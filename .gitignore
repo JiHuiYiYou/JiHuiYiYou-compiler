@@ -1,0 +1,11 @@
+compiler/build/
+*.o
+*.exe
+*.ilk
+*.pdb
+# 忽略 vscode 配置
+.vscode
+# 忽略 Claude Code 本地配置
+.claude
+# 忽略 Claude Code 生成的 markdown 文件
+CLAUDE.md
