@@ -164,12 +164,22 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         NodeBlock *d = node_block_data(n);
         IRVal last = {0};
         for (size_t i = 0; i < d->nstmts; i++) {
-            /* is it a return? */
-            if (d->stmts[i]->kind == NODE_RETURN) {
-                cg_stmt(cg, d->stmts[i]);
-                return last; /* unreachable after return */
+            Node *stmt = d->stmts[i];
+            if (stmt->kind == NODE_RETURN) {
+                cg_stmt(cg, stmt);
+                return last;
             }
-            last = cg_expr(cg, d->stmts[i]);
+            if (stmt->kind == NODE_EXPR_STMT) {
+                NodeExprStmt *es = node_expr_stmt_data(stmt);
+                if (es->expr->kind == NODE_ASSIGN) {
+                    cg_stmt(cg, es->expr);
+                } else {
+                    /* capture value as potential block return value */
+                    last = cg_expr(cg, es->expr);
+                }
+            } else {
+                cg_stmt(cg, stmt);
+            }
         }
         return last;
     }
@@ -239,7 +249,12 @@ static void cg_stmt(CGContext *cg, Node *n) {
         break;
     }
     case NODE_EXPR_STMT: {
-        cg_expr(cg, node_expr_stmt_data(n)->expr);
+        Node *inner = node_expr_stmt_data(n)->expr;
+        if (inner->kind == NODE_ASSIGN) {
+            cg_stmt(cg, inner);
+        } else {
+            cg_expr(cg, inner);
+        }
         break;
     }
     case NODE_WHILE: {
@@ -293,16 +308,12 @@ static void cg_func(IRBuf *ir, Node *n) {
     cg.current_ret_type = fd->sym->type && fd->sym->type->kind == KIND_FUNC
                            ? fd->sym->type->func.ret : NULL;
 
-    /* register params as locals (immutable SSA values) */
+    /* register params as locals (copy into SSA temps) */
     for (size_t i = 0; i < fd->nparams; i++) {
-        IRVal param_val;
-        param_val.kind = IRVAL_TEMP;
-        param_val.id = -1; /* special: params are already in SSA form by QBE */
-        param_val.qbe_type = qbe_type_of(fd->params[i].sym->type);
-        /* Actually, QBE params are already %names. We can't refer by number.
-           For now, we handle them by name. But our IR system uses numbers.
-           Simplification: assume params have temp IDs that map to their names.
-           We reference them as %param_name directly. */
+        char qt = qbe_type_of(fd->params[i].sym->type);
+        IRVal param_val = ir_new_tmp(ir, qt);
+        ir_emit(ir, "    %%t%d =%c copy %%%s\n",
+                param_val.id, qt, fd->params[i].sym->name);
         cg_add_local(&cg, fd->params[i].sym, param_val, 0);
     }
 

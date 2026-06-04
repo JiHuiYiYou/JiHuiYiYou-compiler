@@ -103,13 +103,20 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
     /* ── identifier ── */
     case NODE_IDENT: {
         NodeIdent *d = node_ident_data(n);
-        Sym *sym = symtab_lookup(ctx->current_scope, d->sym->name);
-        if (!sym || sym->type == NULL) {
-            sema_error(ctx, n->loc, "undefined variable '%s'", d->sym->name);
-            n->type = type_primitive(ctx->arena, PRIM_I32);
+        /* Check d->sym first (works for functions whose type was set early) */
+        if (d->sym && d->sym->type) {
+            n->type = d->sym->type;
             return n->type;
         }
-        n->type = sym->type;
+        /* Search locals array (linear scan, reliable) */
+        for (int i = ctx->nlocals - 1; i >= 0; i--) {
+            if (strcmp(ctx->locals[i].name, d->sym->name) == 0) {
+                n->type = ctx->locals[i].type;
+                return n->type;
+            }
+        }
+        sema_error(ctx, n->loc, "undefined variable '%s'", d->sym->name);
+        n->type = type_primitive(ctx->arena, PRIM_I32);
         return n->type;
     }
 
@@ -278,6 +285,11 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
 
         d->sym->type = decl_type;
         d->sym->kind = SYM_VAR;
+        if (ctx->nlocals < SEMA_MAX_LOCALS) {
+            ctx->locals[ctx->nlocals].name = d->sym->name;
+            ctx->locals[ctx->nlocals].type = decl_type;
+            ctx->nlocals++;
+        }
         n->type = type_void();
         return n->type;
     }
@@ -334,6 +346,7 @@ static void check_func_decl(SemaContext *ctx, Node *n) {
     }
 
     push_scope(ctx);
+    ctx->nlocals = 0;
 
     /* register parameters */
     Type **param_types = arena_alloc(ctx->arena, fd->nparams * sizeof(Type *));
@@ -425,6 +438,7 @@ void sema_init(SemaContext *ctx, Arena *arena) {
     ctx->module = NULL;
     ctx->global_scope = symtab_new(arena, NULL);
     ctx->current_scope = ctx->global_scope;
+    ctx->nlocals = 0;
     ctx->scope_depth = 0;
     ctx->error_count = 0;
 }

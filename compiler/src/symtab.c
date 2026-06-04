@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define SYMTAB_INITIAL_SIZE 64
+#define SYMTAB_INITIAL_SIZE 256
 
 /* FNV-1a hash */
 static uint32_t hash_string(const char *s) {

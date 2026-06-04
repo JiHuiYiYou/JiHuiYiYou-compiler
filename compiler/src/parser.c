@@ -367,6 +367,9 @@ static Node *parse_func(Parser *p, bool is_extern) {
     Token name = expect(p, TOKEN_IDENT, "function name");
     const char *fname = tok_name(p, name);
 
+    /* Register function in global scope BEFORE parsing body so recursive calls work */
+    Sym *sym = symtab_insert(p->global_scope, fname, SYM_FN, NULL, false, 0);
+
     push_scope(p);
 
     /* parameter list */
@@ -413,7 +416,6 @@ static Node *parse_func(Parser *p, bool is_extern) {
 
     pop_scope(p);
 
-    Sym *sym = symtab_insert(p->global_scope, fname, SYM_FN, NULL, false, 0);
     return ast_new_func_decl(p->arena, loc, sym, params, nparams, ret_type, body, is_extern);
 }
 
