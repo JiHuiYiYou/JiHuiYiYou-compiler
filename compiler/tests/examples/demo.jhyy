@@ -1,0 +1,159 @@
+// ============================================================
+// jhyy 语言特性演示
+// ============================================================
+
+/* 外部函数声明 */
+extern fn puts(s: *i32) -> i32;
+
+// ----------------------------------------------------------
+// 辅助函数：阶乘
+// ----------------------------------------------------------
+fn factorial(n: i32) -> i32 {
+    let mut result = 1;
+    let mut i = 1;
+    while i <= n {
+        result = result * i;
+        i = i + 1;
+    }
+    return result;
+}
+
+// ----------------------------------------------------------
+// 辅助函数：斐波那契（演示 if-else 表达式）
+// ----------------------------------------------------------
+fn fibonacci(n: i32) -> i32 {
+    if n <= 1 {
+        return n;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+// ----------------------------------------------------------
+// 辅助函数：最大公约数（辗转相除法）
+// ----------------------------------------------------------
+fn gcd(a: i32, b: i32) -> i32 {
+    let mut x = a;
+    let mut y = b;
+    while y != 0 {
+        let temp = y;
+        y = x % y;
+        x = temp;
+    }
+    return x;
+}
+
+// ----------------------------------------------------------
+// 辅助函数：简单求和
+// ----------------------------------------------------------
+fn sum_range(start: i32, end: i32) -> i32 {
+    let mut total = 0;
+    let mut i = start;
+    while i <= end {
+        total += i;
+        i += 1;
+    }
+    return total;
+}
+
+// ----------------------------------------------------------
+// 主入口
+// ----------------------------------------------------------
+fn main_jhyy() -> i32 {
+    // ---- 整数字面量（各种进制） ----
+    let dec = 42;
+    let hex = 0xFF;          // 255
+    let oct = 0o77;          // 63
+    let bin = 0b1010;        // 10
+
+    // ---- 带类型后缀的整数字面量 ----
+    let a_i64 = 100i64;
+    let a_u8  = 255u8;
+
+    // ---- 浮点字面量 ----
+    let pi = 3.14;
+    let half = 0.5;
+
+    // ---- 布尔字面量 ----
+    let yes = true;
+    let no = false;
+
+    // ---- 算术运算 ----
+    let add = 10 + 5;        // 15
+    let sub = 10 - 5;        // 5
+    let mul = 10 * 5;        // 50
+    let div = 10 / 5;        // 2
+    let rem = 10 % 3;        // 1
+
+    // ---- 比较运算 ----
+    let eq  = 1 == 1;        // true
+    let neq = 1 != 2;        // true
+    let lt  = 1 < 2;         // true
+    let gt  = 3 > 2;         // true
+    let le  = 2 <= 2;        // true
+    let ge  = 3 >= 2;        // true
+
+    // ---- 逻辑运算 ----
+    let and_val = (1 < 2) && (3 > 2);   // true
+    let or_val  = (1 > 2) || (3 > 2);   // true
+    let not_val = !(1 > 2);             // true
+
+    // ---- 位运算 ----
+    let bit_and = 0xFF & 0x0F;   // 15
+    let bit_or  = 0xF0 | 0x0F;   // 255
+    let bit_xor = 0xFF ^ 0x0F;   // 240
+    let bit_shl = 1 << 4;        // 16
+    let bit_shr = 16 >> 2;       // 4
+
+    // ---- 一元运算 ----
+    let neg = -(42);             // -42
+    let bit_not = ~(0x0F);       // 按位取反
+
+    // ---- 可变变量与赋值 ----
+    let mut counter = 0;
+    counter = 1;
+    counter += 10;
+    counter -= 2;
+    counter *= 3;
+    counter /= 3;
+    counter %= 5;
+
+    // ---- if-else 表达式 ----
+    let max_xy = if add > sub { add } else { sub };
+
+    // ---- if 语句（多分支） ----
+    let mut grade = 0;
+    let score = 85;
+    if score >= 90 {
+        grade = 4;
+    } else if score >= 80 {
+        grade = 3;
+    } else if score >= 70 {
+        grade = 2;
+    } else if score >= 60 {
+        grade = 1;
+    } else {
+        grade = 0;
+    }
+
+    // ---- while 循环 ----
+    let mut countdown = 5;
+    while countdown > 0 {
+        countdown = countdown - 1;
+    }
+
+    // ---- 函数调用 ----
+    let fact5 = factorial(5);          // 120
+    let fib10 = fibonacci(10);         // 55
+    let g = gcd(48, 18);              // 6
+    let s = sum_range(1, 100);        // 5050
+
+    // ---- 块表达式 ----
+    let block_val = {
+        let a = 10;
+        let b = 20;
+        a + b                          // 30
+    };
+
+    // 返回 0 表示成功
+    return 0;
+}
