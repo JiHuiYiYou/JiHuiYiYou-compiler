@@ -1,0 +1,26 @@
+{
+    "name": "jhyy-lang",
+    "displayName": "JHYY Language Support",
+    "description": "JHYY (机会翼游) language syntax highlighting",
+    "version": "0.1.0",
+    "publisher": "jhyy",
+    "engines": { "vscode": "^1.80.0" },
+    "categories": ["Programming Languages"],
+    "contributes": {
+        "languages": [{
+            "id": "jhyy",
+            "aliases": ["JHYY", "jhyy"],
+            "extensions": [".jhyy"],
+            "configuration": "./language-configuration.json",
+            "icon": {
+                "light": "./icon.svg",
+                "dark": "./icon.svg"
+            }
+        }],
+        "grammars": [{
+            "language": "jhyy",
+            "scopeName": "source.jhyy",
+            "path": "./syntaxes/jhyy.tmLanguage.json"
+        }]
+    }
+}

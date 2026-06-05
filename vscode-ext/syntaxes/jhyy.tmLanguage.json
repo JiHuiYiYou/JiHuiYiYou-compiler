@@ -1,0 +1,64 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "JHYY",
+    "scopeName": "source.jhyy",
+    "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#chars" },
+        { "include": "#numbers" },
+        { "include": "#keywords" },
+        { "include": "#types" },
+        { "include": "#operators" },
+        { "include": "#constants" }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                { "name": "comment.line.double-slash.jhyy", "match": "//.*$" },
+                { "name": "comment.block.jhyy", "begin": "/\\*", "end": "\\*/" }
+            ]
+        },
+        "strings": {
+            "name": "string.quoted.double.jhyy",
+            "begin": "\"", "end": "\"",
+            "patterns": [{ "name": "constant.character.escape.jhyy", "match": "\\\\." }]
+        },
+        "chars": {
+            "name": "string.quoted.single.jhyy",
+            "match": "'.'"
+        },
+        "numbers": {
+            "patterns": [
+                { "name": "constant.numeric.hex.jhyy", "match": "\\b0[xX][0-9a-fA-F_]+\\b" },
+                { "name": "constant.numeric.oct.jhyy", "match": "\\b0[oO][0-7_]+\\b" },
+                { "name": "constant.numeric.bin.jhyy", "match": "\\b0[bB][01_]+\\b" },
+                { "name": "constant.numeric.float.jhyy", "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*\\b" },
+                { "name": "constant.numeric.integer.jhyy", "match": "\\b[0-9][0-9_]*\\b" }
+            ]
+        },
+        "keywords": {
+            "patterns": [
+                { "name": "keyword.control.jhyy", "match": "\\b(if|else|while|for|in|match|return)\\b" },
+                { "name": "keyword.declaration.jhyy", "match": "\\b(let|mut|fn|type|struct|enum|extern|import|as)\\b" },
+                { "name": "keyword.other.jhyy", "match": "\\b(sizeof|alignof)\\b" }
+            ]
+        },
+        "types": {
+            "patterns": [
+                { "name": "storage.type.jhyy", "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\\b" },
+                { "name": "entity.name.type.jhyy", "match": "\\b[A-Z][a-zA-Z0-9_]*\\b" }
+            ]
+        },
+        "operators": {
+            "patterns": [
+                { "name": "keyword.operator.jhyy", "match": "\\+=|-=|\\*=|/=|%=|==|!=|<=|>=|&&|\\|\\||<<|>>|->|=>|\\.\\.|<|>|&|\\||\\^|~|!|\\+|-|\\*|/|%|=" }
+            ]
+        },
+        "constants": {
+            "patterns": [
+                { "name": "constant.language.boolean.jhyy", "match": "\\b(true|false)\\b" }
+            ]
+        }
+    }
+}
