@@ -1,0 +1,16 @@
+extern fn puts(s: *u8) -> i32;
+fn factorial(n: i32) -> i32 {
+    let mut result = 1;
+    let mut i = 1;
+    while i <= n {
+        result = result * i;
+        i = i + 1;
+    }
+    result
+}
+fn main_jhyy() -> i32 {
+    let n = 5;
+    let result = factorial(n);
+    puts(result);
+    0
+}

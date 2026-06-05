@@ -1,0 +1,72 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "JHYY: Build Compiler",
+            "type": "shell",
+            "command": "C:/msys64/ucrt64/bin/gcc.exe",
+            "args": [
+                "-std=c11", "-Wall", "-Wextra",
+                "compiler/src/*.c",
+                "-o", "compiler/build/bin/jhyy.exe",
+                "-I", "compiler/src"
+            ],
+            "group": "build",
+            "problemMatcher": ["$gcc"],
+            "detail": "Compile the JHYY compiler from C source"
+        },
+        {
+            "label": "JHYY: Run",
+            "type": "shell",
+            "command": "compiler/build/bin/jhyy.exe",
+            "args": [
+                "run",
+                "${file}"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "focus": true,
+                "clear": true
+            },
+            "problemMatcher": [],
+            "detail": "Compile and run the current .jhyy file"
+        },
+        {
+            "label": "JHYY: Compile",
+            "type": "shell",
+            "command": "compiler/build/bin/jhyy.exe",
+            "args": [
+                "compile",
+                "${file}",
+                "-o",
+                "${fileDirname}/${fileBasenameNoExtension}"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": [],
+            "detail": "Compile .jhyy to .exe (same directory)"
+        },
+        {
+            "label": "JHYY: Build IR",
+            "type": "shell",
+            "command": "compiler/build/bin/jhyy.exe",
+            "args": [
+                "build",
+                "${file}"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": [],
+            "detail": "Compile .jhyy to .il only (no linking)"
+        }
+    ]
+}
