@@ -12,7 +12,7 @@ JHYY 是一门静态类型的、表达式导向的编译型系统编程语言。
 ### 2. 构建编译器
 
 ```bash
-git clone <this-repo>
+git clone <https://github.com/JiHuiYiYou/JiHuiYiYou-compiler>
 cd JiHuiYiYou
 
 # 编译 jhyy 编译器
