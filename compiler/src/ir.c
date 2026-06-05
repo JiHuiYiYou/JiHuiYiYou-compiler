@@ -38,6 +38,47 @@ void ir_init(IRBuf *ir, Arena *arena) {
     ir->next_tmp = 0;
     ir->next_block = 0;
     ir->next_data = 0;
+    ir->data_buf = NULL;
+    ir->data_len = 0;
+    ir->data_cap = 0;
+}
+
+/* emit to data buffer (deferred definitions) */
+static void ir_emit_data(IRBuf *ir, const char *fmt, ...) {
+    if (!ir->data_buf) {
+        ir->data_cap = 1024;
+        ir->data_buf = arena_alloc(ir->arena, ir->data_cap);
+        ir->data_buf[0] = '\0';
+    }
+    va_list ap; va_start(ap, fmt);
+    size_t avail = ir->data_cap - ir->data_len;
+    int n = vsnprintf(ir->data_buf + ir->data_len, avail, fmt, ap);
+    va_end(ap);
+    if (n < 0) return;
+    if ((size_t)n >= avail) {
+        size_t new_cap = ir->data_cap * 2;
+        while ((size_t)n >= new_cap - ir->data_len) new_cap *= 2;
+        char *new_buf = arena_alloc(ir->arena, new_cap);
+        memcpy(new_buf, ir->data_buf, ir->data_len);
+        ir->data_buf = new_buf; ir->data_cap = new_cap;
+        va_start(ap, fmt);
+        vsnprintf(ir->data_buf + ir->data_len, ir->data_cap - ir->data_len, fmt, ap);
+        va_end(ap);
+    }
+    ir->data_len += n;
+}
+
+void ir_flush_data(IRBuf *ir) {
+    if (!ir->data_buf || ir->data_len == 0) return;
+    /* Prepend data definitions to main buffer */
+    size_t total = ir->data_len + ir->len;
+    while (total >= ir->cap) ir->cap *= 2;
+    char *new_buf = arena_alloc(ir->arena, ir->cap);
+    memcpy(new_buf, ir->data_buf, ir->data_len);
+    memcpy(new_buf + ir->data_len, ir->buf, ir->len);
+    ir->buf = new_buf;
+    ir->len = total;
+    ir->data_len = 0;
 }
 
 IRVal ir_new_tmp(IRBuf *ir, char qbe_type) {
@@ -50,6 +91,7 @@ IRVal ir_new_block(IRBuf *ir, const char *hint) {
 IRVal ir_new_data_str(IRBuf *ir, const char *str, size_t len) {
     IRVal v; v.kind = IRVAL_STR; v.id = ir->next_data++;
     v.name = arena_sprintf(ir->arena, "$str%d", v.id);
+    v.qbe_type = 'l';  /* data labels are pointers (64-bit addresses) */
     ir_emit_data_string(ir, v, str, len); return v;
 }
 
@@ -114,7 +156,11 @@ void ir_emit_call(IRBuf *ir, IRVal dst, const char *fn, IRVal *args, int n) {
     ir_emit(ir, "    %%t%d =%c call $%s(", dst.id, dst.qbe_type, fn);
     for (int i = 0; i < n; i++) {
         if (i > 0) ir_emit(ir, ", ");
-        ir_emit(ir, "%c %%t%d", args[i].qbe_type, args[i].id);
+        if (args[i].kind == IRVAL_STR) {
+            ir_emit(ir, "%c %s", args[i].qbe_type, args[i].name);
+        } else {
+            ir_emit(ir, "%c %%t%d", args[i].qbe_type, args[i].id);
+        }
     }
     ir_emit(ir, ")\n");
 }
@@ -149,15 +195,15 @@ void ir_emit_phi(IRBuf *ir, IRVal dst, int npairs, ...) {
 }
 
 void ir_emit_data_string(IRBuf *ir, IRVal id, const char *str, size_t len) {
-    ir_emit(ir, "data %s = { b \"", id.name);
+    ir_emit_data(ir, "data %s = { b \"", id.name);
     for (size_t i = 0; i < len; i++) {
         char c = str[i];
-        if (c == '\\') ir_emit(ir, "\\\\");
-        else if (c == '"') ir_emit(ir, "\\\"");
-        else if (c == '\n') ir_emit(ir, "\\\\n");
-        else ir_emit(ir, "%c", c);
+        if (c == '\\') ir_emit_data(ir, "\\\\");
+        else if (c == '"') ir_emit_data(ir, "\\\"");
+        else if (c == '\n') ir_emit_data(ir, "\\\\n");
+        else ir_emit_data(ir, "%c", c);
     }
-    ir_emit(ir, "\", b 0 }\n");
+    ir_emit_data(ir, "\", b 0 }\n");
 }
 
 void ir_emit_func_header(IRBuf *ir, const char *name, char ret_type, ...) {

@@ -52,6 +52,8 @@ typedef enum {
     /* struct / enum */
     NODE_STRUCT_LIT,     /* TypeName { field: val, ... } */
     NODE_ENUM_VARIANT,   /* TypeName::Variant(expr) */
+    NODE_STRUCT_DEF,     /* struct { field: Type, ... } — type definition body */
+    NODE_ENUM_DEF,       /* enum { Variant(Type), ... } — type definition body */
 
     /* declarations */
     NODE_FUNC_DECL,      /* fn name(params) [-> Type] { body } */
@@ -170,6 +172,28 @@ typedef struct {
     Node *payload;  /* NULL for nullary variant */
 } NodeEnumVariant;
 
+/* Struct field declaration (for type definitions) */
+typedef struct {
+    const char *name;
+    Node       *type_annot;
+} StructFieldDecl;
+
+typedef struct {
+    StructFieldDecl *fields;
+    size_t           nfields;
+} NodeStructDef;
+
+/* Enum variant declaration (for type definitions) */
+typedef struct {
+    const char *name;
+    Node       *payload_type;  /* NULL for nullary variant */
+} EnumVariantDecl;
+
+typedef struct {
+    EnumVariantDecl *variants;
+    size_t           nvariants;
+} NodeEnumDef;
+
 typedef struct {
     Sym               *sym;
     NodeFuncDeclParam *params;
@@ -227,6 +251,8 @@ NodePatternRange *node_pattern_range_data(Node *n);
 NodePatternOr    *node_pattern_or_data(Node *n);
 NodeStructLit    *node_struct_lit_data(Node *n);
 NodeEnumVariant  *node_enum_variant_data(Node *n);
+NodeStructDef    *node_struct_def_data(Node *n);
+NodeEnumDef      *node_enum_def_data(Node *n);
 NodeFuncDecl     *node_func_decl_data(Node *n);
 NodeTypeDecl     *node_type_decl_data(Node *n);
 NodeExternDecl   *node_extern_decl_data(Node *n);
@@ -270,6 +296,8 @@ Node *ast_new_pattern_or(struct Arena *a, SourceLoc loc, Node *left, Node *right
 Node *ast_new_pattern_wild(struct Arena *a, SourceLoc loc);
 Node *ast_new_struct_lit(struct Arena *a, SourceLoc loc, Sym *type_sym, NodeFieldInit *fields, size_t nfields);
 Node *ast_new_enum_variant(struct Arena *a, SourceLoc loc, Sym *type_sym, Sym *variant_sym, Node *payload);
+Node *ast_new_struct_def(struct Arena *a, SourceLoc loc, StructFieldDecl *fields, size_t nfields);
+Node *ast_new_enum_def(struct Arena *a, SourceLoc loc, EnumVariantDecl *variants, size_t nvariants);
 Node *ast_new_func_decl(struct Arena *a, SourceLoc loc, Sym *sym, NodeFuncDeclParam *params, size_t nparams, Node *ret_type, Node *body, bool is_extern);
 Node *ast_new_type_decl(struct Arena *a, SourceLoc loc, Sym *sym, Node *body);
 Node *ast_new_extern_decl(struct Arena *a, SourceLoc loc, Sym *sym);

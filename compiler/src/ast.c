@@ -54,6 +54,8 @@ ACCESSOR(node_pattern_range_data, NodePatternRange)
 ACCESSOR(node_pattern_or_data, NodePatternOr)
 ACCESSOR(node_struct_lit_data, NodeStructLit)
 ACCESSOR(node_enum_variant_data, NodeEnumVariant)
+ACCESSOR(node_struct_def_data, NodeStructDef)
+ACCESSOR(node_enum_def_data, NodeEnumDef)
 ACCESSOR(node_func_decl_data, NodeFuncDecl)
 ACCESSOR(node_type_decl_data, NodeTypeDecl)
 ACCESSOR(node_extern_decl_data, NodeExternDecl)
@@ -319,6 +321,22 @@ Node *ast_new_enum_variant(Arena *a, SourceLoc loc, Sym *type_sym, Sym *variant_
     return n;
 }
 
+Node *ast_new_struct_def(Arena *a, SourceLoc loc, StructFieldDecl *fields, size_t nfields) {
+    Node *n = new_node(a, NODE_STRUCT_DEF, loc, sizeof(NodeStructDef));
+    NodeStructDef *d = node_struct_def_data(n);
+    d->fields = fields;
+    d->nfields = nfields;
+    return n;
+}
+
+Node *ast_new_enum_def(Arena *a, SourceLoc loc, EnumVariantDecl *variants, size_t nvariants) {
+    Node *n = new_node(a, NODE_ENUM_DEF, loc, sizeof(NodeEnumDef));
+    NodeEnumDef *d = node_enum_def_data(n);
+    d->variants = variants;
+    d->nvariants = nvariants;
+    return n;
+}
+
 Node *ast_new_func_decl(Arena *a, SourceLoc loc, Sym *sym, NodeFuncDeclParam *params,
                          size_t nparams, Node *ret_type, Node *body, bool is_extern) {
     Node *n = new_node(a, NODE_FUNC_DECL, loc, sizeof(NodeFuncDecl));
@@ -398,6 +416,8 @@ const char *node_kind_name(NodeKind kind) {
     case NODE_PATTERN_WILD:  return "pattern_wild";
     case NODE_STRUCT_LIT:    return "struct_lit";
     case NODE_ENUM_VARIANT:  return "enum_variant";
+    case NODE_STRUCT_DEF:    return "struct_def";
+    case NODE_ENUM_DEF:      return "enum_def";
     case NODE_FUNC_DECL:     return "func_decl";
     case NODE_TYPE_DECL:     return "type_decl";
     case NODE_EXTERN_DECL:   return "extern_decl";

@@ -1,0 +1,11 @@
+// Match expression test
+
+fn main_jhyy() -> i32 {
+    let x = 2;
+    let result = match x {
+        1 => 10,
+        2 => 20,
+        _ => 0
+    };
+    result
+}

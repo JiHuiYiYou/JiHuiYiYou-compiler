@@ -42,6 +42,106 @@ static IRVal cg_find_local(CGContext *cg, Sym *sym, int *is_stack) {
 static IRVal cg_expr(CGContext *cg, Node *n);
 static void   cg_stmt(CGContext *cg, Node *n);
 
+/* ── helpers ── */
+static IRVal ir_new_int(int64_t val) {
+    IRVal v;
+    v.kind = IRVAL_INT;
+    v.ival = val;
+    v.qbe_type = 'l';  /* used as offset in pointer arithmetic */
+    v.name = NULL;
+    return v;
+}
+
+/* Emit correct load instruction for the given type.
+   Sub-word types use sign/zero-extension loads. */
+static void cg_emit_load(CGContext *cg, IRVal dst, Type *t, IRVal addr) {
+    if (!t) {
+        ir_emit_load(cg->ir, dst, 'w', addr);
+        return;
+    }
+    char qt = qbe_type_of(t);
+    if (t->kind == KIND_PRIMITIVE) {
+        switch (t->prim) {
+        case PRIM_I8:  /* load signed byte, extend to word */
+            ir_emit(cg->ir, "    %%t%d =%c loadsb %%t%d\n", dst.id, qt, addr.id);
+            return;
+        case PRIM_I16: /* load signed half, extend to word */
+            ir_emit(cg->ir, "    %%t%d =%c loadsh %%t%d\n", dst.id, qt, addr.id);
+            return;
+        case PRIM_U8:  /* load unsigned byte, zero-extend to word */
+        case PRIM_BOOL:
+            ir_emit(cg->ir, "    %%t%d =%c loadub %%t%d\n", dst.id, qt, addr.id);
+            return;
+        case PRIM_U16: /* load unsigned half, zero-extend to word */
+            ir_emit(cg->ir, "    %%t%d =%c loaduh %%t%d\n", dst.id, qt, addr.id);
+            return;
+        default: break;
+        }
+    }
+    ir_emit_load(cg->ir, dst, qt, addr);
+}
+
+/* Emit correct store instruction for the given type.
+   Sub-word types use byte/half stores. */
+static void cg_emit_store(CGContext *cg, Type *t, IRVal val, IRVal addr) {
+    if (!t) {
+        ir_emit_store(cg->ir, 'w', val, addr);
+        return;
+    }
+    if (t->kind == KIND_PRIMITIVE) {
+        switch (t->prim) {
+        case PRIM_I8: case PRIM_U8: case PRIM_BOOL:
+            ir_emit(cg->ir, "    storeb %%t%d, %%t%d\n", val.id, addr.id);
+            return;
+        case PRIM_I16: case PRIM_U16:
+            ir_emit(cg->ir, "    storeh %%t%d, %%t%d\n", val.id, addr.id);
+            return;
+        default: break;
+        }
+    }
+    ir_emit_store(cg->ir, qbe_type_of(t), val, addr);
+}
+
+static IRVal cg_match_pattern(CGContext *cg, IRVal matched, Node *pattern) {
+    switch (pattern->kind) {
+    case NODE_PATTERN_LIT: {
+        NodePatternLit *pl = node_pattern_lit_data(pattern);
+        char qt = matched.qbe_type;  /* use same type as matched value */
+        IRVal lit = ir_new_tmp(cg->ir, qt);
+        ir_emit_copy(cg->ir, lit, pl->value);
+        IRVal cmp = ir_new_tmp(cg->ir, 'w');
+        ir_emit_binary(cg->ir, cmp, "ceqw", matched, lit);
+        return cmp;
+    }
+    case NODE_PATTERN_WILD: {
+        /* always matches */
+        IRVal cmp = ir_new_tmp(cg->ir, 'w');
+        ir_emit_copy(cg->ir, cmp, 1);
+        return cmp;
+    }
+    case NODE_PATTERN_RANGE: {
+        NodePatternRange *pr = node_pattern_range_data(pattern);
+        /* lo <= matched */
+        IRVal lo_val = cg_expr(cg, pr->lo);
+        IRVal cmp_lo = ir_new_tmp(cg->ir, 'w');
+        ir_emit_binary(cg->ir, cmp_lo, "cslew", lo_val, matched);
+        /* matched <= hi */
+        IRVal hi_val = cg_expr(cg, pr->hi);
+        IRVal cmp_hi = ir_new_tmp(cg->ir, 'w');
+        ir_emit_binary(cg->ir, cmp_hi, "cslew", matched, hi_val);
+        /* lo <= matched && matched <= hi */
+        IRVal result = ir_new_tmp(cg->ir, 'w');
+        ir_emit_binary(cg->ir, result, "and", cmp_lo, cmp_hi);
+        return result;
+    }
+    default: {
+        IRVal v = ir_new_tmp(cg->ir, 'w');
+        ir_emit_copy(cg->ir, v, 1);
+        return v;
+    }
+    }
+}
+
 /* ── codegen for expressions ── */
 
 static IRVal cg_expr(CGContext *cg, Node *n) {
@@ -60,6 +160,28 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         ir_emit_copy(cg->ir, v, d->value ? 1 : 0);
         return v;
     }
+    case NODE_FLOAT: {
+        NodeFloat *d = node_float_data(n);
+        IRVal v = ir_new_tmp(cg->ir, 'd');
+        ir_emit(cg->ir, "    %%t%d =d copy %s\n", v.id, "0.0"); /* FIXME: actual float value */
+        (void)d;
+        return v;
+    }
+    case NODE_STRING: {
+        NodeString *d = node_string_data(n);
+        /* Create a null-terminated string data definition, return its address */
+        IRVal str_val = ir_new_data_str(cg->ir, d->chars, d->len);
+        /* Copy data label to an SSA temp for use in expressions */
+        IRVal v = ir_new_tmp(cg->ir, 'l');
+        ir_emit(cg->ir, "    %%t%d =l copy %s\n", v.id, str_val.name);
+        return v;
+    }
+    case NODE_CHAR: {
+        NodeChar *d = node_char_data(n);
+        IRVal v = ir_new_tmp(cg->ir, 'w');
+        ir_emit_copy(cg->ir, v, (unsigned char)d->ch);
+        return v;
+    }
     case NODE_IDENT: {
         NodeIdent *d = node_ident_data(n);
         int is_stack = 0;
@@ -67,10 +189,41 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         if (is_stack) {
             /* load from stack */
             IRVal v = ir_new_tmp(cg->ir, qbe_type_of(n->type));
-            ir_emit_load(cg->ir, v, qbe_type_of(n->type), loc);
+            cg_emit_load(cg, v, n->type, loc);
             return v;
         }
         return loc; /* SSA value */
+    }
+    case NODE_UNARY: {
+        NodeUnary *d = node_unary_data(n);
+        IRVal inner = cg_expr(cg, d->expr);
+        switch (d->op) {
+        case TOKEN_MINUS: {
+            IRVal result = ir_new_tmp(cg->ir, inner.qbe_type);
+            IRVal zero = ir_new_tmp(cg->ir, inner.qbe_type);
+            ir_emit_copy(cg->ir, zero, 0);
+            ir_emit_binary(cg->ir, result, "sub", zero, inner);
+            return result;
+        }
+        case TOKEN_BANG: {
+            /* !expr → logical NOT: result = ceqw(expr, 0) */
+            IRVal result = ir_new_tmp(cg->ir, 'w');
+            IRVal zero = ir_new_tmp(cg->ir, inner.qbe_type ? inner.qbe_type : 'w');
+            ir_emit_copy(cg->ir, zero, 0);
+            ir_emit_binary(cg->ir, result, "ceqw", inner, zero);
+            return result;
+        }
+        case TOKEN_TILDE: {
+            /* ~expr → bitwise NOT: result = xor(expr, -1) */
+            IRVal result = ir_new_tmp(cg->ir, inner.qbe_type);
+            IRVal neg_one = ir_new_tmp(cg->ir, inner.qbe_type);
+            ir_emit_copy(cg->ir, neg_one, -1);
+            ir_emit_binary(cg->ir, result, "xor", inner, neg_one);
+            return result;
+        }
+        default:
+            return inner;
+        }
     }
     case NODE_BINARY: {
         NodeBinary *d = node_binary_data(n);
@@ -79,6 +232,18 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
 
         IRVal result = ir_new_tmp(cg->ir, qbe_type_of(n->type));
 
+        /* determine operand width and signedness for comparisons */
+        Type *op_type = d->left->type;
+        char op_qt = op_type ? qbe_type_of(op_type) : 'w';
+        int is_unsigned = 0;
+        if (op_type && op_type->kind == KIND_PRIMITIVE) {
+            switch (op_type->prim) {
+            case PRIM_U8: case PRIM_U16: case PRIM_U32: case PRIM_U64:
+                is_unsigned = 1; break;
+            default: break;
+            }
+        }
+
         const char *op = NULL;
         switch (d->op) {
         case TOKEN_PLUS:  op = "add"; break;
@@ -86,12 +251,37 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         case TOKEN_STAR:  op = "mul"; break;
         case TOKEN_SLASH: op = "div"; break;
         case TOKEN_PERCENT: op = "rem"; break;
-        case TOKEN_EQEQ:   op = "ceqw"; break;
-        case TOKEN_BANGEQ: op = "cnew"; break;
-        case TOKEN_LT:     op = "csltw"; break;
-        case TOKEN_LTEQ:   op = "cslew"; break;
-        case TOKEN_GT:     op = "csgtw"; break;
-        case TOKEN_GTEQ:   op = "csgew"; break;
+
+        /* comparisons: type-dependent width + signedness */
+        case TOKEN_EQEQ:
+            op = (op_qt == 'l') ? "ceql" : "ceqw"; break;
+        case TOKEN_BANGEQ:
+            op = (op_qt == 'l') ? "cnel" : "cnew"; break;
+        case TOKEN_LT:
+            if (op_qt == 'l')
+                op = is_unsigned ? "cultl" : "csltl";
+            else
+                op = is_unsigned ? "cultw" : "csltw";
+            break;
+        case TOKEN_LTEQ:
+            if (op_qt == 'l')
+                op = is_unsigned ? "culel" : "cslel";
+            else
+                op = is_unsigned ? "culew" : "cslew";
+            break;
+        case TOKEN_GT:
+            if (op_qt == 'l')
+                op = is_unsigned ? "cugtl" : "csgtl";
+            else
+                op = is_unsigned ? "cugtw" : "csgtw";
+            break;
+        case TOKEN_GTEQ:
+            if (op_qt == 'l')
+                op = is_unsigned ? "cugel" : "csgel";
+            else
+                op = is_unsigned ? "cugew" : "csgew";
+            break;
+
         case TOKEN_AMPAMP: op = "and"; break;
         case TOKEN_PIPEPIPE: op = "or"; break;
         case TOKEN_AMP:    op = "and"; break;
@@ -130,17 +320,23 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
 
         ir_emit_jnz(cg->ir, cond, then_block, else_block);
 
+        /* helper to detect if a body ends with return */
+        #define body_returns(body) \
+            ((body) && ((body)->kind == NODE_RETURN || \
+             ((body)->kind == NODE_BLOCK && node_block_data(body)->nstmts > 0 && \
+              node_block_data(body)->stmts[node_block_data(body)->nstmts - 1]->kind == NODE_RETURN)))
+
         /* then */
         ir_emit_label(cg->ir, then_block);
         IRVal then_val = cg_expr(cg, d->then_body);
-        int then_returns = (d->then_body && d->then_body->kind == NODE_RETURN);
+        int then_returns = body_returns(d->then_body);
         if (!then_returns) ir_emit_jmp(cg->ir, merge_block);
 
         /* else */
         ir_emit_label(cg->ir, else_block);
         if (d->else_body) {
             IRVal else_val = cg_expr(cg, d->else_body);
-            int else_returns = (d->else_body->kind == NODE_RETURN);
+            int else_returns = body_returns(d->else_body);
             if (!else_returns) ir_emit_jmp(cg->ir, merge_block);
             /* phi */
             ir_emit_label(cg->ir, merge_block);
@@ -153,6 +349,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             ir_emit_jmp(cg->ir, merge_block);
             ir_emit_label(cg->ir, merge_block);
         }
+        #undef body_returns
 
         if (n->type && n->type->kind == KIND_VOID) {
             IRVal v = {0};
@@ -199,6 +396,243 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         NodeExprStmt *d = node_expr_stmt_data(n);
         return cg_expr(cg, d->expr);
     }
+
+    /* ── address-of: &variable ── */
+    case NODE_ADDR_OF: {
+        NodeAddrOf *d = node_addr_of_data(n);
+        /* target must be a local variable with a stack slot */
+        if (d->expr->kind == NODE_IDENT) {
+            NodeIdent *id = node_ident_data(d->expr);
+            int is_stack = 0;
+            IRVal slot = cg_find_local(cg, id->sym, &is_stack);
+            if (is_stack) {
+                IRVal result = ir_new_tmp(cg->ir, 'l');
+                ir_emit_copy(cg->ir, result, 0);
+                /* return the stack slot address */
+                return slot;
+            }
+            /* For immutable vars (SSA temps), we can't take address yet */
+        }
+        /* fallback: evaluate as expression (won't work for SSA temps) */
+        IRVal v = cg_expr(cg, d->expr);
+        return v;
+    }
+
+    /* ── dereference: *ptr ── */
+    case NODE_DEREF: {
+        NodeDeref *d = node_deref_data(n);
+        IRVal ptr = cg_expr(cg, d->expr);
+        char qt = n->type ? qbe_type_of(n->type) : 'w';
+        IRVal result = ir_new_tmp(cg->ir, qt);
+        cg_emit_load(cg, result, n->type, ptr);
+        return result;
+    }
+
+    /* ── struct literal: TypeName { field: val, ... } ── */
+    case NODE_STRUCT_LIT: {
+        NodeStructLit *d = node_struct_lit_data(n);
+        Type *st = n->type;
+        if (!st || st->kind != KIND_STRUCT) {
+            IRVal v = {0}; return v;
+        }
+        int size = (int)type_size(st);
+        if (size < 4) size = 4;
+        IRVal slot = ir_new_tmp(cg->ir, 'l');
+        ir_emit_alloc(cg->ir, slot, size);
+
+        for (size_t i = 0; i < d->nfields; i++) {
+            IRVal fval = cg_expr(cg, d->fields[i].value);
+            /* find field offset */
+            size_t offset = 0;
+            for (size_t j = 0; j < st->struct_type.nfields; j++) {
+                if (strcmp(st->struct_type.fields[j].name->name, d->fields[i].name) == 0) {
+                    offset = st->struct_type.fields[j].offset;
+                    break;
+                }
+            }
+            /* compute address = slot + offset */
+            IRVal addr = ir_new_tmp(cg->ir, 'l');
+            ir_emit_binary(cg->ir, addr, "add", slot, ir_new_int((int64_t)offset));
+            cg_emit_store(cg, d->fields[i].value->type, fval, addr);
+        }
+        return slot;
+    }
+
+    /* ── enum variant construction: TypeName::Variant(args) ── */
+    case NODE_ENUM_VARIANT: {
+        NodeEnumVariant *d = node_enum_variant_data(n);
+        Type *et = n->type;
+        if (!et || et->kind != KIND_ENUM) {
+            IRVal v = {0}; return v;
+        }
+        int size = (int)type_size(et);
+        if (size < 4) size = 4;
+        IRVal slot = ir_new_tmp(cg->ir, 'l');
+        ir_emit_alloc(cg->ir, slot, size);
+
+        /* find the variant's tag */
+        int tag = -1;
+        Type *payload_type = NULL;
+        for (size_t i = 0; i < et->enum_type.nvariants; i++) {
+            if (strcmp(et->enum_type.variants[i].name->name, d->variant_sym->name) == 0) {
+                tag = et->enum_type.variants[i].tag;
+                payload_type = et->enum_type.variants[i].payload;
+                break;
+            }
+        }
+
+        /* store tag at offset 0 */
+        IRVal tag_addr = ir_new_tmp(cg->ir, 'l');
+        ir_emit_binary(cg->ir, tag_addr, "add", slot, ir_new_int(0));
+        IRVal tag_val = ir_new_tmp(cg->ir, 'w');
+        ir_emit_copy(cg->ir, tag_val, tag >= 0 ? tag : 0);
+        ir_emit_store(cg->ir, 'w', tag_val, tag_addr);
+
+        /* store payload if present */
+        if (d->payload && payload_type) {
+            size_t payload_offset = 4; /* after tag */
+            size_t payload_align = type_align(payload_type);
+            if (payload_align > 4)
+                payload_offset = (payload_offset + payload_align - 1) & ~(payload_align - 1);
+            IRVal payload_addr = ir_new_tmp(cg->ir, 'l');
+            ir_emit_binary(cg->ir, payload_addr, "add", slot, ir_new_int((int64_t)payload_offset));
+            IRVal pval = cg_expr(cg, d->payload);
+            cg_emit_store(cg, payload_type, pval, payload_addr);
+        }
+        return slot;
+    }
+
+    /* ── match expression ── */
+    case NODE_MATCH: {
+        NodeMatch *d = node_match_data(n);
+        IRVal matched = cg_expr(cg, d->expr);
+
+        char qt = (n->type && n->type->kind != KIND_VOID) ? qbe_type_of(n->type) : 0;
+        IRVal merge_block = ir_new_block(cg->ir, "merge");
+
+        /* collect body blocks and values for phi */
+        #define MAX_MATCH_ARMS 32
+        IRVal body_blocks[MAX_MATCH_ARMS];
+        IRVal body_values[MAX_MATCH_ARMS];
+        int nphi = 0;
+
+        /* emit chain of comparisons */
+        IRVal next_check = {0};
+        for (size_t i = 0; i < d->narms; i++) {
+            NodeMatchArm *arm = node_match_arm_data(d->arms[i]);
+            IRVal body_block = ir_new_block(cg->ir, "arm");
+
+            if (arm->pattern->kind == NODE_PATTERN_WILD) {
+                /* wildcard: always match, jump to body */
+                if (next_check.id != 0) {
+                    ir_emit_label(cg->ir, next_check);
+                }
+                ir_emit_jmp(cg->ir, body_block);
+            } else {
+                /* literal/range pattern: emit comparison */
+                if (next_check.id != 0) {
+                    ir_emit_label(cg->ir, next_check);
+                }
+                next_check = ir_new_block(cg->ir, "next");
+                IRVal cmp = cg_match_pattern(cg, matched, arm->pattern);
+                ir_emit_jnz(cg->ir, cmp, body_block, next_check);
+            }
+
+            /* body */
+            ir_emit_label(cg->ir, body_block);
+            IRVal body_val = cg_expr(cg, arm->body);
+            int arm_returns = ((arm->body && arm->body->kind == NODE_RETURN) ||
+                               (arm->body && arm->body->kind == NODE_BLOCK &&
+                                node_block_data(arm->body)->nstmts > 0 &&
+                                node_block_data(arm->body)->stmts[node_block_data(arm->body)->nstmts - 1]->kind == NODE_RETURN));
+            if (!arm_returns && nphi < MAX_MATCH_ARMS) {
+                body_blocks[nphi] = body_block;
+                body_values[nphi] = body_val;
+                nphi++;
+                ir_emit_jmp(cg->ir, merge_block);
+            }
+        }
+
+        /* if there's a dangling next_check, it needs a label (unreachable, jump to merge) */
+        if (next_check.id != 0 && nphi == (int)d->narms) {
+            /* all arms already handled, next_check is unreachable */
+        }
+
+        /* merge with phi */
+        ir_emit_label(cg->ir, merge_block);
+        if (qt && nphi > 0) {
+            IRVal result = ir_new_tmp(cg->ir, qt);
+            /* build phi with collected blocks and values */
+            ir_emit(cg->ir, "    %%t%d =%c phi ", result.id, qt);
+            for (int i = 0; i < nphi; i++) {
+                if (i > 0) ir_emit(cg->ir, ", ");
+                ir_emit(cg->ir, "@%s %%t%d", body_blocks[i].name, body_values[i].id);
+            }
+            ir_emit(cg->ir, "\n");
+            return result;
+        }
+        #undef MAX_MATCH_ARMS
+        IRVal v = {0};
+        return v;
+    }
+
+    /* ── field access with pointer auto-deref ── */
+    case NODE_FIELD: {
+        NodeField *d = node_field_data(n);
+        Type *expr_type = d->expr->type;
+        if (expr_type && expr_type->kind == KIND_POINTER &&
+            expr_type->pointer.elem && expr_type->pointer.elem->kind == KIND_STRUCT) {
+            /* pointer-to-struct: load pointer, add offset, load field */
+            Type *elem = expr_type->pointer.elem;
+            IRVal ptr = cg_expr(cg, d->expr);
+            /* find field offset */
+            size_t offset = 0;
+            Type *field_type = NULL;
+            for (size_t i = 0; i < elem->struct_type.nfields; i++) {
+                if (strcmp(elem->struct_type.fields[i].name->name, d->field) == 0) {
+                    offset = elem->struct_type.fields[i].offset;
+                    field_type = elem->struct_type.fields[i].type;
+                    break;
+                }
+            }
+            IRVal addr;
+            if (offset > 0) {
+                addr = ir_new_tmp(cg->ir, 'l');
+                ir_emit_binary(cg->ir, addr, "add", ptr, ir_new_int((int64_t)offset));
+            } else {
+                addr = ptr; /* offset 0: addr is just the pointer */
+            }
+            IRVal result = ir_new_tmp(cg->ir, field_type ? qbe_type_of(field_type) : 'w');
+            cg_emit_load(cg, result, field_type, addr);
+            return result;
+        }
+        /* For struct value field access: the value IS the stack slot pointer */
+        IRVal base = cg_expr(cg, d->expr);
+        Type *st = expr_type;
+        if (!st || st->kind != KIND_STRUCT) {
+            IRVal v = {0}; return v;
+        }
+        size_t offset = 0;
+        Type *field_type = NULL;
+        for (size_t i = 0; i < st->struct_type.nfields; i++) {
+            if (strcmp(st->struct_type.fields[i].name->name, d->field) == 0) {
+                offset = st->struct_type.fields[i].offset;
+                field_type = st->struct_type.fields[i].type;
+                break;
+            }
+        }
+        IRVal addr;
+        if (offset > 0) {
+            addr = ir_new_tmp(cg->ir, 'l');
+            ir_emit_binary(cg->ir, addr, "add", base, ir_new_int((int64_t)offset));
+        } else {
+            addr = base; /* offset 0 */
+        }
+        IRVal result = ir_new_tmp(cg->ir, field_type ? qbe_type_of(field_type) : 'w');
+        cg_emit_load(cg, result, field_type, addr);
+        return result;
+    }
+
     default: {
         IRVal v = {0};
         return v;
@@ -218,7 +652,7 @@ static void cg_stmt(CGContext *cg, Node *n) {
             if (size < 4) size = 4;
             IRVal slot = ir_new_tmp(cg->ir, 'l');
             ir_emit_alloc(cg->ir, slot, size);
-            ir_emit_store(cg->ir, qbe_type_of(d->sym->type), init_val, slot);
+            cg_emit_store(cg, d->sym->type, init_val, slot);
             cg_add_local(cg, d->sym, slot, 1);
         } else {
             cg_add_local(cg, d->sym, init_val, 0);
@@ -227,13 +661,21 @@ static void cg_stmt(CGContext *cg, Node *n) {
     }
     case NODE_ASSIGN: {
         NodeAssign *d = node_assign_data(n);
-        /* find the target symbol */
-        NodeIdent *id = node_ident_data(d->target);
-        int is_stack = 0;
-        IRVal slot = cg_find_local(cg, id->sym, &is_stack);
-        if (is_stack) {
-            IRVal val = cg_expr(cg, d->value);
-            ir_emit_store(cg->ir, qbe_type_of(d->target->type), val, slot);
+        IRVal val = cg_expr(cg, d->value);
+
+        if (d->target->kind == NODE_DEREF) {
+            /* *ptr = value — store to pointer target */
+            NodeDeref *dd = node_deref_data(d->target);
+            IRVal ptr = cg_expr(cg, dd->expr);
+            cg_emit_store(cg, d->target->type, val, ptr);
+        } else if (d->target->kind == NODE_IDENT) {
+            /* variable assignment */
+            NodeIdent *id = node_ident_data(d->target);
+            int is_stack = 0;
+            IRVal slot = cg_find_local(cg, id->sym, &is_stack);
+            if (is_stack) {
+                cg_emit_store(cg, d->target->type, val, slot);
+            }
         }
         break;
     }
@@ -255,6 +697,49 @@ static void cg_stmt(CGContext *cg, Node *n) {
         } else {
             cg_expr(cg, inner);
         }
+        break;
+    }
+    case NODE_FOR: {
+        NodeFor *df = node_for_data(n);
+        /* for i in start..end { body }
+           Compile as: allocate mutable slot for i, loop with load/compare/increment */
+        IRVal start_val = cg_expr(cg, df->start);
+        IRVal end_val = cg_expr(cg, df->end);
+
+        /* allocate stack slot for loop variable (mutable) */
+        int size = 4; /* i32 */
+        IRVal slot = ir_new_tmp(cg->ir, 'l');
+        ir_emit_alloc(cg->ir, slot, size);
+        ir_emit_store(cg->ir, 'w', start_val, slot);
+        cg_add_local(cg, df->var, slot, 1); /* is_stack=1 */
+
+        IRVal loop_hdr = ir_new_block(cg->ir, "loop");
+        IRVal body_b   = ir_new_block(cg->ir, "body");
+        IRVal exit_b   = ir_new_block(cg->ir, "exit");
+
+        ir_emit_jmp(cg->ir, loop_hdr);
+
+        /* loop header: load i, compare with end */
+        ir_emit_label(cg->ir, loop_hdr);
+        IRVal i_val = ir_new_tmp(cg->ir, 'w');
+        ir_emit_load(cg->ir, i_val, 'w', slot);
+        IRVal cond = ir_new_tmp(cg->ir, 'w');
+        ir_emit_binary(cg->ir, cond, "csltw", i_val, end_val);
+        ir_emit_jnz(cg->ir, cond, body_b, exit_b);
+
+        /* body */
+        ir_emit_label(cg->ir, body_b);
+        cg_expr(cg, df->body);
+
+        /* increment: load i, add 1, store back */
+        IRVal current = ir_new_tmp(cg->ir, 'w');
+        ir_emit_load(cg->ir, current, 'w', slot);
+        IRVal next_val = ir_new_tmp(cg->ir, 'w');
+        ir_emit_binary(cg->ir, next_val, "add", current, ir_new_int(1));
+        ir_emit_store(cg->ir, 'w', next_val, slot);
+        ir_emit_jmp(cg->ir, loop_hdr);
+
+        ir_emit_label(cg->ir, exit_b);
         break;
     }
     case NODE_WHILE: {

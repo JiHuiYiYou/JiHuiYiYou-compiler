@@ -1,0 +1,8 @@
+// Hello World — console output via extern puts
+
+extern fn puts(s: *u8) -> i32;
+
+fn main_jhyy() -> i32 {
+    puts("Hello, world!");
+    0
+}

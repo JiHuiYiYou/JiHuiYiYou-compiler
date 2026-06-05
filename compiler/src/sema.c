@@ -52,6 +52,10 @@ static Type *resolve_type_node(SemaContext *ctx, Node *tn) {
         if (strcmp(name, "f32") == 0) return type_primitive(ctx->arena, PRIM_F32);
         if (strcmp(name, "f64") == 0) return type_primitive(ctx->arena, PRIM_F64);
         if (strcmp(name, "bool") == 0) return type_primitive(ctx->arena, PRIM_BOOL);
+        /* look up in global scope for user-defined types (struct/enum/alias) */
+        Sym *gsym = symtab_lookup(ctx->global_scope, name);
+        if (gsym && gsym->kind == SYM_TYPE && gsym->type)
+            return gsym->type;
         sema_error(ctx, tn->loc, "unknown type '%s'", name);
         return type_primitive(ctx->arena, PRIM_I32); /* error recovery */
     }
@@ -88,7 +92,7 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         return n->type;
     }
     case NODE_STRING: {
-        n->type = type_slice(ctx->arena, type_primitive(ctx->arena, PRIM_U8));
+        n->type = type_pointer(ctx->arena, type_primitive(ctx->arena, PRIM_U8)); /* *u8, null-terminated */
         return n->type;
     }
     case NODE_CHAR: {
@@ -108,10 +112,25 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
             n->type = d->sym->type;
             return n->type;
         }
-        /* Search locals array (linear scan, reliable) */
+        /* Search locals array (linear scan by Sym pointer) */
         for (int i = ctx->nlocals - 1; i >= 0; i--) {
-            if (strcmp(ctx->locals[i].name, d->sym->name) == 0) {
+            if (ctx->locals[i].sym == d->sym) {
                 n->type = ctx->locals[i].type;
+                return n->type;
+            }
+        }
+        /* fallback: name match (for when hash table creates duplicate Sym) */
+        for (int i = ctx->nlocals - 1; i >= 0; i--) {
+            if (strcmp(ctx->locals[i].sym->name, d->sym->name) == 0) {
+                n->type = ctx->locals[i].type;
+                return n->type;
+            }
+        }
+        /* global scope lookup (for imported functions/types) */
+        {
+            Sym *gsym = symtab_lookup_local(ctx->global_scope, d->sym->name);
+            if (gsym && (gsym->kind == SYM_FN || gsym->kind == SYM_TYPE) && gsym->type) {
+                n->type = gsym->type;
                 return n->type;
             }
         }
@@ -286,7 +305,7 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         d->sym->type = decl_type;
         d->sym->kind = SYM_VAR;
         if (ctx->nlocals < SEMA_MAX_LOCALS) {
-            ctx->locals[ctx->nlocals].name = d->sym->name;
+            ctx->locals[ctx->nlocals].sym = d->sym;
             ctx->locals[ctx->nlocals].type = decl_type;
             ctx->nlocals++;
         }
@@ -326,6 +345,135 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         infer_type(ctx, d->cond);
         infer_type(ctx, d->body);
         n->type = type_void();
+        return n->type;
+    }
+
+    /* ── for ── */
+    case NODE_FOR: {
+        NodeFor *d = node_for_data(n);
+        Type *start_type = infer_type(ctx, d->start);
+        infer_type(ctx, d->end);
+        /* register the loop variable */
+        d->var->kind = SYM_VAR;
+        d->var->type = start_type;
+        if (ctx->nlocals < SEMA_MAX_LOCALS) {
+            ctx->locals[ctx->nlocals].sym = d->var;
+            ctx->locals[ctx->nlocals].type = start_type;
+            ctx->nlocals++;
+        }
+        if (d->body) infer_type(ctx, d->body);
+        n->type = type_void();
+        return n->type;
+    }
+
+    /* ── struct literal ── */
+    case NODE_STRUCT_LIT: {
+        NodeStructLit *d = node_struct_lit_data(n);
+        /* resolve the struct type from the type symbol */
+        Type *st = NULL;
+        if (d->type_sym && d->type_sym->type && d->type_sym->type->kind == KIND_STRUCT) {
+            st = d->type_sym->type;
+        } else {
+            /* try global scope lookup */
+            Sym *gsym = symtab_lookup(ctx->global_scope, d->type_sym->name);
+            if (gsym && gsym->type && gsym->type->kind == KIND_STRUCT)
+                st = gsym->type;
+        }
+        if (!st) {
+            sema_error(ctx, n->loc, "unknown struct type '%s'", d->type_sym->name);
+            n->type = type_void();
+            return n->type;
+        }
+        /* check fields */
+        for (size_t i = 0; i < d->nfields; i++) {
+            const char *fname = d->fields[i].name;
+            Type *fval_type = infer_type(ctx, d->fields[i].value);
+            /* find field in struct */
+            bool found = false;
+            for (size_t j = 0; j < st->struct_type.nfields; j++) {
+                if (strcmp(st->struct_type.fields[j].name->name, fname) == 0) {
+                    if (!type_eq(st->struct_type.fields[j].type, fval_type))
+                        sema_error(ctx, n->loc, "field '%s' type mismatch: expected %s, got %s",
+                                   fname, type_to_string(st->struct_type.fields[j].type),
+                                   type_to_string(fval_type));
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+                sema_error(ctx, n->loc, "struct '%s' has no field '%s'",
+                           st->struct_type.name->name, fname);
+        }
+        n->type = st;
+        return n->type;
+    }
+
+    /* ── enum variant construction ── */
+    case NODE_ENUM_VARIANT: {
+        NodeEnumVariant *d = node_enum_variant_data(n);
+        /* resolve the enum type */
+        Type *et = NULL;
+        if (d->type_sym && d->type_sym->type && d->type_sym->type->kind == KIND_ENUM) {
+            et = d->type_sym->type;
+        } else {
+            Sym *gsym = symtab_lookup(ctx->global_scope, d->type_sym->name);
+            if (gsym && gsym->type && gsym->type->kind == KIND_ENUM)
+                et = gsym->type;
+        }
+        if (!et) {
+            sema_error(ctx, n->loc, "unknown enum type '%s'", d->type_sym->name);
+            n->type = type_void();
+            return n->type;
+        }
+        /* check payload if present */
+        if (d->payload) {
+            Type *payload_type = infer_type(ctx, d->payload);
+            /* find variant and check payload type */
+            bool found = false;
+            for (size_t i = 0; i < et->enum_type.nvariants; i++) {
+                if (strcmp(et->enum_type.variants[i].name->name, d->variant_sym->name) == 0) {
+                    if (et->enum_type.variants[i].payload) {
+                        if (!type_eq(et->enum_type.variants[i].payload, payload_type))
+                            sema_error(ctx, n->loc, "variant '%s' payload type mismatch: expected %s, got %s",
+                                       d->variant_sym->name,
+                                       type_to_string(et->enum_type.variants[i].payload),
+                                       type_to_string(payload_type));
+                    } else {
+                        sema_error(ctx, n->loc, "variant '%s' takes no payload", d->variant_sym->name);
+                    }
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+                sema_error(ctx, n->loc, "enum '%s' has no variant '%s'",
+                           et->enum_type.name->name, d->variant_sym->name);
+        }
+        n->type = et;
+        return n->type;
+    }
+
+    /* ── match ── */
+    case NODE_MATCH: {
+        NodeMatch *d = node_match_data(n);
+        (void)infer_type(ctx, d->expr);
+        Type *common_type = NULL;
+
+        for (size_t i = 0; i < d->narms; i++) {
+            NodeMatchArm *arm = node_match_arm_data(d->arms[i]);
+            Type *body_type = infer_type(ctx, arm->body);
+            if (i == 0) {
+                common_type = body_type;
+            } else {
+                if (!type_eq(common_type, body_type)) {
+                    /* Allow void mixing — if one arm is void, skip type check */
+                    if (common_type->kind != KIND_VOID && body_type->kind != KIND_VOID)
+                        sema_error(ctx, n->loc, "match arm type mismatch: %s vs %s",
+                                   type_to_string(common_type), type_to_string(body_type));
+                }
+            }
+        }
+        n->type = common_type ? common_type : type_void();
         return n->type;
     }
 
@@ -391,18 +539,21 @@ static void check_func_decl(SemaContext *ctx, Node *n) {
 static void check_module(SemaContext *ctx, Node *module) {
     NodeModule *md = node_module_data(module);
 
-    /* Pass 1: register all declarations (function names, type names) */
+    /* Pass 1: register all declarations into sema's scope tree.
+       Use symtab_insert_sym to preserve the parser-created Sym* (important for imports). */
     for (size_t i = 0; i < md->ndeccls; i++) {
         Node *decl = md->decls[i];
         switch (decl->kind) {
         case NODE_FUNC_DECL: {
             NodeFuncDecl *fd = node_func_decl_data(decl);
-            symtab_insert(ctx->global_scope, fd->sym->name, SYM_FN, NULL, false, 0);
+            fd->sym->kind = SYM_FN;
+            symtab_insert_sym(ctx->global_scope, fd->sym);
             break;
         }
         case NODE_TYPE_DECL: {
             NodeTypeDecl *td = node_type_decl_data(decl);
-            symtab_insert(ctx->global_scope, td->sym->name, SYM_TYPE, NULL, false, 0);
+            td->sym->kind = SYM_TYPE;
+            symtab_insert_sym(ctx->global_scope, td->sym);
             break;
         }
         case NODE_IMPORT_DECL:
@@ -412,13 +563,79 @@ static void check_module(SemaContext *ctx, Node *module) {
         }
     }
 
-    /* Pass 2: check function bodies */
+    /* Pass 2: resolve all type declarations first (so functions can reference them) */
+    for (size_t i = 0; i < md->ndeccls; i++) {
+        Node *decl = md->decls[i];
+        if (decl->kind != NODE_TYPE_DECL) continue;
+        NodeTypeDecl *td = node_type_decl_data(decl);
+        if (td->body->kind == NODE_STRUCT_DEF) {
+            NodeStructDef *sd = node_struct_def_data(td->body);
+            FieldDesc *fields = arena_alloc(ctx->arena, sd->nfields * sizeof(FieldDesc));
+            size_t offset = 0, max_align = 1;
+            for (size_t j = 0; j < sd->nfields; j++) {
+                Type *ft = resolve_type_node(ctx, sd->fields[j].type_annot);
+                size_t align = type_align(ft);
+                if (align > max_align) max_align = align;
+                offset = (offset + align - 1) & ~(align - 1);
+                Sym *fsym = symtab_lookup(ctx->global_scope, sd->fields[j].name);
+                if (!fsym)
+                    fsym = symtab_insert(ctx->global_scope, sd->fields[j].name, SYM_FIELD, ft, false, 0);
+                fields[j].name = fsym;
+                fields[j].type = ft;
+                fields[j].offset = offset;
+                offset += type_size(ft);
+            }
+            offset = (offset + max_align - 1) & ~(max_align - 1);
+            Type *st = type_struct(ctx->arena, td->sym, fields, sd->nfields, offset, max_align);
+            td->sym->type = st;
+            td->sym->kind = SYM_TYPE;
+        } else if (td->body->kind == NODE_ENUM_DEF) {
+            NodeEnumDef *ed = node_enum_def_data(td->body);
+            VariantDesc *variants = arena_alloc(ctx->arena, ed->nvariants * sizeof(VariantDesc));
+            size_t max_payload_size = 0, max_payload_align = 1;
+            for (size_t j = 0; j < ed->nvariants; j++) {
+                Type *pt = NULL;
+                if (ed->variants[j].payload_type) {
+                    pt = resolve_type_node(ctx, ed->variants[j].payload_type);
+                    size_t sz = type_size(pt);
+                    size_t al = type_align(pt);
+                    if (sz > max_payload_size) max_payload_size = sz;
+                    if (al > max_payload_align) max_payload_align = al;
+                }
+                Sym *vsym = symtab_lookup(ctx->global_scope, ed->variants[j].name);
+                if (!vsym)
+                    vsym = symtab_insert(ctx->global_scope, ed->variants[j].name, SYM_VARIANT, pt, false, 0);
+                variants[j].name = vsym;
+                variants[j].payload = pt;
+                variants[j].tag = (int)j;
+            }
+            size_t tag_size = 4;
+            size_t total_align = max_payload_align > 4 ? max_payload_align : 4;
+            size_t payload_offset = (tag_size + max_payload_align - 1) & ~(max_payload_align - 1);
+            size_t total_size = payload_offset + max_payload_size;
+            total_size = (total_size + total_align - 1) & ~(total_align - 1);
+            Type *et = type_enum(ctx->arena, td->sym, variants, ed->nvariants,
+                                tag_size, max_payload_size, total_size);
+            td->sym->type = et;
+            td->sym->kind = SYM_TYPE;
+        } else if (td->body->kind == NODE_IDENT) {
+            /* type alias: type Name = OtherType */
+            Type *underlying = resolve_type_node(ctx, td->body);
+            Type *at = type_alias(ctx->arena, td->sym, underlying);
+            td->sym->type = at;
+            td->sym->kind = SYM_TYPE;
+        }
+    }
+
+    /* Pass 3: check function bodies and top-level statements */
     for (size_t i = 0; i < md->ndeccls; i++) {
         Node *decl = md->decls[i];
         switch (decl->kind) {
         case NODE_FUNC_DECL:
             check_func_decl(ctx, decl);
             break;
+        case NODE_TYPE_DECL:
+            break; /* already processed in Pass 2 */
         case NODE_LET:
             infer_type(ctx, decl);
             break;

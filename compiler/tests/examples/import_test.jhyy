@@ -1,0 +1,8 @@
+// Test import system
+import mylib;
+
+fn main_jhyy() -> i32 {
+    let x = add(10, 20);
+    let y = get_answer();
+    x + y   // 30 + 42 = 72
+}

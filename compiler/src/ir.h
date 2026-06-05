@@ -33,6 +33,10 @@ typedef struct {
     int next_tmp;
     int next_block;
     int next_data;
+    /* Deferred data definitions (emitted before function code) */
+    char *data_buf;
+    size_t data_len;
+    size_t data_cap;
 } IRBuf;
 
 void ir_init(IRBuf *ir, struct Arena *arena);
@@ -55,8 +59,10 @@ void ir_emit_store(IRBuf *ir, char qbe_type, IRVal val, IRVal addr);
 void ir_emit_load(IRBuf *ir, IRVal dst, char qbe_type, IRVal addr);
 void ir_emit_phi(IRBuf *ir, IRVal dst, int npairs, ...);
 
-/* emit data */
+/* emit data (deferred until ir_flush_data) */
 void ir_emit_data_string(IRBuf *ir, IRVal id, const char *str, size_t len);
+/* flush deferred data definitions to buf */
+void ir_flush_data(IRBuf *ir);
 
 /* convenience */
 void ir_emit_func_header(IRBuf *ir, const char *name, char ret_type, /* params */ ...);

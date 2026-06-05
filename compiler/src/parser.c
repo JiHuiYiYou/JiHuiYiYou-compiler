@@ -114,11 +114,43 @@ static Node *parse_pattern(Parser *p) {
     Token t = peek(p);
 
     switch (t.kind) {
-    case TOKEN_STAR: /* wildcard _ */
+    case TOKEN_IDENT: {
+        /* check for wildcard _ first */
         if (t.length == 1 && *t.start == '_') {
             advance(p);
             return ast_new_pattern_wild(p->arena, t.loc);
         }
+        /* else: identifier pattern, Enum::Variant, or range */
+        advance(p);
+        if (match(p, TOKEN_COLON) && match(p, TOKEN_COLON)) {
+            Token vt = expect(p, TOKEN_IDENT, "variant name");
+            const char *tname = tok_name(p, t);
+            const char *vname = tok_name(p, vt);
+            Sym *tsym = symtab_lookup(p->current_scope, tname);
+            Sym *vsym = symtab_lookup(p->current_scope, vname);
+            Node *inner = NULL;
+            if (check(p, TOKEN_LPAREN)) {
+                advance(p);
+                inner = parse_pattern(p);
+                expect(p, TOKEN_RPAREN, ") after enum pattern");
+            }
+            return ast_new_pattern_enum(p->arena, t.loc, tsym, vsym, inner);
+        }
+        if (match(p, TOKEN_DOTDOT)) {
+            Node *hi = parse_expr(p, PREC_PRIMARY);
+            const char *name = tok_name(p, t);
+            Sym *sym = symtab_lookup(p->current_scope, name);
+            if (!sym) sym = symtab_insert(p->current_scope, name, SYM_VAR, NULL, false, p->scope_depth);
+            Node *lo = ast_new_pattern_ident(p->arena, t.loc, sym);
+            return ast_new_pattern_range(p->arena, t.loc, lo, hi);
+        }
+        const char *name = tok_name(p, t);
+        Sym *sym = symtab_lookup(p->current_scope, name);
+        if (!sym) sym = symtab_insert(p->current_scope, name, SYM_VAR, NULL, false, p->scope_depth);
+        return ast_new_pattern_ident(p->arena, t.loc, sym);
+    }
+
+    case TOKEN_STAR:
         goto default_case;
 
     case TOKEN_INT: {
@@ -140,41 +172,6 @@ static Node *parse_pattern(Parser *p) {
         Token n = expect(p, TOKEN_INT, "integer after - in pattern");
         int64_t val = -strtoll(n.start, NULL, 0);
         return ast_new_pattern_lit(p->arena, t.loc, val, PRIM_I32);
-    }
-    case TOKEN_IDENT: {
-        advance(p);
-        /* check if it's Enum::Variant(pat) */
-        if (match(p, TOKEN_COLON) && match(p, TOKEN_COLON)) {
-            /* Enum::Variant */
-            Token vt = expect(p, TOKEN_IDENT, "variant name");
-            const char *tname = tok_name(p, t);
-            const char *vname = tok_name(p, vt);
-            Sym *tsym = symtab_lookup(p->current_scope, tname);
-            Sym *vsym = symtab_lookup(p->current_scope, vname);
-            Node *inner = NULL;
-            if (check(p, TOKEN_LPAREN)) {
-                advance(p);
-                inner = parse_pattern(p);
-                expect(p, TOKEN_RPAREN, ") after enum pattern");
-            }
-            return ast_new_pattern_enum(p->arena, t.loc, tsym, vsym, inner);
-        }
-        /* check if it's a range pattern: lo..hi */
-        if (match(p, TOKEN_DOTDOT)) {
-            /* parse hi */
-            Node *hi = parse_expr(p, PREC_PRIMARY);
-            /* lo is the identifier as a literal pattern */
-            const char *name = tok_name(p, t);
-            Sym *sym = symtab_lookup(p->current_scope, name);
-            if (!sym) sym = symtab_insert(p->current_scope, name, SYM_VAR, NULL, false, p->scope_depth);
-            Node *lo = ast_new_pattern_ident(p->arena, t.loc, sym);
-            return ast_new_pattern_range(p->arena, t.loc, lo, hi);
-        }
-        /* simple identifier pattern (variable binding) */
-        const char *name = tok_name(p, t);
-        Sym *sym = symtab_lookup(p->current_scope, name);
-        if (!sym) sym = symtab_insert(p->current_scope, name, SYM_VAR, NULL, false, p->scope_depth);
-        return ast_new_pattern_ident(p->arena, t.loc, sym);
     }
     default:
     default_case:
@@ -204,13 +201,10 @@ static Node *parse_block(Parser *p) {
         if (stmt) {
             if (nstmts >= cap) {
                 cap = cap ? cap * 2 : 8;
-                stmts = p->arena->cur
-                    ? (Node **)arena_alloc(p->arena, cap * sizeof(Node *))
-                    : NULL;
-                /* FIXME: this loses previously allocated stmts.
-                   The right approach: use a growable array.
-                   For Phase 1, use a simple bump allocation:
-                   all stmts are arena-allocated, so we grow manually. */
+                Node **new_stmts = arena_alloc(p->arena, cap * sizeof(Node *));
+                if (stmts && nstmts > 0)
+                    memcpy(new_stmts, stmts, nstmts * sizeof(Node *));
+                stmts = new_stmts;
             }
             stmts[nstmts++] = stmt;
         }
@@ -424,28 +418,79 @@ static Node *parse_type_decl(Parser *p) {
     advance(p); /* consume 'type' */
 
     Token name = expect(p, TOKEN_IDENT, "type name");
+    const char *tname = tok_name(p, name);
     expect(p, TOKEN_EQ, "=");
 
-    Token kind = expect(p, TOKEN_IDENT, "struct or enum");
-    const char *kname = tok_name(p, kind);
     Node *body = NULL;
 
-    if (strcmp(kname, "struct") == 0) {
+    if (match(p, TOKEN_STRUCT)) {
+        /* type Name = struct { ... } */
+        SourceLoc body_loc = p->prev.loc;
         expect(p, TOKEN_LBRACE, "{");
-        /* parse struct fields */
-        /* Simplified: just skip for now, sema will do the heavy lifting */
+
+        StructFieldDecl *fields = NULL;
+        size_t nfields = 0, fcap = 0;
+
+        while (!check(p, TOKEN_RBRACE) && !check(p, TOKEN_EOF)) {
+            Token fname = expect(p, TOKEN_IDENT, "field name");
+            expect(p, TOKEN_COLON, ":");
+            Node *ftype = parse_type(p);
+
+            if (nfields >= fcap) {
+                fcap = fcap ? fcap * 2 : 8;
+                StructFieldDecl *nf = arena_alloc(p->arena, fcap * sizeof(StructFieldDecl));
+                if (fields && nfields > 0) memcpy(nf, fields, nfields * sizeof(StructFieldDecl));
+                fields = nf;
+            }
+            fields[nfields].name = tok_name(p, fname);
+            fields[nfields].type_annot = ftype;
+            nfields++;
+
+            if (!match(p, TOKEN_COMMA)) break;
+        }
+
         expect(p, TOKEN_RBRACE, "}");
-        body = ast_new_int(p->arena, kind.loc, 0, PRIM_I32); /* placeholder */
-    } else if (strcmp(kname, "enum") == 0) {
+        body = ast_new_struct_def(p->arena, body_loc, fields, nfields);
+    } else if (match(p, TOKEN_ENUM)) {
+        /* type Name = enum { ... } */
+        SourceLoc body_loc = p->prev.loc;
         expect(p, TOKEN_LBRACE, "{");
+
+        EnumVariantDecl *variants = NULL;
+        size_t nvariants = 0, vcap = 0;
+
+        while (!check(p, TOKEN_RBRACE) && !check(p, TOKEN_EOF)) {
+            Token vname = expect(p, TOKEN_IDENT, "variant name");
+            Node *payload_type = NULL;
+
+            /* optional payload: Variant(Type) */
+            if (match(p, TOKEN_LPAREN)) {
+                payload_type = parse_type(p);
+                expect(p, TOKEN_RPAREN, ")");
+            }
+
+            if (nvariants >= vcap) {
+                vcap = vcap ? vcap * 2 : 8;
+                EnumVariantDecl *nv = arena_alloc(p->arena, vcap * sizeof(EnumVariantDecl));
+                if (variants && nvariants > 0) memcpy(nv, variants, nvariants * sizeof(EnumVariantDecl));
+                variants = nv;
+            }
+            variants[nvariants].name = tok_name(p, vname);
+            variants[nvariants].payload_type = payload_type;
+            nvariants++;
+
+            if (!match(p, TOKEN_COMMA)) break;
+        }
+
         expect(p, TOKEN_RBRACE, "}");
-        body = ast_new_int(p->arena, kind.loc, 1, PRIM_I32); /* placeholder */
+        body = ast_new_enum_def(p->arena, body_loc, variants, nvariants);
     } else {
         /* type alias: type Name = OtherType */
-        body = ast_new_ident(p->arena, kind.loc, NULL);
+        Node *alias_type = parse_type(p);
+        body = alias_type;
     }
 
-    Sym *sym = symtab_insert(p->global_scope, tok_name(p, name), SYM_TYPE, NULL, false, 0);
+    Sym *sym = symtab_insert(p->global_scope, tname, SYM_TYPE, NULL, false, 0);
     return ast_new_type_decl(p->arena, loc, sym, body);
 }
 
@@ -583,6 +628,58 @@ static Node *prefix_ident(Parser *p, Token token) {
     Sym *sym = symtab_lookup(p->current_scope, name);
     if (!sym)
         sym = symtab_insert(p->current_scope, name, SYM_VAR, NULL, false, p->scope_depth);
+
+    /* struct literal: TypeName { field: val, ... }
+       Only when the identifier is a known type name (SYM_TYPE) */
+    if (sym->kind == SYM_TYPE && check(p, TOKEN_LBRACE)) {
+        SourceLoc loc = token.loc;
+        advance(p); /* consume { */
+
+        NodeFieldInit *fields = NULL;
+        size_t nfields = 0, fcap = 0;
+
+        while (!check(p, TOKEN_RBRACE) && !check(p, TOKEN_EOF)) {
+            Token fname = expect(p, TOKEN_IDENT, "field name");
+            expect(p, TOKEN_COLON, ":");
+            Node *fval = parse_expr(p, PREC_NONE);
+
+            if (nfields >= fcap) {
+                fcap = fcap ? fcap * 2 : 8;
+                NodeFieldInit *nf = arena_alloc(p->arena, fcap * sizeof(NodeFieldInit));
+                if (fields && nfields > 0) memcpy(nf, fields, nfields * sizeof(NodeFieldInit));
+                fields = nf;
+            }
+            fields[nfields].name = tok_name(p, fname);
+            fields[nfields].value = fval;
+            nfields++;
+
+            if (!match(p, TOKEN_COMMA)) break;
+        }
+
+        expect(p, TOKEN_RBRACE, "}");
+        return ast_new_struct_lit(p->arena, loc, sym, fields, nfields);
+    }
+
+    /* enum variant construction: TypeName::Variant(args)
+       Only when the identifier is a known type name (SYM_TYPE) */
+    if (sym->kind == SYM_TYPE && match(p, TOKEN_COLON) && match(p, TOKEN_COLON)) {
+        SourceLoc loc = token.loc;
+        Token vt = expect(p, TOKEN_IDENT, "variant name");
+        const char *vname = tok_name(p, vt);
+        Sym *vsym = symtab_lookup(p->current_scope, vname);
+        if (!vsym)
+            vsym = symtab_insert(p->current_scope, vname, SYM_VARIANT, NULL, false, p->scope_depth);
+
+        Node *payload = NULL;
+        if (check(p, TOKEN_LPAREN)) {
+            advance(p);
+            payload = parse_expr(p, PREC_NONE);
+            expect(p, TOKEN_RPAREN, ")");
+        }
+
+        return ast_new_enum_variant(p->arena, loc, sym, vsym, payload);
+    }
+
     return ast_new_ident(p->arena, token.loc, sym);
 }
 

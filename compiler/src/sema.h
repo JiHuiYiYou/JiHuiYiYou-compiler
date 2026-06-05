@@ -7,7 +7,7 @@
 #define SEMA_MAX_LOCALS 256
 
 typedef struct {
-    const char *name;
+    Sym        *sym;   /* matched by pointer, not name */
     Type       *type;
 } SemaLocal;
 

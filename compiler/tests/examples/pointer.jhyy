@@ -1,0 +1,8 @@
+// Pointer operations test
+
+fn main_jhyy() -> i32 {
+    let mut x = 42;
+    let p = &x;       // take address of mutable variable
+    *p = 100;         // write through pointer
+    x                 // should be 100
+}
