@@ -334,8 +334,21 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
 
     /* ── return ── */
     case NODE_RETURN: {
-        /* type will be checked against function return type later */
-        n->type = type_void();
+        NodeReturn *dr = node_return_data(n);
+        Type *expr_type = type_void();
+        if (dr->expr) {
+            expr_type = infer_type(ctx, dr->expr);
+            n->type = expr_type;  /* propagate expr type for block inference */
+        } else {
+            n->type = type_void();
+        }
+        /* check against function return type */
+        if (ctx->current_ret_type && ctx->current_ret_type->kind != KIND_VOID) {
+            if (!type_eq(expr_type, ctx->current_ret_type)) {
+                sema_error(ctx, n->loc, "return type %s does not match function return type %s",
+                           type_to_string(expr_type), type_to_string(ctx->current_ret_type));
+            }
+        }
         return n->type;
     }
 
@@ -521,7 +534,9 @@ static void check_func_decl(SemaContext *ctx, Node *n) {
 
     /* check body */
     if (fd->body && !fd->is_extern) {
+        ctx->current_ret_type = ret_type;
         Type *body_type = infer_type(ctx, fd->body);
+        ctx->current_ret_type = NULL;
         if (ret_type->kind != KIND_VOID && !type_eq(body_type, ret_type)) {
             sema_error(ctx, fd->body->loc, "function body type %s does not match return type %s",
                        type_to_string(body_type), type_to_string(ret_type));
@@ -615,7 +630,7 @@ static void check_module(SemaContext *ctx, Node *module) {
             size_t total_size = payload_offset + max_payload_size;
             total_size = (total_size + total_align - 1) & ~(total_align - 1);
             Type *et = type_enum(ctx->arena, td->sym, variants, ed->nvariants,
-                                tag_size, max_payload_size, total_size);
+                                tag_size, payload_offset, max_payload_size, total_size);
             td->sym->type = et;
             td->sym->kind = SYM_TYPE;
         } else if (td->body->kind == NODE_IDENT) {
@@ -658,6 +673,7 @@ void sema_init(SemaContext *ctx, Arena *arena) {
     ctx->nlocals = 0;
     ctx->scope_depth = 0;
     ctx->error_count = 0;
+    ctx->current_ret_type = NULL;
 }
 
 int sema_check(SemaContext *ctx, Node *module) {

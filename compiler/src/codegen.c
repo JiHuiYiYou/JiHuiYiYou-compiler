@@ -228,8 +228,55 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
     case NODE_BINARY: {
         NodeBinary *d = node_binary_data(n);
         IRVal left = cg_expr(cg, d->left);
-        IRVal right = cg_expr(cg, d->right);
 
+        /* short-circuit && and || */
+        if (d->op == TOKEN_AMPAMP || d->op == TOKEN_PIPEPIPE) {
+            IRVal result = ir_new_tmp(cg->ir, 'w');
+            IRVal eval_b = ir_new_block(cg->ir, "sc_eval");
+            IRVal merge  = ir_new_block(cg->ir, "sc_merge");
+
+            if (d->op == TOKEN_AMPAMP) {
+                /* a && b: jnz a, @eval_b, @false(0) */
+                IRVal false_block = ir_new_block(cg->ir, "sc_false");
+                ir_emit_jnz(cg->ir, left, eval_b, false_block);
+
+                ir_emit_label(cg->ir, false_block);
+                IRVal zero = ir_new_tmp(cg->ir, 'w');
+                ir_emit_copy(cg->ir, zero, 0);
+                ir_emit_jmp(cg->ir, merge);
+
+                ir_emit_label(cg->ir, eval_b);
+                IRVal right_and = cg_expr(cg, d->right);
+                IRVal rb_and = ir_new_tmp(cg->ir, 'w');
+                ir_emit_binary(cg->ir, rb_and, "cnew", right_and, ir_new_int(0));
+                ir_emit_jmp(cg->ir, merge);
+
+                ir_emit_label(cg->ir, merge);
+                ir_emit_phi(cg->ir, result, 2, false_block, zero, eval_b, rb_and);
+            } else {
+                /* a || b: jnz a, @true(1), @eval_b */
+                IRVal true_block = ir_new_block(cg->ir, "sc_true");
+                ir_emit_jnz(cg->ir, left, true_block, eval_b);
+
+                ir_emit_label(cg->ir, true_block);
+                IRVal one = ir_new_tmp(cg->ir, 'w');
+                ir_emit_copy(cg->ir, one, 1);
+                ir_emit_jmp(cg->ir, merge);
+
+                ir_emit_label(cg->ir, eval_b);
+                IRVal right_or = cg_expr(cg, d->right);
+                IRVal rb_or = ir_new_tmp(cg->ir, 'w');
+                ir_emit_binary(cg->ir, rb_or, "cnew", right_or, ir_new_int(0));
+                ir_emit_jmp(cg->ir, merge);
+
+                ir_emit_label(cg->ir, merge);
+                ir_emit_phi(cg->ir, result, 2, true_block, one, eval_b, rb_or);
+            }
+            return result;
+        }
+
+        /* non-short-circuit: evaluate right eagerly */
+        IRVal right = cg_expr(cg, d->right);
         IRVal result = ir_new_tmp(cg->ir, qbe_type_of(n->type));
 
         /* determine operand width and signedness for comparisons */
@@ -282,8 +329,6 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
                 op = is_unsigned ? "cugew" : "csgew";
             break;
 
-        case TOKEN_AMPAMP: op = "and"; break;
-        case TOKEN_PIPEPIPE: op = "or"; break;
         case TOKEN_AMP:    op = "and"; break;
         case TOKEN_PIPE:   op = "or"; break;
         case TOKEN_CARET:  op = "xor"; break;
@@ -490,10 +535,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
 
         /* store payload if present */
         if (d->payload && payload_type) {
-            size_t payload_offset = 4; /* after tag */
-            size_t payload_align = type_align(payload_type);
-            if (payload_align > 4)
-                payload_offset = (payload_offset + payload_align - 1) & ~(payload_align - 1);
+            size_t payload_offset = et->enum_type.payload_offset;
             IRVal payload_addr = ir_new_tmp(cg->ir, 'l');
             ir_emit_binary(cg->ir, payload_addr, "add", slot, ir_new_int((int64_t)payload_offset));
             IRVal pval = cg_expr(cg, d->payload);
@@ -706,11 +748,30 @@ static void cg_stmt(CGContext *cg, Node *n) {
         IRVal start_val = cg_expr(cg, df->start);
         IRVal end_val = cg_expr(cg, df->end);
 
+        /* determine loop variable type */
+        Type *var_type = df->var->type;
+        if (!var_type) var_type = type_void(); /* fallback */
+        char var_qt = qbe_type_of(var_type);
+        int var_size = (int)type_size(var_type);
+        if (var_size < 1) var_size = 4;
+
+        /* determine if unsigned for comparison */
+        int is_unsigned = 0;
+        if (var_type->kind == KIND_PRIMITIVE) {
+            switch (var_type->prim) {
+            case PRIM_U8: case PRIM_U16: case PRIM_U32: case PRIM_U64:
+                is_unsigned = 1; break;
+            default: break;
+            }
+        }
+        const char *cmp_op = is_unsigned
+            ? (var_qt == 'l' ? "cultl" : "cultw")
+            : (var_qt == 'l' ? "csltl" : "csltw");
+
         /* allocate stack slot for loop variable (mutable) */
-        int size = 4; /* i32 */
         IRVal slot = ir_new_tmp(cg->ir, 'l');
-        ir_emit_alloc(cg->ir, slot, size);
-        ir_emit_store(cg->ir, 'w', start_val, slot);
+        ir_emit_alloc(cg->ir, slot, var_size);
+        ir_emit_store(cg->ir, var_qt, start_val, slot);
         cg_add_local(cg, df->var, slot, 1); /* is_stack=1 */
 
         IRVal loop_hdr = ir_new_block(cg->ir, "loop");
@@ -721,10 +782,10 @@ static void cg_stmt(CGContext *cg, Node *n) {
 
         /* loop header: load i, compare with end */
         ir_emit_label(cg->ir, loop_hdr);
-        IRVal i_val = ir_new_tmp(cg->ir, 'w');
-        ir_emit_load(cg->ir, i_val, 'w', slot);
+        IRVal i_val = ir_new_tmp(cg->ir, var_qt);
+        ir_emit_load(cg->ir, i_val, var_qt, slot);
         IRVal cond = ir_new_tmp(cg->ir, 'w');
-        ir_emit_binary(cg->ir, cond, "csltw", i_val, end_val);
+        ir_emit_binary(cg->ir, cond, cmp_op, i_val, end_val);
         ir_emit_jnz(cg->ir, cond, body_b, exit_b);
 
         /* body */
@@ -732,11 +793,11 @@ static void cg_stmt(CGContext *cg, Node *n) {
         cg_expr(cg, df->body);
 
         /* increment: load i, add 1, store back */
-        IRVal current = ir_new_tmp(cg->ir, 'w');
-        ir_emit_load(cg->ir, current, 'w', slot);
-        IRVal next_val = ir_new_tmp(cg->ir, 'w');
+        IRVal current = ir_new_tmp(cg->ir, var_qt);
+        ir_emit_load(cg->ir, current, var_qt, slot);
+        IRVal next_val = ir_new_tmp(cg->ir, var_qt);
         ir_emit_binary(cg->ir, next_val, "add", current, ir_new_int(1));
-        ir_emit_store(cg->ir, 'w', next_val, slot);
+        ir_emit_store(cg->ir, var_qt, next_val, slot);
         ir_emit_jmp(cg->ir, loop_hdr);
 
         ir_emit_label(cg->ir, exit_b);
@@ -804,13 +865,22 @@ static void cg_func(IRBuf *ir, Node *n) {
 
     IRVal body_val = cg_expr(&cg, fd->body);
 
-    /* emit ret if body ends with non-void expression and no explicit return */
-    if (ret_qt != 0 && body_val.qbe_type != 0) {
-        ir_emit_ret(ir, body_val);
-    } else {
-        IRVal v = {0};
-        ir_emit_ret(ir, v);
+    /* check if body already ended with an explicit return */
+    #define body_returns(body) \
+        ((body) && ((body)->kind == NODE_RETURN || \
+         ((body)->kind == NODE_BLOCK && node_block_data(body)->nstmts > 0 && \
+          node_block_data(body)->stmts[node_block_data(body)->nstmts - 1]->kind == NODE_RETURN)))
+
+    if (!body_returns(fd->body)) {
+        /* emit ret only if body doesn't already have one */
+        if (ret_qt != 0 && body_val.qbe_type != 0) {
+            ir_emit_ret(ir, body_val);
+        } else {
+            IRVal v = {0};
+            ir_emit_ret(ir, v);
+        }
     }
+    #undef body_returns
 
     ir_emit(ir, "}\n\n");
 }

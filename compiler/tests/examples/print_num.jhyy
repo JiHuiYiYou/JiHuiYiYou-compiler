@@ -1,0 +1,6 @@
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    printf("计算结果: %d\n", 42);
+    0
+}

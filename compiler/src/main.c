@@ -233,6 +233,8 @@ static int compile(const char *input, const char *output) {
     /* invoke QBE */
     char asm_path[1024];
     snprintf(asm_path, sizeof(asm_path), "%s.s", output);
+    path_to_win(il_path);
+    path_to_win(asm_path);
     char cmd[2048];
     snprintf(cmd, sizeof(cmd),
              "C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/qbe/qbe.exe -t amd64_win -o %s %s",
@@ -243,9 +245,12 @@ static int compile(const char *input, const char *output) {
     }
 
     /* link with gcc */
+    char exe_path[1024];
+    snprintf(exe_path, sizeof(exe_path), "%s.exe", output);
+    path_to_win(exe_path);
     snprintf(cmd, sizeof(cmd),
-             "C:/msys64/ucrt64/bin/gcc.exe %s C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/runtime/runtime.c -o %s.exe -lm",
-             asm_path, output);
+             "C:/msys64/ucrt64/bin/gcc.exe %s C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/runtime/runtime.c -o %s -lm",
+             asm_path, exe_path);
     if (system(cmd) != 0) {
         fprintf(stderr, "gcc link failed\n");
         arena_free(&arena); free(source); return 1;

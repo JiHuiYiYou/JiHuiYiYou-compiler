@@ -20,6 +20,7 @@ typedef struct {
     int       nlocals;
     int       scope_depth;
     int       error_count;
+    Type     *current_ret_type;  /* return type of current function being checked */
 } SemaContext;
 
 void sema_init(SemaContext *ctx, Arena *arena);

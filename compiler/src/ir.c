@@ -198,10 +198,43 @@ void ir_emit_data_string(IRBuf *ir, IRVal id, const char *str, size_t len) {
     ir_emit_data(ir, "data %s = { b \"", id.name);
     for (size_t i = 0; i < len; i++) {
         char c = str[i];
-        if (c == '\\') ir_emit_data(ir, "\\\\");
-        else if (c == '"') ir_emit_data(ir, "\\\"");
-        else if (c == '\n') ir_emit_data(ir, "\\\\n");
-        else ir_emit_data(ir, "%c", c);
+        if (c == '\\' && i + 1 < len) {
+            /* JHYY escape sequence — emit the actual byte */
+            char next = str[++i];
+            switch (next) {
+            case 'n':  ir_emit_data(ir, "\\n"); break;   /* QBE newline */
+            case 't':  ir_emit_data(ir, "\\t"); break;   /* QBE tab */
+            case 'r':  ir_emit_data(ir, "\\r"); break;   /* QBE carriage return */
+            case '0':  ir_emit_data(ir, "\\0"); break;   /* QBE null byte */
+            case '\\': ir_emit_data(ir, "\\\\"); break;  /* literal backslash */
+            case '"':  ir_emit_data(ir, "\\\""); break;  /* literal double quote */
+            case 'x': {
+                /* \xHH hex escape — parse up to 2 hex digits */
+                int val = 0;
+                int digits = 0;
+                while (digits < 2 && i + 1 < len) {
+                    char hex = str[i + 1];
+                    if (hex >= '0' && hex <= '9')      val = (val << 4) | (hex - '0');
+                    else if (hex >= 'a' && hex <= 'f') val = (val << 4) | (hex - 'a' + 10);
+                    else if (hex >= 'A' && hex <= 'F') val = (val << 4) | (hex - 'A' + 10);
+                    else break;
+                    i++; digits++;
+                }
+                ir_emit_data(ir, "\\x%02X", val & 0xFF);
+                break;
+            }
+            default:
+                /* unknown escape — emit literal backslash + char */
+                ir_emit_data(ir, "\\\\%c", next);
+                break;
+            }
+        } else if (c == '"') {
+            ir_emit_data(ir, "\\\"");
+        } else if (c == '\n') {
+            ir_emit_data(ir, "\\n");
+        } else {
+            ir_emit_data(ir, "%c", c);
+        }
     }
     ir_emit_data(ir, "\", b 0 }\n");
 }

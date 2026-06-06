@@ -1,0 +1,16 @@
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn add(a: i32, b: i32) -> i32 {
+    return a + b;
+}
+
+fn greet() -> i32 {
+    printf("Hello from return test!\n", 0);
+    return 100;
+}
+
+fn main_jhyy() -> i32 {
+    let x = add(10, 20);
+    printf("10 + 20 = %d\n", x);
+    greet()
+}

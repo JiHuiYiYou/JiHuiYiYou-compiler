@@ -31,8 +31,7 @@ export function w $main_jhyy() {
 @start4
     %t14 =w copy 5
     %t15 =w call $factorial(w %t14)
-    %t16 =w call $puts(w %t15)
-    %t17 =w copy 0
-    ret %t17
+    %t16 =w copy 0
+    ret %t16
 }
 

@@ -54,7 +54,7 @@ static void test_infer_bool(void) {
 static void test_infer_string(void) {
     Node *mod = parse_and_check("let s = \"hello\";\n");
     NodeLet *ld = node_let_data(find_first_decl(mod));
-    ASSERT(ld->sym->type->kind == KIND_SLICE, "string is slice");
+    ASSERT(ld->sym->type->kind == KIND_POINTER, "string is pointer");
 }
 
 /* ── Type annotation ── */

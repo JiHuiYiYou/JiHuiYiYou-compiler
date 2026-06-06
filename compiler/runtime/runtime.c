@@ -3,6 +3,10 @@
 #include <stdio.h>
 #include <stdint.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 void arena_new(Arena *a, size_t size) {
     a->start = (char *)malloc(size);
     if (!a->start) {
@@ -33,5 +37,8 @@ void arena_destroy(Arena *a) {
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
+#ifdef _WIN32
+    SetConsoleOutputCP(65001); /* UTF-8 console output */
+#endif
     return main_jhyy();
 }

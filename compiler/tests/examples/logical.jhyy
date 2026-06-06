@@ -1,0 +1,33 @@
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+/* crash_if_called: if this function is ever called, we'll know short-circuit failed */
+fn crash_if_called() -> i32 {
+    printf("BUG: short-circuit failed!\n", 0);
+    99
+}
+
+fn main_jhyy() -> i32 {
+    /* Test 1: false && crash_if_called() should NOT call crash_if_called */
+    let a = 0;
+    let t1 = (a != 0) && (crash_if_called() != 0);
+    printf("Test1 (false && X): %d (expect 0)\n", t1);
+
+    /* Test 2: true || crash_if_called() should NOT call crash_if_called */
+    let b = 1;
+    let t2 = (b != 0) || (crash_if_called() != 0);
+    printf("Test2 (true || X): %d (expect 1)\n", t2);
+
+    /* Test 3: true && true = 1 */
+    let t3 = (1 != 0) && (1 != 0);
+    printf("Test3 (true && true): %d (expect 1)\n", t3);
+
+    /* Test 4: false || true = 1 */
+    let t4 = (0 != 0) || (1 != 0);
+    printf("Test4 (false || true): %d (expect 1)\n", t4);
+
+    /* Test 5: false || false = 0 */
+    let t5 = (0 != 0) || (0 != 0);
+    printf("Test5 (false || false): %d (expect 0)\n", t5);
+
+    0
+}

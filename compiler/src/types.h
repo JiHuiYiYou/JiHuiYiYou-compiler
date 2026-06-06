@@ -84,9 +84,10 @@ typedef struct Type {
             struct Sym *name;
             VariantDesc *variants;
             size_t nvariants;
-            size_t tag_size;     /* sizeof(tag), usually 4 */
-            size_t payload_size; /* max payload variant size */
-            size_t total_size;   /* tag + payload, aligned */
+            size_t tag_size;       /* sizeof(tag), usually 4 */
+            size_t payload_offset; /* byte offset where payload starts */
+            size_t payload_size;   /* max payload variant size */
+            size_t total_size;     /* tag + payload, aligned */
         } enum_type;
 
         struct {             /* KIND_ALIAS */
@@ -103,7 +104,7 @@ Type *type_slice(struct Arena *a, Type *elem);
 Type *type_array(struct Arena *a, Type *elem, size_t count);
 Type *type_func(struct Arena *a, Type **params, size_t nparams, Type *ret);
 Type *type_struct(struct Arena *a, struct Sym *name, FieldDesc *fields, size_t nfields, size_t size, size_t align);
-Type *type_enum(struct Arena *a, struct Sym *name, VariantDesc *variants, size_t nvariants, size_t tag_size, size_t payload_size, size_t total_size);
+Type *type_enum(struct Arena *a, struct Sym *name, VariantDesc *variants, size_t nvariants, size_t tag_size, size_t payload_offset, size_t payload_size, size_t total_size);
 Type *type_alias(struct Arena *a, struct Sym *sym, Type *underlying);
 Type *type_void(void);
 

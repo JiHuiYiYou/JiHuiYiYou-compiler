@@ -1,5 +1,0 @@
-fn main_jhyy() -> i32 {
-    let mut x = 10;
-    x = 20;
-    x
-}

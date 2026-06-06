@@ -1,0 +1,6 @@
+extern fn puts(s: *u8) -> i32;
+
+fn main_jhyy() -> i32 {
+    puts("你好，世界！");
+    0
+}

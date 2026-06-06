@@ -91,13 +91,14 @@ Type *type_struct(Arena *a, Sym *name, FieldDesc *fields, size_t nfields, size_t
 }
 
 Type *type_enum(Arena *a, Sym *name, VariantDesc *variants, size_t nvariants,
-                size_t tag_size, size_t payload_size, size_t total_size) {
+                size_t tag_size, size_t payload_offset, size_t payload_size, size_t total_size) {
     Type *t = arena_alloc(a, sizeof(Type));
     t->kind = KIND_ENUM;
     t->enum_type.name = name;
     t->enum_type.variants = variants;
     t->enum_type.nvariants = nvariants;
     t->enum_type.tag_size = tag_size;
+    t->enum_type.payload_offset = payload_offset;
     t->enum_type.payload_size = payload_size;
     t->enum_type.total_size = total_size;
     return t;

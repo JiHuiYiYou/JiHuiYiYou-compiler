@@ -25,10 +25,6 @@ main_jhyy:
 	subq $32, %rsp
 	movl $5, %ecx
 	callq factorial
-	movl %eax, %ecx
-	subq $-32, %rsp
-	subq $32, %rsp
-	callq puts
 	subq $-32, %rsp
 	movl $0, %eax
 	leave

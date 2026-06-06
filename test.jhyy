@@ -11,6 +11,8 @@ fn factorial(n: i32) -> i32 {
 fn main_jhyy() -> i32 {
     let n = 5;
     let result = factorial(n);
-    puts(result);
+    // Assuming we have a way to print the result, e.g., using puts
+    // puts("Factorial of 5 is: ");
+    // puts(result.to_string().as_ptr());
     0
 }
