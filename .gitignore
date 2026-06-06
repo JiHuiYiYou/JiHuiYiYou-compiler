@@ -1,4 +1,9 @@
-compiler/build/
+compiler/build/*
+!compiler/build/bin/
+compiler/build/bin/*
+!compiler/build/bin/.gitkeep
+_*.txt
+_*.py
 *.o
 *.exe
 *.ilk
