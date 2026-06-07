@@ -22,6 +22,8 @@ typedef enum {
     NODE_FIELD,          /* expr.field */
     NODE_INDEX,          /* expr[index] */
     NODE_CAST,           /* expr as Type */
+    NODE_ARRAY_TYPE,     /* [T; N] type annotation */
+    NODE_ARRAY_LIT,      /* [1, 2, 3] array literal */
     NODE_SIZEOF,         /* sizeof(Type) */
     NODE_ALIGNOF,        /* alignof(Type) */
     NODE_ADDR_OF,        /* &expr */
@@ -106,6 +108,8 @@ typedef struct {
 typedef struct { Node *expr; const char *field; } NodeField;
 typedef struct { Node *expr; Node *index; } NodeIndex;
 typedef struct { Node *expr; Type *target_type; } NodeCast;
+typedef struct { Node *elem_type; Node *count_expr; } NodeArrayType;
+typedef struct { Node **elems; size_t nelems; } NodeArrayLit;
 typedef struct { Type *target; } NodeSizeof;
 typedef struct { Type *target; } NodeAlignof;
 typedef struct { Node *expr; } NodeAddrOf;
@@ -230,6 +234,8 @@ NodeCall         *node_call_data(Node *n);
 NodeField        *node_field_data(Node *n);
 NodeIndex        *node_index_data(Node *n);
 NodeCast         *node_cast_data(Node *n);
+NodeArrayType    *node_array_type_data(Node *n);
+NodeArrayLit     *node_array_lit_data(Node *n);
 NodeSizeof       *node_sizeof_data(Node *n);
 NodeAlignof      *node_alignof_data(Node *n);
 NodeAddrOf       *node_addr_of_data(Node *n);
@@ -274,6 +280,8 @@ Node *ast_new_call(struct Arena *a, SourceLoc loc, Node *callee, Node **args, si
 Node *ast_new_field(struct Arena *a, SourceLoc loc, Node *expr, const char *field);
 Node *ast_new_index(struct Arena *a, SourceLoc loc, Node *expr, Node *index);
 Node *ast_new_cast(struct Arena *a, SourceLoc loc, Node *expr, Type *target);
+Node *ast_new_array_type(struct Arena *a, SourceLoc loc, Node *elem_type, Node *count_expr);
+Node *ast_new_array_lit(struct Arena *a, SourceLoc loc, Node **elems, size_t nelems);
 Node *ast_new_sizeof(struct Arena *a, SourceLoc loc, Type *target);
 Node *ast_new_alignof(struct Arena *a, SourceLoc loc, Type *target);
 Node *ast_new_addr_of(struct Arena *a, SourceLoc loc, Node *expr);

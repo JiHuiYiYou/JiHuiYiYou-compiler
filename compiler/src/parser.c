@@ -67,12 +67,12 @@ static Node *parse_type(Parser *p) {
             base = parse_type(p);
             return ast_new_unary(p->arena, p->prev.loc, TOKEN_STAR, base); /* FIXME: properly tag as slice */
         }
-        /* [T; N] — array (simplified for now) */
+        /* [T; N] — array type */
         base = parse_type(p);
         expect(p, TOKEN_SEMICOLON, "; in array type");
-        parse_expr(p, PREC_PRIMARY); /* count */
+        Node *count_expr = parse_expr(p, PREC_PRIMARY); /* count */
         expect(p, TOKEN_RBRACKET, "] in array type");
-        return base; /* FIXME: wrap as array type */
+        return ast_new_array_type(p->arena, p->prev.loc, base, count_expr);
     }
 
     if (match(p, TOKEN_FN)) {
@@ -794,6 +794,27 @@ static Node *infix_as(Parser *p, Token token, Node *left) {
     return ast_new_cast(p->arena, token.loc, left, NULL); /* target resolved in sema */
 }
 
+/* ── array literal: [1, 2, 3] ── */
+static Node *prefix_array_lit(Parser *p, Token token) {
+    Node **elems = NULL;
+    size_t nelems = 0, cap = 0;
+
+    if (!check(p, TOKEN_RBRACKET)) {
+        do {
+            Node *elem = parse_expr(p, PREC_NONE);
+            if (nelems >= cap) {
+                cap = cap ? cap * 2 : 8;
+                Node **ne = arena_alloc(p->arena, cap * sizeof(Node *));
+                if (elems && nelems > 0) memcpy(ne, elems, nelems * sizeof(Node *));
+                elems = ne;
+            }
+            elems[nelems++] = elem;
+        } while (match(p, TOKEN_COMMA));
+    }
+    expect(p, TOKEN_RBRACKET, "]");
+    return ast_new_array_lit(p->arena, token.loc, elems, nelems);
+}
+
 /* ══════════════════════════════════════════════
    INIT + TOP-LEVEL
    ══════════════════════════════════════════════ */
@@ -814,11 +835,11 @@ static void init_rules(Parser *p) {
     register_rule(p, TOKEN_CHAR,   PREC_PRIMARY, prefix_char,   NULL);
     register_rule(p, TOKEN_BOOL,   PREC_PRIMARY, prefix_bool,   NULL);
     register_rule(p, TOKEN_IDENT,  PREC_PRIMARY, prefix_ident,  NULL);
-    register_rule(p, TOKEN_MINUS,  PREC_UNARY,   prefix_unary,  infix_binary);
+    register_rule(p, TOKEN_MINUS,  PREC_TERM,    prefix_unary,  infix_binary);
     register_rule(p, TOKEN_BANG,   PREC_UNARY,   prefix_unary,  NULL);
     register_rule(p, TOKEN_TILDE,  PREC_UNARY,   prefix_unary,  NULL);
-    register_rule(p, TOKEN_STAR,   PREC_UNARY,   prefix_unary,  infix_binary);
-    register_rule(p, TOKEN_AMP,    PREC_UNARY,   prefix_unary,  infix_binary);
+    register_rule(p, TOKEN_STAR,   PREC_FACTOR,  prefix_unary,  infix_binary);
+    register_rule(p, TOKEN_AMP,    PREC_BIT_AND, prefix_unary,  infix_binary);
     register_rule(p, TOKEN_LPAREN, PREC_PRIMARY, prefix_paren,  infix_call);
     register_rule(p, TOKEN_SIZEOF, PREC_PRIMARY, prefix_sizeof, NULL);
     register_rule(p, TOKEN_ALIGNOF,PREC_PRIMARY, prefix_alignof, NULL);
@@ -844,7 +865,7 @@ static void init_rules(Parser *p) {
     register_rule(p, TOKEN_SLASHEQ,PREC_ASSIGN,  NULL, infix_assign);
     register_rule(p, TOKEN_PERCENTEQ,PREC_ASSIGN,NULL, infix_assign);
     register_rule(p, TOKEN_DOT,    PREC_PRIMARY, NULL, infix_field);
-    register_rule(p, TOKEN_LBRACKET,PREC_PRIMARY,NULL, infix_index);
+    register_rule(p, TOKEN_LBRACKET,PREC_PRIMARY,prefix_array_lit, infix_index);
     register_rule(p, TOKEN_AS,     PREC_FACTOR,  NULL, infix_as);
 }
 

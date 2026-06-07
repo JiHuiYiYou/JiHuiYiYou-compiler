@@ -1,0 +1,23 @@
+extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn puts(s: *u8) -> i32;
+
+fn main_jhyy() -> i32 {
+    let condition = 1;
+
+    /* Test 1: if/else with void branches (no explicit value) */
+    if condition > 0 {
+        puts("positive");
+    } else {
+        puts("not positive");
+    }
+
+    /* Test 2: if/else with explicit values (should work with Bug 2 fix) */
+    let result = if condition > 0 {
+        100
+    } else {
+        200
+    };
+    printf("result = %d\n", result);
+
+    0
+}

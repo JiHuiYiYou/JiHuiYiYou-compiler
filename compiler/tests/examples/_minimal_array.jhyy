@@ -1,0 +1,12 @@
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    let arr = [10, 20, 30];
+    let x = arr[0];              /* Test A: let binding */
+
+    let tmp = x;
+    printf("A: %d\n", tmp);      /* Test B: indirect */
+
+    printf("B: %d\n", arr[0]);   /* Test C: direct */
+    0
+}

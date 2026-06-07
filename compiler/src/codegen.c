@@ -162,9 +162,31 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
     }
     case NODE_FLOAT: {
         NodeFloat *d = node_float_data(n);
-        IRVal v = ir_new_tmp(cg->ir, 'd');
-        ir_emit(cg->ir, "    %%t%d =d copy %s\n", v.id, "0.0"); /* FIXME: actual float value */
-        (void)d;
+        double val = d->value;
+        char qbe_type_char = 'd';   /* default: f64 */
+        char buf[64];
+
+        /* Check type for f32 vs f64 */
+        if (n->type && n->type->kind == KIND_PRIMITIVE && n->type->prim == PRIM_F32) {
+            qbe_type_char = 's';
+        }
+
+        /* Format the value for QBE. QBE uses d_ prefix for double, s_ for single.
+           Handle special IEEE 754 values. */
+        if (val != val) {  /* NaN */
+            snprintf(buf, sizeof(buf), "%c_nan", qbe_type_char);
+        } else if (val > 0 && val / val != 1) {  /* +Inf */
+            /* isinf check: val > DBL_MAX */
+            snprintf(buf, sizeof(buf), "%c_+inf", qbe_type_char);
+        } else if (val < 0 && val / val != 1) {  /* -Inf */
+            snprintf(buf, sizeof(buf), "%c_-inf", qbe_type_char);
+        } else {
+            /* Normal float: use %.17g for full precision round-tripping */
+            snprintf(buf, sizeof(buf), "%c_%.17g", qbe_type_char, val);
+        }
+
+        IRVal v = ir_new_tmp(cg->ir, qbe_type_char);
+        ir_emit(cg->ir, "    %%t%d =%c copy %s\n", v.id, qbe_type_char, buf);
         return v;
     }
     case NODE_STRING: {
@@ -382,12 +404,20 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         if (d->else_body) {
             IRVal else_val = cg_expr(cg, d->else_body);
             int else_returns = body_returns(d->else_body);
-            if (!else_returns) ir_emit_jmp(cg->ir, merge_block);
+            IRVal else_phi_block = else_block;  /* default: use else_block as phi predecessor */
+            if (!else_returns) {
+                /* Use a trampoline block so phi always references a direct predecessor.
+                   Nested if/else would otherwise emit the jmp from an inner merge block. */
+                else_phi_block = ir_new_block(cg->ir, "ep");
+                ir_emit_jmp(cg->ir, else_phi_block);
+                ir_emit_label(cg->ir, else_phi_block);
+                ir_emit_jmp(cg->ir, merge_block);
+            }
             /* phi */
             ir_emit_label(cg->ir, merge_block);
             if (!then_returns && !else_returns) {
                 IRVal result = ir_new_tmp(cg->ir, then_val.qbe_type);
-                ir_emit_phi(cg->ir, result, 2, then_block, then_val, else_block, else_val);
+                ir_emit_phi(cg->ir, result, 2, then_block, then_val, else_phi_block, else_val);
                 return result;
             }
         } else {
@@ -618,6 +648,94 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         return v;
     }
 
+    /* ── array index: arr[i] ── */
+    case NODE_INDEX: {
+        NodeIndex *d = node_index_data(n);
+        Type *arr_type = d->expr->type;
+        if (!arr_type || (arr_type->kind != KIND_ARRAY && arr_type->kind != KIND_POINTER)) {
+            IRVal v = {0}; return v;
+        }
+        int is_array = (arr_type->kind == KIND_ARRAY);
+        Type *elem_type = is_array ? arr_type->array.elem : arr_type->pointer.elem;
+        size_t elem_size = type_size(elem_type);
+        char elem_qt = qbe_type_of(elem_type);
+
+        /* get array base address.
+           For array-typed identifiers, get the stack slot directly (don't load). */
+        IRVal base;
+        if (is_array && d->expr->kind == NODE_IDENT) {
+            NodeIdent *id = node_ident_data(d->expr);
+            int is_stack = 0;
+            base = cg_find_local(cg, id->sym, &is_stack);
+            /* base is the stack slot address */
+        } else {
+            base = cg_expr(cg, d->expr);
+        }
+        /* compute index */
+        IRVal idx = cg_expr(cg, d->index);
+
+        /* offset = index * elem_size */
+        IRVal offset = ir_new_tmp(cg->ir, 'l');
+        if (d->index->kind == NODE_INT) {
+            /* constant index: fold at compile time */
+            int64_t const_off = node_int_data(d->index)->value * (int64_t)elem_size;
+            ir_emit_copy(cg->ir, offset, const_off);
+        } else {
+            /* convert index to 64-bit for pointer arithmetic */
+            IRVal idx64 = ir_new_tmp(cg->ir, 'l');
+            if (idx.qbe_type == 'l') {
+                idx64 = idx;
+            } else {
+                ir_emit(cg->ir, "    %%t%d =l extsw %%t%d\n", idx64.id, idx.id);
+            }
+            IRVal elem_size_val = ir_new_tmp(cg->ir, 'l');
+            ir_emit_copy(cg->ir, elem_size_val, (int64_t)elem_size);
+            ir_emit_binary(cg->ir, offset, "mul", idx64, elem_size_val);
+        }
+
+        /* address = base + offset */
+        IRVal addr = ir_new_tmp(cg->ir, 'l');
+        ir_emit_binary(cg->ir, addr, "add", base, offset);
+
+        /* load from computed address */
+        IRVal result = ir_new_tmp(cg->ir, elem_qt);
+        cg_emit_load(cg, result, elem_type, addr);
+        return result;
+    }
+
+    /* ── array literal: [1, 2, 3] ── */
+    case NODE_ARRAY_LIT: {
+        NodeArrayLit *d = node_array_lit_data(n);
+        Type *arr_type = n->type;
+        if (!arr_type || arr_type->kind != KIND_ARRAY) {
+            IRVal v = {0}; return v;
+        }
+        Type *elem_type = arr_type->array.elem;
+        size_t elem_size = type_size(elem_type);
+        size_t total_size = elem_size * d->nelems;
+        if (total_size < 4) total_size = 4;
+
+        /* allocate stack space for the array */
+        IRVal slot = ir_new_tmp(cg->ir, 'l');
+        ir_emit_alloc(cg->ir, slot, (int)total_size);
+
+        /* store each element at its offset */
+        for (size_t i = 0; i < d->nelems; i++) {
+            IRVal elem_val = cg_expr(cg, d->elems[i]);
+            if (i == 0) {
+                /* offset 0: addr is just the slot */
+                cg_emit_store(cg, elem_type, elem_val, slot);
+            } else {
+                IRVal offset = ir_new_tmp(cg->ir, 'l');
+                ir_emit_copy(cg->ir, offset, (int64_t)(i * elem_size));
+                IRVal addr = ir_new_tmp(cg->ir, 'l');
+                ir_emit_binary(cg->ir, addr, "add", slot, offset);
+                cg_emit_store(cg, elem_type, elem_val, addr);
+            }
+        }
+        return slot;
+    }
+
     /* ── field access with pointer auto-deref ── */
     case NODE_FIELD: {
         NodeField *d = node_field_data(n);
@@ -686,17 +804,24 @@ static void cg_stmt(CGContext *cg, Node *n) {
     switch (n->kind) {
     case NODE_LET: {
         NodeLet *d = node_let_data(n);
-        IRVal init_val = cg_expr(cg, d->init);
+        int is_array = (d->sym->type && d->sym->type->kind == KIND_ARRAY);
 
-        if (d->is_mutable) {
-            /* allocate stack slot */
-            int size = (int)type_size(d->sym->type);
-            if (size < 4) size = 4;
-            IRVal slot = ir_new_tmp(cg->ir, 'l');
-            ir_emit_alloc(cg->ir, slot, size);
-            cg_emit_store(cg, d->sym->type, init_val, slot);
-            cg_add_local(cg, d->sym, slot, 1);
+        if (d->is_mutable || is_array) {
+            /* For array literal init, use its slot directly (no double alloc) */
+            if (is_array && d->init && d->init->kind == NODE_ARRAY_LIT) {
+                IRVal init_val = cg_expr(cg, d->init);
+                cg_add_local(cg, d->sym, init_val, 1);
+            } else {
+                IRVal init_val = cg_expr(cg, d->init);
+                int size = (int)type_size(d->sym->type);
+                if (size < 4) size = 4;
+                IRVal slot = ir_new_tmp(cg->ir, 'l');
+                ir_emit_alloc(cg->ir, slot, size);
+                cg_emit_store(cg, d->sym->type, init_val, slot);
+                cg_add_local(cg, d->sym, slot, 1);
+            }
         } else {
+            IRVal init_val = cg_expr(cg, d->init);
             cg_add_local(cg, d->sym, init_val, 0);
         }
         break;
@@ -717,6 +842,47 @@ static void cg_stmt(CGContext *cg, Node *n) {
             IRVal slot = cg_find_local(cg, id->sym, &is_stack);
             if (is_stack) {
                 cg_emit_store(cg, d->target->type, val, slot);
+            }
+        } else if (d->target->kind == NODE_INDEX) {
+            /* arr[i] = value */
+            NodeIndex *idx = node_index_data(d->target);
+            Type *arr_type = idx->expr->type;
+            if (arr_type && (arr_type->kind == KIND_ARRAY || arr_type->kind == KIND_POINTER)) {
+                int is_array = (arr_type->kind == KIND_ARRAY);
+                Type *elem_type = is_array ? arr_type->array.elem : arr_type->pointer.elem;
+                size_t elem_size = type_size(elem_type);
+
+                IRVal base;
+                if (is_array && idx->expr->kind == NODE_IDENT) {
+                    NodeIdent *id = node_ident_data(idx->expr);
+                    int is_stack = 0;
+                    base = cg_find_local(cg, id->sym, &is_stack);
+                } else {
+                    base = cg_expr(cg, idx->expr);
+                }
+                IRVal idx_val = cg_expr(cg, idx->index);
+
+                /* offset = index * elem_size */
+                IRVal offset = ir_new_tmp(cg->ir, 'l');
+                if (idx->index->kind == NODE_INT) {
+                    int64_t const_off = node_int_data(idx->index)->value * (int64_t)elem_size;
+                    ir_emit_copy(cg->ir, offset, const_off);
+                } else {
+                    IRVal idx64 = ir_new_tmp(cg->ir, 'l');
+                    if (idx_val.qbe_type == 'l') {
+                        idx64 = idx_val;
+                    } else {
+                        ir_emit(cg->ir, "    %%t%d =l extsw %%t%d\n", idx64.id, idx_val.id);
+                    }
+                    IRVal es = ir_new_tmp(cg->ir, 'l');
+                    ir_emit_copy(cg->ir, es, (int64_t)elem_size);
+                    ir_emit_binary(cg->ir, offset, "mul", idx64, es);
+                }
+
+                /* address = base + offset */
+                IRVal addr = ir_new_tmp(cg->ir, 'l');
+                ir_emit_binary(cg->ir, addr, "add", base, offset);
+                cg_emit_store(cg, elem_type, val, addr);
             }
         }
         break;

@@ -1,0 +1,11 @@
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    let mut val = 50;
+    let mut p = &val;
+
+    /* Case 1: deref in binary - should work */
+    let x = *p - 20;
+    printf("x = %d\n", x);
+    0
+}

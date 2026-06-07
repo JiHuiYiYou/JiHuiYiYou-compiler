@@ -1,0 +1,21 @@
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    let mut val = 50;
+    let mut p = &val;
+
+    /* Bug 1: *ptr = *ptr - expr should work as single statement */
+    *p = *p - 20;
+
+    printf("val after *p = *p - 20: %d\n", val);
+
+    /* Also test the two-step workaround to confirm logic */
+    let mut val2 = 50;
+    let mut p2 = &val2;
+    let x = *p2;
+    let y = x - 20;
+    *p2 = y;
+    printf("val2 after workaround: %d\n", val2);
+
+    0
+}

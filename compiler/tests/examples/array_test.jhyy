@@ -1,0 +1,33 @@
+extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn puts(s: *u8) -> i32;
+
+fn main_jhyy() -> i32 {
+    puts("=== Array Test ===");
+
+    /* Test 1: array literal */
+    let arr = [10, 20, 30, 40, 50];
+    printf("arr[0] = %d\n", arr[0]);
+    printf("arr[2] = %d\n", arr[2]);
+    printf("arr[4] = %d\n", arr[4]);
+
+    /* Test 2: array subscript write (mutable) */
+    let mut arr2 = [1, 2, 3];
+    printf("arr2[0] before: %d\n", arr2[0]);
+    arr2[0] = 100;
+    printf("arr2[0] after: %d\n", arr2[0]);
+
+    /* Test 3: constant index */
+    let mut arr3 = [5, 10, 15];
+    let x = arr3[0];
+    let y = arr3[1];
+    let z = arr3[2];
+    printf("sum = %d\n", x + y + z);
+
+    /* Test 4: array with type annotation */
+    let mut typed: [i32; 3] = [7, 8, 9];
+    typed[1] = 99;
+    printf("typed[1] = %d\n", typed[1]);
+
+    puts("All array tests passed!");
+    0
+}

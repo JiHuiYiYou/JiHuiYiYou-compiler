@@ -1,0 +1,17 @@
+extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn puts(s: *u8) -> i32;
+
+fn main_jhyy() -> i32 {
+    puts("Float literal test (hardware check)");
+
+    /* Verify float arithmetic generates correct IL.
+       QBE output will show actual float values. */
+    let a = 3.14;
+    let b = 2.5;
+
+    /* Use integer arithmetic with float casts to verify values */
+    /* Since we can't printf floats yet, just verify compilation */
+
+    puts("Float test compiled OK");
+    0
+}

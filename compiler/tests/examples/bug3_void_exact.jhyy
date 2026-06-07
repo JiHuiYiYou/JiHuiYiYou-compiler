@@ -1,0 +1,29 @@
+extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn puts(s: *u8) -> i32;
+
+fn main_jhyy() -> i32 {
+    let mut x = 1;
+
+    /* void if/else as statement */
+    if x > 0 {
+        x = 100;
+    } else {
+        x = 200;
+    }
+
+    printf("x = %d\n", x);
+
+    /* void if/else inside while — the original dungeon game workaround scenario */
+    let mut count = 3;
+    while count > 0 {
+        if count > 1 {
+            puts("count > 1");
+            count = count - 1;
+        } else {
+            puts("count == 1");
+            count = count - 1;
+        }
+    }
+
+    0
+}

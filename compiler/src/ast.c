@@ -33,6 +33,8 @@ ACCESSOR(node_call_data, NodeCall)
 ACCESSOR(node_field_data, NodeField)
 ACCESSOR(node_index_data, NodeIndex)
 ACCESSOR(node_cast_data, NodeCast)
+ACCESSOR(node_array_type_data, NodeArrayType)
+ACCESSOR(node_array_lit_data, NodeArrayLit)
 ACCESSOR(node_sizeof_data, NodeSizeof)
 ACCESSOR(node_alignof_data, NodeAlignof)
 ACCESSOR(node_addr_of_data, NodeAddrOf)
@@ -151,6 +153,22 @@ Node *ast_new_cast(Arena *a, SourceLoc loc, Node *expr, Type *target) {
     NodeCast *d = node_cast_data(n);
     d->expr = expr;
     d->target_type = target;
+    return n;
+}
+
+Node *ast_new_array_type(Arena *a, SourceLoc loc, Node *elem_type, Node *count_expr) {
+    Node *n = new_node(a, NODE_ARRAY_TYPE, loc, sizeof(NodeArrayType));
+    NodeArrayType *d = node_array_type_data(n);
+    d->elem_type = elem_type;
+    d->count_expr = count_expr;
+    return n;
+}
+
+Node *ast_new_array_lit(Arena *a, SourceLoc loc, Node **elems, size_t nelems) {
+    Node *n = new_node(a, NODE_ARRAY_LIT, loc, sizeof(NodeArrayLit));
+    NodeArrayLit *d = node_array_lit_data(n);
+    d->elems = elems;
+    d->nelems = nelems;
     return n;
 }
 
@@ -394,6 +412,8 @@ const char *node_kind_name(NodeKind kind) {
     case NODE_FIELD:         return "field";
     case NODE_INDEX:         return "index";
     case NODE_CAST:          return "cast";
+    case NODE_ARRAY_TYPE:   return "array_type";
+    case NODE_ARRAY_LIT:    return "array_lit";
     case NODE_SIZEOF:        return "sizeof";
     case NODE_ALIGNOF:       return "alignof";
     case NODE_ADDR_OF:       return "addr_of";

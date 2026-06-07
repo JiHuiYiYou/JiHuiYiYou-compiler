@@ -167,7 +167,14 @@ void ir_emit_call(IRBuf *ir, IRVal dst, const char *fn, IRVal *args, int n) {
 }
 
 void ir_emit_alloc(IRBuf *ir, IRVal dst, int size) {
-    ir_emit(ir, "    %%t%d =l alloc%d %d\n", dst.id, size, size);
+    /* QBE only supports alignment 4, 8, or 16. Round up size to alignment. */
+    int align;
+    if (size <= 4) align = 4;
+    else if (size <= 8) align = 8;
+    else align = 16;
+    /* Round size up to alignment boundary */
+    int aligned_size = (size + align - 1) & ~(align - 1);
+    ir_emit(ir, "    %%t%d =l alloc%d %d\n", dst.id, align, aligned_size);
 }
 
 void ir_emit_store(IRBuf *ir, char qbe_type, IRVal val, IRVal addr) {

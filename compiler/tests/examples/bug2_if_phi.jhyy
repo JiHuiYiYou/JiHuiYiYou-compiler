@@ -1,0 +1,24 @@
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    let mut x = 10;
+
+    /* Test 1: simple if/else — should work */
+    if x > 5 {
+        printf("x > 5\n", 0);
+    } else {
+        printf("x <= 5\n", 0);
+    }
+
+    /* Test 2: if/else if/else chain — phi label bug */
+    let result = if x > 20 {
+        100
+    } else if x > 10 {
+        200
+    } else {
+        300
+    };
+    printf("result = %d\n", result);
+
+    0
+}

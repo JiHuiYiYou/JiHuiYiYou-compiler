@@ -68,6 +68,17 @@ static Type *resolve_type_node(SemaContext *ctx, Node *tn) {
         }
         break;
     }
+    case NODE_ARRAY_TYPE: {
+        NodeArrayType *at = node_array_type_data(tn);
+        Type *elem = resolve_type_node(ctx, at->elem_type);
+        int64_t count = 0;
+        if (at->count_expr->kind == NODE_INT) {
+            count = node_int_data(at->count_expr)->value;
+        } else {
+            sema_error(ctx, tn->loc, "array size must be an integer constant");
+        }
+        return type_array(ctx->arena, elem, (size_t)count);
+    }
     default: break;
     }
 
@@ -218,6 +229,10 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
     case NODE_CALL: {
         NodeCall *d = node_call_data(n);
         Type *callee_type = infer_type(ctx, d->callee);
+        /* infer types for all arguments (needed for nested expressions like arr[i]) */
+        for (size_t i = 0; i < d->nargs; i++) {
+            infer_type(ctx, d->args[i]);
+        }
         if (callee_type->kind == KIND_FUNC) {
             n->type = callee_type->func.ret ? callee_type->func.ret : type_void();
         } else {
@@ -255,6 +270,41 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
             sema_error(ctx, n->loc, "cannot access field on type %s", type_to_string(struct_type));
         }
         n->type = type_void();
+        return n->type;
+    }
+
+    /* ── array index access ── */
+    case NODE_INDEX: {
+        NodeIndex *d = node_index_data(n);
+        Type *arr_type = infer_type(ctx, d->expr);
+        infer_type(ctx, d->index); /* check index expression */
+        if (arr_type->kind == KIND_ARRAY) {
+            n->type = arr_type->array.elem;
+        } else if (arr_type->kind == KIND_POINTER) {
+            /* pointer arithmetic: ptr[i] returns *elem */
+            n->type = arr_type->pointer.elem;
+        } else {
+            sema_error(ctx, n->loc, "cannot index into type %s", type_to_string(arr_type));
+            n->type = type_void();
+        }
+        return n->type;
+    }
+
+    /* ── array literal ── */
+    case NODE_ARRAY_LIT: {
+        NodeArrayLit *d = node_array_lit_data(n);
+        Type *elem_type = NULL;
+        for (size_t i = 0; i < d->nelems; i++) {
+            Type *et = infer_type(ctx, d->elems[i]);
+            if (i == 0) {
+                elem_type = et;
+            } else if (!type_eq(elem_type, et)) {
+                sema_error(ctx, n->loc, "array literal elements must have same type: %s vs %s",
+                           type_to_string(elem_type), type_to_string(et));
+            }
+        }
+        if (!elem_type) elem_type = type_void();
+        n->type = type_array(ctx->arena, elem_type, d->nelems);
         return n->type;
     }
 
