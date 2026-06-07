@@ -1,0 +1,10 @@
+extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn scanf(fmt: *u8, ptr: *i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    printf("请输入一个数字: ", 0);
+    let mut x = 0;
+    scanf("%d", &x);
+    printf("你输入的是: %d\n", x);
+    0
+}

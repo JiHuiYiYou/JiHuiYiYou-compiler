@@ -1,0 +1,12 @@
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn add_one(p: *i32) -> i32 {
+    *p + 1
+}
+
+fn main_jhyy() -> i32 {
+    let mut val = 41;
+    let result = add_one(&val);
+    printf("result: %d\n", result);
+    0
+}

@@ -1,0 +1,13 @@
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn test_deref(p: *i32) -> i32 {
+    let x = *p;
+    x
+}
+
+fn main_jhyy() -> i32 {
+    let mut val = 42;
+    let result = test_deref(&val);
+    printf("deref result: %d\n", result);
+    0
+}

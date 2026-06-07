@@ -6,13 +6,19 @@
             "type": "shell",
             "command": "C:/msys64/ucrt64/bin/gcc.exe",
             "args": [
-                "-std=c11", "-Wall", "-Wextra",
+                "-std=c11",
+                "-Wall",
+                "-Wextra",
                 "compiler/src/*.c",
-                "-o", "compiler/build/bin/jhyy.exe",
-                "-I", "compiler/src"
+                "-o",
+                "compiler/build/bin/jhyy.exe",
+                "-I",
+                "compiler/src"
             ],
             "group": "build",
-            "problemMatcher": ["$gcc"],
+            "problemMatcher": [
+                "$gcc"
+            ],
             "detail": "Compile the JHYY compiler from C source"
         },
         {
@@ -25,7 +31,7 @@
             ],
             "group": {
                 "kind": "build",
-                "isDefault": true
+                "isDefault": false
             },
             "presentation": {
                 "reveal": "always",
@@ -67,6 +73,29 @@
             },
             "problemMatcher": [],
             "detail": "Compile .jhyy to .il only (no linking)"
+        },
+        {
+            "type": "cppbuild",
+            "label": "C/C++: g++.exe 生成活动文件",
+            "command": "C:\\msys64\\ucrt64\\bin\\g++.exe",
+            "args": [
+                "-fdiagnostics-color=always",
+                "-g",
+                "${file}",
+                "-o",
+                "${fileDirname}\\${fileBasenameNoExtension}.exe"
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "调试器生成的任务。"
         }
     ]
 }

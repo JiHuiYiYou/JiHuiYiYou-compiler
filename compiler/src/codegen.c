@@ -838,7 +838,10 @@ static void cg_func(IRBuf *ir, Node *n) {
                     ? qbe_type_of(fd->sym->type->func.ret) : 'w';
 
     /* emit header */
-    ir_emit(ir, "export function %c $%s(", ret_qt, fd->sym->name);
+    if (ret_qt)
+        ir_emit(ir, "export function %c $%s(", ret_qt, fd->sym->name);
+    else
+        ir_emit(ir, "export function $%s(", fd->sym->name);
     for (size_t i = 0; i < fd->nparams; i++) {
         if (i > 0) ir_emit(ir, ", ");
         Type *pt = fd->params[i].sym->type;

@@ -1,0 +1,14 @@
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn dec(p: *i32) {
+    let v = *p;
+    let one = 1;
+    *p = v - one;
+}
+
+fn main_jhyy() -> i32 {
+    let mut val = 42;
+    dec(&val);
+    printf("val: %d\n", val);
+    0
+}

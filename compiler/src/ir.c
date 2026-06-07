@@ -153,7 +153,8 @@ void ir_emit_copy(IRBuf *ir, IRVal dst, int64_t val) {
 }
 
 void ir_emit_call(IRBuf *ir, IRVal dst, const char *fn, IRVal *args, int n) {
-    ir_emit(ir, "    %%t%d =%c call $%s(", dst.id, dst.qbe_type, fn);
+    char qt = dst.qbe_type ? dst.qbe_type : 'w';
+    ir_emit(ir, "    %%t%d =%c call $%s(", dst.id, qt, fn);
     for (int i = 0; i < n; i++) {
         if (i > 0) ir_emit(ir, ", ");
         if (args[i].kind == IRVAL_STR) {
@@ -182,7 +183,8 @@ void ir_emit_load(IRBuf *ir, IRVal dst, char qbe_type, IRVal addr) {
 }
 
 void ir_emit_phi(IRBuf *ir, IRVal dst, int npairs, ...) {
-    ir_emit(ir, "    %%t%d =%c phi ", dst.id, dst.qbe_type);
+    char qt = dst.qbe_type ? dst.qbe_type : 'w';
+    ir_emit(ir, "    %%t%d =%c phi ", dst.id, qt);
     va_list ap; va_start(ap, npairs);
     for (int i = 0; i < npairs; i++) {
         if (i > 0) ir_emit(ir, ", ");
@@ -240,7 +242,10 @@ void ir_emit_data_string(IRBuf *ir, IRVal id, const char *str, size_t len) {
 }
 
 void ir_emit_func_header(IRBuf *ir, const char *name, char ret_type, ...) {
-    ir_emit(ir, "export function %c $%s(", ret_type, name);
+    if (ret_type)
+        ir_emit(ir, "export function %c $%s(", ret_type, name);
+    else
+        ir_emit(ir, "export function $%s(", name);
     va_list ap; va_start(ap, ret_type);
     int first = 1;
     for (;;) {

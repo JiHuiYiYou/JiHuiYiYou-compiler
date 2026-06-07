@@ -1,0 +1,226 @@
+// =====================
+// FFI
+// =====================
+extern fn puts(s: *u8) -> i32;
+extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn scanf(fmt: *u8, ptr: *i32) -> i32;
+
+// =====================
+// 随机数 (LCG)
+// =====================
+fn randRange(seed: *i32, min: i32, max: i32) -> i32 {
+    let s = *seed;
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    *seed = s;
+    let range = max - min + 1;
+    min + (s % range)
+}
+
+// =====================
+// 工具
+// =====================
+fn clamp(x: i32, min: i32, max: i32) -> i32 {
+    if x < min { return min; }
+    if x > max { return max; }
+    x
+}
+
+// =====================
+// 怪物数据 (tag: 0=Slime, 1=Skeleton, 2=Dragon)
+// =====================
+fn monsterHp(tag: i32) -> i32 {
+    if tag == 0 { return 8; }
+    if tag == 1 { return 14; }
+    30
+}
+fn monsterAtk(tag: i32) -> i32 {
+    if tag == 0 { return 2; }
+    if tag == 1 { return 4; }
+    7
+}
+fn monsterGold(tag: i32) -> i32 {
+    if tag == 0 { return 5; }
+    if tag == 1 { return 10; }
+    50
+}
+
+// =====================
+// 战斗系统
+// =====================
+fn battle(hp: *i32, maxHp: i32, atk: i32, potions: *i32,
+           mHp: *i32, mAtk: i32, mGold: i32,
+           seed: *i32, state: *i32, gold: *i32) {
+    while *hp > 0 {
+        printf("你的 HP: %d/%d\n", *hp, maxHp);
+        printf("怪物 HP: %d\n", *mHp);
+        puts("1. 攻击");
+        puts("2. 喝药 (+6 HP)");
+        puts("3. 逃跑");
+        puts("选择行动:");
+
+        let mut choice = 0;
+        scanf("%d", &choice);
+
+        // 攻击
+        if choice == 1 {
+            let dmg = atk + randRange(seed, -1, 1);
+            let curMhp = *mHp;
+            let newMhp = curMhp - dmg;
+            *mHp = newMhp;
+            printf("你造成了 %d 点伤害。\n", dmg);
+        }
+        // 喝药
+        if choice == 2 {
+            if *potions > 0 {
+                let curHp = *hp;
+                let newHp = curHp + 6;
+                *hp = newHp;
+                *hp = clamp(*hp, 0, maxHp);
+                let curPot = *potions;
+                let newPot = curPot - 1;
+                *potions = newPot;
+                puts("你喝下一瓶药。");
+            } else {
+                puts("你没有药水！");
+            }
+        }
+        // 逃跑
+        if choice == 3 {
+            let escape = randRange(seed, 0, 1);
+            if escape == 0 {
+                puts("逃跑失败！");
+            } else {
+                puts("你逃跑了。");
+            }
+            if escape != 0 { return; }
+        }
+
+        // 检查怪物是否被击杀
+        if *mHp <= 0 {
+            puts("你击败了怪物！");
+            let newGold = *gold + mGold;
+            *gold = newGold;
+            return;
+        }
+
+        // 怪物反击
+        let dmg = mAtk + randRange(seed, -1, 1);
+        let curHp2 = *hp;
+        let newHp2 = curHp2 - dmg;
+        *hp = newHp2;
+        printf("怪物造成了 %d 点伤害。\n", dmg);
+    }
+
+    // 玩家死亡
+    *state = 2;
+}
+
+// =====================
+// 房间描述
+// =====================
+fn describeRoom(tag: i32) {
+    if tag == 0 { puts("你站在地牢入口。"); }
+    if tag == 1 { puts("一只怪物冲了出来！"); }
+    if tag == 2 { puts("你发现了治疗泉水。"); }
+    if tag == 3 { puts("你找到了一个宝箱。"); }
+    if tag == 4 { puts("前方是最终 BOSS 房间。"); }
+    if tag == 5 { puts("你看到了出口。"); }
+}
+
+// roomTag: 0=Start, 1=Monster, 2=Heal, 3=Treasure, 4=Boss, 5=Exit
+fn processRoom(hp: *i32, maxHp: i32, atk: i32, potions: *i32,
+               seed: *i32, state: *i32, gold: *i32, roomTag: i32) {
+    describeRoom(roomTag);
+
+    // 治疗
+    if roomTag == 2 {
+        let curHp = *hp;
+        let healHp = curHp + 8;
+        *hp = healHp;
+        *hp = clamp(*hp, 0, maxHp);
+        puts("你恢复了生命值。");
+    }
+    // 宝箱
+    if roomTag == 3 {
+        let curGold = *gold;
+        let newG = curGold + 20;
+        *gold = newG;
+        let curPot = *potions;
+        let newPot2 = curPot + 1;
+        *potions = newPot2;
+        puts("获得金币和药水。");
+    }
+    // 普通怪物
+    if roomTag == 1 {
+        let mTag = 0;
+        let mHp = monsterHp(mTag);
+        let mAtk = monsterAtk(mTag);
+        let mGold = monsterGold(mTag);
+        let mut mHpVar = mHp;
+        battle(hp, maxHp, atk, potions, &mHpVar, mAtk, mGold, seed, state, gold);
+    }
+    // BOSS
+    if roomTag == 4 {
+        let mTag = 2;
+        let mHp = monsterHp(mTag);
+        let mAtk = monsterAtk(mTag);
+        let mGold = monsterGold(mTag);
+        let mut mHpVar = mHp;
+        battle(hp, maxHp, atk, potions, &mHpVar, mAtk, mGold, seed, state, gold);
+    }
+    // 出口
+    if roomTag == 5 {
+        *state = 1;
+    }
+}
+
+// =====================
+// 主函数
+// =====================
+fn main_jhyy() -> i32 {
+    puts("=== 地下城文字 Rogue ===");
+
+    let mut hp = 20;
+    let maxHp = 20;
+    let atk = 4;
+    let mut potions = 2;
+    let mut state = 0;
+    let mut roomIndex = 0;
+    let mut gold = 0;
+    let mut seed = 12345;
+
+    while state == 0 {
+        let roomTag = match roomIndex {
+            0 => 0,
+            1 => 2,
+            2 => 1,
+            3 => 3,
+            4 => 4,
+            _ => 5
+        };
+
+        processRoom(&hp, maxHp, atk, &potions, &seed, &state, &gold, roomTag);
+
+        if state == 0 {
+            puts("前往下一层？(1=是 0=退出):");
+            let mut go = 0;
+            scanf("%d", &go);
+            if go == 0 {
+                state = 1;
+                0
+            } else {
+                roomIndex = roomIndex + 1;
+                0
+            }
+        }
+    }
+
+    if state == 1 {
+        puts("你成功逃出地牢！");
+    } else {
+        puts("你死在了地牢深处。");
+    }
+
+    printf("最终金币：%d\n", gold);
+    0
+}
