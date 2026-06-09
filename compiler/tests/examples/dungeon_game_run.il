@@ -231,9 +231,11 @@ export function $battle(l %hp, w %maxHp, w %atk, l %potions, l %mHp, w %mAtk, w 
 @else40
     %t106 =l copy $str9
     %t107 =w call $puts(l %t106)
+    jmp @ep42
+@ep42
     jmp @merge41
 @merge41
-    %t108 =w phi @then39 %t105, @else40 %t107
+    %t108 =w phi @then39 %t105, @ep42 %t107
     jmp @merge38
 @else37
     jmp @merge38
@@ -241,50 +243,52 @@ export function $battle(l %hp, w %maxHp, w %atk, l %potions, l %mHp, w %mAtk, w 
     %t109 =w loadw %t72
     %t110 =w copy 3
     %t111 =w ceqw %t109, %t110
-    jnz %t111, @then42, @else43
-@then42
+    jnz %t111, @then43, @else44
+@then43
     %t112 =w copy 0
     %t113 =w copy 1
     %t114 =w call $randRange(l %t51, w %t112, w %t113)
     %t115 =w copy 0
     %t116 =w ceqw %t114, %t115
-    jnz %t116, @then45, @else46
-@then45
+    jnz %t116, @then46, @else47
+@then46
     %t117 =l copy $str10
     %t118 =w call $puts(l %t117)
-    jmp @merge47
-@else46
+    jmp @merge48
+@else47
     %t119 =l copy $str11
     %t120 =w call $puts(l %t119)
-    jmp @merge47
-@merge47
-    %t121 =w phi @then45 %t118, @else46 %t120
+    jmp @ep49
+@ep49
+    jmp @merge48
+@merge48
+    %t121 =w phi @then46 %t118, @ep49 %t120
     %t122 =w copy 0
     %t123 =w cnew %t114, %t122
-    jnz %t123, @then48, @else49
-@then48
+    jnz %t123, @then50, @else51
+@then50
     ret
-@else49
-    jmp @merge50
-@merge50
-    jmp @merge44
-@else43
-    jmp @merge44
-@merge44
+@else51
+    jmp @merge52
+@merge52
+    jmp @merge45
+@else44
+    jmp @merge45
+@merge45
     %t124 =w loadw %t48
     %t125 =w copy 0
     %t126 =w cslew %t124, %t125
-    jnz %t126, @then51, @else52
-@then51
+    jnz %t126, @then53, @else54
+@then53
     %t127 =l copy $str12
     %t128 =w call $puts(l %t127)
     %t129 =w loadw %t53
     %t130 =w add %t129, %t50
     storew %t130, %t53
     ret
-@else52
-    jmp @merge53
-@merge53
+@else54
+    jmp @merge55
+@merge55
     %t131 =w copy 1
     %t133 =w copy 0
     %t132 =w sub %t133, %t131
@@ -304,73 +308,73 @@ export function $battle(l %hp, w %maxHp, w %atk, l %potions, l %mHp, w %mAtk, w 
 }
 
 export function $describeRoom(w %tag) {
-@start54
+@start56
     %t142 =w copy %tag
     %t143 =w copy 0
     %t144 =w ceqw %t142, %t143
-    jnz %t144, @then55, @else56
-@then55
+    jnz %t144, @then57, @else58
+@then57
     %t145 =l copy $str14
     %t146 =w call $puts(l %t145)
-    jmp @merge57
-@else56
-    jmp @merge57
-@merge57
+    jmp @merge59
+@else58
+    jmp @merge59
+@merge59
     %t147 =w copy 1
     %t148 =w ceqw %t142, %t147
-    jnz %t148, @then58, @else59
-@then58
+    jnz %t148, @then60, @else61
+@then60
     %t149 =l copy $str15
     %t150 =w call $puts(l %t149)
-    jmp @merge60
-@else59
-    jmp @merge60
-@merge60
+    jmp @merge62
+@else61
+    jmp @merge62
+@merge62
     %t151 =w copy 2
     %t152 =w ceqw %t142, %t151
-    jnz %t152, @then61, @else62
-@then61
+    jnz %t152, @then63, @else64
+@then63
     %t153 =l copy $str16
     %t154 =w call $puts(l %t153)
-    jmp @merge63
-@else62
-    jmp @merge63
-@merge63
+    jmp @merge65
+@else64
+    jmp @merge65
+@merge65
     %t155 =w copy 3
     %t156 =w ceqw %t142, %t155
-    jnz %t156, @then64, @else65
-@then64
+    jnz %t156, @then66, @else67
+@then66
     %t157 =l copy $str17
     %t158 =w call $puts(l %t157)
-    jmp @merge66
-@else65
-    jmp @merge66
-@merge66
+    jmp @merge68
+@else67
+    jmp @merge68
+@merge68
     %t159 =w copy 4
     %t160 =w ceqw %t142, %t159
-    jnz %t160, @then67, @else68
-@then67
+    jnz %t160, @then69, @else70
+@then69
     %t161 =l copy $str18
     %t162 =w call $puts(l %t161)
-    jmp @merge69
-@else68
-    jmp @merge69
-@merge69
+    jmp @merge71
+@else70
+    jmp @merge71
+@merge71
     %t163 =w copy 5
     %t164 =w ceqw %t142, %t163
-    jnz %t164, @then70, @else71
-@then70
+    jnz %t164, @then72, @else73
+@then72
     %t165 =l copy $str19
     %t166 =w call $puts(l %t165)
-    jmp @merge72
-@else71
-    jmp @merge72
-@merge72
+    jmp @merge74
+@else73
+    jmp @merge74
+@merge74
     ret
 }
 
 export function $processRoom(l %hp, w %maxHp, w %atk, l %potions, l %seed, l %state, l %gold, w %roomTag) {
-@start73
+@start75
     %t167 =l copy %hp
     %t168 =w copy %maxHp
     %t169 =w copy %atk
@@ -382,8 +386,8 @@ export function $processRoom(l %hp, w %maxHp, w %atk, l %potions, l %seed, l %st
     %t175 =w call $describeRoom(w %t174)
     %t176 =w copy 2
     %t177 =w ceqw %t174, %t176
-    jnz %t177, @then74, @else75
-@then74
+    jnz %t177, @then76, @else77
+@then76
     %t178 =w loadw %t167
     %t179 =w copy 8
     %t180 =w add %t178, %t179
@@ -394,14 +398,14 @@ export function $processRoom(l %hp, w %maxHp, w %atk, l %potions, l %seed, l %st
     storew %t183, %t167
     %t184 =l copy $str20
     %t185 =w call $puts(l %t184)
-    jmp @merge76
-@else75
-    jmp @merge76
-@merge76
+    jmp @merge78
+@else77
+    jmp @merge78
+@merge78
     %t186 =w copy 3
     %t187 =w ceqw %t174, %t186
-    jnz %t187, @then77, @else78
-@then77
+    jnz %t187, @then79, @else80
+@then79
     %t188 =w loadw %t173
     %t189 =w copy 20
     %t190 =w add %t188, %t189
@@ -412,14 +416,14 @@ export function $processRoom(l %hp, w %maxHp, w %atk, l %potions, l %seed, l %st
     storew %t193, %t170
     %t194 =l copy $str21
     %t195 =w call $puts(l %t194)
-    jmp @merge79
-@else78
-    jmp @merge79
-@merge79
+    jmp @merge81
+@else80
+    jmp @merge81
+@merge81
     %t196 =w copy 1
     %t197 =w ceqw %t174, %t196
-    jnz %t197, @then80, @else81
-@then80
+    jnz %t197, @then82, @else83
+@then82
     %t198 =w copy 0
     %t199 =w call $monsterHp(w %t198)
     %t200 =w call $monsterAtk(w %t198)
@@ -428,14 +432,14 @@ export function $processRoom(l %hp, w %maxHp, w %atk, l %potions, l %seed, l %st
     storew %t199, %t202
     %t203 =l copy 0
     %t204 =w call $battle(l %t167, w %t168, w %t169, l %t170, l %t202, w %t200, w %t201, l %t171, l %t172, l %t173)
-    jmp @merge82
-@else81
-    jmp @merge82
-@merge82
+    jmp @merge84
+@else83
+    jmp @merge84
+@merge84
     %t205 =w copy 4
     %t206 =w ceqw %t174, %t205
-    jnz %t206, @then83, @else84
-@then83
+    jnz %t206, @then85, @else86
+@then85
     %t207 =w copy 2
     %t208 =w call $monsterHp(w %t207)
     %t209 =w call $monsterAtk(w %t207)
@@ -444,25 +448,25 @@ export function $processRoom(l %hp, w %maxHp, w %atk, l %potions, l %seed, l %st
     storew %t208, %t211
     %t212 =l copy 0
     %t213 =w call $battle(l %t167, w %t168, w %t169, l %t170, l %t211, w %t209, w %t210, l %t171, l %t172, l %t173)
-    jmp @merge85
-@else84
-    jmp @merge85
-@merge85
+    jmp @merge87
+@else86
+    jmp @merge87
+@merge87
     %t214 =w copy 5
     %t215 =w ceqw %t174, %t214
-    jnz %t215, @then86, @else87
-@then86
+    jnz %t215, @then88, @else89
+@then88
     %t216 =w copy 1
     storew %t216, %t172
-    jmp @merge88
-@else87
-    jmp @merge88
-@merge88
+    jmp @merge90
+@else89
+    jmp @merge90
+@merge90
     ret
 }
 
 export function w $main_jhyy() {
-@start89
+@start91
     %t217 =l copy $str22
     %t218 =w call $puts(l %t217)
     %t219 =w copy 20
@@ -485,55 +489,55 @@ export function w $main_jhyy() {
     %t231 =w copy 12345
     %t232 =l alloc4 4
     storew %t231, %t232
-    jmp @loop90
-@loop90
+    jmp @loop92
+@loop92
     %t233 =w loadw %t226
     %t234 =w copy 0
     %t235 =w ceqw %t233, %t234
-    jnz %t235, @body91, @exit92
-@body91
+    jnz %t235, @body93, @exit94
+@body93
     %t236 =w loadw %t228
     %t237 =w copy 0
     %t238 =w ceqw %t236, %t237
-    jnz %t238, @arm94, @next95
-@arm94
+    jnz %t238, @arm96, @next97
+@arm96
     %t239 =w copy 0
-    jmp @merge93
-@next95
+    jmp @merge95
+@next97
     %t240 =w copy 1
     %t241 =w ceqw %t236, %t240
-    jnz %t241, @arm96, @next97
-@arm96
+    jnz %t241, @arm98, @next99
+@arm98
     %t242 =w copy 2
-    jmp @merge93
-@next97
+    jmp @merge95
+@next99
     %t243 =w copy 2
     %t244 =w ceqw %t236, %t243
-    jnz %t244, @arm98, @next99
-@arm98
+    jnz %t244, @arm100, @next101
+@arm100
     %t245 =w copy 1
-    jmp @merge93
-@next99
+    jmp @merge95
+@next101
     %t246 =w copy 3
     %t247 =w ceqw %t236, %t246
-    jnz %t247, @arm100, @next101
-@arm100
+    jnz %t247, @arm102, @next103
+@arm102
     %t248 =w copy 3
-    jmp @merge93
-@next101
+    jmp @merge95
+@next103
     %t249 =w copy 4
     %t250 =w ceqw %t236, %t249
-    jnz %t250, @arm102, @next103
-@arm102
-    %t251 =w copy 4
-    jmp @merge93
-@next103
-    jmp @arm104
+    jnz %t250, @arm104, @next105
 @arm104
+    %t251 =w copy 4
+    jmp @merge95
+@next105
+    jmp @arm106
+@arm106
     %t252 =w copy 5
-    jmp @merge93
-@merge93
-    %t253 =w phi @arm94 %t239, @arm96 %t242, @arm98 %t245, @arm100 %t248, @arm102 %t251, @arm104 %t252
+    jmp @merge95
+@merge95
+    %t253 =w phi @arm96 %t239, @arm98 %t242, @arm100 %t245, @arm102 %t248, @arm104 %t251, @arm106 %t252
     %t254 =l copy 0
     %t255 =l copy 0
     %t256 =l copy 0
@@ -543,8 +547,8 @@ export function w $main_jhyy() {
     %t260 =w loadw %t226
     %t261 =w copy 0
     %t262 =w ceqw %t260, %t261
-    jnz %t262, @then105, @else106
-@then105
+    jnz %t262, @then107, @else108
+@then107
     %t263 =l copy $str23
     %t264 =w call $puts(l %t263)
     %t265 =w copy 0
@@ -556,41 +560,45 @@ export function w $main_jhyy() {
     %t270 =w loadw %t266
     %t271 =w copy 0
     %t272 =w ceqw %t270, %t271
-    jnz %t272, @then108, @else109
-@then108
+    jnz %t272, @then110, @else111
+@then110
     %t273 =w copy 1
     storew %t273, %t226
     %t274 =w copy 0
-    jmp @merge110
-@else109
+    jmp @merge112
+@else111
     %t275 =w loadw %t228
     %t276 =w copy 1
     %t277 =w add %t275, %t276
     storew %t277, %t228
     %t278 =w copy 0
-    jmp @merge110
-@merge110
-    %t279 =w phi @then108 %t274, @else109 %t278
-    jmp @merge107
-@else106
-    jmp @merge107
-@merge107
-    jmp @loop90
-@exit92
+    jmp @ep113
+@ep113
+    jmp @merge112
+@merge112
+    %t279 =w phi @then110 %t274, @ep113 %t278
+    jmp @merge109
+@else108
+    jmp @merge109
+@merge109
+    jmp @loop92
+@exit94
     %t280 =w loadw %t226
     %t281 =w copy 1
     %t282 =w ceqw %t280, %t281
-    jnz %t282, @then111, @else112
-@then111
+    jnz %t282, @then114, @else115
+@then114
     %t283 =l copy $str25
     %t284 =w call $puts(l %t283)
-    jmp @merge113
-@else112
+    jmp @merge116
+@else115
     %t285 =l copy $str26
     %t286 =w call $puts(l %t285)
-    jmp @merge113
-@merge113
-    %t287 =w phi @then111 %t284, @else112 %t286
+    jmp @ep117
+@ep117
+    jmp @merge116
+@merge116
+    %t287 =w phi @then114 %t284, @ep117 %t286
     %t288 =l copy $str27
     %t289 =w loadw %t230
     %t290 =w call $printf(l %t288, w %t289)

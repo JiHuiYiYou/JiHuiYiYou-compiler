@@ -1,0 +1,15 @@
+// FFI file I/O test
+extern fn fopen(path: *u8, mode: *u8) -> *u8;
+extern fn fclose(file: *u8) -> i32;
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    let f = fopen("ffi_test_output.txt", "w");
+    if f == (0 as *u8) {
+        printf("failed to open file\n", 0);
+        return 1;
+    }
+    let closed = fclose(f);
+    printf("file closed: %d\n", closed);
+    0
+}

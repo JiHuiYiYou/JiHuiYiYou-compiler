@@ -1,0 +1,16 @@
+// Test: function returning struct (sret)
+type Point = struct {
+    x: i32,
+    y: i32
+}
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn make_point(x: i32, y: i32) -> Point {
+    Point { x: x, y: y }
+}
+
+fn main_jhyy() -> i32 {
+    let p = make_point(7, 8);
+    p.x + p.y  // should be 15
+}

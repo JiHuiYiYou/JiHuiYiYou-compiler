@@ -1,0 +1,14 @@
+// Test: struct assignment a = b
+type Point = struct {
+    x: i32,
+    y: i32
+}
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    let mut a = Point { x: 1, y: 2 };
+    let b = Point { x: 10, y: 20 };
+    a = b;
+    a.x + a.y  // should be 30
+}

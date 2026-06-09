@@ -1,4 +1,4 @@
-extern fn puts(s: *u8) -> i32;
+extern fn printf(fmt: *u8, val: i32) -> i32;
 fn factorial(n: i32) -> i32 {
     let mut result = 1;
     let mut i = 1;
@@ -11,8 +11,6 @@ fn factorial(n: i32) -> i32 {
 fn main_jhyy() -> i32 {
     let n = 5;
     let result = factorial(n);
-    // Assuming we have a way to print the result, e.g., using puts
-    // puts("Factorial of 5 is: ");
-    // puts(result.to_string().as_ptr());
+    printf("B: %d\n", result);
     0
 }

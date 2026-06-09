@@ -1,0 +1,4 @@
+// Library C - transitively imported by main via lib_a
+fn get_c() -> i32 {
+    30
+}

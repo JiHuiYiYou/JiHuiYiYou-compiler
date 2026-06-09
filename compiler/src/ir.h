@@ -54,6 +54,7 @@ void ir_emit_jnz(IRBuf *ir, IRVal cond, IRVal then_b, IRVal else_b);
 void ir_emit_binary(IRBuf *ir, IRVal dst, const char *op, IRVal a, IRVal b);
 void ir_emit_copy(IRBuf *ir, IRVal dst, int64_t val);
 void ir_emit_call(IRBuf *ir, IRVal dst, const char *fn, IRVal *args, int n);
+void ir_emit_call_void(IRBuf *ir, const char *fn, IRVal *args, int n);
 void ir_emit_alloc(IRBuf *ir, IRVal dst, int size);
 void ir_emit_store(IRBuf *ir, char qbe_type, IRVal val, IRVal addr);
 void ir_emit_load(IRBuf *ir, IRVal dst, char qbe_type, IRVal addr);

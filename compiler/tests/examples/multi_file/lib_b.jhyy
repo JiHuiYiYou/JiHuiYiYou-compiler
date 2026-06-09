@@ -1,0 +1,4 @@
+// Library B
+fn get_b() -> i32 {
+    20
+}

@@ -1,0 +1,6 @@
+// Library A - imports lib_c (transitive import test)
+import lib_c;
+
+fn get_a() -> i32 {
+    10
+}

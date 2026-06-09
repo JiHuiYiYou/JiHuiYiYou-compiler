@@ -1,3 +1,4 @@
+data $str0 = { b "B: %d\n", b 0 }
 export function w $factorial(w %n) {
 @start0
     %t0 =w copy %n
@@ -31,7 +32,9 @@ export function w $main_jhyy() {
 @start4
     %t14 =w copy 5
     %t15 =w call $factorial(w %t14)
-    %t16 =w copy 0
-    ret %t16
+    %t16 =l copy $str0
+    %t17 =w call $printf(l %t16, w %t15)
+    %t18 =w copy 0
+    ret %t18
 }
 

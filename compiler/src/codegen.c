@@ -16,6 +16,8 @@ typedef struct {
     LocalEntry  locals[MAX_LOCALS];
     int         nlocals;
     Type       *current_ret_type;  /* function return type for checking */
+    IRVal       sret_slot;        /* hidden return slot for struct returns */
+    int         has_sret;         /* 1 if function returns struct via sret */
 } CGContext;
 
 static void cg_add_local(CGContext *cg, Sym *sym, IRVal val, int is_stack) {
@@ -100,6 +102,33 @@ static void cg_emit_store(CGContext *cg, Type *t, IRVal val, IRVal addr) {
         }
     }
     ir_emit_store(cg->ir, qbe_type_of(t), val, addr);
+}
+
+/* Copy a struct value from src_addr to dst_addr, field by field.
+   Handles nested structs recursively. */
+static void cg_copy_struct(CGContext *cg, Type *st, IRVal dst_addr, IRVal src_addr) {
+    if (!st || st->kind != KIND_STRUCT) return;
+    for (size_t i = 0; i < st->struct_type.nfields; i++) {
+        Type *ft = st->struct_type.fields[i].type;
+        size_t offset = st->struct_type.fields[i].offset;
+        /* compute field addresses */
+        IRVal src_off = ir_new_tmp(cg->ir, 'l');
+        IRVal dst_off = ir_new_tmp(cg->ir, 'l');
+        if (offset > 0) {
+            ir_emit_binary(cg->ir, src_off, "add", src_addr, ir_new_int((int64_t)offset));
+            ir_emit_binary(cg->ir, dst_off, "add", dst_addr, ir_new_int((int64_t)offset));
+        } else {
+            ir_emit(cg->ir, "    %%t%d =l copy %%t%d\n", src_off.id, src_addr.id);
+            ir_emit(cg->ir, "    %%t%d =l copy %%t%d\n", dst_off.id, dst_addr.id);
+        }
+        if (ft->kind == KIND_STRUCT) {
+            cg_copy_struct(cg, ft, dst_off, src_off);
+        } else {
+            IRVal fval = ir_new_tmp(cg->ir, qbe_type_of(ft));
+            cg_emit_load(cg, fval, ft, src_off);
+            cg_emit_store(cg, ft, fval, dst_off);
+        }
+    }
 }
 
 static IRVal cg_match_pattern(CGContext *cg, IRVal matched, Node *pattern) {
@@ -209,6 +238,10 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         int is_stack = 0;
         IRVal loc = cg_find_local(cg, d->sym, &is_stack);
         if (is_stack) {
+            /* structs are always manipulated via address */
+            if (n->type && n->type->kind == KIND_STRUCT) {
+                return loc;
+            }
             /* load from stack */
             IRVal v = ir_new_tmp(cg->ir, qbe_type_of(n->type));
             cg_emit_load(cg, v, n->type, loc);
@@ -365,13 +398,42 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         NodeCall *d = node_call_data(n);
         const char *fn_name = node_ident_data(d->callee)->sym->name;
 
-        /* evaluate args */
-        IRVal *args = NULL;
-        if (d->nargs > 0)
-            args = arena_alloc(cg->ir->arena, d->nargs * sizeof(IRVal));
-        for (size_t i = 0; i < d->nargs; i++)
-            args[i] = cg_expr(cg, d->args[i]);
+        int is_sret = (n->type && n->type->kind == KIND_STRUCT);
+        IRVal ret_slot;
+        if (is_sret) {
+            int rsize = (int)type_size(n->type);
+            if (rsize < 4) rsize = 4;
+            ret_slot = ir_new_tmp(cg->ir, 'l');
+            ir_emit_alloc(cg->ir, ret_slot, rsize);
+        }
 
+        /* Evaluate args, copying structs to stack slots */
+        int extra = is_sret ? 1 : 0;
+        IRVal *args = NULL;
+        if (d->nargs + extra > 0)
+            args = arena_alloc(cg->ir->arena, (d->nargs + extra) * sizeof(IRVal));
+        /* sret: hidden return slot pointer is first argument */
+        if (is_sret) args[0] = ret_slot;
+        for (size_t i = 0; i < d->nargs; i++) {
+            IRVal arg = cg_expr(cg, d->args[i]);
+            Type *at = d->args[i]->type;
+            if (at && at->kind == KIND_STRUCT) {
+                /* copy struct to a new stack slot for pass-by-value */
+                int asize = (int)type_size(at);
+                if (asize < 4) asize = 4;
+                IRVal copy_slot = ir_new_tmp(cg->ir, 'l');
+                ir_emit_alloc(cg->ir, copy_slot, asize);
+                cg_copy_struct(cg, at, copy_slot, arg);
+                args[extra + i] = copy_slot;
+            } else {
+                args[extra + i] = arg;
+            }
+        }
+
+        if (is_sret) {
+            ir_emit_call_void(cg->ir, fn_name, args, (int)d->nargs + 1);
+            return ret_slot;
+        }
         char qt = n->type ? qbe_type_of(n->type) : 'w';
         IRVal result = ir_new_tmp(cg->ir, qt);
         ir_emit_call(cg->ir, result, fn_name, args, (int)d->nargs);
@@ -805,12 +867,23 @@ static void cg_stmt(CGContext *cg, Node *n) {
     case NODE_LET: {
         NodeLet *d = node_let_data(n);
         int is_array = (d->sym->type && d->sym->type->kind == KIND_ARRAY);
+        int is_struct = (d->sym->type && d->sym->type->kind == KIND_STRUCT);
 
-        if (d->is_mutable || is_array) {
-            /* For array literal init, use its slot directly (no double alloc) */
-            if (is_array && d->init && d->init->kind == NODE_ARRAY_LIT) {
+        if (d->is_mutable || is_array || is_struct) {
+            /* For array/struct literal init, use its slot directly (no double alloc) */
+            if ((is_array && d->init && d->init->kind == NODE_ARRAY_LIT) ||
+                (is_struct && d->init && d->init->kind == NODE_STRUCT_LIT)) {
                 IRVal init_val = cg_expr(cg, d->init);
                 cg_add_local(cg, d->sym, init_val, 1);
+            } else if (is_struct && d->init) {
+                /* Struct from function call or other expression: alloc and copy */
+                IRVal src = cg_expr(cg, d->init);
+                int size = (int)type_size(d->sym->type);
+                if (size < 4) size = 4;
+                IRVal slot = ir_new_tmp(cg->ir, 'l');
+                ir_emit_alloc(cg->ir, slot, size);
+                cg_copy_struct(cg, d->sym->type, slot, src);
+                cg_add_local(cg, d->sym, slot, 1);
             } else {
                 IRVal init_val = cg_expr(cg, d->init);
                 int size = (int)type_size(d->sym->type);
@@ -821,8 +894,14 @@ static void cg_stmt(CGContext *cg, Node *n) {
                 cg_add_local(cg, d->sym, slot, 1);
             }
         } else {
-            IRVal init_val = cg_expr(cg, d->init);
-            cg_add_local(cg, d->sym, init_val, 0);
+            /* immutable struct: keep slot address as SSA value */
+            if (is_struct && d->init) {
+                IRVal init_val = cg_expr(cg, d->init);
+                cg_add_local(cg, d->sym, init_val, 0);
+            } else {
+                IRVal init_val = cg_expr(cg, d->init);
+                cg_add_local(cg, d->sym, init_val, 0);
+            }
         }
         break;
     }
@@ -841,7 +920,12 @@ static void cg_stmt(CGContext *cg, Node *n) {
             int is_stack = 0;
             IRVal slot = cg_find_local(cg, id->sym, &is_stack);
             if (is_stack) {
-                cg_emit_store(cg, d->target->type, val, slot);
+                if (d->target->type && d->target->type->kind == KIND_STRUCT) {
+                    /* struct copy: val is source address */
+                    cg_copy_struct(cg, d->target->type, slot, val);
+                } else {
+                    cg_emit_store(cg, d->target->type, val, slot);
+                }
             }
         } else if (d->target->kind == NODE_INDEX) {
             /* arr[i] = value */
@@ -890,8 +974,16 @@ static void cg_stmt(CGContext *cg, Node *n) {
     case NODE_RETURN: {
         NodeReturn *dr = node_return_data(n);
         if (dr->expr) {
-            IRVal val = cg_expr(cg, dr->expr);
-            ir_emit_ret(cg->ir, val);
+            if (cg->has_sret) {
+                /* struct return via sret: copy to return slot */
+                IRVal src = cg_expr(cg, dr->expr);
+                cg_copy_struct(cg, cg->current_ret_type, cg->sret_slot, src);
+                IRVal v = {0};
+                ir_emit_ret(cg->ir, v);
+            } else {
+                IRVal val = cg_expr(cg, dr->expr);
+                ir_emit_ret(cg->ir, val);
+            }
         } else {
             IRVal v = {0};
             ir_emit_ret(cg->ir, v);
@@ -1000,18 +1092,30 @@ static void cg_func(IRBuf *ir, Node *n) {
     NodeFuncDecl *fd = node_func_decl_data(n);
     if (fd->is_extern) return; /* no body to emit */
 
-    char ret_qt = fd->sym->type && fd->sym->type->kind == KIND_FUNC && fd->sym->type->func.ret
-                    ? qbe_type_of(fd->sym->type->func.ret) : 'w';
+    Type *ret_type = fd->sym->type && fd->sym->type->kind == KIND_FUNC
+                     ? fd->sym->type->func.ret : NULL;
+    int is_sret = (ret_type && ret_type->kind == KIND_STRUCT);
+    char ret_qt = (ret_type && !is_sret) ? qbe_type_of(ret_type) : 0;
 
     /* emit header */
     if (ret_qt)
         ir_emit(ir, "export function %c $%s(", ret_qt, fd->sym->name);
     else
         ir_emit(ir, "export function $%s(", fd->sym->name);
+    int first = 1;
+    /* sret: hidden return slot pointer is first parameter */
+    if (is_sret) {
+        ir_emit(ir, "l %%ret");
+        first = 0;
+    }
     for (size_t i = 0; i < fd->nparams; i++) {
-        if (i > 0) ir_emit(ir, ", ");
+        if (!first) ir_emit(ir, ", ");
+        first = 0;
         Type *pt = fd->params[i].sym->type;
-        ir_emit(ir, "%c %%%s", qbe_type_of(pt), fd->params[i].sym->name);
+        if (pt && pt->kind == KIND_STRUCT)
+            ir_emit(ir, "l %%%s", fd->params[i].sym->name);
+        else
+            ir_emit(ir, "%c %%%s", qbe_type_of(pt), fd->params[i].sym->name);
     }
     ir_emit(ir, ") {\n");
     ir_emit_label(ir, ir_new_block(ir, "start"));
@@ -1020,12 +1124,20 @@ static void cg_func(IRBuf *ir, Node *n) {
     CGContext cg;
     cg.ir = ir;
     cg.nlocals = 0;
-    cg.current_ret_type = fd->sym->type && fd->sym->type->kind == KIND_FUNC
-                           ? fd->sym->type->func.ret : NULL;
+    cg.current_ret_type = ret_type;
+    cg.has_sret = is_sret;
+    cg.sret_slot.qbe_type = 0;
+
+    /* register sret slot if needed */
+    if (is_sret) {
+        cg.sret_slot = ir_new_tmp(ir, 'l');
+        ir_emit(ir, "    %%t%d =l copy %%ret\n", cg.sret_slot.id);
+    }
 
     /* register params as locals (copy into SSA temps) */
     for (size_t i = 0; i < fd->nparams; i++) {
-        char qt = qbe_type_of(fd->params[i].sym->type);
+        Type *pt = fd->params[i].sym->type;
+        char qt = (pt && pt->kind == KIND_STRUCT) ? 'l' : qbe_type_of(pt);
         IRVal param_val = ir_new_tmp(ir, qt);
         ir_emit(ir, "    %%t%d =%c copy %%%s\n",
                 param_val.id, qt, fd->params[i].sym->name);
@@ -1042,7 +1154,12 @@ static void cg_func(IRBuf *ir, Node *n) {
 
     if (!body_returns(fd->body)) {
         /* emit ret only if body doesn't already have one */
-        if (ret_qt != 0 && body_val.qbe_type != 0) {
+        if (is_sret) {
+            /* copy result to sret slot before returning */
+            cg_copy_struct(&cg, ret_type, cg.sret_slot, body_val);
+            IRVal v = {0};
+            ir_emit_ret(ir, v);
+        } else if (ret_qt != 0 && body_val.qbe_type != 0) {
             ir_emit_ret(ir, body_val);
         } else {
             IRVal v = {0};

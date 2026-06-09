@@ -1,3 +1,10 @@
+.data
+.balign 8
+str0:
+	.ascii "B: %d\n"
+	.byte 0
+/* end data */
+
 .text
 .balign 16
 .globl factorial
@@ -25,6 +32,11 @@ main_jhyy:
 	subq $32, %rsp
 	movl $5, %ecx
 	callq factorial
+	movl %eax, %edx
+	subq $-32, %rsp
+	subq $32, %rsp
+	leaq str0(%rip), %rcx
+	callq printf
 	subq $-32, %rsp
 	movl $0, %eax
 	leave

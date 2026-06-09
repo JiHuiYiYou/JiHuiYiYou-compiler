@@ -166,6 +166,19 @@ void ir_emit_call(IRBuf *ir, IRVal dst, const char *fn, IRVal *args, int n) {
     ir_emit(ir, ")\n");
 }
 
+void ir_emit_call_void(IRBuf *ir, const char *fn, IRVal *args, int n) {
+    ir_emit(ir, "    call $%s(", fn);
+    for (int i = 0; i < n; i++) {
+        if (i > 0) ir_emit(ir, ", ");
+        if (args[i].kind == IRVAL_STR) {
+            ir_emit(ir, "%c %s", args[i].qbe_type, args[i].name);
+        } else {
+            ir_emit(ir, "%c %%t%d", args[i].qbe_type, args[i].id);
+        }
+    }
+    ir_emit(ir, ")\n");
+}
+
 void ir_emit_alloc(IRBuf *ir, IRVal dst, int size) {
     /* QBE only supports alignment 4, 8, or 16. Round up size to alignment. */
     int align;

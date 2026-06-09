@@ -1,0 +1,12 @@
+// Multi-file compilation test: transitive imports
+import lib_a;
+import lib_b;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    let a = get_a();       // from lib_a (should be 10)
+    let b = get_b();       // from lib_b (should be 20)
+    let c = get_c();       // from lib_c via transitive import through lib_a
+    a + b + c  // 10 + 20 + 30 = 60
+}
