@@ -37,6 +37,8 @@ typedef enum {
     NODE_LET,            /* let [mut] name [:Type] = expr ; */
     NODE_ASSIGN,         /* target = expr */
     NODE_RETURN,         /* return [expr] */
+    NODE_BREAK,          /* break; */
+    NODE_CONTINUE,       /* continue; */
     NODE_EXPR_STMT,      /* expr ; (expression as statement) */
 
     /* match */
@@ -107,7 +109,7 @@ typedef struct {
 
 typedef struct { Node *expr; const char *field; } NodeField;
 typedef struct { Node *expr; Node *index; } NodeIndex;
-typedef struct { Node *expr; Type *target_type; } NodeCast;
+typedef struct { Node *expr; Node *target_type; } NodeCast;
 typedef struct { Node *elem_type; Node *count_expr; } NodeArrayType;
 typedef struct { Node **elems; size_t nelems; } NodeArrayLit;
 typedef struct { Type *target; } NodeSizeof;
@@ -150,6 +152,8 @@ typedef struct {
 typedef struct { Node *target; Node *value; } NodeAssign;
 typedef struct { Node *expr; } NodeReturn;
 typedef struct { Node *expr; } NodeExprStmt;
+
+/* break / continue: no variant data needed */
 
 typedef struct { Node *expr; struct Node **arms; size_t narms; } NodeMatch;
 
@@ -279,7 +283,7 @@ Node *ast_new_binary(struct Arena *a, SourceLoc loc, TokenKind op, Node *left, N
 Node *ast_new_call(struct Arena *a, SourceLoc loc, Node *callee, Node **args, size_t nargs);
 Node *ast_new_field(struct Arena *a, SourceLoc loc, Node *expr, const char *field);
 Node *ast_new_index(struct Arena *a, SourceLoc loc, Node *expr, Node *index);
-Node *ast_new_cast(struct Arena *a, SourceLoc loc, Node *expr, Type *target);
+Node *ast_new_cast(struct Arena *a, SourceLoc loc, Node *expr, Node *target);
 Node *ast_new_array_type(struct Arena *a, SourceLoc loc, Node *elem_type, Node *count_expr);
 Node *ast_new_array_lit(struct Arena *a, SourceLoc loc, Node **elems, size_t nelems);
 Node *ast_new_sizeof(struct Arena *a, SourceLoc loc, Type *target);
@@ -293,6 +297,8 @@ Node *ast_new_for(struct Arena *a, SourceLoc loc, Sym *var, Node *start, Node *e
 Node *ast_new_let(struct Arena *a, SourceLoc loc, bool is_mut, Sym *sym, Node *type_annot, Node *init);
 Node *ast_new_assign(struct Arena *a, SourceLoc loc, Node *target, Node *value);
 Node *ast_new_return(struct Arena *a, SourceLoc loc, Node *expr);
+Node *ast_new_break(struct Arena *a, SourceLoc loc);
+Node *ast_new_continue(struct Arena *a, SourceLoc loc);
 Node *ast_new_expr_stmt(struct Arena *a, SourceLoc loc, Node *expr);
 Node *ast_new_match(struct Arena *a, SourceLoc loc, Node *expr, Node **arms, size_t narms);
 Node *ast_new_match_arm(struct Arena *a, SourceLoc loc, Node *pattern, Node *body);

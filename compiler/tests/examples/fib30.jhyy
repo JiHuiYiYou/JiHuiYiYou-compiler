@@ -1,0 +1,17 @@
+// EXPECT: 832040
+// Recursive Fibonacci — fib(30) = 832040
+// Tests: deep recursion, return value, i32 arithmetic
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn fib(n: i32) -> i32 {
+    if n < 2 {
+        return n;
+    }
+    fib(n - 1) + fib(n - 2)
+}
+
+fn main_jhyy() -> i32 {
+    let r: i32 = fib(30);
+    printf("fib(30) = %d\n", r);
+    r
+}

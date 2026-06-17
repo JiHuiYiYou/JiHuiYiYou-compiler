@@ -207,6 +207,18 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         }
     }
 
+    /* ── cast: expr as Type ── */
+    case NODE_CAST: {
+        NodeCast *d = node_cast_data(n);
+        infer_type(ctx, d->expr);
+        if (d->target_type) {
+            n->type = resolve_type_node(ctx, d->target_type);
+        } else {
+            n->type = type_void();
+        }
+        return n->type;
+    }
+
     /* ── dereference ── */
     case NODE_DEREF: {
         NodeDeref *d = node_deref_data(n);
@@ -342,11 +354,20 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
     /* ── let ── */
     case NODE_LET: {
         NodeLet *d = node_let_data(n);
-        Type *init_type = infer_type(ctx, d->init);
-        Type *decl_type = init_type;
-
+        Type *decl_type = NULL;
         if (d->type_annot) {
             decl_type = resolve_type_node(ctx, d->type_annot);
+        }
+        /* if decl is a float primitive, coerce float literal init to match */
+        if (d->init && d->init->kind == NODE_FLOAT && decl_type &&
+            decl_type->kind == KIND_PRIMITIVE &&
+            (decl_type->prim == PRIM_F32 || decl_type->prim == PRIM_F64)) {
+            d->init->type = decl_type;
+        }
+        Type *init_type = infer_type(ctx, d->init);
+        if (!decl_type) decl_type = init_type;
+
+        if (d->type_annot) {
             if (!type_eq(decl_type, init_type))
                 sema_error(ctx, n->loc, "type mismatch: expected %s, got %s",
                            type_to_string(decl_type), type_to_string(init_type));
@@ -366,6 +387,10 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
     /* ── assign ── */
     case NODE_ASSIGN: {
         NodeAssign *d = node_assign_data(n);
+        /* LHS and RHS are inferred independently. d->target and d->value
+           are distinct AST nodes, so a `*p = *p - expr` infers the LHS
+           dereference and RHS dereference separately, each producing
+           the dereferenced element type. */
         Type *target_type = infer_type(ctx, d->target);
         Type *value_type = infer_type(ctx, d->value);
         if (!type_eq(target_type, value_type))
@@ -406,7 +431,9 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
     case NODE_WHILE: {
         NodeWhile *d = node_while_data(n);
         infer_type(ctx, d->cond);
+        ctx->loop_depth++;
         infer_type(ctx, d->body);
+        ctx->loop_depth--;
         n->type = type_void();
         return n->type;
     }
@@ -424,7 +451,23 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
             ctx->locals[ctx->nlocals].type = start_type;
             ctx->nlocals++;
         }
+        ctx->loop_depth++;
         if (d->body) infer_type(ctx, d->body);
+        ctx->loop_depth--;
+        n->type = type_void();
+        return n->type;
+    }
+
+    /* ── break / continue ── */
+    case NODE_BREAK: {
+        if (ctx->loop_depth == 0)
+            sema_error(ctx, n->loc, "'break' outside of a loop");
+        n->type = type_void();
+        return n->type;
+    }
+    case NODE_CONTINUE: {
+        if (ctx->loop_depth == 0)
+            sema_error(ctx, n->loc, "'continue' outside of a loop");
         n->type = type_void();
         return n->type;
     }
@@ -585,8 +628,10 @@ static void check_func_decl(SemaContext *ctx, Node *n) {
     /* check body */
     if (fd->body && !fd->is_extern) {
         ctx->current_ret_type = ret_type;
+        ctx->loop_depth = 0;
         Type *body_type = infer_type(ctx, fd->body);
         ctx->current_ret_type = NULL;
+        ctx->loop_depth = 0;
         if (ret_type->kind != KIND_VOID && !type_eq(body_type, ret_type)) {
             sema_error(ctx, fd->body->loc, "function body type %s does not match return type %s",
                        type_to_string(body_type), type_to_string(ret_type));
@@ -724,6 +769,7 @@ void sema_init(SemaContext *ctx, Arena *arena) {
     ctx->scope_depth = 0;
     ctx->error_count = 0;
     ctx->current_ret_type = NULL;
+    ctx->loop_depth = 0;
 }
 
 int sema_check(SemaContext *ctx, Node *module) {

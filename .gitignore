@@ -4,6 +4,16 @@ compiler/build/bin/*
 !compiler/build/bin/.gitkeep
 _*.txt
 _*.py
+_*.s
+_*.il
+_*.exe
+_*_test.jhyy
+_*_min.jhyy
+_*_minimal_*.jhyy
+compiler/tests/examples/_*.jhyy
+compiler/tests/examples/_*.exe
+compiler/tests/examples/_*.il
+compiler/tests/examples/_*.s
 *.o
 *.exe
 *.ilk

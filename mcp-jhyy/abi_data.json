@@ -1,0 +1,114 @@
+{
+  "version": "1.0.0",
+  "target": "x86-64 Windows (amd64_win)",
+  "backend": "QBE IL",
+  "primitives": {
+    "i8":  {"size": 1, "align": 1, "qbe": "w", "signed": true},
+    "i16": {"size": 2, "align": 2, "qbe": "w", "signed": true},
+    "i32": {"size": 4, "align": 4, "qbe": "w", "signed": true},
+    "i64": {"size": 8, "align": 8, "qbe": "l", "signed": true},
+    "u8":  {"size": 1, "align": 1, "qbe": "w", "signed": false},
+    "u16": {"size": 2, "align": 2, "qbe": "w", "signed": false},
+    "u32": {"size": 4, "align": 4, "qbe": "w", "signed": false},
+    "u64": {"size": 8, "align": 8, "qbe": "l", "signed": false},
+    "f32": {"size": 4, "align": 4, "qbe": "s", "floating": true},
+    "f64": {"size": 8, "align": 8, "qbe": "d", "floating": true},
+    "bool":  {"size": 1, "align": 1, "qbe": "w"},
+    "char":  {"size": 1, "align": 1, "qbe": "w", "alias_of": "i8"}
+  },
+  "pointer": {"size": 8, "align": 8, "qbe": "l"},
+  "struct_passing": {
+    "method": "stack_copy + sret_pointer",
+    "caller_steps": [
+      "alloc copy slot (alloc8 sizeof(struct))",
+      "cg_copy_struct: copy field-by-field (including nested structs)",
+      "pass copy slot address as 'l' argument"
+    ],
+    "callee_steps": [
+      "function signature: function w $foo(l %struct_param, ...)",
+      "copy parameter to SSA temp: %t0 =l copy %struct_param",
+      "%t0 IS the struct address (no load)"
+    ]
+  },
+  "struct_return": {
+    "method": "sret (hidden return slot pointer)",
+    "caller_steps": [
+      "alloc return slot",
+      "prepend slot as FIRST argument",
+      "use call_void (no return value)",
+      "expression result = slot"
+    ],
+    "callee_steps": [
+      "function signature: function $foo(l %ret, ...)",
+      "store return value to %ret",
+      "function ends with bare 'ret' (no value)"
+    ]
+  },
+  "array_passing": "[T; N] arrays follow the same rules as structs (caller alloc, copy, pass address)",
+  "calling_convention": {
+    "name": "Windows x64 (Microsoft x64 ABI)",
+    "integer_args": ["RCX", "RDX", "R8", "R9"],
+    "float_args": ["XMM0", "XMM1", "XMM2", "XMM3"],
+    "stack_args": "right-to-left, caller cleans",
+    "shadow_space_bytes": 32,
+    "stack_alignment": 16,
+    "callee_saved": ["RBX", "RBP", "RDI", "RSI", "RSP", "R12", "R13", "R14", "R15", "XMM6-XMM15"]
+  },
+  "name_mangling": {
+    "rule": "$ + function_name",
+    "examples": {
+      "main_jhyy": "$main_jhyy",
+      "fib": "$fib"
+    },
+    "ffi_notes": "C functions called via QBE 'call $c_name' — symbol must exist in linked runtime"
+  },
+  "memory": {
+    "immutable_let": "SSA temp only (no stack alloc, no address-of)",
+    "mutable_let": "stack slot (alloc4/8) + load/store on access",
+    "array_lit": "stack slot initialized element-by-element",
+    "struct_lit": "stack slot with fields stored at correct offsets"
+  },
+  "loops": {
+    "while": {
+      "blocks": ["loop_hdr", "body", "loop_end"],
+      "break_target": "loop_end",
+      "continue_target": "loop_hdr"
+    },
+    "for": {
+      "blocks": ["loop_hdr", "body", "incr", "loop_end"],
+      "break_target": "loop_end",
+      "continue_target": "incr (NOT loop_hdr)"
+    }
+  },
+  "short_circuit": {
+    "and": "jnz %a, @then_b, @short (a false → short with a value, no eval b)",
+    "or":  "jnz %a, @short, @then_b (a true → short with a value, no eval b)"
+  },
+  "ffi": {
+    "supported_params": ["i8-i64", "u8-u64", "f32", "f64", "pointer", "bool"],
+    "supported_returns": ["i8-i64", "u8-u64", "f32", "f64", "pointer", "bool"],
+    "not_supported": [
+      "struct/enum pass-by-value across FFI",
+      "variadic functions (... must be expanded)",
+      "function callbacks"
+    ],
+    "string_layout": "UTF-8 bytes + NUL terminator in QBE 'data' segment, passed as 'l' pointer"
+  },
+  "module_system": {
+    "syntax": "import <module_name>;  (resolves to module_name.jhyy in same dir as main)",
+    "resolution": "iterative work-list with cycle detection",
+    "namespace": "shared global (no prefix) — v2.0 will add namespaces",
+    "multi_file_cli": "jhyy compile main.jhyy lib_a.jhyy lib_b.jhyy -o output"
+  },
+  "known_limitations": [
+    "Slices [*]T: type defined, no codegen",
+    "Structs/enums across FFI: not supported (Windows x64 ABI mismatch)",
+    "Float comparison: partially implemented (v0.5.0 ongoing)",
+    "Float fmod (%): not implemented",
+    "Variadic functions: not supported (use multiple parameters)",
+    "Function callbacks: not supported",
+    "Stack protection / canaries: not implemented",
+    "DWARF debug info: not implemented",
+    "Threading / TLS: not defined"
+  ]
+}

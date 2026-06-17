@@ -5,6 +5,7 @@
 
 /* ── side table: map Sym* → IRVal for local vars ── */
 #define MAX_LOCALS 512
+#define MAX_LOOP_DEPTH 32
 typedef struct {
     Sym  *sym;
     IRVal value;        /* SSA temp for immutable, stack slot addr for mutable */
@@ -18,6 +19,13 @@ typedef struct {
     Type       *current_ret_type;  /* function return type for checking */
     IRVal       sret_slot;        /* hidden return slot for struct returns */
     int         has_sret;         /* 1 if function returns struct via sret */
+    /* Loop label stack: top is innermost loop.
+       continue_target = where `continue` jumps (for: after body, before i++;
+                                             while: same as loop_starts) */
+    IRVal       loop_starts[MAX_LOOP_DEPTH];
+    IRVal       loop_ends[MAX_LOOP_DEPTH];
+    IRVal       loop_continues[MAX_LOOP_DEPTH];
+    int         loop_depth;
 } CGContext;
 
 static void cg_add_local(CGContext *cg, Sym *sym, IRVal val, int is_stack) {
@@ -449,27 +457,47 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
 
         ir_emit_jnz(cg->ir, cond, then_block, else_block);
 
-        /* helper to detect if a body ends with return */
-        #define body_returns(body) \
+        /* helper to detect if a body ends with a terminator (return/break/continue) */
+        #define body_terminates(body) \
             ((body) && ((body)->kind == NODE_RETURN || \
+                        (body)->kind == NODE_BREAK || \
+                        (body)->kind == NODE_CONTINUE || \
              ((body)->kind == NODE_BLOCK && node_block_data(body)->nstmts > 0 && \
-              node_block_data(body)->stmts[node_block_data(body)->nstmts - 1]->kind == NODE_RETURN)))
+              (node_block_data(body)->stmts[node_block_data(body)->nstmts - 1]->kind == NODE_RETURN || \
+               node_block_data(body)->stmts[node_block_data(body)->nstmts - 1]->kind == NODE_BREAK || \
+               node_block_data(body)->stmts[node_block_data(body)->nstmts - 1]->kind == NODE_CONTINUE))))
 
         /* then */
         ir_emit_label(cg->ir, then_block);
         IRVal then_val = cg_expr(cg, d->then_body);
-        int then_returns = body_returns(d->then_body);
+        int then_returns = body_terminates(d->then_body);
         if (!then_returns) ir_emit_jmp(cg->ir, merge_block);
+
+        /* Pre-allocate trampoline block for nested-if else_body (else if chain).
+           Created BEFORE the recursive cg_expr so the inner if's merge block
+           can reach it via jmp ep; label ep; jmp outer_merge. */
+        int nested_else_if = d->else_body && d->else_body->kind == NODE_IF;
+        IRVal nested_phi_block;
+        if (nested_else_if) {
+            nested_phi_block = ir_new_block(cg->ir, "ep");
+        }
 
         /* else */
         ir_emit_label(cg->ir, else_block);
         if (d->else_body) {
             IRVal else_val = cg_expr(cg, d->else_body);
-            int else_returns = body_returns(d->else_body);
+            int else_returns = body_terminates(d->else_body);
             IRVal else_phi_block = else_block;  /* default: use else_block as phi predecessor */
-            if (!else_returns) {
-                /* Use a trampoline block so phi always references a direct predecessor.
-                   Nested if/else would otherwise emit the jmp from an inner merge block. */
+            if (nested_else_if) {
+                /* Inner if's branches converge at inner_merge, then fall through
+                   into the trampoline. Use the pre-allocated ep as predecessor. */
+                else_phi_block = nested_phi_block;
+                ir_emit_jmp(cg->ir, else_phi_block);
+                ir_emit_label(cg->ir, else_phi_block);
+                ir_emit_jmp(cg->ir, merge_block);
+            } else if (!else_returns) {
+                /* Use a trampoline block so phi always references a direct predecessor
+                   instead of else_block (which may contain non-terminator fallthrough). */
                 else_phi_block = ir_new_block(cg->ir, "ep");
                 ir_emit_jmp(cg->ir, else_phi_block);
                 ir_emit_label(cg->ir, else_phi_block);
@@ -477,6 +505,12 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             }
             /* phi */
             ir_emit_label(cg->ir, merge_block);
+            /* Sprint 5A.3: skip phi emission entirely when if expr is void */
+            if (n->type && n->type->kind == KIND_VOID) {
+                #undef body_terminates
+                IRVal v = {0};
+                return v;
+            }
             if (!then_returns && !else_returns) {
                 IRVal result = ir_new_tmp(cg->ir, then_val.qbe_type);
                 ir_emit_phi(cg->ir, result, 2, then_block, then_val, else_phi_block, else_val);
@@ -486,7 +520,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             ir_emit_jmp(cg->ir, merge_block);
             ir_emit_label(cg->ir, merge_block);
         }
-        #undef body_returns
+        #undef body_terminates
 
         if (n->type && n->type->kind == KIND_VOID) {
             IRVal v = {0};
@@ -499,7 +533,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         IRVal last = {0};
         for (size_t i = 0; i < d->nstmts; i++) {
             Node *stmt = d->stmts[i];
-            if (stmt->kind == NODE_RETURN) {
+            if (stmt->kind == NODE_RETURN || stmt->kind == NODE_BREAK || stmt->kind == NODE_CONTINUE) {
                 cg_stmt(cg, stmt);
                 return last;
             }
@@ -511,6 +545,11 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
                     /* capture value as potential block return value */
                     last = cg_expr(cg, es->expr);
                 }
+            } else if (stmt->kind == NODE_IF || stmt->kind == NODE_MATCH || stmt->kind == NODE_BLOCK) {
+                /* These expression-statement forms may also yield a value
+                   (e.g., `if x { 0 } else { 1 }` as a block's last statement
+                   is the block's return value). */
+                last = cg_expr(cg, stmt);
             } else {
                 cg_stmt(cg, stmt);
             }
@@ -532,6 +571,54 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
     case NODE_EXPR_STMT: {
         NodeExprStmt *d = node_expr_stmt_data(n);
         return cg_expr(cg, d->expr);
+    }
+
+    /* ── cast: expr as Type ── */
+    case NODE_CAST: {
+        NodeCast *d = node_cast_data(n);
+        Type *src_t = d->expr->type;
+        Type *dst_t = n->type;
+        IRVal inner = cg_expr(cg, d->expr);
+        if (!src_t || !dst_t) {
+            return inner;
+        }
+        char src_qt = qbe_type_of(src_t);
+        char dst_qt = qbe_type_of(dst_t);
+        if (src_qt == dst_qt && src_t->kind == dst_t->kind && src_t->prim == dst_t->prim) {
+            /* no-op */
+            return inner;
+        }
+        IRVal result = ir_new_tmp(cg->ir, dst_qt);
+        /* pick a QBE conversion instruction */
+        const char *conv = NULL;
+        if (src_qt == 'd' && (dst_qt == 'w' || dst_qt == 'l'))
+            conv = (dst_qt == 'l') ? "dtosl" : "dtosi";
+        else if (src_qt == 's' && (dst_qt == 'w' || dst_qt == 'l'))
+            conv = (dst_qt == 'l') ? "stosl" : "stosi";
+        else if ((src_qt == 'w' || src_qt == 'l') && dst_qt == 'd')
+            conv = (src_qt == 'l') ? "sltof" : "swtof";
+        else if ((src_qt == 'w' || src_qt == 'l') && dst_qt == 's')
+            conv = (src_qt == 'l') ? "ultof" : "uwtof";
+        else if (src_qt == 's' && dst_qt == 'd')
+            conv = "exts";
+        else if (src_qt == 'd' && dst_qt == 's')
+            conv = "truncd";
+        else if ((src_qt == 'w' || src_qt == 'l') && (dst_qt == 'w' || dst_qt == 'l')) {
+            /* integer width change */
+            if (dst_qt == 'l') {
+                ir_emit(cg->ir, "    %%t%d =l extsw %%t%d\n", result.id, inner.id);
+            } else {
+                ir_emit_copy(cg->ir, result, 0);
+            }
+            return result;
+        }
+        if (!conv) {
+            IRVal v = {0};
+            return v;
+        }
+        ir_emit(cg->ir, "    %%t%d =%c %s %%t%d\n",
+                result.id, dst_qt, conv, inner.id);
+        return result;
     }
 
     /* ── address-of: &variable ── */
@@ -990,6 +1077,20 @@ static void cg_stmt(CGContext *cg, Node *n) {
         }
         break;
     }
+    case NODE_BREAK: {
+        /* jump to innermost loop's end block */
+        if (cg->loop_depth > 0) {
+            ir_emit_jmp(cg->ir, cg->loop_ends[cg->loop_depth - 1]);
+        }
+        break;
+    }
+    case NODE_CONTINUE: {
+        /* jump to innermost loop's continue target (for: post-body, pre-increment) */
+        if (cg->loop_depth > 0) {
+            ir_emit_jmp(cg->ir, cg->loop_continues[cg->loop_depth - 1]);
+        }
+        break;
+    }
     case NODE_EXPR_STMT: {
         Node *inner = node_expr_stmt_data(n)->expr;
         if (inner->kind == NODE_ASSIGN) {
@@ -1034,7 +1135,16 @@ static void cg_stmt(CGContext *cg, Node *n) {
 
         IRVal loop_hdr = ir_new_block(cg->ir, "loop");
         IRVal body_b   = ir_new_block(cg->ir, "body");
+        IRVal incr_b   = ir_new_block(cg->ir, "incr");
         IRVal exit_b   = ir_new_block(cg->ir, "exit");
+
+        /* push loop labels for break/continue */
+        if (cg->loop_depth < MAX_LOOP_DEPTH) {
+            cg->loop_starts[cg->loop_depth] = loop_hdr;
+            cg->loop_ends[cg->loop_depth] = exit_b;
+            cg->loop_continues[cg->loop_depth] = incr_b;  /* for: continue jumps to increment */
+            cg->loop_depth++;
+        }
 
         ir_emit_jmp(cg->ir, loop_hdr);
 
@@ -1051,6 +1161,7 @@ static void cg_stmt(CGContext *cg, Node *n) {
         cg_expr(cg, df->body);
 
         /* increment: load i, add 1, store back */
+        ir_emit_label(cg->ir, incr_b);
         IRVal current = ir_new_tmp(cg->ir, var_qt);
         ir_emit_load(cg->ir, current, var_qt, slot);
         IRVal next_val = ir_new_tmp(cg->ir, var_qt);
@@ -1059,6 +1170,7 @@ static void cg_stmt(CGContext *cg, Node *n) {
         ir_emit_jmp(cg->ir, loop_hdr);
 
         ir_emit_label(cg->ir, exit_b);
+        if (cg->loop_depth > 0) cg->loop_depth--;
         break;
     }
     case NODE_WHILE: {
@@ -1066,6 +1178,14 @@ static void cg_stmt(CGContext *cg, Node *n) {
         IRVal loop_hdr = ir_new_block(cg->ir, "loop");
         IRVal body_b   = ir_new_block(cg->ir, "body");
         IRVal exit_b   = ir_new_block(cg->ir, "exit");
+
+        /* push loop labels for break/continue */
+        if (cg->loop_depth < MAX_LOOP_DEPTH) {
+            cg->loop_starts[cg->loop_depth] = loop_hdr;
+            cg->loop_ends[cg->loop_depth] = exit_b;
+            cg->loop_continues[cg->loop_depth] = loop_hdr;  /* while: continue = header */
+            cg->loop_depth++;
+        }
 
         ir_emit_jmp(cg->ir, loop_hdr);
 
@@ -1078,6 +1198,7 @@ static void cg_stmt(CGContext *cg, Node *n) {
         ir_emit_jmp(cg->ir, loop_hdr);
 
         ir_emit_label(cg->ir, exit_b);
+        if (cg->loop_depth > 0) cg->loop_depth--;
         break;
     }
     default:
@@ -1127,6 +1248,7 @@ static void cg_func(IRBuf *ir, Node *n) {
     cg.current_ret_type = ret_type;
     cg.has_sret = is_sret;
     cg.sret_slot.qbe_type = 0;
+    cg.loop_depth = 0;
 
     /* register sret slot if needed */
     if (is_sret) {

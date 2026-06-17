@@ -1,0 +1,7 @@
+// EXPECT: 70
+fn main_jhyy() -> i32 {
+    let mut x: i32 = 100;
+    let p = &x;
+    *p = *p - 30;
+    *p
+}

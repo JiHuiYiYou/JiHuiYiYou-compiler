@@ -26,6 +26,8 @@ typedef enum {
     TOKEN_IN,
     TOKEN_MATCH,
     TOKEN_RETURN,
+    TOKEN_BREAK,
+    TOKEN_CONTINUE,
     TOKEN_TYPE,
     TOKEN_STRUCT,
     TOKEN_ENUM,

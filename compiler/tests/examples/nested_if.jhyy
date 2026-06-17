@@ -1,0 +1,19 @@
+// EXPECT: 500
+fn main_jhyy() -> i32 {
+    let x: i32 = 5;
+    let mut result: i32 = 0;
+    if x == 1 {
+        result = 100;
+    } else if x == 2 {
+        result = 200;
+    } else if x == 3 {
+        result = 300;
+    } else if x == 4 {
+        result = 400;
+    } else if x == 5 {
+        result = 500;
+    } else {
+        result = 999;
+    }
+    result
+}

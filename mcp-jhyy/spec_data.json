@@ -1,0 +1,157 @@
+{
+  "version": "0.5.0",
+  "status": "Phase 1 in progress",
+  "language_name": "JHYY (机会翼游)",
+  "paradigm": ["imperative", "static-typed", "compiled", "ahead-of-time"],
+  "backend": "QBE IL → amd64_win assembly → GCC → Windows PE",
+  "entry_point": {
+    "function": "main_jhyy",
+    "signature": "fn main_jhyy() -> i32",
+    "exit_code": "i32 return value of main_jhyy"
+  },
+  "lexer_keywords": [
+    "fn", "let", "mut", "if", "else", "while", "for", "in", "return",
+    "break", "continue", "match", "struct", "enum", "type", "import",
+    "extern", "as", "true", "false", "_"
+  ],
+  "operators": {
+    "arithmetic": ["+", "-", "*", "/", "%"],
+    "comparison": ["==", "!=", "<", ">", "<=", ">="],
+    "logical": ["&&", "||", "!"],
+    "bitwise": ["&", "|", "^", "~", "<<", ">>"],
+    "assignment": ["=", "+=", "-=", "*=", "/=", "%="],
+    "pointer": ["&", "*"],
+    "other": [":", "::", "->", "..", "=>", ",", ";", "?"]
+  },
+  "literals": {
+    "integer": {
+      "examples": ["42", "0xFF", "0b1010", "1_000_000"],
+      "default_type": "i32",
+      "sizes": ["i8", "i16", "i32", "i64"]
+    },
+    "float": {
+      "examples": ["3.14", "1.5e-3", "2.0f32", "1.0f64"],
+      "default_type": "f64",
+      "sizes": ["f32", "f64"]
+    },
+    "string": {
+      "delimiter": "double quote",
+      "escape_sequences": ["\\n", "\\t", "\\r", "\\0", "\\\\", "\\\"", "\\xHH"],
+      "encoding": "UTF-8",
+      "type": "*u8 (pointer to data segment)"
+    },
+    "char": {
+      "delimiter": "single quote",
+      "type": "char (1 byte UTF-8 code unit)"
+    },
+    "bool": {
+      "values": ["true", "false"],
+      "type": "bool (1 byte, 0 or 1)"
+    },
+    "array_literal": {
+      "syntax": "[v1, v2, ..., vN]",
+      "type": "[T; N] (inferred from element type and count)"
+    },
+    "struct_literal": {
+      "syntax": "StructName { field1: val1, field2: val2 }",
+      "type": "struct name"
+    }
+  },
+  "types": {
+    "primitives": ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
+                    "f32", "f64", "bool", "char"],
+    "composite": ["*T (pointer)", "[*]T (slice, P2)", "[T; N] (fixed array)", "struct", "enum", "fn(...)", "()"],
+    "user_defined": ["type Name = ...", "struct Name { ... }", "enum Name { ... }"]
+  },
+  "declarations": {
+    "variable": {
+      "syntax": "let [mut] name [: Type] = expr ;",
+      "immutable_default": true,
+      "type_inference": "from init expression",
+      "type_annotation_required_for_params": true
+    },
+    "function": {
+      "syntax": "fn name(param1: T1, param2: T2, ...) [-> Ret] { body }",
+      "params_require_types": true,
+      "return_type_inference": "from body if not annotated",
+      "expression_oriented": "last expression of body is return value",
+      "extern": "extern fn name(params) [-> Ret] ;  (no body, FFI)"
+    },
+    "struct": {
+      "syntax": "struct Name { field1: T1, field2: T2, ... }",
+      "field_access": "instance.field",
+      "pointer_field_access": "ptr->field  (sugar for (*ptr).field)"
+    },
+    "enum": {
+      "syntax": "enum Name { Variant1(T1), Variant2(T2), ... }",
+      "construction": "Name::Variant(payload)",
+      "match_required_for_unwrap": true
+    },
+    "type_alias": {
+      "syntax": "type Name = UnderlyingType ;",
+      "transparent": true
+    }
+  },
+  "control_flow": {
+    "if": "if cond { then } [else { else }]  — expression-oriented, value is last expr of executed branch",
+    "while": "while cond { body }  — exits when cond is false",
+    "for": "for var in start..end { body }  — var is i32/i64 (type-aware)",
+    "break": "exit innermost loop",
+    "continue": "jump to loop test (while) or increment (for)",
+    "match": "match expr { pattern => body, ... }  — patterns: literal, ident, _, range, enum, |"
+  },
+  "operators_semantics": {
+    "+": "add (or pointer arithmetic: p + n advances by n*sizeof(*p))",
+    "-": "subtract (or pointer subtraction)",
+    "*": "multiply (or dereference: *ptr reads value at ptr)",
+    "/": "divide (integer: signed, float: float)",
+    "%": "modulo (integer: signed, float: not implemented)",
+    "==": "equal (returns bool)",
+    "!=": "not equal (returns bool)",
+    "<": "less than (signed, returns bool)",
+    ">": "greater than (signed, returns bool)",
+    "<=": "less or equal (signed)",
+    ">=": "greater or equal (signed)",
+    "&&": "short-circuit AND",
+    "||": "short-circuit OR",
+    "!": "logical NOT (a == 0 → true)",
+    "&": "bitwise AND",
+    "|": "bitwise OR",
+    "^": "bitwise XOR",
+    "~": "bitwise NOT",
+    "<<": "left shift",
+    ">>": "right shift (signed: arithmetic, unsigned: logical)",
+    "=": "assign",
+    "+=": "add-assign",
+    "-=": "sub-assign",
+    "*=": "mul-assign",
+    "/=": "div-assign",
+    "%=": "mod-assign",
+    "&x": "address-of (only for mutable variables)",
+    "*p": "dereference pointer",
+    "as": "type cast (i32 as i64, 5 as *u8, etc.)"
+  },
+  "integer_overflow": {
+    "definition": "two's complement wrap, no runtime check",
+    "example": "2147483647 + 2 = -2147483647 (i32 max + 2 wraps)"
+  },
+  "scope": {
+    "block": "{ ... } introduces new scope",
+    "shadowing": "inner 'let x' shadows outer 'x'",
+    "loop_depth": "break/continue require loop_depth > 0"
+  },
+  "imports": {
+    "syntax": "import module_name;  (file: module_name.jhyy in same dir as main)",
+    "transitive": "yes (recursively resolved)",
+    "cycle_detection": "yes (compile error on circular import)",
+    "multi_file_cli": "jhyy compile main.jhyy lib.jhyy -o output"
+  },
+  "version_evolution": {
+    "v0.0.1": "lexer, parser, basic codegen, primitives",
+    "v0.0.2": "if/else, while, struct, enum, match, FFI",
+    "v0.2.1": "sub-word types, type-aware comparisons, short-circuit, UTF-8",
+    "v0.3.0": "fixed arrays, float literals, sema fixes",
+    "v0.4.0": "struct pass-by-value, sret, multi-file, FFI enhancement",
+    "v0.5.0": "break/continue, float arithmetic, void if, ABI v1.0, MCP service"
+  }
+}

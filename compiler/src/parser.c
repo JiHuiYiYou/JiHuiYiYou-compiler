@@ -331,6 +331,20 @@ static Node *parse_return(Parser *p) {
     return ast_new_return(p->arena, loc, expr);
 }
 
+static Node *parse_break(Parser *p) {
+    SourceLoc loc = peek(p).loc;
+    advance(p); /* consume 'break' */
+    expect(p, TOKEN_SEMICOLON, ";");
+    return ast_new_break(p->arena, loc);
+}
+
+static Node *parse_continue(Parser *p) {
+    SourceLoc loc = peek(p).loc;
+    advance(p); /* consume 'continue' */
+    expect(p, TOKEN_SEMICOLON, ";");
+    return ast_new_continue(p->arena, loc);
+}
+
 static Node *parse_expr_stmt(Parser *p) {
     Node *expr = parse_expr(p, PREC_NONE);
     /* allow omitting ; before } (expression as last statement in block) */
@@ -340,13 +354,15 @@ static Node *parse_expr_stmt(Parser *p) {
 }
 
 static Node *parse_stmt(Parser *p) {
-    if (check(p, TOKEN_LET))     return parse_let(p);
-    if (check(p, TOKEN_IF))      return parse_if(p);
-    if (check(p, TOKEN_WHILE))   return parse_while(p);
-    if (check(p, TOKEN_FOR))     return parse_for(p);
-    if (check(p, TOKEN_MATCH))   return parse_match(p);
-    if (check(p, TOKEN_RETURN))  return parse_return(p);
-    if (check(p, TOKEN_LBRACE))  return parse_block(p);
+    if (check(p, TOKEN_LET))      return parse_let(p);
+    if (check(p, TOKEN_IF))       return parse_if(p);
+    if (check(p, TOKEN_WHILE))    return parse_while(p);
+    if (check(p, TOKEN_FOR))      return parse_for(p);
+    if (check(p, TOKEN_MATCH))    return parse_match(p);
+    if (check(p, TOKEN_RETURN))   return parse_return(p);
+    if (check(p, TOKEN_BREAK))    return parse_break(p);
+    if (check(p, TOKEN_CONTINUE)) return parse_continue(p);
+    if (check(p, TOKEN_LBRACE))   return parse_block(p);
     return parse_expr_stmt(p);
 }
 
@@ -790,8 +806,8 @@ static Node *infix_index(Parser *p, Token token, Node *left) {
 }
 
 static Node *infix_as(Parser *p, Token token, Node *left) {
-    parse_type(p); /* target type */
-    return ast_new_cast(p->arena, token.loc, left, NULL); /* target resolved in sema */
+    Node *target = parse_type(p); /* target type */
+    return ast_new_cast(p->arena, token.loc, left, target); /* target resolved in sema */
 }
 
 /* ── array literal: [1, 2, 3] ── */

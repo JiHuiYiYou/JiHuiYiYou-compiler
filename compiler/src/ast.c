@@ -148,7 +148,7 @@ Node *ast_new_index(Arena *a, SourceLoc loc, Node *expr, Node *index) {
     return n;
 }
 
-Node *ast_new_cast(Arena *a, SourceLoc loc, Node *expr, Type *target) {
+Node *ast_new_cast(Arena *a, SourceLoc loc, Node *expr, Node *target) {
     Node *n = new_node(a, NODE_CAST, loc, sizeof(NodeCast));
     NodeCast *d = node_cast_data(n);
     d->expr = expr;
@@ -253,6 +253,14 @@ Node *ast_new_return(Arena *a, SourceLoc loc, Node *expr) {
     Node *n = new_node(a, NODE_RETURN, loc, sizeof(NodeReturn));
     node_return_data(n)->expr = expr;
     return n;
+}
+
+Node *ast_new_break(Arena *a, SourceLoc loc) {
+    return new_node(a, NODE_BREAK, loc, 0);
+}
+
+Node *ast_new_continue(Arena *a, SourceLoc loc) {
+    return new_node(a, NODE_CONTINUE, loc, 0);
 }
 
 Node *ast_new_expr_stmt(Arena *a, SourceLoc loc, Node *expr) {
@@ -425,6 +433,8 @@ const char *node_kind_name(NodeKind kind) {
     case NODE_LET:           return "let";
     case NODE_ASSIGN:        return "assign";
     case NODE_RETURN:        return "return";
+    case NODE_BREAK:         return "break";
+    case NODE_CONTINUE:      return "continue";
     case NODE_EXPR_STMT:     return "expr_stmt";
     case NODE_MATCH:         return "match";
     case NODE_MATCH_ARM:     return "match_arm";

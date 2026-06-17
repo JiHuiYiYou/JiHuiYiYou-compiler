@@ -332,7 +332,7 @@ static int compile(const char **inputs, int ninputs, const char *output) {
     snprintf(asm_path, sizeof(asm_path), "%s.s", output);
     path_to_win(il_path);
     path_to_win(asm_path);
-    char cmd[2048];
+    char cmd[4096];
     snprintf(cmd, sizeof(cmd),
              "C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/qbe/qbe.exe -t amd64_win -o %s %s",
              asm_path, il_path);

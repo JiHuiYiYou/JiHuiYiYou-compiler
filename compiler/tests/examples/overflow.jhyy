@@ -1,0 +1,14 @@
+// EXPECT: 1
+// Integer overflow: wraps around (two's complement), no runtime check.
+// 2147483647 (i32 max) + 2 = 2147483649, wraps to -2147483647 (0x80000001).
+// Last byte = 0x01 = 1.
+fn main_jhyy() -> i32 {
+    let a: i32 = 2147483647;
+    let b: i32 = 2;
+    let c: i32 = a + b;  // wraps to -2147483647
+    // Return just the sign bit (bit 31). For -2147483647, bit 31 is set.
+    // Use unsigned-style shift by casting the sign-extended to a positive mask.
+    // Easier: return c & 0xFF to extract last byte.
+    // 0x80000001 & 0xFF = 0x01 = 1
+    c & 255
+}

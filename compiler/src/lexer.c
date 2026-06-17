@@ -20,6 +20,8 @@ static const Keyword keywords[] = {
     {"in",      TOKEN_IN},
     {"match",   TOKEN_MATCH},
     {"return",  TOKEN_RETURN},
+    {"break",   TOKEN_BREAK},
+    {"continue", TOKEN_CONTINUE},
     {"type",    TOKEN_TYPE},
     {"struct",  TOKEN_STRUCT},
     {"enum",    TOKEN_ENUM},

@@ -1,0 +1,8 @@
+// EXPECT: 6
+fn main_jhyy() -> i32 {
+    let a: f64 = 1.5;
+    let b: f64 = 2.5;
+    let c: f64 = a + b * 2.0;
+    let d: i32 = c as i32;
+    d
+}
