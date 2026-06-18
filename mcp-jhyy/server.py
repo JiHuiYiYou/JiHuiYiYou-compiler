@@ -36,7 +36,27 @@ except (AttributeError, OSError):
 JHYY_ROOT = Path("C:/Users/liuzhen/Desktop/coding/JiHuiYiYou")
 MCP_DIR = Path(__file__).resolve().parent
 
-mcp = FastMCP("jhyy")
+# ========== Server-level instructions ==========
+# Claude Code 启动 MCP 时注入到 system prompt。保持精简——每个会话都加载，长度直接吃 context window。
+# 路由表 + 严禁旁路是触发信号；详细触发示例已经在工具 docstring 的 Triggers: 段里；workflow hints 在 mcp-jhyy/CLAUDE.md 里。
+JHYY_INSTRUCTIONS = """
+JHYY compiler MCP. Use these tools for any .jhyy work; do NOT bypass with raw Bash/Read.
+
+Routing (intent → tool):
+- run / test / verify behavior → jhyy_run
+- syntax / lint / "is this valid" → jhyy_check
+- compile only (no run) → jhyy_compile
+- show QBE IL / debug codegen → jhyy_get_il
+- "does JHYY support X" / syntax questions → jhyy_lang_ref
+- ABI / struct passing / FFI / calling convention → jhyy_abi_info
+- format code → jhyy_format
+
+DO NOT: Bash("jhyy.exe ..."), Read("docs/abis/jhyy-*.md"), Read("compiler/build/bin/*.il"). Use the tools above.
+
+Default to jhyy_run for any "run" / "test" intent.
+"""
+
+mcp = FastMCP("jhyy", instructions=JHYY_INSTRUCTIONS)
 
 # Import jhyy_runner
 sys.path.insert(0, str(MCP_DIR))
@@ -51,7 +71,12 @@ def jhyy_compile(
     output: Optional[str] = None,
     extra_inputs: Optional[list] = None,
 ) -> dict:
-    """编译 .jhyy 文件为 Windows .exe。
+    """Compile a .jhyy file into a Windows .exe (no execution).
+
+    USE THIS WHEN the user wants to build/produce a binary but NOT run it.
+    Triggers: "compile it", "build this .jhyy", "produce an exe", "compile to <name>".
+
+    For "run it" / "test it" / "verify behavior" use `jhyy_run` instead — it also executes.
 
     Args:
         file: 源文件路径（相对 JHYY 项目根或绝对路径）
@@ -70,7 +95,14 @@ def jhyy_run(
     extra_inputs: Optional[list] = None,
     timeout: int = 10,
 ) -> dict:
-    """编译并运行 .jhyy 文件。
+    """Compile AND execute a .jhyy file. Returns exit code + stdout/stderr.
+
+    USE THIS WHEN the user wants to verify behavior, test a program, or see output.
+    Triggers: "run this", "execute it", "test it", "what does it print", "does it work",
+              "verify", "try it out", "show the output", "what's the exit code".
+
+    This is the MOST COMMON tool — default to it whenever the user wants to see a .jhyy
+    program actually run. It covers compile + execute in one call.
 
     Args:
         file: 源文件路径
@@ -85,7 +117,14 @@ def jhyy_run(
 
 @mcp.tool
 def jhyy_check(file: str) -> dict:
-    """仅做语法/语义检查，不生成可执行文件。
+    """Syntax + semantic check a .jhyy file. Does NOT produce a binary.
+
+    USE THIS WHEN the user wants to validate code without actually running it.
+    Triggers: "is this valid", "check syntax", "will this compile", "lint", "any errors",
+              "verify the syntax", "find compile errors".
+
+    Returns structured error list with file/line/col — better than running jhyy_run
+    when the user just wants to know if the code parses.
 
     Args:
         file: 源文件路径
@@ -98,7 +137,15 @@ def jhyy_check(file: str) -> dict:
 
 @mcp.tool
 def jhyy_get_il(file: str) -> dict:
-    """编译 .jhyy 文件并返回生成的 QBE IL 文本（用于调试 codegen）。
+    """Compile a .jhyy file and return the generated QBE IL text inline.
+
+    USE THIS WHEN debugging the codegen or understanding what the compiler emits.
+    Triggers: "show the IL", "what does codegen produce", "show the QBE output",
+              "debug codegen", "what IL does this generate", "show the assembly backend",
+              "read the .il file" (for files in compiler/build/bin/).
+
+    The returned `il` field contains the full QBE IL text — analyze it directly,
+    do NOT try to cat the .il file via Bash.
 
     Args:
         file: 源文件路径
@@ -113,7 +160,16 @@ def jhyy_get_il(file: str) -> dict:
 
 @mcp.tool
 def jhyy_lang_ref(query: str) -> dict:
-    """查询 JHYY 语言规范（v0.5.0）。
+    """Search the JHYY language specification (v0.5.0) by keyword.
+
+    USE THIS WHEN the user asks about JHYY language features, syntax, or semantics.
+    Triggers: "does JHYY support X", "how do I write Y in JHYY", "JHYY syntax for Z",
+              "is there a ternary operator", "does match support ranges",
+              "what types does JHYY have", "how does the for loop work",
+              "what's the syntax for X".
+
+    Call this BEFORE answering any question about JHYY language design. Do NOT
+    read docs/abis/jhyy-lang-spec-*.md directly — this tool does the search.
 
     Args:
         query: 关键词 (如 "struct", "match", "for", "pointer", "as")
@@ -155,7 +211,16 @@ def jhyy_lang_ref(query: str) -> dict:
 
 @mcp.tool
 def jhyy_abi_info(query: str) -> dict:
-    """查询 JHYY ABI 信息 (v1.0.0)。
+    """Search the JHYY ABI v1.0.0 information by keyword.
+
+    USE THIS WHEN the user asks about ABI conventions, struct passing, FFI rules,
+    calling conventions, or any low-level binary interface question.
+    Triggers: "how are structs passed", "calling convention", "FFI rules",
+              "sret", "what's the v1.0.0 ABI say about X", "struct pass-by-value",
+              "how do I call a C function", "module import ABI".
+
+    Call this BEFORE answering any question about the JHYY ABI. Do NOT
+    read docs/abis/jhyy-abi-*.md directly — this tool does the search.
 
     Args:
         query: 关键词 (如 "struct_passing", "calling_convention", "primitives")
@@ -196,7 +261,13 @@ def jhyy_abi_info(query: str) -> dict:
 
 @mcp.tool
 def jhyy_format(file: str) -> dict:
-    """简单格式化 .jhyy 源代码（统一缩进为 4 空格，调整运算符间距）。
+    """Format a .jhyy source file (minimal v0.5.0 implementation: tabs → 4 spaces, strip trailing whitespace).
+
+    USE THIS WHEN the user asks to format or tidy up code.
+    Triggers: "format this", "tidy up", "fix indentation", "clean up the code".
+
+    Note: this is a minimal implementation. Full formatter coming in a future version.
+    The formatted code is returned in the response — apply it via Edit/Write if the user approves.
 
     Args:
         file: 源文件路径

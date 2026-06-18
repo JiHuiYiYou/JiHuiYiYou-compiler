@@ -19,6 +19,8 @@ compiler/tests/examples/*
 *.exe
 *.ilk
 *.pdb
+__pycache__/
+*.pyc
 # 忽略 Claude Code 本地配置
 .claude
 # 忽略 Claude Code 生成的 markdown 文件
