@@ -2,6 +2,7 @@ compiler/build/*
 !compiler/build/bin/
 compiler/build/bin/*
 !compiler/build/bin/.gitkeep
+!compiler/build/bin/regress.py
 _*.txt
 _*.py
 _*.s
@@ -10,10 +11,10 @@ _*.exe
 _*_test.jhyy
 _*_min.jhyy
 _*_minimal_*.jhyy
-compiler/tests/examples/_*.jhyy
-compiler/tests/examples/_*.exe
-compiler/tests/examples/_*.il
-compiler/tests/examples/_*.s
+# tests/examples/ 里只跟踪 .jhyy 源文件，其余构建产物全部忽略
+compiler/tests/examples/*
+!compiler/tests/examples/*.jhyy
+!compiler/tests/examples/multi_file/
 *.o
 *.exe
 *.ilk

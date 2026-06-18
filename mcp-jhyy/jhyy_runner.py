@@ -58,7 +58,7 @@ def _run_cmd(cmd: list, timeout: int = 30, cwd: Optional[str] = None) -> dict:
         }
 
 
-def compile_file(file: str, output: Optional[str] = None, extra_inputs: list = None) -> dict:
+def compile_file(file: str, output: Optional[str] = None, extra_inputs: list = None) -> dict: # type: ignore
     """编译 .jhyy 文件为可执行程序。"""
     src = _resolve_path(file)
     if not os.path.exists(src):
@@ -80,7 +80,7 @@ def compile_file(file: str, output: Optional[str] = None, extra_inputs: list = N
     return _run_cmd(cmd, timeout=60)
 
 
-def run_exe(exe: str, args: list = None, timeout: int = 10) -> dict:
+def run_exe(exe: str, args: list = None, timeout: int = 10) -> dict: # type: ignore
     """运行已编译的 .exe。"""
     exe = _resolve_path(exe)
     # If user passed a path without .exe, try appending it
@@ -99,7 +99,7 @@ def run_exe(exe: str, args: list = None, timeout: int = 10) -> dict:
     return _run_cmd(cmd, timeout=timeout)
 
 
-def compile_and_run(file: str, extra_inputs: list = None, timeout: int = 10) -> dict:
+def compile_and_run(file: str, extra_inputs: list = None, timeout: int = 10) -> dict: # type: ignore
     """编译并运行 .jhyy 文件，返回运行结果。"""
     src = _resolve_path(file)
     if not os.path.exists(src):
