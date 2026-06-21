@@ -19,6 +19,7 @@ typedef enum {
     NODE_UNARY,          /* -expr, !expr, ~expr, *expr, &expr */
     NODE_BINARY,         /* a + b, a == b, a && b ... */
     NODE_CALL,           /* fn(args...) */
+    NODE_QUALIFIED_CALL, /* mod::fn(args...) */
     NODE_FIELD,          /* expr.field */
     NODE_INDEX,          /* expr[index] */
     NODE_CAST,           /* expr as Type */
@@ -109,6 +110,14 @@ typedef struct {
     Node  **args;
     size_t  nargs;
 } NodeCall;
+
+typedef struct {
+    Node   *module;     /* NODE_IDENT — imported module name */
+    Node   *function;   /* NODE_IDENT */
+    Node  **args;
+    size_t  nargs;
+    Sym    *resolved;   /* set by sema: target function sym (for mangling) */
+} NodeQualifiedCall;
 
 typedef struct { Node *expr; const char *field; } NodeField;
 typedef struct { Node *expr; Node *index; } NodeIndex;
@@ -241,6 +250,7 @@ NodeIdent        *node_ident_data(Node *n);
 NodeUnary        *node_unary_data(Node *n);
 NodeBinary       *node_binary_data(Node *n);
 NodeCall         *node_call_data(Node *n);
+NodeQualifiedCall *node_qualified_call_data(Node *n);
 NodeField        *node_field_data(Node *n);
 NodeIndex        *node_index_data(Node *n);
 NodeCast         *node_cast_data(Node *n);
@@ -290,6 +300,7 @@ Node *ast_new_ident(struct Arena *a, SourceLoc loc, Sym *sym);
 Node *ast_new_unary(struct Arena *a, SourceLoc loc, TokenKind op, Node *expr);
 Node *ast_new_binary(struct Arena *a, SourceLoc loc, TokenKind op, Node *left, Node *right);
 Node *ast_new_call(struct Arena *a, SourceLoc loc, Node *callee, Node **args, size_t nargs);
+Node *ast_new_qualified_call(struct Arena *a, SourceLoc loc, Node *module, Node *function, Node **args, size_t nargs);
 Node *ast_new_field(struct Arena *a, SourceLoc loc, Node *expr, const char *field);
 Node *ast_new_index(struct Arena *a, SourceLoc loc, Node *expr, Node *index);
 Node *ast_new_cast(struct Arena *a, SourceLoc loc, Node *expr, Node *target);

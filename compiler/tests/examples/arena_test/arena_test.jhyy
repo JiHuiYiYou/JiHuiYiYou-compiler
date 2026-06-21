@@ -1,0 +1,51 @@
+// arena_test.jhyy — driver that exercises arena.jhyy
+// Stage 0 self-hosting pilot: verifies arena.jhyy works as a standalone allocator.
+
+import arena;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    printf("step 1\n", 0);
+    let mut a: Arena = Arena {
+        start: 0 as *u8,
+        cur: 0 as *u8,
+        end: 0 as *u8,
+        blocks: 0 as *u8,
+        def_size: 0 as i64,
+    };
+    printf("step 2\n", 0);
+    arena_init(&a, 1024);
+    printf("step 3\n", 0);
+
+    // Allocate a small object (8 bytes, 8-aligned)
+    let p1 = arena_alloc(&a, 8);
+    printf("p1=%d\n", p1 as i32);
+
+    // Force block growth with many allocations
+    let mut i: i32 = 0;
+    while i < 200 {
+        let p = arena_alloc(&a, 16);
+        i = i + 1;
+    }
+    printf("allocated 200 objects\n");
+
+    // calloc: should return zeroed memory
+    let z = arena_calloc(&a, 32);
+    printf("calloc=%d\n", z as i32);
+
+    // strdup: copy a string with explicit null-terminator
+    let hello = "hello" as *u8;
+    let dup = arena_strdup(&a, hello, 5);
+    printf("dup=%d\n", dup as i32);
+
+    // reset: reuses blocks, resets cur
+    arena_reset(&a);
+    printf("after reset\n");
+
+    // free: returns all blocks to libc
+    arena_free(&a);
+    printf("after free\n");
+
+    42
+}

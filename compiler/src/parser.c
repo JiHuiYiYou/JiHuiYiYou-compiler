@@ -379,6 +379,7 @@ static Node *parse_func(Parser *p, bool is_extern) {
 
     /* Register function in global scope BEFORE parsing body so recursive calls work */
     Sym *sym = symtab_insert(p->global_scope, fname, SYM_FN, NULL, false, 0);
+    if (is_extern && sym) sym->is_extern = true;
 
     push_scope(p);
 
@@ -678,7 +679,7 @@ static Node *prefix_ident(Parser *p, Token token) {
 
     /* enum variant construction: TypeName::Variant(args)
        Only when the identifier is a known type name (SYM_TYPE) */
-    if (sym->kind == SYM_TYPE && match(p, TOKEN_COLON) && match(p, TOKEN_COLON)) {
+    if (sym->kind == SYM_TYPE && match(p, TOKEN_COLONCOLON)) {
         SourceLoc loc = token.loc;
         Token vt = expect(p, TOKEN_IDENT, "variant name");
         const char *vname = tok_name(p, vt);
@@ -694,6 +695,41 @@ static Node *prefix_ident(Parser *p, Token token) {
         }
 
         return ast_new_enum_variant(p->arena, loc, sym, vsym, payload);
+    }
+
+    /* qualified call: mod::name(args)
+       When IDENT is an imported module (SYM_MODULE), followed by :: */
+    if (sym->kind == SYM_MODULE && match(p, TOKEN_COLONCOLON)) {
+        SourceLoc loc = token.loc;
+        Token fn_tok = expect(p, TOKEN_IDENT, "function name after '::'");
+        const char *fn_name = tok_name(p, fn_tok);
+        /* Create placeholder sym; sema resolves to actual function in module's namespace */
+        Sym *fn_sym = symtab_lookup(p->current_scope, fn_name);
+        if (!fn_sym)
+            fn_sym = symtab_insert(p->current_scope, fn_name, SYM_FN, NULL, false, 0);
+
+        /* Parse (args...) */
+        Node **args = NULL;
+        size_t nargs = 0, cap = 0;
+        expect(p, TOKEN_LPAREN, "(");
+        if (!check(p, TOKEN_RPAREN)) {
+            do {
+                Node *arg = parse_expr(p, PREC_NONE);
+                if (nargs >= cap) {
+                    cap = cap ? cap * 2 : 8;
+                    Node **na = arena_alloc(p->arena, cap * sizeof(Node *));
+                    if (args && nargs > 0) memcpy(na, args, nargs * sizeof(Node *));
+                    args = na;
+                }
+                args[nargs++] = arg;
+            } while (match(p, TOKEN_COMMA));
+        }
+        expect(p, TOKEN_RPAREN, ")");
+
+        /* Module node is the SYM_MODULE itself; function node is IDENT */
+        Node *mod_node = ast_new_ident(p->arena, loc, sym);
+        Node *fn_node = ast_new_ident(p->arena, fn_tok.loc, fn_sym);
+        return ast_new_qualified_call(p->arena, loc, mod_node, fn_node, args, nargs);
     }
 
     return ast_new_ident(p->arena, token.loc, sym);

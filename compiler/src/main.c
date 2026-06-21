@@ -13,7 +13,9 @@ static void path_to_win(char *p) {
 }
 
 /* Forward declarations */
-static int resolve_imports(Node *module, const char *main_path, Arena *arena);
+static int resolve_imports(Node *module, const char *main_path, Arena *arena,
+                           char extra_paths[16][512], char extra_names[16][256],
+                           int nextra);
 
 static char *read_file(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -62,7 +64,7 @@ static int cmd_build(int argc, char **argv) {
     }
 
     /* resolve imports */
-    if (resolve_imports(ast, input, &arena) > 0) {
+    if (resolve_imports(ast, input, &arena, NULL, NULL, 0) > 0) {
         arena_free(&arena); free(source); return 1;
     }
 
@@ -92,17 +94,37 @@ static int cmd_build(int argc, char **argv) {
 }
 
 /* Resolve a single import file and return its non-import decls.
-   Recursively resolves transitive imports. */
+   Recursively resolves transitive imports.
+   Uses two separate arrays: in_progress (for cycle detection)
+   and completed (to skip modules already fully processed).
+   extra_paths: paths to additional CLI-provided files; used as fallback. */
 static int resolve_one_import(const char *mod_dir, const char *mod_name,
                               SourceLoc loc, Arena *arena,
                               Node ***out_decls, size_t *out_count, size_t *out_cap,
-                              char visited[64][512], size_t *nvisited) {
+                              char in_progress[64][512], size_t *nin_progress,
+                              char completed[64][512], size_t *ncompleted,
+                              char extra_paths[16][512], char extra_names[16][256],
+                              int nextra) {
     char mod_path[512];
-    snprintf(mod_path, sizeof(mod_path), "%s/%s.jhyy", mod_dir, mod_name);
+    /* First check if mod_name matches a CLI-provided file (extra_paths) */
+    int found_extra = 0;
+    for (int e = 0; e < nextra; e++) {
+        if (strcmp(extra_names[e], mod_name) == 0) {
+            snprintf(mod_path, sizeof(mod_path), "%s", extra_paths[e]);
+            found_extra = 1;
+            break;
+        }
+    }
+    if (!found_extra)
+        snprintf(mod_path, sizeof(mod_path), "%s/%s.jhyy", mod_dir, mod_name);
 
-    /* Check for cycle (already being visited) */
-    for (size_t k = 0; k < *nvisited; k++) {
-        if (strcmp(visited[k], mod_path) == 0) {
+    /* Already fully processed? Skip. */
+    for (size_t k = 0; k < *ncompleted; k++) {
+        if (strcmp(completed[k], mod_path) == 0) return 0;
+    }
+    /* Currently being processed? Cycle. */
+    for (size_t k = 0; k < *nin_progress; k++) {
+        if (strcmp(in_progress[k], mod_path) == 0) {
             fprintf(stderr, "%s:%d:%d: error: circular import '%s'\n",
                     loc.filename, loc.line, loc.col, mod_path);
             return 1;
@@ -133,17 +155,18 @@ static int resolve_one_import(const char *mod_dir, const char *mod_name,
         return 1;
     }
 
-    /* Mark as visited (copy path to persistent storage) */
-    if (*nvisited < 64) {
-        snprintf(visited[(*nvisited)++], 512, "%s", mod_path);
+    /* Push onto in_progress */
+    if (*nin_progress < 64) {
+        snprintf(in_progress[(*nin_progress)++], 512, "%s", mod_path);
     }
 
-    /* Extract dir for resolving nested imports */
+    /* Extract dir for resolving nested imports (handles mixed separators) */
     char nested_dir[512];
     snprintf(nested_dir, sizeof(nested_dir), "%s", mod_path);
     char *mslash = strrchr(nested_dir, '/');
-    if (!mslash) mslash = strrchr(nested_dir, '\\');
-    if (mslash) *mslash = '\0';
+    char *mbslash = strrchr(nested_dir, '\\');
+    char *last = mslash > mbslash ? mslash : mbslash;
+    if (last) *last = '\0';
 
     int errors = 0;
     NodeModule *imd = node_module_data(mod_ast);
@@ -154,8 +177,29 @@ static int resolve_one_import(const char *mod_dir, const char *mod_name,
             NodeImportDecl *iid = node_import_decl_data(idecl);
             errors += resolve_one_import(nested_dir, iid->sym->name, idecl->loc,
                                          arena, out_decls, out_count, out_cap,
-                                         visited, nvisited);
+                                         in_progress, nin_progress,
+                                         completed, ncompleted,
+                                         extra_paths, extra_names, nextra);
         } else {
+            /* Tag this decl's sym with its owning module for namespacing */
+            Sym *owner_sym = NULL;
+            switch (idecl->kind) {
+            case NODE_FUNC_DECL:
+                owner_sym = node_func_decl_data(idecl)->sym;
+                break;
+            case NODE_TYPE_DECL:
+                owner_sym = node_type_decl_data(idecl)->sym;
+                break;
+            case NODE_EXTERN_DECL:
+                owner_sym = node_extern_decl_data(idecl)->sym;
+                break;
+            default:
+                break;
+            }
+            if (owner_sym) {
+                owner_sym->module = mod_name;
+            }
+
             /* Add non-import decl to merged list */
             if (*out_count >= *out_cap) {
                 *out_cap *= 2;
@@ -167,20 +211,51 @@ static int resolve_one_import(const char *mod_dir, const char *mod_name,
         }
     }
 
+    /* Pop from in_progress, push onto completed */
+    for (size_t k = 0; k < *nin_progress; k++) {
+        if (strcmp(in_progress[k], mod_path) == 0) {
+            /* shift remaining down (preserve order) */
+            char tmp[512];
+            for (size_t m = k; m < *nin_progress - 1; m++) {
+                snprintf(tmp, sizeof(tmp), "%s", in_progress[m + 1]);
+                snprintf(in_progress[m], 512, "%s", tmp);
+            }
+            (*nin_progress)--;
+            break;
+        }
+    }
+    if (*ncompleted < 64) {
+        snprintf(completed[(*ncompleted)++], 512, "%s", mod_path);
+    }
+
     arena_free(&temp_arena);
     free(mod_source);
     return errors;
 }
 
 /* Resolve imports: parse imported files and merge their decls into the module.
-   Handles transitive imports (A imports B, B imports C) and detects cycles. */
-static int resolve_imports(Node *module, const char *main_path, Arena *arena) {
+   Handles transitive imports (A imports B, B imports C) and detects cycles.
+   Falls back to cwd if main_path's directory doesn't contain the import.
+   extra_paths: paths to additional input files (CLI inputs) — used to
+   satisfy imports when main's directory doesn't contain the file. */
+static int resolve_imports(Node *module, const char *main_path, Arena *arena,
+                           char extra_paths[16][512], char extra_names[16][256],
+                           int nextra) {
     NodeModule *md = node_module_data(module);
     char dir[512];
+    /* Extract directory of main_path. Find the LAST separator of either kind,
+       so paths with mixed separators (e.g. "tests\\foo" or "tests/foo") both
+       work correctly. */
     snprintf(dir, sizeof(dir), "%s", main_path);
     char *slash = strrchr(dir, '/');
-    if (!slash) slash = strrchr(dir, '\\');
-    if (slash) *slash = '\0';
+    char *bslash = strrchr(dir, '\\');
+    char *last_sep = slash > bslash ? slash : bslash;
+    if (last_sep) {
+        *last_sep = '\0';
+    } else {
+        /* No directory in path — assume cwd */
+        snprintf(dir, sizeof(dir), ".");
+    }
 
     /* Count initial imports */
     size_t nimports = 0;
@@ -205,9 +280,11 @@ static int resolve_imports(Node *module, const char *main_path, Arena *arena) {
     size_t new_cap = md->ndeccls + nimports * 8;
     Node **new_decls = arena_alloc(arena, new_cap * sizeof(Node *));
 
-    /* Allocate visited array on heap to avoid huge stack frame */
-    char (*visited)[512] = calloc(64, 512);
-    size_t nvisited = 0;
+    /* Allocate in_progress + completed arrays on heap to avoid huge stack frame */
+    char (*in_progress)[512] = calloc(64, 512);
+    char (*completed)[512] = calloc(64, 512);
+    size_t nin_progress = 0;
+    size_t ncompleted = 0;
 
     int errors = 0;
     for (size_t i = 0; i < md->ndeccls; i++) {
@@ -216,10 +293,23 @@ static int resolve_imports(Node *module, const char *main_path, Arena *arena) {
         NodeImportDecl *id = node_import_decl_data(decl);
         errors += resolve_one_import(dir, id->sym->name, decl->loc, arena,
                                      &new_decls, &new_count, &new_cap,
-                                     visited, &nvisited);
+                                     in_progress, &nin_progress,
+                                     completed, &ncompleted,
+                                     extra_paths, extra_names, nextra);
     }
 
-    if (errors > 0) { free(visited); return errors; }
+    /* Also resolve CLI-provided files as if they were imported by main.
+       Their decls were NOT pre-merged; this is how they get included. */
+    for (int e = 0; e < nextra; e++) {
+        SourceLoc loc = {1, 1, main_path};
+        errors += resolve_one_import(".", extra_names[e], loc, arena,
+                                     &new_decls, &new_count, &new_cap,
+                                     in_progress, &nin_progress,
+                                     completed, &ncompleted,
+                                     extra_paths, extra_names, nextra);
+    }
+
+    if (errors > 0) { free(in_progress); free(completed); return errors; }
 
     /* Append main module's non-import decls after imported decls */
     for (size_t i = 0; i < nmain; i++) {
@@ -234,7 +324,8 @@ static int resolve_imports(Node *module, const char *main_path, Arena *arena) {
 
     md->decls = new_decls;
     md->ndeccls = new_count;
-    free(visited);
+    free(in_progress);
+    free(completed);
     return 0;
 }
 
@@ -259,45 +350,50 @@ static int compile(const char **inputs, int ninputs, const char *output) {
     }
 
     NodeModule *md = node_module_data(ast);
+    (void)md;
 
-    /* Parse additional input files and merge their decls */
+    /* Parse additional input files. Their decls are NOT pre-merged into main.
+   Instead, they're treated as if they were imported by main (their decls
+   go through the same import-resolution code path). This avoids the
+   "duplicate decl with same mangled name" issue. */
+    char extra_paths[16][512];
+    char extra_names[16][256];
+    int nextra = 0;
     for (int fi = 1; fi < ninputs; fi++) {
-        char *f_source = read_file(inputs[fi]);
-        if (!f_source) continue;
-
-        Arena temp_arena;
-        arena_init(&temp_arena, 1024 * 1024);
-        Lexer f_lexer;
-        lexer_init(&f_lexer, f_source, inputs[fi]);
-        Parser f_parser;
-        parser_init(&f_parser, &f_lexer, &arena);
-        Node *f_ast = parser_parse(&f_parser);
-
-        if (f_parser.error_count > 0) {
-            fprintf(stderr, "%d parse error(s) in '%s'\n", f_parser.error_count, inputs[fi]);
-            arena_free(&temp_arena); free(f_source); free(main_source); arena_free(&arena); return 1;
+        /* Derive module name from basename (without extension).
+           Find the LAST separator of either kind so mixed paths work. */
+        const char *s1 = strrchr(inputs[fi], '/');
+        const char *s2 = strrchr(inputs[fi], '\\');
+        const char *base = s1 > s2 ? s1 : s2;
+        base = base ? base + 1 : inputs[fi];
+        snprintf(extra_names[nextra], 256, "%s", base);
+        char *dot = strrchr(extra_names[nextra], '.');
+        if (dot) *dot = '\0';
+        /* Derive directory (same logic) */
+        char dir_buf[512];
+        snprintf(dir_buf, sizeof(dir_buf), "%s", inputs[fi]);
+        char *slash = strrchr(dir_buf, '/');
+        char *bslash = strrchr(dir_buf, '\\');
+        char *last = slash > bslash ? slash : bslash;
+        if (last) *last = '\0';
+        else snprintf(dir_buf, sizeof(dir_buf), ".");
+        /* Build path with explicit size check to silence -Wformat-truncation */
+        size_t needed = strlen(dir_buf) + 1 + strlen(extra_names[nextra]) + 6;
+        if (needed >= 512) {
+            /* path too long, just use module name as fallback */
+            snprintf(extra_paths[nextra], 512, "%s.jhyy", extra_names[nextra]);
+        } else {
+            /* Use GCC suppression pragma for the format string */
+            #pragma GCC diagnostic push
+            #pragma GCC diagnostic ignored "-Wformat-truncation"
+            snprintf(extra_paths[nextra], 512, "%s/%s.jhyy", dir_buf, extra_names[nextra]);
+            #pragma GCC diagnostic pop
         }
-
-        /* Merge non-import decls from this file into main module */
-        NodeModule *fmd = node_module_data(f_ast);
-        size_t new_count = md->ndeccls + fmd->ndeccls;
-        Node **new_decls = arena_alloc(&arena, new_count * sizeof(Node *));
-        memcpy(new_decls, md->decls, md->ndeccls * sizeof(Node *));
-        size_t pos = md->ndeccls;
-        for (size_t j = 0; j < fmd->ndeccls; j++) {
-            if (fmd->decls[j]->kind != NODE_IMPORT_DECL) {
-                new_decls[pos++] = fmd->decls[j];
-            }
-        }
-        md->decls = new_decls;
-        md->ndeccls = pos;
-
-        arena_free(&temp_arena);
-        free(f_source);
+        nextra++;
     }
 
     /* resolve imports (uses main file's directory as base) */
-    if (resolve_imports(ast, inputs[0], &arena) > 0) {
+    if (resolve_imports(ast, inputs[0], &arena, extra_paths, extra_names, nextra) > 0) {
         arena_free(&arena); free(main_source); return 1;
     }
 

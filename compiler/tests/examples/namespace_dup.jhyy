@@ -1,0 +1,11 @@
+// Same-name-in-different-modules test (v0.6 namespace feature)
+// Two modules define a function named `process`; caller disambiguates with ::
+// Values kept < 256 so the exit code (a single byte on Windows) reports correctly.
+import ns_dup_a;
+import ns_dup_b;
+
+fn main_jhyy() -> i32 {
+    let a = ns_dup_a::process();   // returns 100
+    let b = ns_dup_b::process();   // returns 50
+    a + b   // 150
+}

@@ -1,0 +1,8 @@
+// Module B — defines `init` that returns 200 (same name as mod_a::init)
+fn init() -> i32 {
+    200
+}
+
+fn helper() -> i32 {
+    13
+}

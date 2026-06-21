@@ -1,0 +1,17 @@
+// Namespace test: two modules both define `init` and `helper`.
+// Use qualified call syntax to disambiguate.
+import mod_a;
+import mod_b;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    let a_init = mod_a::init();   // 100
+    let b_init = mod_b::init();   // 200
+    let a_help = mod_a::helper(); // 7
+    let b_help = mod_b::helper(); // 13
+    let total = a_init + b_init + a_help + b_help;
+    printf("a_init=%d b_init=%d a_help=%d b_help=%d total=%d\n",
+           a_init, b_init, a_help, b_help, total);
+    total - 320  // 100+200+7+13 = 320; EXIT 0
+}

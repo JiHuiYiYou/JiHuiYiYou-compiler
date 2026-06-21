@@ -1,12 +1,14 @@
-// Multi-file compilation test: transitive imports
+// Multi-file compilation test: transitive imports + module namespaces
+// Each module is imported explicitly (transitive imports are not re-exported).
 import lib_a;
 import lib_b;
+import lib_c;
 
 extern fn printf(fmt: *u8, val: i32) -> i32;
 
 fn main_jhyy() -> i32 {
-    let a = get_a();       // from lib_a (should be 10)
-    let b = get_b();       // from lib_b (should be 20)
-    let c = get_c();       // from lib_c via transitive import through lib_a
+    let a = lib_a::get_a();       // from lib_a (10)
+    let b = lib_b::get_b();       // from lib_b (20)
+    let c = lib_c::get_c();       // from lib_c, also transitively imported via lib_a
     a + b + c  // 10 + 20 + 30 = 60
 }

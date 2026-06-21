@@ -299,7 +299,9 @@ Token lexer_next(Lexer *l) {
     /* punctuation */
     case ',': return make_token(l, TOKEN_COMMA, start, 1);
     case ';': return make_token(l, TOKEN_SEMICOLON, start, 1);
-    case ':': return make_token(l, TOKEN_COLON, start, 1);
+    case ':':
+        if (match_char(l, ':')) return make_token(l, TOKEN_COLONCOLON, start, 2);
+        return make_token(l, TOKEN_COLON, start, 1);
 
     /* dot: ., .. */
     case '.':
@@ -455,6 +457,7 @@ const char *token_kind_name(TokenKind kind) {
     case TOKEN_COMMA:     return ",";
     case TOKEN_SEMICOLON: return ";";
     case TOKEN_COLON:     return ":";
+    case TOKEN_COLONCOLON: return "::";
     case TOKEN_ARROW:     return "->";
     case TOKEN_FATARROW:  return "=>";
     case TOKEN_EOF:       return "EOF";

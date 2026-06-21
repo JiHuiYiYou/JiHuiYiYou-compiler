@@ -79,6 +79,7 @@ typedef enum {
     TOKEN_COMMA,       /* ,  */
     TOKEN_SEMICOLON,   /* ;  */
     TOKEN_COLON,       /* :  */
+    TOKEN_COLONCOLON,  /* :: */
     TOKEN_ARROW,       /* -> */
     TOKEN_FATARROW,    /* => */
 

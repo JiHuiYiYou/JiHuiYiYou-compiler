@@ -15,6 +15,9 @@ _*_minimal_*.jhyy
 compiler/tests/examples/*
 !compiler/tests/examples/*.jhyy
 !compiler/tests/examples/multi_file/
+!compiler/tests/examples/arena_test/
+!compiler/tests/examples/arena_test/*.jhyy
+!compiler/tests/examples/namespace/
 *.o
 *.exe
 *.ilk
@@ -23,5 +26,3 @@ __pycache__/
 *.pyc
 # 忽略 Claude Code 本地配置
 .claude
-# 忽略 Claude Code 生成的 markdown 文件
-CLAUDE.md

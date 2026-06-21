@@ -1,0 +1,8 @@
+// Module A — defines `init` that returns 100
+fn init() -> i32 {
+    100
+}
+
+fn helper() -> i32 {
+    7
+}

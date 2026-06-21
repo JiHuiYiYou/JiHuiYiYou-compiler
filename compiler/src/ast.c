@@ -30,6 +30,7 @@ ACCESSOR(node_ident_data, NodeIdent)
 ACCESSOR(node_unary_data, NodeUnary)
 ACCESSOR(node_binary_data, NodeBinary)
 ACCESSOR(node_call_data, NodeCall)
+ACCESSOR(node_qualified_call_data, NodeQualifiedCall)
 ACCESSOR(node_field_data, NodeField)
 ACCESSOR(node_index_data, NodeIndex)
 ACCESSOR(node_cast_data, NodeCast)
@@ -132,6 +133,17 @@ Node *ast_new_call(Arena *a, SourceLoc loc, Node *callee, Node **args, size_t na
     d->callee = callee;
     d->args = args;
     d->nargs = nargs;
+    return n;
+}
+
+Node *ast_new_qualified_call(Arena *a, SourceLoc loc, Node *module, Node *function, Node **args, size_t nargs) {
+    Node *n = new_node(a, NODE_QUALIFIED_CALL, loc, sizeof(NodeQualifiedCall));
+    NodeQualifiedCall *d = node_qualified_call_data(n);
+    d->module = module;
+    d->function = function;
+    d->args = args;
+    d->nargs = nargs;
+    d->resolved = NULL;
     return n;
 }
 
@@ -441,6 +453,7 @@ const char *node_kind_name(NodeKind kind) {
     case NODE_UNARY:         return "unary";
     case NODE_BINARY:        return "binary";
     case NODE_CALL:          return "call";
+    case NODE_QUALIFIED_CALL: return "qualified_call";
     case NODE_FIELD:         return "field";
     case NODE_INDEX:         return "index";
     case NODE_CAST:          return "cast";

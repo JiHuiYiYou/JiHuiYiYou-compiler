@@ -72,6 +72,8 @@ Sym *symtab_insert(SymTable *t, const char *name, SymKind kind,
             sym->type = type;
             sym->is_mutable = is_mutable;
             sym->depth = depth;
+            sym->module = NULL;
+            sym->is_extern = false;
             t->entries[target] = sym;
             t->count++;
             return sym;

@@ -1,0 +1,14 @@
+// Test pointer <-> integer casts (v0.6 Sprint 6C)
+extern fn printf(fmt: *u8, val: i64) -> i32;
+
+fn main_jhyy() -> i32 {
+    let x: i32 = 42;
+    let p = &x;
+    let addr = p as i64;
+    printf("addr=%ld\n", addr);
+    let back = addr as *i32;
+    let v = *back;
+    /* print v as i64 to match printf's signature */
+    printf("v=%ld\n", v as i64);
+    if v == 42 { 0 } else { 1 }
+}

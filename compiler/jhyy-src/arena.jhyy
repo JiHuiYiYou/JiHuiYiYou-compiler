@@ -1,0 +1,168 @@
+// arena.jhyy — JHYY translation of compiler/src/arena.c
+// Stage 0 self-hosting pilot: demonstrates that JHYY can express
+// the bump allocator used by the compiler itself.
+//
+// Translation notes:
+//   - size_t  → i64 (JHYY uses i64 for sizes/addresses)
+//   - void*   → *u8
+//   - varargs (arena_sprintf) → omitted; not yet supported in JHYY
+//   - Self-referential struct pointers are emulated via *u8 + casts
+//     (JHYY's type system does not yet allow forward struct refs).
+//   - Pointer arithmetic is emulated as `(ptr as i64 + offset) as *u8`
+//     (JHYY's `+` operator does not accept pointer+integer directly).
+
+// =====================
+// FFI: libc primitives
+// =====================
+
+extern fn malloc(size: i64) -> *u8;
+extern fn free(p: *u8) -> i32;
+extern fn memset(p: *u8, val: i32, n: i64) -> *u8;
+extern fn memcpy(dst: *u8, src: *u8, n: i64) -> *u8;
+
+// =====================
+// Constants
+// =====================
+
+fn ARENA_DEFAULT_SIZE() -> i64 { 1048576 as i64 }  // 1 MB
+
+// =====================
+// ArenaBlock: linked-list node for arena chunks
+// =====================
+
+// `next` is *u8 here to avoid forward-reference issue; cast to *ArenaBlock at use site.
+type ArenaBlock = struct {
+    next: *u8,
+}
+
+// =====================
+// Arena: the bump-allocator state
+// =====================
+
+type Arena = struct {
+    start:    *u8,
+    cur:      *u8,
+    end:      *u8,
+    blocks:   *u8,   // actually *ArenaBlock (cast at use site)
+    def_size: i64,
+}
+
+// =====================
+// Helpers
+// =====================
+
+fn align_up(x: i64, align: i64) -> i64 {
+    let mask = align - 1 as i64;
+    (x + mask) & ~(mask)
+}
+
+// ptr_add(p, off): pointer arithmetic as (p as i64 + off) as *u8
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    (p as i64 + off) as *u8
+}
+
+fn arena_new_block(a: *Arena, min_size: i64) -> i32 {
+    let size = (*a).def_size;
+    if size < min_size {
+        size = min_size;
+    }
+    let total = 16 as i64 + size;
+    let raw = malloc(total);
+    if raw == (0 as *u8) {
+        return 0;
+    }
+    let b = raw as *ArenaBlock;
+    (*b).next = (*a).blocks;
+    (*a).blocks = b as *u8;
+    let data = ptr_add(raw, 16 as i64);
+    (*a).start = data;
+    (*a).cur = data;
+    (*a).end = ptr_add(data, size);
+    return 1;
+}
+
+// =====================
+// Public API
+// =====================
+
+fn arena_init(a: *Arena, default_size: i64) -> i32 {
+    if default_size > 0 as i64 {
+        (*a).def_size = default_size;
+    } else {
+        (*a).def_size = ARENA_DEFAULT_SIZE();
+    }
+    (*a).blocks = 0 as *u8;
+    (*a).start = 0 as *u8;
+    (*a).cur = 0 as *u8;
+    (*a).end = 0 as *u8;
+    return 1;
+}
+
+fn arena_alloc_aligned(a: *Arena, size: i64, align: i64) -> *u8 {
+    if size == 0 as i64 {
+        return 0 as *u8;
+    }
+    if (*a).cur != (0 as *u8) {
+        let cur_int = (*a).cur as i64;
+        let aligned = align_up(cur_int, align);
+        let aligned_ptr = aligned as *u8;
+        let end_int = (*a).end as i64;
+        if aligned + size <= end_int {
+            (*a).cur = (aligned + size) as *u8;
+            return aligned_ptr;
+        }
+    }
+    let min_total = size + align;
+    let ok = arena_new_block(a, min_total);
+    if ok == 0 {
+        return 0 as *u8;
+    }
+    return arena_alloc_aligned(a, size, align);
+}
+
+fn arena_alloc(a: *Arena, size: i64) -> *u8 {
+    return arena_alloc_aligned(a, size, 8 as i64);
+}
+
+fn arena_calloc(a: *Arena, size: i64) -> *u8 {
+    let p = arena_alloc(a, size);
+    if p != (0 as *u8) {
+        memset(p, 0, size);
+    }
+    return p;
+}
+
+fn arena_strdup(a: *Arena, s: *u8, len: i64) -> *u8 {
+    let p = arena_alloc(a, len + 1 as i64);
+    if p == (0 as *u8) {
+        return 0 as *u8;
+    }
+    memcpy(p, s, len + 1 as i64);  // copy len bytes + 1 zero byte (data may already have it)
+    return p;
+}
+
+fn arena_reset(a: *Arena) -> i32 {
+    if (*a).blocks != (0 as *u8) {
+        let first = (*a).blocks;
+        let data = ptr_add(first, 16 as i64);
+        (*a).start = data;
+        (*a).cur = data;
+        (*a).end = ptr_add(data, (*a).def_size);
+    }
+    return 1;
+}
+
+fn arena_free(a: *Arena) -> i32 {
+    let mut b = (*a).blocks;
+    while b != (0 as *u8) {
+        let ab = b as *ArenaBlock;
+        let next = (*ab).next;
+        free(b);
+        b = next;
+    }
+    (*a).blocks = 0 as *u8;
+    (*a).start = 0 as *u8;
+    (*a).cur = 0 as *u8;
+    (*a).end = 0 as *u8;
+    return 1;
+}

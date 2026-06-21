@@ -1,0 +1,4 @@
+// Module B: also defines process() (different return value)
+fn process() -> i32 {
+    50
+}

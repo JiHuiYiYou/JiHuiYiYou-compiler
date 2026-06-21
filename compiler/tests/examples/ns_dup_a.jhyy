@@ -1,0 +1,4 @@
+// Module A: defines process()
+fn process() -> i32 {
+    100
+}

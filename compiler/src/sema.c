@@ -146,6 +146,9 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         {
             Sym *gsym = symtab_lookup_local(ctx->global_scope, d->sym->name);
             if (gsym && (gsym->kind == SYM_FN || gsym->kind == SYM_TYPE) && gsym->type) {
+                /* Replace parser placeholder with the real sym so codegen can see
+                   module field for name mangling */
+                if (gsym != d->sym) d->sym = gsym;
                 n->type = gsym->type;
                 return n->type;
             }
@@ -284,6 +287,69 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
             n->type = callee_type->func.ret ? callee_type->func.ret : type_void();
         } else {
             n->type = type_void(); /* unknown return */
+        }
+        return n->type;
+    }
+
+    /* ── qualified call: mod::fn(args) ── */
+    case NODE_QUALIFIED_CALL: {
+        NodeQualifiedCall *d = node_qualified_call_data(n);
+        /* module is NODE_IDENT with a SYM_MODULE sym */
+        if (d->module->kind != NODE_IDENT) {
+            sema_error(ctx, n->loc, "qualified call left side must be a module name");
+            n->type = type_void();
+            return n->type;
+        }
+        Sym *mod_sym = node_ident_data(d->module)->sym;
+        if (mod_sym->kind != SYM_MODULE) {
+            sema_error(ctx, n->loc, "'%s' is not a module", mod_sym->name);
+            n->type = type_void();
+            return n->type;
+        }
+        const char *mod_name = mod_sym->name;
+
+        if (d->function->kind != NODE_IDENT) {
+            sema_error(ctx, n->loc, "qualified call function name must be an identifier");
+            n->type = type_void();
+            return n->type;
+        }
+        Sym *fn_sym_placeholder = node_ident_data(d->function)->sym;
+        const char *fn_name = fn_sym_placeholder->name;
+
+        /* Resolve types of arguments first (for nested expressions) */
+        for (size_t i = 0; i < d->nargs; i++) {
+            infer_type(ctx, d->args[i]);
+        }
+
+        /* Search global scope for a SYM_FN whose name == fn_name and module == mod_name.
+           This handles both same-name-in-different-modules and resolves to the
+           correct module's function. */
+        Sym *resolved = NULL;
+        SymTable *t = ctx->global_scope;
+        for (size_t i = 0; i < t->nentries; i++) {
+            Sym *e = t->entries[i];
+            if (!e) continue;
+            if (e->kind == SYM_FN && strcmp(e->name, fn_name) == 0) {
+                /* match module: NULL (main) only matches "" lookup */
+                if (mod_name && mod_name[0] == '\0') {
+                    if (!e->module) { resolved = e; break; }
+                } else if (e->module && strcmp(e->module, mod_name) == 0) {
+                    resolved = e;
+                    break;
+                }
+            }
+        }
+        if (!resolved) {
+            sema_error(ctx, n->loc, "module '%s' has no function '%s'", mod_name, fn_name);
+            n->type = type_void();
+            return n->type;
+        }
+
+        d->resolved = resolved;
+        if (resolved->type && resolved->type->kind == KIND_FUNC) {
+            n->type = resolved->type->func.ret ? resolved->type->func.ret : type_void();
+        } else {
+            n->type = type_void();
         }
         return n->type;
     }

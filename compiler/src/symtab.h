@@ -22,6 +22,8 @@ typedef struct Sym {
     Type       *type;
     bool        is_mutable;
     int         depth;       /* scope depth, 0 = global */
+    const char *module;      /* owning module name (NULL = main); used for mangling */
+    bool        is_extern;   /* FFI declaration — never mangled, no body to emit */
 } Sym;
 
 /* ── Symbol table (open addressing, linear probing) ── */

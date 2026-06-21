@@ -3,6 +3,15 @@
 #include <stdio.h>
 #include <string.h>
 
+/* ── name mangling: emit $mod__name when sym has an owning module ── */
+static void emit_mangled_name(IRBuf *ir, Sym *sym) {
+    if (sym && sym->module) {
+        ir_emit(ir, "$%s__%s", sym->module, sym->name);
+    } else {
+        ir_emit(ir, "$%s", sym->name ? sym->name : "?");
+    }
+}
+
 /* ── side table: map Sym* → IRVal for local vars ── */
 #define MAX_LOCALS 512
 #define MAX_LOOP_DEPTH 32
@@ -406,7 +415,21 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
     }
     case NODE_CALL: {
         NodeCall *d = node_call_data(n);
-        const char *fn_name = node_ident_data(d->callee)->sym->name;
+        /* Use mangled name if the function sym has a module owner.
+           The parser keeps sym->name unchanged; mangling happens here so
+           that two modules can both define a function with the same name.
+           Extern FFI declarations are NOT mangled. */
+        Sym *fn_sym = (d->callee->kind == NODE_IDENT) ? node_ident_data(d->callee)->sym : NULL;
+        char mangled[512];
+        const char *fn_name;
+        if (fn_sym && fn_sym->is_extern) {
+            fn_name = fn_sym->name;  /* extern: pass-through name to linker */
+        } else if (fn_sym && fn_sym->module) {
+            snprintf(mangled, sizeof(mangled), "%s__%s", fn_sym->module, fn_sym->name);
+            fn_name = mangled;
+        } else {
+            fn_name = fn_sym ? fn_sym->name : "?";
+        }
 
         int is_sret = (n->type && n->type->kind == KIND_STRUCT);
         IRVal ret_slot;
@@ -429,6 +452,57 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             Type *at = d->args[i]->type;
             if (at && at->kind == KIND_STRUCT) {
                 /* copy struct to a new stack slot for pass-by-value */
+                int asize = (int)type_size(at);
+                if (asize < 4) asize = 4;
+                IRVal copy_slot = ir_new_tmp(cg->ir, 'l');
+                ir_emit_alloc(cg->ir, copy_slot, asize);
+                cg_copy_struct(cg, at, copy_slot, arg);
+                args[extra + i] = copy_slot;
+            } else {
+                args[extra + i] = arg;
+            }
+        }
+
+        if (is_sret) {
+            ir_emit_call_void(cg->ir, fn_name, args, (int)d->nargs + 1);
+            return ret_slot;
+        }
+        char qt = n->type ? qbe_type_of(n->type) : 'w';
+        IRVal result = ir_new_tmp(cg->ir, qt);
+        ir_emit_call(cg->ir, result, fn_name, args, (int)d->nargs);
+        return result;
+    }
+    case NODE_QUALIFIED_CALL: {
+        NodeQualifiedCall *d = node_qualified_call_data(n);
+        /* d->resolved was set by sema */
+        Sym *fn_sym = d->resolved;
+        char mangled[512];
+        const char *fn_name;
+        if (fn_sym && fn_sym->module) {
+            snprintf(mangled, sizeof(mangled), "%s__%s", fn_sym->module, fn_sym->name);
+            fn_name = mangled;
+        } else {
+            fn_name = fn_sym ? fn_sym->name : "?";
+        }
+
+        int is_sret = (n->type && n->type->kind == KIND_STRUCT);
+        IRVal ret_slot;
+        if (is_sret) {
+            int rsize = (int)type_size(n->type);
+            if (rsize < 4) rsize = 4;
+            ret_slot = ir_new_tmp(cg->ir, 'l');
+            ir_emit_alloc(cg->ir, ret_slot, rsize);
+        }
+
+        int extra = is_sret ? 1 : 0;
+        IRVal *args = NULL;
+        if (d->nargs + extra > 0)
+            args = arena_alloc(cg->ir->arena, (d->nargs + extra) * sizeof(IRVal));
+        if (is_sret) args[0] = ret_slot;
+        for (size_t i = 0; i < d->nargs; i++) {
+            IRVal arg = cg_expr(cg, d->args[i]);
+            Type *at = d->args[i]->type;
+            if (at && at->kind == KIND_STRUCT) {
                 int asize = (int)type_size(at);
                 if (asize < 4) asize = 4;
                 IRVal copy_slot = ir_new_tmp(cg->ir, 'l');
@@ -651,14 +725,21 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         if (d->expr->kind == NODE_IDENT) {
             NodeIdent *id = node_ident_data(d->expr);
             int is_stack = 0;
-            IRVal slot = cg_find_local(cg, id->sym, &is_stack);
+            IRVal val = cg_find_local(cg, id->sym, &is_stack);
             if (is_stack) {
                 IRVal result = ir_new_tmp(cg->ir, 'l');
                 ir_emit_copy(cg->ir, result, 0);
                 /* return the stack slot address */
-                return slot;
+                return val;
             }
-            /* For immutable vars (SSA temps), we can't take address yet */
+            /* SSA temp: spill to a new stack slot, update local entry, return slot */
+            int size = (int)type_size(id->sym->type);
+            if (size < 4) size = 4;
+            IRVal slot = ir_new_tmp(cg->ir, 'l');
+            ir_emit_alloc(cg->ir, slot, size);
+            cg_emit_store(cg, id->sym->type, val, slot);
+            cg_add_local(cg, id->sym, slot, 1);
+            return slot;
         }
         /* fallback: evaluate as expression (won't work for SSA temps) */
         IRVal v = cg_expr(cg, d->expr);
@@ -669,6 +750,10 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
     case NODE_DEREF: {
         NodeDeref *d = node_deref_data(n);
         IRVal ptr = cg_expr(cg, d->expr);
+        /* Pointer-to-struct: return the pointer itself (struct manipulated by address) */
+        if (n->type && n->type->kind == KIND_STRUCT) {
+            return ptr;
+        }
         char qt = n->type ? qbe_type_of(n->type) : 'w';
         IRVal result = ir_new_tmp(cg->ir, qt);
         cg_emit_load(cg, result, n->type, ptr);
@@ -1186,6 +1271,36 @@ static void cg_stmt(CGContext *cg, Node *n) {
                 ir_emit_binary(cg->ir, addr, "add", base, offset);
                 cg_emit_store(cg, elem_type, val, addr);
             }
+        } else if (d->target->kind == NODE_FIELD) {
+            /* (*ptr).field = value  OR  ptr->field = value */
+            NodeField *df = node_field_data(d->target);
+            /* Compute address of field */
+            Type *expr_type = df->expr->type;
+            Type *struct_type = NULL;
+            if (expr_type && expr_type->kind == KIND_POINTER &&
+                expr_type->pointer.elem && expr_type->pointer.elem->kind == KIND_STRUCT) {
+                struct_type = expr_type->pointer.elem;
+            } else if (expr_type && expr_type->kind == KIND_STRUCT) {
+                struct_type = expr_type;
+            }
+            if (struct_type) {
+                IRVal base = cg_expr(cg, df->expr);
+                size_t offset = 0;
+                Type *field_type = NULL;
+                for (size_t i = 0; i < struct_type->struct_type.nfields; i++) {
+                    if (strcmp(struct_type->struct_type.fields[i].name->name, df->field) == 0) {
+                        offset = struct_type->struct_type.fields[i].offset;
+                        field_type = struct_type->struct_type.fields[i].type;
+                        break;
+                    }
+                }
+                IRVal addr = base;
+                if (offset > 0) {
+                    addr = ir_new_tmp(cg->ir, 'l');
+                    ir_emit_binary(cg->ir, addr, "add", base, ir_new_int((int64_t)offset));
+                }
+                cg_emit_store(cg, field_type, val, addr);
+            }
         }
         break;
     }
@@ -1349,11 +1464,11 @@ static void cg_func(IRBuf *ir, Node *n) {
     int is_sret = (ret_type && ret_type->kind == KIND_STRUCT);
     char ret_qt = (ret_type && !is_sret) ? qbe_type_of(ret_type) : 0;
 
-    /* emit header */
+    /* emit header (mangled name when function is owned by a module) */
     if (ret_qt)
-        ir_emit(ir, "export function %c $%s(", ret_qt, fd->sym->name);
+        ir_emit(ir, "export function %c ", ret_qt), emit_mangled_name(ir, fd->sym), ir_emit(ir, "(");
     else
-        ir_emit(ir, "export function $%s(", fd->sym->name);
+        ir_emit(ir, "export function "), emit_mangled_name(ir, fd->sym), ir_emit(ir, "(");
     int first = 1;
     /* sret: hidden return slot pointer is first parameter */
     if (is_sret) {
