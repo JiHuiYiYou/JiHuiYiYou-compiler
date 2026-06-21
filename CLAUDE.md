@@ -40,9 +40,18 @@ python compiler/build/bin/regress.py    # 43/46 passed, 0 failed
 - [`jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md) — 语言规范（latest，锁定 v0.6）
 - [`jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) — ABI 白皮书（locked：struct pass-by-value / 多文件 / FFI / break-continue / 切片 / 命名空间）
 
-### 计划（`docs/plans/`）
-- [`phase-总规划-v0.2.x-to-v1.0.0.md`](docs/plans/phase-总规划-v0.2.x-to-v1.0.0.md) — 总体路线图
-- 各 sprint：`v0.X.0任务清单 + 概要设计.md` / `v0.X.0详细实现方案.md`
+### 阶段规划（`docs/plans/phase-*.md`，L1 顶层）
+
+| 文档 | 阶段 | 状态 |
+|------|------|------|
+| [`phase-0-skeleton.md`](docs/plans/phase-0-skeleton.md) | Phase 0 — 骨架 | 已完成 |
+| [`phase-1-c-compiler.md`](docs/plans/phase-1-c-compiler.md) | **Phase 1 — C 宿主编译器（当前）** | 进行中（v0.6.0） |
+| [`phase-2-self-hosting.md`](docs/plans/phase-2-self-hosting.md) | Phase 2 — 自举 | 未启动 |
+| [`phase-3-expansion.md`](docs/plans/phase-3-expansion.md) | Phase 3 — 扩展期 | 未启动 |
+| [`phase-总规划-v0.2.x-to-v1.0.0.md`](docs/plans/phase-总规划-v0.2.x-to-v1.0.0.md) | L2 战略路线 | v0.2 → v1.0 总览 |
+
+### 计划（`docs/plans/`，Sprint L3/L4）
+- 各 sprint：`v0.X.0任务清单 + 概要设计.md`（L3）/ `v0.X.0详细实现方案.md`（L4）
 
 ### Sprint 日志（`docs/logs/`）
 - changelog：`changelog-v0.X.Y.md`
