@@ -1,67 +1,81 @@
 # CLAUDE.md — JHYY (机会翼游) 编译器项目
 
-> 自研静态类型编程语言 + 自举编译器。Phase 1 = C 语言宿主编译器（当前）。
-> v0.6.0 tagged。v1.0.0 目标 = 编译器编译自己。
+自研静态类型编程语言 + 自举编译器。
+当前: Phase 1 / v0.6.0 / C 语言宿主编译器
+目标: v1.0.0 = 编译器编译自己（Phase 2）
 
-## 速查
+## Reading order
 
-- **编译器源**：`compiler/src/*.c` `compiler/src/*.h`
-- **运行时**：`compiler/runtime/`
-- **自举翻译**：`compiler/jhyy-src/`（Stage 0：arena.jhyy）
-- **集成测试**：`compiler/tests/examples/*.jhyy`
-- **MCP 服务**：`mcp-jhyy/`
-- **工具链**：GCC 15.2.0 MSYS2 ucrt64 + QBE `-t amd64_win`
+按你打算做的事挑一个入口：
 
-### 一行构建
+| 意图 | 先看 |
+|------|------|
+| 了解项目现在到哪、有什么限制 | [`status.md`](docs/internal/status.md) |
+| 想看 Phase 1 整体还有什么没完成 | [`phase-1-c-compiler.md`](docs/plans/phase-1-c-compiler.md) |
+| 起一个新 sprint | 下方"阶段 + Sprint"表的"当前 sprint"锚 → L3 任务清单 |
+| 改编译器 / 排 bug | [`architecture.md`](docs/internal/architecture.md) 看模块边界 → [`build.md`](docs/internal/build.md) 看构建 + 调试坑 |
+| 改语言规范 / ABI | [`jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md) / [`jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) |
+
+## 项目布局
+
+```
+compiler/
+  src/              *.c / *.h      编译器实现
+  runtime/                         JHYY 运行时
+  jhyy-src/                        自举翻译（当前 Stage 0 = arena.jhyy，见 architecture.md § Stage 0 自举试点）
+  tests/examples/   *.jhyy         集成测试
+  build/bin/        regress.py     回归脚本 + jhyy.exe
+mcp-jhyy/                          JHYY MCP 服务
+docs/
+  internal/         架构 / 构建 / 约定 / 状态 / 测试
+  abis/             语言规范 + ABI（locked）
+  plans/            phase-* 顶层 + v0.X.0 sprint 计划
+  logs/             changelog + 早期 sprint 记录
+```
+
+## 一行构建 / 回归
+
 ```bash
 /c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra compiler/src/*.c -o compiler/build/bin/jhyy.exe -I compiler/src
+python compiler/build/bin/regress.py
 ```
 
-### 一行回归
-```bash
-python compiler/build/bin/regress.py    # 43/46 passed, 0 failed
-```
-
-详细构建/编译/排查：`docs/internal/build.md`。
-手动编译/查看 IL/QBE 调用：`docs/internal/build.md` §手动验证流水线。
-
----
+工具链: GCC 15.2.0 MSYS2 ucrt64 + QBE `-t amd64_win`。详细构建/调试见 `build.md`；测试方法见 `tests.md`。
 
 ## 文档索引
 
+### 阶段 + Sprint
+
+| 层级 | 文档 | 状态 |
+|------|------|------|
+| L1 | [`phase-0-skeleton.md`](docs/plans/phase-0-skeleton.md) | 已完成 |
+| L1 | [`phase-1-c-compiler.md`](docs/plans/phase-1-c-compiler.md) | **进行中** |
+| L1 | [`phase-2-self-hosting.md`](docs/plans/phase-2-self-hosting.md) | 未启动 |
+| L1 | [`phase-3-expansion.md`](docs/plans/phase-3-expansion.md) | 未启动 |
+| L3 | `v0.X.0任务清单 + 概要设计.md` | 每个 sprint 一份 |
+| L4 | `v0.X.0详细实现方案.md` | 每个 sprint 一份 |
+
+最近完成的 sprint: **v0.6.0**（v0.6.1 已发，patch）→ `docs/plans/v0.6.0任务清单 + 概要设计.md` / `docs/plans/v0.6.0详细实现方案.md`
+下一个 sprint: 待起（新 L3 任务清单 + L4 实现方案应出现在 `docs/plans/`）
+历史: changelog 见 `docs/logs/changelog-v0.X.Y.md`；早期 sprint（命名 `sprint-1*.md`）同目录。
+
 ### 项目内部（`docs/internal/`）
-- [`build.md`](docs/internal/build.md) — 编译/运行/手动验证/QBE 坑
-- [`architecture.md`](docs/internal/architecture.md) — 流水线 / 模块清单 / 设计细节 / ABI 决策 / QBE IL 速查
-- [`conventions.md`](docs/internal/conventions.md) — 编码约定 / 文件命名 / 提交规则 / 测试命名
+
+- [`build.md`](docs/internal/build.md) — 编译 / 运行 / **QBE 后端坑（Windows 独有）**
+- [`architecture.md`](docs/internal/architecture.md) — 流水线 / 模块 / 设计细节 / **QBE IL 速查** / Stage 0 自举
+- [`conventions.md`](docs/internal/conventions.md) — 编码约定 / 文件命名 / 提交规则
 - [`status.md`](docs/internal/status.md) — 当前版本 / 已实现特性 / 已知限制 / 历史修复
 - [`tests.md`](docs/internal/tests.md) — 集成测试清单 + 运行方法
 
-### 语言规范 & ABI（`docs/abis/`）
-- [`jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md) — 语言规范（latest，锁定 v0.6）
-- [`jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) — ABI 白皮书（locked：struct pass-by-value / 多文件 / FFI / break-continue / 切片 / 命名空间）
+### 语言规范 & ABI（`docs/abis/`，locked）
 
-### 阶段规划（`docs/plans/phase-*.md`，L1 顶层）
-
-| 文档 | 阶段 | 状态 |
-|------|------|------|
-| [`phase-0-skeleton.md`](docs/plans/phase-0-skeleton.md) | Phase 0 — 骨架 | 已完成 |
-| [`phase-1-c-compiler.md`](docs/plans/phase-1-c-compiler.md) | **Phase 1 — C 宿主编译器（当前）** | 进行中（v0.6.0） |
-| [`phase-2-self-hosting.md`](docs/plans/phase-2-self-hosting.md) | Phase 2 — 自举 | 未启动 |
-| [`phase-3-expansion.md`](docs/plans/phase-3-expansion.md) | Phase 3 — 扩展期 | 未启动 |
-
-### 计划（`docs/plans/`，Sprint L3/L4）
-- 各 sprint：`v0.X.0任务清单 + 概要设计.md`（L3）/ `v0.X.0详细实现方案.md`（L4）
-
-### Sprint 日志（`docs/logs/`）
-- changelog：`changelog-v0.X.Y.md`
-- 早期 sprint：`sprint-1*.md`
-
----
+- [`jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md) — 语言规范（v0.6 锁定）
+- [`jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) — ABI 白皮书（struct pass-by-value / 多文件 / FFI / break-continue / 切片 / 命名空间）
 
 ## 工作风格
 
-- 改前先 `git status` 确认没有上次临时文件遗留
-- C11 零警告（`gcc -std=c11 -Wall -Wextra`）
-- 修改范围最小化：不顺手 refactor，不加"可能将来有用"的代码
-- 改动后跑完整回归；`regress.py` 必须 0 failed
-- Windows + MSYS2 bash。Unix 路径语法。
+只列 JHYY-specific 项；通用约定见根 `CLAUDE.md` § 跨项目工作风格。
+
+- **工具链**：Windows + MSYS2 bash，Unix 路径语法（`/c/...` 而非 `C:\...`）
+- **QBE IL 写盘**：必须 `fopen("wb")`，否则 Windows MSVCRT 把 `\n` 转 `\r\n` 污染 IL。详见 `build.md` § QBE 后端坑
+- **改动后必跑**：`python compiler/build/bin/regress.py`，0 failed 才算完成
