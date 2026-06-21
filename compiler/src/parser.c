@@ -62,10 +62,10 @@ static Node *parse_type(Parser *p) {
 
     if (match(p, TOKEN_LBRACKET)) {
         if (match(p, TOKEN_STAR)) {
-            /* [*]T — slice */
+            /* [*]T — slice type */
             expect(p, TOKEN_RBRACKET, "] after [*");
-            base = parse_type(p);
-            return ast_new_unary(p->arena, p->prev.loc, TOKEN_STAR, base); /* FIXME: properly tag as slice */
+            Node *elem = parse_type(p);
+            return ast_new_slice_type(p->arena, p->prev.loc, elem);
         }
         /* [T; N] — array type */
         base = parse_type(p);
@@ -709,6 +709,28 @@ static Node *prefix_unary(Parser *p, Token token) {
     }
     /* special case: & is both prefix (addr-of) and infix (bit-and) */
     if (op == TOKEN_AMP) {
+        /* slice literal: &[1, 2, 3] */
+        if (check(p, TOKEN_LBRACKET)) {
+            SourceLoc loc = token.loc;
+            advance(p); /* consume [ */
+            Node **elems = NULL;
+            size_t nelems = 0, cap = 0;
+            if (!check(p, TOKEN_RBRACKET)) {
+                do {
+                    Node *elem = parse_expr(p, PREC_NONE);
+                    if (nelems >= cap) {
+                        cap = cap ? cap * 2 : 8;
+                        Node **ne = arena_alloc(p->arena, cap * sizeof(Node *));
+                        if (elems && nelems > 0) memcpy(ne, elems, nelems * sizeof(Node *));
+                        elems = ne;
+                    }
+                    elems[nelems++] = elem;
+                } while (match(p, TOKEN_COMMA));
+            }
+            expect(p, TOKEN_RBRACKET, "] in slice literal");
+            Node *arr = ast_new_array_lit(p->arena, loc, elems, nelems);
+            return ast_new_slice_lit(p->arena, loc, arr);
+        }
         Node *expr = parse_expr(p, PREC_UNARY);
         return ast_new_addr_of(p->arena, token.loc, expr);
     }
@@ -800,9 +822,15 @@ static Node *infix_field(Parser *p, Token token, Node *left) {
 }
 
 static Node *infix_index(Parser *p, Token token, Node *left) {
-    Node *index = parse_expr(p, PREC_NONE);
+    SourceLoc loc = token.loc;
+    Node *start = parse_expr(p, PREC_NONE);
+    if (match(p, TOKEN_DOTDOT)) {
+        Node *end = parse_expr(p, PREC_NONE);
+        expect(p, TOKEN_RBRACKET, "]");
+        return ast_new_slice_range(p->arena, loc, left, start, end);
+    }
     expect(p, TOKEN_RBRACKET, "]");
-    return ast_new_index(p->arena, token.loc, left, index);
+    return ast_new_index(p->arena, loc, left, start);
 }
 
 static Node *infix_as(Parser *p, Token token, Node *left) {

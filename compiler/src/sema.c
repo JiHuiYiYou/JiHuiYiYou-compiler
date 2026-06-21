@@ -79,6 +79,11 @@ static Type *resolve_type_node(SemaContext *ctx, Node *tn) {
         }
         return type_array(ctx->arena, elem, (size_t)count);
     }
+    case NODE_SLICE_TYPE: {
+        NodeSliceType *st = node_slice_type_data(tn);
+        Type *elem = resolve_type_node(ctx, st->elem_type);
+        return type_slice(ctx->arena, elem);
+    }
     default: break;
     }
 
@@ -210,9 +215,16 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
     /* ── cast: expr as Type ── */
     case NODE_CAST: {
         NodeCast *d = node_cast_data(n);
-        infer_type(ctx, d->expr);
+        Type *from = infer_type(ctx, d->expr);
         if (d->target_type) {
-            n->type = resolve_type_node(ctx, d->target_type);
+            Type *to = resolve_type_node(ctx, d->target_type);
+            /* array -> slice cast (no-op at IR level) */
+            if (from->kind == KIND_ARRAY && to->kind == KIND_SLICE &&
+                type_eq(from->array.elem, to->slice.elem)) {
+                n->type = to;
+            } else {
+                n->type = to;
+            }
         } else {
             n->type = type_void();
         }
@@ -240,6 +252,29 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
     /* ── call ── */
     case NODE_CALL: {
         NodeCall *d = node_call_data(n);
+        /* len() builtin: rewrite as field access for slice, const for array */
+        if (d->callee->kind == NODE_IDENT && d->nargs == 1) {
+            const char *fname = node_ident_data(d->callee)->sym->name;
+            if (strcmp(fname, "len") == 0) {
+                Type *t = infer_type(ctx, d->args[0]);
+                if (t->kind == KIND_SLICE) {
+                    n->kind = NODE_FIELD;
+                    NodeField *fd = node_field_data(n);
+                    fd->expr = d->args[0];
+                    fd->field = "len";
+                    n->type = type_primitive(ctx->arena, PRIM_I64);
+                    return n->type;
+                }
+                if (t->kind == KIND_ARRAY) {
+                    n->kind = NODE_INT;
+                    NodeInt *id = node_int_data(n);
+                    id->value = (int64_t)t->array.count;
+                    id->prim = PRIM_I64;
+                    n->type = type_primitive(ctx->arena, PRIM_I64);
+                    return n->type;
+                }
+            }
+        }
         Type *callee_type = infer_type(ctx, d->callee);
         /* infer types for all arguments (needed for nested expressions like arr[i]) */
         for (size_t i = 0; i < d->nargs; i++) {
@@ -257,6 +292,20 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
     case NODE_FIELD: {
         NodeField *d = node_field_data(n);
         Type *struct_type = infer_type(ctx, d->expr);
+        if (struct_type->kind == KIND_SLICE) {
+            /* synthetic .ptr / .len fields */
+            if (strcmp(d->field, "ptr") == 0) {
+                n->type = type_pointer(ctx->arena, struct_type->slice.elem);
+                return n->type;
+            }
+            if (strcmp(d->field, "len") == 0) {
+                n->type = type_primitive(ctx->arena, PRIM_I64);
+                return n->type;
+            }
+            sema_error(ctx, n->loc, "slice has no field '%s'", d->field);
+            n->type = type_void();
+            return n->type;
+        }
         if (struct_type->kind == KIND_STRUCT) {
             for (size_t i = 0; i < struct_type->struct_type.nfields; i++) {
                 if (strcmp(struct_type->struct_type.fields[i].name->name, d->field) == 0) {
@@ -295,6 +344,8 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         } else if (arr_type->kind == KIND_POINTER) {
             /* pointer arithmetic: ptr[i] returns *elem */
             n->type = arr_type->pointer.elem;
+        } else if (arr_type->kind == KIND_SLICE) {
+            n->type = arr_type->slice.elem;
         } else {
             sema_error(ctx, n->loc, "cannot index into type %s", type_to_string(arr_type));
             n->type = type_void();
@@ -317,6 +368,40 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         }
         if (!elem_type) elem_type = type_void();
         n->type = type_array(ctx->arena, elem_type, d->nelems);
+        return n->type;
+    }
+
+    /* ── slice literal: &[1, 2, 3] ── */
+    case NODE_SLICE_LIT: {
+        NodeSliceLit *d = node_slice_lit_data(n);
+        Type *arr_t = infer_type(ctx, d->array);
+        if (!arr_t || arr_t->kind != KIND_ARRAY) {
+            sema_error(ctx, n->loc, "slice literal must wrap an array literal");
+            n->type = type_void();
+            return n->type;
+        }
+        n->type = type_slice(ctx->arena, arr_t->array.elem);
+        return n->type;
+    }
+
+    /* ── sub-range: s[a..b] ── */
+    case NODE_SLICE_RANGE: {
+        NodeSliceRange *d = node_slice_range_data(n);
+        Type *bt = infer_type(ctx, d->base);
+        infer_type(ctx, d->start);
+        infer_type(ctx, d->end);
+        Type *elem = NULL;
+        if (bt->kind == KIND_SLICE) {
+            elem = bt->slice.elem;
+        } else if (bt->kind == KIND_ARRAY) {
+            elem = bt->array.elem;
+        } else {
+            sema_error(ctx, n->loc, "sub-range requires slice or array, got %s",
+                       type_to_string(bt));
+            n->type = type_void();
+            return n->type;
+        }
+        n->type = type_slice(ctx->arena, elem);
         return n->type;
     }
 

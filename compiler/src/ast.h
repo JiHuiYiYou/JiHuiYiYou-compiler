@@ -24,6 +24,9 @@ typedef enum {
     NODE_CAST,           /* expr as Type */
     NODE_ARRAY_TYPE,     /* [T; N] type annotation */
     NODE_ARRAY_LIT,      /* [1, 2, 3] array literal */
+    NODE_SLICE_TYPE,     /* [*]T type annotation */
+    NODE_SLICE_LIT,      /* &[1, 2, 3] slice literal */
+    NODE_SLICE_RANGE,    /* s[a..b] sub-slice */
     NODE_SIZEOF,         /* sizeof(Type) */
     NODE_ALIGNOF,        /* alignof(Type) */
     NODE_ADDR_OF,        /* &expr */
@@ -112,6 +115,9 @@ typedef struct { Node *expr; Node *index; } NodeIndex;
 typedef struct { Node *expr; Node *target_type; } NodeCast;
 typedef struct { Node *elem_type; Node *count_expr; } NodeArrayType;
 typedef struct { Node **elems; size_t nelems; } NodeArrayLit;
+typedef struct { Node *elem_type; } NodeSliceType;
+typedef struct { Node *array; } NodeSliceLit;
+typedef struct { Node *base; Node *start; Node *end; } NodeSliceRange;
 typedef struct { Type *target; } NodeSizeof;
 typedef struct { Type *target; } NodeAlignof;
 typedef struct { Node *expr; } NodeAddrOf;
@@ -240,6 +246,9 @@ NodeIndex        *node_index_data(Node *n);
 NodeCast         *node_cast_data(Node *n);
 NodeArrayType    *node_array_type_data(Node *n);
 NodeArrayLit     *node_array_lit_data(Node *n);
+NodeSliceType    *node_slice_type_data(Node *n);
+NodeSliceLit     *node_slice_lit_data(Node *n);
+NodeSliceRange   *node_slice_range_data(Node *n);
 NodeSizeof       *node_sizeof_data(Node *n);
 NodeAlignof      *node_alignof_data(Node *n);
 NodeAddrOf       *node_addr_of_data(Node *n);
@@ -286,6 +295,9 @@ Node *ast_new_index(struct Arena *a, SourceLoc loc, Node *expr, Node *index);
 Node *ast_new_cast(struct Arena *a, SourceLoc loc, Node *expr, Node *target);
 Node *ast_new_array_type(struct Arena *a, SourceLoc loc, Node *elem_type, Node *count_expr);
 Node *ast_new_array_lit(struct Arena *a, SourceLoc loc, Node **elems, size_t nelems);
+Node *ast_new_slice_type(struct Arena *a, SourceLoc loc, Node *elem_type);
+Node *ast_new_slice_lit(struct Arena *a, SourceLoc loc, Node *array);
+Node *ast_new_slice_range(struct Arena *a, SourceLoc loc, Node *base, Node *start, Node *end);
 Node *ast_new_sizeof(struct Arena *a, SourceLoc loc, Type *target);
 Node *ast_new_alignof(struct Arena *a, SourceLoc loc, Type *target);
 Node *ast_new_addr_of(struct Arena *a, SourceLoc loc, Node *expr);

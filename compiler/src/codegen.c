@@ -246,8 +246,10 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         int is_stack = 0;
         IRVal loc = cg_find_local(cg, d->sym, &is_stack);
         if (is_stack) {
-            /* structs are always manipulated via address */
-            if (n->type && n->type->kind == KIND_STRUCT) {
+            /* structs/arrays/slices are always manipulated via address */
+            if (n->type && (n->type->kind == KIND_STRUCT ||
+                            n->type->kind == KIND_ARRAY ||
+                            n->type->kind == KIND_SLICE)) {
                 return loc;
             }
             /* load from stack */
@@ -582,6 +584,22 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         if (!src_t || !dst_t) {
             return inner;
         }
+        /* array -> slice: build 16-byte slice struct {ptr, len} */
+        if (src_t->kind == KIND_ARRAY && dst_t->kind == KIND_SLICE) {
+            IRVal arr_base = inner; /* already a stack slot address (l) */
+            int nitems = (int)src_t->array.count;
+            IRVal slot = ir_new_tmp(cg->ir, 'l');
+            ir_emit_alloc(cg->ir, slot, 16);
+            /* field 0: ptr = arr_base */
+            ir_emit(cg->ir, "    storel %%t%d, %%t%d\n", arr_base.id, slot.id);
+            /* field 8: len = nitems */
+            IRVal off8 = ir_new_tmp(cg->ir, 'l');
+            ir_emit(cg->ir, "    %%t%d =l add %%t%d, 8\n", off8.id, slot.id);
+            IRVal len_v = ir_new_tmp(cg->ir, 'l');
+            ir_emit_copy(cg->ir, len_v, (int64_t)nitems);
+            ir_emit(cg->ir, "    storel %%t%d, %%t%d\n", len_v.id, off8.id);
+            return slot;
+        }
         char src_qt = qbe_type_of(src_t);
         char dst_qt = qbe_type_of(dst_t);
         if (src_qt == dst_qt && src_t->kind == dst_t->kind && src_t->prim == dst_t->prim) {
@@ -606,9 +624,14 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         else if ((src_qt == 'w' || src_qt == 'l') && (dst_qt == 'w' || dst_qt == 'l')) {
             /* integer width change */
             if (dst_qt == 'l') {
-                ir_emit(cg->ir, "    %%t%d =l extsw %%t%d\n", result.id, inner.id);
+                if (src_qt == 'w') {
+                    ir_emit(cg->ir, "    %%t%d =l extsw %%t%d\n", result.id, inner.id);
+                } else {
+                    ir_emit(cg->ir, "    %%t%d =l copy %%t%d\n", result.id, inner.id);
+                }
             } else {
-                ir_emit_copy(cg->ir, result, 0);
+                /* narrowing l->w: QBE 'copy' from a long truncates implicitly */
+                ir_emit(cg->ir, "    %%t%d =w copy %%t%d\n", result.id, inner.id);
             }
             return result;
         }
@@ -801,22 +824,29 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
     case NODE_INDEX: {
         NodeIndex *d = node_index_data(n);
         Type *arr_type = d->expr->type;
-        if (!arr_type || (arr_type->kind != KIND_ARRAY && arr_type->kind != KIND_POINTER)) {
+        if (!arr_type || (arr_type->kind != KIND_ARRAY && arr_type->kind != KIND_POINTER && arr_type->kind != KIND_SLICE)) {
             IRVal v = {0}; return v;
         }
         int is_array = (arr_type->kind == KIND_ARRAY);
-        Type *elem_type = is_array ? arr_type->array.elem : arr_type->pointer.elem;
+        int is_slice = (arr_type->kind == KIND_SLICE);
+        Type *elem_type = is_array ? arr_type->array.elem
+                          : is_slice ? arr_type->slice.elem
+                          : arr_type->pointer.elem;
         size_t elem_size = type_size(elem_type);
         char elem_qt = qbe_type_of(elem_type);
 
         /* get array base address.
-           For array-typed identifiers, get the stack slot directly (don't load). */
+           For array-typed identifiers, get the stack slot directly (don't load).
+           For slice, cg_expr returns the slot address; load ptr from offset 0. */
         IRVal base;
         if (is_array && d->expr->kind == NODE_IDENT) {
             NodeIdent *id = node_ident_data(d->expr);
             int is_stack = 0;
             base = cg_find_local(cg, id->sym, &is_stack);
-            /* base is the stack slot address */
+        } else if (is_slice) {
+            IRVal slice_addr = cg_expr(cg, d->expr);
+            base = ir_new_tmp(cg->ir, 'l');
+            ir_emit(cg->ir, "    %%t%d =l loadl %%t%d\n", base.id, slice_addr.id);
         } else {
             base = cg_expr(cg, d->expr);
         }
@@ -885,10 +915,111 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         return slot;
     }
 
+    /* ── slice literal: &[1, 2, 3] ── */
+    case NODE_SLICE_LIT: {
+        NodeSliceLit *d = node_slice_lit_data(n);
+        /* Codegen the underlying array first; this returns its stack slot */
+        IRVal arr_slot = cg_expr(cg, d->array);
+        /* Build 16-byte slice struct {arr_slot, nitems} */
+        NodeArrayLit *al = node_array_lit_data(d->array);
+        int nitems = (int)al->nelems;
+        IRVal slot = ir_new_tmp(cg->ir, 'l');
+        ir_emit_alloc(cg->ir, slot, 16);
+        ir_emit(cg->ir, "    storel %%t%d, %%t%d\n", arr_slot.id, slot.id);
+        IRVal off8 = ir_new_tmp(cg->ir, 'l');
+        ir_emit(cg->ir, "    %%t%d =l add %%t%d, 8\n", off8.id, slot.id);
+        IRVal len_v = ir_new_tmp(cg->ir, 'l');
+        ir_emit_copy(cg->ir, len_v, (int64_t)nitems);
+        ir_emit(cg->ir, "    storel %%t%d, %%t%d\n", len_v.id, off8.id);
+        return slot;
+    }
+
+    /* ── sub-range: s[a..b] ── */
+    case NODE_SLICE_RANGE: {
+        NodeSliceRange *d = node_slice_range_data(n);
+        Type *bt = d->base->type;
+        int is_slice = (bt && bt->kind == KIND_SLICE);
+        Type *elem = is_slice ? bt->slice.elem : bt->array.elem;
+        size_t esz = type_size(elem);
+        if (esz < 4) esz = 4;
+
+        IRVal base;
+        if (is_slice) {
+            IRVal slice_addr = cg_expr(cg, d->base);
+            base = ir_new_tmp(cg->ir, 'l');
+            ir_emit(cg->ir, "    %%t%d =l loadl %%t%d\n", base.id, slice_addr.id);
+        } else {
+            base = cg_expr(cg, d->base);
+        }
+
+        IRVal start_v = cg_expr(cg, d->start);
+        /* start_off = start * esz */
+        IRVal start_off = ir_new_tmp(cg->ir, 'l');
+        if (d->start->kind == NODE_INT) {
+            ir_emit_copy(cg->ir, start_off, (int64_t)node_int_data(d->start)->value * (int64_t)esz);
+        } else {
+            IRVal start64 = start_v;
+            if (start_v.qbe_type != 'l') {
+                start64 = ir_new_tmp(cg->ir, 'l');
+                ir_emit(cg->ir, "    %%t%d =l extsw %%t%d\n", start64.id, start_v.id);
+            }
+            IRVal esz_v = ir_new_tmp(cg->ir, 'l');
+            ir_emit_copy(cg->ir, esz_v, (int64_t)esz);
+            ir_emit_binary(cg->ir, start_off, "mul", start64, esz_v);
+        }
+        IRVal new_ptr = ir_new_tmp(cg->ir, 'l');
+        ir_emit_binary(cg->ir, new_ptr, "add", base, start_off);
+
+        IRVal end_v = cg_expr(cg, d->end);
+        IRVal new_len = ir_new_tmp(cg->ir, 'l');
+        if (d->start->kind == NODE_INT && d->end->kind == NODE_INT) {
+            ir_emit_copy(cg->ir, new_len,
+                         (int64_t)node_int_data(d->end)->value - (int64_t)node_int_data(d->start)->value);
+        } else {
+            IRVal end64 = end_v;
+            if (end_v.qbe_type != 'l') {
+                end64 = ir_new_tmp(cg->ir, 'l');
+                ir_emit(cg->ir, "    %%t%d =l extsw %%t%d\n", end64.id, end_v.id);
+            }
+            IRVal start64 = start_v;
+            if (start_v.qbe_type != 'l') {
+                start64 = ir_new_tmp(cg->ir, 'l');
+                ir_emit(cg->ir, "    %%t%d =l extsw %%t%d\n", start64.id, start_v.id);
+            }
+            ir_emit_binary(cg->ir, new_len, "sub", end64, start64);
+        }
+
+        IRVal slot = ir_new_tmp(cg->ir, 'l');
+        ir_emit_alloc(cg->ir, slot, 16);
+        ir_emit(cg->ir, "    storel %%t%d, %%t%d\n", new_ptr.id, slot.id);
+        IRVal off8 = ir_new_tmp(cg->ir, 'l');
+        ir_emit(cg->ir, "    %%t%d =l add %%t%d, 8\n", off8.id, slot.id);
+        ir_emit(cg->ir, "    storel %%t%d, %%t%d\n", new_len.id, off8.id);
+        return slot;
+    }
+
     /* ── field access with pointer auto-deref ── */
     case NODE_FIELD: {
         NodeField *d = node_field_data(n);
         Type *expr_type = d->expr->type;
+        if (expr_type && expr_type->kind == KIND_SLICE) {
+            /* synthetic .ptr / .len fields, slice value is a 16-byte stack slot */
+            IRVal slot = cg_expr(cg, d->expr);
+            if (strcmp(d->field, "ptr") == 0) {
+                IRVal v = ir_new_tmp(cg->ir, 'l');
+                ir_emit(cg->ir, "    %%t%d =l loadl %%t%d\n", v.id, slot.id);
+                return v;
+            }
+            if (strcmp(d->field, "len") == 0) {
+                IRVal off = ir_new_tmp(cg->ir, 'l');
+                ir_emit(cg->ir, "    %%t%d =l add %%t%d, 8\n", off.id, slot.id);
+                IRVal v = ir_new_tmp(cg->ir, 'l');
+                ir_emit(cg->ir, "    %%t%d =l loadl %%t%d\n", v.id, off.id);
+                return v;
+            }
+            IRVal v = {0};
+            return v;
+        }
         if (expr_type && expr_type->kind == KIND_POINTER &&
             expr_type->pointer.elem && expr_type->pointer.elem->kind == KIND_STRUCT) {
             /* pointer-to-struct: load pointer, add offset, load field */

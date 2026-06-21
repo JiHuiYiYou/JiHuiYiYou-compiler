@@ -35,6 +35,9 @@ ACCESSOR(node_index_data, NodeIndex)
 ACCESSOR(node_cast_data, NodeCast)
 ACCESSOR(node_array_type_data, NodeArrayType)
 ACCESSOR(node_array_lit_data, NodeArrayLit)
+ACCESSOR(node_slice_type_data, NodeSliceType)
+ACCESSOR(node_slice_lit_data, NodeSliceLit)
+ACCESSOR(node_slice_range_data, NodeSliceRange)
 ACCESSOR(node_sizeof_data, NodeSizeof)
 ACCESSOR(node_alignof_data, NodeAlignof)
 ACCESSOR(node_addr_of_data, NodeAddrOf)
@@ -169,6 +172,27 @@ Node *ast_new_array_lit(Arena *a, SourceLoc loc, Node **elems, size_t nelems) {
     NodeArrayLit *d = node_array_lit_data(n);
     d->elems = elems;
     d->nelems = nelems;
+    return n;
+}
+
+Node *ast_new_slice_type(Arena *a, SourceLoc loc, Node *elem_type) {
+    Node *n = new_node(a, NODE_SLICE_TYPE, loc, sizeof(NodeSliceType));
+    node_slice_type_data(n)->elem_type = elem_type;
+    return n;
+}
+
+Node *ast_new_slice_lit(Arena *a, SourceLoc loc, Node *array) {
+    Node *n = new_node(a, NODE_SLICE_LIT, loc, sizeof(NodeSliceLit));
+    node_slice_lit_data(n)->array = array;
+    return n;
+}
+
+Node *ast_new_slice_range(Arena *a, SourceLoc loc, Node *base, Node *start, Node *end) {
+    Node *n = new_node(a, NODE_SLICE_RANGE, loc, sizeof(NodeSliceRange));
+    NodeSliceRange *d = node_slice_range_data(n);
+    d->base = base;
+    d->start = start;
+    d->end = end;
     return n;
 }
 
@@ -422,6 +446,9 @@ const char *node_kind_name(NodeKind kind) {
     case NODE_CAST:          return "cast";
     case NODE_ARRAY_TYPE:   return "array_type";
     case NODE_ARRAY_LIT:    return "array_lit";
+    case NODE_SLICE_TYPE:   return "slice_type";
+    case NODE_SLICE_LIT:    return "slice_lit";
+    case NODE_SLICE_RANGE:  return "slice_range";
     case NODE_SIZEOF:        return "sizeof";
     case NODE_ALIGNOF:       return "alignof";
     case NODE_ADDR_OF:       return "addr_of";
