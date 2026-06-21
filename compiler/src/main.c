@@ -82,7 +82,7 @@ static int cmd_build(int argc, char **argv) {
 
     char il_path[1024];
     snprintf(il_path, sizeof(il_path), "%s.il", output);
-    FILE *ilf = fopen(il_path, "w");
+    FILE *ilf = fopen(il_path, "wb");
     if (!ilf) { fprintf(stderr, "cannot write '%s'\n", il_path); arena_free(&arena); free(source); return 1; }
     fwrite(ir.buf, 1, ir.len, ilf);
     fclose(ilf);
@@ -415,7 +415,7 @@ static int compile(const char **inputs, int ninputs, const char *output) {
     /* write .il file */
     char il_path[1024];
     snprintf(il_path, sizeof(il_path), "%s.il", output);
-    FILE *ilf = fopen(il_path, "w");
+    FILE *ilf = fopen(il_path, "wb");
     if (!ilf) {
         fprintf(stderr, "cannot write '%s'\n", il_path);
         arena_free(&arena); free(main_source); return 1;

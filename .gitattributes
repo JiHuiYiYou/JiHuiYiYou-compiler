@@ -1,0 +1,12 @@
+# 强制 LF 行尾（Windows 上 git 偶尔弹 "LF will be replaced by CRLF" 警告）
+# .jhyy 源码 / .md 文档 当前就是 LF，attribute 只是显式声明
+*.jhyy   text eol=lf
+*.md     text eol=lf
+*.c      text eol=lf
+*.h      text eol=lf
+*.py     text eol=lf
+*.toml   text eol=lf
+*.json   text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+Makefile text eol=lf

@@ -26,3 +26,5 @@ __pycache__/
 *.pyc
 # 忽略 Claude Code 本地配置
 .claude
+# codegraph 索引（daemon.pid mtime 抖动会污染 git status）
+.codegraph/
