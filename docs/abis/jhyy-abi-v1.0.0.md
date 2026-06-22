@@ -62,7 +62,7 @@ QBE type    = l
 
 64 位平面地址空间。空指针为整数 0。指针算术以 `sizeof(T)` 为步长。
 
-### 2.3 切片 `[*]T` (P2 — 类型已定义，codegen 缺失)
+### 2.3 切片 `[*]T`
 
 ```
 sizeof([*]T)  = 16
@@ -71,7 +71,7 @@ alignof([*]T) = 8
 QBE type      = l (仅指针部分)
 ```
 
-**当前状态**: 类型系统接受，sema 检查字段访问，但 codegen 缺失。
+**当前状态**: **v0.6.0 sprint 6A 已完整实现 codegen**。按 struct pass-by-value sret 处理（与 v0.4 ABI 一致）。支持：切片字面量、数组 decay（`[*]u8` decay 自字符串字面量）、索引、子切片（`s[i..j]`）、`len(s)`。
 
 ### 2.4 定长数组 `[T; N]`
 
@@ -316,7 +316,7 @@ asm:  $main_jhyy
 - 多文件编译 (`v0.4.0`): 所有 .jhyy 文件的函数共享同一全局命名空间
 - 模块 import: 当前未对模块内函数加前缀 (可能造成冲突)
 
-**已知问题 (P3)**: JHYY 函数导出为 `$name` (QBE `export function`)，但调用 `extern fn` C 函数时使用的是 `call $c_fn_name`，这给 C 函数名也加了 `$` 前缀。在未来模块系统中需要修正。
+**已知问题 (P3)**: ~~JHYY 函数导出为 `$name` (QBE `export function`)，但调用 `extern fn` C 函数时使用的是 `call $c_fn_name`，这给 C 函数名也加了 `$` 前缀。~~ **v0.6.0 sprint 6D.7 已修复**：`Sym.is_extern` 字段 + codegen 检查，extern fn 直接 emit 原名（不加 `$` 前缀）。
 
 ---
 
@@ -786,10 +786,10 @@ JHYY 字符串字面量在 QBE data 段中以 UTF-8 + NUL 终止符存储。
 | # | 问题 | 影响 | 状态 |
 |---|------|------|------|
 | ~~A1~~ | ~~结构体不能按值传递/返回~~ | ~~不能用 struct 做函数参数~~ | **v0.4.0 已修复** |
-| A2 | 切片 `[*]T` 无 codegen | 不能使用 string/slice 类型 | P2 |
+| ~~A2~~ | ~~切片 `[*]T` 无 codegen~~ | ~~不能使用 string/slice 类型~~ | **v0.6.0 sprint 6A 已修复**（按 struct pass-by-value sret 处理） |
 | A3 | struct 跨 FFI 边界 | 不能调用 C 函数传 struct | P3 |
-| A4 | 名称修饰无模块前缀 | 多文件模块符号冲突 | P3 (Phase 2) |
-| A5 | 浮点比较和某些运算不完整 | f32/f64 部分运算结果错误 | P3 |
+| ~~A4~~ | ~~名称修饰无模块前缀~~ | ~~多文件模块符号冲突~~ | **v0.6.0 sprint 6B 已修复**（`$mod__name` mangle + `Sym.module` 字段） |
+| A5 | 浮点比较和某些运算不完整 | f32/f64 部分运算结果错误 | P3（v0.5 sprint 5A 修了大部分，NaN/Inf 极端行为仍未规约） |
 
 ### 11.2 暂不阻碍但需注意
 
@@ -842,4 +842,4 @@ int result = main_jhyy();
 2. **手动调用 QBE**: `qbe/qbe.exe -t amd64_win -o output.s output.il`
 3. **查看汇编**: `cat output.s`
 4. **最小化测试**: 从失败的 .jhyy 抽出最小复现到独立的 .jhyy 文件
-5. **回归测试**: `python compiler/build/bin/regress.py` 跑全部 36 个集成测试
+5. **回归测试**: `python compiler/build/bin/regress.py` 跑全部 43 个集成测试（v0.6.0 验证 43/46 passed, 3 skipped 库文件）

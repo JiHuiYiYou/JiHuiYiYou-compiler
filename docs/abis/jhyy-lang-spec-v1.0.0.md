@@ -1081,15 +1081,15 @@ fn sum_tree(t: *Tree) -> i32 {
 
 | # | 严重度 | 描述 | 影响范围 |
 |---|--------|------|---------|
-| **P2** | 类型已定义，codegen 缺失 | 切片 `[*]T` — 编译器接受 `[*]i32` 但 codegen 无实现 | 自举时若用 slice 需先补 codegen；可用 `(*T, i32)` pair 替代 |
-| **P2** | 不完整 | 浮点比较 (`==`/`<`/...) 部分场景未完全类型化（用 QBE 默认指令） | 大多数场景工作，极端 NaN/Inf 行为未规约 |
+| ~~**P2**~~ | ~~类型已定义，codegen 缺失~~ | ~~切片 `[*]T` — 编译器接受 `[*]i32` 但 codegen 无实现~~ | **v0.6.0 sprint 6A 已实现**：按 struct pass-by-value sret 处理 |
+| **P2** | 不完整 | 浮点比较 (`==`/`<`/...) 部分场景未完全类型化（用 QBE 默认指令） | 大多数场景工作，极端 NaN/Inf 行为未规约（v0.5 sprint 5A 修了大部分） |
 | **P3** | 缺失 | 浮点 fmod (`%`) — 整数 `%` 工作，浮点 `%` 拒绝 | 自举可绕过（用整数 mod） |
 | **P3** | 缺失 | struct / enum 跨 FFI 边界（Windows x64 ABI 不兼容） | 需 C ABI 兼容 struct 传递（v0.6 候选） |
 | **P3** | 缺失 | 变参函数 (`printf` 的 `...`) — JHYY 侧需手动展开为多个 extern | 自举可手写 wrapper |
 | **P3** | 缺失 | 函数回调（把 JHYY 函数指针传给 C 调用） | Phase 2+ 考虑 |
-| **P3** | 缺失 | 模块命名空间（v0.4 多文件后符号冲突） | v0.6 候选 |
-| **P3** | 缺失 | 嵌套 import 路径 (`utils::io`) | v0.6+ 候选 |
-| **P2** | pre-existing | `import_test.jhyy` 找不到 `mylib.jhyy`（CLI 多文件参数路径 bug） | 手动跑 `compiler/tests/examples/multi_file/main.jhyy` 工作 |
+| ~~**P3**~~ | ~~缺失~~ | ~~模块命名空间（v0.4 多文件后符号冲突）~~ | **v0.6.0 sprint 6B 已实现**：`Sym.module` 字段 + `$mod__name` mangle + `mod::fn()` 限定调用 |
+| **P3** | 缺失 | 嵌套 import 路径 (`utils::io`) — 当前仅 `import utils; utils::io_func()` | v0.6+ 候选（v0.6 sprint 6B 未实现） |
+| ~~**P2**~~ | ~~pre-existing~~ | ~~`import_test.jhyy` 找不到 `mylib.jhyy`（CLI 多文件参数路径 bug）~~ | **v0.6.0 sprint 6D.1 已修复**：dir 提取 fallback 到 `"."` |
 
 ---
 
@@ -1124,10 +1124,10 @@ fn sum_tree(t: *Tree) -> i32 {
 
 ### 推荐的 v0.6 优先项（为自举铺路）
 
-1. **切片 codegen** (P2)：如果想在 parser 里用 `[Token]` range 而不是 `(start_ptr, end_ptr)`
-2. **模块命名空间** (P3)：避免 `helper` / `process` 这种通用名冲突
-3. **C ABI 兼容 struct 传递** (P3)：替换当前 stack-copy ABI，让自举的 JHYY 编译器能直接调用 C 标准库
-4. **`as` 支持指针 ↔ usize 互转** (P2)：方便做指针 ↔ 整数互转做 hash
+1. ~~**切片 codegen** (P2)~~：**v0.6.0 sprint 6A 已实现** ✓
+2. ~~**模块命名空间** (P3)~~：**v0.6.0 sprint 6B 已实现** ✓
+3. **C ABI 兼容 struct 传递** (P3)：替换当前 stack-copy ABI，让自举的 JHYY 编译器能直接调用 C 标准库（**v0.6 sprint 6D 部分修 pointer-to-struct 语义，全 ABI 兼容仍待 phase-2**）
+4. **`as` 支持指针 ↔ usize 互转** (P2)：方便做指针 ↔ 整数互转做 hash（**v0.6.0 sprint 6C 已实现** ✓）
 
 ### Phase 2 启动条件
 
