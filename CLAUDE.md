@@ -51,12 +51,13 @@ python compiler/build/bin/regress.py
 | L1 | [`phase-0-skeleton.md`](docs/plans/phase-0-skeleton.md) | 已完成 |
 | L1 | [`phase-1-c-compiler.md`](docs/plans/phase-1-c-compiler.md) | **进行中** |
 | L1 | [`phase-2-self-hosting.md`](docs/plans/phase-2-self-hosting.md) | 未启动 |
+| L1.5 | [`phase-2.5-qbe-rewrite.md`](docs/plans/phase-2.5-qbe-rewrite.md) | 未启动（中期方向，待 phase-2 后启动） |
 | L1 | [`phase-3-expansion.md`](docs/plans/phase-3-expansion.md) | 未启动 |
 | L3 | `v0.X.0任务清单 + 概要设计.md` | 每个 sprint 一份 |
 | L4 | `v0.X.0详细实现方案.md` | 每个 sprint 一份 |
 
 最近完成的 sprint: **v0.6.0**（v0.6.1 已发，patch）→ `docs/plans/v0.6.0任务清单 + 概要设计.md` / `docs/plans/v0.6.0详细实现方案.md`
-下一个 sprint: 待起（新 L3 任务清单 + L4 实现方案应出现在 `docs/plans/`）
+当前 sprint: **v1.0.0** phase-2 自举启动（粗粒度 5 sprint）→ `docs/plans/v1.0.0任务清单 + 概要设计.md` / `docs/plans/v1.0.0详细实现方案.md`
 历史: changelog 见 `docs/logs/changelog-v0.X.Y.md`；早期 sprint（命名 `sprint-1*.md`）同目录。
 
 ### 项目内部（`docs/internal/`）
