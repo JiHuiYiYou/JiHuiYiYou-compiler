@@ -62,6 +62,22 @@
 | **P3** | 缺失 | 函数回调 (Phase 2 考虑) |
 | **P3** | 缺失 | Windows 下 `jhyy run` 子命令 `system()` 路径有 bug (P1) |
 
+### Phase 2 阻塞分析（2026-06-22 验证）
+
+abi § 11.1 五个阻塞自举问题（A1-A5）中，A1/A2/A4 已 ✓。**A3 / A5 不阻塞 phase-2**：
+
+**A3（struct/enum 跨 FFI by-value）** —— 编译器自身用不到：
+- phase-2 FFI 列表（malloc/free/fopen/fread/fwrite/fprintf/strlen/strcmp/system/exit）全 pointer/scalar
+- 源码 grep 仅 `struct Arena *`（指针，非 by-value），无 `extern fn foo() -> struct X` 模式
+- 可延后到 phase-3（用户代码要调 C 函数传 struct 时再处理）
+
+**A5（浮点 NaN/Inf + 不完整运算）** —— 编译器自身不用 float 算术：
+- `double` 实际用途只有 2 处：`atof()` 解析字面量、`NodeFloat { double value; }` AST 字段
+- codegen 用 `%.17g` 把 double 格式化为 QBE IL `d_xxx` 文本，**不做算术**
+- 无 `addd`/`muld`/`divd` 等浮点指令
+- v0.5 sprint 5A 已实现 float 字面量 codegen + 基础算术。P3 的 NaN/Inf 是**算术语义**（`0.0/0.0`、`NaN == NaN`），编译器不跑 float 算术所以碰不到
+- 可延后到 phase-3a（float stdlib），届时 NaN/Inf 规约与算术语义统一处理
+
 **v0.6 已解决**：
 - ✅ 切片 `[*]T` codegen
 - ✅ 模块命名空间 (`mod::fn()`)
