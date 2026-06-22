@@ -40,7 +40,16 @@ docs/
 python compiler/build/bin/regress.py
 ```
 
-工具链: GCC 15.2.0 MSYS2 ucrt64 + QBE `-t amd64_win`。详细构建/调试见 `build.md`；测试方法见 `tests.md`。
+工具链: GCC 15.2.0 MSYS2 ucrt64 + QBE `-t amd64_win`（QBE 二进制在 `qbe/qbe.exe`，不是 PATH 里，靠 jhyy main.c 写绝对路径调用）。详细构建/调试见 `build.md`；测试方法见 `tests.md`。
+
+## 权威文档（100% 权威）
+
+| 文档 | 状态 | 用途 |
+|------|------|------|
+| [`jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md) | 锁定（self-hosting 启动门槛） | 语言规范 + 附录 B 已知限制 + 附录 C phase-2 启动条件 |
+| [`jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) | 锁定（v0.4/v0.5/v0.6 实现已追更） | 类型布局 + 调用约定 + § 11.1 阻塞自举问题清单 |
+
+**所有 plan 文件以这两个为 100% 权威对齐**。其他 phase-* / v*.* 计划文件措辞可能滞后或不准，遇到冲突以 lang-spec / abi 为准。
 
 ## 文档索引
 
@@ -50,9 +59,9 @@ python compiler/build/bin/regress.py
 |------|------|------|
 | L1 | [`phase-0-skeleton.md`](docs/plans/phase-0-skeleton.md) | 已完成 |
 | L1 | [`phase-1-c-compiler.md`](docs/plans/phase-1-c-compiler.md) | **进行中** |
-| L1 | [`phase-2-self-hosting.md`](docs/plans/phase-2-self-hosting.md) | 未启动 |
+| L1 | [`phase-2-self-hosting.md`](docs/plans/phase-2-self-hosting.md) | 未启动（语言特性启动门槛已达成，见 lang-spec 附录 C） |
 | L1.5 | [`phase-2.5-qbe-rewrite.md`](docs/plans/phase-2.5-qbe-rewrite.md) | 未启动（中期方向，待 phase-2 后启动） |
-| L1 | [`phase-3-expansion.md`](docs/plans/phase-3-expansion.md) | 未启动 |
+| L1 | [`phase-3-expansion.md`](docs/plans/phase-3-expansion.md) | 未启动（语言特性扩展；自举能力已在 phase-2 完成） |
 | L3 | `v0.X.0任务清单 + 概要设计.md` | 每个 sprint 一份 |
 | L4 | `v0.X.0详细实现方案.md` | 每个 sprint 一份 |
 

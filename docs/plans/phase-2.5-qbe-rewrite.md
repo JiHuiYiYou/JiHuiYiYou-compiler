@@ -156,7 +156,7 @@ phase-3 (语言扩展) ─────┘
 | x86_64 指令集覆盖不全 | 部分 .jhyy 源编译失败 | L3 sprint 1 先 grep 现有 QBE IL 用例 |
 | 自写 QBE 性能退化 > 1.1x | 运行时性能不达标 | peephole pass + 寄存器分配调优 |
 | N 代 fixed point 收敛不到 | 完成定义不达标 | jhyy_N 和 jhyy_{N+1} diff；若发散回退定位 |
-| phase-2 前端翻译有缺陷 | phase-2.5 起步基础不稳 | phase-2 完成后做严格 .il byte-equal 验证 |
+| phase-2 翻译（含 codegen emit IL）有缺陷 | phase-2.5 起步基础不稳 | phase-2 完成后做严格 .il byte-equal 验证 |
 | 自研 OS ABI 不兼容 | 多目标架构未来扩展 | 当前 amd64_win 中间态；多目标 phase-4+ 考虑 |
 
 ---

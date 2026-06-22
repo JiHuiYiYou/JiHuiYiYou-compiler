@@ -19,29 +19,20 @@ diff(jhyy_0的输出, jhyy_1的输出) → 完全相同 = 自举成功🏆
 
 ## Step 2.0: 确认 Phase 1 编译器支持自举所需全部特性
 
-在开始移植前，检查清单:
+> **本节已被 lang-spec v1.0.0 附录 C 取代**。phase-2 启动条件（lang-spec § 附录 C 行 1132-1137）：
+> - ✅ 本 spec 覆盖的全部特性在 v0.6 编译器中可用
+> - ✅ 已知限制（P2/P3）有 fallback 路径（详见 lang-spec 附录 B + abi § 11.1）
+> - ⏳ 至少 5 个 sprint 验证（实际编译器源用 JHYY 写一遍，过回归）
+> - ⏳ Stage 0/1/2 自举验证（C 编译器编译 JHYY 编译器源码）
 
-- [ ] 整数类型 (i32, i64, u8 等)
-- [ ] bool 类型
-- [ ] 指针 `*T`
-- [ ] 切片 `[*]T`
-- [ ] struct 定义和字面量
-- [ ] enum 定义和 match
-- [ ] 函数 (含递归)
-- [ ] let 绑定 (可变和不可变)
-- [ ] if/else 表达式
-- [ ] while 循环
-- [ ] match 表达式 (字面量、枚举、通配符)
-- [ ] Arena 类型和方法
-- [ ] FFI (调用 libc)
-- [ ] import 模块系统
-- [ ] 字符串字面量
-- [ ] 类型推断 (局部)
-- [ ] struct 字段访问
-- [ ] 嵌套作用域
-- [ ] return 语句
-
-缺失的特性 → 先补充实现。
+> **事实（v0.6 changelog 验证）**：lang-spec 附录 C 行 1100-1113 列的 9 个 C 模块 → JHYY 子集映射**全部 ✓**，即每个 C 编译器模块都能用 v1.0.0 spec 表达。phase-2 启动门槛的语言特性部分**已达成**。
+>
+> **遗留 P3 限制（lang-spec 附录 B 追更后）**：
+> - 变参函数（printf `...`）：JHYY 侧需手动展开，自举可手写 wrapper
+> - 函数回调（JHYY 函数指针 → C 调用）：phase-2 考虑
+> - 嵌套 import `utils::io`：v0.6+ 候选（v0.6 sprint 6B 未实现，仍 P3）
+> - struct/enum 跨 FFI 边界：sprint 6D 部分修 pointer-to-struct，全 ABI 兼容 phase-2 处理
+> - 浮点 fmod / NaN/Inf 极端行为：仍 P3，自举可绕过
 
 ---
 
@@ -74,11 +65,11 @@ compiler/src0/
 |--------|----------|
 | `typedef struct { ... } Node;` | `type Node = struct { ... };` |
 | `switch (node->kind) { ... }` | `match node.kind { NODE_X => ... }` |
-| 手动链表/动态数组 | `arena.alloc::<T>()` + `arena.alloc_slice::<T>(n)` |
-| `malloc`/`free` | `Arena::new(size)` → 离开作用域自动销毁 |
+| 手动链表/动态数组 | `arena_alloc(a, size as i64)` + `arena_alloc` + linked list（**jhyy 无泛型**，不能用 `arena.alloc::<T>()`） |
+| `malloc`/`free` | `libc_malloc` / `libc_free` FFI（**jhyy 无 `Arena::new` 自动析构**，调用方负责 `arena_free`） |
 | `strcmp`, `strncpy` | 自行实现或 FFI |
-| `fprintf(stderr, ...)` | FFI `fprintf` |
-| `fopen`, `fread`, `fclose` | FFI 或直接用系统调用 |
+| `fprintf(stderr, ...)` | FFI `libc_fputs` 拼好的字符串（**JHYY 侧不能直接调用变参 fprintf**，见 lang-spec 附录 B P3） |
+| `fopen`, `fread`, `fclose` | FFI `libc_fopen` 等 |
 
 ### 移植顺序 (按依赖关系从下到上)
 
