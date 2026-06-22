@@ -28,3 +28,6 @@ __pycache__/
 .claude
 # codegraph 索引（daemon.pid mtime 抖动会污染 git status）
 .codegraph/
+
+# ffi_file.jhyy 测试产物（FFI 文件 I/O 测试输出）
+ffi_test_output.txt
