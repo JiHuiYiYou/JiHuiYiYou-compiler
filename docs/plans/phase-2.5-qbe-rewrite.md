@@ -11,7 +11,7 @@
 
 phase-2-self-hosting.md（前端翻译，v1.0）和 phase-3-expansion.md（语言特性扩展）**都不覆盖 QBE 后端重写**：
 
-- phase-2 = 前端 jhyy 化（lexer/parser/sema/codegen emit IL），.il 仍交给 C 版 QBE 工具
+- phase-2 = 前端 + IR 缓冲 + IL 文本 emit 全部 jhyy 化（lexer / parser / sema / ast / types / symtab / ir / codegen emit QBE IL），.il 仍交给 C 版 QBE 工具做 IL → .s → .o → .exe 链
 - phase-3 = 语言扩展（浮点/泛型/闭包/标准库/优化/包管理），**不涉及后端汇编器**
 
 但 user 2026-06-22 明确：**中期目标 = 整个编译器（含 QBE）全部 jhyy 化**。这条不在任何现有 phase 文件里，需要单独的 phase-2.5 占位。
@@ -155,7 +155,7 @@ phase-3 (语言扩展) ─────┘
 | deterministic optimization 难做到 | 全部 .s byte-equal 要求 | 早期 inventory + 排序策略 |
 | x86_64 指令集覆盖不全 | 部分 .jhyy 源编译失败 | L3 sprint 1 先 grep 现有 QBE IL 用例 |
 | 自写 QBE 性能退化 > 1.1x | 运行时性能不达标 | peephole pass + 寄存器分配调优 |
-| N 代 fixed point 收剑不到 | 完成定义不达标 | jhyy_N 和 jhyy_{N+1} diff；若发散回退定位 |
+| N 代 fixed point 收敛不到 | 完成定义不达标 | jhyy_N 和 jhyy_{N+1} diff；若发散回退定位 |
 | phase-2 前端翻译有缺陷 | phase-2.5 起步基础不稳 | phase-2 完成后做严格 .il byte-equal 验证 |
 | 自研 OS ABI 不兼容 | 多目标架构未来扩展 | 当前 amd64_win 中间态；多目标 phase-4+ 考虑 |
 
