@@ -616,7 +616,10 @@ static Node *prefix_string(Parser *p, Token token) {
     /* token includes quotes; extract content */
     const char *chars = token.start + 1;
     size_t len = token.length - 2;
-    return ast_new_string(p->arena, token.loc, chars, len);
+    /* Bug #10 fix (v0.6.4): copy string bytes into arena so the chars pointer
+       outlives mod_source (which resolve_one_import frees at end of import). */
+    return ast_new_string(p->arena, token.loc,
+                          arena_strdup(p->arena, chars, len), len);
 }
 
 static Node *prefix_char(Parser *p, Token token) {
