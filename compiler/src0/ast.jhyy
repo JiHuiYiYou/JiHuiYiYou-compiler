@@ -1,0 +1,600 @@
+// ast.jhyy — JHYY 翻译自 compiler/src/ast.c
+// v1.0.0 sprint 2 commit 3a, 2026-06-24
+//
+// 翻译要点（v0.6.2 patch 后实测）：
+//   - 49 NodeKind × ctor + accessor = ~98 fns，本 commit 完成 22 个（literals + exprs）
+//   - 内存模式：C 版 Node header + variant struct 在 arena 紧邻
+//     → jhyy: arena_alloc(N + M) 一次性，返回 buf；cast 前 40 字节为 *Node，
+//     cast 字节 [40, 40+M) 为 *NodeXxx
+//   - jhyy 无前向引用 → 必须按依赖顺序定义 struct + ctor + accessor
+//     辅助 struct (NodeFieldInit 等) 在 commit 3b+ 才需要
+//   - SourceLoc 不内嵌（Node 自带 loc_filename/line/col 三字段）
+//   - *Type 字段统一 *u8（避免 *Type in struct def 前向引用）
+//
+// 已知差异（vs C 版）：
+//   - **C 用 Node 后紧邻 variant struct**：jhyy 走 single arena_alloc(N+M) 一次性
+//   - **C NodeFieldInit 是独立 struct**（name + value）：commit 3c 才需要
+//   - **C TokenKind 来自 lexer.h**：jhyy 用 i32 暂代，sprint 3 lexer.jhyy 后给常量
+//
+// 后续 commit 拆分：
+//   3a（本 commit）：literals + exprs（22 NodeKinds）
+//   3b：stmts + match + patterns（~12 NodeKinds）
+//   3c：decls（~5 NodeKinds）
+//   3d：type_def + module（~10 NodeKinds）
+
+import arena;
+import util;
+import symtab;
+import types;
+
+// QBE Windows amd64 backend bug workaround（plan § 1.5 bug #8）：
+// f64 存 struct 字段 emit `movsd %gpr`（应该 XMM）。C 端 jh_f64_store 走 GCC emit（正确 movsd %xmm0）。
+extern fn jh_f64_store(dst: *u8, val: f64) -> i32;
+
+// ════════════════════════════════════════════════════
+// SourceLoc（用三字段代替 struct，跟 Node 字段平铺）
+// ════════════════════════════════════════════════════
+
+// 不内嵌到 Node：每个 ast_new_* 接收 3 个 loc 字段，存到 Node 自身
+// （C 版是 SourceLoc 内嵌到 Node，jhyy 用 3 字段等价）
+
+// ════════════════════════════════════════════════════
+// Node struct（header，40 bytes）
+// ════════════════════════════════════════════════════
+
+// kind(8) + type_ptr(8) + loc_filename(8) + loc_line(8) + loc_col(8) = 40
+// 注：jhyy `type` 是 reserved keyword，Node.type 改 type_ptr
+type Node = struct {
+    kind:         i32,
+    type_ptr:     *u8,        // *Type（sema 设置）
+    loc_filename: *u8,
+    loc_line:     i32,
+    loc_col:      i32,
+}
+
+fn NODE_SIZE() -> i64 { return 40 as i64; }
+
+// ════════════════════════════════════════════════════
+// NodeKind 常量（49 个，分批定义，本 commit 22 个）
+// ════════════════════════════════════════════════════
+
+fn NODE_INT()             -> i32 { return 0 as i32; }
+fn NODE_FLOAT()           -> i32 { return 1 as i32; }
+fn NODE_STRING()          -> i32 { return 2 as i32; }
+fn NODE_CHAR()            -> i32 { return 3 as i32; }
+fn NODE_BOOL()            -> i32 { return 4 as i32; }
+fn NODE_IDENT()           -> i32 { return 5 as i32; }
+fn NODE_UNARY()           -> i32 { return 6 as i32; }
+fn NODE_BINARY()          -> i32 { return 7 as i32; }
+fn NODE_CALL()            -> i32 { return 8 as i32; }
+fn NODE_QUALIFIED_CALL()  -> i32 { return 9 as i32; }
+fn NODE_FIELD()           -> i32 { return 10 as i32; }
+fn NODE_INDEX()           -> i32 { return 11 as i32; }
+fn NODE_CAST()            -> i32 { return 12 as i32; }
+fn NODE_ARRAY_TYPE()      -> i32 { return 13 as i32; }
+fn NODE_ARRAY_LIT()       -> i32 { return 14 as i32; }
+fn NODE_SLICE_TYPE()      -> i32 { return 15 as i32; }
+fn NODE_SLICE_LIT()       -> i32 { return 16 as i32; }
+fn NODE_SLICE_RANGE()     -> i32 { return 17 as i32; }
+fn NODE_SIZEOF()          -> i32 { return 18 as i32; }
+fn NODE_ALIGNOF()         -> i32 { return 19 as i32; }
+fn NODE_ADDR_OF()         -> i32 { return 20 as i32; }
+fn NODE_DEREF()           -> i32 { return 21 as i32; }
+// 3b 之后补：22-33 (block/if/while/for/let/assign/return/break/continue/expr_stmt/match/marm)
+// 3c 之后补：34-38 (plit/pident/penum/prange/por/pwild)
+// 3d 之后补：39-48 (slit/evariant/sdef/edef/funcdecl/typedecl/externdecl/importdecl/module)
+
+fn node_kind_name(kind: i32) -> *u8 {
+    if kind == NODE_INT()            { return "INT" as *u8; }
+    if kind == NODE_FLOAT()          { return "FLOAT" as *u8; }
+    if kind == NODE_STRING()         { return "STRING" as *u8; }
+    if kind == NODE_CHAR()           { return "CHAR" as *u8; }
+    if kind == NODE_BOOL()           { return "BOOL" as *u8; }
+    if kind == NODE_IDENT()          { return "IDENT" as *u8; }
+    if kind == NODE_UNARY()          { return "UNARY" as *u8; }
+    if kind == NODE_BINARY()         { return "BINARY" as *u8; }
+    if kind == NODE_CALL()           { return "CALL" as *u8; }
+    if kind == NODE_QUALIFIED_CALL() { return "QUALIFIED_CALL" as *u8; }
+    if kind == NODE_FIELD()          { return "FIELD" as *u8; }
+    if kind == NODE_INDEX()          { return "INDEX" as *u8; }
+    if kind == NODE_CAST()           { return "CAST" as *u8; }
+    if kind == NODE_ARRAY_TYPE()     { return "ARRAY_TYPE" as *u8; }
+    if kind == NODE_ARRAY_LIT()      { return "ARRAY_LIT" as *u8; }
+    if kind == NODE_SLICE_TYPE()     { return "SLICE_TYPE" as *u8; }
+    if kind == NODE_SLICE_LIT()      { return "SLICE_LIT" as *u8; }
+    if kind == NODE_SLICE_RANGE()    { return "SLICE_RANGE" as *u8; }
+    if kind == NODE_SIZEOF()         { return "SIZEOF" as *u8; }
+    if kind == NODE_ALIGNOF()        { return "ALIGNOF" as *u8; }
+    if kind == NODE_ADDR_OF()        { return "ADDR_OF" as *u8; }
+    if kind == NODE_DEREF()          { return "DEREF" as *u8; }
+    return "?" as *u8;
+}
+
+// ════════════════════════════════════════════════════
+// Variant structs（每个紧跟 Node 在 arena）
+// ════════════════════════════════════════════════════
+
+// ─── literals ───
+
+// value(i64 8) + prim(i32 4 + pad 4) = 16
+type NodeInt = struct {
+    value: i64,
+    prim:  i32,
+}
+fn NODE_INT_SIZE() -> i64 { return 16 as i64; }
+
+// value(f64 8) = 8
+type NodeFloat = struct {
+    value: f64,
+}
+fn NODE_FLOAT_SIZE() -> i64 { return 8 as i64; }
+
+// chars(*u8 8) + len(i64 8) = 16
+type NodeString = struct {
+    chars: *u8,
+    len:   i64,
+}
+fn NODE_STRING_SIZE() -> i64 { return 16 as i64; }
+
+// ch(i32 4 + pad 4) = 8
+type NodeChar = struct {
+    ch: i32,
+}
+fn NODE_CHAR_SIZE() -> i64 { return 8 as i64; }
+
+// value(i32 4 + pad 4) = 8
+type NodeBool = struct {
+    value: i32,
+}
+fn NODE_BOOL_SIZE() -> i64 { return 8 as i64; }
+
+// ─── expressions ───
+
+// sym(*u8 8) = 8
+type NodeIdent = struct {
+    sym: *u8,        // *Sym
+}
+fn NODE_IDENT_SIZE() -> i64 { return 8 as i64; }
+
+// op(i32 8) + expr(*u8 8) = 16
+type NodeUnary = struct {
+    op:   i32,       // TokenKind
+    expr: *u8,       // *Node
+}
+fn NODE_UNARY_SIZE() -> i64 { return 16 as i64; }
+
+// op(i32 8) + left(*u8 8) + right(*u8 8) = 24
+type NodeBinary = struct {
+    op:    i32,
+    left:  *u8,
+    right: *u8,
+}
+fn NODE_BINARY_SIZE() -> i64 { return 24 as i64; }
+
+// callee(*u8 8) + args(*u8 8) + nargs(i64 8) = 24
+type NodeCall = struct {
+    callee: *u8,
+    args:   *u8,     // **Node 数组
+    nargs:  i64,
+}
+fn NODE_CALL_SIZE() -> i64 { return 24 as i64; }
+
+// module(*u8 8) + function(*u8 8) + args(*u8 8) + nargs(i64 8) + resolved(*u8 8) = 40
+type NodeQualifiedCall = struct {
+    module:   *u8,   // *Node (IDENT)
+    function: *u8,   // *Node (IDENT)
+    args:     *u8,
+    nargs:    i64,
+    resolved: *u8,   // *Sym (sema 设置)
+}
+fn NODE_QUALIFIED_CALL_SIZE() -> i64 { return 40 as i64; }
+
+// expr(*u8 8) + field(*u8 8) = 16
+type NodeField = struct {
+    expr:  *u8,
+    field: *u8,      // const char *name
+}
+fn NODE_FIELD_SIZE() -> i64 { return 16 as i64; }
+
+// expr(*u8 8) + index(*u8 8) = 16
+type NodeIndex = struct {
+    expr:  *u8,
+    index: *u8,
+}
+fn NODE_INDEX_SIZE() -> i64 { return 16 as i64; }
+
+// expr(*u8 8) + target_type(*u8 8) = 16
+type NodeCast = struct {
+    expr:        *u8,
+    target_type: *u8,
+}
+fn NODE_CAST_SIZE() -> i64 { return 16 as i64; }
+
+// elem_type(*u8 8) + count_expr(*u8 8) = 16
+type NodeArrayType = struct {
+    elem_type:  *u8,
+    count_expr: *u8,
+}
+fn NODE_ARRAY_TYPE_SIZE() -> i64 { return 16 as i64; }
+
+// elems(*u8 8) + nelems(i64 8) = 16
+type NodeArrayLit = struct {
+    elems:  *u8,
+    nelems: i64,
+}
+fn NODE_ARRAY_LIT_SIZE() -> i64 { return 16 as i64; }
+
+// elem_type(*u8 8) = 8
+type NodeSliceType = struct {
+    elem_type: *u8,
+}
+fn NODE_SLICE_TYPE_SIZE() -> i64 { return 8 as i64; }
+
+// array(*u8 8) = 8
+type NodeSliceLit = struct {
+    array: *u8,
+}
+fn NODE_SLICE_LIT_SIZE() -> i64 { return 8 as i64; }
+
+// base(*u8 8) + start(*u8 8) + end(*u8 8) = 24
+type NodeSliceRange = struct {
+    base:  *u8,
+    start: *u8,
+    end:   *u8,
+}
+fn NODE_SLICE_RANGE_SIZE() -> i64 { return 24 as i64; }
+
+// target(*u8 8) = 8
+type NodeSizeof = struct {
+    target: *u8,     // *Type
+}
+fn NODE_SIZEOF_SIZE() -> i64 { return 8 as i64; }
+
+// target(*u8 8) = 8
+type NodeAlignof = struct {
+    target: *u8,
+}
+fn NODE_ALIGNOF_SIZE() -> i64 { return 8 as i64; }
+
+// expr(*u8 8) = 8
+type NodeAddrOf = struct {
+    expr: *u8,
+}
+fn NODE_ADDR_OF_SIZE() -> i64 { return 8 as i64; }
+
+// expr(*u8 8) = 8
+type NodeDeref = struct {
+    expr: *u8,
+}
+fn NODE_DEREF_SIZE() -> i64 { return 8 as i64; }
+
+// ════════════════════════════════════════════════════
+// 通用 helper：初始化 Node header + 设置 variant 数据
+// ════════════════════════════════════════════════════
+
+// 设置 Node 公共字段（kind/type/loc），返回 Node 指针
+// variant 数据由调用方在 NODE_SIZE 偏移处写入
+fn ast_init_node(buf: *u8, kind: i32,
+                 loc_filename: *u8, loc_line: i32, loc_col: i32) -> *Node {
+    let n = buf as *Node;
+    (*n).kind = kind;
+    (*n).type_ptr = 0 as *u8;
+    (*n).loc_filename = loc_filename;
+    (*n).loc_line = loc_line;
+    (*n).loc_col = loc_col;
+    return n;
+}
+
+// ════════════════════════════════════════════════════
+// Literal 构造函数 + 访问器
+// ════════════════════════════════════════════════════
+
+fn ast_new_int(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+               val: i64, prim: i32) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_INT_SIZE());
+    let n = ast_init_node(buf, NODE_INT(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeInt;
+    (*d).value = val;
+    (*d).prim = prim;
+    return n;
+}
+
+fn node_int_data(n: *Node) -> *NodeInt {
+    return (n as i64 + NODE_SIZE()) as *NodeInt;
+}
+
+fn ast_new_float(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                 val: f64) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_FLOAT_SIZE());
+    let n = ast_init_node(buf, NODE_FLOAT(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeFloat;
+    // QBE Windows amd64 backend bug workaround：f64 存 struct 字段 emit
+    // `movsd %gpr`（应该 XMM）。C 端 jh_f64_store 走 GCC emit（正确 movsd %xmm0）。
+    jh_f64_store(d as *u8, val);
+    return n;
+}
+
+fn node_float_data(n: *Node) -> *NodeFloat {
+    return (n as i64 + NODE_SIZE()) as *NodeFloat;
+}
+
+fn ast_new_string(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                  chars: *u8, len: i64) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_STRING_SIZE());
+    let n = ast_init_node(buf, NODE_STRING(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeString;
+    (*d).chars = chars;
+    (*d).len = len;
+    return n;
+}
+
+fn node_string_data(n: *Node) -> *NodeString {
+    return (n as i64 + NODE_SIZE()) as *NodeString;
+}
+
+fn ast_new_char(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                ch: i32) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_CHAR_SIZE());
+    let n = ast_init_node(buf, NODE_CHAR(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeChar;
+    (*d).ch = ch;
+    return n;
+}
+
+fn node_char_data(n: *Node) -> *NodeChar {
+    return (n as i64 + NODE_SIZE()) as *NodeChar;
+}
+
+fn ast_new_bool(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                val: i32) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_BOOL_SIZE());
+    let n = ast_init_node(buf, NODE_BOOL(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeBool;
+    (*d).value = val;
+    return n;
+}
+
+fn node_bool_data(n: *Node) -> *NodeBool {
+    return (n as i64 + NODE_SIZE()) as *NodeBool;
+}
+
+// ════════════════════════════════════════════════════
+// Expression 构造函数 + 访问器
+// ════════════════════════════════════════════════════
+
+fn ast_new_ident(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                 sym: *Sym) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_IDENT_SIZE());
+    let n = ast_init_node(buf, NODE_IDENT(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeIdent;
+    (*d).sym = sym as *u8;
+    return n;
+}
+
+fn node_ident_data(n: *Node) -> *NodeIdent {
+    return (n as i64 + NODE_SIZE()) as *NodeIdent;
+}
+
+fn ast_new_unary(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                 op: i32, expr: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_UNARY_SIZE());
+    let n = ast_init_node(buf, NODE_UNARY(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeUnary;
+    (*d).op = op;
+    (*d).expr = expr as *u8;
+    return n;
+}
+
+fn node_unary_data(n: *Node) -> *NodeUnary {
+    return (n as i64 + NODE_SIZE()) as *NodeUnary;
+}
+
+fn ast_new_binary(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                  op: i32, left: *Node, right: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_BINARY_SIZE());
+    let n = ast_init_node(buf, NODE_BINARY(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeBinary;
+    (*d).op = op;
+    (*d).left = left as *u8;
+    (*d).right = right as *u8;
+    return n;
+}
+
+fn node_binary_data(n: *Node) -> *NodeBinary {
+    return (n as i64 + NODE_SIZE()) as *NodeBinary;
+}
+
+fn ast_new_call(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                callee: *Node, args: *u8, nargs: i64) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_CALL_SIZE());
+    let n = ast_init_node(buf, NODE_CALL(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeCall;
+    (*d).callee = callee as *u8;
+    (*d).args = args;
+    (*d).nargs = nargs;
+    return n;
+}
+
+fn node_call_data(n: *Node) -> *NodeCall {
+    return (n as i64 + NODE_SIZE()) as *NodeCall;
+}
+
+fn ast_new_qualified_call(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                          module: *Node, function: *Node, args: *u8, nargs: i64) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_QUALIFIED_CALL_SIZE());
+    let n = ast_init_node(buf, NODE_QUALIFIED_CALL(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeQualifiedCall;
+    (*d).module = module as *u8;
+    (*d).function = function as *u8;
+    (*d).args = args;
+    (*d).nargs = nargs;
+    (*d).resolved = 0 as *u8;
+    return n;
+}
+
+fn node_qualified_call_data(n: *Node) -> *NodeQualifiedCall {
+    return (n as i64 + NODE_SIZE()) as *NodeQualifiedCall;
+}
+
+fn ast_new_field(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                 expr: *Node, field: *u8) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_FIELD_SIZE());
+    let n = ast_init_node(buf, NODE_FIELD(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeField;
+    (*d).expr = expr as *u8;
+    (*d).field = field;
+    return n;
+}
+
+fn node_field_data(n: *Node) -> *NodeField {
+    return (n as i64 + NODE_SIZE()) as *NodeField;
+}
+
+fn ast_new_index(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                 expr: *Node, index: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_INDEX_SIZE());
+    let n = ast_init_node(buf, NODE_INDEX(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeIndex;
+    (*d).expr = expr as *u8;
+    (*d).index = index as *u8;
+    return n;
+}
+
+fn node_index_data(n: *Node) -> *NodeIndex {
+    return (n as i64 + NODE_SIZE()) as *NodeIndex;
+}
+
+fn ast_new_cast(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                expr: *Node, target: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_CAST_SIZE());
+    let n = ast_init_node(buf, NODE_CAST(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeCast;
+    (*d).expr = expr as *u8;
+    (*d).target_type = target as *u8;
+    return n;
+}
+
+fn node_cast_data(n: *Node) -> *NodeCast {
+    return (n as i64 + NODE_SIZE()) as *NodeCast;
+}
+
+fn ast_new_array_type(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                      elem_type: *Node, count_expr: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_ARRAY_TYPE_SIZE());
+    let n = ast_init_node(buf, NODE_ARRAY_TYPE(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeArrayType;
+    (*d).elem_type = elem_type as *u8;
+    (*d).count_expr = count_expr as *u8;
+    return n;
+}
+
+fn node_array_type_data(n: *Node) -> *NodeArrayType {
+    return (n as i64 + NODE_SIZE()) as *NodeArrayType;
+}
+
+fn ast_new_array_lit(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                     elems: *u8, nelems: i64) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_ARRAY_LIT_SIZE());
+    let n = ast_init_node(buf, NODE_ARRAY_LIT(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeArrayLit;
+    (*d).elems = elems;
+    (*d).nelems = nelems;
+    return n;
+}
+
+fn node_array_lit_data(n: *Node) -> *NodeArrayLit {
+    return (n as i64 + NODE_SIZE()) as *NodeArrayLit;
+}
+
+fn ast_new_slice_type(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                      elem_type: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_SLICE_TYPE_SIZE());
+    let n = ast_init_node(buf, NODE_SLICE_TYPE(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeSliceType;
+    (*d).elem_type = elem_type as *u8;
+    return n;
+}
+
+fn node_slice_type_data(n: *Node) -> *NodeSliceType {
+    return (n as i64 + NODE_SIZE()) as *NodeSliceType;
+}
+
+fn ast_new_slice_lit(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                     array: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_SLICE_LIT_SIZE());
+    let n = ast_init_node(buf, NODE_SLICE_LIT(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeSliceLit;
+    (*d).array = array as *u8;
+    return n;
+}
+
+fn node_slice_lit_data(n: *Node) -> *NodeSliceLit {
+    return (n as i64 + NODE_SIZE()) as *NodeSliceLit;
+}
+
+fn ast_new_slice_range(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                       base: *Node, start: *Node, end: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_SLICE_RANGE_SIZE());
+    let n = ast_init_node(buf, NODE_SLICE_RANGE(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeSliceRange;
+    (*d).base = base as *u8;
+    (*d).start = start as *u8;
+    (*d).end = end as *u8;
+    return n;
+}
+
+fn node_slice_range_data(n: *Node) -> *NodeSliceRange {
+    return (n as i64 + NODE_SIZE()) as *NodeSliceRange;
+}
+
+fn ast_new_sizeof(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                  target: *Type) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_SIZEOF_SIZE());
+    let n = ast_init_node(buf, NODE_SIZEOF(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeSizeof;
+    (*d).target = target as *u8;
+    return n;
+}
+
+fn node_sizeof_data(n: *Node) -> *NodeSizeof {
+    return (n as i64 + NODE_SIZE()) as *NodeSizeof;
+}
+
+fn ast_new_alignof(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                   target: *Type) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_ALIGNOF_SIZE());
+    let n = ast_init_node(buf, NODE_ALIGNOF(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeAlignof;
+    (*d).target = target as *u8;
+    return n;
+}
+
+fn node_alignof_data(n: *Node) -> *NodeAlignof {
+    return (n as i64 + NODE_SIZE()) as *NodeAlignof;
+}
+
+fn ast_new_addr_of(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                   expr: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_ADDR_OF_SIZE());
+    let n = ast_init_node(buf, NODE_ADDR_OF(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeAddrOf;
+    (*d).expr = expr as *u8;
+    return n;
+}
+
+fn node_addr_of_data(n: *Node) -> *NodeAddrOf {
+    return (n as i64 + NODE_SIZE()) as *NodeAddrOf;
+}
+
+fn ast_new_deref(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                 expr: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_DEREF_SIZE());
+    let n = ast_init_node(buf, NODE_DEREF(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeDeref;
+    (*d).expr = expr as *u8;
+    return n;
+}
+
+fn node_deref_data(n: *Node) -> *NodeDeref {
+    return (n as i64 + NODE_SIZE()) as *NodeDeref;
+}

@@ -1,0 +1,350 @@
+// _driver_ast.jhyy — Sprint 2 commit 3a 单元测试：验证 ast.jhyy（literals + exprs）
+// 测试覆盖：22 个 NodeKind 构造 + 访问器 + kind 设置 + variant 字段读写
+// 退出码：42
+
+import arena;
+import util;
+import symtab;
+import types;
+import ast;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    printf("A0\n", 0);
+
+    // ──── 准备 arena + symtab + TypeArena ────
+    let mut a: Arena = Arena {
+        start: 0 as *u8, cur: 0 as *u8, end: 0 as *u8,
+        blocks: 0 as *u8, def_size: 0 as i64,
+    };
+    arena_init(&a, 32768);
+
+    let mut ta: TypeArena = TypeArena {
+        arena: 0 as *Arena, inited: 0 as i32,
+        i8_ty: 0 as *u8, i16_ty: 0 as *u8, i32_ty: 0 as *u8, i64_ty: 0 as *u8,
+        u8_ty: 0 as *u8, u16_ty: 0 as *u8, u32_ty: 0 as *u8, u64_ty: 0 as *u8,
+        f32_ty: 0 as *u8, f64_ty: 0 as *u8, bool_ty: 0 as *u8, void_ty: 0 as *u8,
+    };
+    ta.arena = &a;
+
+    let st = symtab_new(&a, 0 as *u8);
+    let i32_ty = type_primitive(&ta, PRIM_I32());
+    printf("A1\n", 0);
+
+    // ──── NODE_INT ────
+    let n_int = ast_new_int(&a, "test.jhyy" as *u8, 10 as i32, 5 as i32,
+                            42 as i64, PRIM_I32());
+    if (*n_int).kind == NODE_INT() {
+        printf("A2\n", 0);
+    } else {
+        printf("FAIL int kind\n", 0); return 1;
+    }
+    let n_int_d = node_int_data(n_int);
+    if (*n_int_d).value == 42 as i64 {
+        printf("A3\n", 0);
+    } else {
+        printf("FAIL int value\n", 0); return 2;
+    }
+    if (*n_int_d).prim == PRIM_I32() {
+        printf("A4\n", 0);
+    } else {
+        printf("FAIL int prim\n", 0); return 3;
+    }
+    if (*n_int).loc_line == 10 as i32 {
+        printf("A5\n", 0);  // loc 字段保留
+    } else {
+        printf("FAIL int loc\n", 0); return 4;
+    }
+
+    // ──── NODE_FLOAT ────
+    // 注：v0.6.2 codegen bug #8 + #9 + QBE Windows backend bug（f64 存 struct 字段
+    // emit `movsd %gpr`）：用 jh_f64_store C bridge 绕开（C 端 GCC emit 正确 movsd %xmm0）。
+    let n_float = ast_new_float(&a, "f.jhyy" as *u8, 1 as i32, 1 as i32, 3.14 as f64);
+    if (*n_float).kind == NODE_FLOAT() {
+        printf("A6\n", 0);
+    } else {
+        printf("FAIL float kind\n", 0); return 5;
+    }
+    // 验证 f64 value 通过 C bridge 存对：读前 4 byte（mantissa 低位，3.14 非零）
+    let n_float_d_ptr = (n_float as i64 + NODE_SIZE()) as *NodeFloat;
+    let float_addr = n_float_d_ptr as *i32;
+    let low32 = *float_addr;
+    if low32 != 0 as i32 {
+        printf("A7\n", 0);  // 3.14 mantissa 低 4 byte 非零
+    } else {
+        printf("FAIL float value\n", 0); return 6;
+    }
+
+    // ──── NODE_STRING ────
+    let s_hello = "hello" as *u8;
+    let n_str = ast_new_string(&a, "s.jhyy" as *u8, 1 as i32, 1 as i32, s_hello, 5 as i64);
+    if (*n_str).kind == NODE_STRING() {
+        printf("A8\n", 0);
+    } else {
+        printf("FAIL str kind\n", 0); return 7;
+    }
+    let n_str_d = node_string_data(n_str);
+    if strcmp((*n_str_d).chars, s_hello) == 0 as i32 {
+        printf("A9\n", 0);
+    } else {
+        printf("FAIL str chars\n", 0); return 8;
+    }
+    if (*n_str_d).len == 5 as i64 {
+        printf("A10\n", 0);
+    } else {
+        printf("FAIL str len\n", 0); return 9;
+    }
+
+    // ──── NODE_CHAR ────
+    let n_char = ast_new_char(&a, "c.jhyy" as *u8, 1 as i32, 1 as i32, 65 as i32);
+    if (*n_char).kind == NODE_CHAR() {
+        printf("A11\n", 0);
+    } else {
+        printf("FAIL char kind\n", 0); return 10;
+    }
+    if (*node_char_data(n_char)).ch == 65 as i32 {
+        printf("A12\n", 0);
+    } else {
+        printf("FAIL char ch\n", 0); return 11;
+    }
+
+    // ──── NODE_BOOL ────
+    let n_bool = ast_new_bool(&a, "b.jhyy" as *u8, 1 as i32, 1 as i32, 1 as i32);
+    if (*n_bool).kind == NODE_BOOL() {
+        printf("A13\n", 0);
+    } else {
+        printf("FAIL bool kind\n", 0); return 12;
+    }
+    if (*node_bool_data(n_bool)).value == 1 as i32 {
+        printf("A14\n", 0);
+    } else {
+        printf("FAIL bool val\n", 0); return 13;
+    }
+
+    // ──── NODE_IDENT ────
+    let x_sym = symtab_insert(st, "x" as *u8, SYM_VAR(), i32_ty as *u8, 0 as i32, 0 as i32);
+    let n_ident = ast_new_ident(&a, "i.jhyy" as *u8, 2 as i32, 3 as i32, x_sym);
+    if (*n_ident).kind == NODE_IDENT() {
+        printf("A15\n", 0);
+    } else {
+        printf("FAIL ident kind\n", 0); return 14;
+    }
+    if (*node_ident_data(n_ident)).sym == (x_sym as *u8) {
+        printf("A16\n", 0);
+    } else {
+        printf("FAIL ident sym\n", 0); return 15;
+    }
+
+    // ──── NODE_UNARY ────
+    let n_unary = ast_new_unary(&a, "u.jhyy" as *u8, 3 as i32, 1 as i32, 0 as i32, n_int);
+    if (*n_unary).kind == NODE_UNARY() {
+        printf("A17\n", 0);
+    } else {
+        printf("FAIL unary kind\n", 0); return 16;
+    }
+    let n_unary_d = node_unary_data(n_unary);
+    if (*n_unary_d).expr == (n_int as *u8) {
+        printf("A18\n", 0);
+    } else {
+        printf("FAIL unary expr\n", 0); return 17;
+    }
+
+    // ──── NODE_BINARY ────
+    let n_bin = ast_new_binary(&a, "b.jhyy" as *u8, 4 as i32, 1 as i32,
+                               0 as i32, n_int, n_int);
+    if (*n_bin).kind == NODE_BINARY() {
+        printf("A19\n", 0);
+    } else {
+        printf("FAIL binary kind\n", 0); return 18;
+    }
+    let n_bin_d = node_binary_data(n_bin);
+    if (*n_bin_d).left == (n_int as *u8) {
+        printf("A20\n", 0);
+    } else {
+        printf("FAIL binary left\n", 0); return 19;
+    }
+    if (*n_bin_d).right == (n_int as *u8) {
+        printf("A21\n", 0);
+    } else {
+        printf("FAIL binary right\n", 0); return 20;
+    }
+
+    // ──── NODE_CALL ────
+    // args 是 *[*]Node 数组（用 arena 分配 1 个 *Node 槽位）
+    let args_buf = arena_alloc(&a, 8 as i64);
+    let args_p = args_buf as **Node;
+    *args_p = n_int;
+    let n_call = ast_new_call(&a, "ca.jhyy" as *u8, 5 as i32, 1 as i32,
+                              n_ident, args_buf, 1 as i64);
+    if (*n_call).kind == NODE_CALL() {
+        printf("A22\n", 0);
+    } else {
+        printf("FAIL call kind\n", 0); return 21;
+    }
+    let n_call_d = node_call_data(n_call);
+    if (*n_call_d).nargs == 1 as i64 {
+        printf("A23\n", 0);
+    } else {
+        printf("FAIL call nargs\n", 0); return 22;
+    }
+    if (*n_call_d).callee == (n_ident as *u8) {
+        printf("A24\n", 0);
+    } else {
+        printf("FAIL call callee\n", 0); return 23;
+    }
+
+    // ──── NODE_QUALIFIED_CALL ────
+    let n_qcall = ast_new_qualified_call(&a, "q.jhyy" as *u8, 6 as i32, 1 as i32,
+                                         n_ident, n_ident, args_buf, 1 as i64);
+    if (*n_qcall).kind == NODE_QUALIFIED_CALL() {
+        printf("A25\n", 0);
+    } else {
+        printf("FAIL qcall kind\n", 0); return 24;
+    }
+    let n_qcall_d = node_qualified_call_data(n_qcall);
+    if (*n_qcall_d).resolved == (0 as *u8) {
+        printf("A26\n", 0);  // 初始为 NULL（sema 后填）
+    } else {
+        printf("FAIL qcall resolved\n", 0); return 25;
+    }
+
+    // ──── NODE_FIELD ────
+    let n_field = ast_new_field(&a, "f.jhyy" as *u8, 7 as i32, 1 as i32,
+                                n_ident, "name" as *u8);
+    if (*n_field).kind == NODE_FIELD() {
+        printf("A27\n", 0);
+    } else {
+        printf("FAIL field kind\n", 0); return 26;
+    }
+    if strcmp((*node_field_data(n_field)).field, "name" as *u8) == 0 as i32 {
+        printf("A28\n", 0);
+    } else {
+        printf("FAIL field name\n", 0); return 27;
+    }
+
+    // ──── NODE_INDEX ────
+    let n_idx = ast_new_index(&a, "ix.jhyy" as *u8, 8 as i32, 1 as i32, n_ident, n_int);
+    if (*n_idx).kind == NODE_INDEX() {
+        printf("A29\n", 0);
+    } else {
+        printf("FAIL index kind\n", 0); return 28;
+    }
+
+    // ──── NODE_CAST ────
+    let n_cast = ast_new_cast(&a, "c.jhyy" as *u8, 9 as i32, 1 as i32, n_int, n_int);
+    if (*n_cast).kind == NODE_CAST() {
+        printf("A30\n", 0);
+    } else {
+        printf("FAIL cast kind\n", 0); return 29;
+    }
+    if (*node_cast_data(n_cast)).target_type == (n_int as *u8) {
+        printf("A31\n", 0);
+    } else {
+        printf("FAIL cast target\n", 0); return 30;
+    }
+
+    // ──── NODE_ARRAY_TYPE / NODE_ARRAY_LIT / NODE_SLICE_TYPE / NODE_SLICE_LIT / NODE_SLICE_RANGE ────
+    let n_atype = ast_new_array_type(&a, "at.jhyy" as *u8, 10 as i32, 1 as i32, n_int, n_int);
+    if (*n_atype).kind == NODE_ARRAY_TYPE() {
+        printf("A32\n", 0);
+    } else {
+        printf("FAIL atype kind\n", 0); return 31;
+    }
+
+    let n_alit = ast_new_array_lit(&a, "al.jhyy" as *u8, 11 as i32, 1 as i32, args_buf, 1 as i64);
+    if (*n_alit).kind == NODE_ARRAY_LIT() {
+        printf("A33\n", 0);
+    } else {
+        printf("FAIL alit kind\n", 0); return 32;
+    }
+    if (*node_array_lit_data(n_alit)).nelems == 1 as i64 {
+        printf("A34\n", 0);
+    } else {
+        printf("FAIL alit nelems\n", 0); return 33;
+    }
+
+    let n_stype = ast_new_slice_type(&a, "st.jhyy" as *u8, 12 as i32, 1 as i32, n_int);
+    if (*n_stype).kind == NODE_SLICE_TYPE() {
+        printf("A35\n", 0);
+    } else {
+        printf("FAIL stype kind\n", 0); return 34;
+    }
+
+    let n_slit = ast_new_slice_lit(&a, "sl.jhyy" as *u8, 13 as i32, 1 as i32, n_alit);
+    if (*n_slit).kind == NODE_SLICE_LIT() {
+        printf("A36\n", 0);
+    } else {
+        printf("FAIL slit kind\n", 0); return 35;
+    }
+
+    let n_srange = ast_new_slice_range(&a, "sr.jhyy" as *u8, 14 as i32, 1 as i32,
+                                       n_int, n_int, n_int);
+    if (*n_srange).kind == NODE_SLICE_RANGE() {
+        printf("A37\n", 0);
+    } else {
+        printf("FAIL srange kind\n", 0); return 36;
+    }
+
+    // ──── NODE_SIZEOF / NODE_ALIGNOF / NODE_ADDR_OF / NODE_DEREF ────
+    let n_sizeof = ast_new_sizeof(&a, "sz.jhyy" as *u8, 15 as i32, 1 as i32, i32_ty);
+    if (*n_sizeof).kind == NODE_SIZEOF() {
+        printf("A38\n", 0);
+    } else {
+        printf("FAIL sizeof kind\n", 0); return 37;
+    }
+    if (*node_sizeof_data(n_sizeof)).target == (i32_ty as *u8) {
+        printf("A39\n", 0);
+    } else {
+        printf("FAIL sizeof target\n", 0); return 38;
+    }
+
+    let n_alignof = ast_new_alignof(&a, "al.jhyy" as *u8, 16 as i32, 1 as i32, i32_ty);
+    if (*n_alignof).kind == NODE_ALIGNOF() {
+        printf("A40\n", 0);
+    } else {
+        printf("FAIL alignof kind\n", 0); return 39;
+    }
+
+    let n_addrof = ast_new_addr_of(&a, "ad.jhyy" as *u8, 17 as i32, 1 as i32, n_int);
+    if (*n_addrof).kind == NODE_ADDR_OF() {
+        printf("A41\n", 0);
+    } else {
+        printf("FAIL addrof kind\n", 0); return 40;
+    }
+
+    let n_deref = ast_new_deref(&a, "de.jhyy" as *u8, 18 as i32, 1 as i32, n_int);
+    if (*n_deref).kind == NODE_DEREF() {
+        printf("A42\n", 0);
+    } else {
+        printf("FAIL deref kind\n", 0); return 41;
+    }
+
+    // ──── node_kind_name ────
+    if strcmp(node_kind_name(NODE_INT()), "INT" as *u8) == 0 as i32 {
+        printf("A43\n", 0);
+    } else {
+        printf("FAIL kind name INT\n", 0); return 42;
+    }
+    if strcmp(node_kind_name(NODE_DEREF()), "DEREF" as *u8) == 0 as i32 {
+        printf("A44\n", 0);
+    } else {
+        printf("FAIL kind name DEREF\n", 0); return 43;
+    }
+    if strcmp(node_kind_name(999 as i32), "?" as *u8) == 0 as i32 {
+        printf("A45\n", 0);  // 未知 kind 返回 "?"
+    } else {
+        printf("FAIL kind name unknown\n", 0); return 44;
+    }
+
+    // ──── type_ptr 字段独立可写（sema 后续设置）────
+    (*n_int).type_ptr = i32_ty as *u8;
+    if (*n_int).type_ptr == (i32_ty as *u8) {
+        printf("A46\n", 0);
+    } else {
+        printf("FAIL type_ptr set\n", 0); return 45;
+    }
+
+    printf("PASS\n", 0);
+    return 42;
+}
