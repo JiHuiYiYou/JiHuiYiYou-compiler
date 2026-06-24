@@ -1,0 +1,312 @@
+// _driver_ast_3b.jhyy — Sprint 2 commit 3b 单元测试：验证 ast.jhyy（stmts + match + patterns）
+// 测试覆盖：18 个新 NodeKind 构造 + 15 个新访问器 + kind 设置 + variant 字段读写
+// 退出码：42
+
+import arena;
+import util;
+import symtab;
+import types;
+import ast;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    printf("B0\n", 0);
+
+    // ──── 准备 arena + symtab + TypeArena ────
+    let mut a: Arena = Arena {
+        start: 0 as *u8, cur: 0 as *u8, end: 0 as *u8,
+        blocks: 0 as *u8, def_size: 0 as i64,
+    };
+    arena_init(&a, 32768);
+
+    let mut ta: TypeArena = TypeArena {
+        arena: 0 as *Arena, inited: 0 as i32,
+        i8_ty: 0 as *u8, i16_ty: 0 as *u8, i32_ty: 0 as *u8, i64_ty: 0 as *u8,
+        u8_ty: 0 as *u8, u16_ty: 0 as *u8, u32_ty: 0 as *u8, u64_ty: 0 as *u8,
+        f32_ty: 0 as *u8, f64_ty: 0 as *u8, bool_ty: 0 as *u8, void_ty: 0 as *u8,
+    };
+    ta.arena = &a;
+
+    let st = symtab_new(&a, 0 as *u8);
+    let i32_ty = type_primitive(&ta, PRIM_I32());
+
+    // 准备一些子节点（重用 stmts、cond、body 等）
+    let dummy_int = ast_new_int(&a, "d.jhyy" as *u8, 1 as i32, 1 as i32,
+                                7 as i64, PRIM_I32());
+    let stmts_buf = arena_alloc(&a, 8 as i64);
+    let stmts_p = stmts_buf as **Node;
+    *stmts_p = dummy_int;
+    let x_sym = symtab_insert(st, "x" as *u8, SYM_VAR(), i32_ty as *u8, 0 as i32, 0 as i32);
+
+    printf("B1\n", 0);
+
+    // ──── B2: NODE_BLOCK ────
+    let n_block = ast_new_block(&a, "blk.jhyy" as *u8, 1 as i32, 1 as i32, stmts_buf, 1 as i64);
+    if (*n_block).kind == NODE_BLOCK() {
+        printf("B2\n", 0);
+    } else {
+        printf("FAIL block kind\n", 0); return 1;
+    }
+    let n_block_d = node_block_data(n_block);
+    if (*n_block_d).nstmts == 1 as i64 {
+        printf("B3\n", 0);
+    } else {
+        printf("FAIL block nstmts\n", 0); return 2;
+    }
+
+    // ──── B4: NODE_IF ────
+    let n_if = ast_new_if(&a, "i.jhyy" as *u8, 2 as i32, 1 as i32,
+                          dummy_int, dummy_int, dummy_int);
+    if (*n_if).kind == NODE_IF() {
+        printf("B4\n", 0);
+    } else {
+        printf("FAIL if kind\n", 0); return 3;
+    }
+    let n_if_d = node_if_data(n_if);
+    if (*n_if_d).cond == (dummy_int as *u8) {
+        printf("B5\n", 0);
+    } else {
+        printf("FAIL if cond\n", 0); return 4;
+    }
+    if (*n_if_d).then_body == (dummy_int as *u8) {
+        printf("B6\n", 0);
+    } else {
+        printf("FAIL if then\n", 0); return 5;
+    }
+    if (*n_if_d).else_body == (dummy_int as *u8) {
+        printf("B7\n", 0);
+    } else {
+        printf("FAIL if else\n", 0); return 6;
+    }
+
+    // ──── B8: NODE_WHILE ────
+    let n_while = ast_new_while(&a, "w.jhyy" as *u8, 3 as i32, 1 as i32,
+                                dummy_int, dummy_int);
+    if (*n_while).kind == NODE_WHILE() {
+        printf("B8\n", 0);
+    } else {
+        printf("FAIL while kind\n", 0); return 7;
+    }
+
+    // ──── B9: NODE_FOR ────
+    let n_for = ast_new_for(&a, "f.jhyy" as *u8, 4 as i32, 1 as i32,
+                            x_sym, dummy_int, dummy_int, dummy_int);
+    if (*n_for).kind == NODE_FOR() {
+        printf("B9\n", 0);
+    } else {
+        printf("FAIL for kind\n", 0); return 8;
+    }
+    let n_for_d = node_for_data(n_for);
+    if (*n_for_d).var == (x_sym as *u8) {
+        printf("B10\n", 0);
+    } else {
+        printf("FAIL for var\n", 0); return 9;
+    }
+
+    // ──── B11: NODE_LET ────
+    let n_let = ast_new_let(&a, "l.jhyy" as *u8, 5 as i32, 1 as i32,
+                            1 as i32, x_sym, dummy_int, dummy_int);
+    if (*n_let).kind == NODE_LET() {
+        printf("B11\n", 0);
+    } else {
+        printf("FAIL let kind\n", 0); return 10;
+    }
+    let n_let_d = node_let_data(n_let);
+    if (*n_let_d).is_mutable == 1 as i32 {
+        printf("B12\n", 0);
+    } else {
+        printf("FAIL let mut\n", 0); return 11;
+    }
+    if (*n_let_d).sym == (x_sym as *u8) {
+        printf("B13\n", 0);
+    } else {
+        printf("FAIL let sym\n", 0); return 12;
+    }
+
+    // ──── B14: NODE_ASSIGN ────
+    let n_assign = ast_new_assign(&a, "as.jhyy" as *u8, 6 as i32, 1 as i32,
+                                  dummy_int, dummy_int);
+    if (*n_assign).kind == NODE_ASSIGN() {
+        printf("B14\n", 0);
+    } else {
+        printf("FAIL assign kind\n", 0); return 13;
+    }
+
+    // ──── B15: NODE_RETURN ────
+    let n_ret = ast_new_return(&a, "r.jhyy" as *u8, 7 as i32, 1 as i32, dummy_int);
+    if (*n_ret).kind == NODE_RETURN() {
+        printf("B15\n", 0);
+    } else {
+        printf("FAIL return kind\n", 0); return 14;
+    }
+    if (*node_return_data(n_ret)).expr == (dummy_int as *u8) {
+        printf("B16\n", 0);
+    } else {
+        printf("FAIL return expr\n", 0); return 15;
+    }
+
+    // ──── B17: NODE_BREAK（无 variant data，无 accessor）────
+    let n_break = ast_new_break(&a, "br.jhyy" as *u8, 8 as i32, 1 as i32);
+    if (*n_break).kind == NODE_BREAK() {
+        printf("B17\n", 0);
+    } else {
+        printf("FAIL break kind\n", 0); return 16;
+    }
+
+    // ──── B18: NODE_CONTINUE ────
+    let n_cont = ast_new_continue(&a, "c.jhyy" as *u8, 9 as i32, 1 as i32);
+    if (*n_cont).kind == NODE_CONTINUE() {
+        printf("B18\n", 0);
+    } else {
+        printf("FAIL continue kind\n", 0); return 17;
+    }
+
+    // ──── B19: NODE_EXPR_STMT ────
+    let n_estmt = ast_new_expr_stmt(&a, "es.jhyy" as *u8, 10 as i32, 1 as i32, dummy_int);
+    if (*n_estmt).kind == NODE_EXPR_STMT() {
+        printf("B19\n", 0);
+    } else {
+        printf("FAIL estmt kind\n", 0); return 18;
+    }
+    if (*node_expr_stmt_data(n_estmt)).expr == (dummy_int as *u8) {
+        printf("B20\n", 0);
+    } else {
+        printf("FAIL estmt expr\n", 0); return 19;
+    }
+
+    // ──── B21: NODE_MATCH ────
+    let arms_buf = arena_alloc(&a, 8 as i64);
+    let arms_p = arms_buf as **Node;
+    *arms_p = dummy_int;
+    let n_match = ast_new_match(&a, "m.jhyy" as *u8, 11 as i32, 1 as i32,
+                                dummy_int, arms_buf, 1 as i64);
+    if (*n_match).kind == NODE_MATCH() {
+        printf("B21\n", 0);
+    } else {
+        printf("FAIL match kind\n", 0); return 20;
+    }
+    if (*node_match_data(n_match)).narms == 1 as i64 {
+        printf("B22\n", 0);
+    } else {
+        printf("FAIL match narms\n", 0); return 21;
+    }
+
+    // ──── B23: NODE_MATCH_ARM ────
+    let n_marm = ast_new_match_arm(&a, "ma.jhyy" as *u8, 12 as i32, 1 as i32,
+                                   dummy_int, dummy_int);
+    if (*n_marm).kind == NODE_MATCH_ARM() {
+        printf("B23\n", 0);
+    } else {
+        printf("FAIL marm kind\n", 0); return 22;
+    }
+    if (*node_match_arm_data(n_marm)).body == (dummy_int as *u8) {
+        printf("B24\n", 0);
+    } else {
+        printf("FAIL marm body\n", 0); return 23;
+    }
+
+    // ──── B25: NODE_PATTERN_LIT ────
+    let n_plit = ast_new_pattern_lit(&a, "pl.jhyy" as *u8, 13 as i32, 1 as i32,
+                                     99 as i64, PRIM_I32());
+    if (*n_plit).kind == NODE_PATTERN_LIT() {
+        printf("B25\n", 0);
+    } else {
+        printf("FAIL plit kind\n", 0); return 24;
+    }
+    let n_plit_d = node_pattern_lit_data(n_plit);
+    if (*n_plit_d).value == 99 as i64 {
+        printf("B26\n", 0);
+    } else {
+        printf("FAIL plit value\n", 0); return 25;
+    }
+
+    // ──── B27: NODE_PATTERN_IDENT ────
+    let n_pident = ast_new_pattern_ident(&a, "pi.jhyy" as *u8, 14 as i32, 1 as i32, x_sym);
+    if (*n_pident).kind == NODE_PATTERN_IDENT() {
+        printf("B27\n", 0);
+    } else {
+        printf("FAIL pident kind\n", 0); return 26;
+    }
+    if (*node_pattern_ident_data(n_pident)).sym == (x_sym as *u8) {
+        printf("B28\n", 0);
+    } else {
+        printf("FAIL pident sym\n", 0); return 27;
+    }
+
+    // ──── B29: NODE_PATTERN_ENUM ────
+    let n_penum = ast_new_pattern_enum(&a, "pe.jhyy" as *u8, 15 as i32, 1 as i32,
+                                       x_sym, x_sym, dummy_int);
+    if (*n_penum).kind == NODE_PATTERN_ENUM() {
+        printf("B29\n", 0);
+    } else {
+        printf("FAIL penum kind\n", 0); return 28;
+    }
+    let n_penum_d = node_pattern_enum_data(n_penum);
+    if (*n_penum_d).type_sym == (x_sym as *u8) {
+        printf("B30\n", 0);
+    } else {
+        printf("FAIL penum type\n", 0); return 29;
+    }
+    if (*n_penum_d).inner == (dummy_int as *u8) {
+        printf("B31\n", 0);
+    } else {
+        printf("FAIL penum inner\n", 0); return 30;
+    }
+
+    // ──── B32: NODE_PATTERN_RANGE ────
+    let n_prange = ast_new_pattern_range(&a, "pr.jhyy" as *u8, 16 as i32, 1 as i32,
+                                         dummy_int, dummy_int);
+    if (*n_prange).kind == NODE_PATTERN_RANGE() {
+        printf("B32\n", 0);
+    } else {
+        printf("FAIL prange kind\n", 0); return 31;
+    }
+    if (*node_pattern_range_data(n_prange)).lo == (dummy_int as *u8) {
+        printf("B33\n", 0);
+    } else {
+        printf("FAIL prange lo\n", 0); return 32;
+    }
+
+    // ──── B34: NODE_PATTERN_OR ────
+    let n_por = ast_new_pattern_or(&a, "po.jhyy" as *u8, 17 as i32, 1 as i32,
+                                   dummy_int, dummy_int);
+    if (*n_por).kind == NODE_PATTERN_OR() {
+        printf("B34\n", 0);
+    } else {
+        printf("FAIL por kind\n", 0); return 33;
+    }
+    if (*node_pattern_or_data(n_por)).right == (dummy_int as *u8) {
+        printf("B35\n", 0);
+    } else {
+        printf("FAIL por right\n", 0); return 34;
+    }
+
+    // ──── B36: NODE_PATTERN_WILD（无 variant data，无 accessor）────
+    let n_pwild = ast_new_pattern_wild(&a, "pw.jhyy" as *u8, 18 as i32, 1 as i32);
+    if (*n_pwild).kind == NODE_PATTERN_WILD() {
+        printf("B36\n", 0);
+    } else {
+        printf("FAIL pwild kind\n", 0); return 35;
+    }
+
+    // ──── node_kind_name 验证新 kind ────
+    if strcmp(node_kind_name(NODE_BLOCK()), "BLOCK" as *u8) == 0 as i32 {
+        printf("B37\n", 0);
+    } else {
+        printf("FAIL kind name BLOCK\n", 0); return 36;
+    }
+    if strcmp(node_kind_name(NODE_MATCH()), "MATCH" as *u8) == 0 as i32 {
+        printf("B38\n", 0);
+    } else {
+        printf("FAIL kind name MATCH\n", 0); return 37;
+    }
+    if strcmp(node_kind_name(NODE_PATTERN_WILD()), "PATTERN_WILD" as *u8) == 0 as i32 {
+        printf("B39\n", 0);
+    } else {
+        printf("FAIL kind name PATTERN_WILD\n", 0); return 38;
+    }
+
+    printf("PASS\n", 0);
+    return 42;
+}

@@ -1,15 +1,18 @@
 // ast.jhyy — JHYY 翻译自 compiler/src/ast.c
-// v1.0.0 sprint 2 commit 3a, 2026-06-24
+// v1.0.0 sprint 2 commit 3b, 2026-06-24
 //
 // 翻译要点（v0.6.2 patch 后实测）：
-//   - 49 NodeKind × ctor + accessor = ~98 fns，本 commit 完成 22 个（literals + exprs）
+//   - 49 NodeKind × ctor + accessor = ~98 fns，commit 3a+3b 完成 40 个
+//     （3a: 22 literals+exprs / 3b: 18 stmts+match+patterns）
 //   - 内存模式：C 版 Node header + variant struct 在 arena 紧邻
 //     → jhyy: arena_alloc(N + M) 一次性，返回 buf；cast 前 40 字节为 *Node，
 //     cast 字节 [40, 40+M) 为 *NodeXxx
 //   - jhyy 无前向引用 → 必须按依赖顺序定义 struct + ctor + accessor
-//     辅助 struct (NodeFieldInit 等) 在 commit 3b+ 才需要
 //   - SourceLoc 不内嵌（Node 自带 loc_filename/line/col 三字段）
-//   - *Type 字段统一 *u8（避免 *Type in struct def 前向引用）
+//   - *Type / *Sym 字段统一 *u8（避免前向引用）
+//   - 3 个 NodeKind 无 variant data：NODE_BREAK / NODE_CONTINUE / NODE_PATTERN_WILD
+//     → SIZE 常量为 0，但仍走 arena_alloc(NODE_SIZE) 保留 40 字节 header
+//     → 不提供 accessor（header 就够）
 //
 // 已知差异（vs C 版）：
 //   - **C 用 Node 后紧邻 variant struct**：jhyy 走 single arena_alloc(N+M) 一次性
@@ -17,10 +20,10 @@
 //   - **C TokenKind 来自 lexer.h**：jhyy 用 i32 暂代，sprint 3 lexer.jhyy 后给常量
 //
 // 后续 commit 拆分：
-//   3a（本 commit）：literals + exprs（22 NodeKinds）
-//   3b：stmts + match + patterns（~12 NodeKinds）
-//   3c：decls（~5 NodeKinds）
-//   3d：type_def + module（~10 NodeKinds）
+//   3a（已 commit）：literals + exprs（22 NodeKinds）
+//   3b（本 commit）：stmts + match + patterns（18 NodeKinds）
+//   3c：decls + struct/enum literal（~8 NodeKinds）
+//   3d：type_def + module（~2 NodeKinds）
 
 import arena;
 import util;
@@ -55,7 +58,7 @@ type Node = struct {
 fn NODE_SIZE() -> i64 { return 40 as i64; }
 
 // ════════════════════════════════════════════════════
-// NodeKind 常量（49 个，分批定义，本 commit 22 个）
+// NodeKind 常量（49 个，分批定义，commit 3a+3b 完成 40 个）
 // ════════════════════════════════════════════════════
 
 fn NODE_INT()             -> i32 { return 0 as i32; }
@@ -80,9 +83,27 @@ fn NODE_SIZEOF()          -> i32 { return 18 as i32; }
 fn NODE_ALIGNOF()         -> i32 { return 19 as i32; }
 fn NODE_ADDR_OF()         -> i32 { return 20 as i32; }
 fn NODE_DEREF()           -> i32 { return 21 as i32; }
-// 3b 之后补：22-33 (block/if/while/for/let/assign/return/break/continue/expr_stmt/match/marm)
-// 3c 之后补：34-38 (plit/pident/penum/prange/por/pwild)
-// 3d 之后补：39-48 (slit/evariant/sdef/edef/funcdecl/typedecl/externdecl/importdecl/module)
+// ── 3b: stmts + match + patterns（22-39）──
+fn NODE_BLOCK()           -> i32 { return 22 as i32; }
+fn NODE_IF()              -> i32 { return 23 as i32; }
+fn NODE_WHILE()           -> i32 { return 24 as i32; }
+fn NODE_FOR()             -> i32 { return 25 as i32; }
+fn NODE_LET()             -> i32 { return 26 as i32; }
+fn NODE_ASSIGN()          -> i32 { return 27 as i32; }
+fn NODE_RETURN()          -> i32 { return 28 as i32; }
+fn NODE_BREAK()           -> i32 { return 29 as i32; }
+fn NODE_CONTINUE()        -> i32 { return 30 as i32; }
+fn NODE_EXPR_STMT()       -> i32 { return 31 as i32; }
+fn NODE_MATCH()           -> i32 { return 32 as i32; }
+fn NODE_MATCH_ARM()       -> i32 { return 33 as i32; }
+fn NODE_PATTERN_LIT()     -> i32 { return 34 as i32; }
+fn NODE_PATTERN_IDENT()   -> i32 { return 35 as i32; }
+fn NODE_PATTERN_ENUM()    -> i32 { return 36 as i32; }
+fn NODE_PATTERN_RANGE()   -> i32 { return 37 as i32; }
+fn NODE_PATTERN_OR()      -> i32 { return 38 as i32; }
+fn NODE_PATTERN_WILD()    -> i32 { return 39 as i32; }
+// 3c 之后补：40-47 (slit/evariant/sdef/edef/funcdecl/typedecl/externdecl/importdecl)
+// 3d 之后补：48 (module)
 
 fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_INT()            { return "INT" as *u8; }
@@ -107,6 +128,24 @@ fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_ALIGNOF()        { return "ALIGNOF" as *u8; }
     if kind == NODE_ADDR_OF()        { return "ADDR_OF" as *u8; }
     if kind == NODE_DEREF()          { return "DEREF" as *u8; }
+    if kind == NODE_BLOCK()          { return "BLOCK" as *u8; }
+    if kind == NODE_IF()             { return "IF" as *u8; }
+    if kind == NODE_WHILE()          { return "WHILE" as *u8; }
+    if kind == NODE_FOR()            { return "FOR" as *u8; }
+    if kind == NODE_LET()            { return "LET" as *u8; }
+    if kind == NODE_ASSIGN()         { return "ASSIGN" as *u8; }
+    if kind == NODE_RETURN()         { return "RETURN" as *u8; }
+    if kind == NODE_BREAK()          { return "BREAK" as *u8; }
+    if kind == NODE_CONTINUE()       { return "CONTINUE" as *u8; }
+    if kind == NODE_EXPR_STMT()      { return "EXPR_STMT" as *u8; }
+    if kind == NODE_MATCH()          { return "MATCH" as *u8; }
+    if kind == NODE_MATCH_ARM()      { return "MATCH_ARM" as *u8; }
+    if kind == NODE_PATTERN_LIT()    { return "PATTERN_LIT" as *u8; }
+    if kind == NODE_PATTERN_IDENT()  { return "PATTERN_IDENT" as *u8; }
+    if kind == NODE_PATTERN_ENUM()   { return "PATTERN_ENUM" as *u8; }
+    if kind == NODE_PATTERN_RANGE()  { return "PATTERN_RANGE" as *u8; }
+    if kind == NODE_PATTERN_OR()     { return "PATTERN_OR" as *u8; }
+    if kind == NODE_PATTERN_WILD()   { return "PATTERN_WILD" as *u8; }
     return "?" as *u8;
 }
 
@@ -267,6 +306,126 @@ type NodeDeref = struct {
     expr: *u8,
 }
 fn NODE_DEREF_SIZE() -> i64 { return 8 as i64; }
+
+// ─── statements（3b）───
+
+// stmts(*u8 8) + nstmts(i64 8) = 16
+type NodeBlock = struct {
+    stmts:  *u8,     // **Node 数组
+    nstmts: i64,
+}
+fn NODE_BLOCK_SIZE() -> i64 { return 16 as i64; }
+
+// cond(*u8 8) + then_body(*u8 8) + else_body(*u8 8) = 24
+type NodeIf = struct {
+    cond:      *u8,   // *Node
+    then_body: *u8,
+    else_body: *u8,   // 可空（无 else 时 NULL）
+}
+fn NODE_IF_SIZE() -> i64 { return 24 as i64; }
+
+// cond(*u8 8) + body(*u8 8) = 16
+type NodeWhile = struct {
+    cond: *u8,
+    body: *u8,
+}
+fn NODE_WHILE_SIZE() -> i64 { return 16 as i64; }
+
+// var(*u8 8) + start(*u8 8) + end(*u8 8) + body(*u8 8) = 32
+type NodeFor = struct {
+    var:   *u8,       // *Sym
+    start: *u8,       // *Node
+    end:   *u8,
+    body:  *u8,
+}
+fn NODE_FOR_SIZE() -> i64 { return 32 as i64; }
+
+// is_mutable(i32 4 + pad 4) + sym(*u8 8) + type_annot(*u8 8) + init(*u8 8) = 32
+type NodeLet = struct {
+    is_mutable: i32,
+    sym:         *u8,    // *Sym
+    type_annot:  *u8,    // *Node（可空）
+    init:        *u8,    // *Node
+}
+fn NODE_LET_SIZE() -> i64 { return 32 as i64; }
+
+// target(*u8 8) + value(*u8 8) = 16
+type NodeAssign = struct {
+    target: *u8,
+    value:  *u8,
+}
+fn NODE_ASSIGN_SIZE() -> i64 { return 16 as i64; }
+
+// expr(*u8 8) = 8
+type NodeReturn = struct {
+    expr: *u8,    // *Node（可空）
+}
+fn NODE_RETURN_SIZE() -> i64 { return 8 as i64; }
+
+// NODE_BREAK / NODE_CONTINUE：无 variant data
+fn NODE_BREAK_SIZE() -> i64 { return 0 as i64; }
+fn NODE_CONTINUE_SIZE() -> i64 { return 0 as i64; }
+
+// expr(*u8 8) = 8
+type NodeExprStmt = struct {
+    expr: *u8,
+}
+fn NODE_EXPR_STMT_SIZE() -> i64 { return 8 as i64; }
+
+// ─── match + patterns（3b）───
+
+// subject(*u8 8) + arms(*u8 8) + narms(i64 8) = 24
+type NodeMatch = struct {
+    subject: *u8,     // *Node
+    arms:    *u8,     // **Node 数组
+    narms:   i64,
+}
+fn NODE_MATCH_SIZE() -> i64 { return 24 as i64; }
+
+// pattern(*u8 8) + body(*u8 8) = 16
+type NodeMatchArm = struct {
+    pattern: *u8,     // *Node
+    body:    *u8,     // *Node
+}
+fn NODE_MATCH_ARM_SIZE() -> i64 { return 16 as i64; }
+
+// value(i64 8) + prim(i32 4 + pad 4) = 16
+type NodePatternLit = struct {
+    value: i64,
+    prim:  i32,       // TypePrimitive
+}
+fn NODE_PATTERN_LIT_SIZE() -> i64 { return 16 as i64; }
+
+// sym(*u8 8) = 8
+type NodePatternIdent = struct {
+    sym: *u8,         // *Sym
+}
+fn NODE_PATTERN_IDENT_SIZE() -> i64 { return 8 as i64; }
+
+// type_sym(*u8 8) + variant_sym(*u8 8) + inner(*u8 8) = 24
+type NodePatternEnum = struct {
+    type_sym:    *u8,  // *Sym
+    variant_sym: *u8,  // *Sym
+    inner:       *u8,  // *Node（可空）
+}
+fn NODE_PATTERN_ENUM_SIZE() -> i64 { return 24 as i64; }
+
+// lo(*u8 8) + hi(*u8 8) = 16
+type NodePatternRange = struct {
+    lo: *u8,
+    hi: *u8,
+}
+fn NODE_PATTERN_RANGE_SIZE() -> i64 { return 16 as i64; }
+
+// left(*u8 8) + right(*u8 8) = 16
+type NodePatternOr = struct {
+    left:  *u8,
+    right: *u8,
+}
+fn NODE_PATTERN_OR_SIZE() -> i64 { return 16 as i64; }
+
+// NODE_PATTERN_WILD：无 variant data
+fn NODE_PATTERN_WILD_SIZE() -> i64 { return 0 as i64; }
 
 // ════════════════════════════════════════════════════
 // 通用 helper：初始化 Node header + 设置 variant 数据
@@ -597,4 +756,247 @@ fn ast_new_deref(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
 
 fn node_deref_data(n: *Node) -> *NodeDeref {
     return (n as i64 + NODE_SIZE()) as *NodeDeref;
+}
+
+// ════════════════════════════════════════════════════
+// Statement 构造函数 + 访问器（3b）
+// ════════════════════════════════════════════════════
+
+fn ast_new_block(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                 stmts: *u8, nstmts: i64) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_BLOCK_SIZE());
+    let n = ast_init_node(buf, NODE_BLOCK(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeBlock;
+    (*d).stmts = stmts;
+    (*d).nstmts = nstmts;
+    return n;
+}
+
+fn node_block_data(n: *Node) -> *NodeBlock {
+    return (n as i64 + NODE_SIZE()) as *NodeBlock;
+}
+
+fn ast_new_if(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+              cond: *Node, then_body: *Node, else_body: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_IF_SIZE());
+    let n = ast_init_node(buf, NODE_IF(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeIf;
+    (*d).cond = cond as *u8;
+    (*d).then_body = then_body as *u8;
+    (*d).else_body = else_body as *u8;
+    return n;
+}
+
+fn node_if_data(n: *Node) -> *NodeIf {
+    return (n as i64 + NODE_SIZE()) as *NodeIf;
+}
+
+fn ast_new_while(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                 cond: *Node, body: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_WHILE_SIZE());
+    let n = ast_init_node(buf, NODE_WHILE(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeWhile;
+    (*d).cond = cond as *u8;
+    (*d).body = body as *u8;
+    return n;
+}
+
+fn node_while_data(n: *Node) -> *NodeWhile {
+    return (n as i64 + NODE_SIZE()) as *NodeWhile;
+}
+
+fn ast_new_for(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+               var: *Sym, start: *Node, end: *Node, body: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_FOR_SIZE());
+    let n = ast_init_node(buf, NODE_FOR(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeFor;
+    (*d).var = var as *u8;
+    (*d).start = start as *u8;
+    (*d).end = end as *u8;
+    (*d).body = body as *u8;
+    return n;
+}
+
+fn node_for_data(n: *Node) -> *NodeFor {
+    return (n as i64 + NODE_SIZE()) as *NodeFor;
+}
+
+fn ast_new_let(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+               is_mutable: i32, sym: *Sym, type_annot: *Node, init: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_LET_SIZE());
+    let n = ast_init_node(buf, NODE_LET(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeLet;
+    (*d).is_mutable = is_mutable;
+    (*d).sym = sym as *u8;
+    (*d).type_annot = type_annot as *u8;
+    (*d).init = init as *u8;
+    return n;
+}
+
+fn node_let_data(n: *Node) -> *NodeLet {
+    return (n as i64 + NODE_SIZE()) as *NodeLet;
+}
+
+fn ast_new_assign(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                  target: *Node, value: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_ASSIGN_SIZE());
+    let n = ast_init_node(buf, NODE_ASSIGN(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeAssign;
+    (*d).target = target as *u8;
+    (*d).value = value as *u8;
+    return n;
+}
+
+fn node_assign_data(n: *Node) -> *NodeAssign {
+    return (n as i64 + NODE_SIZE()) as *NodeAssign;
+}
+
+fn ast_new_return(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                  expr: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_RETURN_SIZE());
+    let n = ast_init_node(buf, NODE_RETURN(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeReturn;
+    (*d).expr = expr as *u8;
+    return n;
+}
+
+fn node_return_data(n: *Node) -> *NodeReturn {
+    return (n as i64 + NODE_SIZE()) as *NodeReturn;
+}
+
+// NODE_BREAK：仅 header，无 variant data，无 accessor
+fn ast_new_break(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_BREAK_SIZE());
+    let n = ast_init_node(buf, NODE_BREAK(), loc_filename, loc_line, loc_col);
+    return n;
+}
+
+// NODE_CONTINUE：仅 header，无 variant data，无 accessor
+fn ast_new_continue(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_CONTINUE_SIZE());
+    let n = ast_init_node(buf, NODE_CONTINUE(), loc_filename, loc_line, loc_col);
+    return n;
+}
+
+fn ast_new_expr_stmt(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                     expr: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_EXPR_STMT_SIZE());
+    let n = ast_init_node(buf, NODE_EXPR_STMT(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeExprStmt;
+    (*d).expr = expr as *u8;
+    return n;
+}
+
+fn node_expr_stmt_data(n: *Node) -> *NodeExprStmt {
+    return (n as i64 + NODE_SIZE()) as *NodeExprStmt;
+}
+
+// ════════════════════════════════════════════════════
+// Match + Pattern 构造函数 + 访问器（3b）
+// ════════════════════════════════════════════════════
+
+fn ast_new_match(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                 subject: *Node, arms: *u8, narms: i64) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_MATCH_SIZE());
+    let n = ast_init_node(buf, NODE_MATCH(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeMatch;
+    (*d).subject = subject as *u8;
+    (*d).arms = arms;
+    (*d).narms = narms;
+    return n;
+}
+
+fn node_match_data(n: *Node) -> *NodeMatch {
+    return (n as i64 + NODE_SIZE()) as *NodeMatch;
+}
+
+fn ast_new_match_arm(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                     pattern: *Node, body: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_MATCH_ARM_SIZE());
+    let n = ast_init_node(buf, NODE_MATCH_ARM(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeMatchArm;
+    (*d).pattern = pattern as *u8;
+    (*d).body = body as *u8;
+    return n;
+}
+
+fn node_match_arm_data(n: *Node) -> *NodeMatchArm {
+    return (n as i64 + NODE_SIZE()) as *NodeMatchArm;
+}
+
+fn ast_new_pattern_lit(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                       value: i64, prim: i32) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_PATTERN_LIT_SIZE());
+    let n = ast_init_node(buf, NODE_PATTERN_LIT(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodePatternLit;
+    (*d).value = value;
+    (*d).prim = prim;
+    return n;
+}
+
+fn node_pattern_lit_data(n: *Node) -> *NodePatternLit {
+    return (n as i64 + NODE_SIZE()) as *NodePatternLit;
+}
+
+fn ast_new_pattern_ident(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                         sym: *Sym) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_PATTERN_IDENT_SIZE());
+    let n = ast_init_node(buf, NODE_PATTERN_IDENT(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodePatternIdent;
+    (*d).sym = sym as *u8;
+    return n;
+}
+
+fn node_pattern_ident_data(n: *Node) -> *NodePatternIdent {
+    return (n as i64 + NODE_SIZE()) as *NodePatternIdent;
+}
+
+fn ast_new_pattern_enum(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                        type_sym: *Sym, variant_sym: *Sym, inner: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_PATTERN_ENUM_SIZE());
+    let n = ast_init_node(buf, NODE_PATTERN_ENUM(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodePatternEnum;
+    (*d).type_sym = type_sym as *u8;
+    (*d).variant_sym = variant_sym as *u8;
+    (*d).inner = inner as *u8;
+    return n;
+}
+
+fn node_pattern_enum_data(n: *Node) -> *NodePatternEnum {
+    return (n as i64 + NODE_SIZE()) as *NodePatternEnum;
+}
+
+fn ast_new_pattern_range(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                         lo: *Node, hi: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_PATTERN_RANGE_SIZE());
+    let n = ast_init_node(buf, NODE_PATTERN_RANGE(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodePatternRange;
+    (*d).lo = lo as *u8;
+    (*d).hi = hi as *u8;
+    return n;
+}
+
+fn node_pattern_range_data(n: *Node) -> *NodePatternRange {
+    return (n as i64 + NODE_SIZE()) as *NodePatternRange;
+}
+
+fn ast_new_pattern_or(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                      left: *Node, right: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_PATTERN_OR_SIZE());
+    let n = ast_init_node(buf, NODE_PATTERN_OR(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodePatternOr;
+    (*d).left = left as *u8;
+    (*d).right = right as *u8;
+    return n;
+}
+
+fn node_pattern_or_data(n: *Node) -> *NodePatternOr {
+    return (n as i64 + NODE_SIZE()) as *NodePatternOr;
+}
+
+// NODE_PATTERN_WILD：仅 header，无 variant data，无 accessor
+fn ast_new_pattern_wild(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_PATTERN_WILD_SIZE());
+    let n = ast_init_node(buf, NODE_PATTERN_WILD(), loc_filename, loc_line, loc_col);
+    return n;
 }
