@@ -1,0 +1,289 @@
+// symtab.jhyy — JHYY 翻译自 compiler/src/symtab.c
+// v1.0.0 sprint 2 commit 1, 2026-06-24
+//
+// 翻译要点（v0.6.2 patch 后实测）：
+//   - 复用 util.jhyy hash_string（已用 *i32 + shift+mask workaround 避开 #6 qbe_type_of(i8)）
+//   - 复用 util.jhyy strcmp（extern libc, v0.6 已支持）
+//   - arena_alloc 字节数硬编码（jhyy 无 sizeof() 内置，结构 layout 跟 ABI 锁定）
+//   - Type 字段用 *u8 占位，types.jhyy 提交后替 *Type（避免前向引用）
+//   - 计数器 / 累加器必须 `let mut`（避开 #2 let mut bug）
+//   - 自引用 struct 用 *u8 占位（jhyy 不支持 *SymTable in struct def）
+//   - bool 字段改 i32 (0/1)（jhyy 暂无 bool struct 字段实测，v1.0.1 之后再统一）
+//
+// 已知差异（vs C 版）：
+//   - **C 用 `Sym **` 数组，jhyy 走 `*u8 + offset` cast 模式**（util.jhyy hm_get_entry 同款）
+//   - **C `first_tombstone` 跟踪死代码**（symtab 无 delete 路径）—— 不翻译
+//   - **C `is_extern` / `module` 字段**保留，sprint 3 parser 翻译时设置
+//   - **C `module` 默认 NULL**：用 `0 as *u8` 表达
+
+import arena;
+import util;
+
+// ════════════════════════════════════════════════════
+// FFI（util.jhyy 已声明 strcmp；这里不重复）
+// ════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════
+// SymKind 常量
+// ════════════════════════════════════════════════════
+
+fn SYM_VAR()     -> i32 { return 0 as i32; }
+fn SYM_FN()      -> i32 { return 1 as i32; }
+fn SYM_TYPE()    -> i32 { return 2 as i32; }
+fn SYM_FIELD()   -> i32 { return 3 as i32; }
+fn SYM_VARIANT() -> i32 { return 4 as i32; }
+fn SYM_MODULE()  -> i32 { return 5 as i32; }
+
+// ════════════════════════════════════════════════════
+// Sym 符号条目
+// ════════════════════════════════════════════════════
+
+// jhyy size: name(8) + kind(i32 4 + pad 4) + type_ptr(8) + is_mutable(i32 4 + pad 4) +
+//            depth(i32 4 + pad 4) + module(8) + is_extern(i32 4 + pad 4) = 56
+// 注：jhyy `type` 是 reserved keyword（type Foo = struct），C 字段 `type *type` 改 `type_ptr`
+type Sym = struct {
+    name:       *u8,
+    kind:       i32,
+    type_ptr:   *u8,         // placeholder, types.jhyy commit 替 *Type
+    is_mutable: i32,         // 0/1（C bool 替换）
+    depth:      i32,
+    module:     *u8,         // NULL = main（jhyy 用 0 as *u8）
+    is_extern:  i32,         // 0/1（C bool 替换）
+}
+
+// Sym 字节数 = 8 (name) + 8 (kind+pad) + 8 (type) + 8 (is_mut+pad) + 8 (depth+pad) + 8 (module) + 8 (is_extern+pad) = 56
+fn SYM_SIZE() -> i64 { return 56 as i64; }
+
+// ════════════════════════════════════════════════════
+// SymTable
+// ════════════════════════════════════════════════════
+
+// jhyy size: entries(8) + nentries(8) + count(8) + mask(8) + parent(8) + arena(8) = 48
+// 注：jhyy 不支持自引用 struct，parent/arena 都用 *u8 占位，调用方 cast
+type SymTable = struct {
+    entries:  *u8,           // 实际 *[*]*Sym（util.jhyy HashMap 风格，offset 访问）
+    nentries: i64,           // 2 的幂
+    count:    i64,
+    mask:     i64,
+    parent:   *u8,           // 实际 *SymTable（使用处 cast）
+    arena:    *u8,           // 实际 *Arena（使用处 cast）
+}
+
+// SymTable 字节数 = 6 * 8 = 48
+fn SYMTABLE_SIZE() -> i64 { return 48 as i64; }
+
+// 每个 entry slot = sizeof(*Sym) = 8
+fn SYMTAB_ENTRY_SIZE() -> i64 { return 8 as i64; }
+
+// 初始 size 256（C 端 #define SYMTAB_INITIAL_SIZE）
+fn SYMTAB_INITIAL_SIZE() -> i64 { return 256 as i64; }
+
+// 0.75 负载因子
+fn SYMTAB_LOAD_NUM() -> i64 { return 3 as i64; }
+fn SYMTAB_LOAD_DEN() -> i64 { return 4 as i64; }
+
+// ════════════════════════════════════════════════════
+// Helpers
+// ════════════════════════════════════════════════════
+
+// ptr_add_u8 来自 util.jhyy（import 进来自动 mangled `util__ptr_add_u8`）
+
+// 取 entries[idx] 的 *Sym 槽位（**Sym：slot 处的值是 *Sym 指针）
+// util.jhyy hm_get_entry 走 *HashEntry（24 字节大对象），symtab 走 *Sym 指针数组
+// 模式 = util.jhyy 的 *u8 + offset as **T（slot 类型 **Sym，*slot 是 *Sym）
+fn symtab_get_entry(t: *u8, idx: i64) -> **Sym {
+    let tbl = t as *SymTable;
+    return ptr_add_u8((*tbl).entries, idx * SYMTAB_ENTRY_SIZE()) as **Sym;
+}
+
+// 写 entries[idx] = sym
+fn symtab_set_entry(t: *u8, idx: i64, sym: *Sym) -> i32 {
+    let slot = symtab_get_entry(t, idx);
+    *slot = sym;
+    return 1;
+}
+
+// 读 entries[idx]
+fn symtab_load_entry(t: *u8, idx: i64) -> *Sym {
+    return *(symtab_get_entry(t, idx));
+}
+
+// 读 old_entries[idx]（grow 时用，old_entries 还没被覆盖）
+// 必须在 symtab_grow 之前定义（jhyy 无前向引用）
+fn symtab_load_entry_old(old_entries: *u8, idx: i64) -> *Sym {
+    return *(ptr_add_u8(old_entries, idx * SYMTAB_ENTRY_SIZE()) as **Sym);
+}
+
+// 分配 Sym（arena alloc + field-by-field init）
+fn symtab_alloc_sym(a: *Arena, name: *u8, kind: i32, type_ptr: *u8,
+                    is_mutable: i32, depth: i32) -> *Sym {
+    let sym = arena_alloc(a, SYM_SIZE()) as *Sym;
+    (*sym).name = name;
+    (*sym).kind = kind;
+    (*sym).type_ptr = type_ptr;
+    (*sym).is_mutable = is_mutable;
+    (*sym).depth = depth;
+    (*sym).module = 0 as *u8;       // NULL = main
+    (*sym).is_extern = 0 as i32;    // false
+    return sym;
+}
+
+// ════════════════════════════════════════════════════
+// symtab_grow（私有 API, 对应 C static）
+// ════════════════════════════════════════════════════
+
+fn symtab_grow(t_raw: *u8) -> i32 {
+    let t = t_raw as *SymTable;
+    let old_n = (*t).nentries;
+    let old_entries = (*t).entries;
+    let new_n = old_n * (2 as i64);
+    (*t).nentries = new_n;
+    (*t).mask = new_n - (1 as i64);
+    let new_size = new_n * SYMTAB_ENTRY_SIZE();
+    (*t).entries = arena_calloc((*t).arena as *Arena, new_size);
+
+    let mut i: i64 = 0 as i64;
+    while i < old_n {
+        let sym = symtab_load_entry_old(old_entries, i);
+        if sym != (0 as *Sym) {
+            let h = hash_string((*sym).name);
+            let mut idx = h & (*t).mask;
+            while true {
+                let slot_sym = symtab_load_entry(t_raw, idx);
+                if slot_sym == (0 as *Sym) {
+                    symtab_set_entry(t_raw, idx, sym);
+                    break;
+                }
+                idx = (idx + (1 as i64)) & (*t).mask;
+            }
+        }
+        i = i + (1 as i64);
+    }
+    return 1;
+}
+
+// ════════════════════════════════════════════════════
+// Public API
+// ════════════════════════════════════════════════════
+
+fn symtab_new(a: *Arena, parent_raw: *u8) -> *u8 {
+    let t = arena_alloc(a, SYMTABLE_SIZE()) as *SymTable;
+    (*t).nentries = SYMTAB_INITIAL_SIZE();
+    (*t).mask = SYMTAB_INITIAL_SIZE() - (1 as i64);
+    (*t).count = 0 as i64;
+    (*t).parent = parent_raw;
+    (*t).arena = a as *u8;
+    let init_size = SYMTAB_INITIAL_SIZE() * SYMTAB_ENTRY_SIZE();
+    (*t).entries = arena_calloc(a, init_size);
+    return t as *u8;
+}
+
+fn symtab_insert(t_raw: *u8, name: *u8, kind: i32,
+                 type_ptr: *u8, is_mutable: i32, depth: i32) -> *Sym {
+    let t = t_raw as *SymTable;
+
+    // 0.75 负载因子检查
+    if (*t).count * SYMTAB_LOAD_DEN() >= (*t).nentries * SYMTAB_LOAD_NUM() {
+        symtab_grow(t_raw);
+    }
+
+    let h = hash_string(name);
+    let mut idx = h & (*t).mask;
+    let start_idx = idx;
+
+    while true {
+        let entry = symtab_load_entry(t_raw, idx);
+        if entry == (0 as *Sym) {
+            // 空 slot, 插入
+            let sym = symtab_alloc_sym((*t).arena as *Arena, name, kind, type_ptr, is_mutable, depth);
+            symtab_set_entry(t_raw, idx, sym);
+            (*t).count = (*t).count + (1 as i64);
+            return sym;
+        }
+        // 重复检查（同 scope）
+        if (*entry).depth == depth {
+            if strcmp((*entry).name, name) == (0 as i32) {
+                return 0 as *Sym;  // 已定义
+            }
+        }
+        idx = (idx + (1 as i64)) & (*t).mask;
+        if idx == start_idx {
+            return 0 as *Sym;  // table full
+        }
+    }
+    return 0 as *Sym;  // 兜底
+}
+
+fn symtab_insert_sym(t_raw: *u8, sym: *Sym) -> *Sym {
+    let t = t_raw as *SymTable;
+    if (*t).count * SYMTAB_LOAD_DEN() >= (*t).nentries * SYMTAB_LOAD_NUM() {
+        symtab_grow(t_raw);
+    }
+
+    let h = hash_string((*sym).name);
+    let mut idx = h & (*t).mask;
+    let start_idx = idx;
+
+    while true {
+        let entry = symtab_load_entry(t_raw, idx);
+        if entry == (0 as *Sym) {
+            symtab_set_entry(t_raw, idx, sym);
+            (*t).count = (*t).count + (1 as i64);
+            return sym;
+        }
+        if entry == sym {
+            return sym;  // 已在表中
+        }
+        idx = (idx + (1 as i64)) & (*t).mask;
+        if idx == start_idx {
+            return 0 as *Sym;
+        }
+    }
+    return 0 as *Sym;
+}
+
+fn symtab_lookup_one(t_raw: *u8, name: *u8) -> *Sym {
+    if t_raw == (0 as *u8) {
+        return 0 as *Sym;
+    }
+    let t = t_raw as *SymTable;
+    if (*t).count == (0 as i64) {
+        return 0 as *Sym;
+    }
+
+    let h = hash_string(name);
+    let mut idx = h & (*t).mask;
+    let start_idx = idx;
+
+    while true {
+        let entry = symtab_load_entry(t_raw, idx);
+        if entry == (0 as *Sym) {
+            return 0 as *Sym;  // 未找到（无 delete 路径，空 slot 必未插）
+        }
+        if strcmp((*entry).name, name) == (0 as i32) {
+            return entry;
+        }
+        idx = (idx + (1 as i64)) & (*t).mask;
+        if idx == start_idx {
+            return 0 as *Sym;
+        }
+    }
+    return 0 as *Sym;  // 兜底
+}
+
+fn symtab_lookup(t_raw: *u8, name: *u8) -> *Sym {
+    let mut cur = t_raw;
+    while cur != (0 as *u8) {
+        let sym = symtab_lookup_one(cur, name);
+        if sym != (0 as *Sym) {
+            return sym;
+        }
+        let cur_tbl = cur as *SymTable;
+        cur = (*cur_tbl).parent;
+    }
+    return 0 as *Sym;
+}
+
+fn symtab_lookup_local(t_raw: *u8, name: *u8) -> *Sym {
+    return symtab_lookup_one(t_raw, name);
+}

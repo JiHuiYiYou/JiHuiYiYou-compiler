@@ -1,0 +1,247 @@
+// _driver_symtab.jhyy — Sprint 2 commit 1 单元测试：验证 symtab.jhyy
+// 测试覆盖：scope 链、重复检测、计数、grow 触发、parent 跨 scope 查找
+// 退出码：42（沿用 _driver.jhyy 惯例）
+
+import arena;
+import util;
+import symtab;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    printf("S0\n", 0);  // start
+
+    // ──── 准备 arena ────
+    let mut a: Arena = Arena {
+        start: 0 as *u8,
+        cur: 0 as *u8,
+        end: 0 as *u8,
+        blocks: 0 as *u8,
+        def_size: 0 as i64,
+    };
+    arena_init(&a, 8192);
+
+    // ──── 创建 root scope ────
+    let root = symtab_new(&a, 0 as *u8);
+    printf("S1\n", 0);  // root created
+
+    // ──── 插入 3 个 var + 1 个 fn ────
+    let name_x = "x" as *u8;
+    let name_y = "y" as *u8;
+    let name_z = "z" as *u8;
+    let name_main = "main" as *u8;
+
+    let x_sym = symtab_insert(root, name_x, SYM_VAR(), 0 as *u8, 0 as i32, 0 as i32);
+    let y_sym = symtab_insert(root, name_y, SYM_VAR(), 0 as *u8, 0 as i32, 0 as i32);
+    let z_sym = symtab_insert(root, name_z, SYM_VAR(), 0 as *u8, 0 as i32, 0 as i32);
+    let main_sym = symtab_insert(root, name_main, SYM_FN(), 0 as *u8, 0 as i32, 0 as i32);
+    printf("S2\n", 0);  // 4 inserted, count=4
+
+    // ──── 验证 count ────
+    let root_tbl = root as *SymTable;
+    if (*root_tbl).count == 4 as i64 {
+        printf("S3\n", 0);  // count ok
+    } else {
+        printf("FAIL count\n", 0);
+        return 1;
+    }
+
+    // ──── 验证 lookup（命中）────
+    let got_x = symtab_lookup(root, name_x);
+    if got_x == x_sym {
+        printf("S4\n", 0);  // x found
+    } else {
+        printf("FAIL lookup x\n", 0);
+        return 2;
+    }
+
+    let got_main = symtab_lookup(root, name_main);
+    if got_main == main_sym {
+        printf("S5\n", 0);  // main found
+    } else {
+        printf("FAIL lookup main\n", 0);
+        return 3;
+    }
+
+    // ──── 验证 lookup（未命中）────
+    let got_missing = symtab_lookup(root, "missing" as *u8);
+    if got_missing == (0 as *Sym) {
+        printf("S6\n", 0);  // missing not found
+    } else {
+        printf("FAIL lookup missing\n", 0);
+        return 4;
+    }
+
+    // ──── 验证重复插入（root scope）────
+    let dup_x = symtab_insert(root, name_x, SYM_VAR(), 0 as *u8, 0 as i32, 0 as i32);
+    if dup_x == (0 as *Sym) {
+        printf("S7\n", 0);  // dup detected
+    } else {
+        printf("FAIL dup detect\n", 0);
+        return 5;
+    }
+
+    // count 应该是 4（dup 不增）
+    if (*root_tbl).count == 4 as i64 {
+        printf("S8\n", 0);  // count still 4
+    } else {
+        printf("FAIL count after dup\n", 0);
+        return 6;
+    }
+
+    // ──── 创建 child scope ────
+    let child = symtab_new(&a, root);
+    let child_tbl = child as *SymTable;
+    if (*child_tbl).parent == root {
+        printf("S9\n", 0);  // child.parent == root
+    } else {
+        printf("FAIL child.parent\n", 0);
+        return 7;
+    }
+
+    // ──── child 插一个新 var ────
+    let name_w = "w" as *u8;
+    let w_sym = symtab_insert(child, name_w, SYM_VAR(), 0 as *u8, 0 as i32, 1 as i32);
+    printf("S10\n", 0);
+
+    // ──── child lookup w（命中，本地）────
+    let got_w = symtab_lookup(child, name_w);
+    if got_w == w_sym {
+        printf("S11\n", 0);
+    } else {
+        printf("FAIL child lookup w\n", 0);
+        return 8;
+    }
+
+    // ──── child lookup x（命中 root，跨 scope）────
+    let got_x_from_child = symtab_lookup(child, name_x);
+    if got_x_from_child == x_sym {
+        printf("S12\n", 0);  // 跨 scope 找到
+    } else {
+        printf("FAIL child lookup x\n", 0);
+        return 9;
+    }
+
+    // ──── child 重复插入 x（depth 不同 → 允许 shadow）────
+    let shadow_x = symtab_insert(child, name_x, SYM_VAR(), 0 as *u8, 1 as i32, 1 as i32);
+    if shadow_x != (0 as *Sym) {
+        printf("S13\n", 0);  // shadow 成功
+    } else {
+        printf("FAIL shadow\n", 0);
+        return 10;
+    }
+
+    // child lookup x 现在应该返回 shadow（depth=1），不是 root 的 x（depth=0）
+    let got_x_in_child = symtab_lookup(child, name_x);
+    if got_x_in_child == shadow_x {
+        printf("S14\n", 0);  // shadow 优先
+    } else {
+        printf("FAIL shadow priority\n", 0);
+        return 11;
+    }
+
+    // child lookup_local x 应该返回 shadow
+    let got_x_local = symtab_lookup_local(child, name_x);
+    if got_x_local == shadow_x {
+        printf("S15\n", 0);
+    } else {
+        printf("FAIL lookup_local\n", 0);
+        return 12;
+    }
+
+    // root 仍然能查到原 x（shadow 不影响 root）
+    let got_x_in_root = symtab_lookup(root, name_x);
+    if got_x_in_root == x_sym {
+        printf("S16\n", 0);
+    } else {
+        printf("FAIL root after shadow\n", 0);
+        return 13;
+    }
+
+    // ──── 测试 grow：插入超过 256 个（initial 256，0.75 阈值 = 192）────
+    // 起始 root.count = 4，已经 4 个；插到 200 应该触发 grow
+    // 用 3 位十进制名字保证唯一（"000".."199"）
+    let mut i: i64 = 0 as i64;
+    while i < 200 as i64 {
+        let name_buf = arena_alloc(&a, 8 as i64);
+        // 写 4 字节：3 位十进制 + null
+        // byte 0: '0' + (i / 100)
+        // byte 1: '0' + ((i / 10) % 10)
+        // byte 2: '0' + (i % 10)
+        // byte 3: 0 (null terminator)
+        let b0 = (48 as i32) + ((i / (100 as i64)) as i32);
+        let b1 = (48 as i32) + (((i / (10 as i64)) % (10 as i64)) as i32);
+        let b2 = (48 as i32) + ((i % (10 as i64)) as i32);
+        // 把 4 个 byte 拼成一个 i32
+        let packed = b0 + b1 * (256 as i32) + b2 * (256 as i32) * (256 as i32);
+        let name_buf_i32 = name_buf as *i32;
+        *name_buf_i32 = packed;
+        // 写第 4 byte（offset 4）= 0
+        let name_buf_1 = (name_buf as i64 + 4 as i64) as *i32;
+        *name_buf_1 = 0 as i32;
+
+        let s = symtab_insert(root, name_buf, SYM_VAR(), 0 as *u8, 0 as i32, 0 as i32);
+        if s == (0 as *Sym) {
+            printf("FAIL insert during grow\n", 0);
+            return 14;
+        }
+        i = i + (1 as i64);
+    }
+    printf("S17\n", 0);  // grow 测试通过（200 个都成功）
+
+    // count 应该是 4 + 200 = 204
+    if (*root_tbl).count == 204 as i64 {
+        printf("S18\n", 0);
+    } else {
+        printf("FAIL count after grow\n", 0);
+        return 15;
+    }
+
+    // nentries 应该是 grow 后 = 512 (256 * 2)
+    if (*root_tbl).nentries == 512 as i64 {
+        printf("S19\n", 0);
+    } else {
+        printf("FAIL nentries after grow\n", 0);
+        return 16;
+    }
+
+    // ──── 验证 grow 后旧 sym 还能查到（rehash 正确）────
+    let got_x_after_grow = symtab_lookup(root, name_x);
+    if got_x_after_grow == x_sym {
+        printf("S20\n", 0);
+    } else {
+        printf("FAIL lookup after grow\n", 0);
+        return 17;
+    }
+
+    // child 跨 scope 仍能找到 root 的 main
+    let got_main_from_child = symtab_lookup(child, name_main);
+    if got_main_from_child == main_sym {
+        printf("S21\n", 0);
+    } else {
+        printf("FAIL cross-scope after grow\n", 0);
+        return 18;
+    }
+
+    // ──── 验证 NULL 输入安全 ────
+    let got_null = symtab_lookup(0 as *u8, name_x);
+    if got_null == (0 as *Sym) {
+        printf("S22\n", 0);  // NULL root 安全返回
+    } else {
+        printf("FAIL null root\n", 0);
+        return 19;
+    }
+
+    // ──── 验证 empty table 查找 ────
+    let empty = symtab_new(&a, 0 as *u8);
+    let got_empty = symtab_lookup(empty, name_x);
+    if got_empty == (0 as *Sym) {
+        printf("S23\n", 0);  // empty table 返回 0
+    } else {
+        printf("FAIL empty lookup\n", 0);
+        return 20;
+    }
+
+    printf("PASS\n", 0);
+    return 42;
+}
