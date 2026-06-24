@@ -11,7 +11,7 @@
 | 意图 | 先看 |
 |------|------|
 | 了解项目现在到哪、有什么限制 | [`status.md`](docs/internal/status.md) |
-| 想看 Phase 1 整体还有什么没完成 | [`phase-1-c-compiler.md`](docs/plans/phase-1-c-compiler.md) |
+| 想看 Phase 1 整体还有什么没完成 | [`phase-1-c-compiler.md`](docs/plans/phase/phase-1-c-compiler.md) |
 | 起一个新 sprint | 下方"阶段 + Sprint"表的"当前 sprint"锚 → L3 任务清单 |
 | 改编译器 / 排 bug | [`architecture.md`](docs/internal/architecture.md) 看模块边界 → [`build.md`](docs/internal/build.md) 看构建 + 调试坑 |
 | 改语言规范 / ABI | [`jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md) / [`jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) |
@@ -29,7 +29,10 @@ mcp-jhyy/                          JHYY MCP 服务
 docs/
   internal/         架构 / 构建 / 约定 / 状态 / 测试
   abis/             语言规范 + ABI（locked）
-  plans/            phase-* 顶层 + v0.X.0 sprint 计划
+  plans/
+    phase/          长期 phase-N 顶层路线图
+    v0/             C 编译器 sprint 计划
+    v1/             jhyy 自举 sprint 计划
   logs/             changelog + 早期 sprint 记录
 ```
 
@@ -57,16 +60,18 @@ python compiler/build/bin/regress.py
 
 | 层级 | 文档 | 状态 |
 |------|------|------|
-| L1 | [`phase-0-skeleton.md`](docs/plans/phase-0-skeleton.md) | 已完成 |
-| L1 | [`phase-1-c-compiler.md`](docs/plans/phase-1-c-compiler.md) | **进行中** |
-| L1 | [`phase-2-self-hosting.md`](docs/plans/phase-2-self-hosting.md) | 未启动（语言特性启动门槛已达成，见 lang-spec 附录 C） |
-| L1.5 | [`phase-2.5-qbe-rewrite.md`](docs/plans/phase-2.5-qbe-rewrite.md) | 未启动（中期方向，待 phase-2 后启动） |
-| L1 | [`phase-3-expansion.md`](docs/plans/phase-3-expansion.md) | 未启动（语言特性扩展；自举能力已在 phase-2 完成） |
-| L3 | `v0.X.0任务清单 + 概要设计.md` | 每个 sprint 一份 |
-| L4 | `v0.X.0详细实现方案.md` | 每个 sprint 一份 |
+| L1 | [`phase-0-skeleton.md`](docs/plans/phase/phase-0-skeleton.md) | 已完成 |
+| L1 | [`phase-1-c-compiler.md`](docs/plans/phase/phase-1-c-compiler.md) | **进行中** |
+| L1 | [`phase-2-self-hosting.md`](docs/plans/phase/phase-2-self-hosting.md) | 未启动（语言特性启动门槛已达成，见 lang-spec 附录 C） |
+| L1.5 | [`phase-2.5-qbe-rewrite.md`](docs/plans/phase/phase-2.5-qbe-rewrite.md) | 未启动（中期方向，待 phase-2 后启动） |
+| L1 | [`phase-3-expansion.md`](docs/plans/phase/phase-3-expansion.md) | 未启动（语言特性扩展；自举能力已在 phase-2 完成） |
+| L3 | `docs/plans/v0/v0.X.0任务清单 + 概要设计.md` | 每个 C 编译器 sprint 一份 |
+| L4 | `docs/plans/v0/v0.X.0详细实现方案.md` | 每个 C 编译器 sprint 一份 |
+| L3 | `docs/plans/v1/v1.0.0任务清单 + 概要设计.md` | jhyy 自举 sprint（v1.0.0 phase-2） |
+| L4 | `docs/plans/v1/v1.0.0详细实现方案.md` | 同上 |
 
-最近完成的 sprint: **v0.6.0**（v0.6.1 已发，patch）→ `docs/plans/v0.6.0任务清单 + 概要设计.md` / `docs/plans/v0.6.0详细实现方案.md`
-当前 sprint: **v1.0.0** phase-2 自举启动（粗粒度 5 sprint）→ `docs/plans/v1.0.0任务清单 + 概要设计.md` / `docs/plans/v1.0.0详细实现方案.md`
+最近完成的 sprint: **v0.6.0**（v0.6.2 / v0.6.3 已发，patch）→ `docs/plans/v0/v0.6.0任务清单 + 概要设计.md` / `docs/plans/v0/v0.6.0详细实现方案.md` / `docs/logs/changelog-v0.6.3.md`
+当前 sprint: **v1.0.0** phase-2 自举启动（粗粒度 5 sprint）→ `docs/plans/v1/v1.0.0任务清单 + 概要设计.md` / `docs/plans/v1/v1.0.0详细实现方案.md`
 历史: changelog 见 `docs/logs/changelog-v0.X.Y.md`；早期 sprint（命名 `sprint-1*.md`）同目录。
 
 ### 项目内部（`docs/internal/`）

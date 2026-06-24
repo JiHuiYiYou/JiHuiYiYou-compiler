@@ -18,8 +18,11 @@
 | JHYY 源文件 | `snake_case.jhyy` |
 | 文档 | `kebab-case.md` |
 | Sprint 日志 | `docs/logs/changelog-v0.X.Y.md` |
-| Sprint 设计 | `docs/plans/v0.X.Y详细实现方案.md` |
-| Sprint 概要 | `docs/plans/v0.X.Y任务清单 + 概要设计.md` |
+| C 编译器 sprint 设计 | `docs/plans/v0/v0.X.Y详细实现方案.md` |
+| C 编译器 sprint 概要 | `docs/plans/v0/v0.X.Y任务清单 + 概要设计.md` |
+| jhyy 自举 sprint 设计 | `docs/plans/v1/vX.Y.Z详细实现方案.md` |
+| jhyy 自举 sprint 概要 | `docs/plans/v1/vX.Y.Z任务清单 + 概要设计.md` |
+| 长期 phase 路线图 | `docs/plans/phase/phase-N-*.md` |
 
 ## 提交规则
 

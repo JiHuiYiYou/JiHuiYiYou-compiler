@@ -202,8 +202,8 @@ let v = *back;             // dereference recovered pointer
 ### 6F.1 新增文档
 
 - `docs/logs/changelog-v0.6.0.md`（本文档）
-- `docs/plans/v0.6.0任务清单 + 概要设计.md`
-- `docs/plans/v0.6.0详细实现方案.md`
+- `docs/plans/v0/v0.6.0任务清单 + 概要设计.md`
+- `docs/plans/v0/v0.6.0详细实现方案.md`
 
 ### 6F.2 更新文档
 
