@@ -501,13 +501,44 @@ static int cmd_run(int argc, char **argv) {
     return system(exe);
 }
 
+static int cmd_dump(int argc, char **argv) {
+    if (argc < 1) { fprintf(stderr, "usage: jhyy dump <file.jhyy>\n"); return 1; }
+    const char *input = argv[0];
+
+    char *source = read_file(input);
+    if (!source) return 1;
+
+    Arena arena;
+    arena_init(&arena, 16 * 1024 * 1024);
+
+    Lexer lexer;
+    lexer_init(&lexer, source, input);
+    Parser parser;
+    parser_init(&parser, &lexer, &arena);
+    Node *ast = parser_parse(&parser);
+
+    if (parser.error_count > 0) {
+        fprintf(stderr, "parse errors: %d\n", parser.error_count);
+        arena_free(&arena);
+        free(source);
+        return 1;
+    }
+
+    ast_dump(ast);
+
+    arena_free(&arena);
+    free(source);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("jhyy compiler v0.4.0\n");
+        printf("jhyy compiler v0.6.4\n");
         printf("usage: jhyy <command> [args]\n");
         printf("  compile <file.jhyy> [-o output]   compile to executable\n");
         printf("  build   <file.jhyy> [-o output]   compile to .il only\n");
         printf("  run     <file.jhyy>               compile and run\n");
+        printf("  dump    <file.jhyy>               dump AST to stdout\n");
         return 0;
     }
 
@@ -517,6 +548,8 @@ int main(int argc, char **argv) {
         return cmd_build(argc - 2, argv + 2);
     if (strcmp(argv[1], "run") == 0)
         return cmd_run(argc - 2, argv + 2);
+    if (strcmp(argv[1], "dump") == 0)
+        return cmd_dump(argc - 2, argv + 2);
 
     fprintf(stderr, "unknown command: %s\n", argv[1]);
     return 1;

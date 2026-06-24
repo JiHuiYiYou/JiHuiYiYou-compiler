@@ -1,0 +1,61 @@
+module
+  ndeccls=1
+  func_decl
+    SYM name=main_jhyy kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=3
+      let
+        is_mutable=true
+        SYM name=sum kind=var
+        ident
+          SYM name=i32 kind=type
+        int
+          value=0 prim=i32
+      for
+        SYM name=i kind=var
+        int
+          value=0 prim=i32
+        int
+          value=100 prim=i32
+        block
+          nstmts=3
+          if
+            binary
+              op===
+              ident
+                SYM name=i kind=var
+              int
+                value=10 prim=i32
+            block
+              nstmts=1
+              break
+          if
+            binary
+              op===
+              binary
+                op=%
+                ident
+                  SYM name=i kind=var
+                int
+                  value=2 prim=i32
+              int
+                value=0 prim=i32
+            block
+              nstmts=1
+              continue
+          expr_stmt
+            assign
+              ident
+                SYM name=sum kind=var
+              binary
+                op=+
+                ident
+                  SYM name=sum kind=var
+                ident
+                  SYM name=i kind=var
+      expr_stmt
+        ident
+          SYM name=sum kind=var

@@ -1,0 +1,97 @@
+module
+  ndeccls=2
+  func_decl
+    SYM name=printf kind=fn
+    nparams=2 is_extern=true
+    PARAM name=fmt kind=var
+      unary
+        op=*
+        ident
+          SYM name=u8 kind=type
+    PARAM name=val kind=var
+      ident
+        SYM name=i64 kind=type
+    ident
+      SYM name=i32 kind=type
+  func_decl
+    SYM name=main_jhyy kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=8
+      let
+        is_mutable=false
+        SYM name=x kind=var
+        ident
+          SYM name=i32 kind=type
+        int
+          value=42 prim=i32
+      let
+        is_mutable=false
+        SYM name=p kind=var
+        addr_of
+          ident
+            SYM name=x kind=var
+      let
+        is_mutable=false
+        SYM name=addr kind=var
+        cast
+          ident
+            SYM name=p kind=var
+          ident
+            SYM name=i64 kind=type
+      expr_stmt
+        call
+          nargs=2
+          ident
+            SYM name=printf kind=fn
+          string
+            len=10 chars="addr=%ld\n"
+          ident
+            SYM name=addr kind=var
+      let
+        is_mutable=false
+        SYM name=back kind=var
+        cast
+          ident
+            SYM name=addr kind=var
+          unary
+            op=*
+            ident
+              SYM name=i32 kind=type
+      let
+        is_mutable=false
+        SYM name=v kind=var
+        deref
+          ident
+            SYM name=back kind=var
+      expr_stmt
+        call
+          nargs=2
+          ident
+            SYM name=printf kind=fn
+          string
+            len=7 chars="v=%ld\n"
+          cast
+            ident
+              SYM name=v kind=var
+            ident
+              SYM name=i64 kind=type
+      if
+        binary
+          op===
+          ident
+            SYM name=v kind=var
+          int
+            value=42 prim=i32
+        block
+          nstmts=1
+          expr_stmt
+            int
+              value=0 prim=i32
+        block
+          nstmts=1
+          expr_stmt
+            int
+              value=1 prim=i32

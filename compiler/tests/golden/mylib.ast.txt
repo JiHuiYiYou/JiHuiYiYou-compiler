@@ -1,0 +1,32 @@
+module
+  ndeccls=2
+  func_decl
+    SYM name=add kind=fn
+    nparams=2 is_extern=false
+    PARAM name=a kind=var
+      ident
+        SYM name=i32 kind=type
+    PARAM name=b kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=1
+      expr_stmt
+        binary
+          op=+
+          ident
+            SYM name=a kind=var
+          ident
+            SYM name=b kind=var
+  func_decl
+    SYM name=get_answer kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=1
+      expr_stmt
+        int
+          value=42 prim=i32

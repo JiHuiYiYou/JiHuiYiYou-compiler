@@ -1,0 +1,428 @@
+module
+  ndeccls=5
+  func_decl
+    SYM name=factorial kind=fn
+    nparams=1 is_extern=false
+    PARAM name=n kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=4
+      let
+        is_mutable=true
+        SYM name=result kind=var
+        int
+          value=1 prim=i32
+      let
+        is_mutable=true
+        SYM name=i kind=var
+        int
+          value=1 prim=i32
+      while
+        binary
+          op=<=
+          ident
+            SYM name=i kind=var
+          ident
+            SYM name=n kind=var
+        block
+          nstmts=2
+          expr_stmt
+            assign
+              ident
+                SYM name=result kind=var
+              binary
+                op=*
+                ident
+                  SYM name=result kind=var
+                ident
+                  SYM name=i kind=var
+          expr_stmt
+            assign
+              ident
+                SYM name=i kind=var
+              binary
+                op=+
+                ident
+                  SYM name=i kind=var
+                int
+                  value=1 prim=i32
+      expr_stmt
+        ident
+          SYM name=result kind=var
+  func_decl
+    SYM name=fibonacci kind=fn
+    nparams=1 is_extern=false
+    PARAM name=n kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=2
+      if
+        binary
+          op=<=
+          ident
+            SYM name=n kind=var
+          int
+            value=1 prim=i32
+        block
+          nstmts=1
+          return
+            ident
+              SYM name=n kind=var
+      expr_stmt
+        binary
+          op=+
+          call
+            nargs=1
+            ident
+              SYM name=fibonacci kind=fn
+            binary
+              op=-
+              ident
+                SYM name=n kind=var
+              int
+                value=1 prim=i32
+          call
+            nargs=1
+            ident
+              SYM name=fibonacci kind=fn
+            binary
+              op=-
+              ident
+                SYM name=n kind=var
+              int
+                value=2 prim=i32
+  func_decl
+    SYM name=gcd kind=fn
+    nparams=2 is_extern=false
+    PARAM name=a kind=var
+      ident
+        SYM name=i32 kind=type
+    PARAM name=b kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=4
+      let
+        is_mutable=true
+        SYM name=x kind=var
+        ident
+          SYM name=a kind=var
+      let
+        is_mutable=true
+        SYM name=y kind=var
+        ident
+          SYM name=b kind=var
+      while
+        binary
+          op=!=
+          ident
+            SYM name=y kind=var
+          int
+            value=0 prim=i32
+        block
+          nstmts=3
+          let
+            is_mutable=false
+            SYM name=temp kind=var
+            ident
+              SYM name=y kind=var
+          expr_stmt
+            assign
+              ident
+                SYM name=y kind=var
+              binary
+                op=%
+                ident
+                  SYM name=x kind=var
+                ident
+                  SYM name=y kind=var
+          expr_stmt
+            assign
+              ident
+                SYM name=x kind=var
+              ident
+                SYM name=temp kind=var
+      expr_stmt
+        ident
+          SYM name=x kind=var
+  func_decl
+    SYM name=sum_range kind=fn
+    nparams=2 is_extern=false
+    PARAM name=start kind=var
+      ident
+        SYM name=i32 kind=type
+    PARAM name=end kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=4
+      let
+        is_mutable=true
+        SYM name=total kind=var
+        int
+          value=0 prim=i32
+      let
+        is_mutable=true
+        SYM name=i kind=var
+        ident
+          SYM name=start kind=var
+      while
+        binary
+          op=<=
+          ident
+            SYM name=i kind=var
+          ident
+            SYM name=end kind=var
+        block
+          nstmts=2
+          expr_stmt
+            assign
+              ident
+                SYM name=total kind=var
+              binary
+                op=+
+                ident
+                  SYM name=total kind=var
+                ident
+                  SYM name=i kind=var
+          expr_stmt
+            assign
+              ident
+                SYM name=i kind=var
+              binary
+                op=+
+                ident
+                  SYM name=i kind=var
+                int
+                  value=1 prim=i32
+      expr_stmt
+        ident
+          SYM name=total kind=var
+  func_decl
+    SYM name=main_jhyy kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=24
+      let
+        is_mutable=false
+        SYM name=fact5 kind=var
+        call
+          nargs=1
+          ident
+            SYM name=factorial kind=fn
+          int
+            value=5 prim=i32
+      let
+        is_mutable=false
+        SYM name=fib10 kind=var
+        call
+          nargs=1
+          ident
+            SYM name=fibonacci kind=fn
+          int
+            value=10 prim=i32
+      let
+        is_mutable=false
+        SYM name=combined kind=var
+        binary
+          op=+
+          ident
+            SYM name=fact5 kind=var
+          ident
+            SYM name=fib10 kind=var
+      let
+        is_mutable=false
+        SYM name=g kind=var
+        call
+          nargs=2
+          ident
+            SYM name=gcd kind=fn
+          int
+            value=48 prim=i32
+          int
+            value=18 prim=i32
+      let
+        is_mutable=false
+        SYM name=s kind=var
+        call
+          nargs=2
+          ident
+            SYM name=sum_range kind=fn
+          int
+            value=1 prim=i32
+          int
+            value=10 prim=i32
+      let
+        is_mutable=false
+        SYM name=mix kind=var
+        binary
+          op=+
+          ident
+            SYM name=g kind=var
+          ident
+            SYM name=s kind=var
+      let
+        is_mutable=false
+        SYM name=a kind=var
+        binary
+          op=+
+          ident
+            SYM name=combined kind=var
+          ident
+            SYM name=mix kind=var
+      let
+        is_mutable=false
+        SYM name=b kind=var
+        binary
+          op=-
+          ident
+            SYM name=combined kind=var
+          ident
+            SYM name=mix kind=var
+      let
+        is_mutable=false
+        SYM name=c kind=var
+        binary
+          op=*
+          ident
+            SYM name=a kind=var
+          ident
+            SYM name=b kind=var
+      let
+        is_mutable=false
+        SYM name=d kind=var
+        binary
+          op=/
+          ident
+            SYM name=c kind=var
+          int
+            value=10 prim=i32
+      let
+        is_mutable=false
+        SYM name=e kind=var
+        binary
+          op=%
+          ident
+            SYM name=d kind=var
+          int
+            value=7 prim=i32
+      let
+        is_mutable=false
+        SYM name=t kind=var
+        binary
+          op===
+          ident
+            SYM name=a kind=var
+          ident
+            SYM name=c kind=var
+      let
+        is_mutable=false
+        SYM name=u kind=var
+        binary
+          op=<
+          ident
+            SYM name=a kind=var
+          ident
+            SYM name=c kind=var
+      let
+        is_mutable=false
+        SYM name=v kind=var
+        binary
+          op=>
+          ident
+            SYM name=a kind=var
+          ident
+            SYM name=d kind=var
+      let
+        is_mutable=false
+        SYM name=logic_a kind=var
+        binary
+          op=&&
+          ident
+            SYM name=t kind=var
+          ident
+            SYM name=u kind=var
+      let
+        is_mutable=false
+        SYM name=logic_b kind=var
+        binary
+          op=||
+          ident
+            SYM name=v kind=var
+          unary
+            op=!
+            ident
+              SYM name=t kind=var
+      let
+        is_mutable=false
+        SYM name=bits kind=var
+        binary
+          op=&
+          int
+            value=255 prim=i32
+          int
+            value=15 prim=i32
+      let
+        is_mutable=false
+        SYM name=shifted kind=var
+        binary
+          op=?
+          ident
+            SYM name=bits kind=var
+          int
+            value=4 prim=i32
+      let
+        is_mutable=true
+        SYM name=counter kind=var
+        int
+          value=1 prim=i32
+      expr_stmt
+        assign
+          ident
+            SYM name=counter kind=var
+          binary
+            op=+
+            ident
+              SYM name=counter kind=var
+            int
+              value=2 prim=i32
+      expr_stmt
+        assign
+          ident
+            SYM name=counter kind=var
+          binary
+            op=*
+            ident
+              SYM name=counter kind=var
+            int
+              value=3 prim=i32
+      expr_stmt
+        assign
+          ident
+            SYM name=counter kind=var
+          binary
+            op=-
+            ident
+              SYM name=counter kind=var
+            int
+              value=1 prim=i32
+      let
+        is_mutable=false
+        SYM name=final_count kind=var
+        ident
+          SYM name=counter kind=var
+      expr_stmt
+        int
+          value=0 prim=i32

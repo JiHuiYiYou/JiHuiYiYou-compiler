@@ -1,0 +1,188 @@
+module
+  ndeccls=3
+  func_decl
+    SYM name=printf kind=fn
+    nparams=2 is_extern=true
+    PARAM name=fmt kind=var
+      unary
+        op=*
+        ident
+          SYM name=u8 kind=type
+    PARAM name=val kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+  func_decl
+    SYM name=crash_if_called kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=2
+      expr_stmt
+        call
+          nargs=2
+          ident
+            SYM name=printf kind=fn
+          string
+            len=28 chars="BUG: short-circuit failed!\n"
+          int
+            value=0 prim=i32
+      expr_stmt
+        int
+          value=99 prim=i32
+  func_decl
+    SYM name=main_jhyy kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=13
+      let
+        is_mutable=false
+        SYM name=a kind=var
+        int
+          value=0 prim=i32
+      let
+        is_mutable=false
+        SYM name=t1 kind=var
+        binary
+          op=&&
+          binary
+            op=!=
+            ident
+              SYM name=a kind=var
+            int
+              value=0 prim=i32
+          binary
+            op=!=
+            call
+              nargs=0
+              ident
+                SYM name=crash_if_called kind=fn
+            int
+              value=0 prim=i32
+      expr_stmt
+        call
+          nargs=2
+          ident
+            SYM name=printf kind=fn
+          string
+            len=35 chars="Test1 (false && X): %d (expect 0)\n"
+          ident
+            SYM name=t1 kind=var
+      let
+        is_mutable=false
+        SYM name=b kind=var
+        int
+          value=1 prim=i32
+      let
+        is_mutable=false
+        SYM name=t2 kind=var
+        binary
+          op=||
+          binary
+            op=!=
+            ident
+              SYM name=b kind=var
+            int
+              value=0 prim=i32
+          binary
+            op=!=
+            call
+              nargs=0
+              ident
+                SYM name=crash_if_called kind=fn
+            int
+              value=0 prim=i32
+      expr_stmt
+        call
+          nargs=2
+          ident
+            SYM name=printf kind=fn
+          string
+            len=34 chars="Test2 (true || X): %d (expect 1)\n"
+          ident
+            SYM name=t2 kind=var
+      let
+        is_mutable=false
+        SYM name=t3 kind=var
+        binary
+          op=&&
+          binary
+            op=!=
+            int
+              value=1 prim=i32
+            int
+              value=0 prim=i32
+          binary
+            op=!=
+            int
+              value=1 prim=i32
+            int
+              value=0 prim=i32
+      expr_stmt
+        call
+          nargs=2
+          ident
+            SYM name=printf kind=fn
+          string
+            len=37 chars="Test3 (true && true): %d (expect 1)\n"
+          ident
+            SYM name=t3 kind=var
+      let
+        is_mutable=false
+        SYM name=t4 kind=var
+        binary
+          op=||
+          binary
+            op=!=
+            int
+              value=0 prim=i32
+            int
+              value=0 prim=i32
+          binary
+            op=!=
+            int
+              value=1 prim=i32
+            int
+              value=0 prim=i32
+      expr_stmt
+        call
+          nargs=2
+          ident
+            SYM name=printf kind=fn
+          string
+            len=38 chars="Test4 (false || true): %d (expect 1)\n"
+          ident
+            SYM name=t4 kind=var
+      let
+        is_mutable=false
+        SYM name=t5 kind=var
+        binary
+          op=||
+          binary
+            op=!=
+            int
+              value=0 prim=i32
+            int
+              value=0 prim=i32
+          binary
+            op=!=
+            int
+              value=0 prim=i32
+            int
+              value=0 prim=i32
+      expr_stmt
+        call
+          nargs=2
+          ident
+            SYM name=printf kind=fn
+          string
+            len=39 chars="Test5 (false || false): %d (expect 0)\n"
+          ident
+            SYM name=t5 kind=var
+      expr_stmt
+        int
+          value=0 prim=i32

@@ -1,0 +1,290 @@
+module
+  ndeccls=2
+  func_decl
+    SYM name=printf kind=fn
+    nparams=2 is_extern=true
+    PARAM name=fmt kind=var
+      unary
+        op=*
+        ident
+          SYM name=u8 kind=type
+    PARAM name=val kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+  func_decl
+    SYM name=main_jhyy kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=6
+      let
+        is_mutable=true
+        SYM name=arr kind=var
+        array_type
+          ident
+            SYM name=i32 kind=type
+          int
+            value=100 prim=i32
+        array_lit
+          nelems=100
+          int
+            value=1 prim=i32
+          int
+            value=2 prim=i32
+          int
+            value=3 prim=i32
+          int
+            value=4 prim=i32
+          int
+            value=5 prim=i32
+          int
+            value=6 prim=i32
+          int
+            value=7 prim=i32
+          int
+            value=8 prim=i32
+          int
+            value=9 prim=i32
+          int
+            value=10 prim=i32
+          int
+            value=11 prim=i32
+          int
+            value=12 prim=i32
+          int
+            value=13 prim=i32
+          int
+            value=14 prim=i32
+          int
+            value=15 prim=i32
+          int
+            value=16 prim=i32
+          int
+            value=17 prim=i32
+          int
+            value=18 prim=i32
+          int
+            value=19 prim=i32
+          int
+            value=20 prim=i32
+          int
+            value=21 prim=i32
+          int
+            value=22 prim=i32
+          int
+            value=23 prim=i32
+          int
+            value=24 prim=i32
+          int
+            value=25 prim=i32
+          int
+            value=26 prim=i32
+          int
+            value=27 prim=i32
+          int
+            value=28 prim=i32
+          int
+            value=29 prim=i32
+          int
+            value=30 prim=i32
+          int
+            value=31 prim=i32
+          int
+            value=32 prim=i32
+          int
+            value=33 prim=i32
+          int
+            value=34 prim=i32
+          int
+            value=35 prim=i32
+          int
+            value=36 prim=i32
+          int
+            value=37 prim=i32
+          int
+            value=38 prim=i32
+          int
+            value=39 prim=i32
+          int
+            value=40 prim=i32
+          int
+            value=41 prim=i32
+          int
+            value=42 prim=i32
+          int
+            value=43 prim=i32
+          int
+            value=44 prim=i32
+          int
+            value=45 prim=i32
+          int
+            value=46 prim=i32
+          int
+            value=47 prim=i32
+          int
+            value=48 prim=i32
+          int
+            value=49 prim=i32
+          int
+            value=50 prim=i32
+          int
+            value=51 prim=i32
+          int
+            value=52 prim=i32
+          int
+            value=53 prim=i32
+          int
+            value=54 prim=i32
+          int
+            value=55 prim=i32
+          int
+            value=56 prim=i32
+          int
+            value=57 prim=i32
+          int
+            value=58 prim=i32
+          int
+            value=59 prim=i32
+          int
+            value=60 prim=i32
+          int
+            value=61 prim=i32
+          int
+            value=62 prim=i32
+          int
+            value=63 prim=i32
+          int
+            value=64 prim=i32
+          int
+            value=65 prim=i32
+          int
+            value=66 prim=i32
+          int
+            value=67 prim=i32
+          int
+            value=68 prim=i32
+          int
+            value=69 prim=i32
+          int
+            value=70 prim=i32
+          int
+            value=71 prim=i32
+          int
+            value=72 prim=i32
+          int
+            value=73 prim=i32
+          int
+            value=74 prim=i32
+          int
+            value=75 prim=i32
+          int
+            value=76 prim=i32
+          int
+            value=77 prim=i32
+          int
+            value=78 prim=i32
+          int
+            value=79 prim=i32
+          int
+            value=80 prim=i32
+          int
+            value=81 prim=i32
+          int
+            value=82 prim=i32
+          int
+            value=83 prim=i32
+          int
+            value=84 prim=i32
+          int
+            value=85 prim=i32
+          int
+            value=86 prim=i32
+          int
+            value=87 prim=i32
+          int
+            value=88 prim=i32
+          int
+            value=89 prim=i32
+          int
+            value=90 prim=i32
+          int
+            value=91 prim=i32
+          int
+            value=92 prim=i32
+          int
+            value=93 prim=i32
+          int
+            value=94 prim=i32
+          int
+            value=95 prim=i32
+          int
+            value=96 prim=i32
+          int
+            value=97 prim=i32
+          int
+            value=98 prim=i32
+          int
+            value=99 prim=i32
+          int
+            value=100 prim=i32
+      let
+        is_mutable=true
+        SYM name=sum kind=var
+        ident
+          SYM name=i32 kind=type
+        int
+          value=0 prim=i32
+      let
+        is_mutable=true
+        SYM name=i kind=var
+        ident
+          SYM name=i32 kind=type
+        int
+          value=0 prim=i32
+      while
+        binary
+          op=<
+          ident
+            SYM name=i kind=var
+          int
+            value=100 prim=i32
+        block
+          nstmts=2
+          expr_stmt
+            assign
+              ident
+                SYM name=sum kind=var
+              binary
+                op=+
+                ident
+                  SYM name=sum kind=var
+                index
+                  ident
+                    SYM name=arr kind=var
+                  ident
+                    SYM name=i kind=var
+          expr_stmt
+            assign
+              ident
+                SYM name=i kind=var
+              binary
+                op=+
+                ident
+                  SYM name=i kind=var
+                int
+                  value=1 prim=i32
+      expr_stmt
+        call
+          nargs=2
+          ident
+            SYM name=printf kind=fn
+          string
+            len=10 chars="sum = %d\n"
+          ident
+            SYM name=sum kind=var
+      expr_stmt
+        ident
+          SYM name=sum kind=var

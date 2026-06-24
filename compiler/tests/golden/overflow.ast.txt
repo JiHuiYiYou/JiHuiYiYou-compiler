@@ -1,0 +1,41 @@
+module
+  ndeccls=1
+  func_decl
+    SYM name=main_jhyy kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=4
+      let
+        is_mutable=false
+        SYM name=a kind=var
+        ident
+          SYM name=i32 kind=type
+        int
+          value=2147483647 prim=i32
+      let
+        is_mutable=false
+        SYM name=b kind=var
+        ident
+          SYM name=i32 kind=type
+        int
+          value=2 prim=i32
+      let
+        is_mutable=false
+        SYM name=c kind=var
+        ident
+          SYM name=i32 kind=type
+        binary
+          op=+
+          ident
+            SYM name=a kind=var
+          ident
+            SYM name=b kind=var
+      expr_stmt
+        binary
+          op=&
+          ident
+            SYM name=c kind=var
+          int
+            value=255 prim=i32

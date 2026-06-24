@@ -1,0 +1,34 @@
+module
+  ndeccls=2
+  func_decl
+    SYM name=printf kind=fn
+    nparams=2 is_extern=true
+    PARAM name=fmt kind=var
+      unary
+        op=*
+        ident
+          SYM name=u8 kind=type
+    PARAM name=val kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+  func_decl
+    SYM name=main_jhyy kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=2
+      expr_stmt
+        call
+          nargs=2
+          ident
+            SYM name=printf kind=fn
+          string
+            len=18 chars="计算结果: %d\n"
+          int
+            value=42 prim=i32
+      expr_stmt
+        int
+          value=0 prim=i32

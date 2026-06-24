@@ -1,5 +1,6 @@
 #include "ast.h"
 #include "arena.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -495,4 +496,383 @@ const char *node_kind_name(NodeKind kind) {
     case NODE_MODULE:        return "module";
     default:                 return "?";
     }
+}
+
+/* ── AST dump (for byte-equal oracle / sprint 5 self-hosting verification) ── */
+
+static void dump_indent(int depth) {
+    for (int i = 0; i < depth; i++) fputs("  ", stdout);
+}
+
+static const char *dump_prim_name(TypePrimitive p) {
+    switch (p) {
+        case PRIM_I8: return "i8";   case PRIM_I16: return "i16";
+        case PRIM_I32: return "i32"; case PRIM_I64: return "i64";
+        case PRIM_U8: return "u8";   case PRIM_U16: return "u16";
+        case PRIM_U32: return "u32"; case PRIM_U64: return "u64";
+        case PRIM_F32: return "f32"; case PRIM_F64: return "f64";
+        case PRIM_BOOL: return "bool";
+        default: return "?";
+    }
+}
+
+static const char *dump_sym_kind_name(SymKind k) {
+    switch (k) {
+        case SYM_VAR: return "var";
+        case SYM_FN: return "fn";
+        case SYM_TYPE: return "type";
+        case SYM_FIELD: return "field";
+        case SYM_VARIANT: return "variant";
+        case SYM_MODULE: return "module";
+        default: return "?";
+    }
+}
+
+static const char *dump_op_name(TokenKind k) {
+    /* only operators that can appear in NODE_BINARY / NODE_UNARY */
+    switch (k) {
+        case TOKEN_PLUS: return "+";   case TOKEN_MINUS: return "-";
+        case TOKEN_STAR: return "*";   case TOKEN_SLASH: return "/";
+        case TOKEN_PERCENT: return "%";
+        case TOKEN_EQ: return "=";     case TOKEN_EQEQ: return "==";
+        case TOKEN_BANGEQ: return "!=";
+        case TOKEN_LT: return "<";     case TOKEN_GT: return ">";
+        case TOKEN_LTEQ: return "<=";  case TOKEN_GTEQ: return ">=";
+        case TOKEN_BANG: return "!";   case TOKEN_TILDE: return "~";
+        case TOKEN_AMP: return "&";    case TOKEN_PIPE: return "|";
+        case TOKEN_AMPAMP: return "&&"; case TOKEN_PIPEPIPE: return "||";
+        default: return "?";
+    }
+}
+
+static void dump_node(Node *n, int depth);
+
+static void dump_node_list(Node **arr, size_t n, int depth) {
+    for (size_t i = 0; i < n; i++) dump_node(arr[i], depth);
+}
+
+static void dump_sym(Sym *s, int depth) {
+    dump_indent(depth);
+    if (!s) { fputs("SYM null\n", stdout); return; }
+    fprintf(stdout, "SYM name=%s kind=%s\n", s->name, dump_sym_kind_name(s->kind));
+}
+
+static void dump_field_init(NodeFieldInit *fi, int depth) {
+    dump_indent(depth);
+    fprintf(stdout, "FIELD name=%s\n", fi->name);
+    dump_node(fi->value, depth + 1);
+}
+
+static void dump_struct_field_decl(StructFieldDecl *fd, int depth) {
+    dump_indent(depth);
+    fprintf(stdout, "STRUCT_FIELD name=%s\n", fd->name);
+    dump_node(fd->type_annot, depth + 1);
+}
+
+static void dump_enum_variant_decl(EnumVariantDecl *vd, int depth) {
+    dump_indent(depth);
+    fprintf(stdout, "ENUM_VARIANT_DECL name=%s\n", vd->name);
+    dump_node(vd->payload_type, depth + 1);
+}
+
+static void dump_func_decl_param(NodeFuncDeclParam *p, int depth) {
+    dump_indent(depth);
+    if (p->sym)
+        fprintf(stdout, "PARAM name=%s kind=%s\n", p->sym->name, dump_sym_kind_name(p->sym->kind));
+    else
+        fputs("PARAM name=null\n", stdout);
+    dump_node(p->type_annot, depth + 1);
+}
+
+static void dump_node(Node *n, int depth) {
+    if (!n) { dump_indent(depth); fputs("null\n", stdout); return; }
+    dump_indent(depth);
+    fprintf(stdout, "%s\n", node_kind_name(n->kind));
+    depth++;
+    switch (n->kind) {
+        case NODE_INT: {
+            NodeInt *d = node_int_data(n);
+            dump_indent(depth); fprintf(stdout, "value=%lld prim=%s\n", (long long)d->value, dump_prim_name(d->prim));
+            break;
+        }
+        case NODE_FLOAT: {
+            NodeFloat *d = node_float_data(n);
+            dump_indent(depth); fprintf(stdout, "value=%g\n", d->value);
+            break;
+        }
+        case NODE_STRING: {
+            NodeString *d = node_string_data(n);
+            dump_indent(depth); fprintf(stdout, "len=%zu chars=\"%.*s\"\n", d->len, (int)d->len, d->chars);
+            break;
+        }
+        case NODE_CHAR: {
+            NodeChar *d = node_char_data(n);
+            dump_indent(depth); fprintf(stdout, "ch='%c'\n", d->ch);
+            break;
+        }
+        case NODE_BOOL: {
+            NodeBool *d = node_bool_data(n);
+            dump_indent(depth); fprintf(stdout, "value=%s\n", d->value ? "true" : "false");
+            break;
+        }
+        case NODE_IDENT: {
+            NodeIdent *d = node_ident_data(n);
+            dump_sym(d->sym, depth);
+            break;
+        }
+        case NODE_UNARY: {
+            NodeUnary *d = node_unary_data(n);
+            dump_indent(depth); fprintf(stdout, "op=%s\n", dump_op_name(d->op));
+            dump_node(d->expr, depth);
+            break;
+        }
+        case NODE_BINARY: {
+            NodeBinary *d = node_binary_data(n);
+            dump_indent(depth); fprintf(stdout, "op=%s\n", dump_op_name(d->op));
+            dump_node(d->left, depth);
+            dump_node(d->right, depth);
+            break;
+        }
+        case NODE_CALL: {
+            NodeCall *d = node_call_data(n);
+            dump_indent(depth); fprintf(stdout, "nargs=%zu\n", d->nargs);
+            dump_node(d->callee, depth);
+            dump_node_list(d->args, d->nargs, depth);
+            break;
+        }
+        case NODE_QUALIFIED_CALL: {
+            NodeQualifiedCall *d = node_qualified_call_data(n);
+            dump_indent(depth); fprintf(stdout, "nargs=%zu\n", d->nargs);
+            dump_node(d->module, depth);
+            dump_node(d->function, depth);
+            dump_node_list(d->args, d->nargs, depth);
+            break;
+        }
+        case NODE_FIELD: {
+            NodeField *d = node_field_data(n);
+            dump_node(d->expr, depth);
+            dump_indent(depth);
+            fprintf(stdout, "field=\"%s\"\n", d->field);
+            break;
+        }
+        case NODE_INDEX: {
+            NodeIndex *d = node_index_data(n);
+            dump_node(d->expr, depth);
+            dump_node(d->index, depth);
+            break;
+        }
+        case NODE_CAST: {
+            NodeCast *d = node_cast_data(n);
+            dump_node(d->expr, depth);
+            dump_node(d->target_type, depth);
+            break;
+        }
+        case NODE_ARRAY_TYPE: {
+            NodeArrayType *d = node_array_type_data(n);
+            dump_node(d->elem_type, depth);
+            dump_node(d->count_expr, depth);
+            break;
+        }
+        case NODE_ARRAY_LIT: {
+            NodeArrayLit *d = node_array_lit_data(n);
+            dump_indent(depth); fprintf(stdout, "nelems=%zu\n", d->nelems);
+            dump_node_list(d->elems, d->nelems, depth);
+            break;
+        }
+        case NODE_SLICE_TYPE: {
+            NodeSliceType *d = node_slice_type_data(n);
+            dump_node(d->elem_type, depth);
+            break;
+        }
+        case NODE_SLICE_LIT: {
+            NodeSliceLit *d = node_slice_lit_data(n);
+            dump_node(d->array, depth);
+            break;
+        }
+        case NODE_SLICE_RANGE: {
+            NodeSliceRange *d = node_slice_range_data(n);
+            dump_node(d->base, depth);
+            dump_node(d->start, depth);
+            dump_node(d->end, depth);
+            break;
+        }
+        case NODE_SIZEOF:
+        case NODE_ALIGNOF: {
+            /* These hold a Type* resolved by sema; skipped in AST dump
+               since types use a separate representation. */
+            break;
+        }
+        case NODE_ADDR_OF:
+        case NODE_DEREF: {
+            NodeAddrOf *d = node_addr_of_data(n);
+            dump_node(d->expr, depth);
+            break;
+        }
+        case NODE_BLOCK: {
+            NodeBlock *d = node_block_data(n);
+            dump_indent(depth); fprintf(stdout, "nstmts=%zu\n", d->nstmts);
+            dump_node_list(d->stmts, d->nstmts, depth);
+            break;
+        }
+        case NODE_IF: {
+            NodeIf *d = node_if_data(n);
+            dump_node(d->cond, depth);
+            dump_node(d->then_body, depth);
+            if (d->else_body) dump_node(d->else_body, depth);
+            break;
+        }
+        case NODE_WHILE: {
+            NodeWhile *d = node_while_data(n);
+            dump_node(d->cond, depth);
+            dump_node(d->body, depth);
+            break;
+        }
+        case NODE_FOR: {
+            NodeFor *d = node_for_data(n);
+            dump_sym(d->var, depth);
+            dump_node(d->start, depth);
+            dump_node(d->end, depth);
+            dump_node(d->body, depth);
+            break;
+        }
+        case NODE_LET: {
+            NodeLet *d = node_let_data(n);
+            dump_indent(depth); fprintf(stdout, "is_mutable=%s\n", d->is_mutable ? "true" : "false");
+            dump_sym(d->sym, depth);
+            if (d->type_annot) dump_node(d->type_annot, depth);
+            if (d->init) dump_node(d->init, depth);
+            break;
+        }
+        case NODE_ASSIGN: {
+            NodeAssign *d = node_assign_data(n);
+            dump_node(d->target, depth);
+            dump_node(d->value, depth);
+            break;
+        }
+        case NODE_RETURN: {
+            NodeReturn *d = node_return_data(n);
+            if (d->expr) dump_node(d->expr, depth);
+            break;
+        }
+        case NODE_BREAK:
+        case NODE_CONTINUE:
+            break;  /* no variant data */
+        case NODE_EXPR_STMT: {
+            NodeExprStmt *d = node_expr_stmt_data(n);
+            dump_node(d->expr, depth);
+            break;
+        }
+        case NODE_MATCH: {
+            NodeMatch *d = node_match_data(n);
+            dump_node(d->expr, depth);
+            dump_indent(depth); fprintf(stdout, "narms=%zu\n", d->narms);
+            dump_node_list(d->arms, d->narms, depth);
+            break;
+        }
+        case NODE_MATCH_ARM: {
+            NodeMatchArm *d = node_match_arm_data(n);
+            dump_node(d->pattern, depth);
+            dump_node(d->body, depth);
+            break;
+        }
+        case NODE_PATTERN_LIT: {
+            NodePatternLit *d = node_pattern_lit_data(n);
+            dump_indent(depth); fprintf(stdout, "value=%lld prim=%s\n", (long long)d->value, dump_prim_name(d->prim));
+            break;
+        }
+        case NODE_PATTERN_IDENT: {
+            NodePatternIdent *d = node_pattern_ident_data(n);
+            dump_sym(d->sym, depth);
+            break;
+        }
+        case NODE_PATTERN_ENUM: {
+            NodePatternEnum *d = node_pattern_enum_data(n);
+            dump_sym(d->type_sym, depth);
+            dump_sym(d->variant_sym, depth);
+            if (d->inner) dump_node(d->inner, depth);
+            break;
+        }
+        case NODE_PATTERN_RANGE: {
+            NodePatternRange *d = node_pattern_range_data(n);
+            dump_node(d->lo, depth);
+            dump_node(d->hi, depth);
+            break;
+        }
+        case NODE_PATTERN_OR: {
+            NodePatternOr *d = node_pattern_or_data(n);
+            dump_node(d->left, depth);
+            dump_node(d->right, depth);
+            break;
+        }
+        case NODE_PATTERN_WILD:
+            break;  /* no variant data */
+        case NODE_STRUCT_LIT: {
+            NodeStructLit *d = node_struct_lit_data(n);
+            dump_sym(d->type_sym, depth);
+            dump_indent(depth); fprintf(stdout, "nfields=%zu\n", d->nfields);
+            for (size_t i = 0; i < d->nfields; i++)
+                dump_field_init(&d->fields[i], depth);
+            break;
+        }
+        case NODE_ENUM_VARIANT: {
+            NodeEnumVariant *d = node_enum_variant_data(n);
+            dump_sym(d->type_sym, depth);
+            dump_sym(d->variant_sym, depth);
+            if (d->payload) dump_node(d->payload, depth);
+            break;
+        }
+        case NODE_STRUCT_DEF: {
+            NodeStructDef *d = node_struct_def_data(n);
+            dump_indent(depth); fprintf(stdout, "nfields=%zu\n", d->nfields);
+            for (size_t i = 0; i < d->nfields; i++)
+                dump_struct_field_decl(&d->fields[i], depth);
+            break;
+        }
+        case NODE_ENUM_DEF: {
+            NodeEnumDef *d = node_enum_def_data(n);
+            dump_indent(depth); fprintf(stdout, "nvariants=%zu\n", d->nvariants);
+            for (size_t i = 0; i < d->nvariants; i++)
+                dump_enum_variant_decl(&d->variants[i], depth);
+            break;
+        }
+        case NODE_FUNC_DECL: {
+            NodeFuncDecl *d = node_func_decl_data(n);
+            dump_sym(d->sym, depth);
+            dump_indent(depth); fprintf(stdout, "nparams=%zu is_extern=%s\n", d->nparams, d->is_extern ? "true" : "false");
+            for (size_t i = 0; i < d->nparams; i++)
+                dump_func_decl_param(&d->params[i], depth);
+            if (d->ret_type) dump_node(d->ret_type, depth);
+            if (d->body) dump_node(d->body, depth);
+            break;
+        }
+        case NODE_TYPE_DECL: {
+            NodeTypeDecl *d = node_type_decl_data(n);
+            dump_sym(d->sym, depth);
+            dump_node(d->body, depth);
+            break;
+        }
+        case NODE_EXTERN_DECL: {
+            NodeExternDecl *d = node_extern_decl_data(n);
+            dump_sym(d->sym, depth);
+            break;
+        }
+        case NODE_IMPORT_DECL: {
+            NodeImportDecl *d = node_import_decl_data(n);
+            dump_sym(d->sym, depth);
+            break;
+        }
+        case NODE_MODULE: {
+            NodeModule *d = node_module_data(n);
+            dump_indent(depth); fprintf(stdout, "ndeccls=%zu\n", d->ndeccls);
+            dump_node_list(d->decls, d->ndeccls, depth);
+            break;
+        }
+        default:
+            dump_indent(depth); fprintf(stdout, "<unknown kind %d>\n", n->kind);
+            break;
+    }
+}
+
+void ast_dump(Node *n) {
+    dump_node(n, 0);
 }

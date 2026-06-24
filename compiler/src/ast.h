@@ -343,4 +343,7 @@ Node *ast_new_module(struct Arena *a, SourceLoc loc, Node **decls, size_t ndeccl
 
 const char *node_kind_name(NodeKind kind);
 
+/* Dump AST to stdout as structured text (used by `jhyy dump` for byte-equal oracle). */
+void ast_dump(Node *n);
+
 #endif

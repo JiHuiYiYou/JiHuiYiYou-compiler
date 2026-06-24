@@ -1,0 +1,1342 @@
+module
+  ndeccls=12
+  func_decl
+    SYM name=puts kind=fn
+    nparams=1 is_extern=true
+    PARAM name=s kind=var
+      unary
+        op=*
+        ident
+          SYM name=u8 kind=type
+    ident
+      SYM name=i32 kind=type
+  func_decl
+    SYM name=printf kind=fn
+    nparams=2 is_extern=true
+    PARAM name=fmt kind=var
+      unary
+        op=*
+        ident
+          SYM name=u8 kind=type
+    PARAM name=val kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+  func_decl
+    SYM name=scanf kind=fn
+    nparams=2 is_extern=true
+    PARAM name=fmt kind=var
+      unary
+        op=*
+        ident
+          SYM name=u8 kind=type
+    PARAM name=ptr kind=var
+      unary
+        op=*
+        ident
+          SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+  func_decl
+    SYM name=randRange kind=fn
+    nparams=3 is_extern=false
+    PARAM name=seed kind=var
+      unary
+        op=*
+        ident
+          SYM name=i32 kind=type
+    PARAM name=min kind=var
+      ident
+        SYM name=i32 kind=type
+    PARAM name=max kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=5
+      let
+        is_mutable=false
+        SYM name=s kind=var
+        deref
+          ident
+            SYM name=seed kind=var
+      expr_stmt
+        assign
+          ident
+            SYM name=s kind=var
+          binary
+            op=&
+            binary
+              op=+
+              binary
+                op=*
+                ident
+                  SYM name=s kind=var
+                int
+                  value=1103515245 prim=i32
+              int
+                value=12345 prim=i32
+            int
+              value=2147483647 prim=i32
+      expr_stmt
+        assign
+          deref
+            ident
+              SYM name=seed kind=var
+          ident
+            SYM name=s kind=var
+      let
+        is_mutable=false
+        SYM name=range kind=var
+        binary
+          op=+
+          binary
+            op=-
+            ident
+              SYM name=max kind=var
+            ident
+              SYM name=min kind=var
+          int
+            value=1 prim=i32
+      expr_stmt
+        binary
+          op=+
+          ident
+            SYM name=min kind=var
+          binary
+            op=%
+            ident
+              SYM name=s kind=var
+            ident
+              SYM name=range kind=var
+  func_decl
+    SYM name=clamp kind=fn
+    nparams=3 is_extern=false
+    PARAM name=x kind=var
+      ident
+        SYM name=i32 kind=type
+    PARAM name=min kind=var
+      ident
+        SYM name=i32 kind=type
+    PARAM name=max kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=3
+      if
+        binary
+          op=<
+          ident
+            SYM name=x kind=var
+          ident
+            SYM name=min kind=var
+        block
+          nstmts=1
+          return
+            ident
+              SYM name=min kind=var
+      if
+        binary
+          op=>
+          ident
+            SYM name=x kind=var
+          ident
+            SYM name=max kind=var
+        block
+          nstmts=1
+          return
+            ident
+              SYM name=max kind=var
+      expr_stmt
+        ident
+          SYM name=x kind=var
+  func_decl
+    SYM name=monsterHp kind=fn
+    nparams=1 is_extern=false
+    PARAM name=tag kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=3
+      if
+        binary
+          op===
+          ident
+            SYM name=tag kind=var
+          int
+            value=0 prim=i32
+        block
+          nstmts=1
+          return
+            int
+              value=8 prim=i32
+      if
+        binary
+          op===
+          ident
+            SYM name=tag kind=var
+          int
+            value=1 prim=i32
+        block
+          nstmts=1
+          return
+            int
+              value=14 prim=i32
+      expr_stmt
+        int
+          value=30 prim=i32
+  func_decl
+    SYM name=monsterAtk kind=fn
+    nparams=1 is_extern=false
+    PARAM name=tag kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=3
+      if
+        binary
+          op===
+          ident
+            SYM name=tag kind=var
+          int
+            value=0 prim=i32
+        block
+          nstmts=1
+          return
+            int
+              value=2 prim=i32
+      if
+        binary
+          op===
+          ident
+            SYM name=tag kind=var
+          int
+            value=1 prim=i32
+        block
+          nstmts=1
+          return
+            int
+              value=4 prim=i32
+      expr_stmt
+        int
+          value=7 prim=i32
+  func_decl
+    SYM name=monsterGold kind=fn
+    nparams=1 is_extern=false
+    PARAM name=tag kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=3
+      if
+        binary
+          op===
+          ident
+            SYM name=tag kind=var
+          int
+            value=0 prim=i32
+        block
+          nstmts=1
+          return
+            int
+              value=5 prim=i32
+      if
+        binary
+          op===
+          ident
+            SYM name=tag kind=var
+          int
+            value=1 prim=i32
+        block
+          nstmts=1
+          return
+            int
+              value=10 prim=i32
+      expr_stmt
+        int
+          value=50 prim=i32
+  func_decl
+    SYM name=battle kind=fn
+    nparams=10 is_extern=false
+    PARAM name=hp kind=var
+      unary
+        op=*
+        ident
+          SYM name=i32 kind=type
+    PARAM name=maxHp kind=var
+      ident
+        SYM name=i32 kind=type
+    PARAM name=atk kind=var
+      ident
+        SYM name=i32 kind=type
+    PARAM name=potions kind=var
+      unary
+        op=*
+        ident
+          SYM name=i32 kind=type
+    PARAM name=mHp kind=var
+      unary
+        op=*
+        ident
+          SYM name=i32 kind=type
+    PARAM name=mAtk kind=var
+      ident
+        SYM name=i32 kind=type
+    PARAM name=mGold kind=var
+      ident
+        SYM name=i32 kind=type
+    PARAM name=seed kind=var
+      unary
+        op=*
+        ident
+          SYM name=i32 kind=type
+    PARAM name=state kind=var
+      unary
+        op=*
+        ident
+          SYM name=i32 kind=type
+    PARAM name=gold kind=var
+      unary
+        op=*
+        ident
+          SYM name=i32 kind=type
+    block
+      nstmts=2
+      while
+        binary
+          op=>
+          deref
+            ident
+              SYM name=hp kind=var
+          int
+            value=0 prim=i32
+        block
+          nstmts=17
+          expr_stmt
+            call
+              nargs=3
+              ident
+                SYM name=printf kind=fn
+              string
+                len=18 chars="你的 HP: %d/%d\n"
+              deref
+                ident
+                  SYM name=hp kind=var
+              ident
+                SYM name=maxHp kind=var
+          expr_stmt
+            call
+              nargs=2
+              ident
+                SYM name=printf kind=fn
+              string
+                len=15 chars="怪物 HP: %d\n"
+              deref
+                ident
+                  SYM name=mHp kind=var
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=9 chars="1. 攻击"
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=17 chars="2. 喝药 (+6 HP)"
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=9 chars="3. 逃跑"
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=13 chars="选择行动:"
+          let
+            is_mutable=true
+            SYM name=choice kind=var
+            int
+              value=0 prim=i32
+          expr_stmt
+            call
+              nargs=2
+              ident
+                SYM name=scanf kind=fn
+              string
+                len=2 chars="%d"
+              addr_of
+                ident
+                  SYM name=choice kind=var
+          if
+            binary
+              op===
+              ident
+                SYM name=choice kind=var
+              int
+                value=1 prim=i32
+            block
+              nstmts=5
+              let
+                is_mutable=false
+                SYM name=dmg kind=var
+                binary
+                  op=+
+                  ident
+                    SYM name=atk kind=var
+                  call
+                    nargs=3
+                    ident
+                      SYM name=randRange kind=fn
+                    ident
+                      SYM name=seed kind=var
+                    unary
+                      op=-
+                      int
+                        value=1 prim=i32
+                    int
+                      value=1 prim=i32
+              let
+                is_mutable=false
+                SYM name=curMhp kind=var
+                deref
+                  ident
+                    SYM name=mHp kind=var
+              let
+                is_mutable=false
+                SYM name=newMhp kind=var
+                binary
+                  op=-
+                  ident
+                    SYM name=curMhp kind=var
+                  ident
+                    SYM name=dmg kind=var
+              expr_stmt
+                assign
+                  deref
+                    ident
+                      SYM name=mHp kind=var
+                  ident
+                    SYM name=newMhp kind=var
+              expr_stmt
+                call
+                  nargs=2
+                  ident
+                    SYM name=printf kind=fn
+                  string
+                    len=30 chars="你造成了 %d 点伤害。\n"
+                  ident
+                    SYM name=dmg kind=var
+          if
+            binary
+              op===
+              ident
+                SYM name=choice kind=var
+              int
+                value=2 prim=i32
+            block
+              nstmts=1
+              if
+                binary
+                  op=>
+                  deref
+                    ident
+                      SYM name=potions kind=var
+                  int
+                    value=0 prim=i32
+                block
+                  nstmts=8
+                  let
+                    is_mutable=false
+                    SYM name=curHp kind=var
+                    deref
+                      ident
+                        SYM name=hp kind=var
+                  let
+                    is_mutable=false
+                    SYM name=newHp kind=var
+                    binary
+                      op=+
+                      ident
+                        SYM name=curHp kind=var
+                      int
+                        value=6 prim=i32
+                  expr_stmt
+                    assign
+                      deref
+                        ident
+                          SYM name=hp kind=var
+                      ident
+                        SYM name=newHp kind=var
+                  expr_stmt
+                    assign
+                      deref
+                        ident
+                          SYM name=hp kind=var
+                      call
+                        nargs=3
+                        ident
+                          SYM name=clamp kind=fn
+                        deref
+                          ident
+                            SYM name=hp kind=var
+                        int
+                          value=0 prim=i32
+                        ident
+                          SYM name=maxHp kind=var
+                  let
+                    is_mutable=false
+                    SYM name=curPot kind=var
+                    deref
+                      ident
+                        SYM name=potions kind=var
+                  let
+                    is_mutable=false
+                    SYM name=newPot kind=var
+                    binary
+                      op=-
+                      ident
+                        SYM name=curPot kind=var
+                      int
+                        value=1 prim=i32
+                  expr_stmt
+                    assign
+                      deref
+                        ident
+                          SYM name=potions kind=var
+                      ident
+                        SYM name=newPot kind=var
+                  expr_stmt
+                    call
+                      nargs=1
+                      ident
+                        SYM name=puts kind=fn
+                      string
+                        len=21 chars="你喝下一瓶药。"
+                block
+                  nstmts=1
+                  expr_stmt
+                    call
+                      nargs=1
+                      ident
+                        SYM name=puts kind=fn
+                      string
+                        len=18 chars="你没有药水！"
+          if
+            binary
+              op===
+              ident
+                SYM name=choice kind=var
+              int
+                value=3 prim=i32
+            block
+              nstmts=3
+              let
+                is_mutable=false
+                SYM name=escape kind=var
+                call
+                  nargs=3
+                  ident
+                    SYM name=randRange kind=fn
+                  ident
+                    SYM name=seed kind=var
+                  int
+                    value=0 prim=i32
+                  int
+                    value=1 prim=i32
+              if
+                binary
+                  op===
+                  ident
+                    SYM name=escape kind=var
+                  int
+                    value=0 prim=i32
+                block
+                  nstmts=1
+                  expr_stmt
+                    call
+                      nargs=1
+                      ident
+                        SYM name=puts kind=fn
+                      string
+                        len=15 chars="逃跑失败！"
+                block
+                  nstmts=1
+                  expr_stmt
+                    call
+                      nargs=1
+                      ident
+                        SYM name=puts kind=fn
+                      string
+                        len=15 chars="你逃跑了。"
+              if
+                binary
+                  op=!=
+                  ident
+                    SYM name=escape kind=var
+                  int
+                    value=0 prim=i32
+                block
+                  nstmts=1
+                  return
+          if
+            binary
+              op=<=
+              deref
+                ident
+                  SYM name=mHp kind=var
+              int
+                value=0 prim=i32
+            block
+              nstmts=4
+              expr_stmt
+                call
+                  nargs=1
+                  ident
+                    SYM name=puts kind=fn
+                  string
+                    len=21 chars="你击败了怪物！"
+              let
+                is_mutable=false
+                SYM name=newGold kind=var
+                binary
+                  op=+
+                  deref
+                    ident
+                      SYM name=gold kind=var
+                  ident
+                    SYM name=mGold kind=var
+              expr_stmt
+                assign
+                  deref
+                    ident
+                      SYM name=gold kind=var
+                  ident
+                    SYM name=newGold kind=var
+              return
+          let
+            is_mutable=false
+            SYM name=dmg kind=var
+            binary
+              op=+
+              ident
+                SYM name=mAtk kind=var
+              call
+                nargs=3
+                ident
+                  SYM name=randRange kind=fn
+                ident
+                  SYM name=seed kind=var
+                unary
+                  op=-
+                  int
+                    value=1 prim=i32
+                int
+                  value=1 prim=i32
+          let
+            is_mutable=false
+            SYM name=curHp2 kind=var
+            deref
+              ident
+                SYM name=hp kind=var
+          let
+            is_mutable=false
+            SYM name=newHp2 kind=var
+            binary
+              op=-
+              ident
+                SYM name=curHp2 kind=var
+              ident
+                SYM name=dmg kind=var
+          expr_stmt
+            assign
+              deref
+                ident
+                  SYM name=hp kind=var
+              ident
+                SYM name=newHp2 kind=var
+          expr_stmt
+            call
+              nargs=2
+              ident
+                SYM name=printf kind=fn
+              string
+                len=33 chars="怪物造成了 %d 点伤害。\n"
+              ident
+                SYM name=dmg kind=var
+      expr_stmt
+        assign
+          deref
+            ident
+              SYM name=state kind=var
+          int
+            value=2 prim=i32
+  func_decl
+    SYM name=describeRoom kind=fn
+    nparams=1 is_extern=false
+    PARAM name=tag kind=var
+      ident
+        SYM name=i32 kind=type
+    block
+      nstmts=6
+      if
+        binary
+          op===
+          ident
+            SYM name=tag kind=var
+          int
+            value=0 prim=i32
+        block
+          nstmts=1
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=24 chars="你站在地牢入口。"
+      if
+        binary
+          op===
+          ident
+            SYM name=tag kind=var
+          int
+            value=1 prim=i32
+        block
+          nstmts=1
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=27 chars="一只怪物冲了出来！"
+      if
+        binary
+          op===
+          ident
+            SYM name=tag kind=var
+          int
+            value=2 prim=i32
+        block
+          nstmts=1
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=27 chars="你发现了治疗泉水。"
+      if
+        binary
+          op===
+          ident
+            SYM name=tag kind=var
+          int
+            value=3 prim=i32
+        block
+          nstmts=1
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=27 chars="你找到了一个宝箱。"
+      if
+        binary
+          op===
+          ident
+            SYM name=tag kind=var
+          int
+            value=4 prim=i32
+        block
+          nstmts=1
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=30 chars="前方是最终 BOSS 房间。"
+      if
+        binary
+          op===
+          ident
+            SYM name=tag kind=var
+          int
+            value=5 prim=i32
+        block
+          nstmts=1
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=21 chars="你看到了出口。"
+  func_decl
+    SYM name=processRoom kind=fn
+    nparams=8 is_extern=false
+    PARAM name=hp kind=var
+      unary
+        op=*
+        ident
+          SYM name=i32 kind=type
+    PARAM name=maxHp kind=var
+      ident
+        SYM name=i32 kind=type
+    PARAM name=atk kind=var
+      ident
+        SYM name=i32 kind=type
+    PARAM name=potions kind=var
+      unary
+        op=*
+        ident
+          SYM name=i32 kind=type
+    PARAM name=seed kind=var
+      unary
+        op=*
+        ident
+          SYM name=i32 kind=type
+    PARAM name=state kind=var
+      unary
+        op=*
+        ident
+          SYM name=i32 kind=type
+    PARAM name=gold kind=var
+      unary
+        op=*
+        ident
+          SYM name=i32 kind=type
+    PARAM name=roomTag kind=var
+      ident
+        SYM name=i32 kind=type
+    block
+      nstmts=6
+      expr_stmt
+        call
+          nargs=1
+          ident
+            SYM name=describeRoom kind=fn
+          ident
+            SYM name=roomTag kind=var
+      if
+        binary
+          op===
+          ident
+            SYM name=roomTag kind=var
+          int
+            value=2 prim=i32
+        block
+          nstmts=5
+          let
+            is_mutable=false
+            SYM name=curHp kind=var
+            deref
+              ident
+                SYM name=hp kind=var
+          let
+            is_mutable=false
+            SYM name=healHp kind=var
+            binary
+              op=+
+              ident
+                SYM name=curHp kind=var
+              int
+                value=8 prim=i32
+          expr_stmt
+            assign
+              deref
+                ident
+                  SYM name=hp kind=var
+              ident
+                SYM name=healHp kind=var
+          expr_stmt
+            assign
+              deref
+                ident
+                  SYM name=hp kind=var
+              call
+                nargs=3
+                ident
+                  SYM name=clamp kind=fn
+                deref
+                  ident
+                    SYM name=hp kind=var
+                int
+                  value=0 prim=i32
+                ident
+                  SYM name=maxHp kind=var
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=24 chars="你恢复了生命值。"
+      if
+        binary
+          op===
+          ident
+            SYM name=roomTag kind=var
+          int
+            value=3 prim=i32
+        block
+          nstmts=7
+          let
+            is_mutable=false
+            SYM name=curGold kind=var
+            deref
+              ident
+                SYM name=gold kind=var
+          let
+            is_mutable=false
+            SYM name=newG kind=var
+            binary
+              op=+
+              ident
+                SYM name=curGold kind=var
+              int
+                value=20 prim=i32
+          expr_stmt
+            assign
+              deref
+                ident
+                  SYM name=gold kind=var
+              ident
+                SYM name=newG kind=var
+          let
+            is_mutable=false
+            SYM name=curPot kind=var
+            deref
+              ident
+                SYM name=potions kind=var
+          let
+            is_mutable=false
+            SYM name=newPot2 kind=var
+            binary
+              op=+
+              ident
+                SYM name=curPot kind=var
+              int
+                value=1 prim=i32
+          expr_stmt
+            assign
+              deref
+                ident
+                  SYM name=potions kind=var
+              ident
+                SYM name=newPot2 kind=var
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=24 chars="获得金币和药水。"
+      if
+        binary
+          op===
+          ident
+            SYM name=roomTag kind=var
+          int
+            value=1 prim=i32
+        block
+          nstmts=6
+          let
+            is_mutable=false
+            SYM name=mTag kind=var
+            int
+              value=0 prim=i32
+          let
+            is_mutable=false
+            SYM name=mHp kind=var
+            call
+              nargs=1
+              ident
+                SYM name=monsterHp kind=fn
+              ident
+                SYM name=mTag kind=var
+          let
+            is_mutable=false
+            SYM name=mAtk kind=var
+            call
+              nargs=1
+              ident
+                SYM name=monsterAtk kind=fn
+              ident
+                SYM name=mTag kind=var
+          let
+            is_mutable=false
+            SYM name=mGold kind=var
+            call
+              nargs=1
+              ident
+                SYM name=monsterGold kind=fn
+              ident
+                SYM name=mTag kind=var
+          let
+            is_mutable=true
+            SYM name=mHpVar kind=var
+            ident
+              SYM name=mHp kind=var
+          expr_stmt
+            call
+              nargs=10
+              ident
+                SYM name=battle kind=fn
+              ident
+                SYM name=hp kind=var
+              ident
+                SYM name=maxHp kind=var
+              ident
+                SYM name=atk kind=var
+              ident
+                SYM name=potions kind=var
+              addr_of
+                ident
+                  SYM name=mHpVar kind=var
+              ident
+                SYM name=mAtk kind=var
+              ident
+                SYM name=mGold kind=var
+              ident
+                SYM name=seed kind=var
+              ident
+                SYM name=state kind=var
+              ident
+                SYM name=gold kind=var
+      if
+        binary
+          op===
+          ident
+            SYM name=roomTag kind=var
+          int
+            value=4 prim=i32
+        block
+          nstmts=6
+          let
+            is_mutable=false
+            SYM name=mTag kind=var
+            int
+              value=2 prim=i32
+          let
+            is_mutable=false
+            SYM name=mHp kind=var
+            call
+              nargs=1
+              ident
+                SYM name=monsterHp kind=fn
+              ident
+                SYM name=mTag kind=var
+          let
+            is_mutable=false
+            SYM name=mAtk kind=var
+            call
+              nargs=1
+              ident
+                SYM name=monsterAtk kind=fn
+              ident
+                SYM name=mTag kind=var
+          let
+            is_mutable=false
+            SYM name=mGold kind=var
+            call
+              nargs=1
+              ident
+                SYM name=monsterGold kind=fn
+              ident
+                SYM name=mTag kind=var
+          let
+            is_mutable=true
+            SYM name=mHpVar kind=var
+            ident
+              SYM name=mHp kind=var
+          expr_stmt
+            call
+              nargs=10
+              ident
+                SYM name=battle kind=fn
+              ident
+                SYM name=hp kind=var
+              ident
+                SYM name=maxHp kind=var
+              ident
+                SYM name=atk kind=var
+              ident
+                SYM name=potions kind=var
+              addr_of
+                ident
+                  SYM name=mHpVar kind=var
+              ident
+                SYM name=mAtk kind=var
+              ident
+                SYM name=mGold kind=var
+              ident
+                SYM name=seed kind=var
+              ident
+                SYM name=state kind=var
+              ident
+                SYM name=gold kind=var
+      if
+        binary
+          op===
+          ident
+            SYM name=roomTag kind=var
+          int
+            value=5 prim=i32
+        block
+          nstmts=1
+          expr_stmt
+            assign
+              deref
+                ident
+                  SYM name=state kind=var
+              int
+                value=1 prim=i32
+  func_decl
+    SYM name=main_jhyy kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=13
+      expr_stmt
+        call
+          nargs=1
+          ident
+            SYM name=puts kind=fn
+          string
+            len=29 chars="=== 地下城文字 Rogue ==="
+      let
+        is_mutable=true
+        SYM name=hp kind=var
+        int
+          value=20 prim=i32
+      let
+        is_mutable=false
+        SYM name=maxHp kind=var
+        int
+          value=20 prim=i32
+      let
+        is_mutable=false
+        SYM name=atk kind=var
+        int
+          value=4 prim=i32
+      let
+        is_mutable=true
+        SYM name=potions kind=var
+        int
+          value=2 prim=i32
+      let
+        is_mutable=true
+        SYM name=state kind=var
+        int
+          value=0 prim=i32
+      let
+        is_mutable=true
+        SYM name=roomIndex kind=var
+        int
+          value=0 prim=i32
+      let
+        is_mutable=true
+        SYM name=gold kind=var
+        int
+          value=0 prim=i32
+      let
+        is_mutable=true
+        SYM name=seed kind=var
+        int
+          value=12345 prim=i32
+      while
+        binary
+          op===
+          ident
+            SYM name=state kind=var
+          int
+            value=0 prim=i32
+        block
+          nstmts=3
+          let
+            is_mutable=false
+            SYM name=roomTag kind=var
+            match
+              ident
+                SYM name=roomIndex kind=var
+              narms=6
+              match_arm
+                pattern_lit
+                  value=0 prim=i32
+                int
+                  value=0 prim=i32
+              match_arm
+                pattern_lit
+                  value=1 prim=i32
+                int
+                  value=2 prim=i32
+              match_arm
+                pattern_lit
+                  value=2 prim=i32
+                int
+                  value=1 prim=i32
+              match_arm
+                pattern_lit
+                  value=3 prim=i32
+                int
+                  value=3 prim=i32
+              match_arm
+                pattern_lit
+                  value=4 prim=i32
+                int
+                  value=4 prim=i32
+              match_arm
+                pattern_wild
+                int
+                  value=5 prim=i32
+          expr_stmt
+            call
+              nargs=8
+              ident
+                SYM name=processRoom kind=fn
+              addr_of
+                ident
+                  SYM name=hp kind=var
+              ident
+                SYM name=maxHp kind=var
+              ident
+                SYM name=atk kind=var
+              addr_of
+                ident
+                  SYM name=potions kind=var
+              addr_of
+                ident
+                  SYM name=seed kind=var
+              addr_of
+                ident
+                  SYM name=state kind=var
+              addr_of
+                ident
+                  SYM name=gold kind=var
+              ident
+                SYM name=roomTag kind=var
+          if
+            binary
+              op===
+              ident
+                SYM name=state kind=var
+              int
+                value=0 prim=i32
+            block
+              nstmts=4
+              expr_stmt
+                call
+                  nargs=1
+                  ident
+                    SYM name=puts kind=fn
+                  string
+                    len=35 chars="前往下一层？(1=是 0=退出):"
+              let
+                is_mutable=true
+                SYM name=go kind=var
+                int
+                  value=0 prim=i32
+              expr_stmt
+                call
+                  nargs=2
+                  ident
+                    SYM name=scanf kind=fn
+                  string
+                    len=2 chars="%d"
+                  addr_of
+                    ident
+                      SYM name=go kind=var
+              if
+                binary
+                  op===
+                  ident
+                    SYM name=go kind=var
+                  int
+                    value=0 prim=i32
+                block
+                  nstmts=2
+                  expr_stmt
+                    assign
+                      ident
+                        SYM name=state kind=var
+                      int
+                        value=1 prim=i32
+                  expr_stmt
+                    int
+                      value=0 prim=i32
+                block
+                  nstmts=2
+                  expr_stmt
+                    assign
+                      ident
+                        SYM name=roomIndex kind=var
+                      binary
+                        op=+
+                        ident
+                          SYM name=roomIndex kind=var
+                        int
+                          value=1 prim=i32
+                  expr_stmt
+                    int
+                      value=0 prim=i32
+      if
+        binary
+          op===
+          ident
+            SYM name=state kind=var
+          int
+            value=1 prim=i32
+        block
+          nstmts=1
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=24 chars="你成功逃出地牢！"
+        block
+          nstmts=1
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=27 chars="你死在了地牢深处。"
+      expr_stmt
+        call
+          nargs=2
+          ident
+            SYM name=printf kind=fn
+          string
+            len=19 chars="最终金币：%d\n"
+          ident
+            SYM name=gold kind=var
+      expr_stmt
+        int
+          value=0 prim=i32

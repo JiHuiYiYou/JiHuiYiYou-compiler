@@ -1,0 +1,77 @@
+module
+  ndeccls=4
+  type_decl
+    SYM name=Point kind=type
+    struct_def
+      nfields=2
+      STRUCT_FIELD name=x
+        ident
+          SYM name=i32 kind=type
+      STRUCT_FIELD name=y
+        ident
+          SYM name=i32 kind=type
+  func_decl
+    SYM name=printf kind=fn
+    nparams=2 is_extern=true
+    PARAM name=fmt kind=var
+      unary
+        op=*
+        ident
+          SYM name=u8 kind=type
+    PARAM name=val kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+  func_decl
+    SYM name=make_point kind=fn
+    nparams=2 is_extern=false
+    PARAM name=x kind=var
+      ident
+        SYM name=i32 kind=type
+    PARAM name=y kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=Point kind=type
+    block
+      nstmts=1
+      expr_stmt
+        struct_lit
+          SYM name=Point kind=type
+          nfields=2
+          FIELD name=x
+            ident
+              SYM name=x kind=var
+          FIELD name=y
+            ident
+              SYM name=y kind=var
+  func_decl
+    SYM name=main_jhyy kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=2
+      let
+        is_mutable=false
+        SYM name=p kind=var
+        call
+          nargs=2
+          ident
+            SYM name=make_point kind=fn
+          int
+            value=7 prim=i32
+          int
+            value=8 prim=i32
+      expr_stmt
+        binary
+          op=+
+          field
+            ident
+              SYM name=p kind=var
+            field="x"
+          field
+            ident
+              SYM name=p kind=var
+            field="y"

@@ -1,0 +1,391 @@
+module
+  ndeccls=6
+  func_decl
+    SYM name=printf kind=fn
+    nparams=2 is_extern=true
+    PARAM name=fmt kind=var
+      unary
+        op=*
+        ident
+          SYM name=u8 kind=type
+    PARAM name=val kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+  func_decl
+    SYM name=cmp_d kind=fn
+    nparams=2 is_extern=false
+    PARAM name=a kind=var
+      ident
+        SYM name=f64 kind=type
+    PARAM name=b kind=var
+      ident
+        SYM name=f64 kind=type
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=8
+      let
+        is_mutable=true
+        SYM name=n kind=var
+        ident
+          SYM name=i32 kind=type
+        int
+          value=0 prim=i32
+      if
+        binary
+          op===
+          ident
+            SYM name=a kind=var
+          ident
+            SYM name=b kind=var
+        block
+          nstmts=1
+          expr_stmt
+            assign
+              ident
+                SYM name=n kind=var
+              binary
+                op=+
+                ident
+                  SYM name=n kind=var
+                int
+                  value=1 prim=i32
+      if
+        binary
+          op=!=
+          ident
+            SYM name=a kind=var
+          ident
+            SYM name=b kind=var
+        block
+          nstmts=1
+          expr_stmt
+            assign
+              ident
+                SYM name=n kind=var
+              binary
+                op=+
+                ident
+                  SYM name=n kind=var
+                int
+                  value=10 prim=i32
+      if
+        binary
+          op=<
+          ident
+            SYM name=a kind=var
+          ident
+            SYM name=b kind=var
+        block
+          nstmts=1
+          expr_stmt
+            assign
+              ident
+                SYM name=n kind=var
+              binary
+                op=+
+                ident
+                  SYM name=n kind=var
+                int
+                  value=100 prim=i32
+      if
+        binary
+          op=<=
+          ident
+            SYM name=a kind=var
+          ident
+            SYM name=b kind=var
+        block
+          nstmts=1
+          expr_stmt
+            assign
+              ident
+                SYM name=n kind=var
+              binary
+                op=+
+                ident
+                  SYM name=n kind=var
+                int
+                  value=1000 prim=i32
+      if
+        binary
+          op=>
+          ident
+            SYM name=b kind=var
+          ident
+            SYM name=a kind=var
+        block
+          nstmts=1
+          expr_stmt
+            assign
+              ident
+                SYM name=n kind=var
+              binary
+                op=+
+                ident
+                  SYM name=n kind=var
+                int
+                  value=10000 prim=i32
+      if
+        binary
+          op=>=
+          ident
+            SYM name=b kind=var
+          ident
+            SYM name=a kind=var
+        block
+          nstmts=1
+          expr_stmt
+            assign
+              ident
+                SYM name=n kind=var
+              binary
+                op=+
+                ident
+                  SYM name=n kind=var
+                int
+                  value=100000 prim=i32
+      return
+        ident
+          SYM name=n kind=var
+  func_decl
+    SYM name=cmp_s kind=fn
+    nparams=2 is_extern=false
+    PARAM name=a kind=var
+      ident
+        SYM name=f32 kind=type
+    PARAM name=b kind=var
+      ident
+        SYM name=f32 kind=type
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=6
+      let
+        is_mutable=true
+        SYM name=n kind=var
+        ident
+          SYM name=i32 kind=type
+        int
+          value=0 prim=i32
+      if
+        binary
+          op=<
+          ident
+            SYM name=a kind=var
+          ident
+            SYM name=b kind=var
+        block
+          nstmts=1
+          expr_stmt
+            assign
+              ident
+                SYM name=n kind=var
+              binary
+                op=+
+                ident
+                  SYM name=n kind=var
+                int
+                  value=1 prim=i32
+      if
+        binary
+          op=<=
+          ident
+            SYM name=a kind=var
+          ident
+            SYM name=b kind=var
+        block
+          nstmts=1
+          expr_stmt
+            assign
+              ident
+                SYM name=n kind=var
+              binary
+                op=+
+                ident
+                  SYM name=n kind=var
+                int
+                  value=2 prim=i32
+      if
+        binary
+          op=>
+          ident
+            SYM name=b kind=var
+          ident
+            SYM name=a kind=var
+        block
+          nstmts=1
+          expr_stmt
+            assign
+              ident
+                SYM name=n kind=var
+              binary
+                op=+
+                ident
+                  SYM name=n kind=var
+                int
+                  value=4 prim=i32
+      if
+        binary
+          op=>=
+          ident
+            SYM name=b kind=var
+          ident
+            SYM name=a kind=var
+        block
+          nstmts=1
+          expr_stmt
+            assign
+              ident
+                SYM name=n kind=var
+              binary
+                op=+
+                ident
+                  SYM name=n kind=var
+                int
+                  value=8 prim=i32
+      return
+        ident
+          SYM name=n kind=var
+  func_decl
+    SYM name=take_d kind=fn
+    nparams=1 is_extern=false
+    PARAM name=a kind=var
+      ident
+        SYM name=f64 kind=type
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=1
+      if
+        binary
+          op=>
+          ident
+            SYM name=a kind=var
+          float
+            value=1
+        block
+          nstmts=1
+          return
+            int
+              value=1 prim=i32
+        block
+          nstmts=1
+          return
+            int
+              value=0 prim=i32
+  func_decl
+    SYM name=take_s kind=fn
+    nparams=1 is_extern=false
+    PARAM name=a kind=var
+      ident
+        SYM name=f32 kind=type
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=1
+      if
+        binary
+          op=>
+          ident
+            SYM name=a kind=var
+          float
+            value=1
+        block
+          nstmts=1
+          return
+            int
+              value=1 prim=i32
+        block
+          nstmts=1
+          return
+            int
+              value=0 prim=i32
+  func_decl
+    SYM name=main_jhyy kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=7
+      let
+        is_mutable=false
+        SYM name=r_d kind=var
+        call
+          nargs=2
+          ident
+            SYM name=cmp_d kind=fn
+          float
+            value=1
+          float
+            value=2
+      let
+        is_mutable=false
+        SYM name=r_d2 kind=var
+        call
+          nargs=2
+          ident
+            SYM name=cmp_d kind=fn
+          float
+            value=3
+          float
+            value=2
+      let
+        is_mutable=false
+        SYM name=r_s kind=var
+        call
+          nargs=2
+          ident
+            SYM name=cmp_s kind=fn
+          float
+            value=1
+          float
+            value=2
+      let
+        is_mutable=false
+        SYM name=r_p kind=var
+        call
+          nargs=1
+          ident
+            SYM name=take_d kind=fn
+          float
+            value=2.5
+      let
+        is_mutable=false
+        SYM name=r_dem kind=var
+        call
+          nargs=1
+          ident
+            SYM name=take_s kind=fn
+          float
+            value=3.5
+      expr_stmt
+        call
+          nargs=2
+          ident
+            SYM name=printf kind=fn
+          string
+            len=29 chars="d=%d d2=%d s=%d p=%d dem=%d\n"
+          binary
+            op=+
+            binary
+              op=+
+              binary
+                op=+
+                binary
+                  op=+
+                  ident
+                    SYM name=r_d kind=var
+                  ident
+                    SYM name=r_d2 kind=var
+                ident
+                  SYM name=r_s kind=var
+              ident
+                SYM name=r_p kind=var
+            ident
+              SYM name=r_dem kind=var
+      return
+        int
+          value=42 prim=i32

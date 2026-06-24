@@ -1,0 +1,94 @@
+module
+  ndeccls=3
+  func_decl
+    SYM name=printf kind=fn
+    nparams=2 is_extern=true
+    PARAM name=fmt kind=var
+      unary
+        op=*
+        ident
+          SYM name=u8 kind=type
+    PARAM name=val kind=var
+      ident
+        SYM name=i32 kind=type
+    ident
+      SYM name=i32 kind=type
+  func_decl
+    SYM name=puts kind=fn
+    nparams=1 is_extern=true
+    PARAM name=s kind=var
+      unary
+        op=*
+        ident
+          SYM name=u8 kind=type
+    ident
+      SYM name=i32 kind=type
+  func_decl
+    SYM name=main_jhyy kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=5
+      let
+        is_mutable=false
+        SYM name=condition kind=var
+        int
+          value=1 prim=i32
+      if
+        binary
+          op=>
+          ident
+            SYM name=condition kind=var
+          int
+            value=0 prim=i32
+        block
+          nstmts=1
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=8 chars="positive"
+        block
+          nstmts=1
+          expr_stmt
+            call
+              nargs=1
+              ident
+                SYM name=puts kind=fn
+              string
+                len=12 chars="not positive"
+      let
+        is_mutable=false
+        SYM name=result kind=var
+        if
+          binary
+            op=>
+            ident
+              SYM name=condition kind=var
+            int
+              value=0 prim=i32
+          block
+            nstmts=1
+            expr_stmt
+              int
+                value=100 prim=i32
+          block
+            nstmts=1
+            expr_stmt
+              int
+                value=200 prim=i32
+      expr_stmt
+        call
+          nargs=2
+          ident
+            SYM name=printf kind=fn
+          string
+            len=13 chars="result = %d\n"
+          ident
+            SYM name=result kind=var
+      expr_stmt
+        int
+          value=0 prim=i32

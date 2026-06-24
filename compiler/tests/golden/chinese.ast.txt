@@ -1,0 +1,29 @@
+module
+  ndeccls=2
+  func_decl
+    SYM name=puts kind=fn
+    nparams=1 is_extern=true
+    PARAM name=s kind=var
+      unary
+        op=*
+        ident
+          SYM name=u8 kind=type
+    ident
+      SYM name=i32 kind=type
+  func_decl
+    SYM name=main_jhyy kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=2
+      expr_stmt
+        call
+          nargs=1
+          ident
+            SYM name=puts kind=fn
+          string
+            len=18 chars="你好，世界！"
+      expr_stmt
+        int
+          value=0 prim=i32

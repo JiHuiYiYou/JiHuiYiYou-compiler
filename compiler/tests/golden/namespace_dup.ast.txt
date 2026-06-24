@@ -1,0 +1,38 @@
+module
+  ndeccls=3
+  import_decl
+    SYM name=ns_dup_a kind=module
+  import_decl
+    SYM name=ns_dup_b kind=module
+  func_decl
+    SYM name=main_jhyy kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=3
+      let
+        is_mutable=false
+        SYM name=a kind=var
+        qualified_call
+          nargs=0
+          ident
+            SYM name=ns_dup_a kind=module
+          ident
+            SYM name=process kind=fn
+      let
+        is_mutable=false
+        SYM name=b kind=var
+        qualified_call
+          nargs=0
+          ident
+            SYM name=ns_dup_b kind=module
+          ident
+            SYM name=process kind=fn
+      expr_stmt
+        binary
+          op=+
+          ident
+            SYM name=a kind=var
+          ident
+            SYM name=b kind=var

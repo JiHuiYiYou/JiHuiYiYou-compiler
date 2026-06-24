@@ -1,0 +1,12 @@
+module
+  ndeccls=1
+  func_decl
+    SYM name=process kind=fn
+    nparams=0 is_extern=false
+    ident
+      SYM name=i32 kind=type
+    block
+      nstmts=1
+      expr_stmt
+        int
+          value=50 prim=i32
