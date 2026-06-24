@@ -183,7 +183,7 @@ result = await session.call_tool('jhyy_run', {'file': 'compiler/tests/examples/h
 | 测试 | `compiler/tests/examples/*.jhyy` | +10 个新测试 (含 868 行 big_test) |
 | | `compiler/build/bin/regress.py` | Python 回归脚本 |
 | 文档 | `docs/abis/jhyy-abi-v1.0.0.md` | 锁定 ABI |
-| | `docs/logs/changelog-v0.5.0.md` | 本文件 |
+| | `docs/logs/v0/changelog-v0.5.0.md` | 本文件 |
 | | `CLAUDE.md` | v0.5.0 状态表更新 |
 | MCP | `mcp-jhyy/server.py` | FastMCP 入口 (7 tools + 4 resources) |
 | | `mcp-jhyy/jhyy_runner.py` | subprocess 封装 |

@@ -70,9 +70,9 @@ python compiler/build/bin/regress.py
 | L3 | `docs/plans/v1/v1.0.0任务清单 + 概要设计.md` | jhyy 自举 sprint（v1.0.0 phase-2） |
 | L4 | `docs/plans/v1/v1.0.0详细实现方案.md` | 同上 |
 
-最近完成的 sprint: **v0.6.0**（v0.6.2 / v0.6.3 已发，patch）→ `docs/plans/v0/v0.6.0任务清单 + 概要设计.md` / `docs/plans/v0/v0.6.0详细实现方案.md` / `docs/logs/changelog-v0.6.3.md`
+最近完成的 sprint: **v0.6.0**（v0.6.2 / v0.6.3 已发，patch）→ `docs/plans/v0/v0.6.0任务清单 + 概要设计.md` / `docs/plans/v0/v0.6.0详细实现方案.md` / `docs/logs/v0/changelog-v0.6.3.md`
 当前 sprint: **v1.0.0** phase-2 自举启动（粗粒度 5 sprint）→ `docs/plans/v1/v1.0.0任务清单 + 概要设计.md` / `docs/plans/v1/v1.0.0详细实现方案.md`
-历史: changelog 见 `docs/logs/changelog-v0.X.Y.md`；早期 sprint（命名 `sprint-1*.md`）同目录。
+历史: changelog 见 `docs/logs/v0/changelog-v0.X.Y.md`；早期 sprint（命名 `sprint-1*.md`）同目录。
 
 ### 项目内部（`docs/internal/`）
 

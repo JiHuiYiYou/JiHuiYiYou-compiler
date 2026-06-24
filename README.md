@@ -6,7 +6,7 @@
 
 **Statically typed. Expression-oriented. Compiled to native via QBE.**
 
-[![Version](https://img.shields.io/badge/version-v0.5.1-blue)](docs/logs/changelog-v0.5.0.md)
+[![Version](https://img.shields.io/badge/version-v0.5.1-blue)](docs/logs/v0/changelog-v0.5.0.md)
 [![Phase](https://img.shields.io/badge/phase-1%20(C%20host)-yellow)](#路线图)
 [![Backend](https://img.shields.io/badge/backend-QBE-orange)](#)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#)
@@ -114,7 +114,7 @@ python compiler/build/bin/regress.py
 | **FFI** | `extern fn` 调用 C (printf、文件 I/O、多参数) |
 | **内存** | 运行时 Arena 分配器 |
 
-完整变更历史见 [changelog-v0.5.0](docs/logs/changelog-v0.5.0.md)。
+完整变更历史见 [changelog-v0.5.0](docs/logs/v0/changelog-v0.5.0.md)。
 
 ## 命令行
 
@@ -206,13 +206,13 @@ Copy-Item vscode-ext $env:USERPROFILE\.vscode\extensions\jhyy-lang -Recurse
 
 | 版本 | 文档 |
 |------|------|
-| **v0.5.0 (最新)** | [`docs/logs/changelog-v0.5.0.md`](docs/logs/changelog-v0.5.0.md) |
-| v0.4.0 | [`docs/logs/changelog-v0.4.0.md`](docs/logs/changelog-v0.4.0.md) |
-| v0.3.0 | [`docs/logs/changelog-v0.3.0.md`](docs/logs/changelog-v0.3.0.md) |
-| v0.2.1 | [`docs/logs/changelog-v0.2.1.md`](docs/logs/changelog-v0.2.1.md) |
-| v0.0.1 | [`docs/logs/changelog-v0.0.1.md`](docs/logs/changelog-v0.0.1.md) |
+| **v0.5.0 (最新)** | [`docs/logs/v0/changelog-v0.5.0.md`](docs/logs/v0/changelog-v0.5.0.md) |
+| v0.4.0 | [`docs/logs/v0/changelog-v0.4.0.md`](docs/logs/v0/changelog-v0.4.0.md) |
+| v0.3.0 | [`docs/logs/v0/changelog-v0.3.0.md`](docs/logs/v0/changelog-v0.3.0.md) |
+| v0.2.1 | [`docs/logs/v0/changelog-v0.2.1.md`](docs/logs/v0/changelog-v0.2.1.md) |
+| v0.0.1 | [`docs/logs/v0/changelog-v0.0.1.md`](docs/logs/v0/changelog-v0.0.1.md) |
 
-Sprint 实施日志: [`docs/logs/sprint-*.md`](docs/logs/) (sprint-1a ~ 1g)
+Sprint 实施日志: [`docs/logs/v0/sprint-*.md`](docs/logs/v0/) (sprint-1a ~ 1g)
 
 ### 工具 & 集成
 
