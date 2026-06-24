@@ -190,6 +190,34 @@ static IRVal cg_match_pattern(CGContext *cg, IRVal matched, Node *pattern) {
 
 /* ── codegen for expressions ── */
 
+/* Insert QBE conversion if arg's qbe_type != param's qbe_type.
+   v1.0.0: needed so f64 literal → f32 param emits truncd (otherwise
+   the caller passes 8 bytes via movsd and the callee reads only 4
+   via ucomiss, silently corrupting f32 args). */
+static IRVal cg_convert_arg(CGContext *cg, IRVal arg, Type *src_t, Type *dst_t) {
+    if (!src_t || !dst_t) return arg;
+    if (src_t->kind != KIND_PRIMITIVE || dst_t->kind != KIND_PRIMITIVE) return arg;
+    char src_qt = qbe_type_of(src_t);
+    char dst_qt = qbe_type_of(dst_t);
+    if (src_qt == dst_qt && src_t->prim == dst_t->prim) return arg;
+    const char *conv = NULL;
+    if (src_qt == 'd' && (dst_qt == 'w' || dst_qt == 'l'))
+        conv = (dst_qt == 'l') ? "dtosl" : "dtosi";
+    else if (src_qt == 's' && (dst_qt == 'w' || dst_qt == 'l'))
+        conv = (dst_qt == 'l') ? "stosl" : "stosi";
+    else if ((src_qt == 'w' || src_qt == 'l') && dst_qt == 'd')
+        conv = (src_qt == 'l') ? "sltof" : "swtof";
+    else if ((src_qt == 'w' || src_qt == 'l') && dst_qt == 's')
+        conv = (src_qt == 'l') ? "ultof" : "uwtof";
+    else if (src_qt == 's' && dst_qt == 'd') conv = "exts";
+    else if (src_qt == 'd' && dst_qt == 's') conv = "truncd";
+    if (!conv) return arg;
+    IRVal result = ir_new_tmp(cg->ir, dst_qt);
+    ir_emit(cg->ir, "    %%t%d =%c %s %%t%d\n",
+            result.id, dst_qt, conv, arg.id);
+    return result;
+}
+
 static IRVal cg_expr(CGContext *cg, Node *n) {
     if (!n) { IRVal v = {0}; return v; }
 
@@ -375,32 +403,41 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
 
         /* comparisons: type-dependent width + signedness */
         case TOKEN_EQEQ:
-            op = (op_qt == 'l') ? "ceql" : "ceqw"; break;
+            if (op_qt == 'l') op = "ceql";
+            else if (op_qt == 'd') op = "ceqd";  /* v1.0.0 fix #9: f64 ceqw → ceqd */
+            else if (op_qt == 's') op = "ceqs";  /* f32 ceqw → ceqs */
+            else op = "ceqw";
+            break;
         case TOKEN_BANGEQ:
-            op = (op_qt == 'l') ? "cnel" : "cnew"; break;
+            if (op_qt == 'l') op = "cnel";
+            else if (op_qt == 'd') op = "cned";
+            else if (op_qt == 's') op = "cnes";
+            else op = "cnew";
+            break;
+        /* float compares have no signed/unsigned (cltd/cled/cgtd/cged, clts/cles/cgts/cges) */
         case TOKEN_LT:
-            if (op_qt == 'l')
-                op = is_unsigned ? "cultl" : "csltl";
-            else
-                op = is_unsigned ? "cultw" : "csltw";
+            if (op_qt == 'l') op = is_unsigned ? "cultl" : "csltl";
+            else if (op_qt == 'd') op = "cltd";
+            else if (op_qt == 's') op = "clts";
+            else op = is_unsigned ? "cultw" : "csltw";
             break;
         case TOKEN_LTEQ:
-            if (op_qt == 'l')
-                op = is_unsigned ? "culel" : "cslel";
-            else
-                op = is_unsigned ? "culew" : "cslew";
+            if (op_qt == 'l') op = is_unsigned ? "culel" : "cslel";
+            else if (op_qt == 'd') op = "cled";
+            else if (op_qt == 's') op = "cles";
+            else op = is_unsigned ? "culew" : "cslew";
             break;
         case TOKEN_GT:
-            if (op_qt == 'l')
-                op = is_unsigned ? "cugtl" : "csgtl";
-            else
-                op = is_unsigned ? "cugtw" : "csgtw";
+            if (op_qt == 'l') op = is_unsigned ? "cugtl" : "csgtl";
+            else if (op_qt == 'd') op = "cgtd";
+            else if (op_qt == 's') op = "cgts";
+            else op = is_unsigned ? "cugtw" : "csgtw";
             break;
         case TOKEN_GTEQ:
-            if (op_qt == 'l')
-                op = is_unsigned ? "cugel" : "csgel";
-            else
-                op = is_unsigned ? "cugew" : "csgew";
+            if (op_qt == 'l') op = is_unsigned ? "cugel" : "csgel";
+            else if (op_qt == 'd') op = "cged";
+            else if (op_qt == 's') op = "cges";
+            else op = is_unsigned ? "cugew" : "csgew";
             break;
 
         case TOKEN_AMP:    op = "and"; break;
@@ -409,6 +446,11 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         case TOKEN_LTLT:   op = "shl"; break;
         case TOKEN_GTGT:   op = "shr"; break;
         default: op = "add"; break;
+        }
+        /* v1.0.0 fix #9: coerce right to left's qbe_type for float compares
+           (e.g. f32 variable > 1.0f64 literal needs exts/truncd first). */
+        if (d->op >= TOKEN_EQEQ && d->op <= TOKEN_GTEQ && left.qbe_type != right.qbe_type) {
+            right = cg_convert_arg(cg, right, d->right->type, d->left->type);
         }
         ir_emit_binary(cg->ir, result, op, left, right);
         return result;
@@ -447,6 +489,11 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             args = arena_alloc(cg->ir->arena, (d->nargs + extra) * sizeof(IRVal));
         /* sret: hidden return slot pointer is first argument */
         if (is_sret) args[0] = ret_slot;
+        /* parameter types (for v1.0.0: implicit f64→f32 conversion at call site) */
+        Type **param_ts = (fn_sym && fn_sym->type && fn_sym->type->kind == KIND_FUNC)
+                         ? fn_sym->type->func.params : NULL;
+        size_t nparams = (fn_sym && fn_sym->type && fn_sym->type->kind == KIND_FUNC)
+                         ? fn_sym->type->func.nparams : 0;
         for (size_t i = 0; i < d->nargs; i++) {
             IRVal arg = cg_expr(cg, d->args[i]);
             Type *at = d->args[i]->type;
@@ -459,6 +506,10 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
                 cg_copy_struct(cg, at, copy_slot, arg);
                 args[extra + i] = copy_slot;
             } else {
+                /* implicit conversion (e.g. f64 literal → f32 param via truncd) */
+                if (param_ts && i < nparams && param_ts[i]) {
+                    arg = cg_convert_arg(cg, arg, at, param_ts[i]);
+                }
                 args[extra + i] = arg;
             }
         }
@@ -499,6 +550,11 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         if (d->nargs + extra > 0)
             args = arena_alloc(cg->ir->arena, (d->nargs + extra) * sizeof(IRVal));
         if (is_sret) args[0] = ret_slot;
+        /* parameter types (for v1.0.0: implicit f64→f32 conversion at call site) */
+        Type **param_ts = (fn_sym && fn_sym->type && fn_sym->type->kind == KIND_FUNC)
+                         ? fn_sym->type->func.params : NULL;
+        size_t nparams = (fn_sym && fn_sym->type && fn_sym->type->kind == KIND_FUNC)
+                         ? fn_sym->type->func.nparams : 0;
         for (size_t i = 0; i < d->nargs; i++) {
             IRVal arg = cg_expr(cg, d->args[i]);
             Type *at = d->args[i]->type;
@@ -510,6 +566,10 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
                 cg_copy_struct(cg, at, copy_slot, arg);
                 args[extra + i] = copy_slot;
             } else {
+                /* implicit conversion (e.g. f64 literal → f32 param via truncd) */
+                if (param_ts && i < nparams && param_ts[i]) {
+                    arg = cg_convert_arg(cg, arg, at, param_ts[i]);
+                }
                 args[extra + i] = arg;
             }
         }

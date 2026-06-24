@@ -1,0 +1,49 @@
+// float_cmp.jhyy — 回归测试 f64 / f32 比较 + 跨宽度的隐式转换（bug #9
+// + v1.0.0 call-site convert）。退出码：42
+// 用 fn 参数（运行时值）让 QBE 不能常量折叠 → 真正 emit ceqd/cltd/cgtd/cged。
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn cmp_d(a: f64, b: f64) -> i32 {
+    let mut n: i32 = 0;
+    if a == b { n = n + 1; }
+    if a != b { n = n + 10; }
+    if a <  b { n = n + 100; }
+    if a <= b { n = n + 1000; }
+    if b >  a { n = n + 10000; }
+    if b >= a { n = n + 100000; }
+    return n;
+}
+
+fn cmp_s(a: f32, b: f32) -> i32 {
+    let mut n: i32 = 0;
+    if a <  b { n = n + 1; }
+    if a <= b { n = n + 2; }
+    if b >  a { n = n + 4; }
+    if b >= a { n = n + 8; }
+    return n;
+}
+
+/* f32 → f64 隐式提升在 call site：直接传 f32 字面量给 f64 参数 */
+fn take_d(a: f64) -> i32 {
+    if a > 1.0 { return 1; } else { return 0; }
+}
+
+/* f64 → f32 隐式截断在 call site：直接传 f64 字面量给 f32 参数 */
+fn take_s(a: f32) -> i32 {
+    if a > 1.0 { return 1; } else { return 0; }
+}
+
+fn main_jhyy() -> i32 {
+    let r_d  = cmp_d(1.0, 2.0);          /* 111110 */
+    let r_d2 = cmp_d(3.0, 2.0);          /* 10 */
+    let r_s  = cmp_s(1.0, 2.0);          /* 15 */
+
+    /* 2.5f32 → 2.5f64 via call-site exts → take_d 返回 1（>1.0） */
+    let r_p  = take_d(2.5);
+    /* 3.5f64 → 3.5f32 via call-site truncd → take_s 返回 1（>1.0） */
+    let r_dem = take_s(3.5);
+
+    /* 总和：111110 + 10 + 15 + 1 + 1 = 111137 */
+    printf("d=%d d2=%d s=%d p=%d dem=%d\n", r_d + r_d2 + r_s + r_p + r_dem);
+    return 42;
+}

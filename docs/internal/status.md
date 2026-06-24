@@ -2,11 +2,11 @@
 
 > 语言特性 / 已知限制 / 历史修复。版本进展详见 `docs/logs/`。
 
-## 当前版本: v0.6.0
+## 当前版本: v0.6.3
 
-> Phase 1 — C 语言宿主编译器。v1.0.0 启动完整自举。
+> Phase 1 — C 语言宿主编译器。v1.0.0 启动完整自举。v0.6.3 是 phase-2 自举前最后一期 C 端 patch（修 sprint 2 commit 3a 实测沉淀的 #9 f64/f32 比较 + call-site f64↔f32 隐式转换；#8 维持 `jh_f64_store` 桥）。
 
-回归基线：**43/46 passed, 0 failed, 3 skipped**（3 skipped 是库文件，无 `main_jhyy`）。
+回归基线：**44/47 passed, 0 failed, 3 skipped**（3 skipped 是库文件，无 `main_jhyy`）。
 
 ---
 
