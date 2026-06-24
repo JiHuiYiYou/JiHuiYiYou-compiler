@@ -1,9 +1,9 @@
 // ast.jhyy — JHYY 翻译自 compiler/src/ast.c
-// v1.0.0 sprint 2 commit 3c, 2026-06-24
+// v1.0.0 sprint 2 commit 3d, 2026-06-24
 //
 // 翻译要点（v0.6.2 patch 后实测）：
-//   - 49 NodeKind × ctor + accessor = ~98 fns，commit 3a+3b+3c 完成 48 个
-//     （3a: 22 literals+exprs / 3b: 18 stmts+match+patterns / 3c: 8 decls + struct/enum literal）
+//   - 49 NodeKind × ctor + accessor = ~98 fns，commit 3a-3d 完成全部 49 个
+//     （3a: 22 literals+exprs / 3b: 18 stmts+match+patterns / 3c: 8 decls + struct/enum literal / 3d: 1 module）
 //   - 内存模式：C 版 Node header + variant struct 在 arena 紧邻
 //     → jhyy: arena_alloc(N + M) 一次性，返回 buf；cast 前 40 字节为 *Node，
 //     cast 字节 [40, 40+M) 为 *NodeXxx
@@ -20,11 +20,13 @@
 //     → 跟 variant struct 一样独立 arena_alloc
 //   - **C TokenKind 来自 lexer.h**：jhyy 用 i32 暂代，sprint 3 lexer.jhyy 后给常量
 //
-// 后续 commit 拆分：
+// commit 拆分：
 //   3a（已 commit）：literals + exprs（22 NodeKinds）
 //   3b（已 commit）：stmts + match + patterns（18 NodeKinds）
-//   3c（本 commit）：decls + struct/enum literal（8 NodeKinds）
-//   3d：type_def + module（1 NodeKind）
+//   3c（已 commit）：decls + struct/enum literal（8 NodeKinds）
+//   3d（本 commit）：module（1 NodeKind）
+//
+// **ast.jhyy 翻译完成** — sprint 2 全部 4 个 ast.jhyy commit 已 ship。
 
 import arena;
 import util;
@@ -112,7 +114,8 @@ fn NODE_FUNC_DECL()       -> i32 { return 44 as i32; }
 fn NODE_TYPE_DECL()       -> i32 { return 45 as i32; }
 fn NODE_EXTERN_DECL()     -> i32 { return 46 as i32; }
 fn NODE_IMPORT_DECL()     -> i32 { return 47 as i32; }
-// 3d 之后补：48 (module)
+// ── 3d: module（48）──
+fn NODE_MODULE()         -> i32 { return 48 as i32; }
 
 fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_INT()            { return "INT" as *u8; }
@@ -163,6 +166,7 @@ fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_TYPE_DECL()      { return "TYPE_DECL" as *u8; }
     if kind == NODE_EXTERN_DECL()    { return "EXTERN_DECL" as *u8; }
     if kind == NODE_IMPORT_DECL()    { return "IMPORT_DECL" as *u8; }
+    if kind == NODE_MODULE()        { return "MODULE" as *u8; }
     return "?" as *u8;
 }
 
@@ -541,6 +545,13 @@ type NodeImportDecl = struct {
     sym: *u8,         // *Sym
 }
 fn NODE_IMPORT_DECL_SIZE() -> i64 { return 8 as i64; }
+
+// decls(*u8 8) + ndeccls(i64 8) = 16
+type NodeModule = struct {
+    decls:  *u8,      // **Node 数组（顶层 decls）
+    ndeccls: i64,
+}
+fn NODE_MODULE_SIZE() -> i64 { return 16 as i64; }
 
 // ════════════════════════════════════════════════════
 // 通用 helper：初始化 Node header + 设置 variant 数据
@@ -1271,4 +1282,22 @@ fn ast_new_import_decl(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32
 
 fn node_import_decl_data(n: *Node) -> *NodeImportDecl {
     return (n as i64 + NODE_SIZE()) as *NodeImportDecl;
+}
+
+// ════════════════════════════════════════════════════
+// Module 构造函数 + 访问器（3d）
+// ════════════════════════════════════════════════════
+
+fn ast_new_module(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                  decls: *u8, ndeccls: i64) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_MODULE_SIZE());
+    let n = ast_init_node(buf, NODE_MODULE(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeModule;
+    (*d).decls = decls;
+    (*d).ndeccls = ndeccls;
+    return n;
+}
+
+fn node_module_data(n: *Node) -> *NodeModule {
+    return (n as i64 + NODE_SIZE()) as *NodeModule;
 }

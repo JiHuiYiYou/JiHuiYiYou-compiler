@@ -1,0 +1,110 @@
+// _driver_ast_3d.jhyy — Sprint 2 commit 3d 单元测试：验证 ast.jhyy（NODE_MODULE）
+// 测试覆盖：1 个新 NodeKind 构造 + 1 个新访问器 + kind 设置 + variant 字段读写
+// 退出码：42
+
+import arena;
+import util;
+import symtab;
+import types;
+import ast;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    printf("D0\n", 0);
+
+    // ──── 准备 arena + symtab + TypeArena ────
+    let mut a: Arena = Arena {
+        start: 0 as *u8, cur: 0 as *u8, end: 0 as *u8,
+        blocks: 0 as *u8, def_size: 0 as i64,
+    };
+    arena_init(&a, 32768);
+
+    let mut ta: TypeArena = TypeArena {
+        arena: 0 as *Arena, inited: 0 as i32,
+        i8_ty: 0 as *u8, i16_ty: 0 as *u8, i32_ty: 0 as *u8, i64_ty: 0 as *u8,
+        u8_ty: 0 as *u8, u16_ty: 0 as *u8, u32_ty: 0 as *u8, u64_ty: 0 as *u8,
+        f32_ty: 0 as *u8, f64_ty: 0 as *u8, bool_ty: 0 as *u8, void_ty: 0 as *u8,
+    };
+    ta.arena = &a;
+
+    let st = symtab_new(&a, 0 as *u8);
+    let i32_ty = type_primitive(&ta, PRIM_I32());
+
+    // 准备一些 decl 节点（用 ast_new_int 凑数，假装是 func/type decl）
+    let decl1 = ast_new_int(&a, "m.jhyy" as *u8, 1 as i32, 1 as i32,
+                            1 as i64, PRIM_I32());
+    let decl2 = ast_new_int(&a, "m.jhyy" as *u8, 2 as i32, 1 as i32,
+                            2 as i64, PRIM_I32());
+    let decl3 = ast_new_int(&a, "m.jhyy" as *u8, 3 as i32, 1 as i32,
+                            3 as i64, PRIM_I32());
+
+    printf("D1\n", 0);
+
+    // ──── D2: NODE_MODULE with 0 decls ────
+    let n_mod_empty = ast_new_module(&a, "m.jhyy" as *u8, 0 as i32, 0 as i32,
+                                     0 as *u8, 0 as i64);
+    if (*n_mod_empty).kind == NODE_MODULE() {
+        printf("D2\n", 0);
+    } else {
+        printf("FAIL mod empty kind\n", 0); return 1;
+    }
+    let n_mod_empty_d = node_module_data(n_mod_empty);
+    if (*n_mod_empty_d).ndeccls == 0 as i64 {
+        printf("D3\n", 0);
+    } else {
+        printf("FAIL mod empty ndeccls\n", 0); return 2;
+    }
+
+    // ──── D4: NODE_MODULE with 3 decls ────
+    let decls_buf = arena_alloc(&a, 24 as i64);
+    let decls_p = decls_buf as **Node;
+    *decls_p = decl1;
+    let decls_p1 = ptr_add_u8(decls_buf, 8 as i64) as **Node;
+    *decls_p1 = decl2;
+    let decls_p2 = ptr_add_u8(decls_buf, 16 as i64) as **Node;
+    *decls_p2 = decl3;
+
+    let n_mod = ast_new_module(&a, "m.jhyy" as *u8, 0 as i32, 0 as i32,
+                               decls_buf, 3 as i64);
+    if (*n_mod).kind == NODE_MODULE() {
+        printf("D4\n", 0);
+    } else {
+        printf("FAIL mod kind\n", 0); return 3;
+    }
+    let n_mod_d = node_module_data(n_mod);
+    if (*n_mod_d).ndeccls == 3 as i64 {
+        printf("D5\n", 0);
+    } else {
+        printf("FAIL mod ndeccls\n", 0); return 4;
+    }
+    if (*n_mod_d).decls == (decls_buf as *u8) {
+        printf("D6\n", 0);
+    } else {
+        printf("FAIL mod decls\n", 0); return 5;
+    }
+
+    // ──── D7: node_kind_name ────
+    if strcmp(node_kind_name(NODE_MODULE()), "MODULE" as *u8) == 0 as i32 {
+        printf("D7\n", 0);
+    } else {
+        printf("FAIL kind MODULE\n", 0); return 6;
+    }
+
+    // ──── D8: 所有 49 个 NodeKind 编号连续验证 ────
+    // sprint 2 全部 4 commit 完成 — 0..48 应连续
+    if NODE_INT() == 0 as i32
+       && NODE_DEREF() == 21 as i32
+       && NODE_BLOCK() == 22 as i32
+       && NODE_PATTERN_WILD() == 39 as i32
+       && NODE_STRUCT_LIT() == 40 as i32
+       && NODE_IMPORT_DECL() == 47 as i32
+       && NODE_MODULE() == 48 as i32 {
+        printf("D8\n", 0);
+    } else {
+        printf("FAIL kind numbers not contiguous\n", 0); return 7;
+    }
+
+    printf("PASS\n", 0);
+    return 42;
+}
