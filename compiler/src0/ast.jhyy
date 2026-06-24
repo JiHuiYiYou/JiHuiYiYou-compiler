@@ -1,9 +1,9 @@
 // ast.jhyy — JHYY 翻译自 compiler/src/ast.c
-// v1.0.0 sprint 2 commit 3b, 2026-06-24
+// v1.0.0 sprint 2 commit 3c, 2026-06-24
 //
 // 翻译要点（v0.6.2 patch 后实测）：
-//   - 49 NodeKind × ctor + accessor = ~98 fns，commit 3a+3b 完成 40 个
-//     （3a: 22 literals+exprs / 3b: 18 stmts+match+patterns）
+//   - 49 NodeKind × ctor + accessor = ~98 fns，commit 3a+3b+3c 完成 48 个
+//     （3a: 22 literals+exprs / 3b: 18 stmts+match+patterns / 3c: 8 decls + struct/enum literal）
 //   - 内存模式：C 版 Node header + variant struct 在 arena 紧邻
 //     → jhyy: arena_alloc(N + M) 一次性，返回 buf；cast 前 40 字节为 *Node，
 //     cast 字节 [40, 40+M) 为 *NodeXxx
@@ -16,14 +16,15 @@
 //
 // 已知差异（vs C 版）：
 //   - **C 用 Node 后紧邻 variant struct**：jhyy 走 single arena_alloc(N+M) 一次性
-//   - **C NodeFieldInit 是独立 struct**（name + value）：commit 3c 才需要
+//   - **C 4 个 sub-struct**：NodeFieldInit / NodeFuncDeclParam / StructFieldDecl / EnumVariantDecl
+//     → 跟 variant struct 一样独立 arena_alloc
 //   - **C TokenKind 来自 lexer.h**：jhyy 用 i32 暂代，sprint 3 lexer.jhyy 后给常量
 //
 // 后续 commit 拆分：
 //   3a（已 commit）：literals + exprs（22 NodeKinds）
-//   3b（本 commit）：stmts + match + patterns（18 NodeKinds）
-//   3c：decls + struct/enum literal（~8 NodeKinds）
-//   3d：type_def + module（~2 NodeKinds）
+//   3b（已 commit）：stmts + match + patterns（18 NodeKinds）
+//   3c（本 commit）：decls + struct/enum literal（8 NodeKinds）
+//   3d：type_def + module（1 NodeKind）
 
 import arena;
 import util;
@@ -102,7 +103,15 @@ fn NODE_PATTERN_ENUM()    -> i32 { return 36 as i32; }
 fn NODE_PATTERN_RANGE()   -> i32 { return 37 as i32; }
 fn NODE_PATTERN_OR()      -> i32 { return 38 as i32; }
 fn NODE_PATTERN_WILD()    -> i32 { return 39 as i32; }
-// 3c 之后补：40-47 (slit/evariant/sdef/edef/funcdecl/typedecl/externdecl/importdecl)
+// ── 3c: struct/enum literal + decls（40-47）──
+fn NODE_STRUCT_LIT()      -> i32 { return 40 as i32; }
+fn NODE_ENUM_VARIANT()    -> i32 { return 41 as i32; }
+fn NODE_STRUCT_DEF()      -> i32 { return 42 as i32; }
+fn NODE_ENUM_DEF()        -> i32 { return 43 as i32; }
+fn NODE_FUNC_DECL()       -> i32 { return 44 as i32; }
+fn NODE_TYPE_DECL()       -> i32 { return 45 as i32; }
+fn NODE_EXTERN_DECL()     -> i32 { return 46 as i32; }
+fn NODE_IMPORT_DECL()     -> i32 { return 47 as i32; }
 // 3d 之后补：48 (module)
 
 fn node_kind_name(kind: i32) -> *u8 {
@@ -146,6 +155,14 @@ fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_PATTERN_RANGE()  { return "PATTERN_RANGE" as *u8; }
     if kind == NODE_PATTERN_OR()     { return "PATTERN_OR" as *u8; }
     if kind == NODE_PATTERN_WILD()   { return "PATTERN_WILD" as *u8; }
+    if kind == NODE_STRUCT_LIT()     { return "STRUCT_LIT" as *u8; }
+    if kind == NODE_ENUM_VARIANT()   { return "ENUM_VARIANT" as *u8; }
+    if kind == NODE_STRUCT_DEF()     { return "STRUCT_DEF" as *u8; }
+    if kind == NODE_ENUM_DEF()       { return "ENUM_DEF" as *u8; }
+    if kind == NODE_FUNC_DECL()      { return "FUNC_DECL" as *u8; }
+    if kind == NODE_TYPE_DECL()      { return "TYPE_DECL" as *u8; }
+    if kind == NODE_EXTERN_DECL()    { return "EXTERN_DECL" as *u8; }
+    if kind == NODE_IMPORT_DECL()    { return "IMPORT_DECL" as *u8; }
     return "?" as *u8;
 }
 
@@ -426,6 +443,104 @@ fn NODE_PATTERN_OR_SIZE() -> i64 { return 16 as i64; }
 
 // NODE_PATTERN_WILD：无 variant data
 fn NODE_PATTERN_WILD_SIZE() -> i64 { return 0 as i64; }
+
+// ─── struct/enum literal + decls（3c）───
+
+// ── Sub-structs（独立分配，跟 variant struct 一样模式）───
+
+// NodeFieldInit: name(*u8 8) + value(*u8 8) = 16
+//   用于 NODE_STRUCT_LIT.fields 数组（结构体字面量字段初始化）
+type NodeFieldInit = struct {
+    name:  *u8,       // const char *name
+    value: *u8,       // *Node
+}
+fn NODE_FIELD_INIT_SIZE() -> i64 { return 16 as i64; }
+
+// NodeFuncDeclParam: sym(*u8 8) + type_annot(*u8 8) = 16
+//   用于 NODE_FUNC_DECL.params 数组（函数参数声明）
+type NodeFuncDeclParam = struct {
+    sym:        *u8,  // *Sym
+    type_annot: *u8,  // *Node（可空）
+}
+fn NODE_FUNC_DECL_PARAM_SIZE() -> i64 { return 16 as i64; }
+
+// StructFieldDecl: name(*u8 8) + type_annot(*u8 8) = 16
+//   用于 NODE_STRUCT_DEF.fields 数组（结构体类型定义字段声明）
+type StructFieldDecl = struct {
+    name:       *u8,  // const char *name
+    type_annot: *u8,  // *Node
+}
+fn STRUCT_FIELD_DECL_SIZE() -> i64 { return 16 as i64; }
+
+// EnumVariantDecl: name(*u8 8) + payload_type(*u8 8) = 16
+//   用于 NODE_ENUM_DEF.variants 数组（枚举类型定义变体声明）
+type EnumVariantDecl = struct {
+    name:         *u8,  // const char *name
+    payload_type: *u8,  // *Node（可空）
+}
+fn ENUM_VARIANT_DECL_SIZE() -> i64 { return 16 as i64; }
+
+// ── Variant structs ───
+
+// type_sym(*u8 8) + fields(*u8 8) + nfields(i64 8) = 24
+type NodeStructLit = struct {
+    type_sym: *u8,    // *Sym
+    fields:   *u8,    // *NodeFieldInit 数组
+    nfields:  i64,
+}
+fn NODE_STRUCT_LIT_SIZE() -> i64 { return 24 as i64; }
+
+// type_sym(*u8 8) + variant_sym(*u8 8) + payload(*u8 8) = 24
+type NodeEnumVariant = struct {
+    type_sym:    *u8, // *Sym
+    variant_sym: *u8, // *Sym
+    payload:     *u8, // *Node（nullary 变体时 NULL）
+}
+fn NODE_ENUM_VARIANT_SIZE() -> i64 { return 24 as i64; }
+
+// fields(*u8 8) + nfields(i64 8) = 16
+type NodeStructDef = struct {
+    fields:  *u8,     // *StructFieldDecl 数组
+    nfields: i64,
+}
+fn NODE_STRUCT_DEF_SIZE() -> i64 { return 16 as i64; }
+
+// variants(*u8 8) + nvariants(i64 8) = 16
+type NodeEnumDef = struct {
+    variants:  *u8,   // *EnumVariantDecl 数组
+    nvariants: i64,
+}
+fn NODE_ENUM_DEF_SIZE() -> i64 { return 16 as i64; }
+
+// sym(*u8 8) + params(*u8 8) + nparams(i64 8) + ret_type(*u8 8) + body(*u8 8) + is_extern(i32+pad) = 48
+type NodeFuncDecl = struct {
+    sym:      *u8,    // *Sym
+    params:   *u8,    // *NodeFuncDeclParam 数组
+    nparams:  i64,
+    ret_type: *u8,    // *Node（可空）
+    body:     *u8,    // *Node（extern 时 NULL）
+    is_extern: i32,   // bool
+}
+fn NODE_FUNC_DECL_SIZE() -> i64 { return 48 as i64; }
+
+// sym(*u8 8) + body(*u8 8) = 16
+type NodeTypeDecl = struct {
+    sym:  *u8,        // *Sym
+    body: *u8,        // *Node（struct/enum 定义）
+}
+fn NODE_TYPE_DECL_SIZE() -> i64 { return 16 as i64; }
+
+// sym(*u8 8) = 8
+type NodeExternDecl = struct {
+    sym: *u8,         // *Sym
+}
+fn NODE_EXTERN_DECL_SIZE() -> i64 { return 8 as i64; }
+
+// sym(*u8 8) = 8
+type NodeImportDecl = struct {
+    sym: *u8,         // *Sym
+}
+fn NODE_IMPORT_DECL_SIZE() -> i64 { return 8 as i64; }
 
 // ════════════════════════════════════════════════════
 // 通用 helper：初始化 Node header + 设置 variant 数据
@@ -999,4 +1114,161 @@ fn ast_new_pattern_wild(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i3
     let buf = arena_alloc(a, NODE_SIZE() + NODE_PATTERN_WILD_SIZE());
     let n = ast_init_node(buf, NODE_PATTERN_WILD(), loc_filename, loc_line, loc_col);
     return n;
+}
+
+// ════════════════════════════════════════════════════
+// Sub-struct 构造函数（3c）
+// ════════════════════════════════════════════════════
+
+fn new_node_field_init(a: *Arena, name: *u8, value: *Node) -> *NodeFieldInit {
+    let buf = arena_alloc(a, NODE_FIELD_INIT_SIZE());
+    let d = buf as *NodeFieldInit;
+    (*d).name = name;
+    (*d).value = value as *u8;
+    return d;
+}
+
+fn new_func_decl_param(a: *Arena, sym: *Sym, type_annot: *Node) -> *NodeFuncDeclParam {
+    let buf = arena_alloc(a, NODE_FUNC_DECL_PARAM_SIZE());
+    let d = buf as *NodeFuncDeclParam;
+    (*d).sym = sym as *u8;
+    (*d).type_annot = type_annot as *u8;
+    return d;
+}
+
+fn new_struct_field_decl(a: *Arena, name: *u8, type_annot: *Node) -> *StructFieldDecl {
+    let buf = arena_alloc(a, STRUCT_FIELD_DECL_SIZE());
+    let d = buf as *StructFieldDecl;
+    (*d).name = name;
+    (*d).type_annot = type_annot as *u8;
+    return d;
+}
+
+fn new_enum_variant_decl(a: *Arena, name: *u8, payload_type: *Node) -> *EnumVariantDecl {
+    let buf = arena_alloc(a, ENUM_VARIANT_DECL_SIZE());
+    let d = buf as *EnumVariantDecl;
+    (*d).name = name;
+    (*d).payload_type = payload_type as *u8;
+    return d;
+}
+
+// ════════════════════════════════════════════════════
+// Struct/Enum Literal + Decl 构造函数 + 访问器（3c）
+// ════════════════════════════════════════════════════
+
+fn ast_new_struct_lit(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                      type_sym: *Sym, fields: *u8, nfields: i64) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_STRUCT_LIT_SIZE());
+    let n = ast_init_node(buf, NODE_STRUCT_LIT(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeStructLit;
+    (*d).type_sym = type_sym as *u8;
+    (*d).fields = fields;
+    (*d).nfields = nfields;
+    return n;
+}
+
+fn node_struct_lit_data(n: *Node) -> *NodeStructLit {
+    return (n as i64 + NODE_SIZE()) as *NodeStructLit;
+}
+
+fn ast_new_enum_variant(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                        type_sym: *Sym, variant_sym: *Sym, payload: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_ENUM_VARIANT_SIZE());
+    let n = ast_init_node(buf, NODE_ENUM_VARIANT(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeEnumVariant;
+    (*d).type_sym = type_sym as *u8;
+    (*d).variant_sym = variant_sym as *u8;
+    (*d).payload = payload as *u8;
+    return n;
+}
+
+fn node_enum_variant_data(n: *Node) -> *NodeEnumVariant {
+    return (n as i64 + NODE_SIZE()) as *NodeEnumVariant;
+}
+
+fn ast_new_struct_def(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                      fields: *u8, nfields: i64) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_STRUCT_DEF_SIZE());
+    let n = ast_init_node(buf, NODE_STRUCT_DEF(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeStructDef;
+    (*d).fields = fields;
+    (*d).nfields = nfields;
+    return n;
+}
+
+fn node_struct_def_data(n: *Node) -> *NodeStructDef {
+    return (n as i64 + NODE_SIZE()) as *NodeStructDef;
+}
+
+fn ast_new_enum_def(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                    variants: *u8, nvariants: i64) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_ENUM_DEF_SIZE());
+    let n = ast_init_node(buf, NODE_ENUM_DEF(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeEnumDef;
+    (*d).variants = variants;
+    (*d).nvariants = nvariants;
+    return n;
+}
+
+fn node_enum_def_data(n: *Node) -> *NodeEnumDef {
+    return (n as i64 + NODE_SIZE()) as *NodeEnumDef;
+}
+
+fn ast_new_func_decl(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                     sym: *Sym, params: *u8, nparams: i64,
+                     ret_type: *Node, body: *Node, is_extern: i32) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_FUNC_DECL_SIZE());
+    let n = ast_init_node(buf, NODE_FUNC_DECL(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeFuncDecl;
+    (*d).sym = sym as *u8;
+    (*d).params = params;
+    (*d).nparams = nparams;
+    (*d).ret_type = ret_type as *u8;
+    (*d).body = body as *u8;
+    (*d).is_extern = is_extern;
+    return n;
+}
+
+fn node_func_decl_data(n: *Node) -> *NodeFuncDecl {
+    return (n as i64 + NODE_SIZE()) as *NodeFuncDecl;
+}
+
+fn ast_new_type_decl(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                     sym: *Sym, body: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_TYPE_DECL_SIZE());
+    let n = ast_init_node(buf, NODE_TYPE_DECL(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeTypeDecl;
+    (*d).sym = sym as *u8;
+    (*d).body = body as *u8;
+    return n;
+}
+
+fn node_type_decl_data(n: *Node) -> *NodeTypeDecl {
+    return (n as i64 + NODE_SIZE()) as *NodeTypeDecl;
+}
+
+fn ast_new_extern_decl(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                       sym: *Sym) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_EXTERN_DECL_SIZE());
+    let n = ast_init_node(buf, NODE_EXTERN_DECL(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeExternDecl;
+    (*d).sym = sym as *u8;
+    return n;
+}
+
+fn node_extern_decl_data(n: *Node) -> *NodeExternDecl {
+    return (n as i64 + NODE_SIZE()) as *NodeExternDecl;
+}
+
+fn ast_new_import_decl(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                       sym: *Sym) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_IMPORT_DECL_SIZE());
+    let n = ast_init_node(buf, NODE_IMPORT_DECL(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeImportDecl;
+    (*d).sym = sym as *u8;
+    return n;
+}
+
+fn node_import_decl_data(n: *Node) -> *NodeImportDecl {
+    return (n as i64 + NODE_SIZE()) as *NodeImportDecl;
 }

@@ -1,0 +1,295 @@
+// _driver_ast_3c.jhyy — Sprint 2 commit 3c 单元测试：验证 ast.jhyy（decls + struct/enum literal）
+// 测试覆盖：8 个新 NodeKind 构造 + 8 个新访问器 + 4 个 sub-struct ctor + kind 设置 + variant 字段读写
+// 退出码：42
+
+import arena;
+import util;
+import symtab;
+import types;
+import ast;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    printf("C0\n", 0);
+
+    // ──── 准备 arena + symtab + TypeArena ────
+    let mut a: Arena = Arena {
+        start: 0 as *u8, cur: 0 as *u8, end: 0 as *u8,
+        blocks: 0 as *u8, def_size: 0 as i64,
+    };
+    arena_init(&a, 32768);
+
+    let mut ta: TypeArena = TypeArena {
+        arena: 0 as *Arena, inited: 0 as i32,
+        i8_ty: 0 as *u8, i16_ty: 0 as *u8, i32_ty: 0 as *u8, i64_ty: 0 as *u8,
+        u8_ty: 0 as *u8, u16_ty: 0 as *u8, u32_ty: 0 as *u8, u64_ty: 0 as *u8,
+        f32_ty: 0 as *u8, f64_ty: 0 as *u8, bool_ty: 0 as *u8, void_ty: 0 as *u8,
+    };
+    ta.arena = &a;
+
+    let st = symtab_new(&a, 0 as *u8);
+    let i32_ty = type_primitive(&ta, PRIM_I32());
+
+    // 准备一些共用 node / sym
+    let dummy_int = ast_new_int(&a, "d.jhyy" as *u8, 1 as i32, 1 as i32,
+                                7 as i64, PRIM_I32());
+    let s_Point = symtab_insert(st, "Point" as *u8, SYM_TYPE(), i32_ty as *u8, 0 as i32, 0 as i32);
+    let s_Color = symtab_insert(st, "Color" as *u8, SYM_TYPE(), i32_ty as *u8, 0 as i32, 0 as i32);
+    let s_Red   = symtab_insert(st, "Red" as *u8, SYM_VAR(), i32_ty as *u8, 0 as i32, 0 as i32);
+    let s_main  = symtab_insert(st, "main" as *u8, SYM_FN(), i32_ty as *u8, 0 as i32, 0 as i32);
+    let s_MyT   = symtab_insert(st, "MyT" as *u8, SYM_TYPE(), i32_ty as *u8, 0 as i32, 0 as i32);
+    let s_arena = symtab_insert(st, "arena" as *u8, SYM_MODULE(), i32_ty as *u8, 0 as i32, 0 as i32);
+
+    printf("C1\n", 0);
+
+    // ──── C2: sub-struct ctor — NodeFieldInit ────
+    let fi1 = new_node_field_init(&a, "x" as *u8, dummy_int);
+    if strcmp((*fi1).name, "x" as *u8) == 0 as i32 {
+        printf("C2\n", 0);
+    } else {
+        printf("FAIL fi1 name\n", 0); return 1;
+    }
+    if (*fi1).value == (dummy_int as *u8) {
+        printf("C3\n", 0);
+    } else {
+        printf("FAIL fi1 value\n", 0); return 2;
+    }
+
+    // ──── C4: sub-struct ctor — NodeFuncDeclParam ────
+    let fp1 = new_func_decl_param(&a, s_main, dummy_int);
+    if (*fp1).sym == (s_main as *u8) {
+        printf("C4\n", 0);
+    } else {
+        printf("FAIL fp1 sym\n", 0); return 3;
+    }
+    if (*fp1).type_annot == (dummy_int as *u8) {
+        printf("C5\n", 0);
+    } else {
+        printf("FAIL fp1 type_annot\n", 0); return 4;
+    }
+
+    // ──── C6: sub-struct ctor — StructFieldDecl ────
+    let sfd1 = new_struct_field_decl(&a, "y" as *u8, dummy_int);
+    if strcmp((*sfd1).name, "y" as *u8) == 0 as i32 {
+        printf("C6\n", 0);
+    } else {
+        printf("FAIL sfd1 name\n", 0); return 5;
+    }
+    if (*sfd1).type_annot == (dummy_int as *u8) {
+        printf("C7\n", 0);
+    } else {
+        printf("FAIL sfd1 type_annot\n", 0); return 6;
+    }
+
+    // ──── C8: sub-struct ctor — EnumVariantDecl ────
+    let evd1 = new_enum_variant_decl(&a, "Blue" as *u8, dummy_int);
+    if strcmp((*evd1).name, "Blue" as *u8) == 0 as i32 {
+        printf("C8\n", 0);
+    } else {
+        printf("FAIL evd1 name\n", 0); return 7;
+    }
+    if (*evd1).payload_type == (dummy_int as *u8) {
+        printf("C9\n", 0);
+    } else {
+        printf("FAIL evd1 payload\n", 0); return 8;
+    }
+
+    printf("C10\n", 0);
+
+    // ──── C11: NODE_STRUCT_LIT ────
+    let fields_buf = arena_alloc(&a, 8 as i64);
+    let fields_p = fields_buf as **NodeFieldInit;
+    *fields_p = fi1;
+    let n_slit = ast_new_struct_lit(&a, "sl.jhyy" as *u8, 2 as i32, 1 as i32,
+                                    s_Point, fields_buf, 1 as i64);
+    if (*n_slit).kind == NODE_STRUCT_LIT() {
+        printf("C11\n", 0);
+    } else {
+        printf("FAIL slit kind\n", 0); return 10;
+    }
+    let n_slit_d = node_struct_lit_data(n_slit);
+    if (*n_slit_d).type_sym == (s_Point as *u8) {
+        printf("C12\n", 0);
+    } else {
+        printf("FAIL slit type\n", 0); return 11;
+    }
+    if (*n_slit_d).nfields == 1 as i64 {
+        printf("C13\n", 0);
+    } else {
+        printf("FAIL slit nfields\n", 0); return 12;
+    }
+
+    // ──── C14: NODE_ENUM_VARIANT ────
+    let n_evar = ast_new_enum_variant(&a, "ev.jhyy" as *u8, 3 as i32, 1 as i32,
+                                      s_Color, s_Red, dummy_int);
+    if (*n_evar).kind == NODE_ENUM_VARIANT() {
+        printf("C14\n", 0);
+    } else {
+        printf("FAIL evar kind\n", 0); return 13;
+    }
+    let n_evar_d = node_enum_variant_data(n_evar);
+    if (*n_evar_d).type_sym == (s_Color as *u8) {
+        printf("C15\n", 0);
+    } else {
+        printf("FAIL evar type\n", 0); return 14;
+    }
+    if (*n_evar_d).variant_sym == (s_Red as *u8) {
+        printf("C16\n", 0);
+    } else {
+        printf("FAIL evar variant\n", 0); return 15;
+    }
+    if (*n_evar_d).payload == (dummy_int as *u8) {
+        printf("C17\n", 0);
+    } else {
+        printf("FAIL evar payload\n", 0); return 16;
+    }
+
+    // ──── C18: NODE_STRUCT_DEF ────
+    let sdef_fields_buf = arena_alloc(&a, 8 as i64);
+    let sdef_fields_p = sdef_fields_buf as **StructFieldDecl;
+    *sdef_fields_p = sfd1;
+    let n_sdef = ast_new_struct_def(&a, "sd.jhyy" as *u8, 4 as i32, 1 as i32,
+                                    sdef_fields_buf, 1 as i64);
+    if (*n_sdef).kind == NODE_STRUCT_DEF() {
+        printf("C18\n", 0);
+    } else {
+        printf("FAIL sdef kind\n", 0); return 17;
+    }
+    let n_sdef_d = node_struct_def_data(n_sdef);
+    if (*n_sdef_d).nfields == 1 as i64 {
+        printf("C19\n", 0);
+    } else {
+        printf("FAIL sdef nfields\n", 0); return 18;
+    }
+
+    // ──── C20: NODE_ENUM_DEF ────
+    let edef_vars_buf = arena_alloc(&a, 8 as i64);
+    let edef_vars_p = edef_vars_buf as **EnumVariantDecl;
+    *edef_vars_p = evd1;
+    let n_edef = ast_new_enum_def(&a, "ed.jhyy" as *u8, 5 as i32, 1 as i32,
+                                  edef_vars_buf, 1 as i64);
+    if (*n_edef).kind == NODE_ENUM_DEF() {
+        printf("C20\n", 0);
+    } else {
+        printf("FAIL edef kind\n", 0); return 19;
+    }
+    let n_edef_d = node_enum_def_data(n_edef);
+    if (*n_edef_d).nvariants == 1 as i64 {
+        printf("C21\n", 0);
+    } else {
+        printf("FAIL edef nvariants\n", 0); return 20;
+    }
+
+    printf("C22\n", 0);
+
+    // ──── C23: NODE_FUNC_DECL ────
+    let fparams_buf = arena_alloc(&a, 8 as i64);
+    let fparams_p = fparams_buf as **NodeFuncDeclParam;
+    *fparams_p = fp1;
+    let n_fdecl = ast_new_func_decl(&a, "fd.jhyy" as *u8, 6 as i32, 1 as i32,
+                                    s_main, fparams_buf, 1 as i64,
+                                    dummy_int, dummy_int, 0 as i32);
+    if (*n_fdecl).kind == NODE_FUNC_DECL() {
+        printf("C23\n", 0);
+    } else {
+        printf("FAIL fdecl kind\n", 0); return 21;
+    }
+    let n_fdecl_d = node_func_decl_data(n_fdecl);
+    if (*n_fdecl_d).sym == (s_main as *u8) {
+        printf("C24\n", 0);
+    } else {
+        printf("FAIL fdecl sym\n", 0); return 22;
+    }
+    if (*n_fdecl_d).nparams == 1 as i64 {
+        printf("C25\n", 0);
+    } else {
+        printf("FAIL fdecl nparams\n", 0); return 23;
+    }
+    if (*n_fdecl_d).is_extern == 0 as i32 {
+        printf("C26\n", 0);
+    } else {
+        printf("FAIL fdecl is_extern\n", 0); return 24;
+    }
+
+    // ──── C27: NODE_FUNC_DECL with is_extern=1 ────
+    let n_fdecl_ext = ast_new_func_decl(&a, "fe.jhyy" as *u8, 7 as i32, 1 as i32,
+                                        s_main, 0 as *u8, 0 as i64,
+                                        dummy_int, 0 as *Node, 1 as i32);
+    if (*node_func_decl_data(n_fdecl_ext)).is_extern == 1 as i32 {
+        printf("C27\n", 0);
+    } else {
+        printf("FAIL fdecl extern\n", 0); return 25;
+    }
+
+    // ──── C28: NODE_TYPE_DECL ────
+    let n_tdecl = ast_new_type_decl(&a, "td.jhyy" as *u8, 8 as i32, 1 as i32,
+                                    s_MyT, n_sdef);
+    if (*n_tdecl).kind == NODE_TYPE_DECL() {
+        printf("C28\n", 0);
+    } else {
+        printf("FAIL tdecl kind\n", 0); return 26;
+    }
+    let n_tdecl_d = node_type_decl_data(n_tdecl);
+    if (*n_tdecl_d).sym == (s_MyT as *u8) {
+        printf("C29\n", 0);
+    } else {
+        printf("FAIL tdecl sym\n", 0); return 27;
+    }
+    if (*n_tdecl_d).body == (n_sdef as *u8) {
+        printf("C30\n", 0);
+    } else {
+        printf("FAIL tdecl body\n", 0); return 28;
+    }
+
+    // ──── C31: NODE_EXTERN_DECL ────
+    let n_edecl = ast_new_extern_decl(&a, "xd.jhyy" as *u8, 9 as i32, 1 as i32, s_main);
+    if (*n_edecl).kind == NODE_EXTERN_DECL() {
+        printf("C31\n", 0);
+    } else {
+        printf("FAIL edecl kind\n", 0); return 29;
+    }
+    if (*node_extern_decl_data(n_edecl)).sym == (s_main as *u8) {
+        printf("C32\n", 0);
+    } else {
+        printf("FAIL edecl sym\n", 0); return 30;
+    }
+
+    // ──── C33: NODE_IMPORT_DECL ────
+    let n_idecl = ast_new_import_decl(&a, "id.jhyy" as *u8, 10 as i32, 1 as i32, s_arena);
+    if (*n_idecl).kind == NODE_IMPORT_DECL() {
+        printf("C33\n", 0);
+    } else {
+        printf("FAIL idecl kind\n", 0); return 31;
+    }
+    if (*node_import_decl_data(n_idecl)).sym == (s_arena as *u8) {
+        printf("C34\n", 0);
+    } else {
+        printf("FAIL idecl sym\n", 0); return 32;
+    }
+
+    // ──── node_kind_name 验证新 kind ────
+    if strcmp(node_kind_name(NODE_STRUCT_LIT()), "STRUCT_LIT" as *u8) == 0 as i32 {
+        printf("C35\n", 0);
+    } else {
+        printf("FAIL kind STRUCT_LIT\n", 0); return 33;
+    }
+    if strcmp(node_kind_name(NODE_ENUM_VARIANT()), "ENUM_VARIANT" as *u8) == 0 as i32 {
+        printf("C36\n", 0);
+    } else {
+        printf("FAIL kind ENUM_VARIANT\n", 0); return 34;
+    }
+    if strcmp(node_kind_name(NODE_FUNC_DECL()), "FUNC_DECL" as *u8) == 0 as i32 {
+        printf("C37\n", 0);
+    } else {
+        printf("FAIL kind FUNC_DECL\n", 0); return 35;
+    }
+    if strcmp(node_kind_name(NODE_IMPORT_DECL()), "IMPORT_DECL" as *u8) == 0 as i32 {
+        printf("C38\n", 0);
+    } else {
+        printf("FAIL kind IMPORT_DECL\n", 0); return 36;
+    }
+
+    printf("PASS\n", 0);
+    return 42;
+}
