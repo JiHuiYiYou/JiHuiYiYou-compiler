@@ -1,0 +1,326 @@
+// _driver_types.jhyy — Sprint 2 commit 2 单元测试：验证 types.jhyy
+// 测试覆盖：TypeArena lazy init、11 prim + 1 void、复合类型构造、size/align/eq/to_string
+// 退出码：42
+
+import arena;
+import util;
+import symtab;
+import types;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    printf("T0\n", 0);
+
+    // ──── 准备 arena + TypeArena ────
+    let mut a: Arena = Arena {
+        start: 0 as *u8,
+        cur: 0 as *u8,
+        end: 0 as *u8,
+        blocks: 0 as *u8,
+        def_size: 0 as i64,
+    };
+    arena_init(&a, 16384);
+
+    let mut ta: TypeArena = TypeArena {
+        arena: 0 as *Arena,
+        inited: 0 as i32,
+        i8_ty: 0 as *u8,
+        i16_ty: 0 as *u8,
+        i32_ty: 0 as *u8,
+        i64_ty: 0 as *u8,
+        u8_ty: 0 as *u8,
+        u16_ty: 0 as *u8,
+        u32_ty: 0 as *u8,
+        u64_ty: 0 as *u8,
+        f32_ty: 0 as *u8,
+        f64_ty: 0 as *u8,
+        bool_ty: 0 as *u8,
+        void_ty: 0 as *u8,
+    };
+    ta.arena = &a;
+    printf("T1\n", 0);  // arena + TypeArena prepared
+
+    // ──── 验证 TypeArena 初始未初始化 ────
+    if ta.inited == 0 as i32 {
+        printf("T2\n", 0);
+    } else {
+        printf("FAIL inited initial\n", 0);
+        return 1;
+    }
+
+    // ──── type_primitive 触发 lazy init ────
+    let i32_ty = type_primitive(&ta, PRIM_I32());
+    if ta.inited == 1 as i32 {
+        printf("T3\n", 0);  // lazy init 触发
+    } else {
+        printf("FAIL inited after type_primitive\n", 0);
+        return 2;
+    }
+
+    // ──── 验证 i32 类型字段 ────
+    if (*i32_ty).kind == KIND_PRIMITIVE() {
+        printf("T4\n", 0);
+    } else {
+        printf("FAIL i32 kind\n", 0);
+        return 3;
+    }
+    if (*i32_ty).prim == PRIM_I32() {
+        printf("T5\n", 0);
+    } else {
+        printf("FAIL i32 prim\n", 0);
+        return 4;
+    }
+
+    // ──── 验证 type_size for prims ────
+    if type_size(i32_ty) == 4 as i64 {
+        printf("T6\n", 0);  // i32 = 4
+    } else {
+        printf("FAIL size i32\n", 0);
+        return 5;
+    }
+    let i64_ty = type_primitive(&ta, PRIM_I64());
+    if type_size(i64_ty) == 8 as i64 {
+        printf("T7\n", 0);  // i64 = 8
+    } else {
+        printf("FAIL size i64\n", 0);
+        return 6;
+    }
+    let i8_ty = type_primitive(&ta, PRIM_I8());
+    if type_size(i8_ty) == 1 as i64 {
+        printf("T8\n", 0);  // i8 = 1
+    } else {
+        printf("FAIL size i8\n", 0);
+        return 7;
+    }
+    let bool_ty = type_primitive(&ta, PRIM_BOOL());
+    if type_size(bool_ty) == 1 as i64 {
+        printf("T9\n", 0);  // bool = 1
+    } else {
+        printf("FAIL size bool\n", 0);
+        return 8;
+    }
+    let f64_ty = type_primitive(&ta, PRIM_F64());
+    if type_size(f64_ty) == 8 as i64 {
+        printf("T10\n", 0);  // f64 = 8
+    } else {
+        printf("FAIL size f64\n", 0);
+        return 9;
+    }
+
+    // ──── 验证 type_align for prims ────
+    if type_align(i32_ty) == 4 as i64 {
+        printf("T11\n", 0);
+    } else {
+        printf("FAIL align i32\n", 0);
+        return 10;
+    }
+    if type_align(i64_ty) == 8 as i64 {
+        printf("T12\n", 0);
+    } else {
+        printf("FAIL align i64\n", 0);
+        return 11;
+    }
+
+    // ──── 验证 prim Type 缓存（再次调用返回相同指针）────
+    let i32_ty2 = type_primitive(&ta, PRIM_I32());
+    if i32_ty == i32_ty2 {
+        printf("T13\n", 0);  // 缓存命中
+    } else {
+        printf("FAIL cache i32\n", 0);
+        return 12;
+    }
+
+    // ──── 验证 type_void ────
+    let void_ty = type_void(&ta);
+    if (*void_ty).kind == KIND_VOID() {
+        printf("T14\n", 0);
+    } else {
+        printf("FAIL void kind\n", 0);
+        return 13;
+    }
+    if type_size(void_ty) == 0 as i64 {
+        printf("T15\n", 0);  // void = 0
+    } else {
+        printf("FAIL size void\n", 0);
+        return 14;
+    }
+
+    // ──── 验证 type_pointer ────
+    let ptr_i32 = type_pointer(&a, i32_ty);
+    if (*ptr_i32).kind == KIND_POINTER() {
+        printf("T16\n", 0);
+    } else {
+        printf("FAIL ptr kind\n", 0);
+        return 15;
+    }
+    if (*ptr_i32).elem == (i32_ty as *u8) {
+        printf("T17\n", 0);  // elem = i32
+    } else {
+        printf("FAIL ptr elem\n", 0);
+        return 16;
+    }
+    if type_size(ptr_i32) == 8 as i64 {
+        printf("T18\n", 0);  // ptr = 8
+    } else {
+        printf("FAIL size ptr\n", 0);
+        return 17;
+    }
+
+    // ──── 验证 type_slice ────
+    let slice_i32 = type_slice(&a, i32_ty);
+    if (*slice_i32).kind == KIND_SLICE() {
+        printf("T19\n", 0);
+    } else {
+        printf("FAIL slice kind\n", 0);
+        return 18;
+    }
+    if type_size(slice_i32) == 16 as i64 {
+        printf("T20\n", 0);  // slice = 16 (ptr + len)
+    } else {
+        printf("FAIL size slice\n", 0);
+        return 19;
+    }
+
+    // ──── 验证 type_array ────
+    let arr_10_i32 = type_array(&a, i32_ty, 10 as i64);
+    if (*arr_10_i32).kind == KIND_ARRAY() {
+        printf("T21\n", 0);
+    } else {
+        printf("FAIL array kind\n", 0);
+        return 20;
+    }
+    if (*arr_10_i32).arr_count == 10 as i64 {
+        printf("T22\n", 0);
+    } else {
+        printf("FAIL array count\n", 0);
+        return 21;
+    }
+    if type_size(arr_10_i32) == 40 as i64 {
+        printf("T23\n", 0);  // [i32; 10] = 40
+    } else {
+        printf("FAIL size array\n", 0);
+        return 22;
+    }
+
+    // ──── 验证 type_eq: prim 相同 ────
+    if type_eq(i32_ty, i32_ty2) == 1 as i32 {
+        printf("T24\n", 0);
+    } else {
+        printf("FAIL eq i32 same\n", 0);
+        return 23;
+    }
+    if type_eq(i32_ty, i64_ty) == 0 as i32 {
+        printf("T25\n", 0);  // i32 != i64
+    } else {
+        printf("FAIL eq i32 i64\n", 0);
+        return 24;
+    }
+
+    // ──── 验证 type_eq: pointer 递归 ────
+    let ptr_i32_2 = type_pointer(&a, i32_ty);
+    if type_eq(ptr_i32, ptr_i32_2) == 1 as i32 {
+        printf("T26\n", 0);  // same elem
+    } else {
+        printf("FAIL eq ptr same\n", 0);
+        return 25;
+    }
+    let ptr_i64 = type_pointer(&a, i64_ty);
+    if type_eq(ptr_i32, ptr_i64) == 0 as i32 {
+        printf("T27\n", 0);  // different elem
+    } else {
+        printf("FAIL eq ptr diff\n", 0);
+        return 26;
+    }
+
+    // ──── 验证 type_eq: array count 不同 ────
+    let arr_5_i32 = type_array(&a, i32_ty, 5 as i64);
+    if type_eq(arr_10_i32, arr_5_i32) == 0 as i32 {
+        printf("T28\n", 0);
+    } else {
+        printf("FAIL eq array count\n", 0);
+        return 27;
+    }
+
+    // ──── 验证 type_eq: NULL 安全 ────
+    if type_eq(0 as *Type, i32_ty) == 0 as i32 {
+        printf("T29\n", 0);
+    } else {
+        printf("FAIL eq null a\n", 0);
+        return 28;
+    }
+    if type_eq(i32_ty, 0 as *Type) == 0 as i32 {
+        printf("T30\n", 0);
+    } else {
+        printf("FAIL eq null b\n", 0);
+        return 29;
+    }
+    if type_eq(0 as *Type, 0 as *Type) == 1 as i32 {
+        printf("T31\n", 0);  // type_eq(NULL, NULL) = 1
+    } else {
+        printf("FAIL eq null both\n", 0);
+        return 30;
+    }
+
+    // ──── 验证 type_to_string ────
+    if strcmp(type_to_string(i32_ty), "i32" as *u8) == 0 as i32 {
+        printf("T32\n", 0);
+    } else {
+        printf("FAIL to_string i32\n", 0);
+        return 31;
+    }
+    if strcmp(type_to_string(i64_ty), "i64" as *u8) == 0 as i32 {
+        printf("T33\n", 0);
+    } else {
+        printf("FAIL to_string i64\n", 0);
+        return 32;
+    }
+    if strcmp(type_to_string(bool_ty), "bool" as *u8) == 0 as i32 {
+        printf("T34\n", 0);
+    } else {
+        printf("FAIL to_string bool\n", 0);
+        return 33;
+    }
+    if strcmp(type_to_string(void_ty), "()" as *u8) == 0 as i32 {
+        printf("T35\n", 0);
+    } else {
+        printf("FAIL to_string void\n", 0);
+        return 34;
+    }
+    if strcmp(type_to_string(0 as *Type), "(null)" as *u8) == 0 as i32 {
+        printf("T36\n", 0);
+    } else {
+        printf("FAIL to_string null\n", 0);
+        return 35;
+    }
+
+    // ──── 验证 type_func ────
+    let fn_ret_i32 = type_func(&a, 0 as *u8, 0 as i64, i32_ty);
+    if (*fn_ret_i32).kind == KIND_FUNC() {
+        printf("T37\n", 0);
+    } else {
+        printf("FAIL func kind\n", 0);
+        return 36;
+    }
+    if (*fn_ret_i32).nparams == 0 as i64 {
+        printf("T38\n", 0);
+    } else {
+        printf("FAIL func nparams\n", 0);
+        return 37;
+    }
+    if (*fn_ret_i32).ret == (i32_ty as *u8) {
+        printf("T39\n", 0);
+    } else {
+        printf("FAIL func ret\n", 0);
+        return 38;
+    }
+    if type_size(fn_ret_i32) == 8 as i64 {
+        printf("T40\n", 0);  // fn ptr = 8
+    } else {
+        printf("FAIL size func\n", 0);
+        return 39;
+    }
+
+    printf("PASS\n", 0);
+    return 42;
+}

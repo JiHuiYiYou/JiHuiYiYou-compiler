@@ -1,0 +1,420 @@
+// types.jhyy — JHYY 翻译自 compiler/src/types.c
+// v1.0.0 sprint 2 commit 2, 2026-06-24
+//
+// 翻译要点（v0.6.2 patch 后实测）：
+//   - jhyy 无全局变量 → C 端 11 个 prim Type + 1 个 void Type 静态变量 + prims_inited
+//     改造为 TypeArena 模式：传 *TypeArena 给 type_primitive/type_void，
+//     lazy 初始化 12 个 Type 进 arena 内存，地址永驻（arena 不释放）
+//   - jhyy 无 union → "max-size union" 模式：Type struct 把所有 kind 的字段
+//     都铺平（19 字段 × 8 = 152 字节），用 kind tag 区分有效字段
+//   - jhyy 无 sizeof() → TYPE_SIZE = 152 硬编码
+//   - 所有 *Type 字段在 jhyy 中存 *u8（避免 *Type in struct def 前向引用）；
+//     使用处 cast `as *Type`
+//   - type_to_string 用 sprintf("%s") 单参数（jhyy sprintf 变参不支持）
+//     走 StringBuilder 拼：见 plan § 2.2
+//   - type_eq 走递归（POINTER/SLICE/ARRAY 递归 elem，FUNC 递归 params + ret）
+//
+// 已知差异（vs C 版）：
+//   - C union 内存 layout 紧凑；jhyy max-size union 浪费 ~3x 内存（152 vs ~48 字节）
+//     → v1.0.0 阶段可接受（编译期分配，不在 hot path）
+//   - type_primitive / type_void 签名多一个 *TypeArena 参数（plan § 1.4）
+
+import arena;
+import util;
+import symtab;
+
+// ════════════════════════════════════════════════════
+// FFI
+// ════════════════════════════════════════════════════
+
+extern fn snprintf(buf: *u8, n: i64, fmt: *u8, val: *u8) -> i32;
+// 注：jhyy sprintf 走单 i32 参数风格（ffi.jhyy 已有 sprintf）。但 type_to_string
+// 需要拼 *u8 字符串 → 用 snprintf(buf, n, "%s", str) 单 *u8 val 替代
+
+// ════════════════════════════════════════════════════
+// TypeKind 常量
+// ════════════════════════════════════════════════════
+
+fn KIND_PRIMITIVE()  -> i32 { return 0 as i32; }
+fn KIND_POINTER()    -> i32 { return 1 as i32; }
+fn KIND_SLICE()      -> i32 { return 2 as i32; }
+fn KIND_ARRAY()      -> i32 { return 3 as i32; }
+fn KIND_FUNC()       -> i32 { return 4 as i32; }
+fn KIND_STRUCT()     -> i32 { return 5 as i32; }
+fn KIND_ENUM()       -> i32 { return 6 as i32; }
+fn KIND_ALIAS()      -> i32 { return 7 as i32; }
+fn KIND_VOID()       -> i32 { return 8 as i32; }
+fn KIND_UNRESOLVED() -> i32 { return 9 as i32; }
+
+// ════════════════════════════════════════════════════
+// PrimType 常量
+// ════════════════════════════════════════════════════
+
+fn PRIM_I8()   -> i32 { return 0 as i32; }
+fn PRIM_I16()  -> i32 { return 1 as i32; }
+fn PRIM_I32()  -> i32 { return 2 as i32; }
+fn PRIM_I64()  -> i32 { return 3 as i32; }
+fn PRIM_U8()   -> i32 { return 4 as i32; }
+fn PRIM_U16()  -> i32 { return 5 as i32; }
+fn PRIM_U32()  -> i32 { return 6 as i32; }
+fn PRIM_U64()  -> i32 { return 7 as i32; }
+fn PRIM_F32()  -> i32 { return 8 as i32; }
+fn PRIM_F64()  -> i32 { return 9 as i32; }
+fn PRIM_BOOL() -> i32 { return 10 as i32; }
+
+// ════════════════════════════════════════════════════
+// Type struct（max-size union 模式）
+// ════════════════════════════════════════════════════
+
+// 19 字段 × 8 bytes = 152 bytes
+// 字段映射（按 C union variant）：
+//   KIND_PRIMITIVE: kind + prim
+//   KIND_POINTER:   kind + elem
+//   KIND_SLICE:     kind + elem
+//   KIND_ARRAY:     kind + elem + arr_count
+//   KIND_FUNC:      kind + params + nparams + ret
+//   KIND_STRUCT:    kind + name + fields + nfields + size + align
+//   KIND_ENUM:      kind + name + variants + nvariants + tag_size + payload_off + payload_sz + size
+//   KIND_ALIAS:     kind + sym + underlying
+//   KIND_VOID:      kind
+//
+// 注：所有 *Type 在 jhyy 中用 *u8（struct 内前向引用问题）
+type Type = struct {
+    kind:        i32,
+    prim:        i32,
+    elem:        *u8,        // KIND_POINTER/SLICE/ARRAY: *Type
+    arr_count:   i64,        // KIND_ARRAY
+    params:      *u8,        // KIND_FUNC: **Type（实际是 *[*]Type 数组，offset 访问）
+    nparams:     i64,        // KIND_FUNC
+    ret:         *u8,        // KIND_FUNC: *Type
+    name:        *u8,        // KIND_STRUCT/ENUM: *Sym
+    fields:      *u8,        // KIND_STRUCT: *FieldDesc
+    nfields:     i64,        // KIND_STRUCT
+    size:        i64,        // KIND_STRUCT/ENUM
+    align:       i64,        // KIND_STRUCT
+    variants:    *u8,        // KIND_ENUM: *VariantDesc
+    nvariants:   i64,        // KIND_ENUM
+    tag_size:    i64,        // KIND_ENUM
+    payload_off: i64,        // KIND_ENUM
+    payload_sz:  i64,        // KIND_ENUM
+    sym:         *u8,        // KIND_ALIAS: *Sym
+    underlying:  *u8,        // KIND_ALIAS: *Type
+}
+
+// Type struct 字节数
+fn TYPE_SIZE() -> i64 { return 152 as i64; }
+
+// ════════════════════════════════════════════════════
+// TypeArena：11 prim + 1 void 的 lazy 缓存
+// ════════════════════════════════════════════════════
+
+// 12 *Type 字段 + arena + inited = 14 字段 × 8 = 112 bytes
+// jhyy 无 [N]T in struct → 12 个独立字段（vs C 端 *Type[12] 数组）
+type TypeArena = struct {
+    arena:   *Arena,
+    inited:  i32,
+    i8_ty:   *u8,    // *Type
+    i16_ty:  *u8,
+    i32_ty:  *u8,
+    i64_ty:  *u8,
+    u8_ty:   *u8,
+    u16_ty:  *u8,
+    u32_ty:  *u8,
+    u64_ty:  *u8,
+    f32_ty:  *u8,
+    f64_ty:  *u8,
+    bool_ty: *u8,
+    void_ty: *u8,
+}
+
+// TypeArena 字节数
+fn TYPE_ARENA_SIZE() -> i64 { return 112 as i64; }
+
+// ════════════════════════════════════════════════════
+// TypeArena lazy init（私有 helper）
+// ════════════════════════════════════════════════════
+
+// 分配单个 prim Type 进 arena
+fn types_new_prim(a: *Arena, prim: i32) -> *Type {
+    let t = arena_alloc(a, TYPE_SIZE()) as *Type;
+    (*t).kind = KIND_PRIMITIVE();
+    (*t).prim = prim;
+    return t;
+}
+
+// TypeArena lazy init：分配 12 个 Type，地址存到 TypeArena
+// 必须在 type_primitive / type_void 第一次调用前触发
+fn types_init_arena(ta: *TypeArena) -> i32 {
+    if (*ta).inited == (1 as i32) {
+        return 1;
+    }
+    let a = (*ta).arena;
+    (*ta).i8_ty   = types_new_prim(a, PRIM_I8())   as *u8;
+    (*ta).i16_ty  = types_new_prim(a, PRIM_I16())  as *u8;
+    (*ta).i32_ty  = types_new_prim(a, PRIM_I32())  as *u8;
+    (*ta).i64_ty  = types_new_prim(a, PRIM_I64())  as *u8;
+    (*ta).u8_ty   = types_new_prim(a, PRIM_U8())   as *u8;
+    (*ta).u16_ty  = types_new_prim(a, PRIM_U16())  as *u8;
+    (*ta).u32_ty  = types_new_prim(a, PRIM_U32())  as *u8;
+    (*ta).u64_ty  = types_new_prim(a, PRIM_U64())  as *u8;
+    (*ta).f32_ty  = types_new_prim(a, PRIM_F32())  as *u8;
+    (*ta).f64_ty  = types_new_prim(a, PRIM_F64())  as *u8;
+    (*ta).bool_ty = types_new_prim(a, PRIM_BOOL()) as *u8;
+    // void
+    let v = arena_alloc(a, TYPE_SIZE()) as *Type;
+    (*v).kind = KIND_VOID();
+    (*ta).void_ty = v as *u8;
+    (*ta).inited = 1 as i32;
+    return 1;
+}
+
+// ════════════════════════════════════════════════════
+// Public API：type_primitive / type_void
+// ════════════════════════════════════════════════════
+
+fn type_primitive(ta: *TypeArena, prim: i32) -> *Type {
+    types_init_arena(ta);
+    if prim == PRIM_I8()   { return (*ta).i8_ty   as *Type; }
+    if prim == PRIM_I16()  { return (*ta).i16_ty  as *Type; }
+    if prim == PRIM_I32()  { return (*ta).i32_ty  as *Type; }
+    if prim == PRIM_I64()  { return (*ta).i64_ty  as *Type; }
+    if prim == PRIM_U8()   { return (*ta).u8_ty   as *Type; }
+    if prim == PRIM_U16()  { return (*ta).u16_ty  as *Type; }
+    if prim == PRIM_U32()  { return (*ta).u32_ty  as *Type; }
+    if prim == PRIM_U64()  { return (*ta).u64_ty  as *Type; }
+    if prim == PRIM_F32()  { return (*ta).f32_ty  as *Type; }
+    if prim == PRIM_F64()  { return (*ta).f64_ty  as *Type; }
+    if prim == PRIM_BOOL() { return (*ta).bool_ty as *Type; }
+    return 0 as *Type;
+}
+
+fn type_void(ta: *TypeArena) -> *Type {
+    types_init_arena(ta);
+    return (*ta).void_ty as *Type;
+}
+
+// ════════════════════════════════════════════════════
+// Public API：复合类型构造
+// ════════════════════════════════════════════════════
+
+fn type_pointer(a: *Arena, elem: *Type) -> *Type {
+    let t = arena_alloc(a, TYPE_SIZE()) as *Type;
+    (*t).kind = KIND_POINTER();
+    (*t).elem = elem as *u8;
+    return t;
+}
+
+fn type_slice(a: *Arena, elem: *Type) -> *Type {
+    let t = arena_alloc(a, TYPE_SIZE()) as *Type;
+    (*t).kind = KIND_SLICE();
+    (*t).elem = elem as *u8;
+    return t;
+}
+
+fn type_array(a: *Arena, elem: *Type, count: i64) -> *Type {
+    let t = arena_alloc(a, TYPE_SIZE()) as *Type;
+    (*t).kind = KIND_ARRAY();
+    (*t).elem = elem as *u8;
+    (*t).arr_count = count;
+    return t;
+}
+
+fn type_func(a: *Arena, params: *u8, nparams: i64, ret: *Type) -> *Type {
+    // params 实际是 *[*]Type（offset 访问）
+    let t = arena_alloc(a, TYPE_SIZE()) as *Type;
+    (*t).kind = KIND_FUNC();
+    (*t).params = params;
+    (*t).nparams = nparams;
+    (*t).ret = ret as *u8;
+    return t;
+}
+
+fn type_struct(a: *Arena, name: *Sym, fields: *u8, nfields: i64,
+               size: i64, align: i64) -> *Type {
+    // fields 实际是 *FieldDesc
+    let t = arena_alloc(a, TYPE_SIZE()) as *Type;
+    (*t).kind = KIND_STRUCT();
+    (*t).name = name as *u8;
+    (*t).fields = fields;
+    (*t).nfields = nfields;
+    (*t).size = size;
+    (*t).align = align;
+    return t;
+}
+
+fn type_enum(a: *Arena, name: *Sym, variants: *u8, nvariants: i64,
+             tag_size: i64, payload_off: i64, payload_sz: i64,
+             total_size: i64) -> *Type {
+    let t = arena_alloc(a, TYPE_SIZE()) as *Type;
+    (*t).kind = KIND_ENUM();
+    (*t).name = name as *u8;
+    (*t).variants = variants;
+    (*t).nvariants = nvariants;
+    (*t).tag_size = tag_size;
+    (*t).payload_off = payload_off;
+    (*t).payload_sz = payload_sz;
+    (*t).size = total_size;
+    return t;
+}
+
+fn type_alias(a: *Arena, sym: *Sym, underlying: *Type) -> *Type {
+    let t = arena_alloc(a, TYPE_SIZE()) as *Type;
+    (*t).kind = KIND_ALIAS();
+    (*t).sym = sym as *u8;
+    (*t).underlying = underlying as *u8;
+    return t;
+}
+
+// ════════════════════════════════════════════════════
+// type_size / type_align
+// ════════════════════════════════════════════════════
+
+fn type_size(t: *Type) -> i64 {
+    if t == (0 as *Type) {
+        return 0 as i64;
+    }
+    let k = (*t).kind;
+    if k == KIND_PRIMITIVE() {
+        let p = (*t).prim;
+        if p == PRIM_I8()  { return 1 as i64; }
+        if p == PRIM_U8()  { return 1 as i64; }
+        if p == PRIM_I16() { return 2 as i64; }
+        if p == PRIM_U16() { return 2 as i64; }
+        if p == PRIM_I32() { return 4 as i64; }
+        if p == PRIM_U32() { return 4 as i64; }
+        if p == PRIM_I64() { return 8 as i64; }
+        if p == PRIM_U64() { return 8 as i64; }
+        if p == PRIM_F32() { return 4 as i64; }
+        if p == PRIM_F64() { return 8 as i64; }
+        if p == PRIM_BOOL() { return 1 as i64; }
+        return 0 as i64;
+    }
+    if k == KIND_POINTER() { return 8 as i64; }
+    if k == KIND_SLICE()   { return 16 as i64; }  // ptr + len
+    if k == KIND_ARRAY() {
+        let elem = (*t).elem as *Type;
+        return type_size(elem) * (*t).arr_count;
+    }
+    if k == KIND_FUNC()    { return 8 as i64; }
+    if k == KIND_STRUCT()  { return (*t).size; }
+    if k == KIND_ENUM()    { return (*t).size; }
+    if k == KIND_VOID()    { return 0 as i64; }
+    return 0 as i64;
+}
+
+fn type_align(t: *Type) -> i64 {
+    if t == (0 as *Type) {
+        return 1 as i64;
+    }
+    let k = (*t).kind;
+    if k == KIND_PRIMITIVE() { return type_size(t); }
+    if k == KIND_POINTER()   { return 8 as i64; }
+    if k == KIND_SLICE()     { return 8 as i64; }
+    if k == KIND_ARRAY() {
+        let elem = (*t).elem as *Type;
+        return type_align(elem);
+    }
+    if k == KIND_FUNC()      { return 8 as i64; }
+    if k == KIND_STRUCT()    { return (*t).align; }
+    if k == KIND_ENUM()      { return 4 as i64; }  // tag alignment
+    if k == KIND_VOID()      { return 1 as i64; }
+    return 1 as i64;
+}
+
+// ════════════════════════════════════════════════════
+// type_eq
+// ════════════════════════════════════════════════════
+
+fn type_eq(a: *Type, b: *Type) -> i32 {
+    if a == b { return 1 as i32; }
+    if a == (0 as *Type) { return 0 as i32; }
+    if b == (0 as *Type) { return 0 as i32; }
+    if (*a).kind != (*b).kind { return 0 as i32; }
+
+    let k = (*a).kind;
+    if k == KIND_PRIMITIVE() {
+        if (*a).prim == (*b).prim { return 1 as i32; }
+        return 0 as i32;
+    }
+    if k == KIND_POINTER() {
+        return type_eq((*a).elem as *Type, (*b).elem as *Type);
+    }
+    if k == KIND_SLICE() {
+        return type_eq((*a).elem as *Type, (*b).elem as *Type);
+    }
+    if k == KIND_ARRAY() {
+        let eq_elem = type_eq((*a).elem as *Type, (*b).elem as *Type);
+        if eq_elem == 0 { return 0 as i32; }
+        if (*a).arr_count == (*b).arr_count { return 1 as i32; }
+        return 0 as i32;
+    }
+    if k == KIND_FUNC() {
+        if (*a).nparams != (*b).nparams { return 0 as i32; }
+        // 遍历 params[i]（offset 访问 *[*]Type）
+        let mut i: i64 = 0 as i64;
+        while i < (*a).nparams {
+            // a.params[i] = *((a.params as i64) + i * 8) as *Type
+            let a_p_ptr = ptr_add_u8((*a).params, i * (8 as i64)) as **Type;
+            let b_p_ptr = ptr_add_u8((*b).params, i * (8 as i64)) as **Type;
+            let a_p = *a_p_ptr;
+            let b_p = *b_p_ptr;
+            if type_eq(a_p, b_p) == 0 { return 0 as i32; }
+            i = i + (1 as i64);
+        }
+        return type_eq((*a).ret as *Type, (*b).ret as *Type);
+    }
+    if k == KIND_STRUCT() {
+        // nominal: 同 name 视为相等
+        if (*a).name == (*b).name { return 1 as i32; }
+        return 0 as i32;
+    }
+    if k == KIND_ENUM() {
+        if (*a).name == (*b).name { return 1 as i32; }
+        return 0 as i32;
+    }
+    if k == KIND_ALIAS() {
+        return type_eq((*a).underlying as *Type, (*b).underlying as *Type);
+    }
+    if k == KIND_VOID() { return 1 as i32; }
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// type_to_string
+// ════════════════════════════════════════════════════
+
+// 注：完整 type_to_string 需要递归（POINTER elem / FUNC ret），每个嵌套需要
+// snprintf("%s")。jhyy sprintf 单 i32 参数风格不支持 %s 字符串拼接。
+//
+// 临时实现：返回静态名字（prim/void/struct 名 / "ptr" / "slice" / "array" / "fn" / "enum" / "alias"）。
+// 完整递归 + StringBuilder 拼接到 sprint "%d" i32 走 plan § 2.2 的 StringBuilder 套路。
+// 当前 sprint 2 commit 2 阶段：够用（debug 输出），sprint 3 sema 错误信息再补完整。
+
+fn type_to_string(t: *Type) -> *u8 {
+    if t == (0 as *Type) { return "(null)" as *u8; }
+    let k = (*t).kind;
+    if k == KIND_PRIMITIVE() {
+        let p = (*t).prim;
+        if p == PRIM_I8()   { return "i8"  as *u8; }
+        if p == PRIM_I16()  { return "i16" as *u8; }
+        if p == PRIM_I32()  { return "i32" as *u8; }
+        if p == PRIM_I64()  { return "i64" as *u8; }
+        if p == PRIM_U8()   { return "u8"  as *u8; }
+        if p == PRIM_U16()  { return "u16" as *u8; }
+        if p == PRIM_U32()  { return "u32" as *u8; }
+        if p == PRIM_U64()  { return "u64" as *u8; }
+        if p == PRIM_F32()  { return "f32" as *u8; }
+        if p == PRIM_F64()  { return "f64" as *u8; }
+        if p == PRIM_BOOL() { return "bool" as *u8; }
+        return "?prim" as *u8;
+    }
+    if k == KIND_POINTER() { return "ptr" as *u8; }
+    if k == KIND_SLICE()   { return "slice" as *u8; }
+    if k == KIND_ARRAY()   { return "array" as *u8; }
+    if k == KIND_FUNC()    { return "fn" as *u8; }
+    if k == KIND_STRUCT()  { return "struct" as *u8; }
+    if k == KIND_ENUM()    { return "enum" as *u8; }
+    if k == KIND_ALIAS()   { return "alias" as *u8; }
+    if k == KIND_VOID()    { return "()" as *u8; }
+    return "?" as *u8;
+}
