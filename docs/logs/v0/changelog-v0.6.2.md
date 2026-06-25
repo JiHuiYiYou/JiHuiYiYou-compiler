@@ -1,6 +1,17 @@
 # JHYY v0.6.2 Changelog
 
-## 版本目标
+> ⚠️ **本文档为历史草稿，描述 v0.6.2 计划修的 3 个 bug (#2/#5/#6)**。
+> 实际未单独发 v0.6.2。三个 bug 各自走小 patch 流修：
+>
+> - **#2 let mut dead-code** → **v0.6.5 patch** 已修（sema 层）。见 [`changelog-v0.6.5.md`](changelog-v0.6.5.md)。
+> - **#5 nested struct QBE 'w' load 对齐** → 仍是 open bug，jhyy 端继续用平铺 6 字段 workaround。
+> - **#6 qbe_type_of(i8) → 'b'** → 仍是 open bug，jhyy 端继续用 `*i32 + shift+mask` workaround。
+>
+> 下文保留作历史草稿（描述 v0.6.2 的最初设计意图），不要再按它排期。
+
+---
+
+## 版本目标（原始草稿，已废弃）
 
 v0.6.0 + v0.6.1 是自举前最后一期准备，sprint 1 phase-2 实测沉淀 3 个 codegen / sema bug。**v0.6.2 是 phase-2 自举前的 C 端编译器最后一期 patch**，修复这 3 个 bug，让 sprint 2-4 翻译时不再需要专门 work around（之前 util.jhyy / arena.jhyy / hash_string 等已经临时绕开）。同时也是 jhyy 编译器 v1.0.0 真自举闭环的 C 端基线 —— 真自举完成即弃 C 端，但 v0.6.2 是最后 ship 的 C 端二进制。
 

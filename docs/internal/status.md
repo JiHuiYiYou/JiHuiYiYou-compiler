@@ -2,9 +2,9 @@
 
 > 语言特性 / 已知限制 / 历史修复。版本进展详见 `docs/logs/`。
 
-## 当前版本: v0.6.3
+## 当前版本: v0.6.5
 
-> Phase 1 — C 语言宿主编译器。v1.0.0 启动完整自举。v0.6.3 是 phase-2 自举前最后一期 C 端 patch（修 sprint 2 commit 3a 实测沉淀的 #9 f64/f32 比较 + call-site f64↔f32 隐式转换；#8 维持 `jh_f64_store` 桥）。
+> Phase 1 — C 语言宿主编译器。v1.0.0 启动完整自举。v0.6.5 是 phase-2 自举中实测沉淀的小 patch（修 #2 let mut dead-code；sema 层拒绝 immutable binding 赋值）。v0.6.4 修 #10 imported string dangle；v0.6.3 修 #9 f64/f32 比较 + coercion。#5 nested struct / #6 qbe_type_of(i8) 仍是 open bug（jhyy 端 workaround 继续）。
 
 回归基线：**44/47 passed, 0 failed, 3 skipped**（3 skipped 是库文件，无 `main_jhyy`）。
 
