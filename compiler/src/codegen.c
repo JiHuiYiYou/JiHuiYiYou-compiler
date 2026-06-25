@@ -915,12 +915,14 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
                 /* wildcard: always match, jump to body */
                 if (next_check.id != 0) {
                     ir_emit_label(cg->ir, next_check);
+                    next_check.id = 0;  /* consumed */
                 }
                 ir_emit_jmp(cg->ir, body_block);
             } else {
                 /* literal/range pattern: emit comparison */
                 if (next_check.id != 0) {
                     ir_emit_label(cg->ir, next_check);
+                    next_check.id = 0;  /* consumed */
                 }
                 next_check = ir_new_block(cg->ir, "next");
                 IRVal cmp = cg_match_pattern(cg, matched, arm->pattern);
@@ -942,9 +944,25 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             }
         }
 
-        /* if there's a dangling next_check, it needs a label (unreachable, jump to merge) */
-        if (next_check.id != 0 && nphi == (int)d->narms) {
-            /* all arms already handled, next_check is unreachable */
+        /* if there's a dangling next_check, emit its label. This is the
+           fallthrough after the last comparison arm — should be unreachable
+           if the match is exhaustive (sema 7A verifies enum coverage).
+           Without this label, QBE fails with "block @nextX is used
+           undefined" when no arm is a wildcard. */
+        if (next_check.id != 0) {
+            ir_emit_label(cg->ir, next_check);
+            if (nphi > 0) {
+                /* unreachable: provide a dummy value of the right type
+                   for the phi. ir_new_tmp guarantees a unique SSA name. */
+                IRVal undef = ir_new_tmp(cg->ir, qt ? qt : 'w');
+                ir_emit_copy(cg->ir, undef, 0);
+                body_blocks[nphi] = next_check;
+                body_values[nphi] = undef;
+                nphi++;
+                ir_emit_jmp(cg->ir, merge_block);
+            }
+            /* if nphi == 0 (void match), no merge needed; just leave the
+               block dangling — QBE tolerates an unreferenced label. */
         }
 
         /* merge with phi */

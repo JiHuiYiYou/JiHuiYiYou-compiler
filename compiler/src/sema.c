@@ -28,6 +28,12 @@ static void pop_scope(SemaContext *ctx) {
 static Type *infer_type(SemaContext *ctx, Node *n);
 static Type *resolve_type_node(SemaContext *ctx, Node *tn);
 
+/* v0.7 7A: process a match-arm pattern, adding variable bindings to
+   sema's current scope and locals. `match_type` is the type of the value
+   being matched; for NODE_PATTERN_ENUM, the variant's payload type is
+   passed down for the inner pattern. */
+static void process_match_pattern(SemaContext *ctx, Node *pat, Type *match_type);
+
 /* ── resolve a type annotation node to a Type* ── */
 static Type *resolve_type_node(SemaContext *ctx, Node *tn) {
     if (!tn) return NULL;
@@ -89,6 +95,67 @@ static Type *resolve_type_node(SemaContext *ctx, Node *tn) {
 
     sema_error(ctx, tn->loc, "invalid type annotation");
     return type_primitive(ctx->arena, PRIM_I32);
+}
+
+/* v0.7 7A: walk a match-arm pattern and add variable bindings to sema's
+   current scope + locals. `match_type` is the type of the matched value;
+   for NODE_PATTERN_ENUM the function looks up the variant's payload type
+   and recurses on the inner pattern with that payload type. */
+static void process_match_pattern(SemaContext *ctx, Node *pat, Type *match_type) {
+    if (!pat) return;
+
+    switch (pat->kind) {
+    case NODE_PATTERN_IDENT: {
+        NodePatternIdent *pi = node_pattern_ident_data(pat);
+        Sym *sym = pi->sym;
+        sym->type = match_type;
+        sym->kind = SYM_VAR;
+        symtab_insert(ctx->current_scope, sym->name, SYM_VAR, match_type, false, ctx->scope_depth);
+        if (ctx->nlocals < SEMA_MAX_LOCALS) {
+            ctx->locals[ctx->nlocals].sym = sym;
+            ctx->locals[ctx->nlocals].type = match_type;
+            ctx->nlocals++;
+        }
+        break;
+    }
+    case NODE_PATTERN_ENUM: {
+        NodePatternEnum *pe = node_pattern_enum_data(pat);
+        /* find the variant's payload type, if any, by looking up the enum */
+        Type *inner_type = NULL;
+        Type *enum_type = NULL;
+        /* resolve enum type from type_sym or from match_type */
+        if (pe->type_sym && pe->type_sym->type && pe->type_sym->type->kind == KIND_ENUM) {
+            enum_type = pe->type_sym->type;
+        } else if (match_type && match_type->kind == KIND_ENUM) {
+            enum_type = match_type;
+        }
+        if (enum_type && pe->variant_sym) {
+            for (size_t i = 0; i < enum_type->enum_type.nvariants; i++) {
+                if (strcmp(enum_type->enum_type.variants[i].name->name,
+                           pe->variant_sym->name) == 0) {
+                    inner_type = enum_type->enum_type.variants[i].payload;
+                    break;
+                }
+            }
+        }
+        if (pe->inner) {
+            process_match_pattern(ctx, pe->inner, inner_type);
+        }
+        break;
+    }
+    case NODE_PATTERN_OR: {
+        NodePatternOr *po = node_pattern_or_data(pat);
+        process_match_pattern(ctx, po->left, match_type);
+        process_match_pattern(ctx, po->right, match_type);
+        break;
+    }
+    case NODE_PATTERN_LIT:
+    case NODE_PATTERN_WILD:
+    case NODE_PATTERN_RANGE:
+    default:
+        /* no bindings to add */
+        break;
+    }
 }
 
 /* ── type inference for expressions ── */
@@ -726,11 +793,53 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
     /* ── match ── */
     case NODE_MATCH: {
         NodeMatch *d = node_match_data(n);
-        (void)infer_type(ctx, d->expr);
+        Type *match_type = infer_type(ctx, d->expr);
         Type *common_type = NULL;
+
+        /* v0.7 7A: exhaustive match check for enums.
+           If match expr type is enum, every variant must be covered by some arm.
+           `_` wildcard acts as catch-all (must be last). */
+        Sym *variants[64];
+        int nv = 0;
+        int has_wildcard = 0;
+        int is_enum_match = (match_type && match_type->kind == KIND_ENUM &&
+                             match_type->enum_type.name);
+        if (is_enum_match) {
+            const char *ename = match_type->enum_type.name->name;
+            nv = sym_enum_variants(ctx->global_scope, ename, variants, 64);
+        }
 
         for (size_t i = 0; i < d->narms; i++) {
             NodeMatchArm *arm = node_match_arm_data(d->arms[i]);
+            Node *pat = arm->pattern;
+
+            /* 7A: register pattern bindings (e.g. `Some(v) => v`) into sema's
+               current scope so the body can reference them. */
+            process_match_pattern(ctx, pat, match_type);
+
+
+            /* 7A: mark which variants are covered by this arm's pattern */
+            if (is_enum_match && nv > 0) {
+                if (pat->kind == NODE_PATTERN_WILD) {
+                    has_wildcard = 1;
+                } else if (pat->kind == NODE_PATTERN_ENUM) {
+                    NodePatternEnum *pe = node_pattern_enum_data(pat);
+                    /* vsym may be a parser-allocated local-scope sym (different ptr
+                       from sema's global-scope variant sym). Match by name. */
+                    const char *vname = pe->variant_sym ? pe->variant_sym->name : NULL;
+                    if (vname) {
+                        for (int j = 0; j < nv; j++) {
+                            if (variants[j] && strcmp(variants[j]->name, vname) == 0) {
+                                variants[j] = NULL;  /* mark covered */
+                                break;
+                            }
+                        }
+                    }
+                }
+                /* NODE_PATTERN_IDENT / LIT / RANGE / OR: don't cover enum variants
+                   (catch-all wildcard handles them if present). */
+            }
+
             Type *body_type = infer_type(ctx, arm->body);
             if (i == 0) {
                 common_type = body_type;
@@ -743,6 +852,18 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
                 }
             }
         }
+
+        /* 7A: report uncovered variants */
+        if (is_enum_match && !has_wildcard) {
+            for (int j = 0; j < nv; j++) {
+                if (variants[j]) {
+                    sema_error(ctx, n->loc,
+                               "non-exhaustive match: missing variant '%s'",
+                               variants[j]->name);
+                }
+            }
+        }
+
         n->type = common_type ? common_type : type_void();
         return n->type;
     }
@@ -877,8 +998,12 @@ static void check_module(SemaContext *ctx, Node *module) {
                     if (al > max_payload_align) max_payload_align = al;
                 }
                 Sym *vsym = symtab_lookup(ctx->global_scope, ed->variants[j].name);
-                if (!vsym)
+                if (!vsym) {
                     vsym = symtab_insert(ctx->global_scope, ed->variants[j].name, SYM_VARIANT, pt, false, 0);
+                    /* v0.7 7A: tag variant with owning enum name so sym_enum_variants
+                       can collect all variants of a given enum type. */
+                    vsym->module = arena_strdup(ctx->arena, td->sym->name, strlen(td->sym->name));
+                }
                 variants[j].name = vsym;
                 variants[j].payload = pt;
                 variants[j].tag = (int)j;

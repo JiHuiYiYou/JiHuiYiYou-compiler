@@ -1,0 +1,28 @@
+// EXPECT: 2
+// v0.7 7A: enum match 穷尽性检查 + 短名 variant pattern
+//
+// Option::Some 和 Option::None 都覆盖，合法。
+// 短名 `Some(_)` / `None` 也合法（自动查 SYM_VARIANT）。
+// （payload binding `Some(v) => v` 留到后续 sprint —— 当前 codegen
+// 还没把 pattern binding 接进 cg->locals，先用 `_` 通配符占位。）
+
+type Option = enum { Some(i32), None }
+
+fn unwrap_or(opt: Option, default: i32) -> i32 {
+    match opt {
+        Option::Some(_) => 1,
+        Option::None    => default,
+    }
+}
+
+fn unwrap_or_short(opt: Option, default: i32) -> i32 {
+    // 短名 variant pattern（v0.7 新增）
+    match opt {
+        Some(_) => 1,
+        None    => default,
+    }
+}
+
+fn main_jhyy() -> i32 {
+    unwrap_or(Option::Some(42), 0) + unwrap_or_short(Option::Some(0), 1)
+}

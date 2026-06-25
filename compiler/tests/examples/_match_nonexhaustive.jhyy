@@ -1,0 +1,20 @@
+// v0.7 7A negative test (skipped from regress.py via `_` prefix;
+//   verified manually — see docs/logs/v0/changelog-v0.7.0.md):
+//
+// match opt { Option::Some(v) => v } 漏 None arm → 必须编译错误。
+//
+// Manual verification:
+//   $ jhyy compile _match_nonexhaustive.jhyy -o /tmp/x
+//   _match_nonexhaustive.jhyy:N:N: error: non-exhaustive match: missing variant 'None'
+//   1 semantic error(s)
+//   exit=1
+
+type Option = enum { Some(i32), None }
+
+fn main_jhyy() -> i32 {
+    let opt = Option::Some(5);
+    match opt {
+        Option::Some(v) => v,  /* 漏 None */
+    }
+    0
+}

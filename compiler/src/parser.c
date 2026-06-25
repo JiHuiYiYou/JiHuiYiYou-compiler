@@ -122,7 +122,7 @@ static Node *parse_pattern(Parser *p) {
         }
         /* else: identifier pattern, Enum::Variant, or range */
         advance(p);
-        if (match(p, TOKEN_COLON) && match(p, TOKEN_COLON)) {
+        if (match(p, TOKEN_COLONCOLON)) {
             Token vt = expect(p, TOKEN_IDENT, "variant name");
             const char *tname = tok_name(p, t);
             const char *vname = tok_name(p, vt);
@@ -143,6 +143,26 @@ static Node *parse_pattern(Parser *p) {
             if (!sym) sym = symtab_insert(p->current_scope, name, SYM_VAR, NULL, false, p->scope_depth);
             Node *lo = ast_new_pattern_ident(p->arena, t.loc, sym);
             return ast_new_pattern_range(p->arena, t.loc, lo, hi);
+        }
+        /* v0.7 7A: short-name variant pattern — `Some(v)` or bare `None` where
+           the name resolves to a known enum variant in global scope.
+           Disambiguated from ident pattern: `Some(v)` (parens) is variant;
+           `None` (no parens) is also a variant when the name resolves to
+           SYM_VARIANT in global scope. */
+        {
+            const char *name = tok_name(p, t);
+            Sym *gsym = symtab_lookup(p->global_scope, name);
+            if (gsym && gsym->kind == SYM_VARIANT) {
+                if (check(p, TOKEN_LPAREN)) {
+                    /* short-name variant with payload: Some(v) → NODE_PATTERN_ENUM */
+                    advance(p);  /* consume ( */
+                    Node *inner = parse_pattern(p);
+                    expect(p, TOKEN_RPAREN, ") after enum pattern");
+                    return ast_new_pattern_enum(p->arena, t.loc, NULL, gsym, inner);
+                }
+                /* bare variant (no payload, no parens): None → NODE_PATTERN_ENUM with NULL inner */
+                return ast_new_pattern_enum(p->arena, t.loc, NULL, gsym, NULL);
+            }
         }
         const char *name = tok_name(p, t);
         Sym *sym = symtab_lookup(p->current_scope, name);
@@ -500,6 +520,14 @@ static Node *parse_type_decl(Parser *p) {
         }
 
         expect(p, TOKEN_RBRACE, "}");
+        /* v0.7 7A: register variant names in global_scope so short-name pattern
+           `match x { Some(v) => ... }` can resolve at parse time. sema later
+           upgrades these with payload type info + tag value. */
+        for (size_t i = 0; i < nvariants; i++) {
+            if (!symtab_lookup_local(p->global_scope, variants[i].name))
+                symtab_insert(p->global_scope, variants[i].name, SYM_VARIANT,
+                              NULL, false, 0);
+        }
         body = ast_new_enum_def(p->arena, body_loc, variants, nvariants);
     } else {
         /* type alias: type Name = OtherType */

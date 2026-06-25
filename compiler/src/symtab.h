@@ -42,4 +42,9 @@ Sym      *symtab_insert_sym(SymTable *t, Sym *sym);  /* insert existing Sym* int
 Sym      *symtab_lookup(SymTable *t, const char *name);        /* searches upward */
 Sym      *symtab_lookup_local(SymTable *t, const char *name);  /* current scope only */
 
+/* v0.7 7A: collect all SYM_VARIANT syms owned by enum `enum_name`.
+   Returns count written to `out` (capped at max_variants). */
+int      sym_enum_variants(SymTable *global_scope, const char *enum_name,
+                           Sym **out, int max_variants);
+
 #endif

@@ -152,3 +152,20 @@ Sym *symtab_lookup(SymTable *t, const char *name) {
 Sym *symtab_lookup_local(SymTable *t, const char *name) {
     return symtab_lookup_one(t, name);
 }
+
+/* v0.7 7A: collect all SYM_VARIANT syms owned by enum `enum_name`.
+   Used by sema to do exhaustive match checking.
+   Returns count written to out (0 if enum_name not found or has no variants). */
+int sym_enum_variants(SymTable *global_scope, const char *enum_name,
+                      Sym **out, int max_variants) {
+    if (!global_scope || !enum_name || !out || max_variants <= 0) return 0;
+    int n = 0;
+    for (size_t i = 0; i < global_scope->nentries && n < max_variants; i++) {
+        Sym *s = global_scope->entries[i];
+        if (s && s->kind == SYM_VARIANT && s->module &&
+            strcmp(s->module, enum_name) == 0) {
+            out[n++] = s;
+        }
+    }
+    return n;
+}
