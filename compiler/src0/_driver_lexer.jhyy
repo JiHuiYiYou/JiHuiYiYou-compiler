@@ -1,0 +1,233 @@
+// _driver_lexer.jhyy — Sprint 3 commit 1 单元测试：验证 lexer.jhyy
+//
+// 测试覆盖：
+//   - lexer_init + lexer_next 基础调用
+//   - 关键字识别（let / fn / return / struct ...）
+//   - 标识符 + 字面量（int / float / string / bool）
+//   - 运算符 / 标点（== / != / <= / >= / && / || / :: / .. / => / -> / << / >>）
+//   - 1-token lookahead（lexer_peek 不消耗）
+//   - 注释跳过（// 和 /* */）
+//   - 数字字面量后缀（42i32, 0xFFi32, 100u64）
+//   - token_kind_name
+//
+// 退出码：42
+
+import ffi;
+import lexer;
+import util;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+// 检查 token kind + 文本内容；返回 1=ok, 0=fail
+fn check_token(t: *Token, expected_kind: i32, expected_text: *u8) -> i32 {
+    if (*t).kind != expected_kind {
+        printf("FAIL kind got=%d want=%d\n", (*t).kind);
+        return 0;
+    }
+    let len = strlen(expected_text);
+    if (*t).length != len {
+        printf("FAIL len got=%d want=%d\n", (*t).length as i32, len as i32);
+        return 0;
+    }
+    if strncmp((*t).start, expected_text, len) != (0 as i32) {
+        printf("FAIL text\n", 0);
+        return 0;
+    }
+    return 1;
+}
+
+fn main_jhyy() -> i32 {
+    printf("L0\n", 0);
+
+    // ──── 测试 1: 基础 let x = 42; ────
+    let src1 = "let x = 42;" as *u8;
+    let mut lex: Lexer = Lexer {
+        source: 0 as *u8, current: 0 as *u8, filename: 0 as *u8,
+        line: 0, col: 0,
+        peek_kind: 0, peek_start: 0 as *u8, peek_len: 0 as i64,
+        peek_lf: 0 as *u8, peek_ll: 0, peek_lc: 0,
+        has_peek: 0, error_count: 0,
+    };
+    lexer_init(&lex, src1, "t1.jhyy" as *u8);
+
+    let mut t: Token = Token {
+        kind: 0, start: 0 as *u8, length: 0 as i64,
+        loc_filename: 0 as *u8, loc_line: 0, loc_col: 0,
+    };
+    let mut n_ok: i32 = 0;
+
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_LET(), "let" as *u8) != (1 as i32) {
+        printf("FAIL test1 let\n", 0); return 1;
+    }
+    n_ok = n_ok + 1;
+
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_IDENT(), "x" as *u8) != (1 as i32) {
+        printf("FAIL test1 ident\n", 0); return 2;
+    }
+    n_ok = n_ok + 1;
+
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_EQ(), "=" as *u8) != (1 as i32) {
+        printf("FAIL test1 eq\n", 0); return 3;
+    }
+    n_ok = n_ok + 1;
+
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_INT(), "42" as *u8) != (1 as i32) {
+        printf("FAIL test1 int\n", 0); return 4;
+    }
+    n_ok = n_ok + 1;
+
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_SEMICOLON(), ";" as *u8) != (1 as i32) {
+        printf("FAIL test1 semi\n", 0); return 5;
+    }
+    n_ok = n_ok + 1;
+
+    lexer_next(&lex, &t);
+    if t.kind != TOKEN_EOF() {
+        printf("FAIL test1 eof\n", 0); return 6;
+    }
+    printf("L1\n", 0);
+
+    // ──── 测试 2: 关键字 + 带下划线 ident ────
+    let src2 = "fn if_while return" as *u8;
+    lexer_init(&lex, src2, "t2.jhyy" as *u8);
+
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_FN(), "fn" as *u8) != (1 as i32) {
+        printf("FAIL test2 fn\n", 0); return 10;
+    }
+    n_ok = n_ok + 1;
+
+    // "if_while" 是 identifier（带下划线）
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_IDENT(), "if_while" as *u8) != (1 as i32) {
+        printf("FAIL test2 ident_with_underscore\n", 0); return 11;
+    }
+    n_ok = n_ok + 1;
+
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_RETURN(), "return" as *u8) != (1 as i32) {
+        printf("FAIL test2 return\n", 0); return 12;
+    }
+    n_ok = n_ok + 1;
+    printf("L2\n", 0);
+
+    // ──── 测试 3: 运算符 + 复合 ────
+    let src3 = "== != <= >= && || :: .. => -> << >>" as *u8;
+    lexer_init(&lex, src3, "t3.jhyy" as *u8);
+
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_EQEQ(), "==" as *u8) != (1 as i32) { return 20; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_BANGEQ(), "!=" as *u8) != (1 as i32) { return 21; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_LTEQ(), "<=" as *u8) != (1 as i32) { return 22; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_GTEQ(), ">=" as *u8) != (1 as i32) { return 23; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_AMPAMP(), "&&" as *u8) != (1 as i32) { return 24; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_PIPEPIPE(), "||" as *u8) != (1 as i32) { return 25; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_COLONCOLON(), "::" as *u8) != (1 as i32) { return 26; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_DOTDOT(), ".." as *u8) != (1 as i32) { return 27; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_FATARROW(), "=>" as *u8) != (1 as i32) { return 28; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_ARROW(), "->" as *u8) != (1 as i32) { return 29; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_LTLT(), "<<" as *u8) != (1 as i32) { return 30; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_GTGT(), ">>" as *u8) != (1 as i32) { return 31; }
+    n_ok = n_ok + 1;
+    printf("L3\n", 0);
+
+    // ──── 测试 4: peek 不消耗 ────
+    let src4 = "ab cd" as *u8;
+    lexer_init(&lex, src4, "t4.jhyy" as *u8);
+
+    lexer_peek(&lex, &t);
+    if check_token(&t, TOKEN_IDENT(), "ab" as *u8) != (1 as i32) { return 40; }
+    n_ok = n_ok + 1;
+    lexer_peek(&lex, &t);
+    if check_token(&t, TOKEN_IDENT(), "ab" as *u8) != (1 as i32) { return 41; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_IDENT(), "ab" as *u8) != (1 as i32) { return 42; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_IDENT(), "cd" as *u8) != (1 as i32) { return 43; }
+    n_ok = n_ok + 1;
+    printf("L4\n", 0);
+
+    // ──── 测试 5: 字面量 + bool + 类型后缀 ────
+    let src5 = "true false 3.14 0xFFi32 100u64" as *u8;
+    lexer_init(&lex, src5, "t5.jhyy" as *u8);
+
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_BOOL(), "true" as *u8) != (1 as i32) { return 50; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_BOOL(), "false" as *u8) != (1 as i32) { return 51; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_FLOAT(), "3.14" as *u8) != (1 as i32) { return 52; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_INT(), "0xFFi32" as *u8) != (1 as i32) { return 53; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_INT(), "100u64" as *u8) != (1 as i32) { return 54; }
+    n_ok = n_ok + 1;
+    printf("L5\n", 0);
+
+    // ──── 测试 6: 注释跳过 ────
+    let src6 = "// line comment\nlet /* block */ x = 1;" as *u8;
+    lexer_init(&lex, src6, "t6.jhyy" as *u8);
+
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_LET(), "let" as *u8) != (1 as i32) { return 60; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_IDENT(), "x" as *u8) != (1 as i32) { return 61; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_EQ(), "=" as *u8) != (1 as i32) { return 62; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_INT(), "1" as *u8) != (1 as i32) { return 63; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if check_token(&t, TOKEN_SEMICOLON(), ";" as *u8) != (1 as i32) { return 64; }
+    n_ok = n_ok + 1;
+    lexer_next(&lex, &t);
+    if t.kind != TOKEN_EOF() { return 65; }
+    printf("L6\n", 0);
+
+    // ──── 测试 7: token_kind_name ────
+    if strcmp(token_kind_name(TOKEN_FN()), "fn" as *u8) != (0 as i32) { return 70; }
+    if strcmp(token_kind_name(TOKEN_LET()), "let" as *u8) != (0 as i32) { return 71; }
+    if strcmp(token_kind_name(TOKEN_EQEQ()), "==" as *u8) != (0 as i32) { return 72; }
+    if strcmp(token_kind_name(TOKEN_ARROW()), "->" as *u8) != (0 as i32) { return 73; }
+    if strcmp(token_kind_name(TOKEN_EOF()), "EOF" as *u8) != (0 as i32) { return 74; }
+    printf("L7\n", 0);
+
+    printf("PASS n_ok=%d\n", n_ok);
+    return 42;
+}

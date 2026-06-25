@@ -1,0 +1,57 @@
+// ffi.jhyy — 集中声明 JHYY 编译器自举需要的 libc FFI + jhyy_helpers
+//
+// 集中所有 extern fn 声明。jhyy extern fn 没有别名机制（parser.c:514 直接复用
+// parse_func），所以 extern 名必须跟 C 符号名一致才能 link。
+//
+// 变参说明（plan 修订）：jhyy parser 不接受 `...`（实测 2026-06-22）。所有 printf /
+// sprintf 走单 i32 参数风格（lang-spec 附录 B P3 的 fallback）。多段格式化由
+// util.jhyy 的 StringBuilder.sb_appendf（内部 sprintf 单 i32）+ sb_append 拼。
+//
+// jhyy_helpers.c（plan 修订补）：C 端唯一 FFI 桥，桥接 jhyy extern fn 拿不到的
+// libc 资源（FILE* 流 / fopen 二进制模式 / stderr 行号前缀）。jhyy extern 调用，
+// C linker 链接。v1.0 全程存在。
+
+// ═══ 文件 I/O ═══
+extern fn fopen(path: *u8, mode: *u8) -> *u8;
+extern fn fread(buf: *u8, size: i64, count: i64, fp: *u8) -> i64;
+extern fn fwrite(buf: *u8, size: i64, count: i64, fp: *u8) -> i64;
+extern fn fclose(fp: *u8) -> i32;
+extern fn fputs(s: *u8, fp: *u8) -> i32;
+
+// ═══ 内存 ═══
+extern fn malloc(size: i64) -> *u8;
+extern fn free(p: *u8) -> i32;  // v0.6 习惯（实际 C void free）
+extern fn memcpy(dst: *u8, src: *u8, n: i64) -> *u8;
+extern fn memset(s: *u8, c: i32, n: i64) -> *u8;
+extern fn realloc(p: *u8, size: i64) -> *u8;
+
+// ═══ 字符串（自实现为主；这里只列 libc 用于 StringBuilder.sb_appendf） ═══
+extern fn strlen(s: *u8) -> i64;
+extern fn strcmp(a: *u8, b: *u8) -> i32;
+extern fn strncmp(a: *u8, b: *u8, n: i64) -> i32;
+extern fn sprintf(buf: *u8, fmt: *u8, val: i32) -> i32;  // 单 i32
+
+// ═══ 控制台输出（单 i32 参数，覆盖 v0.6 用例） ═══
+extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn puts(s: *u8) -> i32;
+
+// ═══ 系统 ═══
+extern fn system(cmd: *u8) -> i32;
+extern fn exit(code: i32);
+
+// ═══ 字符分类（ctype.h 函数，sprint 3 lexer.jhyy 用） ═══
+extern fn isdigit(c: i32) -> i32;
+extern fn isalpha(c: i32) -> i32;
+extern fn isalnum(c: i32) -> i32;
+
+// ═══ jhyy_helpers.c externs（C 端桥接） ═══
+
+// stderr/stdout 流桥（jhyy 拿不到 FILE* 地址）
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+extern fn jh_fputs_stdout(s: *u8) -> i32;
+
+// 二进制模式 fopen（防 CRLF 污染 QBE IL，v0.6 memory feedback）
+extern fn jh_fopen_wb(path: *u8) -> *u8;
+
+// "filename:line:col: " 前缀输出到 stderr（sema/parser 错误格式）
+extern fn jh_print_loc_stderr(loc_filename: *u8, line: i32, col: i32) -> i32;
