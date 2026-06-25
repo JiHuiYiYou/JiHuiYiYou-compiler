@@ -1,0 +1,618 @@
+// parser.jhyy — JHYY 翻译自 compiler/src/parser.c
+// v1.0.0 sprint 3 commit 2, 2026-06-25
+//
+// 翻译要点（v0.6.4 patch 后实测）：
+//   - parse_decl 顶层 dispatch（fn/type/extern/import），fallback 走 parse_stmt
+//   - 顶层 entry = fn parse_func(is_extern) + parse_type_decl + parse_extern_decl + parse_import_decl
+//   - parse_type 走 pointer / slice / array / ident / qualified ident
+//     fn type 占位（ast_new_int 0 PRIM_I32 替代，C 端亦同）
+//   - parse_func 注册 sym 到 global scope（递归调用支持），push/pop scope 给 body
+//   - parse_block 循环 parse_stmt 直到 }/EOF
+//   - parse_stmt / parse_expr **stub**（commit 2 不实现，留到 commit 3 / 4）
+//     parse_stmt 至少 advance 一 token 防 parse_block 死循环
+//     parse_expr 至少 advance 一 token 防 parse_let / parse_match / 等死循环
+//
+// 已知差异（vs C 版）：
+//   - **C Token by value** → jhyy Token 平铺 6 字段 + caller 栈分配 + lexer 写 *t
+//   - **C `bool` 参数 is_extern** → jhyy `i32` (0/1)
+//   - **C `Token` nested in `Parser.prev`** → jhyy Parser.prev_kind/start/length/lf/ll/lc 6 字段
+//     （避免 nested struct 触发 QBE 'w' load 不对齐，plan § 1.5 bug #5）
+//   - **C `ParseRule[128]` in Parser** → commit 2 暂不实现（commit 3 parse_expr 加）
+//   - **C `static Node *advance(Parser *p)` 返回 Token by value**
+//     → jhyy fn parser_advance(p, *t) 写 *t，prev 字段同步更新
+//   - **C `bool match / check` 返回 bool** → jhyy i32 (0/1)
+//   - **C NodeFuncDeclParam / StructFieldDecl / EnumVariantDecl 数组 growable**
+//     → jhyy 走同样 growable 模式（arena_alloc + memcpy）
+//   - **C `size_t nparams` etc.** → jhyy i64
+//   - **C `fprintf(stderr, ...)` 变参** → jhyy jh_print_loc_stderr + jh_fputs_stderr
+//     （v0.6 parser 不接受变参，plan § 1.5 bug #3）
+//
+// commit 拆分：
+//   commit 2（本 commit）：parse_decl + parse_func + parse_type_decl + parse_type
+//                          + parse_extern_decl + parse_import_decl + parse_block
+//                          + parse_stmt stub + parse_expr stub
+//   commit 3（下次）：parse_stmt 完整（parse_let/if/while/for/match/return/break/continue/parse_pattern）
+//   commit 4（再下次）：parse_expr 完整 Pratt + ParseRule 表 + init_rules
+
+import ffi;
+import util;
+import lexer;
+import arena;
+import symtab;
+import ast;
+
+// ════════════════════════════════════════════════════
+// Parser state（pre 字段平铺避免 nested struct，plan § 1.5 bug #5）
+// ════════════════════════════════════════════════════
+
+type Parser = struct {
+    lexer:         *Lexer,
+    arena:         *Arena,
+    prev_kind:     i32,         // last consumed token's kind
+    prev_start:    *u8,         // last consumed token's text start
+    prev_length:   i64,         // last consumed token's text length
+    prev_lf:       *u8,         // last consumed token's loc_filename
+    prev_ll:       i32,         // last consumed token's loc_line
+    prev_lc:       i32,         // last consumed token's loc_col
+    global_scope:  *u8,         // *SymTable (jhyy 无 *SymTable in struct)
+    current_scope: *u8,
+    scope_depth:   i32,
+    error_count:   i32,
+}
+
+// Parser 字节数 = 2 * 8 (ptr) + 6 * 8 (token fields) + 2 * 8 (scope) + 2 * 4 (depth/count) + 2 pad = 80
+fn PARSER_SIZE() -> i64 { return 80 as i64; }
+
+// ════════════════════════════════════════════════════
+// Token helpers（caller 栈分配 Token，let mut t: Token = ...）
+// ════════════════════════════════════════════════════
+
+// 空 Token（用于栈分配初始化）
+fn empty_token() -> Token {
+    return Token {
+        kind: 0, start: 0 as *u8, length: 0 as i64,
+        loc_filename: 0 as *u8, loc_line: 0, loc_col: 0,
+    };
+}
+
+// peek: 不消耗 token。caller 栈分配 Token
+fn parser_peek(p: *Parser, t: *Token) -> i32 {
+    lexer_peek((*p).lexer, t);
+    return 0;
+}
+
+// advance: 取下一 token（消耗），存到 prev 字段，复制到 *t
+fn parser_advance(p: *Parser, t: *Token) -> i32 {
+    lexer_next((*p).lexer, t);
+    (*p).prev_kind = t.kind;
+    (*p).prev_start = t.start;
+    (*p).prev_length = t.length;
+    (*p).prev_lf = t.loc_filename;
+    (*p).prev_ll = t.loc_line;
+    (*p).prev_lc = t.loc_col;
+    return 0;
+}
+
+// check: peek 当前 token kind 是否匹配
+fn parser_check(p: *Parser, kind: i32) -> i32 {
+    let mut t = empty_token();
+    parser_peek(p, &t);
+    if t.kind == kind {
+        return 1;
+    }
+    return 0;
+}
+
+// match: 若 peek 匹配则 advance，返回 1；否则不消耗，返回 0
+fn parser_match(p: *Parser, kind: i32, t: *Token) -> i32 {
+    if parser_check(p, kind) != (0 as i32) {
+        parser_advance(p, t);
+        return 1;
+    }
+    return 0;
+}
+
+// expect: 必须匹配 kind；匹配则 advance 返回 0；不匹配则报 error 到 stderr 返回 1
+// 报错：jh_print_loc_stderr(filename, line, col) + jh_fputs_stderr("expected X, got Y\n")
+fn parser_expect(p: *Parser, kind: i32, what: *u8, t: *Token) -> i32 {
+    if parser_check(p, kind) != (0 as i32) {
+        parser_advance(p, t);
+        return 0;
+    }
+    let mut peekt = empty_token();
+    parser_peek(p, &peekt);
+    jh_print_loc_stderr(peekt.loc_filename, peekt.loc_line, peekt.loc_col);
+    jh_fputs_stderr("error: expected " as *u8);
+    jh_fputs_stderr(what);
+    jh_fputs_stderr(", got " as *u8);
+    jh_fputs_stderr(token_kind_name(peekt.kind));
+    jh_fputs_stderr("\n" as *u8);
+    (*p).error_count = (*p).error_count + (1 as i32);
+    return 1;
+}
+
+// ════════════════════════════════════════════════════
+// Scope management
+// ════════════════════════════════════════════════════
+
+fn parser_push_scope(p: *Parser) -> i32 {
+    (*p).current_scope = symtab_new((*p).arena, (*p).current_scope);
+    (*p).scope_depth = (*p).scope_depth + (1 as i32);
+    return 0;
+}
+
+fn parser_pop_scope(p: *Parser) -> i32 {
+    let cur = (*p).current_scope as *SymTable;
+    if cur != (0 as *SymTable) {
+        let parent = (*cur).parent;
+        (*p).current_scope = parent;
+    }
+    (*p).scope_depth = (*p).scope_depth - (1 as i32);
+    return 0;
+}
+
+// ════════════════════════════════════════════════════
+// Token name helper
+// ════════════════════════════════════════════════════
+
+// tok_name: arena_strdup token 文本，返回 *u8（NUL 终止）
+fn parser_tok_name(p: *Parser, t: *Token) -> *u8 {
+    return arena_strdup((*p).arena, t.start, t.length);
+}
+
+// ════════════════════════════════════════════════════
+// Stub functions（commit 3 / 4 实现）
+// ════════════════════════════════════════════════════
+
+// parse_expr: stub，commit 4（parse_expr Pratt）实现
+// 当前至少 advance 一 token 防 parse_let / parse_match / 等死循环
+fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
+    let mut t = empty_token();
+    parser_advance(p, &t);
+    return 0 as *Node;
+}
+
+// parse_stmt: stub，commit 3（parse_stmt 完整）实现
+// 当前至少 advance 一 token 防 parse_block 死循环
+fn parse_stmt(p: *Parser) -> *Node {
+    let mut t = empty_token();
+    parser_advance(p, &t);
+    return 0 as *Node;
+}
+
+// parse_pattern: stub，commit 3 实现
+fn parse_pattern(p: *Parser) -> *Node {
+    let mut t = empty_token();
+    parser_advance(p, &t);
+    return 0 as *Node;
+}
+
+// ════════════════════════════════════════════════════
+// Type parsing
+// ════════════════════════════════════════════════════
+
+fn parse_type(p: *Parser) -> *Node {
+    let mut t = empty_token();
+
+    // *T (pointer type)
+    if parser_match(p, TOKEN_STAR(), &t) != (0 as i32) {
+        let inner = parse_type(p);
+        return ast_new_unary((*p).arena, (*p).prev_lf, (*p).prev_ll, (*p).prev_lc,
+                             TOKEN_STAR(), inner);
+    }
+
+    // [*]T (slice) or [T; N] (array)
+    if parser_match(p, TOKEN_LBRACKET(), &t) != (0 as i32) {
+        if parser_match(p, TOKEN_STAR(), &t) != (0 as i32) {
+            // [*]T
+            parser_expect(p, TOKEN_RBRACKET(), "] after [*" as *u8, &t);
+            let elem = parse_type(p);
+            return ast_new_slice_type((*p).arena, (*p).prev_lf, (*p).prev_ll, (*p).prev_lc, elem);
+        }
+        // [T; N]
+        let base = parse_type(p);
+        parser_expect(p, TOKEN_SEMICOLON(), "; in array type" as *u8, &t);
+        // count expr — stub（commit 4 完整 parse_expr 接入）
+        let _count = parse_expr(p, 0 as i32);
+        parser_expect(p, TOKEN_RBRACKET(), "] in array type" as *u8, &t);
+        return ast_new_array_type((*p).arena, (*p).prev_lf, (*p).prev_ll, (*p).prev_lc, base, 0 as *Node);
+    }
+
+    // fn(T1, T2) -> Ret
+    if parser_match(p, TOKEN_FN(), &t) != (0 as i32) {
+        parser_expect(p, TOKEN_LPAREN(), "( in fn type" as *u8, &t);
+        // skip params: 循环消耗直到 )
+        while parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
+            if parser_check(p, TOKEN_EOF()) != (0 as i32) {
+                break;
+            }
+            parser_advance(p, &t);
+            if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) {
+                break;
+            }
+        }
+        parser_expect(p, TOKEN_RPAREN(), ") in fn type" as *u8, &t);
+        // 占位：返回 ast_new_int(0, PRIM_I32)，跟 C 端 placeholder 一致
+        return ast_new_int((*p).arena, (*p).prev_lf, (*p).prev_ll, (*p).prev_lc,
+                           0 as i64, PRIM_I32());
+    }
+
+    // Ident [:: Ident]*
+    parser_expect(p, TOKEN_IDENT(), "type name" as *u8, &t);
+    let name = parser_tok_name(p, &t);
+    let mut sym = symtab_lookup((*p).current_scope, name);
+    if sym == (0 as *Sym) {
+        sym = symtab_insert((*p).current_scope, name, SYM_TYPE(),
+                            0 as *u8, 0 as i32, (*p).scope_depth);
+    }
+    let mut base = ast_new_ident((*p).arena, t.loc_filename, t.loc_line, t.loc_col, sym);
+
+    // :: Ident (qualified)
+    while parser_check(p, TOKEN_COLONCOLON()) != (0 as i32) {
+        parser_advance(p, &t);
+        parser_expect(p, TOKEN_IDENT(), "type name after ::" as *u8, &t);
+        let qname = parser_tok_name(p, &t);
+        let mut qsym = symtab_lookup((*p).current_scope, qname);
+        if qsym == (0 as *Sym) {
+            qsym = symtab_insert((*p).current_scope, qname, SYM_TYPE(),
+                                 0 as *u8, 0 as i32, (*p).scope_depth);
+        }
+        base = ast_new_ident((*p).arena, t.loc_filename, t.loc_line, t.loc_col, qsym);
+    }
+
+    return base;
+}
+
+// ════════════════════════════════════════════════════
+// Block / Statement parsing（commit 2 stub 版）
+// ════════════════════════════════════════════════════
+
+fn parse_block(p: *Parser) -> *Node {
+    let mut t = empty_token();
+    parser_peek(p, &t);
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
+
+    parser_expect(p, TOKEN_LBRACE(), "{" as *u8, &t);
+    parser_push_scope(p);
+
+    let mut stmts: *u8 = 0 as *u8;
+    let mut nstmts: i64 = 0 as i64;
+    let mut cap: i64 = 0 as i64;
+
+    while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+        if parser_check(p, TOKEN_EOF()) != (0 as i32) {
+            break;
+        }
+        let stmt = parse_stmt(p);
+        if stmt != (0 as *Node) {
+            if nstmts >= cap {
+                cap = if cap != (0 as i64) { cap * (2 as i64) } else { (8 as i64) };
+                let ns = arena_alloc((*p).arena, cap * (8 as i64));
+                if stmts != (0 as *u8) {
+                    if nstmts > (0 as i64) {
+                        memcpy(ns, stmts, nstmts * (8 as i64));
+                    }
+                }
+                stmts = ns;
+            }
+            let slot = (stmts as i64 + nstmts * (8 as i64)) as **Node;
+            *slot = stmt;
+            nstmts = nstmts + (1 as i64);
+        }
+    }
+
+    parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
+    parser_pop_scope(p);
+
+    return ast_new_block((*p).arena, loc_lf, loc_ll, loc_lc, stmts, nstmts);
+}
+
+// ════════════════════════════════════════════════════
+// Declaration parsing
+// ════════════════════════════════════════════════════
+
+fn parse_func(p: *Parser, is_extern: i32) -> *Node {
+    let mut t = empty_token();
+    parser_peek(p, &t);
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
+
+    parser_advance(p, &t);  // consume 'fn'
+
+    parser_expect(p, TOKEN_IDENT(), "function name" as *u8, &t);
+    let fname = parser_tok_name(p, &t);
+
+    // 注册到 global scope（递归调用支持）
+    let sym = symtab_insert((*p).global_scope, fname, SYM_FN(),
+                            0 as *u8, 0 as i32, 0 as i32);
+    if is_extern != (0 as i32) {
+        if sym != (0 as *Sym) {
+            (*sym).is_extern = 1 as i32;
+        }
+    }
+
+    parser_push_scope(p);
+
+    parser_expect(p, TOKEN_LPAREN(), "(" as *u8, &t);
+    let mut params: *u8 = 0 as *u8;
+    let mut nparams: i64 = 0 as i64;
+    let mut pcap: i64 = 0 as i64;
+
+    while parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
+        if parser_check(p, TOKEN_EOF()) != (0 as i32) {
+            break;
+        }
+
+        // 取参数名（在 parse_type 之前，因 parse_type 会改 t）
+        parser_expect(p, TOKEN_IDENT(), "parameter name" as *u8, &t);
+        let pname = parser_tok_name(p, &t);
+
+        parser_expect(p, TOKEN_COLON(), ":" as *u8, &t);
+        let ptype = parse_type(p);
+
+        let psym = symtab_insert((*p).current_scope, pname, SYM_VAR(),
+                                 0 as *u8, 0 as i32, (*p).scope_depth);
+
+        if nparams >= pcap {
+            pcap = if pcap != (0 as i64) { pcap * (2 as i64) } else { (4 as i64) };
+            let np = arena_alloc((*p).arena, pcap * NODE_FUNC_DECL_PARAM_SIZE());
+            if params != (0 as *u8) {
+                if nparams > (0 as i64) {
+                    memcpy(np, params, nparams * NODE_FUNC_DECL_PARAM_SIZE());
+                }
+            }
+            params = np;
+        }
+        let pd = (params as i64 + nparams * NODE_FUNC_DECL_PARAM_SIZE()) as *NodeFuncDeclParam;
+        (*pd).sym = psym as *u8;
+        (*pd).type_annot = ptype as *u8;
+        nparams = nparams + (1 as i64);
+
+        if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) {
+            break;
+        }
+    }
+    parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
+
+    // return type（可选）
+    let mut ret_type: *Node = 0 as *Node;
+    if parser_match(p, TOKEN_ARROW(), &t) != (0 as i32) {
+        ret_type = parse_type(p);
+    }
+
+    // body: extern → ; ；否则 parse_block
+    let mut body: *Node = 0 as *Node;
+    if is_extern != (0 as i32) {
+        let _x = parser_expect(p, TOKEN_SEMICOLON(), ";" as *u8, &t);
+        body = 0 as *Node;
+    } else {
+        body = parse_block(p);
+    }
+
+    parser_pop_scope(p);
+
+    return ast_new_func_decl((*p).arena, loc_lf, loc_ll, loc_lc,
+                             sym, params, nparams, ret_type, body, is_extern);
+}
+
+fn parse_type_decl(p: *Parser) -> *Node {
+    let mut t = empty_token();
+    parser_peek(p, &t);
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
+
+    parser_advance(p, &t);  // consume 'type'
+
+    parser_expect(p, TOKEN_IDENT(), "type name" as *u8, &t);
+    let tname = parser_tok_name(p, &t);
+
+    parser_expect(p, TOKEN_EQ(), "=" as *u8, &t);
+
+    let mut body: *Node = 0 as *Node;
+
+    if parser_match(p, TOKEN_STRUCT(), &t) != (0 as i32) {
+        // type Name = struct { ... }
+        let body_loc_lf = (*p).prev_lf;
+        let body_loc_ll = (*p).prev_ll;
+        let body_loc_lc = (*p).prev_lc;
+
+        parser_expect(p, TOKEN_LBRACE(), "{" as *u8, &t);
+
+        let mut fields: *u8 = 0 as *u8;
+        let mut nfields: i64 = 0 as i64;
+        let mut fcap: i64 = 0 as i64;
+
+        while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+            if parser_check(p, TOKEN_EOF()) != (0 as i32) {
+                break;
+            }
+
+            // 字段名（在 parse_type 前保存）
+            parser_expect(p, TOKEN_IDENT(), "field name" as *u8, &t);
+            let fname = parser_tok_name(p, &t);
+
+            parser_expect(p, TOKEN_COLON(), ":" as *u8, &t);
+            let ftype = parse_type(p);
+
+            if nfields >= fcap {
+                fcap = if fcap != (0 as i64) { fcap * (2 as i64) } else { (8 as i64) };
+                let nf = arena_alloc((*p).arena, fcap * STRUCT_FIELD_DECL_SIZE());
+                if fields != (0 as *u8) {
+                    if nfields > (0 as i64) {
+                        memcpy(nf, fields, nfields * STRUCT_FIELD_DECL_SIZE());
+                    }
+                }
+                fields = nf;
+            }
+            let fd = (fields as i64 + nfields * STRUCT_FIELD_DECL_SIZE()) as *StructFieldDecl;
+            (*fd).name = fname;
+            (*fd).type_annot = ftype as *u8;
+            nfields = nfields + (1 as i64);
+
+            if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) {
+                break;
+            }
+        }
+
+        parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
+        body = ast_new_struct_def((*p).arena, body_loc_lf, body_loc_ll, body_loc_lc,
+                                  fields, nfields);
+    } else if parser_match(p, TOKEN_ENUM(), &t) != (0 as i32) {
+        // type Name = enum { ... }
+        let body_loc_lf = (*p).prev_lf;
+        let body_loc_ll = (*p).prev_ll;
+        let body_loc_lc = (*p).prev_lc;
+
+        parser_expect(p, TOKEN_LBRACE(), "{" as *u8, &t);
+
+        let mut variants: *u8 = 0 as *u8;
+        let mut nvariants: i64 = 0 as i64;
+        let mut vcap: i64 = 0 as i64;
+
+        while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+            if parser_check(p, TOKEN_EOF()) != (0 as i32) {
+                break;
+            }
+
+            parser_expect(p, TOKEN_IDENT(), "variant name" as *u8, &t);
+            let vname = parser_tok_name(p, &t);
+
+            // 可选 payload: Variant(Type)
+            let mut payload_type: *Node = 0 as *Node;
+            if parser_match(p, TOKEN_LPAREN(), &t) != (0 as i32) {
+                payload_type = parse_type(p);
+                parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
+            }
+
+            if nvariants >= vcap {
+                vcap = if vcap != (0 as i64) { vcap * (2 as i64) } else { (8 as i64) };
+                let nv = arena_alloc((*p).arena, vcap * ENUM_VARIANT_DECL_SIZE());
+                if variants != (0 as *u8) {
+                    if nvariants > (0 as i64) {
+                        memcpy(nv, variants, nvariants * ENUM_VARIANT_DECL_SIZE());
+                    }
+                }
+                variants = nv;
+            }
+            let vd = (variants as i64 + nvariants * ENUM_VARIANT_DECL_SIZE()) as *EnumVariantDecl;
+            (*vd).name = vname;
+            (*vd).payload_type = payload_type as *u8;
+            nvariants = nvariants + (1 as i64);
+
+            if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) {
+                break;
+            }
+        }
+
+        parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
+        body = ast_new_enum_def((*p).arena, body_loc_lf, body_loc_ll, body_loc_lc,
+                                variants, nvariants);
+    } else {
+        // type alias: type Name = OtherType
+        let alias_type = parse_type(p);
+        body = alias_type;
+    }
+
+    let sym = symtab_insert((*p).global_scope, tname, SYM_TYPE(),
+                            0 as *u8, 0 as i32, 0 as i32);
+    return ast_new_type_decl((*p).arena, loc_lf, loc_ll, loc_lc, sym, body);
+}
+
+fn parse_extern_decl(p: *Parser) -> *Node {
+    let mut t = empty_token();
+    parser_advance(p, &t);  // consume 'extern'
+    return parse_func(p, 1 as i32);
+}
+
+fn parse_import_decl(p: *Parser) -> *Node {
+    let mut t = empty_token();
+    parser_peek(p, &t);
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
+
+    parser_advance(p, &t);  // consume 'import'
+
+    parser_expect(p, TOKEN_IDENT(), "module name" as *u8, &t);
+    let mname = parser_tok_name(p, &t);
+    parser_expect(p, TOKEN_SEMICOLON(), ";" as *u8, &t);
+
+    let sym = symtab_insert((*p).global_scope, mname, SYM_MODULE(),
+                            0 as *u8, 0 as i32, 0 as i32);
+    return ast_new_import_decl((*p).arena, loc_lf, loc_ll, loc_lc, sym);
+}
+
+fn parse_decl(p: *Parser) -> *Node {
+    if parser_check(p, TOKEN_FN()) != (0 as i32) {
+        return parse_func(p, 0 as i32);
+    }
+    if parser_check(p, TOKEN_TYPE()) != (0 as i32) {
+        return parse_type_decl(p);
+    }
+    if parser_check(p, TOKEN_EXTERN()) != (0 as i32) {
+        return parse_extern_decl(p);
+    }
+    if parser_check(p, TOKEN_IMPORT()) != (0 as i32) {
+        return parse_import_decl(p);
+    }
+    // 未识别顶层 token → 走 parse_stmt 兜底（commit 2 stub）
+    return parse_stmt(p);
+}
+
+// ════════════════════════════════════════════════════
+// parser_init + parser_parse
+// ════════════════════════════════════════════════════
+
+fn parser_init(p: *Parser, lex: *Lexer, a: *Arena) -> i32 {
+    (*p).lexer = lex;
+    (*p).arena = a;
+    (*p).error_count = 0 as i32;
+    (*p).scope_depth = 0 as i32;
+    (*p).prev_kind = 0 as i32;
+    (*p).prev_start = 0 as *u8;
+    (*p).prev_length = 0 as i64;
+    (*p).prev_lf = 0 as *u8;
+    (*p).prev_ll = 0 as i32;
+    (*p).prev_lc = 0 as i32;
+    (*p).global_scope = symtab_new(a, 0 as *u8);
+    (*p).current_scope = (*p).global_scope;
+    // commit 3 init_rules(p) 在这里调
+    return 0;
+}
+
+fn parser_parse(p: *Parser) -> *Node {
+    let mut t = empty_token();
+    parser_peek(p, &t);
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
+
+    let mut decls: *u8 = 0 as *u8;
+    let mut ndecls: i64 = 0 as i64;
+    let mut dcap: i64 = 0 as i64;
+
+    while parser_check(p, TOKEN_EOF()) == (0 as i32) {
+        let decl = parse_decl(p);
+        if decl != (0 as *Node) {
+            if ndecls >= dcap {
+                dcap = if dcap != (0 as i64) { dcap * (2 as i64) } else { (16 as i64) };
+                let nd = arena_alloc((*p).arena, dcap * (8 as i64));
+                if decls != (0 as *u8) {
+                    if ndecls > (0 as i64) {
+                        memcpy(nd, decls, ndecls * (8 as i64));
+                    }
+                }
+                decls = nd;
+            }
+            let slot = (decls as i64 + ndecls * (8 as i64)) as **Node;
+            *slot = decl;
+            ndecls = ndecls + (1 as i64);
+        }
+    }
+
+    return ast_new_module((*p).arena, loc_lf, loc_ll, loc_lc, decls, ndecls);
+}

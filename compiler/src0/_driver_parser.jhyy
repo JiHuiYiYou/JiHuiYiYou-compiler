@@ -1,0 +1,463 @@
+// _driver_parser.jhyy — Sprint 3 commit 2 单元测试：验证 parser.jhyy (parse_decl)
+//
+// 测试覆盖：
+//   - parser_init + parser_parse 基础调用
+//   - parse_decl 顶层 dispatch：fn / type / extern / import
+//   - parse_type：*T / [*]T / [T;N] / Ident / Ident::Ident
+//   - parse_func：signature + 空 body (parse_block + parse_stmt stub → 0 stmts)
+//   - parse_type_decl：struct / enum / alias 三种 body
+//   - parse_extern_decl / parse_import_decl
+//   - 错误检测：expect 失败 + error_count 增加
+//   - 嵌套 module：多个 decl
+//
+// 退出码：42
+
+import ffi;
+import util;
+import lexer;
+import arena;
+import symtab;
+import ast;
+import parser;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+// ── 准备 lexer + parser 的 helper ──
+fn setup_parser(src: *u8, lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    arena_init(a, 32768);
+    lexer_init(lex, src, "test.jhyy" as *u8);
+    parser_init(p, lex, a);
+    return 0;
+}
+
+// ── Test 1: extern fn declaration ──
+fn test_extern_fn(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T1\n", 0);
+    let src = "extern fn printf(fmt: *u8, val: i32) -> i32;" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*module).kind != NODE_MODULE() {
+        printf("FAIL T1 kind\n", 0); return 1;
+    }
+    let md = node_module_data(module);
+    if (*md).ndeccls != (1 as i64) {
+        printf("FAIL T1 ndeccls got=%d\n", (*md).ndeccls as i32); return 2;
+    }
+    let slot = (*md).decls as **Node;
+    let decl = *slot;
+    // C 端 parser 把 extern fn 翻译成 NODE_FUNC_DECL + is_extern=true（不是 NODE_EXTERN_DECL）
+    if (*decl).kind != NODE_FUNC_DECL() {
+        printf("FAIL T1 func_decl kind got=%d\n", (*decl).kind); return 3;
+    }
+    let fd = node_func_decl_data(decl);
+    if (*fd).is_extern != (1 as i32) {
+        printf("FAIL T1 is_extern\n", 0); return 6;
+    }
+    let sym = (*fd).sym as *Sym;
+    if strcmp((*sym).name, "printf" as *u8) != (0 as i32) {
+        printf("FAIL T1 sym name\n", 0); return 4;
+    }
+    if (*sym).kind != SYM_FN() {
+        printf("FAIL T1 sym kind got=%d\n", (*sym).kind); return 5;
+    }
+    return 0;
+}
+
+// ── Test 2: import declaration ──
+fn test_import(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T2\n", 0);
+    let src = "import std;" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    let md = node_module_data(module);
+    if (*md).ndeccls != (1 as i64) {
+        printf("FAIL T2 ndeccls\n", 0); return 10;
+    }
+    let slot = (*md).decls as **Node;
+    let decl = *slot;
+    if (*decl).kind != NODE_IMPORT_DECL() {
+        printf("FAIL T2 import kind\n", 0); return 11;
+    }
+    let id = node_import_decl_data(decl);
+    let sym = (*id).sym as *Sym;
+    if strcmp((*sym).name, "std" as *u8) != (0 as i32) {
+        printf("FAIL T2 sym name\n", 0); return 12;
+    }
+    if (*sym).kind != SYM_MODULE() {
+        printf("FAIL T2 sym kind\n", 0); return 13;
+    }
+    return 0;
+}
+
+// ── Test 3: type alias ──
+fn test_type_alias(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T3\n", 0);
+    let src = "type MyInt = i32;" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    let md = node_module_data(module);
+    if (*md).ndeccls != (1 as i64) {
+        printf("FAIL T3 ndeccls\n", 0); return 20;
+    }
+    let slot = (*md).decls as **Node;
+    let decl = *slot;
+    if (*decl).kind != NODE_TYPE_DECL() {
+        printf("FAIL T3 type_decl kind\n", 0); return 21;
+    }
+    let td = node_type_decl_data(decl);
+    let sym = (*td).sym as *Sym;
+    if strcmp((*sym).name, "MyInt" as *u8) != (0 as i32) {
+        printf("FAIL T3 sym name\n", 0); return 22;
+    }
+    // body = NODE_IDENT (type alias)
+    if (*((*td).body as *Node)).kind != NODE_IDENT() {
+        printf("FAIL T3 body kind got=%d\n", (*((*td).body as *Node)).kind); return 23;
+    }
+    return 0;
+}
+
+// ── Test 4: type struct ──
+fn test_type_struct(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T4\n", 0);
+    let src = "type Point = struct { x: i32, y: i32 };" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    let md = node_module_data(module);
+    if (*md).ndeccls != (1 as i64) {
+        printf("FAIL T4 ndeccls\n", 0); return 30;
+    }
+    let slot = (*md).decls as **Node;
+    let decl = *slot;
+    if (*decl).kind != NODE_TYPE_DECL() {
+        printf("FAIL T4 type_decl kind\n", 0); return 31;
+    }
+    let td = node_type_decl_data(decl);
+    if (*((*td).body as *Node)).kind != NODE_STRUCT_DEF() {
+        printf("FAIL T4 struct_def kind got=%d\n", (*((*td).body as *Node)).kind); return 32;
+    }
+    let sd = node_struct_def_data((*td).body);
+    if (*sd).nfields != (2 as i64) {
+        printf("FAIL T4 nfields got=%d\n", (*sd).nfields as i32); return 33;
+    }
+    // 第一个字段名 "x"
+    let f0 = (*sd).fields as *StructFieldDecl;
+    if strcmp((*f0).name, "x" as *u8) != (0 as i32) {
+        printf("FAIL T4 f0 name\n", 0); return 34;
+    }
+    return 0;
+}
+
+// ── Test 5: type enum ──
+fn test_type_enum(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T5\n", 0);
+    let src = "type Color = enum { Red, Green, Blue(i32) };" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    let md = node_module_data(module);
+    if (*md).ndeccls != (1 as i64) {
+        printf("FAIL T5 ndeccls\n", 0); return 40;
+    }
+    let slot = (*md).decls as **Node;
+    let decl = *slot;
+    if (*decl).kind != NODE_TYPE_DECL() {
+        printf("FAIL T5 type_decl kind\n", 0); return 41;
+    }
+    let td = node_type_decl_data(decl);
+    if (*((*td).body as *Node)).kind != NODE_ENUM_DEF() {
+        printf("FAIL T5 enum_def kind got=%d\n", (*((*td).body as *Node)).kind); return 42;
+    }
+    let ed = node_enum_def_data((*td).body);
+    if (*ed).nvariants != (3 as i64) {
+        printf("FAIL T5 nvariants got=%d\n", (*ed).nvariants as i32); return 43;
+    }
+    // 第三个变体 Blue(i32) — payload_type 应非空
+    let v2 = ((*ed).variants as i64 + (2 as i64) * ENUM_VARIANT_DECL_SIZE()) as *EnumVariantDecl;
+    if (*v2).payload_type == (0 as *u8) {
+        printf("FAIL T5 v2 payload\n", 0); return 44;
+    }
+    return 0;
+}
+
+// ── Test 6: fn with empty body ──
+fn test_fn_empty_body(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T6\n", 0);
+    let src = "fn noop() { }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    let md = node_module_data(module);
+    if (*md).ndeccls != (1 as i64) {
+        printf("FAIL T6 ndeccls\n", 0); return 50;
+    }
+    let slot = (*md).decls as **Node;
+    let decl = *slot;
+    if (*decl).kind != NODE_FUNC_DECL() {
+        printf("FAIL T6 func_decl kind got=%d\n", (*decl).kind); return 51;
+    }
+    let fd = node_func_decl_data(decl);
+    let sym = (*fd).sym as *Sym;
+    if strcmp((*sym).name, "noop" as *u8) != (0 as i32) {
+        printf("FAIL T6 sym name\n", 0); return 52;
+    }
+    if (*fd).nparams != (0 as i64) {
+        printf("FAIL T6 nparams got=%d\n", (*fd).nparams as i32); return 53;
+    }
+    if (*fd).ret_type != (0 as *Node) {
+        printf("FAIL T6 ret_type\n", 0); return 54;
+    }
+    if (*fd).is_extern != (0 as i32) {
+        printf("FAIL T6 is_extern\n", 0); return 55;
+    }
+    // body = empty block
+    if (*fd).body == (0 as *Node) {
+        printf("FAIL T6 body null\n", 0); return 56;
+    }
+    if (*((*fd).body as *Node)).kind != NODE_BLOCK() {
+        printf("FAIL T6 body kind\n", 0); return 57;
+    }
+    let bd = node_block_data((*fd).body);
+    if (*bd).nstmts != (0 as i64) {
+        printf("FAIL T6 body nstmts\n", 0); return 58;
+    }
+    return 0;
+}
+
+// ── Test 7: fn with params + return type ──
+fn test_fn_params_ret(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T7\n", 0);
+    let src = "fn add(a: i32, b: i32) -> i32 { }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    let md = node_module_data(module);
+    if (*md).ndeccls != (1 as i64) {
+        printf("FAIL T7 ndeccls\n", 0); return 60;
+    }
+    let slot = (*md).decls as **Node;
+    let decl = *slot;
+    let fd = node_func_decl_data(decl);
+    if (*fd).nparams != (2 as i64) {
+        printf("FAIL T7 nparams got=%d\n", (*fd).nparams as i32); return 61;
+    }
+    // 参数 0 = a, sym name "a"
+    let p0 = (*fd).params as *NodeFuncDeclParam;
+    let p0sym = (*p0).sym as *Sym;
+    if strcmp((*p0sym).name, "a" as *u8) != (0 as i32) {
+        printf("FAIL T7 p0 name\n", 0); return 62;
+    }
+    // ret_type 非空（i32 ident）
+    if (*fd).ret_type == (0 as *Node) {
+        printf("FAIL T7 ret_type\n", 0); return 63;
+    }
+    if (*((*fd).ret_type as *Node)).kind != NODE_IDENT() {
+        printf("FAIL T7 ret_type kind got=%d\n", (*((*fd).ret_type as *Node)).kind); return 64;
+    }
+    return 0;
+}
+
+// ── Test 8: module with multiple decls ──
+fn test_multi_decl(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T8\n", 0);
+    let src = "import std; extern fn puts(s: *u8) -> i32; type MyInt = i32;" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    let md = node_module_data(module);
+    if (*md).ndeccls != (3 as i64) {
+        printf("FAIL T8 ndeccls got=%d\n", (*md).ndeccls as i32); return 70;
+    }
+    // decl[0..2] = import / extern / type
+    let d0 = *(((*md).decls as i64 + (0 as i64) * (8 as i64)) as **Node);
+    let d1 = *(((*md).decls as i64 + (1 as i64) * (8 as i64)) as **Node);
+    let d2 = *(((*md).decls as i64 + (2 as i64) * (8 as i64)) as **Node);
+    if (*d0).kind != NODE_IMPORT_DECL() {
+        printf("FAIL T8 d0 kind got=%d\n", (*d0).kind); return 71;
+    }
+    if (*d1).kind != NODE_FUNC_DECL() {
+        printf("FAIL T8 d1 kind got=%d\n", (*d1).kind); return 72;
+    }
+    // d1 is extern fn → is_extern=true
+    let d1_fd = node_func_decl_data(d1);
+    if (*d1_fd).is_extern != (1 as i32) {
+        printf("FAIL T8 d1 is_extern\n", 0); return 74;
+    }
+    if (*d2).kind != NODE_TYPE_DECL() {
+        printf("FAIL T8 d2 kind got=%d\n", (*d2).kind); return 73;
+    }
+    return 0;
+}
+
+// ── Test 9: pointer type *T ──
+fn test_type_pointer(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T9\n", 0);
+    let src = "fn foo(p: *i32) -> i32 { }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    let md = node_module_data(module);
+    if (*md).ndeccls != (1 as i64) {
+        printf("FAIL T9 ndeccls\n", 0); return 80;
+    }
+    let slot = (*md).decls as **Node;
+    let decl = *slot;
+    let fd = node_func_decl_data(decl);
+    // 第一个参数类型 = *i32 (parse_type 返回 ast_new_unary(STAR, ident))
+    let p0 = (*fd).params as *NodeFuncDeclParam;
+    let ptype = (*p0).type_annot as *Node;
+    if (*ptype).kind != NODE_UNARY() {
+        printf("FAIL T9 ptype kind got=%d\n", (*ptype).kind); return 81;
+    }
+    let ud = node_unary_data(ptype);
+    if (*ud).op != TOKEN_STAR() {
+        printf("FAIL T9 unary op\n", 0); return 82;
+    }
+    // inner = NODE_IDENT "i32"
+    if (*((*ud).expr as *Node)).kind != NODE_IDENT() {
+        printf("FAIL T9 inner kind\n", 0); return 83;
+    }
+    return 0;
+}
+
+// ── Test 10: slice type [*]T ──
+fn test_type_slice(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T10\n", 0);
+    let src = "fn foo(s: [*]u8) -> i32 { }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let decl = *slot;
+    let fd = node_func_decl_data(decl);
+    let p0 = (*fd).params as *NodeFuncDeclParam;
+    let ptype = (*p0).type_annot as *Node;
+    if (*ptype).kind != NODE_SLICE_TYPE() {
+        printf("FAIL T10 kind got=%d\n", (*ptype).kind); return 90;
+    }
+    return 0;
+}
+
+// ── Test 11: array type [T; N]（count expr stubbed，返回 NODE_INT 0） ──
+fn test_type_array(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T11\n", 0);
+    let src = "fn foo(a: [i32; 10]) -> i32 { }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let decl = *slot;
+    let fd = node_func_decl_data(decl);
+    let p0 = (*fd).params as *NodeFuncDeclParam;
+    let ptype = (*p0).type_annot as *Node;
+    if (*ptype).kind != NODE_ARRAY_TYPE() {
+        printf("FAIL T11 kind got=%d\n", (*ptype).kind); return 100;
+    }
+    return 0;
+}
+
+// ── Test 12: qualified type std::module::Type ──
+fn test_type_qualified(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T12\n", 0);
+    let src = "type MyType = std::io::Buffer;" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*module).kind != NODE_MODULE() {
+        printf("FAIL T12 module kind\n", 0); return 110;
+    }
+    let md = node_module_data(module);
+    if (*md).ndeccls != (1 as i64) {
+        printf("FAIL T12 ndeccls\n", 0); return 110;
+    }
+    let slot = (*md).decls as **Node;
+    let decl = *slot;
+    if (*decl).kind != NODE_TYPE_DECL() {
+        printf("FAIL T12 decl kind\n", 0); return 110;
+    }
+    let td = node_type_decl_data(decl);
+    // body = 最右 ident "Buffer"（:: 反复赋值 base）
+    if (*((*td).body as *Node)).kind != NODE_IDENT() {
+        printf("FAIL T12 body kind\n", 0); return 111;
+    }
+    let id = node_ident_data((*td).body);
+    let sym = (*id).sym as *Sym;
+    if strcmp((*sym).name, "Buffer" as *u8) != (0 as i32) {
+        printf("FAIL T12 body sym name\n", 0); return 112;
+    }
+    return 0;
+}
+
+// ── Test 13: error detection（缺 ; → error_count 增加） ──
+fn test_error(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T13\n", 0);
+    // 缺 ; in fn decl — 但 parser_expect 只在 parse_func 内部检查 extern 的 ;
+    // 内部 expect 在 body 的 RBRACE 失败时也会报错。这里故意写一个缺 ) 的 fn。
+    let src = "fn bad(a: i32 { }" as *u8;  // 缺 ) 在参数列表
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count == (0 as i32) {
+        printf("FAIL T13 error_count\n", 0); return 120;
+    }
+    return 0;
+}
+
+fn main_jhyy() -> i32 {
+    printf("T0\n", 0);
+
+    let mut a: Arena = Arena {
+        start: 0 as *u8, cur: 0 as *u8, end: 0 as *u8,
+        blocks: 0 as *u8, def_size: 0 as i64,
+    };
+    let mut lex: Lexer = Lexer {
+        source: 0 as *u8, current: 0 as *u8, filename: 0 as *u8,
+        line: 0, col: 0,
+        peek_kind: 0, peek_start: 0 as *u8, peek_len: 0 as i64,
+        peek_lf: 0 as *u8, peek_ll: 0, peek_lc: 0,
+        has_peek: 0, error_count: 0,
+    };
+    let mut p: Parser = Parser {
+        lexer: 0 as *Lexer, arena: 0 as *Arena,
+        prev_kind: 0, prev_start: 0 as *u8, prev_length: 0 as i64,
+        prev_lf: 0 as *u8, prev_ll: 0, prev_lc: 0,
+        global_scope: 0 as *u8, current_scope: 0 as *u8,
+        scope_depth: 0, error_count: 0,
+    };
+
+    let mut r: i32 = 0;
+
+    r = test_extern_fn(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_import(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_type_alias(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_type_struct(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_type_enum(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_fn_empty_body(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_fn_params_ret(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_multi_decl(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_type_pointer(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_type_slice(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_type_array(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_type_qualified(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_error(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    printf("PASS\n", 0);
+    return 42;
+}

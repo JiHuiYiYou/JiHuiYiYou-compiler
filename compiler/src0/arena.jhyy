@@ -1,0 +1,161 @@
+// arena.jhyy — JHYY 翻译自 compiler/src/arena.c
+// v1.0.0 sprint 1, 2026-06-22 重建（参考 v0.6 examples/arena_test/arena.jhyy）
+//
+// 翻译要点（v0.6 changelog 6E.1 验证）：
+//   - size_t  → i64
+//   - void*   → *u8
+//   - 自引用 struct 用 *u8 + as *ArenaBlock
+//   - 指针算术：(ptr as i64 + off) as *u8
+//   - arena_sprintf (变参) 省略：jhyy 无变参 FFI（lang-spec 附录 B P3）
+//     → 由 util.jhyy 的 StringBuilder.sb_appendf 替代
+
+// ═══ FFI：libc primitives（jhyy 当前无头文件共享，每个文件重复声明） ═══
+// 参考 src0/ffi.jhyy 的集中清单
+
+extern fn malloc(size: i64) -> *u8;
+extern fn free(p: *u8) -> i32;
+extern fn memset(p: *u8, val: i32, n: i64) -> *u8;
+extern fn memcpy(dst: *u8, src: *u8, n: i64) -> *u8;
+
+// ═══ Constants ═══
+
+fn ARENA_DEFAULT_SIZE() -> i64 { 1048576 as i64 }  // 1 MB
+
+// ═══ ArenaBlock: linked-list node for arena chunks ═══
+
+// `next` 是 *u8 以避免前向引用问题；使用处 cast 到 *ArenaBlock
+type ArenaBlock = struct {
+    next: *u8,
+}
+
+// ═══ Arena: bump-allocator state ═══
+
+type Arena = struct {
+    start:    *u8,
+    cur:      *u8,
+    end:      *u8,
+    blocks:   *u8,   // 实际 *ArenaBlock（使用处 cast）
+    def_size: i64,
+}
+
+// ═══ Helpers ═══
+
+fn align_up(x: i64, align: i64) -> i64 {
+    let mask = align - 1 as i64;
+    (x + mask) & ~(mask)
+}
+
+// ptr_add: 指针算术 (p as i64 + off) as *u8
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    (p as i64 + off) as *u8
+}
+
+fn arena_new_block(a: *Arena, min_size: i64) -> i32 {
+    let mut size = (*a).def_size;
+    if size < min_size {
+        size = min_size;
+    }
+    let total = 16 as i64 + size;
+    let raw = malloc(total);
+    if raw == (0 as *u8) {
+        return 0;
+    }
+    let b = raw as *ArenaBlock;
+    (*b).next = (*a).blocks;
+    (*a).blocks = b as *u8;
+    let data = ptr_add(raw, 16 as i64);
+    (*a).start = data;
+    (*a).cur = data;
+    (*a).end = ptr_add(data, size);
+    return 1;
+}
+
+// ═══ Public API ═══
+
+fn arena_init(a: *Arena, default_size: i64) -> i32 {
+    if default_size > 0 as i64 {
+        (*a).def_size = default_size;
+    } else {
+        (*a).def_size = ARENA_DEFAULT_SIZE();
+    }
+    (*a).blocks = 0 as *u8;
+    (*a).start = 0 as *u8;
+    (*a).cur = 0 as *u8;
+    (*a).end = 0 as *u8;
+    return 1;
+}
+
+fn arena_alloc_aligned(a: *Arena, size: i64, align: i64) -> *u8 {
+    if size == 0 as i64 {
+        return 0 as *u8;
+    }
+    if (*a).cur != (0 as *u8) {
+        let cur_int = (*a).cur as i64;
+        let aligned = align_up(cur_int, align);
+        let aligned_ptr = aligned as *u8;
+        let end_int = (*a).end as i64;
+        if aligned + size <= end_int {
+            (*a).cur = (aligned + size) as *u8;
+            return aligned_ptr;
+        }
+    }
+    let min_total = size + align;
+    let ok = arena_new_block(a, min_total);
+    if ok == 0 {
+        return 0 as *u8;
+    }
+    return arena_alloc_aligned(a, size, align);
+}
+
+fn arena_alloc(a: *Arena, size: i64) -> *u8 {
+    return arena_alloc_aligned(a, size, 8 as i64);
+}
+
+fn arena_calloc(a: *Arena, size: i64) -> *u8 {
+    let p = arena_alloc(a, size);
+    if p != (0 as *u8) {
+        memset(p, 0, size);
+    }
+    return p;
+}
+
+fn arena_strdup(a: *Arena, s: *u8, len: i64) -> *u8 {
+    let p = arena_alloc(a, len + 1 as i64);
+    if p == (0 as *u8) {
+        return 0 as *u8;
+    }
+    // C 端：memcpy(p, s, len); p[len] = '\0';
+    // 注：原 jhyy 版 memcpy(p, s, len + 1) 是错的 — 会把 s[len]（token 后的 byte）
+    // 当成 NUL 终止符，但 s[len] 通常非 0（如 "(", " ", "\n"），导致 strdup 结果是
+    // "printf(" 而不是 "printf"，strcmp 全部失败（v0.6 sprint 2 commit 3a 翻译时
+    // 暴露，影响所有 token name / sym name / ident / type name）。
+    memcpy(p, s, len);
+    memset(ptr_add(p, len), 0 as i32, 1 as i64);
+    return p;
+}
+
+fn arena_reset(a: *Arena) -> i32 {
+    if (*a).blocks != (0 as *u8) {
+        let first = (*a).blocks;
+        let data = ptr_add(first, 16 as i64);
+        (*a).start = data;
+        (*a).cur = data;
+        (*a).end = ptr_add(data, (*a).def_size);
+    }
+    return 1;
+}
+
+fn arena_free(a: *Arena) -> i32 {
+    let mut b = (*a).blocks;
+    while b != (0 as *u8) {
+        let ab = b as *ArenaBlock;
+        let next = (*ab).next;
+        free(b);
+        b = next;
+    }
+    (*a).blocks = 0 as *u8;
+    (*a).start = 0 as *u8;
+    (*a).cur = 0 as *u8;
+    (*a).end = 0 as *u8;
+    return 1;
+}
