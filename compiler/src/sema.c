@@ -547,6 +547,19 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         if (!type_eq(target_type, value_type))
             sema_error(ctx, n->loc, "assignment type mismatch: %s = %s",
                        type_to_string(target_type), type_to_string(value_type));
+        /* v0.6.5 patch: forbid rebinding immutable `let` (was silently dropped
+           by codegen — let size = X; if cond { size = Y; } use(size) used Y).
+           Now: compiler error. Use `let mut` for rebindable bindings.
+           Only check NODE_IDENT targets — deref (*p = ...) and index
+           (arr[i] = ...) write through pointers/arrays, not rebindings. */
+        if (d->target->kind == NODE_IDENT) {
+            NodeIdent *id = node_ident_data(d->target);
+            if (id->sym && id->sym->kind == SYM_VAR && !id->sym->is_mutable) {
+                sema_error(ctx, n->loc,
+                           "cannot assign to immutable variable '%s' (use `let mut` to declare)",
+                           id->sym->name);
+            }
+        }
         n->type = type_void();
         return n->type;
     }

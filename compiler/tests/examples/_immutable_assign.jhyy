@@ -1,0 +1,21 @@
+// v0.6.5 patch negative test (skipped from regress.py via `_` prefix;
+//   verified manually — see docs/logs/v0/changelog-v0.6.5.md):
+//
+// `let x = 1; x = 2;` must produce a semantic error (cannot assign to immutable).
+// Before the patch, codegen silently dropped the assignment and ran with x=1.
+//
+// Manual verification:
+//   $ jhyy compile _immutable_assign.jhyy -o /tmp/x
+//   _immutable_assign.jhyy:9:7: error: cannot assign to immutable variable 'x' (use `let mut` to declare)
+//   1 semantic error(s)
+//   exit=1
+//
+// The pre-existing dungeon_game.jhyy randRange() was relying on this bug:
+// it had `let s = *seed; s = ...; *seed = s;` — the middle assignment was
+// silently dropped, so the LCG never advanced. Fixed to `let mut s`.
+
+fn main_jhyy() -> i32 {
+    let x = 1;
+    x = 2;
+    0
+}

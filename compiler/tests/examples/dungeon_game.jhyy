@@ -9,7 +9,7 @@ extern fn scanf(fmt: *u8, ptr: *i32) -> i32;
 // 随机数 (LCG)
 // =====================
 fn randRange(seed: *i32, min: i32, max: i32) -> i32 {
-    let s = *seed;
+    let mut s = *seed;
     s = (s * 1103515245 + 12345) & 0x7fffffff;
     *seed = s;
     let range = max - min + 1;
