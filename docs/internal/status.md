@@ -2,11 +2,11 @@
 
 > 语言特性 / 已知限制 / 历史修复。版本进展详见 `docs/logs/`。
 
-## 当前版本: v0.6.5
+## 当前版本: v0.7.0
 
-> Phase 1 — C 语言宿主编译器。v1.0.0 启动完整自举。v0.6.5 是 phase-2 自举中实测沉淀的小 patch（修 #2 let mut dead-code；sema 层拒绝 immutable binding 赋值）。v0.6.4 修 #10 imported string dangle；v0.6.3 修 #9 f64/f32 比较 + coercion。#5 nested struct / #6 qbe_type_of(i8) 仍是 open bug（jhyy 端 workaround 继续）。
+> Phase 1 — C 语言宿主编译器。v1.0.0 启动完整自举。v0.7.0 是自举前最后一波语言打磨：7A enum first-class（穷尽性检查 + 短名 variant pattern）、7B 顶层 const 数组声明。v0.6.5 是 phase-2 自举中实测沉淀的小 patch（修 #2 let mut dead-code）。#5 nested struct / #6 qbe_type_of(i8) 仍是 open bug（jhyy 端 workaround 继续）。
 
-回归基线：**44/47 passed, 0 failed, 3 skipped**（3 skipped 是库文件，无 `main_jhyy`）。
+回归基线：**47/50 passed, 0 failed, 3 skipped**（3 skipped 是库文件，无 `main_jhyy`）。
 
 ---
 
@@ -20,6 +20,7 @@
 | `let` / `let mut` 变量绑定 | 完成 |
 | 定长数组 `[T; N]`：字面量/类型注解/下标读写 | 完成 (v0.3) |
 | 切片 `[*]T`：字面量/index/subrange/len | 完成 (v0.6) |
+| 顶层 const 数组 (`const NAME: [T; N] = [...]`) | 完成 (v0.7) |
 | 二元运算 (算术/比较/位运算) | 完成 |
 | `&&` / `\|\|` 短路求值 | 完成 |
 | 一元运算 (`-`, `!`, `~`) | 完成 |
@@ -38,6 +39,8 @@
 | struct 字段通过指针 (`ptr->field`) | 完成 |
 | enum 定义/变体构造 (一致内存布局) | 完成 |
 | `match` 表达式 (字面量/通配符/范围) | 完成 |
+| enum match 穷尽性检查 (未覆盖 variant 报错) | 完成 (v0.7) |
+| 短名 variant pattern (`Some(v)` / `None`) | 完成 (v0.7) |
 | `extern fn` FFI 声明 (含 printf, 文件 I/O) | 完成 |
 | FFI 多参数调用 (≥3 参数) | 完成 (v0.4) |
 | 复合赋值 (`+=`, `-=`, `*=`, `/=`, `%=`) | 完成 |
@@ -61,6 +64,8 @@
 | **P3** | 缺失 | 变参函数 (`printf` 的 `...`) 在 JHYY 侧需展开 |
 | **P3** | 缺失 | 函数回调 (Phase 2 考虑) |
 | **P3** | 缺失 | Windows 下 `jhyy run` 子命令 `system()` 路径有 bug (P1) |
+| **P3** | 缺失 | Pattern binding codegen（`Some(v) => v` 提取 payload）—— 7A 仅 sema 层注册 binding，codegen 用 `_` 通配符规避 |
+| **P3** | 缺失 | 嵌套 const array（`[[i32; N]; M]`）、const pointer / const slice / const enum array —— sema 拒绝 |
 
 ### Phase 2 阻塞分析（2026-06-22 验证）
 
@@ -84,6 +89,18 @@ abi § 11.1 五个阻塞自举问题（A1-A5）中，A1/A2/A4 已 ✓。**A3 / A
 - ✅ `*T ↔ i64` 互转 (`as`)
 
 ---
+
+## 已修复 — v0.7.0
+
+- **enum match 穷尽性检查**（7A）：sema 强制每个 variant 必须被覆盖（literal/range pattern 不算），未覆盖报错
+- **短名 variant pattern**（7A）：`Some(v)` / `None` 作为 `Option::Some(v)` / `Option::None` 的语法糖
+- **match dangling next_check label 修复**（7A）：全 non-wildcard arm 时补 emit label
+- **顶层 const 数组声明**（7B）：`const NAME: [T; N] = [elem, ...]`，emit 到 QBE `.data` 段（DYNCONST 0-cost load）
+- **const array struct 平铺**：data section emit 时 struct 字段平铺成 `w`/`l` 等基本类型
+- **arr_of_structs[i].field codegen 修复**（7B 附带）：NODE_INDEX struct elem 返回地址而非 load；cg_emit_store struct 走 cg_copy_struct 字段级拷贝
+- **sub-word load 类型修正**（7B 附带）：loadub/loadsb/loaduh/loadsh 返回 word (`w`)
+- **新增 2 个测试**：const_array, const_struct_array
+- **47/50 回归通过**（3 skipped = 库文件）
 
 ## 已修复 — v0.6.0
 
@@ -161,6 +178,13 @@ abi § 11.1 五个阻塞自举问题（A1-A5）中，A1/A2/A4 已 ✓。**A3 / A
 
 ## 当前 sprint / 下一阶段
 
-**v0.6.0 已完成（tagged）**。v0.7+ 路线取决于 v0.6 自举试点的进一步成果。
+**v0.7.0 已完成**（tagged）。v0.7 是自举前最后一波语言打磨。
 
-v1.0.0 = 完整自举：编译器编译自己并跑同一组测试通过。
+下一阶段：**v1.0.0 phase-2 自举** = 编译器编译自己并跑同一组测试通过（粗粒度 5 sprint）。
+
+已知 v0.7 未完成项（明确延后）：
+- Pattern binding codegen（`Some(v) => v` 提取 payload）—— phase-2 启动后的 patch
+- OR pattern 一致性检查（`Some(x) | Some(y)` 两边必须绑同名）
+- 嵌套 const array（`[[i32; N]; M]`）—— 自举需要时再开
+- const pointer / const slice / const enum array —— 需要 RTTI
+- const fn / 编译期函数求值 —— 大特性，单独 sprint
