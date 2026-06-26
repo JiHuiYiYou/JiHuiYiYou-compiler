@@ -30,6 +30,7 @@ static const Keyword keywords[] = {
     {"as",      TOKEN_AS},
     {"sizeof",  TOKEN_SIZEOF},
     {"alignof", TOKEN_ALIGNOF},
+    {"const",   TOKEN_CONST},
     {"true",    TOKEN_BOOL},
     {"false",   TOKEN_BOOL},
 };
@@ -420,6 +421,7 @@ const char *token_kind_name(TokenKind kind) {
     case TOKEN_AS:        return "as";
     case TOKEN_SIZEOF:    return "sizeof";
     case TOKEN_ALIGNOF:   return "alignof";
+    case TOKEN_CONST:     return "const";
     case TOKEN_PLUS:      return "+";
     case TOKEN_MINUS:     return "-";
     case TOKEN_STAR:      return "*";

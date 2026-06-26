@@ -34,6 +34,11 @@ static Type *resolve_type_node(SemaContext *ctx, Node *tn);
    passed down for the inner pattern. */
 static void process_match_pattern(SemaContext *ctx, Node *pat, Type *match_type);
 
+/* v0.7 7B: check whether a node is a compile-time-evaluable expression
+   (literal / struct literal / SYM_CONST reference). Used to validate
+   const array initializers. */
+static int is_const_expr(Node *n, SymTable *global_scope);
+
 /* ── resolve a type annotation node to a Type* ── */
 static Type *resolve_type_node(SemaContext *ctx, Node *tn) {
     if (!tn) return NULL;
@@ -155,6 +160,33 @@ static void process_match_pattern(SemaContext *ctx, Node *pat, Type *match_type)
     default:
         /* no bindings to add */
         break;
+    }
+}
+
+/* v0.7 7B: return 1 if `n` is a compile-time-evaluable expression
+   (literal / struct literal / SYM_CONST reference). */
+static int is_const_expr(Node *n, SymTable *global_scope) {
+    if (!n) return 0;
+    switch (n->kind) {
+    case NODE_INT:
+    case NODE_FLOAT:
+    case NODE_BOOL:
+    case NODE_STRING:
+        return 1;
+    case NODE_STRUCT_LIT: {
+        NodeStructLit *sl = node_struct_lit_data(n);
+        for (size_t i = 0; i < sl->nfields; i++) {
+            if (!is_const_expr(sl->fields[i].value, global_scope)) return 0;
+        }
+        return 1;
+    }
+    case NODE_IDENT: {
+        /* SYM_CONST reference (must already be registered in global scope) */
+        Sym *s = node_ident_data(n)->sym;
+        return s && s->kind == SYM_CONST;
+    }
+    default:
+        return 0;
     }
 }
 
@@ -638,6 +670,54 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         return n->type;
     }
 
+    /* ── const 顶层声明 (v0.7 7B) ── */
+    case NODE_CONST_DECL: {
+        NodeConstDecl *d = node_const_decl_data(n);
+        /* resolve declared type — must be [T; N] */
+        Type *arr_type = resolve_type_node(ctx, d->type_annot);
+        if (!arr_type || arr_type->kind != KIND_ARRAY) {
+            sema_error(ctx, n->loc, "const declaration must be an array type [T; N]");
+            d->sym->type = arr_type;
+            n->type = type_void();
+            return n->type;
+        }
+        /* validate element type: not enum / pointer / slice */
+        Type *elem_type = arr_type->array.elem;
+        if (elem_type->kind == KIND_POINTER || elem_type->kind == KIND_SLICE) {
+            sema_error(ctx, n->loc,
+                       "const array element type %s not supported (only primitives + structs)",
+                       type_to_string(elem_type));
+        }
+        if (elem_type->kind == KIND_ENUM) {
+            sema_error(ctx, n->loc,
+                       "const array element type %s not supported (enum payload not const-evaluable yet)",
+                       type_to_string(elem_type));
+        }
+        /* validate init is a NODE_ARRAY_LIT */
+        if (!d->init || d->init->kind != NODE_ARRAY_LIT) {
+            sema_error(ctx, n->loc, "const declaration requires array literal init");
+        } else {
+            NodeArrayLit *arr = node_array_lit_data(d->init);
+            if (arr->nelems != arr_type->array.count) {
+                sema_error(ctx, n->loc,
+                           "const array length mismatch: declared [T; %zu], got %zu elems",
+                           arr_type->array.count, arr->nelems);
+            }
+            /* validate each elem is a const expression */
+            for (size_t i = 0; i < arr->nelems; i++) {
+                Node *e = arr->elems[i];
+                if (!is_const_expr(e, ctx->global_scope)) {
+                    sema_error(ctx, e->loc,
+                               "const array element must be a const expression (literal, struct literal, or another const reference)");
+                }
+            }
+        }
+        d->sym->type = arr_type;
+        d->sym->kind = SYM_CONST;
+        n->type = type_void();
+        return n->type;
+    }
+
     /* ── return ── */
     case NODE_RETURN: {
         NodeReturn *dr = node_return_data(n);
@@ -951,6 +1031,12 @@ static void check_module(SemaContext *ctx, Node *module) {
             symtab_insert_sym(ctx->global_scope, td->sym);
             break;
         }
+        case NODE_CONST_DECL: {
+            NodeConstDecl *cd = node_const_decl_data(decl);
+            cd->sym->kind = SYM_CONST;
+            symtab_insert_sym(ctx->global_scope, cd->sym);
+            break;
+        }
         case NODE_IMPORT_DECL:
         case NODE_EXTERN_DECL:
             break;
@@ -1035,6 +1121,11 @@ static void check_module(SemaContext *ctx, Node *module) {
             break;
         case NODE_TYPE_DECL:
             break; /* already processed in Pass 2 */
+        case NODE_CONST_DECL:
+            /* Validate const decl — must run after all TYPE_DECL resolved
+               (so struct types referenced in elem_type are known). */
+            infer_type(ctx, decl);
+            break;
         case NODE_LET:
             infer_type(ctx, decl);
             break;

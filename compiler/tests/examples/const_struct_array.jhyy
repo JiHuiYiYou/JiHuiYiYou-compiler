@@ -1,0 +1,18 @@
+// EXPECT: 9
+// v0.7 7B: 顶层 const struct 数组
+//
+// const PALETTE: [RGB; 3] = [...] 每个 elem 是 struct 字面量
+// codegen emit 到 QBE data 段平铺字段
+// PALETTE[2].b = 9
+
+type RGB = struct { r: i32, g: i32, b: i32 }
+
+const PALETTE: [RGB; 3] = [
+    RGB { r: 1, g: 2, b: 3 },
+    RGB { r: 4, g: 5, b: 6 },
+    RGB { r: 7, g: 8, b: 9 }
+];
+
+fn main_jhyy() -> i32 {
+    PALETTE[2].b
+}

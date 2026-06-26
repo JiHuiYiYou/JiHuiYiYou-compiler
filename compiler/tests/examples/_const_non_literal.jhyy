@@ -1,0 +1,17 @@
+// v0.7 7B negative test (skipped from regress.py via `_` prefix;
+//   verified manually — see docs/logs/v0/changelog-v0.7.0.md):
+//
+// const 数组元素必须是编译期常量（字面量 / struct-literal / 其他 const ref）。
+// 函数调用结果不是 const — sema 必须报错。
+//
+// Manual verification:
+//   $ jhyy compile _const_non_literal.jhyy -o /tmp/x
+//   _const_non_literal.jhyy:N:N: error: const array element must be a compile-time constant
+//   1 semantic error(s)
+//   exit=1
+
+fn compute() -> i32 { 42 }
+
+const BAD: [i32; 1] = [compute()];
+
+fn main_jhyy() -> i32 { 0 }

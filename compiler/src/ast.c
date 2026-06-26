@@ -67,6 +67,7 @@ ACCESSOR(node_func_decl_data, NodeFuncDecl)
 ACCESSOR(node_type_decl_data, NodeTypeDecl)
 ACCESSOR(node_extern_decl_data, NodeExternDecl)
 ACCESSOR(node_import_decl_data, NodeImportDecl)
+ACCESSOR(node_const_decl_data, NodeConstDecl)
 ACCESSOR(node_module_data, NodeModule)
 
 /* ── Constructors ── */
@@ -433,6 +434,15 @@ Node *ast_new_import_decl(Arena *a, SourceLoc loc, Sym *sym) {
     return n;
 }
 
+Node *ast_new_const_decl(Arena *a, SourceLoc loc, Sym *sym, Node *type_annot, Node *init) {
+    Node *n = new_node(a, NODE_CONST_DECL, loc, sizeof(NodeConstDecl));
+    NodeConstDecl *d = node_const_decl_data(n);
+    d->sym = sym;
+    d->type_annot = type_annot;
+    d->init = init;
+    return n;
+}
+
 Node *ast_new_module(Arena *a, SourceLoc loc, Node **decls, size_t ndeccls) {
     Node *n = new_node(a, NODE_MODULE, loc, sizeof(NodeModule));
     NodeModule *d = node_module_data(n);
@@ -493,6 +503,7 @@ const char *node_kind_name(NodeKind kind) {
     case NODE_TYPE_DECL:     return "type_decl";
     case NODE_EXTERN_DECL:   return "extern_decl";
     case NODE_IMPORT_DECL:   return "import_decl";
+    case NODE_CONST_DECL:    return "const_decl";
     case NODE_MODULE:        return "module";
     default:                 return "?";
     }
@@ -859,6 +870,13 @@ static void dump_node(Node *n, int depth) {
         case NODE_IMPORT_DECL: {
             NodeImportDecl *d = node_import_decl_data(n);
             dump_sym(d->sym, depth);
+            break;
+        }
+        case NODE_CONST_DECL: {
+            NodeConstDecl *d = node_const_decl_data(n);
+            dump_sym(d->sym, depth);
+            if (d->type_annot) dump_node(d->type_annot, depth);
+            if (d->init) dump_node(d->init, depth);
             break;
         }
         case NODE_MODULE: {

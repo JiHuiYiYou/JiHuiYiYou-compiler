@@ -61,6 +61,7 @@ void ir_emit_load(IRBuf *ir, IRVal dst, char qbe_type, IRVal addr);
 void ir_emit_phi(IRBuf *ir, IRVal dst, int npairs, ...);
 
 /* emit data (deferred until ir_flush_data) */
+void ir_emit_data(IRBuf *ir, const char *fmt, ...);
 void ir_emit_data_string(IRBuf *ir, IRVal id, const char *str, size_t len);
 /* flush deferred data definitions to buf */
 void ir_flush_data(IRBuf *ir);

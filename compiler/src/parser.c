@@ -555,11 +555,52 @@ static Node *parse_import_decl(Parser *p) {
     return ast_new_import_decl(p->arena, loc, sym);
 }
 
+/* v0.7 7B: parse `const NAME: [T; N] = [elem, ...];` */
+static Node *parse_const_decl(Parser *p) {
+    SourceLoc loc = peek(p).loc;
+    advance(p); /* consume 'const' */
+
+    Token name = expect(p, TOKEN_IDENT, "const name");
+    const char *cname = tok_name(p, name);
+
+    expect(p, TOKEN_COLON, ": after const name");
+
+    /* type annotation — must be [T; N]; reuse parse_type */
+    Node *type_annot = parse_type(p);
+
+    expect(p, TOKEN_EQ, "= after const type");
+
+    /* init: [elem, elem, ...] */
+    Token lbr = expect(p, TOKEN_LBRACKET, "[ for const array init");
+    Node **elems = NULL;
+    size_t nelems = 0, cap = 0;
+    if (!check(p, TOKEN_RBRACKET)) {
+        do {
+            Node *elem = parse_expr(p, PREC_NONE);
+            if (nelems >= cap) {
+                cap = cap ? cap * 2 : 8;
+                Node **ne = arena_alloc(p->arena, cap * sizeof(Node *));
+                if (elems && nelems > 0) memcpy(ne, elems, nelems * sizeof(Node *));
+                elems = ne;
+            }
+            elems[nelems++] = elem;
+        } while (match(p, TOKEN_COMMA));
+    }
+    expect(p, TOKEN_RBRACKET, "] after const array init");
+    Node *init = ast_new_array_lit(p->arena, lbr.loc, elems, nelems);
+
+    expect(p, TOKEN_SEMICOLON, "; after const decl");
+
+    Sym *sym = symtab_insert(p->global_scope, cname, SYM_CONST, NULL, false, 0);
+    return ast_new_const_decl(p->arena, loc, sym, type_annot, init);
+}
+
 static Node *parse_decl(Parser *p) {
     if (check(p, TOKEN_FN))     return parse_func(p, false);
     if (check(p, TOKEN_TYPE))   return parse_type_decl(p);
     if (check(p, TOKEN_EXTERN)) return parse_extern_decl(p);
     if (check(p, TOKEN_IMPORT)) return parse_import_decl(p);
+    if (check(p, TOKEN_CONST))  return parse_const_decl(p);
     /* unknown at top level: try as statement */
     return parse_stmt(p);
 }

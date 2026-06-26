@@ -72,39 +72,47 @@ static IRVal ir_new_int(int64_t val) {
 }
 
 /* Emit correct load instruction for the given type.
-   Sub-word types use sign/zero-extension loads. */
+   Sub-word types (i8/u8/i16/u16/bool) use sign/zero-extension loads
+   that always return a word. The caller must pre-allocate `dst` with
+   type 'w' (word) for sub-word types, not the sub-word letter. */
 static void cg_emit_load(CGContext *cg, IRVal dst, Type *t, IRVal addr) {
     if (!t) {
         ir_emit_load(cg->ir, dst, 'w', addr);
         return;
     }
-    char qt = qbe_type_of(t);
     if (t->kind == KIND_PRIMITIVE) {
+        const char *insn = NULL;
         switch (t->prim) {
-        case PRIM_I8:  /* load signed byte, extend to word */
-            ir_emit(cg->ir, "    %%t%d =%c loadsb %%t%d\n", dst.id, qt, addr.id);
-            return;
-        case PRIM_I16: /* load signed half, extend to word */
-            ir_emit(cg->ir, "    %%t%d =%c loadsh %%t%d\n", dst.id, qt, addr.id);
-            return;
-        case PRIM_U8:  /* load unsigned byte, zero-extend to word */
-        case PRIM_BOOL:
-            ir_emit(cg->ir, "    %%t%d =%c loadub %%t%d\n", dst.id, qt, addr.id);
-            return;
-        case PRIM_U16: /* load unsigned half, zero-extend to word */
-            ir_emit(cg->ir, "    %%t%d =%c loaduh %%t%d\n", dst.id, qt, addr.id);
-            return;
+        case PRIM_I8:  insn = "loadsb"; break;
+        case PRIM_U8:  insn = "loadub"; break;
+        case PRIM_BOOL: insn = "loadub"; break;
+        case PRIM_I16: insn = "loadsh"; break;
+        case PRIM_U16: insn = "loaduh"; break;
         default: break;
         }
+        if (insn) {
+            /* sub-word: always returns word */
+            ir_emit(cg->ir, "    %%t%d =w %s %%t%d\n", dst.id, insn, addr.id);
+            return;
+        }
     }
+    char qt = qbe_type_of(t);
     ir_emit_load(cg->ir, dst, qt, addr);
 }
 
 /* Emit correct store instruction for the given type.
-   Sub-word types use byte/half stores. */
+   Sub-word types use byte/half stores; struct values are field-by-field copy
+   (since QBE has no aggregate store). */
+static void cg_copy_struct(CGContext *cg, Type *st, IRVal dst_addr, IRVal src_addr);  /* fwd decl */
+
 static void cg_emit_store(CGContext *cg, Type *t, IRVal val, IRVal addr) {
     if (!t) {
         ir_emit_store(cg->ir, 'w', val, addr);
+        return;
+    }
+    if (t->kind == KIND_STRUCT) {
+        /* struct value: `val` is the struct's stack-slot address; copy field-by-field */
+        cg_copy_struct(cg, t, addr, val);
         return;
     }
     if (t->kind == KIND_PRIMITIVE) {
@@ -280,6 +288,13 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
     }
     case NODE_IDENT: {
         NodeIdent *d = node_ident_data(n);
+        /* v0.7 7B: const array reference — emit `copy $name` (QBE uses
+           $name as a DYNCONST value directly, no separate addr inst). */
+        if (d->sym && d->sym->kind == SYM_CONST) {
+            IRVal v = ir_new_tmp(cg->ir, 'l');
+            ir_emit(cg->ir, "    %%t%d =l copy $%s\n", v.id, d->sym->name);
+            return v;
+        }
         int is_stack = 0;
         IRVal loc = cg_find_local(cg, d->sym, &is_stack);
         if (is_stack) {
@@ -740,6 +755,12 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             /* no-op */
             return inner;
         }
+        /* sub-word -> word: already word after loadub/loadsb/loaduh/loadsh */
+        if ((src_qt == 'b' || src_qt == 'h') && (dst_qt == 'w' || dst_qt == 'l')) {
+            IRVal result = ir_new_tmp(cg->ir, dst_qt);
+            ir_emit(cg->ir, "    %%t%d =%c copy %%t%d\n", result.id, dst_qt, inner.id);
+            return result;
+        }
         IRVal result = ir_new_tmp(cg->ir, dst_qt);
         /* pick a QBE conversion instruction */
         const char *conv = NULL;
@@ -1000,12 +1021,17 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
 
         /* get array base address.
            For array-typed identifiers, get the stack slot directly (don't load).
+           For SYM_CONST identifiers, use cg_expr to emit `addr $name` (v0.7 7B).
            For slice, cg_expr returns the slot address; load ptr from offset 0. */
         IRVal base;
         if (is_array && d->expr->kind == NODE_IDENT) {
             NodeIdent *id = node_ident_data(d->expr);
-            int is_stack = 0;
-            base = cg_find_local(cg, id->sym, &is_stack);
+            if (id->sym && id->sym->kind == SYM_CONST) {
+                base = cg_expr(cg, d->expr);  /* emits `addr $name` */
+            } else {
+                int is_stack = 0;
+                base = cg_find_local(cg, id->sym, &is_stack);
+            }
         } else if (is_slice) {
             IRVal slice_addr = cg_expr(cg, d->expr);
             base = ir_new_tmp(cg->ir, 'l');
@@ -1039,8 +1065,21 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         IRVal addr = ir_new_tmp(cg->ir, 'l');
         ir_emit_binary(cg->ir, addr, "add", base, offset);
 
-        /* load from computed address */
-        IRVal result = ir_new_tmp(cg->ir, elem_qt);
+        /* Struct element: return the address (struct is manipulated by address,
+           matches NODE_DEREF behavior). Caller applies field offset / load. */
+        if (elem_type && elem_type->kind == KIND_STRUCT) {
+            return addr;
+        }
+
+        /* load from computed address.
+           For sub-word types (i8/u8/i16/u16/bool) the load returns a word;
+           the result temp must be 'w' to match. */
+        char result_qt = (elem_type && elem_type->kind == KIND_PRIMITIVE &&
+                          (elem_type->prim == PRIM_I8 || elem_type->prim == PRIM_U8 ||
+                           elem_type->prim == PRIM_BOOL || elem_type->prim == PRIM_I16 ||
+                           elem_type->prim == PRIM_U16))
+                         ? 'w' : elem_qt;
+        IRVal result = ir_new_tmp(cg->ir, result_qt);
         cg_emit_load(cg, result, elem_type, addr);
         return result;
     }
@@ -1619,8 +1658,81 @@ static void cg_func(IRBuf *ir, Node *n) {
 
 /* ── module codegen ── */
 
+/* v0.7 7B: emit one const array element (recursively for struct fields).
+   Primitive: writes "w 42" / "b 65" / etc.
+   Struct: writes each field value separated by spaces, no outer braces
+           (QBE data section is flat — struct is just contiguous fields). */
+static void cg_emit_const_data_elem(IRBuf *ir, Node *e, Type *t, int *first);
+
+static void cg_emit_const_prim_data(IRBuf *ir, Node *e, Type *t) {
+    char qt = qbe_type_of(t);
+    int64_t val = 0;
+    if (e->kind == NODE_INT) {
+        val = node_int_data(e)->value;
+    } else if (e->kind == NODE_BOOL) {
+        val = node_bool_data(e)->value ? 1 : 0;
+    } else if (e->kind == NODE_FLOAT) {
+        /* QBE data section doesn't support f32/f64 literals directly in
+           all targets — fall back to bit pattern via int. For now just
+           warn: const array of f32/f64 not supported in v0.7. */
+        fprintf(stderr, "warning: const array element is float — bit-cast not yet implemented\n");
+        val = 0;
+    } else {
+        fprintf(stderr, "warning: const array element is not a literal — emitting 0\n");
+    }
+    ir_emit_data(ir, "%c %lld", qt, (long long)val);
+}
+
+static void cg_emit_const_data_elem(IRBuf *ir, Node *e, Type *t, int *first) {
+    if (!*first) ir_emit_data(ir, ", ");
+    if (t->kind == KIND_STRUCT) {
+        /* struct literal: emit each field in declaration order */
+        NodeStructLit *sl = node_struct_lit_data(e);
+        for (size_t i = 0; i < t->struct_type.nfields; i++) {
+            const char *fname = t->struct_type.fields[i].name->name;
+            /* find matching field init */
+            Node *fval = NULL;
+            for (size_t j = 0; j < sl->nfields; j++) {
+                if (strcmp(sl->fields[j].name, fname) == 0) {
+                    fval = sl->fields[j].value;
+                    break;
+                }
+            }
+            if (i > 0) ir_emit_data(ir, ", ");
+            if (fval) {
+                cg_emit_const_prim_data(ir, fval, t->struct_type.fields[i].type);
+            } else {
+                fprintf(stderr, "warning: struct literal missing field '%s' in const data — emitting 0\n", fname);
+                ir_emit_data(ir, "%c 0", qbe_type_of(t->struct_type.fields[i].type));
+            }
+        }
+    } else {
+        cg_emit_const_prim_data(ir, e, t);
+    }
+    *first = 0;
+}
+
 void cg_module(IRBuf *ir, Node *module) {
     NodeModule *md = node_module_data(module);
+    /* Pass A: emit all const decls as data section (deferred to flush) */
+    for (size_t i = 0; i < md->ndeccls; i++) {
+        Node *decl = md->decls[i];
+        if (decl->kind == NODE_CONST_DECL) {
+            NodeConstDecl *d = node_const_decl_data(decl);
+            Type *arr_t = d->sym->type;
+            if (!arr_t || arr_t->kind != KIND_ARRAY) continue;
+            Type *elem_t = arr_t->array.elem;
+            size_t n = arr_t->array.count;
+            NodeArrayLit *arr = node_array_lit_data(d->init);
+            ir_emit_data(ir, "data $%s = { ", d->sym->name);
+            int first = 1;
+            for (size_t j = 0; j < n; j++) {
+                cg_emit_const_data_elem(ir, arr->elems[j], elem_t, &first);
+            }
+            ir_emit_data(ir, " }\n");
+        }
+    }
+    /* Pass B: emit all functions */
     for (size_t i = 0; i < md->ndeccls; i++) {
         Node *decl = md->decls[i];
         if (decl->kind == NODE_FUNC_DECL) {

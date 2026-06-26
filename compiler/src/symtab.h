@@ -13,6 +13,7 @@ typedef enum {
     SYM_FIELD,     /* struct field */
     SYM_VARIANT,   /* enum variant constructor */
     SYM_MODULE,    /* imported module */
+    SYM_CONST,     /* const 顶层声明 (v0.7) */
 } SymKind;
 
 /* ── Symbol entry ── */

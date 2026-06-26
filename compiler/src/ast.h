@@ -68,6 +68,7 @@ typedef enum {
     NODE_TYPE_DECL,      /* type Name = struct/enum { ... } */
     NODE_EXTERN_DECL,    /* extern fn name(params) [-> Type] */
     NODE_IMPORT_DECL,    /* import module */
+    NODE_CONST_DECL,     /* const NAME: [T; N] = [...]  (v0.7) */
 
     /* top level */
     NODE_MODULE,         /* root: list of declarations */
@@ -234,6 +235,13 @@ typedef struct {
 typedef struct { Sym *sym; } NodeExternDecl;
 typedef struct { Sym *sym; } NodeImportDecl;
 
+/* v0.7 7B: const 顶层声明 `const NAME: [T; N] = [...]` */
+typedef struct {
+    Sym   *sym;          /* SYM_CONST sym */
+    Node  *type_annot;   /* [T; N] 类型注解（NODE_ARRAY_TYPE） */
+    Node  *init;         /* NODE_ARRAY_LIT 初值 */
+} NodeConstDecl;
+
 typedef struct {
     Node  **decls;
     size_t  ndeccls;
@@ -286,6 +294,7 @@ NodeFuncDecl     *node_func_decl_data(Node *n);
 NodeTypeDecl     *node_type_decl_data(Node *n);
 NodeExternDecl   *node_extern_decl_data(Node *n);
 NodeImportDecl   *node_import_decl_data(Node *n);
+NodeConstDecl    *node_const_decl_data(Node *n);
 NodeModule       *node_module_data(Node *n);
 
 /* ── Node constructors ── */
@@ -339,6 +348,7 @@ Node *ast_new_func_decl(struct Arena *a, SourceLoc loc, Sym *sym, NodeFuncDeclPa
 Node *ast_new_type_decl(struct Arena *a, SourceLoc loc, Sym *sym, Node *body);
 Node *ast_new_extern_decl(struct Arena *a, SourceLoc loc, Sym *sym);
 Node *ast_new_import_decl(struct Arena *a, SourceLoc loc, Sym *sym);
+Node *ast_new_const_decl(struct Arena *a, SourceLoc loc, Sym *sym, Node *type_annot, Node *init);
 Node *ast_new_module(struct Arena *a, SourceLoc loc, Node **decls, size_t ndeccls);
 
 const char *node_kind_name(NodeKind kind);

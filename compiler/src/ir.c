@@ -44,7 +44,7 @@ void ir_init(IRBuf *ir, Arena *arena) {
 }
 
 /* emit to data buffer (deferred definitions) */
-static void ir_emit_data(IRBuf *ir, const char *fmt, ...) {
+void ir_emit_data(IRBuf *ir, const char *fmt, ...) {
     if (!ir->data_buf) {
         ir->data_cap = 1024;
         ir->data_buf = arena_alloc(ir->arena, ir->data_cap);

@@ -36,6 +36,7 @@ typedef enum {
     TOKEN_AS,
     TOKEN_SIZEOF,
     TOKEN_ALIGNOF,
+    TOKEN_CONST,
 
     /* operators / punctuation */
     TOKEN_PLUS,        /* +  */
