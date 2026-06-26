@@ -256,6 +256,13 @@ Sprint 实施日志: [`docs/logs/v0/sprint-*.md`](docs/logs/v0/) (sprint-1a ~ 1g
 └── .vscode/                    # VS Code 项目配置 (tasks、推荐扩展)
 ```
 
+## Contributors
+
+- **人类作者**: JHYY ([JHYY@local](https://github.com/JiHuiYiYou))
+- **AI 协作**: [MiniMax-M3](https://MiniMax) — 通过 [Claude Code](https://claude.ai/code) CLI 工作流参与设计、编码、调试、文档
+
+> 自 v0.6 起所有 sprint 的实现 + 文档由 JHYY + MiniMax-M3 协作完成。MiniMax-M3 是 [MiniMax](https://MiniMax) 出品的基础模型，**不是** Anthropic Claude / OpenAI GPT 系列。
+
 ## License
 
 [MIT](LICENSE)
