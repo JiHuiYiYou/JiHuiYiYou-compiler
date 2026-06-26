@@ -6,7 +6,7 @@
 
 **Statically typed. Expression-oriented. Compiled to native via QBE.**
 
-[![Version](https://img.shields.io/badge/version-v0.5.1-blue)](docs/logs/v0/changelog-v0.5.0.md)
+[![Version](https://img.shields.io/badge/version-v0.7.0-blue)](docs/logs/v0/changelog-v0.7.0.md)
 [![Phase](https://img.shields.io/badge/phase-1%20(C%20host)-yellow)](#路线图)
 [![Backend](https://img.shields.io/badge/backend-QBE-orange)](#)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#)
@@ -27,8 +27,8 @@ JHYY 是一门自研的、静态类型的、表达式导向的编译型系统编
 ## 一段代码看语法
 
 ```rust
-// 函数、变量、控制流、struct、match、指针、FFI 一次展示
-type Point = struct { x: i32, y: i32 };
+// 函数、变量、控制流、struct、match、enum、FFI 一次展示
+type Point = struct { x: i32, y: i32 }
 
 fn dist_sq(a: Point, b: Point) -> i32 {
     let dx = a.x - b.x;
@@ -38,12 +38,14 @@ fn dist_sq(a: Point, b: Point) -> i32 {
 
 fn classify(n: i32) -> *u8 {
     match n {
-        0          => "zero",
-        1..=9      => "single digit",
-        10 | 20    => "round number",
-        _          => "other",
+        0        => "zero",
+        1..10    => "single digit",   // 半开区间
+        10 | 20  => "round number",
+        _        => "other",
     }
 }
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
 
 fn main_jhyy() -> i32 {
     let p = Point { x: 3, y: 4 };
@@ -98,23 +100,25 @@ jhyy compile hello.jhyy -o hello
 
 ```bash
 python compiler/build/bin/regress.py
-# => 34/36 passed, 2 failed  (import_test 已知问题)
+# => 47/50 passed, 0 failed, 3 skipped (3 skipped = 库文件无 main)
 ```
 
-## 语言特性 (v0.5.1)
+## 语言特性 (v0.7.0)
 
 | 类别 | 支持 |
 |------|------|
 | **类型** | `i8/i16/i32/i64`, `u8/u16/u32/u64`, `f32/f64`, `bool`, `*T`, `[T; N]`, `struct`, `enum` |
-| **类型转换** | `as` 关键字 — 整数/浮点互转、扩宽/截断 |
-| **控制流** | `if`/`else` (含表达式值), `while`, `for start..end`, `break`, `continue`, `match` (字面量/范围/通配符) |
+| **类型转换** | `as` 关键字 — 整数/浮点互转、扩宽/截断、`*T ↔ i64/u64` |
+| **控制流** | `if`/`else` (含表达式值), `while`, `for start..end`, `break`, `continue`, `match` (字面量/范围/通配符/enum + 穷尽性检查) |
+| **模式** | enum 短名 pattern (`Some(v)` / `None`) — v0.7 |
+| **顶层 const** | `const NAME: [T; N] = [...]` — emit 到 `.data` 段，0-cost load (v0.7) |
 | **逻辑** | `&&` / `\|\|` 短路求值, `!` / `~` 一元运算 |
 | **函数** | 头等函数、递归、复合赋值 (`+=` `-=` `*=` `/=` `%=`) |
-| **模块** | `import`、传递性导入、多文件编译 |
+| **模块** | `import`、传递性导入、多文件编译、`mod::fn()` 命名空间 |
 | **FFI** | `extern fn` 调用 C (printf、文件 I/O、多参数) |
 | **内存** | 运行时 Arena 分配器 |
 
-完整变更历史见 [changelog-v0.5.0](docs/logs/v0/changelog-v0.5.0.md)。
+完整变更历史见 [changelog-v0.7.0](docs/logs/v0/changelog-v0.7.0.md)。
 
 ## 命令行
 
@@ -186,10 +190,11 @@ Copy-Item vscode-ext $env:USERPROFILE\.vscode\extensions\jhyy-lang -Recurse
 
 | 文档 | 路径 |
 |------|------|
-| 语言规范 (latest) | [`docs/abis/jhyy-lang-spec-v0.2.1.md`](docs/abis/jhyy-lang-spec-v0.2.1.md) |
+| 语言规范 (latest, v1.1.0) | [`docs/abis/jhyy-lang-spec-v1.1.0.md`](docs/abis/jhyy-lang-spec-v1.1.0.md) |
+| 语言规范 (v1.0.0) | [`docs/abis/jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md) |
 | ABI 白皮书 (locked v1.0.0) | [`docs/abis/jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) |
 | 早期 ABI 草案 (v0.0.1) | [`docs/abis/jhyy-abi-v0.0.1.md`](docs/abis/jhyy-abi-v0.0.1.md) |
-| 早期语言规范 (v0.0.1) | [`docs/abis/jhyy-lang-spec-v0.0.1.md`](docs/abis/jhyy-lang-spec-v0.0.1.md) |
+| 早期语言规范 (v0.2.1) | [`docs/abis/jhyy-lang-spec-v0.2.1.md`](docs/abis/jhyy-lang-spec-v0.2.1.md) |
 
 ### 路线图 & 计划
 
@@ -206,7 +211,11 @@ Copy-Item vscode-ext $env:USERPROFILE\.vscode\extensions\jhyy-lang -Recurse
 
 | 版本 | 文档 |
 |------|------|
-| **v0.5.0 (最新)** | [`docs/logs/v0/changelog-v0.5.0.md`](docs/logs/v0/changelog-v0.5.0.md) |
+| **v0.7.0 (最新)** | [`docs/logs/v0/changelog-v0.7.0.md`](docs/logs/v0/changelog-v0.7.0.md) |
+| v0.6.5 (patch) | [`docs/logs/v0/changelog-v0.6.5.md`](docs/logs/v0/changelog-v0.6.5.md) |
+| v0.6.3 (patch) | [`docs/logs/v0/changelog-v0.6.3.md`](docs/logs/v0/changelog-v0.6.3.md) |
+| v0.6.0 | [`docs/logs/v0/changelog-v0.6.0.md`](docs/logs/v0/changelog-v0.6.0.md) |
+| v0.5.0 | [`docs/logs/v0/changelog-v0.5.0.md`](docs/logs/v0/changelog-v0.5.0.md) |
 | v0.4.0 | [`docs/logs/v0/changelog-v0.4.0.md`](docs/logs/v0/changelog-v0.4.0.md) |
 | v0.3.0 | [`docs/logs/v0/changelog-v0.3.0.md`](docs/logs/v0/changelog-v0.3.0.md) |
 | v0.2.1 | [`docs/logs/v0/changelog-v0.2.1.md`](docs/logs/v0/changelog-v0.2.1.md) |
@@ -226,26 +235,34 @@ Sprint 实施日志: [`docs/logs/v0/sprint-*.md`](docs/logs/v0/) (sprint-1a ~ 1g
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
-| **Phase 1** | C 宿主编译器达到自举门槛 | **进行中** (v0.5.1) |
-| Phase 2 | 用 JHYY 重写编译器（自举，Stage 0/1/2 验证） | 未开始 |
+| **Phase 1** | C 宿主编译器达到自举门槛 | **进行中** (v0.7.0 — 自举前最后一波打磨) |
+| **Phase 2** | 用 JHYY 重写编译器（自举，Stage 0/1/2 验证） | **下一阶段** ([`v1.0.0 任务清单`](docs/plans/v1/v1.0.0任务清单 + 概要设计.md)) |
 | Phase 3 | OS kernel、IDE、扩展生态 | 未开始 |
 
-### v0.6.0 候选
+### v0.7.0 已完成（自举前最后一波）
 
-- 切片 `[*]T` codegen
-- 浮点 fmod (`%`)
-- 模块命名空间
-- C ABI 兼容的 struct 传递
+- ✅ enum match 穷尽性检查（sema 强制覆盖）
+- ✅ 短名 variant pattern（`Some(v)` / `None` 语法糖）
+- ✅ 顶层 const 数组声明（`const NAME: [T; N] = [...]`，emit 到 QBE `.data` 段）
+- ✅ arr_of_structs[i].field codegen 修复（附带修 pre-existing bug）
+
+### v0.6.0 已完成
+
+- ✅ 切片 `[*]T` codegen
+- ✅ 模块命名空间（`mod::fn()` 限定调用 + `Sym.module` 字段）
+- ✅ `*T ↔ i64` 互转
+- ✅ Stage 0 自举试点（`compiler/jhyy-src/arena.jhyy` arena.c → JHYY）
 
 ## 项目结构
 
 ```
 ├── compiler/
-│   ├── src/                    # C 编译器源码 (19 个源文件)
+│   ├── src/                    # C 编译器源码 (10 个 .c + 9 个 .h)
 │   ├── runtime/                # C 运行时 (Arena + main 入口)
+│   ├── src0/                   # Phase 2 自举翻译稿 (v1.0.0 WIP)
 │   └── tests/
 │       ├── unit/               # C 单元测试
-│       └── examples/           # .jhyy 集成测试
+│       └── examples/           # .jhyy 集成测试 (50 个)
 ├── vscode-ext/                 # VS Code 语言扩展
 ├── qbe/                        # Vendored QBE 后端
 ├── mcp-jhyy/                   # Claude Code MCP 集成
