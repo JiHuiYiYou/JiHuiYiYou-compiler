@@ -200,7 +200,6 @@ Copy-Item vscode-ext $env:USERPROFILE\.vscode\extensions\jhyy-lang -Recurse
 
 | 文档 | 路径 |
 |------|------|
-| **总规划 v0.2.x → v1.0.0** | [`docs/plans/phase/phase-1-v0.2.x-to-v1.0.0.md`](docs/plans/phase/phase-1-v0.2.x-to-v1.0.0.md) |
 | Phase 0 — Skeleton | [`docs/plans/phase/phase-0-skeleton.md`](docs/plans/phase/phase-0-skeleton.md) |
 | **Phase 1 — C 编译器 (当前)** | [`docs/plans/phase/phase-1-c-compiler.md`](docs/plans/phase/phase-1-c-compiler.md) |
 | Phase 2 — 自举 | [`docs/plans/phase/phase-2-self-hosting.md`](docs/plans/phase/phase-2-self-hosting.md) |
