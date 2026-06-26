@@ -190,18 +190,9 @@ fn PREC_UNARY()     -> i32 { return 11 as i32; }
 fn PREC_PRIMARY()   -> i32 { return 12 as i32; }
 
 // ════════════════════════════════════════════════════
-// parse_expr: stub（commit 4 实现 Pratt）
-// 当前至少 advance 一 token 防 parse_let / parse_match / 等死循环
-// ════════════════════════════════════════════════════
-
-fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
-    let mut t = empty_token();
-    parser_advance(p, &t);
-    return 0 as *Node;
-}
-
-// ════════════════════════════════════════════════════
-// Type parsing（前置：parse_let / parse_func / parse_type_decl 都调用）
+// Type parsing（前置：parse_let / parse_func / parse_type_decl / parse_expr 都调用）
+// commit 4 移到 parse_expr 之前，parse_expr 中 sizeof/alignof/as 需要它
+// array count 不再走 parse_expr（避免 mutual recursion），改 inline int literal
 // ════════════════════════════════════════════════════
 
 fn parse_type(p: *Parser) -> *Node {
@@ -222,13 +213,19 @@ fn parse_type(p: *Parser) -> *Node {
             let elem = parse_type(p);
             return ast_new_slice_type((*p).arena, (*p).prev_lf, (*p).prev_ll, (*p).prev_lc, elem);
         }
-        // [T; N]
+        // [T; N] — count 走 inline int literal（避免 mutual recursion with parse_expr）
+        let body_loc_lf = (*p).prev_lf;
+        let body_loc_ll = (*p).prev_ll;
+        let body_loc_lc = (*p).prev_lc;
         let base = parse_type(p);
         parser_expect(p, TOKEN_SEMICOLON(), "; in array type" as *u8, &t);
-        // count expr — stub（commit 4 完整 parse_expr 接入）
-        let _count = parse_expr(p, 0 as i32);
+        let mut count_t = empty_token();
+        parser_expect(p, TOKEN_INT(), "array size" as *u8, &count_t);
+        let count_val = strtoll(count_t.start, 0 as *u8, 0 as i32);
+        let count_node = ast_new_int((*p).arena, body_loc_lf, body_loc_ll, body_loc_lc,
+                                     count_val, PRIM_I32());
         parser_expect(p, TOKEN_RBRACKET(), "] in array type" as *u8, &t);
-        return ast_new_array_type((*p).arena, (*p).prev_lf, (*p).prev_ll, (*p).prev_lc, base, 0 as *Node);
+        return ast_new_array_type((*p).arena, body_loc_lf, body_loc_ll, body_loc_lc, base, count_node);
     }
 
     // fn(T1, T2) -> Ret
@@ -274,6 +271,492 @@ fn parse_type(p: *Parser) -> *Node {
     }
 
     return base;
+}
+
+// ════════════════════════════════════════════════════
+// parse_expr: 完整 Pratt 表达式（commit 4）
+// 对应 C 端 parser.c:612-967（parse_expr + 12 prefix_* + 6 infix_*）
+//
+// 关键设计：jhyy 不支持 mutual recursion，所以 prefix_* / infix_* 不能拆成
+// 独立函数（parse_expr → prefix_unary → parse_expr 死循环编译失败）。
+// 把所有 prefix / infix 逻辑 inline 在 parse_expr 内部 token-kind dispatch 里。
+//
+// 已知差异（vs C 版）：
+//   - **不处理 expression-oriented keywords**（if/match/while/for/lbrace）：
+//     C 端 parse_expr 起头 if 调 parse_if(p)，但 jhyy parse_expr 必须定义在
+//     parse_if 之前（parse_let/return/pattern/match/if/while/for 都调 parse_expr
+//     且都在它之前定义），所以 parse_expr 调 parse_if 是 forward reference。
+//     后果：`let x = if cond { a } else { b };` 这种 C 允许的语法 jhyy 报
+//     "unexpected token IF in expression"。v0.7 测试集不用此 pattern（regress.py
+//     47/50 pass 验证），文档化为 limitation。
+//   - **f64 字面量走 jh_f64_atof store 模式**（不能 extern fn return f64，
+//     QBE Windows amd64 backend SSE return 路径未验证）。
+//   - **int 后缀 (42i32 / 100u8) 走 jh_int_suffix_prim**（jhyy 无 atoi）。
+// ════════════════════════════════════════════════════
+
+fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
+    let mut t = empty_token();
+    parser_peek(p, &t);
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
+
+    let mut left: *Node = 0 as *Node;
+
+    // ── Prefix dispatch（基于 t.kind 走 inline）──
+    if t.kind == TOKEN_EOF() {
+        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+        jh_fputs_stderr("error: unexpected end of file in expression\n" as *u8);
+        (*p).error_count = (*p).error_count + (1 as i32);
+        return 0 as *Node;
+    }
+
+    if t.kind == TOKEN_INT() {
+        parser_advance(p, &t);
+        let val = strtoll(t.start, 0 as *u8, 0 as i32);
+        let prim = jh_int_suffix_prim(t.start, t.length);
+        left = ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, val, prim);
+    }
+    else if t.kind == TOKEN_FLOAT() {
+        parser_advance(p, &t);
+        let mut val: f64 = 0.0;
+        jh_f64_atof(t.start, t.length, (&val) as *u8);
+        left = ast_new_float((*p).arena, loc_lf, loc_ll, loc_lc, val);
+    }
+    else if t.kind == TOKEN_STRING() {
+        parser_advance(p, &t);
+        // token 包含两端引号；提取中间内容并 arena_strdup
+        let chars = ((t.start as i64) + (1 as i64)) as *u8;
+        let len = t.length - (2 as i64);
+        let arena_chars = arena_strdup((*p).arena, chars, len);
+        left = ast_new_string((*p).arena, loc_lf, loc_ll, loc_lc, arena_chars, len);
+    }
+    else if t.kind == TOKEN_CHAR() {
+        parser_advance(p, &t);
+        // 绕开 qbe_type_of(*u8)='b' bug：4-byte aligned read + shift + mask
+        // t.start[0] = '\'', t.start[1] = char (or '\\'), t.start[2] = (escape or '\'')
+        let p1 = (t.start as i64) + (1 as i64);
+        let a1 = p1 & (~(3 as i64));
+        let r1 = (p1 - a1) as i32;
+        let w1 = *((a1) as *i32);
+        let s1 = r1 * (8 as i32);
+        let c1 = (w1 >> s1) & (255 as i32);
+        let mut ch: i32 = 0;
+        if c1 == (92 as i32) {  // '\\'
+            let p2 = (t.start as i64) + (2 as i64);
+            let a2 = p2 & (~(3 as i64));
+            let r2 = (p2 - a2) as i32;
+            let w2 = *((a2) as *i32);
+            let s2 = r2 * (8 as i32);
+            let c2 = (w2 >> s2) & (255 as i32);
+            if c2 == (110 as i32) { ch = 10 as i32; }       // 'n'
+            else if c2 == (116 as i32) { ch = 9 as i32; }  // 't'
+            else if c2 == (114 as i32) { ch = 13 as i32; } // 'r'
+            else if c2 == (48 as i32) { ch = 0 as i32; }   // '0'
+            else { ch = c2; }
+        } else {
+            ch = c1;
+        }
+        left = ast_new_char((*p).arena, loc_lf, loc_ll, loc_lc, ch);
+    }
+    else if t.kind == TOKEN_BOOL() {
+        parser_advance(p, &t);
+        let mut val: i32 = 0;
+        if t.length == (4 as i64) {
+            let r = strncmp(t.start, "true" as *u8, 4 as i64);
+            if r == (0 as i32) { val = 1; }
+        }
+        left = ast_new_bool((*p).arena, loc_lf, loc_ll, loc_lc, val);
+    }
+    else if t.kind == TOKEN_IDENT() {
+        parser_advance(p, &t);
+        let name = parser_tok_name(p, &t);
+        let mut sym = symtab_lookup((*p).current_scope, name);
+        if sym == (0 as *Sym) {
+            sym = symtab_insert((*p).current_scope, name, SYM_VAR(),
+                                0 as *u8, 0 as i32, (*p).scope_depth);
+        }
+
+        // branch on sym kind
+        if (*sym).kind == SYM_TYPE() {
+            // ── struct lit: TypeName { field: val, ... } ──
+            if parser_check(p, TOKEN_LBRACE()) != (0 as i32) {
+                parser_advance(p, &t);  // consume {
+                let mut fields: *u8 = 0 as *u8;
+                let mut nfields: i64 = 0 as i64;
+                let mut fcap: i64 = 0 as i64;
+                while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+                    if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+                    let mut fnt = empty_token();
+                    parser_expect(p, TOKEN_IDENT(), "field name" as *u8, &fnt);
+                    let fname = parser_tok_name(p, &fnt);
+                    parser_expect(p, TOKEN_COLON(), ":" as *u8, &t);
+                    let fval = parse_expr(p, PREC_NONE());
+                    if nfields >= fcap {
+                        fcap = if fcap != (0 as i64) { fcap * (2 as i64) } else { (8 as i64) };
+                        let nf = arena_alloc((*p).arena, fcap * (16 as i64));
+                        if fields != (0 as *u8) {
+                            if nfields > (0 as i64) { memcpy(nf, fields, nfields * (16 as i64)); }
+                        }
+                        fields = nf;
+                    }
+                    let fd = (fields as i64 + nfields * (16 as i64)) as *NodeFieldInit;
+                    (*fd).name = fname;
+                    (*fd).value = fval as *u8;
+                    nfields = nfields + (1 as i64);
+                    if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
+                }
+                parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
+                left = ast_new_struct_lit((*p).arena, loc_lf, loc_ll, loc_lc, sym, fields, nfields);
+            }
+            // ── enum variant: TypeName::Variant(args) ──
+            else if parser_check(p, TOKEN_COLONCOLON()) != (0 as i32) {
+                parser_advance(p, &t);  // consume ::
+                let mut vt = empty_token();
+                parser_expect(p, TOKEN_IDENT(), "variant name" as *u8, &vt);
+                let vname = parser_tok_name(p, &vt);
+                let mut vsym = symtab_lookup((*p).current_scope, vname);
+                if vsym == (0 as *Sym) {
+                    vsym = symtab_insert((*p).current_scope, vname, SYM_VARIANT(),
+                                         0 as *u8, 0 as i32, (*p).scope_depth);
+                }
+                let mut payload: *Node = 0 as *Node;
+                if parser_match(p, TOKEN_LPAREN(), &t) != (0 as i32) {
+                    payload = parse_expr(p, PREC_NONE());
+                    parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
+                }
+                left = ast_new_enum_variant((*p).arena, loc_lf, loc_ll, loc_lc, sym, vsym, payload);
+            }
+            // bare type ident (allowed as expression — resolves later)
+            else {
+                left = ast_new_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
+            }
+        }
+        else if (*sym).kind == SYM_MODULE() {
+            // ── qualified call: mod::name(args) ──
+            if parser_check(p, TOKEN_COLONCOLON()) != (0 as i32) {
+                parser_advance(p, &t);  // consume ::
+                let mut fnt = empty_token();
+                parser_expect(p, TOKEN_IDENT(), "function name after '::'" as *u8, &fnt);
+                let fn_name = parser_tok_name(p, &fnt);
+                let mut fn_sym = symtab_lookup((*p).current_scope, fn_name);
+                if fn_sym == (0 as *Sym) {
+                    fn_sym = symtab_insert((*p).current_scope, fn_name, SYM_FN(),
+                                            0 as *u8, 0 as i32, 0 as i32);
+                }
+                let mut args: *u8 = 0 as *u8;
+                let mut nargs: i64 = 0 as i64;
+                let mut cap: i64 = 0 as i64;
+                parser_expect(p, TOKEN_LPAREN(), "(" as *u8, &t);
+                if parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
+                    while true {
+                        let arg = parse_expr(p, PREC_NONE());
+                        if nargs >= cap {
+                            cap = if cap != (0 as i64) { cap * (2 as i64) } else { (8 as i64) };
+                            let na = arena_alloc((*p).arena, cap * (8 as i64));
+                            if args != (0 as *u8) {
+                                if nargs > (0 as i64) { memcpy(na, args, nargs * (8 as i64)); }
+                            }
+                            args = na;
+                        }
+                        let slot = (args as i64 + nargs * (8 as i64)) as **Node;
+                        *slot = arg;
+                        nargs = nargs + (1 as i64);
+                        if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
+                    }
+                }
+                parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
+                let mod_node = ast_new_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
+                let fn_node = ast_new_ident((*p).arena, (*p).prev_lf, (*p).prev_ll, (*p).prev_lc, fn_sym);
+                left = ast_new_qualified_call((*p).arena, loc_lf, loc_ll, loc_lc, mod_node, fn_node, args, nargs);
+            } else {
+                left = ast_new_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
+            }
+        }
+        else {
+            left = ast_new_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
+        }
+    }
+    // ── unary prefix: - ! ~ ──
+    else if t.kind == TOKEN_MINUS() {
+        parser_advance(p, &t);
+        let op = t.kind;
+        let expr = parse_expr(p, PREC_UNARY());
+        left = ast_new_unary((*p).arena, loc_lf, loc_ll, loc_lc, op, expr);
+    }
+    else if t.kind == TOKEN_BANG() {
+        parser_advance(p, &t);
+        let op = t.kind;
+        let expr = parse_expr(p, PREC_UNARY());
+        left = ast_new_unary((*p).arena, loc_lf, loc_ll, loc_lc, op, expr);
+    }
+    else if t.kind == TOKEN_TILDE() {
+        parser_advance(p, &t);
+        let op = t.kind;
+        let expr = parse_expr(p, PREC_UNARY());
+        left = ast_new_unary((*p).arena, loc_lf, loc_ll, loc_lc, op, expr);
+    }
+    else if t.kind == TOKEN_STAR() {
+        // * is both prefix (deref) and infix (multiply)
+        parser_advance(p, &t);
+        let expr = parse_expr(p, PREC_UNARY());
+        left = ast_new_deref((*p).arena, loc_lf, loc_ll, loc_lc, expr);
+    }
+    else if t.kind == TOKEN_AMP() {
+        // & is both prefix (addr-of) and infix (bit-and), and starts slice literal &[...]
+        parser_advance(p, &t);
+        if parser_check(p, TOKEN_LBRACKET()) != (0 as i32) {
+            // slice literal: &[1, 2, 3]
+            parser_advance(p, &t);  // consume [
+            let mut elems: *u8 = 0 as *u8;
+            let mut nelems: i64 = 0 as i64;
+            let mut cap: i64 = 0 as i64;
+            if parser_check(p, TOKEN_RBRACKET()) == (0 as i32) {
+                while true {
+                    let elem = parse_expr(p, PREC_NONE());
+                    if nelems >= cap {
+                        cap = if cap != (0 as i64) { cap * (2 as i64) } else { (8 as i64) };
+                        let ne = arena_alloc((*p).arena, cap * (8 as i64));
+                        if elems != (0 as *u8) {
+                            if nelems > (0 as i64) { memcpy(ne, elems, nelems * (8 as i64)); }
+                        }
+                        elems = ne;
+                    }
+                    let slot = (elems as i64 + nelems * (8 as i64)) as **Node;
+                    *slot = elem;
+                    nelems = nelems + (1 as i64);
+                    if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
+                }
+            }
+            parser_expect(p, TOKEN_RBRACKET(), "] in slice literal" as *u8, &t);
+            let arr = ast_new_array_lit((*p).arena, loc_lf, loc_ll, loc_lc, elems, nelems);
+            left = ast_new_slice_lit((*p).arena, loc_lf, loc_ll, loc_lc, arr);
+        } else {
+            let expr = parse_expr(p, PREC_UNARY());
+            left = ast_new_addr_of((*p).arena, loc_lf, loc_ll, loc_lc, expr);
+        }
+    }
+    else if t.kind == TOKEN_LPAREN() {
+        // paren grouping / unit
+        parser_advance(p, &t);
+        if parser_match(p, TOKEN_RPAREN(), &t) != (0 as i32) {
+            // unit ()
+            left = ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, 0 as i64, PRIM_I32());
+        } else {
+            let expr = parse_expr(p, PREC_NONE());
+            parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
+            left = expr;
+        }
+    }
+    else if t.kind == TOKEN_SIZEOF() {
+        parser_advance(p, &t);
+        parser_expect(p, TOKEN_LPAREN(), "(" as *u8, &t);
+        let _target = parse_type(p);
+        parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
+        left = ast_new_sizeof((*p).arena, loc_lf, loc_ll, loc_lc, 0 as *Type);
+    }
+    else if t.kind == TOKEN_ALIGNOF() {
+        parser_advance(p, &t);
+        parser_expect(p, TOKEN_LPAREN(), "(" as *u8, &t);
+        let _target = parse_type(p);
+        parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
+        left = ast_new_alignof((*p).arena, loc_lf, loc_ll, loc_lc, 0 as *Type);
+    }
+    else if t.kind == TOKEN_LBRACKET() {
+        // array literal: [1, 2, 3]
+        parser_advance(p, &t);
+        let mut elems: *u8 = 0 as *u8;
+        let mut nelems: i64 = 0 as i64;
+        let mut cap: i64 = 0 as i64;
+        if parser_check(p, TOKEN_RBRACKET()) == (0 as i32) {
+            while true {
+                let elem = parse_expr(p, PREC_NONE());
+                if nelems >= cap {
+                    cap = if cap != (0 as i64) { cap * (2 as i64) } else { (8 as i64) };
+                    let ne = arena_alloc((*p).arena, cap * (8 as i64));
+                    if elems != (0 as *u8) {
+                        if nelems > (0 as i64) { memcpy(ne, elems, nelems * (8 as i64)); }
+                    }
+                    elems = ne;
+                }
+                let slot = (elems as i64 + nelems * (8 as i64)) as **Node;
+                *slot = elem;
+                nelems = nelems + (1 as i64);
+                if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
+            }
+        }
+        parser_expect(p, TOKEN_RBRACKET(), "]" as *u8, &t);
+        left = ast_new_array_lit((*p).arena, loc_lf, loc_ll, loc_lc, elems, nelems);
+    }
+    else {
+        // unexpected token (IF / MATCH / WHILE / FOR / LBRACE 等 statement-only)
+        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+        jh_fputs_stderr("error: unexpected token '" as *u8);
+        jh_fputs_stderr(token_kind_name(t.kind));
+        jh_fputs_stderr("' in expression\n" as *u8);
+        (*p).error_count = (*p).error_count + (1 as i32);
+        parser_advance(p, &t);
+        left = 0 as *Node;
+    }
+
+    // error path：prefix dispatch 失败，提前返回
+    if left == (0 as *Node) { return 0 as *Node; }
+
+    // ── Pratt loop: infix dispatch（基于 peek t.kind）──
+    while true {
+        parser_peek(p, &t);
+        // stop conditions (C 端 parser.c:637-643)
+        if t.kind == TOKEN_EOF() { return left; }
+        if t.kind == TOKEN_SEMICOLON() { return left; }
+        if t.kind == TOKEN_RBRACE() { return left; }
+        if t.kind == TOKEN_RPAREN() { return left; }
+        if t.kind == TOKEN_RBRACKET() { return left; }
+        if t.kind == TOKEN_COMMA() { return left; }
+        if t.kind == TOKEN_COLON() { return left; }
+        if t.kind == TOKEN_FATARROW() { return left; }
+        if t.kind == TOKEN_IN() { return left; }
+        if t.kind == TOKEN_ELSE() { return left; }
+
+        // determine precedence (C 端 init_rules 表 inline)
+        let mut prec: i32 = 0;
+        let mut is_infix: i32 = 0;
+        if t.kind == TOKEN_EQ() || t.kind == TOKEN_PLUSEQ() || t.kind == TOKEN_MINUSEQ()
+           || t.kind == TOKEN_STAREQ() || t.kind == TOKEN_SLASHEQ() || t.kind == TOKEN_PERCENTEQ() {
+            prec = PREC_ASSIGN(); is_infix = 1;
+        } else if t.kind == TOKEN_PIPEPIPE() {
+            prec = PREC_OR(); is_infix = 1;
+        } else if t.kind == TOKEN_AMPAMP() {
+            prec = PREC_AND(); is_infix = 1;
+        } else if t.kind == TOKEN_EQEQ() || t.kind == TOKEN_BANGEQ()
+                  || t.kind == TOKEN_LT() || t.kind == TOKEN_GT()
+                  || t.kind == TOKEN_LTEQ() || t.kind == TOKEN_GTEQ() {
+            prec = PREC_COMPARE(); is_infix = 1;
+        } else if t.kind == TOKEN_PIPE() {
+            prec = PREC_BIT_OR(); is_infix = 1;
+        } else if t.kind == TOKEN_CARET() {
+            prec = PREC_BIT_XOR(); is_infix = 1;
+        } else if t.kind == TOKEN_AMP() {
+            prec = PREC_BIT_AND(); is_infix = 1;
+        } else if t.kind == TOKEN_LTLT() || t.kind == TOKEN_GTGT() {
+            prec = PREC_SHIFT(); is_infix = 1;
+        } else if t.kind == TOKEN_PLUS() || t.kind == TOKEN_MINUS() {
+            prec = PREC_TERM(); is_infix = 1;
+        } else if t.kind == TOKEN_STAR() || t.kind == TOKEN_SLASH() || t.kind == TOKEN_PERCENT() {
+            prec = PREC_FACTOR(); is_infix = 1;
+        } else if t.kind == TOKEN_LPAREN() {
+            prec = PREC_PRIMARY(); is_infix = 1;
+        } else if t.kind == TOKEN_DOT() {
+            prec = PREC_PRIMARY(); is_infix = 1;
+        } else if t.kind == TOKEN_LBRACKET() {
+            prec = PREC_PRIMARY(); is_infix = 1;
+        } else if t.kind == TOKEN_AS() {
+            prec = PREC_FACTOR(); is_infix = 1;
+        } else {
+            // unknown token in expression — not an infix
+            is_infix = 0;
+        }
+
+        if is_infix == (0 as i32) { return left; }
+        if prec < min_prec { return left; }
+
+        // ── infix dispatch（基于 t.kind）──
+        if t.kind == TOKEN_EQ() {
+            parser_advance(p, &t);
+            let right = parse_expr(p, PREC_NONE());
+            left = ast_new_assign((*p).arena, loc_lf, loc_ll, loc_lc, left, right);
+        }
+        else if t.kind == TOKEN_PLUSEQ() {
+            parser_advance(p, &t);
+            let right = parse_expr(p, PREC_NONE());
+            let bin = ast_new_binary((*p).arena, loc_lf, loc_ll, loc_lc, TOKEN_PLUS(), left, right);
+            left = ast_new_assign((*p).arena, loc_lf, loc_ll, loc_lc, left, bin);
+        }
+        else if t.kind == TOKEN_MINUSEQ() {
+            parser_advance(p, &t);
+            let right = parse_expr(p, PREC_NONE());
+            let bin = ast_new_binary((*p).arena, loc_lf, loc_ll, loc_lc, TOKEN_MINUS(), left, right);
+            left = ast_new_assign((*p).arena, loc_lf, loc_ll, loc_lc, left, bin);
+        }
+        else if t.kind == TOKEN_STAREQ() {
+            parser_advance(p, &t);
+            let right = parse_expr(p, PREC_NONE());
+            let bin = ast_new_binary((*p).arena, loc_lf, loc_ll, loc_lc, TOKEN_STAR(), left, right);
+            left = ast_new_assign((*p).arena, loc_lf, loc_ll, loc_lc, left, bin);
+        }
+        else if t.kind == TOKEN_SLASHEQ() {
+            parser_advance(p, &t);
+            let right = parse_expr(p, PREC_NONE());
+            let bin = ast_new_binary((*p).arena, loc_lf, loc_ll, loc_lc, TOKEN_SLASH(), left, right);
+            left = ast_new_assign((*p).arena, loc_lf, loc_ll, loc_lc, left, bin);
+        }
+        else if t.kind == TOKEN_PERCENTEQ() {
+            parser_advance(p, &t);
+            let right = parse_expr(p, PREC_NONE());
+            let bin = ast_new_binary((*p).arena, loc_lf, loc_ll, loc_lc, TOKEN_PERCENT(), left, right);
+            left = ast_new_assign((*p).arena, loc_lf, loc_ll, loc_lc, left, bin);
+        }
+        else if t.kind == TOKEN_LPAREN() {
+            // call: foo(a, b, ...)
+            parser_advance(p, &t);
+            let mut args: *u8 = 0 as *u8;
+            let mut nargs: i64 = 0 as i64;
+            let mut cap: i64 = 0 as i64;
+            if parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
+                while true {
+                    let arg = parse_expr(p, PREC_NONE());
+                    if nargs >= cap {
+                        cap = if cap != (0 as i64) { cap * (2 as i64) } else { (8 as i64) };
+                        let na = arena_alloc((*p).arena, cap * (8 as i64));
+                        if args != (0 as *u8) {
+                            if nargs > (0 as i64) { memcpy(na, args, nargs * (8 as i64)); }
+                        }
+                        args = na;
+                    }
+                    let slot = (args as i64 + nargs * (8 as i64)) as **Node;
+                    *slot = arg;
+                    nargs = nargs + (1 as i64);
+                    if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
+                }
+            }
+            parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
+            left = ast_new_call((*p).arena, loc_lf, loc_ll, loc_lc, left, args, nargs);
+        }
+        else if t.kind == TOKEN_DOT() {
+            // field access: expr.field
+            parser_advance(p, &t);
+            let mut field_t = empty_token();
+            parser_expect(p, TOKEN_IDENT(), "field name" as *u8, &field_t);
+            let field_name = parser_tok_name(p, &field_t);
+            left = ast_new_field((*p).arena, loc_lf, loc_ll, loc_lc, left, field_name);
+        }
+        else if t.kind == TOKEN_LBRACKET() {
+            // index: a[i] or slice range: a[i..j]
+            parser_advance(p, &t);
+            let start = parse_expr(p, PREC_NONE());
+            if parser_match(p, TOKEN_DOTDOT(), &t) != (0 as i32) {
+                let end = parse_expr(p, PREC_NONE());
+                parser_expect(p, TOKEN_RBRACKET(), "]" as *u8, &t);
+                left = ast_new_slice_range((*p).arena, loc_lf, loc_ll, loc_lc, left, start, end);
+            } else {
+                parser_expect(p, TOKEN_RBRACKET(), "]" as *u8, &t);
+                left = ast_new_index((*p).arena, loc_lf, loc_ll, loc_lc, left, start);
+            }
+        }
+        else if t.kind == TOKEN_AS() {
+            // as cast: expr as Type
+            parser_advance(p, &t);
+            let target = parse_type(p);
+            left = ast_new_cast((*p).arena, loc_lf, loc_ll, loc_lc, left, target);
+        }
+        else {
+            // binary op: +, -, *, /, %, ==, !=, <, >, <=, >=, &&, ||, |, ^, &, <<, >>
+            parser_advance(p, &t);
+            let op = t.kind;
+            let right = parse_expr(p, prec + (1 as i32));
+            left = ast_new_binary((*p).arena, loc_lf, loc_ll, loc_lc, op, left, right);
+        }
+    }
+    return 0 as *Node;  // sentinel（while true 永远不退出；jhyy 类型检查需要）
 }
 
 // ════════════════════════════════════════════════════
@@ -366,6 +849,8 @@ fn parse_continue(p: *Parser) -> *Node {
 }
 
 // parse_expr_stmt: expr [;] — allow omitting ; before }
+// commit 4 保留：parse_expr 现在是完整 Pratt（定义在 line ~200，本函数之后），
+// parse_expr_stmt 仍是 5 处 inlined block dispatcher 的"表达式语句"入口。
 fn parse_expr_stmt(p: *Parser) -> *Node {
     let mut t = empty_token();
     let expr = parse_expr(p, PREC_NONE());

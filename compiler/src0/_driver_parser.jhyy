@@ -420,9 +420,9 @@ fn test_parse_let(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
     let fd = node_func_decl_data(fn_decl);
     let body = (*fd).body as *Node;
     let bd = node_block_data(body);
-    // parse_expr stub 返回 NULL，parse_expr_stmt 返回 0。
-    // body 块只有 1 个 stmt (let)，trailing `0` 不计入。
-    if (*bd).nstmts != (1 as i64) {
+    // commit 4 parse_expr 是完整 Pratt：trailing `0` 现在是 NODE_EXPR_STMT，
+    // body 块有 2 个 stmt（let + expr_stmt）
+    if (*bd).nstmts != (2 as i64) {
         printf("FAIL T14 nstmts got=%d\n", (*bd).nstmts as i32); return 131;
     }
     let s0 = *(((*bd).stmts as i64) as **Node);
@@ -436,6 +436,19 @@ fn test_parse_let(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
     let sym = (*ld).sym as *Sym;
     if strcmp((*sym).name, "x" as *u8) != (0 as i32) {
         printf("FAIL T14 sym name\n", 0); return 134;
+    }
+    // commit 4 新增：let init = NODE_INT 0（不再是 NULL）
+    let init = (*ld).init as *Node;
+    if init == (0 as *Node) {
+        printf("FAIL T14 init null\n", 0); return 135;
+    }
+    if (*init).kind != NODE_INT() {
+        printf("FAIL T14 init kind got=%d\n", (*init).kind); return 136;
+    }
+    // s1 = NODE_EXPR_STMT（trailing `0`）
+    let s1 = *(((*bd).stmts as i64 + (8 as i64)) as **Node);
+    if (*s1).kind != NODE_EXPR_STMT() {
+        printf("FAIL T14 s1 kind got=%d\n", (*s1).kind); return 137;
     }
     return 0;
 }
@@ -570,8 +583,8 @@ fn test_parse_for(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
 fn test_parse_match_short_variant(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
     printf("T19\n", 0);
     // 先 type Option = enum { Some(i32), None } 再 match opt { Some(_) => 1, None => 0 }
-    let src = "type Option = enum { Some(i32), None }\n\
-               \nfn f(opt: Option) -> i32 { match opt { Some(_) => 1, None => 0 } 0 }" as *u8;
+    // 单行 — 字符串字面量里的 \n 是字面字节，不是换行
+    let src = "type Option = enum { Some(i32), None } fn f(opt: Option) -> i32 { match opt { Some(_) => 1, None => 0 } 0 }" as *u8;
     setup_parser(src, lex, p, a);
     let module = parser_parse(p);
     if (*p).error_count != (0 as i32) {
@@ -622,8 +635,7 @@ fn test_parse_match_short_variant(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
 // ── Test 20: parse_match 完整限定 Option::Some(v) ──
 fn test_parse_match_qualified_enum(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
     printf("T20\n", 0);
-    let src = "type Option = enum { Some(i32), None }\n\
-               \nfn f(opt: Option) -> i32 { match opt { Option::Some(_) => 1, Option::None => 0 } 0 }" as *u8;
+    let src = "type Option = enum { Some(i32), None } fn f(opt: Option) -> i32 { match opt { Option::Some(_) => 1, Option::None => 0 } 0 }" as *u8;
     setup_parser(src, lex, p, a);
     let module = parser_parse(p);
     if (*p).error_count != (0 as i32) {
@@ -713,8 +725,8 @@ fn test_parse_return(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
     let fd = node_func_decl_data(fn_decl);
     let body = (*fd).body as *Node;
     let bd = node_block_data(body);
-    // nstmts=1 (return, trailing 0 → expr stub NULL)
-    if (*bd).nstmts != (1 as i64) {
+    // nstmts=2 (return + expr_stmt for trailing 0)
+    if (*bd).nstmts != (2 as i64) {
         printf("FAIL T22 nstmts got=%d\n", (*bd).nstmts as i32); return 211;
     }
     let s0 = *(((*bd).stmts as i64) as **Node);
@@ -798,6 +810,348 @@ fn test_parse_pattern_range_bool(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
     }
     if (*pd).prim != PRIM_BOOL() {
         printf("FAIL T24 pat1 prim got=%d\n", (*pd).prim); return 235;
+    }
+    return 0;
+}
+
+// ═══ Sprint 3 commit 4: parse_expr 完整 Pratt 测试 ═══
+
+// ── Test 25: parse_expr 整数字面量 + 二元加法 ──
+fn test_expr_int_add(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T25\n", 0);
+    let src = "fn f() -> i32 { let x = 1 + 2; x }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T25 error_count=%d\n", (*p).error_count); return 250;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    if (*s0).kind != NODE_LET() {
+        printf("FAIL T25 s0 kind got=%d\n", (*s0).kind); return 251;
+    }
+    let ld = node_let_data(s0);
+    let init = (*ld).init as *Node;
+    if (*init).kind != NODE_BINARY() {
+        printf("FAIL T25 init kind got=%d\n", (*init).kind); return 252;
+    }
+    let bd2 = node_binary_data(init);
+    if (*bd2).op != TOKEN_PLUS() {
+        printf("FAIL T25 op got=%d\n", (*bd2).op); return 253;
+    }
+    // left = NODE_INT 1, right = NODE_INT 2
+    let left = (*bd2).left as *Node;
+    let right = (*bd2).right as *Node;
+    if (*left).kind != NODE_INT() {
+        printf("FAIL T25 left kind got=%d\n", (*left).kind); return 254;
+    }
+    if (*right).kind != NODE_INT() {
+        printf("FAIL T25 right kind got=%d\n", (*right).kind); return 255;
+    }
+    let ld_left = node_int_data(left);
+    let ld_right = node_int_data(right);
+    if (*ld_left).value != (1 as i64) {
+        printf("FAIL T25 left val got=%d\n", (*ld_left).value as i32); return 256;
+    }
+    if (*ld_right).value != (2 as i64) {
+        printf("FAIL T25 right val got=%d\n", (*ld_right).value as i32); return 257;
+    }
+    return 0;
+}
+
+// ── Test 26: parse_expr 一元负号 -x ──
+fn test_expr_unary_neg(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T26\n", 0);
+    let src = "fn f() -> i32 { let x = -42; x }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T26 error_count=%d\n", (*p).error_count); return 260;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    let ld = node_let_data(s0);
+    let init = (*ld).init as *Node;
+    if (*init).kind != NODE_UNARY() {
+        printf("FAIL T26 init kind got=%d\n", (*init).kind); return 261;
+    }
+    let ud = node_unary_data(init);
+    if (*ud).op != TOKEN_MINUS() {
+        printf("FAIL T26 op got=%d\n", (*ud).op); return 262;
+    }
+    let inner = (*ud).expr as *Node;
+    let idata = node_int_data(inner);
+    if (*idata).value != (42 as i64) {
+        printf("FAIL T26 val got=%d\n", (*idata).value as i32); return 263;
+    }
+    return 0;
+}
+
+// ── Test 27: parse_expr 函数调用 foo(a, b) ──
+fn test_expr_call(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T27\n", 0);
+    let src = "fn f() -> i32 { let x = foo(1, 2); x }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T27 error_count=%d\n", (*p).error_count); return 270;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    let ld = node_let_data(s0);
+    let init = (*ld).init as *Node;
+    if (*init).kind != NODE_CALL() {
+        printf("FAIL T27 init kind got=%d\n", (*init).kind); return 271;
+    }
+    let cd = node_call_data(init);
+    if (*cd).nargs != (2 as i64) {
+        printf("FAIL T27 nargs got=%d\n", (*cd).nargs as i32); return 272;
+    }
+    // callee = NODE_IDENT "foo"
+    let callee = (*cd).callee as *Node;
+    if (*callee).kind != NODE_IDENT() {
+        printf("FAIL T27 callee kind got=%d\n", (*callee).kind); return 273;
+    }
+    let idata = node_ident_data(callee);
+    if strcmp((*((*idata).sym as *Sym)).name, "foo" as *u8) != (0 as i32) {
+        printf("FAIL T27 callee name\n", 0); return 274;
+    }
+    return 0;
+}
+
+// ── Test 28: parse_expr 字段访问 a.b ──
+fn test_expr_field(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T28\n", 0);
+    let src = "fn f() -> i32 { let x = a.b; x }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T28 error_count=%d\n", (*p).error_count); return 280;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    let ld = node_let_data(s0);
+    let init = (*ld).init as *Node;
+    if (*init).kind != NODE_FIELD() {
+        printf("FAIL T28 init kind got=%d\n", (*init).kind); return 281;
+    }
+    let fd2 = node_field_data(init);
+    if strcmp((*fd2).field, "b" as *u8) != (0 as i32) {
+        printf("FAIL T28 field name\n", 0); return 282;
+    }
+    return 0;
+}
+
+// ── Test 29: parse_expr 数组下标 a[i] ──
+fn test_expr_index(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T29\n", 0);
+    let src = "fn f() -> i32 { let x = a[0]; x }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T29 error_count=%d\n", (*p).error_count); return 290;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    let ld = node_let_data(s0);
+    let init = (*ld).init as *Node;
+    if (*init).kind != NODE_INDEX() {
+        printf("FAIL T29 init kind got=%d\n", (*init).kind); return 291;
+    }
+    return 0;
+}
+
+// ── Test 30: parse_expr 字面量组合（int + float + string + bool） ──
+fn test_expr_literals(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T30\n", 0);
+    // 多个 let 验证 4 种字面量 prefix
+    let src = "fn f() -> i32 { let i = 42; let f = 3.14; let s = \"hi\"; let b = true; 0 }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T30 error_count=%d\n", (*p).error_count); return 300;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    // 4 lets + 1 expr_stmt = 5 stmts
+    if (*bd).nstmts != (5 as i64) {
+        printf("FAIL T30 nstmts got=%d\n", (*bd).nstmts as i32); return 301;
+    }
+    // s0 = let i = 42 (NODE_INT)
+    let s0 = *(((*bd).stmts as i64 + (0 as i64) * (8 as i64)) as **Node);
+    let l0 = node_let_data(s0);
+    let i0 = (*l0).init as *Node;
+    if (*i0).kind != NODE_INT() { printf("FAIL T30 s0 init kind got=%d\n", (*i0).kind); return 302; }
+    // s1 = let f = 3.14 (NODE_FLOAT)
+    let s1 = *(((*bd).stmts as i64 + (1 as i64) * (8 as i64)) as **Node);
+    let l1 = node_let_data(s1);
+    let f1 = (*l1).init as *Node;
+    if (*f1).kind != NODE_FLOAT() { printf("FAIL T30 s1 init kind got=%d\n", (*f1).kind); return 303; }
+    // s2 = let s = "hi" (NODE_STRING, len=2)
+    let s2 = *(((*bd).stmts as i64 + (2 as i64) * (8 as i64)) as **Node);
+    let l2 = node_let_data(s2);
+    let st2 = (*l2).init as *Node;
+    if (*st2).kind != NODE_STRING() { printf("FAIL T30 s2 init kind got=%d\n", (*st2).kind); return 304; }
+    let strd = node_string_data(st2);
+    if (*strd).len != (2 as i64) { printf("FAIL T30 s2 len got=%d\n", (*strd).len as i32); return 305; }
+    // s3 = let b = true (NODE_BOOL, val=1)
+    let s3 = *(((*bd).stmts as i64 + (3 as i64) * (8 as i64)) as **Node);
+    let l3 = node_let_data(s3);
+    let b3 = (*l3).init as *Node;
+    if (*b3).kind != NODE_BOOL() { printf("FAIL T30 s3 init kind got=%d\n", (*b3).kind); return 306; }
+    let bd3 = node_bool_data(b3);
+    if (*bd3).value != (1 as i32) { printf("FAIL T30 s3 val got=%d\n", (*bd3).value); return 307; }
+    return 0;
+}
+
+// ── Test 31: parse_expr 优先级（a + b * c 应该解析为 a + (b*c)） ──
+fn test_expr_precedence(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T31\n", 0);
+    let src = "fn f() -> i32 { let x = 1 + 2 * 3; x }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T31 error_count=%d\n", (*p).error_count); return 310;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    let ld = node_let_data(s0);
+    let init = (*ld).init as *Node;
+    // 顶层应该是 +（PREC_TERM 比 PREC_FACTOR 低）
+    if (*init).kind != NODE_BINARY() {
+        printf("FAIL T31 root kind got=%d\n", (*init).kind); return 311;
+    }
+    let top = node_binary_data(init);
+    if (*top).op != TOKEN_PLUS() {
+        printf("FAIL T31 root op got=%d\n", (*top).op); return 312;
+    }
+    // top.left = 1, top.right = 2 * 3
+    let top_left = (*top).left as *Node;
+    if (*top_left).kind != NODE_INT() { printf("FAIL T31 left kind got=%d\n", (*top_left).kind); return 313; }
+    let top_right = (*top).right as *Node;
+    if (*top_right).kind != NODE_BINARY() { printf("FAIL T31 right kind got=%d\n", (*top_right).kind); return 314; }
+    let inner = node_binary_data(top_right);
+    if (*inner).op != TOKEN_STAR() {
+        printf("FAIL T31 inner op got=%d\n", (*inner).op); return 315;
+    }
+    return 0;
+}
+
+// ── Test 32: parse_expr 赋值 x = 42 ──
+fn test_expr_assign(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T32\n", 0);
+    let src = "fn f() -> i32 { let mut x = 0; x = 42; 0 }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T32 error_count=%d\n", (*p).error_count); return 320;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    // s0 = let, s1 = assign stmt, s2 = expr stmt 0
+    if (*bd).nstmts != (3 as i64) { printf("FAIL T32 nstmts got=%d\n", (*bd).nstmts as i32); return 321; }
+    let s1 = *(((*bd).stmts as i64 + (1 as i64) * (8 as i64)) as **Node);
+    if (*s1).kind != NODE_EXPR_STMT() {
+        printf("FAIL T32 s1 kind got=%d\n", (*s1).kind); return 322;
+    }
+    let esd = node_expr_stmt_data(s1);
+    let inner = (*esd).expr as *Node;
+    if (*inner).kind != NODE_ASSIGN() {
+        printf("FAIL T32 assign kind got=%d\n", (*inner).kind); return 323;
+    }
+    return 0;
+}
+
+// ── Test 33: parse_expr 数组字面量 [1, 2, 3] ──
+fn test_expr_array_lit(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T33\n", 0);
+    let src = "fn f() -> i32 { let x = [1, 2, 3]; 0 }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T33 error_count=%d\n", (*p).error_count); return 330;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    let ld = node_let_data(s0);
+    let init = (*ld).init as *Node;
+    if (*init).kind != NODE_ARRAY_LIT() {
+        printf("FAIL T33 init kind got=%d\n", (*init).kind); return 331;
+    }
+    let ald = node_array_lit_data(init);
+    if (*ald).nelems != (3 as i64) {
+        printf("FAIL T33 nelems got=%d\n", (*ald).nelems as i32); return 332;
+    }
+    return 0;
+}
+
+// ── Test 34: parse_expr 字符串字面量（含引号剥离） ──
+fn test_expr_string(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T34\n", 0);
+    let src = "fn f() -> i32 { let s = \"hello world\"; 0 }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T34 error_count=%d\n", (*p).error_count); return 340;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    let ld = node_let_data(s0);
+    let init = (*ld).init as *Node;
+    if (*init).kind != NODE_STRING() {
+        printf("FAIL T34 init kind got=%d\n", (*init).kind); return 341;
+    }
+    let sd = node_string_data(init);
+    if (*sd).len != (11 as i64) {  // "hello world" 中间 11 字符
+        printf("FAIL T34 len got=%d\n", (*sd).len as i32); return 342;
     }
     return 0;
 }
@@ -896,6 +1250,37 @@ fn main_jhyy() -> i32 {
     if r != (0 as i32) { return r; }
 
     r = test_parse_pattern_range_bool(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    // commit 4 新增
+    r = test_expr_int_add(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_expr_unary_neg(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_expr_call(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_expr_field(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_expr_index(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_expr_literals(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_expr_precedence(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_expr_assign(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_expr_array_lit(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_expr_string(&lex, &p, &a);
     if r != (0 as i32) { return r; }
 
     printf("PASS\n", 0);
