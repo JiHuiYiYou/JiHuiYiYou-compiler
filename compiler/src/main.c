@@ -442,7 +442,7 @@ static int compile(const char **inputs, int ninputs, const char *output) {
     snprintf(exe_path, sizeof(exe_path), "%s.exe", output);
     path_to_win(exe_path);
     snprintf(cmd, sizeof(cmd),
-             "C:/msys64/ucrt64/bin/gcc.exe %s C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/runtime/runtime.c -o %s -lm",
+             "C:/msys64/ucrt64/bin/gcc.exe %s C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/runtime/runtime.c C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/src0/jhyy_helpers.c -o %s -lm",
              asm_path, exe_path);
     if (system(cmd) != 0) {
         fprintf(stderr, "gcc link failed\n");

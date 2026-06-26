@@ -145,12 +145,12 @@ fn lookup_keyword(name: *u8, len: i64) -> i32 {
     if len == 2 as i64 {
         if strncmp(name, "fn" as *u8, 2 as i64) == 0 as i32 { return TOKEN_FN(); }
         if strncmp(name, "if" as *u8, 2 as i64) == 0 as i32 { return TOKEN_IF(); }
+        if strncmp(name, "in" as *u8, 2 as i64) == 0 as i32 { return TOKEN_IN(); }
     }
     if len == 3 as i64 {
         if strncmp(name, "let" as *u8, 3 as i64) == 0 as i32 { return TOKEN_LET(); }
         if strncmp(name, "mut" as *u8, 3 as i64) == 0 as i32 { return TOKEN_MUT(); }
         if strncmp(name, "for" as *u8, 3 as i64) == 0 as i32 { return TOKEN_FOR(); }
-        if strncmp(name, "in" as *u8, 3 as i64) == 0 as i32 { return TOKEN_IN(); }
         if strncmp(name, "as" as *u8, 3 as i64) == 0 as i32 { return TOKEN_AS(); }
     }
     if len == 4 as i64 {

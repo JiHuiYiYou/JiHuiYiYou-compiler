@@ -30,6 +30,7 @@ extern fn strlen(s: *u8) -> i64;
 extern fn strcmp(a: *u8, b: *u8) -> i32;
 extern fn strncmp(a: *u8, b: *u8, n: i64) -> i32;
 extern fn sprintf(buf: *u8, fmt: *u8, val: i32) -> i32;  // 单 i32
+extern fn strtoll(s: *u8, endptr: *u8, base: i32) -> i64;  // v1 sprint 3 commit 3 parse_pattern int literal
 
 // ═══ 控制台输出（单 i32 参数，覆盖 v0.6 用例） ═══
 extern fn printf(fmt: *u8, val: i32) -> i32;

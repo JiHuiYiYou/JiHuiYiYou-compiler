@@ -1,6 +1,6 @@
-// _driver_parser.jhyy — Sprint 3 commit 2 单元测试：验证 parser.jhyy (parse_decl)
+// _driver_parser.jhyy — Sprint 3 commit 2 + 3 单元测试
 //
-// 测试覆盖：
+// commit 2 测试覆盖：
 //   - parser_init + parser_parse 基础调用
 //   - parse_decl 顶层 dispatch：fn / type / extern / import
 //   - parse_type：*T / [*]T / [T;N] / Ident / Ident::Ident
@@ -9,6 +9,13 @@
 //   - parse_extern_decl / parse_import_decl
 //   - 错误检测：expect 失败 + error_count 增加
 //   - 嵌套 module：多个 decl
+//
+// commit 3 新增测试覆盖：
+//   - parse_stmt 9 个子分支配器：let/if/while/for/match/return/break/continue/expr_stmt
+//   - parse_pattern：literal / wildcard / ident / enum variant / range
+//   - parse_if / parse_while / parse_for 的 inlined block 验证
+//   - parse_match 短名 variant pattern
+//   - nested control flow（if-inside-for）
 //
 // 退出码：42
 
@@ -395,6 +402,406 @@ fn test_error(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
     return 0;
 }
 
+// ═══ Sprint 3 commit 3: parse_stmt + parse_pattern 测试 ═══
+
+// ── Test 14: parse_let（带 mut + type annotation） ──
+fn test_parse_let(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T14\n", 0);
+    let src = "fn f() -> i32 { let mut x: i32 = 0; 0 }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T14 error_count=%d\n", (*p).error_count); return 130;
+    }
+    // 进入 fn body 找到 NODE_LET
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    // parse_expr stub 返回 NULL，parse_expr_stmt 返回 0。
+    // body 块只有 1 个 stmt (let)，trailing `0` 不计入。
+    if (*bd).nstmts != (1 as i64) {
+        printf("FAIL T14 nstmts got=%d\n", (*bd).nstmts as i32); return 131;
+    }
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    if (*s0).kind != NODE_LET() {
+        printf("FAIL T14 s0 kind got=%d\n", (*s0).kind); return 132;
+    }
+    let ld = node_let_data(s0);
+    if (*ld).is_mutable != (1 as i32) {
+        printf("FAIL T14 is_mutable\n", 0); return 133;
+    }
+    let sym = (*ld).sym as *Sym;
+    if strcmp((*sym).name, "x" as *u8) != (0 as i32) {
+        printf("FAIL T14 sym name\n", 0); return 134;
+    }
+    return 0;
+}
+
+// ── Test 15: parse_if (无 else) ──
+fn test_parse_if_no_else(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T15\n", 0);
+    let src = "fn f() -> i32 { if 1 { 0 } 0 }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T15 error_count=%d\n", (*p).error_count); return 140;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    // nstmts = 1 (if, the trailing 0 → expr stub NULL)
+    if (*bd).nstmts < (1 as i64) {
+        printf("FAIL T15 nstmts\n", 0); return 141;
+    }
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    if (*s0).kind != NODE_IF() {
+        printf("FAIL T15 s0 kind got=%d\n", (*s0).kind); return 142;
+    }
+    let id = node_if_data(s0);
+    if (*id).else_body != (0 as *u8) {
+        printf("FAIL T15 else_body should be null\n", 0); return 143;
+    }
+    if (*id).then_body == (0 as *u8) {
+        printf("FAIL T15 then_body null\n", 0); return 144;
+    }
+    return 0;
+}
+
+// ── Test 16: parse_if (with else) ──
+fn test_parse_if_else(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T16\n", 0);
+    let src = "fn f() -> i32 { if 1 { 0 } else { 0 } 0 }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T16 error_count=%d\n", (*p).error_count); return 150;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    if (*s0).kind != NODE_IF() {
+        printf("FAIL T16 s0 kind got=%d\n", (*s0).kind); return 151;
+    }
+    let id = node_if_data(s0);
+    if (*id).else_body == (0 as *u8) {
+        printf("FAIL T16 else_body null\n", 0); return 152;
+    }
+    let eb = (*id).else_body as *Node;
+    if (*eb).kind != NODE_BLOCK() {
+        printf("FAIL T16 else kind got=%d\n", (*eb).kind); return 153;
+    }
+    return 0;
+}
+
+// ── Test 17: parse_while ──
+fn test_parse_while(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T17\n", 0);
+    let src = "fn f() -> i32 { while 1 { break; } 0 }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T17 error_count=%d\n", (*p).error_count); return 160;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    if (*s0).kind != NODE_WHILE() {
+        printf("FAIL T17 s0 kind got=%d\n", (*s0).kind); return 161;
+    }
+    let wd = node_while_data(s0);
+    if (*wd).body == (0 as *u8) {
+        printf("FAIL T17 body null\n", 0); return 162;
+    }
+    // body = block with 1 stmt (break)
+    let wb = (*wd).body as *Node;
+    let wbd = node_block_data(wb);
+    if (*wbd).nstmts != (1 as i64) {
+        printf("FAIL T17 nstmts got=%d\n", (*wbd).nstmts as i32); return 163;
+    }
+    let bs = *(((*wbd).stmts as i64) as **Node);
+    if (*bs).kind != NODE_BREAK() {
+        printf("FAIL T17 inner kind got=%d\n", (*bs).kind); return 164;
+    }
+    return 0;
+}
+
+// ── Test 18: parse_for ──
+fn test_parse_for(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T18\n", 0);
+    let src = "fn f() -> i32 { for i in 0..10 { continue; } 0 }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T18 error_count=%d\n", (*p).error_count); return 170;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    if (*s0).kind != NODE_FOR() {
+        printf("FAIL T18 s0 kind got=%d\n", (*s0).kind); return 171;
+    }
+    let fd2 = node_for_data(s0);
+    let sym = (*fd2).var as *Sym;
+    if strcmp((*sym).name, "i" as *u8) != (0 as i32) {
+        printf("FAIL T18 var name\n", 0); return 172;
+    }
+    return 0;
+}
+
+// ── Test 19: parse_match + parse_pattern 短名 variant ──
+fn test_parse_match_short_variant(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T19\n", 0);
+    // 先 type Option = enum { Some(i32), None } 再 match opt { Some(_) => 1, None => 0 }
+    let src = "type Option = enum { Some(i32), None }\n\
+               \nfn f(opt: Option) -> i32 { match opt { Some(_) => 1, None => 0 } 0 }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T19 error_count=%d\n", (*p).error_count); return 180;
+    }
+    let md = node_module_data(module);
+    if (*md).ndeccls != (2 as i64) {
+        printf("FAIL T19 ndeccls got=%d\n", (*md).ndeccls as i32); return 181;
+    }
+    // 第二个 decl = fn
+    let fn_slot = ((*md).decls as i64 + (8 as i64)) as **Node;
+    let fn_decl = *fn_slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    // block: 1 stmt = match
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    if (*s0).kind != NODE_MATCH() {
+        printf("FAIL T19 s0 kind got=%d\n", (*s0).kind); return 182;
+    }
+    let mdata = node_match_data(s0);
+    if (*mdata).narms != (2 as i64) {
+        printf("FAIL T19 narms got=%d\n", (*mdata).narms as i32); return 183;
+    }
+    // arm 0: Some(_) → NODE_PATTERN_ENUM, type_sym=NULL, variant_sym=SYM_VARIANT
+    let arm0 = *(((*mdata).arms as i64) as **Node);
+    let arm0d = node_match_arm_data(arm0);
+    let pat0 = (*arm0d).pattern as *Node;
+    if (*pat0).kind != NODE_PATTERN_ENUM() {
+        printf("FAIL T19 pat0 kind got=%d\n", (*pat0).kind); return 184;
+    }
+    let pdata = node_pattern_enum_data(pat0);
+    let vsym = (*pdata).variant_sym as *Sym;
+    if (*vsym).kind != SYM_VARIANT() {
+        printf("FAIL T19 vsym kind got=%d\n", (*vsym).kind); return 185;
+    }
+    if strcmp((*vsym).name, "Some" as *u8) != (0 as i32) {
+        printf("FAIL T19 vsym name got=%s\n", (*vsym).name); return 186;
+    }
+    // inner = NODE_PATTERN_WILD (_)
+    let inner = (*pdata).inner as *Node;
+    if (*inner).kind != NODE_PATTERN_WILD() {
+        printf("FAIL T19 inner kind got=%d\n", (*inner).kind); return 187;
+    }
+    return 0;
+}
+
+// ── Test 20: parse_match 完整限定 Option::Some(v) ──
+fn test_parse_match_qualified_enum(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T20\n", 0);
+    let src = "type Option = enum { Some(i32), None }\n\
+               \nfn f(opt: Option) -> i32 { match opt { Option::Some(_) => 1, Option::None => 0 } 0 }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T20 error_count=%d\n", (*p).error_count); return 190;
+    }
+    let md = node_module_data(module);
+    let fn_slot = ((*md).decls as i64 + (8 as i64)) as **Node;
+    let fn_decl = *fn_slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    let mdata = node_match_data(s0);
+    let arm0 = *(((*mdata).arms as i64) as **Node);
+    let arm0d = node_match_arm_data(arm0);
+    let pat0 = (*arm0d).pattern as *Node;
+    let pdata = node_pattern_enum_data(pat0);
+    // qualified: type_sym = "Option" (SYM_TYPE)
+    let tsym = (*pdata).type_sym as *Sym;
+    if (*tsym).kind != SYM_TYPE() {
+        printf("FAIL T20 tsym kind got=%d\n", (*tsym).kind); return 191;
+    }
+    if strcmp((*tsym).name, "Option" as *u8) != (0 as i32) {
+        printf("FAIL T20 tsym name\n", 0); return 192;
+    }
+    let vsym = (*pdata).variant_sym as *Sym;
+    if strcmp((*vsym).name, "Some" as *u8) != (0 as i32) {
+        printf("FAIL T20 vsym name\n", 0); return 193;
+    }
+    return 0;
+}
+
+// ── Test 21: parse_pattern int literal ──
+fn test_parse_pattern_int(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T21\n", 0);
+    let src = "fn f() -> i32 { match 1 { 0 => 0, 1 => 1, _ => 2 } 0 }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T21 error_count=%d\n", (*p).error_count); return 200;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    let mdata = node_match_data(s0);
+    if (*mdata).narms != (3 as i64) {
+        printf("FAIL T21 narms got=%d\n", (*mdata).narms as i32); return 201;
+    }
+    // arm 0: pat = NODE_PATTERN_LIT, value=0
+    let arm0 = *(((*mdata).arms as i64) as **Node);
+    let arm0d = node_match_arm_data(arm0);
+    let pat0 = (*arm0d).pattern as *Node;
+    if (*pat0).kind != NODE_PATTERN_LIT() {
+        printf("FAIL T21 pat0 kind got=%d\n", (*pat0).kind); return 202;
+    }
+    let pd = node_pattern_lit_data(pat0);
+    if (*pd).value != (0 as i64) {
+        printf("FAIL T21 pat0 value got=%d\n", (*pd).value as i32); return 203;
+    }
+    // arm 1: pat = NODE_PATTERN_LIT, value=1
+    let arm1 = *(((*mdata).arms as i64 + (8 as i64)) as **Node);
+    let arm1d = node_match_arm_data(arm1);
+    let pat1 = (*arm1d).pattern as *Node;
+    let pd1 = node_pattern_lit_data(pat1);
+    if (*pd1).value != (1 as i64) {
+        printf("FAIL T21 pat1 value got=%d\n", (*pd1).value as i32); return 204;
+    }
+    return 0;
+}
+
+// ── Test 22: parse_return ──
+fn test_parse_return(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T22\n", 0);
+    let src = "fn f() -> i32 { return 42; 0 }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T22 error_count=%d\n", (*p).error_count); return 210;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    // nstmts=1 (return, trailing 0 → expr stub NULL)
+    if (*bd).nstmts != (1 as i64) {
+        printf("FAIL T22 nstmts got=%d\n", (*bd).nstmts as i32); return 211;
+    }
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    if (*s0).kind != NODE_RETURN() {
+        printf("FAIL T22 s0 kind got=%d\n", (*s0).kind); return 212;
+    }
+    return 0;
+}
+
+// ── Test 23: nested control flow (if inside for) ──
+fn test_nested_if_for(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T23\n", 0);
+    let src = "fn f() -> i32 { for i in 0..10 { if 1 { break; } } 0 }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T23 error_count=%d\n", (*p).error_count); return 220;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    if (*s0).kind != NODE_FOR() {
+        printf("FAIL T23 s0 kind got=%d\n", (*s0).kind); return 221;
+    }
+    let fd2 = node_for_data(s0);
+    let fbody = (*fd2).body as *Node;
+    let fbd = node_block_data(fbody);
+    // for body: 1 stmt = if
+    if (*fbd).nstmts != (1 as i64) {
+        printf("FAIL T23 for body nstmts got=%d\n", (*fbd).nstmts as i32); return 222;
+    }
+    let inner = *(((*fbd).stmts as i64) as **Node);
+    if (*inner).kind != NODE_IF() {
+        printf("FAIL T23 inner kind got=%d\n", (*inner).kind); return 223;
+    }
+    return 0;
+}
+
+// ── Test 24: parse_pattern range + bool literal ──
+fn test_parse_pattern_range_bool(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
+    printf("T24\n", 0);
+    // range pattern 是 ident-based: `lo..hi`（jhyy 不支持 `1..10` 字面量范围）
+    let src = "fn f() -> i32 { match 0 { x..y => 0, true => 0 } 0 }" as *u8;
+    setup_parser(src, lex, p, a);
+    let module = parser_parse(p);
+    if (*p).error_count != (0 as i32) {
+        printf("FAIL T24 error_count=%d\n", (*p).error_count); return 230;
+    }
+    let md = node_module_data(module);
+    let slot = (*md).decls as **Node;
+    let fn_decl = *slot;
+    let fd = node_func_decl_data(fn_decl);
+    let body = (*fd).body as *Node;
+    let bd = node_block_data(body);
+    let s0 = *(((*bd).stmts as i64) as **Node);
+    let mdata = node_match_data(s0);
+    if (*mdata).narms != (2 as i64) {
+        printf("FAIL T24 narms got=%d\n", (*mdata).narms as i32); return 231;
+    }
+    // arm 0: pat = NODE_PATTERN_RANGE
+    let arm0 = *(((*mdata).arms as i64) as **Node);
+    let arm0d = node_match_arm_data(arm0);
+    let pat0 = (*arm0d).pattern as *Node;
+    if (*pat0).kind != NODE_PATTERN_RANGE() {
+        printf("FAIL T24 pat0 kind got=%d\n", (*pat0).kind); return 232;
+    }
+    // arm 1: pat = NODE_PATTERN_LIT, value=1 (true), prim=bool
+    let arm1 = *(((*mdata).arms as i64 + (8 as i64)) as **Node);
+    let arm1d = node_match_arm_data(arm1);
+    let pat1 = (*arm1d).pattern as *Node;
+    if (*pat1).kind != NODE_PATTERN_LIT() {
+        printf("FAIL T24 pat1 kind got=%d\n", (*pat1).kind); return 233;
+    }
+    let pd = node_pattern_lit_data(pat1);
+    if (*pd).value != (1 as i64) {
+        printf("FAIL T24 pat1 value got=%d\n", (*pd).value as i32); return 234;
+    }
+    if (*pd).prim != PRIM_BOOL() {
+        printf("FAIL T24 pat1 prim got=%d\n", (*pd).prim); return 235;
+    }
+    return 0;
+}
+
 fn main_jhyy() -> i32 {
     printf("T0\n", 0);
 
@@ -456,6 +863,39 @@ fn main_jhyy() -> i32 {
     if r != (0 as i32) { return r; }
 
     r = test_error(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_parse_let(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_parse_if_no_else(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_parse_if_else(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_parse_while(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_parse_for(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_parse_match_short_variant(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_parse_match_qualified_enum(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_parse_pattern_int(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_parse_return(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_nested_if_for(&lex, &p, &a);
+    if r != (0 as i32) { return r; }
+
+    r = test_parse_pattern_range_bool(&lex, &p, &a);
     if r != (0 as i32) { return r; }
 
     printf("PASS\n", 0);
