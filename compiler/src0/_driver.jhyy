@@ -1,0 +1,69 @@
+// _driver.jhyy — Sprint 1 driver：测试 arena.jhyy + util.jhyy
+
+import arena;
+import util;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn exit(code: i32);
+
+fn main_jhyy() -> i32 {
+    printf("A\n", 0);
+    let mut a: Arena = Arena {
+        start: 0 as *u8,
+        cur: 0 as *u8,
+        end: 0 as *u8,
+        blocks: 0 as *u8,
+        def_size: 0 as i64,
+    };
+    arena_init(&a, 1024);
+    printf("B\n", 0);
+    let p1 = arena_alloc(&a, 8);
+    printf("C\n", 0);
+    let mut i: i32 = 0;
+    while i < 200 {
+        let p = arena_alloc(&a, 16);
+        i = i + 1;
+    }
+    printf("D\n", 0);
+    let z = arena_calloc(&a, 32);
+    printf("E\n", 0);
+    let hello = "hello" as *u8;
+    let dup = arena_strdup(&a, hello, 5);
+    printf("F\n", 0);
+
+    // Phase 2
+    let mut sb: StringBuilder = StringBuilder {
+        buf: 0 as *u8,
+        len: 0 as i64,
+        cap: 0 as i64,
+    };
+    sb_init(&a, &sb);
+    printf("G\n", 0);
+    sb_append_cstr(&a, &sb, "x" as *u8);
+    printf("H\n", 0);
+    sb_appendf(&a, &sb, "%d" as *u8, 42 as i32);
+    printf("I\n", 0);
+    let s = sb_cstr(&a, &sb);
+    printf("J\n", 0);
+
+    printf("K0\n", 0);
+    printf("K1\n", 0);
+    // Phase 3: HashMap
+    let mut m: HashMap = HashMap {
+        buckets: 0 as *u8,
+        nbuckets: 0 as i64,
+        mask: 0 as i64,
+        count: 0 as i64,
+        arena: 0 as *Arena,
+    };
+    printf("K2\n", 0);
+    hm_init(&a, &m);
+    printf("K3\n", 0);
+    let key0 = "hello" as *u8;
+    let val0 = "world" as *u8;
+    hm_put(&a, &m, key0, val0);
+    printf("K4\n", 0);
+    let v0 = hm_get(&m, key0);
+    printf("K5\n", 0);
+    42
+}

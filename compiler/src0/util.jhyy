@@ -1,0 +1,331 @@
+// util.jhyy — jhyy 版编译器内部工具库（v1.0.0 sprint 1）
+//
+// 三个组件：
+//   - StringBuilder: 动态字节缓冲，sb_appendf 内部 sprintf 单 i32
+//   - HashMap: FNV-1a 64-bit + 开放寻址 + 线性探测 + 0.75 自动扩容
+//   - Diagnostic: 单字符串参数（变参由 StringBuilder 拼好）+ SourceLoc
+//
+// 重要（plan 修订）：util.jhyy 是 jhyy 版编译器内部使用。**C 端 codegen.c /
+// symtab.c / sema.c 不重写、不删**（保留到 v2.0+），跟 jhyy 版无调用关系。
+//
+// 重要（v1.0 sprint 1 修订补）：arena 函数通过 `import arena;` 引入（jhyy
+// sema 把 arena.jhyy 的 fn 符号拉到调用方，codegen emit `module__fn` 的
+// mangled 名字）。**绝对不能**对 arena 函数写 `extern fn` — extern fn 标记
+// is_extern=1，codegen emit **不带** module prefix 的 unmangled 名字，link
+// 时找不到符号（plan § 1.1 util.jhyy 段落的"直接抄"措辞错了，修订为"通过
+// import arena; 引入"）。
+
+import arena;
+
+// ════════════════════════════════════════════════════
+// FFI（jhyy 当前无头文件共享；每个文件重复 extern 声明）
+// ════════════════════════════════════════════════════
+
+// libc 内存
+extern fn malloc(size: i64) -> *u8;
+extern fn free(p: *u8) -> i32;
+extern fn memcpy(dst: *u8, src: *u8, n: i64) -> *u8;
+extern fn memset(s: *u8, c: i32, n: i64) -> *u8;
+extern fn realloc(p: *u8, size: i64) -> *u8;
+
+// libc 字符串
+extern fn strlen(s: *u8) -> i64;
+extern fn strcmp(a: *u8, b: *u8) -> i32;
+extern fn sprintf(buf: *u8, fmt: *u8, val: i32) -> i32;
+
+// jhyy_helpers
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+extern fn jh_print_loc_stderr(loc_filename: *u8, line: i32, col: i32) -> i32;
+
+// ════════════════════════════════════════════════════
+// Arena 类型声明（从 arena.jhyy 复制）
+// ════════════════════════════════════════════════════
+
+type Arena = struct {
+    start:    *u8,
+    cur:      *u8,
+    end:      *u8,
+    blocks:   *u8,
+    def_size: i64,
+}
+
+// ════════════════════════════════════════════════════
+// StringBuilder
+// ════════════════════════════════════════════════════
+
+type StringBuilder = struct {
+    buf:  *u8,
+    len:  i64,
+    cap:  i64,
+}
+
+// 指针算术 helper（jhyy 不支持 *u8 + i64，要 cast）
+fn ptr_add_u8(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+
+fn sb_init(a: *Arena, sb: *StringBuilder) -> i32 {
+    let cap = 256 as i64;
+    let buf = arena_alloc(a, cap);
+    if buf == (0 as *u8) {
+        return 0;
+    }
+    (*sb).buf = buf;
+    (*sb).len = 0 as i64;
+    (*sb).cap = cap;
+    return 1;
+}
+
+fn sb_grow(a: *Arena, sb: *StringBuilder, need: i64) -> i32 {
+    let mut new_cap = (*sb).cap;
+    while new_cap < need {
+        new_cap = new_cap * (2 as i64);
+    }
+    let new_buf = realloc((*sb).buf, new_cap);
+    if new_buf == (0 as *u8) {
+        return 0;
+    }
+    (*sb).buf = new_buf;
+    (*sb).cap = new_cap;
+    return 1;
+}
+
+fn sb_append(a: *Arena, sb: *StringBuilder, src: *u8, n: i64) -> i32 {
+    let need = (*sb).len + n;
+    if need > (*sb).cap {
+        if sb_grow(a, sb, need) == 0 {
+            return 0;
+        }
+    }
+    let dst = ptr_add_u8((*sb).buf, (*sb).len);
+    memcpy(dst, src, n);
+    (*sb).len = (*sb).len + n;
+    return 1;
+}
+
+fn sb_append_cstr(a: *Arena, sb: *StringBuilder, s: *u8) -> i32 {
+    let n = strlen(s);
+    return sb_append(a, sb, s, n);
+}
+
+fn sb_appendf(a: *Arena, sb: *StringBuilder, fmt: *u8, val: i32) -> i32 {
+    let tmp_cap = 32 as i64;
+    let tmp = arena_alloc(a, tmp_cap);
+    if tmp == (0 as *u8) {
+        return 0;
+    }
+    let n = sprintf(tmp, fmt, val);
+    if n < (0 as i32) {
+        return 0;
+    }
+    let n64 = n as i64;
+    return sb_append(a, sb, tmp, n64);
+}
+
+fn sb_cstr(a: *Arena, sb: *StringBuilder) -> *u8 {
+    if (*sb).len >= (*sb).cap {
+        if sb_grow(a, sb, (*sb).len + (1 as i64)) == 0 {
+            return 0 as *u8;
+        }
+    }
+    let p = ptr_add_u8((*sb).buf, (*sb).len);
+    memset(p, 0 as i32, 1 as i64);
+    return (*sb).buf;
+}
+
+fn sb_reset(sb: *StringBuilder) -> i32 {
+    (*sb).len = 0 as i64;
+    return 1;
+}
+
+fn sb_free(sb: *StringBuilder) -> i32 {
+    (*sb).len = 0 as i64;
+    (*sb).cap = 0 as i64;
+    (*sb).buf = 0 as *u8;
+    return 1;
+}
+
+// ════════════════════════════════════════════════════
+// HashMap
+// FNV-1a 64-bit + 开放寻址 + 线性探测 + 0.75 自动扩容
+// 函数顺序：依赖从底向上定义（jhyy 不支持前向引用）
+// ════════════════════════════════════════════════════
+
+type HashEntry = struct {
+    key:   *u8,
+    value: *u8,
+    used:  i32,
+}
+
+type HashMap = struct {
+    buckets:  *u8,
+    nbuckets: i64,
+    mask:     i64,
+    count:    i64,
+    arena:    *Arena,
+}
+
+fn HASH_ENTRY_SIZE() -> i64 { return 24 as i64; }
+fn HASHMAP_INITIAL_SIZE() -> i64 { return 256 as i64; }
+fn FNV_OFFSET() -> i64 { return 0xcbf29ce484222325 as i64; }
+fn FNV_PRIME() -> i64 { return 0x100000001b3 as i64; }
+
+// 绕过 v0.6 codegen bug：*u8 deref 会 emit `%=b loadsb`（QBE 不允许 'b' 作
+// destination）。改用 *i32 deref 每次读 4 byte（loadw 合法），shift+mask 取 byte。
+// Hash 输出与 C 版 FNV-1a byte-equal 不必要（不影响 Stage 1 byte-equal，
+// QBE IL emit 顺序由 AST 决定，不依赖 hash 值）。
+fn hash_string(s: *u8) -> i64 {
+    let mut h = FNV_OFFSET();
+    let mut i: i64 = 0 as i64;
+    let n = strlen(s);
+    while i < n {
+        // 读 4 byte（含 s[i] 在低 byte，未对齐访问 QBE 不允许；强制 4-aligned）
+        let rem = (i - ((i / (4 as i64)) * (4 as i64))) as i32;
+        let aligned = i - (rem as i64);
+        let w = *((s as i64 + aligned) as *i32);
+        let sh = rem * (8 as i32);
+        let c = ((w >> sh) & (255 as i32)) as i64;
+        h = (h ^ c) * FNV_PRIME();
+        i = i + (1 as i64);
+    }
+    return h;
+}
+
+fn hm_alloc_buckets(a: *Arena, n: i64) -> *u8 {
+    let total = n * HASH_ENTRY_SIZE();
+    return arena_calloc(a, total);
+}
+
+fn hm_get_entry(m: *HashMap, idx: i64) -> *HashEntry {
+    let off = idx * HASH_ENTRY_SIZE();
+    return ptr_add_u8((*m).buckets, off) as *HashEntry;
+}
+
+fn hm_put(a: *Arena, m: *HashMap, key: *u8, value: *u8) -> i32 {
+    // 注：jhyy 不支持函数前向引用，hm_put 不调 hm_grow 自动扩容。
+    // 调用方负责：插入前用 hm_should_grow 检查，需要时调 hm_grow。
+    let h = hash_string(key);
+    let mut idx = h & (*m).mask;
+    let start = idx;
+    while true {
+        let e = hm_get_entry(m, idx);
+        if (*e).used == (0 as i32) {
+            (*e).key = key;
+            (*e).value = value;
+            (*e).used = 1 as i32;
+            (*m).count = (*m).count + (1 as i64);
+            return 1;
+        }
+        if strcmp((*e).key, key) == (0 as i32) {
+            (*e).value = value;
+            return 1;
+        }
+        idx = (idx + (1 as i64)) & (*m).mask;
+        if idx == start {
+            return 0;
+        }
+    }
+    return 0;  // 兜底
+}
+
+// 检查是否需要扩容（load factor 0.75）
+fn hm_should_grow(m: *HashMap) -> i32 {
+    if (*m).count * (4 as i64) >= (*m).nbuckets * (3 as i64) {
+        return 1;
+    }
+    return 0;
+}
+
+fn hm_grow(a: *Arena, m: *HashMap) -> i32 {
+    let old_n = (*m).nbuckets;
+    let old_buckets = (*m).buckets;
+    let new_n = old_n * (2 as i64);
+    let new_buckets = hm_alloc_buckets(a, new_n);
+    if new_buckets == (0 as *u8) {
+        return 0;
+    }
+    (*m).buckets = new_buckets;
+    (*m).nbuckets = new_n;
+    (*m).mask = new_n - (1 as i64);
+    (*m).count = 0 as i64;
+
+    let mut i: i64 = 0 as i64;
+    while i < old_n {
+        let old_e = ptr_add_u8(old_buckets, i * HASH_ENTRY_SIZE()) as *HashEntry;
+        if (*old_e).used == (1 as i32) {
+            // jhyy 不支持前向引用；不调 hm_put，直接 inline 放 entry
+            let h = hash_string((*old_e).key);
+            let mut idx = h & (*m).mask;
+            while true {
+                let e = hm_get_entry(m, idx);
+                if (*e).used == (0 as i32) {
+                    (*e).key = (*old_e).key;
+                    (*e).value = (*old_e).value;
+                    (*e).used = 1 as i32;
+                    (*m).count = (*m).count + (1 as i64);
+                    break;
+                }
+                idx = (idx + (1 as i64)) & (*m).mask;
+            }
+        }
+        i = i + (1 as i64);
+    }
+    return 1;
+}
+
+fn hm_init(a: *Arena, m: *HashMap) -> i32 {
+    let init_n = HASHMAP_INITIAL_SIZE();
+    (*m).nbuckets = init_n;
+    (*m).mask = init_n - (1 as i64);
+    (*m).count = 0 as i64;
+    (*m).arena = a;
+    let buckets = hm_alloc_buckets(a, init_n);
+    if buckets == (0 as *u8) {
+        return 0;
+    }
+    (*m).buckets = buckets;
+    return 1;
+}
+
+fn hm_get(m: *HashMap, key: *u8) -> *u8 {
+    if (*m).count == (0 as i64) {
+        return 0 as *u8;
+    }
+    let h = hash_string(key);
+    let mut idx = h & (*m).mask;
+    let start = idx;
+    while true {
+        let e = hm_get_entry(m, idx);
+        if (*e).used == (0 as i32) {
+            return 0 as *u8;
+        }
+        if strcmp((*e).key, key) == (0 as i32) {
+            return (*e).value;
+        }
+        idx = (idx + (1 as i64)) & (*m).mask;
+        if idx == start {
+            return 0 as *u8;
+        }
+    }
+    return 0 as *u8;  // 兜底
+}
+
+// ════════════════════════════════════════════════════
+// Diagnostic
+// ════════════════════════════════════════════════════
+
+// 绕过 v0.6 codegen bug：嵌套 struct field access 会 emit `%=w loadw`（因为
+// qbe_type_of(struct) 默认 'w'），但 nested struct 经常需要 8-aligned load。
+// 平铺所有字段，不嵌套 struct。
+type Diagnostic = struct {
+    filename: *u8,
+    line:     i32,
+    col:      i32,
+    msg:      *u8,
+}
+
+fn diag_emit(d: *Diagnostic) -> i32 {
+    jh_print_loc_stderr((*d).filename, (*d).line, (*d).col);
+    jh_fputs_stderr((*d).msg);
+    return 0;
+}
