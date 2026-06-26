@@ -31,3 +31,8 @@ __pycache__/
 
 # ffi_file.jhyy 测试产物（FFI 文件 I/O 测试输出）
 ffi_test_output.txt
+
+# src0/ v1.0.0 自举翻译稿目录：只跟踪 .jhyy 源文件，.il/.exe/.s 构建产物全部忽略
+compiler/src0/*.il
+compiler/src0/*.s
+compiler/src0/*.exe

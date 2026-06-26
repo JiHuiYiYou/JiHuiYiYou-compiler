@@ -1,5 +1,0 @@
-import ast;
-
-fn main_jhyy() -> i32 {
-    return 42 as i32;
-}
