@@ -22,6 +22,8 @@ import util;
 // ════════════════════════════════════════════════════
 // FFI（util.jhyy 已声明 strcmp；这里不重复）
 // ════════════════════════════════════════════════════
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+extern fn printf(fmt: *u8, val: i32) -> i32;
 
 // ════════════════════════════════════════════════════
 // SymKind 常量
@@ -286,4 +288,42 @@ fn symtab_lookup(t_raw: *u8, name: *u8) -> *Sym {
 
 fn symtab_lookup_local(t_raw: *u8, name: *u8) -> *Sym {
     return symtab_lookup_one(t_raw, name);
+}
+
+// ═══════════════════════════════════════════════════
+// v0.7 7A：sym_enum_variants（sema 7A 用，收集某 enum 的所有 variant sym）
+// ═══════════════════════════════════════════════════
+
+// 遍历 global_scope，收集 kind=SYM_VARIANT 且 module==enum_name 的所有 sym 写到 out 数组。
+// 返回写入数量（0 if 未找到或无 variants）。
+// jhyy 版：用 offset 访问 SymTable.entries（*[*]*Sym 数组）
+fn sym_enum_variants(t_raw: *u8, enum_name: *u8, out: *u8, max_variants: i64) -> i32 {
+    if t_raw == (0 as *u8) { return 0 as i32; }
+    if enum_name == (0 as *u8) { return 0 as i32; }
+    if out == (0 as *u8) { return 0 as i32; }
+    if max_variants <= (0 as i64) { return 0 as i32; }
+
+    let t = t_raw as *SymTable;
+    let mut n: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < (*t).nentries {
+        if n >= max_variants {
+            break;
+        }
+        let entry = symtab_load_entry(t_raw, i);
+        if entry != (0 as *Sym) {
+            if (*entry).kind == SYM_VARIANT() {
+                if (*entry).module != (0 as *u8) {
+                    if strcmp((*entry).module, enum_name) == (0 as i32) {
+                        // out[n] = entry
+                        let slot = ptr_add_u8(out, n * (8 as i64)) as **Sym;
+                        *slot = entry;
+                        n = n + (1 as i64);
+                    }
+                }
+            }
+        }
+        i = i + (1 as i64);
+    }
+    return n as i32;
 }

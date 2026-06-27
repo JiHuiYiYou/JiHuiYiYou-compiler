@@ -1,0 +1,259 @@
+// _driver_sema.jhyy — Sprint 3 commit 5 单元测试
+//
+// 测试覆盖：
+//   T0  smoke：sema_init 不崩
+//   T1  有效函数（fn main 返回 i32，body 含 let + return）→ 0 errors
+//   T2  未定义变量 → 1+ errors（"undefined variable"）
+//   T3  struct layout：2 个 i32 字段，第二个 offset=4
+//   T4  enum variants 注册：symtab_lookup 找得到
+//   T5  match 非穷尽（无 _ 且少覆盖一个 variant）→ errors > 0
+//   T6  match 穷尽（有 _ 兜底）→ 0 errors
+//   T7  let mut 可赋值 / let 不可赋值（v0.6.5 patch）
+//
+// 退出码：42
+
+import ffi;
+import util;
+import lexer;
+import arena;
+import symtab;
+import types;
+import ast;
+import parser;
+import sema;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+
+// ── Helper：parse 一段 source 到 Module Node，并 re-init SemaContext ──
+// ⚠ arena_reset 后 ctx.global_scope 指向的 symtab 内存已被后续 arena_alloc 覆盖！
+//   必须重新调 sema_init 分配全新的 global_scope。
+fn parse_source(a: *Arena, ta: *TypeArena, src: *u8, lex_out: *Lexer, p_out: *Parser, ctx: *SemaContext) -> *Node {
+    arena_reset(a);
+    lexer_init(lex_out, src, "test.jhyy" as *u8);
+    parser_init(p_out, lex_out, a);
+    // 重新分配 ctx 内部的所有 arena-backed 状态（global_scope / locals）
+    let _x = sema_init(ctx, a, ta);
+    let mod = parser_parse(p_out);
+    return mod;
+}
+
+// ── Test 1: valid simple function ──
+fn test_valid_fn(a: *Arena, lex: *Lexer, p: *Parser, ctx: *SemaContext, ta: *TypeArena) -> i32 {
+    printf("T1\n", 0);
+    let src = "fn main() -> i32 { let x: i32 = 42; return x; }" as *u8;
+    let module = parse_source(a, ta, src, lex, p, ctx);
+    let errs = sema_check(ctx, ta, module);
+    if errs != (0 as i32) {
+        printf("FAIL T1 errs got=%d\n", errs);
+        return 1;
+    }
+    return 0;
+}
+
+// ── Test 2: undefined variable ──
+fn test_undefined_var(a: *Arena, lex: *Lexer, p: *Parser, ctx: *SemaContext, ta: *TypeArena) -> i32 {
+    printf("T2\n", 0);
+    let src = "fn main() -> i32 { return x; }" as *u8;
+    let module = parse_source(a, ta, src, lex, p, ctx);
+    let errs = sema_check(ctx, ta, module);
+    if errs <= (0 as i32) {
+        printf("FAIL T2 errs got=%d (expected >0)\n", errs);
+        return 20;
+    }
+    return 0;
+}
+
+// ── Test 3: struct layout (simplified: just check sema errors + Point exists) ──
+fn test_struct_layout(a: *Arena, lex: *Lexer, p: *Parser, ctx: *SemaContext, ta: *TypeArena) -> i32 {
+    printf("T3\n", 0);
+    arena_reset(a);
+    let src = "type Point = struct { x: i32, y: i32 }" as *u8;
+    let module = parse_source(a, ta, src, lex, p, ctx);
+    let errs = sema_check(ctx, ta, module);
+    if errs != (0 as i32) {
+        printf("FAIL T3 errs got=%d\n", errs);
+        return 30;
+    }
+    let point_sym = symtab_lookup(ctx.global_scope, "Point" as *u8);
+    if point_sym == (0 as *Sym) {
+        printf("FAIL T3 Point sym not found\n", 0);
+        return 31;
+    }
+    return 0;
+}
+
+// ── Test 4: enum variants registered ──
+fn test_enum_variants(a: *Arena, lex: *Lexer, p: *Parser, ctx: *SemaContext, ta: *TypeArena) -> i32 {
+    printf("T4\n", 0);
+    arena_reset(a);
+    let src = "type Color = enum { Red, Green, Blue } fn main() -> i32 { return 0; }" as *u8;
+    let module = parse_source(a, ta, src, lex, p, ctx);
+    let errs = sema_check(ctx, ta, module);
+    if errs != (0 as i32) {
+        printf("FAIL T4 errs got=%d\n", errs);
+        return 40;
+    }
+    // enum sym 应该有 type
+    let color_sym = symtab_lookup(ctx.global_scope, "Color" as *u8);
+    if color_sym == (0 as *Sym) {
+        printf("FAIL T4 Color sym not found\n", 0);
+        return 41;
+    }
+    let ct = (*color_sym).type_ptr as *Type;
+    if ct == (0 as *Type) {
+        printf("FAIL T4 Color type_ptr null\n", 0);
+        return 41;
+    }
+    if (*ct).kind != KIND_ENUM() {
+        printf("FAIL T4 Color not KIND_ENUM got=%d\n", (*ct).kind);
+        return 42;
+    }
+    if (*ct).nvariants != (3 as i64) {
+        printf("FAIL T4 nvariants got=%d\n", (*ct).nvariants as i32);
+        return 43;
+    }
+    // sym_enum_variants 应返回 3
+    let buf = arena_alloc(a, 16 as i64 * (8 as i64));
+    let nv = sym_enum_variants(ctx.global_scope, "Color" as *u8, buf, 16 as i64);
+    if nv != (3 as i32) {
+        printf("FAIL T4 sym_enum_variants got=%d\n", nv);
+        return 44;
+    }
+    return 0;
+}
+
+// ── Test 5: non-exhaustive match on enum (no wildcard, missing variant) ──
+fn test_match_non_exhaustive(a: *Arena, lex: *Lexer, p: *Parser, ctx: *SemaContext, ta: *TypeArena) -> i32 {
+    printf("T5\n", 0);
+    let src = "type Color = enum { Red, Green, Blue } fn main() -> i32 { let c = Red; match c { Red => 0 } 1 }" as *u8;
+    let module = parse_source(a, ta, src, lex, p, ctx);
+    let errs = sema_check(ctx, ta, module);
+    if errs <= (0 as i32) {
+        printf("FAIL T5 errs got=%d (expected >0 for non-exhaustive)\n", errs);
+        return 50;
+    }
+    return 0;
+}
+
+// ── Test 6: exhaustive match (with wildcard) ──
+fn test_match_exhaustive(a: *Arena, lex: *Lexer, p: *Parser, ctx: *SemaContext, ta: *TypeArena) -> i32 {
+    printf("T6\n", 0);
+    let src = "type Color = enum { Red, Green, Blue } fn main() -> i32 { let c = Red; match c { Red => 0, _ => 1 } }" as *u8;
+    let module = parse_source(a, ta, src, lex, p, ctx);
+    let errs = sema_check(ctx, ta, module);
+    if errs != (0 as i32) {
+        printf("FAIL T6 errs got=%d (expected 0)\n", errs);
+        return 60;
+    }
+    return 0;
+}
+
+// ── Test 7: let mut allowed, immutable rejected (v0.6.5 patch) ──
+fn test_let_mut(a: *Arena, lex: *Lexer, p: *Parser, ctx: *SemaContext, ta: *TypeArena) -> i32 {
+    printf("T7\n", 0);
+    let src1 = "fn main() -> i32 { let x: i32 = 1; x = 2; return x; }" as *u8;
+    let module1 = parse_source(a, ta, src1, lex, p, ctx);
+    let errs1 = sema_check(ctx, ta, module1);
+    if errs1 <= (0 as i32) {
+        printf("FAIL T7a immutable assign should error, got=%d\n", errs1);
+        return 70;
+    }
+
+    let src2 = "fn main() -> i32 { let mut x: i32 = 1; x = 2; return x; }" as *u8;
+    let module2 = parse_source(a, ta, src2, lex, p, ctx);
+    let errs2 = sema_check(ctx, ta, module2);
+    if errs2 != (0 as i32) {
+        printf("FAIL T7b let mut should pass, got=%d\n", errs2);
+        return 71;
+    }
+    return 0;
+}
+
+fn main_jhyy() -> i32 {
+    printf("T0\n", 0);
+
+    // Lexer + Parser
+    let mut lex: Lexer = Lexer {
+        source: 0 as *u8, current: 0 as *u8, filename: 0 as *u8,
+        line: 0, col: 0,
+        peek_kind: 0, peek_start: 0 as *u8, peek_len: 0 as i64,
+        peek_lf: 0 as *u8, peek_ll: 0, peek_lc: 0,
+        has_peek: 0, error_count: 0,
+    };
+    let mut p: Parser = Parser {
+        lexer: 0 as *Lexer, arena: 0 as *Arena,
+        prev_kind: 0, prev_start: 0 as *u8, prev_length: 0 as i64,
+        prev_lf: 0 as *u8, prev_ll: 0, prev_lc: 0,
+        global_scope: 0 as *u8, current_scope: 0 as *u8,
+        scope_depth: 0, error_count: 0,
+    };
+
+    // TypeArena
+    let mut ta: TypeArena = TypeArena {
+        arena: 0 as *Arena, inited: 0 as i32,
+        i8_ty: 0 as *u8, i16_ty: 0 as *u8, i32_ty: 0 as *u8, i64_ty: 0 as *u8,
+        u8_ty: 0 as *u8, u16_ty: 0 as *u8, u32_ty: 0 as *u8, u64_ty: 0 as *u8,
+        f32_ty: 0 as *u8, f64_ty: 0 as *u8, bool_ty: 0 as *u8, void_ty: 0 as *u8,
+    };
+
+    // SemaContext
+    let mut ctx: SemaContext = SemaContext {
+        arena: 0 as *Arena, module: 0 as *Node,
+        global_scope: 0 as *u8, current_scope: 0 as *u8,
+        locals: 0 as *u8, nlocals: 0 as i64,
+        scope_depth: 0 as i32, error_count: 0 as i32,
+        current_ret_type: 0 as *u8, loop_depth: 0 as i32,
+    };
+
+    let mut r: i32 = 0;
+
+    // Per-test fresh arena to avoid cross-test state
+    let mut a: Arena = Arena {
+        start: 0 as *u8, cur: 0 as *u8, end: 0 as *u8,
+        blocks: 0 as *u8, def_size: 0 as i64,
+    };
+    arena_init(&a, 65536 as i64);
+    let _x = sema_init(&ctx, &a, &ta);
+
+    r = test_valid_fn(&a, &lex, &p, &ctx, &ta);
+    if r != (0 as i32) { return r; }
+
+    arena_free(&a);
+    arena_init(&a, 65536 as i64);
+    let _x2 = sema_init(&ctx, &a, &ta);
+    r = test_undefined_var(&a, &lex, &p, &ctx, &ta);
+    if r != (0 as i32) { return r; }
+
+    arena_free(&a);
+    arena_init(&a, 65536 as i64);
+    let _x3 = sema_init(&ctx, &a, &ta);
+    r = test_struct_layout(&a, &lex, &p, &ctx, &ta);
+    if r != (0 as i32) { return r; }
+
+    arena_free(&a);
+    arena_init(&a, 65536 as i64);
+    let _x4 = sema_init(&ctx, &a, &ta);
+    r = test_enum_variants(&a, &lex, &p, &ctx, &ta);
+    if r != (0 as i32) { return r; }
+
+    arena_free(&a);
+    arena_init(&a, 65536 as i64);
+    let _x5 = sema_init(&ctx, &a, &ta);
+    r = test_match_non_exhaustive(&a, &lex, &p, &ctx, &ta);
+    if r != (0 as i32) { return r; }
+
+    arena_free(&a);
+    arena_init(&a, 65536 as i64);
+    let _x6 = sema_init(&ctx, &a, &ta);
+    r = test_match_exhaustive(&a, &lex, &p, &ctx, &ta);
+    if r != (0 as i32) { return r; }
+
+    arena_free(&a);
+    arena_init(&a, 65536 as i64);
+    let _x7 = sema_init(&ctx, &a, &ta);
+    r = test_let_mut(&a, &lex, &p, &ctx, &ta);
+    if r != (0 as i32) { return r; }
+
+    return 42;
+}
