@@ -2,11 +2,11 @@
 
 **日期**: 2026-06-28
 **对应 plan**: [`../../plans/v1/v1.0.0详细实现方案.md`](../../plans/v1/v1.0.0详细实现方案.md) § 3.4
-**状态**: ⚠️ **代码已清，T1-T4/T7 PASS，T5/T6 受 amd64_win codegen bug 阻塞**
+**状态**: ✅ **代码已清 + T0-T7 全部 PASS（exit=42）**
 
 ## 目标
 
-收尾 commit 5 的 debug 代码，把真翻译 bug（VARIANT 处理）合入，留 amd64_win codegen bug 待后续 sprint。
+收尾 commit 5 的 debug 代码，把真翻译 bug（VARIANT 处理）合入，并把 `symtab_lookup_one` 入口的 `sb_init` workaround 保留作为栈帧稳定补丁。
 
 ## 改动
 
@@ -70,24 +70,24 @@ commit 5 调试时发现：`symtab_lookup_one` 在特定调用路径（T5 的 `i
 
 退出码 42。
 
-## ⚠️ amd64_win codegen bug
+## ⚠️ amd64_win codegen bug（workaround 已落 symtab.jhyy）
 
-**症状**：commit 5 调试中发现 T2（`return x;` undefined variable 错误路径）通过后，**第三次** check_func_decl 进入 `symtab_lookup_one` 时崩溃。崩溃点是 jhyy 后端 stack-spill，与 sema 翻译无关。
+**症状**：去掉 workaround 后，T2 之后的深层 `infer_type → IDENT → symtab_lookup_local → symtab_lookup_one` 路径稳定 segfault，exit=139。崩溃点是 jhyy 后端 stack-spill，与 sema 翻译无关。
 
-**Workaround 原理**：`symtab_lookup_one` 加 `sb_init`（不输出字符串）→ arena_alloc 触发栈帧膨胀 → 避开后端的 stack-spill bug。
+**当前 Workaround（已合入 symtab.jhyy）**：`symtab_lookup_one` 入口加 `sb_init`（不输出字符串）→ 触发 arena_alloc → 让 QBE amd64_win 后端生成保守的栈帧 → 避开 stack-spill bug。注释指向本 changelog。
 
-**稳定复现**：去掉 workaround 后 T2 之后 segfault，exit=139。重新加回 workaround 后所有 7 测试通过。
+**稳定复现**：去掉 workaround 后 T2 之后 segfault，exit=139；加回后 T0-T7 全部 PASS，exit=42。
 
-**根因**：jhyy 自举编译器 amd64_win 后端的 stack-spill / 大结构传参处理。在 `infer_type` 的 IDENT 分支里嵌套调用 `symtab_lookup_local → symtab_lookup_one` 这条深路径上触发。
+**根因未确认**：jhyy 自举编译器 amd64_win 后端的 stack-spill 阈值 bug。疑似 `symtab_lookup_one` 的 7 个 8-byte locals + 同一函数里 arena_alloc 4096 字节 locals 数组并存时，QBE 在某些调用序列上触发不安全的 spill 重用。
 
-**影响**：影响所有自举翻译的、含深 IDENT-branch + symtab lookup 路径的函数。
+**影响范围**：所有自举翻译的、含深 IDENT-branch + symtab lookup 路径的函数。
 
 **修复路径**：
-- 短期：保留 symtab.jhyy workaround，注释指引
+- 短期：保留 symtab.jhyy workaround（commit 6 起），注释指引后续维护者
 - 中期：codegen.jhyy 翻译开起来后，借助 QBE IL 重写逐步替换 amd64_win 后端
 - 长期：phase 2.5 QBE rewrite（plan 已记）
 
-**为什么先 commit 再修**：codegen.jhyy 是 sprint 4 的主线任务；强行让 jhyy 后端在 sprint 3 末尾能跑更深调用栈会拖慢 sprint 4 起步。先 commit 已清干净的 sema.jhyy，下个 sprint 推进 codegen 时顺带扩大栈帧测试覆盖，后端 bug 会更早暴露、修复路径更清晰。
+**sprint 4 预期**：codegen.jhyy 翻译时必然再次触发同类症状（更深调用栈），届时把 workaround 模式扩展到 codegen 自身，并提交到 jhyy compiler 上游 repo。
 
 ## 代码量
 
