@@ -463,7 +463,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             }
             i = i - (1 as i64);
         }
-        // 3) global scope lookup（imported fns / types）
+        // 3) global scope lookup（imported fns / types / variants）
         let gsym = symtab_lookup_local((*ctx).global_scope, (*id_sym).name);
         if gsym != (0 as *Sym) {
             if (*gsym).kind == SYM_FN() || (*gsym).kind == SYM_TYPE() {
@@ -475,6 +475,23 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                     let t = (*gsym).type_ptr as *Type;
                     (*n).type_ptr = t as *u8;
                     return t;
+                }
+            }
+            // 3b) SYM_VARIANT: 取 parent enum 的 type（module 字段记的是 enum 名）
+            if (*gsym).kind == SYM_VARIANT() {
+                let module_name = (*gsym).module;
+                if module_name != (0 as *u8) {
+                    let enum_sym = symtab_lookup_local((*ctx).global_scope, module_name);
+                    if enum_sym != (0 as *Sym) {
+                        if (*enum_sym).type_ptr != (0 as *u8) {
+                            if gsym != id_sym {
+                                (*d).sym = gsym as *u8;
+                            }
+                            let t = (*enum_sym).type_ptr as *Type;
+                            (*n).type_ptr = t as *u8;
+                            return t;
+                        }
+                    }
                 }
             }
         }

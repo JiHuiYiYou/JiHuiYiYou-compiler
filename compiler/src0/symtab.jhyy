@@ -252,6 +252,10 @@ fn symtab_lookup_one(t_raw: *u8, name: *u8) -> *Sym {
     if (*t).count == (0 as i64) {
         return 0 as *Sym;
     }
+    // WORKAROUND: amd64_win stack-spill — touching arena forces
+    // codegen to materialize stack frame in safe way (see sprint-3-commit-5-sema-attempt.md).
+    let mut _wb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
+    sb_init(t.arena as *Arena, &_wb);
 
     let h = hash_string(name);
     let mut idx = h & (*t).mask;

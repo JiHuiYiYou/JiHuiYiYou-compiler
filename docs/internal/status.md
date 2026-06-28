@@ -66,6 +66,7 @@
 | **P3** | 缺失 | Windows 下 `jhyy run` 子命令 `system()` 路径有 bug (P1) |
 | **P3** | 缺失 | Pattern binding codegen（`Some(v) => v` 提取 payload）—— 7A 仅 sema 层注册 binding，codegen 用 `_` 通配符规避 |
 | **P3** | 缺失 | 嵌套 const array（`[[i32; N]; M]`）、const pointer / const slice / const enum array —— sema 拒绝 |
+| **P2** | 后端 bug | **jhyy 编译器 amd64_win 后端 stack-spill**（sprint 3 commit 5/6 实测）：`infer_type → IDENT → symtab_lookup_local → symtab_lookup_one` 在特定调用栈深度 + 大结构传参下崩溃。临时 workaround 在 `compiler/src0/symtab.jhyy:255-258`（`sb_init` 触发 arena_alloc 改变栈帧大小）。完整记录见 `docs/plans/v1/v1.0.0详细实现方案.md` § 3.6 和 `docs/logs/v1/sprint-3-commit-6-sema-cleanup.md`。修复路径：phase-2.5 QBE rewrite |
 
 ### Phase 2 阻塞分析（2026-06-22 验证）
 

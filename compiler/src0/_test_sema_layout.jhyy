@@ -1,0 +1,67 @@
+// _test_sema_layout.jhyy — 验证 SemaContext 字段读写
+import ffi;
+import arena;
+import util;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+
+type Node = struct { dummy: i32 }
+
+type SemaContext = struct {
+    arena:             *Arena,
+    module:            *Node,
+    global_scope:      *u8,
+    current_scope:     *u8,
+    locals:            *u8,
+    nlocals:           i64,
+    scope_depth:       i32,
+    error_count:       i32,
+    current_ret_type:  *u8,
+    loop_depth:        i32,
+}
+
+fn main_jhyy() -> i32 {
+    jh_fputs_stderr("start\n" as *u8);
+
+    let mut a: Arena = Arena {
+        start: 0 as *u8, cur: 0 as *u8, end: 0 as *u8,
+        blocks: 0 as *u8, def_size: 0 as i64,
+    };
+    arena_init(&a, 65536 as i64);
+
+    // 80 bytes 分配
+    let ctx = arena_alloc(&a, 80 as i64) as *SemaContext;
+    jh_fputs_stderr("ctx alloc ok\n" as *u8);
+
+    // 写 magic values
+    (*ctx).nlocals = 9999 as i64;
+    (*ctx).scope_depth = 1111 as i32;
+    (*ctx).error_count = 2222 as i32;
+    (*ctx).loop_depth = 3333 as i32;
+    jh_fputs_stderr("writes ok\n" as *u8);
+
+    // 读回
+    let n: i64 = (*ctx).nlocals;
+    let sd: i32 = (*ctx).scope_depth;
+    let ec: i32 = (*ctx).error_count;
+    let ld: i32 = (*ctx).loop_depth;
+    jh_fputs_stderr("reads ok\n" as *u8);
+
+    // 打印（用 printf + StringBuilder）
+    let mut sb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
+    sb_init(&a, &sb);
+    sb_append_cstr(&a, &sb, "nlocals=" as *u8);
+    sb_appendf(&a, &sb, "%d" as *u8, n as i32);
+    sb_append_cstr(&a, &sb, " sd=" as *u8);
+    sb_appendf(&a, &sb, "%d" as *u8, sd);
+    sb_append_cstr(&a, &sb, " ec=" as *u8);
+    sb_appendf(&a, &sb, "%d" as *u8, ec);
+    sb_append_cstr(&a, &sb, " ld=" as *u8);
+    sb_appendf(&a, &sb, "%d" as *u8, ld);
+    sb_append_cstr(&a, &sb, "\n" as *u8);
+    let s = sb_cstr(&a, &sb);
+    jh_fputs_stderr(s);
+    jh_fputs_stderr("done\n" as *u8);
+    return 42;
+}
