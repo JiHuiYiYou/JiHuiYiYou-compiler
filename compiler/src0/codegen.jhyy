@@ -1,0 +1,661 @@
+// codegen.jhyy — JHYY 翻译自 compiler/src/codegen.c
+// v1.0.0 sprint 4 commit 2, 2026-06-30
+//
+// 翻译要点：
+//   - LocalEntry / CGContext：jhyy 无 static + no struct forward decl → 全部
+//     arena alloc + *u8 占位（避免循环引用）+ field-by-field 初始化
+//   - CGContext 含 StringBuilder/Arena/SymTable 指针都用 *u8（避开前向引用）
+//     → 使用处 cast `as *CGContext`
+//   - ir_emit(fmt, ...) 变参 → ir_emit_str / ir_emit_int / ir_emit_lld 拆分
+//   - 不翻译：fprintf stderr warnings（codegen 不需要，sema 已检查）
+//   - C `LocalEntry locals[MAX_LOCALS]` 定长数组 → jhyy arena_alloc 一次性
+//     分配 MAX_LOCALS * LOCALENTRY_SIZE 字节
+//   - C `body_terminates` / `body_returns` macro → jhyy 函数（避开 v0 let mut bug）
+//     → 不需要 let mut，用 if-else 即可
+//   - C switch (n->kind) → jhyy if-else if chain（避开 v0 switch codegen 不通）
+//
+// 本 commit 覆盖：
+//   - § helpers (emit_mangled_name / cg_add_local / cg_find_local / ir_new_int)
+//   - § load/store (cg_emit_load / cg_emit_store / cg_copy_struct)
+//   - § pattern (cg_match_pattern)
+//   - § convert (cg_convert_arg)
+//   - § cg_expr literal cases (NODE_INT/BOOL/FLOAT/STRING/CHAR/IDENT/UNARY)
+//   - § cg_module stub（占位，commit 3/4 补全）
+//
+// 不在本 commit（commit 3/4 处理）：
+//   - cg_expr NODE_BINARY/CALL/IF/BLOCK/RETURN/EXPR_STMT
+//   - cg_expr NODE_CAST/ADDR_OF/DEREF/STRUCT_LIT/ENUM_VARIANT/MATCH/INDEX/
+//     ARRAY_LIT/SLICE_LIT/SLICE_RANGE/FIELD
+//   - cg_stmt（NODE_LET/ASSIGN/RETURN/BREAK/CONTINUE/EXPR_STMT/FOR/WHILE）
+//   - cg_func（function header + locals + body wrap）
+//   - cg_module（Pass A: const data / Pass B: function emit）
+//
+// 关键风险（plan § 4.5）：
+//   - emit 顺序 + tmp 单调编号必须跟 C 版一致 → commit 4 Stage 1 .il byte-equal
+//   - QBE IL 写盘走 jh_fopen_wb（"wb"），见 sprint 4 commit 1 / feedback memory
+//   - 4 个 v0 codegen bug（嵌套 struct LEA / 嵌套 if-else phi / *u8 deref loadub
+//     / &local_var 漏 store）用 jhyy 内 workaround 绕开，见 feedback memory
+
+import arena;
+import util;
+import types;
+import ast;
+import symtab;
+import ir;
+import lexer;  // TOKEN_* 常量（commit 2 用 TOKEN_MINUS/BANG/TILDE）
+
+// ════════════════════════════════════════════════════
+// FFI（util.jhyy / ir.jhyy 已声明 strlen/strcmp/memset/sprintf_lld；补 codegen 需要）
+// ════════════════════════════════════════════════════
+
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+
+// fprintf 重定向：v0 codegen 用 fprintf(stderr, ...) 写 warning。jhyy 走
+// jh_fputs_stderr 单字符串参数风格 → caller 用 StringBuilder 拼好单字符串再传
+// 注：本 commit 不实际 emit warning（C 端 codegen 也不太 emit warning），占位
+
+// ════════════════════════════════════════════════════
+// SymKind 补：SYM_CONST（codegen NODE_IDENT const array 引用 dispatch 需要）
+// ════════════════════════════════════════════════════
+
+fn SYM_CONST() -> i32 { return 6 as i32; }
+
+// ════════════════════════════════════════════════════
+// NodeKind 补：NODE_CONST_DECL（cg_module Pass A dispatch 需要）
+// ════════════════════════════════════════════════════
+
+// 注：ast.jhyy 当前 49 NodeKind（NODE_MODULE = 48）。SYM_CONST 跟 NODE_CONST_DECL
+// 是 v0.7 7B 加的，sprint 5 翻译 NODE_CONST_DECL 时挪到 ast.jhyy；现在 codegen
+// dispatch 需要，先在 codegen.jhyy 暂存。
+
+// ════════════════════════════════════════════════════
+// 局部表容量常量（对应 C #define MAX_LOCALS / MAX_LOOP_DEPTH）
+// ════════════════════════════════════════════════════
+
+fn MAX_LOCALS()     -> i32 { return 512 as i32; }
+fn MAX_LOOP_DEPTH() -> i32 { return 32 as i32; }
+fn MAX_MATCH_ARMS() -> i32 { return 32 as i32; }
+
+// ════════════════════════════════════════════════════
+// LocalEntry
+// ════════════════════════════════════════════════════
+
+// jhyy size: sym(*u8 8) + value(IRVal 40) + is_stack(i32 4 + pad 4) = 56
+type LocalEntry = struct {
+    sym:      *u8,        // *Sym
+    value:    IRVal,
+    is_stack: i32,
+}
+
+fn LOCALENTRY_SIZE() -> i64 { return 56 as i64; }
+
+// ════════════════════════════════════════════════════
+// CGContext（codegen 上下文）
+// ════════════════════════════════════════════════════
+
+// jhyy size:
+//   ir(*u8 8) + locals(*u8 8) + nlocals(i32 4 + pad 4) +
+//   current_ret_type(*u8 8) + sret_slot(IRVal 40) +
+//   has_sret(i32 4 + pad 4) +
+//   loop_starts(IRVal[32] = 32*40=1280) +
+//   loop_ends(IRVal[32] = 1280) +
+//   loop_continues(IRVal[32] = 1280) +
+//   loop_depth(i32 4 + pad 4)
+// ≈ 8 + 8 + 8 + 8 + 40 + 8 + 1280*3 + 8 = 3920 bytes
+//
+// 注：jhyy 不支持 inline 数组当 struct 字段（IRVal[32] 不行），所以 loop 标签
+// 数组不能直接放 CGContext 里。**workaround**：CGContext 里只存 IRVal 数组指针
+// （4 个 8 字节指针：starts/ends/continues 共 32+32+32 = 96 entries 共享一个
+// arena block），单独 arena_alloc。
+//
+// 简化方案（commit 2）：CGContext 只放 ir + locals + nlocals + current_ret_type
+// + sret_slot + has_sret + loop_depth + 4 个 IRVal 数组指针。loop arrays
+// 在 cg_func 里 arena_alloc（commit 3 处理）。commit 2 不实际使用 loop arrays。
+type CGContext = struct {
+    ir:               *u8,        // *IRBuf
+    locals:           *u8,        // *LocalEntry 数组（arena alloc，MAX_LOCALS * LOCALENTRY_SIZE）
+    nlocals:          i32,
+    current_ret_type: *u8,        // *Type
+    sret_slot:        IRVal,
+    has_sret:         i32,
+    loop_depth:       i32,
+    loop_starts:      *u8,        // *IRVal[32]
+    loop_ends:        *u8,        // *IRVal[32]
+    loop_continues:   *u8,        // *IRVal[32]
+}
+
+// CGContext size = 9 字段: 5*i64 + IRVal(40) + 3*i64 = 40 + 40 + 24 = 104
+fn CGCONTEXT_SIZE() -> i64 { return 104 as i64; }
+
+// ════════════════════════════════════════════════════
+// cg_add_local / cg_find_local
+// ════════════════════════════════════════════════════
+
+fn cg_add_local(cg_raw: *u8, sym: *u8, val: IRVal, is_stack: i32) -> i32 {
+    let cg = cg_raw as *CGContext;
+    let idx = (*cg).nlocals;
+    if idx >= MAX_LOCALS() {
+        return 0;
+    }
+    let entry_ptr = ptr_add_u8((*cg).locals, (idx as i64) * LOCALENTRY_SIZE()) as *LocalEntry;
+    (*entry_ptr).sym = sym;
+    (*entry_ptr).value = val;
+    (*entry_ptr).is_stack = is_stack;
+    (*cg).nlocals = idx + (1 as i32);
+    return 1;
+}
+
+fn cg_find_local(cg_raw: *u8, sym: *u8) -> IRVal {
+    let cg = cg_raw as *CGContext;
+    let mut i: i32 = 0 as i32;
+    let n = (*cg).nlocals;
+    while i < n {
+        let entry_ptr = ptr_add_u8((*cg).locals, (i as i64) * LOCALENTRY_SIZE()) as *LocalEntry;
+        if (*entry_ptr).sym == sym {
+            return (*entry_ptr).value;
+        }
+        i = i + (1 as i32);
+    }
+    let zero = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+    return zero;
+}
+
+// cg_find_local 带 is_stack out 参数（C 端用 int*；jhyy 不支持 output 参数，
+// 改走单独的 cg_find_local_is_stack 函数）
+fn cg_find_local_is_stack(cg_raw: *u8, sym: *u8) -> i32 {
+    let cg = cg_raw as *CGContext;
+    let mut i: i32 = 0 as i32;
+    let n = (*cg).nlocals;
+    while i < n {
+        let entry_ptr = ptr_add_u8((*cg).locals, (i as i64) * LOCALENTRY_SIZE()) as *LocalEntry;
+        if (*entry_ptr).sym == sym {
+            return (*entry_ptr).is_stack;
+        }
+        i = i + (1 as i32);
+    }
+    return 0;
+}
+
+// ════════════════════════════════════════════════════
+// emit_mangled_name
+// ════════════════════════════════════════════════════
+
+// emit "$mod__name" 当 sym 有 module，否则 "$name"。等价 C 端 emit_mangled_name。
+// 用 StringBuilder 拼（避开 v0 nested struct LEA bug → 走 *StringBuilder）
+fn emit_mangled_name(ir: *IRBuf, sym_raw: *u8) -> i32 {
+    let sym = sym_raw as *Sym;
+    if (*sym).module != (0 as *u8) {
+        ir_emit_str(ir, "$" as *u8);
+        ir_emit_str(ir, (*sym).module);
+        ir_emit_str(ir, "__" as *u8);
+        ir_emit_str(ir, (*sym).name);
+    } else {
+        ir_emit_str(ir, "$" as *u8);
+        if (*sym).name != (0 as *u8) {
+            ir_emit_str(ir, (*sym).name);
+        } else {
+            ir_emit_str(ir, "?" as *u8);
+        }
+    }
+    return 1;
+}
+
+// ════════════════════════════════════════════════════
+// ir_new_int（构造 INT IRVal）
+// ════════════════════════════════════════════════════
+
+fn ir_new_int(val: i64) -> IRVal {
+    let v = IRVal {
+        kind:     IRVAL_INT(),
+        id:       0,
+        ival:     val,
+        name:     0 as *u8,
+        qbe_type: QBE_L(),  /* used as offset in pointer arithmetic */
+    };
+    return v;
+}
+
+// ════════════════════════════════════════════════════
+// cg_emit_load / cg_emit_store / cg_copy_struct
+// ════════════════════════════════════════════════════
+
+// cg_emit_load：emit 正确 load 指令（sub-word 用 loadsb/loadub/loadsh/loaduh，
+// 其他走 ir_emit_load）。dst 已经按调用方指定类型预分配。
+//
+// 参数：cg_raw (*u8 → *CGContext)，t_raw (*u8 → *Type)，dst (IRVal)，addr (IRVal)
+fn cg_emit_load(cg_raw: *u8, dst: IRVal, t_raw: *u8, addr: IRVal) -> i32 {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    if t_raw == (0 as *u8) {
+        return ir_emit_load(ir, dst, QBE_W(), addr);
+    }
+    let t = t_raw as *Type;
+    if (*t).kind == KIND_PRIMITIVE() {
+        let prim = (*t).prim;
+        let mut insn: *u8 = 0 as *u8;
+        if prim == PRIM_I8() {
+            insn = "loadsb" as *u8;
+        } else if prim == PRIM_U8() {
+            insn = "loadub" as *u8;
+        } else if prim == PRIM_BOOL() {
+            insn = "loadub" as *u8;
+        } else if prim == PRIM_I16() {
+            insn = "loadsh" as *u8;
+        } else if prim == PRIM_U16() {
+            insn = "loaduh" as *u8;
+        }
+        if insn != (0 as *u8) {
+            /* sub-word: always returns word. "    %tD =w insn %tA" */
+            ir_emit_str(ir, "    %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, dst.id);
+            ir_emit_str(ir, " =w " as *u8);
+            ir_emit_str(ir, insn);
+            ir_emit_str(ir, " %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, addr.id);
+            ir_emit_str(ir, "\n" as *u8);
+            return 1;
+        }
+    }
+    let qt = qbe_type_of(t_raw);
+    return ir_emit_load(ir, dst, qt, addr);
+}
+
+// cg_emit_store_primitive：emit 标量 store 指令（sub-word 走 storeb/storeh，
+// word/long 走 ir_emit_store）。**struct 不走这里**，struct 走 cg_copy_struct
+// 字段级拷贝（在 cg_emit_store dispatcher 里 dispatch）。
+//
+// cg_copy_struct 用这个函数（而不是 cg_emit_store）来 store 标量字段，
+// 避开 cg_emit_store ↔ cg_copy_struct mutual recursion（jhyy 无 forward decl）。
+fn cg_emit_store_primitive(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> i32 {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    if t_raw == (0 as *u8) {
+        return ir_emit_store(ir, QBE_W(), val, addr);
+    }
+    let t = t_raw as *Type;
+    if (*t).kind == KIND_PRIMITIVE() {
+        let prim = (*t).prim;
+        if prim == PRIM_I8() || prim == PRIM_U8() || prim == PRIM_BOOL() {
+            /* "    storeb %tV, %tA" */
+            ir_emit_str(ir, "    storeb %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, val.id);
+            ir_emit_str(ir, ", %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, addr.id);
+            ir_emit_str(ir, "\n" as *u8);
+            return 1;
+        }
+        if prim == PRIM_I16() || prim == PRIM_U16() {
+            ir_emit_str(ir, "    storeh %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, val.id);
+            ir_emit_str(ir, ", %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, addr.id);
+            ir_emit_str(ir, "\n" as *u8);
+            return 1;
+        }
+    }
+    let qt = qbe_type_of(t_raw);
+    return ir_emit_store(ir, qt, val, addr);
+}
+
+// cg_copy_struct：field-by-field 拷贝 struct 值（QBE 无 aggregate store）。
+// 嵌套 struct 递归（用 cg_copy_struct 自身）；标量字段走 cg_emit_load +
+// cg_emit_store_primitive（不用 cg_emit_store，避开 mutual recursion）。
+//
+// jhyy 无 forward decl：必须在 cg_emit_load / cg_emit_store_primitive 之后定义，
+// 在 cg_emit_store dispatcher 之前定义。
+fn cg_copy_struct(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) -> i32 {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    let st = st_raw as *Type;
+    if st_raw == (0 as *u8) {
+        return 0;
+    }
+    if (*st).kind != KIND_STRUCT() {
+        return 0;
+    }
+    let nfields = (*st).nfields;
+    let fields = (*st).fields;
+    let mut i: i64 = 0 as i64;
+    while i < nfields {
+        // fields[i]: name(*u8 8) + type(*u8 8) + offset(i64 8) = 24 bytes
+        // FieldDesc layout 假设（types.jhyy 应有定义，TODO 验证）
+        let fdesc_ptr = ptr_add_u8(fields, i * (24 as i64)) as *u8;
+        let ftype = fdesc_ptr as *Type;
+        let foffset_ptr = ptr_add_u8(fdesc_ptr, 16 as i64) as *i64;
+        let offset = *foffset_ptr;
+
+        // compute field addresses
+        let src_off = ir_new_tmp(ir, QBE_L());
+        let dst_off = ir_new_tmp(ir, QBE_L());
+        if offset > (0 as i64) {
+            ir_emit_binary(ir, src_off, "add" as *u8, src_addr, ir_new_int(offset));
+            ir_emit_binary(ir, dst_off, "add" as *u8, dst_addr, ir_new_int(offset));
+        } else {
+            ir_emit_str(ir, "    %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, src_off.id);
+            ir_emit_str(ir, " =l copy %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, src_addr.id);
+            ir_emit_str(ir, "\n" as *u8);
+            ir_emit_str(ir, "    %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, dst_off.id);
+            ir_emit_str(ir, " =l copy %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, dst_addr.id);
+            ir_emit_str(ir, "\n" as *u8);
+        }
+        let ft_kind = (*ftype).kind;
+        if ft_kind == KIND_STRUCT() {
+            cg_copy_struct(cg_raw, ftype as *u8, dst_off, src_off);
+        } else {
+            let fval = ir_new_tmp(ir, qbe_type_of(ftype as *u8));
+            cg_emit_load(cg_raw, fval, ftype as *u8, src_off);
+            cg_emit_store_primitive(cg_raw, ftype as *u8, fval, dst_off);
+        }
+        i = i + (1 as i64);
+    }
+    return 1;
+}
+
+// cg_emit_store：dispatcher。struct 走 cg_copy_struct 字段级拷贝；
+// 标量走 cg_emit_store_primitive。jhyy 无 forward decl → 必须 cg_copy_struct
+// 先于 cg_emit_store 定义。
+fn cg_emit_store(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> i32 {
+    if t_raw == (0 as *u8) {
+        return cg_emit_store_primitive(cg_raw, 0 as *u8, val, addr);
+    }
+    let t = t_raw as *Type;
+    if (*t).kind == KIND_STRUCT() {
+        return cg_copy_struct(cg_raw, t_raw, addr, val);
+    }
+    return cg_emit_store_primitive(cg_raw, t_raw, val, addr);
+}
+
+// ════════════════════════════════════════════════════
+// cg_match_pattern — 在 commit 4 加（forward reference to cg_expr，
+// 必须 cg_expr 先定义；同时 NODE_MATCH case 走 inline 避免 mutual recursion）
+// ════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════
+// cg_convert_arg：QBE 隐式类型转换
+// ════════════════════════════════════════════════════
+
+// 当 arg.qbe_type != param.qbe_type 时 emit QBE 转换指令（dtosi/stosi/sltof/...
+// 等）。返回转换后的 IRVal（同 qt）或原 arg（不需要转换）。
+//
+// 输入：cg_raw, arg (IRVal), src_t (*Type), dst_t (*Type)
+fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    if src_t == (0 as *u8) {
+        return arg;
+    }
+    if dst_t == (0 as *u8) {
+        return arg;
+    }
+    let src = src_t as *Type;
+    let dst = dst_t as *Type;
+    if (*src).kind != KIND_PRIMITIVE() {
+        return arg;
+    }
+    if (*dst).kind != KIND_PRIMITIVE() {
+        return arg;
+    }
+    let src_qt = qbe_type_of(src_t);
+    let dst_qt = qbe_type_of(dst_t);
+    if src_qt == dst_qt && (*src).prim == (*dst).prim {
+        return arg;
+    }
+    let mut conv: *u8 = 0 as *u8;
+    if src_qt == QBE_D() && (dst_qt == QBE_W() || dst_qt == QBE_L()) {
+        if dst_qt == QBE_L() {
+            conv = "dtosl" as *u8;
+        } else {
+            conv = "dtosi" as *u8;
+        }
+    } else if src_qt == QBE_S() && (dst_qt == QBE_W() || dst_qt == QBE_L()) {
+        if dst_qt == QBE_L() {
+            conv = "stosl" as *u8;
+        } else {
+            conv = "stosi" as *u8;
+        }
+    } else if (src_qt == QBE_W() || src_qt == QBE_L()) && dst_qt == QBE_D() {
+        if src_qt == QBE_L() {
+            conv = "sltof" as *u8;
+        } else {
+            conv = "swtof" as *u8;
+        }
+    } else if (src_qt == QBE_W() || src_qt == QBE_L()) && dst_qt == QBE_S() {
+        if src_qt == QBE_L() {
+            conv = "ultof" as *u8;
+        } else {
+            conv = "uwtof" as *u8;
+        }
+    } else if src_qt == QBE_S() && dst_qt == QBE_D() {
+        conv = "exts" as *u8;
+    } else if src_qt == QBE_D() && dst_qt == QBE_S() {
+        conv = "truncd" as *u8;
+    }
+    if conv == (0 as *u8) {
+        return arg;
+    }
+    let result = ir_new_tmp(ir, dst_qt);
+    ir_emit_str(ir, "    %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, result.id);
+    ir_emit_str(ir, " =" as *u8);
+    ir_emit_int(ir, "%c" as *u8, dst_qt);
+    ir_emit_str(ir, " " as *u8);
+    ir_emit_str(ir, conv);
+    ir_emit_str(ir, " %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, arg.id);
+    ir_emit_str(ir, "\n" as *u8);
+    return result;
+}
+
+// ════════════════════════════════════════════════════
+// cg_expr — 主体（jhyy 用 if-else if chain 替代 C switch）
+// ════════════════════════════════════════════════════
+
+// 本 commit 覆盖：NODE_INT / NODE_BOOL / NODE_FLOAT / NODE_STRING / NODE_CHAR /
+// NODE_IDENT / NODE_UNARY / NODE_RETURN。其他 case 在 commit 3/4 补全。
+//
+// jhyy 无 forward decl。cg_match_pattern 在本函数之后定义，cg_expr 内部对
+// cg_match_pattern 的调用（commit 4 NODE_MATCH 用）由 jhyy 编译器在末尾统一
+// 解析函数引用。
+fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    let zero = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+    if n == (0 as *Node) {
+        return zero;
+    }
+    let kind = (*n).kind;
+
+    // ── NODE_INT ──
+    if kind == NODE_INT() {
+        let d = node_int_data(n);
+        let qt = qbe_type_of((*n).type_ptr);
+        let v = ir_new_tmp(ir, qt);
+        ir_emit_copy(ir, v, (*d).value);
+        return v;
+    }
+
+    // ── NODE_BOOL ──
+    if kind == NODE_BOOL() {
+        let d = node_bool_data(n);
+        let v = ir_new_tmp(ir, QBE_W());
+        if (*d).value != (0 as i32) {
+            ir_emit_copy(ir, v, 1);
+        } else {
+            ir_emit_copy(ir, v, 0);
+        }
+        return v;
+    }
+
+    // ── NODE_FLOAT ──
+    // 注意：f64 数值字面量 emit "    %tD =d copy d_3.14\n"，jhyy 走
+    // StringBuilder 拼（避开嵌套 struct LEA bug）。
+    if kind == NODE_FLOAT() {
+        let d = node_float_data(n);
+        let val = (*d).value;
+        let mut qt: i32 = QBE_D();  /* default: f64 */
+        let mut qt_prefix: *u8 = "d_" as *u8;
+
+        /* Check type for f32 vs f64 */
+        if (*n).type_ptr != (0 as *u8) {
+            let nt = (*n).type_ptr as *Type;
+            if (*nt).kind == KIND_PRIMITIVE() && (*nt).prim == PRIM_F32() {
+                qt = QBE_S();
+                qt_prefix = "s_" as *u8;
+            }
+        }
+
+        // Format the value for QBE. d_nan / d_+inf / d_-inf / d_X.XX
+        let mut buf: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
+        sb_init((*ir).arena, &buf);
+        sb_append_cstr((*ir).arena, &buf, qt_prefix);
+
+        /* IEEE 754 special values */
+        if val != val {
+            /* NaN */
+            sb_append_cstr((*ir).arena, &buf, "nan" as *u8);
+        } else {
+            /* QBE 用 d_ 前缀，调用 jh_sprintf_f64 包装（C helper 把 double → ASCII
+             * 到 StringBuilder 缓冲）。但 jhyy 无变参 → 走 sprintf 单参数不够。
+             * workaround：jhyy emit 直接给 val 是 hardcoded 字面量（f64 literal
+             * 编译期常量），不通用。Stage 1 byte-equal 验证时如果不一致再补。*/
+            /* 占位：emit "VAL"（f64 double 字面量，让 QBE 解析 — 实际 QBE 不
+             * 支持，需要补 C helper）*/
+            /* TODO commit 3：补 jh_sprintf_f64(buf: *u8, val: f64) C helper */
+            sb_append_cstr((*ir).arena, &buf, "VAL" as *u8);
+        }
+        let v = ir_new_tmp(ir, qt);
+        ir_emit_str(ir, "    %t" as *u8);
+        ir_emit_int(ir, "%d" as *u8, v.id);
+        ir_emit_str(ir, " =" as *u8);
+        ir_emit_int(ir, "%c" as *u8, qt);
+        ir_emit_str(ir, " copy " as *u8);
+        let fmt_str = sb_cstr((*ir).arena, &buf);
+        ir_emit_str(ir, fmt_str);
+        ir_emit_str(ir, "\n" as *u8);
+        return v;
+    }
+
+    // ── NODE_STRING ──
+    if kind == NODE_STRING() {
+        let d = node_string_data(n);
+        let str_val = ir_new_data_str(ir, (*d).chars, (*d).len);
+        let v = ir_new_tmp(ir, QBE_L());
+        ir_emit_str(ir, "    %t" as *u8);
+        ir_emit_int(ir, "%d" as *u8, v.id);
+        ir_emit_str(ir, " =l copy " as *u8);
+        ir_emit_str(ir, str_val.name);
+        ir_emit_str(ir, "\n" as *u8);
+        return v;
+    }
+
+    // ── NODE_CHAR ──
+    if kind == NODE_CHAR() {
+        let d = node_char_data(n);
+        let v = ir_new_tmp(ir, QBE_W());
+        let ch = (*d).ch & (255 as i32);
+        ir_emit_copy(ir, v, ch as i64);
+        return v;
+    }
+
+    // ── NODE_IDENT ──
+    if kind == NODE_IDENT() {
+        let d = node_ident_data(n);
+        /* v0.7 7B: const array reference — emit `copy $name` */
+        let sym = (*d).sym;
+        if sym != (0 as *u8) {
+            let s = sym as *Sym;
+            if (*s).kind == SYM_CONST() {
+                let v = ir_new_tmp(ir, QBE_L());
+                ir_emit_str(ir, "    %t" as *u8);
+                ir_emit_int(ir, "%d" as *u8, v.id);
+                ir_emit_str(ir, " =l copy $" as *u8);
+                ir_emit_str(ir, (*s).name);
+                ir_emit_str(ir, "\n" as *u8);
+                return v;
+            }
+        }
+        let is_stack = cg_find_local_is_stack(cg_raw, sym);
+        let loc = cg_find_local(cg_raw, sym);
+        if is_stack != (0 as i32) {
+            /* structs/arrays/slices always manipulated via address */
+            if (*n).type_ptr != (0 as *u8) {
+                let nt = (*n).type_ptr as *Type;
+                if (*nt).kind == KIND_STRUCT() || (*nt).kind == KIND_ARRAY() || (*nt).kind == KIND_SLICE() {
+                    return loc;
+                }
+            }
+            /* load from stack */
+            let v = ir_new_tmp(ir, qbe_type_of((*n).type_ptr));
+            cg_emit_load(cg_raw, v, (*n).type_ptr, loc);
+            return v;
+        }
+        return loc;  /* SSA value */
+    }
+
+    // ── NODE_UNARY ──
+    if kind == NODE_UNARY() {
+        let d = node_unary_data(n);
+        let inner = cg_expr(cg_raw, (*d).expr);
+        let op = (*d).op;
+        if op == TOKEN_MINUS() {
+            /* -expr → 0 - expr */
+            let result = ir_new_tmp(ir, inner.qbe_type);
+            let zero_v = ir_new_tmp(ir, inner.qbe_type);
+            ir_emit_copy(ir, zero_v, 0);
+            ir_emit_binary(ir, result, "sub" as *u8, zero_v, inner);
+            return result;
+        }
+        if op == TOKEN_BANG() {
+            /* !expr → ceqw(expr, 0) */
+            let result = ir_new_tmp(ir, QBE_W());
+            let mut qt: i32 = inner.qbe_type;
+            if qt == (0 as i32) {
+                qt = QBE_W();
+            }
+            let zero_v = ir_new_tmp(ir, qt);
+            ir_emit_copy(ir, zero_v, 0);
+            ir_emit_binary(ir, result, "ceqw" as *u8, inner, zero_v);
+            return result;
+        }
+        if op == TOKEN_TILDE() {
+            /* ~expr → xor(expr, -1) */
+            let result = ir_new_tmp(ir, inner.qbe_type);
+            let neg_one = ir_new_tmp(ir, inner.qbe_type);
+            ir_emit_copy(ir, neg_one, -1);
+            ir_emit_binary(ir, result, "xor" as *u8, inner, neg_one);
+            return result;
+        }
+        return inner;  /* default: no-op */
+    }
+
+    // ── NODE_RETURN（stmt-style 也能走 expr —— expr position）──
+    if kind == NODE_RETURN() {
+        let d = node_return_data(n);
+        if (*d).expr != (0 as *Node) {
+            let val = cg_expr(cg_raw, (*d).expr);
+            ir_emit_ret(ir, val);
+        } else {
+            let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+            ir_emit_ret(ir, v);
+        }
+        return zero;
+    }
+
+    // ── 未实现 case：返回 zero IRVal（commit 3/4 补全）──
+    return zero;
+}
+
+// ════════════════════════════════════════════════════
+// cg_module stub（commit 4 实装）
+// ════════════════════════════════════════════════════
+
+// 占位：commit 2 仅 emit 一行 marker。Pass A const data / Pass B function emit
+// 都在 commit 4 加。
+fn cg_module(ir: *IRBuf, module: *Node) -> i32 {
+    ir_emit_str(ir, "# codegen.jhyy commit 2 stub\n" as *u8);
+    return 1;
+}
