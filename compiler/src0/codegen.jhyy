@@ -632,26 +632,428 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         return inner;  /* default: no-op */
     }
 
-    // ── NODE_RETURN（stmt-style 也能走 expr —— expr position）──
+    // ── NODE_RETURN（stmt-position + expr-position 都走这里，cg_stmt 已 merge 到 cg_expr）──
+    // v0 codegen bug 临时绕开：sret 处理需要 cg.sret_slot 字段。commit 4 才用得上（当前
+    // commit 3 还没用到）。先写最简 expr-only 版本。
     if kind == NODE_RETURN() {
         let d = node_return_data(n);
         if (*d).expr != (0 as *Node) {
             let val = cg_expr(cg_raw, (*d).expr);
-            ir_emit_ret(ir, val);
+            let _ = ir_emit_ret(ir, val);
         } else {
             let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-            ir_emit_ret(ir, v);
+            let _ = ir_emit_ret(ir, v);
         }
         return zero;
     }
 
-    // ── 未实现 case：返回 zero IRVal（commit 3/4 补全）──
+    // ── NODE_BLOCK（expr-position: block 最后一个 expr 的值）──
+    if kind == NODE_BLOCK() {
+        let d = node_block_data(n);
+        let mut last: IRVal = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+        let mut i: i64 = 0 as i64;
+        while i < (*d).nstmts {
+            let stmt_slot = ptr_add_u8((*d).stmts, i * (8 as i64)) as **Node;
+            let stmt = *stmt_slot as *Node;
+            if (*stmt).kind == NODE_RETURN() || (*stmt).kind == NODE_BREAK() || (*stmt).kind == NODE_CONTINUE() {
+                let _ = cg_expr(cg_raw, stmt);
+                return last;
+            }
+            if (*stmt).kind == NODE_EXPR_STMT() {
+                let es = node_expr_stmt_data(stmt);
+                let inner_node = (*es).expr as *Node;
+                if (*inner_node).kind == NODE_ASSIGN() {
+                    let _ = cg_expr(cg_raw, stmt);
+                } else {
+                    last = cg_expr(cg_raw, inner_node);
+                }
+            } else if (*stmt).kind == NODE_IF() || (*stmt).kind == NODE_MATCH() {
+                last = cg_expr(cg_raw, stmt);
+            } else if (*stmt).kind == NODE_BLOCK() {
+                last = cg_expr(cg_raw, stmt);
+            } else {
+                let _ = cg_expr(cg_raw, stmt);
+            }
+            i = i + (1 as i64);
+        }
+        return last;
+    }
+
+    // ── NODE_LET （stmt position: alloc + (optional) store + register local）──
+    if kind == NODE_LET() {
+        let d = node_let_data(n);
+        let mut is_array: i32 = 0;
+        let mut is_struct: i32 = 0;
+        if (*d).sym != (0 as *u8) {
+            let sym_lt = (*d).sym as *Sym;
+            if (*sym_lt).type_ptr != (0 as *u8) {
+                let st_lt = (*sym_lt).type_ptr as *Type;
+                if (*st_lt).kind == KIND_ARRAY() { is_array = 1; }
+                if (*st_lt).kind == KIND_STRUCT() { is_struct = 1; }
+            }
+        }
+
+        let init_node = ((*d).init) as *Node;
+        if (*d).is_mutable != 0 || is_array != 0 || is_struct != 0 {
+            // mutable / array / struct: alloc stack slot
+            let init_v = cg_expr(cg_raw, init_node);
+            let init_kind = (*init_node).kind;
+            if init_kind == NODE_ARRAY_LIT() || init_kind == NODE_STRUCT_LIT() {
+                cg_add_local(cg_raw, (*d).sym, init_v, 1);
+            } else if is_struct != 0 {
+                let sym_t = ((*d).sym as *Sym).type_ptr;
+                let sz = type_size(sym_t as *Type) as i32;
+                let mut sz2 = sz;
+                if sz2 < 4 { sz2 = 4; }
+                let slot = ir_new_tmp(ir, QBE_L());
+                ir_emit_alloc(ir, slot, sz2);
+                cg_copy_struct(cg_raw, sym_t, slot, init_v);
+                cg_add_local(cg_raw, (*d).sym, slot, 1);
+            } else {
+                let sym_t = ((*d).sym as *Sym).type_ptr;
+                let sz = type_size(sym_t as *Type) as i32;
+                let mut sz2 = sz;
+                if sz2 < 4 { sz2 = 4; }
+                let slot = ir_new_tmp(ir, QBE_L());
+                ir_emit_alloc(ir, slot, sz2);
+                cg_emit_store(cg_raw, sym_t, init_v, slot);
+                cg_add_local(cg_raw, (*d).sym, slot, 1);
+            }
+        } else {
+            // immutable 标量：keep as SSA
+            cg_add_local(cg_raw, (*d).sym, init_v, 0);
+        }
+        return zero;
+    }
+
+    // ── NODE_ASSIGN （stmt position）──
+    if kind == NODE_ASSIGN() {
+        let d = node_assign_data(n);
+        let val = cg_expr(cg_raw, ((*d).value) as *Node);
+        let target = ((*d).target) as *Node;
+        let target_kind = (*target).kind;
+
+        if target_kind == NODE_DEREF() {
+            let dd = node_deref_data(target);
+            let ptr = cg_expr(cg_raw, (*dd).expr);
+            let _ = cg_emit_store(cg_raw, (*target).type_ptr, val, ptr);
+        } else if target_kind == NODE_IDENT() {
+            let id = node_ident_data(target);
+            let is_stack = cg_find_local_is_stack(cg_raw, (*id).sym);
+            let slot = cg_find_local(cg_raw, (*id).sym);
+            if is_stack != 0 {
+                let tgt_t = (*target).type_ptr;
+                if tgt_t != (0 as *u8) {
+                    let tt = tgt_t as *Type;
+                    if (*tt).kind == KIND_STRUCT() {
+                        let _ = cg_copy_struct(cg_raw, tgt_t, slot, val);
+                    } else {
+                        let _ = cg_emit_store(cg_raw, tgt_t, val, slot);
+                    }
+                }
+            }
+        } else if target_kind == NODE_INDEX() {
+            // arr[i] = value
+            let idx = node_index_data(target);
+            let idx_expr_node = ((*idx).expr) as *Node;
+            let idx_index_node = ((*idx).index) as *Node;
+            let arr_type = (*idx_expr_node).type_ptr;
+            if arr_type != (0 as *u8) {
+                let at = arr_type as *Type;
+                if (*at).kind == KIND_ARRAY() || (*at).kind == KIND_POINTER() {
+                    let is_array = ((*at).kind == KIND_ARRAY());
+                    let elem_type = (*at).elem;
+                    let elem_sz = type_size(elem_type as *Type);
+
+                    // 路径 1: 数组 + IDENT 标识符 → 直接用 stack slot
+                    if is_array != 0 && (*idx_expr_node).kind == NODE_IDENT() {
+                        let id = node_ident_data(idx_expr_node);
+                        let real_base = cg_find_local(cg_raw, (*id).sym);
+                        let idx_val = cg_expr(cg_raw, idx_index_node);
+                        let offset2 = ir_new_tmp(ir, QBE_L());
+                        let idx_index_kind = (*idx_index_node).kind;
+                        if idx_index_kind == NODE_INT() {
+                            let nd2 = node_int_data(idx_index_node);
+                            let const_off2 = (*nd2).value * (elem_sz as i64);
+                            ir_emit_copy(ir, offset2, const_off2);
+                        } else {
+                            ir_emit_binary(ir, offset2, "mul" as *u8, idx_val, ir_new_int(elem_sz));
+                        }
+                        let final_addr = ir_new_tmp(ir, QBE_L());
+                        ir_emit_binary(ir, final_addr, "add" as *u8, real_base, offset2);
+                        let _ = cg_emit_store(cg_raw, elem_type, val, final_addr);
+                    } else {
+                        // 路径 2: 通用 → base from expr + offset
+                        let base = cg_expr(cg_raw, idx_expr_node);
+                        let idx_val2 = cg_expr(cg_raw, idx_index_node);
+
+                        // offset = index * elem_sz
+                        let offset = ir_new_tmp(ir, QBE_L());
+                        let idx_v2_kind = (*idx_index_node).kind;
+                        if idx_v2_kind == NODE_INT() {
+                            let nd = node_int_data(idx_index_node);
+                            let const_off = (*nd).value * (elem_sz as i64);
+                            ir_emit_copy(ir, offset, const_off);
+                        } else {
+                            if idx_val2.qbe_type == QBE_L() {
+                                ir_emit_binary(ir, offset, "mul" as *u8, idx_val2, ir_new_int(elem_sz));
+                            } else {
+                                let idx64 = ir_new_tmp(ir, QBE_L());
+                                ir_emit_str(ir, "    %t" as *u8);
+                                ir_emit_int(ir, "%d" as *u8, idx64.id);
+                                ir_emit_str(ir, " =l extsw %t" as *u8);
+                                ir_emit_int(ir, "%d" as *u8, idx_val2.id);
+                                ir_emit_str(ir, "\n" as *u8);
+                                ir_emit_binary(ir, offset, "mul" as *u8, idx64, ir_new_int(elem_sz));
+                            }
+                        }
+
+                        // addr = base + offset
+                        let addr = ir_new_tmp(ir, QBE_L());
+                        ir_emit_binary(ir, addr, "add" as *u8, base, offset);
+                        let _ = cg_emit_store(cg_raw, elem_type, val, addr);
+                    }
+                }
+            }
+        } else if target_kind == NODE_FIELD() {
+            // (*ptr).field = value
+            let df = node_field_data(target);
+            let df_expr_node = ((*df).expr) as *Node;
+            let expr_t = (*df_expr_node).type_ptr;
+            let mut struct_type_raw: *u8 = 0 as *u8;
+            if expr_t != (0 as *u8) {
+                let et = expr_t as *Type;
+                if (*et).kind == KIND_POINTER() && (*et).elem != (0 as *u8) {
+                    let inner_t = (*et).elem as *Type;
+                    if (*inner_t).kind == KIND_STRUCT() {
+                        struct_type_raw = (*et).elem;
+                    }
+                } else if (*et).kind == KIND_STRUCT() {
+                    struct_type_raw = expr_t;
+                }
+            }
+            if struct_type_raw != (0 as *u8) {
+                let base = cg_expr(cg_raw, df_expr_node);
+                let st = struct_type_raw as *Type;
+                // find field offset
+                let mut offset: i64 = 0 as i64;
+                let mut field_type_raw: *u8 = 0 as *u8;
+                let mut j: i64 = 0 as i64;
+                while j < (*st).nfields {
+                    let fdesc = ptr_add_u8((*st).fields, j * (24 as i64)) as *u8;
+                    let fname_str_ptr = fdesc as **u8;
+                    let fname_str = *fname_str_ptr;
+                    if strcmp(fname_str, (*df).field) == 0 {
+                        let foff = ptr_add_u8(fdesc, 16 as i64) as *i64;
+                        offset = *foff;
+                        field_type_raw = ptr_add_u8(fdesc, 8 as i64) as *u8;
+                        break;
+                    }
+                    j = j + (1 as i64);
+                }
+                let mut addr = base;
+                if offset > (0 as i64) {
+                    addr = ir_new_tmp(ir, QBE_L());
+                    ir_emit_binary(ir, addr, "add" as *u8, base, ir_new_int(offset));
+                }
+                let _ = cg_emit_store(cg_raw, field_type_raw, val, addr);
+            }
+        }
+        return zero;
+    }
+
+    // ── NODE_BREAK ──
+    if kind == NODE_BREAK() {
+        if (*cg).loop_depth > 0 {
+            let ends_ptr = (*cg).loop_ends as *IRVal;
+            let end_label = *(ptr_add_u8(ends_ptr as *u8, (((*cg).loop_depth - (1 as i32)) as i64) * (40 as i64)) as *IRVal);
+            let _ = ir_emit_jmp(ir, end_label);
+        }
+        return zero;
+    }
+
+    // ── NODE_CONTINUE ──
+    if kind == NODE_CONTINUE() {
+        if (*cg).loop_depth > 0 {
+            let conts_ptr = (*cg).loop_continues as *IRVal;
+            let cont_label = *(ptr_add_u8(conts_ptr as *u8, (((*cg).loop_depth - (1 as i32)) as i64) * (40 as i64)) as *IRVal);
+            let _ = ir_emit_jmp(ir, cont_label);
+        }
+        return zero;
+    }
+
+    // ── NODE_EXPR_STMT（stmt position）──
+    if kind == NODE_EXPR_STMT() {
+        let inner = node_expr_stmt_data(n);
+        let inner_node = (*inner).expr as *Node;
+        if (*inner_node).kind == NODE_ASSIGN() {
+            let _ = cg_expr(cg_raw, inner_node);
+        } else {
+            let _ = cg_expr(cg_raw, inner_node);
+        }
+        return zero;
+    }
+
+    // ── NODE_BINARY ──
+    if kind == NODE_BINARY() {
+        let d = node_binary_data(n);
+        let left_node = ((*d).left) as *Node;
+        let right_node = ((*d).right) as *Node;
+        let left = cg_expr(cg_raw, left_node);
+
+        // short-circuit && 和 ||
+        let d_op = (*d).op;
+        if d_op == TOKEN_AMPAMP() || d_op == TOKEN_PIPEPIPE() {
+            let result = ir_new_tmp(ir, QBE_W());
+            let eval_b = ir_new_block(ir, "sc_eval" as *u8);
+            let merge_b = ir_new_block(ir, "sc_merge" as *u8);
+
+            if d_op == TOKEN_AMPAMP() {
+                let false_block = ir_new_block(ir, "sc_false" as *u8);
+                ir_emit_jnz(ir, left, eval_b, false_block);
+                ir_emit_label(ir, false_block);
+                let zero_v = ir_new_tmp(ir, QBE_W());
+                ir_emit_copy(ir, zero_v, 0);
+                ir_emit_jmp(ir, merge_b);
+                ir_emit_label(ir, eval_b);
+                let right_and = cg_expr(cg_raw, right_node);
+                let rb_and = ir_new_tmp(ir, QBE_W());
+                ir_emit_binary(ir, rb_and, "cnew" as *u8, right_and, ir_new_int(0));
+                ir_emit_jmp(ir, merge_b);
+                ir_emit_label(ir, merge_b);
+                ir_emit_phi2(ir, result, false_block, zero_v, eval_b, rb_and);
+            } else {
+                let true_block = ir_new_block(ir, "sc_true" as *u8);
+                ir_emit_jnz(ir, left, true_block, eval_b);
+                ir_emit_label(ir, true_block);
+                let one_v = ir_new_tmp(ir, QBE_W());
+                ir_emit_copy(ir, one_v, 1);
+                ir_emit_jmp(ir, merge_b);
+                ir_emit_label(ir, eval_b);
+                let right_or = cg_expr(cg_raw, right_node);
+                let rb_or = ir_new_tmp(ir, QBE_W());
+                ir_emit_binary(ir, rb_or, "cnew" as *u8, right_or, ir_new_int(0));
+                ir_emit_jmp(ir, merge_b);
+                ir_emit_label(ir, merge_b);
+                ir_emit_phi2(ir, result, true_block, one_v, eval_b, rb_or);
+            }
+            return result;
+        }
+
+        // 非短路：eager eval right
+        let right = cg_expr(cg_raw, right_node);
+        let result = ir_new_tmp(ir, qbe_type_of((*n).type_ptr));
+
+        // operand width + signedness
+        let mut op_qt: i32 = QBE_W();
+        let mut is_unsigned: i32 = 0;
+        if (*left_node).type_ptr != (0 as *u8) {
+            let op_type = (*left_node).type_ptr as *Type;
+            op_qt = qbe_type_of((*left_node).type_ptr);
+            if (*op_type).kind == KIND_PRIMITIVE() {
+                let prim = (*op_type).prim;
+                if prim == PRIM_U8() || prim == PRIM_U16() || prim == PRIM_U32() || prim == PRIM_U64() {
+                    is_unsigned = 1;
+                }
+            }
+        }
+
+        let mut op: *u8 = "add" as *u8;
+        if d_op == TOKEN_PLUS()    { op = "add" as *u8; }
+        else if d_op == TOKEN_MINUS() { op = "sub" as *u8; }
+        else if d_op == TOKEN_STAR()  { op = "mul" as *u8; }
+        else if d_op == TOKEN_SLASH() { op = "div" as *u8; }
+        else if d_op == TOKEN_PERCENT() { op = "rem" as *u8; }
+        else if d_op == TOKEN_AMP()   { op = "and" as *u8; }
+        else if d_op == TOKEN_PIPE()  { op = "or" as *u8; }
+        else if d_op == TOKEN_CARET() { op = "xor" as *u8; }
+        else if d_op == TOKEN_LTLT()  { op = "shl" as *u8; }
+        else if d_op == TOKEN_GTGT()  { op = "shr" as *u8; }
+        else if d_op == TOKEN_EQEQ() {
+            if op_qt == QBE_L()      { op = "ceql" as *u8; }
+            else if op_qt == QBE_D() { op = "ceqd" as *u8; }
+            else if op_qt == QBE_S() { op = "ceqs" as *u8; }
+            else                     { op = "ceqw" as *u8; }
+        }
+        else if d_op == TOKEN_BANGEQ() {
+            if op_qt == QBE_L()      { op = "cnel" as *u8; }
+            else if op_qt == QBE_D() { op = "cned" as *u8; }
+            else if op_qt == QBE_S() { op = "cnes" as *u8; }
+            else                     { op = "cnew" as *u8; }
+        }
+        else if d_op == TOKEN_LT() {
+            if op_qt == QBE_L() {
+                if is_unsigned != 0 { op = "cultl" as *u8; } else { op = "csltl" as *u8; }
+            } else if op_qt == QBE_D() {
+                op = "cltd" as *u8;
+            } else if op_qt == QBE_S() {
+                op = "clts" as *u8;
+            } else {
+                if is_unsigned != 0 { op = "cultw" as *u8; } else { op = "csltw" as *u8; }
+            }
+        }
+        else if d_op == TOKEN_LTEQ() {
+            if op_qt == QBE_L() {
+                if is_unsigned != 0 { op = "culel" as *u8; } else { op = "cslel" as *u8; }
+            } else if op_qt == QBE_D() {
+                op = "cled" as *u8;
+            } else if op_qt == QBE_S() {
+                op = "cles" as *u8;
+            } else {
+                if is_unsigned != 0 { op = "culew" as *u8; } else { op = "cslew" as *u8; }
+            }
+        }
+        else if d_op == TOKEN_GT() {
+            if op_qt == QBE_L() {
+                if is_unsigned != 0 { op = "cugtl" as *u8; } else { op = "csgtl" as *u8; }
+            } else if op_qt == QBE_D() {
+                op = "cgtd" as *u8;
+            } else if op_qt == QBE_S() {
+                op = "cgts" as *u8;
+            } else {
+                if is_unsigned != 0 { op = "cugtw" as *u8; } else { op = "csgtw" as *u8; }
+            }
+        }
+        else if d_op == TOKEN_GTEQ() {
+            if op_qt == QBE_L() {
+                if is_unsigned != 0 { op = "cugel" as *u8; } else { op = "csgel" as *u8; }
+            } else if op_qt == QBE_D() {
+                op = "cged" as *u8;
+            } else if op_qt == QBE_S() {
+                op = "cges" as *u8;
+            } else {
+                if is_unsigned != 0 { op = "cugew" as *u8; } else { op = "csgew" as *u8; }
+            }
+        }
+
+        // 比较时若左右 qbe_type 不同，coerce right 到 left type
+        let mut right_coerced = right;
+        if d_op >= TOKEN_EQEQ() && d_op <= TOKEN_GTEQ() {
+            if left.qbe_type != right.qbe_type {
+                right_coerced = cg_convert_arg(cg_raw, right, (*right_node).type_ptr, (*left_node).type_ptr);
+            }
+        }
+        ir_emit_binary(ir, result, op, left, right_coerced);
+        return result;
+    }
+
+    // ── 未实现 case：返回 zero IRVal（commit 4 补全）──
     return zero;
 }
 
 // ════════════════════════════════════════════════════
-// cg_module stub（commit 4 实装）
+// cg_stmt — 薄包装（cg_expr 内部已合并所有 stmt cases：LET/ASSIGN/RETURN/
+// BREAK/CONTINUE/EXPR_STMT。jhyy 无 forward decl → 必须单一定义 cg_expr
+// 不能互相递归。cg_func 等外部调用方继续走 cg_stmt 接口，IRVal 自动丢弃。）
 // ════════════════════════════════════════════════════
+
+fn cg_stmt(cg_raw: *u8, n: *Node) -> i32 {
+    if n == (0 as *Node) {
+        return 0;
+    }
+    let _ = cg_expr(cg_raw, n);
+    return 1;
+}
 
 // 占位：commit 2 仅 emit 一行 marker。Pass A const data / Pass B function emit
 // 都在 commit 4 加。
