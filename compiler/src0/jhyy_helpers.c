@@ -13,6 +13,13 @@
 #include <stdio.h>
 #include <stdlib.h>  // atof (v1 sprint 3 commit 4 prefix_float)
 
+/* sprintf_lld：i64 参数 sprintf wrapper（jhyy extern 不能 variadic）。
+   Windows x64 ABI 下 i64 和 i32 都走 RCX/RDX/R8/R9 GPR，所以转发安全。
+   ir.jhyy 用这个 emit %lld 整数字面量（struct 字段偏移等可能 > INT_MAX）。 */
+int sprintf_lld(char *buf, const char *fmt, long long val) {
+    return sprintf(buf, fmt, val);
+}
+
 /* stderr/stdout 流桥（jhyy 拿不到 FILE* 地址） */
 int jh_fputs_stderr(const char *s) {
     return fputs(s, stderr);

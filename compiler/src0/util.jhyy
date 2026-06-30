@@ -32,6 +32,7 @@ extern fn realloc(p: *u8, size: i64) -> *u8;
 extern fn strlen(s: *u8) -> i64;
 extern fn strcmp(a: *u8, b: *u8) -> i32;
 extern fn sprintf(buf: *u8, fmt: *u8, val: i32) -> i32;
+extern fn sprintf_lld(buf: *u8, fmt: *u8, val: i64) -> i32;
 
 // jhyy_helpers
 extern fn jh_fputs_stderr(s: *u8) -> i32;
@@ -115,6 +116,21 @@ fn sb_appendf(a: *Arena, sb: *StringBuilder, fmt: *u8, val: i32) -> i32 {
         return 0;
     }
     let n = sprintf(tmp, fmt, val);
+    if n < (0 as i32) {
+        return 0;
+    }
+    let n64 = n as i64;
+    return sb_append(a, sb, tmp, n64);
+}
+
+// sb_appendf_lld：i64 参数版本（v1 sprint 4 ir.jhyy 用，emit %lld 整数字面量）
+fn sb_appendf_lld(a: *Arena, sb: *StringBuilder, fmt: *u8, val: i64) -> i32 {
+    let tmp_cap = 32 as i64;
+    let tmp = arena_alloc(a, tmp_cap);
+    if tmp == (0 as *u8) {
+        return 0;
+    }
+    let n = sprintf_lld(tmp, fmt, val);
     if n < (0 as i32) {
         return 0;
     }

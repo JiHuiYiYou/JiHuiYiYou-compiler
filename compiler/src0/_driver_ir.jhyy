@@ -1,0 +1,340 @@
+// _driver_ir.jhyy — Sprint 4 commit 1 单元测试：验证 ir.jhyy 基础 emit
+//
+// 测试覆盖：
+//   - ir_init + IRBuf 创建
+//   - ir_new_tmp / ir_new_block / ir_new_data_str
+//   - ir_emit_label / ret / jmp / jnz
+//   - ir_emit_binary（INT/TEMP/混合 4 种 case）
+//   - ir_emit_copy / call / call_void / alloc / store / load
+//   - ir_emit_phi2
+//   - ir_emit_data_string（escape sequences）
+//   - ir_flush_data
+// 退出码：42（沿用惯例）
+
+import arena;
+import util;
+import types;
+import ir;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn strcmp(a: *u8, b: *u8) -> i32;
+
+fn main_jhyy() -> i32 {
+    printf("IR0\n", 0);  // start
+
+    // ──── 准备 arena + IRBuf ────
+    let mut a: Arena = Arena {
+        start: 0 as *u8,
+        cur: 0 as *u8,
+        end: 0 as *u8,
+        blocks: 0 as *u8,
+        def_size: 0 as i64,
+    };
+    arena_init(&a, 16384);
+
+    let mut ir: IRBuf = IRBuf {
+        arena:      0 as *Arena,
+        sb:         0 as *StringBuilder,
+        next_tmp:   0 as i32,
+        next_block: 0 as i32,
+        next_data:  0 as i32,
+        data_sb:    0 as *StringBuilder,
+        data_used:  0 as i32,
+    };
+    ir_init(&ir, &a);
+    printf("IR1\n", 0);  // IRBuf ready
+
+    // ──── 测试 ir_new_tmp 顺序 ────
+    let t0 = ir_new_tmp(&ir, QBE_W());
+    let t1 = ir_new_tmp(&ir, QBE_L());
+    let t2 = ir_new_tmp(&ir, QBE_D());
+    if t0.id == 0 && t1.id == 1 && t2.id == 2 {
+        printf("IR2\n", 0);  // tmp ids 0,1,2
+    } else {
+        printf("FAIL tmp ids\n", 0);
+        return 1;
+    }
+    if t0.qbe_type == 119 && t1.qbe_type == 108 && t2.qbe_type == 100 {
+        printf("IR3\n", 0);  // qbe types correct
+    } else {
+        printf("FAIL tmp qt\n", 0);
+        return 2;
+    }
+
+    // ──── 测试 ir_emit_ret ────
+    ir_emit_ret(&ir, t0);
+    // 注：jhyy 不支持 struct literal 作为函数参数，所以 IRVal 必须先 let
+    let mut v_void: IRVal = IRVal { kind: IRVAL_TEMP(), id: 5, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+    ir_emit_ret(&ir, v_void);
+    let buf1 = ir_buf_str(&ir);
+    let want1 = "    ret %t0\n    ret\n" as *u8;
+    if strcmp(buf1, want1) == 0 {
+        printf("IR4\n", 0);  // ret emit correct
+    } else {
+        printf("FAIL ret emit\n", 0);
+        return 3;
+    }
+
+    // ──── reset IRBuf ────
+    sb_reset(ir.sb);
+
+    // ──── 测试 ir_new_block + label + jmp ────
+    let b0 = ir_new_block(&ir, "start" as *u8);
+    let b1 = ir_new_block(&ir, 0 as *u8);  // null hint → "b"
+    if b0.id == 0 && b1.id == 1 {
+        printf("IR5\n", 0);
+    } else {
+        printf("FAIL block ids\n", 0);
+        return 4;
+    }
+    let want_b0 = "start0" as *u8;
+    let want_b1 = "b1" as *u8;
+    if strcmp(b0.name, want_b0) == 0 && strcmp(b1.name, want_b1) == 0 {
+        printf("IR6\n", 0);  // block names correct
+    } else {
+        printf("FAIL block names\n", 0);
+        return 5;
+    }
+    ir_emit_label(&ir, b0);
+    ir_emit_jmp(&ir, b1);
+    ir_emit_label(&ir, b1);
+    let buf2 = ir_buf_str(&ir);
+    let want2 = "@start0\n    jmp @b1\n@b1\n" as *u8;
+    if strcmp(buf2, want2) == 0 {
+        printf("IR7\n", 0);
+    } else {
+        printf("FAIL label+jmp\n", 0);
+        return 6;
+    }
+
+    sb_reset(ir.sb);
+
+    // ──── 测试 ir_emit_jnz ────
+    let cond = ir_new_tmp(&ir, QBE_W());
+    ir_emit_jnz(&ir, cond, b0, b1);
+    let buf3 = ir_buf_str(&ir);
+    let want3 = "    jnz %t3, @start0, @b1\n" as *u8;
+    if strcmp(buf3, want3) == 0 {
+        printf("IR8\n", 0);
+    } else {
+        printf("FAIL jnz\n", 0);
+        return 7;
+    }
+
+    sb_reset(ir.sb);
+
+    // ──── 测试 ir_emit_binary 4 种 case ────
+    let ta = ir_new_tmp(&ir, QBE_W());
+    let tb = ir_new_tmp(&ir, QBE_W());
+    let td = ir_new_tmp(&ir, QBE_W());
+    let ia = IRVal { kind: IRVAL_INT(), id: 0, ival: 5 as i64, name: 0 as *u8, qbe_type: QBE_W() };
+    let ib = IRVal { kind: IRVAL_INT(), id: 0, ival: 100 as i64, name: 0 as *u8, qbe_type: QBE_W() };
+
+    // case 1: INT + INT → "    %tD =w copy V\n"
+    ir_emit_binary(&ir, td, "add" as *u8, ia, ib);
+    let want_c1 = "    %t6 =w copy 5\n" as *u8;
+    let buf_c1 = ir_buf_str(&ir);
+    if strcmp(buf_c1, want_c1) == 0 {
+        printf("IR9\n", 0);  // INT+INT correct
+    } else {
+        printf("FAIL binary INT+INT\n", 0);
+        return 8;
+    }
+    sb_reset(ir.sb);
+
+    // case 2: INT + TEMP → "    %tD =w op V, %tB\n"
+    ir_emit_binary(&ir, td, "add" as *u8, ia, ta);
+    let want_c2 = "    %t6 =w add 5, %t4\n" as *u8;
+    let buf_c2 = ir_buf_str(&ir);
+    if strcmp(buf_c2, want_c2) == 0 {
+        printf("IR10\n", 0);
+    } else {
+        printf("FAIL binary INT+TEMP\n", 0);
+        return 9;
+    }
+    sb_reset(ir.sb);
+
+    // case 3: TEMP + INT
+    ir_emit_binary(&ir, td, "add" as *u8, ta, ib);
+    let want_c3 = "    %t6 =w add %t4, 100\n" as *u8;
+    let buf_c3 = ir_buf_str(&ir);
+    if strcmp(buf_c3, want_c3) == 0 {
+        printf("IR11\n", 0);
+    } else {
+        printf("FAIL binary TEMP+INT\n", 0);
+        return 10;
+    }
+    sb_reset(ir.sb);
+
+    // case 4: TEMP + TEMP
+    ir_emit_binary(&ir, td, "add" as *u8, ta, tb);
+    let want_c4 = "    %t6 =w add %t4, %t5\n" as *u8;
+    let buf_c4 = ir_buf_str(&ir);
+    if strcmp(buf_c4, want_c4) == 0 {
+        printf("IR12\n", 0);
+    } else {
+        printf("FAIL binary TEMP+TEMP\n", 0);
+        return 11;
+    }
+    sb_reset(ir.sb);
+
+    // ──── 测试 ir_emit_copy ────
+    ir_emit_copy(&ir, td, 42);
+    let want_copy = "    %t6 =w copy 42\n" as *u8;
+    let buf_copy = ir_buf_str(&ir);
+    if strcmp(buf_copy, want_copy) == 0 {
+        printf("IR13\n", 0);
+    } else {
+        printf("FAIL copy\n", 0);
+        return 12;
+    }
+    sb_reset(ir.sb);
+
+    // ──── 测试 ir_emit_call / call_void（args 数组）────
+    let arg0 = ir_new_tmp(&ir, QBE_W());
+    let arg1 = ir_new_tmp(&ir, QBE_L());
+    // args 数组：2 个 IRVal，arena 分配 2*40 = 80 字节
+    let args_buf = arena_alloc(&a, 80 as i64);
+    let arg0_ptr = args_buf as *IRVal;
+    *arg0_ptr = arg0;
+    let arg1_ptr = ptr_add_u8(args_buf, 40 as i64) as *IRVal;
+    *arg1_ptr = arg1;
+    ir_emit_call(&ir, td, "my_fn" as *u8, args_buf, 2 as i32);
+    let want_call = "    %t6 =w call $my_fn(w %t7, l %t8)\n" as *u8;
+    let buf_call = ir_buf_str(&ir);
+    if strcmp(buf_call, want_call) == 0 {
+        printf("IR14\n", 0);
+    } else {
+        printf("FAIL call\n", 0);
+        return 13;
+    }
+    sb_reset(ir.sb);
+
+    ir_emit_call_void(&ir, "side_effect" as *u8, args_buf, 2 as i32);
+    let want_cv = "    call $side_effect(w %t7, l %t8)\n" as *u8;
+    let buf_cv = ir_buf_str(&ir);
+    if strcmp(buf_cv, want_cv) == 0 {
+        printf("IR15\n", 0);
+    } else {
+        printf("FAIL call_void\n", 0);
+        return 14;
+    }
+    sb_reset(ir.sb);
+
+    // ──── 测试 ir_emit_alloc / store / load ────
+    let dst_alloc = ir_new_tmp(&ir, QBE_L());
+    ir_emit_alloc(&ir, dst_alloc, 8 as i32);
+    let want_alloc = "    %t9 =l alloc8 8\n" as *u8;
+    let buf_alloc = ir_buf_str(&ir);
+    if strcmp(buf_alloc, want_alloc) == 0 {
+        printf("IR16\n", 0);
+    } else {
+        printf("FAIL alloc\n", 0);
+        return 15;
+    }
+    sb_reset(ir.sb);
+
+    let store_val = ir_new_tmp(&ir, QBE_W());
+    let store_addr = ir_new_tmp(&ir, QBE_L());
+    ir_emit_store(&ir, QBE_W(), store_val, store_addr);
+    let want_store = "    storew %t10, %t11\n" as *u8;
+    let buf_store = ir_buf_str(&ir);
+    if strcmp(buf_store, want_store) == 0 {
+        printf("IR17\n", 0);
+    } else {
+        printf("FAIL store\n", 0);
+        return 16;
+    }
+    sb_reset(ir.sb);
+
+    let load_dst = ir_new_tmp(&ir, QBE_W());
+    let load_addr = ir_new_tmp(&ir, QBE_L());
+    ir_emit_load(&ir, load_dst, QBE_W(), load_addr);
+    let want_load = "    %t12 =w loadw %t13\n" as *u8;
+    let buf_load = ir_buf_str(&ir);
+    if strcmp(buf_load, want_load) == 0 {
+        printf("IR18\n", 0);
+    } else {
+        printf("FAIL load\n", 0);
+        return 17;
+    }
+    sb_reset(ir.sb);
+
+    // ──── 测试 ir_emit_phi2 ────
+    let phi_dst = ir_new_tmp(&ir, QBE_W());
+    let phi_v1 = ir_new_tmp(&ir, QBE_W());
+    let phi_v2 = ir_new_tmp(&ir, QBE_W());
+    ir_emit_phi2(&ir, phi_dst, b0, phi_v1, b1, phi_v2);
+    let want_phi = "    %t14 =w phi @start0 %t15, @b1 %t16\n" as *u8;
+    let buf_phi = ir_buf_str(&ir);
+    if strcmp(buf_phi, want_phi) == 0 {
+        printf("IR19\n", 0);
+    } else {
+        printf("FAIL phi\n", 0);
+        return 18;
+    }
+    sb_reset(ir.sb);
+
+    // ──── 测试 ir_emit_data_string ────
+    let s_hello = "hello\nworld" as *u8;
+    let str_id = IRVal { kind: IRVAL_STR(), id: 0, ival: 0 as i64,
+                         name: "$str0" as *u8, qbe_type: QBE_L() };
+    ir_emit_data_string(&ir, str_id, s_hello, 11 as i64);
+    ir_flush_data(&ir);
+    let want_data = "data $str0 = { b \"hello\\nworld\", b 0 }\n" as *u8;
+    let buf_data = ir_buf_str(&ir);
+    if strcmp(buf_data, want_data) == 0 {
+        printf("IR20\n", 0);
+    } else {
+        printf("FAIL data_string\n", 0);
+        return 19;
+    }
+    sb_reset(ir.sb);
+
+    // ──── 测试 ir_new_data_str ────
+    let dstr = ir_new_data_str(&ir, "abc" as *u8, 3 as i64);
+    ir_flush_data(&ir);
+    if strcmp(dstr.name, "$str0" as *u8) == 0 {
+        printf("IR21\n", 0);
+    } else {
+        printf("FAIL data_str name\n", 0);
+        return 20;
+    }
+    let want_dstr = "data $str0 = { b \"abc\", b 0 }\n" as *u8;
+    let buf_dstr = ir_buf_str(&ir);
+    if strcmp(buf_dstr, want_dstr) == 0 {
+        printf("IR22\n", 0);
+    } else {
+        printf("FAIL data_str\n", 0);
+        return 21;
+    }
+    sb_reset(ir.sb);
+
+    // ──── 测试 ir_emit_func_header ────
+    let params_qt = arena_alloc(&a, 8 as i64) as *i32;
+    *params_qt = QBE_W();
+    let p1_name_buf = arena_alloc(&a, 8 as i64);
+    let p1_name = p1_name_buf as *i32;
+    *p1_name = 120;  // 'x'
+    let p1_nul = (p1_name_buf as i64 + 4 as i64) as *i32;
+    *p1_nul = 0;
+
+    let params_name = arena_alloc(&a, 8 as i64);
+    let pn_ptr = params_name as *i32;
+    *pn_ptr = p1_name_buf as i32;
+    let pn_nul = (params_name as i64 + 4 as i64) as *i32;
+    *pn_nul = 0;
+
+    ir_emit_func_header(&ir, "foo" as *u8, QBE_W(), params_qt, params_name, 1 as i32);
+    let want_fh = "export function w $foo(w %x) {\n" as *u8;
+    let buf_fh = ir_buf_str(&ir);
+    if strcmp(buf_fh, want_fh) == 0 {
+        printf("IR23\n", 0);
+    } else {
+        printf("FAIL func_header\n", 0);
+        return 22;
+    }
+
+    printf("PASS\n", 0);
+    return 42;
+}

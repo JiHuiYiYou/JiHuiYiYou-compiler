@@ -30,6 +30,11 @@ extern fn strlen(s: *u8) -> i64;
 extern fn strcmp(a: *u8, b: *u8) -> i32;
 extern fn strncmp(a: *u8, b: *u8, n: i64) -> i32;
 extern fn sprintf(buf: *u8, fmt: *u8, val: i32) -> i32;  // 单 i32
+// sprintf_lld：i64 参数版本（C 端 jhyy_helpers.c 包 sprintf(buf, fmt, val)，
+// 因为 sprintf 本身是 variadic，jhyy extern 不能直接用 variadic。Windows
+// x64 calling convention 下 i64 和 i32 都走 GPR 寄存器，所以转发是安全的）。
+// ir.jhyy 用这个 emit %lld 整数字面量（struct 字段偏移等可能 > INT_MAX）。
+extern fn sprintf_lld(buf: *u8, fmt: *u8, val: i64) -> i32;
 extern fn strtoll(s: *u8, endptr: *u8, base: i32) -> i64;  // v1 sprint 3 commit 3 parse_pattern int literal
 
 // v1 sprint 3 commit 4 parse_expr prefix_float + prefix_int suffix
