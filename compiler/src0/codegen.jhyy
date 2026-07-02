@@ -68,6 +68,22 @@ fn SYM_CONST() -> i32 { return 6 as i32; }
 // 是 v0.7 7B 加的，sprint 5 翻译 NODE_CONST_DECL 时挪到 ast.jhyy；现在 codegen
 // dispatch 需要，先在 codegen.jhyy 暂存。
 
+// NODE_CONST_DECL = 49（sprint 5 挪到 ast.jhyy）
+fn NODE_CONST_DECL() -> i32 { return 49 as i32; }
+
+// NodeConstDecl: sym(*u8 8) + type_annot(*u8 8) + init(*u8 8) = 24 bytes
+// codegen dispatch 需要，sprint 5 挪到 ast.jhyy
+type NodeConstDecl = struct {
+    sym:        *u8,
+    type_annot: *u8,
+    init:       *u8,
+}
+fn NODE_CONST_DECL_SIZE() -> i64 { return 24 as i64; }
+
+fn node_const_decl_data(n: *Node) -> *NodeConstDecl {
+    return (n as i64 + NODE_SIZE()) as *NodeConstDecl;
+}
+
 // ════════════════════════════════════════════════════
 // 局部表容量常量（对应 C #define MAX_LOCALS / MAX_LOOP_DEPTH）
 // ════════════════════════════════════════════════════
@@ -88,6 +104,37 @@ type LocalEntry = struct {
 }
 
 fn LOCALENTRY_SIZE() -> i64 { return 56 as i64; }
+
+// ════════════════════════════════════════════════════
+// FieldDesc / VariantDesc / NodeFieldInit（size constants + types）
+// jhyy 无 forward decl：sema.jhyy / ast.jhyy 定义了，但 codegen 翻译时
+// 为避开循环引用在 codegen.jhyy 复制定义（sprint 4 commit 4）
+// ════════════════════════════════════════════════════
+
+// FieldDesc: name(*Sym *u8 8) + type(*Type *u8 8) + offset(i64 8) = 24 bytes
+fn FIELD_DESC_SIZE() -> i64 { return 24 as i64; }
+
+// VariantDesc: name(*Sym *u8 8) + tag(i32 4 + pad 4) = 16 bytes
+fn VARIANT_DESC_SIZE() -> i64 { return 16 as i64; }
+
+// NodeFieldInit: name(*u8 8) + value(*Node *u8 8) = 16 bytes
+fn NODE_FIELD_INIT_SIZE() -> i64 { return 16 as i64; }
+
+type FieldDesc = struct {
+    name:   *u8,    // *Sym
+    type_:  *u8,    // *Type
+    offset: i64,
+}
+
+type VariantDesc = struct {
+    name: *u8,      // *Sym
+    tag:  i32,
+}
+
+type NodeFieldInit = struct {
+    name:  *u8,
+    value: *u8,
+}
 
 // ════════════════════════════════════════════════════
 // CGContext（codegen 上下文）
@@ -145,19 +192,60 @@ fn cg_add_local(cg_raw: *u8, sym: *u8, val: IRVal, is_stack: i32) -> i32 {
     return 1;
 }
 
-fn cg_find_local(cg_raw: *u8, sym: *u8) -> IRVal {
+// cg_find_local: 找 sym 对应的 IRVal，写到 out_buf。返回 1 if found, 0 if not。
+//
+// v0 codegen bug workaround (复合):
+//   - bug 1: 避免 (*entry_ptr).value.field 这种嵌套 struct field access
+//     （v0 codegen LEA 32-bit 字段会算错 offset，emit 出 loadw on loadw）。
+//     改走 ptr_add_u8 + cast + scalar deref。
+//   - bug 8: 避免返回 IRVal struct（v0 codegen 多字段 struct return 漏写 sret）。
+//     改走 out_buf 模式：caller alloc IRVal 缓冲，pass pointer。
+fn cg_find_local(cg_raw: *u8, sym: *u8, out_buf: *u8) -> i32 {
     let cg = cg_raw as *CGContext;
     let mut i: i32 = 0 as i32;
     let n = (*cg).nlocals;
     while i < n {
         let entry_ptr = ptr_add_u8((*cg).locals, (i as i64) * LOCALENTRY_SIZE()) as *LocalEntry;
         if (*entry_ptr).sym == sym {
-            return (*entry_ptr).value;
+            // IRVal layout: kind(i32) + id(i32) + ival(i64) + name(*u8) + qbe_type(i32)
+            // offsets: 0 / 4 / 8 / 16 / 24
+            let value_u8 = ptr_add_u8(entry_ptr as *u8, 8 as i64);
+            // kind
+            let kind_p = value_u8 as *i32;
+            let out_kind_p = out_buf as *i32;
+            *out_kind_p = *kind_p;
+            // id
+            let id_p = ptr_add_u8(value_u8, 4 as i64) as *i32;
+            let out_id_p = ptr_add_u8(out_buf, 4 as i64) as *i32;
+            *out_id_p = *id_p;
+            // ival
+            let ival_p = ptr_add_u8(value_u8, 8 as i64) as *i64;
+            let out_ival_p = ptr_add_u8(out_buf, 8 as i64) as *i64;
+            *out_ival_p = *ival_p;
+            // name
+            let name_p = ptr_add_u8(value_u8, 16 as i64) as **u8;
+            let out_name_p = ptr_add_u8(out_buf, 16 as i64) as **u8;
+            *out_name_p = *name_p;
+            // qbe_type
+            let qt_p = ptr_add_u8(value_u8, 24 as i64) as *i32;
+            let out_qt_p = ptr_add_u8(out_buf, 24 as i64) as *i32;
+            *out_qt_p = *qt_p;
+            return 1;
         }
         i = i + (1 as i32);
     }
-    let zero = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-    return zero;
+    // not found — zero out
+    let zk = out_buf as *i32;
+    *zk = 0;
+    let zi = ptr_add_u8(out_buf, 4 as i64) as *i32;
+    *zi = 0;
+    let ziv = ptr_add_u8(out_buf, 8 as i64) as *i64;
+    *ziv = 0 as i64;
+    let zn = ptr_add_u8(out_buf, 16 as i64) as **u8;
+    *zn = 0 as *u8;
+    let zq = ptr_add_u8(out_buf, 24 as i64) as *i32;
+    *zq = 0;
+    return 0;
 }
 
 // cg_find_local 带 is_stack out 参数（C 端用 int*；jhyy 不支持 output 参数，
@@ -325,22 +413,13 @@ fn cg_copy_struct(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) ->
         let offset = *foffset_ptr;
 
         // compute field addresses
-        let src_off = ir_new_tmp(ir, QBE_L());
-        let dst_off = ir_new_tmp(ir, QBE_L());
+        let mut src_off: IRVal = src_addr;
+        let mut dst_off: IRVal = dst_addr;
         if offset > (0 as i64) {
+            src_off = ir_new_tmp(ir, QBE_L());
+            dst_off = ir_new_tmp(ir, QBE_L());
             ir_emit_binary(ir, src_off, "add" as *u8, src_addr, ir_new_int(offset));
             ir_emit_binary(ir, dst_off, "add" as *u8, dst_addr, ir_new_int(offset));
-        } else {
-            ir_emit_str(ir, "    %t" as *u8);
-            ir_emit_int(ir, "%d" as *u8, src_off.id);
-            ir_emit_str(ir, " =l copy %t" as *u8);
-            ir_emit_int(ir, "%d" as *u8, src_addr.id);
-            ir_emit_str(ir, "\n" as *u8);
-            ir_emit_str(ir, "    %t" as *u8);
-            ir_emit_int(ir, "%d" as *u8, dst_off.id);
-            ir_emit_str(ir, " =l copy %t" as *u8);
-            ir_emit_int(ir, "%d" as *u8, dst_addr.id);
-            ir_emit_str(ir, "\n" as *u8);
         }
         let ft_kind = (*ftype).kind;
         if ft_kind == KIND_STRUCT() {
@@ -401,38 +480,46 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
     }
     let src_qt = qbe_type_of(src_t);
     let dst_qt = qbe_type_of(dst_t);
-    if src_qt == dst_qt && (*src).prim == (*dst).prim {
-        return arg;
+    // v0 codegen bug 2 workaround: 避免 &&/|| 嵌套 short-circuit (nested phi predecessor mismatch)
+    // 改成 nested if-else，无短路
+    if src_qt == dst_qt {
+        if (*src).prim == (*dst).prim {
+            return arg;
+        }
     }
     let mut conv: *u8 = 0 as *u8;
-    if src_qt == QBE_D() && (dst_qt == QBE_W() || dst_qt == QBE_L()) {
-        if dst_qt == QBE_L() {
-            conv = "dtosl" as *u8;
-        } else {
+    if src_qt == QBE_D() {
+        if dst_qt == QBE_W() {
             conv = "dtosi" as *u8;
+        } else if dst_qt == QBE_L() {
+            conv = "dtosl" as *u8;
         }
-    } else if src_qt == QBE_S() && (dst_qt == QBE_W() || dst_qt == QBE_L()) {
-        if dst_qt == QBE_L() {
-            conv = "stosl" as *u8;
-        } else {
+    } else if src_qt == QBE_S() {
+        if dst_qt == QBE_W() {
             conv = "stosi" as *u8;
+        } else if dst_qt == QBE_L() {
+            conv = "stosl" as *u8;
         }
-    } else if (src_qt == QBE_W() || src_qt == QBE_L()) && dst_qt == QBE_D() {
+    } else if dst_qt == QBE_D() {
         if src_qt == QBE_L() {
             conv = "sltof" as *u8;
-        } else {
+        } else if src_qt == QBE_W() {
             conv = "swtof" as *u8;
         }
-    } else if (src_qt == QBE_W() || src_qt == QBE_L()) && dst_qt == QBE_S() {
+    } else if dst_qt == QBE_S() {
         if src_qt == QBE_L() {
             conv = "ultof" as *u8;
-        } else {
+        } else if src_qt == QBE_W() {
             conv = "uwtof" as *u8;
         }
-    } else if src_qt == QBE_S() && dst_qt == QBE_D() {
-        conv = "exts" as *u8;
-    } else if src_qt == QBE_D() && dst_qt == QBE_S() {
-        conv = "truncd" as *u8;
+    } else if src_qt == QBE_S() {
+        if dst_qt == QBE_D() {
+            conv = "exts" as *u8;
+        }
+    } else if src_qt == QBE_D() {
+        if dst_qt == QBE_S() {
+            conv = "truncd" as *u8;
+        }
     }
     if conv == (0 as *u8) {
         return arg;
@@ -579,7 +666,9 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             }
         }
         let is_stack = cg_find_local_is_stack(cg_raw, sym);
-        let loc = cg_find_local(cg_raw, sym);
+        let loc_buf = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+        let _found = cg_find_local(cg_raw, sym, (loc_buf as *u8));
+        let loc = loc_buf;
         if is_stack != (0 as i32) {
             /* structs/arrays/slices always manipulated via address */
             if (*n).type_ptr != (0 as *u8) {
@@ -740,7 +829,9 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         } else if target_kind == NODE_IDENT() {
             let id = node_ident_data(target);
             let is_stack = cg_find_local_is_stack(cg_raw, (*id).sym);
-            let slot = cg_find_local(cg_raw, (*id).sym);
+            let slot_buf = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+            let _found2 = cg_find_local(cg_raw, (*id).sym, (slot_buf as *u8));
+            let slot = slot_buf;
             if is_stack != 0 {
                 let tgt_t = (*target).type_ptr;
                 if tgt_t != (0 as *u8) {
@@ -768,7 +859,9 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                     // 路径 1: 数组 + IDENT 标识符 → 直接用 stack slot
                     if is_array != 0 && (*idx_expr_node).kind == NODE_IDENT() {
                         let id = node_ident_data(idx_expr_node);
-                        let real_base = cg_find_local(cg_raw, (*id).sym);
+                        let real_base_buf = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+                        let _found3 = cg_find_local(cg_raw, (*id).sym, (real_base_buf as *u8));
+                        let real_base = real_base_buf;
                         let idx_val = cg_expr(cg_raw, idx_index_node);
                         let offset2 = ir_new_tmp(ir, QBE_L());
                         let idx_index_kind = (*idx_index_node).kind;
@@ -902,9 +995,17 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         let left = cg_expr(cg_raw, left_node);
 
         // short-circuit && 和 ||
+        //
+        // v0 codegen bug 2 workaround：phi predecessor mismatch when recursive
+        // cg_expr call inside one branch of if-else。改走 store/load 模式：
+        //   - alloc result slot at outer scope
+        //   - each branch stores its value to slot, jmps merge
+        //   - merge loads from slot (no phi needed)
         let d_op = (*d).op;
         if d_op == TOKEN_AMPAMP() || d_op == TOKEN_PIPEPIPE() {
             let result = ir_new_tmp(ir, QBE_W());
+            let result_slot = ir_new_tmp(ir, QBE_L());
+            ir_emit_alloc(ir, result_slot, 4 as i32);
             let eval_b = ir_new_block(ir, "sc_eval" as *u8);
             let merge_b = ir_new_block(ir, "sc_merge" as *u8);
 
@@ -914,28 +1015,32 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 ir_emit_label(ir, false_block);
                 let zero_v = ir_new_tmp(ir, QBE_W());
                 ir_emit_copy(ir, zero_v, 0);
+                let _s1 = cg_emit_store_primitive(cg_raw, 0 as *u8, zero_v, result_slot);
                 ir_emit_jmp(ir, merge_b);
                 ir_emit_label(ir, eval_b);
                 let right_and = cg_expr(cg_raw, right_node);
                 let rb_and = ir_new_tmp(ir, QBE_W());
                 ir_emit_binary(ir, rb_and, "cnew" as *u8, right_and, ir_new_int(0));
+                let _s2 = cg_emit_store_primitive(cg_raw, 0 as *u8, rb_and, result_slot);
                 ir_emit_jmp(ir, merge_b);
                 ir_emit_label(ir, merge_b);
-                ir_emit_phi2(ir, result, false_block, zero_v, eval_b, rb_and);
+                ir_emit_load(cg_raw, result, 0 as *u8, result_slot);
             } else {
                 let true_block = ir_new_block(ir, "sc_true" as *u8);
                 ir_emit_jnz(ir, left, true_block, eval_b);
                 ir_emit_label(ir, true_block);
                 let one_v = ir_new_tmp(ir, QBE_W());
                 ir_emit_copy(ir, one_v, 1);
+                let _s3 = cg_emit_store_primitive(cg_raw, 0 as *u8, one_v, result_slot);
                 ir_emit_jmp(ir, merge_b);
                 ir_emit_label(ir, eval_b);
                 let right_or = cg_expr(cg_raw, right_node);
                 let rb_or = ir_new_tmp(ir, QBE_W());
                 ir_emit_binary(ir, rb_or, "cnew" as *u8, right_or, ir_new_int(0));
+                let _s4 = cg_emit_store_primitive(cg_raw, 0 as *u8, rb_or, result_slot);
                 ir_emit_jmp(ir, merge_b);
                 ir_emit_label(ir, merge_b);
-                ir_emit_phi2(ir, result, true_block, one_v, eval_b, rb_or);
+                ir_emit_load(cg_raw, result, 0 as *u8, result_slot);
             }
             return result;
         }
@@ -1037,6 +1142,566 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         return result;
     }
 
+    // ── NODE_INDEX ──
+    if kind == NODE_INDEX() {
+        let nd_idx = node_index_data(n);
+        let base_node = (*nd_idx).expr as *Node;
+        let idx_node = (*nd_idx).index as *Node;
+        let base = cg_expr(cg_raw, base_node);
+        let idx = cg_expr(cg_raw, idx_node);
+        let mut idx64: IRVal = ir_new_tmp(ir, QBE_L());
+        if idx.qbe_type != QBE_L() {
+            let _e = ir_emit_copy(ir, idx64, idx);
+            let _ = _e;
+        } else {
+            idx64 = idx;
+            let _ = idx64;
+        }
+        let byte_off = ir_new_tmp(ir, QBE_L());
+        let size_const = ir_new_int(8 as i64);
+        ir_emit_binary(ir, byte_off, "mul" as *u8, idx64, size_const);
+        let elem_addr = ir_new_tmp(ir, QBE_L());
+        ir_emit_binary(ir, elem_addr, "add" as *u8, base, byte_off);
+        let result = ir_new_tmp(ir, qbe_type_of((*n).type_ptr));
+        ir_emit_load(ir, result, "l" as *u8, elem_addr);
+        return result;
+    }
+
+    // ── NODE_FIELD ──
+    // (*ptr).field 或 s.field。emit base 表达式 + 算 offset + load。
+    // 如果字段是 struct 类型，struct 在 QBE 里只能按地址处理 → 返回 addr 不 load。
+    if kind == NODE_FIELD() {
+        let nf = node_field_data(n);
+        let target_node = (*nf).expr as *Node;
+        let field_name = (*nf).field;
+        let base = cg_expr(cg_raw, target_node);
+        let target_t = (*target_node).type_ptr;
+        if target_t == (0 as *u8) {
+            return zero;
+        }
+        let tt = target_t as *Type;
+        let mut struct_type_raw: *u8 = 0 as *u8;
+        if (*tt).kind == KIND_POINTER() && (*tt).elem != (0 as *u8) {
+            struct_type_raw = (*tt).elem;
+        } else if (*tt).kind == KIND_STRUCT() {
+            struct_type_raw = target_t;
+        }
+        if struct_type_raw == (0 as *u8) {
+            return zero;
+        }
+        let st = struct_type_raw as *Type;
+        let mut offset: i64 = 0 as i64;
+        let mut field_type_raw: *u8 = 0 as *u8;
+        let mut j: i64 = 0 as i64;
+        while j < (*st).nfields {
+            // FieldDesc layout: name(*u8 8) + type_(*u8 8) + offset(i64 8) = 24
+            let fdesc = ptr_add_u8((*st).fields, j * FIELD_DESC_SIZE()) as *u8;
+            let fname_str_ptr = fdesc as **u8;
+            let fname_str = *fname_str_ptr;
+            if strcmp(fname_str, field_name) == 0 {
+                let foff = ptr_add_u8(fdesc, 16 as i64) as *i64;
+                offset = *foff;
+                field_type_raw = ptr_add_u8(fdesc, 8 as i64) as *u8;
+                break;
+            }
+            j = j + (1 as i64);
+        }
+        let mut addr = base;
+        if offset > (0 as i64) {
+            addr = ir_new_tmp(ir, QBE_L());
+            ir_emit_binary(ir, addr, "add" as *u8, base, ir_new_int(offset));
+        }
+        // struct field → 返回 addr（caller 按 is_stack 处理）
+        if field_type_raw != (0 as *u8) {
+            let ft = field_type_raw as *Type;
+            if (*ft).kind == KIND_STRUCT() {
+                return addr;
+            }
+        }
+        let result = ir_new_tmp(ir, qbe_type_of(field_type_raw));
+        cg_emit_load(cg_raw, result, field_type_raw, addr);
+        return result;
+    }
+
+    // ── NODE_DEREF ──
+    // *expr。emit expr（应该 produce pointer），然后 load 返回。
+    // 如果目标是 struct/array：struct 在 QBE 只能按指针走 → 返回 pointer itself。
+    if kind == NODE_DEREF() {
+        let dd = node_deref_data(n);
+        let inner_node = (*dd).expr as *Node;
+        let ptr = cg_expr(cg_raw, inner_node);
+        let t_inner = (*inner_node).type_ptr;
+        if t_inner == (0 as *u8) {
+            return zero;
+        }
+        let t_inner_t = t_inner as *Type;
+        if (*t_inner_t).kind == KIND_POINTER() && (*t_inner_t).elem != (0 as *u8) {
+            let elem_t = (*t_inner_t).elem;
+            let et = elem_t as *Type;
+            if (*et).kind == KIND_STRUCT() || (*et).kind == KIND_ARRAY() || (*et).kind == KIND_SLICE() {
+                return ptr;
+            }
+        }
+        let result = ir_new_tmp(ir, qbe_type_of((*n).type_ptr));
+        cg_emit_load(cg_raw, result, (*n).type_ptr, ptr);
+        return result;
+    }
+
+    // ── NODE_CALL ──
+    // Function call. 处理:
+    //   - extern FFI（不 mangle，fn_name = sym.name）
+    //   - module 函数（mangle "$mod__$name"，用 StringBuilder 拼）
+    //   - 普通函数（fn_name = sym.name）
+    //   - sret: 返回类型 struct → alloc ret_slot + pass as hidden arg[0]
+    //   - struct arg → copy to stack slot before call
+    //   - 隐式类型转换（cg_convert_arg）
+    if kind == NODE_CALL() {
+        let cd = node_call_data(n);
+        let callee_node = ((*cd).callee) as *Node;
+        let args_node = (*cd).args;
+        let nargs = (*cd).nargs;
+
+        // 取 callee sym（callee 是 IDENT 时才有 sym）
+        let mut fn_sym_raw: *u8 = 0 as *u8;
+        if (*callee_node).kind == NODE_IDENT() {
+            let id_d = node_ident_data(callee_node);
+            fn_sym_raw = (*id_d).sym;
+        }
+
+        // 决定 fn_name（extern 不 mangle；有 module 做 mangle）
+        let mut fn_name: *u8 = "?" as *u8;
+        let mut is_extern_call: i32 = 0;
+        if fn_sym_raw != (0 as *u8) {
+            let fs = fn_sym_raw as *Sym;
+            if (*fs).is_extern != 0 {
+                is_extern_call = 1;
+                fn_name = (*fs).name;
+            } else if (*fs).module != (0 as *u8) {
+                // mangle "$mod__$name" via StringBuilder
+                let mut sb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
+                sb_init((*ir).arena, &sb);
+                sb_append_cstr((*ir).arena, &sb, (*fs).module as *u8);
+                sb_append_cstr((*ir).arena, &sb, "__" as *u8);
+                sb_append_cstr((*ir).arena, &sb, (*fs).name as *u8);
+                fn_name = sb_cstr((*ir).arena, &sb);
+            } else {
+                fn_name = (*fs).name;
+            }
+        }
+
+        // sret if return type is struct
+        let mut is_sret: i32 = 0;
+        let mut ret_slot: IRVal = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+        if (*n).type_ptr != (0 as *u8) {
+            let nt = (*n).type_ptr as *Type;
+            if (*nt).kind == KIND_STRUCT() {
+                is_sret = 1;
+                let rsize = type_size((*n).type_ptr as *Type) as i32;
+                let mut rsize2 = rsize;
+                if rsize2 < (4 as i32) { rsize2 = 4; }
+                ret_slot = ir_new_tmp(ir, QBE_L());
+                ir_emit_alloc(ir, ret_slot, rsize2);
+            }
+        }
+
+        // 取 param_types + nparams（fn_sym 是 fn 时）
+        let mut param_ts_raw: *u8 = 0 as *u8;
+        let mut nparams: i64 = 0 as i64;
+        if fn_sym_raw != (0 as *u8) {
+            let fs2 = fn_sym_raw as *Sym;
+            if (*fs2).type_ptr != (0 as *u8) {
+                let fst = (*fs2).type_ptr as *Type;
+                if (*fst).kind == KIND_FUNC() {
+                    param_ts_raw = (*fst).params;
+                    nparams = (*fst).nparams;
+                }
+            }
+        }
+
+        // args arena alloc（(nargs + extra) * IRVAL_SIZE）
+        let mut extra: i32 = 0;
+        if is_sret != 0 {
+            extra = 1 as i32;
+        } else {
+            extra = 0 as i32;
+        }
+        let mut args_arr: *u8 = 0 as *u8;
+        let total_n: i64 = (nargs as i64) + (extra as i64);
+        if total_n > (0 as i64) {
+            args_arr = arena_alloc((*ir).arena, total_n * IRVAL_SIZE());
+        }
+        if is_sret != 0 {
+            let slot_ptr = args_arr as *IRVal;
+            *slot_ptr = ret_slot;
+        }
+
+        let mut i: i64 = 0 as i64;
+        while i < nargs {
+            let arg_slot_node = ptr_add_u8(args_node, i * (8 as i64)) as **Node;
+            let arg_node = *arg_slot_node;
+            let mut arg_v = cg_expr(cg_raw, arg_node);
+            let arg_t = (*arg_node).type_ptr;
+            // struct arg → 拷贝到 stack slot
+            if arg_t != (0 as *u8) {
+                let at = arg_t as *Type;
+                if (*at).kind == KIND_STRUCT() {
+                    let asize = type_size(arg_t as *Type) as i32;
+                    let mut asize2 = asize;
+                    if asize2 < (4 as i32) { asize2 = 4; }
+                    let copy_slot = ir_new_tmp(ir, QBE_L());
+                    ir_emit_alloc(ir, copy_slot, asize2);
+                    cg_copy_struct(cg_raw, arg_t, copy_slot, arg_v);
+                    arg_v = copy_slot;
+                } else {
+                    // 隐式类型转换（cg_convert_arg）
+                    if param_ts_raw != (0 as *u8) && i < nparams {
+                        let pt_slot = ptr_add_u8(param_ts_raw, i * (8 as i64)) as **Type;
+                        let pt = *pt_slot as *Type;
+                        if pt != (0 as *Type) {
+                            arg_v = cg_convert_arg(cg_raw, arg_v, arg_t, pt as *u8);
+                        }
+                    }
+                }
+            }
+            let out_slot = ptr_add_u8(args_arr, ((extra as i64) + i) * IRVAL_SIZE()) as *IRVal;
+            *out_slot = arg_v;
+            i = i + (1 as i64);
+        }
+
+        if is_sret != 0 {
+            ir_emit_call_void(ir, fn_name, args_arr, ((nargs + (extra as i64)) as i32));
+            return ret_slot;
+        }
+        let mut qt: i32 = QBE_W();
+        if (*n).type_ptr != (0 as *u8) {
+            qt = qbe_type_of((*n).type_ptr);
+        }
+        let result = ir_new_tmp(ir, qt);
+        ir_emit_call(ir, result, fn_name, args_arr, (nargs as i32));
+        return result;
+    }
+
+    // ── NODE_QUALIFIED_CALL ──
+    // module::func(args) — sema 已设 resolved (Sym*)
+    if kind == NODE_QUALIFIED_CALL() {
+        let qd = node_qualified_call_data(n);
+        let fn_sym_raw = (*qd).resolved;
+        let args_node = (*qd).args;
+        let nargs = (*qd).nargs;
+
+        // mangle "$mod__$name" via StringBuilder
+        let mut fn_name: *u8 = "?" as *u8;
+        if fn_sym_raw != (0 as *u8) {
+            let fs = fn_sym_raw as *Sym;
+            if (*fs).module != (0 as *u8) {
+                let mut sb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
+                sb_init((*ir).arena, &sb);
+                sb_append_cstr((*ir).arena, &sb, (*fs).module as *u8);
+                sb_append_cstr((*ir).arena, &sb, "__" as *u8);
+                sb_append_cstr((*ir).arena, &sb, (*fs).name as *u8);
+                fn_name = sb_cstr((*ir).arena, &sb);
+            } else {
+                fn_name = (*fs).name;
+            }
+        }
+
+        // sret 同 NODE_CALL
+        let mut is_sret: i32 = 0;
+        let mut ret_slot: IRVal = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+        if (*n).type_ptr != (0 as *u8) {
+            let nt = (*n).type_ptr as *Type;
+            if (*nt).kind == KIND_STRUCT() {
+                is_sret = 1;
+                let rsize = type_size((*n).type_ptr as *Type) as i32;
+                let mut rsize2 = rsize;
+                if rsize2 < (4 as i32) { rsize2 = 4; }
+                ret_slot = ir_new_tmp(ir, QBE_L());
+                ir_emit_alloc(ir, ret_slot, rsize2);
+            }
+        }
+
+        let mut param_ts_raw: *u8 = 0 as *u8;
+        let mut nparams: i64 = 0 as i64;
+        if fn_sym_raw != (0 as *u8) {
+            let fs2 = fn_sym_raw as *Sym;
+            if (*fs2).type_ptr != (0 as *u8) {
+                let fst = (*fs2).type_ptr as *Type;
+                if (*fst).kind == KIND_FUNC() {
+                    param_ts_raw = (*fst).params;
+                    nparams = (*fst).nparams;
+                }
+            }
+        }
+
+        let mut extra: i32 = 0;
+        if is_sret != 0 {
+            extra = 1 as i32;
+        } else {
+            extra = 0 as i32;
+        }
+        let mut args_arr: *u8 = 0 as *u8;
+        let total_n: i64 = (nargs as i64) + (extra as i64);
+        if total_n > (0 as i64) {
+            args_arr = arena_alloc((*ir).arena, total_n * IRVAL_SIZE());
+        }
+        if is_sret != 0 {
+            let slot_ptr = args_arr as *IRVal;
+            *slot_ptr = ret_slot;
+        }
+
+        let mut i: i64 = 0 as i64;
+        while i < nargs {
+            let arg_slot_node = ptr_add_u8(args_node, i * (8 as i64)) as **Node;
+            let arg_node = *arg_slot_node;
+            let mut arg_v = cg_expr(cg_raw, arg_node);
+            let arg_t = (*arg_node).type_ptr;
+            if arg_t != (0 as *u8) {
+                let at = arg_t as *Type;
+                if (*at).kind == KIND_STRUCT() {
+                    let asize = type_size(arg_t as *Type) as i32;
+                    let mut asize2 = asize;
+                    if asize2 < (4 as i32) { asize2 = 4; }
+                    let copy_slot = ir_new_tmp(ir, QBE_L());
+                    ir_emit_alloc(ir, copy_slot, asize2);
+                    cg_copy_struct(cg_raw, arg_t, copy_slot, arg_v);
+                    arg_v = copy_slot;
+                } else {
+                    if param_ts_raw != (0 as *u8) && i < nparams {
+                        let pt_slot = ptr_add_u8(param_ts_raw, i * (8 as i64)) as **Type;
+                        let pt = *pt_slot as *Type;
+                        if pt != (0 as *Type) {
+                            arg_v = cg_convert_arg(cg_raw, arg_v, arg_t, pt as *u8);
+                        }
+                    }
+                }
+            }
+            let out_slot = ptr_add_u8(args_arr, ((extra as i64) + i) * IRVAL_SIZE()) as *IRVal;
+            *out_slot = arg_v;
+            i = i + (1 as i64);
+        }
+
+        if is_sret != 0 {
+            ir_emit_call_void(ir, fn_name, args_arr, ((nargs + (extra as i64)) as i32));
+            return ret_slot;
+        }
+        let mut qt: i32 = QBE_W();
+        if (*n).type_ptr != (0 as *u8) {
+            qt = qbe_type_of((*n).type_ptr);
+        }
+        let result = ir_new_tmp(ir, qt);
+        ir_emit_call(ir, result, fn_name, args_arr, (nargs as i32));
+        return result;
+    }
+
+    // ── NODE_IF ──
+    // if cond { then } [else { else }]
+    //
+    // v0 codegen bug 2 workaround: nested if-else 时 phi predecessor mismatch。
+    // 改走 store/load 模式：alloc result_slot, each branch store, merge load。
+    // trampoline (ep_block) 保留但 only for void-merge case（短跳 ep → merge 即可）。
+    // void if → 直接走 ep_block（不走 merge phi）
+    if kind == NODE_IF() {
+        let nid = node_if_data(n);
+        let cond_node = (*nid).cond as *Node;
+        let then_node = (*nid).then_body as *Node;
+        let else_node = (*nid).else_body as *Node;
+        let cond = cg_expr(cg_raw, cond_node);
+        let then_block = ir_new_block(ir, "then" as *u8);
+        let else_block = ir_new_block(ir, "else" as *u8);
+        let merge_block = ir_new_block(ir, "merge" as *u8);
+
+        // 决定返回类型（如果 void 就 skip result slot）
+        let mut is_void: i32 = 0;
+        let mut ret_qt: i32 = QBE_W();
+        if (*n).type_ptr != (0 as *u8) {
+            let nt = (*n).type_ptr as *Type;
+            if (*nt).kind == KIND_VOID() {
+                is_void = 1;
+            } else {
+                ret_qt = qbe_type_of((*n).type_ptr);
+            }
+        }
+
+        ir_emit_jnz(ir, cond, then_block, else_block);
+
+        // alloc result slot (only for non-void)
+        let result_slot = ir_new_tmp(ir, QBE_L());
+        if is_void == 0 {
+            ir_emit_alloc(ir, result_slot, 4 as i32);
+        }
+
+        // then
+        ir_emit_label(ir, then_block);
+        if is_void == 0 {
+            let then_v = cg_expr(cg_raw, then_node);
+            let _s1 = cg_emit_store_primitive(cg_raw, 0 as *u8, then_v, result_slot);
+        } else {
+            let _u1 = cg_expr(cg_raw, then_node);
+        }
+        ir_emit_jmp(ir, merge_block);
+
+        // else
+        ir_emit_label(ir, else_block);
+        if is_void == 0 {
+            if else_node != (0 as *Node) {
+                let else_v = cg_expr(cg_raw, else_node);
+                let _s2 = cg_emit_store_primitive(cg_raw, 0 as *u8, else_v, result_slot);
+            } else {
+                let zv = ir_new_tmp(ir, ret_qt);
+                ir_emit_copy(ir, zv, 0);
+                let _s2b = cg_emit_store_primitive(cg_raw, 0 as *u8, zv, result_slot);
+            }
+        } else {
+            if else_node != (0 as *Node) {
+                let _u2 = cg_expr(cg_raw, else_node);
+            }
+        }
+        ir_emit_jmp(ir, merge_block);
+
+        // merge
+        ir_emit_label(ir, merge_block);
+        if is_void == 0 {
+            let result = ir_new_tmp(ir, ret_qt);
+            ir_emit_load(cg_raw, result, 0 as *u8, result_slot);
+            return result;
+        }
+        return zero;
+    }
+
+    // ── NODE_WHILE ──
+    // while cond { body }
+    //   loop_start (label emit before cond)
+    //   cond eval → jnz loop_body, loop_end
+    //   loop_body:
+    //   body emit
+    //   jmp loop_start
+    //   loop_continues / loop_ends 推到 stack（loop_depth++）
+    if kind == NODE_WHILE() {
+        let nwd = node_while_data(n);
+        let cond_node = (*nwd).cond as *Node;
+        let body_node = (*nwd).body as *Node;
+        let loop_start = ir_new_block(ir, "loop_start" as *u8);
+        let loop_body = ir_new_block(ir, "loop_body" as *u8);
+        let loop_end = ir_new_block(ir, "loop_end" as *u8);
+        let loop_cont = ir_new_block(ir, "loop_cont" as *u8);
+
+        // push loop labels onto stack
+        let depth = (*cg).loop_depth;
+        let starts_ptr = (*cg).loop_starts as *IRVal;
+        let ends_ptr = (*cg).loop_ends as *IRVal;
+        let conts_ptr = (*cg).loop_continues as *IRVal;
+        *(ptr_add_u8(starts_ptr as *u8, (depth as i64) * (40 as i64)) as *IRVal) = loop_start;
+        *(ptr_add_u8(ends_ptr as *u8, (depth as i64) * (40 as i64)) as *IRVal) = loop_end;
+        *(ptr_add_u8(conts_ptr as *u8, (depth as i64) * (40 as i64)) as *IRVal) = loop_cont;
+        (*cg).loop_depth = depth + (1 as i32);
+
+        // start: emit label, eval cond
+        ir_emit_label(ir, loop_start);
+        let cond_v = cg_expr(cg_raw, cond_node);
+        ir_emit_jnz(ir, cond_v, loop_body, loop_end);
+
+        // body
+        ir_emit_label(ir, loop_body);
+        let _ = cg_expr(cg_raw, body_node);
+        ir_emit_jmp(ir, loop_start);
+
+        // end
+        ir_emit_label(ir, loop_end);
+        (*cg).loop_depth = depth;
+        return zero;
+    }
+
+    // ── NODE_STRUCT_LIT ──
+    // Type { field1: val1, field2: val2, ... }
+    // alloc stack slot + store 每个字段（field offset 通过 st.fields[] 查 name）
+    //
+    // 注意：NODE_STRUCT_LIT 作为 "let x = Type{...}" 右侧时（mutable/struct 用 is_stack
+    // 路径，见 NODE_LET）；本 case 是表达式位置（struct lit 自身已经返回 slot）
+    if kind == NODE_STRUCT_LIT() {
+        let sl = node_struct_lit_data(n);
+        if (*n).type_ptr == (0 as *u8) {
+            return zero;
+        }
+        let st = (*n).type_ptr as *Type;
+        if (*st).kind != KIND_STRUCT() {
+            return zero;
+        }
+        let size = type_size(st) as i32;
+        let mut size2 = size;
+        if size2 < (4 as i32) { size2 = 4; }
+        let slot = ir_new_tmp(ir, QBE_L());
+        ir_emit_alloc(ir, slot, size2);
+
+        let nfields = (*sl).nfields;
+        let fields_arr = (*sl).fields;
+        let mut i: i64 = 0 as i64;
+        while i < nfields {
+            let fi_entry = ptr_add_u8(fields_arr, i * NODE_FIELD_INIT_SIZE()) as *NodeFieldInit;
+            let fname = (*fi_entry).name;
+            let fval_node = (*fi_entry).value as *Node;
+            let fval = cg_expr(cg_raw, fval_node);
+
+            // 找 field offset by name
+            let mut offset: i64 = 0 as i64;
+            let mut j: i64 = 0 as i64;
+            while j < (*st).nfields {
+                let fdesc = ptr_add_u8((*st).fields, j * FIELD_DESC_SIZE()) as *u8;
+                let fname_str_ptr = fdesc as **u8;
+                let fname_str = *fname_str_ptr;
+                if strcmp(fname_str, fname as *u8) == 0 {
+                    let foff = ptr_add_u8(fdesc, 16 as i64) as *i64;
+                    offset = *foff;
+                    break;
+                }
+                j = j + (1 as i64);
+            }
+
+            // store value at slot + offset
+            let addr = ir_new_tmp(ir, QBE_L());
+            let off_val = ir_new_int(offset);
+            ir_emit_binary(ir, addr, "add" as *u8, slot, off_val);
+            cg_emit_store(cg_raw, (*fval_node).type_ptr, fval, addr);
+            i = i + (1 as i64);
+        }
+        return slot;
+    }
+
+    // ── NODE_ADDR_OF ──
+    // &expr → 返回 expr 的地址。要求目标 var 已分配 stack slot。
+    // codegen.jhyy 用 NODE_ADDR_OF 主要用于 `&buf` 模式（StringBuilder addr）。
+    if kind == NODE_ADDR_OF() {
+        let nad = node_addr_of_data(n);
+        let inner_node = (*nad).expr as *Node;
+        let inner_kind = (*inner_node).kind;
+        if inner_kind == NODE_IDENT() {
+            let id = node_ident_data(inner_node);
+            let loc_buf = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+            let _found4 = cg_find_local(cg_raw, (*id).sym, (loc_buf as *u8));
+            let loc = loc_buf;
+            let is_stack = cg_find_local_is_stack(cg_raw, (*id).sym);
+            if is_stack != 0 {
+                return loc;  // already address
+            }
+            // SSA value → alloc temp slot, store, return slot
+            let v = cg_expr(cg_raw, inner_node);
+            let slot = ir_new_tmp(ir, QBE_L());
+            ir_emit_alloc(ir, slot, 8 as i32);
+            let _ = cg_emit_store(cg_raw, (*inner_node).type_ptr, v, slot);
+            return slot;
+        }
+        return zero;
+    }
+
+    // ── NODE_CAST ──
+    // `x as T` → emit cast instruction. 简化版：默认走 QBE 隐式 copy（无操作）。
+    // 实际 QBE 类型转换需要 retype/cast：float→int 走 stosi/dtosi 等已在 cg_convert_arg。
+    // 这里保留为 noop（Phase-2 sprint 4 不要求完整 cast 实现）。
+    if kind == NODE_CAST() {
+        let ncd = node_cast_data(n);
+        let inner_node = (*ncd).expr as *Node;
+        return cg_expr(cg_raw, inner_node);
+    }
+
     // ── 未实现 case：返回 zero IRVal（commit 4 补全）──
     return zero;
 }
@@ -1055,9 +1720,290 @@ fn cg_stmt(cg_raw: *u8, n: *Node) -> i32 {
     return 1;
 }
 
-// 占位：commit 2 仅 emit 一行 marker。Pass A const data / Pass B function emit
-// 都在 commit 4 加。
+// ════════════════════════════════════════════════════
+// cg_emit_const_prim_data — emit a single primitive const data item
+// ════════════════════════════════════════════════════
+
+fn cg_emit_const_prim_data(ir: *IRBuf, e: *Node, t: *Type) -> i32 {
+    let qt = qbe_type_of(t as *u8);
+    let mut val: i64 = 0 as i64;
+    let ek = (*e).kind;
+    if ek == NODE_INT() {
+        let nd = node_int_data(e);
+        val = (*nd).value;
+    } else if ek == NODE_BOOL() {
+        let bd = node_bool_data(e);
+        if (*bd).value != 0 {
+            val = 1 as i64;
+        } else {
+            val = 0 as i64;
+        }
+    } else if ek == NODE_FLOAT() {
+        val = 0 as i64;
+    } else {
+        val = 0 as i64;
+    }
+    ir_emit_data_int(ir, "%c " as *u8, qt);
+    ir_emit_data_lld(ir, "%lld" as *u8, val);
+    return 1;
+}
+
+// ════════════════════════════════════════════════════
+// cg_emit_const_data_elem — recursive helper for Pass A
+// ════════════════════════════════════════════════════
+
+fn cg_emit_const_data_elem(ir: *IRBuf, e: *Node, t: *Type, first_ptr: *u8) -> i32 {
+    let first_slot = first_ptr as *i32;
+    if (*first_slot) == 0 {
+        ir_emit_data_str(ir, ", " as *u8);
+    }
+    if (*t).kind == KIND_STRUCT() {
+        let sl = node_struct_lit_data(e);
+        let mut si: i64 = 0 as i64;
+        while si < (*t).nfields {
+            if si > 0 {
+                ir_emit_data_str(ir, ", " as *u8);
+            }
+            let fdesc = ptr_add_u8((*t).fields, si * FIELD_DESC_SIZE()) as *u8;
+            let fdesc_t = fdesc as *FieldDesc;
+            let fname_sym = (*fdesc_t).name;
+            let mut fval: *Node = 0 as *Node;
+            let mut fj: i64 = 0 as i64;
+            while fj < (*sl).nfields {
+                let sf_entry_slot = ptr_add_u8((*sl).fields, fj * NODE_FIELD_INIT_SIZE()) as *NodeFieldInit;
+                let sf_name = (*sf_entry_slot).name;
+                if strcmp(sf_name, fname_sym as *u8) == 0 {
+                    fval = (*sf_entry_slot).value as *Node;
+                    break;
+                }
+                fj = fj + (1 as i64);
+            }
+            let ft_raw = (*fdesc_t).type_;
+            let ft = ft_raw as *Type;
+            if fval != (0 as *Node) {
+                cg_emit_const_prim_data(ir, fval, ft);
+            } else {
+                let ft_qt = qbe_type_of(ft_raw);
+                ir_emit_data_int(ir, "%c " as *u8, ft_qt);
+                ir_emit_data_lld(ir, "0" as *u8, 0 as i64);
+            }
+            si = si + (1 as i64);
+        }
+        (*first_slot) = 0 as i32;
+        return 1;
+    } else {
+        cg_emit_const_prim_data(ir, e, t);
+        (*first_slot) = 0 as i32;
+        return 1;
+    }
+}
+// ════════════════════════════════════════════════════
+// cg_func — emit 一整个函数定义（含 header / locals / body / ret）
+// ════════════════════════════════════════════════════
+
+// v1.0.0 阶段简化：sret 重置 cg.sret_slot（保持 jhyy 多遍编译稳定）；
+// 每个函数 arena_alloc 一组 loop label arrays（jhyy 不支持 fixed-size struct field）。
+
+// cg_body_returns：检查 body 是否以 return 结尾（用于 cg_func 不 emit ret）
+//
+// jhyy 无 forward decl → 必须 cg_func 之前定义。inline check 会触发 v0 codegen bug。
+fn cg_body_returns(body_node: *Node) -> i32 {
+    if body_node == (0 as *Node) {
+        return 0;
+    }
+    if (*body_node).kind == NODE_RETURN() {
+        return 1;
+    }
+    if (*body_node).kind == NODE_BLOCK() {
+        let bd = node_block_data(body_node);
+        if (*bd).nstmts > (0 as i64) {
+            let last_slot = ptr_add_u8((*bd).stmts, ((*bd).nstmts - (1 as i64)) * (8 as i64)) as **Node;
+            let last = *last_slot;
+            if (*last).kind == NODE_RETURN() {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+fn cg_func(cg_raw: *u8, n: *Node) -> i32 {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    let fd = node_func_decl_data(n);
+    if (*fd).is_extern != (0 as i32) {
+        return 1;
+    }
+    let fd_sym_raw = (*fd).sym;
+    if fd_sym_raw == (0 as *u8) {
+        return 0;
+    }
+    let fd_sym = fd_sym_raw as *Sym;
+    let mut ret_type: *u8 = 0 as *u8;
+    if (*fd_sym).type_ptr != (0 as *u8) {
+        let fst = (*fd_sym).type_ptr as *Type;
+        if (*fst).kind == KIND_FUNC() {
+            ret_type = (*fst).ret;
+        }
+    }
+    let mut is_sret: i32 = 0;
+    let mut ret_qt: i32 = 0 as i32;
+    if ret_type != (0 as *u8) {
+        let rt = ret_type as *Type;
+        if (*rt).kind == KIND_STRUCT() {
+            is_sret = 1;
+        } else {
+            ret_qt = qbe_type_of(ret_type);
+        }
+    }
+
+    // emit function header
+    ir_emit_str(ir, "export function " as *u8);
+    if ret_qt != (0 as i32) {
+        ir_emit_int(ir, "%c " as *u8, ret_qt);
+    }
+    emit_mangled_name(ir, fd_sym_raw);
+    ir_emit_str(ir, "(" as *u8);
+    let mut first: i32 = 1;
+    if is_sret != 0 {
+        ir_emit_str(ir, "l %ret" as *u8);
+        first = 0;
+    }
+    let nparams = (*fd).nparams;
+    let mut pi: i64 = 0 as i64;
+    while pi < nparams {
+        if first == 0 {
+            ir_emit_str(ir, ", " as *u8);
+        }
+        first = 0;
+        let param_slot = ptr_add_u8((*fd).params, pi * NODE_FUNC_DECL_PARAM_SIZE()) as *NodeFuncDeclParam;
+        let p_sym_raw = (*param_slot).sym;
+        let p_sym = p_sym_raw as *Sym;
+        let mut pt: *u8 = 0 as *u8;
+        if (*p_sym).type_ptr != (0 as *u8) {
+            pt = (*p_sym).type_ptr;
+        }
+        if pt != (0 as *u8) {
+            let pt_t = pt as *Type;
+            if (*pt_t).kind == KIND_STRUCT() {
+                ir_emit_str(ir, "l %" as *u8);
+            } else {
+                ir_emit_int(ir, "%c %" as *u8, qbe_type_of(pt));
+            }
+        } else {
+            ir_emit_str(ir, "w %" as *u8);
+        }
+        ir_emit_str(ir, (*p_sym).name);
+        pi = pi + (1 as i64);
+    }
+    ir_emit_str(ir, ") {\n" as *u8);
+
+    // emit start label
+    let start_block = ir_new_block(ir, "start" as *u8);
+    ir_emit_label(ir, start_block);
+
+    // reset cg (per-function)
+    (*cg).current_ret_type = ret_type;
+    (*cg).has_sret = is_sret;
+    (*cg).loop_depth = 0;
+    (*cg).nlocals = 0;
+
+    // arena alloc loop label arrays
+    (*cg).loop_starts = arena_alloc((*ir).arena, 32 as i64 * IRVAL_SIZE());
+    (*cg).loop_ends = arena_alloc((*ir).arena, 32 as i64 * IRVAL_SIZE());
+    (*cg).loop_continues = arena_alloc((*ir).arena, 32 as i64 * IRVAL_SIZE());
+
+    // register sret slot if needed
+    if is_sret != 0 {
+        let sr = ir_new_tmp(ir, QBE_L());
+        (*cg).sret_slot = sr;
+        ir_emit_str(ir, "    %t" as *u8);
+        ir_emit_int(ir, "%d" as *u8, sr.id);
+        ir_emit_str(ir, " =l copy %ret\n" as *u8);
+    }
+
+    // register params as locals
+    pi = 0 as i64;
+    while pi < nparams {
+        let param_slot2 = ptr_add_u8((*fd).params, pi * NODE_FUNC_DECL_PARAM_SIZE()) as *NodeFuncDeclParam;
+        let p2_sym_raw = (*param_slot2).sym;
+        let p2_sym = p2_sym_raw as *Sym;
+        let mut pt2: *u8 = 0 as *u8;
+        if (*p2_sym).type_ptr != (0 as *u8) {
+            pt2 = (*p2_sym).type_ptr;
+        }
+        let mut pq: i32 = QBE_W();
+        if pt2 != (0 as *u8) {
+            let pt2_t = pt2 as *Type;
+            if (*pt2_t).kind == KIND_STRUCT() {
+                pq = QBE_L();
+            } else {
+                pq = qbe_type_of(pt2);
+            }
+        }
+        let pv = ir_new_tmp(ir, pq);
+        ir_emit_str(ir, "    %t" as *u8);
+        ir_emit_int(ir, "%d" as *u8, pv.id);
+        ir_emit_str(ir, " =" as *u8);
+        ir_emit_int(ir, "%c" as *u8, pq);
+        ir_emit_str(ir, " copy %" as *u8);
+        ir_emit_str(ir, (*p2_sym).name);
+        ir_emit_str(ir, "\n" as *u8);
+        cg_add_local(cg_raw, p2_sym_raw, pv, 0);
+        pi = pi + (1 as i64);
+    }
+
+    // body
+    let body_val = cg_expr(cg_raw, (*fd).body as *Node);
+
+    // body_returns check
+    let body_returns: i32 = cg_body_returns((*fd).body as *Node);
+
+    if body_returns == 0 {
+        if is_sret != 0 {
+            let _ = cg_copy_struct(cg_raw, ret_type, (*cg).sret_slot, body_val);
+            let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+            ir_emit_ret(ir, v);
+        } else if ret_qt != (0 as i32) {
+            ir_emit_ret(ir, body_val);
+        } else {
+            let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+            ir_emit_ret(ir, v);
+        }
+    }
+
+    ir_emit_str(ir, "}\n\n" as *u8);
+    return 1;
+}
+
+// ════════════════════════════════════════════════════
+// cg_module — Pass A const data + Pass B function emit
+// ════════════════════════════════════════════════════
+
 fn cg_module(ir: *IRBuf, module: *Node) -> i32 {
-    ir_emit_str(ir, "# codegen.jhyy commit 2 stub\n" as *u8);
+    if module == (0 as *Node) {
+        return 0;
+    }
+    let md = node_module_data(module);
+    let ndeccls = (*md).ndeccls;
+
+    // alloc CGContext + locals arena block（一次性；每 func 进 cg_func reset nlocals）
+    let cg_buf = arena_alloc((*ir).arena, CGCONTEXT_SIZE());
+    let cg_ptr = cg_buf as *CGContext;
+    (*cg_ptr).ir = ir as *u8;
+    let locals_buf = arena_alloc((*ir).arena, (MAX_LOCALS() as i64) * LOCALENTRY_SIZE());
+    (*cg_ptr).locals = locals_buf;
+    let cg_raw: *u8 = cg_ptr as *u8;
+
+    // Pass B: 逐个 func decl dispatch → cg_func
+    let mut di: i64 = 0 as i64;
+    while di < ndeccls {
+        let d_slot = ptr_add_u8((*md).decls, di * (8 as i64)) as **Node;
+        let d_node = *d_slot;
+        if (*d_node).kind == NODE_FUNC_DECL() {
+            cg_func(cg_raw, d_node);
+        }
+        di = di + (1 as i64);
+    }
     return 1;
 }
