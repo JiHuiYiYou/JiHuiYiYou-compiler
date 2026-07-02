@@ -41,6 +41,14 @@ void ir_init(IRBuf *ir, Arena *arena) {
     ir->data_buf = NULL;
     ir->data_len = 0;
     ir->data_cap = 0;
+    ir->cur_block.kind = IRVAL_BLOCK;
+    ir->cur_block.id = 0;
+    ir->cur_block.name = "@start";
+    ir->cur_block.qbe_type = 0;
+}
+
+IRVal ir_current_block(IRBuf *ir) {
+    return ir->cur_block;
 }
 
 /* emit to data buffer (deferred definitions) */
@@ -117,6 +125,7 @@ void ir_emit(IRBuf *ir, const char *fmt, ...) {
 /* ── emit helpers (using %tN for temps to avoid QBE numeric issues) ── */
 
 void ir_emit_label(IRBuf *ir, IRVal block) {
+    ir->cur_block = block;
     ir_emit(ir, "@%s\n", block.name);
 }
 

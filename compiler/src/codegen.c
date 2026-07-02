@@ -622,54 +622,46 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         ir_emit_label(cg->ir, then_block);
         IRVal then_val = cg_expr(cg, d->then_body);
         int then_returns = body_terminates(d->then_body);
-        if (!then_returns) ir_emit_jmp(cg->ir, merge_block);
-
-        /* Pre-allocate trampoline block for nested-if else_body (else if chain).
-           Created BEFORE the recursive cg_expr so the inner if's merge block
-           can reach it via jmp ep; label ep; jmp outer_merge. */
-        int nested_else_if = d->else_body && d->else_body->kind == NODE_IF;
-        IRVal nested_phi_block;
-        if (nested_else_if) {
-            nested_phi_block = ir_new_block(cg->ir, "ep");
+        /* current block after recursion may be a nested merge block (if then_body
+           contains its own if/else). Use it as phi predecessor so the value is
+           actually defined there. */
+        IRVal then_phi_pred = then_block;
+        if (!then_returns) {
+            then_phi_pred = ir_current_block(cg->ir);
+            ir_emit_jmp(cg->ir, merge_block);
         }
 
-        /* else */
+        /* else — no trampoline. After recursive cg_expr(else_body), current block
+           is whatever block the recursion ended in (else_block for non-nested
+           fallthrough, inner_merge for nested else-if). Emit jmp merge directly
+           so phi predecessor matches the block that actually defines else_val. */
         ir_emit_label(cg->ir, else_block);
+        IRVal else_val = {0};
+        int else_returns = 0;
+        IRVal else_phi_pred = else_block;
         if (d->else_body) {
-            IRVal else_val = cg_expr(cg, d->else_body);
-            int else_returns = body_terminates(d->else_body);
-            IRVal else_phi_block = else_block;  /* default: use else_block as phi predecessor */
-            if (nested_else_if) {
-                /* Inner if's branches converge at inner_merge, then fall through
-                   into the trampoline. Use the pre-allocated ep as predecessor. */
-                else_phi_block = nested_phi_block;
-                ir_emit_jmp(cg->ir, else_phi_block);
-                ir_emit_label(cg->ir, else_phi_block);
-                ir_emit_jmp(cg->ir, merge_block);
-            } else if (!else_returns) {
-                /* Use a trampoline block so phi always references a direct predecessor
-                   instead of else_block (which may contain non-terminator fallthrough). */
-                else_phi_block = ir_new_block(cg->ir, "ep");
-                ir_emit_jmp(cg->ir, else_phi_block);
-                ir_emit_label(cg->ir, else_phi_block);
-                ir_emit_jmp(cg->ir, merge_block);
-            }
-            /* phi */
-            ir_emit_label(cg->ir, merge_block);
-            /* Sprint 5A.3: skip phi emission entirely when if expr is void */
-            if (n->type && n->type->kind == KIND_VOID) {
-                #undef body_terminates
-                IRVal v = {0};
-                return v;
-            }
-            if (!then_returns && !else_returns) {
-                IRVal result = ir_new_tmp(cg->ir, then_val.qbe_type);
-                ir_emit_phi(cg->ir, result, 2, then_block, then_val, else_phi_block, else_val);
-                return result;
-            }
+            else_val = cg_expr(cg, d->else_body);
+            else_returns = body_terminates(d->else_body);
+            /* current block is now wherever recursion ended (inner_merge for nested).
+               Use it as phi predecessor so the value is actually defined there. */
+            IRVal cur = ir_current_block(cg->ir);
+            else_phi_pred = cur;
+            if (!else_returns) ir_emit_jmp(cg->ir, merge_block);
         } else {
             ir_emit_jmp(cg->ir, merge_block);
-            ir_emit_label(cg->ir, merge_block);
+        }
+        /* phi */
+        ir_emit_label(cg->ir, merge_block);
+        /* Sprint 5A.3: skip phi emission entirely when if expr is void */
+        if (n->type && n->type->kind == KIND_VOID) {
+            #undef body_terminates
+            IRVal v = {0};
+            return v;
+        }
+        if (d->else_body && !then_returns && !else_returns) {
+            IRVal result = ir_new_tmp(cg->ir, then_val.qbe_type);
+            ir_emit_phi(cg->ir, result, 2, then_phi_pred, then_val, else_phi_pred, else_val);
+            return result;
         }
         #undef body_terminates
 

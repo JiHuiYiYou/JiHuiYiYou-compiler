@@ -33,6 +33,8 @@ typedef struct {
     int next_tmp;
     int next_block;
     int next_data;
+    /* Current block for emission (most recently label-emitted block) */
+    IRVal cur_block;
     /* Deferred data definitions (emitted before function code) */
     char *data_buf;
     size_t data_len;
@@ -44,6 +46,7 @@ void ir_init(IRBuf *ir, struct Arena *arena);
 IRVal ir_new_tmp(IRBuf *ir, char qbe_type);
 IRVal ir_new_block(IRBuf *ir, const char *hint);
 IRVal ir_new_data_str(IRBuf *ir, const char *str, size_t len);
+IRVal ir_current_block(IRBuf *ir);
 
 /* emit instructions */
 void ir_emit(IRBuf *ir, const char *fmt, ...);
