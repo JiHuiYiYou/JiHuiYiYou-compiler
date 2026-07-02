@@ -35,10 +35,8 @@ void arena_destroy(Arena *a) {
 }
 
 int main(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
 #ifdef _WIN32
     SetConsoleOutputCP(65001); /* UTF-8 console output */
 #endif
-    return main_jhyy();
+    return main_jhyy(argc, argv);
 }

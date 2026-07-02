@@ -21,7 +21,7 @@ type SemaContext = struct {
     loop_depth:        i32,
 }
 
-fn main_jhyy() -> i32 {
+fn main_jhyy(_argc: i32, _argv: *u8) -> i32 {
     jh_fputs_stderr("start\n" as *u8);
 
     let mut a: Arena = Arena {

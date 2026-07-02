@@ -10,7 +10,7 @@ import ast;
 
 extern fn printf(fmt: *u8, val: i32) -> i32;
 
-fn main_jhyy() -> i32 {
+fn main_jhyy(_argc: i32, _argv: *u8) -> i32 {
     printf("D0\n", 0);
 
     // ──── 准备 arena + symtab + TypeArena ────

@@ -36,7 +36,7 @@ fn check_token(t: *Token, expected_kind: i32, expected_text: *u8) -> i32 {
     return 1;
 }
 
-fn main_jhyy() -> i32 {
+fn main_jhyy(_argc: i32, _argv: *u8) -> i32 {
     printf("L0\n", 0);
 
     // ──── 测试 1: 基础 let x = 42; ────

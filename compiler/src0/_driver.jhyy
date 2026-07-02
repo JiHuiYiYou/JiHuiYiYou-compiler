@@ -6,7 +6,7 @@ import util;
 extern fn printf(fmt: *u8, val: i32) -> i32;
 extern fn exit(code: i32);
 
-fn main_jhyy() -> i32 {
+fn main_jhyy(_argc: i32, _argv: *u8) -> i32 {
     printf("A\n", 0);
     let mut a: Arena = Arena {
         start: 0 as *u8,

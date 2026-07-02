@@ -1156,7 +1156,7 @@ fn test_expr_string(lex: *Lexer, p: *Parser, a: *Arena) -> i32 {
     return 0;
 }
 
-fn main_jhyy() -> i32 {
+fn main_jhyy(_argc: i32, _argv: *u8) -> i32 {
     printf("T0\n", 0);
 
     let mut a: Arena = Arena {

@@ -17,6 +17,6 @@ void  arena_reset(Arena *a);
 void  arena_destroy(Arena *a);
 
 /* user program entry point */
-extern int main_jhyy(void);
+extern int main_jhyy(int argc, char **argv);
 
 #endif

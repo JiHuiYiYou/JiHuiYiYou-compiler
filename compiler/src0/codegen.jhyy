@@ -1918,7 +1918,10 @@ fn cg_func(cg_raw: *u8, n: *Node) -> i32 {
             if (*pt_t).kind == KIND_STRUCT() {
                 ir_emit_str(ir, "l %" as *u8);
             } else {
-                ir_emit_int(ir, "%c %" as *u8, qbe_type_of(pt));
+                // v0 codegen bug workaround: 不能用 "%c %"（sprintf 把末尾 literal % 吃掉）
+                // 拆成 2 个 emit：先 "w " + "%" + name
+                ir_emit_int(ir, "%c " as *u8, qbe_type_of(pt));
+                ir_emit_str(ir, "%" as *u8);
             }
         } else {
             ir_emit_str(ir, "w %" as *u8);

@@ -1,0 +1,498 @@
+// main.jhyy — JHYY 翻译自 compiler/src/main.c
+// v1.0.0 sprint 5 commit 2, 2026-07-02
+//
+// 翻译要点：
+//   - C main(int argc, char **argv) → jhyy main_jhyy(argc, argv)
+//     runtime.c 改 main 转发 argc/argv（v0.8 commit 2）
+//   - CLI dispatch（compile/build/run/dump）跟 C 版保持一致
+//   - cmd_build 走 lex → parse → sema → codegen → 写 .il
+//   - cmd_compile 在 build 之上加 QBE + gcc 链接（绝对路径，per v1.0.0 L1 § 134）
+//   - resolve_imports (main.c:241) 暂不翻译 — 单文件能用，多文件待 commit 2b/2c
+//   - path_to_win (/) 转换：jhyy 端 inline 写
+//   - 已知差异：cmd_dump 是 stub（commit 2c 加 ast_dump.jhyy）
+//
+// 本 commit 范围（v0.8 commit 2a）：
+//   - main_jhyy dispatch
+//   - read_file: fopen("rb") + fseek/ftell + malloc + fread
+//   - cmd_build: lex → parse → sema → codegen → 写 .il
+//   - cmd_compile: cmd_build + QBE + gcc link
+//   - cmd_run: cmd_compile + system(exe)
+//   - cmd_dump: stub (return 1)
+//   - 暂不支持 multi-file
+
+import ffi;
+import util;
+import arena;
+import ast;
+import types;
+import symtab;
+import lexer;
+import parser;
+import sema;
+import ir;
+import codegen;
+
+// ═══ Local externs (ffi.jhyy 已声明 malloc/free/fopen/fread/fwrite/fclose/
+//    strlen/strcmp/system/jh_fputs_stderr/jh_fopen_wb 等；这里只补 main.jhyy
+//    额外需要的) ═══
+
+extern fn fseek(fp: *u8, off: i64, whence: i32) -> i32;
+extern fn ftell(fp: *u8) -> i64;
+extern fn strrchr(s: *u8, c: i32) -> *u8;
+extern fn sprintf(buf: *u8, fmt: *u8, val: i32) -> i32;
+
+// ═══ Constants ═══
+
+// fseek whence: SEEK_SET=0, SEEK_CUR=1, SEEK_END=2 (POSIX/Windows)
+fn SEEK_END_VAL() -> i32 { return 2 as i32; }
+
+// QBE + gcc 绝对路径（per v1.0.0 L1 § 134 决策）
+fn QBE_PATH() -> *u8 { return "C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/qbe/qbe.exe" as *u8; }
+fn GCC_PATH() -> *u8 { return "C:/msys64/ucrt64/bin/gcc.exe" as *u8; }
+fn RUNTIME_C() -> *u8 { return "C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/runtime/runtime.c" as *u8; }
+fn HELPERS_C() -> *u8 { return "C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/src0/jhyy_helpers.c" as *u8; }
+
+// ═══ Helpers ═══
+
+// path_to_win: / → \ 转换（Windows cmd.exe 需要）
+// 注：直接 walk 直到 '\0'，不用 strlen
+fn path_to_win(p: *u8) -> i32 {
+    let mut i: i64 = 0 as i64;
+    let n = strlen(p);
+    while i < n {
+        let c_p = (p as i64 + i) as *u8;
+        let c_pi = c_p as *i32;
+        if (*c_pi) == (47 as i32) {  // '/' = 47
+            (*c_pi) = (92 as i32);   // '\\' = 92
+        }
+        i = i + (1 as i64);
+    }
+    return 0 as i32;
+}
+
+// read_file: 读整个文件到 malloc'd buffer
+fn read_file(path: *u8) -> *u8 {
+    let fp = fopen(path, "rb" as *u8);
+    if fp == (0 as *u8) {
+        jh_fputs_stderr("cannot open file\n" as *u8);
+        return 0 as *u8;
+    }
+    fseek(fp, 0 as i64, SEEK_END_VAL());
+    let sz = ftell(fp);
+    fseek(fp, 0 as i64, 0 as i32);  // SEEK_SET = 0
+    let buf = malloc(sz + (1 as i64));
+    if buf == (0 as *u8) {
+        fclose(fp);
+        return 0 as *u8;
+    }
+    fread(buf, 1 as i64, sz, fp);
+    // null-terminate
+    let last = (buf as i64 + sz) as *u8;
+    let last_i = last as *i32;
+    (*last_i) = 0 as i32;
+    fclose(fp);
+    return buf;
+}
+
+// store_byte_i32: 写 i32 值到 *u8 位置（按 1 byte 存）
+fn store_byte_i32(p: *u8, val: i32) -> i32 {
+    let pi = p as *i32;
+    (*pi) = val;
+    return 0 as i32;
+}
+
+// load_byte_i32: 读 *u8 位置到 i32
+fn load_byte_i32(p: *u8) -> i32 {
+    let pi = p as *i32;
+    return (*pi);
+}
+
+// str_concat: 拷贝 src 到 dst，返回写入字节数（不含 NUL）
+fn str_copy(dst: *u8, src: *u8) -> i64 {
+    let n = strlen(src);
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let s_p = (src as i64 + i) as *u8;
+        let d_p = (dst as i64 + i) as *u8;
+        let s_pi = s_p as *i32;
+        let d_pi = d_p as *i32;
+        (*d_pi) = (*s_pi);
+        i = i + (1 as i64);
+    }
+    return n;
+}
+
+// str_concat_at: 把 src append 到 dst+offset，返回新 offset
+fn str_concat_at(dst: *u8, off: i64, src: *u8) -> i64 {
+    let n = strlen(src);
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let s_p = (src as i64 + i) as *u8;
+        let d_p = (dst as i64 + off + i) as *u8;
+        let s_pi = s_p as *i32;
+        let d_pi = d_p as *i32;
+        (*d_pi) = (*s_pi);
+        i = i + (1 as i64);
+    }
+    return off + n;
+}
+
+// build_il: 完整 lex → parse → sema → codegen → 写 .il
+// 返回 0 成功，1 失败
+fn build_il(input: *u8, output: *u8) -> i32 {
+    let source = read_file(input);
+    if source == (0 as *u8) {
+        return 1 as i32;
+    }
+
+    // ── Arena ──
+    let mut arena: Arena = Arena {
+        start: 0 as *u8,
+        cur: 0 as *u8,
+        end: 0 as *u8,
+        blocks: 0 as *u8,
+        def_size: 0 as i64,
+    };
+    arena_init(&arena, (16 as i64) * (1024 as i64) * (1024 as i64));
+
+    // ── TypeArena ──
+    let mut ta: TypeArena = TypeArena {
+        arena:  0 as *Arena,
+        inited: 0 as i32,
+        i8_ty:  0 as *u8, i16_ty: 0 as *u8, i32_ty: 0 as *u8, i64_ty: 0 as *u8,
+        u8_ty:  0 as *u8, u16_ty: 0 as *u8, u32_ty: 0 as *u8, u64_ty: 0 as *u8,
+        f32_ty: 0 as *u8, f64_ty: 0 as *u8, bool_ty: 0 as *u8, void_ty: 0 as *u8,
+    };
+    ta.arena = &arena;
+    types_init_arena(&ta);
+
+    // ── Lexer ──
+    let mut lexer: Lexer = Lexer {
+        source:       0 as *u8,
+        current:      0 as *u8,
+        filename:     0 as *u8,
+        line:         0 as i32,
+        col:          0 as i32,
+        peek_kind:    0 as i32,
+        peek_start:   0 as *u8,
+        peek_len:     0 as i64,
+        peek_lf:      0 as *u8,
+        peek_ll:      0 as i32,
+        peek_lc:      0 as i32,
+        has_peek:     0 as i32,
+        error_count:  0 as i32,
+    };
+    lexer_init(&lexer, source, input);
+
+    // ── Parser ──
+    let mut parser_v: Parser = Parser {
+        lexer:         0 as *Lexer,
+        arena:         0 as *Arena,
+        prev_kind:     0 as i32,
+        prev_start:    0 as *u8,
+        prev_length:   0 as i64,
+        prev_lf:       0 as *u8,
+        prev_ll:       0 as i32,
+        prev_lc:       0 as i32,
+        global_scope:  0 as *u8,
+        current_scope: 0 as *u8,
+        scope_depth:   0 as i32,
+        error_count:   0 as i32,
+    };
+    parser_init(&parser_v, &lexer, &arena);
+
+    let ast_node = parser_parse(&parser_v);
+    if parser_v.error_count > (0 as i32) {
+        jh_fputs_stderr("parse errors\n" as *u8);
+        free(source);
+        return 1 as i32;
+    }
+
+    // skip resolve_imports (commit 2b/2c 加)
+
+    // ── Sema ──
+    let mut sema: SemaContext = SemaContext {
+        arena:            0 as *Arena,
+        module:           0 as *Node,
+        global_scope:     0 as *u8,
+        current_scope:    0 as *u8,
+        locals:           0 as *u8,
+        nlocals:          0 as i64,
+        scope_depth:      0 as i32,
+        error_count:      0 as i32,
+        current_ret_type: 0 as *u8,
+        loop_depth:       0 as i32,
+    };
+    sema_init(&sema, &arena, &ta);
+    if sema_check(&sema, &ta, ast_node) > (0 as i32) {
+        jh_fputs_stderr("semantic errors\n" as *u8);
+        free(source);
+        return 1 as i32;
+    }
+
+    // ── IR + Codegen ──
+    let mut ir: IRBuf = IRBuf {
+        arena:      0 as *Arena,
+        sb:         0 as *StringBuilder,
+        next_tmp:   0 as i32,
+        next_block: 0 as i32,
+        next_data:  0 as i32,
+        data_sb:    0 as *StringBuilder,
+        data_used:  0 as i32,
+    };
+    ir_init(&ir, &arena);
+    cg_module(&ir, ast_node);
+    ir_flush_data(&ir);
+
+    // ── 写 <output>.il ──
+    let il_path_buf = malloc(1024 as i64);
+    let il_path = il_path_buf;
+    let n_o = strlen(output);
+    str_copy(il_path, output);
+    let ext_il = ".il" as *u8;
+    let off1 = str_concat_at(il_path, n_o, ext_il);
+    let nul1 = (il_path as i64 + off1) as *u8;
+    let _s1 = store_byte_i32(nul1, 0 as i32);
+
+    let ilf = jh_fopen_wb(il_path);
+    if ilf == (0 as *u8) {
+        jh_fputs_stderr("cannot write il\n" as *u8);
+        free(source);
+        free(il_path_buf);
+        return 1 as i32;
+    }
+    // fwrite((*ir.sb).buf, 1, (*ir.sb).len, ilf)
+    let sb_inner = ir.sb;
+    let buf_p = (*sb_inner).buf;
+    let buf_len = (*sb_inner).len;
+    let _w = fwrite(buf_p, (1 as i64), buf_len, ilf);
+    fclose(ilf);
+
+    free(il_path_buf);
+    free(source);
+    arena_free(&arena);
+    return 0 as i32;
+}
+
+// run_qbe: invoke QBE on .il → .s
+fn run_qbe(il_path: *u8, asm_path: *u8) -> i32 {
+    let cmd_buf = malloc(4096 as i64);
+    let qbe = QBE_PATH();
+    let mut pos: i64 = 0 as i64;
+    pos = str_concat_at(cmd_buf, pos, qbe);
+    let sep1 = " -t amd64_win -o " as *u8;
+    pos = str_concat_at(cmd_buf, pos, sep1);
+    pos = str_concat_at(cmd_buf, pos, asm_path);
+    let sep2 = " " as *u8;
+    pos = str_concat_at(cmd_buf, pos, sep2);
+    pos = str_concat_at(cmd_buf, pos, il_path);
+    let nul_p = (cmd_buf as i64 + pos) as *u8;
+    let _sq1 = store_byte_i32(nul_p, 0 as i32);
+
+    path_to_win(il_path);
+    path_to_win(asm_path);
+    let r = system(cmd_buf);
+    free(cmd_buf);
+    if r != (0 as i32) {
+        jh_fputs_stderr("QBE failed\n" as *u8);
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
+// link_with_gcc: gcc ASM_PATH RUNTIME_C HELPERS_C -o EXE_PATH -lm
+fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
+    let cmd_buf = malloc(4096 as i64);
+    let gcc = GCC_PATH();
+    let mut pos: i64 = 0 as i64;
+    pos = str_concat_at(cmd_buf, pos, gcc);
+    let sp = " " as *u8;
+    pos = str_concat_at(cmd_buf, pos, sp);
+    pos = str_concat_at(cmd_buf, pos, asm_path);
+    pos = str_concat_at(cmd_buf, pos, sp);
+    pos = str_concat_at(cmd_buf, pos, RUNTIME_C());
+    pos = str_concat_at(cmd_buf, pos, sp);
+    pos = str_concat_at(cmd_buf, pos, HELPERS_C());
+    let oflag = " -o " as *u8;
+    pos = str_concat_at(cmd_buf, pos, oflag);
+    pos = str_concat_at(cmd_buf, pos, exe_path);
+    let lmflag = " -lm" as *u8;
+    pos = str_concat_at(cmd_buf, pos, lmflag);
+    let nul_p = (cmd_buf as i64 + pos) as *u8;
+    let _sq2 = store_byte_i32(nul_p, 0 as i32);
+
+    path_to_win(exe_path);
+    let r = system(cmd_buf);
+    free(cmd_buf);
+    if r != (0 as i32) {
+        jh_fputs_stderr("gcc link failed\n" as *u8);
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
+// derive_output_name: input "path/foo.jhyy" → "path/foo" (strip .jhyy)
+fn derive_output_name(input: *u8, out_buf: *u8) -> i32 {
+    let n = strlen(input);
+    str_copy(out_buf, input);
+    let nul = (out_buf as i64 + n) as *u8;
+    let _sn = store_byte_i32(nul, 0 as i32);
+    let dot = strrchr(out_buf, (46 as i32));  // '.' = 46
+    if dot != (0 as *u8) {
+        let _sd = store_byte_i32(dot, 0 as i32);
+    }
+    return 0 as i32;
+}
+
+// cmd_build: lex → parse → sema → codegen → 写 .il
+fn cmd_build(argc: i32, argv: *u8) -> i32 {
+    if argc < (1 as i32) {
+        jh_fputs_stderr("usage: jhyy build <file.jhyy> [-o output]\n" as *u8);
+        return 1 as i32;
+    }
+    // argv is *u8 → first arg is at *(argv as **u8)
+    let argv_arr = argv as **u8;
+    let input = (*argv_arr);
+    let out_buf = malloc(1024 as i64);
+    derive_output_name(input, out_buf);
+    let r = build_il(input, out_buf);
+    free(out_buf);
+    return r;
+}
+
+// cmd_compile: build + QBE + gcc
+fn cmd_compile(argc: i32, argv: *u8) -> i32 {
+    if argc < (1 as i32) {
+        jh_fputs_stderr("usage: jhyy compile <file.jhyy> [-o output]\n" as *u8);
+        return 1 as i32;
+    }
+    let argv_arr = argv as **u8;
+    let input = (*argv_arr);
+
+    let out_buf = malloc(1024 as i64);
+    derive_output_name(input, out_buf);
+    // 1. build .il
+    if build_il(input, out_buf) != (0 as i32) {
+        free(out_buf);
+        return 1 as i32;
+    }
+    // 2. .il → .s
+    let il_path = malloc(1024 as i64);
+    let asm_path = malloc(1024 as i64);
+    let exe_path = malloc(1024 as i64);
+    let n_o = strlen(out_buf);
+    str_copy(il_path, out_buf);
+    let off1 = str_concat_at(il_path, n_o, ".il" as *u8);
+    let nul1 = (il_path as i64 + off1) as *u8;
+    let _scl1 = store_byte_i32(nul1, 0 as i32);
+    str_copy(asm_path, out_buf);
+    let off2 = str_concat_at(asm_path, n_o, ".s" as *u8);
+    let nul2 = (asm_path as i64 + off2) as *u8;
+    let _scl2 = store_byte_i32(nul2, 0 as i32);
+    str_copy(exe_path, out_buf);
+    let off3 = str_concat_at(exe_path, n_o, ".exe" as *u8);
+    let nul3 = (exe_path as i64 + off3) as *u8;
+    let _scl3 = store_byte_i32(nul3, 0 as i32);
+
+    let r1 = run_qbe(il_path, asm_path);
+    if r1 != (0 as i32) {
+        free(out_buf); free(il_path); free(asm_path); free(exe_path);
+        return 1 as i32;
+    }
+    let r2 = link_with_gcc(asm_path, exe_path);
+    free(out_buf); free(il_path); free(asm_path); free(exe_path);
+    if r2 != (0 as i32) {
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
+// cmd_run: cmd_compile + system(exe)
+fn cmd_run(argc: i32, argv: *u8) -> i32 {
+    if argc < (1 as i32) {
+        jh_fputs_stderr("usage: jhyy run <file.jhyy>\n" as *u8);
+        return 1 as i32;
+    }
+    let argv_arr = argv as **u8;
+    let input = (*argv_arr);
+
+    // tmp output: "input" minus ext + "_run"
+    let out_buf = malloc(1024 as i64);
+    str_copy(out_buf, input);
+    let dot = strrchr(out_buf, (46 as i32));
+    if dot != (0 as *u8) {
+        let _sdr = store_byte_i32(dot, 0 as i32);
+    }
+    let nl = strlen(out_buf);
+    let off1 = str_concat_at(out_buf, nl, "_run" as *u8);
+    let nul1 = (out_buf as i64 + off1) as *u8;
+    let _snr1 = store_byte_i32(nul1, 0 as i32);
+
+    // build argv for cmd_compile: {input}
+    let arg_arr = malloc(8 as i64);
+    let arg_arr_pp = arg_arr as **u8;
+    (*arg_arr_pp) = input;
+
+    let r = cmd_compile(1 as i32, arg_arr);
+    free(arg_arr);
+    if r != (0 as i32) {
+        free(out_buf);
+        return r;
+    }
+    // system("out.exe")
+    let exe_path = malloc(1024 as i64);
+    let no = strlen(out_buf);
+    str_copy(exe_path, out_buf);
+    let off2 = str_concat_at(exe_path, no, ".exe" as *u8);
+    let nul2 = (exe_path as i64 + off2) as *u8;
+    let _snr2 = store_byte_i32(nul2, 0 as i32);
+    path_to_win(exe_path);
+    let rc = system(exe_path);
+    free(exe_path);
+    free(out_buf);
+    return rc;
+}
+
+// cmd_dump: stub for now
+fn cmd_dump(argc: i32, argv: *u8) -> i32 {
+    jh_fputs_stderr("cmd_dump not yet implemented (sprint 5 commit 2c)\n" as *u8);
+    return 1 as i32;
+}
+
+// ═══ Entry point ═══
+
+fn main_jhyy(argc: i32, argv: *u8) -> i32 {
+    if argc < (2 as i32) {
+        printf("jhyy compiler v0.8 (self-hosted)\n" as *u8, 0);
+        printf("usage: jhyy <command> [args]\n" as *u8, 0);
+        printf("  compile <file.jhyy> [-o output]\n" as *u8, 0);
+        printf("  build   <file.jhyy> [-o output]\n" as *u8, 0);
+        printf("  run     <file.jhyy>\n" as *u8, 0);
+        printf("  dump    <file.jhyy>\n" as *u8, 0);
+        return 0 as i32;
+    }
+    // argv is *u8 (passed from C runtime). Each element is *u8, 8 bytes.
+    // argv[0] = program path, argv[1] = command, argv[2...] = args
+    let argv_arr = argv as **u8;
+    let cmd_p = (argv as i64 + (8 as i64)) as *u8;
+    let cmd_arr = cmd_p as **u8;
+    let cmd = (*cmd_arr);
+    let rest_argc = argc - (2 as i32);
+    let rest_argv_p = (argv as i64 + (16 as i64)) as *u8;
+    let rest_argv = rest_argv_p;
+
+    if strcmp(cmd, "compile" as *u8) == (0 as i32) {
+        return cmd_compile(rest_argc, rest_argv);
+    }
+    if strcmp(cmd, "build" as *u8) == (0 as i32) {
+        return cmd_build(rest_argc, rest_argv);
+    }
+    if strcmp(cmd, "run" as *u8) == (0 as i32) {
+        return cmd_run(rest_argc, rest_argv);
+    }
+    if strcmp(cmd, "dump" as *u8) == (0 as i32) {
+        return cmd_dump(rest_argc, rest_argv);
+    }
+    jh_fputs_stderr("unknown command\n" as *u8);
+    return 1 as i32;
+}
