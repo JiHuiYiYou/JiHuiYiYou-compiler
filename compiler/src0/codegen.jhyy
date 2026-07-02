@@ -142,7 +142,7 @@ type NodeFieldInit = struct {
 
 // jhyy size:
 //   ir(*u8 8) + locals(*u8 8) + nlocals(i32 4 + pad 4) +
-//   current_ret_type(*u8 8) + sret_slot(IRVal 40) +
+//   current_ret_type(*u8 8) + sret_slot_id(i64 8) +
 //   has_sret(i32 4 + pad 4) +
 //   loop_starts(IRVal[32] = 32*40=1280) +
 //   loop_ends(IRVal[32] = 1280) +
@@ -163,7 +163,12 @@ type CGContext = struct {
     locals:           *u8,        // *LocalEntry 数组（arena alloc，MAX_LOCALS * LOCALENTRY_SIZE）
     nlocals:          i32,
     current_ret_type: *u8,        // *Type
-    sret_slot:        IRVal,
+    // v0 codegen bug workaround: sret_slot 改为 i64 (just temp number) 而不是 IRVal
+    //   struct — 避免 (*cg).sret_slot = X 这种 5-field struct value assignment
+    //   在 v0 jhyy compiler 里 emit 错的 struct-to-buffer copy (bug 8: loadw
+    //   kind 当成 src base 算 next field offset). id 字段 = temp number = 唯一
+    //   真正用得到的字段.
+    sret_slot_id:     i64,
     has_sret:         i32,
     loop_depth:       i32,
     loop_starts:      *u8,        // *IRVal[32]
@@ -171,8 +176,12 @@ type CGContext = struct {
     loop_continues:   *u8,        // *IRVal[32]
 }
 
-// CGContext size = 9 字段: 5*i64 + IRVal(40) + 3*i64 = 40 + 40 + 24 = 104
-fn CGCONTEXT_SIZE() -> i64 { return 104 as i64; }
+// CGContext size (after sret_slot → sret_slot_id i64 workaround): 9 字段 =
+//   5*i64 (ir, locals, nlocals_pad, current_ret_type, sret_slot_id) = 40 +
+//   has_sret(i32) + loop_depth(i32) = 8 +
+//   3*i64 (loop_starts, loop_ends, loop_continues) = 24
+//   = 72 (was 104 before workaround; original had 5*8 + 40 + 3*8 = 104)
+fn CGCONTEXT_SIZE() -> i64 { return 72 as i64; }
 
 // ════════════════════════════════════════════════════
 // cg_add_local / cg_find_local
@@ -184,10 +193,27 @@ fn cg_add_local(cg_raw: *u8, sym: *u8, val: IRVal, is_stack: i32) -> i32 {
     if idx >= MAX_LOCALS() {
         return 0;
     }
-    let entry_ptr = ptr_add_u8((*cg).locals, (idx as i64) * LOCALENTRY_SIZE()) as *LocalEntry;
-    (*entry_ptr).sym = sym;
-    (*entry_ptr).value = val;
-    (*entry_ptr).is_stack = is_stack;
+    let entry_ptr = ptr_add_u8((*cg).locals, (idx as i64) * LOCALENTRY_SIZE()) as *u8;
+    // v0 codegen bug workaround: 避免 (*entry_ptr).value = val 这种 struct value
+    //   field assignment (bug 8: multi-field struct 走 cg_copy_struct 时会 emit
+    //   错 sret body). 改走 ptr_add_u8 + 字段级 store.
+    // IRVal layout: kind(0) + id(4) + ival(8) + name(16) + qbe_type(24) = 32, padded to 40
+    // LocalEntry: sym(0..8) + value(8..48) + is_stack(48..52), padded to 56
+    let sym_p = entry_ptr as **u8;
+    *sym_p = sym;
+    let val_u8 = ptr_add_u8(entry_ptr, 8 as i64);
+    let kind_p = val_u8 as *i32;
+    *kind_p = val.kind;
+    let id_p = ptr_add_u8(val_u8, 4 as i64) as *i32;
+    *id_p = val.id;
+    let ival_p = ptr_add_u8(val_u8, 8 as i64) as *i64;
+    *ival_p = val.ival;
+    let name_p = ptr_add_u8(val_u8, 16 as i64) as **u8;
+    *name_p = val.name;
+    let qt_p = ptr_add_u8(val_u8, 24 as i64) as *i32;
+    *qt_p = val.qbe_type;
+    let stack_p = ptr_add_u8(entry_ptr, 48 as i64) as *i32;
+    *stack_p = is_stack;
     (*cg).nlocals = idx + (1 as i32);
     return 1;
 }
@@ -408,7 +434,8 @@ fn cg_copy_struct(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) ->
         // fields[i]: name(*u8 8) + type(*u8 8) + offset(i64 8) = 24 bytes
         // FieldDesc layout 假设（types.jhyy 应有定义，TODO 验证）
         let fdesc_ptr = ptr_add_u8(fields, i * (24 as i64)) as *u8;
-        let ftype = fdesc_ptr as *Type;
+        // bug fix: ftype 在 offset 8, 不是 0 (offset 0 是 name *u8)
+        let ftype = ptr_add_u8(fdesc_ptr, 8 as i64) as *Type;
         let foffset_ptr = ptr_add_u8(fdesc_ptr, 16 as i64) as *i64;
         let offset = *foffset_ptr;
 
@@ -810,7 +837,10 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             }
         } else {
             // immutable 标量：keep as SSA
-            cg_add_local(cg_raw, (*d).sym, init_v, 0);
+            // 重新算 init_v（C 端 codegen.c 这里重算一份；jhyy 的 if/else 是
+            // 兄弟 block，init_v 在 else 里不可见，必须重 declare 才能拿到正确 SSA）
+            let init_v2 = cg_expr(cg_raw, init_node);
+            cg_add_local(cg_raw, (*d).sym, init_v2, 0);
         }
         return zero;
     }
@@ -1916,7 +1946,7 @@ fn cg_func(cg_raw: *u8, n: *Node) -> i32 {
     // register sret slot if needed
     if is_sret != 0 {
         let sr = ir_new_tmp(ir, QBE_L());
-        (*cg).sret_slot = sr;
+        (*cg).sret_slot_id = sr.id as i64;
         ir_emit_str(ir, "    %t" as *u8);
         ir_emit_int(ir, "%d" as *u8, sr.id);
         ir_emit_str(ir, " =l copy %ret\n" as *u8);
@@ -1961,7 +1991,10 @@ fn cg_func(cg_raw: *u8, n: *Node) -> i32 {
 
     if body_returns == 0 {
         if is_sret != 0 {
-            let _ = cg_copy_struct(cg_raw, ret_type, (*cg).sret_slot, body_val);
+            // 用 IRVal literal (struct 构造) 包 sret_slot_id, 避免读
+            // (*cg).sret_slot 触发 bug 8 struct-to-buffer copy
+            let sret_addr = IRVal { kind: 0, id: (*cg).sret_slot_id as i32, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+            let _ = cg_copy_struct(cg_raw, ret_type, sret_addr, body_val);
             let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
             ir_emit_ret(ir, v);
         } else if ret_qt != (0 as i32) {

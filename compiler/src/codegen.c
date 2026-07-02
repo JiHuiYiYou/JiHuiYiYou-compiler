@@ -219,6 +219,7 @@ static IRVal cg_convert_arg(CGContext *cg, IRVal arg, Type *src_t, Type *dst_t) 
         conv = (src_qt == 'l') ? "ultof" : "uwtof";
     else if (src_qt == 's' && dst_qt == 'd') conv = "exts";
     else if (src_qt == 'd' && dst_qt == 's') conv = "truncd";
+    else if (src_qt == 'w' && dst_qt == 'l') conv = "extsw";   /* v0.8 bug 11: i32→i64 sign-extend */
     if (!conv) return arg;
     IRVal result = ir_new_tmp(cg->ir, dst_qt);
     ir_emit(cg->ir, "    %%t%d =%c %s %%t%d\n",
