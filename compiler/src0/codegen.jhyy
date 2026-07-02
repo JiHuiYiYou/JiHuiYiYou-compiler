@@ -231,8 +231,12 @@ fn cg_find_local(cg_raw: *u8, sym: *u8, out_buf: *u8) -> i32 {
     let mut i: i32 = 0 as i32;
     let n = (*cg).nlocals;
     while i < n {
-        let entry_ptr = ptr_add_u8((*cg).locals, (i as i64) * LOCALENTRY_SIZE()) as *LocalEntry;
-        if (*entry_ptr).sym == sym {
+        // v0 codegen bug 10 workaround: 避免 (*entry_ptr).sym 这种 struct field
+        //   access（jhyy codegen 在 nested struct + 32-bit field 上会算错 offset）。
+        //   改走 ptr_add_u8 + scalar deref：entry 0..8 是 sym *u8 字段。
+        let entry_ptr = ptr_add_u8((*cg).locals, (i as i64) * LOCALENTRY_SIZE());
+        let entry_sym_p = entry_ptr as **u8;
+        if *entry_sym_p == sym {
             // IRVal layout: kind(i32) + id(i32) + ival(i64) + name(*u8) + qbe_type(i32)
             // offsets: 0 / 4 / 8 / 16 / 24
             let value_u8 = ptr_add_u8(entry_ptr as *u8, 8 as i64);
@@ -281,9 +285,13 @@ fn cg_find_local_is_stack(cg_raw: *u8, sym: *u8) -> i32 {
     let mut i: i32 = 0 as i32;
     let n = (*cg).nlocals;
     while i < n {
-        let entry_ptr = ptr_add_u8((*cg).locals, (i as i64) * LOCALENTRY_SIZE()) as *LocalEntry;
-        if (*entry_ptr).sym == sym {
-            return (*entry_ptr).is_stack;
+        // v0 codegen bug 10 workaround: 同 cg_find_local
+        let entry_ptr = ptr_add_u8((*cg).locals, (i as i64) * LOCALENTRY_SIZE());
+        let entry_sym_p = entry_ptr as **u8;
+        if *entry_sym_p == sym {
+            // is_stack 字段在 LocalEntry 偏移 48（见 cg_add_local 注释）
+            let is_stack_p = ptr_add_u8(entry_ptr, 48 as i64) as *i32;
+            return *is_stack_p;
         }
         i = i + (1 as i32);
     }
@@ -693,9 +701,24 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             }
         }
         let is_stack = cg_find_local_is_stack(cg_raw, sym);
-        let loc_buf = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-        let _found = cg_find_local(cg_raw, sym, (loc_buf as *u8));
-        let loc = loc_buf;
+        // v0 codegen bug workaround: 不要在 caller 栈上 declare IRVal 然后 cast
+        //   `(loc_buf as *u8)` 取地址 — jhyy codegen 对 IRVal struct value 做
+        //   as-pointer 时会 emit 错的 loadw/loadl 链。改在 arena 里 alloc 一个
+        //   已知 buffer，把 sym IRVal 写进去再 field-level read。
+        let loc_buf_u8 = arena_alloc((*ir).arena, IRVAL_SIZE());
+        cg_find_local(cg_raw, sym, loc_buf_u8);
+        let loc_kind_p = loc_buf_u8 as *i32;
+        let loc_id_p = ptr_add_u8(loc_buf_u8, 4 as i64) as *i32;
+        let loc_ival_p = ptr_add_u8(loc_buf_u8, 8 as i64) as *i64;
+        let loc_name_p = ptr_add_u8(loc_buf_u8, 16 as i64) as **u8;
+        let loc_qt_p = ptr_add_u8(loc_buf_u8, 24 as i64) as *i32;
+        let loc = IRVal {
+            kind: *loc_kind_p,
+            id: *loc_id_p,
+            ival: *loc_ival_p,
+            name: *loc_name_p,
+            qbe_type: *loc_qt_p,
+        };
         if is_stack != (0 as i32) {
             /* structs/arrays/slices always manipulated via address */
             if (*n).type_ptr != (0 as *u8) {

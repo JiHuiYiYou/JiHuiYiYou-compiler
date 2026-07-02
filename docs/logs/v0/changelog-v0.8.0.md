@@ -28,6 +28,39 @@ v0.7.0 之后（7A enum first-class + 7B const struct array），v0.8.0 转向 *
 
 **`compiler/src0/_driver*.jhyy` (12 个 driver)**：签名 `fn main_jhyy() -> i32` 改 `fn main_jhyy(_argc: i32, _argv: *u8) -> i32`（runtime 现在带 argc/argv 转发）。
 
+## commit 3（pending）：修 jhyy_v1 自举回归
+
+**目标**：让 `jhyy_v1.exe`（自举版）能编译更多 tests，缩小与 `jhyy_0`（C 版）的差距。
+
+**Bug 15（lexer.jhyy `lookup_keyword` length 错配）**：
+
+- 症状：所有 `as` cast 编译报 CERR（"unexpected token ident"）— `as` 被识别为 ident 而非 TOKEN_AS
+- 根因：`as`（2 字符）放在 `len == 3` 分支用 `strncmp(name, "as", 3)` —— strncmp 读越界不会匹配
+- 同类 bug：`sizeof`（6 字符）放 `len == 5` 分支；`alignof`（7 字符）放 `len == 6` 分支
+- Fix：把 `as` 移到 `len == 2` 分支用 strncmp length 2；新增 `len == 6` 分支给 `sizeof`；新增 `len == 7` 分支给 `alignof`
+- 影响：单 fix 直接让 5 个 CERR 测试从 reject → 可能 pass
+
+**Bug 16（codegen.jhyy `cg_find_local` out_buf cast segfault）**：
+
+- 症状：所有 `let x = 42; x`（immutable scalar local + ident ref）触发 0xC0000005 segfault
+- 根因：caller 模式 `let loc_buf = IRVal { ... }; cg_find_local(..., (loc_buf as *u8))` —— jhyy codegen 对 caller-stack IRVal struct value 做 `as *u8` 时 emit 错的 loadw 链，访问未初始化内存
+- Fix：caller 改用 `arena_alloc(IRVAL_SIZE())` 拿到已知 buffer，函数内 write 进去，caller 端 field-level read 回 IRVal struct value
+- 影响：单 fix 让 19 个 AV 测试从 segfault → 进展到下一阶段（但 18 个撞 STK 栈溢出）
+
+**当前 jhyy_v1 regress 状态**：
+
+| 阶段 | OK | AV | STK | CERR | WRX | NORUN |
+|------|----|----|-----|------|-----|-------|
+| 修 bug 15 前 | 0 | 20 | 11 | 12 | 0 | 4 |
+| 修 bug 15 后 | 0 | 27 | 9  | 7  | 0 | 4 |
+| 修 bug 16 后 | 0 | 8  | 25 | 9  | 0 | 5 |
+
+**剩余 8 个 AV / 25 个 STK / 9 个 CERR**：
+
+- 9 个 CERR 全部是 jhyy parser 翻译层缺功能（expression-form if/match / const arrays / import）—— parser enhancement 工作，不是简单 bug fix
+- 8 个 AV + 25 个 STK 推测都是 jhyy codegen 翻译层缺功能（如 struct field、array、slice、loop 渲染缺失）—— 需要逐个深入查
+- 单 sprint 内无法全部修完；记录在案，sprint 5+ 逐个推进
+
 ## 验证
 
 | 步骤 | 状态 |
