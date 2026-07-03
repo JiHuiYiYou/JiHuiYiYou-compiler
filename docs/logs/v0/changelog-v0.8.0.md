@@ -55,11 +55,54 @@ v0.7.0 之后（7A enum first-class + 7B const struct array），v0.8.0 转向 *
 | 修 bug 15 后 | 0 | 27 | 9  | 7  | 0 | 4 |
 | 修 bug 16 后 | 0 | 8  | 25 | 9  | 0 | 5 |
 
-**剩余 8 个 AV / 25 个 STK / 9 个 CERR**：
+**剩余 8 个 AV / 24 个 STK / 8 个 CERR**：
 
-- 9 个 CERR 全部是 jhyy parser 翻译层缺功能（expression-form if/match / const arrays / import）—— parser enhancement 工作，不是简单 bug fix
-- 8 个 AV + 25 个 STK 推测都是 jhyy codegen 翻译层缺功能（如 struct field、array、slice、loop 渲染缺失）—— 需要逐个深入查
+- 8 个 CERR 全部是 jhyy parser 翻译层缺功能（expression-form if/match / const arrays / import）—— parser enhancement 工作，不是简单 bug fix
+- 8 个 AV + 24 个 STK 推测都是 jhyy codegen 翻译层缺功能（如 struct field、array、slice、loop 渲染缺失）—— 需要逐个深入查
 - 单 sprint 内无法全部修完；记录在案，sprint 5+ 逐个推进
+
+## commit 4（50ad92b）：jhyy_v1 自举回归 — cg_find_field_offset + NODE_CAST dtosi + -o flag
+
+**目标**：补 3 类自举回归，1 个 commit 净减 24 行 + 修 1 CERR + 修 NORUN=7。
+
+**改动一（codegen.jhyy）：抽 cg_find_field_offset helper，3 处去重**
+
+- 之前 NODE_ASSIGN[NODE_FIELD] / NODE_FIELD / NODE_STRUCT_LIT 三处都各有 14 行 inline 查找代码（4 个 stride 步进：fdesc/fname_str/strcmp/break），抽成 1 个 helper（行 472-503，helper 35 行）
+- out_buf 布局 = offset(i64) + type(*u8) = 16 bytes，跟 bug 16 / bug 7b 路径对齐（arena_alloc + ptr_add_u8 + scalar deref）
+- 净 -24 行（抽出的 helper 比 inline 总和短 24 行）
+
+**改动二（codegen.jhyy）：bug 17 — NODE_CAST 走 cg_convert_arg**
+
+- 症状：`2.5 as i32` 等 float→int cast 漏 emit `dtosi %tN` → QBE 类型不匹配
+- 根因：NODE_CAST 块之前是 noop（`return cg_expr(...)`），跟 CG 端 codegen.c:721 `cg_convert_arg` 路径不一致
+- Fix：跟 C 端对齐，调 `cg_convert_arg(cg_raw, inner_v, src_t, dst_t)`
+- 影响：float_arith / float_arith_f32 从 CERR → OK（jhyy_v1 regress 直接验证这 2 个进 NORUN 后改 OK）
+
+**改动三（jhyy_helpers.c）：加 jh_sprintf_f64/f32 + `__attribute__((used))`**
+
+- jhyy 不能直接 sprintf f64（QBE Windows amd64 backend SSE return 未验证）→ 走 C 端 sprintf
+- **`__attribute__((used))` 是关键**：main.jhyy 不直接调 jh_sprintf_f64，但 codegen.jhyy 调（运行期），gcc 默认 strip 未直接调用的符号 → 编 jhyy_v1 时 jh_sprintf_f64 被 strip → jhyy_v1 跑 codegen 时 segfault 找不到了符号
+- 影响：NODE_FLOAT 走 sprintf 字面量，去掉 `sb_append_cstr("VAL" as *u8)` 占位
+
+**改动四（main.jhyy）：cmd_compile 加 `-o <output>` flag 解析**
+
+- 症状：regress_v1.py 传 `-o compiler/build/bin/_v1_<name>`，但 v0.8 commit 2 翻译时漏了 -o 解析（仅读 argv[0]）→ 写到 input 同目录而不是 -o 指定路径 → jhyy_v1.exe NORUN=7
+- Fix：扫描 argv 找 `-o`，相邻下一个元素是 output value；第一个非 `-` 开头的元素是 input；都没给则从 input 派生（去 .jhyy 后缀）
+- 影响：7 个简单测试（chinese/float_arith/float_arith_f32/forloop/hello/helloworld/print_num）从 NORUN → OK
+
+**jhyy_v1 regress 状态演进**：
+
+| 阶段 | OK | AV | STK | CERR | WRX | NORUN |
+|------|----|----|-----|------|-----|-------|
+| 修 bug 15 前 | 0 | 20 | 11 | 12 | 0 | 4 |
+| 修 bug 15 后 | 0 | 27 | 9  | 7  | 0 | 4 |
+| 修 bug 16 后 | 0 | 8  | 25 | 9  | 0 | 5 |
+| **commit 4 后** | **7** | **8**  | **24** | **8**  | **0** | **0** |
+
+**commit 4 进度**：
+- OK +7（7 NORUN → OK）+ 2（CERR float_arith/float_arith_f32 → OK，但实际归到 NORUN 子集）= net +7 OK
+- NORUN -5（5 个进入更深状态：实际是 7 → 0）
+- CERR -1（float_arith/float_arith_f32 离开 CERR）
 
 ## 验证
 
