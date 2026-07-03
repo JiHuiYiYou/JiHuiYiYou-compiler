@@ -127,6 +127,24 @@ v0.7.0 之后（7A enum first-class + 7B const struct array），v0.8.0 转向 *
 
 ```
 ✅ v0.8 commit 1: 修 3 个自举过程发现的 codegen bug   (1b86277, 2026-07-02)
-→ v0.8 commit 2: 翻译 main.c → main.jhyy + bug 14    (本文档)
-→ v0.8 commit 3: Stage 1 byte-equal 验证              (后续 sprint)
+✅ v0.8 commit 2: 翻译 main.c → main.jhyy + bug 14    (b93925f, 2026-07-02)
+✅ v0.8 commit 3: 修 jhyy_v1 自举回归                (990cc6c, 2026-07-03)
+✅ v0.8 commit 4: 3 类 fix + regress 推进 7 OK       (50ad92b + 760c7c2 changelog, 2026-07-03)
+→ v0.8 commit 5+: Phase A (parser 翻译层 8 CERR) + Phase B (codegen 翻译层 8 AV + 24 STK)
 ```
+
+## Phase A/B 计划（commit 4 后剩余工作）
+
+修完后理论 OK 总数从 7 推到 47 (假设 Phase A + B 全过)：
+
+| 阶段 | 范围 | 文件 | OK gain |
+|------|------|------|---------|
+| Phase A-1 | if-expr（bug2_if_phi + bug3_void_if）| parser.jhyy: parse_primary + parse_expr | +2 → -2 CERR |
+| Phase A-2 | match-expr（dungeon_game + match）| parser.jhyy: parse_primary | +2 → -2 CERR |
+| Phase A-3 | const_array（const_array + const_struct_array）| parser.jhyy: parse_decl + parse_primary | +2 → -2 CERR |
+| Phase A-4 | import（import_test + namespace_dup）| main.jhyy: resolve_imports | +2 → -2 CERR |
+| Phase B-1 | 8 AV 逐个诊断 codegen 路径 | codegen.jhyy: cg_expr 各 case | +8 → -8 AV |
+| Phase B-2 | 24 STK 逐个诊断 codegen 路径 | codegen.jhyy: cg_expr 各 case | +24 → -24 STK |
+| **总计** | | | **0 → 47 OK** |
+
+修完之后 `regress_v1.py` 跟 `regress.py` (C 端) 结果应当高度一致 → **M4 真自举闭环**（v1.0 目标）。
