@@ -360,20 +360,55 @@ fn cmd_build(argc: i32, argv: *u8) -> i32 {
     return r;
 }
 
-// cmd_compile: build + QBE + gcc
+// cmd_compile: build + QBE + gcc。支持 `-o <output>` flag（v0.8 commit 4 补；
+// regress_v1.py 传 `-o` 写 regress 结果，但 v0.8 commit 2 翻译时漏了 -o 解析
+// → regress_v1.py NORUN=7）
 fn cmd_compile(argc: i32, argv: *u8) -> i32 {
     if argc < (1 as i32) {
         jh_fputs_stderr("usage: jhyy compile <file.jhyy> [-o output]\n" as *u8);
         return 1 as i32;
     }
-    let argv_arr = argv as **u8;
-    let input = (*argv_arr);
 
-    let out_buf = malloc(1024 as i64);
-    derive_output_name(input, out_buf);
+    /* parse argv: 找 -o flag + 第一个非 - 开头的文件。jhyy 端 argv 是 *u8
+     * （实质 **u8 cast），每个元素 8 字节。避免 bug 9 (&&/|| phi) 用 nested if。 */
+    let mut input: *u8 = 0 as *u8;
+    let mut user_out: *u8 = 0 as *u8;
+    let mut i: i32 = 0 as i32;
+    while i < argc {
+        let i64_i = i as i64;
+        let arg_p = ptr_add_u8(argv, i64_i * (8 as i64)) as **u8;
+        let arg = (*arg_p);
+        if strcmp(arg, "-o" as *u8) == (0 as i32) {
+            let next_i = i + (1 as i32);
+            if next_i < argc {
+                let next_i64 = next_i as i64;
+                let out_p = ptr_add_u8(argv, next_i64 * (8 as i64)) as **u8;
+                user_out = (*out_p);
+                i = next_i;
+            }
+        } else {
+            if input == (0 as *u8) {
+                input = arg;
+            }
+        }
+        i = i + (1 as i32);
+    }
+
+    if input == (0 as *u8) {
+        jh_fputs_stderr("compile: no input file\n" as *u8);
+        return 1 as i32;
+    }
+
+    /* 默认从 input 派生 output 名（去 .jhyy 后缀） */
+    let derived = malloc(1024 as i64);
+    derive_output_name(input, derived);
+    let mut out_buf: *u8 = derived;
+    if user_out != (0 as *u8) {
+        out_buf = user_out;
+    }
     // 1. build .il
     if build_il(input, out_buf) != (0 as i32) {
-        free(out_buf);
+        if derived != (0 as *u8) { free(derived); }
         return 1 as i32;
     }
     // 2. .il → .s
@@ -396,11 +431,13 @@ fn cmd_compile(argc: i32, argv: *u8) -> i32 {
 
     let r1 = run_qbe(il_path, asm_path);
     if r1 != (0 as i32) {
-        free(out_buf); free(il_path); free(asm_path); free(exe_path);
+        if derived != (0 as *u8) { free(derived); }
+        free(il_path); free(asm_path); free(exe_path);
         return 1 as i32;
     }
     let r2 = link_with_gcc(asm_path, exe_path);
-    free(out_buf); free(il_path); free(asm_path); free(exe_path);
+    if derived != (0 as *u8) { free(derived); }
+    free(il_path); free(asm_path); free(exe_path);
     if r2 != (0 as i32) {
         return 1 as i32;
     }

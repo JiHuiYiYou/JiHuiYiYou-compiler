@@ -49,6 +49,8 @@ import lexer;  // TOKEN_* 常量（commit 2 用 TOKEN_MINUS/BANG/TILDE）
 // ════════════════════════════════════════════════════
 
 extern fn jh_fputs_stderr(s: *u8) -> i32;
+extern fn jh_sprintf_f64(buf: *u8, val: f64) -> i32;
+extern fn jh_sprintf_f32(buf: *u8, val: f64) -> i32;
 
 // fprintf 重定向：v0 codegen 用 fprintf(stderr, ...) 写 warning。jhyy 走
 // jh_fputs_stderr 单字符串参数风格 → caller 用 StringBuilder 拼好单字符串再传
@@ -469,6 +471,33 @@ fn cg_copy_struct(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) ->
     return 1;
 }
 
+// cg_find_field_offset：full helper
+fn cg_find_field_offset(st_raw: *u8, field_name: *u8, out_buf: *u8) -> i32 {
+    if st_raw == (0 as *u8) {
+        return 0;
+    }
+    let st = st_raw as *Type;
+    if (*st).kind != KIND_STRUCT() {
+        return 0;
+    }
+    let mut j: i64 = 0 as i64;
+    while j < (*st).nfields {
+        let fdesc = ptr_add_u8((*st).fields, j * FIELD_DESC_SIZE()) as *u8;
+        let fname_str_ptr = fdesc as **u8;
+        let fname_str = *fname_str_ptr;
+        if strcmp(fname_str, field_name) == 0 {
+            let foff = ptr_add_u8(fdesc, 16 as i64) as *i64;
+            let out_off = out_buf as *i64;
+            *out_off = *foff;
+            let out_type = ptr_add_u8(out_buf, 8 as i64) as **u8;
+            *out_type = ptr_add_u8(fdesc, 8 as i64) as *u8;
+            return 1;
+        }
+        j = j + (1 as i64);
+    }
+    return 0;
+}
+
 // cg_emit_store：dispatcher。struct 走 cg_copy_struct 字段级拷贝；
 // 标量走 cg_emit_store_primitive。jhyy 无 forward decl → 必须 cg_copy_struct
 // 先于 cg_emit_store 定义。
@@ -640,14 +669,16 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             /* NaN */
             sb_append_cstr((*ir).arena, &buf, "nan" as *u8);
         } else {
-            /* QBE 用 d_ 前缀，调用 jh_sprintf_f64 包装（C helper 把 double → ASCII
-             * 到 StringBuilder 缓冲）。但 jhyy 无变参 → 走 sprintf 单参数不够。
-             * workaround：jhyy emit 直接给 val 是 hardcoded 字面量（f64 literal
-             * 编译期常量），不通用。Stage 1 byte-equal 验证时如果不一致再补。*/
-            /* 占位：emit "VAL"（f64 double 字面量，让 QBE 解析 — 实际 QBE 不
-             * 支持，需要补 C helper）*/
-            /* TODO commit 3：补 jh_sprintf_f64(buf: *u8, val: f64) C helper */
-            sb_append_cstr((*ir).arena, &buf, "VAL" as *u8);
+            /* 调 jh_sprintf_f64/f32 C helper（sprint 5 commit 4 加）把 f64 字面量
+             * 格式化到 StringBuilder buf。jhyy 不能 sprintf f64（QBE Windows amd64
+             * backend SSE return 未验证），走 C 端 sprintf。 */
+            let fmt_buf_u8 = arena_alloc((*ir).arena, 64 as i64);
+            if qt == QBE_S() {
+                jh_sprintf_f32(fmt_buf_u8, val);
+            } else {
+                jh_sprintf_f64(fmt_buf_u8, val);
+            }
+            sb_append_cstr((*ir).arena, &buf, fmt_buf_u8);
         }
         let v = ir_new_tmp(ir, qt);
         ir_emit_str(ir, "    %t" as *u8);
@@ -980,23 +1011,11 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             }
             if struct_type_raw != (0 as *u8) {
                 let base = cg_expr(cg_raw, df_expr_node);
-                let st = struct_type_raw as *Type;
-                // find field offset
-                let mut offset: i64 = 0 as i64;
-                let mut field_type_raw: *u8 = 0 as *u8;
-                let mut j: i64 = 0 as i64;
-                while j < (*st).nfields {
-                    let fdesc = ptr_add_u8((*st).fields, j * (24 as i64)) as *u8;
-                    let fname_str_ptr = fdesc as **u8;
-                    let fname_str = *fname_str_ptr;
-                    if strcmp(fname_str, (*df).field) == 0 {
-                        let foff = ptr_add_u8(fdesc, 16 as i64) as *i64;
-                        offset = *foff;
-                        field_type_raw = ptr_add_u8(fdesc, 8 as i64) as *u8;
-                        break;
-                    }
-                    j = j + (1 as i64);
-                }
+                // find field offset via cg_find_field_offset
+                let foff_buf = arena_alloc((*ir).arena, 16 as i64);
+                cg_find_field_offset(struct_type_raw, (*df).field, foff_buf);
+                let offset: i64 = *(foff_buf as *i64);
+                let field_type_raw: *u8 = *(ptr_add_u8(foff_buf, 8 as i64) as **u8);
                 let mut addr = base;
                 if offset > (0 as i64) {
                     addr = ir_new_tmp(ir, QBE_L());
@@ -1242,23 +1261,11 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         if struct_type_raw == (0 as *u8) {
             return zero;
         }
-        let st = struct_type_raw as *Type;
-        let mut offset: i64 = 0 as i64;
-        let mut field_type_raw: *u8 = 0 as *u8;
-        let mut j: i64 = 0 as i64;
-        while j < (*st).nfields {
-            // FieldDesc layout: name(*u8 8) + type_(*u8 8) + offset(i64 8) = 24
-            let fdesc = ptr_add_u8((*st).fields, j * FIELD_DESC_SIZE()) as *u8;
-            let fname_str_ptr = fdesc as **u8;
-            let fname_str = *fname_str_ptr;
-            if strcmp(fname_str, field_name) == 0 {
-                let foff = ptr_add_u8(fdesc, 16 as i64) as *i64;
-                offset = *foff;
-                field_type_raw = ptr_add_u8(fdesc, 8 as i64) as *u8;
-                break;
-            }
-            j = j + (1 as i64);
-        }
+        // find field offset via cg_find_field_offset
+        let foff_buf2 = arena_alloc((*ir).arena, 16 as i64);
+        cg_find_field_offset(struct_type_raw, field_name, foff_buf2);
+        let offset: i64 = *(foff_buf2 as *i64);
+        let field_type_raw: *u8 = *(ptr_add_u8(foff_buf2, 8 as i64) as **u8);
         let mut addr = base;
         if offset > (0 as i64) {
             addr = ir_new_tmp(ir, QBE_L());
@@ -1694,20 +1701,10 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             let fval_node = (*fi_entry).value as *Node;
             let fval = cg_expr(cg_raw, fval_node);
 
-            // 找 field offset by name
-            let mut offset: i64 = 0 as i64;
-            let mut j: i64 = 0 as i64;
-            while j < (*st).nfields {
-                let fdesc = ptr_add_u8((*st).fields, j * FIELD_DESC_SIZE()) as *u8;
-                let fname_str_ptr = fdesc as **u8;
-                let fname_str = *fname_str_ptr;
-                if strcmp(fname_str, fname as *u8) == 0 {
-                    let foff = ptr_add_u8(fdesc, 16 as i64) as *i64;
-                    offset = *foff;
-                    break;
-                }
-                j = j + (1 as i64);
-            }
+            // 找 field offset by name (via cg_find_field_offset helper)
+            let foff_buf3 = arena_alloc((*ir).arena, 16 as i64);
+            cg_find_field_offset(st as *u8, fname as *u8, foff_buf3);
+            let offset: i64 = *(foff_buf3 as *i64);
 
             // store value at slot + offset
             let addr = ir_new_tmp(ir, QBE_L());
@@ -1746,13 +1743,18 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
     }
 
     // ── NODE_CAST ──
-    // `x as T` → emit cast instruction. 简化版：默认走 QBE 隐式 copy（无操作）。
-    // 实际 QBE 类型转换需要 retype/cast：float→int 走 stosi/dtosi 等已在 cg_convert_arg。
-    // 这里保留为 noop（Phase-2 sprint 4 不要求完整 cast 实现）。
+    // `x as T` → emit cast instruction. 走 cg_convert_arg（跟 C 端 codegen.c:721 一致）
+    // float→int 走 stosi/dtosi 等。Phase-2 sprint 5 commit 4 补全（之前是 noop 漏 emit dtosi）。
     if kind == NODE_CAST() {
         let ncd = node_cast_data(n);
         let inner_node = (*ncd).expr as *Node;
-        return cg_expr(cg_raw, inner_node);
+        let inner_v = cg_expr(cg_raw, inner_node);
+        let src_t = (*inner_node).type_ptr;
+        let dst_t = (*n).type_ptr;
+        if src_t == (0 as *u8) || dst_t == (0 as *u8) {
+            return inner_v;
+        }
+        return cg_convert_arg(cg_raw, inner_v, src_t, dst_t);
     }
 
     // ── 未实现 case：返回 zero IRVal（commit 4 补全）──

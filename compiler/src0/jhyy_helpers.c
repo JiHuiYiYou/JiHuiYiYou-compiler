@@ -94,3 +94,20 @@ int jh_int_suffix_prim(const char *s, long long len) {
     }
     return 2;  /* no suffix → PRIM_I32 */
 }
+
+/* v1.0.0 sprint 5：codegen NODE_FLOAT emit f64/f32 literal to StringBuilder。
+   jhyy 不能直接 sprintf f64（QBE Windows amd64 backend SSE return 未验证），
+   走 C 端 sprintf 写 StringBuilder buf。返回写入字节数。
+   用例：codegen.jhyy NODE_FLOAT 块用 sb_append_cstr 占位 "VAL"，改为
+         `char fmt_buf[64]; jh_sprintf_f64(fmt_buf, val); sb_append_cstr(buf, fmt_buf);` */
+
+/* __attribute__((used)) 防止 gcc strip unused symbols — jhyy 编 main.jhyy 时
+   main.jhyy 不直接调 jh_sprintf_f64，但 codegen.jhyy 调（运行期），gcc 会 strip
+   该符号 → jhyy_v1 binary 找不到符号 segfault */
+__attribute__((used)) int jh_sprintf_f64(char *buf, double val) {
+    return sprintf(buf, "%.17g", val);
+}
+
+__attribute__((used)) int jh_sprintf_f32(char *buf, double val) {
+    return sprintf(buf, "%.9g", (float)val);
+}
