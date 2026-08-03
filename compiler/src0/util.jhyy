@@ -36,6 +36,8 @@ extern fn sprintf_lld(buf: *u8, fmt: *u8, val: i64) -> i32;
 
 // jhyy_helpers
 extern fn jh_fputs_stderr(s: *u8) -> i32;
+extern fn jh_fmt_d_stderr(fmt: *u8, val: i32) -> i32;
+extern fn jh_fmt_lld_stderr(fmt: *u8, val: i64) -> i32;
 extern fn jh_print_loc_stderr(loc_filename: *u8, line: i32, col: i32) -> i32;
 
 // ════════════════════════════════════════════════════
@@ -77,15 +79,19 @@ fn sb_init(a: *Arena, sb: *StringBuilder) -> i32 {
     return 1;
 }
 
+// v1.0.0 sprint 5 bug: 不能直接 realloc/free — 老 buf 是 arena_alloc 分配的，
+// libc realloc/free 只能操作 malloc 指针。修：用 malloc 新分配，旧 buf 放任泄漏
+// （arena 整体释放时会回收 arena 块；不释放则是一次性进程，泄漏可接受）。
 fn sb_grow(a: *Arena, sb: *StringBuilder, need: i64) -> i32 {
     let mut new_cap = (*sb).cap;
     while new_cap < need {
         new_cap = new_cap * (2 as i64);
     }
-    let new_buf = realloc((*sb).buf, new_cap);
+    let new_buf = malloc(new_cap);
     if new_buf == (0 as *u8) {
         return 0;
     }
+    memcpy(new_buf, (*sb).buf, (*sb).len);
     (*sb).buf = new_buf;
     (*sb).cap = new_cap;
     return 1;

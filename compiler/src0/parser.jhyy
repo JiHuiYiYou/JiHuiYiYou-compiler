@@ -562,6 +562,105 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
         left = ast_new_alignof((*p).arena, loc_lf, loc_ll, loc_lc, 0 as *Type);
     }
+    else if t.kind == TOKEN_IF() {
+        /* if-as-expression（Phase A-1, v0.8 commit 5）：`let r = if cond { a } else { b };`
+         * jhyy 无 forward reference（parse_if 定义在 parse_expr 之后，见 line 286 注释），
+         * 所以不能调 parse_if。这里 inline 一份 if 解析，块内语句只支持：
+         *   - 表达式语句（parse_expr + optional ;，自递归 OK）
+         *   - 嵌套 if / else-if（parse_expr 自递归回到本分支）
+         * 不支持块内 let/return/match（if-expr 值块场景用不到；if-statement 走 parse_if）。*/
+        parser_advance(p, &t);  // consume 'if'
+        let ifx_cond = parse_expr(p, PREC_NONE());
+
+        // ── then block ──
+        parser_expect(p, TOKEN_LBRACE(), "{ after if condition" as *u8, &t);
+        parser_push_scope(p);
+        let mut ifx_then: *u8 = 0 as *u8;
+        let mut ifx_nthen: i64 = 0 as i64;
+        let mut ifx_tcap: i64 = 0 as i64;
+        while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+            if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+            let mut ifx_s: *Node = 0 as *Node;
+            if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                ifx_s = parse_expr(p, PREC_NONE());   // 嵌套 if-expr（自递归）
+            } else {
+                let ex = parse_expr(p, PREC_NONE());
+                if ex != (0 as *Node) {
+                    if parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+                        if parser_check(p, TOKEN_EOF()) == (0 as i32) {
+                            parser_expect(p, TOKEN_SEMICOLON(), ";" as *u8, &t);
+                        }
+                    }
+                    ifx_s = ast_new_expr_stmt((*p).arena, ex, (*ex).loc_line, (*ex).loc_col, ex);
+                }
+            }
+            if ifx_s != (0 as *Node) {
+                if ifx_nthen >= ifx_tcap {
+                    ifx_tcap = if ifx_tcap != (0 as i64) { ifx_tcap * (2 as i64) } else { (8 as i64) };
+                    let nt = arena_alloc((*p).arena, ifx_tcap * (8 as i64));
+                    if ifx_then != (0 as *u8) {
+                        if ifx_nthen > (0 as i64) { memcpy(nt, ifx_then, ifx_nthen * (8 as i64)); }
+                    }
+                    ifx_then = nt;
+                }
+                let slot = (ifx_then as i64 + ifx_nthen * (8 as i64)) as **Node;
+                *slot = ifx_s;
+                ifx_nthen = ifx_nthen + (1 as i64);
+            }
+        }
+        parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
+        parser_pop_scope(p);
+        let ifx_then_body = ast_new_block((*p).arena, loc_lf, loc_ll, loc_lc, ifx_then, ifx_nthen);
+
+        // ── else block (optional) ──
+        let mut ifx_else_body: *Node = 0 as *Node;
+        if parser_match(p, TOKEN_ELSE(), &t) != (0 as i32) {
+            if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                ifx_else_body = parse_expr(p, PREC_NONE());   // else-if（自递归）
+            } else {
+                parser_expect(p, TOKEN_LBRACE(), "{ after else" as *u8, &t);
+                parser_push_scope(p);
+                let mut ifx_els: *u8 = 0 as *u8;
+                let mut ifx_nels: i64 = 0 as i64;
+                let mut ifx_ecap: i64 = 0 as i64;
+                while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+                    if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+                    let mut ifx_s2: *Node = 0 as *Node;
+                    if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                        ifx_s2 = parse_expr(p, PREC_NONE());
+                    } else {
+                        let ex2 = parse_expr(p, PREC_NONE());
+                        if ex2 != (0 as *Node) {
+                            if parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+                                if parser_check(p, TOKEN_EOF()) == (0 as i32) {
+                                    parser_expect(p, TOKEN_SEMICOLON(), ";" as *u8, &t);
+                                }
+                            }
+                            ifx_s2 = ast_new_expr_stmt((*p).arena, ex2, (*ex2).loc_line, (*ex2).loc_col, ex2);
+                        }
+                    }
+                    if ifx_s2 != (0 as *Node) {
+                        if ifx_nels >= ifx_ecap {
+                            ifx_ecap = if ifx_ecap != (0 as i64) { ifx_ecap * (2 as i64) } else { (8 as i64) };
+                            let ne = arena_alloc((*p).arena, ifx_ecap * (8 as i64));
+                            if ifx_els != (0 as *u8) {
+                                if ifx_nels > (0 as i64) { memcpy(ne, ifx_els, ifx_nels * (8 as i64)); }
+                            }
+                            ifx_els = ne;
+                        }
+                        let slot2 = (ifx_els as i64 + ifx_nels * (8 as i64)) as **Node;
+                        *slot2 = ifx_s2;
+                        ifx_nels = ifx_nels + (1 as i64);
+                    }
+                }
+                parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
+                parser_pop_scope(p);
+                ifx_else_body = ast_new_block((*p).arena, loc_lf, loc_ll, loc_lc, ifx_els, ifx_nels);
+            }
+        }
+
+        left = ast_new_if((*p).arena, loc_lf, loc_ll, loc_lc, ifx_cond, ifx_then_body, ifx_else_body);
+    }
     else if t.kind == TOKEN_LBRACKET() {
         // array literal: [1, 2, 3]
         parser_advance(p, &t);

@@ -602,6 +602,32 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
 }
 
 // ════════════════════════════════════════════════════
+// cg_body_returns — body 是否以 return 结尾（cg_expr NODE_IF 用）
+// ════════════════════════════════════════════════════
+
+// 注意：本函数必须在 cg_expr 之前定义（v1.0.0 sprint 5: NODE_IF 现在用
+// cg_body_returns 检查 then/else 末是否为 return，避免 QBE dead jmp after ret）
+fn cg_body_returns(body_node: *Node) -> i32 {
+    if body_node == (0 as *Node) {
+        return 0;
+    }
+    if (*body_node).kind == NODE_RETURN() {
+        return 1;
+    }
+    if (*body_node).kind == NODE_BLOCK() {
+        let bd = node_block_data(body_node);
+        if (*bd).nstmts > (0 as i64) {
+            let last_slot = ptr_add_u8((*bd).stmts, ((*bd).nstmts - (1 as i64)) * (8 as i64)) as **Node;
+            let last = *last_slot;
+            if (*last).kind == NODE_RETURN() {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+// ════════════════════════════════════════════════════
 // cg_expr — 主体（jhyy 用 if-else if chain 替代 C switch）
 // ════════════════════════════════════════════════════
 
@@ -818,15 +844,31 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
     }
 
     // ── NODE_BLOCK（expr-position: block 最后一个 expr 的值）──
+    // v0 codegen bug 16 workaround: `last = cg_expr(...)` 把 40 字节 IRVal
+    // 按值赋给 mutable local，在 second-function + 嵌套 expr 时触发 v0 jhyy
+    // codegen stack buffer 错位 → rc=127。改走 arena_alloc + field-level
+    // read-back（arena 不释放，重建 IRVal 通过 deref 5 字段完成）。
     if kind == NODE_BLOCK() {
         let d = node_block_data(n);
-        let mut last: IRVal = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+        let last_buf = arena_alloc((*ir).arena, IRVAL_SIZE());
+        *(last_buf as *i32) = 0;
+        *(ptr_add_u8(last_buf, 4 as i64) as *i32) = 0;
+        *(ptr_add_u8(last_buf, 8 as i64) as *i64) = 0 as i64;
+        *(ptr_add_u8(last_buf, 16 as i64) as **u8) = 0 as *u8;
+        *(ptr_add_u8(last_buf, 24 as i64) as *i32) = 0;
         let mut i: i64 = 0 as i64;
         while i < (*d).nstmts {
             let stmt_slot = ptr_add_u8((*d).stmts, i * (8 as i64)) as **Node;
             let stmt = *stmt_slot as *Node;
             if (*stmt).kind == NODE_RETURN() || (*stmt).kind == NODE_BREAK() || (*stmt).kind == NODE_CONTINUE() {
                 let _ = cg_expr(cg_raw, stmt);
+                let last = IRVal {
+                    kind: *(last_buf as *i32),
+                    id: *(ptr_add_u8(last_buf, 4 as i64) as *i32),
+                    ival: *(ptr_add_u8(last_buf, 8 as i64) as *i64),
+                    name: *(ptr_add_u8(last_buf, 16 as i64) as **u8),
+                    qbe_type: *(ptr_add_u8(last_buf, 24 as i64) as *i32),
+                };
                 return last;
             }
             if (*stmt).kind == NODE_EXPR_STMT() {
@@ -835,17 +877,39 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 if (*inner_node).kind == NODE_ASSIGN() {
                     let _ = cg_expr(cg_raw, stmt);
                 } else {
-                    last = cg_expr(cg_raw, inner_node);
+                    let r = cg_expr(cg_raw, inner_node);
+                    *(last_buf as *i32) = r.kind;
+                    *(ptr_add_u8(last_buf, 4 as i64) as *i32) = r.id;
+                    *(ptr_add_u8(last_buf, 8 as i64) as *i64) = r.ival;
+                    *(ptr_add_u8(last_buf, 16 as i64) as **u8) = r.name;
+                    *(ptr_add_u8(last_buf, 24 as i64) as *i32) = r.qbe_type;
                 }
             } else if (*stmt).kind == NODE_IF() || (*stmt).kind == NODE_MATCH() {
-                last = cg_expr(cg_raw, stmt);
+                let r = cg_expr(cg_raw, stmt);
+                *(last_buf as *i32) = r.kind;
+                *(ptr_add_u8(last_buf, 4 as i64) as *i32) = r.id;
+                *(ptr_add_u8(last_buf, 8 as i64) as *i64) = r.ival;
+                *(ptr_add_u8(last_buf, 16 as i64) as **u8) = r.name;
+                *(ptr_add_u8(last_buf, 24 as i64) as *i32) = r.qbe_type;
             } else if (*stmt).kind == NODE_BLOCK() {
-                last = cg_expr(cg_raw, stmt);
+                let r = cg_expr(cg_raw, stmt);
+                *(last_buf as *i32) = r.kind;
+                *(ptr_add_u8(last_buf, 4 as i64) as *i32) = r.id;
+                *(ptr_add_u8(last_buf, 8 as i64) as *i64) = r.ival;
+                *(ptr_add_u8(last_buf, 16 as i64) as **u8) = r.name;
+                *(ptr_add_u8(last_buf, 24 as i64) as *i32) = r.qbe_type;
             } else {
                 let _ = cg_expr(cg_raw, stmt);
             }
             i = i + (1 as i64);
         }
+        let last = IRVal {
+            kind: *(last_buf as *i32),
+            id: *(ptr_add_u8(last_buf, 4 as i64) as *i32),
+            ival: *(ptr_add_u8(last_buf, 8 as i64) as *i64),
+            name: *(ptr_add_u8(last_buf, 16 as i64) as **u8),
+            qbe_type: *(ptr_add_u8(last_buf, 24 as i64) as *i32),
+        };
         return last;
     }
 
@@ -1582,13 +1646,15 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             }
         }
 
-        ir_emit_jnz(ir, cond, then_block, else_block);
-
-        // alloc result slot (only for non-void)
+        // alloc result slot (only for non-void) — v1.0.0 sprint 5: 必须在 jnz 之前
+        // （QBE 要求 alloc 在函数首块，jnz 是 terminator，alloc 跟在后面会报
+        // "label or } expected"）
         let result_slot = ir_new_tmp(ir, QBE_L());
         if is_void == 0 {
             ir_emit_alloc(ir, result_slot, 4 as i32);
         }
+
+        ir_emit_jnz(ir, cond, then_block, else_block);
 
         // then
         ir_emit_label(ir, then_block);
@@ -1598,7 +1664,10 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         } else {
             let _u1 = cg_expr(cg_raw, then_node);
         }
-        ir_emit_jmp(ir, merge_block);
+        // v1.0.0 sprint 5：then body 以 ret 结尾时不能 emit jmp（QBE 拒收 dead jmp after ret）
+        if cg_body_returns(then_node) == 0 {
+            ir_emit_jmp(ir, merge_block);
+        }
 
         // else
         ir_emit_label(ir, else_block);
@@ -1616,13 +1685,15 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 let _u2 = cg_expr(cg_raw, else_node);
             }
         }
-        ir_emit_jmp(ir, merge_block);
+        if cg_body_returns(else_node) == 0 {
+            ir_emit_jmp(ir, merge_block);
+        }
 
         // merge
         ir_emit_label(ir, merge_block);
         if is_void == 0 {
             let result = ir_new_tmp(ir, ret_qt);
-            ir_emit_load(cg_raw, result, 0 as *u8, result_slot);
+            cg_emit_load(cg_raw, result, 0 as *u8, result_slot);  // v1.0.0 sprint 5: ir_emit_load→cg_emit_load
             return result;
         }
         return zero;
@@ -1858,29 +1929,7 @@ fn cg_emit_const_data_elem(ir: *IRBuf, e: *Node, t: *Type, first_ptr: *u8) -> i3
 
 // v1.0.0 阶段简化：sret 重置 cg.sret_slot（保持 jhyy 多遍编译稳定）；
 // 每个函数 arena_alloc 一组 loop label arrays（jhyy 不支持 fixed-size struct field）。
-
-// cg_body_returns：检查 body 是否以 return 结尾（用于 cg_func 不 emit ret）
-//
-// jhyy 无 forward decl → 必须 cg_func 之前定义。inline check 会触发 v0 codegen bug。
-fn cg_body_returns(body_node: *Node) -> i32 {
-    if body_node == (0 as *Node) {
-        return 0;
-    }
-    if (*body_node).kind == NODE_RETURN() {
-        return 1;
-    }
-    if (*body_node).kind == NODE_BLOCK() {
-        let bd = node_block_data(body_node);
-        if (*bd).nstmts > (0 as i64) {
-            let last_slot = ptr_add_u8((*bd).stmts, ((*bd).nstmts - (1 as i64)) * (8 as i64)) as **Node;
-            let last = *last_slot;
-            if (*last).kind == NODE_RETURN() {
-                return 1;
-            }
-        }
-    }
-    return 0;
-}
+// cg_body_returns 定义移到 cg_expr 之前（v1.0.0 sprint 5：NODE_IF 也用）
 
 fn cg_func(cg_raw: *u8, n: *Node) -> i32 {
     let cg = cg_raw as *CGContext;

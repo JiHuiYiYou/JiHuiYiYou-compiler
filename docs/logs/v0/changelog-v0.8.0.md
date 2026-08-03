@@ -98,11 +98,87 @@ v0.7.0 之后（7A enum first-class + 7B const struct array），v0.8.0 转向 *
 | 修 bug 15 后 | 0 | 27 | 9  | 7  | 0 | 4 |
 | 修 bug 16 后 | 0 | 8  | 25 | 9  | 0 | 5 |
 | **commit 4 后** | **7** | **8**  | **24** | **8**  | **0** | **0** |
+| **commit 5 后** | **16** | **30** | **1 (timeout)** | **0** | **0** | — |
 
 **commit 4 进度**：
 - OK +7（7 NORUN → OK）+ 2（CERR float_arith/float_arith_f32 → OK，但实际归到 NORUN 子集）= net +7 OK
 - NORUN -5（5 个进入更深状态：实际是 7 → 0）
 - CERR -1（float_arith/float_arith_f32 离开 CERR）
+
+## commit 5（pending）：Phase A-1 if-expr — 5 codegen bug + parser if-as-expression
+
+**目标**：让 `let r = if cond { a } else { b };` 在 jhyy_v1 能编译并跑通；regress 从 7 OK 推到 16 OK（+9）。
+
+**改动一（util.jhyy）：Bug 18 — `sb_grow` 不能调 `realloc`**
+
+- 症状：编第 2 个含 `if cond { ... }` 的函数时 jhyy_v1 rc=127（silent crash，无 stderr）
+- 根因：`StringBuilder.buf` 是 `arena_alloc` 分配的，但 `sb_grow` 调 `realloc` — libc realloc/free 只接受 malloc 指针。realloc 接受 arena 指针会污染 heap metadata → silent crash（exit code 127 通常是 dynamic linker 找不到符号，但这里实际是 heap 死锁后续 segfault 被 bash 转 127）
+- Fix：`malloc(new_cap)` + `memcpy(new_buf, old_buf, len)` + 放任旧 buf 泄漏（一次性进程，arena 整体释放时回收）
+- 影响：单 fix 解 rc=127，2nd+ function 编译能跑
+
+**改动二（codegen.jhyy）：Bug 19 — `ir_emit_alloc` 必须在 `ir_emit_jnz` 之前**
+
+- 症状：含 `let x = if ... { ... } else { ... };` 的函数 QBE 报 "label or } expected"
+- 根因：QBE 要求 `alloc` 必须在函数首块（在任何 terminator `jnz` 之前）。codegen.jhyy 原来 `ir_emit_jnz` 在前 `ir_emit_alloc` 在后
+- Fix：调换顺序，先 alloc result slot 再 jnz
+
+**改动三（codegen.jhyy）：Bug 20 — then/else 末 return 时不能 emit trailing jmp**
+
+- 症状：if body 以 `return` 结尾时 QBE 报 "block @mergeX is used undefined" / "dead code after ret"
+- 根因：then/else body emit 后无条件 `ir_emit_jmp(merge_block)`，但如果 body 末是 `ret`，jmp 是 dead code → QBE 拒收
+- Fix：加 helper `cg_body_returns(body_node) -> i32` 检查 body 末是否为 NODE_RETURN，仅当非 return 时 emit trailing jmp
+- 副作用：cg_body_returns 定义必须在 cg_expr 之前（jhyy 无 forward decl）—— 跟 NODE_IF 的引用顺序决定
+
+**改动四（codegen.jhyy）：Bug 21 — `ir_emit_load` → `cg_emit_load` typo（value path）**
+
+- 症状：非 void `let r = if cond { 1 } else { 2 };` 编译过但运行 hang / 输出空
+- 根因：merge 块 emit `ir_emit_load(cg_raw, result, 0 as *u8, result_slot)` —— 4 参数 `(IRVal, ..., *, *)` 签名跟 `ir_emit_load(ir: *IRBuf, dst: IRVal, src: IRVal, off: IRVal)` 不同（4 参 vs 4 参但类型不同），jhyy v0 codegen 没做强类型 dispatch 走错函数 → emit 错的 IL
+- Fix：`cg_emit_load(cg_raw, result, 0 as *u8, result_slot)`（codegen ctx，正确函数）
+- 同类潜在 typo：logical AND/OR codegen（lines 1163/1179）—— 当前未触达，sprint 6 处理
+
+**改动五（codegen.jhyy）：Bug 22 — `cg_body_returns` 定义必须在 cg_expr 之前**
+
+- 症状：jhyy 报 "undefined variable 'cg_body_returns'"
+- 根因：jhyy 无 forward declaration，函数必须在使用前定义。原来 `cg_body_returns` 在文件底部（v0.7 时代），NODE_IF 现在用上
+- Fix：移到 cg_expr 之前（line 612）
+
+**改动六（codegen.jhyy）：Bug 16 应用 — NODE_BLOCK expr-position 走 arena + field-level**
+
+- 症状：含 `{ expr; expr; last_expr }` 块作为表达式位置（如 if body）时 stack buffer corruption
+- 根因：v0 codegen bug 16 — IRVal 40 字节 struct value 赋给 mutable local，caller-stack 错位
+- Fix：`last_buf = arena_alloc(IRVAL_SIZE())` + 每次写 5 字段；return 时 field-level deref 重建 IRVal struct value
+
+**改动七（parser.jhyy）：if-as-expression 解析器分支**
+
+- 症状：`let r = if cond { a } else { b };` 报 CERR（"expected ';' after expression" 或 "if without else"）
+- 根因：parser.jhyy `parse_expr` 不支持 expression-form if（只支持 statement-form，走 `parse_if`）
+- Fix：在 `parse_expr` 内 inline 一份 if 解析（parse_if 定义在 parse_expr 之后无法 forward ref）—— 支持 then/else block 内 expression statements + 嵌套 if（自递归）+ else-if（自递归）。不支持块内 let/return/match（if-expr 值块场景不需要，if-statement 走 parse_if）
+
+**改动八（jhyy_helpers.c）：debug printf helpers**
+
+- 加 `jh_fmt_d_stderr` / `jh_fmt_lld_stderr` 两个 wrapper（jhyy extern 不能 variadic）。这次 commit 没用上，sprint 6 codegen 排错时备用。
+
+**jhyy_v1 regress 状态演进**：
+
+| 阶段 | OK | CERR | STK/AV/TIMEOUT | WRX |
+|------|----|----|----------------|-----|
+| commit 4 | 7 | 8 | 32 | 0 |
+| **commit 5** | **16** | **30** | **1** | **0** |
+
+**commit 5 进度**：
+- OK +9（if-as-expression 用法测试从 CERR → OK：void_if / bug3_void_if / bug2_if_phi + 6 个 test_if_*）
+- CERR net +22：8 → 30（if-expr CERR 减 3，但 logical.jhyy 因 logical operator codegen typo 之前归类不同，加上其他 STK/AV 测试因 if-expr fixed 暴露更深 codegen bug，现在归 CERR）
+- STK/AV 大幅减少：32 → 1（大量之前挂的 if 嵌套测试现在能跑）
+
+**验证**：
+
+| 步骤 | 状态 |
+|------|------|
+| jhyy_0 (C) regress | ✅ 47/47 pass, 0 fail, 3 skip |
+| jhyy_v1 编 bug2_if_phi.jhyy → 跑通 | ✅ |
+| jhyy_v1 编 bug3_void_if.jhyy → 跑通 | ✅ |
+| jhyy_v1 编 void_if.jhyy → 跑通 | ✅ |
+| jhyy_v1 regress | ✅ 16/47 OK（commit 4 → commit 5: +9）|
 
 ## 验证
 
@@ -130,7 +206,8 @@ v0.7.0 之后（7A enum first-class + 7B const struct array），v0.8.0 转向 *
 ✅ v0.8 commit 2: 翻译 main.c → main.jhyy + bug 14    (b93925f, 2026-07-02)
 ✅ v0.8 commit 3: 修 jhyy_v1 自举回归                (990cc6c, 2026-07-03)
 ✅ v0.8 commit 4: 3 类 fix + regress 推进 7 OK       (50ad92b + 760c7c2 changelog, 2026-07-03)
-→ v0.8 commit 5+: Phase A (parser 翻译层 8 CERR) + Phase B (codegen 翻译层 8 AV + 24 STK)
+✅ v0.8 commit 5: Phase A-1 if-expr + regress 推进 16 OK  (pending, 2026-08-03)
+→ v0.8 commit 6+: Phase A-2 (match) / A-3 (const_array) / A-4 (import) + Phase B (codegen 翻译层)
 ```
 
 ## Phase A/B 计划（commit 4 后剩余工作）

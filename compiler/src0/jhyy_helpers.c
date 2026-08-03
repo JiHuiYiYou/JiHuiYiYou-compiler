@@ -111,3 +111,12 @@ __attribute__((used)) int jh_sprintf_f64(char *buf, double val) {
 __attribute__((used)) int jh_sprintf_f32(char *buf, double val) {
     return sprintf(buf, "%.9g", (float)val);
 }
+
+/* v1.0.0 sprint 5: debug printf helpers (int / long long) to stderr.
+   jhyy extern 不能 variadic, 用 wrapper 接 i32 / i64. */
+__attribute__((used)) int jh_fmt_d_stderr(const char *fmt, int val) {
+    return fprintf(stderr, fmt, val);
+}
+__attribute__((used)) int jh_fmt_lld_stderr(const char *fmt, long long val) {
+    return fprintf(stderr, fmt, val);
+}
