@@ -445,7 +445,11 @@ fn cg_copy_struct(cg_raw_v1: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal)
         // FieldDesc layout 假设（types.jhyy 应有定义，TODO 验证）
         let fdesc_ptr = ptr_add_u8(fields_v1, i * (24 as i64)) as *u8;
         // bug fix: ftype 在 offset_v1 8, 不是 0 (offset_v1 0 是 name *u8)
-        let ftype = ptr_add_u8(fdesc_ptr, 8 as i64) as *Type;
+        // W-008 fix: 漏一层 deref。ptr_add_u8(...) as *Type 给的是 *Type 指向
+        //   fdesc+8 处的字节（即 type 字段存储位置），并不是 type 字段存的值。
+        //   要拿到真正的 Type* 必须再 deref 一层：*(fdesc+8 as **Type)。
+        let ftype_slot_v1 = ptr_add_u8(fdesc_ptr, 8 as i64) as **Type;
+        let ftype = *ftype_slot_v1;
         let foffset_ptr = ptr_add_u8(fdesc_ptr, 16 as i64) as *i64;
         let offset_v1 = *foffset_ptr;
 
@@ -483,14 +487,26 @@ fn cg_find_field_offset(st_raw: *u8, field_name: *u8, out_buf_v1: *u8) -> i32 {
     let mut j: i64 = 0 as i64;
     while j < (*st).nfields_v1 {
         let fdesc = ptr_add_u8((*st).fields_v1, j * FIELD_DESC_SIZE()) as *u8;
-        let fname_str_ptr = fdesc as **u8;
-        let fname_str = *fname_str_ptr;
+        // W-008 fix (深层): FieldDesc.name 存的是 *Sym（sema.jhyy:1507 写入
+        //   `*fd_name_slot = fsym`），不是 const char *。直接 strcmp(Sym*, str)
+        //   把 Sym 字节当字符串（指针 8 字节内会有 0x00）→ 几乎永远不匹配 →
+        //   cg_find_field_offset 返回 0 + garbage → caller 拿到 offset_v1=0 +
+        //   field_type_raw=garbage → emit `=w loadw` 错 IL。
+        //   修法：deref Sym*，读 Sym.name (Sym 字节布局 name @ offset 0)。
+        //   C 端 codegen.c:854 等价 `st->fields[j].name->name`。
+        let sym_p_v1 = *(fdesc as **Sym);
+        let fname_str = *(ptr_add_u8(sym_p_v1 as *u8, 0 as i64) as **u8);
         if strcmp(fname_str, field_name) == 0 {
             let foff = ptr_add_u8(fdesc, 16 as i64) as *i64;
             let out_off_v1 = out_buf_v1 as *i64;
             *out_off_v1 = *foff;
             let out_type_v1 = ptr_add_u8(out_buf_v1, 8 as i64) as **u8;
-            *out_type_v1 = ptr_add_u8(fdesc, 8 as i64) as *u8;
+            // W-008 fix: 漏一层 deref。ptr_add_u8(fdesc, 8) as *u8 是
+            //   FieldDesc.type 字段存储位置的地址，并非字段存的 Type* 本身。
+            //   必须再 deref 一层拿到真 Type*；否则 caller 的 qbe_type_of(bad_ptr)
+            //   读到 Type 指针值低 32 位当 kind → fall through → QBE_W →
+            //   emit `=w loadw` 错的，i64/pointer field 全部踩。
+            *out_type_v1 = *(ptr_add_u8(fdesc, 8 as i64) as **u8);
             return 1;
         }
         j = j + (1 as i64);
@@ -583,6 +599,11 @@ fn cg_convert_arg(cg_raw_v1: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
     } else if src_qt_v1 == QBE_D() {
         if dst_qt_v1 == QBE_S() {
             conv = "truncd" as *u8;
+        }
+    } else if src_qt_v1 == QBE_W() {
+        // W-007 fix (v0.8 bug 11 analog): i32→i64 sign-extend via extsw
+        if dst_qt_v1 == QBE_L() {
+            conv = "extsw" as *u8;
         }
     }
     if conv == (0 as *u8) {

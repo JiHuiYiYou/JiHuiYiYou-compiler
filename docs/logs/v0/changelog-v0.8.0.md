@@ -212,7 +212,62 @@ v0.7.0 之后（7A enum first-class + 7B const struct array），v0.8.0 转向 *
 ✅ v0.8 commit 8: W-003 let _ = fncall → direct call   (bea83f0, 2026-08-03)
 ✅ v0.8 commit 9: W-001 byte-by-byte hash + W-005 let-mut workaround (d570c72, 2026-08-03)
 ✅ v0.8 commit 10: W-005 扩展到 util/arena + W-006/W-007 文档 (commit pending, 2026-08-04)
-→ v0.8 commit 11+: W-006/W-007 workaround 应用 + Stage 0 闭环
+✅ v0.8 commit 11: W-008 cg_find_field_offset 三层 deref 漏修 + doc (commit pending, 2026-08-04)
+→ v0.8 commit 12+: W-009 cslel 操作数类型错（commit 11 暴露的下一道）+ Stage 0 闭环
+
+---
+
+## commit 11 (pending)：W-008 cg_find_field_offset 三层 deref 漏修
+
+**目标**：修 jhyy_v1 codegen.jhyy 的 cg_find_field_offset / cg_copy_struct 三处 deref 漏，让 struct field access emit 正确 IL（i64 field `=l loadl` 而非 `=w loadw`，pointer field 同样修正）。
+
+**改动一（codegen.jhyy:448 — Bug 8c, ftype deref）**
+
+```jhyy
+// 前：let ftype = ptr_add_u8(fdesc_ptr, 8 as i64) as *Type;     // 读到 FieldDesc 内字节
+// 后：
+let ftype_slot_v1 = ptr_add_u8(fdesc_ptr, 8 as i64) as **Type;
+let ftype = *ftype_slot_v1;
+```
+
+**改动二（codegen.jhyy:489-491 — Bug 8a, sym deref, 深层 root cause）**
+
+```jhyy
+// 前：let fname_str = *fname_str_ptr;    // 读到 *Sym 当字符串
+// 后：
+let sym_p_v1 = *(fdesc as **Sym);                                  // deref Sym*
+let fname_str = *(ptr_add_u8(sym_p_v1 as *u8, 0 as i64) as **u8);  // Sym.name @ offset 0
+```
+
+**改动三（codegen.jhyy:496-502 — Bug 8b, type slot deref）**
+
+```jhyy
+// 前：*out_type_v1 = ptr_add_u8(fdesc, 8 as i64) as *u8;          // 写 fdesc+8 地址
+// 后：*out_type_v1 = *(ptr_add_u8(fdesc, 8 as i64) as **u8);       // 写 fdesc+8 处的值
+```
+
+**Why**：jhyy_v1 的 struct field access 路径（`(*a).field`、`s.field`、struct assign、struct copy）全部走 cg_find_field_offset / cg_copy_struct。这两个 helper 把 *u8 当 **u8 解 / 少解一层 deref，导致：
+1. **Bug 8a**（最深层）：FieldDesc.name 实际存 *Sym，strcmp(Sym*, "val") 几乎永远不匹配 → cg_find_field_offset fallback 走错路径
+2. **Bug 8b/8c**：FieldDesc.type 漏 deref → caller 拿到的 field_type_raw 是 fdesc+8 这个**指向 type 字段存储地址的指针**（不是 Type 指针本身）→ qbe_type_of 读到 garbage kind → fall through → return QBE_W → 所有 i64/pointer struct field 标量化且 QBE_W
+3. **下游链**：caller emit `%tN =w loadw` 但目标字段是 i64/pointer（需要 `=l loadl`）→ QBE typecheck 拒绝
+
+**修复前 → 修复后 IL 对比**（`Box { val: 5 as i64 }`）：
+```diff
+- %t4 =w loadw %t0      # 错：i64 字段按 32-bit 读
++ %t4 =l loadl %t0      # 对：i64 字段按 64-bit 读
+```
+
+**验证**：
+- 复现：`compiler/src0/__w8_test.jhyy`（最小 struct field 读写）— 修复前 QBE 拒绝，修复后 emit 正确 IL
+- 端到端：`jhyy_v1 compile arena.jhyy` 修复后 emit 含 `=l loadl` 给 def_size 字段（offset 32），QBE 通过 stage 0 closure 入口
+- v0 regress：47/47 pass, 0 fail, 3 skip（**无 regression**）
+- v1 regress：12 OK（commit 10 是 16 OK，**回退 -4** — 因为 W-008 修了 loadw→loadl 但暴露了下一道 cslel operand type bug：W-009 候选）
+
+**Stage 0 closure 关系**：W-008 + W-007（commit 10 修 cg_convert_arg extsw）是 Stage 0 闭环的**必要组合**。两个 fix 缺一不可：W-007 修 return literal 的 w→l 转换，W-008 修 struct field load 的类型判定。任一缺失 → jhyy_v1 编译 arena.jhyy 失败。
+
+**superseder**：本 commit 转 W-008 为 RESOLVED；剩余 v1 OK 数量回落的原因是 commit 11 把一些之前走错 IL 但碰巧能跑的测试暴露到 QBE 严格 typecheck 下，**新 cslel 错**。修 W-009（cslel 比较结果类型错）后 v1 OK 数量应回到 16+。
+
+**详细文档**：[`docs/internal/workarounds.md` § W-008](../../internal/workarounds.md#w-008)
 ```
 
 ## Phase A/B 计划（commit 4 后剩余工作）

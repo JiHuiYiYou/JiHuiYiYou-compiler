@@ -32,6 +32,7 @@
 | [W-005](#w-005-let-mut--assign--jhyy_v1-codegen-segfault) | ACTIVE | `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault |
 | [W-006](#w-006-jhyy_v1-return-x--y-两-1-char-var-发-127qbe-fail) | ACTIVE | jhyy_v1 codegen 让两个 1-char 局部变量在 `return x ± y` 共享同一 stack slot → QBE fail / exit 127；改名或加类型注解绕 |
 | [W-007](#w-007-jhyy_v1-fn--i64--return--literal-as-i64-emit-w-copy) | ACTIVE | jhyy_v1 codegen 把 `fn() -> i64 { return X as i64; }` 的 return value 当 w（32-bit）emit → QBE "invalid type for jump argument" 错 |
+| [W-008](#w-008-jhyy_v1-cg_find_field_offset-漏一层-deref-i64-struct-field-emit-w-loadw) | ACTIVE | jhyy_v1 codegen NODE_FIELD 查 struct field type 时把 `*u8` 指针当 `**u8` 解了一层 → i64/pointer struct field 全 emit `=w loadw` 而非 `=l loadl` → QBE 拒绝 |
 
 ---
 
@@ -510,4 +511,105 @@ fn small_const() -> i64 { return some_64(); }
 - 复现 `_test_small.jhyy` / `_test_small4.jhyy` / `_test_small6.jhyy` / `_test_small8.jhyy`
 - v0 同源码 emit 正确 IL（`%t0 =l copy ...`），jhyy_v1 emit `w copy`，bug 在 jhyy_v1 自身
 - 与 W-006 触发面不同（无 1-char var 介入），是独立 bug
+
+---
+
+## W-008: jhyy_v1 cg_find_field_offset 双层 deref 漏（i64 struct field emit `=w loadw` + 全 struct field 走 fallback）
+
+**ID:** W-008
+**状态:** ACTIVE（fix 在 v0.8 commit 11 同步应用；arena.jhyy 跑通确认 fix 正确；待 v0.8 commit 11 changelog 转 RESOLVED）
+**日期:** 2026-08-04
+**触发面:** jhyy 源码里**任意 `(*ptr).field_X` 或 `s.field` 或 `field.assign()` 路径**走 cg_find_field_offset / cg_copy_struct — 包括 codegen 阶段任何按 struct 字段 emit 的代码：
+- `(*a).def_size`（i64）— arena.jhyy 赋值/读取 def_size
+- `(*a).blocks` 等所有 *u8 字段 — 写到 i64 变量也算
+- v0.7 7B `arr_of_structs[i].field`（path 1/2 都用 cg_find_field_offset）
+- 任何 user-defined struct 的 field 访问
+
+**症状:** QBE 拒绝：`invalid type for store ... (w != l)` 或 `storel %t_w, %t_slot` type mismatch；jhyy_v1 编译 exit 1。**或者**编译过但运行时 segfault 0xC0000005（heap corruption）。
+**根因（双层 deref 漏）：** jhyy_v1 `cg_find_field_offset`（codegen.jhyy）有**两个独立的 deref 漏**：
+
+### Bug 8a：sym-p 解 deref（更深层 root cause）
+```jhyy
+// codegen.jhyy:489-491（fix 前）
+let fdesc = ptr_add_u8((*st).fields_v1, j * FIELD_DESC_SIZE()) as *u8;
+let fname_str_ptr = fdesc as **u8;
+let fname_str = *fname_str_ptr;        // ← BUG：读到的是 *Sym，不是 const char *
+if strcmp(fname_str, field_name) == 0 { ... }
+```
+
+sema.jhyy:1507 写入的是 `*fd_name_slot = fsym`（fsym 是 *Sym），所以 FieldDesc.name 字段存的是 *Sym 指针。strcmp(Sym*, "val") 把 Sym 内存字节当 C 字符串，但 Sym 字节是 8 字节堆指针（如 `0x0000_0020_4D_EF_12_34`，会有高位 0x00）→ strcmp 几乎永远不匹配 → cg_find_field_offset 直接走 fallback exit path 返回 0 → caller 拿到的 out_buf 是 uninitialized arena garbage → offset_v1=0、field_type_raw=garbage。
+
+C 端 codegen.c:854 等价语句是 `strcmp(st->struct_type.fields[j].name->name, d->fields[i].name)` — **多一层 deref 读 `Sym->name`**，所以 v0 工作。
+
+### Bug 8b：type slot deref（首次发现层）
+```jhyy
+// codegen.jhyy:493（fix 前）
+let out_type_v1 = ptr_add_u8(out_buf_v1, 8 as i64) as **u8;
+*out_type_v1 = ptr_add_u8(fdesc, 8 as i64) as *u8;   // ← BUG：写的是 fdesc+8 地址本身，不是 fdesc+8 处的值
+```
+对比 offset_v1 那行 `*out_off_v1 = *foff` 是正确 deref → 漏 symmetry。CGContext out_buf layout（i64 offset_v1 @ 0 + *Type @ 8）是 commit 4 抽 helper 定的，type slot 写漏 deref → caller 拿到 `field_type_raw` 实际是 fdesc+8 这个**指向 type 字段存储地址的指针**（不是 Type 指针本身）。
+
+### Bug 8c：cg_copy_struct 同模式 (codegen.jhyy:448)
+```jhyy
+let ftype = ptr_add_u8(fdesc_ptr, 8 as i64) as *Type;   // ← BUG：ftype 实际指向 FieldDesc 内字节，不是 Type
+```
+后续 `(*ftype).kind` 读 4 字节 at fdesc_ptr+8 → Type* 指针的低 32 位 → 不等于任何 KIND_* → fall through → return QBE_W → 所有 struct field 标量化且 QBE_W。
+
+### 联动错误链路
+若只修 8b（type slot deref），但 8a（sym cmp）未修 → strcmp 仍然永不匹配 → fallback path → field_type_raw 仍然 garbage → 症状不变。所以**两个 bug 必须同时修**。最初 fix cycle 发现 8b 修完症状依旧，**进一步挖到 8a** 才是真 root cause。
+
+### 下游链 (任意 fix 漏掉时)
+1. `qbe_type_of(field_type_raw)` 读到非 valid Type* → garbage kind → 落到 `return QBE_W()` (ir.jhyy:127)
+2. caller 拿到 `result_v1.qbe_type = QBE_W`
+3. emit `%tN =w loadw %tA` 但目标是 i64/pointer 字段（需要 QBE_L → `=l loadl`）
+4. QBE typecheck 拒绝 → jhyy_v1 退出 1
+
+### 修复（commit 11 三处同步）
+```jhyy
+// codegen.jhyy:489-491（Bug 8a — sym deref）
+let sym_p_v1 = *(fdesc as **Sym);                          // deref Sym*
+let fname_str = *(ptr_add_u8(sym_p_v1 as *u8, 0 as i64) as **u8);  // Sym.name @ offset 0
+if strcmp(fname_str, field_name) == 0 { ... }
+
+// codegen.jhyy:448（Bug 8c — ftype deref in cg_copy_struct）
+let ftype_slot_v1 = ptr_add_u8(fdesc_ptr, 8 as i64) as **Type;
+let ftype = *ftype_slot_v1;
+
+// codegen.jhyy:502（Bug 8b — type slot deref in cg_find_field_offset）
+*out_type_v1 = *(ptr_add_u8(fdesc, 8 as i64) as **u8);    // 再 deref 一层
+```
+
+### 验证（v0.8 commit 11）
+```jhyy
+type Box = struct { val: i64, next: *u8 }
+fn use_struct() -> i64 {
+    let local_box: Box = Box { val: 5 as i64 };
+    return local_box.val;
+}
+```
+**jhyy_v1 emit (fix 后):**
+```
+%t4 =l loadl %t0
+ret %t4
+```
+✅ QBE 通过，arena.jhyy 完整跑通 `step 1/2/3 ... rc=42` 输出（参见 arena_test.exe.exe 测试结果）。
+
+**影响范围（仅在 jhyy_v1 codegen 翻译产物，v0 C 编译不受影响）:**
+- src0/arena.jhyy: `arena_new_block/arena_alloc_aligned/arena_reset/arena_free` 全 struct field 访问
+- src0/parser.jhyy: Lexer state struct, Parser state struct
+- src0/sema.jhyy: SymTable entries, TypeArena fields
+- src0/codegen.jhyy: LocalEntry.sym / IRVal.kind (但 cg_add_local / cg_find_local 不走 cg_find_field_offset，所以可能 OK)
+- 任何 user-defined struct 的 field access
+
+**Stage 0 closure 关系:** W-008 是 W-007 fix 完成后**下一道关卡** — W-007 extsw 让 `ARENA_DEFAULT_SIZE` 类型常函数 emit 正确；W-008 让所有 struct field load 类型正确。**两个 fix 缺一不可**才能 Stage 0 closure。
+
+**失效条件:** 不再次变动 codegen.jhyy 的 cg_find_field_offset / cg_copy_struct 字段查找代码。或者把 sema 改成存 string 而非 *Sym（避开 deref 链）。
+
+**superseder:** v0.8 commit 11（W-007 同 commit 应用）
+
+**引用:**
+- 复现：scratch src0/__w8_test.jhyy（最小 struct field 读写）
+- arena.jhyy 验证：build/bin 多次重新 compile + run（rc=42 + 完整打印 step 1-3）
+- 与 W-007：两层 root cause 都必须修。W-007 修 const/copy extsw，W-008 修 cg_find_field_offset deref
+- 与 W-005：无直接关联，但 arena.jhyy 用 W-005 (*i64 指针累加) 才能让 W-008 fix 后的 struct field 访问真在 codegen 路径上跑通（W-005 解决 *p = ... 的赋值 segfault，W-008 解决 `*p = (*a).def_size` 的 i64 load 类型错）
 
