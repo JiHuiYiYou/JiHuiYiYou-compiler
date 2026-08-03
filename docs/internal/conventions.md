@@ -53,3 +53,15 @@
 2. **避免嵌套表达式**：复杂表达式拆 `let mut x = ...`
 3. **不可变优先**：默认 `let`，需要时再 `let mut`
 4. **指针用 `*T` 不用 `**T`**（自举后建议）
+
+## Workaround 登记（强制）
+
+**所有 workaround 必须登记到 `docs/internal/workarounds.md` 才能写入代码。** 详见该文件 § 登记格式。
+
+登记时机：
+- **执行前**：在 doc 写明 workaround 是什么、触发面、怎么改、影响范围、失效条件
+- **执行后**：回填实际改动的清单（rename 表 / 行号 / commit hash）
+
+不豁免：哪怕是 1 行 inline comment 的 workaround 也得登记。已存在的 inline comment（如 `util.jhyy` hash_string 处的 `// 绕过 v0.6 codegen bug`）补登记到 doc。
+
+superseded 的 workaround 标记 `RESOLVED` 不删除（留作审计）。

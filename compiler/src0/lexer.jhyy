@@ -35,14 +35,14 @@ fn TOKEN_BOOL()        -> i32 { return 4 as i32; }
 fn TOKEN_IDENT()       -> i32 { return 5 as i32; }
 
 // keywords (6-26)
-fn TOKEN_FN()          -> i32 { return 6 as i32; }
+fn TOKEN_FN_v1()          -> i32 { return 6 as i32; }
 fn TOKEN_LET()         -> i32 { return 7 as i32; }
 fn TOKEN_MUT()         -> i32 { return 8 as i32; }
-fn TOKEN_IF()          -> i32 { return 9 as i32; }
+fn TOKEN_IF_v1()          -> i32 { return 9 as i32; }
 fn TOKEN_ELSE()        -> i32 { return 10 as i32; }
 fn TOKEN_WHILE()       -> i32 { return 11 as i32; }
 fn TOKEN_FOR()         -> i32 { return 12 as i32; }
-fn TOKEN_IN()          -> i32 { return 13 as i32; }
+fn TOKEN_IN_v1()          -> i32 { return 13 as i32; }
 fn TOKEN_MATCH()       -> i32 { return 14 as i32; }
 fn TOKEN_RETURN()      -> i32 { return 15 as i32; }
 fn TOKEN_BREAK()       -> i32 { return 16 as i32; }
@@ -52,7 +52,7 @@ fn TOKEN_STRUCT()      -> i32 { return 19 as i32; }
 fn TOKEN_ENUM()        -> i32 { return 20 as i32; }
 fn TOKEN_IMPORT()      -> i32 { return 21 as i32; }
 fn TOKEN_EXTERN()      -> i32 { return 22 as i32; }
-fn TOKEN_AS()          -> i32 { return 23 as i32; }
+fn TOKEN_AS_v1()          -> i32 { return 23 as i32; }
 fn TOKEN_SIZEOF()      -> i32 { return 24 as i32; }
 fn TOKEN_ALIGNOF()     -> i32 { return 25 as i32; }
 
@@ -62,11 +62,11 @@ fn TOKEN_MINUS()       -> i32 { return 28 as i32; }   /* -  */
 fn TOKEN_STAR()        -> i32 { return 29 as i32; }   /* *  */
 fn TOKEN_SLASH()       -> i32 { return 30 as i32; }   /* /  */
 fn TOKEN_PERCENT()     -> i32 { return 31 as i32; }   /* %  */
-fn TOKEN_EQ()          -> i32 { return 32 as i32; }   /* =  */
+fn TOKEN_EQ_v1()          -> i32 { return 32 as i32; }   /* =  */
 fn TOKEN_EQEQ()        -> i32 { return 33 as i32; }   /* == */
 fn TOKEN_BANGEQ()      -> i32 { return 34 as i32; }   /* != */
-fn TOKEN_LT()          -> i32 { return 35 as i32; }   /* <  */
-fn TOKEN_GT()          -> i32 { return 36 as i32; }   /* >  */
+fn TOKEN_LT_v1()          -> i32 { return 35 as i32; }   /* <  */
+fn TOKEN_GT_v1()          -> i32 { return 36 as i32; }   /* >  */
 fn TOKEN_LTEQ()        -> i32 { return 37 as i32; }   /* <= */
 fn TOKEN_GTEQ()        -> i32 { return 38 as i32; }   /* >= */
 fn TOKEN_BANG()        -> i32 { return 39 as i32; }   /* !  */
@@ -119,7 +119,7 @@ type Token = struct {
 }
 
 type Lexer = struct {
-    source:   *u8,
+    source_v1:   *u8,
     current:  *u8,
     filename: *u8,
     line:     i32,
@@ -143,10 +143,10 @@ type Lexer = struct {
 
 fn lookup_keyword(name: *u8, len: i64) -> i32 {
     if len == 2 as i64 {
-        if strncmp(name, "fn" as *u8, 2 as i64) == 0 as i32 { return TOKEN_FN(); }
-        if strncmp(name, "if" as *u8, 2 as i64) == 0 as i32 { return TOKEN_IF(); }
-        if strncmp(name, "in" as *u8, 2 as i64) == 0 as i32 { return TOKEN_IN(); }
-        if strncmp(name, "as" as *u8, 2 as i64) == 0 as i32 { return TOKEN_AS(); }
+        if strncmp(name, "fn" as *u8, 2 as i64) == 0 as i32 { return TOKEN_FN_v1(); }
+        if strncmp(name, "if" as *u8, 2 as i64) == 0 as i32 { return TOKEN_IF_v1(); }
+        if strncmp(name, "in" as *u8, 2 as i64) == 0 as i32 { return TOKEN_IN_v1(); }
+        if strncmp(name, "as" as *u8, 2 as i64) == 0 as i32 { return TOKEN_AS_v1(); }
     }
     if len == 3 as i64 {
         if strncmp(name, "let" as *u8, 3 as i64) == 0 as i32 { return TOKEN_LET(); }
@@ -188,12 +188,12 @@ fn lookup_keyword(name: *u8, len: i64) -> i32 {
 // 读取 current 但不前进；EOF 返回 '\0' (NUL)
 //
 // 绕开 v0.6 codegen bug #6：*u8 deref 会 emit `%=b loadsb`（QBE 不允许 'b'
-// 作 destination）。改用 *i32 deref + 4-byte aligned + shift+mask 取 byte。
+// 作 destination）。改用 *i32 deref + 4-byte aligned_v1 + shift+mask 取 byte。
 fn lex_peek_char(l: *Lexer) -> i32 {
-    let p_addr = (*l).current as i64;
-    let aligned = p_addr & (~(3 as i64));
-    let rem = (p_addr - aligned) as i32;
-    let w = *((aligned) as *i32);
+    let p_addr_v1 = (*l).current as i64;
+    let aligned_v1 = p_addr_v1 & (~(3 as i64));
+    let rem = (p_addr_v1 - aligned_v1) as i32;
+    let w = *((aligned_v1) as *i32);
     let sh = rem * (8 as i32);
     let c = ((w >> sh) & (255 as i32)) as i64;
     return c as i32;
@@ -228,10 +228,10 @@ fn lex_match_char(l: *Lexer, expected: i32) -> i32 {
 
 // 读 current+off 字符但不前进
 fn lex_peek_char_at(l: *Lexer, off: i64) -> i32 {
-    let p_addr = ((*l).current as i64) + off;
-    let aligned = p_addr & (~(3 as i64));
-    let rem = (p_addr - aligned) as i32;
-    let w = *((aligned) as *i32);
+    let p_addr_v1 = ((*l).current as i64) + off;
+    let aligned_v1 = p_addr_v1 & (~(3 as i64));
+    let rem = (p_addr_v1 - aligned_v1) as i32;
+    let w = *((aligned_v1) as *i32);
     let sh = rem * (8 as i32);
     let c = ((w >> sh) & (255 as i32)) as i64;
     return c as i32;
@@ -359,15 +359,15 @@ fn lex_scan_number(l: *Lexer, t: *Token) -> i32 {
     // digit_fn pointer (C 用函数指针；jhyy 用 base 值 + if/else 模拟)
     let mut digit_kind = 0 as i32;  // 0=dec, 1=hex, 2=oct, 3=bin
 
-    // workaround bug #6: *u8 deref → use aligned *i32 + mask
+    // workaround bug #6: *u8 deref → use aligned_v1 *i32 + mask
     let first_addr = start as i64;
     let first_aligned = first_addr & (~(3 as i64));
     let first_rem = (first_addr - first_aligned) as i32;
-    let first_w = *((first_aligned) as *i32);
-    let first_sh = first_rem * (8 as i32);
-    let first_byte = (first_w >> first_sh) & (255 as i32);
-    let first_ci = first_byte as i32;
-    if first_ci == 48 {  // '0'
+    let first_w_v1 = *((first_aligned) as *i32);
+    let first_sh_v1 = first_rem * (8 as i32);
+    let first_byte = (first_w_v1 >> first_sh_v1) & (255 as i32);
+    let first_ci_v1 = first_byte as i32;
+    if first_ci_v1 == 48 {  // '0'
         let p = lex_peek_char(l);
         if p == 120 || p == 88 {  // x / X
             base = 16 as i32; digit_kind = 1 as i32;
@@ -463,7 +463,7 @@ fn lex_scan_string(l: *Lexer, t: *Token) -> i32 {
             return lex_error_token(l, "unterminated string literal" as *u8,
                                   ((*l).current as i64 - start as i64), t);
         }
-        if c == (34 as i32) {  // closing '"'
+        if c == (34 as i32) {  // closing_v1 '"'
             done = 1 as i32;
         } else if c == (92 as i32) {  // '\\'
             let e = lex_peek_char(l);
@@ -498,8 +498,8 @@ fn lex_scan_char(l: *Lexer, t: *Token) -> i32 {
             if is_hex_digit(lex_peek_char(l)) != (0 as i32) { lex_next_char(l); }
         }
     }
-    let closing = lex_next_char(l);
-    if closing != (39 as i32) {  // '\''
+    let closing_v1 = lex_next_char(l);
+    if closing_v1 != (39 as i32) {  // '\''
         return lex_error_token(l, "unterminated character literal" as *u8,
                               ((*l).current as i64 - start as i64), t);
     }
@@ -540,9 +540,9 @@ fn lex_scan_ident_or_keyword(l: *Lexer, t: *Token) -> i32 {
 // Public API
 // ════════════════════════════════════════════════════
 
-fn lexer_init(l: *Lexer, source: *u8, filename: *u8) -> i32 {
-    (*l).source = source;
-    (*l).current = source;
+fn lexer_init(l: *Lexer, source_v1: *u8, filename: *u8) -> i32 {
+    (*l).source_v1 = source_v1;
+    (*l).current = source_v1;
     (*l).filename = filename;
     (*l).line = 1 as i32;
     (*l).col = 1 as i32;
@@ -661,7 +661,7 @@ fn lexer_next(l: *Lexer, t: *Token) -> i32 {
         } else if lex_match_char(l, 62 as i32) != (0 as i32) {
             lex_make_token(l, TOKEN_FATARROW(), start, 2 as i64, t);
         } else {
-            lex_make_token(l, TOKEN_EQ(), start, 1 as i64, t);
+            lex_make_token(l, TOKEN_EQ_v1(), start, 1 as i64, t);
         }
         return 0 as i32;
     }
@@ -681,7 +681,7 @@ fn lexer_next(l: *Lexer, t: *Token) -> i32 {
         } else if lex_match_char(l, 60 as i32) != (0 as i32) {
             lex_make_token(l, TOKEN_LTLT(), start, 2 as i64, t);
         } else {
-            lex_make_token(l, TOKEN_LT(), start, 1 as i64, t);
+            lex_make_token(l, TOKEN_LT_v1(), start, 1 as i64, t);
         }
         return 0 as i32;
     }
@@ -692,7 +692,7 @@ fn lexer_next(l: *Lexer, t: *Token) -> i32 {
         } else if lex_match_char(l, 62 as i32) != (0 as i32) {
             lex_make_token(l, TOKEN_GTGT(), start, 2 as i64, t);
         } else {
-            lex_make_token(l, TOKEN_GT(), start, 1 as i64, t);
+            lex_make_token(l, TOKEN_GT_v1(), start, 1 as i64, t);
         }
         return 0 as i32;
     }
@@ -777,14 +777,14 @@ fn token_kind_name(kind: i32) -> *u8 {
     if kind == TOKEN_CHAR() { return "char" as *u8; }
     if kind == TOKEN_BOOL() { return "bool" as *u8; }
     if kind == TOKEN_IDENT() { return "ident" as *u8; }
-    if kind == TOKEN_FN() { return "fn" as *u8; }
+    if kind == TOKEN_FN_v1() { return "fn" as *u8; }
     if kind == TOKEN_LET() { return "let" as *u8; }
     if kind == TOKEN_MUT() { return "mut" as *u8; }
-    if kind == TOKEN_IF() { return "if" as *u8; }
+    if kind == TOKEN_IF_v1() { return "if" as *u8; }
     if kind == TOKEN_ELSE() { return "else" as *u8; }
     if kind == TOKEN_WHILE() { return "while" as *u8; }
     if kind == TOKEN_FOR() { return "for" as *u8; }
-    if kind == TOKEN_IN() { return "in" as *u8; }
+    if kind == TOKEN_IN_v1() { return "in" as *u8; }
     if kind == TOKEN_MATCH() { return "match" as *u8; }
     if kind == TOKEN_RETURN() { return "return" as *u8; }
     if kind == TOKEN_BREAK() { return "break" as *u8; }
@@ -794,7 +794,7 @@ fn token_kind_name(kind: i32) -> *u8 {
     if kind == TOKEN_ENUM() { return "enum" as *u8; }
     if kind == TOKEN_IMPORT() { return "import" as *u8; }
     if kind == TOKEN_EXTERN() { return "extern" as *u8; }
-    if kind == TOKEN_AS() { return "as" as *u8; }
+    if kind == TOKEN_AS_v1() { return "as" as *u8; }
     if kind == TOKEN_SIZEOF() { return "sizeof" as *u8; }
     if kind == TOKEN_ALIGNOF() { return "alignof" as *u8; }
     if kind == TOKEN_PLUS() { return "+" as *u8; }
@@ -802,11 +802,11 @@ fn token_kind_name(kind: i32) -> *u8 {
     if kind == TOKEN_STAR() { return "*" as *u8; }
     if kind == TOKEN_SLASH() { return "/" as *u8; }
     if kind == TOKEN_PERCENT() { return "%" as *u8; }
-    if kind == TOKEN_EQ() { return "=" as *u8; }
+    if kind == TOKEN_EQ_v1() { return "=" as *u8; }
     if kind == TOKEN_EQEQ() { return "==" as *u8; }
     if kind == TOKEN_BANGEQ() { return "!=" as *u8; }
-    if kind == TOKEN_LT() { return "<" as *u8; }
-    if kind == TOKEN_GT() { return ">" as *u8; }
+    if kind == TOKEN_LT_v1() { return "<" as *u8; }
+    if kind == TOKEN_GT_v1() { return ">" as *u8; }
     if kind == TOKEN_LTEQ() { return "<=" as *u8; }
     if kind == TOKEN_GTEQ() { return ">=" as *u8; }
     if kind == TOKEN_BANG() { return "!" as *u8; }
