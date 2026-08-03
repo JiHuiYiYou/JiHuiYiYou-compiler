@@ -1176,6 +1176,49 @@ fn parse_match(p: *Parser) -> *Node {
 }
 
 // ════════════════════════════════════════════════════
+// parse_dispatch_simple_only: block body 里的"非控制流"语句 dispatcher
+// ════════════════════════════════════════════════════
+//
+// v0.8 commit 6：抽取 helper 解决 parse_if / parse_for 缺 while/for 的问题。
+// 原始 commit 3 设计是每个 block body inline 一份 dispatcher（避免 mutual recursion）。
+// 但 inline dispatcher 在 parse_if body 漏 TOKEN_WHILE，在 parse_for body 漏 TOKEN_WHILE，
+// 导致 while-inside-if / while-inside-for 报 CERR。
+//
+// 折中：dispatcher 拆成两部分：
+//   1. **简单语句**（let/return/break/continue/match/expr_stmt）→ parse_dispatch_simple_only
+//      在 parse_match 之后定义，可在 parse_if / parse_for / parse_while / parse_func
+//      任意位置复用（不依赖 control flow parsers 的相对顺序）
+//   2. **控制流**（if/while/for）→ 各自 dispatcher inline 加分支
+//
+// 这样：
+//   - parse_if body 加 TOKEN_WHILE/TOKEN_FOR 分支（用内联 parse_while/parse_for 逻辑）
+//   - parse_for body 加 TOKEN_WHILE 分支
+//   - parse_while / parse_func body 已有全 dispatcher，保持不变
+//
+// 限制：parse_if 内部的 while body 不能嵌套 for/while（forward ref），
+// parse_for 内部的 while body 不能嵌套 while。compiler 源码里的 while-inside-if
+// 模式（util.jhyy hm_grow）body 只有 if/break/expr_stmt，正好够用。
+
+fn parse_dispatch_simple_only(p: *Parser) -> *Node {
+    if parser_check(p, TOKEN_LET()) != (0 as i32) {
+        return parse_let(p);
+    }
+    if parser_check(p, TOKEN_RETURN()) != (0 as i32) {
+        return parse_return(p);
+    }
+    if parser_check(p, TOKEN_BREAK()) != (0 as i32) {
+        return parse_break(p);
+    }
+    if parser_check(p, TOKEN_CONTINUE()) != (0 as i32) {
+        return parse_continue(p);
+    }
+    if parser_check(p, TOKEN_MATCH()) != (0 as i32) {
+        return parse_match(p);
+    }
+    return parse_expr_stmt(p);
+}
+
+// ════════════════════════════════════════════════════
 // parse_if: inlined block body (commit 3 限制：block 内不支持 nested LBRACE)
 // 顺序：parse_if 必须先于 parse_for 定义（parse_for 调 parse_if）
 // ════════════════════════════════════════════════════
@@ -1203,24 +1246,100 @@ fn parse_if(p: *Parser) -> *Node {
         if parser_check(p, TOKEN_EOF()) != (0 as i32) {
             break;
         }
-        // inlined dispatcher: shared 6 sub-stmts + self (parse_if) only
-        // （no parse_for / parse_while to avoid mutual recursion 死循环；
-        //   if-inside-for 由 parse_for 内的 dispatcher 调 parse_if 处理）
+        // v0.8 commit 6 dispatcher: simple_only helper + parse_if (self) +
+        // parse_while + parse_for（inlined limited 版本 — 见下）
         let mut stmt: *Node = 0 as *Node;
-        if parser_check(p, TOKEN_LET()) != (0 as i32) {
-            stmt = parse_let(p);
-        } else if parser_check(p, TOKEN_RETURN()) != (0 as i32) {
-            stmt = parse_return(p);
-        } else if parser_check(p, TOKEN_BREAK()) != (0 as i32) {
-            stmt = parse_break(p);
-        } else if parser_check(p, TOKEN_CONTINUE()) != (0 as i32) {
-            stmt = parse_continue(p);
-        } else if parser_check(p, TOKEN_MATCH()) != (0 as i32) {
-            stmt = parse_match(p);
-        } else if parser_check(p, TOKEN_IF()) != (0 as i32) {
+        if parser_check(p, TOKEN_IF()) != (0 as i32) {
             stmt = parse_if(p);
+        } else if parser_check(p, TOKEN_WHILE()) != (0 as i32) {
+            // ── inline parse_while（limited body：simple_only + parse_if） ──
+            let mut wt = empty_token();
+            parser_peek(p, &wt);
+            let wlf = wt.loc_filename;
+            let wll = wt.loc_line;
+            let wlc = wt.loc_col;
+            parser_advance(p, &wt);  // consume 'while'
+            let wcond = parse_expr(p, PREC_NONE());
+            parser_expect(p, TOKEN_LBRACE(), "{ after while condition" as *u8, &wt);
+            parser_push_scope(p);
+            let mut wstmts: *u8 = 0 as *u8;
+            let mut wnstmts: i64 = 0 as i64;
+            let mut wcap: i64 = 0 as i64;
+            while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+                if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+                let mut wstmt: *Node = 0 as *Node;
+                if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                    wstmt = parse_if(p);
+                } else {
+                    wstmt = parse_dispatch_simple_only(p);
+                }
+                if wstmt != (0 as *Node) {
+                    if wnstmts >= wcap {
+                        wcap = if wcap != (0 as i64) { wcap * (2 as i64) } else { (8 as i64) };
+                        let wns = arena_alloc((*p).arena, wcap * (8 as i64));
+                        if wstmts != (0 as *u8) {
+                            if wnstmts > (0 as i64) { memcpy(wns, wstmts, wnstmts * (8 as i64)); }
+                        }
+                        wstmts = wns;
+                    }
+                    let wslot = (wstmts as i64 + wnstmts * (8 as i64)) as **Node;
+                    *wslot = wstmt;
+                    wnstmts = wnstmts + (1 as i64);
+                }
+            }
+            parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &wt);
+            parser_pop_scope(p);
+            let wbody = ast_new_block((*p).arena, wlf, wll, wlc, wstmts, wnstmts);
+            stmt = ast_new_while((*p).arena, wlf, wll, wlc, wcond, wbody);
+        } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
+            // ── inline parse_for（limited body：simple_only + parse_if） ──
+            let mut ft = empty_token();
+            parser_peek(p, &ft);
+            let flf = ft.loc_filename;
+            let fll = ft.loc_line;
+            let flc = ft.loc_col;
+            parser_advance(p, &ft);  // consume 'for'
+            parser_expect(p, TOKEN_IDENT(), "loop variable" as *u8, &ft);
+            let fvname = parser_tok_name(p, &ft);
+            parser_expect(p, TOKEN_IN(), "in" as *u8, &ft);
+            let fstart = parse_expr(p, PREC_NONE());
+            parser_expect(p, TOKEN_DOTDOT(), ".." as *u8, &ft);
+            let fend = parse_expr(p, PREC_NONE());
+            parser_expect(p, TOKEN_LBRACE(), "{ after for range" as *u8, &ft);
+            parser_push_scope(p);
+            let fsym = symtab_insert((*p).current_scope, fvname, SYM_VAR(),
+                                    0 as *u8, 0 as i32, (*p).scope_depth);
+            let mut fstmts: *u8 = 0 as *u8;
+            let mut fnstmts: i64 = 0 as i64;
+            let mut fcap: i64 = 0 as i64;
+            while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+                if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+                let mut fstmt: *Node = 0 as *Node;
+                if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                    fstmt = parse_if(p);
+                } else {
+                    fstmt = parse_dispatch_simple_only(p);
+                }
+                if fstmt != (0 as *Node) {
+                    if fnstmts >= fcap {
+                        fcap = if fcap != (0 as i64) { fcap * (2 as i64) } else { (8 as i64) };
+                        let fns = arena_alloc((*p).arena, fcap * (8 as i64));
+                        if fstmts != (0 as *u8) {
+                            if fnstmts > (0 as i64) { memcpy(fns, fstmts, fnstmts * (8 as i64)); }
+                        }
+                        fstmts = fns;
+                    }
+                    let fslot = (fstmts as i64 + fnstmts * (8 as i64)) as **Node;
+                    *fslot = fstmt;
+                    fnstmts = fnstmts + (1 as i64);
+                }
+            }
+            parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &ft);
+            parser_pop_scope(p);
+            let fbody = ast_new_block((*p).arena, flf, fll, flc, fstmts, fnstmts);
+            stmt = ast_new_for((*p).arena, flf, fll, flc, fsym, fstart, fend, fbody);
         } else {
-            stmt = parse_expr_stmt(p);
+            stmt = parse_dispatch_simple_only(p);
         }
 
         if stmt != (0 as *Node) {
@@ -1260,21 +1379,99 @@ fn parse_if(p: *Parser) -> *Node {
                 if parser_check(p, TOKEN_EOF()) != (0 as i32) {
                     break;
                 }
+                // v0.8 commit 6 dispatcher: simple_only + parse_if + inline limited while/for
                 let mut stmt: *Node = 0 as *Node;
-                if parser_check(p, TOKEN_LET()) != (0 as i32) {
-                    stmt = parse_let(p);
-                } else if parser_check(p, TOKEN_RETURN()) != (0 as i32) {
-                    stmt = parse_return(p);
-                } else if parser_check(p, TOKEN_BREAK()) != (0 as i32) {
-                    stmt = parse_break(p);
-                } else if parser_check(p, TOKEN_CONTINUE()) != (0 as i32) {
-                    stmt = parse_continue(p);
-                } else if parser_check(p, TOKEN_MATCH()) != (0 as i32) {
-                    stmt = parse_match(p);
-                } else if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                if parser_check(p, TOKEN_IF()) != (0 as i32) {
                     stmt = parse_if(p);
+                } else if parser_check(p, TOKEN_WHILE()) != (0 as i32) {
+                    // ── inline parse_while（limited body：simple_only + parse_if） ──
+                    let mut wt = empty_token();
+                    parser_peek(p, &wt);
+                    let wlf = wt.loc_filename;
+                    let wll = wt.loc_line;
+                    let wlc = wt.loc_col;
+                    parser_advance(p, &wt);
+                    let wcond = parse_expr(p, PREC_NONE());
+                    parser_expect(p, TOKEN_LBRACE(), "{ after while condition" as *u8, &wt);
+                    parser_push_scope(p);
+                    let mut wstmts: *u8 = 0 as *u8;
+                    let mut wnstmts: i64 = 0 as i64;
+                    let mut wcap: i64 = 0 as i64;
+                    while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+                        if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+                        let mut wstmt: *Node = 0 as *Node;
+                        if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                            wstmt = parse_if(p);
+                        } else {
+                            wstmt = parse_dispatch_simple_only(p);
+                        }
+                        if wstmt != (0 as *Node) {
+                            if wnstmts >= wcap {
+                                wcap = if wcap != (0 as i64) { wcap * (2 as i64) } else { (8 as i64) };
+                                let wns = arena_alloc((*p).arena, wcap * (8 as i64));
+                                if wstmts != (0 as *u8) {
+                                    if wnstmts > (0 as i64) { memcpy(wns, wstmts, wnstmts * (8 as i64)); }
+                                }
+                                wstmts = wns;
+                            }
+                            let wslot = (wstmts as i64 + wnstmts * (8 as i64)) as **Node;
+                            *wslot = wstmt;
+                            wnstmts = wnstmts + (1 as i64);
+                        }
+                    }
+                    parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &wt);
+                    parser_pop_scope(p);
+                    let wbody = ast_new_block((*p).arena, wlf, wll, wlc, wstmts, wnstmts);
+                    stmt = ast_new_while((*p).arena, wlf, wll, wlc, wcond, wbody);
+                } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
+                    // ── inline parse_for（limited body：simple_only + parse_if） ──
+                    let mut ft = empty_token();
+                    parser_peek(p, &ft);
+                    let flf = ft.loc_filename;
+                    let fll = ft.loc_line;
+                    let flc = ft.loc_col;
+                    parser_advance(p, &ft);
+                    parser_expect(p, TOKEN_IDENT(), "loop variable" as *u8, &ft);
+                    let fvname = parser_tok_name(p, &ft);
+                    parser_expect(p, TOKEN_IN(), "in" as *u8, &ft);
+                    let fstart = parse_expr(p, PREC_NONE());
+                    parser_expect(p, TOKEN_DOTDOT(), ".." as *u8, &ft);
+                    let fend = parse_expr(p, PREC_NONE());
+                    parser_expect(p, TOKEN_LBRACE(), "{ after for range" as *u8, &ft);
+                    parser_push_scope(p);
+                    let fsym = symtab_insert((*p).current_scope, fvname, SYM_VAR(),
+                                            0 as *u8, 0 as i32, (*p).scope_depth);
+                    let mut fstmts: *u8 = 0 as *u8;
+                    let mut fnstmts: i64 = 0 as i64;
+                    let mut fcap: i64 = 0 as i64;
+                    while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+                        if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+                        let mut fstmt: *Node = 0 as *Node;
+                        if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                            fstmt = parse_if(p);
+                        } else {
+                            fstmt = parse_dispatch_simple_only(p);
+                        }
+                        if fstmt != (0 as *Node) {
+                            if fnstmts >= fcap {
+                                fcap = if fcap != (0 as i64) { fcap * (2 as i64) } else { (8 as i64) };
+                                let fns = arena_alloc((*p).arena, fcap * (8 as i64));
+                                if fstmts != (0 as *u8) {
+                                    if fnstmts > (0 as i64) { memcpy(fns, fstmts, fnstmts * (8 as i64)); }
+                                }
+                                fstmts = fns;
+                            }
+                            let fslot = (fstmts as i64 + fnstmts * (8 as i64)) as **Node;
+                            *fslot = fstmt;
+                            fnstmts = fnstmts + (1 as i64);
+                        }
+                    }
+                    parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &ft);
+                    parser_pop_scope(p);
+                    let fbody = ast_new_block((*p).arena, flf, fll, flc, fstmts, fnstmts);
+                    stmt = ast_new_for((*p).arena, flf, fll, flc, fsym, fstart, fend, fbody);
                 } else {
-                    stmt = parse_expr_stmt(p);
+                    stmt = parse_dispatch_simple_only(p);
                 }
                 if stmt != (0 as *Node) {
                     if nelse >= ecap {
@@ -1338,25 +1535,57 @@ fn parse_for(p: *Parser) -> *Node {
         if parser_check(p, TOKEN_EOF()) != (0 as i32) {
             break;
         }
-        // inlined dispatcher: shared 6 sub-stmts + self (parse_for) + parse_if
-        // （no parse_while — while-inside-for 是 commit 3 limitation）
+        // v0.8 commit 6 dispatcher: simple_only + parse_if + parse_for (self) +
+        // parse_while（inlined limited 版本 — body 不嵌套 while）
         let mut stmt: *Node = 0 as *Node;
-        if parser_check(p, TOKEN_LET()) != (0 as i32) {
-            stmt = parse_let(p);
-        } else if parser_check(p, TOKEN_RETURN()) != (0 as i32) {
-            stmt = parse_return(p);
-        } else if parser_check(p, TOKEN_BREAK()) != (0 as i32) {
-            stmt = parse_break(p);
-        } else if parser_check(p, TOKEN_CONTINUE()) != (0 as i32) {
-            stmt = parse_continue(p);
-        } else if parser_check(p, TOKEN_MATCH()) != (0 as i32) {
-            stmt = parse_match(p);
-        } else if parser_check(p, TOKEN_IF()) != (0 as i32) {
+        if parser_check(p, TOKEN_IF()) != (0 as i32) {
             stmt = parse_if(p);
         } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
             stmt = parse_for(p);
+        } else if parser_check(p, TOKEN_WHILE()) != (0 as i32) {
+            // ── inline parse_while（limited body：simple_only + parse_if + parse_for） ──
+            let mut wt = empty_token();
+            parser_peek(p, &wt);
+            let wlf = wt.loc_filename;
+            let wll = wt.loc_line;
+            let wlc = wt.loc_col;
+            parser_advance(p, &wt);
+            let wcond = parse_expr(p, PREC_NONE());
+            parser_expect(p, TOKEN_LBRACE(), "{ after while condition" as *u8, &wt);
+            parser_push_scope(p);
+            let mut wstmts: *u8 = 0 as *u8;
+            let mut wnstmts: i64 = 0 as i64;
+            let mut wcap: i64 = 0 as i64;
+            while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+                if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+                let mut wstmt: *Node = 0 as *Node;
+                if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                    wstmt = parse_if(p);
+                } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
+                    wstmt = parse_for(p);
+                } else {
+                    wstmt = parse_dispatch_simple_only(p);
+                }
+                if wstmt != (0 as *Node) {
+                    if wnstmts >= wcap {
+                        wcap = if wcap != (0 as i64) { wcap * (2 as i64) } else { (8 as i64) };
+                        let wns = arena_alloc((*p).arena, wcap * (8 as i64));
+                        if wstmts != (0 as *u8) {
+                            if wnstmts > (0 as i64) { memcpy(wns, wstmts, wnstmts * (8 as i64)); }
+                        }
+                        wstmts = wns;
+                    }
+                    let wslot = (wstmts as i64 + wnstmts * (8 as i64)) as **Node;
+                    *wslot = wstmt;
+                    wnstmts = wnstmts + (1 as i64);
+                }
+            }
+            parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &wt);
+            parser_pop_scope(p);
+            let wbody = ast_new_block((*p).arena, wlf, wll, wlc, wstmts, wnstmts);
+            stmt = ast_new_while((*p).arena, wlf, wll, wlc, wcond, wbody);
         } else {
-            stmt = parse_expr_stmt(p);
+            stmt = parse_dispatch_simple_only(p);
         }
         if stmt != (0 as *Node) {
             if nstmts >= cap {

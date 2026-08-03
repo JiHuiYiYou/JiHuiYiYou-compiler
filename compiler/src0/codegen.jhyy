@@ -1160,7 +1160,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 let _s2 = cg_emit_store_primitive(cg_raw, 0 as *u8, rb_and, result_slot);
                 ir_emit_jmp(ir, merge_b);
                 ir_emit_label(ir, merge_b);
-                ir_emit_load(cg_raw, result, 0 as *u8, result_slot);
+                cg_emit_load(cg_raw, result, 0 as *u8, result_slot);  // v0.8 commit 5: ir_emit_load→cg_emit_load
             } else {
                 let true_block = ir_new_block(ir, "sc_true" as *u8);
                 ir_emit_jnz(ir, left, true_block, eval_b);
@@ -1176,7 +1176,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 let _s4 = cg_emit_store_primitive(cg_raw, 0 as *u8, rb_or, result_slot);
                 ir_emit_jmp(ir, merge_b);
                 ir_emit_label(ir, merge_b);
-                ir_emit_load(cg_raw, result, 0 as *u8, result_slot);
+                cg_emit_load(cg_raw, result, 0 as *u8, result_slot);  // v0.8 commit 5: ir_emit_load→cg_emit_load
             }
             return result;
         }
