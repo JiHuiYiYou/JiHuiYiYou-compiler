@@ -28,6 +28,8 @@
 | [W-001](#w-001-hash_string-用-i32-deref-绕-v0-codegen-loadsb-错) | ACTIVE | hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错 |
 | [W-002](#w-002-mainjhyy-重命名绕-jhyy_v1-hash_string-堆损坏) | ACTIVE | 211 个 src0 标识符 _v1 后缀化绕 jhyy_v1 hash_string 堆损坏 |
 | [W-003](#w-003-jhyy_v1-let-_-fncall-顶层-嵌套-segfault) | ACTIVE | `let _ = fncall(...)` 改 direct call，绕 jhyy_v1 codegen segfault（Bug 7/7b） |
+| [W-004](#w-004-short-local-var-4-chars--symtab-hash-撞--jhyy_v1-field-assign-死循环) | ACTIVE | 短（≤4 字符）local var / fn 参数 / field 改名绕 jhyy_v1 symtab hash 撞（stack overflow） |
+| [W-005](#w-005-let-mut--assign--jhyy_v1-codegen-segfault) | ACTIVE | `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault |
 
 ---
 
@@ -216,3 +218,160 @@ store_byte_i32(nul1, 0 as i32);
 **引用:**
 - `memory/feedback_v0_codegen_bug_workarounds.md` Bug 7 / Bug 7b
 - 决策过程见 `memory/project_bootstrap_closure_state.md` § W-003 iterations
+
+---
+
+## W-004: short local var (≤4 chars) → symtab hash 撞 → jhyy_v1 field assign 死循环
+
+**ID:** W-004
+**状态:** ACTIVE
+**日期:** 2026-08-03
+**触发面:** 同时存在 ① 短（≤4 字符）函数名 + ② 短（≤4 字符）`let` 局部 var 名 + ③ struct field 赋值的组合。具体阈值取决于三者长度之和（如 `fn main` 4 + `let a` 1 + `field cur` 3 = fail；`fn entry` 5 + `let a` 1 + `field cur` 3 = OK）。
+**症状:** jhyy_v1 编译含此模式的源码 → 0xC00000FD STACK OVERFLOW（exit 3221226356）。**不是** segfault（exit 3221225477）。
+**根因嫌疑:** W-001 的 `hash_string` 用 `*i32` deref 一次读 4 byte。对于短字符串（长度 1-4），4-byte read 把后续 slack 字节吸进 hash 值，导致 hash 错位 → 多个不同 ident 撞同一 slot → 后续 cg_emit_store / cg_copy_struct 走错 sym → 递归查错 local → 死循环。
+
+W-002 已修类似（identifier 长度 6-8 + `_buf` 后缀）的 hash_string 触发面，但只覆盖了**全局** enum 常量和**函数名**（211 个），未覆盖**局部 var 名**和**struct field 名**。本 workaround 补 W-002 漏掉的部分。
+
+**workaround:** 把 src0/ 里所有 ≤ 4 字符的 `let` 局部 var 标识符重命名到 ≥ 5 字符。机械化前缀 `ptr_` / 后缀 `_local` / 加 `_v1`。同样适用于函数参数名。
+
+**改名规则:**
+- 长度 ≤ 4 字符的 `let`/`let mut` 局部 var（包含函数参数）一律改名到 ≥ 5 字符
+- 长度 ≤ 4 字符的 struct field 名同样改名
+- 命名规则同 W-002：机械化前缀/后缀，避免新撞
+
+**最小复现（验证 workaround 必要性）:**
+
+```jhyy
+// BAD (触发 stack overflow):
+type Arena = struct { cur: i32 }     // field "cur" 长度 3
+fn main() -> i32 {                   // fn "main" 长度 4
+    let mut a: Arena = Arena { cur: 0 as i32 };  // var "a" 长度 1
+    a.cur = 5 as i32;                 // field assign 触发
+    return 0 as i32;
+}
+// jhyy_v1: STACK OVERFLOW (3221226356)
+
+// GOOD (workaround 验证):
+type Arena = struct { current_value: i32 }  // field 长度 13
+fn ab() -> i32 {                              // fn 长度 2，但其它都长
+    let mut arena_local: Arena = Arena { current_value: 0 as i32 };  // var 长度 11
+    arena_local.current_value = 5 as i32;
+    return 0 as i32;
+}
+// jhyy_v1: OK
+```
+
+**验证（2026-08-03）:**
+- 局部 var 名 `a`/`aa` (1-2 字符) + fn 名 `main`/`ab` (≤4 字符) + field 名 `cur`/`val` (≤4 字符) → 100% stack overflow
+- 任一项 ≥ 5 字符 → 100% OK
+- 字段赋值 (`a.cur = 5`) 是必要触发条件；只读不写不触发
+
+**影响范围（src0/ 各文件 `let x` / `let mut x` 计数 — W-004 待替换）:**
+
+- main.jhyy: 55 个 let + ~20 个 fn 参数（主要工作量）
+- 其他文件待评估（codegen.jhyy / sema.jhyy 等 src0/ 文件，若要 jhyy_v1 编出来都要改）
+
+**W-004 局限性:** W-001 的 hash_string 根因（`*i32` deref overread）未解，只是机械改名绕开触发面。W-001 真正修了之后，W-004 可移除并恢复短名。
+
+**失效条件:** jhyy_v1 的 codegen 对 `*i32` deref 4-byte read 改成 byte-by-byte 不再 overread（修 W-001 根因）→ W-004 可移除。
+
+**superseder:** TBD（v0 codegen fix sprint，post v1.0.0）
+
+**引用:**
+- `memory/feedback_v0_codegen_bug_workarounds.md` Bug 6 (let-mut assignment) + Bug 1 (hash_string overread)
+- W-002 (`docs/internal/workarounds.md` § W-002) 修了 211 个全局/函数名，未覆盖局部 var
+- 复现测试 `tmp/test_w4.jhyy` ~ `tmp/test_w8.jhyy`
+
+---
+
+## W-005: `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault
+
+**ID:** W-005
+**状态:** ACTIVE
+**日期:** 2026-08-03
+**触发面:** 函数体内任意 `let mut` 变量 + 后续 `x = expr;` 赋值语句（不论 expr 类型、变量名长度、是否被 read、所在 fn 深度）。**100% 触发**（exit 139 / 0xC0000005）。
+**症状:** jhyy_v1 编译含此模式的源码 → 0xC0000005 segfault。v0 jhyy.exe 编同一源码 → exit 0（IL 正确）。
+**最小复现:**
+```jhyy
+// BAD (segfault):
+fn entry() -> i32 {
+    let mut x: i32 = 0 as i32;
+    x = 42 as i32;
+    return x;
+}
+// jhyy_v1: segfault (139)
+
+// GOOD (workaround 验证):
+fn entry() -> i32 {
+    let buf = malloc(8 as i64) as *i64;
+    *buf = 0 as i64;
+    *buf = *buf + 42 as i64;
+    let nul = (buf as i64) as *u8;
+    free(nul);
+    return 0 as i32;
+}
+// jhyy_v1: OK
+```
+
+**根因嫌疑:** Bug 6 (let-mut assignment) + Bug 7b (nested let-mut) 的复合 — jhyy_v1 自举编译 `NODE_ASSIGN[NODE_IDENT]` 路径时 emit 错的 IL（多写 storew 到未初始化 stack slot，或 loadw-on-loadw 链），访问 uninitialized memory 触发 0xC0000005。**v0 codegen 没这个问题**（v0 编同一 .jhyy 源码 emit 正确 IL），所以是 jhyy_v1 自身 codegen 的 bug，不是源 v0 的 bug。
+
+**workaround:** 用 `*pos_ptr += n` 模式（`i64` 通过 `*i64` 解引用累加）替代 `let mut pos: i64 = 0; pos = str_concat_at(...)`。需要累计位置的所有 cmd-构造函数（`run_qbe_v1` / `link_with_gcc`）都改。
+
+```jhyy
+// BAD (触发 segfault):
+fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
+    let cmd_buf_v1 = malloc(4096 as i64);
+    let qbe = QBE_PATH_v1();
+    let mut pos_v1: i64 = 0 as i64;
+    pos_v1 = str_concat_at(cmd_buf_v1, pos_v1, qbe);
+    pos_v1 = str_concat_at(cmd_buf_v1, pos_v1, " -t amd64_win -o " as *u8);
+    pos_v1 = str_concat_at(cmd_buf_v1, pos_v1, asm_path_v1);
+    ...
+    let nul_p = (cmd_buf_v1 as i64 + pos_v1) as *u8;
+    store_byte_i32(nul_p, 0 as i32);
+    ...
+}
+
+// GOOD (W-005):
+fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
+    let cmd_buf_v1 = malloc(4096 as i64);
+    let pos_ptr_v1 = malloc(8 as i64) as *i64;
+    *pos_ptr_v1 = 0 as i64;
+    let qbe = QBE_PATH_v1();
+    *pos_ptr_v1 = str_concat_at(cmd_buf_v1, *pos_ptr_v1, qbe);
+    *pos_ptr_v1 = str_concat_at(cmd_buf_v1, *pos_ptr_v1, " -t amd64_win -o " as *u8);
+    *pos_ptr_v1 = str_concat_at(cmd_buf_v1, *pos_ptr_v1, asm_path_v1);
+    ...
+    let nul_p = (cmd_buf_v1 as i64 + *pos_ptr_v1) as *u8;
+    store_byte_i32(nul_p, 0 as i32);
+    ...
+    free(pos_ptr_v1 as *u8);
+}
+```
+
+注意：`*pos_ptr_v1 = str_concat_at(...)` 实际是 `*pos_ptr_v1 = expr`，本质也是 `let mut` assignment 模式。**但通过 `*i64` deref 走的是 `NODE_DEREF` 路径而不是 `NODE_ASSIGN[NODE_IDENT]` 路径**，绕开 bug 6 的触发面。
+
+**验证（2026-08-03）:**
+- 最小 let-mut + assign（i32/i64、var 长度 1/7/10/各种）→ 100% segfault
+- `*pos_ptr = ...` 模式 → 100% OK
+- v0 编两种模式都 OK（jhyy_v1 自身 bug，不是 v0 也不是源 jhyy 源码问题）
+
+**影响范围（src0/ 中需 W-005 替换的 let-mut + assign 位置）:**
+
+| 文件 | 函数 | 变量 | 替换数 |
+|------|------|------|--------|
+| main.jhyy | run_qbe_v1 | pos_v1 | 5 (5 个 assign) |
+| main.jhyy | link_with_gcc | pos_v2 | 9 (9 个 assign) |
+| **总计** | | | **14** |
+
+**W-005 局限性:** 这是绕 `NODE_ASSIGN[NODE_IDENT]` 触发面。`let mut struct; struct.field = X` (NODE_ASSIGN[NODE_FIELD]) 走不同路径，W-005 不修。**Bug 6+7b 的根因修复需在 jhyy_v1 codegen.c 端修 NODE_ASSIGN 的 emit，post v1.0.0。**
+
+**失效条件:** jhyy_v1 codegen 修对 NODE_ASSIGN[NODE_IDENT] 的 let-mut target → emit 正确 `storew` 到 stack slot → W-005 可移除并恢复 `let mut x; x = ...;` 风格。
+
+**superseder:** TBD（jhyy_v1 codegen fix sprint，post v1.0.0 phase-2 落地后）
+
+**引用:**
+- `memory/feedback_v0_codegen_bug_workarounds.md` Bug 6 (let-mut assignment) + Bug 7b (nested let-mut)
+- W-003 (`docs/internal/workarounds.md` § W-003) 修了 `let _X = fncall()` 顶层 direct call 模式，未覆盖 let-mut + assign
+- W-004 修了短 var 名导致 symtab hash 撞死循环，未覆盖 let-mut + assign segfault
+- 复现测试 `tmp/test_w4_lit.jhyy` / `tmp/test_w4_v1.jhyy`

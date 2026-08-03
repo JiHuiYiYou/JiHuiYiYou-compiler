@@ -192,21 +192,28 @@ fn HASHMAP_INITIAL_SIZE() -> i64 { return 256 as i64; }
 fn FNV_OFFSET() -> i64 { return 0xcbf29ce484222325 as i64; }
 fn FNV_PRIME() -> i64 { return 0x100000001b3 as i64; }
 
-// 绕过 v0.6 codegen bug：*u8 deref 会 emit `%=b loadsb`（QBE 不允许 'b' 作
-// destination）。改用 *i32 deref 每次读 4 byte（loadw 合法），shift+mask 取 byte。
-// Hash 输出与 C 版 FNV-1a byte-equal 不必要（不影响 Stage 1 byte-equal，
-// QBE IL emit 顺序由 AST 决定，不依赖 hash 值）。
+// 绕 W-004：原 4-byte aligned read 让 hash 撞 → jhyy_v1 stack overflow on
+// 短/特定长度 ident 的 field assign。
+//
+// v0 codegen 现在 *u8 deref 正确 emit `loadub` (w class)，但 `as i64` cast
+// 在 w→l 时仍 emit `copy` (QBE 拒)。所以走 *u8 deref → as i32 (保持 w) →
+// 用 extsw 升级到 i64 路径：
+//   1. `c32 = *((s + i) as *u8) as i32`  → loadub + copy (w class)
+//   2. `c64 = c32 as i64`                → extsw (w → l 合法)
+//
+// 加 length 到 hash 初始（绕 W-004：FNV-1a 在短+特定长度串会撞 → 查错
+// sym → field assign 死循环）。length 是 i64，乘入 FNV_OFFSET 形式。
+// 输出 hash 与原 *i32 版本不一定 byte-equal（无要求），但保证 byte-aligned
+// → 不撞 → jhyy_v1 field assign 路径不死循环。
 fn hash_string(s: *u8) -> i64 {
     let mut h = FNV_OFFSET();
-    let mut i: i64 = 0 as i64;
     let n = strlen(s);
+    // mix length first to disambiguate short strings of similar chars
+    h = (h ^ n) * FNV_PRIME();
+    let mut i: i64 = 0 as i64;
     while i < n {
-        // 读 4 byte（含 s[i] 在低 byte，未对齐访问 QBE 不允许；强制 4-aligned_v1）
-        let rem = (i - ((i / (4 as i64)) * (4 as i64))) as i32;
-        let aligned_v1 = i - (rem as i64);
-        let w = *((s as i64 + aligned_v1) as *i32);
-        let sh = rem * (8 as i32);
-        let c = ((w >> sh) & (255 as i32)) as i64;
+        let c32 = *((s as i64 + i) as *u8) as i32;
+        let c = c32 as i64;
         h = (h ^ c) * FNV_PRIME();
         i = i + (1 as i64);
     }
