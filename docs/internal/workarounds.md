@@ -30,6 +30,8 @@
 | [W-003](#w-003-jhyy_v1-let-_-fncall-顶层-嵌套-segfault) | ACTIVE | `let _ = fncall(...)` 改 direct call，绕 jhyy_v1 codegen segfault（Bug 7/7b） |
 | [W-004](#w-004-short-local-var-4-chars--symtab-hash-撞--jhyy_v1-field-assign-死循环) | ACTIVE | 短（≤4 字符）local var / fn 参数 / field 改名绕 jhyy_v1 symtab hash 撞（stack overflow） |
 | [W-005](#w-005-let-mut--assign--jhyy_v1-codegen-segfault) | ACTIVE | `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault |
+| [W-006](#w-006-jhyy_v1-return-x--y-两-1-char-var-发-127qbe-fail) | ACTIVE | jhyy_v1 codegen 让两个 1-char 局部变量在 `return x ± y` 共享同一 stack slot → QBE fail / exit 127；改名或加类型注解绕 |
+| [W-007](#w-007-jhyy_v1-fn--i64--return--literal-as-i64-emit-w-copy) | ACTIVE | jhyy_v1 codegen 把 `fn() -> i64 { return X as i64; }` 的 return value 当 w（32-bit）emit → QBE "invalid type for jump argument" 错 |
 
 ---
 
@@ -375,3 +377,137 @@ fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
 - W-003 (`docs/internal/workarounds.md` § W-003) 修了 `let _X = fncall()` 顶层 direct call 模式，未覆盖 let-mut + assign
 - W-004 修了短 var 名导致 symtab hash 撞死循环，未覆盖 let-mut + assign segfault
 - 复现测试 `tmp/test_w4_lit.jhyy` / `tmp/test_w4_v1.jhyy`
+
+---
+
+## W-006: jhyy_v1 `return x ± y` 两 1-char var 发 127（QBE fail）
+
+**ID:** W-006
+**状态:** ACTIVE
+**日期:** 2026-08-04
+**触发面:** 函数体末尾 `return X OP Y`（OP ∈ `+`, `-`），X 和 Y 都是 1-char 局部变量（任意 i32/i64 类型）。
+**症状:** jhyy_v1 编译 → exit 127（无输出）→ 可能是 segfault 也可能是 QBE fail。QBE fail 时报 "invalid type for jump argument"。
+**最小复现:**
+```jhyy
+// BAD (exit 127 / QBE fail):
+fn main_jhyy() -> i32 {
+    let x = 42 as i32;
+    let y = 7 as i32;
+    return x + y;
+}
+// jhyy_v1: exit 127
+
+// GOOD (workaround 1 — rename):
+fn main_jhyy() -> i32 {
+    let xx = 42 as i32;
+    let yy = 7 as i32;
+    return xx + yy;
+}
+// jhyy_v1: OK (exit 0)
+
+// GOOD (workaround 2 — type annotation):
+fn main_jhyy() -> i32 {
+    let x: i32 = 42 as i32;
+    let y: i32 = 7 as i32;
+    return x + y;
+}
+// jhyy_v1: OK
+
+// GOOD (workaround 3 — intermediate let):
+fn main_jhyy() -> i32 {
+    let x = 42 as i32;
+    let y = 7 as i32;
+    let z = x + y;
+    return z;
+}
+// jhyy_v1: OK
+```
+
+**根因嫌疑:** jhyy_v1 codegen 的 stack-slot allocator 给两个 1-char 局部 var 分配了**同一个 stack offset**（slot reuse bug）。当 `x + y` 在 return 表达式上下文被直接编译时，emit 的 IL 中两个 operand 指向同一临时，结果 QBE 拒绝（type mismatch 或 错位）→ 退化成 exit 127。v0 codegen 没这个问题。
+
+**workaround:** 三个等价方案（任选一）：
+1. **rename：** 把 X 或 Y 改成 ≥2 字符（`xx`、`yy` 等）
+2. **type annotation：** `let x: i32 = 42 as i32;` 显式声明类型
+3. **intermediate let：** `let z = x + y; return z;` 强制中间 stack slot
+
+**影响范围:** 触发面在 src0/ 极常见：所有短局部变量（`x`/`y`/`n`/`i`/`p`/`h`/`c` 等）参与 `return X + Y` 或 `return X - Y` 时都中招。需要机械扫描：
+- util.jhyy: 至少 12 个 1-char `let`（`n`、`p`、`h`、`c`、`e`、`i`），多个 `*i_ptr + 1` 累加模式
+- arena.jhyy: `arena_free` 的 `b = next` 累加（已用 W-005 转 `*i64` 绕过）
+- main.jhyy: `path_to_win` 索引累加（已用 W-005 转 `*i64` 绕过）
+- lexer.jhyy / parser.jhyy / sema.jhyy / codegen.jhyy: 推测大量触发面（未审计）
+
+**W-006 局限性:** 仅触发 `return X ± Y` 直接形式。中间 let / 比较 / 字段访问不触发。`*ptr_ptr += n` 累加（已 W-005 转过的）也不触发，因为 deref 走 NODE_DEREF 路径不同。
+
+**失效条件:** jhyy_v1 codegen 修对 stack-slot allocator（按变量名长度 ≤1 时分配不同 slot）→ W-006 可移除并恢复 `let x = ...; return x + y;` 风格。
+
+**superseder:** TBD（jhyy_v1 codegen fix sprint，post v1.0.0 phase-2 落地后）
+
+**引用:**
+- 复现 `_test_e.jhyy` / `_test_y.jhyy`（x + y / a + b 都触发）
+- v0 同源码编译 exit 0 → 是 jhyy_v1 自身 bug，不是源 jhyy 问题
+- W-004 修了短名（≤4 char）symtab hash 撞死循环；W-006 是 codegen slot allocator bug，**不同 bug**
+
+---
+
+## W-007: jhyy_v1 `fn() -> i64 { return X as i64; }` emit `w copy`
+
+**ID:** W-007
+**状态:** ACTIVE
+**日期:** 2026-08-04
+**触发面:** 函数体末尾 `return literal as i64;` 或 `let x = literal as i64; return x;`，且 literal 是字面整数常量。
+**症状:** QBE 拒绝 → "invalid type for jump argument %t0 in block @start0"。jhyy_v1 编译 exit 1。
+**最小复现:**
+```jhyy
+// BAD (QBE fail):
+fn small_const() -> i64 { return 5 as i64; }
+// jhyy_v1 emit:
+//   export function l $small_const() {
+//   @start0
+//       %t0 =w copy 5      ← 函数返回 l (i64) 但 copy 是 w (32-bit)
+//       ret %t0            ← QBE 拒绝
+//   }
+// QBE error: invalid type for jump argument %t0 in block @start0
+
+// BAD 变体 2 (let + return):
+fn small_const() -> i64 {
+    let x = 5 as i64;
+    return x;
+}
+// jhyy_v1: emit %t0 =w copy 5; ret %t0（同样错）
+
+// BAD 变体 3 (arithmetic):
+fn small_const() -> i64 {
+    return (4 + 1) as i64;
+}
+// jhyy_v1: emit %t0 =w copy 4; %t1 =w copy 1; %t2 =w add %t0, %t1; ret %t2
+
+// GOOD (workaround — 用 extern fn 包一层返回 i64):
+extern fn some_64() -> i64;
+fn small_const() -> i64 { return some_64(); }
+// jhyy_v1: OK
+```
+
+**根因嫌疑:** jhyy_v1 codegen 的 const/copy emit 路径在类型推断时**丢失了 i64 类型信息**。NODE_INT_LIT 的默认 emit 类是 w (32-bit) — 看起来是 v0 早期版本的硬编码，jhyy_v1 翻译时没修。`as i64` cast 在 codegen 路径上没生效（虽然 sema 通过了）。
+
+**workaround:**
+- 暂时没有完全等价的 workaround（不能直接 emit i64 literal in codegen）
+- **方法 1**：把 i64 返回函数改成返回 `*u8` 或 `i32`，调用方再做 cast（接口破坏大）
+- **方法 2**：i64 常量函数（如 `FNV_OFFSET`、`FNV_PRIME`）改写成**两行 let + extern 调用链**（不实用）
+- **方法 3**：在 jhyy_v1 codegen 端修 NODE_INT_LIT emit 的 type 推断（**根治，需 post v1.0.0 phase-2**）
+
+**影响范围:** util.jhyy 中所有 `fn XXX() -> i64 { return literal as i64; }`：
+- `FNV_OFFSET() -> i64 { return 0xcbf29ce484222325 as i64; }`
+- `FNV_PRIME() -> i64 { return 0x100000001b3 as i64; }`
+- 以及 hash_string / strlen / sprintf_lld 等所有返回 i64 的内部函数
+
+**W-007 局限性:** 仅触发字面整数常量。变量、函数调用返回 i64 不触发（caller 用 `l` 类型正确 emit）。所以 `let n: i64 = strlen(s);` 不受影响，`return n;` 也不受影响。
+
+**失效条件:** jhyy_v1 codegen 在 NODE_INT_LIT 的 emit 路径上加 type propagation（看 return type / cast 类型决定 copy 的 class）→ W-007 可移除。
+
+**superseder:** TBD（jhyy_v1 codegen fix sprint，post v1.0.0 phase-2 落地后）
+
+**引用:**
+- 复现 `_test_small.jhyy` / `_test_small4.jhyy` / `_test_small6.jhyy` / `_test_small8.jhyy`
+- v0 同源码 emit 正确 IL（`%t0 =l copy ...`），jhyy_v1 emit `w copy`，bug 在 jhyy_v1 自身
+- 与 W-006 触发面不同（无 1-char var 介入），是独立 bug
+

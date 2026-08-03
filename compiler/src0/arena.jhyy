@@ -51,13 +51,16 @@ fn ptr_add_v1(p: *u8, off: i64) -> *u8 {
 }
 
 fn arena_new_block(a: *Arena, min_size: i64) -> i32 {
-    let mut size = (*a).def_size;
-    if size < min_size {
-        size = min_size;
+    // W-005 workaround: let-mut + assign triggers jhyy_v1 segfault; use *i64 ptr
+    let size_ptr = malloc(8 as i64) as *i64;
+    *size_ptr = (*a).def_size;
+    if (*size_ptr) < min_size {
+        *size_ptr = min_size;
     }
-    let total = 16 as i64 + size;
+    let total = 16 as i64 + (*size_ptr);
     let raw = malloc(total);
     if raw == (0 as *u8) {
+        free(size_ptr as *u8);
         return 0;
     }
     let b = raw as *ArenaBlock;
@@ -66,7 +69,8 @@ fn arena_new_block(a: *Arena, min_size: i64) -> i32 {
     let data = ptr_add_v1(raw, 16 as i64);
     (*a).start = data;
     (*a).cur = data;
-    (*a).end = ptr_add_v1(data, size);
+    (*a).end = ptr_add_v1(data, *size_ptr);
+    free(size_ptr as *u8);
     return 1;
 }
 
@@ -146,13 +150,18 @@ fn arena_reset(a: *Arena) -> i32 {
 }
 
 fn arena_free(a: *Arena) -> i32 {
-    let mut b = (*a).blocks;
-    while b != (0 as *u8) {
-        let ab = b as *ArenaBlock;
+    // W-005 workaround: let-mut + assign triggers jhyy_v1 segfault; use *i64 ptr
+    // (store pointer as i64 since *(*u8) cast type isn't supported)
+    let b_i64 = malloc(8 as i64) as *i64;
+    *b_i64 = (*a).blocks as i64;
+    while (*b_i64) != (0 as i64) {
+        let b_p = (*b_i64) as *u8;
+        let ab = b_p as *ArenaBlock;
         let next = (*ab).next;
-        free(b);
-        b = next;
+        free(b_p);
+        *b_i64 = next as i64;
     }
+    free(b_i64 as *u8);
     (*a).blocks = 0 as *u8;
     (*a).start = 0 as *u8;
     (*a).cur = 0 as *u8;

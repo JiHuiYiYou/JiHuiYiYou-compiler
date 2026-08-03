@@ -207,7 +207,12 @@ v0.7.0 之后（7A enum first-class + 7B const struct array），v0.8.0 转向 *
 ✅ v0.8 commit 3: 修 jhyy_v1 自举回归                (990cc6c, 2026-07-03)
 ✅ v0.8 commit 4: 3 类 fix + regress 推进 7 OK       (50ad92b + 760c7c2 changelog, 2026-07-03)
 ✅ v0.8 commit 5: Phase A-1 if-expr + regress 推进 16 OK  (pending, 2026-08-03)
-→ v0.8 commit 6+: Phase A-2 (match) / A-3 (const_array) / A-4 (import) + Phase B (codegen 翻译层)
+✅ v0.8 commit 6 wip: bisect heap corruption (efc41bf, 2026-08-03)
+✅ v0.8 commit 7: W-002 标识符 rename + workaround doc (0453cef, 2026-08-03)
+✅ v0.8 commit 8: W-003 let _ = fncall → direct call   (bea83f0, 2026-08-03)
+✅ v0.8 commit 9: W-001 byte-by-byte hash + W-005 let-mut workaround (d570c72, 2026-08-03)
+✅ v0.8 commit 10: W-005 扩展到 util/arena + W-006/W-007 文档 (commit pending, 2026-08-04)
+→ v0.8 commit 11+: W-006/W-007 workaround 应用 + Stage 0 闭环
 ```
 
 ## Phase A/B 计划（commit 4 后剩余工作）
