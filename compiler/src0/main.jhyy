@@ -252,7 +252,7 @@ fn build_il_v1(input: *u8, output: *u8) -> i32 {
     let ext_il_v1 = ".il" as *u8;
     let off1 = str_concat_at(il_path_v1, n_o, ext_il_v1);
     let nul1 = (il_path_v1 as i64 + off1) as *u8;
-    let _s1 = store_byte_i32(nul1, 0 as i32);
+    store_byte_i32(nul1, 0 as i32);
 
     let ilf = jh_fopen_wb(il_path_v1);
     if ilf == (0 as *u8) {
@@ -265,7 +265,7 @@ fn build_il_v1(input: *u8, output: *u8) -> i32 {
     let sb_inner_v1 = ir.sb;
     let buf_p = (*sb_inner_v1).buf;
     let buf_len_v1 = (*sb_inner_v1).len;
-    let _w = fwrite(buf_p, (1 as i64), buf_len_v1, ilf);
+    fwrite(buf_p, (1 as i64), buf_len_v1, ilf);
     fclose(ilf);
 
     free(il_path_buf_v1);
@@ -287,7 +287,7 @@ fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
     pos = str_concat_at(cmd_buf_v1, pos, sep2);
     pos = str_concat_at(cmd_buf_v1, pos, il_path_v1);
     let nul_p = (cmd_buf_v1 as i64 + pos) as *u8;
-    let _sq1 = store_byte_i32(nul_p, 0 as i32);
+    store_byte_i32(nul_p, 0 as i32);
 
     path_to_win(il_path_v1);
     path_to_win(asm_path_v1);
@@ -319,7 +319,7 @@ fn link_with_gcc(asm_path_v1: *u8, exe_path_v1: *u8) -> i32 {
     let lmflag_v1 = " -lm" as *u8;
     pos = str_concat_at(cmd_buf_v1, pos, lmflag_v1);
     let nul_p = (cmd_buf_v1 as i64 + pos) as *u8;
-    let _sq2 = store_byte_i32(nul_p, 0 as i32);
+    store_byte_i32(nul_p, 0 as i32);
 
     path_to_win(exe_path_v1);
     let r = system(cmd_buf_v1);
@@ -336,7 +336,7 @@ fn derive_output_name(input: *u8, out_buf_v1: *u8) -> i32 {
     let n = strlen(input);
     str_copy_v1(out_buf_v1, input);
     let nul = (out_buf_v1 as i64 + n) as *u8;
-    let _sn = store_byte_i32(nul, 0 as i32);
+    store_byte_i32(nul, 0 as i32);
     let dot = strrchr(out_buf_v1, (46 as i32));  // '.' = 46
     if dot != (0 as *u8) {
         let _sd = store_byte_i32(dot, 0 as i32);
@@ -419,15 +419,15 @@ fn cmd_compile(argc: i32, argv: *u8) -> i32 {
     str_copy_v1(il_path_v1, out_buf_v1);
     let off1 = str_concat_at(il_path_v1, n_o, ".il" as *u8);
     let nul1 = (il_path_v1 as i64 + off1) as *u8;
-    let _scl1 = store_byte_i32(nul1, 0 as i32);
+    store_byte_i32(nul1, 0 as i32);
     str_copy_v1(asm_path_v1, out_buf_v1);
     let off2 = str_concat_at(asm_path_v1, n_o, ".s" as *u8);
     let nul2 = (asm_path_v1 as i64 + off2) as *u8;
-    let _scl2 = store_byte_i32(nul2, 0 as i32);
+    store_byte_i32(nul2, 0 as i32);
     str_copy_v1(exe_path_v1, out_buf_v1);
     let off3 = str_concat_at(exe_path_v1, n_o, ".exe" as *u8);
     let nul3 = (exe_path_v1 as i64 + off3) as *u8;
-    let _scl3 = store_byte_i32(nul3, 0 as i32);
+    store_byte_i32(nul3, 0 as i32);
 
     let r1 = run_qbe_v1(il_path_v1, asm_path_v1);
     if r1 != (0 as i32) {
@@ -463,7 +463,7 @@ fn cmd_run_v1(argc: i32, argv: *u8) -> i32 {
     let nl = strlen(out_buf_v1);
     let off1 = str_concat_at(out_buf_v1, nl, "_run" as *u8);
     let nul1 = (out_buf_v1 as i64 + off1) as *u8;
-    let _snr1 = store_byte_i32(nul1, 0 as i32);
+    store_byte_i32(nul1, 0 as i32);
 
     // build argv for cmd_compile: {input}
     let arg_arr_v1 = malloc(8 as i64);
@@ -482,7 +482,7 @@ fn cmd_run_v1(argc: i32, argv: *u8) -> i32 {
     str_copy_v1(exe_path_v1, out_buf_v1);
     let off2 = str_concat_at(exe_path_v1, no, ".exe" as *u8);
     let nul2 = (exe_path_v1 as i64 + off2) as *u8;
-    let _snr2 = store_byte_i32(nul2, 0 as i32);
+    store_byte_i32(nul2, 0 as i32);
     path_to_win(exe_path_v1);
     let rc = system(exe_path_v1);
     free(exe_path_v1);

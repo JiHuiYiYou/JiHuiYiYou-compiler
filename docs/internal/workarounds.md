@@ -26,7 +26,8 @@
 | ID | 状态 | 简介 |
 |----|------|------|
 | [W-001](#w-001-hash_string-用-i32-deref-绕-v0-codegen-loadsb-错) | ACTIVE | hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错 |
-| [W-002](#w-002-mainjhyy-重命名绕-jhyy_v1-hash_string-堆损坏) | ACTIVE | main.jhyy 重命名绕 jhyy_v1 hash_string 堆损坏 |
+| [W-002](#w-002-mainjhyy-重命名绕-jhyy_v1-hash_string-堆损坏) | ACTIVE | 211 个 src0 标识符 _v1 后缀化绕 jhyy_v1 hash_string 堆损坏 |
+| [W-003](#w-003-jhyy_v1-let-_-fncall-顶层-嵌套-segfault) | ACTIVE | `let _ = fncall(...)` 改 direct call，绕 jhyy_v1 codegen segfault（Bug 7/7b） |
 
 ---
 
@@ -148,3 +149,70 @@ let c = ((w >> sh) & (255 as i32)) as i64;
 - v0.8 commit 6 (efc41bf) `wip: bisect heap corruption`
 - v0.8 commit 7 (待) `W-002: 211 个标识符 _v1 后缀化 + workarounds.md`
 - 战略决策 `memory/project_bootstrap_closure_state.md` § Bisect findings
+---
+
+## W-003: jhyy_v1 `let _ = fncall(...)` 顶层 / 嵌套 segfault → direct call (top-level only)
+
+**ID:** W-003
+**状态:** ACTIVE (partial — v3 只覆盖顶层)
+**日期:** 2026-08-03
+**触发面:** 任何 `let _NAME = fncall(...)` 模式，无论 `_NAME` 是什么；无论 fncall 是否在函数顶层或嵌套 if/while 块内
+**症状:** jhyy_v1 编译含此模式的源码 → 0xC0000005 segfault（exit 139）
+**根因嫌疑:** v0 codegen 对 `let _ = fncall(...)` emit IL 缺漏（详见 `memory/feedback_v0_codegen_bug_workarounds.md` Bug 7 / Bug 7b）
+**workaround (v3 — 限定顶层):** 把**函数顶层**的 `let _X = fncall(args);` 改成 `fncall(args);`（direct call，无 binding）。**嵌套 if/while/for 块内的同模式保持原样**——v3 不改，避免 v0 sema if/else 分支类型不匹配。
+
+```jhyy
+// BAD (顶层):
+let _s1 = store_byte_i32(nul1, 0 as i32);
+
+// GOOD (顶层):
+store_byte_i32(nul1, 0 as i32);
+
+// BAD (嵌套 if) — 保持原样，不动
+```
+
+注意：`_X` 是 discard variable；direct call 的返回值被 jhyy 语义自然丢弃，无需 binding。
+
+**v3 决策的根因（v1/v2 失败教训）：**
+- **v1 (全部 direct call)**: v0 报 18 个 sema error（"if/else branches must have same type: () vs i32"）。
+  - 原因：`let _X = fncall()` 让分支 type = `()`（NODE_LET → `type_void()`）；改 bare `fncall()` 让分支 type = `i32`（fncall 返回 i32）。分支 mismatch。
+  - 受影响的 17 处都在 `sema.jhyy` 的嵌套 if-else（典型：middle if 的 else 分支是 `let _X = sema_error_str(...)`，then 分支里套一个 no-else 的 inner if）。
+- **v2 (全部 mutable 模式 `let mut _x = 0; _x = fncall(); let _ = _x;`)**: v0 自己 segfault。
+  - 原因：mutable pattern 在 codegen 路径中产生 jhyy_v1 codegen 不支持的 emit。可能触发 Bug 6（重复 if kind）或 Bug 9（nested phi）等。
+- **v3 (只顶层 direct call)**: 通过。regress 47/50 pass, 0 fail, 3 skipped. jhyy_v1 可编 main.jhyy 但仍偶尔 segfault（heap 不稳）。
+
+**影响范围（src0/ 各文件 `let _X = ...` 计数 — v3 实际替换 vs 剩余）：**
+
+| 文件 | 总数 | v3 替换 (顶层) | 剩余 (嵌套) |
+|------|------|----------------|--------------|
+| codegen.jhyy | 34 | 1 | 33 |
+| sema.jhyy | 77 | 18 | 59 |
+| lexer.jhyy | 23 | 0 | 23 |
+| parser.jhyy | 5 | 4 | 1 |
+| main.jhyy | 12 | 10 | 2 |
+| **总计** | **151** | **33** | **118** |
+
+（v3 实际产生 29 替换，差异是某些顶层 pattern 不匹配正则或不在 `let _X = ` 形式）
+
+**v3 实现的细节：** 用 Python 脚本 `tmp/do_w003_v3.py` 扫 brace depth，只改 depth==1 的模式。depth 计算跳过字符串 (`"..."`) 和行注释 (`//`)。29 处替换不引入新 sema error。
+
+**v3 验证（2026-08-03）：**
+- v0 build main.jhyy: ✓ exit 0, 生成 main.il
+- regress.py: 47/50 pass, 0 fail, 3 skipped
+- jhyy_v1 build main.jhyy: 部分成功（exit 0 偶尔，segfault 139 偶尔 — heap 不稳，需要进一步 workaround 或 root cause fix）
+- jhyy_v1 build hello.jhyy: ✓ exit 0
+- jhyy_v1 compile hello.jhyy -o tmp/hello_run.exe: ✓ exit 0
+- jhyy_v1 build codegen.jhyy: ✗ parse error "unexpected token 'while' in expression"（Bug 60，jhyy 翻译 parser 时 while 在 expression 上下文漏处理）
+
+**失效条件:** v0 codegen 修复 `let _ = fncall(...)` emit → W-003 可移除，回归 `let _X = fncall(...)` 风格
+
+**superseder:** TBD（v0 codegen fix sprint，post v1.0.0）
+
+**未解决问题 (v3 之后):**
+- jhyy_v1 build main.jhyy 偶尔 segfault — 怀疑是 W-001/W-002 heap 损坏叠加 W-003 未覆盖的 Bug 7b 嵌套模式。118 处嵌套 `let _ = fncall()` 仍是潜在 trigger。
+- 进一步 v4 候选：用 **mutable assignment pattern** 处理 depth==2（1-level if 块），depth==3+ 仍保持原样。
+- mutable pattern 会触发 v0 codegen bug（v2 失败）— 需要先验证 v0 codegen 是哪种 pattern 失败、是否能更精细地限定 mutable 范围。
+
+**引用:**
+- `memory/feedback_v0_codegen_bug_workarounds.md` Bug 7 / Bug 7b
+- 决策过程见 `memory/project_bootstrap_closure_state.md` § W-003 iterations

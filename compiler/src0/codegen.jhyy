@@ -1842,7 +1842,7 @@ fn cg_stmt_v1(cg_raw_v1: *u8, n: *Node) -> i32 {
     if n == (0 as *Node) {
         return 0;
     }
-    let _ = cg_expr_v1(cg_raw_v1, n);
+    cg_expr_v1(cg_raw_v1, n);
     return 1;
 }
 

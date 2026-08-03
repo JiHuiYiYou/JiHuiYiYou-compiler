@@ -132,10 +132,10 @@ fn sema_error_int(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
     sb_appendf((*ctx).arena, &sb, "%d" as *u8, col);
     sb_append_cstr((*ctx).arena, &sb, ": error: " as *u8);
     sb_append_cstr((*ctx).arena, &sb, msg);
-    let _x1 = sb_appendf((*ctx).arena, &sb, "%d" as *u8, val);
-    let _x2 = sb_append_cstr((*ctx).arena, &sb, "\n" as *u8);
+    sb_appendf((*ctx).arena, &sb, "%d" as *u8, val);
+    sb_append_cstr((*ctx).arena, &sb, "\n" as *u8);
     let s = sb_cstr_v1((*ctx).arena, &sb);
-    let _x3 = jh_fputs_stderr(s);
+    jh_fputs_stderr(s);
     (*ctx).error_count = (*ctx).error_count + (1 as i32);
     sb_free_v1(&sb);
     return 0;
@@ -153,12 +153,12 @@ fn sema_error_int2(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
     sb_appendf((*ctx).arena, &sb, "%d" as *u8, col);
     sb_append_cstr((*ctx).arena, &sb, ": error: " as *u8);
     sb_append_cstr((*ctx).arena, &sb, msg1);
-    let _x1 = sb_appendf((*ctx).arena, &sb, "%d" as *u8, val1);
+    sb_appendf((*ctx).arena, &sb, "%d" as *u8, val1);
     sb_append_cstr((*ctx).arena, &sb, msg2);
-    let _x2 = sb_appendf((*ctx).arena, &sb, "%d" as *u8, val2);
-    let _x3 = sb_append_cstr((*ctx).arena, &sb, "\n" as *u8);
+    sb_appendf((*ctx).arena, &sb, "%d" as *u8, val2);
+    sb_append_cstr((*ctx).arena, &sb, "\n" as *u8);
     let s = sb_cstr_v1((*ctx).arena, &sb);
-    let _x4 = jh_fputs_stderr(s);
+    jh_fputs_stderr(s);
     (*ctx).error_count = (*ctx).error_count + (1 as i32);
     sb_free_v1(&sb);
     return 0;
@@ -175,10 +175,10 @@ fn sema_error_str(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
     sb_append_cstr((*ctx).arena, &sb, ":" as *u8);
     sb_appendf((*ctx).arena, &sb, "%d" as *u8, col);
     sb_append_cstr((*ctx).arena, &sb, ": error: " as *u8);
-    let _x1 = sb_append_cstr((*ctx).arena, &sb, msg);
-    let _x2 = sb_append_cstr((*ctx).arena, &sb, "\n" as *u8);
+    sb_append_cstr((*ctx).arena, &sb, msg);
+    sb_append_cstr((*ctx).arena, &sb, "\n" as *u8);
     let s = sb_cstr_v1((*ctx).arena, &sb);
-    let _x3 = jh_fputs_stderr(s);
+    jh_fputs_stderr(s);
     (*ctx).error_count = (*ctx).error_count + (1 as i32);
     sb_free_v1(&sb);
     return 0;
@@ -195,11 +195,11 @@ fn sema_error_str_int(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
     sb_append_cstr((*ctx).arena, &sb, ":" as *u8);
     sb_appendf((*ctx).arena, &sb, "%d" as *u8, col);
     sb_append_cstr((*ctx).arena, &sb, ": error: " as *u8);
-    let _x1 = sb_append_cstr((*ctx).arena, &sb, msg1);
-    let _x2 = sb_appendf((*ctx).arena, &sb, "%d" as *u8, val);
-    let _x3 = sb_append_cstr((*ctx).arena, &sb, "\n" as *u8);
+    sb_append_cstr((*ctx).arena, &sb, msg1);
+    sb_appendf((*ctx).arena, &sb, "%d" as *u8, val);
+    sb_append_cstr((*ctx).arena, &sb, "\n" as *u8);
     let s = sb_cstr_v1((*ctx).arena, &sb);
-    let _x4 = jh_fputs_stderr(s);
+    jh_fputs_stderr(s);
     (*ctx).error_count = (*ctx).error_count + (1 as i32);
     sb_free_v1(&sb);
     return 0;
@@ -1383,7 +1383,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
 fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
     let fd = node_func_decl_data(n);
 
-    let _x = sema_push_scope(ctx);
+    sema_push_scope(ctx);
     (*ctx).nlocals = 0 as i64;
 
     // 分配 param_types 数组
@@ -1444,7 +1444,7 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
         }
     }
 
-    let _x2 = sema_pop_scope(ctx);
+    sema_pop_scope(ctx);
     return 1;
 }
 
@@ -1629,13 +1629,13 @@ fn sema_init(ctx: *SemaContext, arena: *Arena, ta: *TypeArena) -> i32 {
     // init type arena（lazy init 也会触发）
     (*ta).arena = arena;
     (*ta).inited = 0 as i32;
-    let _x = types_init_arena(ta);
+    types_init_arena(ta);
     return 1;
 }
 
 fn sema_check(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
     (*ctx).module = module;
     (*ctx).current_scope = (*ctx).global_scope;
-    let _x = check_module(ctx, ta, module);
+    check_module(ctx, ta, module);
     return (*ctx).error_count;
 }
