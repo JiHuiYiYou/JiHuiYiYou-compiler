@@ -212,8 +212,9 @@ v0.7.0 之后（7A enum first-class + 7B const struct array），v0.8.0 转向 *
 ✅ v0.8 commit 8: W-003 let _ = fncall → direct call   (bea83f0, 2026-08-03)
 ✅ v0.8 commit 9: W-001 byte-by-byte hash + W-005 let-mut workaround (d570c72, 2026-08-03)
 ✅ v0.8 commit 10: W-005 扩展到 util/arena + W-006/W-007 文档 (commit pending, 2026-08-04)
-✅ v0.8 commit 11: W-008 cg_find_field_offset 三层 deref 漏修 + doc (commit pending, 2026-08-04)
-→ v0.8 commit 12+: W-009 cslel 操作数类型错（commit 11 暴露的下一道）+ Stage 0 闭环
+✅ v0.8 commit 11: W-008 cg_find_field_offset 三层 deref 漏修 + doc (2d4c319, 2026-08-04)
+✅ v0.8 commit 12: W-009 cg_convert_arg src_t==0 兜底 + dst.kind 放宽 + doc (commit pending, 2026-08-04)
+→ v0.8 commit 13+: Stage 0 闭环 driver 验证 + 持续修 v1 codegen 暴露问题
 
 ---
 
@@ -268,6 +269,57 @@ let fname_str = *(ptr_add_u8(sym_p_v1 as *u8, 0 as i64) as **u8);  // Sym.name @
 **superseder**：本 commit 转 W-008 为 RESOLVED；剩余 v1 OK 数量回落的原因是 commit 11 把一些之前走错 IL 但碰巧能跑的测试暴露到 QBE 严格 typecheck 下，**新 cslel 错**。修 W-009（cslel 比较结果类型错）后 v1 OK 数量应回到 16+。
 
 **详细文档**：[`docs/internal/workarounds.md` § W-008](../../internal/workarounds.md#w-008)
+
+---
+
+## commit 12 (pending)：W-009 cg_convert_arg + NODE_CAST 两处放宽
+
+**目标**：让 jhyy_v1 编 arena.jhyy 时所有 `ptr == 0` / `i64 cmp 0` / `pointer cmp 0` 路径 emit 正确 IL（l vs l，不再 w vs l），Stage 0 closure 解锁。
+
+**改动一（codegen.jhyy:548-553, Fix 1）— cg_convert_arg src_t==0 兜底**
+
+```jhyy
+// 前：if src_t == (0 as *u8) { return arg; }
+// 后：
+let src_qt_v1: i32 = if src_t == (0 as *u8) { arg.qbe_type } else { qbe_type_of(src_t) };
+```
+
+**改动二（codegen.jhyy:555-570, Fix 2）— cg_convert_arg 不再 bail dst.kind=KIND_POINTER**
+
+```jhyy
+// 前：if (*dst).kind != KIND_PRIMITIVE() { return arg; }   // 让 "0 as *u8" 永远 no-op
+// 后：移除 dst.kind check（pointer qbe_type 是 L，走 W→L extsw）；保留 src.kind=KIND_PRIMITIVE 检查
+if (*src).kind != KIND_PRIMITIVE() { return arg; }
+```
+
+**改动三（codegen.jhyy:1844-1855, Fix 3）— NODE_CAST 移除 src_t==0 早 bail**
+
+```jhyy
+// 前：if src_t == (0 as *u8) || dst_t == (0 as *u8) { return inner_v_v1; }
+// 后：if dst_t == (0 as *u8) { return inner_v_v1; }
+```
+
+**Why**：v0 (codegen.c:721) 的 NODE_CAST 直接 emit QBE 转换指令（src_qt/dst_qt 决策，不 bail KIND_POINTER）。jhyy_v1 把 cast 委托给 cg_convert_arg，但 cg_convert_arg 有两个 hard bail 阻挡：
+1. src_t==0 早 bail — 但 literal 0 走这里（type_ptr_v1 未填）
+2. dst.kind != KIND_PRIMITIVE 早 bail — 让 `0 as *u8` 永远 no-op（pointer cast）
+
+**修复前 vs 修复后 IL（arena.jhyy line ~53 `if raw == (0 as *u8)`）：**
+```diff
+  %t28 =l call $malloc(l %t27)
+  %t29 =w copy 0
+- %t30 =w ceql %t28, %t29            # INVALID：ceql 要两边 l
++ %t30 =l extsw %t29                 # cg_convert_arg 自动 emit
++ %t31 =w ceql %t28, %t30            # VALID：两边 l
+```
+
+**实测数字**：arena.jhyy emit 中 `extsw` 出现次数 0 → 29；所有 `ceql/cslel/csltl/csgtl` 操作数两边都是 l。QBE typecheck 通过。
+
+**联动**：
+- v0 regress：47/47 pass, 0 fail, 3 skip（**无 regression**）
+- v1 regress：12 OK（持平，arena.jhyy 不在 regress 测试集——是 library；但**Stage 0 closure 解锁**）
+- W-008 (commit 11) + W-009 (commit 12) = jhyy_v1 编 arena.jhyy 通过 QBE typecheck 的**必要组合**
+
+**详细文档**：[`docs/internal/workarounds.md` § W-009](../../internal/workarounds.md#w-009)
 ```
 
 ## Phase A/B 计划（commit 4 后剩余工作）

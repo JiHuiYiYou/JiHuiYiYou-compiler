@@ -32,7 +32,8 @@
 | [W-005](#w-005-let-mut--assign--jhyy_v1-codegen-segfault) | ACTIVE | `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault |
 | [W-006](#w-006-jhyy_v1-return-x--y-两-1-char-var-发-127qbe-fail) | ACTIVE | jhyy_v1 codegen 让两个 1-char 局部变量在 `return x ± y` 共享同一 stack slot → QBE fail / exit 127；改名或加类型注解绕 |
 | [W-007](#w-007-jhyy_v1-fn--i64--return--literal-as-i64-emit-w-copy) | ACTIVE | jhyy_v1 codegen 把 `fn() -> i64 { return X as i64; }` 的 return value 当 w（32-bit）emit → QBE "invalid type for jump argument" 错 |
-| [W-008](#w-008-jhyy_v1-cg_find_field_offset-漏一层-deref-i64-struct-field-emit-w-loadw) | ACTIVE | jhyy_v1 codegen NODE_FIELD 查 struct field type 时把 `*u8` 指针当 `**u8` 解了一层 → i64/pointer struct field 全 emit `=w loadw` 而非 `=l loadl` → QBE 拒绝 |
+| [W-008](#w-008-jhyy_v1-cg_find_field_offset-漏一层-deref-i64-struct-field-emit-w-loadw) | RESOLVED | jhyy_v1 codegen NODE_FIELD 查 struct field type 时把 `*u8` 指针当 `**u8` 解了一层 → i64/pointer struct field 全 emit `=w loadw` 而非 `=l loadl` → QBE 拒绝 |
+| [W-009](#w-009-jhyy_v1-cg_convert_arg-src_t--0-返回-arg-未-coerce-导致-literal-0-w-copy-0-在-ceql-被-reject) | ACTIVE | jhyy_v1 codegen cg_convert_arg 在 `src_t==0` 时直接 return arg，但 literal 0 实际 emit `=w copy 0`（因 qbe_type_of(NULL)=QBE_W）→ 比较 l 字段（pointer / i64 / u64）时 `ceql`/`csltl` 等操作码两边操作数类型不匹配 → QBE "invalid type for second operand" 错 |
 
 ---
 
@@ -517,7 +518,7 @@ fn small_const() -> i64 { return some_64(); }
 ## W-008: jhyy_v1 cg_find_field_offset 双层 deref 漏（i64 struct field emit `=w loadw` + 全 struct field 走 fallback）
 
 **ID:** W-008
-**状态:** ACTIVE（fix 在 v0.8 commit 11 同步应用；arena.jhyy 跑通确认 fix 正确；待 v0.8 commit 11 changelog 转 RESOLVED）
+**状态:** RESOLVED（v0.8 commit 11，2d4c319 — codegen.jhyy 三处 deref 漏 + workarounds.md 文档同步；下游 cslel/ceql 错转为 W-009 候选）
 **日期:** 2026-08-04
 **触发面:** jhyy 源码里**任意 `(*ptr).field_X` 或 `s.field` 或 `field.assign()` 路径**走 cg_find_field_offset / cg_copy_struct — 包括 codegen 阶段任何按 struct 字段 emit 的代码：
 - `(*a).def_size`（i64）— arena.jhyy 赋值/读取 def_size
@@ -612,4 +613,160 @@ ret %t4
 - arena.jhyy 验证：build/bin 多次重新 compile + run（rc=42 + 完整打印 step 1-3）
 - 与 W-007：两层 root cause 都必须修。W-007 修 const/copy extsw，W-008 修 cg_find_field_offset deref
 - 与 W-005：无直接关联，但 arena.jhyy 用 W-005 (*i64 指针累加) 才能让 W-008 fix 后的 struct field 访问真在 codegen 路径上跑通（W-005 解决 *p = ... 的赋值 segfault，W-008 解决 `*p = (*a).def_size` 的 i64 load 类型错）
+
+---
+
+## W-009: jhyy_v1 cg_convert_arg src_t==0 早 bail，导致 literal `0` 在 ceql/csltl 中以 w 操作数出现
+
+**ID:** W-009
+**状态:** ACTIVE（fix 在 v0.8 commit 12 同步应用；待 commit 12 changelog 转 RESOLVED）
+**日期:** 2026-08-04
+**触发面:** jhyy 源码里**任意 `l_field == 0` / `l_field != 0` / `i64_var cmp 0` / `pointer cmp 0` 路径**走 cg_expr → 比较操作 → cg_convert_arg：
+- `if (*a).def_size > 0` — arena.jhyy: arena_new_block 的 fallback 路径
+- `if malloc(...) == 0` — arena.jhyy: arena_new_block malloc 返回值 null check
+- `if arena_alloc(...) == 0` — arena.jhyy: arena_strdup malloc null check
+- 任何 user code 写的 `p == 0` 或 `p != 0`（p 是指针 / i64 / u64）
+
+**症状:** QBE 拒绝：`invalid type for second operand %tX in ceql` 或 `invalid type for first operand %tX in csltl`。jhyy_v1 编译 exit 1。
+**根因（cg_convert_arg 早 bail + literal 默认 w）：**
+
+### Bug 9a：literal `0` 在 NODE_INT_v1 处 emit `=w copy 0`
+```jhyy
+// codegen.jhyy:671-676（fix 前）
+if kind == NODE_INT_v1() {
+    let d = node_int_data(n);
+    let qt = qbe_type_of((*n).type_ptr_v1);   // type_ptr_v1=0 → qbe_type_of(NULL)=QBE_W
+    let v = ir_new_tmp(ir, qt);               // qbe_type=W
+    ir_emit_copy(ir, v, (*d).value);          // emit "    %tN =w copy 0"
+    return v;
+}
+```
+
+jhyy 的字面量 0 在 parser 阶段没填 type_ptr_v1（sema 也没补全 — 缺特性），所以 `qbe_type_of(NULL) = QBE_W`。NODE_INT_v1 直接 emit `w copy 0`。
+
+### Bug 9b：cg_convert_arg src_t==0 时早 bail
+```jhyy
+// codegen.jhyy:548-550（fix 前）
+fn cg_convert_arg(cg_raw_v1: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
+    let cg = cg_raw_v1 as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    if src_t == (0 as *u8) {
+        return arg;          // ← BUG：literal 走到这里不 coerce
+    }
+    if dst_t == (0 as *u8) {
+        return arg;
+    }
+    ...
+}
+```
+
+### 联动错误链路
+比较操作 emit 块（codegen.jhyy:1291-1294）：
+```jhyy
+let mut right_coerced = right;
+if d_op >= TOKEN_EQEQ() && d_op <= TOKEN_GTEQ() {
+    if left.qbe_type != right.qbe_type {                    // L (l) != W (w) → 进 coerce
+        right_coerced = cg_convert_arg(cg_raw_v1, right,
+            (*right_node).type_ptr_v1,                       // 0
+            (*left_node).type_ptr_v1);                      // l type
+    }
+}
+```
+`cg_convert_arg` 接 src_t=0 早 bail → `right_coerced = right`（仍是 `w copy 0`）→ emit `ceql %t_l, %t_w` → QBE "invalid type for second operand"。
+
+### 修复（commit 12：cg_convert_arg + NODE_CAST 两处放宽条件）
+
+实际实现包含 **三处放宽**，比原始 root cause 分析更深一层：
+
+**Fix 1：cg_convert_arg src_t==0 时用 arg.qbe_type 兜底**
+```jhyy
+// codegen.jhyy:548-553（fix 后）
+fn cg_convert_arg(cg_raw_v1: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
+    let cg = cg_raw_v1 as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    if dst_t == (0 as *u8) {
+        return arg;
+    }
+    // W-009 fix: src_t==NULL 时（literal 没 type info），用 arg.qbe_type 当 src_qt
+    let src_qt_v1: i32 = if src_t == (0 as *u8) { arg.qbe_type } else { qbe_type_of(src_t) };
+    ...
+}
+```
+
+**Fix 2：cg_convert_arg dst.kind=KIND_POINTER 不再 bail（v0 行为对齐）**
+```jhyy
+// codegen.jhyy:555-570（fix 后）
+if src_t != (0 as *u8) {
+    let src = src_t as *Type;
+    if (*src).kind != KIND_PRIMITIVE() {     // src 仍要求 primitive
+        return arg;
+    }
+    // dst 不再硬要求 KIND_PRIMITIVE（pointer 是 qbe_type L，走 W→L extsw）
+    if src_qt_v1 == dst_qt_v1 && (*src).kind == KIND_PRIMITIVE() {
+        let dst2 = dst_t as *Type;
+        if (*dst2).kind == KIND_PRIMITIVE() {
+            if (*src).prim == (*dst2).prim { return arg; }
+        }
+    }
+}
+```
+原版 hard-bail `dst.kind != KIND_PRIMITIVE` 让 `0 as *u8` 永远 no-op（C 端 codegen.c:721 也不 bail，所以 W-009 fix 让 jhyy_v1 行为对齐 v0）。
+
+**Fix 3：NODE_CAST 不再因 src_t==0 早 bail**
+```jhyy
+// codegen.jhyy:1844-1855（fix 后）
+if kind == NODE_CAST() {
+    let ncd = node_cast_data(n);
+    let inner_node = (*ncd).expr as *Node;
+    let inner_v_v1 = cg_expr_v1(cg_raw_v1, inner_node);
+    let src_t = (*inner_node).type_ptr_v1;
+    let dst_t = (*n).type_ptr_v1;
+    if dst_t == (0 as *u8) {                  // ← 移除了 src_t==0 的早 bail
+        return inner_v_v1;
+    }
+    return cg_convert_arg(cg_raw_v1, inner_v_v1, src_t, dst_t);
+}
+```
+原版 `if src_t == 0 || dst_t == 0 { return inner_v_v1; }` 在 literal 走到这里就 return，让 cast 失效。
+
+### 验证（v0.8 commit 12）
+
+**jhyy_v1 compile arena.jhyy emit (修复前)：**
+```
+%t28 =l call $malloc(l %t27)
+%t29 =w copy 0                            ← 字面量 0 emit w
+%t30 =w ceql %t28, %t29                   ← INVALID：ceql 要两边 l
+```
+QBE：`invalid type for second operand %t29 in ceql`
+
+**jhyy_v1 compile arena.jhyy emit (修复后)：**
+```
+%t28 =l call $malloc(l %t27)
+%t29 =w copy 0
+%t30 =l extsw %t29                        ← 自动补 extsw
+%t31 =w ceql %t28, %t30                   ← VALID：两边 l
+```
+实测：commit 12 后 arena.jhyy emit 中 `extsw` 出现 **29 次**（修复前是 0），所有 `ceql/cslel/csltl/csgtl` 操作数两边都是 l。QBE typecheck 通过。
+
+**v0 regress：47/47 pass, 0 fail, 3 skip（**无 regression**）**
+
+**v1 regress：12 OK（持平 — W-009 修了 arena.jhyy 这种**库文件**编译路径，regress 测试集是 47 个 main 程序不直接覆盖；但 Stage 0 closure 达成）**
+
+### 影响范围（仅在 jhyy_v1 codegen 翻译产物，v0 C 编译不受影响）
+- src0/arena.jhyy: `arena_new_block`/`arena_alloc_aligned`/`arena_strdup` 多个 `ptr == 0` null check
+- src0/parser.jhyy: 任意 `let tok = ...; if tok == 0 { ... }` 类型 check（如果 parser 走 literal 0）
+- src0/sema.jhyy: symbol table null check
+- 任何 user code 里的 pointer / i64 / u64 字段 null-or-zero 比较
+
+**Stage 0 closure 关系:** W-009 是 W-008 修完后**下一道关卡** — W-008 让 struct field load 类型正确（i64 field 出 `=l loadl`）；W-009 让比较 l 字段时 right operand (literal 0) 也走 `extsw` 升级到 l。**两个 fix 缺一不可**才能让 jhyy_v1 编 arena.jhyy 跑通 QBE 严格 typecheck。
+
+**失效条件:** 不再次变动 cg_convert_arg 的 src_t==0 早 bail 逻辑。或者把 sema 改成给 NODE_INT 字面量填 type_ptr_v1（让 qbe_type_of 走 TYPE 路径而非 NULL fallback）。
+
+**superseder:** v0.8 commit 12
+
+**引用:**
+- arena.jhyy: arena_new_block line ~50 `if malloc(8) == 0` + arena_strdup line ~190 `if arena_alloc(...) == 0`
+- arena.il 反例：`_w008_arena.il:55` (`ceql %t28, %t29` mixed) 与 `:211` (`ceql %t112, %t113` mixed)
+- 与 W-008：无直接关联。W-008 修 struct field load type，W-009 修 literal compare operand type
+- 与 W-007：W-007 修 return literal 类型（extsw in cg_convert_arg w→l case），W-009 修 cg_convert_arg 入口 bail 条件让 extsw 路径真正走到
 

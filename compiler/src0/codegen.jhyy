@@ -544,29 +544,34 @@ fn cg_emit_store(cg_raw_v1: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> i32 {
 fn cg_convert_arg(cg_raw_v1: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
     let cg = cg_raw_v1 as *CGContext;
     let ir = (*cg).ir as *IRBuf;
-    if src_t == (0 as *u8) {
-        return arg;
-    }
     if dst_t == (0 as *u8) {
         return arg;
     }
-    let src = src_t as *Type;
-    let dst = dst_t as *Type;
-    if (*src).kind != KIND_PRIMITIVE() {
-        return arg;
-    }
-    if (*dst).kind != KIND_PRIMITIVE() {
-        return arg;
-    }
-    let src_qt_v1 = qbe_type_of(src_t);
+    // W-009 fix: src_t==0（literal 没 type info）时用 arg.qbe_type 当 src_qt。
+    //   否则 literal 0 (NODE_INT_v1 emit "=w copy 0") 在比较 i64/pointer 字段时
+    //   ceql/csltl 报 operand type 不匹配（QBE 要两边都是 l）。
+    // W-009 fix: dst.kind=KIND_POINTER 也走转换（emit W→L extsw 给 pointer cast 用）
+    let src_qt_v1: i32 = if src_t == (0 as *u8) { arg.qbe_type } else { qbe_type_of(src_t) };
     let dst_qt_v1 = qbe_type_of(dst_t);
-    // v0 codegen bug 2 workaround: 避免 &&/|| 嵌套 short-circuit (nested phi predecessor mismatch)
-    // 改成 nested if-else，无短路
-    if src_qt_v1 == dst_qt_v1 {
-        if (*src).prim == (*dst).prim {
+    // 只有 src_t 非 0 时做 KIND_PRIMITIVE 早 bail（保留原语义）；src_t==0 时直接走转换
+    // dst 不再硬要求 KIND_PRIMITIVE（pointer 是 qbe_type L，走 W→L extsw）
+    if src_t != (0 as *u8) {
+        let src = src_t as *Type;
+        if (*src).kind != KIND_PRIMITIVE() {
             return arg;
         }
+        // same-qt-same-prim only when both are primitive
+        if src_qt_v1 == dst_qt_v1 && (*src).kind == KIND_PRIMITIVE() {
+            let dst2 = dst_t as *Type;
+            if (*dst2).kind == KIND_PRIMITIVE() {
+                if (*src).prim == (*dst2).prim {
+                    return arg;
+                }
+            }
+        }
     }
+    // v0 codegen bug 2 workaround: 避免 &&/|| 嵌套 short-circuit (nested phi predecessor mismatch)
+    // 改成 nested if-else，无短路
     let mut conv: *u8 = 0 as *u8;
     if src_qt_v1 == QBE_D() {
         if dst_qt_v1 == QBE_W() {
@@ -1843,7 +1848,10 @@ fn cg_expr_v1(cg_raw_v1: *u8, n: *Node) -> IRVal {
         let inner_v_v1 = cg_expr_v1(cg_raw_v1, inner_node);
         let src_t = (*inner_node).type_ptr_v1;
         let dst_t = (*n).type_ptr_v1;
-        if src_t == (0 as *u8) || dst_t == (0 as *u8) {
+        // W-009 fix: src_t==0（literal 没 type info）也走 coerce，cg_convert_arg 用
+        //   arg.qbe_type 兜底。否则 `0 as *u8` no-op 成 `w copy 0`，比较 l 字段
+        //   时 ceql 报 operand type 不匹配
+        if dst_t == (0 as *u8) {
             return inner_v_v1;
         }
         return cg_convert_arg(cg_raw_v1, inner_v_v1, src_t, dst_t);
