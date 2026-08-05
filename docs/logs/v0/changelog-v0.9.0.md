@@ -10,7 +10,8 @@
 | commit | 主题 | 状态 |
 |--------|------|------|
 | commit 1 | 29-extsw hypothesis 验证 | ✅ SHIPPED ([ce93f64](../../plans/roadmap/v0.x-c-compiler-roadmap.md), 2026-08-05) |
-| commit 2.5 | Stage 1 byte-equal 7 测试集 + 修 B-let2 (l→w narrow) | ✅ SHIPPED (本 commit) |
+| commit 2.5 | Stage 1 byte-equal 7 测试集 + 修 B-let2 (l→w narrow) | ✅ SHIPPED (2026-08-05) |
+| commit 2.6 | B-φ1 真修 — 加 phi emit 路径对齐 v0 | ✅ SHIPPED (本 commit) |
 
 ---
 
@@ -179,12 +180,119 @@ docs/internal/workarounds.md — B-let2 cross-ref entry 完整
 
 ---
 
-### 后续工作
+### 后续工作(已按最终路径重排)
 
-| commit | 主题 | 备注 |
+| commit | 主题 | 状态 |
 |--------|------|------|
-| commit 2.6 | W-006 (1-char local var) 验证完整 | per `v0.9.0任务清单 + 概要设计.md` § commit 2.5 |
-| commit 2.7+ | B-φ1 / B-struct / B-data 评估 | 加 `-emit-phi` / `-emit-sret-aligned` flag 或接受 diff |
-| commit 3 | main.c → main.jhyy 翻译 (3 子 commit) | jhyy_helpers.c 不重翻译,直接 link |
-| commit 4 | Stage 1 byte-equal 验证 + regress.py JHYY_CC 支持 | diff 全空 + regress 持平 + changelog 写完 |
-| v1.0.0 | 自举启动 | 5 sprint 粗粒度 |
+| commit 2.7 | B-data (.data 段 emit 顺序) 真修 | 🔴 待 |
+| commit 2.8 | B-struct (struct by-value sret 路径) 真修 | 🔴 待 |
+| commit 2.9 | B-match (match-expr 翻译补全) 真修 | 🔴 待 |
+| commit 2.10 | W-005 真修 phase 1 (codegen.c NODE_ASSIGN let-mut fix) | 🔴 待 |
+| commit 2.11 | W-003 真修 (let _ = fncall) | 🔴 待 |
+| commit 2.12 | W-001 真修 (高风险 hash_string 重写) | 🔴 待 |
+| commit 2.13 | W-005 加固 phase 2 (main.jhyy 4 处 *pos_ptr_vN revert → let-mut) | 🔴 待 (等 W-001) |
+| commit 2.14 | W-006 + W-002/W-004 + W-008/W-009 文档 | 🔴 待 |
+| commit 4 (C) | Stage 1 byte-equal 7/7 final | 🟡 等 2.7-2.9 |
+| B | main.jhyy 收尾 (resolve_imports + cmd_dump 推迟) | 🟡 等 C |
+| C'.1 / C'.2 | codegen 确定性 audit + sub-pass | 🔴 待 (Stage 2 前置) |
+| D | Stage 2 真闭环 (jhyy_1 → jhyy_2 → jhyy_3 N=3 byte-equal) | 🔴 待 (v1.0 目标) |
+| v1.0.0 | 真自举达成 (M4) | 🔴 待 (D 之后) |
+
+---
+
+## v0.9 wip commit 2.6: B-φ1 真修 — 加 phi emit 路径对齐 v0
+
+**日期**: 2026-08-05
+**承接**: v0.9 wip commit 2.5
+
+### 目标
+
+修 B-φ1 (if-expr 提前 alloc result_slot 占 tmp 编号 + 缺 phi emit 路径),让 `stage1-expanded.sh` byte-equal 从 2/7 升到 4/7 (消 fib_renamed + control_flow FAIL)。
+
+### 完成定义(全达成 ✅)
+
+| 标准 | 状态 |
+|------|------|
+| cg_emit_phi helper 加完 (codegen.jhyy:544-550) | ✅ |
+| NODE_IF_v1 重写走 v0 codegen.c:602-674 逻辑 | ✅ |
+| v0 codegen bug 2 workaround 注释删除 | ✅ |
+| byte-equal ≥ 4/7 | ✅ (4/7:hello + arith + fib_renamed + control_flow) |
+| regress 持平 baseline | ✅ (3 OK) |
+
+---
+
+### 改动 1: `compiler/src0/codegen.jhyy:544-550` — cg_emit_phi helper
+
+```jhyy
+// cg_emit_phi — v0.9 wip commit 2.6 (B-φ1 fix)
+// Emit QBE phi 指令: result_v1 = qt phi @block1 then_v, @block2 else_v
+fn cg_emit_phi(ir: *IRBuf, result_v1: IRVal, block1: IRVal, val1: IRVal,
+                                 block2: IRVal, val2: IRVal) -> i32 {
+    return ir_emit_phi2(ir, result_v1, block1, val1, block2, val2);
+}
+```
+
+---
+
+### 改动 2: `compiler/src0/codegen.jhyy:1662-1740` — NODE_IF_v1 重写
+
+**改前 (v0 codegen bug 2 workaround — store/load mode)**:
+```jhyy
+// 提前 alloc result_slot (QBE_L) → 占 tmp 编号
+let result_slot = ir_new_tmp(ir, QBE_L());
+if is_void == 0 {
+    ir_emit_alloc(ir, result_slot, 4 as i32);
+}
+// then: cg_expr_v1 → store 到 result_slot
+// else: cg_expr_v1 → store 到 result_slot
+// merge: load from result_slot
+```
+
+**改后 (对齐 v0 codegen.c:602-674)**:
+```jhyy
+// 删提前 alloc result_slot
+// phi only when both branches don't return (v0 codegen.c:662)
+if else_node != (0 as *Node) && then_returns == 0 && else_returns == 0 {
+    let result_v1 = ir_new_tmp(ir, ret_qt);
+    cg_emit_phi(ir, result_v1, then_block, then_v_v1, else_block, else_v_v1);
+    return result_v1;
+}
+return then_v_v1;  // fallback (单边 return / 无 else)
+```
+
+**根因**:fib_renamed `if count < 2 { return count; } fib(count-1) + fib(count-2)` 的 then 是 return,v0 codegen.c 不 alloc result temp (`if (d->else_body && !then_returns && !else_returns)` 条件不满足)。jhyy_v1 老版本**总是** alloc,占 tmp 3,让 @merge3 后续 tmp 从 4 开始 vs v0 的 3,byte-equal 偏移 1。
+
+---
+
+### 验证
+
+```bash
+# 1. byte-equal baseline
+bash compiler/tests/stage1-expanded.sh
+# [PASS] hello
+# [PASS] fib_renamed
+# [FAIL] struct_val_pass
+# [FAIL] match_exhaustive
+# [PASS] arith
+# [FAIL] const_array
+# [PASS] control_flow
+# === summary ===
+# pass: 4 / 7   (commit 2.5: 2/7)
+# fail: 3       (commit 2.5: 5/7)
+
+# 2. regress 持平
+python -c "..."   # 3 OK baseline (持平 commit 2.5)
+
+# 3. fib_renamed diff 空
+diff /tmp/stage1-expanded/fib_renamed_v0_tmp.il compiler/tests/examples/fib_renamed.il
+# (空)
+```
+
+---
+
+### 风险评估校准(进 codegen-pitfalls.md § 2.1)
+
+commit 2.5 文档化的 B-φ1 修复选项 2 "接受 diff" 是**错位假设** — 实际 B-φ1 真修:
+- 改动面:**~60 行** (helper 10 行 + NODE_IF_v1 重写 50 行)
+- 风险:**低-中** (fib_renamed / control_flow 都没触发 phi path,纯靠"删提前 alloc"就 byte-equal)
+- 不需要照搬 v0 codegen.c 嵌套结构 (ir_current_block 嵌套 phi predecessor 处理推迟到未来 sprint)

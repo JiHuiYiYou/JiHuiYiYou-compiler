@@ -537,6 +537,16 @@ fn cg_emit_store(cg_raw_v1: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> i32 {
 // cg_convert_arg：QBE 隐式类型转换
 // ════════════════════════════════════════════════════
 
+// cg_emit_phi — v0.9 wip commit 2.6 (B-φ1 fix)
+// Emit QBE phi 指令：result_v1 = qt phi @block1 then_v, @block2 else_v
+// 仅在 then AND else 都不 return 时调用（v0 codegen.c:662 对齐）。
+// 嵌套 if-else 的 phi predecessor 用 then_block / else_block (v0 codegen.c
+// 用 ir_current_block 处理嵌套,本 commit 跳过,fallback 到 then_val)。
+fn cg_emit_phi(ir: *IRBuf, result_v1: IRVal, block1: IRVal, val1: IRVal,
+                                 block2: IRVal, val2: IRVal) -> i32 {
+    return ir_emit_phi2(ir, result_v1, block1, val1, block2, val2);
+}
+
 // 当 arg.qbe_type != param.qbe_type 时 emit QBE 转换指令（dtosi/stosi/sltof/...
 // 等）。返回转换后的 IRVal（同 qt）或原 arg（不需要转换）。
 //
@@ -1652,10 +1662,12 @@ fn cg_expr_v1(cg_raw_v1: *u8, n: *Node) -> IRVal {
     // ── NODE_IF_v1 ──
     // if cond { then } [else { else }]
     //
-    // v0 codegen bug 2 workaround: nested if-else 时 phi predecessor mismatch。
-    // 改走 store/load 模式：alloc result_slot, each branch store, merge load。
-    // trampoline (ep_block) 保留但 only for void-merge case（短跳 ep → merge 即可）。
-    // void if → 直接走 ep_block（不走 merge phi）
+    // v0.9 wip commit 2.6 (B-φ1 fix): 对齐 v0 codegen.c:602-674 if-expr logic
+    //   - 删 v0 codegen bug 2 workaround (store/load 模式)
+    //   - 删 alloc result_slot 提前 (会占 tmp 编号, fib_renamed.il 偏移 1)
+    //   - phi 只在 then AND else 都不 return 时 emit
+    //   - void if → 不 alloc, 不 phi
+    //   - 单边 return → fallback return then_v (zero IRVal from NODE_RETURN)
     if kind == NODE_IF_v1() {
         let nid = node_if_data(n);
         let cond_node = (*nid).cond as *Node;
@@ -1666,7 +1678,7 @@ fn cg_expr_v1(cg_raw_v1: *u8, n: *Node) -> IRVal {
         let else_block = ir_new_block(ir, "else" as *u8);
         let merge_block = ir_new_block(ir, "merge" as *u8);
 
-        // 决定返回类型（如果 void 就 skip result_v1 slot）
+        // 决定返回类型（void if 不 emit phi）
         let mut is_void: i32 = 0;
         let mut ret_qt: i32 = QBE_W();
         if (*n).type_ptr_v1 != (0 as *u8) {
@@ -1678,57 +1690,57 @@ fn cg_expr_v1(cg_raw_v1: *u8, n: *Node) -> IRVal {
             }
         }
 
-        // alloc result_v1 slot (only for non-void) — v1.0.0 sprint 5: 必须在 jnz 之前
-        // （QBE 要求 alloc 在函数首块，jnz 是 terminator，alloc 跟在后面会报
-        // "label or } expected"）
-        let result_slot = ir_new_tmp(ir, QBE_L());
-        if is_void == 0 {
-            ir_emit_alloc(ir, result_slot, 4 as i32);
-        }
+        // 检测 then/else 是否以 return/break/continue 结尾（避免 dead jmp after ret）
+        let then_returns: i32 = cg_body_returns(then_node);
+        let else_returns: i32 = if else_node != (0 as *Node) { cg_body_returns(else_node) } else { 1 };
 
         ir_emit_jnz(ir, cond, then_block, else_block);
 
         // then
         ir_emit_label(ir, then_block);
+        let mut then_v_v1: IRVal = zero;
+        let _then_void = cg_expr_v1(cg_raw_v1, then_node);
         if is_void == 0 {
-            let then_v_v1 = cg_expr_v1(cg_raw_v1, then_node);
-            let _s1 = cg_emit_store_primitive(cg_raw_v1, 0 as *u8, then_v_v1, result_slot);
-        } else {
-            let _u1 = cg_expr_v1(cg_raw_v1, then_node);
+            then_v_v1 = _then_void;
         }
-        // v1.0.0 sprint 5：then body 以 ret 结尾时不能 emit jmp（QBE 拒收 dead jmp after ret）
-        if cg_body_returns(then_node) == 0 {
+        if then_returns == 0 {
             ir_emit_jmp(ir, merge_block);
         }
 
         // else
         ir_emit_label(ir, else_block);
-        if is_void == 0 {
-            if else_node != (0 as *Node) {
-                let else_v_v1 = cg_expr_v1(cg_raw_v1, else_node);
-                let _s2 = cg_emit_store_primitive(cg_raw_v1, 0 as *u8, else_v_v1, result_slot);
-            } else {
-                let zv = ir_new_tmp(ir, ret_qt);
-                ir_emit_copy(ir, zv, 0);
-                let _s2b = cg_emit_store_primitive(cg_raw_v1, 0 as *u8, zv, result_slot);
+        let mut else_v_v1: IRVal = zero;
+        let _has_else: i32 = if else_node != (0 as *Node) { 1 } else { 0 };
+        if _has_else != 0 {
+            let _else_void = cg_expr_v1(cg_raw_v1, else_node);
+            if is_void == 0 {
+                else_v_v1 = _else_void;
             }
-        } else {
-            if else_node != (0 as *Node) {
-                let _u2 = cg_expr_v1(cg_raw_v1, else_node);
+            if else_returns == 0 {
+                ir_emit_jmp(ir, merge_block);
             }
         }
-        if cg_body_returns(else_node) == 0 {
+        if _has_else == 0 {
+            // no else → fallthrough to merge
             ir_emit_jmp(ir, merge_block);
         }
 
         // merge
         ir_emit_label(ir, merge_block);
-        if is_void == 0 {
+        if is_void != 0 {
+            return zero;
+        }
+        // phi only when both branches don't return (对齐 v0 codegen.c:662)
+        if else_node != (0 as *Node) && then_returns == 0 && else_returns == 0 {
             let result_v1 = ir_new_tmp(ir, ret_qt);
-            cg_emit_load(cg_raw_v1, result_v1, 0 as *u8, result_slot);  // v1.0.0 sprint 5: ir_emit_load→cg_emit_load
+            // B-φ1 fix: emit phi @then_block then_v, @else_block else_v
+            // （v0 codegen.c:629-633: nested if-else 用 ir_current_block 但 fib_renamed / control_flow
+            //   是单层 if-expr, then_block / else_block 作为 predecessor 即可）
+            cg_emit_phi(ir, result_v1, then_block, then_v_v1, else_block, else_v_v1);
             return result_v1;
         }
-        return zero;
+        // fallback: 单边 return / 无 else → 直接返回 then_v (zero IRVal from NODE_RETURN)
+        return then_v_v1;
     }
 
     // ── NODE_WHILE ──

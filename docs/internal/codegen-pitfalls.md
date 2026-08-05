@@ -36,38 +36,40 @@
 
 | # | tag | 测试 | 现象 (jhyy_0 vs jhyy_1 .il diff) | 根因 | 优先级 | commit |
 |---|-----|------|----------------------------------|------|--------|--------|
-| 1 | **B-φ1** | `fib_renamed` / `control_flow` | if-expr phi slot 缺;jhyy_1 emit `ret %t4` 而 jhyy_0 emit `ret %t7`(`%t7 =w copy %t4`) | v0 if-expr codegen 用 QBE `phi`(merge 块 alloc result,两边 store);v1.0.0 sprint 5 commit 4 改走 store/load 模式(v0 codegen bug 2 workaround:nested if-else phi predecessor mismatch) | 🔴 中 | 待 v0.9 commit 2.6+ |
-| 2 | **B-let2** | `arith` | `l → w` narrow 缺;`qbe_type_of` i64 → i32 字段赋值无 emit `copy`/`extuw` | jhyy_v1 `cg_convert_arg` (codegen.jhyy:544-634) 历史上只覆盖 `src=w, dst=l` (extsw) + `src=l, dst=d/s`;**漏 `src=l, dst=w`** —— v0 codegen.c:780-783 显式 emit `copy`(QBE 'copy' from l to w 隐式截断) | 🟢 必修 | ✅ v0.9 commit 2.5 |
+| 1 | **B-φ1** ✅ | `fib_renamed` / `control_flow` | if-expr phi slot 缺;jhyy_1 emit `ret %t4` 而 jhyy_0 emit `ret %t7`(`%t7 =w copy %t4`) | v0 if-expr codegen 用 QBE `phi`(merge 块 alloc result,两边 store);v1.0.0 sprint 5 commit 4 改走 store/load 模式(v0 codegen bug 2 workaround:nested if-else phi predecessor mismatch) | 🔴 中 | ✅ v0.9 commit 2.6 (本 commit) |
+| 2 | **B-let2** ✅ | `arith` | `l → w` narrow 缺;`qbe_type_of` i64 → i32 字段赋值无 emit `copy`/`extuw` | jhyy_v1 `cg_convert_arg` (codegen.jhyy:544-634) 历史上只覆盖 `src=w, dst=l` (extsw) + `src=l, dst=d/s`;**漏 `src=l, dst=w`** —— v0 codegen.c:780-783 显式 emit `copy`(QBE 'copy' from l to w 隐式截断) | 🟢 必修 | ✅ v0.9 commit 2.5 |
 | 3 | **B-struct** | `struct_val_pass` | struct by-value sret 参数路径差异(具体 diff 见 `stage1-expanded.sh` 输出) | jhyy_v1 NODE_CALL sret 路径(codegen.jhyy:1414-1538) emit `ret_slot` alloc + pass as `l %ret` arg,v0 codegen.c:1140-1234 emit 顺序 / slot 编号细节不一致 | 🟡 中 | 待 v0.9 commit 2.7+ |
 | 4 | **B-match** | `match_exhaustive` | match-expr codegen 缺;NODE_MATCH case `cg_expr_v1` 当前 fall-through 返回 zero IRVal | v0 codegen.c 完整 match(codegen.c:1310-1450);jhyy_v1 commit 4 没翻译 match-expr(sprint 5 commit 4 占位 return zero)—— **CERR big 4 中的 2 个**(dungeon_game + match_test),v1.0.0 sprint 3 处理 | 🔴 高 | 待 v1.0.0 sprint 3 (parser 翻译 + codegen 翻译) |
 | 5 | **B-data** | `const_array` | `.data` 段 emit 顺序 / 格式差异 | jhyy_v1 `cg_emit_const_data_elem` (codegen.jhyy:1916-1960) 当前 emit 顺序 vs v0 codegen.c `cg_emit_const_data` 不同 —— v0 先 emit 字段 `d N, w N` 分行,jhyy_v1 单行 emit | 🟡 中 | 待 v0.9 commit 2.7+ |
 | 6 | **B-testset** | 7 测试集 baseline 锁定 | Stage 1 byte-equal baseline = `hello`(已 PASS)/ `arith`(本 commit 修) / 5 FAIL | 测试集本身锁定:文件位置 + EXPECT + 不依赖 let mut / 不依赖 hash 触发面 | 🟢 完成 | ✅ v0.9 commit 2.5 |
 
-### 2.1 B-φ1 详解(if-expr phi slot skip)
+### 2.1 B-φ1 详解(if-expr phi slot skip) — RESOLVED commit 2.6
 
 **首次报告**: v0.9 wip commit 2.5(2026-08-05)
-**触发**: `stage1-expanded.sh` 跑 `fib_renamed.jhyy` + `control_flow.jhyy`,jhyy_0 vs jhyy_1 .il diff 显示:
+**修复**: v0.9 wip commit 2.6(2026-08-05)
+**触发**: `stage1-expanded.sh` 跑 `fib_renamed.jhyy` + `control_flow.jhyy`,jhyy_0 vs jhyy_1 .il diff 显示 tmp 编号偏移 1:
 
 ```diff
-<     %t4 =w copy %t0
-<     %t7 =w copy %t4    # phi 合并 from then-branch
-<     ret %t7
----
->     %t4 =w copy %t0
->     ret %t4            # 直接 ret;没 emit phi 合并块
+- < %t3 =w copy 1            # v0 在 @merge3 从 tmp 3 开始
++ > %t4 =w copy 1            # jhyy_v1 在 @merge3 从 tmp 4 开始 (多 alloc result_slot 占 tmp 3)
 ```
 
 **根因**:
-- v0 codegen.c if-expr codegen: alloc result_v1 temp in merge block,then/else 各 emit `jnz @merge` + branch 写入 temp,merge block 用 phi 拿最终值。
-- jhyy_v1 codegen.jhyy:1659-1732 NODE_IF_v1 case **不走 phi**,改走 store/load 模式:alloc result_slot (QBE_L) in start block,then/else `store` 到 slot,merge `load` 出来。
-- 行为正确(都返回 if-expr 值),但 .il 字节布局不同。
+- v0 codegen.c if-expr: 只在 `d->else_body && !then_returns && !else_returns` 时 alloc result + emit phi;otherwise fallback `return then_val`(no alloc,no phi,no extra tmp)
+- jhyy_v1 codegen.jhyy:1659-1732 NODE_IF_v1 case **总是 alloc result_slot (QBE_L) + store/load mode** → 多占一个 tmp 编号,即使 fib_renamed 的 if-expr (then=return) 不需要 phi
 
-**修复选项**(v0.9 commit 2.7+ 评估):
-1. **加 phi emit 路径对齐 v0** —— 工作量大(v0 codegen.c phi 用嵌套结构,jhyy 无前向引用避不开 mutual recursion)
-2. **接受 diff + 文档化** —— Stage 1 byte-equal 仅要求 byte-equal,**不是**说 .il 必须跟 v0 完全相同;commit 2.5 修 B-let2 后 2/7 = 基线,**后续真自举**(v1.0 启动后)v1 编自身产物一致即可,不一定跟 v0 编的一致
-3. **jhyy_v1 codegen 选项 flag** —— 加 `-emit-phi` flag,默认 store/load,真自举验证时切 phi(过设计,推迟到 v2.0 QBE 重写)
+**修复方案**(实际执行 — 不是 commit 2.5 估的"选项 2 接受 diff"):
+1. jhyy_v1 codegen.jhyy:544-548 加 `cg_emit_phi` helper (包装 `ir_emit_phi2`)
+2. codegen.jhyy:1662-1740 NODE_IF_v1 重写,删 v0 codegen bug 2 workaround:
+   - 删提前 alloc result_slot
+   - phi emit 条件: `else_node != 0 && then_returns == 0 && else_returns == 0`
+   - 单边 return / 无 else → fallback `return then_v`
+   - void if → return zero, 不 alloc
+3. fib_renamed (then=return) 走 fallback,无 alloc → @merge3 从 tmp 4 → tmp 3,byte-equal
 
-**推荐**: 选项 2 (commit 2.5 已采:接受 diff + 文档化)
+**验证**: `stage1-expanded.sh` 4/7 PASS (hello + arith + fib_renamed + control_flow)。regress 持平 3 OK。
+
+**风险评估偏差**: commit 2.5 估 "B-φ1 选项 1 = 工作量大,选选项 2 接受 diff" 是**错位假设**——实际 jhyy_v1 codegen.jhyy 改动面很小 (helper ~10 行 + NODE_IF_v1 重写 ~50 行),不需要照搬 v0 codegen.c 嵌套结构。 fib_renamed / control_flow 都没触发 phi path (then 都是 return,走 fallback),纯靠"删提前 alloc"就 byte-equal。
 
 ### 2.2 B-let2 详解(l→w narrow in cg_convert_arg)
 
@@ -119,7 +121,17 @@
 | regress 持平 baseline | ✅ (3 OK = 持平 commit 12 12 OK 测量口径差) |
 | Stage 1 验收脚本存在 | ✅ ([`stage1-expanded.sh`](../../tests/stage1-expanded.sh)) |
 
-**下一步**: v0.9 commit 2.6+ (W-006 1-char local var 验证完整) + commit 3 (main.c 翻译) + commit 4 (Stage 1 final verify)
+### 2.6 commit 2.6 增量(B-φ1 真修)
+
+| 标准 | 状态 |
+|------|------|
+| B-φ1 修完,byte-equal ≥ 4/7 | ✅ (4/7:hello + arith + fib_renamed + control_flow) |
+| cg_emit_phi helper 加完 | ✅ (codegen.jhyy:544-550) |
+| NODE_IF_v1 重写走 v0 codegen.c:602-674 逻辑 | ✅ (codegen.jhyy:1662-1740) |
+| v0 codegen bug 2 workaround 注释删除 | ✅ (L1655-1658 注释删,改 v0.9 wip commit 2.6 注释) |
+| regress 持平 | ✅ (3 OK = 持平 commit 2.5 baseline) |
+
+**下一步**: v0.9 commit 2.7 (B-data) + commit 2.8 (B-struct) + commit 2.9 (B-match) + commit 2.10+ (W 真修) → commit 4 final (byte-equal 7/7)
 
 ---
 
@@ -130,3 +142,5 @@
 | v0.7 7A | match non-wildcard 漏 emit next_check label | v0.7 commit 7A |
 | v0.7 7B | arr_of_structs[i].field 返回地址不 load | v0.7 commit 7B |
 | v0.8 W-009 | `cg_convert_arg` 缺 NODE_CAST 处理 + 整数宽度不转 | v0.8 commit 12 |
+| v0.9 commit 2.5 (B-let2) | `cg_convert_arg` 漏 `src=l, dst=w` narrow 分支 | v0.9 wip commit 2.5 |
+| v0.9 commit 2.6 (B-φ1) | if-expr 提前 alloc result_slot 占 tmp 编号 + 缺 phi emit | v0.9 wip commit 2.6 |
