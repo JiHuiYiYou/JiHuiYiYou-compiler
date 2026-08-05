@@ -40,7 +40,7 @@
 | 2 | **B-let2** ✅ | `arith` | `l → w` narrow 缺;`qbe_type_of` i64 → i32 字段赋值无 emit `copy`/`extuw` | jhyy_v1 `cg_convert_arg` (codegen.jhyy:544-634) 历史上只覆盖 `src=w, dst=l` (extsw) + `src=l, dst=d/s`;**漏 `src=l, dst=w`** —— v0 codegen.c:780-783 显式 emit `copy`(QBE 'copy' from l to w 隐式截断) | 🟢 必修 | ✅ v0.9 commit 2.5 |
 | 3 | **B-struct** | `struct_val_pass` | struct by-value sret 参数路径差异(具体 diff 见 `stage1-expanded.sh` 输出) | jhyy_v1 NODE_CALL sret 路径(codegen.jhyy:1414-1538) emit `ret_slot` alloc + pass as `l %ret` arg,v0 codegen.c:1140-1234 emit 顺序 / slot 编号细节不一致 | 🟡 中 | 待 v0.9 commit 2.7+ |
 | 4 | **B-match** | `match_exhaustive` | match-expr codegen 缺;NODE_MATCH case `cg_expr_v1` 当前 fall-through 返回 zero IRVal | v0 codegen.c 完整 match(codegen.c:1310-1450);jhyy_v1 commit 4 没翻译 match-expr(sprint 5 commit 4 占位 return zero)—— **CERR big 4 中的 2 个**(dungeon_game + match_test),v1.0.0 sprint 3 处理 | 🔴 高 | 待 v1.0.0 sprint 3 (parser 翻译 + codegen 翻译) |
-| 5 | **B-data** | `const_array` | `.data` 段 emit 顺序 / 格式差异 | jhyy_v1 `cg_emit_const_data_elem` (codegen.jhyy:1916-1960) 当前 emit 顺序 vs v0 codegen.c `cg_emit_const_data` 不同 —— v0 先 emit 字段 `d N, w N` 分行,jhyy_v1 单行 emit | 🟡 中 | 待 v0.9 commit 2.7+ |
+| 5 | **B-data** ⚠️ moot (parser CERR) | `const_array` | jhyy_v1 parser **直接拒绝** 顶层 `const NAME: TYPE = [...];` (CERR: "expected ;, got ident" on line 7)→ 不生成 .il,byte-equal diff 不可观察 | **不是 codegen gap** —— jhyy_v1 parser 翻译层缺顶层 const decl (sprint 5 commit 4 没翻译 NODE_CONST_DECL parsing)。归并到 v1.0.0 sprint 3 parser 翻译 (Task #52) | 🟡 moot | ✅ v0.9 commit 2.7 (文档化,无 codegen 改动) |
 | 6 | **B-testset** | 7 测试集 baseline 锁定 | Stage 1 byte-equal baseline = `hello`(已 PASS)/ `arith`(本 commit 修) / 5 FAIL | 测试集本身锁定:文件位置 + EXPECT + 不依赖 let mut / 不依赖 hash 触发面 | 🟢 完成 | ✅ v0.9 commit 2.5 |
 
 ### 2.1 B-φ1 详解(if-expr phi slot skip) — RESOLVED commit 2.6
@@ -101,7 +101,7 @@
 
 **B-match** (match-expr codegen): jhyy_v1 cg_expr_v1 NODE_MATCH case 占位 return zero → 任何 match-expr 测试 QBE 报 "undefined temp" → 待 v1.0.0 sprint 3(parser 翻译 + codegen 翻译)。这是 CERR big 4 中的 2 个(dungeon_game + match_test)。
 
-**B-data** (.data 段 emit 顺序): jhyy_v1 `cg_emit_const_data_elem` (codegen.jhyy:1916-1960) 单行 emit `,` 分隔,v0 codegen.c `cg_emit_const_data` 多行 emit → 待 v0.9 commit 2.7+ 加 multi-line emit 选项或 jhyy_v1 切 multi-line 对齐 v0。
+**B-data** (.data 段 emit 顺序) — **MOOT per v0.9 commit 2.7**: jhyy_v1 parser **CERR 拒绝顶层 `const NAME: TYPE = ...`** (`expected ;, got ident` on line 7 col 7 of `const_array.jhyy`),根本走不到 codegen 阶段,不存在 `.data` 段 emit 差异可观察。**根因**:parser 翻译层缺 NODE_CONST_DECL parsing (v1.0.0 sprint 5 commit 4 没翻译) → 推迟到 v1.0.0 sprint 3 (Task #52)。**验证证据**: `jhyy_v1 build const_array.jhyy` → 6 条 parse errors + exit 0 (CERR); `jhyy.exe build const_array.jhyy` → 生成 `/tmp/ca_v0.il.il` 含 `data $ASCII_LOWER = { b 97, ... }`。
 
 ### 2.4 修复策略共识(commit 2.5 锁定)
 
@@ -131,7 +131,18 @@
 | v0 codegen bug 2 workaround 注释删除 | ✅ (L1655-1658 注释删,改 v0.9 wip commit 2.6 注释) |
 | regress 持平 | ✅ (3 OK = 持平 commit 2.5 baseline) |
 
-**下一步**: v0.9 commit 2.7 (B-data) + commit 2.8 (B-struct) + commit 2.9 (B-match) + commit 2.10+ (W 真修) → commit 4 final (byte-equal 7/7)
+### 2.7 commit 2.7 增量(B-data moot — doc-only)
+
+| 标准 | 状态 |
+|------|------|
+| B-data 根因重新诊断 | ✅ parser CERR(顶层 const decl 拒绝),不是 codegen gap |
+| const_array.jhyy 还原到 v0.7 7B 版本 | ✅ (从 fn 内 hard-coded 数组 revert 回顶层 const) |
+| codegen-pitfalls.md § 2 + § 2.3 状态更新 | ✅ (B-data 行标 "moot (parser CERR)",§ 2.3 改写根因) |
+| changelog-v0.9.0.md 加 commit 2.7 段 | ✅ |
+| regress 持平 | ✅ (3 OK = 持平 commit 2.6 baseline) |
+| byte-equal 持平 4/7 | ✅ (const_array FAIL 保持,根因 = parser CERR 不算 codegen gap) |
+
+**下一步**: v0.9 commit 2.8 (B-struct 真修) + commit 2.9 (B-match 真修) + commit 2.10+ (W 真修) → commit 4 final (byte-equal 7/7)
 
 ---
 
@@ -144,3 +155,4 @@
 | v0.8 W-009 | `cg_convert_arg` 缺 NODE_CAST 处理 + 整数宽度不转 | v0.8 commit 12 |
 | v0.9 commit 2.5 (B-let2) | `cg_convert_arg` 漏 `src=l, dst=w` narrow 分支 | v0.9 wip commit 2.5 |
 | v0.9 commit 2.6 (B-φ1) | if-expr 提前 alloc result_slot 占 tmp 编号 + 缺 phi emit | v0.9 wip commit 2.6 |
+| v0.9 commit 2.7 (B-data) | (诊断) const_array FAIL 根因 = parser CERR 而非 codegen gap → 推迟到 v1.0.0 sprint 3 (Task #52) | v0.9 wip commit 2.7 (doc-only) |

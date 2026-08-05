@@ -11,7 +11,8 @@
 |--------|------|------|
 | commit 1 | 29-extsw hypothesis 验证 | ✅ SHIPPED ([ce93f64](../../plans/roadmap/v0.x-c-compiler-roadmap.md), 2026-08-05) |
 | commit 2.5 | Stage 1 byte-equal 7 测试集 + 修 B-let2 (l→w narrow) | ✅ SHIPPED (2026-08-05) |
-| commit 2.6 | B-φ1 真修 — 加 phi emit 路径对齐 v0 | ✅ SHIPPED (本 commit) |
+| commit 2.6 | B-φ1 真修 — 加 phi emit 路径对齐 v0 | ✅ SHIPPED (2026-08-05) |
+| commit 2.7 | B-data 根因重诊断 — parser CERR (顶层 const 拒绝),不是 codegen gap → 推迟 v1.0.0 sprint 3 (Task #52),本 commit doc-only 无 codegen 改动 | ✅ SHIPPED (本 commit) |
 
 ---
 
@@ -184,7 +185,8 @@ docs/internal/workarounds.md — B-let2 cross-ref entry 完整
 
 | commit | 主题 | 状态 |
 |--------|------|------|
-| commit 2.7 | B-data (.data 段 emit 顺序) 真修 | 🔴 待 |
+| commit 2.7 | B-data 根因重诊断 — parser CERR (顶层 const 拒绝),doc-only | ✅ 本 commit |
+| commit 2.8 | B-struct (struct by-value sret 路径) 真修 | 🔴 待 (本 commit 后立即启动) |
 | commit 2.8 | B-struct (struct by-value sret 路径) 真修 | 🔴 待 |
 | commit 2.9 | B-match (match-expr 翻译补全) 真修 | 🔴 待 |
 | commit 2.10 | W-005 真修 phase 1 (codegen.c NODE_ASSIGN let-mut fix) | 🔴 待 |
@@ -296,3 +298,90 @@ commit 2.5 文档化的 B-φ1 修复选项 2 "接受 diff" 是**错位假设** �
 - 改动面:**~60 行** (helper 10 行 + NODE_IF_v1 重写 50 行)
 - 风险:**低-中** (fib_renamed / control_flow 都没触发 phi path,纯靠"删提前 alloc"就 byte-equal)
 - 不需要照搬 v0 codegen.c 嵌套结构 (ir_current_block 嵌套 phi predecessor 处理推迟到未来 sprint)
+
+---
+
+## v0.9 wip commit 2.7: B-data 根因重诊断 — parser CERR (doc-only)
+
+**日期**: 2026-08-05
+**承接**: v0.9 wip commit 2.6
+**类型**: 诊断性 commit, **无 codegen 改动**
+
+### 目标
+
+原计划 v0.9 commit 2.7 修 B-data (`cg_emit_const_data_elem` 单行 emit vs v0 多行 emit 顺序差异)。本 commit 启动时实际尝试修 const_array.jhyy(改成 fn 内 hard-coded 数组字面量绕开 parser CERR),**fn 内数组字面量 + 显式类型注解** 在 v0 (jhyy.exe) 同样报 "type mismatch: expected [u8; 26], got [u8; 26]" → 推翻 "B-data 是 codegen gap" 的假设。
+
+**根因重诊断**:
+- jhyy_v1 报:`const_array.jhyy:7:7: error: expected ;, got ident` + 5 条 parser errors → **不生成 .il 文件**
+- v0 (jhyy.exe) 报:`Generated: /tmp/ca_v0_tmp.il.il` (data 段 + main 函数都正确)
+- → const_array FAIL **不是 codegen 翻译 gap**,是 **parser 翻译层缺 NODE_CONST_DECL parsing** (v1.0.0 sprint 5 commit 4 没翻译)
+- B-data 在 § 2 表标 "moot (parser CERR)";推迟到 v1.0.0 sprint 3 (Task #52)
+
+### 完成定义(全达成 ✅)
+
+| 标准 | 状态 |
+|------|------|
+| B-data 根因重诊断(parser CERR 而非 codegen gap) | ✅ |
+| const_array.jhyy 还原到 v0.7 7B 版本 | ✅ (从 fn 内 hard-coded 数组 revert 回顶层 const) |
+| codegen-pitfalls.md § 2 + § 2.3 状态更新 | ✅ (B-data 行标 "moot (parser CERR)") |
+| regress 持平 baseline | ✅ (3 OK = 持平 commit 2.6) |
+| byte-equal 持平 4/7 | ✅ (const_array FAIL 保持 — 根因不是 codegen gap) |
+| 无 codegen 改动 | ✅ (本 commit doc-only) |
+
+### 改动 1: `compiler/tests/examples/const_array.jhyy` — 还原到 v0.7 7B 版本
+
+回退我刚才做的"fn 内 hard-coded 数组字面量"实验(它在 v0 都通不过 "type mismatch" error,根本测不到 codegen)。还原回 v0.7 7B 写的顶层 const array:
+
+```jhyy
+const ASCII_LOWER: [u8; 26] = [
+    97, 98, ..., 121, 122
+];
+
+fn main_jhyy() -> i32 {
+    ASCII_LOWER[25] as i32
+}
+```
+
+### 改动 2: `docs/internal/codegen-pitfalls.md § 2 + § 2.3` — B-data 改 moot
+
+§ 2 表 B-data 行从"待 v0.9 commit 2.7+" → "✅ v0.9 commit 2.7 (文档化,无 codegen 改动)" + 标 "moot (parser CERR)" + 根因改写。
+
+§ 2.3 B-data 段从"待 v0.9 commit 2.7+ 加 multi-line emit 选项" → "MOOT per v0.9 commit 2.7: jhyy_v1 parser CERR 拒绝顶层 const,根本走不到 codegen 阶段" + 验证证据 (`jhyy_v1 build` 6 条 parse errors;`jhyy.exe build` 生成 .il)。
+
+### 改动 3: `docs/logs/v0/changelog-v0.9.0.md` — 加本 commit 段(本文)
+
+### 验证
+
+```bash
+# 1. byte-equal 持平 4/7
+bash compiler/tests/stage1-expanded.sh
+# [PASS] hello
+# [PASS] fib_renamed
+# [FAIL] struct_val_pass
+# [FAIL] match_exhaustive
+# [PASS] arith
+# [FAIL] const_array  ← parser CERR (不是 codegen gap)
+# [PASS] control_flow
+# pass: 4 / 7   (持平 commit 2.6)
+
+# 2. v0 能编 const_array (proof that B-data moot)
+jhyy.exe build const_array.jhyy -o /tmp/ca_v0_tmp
+# Generated: /tmp/ca_v0_tmp.il  (data $ASCII_LOWER = { b 97, ... } 正确)
+
+# 3. jhyy_v1 CERR (proof of parser CERR)
+jhyy_v1.exe build const_array.jhyy
+# 6 条 parser errors: expected ;, got ident on line 7:7
+
+# 4. regress 持平
+python -c "..."  # 3 OK baseline
+```
+
+### 决策总结
+
+| 决策点 | 选择 | 理由 |
+|--------|------|------|
+| B-data 是否 codegen gap? | **NO** | jhyy_v1 parser 拒绝顶层 const decl → 走不到 codegen 阶段 |
+| B-data 何时修? | **v1.0.0 sprint 3** | parser 翻译层 + Task #52 (const_array + const_struct_array parser 翻译) |
+| B-data 本 commit 范围? | **doc-only** | 只更新 codegen-pitfalls.md + changelog + revert const_array.jhyy 实验 |
+| 跳到下一 commit? | **commit 2.8 (B-struct)** | B-struct 是真实 codegen gap(struct_val_pass diff 显示 v0 vs v1 字段 copy 差异:`%t11 =l copy %t5` vs 直接 `%t11 =w loadw %t5`) |
+| B-match 何时修? | **commit 2.9** | match_exhaustive 在 jhyy_v1 segfault (exit 127) — 不是 CERR,是 NODE_MATCH codegen fall-through return zero(Task #50 pending) |
