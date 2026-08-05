@@ -48,6 +48,21 @@ fn FIELD_DESC_SIZE() -> i64 { return 24 as i64; }
 // VariantDesc layout: name(*u8 8) + payload(*u8 8) + tag(i32 4 + pad 4) = 16
 fn VARIANT_DESC_SIZE() -> i64 { return 16 as i64; }
 
+// var_name_eq_v1: 比较两个 Sym* 的 name 字符串相等 (strcmp 风格: 0=相等, 非 0=不等)。
+//   parser 阶段 alloc 的 SYM_VARIANT 跟 sema 阶段 enum 注册的全局 variant
+//   Sym 指针可能不同 (但 name 相同)。v0 端 sema.c 用 strcmp(name) 是对的,
+//   jhyy 端之前用指针 == 永远不命中 → "enum has no variant" 误报。
+//   match_exhaustive.jhyy byte-equal 5/7 → 6/7 的根因修复 (commit 2.12a)。
+fn var_name_eq_v1(a: *Sym, b: *Sym) -> i32 {
+    if a == (0 as *Sym) {
+        return 1 as i32;  // a NULL: 非 0 = 不等
+    }
+    if b == (0 as *Sym) {
+        return 1 as i32;  // b NULL: 非 0 = 不等
+    }
+    return strcmp((*a).name, (*b).name);
+}
+
 // ════════════════════════════════════════════════════
 // Sub-structs: FieldDesc / VariantDesc
 // ════════════════════════════════════════════════════
@@ -370,7 +385,7 @@ fn process_match_pattern(ctx: *SemaContext, pat: *Node, match_type: *Type) -> i3
                     // 读 enum_type.variants_v1[i].name（VariantDesc 16 bytes）
                     let v_off = ptr_add_u8((*enum_type).variants_v1, i * VARIANT_DESC_SIZE());
                     let v_name_ptr = *(v_off as **Sym);
-                    if v_name_ptr == vsym {
+                    if var_name_eq_v1(v_name_ptr, vsym) == (0 as i32) {
                         // payload 在 offset_v1 8
                         let payload_ptr = *((v_off as i64 + (8 as i64)) as **Type);
                         inner_type = payload_ptr;
@@ -1242,7 +1257,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             while i < (*et).nvariants {
                 let v_off = ptr_add_u8((*et).variants_v1, i * VARIANT_DESC_SIZE());
                 let v_name_ptr = *(v_off as **Sym);
-                if v_name_ptr == vsym {
+                if var_name_eq_v1(v_name_ptr, vsym) == (0 as i32) {
                     let variant_payload = *((v_off as i64 + (8 as i64)) as **Type);
                     if variant_payload != (0 as *Type) {
                         if type_eq_v1(variant_payload, payload_type) == (0 as i32) {

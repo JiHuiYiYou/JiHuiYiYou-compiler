@@ -165,7 +165,51 @@
 | byte-equal 持平 5/7 | ✅ (5/7: hello + fib_renamed + struct_val_pass + arith + control_flow) |
 | regress 持平 | ✅ (3 OK = 持平 commit 2.8 baseline;实测 50/53 PASS) |
 
-**下一步**: v0.9 commit 2.10 (W-005 根因重诊断,doc-only,已 SHIPPED 2026-08-05) → commit 2.11 (W-005 真修: C/jhyy CGContext 布局对齐,已 SHIPPED 2026-08-05) → commit 4 final (byte-equal 6/7,const_array 不可达上限)
+**下一步**: v0.9 commit 2.10 (W-005 根因重诊断,doc-only,已 SHIPPED 2026-08-05) → commit 2.11 (W-005 真修: C/jhyy CGContext 布局对齐,已 SHIPPED 2026-08-05) → commit 2.12a (sema.jhyy enum variant lookup 修复,已 SHIPPED 2026-08-05) → commit 2.12b (codegen.jhyy NODE_ENUM_VARIANT 翻译,byte-equal 5/7→6/7)
+
+### 2.10 commit 2.10 增量 (W-005 根因重诊断, doc-only)
+
+| 标准 | 状态 |
+|------|------|
+| W-005 根因 = C/jhyy CGContext struct 布局不匹配, 9 字段错位 | ✅ (workarounds.md W-005 根因段) |
+| 修复路径明确 (C 端 CGContext 改 jhyy 端布局, ~50 行 C + ~30 行 jhyy) | ✅ |
+| byte-equal 持平 5/7 (无 codegen 改动) | ✅ |
+| regress 持平 | ✅ (50/53 PASS) |
+
+**无 codegen 改动**, 仅 doc-only。实际修复推后到 commit 2.11。
+
+### 2.11 commit 2.11 增量 (W-005 真修 phase 2)
+
+| 标准 | 状态 |
+|------|------|
+| C 端 CGContext 9 字段全对齐 jhyy 端布局 (calloc locals + loop_starts/ends/continues + sret_slot_id i64 + 字段顺序) | ✅ (codegen.c:18-43) |
+| cg_func 加 4×calloc + 4×free + `<stdlib.h>` include | ✅ (codegen.c:1604-1620) |
+| `cg->sret_slot` → 构造 IRVal literal (`sret_addr.id = sret_slot_id`) | ✅ (codegen.c:1429, 1646) |
+| jhyy_v1 编 test_w5.jhyy (let-mut 最小复现) 不再 segfault (exit 139 → exit 0 + `x = 20`) | ✅ |
+| byte-equal 持平 5/7 (纯内存布局, 不影响 .il emit) | ✅ |
+| regress 持平 50/53 | ✅ |
+
+**W-005 workaround 现在可安全移除** (下一 commit 2.13 加固 26 处 `*pos_ptr_vN` → `let mut x; x += n` 风格 revert)。
+
+### 2.12a commit 2.12a 增量 (sema enum variant lookup 修复)
+
+| 标准 | 状态 |
+|------|------|
+| 加 `var_name_eq_v1` helper (strcmp name, NULL-safe, 2 处复用) | ✅ (sema.jhyy:51-64) |
+| `process_match_pattern` L388 (NODE_PATTERN_ENUM) `v_name_ptr == vsym` → `var_name_eq_v1(v_name_ptr, vsym) == 0` | ✅ (sema.jhyy:388) |
+| `infer_type` NODE_ENUM_VARIANT L1260 `v_name_ptr == vsym` → `var_name_eq_v1(...) == 0` | ✅ (sema.jhyy:1260) |
+| regress 持平 50/53 | ✅ |
+| byte-equal 持平 5/7 (codegen 仍缺 NODE_ENUM_VARIANT case) | ✅ (持平, 6/7 推到 commit 2.12b) |
+| jhyy_v1 编 match_exhaustive.jhyy 不再报 "enum has no variant" | ✅ (sema 阶段通过) |
+
+**根因**: parser 阶段 alloc 的 `SYM_VARIANT` 跟 sema 阶段 enum 注册的全局 variant `Sym` 指针不同 (但 name 相同)。jhyy 端用 `==` 永远不命中 → 误报 "enum has no variant"。v0 端 sema.c:851 用 `strcmp(name)`, 是正确实现。jhyy 端修复 = 语义对齐 v0, **不只为 byte-equal**。
+
+**W-005 / W-001 / B-match 范畴**:
+- 跟 W-005 (let-mut segfault) 正交 — W-005 是 codegen 路径, 2.12a 是 sema 路径
+- 跟 W-001 (hash_string) 正交 — W-001 是 symtab 路径
+- 跟 B-match (NODE_MATCH codegen, commit 2.9 修) 是 match-expr 测试的 "兄弟 bug" — 2.12a 修 sema enum variant lookup, 2.12b 修 codegen NODE_ENUM_VARIANT case (v0 codegen.c:874-912 翻译)
+
+**下一步**: commit 2.12b (codegen.jhyy NODE_ENUM_VARIANT case 翻译, ~40-50 行, byte-equal 5/7 → 6/7) → commit 2.12 (W-001 真修 + 211 revert 合并)
 
 ---
 
@@ -183,3 +227,4 @@
 | v0.9 commit 2.9 (B-match) | NODE_MATCH codegen 缺 + `read_file` malloc `sz+1` heap 越界 | v0.9 wip commit 2.9 |
 | v0.9 commit 2.10 (W-005 诊断) | W-005 segfault 根因 = C/jhyy CGContext struct 布局不匹配 (9 字段) — 推迟真修到 2.11 | v0.9 wip commit 2.10 (doc-only) |
 | v0.9 commit 2.11 (W-005 真修 phase 2) | C 端 CGContext 9 字段全对齐 jhyy 端布局: `LocalEntry *locals` + `int64_t sret_slot_id` + `IRVal *loop_starts/ends/continues` + 字段顺序 (loop_depth 在 has_sret 之后) | v0.9 wip commit 2.11 |
+| v0.9 commit 2.12a (B-match-sema) | jhyy 端 sema.jhyy enum variant lookup 指针 `==` 永远不命中 (parser-scope vs sema-scope Sym 不同) → 误报 "enum has no variant"; v0 端 strcmp 字符串比较, 2.12a 改 jhyy 端对齐 | v0.9 wip commit 2.12a |

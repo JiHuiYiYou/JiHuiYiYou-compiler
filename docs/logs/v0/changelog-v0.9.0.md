@@ -17,6 +17,8 @@
 | commit 2.9 | B-match 真修 — NODE_MATCH codegen + `cg_match_pattern` helper + `read_file` malloc sz+4 修 | ✅ SHIPPED (2026-08-05) |
 | commit 2.10 | W-005 根因重诊断 — C/jhyy CGContext struct 布局不匹配(doc-only,无 codegen 改动);真修推后到 commit 2.11+ | ✅ SHIPPED (2026-08-05) |
 | commit 2.11 | W-005 真修 phase 2 — C 端 CGContext 9 字段对齐 jhyy 端布局 (`*locals` + `sret_slot_id i64` + `*loop_starts/ends/continues` + 字段顺序) | ✅ SHIPPED (2026-08-05) |
+| commit 2.12a | B-match-sema 真修 — sema.jhyy enum variant lookup 指针 `==` → strcmp (var_name_eq_v1 helper, 2 处复用) | ✅ SHIPPED (2026-08-05) |
+| commit 2.12b | B-match-codegen 真修 — codegen.jhyy 加 NODE_ENUM_VARIANT case 翻译 (~40-50 行) | 🟡 待 ship (byte-equal 5/7 → 6/7) |
 
 ---
 
@@ -879,8 +881,8 @@ bash compiler/tests/stage1-expanded.sh
 
 | commit | 主题 | 范围 |
 |--------|------|------|
-| commit 2.12 | W-001 真修 (hash_string 重写) | 高风险 |
-| commit 2.13 | W-005 加固 phase 2 (main.jhyy 14 处 *pos_ptr revert → let-mut) | 依赖 2.11 + 2.12 |
+| commit 2.12 | W-001 真修 (hash_string 重写) + 211 revert | 高风险 |
+| commit 2.13 | W-005 加固 phase 2 (26 处 *pos_ptr revert → let-mut) | 依赖 2.11 + 2.12 |
 | commit 2.14 | W-006 + W-002/W-004 衍生 + W-008/W-009 文档 | 文档 |
 | AUDIT (5 struct) | Sym / SymTable / Parser / Lexer / SemaContext | 排在 2.14 之后 / B 之前 |
 | B | main.jhyy 收尾 (resolve_imports, ~300 行) | 依赖 AUDIT |
@@ -888,4 +890,100 @@ bash compiler/tests/stage1-expanded.sh
 | D | N=3 byte-equal (5/7 层面) | M4 软定义达成 |
 | v1.0 sprint 3 (Task #52) | parser + sema fix → byte-equal 7/7 | |
 | v1.0 sprint 5 | N=3 在 7/7 层面 → M4 hard 闭环 | |
-| commit 4 (C) | byte-equal final 6/7 | W-005 不阻塞(已持平 5/7) |
+| commit 4 (C) | byte-equal final 6/7 (match_exhaustive 修后) | W-005 不阻塞(已持平 5/7) |
+
+---
+
+## v0.9 wip commit 2.12a: B-match-sema 真修 — sema.jhyy enum variant lookup 改 strcmp
+
+**日期**: 2026-08-05
+**承接**: v0.9 wip commit 2.11 (W-005 真修 phase 2)
+**目标**: 修 jhyy 端 sema.jhyy enum variant lookup 指针 `==` 误报 (跟 v0 端 strcmp 行为对齐)
+**byte-equal 影响**: 持平 5/7 (sema 修通, codegen 仍缺 NODE_ENUM_VARIANT case, 6/7 推到 commit 2.12b)
+
+### 改动 1: 加 `var_name_eq_v1` helper (sema.jhyy:51-64)
+
+```jhyy
+// var_name_eq_v1: 比较两个 Sym* 的 name 字符串相等 (strcmp 风格: 0=相等, 非 0=不等)。
+//   parser 阶段 alloc 的 SYM_VARIANT 跟 sema 阶段 enum 注册的全局 variant
+//   Sym 指针可能不同 (但 name 相同)。v0 端 sema.c 用 strcmp(name) 是对的,
+//   jhyy 端之前用指针 == 永远不命中 → "enum has no variant" 误报。
+//   match_exhaustive.jhyy byte-equal 5/7 → 6/7 的根因修复 (commit 2.12a)。
+fn var_name_eq_v1(a: *Sym, b: *Sym) -> i32 {
+    if a == (0 as *Sym) { return 1 as i32; }
+    if b == (0 as *Sym) { return 1 as i32; }
+    return strcmp((*a).name, (*b).name);
+}
+```
+
+### 改动 2: 2 处 enum variant lookup 改用 helper
+
+```jhyy
+// process_match_pattern (NODE_PATTERN_ENUM, sema.jhyy:388)
+- if v_name_ptr == vsym {
++ if var_name_eq_v1(v_name_ptr, vsym) == (0 as i32) {
+
+// infer_type NODE_ENUM_VARIANT (sema.jhyy:1260)
+- if v_name_ptr == vsym {
++ if var_name_eq_v1(v_name_ptr, vsym) == (0 as i32) {
+```
+
+### 验证 (commit 2.12a)
+
+```bash
+# 1. C 端编译干净
+/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra compiler/src/*.c -o jhyy.exe -I compiler/src
+# (no warnings)
+
+# 2. regress 持平
+python compiler/build/bin/regress.py
+# 50/53 PASS, 0 failed, 3 skipped   (持平 baseline)
+
+# 3. jhyy_v1 编 match_exhaustive.jhyy 不再报 "enum has no variant"
+./compiler/build/bin/jhyy_v1.exe build match_exhaustive.jhyy -o /tmp/me_12a
+# (no "enum has no variant" error — sema 阶段通过)
+# 但 jhyy_v1 端 codegen 仍缺 NODE_ENUM_VARIANT case → .il 不 byte-equal
+# (QBE 报 "invalid character (0)" 因为 jhyy_v1 emit `call $unwrap_or( %t0, ...)`
+#  漏 enum 构造 alloc slot + store tag + store payload)
+
+# 4. byte-equal 持平 5/7
+bash compiler/tests/stage1-expanded.sh
+# [PASS] hello
+# [PASS] fib_renamed
+# [PASS] struct_val_pass
+# [FAIL] match_exhaustive  ← codegen 仍缺 NODE_ENUM_VARIANT (2.12b 修)
+# [PASS] arith
+# [FAIL] const_array  ← parser CERR (moot, 推迟 v1.0.0 sprint 3 Task #52)
+# [PASS] control_flow
+# pass: 5 / 7   (持平 commit 2.11)
+```
+
+### 根因诊断 (commit 2.12a, 2026-08-05)
+
+之前 changelog-v0.9.0.md 标 "match_exhaustive ← jhyy_v1 sema 'enum has no variant' 已知 bug (post 2.13 fix)" — 推迟原因是当时只看到 sema 报错没诊断根因。
+
+实际根因:
+- v0 端 `sema.c:851` 用 `strcmp(et->enum_type.variants[i].name->name, d->variant_sym->name) == 0` 字符串比较
+- jhyy 端 `sema.jhyy:1245` 用 `if v_name_ptr == vsym` 指针比较
+- 错误路径: `Option::Some(42)` 是 NODE_ENUM_VARIANT, `Option::Some` 的 `Some` Sym 在 parser 阶段 alloc (局部 scope), sema 阶段 enum 注册的 `Some` Sym 是全局 scope, 两者指针永远不等
+- 错误报告: `L1263` "enum has no variant" (sema 错 match_exhaustive:26:15 + 26:54)
+- 修复: 加 `var_name_eq_v1` helper, 2 处 enum variant lookup 改走 helper
+- **修复本质 = 行为对齐 v0 端 strcmp 字符串比较, 不仅是 byte-equal 范畴**
+
+### 影响
+
+- **W-005 / W-001 / B-match 范畴**:
+  - 跟 W-005 (let-mut segfault) 正交 — W-005 是 codegen 路径, 2.12a 是 sema 路径
+  - 跟 W-001 (hash_string) 正交 — W-001 是 symtab 路径
+  - 跟 B-match (NODE_MATCH codegen, commit 2.9 修) 是 match-expr 测试的"兄弟 bug" — 2.12a 修 sema, 2.12b 修 codegen
+- **新 helper `var_name_eq_v1` 用 _v1 后缀**: 跟 W-002 211 rename map 兼容 (commit 2.12 211 revert 阶段会统一 strip _v1)
+- **2.12b 依赖**: codegen.jhyy NODE_ENUM_VARIANT case 翻译 (~40-50 行), 用 v0 codegen.c:874-912 翻译; 2.12a helper 跟 codegen.jhyy 范畴不共享 (sema.jhyy → codegen.jhyy 不互相 import 任何东西), codegen 端自己写 enum variant name 比较 (或 dup var_name_eq_v1)
+
+### 下一步
+
+| commit | 主题 | 范围 |
+|--------|------|------|
+| commit 2.12b | B-match-codegen 真修 — codegen.jhyy NODE_ENUM_VARIANT case 翻译 (~40-50 行) | 跟 2.12a 衔接 |
+| commit 2.12 | W-001 真修 + 211 revert 合并 (10 个 src0/ .jhyy 文件 + symtab.jhyy hash_string 重写) | 高风险 |
+| commit 2.13 | W-005 加固 phase 2 (26 处 *pos_ptr revert → let-mut) | 依赖 2.11 + 2.12 |
+| commit 2.14 | W-006 + W-002/W-004 衍生 + W-008/W-009 文档 | 文档 |
