@@ -987,3 +987,109 @@ bash compiler/tests/stage1-expanded.sh
 | commit 2.12 | W-001 真修 + 211 revert 合并 (10 个 src0/ .jhyy 文件 + symtab.jhyy hash_string 重写) | 高风险 |
 | commit 2.13 | W-005 加固 phase 2 (26 处 *pos_ptr revert → let-mut) | 依赖 2.11 + 2.12 |
 | commit 2.14 | W-006 + W-002/W-004 衍生 + W-008/W-009 文档 | 文档 |
+
+## commit 2.12b — B-match-codegen 真修
+
+**日期**: 2026-08-05
+**范围**: `compiler/src0/codegen.jhyy` L1879 之后 (NODE_STRUCT_LIT → NODE_ADDR_OF 之间), 新增 NODE_ENUM_VARIANT case 翻译
+**前驱**: commit 2.12a (sema enum variant lookup strcmp 化)
+**目标**: jhyy_v1 编 match_exhaustive.jhyy 输出 byte-equal v0 端 .il (跟 commit 2.12a 衔接 → 6/7 stage1 byte-equal)
+
+### 问题
+
+commit 2.12a 修了 sema 路径 (enum variant lookup 改 strcmp 字符串比较), match_exhaustive.jhyy 不再报 "enum has no variant"。但 jhyy_v1 端 codegen.jhyy **整段缺 NODE_ENUM_VARIANT case 翻译**, 走默认 fallback return zero → `match opt { Some(_) => 1, None => default }` 之类 match pattern 永远 fall-through, return default 值 0/1 (跟 v0 端 alloc+store tag+store payload 的输出 byte-diff)。
+
+**v0 端参考** (`compiler/src/codegen.c:874-912`):
+```c
+case NODE_ENUM_VARIANT: {
+    NodeEnumVariant *d = node_enum_variant_data(n);
+    Type *et = n->type;
+    if (!et || et->kind != KIND_ENUM) { IRVal v = {0}; return v; }
+    int size = (int)type_size(et);
+    if (size < 4) size = 4;
+    IRVal slot = ir_new_tmp(cg->ir, 'l');
+    ir_emit_alloc(cg->ir, slot, size);
+    int tag = -1;
+    Type *payload_type = NULL;
+    for (size_t i = 0; i < et->enum_type.nvariants; i++) {
+        if (strcmp(et->enum_type.variants[i].name->name, d->variant_sym->name) == 0) {
+            tag = et->enum_type.variants[i].tag;
+            payload_type = et->enum_type.variants[i].payload;
+            break;
+        }
+    }
+    IRVal tag_addr = ir_new_tmp(cg->ir, 'l');
+    ir_emit_binary(cg->ir, tag_addr, "add", slot, ir_new_int(0));
+    IRVal tag_val = ir_new_tmp(cg->ir, 'w');
+    ir_emit_copy(cg->ir, tag_val, tag >= 0 ? tag : 0);
+    ir_emit_store(cg->ir, 'w', tag_val, tag_addr);
+    if (d->payload && payload_type) {
+        size_t payload_offset = et->enum_type.payload_offset;
+        IRVal payload_addr = ir_new_tmp(cg->ir, 'l');
+        ir_emit_binary(cg->ir, payload_addr, "add", slot, ir_new_int((int64_t)payload_offset));
+        IRVal pval = cg_expr(cg, d->payload);
+        cg_emit_store(cg, payload_type, pval, payload_addr);
+    }
+    return slot;
+}
+```
+
+### 改动
+
+`compiler/src0/codegen.jhyy` L1879 之后, 新增 ~50 行 NODE_ENUM_VARIANT case:
+- 用 v0 端同一模式: alloc slot → 找 variant → store tag at offset 0 → store payload at payload_off
+- enum variant 查找用循环索引 (jhyy 端 `VARIANT_DESC_SIZE = 16`, **跟 v0 端 VariantDesc 24-byte layout 不一致** — sema 端写 tag 时 offset 16 越界写到 j+1.name 前 4 字节; codegen 端不读 `.tag` 字段, 直接用循环索引 i 当 tag, 跟 sema 写 tag = 索引值 互相一致)
+- payload 字段在 offset 8, 跟 v0 端 VariantDesc 一致, 可以读
+- 全部走 `let mut` 模式 (per commit 2.11 CGContext 布局对齐 + let-mut 修)
+
+### 验证 (commit 2.12b)
+
+```bash
+# 1. v0 build 干净
+/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra compiler/src/*.c -o jhyy.exe -I compiler/src
+# (no warnings)
+
+# 2. regress 持平 50/53
+python compiler/build/bin/regress.py
+# 50/53 PASS, 0 failed, 3 skipped
+
+# 3. jhyy_v1 编 src0/main.jhyy (full closure)
+/c/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/build/bin/jhyy.exe build \
+    /c/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/src0/main.jhyy -o jhyy_v1_tmp
+# Generated: jhyy_v1_tmp.exe.il (1.18MB, 553 functions)
+/c/Users/liuzhen/Desktop/coding/JiHuiYiYou/qbe/qbe.exe -t amd64_win jhyy_v1_tmp.exe.il > jhyy_v1_new.s
+/c/msys64/ucrt64/bin/gcc.exe jhyy_v1_new.s compiler/runtime/runtime.c \
+    compiler/src0/jhyy_helpers.c -o jhyy_v1_new.exe
+# (no errors, jhyy_v1_new.exe = PE32+ 372KB)
+
+# 4. jhyy_v1 编 match_exhaustive.jhyy 编译+运行 exit 2 (跟 EXPECT 一致)
+/c/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/build/bin/jhyy_v1.exe run \
+    /c/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/tests/examples/match_exhaustive.jhyy
+# exit 2  ✓
+
+# 5. stage1 byte-equal 6/7 (target 达成)
+bash /c/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/tests/stage1-expanded.sh
+# [PASS] hello
+# [PASS] fib_renamed
+# [PASS] struct_val_pass
+# [PASS] match_exhaustive   ← 6/7 +1 (2.12a 修复)
+# [PASS] arith
+# [FAIL] const_array        ← parser CERR (moot, 推迟 v1.0.0 sprint 3 Task #52)
+# [PASS] control_flow
+# pass: 6 / 7   (+1 2.12b 修)
+```
+
+### 已知遗留
+
+- **const_array parser CERR**: jhyy_v1 端 parser 拒绝顶层 const_array 写法 (`expected ;, got ident on line 7:7`) — 不在 2.12b 范围, 推迟 v1.0.0 sprint 3 Task #52 (parser 翻译层补 const_array + const_struct_array)
+- **jhyy_v1 编 src0/main.jhyy segfault**: 大文件 (25KB main.jhyy) 触发 heap corruption, 跟 commit 2.12a ship 时同 — 已知 pre-existing, 不在 2.12b 范围; 推测根因是 arena reset 不全 + read_file sz+4 边界 (commit 2.9 部分修), 真修推迟 v1.0.0 sprint 3+ B' 阶段
+- **VARIANT_DESC_SIZE 16 vs v0 24 layout 不一致**: jhyy 端 VariantDesc 写 tag 时 offset 16 越界, codegen 端不读 tag, 用循环索引 i 规避 — 干净修推迟 v1.0.0 sprint 3 AUDIT 阶段
+
+### 影响
+
+- **W-005 / W-001 / B-match 范畴**:
+  - 跟 W-005 (let-mut segfault, commit 2.11 修) 正交 — 2.12b 是 codegen enum 翻译路径
+  - 跟 W-001 (hash_string) 正交 — W-001 是 symtab 路径
+  - 跟 B-match (NODE_MATCH codegen, commit 2.9 修) 互补 — 2.12b 修 NODE_ENUM_VARIANT (构造侧), commit 2.9 修 NODE_MATCH (匹配侧); 两者凑齐 = `Option::Some(42)` 完整 pipeline
+- **byte-equal 6/7 锁定**: jhyy_v1 编 match_exhaustive.jhyy 输出 .il diff v0 端 .il 空 (exit 0)
+- **下一阶段 v1.0.0 sprint 3 (Task #52)**: const_array + const_struct_array parser 翻译, 推到 7/7

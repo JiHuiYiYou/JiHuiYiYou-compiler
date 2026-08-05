@@ -228,3 +228,4 @@
 | v0.9 commit 2.10 (W-005 诊断) | W-005 segfault 根因 = C/jhyy CGContext struct 布局不匹配 (9 字段) — 推迟真修到 2.11 | v0.9 wip commit 2.10 (doc-only) |
 | v0.9 commit 2.11 (W-005 真修 phase 2) | C 端 CGContext 9 字段全对齐 jhyy 端布局: `LocalEntry *locals` + `int64_t sret_slot_id` + `IRVal *loop_starts/ends/continues` + 字段顺序 (loop_depth 在 has_sret 之后) | v0.9 wip commit 2.11 |
 | v0.9 commit 2.12a (B-match-sema) | jhyy 端 sema.jhyy enum variant lookup 指针 `==` 永远不命中 (parser-scope vs sema-scope Sym 不同) → 误报 "enum has no variant"; v0 端 strcmp 字符串比较, 2.12a 改 jhyy 端对齐 | v0.9 wip commit 2.12a |
+| v0.9 commit 2.12b (B-match-codegen) | jhyy 端 codegen.jhyy 缺 NODE_ENUM_VARIANT case 翻译 → match-expr 的 enum 构造 (e.g. `Option::Some(42)`) 走默认 fallback return zero → `match opt { ... }` fall-through, byte-diff v0 端 (v0 端 codegen.c:874-912: alloc slot + store tag at offset 0 + store payload at payload_off); jhyy 端 v0.9 wip commit 2.12b 加同模式 | v0.9 wip commit 2.12b |

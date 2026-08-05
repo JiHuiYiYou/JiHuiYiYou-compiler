@@ -1876,6 +1876,77 @@ fn cg_expr_v1(cg_raw_v1: *u8, n: *Node) -> IRVal {
         return slot;
     }
 
+    // ── NODE_ENUM_VARIANT (v0.9 wip commit 2.12b) ──
+    // 对齐 v0 codegen.c:874-912:
+    //   - alloc stack slot (size = et.size, min 4)
+    //   - 找 variant 的 tag (按 name 匹配 → 循环索引 = tag)
+    //   - store tag at offset 0
+    //   - 如果有 payload, store at payload_off
+    // 已知 trick: VARIANT_DESC_SIZE = 16 (jhyy 端, vs C 端 24 含 tag 字段),
+    //   tag 字段写时在 offset 16 (= 下一项的 name 字段, 是 jhyy 端 struct layout
+    //   bug — 写 tag = 写 VariantDesc[i+1].name 前 4 字节)。codegen 端不读
+    //   VariantDesc.tag, 直接用循环索引 i 作为 tag (跟 sema 写 tag = j 一致)。
+    //   payload 字段在 offset 8 跟 v0 端一致, 可以读。
+    if kind == NODE_ENUM_VARIANT() {
+        let nev = node_enum_variant_data(n);
+        if (*n).type_ptr_v1 == (0 as *u8) {
+            return zero;
+        }
+        let et = (*n).type_ptr_v1 as *Type;
+        if (*et).kind != KIND_ENUM() {
+            return zero;
+        }
+        let mut size2 = (*et).size as i32;
+        if size2 < (4 as i32) { size2 = 4; }
+        let slot = ir_new_tmp(ir, QBE_L());
+        ir_emit_alloc(ir, slot, size2);
+
+        // 找 variant: 按 name 比较 (strcmp 字符串, 跟 v0 端 sema.c:851 / codegen.c:889 一致)
+        let variants_buf_v1 = (*et).variants_v1;
+        let nvariants_v1 = (*et).nvariants;
+        let d_variant_sym_v1 = (*nev).variant_sym as *Sym;
+        let mut tag_v1: i32 = 0 as i32;
+        let mut found_v1: i32 = 0 as i32;
+        let mut payload_type_raw: *u8 = 0 as *u8;
+        let mut i: i64 = 0 as i64;
+        while i < nvariants_v1 {
+            let v_off = ptr_add_u8(variants_buf_v1, i * VARIANT_DESC_SIZE());
+            let v_name_ptr = *(v_off as **Sym);
+            if v_name_ptr != (0 as *Sym) {
+                if d_variant_sym_v1 != (0 as *Sym) {
+                    if strcmp((*v_name_ptr).name, (*d_variant_sym_v1).name) == (0 as i32) {
+                        tag_v1 = i as i32;
+                        payload_type_raw = *((v_off as i64 + (8 as i64)) as **Type) as *u8;
+                        found_v1 = 1 as i32;
+                    }
+                }
+            }
+            if found_v1 != (0 as i32) { break; }
+            i = i + (1 as i64);
+        }
+        // 没找到: tag_v1 保持 0 (跟 v0 端 codegen.c:900 silent 行为一致)
+
+        // store tag at offset 0
+        let tag_addr = ir_new_tmp(ir, QBE_L());
+        let off_zero_v1 = ir_new_int(0 as i64);
+        ir_emit_binary(ir, tag_addr, "add" as *u8, slot, off_zero_v1);
+        let tag_val = ir_new_tmp(ir, QBE_W());
+        ir_emit_copy(ir, tag_val, tag_v1 as i64);
+        ir_emit_store(ir, QBE_W(), tag_val, tag_addr);
+
+        // store payload if present
+        if (*nev).payload != (0 as *u8) {
+            if payload_type_raw != (0 as *u8) {
+                let payload_addr = ir_new_tmp(ir, QBE_L());
+                let off_payload_v1 = ir_new_int((*et).payload_off);
+                ir_emit_binary(ir, payload_addr, "add" as *u8, slot, off_payload_v1);
+                let pval = cg_expr_v1(cg_raw_v1, (*nev).payload as *Node);
+                cg_emit_store(cg_raw_v1, payload_type_raw, pval, payload_addr);
+            }
+        }
+        return slot;
+    }
+
     // ── NODE_ADDR_OF ──
     // &expr → 返回 expr 的地址。要求目标 var 已分配 stack slot。
     // codegen.jhyy 用 NODE_ADDR_OF 主要用于 `&buf` 模式（StringBuilder addr）。
