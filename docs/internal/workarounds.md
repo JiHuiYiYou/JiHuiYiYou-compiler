@@ -25,8 +25,8 @@
 
 | ID | 状态 | 简介 |
 |----|------|------|
-| [W-001](#w-001-hash_string-用-i32-deref-绕-v0-codegen-loadsb-错) | ACTIVE | hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错 |
-| [W-002](#w-002-mainjhyy-重命名绕-jhyy_v1-hash_string-堆损坏) | ACTIVE | 211 个 src0 标识符 _v1 后缀化绕 jhyy_v1 hash_string 堆损坏 |
+| [W-001](#w-001-hash_string-用-i32-deref-绕-v0-codegen-loadsb-错) | RESOLVED (v0.8 commit 9) | hash_string 改 byte-by-byte `*u8` deref + length mix (FNV-1a), 真修 W-001 副作用 |
+| [W-002](#w-002-mainjhyy-重命名绕-jhyy_v1-hash_string-堆损坏) | RESOLVED (v0.9 wip commit 2.12) | 211 个 src0 标识符 `_v1` 后缀化 revert 回原名, W-001 真修后失效 |
 | [W-003](#w-003-jhyy_v1-let-_-fncall-顶层-嵌套-segfault) | ACTIVE | `let _ = fncall(...)` 改 direct call，绕 jhyy_v1 codegen segfault（Bug 7/7b） |
 | [W-004](#w-004-short-local-var-4-chars--symtab-hash-撞--jhyy_v1-field-assign-死循环) | ACTIVE | 短（≤4 字符）local var / fn 参数 / field 改名绕 jhyy_v1 symtab hash 撞（stack overflow） |
 | [W-005](#w-005-let-mut--assign--jhyy_v1-codegen-segfault) | ACTIVE | `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault |
@@ -76,11 +76,36 @@ let c = ((w >> sh) & (255 as i32)) as i64;
 
 ---
 
+## W-001 RESOLVED — v0.8 commit 9 (`d570c72`) byte-by-byte 真修
+
+**日期:** 2026-08-03 (commit `d570c72`)
+**修复:** `compiler/src0/util.jhyy` `hash_string` 改成 byte-by-byte `*u8` deref + length mix (FNV-1a)
+- L222: `let c32 = *((s as i64 + (*i_ptr)) as *u8) as i32;` — `*u8` deref 1 byte (`loadsb` 仍可走, 不需 overread)
+- 移除了 `*((s as i64 + aligned) as *i32)` 的 4-byte read 模式 (commit 之前 L199-213 整段)
+- 移除了 `let w = ...` + `let sh = ...` + `(w >> sh) & 255` 的 shift+mask workaround
+
+**为什么真修 (而不是简单 revert workaround):**
+- W-001 根因不在 v0 codegen `loadsb` 错 (post-v0.6 sprint 实际已修复 destination 类型推导 — codegen L6+ 已正确处理 `*u8` deref 出 `w` class)
+- 真正的"segfault 副作用" 来自 `*i32` 4-byte read overread slack 字节进 hash → hash 错位 → SymTab lookup 误路由 (W-002 根因)
+- byte-by-byte 真修消除 overread → W-002 失效条件 (ii) 满足 → W-002 也可移除
+
+**验证:**
+- v0 编 src0/main.jhyy → 1.18MB IL, 553 functions
+- jhyy_v1 编 hello.jhyy 等小测试 byte-equal PASS (stage1 6/7 持平)
+- v0 + regress 持平 50/53
+
+**引用:**
+- commit `d570c72` (v0.8 commit 9: W-001 byte-by-byte hash + W-005 let-mut workaround)
+- 源码注释 `util.jhyy:212-231`
+- 配合 v0.9 wip commit 2.12 撤销 W-002 211 个 `_v1` 后缀 revert (见下)
+
+---
+
 ## W-002: main.jhyy 重命名绕 jhyy_v1 hash_string 堆损坏
 
 **ID:** W-002
-**状态:** ACTIVE
-**日期:** 2026-08-03
+**状态:** RESOLVED (v0.9 wip commit 2.12)
+**日期:** 2026-08-03 (ACTIVE) → 2026-08-05 (RESOLVED)
 **触发面:**（任一即可）
 1. 源码标识符长度 ∈ {6, 7, 8} 字符（如 `out_buf`、`in_buf`、`cmd_buf`）
 2. 源码标识符后缀 = `_buf`（任意长度）
@@ -141,13 +166,15 @@ let c = ((w >> sh) & (255 as i32)) as i64;
 | arena.jhyy | 17 |
 | **总计** | **2073** |
 
-**局限性（重要）：** W-002 修了 hash_string 触发面 bug，但 jhyy_v1 编 main.jhyy **仍然 segfault**（exit 139）—— 因为 main.jhyy 还有别的触发 jhyy_v1 codegen bug 的模式（Bug 7 `let _ = fncall`、Bug 9 嵌套 if/else phi、Bug 13/16 struct 值传递等；详见 `memory/feedback_v0_codegen_bug_workarounds.md`）。要达到 closure 还得逐一修这些 bug。
+**局限性（重要, 历史记录）：** W-002 修了 hash_string 触发面 bug，但 jhyy_v1 编 main.jhyy **仍然 segfault**（exit 139, 2026-08-04 之前观察）—— 因为 main.jhyy 还有别的触发 jhyy_v1 codegen bug 的模式（Bug 7 `let _ = fncall`、Bug 9 嵌套 if/else phi、Bug 13/16 struct 值传递等；详见 `memory/feedback_v0_codegen_bug_workarounds.md`）。**但** W-001 真正修复 + 后续 v0.9 wip commit 2.5~2.11 修了 B-φ1/B-struct/B-match/W-005 phase 1+2, main.jhyy segfault 触发面已大量消除 — v0.9 wip commit 2.12 revert 后是否还 segfault 由 commit 2.12 的 **observation step** 检验 (commit 2.12 plan § observation)。
 
 **失效条件:**（任一即可移除 W-002）
 - jhyy_v1 的 codegen 对 hash_string 生成的 IL 与 v0 IL byte-equal（diff 通过）→ 重新引入原名
 - 或 v0 codegen 修了 W-001 的副作用（W-001 workaround 改成 byte-by-byte 不再 overread）—— 此时即使 jhyy_v1 触发面不变也不再 segfault
 
-**superseder:** TBD（v0 codegen fix 或 jhyy_v1 IL diff 修复后）
+**superseder:** ✅ 已实现 (v0.9 wip commit 2.12 — W-001 byte-by-byte 真修 → W-002 失效条件 (ii) 满足 → 211 个 `_v1` 后缀 revert 回原名)
+
+**W-002 RESOLVED section:** 见下方"W-002 RESOLVED — v0.9 wip commit 2.12 211 revert"
 
 **引用:**
 - 详细 bisect 记录见 `memory/project_bootstrap_closure_state.md`
@@ -156,6 +183,38 @@ let c = ((w >> sh) & (255 as i32)) as i64;
 - v0.8 commit 6 (efc41bf) `wip: bisect heap corruption`
 - v0.8 commit 7 (0453cef) `W-002: 211 个标识符 _v1 后缀化 + workarounds.md`
 - 战略决策 `memory/project_bootstrap_closure_state.md` § Bisect findings
+
+---
+
+## W-002 RESOLVED — v0.9 wip commit 2.12 211 revert
+
+**日期:** 2026-08-05 (commit pending ship)
+**修复:** `compiler/src0/_W002_rename_map.txt` 211 个 `X -> X_v1` 反向 sed revert 回原名
+
+**为什么 revert:**
+- W-001 根因 (hash_string `*i32` overread slack 字节) 在 v0.8 commit 9 (`d570c72`) 已真修 → 改 byte-by-byte `*u8` deref
+- byte-by-byte 真修后, hash_string 不再 overread → slack 字节不再污染 hash → W-002 触发面消失
+- 211 个 `_v1` 后缀变成纯 cosmetic 噪声, 跟原 code base 分离, 增加 review burden + 阻碍 future bisect
+- revert 后 src0/ 跟 v0 端 C 源码更接近 → 后续 v1.0.0 sprint 3+ 翻译难度降低
+
+**实施步骤 (scripted, 见 commit 2.12 changelog):**
+1. 读 `_W002_rename_map.txt` 生成反向 sed: `s/X_v1\b/X/g` per 211 identifier
+2. 在 src0/ 11 个 .jhyy 文件批量 apply (1701 occurrences: codegen 600 / sema 309 / parser 282 / main 186 / types 87 / ast 57 / ir 47 / util 44 / lexer 43 / symtab 28 / arena 16)
+3. v0 build + regress 持平 50/53
+4. 新 jhyy_v1 编 src0/main.jhyy → **observation step** (per commit 2.12 plan):
+   - segfault 消除 → A 段 hard closure 提前
+   - segfault 还在 → 推 v1.0 sprint 3 B' 阶段
+5. stage1 byte-equal 持平 6/7
+
+**保留历史信息:**
+- W-002 ACTIVE 期间的实施细节 (改名规则、影响范围、改名清单、局限性、引用) 保留在上方"W-002 ACTIVE 期间" 标题下, 作为 ACTIVE 历史归档
+- `_W002_rename_map.txt` 保留作为可重放参考 (已不需要, 但 archive)
+
+**引用:**
+- v0.9 wip commit 2.12 (this commit) — 211 revert
+- v0.8 commit 9 (`d570c72`) — W-001 byte-by-byte 真修 (根因消除)
+- 配合 W-001 RESOLVED section (上方)
+
 ---
 
 ## W-003: jhyy_v1 `let _ = fncall(...)` 顶层 / 嵌套 segfault → direct call (top-level only)

@@ -67,7 +67,7 @@ fn ptr_add_u8(p: *u8, off: i64) -> *u8 {
     return (p as i64 + off) as *u8;
 }
 
-fn sb_init_v1(a: *Arena, sb: *StringBuilder) -> i32 {
+fn sb_init(a: *Arena, sb: *StringBuilder) -> i32 {
     let cap = 256 as i64;
     let buf = arena_alloc(a, cap);
     if buf == (0 as *u8) {
@@ -82,20 +82,20 @@ fn sb_init_v1(a: *Arena, sb: *StringBuilder) -> i32 {
 // v1.0.0 sprint 5 bug: 不能直接 realloc/free — 老 buf 是 arena_alloc 分配的，
 // libc realloc/free 只能操作 malloc 指针。修：用 malloc 新分配，旧 buf 放任泄漏
 // （arena 整体释放时会回收 arena 块；不释放则是一次性进程，泄漏可接受）。
-fn sb_grow_v1(a: *Arena, sb: *StringBuilder, need: i64) -> i32 {
+fn sb_grow(a: *Arena, sb: *StringBuilder, need: i64) -> i32 {
     // W-005 workaround: let-mut + assign triggers jhyy_v1 segfault; use *i64 ptr
     let new_cap_ptr = malloc(8 as i64) as *i64;
     *new_cap_ptr = (*sb).cap;
     while (*new_cap_ptr) < need {
         *new_cap_ptr = (*new_cap_ptr) * (2 as i64);
     }
-    let new_buf_v1 = malloc(*new_cap_ptr);
-    if new_buf_v1 == (0 as *u8) {
+    let new_buf = malloc(*new_cap_ptr);
+    if new_buf == (0 as *u8) {
         free(new_cap_ptr as *u8);
         return 0;
     }
-    memcpy(new_buf_v1, (*sb).buf, (*sb).len);
-    (*sb).buf = new_buf_v1;
+    memcpy(new_buf, (*sb).buf, (*sb).len);
+    (*sb).buf = new_buf;
     (*sb).cap = *new_cap_ptr;
     free(new_cap_ptr as *u8);
     return 1;
@@ -104,7 +104,7 @@ fn sb_grow_v1(a: *Arena, sb: *StringBuilder, need: i64) -> i32 {
 fn sb_append(a: *Arena, sb: *StringBuilder, src: *u8, n: i64) -> i32 {
     let need = (*sb).len + n;
     if need > (*sb).cap {
-        if sb_grow_v1(a, sb, need) == 0 {
+        if sb_grow(a, sb, need) == 0 {
             return 0;
         }
     }
@@ -120,8 +120,8 @@ fn sb_append_cstr(a: *Arena, sb: *StringBuilder, s: *u8) -> i32 {
 }
 
 fn sb_appendf(a: *Arena, sb: *StringBuilder, fmt: *u8, val: i32) -> i32 {
-    let tmp_cap_v1 = 32 as i64;
-    let tmp = arena_alloc(a, tmp_cap_v1);
+    let tmp_cap = 32 as i64;
+    let tmp = arena_alloc(a, tmp_cap);
     if tmp == (0 as *u8) {
         return 0;
     }
@@ -135,8 +135,8 @@ fn sb_appendf(a: *Arena, sb: *StringBuilder, fmt: *u8, val: i32) -> i32 {
 
 // sb_appendf_lld：i64 参数版本（v1 sprint 4 ir.jhyy 用，emit %lld 整数字面量）
 fn sb_appendf_lld(a: *Arena, sb: *StringBuilder, fmt: *u8, val: i64) -> i32 {
-    let tmp_cap_v1 = 32 as i64;
-    let tmp = arena_alloc(a, tmp_cap_v1);
+    let tmp_cap = 32 as i64;
+    let tmp = arena_alloc(a, tmp_cap);
     if tmp == (0 as *u8) {
         return 0;
     }
@@ -148,9 +148,9 @@ fn sb_appendf_lld(a: *Arena, sb: *StringBuilder, fmt: *u8, val: i64) -> i32 {
     return sb_append(a, sb, tmp, n64);
 }
 
-fn sb_cstr_v1(a: *Arena, sb: *StringBuilder) -> *u8 {
+fn sb_cstr(a: *Arena, sb: *StringBuilder) -> *u8 {
     if (*sb).len >= (*sb).cap {
-        if sb_grow_v1(a, sb, (*sb).len + (1 as i64)) == 0 {
+        if sb_grow(a, sb, (*sb).len + (1 as i64)) == 0 {
             return 0 as *u8;
         }
     }
@@ -159,12 +159,12 @@ fn sb_cstr_v1(a: *Arena, sb: *StringBuilder) -> *u8 {
     return (*sb).buf;
 }
 
-fn sb_reset_v1(sb: *StringBuilder) -> i32 {
+fn sb_reset(sb: *StringBuilder) -> i32 {
     (*sb).len = 0 as i64;
     return 1;
 }
 
-fn sb_free_v1(sb: *StringBuilder) -> i32 {
+fn sb_free(sb: *StringBuilder) -> i32 {
     (*sb).len = 0 as i64;
     (*sb).cap = 0 as i64;
     (*sb).buf = 0 as *u8;
@@ -184,7 +184,7 @@ type HashEntry = struct {
 }
 
 type HashMap = struct {
-    buckets_v1:  *u8,
+    buckets:  *u8,
     nbuckets: i64,
     mask:     i64,
     count:    i64,
@@ -237,12 +237,12 @@ fn hm_alloc_buckets(a: *Arena, n: i64) -> *u8 {
 
 fn hm_get_entry(m: *HashMap, idx: i64) -> *HashEntry {
     let off = idx * HASH_ENTRY_SIZE();
-    return ptr_add_u8((*m).buckets_v1, off) as *HashEntry;
+    return ptr_add_u8((*m).buckets, off) as *HashEntry;
 }
 
-fn hm_put_v1(a: *Arena, m: *HashMap, key: *u8, value: *u8) -> i32 {
-    // 注：jhyy 不支持函数前向引用，hm_put_v1 不调 hm_grow_v1 自动扩容。
-    // 调用方负责：插入前用 hm_should_grow 检查，需要时调 hm_grow_v1。
+fn hm_put(a: *Arena, m: *HashMap, key: *u8, value: *u8) -> i32 {
+    // 注：jhyy 不支持函数前向引用，hm_put 不调 hm_grow 自动扩容。
+    // 调用方负责：插入前用 hm_should_grow 检查，需要时调 hm_grow。
     // W-005 workaround: let-mut + assign triggers jhyy_v1 segfault; use *i64 ptr
     let h = hash_string(key);
     let idx_ptr = malloc(8 as i64) as *i64;
@@ -280,15 +280,15 @@ fn hm_should_grow(m: *HashMap) -> i32 {
     return 0;
 }
 
-fn hm_grow_v1(a: *Arena, m: *HashMap) -> i32 {
+fn hm_grow(a: *Arena, m: *HashMap) -> i32 {
     let old_n = (*m).nbuckets;
-    let old_buckets = (*m).buckets_v1;
+    let old_buckets = (*m).buckets;
     let new_n = old_n * (2 as i64);
     let new_buckets = hm_alloc_buckets(a, new_n);
     if new_buckets == (0 as *u8) {
         return 0;
     }
-    (*m).buckets_v1 = new_buckets;
+    (*m).buckets = new_buckets;
     (*m).nbuckets = new_n;
     (*m).mask = new_n - (1 as i64);
     (*m).count = 0 as i64;
@@ -299,7 +299,7 @@ fn hm_grow_v1(a: *Arena, m: *HashMap) -> i32 {
     while (*i_ptr) < old_n {
         let old_e = ptr_add_u8(old_buckets, (*i_ptr) * HASH_ENTRY_SIZE()) as *HashEntry;
         if (*old_e).used == (1 as i32) {
-            // jhyy 不支持前向引用；不调 hm_put_v1，直接 inline 放 entry
+            // jhyy 不支持前向引用；不调 hm_put，直接 inline 放 entry
             let h = hash_string((*old_e).key);
             let idx_ptr = malloc(8 as i64) as *i64;
             *idx_ptr = h & (*m).mask;
@@ -322,21 +322,21 @@ fn hm_grow_v1(a: *Arena, m: *HashMap) -> i32 {
     return 1;
 }
 
-fn hm_init_v1(a: *Arena, m: *HashMap) -> i32 {
-    let init_n_v1 = HASHMAP_INITIAL_SIZE();
-    (*m).nbuckets = init_n_v1;
-    (*m).mask = init_n_v1 - (1 as i64);
+fn hm_init(a: *Arena, m: *HashMap) -> i32 {
+    let init_n = HASHMAP_INITIAL_SIZE();
+    (*m).nbuckets = init_n;
+    (*m).mask = init_n - (1 as i64);
     (*m).count = 0 as i64;
     (*m).arena = a;
-    let buckets_v1 = hm_alloc_buckets(a, init_n_v1);
-    if buckets_v1 == (0 as *u8) {
+    let buckets = hm_alloc_buckets(a, init_n);
+    if buckets == (0 as *u8) {
         return 0;
     }
-    (*m).buckets_v1 = buckets_v1;
+    (*m).buckets = buckets;
     return 1;
 }
 
-fn hm_get_v1(m: *HashMap, key: *u8) -> *u8 {
+fn hm_get(m: *HashMap, key: *u8) -> *u8 {
     if (*m).count == (0 as i64) {
         return 0 as *u8;
     }
@@ -371,7 +371,7 @@ fn hm_get_v1(m: *HashMap, key: *u8) -> *u8 {
 // ════════════════════════════════════════════════════
 
 // 绕过 v0.6 codegen bug：嵌套 struct field access 会 emit `%=w loadw`（因为
-// qbe_type_of(struct) 默认 'w'），但 nested struct 经常需要 8-aligned_v1 load。
+// qbe_type_of(struct) 默认 'w'），但 nested struct 经常需要 8-aligned load。
 // 平铺所有字段，不嵌套 struct。
 type Diagnostic = struct {
     filename: *u8,

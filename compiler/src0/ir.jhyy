@@ -80,7 +80,7 @@ fn IRVAL_SIZE() -> i64 { return 40 as i64; }
 // struct。原因：v0 codegen 对 `&(*ptr).struct_field`（nested struct field
 // address）emit loadw 而非 LEA，导致 QBE 类型不匹配。改用指针后 `(*ir).sb`
 // 本身是 *StringBuilder，不需要再 `&` 取地址，绕过 v0 bug。
-// StringBuilder 24 字节，ir_init_v1 从 arena 各 alloc 24。
+// StringBuilder 24 字节，ir_init 从 arena 各 alloc 24。
 type IRBuf = struct {
     arena:      *Arena,
     sb:         *StringBuilder,
@@ -91,7 +91,7 @@ type IRBuf = struct {
     data_used:  i32,
 }
 
-// sb_init_v1 / sb_grow_v1 内部初始 cap 256；这里 IRBuf 用 4096（对齐 C 端初始 cap）
+// sb_init / sb_grow 内部初始 cap 256；这里 IRBuf 用 4096（对齐 C 端初始 cap）
 fn IRBUF_INITIAL_CAP() -> i64 { return 4096 as i64; }
 fn IRBUF_DATA_CAP()    -> i64 { return 1024 as i64; }
 
@@ -107,16 +107,16 @@ fn qbe_type_of(t_raw: *u8) -> i32 {
     let t = t_raw as *Type;
     if (*t).kind == KIND_PRIMITIVE() {
         let prim = (*t).prim;
-        if prim == PRIM_I8_v1()  { return QBE_W(); }  // 实际 QBE 'b'，但 codegen 走 storew/loadw
-        if prim == PRIM_U8_v1()  { return QBE_W(); }
-        if prim == PRIM_I16_v1() { return QBE_W(); }  // 实际 'h'
-        if prim == PRIM_U16_v1() { return QBE_W(); }
-        if prim == PRIM_I32_v1() { return QBE_W(); }
-        if prim == PRIM_U32_v1() { return QBE_W(); }
-        if prim == PRIM_I64_v1() { return QBE_L(); }
-        if prim == PRIM_U64_v1() { return QBE_L(); }
-        if prim == PRIM_F32_v1() { return QBE_S(); }
-        if prim == PRIM_F64_v1() { return QBE_D(); }
+        if prim == PRIM_I8()  { return QBE_W(); }  // 实际 QBE 'b'，但 codegen 走 storew/loadw
+        if prim == PRIM_U8()  { return QBE_W(); }
+        if prim == PRIM_I16() { return QBE_W(); }  // 实际 'h'
+        if prim == PRIM_U16() { return QBE_W(); }
+        if prim == PRIM_I32() { return QBE_W(); }
+        if prim == PRIM_U32() { return QBE_W(); }
+        if prim == PRIM_I64() { return QBE_L(); }
+        if prim == PRIM_U64() { return QBE_L(); }
+        if prim == PRIM_F32() { return QBE_S(); }
+        if prim == PRIM_F64() { return QBE_D(); }
         if prim == PRIM_BOOL() { return QBE_W(); }
         return QBE_W();
     }
@@ -127,7 +127,7 @@ fn qbe_type_of(t_raw: *u8) -> i32 {
     return QBE_W();
 }
 
-// 注：原 C 端 qbe_type_of 对 PRIM_I8_v1/U8 返回 'b'，但 v0.6 codegen 走 loadw/storew
+// 注：原 C 端 qbe_type_of 对 PRIM_I8/U8 返回 'b'，但 v0.6 codegen 走 loadw/storew
 // workaround（plan § 0 bug #6：*=b loadsb QBE 不允许）。这里 jhyy 版直接返回 'w'
 // 跟 codegen 实际 emit 行为一致，避免不一致。
 
@@ -135,19 +135,19 @@ fn qbe_type_of(t_raw: *u8) -> i32 {
 // IRBuf 初始化
 // ════════════════════════════════════════════════════
 
-fn ir_init_v1(ir: *IRBuf, arena: *Arena) -> i32 {
+fn ir_init(ir: *IRBuf, arena: *Arena) -> i32 {
     (*ir).arena = arena;
     // sb / data_sb：24 字节 each，从 arena 分配。绕过 v0 nested-struct
     // LEA bug（见 IRBuf 定义注释）。
-    let sb_ptr_v1 = arena_alloc(arena, 24 as i64) as *StringBuilder;
-    sb_init_v1(arena, sb_ptr_v1);
-    (*ir).sb = sb_ptr_v1;
+    let sb_ptr = arena_alloc(arena, 24 as i64) as *StringBuilder;
+    sb_init(arena, sb_ptr);
+    (*ir).sb = sb_ptr;
 
-    let dsb_ptr_v1 = arena_alloc(arena, 24 as i64) as *StringBuilder;
-    // data_sb 延迟到 ir_emit_data_* 第一次调用时再 sb_init_v1（init 阶段只置零）
+    let dsb_ptr = arena_alloc(arena, 24 as i64) as *StringBuilder;
+    // data_sb 延迟到 ir_emit_data_* 第一次调用时再 sb_init（init 阶段只置零）
     let mut empty = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
-    *dsb_ptr_v1 = empty;
-    (*ir).data_sb = dsb_ptr_v1;
+    *dsb_ptr = empty;
+    (*ir).data_sb = dsb_ptr;
 
     (*ir).next_tmp = 0 as i32;
     (*ir).next_block = 0 as i32;
@@ -158,7 +158,7 @@ fn ir_init_v1(ir: *IRBuf, arena: *Arena) -> i32 {
 
 // 获取 IRBuf 当前 buffer 字符串（NUL 终止；codegen 末调用拿完整 .il 内容）
 fn ir_buf_str(ir: *IRBuf) -> *u8 {
-    return sb_cstr_v1((*ir).arena, (*ir).sb);
+    return sb_cstr((*ir).arena, (*ir).sb);
 }
 
 // ════════════════════════════════════════════════════
@@ -180,14 +180,14 @@ fn ir_new_tmp(ir: *IRBuf, qbe_type: i32) -> IRVal {
 fn ir_new_block(ir: *IRBuf, hint: *u8) -> IRVal {
     // 等价 C: arena_sprintf("%s%d", hint, id)
     let mut tmp_sb = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
-    sb_init_v1((*ir).arena, &tmp_sb);
+    sb_init((*ir).arena, &tmp_sb);
     if hint != (0 as *u8) {
         sb_append_cstr((*ir).arena, &tmp_sb, hint);
     } else {
         sb_append_cstr((*ir).arena, &tmp_sb, "b" as *u8);
     }
     sb_appendf((*ir).arena, &tmp_sb, "%d" as *u8, (*ir).next_block);
-    let name = sb_cstr_v1((*ir).arena, &tmp_sb);
+    let name = sb_cstr((*ir).arena, &tmp_sb);
 
     let v = IRVal {
         kind:     IRVAL_BLOCK(),
@@ -233,7 +233,7 @@ fn ir_data_init(ir: *IRBuf) -> i32 {
     if (*ir).data_used == (1 as i32) {
         return 1;
     }
-    sb_init_v1((*ir).arena, (*ir).data_sb);
+    sb_init((*ir).arena, (*ir).data_sb);
     (*ir).data_used = 1 as i32;
     return 1;
 }
@@ -274,7 +274,7 @@ fn ir_flush_data(ir: *IRBuf) -> i32 {
     }
     // 用新 StringBuilder 暂存 [data | code]
     let mut tmp_sb = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
-    sb_init_v1((*ir).arena, &tmp_sb);
+    sb_init((*ir).arena, &tmp_sb);
     // 先 append data
     sb_append((*ir).arena, &tmp_sb, (*dsb).buf, (*dsb).len);
     // 再 append code
@@ -287,7 +287,7 @@ fn ir_flush_data(ir: *IRBuf) -> i32 {
     (*sb).len = tmp_sb.len;
     (*sb).cap = tmp_sb.cap;
     // 清空 data_sb
-    sb_reset_v1(dsb);
+    sb_reset(dsb);
     return 1;
 }
 
@@ -316,12 +316,12 @@ fn ir_emit_ret(ir: *IRBuf, val: IRVal) -> i32 {
     return 1;
 }
 
-fn ir_emit_jmp(ir: *IRBuf, target_v1: IRVal) -> i32 {
-    if target_v1.kind != IRVAL_BLOCK() {
+fn ir_emit_jmp(ir: *IRBuf, target: IRVal) -> i32 {
+    if target.kind != IRVAL_BLOCK() {
         return 0;
     }
     ir_emit_str(ir, "    jmp @" as *u8);
-    ir_emit_str(ir, target_v1.name);
+    ir_emit_str(ir, target.name);
     ir_emit_str(ir, "\n" as *u8);
     return 1;
 }
@@ -349,7 +349,7 @@ fn ir_emit_jnz(ir: *IRBuf, cond: IRVal, then_b: IRVal, else_b: IRVal) -> i32 {
 // 拆成 3 个 helper：dispatch 走 1 层 if（避开 v0 nested-if-else codegen bug
 // —— QBE 报 "predecessors not matched in phi"）。每个 helper 内部 if-else
 // 都是"if-return / fall-through-return"，不产生 phi。
-fn _bin_int_v1(ir: *IRBuf, dst: IRVal, op: *u8, a: IRVal, b: IRVal, qt: i32) -> i32 {
+fn _bin_int(ir: *IRBuf, dst: IRVal, op: *u8, a: IRVal, b: IRVal, qt: i32) -> i32 {
     if b.kind == IRVAL_INT() {
         // "    %tD =q copy V"
         ir_emit_str(ir, "    %t" as *u8);
@@ -376,7 +376,7 @@ fn _bin_int_v1(ir: *IRBuf, dst: IRVal, op: *u8, a: IRVal, b: IRVal, qt: i32) -> 
     return 1;
 }
 
-fn _bin_tmp_v1(ir: *IRBuf, dst: IRVal, op: *u8, a: IRVal, b: IRVal, qt: i32) -> i32 {
+fn _bin_tmp(ir: *IRBuf, dst: IRVal, op: *u8, a: IRVal, b: IRVal, qt: i32) -> i32 {
     if b.kind == IRVAL_INT() {
         // "    %tD =q op %tA, V"
         ir_emit_str(ir, "    %t" as *u8);
@@ -410,9 +410,9 @@ fn _bin_tmp_v1(ir: *IRBuf, dst: IRVal, op: *u8, a: IRVal, b: IRVal, qt: i32) -> 
 fn ir_emit_binary(ir: *IRBuf, dst: IRVal, op: *u8, a: IRVal, b: IRVal) -> i32 {
     let qt = dst.qbe_type;
     if a.kind == IRVAL_INT() {
-        return _bin_int_v1(ir, dst, op, a, b, qt);
+        return _bin_int(ir, dst, op, a, b, qt);
     }
-    return _bin_tmp_v1(ir, dst, op, a, b, qt);
+    return _bin_tmp(ir, dst, op, a, b, qt);
 }
 
 fn ir_emit_copy(ir: *IRBuf, dst: IRVal, val: i64) -> i32 {
@@ -428,7 +428,7 @@ fn ir_emit_copy(ir: *IRBuf, dst: IRVal, val: i64) -> i32 {
 }
 
 // ir_emit_call / call_void：args 数组 + n
-fn ir_emit_call(ir: *IRBuf, dst: IRVal, fn_name_v1: *u8, args_raw: *u8, n: i32) -> i32 {
+fn ir_emit_call(ir: *IRBuf, dst: IRVal, fn_name: *u8, args_raw: *u8, n: i32) -> i32 {
     let qt = dst.qbe_type;
     let mut real_qt = qt;
     if real_qt == (0 as i32) {
@@ -439,14 +439,14 @@ fn ir_emit_call(ir: *IRBuf, dst: IRVal, fn_name_v1: *u8, args_raw: *u8, n: i32) 
     ir_emit_str(ir, " =" as *u8);
     ir_emit_int(ir, "%c" as *u8, real_qt);
     ir_emit_str(ir, " call $" as *u8);
-    ir_emit_str(ir, fn_name_v1);
+    ir_emit_str(ir, fn_name);
     ir_emit_str(ir, "(" as *u8);
     let mut i: i32 = 0 as i32;
     while i < n {
         if i > (0 as i32) {
             ir_emit_str(ir, ", " as *u8);
         }
-        // 取第 i 个 IRVal（IRVAL_SIZE=40, i*40 offset_v1）
+        // 取第 i 个 IRVal（IRVAL_SIZE=40, i*40 offset）
         let arg = ptr_add_u8(args_raw, (i as i64) * IRVAL_SIZE()) as *IRVal;
         if (*arg).kind == IRVAL_STR() {
             ir_emit_int(ir, "%c" as *u8, (*arg).qbe_type);
@@ -463,9 +463,9 @@ fn ir_emit_call(ir: *IRBuf, dst: IRVal, fn_name_v1: *u8, args_raw: *u8, n: i32) 
     return 1;
 }
 
-fn ir_emit_call_void(ir: *IRBuf, fn_name_v1: *u8, args_raw: *u8, n: i32) -> i32 {
+fn ir_emit_call_void(ir: *IRBuf, fn_name: *u8, args_raw: *u8, n: i32) -> i32 {
     ir_emit_str(ir, "    call $" as *u8);
-    ir_emit_str(ir, fn_name_v1);
+    ir_emit_str(ir, fn_name);
     ir_emit_str(ir, "(" as *u8);
     let mut i: i32 = 0 as i32;
     while i < n {
@@ -597,8 +597,8 @@ fn ir_emit_phi2(ir: *IRBuf, dst: IRVal, block1: IRVal, val1: IRVal,
 fn data_putc(ir: *IRBuf, c: i32) -> i32 {
     let ch = c & (255 as i32);
     let buf = arena_alloc((*ir).arena, 4 as i64);
-    let buf_i32_v1 = buf as *i32;
-    *buf_i32_v1 = ch;
+    let buf_i32 = buf as *i32;
+    *buf_i32 = ch;
     return ir_emit_data_str_n(ir, buf, 1 as i64);
 }
 
@@ -613,9 +613,9 @@ fn ir_emit_data_string(ir: *IRBuf, id: IRVal, str: *u8, len: i64) -> i32 {
         // JHYY 转义序列
         if c8 == (92 as i32) {
             // backslash
-            let next_idx_v1 = i + (1 as i64);
-            if next_idx_v1 < len {
-                let next8 = (*((str as i64 + next_idx_v1) as *i32) & (255 as i32));
+            let next_idx = i + (1 as i64);
+            if next_idx < len {
+                let next8 = (*((str as i64 + next_idx) as *i32) & (255 as i32));
                 if next8 == (110 as i32) {  // 'n'
                     ir_emit_data_str(ir, "\\n" as *u8);
                     i = i + (2 as i64);
@@ -644,7 +644,7 @@ fn ir_emit_data_string(ir: *IRBuf, id: IRVal, str: *u8, len: i64) -> i32 {
                     // 解析最多 2 hex digit
                     let mut val: i32 = 0 as i32;
                     let mut digits: i32 = 0 as i32;
-                    let mut j: i64 = next_idx_v1 + (1 as i64);
+                    let mut j: i64 = next_idx + (1 as i64);
                     while digits < (2 as i32) {
                         if !(j < len) { break; }
                         let hex = (*((str as i64 + j) as *i32) & (255 as i32));
@@ -723,10 +723,10 @@ fn ir_new_data_str(ir: *IRBuf, str: *u8, len: i64) -> IRVal {
     };
     // 等价 C: arena_sprintf("$str%d", id)
     let mut tmp_sb = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
-    sb_init_v1((*ir).arena, &tmp_sb);
+    sb_init((*ir).arena, &tmp_sb);
     sb_append_cstr((*ir).arena, &tmp_sb, "$str" as *u8);
     sb_appendf((*ir).arena, &tmp_sb, "%d" as *u8, (*ir).next_data);
-    let name = sb_cstr_v1((*ir).arena, &tmp_sb);
+    let name = sb_cstr((*ir).arena, &tmp_sb);
     v.name = name;
 
     (*ir).next_data = (*ir).next_data + (1 as i32);

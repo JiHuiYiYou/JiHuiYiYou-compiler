@@ -8,22 +8,22 @@
 //     → check_func_decl → check_module → sema_init / sema_check
 //   - SemaContext 内嵌 256 SemaLocal 太大（4096 字节）→ 外置 locals 数组
 //     arena_alloc(SEMA_MAX_LOCALS * SEMA_LOCAL_SIZE())，SemaContext.locals
-//     字段为 *u8（用 offset_v1 访问）
+//     字段为 *u8（用 offset 访问）
 //   - FieldDesc / VariantDesc 是 sema.c 内部布局，jhyy 版定义在 sema.jhyy
 //     私有区（sema construct + 读取都在这里）
 //   - sema_error 不走 vfprintf（jhyy 无变参）→ 走 sb_appendf 单 i32 拼接；
-//     整型用 sb_appendf("%d", n)，字符串用 sb_append_cstr，最后 sb_cstr_v1 +
+//     整型用 sb_appendf("%d", n)，字符串用 sb_append_cstr，最后 sb_cstr +
 //     jh_fputs_stderr
 //   - v0.7 7A exhaustive match + 7B const decl：本 commit 暂不支持 NODE_CONST_DECL
 //     （parser 还没翻译 const token + sema 复杂；plan 决定推到下一 commit）。
 //     完整支持 7A：match 检查 enum 所有 variant 都覆盖或 _ 兜底
-//   - SemaContext.locals 用 SemaLocal layout (sym_ptr + type_ptr_v1 = 16 bytes)；
-//     通过 offset_v1 访问 locals[i].sym / locals[i].type
+//   - SemaContext.locals 用 SemaLocal layout (sym_ptr + type_ptr = 16 bytes)；
+//     通过 offset 访问 locals[i].sym / locals[i].type
 //
 // 已知差异（vs C 版）：
 //   - C `vfprintf` 变参 → jhyy `sb_appendf` + sb_append_cstr 拼接
 //   - C `int64_t` `%zu` → jhyy i64 单 sprintf "%d" 多次
-//   - C `SemaLocal locals[256]` → jhyy `*u8` arena_alloc + offset_v1
+//   - C `SemaLocal locals[256]` → jhyy `*u8` arena_alloc + offset
 
 import arena;
 import util;
@@ -42,7 +42,7 @@ fn SEMA_MAX_LOCALS() -> i64 { return 256 as i64; }
 // SemaLocal layout: sym(*u8 8) + type(*u8 8) = 16
 fn SEMA_LOCAL_SIZE() -> i64 { return 16 as i64; }
 
-// FieldDesc layout: name(*u8 8) + type(*u8 8) + offset_v1(i64 8) = 24
+// FieldDesc layout: name(*u8 8) + type(*u8 8) + offset(i64 8) = 24
 fn FIELD_DESC_SIZE() -> i64 { return 24 as i64; }
 
 // VariantDesc layout: name(*u8 8) + payload(*u8 8) + tag(i32 4 + pad 4) = 16
@@ -70,7 +70,7 @@ fn var_name_eq_v1(a: *Sym, b: *Sym) -> i32 {
 type FieldDesc = struct {
     name:   *u8,    // *Sym
     type_:  *u8,    // *Type（jhyy `type` 是 reserved → type_）
-    offset_v1: i64,
+    offset: i64,
 }
 
 type VariantDesc = struct {
@@ -92,7 +92,7 @@ type SemaContext = struct {
     module:            *Node,
     global_scope:      *u8,        // *SymTable
     current_scope:     *u8,        // *SymTable
-    locals:            *u8,        // SemaLocal[]（offset_v1 访问）
+    locals:            *u8,        // SemaLocal[]（offset 访问）
     nlocals:           i64,
     scope_depth:       i32,
     error_count:       i32,
@@ -117,8 +117,8 @@ fn sema_local_sym(locals: *u8, idx: i64) -> *Sym {
 
 fn sema_local_type(locals: *u8, idx: i64) -> *Type {
     let p = sema_local_at(locals, idx);
-    let type_ptr_v1 = *((p as i64 + (8 as i64)) as **Type);
-    return type_ptr_v1;
+    let type_ptr = *((p as i64 + (8 as i64)) as **Type);
+    return type_ptr;
 }
 
 fn sema_local_set(locals: *u8, idx: i64, sym: *Sym, t: *Type) -> i32 {
@@ -139,7 +139,7 @@ fn sema_local_set(locals: *u8, idx: i64, sym: *Sym, t: *Type) -> i32 {
 fn sema_error_int(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
                   msg: *u8, val: i32) -> i32 {
     let mut sb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
-    sb_init_v1((*ctx).arena, &sb);
+    sb_init((*ctx).arena, &sb);
     sb_append_cstr((*ctx).arena, &sb, loc_filename);
     sb_append_cstr((*ctx).arena, &sb, ":" as *u8);
     sb_appendf((*ctx).arena, &sb, "%d" as *u8, line);
@@ -149,10 +149,10 @@ fn sema_error_int(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
     sb_append_cstr((*ctx).arena, &sb, msg);
     sb_appendf((*ctx).arena, &sb, "%d" as *u8, val);
     sb_append_cstr((*ctx).arena, &sb, "\n" as *u8);
-    let s = sb_cstr_v1((*ctx).arena, &sb);
+    let s = sb_cstr((*ctx).arena, &sb);
     jh_fputs_stderr(s);
     (*ctx).error_count = (*ctx).error_count + (1 as i32);
-    sb_free_v1(&sb);
+    sb_free(&sb);
     return 0;
 }
 
@@ -160,7 +160,7 @@ fn sema_error_int(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
 fn sema_error_int2(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
                    msg1: *u8, val1: i32, msg2: *u8, val2: i32) -> i32 {
     let mut sb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
-    sb_init_v1((*ctx).arena, &sb);
+    sb_init((*ctx).arena, &sb);
     sb_append_cstr((*ctx).arena, &sb, loc_filename);
     sb_append_cstr((*ctx).arena, &sb, ":" as *u8);
     sb_appendf((*ctx).arena, &sb, "%d" as *u8, line);
@@ -172,10 +172,10 @@ fn sema_error_int2(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
     sb_append_cstr((*ctx).arena, &sb, msg2);
     sb_appendf((*ctx).arena, &sb, "%d" as *u8, val2);
     sb_append_cstr((*ctx).arena, &sb, "\n" as *u8);
-    let s = sb_cstr_v1((*ctx).arena, &sb);
+    let s = sb_cstr((*ctx).arena, &sb);
     jh_fputs_stderr(s);
     (*ctx).error_count = (*ctx).error_count + (1 as i32);
-    sb_free_v1(&sb);
+    sb_free(&sb);
     return 0;
 }
 
@@ -183,7 +183,7 @@ fn sema_error_int2(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
 fn sema_error_str(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
                   msg: *u8) -> i32 {
     let mut sb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
-    sb_init_v1((*ctx).arena, &sb);
+    sb_init((*ctx).arena, &sb);
     sb_append_cstr((*ctx).arena, &sb, loc_filename);
     sb_append_cstr((*ctx).arena, &sb, ":" as *u8);
     sb_appendf((*ctx).arena, &sb, "%d" as *u8, line);
@@ -192,10 +192,10 @@ fn sema_error_str(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
     sb_append_cstr((*ctx).arena, &sb, ": error: " as *u8);
     sb_append_cstr((*ctx).arena, &sb, msg);
     sb_append_cstr((*ctx).arena, &sb, "\n" as *u8);
-    let s = sb_cstr_v1((*ctx).arena, &sb);
+    let s = sb_cstr((*ctx).arena, &sb);
     jh_fputs_stderr(s);
     (*ctx).error_count = (*ctx).error_count + (1 as i32);
-    sb_free_v1(&sb);
+    sb_free(&sb);
     return 0;
 }
 
@@ -203,7 +203,7 @@ fn sema_error_str(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
 fn sema_error_str_int(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
                       msg1: *u8, val: i32) -> i32 {
     let mut sb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
-    sb_init_v1((*ctx).arena, &sb);
+    sb_init((*ctx).arena, &sb);
     sb_append_cstr((*ctx).arena, &sb, loc_filename);
     sb_append_cstr((*ctx).arena, &sb, ":" as *u8);
     sb_appendf((*ctx).arena, &sb, "%d" as *u8, line);
@@ -213,10 +213,10 @@ fn sema_error_str_int(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
     sb_append_cstr((*ctx).arena, &sb, msg1);
     sb_appendf((*ctx).arena, &sb, "%d" as *u8, val);
     sb_append_cstr((*ctx).arena, &sb, "\n" as *u8);
-    let s = sb_cstr_v1((*ctx).arena, &sb);
+    let s = sb_cstr((*ctx).arena, &sb);
     jh_fputs_stderr(s);
     (*ctx).error_count = (*ctx).error_count + (1 as i32);
-    sb_free_v1(&sb);
+    sb_free(&sb);
     return 0;
 }
 
@@ -233,7 +233,7 @@ fn sema_push_scope(ctx: *SemaContext) -> i32 {
 
 fn sema_pop_scope(ctx: *SemaContext) -> i32 {
     let cur = (*ctx).current_scope as *SymTable;
-    (*ctx).current_scope = (*cur).parent_v1;
+    (*ctx).current_scope = (*cur).parent;
     (*ctx).scope_depth = (*ctx).scope_depth - (1 as i32);
     return 1;
 }
@@ -261,42 +261,42 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
         let sym = (*idd).sym as *Sym;
         let name = (*sym).name;
 
-        // 优先在当前 scope 查 SYM_TYPE_v1（sym 已经设了 type 的话直接返回）
-        let looked_v1 = symtab_lookup((*ctx).current_scope, name);
-        if looked_v1 != (0 as *Sym) {
-            if (*looked_v1).kind == SYM_TYPE_v1() {
-                if (*looked_v1).type_ptr_v1 != (0 as *u8) {
-                    return (*looked_v1).type_ptr_v1 as *Type;
+        // 优先在当前 scope 查 SYM_TYPE（sym 已经设了 type 的话直接返回）
+        let looked = symtab_lookup((*ctx).current_scope, name);
+        if looked != (0 as *Sym) {
+            if (*looked).kind == SYM_TYPE() {
+                if (*looked).type_ptr != (0 as *u8) {
+                    return (*looked).type_ptr as *Type;
                 }
             }
         }
 
         // primitive types（走 TypeArena）
-        if strcmp(name, "i8" as *u8)   == (0 as i32) { return type_primitive(ta, PRIM_I8_v1()); }
-        if strcmp(name, "i16" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_I16_v1()); }
-        if strcmp(name, "i32" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_I32_v1()); }
-        if strcmp(name, "i64" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_I64_v1()); }
-        if strcmp(name, "u8" as *u8)   == (0 as i32) { return type_primitive(ta, PRIM_U8_v1()); }
-        if strcmp(name, "u16" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_U16_v1()); }
-        if strcmp(name, "u32" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_U32_v1()); }
-        if strcmp(name, "u64" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_U64_v1()); }
-        if strcmp(name, "f32" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_F32_v1()); }
-        if strcmp(name, "f64" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_F64_v1()); }
+        if strcmp(name, "i8" as *u8)   == (0 as i32) { return type_primitive(ta, PRIM_I8()); }
+        if strcmp(name, "i16" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_I16()); }
+        if strcmp(name, "i32" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_I32()); }
+        if strcmp(name, "i64" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_I64()); }
+        if strcmp(name, "u8" as *u8)   == (0 as i32) { return type_primitive(ta, PRIM_U8()); }
+        if strcmp(name, "u16" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_U16()); }
+        if strcmp(name, "u32" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_U32()); }
+        if strcmp(name, "u64" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_U64()); }
+        if strcmp(name, "f32" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_F32()); }
+        if strcmp(name, "f64" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_F64()); }
         if strcmp(name, "bool" as *u8) == (0 as i32) { return type_primitive(ta, PRIM_BOOL()); }
 
         // global scope user-defined type
         let gsym = symtab_lookup((*ctx).global_scope, name);
         if gsym != (0 as *Sym) {
-            if (*gsym).kind == SYM_TYPE_v1() {
-                if (*gsym).type_ptr_v1 != (0 as *u8) {
-                    return (*gsym).type_ptr_v1 as *Type;
+            if (*gsym).kind == SYM_TYPE() {
+                if (*gsym).type_ptr != (0 as *u8) {
+                    return (*gsym).type_ptr as *Type;
                 }
             }
         }
 
         let _x = sema_error_str(ctx, (*tn).loc_filename, (*tn).loc_line, (*tn).loc_col,
                                 "unknown type" as *u8);
-        return type_primitive(ta, PRIM_I32_v1());  // error recovery
+        return type_primitive(ta, PRIM_I32());  // error recovery
     }
 
     if (*tn).kind == NODE_UNARY() {
@@ -305,7 +305,7 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
             let inner = resolve_type_node(ctx, ta, (*ud).expr as *Node);
             return type_pointer((*ctx).arena, inner);
         }
-        return type_primitive(ta, PRIM_I32_v1());  // error recovery
+        return type_primitive(ta, PRIM_I32());  // error recovery
     }
 
     if (*tn).kind == NODE_ARRAY_TYPE() {
@@ -313,7 +313,7 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
         let elem = resolve_type_node(ctx, ta, (*at).elem_type as *Node);
         let mut count: i64 = 0 as i64;
         if (*at).count_expr != (0 as *u8) {
-            if (*((*at).count_expr as *Node)).kind == NODE_INT_v1() {
+            if (*((*at).count_expr as *Node)).kind == NODE_INT() {
                 let idd = node_int_data((*at).count_expr as *Node);
                 count = (*idd).value;
             } else {
@@ -332,7 +332,7 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
 
     let _x = sema_error_str(ctx, (*tn).loc_filename, (*tn).loc_line, (*tn).loc_col,
                             "invalid type annotation" as *u8);
-    return type_primitive(ta, PRIM_I32_v1());
+    return type_primitive(ta, PRIM_I32());
 }
 
 // ════════════════════════════════════════════════════
@@ -345,9 +345,9 @@ fn process_match_pattern(ctx: *SemaContext, pat: *Node, match_type: *Type) -> i3
     if (*pat).kind == NODE_PATTERN_IDENT() {
         let pi = node_pattern_ident_data(pat);
         let sym = (*pi).sym as *Sym;
-        (*sym).type_ptr_v1 = match_type as *u8;
-        (*sym).kind = SYM_VAR_v1();
-        let _x = symtab_insert((*ctx).current_scope, (*sym).name, SYM_VAR_v1(),
+        (*sym).type_ptr = match_type as *u8;
+        (*sym).kind = SYM_VAR();
+        let _x = symtab_insert((*ctx).current_scope, (*sym).name, SYM_VAR(),
                               match_type as *u8, 0 as i32, (*ctx).scope_depth);
         if (*ctx).nlocals < SEMA_MAX_LOCALS() {
             sema_local_set((*ctx).locals, (*ctx).nlocals, sym, match_type);
@@ -363,8 +363,8 @@ fn process_match_pattern(ctx: *SemaContext, pat: *Node, match_type: *Type) -> i3
         let mut enum_type: *Type = 0 as *Type;
         if (*pe).type_sym != (0 as *u8) {
             let ts = (*pe).type_sym as *Sym;
-            if (*ts).type_ptr_v1 != (0 as *u8) {
-                let t = (*ts).type_ptr_v1 as *Type;
+            if (*ts).type_ptr != (0 as *u8) {
+                let t = (*ts).type_ptr as *Type;
                 if (*t).kind == KIND_ENUM() {
                     enum_type = t;
                 }
@@ -382,11 +382,11 @@ fn process_match_pattern(ctx: *SemaContext, pat: *Node, match_type: *Type) -> i3
                 let vsym = (*pe).variant_sym as *Sym;
                 let mut i: i64 = 0 as i64;
                 while i < (*enum_type).nvariants {
-                    // 读 enum_type.variants_v1[i].name（VariantDesc 16 bytes）
-                    let v_off = ptr_add_u8((*enum_type).variants_v1, i * VARIANT_DESC_SIZE());
+                    // 读 enum_type.variants[i].name（VariantDesc 16 bytes）
+                    let v_off = ptr_add_u8((*enum_type).variants, i * VARIANT_DESC_SIZE());
                     let v_name_ptr = *(v_off as **Sym);
                     if var_name_eq_v1(v_name_ptr, vsym) == (0 as i32) {
-                        // payload 在 offset_v1 8
+                        // payload 在 offset 8
                         let payload_ptr = *((v_off as i64 + (8 as i64)) as **Type);
                         inner_type = payload_ptr;
                         break;
@@ -419,45 +419,45 @@ fn process_match_pattern(ctx: *SemaContext, pat: *Node, match_type: *Type) -> i3
 // ta: TypeArena
 fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     if n == (0 as *Node) { return type_void(ta); }
-    if (*n).type_ptr_v1 != (0 as *u8) { return (*n).type_ptr_v1 as *Type; }
+    if (*n).type_ptr != (0 as *u8) { return (*n).type_ptr as *Type; }
 
     // ── literals ──
-    if (*n).kind == NODE_INT_v1() {
+    if (*n).kind == NODE_INT() {
         let d = node_int_data(n);
         let t = type_primitive(ta, (*d).prim);
-        (*n).type_ptr_v1 = t as *u8;
+        (*n).type_ptr = t as *u8;
         return t;
     }
     if (*n).kind == NODE_FLOAT() {
-        let t = type_primitive(ta, PRIM_F64_v1());
-        (*n).type_ptr_v1 = t as *u8;
+        let t = type_primitive(ta, PRIM_F64());
+        (*n).type_ptr = t as *u8;
         return t;
     }
     if (*n).kind == NODE_STRING() {
-        let t = type_pointer((*ctx).arena, type_primitive(ta, PRIM_U8_v1()));
-        (*n).type_ptr_v1 = t as *u8;
+        let t = type_pointer((*ctx).arena, type_primitive(ta, PRIM_U8()));
+        (*n).type_ptr = t as *u8;
         return t;
     }
     if (*n).kind == NODE_CHAR() {
-        let t = type_primitive(ta, PRIM_U8_v1());
-        (*n).type_ptr_v1 = t as *u8;
+        let t = type_primitive(ta, PRIM_U8());
+        (*n).type_ptr = t as *u8;
         return t;
     }
     if (*n).kind == NODE_BOOL() {
         let t = type_primitive(ta, PRIM_BOOL());
-        (*n).type_ptr_v1 = t as *u8;
+        (*n).type_ptr = t as *u8;
         return t;
     }
 
     // ── identifier ──
     if (*n).kind == NODE_IDENT() {
         let d = node_ident_data(n);
-        let id_sym_v1 = (*d).sym as *Sym;
+        let id_sym = (*d).sym as *Sym;
         // 1) sym 本身有 type
-        if id_sym_v1 != (0 as *Sym) {
-            if (*id_sym_v1).type_ptr_v1 != (0 as *u8) {
-                let t = (*id_sym_v1).type_ptr_v1 as *Type;
-                (*n).type_ptr_v1 = t as *u8;
+        if id_sym != (0 as *Sym) {
+            if (*id_sym).type_ptr != (0 as *u8) {
+                let t = (*id_sym).type_ptr as *Type;
+                (*n).type_ptr = t as *u8;
                 return t;
             }
         }
@@ -465,45 +465,45 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let mut i: i64 = (*ctx).nlocals - (1 as i64);
         while i >= (0 as i64) {
             let ls = sema_local_sym((*ctx).locals, i);
-            if ls == id_sym_v1 {
+            if ls == id_sym {
                 let lt = sema_local_type((*ctx).locals, i);
-                (*n).type_ptr_v1 = lt as *u8;
+                (*n).type_ptr = lt as *u8;
                 return lt;
             }
             // name 匹配 fallback（hash 重复 sym 时）
-            if strcmp((*ls).name, (*id_sym_v1).name) == (0 as i32) {
+            if strcmp((*ls).name, (*id_sym).name) == (0 as i32) {
                 let lt = sema_local_type((*ctx).locals, i);
-                (*n).type_ptr_v1 = lt as *u8;
+                (*n).type_ptr = lt as *u8;
                 return lt;
             }
             i = i - (1 as i64);
         }
-        // 3) global scope lookup（imported fns / types / variants_v1）
-        let gsym = symtab_lookup_local((*ctx).global_scope, (*id_sym_v1).name);
+        // 3) global scope lookup（imported fns / types / variants）
+        let gsym = symtab_lookup_local((*ctx).global_scope, (*id_sym).name);
         if gsym != (0 as *Sym) {
-            if (*gsym).kind == SYM_FN_v1() || (*gsym).kind == SYM_TYPE_v1() {
-                if (*gsym).type_ptr_v1 != (0 as *u8) {
+            if (*gsym).kind == SYM_FN() || (*gsym).kind == SYM_TYPE() {
+                if (*gsym).type_ptr != (0 as *u8) {
                     // 替换 sym 让 codegen 拿到正确 module
-                    if gsym != id_sym_v1 {
+                    if gsym != id_sym {
                         (*d).sym = gsym as *u8;
                     }
-                    let t = (*gsym).type_ptr_v1 as *Type;
-                    (*n).type_ptr_v1 = t as *u8;
+                    let t = (*gsym).type_ptr as *Type;
+                    (*n).type_ptr = t as *u8;
                     return t;
                 }
             }
-            // 3b) SYM_VARIANT: 取 parent_v1 enum 的 type（module 字段记的是 enum 名）
+            // 3b) SYM_VARIANT: 取 parent enum 的 type（module 字段记的是 enum 名）
             if (*gsym).kind == SYM_VARIANT() {
                 let module_name = (*gsym).module;
                 if module_name != (0 as *u8) {
-                    let enum_sym_v1 = symtab_lookup_local((*ctx).global_scope, module_name);
-                    if enum_sym_v1 != (0 as *Sym) {
-                        if (*enum_sym_v1).type_ptr_v1 != (0 as *u8) {
-                            if gsym != id_sym_v1 {
+                    let enum_sym = symtab_lookup_local((*ctx).global_scope, module_name);
+                    if enum_sym != (0 as *Sym) {
+                        if (*enum_sym).type_ptr != (0 as *u8) {
+                            if gsym != id_sym {
                                 (*d).sym = gsym as *u8;
                             }
-                            let t = (*enum_sym_v1).type_ptr_v1 as *Type;
-                            (*n).type_ptr_v1 = t as *u8;
+                            let t = (*enum_sym).type_ptr as *Type;
+                            (*n).type_ptr = t as *u8;
                             return t;
                         }
                     }
@@ -512,8 +512,8 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         }
         let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                 "undefined variable" as *u8);
-        let t = type_primitive(ta, PRIM_I32_v1());
-        (*n).type_ptr_v1 = t as *u8;
+        let t = type_primitive(ta, PRIM_I32());
+        (*n).type_ptr = t as *u8;
         return t;
     }
 
@@ -526,16 +526,16 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                 let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                         "unary operator requires primitive type" as *u8);
             }
-            (*n).type_ptr_v1 = inner as *u8;
+            (*n).type_ptr = inner as *u8;
             return inner;
         }
         if (*d).op == TOKEN_BANG() {
             let t = type_primitive(ta, PRIM_BOOL());
-            (*n).type_ptr_v1 = t as *u8;
+            (*n).type_ptr = t as *u8;
             return t;
         }
         // default: deref / addr-of 等单独 kind 处理
-        (*n).type_ptr_v1 = inner as *u8;
+        (*n).type_ptr = inner as *u8;
         return inner;
     }
 
@@ -550,27 +550,27 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
            op == TOKEN_SLASH() || op == TOKEN_PERCENT() ||
            op == TOKEN_PIPE()  || op == TOKEN_AMP()   || op == TOKEN_CARET() ||
            op == TOKEN_LTLT()  || op == TOKEN_GTGT() {
-            if type_eq_v1(lt, rt) == (0 as i32) {
+            if type_eq(lt, rt) == (0 as i32) {
                 let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                         "type mismatch in binary" as *u8);
             }
-            (*n).type_ptr_v1 = lt as *u8;
+            (*n).type_ptr = lt as *u8;
             return lt;
         }
         if op == TOKEN_EQEQ() || op == TOKEN_BANGEQ() ||
-           op == TOKEN_LT_v1() || op == TOKEN_GT_v1() ||
+           op == TOKEN_LT() || op == TOKEN_GT() ||
            op == TOKEN_LTEQ() || op == TOKEN_GTEQ() {
             let t = type_primitive(ta, PRIM_BOOL());
-            (*n).type_ptr_v1 = t as *u8;
+            (*n).type_ptr = t as *u8;
             return t;
         }
         if op == TOKEN_AMPAMP() || op == TOKEN_PIPEPIPE() {
             let t = type_primitive(ta, PRIM_BOOL());
-            (*n).type_ptr_v1 = t as *u8;
+            (*n).type_ptr = t as *u8;
             return t;
         }
         // default
-        (*n).type_ptr_v1 = lt as *u8;
+        (*n).type_ptr = lt as *u8;
         return lt;
     }
 
@@ -581,11 +581,11 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         if (*d).target_type != (0 as *u8) {
             let to = resolve_type_node(ctx, ta, (*d).target_type as *Node);
             // array → slice 特殊：直接接受
-            (*n).type_ptr_v1 = to as *u8;
+            (*n).type_ptr = to as *u8;
             return to;
         }
         let v = type_void(ta);
-        (*n).type_ptr_v1 = v as *u8;
+        (*n).type_ptr = v as *u8;
         return v;
     }
 
@@ -597,11 +597,11 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "cannot dereference non-pointer type" as *u8);
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
             return v;
         }
         let elem = (*inner).elem as *Type;
-        (*n).type_ptr_v1 = elem as *u8;
+        (*n).type_ptr = elem as *u8;
         return elem;
     }
 
@@ -610,7 +610,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let d = node_addr_of_data(n);
         let inner = infer_type(ctx, ta, (*d).expr as *Node);
         let t = type_pointer((*ctx).arena, inner);
-        (*n).type_ptr_v1 = t as *u8;
+        (*n).type_ptr = t as *u8;
         return t;
     }
 
@@ -618,7 +618,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     if (*n).kind == NODE_CALL() {
         let d = node_call_data(n);
 
-        // len() builtin：对 slice → NODE_FIELD.synth / 对 array → NODE_INT_v1
+        // len() builtin：对 slice → NODE_FIELD.synth / 对 array → NODE_INT
         if (*d).callee != (0 as *u8) {
             if (*((*d).callee as *Node)).kind == NODE_IDENT() {
                 if (*d).nargs == (1 as i64) {
@@ -630,14 +630,14 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                             // 改写为 NODE_FIELD（field="len"）
                             // 重用 n 的 memory，把 header kind 改 NODE_FIELD
                             // 简化版：直接创建新 Node 再修改 n；jhyy 不允许这点
-                            // → 退化方案：直接 type_primitive(PRIM_I64_v1())，调用方访问 s.len 时 codegen 走原路径
-                            let t = type_primitive(ta, PRIM_I64_v1());
-                            (*n).type_ptr_v1 = t as *u8;
+                            // → 退化方案：直接 type_primitive(PRIM_I64())，调用方访问 s.len 时 codegen 走原路径
+                            let t = type_primitive(ta, PRIM_I64());
+                            (*n).type_ptr = t as *u8;
                             return t;
                         }
                         if (*arg_t).kind == KIND_ARRAY() {
-                            let t = type_primitive(ta, PRIM_I64_v1());
-                            (*n).type_ptr_v1 = t as *u8;
+                            let t = type_primitive(ta, PRIM_I64());
+                            (*n).type_ptr = t as *u8;
                             return t;
                         }
                     }
@@ -655,12 +655,12 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         if (*callee_type).kind == KIND_FUNC() {
             let ret = (*callee_type).ret as *Type;
             if ret != (0 as *Type) {
-                (*n).type_ptr_v1 = ret as *u8;
+                (*n).type_ptr = ret as *u8;
                 return ret;
             }
         }
         let v = type_void(ta);
-        (*n).type_ptr_v1 = v as *u8;
+        (*n).type_ptr = v as *u8;
         return v;
     }
 
@@ -671,44 +671,44 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "qualified call missing module" as *u8);
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
             return v;
         }
         if (*((*d).module as *Node)).kind != NODE_IDENT() {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "qualified call left side must be a module name" as *u8);
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
             return v;
         }
-        let mod_idd_v1 = node_ident_data((*d).module as *Node);
-        let mod_sym_v1 = (*mod_idd_v1).sym as *Sym;
-        if (*mod_sym_v1).kind != SYM_MODULE() {
+        let mod_idd = node_ident_data((*d).module as *Node);
+        let mod_sym = (*mod_idd).sym as *Sym;
+        if (*mod_sym).kind != SYM_MODULE() {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "not a module" as *u8);
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
             return v;
         }
-        let mod_name_v1 = (*mod_sym_v1).name;
+        let mod_name = (*mod_sym).name;
 
         if (*d).function == (0 as *u8) {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "qualified call missing function" as *u8);
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
             return v;
         }
         if (*((*d).function as *Node)).kind != NODE_IDENT() {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "qualified call function name must be identifier" as *u8);
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
             return v;
         }
-        let fn_idd_v1 = node_ident_data((*d).function as *Node);
-        let fn_sym_ph = (*fn_idd_v1).sym as *Sym;
-        let fn_name_v1 = (*fn_sym_ph).name;
+        let fn_idd = node_ident_data((*d).function as *Node);
+        let fn_sym_ph = (*fn_idd).sym as *Sym;
+        let fn_name = (*fn_sym_ph).name;
 
         // 推所有 arg 类型
         let mut ai: i64 = 0 as i64;
@@ -717,24 +717,24 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             ai = ai + (1 as i64);
         }
 
-        // 搜索 global_scope 找 SYM_FN_v1，name == fn_name_v1 且 module == mod_name_v1
+        // 搜索 global_scope 找 SYM_FN，name == fn_name 且 module == mod_name
         let mut resolved: *Sym = 0 as *Sym;
-        let gscope_v1 = (*ctx).global_scope as *SymTable;
+        let gscope = (*ctx).global_scope as *SymTable;
         let mut i: i64 = 0 as i64;
-        while i < (*gscope_v1).nentries {
-            let entry = *(ptr_add_u8((*gscope_v1).entries, i * (8 as i64)) as **Sym);
+        while i < (*gscope).nentries {
+            let entry = *(ptr_add_u8((*gscope).entries, i * (8 as i64)) as **Sym);
             if entry != (0 as *Sym) {
-                if (*entry).kind == SYM_FN_v1() {
-                    if strcmp((*entry).name, fn_name_v1) == (0 as i32) {
-                        if mod_name_v1 != (0 as *u8) {
-                            if (*mod_name_v1) == (0 as i32) {  // '\0'
+                if (*entry).kind == SYM_FN() {
+                    if strcmp((*entry).name, fn_name) == (0 as i32) {
+                        if mod_name != (0 as *u8) {
+                            if (*mod_name) == (0 as i32) {  // '\0'
                                 if (*entry).module == (0 as *u8) {
                                     resolved = entry;
                                     break;
                                 }
                             } else {
                                 if (*entry).module != (0 as *u8) {
-                                    if strcmp((*entry).module, mod_name_v1) == (0 as i32) {
+                                    if strcmp((*entry).module, mod_name) == (0 as i32) {
                                         resolved = entry;
                                         break;
                                     }
@@ -750,22 +750,22 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "module has no function" as *u8);
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
             return v;
         }
         (*d).resolved = resolved as *u8;
-        if (*resolved).type_ptr_v1 != (0 as *u8) {
-            let t = (*resolved).type_ptr_v1 as *Type;
+        if (*resolved).type_ptr != (0 as *u8) {
+            let t = (*resolved).type_ptr as *Type;
             if (*t).kind == KIND_FUNC() {
                 let ret = (*t).ret as *Type;
                 if ret != (0 as *Type) {
-                    (*n).type_ptr_v1 = ret as *u8;
+                    (*n).type_ptr = ret as *u8;
                     return ret;
                 }
             }
         }
         let v = type_void(ta);
-        (*n).type_ptr_v1 = v as *u8;
+        (*n).type_ptr = v as *u8;
         return v;
     }
 
@@ -778,33 +778,33 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         if (*struct_type).kind == KIND_SLICE() {
             if strcmp((*d).field, "ptr" as *u8) == (0 as i32) {
                 let t = type_pointer((*ctx).arena, (*struct_type).elem as *Type);
-                (*n).type_ptr_v1 = t as *u8;
+                (*n).type_ptr = t as *u8;
                 return t;
             }
             if strcmp((*d).field, "len" as *u8) == (0 as i32) {
-                let t = type_primitive(ta, PRIM_I64_v1());
-                (*n).type_ptr_v1 = t as *u8;
+                let t = type_primitive(ta, PRIM_I64());
+                (*n).type_ptr = t as *u8;
                 return t;
             }
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "slice has no field" as *u8);
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
             return v;
         }
 
         // struct field
         if (*struct_type).kind == KIND_STRUCT() {
             let mut i: i64 = 0 as i64;
-            while i < (*struct_type).nfields_v1 {
-                // FieldDesc layout: name(*u8) + type(*u8) + offset_v1(i64)
-                let f_off = ptr_add_u8((*struct_type).fields_v1, i * FIELD_DESC_SIZE());
+            while i < (*struct_type).nfields {
+                // FieldDesc layout: name(*u8) + type(*u8) + offset(i64)
+                let f_off = ptr_add_u8((*struct_type).fields, i * FIELD_DESC_SIZE());
                 let f_name_ptr = *(f_off as **Sym);
                 if f_name_ptr != (0 as *Sym) {
                     if strcmp((*f_name_ptr).name, (*d).field) == (0 as i32) {
-                        let ft_ptr_v1 = *((f_off as i64 + (8 as i64)) as **Type);
-                        (*n).type_ptr_v1 = ft_ptr_v1 as *u8;
-                        return ft_ptr_v1;
+                        let ft_ptr = *((f_off as i64 + (8 as i64)) as **Type);
+                        (*n).type_ptr = ft_ptr as *u8;
+                        return ft_ptr;
                     }
                 }
                 i = i + (1 as i64);
@@ -812,7 +812,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "struct has no field" as *u8);
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
             return v;
         }
 
@@ -821,14 +821,14 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             let elem = (*struct_type).elem as *Type;
             if (*elem).kind == KIND_STRUCT() {
                 let mut i: i64 = 0 as i64;
-                while i < (*elem).nfields_v1 {
-                    let f_off = ptr_add_u8((*elem).fields_v1, i * FIELD_DESC_SIZE());
+                while i < (*elem).nfields {
+                    let f_off = ptr_add_u8((*elem).fields, i * FIELD_DESC_SIZE());
                     let f_name_ptr = *(f_off as **Sym);
                     if f_name_ptr != (0 as *Sym) {
                         if strcmp((*f_name_ptr).name, (*d).field) == (0 as i32) {
-                            let ft_ptr_v1 = *((f_off as i64 + (8 as i64)) as **Type);
-                            (*n).type_ptr_v1 = ft_ptr_v1 as *u8;
-                            return ft_ptr_v1;
+                            let ft_ptr = *((f_off as i64 + (8 as i64)) as **Type);
+                            (*n).type_ptr = ft_ptr as *u8;
+                            return ft_ptr;
                         }
                     }
                     i = i + (1 as i64);
@@ -836,7 +836,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                 let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                         "struct has no field (auto-deref)" as *u8);
                 let v = type_void(ta);
-                (*n).type_ptr_v1 = v as *u8;
+                (*n).type_ptr = v as *u8;
                 return v;
             }
         }
@@ -844,34 +844,34 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                 "cannot access field on type" as *u8);
         let v = type_void(ta);
-        (*n).type_ptr_v1 = v as *u8;
+        (*n).type_ptr = v as *u8;
         return v;
     }
 
     // ── index ──
     if (*n).kind == NODE_INDEX() {
         let d = node_index_data(n);
-        let arr_type_v1 = infer_type(ctx, ta, (*d).expr as *Node);
+        let arr_type = infer_type(ctx, ta, (*d).expr as *Node);
         let _x = infer_type(ctx, ta, (*d).index as *Node);
-        if (*arr_type_v1).kind == KIND_ARRAY() {
-            let t = (*arr_type_v1).elem as *Type;
-            (*n).type_ptr_v1 = t as *u8;
+        if (*arr_type).kind == KIND_ARRAY() {
+            let t = (*arr_type).elem as *Type;
+            (*n).type_ptr = t as *u8;
             return t;
         }
-        if (*arr_type_v1).kind == KIND_POINTER() {
-            let t = (*arr_type_v1).elem as *Type;
-            (*n).type_ptr_v1 = t as *u8;
+        if (*arr_type).kind == KIND_POINTER() {
+            let t = (*arr_type).elem as *Type;
+            (*n).type_ptr = t as *u8;
             return t;
         }
-        if (*arr_type_v1).kind == KIND_SLICE() {
-            let t = (*arr_type_v1).elem as *Type;
-            (*n).type_ptr_v1 = t as *u8;
+        if (*arr_type).kind == KIND_SLICE() {
+            let t = (*arr_type).elem as *Type;
+            (*n).type_ptr = t as *u8;
             return t;
         }
         let _x1 = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                  "cannot index into type" as *u8);
         let v = type_void(ta);
-        (*n).type_ptr_v1 = v as *u8;
+        (*n).type_ptr = v as *u8;
         return v;
     }
 
@@ -885,7 +885,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             if i == (0 as i64) {
                 elem_type = et;
             } else {
-                if type_eq_v1(elem_type, et) == (0 as i32) {
+                if type_eq(elem_type, et) == (0 as i32) {
                     let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                             "array literal elements must have same type" as *u8);
                 }
@@ -896,7 +896,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             elem_type = type_void(ta);
         }
         let t = type_array((*ctx).arena, elem_type, (*d).nelems);
-        (*n).type_ptr_v1 = t as *u8;
+        (*n).type_ptr = t as *u8;
         return t;
     }
 
@@ -908,18 +908,18 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "slice literal needs array" as *u8);
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
             return v;
         }
         if (*arr_t).kind != KIND_ARRAY() {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "slice literal must wrap an array literal" as *u8);
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
             return v;
         }
         let t = type_slice((*ctx).arena, (*arr_t).elem as *Type);
-        (*n).type_ptr_v1 = t as *u8;
+        (*n).type_ptr = t as *u8;
         return t;
     }
 
@@ -943,11 +943,11 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         }
         if elem == (0 as *Type) {
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
             return v;
         }
         let t = type_slice((*ctx).arena, elem);
-        (*n).type_ptr_v1 = t as *u8;
+        (*n).type_ptr = t as *u8;
         return t;
     }
 
@@ -960,36 +960,36 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             last_type = infer_type(ctx, ta, *(((*d).stmts as i64 + i * (8 as i64)) as **Node));
             i = i + (1 as i64);
         }
-        (*n).type_ptr_v1 = last_type as *u8;
+        (*n).type_ptr = last_type as *u8;
         return last_type;
     }
 
     // ── if ──
-    if (*n).kind == NODE_IF_v1() {
+    if (*n).kind == NODE_IF() {
         let d = node_if_data(n);
         let cond_type = infer_type(ctx, ta, (*d).cond as *Node);
-        let bool_t_v1 = type_primitive(ta, PRIM_BOOL());
-        if type_eq_v1(cond_type, bool_t_v1) == (0 as i32) {
+        let bool_t = type_primitive(ta, PRIM_BOOL());
+        if type_eq(cond_type, bool_t) == (0 as i32) {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "if condition must be bool" as *u8);
         }
         let then_type = infer_type(ctx, ta, (*d).then_body as *Node);
         if (*d).else_body != (0 as *u8) {
             let else_type = infer_type(ctx, ta, (*d).else_body as *Node);
-            if type_eq_v1(then_type, else_type) == (0 as i32) {
+            if type_eq(then_type, else_type) == (0 as i32) {
                 let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                         "if/else branches must have same type" as *u8);
             }
-            (*n).type_ptr_v1 = then_type as *u8;
+            (*n).type_ptr = then_type as *u8;
             return then_type;
         }
         let v = type_void(ta);
-        (*n).type_ptr_v1 = v as *u8;
+        (*n).type_ptr = v as *u8;
         return v;
     }
 
     // ── let ──
-    if (*n).kind == NODE_LET_v1() {
+    if (*n).kind == NODE_LET() {
         let d = node_let_data(n);
         let mut decl_type: *Type = 0 as *Type;
         if (*d).type_annot != (0 as *u8) {
@@ -1000,8 +1000,8 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             if (*((*d).init as *Node)).kind == NODE_FLOAT() {
                 if decl_type != (0 as *Type) {
                     if (*decl_type).kind == KIND_PRIMITIVE() {
-                        if (*decl_type).prim == PRIM_F32_v1() || (*decl_type).prim == PRIM_F64_v1() {
-                            (*((*d).init as *Node)).type_ptr_v1 = decl_type as *u8;
+                        if (*decl_type).prim == PRIM_F32() || (*decl_type).prim == PRIM_F64() {
+                            (*((*d).init as *Node)).type_ptr = decl_type as *u8;
                         }
                     }
                 }
@@ -1012,40 +1012,40 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             decl_type = init_type;
         }
         if (*d).type_annot != (0 as *u8) {
-            if type_eq_v1(decl_type, init_type) == (0 as i32) {
+            if type_eq(decl_type, init_type) == (0 as i32) {
                 let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                         "type mismatch in let" as *u8);
             }
         }
         let sym = (*d).sym as *Sym;
-        (*sym).type_ptr_v1 = decl_type as *u8;
-        (*sym).kind = SYM_VAR_v1();
+        (*sym).type_ptr = decl_type as *u8;
+        (*sym).kind = SYM_VAR();
         if (*ctx).nlocals < SEMA_MAX_LOCALS() {
             sema_local_set((*ctx).locals, (*ctx).nlocals, sym, decl_type);
             (*ctx).nlocals = (*ctx).nlocals + (1 as i64);
         }
         let v = type_void(ta);
-        (*n).type_ptr_v1 = v as *u8;
+        (*n).type_ptr = v as *u8;
         return v;
     }
 
     // ── assign ──
     if (*n).kind == NODE_ASSIGN() {
         let d = node_assign_data(n);
-        let target_type = infer_type(ctx, ta, (*d).target_v1 as *Node);
+        let target_type = infer_type(ctx, ta, (*d).target as *Node);
         let value_type = infer_type(ctx, ta, (*d).value as *Node);
-        if type_eq_v1(target_type, value_type) == (0 as i32) {
+        if type_eq(target_type, value_type) == (0 as i32) {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "assignment type mismatch" as *u8);
         }
         // v0.6.5 patch: forbid rebinding immutable `let`
-        if (*d).target_v1 != (0 as *u8) {
-            if (*((*d).target_v1 as *Node)).kind == NODE_IDENT() {
-                let idd = node_ident_data((*d).target_v1 as *Node);
-                let id_sym_v1 = (*idd).sym as *Sym;
-                if id_sym_v1 != (0 as *Sym) {
-                    if (*id_sym_v1).kind == SYM_VAR_v1() {
-                        if (*id_sym_v1).is_mutable == (0 as i32) {
+        if (*d).target != (0 as *u8) {
+            if (*((*d).target as *Node)).kind == NODE_IDENT() {
+                let idd = node_ident_data((*d).target as *Node);
+                let id_sym = (*idd).sym as *Sym;
+                if id_sym != (0 as *Sym) {
+                    if (*id_sym).kind == SYM_VAR() {
+                        if (*id_sym).is_mutable == (0 as i32) {
                             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                                     "cannot assign to immutable variable (use let mut)" as *u8);
                         }
@@ -1054,7 +1054,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             }
         }
         let v = type_void(ta);
-        (*n).type_ptr_v1 = v as *u8;
+        (*n).type_ptr = v as *u8;
         return v;
     }
 
@@ -1062,7 +1062,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     if (*n).kind == NODE_EXPR_STMT() {
         let d = node_expr_stmt_data(n);
         let t = infer_type(ctx, ta, (*d).expr as *Node);
-        (*n).type_ptr_v1 = t as *u8;
+        (*n).type_ptr = t as *u8;
         return t;
     }
 
@@ -1072,16 +1072,16 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let mut expr_type: *Type = type_void(ta);
         if (*dr).expr != (0 as *u8) {
             expr_type = infer_type(ctx, ta, (*dr).expr as *Node);
-            (*n).type_ptr_v1 = expr_type as *u8;
+            (*n).type_ptr = expr_type as *u8;
         } else {
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
         }
         // check against function return type
         let ret_t = (*ctx).current_ret_type as *Type;
         if ret_t != (0 as *Type) {
             if (*ret_t).kind != KIND_VOID() {
-                if type_eq_v1(expr_type, ret_t) == (0 as i32) {
+                if type_eq(expr_type, ret_t) == (0 as i32) {
                     let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                             "return type does not match function return type" as *u8);
                 }
@@ -1098,21 +1098,21 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let _x2 = infer_type(ctx, ta, (*d).body as *Node);
         (*ctx).loop_depth = (*ctx).loop_depth - (1 as i32);
         let v = type_void(ta);
-        (*n).type_ptr_v1 = v as *u8;
+        (*n).type_ptr = v as *u8;
         return v;
     }
 
     // ── for ──
-    if (*n).kind == NODE_FOR_v1() {
+    if (*n).kind == NODE_FOR() {
         let d = node_for_data(n);
         let start_type = infer_type(ctx, ta, (*d).start as *Node);
         let _x = infer_type(ctx, ta, (*d).end as *Node);
         // register loop var
-        let var_sym_v1 = (*d).var as *Sym;
-        (*var_sym_v1).kind = SYM_VAR_v1();
-        (*var_sym_v1).type_ptr_v1 = start_type as *u8;
+        let var_sym = (*d).var as *Sym;
+        (*var_sym).kind = SYM_VAR();
+        (*var_sym).type_ptr = start_type as *u8;
         if (*ctx).nlocals < SEMA_MAX_LOCALS() {
-            sema_local_set((*ctx).locals, (*ctx).nlocals, var_sym_v1, start_type);
+            sema_local_set((*ctx).locals, (*ctx).nlocals, var_sym, start_type);
             (*ctx).nlocals = (*ctx).nlocals + (1 as i64);
         }
         (*ctx).loop_depth = (*ctx).loop_depth + (1 as i32);
@@ -1121,7 +1121,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         }
         (*ctx).loop_depth = (*ctx).loop_depth - (1 as i32);
         let v = type_void(ta);
-        (*n).type_ptr_v1 = v as *u8;
+        (*n).type_ptr = v as *u8;
         return v;
     }
 
@@ -1132,7 +1132,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                                     "'break' outside of a loop" as *u8);
         }
         let v = type_void(ta);
-        (*n).type_ptr_v1 = v as *u8;
+        (*n).type_ptr = v as *u8;
         return v;
     }
     if (*n).kind == NODE_CONTINUE() {
@@ -1141,7 +1141,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                                     "'continue' outside of a loop" as *u8);
         }
         let v = type_void(ta);
-        (*n).type_ptr_v1 = v as *u8;
+        (*n).type_ptr = v as *u8;
         return v;
     }
 
@@ -1151,8 +1151,8 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let mut st: *Type = 0 as *Type;
         if (*d).type_sym != (0 as *u8) {
             let ts = (*d).type_sym as *Sym;
-            if (*ts).type_ptr_v1 != (0 as *u8) {
-                let t = (*ts).type_ptr_v1 as *Type;
+            if (*ts).type_ptr != (0 as *u8) {
+                let t = (*ts).type_ptr as *Type;
                 if (*t).kind == KIND_STRUCT() {
                     st = t;
                 }
@@ -1164,8 +1164,8 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             if ts != (0 as *Sym) {
                 let gsym = symtab_lookup((*ctx).global_scope, (*ts).name);
                 if gsym != (0 as *Sym) {
-                    if (*gsym).type_ptr_v1 != (0 as *u8) {
-                        let t = (*gsym).type_ptr_v1 as *Type;
+                    if (*gsym).type_ptr != (0 as *u8) {
+                        let t = (*gsym).type_ptr as *Type;
                         if (*t).kind == KIND_STRUCT() {
                             st = t;
                         }
@@ -1177,24 +1177,24 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "unknown struct type" as *u8);
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
             return v;
         }
-        // check fields_v1 (NodeFieldInit: name(*u8) + value(*Node))
+        // check fields (NodeFieldInit: name(*u8) + value(*Node))
         let mut i: i64 = 0 as i64;
-        while i < (*d).nfields_v1 {
-            let fi = ptr_add_u8((*d).fields_v1, i * (16 as i64)) as *NodeFieldInit;
+        while i < (*d).nfields {
+            let fi = ptr_add_u8((*d).fields, i * (16 as i64)) as *NodeFieldInit;
             let fname = (*fi).name;
             let fval_type = infer_type(ctx, ta, (*fi).value as *Node);
             let mut found: i32 = 0 as i32;
             let mut j: i64 = 0 as i64;
-            while j < (*st).nfields_v1 {
-                let f_off = ptr_add_u8((*st).fields_v1, j * FIELD_DESC_SIZE());
+            while j < (*st).nfields {
+                let f_off = ptr_add_u8((*st).fields, j * FIELD_DESC_SIZE());
                 let f_name_ptr = *(f_off as **Sym);
                 if f_name_ptr != (0 as *Sym) {
                     if strcmp((*f_name_ptr).name, fname) == (0 as i32) {
-                        let ft_ptr_v1 = *((f_off as i64 + (8 as i64)) as **Type);
-                        if type_eq_v1(ft_ptr_v1, fval_type) == (0 as i32) {
+                        let ft_ptr = *((f_off as i64 + (8 as i64)) as **Type);
+                        if type_eq(ft_ptr, fval_type) == (0 as i32) {
                             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                                     "field type mismatch" as *u8);
                         }
@@ -1210,7 +1210,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             }
             i = i + (1 as i64);
         }
-        (*n).type_ptr_v1 = st as *u8;
+        (*n).type_ptr = st as *u8;
         return st;
     }
 
@@ -1220,8 +1220,8 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let mut et: *Type = 0 as *Type;
         if (*d).type_sym != (0 as *u8) {
             let ts = (*d).type_sym as *Sym;
-            if (*ts).type_ptr_v1 != (0 as *u8) {
-                let t = (*ts).type_ptr_v1 as *Type;
+            if (*ts).type_ptr != (0 as *u8) {
+                let t = (*ts).type_ptr as *Type;
                 if (*t).kind == KIND_ENUM() {
                     et = t;
                 }
@@ -1232,8 +1232,8 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             if ts != (0 as *Sym) {
                 let gsym = symtab_lookup((*ctx).global_scope, (*ts).name);
                 if gsym != (0 as *Sym) {
-                    if (*gsym).type_ptr_v1 != (0 as *u8) {
-                        let t = (*gsym).type_ptr_v1 as *Type;
+                    if (*gsym).type_ptr != (0 as *u8) {
+                        let t = (*gsym).type_ptr as *Type;
                         if (*t).kind == KIND_ENUM() {
                             et = t;
                         }
@@ -1245,7 +1245,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "unknown enum type" as *u8);
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
             return v;
         }
         // check payload
@@ -1255,12 +1255,12 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             let mut found: i32 = 0 as i32;
             let mut i: i64 = 0 as i64;
             while i < (*et).nvariants {
-                let v_off = ptr_add_u8((*et).variants_v1, i * VARIANT_DESC_SIZE());
+                let v_off = ptr_add_u8((*et).variants, i * VARIANT_DESC_SIZE());
                 let v_name_ptr = *(v_off as **Sym);
                 if var_name_eq_v1(v_name_ptr, vsym) == (0 as i32) {
                     let variant_payload = *((v_off as i64 + (8 as i64)) as **Type);
                     if variant_payload != (0 as *Type) {
-                        if type_eq_v1(variant_payload, payload_type) == (0 as i32) {
+                        if type_eq(variant_payload, payload_type) == (0 as i32) {
                             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                                     "variant payload type mismatch" as *u8);
                         }
@@ -1278,7 +1278,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                                         "enum has no variant" as *u8);
             }
         }
-        (*n).type_ptr_v1 = et as *u8;
+        (*n).type_ptr = et as *u8;
         return et;
     }
 
@@ -1288,7 +1288,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let match_type = infer_type(ctx, ta, (*d).subject as *Node);
         let mut common_type: *Type = 0 as *Type;
 
-        // 7A: 收集 enum variants_v1 用于 exhaustive 检查
+        // 7A: 收集 enum variants 用于 exhaustive 检查
         let mut variants_buf: *u8 = arena_alloc((*ctx).arena, 64 as i64 * (8 as i64));
         let mut nv: i64 = 0 as i64;
         let mut has_wildcard: i32 = 0 as i32;
@@ -1346,7 +1346,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             if i == (0 as i64) {
                 common_type = body_type;
             } else {
-                if type_eq_v1(common_type, body_type) == (0 as i32) {
+                if type_eq(common_type, body_type) == (0 as i32) {
                     // 允许 void 与非 void 混合
                     if (*common_type).kind != KIND_VOID() {
                         if (*body_type).kind != KIND_VOID() {
@@ -1359,7 +1359,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             i = i + (1 as i64);
         }
 
-        // 7A: report uncovered variants_v1
+        // 7A: report uncovered variants
         if is_enum_match == (1 as i32) {
             if has_wildcard == (0 as i32) {
                 let mut j: i64 = 0 as i64;
@@ -1378,16 +1378,16 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let ret_t = common_type;
         if ret_t == (0 as *Type) {
             let v = type_void(ta);
-            (*n).type_ptr_v1 = v as *u8;
+            (*n).type_ptr = v as *u8;
             return v;
         }
-        (*n).type_ptr_v1 = ret_t as *u8;
+        (*n).type_ptr = ret_t as *u8;
         return ret_t;
     }
 
     // default: skip for now
     let v = type_void(ta);
-    (*n).type_ptr_v1 = v as *u8;
+    (*n).type_ptr = v as *u8;
     return v;
 }
 
@@ -1402,20 +1402,20 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
     (*ctx).nlocals = 0 as i64;
 
     // 分配 param_types 数组
-    let param_types = arena_alloc((*ctx).arena, (*fd).nparams_v1 * (8 as i64));
+    let param_types = arena_alloc((*ctx).arena, (*fd).nparams * (8 as i64));
 
     let mut i: i64 = 0 as i64;
-    while i < (*fd).nparams_v1 {
+    while i < (*fd).nparams {
         let param = ptr_add_u8((*fd).params, i * (16 as i64)) as *NodeFuncDeclParam;
         let pt = resolve_type_node(ctx, ta, (*param).type_annot as *Node);
         // store pt into param_types[i]
-        let pt_slot_v1 = ptr_add_u8(param_types, i * (8 as i64)) as **Type;
-        *pt_slot_v1 = pt;
+        let pt_slot = ptr_add_u8(param_types, i * (8 as i64)) as **Type;
+        *pt_slot = pt;
 
         let param_sym = (*param).sym as *Sym;
-        (*param_sym).type_ptr_v1 = pt as *u8;
-        (*param_sym).kind = SYM_VAR_v1();
-        let _x1 = symtab_insert((*ctx).current_scope, (*param_sym).name, SYM_VAR_v1(),
+        (*param_sym).type_ptr = pt as *u8;
+        (*param_sym).kind = SYM_VAR();
+        let _x1 = symtab_insert((*ctx).current_scope, (*param_sym).name, SYM_VAR(),
                                 pt as *u8, 0 as i32, (*ctx).scope_depth);
         i = i + (1 as i64);
     }
@@ -1429,10 +1429,10 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
     }
 
     // 构造 fn type
-    let fn_type_v1 = type_func((*ctx).arena, param_types, (*fd).nparams_v1, ret_type);
-    let fn_sym_v1 = (*fd).sym as *Sym;
-    (*fn_sym_v1).type_ptr_v1 = fn_type_v1 as *u8;
-    (*fn_sym_v1).kind = SYM_FN_v1();
+    let fn_type = type_func((*ctx).arena, param_types, (*fd).nparams, ret_type);
+    let fn_sym = (*fd).sym as *Sym;
+    (*fn_sym).type_ptr = fn_type as *u8;
+    (*fn_sym).kind = SYM_FN();
 
     // check body
     if (*fd).body != (0 as *u8) {
@@ -1443,7 +1443,7 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
             (*ctx).current_ret_type = 0 as *u8;
             (*ctx).loop_depth = 0 as i32;
             if (*ret_type).kind != KIND_VOID() {
-                if type_eq_v1(body_type, ret_type) == (0 as i32) {
+                if type_eq(body_type, ret_type) == (0 as i32) {
                     let _x = sema_error_str(ctx, (*((*fd).body as *Node)).loc_filename,
                                             (*((*fd).body as *Node)).loc_line, (*((*fd).body as *Node)).loc_col,
                                             "function body type does not match return type" as *u8);
@@ -1452,8 +1452,8 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
             // void ret + non-void body：infer return type
             if (*ret_type).kind == KIND_VOID() {
                 if (*body_type).kind != KIND_VOID() {
-                    let new_fn_type = type_func((*ctx).arena, param_types, (*fd).nparams_v1, body_type);
-                    (*fn_sym_v1).type_ptr_v1 = new_fn_type as *u8;
+                    let new_fn_type = type_func((*ctx).arena, param_types, (*fd).nparams, body_type);
+                    (*fn_sym).type_ptr = new_fn_type as *u8;
                 }
             }
         }
@@ -1472,19 +1472,19 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
 
     // Pass 1: register decls into global scope
     let mut i: i64 = 0 as i64;
-    while i < (*md).ndeccls_v1 {
+    while i < (*md).ndeccls {
         let decl = *(((*md).decls as i64 + i * (8 as i64)) as **Node);
         if (*decl).kind == NODE_FUNC_DECL() {
             let fd = node_func_decl_data(decl);
-            let fn_sym_v1 = (*fd).sym as *Sym;
-            (*fn_sym_v1).kind = SYM_FN_v1();
-            let _x = symtab_insert_sym((*ctx).global_scope, fn_sym_v1);
+            let fn_sym = (*fd).sym as *Sym;
+            (*fn_sym).kind = SYM_FN();
+            let _x = symtab_insert_sym((*ctx).global_scope, fn_sym);
         } else {
             if (*decl).kind == NODE_TYPE_DECL() {
                 let td = node_type_decl_data(decl);
-                let td_sym_v1 = (*td).sym as *Sym;
-                (*td_sym_v1).kind = SYM_TYPE_v1();
-                let _x = symtab_insert_sym((*ctx).global_scope, td_sym_v1);
+                let td_sym = (*td).sym as *Sym;
+                (*td_sym).kind = SYM_TYPE();
+                let _x = symtab_insert_sym((*ctx).global_scope, td_sym);
             }
         }
         i = i + (1 as i64);
@@ -1492,58 +1492,58 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
 
     // Pass 2: resolve TYPE_DECL（struct/enum/alias）— 必须先于 Pass 3
     let mut i2: i64 = 0 as i64;
-    while i2 < (*md).ndeccls_v1 {
+    while i2 < (*md).ndeccls {
         let decl = *(((*md).decls as i64 + i2 * (8 as i64)) as **Node);
         if (*decl).kind == NODE_TYPE_DECL() {
             let td = node_type_decl_data(decl);
             if (*((*td).body as *Node)).kind == NODE_STRUCT_DEF() {
                 let sd = node_struct_def_data((*td).body as *Node);
-                let fields_v1 = arena_alloc((*ctx).arena, (*sd).nfields_v1 * FIELD_DESC_SIZE());
-                let mut offset_v1: i64 = 0 as i64;
+                let fields = arena_alloc((*ctx).arena, (*sd).nfields * FIELD_DESC_SIZE());
+                let mut offset: i64 = 0 as i64;
                 let mut max_align: i64 = 1 as i64;
                 let mut j: i64 = 0 as i64;
-                while j < (*sd).nfields_v1 {
-                    let fld = ptr_add_u8((*sd).fields_v1, j * (16 as i64)) as *StructFieldDecl;
+                while j < (*sd).nfields {
+                    let fld = ptr_add_u8((*sd).fields, j * (16 as i64)) as *StructFieldDecl;
                     let ft = resolve_type_node(ctx, ta, (*fld).type_annot as *Node);
                     let al = type_align(ft);
                     if al > max_align {
                         max_align = al;
                     }
-                    // align up offset_v1
-                    offset_v1 = (offset_v1 + al - (1 as i64)) & ~((al - (1 as i64)) as i64);
-                    let fld_name_v1 = (*fld).name;
-                    let mut fsym = symtab_lookup((*ctx).global_scope, fld_name_v1);
+                    // align up offset
+                    offset = (offset + al - (1 as i64)) & ~((al - (1 as i64)) as i64);
+                    let fld_name = (*fld).name;
+                    let mut fsym = symtab_lookup((*ctx).global_scope, fld_name);
                     if fsym == (0 as *Sym) {
-                        fsym = symtab_insert((*ctx).global_scope, fld_name_v1, SYM_FIELD(),
+                        fsym = symtab_insert((*ctx).global_scope, fld_name, SYM_FIELD(),
                                             ft as *u8, 0 as i32, 0 as i32);
                     }
                     // write FieldDesc
-                    let fd_off_v1 = ptr_add_u8(fields_v1, j * FIELD_DESC_SIZE());
-                    let fd_name_slot = fd_off_v1 as **Sym;
+                    let fd_off = ptr_add_u8(fields, j * FIELD_DESC_SIZE());
+                    let fd_name_slot = fd_off as **Sym;
                     *fd_name_slot = fsym;
-                    let fd_type_slot = (fd_off_v1 as i64 + (8 as i64)) as **Type;
+                    let fd_type_slot = (fd_off as i64 + (8 as i64)) as **Type;
                     *fd_type_slot = ft;
-                    let fd_offset_slot = (fd_off_v1 as i64 + (16 as i64)) as *i64;
-                    *fd_offset_slot = offset_v1;
-                    offset_v1 = offset_v1 + type_size(ft);
+                    let fd_offset_slot = (fd_off as i64 + (16 as i64)) as *i64;
+                    *fd_offset_slot = offset;
+                    offset = offset + type_size(ft);
                     j = j + (1 as i64);
                 }
                 // final size alignment
-                offset_v1 = (offset_v1 + max_align - (1 as i64)) & ~((max_align - (1 as i64)) as i64);
+                offset = (offset + max_align - (1 as i64)) & ~((max_align - (1 as i64)) as i64);
 
-                let td_sym_v1 = (*td).sym as *Sym;
-                let st = type_struct((*ctx).arena, td_sym_v1, fields_v1, (*sd).nfields_v1, offset_v1, max_align);
-                (*td_sym_v1).type_ptr_v1 = st as *u8;
-                (*td_sym_v1).kind = SYM_TYPE_v1();
+                let td_sym = (*td).sym as *Sym;
+                let st = type_struct((*ctx).arena, td_sym, fields, (*sd).nfields, offset, max_align);
+                (*td_sym).type_ptr = st as *u8;
+                (*td_sym).kind = SYM_TYPE();
             } else {
                 if (*((*td).body as *Node)).kind == NODE_ENUM_DEF() {
                     let ed = node_enum_def_data((*td).body as *Node);
-                    let variants_v1 = arena_alloc((*ctx).arena, (*ed).nvariants * VARIANT_DESC_SIZE());
+                    let variants = arena_alloc((*ctx).arena, (*ed).nvariants * VARIANT_DESC_SIZE());
                     let mut max_payload_size: i64 = 0 as i64;
                     let mut max_payload_align: i64 = 1 as i64;
                     let mut j: i64 = 0 as i64;
                     while j < (*ed).nvariants {
-                        let vd = ptr_add_u8((*ed).variants_v1, j * (16 as i64)) as *EnumVariantDecl;
+                        let vd = ptr_add_u8((*ed).variants, j * (16 as i64)) as *EnumVariantDecl;
                         let mut pt: *Type = 0 as *Type;
                         if (*vd).payload_type != (0 as *u8) {
                             pt = resolve_type_node(ctx, ta, (*vd).payload_type as *Node);
@@ -1556,46 +1556,46 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
                                 max_payload_align = al;
                             }
                         }
-                        let vd_name_v1 = (*vd).name;
-                        let mut vsym = symtab_lookup((*ctx).global_scope, vd_name_v1);
+                        let vd_name = (*vd).name;
+                        let mut vsym = symtab_lookup((*ctx).global_scope, vd_name);
                         if vsym == (0 as *Sym) {
-                            vsym = symtab_insert((*ctx).global_scope, vd_name_v1, SYM_VARIANT(),
+                            vsym = symtab_insert((*ctx).global_scope, vd_name, SYM_VARIANT(),
                                                 pt as *u8, 0 as i32, 0 as i32);
                             // 7A: 标记 variant 所属 enum 名
-                            let td_sym_v1 = (*td).sym as *Sym;
-                            let td_name_v1 = (*td_sym_v1).name;
-                            let td_name_len = strlen(td_name_v1);
-                            (*vsym).module = arena_strdup((*ctx).arena, td_name_v1, td_name_len);
+                            let td_sym = (*td).sym as *Sym;
+                            let td_name = (*td_sym).name;
+                            let td_name_len = strlen(td_name);
+                            (*vsym).module = arena_strdup((*ctx).arena, td_name, td_name_len);
                         }
                         // write VariantDesc
-                        let vd_off_v1 = ptr_add_u8(variants_v1, j * VARIANT_DESC_SIZE());
-                        let vd_name_slot = vd_off_v1 as **Sym;
+                        let vd_off = ptr_add_u8(variants, j * VARIANT_DESC_SIZE());
+                        let vd_name_slot = vd_off as **Sym;
                         *vd_name_slot = vsym;
-                        let vd_payload_slot = (vd_off_v1 as i64 + (8 as i64)) as **Type;
+                        let vd_payload_slot = (vd_off as i64 + (8 as i64)) as **Type;
                         *vd_payload_slot = pt;
-                        let vd_tag_slot = (vd_off_v1 as i64 + (8 as i64) + (8 as i64)) as *i32;
+                        let vd_tag_slot = (vd_off as i64 + (8 as i64) + (8 as i64)) as *i32;
                         *vd_tag_slot = j as i32;
                         j = j + (1 as i64);
                     }
-                    let tag_size_v1: i64 = 4 as i64;
+                    let tag_size: i64 = 4 as i64;
                     let total_align = if max_payload_align > (4 as i64) { max_payload_align } else { (4 as i64) };
-                    let payload_offset = (tag_size_v1 + max_payload_align - (1 as i64)) & ~((max_payload_align - (1 as i64)) as i64);
+                    let payload_offset = (tag_size + max_payload_align - (1 as i64)) & ~((max_payload_align - (1 as i64)) as i64);
                     let mut total_size = payload_offset + max_payload_size;
                     total_size = (total_size + total_align - (1 as i64)) & ~((total_align - (1 as i64)) as i64);
 
-                    let td_sym_v1 = (*td).sym as *Sym;
-                    let et = type_enum((*ctx).arena, td_sym_v1, variants_v1, (*ed).nvariants,
-                                      tag_size_v1, payload_offset, max_payload_size, total_size);
-                    (*td_sym_v1).type_ptr_v1 = et as *u8;
-                    (*td_sym_v1).kind = SYM_TYPE_v1();
+                    let td_sym = (*td).sym as *Sym;
+                    let et = type_enum((*ctx).arena, td_sym, variants, (*ed).nvariants,
+                                      tag_size, payload_offset, max_payload_size, total_size);
+                    (*td_sym).type_ptr = et as *u8;
+                    (*td_sym).kind = SYM_TYPE();
                 } else {
                     if (*((*td).body as *Node)).kind == NODE_IDENT() {
                         // type alias
                         let underlying = resolve_type_node(ctx, ta, (*td).body as *Node);
-                        let td_sym_v1 = (*td).sym as *Sym;
-                        let at = type_alias((*ctx).arena, td_sym_v1, underlying);
-                        (*td_sym_v1).type_ptr_v1 = at as *u8;
-                        (*td_sym_v1).kind = SYM_TYPE_v1();
+                        let td_sym = (*td).sym as *Sym;
+                        let at = type_alias((*ctx).arena, td_sym, underlying);
+                        (*td_sym).type_ptr = at as *u8;
+                        (*td_sym).kind = SYM_TYPE();
                     }
                 }
             }
@@ -1605,7 +1605,7 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
 
     // Pass 3: check function bodies + top-level stmts
     let mut i3: i64 = 0 as i64;
-    while i3 < (*md).ndeccls_v1 {
+    while i3 < (*md).ndeccls {
         let decl = *(((*md).decls as i64 + i3 * (8 as i64)) as **Node);
         if (*decl).kind == NODE_FUNC_DECL() {
             let _x = check_func_decl(ctx, ta, decl);
@@ -1613,7 +1613,7 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
             if (*decl).kind == NODE_TYPE_DECL() {
                 // already done in Pass 2
             } else {
-                if (*decl).kind == NODE_LET_v1() || (*decl).kind == NODE_EXPR_STMT() {
+                if (*decl).kind == NODE_LET() || (*decl).kind == NODE_EXPR_STMT() {
                     let _x = infer_type(ctx, ta, decl);
                 }
             }

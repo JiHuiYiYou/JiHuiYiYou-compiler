@@ -5,9 +5,9 @@
 //   - parse_decl 顶层 dispatch（fn/type/extern/import），fallback 走 parse_stmt
 //   - parse_func 注册 sym 到 global scope（递归调用支持），push/pop scope 给 body
 //   - parse_type 走 pointer / slice / array / ident / qualified ident
-//     fn type 占位（ast_new_int 0 PRIM_I32_v1 替代，C 端亦同）
+//     fn type 占位（ast_new_int 0 PRIM_I32 替代，C 端亦同）
 //   - commit 3 完整 parse_stmt 9 个子分支配器：
-//     parse_let / parse_if_v1 / parse_while / parse_for / parse_match /
+//     parse_let / parse_if / parse_while / parse_for / parse_match /
 //     parse_return / parse_break / parse_continue / parse_expr_stmt
 //   - commit 3 完整 parse_pattern（literal / wildcard / ident / enum variant / range）
 //   - commit 3 起 strtoll 走 ffi extern
@@ -22,17 +22,17 @@
 //   - **C `bool match / check` 返回 bool** → jhyy i32 (0/1)
 //   - **C NodeFuncDeclParam / StructFieldDecl / EnumVariantDecl 数组 growable**
 //     → jhyy 走同样 growable 模式（arena_alloc + memcpy）
-//   - **C `size_t nparams_v1` etc.** → jhyy i64
+//   - **C `size_t nparams` etc.** → jhyy i64
 //   - **C `fprintf(stderr, ...)` 变参** → jhyy jh_print_loc_stderr + jh_fputs_stderr
 //     （v0.6 parser 不接受变参，plan § 1.5 bug #3）
 //   - **jhyy 不支持 mutual recursion**（forward reference hard error）→ commit 3 设计：
-//     parse_if_v1 / parse_while / parse_for / parse_func 的 block body 各自 inline 一份
+//     parse_if / parse_while / parse_for / parse_func 的 block body 各自 inline 一份
 //     dispatcher（共享 6 个 sub-stmt + self-recursion + 必要 cross control flow）。
 //     不再共享 parse_block。Order 限制：
-//       parse_if_v1     → inlined block 调 self + (no other ctrl flow)
-//       parse_for    → inlined block 调 self + parse_if_v1
-//       parse_while  → inlined block 调 self + parse_for + parse_if_v1
-//       parse_func   → inlined block 调 parse_if_v1 + parse_while + parse_for
+//       parse_if     → inlined block 调 self + (no other ctrl flow)
+//       parse_for    → inlined block 调 self + parse_if
+//       parse_while  → inlined block 调 self + parse_for + parse_if
+//       parse_func   → inlined block 调 parse_if + parse_while + parse_for
 //     nested LBRACE（`{ { ... } }`）暂不支持（commit 3 limitation，测试无此用例）
 //   - **parse_expr stub**：commit 3 仍为 stub（返回 NULL），match arm body / let init 等
 //     临时为 NULL。commit 4 实现完整 Pratt 表达式。
@@ -71,7 +71,7 @@ type Parser = struct {
     error_count:   i32,
 }
 
-// Parser 字节数 = 2 * 8 (ptr) + 6 * 8 (token fields_v1) + 2 * 8 (scope) + 2 * 4 (depth/count) + 2 pad = 80
+// Parser 字节数 = 2 * 8 (ptr) + 6 * 8 (token fields) + 2 * 8 (scope) + 2 * 4 (depth/count) + 2 pad = 80
 fn PARSER_SIZE() -> i64 { return 80 as i64; }
 
 // ════════════════════════════════════════════════════
@@ -155,8 +155,8 @@ fn parser_push_scope(p: *Parser) -> i32 {
 fn parser_pop_scope(p: *Parser) -> i32 {
     let cur = (*p).current_scope as *SymTable;
     if cur != (0 as *SymTable) {
-        let parent_v1 = (*cur).parent_v1;
-        (*p).current_scope = parent_v1;
+        let parent = (*cur).parent;
+        (*p).current_scope = parent;
     }
     (*p).scope_depth = (*p).scope_depth - (1 as i32);
     return 0;
@@ -177,8 +177,8 @@ fn parser_tok_name(p: *Parser, t: *Token) -> *u8 {
 
 fn PREC_NONE()      -> i32 { return 0  as i32; }
 fn PREC_ASSIGN()    -> i32 { return 1  as i32; }
-fn PREC_OR_v1()        -> i32 { return 2  as i32; }
-fn PREC_AND_v1()       -> i32 { return 3  as i32; }
+fn PREC_OR()        -> i32 { return 2  as i32; }
+fn PREC_AND()       -> i32 { return 3  as i32; }
 fn PREC_COMPARE()   -> i32 { return 4  as i32; }
 fn PREC_BIT_OR()    -> i32 { return 5  as i32; }
 fn PREC_BIT_XOR()   -> i32 { return 6  as i32; }
@@ -223,13 +223,13 @@ fn parse_type(p: *Parser) -> *Node {
         parser_expect(p, TOKEN_INT(), "array size" as *u8, &count_t);
         let count_val = strtoll(count_t.start, 0 as *u8, 0 as i32);
         let count_node = ast_new_int((*p).arena, body_loc_lf, body_loc_ll, body_loc_lc,
-                                     count_val, PRIM_I32_v1());
+                                     count_val, PRIM_I32());
         parser_expect(p, TOKEN_RBRACKET(), "] in array type" as *u8, &t);
         return ast_new_array_type((*p).arena, body_loc_lf, body_loc_ll, body_loc_lc, base, count_node);
     }
 
     // fn(T1, T2) -> Ret
-    if parser_match(p, TOKEN_FN_v1(), &t) != (0 as i32) {
+    if parser_match(p, TOKEN_FN(), &t) != (0 as i32) {
         parser_expect(p, TOKEN_LPAREN(), "( in fn type" as *u8, &t);
         // skip params: 循环消耗直到 )
         while parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
@@ -242,9 +242,9 @@ fn parse_type(p: *Parser) -> *Node {
             }
         }
         parser_expect(p, TOKEN_RPAREN(), ") in fn type" as *u8, &t);
-        // 占位：返回 ast_new_int(0, PRIM_I32_v1)，跟 C 端 placeholder 一致
+        // 占位：返回 ast_new_int(0, PRIM_I32)，跟 C 端 placeholder 一致
         return ast_new_int((*p).arena, (*p).prev_lf, (*p).prev_ll, (*p).prev_lc,
-                           0 as i64, PRIM_I32_v1());
+                           0 as i64, PRIM_I32());
     }
 
     // Ident [:: Ident]*
@@ -252,7 +252,7 @@ fn parse_type(p: *Parser) -> *Node {
     let name = parser_tok_name(p, &t);
     let mut sym = symtab_lookup((*p).current_scope, name);
     if sym == (0 as *Sym) {
-        sym = symtab_insert((*p).current_scope, name, SYM_TYPE_v1(),
+        sym = symtab_insert((*p).current_scope, name, SYM_TYPE(),
                             0 as *u8, 0 as i32, (*p).scope_depth);
     }
     let mut base = ast_new_ident((*p).arena, t.loc_filename, t.loc_line, t.loc_col, sym);
@@ -264,7 +264,7 @@ fn parse_type(p: *Parser) -> *Node {
         let qname = parser_tok_name(p, &t);
         let mut qsym = symtab_lookup((*p).current_scope, qname);
         if qsym == (0 as *Sym) {
-            qsym = symtab_insert((*p).current_scope, qname, SYM_TYPE_v1(),
+            qsym = symtab_insert((*p).current_scope, qname, SYM_TYPE(),
                                  0 as *u8, 0 as i32, (*p).scope_depth);
         }
         base = ast_new_ident((*p).arena, t.loc_filename, t.loc_line, t.loc_col, qsym);
@@ -283,9 +283,9 @@ fn parse_type(p: *Parser) -> *Node {
 //
 // 已知差异（vs C 版）：
 //   - **不处理 expression-oriented keywords**（if/match/while/for/lbrace）：
-//     C 端 parse_expr 起头 if 调 parse_if_v1(p)，但 jhyy parse_expr 必须定义在
-//     parse_if_v1 之前（parse_let/return/pattern/match/if/while/for 都调 parse_expr
-//     且都在它之前定义），所以 parse_expr 调 parse_if_v1 是 forward reference。
+//     C 端 parse_expr 起头 if 调 parse_if(p)，但 jhyy parse_expr 必须定义在
+//     parse_if 之前（parse_let/return/pattern/match/if/while/for 都调 parse_expr
+//     且都在它之前定义），所以 parse_expr 调 parse_if 是 forward reference。
 //     后果：`let x = if cond { a } else { b };` 这种 C 允许的语法 jhyy 报
 //     "unexpected token IF in expression"。v0.7 测试集不用此 pattern（regress.py
 //     47/50 pass 验证），文档化为 limitation。
@@ -297,15 +297,15 @@ fn parse_type(p: *Parser) -> *Node {
 fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
-    let loc_lf_v1 = t.loc_filename;
-    let loc_ll_v1 = t.loc_line;
-    let loc_lc_v1 = t.loc_col;
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
 
     let mut left: *Node = 0 as *Node;
 
     // ── Prefix dispatch（基于 t.kind 走 inline）──
     if t.kind == TOKEN_EOF() {
-        jh_print_loc_stderr(loc_lf_v1, loc_ll_v1, loc_lc_v1);
+        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
         jh_fputs_stderr("error: unexpected end of file in expression\n" as *u8);
         (*p).error_count = (*p).error_count + (1 as i32);
         return 0 as *Node;
@@ -315,13 +315,13 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         parser_advance(p, &t);
         let val = strtoll(t.start, 0 as *u8, 0 as i32);
         let prim = jh_int_suffix_prim(t.start, t.length);
-        left = ast_new_int((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, val, prim);
+        left = ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, val, prim);
     }
     else if t.kind == TOKEN_FLOAT() {
         parser_advance(p, &t);
         let mut val: f64 = 0.0;
         jh_f64_atof(t.start, t.length, (&val) as *u8);
-        left = ast_new_float((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, val);
+        left = ast_new_float((*p).arena, loc_lf, loc_ll, loc_lc, val);
     }
     else if t.kind == TOKEN_STRING() {
         parser_advance(p, &t);
@@ -329,11 +329,11 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         let chars = ((t.start as i64) + (1 as i64)) as *u8;
         let len = t.length - (2 as i64);
         let arena_chars = arena_strdup((*p).arena, chars, len);
-        left = ast_new_string((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, arena_chars, len);
+        left = ast_new_string((*p).arena, loc_lf, loc_ll, loc_lc, arena_chars, len);
     }
     else if t.kind == TOKEN_CHAR() {
         parser_advance(p, &t);
-        // 绕开 qbe_type_of(*u8)='b' bug：4-byte aligned_v1 read + shift + mask
+        // 绕开 qbe_type_of(*u8)='b' bug：4-byte aligned read + shift + mask
         // t.start[0] = '\'', t.start[1] = char (or '\\'), t.start[2] = (escape or '\'')
         let p1 = (t.start as i64) + (1 as i64);
         let a1 = p1 & (~(3 as i64));
@@ -357,7 +357,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         } else {
             ch = c1;
         }
-        left = ast_new_char((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, ch);
+        left = ast_new_char((*p).arena, loc_lf, loc_ll, loc_lc, ch);
     }
     else if t.kind == TOKEN_BOOL() {
         parser_advance(p, &t);
@@ -366,24 +366,24 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
             let r = strncmp(t.start, "true" as *u8, 4 as i64);
             if r == (0 as i32) { val = 1; }
         }
-        left = ast_new_bool((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, val);
+        left = ast_new_bool((*p).arena, loc_lf, loc_ll, loc_lc, val);
     }
     else if t.kind == TOKEN_IDENT() {
         parser_advance(p, &t);
         let name = parser_tok_name(p, &t);
         let mut sym = symtab_lookup((*p).current_scope, name);
         if sym == (0 as *Sym) {
-            sym = symtab_insert((*p).current_scope, name, SYM_VAR_v1(),
+            sym = symtab_insert((*p).current_scope, name, SYM_VAR(),
                                 0 as *u8, 0 as i32, (*p).scope_depth);
         }
 
         // branch on sym kind
-        if (*sym).kind == SYM_TYPE_v1() {
+        if (*sym).kind == SYM_TYPE() {
             // ── struct lit: TypeName { field: val, ... } ──
             if parser_check(p, TOKEN_LBRACE()) != (0 as i32) {
                 parser_advance(p, &t);  // consume {
-                let mut fields_v1: *u8 = 0 as *u8;
-                let mut nfields_v1: i64 = 0 as i64;
+                let mut fields: *u8 = 0 as *u8;
+                let mut nfields: i64 = 0 as i64;
                 let mut fcap: i64 = 0 as i64;
                 while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
                     if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
@@ -392,22 +392,22 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                     let fname = parser_tok_name(p, &fnt);
                     parser_expect(p, TOKEN_COLON(), ":" as *u8, &t);
                     let fval = parse_expr(p, PREC_NONE());
-                    if nfields_v1 >= fcap {
+                    if nfields >= fcap {
                         fcap = if fcap != (0 as i64) { fcap * (2 as i64) } else { (8 as i64) };
                         let nf = arena_alloc((*p).arena, fcap * (16 as i64));
-                        if fields_v1 != (0 as *u8) {
-                            if nfields_v1 > (0 as i64) { memcpy(nf, fields_v1, nfields_v1 * (16 as i64)); }
+                        if fields != (0 as *u8) {
+                            if nfields > (0 as i64) { memcpy(nf, fields, nfields * (16 as i64)); }
                         }
-                        fields_v1 = nf;
+                        fields = nf;
                     }
-                    let fd = (fields_v1 as i64 + nfields_v1 * (16 as i64)) as *NodeFieldInit;
+                    let fd = (fields as i64 + nfields * (16 as i64)) as *NodeFieldInit;
                     (*fd).name = fname;
                     (*fd).value = fval as *u8;
-                    nfields_v1 = nfields_v1 + (1 as i64);
+                    nfields = nfields + (1 as i64);
                     if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
                 }
                 parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
-                left = ast_new_struct_lit((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, sym, fields_v1, nfields_v1);
+                left = ast_new_struct_lit((*p).arena, loc_lf, loc_ll, loc_lc, sym, fields, nfields);
             }
             // ── enum variant: TypeName::Variant(args) ──
             else if parser_check(p, TOKEN_COLONCOLON()) != (0 as i32) {
@@ -425,11 +425,11 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                     payload = parse_expr(p, PREC_NONE());
                     parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
                 }
-                left = ast_new_enum_variant((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, sym, vsym, payload);
+                left = ast_new_enum_variant((*p).arena, loc_lf, loc_ll, loc_lc, sym, vsym, payload);
             }
             // bare type ident (allowed as expression — resolves later)
             else {
-                left = ast_new_ident((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, sym);
+                left = ast_new_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
             }
         }
         else if (*sym).kind == SYM_MODULE() {
@@ -438,10 +438,10 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                 parser_advance(p, &t);  // consume ::
                 let mut fnt = empty_token();
                 parser_expect(p, TOKEN_IDENT(), "function name after '::'" as *u8, &fnt);
-                let fn_name_v1 = parser_tok_name(p, &fnt);
-                let mut fn_sym_v1 = symtab_lookup((*p).current_scope, fn_name_v1);
-                if fn_sym_v1 == (0 as *Sym) {
-                    fn_sym_v1 = symtab_insert((*p).current_scope, fn_name_v1, SYM_FN_v1(),
+                let fn_name = parser_tok_name(p, &fnt);
+                let mut fn_sym = symtab_lookup((*p).current_scope, fn_name);
+                if fn_sym == (0 as *Sym) {
+                    fn_sym = symtab_insert((*p).current_scope, fn_name, SYM_FN(),
                                             0 as *u8, 0 as i32, 0 as i32);
                 }
                 let mut args: *u8 = 0 as *u8;
@@ -466,15 +466,15 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                     }
                 }
                 parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
-                let mod_node_v1 = ast_new_ident((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, sym);
-                let fn_node_v1 = ast_new_ident((*p).arena, (*p).prev_lf, (*p).prev_ll, (*p).prev_lc, fn_sym_v1);
-                left = ast_new_qualified_call((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, mod_node_v1, fn_node_v1, args, nargs);
+                let mod_node = ast_new_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
+                let fn_node = ast_new_ident((*p).arena, (*p).prev_lf, (*p).prev_ll, (*p).prev_lc, fn_sym);
+                left = ast_new_qualified_call((*p).arena, loc_lf, loc_ll, loc_lc, mod_node, fn_node, args, nargs);
             } else {
-                left = ast_new_ident((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, sym);
+                left = ast_new_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
             }
         }
         else {
-            left = ast_new_ident((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, sym);
+            left = ast_new_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
         }
     }
     // ── unary prefix: - ! ~ ──
@@ -482,25 +482,25 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         parser_advance(p, &t);
         let op = t.kind;
         let expr = parse_expr(p, PREC_UNARY());
-        left = ast_new_unary((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, op, expr);
+        left = ast_new_unary((*p).arena, loc_lf, loc_ll, loc_lc, op, expr);
     }
     else if t.kind == TOKEN_BANG() {
         parser_advance(p, &t);
         let op = t.kind;
         let expr = parse_expr(p, PREC_UNARY());
-        left = ast_new_unary((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, op, expr);
+        left = ast_new_unary((*p).arena, loc_lf, loc_ll, loc_lc, op, expr);
     }
     else if t.kind == TOKEN_TILDE() {
         parser_advance(p, &t);
         let op = t.kind;
         let expr = parse_expr(p, PREC_UNARY());
-        left = ast_new_unary((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, op, expr);
+        left = ast_new_unary((*p).arena, loc_lf, loc_ll, loc_lc, op, expr);
     }
     else if t.kind == TOKEN_STAR() {
         // * is both prefix (deref) and infix (multiply)
         parser_advance(p, &t);
         let expr = parse_expr(p, PREC_UNARY());
-        left = ast_new_deref((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, expr);
+        left = ast_new_deref((*p).arena, loc_lf, loc_ll, loc_lc, expr);
     }
     else if t.kind == TOKEN_AMP() {
         // & is both prefix (addr-of) and infix (bit-and), and starts slice literal &[...]
@@ -529,11 +529,11 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                 }
             }
             parser_expect(p, TOKEN_RBRACKET(), "] in slice literal" as *u8, &t);
-            let arr = ast_new_array_lit((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, elems, nelems);
-            left = ast_new_slice_lit((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, arr);
+            let arr = ast_new_array_lit((*p).arena, loc_lf, loc_ll, loc_lc, elems, nelems);
+            left = ast_new_slice_lit((*p).arena, loc_lf, loc_ll, loc_lc, arr);
         } else {
             let expr = parse_expr(p, PREC_UNARY());
-            left = ast_new_addr_of((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, expr);
+            left = ast_new_addr_of((*p).arena, loc_lf, loc_ll, loc_lc, expr);
         }
     }
     else if t.kind == TOKEN_LPAREN() {
@@ -541,7 +541,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         parser_advance(p, &t);
         if parser_match(p, TOKEN_RPAREN(), &t) != (0 as i32) {
             // unit ()
-            left = ast_new_int((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, 0 as i64, PRIM_I32_v1());
+            left = ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, 0 as i64, PRIM_I32());
         } else {
             let expr = parse_expr(p, PREC_NONE());
             parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
@@ -551,26 +551,26 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
     else if t.kind == TOKEN_SIZEOF() {
         parser_advance(p, &t);
         parser_expect(p, TOKEN_LPAREN(), "(" as *u8, &t);
-        let _target_v1 = parse_type(p);
+        let _target = parse_type(p);
         parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
-        left = ast_new_sizeof((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, 0 as *Type);
+        left = ast_new_sizeof((*p).arena, loc_lf, loc_ll, loc_lc, 0 as *Type);
     }
     else if t.kind == TOKEN_ALIGNOF() {
         parser_advance(p, &t);
         parser_expect(p, TOKEN_LPAREN(), "(" as *u8, &t);
-        let _target_v1 = parse_type(p);
+        let _target = parse_type(p);
         parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
-        left = ast_new_alignof((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, 0 as *Type);
+        left = ast_new_alignof((*p).arena, loc_lf, loc_ll, loc_lc, 0 as *Type);
     }
-    else if t.kind == TOKEN_IF_v1() {
+    else if t.kind == TOKEN_IF() {
         /* if-as-expression（Phase A-1, v0.8 commit 5）：`let r = if cond { a } else { b };`
-         * jhyy 无 forward reference（parse_if_v1 定义在 parse_expr 之后，见 line 286 注释），
-         * 所以不能调 parse_if_v1。这里 inline 一份 if 解析，块内语句只支持：
+         * jhyy 无 forward reference（parse_if 定义在 parse_expr 之后，见 line 286 注释），
+         * 所以不能调 parse_if。这里 inline 一份 if 解析，块内语句只支持：
          *   - 表达式语句（parse_expr + optional ;，自递归 OK）
          *   - 嵌套 if / else-if（parse_expr 自递归回到本分支）
-         * 不支持块内 let/return/match（if-expr 值块场景用不到；if-statement 走 parse_if_v1）。*/
+         * 不支持块内 let/return/match（if-expr 值块场景用不到；if-statement 走 parse_if）。*/
         parser_advance(p, &t);  // consume 'if'
-        let ifx_cond_v1 = parse_expr(p, PREC_NONE());
+        let ifx_cond = parse_expr(p, PREC_NONE());
 
         // ── then block ──
         parser_expect(p, TOKEN_LBRACE(), "{ after if condition" as *u8, &t);
@@ -581,7 +581,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
             if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
             let mut ifx_s: *Node = 0 as *Node;
-            if parser_check(p, TOKEN_IF_v1()) != (0 as i32) {
+            if parser_check(p, TOKEN_IF()) != (0 as i32) {
                 ifx_s = parse_expr(p, PREC_NONE());   // 嵌套 if-expr（自递归）
             } else {
                 let ex = parse_expr(p, PREC_NONE());
@@ -610,12 +610,12 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         }
         parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
         parser_pop_scope(p);
-        let ifx_then_body = ast_new_block((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, ifx_then, ifx_nthen);
+        let ifx_then_body = ast_new_block((*p).arena, loc_lf, loc_ll, loc_lc, ifx_then, ifx_nthen);
 
         // ── else block (optional) ──
         let mut ifx_else_body: *Node = 0 as *Node;
         if parser_match(p, TOKEN_ELSE(), &t) != (0 as i32) {
-            if parser_check(p, TOKEN_IF_v1()) != (0 as i32) {
+            if parser_check(p, TOKEN_IF()) != (0 as i32) {
                 ifx_else_body = parse_expr(p, PREC_NONE());   // else-if（自递归）
             } else {
                 parser_expect(p, TOKEN_LBRACE(), "{ after else" as *u8, &t);
@@ -626,7 +626,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                 while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
                     if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
                     let mut ifx_s2: *Node = 0 as *Node;
-                    if parser_check(p, TOKEN_IF_v1()) != (0 as i32) {
+                    if parser_check(p, TOKEN_IF()) != (0 as i32) {
                         ifx_s2 = parse_expr(p, PREC_NONE());
                     } else {
                         let ex2 = parse_expr(p, PREC_NONE());
@@ -655,11 +655,11 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                 }
                 parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
                 parser_pop_scope(p);
-                ifx_else_body = ast_new_block((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, ifx_els, ifx_nels);
+                ifx_else_body = ast_new_block((*p).arena, loc_lf, loc_ll, loc_lc, ifx_els, ifx_nels);
             }
         }
 
-        left = ast_new_if((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, ifx_cond_v1, ifx_then_body, ifx_else_body);
+        left = ast_new_if((*p).arena, loc_lf, loc_ll, loc_lc, ifx_cond, ifx_then_body, ifx_else_body);
     }
     else if t.kind == TOKEN_LBRACKET() {
         // array literal: [1, 2, 3]
@@ -685,11 +685,11 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
             }
         }
         parser_expect(p, TOKEN_RBRACKET(), "]" as *u8, &t);
-        left = ast_new_array_lit((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, elems, nelems);
+        left = ast_new_array_lit((*p).arena, loc_lf, loc_ll, loc_lc, elems, nelems);
     }
     else {
         // unexpected token (IF / MATCH / WHILE / FOR / LBRACE 等 statement-only)
-        jh_print_loc_stderr(loc_lf_v1, loc_ll_v1, loc_lc_v1);
+        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
         jh_fputs_stderr("error: unexpected token '" as *u8);
         jh_fputs_stderr(token_kind_name(t.kind));
         jh_fputs_stderr("' in expression\n" as *u8);
@@ -713,21 +713,21 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         if t.kind == TOKEN_COMMA() { return left; }
         if t.kind == TOKEN_COLON() { return left; }
         if t.kind == TOKEN_FATARROW() { return left; }
-        if t.kind == TOKEN_IN_v1() { return left; }
+        if t.kind == TOKEN_IN() { return left; }
         if t.kind == TOKEN_ELSE() { return left; }
 
         // determine precedence (C 端 init_rules 表 inline)
         let mut prec: i32 = 0;
         let mut is_infix: i32 = 0;
-        if t.kind == TOKEN_EQ_v1() || t.kind == TOKEN_PLUSEQ() || t.kind == TOKEN_MINUSEQ()
+        if t.kind == TOKEN_EQ() || t.kind == TOKEN_PLUSEQ() || t.kind == TOKEN_MINUSEQ()
            || t.kind == TOKEN_STAREQ() || t.kind == TOKEN_SLASHEQ() || t.kind == TOKEN_PERCENTEQ() {
             prec = PREC_ASSIGN(); is_infix = 1;
         } else if t.kind == TOKEN_PIPEPIPE() {
-            prec = PREC_OR_v1(); is_infix = 1;
+            prec = PREC_OR(); is_infix = 1;
         } else if t.kind == TOKEN_AMPAMP() {
-            prec = PREC_AND_v1(); is_infix = 1;
+            prec = PREC_AND(); is_infix = 1;
         } else if t.kind == TOKEN_EQEQ() || t.kind == TOKEN_BANGEQ()
-                  || t.kind == TOKEN_LT_v1() || t.kind == TOKEN_GT_v1()
+                  || t.kind == TOKEN_LT() || t.kind == TOKEN_GT()
                   || t.kind == TOKEN_LTEQ() || t.kind == TOKEN_GTEQ() {
             prec = PREC_COMPARE(); is_infix = 1;
         } else if t.kind == TOKEN_PIPE() {
@@ -748,7 +748,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
             prec = PREC_PRIMARY(); is_infix = 1;
         } else if t.kind == TOKEN_LBRACKET() {
             prec = PREC_PRIMARY(); is_infix = 1;
-        } else if t.kind == TOKEN_AS_v1() {
+        } else if t.kind == TOKEN_AS() {
             prec = PREC_FACTOR(); is_infix = 1;
         } else {
             // unknown token in expression — not an infix
@@ -759,40 +759,40 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         if prec < min_prec { return left; }
 
         // ── infix dispatch（基于 t.kind）──
-        if t.kind == TOKEN_EQ_v1() {
+        if t.kind == TOKEN_EQ() {
             parser_advance(p, &t);
             let right = parse_expr(p, PREC_NONE());
-            left = ast_new_assign((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, left, right);
+            left = ast_new_assign((*p).arena, loc_lf, loc_ll, loc_lc, left, right);
         }
         else if t.kind == TOKEN_PLUSEQ() {
             parser_advance(p, &t);
             let right = parse_expr(p, PREC_NONE());
-            let bin = ast_new_binary((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, TOKEN_PLUS(), left, right);
-            left = ast_new_assign((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, left, bin);
+            let bin = ast_new_binary((*p).arena, loc_lf, loc_ll, loc_lc, TOKEN_PLUS(), left, right);
+            left = ast_new_assign((*p).arena, loc_lf, loc_ll, loc_lc, left, bin);
         }
         else if t.kind == TOKEN_MINUSEQ() {
             parser_advance(p, &t);
             let right = parse_expr(p, PREC_NONE());
-            let bin = ast_new_binary((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, TOKEN_MINUS(), left, right);
-            left = ast_new_assign((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, left, bin);
+            let bin = ast_new_binary((*p).arena, loc_lf, loc_ll, loc_lc, TOKEN_MINUS(), left, right);
+            left = ast_new_assign((*p).arena, loc_lf, loc_ll, loc_lc, left, bin);
         }
         else if t.kind == TOKEN_STAREQ() {
             parser_advance(p, &t);
             let right = parse_expr(p, PREC_NONE());
-            let bin = ast_new_binary((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, TOKEN_STAR(), left, right);
-            left = ast_new_assign((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, left, bin);
+            let bin = ast_new_binary((*p).arena, loc_lf, loc_ll, loc_lc, TOKEN_STAR(), left, right);
+            left = ast_new_assign((*p).arena, loc_lf, loc_ll, loc_lc, left, bin);
         }
         else if t.kind == TOKEN_SLASHEQ() {
             parser_advance(p, &t);
             let right = parse_expr(p, PREC_NONE());
-            let bin = ast_new_binary((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, TOKEN_SLASH(), left, right);
-            left = ast_new_assign((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, left, bin);
+            let bin = ast_new_binary((*p).arena, loc_lf, loc_ll, loc_lc, TOKEN_SLASH(), left, right);
+            left = ast_new_assign((*p).arena, loc_lf, loc_ll, loc_lc, left, bin);
         }
         else if t.kind == TOKEN_PERCENTEQ() {
             parser_advance(p, &t);
             let right = parse_expr(p, PREC_NONE());
-            let bin = ast_new_binary((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, TOKEN_PERCENT(), left, right);
-            left = ast_new_assign((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, left, bin);
+            let bin = ast_new_binary((*p).arena, loc_lf, loc_ll, loc_lc, TOKEN_PERCENT(), left, right);
+            left = ast_new_assign((*p).arena, loc_lf, loc_ll, loc_lc, left, bin);
         }
         else if t.kind == TOKEN_LPAREN() {
             // call: foo(a, b, ...)
@@ -818,7 +818,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                 }
             }
             parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
-            left = ast_new_call((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, left, args, nargs);
+            left = ast_new_call((*p).arena, loc_lf, loc_ll, loc_lc, left, args, nargs);
         }
         else if t.kind == TOKEN_DOT() {
             // field access: expr.field
@@ -826,7 +826,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
             let mut field_t = empty_token();
             parser_expect(p, TOKEN_IDENT(), "field name" as *u8, &field_t);
             let field_name = parser_tok_name(p, &field_t);
-            left = ast_new_field((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, left, field_name);
+            left = ast_new_field((*p).arena, loc_lf, loc_ll, loc_lc, left, field_name);
         }
         else if t.kind == TOKEN_LBRACKET() {
             // index: a[i] or slice range: a[i..j]
@@ -835,24 +835,24 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
             if parser_match(p, TOKEN_DOTDOT(), &t) != (0 as i32) {
                 let end = parse_expr(p, PREC_NONE());
                 parser_expect(p, TOKEN_RBRACKET(), "]" as *u8, &t);
-                left = ast_new_slice_range((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, left, start, end);
+                left = ast_new_slice_range((*p).arena, loc_lf, loc_ll, loc_lc, left, start, end);
             } else {
                 parser_expect(p, TOKEN_RBRACKET(), "]" as *u8, &t);
-                left = ast_new_index((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, left, start);
+                left = ast_new_index((*p).arena, loc_lf, loc_ll, loc_lc, left, start);
             }
         }
-        else if t.kind == TOKEN_AS_v1() {
+        else if t.kind == TOKEN_AS() {
             // as cast: expr as Type
             parser_advance(p, &t);
-            let target_v1 = parse_type(p);
-            left = ast_new_cast((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, left, target_v1);
+            let target = parse_type(p);
+            left = ast_new_cast((*p).arena, loc_lf, loc_ll, loc_lc, left, target);
         }
         else {
             // binary op: +, -, *, /, %, ==, !=, <, >, <=, >=, &&, ||, |, ^, &, <<, >>
             parser_advance(p, &t);
             let op = t.kind;
             let right = parse_expr(p, prec + (1 as i32));
-            left = ast_new_binary((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, op, left, right);
+            left = ast_new_binary((*p).arena, loc_lf, loc_ll, loc_lc, op, left, right);
         }
     }
     return 0 as *Node;  // sentinel（while true 永远不退出；jhyy 类型检查需要）
@@ -865,9 +865,9 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
 fn parse_let(p: *Parser) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
-    let loc_lf_v1 = t.loc_filename;
-    let loc_ll_v1 = t.loc_line;
-    let loc_lc_v1 = t.loc_col;
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
 
     parser_advance(p, &t);  // consume 'let'
 
@@ -885,13 +885,13 @@ fn parse_let(p: *Parser) -> *Node {
         type_annot = parse_type(p);
     }
 
-    parser_expect(p, TOKEN_EQ_v1(), "=" as *u8, &t);
+    parser_expect(p, TOKEN_EQ(), "=" as *u8, &t);
     let init = parse_expr(p, PREC_NONE());
     parser_expect(p, TOKEN_SEMICOLON(), ";" as *u8, &t);
 
-    let sym = symtab_insert((*p).current_scope, vname, SYM_VAR_v1(),
+    let sym = symtab_insert((*p).current_scope, vname, SYM_VAR(),
                             0 as *u8, is_mut, (*p).scope_depth);
-    return ast_new_let((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, is_mut, sym, type_annot, init);
+    return ast_new_let((*p).arena, loc_lf, loc_ll, loc_lc, is_mut, sym, type_annot, init);
 }
 
 // ════════════════════════════════════════════════════
@@ -902,9 +902,9 @@ fn parse_let(p: *Parser) -> *Node {
 fn parse_return(p: *Parser) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
-    let loc_lf_v1 = t.loc_filename;
-    let loc_ll_v1 = t.loc_line;
-    let loc_lc_v1 = t.loc_col;
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
 
     parser_advance(p, &t);  // consume 'return'
 
@@ -916,35 +916,35 @@ fn parse_return(p: *Parser) -> *Node {
     }
     parser_expect(p, TOKEN_SEMICOLON(), ";" as *u8, &t);
 
-    return ast_new_return((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, expr);
+    return ast_new_return((*p).arena, loc_lf, loc_ll, loc_lc, expr);
 }
 
 // parse_break: break ;
 fn parse_break(p: *Parser) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
-    let loc_lf_v1 = t.loc_filename;
-    let loc_ll_v1 = t.loc_line;
-    let loc_lc_v1 = t.loc_col;
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
 
     parser_advance(p, &t);  // consume 'break'
     parser_expect(p, TOKEN_SEMICOLON(), ";" as *u8, &t);
 
-    return ast_new_break((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1);
+    return ast_new_break((*p).arena, loc_lf, loc_ll, loc_lc);
 }
 
 // parse_continue: continue ;
 fn parse_continue(p: *Parser) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
-    let loc_lf_v1 = t.loc_filename;
-    let loc_ll_v1 = t.loc_line;
-    let loc_lc_v1 = t.loc_col;
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
 
     parser_advance(p, &t);  // consume 'continue'
     parser_expect(p, TOKEN_SEMICOLON(), ";" as *u8, &t);
 
-    return ast_new_continue((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1);
+    return ast_new_continue((*p).arena, loc_lf, loc_ll, loc_lc);
 }
 
 // parse_expr_stmt: expr [;] — allow omitting ; before }
@@ -975,24 +975,24 @@ fn parse_pattern(p: *Parser) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
 
-    let loc_lf_v1 = t.loc_filename;
-    let loc_ll_v1 = t.loc_line;
-    let loc_lc_v1 = t.loc_col;
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
 
     // ── TOKEN_IDENT 分支 ──
     if t.kind == TOKEN_IDENT() {
         // wildcard _
         if t.length == (1 as i64) {
-            // t.start may not be 4-byte aligned_v1; use aligned_v1 read
-            let p_addr_v1 = t.start as i64;
-            let aligned_v1 = p_addr_v1 & (~(3 as i64));
-            let rem = (p_addr_v1 - aligned_v1) as i32;
-            let w = *((aligned_v1) as *i32);
+            // t.start may not be 4-byte aligned; use aligned read
+            let p_addr = t.start as i64;
+            let aligned = p_addr & (~(3 as i64));
+            let rem = (p_addr - aligned) as i32;
+            let w = *((aligned) as *i32);
             let shift = rem * (8 as i32);
             let c0 = (w >> shift) & (255 as i32);
             if c0 == (95 as i32) {  // '_' = ASCII 95
                 parser_advance(p, &t);
-                return ast_new_pattern_wild((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1);
+                return ast_new_pattern_wild((*p).arena, loc_lf, loc_ll, loc_lc);
             }
         }
         parser_advance(p, &t);
@@ -1009,12 +1009,12 @@ fn parse_pattern(p: *Parser) -> *Node {
             let vname = parser_tok_name(p, &t);
             let mut tsym = symtab_lookup((*p).current_scope, outer_name);
             if tsym == (0 as *Sym) {
-                tsym = symtab_insert((*p).current_scope, outer_name, SYM_TYPE_v1(),
+                tsym = symtab_insert((*p).current_scope, outer_name, SYM_TYPE(),
                                      0 as *u8, 0 as i32, (*p).scope_depth);
             }
             let mut vsym = symtab_lookup((*p).current_scope, vname);
             if vsym == (0 as *Sym) {
-                vsym = symtab_insert((*p).current_scope, vname, SYM_VAR_v1(),
+                vsym = symtab_insert((*p).current_scope, vname, SYM_VAR(),
                                      0 as *u8, 0 as i32, (*p).scope_depth);
             }
             let mut inner: *Node = 0 as *Node;
@@ -1022,20 +1022,20 @@ fn parse_pattern(p: *Parser) -> *Node {
                 inner = parse_pattern(p);
                 parser_expect(p, TOKEN_RPAREN(), ") after enum pattern" as *u8, &t);
             }
-            return ast_new_pattern_enum((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, tsym, vsym, inner);
+            return ast_new_pattern_enum((*p).arena, loc_lf, loc_ll, loc_lc, tsym, vsym, inner);
         }
 
         // range lo..hi  —— hi 走 parse_expr（PREC_PRIMARY），commit 3 parse_expr 是 stub 返回 NULL
         if parser_match(p, TOKEN_DOTDOT(), &t) != (0 as i32) {
             let hi = parse_expr(p, PREC_PRIMARY());
-            let lo_name_v1 = arena_strdup((*p).arena, t.start, t.length);
-            let mut sym = symtab_lookup((*p).current_scope, lo_name_v1);
+            let lo_name = arena_strdup((*p).arena, t.start, t.length);
+            let mut sym = symtab_lookup((*p).current_scope, lo_name);
             if sym == (0 as *Sym) {
-                sym = symtab_insert((*p).current_scope, lo_name_v1, SYM_VAR_v1(),
+                sym = symtab_insert((*p).current_scope, lo_name, SYM_VAR(),
                                     0 as *u8, 0 as i32, (*p).scope_depth);
             }
-            let lo = ast_new_pattern_ident((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, sym);
-            return ast_new_pattern_range((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, lo, hi);
+            let lo = ast_new_pattern_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
+            return ast_new_pattern_range((*p).arena, loc_lf, loc_ll, loc_lc, lo, hi);
         }
 
         // short-name variant（v0.7 7A）：Name 解析到 SYM_VARIANT in global_scope
@@ -1049,11 +1049,11 @@ fn parse_pattern(p: *Parser) -> *Node {
                     parser_advance(p, &t);  // consume (
                     let inner = parse_pattern(p);
                     parser_expect(p, TOKEN_RPAREN(), ") after enum pattern" as *u8, &t);
-                    return ast_new_pattern_enum((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1,
+                    return ast_new_pattern_enum((*p).arena, loc_lf, loc_ll, loc_lc,
                                                 0 as *Sym, gsym, inner);
                 }
                 // bare variant: None
-                return ast_new_pattern_enum((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1,
+                return ast_new_pattern_enum((*p).arena, loc_lf, loc_ll, loc_lc,
                                             0 as *Sym, gsym, 0 as *Node);
             }
         }
@@ -1061,17 +1061,17 @@ fn parse_pattern(p: *Parser) -> *Node {
         // 普通 ident pattern（binding）
         let mut sym = symtab_lookup((*p).current_scope, ident_name);
         if sym == (0 as *Sym) {
-            sym = symtab_insert((*p).current_scope, ident_name, SYM_VAR_v1(),
+            sym = symtab_insert((*p).current_scope, ident_name, SYM_VAR(),
                                 0 as *u8, 0 as i32, (*p).scope_depth);
         }
-        return ast_new_pattern_ident((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, sym);
+        return ast_new_pattern_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
     }
 
     // ── TOKEN_INT 分支 ──
     if t.kind == TOKEN_INT() {
         parser_advance(p, &t);
         let val = strtoll(t.start, 0 as *u8, 0 as i32);
-        return ast_new_pattern_lit((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, val, PRIM_I32_v1());
+        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_I32());
     }
 
     // ── TOKEN_BOOL 分支 ──
@@ -1085,23 +1085,23 @@ fn parse_pattern(p: *Parser) -> *Node {
                 val = 1 as i64;
             }
         }
-        return ast_new_pattern_lit((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, val, PRIM_BOOL());
+        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_BOOL());
     }
 
     // ── TOKEN_CHAR 分支 ──
     if t.kind == TOKEN_CHAR() {
         parser_advance(p, &t);
         // t.start[0] = '\'', t.start[1] = char, t.start[2] = '\''
-        // qbe_type_of(*u8) 默认 'b' bug（plan § 0 #6），绕开：4-byte aligned_v1 read + mask
+        // qbe_type_of(*u8) 默认 'b' bug（plan § 0 #6），绕开：4-byte aligned read + mask
         // 对齐 lexer.jhyy::lex_peek_char 的写法
-        let p_addr_v1 = t.start as i64;
-        let aligned_v1 = p_addr_v1 & (~(3 as i64));
-        let rem = (p_addr_v1 - aligned_v1) as i32;
-        let w = *((aligned_v1) as *i32);
+        let p_addr = t.start as i64;
+        let aligned = p_addr & (~(3 as i64));
+        let rem = (p_addr - aligned) as i32;
+        let w = *((aligned) as *i32);
         let shift = rem * (8 as i32);
-        let masked_v1 = (w >> shift) & (255 as i32);
-        let ch = masked_v1 & (255 as i32);
-        return ast_new_pattern_lit((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, ch as i64, PRIM_U8_v1());
+        let masked = (w >> shift) & (255 as i32);
+        let ch = masked & (255 as i32);
+        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, ch as i64, PRIM_U8());
     }
 
     // ── TOKEN_MINUS 分支 ──
@@ -1109,11 +1109,11 @@ fn parse_pattern(p: *Parser) -> *Node {
         parser_advance(p, &t);  // consume '-'
         parser_expect(p, TOKEN_INT(), "integer after - in pattern" as *u8, &t);
         let val = strtoll(t.start, 0 as *u8, 0 as i32);
-        return ast_new_pattern_lit((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, -val, PRIM_I32_v1());
+        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, -val, PRIM_I32());
     }
 
     // ── default: error ──
-    jh_print_loc_stderr(loc_lf_v1, loc_ll_v1, loc_lc_v1);
+    jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
     jh_fputs_stderr("error: unexpected token '" as *u8);
     jh_fputs_stderr(token_kind_name(t.kind));
     jh_fputs_stderr("' in pattern\n" as *u8);
@@ -1130,9 +1130,9 @@ fn parse_pattern(p: *Parser) -> *Node {
 fn parse_match(p: *Parser) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
-    let loc_lf_v1 = t.loc_filename;
-    let loc_ll_v1 = t.loc_line;
-    let loc_lc_v1 = t.loc_col;
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
 
     parser_advance(p, &t);  // consume 'match'
 
@@ -1154,7 +1154,7 @@ fn parse_match(p: *Parser) -> *Node {
         // optional trailing comma
         let _x = parser_match(p, TOKEN_COMMA(), &t);
 
-        let arm = ast_new_match_arm((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, pat, body);
+        let arm = ast_new_match_arm((*p).arena, loc_lf, loc_ll, loc_lc, pat, body);
 
         if narms >= cap {
             cap = if cap != (0 as i64) { cap * (2 as i64) } else { (8 as i64) };
@@ -1172,32 +1172,32 @@ fn parse_match(p: *Parser) -> *Node {
     }
 
     parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
-    return ast_new_match((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, subj, arms, narms);
+    return ast_new_match((*p).arena, loc_lf, loc_ll, loc_lc, subj, arms, narms);
 }
 
 // ════════════════════════════════════════════════════
 // parse_dispatch_simple_only: block body 里的"非控制流"语句 dispatcher
 // ════════════════════════════════════════════════════
 //
-// v0.8 commit 6：抽取 helper 解决 parse_if_v1 / parse_for 缺 while/for 的问题。
+// v0.8 commit 6：抽取 helper 解决 parse_if / parse_for 缺 while/for 的问题。
 // 原始 commit 3 设计是每个 block body inline 一份 dispatcher（避免 mutual recursion）。
-// 但 inline dispatcher 在 parse_if_v1 body 漏 TOKEN_WHILE，在 parse_for body 漏 TOKEN_WHILE，
+// 但 inline dispatcher 在 parse_if body 漏 TOKEN_WHILE，在 parse_for body 漏 TOKEN_WHILE，
 // 导致 while-inside-if / while-inside-for 报 CERR。
 //
 // 折中：dispatcher 拆成两部分：
 //   1. **简单语句**（let/return/break/continue/match/expr_stmt）→ parse_dispatch_simple_only
-//      在 parse_match 之后定义，可在 parse_if_v1 / parse_for / parse_while / parse_func
+//      在 parse_match 之后定义，可在 parse_if / parse_for / parse_while / parse_func
 //      任意位置复用（不依赖 control flow parsers 的相对顺序）
 //   2. **控制流**（if/while/for）→ 各自 dispatcher inline 加分支
 //
 // 这样：
-//   - parse_if_v1 body 加 TOKEN_WHILE/TOKEN_FOR 分支（用内联 parse_while/parse_for 逻辑）
+//   - parse_if body 加 TOKEN_WHILE/TOKEN_FOR 分支（用内联 parse_while/parse_for 逻辑）
 //   - parse_for body 加 TOKEN_WHILE 分支
 //   - parse_while / parse_func body 已有全 dispatcher，保持不变
 //
-// 限制：parse_if_v1 内部的 while body 不能嵌套 for/while（forward ref），
+// 限制：parse_if 内部的 while body 不能嵌套 for/while（forward ref），
 // parse_for 内部的 while body 不能嵌套 while。compiler 源码里的 while-inside-if
-// 模式（util.jhyy hm_grow_v1）body 只有 if/break/expr_stmt，正好够用。
+// 模式（util.jhyy hm_grow）body 只有 if/break/expr_stmt，正好够用。
 
 fn parse_dispatch_simple_only(p: *Parser) -> *Node {
     if parser_check(p, TOKEN_LET()) != (0 as i32) {
@@ -1219,16 +1219,16 @@ fn parse_dispatch_simple_only(p: *Parser) -> *Node {
 }
 
 // ════════════════════════════════════════════════════
-// parse_if_v1: inlined block body (commit 3 限制：block 内不支持 nested LBRACE)
-// 顺序：parse_if_v1 必须先于 parse_for 定义（parse_for 调 parse_if_v1）
+// parse_if: inlined block body (commit 3 限制：block 内不支持 nested LBRACE)
+// 顺序：parse_if 必须先于 parse_for 定义（parse_for 调 parse_if）
 // ════════════════════════════════════════════════════
 
-fn parse_if_v1(p: *Parser) -> *Node {
+fn parse_if(p: *Parser) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
-    let loc_lf_v1 = t.loc_filename;
-    let loc_ll_v1 = t.loc_line;
-    let loc_lc_v1 = t.loc_col;
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
 
     parser_advance(p, &t);  // consume 'if'
 
@@ -1246,13 +1246,13 @@ fn parse_if_v1(p: *Parser) -> *Node {
         if parser_check(p, TOKEN_EOF()) != (0 as i32) {
             break;
         }
-        // v0.8 commit 6 dispatcher: simple_only helper + parse_if_v1 (self) +
+        // v0.8 commit 6 dispatcher: simple_only helper + parse_if (self) +
         // parse_while + parse_for（inlined limited 版本 — 见下）
         let mut stmt: *Node = 0 as *Node;
-        if parser_check(p, TOKEN_IF_v1()) != (0 as i32) {
-            stmt = parse_if_v1(p);
+        if parser_check(p, TOKEN_IF()) != (0 as i32) {
+            stmt = parse_if(p);
         } else if parser_check(p, TOKEN_WHILE()) != (0 as i32) {
-            // ── inline parse_while（limited body：simple_only + parse_if_v1） ──
+            // ── inline parse_while（limited body：simple_only + parse_if） ──
             let mut wt = empty_token();
             parser_peek(p, &wt);
             let wlf = wt.loc_filename;
@@ -1268,8 +1268,8 @@ fn parse_if_v1(p: *Parser) -> *Node {
             while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
                 if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
                 let mut wstmt: *Node = 0 as *Node;
-                if parser_check(p, TOKEN_IF_v1()) != (0 as i32) {
-                    wstmt = parse_if_v1(p);
+                if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                    wstmt = parse_if(p);
                 } else {
                     wstmt = parse_dispatch_simple_only(p);
                 }
@@ -1292,7 +1292,7 @@ fn parse_if_v1(p: *Parser) -> *Node {
             let wbody = ast_new_block((*p).arena, wlf, wll, wlc, wstmts, wnstmts);
             stmt = ast_new_while((*p).arena, wlf, wll, wlc, wcond, wbody);
         } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
-            // ── inline parse_for（limited body：simple_only + parse_if_v1） ──
+            // ── inline parse_for（limited body：simple_only + parse_if） ──
             let mut ft = empty_token();
             parser_peek(p, &ft);
             let flf = ft.loc_filename;
@@ -1300,14 +1300,14 @@ fn parse_if_v1(p: *Parser) -> *Node {
             let flc = ft.loc_col;
             parser_advance(p, &ft);  // consume 'for'
             parser_expect(p, TOKEN_IDENT(), "loop variable" as *u8, &ft);
-            let fvname_v1 = parser_tok_name(p, &ft);
-            parser_expect(p, TOKEN_IN_v1(), "in" as *u8, &ft);
-            let fstart_v1 = parse_expr(p, PREC_NONE());
+            let fvname = parser_tok_name(p, &ft);
+            parser_expect(p, TOKEN_IN(), "in" as *u8, &ft);
+            let fstart = parse_expr(p, PREC_NONE());
             parser_expect(p, TOKEN_DOTDOT(), ".." as *u8, &ft);
             let fend = parse_expr(p, PREC_NONE());
             parser_expect(p, TOKEN_LBRACE(), "{ after for range" as *u8, &ft);
             parser_push_scope(p);
-            let fsym = symtab_insert((*p).current_scope, fvname_v1, SYM_VAR_v1(),
+            let fsym = symtab_insert((*p).current_scope, fvname, SYM_VAR(),
                                     0 as *u8, 0 as i32, (*p).scope_depth);
             let mut fstmts: *u8 = 0 as *u8;
             let mut fnstmts: i64 = 0 as i64;
@@ -1315,8 +1315,8 @@ fn parse_if_v1(p: *Parser) -> *Node {
             while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
                 if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
                 let mut fstmt: *Node = 0 as *Node;
-                if parser_check(p, TOKEN_IF_v1()) != (0 as i32) {
-                    fstmt = parse_if_v1(p);
+                if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                    fstmt = parse_if(p);
                 } else {
                     fstmt = parse_dispatch_simple_only(p);
                 }
@@ -1337,7 +1337,7 @@ fn parse_if_v1(p: *Parser) -> *Node {
             parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &ft);
             parser_pop_scope(p);
             let fbody = ast_new_block((*p).arena, flf, fll, flc, fstmts, fnstmts);
-            stmt = ast_new_for((*p).arena, flf, fll, flc, fsym, fstart_v1, fend, fbody);
+            stmt = ast_new_for((*p).arena, flf, fll, flc, fsym, fstart, fend, fbody);
         } else {
             stmt = parse_dispatch_simple_only(p);
         }
@@ -1361,13 +1361,13 @@ fn parse_if_v1(p: *Parser) -> *Node {
 
     parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
     parser_pop_scope(p);
-    let then_body = ast_new_block((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, then_stmts, nthen);
+    let then_body = ast_new_block((*p).arena, loc_lf, loc_ll, loc_lc, then_stmts, nthen);
 
     // ── else body (optional) ──
     let mut else_body: *Node = 0 as *Node;
     if parser_match(p, TOKEN_ELSE(), &t) != (0 as i32) {
-        if parser_check(p, TOKEN_IF_v1()) != (0 as i32) {
-            else_body = parse_if_v1(p);
+        if parser_check(p, TOKEN_IF()) != (0 as i32) {
+            else_body = parse_if(p);
         } else {
             // inlined else block
             parser_expect(p, TOKEN_LBRACE(), "{ after else" as *u8, &t);
@@ -1379,12 +1379,12 @@ fn parse_if_v1(p: *Parser) -> *Node {
                 if parser_check(p, TOKEN_EOF()) != (0 as i32) {
                     break;
                 }
-                // v0.8 commit 6 dispatcher: simple_only + parse_if_v1 + inline limited while/for
+                // v0.8 commit 6 dispatcher: simple_only + parse_if + inline limited while/for
                 let mut stmt: *Node = 0 as *Node;
-                if parser_check(p, TOKEN_IF_v1()) != (0 as i32) {
-                    stmt = parse_if_v1(p);
+                if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                    stmt = parse_if(p);
                 } else if parser_check(p, TOKEN_WHILE()) != (0 as i32) {
-                    // ── inline parse_while（limited body：simple_only + parse_if_v1） ──
+                    // ── inline parse_while（limited body：simple_only + parse_if） ──
                     let mut wt = empty_token();
                     parser_peek(p, &wt);
                     let wlf = wt.loc_filename;
@@ -1400,8 +1400,8 @@ fn parse_if_v1(p: *Parser) -> *Node {
                     while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
                         if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
                         let mut wstmt: *Node = 0 as *Node;
-                        if parser_check(p, TOKEN_IF_v1()) != (0 as i32) {
-                            wstmt = parse_if_v1(p);
+                        if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                            wstmt = parse_if(p);
                         } else {
                             wstmt = parse_dispatch_simple_only(p);
                         }
@@ -1424,7 +1424,7 @@ fn parse_if_v1(p: *Parser) -> *Node {
                     let wbody = ast_new_block((*p).arena, wlf, wll, wlc, wstmts, wnstmts);
                     stmt = ast_new_while((*p).arena, wlf, wll, wlc, wcond, wbody);
                 } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
-                    // ── inline parse_for（limited body：simple_only + parse_if_v1） ──
+                    // ── inline parse_for（limited body：simple_only + parse_if） ──
                     let mut ft = empty_token();
                     parser_peek(p, &ft);
                     let flf = ft.loc_filename;
@@ -1432,14 +1432,14 @@ fn parse_if_v1(p: *Parser) -> *Node {
                     let flc = ft.loc_col;
                     parser_advance(p, &ft);
                     parser_expect(p, TOKEN_IDENT(), "loop variable" as *u8, &ft);
-                    let fvname_v1 = parser_tok_name(p, &ft);
-                    parser_expect(p, TOKEN_IN_v1(), "in" as *u8, &ft);
-                    let fstart_v1 = parse_expr(p, PREC_NONE());
+                    let fvname = parser_tok_name(p, &ft);
+                    parser_expect(p, TOKEN_IN(), "in" as *u8, &ft);
+                    let fstart = parse_expr(p, PREC_NONE());
                     parser_expect(p, TOKEN_DOTDOT(), ".." as *u8, &ft);
                     let fend = parse_expr(p, PREC_NONE());
                     parser_expect(p, TOKEN_LBRACE(), "{ after for range" as *u8, &ft);
                     parser_push_scope(p);
-                    let fsym = symtab_insert((*p).current_scope, fvname_v1, SYM_VAR_v1(),
+                    let fsym = symtab_insert((*p).current_scope, fvname, SYM_VAR(),
                                             0 as *u8, 0 as i32, (*p).scope_depth);
                     let mut fstmts: *u8 = 0 as *u8;
                     let mut fnstmts: i64 = 0 as i64;
@@ -1447,8 +1447,8 @@ fn parse_if_v1(p: *Parser) -> *Node {
                     while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
                         if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
                         let mut fstmt: *Node = 0 as *Node;
-                        if parser_check(p, TOKEN_IF_v1()) != (0 as i32) {
-                            fstmt = parse_if_v1(p);
+                        if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                            fstmt = parse_if(p);
                         } else {
                             fstmt = parse_dispatch_simple_only(p);
                         }
@@ -1469,7 +1469,7 @@ fn parse_if_v1(p: *Parser) -> *Node {
                     parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &ft);
                     parser_pop_scope(p);
                     let fbody = ast_new_block((*p).arena, flf, fll, flc, fstmts, fnstmts);
-                    stmt = ast_new_for((*p).arena, flf, fll, flc, fsym, fstart_v1, fend, fbody);
+                    stmt = ast_new_for((*p).arena, flf, fll, flc, fsym, fstart, fend, fbody);
                 } else {
                     stmt = parse_dispatch_simple_only(p);
                 }
@@ -1491,40 +1491,40 @@ fn parse_if_v1(p: *Parser) -> *Node {
             }
             parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
             parser_pop_scope(p);
-            else_body = ast_new_block((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, else_stmts, nelse);
+            else_body = ast_new_block((*p).arena, loc_lf, loc_ll, loc_lc, else_stmts, nelse);
         }
     }
 
-    return ast_new_if((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, cond, then_body, else_body);
+    return ast_new_if((*p).arena, loc_lf, loc_ll, loc_lc, cond, then_body, else_body);
 }
 
 // ════════════════════════════════════════════════════
 // parse_for: inlined block body
-// 顺序：在 parse_if_v1 之后定义（block 内调 parse_if_v1 处理 if-inside-for）
+// 顺序：在 parse_if 之后定义（block 内调 parse_if 处理 if-inside-for）
 // ════════════════════════════════════════════════════
 
 fn parse_for(p: *Parser) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
-    let loc_lf_v1 = t.loc_filename;
-    let loc_ll_v1 = t.loc_line;
-    let loc_lc_v1 = t.loc_col;
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
 
     parser_advance(p, &t);  // consume 'for'
 
     parser_expect(p, TOKEN_IDENT(), "loop variable" as *u8, &t);
     let vname = parser_tok_name(p, &t);
 
-    parser_expect(p, TOKEN_IN_v1(), "in" as *u8, &t);
+    parser_expect(p, TOKEN_IN(), "in" as *u8, &t);
 
     let start = parse_expr(p, PREC_NONE());
     parser_expect(p, TOKEN_DOTDOT(), ".." as *u8, &t);
     let end = parse_expr(p, PREC_NONE());
 
-    // ── body: inlined block (with parse_if_v1 for if-inside-for) ──
+    // ── body: inlined block (with parse_if for if-inside-for) ──
     parser_expect(p, TOKEN_LBRACE(), "{ after for range" as *u8, &t);
     parser_push_scope(p);
-    let sym = symtab_insert((*p).current_scope, vname, SYM_VAR_v1(),
+    let sym = symtab_insert((*p).current_scope, vname, SYM_VAR(),
                             0 as *u8, 0 as i32, (*p).scope_depth);
 
     let mut stmts: *u8 = 0 as *u8;
@@ -1535,15 +1535,15 @@ fn parse_for(p: *Parser) -> *Node {
         if parser_check(p, TOKEN_EOF()) != (0 as i32) {
             break;
         }
-        // v0.8 commit 6 dispatcher: simple_only + parse_if_v1 + parse_for (self) +
+        // v0.8 commit 6 dispatcher: simple_only + parse_if + parse_for (self) +
         // parse_while（inlined limited 版本 — body 不嵌套 while）
         let mut stmt: *Node = 0 as *Node;
-        if parser_check(p, TOKEN_IF_v1()) != (0 as i32) {
-            stmt = parse_if_v1(p);
+        if parser_check(p, TOKEN_IF()) != (0 as i32) {
+            stmt = parse_if(p);
         } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
             stmt = parse_for(p);
         } else if parser_check(p, TOKEN_WHILE()) != (0 as i32) {
-            // ── inline parse_while（limited body：simple_only + parse_if_v1 + parse_for） ──
+            // ── inline parse_while（limited body：simple_only + parse_if + parse_for） ──
             let mut wt = empty_token();
             parser_peek(p, &wt);
             let wlf = wt.loc_filename;
@@ -1559,8 +1559,8 @@ fn parse_for(p: *Parser) -> *Node {
             while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
                 if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
                 let mut wstmt: *Node = 0 as *Node;
-                if parser_check(p, TOKEN_IF_v1()) != (0 as i32) {
-                    wstmt = parse_if_v1(p);
+                if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                    wstmt = parse_if(p);
                 } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
                     wstmt = parse_for(p);
                 } else {
@@ -1606,28 +1606,28 @@ fn parse_for(p: *Parser) -> *Node {
 
     parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
     parser_pop_scope(p);
-    let body = ast_new_block((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, stmts, nstmts);
+    let body = ast_new_block((*p).arena, loc_lf, loc_ll, loc_lc, stmts, nstmts);
 
-    return ast_new_for((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, sym, start, end, body);
+    return ast_new_for((*p).arena, loc_lf, loc_ll, loc_lc, sym, start, end, body);
 }
 
 // ════════════════════════════════════════════════════
 // parse_while: inlined block body
-// 顺序：在 parse_if_v1 / parse_for 之后定义（block 内调两者）
+// 顺序：在 parse_if / parse_for 之后定义（block 内调两者）
 // ════════════════════════════════════════════════════
 
 fn parse_while(p: *Parser) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
-    let loc_lf_v1 = t.loc_filename;
-    let loc_ll_v1 = t.loc_line;
-    let loc_lc_v1 = t.loc_col;
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
 
     parser_advance(p, &t);  // consume 'while'
 
     let cond = parse_expr(p, PREC_NONE());
 
-    // ── body: inlined block (with parse_if_v1 + parse_for for nested) ──
+    // ── body: inlined block (with parse_if + parse_for for nested) ──
     parser_expect(p, TOKEN_LBRACE(), "{ after while condition" as *u8, &t);
     parser_push_scope(p);
 
@@ -1639,7 +1639,7 @@ fn parse_while(p: *Parser) -> *Node {
         if parser_check(p, TOKEN_EOF()) != (0 as i32) {
             break;
         }
-        // inlined dispatcher: shared 6 sub-stmts + self (parse_while) + parse_if_v1 + parse_for
+        // inlined dispatcher: shared 6 sub-stmts + self (parse_while) + parse_if + parse_for
         let mut stmt: *Node = 0 as *Node;
         if parser_check(p, TOKEN_LET()) != (0 as i32) {
             stmt = parse_let(p);
@@ -1651,8 +1651,8 @@ fn parse_while(p: *Parser) -> *Node {
             stmt = parse_continue(p);
         } else if parser_check(p, TOKEN_MATCH()) != (0 as i32) {
             stmt = parse_match(p);
-        } else if parser_check(p, TOKEN_IF_v1()) != (0 as i32) {
-            stmt = parse_if_v1(p);
+        } else if parser_check(p, TOKEN_IF()) != (0 as i32) {
+            stmt = parse_if(p);
         } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
             stmt = parse_for(p);
         } else if parser_check(p, TOKEN_WHILE()) != (0 as i32) {
@@ -1679,19 +1679,19 @@ fn parse_while(p: *Parser) -> *Node {
 
     parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
     parser_pop_scope(p);
-    let body = ast_new_block((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, stmts, nstmts);
+    let body = ast_new_block((*p).arena, loc_lf, loc_ll, loc_lc, stmts, nstmts);
 
-    return ast_new_while((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, cond, body);
+    return ast_new_while((*p).arena, loc_lf, loc_ll, loc_lc, cond, body);
 }
 
 // ════════════════════════════════════════════════════
 // parse_stmt: 顶层 dispatcher（C 端 parser.c:376-387 一致）
-// 调所有 9 个 sub-stmt（parse_if_v1/while/for/let/return/break/continue/match/expr_stmt）
+// 调所有 9 个 sub-stmt（parse_if/while/for/let/return/break/continue/match/expr_stmt）
 // ════════════════════════════════════════════════════
 
 fn parse_stmt(p: *Parser) -> *Node {
     if parser_check(p, TOKEN_LET())      != (0 as i32) { return parse_let(p); }
-    if parser_check(p, TOKEN_IF_v1())       != (0 as i32) { return parse_if_v1(p); }
+    if parser_check(p, TOKEN_IF())       != (0 as i32) { return parse_if(p); }
     if parser_check(p, TOKEN_WHILE())    != (0 as i32) { return parse_while(p); }
     if parser_check(p, TOKEN_FOR())      != (0 as i32) { return parse_for(p); }
     if parser_check(p, TOKEN_MATCH())    != (0 as i32) { return parse_match(p); }
@@ -1709,9 +1709,9 @@ fn parse_stmt(p: *Parser) -> *Node {
 fn parse_func(p: *Parser, is_extern: i32) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
-    let loc_lf_v1 = t.loc_filename;
-    let loc_ll_v1 = t.loc_line;
-    let loc_lc_v1 = t.loc_col;
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
 
     parser_advance(p, &t);  // consume 'fn'
 
@@ -1719,7 +1719,7 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
     let fname = parser_tok_name(p, &t);
 
     // 注册到 global scope（递归调用支持）
-    let sym = symtab_insert((*p).global_scope, fname, SYM_FN_v1(),
+    let sym = symtab_insert((*p).global_scope, fname, SYM_FN(),
                             0 as *u8, 0 as i32, 0 as i32);
     if is_extern != (0 as i32) {
         if sym != (0 as *Sym) {
@@ -1731,7 +1731,7 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
 
     parser_expect(p, TOKEN_LPAREN(), "(" as *u8, &t);
     let mut params: *u8 = 0 as *u8;
-    let mut nparams_v1: i64 = 0 as i64;
+    let mut nparams: i64 = 0 as i64;
     let mut pcap: i64 = 0 as i64;
 
     while parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
@@ -1746,23 +1746,23 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
         parser_expect(p, TOKEN_COLON(), ":" as *u8, &t);
         let ptype = parse_type(p);
 
-        let psym = symtab_insert((*p).current_scope, pname, SYM_VAR_v1(),
+        let psym = symtab_insert((*p).current_scope, pname, SYM_VAR(),
                                  0 as *u8, 0 as i32, (*p).scope_depth);
 
-        if nparams_v1 >= pcap {
+        if nparams >= pcap {
             pcap = if pcap != (0 as i64) { pcap * (2 as i64) } else { (4 as i64) };
             let np = arena_alloc((*p).arena, pcap * NODE_FUNC_DECL_PARAM_SIZE());
             if params != (0 as *u8) {
-                if nparams_v1 > (0 as i64) {
-                    memcpy(np, params, nparams_v1 * NODE_FUNC_DECL_PARAM_SIZE());
+                if nparams > (0 as i64) {
+                    memcpy(np, params, nparams * NODE_FUNC_DECL_PARAM_SIZE());
                 }
             }
             params = np;
         }
-        let pd = (params as i64 + nparams_v1 * NODE_FUNC_DECL_PARAM_SIZE()) as *NodeFuncDeclParam;
+        let pd = (params as i64 + nparams * NODE_FUNC_DECL_PARAM_SIZE()) as *NodeFuncDeclParam;
         (*pd).sym = psym as *u8;
         (*pd).type_annot = ptype as *u8;
-        nparams_v1 = nparams_v1 + (1 as i64);
+        nparams = nparams + (1 as i64);
 
         if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) {
             break;
@@ -1792,7 +1792,7 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
             if parser_check(p, TOKEN_EOF()) != (0 as i32) {
                 break;
             }
-            // inlined dispatcher: shared 6 sub-stmts + all 3 control flow (parse_if_v1/while/for)
+            // inlined dispatcher: shared 6 sub-stmts + all 3 control flow (parse_if/while/for)
             let mut stmt: *Node = 0 as *Node;
             if parser_check(p, TOKEN_LET()) != (0 as i32) {
                 stmt = parse_let(p);
@@ -1804,8 +1804,8 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
                 stmt = parse_continue(p);
             } else if parser_check(p, TOKEN_MATCH()) != (0 as i32) {
                 stmt = parse_match(p);
-            } else if parser_check(p, TOKEN_IF_v1()) != (0 as i32) {
-                stmt = parse_if_v1(p);
+            } else if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                stmt = parse_if(p);
             } else if parser_check(p, TOKEN_WHILE()) != (0 as i32) {
                 stmt = parse_while(p);
             } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
@@ -1831,13 +1831,13 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
         }
 
         parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
-        body = ast_new_block((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, stmts, nstmts);
+        body = ast_new_block((*p).arena, loc_lf, loc_ll, loc_lc, stmts, nstmts);
     }
 
     parser_pop_scope(p);
 
-    return ast_new_func_decl((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1,
-                             sym, params, nparams_v1, ret_type, body, is_extern);
+    return ast_new_func_decl((*p).arena, loc_lf, loc_ll, loc_lc,
+                             sym, params, nparams, ret_type, body, is_extern);
 }
 
 // ════════════════════════════════════════════════════
@@ -1847,16 +1847,16 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
 fn parse_type_decl(p: *Parser) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
-    let loc_lf_v1 = t.loc_filename;
-    let loc_ll_v1 = t.loc_line;
-    let loc_lc_v1 = t.loc_col;
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
 
     parser_advance(p, &t);  // consume 'type'
 
     parser_expect(p, TOKEN_IDENT(), "type name" as *u8, &t);
     let tname = parser_tok_name(p, &t);
 
-    parser_expect(p, TOKEN_EQ_v1(), "=" as *u8, &t);
+    parser_expect(p, TOKEN_EQ(), "=" as *u8, &t);
 
     let mut body: *Node = 0 as *Node;
 
@@ -1868,8 +1868,8 @@ fn parse_type_decl(p: *Parser) -> *Node {
 
         parser_expect(p, TOKEN_LBRACE(), "{" as *u8, &t);
 
-        let mut fields_v1: *u8 = 0 as *u8;
-        let mut nfields_v1: i64 = 0 as i64;
+        let mut fields: *u8 = 0 as *u8;
+        let mut nfields: i64 = 0 as i64;
         let mut fcap: i64 = 0 as i64;
 
         while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
@@ -1884,20 +1884,20 @@ fn parse_type_decl(p: *Parser) -> *Node {
             parser_expect(p, TOKEN_COLON(), ":" as *u8, &t);
             let ftype = parse_type(p);
 
-            if nfields_v1 >= fcap {
+            if nfields >= fcap {
                 fcap = if fcap != (0 as i64) { fcap * (2 as i64) } else { (8 as i64) };
                 let nf = arena_alloc((*p).arena, fcap * STRUCT_FIELD_DECL_SIZE());
-                if fields_v1 != (0 as *u8) {
-                    if nfields_v1 > (0 as i64) {
-                        memcpy(nf, fields_v1, nfields_v1 * STRUCT_FIELD_DECL_SIZE());
+                if fields != (0 as *u8) {
+                    if nfields > (0 as i64) {
+                        memcpy(nf, fields, nfields * STRUCT_FIELD_DECL_SIZE());
                     }
                 }
-                fields_v1 = nf;
+                fields = nf;
             }
-            let fd = (fields_v1 as i64 + nfields_v1 * STRUCT_FIELD_DECL_SIZE()) as *StructFieldDecl;
+            let fd = (fields as i64 + nfields * STRUCT_FIELD_DECL_SIZE()) as *StructFieldDecl;
             (*fd).name = fname;
             (*fd).type_annot = ftype as *u8;
-            nfields_v1 = nfields_v1 + (1 as i64);
+            nfields = nfields + (1 as i64);
 
             if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) {
                 break;
@@ -1906,7 +1906,7 @@ fn parse_type_decl(p: *Parser) -> *Node {
 
         parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
         body = ast_new_struct_def((*p).arena, body_loc_lf, body_loc_ll, body_loc_lc,
-                                  fields_v1, nfields_v1);
+                                  fields, nfields);
     } else if parser_match(p, TOKEN_ENUM(), &t) != (0 as i32) {
         // type Name = enum { ... }
         let body_loc_lf = (*p).prev_lf;
@@ -1915,7 +1915,7 @@ fn parse_type_decl(p: *Parser) -> *Node {
 
         parser_expect(p, TOKEN_LBRACE(), "{" as *u8, &t);
 
-        let mut variants_v1: *u8 = 0 as *u8;
+        let mut variants: *u8 = 0 as *u8;
         let mut nvariants: i64 = 0 as i64;
         let mut vcap: i64 = 0 as i64;
 
@@ -1937,14 +1937,14 @@ fn parse_type_decl(p: *Parser) -> *Node {
             if nvariants >= vcap {
                 vcap = if vcap != (0 as i64) { vcap * (2 as i64) } else { (8 as i64) };
                 let nv = arena_alloc((*p).arena, vcap * ENUM_VARIANT_DECL_SIZE());
-                if variants_v1 != (0 as *u8) {
+                if variants != (0 as *u8) {
                     if nvariants > (0 as i64) {
-                        memcpy(nv, variants_v1, nvariants * ENUM_VARIANT_DECL_SIZE());
+                        memcpy(nv, variants, nvariants * ENUM_VARIANT_DECL_SIZE());
                     }
                 }
-                variants_v1 = nv;
+                variants = nv;
             }
-            let vd = (variants_v1 as i64 + nvariants * ENUM_VARIANT_DECL_SIZE()) as *EnumVariantDecl;
+            let vd = (variants as i64 + nvariants * ENUM_VARIANT_DECL_SIZE()) as *EnumVariantDecl;
             (*vd).name = vname;
             (*vd).payload_type = payload_type as *u8;
             nvariants = nvariants + (1 as i64);
@@ -1960,7 +1960,7 @@ fn parse_type_decl(p: *Parser) -> *Node {
         // `match x { Some(v) => ... }` can resolve at parse time.
         let mut vi: i64 = 0 as i64;
         while vi < nvariants {
-            let vdi = (variants_v1 as i64 + vi * ENUM_VARIANT_DECL_SIZE()) as *EnumVariantDecl;
+            let vdi = (variants as i64 + vi * ENUM_VARIANT_DECL_SIZE()) as *EnumVariantDecl;
             if symtab_lookup_local((*p).global_scope, (*vdi).name) == (0 as *Sym) {
                 let _vs = symtab_insert((*p).global_scope, (*vdi).name, SYM_VARIANT(),
                                         0 as *u8, 0 as i32, 0 as i32);
@@ -1969,16 +1969,16 @@ fn parse_type_decl(p: *Parser) -> *Node {
         }
 
         body = ast_new_enum_def((*p).arena, body_loc_lf, body_loc_ll, body_loc_lc,
-                                variants_v1, nvariants);
+                                variants, nvariants);
     } else {
         // type alias: type Name = OtherType
         let alias_type = parse_type(p);
         body = alias_type;
     }
 
-    let sym = symtab_insert((*p).global_scope, tname, SYM_TYPE_v1(),
+    let sym = symtab_insert((*p).global_scope, tname, SYM_TYPE(),
                             0 as *u8, 0 as i32, 0 as i32);
-    return ast_new_type_decl((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, sym, body);
+    return ast_new_type_decl((*p).arena, loc_lf, loc_ll, loc_lc, sym, body);
 }
 
 fn parse_extern_decl(p: *Parser) -> *Node {
@@ -1990,9 +1990,9 @@ fn parse_extern_decl(p: *Parser) -> *Node {
 fn parse_import_decl(p: *Parser) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
-    let loc_lf_v1 = t.loc_filename;
-    let loc_ll_v1 = t.loc_line;
-    let loc_lc_v1 = t.loc_col;
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
 
     parser_advance(p, &t);  // consume 'import'
 
@@ -2002,11 +2002,11 @@ fn parse_import_decl(p: *Parser) -> *Node {
 
     let sym = symtab_insert((*p).global_scope, mname, SYM_MODULE(),
                             0 as *u8, 0 as i32, 0 as i32);
-    return ast_new_import_decl((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, sym);
+    return ast_new_import_decl((*p).arena, loc_lf, loc_ll, loc_lc, sym);
 }
 
 fn parse_decl(p: *Parser) -> *Node {
-    if parser_check(p, TOKEN_FN_v1()) != (0 as i32) {
+    if parser_check(p, TOKEN_FN()) != (0 as i32) {
         return parse_func(p, 0 as i32);
     }
     if parser_check(p, TOKEN_TYPE()) != (0 as i32) {
@@ -2045,9 +2045,9 @@ fn parser_init(p: *Parser, lex: *Lexer, a: *Arena) -> i32 {
 fn parser_parse(p: *Parser) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
-    let loc_lf_v1 = t.loc_filename;
-    let loc_ll_v1 = t.loc_line;
-    let loc_lc_v1 = t.loc_col;
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
 
     let mut decls: *u8 = 0 as *u8;
     let mut ndecls: i64 = 0 as i64;
@@ -2072,5 +2072,5 @@ fn parser_parse(p: *Parser) -> *Node {
         }
     }
 
-    return ast_new_module((*p).arena, loc_lf_v1, loc_ll_v1, loc_lc_v1, decls, ndecls);
+    return ast_new_module((*p).arena, loc_lf, loc_ll, loc_lc, decls, ndecls);
 }

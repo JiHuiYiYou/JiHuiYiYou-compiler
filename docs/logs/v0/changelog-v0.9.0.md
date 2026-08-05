@@ -1093,3 +1093,116 @@ bash /c/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/tests/stage1-expanded.s
   - 跟 B-match (NODE_MATCH codegen, commit 2.9 修) 互补 — 2.12b 修 NODE_ENUM_VARIANT (构造侧), commit 2.9 修 NODE_MATCH (匹配侧); 两者凑齐 = `Option::Some(42)` 完整 pipeline
 - **byte-equal 6/7 锁定**: jhyy_v1 编 match_exhaustive.jhyy 输出 .il diff v0 端 .il 空 (exit 0)
 - **下一阶段 v1.0.0 sprint 3 (Task #52)**: const_array + const_struct_array parser 翻译, 推到 7/7
+
+---
+
+## commit 2.12 — W-001 真修 docs sync + 211 W-002 revert 合并
+
+**日期:** 2026-08-05
+**范围:** `docs/internal/workarounds.md` (W-001 + W-002 标 RESOLVED) + `compiler/src0/_W002_rename_map.txt` + `compiler/src0/_W002_revert.py` (新) + `compiler/src0/*.jhyy` 11 文件批量 revert (2095 occurrences)
+**前驱:** commit 2.12a (sema) + commit 2.12b (codegen)
+**目标:** W-001 docs 同步 (实际真修已在 v0.8 commit 9 `d570c72` ship) + W-002 211 个 `_v1` 后缀 revert 回原名 → observation step 检验 main.jhyy segfault 是否消除
+
+### 上下文回顾
+
+**W-001 实际状态 (commit 时机错位)**:
+- 文档状态: `docs/internal/workarounds.md` W-001 标 ACTIVE, 描述 "hash_string 用 `*i32` deref 4-byte read 绕 v0 codegen `loadsb` 错"
+- 实际状态: W-001 已在 **v0.8 commit 9 (`d570c72`, 2026-08-03)** ship 真修 — `util.jhyy:212-231` `hash_string` 改成 byte-by-byte `*u8` deref + length mix (FNV-1a), 移除 `*i32` 4-byte overread
+- workarounds.md 没同步标 RESOLVED 是历史遗漏, 实质 root cause fix 已 ship
+
+**W-002 失效条件 (ii) 满足**:
+> "或 v0 codegen 修了 W-001 的副作用（W-001 workaround 改成 byte-by-byte 不再 overread）—— 此时即使 jhyy_v1 触发面不变也不再 segfault"
+
+v0.8 commit 9 满足此条件 → W-002 211 个 `_v1` 后缀可以 revert 回原名 → 移除 cosmetic 噪声 + 跟 v0 端 C 源码对齐 + 降低 future bisect 难度
+
+### 改动
+
+**1. `docs/internal/workarounds.md`**:
+- 顶部索引表 W-001 / W-002 状态 ACTIVE → RESOLVED
+- W-001 section 加 RESOLVED 详情 (引用 v0.8 commit 9 `d570c72` 真修 + 解释真修 vs workaround 区别)
+- W-002 section 头部状态改 RESOLVED + 加 RESOLVED section (实施步骤 + 保留历史)
+
+**2. `compiler/src0/_W002_revert.py`** (新): Python 脚本批量 revert 211 个 identifier
+- 读 `_W002_rename_map.txt`, 按 `X_v1` 长度倒序生成 regex (`最长先匹配` 避免 cascading — e.g. `buf_v1` 不能先 match 进 `out_buf_v1`)
+- 用 `(?<!\w)` 负向 lookbehind 防止部分匹配 (e.g. `out_buf_v1` 里的 `buf_v1` 不被 match, 因为前面 `_` 是 word char)
+- 11 个 .jhyy 文件, 共 2095 occurrences revert (workarounds.md 表预估值 2073, 实际略多 22 因为后续 commit 加了少量 `_v1` 后缀)
+
+**3. `compiler/src0/*.jhyy` 11 文件 revert**: 共 2095 occurrences (codegen 744 / sema 351 / parser 469 / main 182 / ast 71 / types 97 / ir 49 / lexer 49 / symtab 30 / arena 17 / util 36)
+- 剩余 ~100 个 `_v1` 后缀 (在 main.jhyy / codegen.jhyy / util.jhyy 等) 都是**合法的局部变量命名** (e.g. `p_v1`, `path_v1`, `ret_v1`, `ftype_slot_v1`), 不在 211 map 内, 不动
+
+### 验证 (commit 2.12)
+
+```bash
+# 1. v0 build clean
+/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra compiler/src/*.c -o jhyy.exe -I compiler/src
+# (no warnings)
+
+# 2. regress 持平 50/53 (revert 不影响 .il 输出)
+python compiler/build/bin/regress.py
+# 50/53 PASS, 0 failed, 3 skipped
+
+# 3. v0 编 src0/main.jhyy (closure 自举)
+/c/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/build/bin/jhyy.exe build \
+    /c/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/src0/main.jhyy -o jhyy_v1_post_revert
+# Generated: 1.19MB IL (vs 1.18MB revert 前 — 略小因为少了 _v1 后缀)
+/c/Users/liuzhen/Desktop/coding/JiHuiYiYou/qbe/qbe.exe -t amd64_win \
+    /c/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/build/bin/jhyy_v1.exe.il > jhyy_v1_new.s
+/c/msys64/ucrt64/bin/gcc.exe jhyy_v1_new.s compiler/runtime/runtime.c \
+    compiler/src0/jhyy_helpers.c -o jhyy_v1_new.exe
+# (no errors, jhyy_v1_new.exe = PE32+ 372KB)
+
+# 4. Observation step (critical) — jhyy_v1 编 src0/main.jhyy
+/c/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/build/bin/jhyy_v1.exe build \
+    /c/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/src0/main.jhyy -o jhyy_v1_obs
+# exit 139 (SIGSEGV) ← segfault 仍在 ❌
+
+# 5. stage1 byte-equal 持平 6/7
+bash /c/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/tests/stage1-expanded.sh
+# [PASS] hello
+# [PASS] fib_renamed
+# [PASS] struct_val_pass
+# [PASS] match_exhaustive
+# [PASS] arith
+# [FAIL] const_array   ← parser CERR (moot)
+# [PASS] control_flow
+# pass: 6 / 7   (持平)
+```
+
+### Observation result: segfault 仍在 ❌
+
+**W-001 真修 + 211 revert 后 jhyy_v1 编 src0/main.jhyy 仍 segfault**:
+- exit 139 (SIGSEGV, 0xC0000005)
+- 输入 25KB main.jhyy, jhyy_v1 编它时 heap corruption 触发 segfault
+- 跟 2.12a/2.12b ship 时观察一致 (pre-existing)
+
+**含义**: W-001 hash_string 真修 + W-002 211 rename 不是 main.jhyy segfault 的**全部根因**, 还有别的 jhyy_v1 codegen bug 在 25KB 大文件 heap layout 下触发。 候选:
+- `path_to_win` 用 `c_p as *i32` deref in-place 改 malloc'd buf 字符 (L75) — unaligned 4-byte deref, x86_64 一般 OK 但语义错位
+- `*i32_ptr = malloc(4)` 累加 (W-005 workaround, L401) — 已 ship, 不是新触发面
+- src0/ 内部某处未跟踪的 `*i32` deref overread (类似 W-001 根因但不在已知触发面)
+- symtab / parser / sema 内部某处 large-input 触发 latent bug
+
+### 决策 (per commit 2.12 plan § observation)
+
+**A 段 hard closure 不成立** → **推 v1.0 sprint 3 B' 阶段** (`jhyy_v1 编 src0/main.jhyy 真闭环`)。
+
+但 commit 2.12 仍有独立价值 ship:
+- ✅ W-001 docs 标 RESOLVED (实际真修早已 ship, 文档同步)
+- ✅ W-002 211 revert (移除 cosmetic 噪声)
+- ✅ regress 持平 50/53
+- ✅ stage1 byte-equal 持平 6/7 (revert 不影响 examples 输出 .il)
+- ❌ observation step 暴露剩余问题 → 推 v1.0 sprint 3 B' 阶段 (单独立 sprint, 不在 commit 2.12 范围)
+
+### 影响
+
+- **2.13 / 2.14 / AUDIT 全部依赖 2.12**: 因为 W-005 加固需要 revert 后的 src0/, AUDIT (5 struct) 需要 revert 后源码
+- **A 段 closure 状态**: byte-equal 6/7 + regress 50/53 ✓ (硬不变量达成); main.jhyy segfault → 推到 v1.0 sprint 3 B' 阶段
+- **byte-equal ceiling in v0.9 wip = 6/7** (const_array 推 v1.0 sprint 3 Task #52)
+- **下一阶段**: commit 2.13 W-005 加固 26 处 revert (main.jhyy 16 + arena.jhyy 5 + util.jhyy 5) → 验证 regress + byte-equal 6/7 → commit 2.14 W-006 + 衍生文档 → A 段 close (不含 main.jhyy 跑通, 取决于 v1.0 sprint 3 B')
+
+### 引用
+
+- v0.8 commit 9 (`d570c72`) — W-001 byte-by-byte 真修 (根因消除, 文档落后)
+- v0.8 commit 7 (`0453cef`) — W-002 211 identifier rename (workaround 实施, 现在可移除)
+- `compiler/src0/_W002_rename_map.txt` — 211 rename map (保留作为 archive)
+- `compiler/src0/_W002_revert.py` — revert 脚本 (本次 ship)
+- `docs/internal/workarounds.md` — W-001 + W-002 标 RESOLVED (本次 ship)

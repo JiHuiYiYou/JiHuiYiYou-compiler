@@ -40,13 +40,13 @@ type Arena = struct {
 
 // ═══ Helpers ═══
 
-fn align_up_v1(x: i64, align: i64) -> i64 {
+fn align_up(x: i64, align: i64) -> i64 {
     let mask = align - 1 as i64;
     (x + mask) & ~(mask)
 }
 
-// ptr_add_v1: 指针算术 (p as i64 + off) as *u8
-fn ptr_add_v1(p: *u8, off: i64) -> *u8 {
+// ptr_add: 指针算术 (p as i64 + off) as *u8
+fn ptr_add(p: *u8, off: i64) -> *u8 {
     (p as i64 + off) as *u8
 }
 
@@ -66,10 +66,10 @@ fn arena_new_block(a: *Arena, min_size: i64) -> i32 {
     let b = raw as *ArenaBlock;
     (*b).next = (*a).blocks;
     (*a).blocks = b as *u8;
-    let data = ptr_add_v1(raw, 16 as i64);
+    let data = ptr_add(raw, 16 as i64);
     (*a).start = data;
     (*a).cur = data;
-    (*a).end = ptr_add_v1(data, *size_ptr);
+    (*a).end = ptr_add(data, *size_ptr);
     free(size_ptr as *u8);
     return 1;
 }
@@ -94,12 +94,12 @@ fn arena_alloc_aligned(a: *Arena, size: i64, align: i64) -> *u8 {
         return 0 as *u8;
     }
     if (*a).cur != (0 as *u8) {
-        let cur_int_v1 = (*a).cur as i64;
-        let aligned_v1 = align_up_v1(cur_int_v1, align);
-        let aligned_ptr = aligned_v1 as *u8;
-        let end_int_v1 = (*a).end as i64;
-        if aligned_v1 + size <= end_int_v1 {
-            (*a).cur = (aligned_v1 + size) as *u8;
+        let cur_int = (*a).cur as i64;
+        let aligned = align_up(cur_int, align);
+        let aligned_ptr = aligned as *u8;
+        let end_int = (*a).end as i64;
+        if aligned + size <= end_int {
+            (*a).cur = (aligned + size) as *u8;
             return aligned_ptr;
         }
     }
@@ -134,17 +134,17 @@ fn arena_strdup(a: *Arena, s: *u8, len: i64) -> *u8 {
     // "printf(" 而不是 "printf"，strcmp 全部失败（v0.6 sprint 2 commit 3a 翻译时
     // 暴露，影响所有 token name / sym name / ident / type name）。
     memcpy(p, s, len);
-    memset(ptr_add_v1(p, len), 0 as i32, 1 as i64);
+    memset(ptr_add(p, len), 0 as i32, 1 as i64);
     return p;
 }
 
 fn arena_reset(a: *Arena) -> i32 {
     if (*a).blocks != (0 as *u8) {
         let first = (*a).blocks;
-        let data = ptr_add_v1(first, 16 as i64);
+        let data = ptr_add(first, 16 as i64);
         (*a).start = data;
         (*a).cur = data;
-        (*a).end = ptr_add_v1(data, (*a).def_size);
+        (*a).end = ptr_add(data, (*a).def_size);
     }
     return 1;
 }
