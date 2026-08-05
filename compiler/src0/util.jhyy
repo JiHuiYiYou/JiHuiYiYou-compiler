@@ -83,21 +83,17 @@ fn sb_init(a: *Arena, sb: *StringBuilder) -> i32 {
 // libc realloc/free 只能操作 malloc 指针。修：用 malloc 新分配，旧 buf 放任泄漏
 // （arena 整体释放时会回收 arena 块；不释放则是一次性进程，泄漏可接受）。
 fn sb_grow(a: *Arena, sb: *StringBuilder, need: i64) -> i32 {
-    // W-005 workaround: let-mut + assign triggers jhyy_v1 segfault; use *i64 ptr
-    let new_cap_ptr = malloc(8 as i64) as *i64;
-    *new_cap_ptr = (*sb).cap;
-    while (*new_cap_ptr) < need {
-        *new_cap_ptr = (*new_cap_ptr) * (2 as i64);
+    let mut new_cap: i64 = (*sb).cap;
+    while new_cap < need {
+        new_cap = new_cap * (2 as i64);
     }
-    let new_buf = malloc(*new_cap_ptr);
+    let new_buf = malloc(new_cap);
     if new_buf == (0 as *u8) {
-        free(new_cap_ptr as *u8);
         return 0;
     }
     memcpy(new_buf, (*sb).buf, (*sb).len);
     (*sb).buf = new_buf;
-    (*sb).cap = *new_cap_ptr;
-    free(new_cap_ptr as *u8);
+    (*sb).cap = new_cap;
     return 1;
 }
 
@@ -210,24 +206,18 @@ fn FNV_PRIME() -> i64 { return 0x100000001b3 as i64; }
 // 输出 hash 与原 *i32 版本不一定 byte-equal（无要求），但保证 byte-aligned
 // → 不撞 → jhyy_v1 field assign 路径不死循环。
 fn hash_string(s: *u8) -> i64 {
-    // W-005 workaround: let-mut + assign triggers jhyy_v1 segfault; use *i64 ptr
-    let h_ptr = malloc(8 as i64) as *i64;
-    *h_ptr = FNV_OFFSET();
+    let mut h: i64 = FNV_OFFSET();
     let n = strlen(s);
     // mix length first to disambiguate short strings of similar chars
-    *h_ptr = ((*h_ptr) ^ n) * FNV_PRIME();
-    let i_ptr = malloc(8 as i64) as *i64;
-    *i_ptr = 0 as i64;
-    while (*i_ptr) < n {
-        let c32 = *((s as i64 + (*i_ptr)) as *u8) as i32;
+    h = (h ^ n) * FNV_PRIME();
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let c32 = *((s as i64 + i) as *u8) as i32;
         let c = c32 as i64;
-        *h_ptr = ((*h_ptr) ^ c) * FNV_PRIME();
-        *i_ptr = (*i_ptr) + (1 as i64);
+        h = (h ^ c) * FNV_PRIME();
+        i = i + (1 as i64);
     }
-    let ret_v1 = (*h_ptr);
-    free(h_ptr as *u8);
-    free(i_ptr as *u8);
-    return ret_v1;
+    return h;
 }
 
 fn hm_alloc_buckets(a: *Arena, n: i64) -> *u8 {
@@ -243,29 +233,24 @@ fn hm_get_entry(m: *HashMap, idx: i64) -> *HashEntry {
 fn hm_put(a: *Arena, m: *HashMap, key: *u8, value: *u8) -> i32 {
     // 注：jhyy 不支持函数前向引用，hm_put 不调 hm_grow 自动扩容。
     // 调用方负责：插入前用 hm_should_grow 检查，需要时调 hm_grow。
-    // W-005 workaround: let-mut + assign triggers jhyy_v1 segfault; use *i64 ptr
     let h = hash_string(key);
-    let idx_ptr = malloc(8 as i64) as *i64;
-    *idx_ptr = h & (*m).mask;
-    let start = *idx_ptr;
+    let mut idx: i64 = h & (*m).mask;
+    let start = idx;
     while true {
-        let e = hm_get_entry(m, *idx_ptr);
+        let e = hm_get_entry(m, idx);
         if (*e).used == (0 as i32) {
             (*e).key = key;
             (*e).value = value;
             (*e).used = 1 as i32;
             (*m).count = (*m).count + (1 as i64);
-            free(idx_ptr as *u8);
             return 1;
         }
         if strcmp((*e).key, key) == (0 as i32) {
             (*e).value = value;
-            free(idx_ptr as *u8);
             return 1;
         }
-        *idx_ptr = (*idx_ptr + (1 as i64)) & (*m).mask;
-        if (*idx_ptr) == start {
-            free(idx_ptr as *u8);
+        idx = (idx + (1 as i64)) & (*m).mask;
+        if idx == start {
             return 0;
         }
     }
@@ -293,18 +278,15 @@ fn hm_grow(a: *Arena, m: *HashMap) -> i32 {
     (*m).mask = new_n - (1 as i64);
     (*m).count = 0 as i64;
 
-    // W-005 workaround: let-mut + assign triggers jhyy_v1 segfault; use *i64 ptr
-    let i_ptr = malloc(8 as i64) as *i64;
-    *i_ptr = 0 as i64;
-    while (*i_ptr) < old_n {
-        let old_e = ptr_add_u8(old_buckets, (*i_ptr) * HASH_ENTRY_SIZE()) as *HashEntry;
+    let mut i: i64 = 0 as i64;
+    while i < old_n {
+        let old_e = ptr_add_u8(old_buckets, i * HASH_ENTRY_SIZE()) as *HashEntry;
         if (*old_e).used == (1 as i32) {
             // jhyy 不支持前向引用；不调 hm_put，直接 inline 放 entry
             let h = hash_string((*old_e).key);
-            let idx_ptr = malloc(8 as i64) as *i64;
-            *idx_ptr = h & (*m).mask;
+            let mut idx: i64 = h & (*m).mask;
             while true {
-                let e = hm_get_entry(m, *idx_ptr);
+                let e = hm_get_entry(m, idx);
                 if (*e).used == (0 as i32) {
                     (*e).key = (*old_e).key;
                     (*e).value = (*old_e).value;
@@ -312,13 +294,11 @@ fn hm_grow(a: *Arena, m: *HashMap) -> i32 {
                     (*m).count = (*m).count + (1 as i64);
                     break;
                 }
-                *idx_ptr = (*idx_ptr + (1 as i64)) & (*m).mask;
+                idx = (idx + (1 as i64)) & (*m).mask;
             }
-            free(idx_ptr as *u8);
         }
-        *i_ptr = (*i_ptr) + (1 as i64);
+        i = i + (1 as i64);
     }
-    free(i_ptr as *u8);
     return 1;
 }
 
@@ -340,29 +320,22 @@ fn hm_get(m: *HashMap, key: *u8) -> *u8 {
     if (*m).count == (0 as i64) {
         return 0 as *u8;
     }
-    // W-005 workaround: let-mut + assign triggers jhyy_v1 segfault; use *i64 ptr
     let h = hash_string(key);
-    let idx_ptr = malloc(8 as i64) as *i64;
-    *idx_ptr = h & (*m).mask;
-    let start = *idx_ptr;
+    let mut idx: i64 = h & (*m).mask;
+    let start = idx;
     while true {
-        let e = hm_get_entry(m, *idx_ptr);
+        let e = hm_get_entry(m, idx);
         if (*e).used == (0 as i32) {
-            free(idx_ptr as *u8);
             return 0 as *u8;
         }
         if strcmp((*e).key, key) == (0 as i32) {
-            let ret_v1 = (*e).value;
-            free(idx_ptr as *u8);
-            return ret_v1;
+            return (*e).value;
         }
-        *idx_ptr = (*idx_ptr + (1 as i64)) & (*m).mask;
-        if (*idx_ptr) == start {
-            free(idx_ptr as *u8);
+        idx = (idx + (1 as i64)) & (*m).mask;
+        if idx == start {
             return 0 as *u8;
         }
     }
-    free(idx_ptr as *u8);
     return 0 as *u8;  // 兜底
 }
 

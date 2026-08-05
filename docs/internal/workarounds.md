@@ -29,7 +29,7 @@
 | [W-002](#w-002-mainjhyy-重命名绕-jhyy_v1-hash_string-堆损坏) | RESOLVED (v0.9 wip commit 2.12) | 211 个 src0 标识符 `_v1` 后缀化 revert 回原名, W-001 真修后失效 |
 | [W-003](#w-003-jhyy_v1-let-_-fncall-顶层-嵌套-segfault) | ACTIVE | `let _ = fncall(...)` 改 direct call，绕 jhyy_v1 codegen segfault（Bug 7/7b） |
 | [W-004](#w-004-short-local-var-4-chars--symtab-hash-撞--jhyy_v1-field-assign-死循环) | ACTIVE | 短（≤4 字符）local var / fn 参数 / field 改名绕 jhyy_v1 symtab hash 撞（stack overflow） |
-| [W-005](#w-005-let-mut--assign--jhyy_v1-codegen-segfault) | ACTIVE | `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault |
+| [W-005](#w-005-let-mut--assign--jhyy_v1-codegen-segfault) | RESOLVED (v0.9 wip commit 2.13) | `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault；commit 2.11 CGContext 布局对齐真修 + commit 2.13 revert 16 处回 `let mut` 风格 |
 | [W-006](#w-006-jhyy_v1-return-x--y-两-1-char-var-发-127qbe-fail) | ACTIVE | jhyy_v1 codegen 让两个 1-char 局部变量在 `return x ± y` 共享同一 stack slot → QBE fail / exit 127；改名或加类型注解绕 |
 | [W-007](#w-007-jhyy_v1-fn--i64--return--literal-as-i64-emit-w-copy) | ACTIVE | jhyy_v1 codegen 把 `fn() -> i64 { return X as i64; }` 的 return value 当 w（32-bit）emit → QBE "invalid type for jump argument" 错 |
 | [W-008](#w-008-jhyy_v1-cg_find_field_offset-漏一层-deref-i64-struct-field-emit-w-loadw) | RESOLVED | jhyy_v1 codegen NODE_FIELD 查 struct field type 时把 `*u8` 指针当 `**u8` 解了一层 → i64/pointer struct field 全 emit `=w loadw` 而非 `=l loadl` → QBE 拒绝 |
@@ -351,8 +351,8 @@ fn ab() -> i32 {                              // fn 长度 2，但其它都长
 ## W-005: `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault
 
 **ID:** W-005
-**状态:** ACTIVE
-**日期:** 2026-08-03
+**状态:** RESOLVED (v0.9 wip commit 2.13)
+**日期:** 2026-08-03 (workaround) → 2026-08-05 (commit 2.11 真修) → 2026-08-05 (commit 2.13 revert 加固)
 **触发面:** 函数体内任意 `let mut` 变量 + 后续 `x = expr;` 赋值语句（不论 expr 类型、变量名长度、是否被 read、所在 fn 深度）。**100% 触发**（exit 139 / 0xC0000005）。
 **症状:** jhyy_v1 编译含此模式的源码 → 0xC0000005 segfault。v0 jhyy.exe 编同一源码 → exit 0（IL 正确）。
 **最小复现:**
@@ -420,13 +420,30 @@ fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
 - `*pos_ptr = ...` 模式 → 100% OK
 - v0 编两种模式都 OK（jhyy_v1 自身 bug，不是 v0 也不是源 jhyy 源码问题）
 
-**影响范围（src0/ 中需 W-005 替换的 let-mut + assign 位置）:**
+**影响范围（src0/ 中需 W-005 替换的 let-mut + assign 位置）— commit 2.13 revert 后:**
 
-| 文件 | 函数 | 变量 | 替换数 |
-|------|------|------|--------|
-| main.jhyy | run_qbe_v1 | pos_v1 | 5 (5 个 assign) |
-| main.jhyy | link_with_gcc | pos_v2 | 9 (9 个 assign) |
-| **总计** | | | **14** |
+| 文件 | 函数 | 变量 | revert 数 |
+|------|------|------|-----------|
+| main.jhyy | path_to_win | idx_ptr | 1 |
+| main.jhyy | run_qbe | pos_v1 | 1 var / 5 assign |
+| main.jhyy | link_with_gcc | pos_v2 | 1 var / 9 assign |
+| main.jhyy | cmd_compile (argv walk) | input_v1 / user_out_v1 / i_v4 | 3 vars |
+| main.jhyy | cmd_compile (out_buf) | out_buf if-else workaround | 1 简化 |
+| arena.jhyy | arena_new_block | size_v1 | 1 |
+| arena.jhyy | arena_free | b | 1 |
+| util.jhyy | sb_grow | new_cap | 1 |
+| util.jhyy | hash_string | h / i | 2 |
+| util.jhyy | hm_put | idx | 1 |
+| util.jhyy | hm_grow (outer + inner) | i / idx | 2 |
+| util.jhyy | hm_get | idx | 1 |
+| **总计** | | | **15 vars + 1 if-else 简化** (= 16 模式 revert) |
+
+**commit 2.13 验证 (2026-08-05):** 所有 16 模式 revert 回 `let mut x; x = expr;` 风格后：
+- v0 build clean (无 warning)
+- regress 持平 50/53 PASS
+- stage1 byte-equal 持平 6/7 PASS
+- jhyy_v1.exe (built from reverted src0/) 可执行,跟 commit 2.12 路径完全一致
+- main.jhyy runtime (jhyy_v1 编 src0/main.jhyy 跑 main.jhyy) **仍 segfault (exit 139)** —— 这是 main.jhyy 自身更大尺寸 (25KB) 引发的 W-001 类 heap corruption 问题,不在 commit 2.13 范围,推 v1.0 sprint 3 B' 阶段
 
 **W-005 局限性:** 这是绕 `NODE_ASSIGN[NODE_IDENT]` 触发面。`let mut struct; struct.field = X` (NODE_ASSIGN[NODE_FIELD]) 走不同路径，W-005 不修。**Bug 6+7b 的根因修复需在 jhyy_v1 codegen.c 端修 NODE_ASSIGN 的 emit，post v1.0.0。**
 

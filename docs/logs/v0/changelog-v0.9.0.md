@@ -1206,3 +1206,107 @@ bash /c/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/tests/stage1-expanded.s
 - `compiler/src0/_W002_rename_map.txt` — 211 rename map (保留作为 archive)
 - `compiler/src0/_W002_revert.py` — revert 脚本 (本次 ship)
 - `docs/internal/workarounds.md` — W-001 + W-002 标 RESOLVED (本次 ship)
+
+---
+
+## commit 2.13 — W-005 加固 revert 16 处 `*pos_ptr_vN` → `let mut x; x = expr;`
+
+**日期**: 2026-08-05
+**范围**: `compiler/src0/{main, arena, util}.jhyy` 共 15 vars + 1 if-else workaround simplify = **16 模式 revert**
+**前驱**: commit 2.11 (W-005 真修 phase 2 — CGContext C/jhyy 布局对齐) + commit 2.12 (W-001/W-002 docs 同步)
+**目标**: W-005 workaround (`*pos_ptr_vN` 模式) 移出 src0/ active 列表, 恢复 let-mut 自然风格
+
+### 问题
+
+commit 2.10/2.11 真修 W-005 根因 (C/jhyy CGContext struct 布局不匹配) 后, jhyy_v1 编 `let mut x; x = expr;` 模式不再 segfault。但 src0/ 中仍有 **15 vars + 1 if-else workaround** 走 `*pos_ptr_vN = ...` 模式 (绕过 NODE_ASSIGN[NODE_IDENT] 触发面的 workaround)。这些 workaround 现在不再必要, 但留在 src0/ 里:
+- 让 jhyy_v1 编 src0/ 时多出不必要的 malloc/free (15 次 malloc 8/4 bytes + 15 次 free)
+- 让 src0/ 跟 v0 端 C 源码 (用纯 `let mut` 风格) 不一致 (cosmetic noise)
+- 阻碍 AUDIT 阶段 5 struct (Sym/SymTable/Parser/Lexer/SemaContext) 字段访问审计 (workaround pattern 干扰审计)
+
+### 范围
+
+**main.jhyy** (6 vars + 1 if-else simplify):
+| 函数 | var | revert 操作 |
+|------|-----|------------|
+| path_to_win | idx_v1 | `malloc(8) as *i64` + `*idx_ptr = 0; while (*idx_ptr) < n { ... *idx_ptr = (*idx_ptr) + 1; } free` → `let mut idx_v1: i64 = 0; while idx_v1 < n { ... idx_v1 = idx_v1 + 1; }` |
+| run_qbe | pos_v1 | `*pos_ptr_v1 = str_concat_at(...)` × 5 → `pos_v1 = str_concat_at(...)` × 5 |
+| link_with_gcc | pos_v2 | `*pos_ptr_v2 = ...` × 9 → `pos_v2 = ...` × 9 |
+| cmd_compile (argv walk) | input_v1 / user_out_v1 / i_v4 | 3 × `malloc(8/4) as **u8 / *i32` + deref+assign → `let mut` + 直接 assign |
+| cmd_compile (out_buf) | if-else workaround | 移除 `if derived != 0 { free(derived); }` 嵌套, 简化 `free(derived); out_buf = user_out;` |
+
+**arena.jhyy** (2 vars):
+| 函数 | var | revert 操作 |
+|------|-----|------------|
+| arena_new_block | size_v1 | `malloc(8) as *i64` + 2 deref+assign + free → `let mut size_v1: i64 = (*a).def_size; if size_v1 < min_size { size_v1 = min_size; }` |
+| arena_free | b | `malloc(8) as *i64` + while deref+assign + free → `let mut b: *u8 = (*a).blocks; while b != 0 { ... b = next; }` |
+
+**util.jhyy** (7 vars):
+| 函数 | var | revert 操作 |
+|------|-----|------------|
+| sb_grow | new_cap | `malloc(8) as *i64` + while deref+assign × 2 + free → `let mut new_cap: i64 = ...; while ... { new_cap = new_cap * 2; }` |
+| hash_string | h / i | 2 × `malloc(8) as *i64` + 多处 deref+assign + free × 2 → `let mut h: i64 = ...; let mut i: i64 = 0; while i < n { ... h = ...; i = i + 1; }` |
+| hm_put | idx | `malloc(8) as *i64` + 多处 deref+assign + free → `let mut idx: i64 = h & mask; while true { ... idx = (idx + 1) & mask; }` |
+| hm_grow (外 + 内) | i / idx | 2 vars (外层 walk + 内层 probe) → `let mut i: i64 = 0; while i < old_n { ... let mut idx: i64 = h & mask; while true { ... idx = (idx + 1) & mask; } ... i = i + 1; }` |
+| hm_get | idx | `malloc(8) as *i64` + 多处 deref+assign + free → `let mut idx: i64 = h & mask; while true { ... idx = (idx + 1) & mask; }` |
+
+**总计: 15 vars + 1 if-else 简化 = 16 模式 revert**
+
+### 验证 (2026-08-05)
+
+```
+# 1. v0 build clean
+/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra compiler/src/*.c \
+    -o compiler/build/bin/jhyy.exe -I compiler/src
+# (no errors, no warnings)
+
+# 2. regress 持平 50/53
+python compiler/build/bin/regress.py
+# ===== 50/53 passed, 0 failed, 3 skipped =====  (持平 baseline)
+
+# 3. 重 build jhyy_v1.exe from reverted src0/
+compiler/build/bin/jhyy.exe compile compiler/src0/main.jhyy -o compiler/build/bin/jhyy_v1
+# Compiled: compiler/build/bin/jhyy_v1.exe  (PE32+ 371KB, 跟 commit 2.12 路径完全一致)
+
+# 4. stage1 byte-equal 持平 6/7
+bash compiler/tests/stage1-expanded.sh
+# [PASS] hello
+# [PASS] fib_renamed
+# [PASS] struct_val_pass
+# [PASS] match_exhaustive
+# [FAIL] const_array   ← parser CERR (moot, 推 v1.0 sprint 3 Task #52)
+# [PASS] control_flow
+# pass: 6 / 7   (持平)
+```
+
+### 不验证 (per user plan)
+
+**main.jhyy runtime** (jhyy_v1 编 src0/main.jhyy 跑 main.jhyy): 已知 25KB 大文件触发 W-001 类 heap corruption, segfault 仍在 ❌ — **不在 commit 2.13 范围, 推 v1.0 sprint 3 B' 阶段** (单独立 sprint)。
+
+### 影响
+
+- **W-005 workarounds 全部移除**: `docs/internal/workarounds.md` § W-005 状态 ACTIVE → **RESOLVED (v0.9 wip commit 2.13)**
+- **src0/ 跟 v0 端 C 源码语义对齐**: 所有累加模式 (`run_qbe`/`link_with_gcc` 的 cmd_buf 拼接, `hash_string`/`hm_*` 的累加器) 跟 C 端一致用 `let mut` 自然风格
+- **jhyy_v1.exe size**: 持平 (~371KB), 无 regression
+- **v0 build**: clean, 0 warning (clang/gcc -Wall -Wextra)
+- **AUDIT 准备就绪**: revert 后 src0/ 进入下一阶段 (commit 2.14 文档 + AUDIT 5 struct 字段访问审计)
+
+### 决策
+
+**commit 2.13 ship ✅** (W-005 加固达成, 全部 gate 通过)
+
+下一阶段:
+- commit 2.14: W-006 + W-002/W-004 衍生 + W-008/W-009 文档
+- AUDIT: 5 struct (Sym/SymTable/Parser/Lexer/SemaContext) 字段访问审计 (W-B watchpoint)
+- B: main.jhyy 收尾 (resolve_imports 翻译 ~300 行) → 推到 v1.0 sprint 3 B' 阶段
+- C': codegen 确定性 audit (.data 排序 + stack slot 排序 + hash 桶迭代排序)
+- D: N=3 byte-equal
+- v1.0 sprint 3 (Task #52): parser.jhyy NODE_CONST_DECL 补全 + jhyy_v1 sema 内部 fix → 7/7
+- M4 hard closure: byte-equal 7/7 + N=3 + main.jhyy 跑通 + regress 持平
+
+### 引用
+
+- v0.9 wip commit 2.11 — W-005 真修 phase 2 (CGContext 布局对齐, 真修根因)
+- v0.9 wip commit 2.10 — W-005 真修 phase 1 (诊断性 doc-only)
+- v0.8 commit 10 (`d8535a9`) — W-005 扩展到 util.jhyy + arena.jhyy (initial workaround 实施)
+- v0.8 commit 9 (`d570c72`) — W-001 byte-by-byte 真修 (W-005 workaround 初始引入)
+- `docs/internal/workarounds.md` — W-005 标 RESOLVED (本次 ship)
