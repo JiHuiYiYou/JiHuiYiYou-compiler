@@ -610,6 +610,12 @@ fn cg_convert_arg(cg_raw_v1: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
         if dst_qt_v1 == QBE_L() {
             conv = "extsw" as *u8;
         }
+    } else if src_qt_v1 == QBE_L() {
+        // v0.9 wip commit 2.5 (B-let2): l→w narrow — QBE 'copy' from l to w truncates implicitly
+        // (对齐 v0 codegen.c:780-783 integer width change narrowing l→w 分支)
+        if dst_qt_v1 == QBE_W() {
+            conv = "copy" as *u8;
+        }
     }
     if conv == (0 as *u8) {
         return arg;

@@ -1,0 +1,19 @@
+// EXPECT: 832040
+// Recursive Fibonacci — fib(30) = 832040
+// v0.9 wip commit 2.5: renamed locals (n→count, r→result) to avoid W-006
+//   (1-char local var + return expr) + W-004 (≤4-char local hash collision).
+// Original fib30.jhyy retained for v0 regress baseline.
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn fib(count: i32) -> i32 {
+    if count < 2 {
+        return count;
+    }
+    fib(count - 1) + fib(count - 2)
+}
+
+fn main_jhyy() -> i32 {
+    let result: i32 = fib(30);
+    printf("fib(30) = %d\n", result);
+    result
+}

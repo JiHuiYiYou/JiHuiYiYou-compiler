@@ -1,0 +1,14 @@
+// EXPECT: 1000042
+// i32/i64 mixed arithmetic + as conversion
+// v0.9 wip commit 2.5: covers extsw path stability (small_val as i64 + total_val as i32)
+//   + const-only data (no let mut → W-005 avoidance).
+extern fn printf(fmt: *u8, val: i64) -> i32;
+
+fn main_jhyy() -> i32 {
+    let small_val: i32 = 42;
+    let big_val: i64 = 1000000 as i64;
+    let total_val: i64 = (small_val as i64) + big_val;
+    printf("total = %d\n", total_val);
+    let down_val: i32 = total_val as i32;
+    down_val
+}

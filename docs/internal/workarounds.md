@@ -33,7 +33,8 @@
 | [W-006](#w-006-jhyy_v1-return-x--y-两-1-char-var-发-127qbe-fail) | ACTIVE | jhyy_v1 codegen 让两个 1-char 局部变量在 `return x ± y` 共享同一 stack slot → QBE fail / exit 127；改名或加类型注解绕 |
 | [W-007](#w-007-jhyy_v1-fn--i64--return--literal-as-i64-emit-w-copy) | ACTIVE | jhyy_v1 codegen 把 `fn() -> i64 { return X as i64; }` 的 return value 当 w（32-bit）emit → QBE "invalid type for jump argument" 错 |
 | [W-008](#w-008-jhyy_v1-cg_find_field_offset-漏一层-deref-i64-struct-field-emit-w-loadw) | RESOLVED | jhyy_v1 codegen NODE_FIELD 查 struct field type 时把 `*u8` 指针当 `**u8` 解了一层 → i64/pointer struct field 全 emit `=w loadw` 而非 `=l loadl` → QBE 拒绝 |
-| [W-009](#w-009-jhyy_v1-cg_convert_arg-src_t--0-返回-arg-未-coerce-导致-literal-0-w-copy-0-在-ceql-被-reject) | ACTIVE | jhyy_v1 codegen cg_convert_arg 在 `src_t==0` 时直接 return arg，但 literal 0 实际 emit `=w copy 0`（因 qbe_type_of(NULL)=QBE_W）→ 比较 l 字段（pointer / i64 / u64）时 `ceql`/`csltl` 等操作码两边操作数类型不匹配 → QBE "invalid type for second operand" 错 |
+| [W-009](#w-009-jhyy_v1-cg_convert_arg-src_t--0-返回-arg-未-coerce-导致-literal-0-w-copy-0-在-ceql-被-reject) | RESOLVED | jhyy_v1 codegen cg_convert_arg 在 `src_t==0` 时直接 return arg，但 literal 0 实际 emit `=w copy 0`（因 qbe_type_of(NULL)=QBE_W）→ 比较 l 字段（pointer / i64 / u64）时 `ceql`/`csltl` 等操作码两边操作数类型不匹配 → QBE "invalid type for second operand" 错 |
+| [B-let2 (cross-ref)](#cross-ref-b-let2-stage-1-byte-equal-codegen-gap) | RESOLVED (v0.9 commit 2.5) | jhyy_v1 `cg_convert_arg` 缺 `src=l, dst=w` narrow 分支 → `i64 → i32` 字段赋值 / `as` 转换 emit 错 IL。详见 [`codegen-pitfalls.md` § 2.2](codegen-pitfalls.md) |
 
 ---
 
@@ -153,7 +154,7 @@ let c = ((w >> sh) & (255 as i32)) as i64;
 - 测试用例 `tmp/tm_*.jhyy`
 - 完整 rename 映射 `compiler/src0/_W002_rename_map.txt`
 - v0.8 commit 6 (efc41bf) `wip: bisect heap corruption`
-- v0.8 commit 7 (待) `W-002: 211 个标识符 _v1 后缀化 + workarounds.md`
+- v0.8 commit 7 (0453cef) `W-002: 211 个标识符 _v1 后缀化 + workarounds.md`
 - 战略决策 `memory/project_bootstrap_closure_state.md` § Bisect findings
 ---
 
@@ -372,7 +373,7 @@ fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
 
 **失效条件:** jhyy_v1 codegen 修对 NODE_ASSIGN[NODE_IDENT] 的 let-mut target → emit 正确 `storew` 到 stack slot → W-005 可移除并恢复 `let mut x; x = ...;` 风格。
 
-**superseder:** TBD（jhyy_v1 codegen fix sprint，post v1.0.0 phase-2 落地后）
+**superseder:** v0.9.0 commit 2 (planned) — 真修 jhyy_v1 codegen NODE_ASSIGN[NODE_IDENT] let-mut path; W-005 仍 ACTIVE 待 v0.9 真修。
 
 **引用:**
 - `memory/feedback_v0_codegen_bug_workarounds.md` Bug 6 (let-mut assignment) + Bug 7b (nested let-mut)
@@ -442,7 +443,7 @@ fn main_jhyy() -> i32 {
 
 **失效条件:** jhyy_v1 codegen 修对 stack-slot allocator（按变量名长度 ≤1 时分配不同 slot）→ W-006 可移除并恢复 `let x = ...; return x + y;` 风格。
 
-**superseder:** TBD（jhyy_v1 codegen fix sprint，post v1.0.0 phase-2 落地后）
+**superseder:** TBD（jhyy_v1 codegen fix sprint，post v1.0.0 落地后）
 
 **引用:**
 - 复现 `_test_e.jhyy` / `_test_y.jhyy`（x + y / a + b 都触发）
@@ -495,7 +496,7 @@ fn small_const() -> i64 { return some_64(); }
 - 暂时没有完全等价的 workaround（不能直接 emit i64 literal in codegen）
 - **方法 1**：把 i64 返回函数改成返回 `*u8` 或 `i32`，调用方再做 cast（接口破坏大）
 - **方法 2**：i64 常量函数（如 `FNV_OFFSET`、`FNV_PRIME`）改写成**两行 let + extern 调用链**（不实用）
-- **方法 3**：在 jhyy_v1 codegen 端修 NODE_INT_LIT emit 的 type 推断（**根治，需 post v1.0.0 phase-2**）
+- **方法 3**：在 jhyy_v1 codegen 端修 NODE_INT_LIT emit 的 type 推断（**根治，需 post v1.0.0**）
 
 **影响范围:** util.jhyy 中所有 `fn XXX() -> i64 { return literal as i64; }`：
 - `FNV_OFFSET() -> i64 { return 0xcbf29ce484222325 as i64; }`
@@ -506,7 +507,7 @@ fn small_const() -> i64 { return some_64(); }
 
 **失效条件:** jhyy_v1 codegen 在 NODE_INT_LIT 的 emit 路径上加 type propagation（看 return type / cast 类型决定 copy 的 class）→ W-007 可移除。
 
-**superseder:** TBD（jhyy_v1 codegen fix sprint，post v1.0.0 phase-2 落地后）
+**superseder:** TBD（jhyy_v1 codegen fix sprint，post v1.0.0 落地后）
 
 **引用:**
 - 复现 `_test_small.jhyy` / `_test_small4.jhyy` / `_test_small6.jhyy` / `_test_small8.jhyy`
@@ -619,7 +620,7 @@ ret %t4
 ## W-009: jhyy_v1 cg_convert_arg src_t==0 早 bail，导致 literal `0` 在 ceql/csltl 中以 w 操作数出现
 
 **ID:** W-009
-**状态:** ACTIVE（fix 在 v0.8 commit 12 同步应用；待 commit 12 changelog 转 RESOLVED）
+**状态:** RESOLVED（v0.8 commit 12, 5820793 — codegen.jhyy cg_convert_arg src_t==0 兜底 + dst.kind=KIND_POINTER 不再 bail + NODE_CAST 移除 src_t==0 早 bail；arena.jhyy Stage 0 closure 解锁）
 **日期:** 2026-08-04
 **触发面:** jhyy 源码里**任意 `l_field == 0` / `l_field != 0` / `i64_var cmp 0` / `pointer cmp 0` 路径**走 cg_expr → 比较操作 → cg_convert_arg：
 - `if (*a).def_size > 0` — arena.jhyy: arena_new_block 的 fallback 路径
@@ -769,4 +770,45 @@ QBE：`invalid type for second operand %t29 in ceql`
 - arena.il 反例：`_w008_arena.il:55` (`ceql %t28, %t29` mixed) 与 `:211` (`ceql %t112, %t113` mixed)
 - 与 W-008：无直接关联。W-008 修 struct field load type，W-009 修 literal compare operand type
 - 与 W-007：W-007 修 return literal 类型（extsw in cg_convert_arg w→l case），W-009 修 cg_convert_arg 入口 bail 条件让 extsw 路径真正走到
+
+---
+
+## Cross-ref: B-let2 (Stage 1 byte-equal codegen gap)
+
+**ID:** B-let2
+**状态:** RESOLVED (v0.9 wip commit 2.5)
+**日期:** 2026-08-05
+**触发面:** jhyy_v1 `cg_convert_arg` 函数 (`compiler/src0/codegen.jhyy:544-634`)
+**症状:** Stage 1 byte-equal 验收 (`stage1-expanded.sh`) 跑 `arith.jhyy` 时 FAIL —— `let down_val: i32 = total_val as i32;` (total_val: i64 → down_val: i32) emit `=w copy %l_value`,QBE 报 "type mismatch"。
+
+**根因:**
+- v0 codegen.c:780-783 `cg_convert_arg` 显式 emit `copy` for `src=L, dst=W` integer width narrowing。
+- jhyy_v1 codegen.jhyy:544-634 `cg_convert_arg` 历史上漏这条分支(只覆盖 `src=w, dst=l` via extsw + `src=l, dst=d/s` via sltof/ultof)。
+
+**修复** (v0.9 wip commit 2.5):
+- 在 `cg_convert_arg` 加 `src=L, dst=W` 分支:
+```jhyy
+} else if src_qt_v1 == QBE_L() {
+    if dst_qt_v1 == QBE_W() {
+        conv = "copy" as *u8;
+    }
+}
+```
+- 对齐 v0 codegen.c:780-783,QBE `copy` from l to w 隐式截断(lower 32 bits 取到 w,QBE ABI 行为)
+
+**验证:** `bash compiler/tests/stage1-expanded.sh` arith.jhyy PASS,byte-equal baseline 1/7 → **2/7** (hello + arith)
+
+**不是 workaround 而是真修:** B-let2 不需要 workarounds(非 user-facing 触发),直接修 codegen.jhyy 一处即解。
+
+**与 W-007/W-009 关系:**
+- W-007 修 `src=w, dst=l` (extsw) —— 跟 B-let2 镜像对称(B-let2 修 `src=l, dst=w` copy)
+- W-009 修 src_t==0 兜底 —— 让 B-let2 / W-007 的转换路径走到(literal 0 → extsw → copy 链路)
+- 三个 fix 缺一不可,jhyy_v1 cg_convert_arg 才算完整
+
+**引用:**
+- [`docs/internal/codegen-pitfalls.md` § 2.2](codegen-pitfalls.md) —— B-let2 详解(diff + 修复代码 + 验证)
+- `compiler/src0/codegen.jhyy:613-619` —— 修复代码
+- `compiler/tests/examples/arith.jhyy` —— 触发用例
+- `compiler/tests/stage1-expanded.sh` —— 验收脚本
+- v0 codegen.c:780-783 —— 对齐的 C 端 emit 路径
 

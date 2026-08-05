@@ -1,0 +1,26 @@
+// EXPECT: 23
+// Control flow test: recursion simulates while/for/break/continue semantics
+// v0.9 wip commit 2.5: pure functional (no let mut → W-005 avoidance).
+//   Sum of counter 0..9, skip 5 (continue), break at 8.
+//   = 0+1+2+3+4+6+7 = 23.
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn loop_sum(counter: i32, acc: i32) -> i32 {
+    if counter >= 10 {
+        return acc;
+    }
+    if counter == 5 {
+        return loop_sum(counter + 1, acc);
+    }
+    if counter == 8 {
+        return acc;
+    }
+    loop_sum(counter + 1, acc + counter)
+}
+
+fn main_jhyy() -> i32 {
+    let total = loop_sum(0, 0);
+    printf("sum = %d\n", total);
+    total
+}
