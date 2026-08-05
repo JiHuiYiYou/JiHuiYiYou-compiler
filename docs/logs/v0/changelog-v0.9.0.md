@@ -21,6 +21,7 @@
 | commit 2.12b | B-match-codegen 真修 — codegen.jhyy 加 NODE_ENUM_VARIANT case 翻译 (~40-50 行) | 🟡 待 ship (byte-equal 5/7 → 6/7) |
 | commit 2.13 | W-005 加固 revert 16 处 `*pos_ptr_vN` → `let mut x; x += n` (main.jhyy 6 + arena.jhyy 2 + util.jhyy 7 + 1 if-else simplify) | ✅ SHIPPED (2026-08-05) |
 | commit 2.14 | W-004 BLOCKED verification (Task #60 阻断) + W-002 archive 标记 (删 `_W002_revert.py` + 加 README) + W-006 dormant 标记 + W-008 ↔ W-009 ↔ W-007 ↔ W-005 cross-ref 联动段 | ✅ SHIPPED (2026-08-05) |
+| commit 2.15 | Task #60 真修 — parse_if body inline parse_while 嵌套 TOKEN_WHILE 分支 (`if→while→while` 模式解锁, codegen.jhyy:2198 + sema.jhyy:1191 parse error 消除) | ✅ SHIPPED (2026-08-05) |
 
 ---
 
@@ -1457,3 +1458,149 @@ bash compiler/tests/stage1-expanded.sh
 - `docs/internal/workarounds.md` — 4 块改动集中 (本 commit)
 - `compiler/src0/_W002_rename_map.txt` — archive 文件 (tracked, README 已加)
 - `compiler/src0/_W002_revert.py` — 已删除 (一次性脚本)
+
+---
+
+## v0.9 wip commit 2.15: Task #60 真修 — parse_if body inline parse_while 嵌套 TOKEN_WHILE 分支
+
+**日期**: 2026-08-05
+**承接**: v0.9 wip commit 2.14
+**类型**: parser bug fix (~40 行, 1 文件)
+**范围**: `compiler/src0/parser.jhyy` Site 1 (parse_if body inline parse_while inner body dispatcher) 加 TOKEN_WHILE 递归分支
+
+### 问题
+
+jhyy_v1 编 src0/{codegen,sema}.jhyy 在 parse 阶段报 `'unexpected token 'while' in expression'`:
+- `codegen.jhyy:2198`: `while fj < (*sl).nfields` (在 `if (*t).kind == KIND_STRUCT()` 块内的 `while si < (*t).nfields` 块内) — 即 `if → while → while` 嵌套
+- `sema.jhyy:1191`: `while j < (*st).nfields` (在 `if (*n).kind == NODE_STRUCT_LIT()` 块内的 `while i < (*d).nfields` 块内) — 同样 `if → while → while` 嵌套
+
+**根因**: `parse_if` body 的 inline parse_while (parser.jhyy:1254+) inner body dispatcher 限制为 `TOKEN_IF + simple_only` (per commit 6 抽取 `parse_dispatch_simple_only` 时的设计决策)。Inner body 遇到 TOKEN_WHILE → 走 `parse_dispatch_simple_only` → `parse_expr_stmt` → `parse_expr` fall-through 到 L690-699 "unexpected token 'while' in expression"。
+
+### 改动 1: `parser.jhyy:1268+` (Site 1 inner body dispatcher) 加 TOKEN_WHILE 递归分支
+
+**改前 (limited dispatcher)**:
+```jhyy
+let mut wstmt: *Node = 0 as *Node;
+if parser_check(p, TOKEN_IF()) != (0 as i32) {
+    wstmt = parse_if(p);
+} else {
+    wstmt = parse_dispatch_simple_only(p);
+}
+```
+
+**改后 (limited dispatcher + TOKEN_WHILE 嵌套分支)**:
+```jhyy
+let mut wstmt: *Node = 0 as *Node;
+if parser_check(p, TOKEN_IF()) != (0 as i32) {
+    wstmt = parse_if(p);
+} else if parser_check(p, TOKEN_WHILE()) != (0 as i32) {
+    // 递归 inline parse_while (limited: TOKEN_IF + simple_only)
+    // ~30 行 duplicate code (accept 限制 — src0/ for loop 数为 0, 不需要)
+    let mut wt2 = empty_token();
+    ... (recursive inline parse_while body) ...
+    wstmt = ast_new_while(...);
+} else {
+    wstmt = parse_dispatch_simple_only(p);
+}
+```
+
+### 改动 2: `parser.jhyy:1198-1204` (commit 6 注释更新)
+
+原 commit 6 注释说 "parse_if 内部的 while body 不能嵌套 for/while (forward ref)", 现在 if→while→while 支持了, 注释加新状态段:
+> v0.9 wip commit 2.15 (Task #60 修): parse_if 内部的 while body 现在支持嵌套 TOKEN_WHILE (if→while→while 模式)。仍然不支持嵌套 TOKEN_FOR/TOKEN_MATCH (forward ref 限制); src0/ 内 for loop 数为 0, 不影响当前 main.jhyy 跑通。
+
+### 完成定义 (全达成 ✅)
+
+| 标准 | 状态 | 证据 |
+|------|------|------|
+| jhyy_v1 compile src0/codegen.jhyy 不再报 'unexpected token while in expression' | ✅ | 现报 5 sema errors (unknown type — cross-file types, expected standalone) |
+| jhyy_v1 compile src0/sema.jhyy 不再报 'unexpected token while in expression' | ✅ | 现报 10 sema errors (unknown type — cross-file types, expected standalone) |
+| jhyy_v1 compile src0/parser.jhyy parse stage 全过 | ✅ | 0 parse errors, 0 unexpected tokens |
+| v0 build clean (-Wall -Wextra 0 warnings) | ✅ | gcc exit 0, no output |
+| regress 持平 baseline 50/53 | ✅ | (per TaskUpdate) |
+| stage1 byte-equal 持平 6/7 | ✅ | (parser.jhyy change 不影响 7 测试集) |
+
+### 验证
+
+```bash
+# 1. v0 build clean
+/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra compiler/src/*.c \
+    -o compiler/build/bin/jhyy.exe -I compiler/src
+# (no warnings)
+
+# 2. regress 持平
+python compiler/build/bin/regress.py
+# 50/53 PASS, 0 failed, 3 skipped
+
+# 3. stage1 byte-equal 持平
+bash compiler/tests/stage1-expanded.sh
+# pass: 6 / 7  (持平 commit 2.14)
+
+# 4. Rebuild jhyy_v1.exe with new parser.jhyy
+compiler/build/bin/jhyy.exe compile compiler/src0/main.jhyy -o compiler/build/bin/jhyy_v1
+# Compiled: compiler/build/bin/jhyy_v1.exe (PE32+ 372KB)
+
+# 5. Task #60 ship 验证 — standalone compile no parse error
+./compiler/build/bin/jhyy_v1.exe build compiler/src0/codegen.jhyy -o /tmp/codegen_t60
+# (no parse errors) → 5 sema errors (unknown type — standalone, expected)
+./compiler/build/bin/jhyy_v1.exe build compiler/src0/sema.jhyy -o /tmp/sema_t60
+# (no parse errors) → 10 sema errors (unknown type — standalone, expected)
+./compiler/build/bin/jhyy_v1.exe build compiler/src0/parser.jhyy -o /tmp/parser_t60 2>&1 | grep unexpected
+# (no unexpected tokens, no parse errors)
+```
+
+### 不验证 (per user plan + commit 2.13 precedent)
+
+- **main.jhyy runtime (jhyy_v1 编 src0/main.jhyy 跑 main.jhyy)**: 10/10 segfault (exit 139), pre-existing, 不在 Task #60 范围。推 v1.0 sprint 3 B' 阶段 (Task #61 pending)。
+
+### 不验证的 W-004 verification 路径
+
+Per v0.9 wip commit 2.14 changelog § "W-004 BLOCKED verification":
+
+> 失效条件 (i) 实证路径: jhyy_v1 编 codegen.jhyy / parser.jhyy / sema.jhyy 看是否 stack overflow。
+
+**实证状态 (post-Task #60)**:
+- jhyy_v1 compile src0/codegen.jhyy: parse stage ✅ pass, sema stage 报 5 errors (cross-file types, exit 0, no segfault)
+- jhyy_v1 compile src0/sema.jhyy: parse stage ✅ pass, sema stage 报 10 errors (cross-file types, exit 0, no segfault)
+- jhyy_v1 compile src0/parser.jhyy: parse stage ✅ pass, no errors
+
+**关键 nuance**: standalone compile **never reaches codegen stage** (sema fails first on cross-file types)。W-004 trigger (symtab hash collision on field assign) fires in **codegen stage**, 不是 parse/sema stage。
+
+→ **W-004 verification 路径 (standalone compile) 无法直接证实**: 需要 full main.jhyy compile (via inline_imports), 那才是 codegen stage 跑全的路径。但 full main.jhyy compile 仍 segfault (Task #61 / sprint 3 B')。
+
+→ **W-004 标 RESOLVED 失效条件 (i) 实证推迟到 Task #61 (jhyy_v1 编 src0/main.jhyy) 完成后**。
+
+W-004 status 保持 ACTIVE (BLOCKED verification — Task #61 prerequisite)。
+
+### 影响
+
+- **parse_expr while/else bug 修了**: src0/ 内 if→while→while 嵌套可正常 parse
+- **Task #60 ship 定义达成**: 1 commit, parser.jhyy 1 文件, ~40 行 (符合 "tight scope + low risk" 决策)
+- **下游解锁**: W-004 verification 路径 (standalone compile) parse 阶段不再阻断, Task #61 (main.jhyy compile) 是下一阶段
+- **不影响 v0**: parser.jhyy 是 jhyy 端源, v0 jhyy.exe 用 compiler/src/parser.c (C 端), 不受影响
+- **不影响 stage1 byte-equal**: parser.jhyy change 不影响 7 测试集 (没触发 if→while→while 模式)
+- **不影响 regress**: regress 用 v0 jhyy.exe, 不受影响
+
+### 下一步
+
+| commit / 阶段 | 主题 | 依赖 |
+|--------------|------|------|
+| AUDIT | 5 struct (Sym/SymTable/Parser/Lexer/SemaContext) 字段访问审计 (200 行 review + 3-5 真修) | 本 commit (Task #60 修) |
+| Task #61 | jhyy_v1 编 src0/main.jhyy 跑通 (sema + codegen 全路径) | Task #60 + Task #60 修后的 W-004 verification |
+| B (sprint 3 B') | main.jhyy 收尾 (resolve_imports 翻译 ~300 行) + 25KB 大文件 heap corruption 修 | Task #61 |
+| C' | codegen 确定性 audit (.data 排序 + stack slot 排序 + hash 桶迭代排序) | B |
+| D | N=3 byte-equal (在 6/7 层面) | C' |
+| v1.0 sprint 3 (Task #52) | parser.jhyy NODE_CONST_DECL 补全 + jhyy_v1 sema 内部 fix → 7/7 | D |
+| v1.0 sprint 5 | N=3 在 7/7 层面 → M4 hard 闭环 | v1.0 sprint 3 |
+| Task #61 完成后 → W-004 verification | jhyy_v1 编 codegen.jhyy / parser.jhyy / sema.jhyy (via inline_imports 路径) 验证 stack overflow 不触发 → W-004 可标 RESOLVED | Task #61 |
+
+### 引用
+
+- v0.9 wip commit 2.14 — W-004 BLOCKED verification (Task #60 prerequisite 标记)
+- v0.8 commit 6 — `parse_dispatch_simple_only` 抽取 (设计决策源头)
+- v0.8 commit 5 — if-as-expression inline 实现 (parse_expr 加 TOKEN_IF 分支)
+- `docs/internal/workarounds.md` — W-004 (status ACTIVE BLOCKED verification)
+- `compiler/src0/parser.jhyy:1198+` (commit 6 注释 + Task #60 更新)
+- `compiler/src0/parser.jhyy:1268+` (Site 1 inner body dispatcher 加 TOKEN_WHILE 嵌套分支)
+- `compiler/src0/codegen.jhyy:2186-2206` (`if → while → while` 触发面)
+- `compiler/src0/sema.jhyy:1150-1206` (同样触发面)

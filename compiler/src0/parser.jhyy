@@ -1198,6 +1198,11 @@ fn parse_match(p: *Parser) -> *Node {
 // 限制：parse_if 内部的 while body 不能嵌套 for/while（forward ref），
 // parse_for 内部的 while body 不能嵌套 while。compiler 源码里的 while-inside-if
 // 模式（util.jhyy hm_grow）body 只有 if/break/expr_stmt，正好够用。
+//
+// v0.9 wip commit 2.15 (Task #60 修): parse_if 内部的 while body 现在支持嵌套
+// TOKEN_WHILE（if→while→while 模式, codegen.jhyy:2186-2206 + sema.jhyy:1150-1206
+// 触发）。仍然不支持嵌套 TOKEN_FOR/TOKEN_MATCH（forward ref 限制）；src0/ 内
+// for loop 数为 0, 不影响当前 main.jhyy 跑通。
 
 fn parse_dispatch_simple_only(p: *Parser) -> *Node {
     if parser_check(p, TOKEN_LET()) != (0 as i32) {
@@ -1270,6 +1275,49 @@ fn parse_if(p: *Parser) -> *Node {
                 let mut wstmt: *Node = 0 as *Node;
                 if parser_check(p, TOKEN_IF()) != (0 as i32) {
                     wstmt = parse_if(p);
+                } else if parser_check(p, TOKEN_WHILE()) != (0 as i32) {
+                    // ── inline parse_while（嵌套版,limited body: TOKEN_IF + simple_only）──
+                    // Task #60 修:if → while → while 模式（codegen.jhyy:2186-2206,
+                    //   sema.jhyy:1150-1206）需要内层 while body 支持 TOKEN_WHILE 嵌套。
+                    //   不支持嵌套 for/while（forward ref）；src0/ 最大嵌套 3 满足。
+                    let mut wt2 = empty_token();
+                    parser_peek(p, &wt2);
+                    let w2lf = wt2.loc_filename;
+                    let w2ll = wt2.loc_line;
+                    let w2lc = wt2.loc_col;
+                    parser_advance(p, &wt2);  // consume 'while'
+                    let w2cond = parse_expr(p, PREC_NONE());
+                    parser_expect(p, TOKEN_LBRACE(), "{ after while condition" as *u8, &wt2);
+                    parser_push_scope(p);
+                    let mut w2stmts: *u8 = 0 as *u8;
+                    let mut w2nstmts: i64 = 0 as i64;
+                    let mut w2cap: i64 = 0 as i64;
+                    while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+                        if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+                        let mut w2stmt: *Node = 0 as *Node;
+                        if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                            w2stmt = parse_if(p);
+                        } else {
+                            w2stmt = parse_dispatch_simple_only(p);
+                        }
+                        if w2stmt != (0 as *Node) {
+                            if w2nstmts >= w2cap {
+                                w2cap = if w2cap != (0 as i64) { w2cap * (2 as i64) } else { (8 as i64) };
+                                let w2ns = arena_alloc((*p).arena, w2cap * (8 as i64));
+                                if w2stmts != (0 as *u8) {
+                                    if w2nstmts > (0 as i64) { memcpy(w2ns, w2stmts, w2nstmts * (8 as i64)); }
+                                }
+                                w2stmts = w2ns;
+                            }
+                            let w2slot = (w2stmts as i64 + w2nstmts * (8 as i64)) as **Node;
+                            *w2slot = w2stmt;
+                            w2nstmts = w2nstmts + (1 as i64);
+                        }
+                    }
+                    parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &wt2);
+                    parser_pop_scope(p);
+                    let w2body = ast_new_block((*p).arena, w2lf, w2ll, w2lc, w2stmts, w2nstmts);
+                    wstmt = ast_new_while((*p).arena, w2lf, w2ll, w2lc, w2cond, w2body);
                 } else {
                     wstmt = parse_dispatch_simple_only(p);
                 }
