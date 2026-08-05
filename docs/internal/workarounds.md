@@ -28,13 +28,14 @@
 | [W-001](#w-001-hash_string-用-i32-deref-绕-v0-codegen-loadsb-错) | RESOLVED (v0.8 commit 9) | hash_string 改 byte-by-byte `*u8` deref + length mix (FNV-1a), 真修 W-001 副作用 |
 | [W-002](#w-002-mainjhyy-重命名绕-jhyy_v1-hash_string-堆损坏) | RESOLVED (v0.9 wip commit 2.12) | 211 个 src0 标识符 `_v1` 后缀化 revert 回原名, W-001 真修后失效 |
 | [W-003](#w-003-jhyy_v1-let-_-fncall-顶层-嵌套-segfault) | ACTIVE | `let _ = fncall(...)` 改 direct call，绕 jhyy_v1 codegen segfault（Bug 7/7b） |
-| [W-004](#w-004-short-local-var-4-chars--symtab-hash-撞--jhyy_v1-field-assign-死循环) | ACTIVE | 短（≤4 字符）local var / fn 参数 / field 改名绕 jhyy_v1 symtab hash 撞（stack overflow） |
+| [W-004](#w-004-short-local-var-4-chars--symtab-hash-撞--jhyy_v1-field-assign-死循环) | ACTIVE (BLOCKED verification — Task #60 parse_expr while/else blocks isolation) | 短（≤4 字符）local var / fn 参数 / field 改名绕 jhyy_v1 symtab hash 撞（stack overflow） |
 | [W-005](#w-005-let-mut--assign--jhyy_v1-codegen-segfault) | RESOLVED (v0.9 wip commit 2.13) | `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault；commit 2.11 CGContext 布局对齐真修 + commit 2.13 revert 16 处回 `let mut` 风格 |
-| [W-006](#w-006-jhyy_v1-return-x--y-两-1-char-var-发-127qbe-fail) | ACTIVE | jhyy_v1 codegen 让两个 1-char 局部变量在 `return x ± y` 共享同一 stack slot → QBE fail / exit 127；改名或加类型注解绕 |
+| [W-006](#w-006-jhyy_v1-return-x--y-两-1-char-var-发-127qbe-fail) | ACTIVE (dormant — 0 触发面 in current src0/) | jhyy_v1 codegen 让两个 1-char 局部变量在 `return x ± y` 共享同一 stack slot → QBE fail / exit 127；改名或加类型注解绕 |
 | [W-007](#w-007-jhyy_v1-fn--i64--return--literal-as-i64-emit-w-copy) | ACTIVE | jhyy_v1 codegen 把 `fn() -> i64 { return X as i64; }` 的 return value 当 w（32-bit）emit → QBE "invalid type for jump argument" 错 |
 | [W-008](#w-008-jhyy_v1-cg_find_field_offset-漏一层-deref-i64-struct-field-emit-w-loadw) | RESOLVED | jhyy_v1 codegen NODE_FIELD 查 struct field type 时把 `*u8` 指针当 `**u8` 解了一层 → i64/pointer struct field 全 emit `=w loadw` 而非 `=l loadl` → QBE 拒绝 |
 | [W-009](#w-009-jhyy_v1-cg_convert_arg-src_t--0-返回-arg-未-coerce-导致-literal-0-w-copy-0-在-ceql-被-reject) | RESOLVED | jhyy_v1 codegen cg_convert_arg 在 `src_t==0` 时直接 return arg，但 literal 0 实际 emit `=w copy 0`（因 qbe_type_of(NULL)=QBE_W）→ 比较 l 字段（pointer / i64 / u64）时 `ceql`/`csltl` 等操作码两边操作数类型不匹配 → QBE "invalid type for second operand" 错 |
 | [B-let2 (cross-ref)](#cross-ref-b-let2-stage-1-byte-equal-codegen-gap) | RESOLVED (v0.9 commit 2.5) | jhyy_v1 `cg_convert_arg` 缺 `src=l, dst=w` narrow 分支 → `i64 → i32` 字段赋值 / `as` 转换 emit 错 IL。详见 [`codegen-pitfalls.md` § 2.2](codegen-pitfalls.md) |
+| [W-008 ↔ W-009 ↔ W-007 ↔ W-005 (cross-ref)](#cross-ref-w-008--w-009--w-007--w-005-codegen-转化路径联动) | mixed (W-005 RESOLVED, W-008/W-009 RESOLVED, W-007 ACTIVE) | 4 个 workaround 都在 jhyy_v1 `cg_convert_arg` + NODE_ASSIGN + NODE_FIELD codegen 路径, 真修需要联动考虑 |
 
 ---
 
@@ -215,6 +216,37 @@ let c = ((w >> sh) & (255 as i32)) as i64;
 - v0.8 commit 9 (`d570c72`) — W-001 byte-by-byte 真修 (根因消除)
 - 配合 W-001 RESOLVED section (上方)
 
+### Archive 文件 (v0.9 wip commit 2.14 标记)
+
+W-002 revert 实施时产生的 archive 文件保留作为可重放参考:
+
+| 文件 | git 状态 | 大小 | 用途 |
+|------|---------|------|------|
+| `compiler/src0/_W002_rename_map.txt` | **tracked** (commit 2.12 ship 时已 ship, hash `8a9de1c`) | 4982B | 211 个 `X → X_v1` rename mapping (反向应用即可 revert) |
+| `compiler/src0/_W002_revert.py` | **gitignored** (`.gitignore` `_*.py` 规则) | 2220B | 一次性 revert 脚本 (2026-08-05 实施完成, 已 ship 后失去保留价值) |
+
+**清理决策 (v0.9 wip commit 2.14)**:
+- `_W002_revert.py`: **删除** (一次性工具, 已 ship, 不再需要; 占用磁盘 clutter)
+- `_W002_rename_map.txt`: **保留 + 顶部加 README** (未来如果需要重新引入 W-002 rename 可直接当 input; 499 行 5KB 占用低; ship history 保留)
+
+**README 注释 (添加在 `_W002_rename_map.txt` 顶部)**:
+```
+# ════════════════════════════════════════════════════════════════
+# W-002 ARCHIVE — 211 个 src0/ identifier 的 `X → X_v1` rename map
+# ════════════════════════════════════════════════════════════════
+# 历史: v0.8 commit 7 (`0453cef`) 引入 W-002 (绕 hash_string *i32 overread)
+#       v0.8 commit 9 (`d570c72`) W-001 真修后 W-002 失效
+#       v0.9 wip commit 2.12 (`8a9de1c`) 211 revert 回原名
+# 状态: RESOLVED (per docs/internal/workarounds.md § W-002)
+# 用途: archive — 保留作为可重放参考; 未来若需重新引入 W-002 可直接当 input
+# ════════════════════════════════════════════════════════════════
+```
+
+**引用**:
+- `compiler/src0/_W002_rename_map.txt` (tracked, archive)
+- `compiler/src0/_W002_revert.py` (gitignored, 已删 2026-08-05)
+- v0.9 wip commit 2.14 — 标记 archive + 清理 + README 注释
+
 ---
 
 ## W-003: jhyy_v1 `let _ = fncall(...)` 顶层 / 嵌套 segfault → direct call (top-level only)
@@ -288,7 +320,7 @@ store_byte_i32(nul1, 0 as i32);
 ## W-004: short local var (≤4 chars) → symtab hash 撞 → jhyy_v1 field assign 死循环
 
 **ID:** W-004
-**状态:** ACTIVE
+**状态:** ACTIVE (v0.9 wip commit 2.14 验证 BLOCKED — 详见下方"验证状态 2026-08-05")
 **日期:** 2026-08-03
 **触发面:** 同时存在 ① 短（≤4 字符）函数名 + ② 短（≤4 字符）`let` 局部 var 名 + ③ struct field 赋值的组合。具体阈值取决于三者长度之和（如 `fn main` 4 + `let a` 1 + `field cur` 3 = fail；`fn entry` 5 + `let a` 1 + `field cur` 3 = OK）。
 **症状:** jhyy_v1 编译含此模式的源码 → 0xC00000FD STACK OVERFLOW（exit 3221226356）。**不是** segfault（exit 3221225477）。
@@ -345,6 +377,24 @@ fn ab() -> i32 {                              // fn 长度 2，但其它都长
 - `memory/feedback_v0_codegen_bug_workarounds.md` Bug 6 (let-mut assignment) + Bug 1 (hash_string overread)
 - W-002 (`docs/internal/workarounds.md` § W-002) 修了 211 个全局/函数名，未覆盖局部 var
 - 复现测试 `tmp/test_w4.jhyy` ~ `tmp/test_w8.jhyy`
+
+### 验证状态 2026-08-05 (v0.9 wip commit 2.14) — BLOCKED
+
+**目标**: 验证 jhyy_v1 编 src0/{codegen,parser,sema}.jhyy 是否触发 stack overflow (W-004 失效条件 (i))。
+
+**结果**: 验证 BLOCKED — 3 个目标文件**单独编译都跑不到 codegen 阶段**:
+
+| 文件 | 现象 | 阻断根因 |
+|------|------|---------|
+| `src0/codegen.jhyy` | `L2198: unexpected token 'while' in expression` + 6 parse errors | Task #60 (parse_expr `while`/else) |
+| `src0/sema.jhyy` | `L1191: unexpected token 'while' in expression` + parse errors | Task #60 (同上) |
+| `src0/parser.jhyy` | 9+ sema errors (unknown type `*Node`, undefined variable, 不能 access field) | 跨文件 type (`*Node`, `Token`, `Sym` 等) 在 ast.jhyy / symtab.jhyy 等, 单独编 parser 拿不到 |
+
+**full src0/main.jhyy (inline_imports 全拼接)**: 仍 segfault (exit 139) — 但 segfault 是在 parse 阶段 (Task #60 触发), 不是 codegen 阶段 (W-004 触发)。Task #60 是上游 blocker, 不修就无法隔离 W-004。
+
+**结论**: W-004 标 RESOLVED 失效条件 (i) 无法满足, 推 v1.0.0 sprint 3+ Task #60 修后**再做 W-004 验证**。W-004 status 保持 ACTIVE (BLOCKED verification)。
+
+**contingency**: 如果 Task #60 修后, jhyy_v1 编 src0/codegen.jhyy / parser.jhyy / sema.jhyy 不再 stack overflow → W-004 可标 RESOLVED (W-001 真修已间接覆盖);如果仍 stack overflow → 立刻开 commit 2.15 (W-004 批量改名, 触发面消除)。
 
 ---
 
@@ -485,7 +535,7 @@ fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
 ## W-006: jhyy_v1 `return x ± y` 两 1-char var 发 127（QBE fail）
 
 **ID:** W-006
-**状态:** ACTIVE
+**状态:** ACTIVE (dormant — 当前 src0/ 0 触发面, 2026-08-05 扫)
 **日期:** 2026-08-04
 **触发面:** 函数体末尾 `return X OP Y`（OP ∈ `+`, `-`），X 和 Y 都是 1-char 局部变量（任意 i32/i64 类型）。
 **症状:** jhyy_v1 编译 → exit 127（无输出）→ 可能是 segfault 也可能是 QBE fail。QBE fail 时报 "invalid type for jump argument"。
@@ -548,6 +598,21 @@ fn main_jhyy() -> i32 {
 - 复现 `_test_e.jhyy` / `_test_y.jhyy`（x + y / a + b 都触发）
 - v0 同源码编译 exit 0 → 是 jhyy_v1 自身 bug，不是源 jhyy 问题
 - W-004 修了短名（≤4 char）symtab hash 撞死循环；W-006 是 codegen slot allocator bug，**不同 bug**
+
+### 触发面扫描 2026-08-05 — dormant (0 活跃触发面)
+
+**目标**: 扫当前 src0/ 看 `return X ± Y` (X, Y 都是 1-char) 触发面是否仍存在。
+
+**扫描方法**: `grep -rn 'return [a-z_]\{1,2\} [+\-] [a-z_]\{1,2\}[^_]' compiler/src0/*.jhyy` (排除 2 字符含下划线的合法名)。
+
+**结果**: **0 命中** — 当前 src0/ 内所有 `return X ± Y` 形式已自然避免 W-006 触发面:
+- 翻译阶段已用 `(p as i64 + off) as *u8` cast-chain 形式替代直接 var+var (util.jhyy 11 处)
+- 翻译阶段已用 `return n;` / `return 0 as *u8;` / `return (n as i64 + NODE_SIZE()) as *Type;` 单 operand 形式替代 (codegen / sema / ast)
+- 翻译风格: `let z = x + y; return z;` intermediate let 已普遍 (避免直接 return sum)
+
+**结论**: W-006 在当前 src0/ **0 活跃触发面**, 但根因 (codegen stack-slot allocator bug) 未真修, 新写代码仍可能触发。Status 保持 ACTIVE (dormant), 标记 "dormant" 提醒未来 reader。
+
+**风险**: 如果未来写 `return x + y` (双 1-char) 又会触发 → 需机械改名 / 类型注解 / intermediate let。改动面在 codegen.jhyy stack-slot allocator 真修之前, 工作量随代码增长线性增加。
 
 ---
 
@@ -910,4 +975,69 @@ QBE：`invalid type for second operand %t29 in ceql`
 - `compiler/tests/examples/arith.jhyy` —— 触发用例
 - `compiler/tests/stage1-expanded.sh` —— 验收脚本
 - v0 codegen.c:780-783 —— 对齐的 C 端 emit 路径
+
+---
+
+## Cross-ref: W-008 ↔ W-009 ↔ W-007 ↔ W-005 codegen 转化路径联动
+
+**日期**: 2026-08-05 (v0.9 wip commit 2.14)
+**目的**: 把 4 个 codegen 翻译层 workaround 集中梳理, 标清联动关系 + 真修路径, 避免未来 sprint 单独修一个时漏考虑其他 3 个。
+
+### 4 workaround 摘要
+
+| ID | 触发面 | 根因 | 真修状态 | commit |
+|----|-------|------|---------|--------|
+| **W-005** | `let mut x; x = expr;` (NODE_ASSIGN + NODE_IDENT) segfault | C/jhyy CGContext struct 布局不匹配 (9 字段 offset) | ✅ RESOLVED | v0.9 wip commit 2.11 (CGContext 对齐) + 2.13 (16 处 revert 回 `let mut`) |
+| **W-007** | `fn() -> i64 { return X as i64; }` emit `w copy` | cg_convert_arg 缺 `src=W, dst=L` extsw 分支 | 🟡 ACTIVE (partial — 单 return value 路径修了, struct field + global var 路径仍漏) | v0.8 commit 7 (`0453cef`) partial |
+| **W-008** | cg_find_field_offset 双层 deref 漏 → i64 struct field emit `=w loadw` | cg_find_field_offset helper 把 `*u8` 指针当 `**u8` 多解一层 | ✅ RESOLVED | v0.8 commit 11 |
+| **W-009** | cg_convert_arg src_t==0 早 bail → literal 0 在 ceql/csltl 中以 w 操作数出现 | cg_convert_arg 入口 `if src_t == 0 { return arg; }` 跳过 extsw 路径 | ✅ RESOLVED | v0.8 commit 12 |
+
+### 联动关系
+
+**W-008 ↔ W-009 (链式依赖)**:
+- W-008 修 struct field load 类型 (`=l loadl` for i64 field)
+- W-009 修 literal 0 比较时升级到 l (`extsw` before compare)
+- **缺一不可**: W-008 让 left operand 是 l; W-009 让 right operand (literal 0) 也是 l。任一不修, `ceql/csltl/csgtl` 操作数类型 mismatch → QBE 拒绝
+
+**W-005 ↔ W-007 (NODE_ASSIGN 路径分支)**:
+- W-005 修 `let mut x; x = expr;` 路径 (NODE_ASSIGN + NODE_IDENT + cg_add_local/cg_find_local/cg_emit_store)
+- W-007 修 `return X as i64;` 路径 (NODE_RETURN + NODE_CAST → cg_convert_arg)
+- **不同路径**: W-005 是 store 路径; W-007 是 return 路径。但 cg_emit_store 内部走 cg_convert_arg (类型转换) — W-005 真修后, W-007 partial 路径可能漏的 struct field + global var 路径**才**会被 W-005 真修路径触发
+
+**W-007 ↔ W-008 ↔ W-009 (cg_convert_arg 三向联动)**:
+- W-007 修 cg_convert_arg `src=W, dst=L` extsw 分支
+- W-009 修 cg_convert_arg 入口 bail 条件, 让 extsw 路径走到
+- W-008 修 cg_find_field_offset, 让 cg_emit_store 拿到的 struct field load 是正确类型 (`=l loadl` for i64 field), 喂给 cg_convert_arg 时 src_qt 是 L 而非 W (W-008 修了上游, W-007 才需 `src=L, dst=W` B-let2 copy 分支对应 `src=W, dst=L` extsw 分支)
+
+**W-005 真修 (CGContext 布局对齐) → W-007/W-008/W-009 影响**:
+- CGContext 布局对齐后, cg_add_local/cg_find_local/cg_emit_store 路径全 clean
+- 之前 W-008/W-009 修的部分, 现在在 `let mut x; x = Y;` 路径上**才真正测得到**(之前因 W-005 segfault 在前面挡了)
+- v0.9 wip commit 2.11 后跑 regress, 未观察到 W-007/W-008/W-009 在 src0/ 内的新触发面
+
+### 真修路径共识 (per cross-ref)
+
+| workaround | 真修 | commit | 备注 |
+|-----------|------|--------|------|
+| W-005 | ✅ 已真修 | v0.9 wip commit 2.11 + 2.13 | CGContext C/jhyy 9 字段对齐 |
+| W-007 | 🟡 partial → 等 W-005 后审计 + B-let2 路径补全 | 待 v1.0 sprint 3+ | 单 return value 路径修了; struct field / global var 路径需审计 |
+| W-008 | ✅ 已真修 | v0.8 commit 11 | cg_find_field_offset 单层 deref |
+| W-009 | ✅ 已真修 | v0.8 commit 12 | cg_convert_arg 入口 bail 条件删 |
+
+### 验证 (commit 2.14, 2026-08-05)
+
+- regress 持平 50/53 (commit 2.13 baseline)
+- stage1 byte-equal 持平 6/7 (commit 2.12 baseline)
+- 4 workaround 联动关系: W-005 真修后, W-007 partial 路径在 src0/ 内的触发面待审计 (Task #60 修后 + W-004 verification 后再做)
+
+### 引用
+
+- v0.8 commit 7 (`0453cef`) — W-007 partial (单 return value path)
+- v0.8 commit 9 (`d570c72`) — W-001 byte-by-byte 真修 (W-002/W-004 根因消除)
+- v0.8 commit 10 (`d8535a9`) — W-005 workaround extension (util.jhyy + arena.jhyy)
+- v0.8 commit 11 — W-008 真修 (cg_find_field_offset)
+- v0.8 commit 12 — W-009 真修 (cg_convert_arg 入口)
+- v0.9 wip commit 2.5 — B-let2 真修 (W-007 镜像)
+- v0.9 wip commit 2.11 — W-005 真修 phase 2 (CGContext 对齐)
+- v0.9 wip commit 2.13 — W-005 加固 16 处 revert 回 let mut
+- v0.9 wip commit 2.14 (本 commit) — cross-ref 联动关系文档化
 

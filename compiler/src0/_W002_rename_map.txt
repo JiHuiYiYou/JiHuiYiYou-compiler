@@ -1,3 +1,12 @@
+# ════════════════════════════════════════════════════════════════
+# W-002 ARCHIVE — 211 个 src0/ identifier 的 `X → X_v1` rename map
+# ════════════════════════════════════════════════════════════════
+# 历史: v0.8 commit 7 (`0453cef`) 引入 W-002 (绕 hash_string *i32 overread)
+#       v0.8 commit 9 (`d570c72`) W-001 真修后 W-002 失效
+#       v0.9 wip commit 2.12 (`8a9de1c`) 211 revert 回原名
+# 状态: RESOLVED (per docs/internal/workarounds.md § W-002)
+# 用途: archive — 保留作为可重放参考; 未来若需重新引入 W-002 可直接当 input
+# ════════════════════════════════════════════════════════════════
 # W-002 rename map
 # Total: 211 identifiers renamed to X_v1 form
 

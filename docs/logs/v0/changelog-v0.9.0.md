@@ -19,6 +19,8 @@
 | commit 2.11 | W-005 真修 phase 2 — C 端 CGContext 9 字段对齐 jhyy 端布局 (`*locals` + `sret_slot_id i64` + `*loop_starts/ends/continues` + 字段顺序) | ✅ SHIPPED (2026-08-05) |
 | commit 2.12a | B-match-sema 真修 — sema.jhyy enum variant lookup 指针 `==` → strcmp (var_name_eq_v1 helper, 2 处复用) | ✅ SHIPPED (2026-08-05) |
 | commit 2.12b | B-match-codegen 真修 — codegen.jhyy 加 NODE_ENUM_VARIANT case 翻译 (~40-50 行) | 🟡 待 ship (byte-equal 5/7 → 6/7) |
+| commit 2.13 | W-005 加固 revert 16 处 `*pos_ptr_vN` → `let mut x; x += n` (main.jhyy 6 + arena.jhyy 2 + util.jhyy 7 + 1 if-else simplify) | ✅ SHIPPED (2026-08-05) |
+| commit 2.14 | W-004 BLOCKED verification (Task #60 阻断) + W-002 archive 标记 (删 `_W002_revert.py` + 加 README) + W-006 dormant 标记 + W-008 ↔ W-009 ↔ W-007 ↔ W-005 cross-ref 联动段 | ✅ SHIPPED (2026-08-05) |
 
 ---
 
@@ -1310,3 +1312,148 @@ bash compiler/tests/stage1-expanded.sh
 - v0.8 commit 10 (`d8535a9`) — W-005 扩展到 util.jhyy + arena.jhyy (initial workaround 实施)
 - v0.8 commit 9 (`d570c72`) — W-001 byte-by-byte 真修 (W-005 workaround 初始引入)
 - `docs/internal/workarounds.md` — W-005 标 RESOLVED (本次 ship)
+---
+
+## commit 2.14 — W-004 BLOCKED verification + W-002 archive 标记 + W-006 dormant + 4-workaround cross-ref
+
+**日期**: 2026-08-05
+**承接**: v0.9 wip commit 2.13
+**类型**: 文档 + cleanup (无 codegen 改动, W-004 BLOCKED verification)
+**范围**: 4 块 — (a) W-004 验证 (b) W-004 决策 (c) W-002 archive (d) cross-ref 联动
+
+### 目标
+
+3 块文档同步 + 1 块文件清理:
+- (a) W-004 验证: 实证 jhyy_v1 编 src0/{codegen,parser,sema}.jhyy 看是否 stack overflow (W-004 失效条件 (i))
+- (b) W-004 决策: 基于 (a) 结果标 RESOLVED / 仍 ACTIVE
+- (c) W-002 archive 物理清理: 删 `_W002_revert.py` (一次性脚本), `_W002_rename_map.txt` 顶部加 README
+- (d) cross-ref: W-006 dormant 标记 + W-008 ↔ W-009 ↔ W-007 ↔ W-005 联动段
+
+### 改动 1: (a) W-004 验证 — BLOCKED
+
+**验证方法**: `jhyy_v1.exe build src0/{codegen,parser,sema}.jhyy -o /tmp/<name>` (单独编译)
+
+**结果 (2026-08-05)**:
+
+| 文件 | 现象 | 阻断根因 |
+|------|------|---------|
+| `src0/codegen.jhyy` | `L2198: unexpected token 'while' in expression` + 6 parse errors | Task #60 (parse_expr `while`/else) |
+| `src0/sema.jhyy` | `L1191: unexpected token 'while' in expression` + parse errors | Task #60 (同上) |
+| `src0/parser.jhyy` | 9+ sema errors (unknown type `*Node`, undefined variable) | 跨文件 type 缺失 |
+
+**full src0/main.jhyy (inline_imports)**: 仍 segfault (exit 139) — 但 segfault 在 **parse 阶段** (Task #60 触发), 不是 codegen 阶段 (W-004 触发)。Task #60 是上游 blocker, 不修就无法隔离 W-004。
+
+### 改动 2: (b) W-004 决策 — 仍 ACTIVE (BLOCKED verification)
+
+- W-004 标 RESOLVED 失效条件 (i) 不满足
+- Status: **ACTIVE (BLOCKED verification — Task #60 parse_expr while/else blocks isolation)**
+- 推 v1.0.0 sprint 3+ Task #60 修后**再做 W-004 验证**
+- **contingency**: Task #60 修后, 若 jhyy_v1 编 codegen.jhyy / parser.jhyy / sema.jhyy 不再 stack overflow → W-004 可标 RESOLVED (W-001 真修已间接覆盖);若仍 stack overflow → 立刻开 commit 2.15 (W-004 批量改名)
+
+### 改动 3: (c) W-002 archive 物理清理
+
+| 文件 | git 状态 | 处理 |
+|------|---------|------|
+| `compiler/src0/_W002_rename_map.txt` | **tracked** (commit 2.12 ship, hash `8a9de1c`) | **保留 + 顶部加 README** (11 行) |
+| `compiler/src0/_W002_revert.py` | **gitignored** (`_*.py` 规则) | **删除** (一次性脚本, 已 ship 失去保留价值) |
+
+`_W002_rename_map.txt` README 注释添加:
+```
+# ════════════════════════════════════════════════════════════════
+# W-002 ARCHIVE — 211 个 src0/ identifier 的 `X → X_v1` rename map
+# 历史: v0.8 commit 7 (`0453cef`) 引入 → v0.8 commit 9 W-001 真修 → v0.9 commit 2.12 revert
+# 状态: RESOLVED, 保留作为可重放参考
+# ════════════════════════════════════════════════════════════════
+```
+
+### 改动 4: (d) cross-ref 文档
+
+**W-006 dormant 标记** (status 仍 ACTIVE, 加 dormant 提示):
+- 触发面扫描 2026-08-05: 当前 src0/ **0 命中** `return X ± Y` (X/Y 双 1-char)
+- 翻译阶段已自然避免 (cast-chain / single-operand / intermediate let)
+- 根因 (codegen stack-slot allocator bug) 未真修, 未来写 `return x + y` 又会触发
+
+**W-008 ↔ W-009 ↔ W-007 ↔ W-005 cross-ref** (新 section):
+- W-008 ↔ W-009 链式依赖 (struct field load type + literal 0 extsw, 缺一不可)
+- W-005 ↔ W-007 不同路径 (W-005 store 路径 / W-007 return 路径)
+- W-007 ↔ W-008 ↔ W-009 (cg_convert_arg 三向联动 + B-let2 镜像)
+- W-005 真修 (CGContext 布局对齐) → 让 W-007/W-008/W-009 在 let-mut 路径上**才真正测得到**
+
+**索引表更新**:
+- W-004 加 "(BLOCKED verification — Task #60)"
+- W-006 加 "(dormant — 0 触发面 in current src0/)"
+- 新增 cross-ref 索引项 "W-008 ↔ W-009 ↔ W-007 ↔ W-005 (codegen 转化路径联动)"
+
+### 验证 (2026-08-05)
+
+```bash
+# 1. 触发面扫描 (W-006 dormant 实证)
+grep -rn 'return [a-z_]\{1,2\} [+\-] [a-z_]\{1,2\}[^_]' compiler/src0/*.jhyy
+# 0 命中 ✓
+
+# 2. _W002_revert.py 删除验证
+ls compiler/src0/_W002_revert.py
+# (not found) ✓
+
+# 3. _W002_rename_map.txt README + tracked 验证
+git ls-files compiler/src0/_W002_rename_map.txt
+# compiler/src0/_W002_rename_map.txt ✓ (tracked, 顶部 11 行 README)
+
+# 4. regress 持平
+python compiler/build/bin/regress.py
+# 50/53 PASS, 0 failed, 3 skipped   (持平 commit 2.13 baseline)
+
+# 5. stage1 byte-equal 持平
+bash compiler/tests/stage1-expanded.sh
+# pass: 6 / 7   (持平 commit 2.13 baseline)
+
+# 6. v0 build clean
+/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra compiler/src/*.c \
+    -o compiler/build/bin/jhyy.exe -I compiler/src
+# (no warnings)
+```
+
+### 不验证 (per user plan)
+
+- **W-004 实证**: 已 BLOCKED, 推 v1.0.0 sprint 3+ Task #60 修后再做
+- **main.jhyy runtime (jhyy_v1 编 src0/main.jhyy 跑 main.jhyy)**: 已知 25KB 大文件触发 Task #60 (parse_expr), 不在本 commit 范围
+
+### 已知遗留
+
+- W-004 status ACTIVE, 失效条件 (i) 实证路径 BLOCKED by Task #60
+- W-006 status ACTIVE dormant, 根因 (codegen stack-slot allocator) 未真修
+- W-007 partial 真修, struct field + global var 路径需 W-005 后审计
+- 跨边界 (jhyy_OS) 决策 D5 spec baseline 锁 + D11 `&mut` 矩阵 — 不在 2.14 范围
+
+### 影响
+
+- **W-004 / W-006 决策清晰化**: W-004 BLOCKED verification 有明示 (Task #60 dependency); W-006 dormant 有数据支撑 (0 命中扫描)
+- **W-002 archive 物理清理**: 一次性脚本删除 (释放 2220B), tracked 文件保留 (ship history 完整)
+- **cross-ref 联动段**: 给未来 sprint 设计者清晰 4-workaround 联动视图, 避免单独修一个漏考虑其他
+- **AUDIT 准备就绪**: revert 后 src0/ + W-002 archive 清理 + W-004/W-006 状态明示 + cross-ref 联动 → AUDIT 5 struct 阶段所有前置达成
+
+### 下一步
+
+| commit / 阶段 | 主题 | 范围 | 依赖 |
+|--------------|------|------|------|
+| **AUDIT** | 5 struct (Sym/SymTable/Parser/Lexer/SemaContext) 字段访问审计 | ~200 行 review + 3-5 真修 | 本 commit (2.14) |
+| B | main.jhyy 收尾 (resolve_imports 翻译 ~300 行) → 推 v1.0 sprint 3 B' | ~300 行 | AUDIT + Task #60 |
+| C' | codegen 确定性 audit (.data 排序 + stack slot 排序 + hash 桶迭代排序) | ~50 行 | B |
+| D | N=3 byte-equal (在 6/7 层面) | 验证 | C' |
+| v1.0 sprint 3 (Task #52) | parser.jhyy NODE_CONST_DECL 补全 + jhyy_v1 sema 内部 fix → 7/7 | | D |
+| v1.0 sprint 5 | N=3 在 7/7 层面 → M4 hard 闭环 | | v1.0 sprint 3 |
+| Task #60 | Fix parse_expr to handle while/else in expression context | parser.jhyy 翻译 | 无 |
+| Task #60 修后 → W-004 验证 | jhyy_v1 编 codegen.jhyy / parser.jhyy / sema.jhyy | | Task #60 |
+| 2.15 (contingency) | W-004 批量改名 (触发面消除, 如果 Task #60 修后仍 stack overflow) | ~500 行机械改名 | Task #60 修 + W-004 verification |
+
+### 引用
+
+- v0.9 wip commit 2.11 — W-005 真修 (CGContext 对齐, W-004 验证前提)
+- v0.9 wip commit 2.12 — W-001 docs 标 RESOLVED + W-002 211 revert (W-002 archive 起源)
+- v0.9 wip commit 2.13 — W-005 加固 16 处 revert (W-005 RESOLVED 锁定)
+- v0.8 commit 9 (`d570c72`) — W-001 byte-by-byte 真修 (W-002/W-004 根因消除)
+- v0.8 commit 11 — W-008 真修 (cg_find_field_offset)
+- v0.8 commit 12 — W-009 真修 (cg_convert_arg 入口 bail)
+- `docs/internal/workarounds.md` — 4 块改动集中 (本 commit)
+- `compiler/src0/_W002_rename_map.txt` — archive 文件 (tracked, README 已加)
+- `compiler/src0/_W002_revert.py` — 已删除 (一次性脚本)
