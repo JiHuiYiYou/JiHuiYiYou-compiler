@@ -185,8 +185,8 @@ docs/internal/workarounds.md — B-let2 cross-ref entry 完整
 
 | commit | 主题 | 状态 |
 |--------|------|------|
-| commit 2.7 | B-data 根因重诊断 — parser CERR (顶层 const 拒绝),doc-only | ✅ 本 commit |
-| commit 2.8 | B-struct (struct by-value sret 路径) 真修 | 🔴 待 (本 commit 后立即启动) |
+| commit 2.7 | B-data 根因重诊断 — parser CERR (顶层 const 拒绝),doc-only | ✅ SHIPPED (本 commit) |
+| commit 2.8 | B-struct (struct by-value 字段 copy 偷懒) 真修 | ✅ SHIPPED (本 commit) |
 | commit 2.8 | B-struct (struct by-value sret 路径) 真修 | 🔴 待 |
 | commit 2.9 | B-match (match-expr 翻译补全) 真修 | 🔴 待 |
 | commit 2.10 | W-005 真修 phase 1 (codegen.c NODE_ASSIGN let-mut fix) | 🔴 待 |
@@ -385,3 +385,97 @@ python -c "..."  # 3 OK baseline
 | B-data 本 commit 范围? | **doc-only** | 只更新 codegen-pitfalls.md + changelog + revert const_array.jhyy 实验 |
 | 跳到下一 commit? | **commit 2.8 (B-struct)** | B-struct 是真实 codegen gap(struct_val_pass diff 显示 v0 vs v1 字段 copy 差异:`%t11 =l copy %t5` vs 直接 `%t11 =w loadw %t5`) |
 | B-match 何时修? | **commit 2.9** | match_exhaustive 在 jhyy_v1 segfault (exit 127) — 不是 CERR,是 NODE_MATCH codegen fall-through return zero(Task #50 pending) |
+
+---
+
+## v0.9 wip commit 2.8: B-struct 真修 — `cg_copy_struct` offset==0 加 `copy`
+
+**日期**: 2026-08-05
+**承接**: v0.9 wip commit 2.7
+**类型**: codegen fix (~30 行)
+
+### 目标
+
+修 B-struct: jhyy_v1 `cg_copy_struct` 偷懒 — offset==0 时直接复用 src_addr/dst_addr,不 alloc 新 tmp,导致 struct 字段 loadw 直接用 src_addr,字段编号错位 + byte-equal diff。
+
+**对齐 v0**: v0 codegen.c:140-148 总是 alloc src_off/dst_off 新 tmp,offset==0 时 emit `copy %tA, src_addr`,offset>0 时 emit `add %tA, offset`。
+
+### 完成定义(全达成 ✅)
+
+| 标准 | 状态 |
+|------|------|
+| `cg_copy_struct` 对齐 v0 codegen.c:140-148 | ✅ (codegen.jhyy:456-481) |
+| byte-equal ≥ 5/7 | ✅ (5/7:hello + fib_renamed + struct_val_pass + arith + control_flow) |
+| regress 持平 | ✅ (3 OK = 持平 commit 2.7 baseline) |
+
+### 改动 1: `compiler/src0/codegen.jhyy:456-481` — `cg_copy_struct` 字段地址 alloc 路径
+
+**改前(偷懒)**:
+```jhyy
+let mut src_off: IRVal = src_addr;
+let mut dst_off: IRVal = dst_addr;
+if offset_v1 > (0 as i64) {
+    src_off = ir_new_tmp(ir, QBE_L());
+    dst_off = ir_new_tmp(ir, QBE_L());
+    ir_emit_binary(ir, src_off, "add" as *u8, src_addr, ir_new_int(offset_v1));
+    ir_emit_binary(ir, dst_off, "add" as *u8, dst_addr, ir_new_int(offset_v1));
+}
+```
+
+**改后(对齐 v0)**:
+```jhyy
+let mut src_off: IRVal = ir_new_tmp(ir, QBE_L());
+let mut dst_off: IRVal = ir_new_tmp(ir, QBE_L());
+if offset_v1 > (0 as i64) {
+    ir_emit_binary(ir, src_off, "add" as *u8, src_addr, ir_new_int(offset_v1));
+    ir_emit_binary(ir, dst_off, "add" as *u8, dst_addr, ir_new_int(offset_v1));
+} else {
+    // ir_emit_copy 只接 i64 literal → 走 inline str emit
+    ir_emit_str(ir, "    %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, src_off.id);
+    ir_emit_str(ir, " =l copy %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, src_addr.id);
+    ir_emit_str(ir, "\n" as *u8);
+    ir_emit_str(ir, "    %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, dst_off.id);
+    ir_emit_str(ir, " =l copy %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, dst_addr.id);
+    ir_emit_str(ir, "\n" as *u8);
+}
+```
+
+**根因**: struct_val_pass.jhyy (`let p = Point { x: 10, y: 25 }; sum_point(p);`) 触发 cg_copy_struct 字段 copy:
+- v0: 总是 alloc tmp + emit `copy %t11, %t5` + `copy %t12, %t10` + 后续 loadw + storew
+- jhyy_v1 旧: offset==0 时不 alloc,直接 `%t11 =w loadw %t5` + `storew %t11, %t10` → 字段 tmp 编号错位
+
+### 验证
+
+```bash
+# 1. byte-equal baseline
+bash compiler/tests/stage1-expanded.sh
+# [PASS] hello
+# [PASS] fib_renamed
+# [PASS] struct_val_pass    ← 修复后 PASS
+# [FAIL] match_exhaustive
+# [PASS] arith
+# [FAIL] const_array  ← parser CERR (moot,非本 commit)
+# [PASS] control_flow
+# pass: 5 / 7   (commit 2.7: 4/7)
+
+# 2. regress 持平
+python -c "..."  # 3 OK baseline
+
+# 3. struct_val_pass diff 空
+diff /tmp/stage1-expanded/struct_val_pass_v0_tmp.il compiler/tests/examples/struct_val_pass.il
+# (空)
+```
+
+### 下一步
+
+| commit | 主题 | 范围 |
+|--------|------|------|
+| commit 2.9 | B-match 真修 (NODE_MATCH codegen + cg_match_pattern helper) | ~120 行 |
+| commit 2.10+ | W 真修 phase 1/2 | 见 final path |
+| commit 4 (C) | byte-equal 6/7 (const_array 不可达上限) | 等 commit 2.9 |
+| B | main.jhyy 收尾 | 等 C |
+| D | Stage 2 真闭环 | v1.0 目标 |

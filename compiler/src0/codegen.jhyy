@@ -454,13 +454,28 @@ fn cg_copy_struct(cg_raw_v1: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal)
         let offset_v1 = *foffset_ptr;
 
         // compute field addresses
-        let mut src_off: IRVal = src_addr;
-        let mut dst_off: IRVal = dst_addr;
+        // v0.9 wip commit 2.8 (B-struct fix): 对齐 v0 codegen.c:140-148
+        //   - 总是 alloc src_off/dst_off 新 tmp (即使 offset==0)
+        //   - offset > 0: emit `add %tA, offset`
+        //   - offset == 0: emit `copy %tA, src_addr/dst_addr`
+        //   jhyy_v1 旧版本偷懒 offset==0 时直接用 src_addr/dst_addr 不 alloc → 字段编号错位 byte-equal diff
+        let mut src_off: IRVal = ir_new_tmp(ir, QBE_L());
+        let mut dst_off: IRVal = ir_new_tmp(ir, QBE_L());
         if offset_v1 > (0 as i64) {
-            src_off = ir_new_tmp(ir, QBE_L());
-            dst_off = ir_new_tmp(ir, QBE_L());
             ir_emit_binary(ir, src_off, "add" as *u8, src_addr, ir_new_int(offset_v1));
             ir_emit_binary(ir, dst_off, "add" as *u8, dst_addr, ir_new_int(offset_v1));
+        } else {
+            // ir_emit_copy 只接受 i64 literal,这里要 `copy %tN` 从 IRVal src/dst → 走 inline emit
+            ir_emit_str(ir, "    %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, src_off.id);
+            ir_emit_str(ir, " =l copy %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, src_addr.id);
+            ir_emit_str(ir, "\n" as *u8);
+            ir_emit_str(ir, "    %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, dst_off.id);
+            ir_emit_str(ir, " =l copy %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, dst_addr.id);
+            ir_emit_str(ir, "\n" as *u8);
         }
         let ft_kind_v1 = (*ftype).kind;
         if ft_kind_v1 == KIND_STRUCT() {

@@ -38,7 +38,7 @@
 |---|-----|------|----------------------------------|------|--------|--------|
 | 1 | **B-φ1** ✅ | `fib_renamed` / `control_flow` | if-expr phi slot 缺;jhyy_1 emit `ret %t4` 而 jhyy_0 emit `ret %t7`(`%t7 =w copy %t4`) | v0 if-expr codegen 用 QBE `phi`(merge 块 alloc result,两边 store);v1.0.0 sprint 5 commit 4 改走 store/load 模式(v0 codegen bug 2 workaround:nested if-else phi predecessor mismatch) | 🔴 中 | ✅ v0.9 commit 2.6 (本 commit) |
 | 2 | **B-let2** ✅ | `arith` | `l → w` narrow 缺;`qbe_type_of` i64 → i32 字段赋值无 emit `copy`/`extuw` | jhyy_v1 `cg_convert_arg` (codegen.jhyy:544-634) 历史上只覆盖 `src=w, dst=l` (extsw) + `src=l, dst=d/s`;**漏 `src=l, dst=w`** —— v0 codegen.c:780-783 显式 emit `copy`(QBE 'copy' from l to w 隐式截断) | 🟢 必修 | ✅ v0.9 commit 2.5 |
-| 3 | **B-struct** | `struct_val_pass` | struct by-value sret 参数路径差异(具体 diff 见 `stage1-expanded.sh` 输出) | jhyy_v1 NODE_CALL sret 路径(codegen.jhyy:1414-1538) emit `ret_slot` alloc + pass as `l %ret` arg,v0 codegen.c:1140-1234 emit 顺序 / slot 编号细节不一致 | 🟡 中 | 待 v0.9 commit 2.7+ |
+| 3 | **B-struct** ✅ | `struct_val_pass` | struct by-value 字段 copy 时 jhyy_v1 offset==0 偷懒不 alloc tmp (直接用 src_addr/dst_addr),v0 codegen.c:140-148 总是 alloc + emit `copy`(offset==0) 或 `add`(offset>0) | jhyy_v1 `cg_copy_struct` (codegen.jhyy:430-490) 偷懒: offset==0 时 src_off = src_addr (复用),导致字段 loadw 直接用 src_addr → 字段编号错位 + byte-equal diff | 🟡 中 | ✅ v0.9 commit 2.8 |
 | 4 | **B-match** | `match_exhaustive` | match-expr codegen 缺;NODE_MATCH case `cg_expr_v1` 当前 fall-through 返回 zero IRVal | v0 codegen.c 完整 match(codegen.c:1310-1450);jhyy_v1 commit 4 没翻译 match-expr(sprint 5 commit 4 占位 return zero)—— **CERR big 4 中的 2 个**(dungeon_game + match_test),v1.0.0 sprint 3 处理 | 🔴 高 | 待 v1.0.0 sprint 3 (parser 翻译 + codegen 翻译) |
 | 5 | **B-data** ⚠️ moot (parser CERR) | `const_array` | jhyy_v1 parser **直接拒绝** 顶层 `const NAME: TYPE = [...];` (CERR: "expected ;, got ident" on line 7)→ 不生成 .il,byte-equal diff 不可观察 | **不是 codegen gap** —— jhyy_v1 parser 翻译层缺顶层 const decl (sprint 5 commit 4 没翻译 NODE_CONST_DECL parsing)。归并到 v1.0.0 sprint 3 parser 翻译 (Task #52) | 🟡 moot | ✅ v0.9 commit 2.7 (文档化,无 codegen 改动) |
 | 6 | **B-testset** | 7 测试集 baseline 锁定 | Stage 1 byte-equal baseline = `hello`(已 PASS)/ `arith`(本 commit 修) / 5 FAIL | 测试集本身锁定:文件位置 + EXPECT + 不依赖 let mut / 不依赖 hash 触发面 | 🟢 完成 | ✅ v0.9 commit 2.5 |
@@ -97,7 +97,7 @@
 
 ### 2.3 B-struct / B-match / B-data 概要
 
-**B-struct** (struct by-value sret): jhyy_v1 NODE_CALL sret 路径当前 emit 顺序 / temp 编号 / arg slot offset 跟 v0 codegen.c 不同 → 待 v0.9 commit 2.7+ 加 `-emit-sret-aligned` flag 对齐 v0 序列;或接受 diff(Stage 1 仅要求 hello + 至少 1/6 修)。
+**B-struct** (struct by-value 字段 copy) — **RESOLVED commit 2.8**: jhyy_v1 `cg_copy_struct` (codegen.jhyy:430-490) 偷懒 — offset==0 时直接用 src_addr / dst_addr (复用,不 alloc tmp),导致字段 `loadw %src_addr` 直接用 → 字段编号错位 + byte-equal diff。v0 codegen.c:140-148 总是 alloc src_off/dst_off + emit `copy`(offset==0) 或 `add`(offset>0)。修复:对齐 v0 路径 + 用 inline emit `copy %tN` (ir_emit_copy 只接 i64 literal,不接 IRVal src)。
 
 **B-match** (match-expr codegen): jhyy_v1 cg_expr_v1 NODE_MATCH case 占位 return zero → 任何 match-expr 测试 QBE 报 "undefined temp" → 待 v1.0.0 sprint 3(parser 翻译 + codegen 翻译)。这是 CERR big 4 中的 2 个(dungeon_game + match_test)。
 
@@ -142,7 +142,16 @@
 | regress 持平 | ✅ (3 OK = 持平 commit 2.6 baseline) |
 | byte-equal 持平 4/7 | ✅ (const_array FAIL 保持,根因 = parser CERR 不算 codegen gap) |
 
-**下一步**: v0.9 commit 2.8 (B-struct 真修) + commit 2.9 (B-match 真修) + commit 2.10+ (W 真修) → commit 4 final (byte-equal 7/7)
+### 2.8 commit 2.8 增量(B-struct 真修)
+
+| 标准 | 状态 |
+|------|------|
+| cg_copy_struct 对齐 v0 codegen.c:140-148 路径 | ✅ (codegen.jhyy:456-481) |
+| offset==0 总是 alloc src_off/dst_off + inline emit `copy %tN` | ✅ (ir_emit_copy 不接 IRVal src → 走 inline str emit) |
+| byte-equal ≥ 5/7 | ✅ (5/7:hello + fib_renamed + struct_val_pass + arith + control_flow) |
+| regress 持平 | ✅ (3 OK = 持平 commit 2.7 baseline) |
+
+**下一步**: v0.9 commit 2.9 (B-match 真修 — NODE_MATCH codegen 翻译 + cg_match_pattern helper) + commit 2.10+ (W 真修) → commit 4 final (byte-equal 7/7 const_array 不可达 6/7 上限)
 
 ---
 
@@ -156,3 +165,4 @@
 | v0.9 commit 2.5 (B-let2) | `cg_convert_arg` 漏 `src=l, dst=w` narrow 分支 | v0.9 wip commit 2.5 |
 | v0.9 commit 2.6 (B-φ1) | if-expr 提前 alloc result_slot 占 tmp 编号 + 缺 phi emit | v0.9 wip commit 2.6 |
 | v0.9 commit 2.7 (B-data) | (诊断) const_array FAIL 根因 = parser CERR 而非 codegen gap → 推迟到 v1.0.0 sprint 3 (Task #52) | v0.9 wip commit 2.7 (doc-only) |
+| v0.9 commit 2.8 (B-struct) | `cg_copy_struct` offset==0 偷懒: 不 alloc src_off/dst_off → 字段编号错位 + byte-equal diff | v0.9 wip commit 2.8 |
