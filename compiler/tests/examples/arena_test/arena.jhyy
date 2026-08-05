@@ -62,7 +62,7 @@ fn ptr_add(p: *u8, off: i64) -> *u8 {
 }
 
 fn arena_new_block(a: *Arena, min_size: i64) -> i32 {
-    let size = (*a).def_size;
+    let mut size = (*a).def_size;
     if size < min_size {
         size = min_size;
     }
