@@ -373,7 +373,15 @@ fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
 
 **失效条件:** jhyy_v1 codegen 修对 NODE_ASSIGN[NODE_IDENT] 的 let-mut target → emit 正确 `storew` 到 stack slot → W-005 可移除并恢复 `let mut x; x = ...;` 风格。
 
-**superseder:** v0.9.0 commit 2 (planned) — 真修 jhyy_v1 codegen NODE_ASSIGN[NODE_IDENT] let-mut path; W-005 仍 ACTIVE 待 v0.9 真修。
+**superseder:** v0.9 wip commit 2.10 (诊断性 doc-only,无 codegen 改动) — 真修推后到 v0.9 wip commit 2.11+ 或更晚。
+
+**根因重诊断(v0.9 wip commit 2.10,2026-08-05):** W-005 segfault **不是** "NODE_ASSIGN emit 错" 那么直接 —— 是 **C 端 codegen.c CGContext 跟 jhyy 端 codegen.jhyy CGContext struct 布局不匹配**:
+- C 端: `LocalEntry locals[MAX_LOCALS]` (24576 bytes inline array),nlocals 在 offset 24584, has_sret 在 offset 24592+, loop_starts 在 offset 24600+ ...
+- Jhyy 端: `locals: *u8` (指针,arena 单独 alloc),nlocals 在 offset 16, has_sret 在 offset 40, loop_starts 在 offset 48 ...
+- Jhyy_v1 编译后,offset 错位 → `(*cg).locals` 实际读到 `locals[0].sym` (jhyy 当指针用) → cg_find_local 把 sym 指针当 locals buffer base → `ptr_add_u8(sym, 0)` 指向 Sym 结构 → `entry_sym_p == sym` 凑巧成立 → 后续读 `entry_ptr + 8` (kind 字段) 实际读 Sym 结构的非 sym 字节 → 越界读 → segfault
+- **修复路径 (post-v0.9 wip):** 把 C 端 CGContext 改成 jhyy 端布局 (LocalEntry *locals + separate alloc) + 把 sret_slot 改成 sret_slot_id i64 + 把 loop_starts/ends/continues 改成 *u8 指针(单独 arena alloc)。涉及全部 codegen.c 字段访问路径 (~30 处)。**scope 超出 commit 2.10**,推迟到 commit 2.11+ 或独立 sprint。
+
+**影响:** 不影响 commit 2.10 目标 (byte-equal 持平 5/7, regress 持平) —— 现状 byte-equal 5/7 已稳定,let-mut + assign 触发面继续走 W-005 workaround (`*pos_ptr_vN` 模式)。
 
 **引用:**
 - `memory/feedback_v0_codegen_bug_workarounds.md` Bug 6 (let-mut assignment) + Bug 7b (nested let-mut)

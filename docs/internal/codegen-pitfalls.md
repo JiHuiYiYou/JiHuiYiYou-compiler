@@ -165,7 +165,7 @@
 | byte-equal 持平 5/7 | ✅ (5/7: hello + fib_renamed + struct_val_pass + arith + control_flow) |
 | regress 持平 | ✅ (3 OK = 持平 commit 2.8 baseline;实测 50/53 PASS) |
 
-**下一步**: v0.9 commit 2.10+ (W 真修 phase 1/2) → commit 4 final (byte-equal 6/7,const_array 不可达上限)
+**下一步**: v0.9 commit 2.10 (W-005 根因重诊断,doc-only,已 SHIPPED 2026-08-05) → commit 2.11+ (W-005 真修: C/jhyy CGContext 布局对齐) → commit 4 final (byte-equal 6/7,const_array 不可达上限)
 
 ---
 

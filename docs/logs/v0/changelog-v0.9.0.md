@@ -15,6 +15,7 @@
 | commit 2.7 | B-data 根因重诊断 — parser CERR (顶层 const 拒绝),不是 codegen gap → 推迟 v1.0.0 sprint 3 (Task #52),本 commit doc-only 无 codegen 改动 | ✅ SHIPPED (2026-08-05) |
 | commit 2.8 | B-struct 真修 — `cg_copy_struct` offset==0 加 `copy` 对齐 v0 | ✅ SHIPPED (2026-08-05) |
 | commit 2.9 | B-match 真修 — NODE_MATCH codegen + `cg_match_pattern` helper + `read_file` malloc sz+4 修 | ✅ SHIPPED (2026-08-05) |
+| commit 2.10 | W-005 根因重诊断 — C/jhyy CGContext struct 布局不匹配(doc-only,无 codegen 改动);真修推后到 commit 2.11+ | ✅ SHIPPED (2026-08-05) |
 
 ---
 
@@ -620,11 +621,129 @@ python compiler/build/bin/regress.py
 
 | commit | 主题 | 范围 |
 |--------|------|------|
-| commit 2.10 | W-005 真修 phase 1 (codegen.c NODE_ASSIGN let-mut fix) | 待 W 真修 |
-| commit 2.11 | W-003 真修 | 待 |
-| commit 2.12 | W-001 真修 (高风险 hash_string 重写) | 待 |
-| commit 2.13 | W-005 加固 phase 2 | 待 W-001 |
-| commit 2.14 | W-006 + W-002/W-004 + W-008/W-009 文档 | 待 |
-| commit 4 (C) | byte-equal final 6/7 | 等 commit 2.10+ |
+| commit 2.10 | W-005 根因重诊断 — C/jhyy CGContext 布局 mismatch | ✅ SHIPPED (本 commit, doc-only) |
+| commit 2.11+ | W-005 真修 (CGContext 布局对齐) | 待 scope 评估 |
+| commit 4 (C) | byte-equal final 6/7 | W-005 不阻塞(已持平 5/7) |
 | B | main.jhyy 收尾 | 等 C |
 | D | Stage 2 真闭环 N=3 | v1.0 目标 |
+
+---
+
+## v0.9 wip commit 2.10: W-005 根因重诊断 — C/jhyy CGContext struct 布局不匹配 (doc-only)
+
+**日期**: 2026-08-05
+**承接**: v0.9 wip commit 2.9
+**类型**: 诊断性 commit, **无 codegen 改动**
+
+### 目标
+
+修 W-005 (`let mut x: T; x = expr;` jhyy_v1 100% segfault)。原计划 codegen.c NODE_ASSIGN let-mut path 真修,本 commit 启动时实际 trace segfault 位置 → 发现根因不是 NODE_ASSIGN 而是 **C 端 codegen.c CGContext 跟 jhyy 端 codegen.jhyy CGContext struct 布局不匹配**。
+
+### 完成定义(全达成 ✅)
+
+| 标准 | 状态 |
+|------|------|
+| W-005 segfault 根因重诊断 | ✅ (C/jhyy CGContext struct 布局 mismatch,非 NODE_ASSIGN 错) |
+| workarounds.md W-005 加根因段 + superseder 改 commit 2.10 | ✅ |
+| byte-equal 持平 5/7 | ✅ (5/7,let-mut 触发面继续 W-005 workaround) |
+| regress 持平 baseline | ✅ (3 OK = 持平 commit 2.9) |
+| 无 codegen 改动 | ✅ (本 commit doc-only) |
+
+### 根因重诊断
+
+**Trace (commit 2.10 启动时):**
+
+最小复现 `/c/msys64/tmp/test_w5.jhyy`:
+```jhyy
+extern fn printf(fmt: *u8, val: i32) -> i32;
+fn main_jhyy() -> i32 {
+    let mut x: i32 = 10;
+    x = 20;
+    printf("x = %d\n", x);
+    x
+}
+```
+
+`jhyy_v1 build /c/msys64/tmp/test_w5.jhyy` → segfault (exit 139)。
+
+逐步 trace:
+- cg_add_local (`let mut x: i32 = 10;`) → 成功写 locals[0]
+- cg_find_local (`x = 20;` NODE_ASSIGN) → 进入 loop i=0
+- `*entry_sym_p == sym` **凑巧 true** (C-side locals[0].sym = X sym ptr; jhyy 看 offset 8 当指针 = X sym ptr; 因为 locals[0].sym 是结构第一个字段,字节布局跟指针一致)
+- 进入 "match" 分支 → `value_u8_v1 = entry_ptr + 8`
+- 但 `entry_ptr` **不是 locals buffer**,而是 **sym pointer**(因为 `(*cg).locals` jhyy 读 offset 8,但 C 端 offset 8 是 locals[0] 的 sym 字段,jhyy 把这 8 字节当指针)
+- `value_u8_v1 = sym_ptr + 8` 指向 **Sym 结构 bytes 8-11**
+- `*kind_p_v1` 读 Sym 结构偏移 8-11 → 大概率越界或读到无效指针 → segfault
+
+**C/jhyy CGContext 布局不匹配:**
+
+| 字段 | C 端 (codegen.c) | jhyy 端 (codegen.jhyy) | 一致? |
+|------|------------------|------------------------|------|
+| locals | `LocalEntry locals[512]` (inline array, 24576 bytes) | `locals: *u8` (pointer) | ❌ |
+| nlocals | offset 24584 (int) | offset 16 (i32) | ❌ |
+| current_ret_type | offset 24588 (pointer) | offset 24 (pointer) | ❌ |
+| sret_slot | offset 24596 (IRVal, 32 bytes) | offset 32 (sret_slot_id i64) | ❌ |
+| has_sret | offset 24628 (int) | offset 40 (i32) | ❌ |
+| loop_starts | offset 24636 (IRVal[32] inline, 1024 bytes) | offset 48 (pointer) | ❌ |
+| loop_ends | offset 25660 (IRVal[32] inline, 1024 bytes) | offset 56 (pointer) | ❌ |
+| loop_continues | offset 26684 (IRVal[32] inline, 1024 bytes) | offset 64 (pointer) | ❌ |
+| loop_depth | offset 27708 (int) | offset 72 (i32) | ❌ |
+
+**全部 9 个字段 offset 都不一致**(除了 ir 在 offset 0 都对)。jhyy_v1 编译后任何对 `(*cg).X` 的访问都读到错的字节。
+
+### 为什么 fib_renamed / arith 等测试还能跑?
+
+- is_stack=0 (immutable `let`) 路径: cg_find_local 返回的 IRVal 里 id 字段读 C-side padding (offset 4 garbage),但 fib_renamed / arith 不依赖 id 字段
+- is_stack=1 (mutable `let mut`) 路径: cg_find_local 返回的 IRVal 要拿 id (slot temp number) 喂给 cg_emit_store → 拿到 garbage → segfault
+
+### 修复路径 (post-v0.9 wip)
+
+把 C 端 CGContext 改成 jhyy 端布局:
+1. `LocalEntry *locals` (指针) + separate alloc (`MAX_LOCALS * sizeof(LocalEntry)`,calloc 清零)
+2. `sret_slot` → `int64_t sret_slot_id` (jhyy 已改)
+3. `IRVal loop_starts[MAX_LOOP_DEPTH]` → `IRVal *loop_starts` (指针,separate alloc)
+4. 同步 loop_ends / loop_continues
+5. 全部 `cg->locals[i]` 改成 `cg->locals[i]` (指针访问) — 6 处
+6. 全部 `cg->loop_starts[i]` / `cg->loop_ends[i]` / `cg->loop_continues[i]` 改成 `cg->loop_starts[i]` (指针访问)
+7. `free(cg.locals)` 在 `cg_func` 末尾
+
+**scope 评估:** ~50 行 C 端改动 + 1 处 init + 1 处 free。**风险:中-高**(CGContext 是 codegen 全局上下文,改 field offset 影响所有 cg_expr/cg_stmt 路径)。**预计 commit 2.11** (跟 W-003 真修合并,W-003 也涉及 codegen_stmt 增强)。
+
+### 改动 1: `docs/internal/workarounds.md` W-005 段更新
+
+加根因重诊断段 + superseder 改 commit 2.10 + 影响说明。
+
+### 改动 2: `docs/logs/v0/changelog-v0.9.0.md` 加本 commit 段
+
+### 验证
+
+```bash
+# 1. byte-equal 持平 5/7
+bash compiler/tests/stage1-expanded.sh
+# [PASS] hello
+# [PASS] fib_renamed
+# [PASS] struct_val_pass
+# [FAIL] match_exhaustive  ← jhyy_v1 sema "enum has no variant" 已知 bug
+# [PASS] arith
+# [FAIL] const_array  ← parser CERR (moot)
+# [PASS] control_flow
+# pass: 5 / 7   (持平 commit 2.9)
+
+# 2. regress 持平
+python compiler/build/bin/regress.py
+# 50/53 PASS, 0 failed, 3 skipped   (持平 commit 2.9 baseline)
+
+# 3. let-mut 复现仍 segfault (W-005 workaround 继续有效)
+./compiler/build/bin/jhyy_v1.exe compile /c/msys64/tmp/test_w5.jhyy -o /tmp/me9
+# exit 139 (segfault,跟 commit 2.9 一致,W-005 workaround 在 src0/ 内绕开触发面)
+```
+
+### 下一步
+
+| commit | 主题 | 范围 |
+|--------|------|------|
+| commit 2.11 | W-005 真修 (CGContext 布局对齐 C ↔ jhyy) + W-003 真修 | ~50 行 C + ~30 行 jhyy |
+| commit 2.12 | W-001 真修 (高风险 hash_string 重写) | 待 |
+| commit 2.13 | W-005 加固 phase 2 (main.jhyy 4 处 *pos_ptr revert → let-mut) | 等 W-005 真修 |
+| commit 2.14 | W-006 + W-002/W-004 + W-008/W-009 文档 | 待 |
+| commit 4 (C) | byte-equal final 6/7 | W-005 不阻塞(已持平 5/7) |

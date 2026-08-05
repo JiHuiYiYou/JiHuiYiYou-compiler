@@ -216,7 +216,6 @@ fn build_il_v1(input: *u8, output: *u8) -> i32 {
     parser_init(&parser_v, &lexer, &arena);
 
     let ast_node_v1 = parser_parse(&parser_v);
-    jh_fputs_stderr("DEBUG_ME9: parsed\n" as *u8);
     if parser_v.error_count > (0 as i32) {
         jh_fputs_stderr("parse errors\n" as *u8);
         free(source_v1);
