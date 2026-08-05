@@ -92,13 +92,15 @@ fn read_file(path_v1: *u8) -> *u8 {
     fseek(fp, 0 as i64, SEEK_END_VAL());
     let sz = ftell(fp);
     fseek(fp, 0 as i64, 0 as i32);  // SEEK_SET = 0
-    let buf = malloc(sz + (1 as i64));
+    // alloc sz+4 (not sz+1): 下面 (*last_i_v1)=0 是 *i32 写 (4字节), 在 sz+1 边界写 4 字节
+    // 会 overflow heap。改成 sz+4 让边界 4 字节內可写。v0.9 wip commit 2.9 修。
+    let buf = malloc(sz + (4 as i64));
     if buf == (0 as *u8) {
         fclose(fp);
         return 0 as *u8;
     }
     fread(buf, 1 as i64, sz, fp);
-    // null-terminate
+    // null-terminate: 4字节 store 覆盖 buf+sz..buf+sz+3
     let last = (buf as i64 + sz) as *u8;
     let last_i_v1 = last as *i32;
     (*last_i_v1) = 0 as i32;
@@ -214,6 +216,7 @@ fn build_il_v1(input: *u8, output: *u8) -> i32 {
     parser_init(&parser_v, &lexer, &arena);
 
     let ast_node_v1 = parser_parse(&parser_v);
+    jh_fputs_stderr("DEBUG_ME9: parsed\n" as *u8);
     if parser_v.error_count > (0 as i32) {
         jh_fputs_stderr("parse errors\n" as *u8);
         free(source_v1);

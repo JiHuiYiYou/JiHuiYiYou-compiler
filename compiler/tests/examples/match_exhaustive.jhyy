@@ -16,7 +16,6 @@ fn unwrap_or(opt: Option, default: i32) -> i32 {
 }
 
 fn unwrap_or_short(opt: Option, default: i32) -> i32 {
-    // 短名 variant pattern（v0.7 新增）
     match opt {
         Some(_) => 1,
         None    => default,

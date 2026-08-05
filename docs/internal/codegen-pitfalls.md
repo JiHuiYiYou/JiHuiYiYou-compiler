@@ -39,7 +39,7 @@
 | 1 | **B-φ1** ✅ | `fib_renamed` / `control_flow` | if-expr phi slot 缺;jhyy_1 emit `ret %t4` 而 jhyy_0 emit `ret %t7`(`%t7 =w copy %t4`) | v0 if-expr codegen 用 QBE `phi`(merge 块 alloc result,两边 store);v1.0.0 sprint 5 commit 4 改走 store/load 模式(v0 codegen bug 2 workaround:nested if-else phi predecessor mismatch) | 🔴 中 | ✅ v0.9 commit 2.6 (本 commit) |
 | 2 | **B-let2** ✅ | `arith` | `l → w` narrow 缺;`qbe_type_of` i64 → i32 字段赋值无 emit `copy`/`extuw` | jhyy_v1 `cg_convert_arg` (codegen.jhyy:544-634) 历史上只覆盖 `src=w, dst=l` (extsw) + `src=l, dst=d/s`;**漏 `src=l, dst=w`** —— v0 codegen.c:780-783 显式 emit `copy`(QBE 'copy' from l to w 隐式截断) | 🟢 必修 | ✅ v0.9 commit 2.5 |
 | 3 | **B-struct** ✅ | `struct_val_pass` | struct by-value 字段 copy 时 jhyy_v1 offset==0 偷懒不 alloc tmp (直接用 src_addr/dst_addr),v0 codegen.c:140-148 总是 alloc + emit `copy`(offset==0) 或 `add`(offset>0) | jhyy_v1 `cg_copy_struct` (codegen.jhyy:430-490) 偷懒: offset==0 时 src_off = src_addr (复用),导致字段 loadw 直接用 src_addr → 字段编号错位 + byte-equal diff | 🟡 中 | ✅ v0.9 commit 2.8 |
-| 4 | **B-match** | `match_exhaustive` | match-expr codegen 缺;NODE_MATCH case `cg_expr_v1` 当前 fall-through 返回 zero IRVal | v0 codegen.c 完整 match(codegen.c:1310-1450);jhyy_v1 commit 4 没翻译 match-expr(sprint 5 commit 4 占位 return zero)—— **CERR big 4 中的 2 个**(dungeon_game + match_test),v1.0.0 sprint 3 处理 | 🔴 高 | 待 v1.0.0 sprint 3 (parser 翻译 + codegen 翻译) |
+| 4 | **B-match** ✅ | `match_exhaustive` | match-expr codegen 缺;NODE_MATCH case `cg_expr_v1` 当前 fall-through 返回 zero IRVal | v0 codegen.c 完整 match(codegen.c:909-997);jhyy_v1 commit 4 没翻译 match-expr(sprint 5 commit 4 占位 return zero)—— **commit 2.9 真修**:`cg_match_pattern` helper + NODE_MATCH 对齐 v0 逻辑 + arms_arr 解读修正(*Node 数组,不是 NodeMatchArm 数组)。match_exhaustive 现在 exit 1 (sema "enum has no variant") 不是 exit 127 (segfault) | 🔴 高 | ✅ v0.9 commit 2.9 |
 | 5 | **B-data** ⚠️ moot (parser CERR) | `const_array` | jhyy_v1 parser **直接拒绝** 顶层 `const NAME: TYPE = [...];` (CERR: "expected ;, got ident" on line 7)→ 不生成 .il,byte-equal diff 不可观察 | **不是 codegen gap** —— jhyy_v1 parser 翻译层缺顶层 const decl (sprint 5 commit 4 没翻译 NODE_CONST_DECL parsing)。归并到 v1.0.0 sprint 3 parser 翻译 (Task #52) | 🟡 moot | ✅ v0.9 commit 2.7 (文档化,无 codegen 改动) |
 | 6 | **B-testset** | 7 测试集 baseline 锁定 | Stage 1 byte-equal baseline = `hello`(已 PASS)/ `arith`(本 commit 修) / 5 FAIL | 测试集本身锁定:文件位置 + EXPECT + 不依赖 let mut / 不依赖 hash 触发面 | 🟢 完成 | ✅ v0.9 commit 2.5 |
 
@@ -99,7 +99,7 @@
 
 **B-struct** (struct by-value 字段 copy) — **RESOLVED commit 2.8**: jhyy_v1 `cg_copy_struct` (codegen.jhyy:430-490) 偷懒 — offset==0 时直接用 src_addr / dst_addr (复用,不 alloc tmp),导致字段 `loadw %src_addr` 直接用 → 字段编号错位 + byte-equal diff。v0 codegen.c:140-148 总是 alloc src_off/dst_off + emit `copy`(offset==0) 或 `add`(offset>0)。修复:对齐 v0 路径 + 用 inline emit `copy %tN` (ir_emit_copy 只接 i64 literal,不接 IRVal src)。
 
-**B-match** (match-expr codegen): jhyy_v1 cg_expr_v1 NODE_MATCH case 占位 return zero → 任何 match-expr 测试 QBE 报 "undefined temp" → 待 v1.0.0 sprint 3(parser 翻译 + codegen 翻译)。这是 CERR big 4 中的 2 个(dungeon_game + match_test)。
+**B-match** (match-expr codegen) — **RESOLVED commit 2.9**: jhyy_v1 cg_expr_v1 NODE_MATCH case 占位 return zero → 任何 match-expr 测试 QBE 报 "undefined temp"。修复:`cg_match_pattern` helper + NODE_MATCH 对齐 v0 codegen.c:909-997 逻辑 + arms_arr 解读修正(*Node 数组,不是 NodeMatchArm 数组)。match_exhaustive 现在 exit 1 (sema "enum has no variant") 不是 exit 127 (segfault)。**jhyy_v1 sema "enum has no variant" 已知遗留**:jhyy_v1 自身 bug,跟 codegen 无关,待 v1.0.0 sprint 3 修。
 
 **B-data** (.data 段 emit 顺序) — **MOOT per v0.9 commit 2.7**: jhyy_v1 parser **CERR 拒绝顶层 `const NAME: TYPE = ...`** (`expected ;, got ident` on line 7 col 7 of `const_array.jhyy`),根本走不到 codegen 阶段,不存在 `.data` 段 emit 差异可观察。**根因**:parser 翻译层缺 NODE_CONST_DECL parsing (v1.0.0 sprint 5 commit 4 没翻译) → 推迟到 v1.0.0 sprint 3 (Task #52)。**验证证据**: `jhyy_v1 build const_array.jhyy` → 6 条 parse errors + exit 0 (CERR); `jhyy.exe build const_array.jhyy` → 生成 `/tmp/ca_v0.il.il` 含 `data $ASCII_LOWER = { b 97, ... }`。
 
@@ -153,6 +153,20 @@
 
 **下一步**: v0.9 commit 2.9 (B-match 真修 — NODE_MATCH codegen 翻译 + cg_match_pattern helper) + commit 2.10+ (W 真修) → commit 4 final (byte-equal 7/7 const_array 不可达 6/7 上限)
 
+### 2.9 commit 2.9 增量(B-match 真修 + read_file malloc sz+4)
+
+| 标准 | 状态 |
+|------|------|
+| `cg_match_pattern` helper 加完 (codegen.jhyy:695-718) | ✅ |
+| NODE_MATCH codegen 对齐 v0 codegen.c:909-997 逻辑 (codegen.jhyy:1923+) | ✅ |
+| `arms_arr` 解读修正 (*Node 数组,不是 NodeMatchArm 数组) | ✅ |
+| `read_file` malloc `sz+4` 修 heap 越界 (main.jhyy) | ✅ |
+| match_exhaustive 不再 segfault (exit 127 → exit 1) | ✅ |
+| byte-equal 持平 5/7 | ✅ (5/7: hello + fib_renamed + struct_val_pass + arith + control_flow) |
+| regress 持平 | ✅ (3 OK = 持平 commit 2.8 baseline;实测 50/53 PASS) |
+
+**下一步**: v0.9 commit 2.10+ (W 真修 phase 1/2) → commit 4 final (byte-equal 6/7,const_array 不可达上限)
+
 ---
 
 ## § 3 已修 codegen bug（历史索引，仅参考）
@@ -166,3 +180,4 @@
 | v0.9 commit 2.6 (B-φ1) | if-expr 提前 alloc result_slot 占 tmp 编号 + 缺 phi emit | v0.9 wip commit 2.6 |
 | v0.9 commit 2.7 (B-data) | (诊断) const_array FAIL 根因 = parser CERR 而非 codegen gap → 推迟到 v1.0.0 sprint 3 (Task #52) | v0.9 wip commit 2.7 (doc-only) |
 | v0.9 commit 2.8 (B-struct) | `cg_copy_struct` offset==0 偷懒: 不 alloc src_off/dst_off → 字段编号错位 + byte-equal diff | v0.9 wip commit 2.8 |
+| v0.9 commit 2.9 (B-match) | NODE_MATCH codegen 缺 + `read_file` malloc `sz+1` heap 越界 | v0.9 wip commit 2.9 |

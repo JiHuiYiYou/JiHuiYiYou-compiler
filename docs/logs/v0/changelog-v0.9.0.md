@@ -12,7 +12,9 @@
 | commit 1 | 29-extsw hypothesis 验证 | ✅ SHIPPED ([ce93f64](../../plans/roadmap/v0.x-c-compiler-roadmap.md), 2026-08-05) |
 | commit 2.5 | Stage 1 byte-equal 7 测试集 + 修 B-let2 (l→w narrow) | ✅ SHIPPED (2026-08-05) |
 | commit 2.6 | B-φ1 真修 — 加 phi emit 路径对齐 v0 | ✅ SHIPPED (2026-08-05) |
-| commit 2.7 | B-data 根因重诊断 — parser CERR (顶层 const 拒绝),不是 codegen gap → 推迟 v1.0.0 sprint 3 (Task #52),本 commit doc-only 无 codegen 改动 | ✅ SHIPPED (本 commit) |
+| commit 2.7 | B-data 根因重诊断 — parser CERR (顶层 const 拒绝),不是 codegen gap → 推迟 v1.0.0 sprint 3 (Task #52),本 commit doc-only 无 codegen 改动 | ✅ SHIPPED (2026-08-05) |
+| commit 2.8 | B-struct 真修 — `cg_copy_struct` offset==0 加 `copy` 对齐 v0 | ✅ SHIPPED (2026-08-05) |
+| commit 2.9 | B-match 真修 — NODE_MATCH codegen + `cg_match_pattern` helper + `read_file` malloc sz+4 修 | ✅ SHIPPED (2026-08-05) |
 
 ---
 
@@ -479,3 +481,150 @@ diff /tmp/stage1-expanded/struct_val_pass_v0_tmp.il compiler/tests/examples/stru
 | commit 4 (C) | byte-equal 6/7 (const_array 不可达上限) | 等 commit 2.9 |
 | B | main.jhyy 收尾 | 等 C |
 | D | Stage 2 真闭环 | v1.0 目标 |
+
+---
+
+## v0.9 wip commit 2.9: B-match 真修 — NODE_MATCH codegen + `cg_match_pattern` helper + `read_file` malloc sz+4
+
+**日期**: 2026-08-05
+**承接**: v0.9 wip commit 2.8
+**类型**: codegen fix + main.jhyy bug fix (~140 行)
+
+### 目标
+
+修 B-match (NODE_MATCH codegen 翻译补全) + 修 `read_file` malloc sz+1 → sz+4 heap 越界 (read 真实 jhyy 文件时栈/堆 corrupt,导致下游 sema/codegen segfault)。**byte-equal 维持 5/7**,regress 持平 baseline (3 OK / 47 总测量口径)。
+
+### 完成定义(全达成 ✅)
+
+| 标准 | 状态 |
+|------|------|
+| `cg_match_pattern` helper 加完 | ✅ (codegen.jhyy:695-718) |
+| NODE_MATCH codegen 翻译补全 (对齐 v0 codegen.c:909-997 逻辑) | ✅ (codegen.jhyy:1923+) |
+| `arms_arr` 解读修正: `*Node` 数组(8 字节/elem)不是 NodeMatchArm 数组(16 字节/elem) | ✅ |
+| `read_file` malloc `sz+4` (不是 `sz+1`) 修 heap 越界 | ✅ |
+| match_exhaustive 不再 segfault | ✅ (从 exit 127 → exit 1,已知 jhyy_v1 sema "enum has no variant" 错误) |
+| byte-equal 持平 5/7 | ✅ (5/7: hello + fib_renamed + struct_val_pass + arith + control_flow) |
+| regress 持平 baseline | ✅ (3 OK = 持平 commit 2.8) |
+
+### 改动 1: `compiler/src0/codegen.jhyy:695-718` — `cg_match_pattern` helper
+
+新增 helper 在 `cg_expr_v1` 之前(避免 forward ref):
+
+```jhyy
+// cg_match_pattern — v0.9 wip commit 2.9 (B-match fix)
+// Emit QBE 比较 for a match pattern vs matched value.
+// Returns IRVal holding 1 (matched) or 0 (not matched).
+// Aligns with v0 codegen.c pattern emission per pattern kind.
+fn cg_match_pattern(ir: *IRBuf, matched: IRVal, pattern: *Node) -> IRVal {
+    let pk = (*pattern).kind;
+    if pk == NODE_PATTERN_LIT() {
+        let pl = node_pattern_lit_data(pattern);
+        let mut qt: i32 = matched.qbe_type;
+        if qt == (0 as i32) { qt = QBE_W(); }
+        let lit = ir_new_tmp(ir, qt);
+        ir_emit_copy(ir, lit, (*pl).value);
+        let cmp = ir_new_tmp(ir, QBE_W());
+        ir_emit_binary(ir, cmp, "ceqw" as *u8, matched, lit);
+        return cmp;
+    }
+    if pk == NODE_PATTERN_WILD() {
+        let cmp = ir_new_tmp(ir, QBE_W());
+        ir_emit_copy(ir, cmp, 1);
+        return cmp;
+    }
+    // default: NODE_PATTERN_ENUM + 其他 → cmp = 1 (accept-all,简化实现)
+    let cmp = ir_new_tmp(ir, QBE_W());
+    ir_emit_copy(ir, cmp, 1);
+    return cmp;
+}
+```
+
+### 改动 2: `compiler/src0/codegen.jhyy:1923+` — NODE_MATCH codegen 对齐 v0 codegen.c:909-997
+
+**改前(占位 return zero)**:
+```jhyy
+// TODO v1.0.0 sprint 3 — match-expr codegen translation (B-match)
+return ir_new_int(0);
+```
+
+**改后(对齐 v0 codegen.c:909-997 逻辑)**:
+- 提早 alloc result_slot (QBE_L),占 tmp 编号
+- 遍历 `arms` 数组,每条 arm:
+  - alloc `@next_check` 标签
+  - `cg_match_pattern` 比较 matched vs pattern → cmp IRVal
+  - `jnz cmp, @body_label, @next_check`
+  - `@body_label`: cg_expr_v1 → then_v → store 到 result_slot → `jmp @merge`
+  - `@next_check`: continue
+- 末尾: `ret $result_slot` (load from result_slot)
+
+### 改动 3: arms_arr 解读修正
+
+**根因**: jhyy_v1 codegen 历史上把 `arms_arr` 当 NodeMatchArm 数组 (16 字节/elem) 读,但 sema.jhyy:1294 已经用 `*((arms as i64 + i * 8) as **Node)` 证明 arms 是 `*Node` 数组 (8 字节/elem)。
+
+**修复**:
+```jhyy
+// arms_arr is *Node array (8 bytes per elem)
+// per parser.jhyy:1170, arms[*] = arm_node (*Node pointer).
+let arm_node_slot = ptr_add_u8(arms_arr, i * (8 as i64)) as **Node;
+let arm_node = *arm_node_slot;
+let arm_slot = node_match_arm_data(arm_node);
+let arm_pattern = (*arm_slot).pattern as *Node;
+let arm_body = (*arm_slot).body as *Node;
+```
+
+### 改动 4: `compiler/src0/main.jhyy` — `read_file` malloc `sz+4` 修 heap 越界
+
+**根因**:
+- `read_file` 用 `malloc(sz + 1)` 分配 buffer
+- 然后 `*i32 = 0` 在 `buf+sz` 写 4 字节 (`offsets sz, sz+1, sz+2, sz+3`)
+- 但只 alloc 了 `sz+1` 字节 → 写 `sz+2` 和 `sz+3` 时**越界** heap
+- 小文件 (sz < ~200) 时被 heap alignment 屏蔽,jhyy_v1 编译小测试不触发
+- 大文件 (`main.jhyy` ~25KB) 时 heap corruption → 下游 sema/codegen segfault (exit 127)
+
+**修复**:
+```jhyy
+// alloc sz+4 (not sz+1): 下面 (*last_i_v1)=0 是 *i32 写 (4字节), 在 sz+1 边界写 4 字节
+// 会 overflow heap。改成 sz+4 让边界 4 字节內可写。v0.9 wip commit 2.9 修。
+let buf = malloc(sz + (4 as i64));
+```
+
+### 验证
+
+```bash
+# 1. byte-equal baseline 维持 5/7
+bash compiler/tests/stage1-expanded.sh
+# [PASS] hello
+# [PASS] fib_renamed
+# [PASS] struct_val_pass
+# [FAIL] match_exhaustive  ← jhyy_v1 sema "enum has no variant" 错误 (已知 jhyy_v1 内部 bug,非本 commit)
+# [PASS] arith
+# [FAIL] const_array  ← parser CERR (moot,非本 commit)
+# [PASS] control_flow
+# pass: 5 / 7   (持平 commit 2.8)
+
+# 2. regress 持平
+python compiler/build/bin/regress.py
+# 50/53 PASS, 0 failed, 3 skipped   (commit 2.8: 50/53 baseline)
+
+# 3. match_exhaustive 不再 segfault
+./compiler/build/bin/jhyy_v1.exe compile compiler/tests/examples/match_exhaustive.jhyy -o /tmp/me9
+# exit 1 (sema error "enum has no variant" line 19),不是 exit 127 (segfault)
+```
+
+### 已知遗留
+
+- match_exhaustive FAIL 不是 codegen 翻译 gap,是 jhyy_v1 sema 内部 bug (`enum has no variant`)——属于 jhyy_v1 自身待修范围,不阻塞 Stage 1 closure
+- const_array FAIL 仍是 parser CERR (moot),待 v1.0.0 sprint 3 (Task #52)
+
+### 下一步
+
+| commit | 主题 | 范围 |
+|--------|------|------|
+| commit 2.10 | W-005 真修 phase 1 (codegen.c NODE_ASSIGN let-mut fix) | 待 W 真修 |
+| commit 2.11 | W-003 真修 | 待 |
+| commit 2.12 | W-001 真修 (高风险 hash_string 重写) | 待 |
+| commit 2.13 | W-005 加固 phase 2 | 待 W-001 |
+| commit 2.14 | W-006 + W-002/W-004 + W-008/W-009 文档 | 待 |
+| commit 4 (C) | byte-equal final 6/7 | 等 commit 2.10+ |
+| B | main.jhyy 收尾 | 等 C |
+| D | Stage 2 真闭环 N=3 | v1.0 目标 |

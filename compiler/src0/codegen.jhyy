@@ -685,6 +685,36 @@ fn cg_body_returns(body_node: *Node) -> i32 {
 }
 
 // ════════════════════════════════════════════════════
+// cg_match_pattern — v0.9 wip commit 2.9 (B-match fix)
+// Emit pattern 比较,返回 IRVal cmp (QBE 'w') 给 NODE_MATCH 用。
+// 对齐 v0 codegen.c:159-197: NODE_PATTERN_LIT / WILD 显式,其他 default = cmp = 1 (accept-all)。
+// RANGE pattern 暂略(match_exhaustive 不用 + jhyy forward ref 不支持 cg_expr_v1 调用) →
+// 推迟到 v1.0.0 sprint 3 (Task #50)
+//
+// 必须 cg_expr_v1 之前定义(forward reference hard error)
+fn cg_match_pattern(ir: *IRBuf, matched: IRVal, pattern: *Node) -> IRVal {
+    let pk = (*pattern).kind;
+    if pk == NODE_PATTERN_LIT() {
+        let pl = node_pattern_lit_data(pattern);
+        let mut qt: i32 = matched.qbe_type;
+        if qt == (0 as i32) { qt = QBE_W(); }
+        let lit = ir_new_tmp(ir, qt);
+        ir_emit_copy(ir, lit, (*pl).value);
+        let cmp = ir_new_tmp(ir, QBE_W());
+        ir_emit_binary(ir, cmp, "ceqw" as *u8, matched, lit);
+        return cmp;
+    }
+    if pk == NODE_PATTERN_WILD() {
+        let cmp = ir_new_tmp(ir, QBE_W());
+        ir_emit_copy(ir, cmp, 1);
+        return cmp;
+    }
+    // default: NODE_PATTERN_ENUM + 其他 → cmp = 1 (accept-all, 跟 v0 codegen.c:191-195 对齐)
+    let cmp = ir_new_tmp(ir, QBE_W());
+    ir_emit_copy(ir, cmp, 1);
+    return cmp;
+}
+
 // cg_expr_v1 — 主体（jhyy 用 if-else if chain 替代 C switch）
 // ════════════════════════════════════════════════════
 
@@ -1888,6 +1918,143 @@ fn cg_expr_v1(cg_raw_v1: *u8, n: *Node) -> IRVal {
             return inner_v_v1;
         }
         return cg_convert_arg(cg_raw_v1, inner_v_v1, src_t, dst_t);
+    }
+
+    // ── NODE_MATCH（v0.9 wip commit 2.9 B-match fix）──
+    // 对齐 v0 codegen.c:909-997 逻辑:
+    //   - 链式 jnz + arm body block
+    //   - 收集 body_blocks / body_values for phi
+    //   - 末尾 dangling next_check (sema 7A 验穷尽,但 codegen 仍 emit label 兜底)
+    //   - merge + phi 收尾
+    // 已知限制(对齐 v0): enum pattern 走 default case → cmp = 1 (accept-all)。
+    // 这跟 v0 行为 byte-equal,但语义上不正确(应该按 tag dispatch)。
+    // match_exhaustive.jhyy 用 Some(_) / None enum pattern,v0 路径也是 cmp=1
+    // (永远走第一个 arm = Some → 1) → 跟 match_exhaustive EXPECT: 2 一致。
+    if kind == NODE_MATCH() {
+        let nmd = node_match_data(n);
+        let matched_node = (*nmd).subject as *Node;
+        let matched = cg_expr_v1(cg_raw_v1, matched_node);
+        let arms_arr = (*nmd).arms;
+        let narms = (*nmd).narms;
+
+        // 决定返回类型 (void match 不 emit phi)
+        let mut qt: i32 = 0;
+        if (*n).type_ptr_v1 != (0 as *u8) {
+            let nt = (*n).type_ptr_v1 as *Type;
+            if (*nt).kind != KIND_VOID() {
+                qt = qbe_type_of((*n).type_ptr_v1);
+            }
+        }
+
+        let merge_block = ir_new_block(ir, "merge" as *u8);
+
+        // 收集 body_blocks / body_values for phi (MAX_MATCH_ARMS = 32, 但用 arena alloc)
+        let phi_buf = arena_alloc((*ir).arena, 32 as i64 * (40 as i64 + 40 as i64));
+        let nphi_var = arena_alloc((*ir).arena, 8 as i64);
+        let nphi_p = nphi_var as *i64;
+        *nphi_p = 0 as i64;
+
+        let mut next_check: IRVal = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+        let mut next_check_id: i64 = 0 as i64;  // 用 id 字段当 "is set" 标志
+
+        let mut i: i64 = 0 as i64;
+        while i < narms {
+            // v0.9 wip commit 2.9 (B-match fix): arms_arr is *Node array (8 bytes per elem),
+            // each elem is a Node with NodeMatchArm data after Node header.
+            // Per parser.jhyy:1170, arms[*] = arm_node (just *Node pointer).
+            // NOT a NodeMatchArm array (that was wrong assumption — would read garbage).
+            let arm_node_slot = ptr_add_u8(arms_arr, i * (8 as i64)) as **Node;
+            let arm_node = *arm_node_slot;
+            let arm_slot = node_match_arm_data(arm_node);
+            let arm_pattern = (*arm_slot).pattern as *Node;
+            let arm_body = (*arm_slot).body as *Node;
+            let body_block = ir_new_block(ir, "arm" as *u8);
+
+            if (*arm_pattern).kind == NODE_PATTERN_WILD() {
+                // wildcard: always match, jump to body
+                if next_check_id != (0 as i64) {
+                    ir_emit_label(ir, next_check);
+                    next_check_id = 0 as i64;
+                }
+                ir_emit_jmp(ir, body_block);
+            } else {
+                // literal/range/enum pattern: emit comparison
+                if next_check_id != (0 as i64) {
+                    ir_emit_label(ir, next_check);
+                    next_check_id = 0 as i64;
+                }
+                next_check = ir_new_block(ir, "next" as *u8);
+                next_check_id = 1 as i64;
+                let cmp = cg_match_pattern(ir, matched, arm_pattern);
+                ir_emit_jnz(ir, cmp, body_block, next_check);
+            }
+
+            // body
+            ir_emit_label(ir, body_block);
+            let body_val = cg_expr_v1(cg_raw_v1, arm_body);
+            // body_returns check
+            let arm_returns: i32 = cg_body_returns(arm_body);
+            if arm_returns == 0 {
+                if *nphi_p < (32 as i64) {
+                    // 写 body_block 到 phi_buf[nphi*40], body_val 到 phi_buf[32*40 + nphi*40]
+                    let bb_slot_v1 = ptr_add_u8(phi_buf, (*nphi_p) * (40 as i64)) as *IRVal;
+                    *bb_slot_v1 = body_block;
+                    let bv_slot_v1 = ptr_add_u8(phi_buf, (32 as i64) * (40 as i64) + (*nphi_p) * (40 as i64)) as *IRVal;
+                    *bv_slot_v1 = body_val;
+                    *nphi_p = *nphi_p + (1 as i64);
+                }
+                ir_emit_jmp(ir, merge_block);
+            }
+            i = i + (1 as i64);
+        }
+
+        // dangling next_check (sema 7A 验穷尽但 codegen 仍 emit label 兜底,见 v0 codegen.c:961-980)
+        if next_check_id != (0 as i64) {
+            ir_emit_label(ir, next_check);
+            if *nphi_p > (0 as i64) {
+                // unreachable: dummy value for phi
+                let mut undef_qt: i32 = qt;
+                if undef_qt == (0 as i32) { undef_qt = QBE_W(); }
+                let undef = ir_new_tmp(ir, undef_qt);
+                ir_emit_copy(ir, undef, 0);
+                if *nphi_p < (32 as i64) {
+                    let bb_slot_v2 = ptr_add_u8(phi_buf, (*nphi_p) * (40 as i64)) as *IRVal;
+                    *bb_slot_v2 = next_check;
+                    let bv_slot_v2 = ptr_add_u8(phi_buf, (32 as i64) * (40 as i64) + (*nphi_p) * (40 as i64)) as *IRVal;
+                    *bv_slot_v2 = undef;
+                    *nphi_p = *nphi_p + (1 as i64);
+                }
+                ir_emit_jmp(ir, merge_block);
+            }
+        }
+
+        // merge + phi
+        ir_emit_label(ir, merge_block);
+        if qt != (0 as i32) && *nphi_p > (0 as i64) {
+            let result_v1 = ir_new_tmp(ir, qt);
+            // emit `result =qt phi @block1 val1, @block2 val2, ...`
+            ir_emit_str(ir, "    %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, result_v1.id);
+            ir_emit_str(ir, " =" as *u8);
+            ir_emit_int(ir, "%c" as *u8, qt);
+            ir_emit_str(ir, " phi " as *u8);
+            let mut pi: i64 = 0 as i64;
+            while pi < *nphi_p {
+                if pi > (0 as i64) {
+                    ir_emit_str(ir, ", " as *u8);
+                }
+                let bb_v3 = *(ptr_add_u8(phi_buf, pi * (40 as i64)) as *IRVal);
+                let bv_v3 = *(ptr_add_u8(phi_buf, (32 as i64) * (40 as i64) + pi * (40 as i64)) as *IRVal);
+                ir_emit_str(ir, "@" as *u8);
+                ir_emit_str(ir, bb_v3.name);
+                ir_emit_str(ir, " %t" as *u8);
+                ir_emit_int(ir, "%d" as *u8, bv_v3.id);
+                pi = pi + (1 as i64);
+            }
+            ir_emit_str(ir, "\n" as *u8);
+            return result_v1;
+        }
+        return zero;
     }
 
     // ── 未实现 case：返回 zero IRVal（commit 4 补全）──
