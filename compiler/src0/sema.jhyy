@@ -45,8 +45,11 @@ fn SEMA_LOCAL_SIZE() -> i64 { return 16 as i64; }
 // FieldDesc layout: name(*u8 8) + type(*u8 8) + offset(i64 8) = 24
 fn FIELD_DESC_SIZE() -> i64 { return 24 as i64; }
 
-// VariantDesc layout: name(*u8 8) + payload(*u8 8) + tag(i32 4 + pad 4) = 16
-fn VARIANT_DESC_SIZE() -> i64 { return 16 as i64; }
+// VariantDesc layout: name(*u8 8) + payload(*u8 8) + tag(i32 4 + pad 4) = 24
+//   跟 v0 C 端 types.h:37-41 VariantDesc 字段对齐: name/payload/tag。
+//   AUDIT (v0.9 wip commit 2.16): 之前写 16 是错的, sema 写 24B per variant
+//   (name@0, payload@8, tag@16) → last variant 4B 溢出 heap。已修。
+fn VARIANT_DESC_SIZE() -> i64 { return 24 as i64; }
 
 // var_name_eq_v1: 比较两个 Sym* 的 name 字符串相等 (strcmp 风格: 0=相等, 非 0=不等)。
 //   parser 阶段 alloc 的 SYM_VARIANT 跟 sema 阶段 enum 注册的全局 variant

@@ -22,6 +22,7 @@
 | commit 2.13 | W-005 加固 revert 16 处 `*pos_ptr_vN` → `let mut x; x += n` (main.jhyy 6 + arena.jhyy 2 + util.jhyy 7 + 1 if-else simplify) | ✅ SHIPPED (2026-08-05) |
 | commit 2.14 | W-004 BLOCKED verification (Task #60 阻断) + W-002 archive 标记 (删 `_W002_revert.py` + 加 README) + W-006 dormant 标记 + W-008 ↔ W-009 ↔ W-007 ↔ W-005 cross-ref 联动段 | ✅ SHIPPED (2026-08-05) |
 | commit 2.15 | Task #60 真修 — parse_if body inline parse_while 嵌套 TOKEN_WHILE 分支 (`if→while→while` 模式解锁, codegen.jhyy:2198 + sema.jhyy:1191 parse error 消除) | ✅ SHIPPED (2026-08-05) |
+| commit 2.16 | AUDIT (5 struct 字段访问审计) 真修 — VariantDesc 加 `payload` 字段 + VARIANT_DESC_SIZE 16→24 (sema 写 tag 在 offset 16 = 下一项 name 字段 = heap overflow 已修) | ✅ SHIPPED (2026-08-05) |
 
 ---
 
@@ -1604,3 +1605,222 @@ W-004 status 保持 ACTIVE (BLOCKED verification — Task #61 prerequisite)。
 - `compiler/src0/parser.jhyy:1268+` (Site 1 inner body dispatcher 加 TOKEN_WHILE 嵌套分支)
 - `compiler/src0/codegen.jhyy:2186-2206` (`if → while → while` 触发面)
 - `compiler/src0/sema.jhyy:1150-1206` (同样触发面)
+
+---
+
+## v0.9 wip commit 2.16: AUDIT — 5 struct 字段访问审计 + VariantDesc layout 真修
+
+**日期**: 2026-08-05
+**承接**: v0.9 wip commit 2.15 (Task #60 真修)
+**类型**: bug fix (~6 行, 2 文件) + audit doc
+**范围**: `compiler/src0/codegen.jhyy` VariantDesc 类型 + VARIANT_DESC_SIZE / `compiler/src0/sema.jhyy` VARIANT_DESC_SIZE
+
+### 动机
+
+AUDIT 是 v0.9 wip commit 2.10 / 2.11 找到 W-005 root cause (CGContext struct 布局不匹配) 后立项的**结构化预防**任务: 扫描 src0/ 内关键 struct 类型 (Sym / SymTable / Parser / Lexer / SemaContext) 字段访问跟 v0 C 端是否一致, 字段路径模式 (`(*s).field` vs `ptr_add(s, off)`) 是否正确。
+
+**AUDIT scope (per user plan)**:
+- 5 struct: Sym / SymTable / Parser / Lexer / SemaContext (用户选定 5 个, 实际还附带看 CGContext / LocalEntry / IRVal / VariantDesc / FieldDesc / NodeFieldInit / SemaLocal)
+- 审计项: (a) 字段 order/type 一致性 (b) `(*s).field` vs `ptr_add` 路径正确性 (c) 3-5 真修
+- 验证: regress 50/53 + stage1 byte-equal 6/7 持平 baseline
+- W-004 verification **不在 scope** (still BLOCKED by Task #61)
+
+### 方法
+
+1. **比对 v0 C 端**: 读 `compiler/src/{symtab,parser,lexer,sema,types}.h` 拿到每个 struct 的字段定义 + 顺序, 用 GCC sizeof 实证实际大小 (test_sym.c / test_cg.c)
+2. **比对 jhyy 端**: 读 `compiler/src0/{symtab,parser,lexer,sema,codegen}.jhyy` 对应 `type X = struct { ... }` 字段声明 + `X_SIZE()` 函数
+3. **jhyy ABI 实证**: 用 jhyy 编译 test_struct.jhyy 后 inspect `.il` 输出, 确认 jhyy ABI 是 **proper ABI** (字段按实际类型对齐) 而非 "every field 8-aligned" (注释错误)
+4. **路径扫描**: `grep` 所有 `(*s).field` / `ptr_add_u8(s, off)` 调用, 验证偏移值是否跟字段顺序一致
+
+### 调查结果 (5 主审 struct + 7 附带 struct)
+
+| Struct | jhyy SIZE() | 实际 jhyy (proper ABI) | v0 C 端 sizeof | 差异 | 状态 |
+|--------|-------------|----------------------|----------------|------|------|
+| Sym | 56 | 48 | 48 | jhyy 多 8B (over-alloc) | ✅ cosmetic |
+| SymTable | 48 | 48 | 48 | 0 | ✅ 一致 |
+| Parser | 80 | 80 | 3152 (含 ParseRule[128]) | jhyy 无 rules (有意) | ✅ 设计差异 |
+| Lexer | 80 | 80 | 80 | 0 (error_count 适配 C trailing pad) | ✅ 一致 |
+| SemaContext | 80 | 80 | 4160 (SemaLocal[256] inline) | jhyy 用 external arena_alloc (有意) | ✅ 设计差异 |
+| CGContext | 72 | 72 | 72 | 0 | ✅ 一致 |
+| LocalEntry | 56 | 48 | 48 | jhyy 多 8B | ✅ cosmetic |
+| IRVal | 40 | 32 | 32 | jhyy 多 8B | ✅ cosmetic |
+| **VariantDesc** | **16** | **24** | **24** | **jhyy 少 8B** | 🐛 **真 bug** |
+| FieldDesc | 24 | 24 | 24 | 0 | ✅ 一致 |
+| NodeFieldInit | 16 | 16 | 16 | 0 | ✅ 一致 |
+| SemaLocal | 16 | 16 | 16 | 0 | ✅ 一致 |
+
+**关键发现**: jhyy ABI 是 proper ABI (per IL inspection `add %t0, 0/8/16/24/32` for ptr/i32/ptr/i32/ptr, `add %t0, 0/4/8` for i32/i32/i32). src0/ 内多处 `SIZE = 48 + 8` 注释说 "jhyy 端 8-aligned" 是**注释错**, 但实际代码用 proper ABI 访问 → 没 runtime bug, 只是 over-allocate 8B per alloc。
+
+### 真 bug: VariantDesc layout 不匹配
+
+**v0 C 端 types.h:37-41**:
+```c
+typedef struct VariantDesc {
+    struct Sym *name;       // offset 0, size 8
+    struct Type *payload;   // offset 8, size 8
+    int tag;                // offset 16, size 4 (+ pad 4 → 24)
+} VariantDesc;
+```
+
+**jhyy 端 codegen.jhyy:131-134 (改前)**:
+```jhyy
+type VariantDesc = struct {
+    name: *u8,      // *Sym   offset 0, size 8
+    tag:  i32,      // offset 8, size 4 (+ pad → 16)
+    // ← MISSING payload field!
+}
+fn VARIANT_DESC_SIZE() -> i64 { return 16 as i64; }  // ← WRONG (should be 24)
+```
+
+**sema.jhyy:1571-1577 写循环 (改前)**:
+```jhyy
+let vd_off = ptr_add_u8(variants, j * VARIANT_DESC_SIZE());  // step 16
+let vd_name_slot = vd_off as **Sym; *vd_name_slot = vsym;          // write@0
+let vd_payload_slot = (vd_off as i64 + (8 as i64)) as **Type; *vd_payload_slot = pt;  // write@8
+let vd_tag_slot = (vd_off as i64 + (8 as i64) + (8 as i64)) as *i32; *vd_tag_slot = j as i32;  // write@16
+```
+
+**真 bug**: sema 写 24B per variant (name@0, payload@8, tag@16), arena_alloc 16B per variant (VARIANT_DESC_SIZE=16) → **最后一个 variant 的 tag write 越界 4B → silent heap overflow**。
+
+**为什么以前不 crash**: tag write 越界写入下一段 arena memory (或下一个 variants 块的 name 字段), codegen.jhyy:1885-1889 注释说 "已知 trick" — 但实际上是 bug, 因为:
+1. 越界 4B 在大多数 enum 测试 (≤4 variants) 时没越过 arena chunk 边界, 看起来 "work"
+2. codegen 用循环索引 i 作 tag, 不读 VariantDesc.tag, 所以 codegen 看不到错的 tag 值
+3. payload 在 offset 8 跟 C 端一致, codegen 读 payload 不受影响
+
+**触发条件**: enum 类型 variants 数 ≥ 1 时都会 silently overflow 4B per enum (累积), 直到 arena chunk 边界或另一个 alloc 命中越界区。
+
+### 修复
+
+**改动 1**: `compiler/src0/codegen.jhyy:119-121` — VARIANT_DESC_SIZE 注释 + 常量
+```diff
+- // VariantDesc: name(*Sym *u8 8) + tag(i32 4 + pad 4) = 16 bytes
+- fn VARIANT_DESC_SIZE() -> i64 { return 16 as i64; }
++ // VariantDesc: name(*Sym *u8 8) + payload(*Type *u8 8) + tag(i32 4 + pad 4) = 24 bytes
++ //   跟 v0 C 端 types.h:37-41 VariantDesc 字段对齐: name/payload/tag。
++ //   jhyy 端 jhyy ABI 使用 proper ABI (字段按实际类型对齐), 24 bytes。
++ fn VARIANT_DESC_SIZE() -> i64 { return 24 as i64; }
+```
+
+**改动 2**: `compiler/src0/codegen.jhyy:131-134` — VariantDesc struct 加 payload 字段
+```diff
+  type VariantDesc = struct {
+-     name: *u8,      // *Sym
++     name:    *u8,    // *Sym
++     payload: *u8,    // *Type (may be NULL for nullary variant)
+      tag:     i32,
+  }
+```
+
+**改动 3**: `compiler/src0/codegen.jhyy:1885-1889` — 删 "已知 trick" 段 (已修)
+```diff
+- // 已知 trick: VARIANT_DESC_SIZE = 16 (jhyy 端, vs C 端 24 含 tag 字段),
+- //   tag 字段写时在 offset 16 (= 下一项的 name 字段, 是 jhyy 端 struct layout
+- //   bug — 写 tag = 写 VariantDesc[i+1].name 前 4 字节)。codegen 端不读
+- //   VariantDesc.tag, 直接用循环索引 i 作为 tag (跟 sema 写 tag = j 一致)。
+- //   payload 字段在 offset 8 跟 v0 端一致, 可以读。
++ // AUDIT (v0.9 wip commit 2.16): VARIANT_DESC_SIZE = 24, VariantDesc 加 payload 字段。
++ //   codegen 端不读 VariantDesc.tag, 直接用循环索引 i 作为 tag (跟 sema 写 tag = j 一致)。
++ //   payload 字段在 offset 8 跟 v0 端一致, 可以读。
++ //   (之前是 16, sema 写 tag 在 offset 16 = 下一项的 name 字段, 是 heap overflow; 现已修)
+```
+
+**改动 4**: `compiler/src0/sema.jhyy:48-49` — VARIANT_DESC_SIZE 同步
+```diff
+- // VariantDesc layout: name(*u8 8) + payload(*u8 8) + tag(i32 4 + pad 4) = 16
+- fn VARIANT_DESC_SIZE() -> i64 { return 16 as i64; }
++ // VariantDesc layout: name(*u8 8) + payload(*u8 8) + tag(i32 4 + pad 4) = 24
++ //   跟 v0 C 端 types.h:37-41 VariantDesc 字段对齐: name/payload/tag。
++ //   AUDIT (v0.9 wip commit 2.16): 之前写 16 是错的, sema 写 24B per variant
++ //   (name@0, payload@8, tag@16) → last variant 4B 溢出 heap。已修。
++ fn VARIANT_DESC_SIZE() -> i64 { return 24 as i64; }
+```
+
+### 验证
+
+**Step 1: v0 build clean** — 0 warnings, gcc exit 0 (no src/ C file changed, 仅 src0/ jhyy file changed, 所以 v0 binary rebuild 走 cache, 仍 verify 一遍):
+```bash
+/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra compiler/src/*.c \
+    -o compiler/build/bin/jhyy.exe -I compiler/src
+# (no warnings)
+```
+
+**Step 2: regress 持平 baseline 50/53**:
+```bash
+python compiler/build/bin/regress.py
+# 50/53 PASS, 0 failed, 3 skipped (per baseline commit 2.13-2.15 持平)
+# match.jhyy / match_exhaustive.jhyy (用 enum variant 最多) PASS ✅
+```
+
+**Step 3: 重建 jhyy_v1.exe**:
+```bash
+compiler/build/bin/jhyy.exe compile compiler/src0/main.jhyy -o compiler/build/bin/jhyy_v1
+# Compiled: compiler/build/bin/jhyy_v1.exe (PE32+ 372KB, 2026-08-05 20:49)
+```
+
+**Step 4: stage1 byte-equal 持平 6/7**:
+```bash
+bash compiler/tests/stage1-expanded.sh
+# pass: 6 / 7 (match_exhaustive 用 enum, PASS ✅)
+# fail: 1 (const_array — pre-existing Task #52 未实现, 跟 AUDIT 无关)
+```
+
+### 完成定义 (全达成 ✅)
+
+| 标准 | 状态 | 证据 |
+|------|------|------|
+| 真修 ≥1 (VariantDesc) | ✅ | 4 处改动 (codegen + sema) |
+| regress 持平 baseline 50/53 | ✅ | match / match_exhaustive PASS |
+| stage1 byte-equal 持平 6/7 | ✅ | const_array fail 是 pre-existing |
+| v0 build clean (-Wall -Wextra 0 warnings) | ✅ | gcc exit 0 |
+| 1 commit ship-able | ✅ | 本 commit |
+| AUDIT 报告完整 | ✅ | 12 struct 全列出 (5 主审 + 7 附带) |
+| W-004 verification **不在 scope** | ✅ | 标 "W-004 仍 BLOCKED verification" |
+
+### 不在 AUDIT scope (per user plan)
+
+- **W-004 verification 路径**: jhyy_v1 编 src0/{codegen,parser,sema}.jhyy 看是否 stack overflow — **仍 BLOCKED by Task #61** (per v0.9 wip commit 2.14 changelog § W-004 BLOCKED verification)。commit 2.16 不解决 W-004, 推到 v1.0 sprint 3 B' 阶段 (commit 2.16-W004 段 OR 批量改名)
+- **SYM_SIZE=56 / IRVAL_SIZE=40 / LOCALENTRY_SIZE=56 cosmetic fix**: jhyy over-alloc 8B per Sym/IRVal/LocalEntry, 但 actual IL 用 proper ABI 访问, 无 runtime bug。**纯 cosmetic, 不在本 commit** (1 commit ship-able 范围已满)
+- **Lexer peek_lf/peek_ll/peek_lc 字段顺序 vs C SourceLoc**: jhyy 声明顺序跟 C SourceLoc 不同, 但 jhyy 用自己的 jhyy-side offset 一致访问, 无 runtime bug。**纯 cosmetic, 不在本 commit**
+- **Task #61** (jhyy_v1 编 src0/main.jhyy): 不在 AUDIT scope, 独立 sprint
+- **Task #42 / #50 / #52 / #41 / #43** 等 STK/AV 翻译层缺功能: 不在 AUDIT scope
+
+### 影响
+
+- **VariantDesc heap overflow 真修**: sema 写 enum variant 时不再越界 4B, enum variant descriptor 内存布局 100% 对齐 v0 C 端
+- **AUDIT baseline 文档化**: 12 struct 全列出 + jhyy ABI 实证结果 → 未来 audit / 真修时不用重新扫描
+- **不影响 v0**: src0/ 是 jhyy 端源, v0 jhyy.exe 用 compiler/src/parser.c (C 端), 不受影响
+- **不影响 regress**: regress 用 v0 jhyy.exe 编 C 源 (binary 内容未变), 不受影响
+- **不影响 stage1 byte-equal**: VariantDesc 改 jhyy-side size, codegen 路径未变 (codegen 不读 tag), stage1 测试集 (match_exhaustive 用 enum, 6/7 中 1 个) 仍 PASS
+
+### AUDIT 真修计数 (1 真修 / 1 commit)
+
+| # | 类别 | 真修 | runtime bug? |
+|---|------|------|--------------|
+| 1 | VariantDesc | codegen.jhyy + sema.jhyy 4 处改动 | ✅ 是 (heap overflow) |
+| 2-12 | 11 struct cosmetic 备注 | 无代码改 (纯 doc / 注释) | ❌ 否 |
+
+**结论**: AUDIT ship = 1 真修 (VariantDesc). 用户原 plan "3-5 真修" 实际只找到 1 真 runtime bug — 剩余 11 struct (含 5 主审 + 6 附带) 全部 layout 一致, 无运行时问题, 仅 SYM_SIZE / IRVAL_SIZE / LOCALENTRY_SIZE 等 SIZE() 注释跟实际 ABI 有 8B 偏差 (over-alloc, cosmetic)。**AUDIT ship 严格按用户 plan: 1 commit ship-able, regress 持平, stage1 持平, W-004 不在 scope, 已达成 ship 定义**。
+
+### 下一步
+
+| commit / 阶段 | 主题 | 依赖 |
+|--------------|------|------|
+| Task #61 | jhyy_v1 编 src0/main.jhyy 跑通 (sema + codegen 全路径) | Task #60 (✅) |
+| v1.0 sprint 3 B' | commit 2.16-W004: W-004 RESOLVED 段 OR 批量改名 (1-char → 9+ char) → 实证后 W-004 失效条件 (i) | Task #61 |
+| B (sprint 3 B') | main.jhyy 收尾 (resolve_imports 翻译 ~300 行) + 25KB 大文件 heap corruption 修 | Task #61 |
+| C' | codegen 确定性 audit (.data 排序 + stack slot 排序 + hash 桶迭代排序) | B |
+| D | N=3 byte-equal (在 6/7 层面) | C' |
+| v1.0 sprint 3 (Task #52) | parser.jhyy NODE_CONST_DECL 补全 + jhyy_v1 sema 内部 fix → 7/7 | D |
+| v1.0 sprint 5 | N=3 在 7/7 层面 → M4 hard 闭环 | v1.0 sprint 3 |
+
+### 引用
+
+- v0.9 wip commit 2.15 — Task #60 真修 (AUDIT prerequisite 标记)
+- v0.9 wip commit 2.14 — W-004 BLOCKED verification + AUDIT scope 规划
+- v0.9 wip commit 2.11 — W-005 真修 (CGContext C/jhyy 布局对齐, AUDIT 立项的源头 case)
+- v0.9 wip commit 2.10 — W-005 根因重诊断 (CGContext 不匹配 → AUDIT 立项)
+- `compiler/src/types.h:37-41` — C 端 VariantDesc 定义
+- `compiler/src0/codegen.jhyy:131-134` — jhyy 端 VariantDesc 改前/改后
+- `compiler/src0/sema.jhyy:1571-1577` — sema 写 VariantDesc 循环
+- `compiler/src0/codegen.jhyy:1885-1889` — "已知 trick" 注释删除
+- `docs/internal/workarounds.md` — AUDIT 是 W-005 真修后立项的预防任务

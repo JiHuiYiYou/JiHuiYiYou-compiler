@@ -116,8 +116,10 @@ fn LOCALENTRY_SIZE() -> i64 { return 56 as i64; }
 // FieldDesc: name(*Sym *u8 8) + type(*Type *u8 8) + offset(i64 8) = 24 bytes
 fn FIELD_DESC_SIZE() -> i64 { return 24 as i64; }
 
-// VariantDesc: name(*Sym *u8 8) + tag(i32 4 + pad 4) = 16 bytes
-fn VARIANT_DESC_SIZE() -> i64 { return 16 as i64; }
+// VariantDesc: name(*Sym *u8 8) + payload(*Type *u8 8) + tag(i32 4 + pad 4) = 24 bytes
+//   跟 v0 C 端 types.h:37-41 VariantDesc 字段对齐: name/payload/tag。
+//   jhyy 端 jhyy ABI 使用 proper ABI (字段按实际类型对齐), 24 bytes。
+fn VARIANT_DESC_SIZE() -> i64 { return 24 as i64; }
 
 // NodeFieldInit: name(*u8 8) + value(*Node *u8 8) = 16 bytes
 fn NODE_FIELD_INIT_SIZE() -> i64 { return 16 as i64; }
@@ -129,8 +131,9 @@ type FieldDesc = struct {
 }
 
 type VariantDesc = struct {
-    name: *u8,      // *Sym
-    tag:  i32,
+    name:    *u8,    // *Sym
+    payload: *u8,    // *Type (may be NULL for nullary variant)
+    tag:     i32,
 }
 
 type NodeFieldInit = struct {
@@ -1882,11 +1885,10 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
     //   - 找 variant 的 tag (按 name 匹配 → 循环索引 = tag)
     //   - store tag at offset 0
     //   - 如果有 payload, store at payload_off
-    // 已知 trick: VARIANT_DESC_SIZE = 16 (jhyy 端, vs C 端 24 含 tag 字段),
-    //   tag 字段写时在 offset 16 (= 下一项的 name 字段, 是 jhyy 端 struct layout
-    //   bug — 写 tag = 写 VariantDesc[i+1].name 前 4 字节)。codegen 端不读
-    //   VariantDesc.tag, 直接用循环索引 i 作为 tag (跟 sema 写 tag = j 一致)。
+    // AUDIT (v0.9 wip commit 2.16): VARIANT_DESC_SIZE = 24, VariantDesc 加 payload 字段。
+    //   codegen 端不读 VariantDesc.tag, 直接用循环索引 i 作为 tag (跟 sema 写 tag = j 一致)。
     //   payload 字段在 offset 8 跟 v0 端一致, 可以读。
+    //   (之前是 16, sema 写 tag 在 offset 16 = 下一项的 name 字段, 是 heap overflow; 现已修)
     if kind == NODE_ENUM_VARIANT() {
         let nev = node_enum_variant_data(n);
         if (*n).type_ptr == (0 as *u8) {
