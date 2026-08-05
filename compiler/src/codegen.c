@@ -1,6 +1,7 @@
 #include "codegen.h"
 #include "arena.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ── name mangling: emit $mod__name when sym has an owning module ── */
@@ -21,20 +22,25 @@ typedef struct {
     int   is_stack;     /* 1 if value is a stack slot address */
 } LocalEntry;
 
+/* CGContext layout MUST match jhyy-side codegen.jhyy CGCONTEXT_SIZE = 72.
+   Fields are heap-allocated (calloc) rather than inline arrays so the
+   layout is portable between C-side (inline arrays OK but huge) and
+   jhyy-side (no fixed-size struct fields). See docs/internal/workarounds.md
+   W-005 phase 2 for full diagnosis. */
 typedef struct {
-    IRBuf      *ir;
-    LocalEntry  locals[MAX_LOCALS];
-    int         nlocals;
-    Type       *current_ret_type;  /* function return type for checking */
-    IRVal       sret_slot;        /* hidden return slot for struct returns */
-    int         has_sret;         /* 1 if function returns struct via sret */
-    /* Loop label stack: top is innermost loop.
-       continue_target = where `continue` jumps (for: after body, before i++;
-                                             while: same as loop_starts) */
-    IRVal       loop_starts[MAX_LOOP_DEPTH];
-    IRVal       loop_ends[MAX_LOOP_DEPTH];
-    IRVal       loop_continues[MAX_LOOP_DEPTH];
-    int         loop_depth;
+    IRBuf       *ir;
+    LocalEntry  *locals;             /* calloc'd MAX_LOCALS entries */
+    int          nlocals;
+    Type        *current_ret_type;
+    int64_t      sret_slot_id;       /* temp number for sret slot, -1 if none */
+    int          has_sret;
+    int          loop_depth;
+    /* Loop label stacks: top = innermost loop. continue_target semantics:
+         for:   after body, before i++   (loop_continues[depth-1])
+         while: same as loop_starts[depth-1] */
+    IRVal       *loop_starts;        /* calloc'd MAX_LOOP_DEPTH entries */
+    IRVal       *loop_ends;
+    IRVal       *loop_continues;
 } CGContext;
 
 static void cg_add_local(CGContext *cg, Sym *sym, IRVal val, int is_stack) {
@@ -1420,7 +1426,10 @@ static void cg_stmt(CGContext *cg, Node *n) {
             if (cg->has_sret) {
                 /* struct return via sret: copy to return slot */
                 IRVal src = cg_expr(cg, dr->expr);
-                cg_copy_struct(cg, cg->current_ret_type, cg->sret_slot, src);
+                IRVal sret_addr = {0};
+                sret_addr.id = cg->sret_slot_id;
+                sret_addr.qbe_type = 'l';
+                cg_copy_struct(cg, cg->current_ret_type, sret_addr, src);
                 IRVal v = {0};
                 ir_emit_ret(cg->ir, v);
             } else {
@@ -1603,13 +1612,18 @@ static void cg_func(IRBuf *ir, Node *n) {
     cg.nlocals = 0;
     cg.current_ret_type = ret_type;
     cg.has_sret = is_sret;
-    cg.sret_slot.qbe_type = 0;
+    cg.sret_slot_id = -1;
     cg.loop_depth = 0;
+    /* heap-alloc locals + loop label arrays (matches jhyy-side layout) */
+    cg.locals        = (LocalEntry*)calloc(MAX_LOCALS,     sizeof(LocalEntry));
+    cg.loop_starts   = (IRVal*)     calloc(MAX_LOOP_DEPTH, sizeof(IRVal));
+    cg.loop_ends     = (IRVal*)     calloc(MAX_LOOP_DEPTH, sizeof(IRVal));
+    cg.loop_continues= (IRVal*)     calloc(MAX_LOOP_DEPTH, sizeof(IRVal));
 
     /* register sret slot if needed */
     if (is_sret) {
-        cg.sret_slot = ir_new_tmp(ir, 'l');
-        ir_emit(ir, "    %%t%d =l copy %%ret\n", cg.sret_slot.id);
+        cg.sret_slot_id = ir_new_tmp(ir, 'l').id;
+        ir_emit(ir, "    %%t%d =l copy %%ret\n", cg.sret_slot_id);
     }
 
     /* register params as locals (copy into SSA temps) */
@@ -1634,7 +1648,10 @@ static void cg_func(IRBuf *ir, Node *n) {
         /* emit ret only if body doesn't already have one */
         if (is_sret) {
             /* copy result to sret slot before returning */
-            cg_copy_struct(&cg, ret_type, cg.sret_slot, body_val);
+            IRVal sret_addr = {0};
+            sret_addr.id = cg.sret_slot_id;
+            sret_addr.qbe_type = 'l';
+            cg_copy_struct(&cg, ret_type, sret_addr, body_val);
             IRVal v = {0};
             ir_emit_ret(ir, v);
         } else if (ret_qt != 0 && body_val.qbe_type != 0) {
@@ -1647,6 +1664,12 @@ static void cg_func(IRBuf *ir, Node *n) {
     #undef body_returns
 
     ir_emit(ir, "}\n\n");
+
+    /* free heap-allocated CGContext arrays */
+    free(cg.locals);
+    free(cg.loop_starts);
+    free(cg.loop_ends);
+    free(cg.loop_continues);
 }
 
 /* ── module codegen ── */

@@ -16,6 +16,7 @@
 | commit 2.8 | B-struct 真修 — `cg_copy_struct` offset==0 加 `copy` 对齐 v0 | ✅ SHIPPED (2026-08-05) |
 | commit 2.9 | B-match 真修 — NODE_MATCH codegen + `cg_match_pattern` helper + `read_file` malloc sz+4 修 | ✅ SHIPPED (2026-08-05) |
 | commit 2.10 | W-005 根因重诊断 — C/jhyy CGContext struct 布局不匹配(doc-only,无 codegen 改动);真修推后到 commit 2.11+ | ✅ SHIPPED (2026-08-05) |
+| commit 2.11 | W-005 真修 phase 2 — C 端 CGContext 9 字段对齐 jhyy 端布局 (`*locals` + `sret_slot_id i64` + `*loop_starts/ends/continues` + 字段顺序) | ✅ SHIPPED (2026-08-05) |
 
 ---
 
@@ -746,4 +747,145 @@ python compiler/build/bin/regress.py
 | commit 2.12 | W-001 真修 (高风险 hash_string 重写) | 待 |
 | commit 2.13 | W-005 加固 phase 2 (main.jhyy 4 处 *pos_ptr revert → let-mut) | 等 W-005 真修 |
 | commit 2.14 | W-006 + W-002/W-004 + W-008/W-009 文档 | 待 |
+
+---
+
+## v0.9 wip commit 2.11: W-005 真修 phase 2 — C 端 CGContext 9 字段对齐 jhyy 端布局
+
+**日期**: 2026-08-05
+**承接**: v0.9 wip commit 2.10 (W-005 根因重诊断 doc-only)
+**目标**: 实施 commit 2.10 识别的 CGContext 布局修复 — C 端 9 字段全对齐 jhyy 端布局,消除 jhyy_v1 codegen 撞 let-mut 时的 segfault
+
+### 改动 1: C 端 `codegen.c` CGContext 布局 (compiler/src/codegen.c)
+
+**改前** (jhyy 端布局不一致):
+```c
+typedef struct {
+    IRBuf      *ir;
+    LocalEntry  locals[MAX_LOCALS];     /* 24576 bytes inline */
+    int         nlocals;
+    Type       *current_ret_type;
+    IRVal       sret_slot;              /* 32 bytes (IRVal union+name+qt) */
+    int         has_sret;
+    IRVal       loop_starts[MAX_LOOP_DEPTH];   /* 1024 bytes inline */
+    IRVal       loop_ends[MAX_LOOP_DEPTH];
+    IRVal       loop_continues[MAX_LOOP_DEPTH];
+    int         loop_depth;
+} CGContext;
+```
+
+**改后** (跟 jhyy 端 CGCONTEXT_SIZE = 72 字节精确对齐):
+```c
+typedef struct {
+    IRBuf       *ir;            /* 0   */
+    LocalEntry  *locals;        /* 8   calloc'd MAX_LOCALS */
+    int          nlocals;       /* 16  */
+    Type        *current_ret_type; /* 24  */
+    int64_t      sret_slot_id;  /* 32  temp number, -1 if none */
+    int          has_sret;      /* 40  */
+    int          loop_depth;    /* 44  */
+    IRVal       *loop_starts;   /* 48  calloc'd MAX_LOOP_DEPTH */
+    IRVal       *loop_ends;     /* 56  */
+    IRVal       *loop_continues;/* 64  */
+} CGContext;                   /* 72 bytes ✓ */
+```
+
+**字段顺序变化**: `loop_depth` 挪到 `has_sret` 之后 (跟 jhyy 端布局一致)
+
+### 改动 2: `cg_func` 加 `<stdlib.h>` + 4×calloc + 4×free
+
+```c
+#include <stdlib.h>  // 新增
+
+CGContext cg;
+cg.ir = ir;
+cg.nlocals = 0;
+cg.current_ret_type = ret_type;
+cg.has_sret = is_sret;
+cg.sret_slot_id = -1;
+cg.loop_depth = 0;
+cg.locals         = (LocalEntry*)calloc(MAX_LOCALS,     sizeof(LocalEntry));
+cg.loop_starts    = (IRVal*)     calloc(MAX_LOOP_DEPTH, sizeof(IRVal));
+cg.loop_ends      = (IRVal*)     calloc(MAX_LOOP_DEPTH, sizeof(IRVal));
+cg.loop_continues = (IRVal*)     calloc(MAX_LOOP_DEPTH, sizeof(IRVal));
+...
+ir_emit(ir, "}\n\n");
+free(cg.locals);
+free(cg.loop_starts);
+free(cg.loop_ends);
+free(cg.loop_continues);
+```
+
+### 改动 3: `cg->sret_slot` → `cg->sret_slot_id` (2 处使用点)
+
+`cg_func` 的 sret 注册 + NODE_RETURN 处理 cg_copy_struct 调用都从 `IRVal sret_slot` 改成构造 `IRVal` literal:
+
+```c
+// cg_func 注册 sret
+cg.sret_slot_id = ir_new_tmp(ir, 'l').id;  // was: cg.sret_slot = ir_new_tmp(...);
+ir_emit(ir, "    %%t%d =l copy %%ret\n", cg.sret_slot_id);  // was: cg.sret_slot.id
+
+// cg_func 末尾 + NODE_RETURN 处理
+IRVal sret_addr = {0};
+sret_addr.id = cg->sret_slot_id;
+sret_addr.qbe_type = 'l';
+cg_copy_struct(&cg, ret_type, sret_addr, body_val);  // was: cg.sret_slot
+```
+
+`cg_add_local` / `cg_find_local` 不动 (locals[i] 访问语法指针/数组通用)
+
+### 改动 4: `cg->loop_starts[i]` 访问保持 (指针访问 = 数组访问)
+
+`cg->loop_starts[cg->loop_depth]` 这种 access 模式不需改 — C 端 `IRVal *` 跟 `IRVal array[]` 在 `[]` 语法下完全等价,只是从 inline 改成 heap。
+
+### 验证 (commit 2.11)
+
+```bash
+# 1. C 端编译干净
+/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra compiler/src/*.c -o jhyy.exe -I compiler/src
+# (no warnings)
+
+# 2. regress 持平
+python compiler/build/bin/regress.py
+# 50/53 PASS, 0 failed, 3 skipped   (持平 commit 2.10 baseline)
+
+# 3. byte-equal 持平
+bash compiler/tests/stage1-expanded.sh
+# [PASS] hello
+# [PASS] fib_renamed
+# [PASS] struct_val_pass
+# [FAIL] match_exhaustive  ← jhyy_v1 sema "enum has no variant" 已知 bug (post 2.13 fix)
+# [PASS] arith
+# [FAIL] const_array  ← parser CERR (moot, 推迟 v1.0.0 sprint 3 Task #52)
+# [PASS] control_flow
+# pass: 5 / 7   (持平 commit 2.10)
+
+# 4. W-005 真修 phase 2 核心验证: let-mut 不再 segfault!
+./compiler/build/bin/jhyy_v1.exe compile /c/msys64/tmp/test_w5.jhyy -o /tmp/me9
+# exit 0  ← 之前 commit 2.10 阶段 exit 139 (segfault) 消失!
+/tmp/me9.exe
+# x = 20  ← 输出正确
+# exit 20
+```
+
+### 影响
+
+- **W-005 workaround 现在可安全移除**: src0/ 14 处 `*pos_ptr_vN` 累加模式是 commit 2.10 阶段因 W-005 根因 (CGContext 错位) 撞 segfault 而加的,现在布局已对齐 → 下个 commit (2.13) 加固 phase 2 可全部 revert 回 `let mut x; x += n` 风格。W-005 在 commit 2.13 移出 workarounds.md active 列表。
+- **不影响 byte-equal**: 改动纯 codegen.c CGContext 内存布局,跟 .il emit 顺序/内容无关。byte-equal 持平 5/7 (跟 commit 2.9/2.10 baseline 一致)。
+- **不影响 regress**: 50/53 PASS, 0 FAIL, 3 SKIP — 持平。
+- **audit 排在 2.14 之后 / B 之前** (per user 决策 2026-08-05): 5 struct (Sym/SymTable/Parser/Lexer/SemaContext) 已知没观测到 segfault = audit 紧急度低,推到 v0.9 wip 末。
+
+### 下一步
+
+| commit | 主题 | 范围 |
+|--------|------|------|
+| commit 2.12 | W-001 真修 (hash_string 重写) | 高风险 |
+| commit 2.13 | W-005 加固 phase 2 (main.jhyy 14 处 *pos_ptr revert → let-mut) | 依赖 2.11 + 2.12 |
+| commit 2.14 | W-006 + W-002/W-004 衍生 + W-008/W-009 文档 | 文档 |
+| AUDIT (5 struct) | Sym / SymTable / Parser / Lexer / SemaContext | 排在 2.14 之后 / B 之前 |
+| B | main.jhyy 收尾 (resolve_imports, ~300 行) | 依赖 AUDIT |
+| C' | codegen 确定性 audit | |
+| D | N=3 byte-equal (5/7 层面) | M4 软定义达成 |
+| v1.0 sprint 3 (Task #52) | parser + sema fix → byte-equal 7/7 | |
+| v1.0 sprint 5 | N=3 在 7/7 层面 → M4 hard 闭环 | |
 | commit 4 (C) | byte-equal final 6/7 | W-005 不阻塞(已持平 5/7) |

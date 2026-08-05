@@ -165,7 +165,7 @@
 | byte-equal 持平 5/7 | ✅ (5/7: hello + fib_renamed + struct_val_pass + arith + control_flow) |
 | regress 持平 | ✅ (3 OK = 持平 commit 2.8 baseline;实测 50/53 PASS) |
 
-**下一步**: v0.9 commit 2.10 (W-005 根因重诊断,doc-only,已 SHIPPED 2026-08-05) → commit 2.11+ (W-005 真修: C/jhyy CGContext 布局对齐) → commit 4 final (byte-equal 6/7,const_array 不可达上限)
+**下一步**: v0.9 commit 2.10 (W-005 根因重诊断,doc-only,已 SHIPPED 2026-08-05) → commit 2.11 (W-005 真修: C/jhyy CGContext 布局对齐,已 SHIPPED 2026-08-05) → commit 4 final (byte-equal 6/7,const_array 不可达上限)
 
 ---
 
@@ -181,3 +181,5 @@
 | v0.9 commit 2.7 (B-data) | (诊断) const_array FAIL 根因 = parser CERR 而非 codegen gap → 推迟到 v1.0.0 sprint 3 (Task #52) | v0.9 wip commit 2.7 (doc-only) |
 | v0.9 commit 2.8 (B-struct) | `cg_copy_struct` offset==0 偷懒: 不 alloc src_off/dst_off → 字段编号错位 + byte-equal diff | v0.9 wip commit 2.8 |
 | v0.9 commit 2.9 (B-match) | NODE_MATCH codegen 缺 + `read_file` malloc `sz+1` heap 越界 | v0.9 wip commit 2.9 |
+| v0.9 commit 2.10 (W-005 诊断) | W-005 segfault 根因 = C/jhyy CGContext struct 布局不匹配 (9 字段) — 推迟真修到 2.11 | v0.9 wip commit 2.10 (doc-only) |
+| v0.9 commit 2.11 (W-005 真修 phase 2) | C 端 CGContext 9 字段全对齐 jhyy 端布局: `LocalEntry *locals` + `int64_t sret_slot_id` + `IRVal *loop_starts/ends/continues` + 字段顺序 (loop_depth 在 has_sret 之后) | v0.9 wip commit 2.11 |

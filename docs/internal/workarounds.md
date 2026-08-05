@@ -375,6 +375,21 @@ fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
 
 **superseder:** v0.9 wip commit 2.10 (诊断性 doc-only,无 codegen 改动) — 真修推后到 v0.9 wip commit 2.11+ 或更晚。
 
+**v0.9 wip commit 2.11 (2026-08-05) — W-005 真修 phase 2 实施完成:**
+- C 端 `codegen.c` CGContext 布局改成 jhyy 端布局:
+  - `LocalEntry locals[MAX_LOCALS]` (inline 24576 bytes) → `LocalEntry *locals` (calloc'd)
+  - `IRVal sret_slot` (32 bytes) → `int64_t sret_slot_id` (8 bytes, = temp number)
+  - `IRVal loop_starts/ends/continues[MAX_LOOP_DEPTH]` (3×1024 bytes) → `IRVal *loop_starts/ends/continues` (3×calloc'd)
+  - 字段顺序: `loop_depth` 挪到 `has_sret` 之后 (跟 jhyy 端布局一致)
+- C 端 `cg_func` 加 `calloc` ×4 + `free` ×4 (新 `<stdlib.h>` include)
+- C 端所有 `cg->sret_slot` → 构造 `IRVal` literal (`{0}` + `sret_addr.id = sret_slot_id; sret_addr.qbe_type = 'l';`)
+- 全部 9 字段 offset 现在跟 jhyy 端 CGCONTEXT_SIZE = 72 字节精确对齐
+- **验证 (commit 2.11):**
+  - regress 50/53 PASS, 0 FAIL, 3 SKIP — 持平 baseline
+  - byte-equal 持平 5/7 (5 PASS / 2 FAIL: match_exhaustive + const_array)
+  - **let-mut 最小复现 `tmp/test_w5.jhyy`:** jhyy_v1 编译 + 运行 → exit=20 (输出 `x = 20`) — **不再 segfault**! 之前 commit 2.10 阶段 jhyy_v1 编译同一文件 segfault (exit 139)
+- 剩余影响: W-005 workaround (`*pos_ptr_vN` 模式) 在 src0/ 仍有 14 处使用。**W-005 现在可安全移除** — 下个 commit (2.13) 加固可 revert 14 处 `*pos_ptr_vN` 累加 → 改回 `let mut x; x += n` 风格。W-005 在 commit 2.13 移出 workarounds.md active 列表。
+
 **根因重诊断(v0.9 wip commit 2.10,2026-08-05):** W-005 segfault **不是** "NODE_ASSIGN emit 错" 那么直接 —— 是 **C 端 codegen.c CGContext 跟 jhyy 端 codegen.jhyy CGContext struct 布局不匹配**:
 - C 端: `LocalEntry locals[MAX_LOCALS]` (24576 bytes inline array),nlocals 在 offset 24584, has_sret 在 offset 24592+, loop_starts 在 offset 24600+ ...
 - Jhyy 端: `locals: *u8` (指针,arena 单独 alloc),nlocals 在 offset 16, has_sret 在 offset 40, loop_starts 在 offset 48 ...
