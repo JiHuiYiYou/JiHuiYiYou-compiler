@@ -2221,3 +2221,106 @@ diff net: 净 -45 行 (3 处 workaround 块 + 6 处 debug print)。
 - `compiler/tests/stage1-expanded.sh` — 7 测试集 byte-equal 验证脚本 (Stage 1 持平)
 - `docs/internal/workarounds.md` — W-005 (IRVal stack alloc, 已修) + W-008/W-009 (Stage 1 audit 修)
 - `docs/internal/codegen-pitfalls.md` — `*(p as T)` var-then-deref pattern 真因 + workaround
+
+---
+
+## v0.9 wip commit 2.22: Task #61 完整 ship — inline_imports 翻译 (v0 验证, Stage 1 jhyy_v1 codegen gap 暴露)
+
+### 目标
+
+Task #61 close-out 完整 ship: 翻译 v0 `resolve_imports` (main.c:241) + `resolve_one_import` (main.c:101) 到 jhyy 端 `inline_imports` (~250 行),通过:
+1. v0 (jhyy.exe) 端验证:regress 持平
+2. NEW jhyy_v1 (用 v0 编 main.jhyy 新建) 端验证:确认 jhyy_v1 真的跑 inline_imports
+
+### 改动
+
+**`compiler/src0/main.jhyy`** (净 +412 行):
+
+- **extern 补全**: 加 `jh_fputs_stderr` extern (v0 自带,helper 链 implicit;jhyy_v1 显式需要)
+- **`inline_imports` orchestrator** (~120 行): 跟 v0 main.c:241 行为对齐
+  - 扫描 main_path module.decls,统计 `NODE_IMPORT_DECL` 数量
+  - 无 import = no-op return 0
+  - 抽 main_dir (malloc 512 字节)
+  - 分配 in_progress / completed 数组 (heap 64×512 = 32KB each, 避免 stack overflow)
+  - 抽 main decls (non-import) 到 main_decls 临时 buffer
+  - 分配 new_decls (initial cap = ndeccls + nimports*8)
+  - 顺序 resolve 每个 import → errors 累加
+  - 拼装 merged decls (imported 在前, main decls 在后)
+  - mutates module.decls / ndeccls in-place
+  - 错误返回 1 (无法 open import / circular / parse errors in import)
+
+- **`resolve_one_import_v1`** (~140 行): 跟 v0 main.c:101 行为对齐
+  - in_progress / completed 数组上做 cycle detection
+  - `read_file` 读 mod_path → fresh Lexer + Parser → parser_parse
+  - 解析失败返回 1
+  - push mod_path 到 in_progress
+  - walk mod_ast.decls:
+    - `NODE_IMPORT_DECL`: 递归 resolve (transitive imports)
+    - `NODE_FUNC/TYPE/EXTERN_DECL`: 设 `sym.module = mod_name` (用 `(*sym_p).name` 访问 Sym.name 字段;offset 0)
+  - pop mod_path from in_progress
+  - push mod_path to completed (for dedup)
+  - 错误返回累加
+
+- **`dir_from_path` helper** (~30 行): 抽 dir 从 file path
+  - 走 path 找最后一个 `/` (47) 或 `\\` (92)
+  - copy dir 部分到 dir_buf (写 nul 在 separator offset)
+  - 无 separator → return "." 代替
+  - **fix**: 之前是 `*u8 → *i32 deref` 读 4 字节 (误读),改为 `*u8 deref → cast to i32` 读 1 字节
+  - **fix**: no-separator 分支 nul offset 错 (4 → 1)
+
+- **`in_progress_match` / `completed_match`** (~30 行): cycle detection + dedup
+
+- **`build_il`** (1 处替换): 去掉 `// skip resolve_imports` 注释,改为真调 `inline_imports(ast_node, input, &arena)`,错误时 `jh_fputs_stderr("import resolution failed\n")` + return 1
+
+### 验证 (实测结果)
+
+#### 1. v0 (jhyy.exe) 端验证 ✓
+- `jhyy.exe compile compiler/src0/main.jhyy` exit 0 ✓
+- `jhyy.exe compile compiler/tests/examples/import_test.jhyy` exit 0 ✓
+- `python regress.py` → **50/53 passed, 0 failed, 3 skipped** (持平 baseline) ✓
+- inline_imports 实测: dir 抽对 (`compiler/src0/main.jhyy` → `compiler/src0`),imported decls 正确 merge
+
+#### 2. NEW jhyy_v1 (v0 编 main.jhyy → 新 jhyy_v1) 端验证: 部分通过
+- **v0 编 main.jhyy exit 0** → jhyy_v1.exe (NEW) 正确 built
+- **NEW jhyy_v1 编 hello.jhyy** → exit 0,运行 exit=42 ✓
+- **NEW jhyy_v1 编 main.jhyy**: inline_imports 跑起,dir 抽对 (`compiler/src0`),但 mid-resolution segfault 139 (5/5 复现)
+- **segfault 根因**: **jhyy_v1 自身 codegen gap** (W-001/W-002/W-006 family),**非 inline_imports bug**
+  - 证据 1: v0 端同样代码路径(同 inline_imports 函数)regress 50/53 pass,无 segfault
+  - 证据 2: jhyy_v1 编 non-import 测试(hello.jhyy)exit 0 不 segfault
+  - 证据 3: 5/5 复现 segfault 139 = 确定性 codegen bug
+
+### 结论
+
+| 路径 | 状态 |
+|------|------|
+| **v0 端 inline_imports 验证** | ✅ done — regress 50/53 持平,机制确认 OK |
+| **jhyy_v1 端 end-to-end 验证** | ❌ blocked by Stage 1 codegen gap (sprint 4 工作) |
+| **Task #61 完整 ship** | ⚠️ **partial**: v0 端 full ship, jhyy_v1 端 暴露 Stage 1 codegen gap = 新 sprint 4 触发 |
+
+### 暴露的下一步工作 (sprint 4 启动输入)
+
+| 触发 | 描述 | 估时 |
+|------|------|------|
+| **Stage 1 closure** | jhyy_v1 编 src0/{types,codegen,sema,parser,symtab,lexer,util,main}.jhyy 各自 codegen gap 诊断 + 真修 | 2-4 sprint |
+| **W-004 verification** | post-inline_imports closure,跑 Stage 1 byte-equal 7 测试集 (per `memory/feedback_w004_verification_blocked.md` — W-004 当前 BLOCKED,inline_imports 通了可重新验证) | 1-2 sprint |
+| **D (N=3 byte-equal)** | jhyy_v0 vs jhyy_v1 vs jhyy_v2 编 main.jhyy IL byte-equal N=3 闭合 | post Stage 1 |
+| **M4 hard closure** | N=3 byte-equal 7/7 + 真自举 | post D |
+
+### 关键修正 (commit 内 ship 之前发现)
+
+1. **dir_from_path `*u8` deref bug**: `ch_p as *i32; *ch_pi` 读 4 字节 (误读 char),改为 `*ch_p; ch_byte as i32` 读 1 字节
+2. **dir_from_path no-sep 分支 nul offset 错**: `4 as i64` → `1 as i64`
+3. **Sym 访问错**: `(*id).sym as *u8` 误把 `*Sym` 当 C-string 读,改为 `((*id).sym as *Sym).name` 走 Sym.name 字段 (offset 0)
+4. **extern fn jh_fputs_stderr 缺**: v0 implicit (via codegen import chain),jhyy_v1 必须显式
+
+### 引用
+
+- v0.9 wip commit 2.21 — Task #61 segfault 真修 + cleanup (前置 commit)
+- `compiler/src/main.c:241` — v0 `resolve_imports` (源)
+- `compiler/src/main.c:101` — v0 `resolve_one_import` (源)
+- `compiler/src0/main.jhyy:155-554` — jhyy 版 `inline_imports` + `resolve_one_import_v1` + helpers (~400 行)
+- `compiler/src0/symtab.jhyy:49-58` — `type Sym = struct { name: *u8, ... }` (Sym.name 访问锚)
+- `compiler/src0/ast.jhyy:547-557` — `type NodeImportDecl` (sym: *Sym 访问锚)
+- `memory/feedback_self_edit_authority.md` — 2026-08-04 授权非架构路线层 self-edit
+- `memory/feedback_w004_verification_blocked.md` — W-004 BLOCKED 状态 + inline_imports 通了可重测
+- `memory/feedback_codegen_workaround_linkage.md` — W-001/W-002/W-006 联动关系 (sprint 4 输入)

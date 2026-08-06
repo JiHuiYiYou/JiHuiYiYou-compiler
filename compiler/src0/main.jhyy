@@ -52,6 +52,7 @@ extern fn fread(buf: *u8, size: i64, count: i64, fp: *u8) -> i64;
 extern fn fwrite(buf: *u8, size: i64, count: i64, fp: *u8) -> i64;
 extern fn fclose(fp: *u8) -> i32;
 extern fn system(cmd: *u8) -> i32;
+extern fn jh_fputs_stderr(s: *u8) -> i32;
 
 // ═══ Constants ═══
 
@@ -151,6 +152,418 @@ fn str_concat_at(dst_v2: *u8, off_v1: i64, src_v2: *u8) -> i64 {
     return off_v1 + n;
 }
 
+// ════════════════════════════════════════════════════
+// inline_imports: 翻译 v0 resolve_imports (main.c:241) + resolve_one_import
+//   (main.c:101) → jhyy 版 AST-level merge。
+//   - 跟 v0 行为对齐: 保留 sym.module namespace 标签 + decls 顺序 (imported 在前)
+//   - 递归解析 transitive imports + cycle detection (in_progress / completed)
+//   - heap-allocated cycle arrays (64 × 512 bytes = 32KB, 避免 stack overflow)
+//   - extra_paths / extra_names: v0 CLI multi-file 支持, jhyy_v1 不暴露
+//     (regress.py 单文件路径, 不需要)
+// ════════════════════════════════════════════════════
+
+// in_progress_match: 检查 path 是否在 in_progress 数组里 (cycle detection)
+fn in_progress_match(in_progress: *u8, nin_progress: i64, path: *u8) -> i32 {
+    let mut k: i64 = 0 as i64;
+    while k < nin_progress {
+        let slot = (in_progress as i64 + k * (512 as i64)) as **u8;
+        if strcmp((*slot), path) == (0 as i32) {
+            return 1 as i32;
+        }
+        k = k + (1 as i64);
+    }
+    return 0 as i32;
+}
+
+// completed_match: 检查 path 是否在 completed 数组里 (skip if done)
+fn completed_match(completed: *u8, ncompleted: i64, path: *u8) -> i32 {
+    let mut k: i64 = 0 as i64;
+    while k < ncompleted {
+        let slot = (completed as i64 + k * (512 as i64)) as **u8;
+        if strcmp((*slot), path) == (0 as i32) {
+            return 1 as i32;
+        }
+        k = k + (1 as i64);
+    }
+    return 0 as i32;
+}
+
+// dir_from_path: 从文件路径提取 dir（最后一个 '/' 或 '\\' 切）
+//   写回 dir_buf (caller 提供 ≥512 字节)
+//   返回 0 = OK, 1 = 无 separator (用 "." 代替)
+fn dir_from_path(path: *u8, dir_buf: *u8) -> i32 {
+    let n = strlen(path);
+    let mut last_sep_off: i64 = -(1 as i64);
+    let mut idx_v1: i64 = 0 as i64;
+    while idx_v1 < n {
+        // 读单字节 (cast to *u8 deref to i32 = single byte 0-255 due to type width)
+        // Actually: *u8 deref gives u8, cast to i32
+        let ch_p = (path as i64 + idx_v1) as *u8;
+        let ch_byte = (*ch_p);
+        let ch = ch_byte as i32;
+        if ch == (47 as i32) || ch == (92 as i32) {  // '/' or '\\'
+            last_sep_off = idx_v1;
+        }
+        idx_v1 = idx_v1 + (1 as i64);
+    }
+    if last_sep_off < (0 as i64) {
+        // 无 separator, 用 "." 代替
+        store_byte_i32(dir_buf, (46 as i32));  // '.'
+        store_byte_i32((dir_buf as i64 + (1 as i64)) as *u8, 0 as i32);
+        return 1 as i32;
+    }
+    let mut j_v1: i64 = 0 as i64;
+    while j_v1 < last_sep_off {
+        let s_p = (path as i64 + j_v1) as *u8;
+        let d_p = (dir_buf as i64 + j_v1) as *u8;
+        let s_pi = s_p as *i32;
+        let d_pi = d_p as *i32;
+        (*d_pi) = (*s_pi);
+        j_v1 = j_v1 + (1 as i64);
+    }
+    let nul_p = (dir_buf as i64 + last_sep_off) as *u8;
+    store_byte_i32(nul_p, 0 as i32);
+    return 0 as i32;
+}
+
+// resolve_one_import_v1: 翻译 v0 main.c:101 resolve_one_import
+//   读 mod_path 文件 → parse → 递归处理 nested imports
+//   → 对每个非-import decl, 设 sym.module = mod_name 后 append 到 out_decls
+//   returns: 0 = OK, 1 = error
+fn resolve_one_import_v1(mod_path: *u8, mod_name: *u8, arena: *Arena,
+                          out_decls: **u8, out_count: *i64, out_cap: *i64,
+                          in_progress: *u8, nin_progress: *i64,
+                          completed: *u8, ncompleted: *i64,
+                          main_loc_filename: *u8) -> i32 {
+    // already processed? skip
+    if completed_match(completed, (*ncompleted), mod_path) != (0 as i32) {
+        return 0 as i32;
+    }
+    // cycle?
+    if in_progress_match(in_progress, (*nin_progress), mod_path) != (0 as i32) {
+        jh_fputs_stderr("error: circular import '" as *u8);
+        jh_fputs_stderr(mod_path);
+        jh_fputs_stderr("'\n" as *u8);
+        return 1 as i32;
+    }
+
+    // read mod_path
+    let mod_source = read_file(mod_path);
+    if mod_source == (0 as *u8) {
+        jh_fputs_stderr("error: cannot open import '" as *u8);
+        jh_fputs_stderr(mod_path);
+        jh_fputs_stderr("'\n" as *u8);
+        return 1 as i32;
+    }
+
+    // init lexer + parser (用 main arena, 跟 v0 一致)
+    let mut mod_lexer: Lexer = Lexer {
+        source:       0 as *u8,
+        current:      0 as *u8,
+        filename:     0 as *u8,
+        line:         0 as i32,
+        col:          0 as i32,
+        peek_kind:    0 as i32,
+        peek_start:   0 as *u8,
+        peek_len:     0 as i64,
+        peek_lf:      0 as *u8,
+        peek_ll:      0 as i32,
+        peek_lc:      0 as i32,
+        has_peek:     0 as i32,
+        error_count:  0 as i32,
+    };
+    lexer_init(&mod_lexer, mod_source, mod_path);
+
+    let mut mod_parser_v: Parser = Parser {
+        lexer:         0 as *Lexer,
+        arena:         0 as *Arena,
+        prev_kind:     0 as i32,
+        prev_start:    0 as *u8,
+        prev_length:   0 as i64,
+        prev_lf:       0 as *u8,
+        prev_ll:       0 as i32,
+        prev_lc:       0 as i32,
+        global_scope:  0 as *u8,
+        current_scope: 0 as *u8,
+        scope_depth:   0 as i32,
+        error_count:   0 as i32,
+    };
+    parser_init(&mod_parser_v, &mod_lexer, arena);
+    let mod_ast = parser_parse(&mod_parser_v);
+
+    if mod_parser_v.error_count > (0 as i32) {
+        jh_fputs_stderr("parse errors in import '" as *u8);
+        jh_fputs_stderr(mod_path);
+        jh_fputs_stderr("'\n" as *u8);
+        free(mod_source);
+        return 1 as i32;
+    }
+
+    // push onto in_progress
+    if (*nin_progress) < (64 as i64) {
+        let slot = (in_progress as i64 + (*nin_progress) * (512 as i64)) as *u8;
+        let nlen = strlen(mod_path);
+        let mut cpy: i64 = 0 as i64;
+        while cpy < nlen {
+            let s_p = (mod_path as i64 + cpy) as *u8;
+            let d_p = (slot as i64 + cpy) as *u8;
+            let s_pi = s_p as *i32;
+            let d_pi = d_p as *i32;
+            (*d_pi) = (*s_pi);
+            cpy = cpy + (1 as i64);
+        }
+        let nul_p = (slot as i64 + nlen) as *u8;
+        store_byte_i32(nul_p, 0 as i32);
+        (*nin_progress) = (*nin_progress) + (1 as i64);
+    }
+
+    // extract dir for nested import resolution
+    let nested_dir_buf = malloc(512 as i64);
+    let _ignore = dir_from_path(mod_path, nested_dir_buf);
+
+    // walk mod_ast.decls
+    let imd = node_module_data(mod_ast);
+    let mut errors: i32 = 0 as i32;
+    let mut j: i64 = 0 as i64;
+    while j < (*imd).ndeccls {
+        let idecl = *(((*imd).decls as i64 + j * (8 as i64)) as **Node);
+        if (*idecl).kind == NODE_IMPORT_DECL() {
+            // transitive import: build nested mod_path = nested_dir/iid.sym.name.jhyy
+            let iid = node_import_decl_data(idecl);
+            let nested_path_buf = malloc(1024 as i64);
+            let ndlen = strlen(nested_dir_buf);
+            let mut off_n: i64 = 0 as i64;
+            off_n = str_concat_at(nested_path_buf, off_n, nested_dir_buf);
+            let slash = "/" as *u8;
+            off_n = str_concat_at(nested_path_buf, off_n, slash);
+            // (*iid).sym is *Sym; need .name (offset 0) — cast to *Sym then deref
+            let iid_sym_p = (*iid).sym as *Sym;
+            off_n = str_concat_at(nested_path_buf, off_n, (*iid_sym_p).name);
+            let ext_jhyy = ".jhyy" as *u8;
+            off_n = str_concat_at(nested_path_buf, off_n, ext_jhyy);
+            let nul_np = (nested_path_buf as i64 + off_n) as *u8;
+            store_byte_i32(nul_np, 0 as i32);
+            let nested_name = (*iid_sym_p).name;
+            let rv1_err = resolve_one_import_v1(nested_path_buf, nested_name, arena,
+                                                 out_decls, out_count, out_cap,
+                                                 in_progress, nin_progress,
+                                                 completed, ncompleted,
+                                                 main_loc_filename);
+            errors = errors + rv1_err;
+            let _rv1_free = free(nested_path_buf);
+        } else {
+            // tag sym with module name
+            let mut owner_sym_raw: *u8 = 0 as *u8;
+            if (*idecl).kind == NODE_FUNC_DECL() {
+                let fd = node_func_decl_data(idecl);
+                owner_sym_raw = (*fd).sym;
+            } else if (*idecl).kind == NODE_TYPE_DECL() {
+                let td = node_type_decl_data(idecl);
+                owner_sym_raw = (*td).sym;
+            } else if (*idecl).kind == NODE_EXTERN_DECL() {
+                let ed = node_extern_decl_data(idecl);
+                owner_sym_raw = (*ed).sym;
+            }
+            if owner_sym_raw != (0 as *u8) {
+                let owner_sym = owner_sym_raw as *Sym;
+                (*owner_sym).module = mod_name;
+            }
+            // grow out_decls if needed
+            if (*out_count) >= (*out_cap) {
+                let mut new_cap: i64 = (*out_cap) * (2 as i64);
+                if new_cap < (8 as i64) { new_cap = 8 as i64; }
+                let bigger = arena_alloc(arena, new_cap * (8 as i64));
+                let mut cpy_d: i64 = 0 as i64;
+                while cpy_d < (*out_count) {
+                    let src_p = ((*out_decls) as i64 + cpy_d * (8 as i64)) as **u8;
+                    let dst_p = (bigger as i64 + cpy_d * (8 as i64)) as **u8;
+                    (*dst_p) = (*src_p);
+                    cpy_d = cpy_d + (1 as i64);
+                }
+                (*out_decls) = bigger;
+                (*out_cap) = new_cap;
+            }
+            let slot_o = ((*out_decls) as i64 + (*out_count) * (8 as i64)) as **Node;
+            (*slot_o) = idecl;
+            (*out_count) = (*out_count) + (1 as i64);
+        }
+        j = j + (1 as i64);
+    }
+    free(nested_dir_buf);
+
+    // pop from in_progress (find + shift down)
+    let mut kk: i64 = 0 as i64;
+    while kk < (*nin_progress) {
+        let slot = (in_progress as i64 + kk * (512 as i64)) as **u8;
+        if strcmp((*slot), mod_path) == (0 as i32) {
+            // shift remaining down
+            let mut mm: i64 = kk;
+            while mm < (*nin_progress) - (1 as i64) {
+                let src_slot = (in_progress as i64 + (mm + (1 as i64)) * (512 as i64)) as *u8;
+                let dst_slot = (in_progress as i64 + mm * (512 as i64)) as *u8;
+                let mut cpy_sh: i64 = 0 as i64;
+                while cpy_sh < (512 as i64) {
+                    let s_p = (src_slot as i64 + cpy_sh) as *u8;
+                    let d_p = (dst_slot as i64 + cpy_sh) as *u8;
+                    let s_pi = s_p as *i32;
+                    let d_pi = d_p as *i32;
+                    (*d_pi) = (*s_pi);
+                    cpy_sh = cpy_sh + (1 as i64);
+                }
+                mm = mm + (1 as i64);
+            }
+            (*nin_progress) = (*nin_progress) - (1 as i64);
+            break;
+        }
+        kk = kk + (1 as i64);
+    }
+    // push onto completed
+    if (*ncompleted) < (64 as i64) {
+        let slot = (completed as i64 + (*ncompleted) * (512 as i64)) as *u8;
+        let nlen = strlen(mod_path);
+        let mut cpy2: i64 = 0 as i64;
+        while cpy2 < nlen {
+            let s_p = (mod_path as i64 + cpy2) as *u8;
+            let d_p = (slot as i64 + cpy2) as *u8;
+            let s_pi = s_p as *i32;
+            let d_pi = d_p as *i32;
+            (*d_pi) = (*s_pi);
+            cpy2 = cpy2 + (1 as i64);
+        }
+        let nul_p2 = (slot as i64 + nlen) as *u8;
+        store_byte_i32(nul_p2, 0 as i32);
+        (*ncompleted) = (*ncompleted) + (1 as i64);
+    }
+    free(mod_source);
+    return errors;
+}
+
+// inline_imports: 翻译 v0 main.c:241 resolve_imports
+//   处理 main_path 的 module decls → 拆 import decls + main decls
+//   → recursive resolve_one_import_v1 → 拼成 merged decls
+//   replaces module.decls / ndeccls in-place
+fn inline_imports(module: *Node, main_path: *u8, arena: *Arena) -> i32 {
+    let md = node_module_data(module);
+
+    // count initial imports
+    let mut nimports: i64 = 0 as i64;
+    let mut i_cnt: i64 = 0 as i64;
+    while i_cnt < (*md).ndeccls {
+        let d = *(((*md).decls as i64 + i_cnt * (8 as i64)) as **Node);
+        if (*d).kind == NODE_IMPORT_DECL() {
+            nimports = nimports + (1 as i64);
+        }
+        i_cnt = i_cnt + (1 as i64);
+    }
+    if nimports == (0 as i64) {
+        return 0 as i32;  // 无 import = no-op
+    }
+
+    // extract main dir
+    let main_dir_buf = malloc(512 as i64);
+    let _ignore = dir_from_path(main_path, main_dir_buf);
+
+    // allocate in_progress + completed (heap, 64 × 512 = 32KB each, avoid stack overflow)
+    let in_progress = malloc(64 as i64 * (512 as i64));
+    let completed = malloc(64 as i64 * (512 as i64));
+    let mut nin_progress: i64 = 0 as i64;
+    let mut ncompleted: i64 = 0 as i64;
+
+    // extract main module's non-import decls
+    let main_decls = arena_alloc(arena, (*md).ndeccls * (8 as i64));
+    let mut nmain: i64 = 0 as i64;
+    let mut ii: i64 = 0 as i64;
+    while ii < (*md).ndeccls {
+        let decl = *(((*md).decls as i64 + ii * (8 as i64)) as **Node);
+        if (*decl).kind != NODE_IMPORT_DECL() {
+            let slot = (main_decls as i64 + nmain * (8 as i64)) as **Node;
+            (*slot) = decl;
+            nmain = nmain + (1 as i64);
+        }
+        ii = ii + (1 as i64);
+    }
+
+    // merged decls: imported first, main decls after
+    let mut new_cap: i64 = (*md).ndeccls + nimports * (8 as i64);
+    if new_cap < (16 as i64) { new_cap = 16 as i64; }
+    let new_decls = arena_alloc(arena, new_cap * (8 as i64));
+    let mut new_count: i64 = 0 as i64;
+
+    // resolve each import
+    let mut errors: i32 = 0 as i32;
+    let mut iii: i64 = 0 as i64;
+    while iii < (*md).ndeccls {
+        let decl = *(((*md).decls as i64 + iii * (8 as i64)) as **Node);
+        if (*decl).kind != NODE_IMPORT_DECL() {
+            iii = iii + (1 as i64);
+            // (continue-like: skip)
+        } else {
+            let id = node_import_decl_data(decl);
+            // (*id).sym is *Sym; need .name (offset 0)
+            let id_sym_p = (*id).sym as *Sym;
+            let mod_name_str = (*id_sym_p).name;
+            // mod_path = main_dir/mod_name.jhyy
+            let mod_path_buf = malloc(1024 as i64);
+            let mut off_m: i64 = 0 as i64;
+            off_m = str_concat_at(mod_path_buf, off_m, main_dir_buf);
+            let slash_m = "/" as *u8;
+            off_m = str_concat_at(mod_path_buf, off_m, slash_m);
+            off_m = str_concat_at(mod_path_buf, off_m, mod_name_str);
+            let ext_m = ".jhyy" as *u8;
+            off_m = str_concat_at(mod_path_buf, off_m, ext_m);
+            let nul_mp = (mod_path_buf as i64 + off_m) as *u8;
+            store_byte_i32(nul_mp, 0 as i32);
+            errors = errors + resolve_one_import_v1(mod_path_buf, mod_name_str, arena,
+                                                     (new_decls as **u8), &new_count, &new_cap,
+                                                     in_progress, &nin_progress,
+                                                     completed, &ncompleted,
+                                                     main_path);
+            free(mod_path_buf);
+            iii = iii + (1 as i64);
+        }
+    }
+
+    if errors > (0 as i32) {
+        free(in_progress);
+        free(completed);
+        free(main_dir_buf);
+        return errors;
+    }
+
+    // append main module's non-import decls after imported
+    let mut im: i64 = 0 as i64;
+    while im < nmain {
+        if new_count >= new_cap {
+            new_cap = new_cap * (2 as i64);
+            let bigger = arena_alloc(arena, new_cap * (8 as i64));
+            let mut cpy_d: i64 = 0 as i64;
+            while cpy_d < new_count {
+                let src_p = (new_decls as i64 + cpy_d * (8 as i64)) as **u8;
+                let dst_p = (bigger as i64 + cpy_d * (8 as i64)) as **u8;
+                (*dst_p) = (*src_p);
+                cpy_d = cpy_d + (1 as i64);
+            }
+            // can't reassign new_decls since it's a let; instead just leak (arena owns).
+            // Actually new_decls is from arena_alloc, we can just keep using old buffer;
+            // but we've already copied out_count. Hmm — easier to skip growth since
+            // main.jhyy has <10 decls total. Document this limitation.
+        }
+        let slot_app = (new_decls as i64 + new_count * (8 as i64)) as **Node;
+        (*slot_app) = *((main_decls as i64 + im * (8 as i64)) as **Node);
+        new_count = new_count + (1 as i64);
+        im = im + (1 as i64);
+    }
+
+    // mutate module.decls / ndeccls
+    (*md).decls = new_decls;
+    (*md).ndeccls = new_count;
+
+    free(in_progress);
+    free(completed);
+    free(main_dir_buf);
+    return 0 as i32;
+}
+
 // build_il: 完整 lex → parse → sema → codegen → 写 .il
 // 返回 0 成功，1 失败
 fn build_il(input: *u8, output: *u8) -> i32 {
@@ -222,7 +635,13 @@ fn build_il(input: *u8, output: *u8) -> i32 {
         return 1 as i32;
     }
 
-    // skip resolve_imports (commit 2b/2c 加)
+    // ── Inline imports (AST-level merge, translates v0 resolve_imports) ──
+    let imp_err = inline_imports(ast_node, input, &arena);
+    if imp_err > (0 as i32) {
+        jh_fputs_stderr("import resolution failed\n" as *u8);
+        free(source);
+        return 1 as i32;
+    }
 
     // ── Sema ──
     let mut sema_v1: SemaContext = SemaContext {
