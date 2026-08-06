@@ -103,7 +103,7 @@ python compiler/build/bin/regress.py
 # => 50/53 passed, 0 failed, 3 skipped (3 skipped = 库文件无 main)
 ```
 
-> **自举进度**：v0.9 wip 末 jhyy_v1 regress **50/53 PASS 持平 baseline** + stage1 byte-equal **6/7 持平 baseline** + 2 audit 全 PASS (AUDIT 修 VariantDesc heap overflow + C' 验证 codegen 5 维度 by-construction deterministic)。详见 [`v0.9.0 任务清单`](docs/plans/v0/v0.9.0任务清单 + 概要设计.md) + [`v1.0 sprint 3 计划`](docs/plans/v1/)。
+> **自举进度**：v0.9 wip 末 jhyy_v1 regress **50/53 PASS 持平 baseline** + stage1 byte-equal **6/7 持平 baseline** + 2 audit 全 PASS (AUDIT 修 VariantDesc heap overflow + C' 验证 codegen 5 维度 by-construction deterministic)。详见 [`v0.9.0 任务清单`](docs/plans/v0/v0.9.0任务清单 + 概要设计.md) + [`v1.0 sprint 3 计划`](docs/plans/v1/v1.0-sprint-3-launch.md)。
 
 ## 语言特性 (v0.7.0 + v0.8 wip + v0.9 wip)
 
@@ -206,7 +206,7 @@ Copy-Item vscode-ext $env:USERPROFILE\.vscode\extensions\jhyy-lang -Recurse
 | v0.x — C 编译器 | [`docs/plans/roadmap/v0.x-c-compiler-roadmap.md`](docs/plans/roadmap/v0.x-c-compiler-roadmap.md) |
 | **v0.8 wip — 自举路径清理** | [`docs/plans/v0/v0.8.0任务清单 + 概要设计.md`](docs/plans/v0/v0.8.0任务清单 + 概要设计.md) |
 | **v0.9 wip — W 真修 + 2 audit (AUDIT + C') + Stage 1 byte-equal（当前 sprint）** | [`docs/plans/v0/v0.9.0任务清单 + 概要设计.md`](docs/plans/v0/v0.9.0任务清单 + 概要设计.md) |
-| **v1.0 sprint 3 — 5 task 粗粒度合并（下一阶段）** | [`docs/plans/v1/v1.0-sprint-3-*.md`](docs/plans/v1/) |
+| **v1.0 sprint 3 — 5 task 粗粒度合并（下一阶段）** | [`docs/plans/v1/v1.0-sprint-3-launch.md`](docs/plans/v1/v1.0-sprint-3-launch.md) |
 | **v1.0 — 自举** | [`docs/plans/roadmap/v1.0-self-hosting.md`](docs/plans/roadmap/v1.0-self-hosting.md) + [`docs/plans/v1/v1.0.0任务清单 + 概要设计.md`](docs/plans/v1/v1.0.0任务清单 + 概要设计.md) |
 | v2.x — QBE 完整重写 | [`docs/plans/roadmap/v2.x-qbe-rewrite.md`](docs/plans/roadmap/v2.x-qbe-rewrite.md) |
 | v3.x — 扩展 | [`docs/plans/roadmap/v3.x-language-expansion.md`](docs/plans/roadmap/v3.x-language-expansion.md) |
@@ -229,7 +229,7 @@ Copy-Item vscode-ext $env:USERPROFILE\.vscode\extensions\jhyy-lang -Recurse
 | v0.2.1 | [`docs/logs/v0/changelog-v0.2.1.md`](docs/logs/v0/changelog-v0.2.1.md) |
 | v0.0.1 | [`docs/logs/v0/changelog-v0.0.1.md`](docs/logs/v0/changelog-v0.0.1.md) |
 
-Sprint 实施日志: [`docs/logs/v0/sprint-*.md`](docs/logs/v0/) (sprint-1a ~ 1g)
+Sprint 实施日志: `docs/logs/v0/sprint-1[a-g]-*.md` (sprint-1a ~ 1g,v0.1 时代命名) — 索引见 [`docs/logs/v0/README.md`](docs/logs/v0/README.md)
 
 ### 工具 & 集成
 
