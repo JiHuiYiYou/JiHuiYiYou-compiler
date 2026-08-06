@@ -23,6 +23,7 @@
 | commit 2.14 | W-004 BLOCKED verification (Task #60 阻断) + W-002 archive 标记 (删 `_W002_revert.py` + 加 README) + W-006 dormant 标记 + W-008 ↔ W-009 ↔ W-007 ↔ W-005 cross-ref 联动段 | ✅ SHIPPED (2026-08-05) |
 | commit 2.15 | Task #60 真修 — parse_if body inline parse_while 嵌套 TOKEN_WHILE 分支 (`if→while→while` 模式解锁, codegen.jhyy:2198 + sema.jhyy:1191 parse error 消除) | ✅ SHIPPED (2026-08-05) |
 | commit 2.16 | AUDIT (5 struct 字段访问审计) 真修 — VariantDesc 加 `payload` 字段 + VARIANT_DESC_SIZE 16→24 (sema 写 tag 在 offset 16 = 下一项 name 字段 = heap overflow 已修) | ✅ SHIPPED (2026-08-05) |
+| commit 2.17 | C' (codegen 确定性 audit, 5 维度) — 全 by-construction deterministic, 0 真修, 3 stage1 测试 v0↔v1 byte-equal 实证 | ✅ SHIPPED (2026-08-05) |
 
 ---
 
@@ -1822,5 +1823,181 @@ bash compiler/tests/stage1-expanded.sh
 - `compiler/src/types.h:37-41` — C 端 VariantDesc 定义
 - `compiler/src0/codegen.jhyy:131-134` — jhyy 端 VariantDesc 改前/改后
 - `compiler/src0/sema.jhyy:1571-1577` — sema 写 VariantDesc 循环
+
+---
+
+## v0.9 wip commit 2.17: C' — codegen 确定性 audit (5 维度, 0 真修, 3 stage1 实证 byte-equal)
+
+**日期**: 2026-08-05
+**承接**: v0.9 wip commit 2.16 (AUDIT 真修)
+**类型**: audit-only (~150 行 doc, 0 文件代码改)
+**范围**: codegen .il 输出字节确定性 (跟 AUDIT struct layout 维度正交)
+
+### 动机
+
+AUDIT (commit 2.16) 修的是 codegen **内部状态** struct layout 正确性, 保证 jhyy_v1 编 codegen.jhyy 不 segfault + emit 字段值正确。
+
+**C' 是 AUDIT 的互补维度**: codegen **外部输出** (.il 字节) 确定性, 保证:
+- (a) jhyy_v1 跑两次同 input → output byte-equal (自我确定性)
+- (b) jhyy_v1 vs jhyy_0 跑同 input → output byte-equal (跨实现一致性, 部分由 stage1 6/7 覆盖)
+
+**C' ship-able 标准** (per user plan):
+- 5 维度 audit 全跑过: (i) 找到 ≥1 确定性风险源 / (ii) 验证全 by-construction deterministic
+- regress 持平 baseline 50/53
+- 3+ stage1 测试 v0↔v1 byte-equal
+- jhyy_v1 self byte-equal (跑两次)
+- 1 commit ship-able
+
+### 方法
+
+1. **5 维度 code review**:
+   - (1) **tmp 编号**: `ir.jhyy:168-178 ir_new_tmp` — 单调 ++id
+   - (2) **block 编号**: `ir.jhyy:180-201 ir_new_block` — 单调 ++id
+   - (3) **label 生成**: `ir.jhyy:298-306 ir_emit_label` — `@<name>` = hint + sequential id, emit 顺序 = ir_new_block 调用顺序
+   - (4) **data 段 emit**: `ir.jhyy:241-292 ir_emit_data_*` / `ir_flush_data` — append-only `data_sb`, prepend 在 flush 时 (data_sb 是 StringBuilder, 顺序 append = 顺序 emit)
+   - (5) **字符串拼接**: `util.jhyy sb_append*` — 顺序 append, no buffer reverse/reorder
+
+2. **非确定性源 grep**:
+   - `rand()` / `time()` — 0 命中 (codegen.jhyy / ir.jhyy / util.jhyy / arena.jhyy 全扫)
+   - `qsort()` / `sort()` — 0 命中
+   - `hashmap iteration in emit path` — 0 命中 (codegen.jhyy 18 while loops 全 iterate over ARRAY indices, e.g. `while i < nfields`, `while j < nvariants`, etc., 无 hash 桶迭代)
+   - `next_tmp / next_block / next_data =` 重赋值 — 0 命中 (only increment via ir_new_* helper)
+   - arena alloc 是 bump allocator (顺序分配), 不重用内存 → 风险零
+
+3. **empirical byte-equal 验证**:
+   - 3 stage1 测试 (arith / struct_val_pass / match_exhaustive) 全 PASS byte-equal v0↔v1
+   - jhyy_v1 跑两次 match_exhaustive → byte-equal (自我确定性)
+   - v0 跑两次 match_exhaustive → byte-equal (v0 baseline 自我确定性)
+
+### 5 维度 audit 表
+
+| 维度 | 实现位置 | 顺序保证 | 验证 | 风险 |
+|------|---------|---------|------|------|
+| (1) tmp 编号 | ir.jhyy:168-178 | `(*ir).next_tmp = (*ir).next_tmp + 1` 单调 ++ | 3 测试 byte-equal | 0 |
+| (2) block 编号 | ir.jhyy:180-201 | `(*ir).next_block = (*ir).next_block + 1` 单调 ++ | 3 测试 byte-equal | 0 |
+| (3) label 生成 | ir.jhyy:298-306 | `ir_emit_label` 输出 `@<name>` = `ir_new_block` 当时分配的 hint+id, 无 reordering | 3 测试 byte-equal | 0 |
+| (4) data 段 emit | ir.jhyy:241-292 | `ir_emit_data_*` 顺序 append 到 data_sb, `ir_flush_data` prepend (data 在 code 之前) | 3 测试 byte-equal | 0 |
+| (5) 字符串拼接 | util.jhyy sb_* | `sb_append_cstr` / `sb_appendf` / `sb_appendf_lld` 全是顺序 append, 无 reverse | 3 测试 byte-equal | 0 |
+
+**结论**: 5 维度全部 by-construction deterministic. 0 真修, 0 latent risk (5/5).
+
+### Empirical byte-equal 验证
+
+**Step 1: v0 self byte-equal**
+```bash
+jhyy.exe compile match_exhaustive.jhyy -o /tmp/cprime/me_v0_a.exe
+jhyy.exe compile match_exhaustive.jhyy -o /tmp/cprime/me_v0_b.exe
+diff /tmp/cprime/me_v0_a.exe.il /tmp/cprime/me_v0_b.exe.il
+# (no diff) → v0 self byte-equal ✅
+```
+
+**Step 2: jhyy_v1 self byte-equal**
+```bash
+jhyy_v1.exe compile match_exhaustive.jhyy -o /tmp/cprime/me_v1_a.exe
+jhyy_v1.exe compile match_exhaustive.jhyy -o /tmp/cprime/me_v1_b.exe
+diff /tmp/cprime/me_v1_a.exe.il /tmp/cprime/me_v1_b.exe.il
+# (no diff) → jhyy_v1 self byte-equal ✅
+```
+
+**Step 3: v0 ↔ v1 byte-equal (3 stage1 测试)**
+```bash
+# match_exhaustive (enum + match codegen heavy)
+jhyy.exe compile match_exhaustive.jhyy -o /tmp/cprime/me_v0.exe
+jhyy_v1.exe compile match_exhaustive.jhyy -o /tmp/cprime/me_v1.exe
+diff /tmp/cprime/me_v0.exe.il /tmp/cprime/me_v1.exe.il
+# (no diff) → match_exhaustive byte-equal ✅
+
+# arith (basic arithmetic codegen)
+jhyy.exe compile arith.jhyy -o /tmp/cprime/ar_v0.exe
+jhyy_v1.exe compile arith.jhyy -o /tmp/cprime/ar_v1.exe
+diff /tmp/cprime/ar_v0.exe.il /tmp/cprime/ar_v1.exe.il
+# (no diff) → arith byte-equal ✅
+
+# struct_val_pass (struct copy codegen heavy)
+jhyy.exe compile struct_val_pass.jhyy -o /tmp/cprime/svp_v0.exe
+jhyy_v1.exe compile struct_val_pass.jhyy -o /tmp/cprime/svp_v1.exe
+diff /tmp/cprime/svp_v0.exe.il /tmp/cprime/svp_v1.exe.il
+# (no diff) → struct_val_pass byte-equal ✅
+```
+
+**Step 4: stage1 7 测试集 byte-equal 持平 baseline 6/7**
+```bash
+bash compiler/tests/stage1-expanded.sh
+# pass: 6 / 7 (持平 commit 2.15/2.16)
+# fail: 1 (const_array — pre-existing Task #52, 跟 C' 无关)
+```
+
+**Step 5: regress 持平 baseline 50/53**
+```bash
+python compiler/build/bin/regress.py
+# 50/53 PASS, 0 failed, 3 skipped (per baseline)
+```
+
+### 完成定义 (全达成 ✅)
+
+| 标准 | 状态 | 证据 |
+|------|------|------|
+| 5 维度 audit 全跑过 | ✅ | 5/5 by-construction deterministic (table) |
+| 0 真修 OR ≥1 真修 | ✅ | **0 真修** (5 维度全 PASS, 无 bug) |
+| regress 持平 baseline 50/53 | ✅ | (per Step 5) |
+| stage1 byte-equal 持平 6/7 | ✅ | (per Step 4) |
+| 3+ 测试 v0↔v1 byte-equal | ✅ | match_exhaustive + arith + struct_val_pass (per Step 3) |
+| jhyy_v1 self byte-equal | ✅ | (per Step 2) |
+| v0 self byte-equal | ✅ | (per Step 1) |
+| 1 commit ship-able | ✅ | 本 commit (audit-only, 0 代码改) |
+
+### C' 跟 AUDIT 区别 (per user plan)
+
+| 维度 | AUDIT (commit 2.16) | C' (commit 2.17) |
+|------|---------------------|------------------|
+| **审计对象** | codegen 内部状态 (struct layout / 字段访问) | codegen 外部输出 (.il 字节确定性) |
+| **风险类型** | struct 字段偏移错位 → 越界 / 错值访问 | hash 迭代 / rand → 同样 input 不同 output |
+| **真修** | 1 真修 (VariantDesc size + payload) | 0 真修 (全 by-construction deterministic) |
+| **验证** | regress 50/53 + stage1 6/7 + jhyy_v1 编 codegen.jhyy 不 segfault | 双重 byte-equal (self + cross-implementation) + 3 stage1 测试 |
+| **互补性** | 保证 jhyy_v1 跑得动 + 字段值正确 | 保证 jhyy_v1 输出 reproducible + 跟 v0 对齐 |
+
+**两个 audit 维度不同, 互补**: AUDIT 修的是 "跑得对", C' 修的是 "跑得稳" (deterministic)。两个都达成 → Stage 1 closure 的基础 (跑得对 + 跑得稳 + 跑得 byte-equal) 才真正完整。
+
+### 风险源排查 (全清空)
+
+| 风险类型 | 排查范围 | 命中 | 状态 |
+|---------|---------|------|------|
+| `rand()` / `time()` | codegen/ir/util/arena/symtab 全扫 | 0 | ✅ 0 risk |
+| `qsort()` / `sort()` | 同上 | 0 | ✅ 0 risk |
+| `hashmap iteration in emit` | codegen.jhyy 18 while loops 扫 | 0 (全 iterate over array indices) | ✅ 0 risk |
+| `next_tmp/block/data = 重赋值` | codegen.jhyy 全扫 | 0 (only increment via ir_new_*) | ✅ 0 risk |
+| arena 内存重用 | arena.jhyy bump allocator | 0 (顺序分配, 不 free) | ✅ 0 risk |
+| Pointer arithmetic in emit | codegen.jhyy ptr_add_u8 扫 | 0 (ptr_add_u8 只用于 arena memory, 不进 .il) | ✅ 0 risk |
+| Float determinism | ir.jhyy QBE float emit | 0 (float 走 `stores`/`loads`, 无精度差异) | ✅ 0 risk |
+
+**结论**: 7 类风险源全 0 命中, C' 审计达成 "全 by-construction deterministic"。
+
+### 影响
+
+- **codegen 输出确定性 baseline 文档化**: 5 维度全 PASS, 7 类风险源全 0, 3 测试 byte-equal 实证
+- **不影响 v0**: src0/ 是 jhyy 端源, v0 jhyy.exe 不变
+- **不影响 regress / stage1**: 持平 baseline
+- **不影响 AUDIT**: AUDIT 修的 VariantDesc 也不影响 .il 字节 (VariantDesc 是 sema 内部状态, 不进 .il)
+- **Stage 1 closure 基础完整**: AUDIT (跑得对) + C' (跑得稳) + 6/7 stage1 byte-equal (跑得对齐) = 三基础齐
+
+### 下一步
+
+| commit / 阶段 | 主题 | 依赖 |
+|--------------|------|------|
+| v0.9 wip 收尾 | docs cleanup + A 段 closure 总结 + ship v0.9 wip tag | C' ✅ |
+| v1.0 sprint 3 启动 (粗粒度合并) | Task #52 (parser NODE_CONST_DECL → 7/7) + B' (resolve_imports 翻译) + Task #61 (jhyy_v1 编 main.jhyy 跑通) + W-004 verification (post-Task #61) → commit 2.18 W-004 RESOLVED OR 批量改名 + D (N=3 byte-equal) | v0.9 wip 收尾 |
+| M4 hard closure | N=3 byte-equal 7/7 + 真自举 | v1.0 sprint 3 全部 |
+
+### 引用
+
+- v0.9 wip commit 2.16 — AUDIT 真修 (C' 互补的前置 audit)
+- v0.9 wip commit 2.15 — Task #60 真修 (AUDIT prerequisite)
+- v0.9 wip commit 2.9 — B-match 真修 (codegen emit 顺序对齐 v0 的关键 commit)
+- v0.9 wip commit 2.7 — B-data 真修 (.data 段 emit 顺序对齐 v0)
+- v0.9 wip commit 2.5 — Stage 1 byte-equal 7 测试集 baseline
+- `compiler/src0/ir.jhyy:138-292` — IRBuf + ir_new_tmp/ir_new_block/ir_emit_data_*/ir_flush_data
+- `compiler/src0/util.jhyy:171-323` — HashMap + hash_string (FNV-1a, 确定性 per string)
+- `compiler/src0/codegen.jhyy:18 while loops` — 全 iterate over array indices, 无 hash 迭代
+- `compiler/tests/stage1-expanded.sh` — 7 测试集 byte-equal 验证脚本
 - `compiler/src0/codegen.jhyy:1885-1889` — "已知 trick" 注释删除
 - `docs/internal/workarounds.md` — AUDIT 是 W-005 真修后立项的预防任务
