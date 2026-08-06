@@ -112,6 +112,7 @@ python compiler/build/bin/regress.py
 | L1 | [`v1.0-self-hosting.md`](docs/plans/roadmap/v1.0-self-hosting.md) | 未启动（语言特性启动门槛已达成，见 lang-spec 附录 C）|
 | L1.5 | [`v2.x-qbe-rewrite.md`](docs/plans/roadmap/v2.x-qbe-rewrite.md) | 未启动（中期方向，待 v1.0 后启动）|
 | L1 | [`v3.x-language-expansion.md`](docs/plans/roadmap/v3.x-language-expansion.md) | 未启动（语言特性扩展；自举能力已在 v1.0 完成）|
+| L1.5 | [`v2-v3-parallel-sprint-plan.md`](docs/plans/roadmap/v2-v3-parallel-sprint-plan.md) | **v2.x ⟂ v3.x 并行 sprint 调度**（M1-M4-M11 路径 + 风险触点 + 时间线）|
 | L1 | [`v0.0-skeleton.md`](docs/plans/roadmap/v0.0-skeleton.md) | 已完成（早期骨架）|
 | L3 | `docs/plans/v0/v0.X.0任务清单 + 概要设计.md` | 每个 C 编译器 sprint 一份 |
 | L4 | `docs/plans/v0/v0.X.0详细实现方案.md` | 每个 C 编译器 sprint 一份 |
