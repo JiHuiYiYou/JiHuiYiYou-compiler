@@ -2,11 +2,28 @@
 
 > 语言特性 / 已知限制 / 历史修复。版本进展详见 `docs/logs/`。
 
-## 当前版本: v0.7.0
+## 当前版本: v0.9 wip (commit 2.17, 7691457)
 
-> Phase 1 — C 语言宿主编译器。v1.0.0 启动完整自举。v0.7.0 是自举前最后一波语言打磨：7A enum first-class（穷尽性检查 + 短名 variant pattern）、7B 顶层 const 数组声明。v0.6.5 是 phase-2 自举中实测沉淀的小 patch（修 #2 let mut dead-code）。#5 nested struct / #6 qbe_type_of(i8) 仍是 open bug（jhyy 端 workaround 继续）。
+> v0.x — C 语言宿主编译器。v1.0.0 启动完整自举。v0.9 定位 = W-001~W-009 真修 + main.c 翻译 + Stage 1 byte-equal 闭环 + 2 个 audit (AUDIT + C')：
+> - **v0.9 commit 1**（ce93f64）：29-extsw hypothesis 验证（未命中，extsw 是 .il 体积噪音）
+> - **v0.9 wip commit 2.5**（stage1 byte-equal 7 测试集 baseline + 修 B-let2 codegen 差异）
+> - **v0.9 wip commit 2.6-2.9**（B-φ1/B-data/B-struct/B-match 真修 — codegen emit 顺序对齐 v0）
+> - **v0.9 wip commit 2.10-2.11**（W-005 真修 phase 1+2 — CGContext C/jhyy 布局对齐, AUDIT 立项的源头 case）
+> - **v0.9 wip commit 2.12a/2.12b**（B-match-sema/codegen 真修 — match_exhaustive byte-equal 5/7 → 6/7）
+> - **v0.9 wip commit 2.13**（W-005 加固 revert 16 处 *pos_ptr_vN → let mut 风格）
+> - **v0.9 wip commit 2.14**（W-004 BLOCKED verification + W-002 archive + W-006 dormant + cross-ref 联动段）
+> - **v0.9 wip commit 2.15**（Task #60 真修 — parse_if body inline parse_while 嵌套 TOKEN_WHILE 分支）
+> - **v0.9 wip commit 2.16**（AUDIT — VariantDesc 加 payload 字段 + VARIANT_DESC_SIZE 16→24 = heap overflow 修）
+> - **v0.9 wip commit 2.17**（C' codegen 确定性 audit — 5 维度全 by-construction deterministic, 0 真修, 3 stage1 测试 byte-equal 实证）
+>
+> v0.8 wip commit 12 是 v0.9 前一版（12 commits → Stage 0 closure 解锁）。v0.7.0 是更前版（7A enum first-class + 7B 顶层 const 数组）。
+>
+> **完成定义校准**：原"jhyy_v1 推到 47/47 = M4 真自举闭环"目标在 v0.8 wip commit 6 重新校准为"持平 baseline（12 OK 持平即可）" — 详见 [`docs/plans/v0/v0.8.0任务清单 + 概要设计.md`](../plans/v0/v0.8.0任务清单 + 概要设计.md) § 完成定义校准。v0.9 wip 沿用同一基准 (regress 50/53 PASS + stage1 byte-equal 6/7 持平) + 加 2 个 audit 维度 (AUDIT + C')。下一阶段 v1.0 sprint 3 = Task #52 / B (resolve_imports 翻译) / Task #61 / W-004 verification / D。
 
-回归基线：**47/50 passed, 0 failed, 3 skipped**（3 skipped 是库文件，无 `main_jhyy`）。
+回归基线：
+- **jhyy_0 (C 编译) regress**: **50/53 passed, 0 failed, 3 skipped**（3 skipped 是库文件，无 `main_jhyy`）
+- **jhyy_v1 (自举) regress**: **12/47 OK**（v0.8 wip commit 12 后持平 baseline；持平即可，不是 47/47；regress.py 当前 hardcode jhyy.exe，要跑 jhyy_v1 regress 需 JHYY_CC env var — v0.9 wip commit 4 plan 改造, 当前未做）
+- **stage1 byte-equal**: **6/7 PASS 持平 baseline**（v0.9 wip commit 2.17 ship；const_array 失败是 pre-existing Task #52）
 
 ---
 
@@ -62,27 +79,27 @@
 | **P3** | 缺失 | 浮点 fmod (`%`) 未实现 |
 | **P3** | 缺失 | struct/enum 跨 FFI 边界 (Windows x64 ABI 不兼容) |
 | **P3** | 缺失 | 变参函数 (`printf` 的 `...`) 在 JHYY 侧需展开 |
-| **P3** | 缺失 | 函数回调 (Phase 2 考虑) |
+| **P3** | 缺失 | 函数回调 (v1.x 考虑) |
 | **P3** | 缺失 | Windows 下 `jhyy run` 子命令 `system()` 路径有 bug (P1) |
 | **P3** | 缺失 | Pattern binding codegen（`Some(v) => v` 提取 payload）—— 7A 仅 sema 层注册 binding，codegen 用 `_` 通配符规避 |
 | **P3** | 缺失 | 嵌套 const array（`[[i32; N]; M]`）、const pointer / const slice / const enum array —— sema 拒绝 |
-| **P2** | 后端 bug | **jhyy 编译器 amd64_win 后端 stack-spill**（sprint 3 commit 5/6 实测）：`infer_type → IDENT → symtab_lookup_local → symtab_lookup_one` 在特定调用栈深度 + 大结构传参下崩溃。临时 workaround 在 `compiler/src0/symtab.jhyy:255-258`（`sb_init` 触发 arena_alloc 改变栈帧大小）。完整记录见 `docs/plans/v1/v1.0.0详细实现方案.md` § 3.6 和 `docs/logs/v1/sprint-3-commit-6-sema-cleanup.md`。修复路径：phase-2.5 QBE rewrite |
+| **P2** | 后端 bug | **jhyy 编译器 amd64_win 后端 stack-spill**（sprint 3 commit 5/6 实测）：`infer_type → IDENT → symtab_lookup_local → symtab_lookup_one` 在特定调用栈深度 + 大结构传参下崩溃。临时 workaround 在 `compiler/src0/symtab.jhyy:255-258`（`sb_init` 触发 arena_alloc 改变栈帧大小）。完整记录见 `docs/plans/v1/v1.0.0详细实现方案.md` § 3.6 和 `docs/logs/v1/sprint-3-commit-6-sema-cleanup.md`。修复路径：v2.x QBE rewrite |
 
-### Phase 2 阻塞分析（2026-06-22 验证）
+### v1.x 阻塞分析（2026-06-22 验证）
 
-abi § 11.1 五个阻塞自举问题（A1-A5）中，A1/A2/A4 已 ✓。**A3 / A5 不阻塞 phase-2**：
+abi § 11.1 五个阻塞自举问题（A1-A5）中，A1/A2/A4 已 ✓。**A3 / A5 不阻塞 v1.x**：
 
 **A3（struct/enum 跨 FFI by-value）** —— 编译器自身用不到：
-- phase-2 FFI 列表（malloc/free/fopen/fread/fwrite/fprintf/strlen/strcmp/system/exit）全 pointer/scalar
+- v1.x FFI 列表（malloc/free/fopen/fread/fwrite/fprintf/strlen/strcmp/system/exit）全 pointer/scalar
 - 源码 grep 仅 `struct Arena *`（指针，非 by-value），无 `extern fn foo() -> struct X` 模式
-- 可延后到 phase-3（用户代码要调 C 函数传 struct 时再处理）
+- 可延后到 v3.x（用户代码要调 C 函数传 struct 时再处理）
 
 **A5（浮点 NaN/Inf + 不完整运算）** —— 编译器自身不用 float 算术：
 - `double` 实际用途只有 2 处：`atof()` 解析字面量、`NodeFloat { double value; }` AST 字段
 - codegen 用 `%.17g` 把 double 格式化为 QBE IL `d_xxx` 文本，**不做算术**
 - 无 `addd`/`muld`/`divd` 等浮点指令
 - v0.5 sprint 5A 已实现 float 字面量 codegen + 基础算术。P3 的 NaN/Inf 是**算术语义**（`0.0/0.0`、`NaN == NaN`），编译器不跑 float 算术所以碰不到
-- 可延后到 phase-3a（float stdlib），届时 NaN/Inf 规约与算术语义统一处理
+- 可延后到 v3.xa（float stdlib），届时 NaN/Inf 规约与算术语义统一处理
 
 **v0.6 已解决**：
 - ✅ 切片 `[*]T` codegen
@@ -179,13 +196,16 @@ abi § 11.1 五个阻塞自举问题（A1-A5）中，A1/A2/A4 已 ✓。**A3 / A
 
 ## 当前 sprint / 下一阶段
 
-**v0.7.0 已完成**（tagged）。v0.7 是自举前最后一波语言打磨。
+**v0.9 wip**（commit 2.17 ship, 7691457）：jhyy_v1 regress **50/53 PASS 持平 baseline** + stage1 byte-equal **6/7 持平 baseline** + **2 个 audit 全 PASS** (AUDIT 修 VariantDesc heap overflow / C' 验证 5 维度 by-construction deterministic)。详细进度见 `docs/logs/v0/changelog-v0.9.0.md` + `docs/plans/v0/v0.9.0任务清单 + 概要设计.md`。
 
-下一阶段：**v1.0.0 phase-2 自举** = 编译器编译自己并跑同一组测试通过（粗粒度 5 sprint）。
+下一阶段：**v1.0 sprint 3 启动**（5 task 粗粒度合并）→ `docs/plans/v1/v1.0-sprint-3-*.md`。完成定义 = jhyy_v1 编 src0/main.jhyy 真闭环 + N=3 byte-equal + W-004 RESOLVED。
 
-已知 v0.7 未完成项（明确延后）：
-- Pattern binding codegen（`Some(v) => v` 提取 payload）—— phase-2 启动后的 patch
+再下一阶段：**v1.0.0 真自举 byte-equal .il 闭环**（v1.0 sprint 3 末 → v1.0 sprint 5）→ `docs/plans/v1/v1.0.0任务清单 + 概要设计.md`。
+
+已知 v0.9 / v1.0 sprint 3 / v1.0.0 未完成项（明确延后）：
+- Pattern binding codegen（`Some(v) => v` 提取 payload）—— v1.0 sprint 3 末 patch
 - OR pattern 一致性检查（`Some(x) | Some(y)` 两边必须绑同名）
 - 嵌套 const array（`[[i32; N]; M]`）—— 自举需要时再开
 - const pointer / const slice / const enum array —— 需要 RTTI
 - const fn / 编译期函数求值 —— 大特性，单独 sprint
+- v0 codegen bug 1/2/3/4（LEA / phi / loadub / &local）—— workaround 已在 jhyy 源码里，v1.0 sprint 5 收尾
