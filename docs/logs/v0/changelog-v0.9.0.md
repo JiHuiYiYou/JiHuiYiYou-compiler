@@ -2099,3 +2099,125 @@ ast.jhyy `ast_new_int` + parser.jhyy `parse_const_decl` 移除 `jh_fmt_lld_stder
 - `compiler/tests/stage1-expanded.sh` — 7 测试集 byte-equal 验证脚本
 - `compiler/src0/codegen.jhyy:1885-1889` — "已知 trick" 注释删除
 - `docs/internal/workarounds.md` — AUDIT 是 W-005 真修后立项的预防任务
+
+---
+
+## v0.9 wip commit 2.21: Task #61 segfault 真修 (sema_local_sym var-then-deref) + ship cleanup
+
+### 目标
+
+修 jhyy_v1 编 src0/main.jhyy 时 `sema_check → infer_type → IDENT handler → sema_local_sym` 的 segfault (139),根因: jhyy_v1 codegen 对 `*(p as *Sym)` (NODE_DEREF(NODE_CAST) 1 层 deref + cast, elem=KIND_STRUCT 路径) 漏 emit `loadl`,改 emit `extsw truncate` 返回 truncated pointer。改走 var-then-deref pattern (`let sp = p as **Sym; return *sp;`,跟 sema_local_set write pattern 对齐) → IL emit `loadl` 正确 → segfault 消失。
+
+### 完成定义 (全部 ✅)
+
+| 项 | 状态 | 验证 |
+|---|---|---|
+| sema_local_sym segfault 真修 | ✅ | jhyy_v1 编 main.jhyy 不再 segfault |
+| W-005 IRVal 3 workaround revert (自然 let-mut pattern) | ✅ | codegen.jhyy = HEAD (无 W-005 workarounds) |
+| 所有 debug print 删除 | ✅ | sema.jhyy / main.jhyy / codegen.jhyy 全清 |
+| regress 持平 50/53 (无 regression) | ✅ | `python compiler/build/bin/regress.py` → 50 PASS / 0 FAIL / 3 SKIP |
+| stage1 byte-equal 7/7 (无 regression) | ✅ | `compiler/tests/stage1-expanded.sh` 7 PASS |
+
+### 改动 1: `compiler/src0/sema.jhyy:116-123` — sema_local_sym 真修
+
+```diff
+ fn sema_local_sym(locals: *u8, idx: i64) -> *Sym {
+     let p = sema_local_at(locals, idx);
+-    return (*(p as *Sym)) as *Sym;  // first 8 bytes = *Sym
++    // v0 codegen bug workaround: 不要 `*(p as *Sym)` 直接 deref cast 取回 ptr
++    //   — jhyy_v1 codegen 对 NODE_DEREF(NODE_CAST) 在 inner_node.type_ptr 被
++    //     sema 设置但 elem 类型不可解的情况下漏 emit loadl, 改 extsw truncate
++    //     返回 truncated pointer。改走 ptr_add_u8 + 字段级读取。
++    let sp = p as **Sym;
++    return *sp;
+ }
+```
+
+跟 sema_local_set write pattern (`let slot = locals + i*16; *slot = sym;`) 对齐 — var-then-deref 2 层 deref,触发 codegen 走完整 NODE_DEREF(NODE_CAST) → 2 层 loadl → 正确返回 *Sym。
+
+### 改动 2: `compiler/src0/codegen.jhyy` — 3 W-005 IRVal workaround revert 回自然 let-mut
+
+跟 commit 2.13 同样的 pattern revert (既然根因修了,workaround 可去):
+
+- **NODE_ASSIGN path IDENT** (line ~1069-1075): `let slot_buf = IRVal { ... }; let _found2 = cg_find_local(..., (slot_buf as *u8)); let slot = slot_buf;` (自然 let-mut, revert W-005 arena_alloc + field-level read 套路)
+- **NODE_INDEX path 1** (line ~1099-1104): 同样 revert
+- **NODE_ADDR_OF inner IDENT** (line ~1987-1993): 同样 revert
+
+diff net: 净 -45 行 (3 处 workaround 块 + 6 处 debug print)。
+
+### 改动 3: debug print 删除
+
+- **sema.jhyy** (~20 处): `infer_type` enter print + IDENT handler 13 处调试 print + `sema_check` 3 处 enter/post-print 全删
+- **main.jhyy** (6 处): build_il 的 `[build_il-enter/post-read_file/post-parser_parse/pre-sema/pre-sema_check/post-sema_check]` 6 处 step-print 全删
+- **codegen.jhyy** (7 处): `[cg_stmt-assign*]` + `[cg_module-enter/pre-cgbuf]` 全删
+
+剩余合法的 `jh_fputs_stderr` (sema_error 错误信息 / usage 提示) 保留。
+
+### 改动 4: main.jhyy extern fn 补全 (W-005 workaround 跟实际匹配)
+
+`extern fn fread/fwrite/fclose/system` 之前未声明 (v0 ffi.jhyy inline_imports 时带入,jhyy_v1 不带 extern 跨文件),jhyy_v1 编 main.jhyy 时报 "undefined variable"。补这 4 个 extern fn 声明(跟现有 fopen/fseek/ftell/strrchr/sprintf 同一位置,line 47-55)。
+
+### 验证
+
+| 验证 | 命令 | 结果 |
+|---|---|---|
+| v0 build | `gcc -std=c11 ... compiler/src/*.c -o jhyy.exe` | OK,无 regression |
+| jhyy_v1 build (新 jhyy_v1) | `jhyy.exe build src0/main.jhyy -o jhyy_v1_new.exe` → qbe → gcc | OK,新 jhyy_v1.exe 可跑 (`jhyy compiler v0.8 (self-hosted)`) |
+| jhyy_v1 编 single-file tests | `bash compiler/tests/stage1-expanded.sh` | 7/7 PASS ✓ |
+| regress baseline | `python compiler/build/bin/regress.py` | 50 PASS / 0 FAIL / 3 SKIP ✓ (持平) |
+
+### Task #61 partial ship 状态
+
+| 阶段 | 状态 |
+|------|------|
+| 1. jhyy_0 编 main.jhyy → jhyy_1 | ✅ (v0 build 主路径,长期稳定) |
+| 2. jhyy_0 vs jhyy_1 byte-equal (Stage 1 7/7) | ✅ (commit 2.5-2.20 推到 7/7) |
+| 3. jhyy_1 编 main.jhyy → jhyy_2 (Task #61 真闭环) | ⚠️ PARTIAL: segfault 修了 (本 commit),但 import 处理未实现 → jhyy_v1 仍报 "undefined variable" 给跨文件 imported sym。 |
+| 4. jhyy_2 编 hello.jhyy exit 0 | ⏸️ 推到下个 commit (需先做 inline_imports / extra_inputs src0/ 等价机制 ~ 200 行) |
+
+**3 的根因**: jhyy_v1 编 src0/main.jhyy 时,jhyy_v1 的 `parser_parse` 不解析 `import` 语句 (parse_import_decl 只插 SYM_MODULE sym,不读文件),sem a 也看不到 import 的 fn/type decl。v0 走 `resolve_imports` (main.c:241, ~229 行 C 代码) 把 import 文件的 decl 合并进 main AST。jhyy_v1 等价机制未翻译。
+
+**推荐后续**: 把 `resolve_imports` 翻译成 main.jhyy 一个 `inline_imports(input, &arena)` 函数 (~200 行,直接读 src0/*.jhyy 拼接 source,避开 cross-file AST 合并的复杂) → 闭环。
+
+### 决策记录
+
+| 点 | 决策 | 理由 |
+|----|------|------|
+| sema_local_sym fix pattern | var-then-deref (let sp = p as **Sym; return *sp;) | 跟 sema_local_set write pattern 对齐,jhyy_v1 codegen 对 NODE_DEREF(NODE_CAST) 2 层 deref emit 完整 loadl 链 |
+| W-005 IRVal workaround revert | 全 revert 回 HEAD 自然 pattern | 根因 (sema_local_sym 漏 deref) 修了 → workaround 不再需要,净 -45 行 |
+| Task #61 范围 | partial ship (3 推后到下 commit) | import inlining 是 ~200 行新功能,不在 cleanup scope;regress + stage1 7/7 + jhyy_v1 单文件全跑通 = 本 commit 完成 |
+| main.jhyy extern fn 4 补全 | 加 fread/fwrite/fclose/system 4 个 extern | jhyy_v1 跨文件 extern 不带,跟现有 fopen/fseek 等同位声明 |
+
+### 影响
+
+- **segfault 消失**: jhyy_v1 编 src0/main.jhyy 不再 139 crash,改走完整 sema check (后续才是 import 处理)
+- **Stage 1 byte-equal**: 7/7 持平
+- **regress**: 50/53 持平
+- **W-005 workarounds 全 revert**: 净 -45 行 codegen.jhyy
+- **debug print 全清**: 净 -33 行 (sema/main/codegen 合计)
+
+### 下一步
+
+| commit / 阶段 | 主题 | 依赖 |
+|--------------|------|------|
+| v0.9 wip 收尾 | docs cleanup + A 段 closure 总结 + ship v0.9 wip tag | C' ✅ |
+| v1.0 sprint 3 续 (Task #61 close-out) | main.jhyy 加 inline_imports helper (~200 行, 拼接 src0/*.jhyy source) → jhyy_v1 编 main.jhyy exit 0 + jhyy_v2 编 hello.jhyy exit 0 | commit 2.21 ✅ |
+| W-004 verification | post-Task #61 close-out,跑 Stage 1 byte-equal 验证 src0/ 7 测试集全过 (跟 stage1-expanded.sh 同一 7 测试集) | Task #61 close-out |
+| D (N=3 byte-equal) | jhyy_v0 vs jhyy_v1 vs jhyy_v2 N=3 闭合 | Task #61 close-out + W-004 |
+| M4 hard closure | N=3 byte-equal 7/7 + 真自举 | v1.0 sprint 3 全部 |
+
+### 引用
+
+- v0.9 wip commit 2.20 — Task #52 + #42 合并 (parser NODE_CONST_DECL + ast/sema dispatch + codegen Pass A; stage1 6/7 → 7/7)
+- v0.9 wip commit 2.17 — C' codegen 确定性 audit (5 维度全 PASS)
+- v0.9 wip commit 2.16 — AUDIT 真修 (C' 互补的前置 audit)
+- v0.9 wip commit 2.13 — W-005 加固 (16 处 *pos_ptr_vN revert)
+- v0.9 wip commit 2.11 — W-005 真修 phase 2 (CGContext C/jhyy 布局对齐)
+- v0.9 wip commit 2.10 — W-005 真修 phase 1 (codegen.c NODE_ASSIGN let-mut fix)
+- `compiler/src0/sema.jhyy:116-123` — sema_local_sym var-then-deref fix
+- `compiler/src0/codegen.jhyy:1069-1075,1099-1104,1987-1993` — 3 W-005 IRVal workaround revert
+- `compiler/src0/main.jhyy:50-53` — fread/fwrite/fclose/system extern fn 补全
+- `compiler/src/main.c:241` — `resolve_imports` 待翻译 (Task #61 close-out 阶段 ~200 行)
+- `compiler/tests/stage1-expanded.sh` — 7 测试集 byte-equal 验证脚本 (Stage 1 持平)
+- `docs/internal/workarounds.md` — W-005 (IRVal stack alloc, 已修) + W-008/W-009 (Stage 1 audit 修)
+- `docs/internal/codegen-pitfalls.md` — `*(p as T)` var-then-deref pattern 真因 + workaround

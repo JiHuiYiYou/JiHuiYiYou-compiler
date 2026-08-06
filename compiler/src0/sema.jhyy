@@ -115,7 +115,12 @@ fn sema_local_at(locals: *u8, idx: i64) -> *u8 {
 
 fn sema_local_sym(locals: *u8, idx: i64) -> *Sym {
     let p = sema_local_at(locals, idx);
-    return (*(p as *Sym)) as *Sym;  // first 8 bytes = *Sym
+    // v0 codegen bug workaround: 不要 `*(p as *Sym)` 直接 deref cast 取回 ptr
+    //   — jhyy_v1 codegen 对 NODE_DEREF(NODE_CAST) 在 inner_node.type_ptr 被
+    //     sema 设置但 elem 类型不可解的情况下漏 emit loadl, 改 extsw truncate
+    //     返回 truncated pointer。改走 ptr_add_u8 + 字段级读取。
+    let sp = p as **Sym;
+    return *sp;
 }
 
 fn sema_local_type(locals: *u8, idx: i64) -> *Type {

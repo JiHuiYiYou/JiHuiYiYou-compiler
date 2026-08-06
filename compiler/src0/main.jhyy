@@ -48,6 +48,10 @@ extern fn fseek(fp: *u8, off: i64, whence: i32) -> i32;
 extern fn ftell(fp: *u8) -> i64;
 extern fn strrchr(s: *u8, c: i32) -> *u8;
 extern fn sprintf(buf: *u8, fmt: *u8, val: i32) -> i32;
+extern fn fread(buf: *u8, size: i64, count: i64, fp: *u8) -> i64;
+extern fn fwrite(buf: *u8, size: i64, count: i64, fp: *u8) -> i64;
+extern fn fclose(fp: *u8) -> i32;
+extern fn system(cmd: *u8) -> i32;
 
 // ═══ Constants ═══
 
