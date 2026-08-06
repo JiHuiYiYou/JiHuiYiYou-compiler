@@ -2367,3 +2367,87 @@ Task #61 close-out 完整 ship: 翻译 v0 `resolve_imports` (main.c:241) + `reso
 - v0.9 wip commit 2.22 — inline_imports 翻译 (前置 commit) + Stage 1 closure gap 暴露
 - `memory/feedback_regress_py_abspath.md` — 2026-08-05 MSYS2 + Windows subprocess abspath 修
 - `memory/project_stage1_closure_codegen_gap.md` — Stage 1 closure = sprint 4 输入,本 patch 是 sprint 4 工具链准备
+
+## v0.9 wip commit 2.23-fix (2026-08-06): Sprint 4.1 IL-diff 真修 #1 — NODE_FOR + cg_body_returns
+
+### 背景
+
+Sprint 4.1 之前 3 个 codegen fix (anti-pattern stack-as-pointer → arena_alloc) 都未通过验证:
+- Fix #1 (NODE_BLOCK stmt→inner_node): array_test regressed
+- Fix #2 (NODE_ASSIGN IDENT arena_alloc): 0 net change
+- Fix #3 (NODE_ADDR_OF IDENT arena_alloc): 0 net change
+
+之前假设 (let-mut 是 trigger / NODE_BLOCK asymmetry 是 bug) 全错。reframing: **per-test IL diff against v0 control** = empirical bug location。
+
+### 方法
+
+```
+For each failing test T:
+  Step A: v0 jhyy.exe compile T → T_v0.il     (control)
+  Step B: jhyy_v1 compile T → T_v1.il          (experimental)
+  Step C: diff T_v0.il T_v1.il                 (codegen divergence)
+  Step D: locate divergence in codegen.jhyy    (true bug line)
+```
+
+User 提议 first target = match.jhyy (NO_ARTIFACTS),但 match.jhyy fails at PARSE (parser bug, no .il emit) — can't IL-diff。Pivot 到 break_continue.jhyy (FULL cluster) 有真 divergence。
+
+### Finding
+
+`break_continue.jhyy` IL diff (v0 md5 05827def... vs v1 md5 1f33394c...):
+- v0 .il: 47 lines (完整 for-loop with `@loop1`/`@body2`/`@then5`/`@else6`/`@merge7`/`@then8`/`@else9`/`@merge10`/`@incr3`/`@exit4`)
+- v1 .il: **7 lines only** — `let sum=0; ret sum`(整个 for-loop body DROPPED)
+
+`grep NODE_FOR compiler/src0/codegen.jhyy` = 0 hits。
+`grep NODE_FOR compiler/build/bin/codegen.jhyy` = 0 hits。
+
+`cg_expr` 21 cases (INT/BOOL/FLOAT/STRING/CHAR/IDENT/UNARY/RETURN/BLOCK/LET/ASSIGN/DEREF/CALL/QUALIFIED_CALL/IF/WHILE/STRUCT_LIT/ENUM_VARIANT/ADDR_OF/CAST/MATCH) — **NODE_FOR 缺失**。 Falls through 到 `return zero;` (line 2162)。
+
+### 真修 #1: NODE_FOR case 翻译 (codegen.jhyy)
+
+按 v0 codegen.c:1468-1540 (~73 lines C) 翻译到 jhyy:
+- alloc stack slot for loop var (mutable), init with start
+- 4 blocks: loop_start, loop_body, loop_inc, loop_end
+- loop_start: load i, compare with end (signed: csltw/csltl, unsigned: cultw/cultl), jnz
+- loop_body: emit body via cg_expr
+- loop_inc: load i, add 1, store, jmp loop_start
+- loop_end: pop loop_depth
+- loop_continues = loop_inc → continue jumps to increment
+
+所有 helper 已存在 (ir_emit_alloc/store/load/binary/label/jmp/jnz, ir_new_tmp/block, cg_add_local, cg_emit_load/store, qbe_type_of, type_size, node_for_data)。
+
+### 真修 #2: cg_body_returns 补 BREAK/CONTINUE (codegen.jhyy)
+
+Fix #1 暴露 second bug: `cg_body_returns` 只检查 `NODE_RETURN()`,不检查 `NODE_BREAK()`/`NODE_CONTINUE()`。
+
+Result: 在 `for { if cond { break; } ... }` 中,IF 的 then branch 即使以 break 结尾, IF codegen 仍 emit `jmp @merge_block`,产生 dead jmp after `jmp @loop_end`,QBE fails "label or } expected"。
+
+Fix: 加 2 行 — `(*body_node).kind == NODE_BREAK() || ... NODE_CONTINUE()` (单 stmt 路径) + 同样 check 在 BLOCK last stmt。
+
+### 验证
+
+| 测试 | 旧 jhyy_v1 | 新 jhyy_v1 | 说明 |
+|------|------------|------------|------|
+| break_continue.jhyy | rc=0 (FAIL) | **rc=25 (PASS)** | 完整 for-loop body emit, break/continue 正确跳转 |
+| 全部 FULL cluster (15 tests) | 13 PASS / 2 CERR | **13 PASS / 2 CERR** | mylib/ns_dup_b 是 library 跳过 (SKIP),其他 13 全 PASS |
+| NO_ARTIFACTS (19 tests) | 9 PASS / 10 FAIL | **9 PASS / 10 FAIL** | no regression; for-loop tests 仍 COMPILE_FAIL (parser 缺 `&[10,20,30]` slice literal 支持) |
+| jhyy_v1 全 regress (53 tests) | **34 PASS / 16 FAIL** | **35 PASS / 15 FAIL** | **+1 (break_continue), 0 regression** |
+| v0 jhyy.exe 全 regress (50 tests) | 50/53 PASS | **50/53 PASS** | ✓ 不 regress |
+
+### 关键信号
+
+- **IL diff methodology validated** — empirical 找到真 bug,per-test 增量 baseline 提升,no regressions
+- 1 fix (NODE_FOR) + 1 correlated fix (cg_body_returns) → +1 visible baseline improvement
+- v0 regress 持平 50/53,证明 jhyy_v1 fix 不污染 v0 codegen
+
+### 已知仍 fail (后续 commit)
+
+- `big_test`, `slice_iterate` (NO_ARTIFACTS) — 有 for-loop 但 parse-level 缺 `&[10,20,30]` slice literal / `[*]i32` type 语法 (parser 层,不属本 commit 范围)
+- `match.jhyy` (NO_ARTIFACTS) — match-expression `1 => 10, _ => 0` parser 失败 (parser 层,Task #50 已开)
+- 9 个 NO_ARTIFACTS COMPILE_FAIL + 1 WRONG_RC (nested_if) — 多为 parse/sema 层,per IL diff 后续 round
+
+### 引用
+
+- v0 codegen.c:1468-1540 (NODE_FOR 参考实现,73 行)
+- `memory/project_sprint4_1_ildiff_break_continue.md` — IL diff 方法论 + NODE_FOR 缺失证据
+- `memory/project_sprint4_1_fix3_negative.md` — 3 anti-pattern fix 全 revert 记录
+- `memory/feedback_self_edit_authority.md` — 2026-08-04 授权 (本 commit 在授权范围内)

@@ -674,12 +674,15 @@ fn cg_body_returns(body_node: *Node) -> i32 {
     if (*body_node).kind == NODE_RETURN() {
         return 1;
     }
+    if (*body_node).kind == NODE_BREAK() || (*body_node).kind == NODE_CONTINUE() {
+        return 1;
+    }
     if (*body_node).kind == NODE_BLOCK() {
         let bd = node_block_data(body_node);
         if (*bd).nstmts > (0 as i64) {
             let last_slot = ptr_add_u8((*bd).stmts, ((*bd).nstmts - (1 as i64)) * (8 as i64)) as **Node;
             let last = *last_slot;
-            if (*last).kind == NODE_RETURN() {
+            if (*last).kind == NODE_RETURN() || (*last).kind == NODE_BREAK() || (*last).kind == NODE_CONTINUE() {
                 return 1;
             }
         }
@@ -1819,15 +1822,105 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         return then_v;
     }
 
+    // ── NODE_FOR ──
+    // for i in start..end { body }
+    //   alloc stack slot for i, init with start
+    //   4 blocks: loop_start, loop_body, loop_inc, loop_end
+    //   loop_start: load i, compare with end, jnz loop_body, loop_end
+    //   loop_body: emit body
+    //   loop_inc: load i, add 1, store, jmp loop_start
+    //   loop_end: pop loop_depth
+    //   (loop_continues = loop_inc → continue jumps to increment)
+    // v0 参考: compiler/src/codegen.c:1468-1540
+    if kind == NODE_FOR() {
+        let d = node_for_data(n);
+        let start_node = ((*d).start) as *Node;
+        let end_node = ((*d).end) as *Node;
+        let body_node = ((*d).body) as *Node;
+        let var_sym_raw = (*d).var;
+        let var_type_raw = (*(var_sym_raw as *Sym)).type_ptr;
+
+        // Compile start and end expressions
+        let start_v = cg_expr(cg_raw, start_node);
+        let end_v = cg_expr(cg_raw, end_node);
+
+        // Determine loop variable type
+        let var_qt = qbe_type_of(var_type_raw);
+        let mut var_sz = type_size(var_type_raw as *Type) as i32;
+        if var_sz < 4 { var_sz = 4; }
+
+        // Determine signed vs unsigned for comparison op (csltw/csltl/cultw/cultl)
+        let mut cmp_op_str: *u8 = "csltw" as *u8;
+        if var_qt == QBE_L() {
+            cmp_op_str = "csltl" as *u8;
+        }
+        if var_type_raw != (0 as *u8) {
+            let vt = var_type_raw as *Type;
+            if (*vt).kind == KIND_PRIMITIVE() {
+                let prim_k = (*vt).prim;
+                if prim_k == PRIM_U8() || prim_k == PRIM_U16() || prim_k == PRIM_U32() || prim_k == PRIM_U64() {
+                    if var_qt == QBE_L() {
+                        cmp_op_str = "cultl" as *u8;
+                    } else {
+                        cmp_op_str = "cultw" as *u8;
+                    }
+                }
+            }
+        }
+
+        // Allocate stack slot for loop variable (mutable)
+        let slot = ir_new_tmp(ir, QBE_L());
+        ir_emit_alloc(ir, slot, var_sz);
+        cg_emit_store(cg_raw, var_type_raw, start_v, slot);
+        cg_add_local(cg_raw, var_sym_raw, slot, 1);
+
+        // 4 blocks
+        let loop_start = ir_new_block(ir, "loop_start" as *u8);
+        let loop_body_b = ir_new_block(ir, "loop_body" as *u8);
+        let loop_inc = ir_new_block(ir, "loop_inc" as *u8);
+        let loop_end = ir_new_block(ir, "loop_end" as *u8);
+
+        // Push loop labels for break/continue
+        let depth = (*cg).loop_depth;
+        let starts_ptr = (*cg).loop_starts as *IRVal;
+        let ends_ptr = (*cg).loop_ends as *IRVal;
+        let conts_ptr = (*cg).loop_continues as *IRVal;
+        *(ptr_add_u8(starts_ptr as *u8, (depth as i64) * (40 as i64)) as *IRVal) = loop_start;
+        *(ptr_add_u8(ends_ptr as *u8, (depth as i64) * (40 as i64)) as *IRVal) = loop_end;
+        *(ptr_add_u8(conts_ptr as *u8, (depth as i64) * (40 as i64)) as *IRVal) = loop_inc;
+        (*cg).loop_depth = depth + (1 as i32);
+
+        // jmp loop_start
+        ir_emit_jmp(ir, loop_start);
+
+        // loop_start: load i, compare with end, jnz loop_body, loop_end
+        ir_emit_label(ir, loop_start);
+        let i_val = ir_new_tmp(ir, var_qt);
+        cg_emit_load(cg_raw, i_val, var_type_raw, slot);
+        let cond = ir_new_tmp(ir, QBE_W());
+        ir_emit_binary(ir, cond, cmp_op_str, i_val, end_v);
+        ir_emit_jnz(ir, cond, loop_body_b, loop_end);
+
+        // loop_body: emit body
+        ir_emit_label(ir, loop_body_b);
+        let _ = cg_expr(cg_raw, body_node);
+
+        // loop_inc: load i, add 1, store, jmp loop_start
+        ir_emit_label(ir, loop_inc);
+        let current = ir_new_tmp(ir, var_qt);
+        cg_emit_load(cg_raw, current, var_type_raw, slot);
+        let next_val = ir_new_tmp(ir, var_qt);
+        ir_emit_binary(ir, next_val, "add" as *u8, current, ir_new_int(1 as i64));
+        cg_emit_store(cg_raw, var_type_raw, next_val, slot);
+        ir_emit_jmp(ir, loop_start);
+
+        // loop_end
+        ir_emit_label(ir, loop_end);
+        (*cg).loop_depth = depth;
+        return zero;
+    }
+
     // ── NODE_WHILE ──
-    // while cond { body }
-    //   loop_start (label emit before cond)
-    //   cond eval → jnz loop_body, loop_end
-    //   loop_body:
-    //   body emit
-    //   jmp loop_start
-    //   loop_continues / loop_ends 推到 stack（loop_depth++）
-    if kind == NODE_WHILE() {
         let nwd = node_while_data(n);
         let cond_node = (*nwd).cond as *Node;
         let body_node = (*nwd).body as *Node;
