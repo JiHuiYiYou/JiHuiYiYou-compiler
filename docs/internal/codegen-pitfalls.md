@@ -30,7 +30,7 @@
 ## § 2 Stage 1 byte-equal codegen translation gaps（v0.9.0 commit 2.5 范畴）
 
 > **首次登记**: v0.9 wip commit 2.5 (2026-08-05)
-> **测试集**: [`compiler/tests/examples/`](../../tests/examples/) 下 7 个 Stage 1 byte-equal 验证集(`stage1-expanded.sh`)
+> **测试集**: [`compiler/tests/examples/`](../../compiler/tests/examples/) 下 7 个 Stage 1 byte-equal 验证集(`stage1-expanded.sh`)
 > **基线**: `jhyy_0` (C 编译) vs `jhyy_1` (jhyy 编译) 对相同 .jhyy 输入产 .il,**byte-equal 是硬性要求**
 > **commit 2.5 验收**: byte-equal 至少 2/7 (本 commit 修 1 个,B-let2)
 
@@ -119,7 +119,7 @@
 | B-let2 修完,byte-equal ≥ 2/7 | ✅ (2/7:hello + arith) |
 | 5 个未修 gap 文档化(B-φ1/B-struct/B-match/B-data + B-testset baseline) | ✅ (本文档) |
 | regress 持平 baseline | ✅ (3 OK = 持平 commit 12 12 OK 测量口径差) |
-| Stage 1 验收脚本存在 | ✅ ([`stage1-expanded.sh`](../../tests/stage1-expanded.sh)) |
+| Stage 1 验收脚本存在 | ✅ ([`stage1-expanded.sh`](../../compiler/tests/stage1-expanded.sh)) |
 
 ### 2.6 commit 2.6 增量(B-φ1 真修)
 

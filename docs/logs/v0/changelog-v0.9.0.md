@@ -1,7 +1,7 @@
 # JHYY v0.9.0 Changelog
 
 > **状态**: 🚧 wip (commit 1 ✅, commit 2.x 部分 ship)
-> **承接**: v0.8 wip commit 12 ([5820793](../logs/v0/changelog-v0.8.0.md)) — Stage 0 closure 解锁
+> **承接**: v0.8 wip commit 12 ([5820793](./changelog-v0.8.0.md)) — Stage 0 closure 解锁
 > **目标**: `jhyy_0` (C 编译) 与 `jhyy_1` (jhyy 编译) 对相同 .jhyy 测试集产 **byte-equal .il** (Stage 1 closure)
 > **后续**: v1.0.0 自举启动（粗粒度 5 sprint）
 
@@ -41,7 +41,7 @@
 
 | 标准 | 状态 | 证据 |
 |------|------|------|
-| 7 测试集 byte-equal baseline 锁定(测试集 + EXPECT + 路径) | ✅ | [`stage1-expanded.sh`](../../tests/stage1-expanded.sh) + `fib_renamed.jhyy`/`arith.jhyy`/`control_flow.jhyy` 等 7 文件 |
+| 7 测试集 byte-equal baseline 锁定(测试集 + EXPECT + 路径) | ✅ | [`stage1-expanded.sh`](../../../compiler/tests/stage1-expanded.sh) + `fib_renamed.jhyy`/`arith.jhyy`/`control_flow.jhyy` 等 7 文件 |
 | B-let2 (l→w narrow) 修完,byte-equal ≥ 2/7 | ✅ | **2/7** (hello + arith PASS) |
 | 6 codegen gap 文档化 | ✅ | [`codegen-pitfalls.md` § 2](../../internal/codegen-pitfalls.md) |
 | regress 持平 baseline | ✅ | 3 OK (持平 commit 12 测量口径) |
