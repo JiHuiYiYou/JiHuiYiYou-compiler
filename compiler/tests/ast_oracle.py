@@ -2,7 +2,7 @@
 """
 ast_oracle.py — byte-equal oracle for AST dump files.
 
-Used by v1.0.0 phase-2 self-hosting verification (sprint 5):
+Used by v1.0.0 self-hosting verification (sprint 5):
     jhyy_0 (C-compiled) dumps AST → actual.ast.txt
     jhyy_1 (self-hosted) dumps AST → expected.ast.txt
     ast_oracle.py compares the two

@@ -36,3 +36,7 @@ ffi_test_output.txt
 compiler/src0/*.il
 compiler/src0/*.s
 compiler/src0/*.exe
+
+# tmp/ — 工作目录临时调试 artifact（do_w*.py / tm_*.jhyy / test_*.jhyy / r1.* 等 200+ 文件）
+# 用 `tmp/` 目录而不是 repo 根散落文件，避免 git status 噪音
+tmp/

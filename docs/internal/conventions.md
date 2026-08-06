@@ -22,15 +22,26 @@
 | C 编译器 sprint 概要 | `docs/plans/v0/v0.X.Y任务清单 + 概要设计.md` |
 | jhyy 自举 sprint 设计 | `docs/plans/v1/vX.Y.Z详细实现方案.md` |
 | jhyy 自举 sprint 概要 | `docs/plans/v1/vX.Y.Z任务清单 + 概要设计.md` |
-| 长期 phase 路线图 | `docs/plans/phase/phase-N-*.md` |
+| 长期 vX.Y 路线图 | `docs/plans/roadmap/vX.X-*.md` |
 
 ## 提交规则
 
 1. **禁止提交构建产物**：`.exe`、`.il`、`.s`、`.o`（已在 `.gitignore`）
-2. **禁止提交临时调试文件**：`test_*.c`、`test_*.jhyy`、`out.txt` 等
+2. **禁止提交临时调试文件**：`test_*.c`、`test_*.jhyy`、`out.txt` 等（用 `tmp/` 目录）
 3. **改动前先看 git status**：避免误提交上次的临时文件
-4. **每个 sprint 一个 commit**：commit message 用中文概述 + Co-Authored-By
+4. **每个 sprint 一个 commit**：commit message 用中文概述 + Co-Authored-By: MiniMax-M3 <noreply@MiniMax>
 5. **版本号用 git tag**：`git tag v0.X.Y`
+
+### 改动后必跑（按层面）
+
+| 改的文件 | 必跑 | 备注 |
+|----------|------|------|
+| `compiler/src/*.c` (C 编译器源) | `python compiler/build/bin/regress.py` | 0 failed 才算完成 |
+| `compiler/src0/*.jhyy` (jhyy 编译器源) | (1) `python compiler/build/bin/regress.py` (jhyy_0 编 regress)<br>(2) `JHYY_CC=jhyy_1 python compiler/build/bin/regress.py` (jhyy_v1 编 regress，持平 baseline) | v0.9 commit 4 + v1.0.0 阶段必跑 |
+| `compiler/tests/examples/*.jhyy` | `python compiler/build/bin/regress.py` | 加新测试必跑 |
+| `docs/abis/jhyy-lang-spec-*.md` / `docs/abis/jhyy-abi-*.md` | (1) 同步更新 v0.x / v1.x / v2.x 路线图引用<br>(2) `regress.py`（spec 改动可能影响 jhyy 端解析） | spec 改动 = 跨多 sprint 影响 |
+| `docs/plans/v0/*` / `docs/plans/v1/*` / `docs/plans/v2/*` / `docs/plans/roadmap/*` | 至少 review 跨文件引用一致性 | doc-only 改动不强制 regress，但建议跑一次验证 jhyy 编译器仍编得出 hello.jhyy |
+| `mcp-jhyy/*` | 重启 MCP server + 跑 `jhyy_run` tool 验证 hello.jhyy | — |
 
 ## 测试命名
 

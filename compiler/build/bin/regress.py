@@ -5,8 +5,8 @@ import sys
 import os
 import re
 
-JHYY = "compiler/build/bin/jhyy.exe"
-TEST_DIR = "compiler/tests/examples"
+JHYY = os.path.abspath("compiler/build/bin/jhyy.exe")
+TEST_DIR = os.path.abspath("compiler/tests/examples")
 TIMEOUT = 10
 
 def run_test(jhyy_file):
@@ -38,7 +38,7 @@ def run_test(jhyy_file):
                        encoding='utf-8', errors='replace')
     if r.returncode != 0:
         return (False, expected, -1, f"compile failed: {r.stderr[:200]}")
-    exe = out_base + ".exe"
+    exe = os.path.abspath(out_base + ".exe")
     if not os.path.exists(exe):
         return (False, expected, -2, "exe not created")
 

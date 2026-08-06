@@ -2,7 +2,7 @@
 
 ## 概要
 
-v0.7.0 之后（7A enum first-class + 7B const struct array），v0.8.0 转向 **v1.0.0 phase-2 自举 sprint 4-5 收尾**。v0.8 定位：清理自举路径的剩余卡点，让 `jhyy_0 (C 编译) 编 main.jhyy → jhyy_1` 跑通。
+v0.7.0 之后（7A enum first-class + 7B const struct array），v0.8.0 转向 **v1.0.0 v1.x 自举 sprint 4-5 收尾**。v0.8 定位：清理自举路径的剩余卡点，让 `jhyy_0 (C 编译) 编 main.jhyy → jhyy_1` 跑通。
 
 按 v1.0.0 L1 计划：v0.x patch 只修 bug，**不引入新特性**。v0.8.0 同样不引入新语法（enum / const array 等下个 minor version）。
 
@@ -16,7 +16,7 @@ v0.7.0 之后（7A enum first-class + 7B const struct array），v0.8.0 转向 *
 
 **Why**：这 3 个 bug 是 sprint 4 翻译 codegen.jhyy 时暴露的 codegen 问题，挡住自举 main.c → main.jhyy 路径。bug 11 是 jhyy 0 codegen 缺 w→l extension（实测触发：i64 变量 > 0 字面量比较）。bug 12 是翻译 bug（FieldDesc 字段 offset 算错）。bug 13 是 v0 codegen 对 first-field-w struct value 的 sret 处理有缺陷（IRVal 有 5 字段），workaround 是把 sret_slot 改 i64 不存 struct。
 
-## commit 2（pending）：翻译 main.c → main.jhyy
+## commit 2（b93925f）：翻译 main.c → main.jhyy
 
 **目标**：`compiler/src/main.c` (556 行) → `compiler/src0/main.jhyy` (471 行)
 
@@ -28,7 +28,7 @@ v0.7.0 之后（7A enum first-class + 7B const struct array），v0.8.0 转向 *
 
 **`compiler/src0/_driver*.jhyy` (12 个 driver)**：签名 `fn main_jhyy() -> i32` 改 `fn main_jhyy(_argc: i32, _argv: *u8) -> i32`（runtime 现在带 argc/argv 转发）。
 
-## commit 3（pending）：修 jhyy_v1 自举回归
+## commit 3（990cc6c）：修 jhyy_v1 自举回归
 
 **目标**：让 `jhyy_v1.exe`（自举版）能编译更多 tests，缩小与 `jhyy_0`（C 版）的差距。
 
@@ -105,7 +105,7 @@ v0.7.0 之后（7A enum first-class + 7B const struct array），v0.8.0 转向 *
 - NORUN -5（5 个进入更深状态：实际是 7 → 0）
 - CERR -1（float_arith/float_arith_f32 离开 CERR）
 
-## commit 5（pending）：Phase A-1 if-expr — 5 codegen bug + parser if-as-expression
+## commit 5（9e77e09）：Phase A-1 if-expr — 5 codegen bug + parser if-as-expression
 
 **目标**：让 `let r = if cond { a } else { b };` 在 jhyy_v1 能编译并跑通；regress 从 7 OK 推到 16 OK（+9）。
 
@@ -195,8 +195,8 @@ v0.7.0 之后（7A enum first-class + 7B const struct array），v0.8.0 转向 *
 | 项 | 延后到 | 理由 |
 |----|-------|------|
 | 修 v0 codegen bug 1/2/3/4（LEA/phi/loadub/&local）| v0.8.x patch 或 v1.0.0 后 | workaround 已在 jhyy 源码里 |
-| QBE 完整重写 | phase-2.5 / v3.x+ | 2026-06-22 决策：先 phase-2 前端翻译 |
-| 多目标架构（自研 OS）| phase-4+ | 当前 amd64_win 中间态 |
+| QBE 完整重写 | v2.x | 2026-06-22 决策：先 v1.x 前端翻译 |
+| 多目标架构（自研 OS）| v3.x+ | 当前 amd64_win 中间态 |
 | 性能优化 | v2.x | v1.0 目标 = 翻译完成 + 行为正确 |
 
 ## 实施顺序
@@ -206,19 +206,19 @@ v0.7.0 之后（7A enum first-class + 7B const struct array），v0.8.0 转向 *
 ✅ v0.8 commit 2: 翻译 main.c → main.jhyy + bug 14    (b93925f, 2026-07-02)
 ✅ v0.8 commit 3: 修 jhyy_v1 自举回归                (990cc6c, 2026-07-03)
 ✅ v0.8 commit 4: 3 类 fix + regress 推进 7 OK       (50ad92b + 760c7c2 changelog, 2026-07-03)
-✅ v0.8 commit 5: Phase A-1 if-expr + regress 推进 16 OK  (pending, 2026-08-03)
+✅ v0.8 commit 5: Phase A-1 if-expr + regress 推进 16 OK  (9e77e09, 2026-08-03)
 ✅ v0.8 commit 6 wip: bisect heap corruption (efc41bf, 2026-08-03)
 ✅ v0.8 commit 7: W-002 标识符 rename + workaround doc (0453cef, 2026-08-03)
 ✅ v0.8 commit 8: W-003 let _ = fncall → direct call   (bea83f0, 2026-08-03)
 ✅ v0.8 commit 9: W-001 byte-by-byte hash + W-005 let-mut workaround (d570c72, 2026-08-03)
-✅ v0.8 commit 10: W-005 扩展到 util/arena + W-006/W-007 文档 (commit pending, 2026-08-04)
+✅ v0.8 commit 10: W-005 扩展到 util/arena + W-006/W-007 文档 (d8535a9, 2026-08-04)
 ✅ v0.8 commit 11: W-008 cg_find_field_offset 三层 deref 漏修 + doc (2d4c319, 2026-08-04)
-✅ v0.8 commit 12: W-009 cg_convert_arg src_t==0 兜底 + dst.kind 放宽 + doc (commit pending, 2026-08-04)
-→ v0.8 commit 13+: Stage 0 闭环 driver 验证 + 持续修 v1 codegen 暴露问题
+✅ v0.8 commit 12: W-009 cg_convert_arg src_t==0 兜底 + dst.kind 放宽 + doc (5820793, 2026-08-04)
+→ v0.9 sprint: W-001~W-009 真修 + main.c 翻译收尾 + Stage 1 byte-equal 闭环
 
 ---
 
-## commit 11 (pending)：W-008 cg_find_field_offset 三层 deref 漏修
+## commit 11 (2d4c319)：W-008 cg_find_field_offset 三层 deref 漏修
 
 **目标**：修 jhyy_v1 codegen.jhyy 的 cg_find_field_offset / cg_copy_struct 三处 deref 漏，让 struct field access emit 正确 IL（i64 field `=l loadl` 而非 `=w loadw`，pointer field 同样修正）。
 
@@ -272,7 +272,7 @@ let fname_str = *(ptr_add_u8(sym_p_v1 as *u8, 0 as i64) as **u8);  // Sym.name @
 
 ---
 
-## commit 12 (pending)：W-009 cg_convert_arg + NODE_CAST 两处放宽
+## commit 12 (5820793)：W-009 cg_convert_arg + NODE_CAST 两处放宽
 
 **目标**：让 jhyy_v1 编 arena.jhyy 时所有 `ptr == 0` / `i64 cmp 0` / `pointer cmp 0` 路径 emit 正确 IL（l vs l，不再 w vs l），Stage 0 closure 解锁。
 
@@ -322,18 +322,20 @@ if (*src).kind != KIND_PRIMITIVE() { return arg; }
 **详细文档**：[`docs/internal/workarounds.md` § W-009](../../internal/workarounds.md#w-009)
 ```
 
-## Phase A/B 计划（commit 4 后剩余工作）
+## Phase A/B 计划（commit 4 后剩余工作 — v0.9 真修前）
 
-修完后理论 OK 总数从 7 推到 47 (假设 Phase A + B 全过)：
+> **2026-08-04 校准**：原"Phase A + B 全过 → 47 OK"假设未达成。Phase A-1 if-expr (commit 5, 9e77e09) 推进到 16 OK 后，后续 commit 6-12 的 W-001~W-009 workaround 暴露下一层 codegen 严格性问题（loadw→loadl / cslel operand type 等），jhyy_v1 regress 实际落定在 **12 OK / 47 总（持平 baseline）**。详见 [`v0.8.0任务清单 + 概要设计.md`](../../plans/v0/v0.8.0任务清单 + 概要设计.md) § 完成定义校准。
 
-| 阶段 | 范围 | 文件 | OK gain |
-|------|------|------|---------|
-| Phase A-1 | if-expr（bug2_if_phi + bug3_void_if）| parser.jhyy: parse_primary + parse_expr | +2 → -2 CERR |
-| Phase A-2 | match-expr（dungeon_game + match）| parser.jhyy: parse_primary | +2 → -2 CERR |
-| Phase A-3 | const_array（const_array + const_struct_array）| parser.jhyy: parse_decl + parse_primary | +2 → -2 CERR |
-| Phase A-4 | import（import_test + namespace_dup）| main.jhyy: resolve_imports | +2 → -2 CERR |
-| Phase B-1 | 8 AV 逐个诊断 codegen 路径 | codegen.jhyy: cg_expr 各 case | +8 → -8 AV |
-| Phase B-2 | 24 STK 逐个诊断 codegen 路径 | codegen.jhyy: cg_expr 各 case | +24 → -24 STK |
-| **总计** | | | **0 → 47 OK** |
+修完后理论 OK 总数从 7 推到 16（Phase A-1 commit 5 已达成；剩余待 v0.9 W-真修）：
 
-修完之后 `regress_v1.py` 跟 `regress.py` (C 端) 结果应当高度一致 → **M4 真自举闭环**（v1.0 目标）。
+| 阶段 | 范围 | 文件 | OK gain | 实际状态 |
+|------|------|------|---------|---------|
+| Phase A-1 | if-expr（bug2_if_phi + bug3_void_if）| parser.jhyy: parse_primary + parse_expr | +9 → -9 CERR | ✅ commit 5 已达成 |
+| Phase A-2 | match-expr（dungeon_game + match）| parser.jhyy: parse_primary | +2 → -2 CERR | 🔴 v0.9 真修 |
+| Phase A-3 | const_array（const_array + const_struct_array）| parser.jhyy: parse_decl + parse_primary | +2 → -2 CERR | 🔴 v0.9 真修 |
+| Phase A-4 | import（import_test + namespace_dup）| main.jhyy: resolve_imports | +2 → -2 CERR | 🔴 v0.9 真修 |
+| Phase B-1 | 8 AV 逐个诊断 codegen 路径 | codegen.jhyy: cg_expr 各 case | +8 → -8 AV | 🔴 v0.9 真修（W-001~W-009）|
+| Phase B-2 | 24 STK 逐个诊断 codegen 路径 | codegen.jhyy: cg_expr 各 case | +24 → -24 STK | 🔴 v0.9 真修 |
+| **总计** | | | **0 → 47 OK** | **v0.8 wip 实际 12 OK 持平（≠ 47）**|
+
+修完之后 `regress_v1.py` 跟 `regress.py` (C 端) 结果**持平 baseline**（12 OK 持平即可，**不是** 47/47）→ **Stage 1 byte-equal 闭环**（v0.9 目标）。
