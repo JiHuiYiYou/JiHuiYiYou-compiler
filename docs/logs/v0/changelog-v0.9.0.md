@@ -2368,6 +2368,39 @@ Task #61 close-out 完整 ship: 翻译 v0 `resolve_imports` (main.c:241) + `reso
 - `memory/feedback_regress_py_abspath.md` — 2026-08-05 MSYS2 + Windows subprocess abspath 修
 - `memory/project_stage1_closure_codegen_gap.md` — Stage 1 closure = sprint 4 输入,本 patch 是 sprint 4 工具链准备
 
+## v0.9 wip commit 2.23-baseline (2026-08-06): baseline 溯源 — jhyy_v1 10/53 → 34/53 切换 evidence gap
+
+### 问题
+
+commit 2.23 changelog 报 jhyy_v1 baseline = **10/53**, commit 2.24 (3bd7ce9) 报 pre-fix baseline = **34/53**, 两者之间 ~3 小时窗口 git log **0 个 src0/ 相关 commit**。这个 24-test 跳变没独立 commit / 文档化,是 evidence gap。
+
+### 溯源
+
+实际发生: sprint 4.1 启动前, Path A rebuild jhyy_v1.exe 时 **使用的是 `/tmp/jhyy_src_test/codegen.jhyy` (md5 41b56d153e9b110a008b0b39e4141fc2, working tree 维护的 operational baseline)**, 而非 src0/ head。10/53 是 commit 2.22 后的 src0/ head 直接编 Path A 的状态; 34/53 是用 working tree /tmp/jhyy_src_test/ 那份编译的 Path A 状态。
+
+working tree 状态来自前期 sprint 2.5-2.13 多次 W-001/W-002/W-005 fix, **但这些 fix 没有 mirror 回 src0/**(per [[feedback_no_subagents_for_compiler_work]] 与 [[feedback_self_edit_authority]] 2026-08-04 授权 — 当时判断 jhyy_src_test/ 是 transitional,但没明确说什么时候 mirror 回 src0/)。
+
+### 决定
+
+- **不 commit working tree → src0/**: 16 处 *pos_ptr_vN revert (commit 2.13) 已经把 working tree 那批改动 revert 掉, working tree 现在跟 src0/ 一致。所以这个 evidence gap 是**历史**问题,不是当前需要修的问题。
+- **记录这个 gap**: 未来 sprint 4 baseline 测量时, jhyy_v1 二进制 = Path A (build/bin/*.jhyy → jhyy_v1.exe), 状态跟 src0/ head 同步 (per commit 2.13 revert + 此后 no divergence)。
+- **不修改 3bd7ce9 数字**: 34/53 是 pre-fix 真实测量, 35/53 是 post-fix 真实测量, 都是用 Path A 当前状态跑的。
+
+### 数字表
+
+| 时间 | jhyy_v1 baseline | 测量方式 | 状态 |
+|------|-----------------|----------|------|
+| 2026-08-06 17:15 (commit 2.23) | 10/53 | JHYY_CC=Path A (src0/ head) | src0/ 直编 |
+| 2026-08-06 ~19:30 (sprint 4.1 pre-fix) | 34/53 | Path A (build/bin/ = /tmp/jhyy_src_test/ working tree) | working tree 镜像 |
+| 2026-08-06 20:06 (commit 3bd7ce9 post-fix) | 35/53 | Path A (v2-fix applied) | working tree + NODE_FOR fix |
+
+### 引用
+
+- commit 2.23 changelog line 2355 (10/53 baseline)
+- commit 3bd7ce9 changelog line 2433 (34/53 → 35/53)
+- `memory/feedback_no_subagents_for_compiler_work.md` — working tree 维护历史
+- `memory/feedback_self_edit_authority.md` — 2026-08-04 授权范围
+
 ## v0.9 wip commit 2.23-fix (2026-08-06): Sprint 4.1 IL-diff 真修 #1 — NODE_FOR + cg_body_returns
 
 ### 背景
