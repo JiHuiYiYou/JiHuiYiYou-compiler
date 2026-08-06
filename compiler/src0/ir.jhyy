@@ -121,6 +121,7 @@ type IRBuf = struct {
     next_data:  i32,
     data_sb:    *StringBuilder,
     data_used:  i32,
+    cur_block:  IRVal,  // 当前 emit 所在的 block (对齐 v0 ir.c:40-48 ir->cur_block + codegen.c:637/654 phi predecessor 用)
 }
 
 // sb_init / sb_grow 内部初始 cap 256；这里 IRBuf 用 4096（对齐 C 端初始 cap）
@@ -185,7 +186,31 @@ fn ir_init(ir: *IRBuf, arena: *Arena) -> i32 {
     (*ir).next_block = 0 as i32;
     (*ir).next_data = 0 as i32;
     (*ir).data_used = 0 as i32;
+    // Sprint 4.1 IL_ONLY #2: cur_block init (对齐 v0 ir.c:44-47 @start)
+    let init_block = IRVal {
+        kind:     IRVAL_BLOCK(),
+        id:       0 as i32,
+        ival:     0 as i64,
+        name:     "@start" as *u8,
+        qbe_type: 0 as i32,
+    };
+    (*ir).cur_block = init_block;
     return 1;
+}
+
+// Sprint 4.1 IL_ONLY #2: ir_current_block (对齐 v0 ir.c:50-52)
+// 返回当前 emit 所在的 block IRVal。phi predecessor 用。
+// v0 codegen bug 8 workaround: 避免 `return (*ir).cur_block` 这种"struct-字段作为表达式"
+// 模式（codegen 走 cg_copy_struct 时把 first field value 当成 struct base，产生错 IL：
+//   %tA =w loadw %tB    ; cur_block.kind value
+//   %tC =l copy %tA      ; 错当成 struct base
+//   %tD =w loadw %tC     ; 错
+// 改走显式指针运算 + ptr cast + deref：cb_addr = ir + 48 (cast 为 *IRVal) → *cb_addr
+// deref 走 loadw/storew 字段级，避开 struct-to-buffer copy bug。
+fn ir_current_block(ir: *IRBuf) -> IRVal {
+    let cb_addr = (ir as i64 + 48 as i64) as *IRVal;
+    let cb_val = *cb_addr;
+    return cb_val;
 }
 
 // 获取 IRBuf 当前 buffer 字符串（NUL 终止；codegen 末调用拿完整 .il 内容）
@@ -331,6 +356,8 @@ fn ir_emit_label(ir: *IRBuf, block: IRVal) -> i32 {
     if block.kind != IRVAL_BLOCK() {
         return 0;
     }
+    // Sprint 4.1 IL_ONLY #2: emit label 后 cur_block = block (对齐 v0 ir.c:128)
+    (*ir).cur_block = block;
     ir_emit_str(ir, "@" as *u8);
     ir_emit_str(ir, block.name);
     ir_emit_str(ir, "\n" as *u8);

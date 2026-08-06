@@ -673,6 +673,7 @@ fn build_il(input: *u8, output: *u8) -> i32 {
         data_sb:    0 as *StringBuilder,
         data_used:  0 as i32,
     };
+    // Sprint 4.1 IL_ONLY #2: cur_block 由 ir_init 设 (避开 v0 codegen struct-field assign bug)
     ir_init(&ir_v1, &arena);
     cg_module(&ir_v1, ast_node);
     ir_flush_data(&ir_v1);

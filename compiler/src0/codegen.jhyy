@@ -1782,7 +1782,11 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         if is_void == 0 {
             then_v = _then_void;
         }
+        // Sprint 4.1 IL_ONLY #2: save then phi predecessor (after cg_expr returns, cur_block is
+        //   inner_merge for nested case, or then_block for non-nested)
+        let mut then_phi_pred: IRVal = then_block;
         if then_returns == 0 {
+            then_phi_pred = ir_current_block(ir);
             ir_emit_jmp(ir, merge_block);
         }
 
@@ -1790,11 +1794,16 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         ir_emit_label(ir, else_block);
         let mut else_v: IRVal = zero;
         let _has_else: i32 = if else_node != (0 as *Node) { 1 } else { 0 };
+        // Sprint 4.1 IL_ONLY #2: save else phi predecessor (after cg_expr returns, cur_block is
+        //   inner_merge for nested case, or else_block for non-nested). 必须 init 为 else_block
+        //   这样 _has_else == 0 时 phi predecessor 仍正确指向 else_block。
+        let mut else_phi_pred: IRVal = else_block;
         if _has_else != 0 {
             let _else_void = cg_expr(cg_raw, else_node);
             if is_void == 0 {
                 else_v = _else_void;
             }
+            else_phi_pred = ir_current_block(ir);
             if else_returns == 0 {
                 ir_emit_jmp(ir, merge_block);
             }
@@ -1812,10 +1821,8 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         // phi only when both branches don't return (对齐 v0 codegen.c:662)
         if else_node != (0 as *Node) && then_returns == 0 && else_returns == 0 {
             let result = ir_new_tmp(ir, ret_qt);
-            // B-φ1 fix: emit phi @then_block then_v, @else_block else_v
-            // （v0 codegen.c:629-633: nested if-else 用 ir_current_block 但 fib_renamed / control_flow
-            //   是单层 if-expr, then_block / else_block 作为 predecessor 即可）
-            cg_emit_phi(ir, result, then_block, then_v, else_block, else_v);
+            // Sprint 4.1 IL_ONLY #2: 用 cur_block saved 值 (非 nested 时 cur_block == then_block / else_block)
+            cg_emit_phi(ir, result, then_phi_pred, then_v, else_phi_pred, else_v);
             return result;
         }
         // fallback: 单边 return / 无 else → 直接返回 then_v (zero IRVal from NODE_RETURN)
