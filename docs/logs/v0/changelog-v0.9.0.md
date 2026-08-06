@@ -2324,3 +2324,46 @@ Task #61 close-out 完整 ship: 翻译 v0 `resolve_imports` (main.c:241) + `reso
 - `memory/feedback_self_edit_authority.md` — 2026-08-04 授权非架构路线层 self-edit
 - `memory/feedback_w004_verification_blocked.md` — W-004 BLOCKED 状态 + inline_imports 通了可重测
 - `memory/feedback_codegen_workaround_linkage.md` — W-001/W-002/W-006 联动关系 (sprint 4 输入)
+
+---
+
+## v0.9 wip commit 2.23: regress.py JHYY_CC env var — 解锁 jhyy_v1 baseline 测量
+
+### 目标
+
+1-line patch: 让 regress.py 可测任意 jhyy 编译器 (不只是 `compiler/build/bin/jhyy.exe`)。
+直接 trigger: sprint 4 — Stage 1 closure codegen gap 修复时,需要拿 jhyy_v1 编出的 .il/.exe vs jhyy.exe 编的 byte-equal / regress baseline 对比。
+
+### 改动
+
+**`compiler/build/bin/regress.py:8`** (1 行):
+
+```python
+- JHYY = os.path.abspath("compiler/build/bin/jhyy.exe")
++ JHYY = os.path.abspath(os.environ.get("JHYY_CC", "compiler/build/bin/jhyy.exe"))
+```
+
+- 读 `JHYY_CC` env var (默认 fallback 到原路径,确保 CI / 一般调用 0 行为变化)
+- 走 `os.path.abspath` 包装 (跟 `feedback_regress_py_abspath.md` 2026-08-05 修一致,MSYS2 Python + Windows subprocess 兼容)
+
+### 验证
+
+| 命令 | 结果 | 说明 |
+|------|------|------|
+| `python regress.py` (env 未设) | **50/53 passed, 0 failed, 3 skipped** | ✓ baseline 持平 |
+| `JHYY_CC=compiler/build/bin/jhyy.exe python regress.py` | **50/53 passed, 0 failed, 3 skipped** | ✓ 显式设 env 同样 baseline |
+| `JHYY_CC=compiler/build/bin/jhyy_v1.exe python regress.py` | **10/53 passed, 40 failed, 3 skipped** | 🔵 **新 baseline 测量**: jhyy_v1 当前 codegen 覆盖 |
+
+### 新 baseline 信号
+
+`JHYY_CC=jhyy_v1.exe` → **10/53 passed**: 这是 jhyy_v1 端到端 self-compile 后第一份量化 baseline。
+涵盖面 vs jhyy.exe 的 50/53 = 20% 覆盖,差距主要在:
+- slice / struct / 多文件 codegen path (W-001/W-002/W-006 family)
+- inline_imports call 路径 (commit 2.22 修了但 jhyy_v1 编 main.jhyy 仍在 segfault 中,per `memory/project_stage1_closure_codegen_gap.md`)
+- Stage 0 closure 测试集 (`compiler/tests/stage1-expanded.sh` 7/7)
+
+### 引用
+
+- v0.9 wip commit 2.22 — inline_imports 翻译 (前置 commit) + Stage 1 closure gap 暴露
+- `memory/feedback_regress_py_abspath.md` — 2026-08-05 MSYS2 + Windows subprocess abspath 修
+- `memory/project_stage1_closure_codegen_gap.md` — Stage 1 closure = sprint 4 输入,本 patch 是 sprint 4 工具链准备
