@@ -1032,6 +1032,35 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         return v;
     }
 
+    // ── const_decl (v0.7 7B; v0.9 wip commit 2.20 / Task #52 + #42 合并) ──
+    //   对齐 C 端 sema.c:673-719 check_const_decl: 不强校 init type
+    //   (let int 元素 vs decl [u8; 26] 元素 jhyy type_eq 会失败, 但 C 端宽松)
+    //   只校验 decl type 是 KIND_ARRAY + elem 不是 pointer/slice/enum
+    if (*n).kind == NODE_CONST_DECL() {
+        let d = node_const_decl_data(n);
+        let mut arr_t: *Type = 0 as *Type;
+        if (*d).type_annot != (0 as *u8) {
+            arr_t = resolve_type_node(ctx, ta, (*d).type_annot as *Node);
+        }
+        if arr_t == (0 as *Type) {
+            let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                    "const decl requires array type annotation" as *u8);
+            let v = type_void(ta);
+            (*n).type_ptr = v as *u8;
+            return v;
+        }
+        if (*arr_t).kind != KIND_ARRAY() {
+            let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                    "const declaration must be an array type [T; N]" as *u8);
+        }
+        let sym = (*d).sym as *Sym;
+        (*sym).type_ptr = arr_t as *u8;
+        (*sym).kind = SYM_CONST();
+        let v = type_void(ta);
+        (*n).type_ptr = v as *u8;
+        return v;
+    }
+
     // ── assign ──
     if (*n).kind == NODE_ASSIGN() {
         let d = node_assign_data(n);
@@ -1488,6 +1517,15 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
                 let td_sym = (*td).sym as *Sym;
                 (*td_sym).kind = SYM_TYPE();
                 let _x = symtab_insert_sym((*ctx).global_scope, td_sym);
+            } else {
+                // v0.9 wip commit 2.20 / Task #52 + #42 合并: NODE_CONST_DECL 跟 SYM_CONST
+                //   跟 C 端 sema.c:1034-1038 check_module Pass 1 对齐
+                if (*decl).kind == NODE_CONST_DECL() {
+                    let cd = node_const_decl_data(decl);
+                    let cd_sym = (*cd).sym as *Sym;
+                    (*cd_sym).kind = SYM_CONST();
+                    let _x = symtab_insert_sym((*ctx).global_scope, cd_sym);
+                }
             }
         }
         i = i + (1 as i64);
@@ -1618,6 +1656,12 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
             } else {
                 if (*decl).kind == NODE_LET() || (*decl).kind == NODE_EXPR_STMT() {
                     let _x = infer_type(ctx, ta, decl);
+                } else {
+                    // v0.9 wip commit 2.20 / Task #52 + #42 合并: NODE_CONST_DECL
+                    //   sema infer_type dispatch 设 sym.type_ptr = array type
+                    if (*decl).kind == NODE_CONST_DECL() {
+                        let _x = infer_type(ctx, ta, decl);
+                    }
                 }
             }
         }

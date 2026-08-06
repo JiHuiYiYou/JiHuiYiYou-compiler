@@ -32,6 +32,9 @@ extern fn printf(fmt: *u8, val: i32) -> i32;
 fn SYM_VAR()     -> i32 { return 0 as i32; }
 fn SYM_FN()      -> i32 { return 1 as i32; }
 fn SYM_TYPE()    -> i32 { return 2 as i32; }
+// v0.9 wip commit 2.20 / Task #52 + #42 合并: SYM_CONST 从 codegen.jhyy 挪到
+//   symtab.jhyy (SymKind 归属正确位置), 删 parser/codegen 冗余定义
+fn SYM_CONST()   -> i32 { return 6 as i32; }
 fn SYM_FIELD()   -> i32 { return 3 as i32; }
 fn SYM_VARIANT() -> i32 { return 4 as i32; }
 fn SYM_MODULE()  -> i32 { return 5 as i32; }

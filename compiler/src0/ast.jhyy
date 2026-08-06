@@ -58,7 +58,7 @@ type Node = struct {
     loc_col:      i32,
 }
 
-fn NODE_SIZE() -> i64 { return 40 as i64; }
+fn NODE_SIZE() -> i64 { return 32 as i64; }
 
 // ════════════════════════════════════════════════════
 // NodeKind 常量（49 个，分批定义，commit 3a+3b 完成 40 个）
@@ -116,6 +116,9 @@ fn NODE_EXTERN_DECL()     -> i32 { return 46 as i32; }
 fn NODE_IMPORT_DECL()     -> i32 { return 47 as i32; }
 // ── 3d: module（48）──
 fn NODE_MODULE()         -> i32 { return 48 as i32; }
+// v0.9 wip commit 2.20 / Task #52 + #42 合并: NODE_CONST_DECL 漏定义补
+//   跟 C 端 ast.h:NodeKind 枚举对齐 (const decl = 49, 在 NODE_MODULE 之后)
+fn NODE_CONST_DECL()     -> i32 { return 49 as i32; }
 
 fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_INT()            { return "INT" as *u8; }
@@ -1284,9 +1287,35 @@ fn node_import_decl_data(n: *Node) -> *NodeImportDecl {
     return (n as i64 + NODE_SIZE()) as *NodeImportDecl;
 }
 
-// ════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// ConstDecl 构造函数 + 访问器（v0.9 wip commit 2.20 / task #52 + #42 合并）
+// ═══════════════════════════════════════════════════════════
+
+type NodeConstDecl = struct {
+    sym:        *u8,
+    type_annot: *u8,
+    init:       *u8,
+}
+fn NODE_CONST_DECL_SIZE() -> i64 { return 24 as i64; }
+
+fn ast_new_const_decl(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                      sym: *Sym, type_annot: *Node, init: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_CONST_DECL_SIZE());
+    let n = ast_init_node(buf, NODE_CONST_DECL(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeConstDecl;
+    (*d).sym = sym as *u8;
+    (*d).type_annot = type_annot as *u8;
+    (*d).init = init as *u8;
+    return n;
+}
+
+fn node_const_decl_data(n: *Node) -> *NodeConstDecl {
+    return (n as i64 + NODE_SIZE()) as *NodeConstDecl;
+}
+
+// ═══════════════════════════════════════════════════════════
 // Module 构造函数 + 访问器（3d）
-// ════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
 
 fn ast_new_module(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
                   decls: *u8, ndeccls: i64) -> *Node {

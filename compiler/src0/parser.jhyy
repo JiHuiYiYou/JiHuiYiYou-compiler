@@ -12,6 +12,9 @@
 //   - commit 3 完整 parse_pattern（literal / wildcard / ident / enum variant / range）
 //   - commit 3 起 strtoll 走 ffi extern
 //
+//   - v0.9 wip commit 2.20 / Task #52: parse_const_decl 翻译 (顶层 const 数组声明),
+//     SYM_CONST 在此文件冗余定义 (跟 codegen.jhyy:63 一致 — jhyy 无跨文件 import 机制,
+//     task #42 完整搬家留后续独立 commit)
 // 已知差异（vs C 版）：
 //   - **C Token by value** → jhyy Token 平铺 6 字段 + caller 栈分配 + lexer 写 *t
 //   - **C `bool` 参数 is_extern** → jhyy `i32` (0/1)
@@ -46,6 +49,10 @@
 //   commit 4（下次）：parse_expr 完整 Pratt + ParseRule 表 + init_rules
 
 import ffi;
+
+// v0.9 wip commit 2.20 / Task #52: SYM_CONST 由 symtab.jhyy 统一定义
+//   (跟 SYM_VAR/SYM_FN/SYM_TYPE 同列)。parser.jhyy 通过 `import symtab` 可见,
+//   不再需要本地冗余定义。
 import util;
 import lexer;
 import arena;
@@ -2035,6 +2042,82 @@ fn parse_extern_decl(p: *Parser) -> *Node {
     return parse_func(p, 1 as i32);
 }
 
+// v0.7 7B: parse `const NAME: [T; N] = [elem, ...];`
+//   v0.9 wip commit 2.20 / Task #52: NODE_CONST_DECL 翻译补全,让 jhyy_v1 编
+//   const_array.jhyy 不再 parser CERR, stage1 byte-equal 6/7 → 7/7。
+fn parse_const_decl(p: *Parser) -> *Node {
+    let mut t = empty_token();
+    parser_peek(p, &t);
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
+
+    parser_advance(p, &t);  // consume 'const'
+
+    parser_expect(p, TOKEN_IDENT(), "const name" as *u8, &t);
+    let cname = parser_tok_name(p, &t);
+
+    parser_expect(p, TOKEN_COLON(), ": after const name" as *u8, &t);
+
+    // type annotation — must be [T; N]; reuse parse_type
+    let type_annot = parse_type(p);
+
+    parser_expect(p, TOKEN_EQ(), "= after const type" as *u8, &t);
+
+    // init: [elem, elem, ...]
+    let mut t2 = empty_token();
+    parser_expect(p, TOKEN_LBRACKET(), "[ for const array init" as *u8, &t2);
+    let lbr_lf = t2.loc_filename;
+    let lbr_ll = t2.loc_line;
+    let lbr_lc = t2.loc_col;
+    let mut elems: *u8 = 0 as *u8;
+    let mut nelems: i64 = 0 as i64;
+    let mut dcap: i64 = 0 as i64;
+    if parser_check(p, TOKEN_RBRACKET()) == (0 as i32) {
+        let mut done: i32 = 0 as i32;
+        while done == (0 as i32) {
+            let elem = parse_expr(p, PREC_NONE());
+            // grow array if needed (double capacity, initial 8)
+            if nelems >= dcap {
+                let mut ncap: i64 = 0 as i64;
+                if dcap != (0 as i64) {
+                    ncap = dcap * (2 as i64);
+                } else {
+                    ncap = 8 as i64;
+                }
+                let new_buf = arena_alloc((*p).arena, ncap * (8 as i64));
+                if elems != (0 as *u8) {
+                    if nelems > (0 as i64) {
+                        let mut k: i64 = 0 as i64;
+                        while k < nelems {
+                            let src_slot = ptr_add_u8(elems, k * (8 as i64)) as **Node;
+                            let dst_slot = ptr_add_u8(new_buf, k * (8 as i64)) as **Node;
+                            *dst_slot = *src_slot;
+                            k = k + (1 as i64);
+                        }
+                    }
+                }
+                elems = new_buf;
+                dcap = ncap;
+            }
+            let slot = ptr_add_u8(elems, nelems * (8 as i64)) as **Node;
+            *slot = elem;
+            nelems = nelems + (1 as i64);
+            if parser_match(p, TOKEN_COMMA(), &t2) == (0 as i32) {
+                done = 1 as i32;
+            }
+        }
+    }
+    parser_expect(p, TOKEN_RBRACKET(), "] after const array init" as *u8, &t);
+    let init = ast_new_array_lit((*p).arena, lbr_lf, lbr_ll, lbr_lc, elems, nelems);
+
+    parser_expect(p, TOKEN_SEMICOLON(), "; after const decl" as *u8, &t);
+
+    let sym = symtab_insert((*p).global_scope, cname, SYM_CONST(),
+                            0 as *u8, 0 as i32, 0 as i32);
+    return ast_new_const_decl((*p).arena, loc_lf, loc_ll, loc_lc, sym, type_annot, init);
+}
+
 fn parse_import_decl(p: *Parser) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
@@ -2053,6 +2136,8 @@ fn parse_import_decl(p: *Parser) -> *Node {
     return ast_new_import_decl((*p).arena, loc_lf, loc_ll, loc_lc, sym);
 }
 
+// v0.9 wip commit 2.20 / Task #52: parse_decl 移到 parse_import_decl 之后
+//   (parse_decl 调 parse_import_decl; jhyy 无 forward ref 解析)
 fn parse_decl(p: *Parser) -> *Node {
     if parser_check(p, TOKEN_FN()) != (0 as i32) {
         return parse_func(p, 0 as i32);
@@ -2065,6 +2150,9 @@ fn parse_decl(p: *Parser) -> *Node {
     }
     if parser_check(p, TOKEN_IMPORT()) != (0 as i32) {
         return parse_import_decl(p);
+    }
+    if parser_check(p, TOKEN_CONST()) != (0 as i32) {
+        return parse_const_decl(p);
     }
     // 未识别顶层 token → 走 parse_stmt 兜底
     return parse_stmt(p);

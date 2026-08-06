@@ -51,6 +51,38 @@ fn QBE_W() -> i32 { return 119 as i32; }  // 'w' word 4-byte
 fn QBE_L() -> i32 { return 108 as i32; }  // 'l' long 8-byte
 fn QBE_S() -> i32 { return 115 as i32; }  // 's' single 4-byte float
 fn QBE_D() -> i32 { return 100 as i32; }  // 'd' double 8-byte float
+fn QBE_B() -> i32 { return 98 as i32; }   // 'b' byte 1-byte（sub-word）
+fn QBE_H() -> i32 { return 104 as i32; }  // 'h' half 2-byte（sub-word）
+
+// data_qt_of：data 段的 element QBE 类型。
+//   与 qbe_type_of 不同：data 段需要真实 sub-word 类型（u8 → 'b', u16 → 'h'）
+//   因为 loadub/loaduh/storeb/storeh 都按 byte/half 寻址；qbe_type_of 返回 'w'
+//   会导致按 4-byte 寻址（v0.6 workaround），与 C 端 .il 输出不一致。
+fn data_qt_of(t_raw: *u8) -> i32 {
+    if t_raw == (0 as *u8) {
+        return QBE_W();
+    }
+    let t = t_raw as *Type;
+    if (*t).kind == KIND_PRIMITIVE() {
+        let prim = (*t).prim;
+        if prim == PRIM_I8()  { return QBE_B(); }
+        if prim == PRIM_U8()  { return QBE_B(); }
+        if prim == PRIM_BOOL() { return QBE_B(); }
+        if prim == PRIM_I16() { return QBE_H(); }
+        if prim == PRIM_U16() { return QBE_H(); }
+        if prim == PRIM_I32() { return QBE_W(); }
+        if prim == PRIM_U32() { return QBE_W(); }
+        if prim == PRIM_I64() { return QBE_L(); }
+        if prim == PRIM_U64() { return QBE_L(); }
+        if prim == PRIM_F32() { return QBE_S(); }
+        if prim == PRIM_F64() { return QBE_D(); }
+        return QBE_W();
+    }
+    if (*t).kind == KIND_POINTER() { return QBE_L(); }
+    if (*t).kind == KIND_SLICE()   { return QBE_L(); }
+    if (*t).kind == KIND_FUNC()    { return QBE_L(); }
+    return QBE_W();
+}
 
 // ════════════════════════════════════════════════════
 // IRVal tagged union（jhyy 无 union，用 i32 kind + payload 字段）

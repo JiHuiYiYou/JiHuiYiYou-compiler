@@ -55,6 +55,9 @@ fn TOKEN_EXTERN()      -> i32 { return 22 as i32; }
 fn TOKEN_AS()          -> i32 { return 23 as i32; }
 fn TOKEN_SIZEOF()      -> i32 { return 24 as i32; }
 fn TOKEN_ALIGNOF()     -> i32 { return 25 as i32; }
+// v0.9 wip commit 2.20 / Task #52 + #42 合并: TOKEN_CONST 漏定义补
+//   跟 C 端 lexer.c:33 {"const", TOKEN_CONST} 对齐
+fn TOKEN_CONST()       -> i32 { return 26 as i32; }
 
 // operators (27-51)
 fn TOKEN_PLUS()        -> i32 { return 27 as i32; }   /* +  */
@@ -164,6 +167,8 @@ fn lookup_keyword(name: *u8, len: i64) -> i32 {
         if strncmp(name, "match" as *u8, 5 as i64) == 0 as i32 { return TOKEN_MATCH(); }
         if strncmp(name, "false" as *u8, 5 as i64) == 0 as i32 { return TOKEN_BOOL(); }
         if strncmp(name, "break" as *u8, 5 as i64) == 0 as i32 { return TOKEN_BREAK(); }
+        // v0.9 wip commit 2.20 / Task #52 + #42 合并: const 关键字漏, 补
+        if strncmp(name, "const" as *u8, 5 as i64) == 0 as i32 { return TOKEN_CONST(); }
     }
     if len == 6 as i64 {
         if strncmp(name, "struct" as *u8, 6 as i64) == 0 as i32 { return TOKEN_STRUCT(); }
@@ -797,6 +802,8 @@ fn token_kind_name(kind: i32) -> *u8 {
     if kind == TOKEN_AS() { return "as" as *u8; }
     if kind == TOKEN_SIZEOF() { return "sizeof" as *u8; }
     if kind == TOKEN_ALIGNOF() { return "alignof" as *u8; }
+    // v0.9 wip commit 2.20 / Task #52 + #42 合并: const 漏, 补
+    if kind == TOKEN_CONST() { return "const" as *u8; }
     if kind == TOKEN_PLUS() { return "+" as *u8; }
     if kind == TOKEN_MINUS() { return "-" as *u8; }
     if kind == TOKEN_STAR() { return "*" as *u8; }

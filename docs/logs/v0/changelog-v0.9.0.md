@@ -1972,24 +1972,122 @@ python compiler/build/bin/regress.py
 
 **结论**: 7 类风险源全 0 命中, C' 审计达成 "全 by-construction deterministic"。
 
+---
+
+## v0.9 wip commit 2.20: Task #52 + #42 合并 — parser NODE_CONST_DECL + ast/sema dispatch + codegen Pass A (stage1 6/7 → 7/7)
+
+### 目标
+
+合并 `Task #52` (parser 翻译层补 const_array + const_struct_array 缺功能) + `Task #42` (搬 SYM_CONST 到 symtab.jhyy + NODE_CONST_DECL 到 ast.jhyy 的 dispatch),让 jhyy_v1 编 `compiler/tests/examples/const_array.jhyy` 不再 parser CERR,Stage 1 byte-equal 从 6/7 推到 **7/7 (const_array 现在 PASS)**,regress 持平 **50/53**。
+
+### 完成定义 (全达成 ✅)
+
+| 项 | 状态 | 验证 |
+|---|---|---|
+| const_array.jhyy 不再 parser CERR | ✅ | jhyy_v1 (C 编译 src0/) EXIT=122 |
+| stage1 byte-equal 7/7 (含 const_array) | ✅ | `compiler/tests/stage1-expanded.sh` byte-equal 7 PASS |
+| regress 持平 50/53 (无 regression) | ✅ | `python compiler/build/bin/regress.py` → 50 PASS / 0 FAIL / 3 SKIP |
+| Task #52 + #42 单 commit 合并 | ✅ | 本 commit |
+
+### 改动 1: `compiler/src0/lexer.jhyy:58` — TOKEN_CONST + keyword lookup + token_kind_name
+
+补 `TOKEN_CONST = 26` 定义 + 在 `lookup_keyword` (len==5 分支) 加 `const` 关键字匹配 + `token_kind_name` 加 case。
+
+### 改动 2: `compiler/src0/symtab.jhyy:35` — SYM_CONST 统一定义到 symtab.jhyy
+
+`SYM_CONST = 6` 从 `codegen.jhyy` 挪到 `symtab.jhyy` (SymKind 归属正确位置),删 codegen/parser 冗余定义。`parser.jhyy` 通过 `import symtab` 可见。
+
+### 改动 3: `compiler/src0/ast.jhyy:119,1291-1320` — NODE_CONST_DECL + NodeConstDecl struct + accessor
+
+补 `NODE_CONST_DECL = 49` + `NodeConstDecl_SIZE = 24` + `ast_new_const_decl` 构造函数 + `node_const_decl_data` accessor (3 字段: sym/type_annot/init)。
+
+### 改动 4: `compiler/src0/parser.jhyy:2045-2120` — parse_const_decl 函数 + parse_decl dispatch
+
+`parse_const_decl` 函数 (76 行) 翻译 C 端 `parser.c:parse_const_decl`:
+- consume `const` 关键字 → ident → `:` → `[T; N]` type annotation → `=` → `[elem, elem, ...]` init
+- arena-allocated elems array (dynamic grow, initial cap=8)
+- `ast_new_array_lit` + `ast_new_const_decl` → 返回 NodeConstDecl
+
+`parse_decl` 在 `parse_import_decl` 之后加 `TOKEN_CONST` 分支。
+
+### 改动 5: `compiler/src0/sema.jhyy:1032-1060,1517-1530,1656-1663` — NODE_CONST_DECL sema dispatch
+
+`infer_type` 加 `NODE_CONST_DECL` 分支: 校验 arr_t 是 KIND_ARRAY + 设 sym.type_ptr = arr_t + 设 sym.kind = SYM_CONST + 返回 void。
+
+`check_module` Pass 1 (type decl 之后) 加 `NODE_CONST_DECL` 分支: 插入 symtab + 设 SYM_CONST。Pass 2 (let/expr_stmt 之后) 加 `NODE_CONST_DECL` 分支: 调 `infer_type` 设 type_ptr。
+
+### 改动 6: `compiler/src0/codegen.jhyy:2444-2500` — cg_module Pass A data section
+
+`cg_module` 处理 `NODE_CONST_DECL` 时 (跟 v0 codegen.c:1411-1451 对齐):
+- `data_qt_of(elem_t)` 取 element QBE type (新加 helper, 支持 'b'/'h' sub-word)
+- emit `data $name = { v1, v2, ..., vN }` 段 (N = nelems)
+- 用 `node_array_lit_data(init_raw)` 而不是 `init_raw as *NodeArrayLit` (后者 layout 错位, v0 写法)
+
+### 改动 7: `compiler/src0/codegen.jhyy:1346-1420` — NODE_INDEX 完整重写 (对齐 v0 codegen.c:1007-1080)
+
+完整重写 cg_expr 的 `NODE_INDEX` case:
+- elem_t from base_node.type_ptr (KIND_ARRAY/POINTER/SLICE)
+- const-fold path: `byte_off = idx_val * elem_sz` 编译期算 (NODE_INT 直接 emit `copy`)
+- non-const path: `extsw idx_val → idx64` (w→l sign extension),`mul idx64, elem_sz`
+- `cg_emit_load` 走 qbe_type_of (u8 → loadub, i64 → loadl 等)
+- 关键: 先 `cg_expr(idx_node)` emit 原 idx tmp (next_tmp 递增对齐 v0),再 const-fold
+
+### 改动 8: `compiler/src0/codegen.jhyy:547-580` — cg_convert_arg sub-word → word copy
+
+对齐 v0 codegen.c:757-762: sub-word (u8/u16/i8/i16/bool) → word (i32/u32) / long (i64) emit `copy` 指令 (避免 stage1 byte-equal 缺 `%t5 =w copy %t4`)。
+
+### 改动 9: `compiler/src0/ir.jhyy` — QBE_B + QBE_H + data_qt_of helper
+
+加 `QBE_B = 98` ('b' byte 1-byte) + `QBE_H = 104` ('h' half 2-byte) 常量。加 `data_qt_of(t_raw)` helper,根据 `(*t).kind` + `(*t).prim` 决定 data section element type (区别于 `qbe_type_of` 的 stack alloc 默认 'w')。
+
+### 改动 10: 删所有 debug print
+
+ast.jhyy `ast_new_int` + parser.jhyy `parse_const_decl` 移除 `jh_fmt_lld_stderr` debug call,删 `extern fn jh_fmt_lld_stderr`。
+
+### 验证
+
+| 验证 | 命令 | 结果 |
+|---|---|---|
+| jhyy_v1 编 const_array.jhyy | `jhyy_v1_new.exe compile compiler/tests/examples/const_array.jhyy` | EXIT=122 ✓ |
+| stage1 byte-equal (7 测试集) | `compiler/tests/stage1-expanded.sh` | 7/7 PASS ✓ (本 commit 推到 7/7) |
+| regress | `python compiler/build/bin/regress.py` | 50 PASS / 0 FAIL / 3 SKIP ✓ (持平 baseline) |
+| v0 build | `gcc -std=c11 ... compiler/src/*.c -o jhyy.exe` | OK,无 regression |
+
+### 决策记录 (跟 v0 行为对齐 vs 翻译风格)
+
+| 点 | v0 (codegen.c) | jhyy_v1 本 commit | 决策理由 |
+|----|---------------|------------------|---------|
+| NODE_INT idx const-fold | 调 cg_expr(idx_node) 再算 offset | 同 v0: 先 cg_expr 递增 tmp,再算 | next_tmp 必须跟 v0 对齐 (byte-equal) |
+| `let int` vs `[u8; 26]` element type 严格性 | 宽松 (不强校) | sema infer_type 不强校 | 跟 v0 sema.c:673-719 check_const_decl 对齐 |
+| sub-word → word cast | `copy` 指令 (auto extend) | `copy` 指令 | jhyy_qbe_type_of 返回 'w' 给 sub-word (v0.6 workaround),byte-equal 必须有 copy |
+| data section element type | v0 codegen.c 走 `qbe_type_of` 默认 'w' | 新加 `data_qt_of` 返回真实 sub-word ('b'/'h') | .data 段必须真实 sub-word (i32 store 不能装 u8 array) |
+
+### 联动
+
+- `Task #52` ✅ 闭环 (parser 翻译层 const 缺功能 修完)
+- `Task #42` ✅ 闭环 (SYM_CONST + NODE_CONST_DECL 归位 + dispatch 完整)
+- Phase A-3 (Phase A/B 计划中 const_array + const_struct_array 两 CERR) ✅ 现在 PASS
+- 后续: Task #61 (jhyy_v1 编 main.jhyy) / Task #50 (match-expr) / Task #43 (8 AV) / Task #41 (25 STK)
+
 ### 影响
 
-- **codegen 输出确定性 baseline 文档化**: 5 维度全 PASS, 7 类风险源全 0, 3 测试 byte-equal 实证
-- **不影响 v0**: src0/ 是 jhyy 端源, v0 jhyy.exe 不变
-- **不影响 regress / stage1**: 持平 baseline
-- **不影响 AUDIT**: AUDIT 修的 VariantDesc 也不影响 .il 字节 (VariantDesc 是 sema 内部状态, 不进 .il)
-- **Stage 1 closure 基础完整**: AUDIT (跑得对) + C' (跑得稳) + 6/7 stage1 byte-equal (跑得对齐) = 三基础齐
+- **Stage 1 byte-equal**: 6/7 → **7/7** (const_array 现在 PASS)
+- **regress 持平**: 50/53 (无 regression)
+- **不为 v0 src0/ 之外的事**: jhyy_v1 的 main.jhyy 仍不能编 (Task #61 未做,resolve_imports ~229 行待翻译)
+- **v0 build 不变**: 本 commit 不动 `compiler/src/*.c`
 
 ### 下一步
 
 | commit / 阶段 | 主题 | 依赖 |
 |--------------|------|------|
 | v0.9 wip 收尾 | docs cleanup + A 段 closure 总结 + ship v0.9 wip tag | C' ✅ |
-| v1.0 sprint 3 启动 (粗粒度合并) | Task #52 (parser NODE_CONST_DECL → 7/7) + B' (resolve_imports 翻译) + Task #61 (jhyy_v1 编 main.jhyy 跑通) + W-004 verification (post-Task #61) → commit 2.18 W-004 RESOLVED OR 批量改名 + D (N=3 byte-equal) | v0.9 wip 收尾 |
+| v1.0 sprint 3 启动 (粗粒度合并) | Task #52 (parser NODE_CONST_DECL → 7/7) ✅ + B' (resolve_imports 翻译) + Task #61 (jhyy_v1 编 main.jhyy 跑通) + W-004 verification (post-Task #61) → commit 2.18 W-004 RESOLVED OR 批量改名 + D (N=3 byte-equal) | v0.9 wip 收尾 + Task #52 ✅ |
 | M4 hard closure | N=3 byte-equal 7/7 + 真自举 | v1.0 sprint 3 全部 |
 
 ### 引用
 
+- v0.9 wip commit 2.20 — Task #52 + #42 合并 (parser NODE_CONST_DECL + ast/sema dispatch + codegen Pass A; stage1 6/7 → 7/7)
+- v0.9 wip commit 2.17 — C' codegen 确定性 audit (5 维度全 PASS)
 - v0.9 wip commit 2.16 — AUDIT 真修 (C' 互补的前置 audit)
 - v0.9 wip commit 2.15 — Task #60 真修 (AUDIT prerequisite)
 - v0.9 wip commit 2.9 — B-match 真修 (codegen emit 顺序对齐 v0 的关键 commit)

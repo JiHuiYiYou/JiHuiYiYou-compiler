@@ -57,34 +57,9 @@ extern fn jh_sprintf_f32(buf: *u8, val: f64) -> i32;
 // 注：本 commit 不实际 emit warning（C 端 codegen 也不太 emit warning），占位
 
 // ════════════════════════════════════════════════════
-// SymKind 补：SYM_CONST（codegen NODE_IDENT const array 引用 dispatch 需要）
+// SymKind: SYM_CONST 由 symtab.jhyy 统一定义 (v0.9 wip commit 2.20 / Task #52 + #42 合并)
 // ════════════════════════════════════════════════════
 
-fn SYM_CONST() -> i32 { return 6 as i32; }
-
-// ════════════════════════════════════════════════════
-// NodeKind 补：NODE_CONST_DECL（cg_module Pass A dispatch 需要）
-// ════════════════════════════════════════════════════
-
-// 注：ast.jhyy 当前 49 NodeKind（NODE_MODULE = 48）。SYM_CONST 跟 NODE_CONST_DECL
-// 是 v0.7 7B 加的，sprint 5 翻译 NODE_CONST_DECL 时挪到 ast.jhyy；现在 codegen
-// dispatch 需要，先在 codegen.jhyy 暂存。
-
-// NODE_CONST_DECL = 49（sprint 5 挪到 ast.jhyy）
-fn NODE_CONST_DECL() -> i32 { return 49 as i32; }
-
-// NodeConstDecl: sym(*u8 8) + type_annot(*u8 8) + init(*u8 8) = 24 bytes
-// codegen dispatch 需要，sprint 5 挪到 ast.jhyy
-type NodeConstDecl = struct {
-    sym:        *u8,
-    type_annot: *u8,
-    init:       *u8,
-}
-fn NODE_CONST_DECL_SIZE() -> i64 { return 24 as i64; }
-
-fn node_const_decl_data(n: *Node) -> *NodeConstDecl {
-    return (n as i64 + NODE_SIZE()) as *NodeConstDecl;
-}
 
 // ════════════════════════════════════════════════════
 // 局部表容量常量（对应 C #define MAX_LOCALS / MAX_LOOP_DEPTH）
@@ -594,6 +569,31 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
             if (*dst2).kind == KIND_PRIMITIVE() {
                 if (*src).prim == (*dst2).prim {
                     return arg;
+                }
+            }
+        }
+        // sub-word (u8/u16/i8/i16/bool) → word (i32/u32) / long (i64): emit copy
+        //   对齐 v0 codegen.c:757-762 (sub-word → word/long)。jhyy 端 qbe_type_of 对 u8 返回 'w'
+        //   (v0.6 workaround) — 所以走 prim check 而非 src_qt/b vs dst_qt/w 判断。
+        //   判定: src prim ∈ {I8,U8,I16,U16,BOOL} 且 dst prim ∈ {I32,U32,I64,U64} → emit copy
+        if src_t != (0 as *u8) && dst_t != (0 as *u8) {
+            let src2 = src_t as *Type;
+            let dst2 = dst_t as *Type;
+            if (*src2).kind == KIND_PRIMITIVE() && (*dst2).kind == KIND_PRIMITIVE() {
+                let sp = (*src2).prim;
+                let dp = (*dst2).prim;
+                let src_sub: i32 = if sp == PRIM_I8() || sp == PRIM_U8() || sp == PRIM_I16() || sp == PRIM_U16() || sp == PRIM_BOOL() { 1 } else { 0 };
+                let dst_word: i32 = if dp == PRIM_I32() || dp == PRIM_U32() || dp == PRIM_I64() || dp == PRIM_U64() { 1 } else { 0 };
+                if src_sub != 0 && dst_word != 0 {
+                    let result = ir_new_tmp(ir, dst_qt);
+                    ir_emit_str(ir, "    %t" as *u8);
+                    ir_emit_int(ir, "%d" as *u8, result.id);
+                    ir_emit_str(ir, " =" as *u8);
+                    ir_emit_int(ir, "%c" as *u8, dst_qt);
+                    ir_emit_str(ir, " copy %t" as *u8);
+                    ir_emit_int(ir, "%d" as *u8, arg.id);
+                    ir_emit_str(ir, "\n" as *u8);
+                    return result;
                 }
             }
         }
@@ -1369,27 +1369,55 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
     }
 
     // ── NODE_INDEX ──
+    // 对齐 v0 codegen.c:1007-1080: const-fold NODE_INT + extsw w→l + 用 elem_sz (非 hardcoded 8)
+    // v0.9 wip commit 2.20 真修: ir_emit_copy 第三个参数是 int64_t, 之前传 IRVal 32 字节 → C 读前 8 字节
+    //   当成 int64 (kind+id 联合解释) → garbage。const-fold 走 NODE_INT 直接避开 broken 调用。
     if kind == NODE_INDEX() {
         let nd_idx = node_index_data(n);
         let base_node = (*nd_idx).expr as *Node;
         let idx_node = (*nd_idx).index as *Node;
-        let base = cg_expr(cg_raw, base_node);
-        let idx = cg_expr(cg_raw, idx_node);
-        let mut idx64: IRVal = ir_new_tmp(ir, QBE_L());
-        if idx.qbe_type != QBE_L() {
-            let _e = ir_emit_copy(ir, idx64, idx);
-            let _ = _e;
-        } else {
-            idx64 = idx;
-            let _ = idx64;
+        let base_t_raw = (*base_node).type_ptr;
+        // 取 element type
+        let mut elem_t_raw: *u8 = 0 as *u8;
+        if base_t_raw != (0 as *u8) {
+            let bt = base_t_raw as *Type;
+            if (*bt).kind == KIND_ARRAY() || (*bt).kind == KIND_POINTER() || (*bt).kind == KIND_SLICE() {
+                elem_t_raw = (*bt).elem;
+            }
         }
+        let elem_sz = type_size(elem_t_raw as *Type);
+        let base = cg_expr(cg_raw, base_node);
+        // byte-equal v0 codegen.c:1007-1080 — 先 cg_expr(idx_node) emit 原 idx tmp (e.g. %t1 =w copy 25)
+        //   再 ir_new_tmp(byte_off) → const-fold 或 extsw+mul。const-fold 不复用 idx_val tmp (next_tmp 递增),
+        //   对齐 v0 codegen.c 路径: const_off = value * elem_sz emit 到新 tmp。
+        let idx_val = cg_expr(cg_raw, idx_node);
         let byte_off = ir_new_tmp(ir, QBE_L());
-        let size_const = ir_new_int(8 as i64);
-        ir_emit_binary(ir, byte_off, "mul" as *u8, idx64, size_const);
+        let idx_index_kind = (*idx_node).kind;
+        if idx_index_kind == NODE_INT() {
+            // 常量索引：const-fold value * elem_sz 直接 emit copy
+            let nd = node_int_data(idx_node);
+            let const_off = (*nd).value * elem_sz;
+            ir_emit_copy(ir, byte_off, const_off);
+        } else {
+            // 动态索引：必要时 w→l extsw → mul elem_sz
+            if idx_val.qbe_type == QBE_L() {
+                ir_emit_binary(ir, byte_off, "mul" as *u8, idx_val, ir_new_int(elem_sz));
+            } else {
+                let idx64 = ir_new_tmp(ir, QBE_L());
+                ir_emit_str(ir, "    %t" as *u8);
+                ir_emit_int(ir, "%d" as *u8, idx64.id);
+                ir_emit_str(ir, " =l extsw %t" as *u8);
+                ir_emit_int(ir, "%d" as *u8, idx_val.id);
+                ir_emit_str(ir, "\n" as *u8);
+                ir_emit_binary(ir, byte_off, "mul" as *u8, idx64, ir_new_int(elem_sz));
+            }
+        }
         let elem_addr = ir_new_tmp(ir, QBE_L());
         ir_emit_binary(ir, elem_addr, "add" as *u8, base, byte_off);
         let result = ir_new_tmp(ir, qbe_type_of((*n).type_ptr));
-        ir_emit_load(ir, result, "l" as *u8, elem_addr);
+        // 用 cg_emit_load 而非 ir_emit_load — u8 走 loadub (与 C 端 byte-equal 对齐)
+        let _ld = cg_emit_load(cg_raw, result, (*n).type_ptr, elem_addr);
+        let _ = _ld;
         return result;
     }
 
@@ -2177,6 +2205,22 @@ fn cg_emit_const_prim_data(ir: *IRBuf, e: *Node, t: *Type) -> i32 {
 }
 
 // ════════════════════════════════════════════════════
+// cg_const_data_prim_val — extract int/bool value from a const-data literal node.
+//   v0.9 wip commit 2.20: cg_module Pass A 内联 helper, 取 NODE_INT/BOOL value
+//   (KIND_PRIMITIVE const 数组元素)。返回 i64 (默认 0 if 非 literal)。
+fn cg_const_data_prim_val(e: *Node) -> i64 {
+    let ek = (*e).kind;
+    if ek == NODE_INT() {
+        let nd = node_int_data(e);
+        return (*nd).value;
+    }
+    if ek == NODE_BOOL() {
+        let bd = node_bool_data(e);
+        return (*bd).value as i64;
+    }
+    return 0 as i64;
+}
+
 // cg_emit_const_data_elem — recursive helper for Pass A
 // ════════════════════════════════════════════════════
 
@@ -2406,6 +2450,62 @@ fn cg_module(ir: *IRBuf, module: *Node) -> i32 {
     let locals_buf = arena_alloc((*ir).arena, (MAX_LOCALS() as i64) * LOCALENTRY_SIZE());
     (*cg_ptr).locals = locals_buf;
     let cg_raw: *u8 = cg_ptr as *u8;
+
+    // Pass A: emit all const decls as .data section
+    //   v0.9 wip commit 2.20 / Task #52 + #42 合并 (const_array.jhyy 测试依赖此路径)
+    //   对齐 C 端 codegen.c:1733-1750 (cg_module Pass A)
+    //   inline emit: const_array.jhyy 用纯 int 数组,只走 prim_data 路径
+    //   (cg_emit_const_data_elem 递归 helper 在 jhyy 端有 first_slot 栈共享问题)
+    //   loop bound = max(count, (*arr).nelems) 防御:防止 arr_count 或 nelems 任一为 0
+    let mut di_a: i64 = 0 as i64;
+    while di_a < ndeccls {
+        let d_slot_a = ptr_add_u8((*md).decls, di_a * (8 as i64)) as **Node;
+        let d_node_a = *d_slot_a;
+        if (*d_node_a).kind == NODE_CONST_DECL() {
+            let d_a = node_const_decl_data(d_node_a);
+            let arr_t_raw = (*((*d_a).sym as *Sym)).type_ptr;
+            if arr_t_raw != (0 as *u8) {
+                let arr_t = arr_t_raw as *Type;
+                if (*arr_t).kind == KIND_ARRAY() {
+                    let elem_t = (*arr_t).elem as *Type;
+                    let count = (*arr_t).arr_count;
+                    let init_raw = (*d_a).init;
+                    if init_raw != (0 as *u8) {
+                        // BUG 真修: 必须走 node_array_lit_data 加 NODE_SIZE 偏移, 跟 C 端 cg_module 一致
+                        //   (对齐 v0 codegen.c:1742 — 不能直接 cast init_raw as *NodeArrayLit)
+                        let arr = node_array_lit_data(init_raw as *Node);
+                        let arr_elems = (*arr).elems;
+                        let arr_n = (*arr).nelems;
+                        // 取 max(count, arr_n) 作为 loop bound
+                        let mut bound: i64 = count;
+                        if arr_n > bound {
+                            bound = arr_n;
+                        }
+                        ir_emit_data_str(ir, "data $" as *u8);
+                        ir_emit_data_str(ir, (*((*d_a).sym as *Sym)).name);
+                        ir_emit_data_str(ir, " = { " as *u8);
+                        let mut j: i64 = 0 as i64;
+                        while j < bound {
+                            if j < arr_n {
+                                let e_slot = ptr_add_u8((*arr).elems, j * (8 as i64)) as **Node;
+                                let e_node = *e_slot;
+                                let qt = data_qt_of(elem_t as *u8);
+                                let val: i64 = cg_const_data_prim_val(e_node);
+                                if j > (0 as i64) {
+                                    ir_emit_data_str(ir, ", " as *u8);
+                                }
+                                ir_emit_data_int(ir, "%c " as *u8, qt);
+                                ir_emit_data_lld(ir, "%lld" as *u8, val);
+                            }
+                            j = j + (1 as i64);
+                        }
+                        ir_emit_data_str(ir, " }\n" as *u8);
+                    }
+                }
+            }
+        }
+        di_a = di_a + (1 as i64);
+    }
 
     // Pass B: 逐个 func decl dispatch → cg_func
     let mut di: i64 = 0 as i64;
