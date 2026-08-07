@@ -338,4 +338,47 @@ if (*src).kind != KIND_PRIMITIVE() { return arg; }
 | Phase B-2 | 24 STK 逐个诊断 codegen 路径 | codegen.jhyy: cg_expr 各 case | +24 → -24 STK | 🔴 v0.9 真修 |
 | **总计** | | | **0 → 47 OK** | **v0.8 wip 实际 12 OK 持平（≠ 47）**|
 
+---
+
+## Sprint 4.4 A — 修 latent bug 解 Task #146 (commit 2.36, 2026-08-07)
+
+**触发场景**: Task #146 (slice_subrange codegen fix) 完整 NODE_SLICE_RANGE 翻译 (~120 行) 触发 jhyy_v1 HEAD rebuild QBE 错 `invalid type for first operand %t0 in csltl` / `add`。
+
+**Latent Bug 根因** (Sprint 4.4 B 实证):
+
+1. **ir.jhyy:185 ir_init 设 next_tmp=0** + post-increment → 第一 ir_new_tmp 返回 id=0
+2. **codegen.jhyy:740 `let zero = IRVal { kind: 0, id: 0, ... }`** → kind=0=IRVAL_TEMP
+   - 当 `zero` 当 cg_expr 返回值 (e.g. `return zero;` fall-through) 传给 phi/csltl 操作数, 被当 temp 发 `%t0`
+   - QBE 把 %t0 留作 call return register, 不接受普通操作数
+
+**commit 2.36 修法** (选项 2 pre-increment, 1-line 局部 fix):
+
+1. **ir.jhyy ir_new_tmp 改 pre-increment** — first id = 1, 跟 v0 端 cg_expr 入口 pre-alloc 行为对齐
+2. **ir.jhyy 加 ir_emit_arg helper** — 按 val.kind dispatch (IRVAL_INT → literal `<ival>`, 其他 → `%t<id>`)
+3. **codegen.jhyy `zero` 改 kind=IRVAL_INT()** — literal 0, 不再当 temp 发
+4. **ir.jhyy ir_emit_load 改用 ir_emit_arg** — dispatch on addr.kind
+5. **codegen.jhyy NODE_INDEX slice 处理改用 ir_emit_arg** — dispatch on base.kind
+
+**Why 选选项 2 (pre-increment) 不选选项 1 (next_tmp=1 in init)**:
+- 选项 2 根治: 改 return 逻辑, 不管 reset arena 多少次 first id 都 = 1
+- 选项 1 局部: 改 init, 但每次 reset arena 回到 0 → first id 又撞 0
+- 选项 2 1-line fix, 选项 1 改动面更大
+
+**验证**:
+- v0 regress: 50/53 passed, 0 failed, 3 skipped (持平 baseline 12/47, 实际已扩展到 50/53)
+- jhyy_v1 (phantom sha e2064a6b): slice_subrange.jhyy **compile EXIT=0** (前: QBE FAIL %t0)
+  - IL 显示 `loadl 0` (literal, 之前是 broken `%t0`)
+
+**Task #145 BLOCKED** (defer Sprint 4.5 B): cleanup crash bisect + HEAD rebuild 加完整
+NODE_SLICE_RANGE 翻译 仍 FAIL `\0 %t0` (4th arg of cg_match_pattern call) — phantom binary
+范畴问题, 跟 Task #146 phantom binary finding 同根。
+
+**内存记录**: [[`project_sprint4_4_b_latent_codegen_bug.md`]](../../../../.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_sprint4_4_b_latent_codegen_bug.md) (含 IL diff 实证)
+
+**Sprint 4.4 A ship**:
+- ✅ commit 2.36: latent bug fix (pre-increment + kind dispatch)
+- 🔴 Step 2 commit 2.37 (完整 NODE_SLICE_RANGE 翻译) DEFERRED → Sprint 4.5 B
+- 🔴 Task #145 (cleanup crash bisect) BLOCKED by phantom binary
+
+
 修完之后 `regress_v1.py` 跟 `regress.py` (C 端) 结果**持平 baseline**（12 OK 持平即可，**不是** 47/47）→ **Stage 1 byte-equal 闭环**（v0.9 目标）。
