@@ -382,3 +382,36 @@ NODE_SLICE_RANGE 翻译 仍 FAIL `\0 %t0` (4th arg of cg_match_pattern call) —
 
 
 修完之后 `regress_v1.py` 跟 `regress.py` (C 端) 结果**持平 baseline**（12 OK 持平即可，**不是** 47/47）→ **Stage 1 byte-equal 闭环**（v0.9 目标）。
+
+---
+
+## Sprint 4.5 B 启动 — phantom vs HEAD audit (commit 2.39, 2026-08-07)
+
+**目的**: 验证 phantom binary 是否真缺 sprint 4.2+ 翻译 (NODE_CONST_DECL 等), 还是仅命名约定不同.
+
+**Audit 方法** (`objdump -t` + `strings` 比对):
+
+| Binary | sha256 (前 16) | bytes | symbols | .text lines | unique strings |
+|--------|----------------|-------|---------|-------------|----------------|
+| phantom (jhyy_v1.exe) | `e2064a6b9c9d96...` | 397823 | 3399 | 13395 | 6 |
+| HEAD v5 (jhyy_v1_v5) | `341659409385300d` | 398899 | 3401 | 13449 | 19 |
+
+**audit 关键发现**:
+
+1. **codegen 函数符号集完全相同** — `cg_add_local`, `cg_body_returns`, `cg_const_data_prim_val`, `cg_convert_arg`, `cg_copy_struct`, `cg_emit_const_data_elem`, `cg_emit_const_prim_data`, `cg_emit_load`, `cg_emit_phi`, `cg_emit_store`, `cg_emit_store_primitive`, `cg_expr`, `cg_find_field_offset`, `cg_find_local`, `cg_find_local_is_stack`, `cg_func`, `cg_match_pattern`, `cg_module`, `cg_stmt`, `emit_mangled_name`, `ir_new_int` 共 20 个全部存在 (phantom = HEAD v5).
+
+2. **ast 枚举常量也存在** — `ast__NODE_CONST_DECL`, `ast__ast_new_const_decl`, `ast__NODE_FOR`, `ast__NODE_IF` 等 sprint 4.2+ 翻译符号 phantom = HEAD v5 都存在.
+
+3. **真正区别**:
+   - **命名约定**: phantom 无 `_v1` 后缀 (裸名 `arena__align_up`); HEAD v5 有 `_v1` 后缀 (`arena__align_up_v1`)
+   - **代码量微差**: HEAD v5 大 1076 bytes (+19 unique strings) — 来自 commit 2.36 latent bug fix 的 5 处小修改 (ir.jhyy pre-increment + ir_emit_arg + zero kind=IRVAL_INT + ir_emit_load dispatch + NODE_INDEX slice dispatch)
+
+**UPDATED 2026-08-07 commit 2.39**: 之前 (commit 2.34 phantom discovery postmortem) 误判 "phantom 缺 sprint 4.2+ 翻译". 真正原因: 只跟 `_v1` 后缀模式 grep, 而没 grep 不带后缀的 `NODE_CONST_DECL` 这种 enum 常量 (phantom 也有). audit 实测两个 binary 功能等价.
+
+**Sprint 4.5 B 待办**:
+1. **Task #145 cleanup crash bisect** — 22 tests "compile failed" 是 jhyy_v1 cleanup 阶段 non-deterministic HEAP_CORRUPTION. 需 HEAD rebuild 解后才能验证.
+2. **完整 NODE_SLICE_RANGE 翻译 HEAD rebuild 验证** — commit 2.36 (latent bug fix) 通过 phantom 验证但 HEAD rebuild 验证被 phantom 范畴问题 BLOCKED. 加完整 NODE_SLICE_RANGE 触发 QBE `\0 %t0` (separate codegen bug, 4th arg of cg_match_pattern call).
+3. **EXIT=60 真 PASS 验证** — Task #146 完成 (slice_subrange codegen fix 真 PASS).
+4. **phantom binary 锁定** — phantom sha e2064a6b 是当前唯一 working baseline. 任何 phantom binary 修改 = baseline 重置,需同步 reset regress_v1 baseline 数字.
+
+**内存记录**: [[`project_sprint4_4_phantom_binary_finding.md`]](../../../../.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_sprint4_4_phantom_binary_finding.md) (corrected from commit 2.34 postmortem)
