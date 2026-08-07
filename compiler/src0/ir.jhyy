@@ -223,6 +223,11 @@ fn ir_buf_str(ir: *IRBuf) -> *u8 {
 // ════════════════════════════════════════════════════
 
 fn ir_new_tmp(ir: *IRBuf, qbe_type: i32) -> IRVal {
+    // Sprint 4.4 commit 2.36 (latent bug fix): pre-increment 让 first id = 1
+    //   修 QBE "invalid type for first operand %t0 in csltl" — %t0 是 QBE call
+    //   return 专用 register, 不可作普通 temp 操作数. 改 pre-increment 后
+    //   不管 reset arena 多少次, first ir_new_tmp 都返回 id=1, 根治.
+    (*ir).next_tmp = (*ir).next_tmp + (1 as i32);
     let v = IRVal {
         kind:     IRVAL_TEMP(),
         id:       (*ir).next_tmp,
@@ -230,7 +235,6 @@ fn ir_new_tmp(ir: *IRBuf, qbe_type: i32) -> IRVal {
         name:     0 as *u8,
         qbe_type: qbe_type,
     };
-    (*ir).next_tmp = (*ir).next_tmp + (1 as i32);
     return v;
 }
 
@@ -279,6 +283,21 @@ fn ir_emit_int(ir: *IRBuf, fmt: *u8, val: i32) -> i32 {
 // 代码缓冲：emit i64 格式化（printf 风格 fmt，含 %lld）
 fn ir_emit_lld(ir: *IRBuf, fmt: *u8, val: i64) -> i32 {
     return sb_appendf_lld((*ir).arena, (*ir).sb, fmt, val);
+}
+
+// Sprint 4.4 commit 2.36 (latent bug fix): emit 一个 operand (按 kind dispatch)
+//   - IRVAL_TEMP/BLOCK/STR → " %t<id>"
+//   - IRVAL_INT → " <ival>" (literal)
+// 用途：ir_emit_load / ir_emit_phi2 等操作数位置。当 val 是 literal (e.g. cg_expr
+//   返回的 `zero` IRVal, 之前 kind=0=IRVAL_TEMP) 时, 不再误发 %t<id> (= %t0)
+//   触发 QBE "invalid type for first operand %t0".
+fn ir_emit_arg(ir: *IRBuf, val: IRVal) -> i32 {
+    if val.kind == IRVAL_INT() {
+        ir_emit_str(ir, " " as *u8);
+        return ir_emit_lld(ir, "%lld" as *u8, val.ival);
+    }
+    ir_emit_str(ir, " %t" as *u8);
+    return ir_emit_int(ir, "%d" as *u8, val.id);
 }
 
 // ════════════════════════════════════════════════════
@@ -613,8 +632,9 @@ fn ir_emit_load(ir: *IRBuf, dst: IRVal, qbe_type: i32, addr: IRVal) -> i32 {
     ir_emit_int(ir, "%c" as *u8, dst.qbe_type);
     ir_emit_str(ir, " " as *u8);
     ir_emit_str(ir, pref);
-    ir_emit_str(ir, " %t" as *u8);
-    ir_emit_int(ir, "%d" as *u8, addr.id);
+    // Sprint 4.4 commit 2.36: dispatch on addr.kind (literal vs temp) — 防 `zero`
+    //   IRVal (kind=IRVAL_INT) 被当 temp 发 %t<id>=%t0 触发 QBE 错误
+    let _a = ir_emit_arg(ir, addr);
     ir_emit_str(ir, "\n" as *u8);
     return 1;
 }

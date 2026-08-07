@@ -737,7 +737,10 @@ fn cg_match_pattern(ir: *IRBuf, matched: IRVal, pattern: *Node) -> IRVal {
 fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
-    let zero = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+    // Sprint 4.4 commit 2.36: zero IRVal 改 kind=IRVAL_INT (1) — 之前 kind=0=IRVAL_TEMP
+    //   被 ir_emit_load / ir_emit_phi2 当 temp 发 %t0, 触发 QBE "invalid type for
+    //   first operand %t0". 现在 literal 0, dispatch 走 ir_emit_arg 的 literal 分支.
+    let zero = IRVal { kind: IRVAL_INT(), id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
     if n == (0 as *Node) {
         return zero;
     }
@@ -1421,8 +1424,10 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 let slice_ptr = ir_new_tmp(ir, QBE_L());
                 ir_emit_str(ir, "    %t" as *u8);
                 ir_emit_int(ir, "%d" as *u8, slice_ptr.id);
-                ir_emit_str(ir, " =l loadl %t" as *u8);
-                ir_emit_int(ir, "%d" as *u8, base.id);
+                ir_emit_str(ir, " =l loadl" as *u8);
+                // Sprint 4.4 commit 2.36: base.kind dispatch (literal vs temp) —
+                //   防 `zero` IRVal (kind=IRVAL_INT) 误发 %t0 触发 QBE 错误
+                let _b = ir_emit_arg(ir, base);
                 ir_emit_str(ir, "\n" as *u8);
                 base = slice_ptr;
             }
