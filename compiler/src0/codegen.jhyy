@@ -372,7 +372,11 @@ fn cg_emit_store_primitive(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> 
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
     if t_raw == (0 as *u8) {
-        return ir_emit_store(ir, QBE_W(), val, addr);
+        // Sprint 4.3 A fix: NULL type 时用 val.qbe_type 决定 store 宽度 — 不是 hardcoded QBE_W().
+        //   修 slice/array 路径 heap corruption 根因: 写 64-bit ptr (QBE_L) 时应该用 storel,
+        //   旧代码永远 storew (32-bit) → 高 32 位 garbage → 后续 loadl 读到坏 ptr → AV.
+        //   历史调用方 (zero_v/one_v/rb_and 都是 QBE_W tmp) 不受影响.
+        return ir_emit_store(ir, val.qbe_type, val, addr);
     }
     let t = t_raw as *Type;
     if (*t).kind == KIND_PRIMITIVE() {
