@@ -845,7 +845,7 @@ fn cmd_compile(argc_v2: i32, argv_v2: *u8) -> i32 {
     }
     // 1. build .il
     if build_il(input, out_buf) != (0 as i32) {
-        if derived != (0 as *u8) { free(derived); }
+        if user_out == (0 as *u8) { free(derived); }  // Sprint 4.5 B Task #145 fix: avoid double-free when user_out was set
         return 1 as i32;
     }
     // 2. .il → .s
@@ -868,12 +868,12 @@ fn cmd_compile(argc_v2: i32, argv_v2: *u8) -> i32 {
 
     let r1 = run_qbe(il_path, asm_path);
     if r1 != (0 as i32) {
-        if derived != (0 as *u8) { free(derived); }
+        if user_out == (0 as *u8) { free(derived); }
         free(il_path); free(asm_path); free(exe_path);
         return 1 as i32;
     }
     let r2 = link_with_gcc(asm_path, exe_path);
-    if derived != (0 as *u8) { free(derived); }
+    if user_out == (0 as *u8) { free(derived); }
     free(il_path); free(asm_path); free(exe_path);
     if r2 != (0 as i32) {
         return 1 as i32;

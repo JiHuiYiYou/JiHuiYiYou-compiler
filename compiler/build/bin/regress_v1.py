@@ -5,7 +5,11 @@ import sys
 import os
 import re
 
-JHYY = os.path.abspath("compiler/build/bin/jhyy_v1.exe")
+# Sprint 4.5 B: use HEAD v6 (sha 76c05c4f) at .exe.exe suffix.
+# Earlier this pointed at the PHANTOM binary (sha e2064a6b) which has
+# the same cmd_compile double-free bug = regress_v1 22 tests "compile failed"
+# was actually phantom heap corruption. See project_sprint4_4_cleanup_crash_discovery.md.
+JHYY = os.path.abspath("compiler/build/bin/jhyy_v1.exe.exe")
 TEST_DIR = os.path.abspath("compiler/tests/examples")
 TIMEOUT = 10
 

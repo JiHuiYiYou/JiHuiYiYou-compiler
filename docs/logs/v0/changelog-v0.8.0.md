@@ -415,3 +415,63 @@ NODE_SLICE_RANGE 翻译 仍 FAIL `\0 %t0` (4th arg of cg_match_pattern call) —
 4. **phantom binary 锁定** — phantom sha e2064a6b 是当前唯一 working baseline. 任何 phantom binary 修改 = baseline 重置,需同步 reset regress_v1 baseline 数字.
 
 **内存记录**: [[`project_sprint4_4_phantom_binary_finding.md`]](../../../../.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_sprint4_4_phantom_binary_finding.md) (corrected from commit 2.34 postmortem)
+
+---
+
+## Sprint 4.5 B Task #145 ship — cmd_compile double-free fix (commit 2.40, 2026-08-07)
+
+**Task**: 解 phantom binary 的 cmd_compile double-free bug (Sprint 4.5 B 步骤 1).
+
+**根因** (`compiler/src0/main.jhyy` cmd_compile, lines 838-881):
+```jhyy
+let derived = malloc(1024 as i64);    // 总是 alloc
+derive_output_name(input, derived);
+let mut out_buf: *u8 = derived;
+if user_out != (0 as *u8) {
+    free(derived);                      // line 843: 如果 user_out 提供, 立即 free
+    out_buf = user_out;
+}
+// 后面 cleanup 时:
+if derived != (0 as *u8) { free(derived); }   // ❌ derived 非 0, double-free
+```
+
+cmd_compile 在 3 处 cleanup 检查 `if derived != (0 as *u8)` 来 free `derived` (lines 848, 871, 876), 但 `derived` 是 malloc 出来的真实指针 (永远非 0). 当 `user_out` 被提供时, derived 已经在 line 843 被 free 过一次, 后续 cleanup 再 free 一次 = **double-free** → NTSTATUS 0xC0000374 (HEAP_CORRUPTION) 非确定性崩溃。
+
+**修法** (1-line × 3 sites): 把 cleanup 的 `if derived != (0 as *u8) { free(derived); }` 全部改成 `if user_out == (0 as *u8) { free(derived); }`. 语义: 只有 `user_out` 未提供时 (`derived` 仍是 output name 缓冲区) 才 free 它.
+
+注: 原 `derived = 0 as *u8` 方案被 sema 拒绝 ("cannot assign to immutable variable"). 用 `user_out == 0` 语义等价 (避免 null-out-derived).
+
+**验证** (HEAD v6 = sha 76c05c4f, v0-compiled):
+- `const_array.jhyy`: 10/10 OK (前 phantom: 3/10 OK / 7/10 crash)
+- `fib30.jhyy`: 10/10 OK EXIT=832040 (前 phantom: 9/10 OK / 1/10 crash)
+- `regress.py` (C 端 baseline): 50/53 passed, 0 failed, 3 skipped (持平)
+- `regress_v1.py` (HEAD v6): **42/53 passed, 8 failed, 3 skipped** (前 phantom: 22 cleanup-crash "compile failed")
+
+**regress_v1.py path fix** (paired with this commit):
+```python
+# Before: pointing at PHANTOM jhyy_v1.exe (sha e2064a6b)
+JHYY = os.path.abspath("compiler/build/bin/jhyy_v1.exe")
+# After: pointing at HEAD v6 jhyy_v1.exe.exe (sha 76c05c4f)
+JHYY = os.path.abspath("compiler/build/bin/jhyy_v1.exe.exe")
+```
+
+之前 regress_v1 所有 "compile failed" 测量都是 PHANTOM binary 在 cleanup 时 heap crash, 不是 fix 的效果。改 path 后才能测 HEAD v6。
+
+**8 个真 fail 诊断** (NEW 暴露的真实 bug):
+| Test | rc | 真 bug |
+|------|----|------|
+| slice_subrange.jhyy | 0 (compile) → AV | Task #146 已知 |
+| slice_iterate.jhyy | 1 (sema) | "undefined variable" sema bug |
+| slice_len.jhyy | 1 (sema) | "undefined variable" sema bug |
+| dungeon_game.jhyy | 1 (parser) | "unexpected token 'match' in expression" — match-expr 翻译缺 (Task #50) |
+| match.jhyy | 1 (parser) | match-expr 同上 (Task #50) |
+| import_test.jhyy | AV 0xC0000005 | codegen AV |
+| namespace_dup.jhyy | AV 0xC0000005 | codegen AV |
+| float_cmp.jhyy | QBE | "invalid type for second operand %t57 in cgts" — codegen 类型推导 |
+
+**Task #145 ship**:
+- ✅ 22 cleanup-crash tests 解 (regress_v1 真 PASS 8 → 30, 加 12 baseline = 42)
+- 🔴 8 个真 fail 已诊断 (5 个 codegen, 2 个 parser/sema, 1 个 QBE 类型)
+- 🔴 下一步: Task #146 (slice_subrange codegen fix) — 这才是真正的"再加 1 PASS"路径
+
+**内存记录**: [[`project_sprint4_4_cleanup_crash_discovery.md`]](../../../../.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_sprint4_4_cleanup_crash_discovery.md) (UPDATED 加 cmd_compile double-free 根因)
