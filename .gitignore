@@ -38,6 +38,12 @@ compiler/src0/*.il
 compiler/src0/*.s
 compiler/src0/*.exe
 
+# Phantom binary 备份 — 防止 Sprint 4.4 cleanup crash bisect 期间
+# 误覆盖唯一能跑 codegen 的 jhyy_v1.exe (sha e2064a6b per Sprint 4.4 D finding)
+*.phantom.bak
+*_phantom.bak
+*_baseline.exe
+
 # tmp/ — 工作目录临时调试 artifact（do_w*.py / tm_*.jhyy / test_*.jhyy / r1.* 等 200+ 文件）
 # 用 `tmp/` 目录而不是 repo 根散落文件，避免 git status 噪音
 tmp/
