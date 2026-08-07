@@ -1928,6 +1928,11 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
     }
 
     // ── NODE_WHILE ──
+    // while cond { body }
+    //   loop_start: cond eval → jnz loop_body, loop_end
+    //   loop_body: body emit → jmp loop_start
+    //   loop_continues / loop_ends 推到 stack（loop_depth++）
+    if kind == NODE_WHILE() {
         let nwd = node_while_data(n);
         let cond_node = (*nwd).cond as *Node;
         let body_node = (*nwd).body as *Node;
