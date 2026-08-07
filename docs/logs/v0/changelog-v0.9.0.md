@@ -2855,3 +2855,109 @@ slice/array 路径的 NULL-type store 实际写的是 64-bit ptr,被截断成 32
 - `memory/project_sprint4_2_codegen_mirror_done.md` — codegen mirror 5 fix 起点
 - `memory/project_sprint4_1_heap_corruption_runtime.md` — runtime pivot 方法论
 - `memory/feedback_qbe_crlf_root_cause.md` — `.il` 行号偏移排查辅助
+
+## v0.9 wip commit 2.32 (2026-08-07) — Sprint 4.3 B regress measurement 修对
+
+### 修改
+
+**9 文件, +145/-1 行**:
+- `compiler/build/bin/regress.py`: NTSTATUS 检测 (+29/-1)
+- `compiler/build/bin/regress_v1.py`: NTSTATUS 检测 (同步, NEW tracked via .gitignore)
+- `.gitignore`: 加 `!compiler/build/bin/regress_v1.py` exception
+- 6 个 .jhyy 测试加 EXPECT annotation (slice_index / slice_literal / slice_subrange / slice_len / slice_iterate / forloop)
+
+### Bug (修前)
+
+regress.py / regress_v1.py 对**没 EXPECT annotation** 的测试 = "compiles + no timeout" = PASS,
+**忽略实际 exit code**。所以 `EXIT=3221225477` (AV 0xC0000005) / `EXIT=3221226356` (HEAP 0xC0000374)
+都被算成 PASS。regress_v1 旧 5/53 是**假数字** — 5 里 4 个是真 AV。
+
+### 修法
+
+#### NTSTATUS 检测 (regress.py + regress_v1.py 同步)
+
+```python
+NTSTATUS_NAMES = {
+    0xC0000005: "ACCESS_VIOLATION",
+    0xC0000374: "HEAP_CORRUPTION",
+    0xC0000409: "STACK_BUFFER_OVERRUN",
+    0xC00000FD: "STACK_OVERFLOW",
+    # ... 11 个常见 status
+}
+
+def ntstatus_name(code):
+    if code is None or code < 0:
+        return None
+    if code >= 0xC0000000:                       # NTSTATUS severity = Error
+        return NTSTATUS_NAMES.get(code, f"NTSTATUS_0x{code:08X}")
+    return None
+
+# 替换 line 54-57:
+if expected is None:
+    nt = ntstatus_name(actual)
+    if nt is not None:
+        return (False, None, actual, f"runtime crash: {nt} (0x{actual:08X})")
+    return (True, actual, actual, output)
+# EXPECT present 时 NTSTATUS 也 FAIL (除非 expected 是那个 exact NTSTATUS)
+```
+
+#### 6 个 .jhyy 测试加 EXPECT
+
+| Test | EXPECT | 验算 |
+|---|---|---|
+| slice_index.jhyy | 80 | s[2]+s[4] = 30+50 |
+| slice_literal.jhyy | 60 | s[0]+s[1]+s[2] = 10+20+30 |
+| slice_subrange.jhyy | 60 | sub[0]+sub[2] = 20+40 (sub=s[1..4]) |
+| slice_len.jhyy | 5 | len(&[1,2,3,4,5]) |
+| slice_iterate.jhyy | 60 | sum [10,20,30] |
+| forloop.jhyy | 10 | 0+1+2+3+4 |
+
+#### .gitignore 同步
+
+regress_v1.py 跟 regress.py 一样是 source Python driver,不是 build artifact,应该 tracked。
+commit 86a3c76 加了 regress_v1.py 但 .gitignore 没同步 → 加 exception。
+
+### 验证 (2026-08-07)
+
+| 项 | 修前 | 修后 |
+|---|---|---|
+| regress_v1 PASS | **5/53** (含 4 假 PASS = AV) | **16/53** (全真 PASS) |
+| slice_subrange | "PASS" 但 EXIT=AV | **FAIL runtime crash: ACCESS_VIOLATION (0xC0000005)** ✓ proper diagnostic |
+| ptr_self_assign | 无 EXPECT EXIT=70 | **PASS EXIT=70** (新!) |
+| struct / struct_val_* | 无 EXPECT EXIT=30/35/15 | **PASS** (新! ×4) |
+| return_type / nested_if | 无 EXPECT EXIT=100/500 | **PASS** (新! ×2) |
+| v0 regress | 50/53 | **50/53** (不破坏, EXPECT 注释 v0 已对) |
+| Stage 1 byte-equal | 7/7 | **7/7** |
+
+### 5 → 16 真进步
+
+旧 5 是 fake (含 4 AV); 新 16 是 ground truth。后续 sprint 4.4+ 修 jhyy_v1 progress
+直接看 PASS 数变化即可 (不会再有 "AV 被算 PASS" 假象).
+
+**新 16 PASS**: arith, break_continue, control_flow, fib_renamed, match_exhaustive,
+nested_if, ptr_self_assign, return_type, slice_index, slice_literal, struct,
+struct_val_assign, struct_val_pass, struct_val_ret, void_if, forloop
+
+### 仍 FAIL 的 34 个分布
+
+- **runtime crash (NTSTATUS)**: slice_subrange, slice_iterate (compile failed 实际是同样 AV root cause),
+  fib30, ffi_*, overflow, struct_val_*, bug2_if_phi 等 ~10
+- **compile failed** (parser/codegen 缺功能): logical, match, ns_dup, pointer, print_num,
+  ptr_self_assign AV 等 ~20
+- **其他** (timeout / error): ~4
+
+### 下一步
+
+1. Sprint 4.4+: NTSTATUS cluster 用同样 .il + .s 方法定位下一个 root cause
+   (类似 commit 2.31)
+2. Sprint 4.4+: compile failed cluster 用 codegen/parser 翻译层补功能
+3. ⏭️ v1.0 真自举 byte-equal 路径: jhyy_v1 编 src0/main.jhyy 跑通后,
+   regress_v1 16 → 50 (跟 v0 持平) 即闭环达成
+
+### 引用
+
+- commit d870c33 (2.32)
+- commit c42ea43 (2.31) — Sprint 4.3 A heap corruption 根因
+- commit 86a3c76 — 加 regress_v1.py 但没 track
+- `memory/project_sprint4_3_heap_corruption_root_cause.md` — A fix
+- `memory/feedback_il_s_debugging_pattern.md` — .il + .s fallback 取证
