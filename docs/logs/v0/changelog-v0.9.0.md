@@ -2484,3 +2484,116 @@ Fix: 加 2 行 — `(*body_node).kind == NODE_BREAK() || ... NODE_CONTINUE()` (�
 - `memory/project_sprint4_1_ildiff_break_continue.md` — IL diff 方法论 + NODE_FOR 缺失证据
 - `memory/project_sprint4_1_fix3_negative.md` — 3 anti-pattern fix 全 revert 记录
 - `memory/feedback_self_edit_authority.md` — 2026-08-04 授权 (本 commit 在授权范围内)
+
+## v0.9 wip commit 2.28 (2026-08-07): Sprint 4.1 IL-diff 真修 #3 — NODE_INDEX struct elem + const_struct_array data emit
+
+### 背景
+
+Sprint 4.1 IL_ONLY #1/#2 (NODE_FOR + cg_body_returns) 后 pivot 到 const_struct_array.jhyy (NO_ARTIFACTS cluster)。该 test 编译能过但 QBE reject:
+
+```
+qbe:const_struct_array_v1.exe.il:12: invalid type for first operand %t4 in add
+```
+
+### IL diff 实证 (byte-equal control)
+
+v0 jhyy.exe 编译 const_struct_array.jhyy → `const_struct_array_v0.exe.il` (md5 05827def... 6 stmts):
+```
+data $PALETTE = { w 1, w 2, w 3, w 4, w 5, w 6, w 7, w 8, w 9 }
+%t0 =l copy $PALETTE       # base
+%t1 =w copy 2               # index
+%t2 =l copy 24              # 2*12 offset
+%t3 =l add %t0, %t2         # &PALETTE[2]
+%t4 =l add %t3, 8           # &PALETTE[2].b
+%t5 =w loadw %t4            # load value
+ret %t5
+```
+
+v1 jhyy_v1 (旧) 编译 → 7 stmts + 错 data:
+```
+data $PALETTE = { w 0, w 0, w 0 }                          # 仅 3 字, 全 0
+%t3 =l add %t0, %t2
+%t4 =w loadw %t3             ← BUG: 多余 loadw
+%t5 =l add %t4, 8            ← BUG: %t4 是 w, 类型不匹配 → QBE reject
+%t6 =w loadw %t5
+```
+
+### Finding #1: NODE_INDEX struct elem 缺 struct-special-case
+
+v0 codegen.c:1069-1071 有显式分支:
+```c
+if (elem_type && elem_type->kind == KIND_STRUCT) {
+    return addr;   // struct 走地址 (caller 按 is_stack 处理)
+}
+```
+
+v1 src0/codegen.jhyy NODE_INDEX 缺这个 special case — 永远走 cg_emit_load 然后返回 loaded value。后果: struct elem 后续的 NODE_FIELD 把 loaded value 当 address 算 field offset,触发 QBE type-mismatch。
+
+### Finding #2: NODE_CONST_DECL data emit 缺 struct 数组处理
+
+v0 codegen.c:1702-1724 用递归 helper `cg_emit_const_data_elem`(struct → 逐 field emit)。v1 src0/codegen.jhyy:2577 Pass A 走 inline emit 逻辑,只处理 KIND_PRIMITIVE elem。struct elem 走 `cg_const_data_prim_val` 返回 0 → data 全 0。
+
+外加隐藏 bug: inline 比较 `strcmp(sf_name, fname_sym as *u8)` 把 FieldDesc.name (实际是 *Sym, W-008 fix 注释确认) 当 *u8 直接比 → 永远不等 → 走 "missing field" 分支 emit 0。**就算加 struct 展开逻辑也仍 emit 0**。两 bug 串联:struct 展开 + name deref 都得改。
+
+### 真修
+
+src0/codegen.jhyy + build/bin/codegen.jhyy 各加 56 行 (dual-source):
+
+1. **NODE_INDEX struct elem special case** (对齐 v0 codegen.c:1069-1071):
+```jhyy
+let elem_addr = ir_new_tmp(ir, QBE_L());
+ir_emit_binary(ir, elem_addr, "add" as *u8, base, byte_off);
+if elem_t_raw != (0 as *u8) {
+    let et = elem_t_raw as *Type;
+    if (*et).kind == KIND_STRUCT() {
+        return elem_addr;  // struct 走地址
+    }
+}
+let result = ir_new_tmp(ir, qbe_type_of((*n).type_ptr));
+let _ld = cg_emit_load(cg_raw, result, (*n).type_ptr, elem_addr);
+let _ = _ld;
+return result;
+```
+
+2. **NODE_CONST_DECL data emit struct array handling** (对齐 v0 codegen.c:1702-1724):
+- 加 `first_d: i32` flag 控 flat emit 逗号 (跨 elem 间不漏)
+- elem_t.kind == KIND_STRUCT() 分支: 遍历 elem_t.fields, 对每个 field name 找 sl->fields 同名 value, emit `cg_emit_const_prim_data`
+- primitive elem 走原路径但用 first_d 控逗号
+
+3. **FieldDesc.name deref** (W-008 fix 注释确认 name 是 *Sym):
+```jhyy
+let fdesc_name_sym = (*fdesc_t).name as *Sym;
+let fdesc_name_str = (*fdesc_name_sym).name;
+```
+之前 `strcmp(sf_name, fname_sym as *u8)` 把 *Sym 字节当 *u8 字符串比 → 永远 0。
+
+### 验证
+
+| 测试 | 旧 jhyy_v1 | 新 jhyy_v1 | 说明 |
+|------|------------|------------|------|
+| const_struct_array.jhyy | qbe reject (type mismatch) | **rc=9 (PASS)** | IL byte-equal v0 ✓ |
+| slice_subrange.jhyy | segfault | **EXIT=3221225477** | 仍 heap corruption (后续 IL_ONLY 修) |
+| slice_iterate / slice_len | compile segfault | compile segfault | 不属本 commit 范围 (parser 缺 slice literal) |
+| jhyy_v1 全 regress (53 tests) | **14/53 PASS** | **35/53 PASS** | **+21 (target + struct tests + slice 部分)** |
+| v0 jhyy.exe 全 regress (50 tests) | 50/53 PASS | **50/53 PASS** | ✓ 不 regress |
+
+注: 5 runs 测得 35/53 mode (4/5 = 35, 1/5 = 34); 34 差异源自 `slice_subrange.jhyy` 偶发 PASS/FAIL (编译 OK + run segfault, 测试框架 expected=None → PASS 是 flaky 的)。主体 fix 验证 5/5 PASS 在 `const_struct_array.jhyy`。
+
+### 关键信号
+
+- **2 真修连锁**: struct elem 返回地址 (NODE_INDEX) + struct array data emit (NODE_CONST_DECL) + FieldDesc deref 三合一才解开 PALETTE[N].field
+- **+21 baseline improvement** 是 sprint 4 以来最大单 commit 增量 (突破 canonical 14/53 baseline)
+- 之前 Path B 2 个 fix 失败 (commit 2.24 前后 IRVal offset / arena_alloc) 是不同 bug 维度 → 本次 pivot IL diff 命中真 bug
+
+### 已知仍 fail (后续 commit)
+
+- `slice_subrange` heap corruption (compile OK, run crash) — IL diff 下个 round
+- `slice_iterate`, `slice_len`, `slice_index` 部分 — 跟 const_struct_array 同家族
+- 9 个 NO_ARTIFACTS COMPILE_FAIL — parser/sema 层不属本 commit
+
+### 引用
+
+- v0 codegen.c:1067-1083 (NODE_INDEX struct elem), 1702-1750 (cg_module data emit + cg_emit_const_data_elem)
+- `memory/feedback_fix_evaluation_rule.md` — 5/5 PASS 评估规则
+- `memory/project_sprint4_1_baseline_reset_14_53.md` — canonical baseline 起点
+- `memory/feedback_self_edit_authority.md` — 2026-08-04 授权范围

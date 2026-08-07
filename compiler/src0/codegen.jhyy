@@ -1417,6 +1417,14 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         }
         let elem_addr = ir_new_tmp(ir, QBE_L());
         ir_emit_binary(ir, elem_addr, "add" as *u8, base, byte_off);
+        // struct element: return address (not load) — caller applies field offset.
+        // 对齐 v0 codegen.c:1067-1071（struct 走地址，caller 按 is_stack 处理）。
+        if elem_t_raw != (0 as *u8) {
+            let et = elem_t_raw as *Type;
+            if (*et).kind == KIND_STRUCT() {
+                return elem_addr;
+            }
+        }
         let result = ir_new_tmp(ir, qbe_type_of((*n).type_ptr));
         // 用 cg_emit_load 而非 ir_emit_load — u8 走 loadub (与 C 端 byte-equal 对齐)
         let _ld = cg_emit_load(cg_raw, result, (*n).type_ptr, elem_addr);
@@ -2589,18 +2597,60 @@ fn cg_module(ir: *IRBuf, module: *Node) -> i32 {
                         ir_emit_data_str(ir, "data $" as *u8);
                         ir_emit_data_str(ir, (*((*d_a).sym as *Sym)).name);
                         ir_emit_data_str(ir, " = { " as *u8);
+                        let mut first_d: i32 = 1 as i32;
                         let mut j: i64 = 0 as i64;
                         while j < bound {
                             if j < arr_n {
                                 let e_slot = ptr_add_u8((*arr).elems, j * (8 as i64)) as **Node;
                                 let e_node = *e_slot;
-                                let qt = data_qt_of(elem_t as *u8);
-                                let val: i64 = cg_const_data_prim_val(e_node);
-                                if j > (0 as i64) {
-                                    ir_emit_data_str(ir, ", " as *u8);
+                                if (*elem_t).kind == KIND_STRUCT() {
+                                    // struct elem: emit each field value (QBE data 是 flat 平铺)
+                                    // 对齐 v0 codegen.c:1702-1724 cg_emit_const_data_elem。
+                                    // 用 first_d 控逗号而不是逐 elem 跳，避免 nested field 与 next elem 之间漏逗号。
+                                    let sl = node_struct_lit_data(e_node);
+                                    let mut si: i64 = 0 as i64;
+                                    while si < (*elem_t).nfields {
+                                        let fdesc = ptr_add_u8((*elem_t).fields, si * FIELD_DESC_SIZE()) as *u8;
+                                        let fdesc_t = fdesc as *FieldDesc;
+                                        // FieldDesc.name 是 *Sym（W-008 fix 注释: deref 拿 name *u8）
+                                        let fdesc_name_sym = (*fdesc_t).name as *Sym;
+                                        let fdesc_name_str = (*fdesc_name_sym).name;
+                                        let mut fval: *Node = 0 as *Node;
+                                        let mut fj: i64 = 0 as i64;
+                                        while fj < (*sl).nfields {
+                                            let sf_entry = ptr_add_u8((*sl).fields, fj * NODE_FIELD_INIT_SIZE()) as *NodeFieldInit;
+                                            let sf_name = (*sf_entry).name;
+                                            if strcmp(sf_name, fdesc_name_str) == 0 {
+                                                fval = (*sf_entry).value as *Node;
+                                                break;
+                                            }
+                                            fj = fj + (1 as i64);
+                                        }
+                                        let ft_raw = (*fdesc_t).type_;
+                                        let ft = ft_raw as *Type;
+                                        if first_d == 0 {
+                                            ir_emit_data_str(ir, ", " as *u8);
+                                        }
+                                        if fval != (0 as *Node) {
+                                            cg_emit_const_prim_data(ir, fval, ft);
+                                        } else {
+                                            let ft_qt = qbe_type_of(ft_raw);
+                                            ir_emit_data_int(ir, "%c " as *u8, ft_qt);
+                                            ir_emit_data_lld(ir, "0" as *u8, 0 as i64);
+                                        }
+                                        first_d = 0 as i32;
+                                        si = si + (1 as i64);
+                                    }
+                                } else {
+                                    let val: i64 = cg_const_data_prim_val(e_node);
+                                    if first_d == 0 {
+                                        ir_emit_data_str(ir, ", " as *u8);
+                                    }
+                                    let qt = data_qt_of(elem_t as *u8);
+                                    ir_emit_data_int(ir, "%c " as *u8, qt);
+                                    ir_emit_data_lld(ir, "%lld" as *u8, val);
+                                    first_d = 0 as i32;
                                 }
-                                ir_emit_data_int(ir, "%c " as *u8, qt);
-                                ir_emit_data_lld(ir, "%lld" as *u8, val);
                             }
                             j = j + (1 as i64);
                         }
