@@ -475,3 +475,55 @@ JHYY = os.path.abspath("compiler/build/bin/jhyy_v1.exe.exe")
 - 🔴 下一步: Task #146 (slice_subrange codegen fix) — 这才是真正的"再加 1 PASS"路径
 
 **内存记录**: [[`project_sprint4_4_cleanup_crash_discovery.md`]](../../../../.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_sprint4_4_cleanup_crash_discovery.md) (UPDATED 加 cmd_compile double-free 根因)
+
+---
+
+### 2026-08-07 — v0.9 wip commit 2.41: Sprint 4.5 B Step 2 ship — baseline lock + HEAD v6 calibration
+
+**Sprint 4.5 B ship 完成**: Task #145 (cmd_compile double-free) commit 2.40 + Step 2 baseline lock.
+Task #146 (NODE_SLICE_RANGE codegen) BLOCKED by known latent bug, defer to Sprint 4.5 C.
+
+**Canonical HEAD v6 binary** (Sprint 4.5 B ship):
+- `jhyy_v1.exe.exe` sha256 = `181375d70822f758110c8dcfdebed492d046821eb63988d1be1754fb0d5d5eec`
+- 对应 commit = `576867a` (Task #145 ship)
+- 注: 之前 memory 记的 "sha 76c05c4f" 是 commit hash, 不是 binary hash
+
+**Canonical HEAD v6 baseline** (jhyy_v1, regress_v1.py):
+```
+===== 42/53 passed, 8 failed, 3 skipped =====
+```
+
+regress.py (C 端): 50/53 passed, 0 failed, 3 skipped (持平 baseline, no regression)
+
+**8 FAIL breakdown** (jhyy_v1 HEAD v6 真 bug):
+| Test | expected | got | 根因 |
+|------|----------|-----|------|
+| dungeon_game.jhyy | None | -1 | parser match-expr 缺 (Task #50) |
+| float_cmp.jhyy | None | -1 | QBE "invalid type f<->i cmp" |
+| import_test.jhyy | None | -1 | codegen AV (多文件 import) |
+| match.jhyy | None | -1 | parser match-expr 缺 (Task #50) |
+| namespace_dup.jhyy | None | -1 | codegen AV (命名空间 dup) |
+| slice_iterate.jhyy | 60 | -1 | sema undef var in slice 翻译 |
+| slice_len.jhyy | 5 | -1 | sema undef var in slice 翻译 |
+| slice_subrange.jhyy | 60 | AV | Task #146 BLOCKED |
+
+**3 SKIP** (library, no main): mylib.jhyy, ns_dup_a.jhyy, ns_dup_b.jhyy
+
+**历史 baseline 对比**:
+| 阶段 | binary | regress_v1 |
+|------|--------|-----------|
+| commit 2.28 phantom | sha 17253a96 | "35/53" (假) |
+| commit 2.28 真 src0/ HEAD rebuild | sha 6315b2ea | 7/53 |
+| commit 2.31+2.32 phantom | sha e2064a6b | 16/53 |
+| **commit 2.40 HEAD v6** | **sha 181375d7...** | **42/53** |
+
+**Task #146 BLOCKED 状态**:
+- 完整 NODE_SLICE_RANGE 翻译 (47 行) + 最小 const-only 版本 (49 行) 都触发 QBE `invalid type for first operand %t0 in copy`
+- 根因: zero IRVal (kind=0=IRVAL_TEMP) 被 emit 进 IL 当 literal arg, QBE 看到 %t0 当 temp 但实际是 literal
+- 修法需 `ir.jhyy` 加 IRVal kind dispatch (类似 `ir_emit_arg` helper), 是 translator architecture 层
+- 不在 Sprint 4.5 B 范围, 列入 Sprint 4.5 C 或后续
+- src0/codegen.jhyy 已 revert 到 clean state (无 NODE_SLICE_RANGE case)
+
+**Baseline log**: `compiler/build/bin/_regress_v1_baseline_HEADv6.log` (55 行, 完整 PASS/FAIL 输出)
+
+**内存记录**: [[`project_sprint4_5_b_step2_baseline_lock.md`]](../../../../.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_sprint4_5_b_step2_baseline_lock.md)
