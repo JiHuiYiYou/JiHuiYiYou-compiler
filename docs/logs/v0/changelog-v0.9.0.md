@@ -2961,3 +2961,94 @@ struct_val_assign, struct_val_pass, struct_val_ret, void_if, forloop
 - commit 86a3c76 — 加 regress_v1.py 但没 track
 - `memory/project_sprint4_3_heap_corruption_root_cause.md` — A fix
 - `memory/feedback_il_s_debugging_pattern.md` — .il + .s fallback 取证
+
+---
+
+## commit 9fc6136 (v0.9 wip commit 2.33) — Sprint 4.4 C stale .exe hardening
+
+### 改
+
+regress.py + regress_v1.py 测前清掉 `_regress_X.{il,s,exe}`,避免 stale .exe cache
+掩盖 jhyy_v1 cleanup crash (HEAP_CORRUPTION 0xC0000374, 非确定性 1/9 OK)。
+
+### 验证
+
+| 项 | 修前 | 修后 |
+|---|---|---|
+| regress_v1 fresh baseline | **16/53** (含 1 stale 假象) | **15/53** (fresh,真实) |
+| stale cache 影响 | +1 假 PASS | 0 (每次都 fresh compile) |
+
+符合 user 预测 range 11-15 (实际 = 15)。
+
+### 引用
+
+- commit d870c33 (2.32) — NTSTATUS 检测 + EXPECT annotations
+
+---
+
+## commit 2.34 (待 ship) — Sprint 4.4 D phantom binary discovery (postmortem)
+
+### 关键发现 — jhyy_v1.exe 是 phantom, 不可重复
+
+Sprint 4.4 A bisect 第一步 (Task #144 main.c cleanup path depth audit) 暴露:
+
+```bash
+$ sha256sum compiler/build/bin/jhyy_v1.exe compiler/src0/main.il
+e2064a6b9c9d9639371c6add71d02a3dafb552e18571dbddd168e8ee9bd64470  jhyy_v1.exe     ← phantom
+3e50c44796540d5787b018da2bcf8da991ab7f2208ec616222faf5f5a4365d31  main.il         ← src0/ HEAD
+```
+
+`jhyy_v1.exe` 时间戳 2026-08-07 18:11, 但 `src0/main.il` 2026-08-04 00:12。
+jhyy_v1.exe **不是** src0/ HEAD rebuild 的产物。
+
+符号比对确认:
+
+| 符号 | phantom jhyy_v1.exe | HEAD rebuild (jhyy_v1_dbg) |
+|---|---|---|
+| arena__align_up | ✓ (无后缀) | ✗ (_v1 后缀) |
+| ast__NODE_FOR | ✓ | ✗ (_v1 后缀) |
+| codegen__cg_expr | ✓ | ✗ (_v1 后缀) |
+| ast__ast_new_const_decl | ✓ | ✗ (不在符号表) |
+| ast__NODE_CONST_DECL | ✓ | ✗ (不在符号表) |
+
+phantom 含 sprint 4.2+ 翻译 (NODE_CONST_DECL 等),且很多符号去掉 _v1 后缀。
+HEAD rebuild (从 src0/ HEAD 重编) 上 **const_array.jhyy parse error** (line 7:7
+'expected ;, got ident'),但 phantom 同一测试 PASS EXIT=122。
+
+### 影响范围
+
+所有 Sprint 4.4 测量基于 phantom,不可从 src0/ HEAD 复现:
+
+| 测量 | binary | 可复现 |
+|---|---|---|
+| 16/53 baseline (commit 2.32) | phantom (e2064a6b) | ✗ |
+| 22 cleanup crash discovery (Sprint 4.4 bisect 第一步) | phantom | ✗ |
+| 15/53 fresh baseline (commit 2.33) | phantom | ✗ |
+| Stage 1 byte-equal 7/7 | phantom | ✗ |
+
+Sprint 4.1-4.3 所有真修 (W-005/W-008/W-009/sprint 4.3 A) 也是 phantom 验证,
+结果可能跟 HEAD rebuild 不一致 (但 phantom 是当前唯一能跑 codegen 的 binary)。
+
+### User 决策 (待)
+
+按 user 反馈 `feedback_regress_baseline_binary_hash.md` 严格执行 MANDATORY
+sha256sum check。本 commit 触发 user review,等待 3 选项决定:
+
+- **A**: 维持 phantom binary, sprint 4.4 在 phantom 上跑 (现状)
+- **B**: 先 rebuild src0/ 让 HEAD rebuild = phantom 功能 (sprint 4.5 提前)
+- **C**: 暂停 sprint 4.4, 改 sprint 4.5 (parser 翻译层) 拉齐 HEAD
+
+### 临时保护
+
+phantom jhyy_v1.exe 备份到 `/tmp/jhyy_v1_baseline.exe`, 防止后续 rebuild 覆盖。
+HEAD rebuild 路径 (jhyy_v1_dbg.exe) 只用于 debug, 不入 baseline。
+
+### 引用
+
+- commit 9fc6136 (2.33) — Sprint 4.4 C stale .exe hardening
+- commit d870c33 (2.32) — Sprint 4.3 B regress measurement
+- commit c42ea43 (2.31) — Sprint 4.3 A heap corruption root cause
+- `memory/project_sprint4_4_phantom_binary_finding.md` — 详细分析
+- `memory/project_sprint4_4_cleanup_crash_discovery.md` — 基于 phantom 的 cleanup crash 发现
+- `memory/project_sprint4_1_phantom_baseline_finding.md` — 2026-08-07 commit 2.29 同类问题
+- `memory/feedback_regress_baseline_binary_hash.md` — MANDATORY sha256sum check
