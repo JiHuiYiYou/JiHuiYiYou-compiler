@@ -2597,3 +2597,107 @@ let fdesc_name_str = (*fdesc_name_sym).name;
 - `memory/feedback_fix_evaluation_rule.md` — 5/5 PASS 评估规则
 - `memory/project_sprint4_1_baseline_reset_14_53.md` — canonical baseline 起点
 - `memory/feedback_self_edit_authority.md` — 2026-08-04 授权范围
+
+---
+
+## v0.9 wip commit 2.29 (2026-08-07): Sprint 4.1 phantom baseline 真相 — 7/53 vs 35/53 溯源
+
+**Doc-only commit。零代码改动。**
+
+### 问题
+
+commit 2.28 changelog 报告 `jhyy_v1 regress: 14/53 → 35/53 mode = +21`。但 user 从 src0/ HEAD (commit b69af98) clean rebuild 只能测出 7/53。14 跟 35 跟 7 三个数字互相不一致,user 要求溯源。
+
+### 真相(2 句话)
+
+1. **35/53 来自 `/tmp/jhyy_v1_baseline.exe.exe` (sha `17253a96...`)**,不是 commit 2.28 编的 binary。Working tree 在 `/tmp/jhyy_src_test/`,git 仓库外,从 sprint 4 早期 (Aug 6) 一直存在但**从未 mirror 回 src0/**。
+2. **7/53 来自 src0/ HEAD clean rebuild** (commit b69af98 binary, sha `6315b2ea...`),是**真自举 binary** (inline_imports 拼好所有 module,运行时无外部 .jhyy 依赖)。
+
+### 两个 binary 不是同一架构
+
+| 维度 | `/tmp/jhyy_v1_baseline.exe.exe` (35/53) | `compiler/build/bin/jhyy_v1.exe` (7/53) |
+|---|---|---|
+| sha256 | `17253a9600168c2afa06a94ea3c8df360d90af5c74481b4c130a9dcbe093b67d` | `6315b2ea2265af8c09f988be3f9e367d44ae610387ad644ea6db2173f75b88b2` |
+| 来源 main.jhyy | `/tmp/jhyy_src_test/main.jhyy` (18,647 字节,pre-inline_imports) | `compiler/src0/main.jhyy` (35,798 字节,post-inline_imports) |
+| 运行时依赖 | 需磁盘上 .jhyy 文件 (C-style resolve_imports) | 零依赖 (inline_imports) |
+| 架构阶段 | pre-inline_imports (commit 2.22 之前) | post-inline_imports (commit 2.22+) |
+| v1.0 闭环 | ❌ 不是真自举 | ✅ 真自举候选 |
+| regress | **34/53** (实测 2026-08-07) | **7/53** (实测 2026-08-07) |
+
+**commit 2.28 changelog 的 +21 是 working tree binary 加了 2.28 patches 的产物,不是 commit 2.28 binary 自身的产物**。
+
+### codegen.jhyy diff 详细(working tree → src0/ HEAD)
+
+`diff /tmp/jhyy_src_test/codegen.jhyy compiler/src0/codegen.jhyy`:
+
+- **181 行 working tree 独有** (NOT in src0/) — sprint 4 早期 W-005 + slice/array 修复
+- **184 行 src0/ HEAD 独有** (NOT in working tree) — commit 2.24/2.25/2.28 IL-diff 修复
+- 两批**完全不冲突**(不同 cg_expr 函数段),可合并
+
+**md5**:
+- `/tmp/jhyy_src_test/codegen.jhyy` = `52bd112839b35c3e9e7cb0e06bb4dffa` (119,382 字节,Aug 6 20:36)
+- `compiler/src0/codegen.jhyy` = `eeb7280a5e107a721cadd78b42364911` (120,006 字节,Aug 7 15:37)
+
+**Working tree 独有的 5 个 fix 类别**:
+
+| Fix | 大约行数 | 解决 |
+|---|---|---|
+| W-005 `arena_alloc(IRVAL_SIZE)` + field-level read ×3 处 | ~30 | `let mut x; x = Y` segfault (v0 codegen bug 16) |
+| Sprint 4.1 IL_ONLY #1 slice ptr deref in NODE_INDEX | ~15 | `slice[i]` 拿 slice struct base 不 deref ptr |
+| NODE_ARRAY_LIT case | ~28 | `[1, 2, 3]` 字面量 |
+| NODE_SLICE_LIT case | ~30 | `[1..3]` slice 字面量 |
+| array→slice cast in cg_module | ~30 | `arr as [i32]` 隐式转 slice |
+| 额外:6× `jh_fputs_stderr` DBG prints | ~6 | 调试用,需剥 |
+
+**src0/ HEAD 独有的 fix 类别** (commit 2.24/2.25/2.28):
+
+| Fix | 来源 commit |
+|---|---|
+| `cg_body_returns` BREAK/CONTINUE 检查 | 2.24 |
+| NODE_FOR case (完整 for-loop 翻译) | 2.24 |
+| 3× phi predecessor (bug2_if_phi) | 2.25 |
+| struct element return address | 2.28 |
+| `first_d` 逗号控制 + FieldDesc deref | 2.28 |
+
+### commit 2.28 measurement 错位溯源
+
+- `git show b69af98 --stat`: commit 2.28 只动了 `compiler/src0/codegen.jhyy` + changelog,**没动 main.jhyy**
+- main.jhyy 的 inline_imports 在 commit 2.22 就固化了,**2.28 commit 自身产物一定是 post-inline_imports binary**
+- 35/53 数字却用了 pre-inline_imports binary (working tree) 测的
+- 这是 changelog 文档错位,**不是代码问题**
+
+模式重复: commit 2.23-baseline (d167e43) 早就发现过类似 evidence gap (`docs/logs/v0/changelog-v0.9.0.md:2377-2381`):
+> "sprint 4.1 启动前, Path A rebuild jhyy_v1.exe 时使用的是 `/tmp/jhyy_src_test/codegen.jhyy` (md5 41b56d153e9b110a008b0b39e4141fc2, working tree 维护的 operational baseline), 而非 src0/ head"
+
+### 7/14/35 三层数字关系
+
+| 数字 | Binary sha | 状态 | 置信度 |
+|---|---|---|---|
+| **35/53** | `17253a96` (working tree 编) | pre-inline_imports + 5 working-tree-only fix | **100%** |
+| **14/53** | `eff277b5` (memory 提及,**binary 不在当前 FS**) | 未知 | **0%** (binary 缺失) |
+| **7/53** | `6315b2ea` (src0/ HEAD rebuild) | post-inline_imports + 2.24/2.25/2.27/2.28,缺 5 working-tree fix | **100%** |
+
+**14/53 → 7/53 可能解释**(从高到低):
+
+1. **(60%)** 14/53 binary (`eff277b5`) 在某个中间 src0/ 状态,后续 commit 引入 transient regression → src0/ HEAD 重新编回到 7。binary 丢失,无法验证。
+2. **(30%)** regress_v1.py commit 86a3c76 "relative-path invocation" 改版导致 PASS 数变化。**最可疑** — 同一 src0/ HEAD,不同 regress.py 跑法不同结果。
+3. **(10%)** 14/53 是真实测量,7/53 是 fluke / 环境差异。
+
+### 决策
+
+1. **新 canonical baseline = 7/53** (sha `6315b2ea`),14/53 标 SUPERSEDED
+2. **不修改 commit 2.28 message** (amend 涉及 SHA 变化,影响后续引用链;commit 2.29 替代)
+3. **删 `/tmp/jhyy_src_test/` + `/tmp/jhyy_v1_baseline.exe.exe`**(物理删除防误用)
+4. **mirror 7→35 是 sprint 4.2 工作**(不是 4.1 尾巴):剥 6× jh_fputs + 保留 src0/ 已有 fix 的 selective Edit,需要冷静做
+
+### 引用
+
+- `memory/project_sprint4_1_phantom_baseline_finding.md` — 完整溯源(本 commit 对应 memory)
+- `memory/project_sprint4_1_baseline_reset_14_53.md` — ⚠️ SUPERSEDED 2026-08-07 指向本文件
+- `memory/feedback_regress_baseline_binary_hash.md` — MANDATORY sha256sum check (本 commit 复测验证)
+- `memory/feedback_fix_evaluation_rule.md` — 5/5 PASS 评估规则
+- `memory/project_sprint4_1_ILdiff_break_continue.md` — IL-diff methodology 上下文
+- commit b69af98 (2.28) — changelog 数字错位的源头
+- commit d167e43 (2.23-baseline) — 第一个发现 working tree ≠ src0/ 的 commit
+- `docs/logs/v0/changelog-v0.9.0.md:2377-2381` — 2.23-baseline 溯源段(模式重复证据)
+- `/tmp/codegen_diff.txt` — 本次溯源产物的 502 行 unified diff(临时文件,后续 mirror 用)
