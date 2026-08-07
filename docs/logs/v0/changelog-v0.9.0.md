@@ -2775,3 +2775,83 @@ raw 5-6 < 7 是 measurement 精度提升的副作用,**非 codegen 退步**。
 - `memory/feedback_fix_evaluation_rule.md` — 5/5 PASS 评估
 - commit b69af98 (2.28) — IL-diff 修复组起点
 - `docs/logs/v0/changelog-v0.9.0.md:2377-2381` — 2.23-baseline evidence gap 模式重复
+
+## v0.9 wip commit 2.31 (2026-08-07) — Sprint 4.3 A heap corruption 根因
+
+### 修改
+
+**1 文件, +5/-1 行**: `compiler/src0/codegen.jhyy:374-379` — `cg_emit_store_primitive` NULL type 路径从硬编码 `QBE_W()` 改成 `val.qbe_type`。
+
+```diff
+ if t_raw == (0 as *u8) {
++    // Sprint 4.3 A fix: NULL type 时用 val.qbe_type 决定 store 宽度 — 不是 hardcoded QBE_W().
++    //   修 slice/array 路径 heap corruption 根因: 写 64-bit ptr (QBE_L) 时应该用 storel,
++    //   旧代码永远 storew (32-bit) → 高 32 位 garbage → 后续 loadl 读到坏 ptr → AV.
++    //   历史调用方 (zero_v/one_v/rb_and 都是 QBE_W tmp) 不受影响.
+-    return ir_emit_store(ir, QBE_W(), val, addr);
++    return ir_emit_store(ir, val.qbe_type, val, addr);
+ }
+```
+
+### 根因溯源 (commit 2.31)
+
+`slice_index.jhyy` 5 行测试,新 .s 显示:
+```asm
+movl %eax, 32(%rsp)        # ← 32-bit store of 64-bit ptr (BUG)
+movl $5, 40(%rsp)
+movq 32(%rsp), %rcx        # ← reads 8 bytes (4 garbage + 4 valid) → AV
+```
+
+对应 .il:
+```il
+%t0 =l copy ...
+%t11 =l alloc16 16
+storew %t0, %t12            # ← BUG: storew but %t0 is 64-bit l
+```
+
+`storew` 只能写 32 位, `%t0` 是 64-bit ptr → 高 32 位保留栈 garbage → 后续 `loadl` 读到坏 ptr → AV。
+
+### 根因 = `cg_emit_store_primitive` 硬编码 `QBE_W()`
+
+旧代码 `if t_raw == (0 as *u8) return ir_emit_store(ir, QBE_W(), val, addr);` 不管 val 实际类型都 emit `storew`。
+slice/array 路径的 NULL-type store 实际写的是 64-bit ptr,被截断成 32-bit。
+
+### 修法
+
+改用 `val.qbe_type` 决定 store 宽度,让 `ir_emit_store` 按 val 实际类型 emit `storew`/`storel`/`storeb`/`storeh`。
+历史调用方 (`zero_v`/`one_v`/`rb_and` = 32-bit QBE_W tmp) 不受影响。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| `slice_index.jhyy` 5/5 | EXIT=80 (30+50=80, **正确**; 修前 AV) |
+| `slice_literal.jhyy` | EXIT=60 (**正确**; 修前 AV) |
+| `slice_subrange.jhyy` | EXIT=AV (其他 root cause, 待 sprint 4.3+) |
+| Stage 1 byte-equal 7/7 | ✓ 不破坏 |
+| v0 regress 50/53 | ✓ 不破坏 |
+| regress_v1 5/53 | 持平 baseline (slice_index 真 PASS, 其他多数仍 NTSTATUS 但根因不同) |
+
+### A + C 合并
+
+原本 Sprint 4.3 计划 A (heap corruption root cause) 跟 C (真修 `cg_emit_store(0 as *u8)` bisect bug)
+是两个 task。根因挖出来后,发现它们是**同一个**: `cg_emit_store_primitive` 改对后,所有
+`cg_emit_store(0 as *u8, ...)` 间接走的也是这条路,自动 emit 正确宽度。C 任务完成 = A 根因修对。
+
+### 工具链备注
+
+- PageHeap / gflags: 不可用 (no admin, choco blocked, MS download redirect HTML)
+- gdb 16.3 装上但无符号 → 不如直接读 .il + .s
+- **直接读 QBE-generated `.il` + `.s` 是 fallback 比 gdb 更有效的取证手段**(per [[project-sprint4-1-heap-corruption-runtime]])
+
+### 下一步
+
+1. Sprint 4.3 B (Task #141): regress_v1.py 加 EXPECT annotation + exit code 检查
+2. Sprint 4.3+: slice_subrange 等仍 NTSTATUS 的测试,用同样方法 (.il + .s 比对) 定位下一个 root cause
+
+### 引用
+
+- commit c42ea43 (2.31)
+- `memory/project_sprint4_2_codegen_mirror_done.md` — codegen mirror 5 fix 起点
+- `memory/project_sprint4_1_heap_corruption_runtime.md` — runtime pivot 方法论
+- `memory/feedback_qbe_crlf_root_cause.md` — `.il` 行号偏移排查辅助
