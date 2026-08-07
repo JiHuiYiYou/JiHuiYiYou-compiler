@@ -1,3 +1,4 @@
+// EXPECT: 10
 // For loop test: sum numbers from 0 to 5
 
 fn main_jhyy() -> i32 {

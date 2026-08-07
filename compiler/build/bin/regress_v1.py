@@ -5,7 +5,7 @@ import sys
 import os
 import re
 
-JHYY = os.path.abspath(os.environ.get("JHYY_CC", "compiler/build/bin/jhyy.exe"))
+JHYY = os.path.abspath("compiler/build/bin/jhyy_v1.exe")
 TEST_DIR = os.path.abspath("compiler/tests/examples")
 TIMEOUT = 10
 

@@ -3,6 +3,7 @@ compiler/build/*
 compiler/build/bin/*
 !compiler/build/bin/.gitkeep
 !compiler/build/bin/regress.py
+!compiler/build/bin/regress_v1.py
 _*.txt
 _*.py
 _*.s
