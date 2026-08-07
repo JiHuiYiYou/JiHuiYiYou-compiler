@@ -1070,9 +1070,20 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         } else if target_kind == NODE_IDENT() {
             let id = node_ident_data(target);
             let is_stack = cg_find_local_is_stack(cg_raw, (*id).sym);
-            let slot_buf = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-            let _found2 = cg_find_local(cg_raw, (*id).sym, (slot_buf as *u8));
-            let slot = slot_buf;
+            // v0 codegen bug 16 workaround (W-005): 不要 `let slot_buf = IRVal {...}` 然后
+            // `slot_buf as *u8` —— v0 codegen 把 IRVal literal 当 32-bit alloc,然后
+            // (slot_buf as *u8) 走 extsw 截断指针 → cg_find_local 收截断的 out_buf,
+            // 写野指针 → segfault。改走 arena_alloc(IRVAL_SIZE()) 拿 40 字节
+            // 的 heap buffer + field-level 读出 IRVal local。
+            let slot_buf_u8 = arena_alloc((*ir).arena, IRVAL_SIZE());
+            let _found2 = cg_find_local(cg_raw, (*id).sym, slot_buf_u8);
+            let slot = IRVal {
+                kind:     *(slot_buf_u8 as *i32),
+                id:       *(ptr_add_u8(slot_buf_u8, 4 as i64) as *i32),
+                ival:     *(ptr_add_u8(slot_buf_u8, 8 as i64) as *i64),
+                name:     *(ptr_add_u8(slot_buf_u8, 16 as i64) as **u8),
+                qbe_type: *(ptr_add_u8(slot_buf_u8, 24 as i64) as *i32),
+            };
             if is_stack != 0 {
                 let tgt_t = (*target).type_ptr;
                 if tgt_t != (0 as *u8) {
@@ -1100,9 +1111,16 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                     // 路径 1: 数组 + IDENT 标识符 → 直接用 stack slot
                     if is_array != 0 && (*idx_expr_node).kind == NODE_IDENT() {
                         let id = node_ident_data(idx_expr_node);
-                        let real_base_buf = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-                        let _found3 = cg_find_local(cg_raw, (*id).sym, (real_base_buf as *u8));
-                        let real_base = real_base_buf;
+                        // v0 codegen bug 16 workaround (W-005): 同 NODE_ASSIGN — arena_alloc + field-level read
+                        let real_base_buf_u8 = arena_alloc((*ir).arena, IRVAL_SIZE());
+                        let _found3 = cg_find_local(cg_raw, (*id).sym, real_base_buf_u8);
+                        let real_base = IRVal {
+                            kind:     *(real_base_buf_u8 as *i32),
+                            id:       *(ptr_add_u8(real_base_buf_u8, 4 as i64) as *i32),
+                            ival:     *(ptr_add_u8(real_base_buf_u8, 8 as i64) as *i64),
+                            name:     *(ptr_add_u8(real_base_buf_u8, 16 as i64) as **u8),
+                            qbe_type: *(ptr_add_u8(real_base_buf_u8, 24 as i64) as *i32),
+                        };
                         let idx_val = cg_expr(cg_raw, idx_index_node);
                         let offset2 = ir_new_tmp(ir, QBE_L());
                         let idx_index_kind = (*idx_index_node).kind;
@@ -1389,7 +1407,22 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             }
         }
         let elem_sz = type_size(elem_t_raw as *Type);
-        let base = cg_expr(cg_raw, base_node);
+        let mut base = cg_expr(cg_raw, base_node);
+        // Sprint 4.1 IL_ONLY #1: slice → load ptr from struct (slice = { ptr: l, len: l })
+        // working-tree slice index fix: base 是 slice struct 地址,byte-equal 要求 loadl offset 0
+        //   拿 ptr 再做 index + offset
+        if base_t_raw != (0 as *u8) {
+            let bt_slice = base_t_raw as *Type;
+            if (*bt_slice).kind == KIND_SLICE() {
+                let slice_ptr = ir_new_tmp(ir, QBE_L());
+                ir_emit_str(ir, "    %t" as *u8);
+                ir_emit_int(ir, "%d" as *u8, slice_ptr.id);
+                ir_emit_str(ir, " =l loadl %t" as *u8);
+                ir_emit_int(ir, "%d" as *u8, base.id);
+                ir_emit_str(ir, "\n" as *u8);
+                base = slice_ptr;
+            }
+        }
         // byte-equal v0 codegen.c:1007-1080 — 先 cg_expr(idx_node) emit 原 idx tmp (e.g. %t1 =w copy 25)
         //   再 ir_new_tmp(byte_off) → const-fold 或 extsw+mul。const-fold 不复用 idx_val tmp (next_tmp 递增),
         //   对齐 v0 codegen.c 路径: const_off = value * elem_sz emit 到新 tmp。
@@ -2020,6 +2053,77 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         return slot;
     }
 
+    if kind == NODE_ARRAY_LIT() {
+        let al = node_array_lit_data(n);
+        if (*n).type_ptr == (0 as *u8) {
+            return zero;
+        }
+        let at_arr = (*n).type_ptr as *Type;
+        if (*at_arr).kind != KIND_ARRAY() {
+            return zero;
+        }
+        let elem_t_arr = (*at_arr).elem;
+        let count_arr = (*at_arr).arr_count;
+        let elem_sz_arr = type_size(elem_t_arr as *Type);
+        let total_sz = count_arr * elem_sz_arr;
+        let mut slot_sz = total_sz as i32;
+        if slot_sz < 4 { slot_sz = 4; }
+        let slot = ir_new_tmp(ir, QBE_L());
+        ir_emit_alloc(ir, slot, slot_sz);
+        let arr_elems = (*al).elems;
+        let arr_n = (*al).nelems;
+        let mut i_arr: i64 = 0 as i64;
+        while i_arr < arr_n {
+            let e_slot_arr = ptr_add_u8(arr_elems, i_arr * (8 as i64)) as **Node;
+            let e_node_arr = *e_slot_arr;
+            let e_val = cg_expr(cg_raw, e_node_arr);
+            let off_arr = ir_new_int(i_arr * elem_sz_arr);
+            let elem_addr_arr = ir_new_tmp(ir, QBE_L());
+            ir_emit_binary(ir, elem_addr_arr, "add" as *u8, slot, off_arr);
+            let _ = cg_emit_store(cg_raw, elem_t_arr, e_val, elem_addr_arr);
+            i_arr = i_arr + (1 as i64);
+        }
+        return slot;
+    }
+
+    if kind == NODE_SLICE_LIT() {
+        let sl_lit = node_slice_lit_data(n);
+        if (*n).type_ptr == (0 as *u8) { return zero; }
+        let st_slice = (*n).type_ptr as *Type;
+        if (*st_slice).kind != KIND_SLICE() { return zero; }
+        let elem_t_sl = (*st_slice).elem;
+        let elem_sz_sl = type_size(elem_t_sl as *Type);
+        let al_inner = node_array_lit_data((*sl_lit).array as *Node);
+        let sl_n = (*al_inner).nelems;
+        let sl_elems = (*al_inner).elems;
+        let mut elem_buf_sz = (sl_n * elem_sz_sl) as i32;
+        if elem_buf_sz < 4 { elem_buf_sz = 4; }
+        let elem_buf = ir_new_tmp(ir, QBE_L());
+        ir_emit_alloc(ir, elem_buf, elem_buf_sz);
+        let mut isl: i64 = 0 as i64;
+        while isl < sl_n {
+            let es_slot = ptr_add_u8(sl_elems, isl * (8 as i64)) as **Node;
+            let es_node = *es_slot;
+            let es_val = cg_expr(cg_raw, es_node);
+            let off_sl = ir_new_int(isl * elem_sz_sl);
+            let es_addr = ir_new_tmp(ir, QBE_L());
+            ir_emit_binary(ir, es_addr, "add" as *u8, elem_buf, off_sl);
+            let _ = cg_emit_store(cg_raw, elem_t_sl, es_val, es_addr);
+            isl = isl + (1 as i64);
+        }
+        let slice_slot = ir_new_tmp(ir, QBE_L());
+        ir_emit_alloc(ir, slice_slot, 16 as i32);
+        let ptr_addr = ir_new_tmp(ir, QBE_L());
+        ir_emit_binary(ir, ptr_addr, "add" as *u8, slice_slot, ir_new_int(0 as i64));
+        let _s1 = cg_emit_store_primitive(cg_raw, 0 as *u8, elem_buf, ptr_addr);
+        let len_addr = ir_new_tmp(ir, QBE_L());
+        ir_emit_binary(ir, len_addr, "add" as *u8, slice_slot, ir_new_int(8 as i64));
+        let len_val = ir_new_tmp(ir, QBE_L());
+        ir_emit_copy(ir, len_val, sl_n);
+        let _s2 = cg_emit_store_primitive(cg_raw, 0 as *u8, len_val, len_addr);
+        return slice_slot;
+    }
+
     // ── NODE_ENUM_VARIANT (v0.9 wip commit 2.12b) ──
     // 对齐 v0 codegen.c:874-912:
     //   - alloc stack slot (size = et.size, min 4)
@@ -2099,9 +2203,16 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         let inner_kind = (*inner_node).kind;
         if inner_kind == NODE_IDENT() {
             let id = node_ident_data(inner_node);
-            let loc_buf = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-            let _found4 = cg_find_local(cg_raw, (*id).sym, (loc_buf as *u8));
-            let loc = loc_buf;
+            // v0 codegen bug 16 workaround (W-005): 同 NODE_ASSIGN — arena_alloc + field-level read
+            let loc_buf_u8 = arena_alloc((*ir).arena, IRVAL_SIZE());
+            let _found4 = cg_find_local(cg_raw, (*id).sym, loc_buf_u8);
+            let loc = IRVal {
+                kind:     *(loc_buf_u8 as *i32),
+                id:       *(ptr_add_u8(loc_buf_u8, 4 as i64) as *i32),
+                ival:     *(ptr_add_u8(loc_buf_u8, 8 as i64) as *i64),
+                name:     *(ptr_add_u8(loc_buf_u8, 16 as i64) as **u8),
+                qbe_type: *(ptr_add_u8(loc_buf_u8, 24 as i64) as *i32),
+            };
             let is_stack = cg_find_local_is_stack(cg_raw, (*id).sym);
             if is_stack != 0 {
                 return loc;  // already address
@@ -2125,6 +2236,27 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         let inner_v = cg_expr(cg_raw, inner_node);
         let src_t = (*inner_node).type_ptr;
         let dst_t = (*n).type_ptr;
+        // Sprint 4.2 mirror: array→slice cast — alloc 16-byte slot, store ptr at offset 0, len at offset 8
+        if src_t != (0 as *u8) && dst_t != (0 as *u8) {
+            let src_arr = src_t as *Type;
+            let dst_arr = dst_t as *Type;
+            if (*src_arr).kind == KIND_ARRAY() && (*dst_arr).kind == KIND_SLICE() {
+                if (*src_arr).elem == (*dst_arr).elem {
+                    let arr_count = (*src_arr).arr_count;
+                    let slice_slot = ir_new_tmp(ir, QBE_L());
+                    ir_emit_alloc(ir, slice_slot, 16 as i32);
+                    let ptr_addr_c = ir_new_tmp(ir, QBE_L());
+                    ir_emit_binary(ir, ptr_addr_c, "add" as *u8, slice_slot, ir_new_int(0 as i64));
+                    let _sc1 = cg_emit_store_primitive(cg_raw, 0 as *u8, inner_v, ptr_addr_c);
+                    let len_addr_c = ir_new_tmp(ir, QBE_L());
+                    ir_emit_binary(ir, len_addr_c, "add" as *u8, slice_slot, ir_new_int(8 as i64));
+                    let len_val_c = ir_new_tmp(ir, QBE_L());
+                    ir_emit_copy(ir, len_val_c, arr_count);
+                    let _sc2 = cg_emit_store_primitive(cg_raw, 0 as *u8, len_val_c, len_addr_c);
+                    return slice_slot;
+                }
+            }
+        }
         // W-009 fix: src_t==0（literal 没 type info）也走 coerce，cg_convert_arg 用
         //   arg.qbe_type 兜底。否则 `0 as *u8` no-op 成 `w copy 0`，比较 l 字段
         //   时 ceql 报 operand type 不匹配
