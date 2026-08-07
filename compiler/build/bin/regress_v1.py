@@ -35,6 +35,13 @@ def run_test(jhyy_file):
     name = os.path.splitext(os.path.basename(jhyy_file))[0]
     out_base = f"compiler/build/bin/_regress_{name}"
 
+    # Sprint 4.4 C: stale .exe hardening — 避免 stale cache 掩盖 jhyy_v1 cleanup crash
+    # (per project_sprint4_4_cleanup_crash_discovery.md). 每次测前清掉 _regress_X.exe.
+    for ext in (".il", ".s", ".exe"):
+        p = out_base + ext
+        if os.path.exists(p):
+            os.remove(p)
+
     # Read expected exit from comment if present
     expected = None
     has_main = False
