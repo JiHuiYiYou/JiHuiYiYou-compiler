@@ -7,7 +7,15 @@ import re
 
 JHYY_V1 = os.path.abspath(os.environ.get("JHYY_V1_BIN", "compiler/build/bin/jhyy_v1.exe.exe"))
 TEST_DIR = os.path.abspath("compiler/tests/examples")
+PROJECT_ROOT = os.path.abspath(".")
 TIMEOUT = 10
+
+def to_jhyy_arg(p):
+    """Convert path for jhyy_v1 invocation: backslash for absolute, relative for cwd-relative."""
+    p = os.path.abspath(p)
+    if p.startswith("C:"):
+        return p.replace("/", "\\")
+    return p
 
 def run_test(jhyy_file):
     name = os.path.splitext(os.path.basename(jhyy_file))[0]
@@ -34,9 +42,15 @@ def run_test(jhyy_file):
         except FileNotFoundError: pass
 
     try:
-        r = subprocess.run([JHYY_V1, "compile", jhyy_file, "-o", out_base],
+        # Use relative paths from cwd = project root. jhyy_v1 segfaults on
+        # absolute paths with forward slashes (buffer overflow in main.c
+        # path_to_win replacement), so feed it relative paths via cwd.
+        rel_jhyy = os.path.relpath(jhyy_file, PROJECT_ROOT)
+        rel_out = os.path.relpath(out_base, PROJECT_ROOT)
+        rel_jhyy_v1 = os.path.relpath(JHYY_V1, PROJECT_ROOT)
+        r = subprocess.run([rel_jhyy_v1, "compile", rel_jhyy, "-o", rel_out],
                            capture_output=True, text=True, timeout=20,
-                           encoding='utf-8', errors='replace')
+                           encoding='utf-8', errors='replace', cwd=PROJECT_ROOT)
     except subprocess.TimeoutExpired:
         return (False, expected, -4, "compile timeout")
 
@@ -47,9 +61,10 @@ def run_test(jhyy_file):
     if r.returncode != 0:
         err = (r.stderr or "").strip().split("\n")[0]
         return (False, expected, r.returncode, f"compile failed: {err[:120]}")
-    exe = os.path.abspath(out_base + ".exe")
+    exe = out_base + ".exe"
     if not os.path.exists(exe):
         return (False, expected, -2, "exe not created")
+    exe = os.path.relpath(exe, PROJECT_ROOT)
 
     try:
         r2 = subprocess.run([exe], capture_output=True, text=True, timeout=TIMEOUT,
