@@ -633,17 +633,27 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                     let callee_id = node_ident_data((*d).callee as *Node);
                     let fname = (*((*callee_id).sym as *Sym)).name;
                     if strcmp(fname, "len" as *u8) == (0 as i32) {
-                        let arg_t = infer_type(ctx, ta, (*d).args as *Node);
+                        // 取第一个 arg：同 line 660/724 模式（*((*d).args as i64 + 0*8) as **Node）
+                        let first_arg_ptr_ptr = ((*d).args as i64 + (0 as i64) * (8 as i64)) as **Node;
+                        let first_arg_node = *first_arg_ptr_ptr;
+                        let arg_t = infer_type(ctx, ta, first_arg_node);
                         if (*arg_t).kind == KIND_SLICE() {
-                            // 改写为 NODE_FIELD（field="len"）
-                            // 重用 n 的 memory，把 header kind 改 NODE_FIELD
-                            // 简化版：直接创建新 Node 再修改 n；jhyy 不允许这点
-                            // → 退化方案：直接 type_primitive(PRIM_I64())，调用方访问 s.len 时 codegen 走原路径
+                            // 改写 NODE_CALL → NODE_FIELD(s.len)：复用 n 的 memory (Node header 32B
+                            // + NodeField 16B 总 48B，原 NodeCall 24B 也 fit)
+                            (*n).kind = NODE_FIELD();
+                            let fd = node_field_data(n);
+                            (*fd).expr = first_arg_node as *u8;
+                            (*fd).field = "len" as *u8;
                             let t = type_primitive(ta, PRIM_I64());
                             (*n).type_ptr = t as *u8;
                             return t;
                         }
                         if (*arg_t).kind == KIND_ARRAY() {
+                            // 改写 NODE_CALL → NODE_INT(arr_count)
+                            (*n).kind = NODE_INT();
+                            let id = node_int_data(n);
+                            (*id).value = (*arg_t).arr_count;
+                            (*id).prim = PRIM_I64();
                             let t = type_primitive(ta, PRIM_I64());
                             (*n).type_ptr = t as *u8;
                             return t;

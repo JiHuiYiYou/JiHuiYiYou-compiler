@@ -527,3 +527,49 @@ regress.py (C 端): 50/53 passed, 0 failed, 3 skipped (持平 baseline, no regre
 **Baseline log**: `compiler/build/bin/_regress_v1_baseline_HEADv6.log` (55 行, 完整 PASS/FAIL 输出)
 
 **内存记录**: [[`project_sprint4_5_b_step2_baseline_lock.md`]](../../../../.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_sprint4_5_b_step2_baseline_lock.md)
+
+---
+
+### 2026-08-08 — v0.9 wip commit 2.42: Sprint 4.5 C step 1 ship — len() builtin fix (slice_iterate + slice_len)
+
+**Task**: 解 slice_iterate / slice_len 的 sema undef var bug (+2 PASS 杠杆).
+
+**根因** (2 处翻译层 bug):
+
+**Bug 1**: `src0/sema.jhyy:636` len() builtin 调用 `infer_type(ctx, ta, (*d).args as *Node)` — 错把 `**Node` args 数组当 `*Node` 传. 
+正确写法: `*(((*d).args as i64 + (0 as i64) * (8 as i64)) as **Node)` (同 line 660/724 模式).
+
+**Bug 2**: `src0/sema.jhyy:637-650` len() builtin 只设 type 但**不 rewrite node kind** — codegen 收到 NODE_CALL 但 len 不是 fn sym → fn_name="?" → QBE fail. 
+正确写法: rewrite NODE_CALL → NODE_FIELD(s.len) for KIND_SLICE / NODE_INT(arr_count) for KIND_ARRAY (对齐 v0 codegen.c:1206-1219).
+
+**Bug 3** (暴露 via fix 1+2): `src0/codegen.jhyy` NODE_FIELD case 不处理 KIND_SLICE — 之前只检查 KIND_POINTER + KIND_STRUCT, KIND_SLICE 时 struct_type_raw=0 → return zero → emit `%t0` (zero IRVal latent bug).
+正确写法: KIND_SLICE 走合成字段路径 (s.ptr = loadl base+0, s.len = loadl base+8), 对齐 v0 codegen.c:1206-1219.
+
+**修法** (~30 行):
+- `sema.jhyy` line 636 改 args[0] 取法 + KIND_SLICE/KIND_ARRAY 双 rewrite branch
+- `codegen.jhyy` NODE_FIELD 加 KIND_SLICE 早期返回 (before struct path), 跟 v0 codegen.c 一致
+
+**验收** (HEAD v7 binary sha `87ce6733803d34d9eb79fc0b6eb15319a9aa6ed50618f690df8da41d077974f2`):
+- slice_len.jhyy: 5/5 PASS EXIT=5
+- slice_iterate.jhyy: 5/5 PASS EXIT=60
+- regress.py (C 端): 50/53 持平
+- regress_v1.py (HEAD v7): **44/53 passed, 6 failed, 3 skipped** (前 HEAD v6: 42/53, +2)
+- 3x regress 跑稳定 44/53
+
+**6 fail 剩余** (下一步 sprint 4.5 C input):
+| Test | 根因 | 关联 task |
+|------|------|----------|
+| dungeon_game.jhyy | parser match-expr 缺 | Task #50 |
+| match.jhyy | parser match-expr 缺 | Task #50 |
+| slice_subrange.jhyy | codegen 缺 NODE_SLICE_RANGE | Task #146 BLOCKED |
+| float_cmp.jhyy | QBE "invalid type f<->i cmp" | step 2 |
+| import_test.jhyy | codegen AV | Task #43 |
+| namespace_dup.jhyy | codegen AV | Task #43 |
+
+**3 SKIP** (library, no main): mylib.jhyy, ns_dup_a.jhyy, ns_dup_b.jhyy
+
+**Baseline log**: `compiler/build/bin/_regress_v1_baseline_v7.log`
+
+**Binary saved**: `compiler/build/bin/jhyy_v1_v7.exe.exe` sha `87ce6733803d34d9eb79fc0b6eb15319a9aa6ed50618f690df8da41d077974f2`
+
+**Timeline 校准**: 42 → 44 (+2 PASS). 下一步 Sprint 4.5 C step 2 (QBE float_cmp type) 估 +1 → 45.

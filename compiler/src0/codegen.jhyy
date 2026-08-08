@@ -1481,8 +1481,28 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         let nf = node_field_data(n);
         let target_node = (*nf).expr as *Node;
         let field_name = (*nf).field;
-        let base = cg_expr(cg_raw, target_node);
         let target_t = (*target_node).type_ptr;
+        // KIND_SLICE: 合成字段 ptr (off 0) / len (off 8). slice value 是 16-byte stack slot
+        if target_t != (0 as *u8) {
+            let tt = target_t as *Type;
+            if (*tt).kind == KIND_SLICE() {
+                let slot_sl = cg_expr(cg_raw, target_node);
+                if strcmp(field_name, "ptr" as *u8) == (0 as i32) {
+                    let vp = ir_new_tmp(ir, QBE_L());
+                    let _lp = ir_emit_load(ir, vp, QBE_L(), slot_sl);
+                    return vp;
+                }
+                if strcmp(field_name, "len" as *u8) == (0 as i32) {
+                    let off8_sl = ir_new_tmp(ir, QBE_L());
+                    let _al = ir_emit_binary(ir, off8_sl, "add" as *u8, slot_sl, ir_new_int(8 as i64));
+                    let vl = ir_new_tmp(ir, QBE_L());
+                    let _ll = ir_emit_load(ir, vl, QBE_L(), off8_sl);
+                    return vl;
+                }
+                return zero;
+            }
+        }
+        let base = cg_expr(cg_raw, target_node);
         if target_t == (0 as *u8) {
             return zero;
         }
