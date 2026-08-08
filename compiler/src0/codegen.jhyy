@@ -2153,6 +2153,27 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         return slice_slot;
     }
 
+    // ── NODE_SLICE_RANGE (Sprint 4.7 / Task #146 minimal stub) ──
+    // 完整实现触发 v0 codegen bug (next_tmp 不递增 → 后续 cg_expr IRVal 字段被覆盖) → jhyy_v1 编 main.jhyy 报 QBE `\0 %t0`。
+    // 简化策略: alloc 16-byte slot + 填 ptr=0 + len=0 (返回 NULL slice),QBE 不会报 "read but never stored to"。
+    // 运行时 slice_subrange.jhyy 拿到的 sub = NULL slice → sub[0]+sub[2] 仍会 AV,但 regress_v1 slice_subrange 行为保持 baseline (compile OK + runtime AV)。
+    // 完整功能等 post-W-005 真修后再补 (参考 Sprint 4.6 IRVal layout fix 之后的下一次 codegen.c 修)。
+    if kind == NODE_SLICE_RANGE() {
+        let slot = ir_new_tmp(ir, QBE_L());
+        ir_emit_alloc(ir, slot, 16 as i32);
+        let zero_l = ir_new_tmp(ir, QBE_L());
+        ir_emit_copy(ir, zero_l, 0 as i64);
+        let _st1 = cg_emit_store_primitive(cg_raw, 0 as *u8, zero_l, slot);
+        let off8 = ir_new_tmp(ir, QBE_L());
+        ir_emit_str(ir, "    %t" as *u8);
+        ir_emit_int(ir, "%d" as *u8, off8.id);
+        ir_emit_str(ir, " =l add %t" as *u8);
+        ir_emit_int(ir, "%d" as *u8, slot.id);
+        ir_emit_str(ir, ", 8\n" as *u8);
+        let _st2 = cg_emit_store_primitive(cg_raw, 0 as *u8, zero_l, off8);
+        return slot;
+    }
+
     // ── NODE_ENUM_VARIANT (v0.9 wip commit 2.12b) ──
     // 对齐 v0 codegen.c:874-912:
     //   - alloc stack slot (size = et.size, min 4)
