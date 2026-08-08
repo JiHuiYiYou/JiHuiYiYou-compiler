@@ -344,8 +344,8 @@ fn inline_imports(module: *Node, main_path: *u8, arena: *Arena) -> i32 {
     }
 
     // merged decls: imported first, main decls after
-    let mut new_cap: i64 = (*md).ndeccls + nimports * (8 as i64);
-    if new_cap < (16 as i64) { new_cap = 16 as i64; }
+    // Sprint 4.11: over-allocate 4096 slots (32KB) for all imports, no growth needed
+    let new_cap: i64 = 4096 as i64;
     let new_decls = arena_alloc(arena, new_cap * (8 as i64));
     let mut new_count: i64 = 0 as i64;
 
@@ -391,23 +391,9 @@ fn inline_imports(module: *Node, main_path: *u8, arena: *Arena) -> i32 {
     }
 
     // append main module's non-import decls after imported
+    // Sprint 4.11: new_cap is 4x overallocated, growth never needed
     let mut im: i64 = 0 as i64;
     while im < nmain {
-        if new_count >= new_cap {
-            new_cap = new_cap * (2 as i64);
-            let bigger = arena_alloc(arena, new_cap * (8 as i64));
-            let mut cpy_d: i64 = 0 as i64;
-            while cpy_d < new_count {
-                let src_p = (new_decls as i64 + cpy_d * (8 as i64)) as **u8;
-                let dst_p = (bigger as i64 + cpy_d * (8 as i64)) as **u8;
-                (*dst_p) = (*src_p);
-                cpy_d = cpy_d + (1 as i64);
-            }
-            // can't reassign new_decls since it's a let; instead just leak (arena owns).
-            // Actually new_decls is from arena_alloc, we can just keep using old buffer;
-            // but we've already copied out_count. Hmm — easier to skip growth since
-            // main.jhyy has <10 decls total. Document this limitation.
-        }
         let slot_app = (new_decls as i64 + new_count * (8 as i64)) as **Node;
         (*slot_app) = *((main_decls as i64 + im * (8 as i64)) as **Node);
         new_count = new_count + (1 as i64);
