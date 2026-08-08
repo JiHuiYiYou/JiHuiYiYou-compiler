@@ -24,7 +24,7 @@
 
 回归基线：
 - **jhyy_0 (C 编译) regress**: **50/53 passed, 0 failed, 3 skipped**（3 skipped 是库文件，无 `main_jhyy`）
-- **jhyy_v1 (自举) regress_v1**: **45/53 passed, 5 failed, 3 skipped**（Sprint 4.5 C step 2 commit 2.43 — cg_convert_arg unreachable D→S 分支修 (literal f64 → f32 compare 触发)；HEAD v8 binary sha 09de6d48...；+1 PASS 来自 float_cmp；5 fail 剩余：dungeon_game/match (Task #50) + slice_subrange (Task #146) + import_test/namespace_dup (Task #43)）
+- **jhyy_v1 (自举) regress_v1**: **47/53 passed, 3 failed, 3 skipped**（Sprint 4.5 C step 3 commit 2.44 — parse_expr inline match-as-expression dispatch (literal int + wildcard + ident binding)；HEAD v9 binary sha 85f1df8430a5f4cd...；+2 PASS 来自 match + dungeon_game；3 fail 剩余：slice_subrange (Task #146) + import_test/namespace_dup (Task #43)）
 - **stage1 byte-equal**: **6/7 PASS 持平 baseline**（v0.9 wip commit 2.17 ship；const_array 失败是 pre-existing Task #52）
 
 ---

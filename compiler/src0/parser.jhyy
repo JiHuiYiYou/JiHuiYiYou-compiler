@@ -668,6 +668,98 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
 
         left = ast_new_if((*p).arena, loc_lf, loc_ll, loc_lc, ifx_cond, ifx_then_body, ifx_else_body);
     }
+    else if t.kind == TOKEN_MATCH() {
+        /* match-as-expression（Sprint 4.5 C step 3a）：
+         *   let result = match x { 1 => 10, 2 => 20, _ => 0 };
+         * jhyy 无 forward reference（parse_match 定义在 parse_expr 之后），
+         * 所以不能调 parse_match。这里 inline 一份 match 解析。
+         * 模式只支持 literal int + wildcard（match.jhyy + dungeon_game.jhyy 触发面已足）；
+         * enum/range/binding pattern 走原 parse_match。*/
+        parser_advance(p, &t);  // consume 'match'
+        let mx_subj = parse_expr(p, PREC_NONE());
+        parser_expect(p, TOKEN_LBRACE(), "{ after match subject" as *u8, &t);
+
+        let mut mx_arms: *u8 = 0 as *u8;
+        let mut mx_narms: i64 = 0 as i64;
+        let mut mx_cap: i64 = 0 as i64;
+
+        while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+            if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+
+            // inline minimal pattern: literal int (TOKEN_INT) + wildcard (single-char '_' ident)
+            let mut mx_pat: *Node = 0 as *Node;
+            let mut pt = empty_token();
+            parser_peek(p, &pt);
+            let p_lf = pt.loc_filename;
+            let p_ll = pt.loc_line;
+            let p_lc = pt.loc_col;
+
+            if pt.kind == TOKEN_INT() {
+                parser_advance(p, &pt);
+                let pval = strtoll(pt.start, 0 as *u8, 0 as i32);
+                mx_pat = ast_new_pattern_lit((*p).arena, p_lf, p_ll, p_lc, pval, PRIM_I32());
+            } else if pt.kind == TOKEN_IDENT() {
+                // check wildcard '_' (single-char ident)
+                let mut is_wild = 0 as i32;
+                if pt.length == (1 as i64) {
+                    let p_addr = pt.start as i64;
+                    let aligned = p_addr & (~(3 as i64));
+                    let rem = (p_addr - aligned) as i32;
+                    let w = *((aligned) as *i32);
+                    let shift = rem * (8 as i32);
+                    let c0 = (w >> shift) & (255 as i32);
+                    if c0 == (95 as i32) {
+                        is_wild = 1 as i32;
+                    }
+                }
+                if is_wild != (0 as i32) {
+                    parser_advance(p, &pt);
+                    mx_pat = ast_new_pattern_wild((*p).arena, p_lf, p_ll, p_lc);
+                } else {
+                    // ident binding fallback（parse_pattern forward ref 限制下最简实现）
+                    parser_advance(p, &pt);
+                    let iname = arena_strdup((*p).arena, pt.start, pt.length);
+                    let mut isym = symtab_lookup((*p).current_scope, iname);
+                    if isym == (0 as *Sym) {
+                        isym = symtab_insert((*p).current_scope, iname, SYM_VAR(),
+                                             0 as *u8, 0 as i32, (*p).scope_depth);
+                    }
+                    mx_pat = ast_new_pattern_ident((*p).arena, p_lf, p_ll, p_lc, isym);
+                }
+            } else {
+                jh_print_loc_stderr(p_lf, p_ll, p_lc);
+                jh_fputs_stderr("error: unexpected token in match pattern\n" as *u8);
+                (*p).error_count = (*p).error_count + (1 as i32);
+                parser_advance(p, &pt);
+                mx_pat = 0 as *Node;  // type-anchor: 让 if/else chain 末表达式类型一致
+            }
+
+            parser_expect(p, TOKEN_FATARROW(), "=>" as *u8, &t);
+            let mx_body = parse_expr(p, PREC_NONE());
+
+            // optional trailing comma
+            let _mx_c = parser_match(p, TOKEN_COMMA(), &t);
+
+            let mx_arm = ast_new_match_arm((*p).arena, loc_lf, loc_ll, loc_lc, mx_pat, mx_body);
+
+            if mx_narms >= mx_cap {
+                mx_cap = if mx_cap != (0 as i64) { mx_cap * (2 as i64) } else { (8 as i64) };
+                let mna = arena_alloc((*p).arena, mx_cap * (8 as i64));
+                if mx_arms != (0 as *u8) {
+                    if mx_narms > (0 as i64) {
+                        memcpy(mna, mx_arms, mx_narms * (8 as i64));
+                    }
+                }
+                mx_arms = mna;
+            }
+            let mslot = (mx_arms as i64 + mx_narms * (8 as i64)) as **Node;
+            *mslot = mx_arm;
+            mx_narms = mx_narms + (1 as i64);
+        }
+
+        parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
+        left = ast_new_match((*p).arena, loc_lf, loc_ll, loc_lc, mx_subj, mx_arms, mx_narms);
+    }
     else if t.kind == TOKEN_LBRACKET() {
         // array literal: [1, 2, 3]
         parser_advance(p, &t);

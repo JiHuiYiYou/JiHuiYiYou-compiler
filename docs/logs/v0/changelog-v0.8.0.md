@@ -625,3 +625,59 @@ D→S (f64→f32) 在 binop `a > 1.0` (`a: f32`, literal `1.0` 默认 f64) 触�
 **Binary saved**: `compiler/build/bin/jhyy_v1_v8.exe.exe` sha `09de6d48aa882c8c51e7f2e889cb83daf4aa117e9cb192d1ee4296f1d0a5396a`
 
 **Timeline 校准**: 44 → 45 (+1 PASS). 1-line fix 模式第 5 连命中 (commit 2.31/2.36/2.40/2.42/**2.43**). 下一步 Sprint 4.5 C step 3 (Task #50 match-expr × 2) 估 +2 → 47.
+
+---
+
+### 2026-08-08 — v0.9 wip commit 2.44: Sprint 4.5 C step 3 ship — parse_expr inline match-as-expression (+2 PASS)
+
+**Task**: 解 match.jhyy + dungeon_game.jhyy 的 PARSE 阶段 `unexpected token ',' in expression` 错 (Task #50 = CERR big 4 中的 2 个).
+
+**根因** (`src0/parser.jhyy` parse_expr prefix dispatch):
+
+parse_expr 无 TOKEN_MATCH dispatch (C-side parser.c:615 有 `if check(p, TOKEN_MATCH) return parse_match(p);`). jhyy 无 forward ref (parse_match 定义在 parse_expr 之后, 见 line 286 注释), 不能调 parse_match. parse_expr 见到 `match` token 走不到 → 把 `,` 当意外 token 报错.
+
+**修法** (~92 行, src0/parser.jhyy + build/bin/parser.jhyy dual-source):
+
+在 parse_expr prefix dispatch `else if t.kind == TOKEN_LBRACKET() {` 前插入 `else if t.kind == TOKEN_MATCH() {`:
+
+1. consume 'match'
+2. parse_expr (subject) 走 PREC_NONE()
+3. expect '{'
+4. while not '}', 循环:
+   - inline minimal pattern parser:
+     - TOKEN_INT → ast_new_pattern_lit (PRIM_I32)
+     - TOKEN_IDENT + 单字符 `_` → ast_new_pattern_wild
+     - TOKEN_IDENT else → ast_new_pattern_ident (binding fallback)
+     - 其他 token → error + advance + **mx_pat = 0 as *Node** (type-anchor 让 if/else chain 末表达式类型一致, 避免 sema "if/else branches must have same type: () vs i32")
+   - expect '=>'
+   - parse_expr (body)
+   - optional ','
+   - ast_new_match_arm → growable array (8 → 16 → 32)
+5. expect '}'
+6. left = ast_new_match(...)
+
+**Type-anchor 小坑**: 第一版缺 `mx_pat = 0 as *Node;` 在 error 分支末尾 → sema 报 "if/else branches must have same type: () vs i32" 在 parser.jhyy:701:20 (TOKEN_INT 分支 `mx_pat = ast_new_pattern_lit(...)` 末表达式 `*Node` vs error 分支 `parser_advance(p, &pt)` 末表达式 `i32`).
+
+**为什么 inline 不用 parse_pattern**: parse_pattern (line 981) 也在 parse_expr 之后定义, mutual recursion + 无 forward ref = 不能调. match.jhyy + dungeon_game.jhyy 都只用 literal int + wildcard 模式, 内联足够 (enum/range/binding binding 分支走 fallback path).
+
+**验收** (HEAD v9 binary sha `85f1df8430a5f4cd38951b61204d88cb03250256ad0fd4fac408e917a3a291c9`):
+- match.jhyy: 5/5 PASS EXIT=20 (x=2 → result=20)
+- dungeon_game.jhyy: 5/5 PASS EXIT=0 (游戏跑完成功逃出地牢)
+- regress.py (C 端): 50/53 持平
+- regress_v1.py (HEAD v9): **47/53 passed, 3 failed, 3 skipped** (前 HEAD v8: 45/53, +2)
+- 3x regress 跑稳定 47/53
+
+**3 fail 剩余** (下一步 sprint 4.5 C-extension input):
+| Test | 根因 | 关联 task |
+|------|------|----------|
+| slice_subrange.jhyy | codegen 缺 NODE_SLICE_RANGE | Task #146 BLOCKED |
+| import_test.jhyy | codegen AV (多文件 import) | Task #43 |
+| namespace_dup.jhyy | codegen AV (命名空间 dup) | Task #43 |
+
+**3 SKIP** (library, no main): mylib.jhyy, ns_dup_a.jhyy, ns_dup_b.jhyy
+
+**Baseline log**: `compiler/build/bin/_regress_v1_v9.log`
+
+**Binary saved**: `compiler/build/bin/jhyy_v1_v9.exe.exe` sha `85f1df8430a5f4cd38951b61204d88cb03250256ad0fd4fac408e917a3a291c9`
+
+**Timeline 校准**: 45 → 47 (+2 PASS). 1-line fix 模式 (这步不算 1-line, 是 92 行 inline parser, 但 root cause 简洁). 下一步 Sprint 4.5 C step 4 (Task #146 IRVal kind dispatch) 估 +1 → 48, sprint 4.6 (Task #43 × 2) → 50.
