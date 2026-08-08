@@ -17,12 +17,14 @@
 > - **v0.9 wip commit 2.17**（C' codegen 确定性 audit — 5 维度全 by-construction deterministic, 0 真修, 3 stage1 测试 byte-equal 实证）
 >
 > v0.8 wip commit 12 是 v0.9 前一版（12 commits → Stage 0 closure 解锁）。v0.7.0 是更前版（7A enum first-class + 7B 顶层 const 数组）。
+>>
+>> **v0.8 wip commit 2.42-2.43**（Sprint 4.5 C ship）：len() builtin 3 处翻译层 bug 修 (commit 2.42) + cg_convert_arg unreachable D→S 分支修 (commit 2.43)。jhyy_v1 regress_v1 **44 → 45** (+2/+1)，回归持平。
 >
 > **完成定义校准**：原"jhyy_v1 推到 47/47 = M4 真自举闭环"目标在 v0.8 wip commit 6 重新校准为"持平 baseline（12 OK 持平即可）" — 详见 [`docs/plans/v0/v0.8.0任务清单 + 概要设计.md`](../plans/v0/v0.8.0任务清单 + 概要设计.md) § 完成定义校准。v0.9 wip 沿用同一基准 (regress 50/53 PASS + stage1 byte-equal 6/7 持平) + 加 2 个 audit 维度 (AUDIT + C')。下一阶段 v1.0 sprint 3 = Task #52 / B (resolve_imports 翻译) / Task #61 / W-004 verification / D。
 
 回归基线：
 - **jhyy_0 (C 编译) regress**: **50/53 passed, 0 failed, 3 skipped**（3 skipped 是库文件，无 `main_jhyy`）
-- **jhyy_v1 (自举) regress_v1**: **44/53 passed, 6 failed, 3 skipped**（Sprint 4.5 C step 1 commit 2.42 — len() builtin fix (sema + codegen 双修)；HEAD v7 binary sha 87ce6733...；+2 PASS 来自 slice_iterate / slice_len；6 fail 诊断详 changelog-v0.8.0.md 末尾）
+- **jhyy_v1 (自举) regress_v1**: **45/53 passed, 5 failed, 3 skipped**（Sprint 4.5 C step 2 commit 2.43 — cg_convert_arg unreachable D→S 分支修 (literal f64 → f32 compare 触发)；HEAD v8 binary sha 09de6d48...；+1 PASS 来自 float_cmp；5 fail 剩余：dungeon_game/match (Task #50) + slice_subrange (Task #146) + import_test/namespace_dup (Task #43)）
 - **stage1 byte-equal**: **6/7 PASS 持平 baseline**（v0.9 wip commit 2.17 ship；const_array 失败是 pre-existing Task #52）
 
 ---

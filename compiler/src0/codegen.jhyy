@@ -604,18 +604,26 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
     }
     // v0 codegen bug 2 workaround: 避免 &&/|| 嵌套 short-circuit (nested phi predecessor mismatch)
     // 改成 nested if-else，无短路
+    // Sprint 4.5 C step 2 fix (float_cmp): D→S case was unreachable
+    //   (above if src_qt==D matched first; inner QBE_W/L only — no QBE_S case).
+    //   Add explicit QBE_S branch so f64→f32 truncd emits correctly.
+    //   S→D exts branch already in dedicated else-if below; mirror here for src_qt==S.
     let mut conv: *u8 = 0 as *u8;
     if src_qt == QBE_D() {
         if dst_qt == QBE_W() {
             conv = "dtosi" as *u8;
         } else if dst_qt == QBE_L() {
             conv = "dtosl" as *u8;
+        } else if dst_qt == QBE_S() {
+            conv = "truncd" as *u8;
         }
     } else if src_qt == QBE_S() {
         if dst_qt == QBE_W() {
             conv = "stosi" as *u8;
         } else if dst_qt == QBE_L() {
             conv = "stosl" as *u8;
+        } else if dst_qt == QBE_D() {
+            conv = "exts" as *u8;
         }
     } else if dst_qt == QBE_D() {
         if src_qt == QBE_L() {
@@ -628,14 +636,6 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
             conv = "ultof" as *u8;
         } else if src_qt == QBE_W() {
             conv = "uwtof" as *u8;
-        }
-    } else if src_qt == QBE_S() {
-        if dst_qt == QBE_D() {
-            conv = "exts" as *u8;
-        }
-    } else if src_qt == QBE_D() {
-        if dst_qt == QBE_S() {
-            conv = "truncd" as *u8;
         }
     } else if src_qt == QBE_W() {
         // W-007 fix (v0.8 bug 11 analog): i32→i64 sign-extend via extsw

@@ -573,3 +573,55 @@ regress.py (C 端): 50/53 passed, 0 failed, 3 skipped (持平 baseline, no regre
 **Binary saved**: `compiler/build/bin/jhyy_v1_v7.exe.exe` sha `87ce6733803d34d9eb79fc0b6eb15319a9aa6ed50618f690df8da41d077974f2`
 
 **Timeline 校准**: 42 → 44 (+2 PASS). 下一步 Sprint 4.5 C step 2 (QBE float_cmp type) 估 +1 → 45.
+
+---
+
+### 2026-08-08 — v0.9 wip commit 2.43: Sprint 4.5 C step 2 ship — cg_convert_arg D→S truncd 修 (float_cmp)
+
+**Task**: 解 float_cmp.jhyy 的 f32 compare literal f64 类型不匹配 (+1 PASS 杠杆).
+
+**根因** (codegen.jhyy:608 附近 `cg_convert_arg` unreachable 分支):
+
+`cg_convert_arg` 的 conv 选择 if-else 顺序漏:
+```jhyy
+// BEFORE (Sprint 4.5 C step 2 之前):
+if src_qt == QBE_D() {       // f64→xxx 入口
+    if dst_qt == QBE_W() { conv = "dtosi"; }
+    else if dst_qt == QBE_L() { conv = "dtosl"; }
+    // ← 缺: dst_qt == QBE_S() → conv = "truncd"
+}
+else if src_qt == QBE_S() { ... }
+else if src_qt == QBE_D() {  // unreachable for f64→f32!
+    if dst_qt == QBE_S() { conv = "truncd"; }
+}
+```
+
+D→S (f64→f32) 在 binop `a > 1.0` (`a: f32`, literal `1.0` 默认 f64) 触发 — 字面量 sema 固定 f64 (sema.jhyy:440), `cg_convert_arg` 收 `src_qt=D, dst_qt=S`, 进入 QBE_D 分支后内层只匹配 W/L → **未设置 conv** → fall through `return arg` → 直接发 `cgts %t%(s), %t%(d)` → QBE "invalid type for second operand ... in cgts".
+
+**修法** (~5 行):
+- `cg_convert_arg` QBE_D 分支加 QBE_S case (truncd)
+- QBE_S 分支加 QBE_D case (exts) — 镜像修复, 原本在 unreachable else-if 段
+- 删除原 D→S unreachable 段 (line 636)
+
+**验收** (HEAD v8 binary sha `09de6d48aa882c8c51e7f2e889cb83daf4aa117e9cb192d1ee4296f1d0a5396a`):
+- float_cmp.jhyy: 5/5 PASS EXIT=42
+- regress.py (C 端): 50/53 持平
+- regress_v1.py (HEAD v8): **45/53 passed, 5 failed, 3 skipped** (前 HEAD v7: 44/53, +1)
+- 3x regress 跑稳定 45/53
+
+**5 fail 剩余** (下一步 sprint 4.5 C input):
+| Test | 根因 | 关联 task |
+|------|------|----------|
+| dungeon_game.jhyy | parser match-expr 缺 | Task #50 |
+| match.jhyy | parser match-expr 缺 | Task #50 |
+| slice_subrange.jhyy | codegen 缺 NODE_SLICE_RANGE | Task #146 BLOCKED |
+| import_test.jhyy | codegen AV | Task #43 |
+| namespace_dup.jhyy | codegen AV | Task #43 |
+
+**3 SKIP** (library, no main): mylib.jhyy, ns_dup_a.jhyy, ns_dup_b.jhyy
+
+**Baseline log**: `compiler/build/bin/_regress_v1_v8.log`
+
+**Binary saved**: `compiler/build/bin/jhyy_v1_v8.exe.exe` sha `09de6d48aa882c8c51e7f2e889cb83daf4aa117e9cb192d1ee4296f1d0a5396a`
+
+**Timeline 校准**: 44 → 45 (+1 PASS). 1-line fix 模式第 5 连命中 (commit 2.31/2.36/2.40/2.42/**2.43**). 下一步 Sprint 4.5 C step 3 (Task #50 match-expr × 2) 估 +2 → 47.
