@@ -5,6 +5,8 @@
 版本号对应 jhyy 编译器自身版本（目标 v1.0.0 = 真自举闭环，定义为 `.il byte-equal`）：
 - `v1.0.0任务清单 + 概要设计.md` — v1.0.0 总览（粗粒度 5 sprint）
 - `v1.0.0详细实现方案.md`
+- `v1.0-sprint-3-launch.md` — v1.0 sprint 3 5 task 粗粒度合并 (v0.9 wip commit 2.18 视角, 部分过期)
+- `v1.0-post-50-53-plan.md` — **当前活跃**: 50/53 → byte-equal Stage 2 → v2.x || v3.x 完整计划 (commit 2.47 视角)
 
 C 端编译器 sprint 计划 → [`../v0/`](../v0/)
 
