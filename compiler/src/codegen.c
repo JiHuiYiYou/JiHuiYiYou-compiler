@@ -14,7 +14,7 @@ static void emit_mangled_name(IRBuf *ir, Sym *sym) {
 }
 
 /* ── side table: map Sym* → IRVal for local vars ── */
-#define MAX_LOCALS 512
+#define MAX_LOCALS 1024
 #define MAX_LOOP_DEPTH 32
 typedef struct {
     Sym  *sym;

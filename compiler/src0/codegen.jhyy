@@ -2153,24 +2153,87 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         return slice_slot;
     }
 
-    // ── NODE_SLICE_RANGE (Sprint 4.7 / Task #146 minimal stub) ──
-    // 完整实现触发 v0 codegen bug (next_tmp 不递增 → 后续 cg_expr IRVal 字段被覆盖) → jhyy_v1 编 main.jhyy 报 QBE `\0 %t0`。
-    // 简化策略: alloc 16-byte slot + 填 ptr=0 + len=0 (返回 NULL slice),QBE 不会报 "read but never stored to"。
-    // 运行时 slice_subrange.jhyy 拿到的 sub = NULL slice → sub[0]+sub[2] 仍会 AV,但 regress_v1 slice_subrange 行为保持 baseline (compile OK + runtime AV)。
-    // 完整功能等 post-W-005 真修后再补 (参考 Sprint 4.6 IRVal layout fix 之后的下一次 codegen.c 修)。
+    // ── NODE_SLICE_RANGE (Sprint 4.8 full impl, W-006 MAX_LOCALS fix) ──
+    // 对齐 v0 codegen.c:1139-1200。
     if kind == NODE_SLICE_RANGE() {
+        let sr = node_slice_range_data(n);
+        let base_node = (*sr).base as *Node;
+        let start_node = (*sr).start as *Node;
+        let end_node = (*sr).end as *Node;
+        let base_t_raw = (*base_node).type_ptr;
+        if base_t_raw == (0 as *u8) { return zero; }
+        let bt = base_t_raw as *Type;
+        let is_slice: i64 = if (*bt).kind == KIND_SLICE() { 1 as i64 } else { 0 as i64 };
+        let mut elem_t_raw: *u8 = 0 as *u8;
+        if (*bt).kind == KIND_SLICE() { elem_t_raw = (*bt).elem; } else { elem_t_raw = (*bt).elem; }
+        if elem_t_raw == (0 as *u8) { return zero; }
+        let elem_sz = type_size(elem_t_raw as *Type);
+        let mut elem_sz_eff = elem_sz;
+        if elem_sz_eff < (4 as i64) { elem_sz_eff = 4 as i64; }
+
+        // base: ptr to first element
+        let mut base = ir_new_tmp(ir, QBE_L());
+        if is_slice != (0 as i64) {
+            let slice_addr = cg_expr(cg_raw, base_node);
+            ir_emit_str(ir, "    %t" as *u8); ir_emit_int(ir, "%d" as *u8, base.id);
+            ir_emit_str(ir, " =l loadl %t" as *u8); ir_emit_int(ir, "%d" as *u8, slice_addr.id);
+            ir_emit_str(ir, "\n" as *u8);
+        }
+        if is_slice == (0 as i64) { base = cg_expr(cg_raw, base_node); }
+
+        // start_off = start * elem_sz_eff
+        let start_v = cg_expr(cg_raw, start_node);
+        let start_off = ir_new_tmp(ir, QBE_L());
+        if (*start_node).kind == NODE_INT() {
+            let sv = (*(node_int_data(start_node))).value;
+            ir_emit_copy(ir, start_off, sv * elem_sz_eff);
+        } else {
+            let mut start64 = start_v;
+            if start_v.qbe_type != QBE_L() {
+                start64 = ir_new_tmp(ir, QBE_L());
+                ir_emit_str(ir, "    %t" as *u8); ir_emit_int(ir, "%d" as *u8, start64.id);
+                ir_emit_str(ir, " =l extsw %t" as *u8); ir_emit_int(ir, "%d" as *u8, start_v.id);
+                ir_emit_str(ir, "\n" as *u8);
+            }
+            ir_emit_binary(ir, start_off, "mul" as *u8, start64, ir_new_int(elem_sz_eff));
+        }
+
+        // new_ptr = base + start_off
+        let new_ptr = ir_new_tmp(ir, QBE_L());
+        ir_emit_binary(ir, new_ptr, "add" as *u8, base, start_off);
+
+        // new_len = end - start
+        let end_v = cg_expr(cg_raw, end_node);
+        let new_len = ir_new_tmp(ir, QBE_L());
+        if (*start_node).kind == NODE_INT() && (*end_node).kind == NODE_INT() {
+            let sv2 = (*(node_int_data(start_node))).value;
+            let ev = (*(node_int_data(end_node))).value;
+            ir_emit_copy(ir, new_len, ev - sv2);
+        } else {
+            let mut end64 = end_v;
+            if end_v.qbe_type != QBE_L() {
+                end64 = ir_new_tmp(ir, QBE_L());
+                ir_emit_str(ir, "    %t" as *u8); ir_emit_int(ir, "%d" as *u8, end64.id);
+                ir_emit_str(ir, " =l extsw %t" as *u8); ir_emit_int(ir, "%d" as *u8, end_v.id);
+                ir_emit_str(ir, "\n" as *u8);
+            }
+            let mut start64b = start_v;
+            if start_v.qbe_type != QBE_L() {
+                start64b = ir_new_tmp(ir, QBE_L());
+                ir_emit_str(ir, "    %t" as *u8); ir_emit_int(ir, "%d" as *u8, start64b.id);
+                ir_emit_str(ir, " =l extsw %t" as *u8); ir_emit_int(ir, "%d" as *u8, start_v.id);
+                ir_emit_str(ir, "\n" as *u8);
+            }
+            ir_emit_binary(ir, new_len, "sub" as *u8, end64, start64b);
+        }
+
+        // alloc 16-byte slice slot, store ptr + len
         let slot = ir_new_tmp(ir, QBE_L());
         ir_emit_alloc(ir, slot, 16 as i32);
-        let zero_l = ir_new_tmp(ir, QBE_L());
-        ir_emit_copy(ir, zero_l, 0 as i64);
-        let _st1 = cg_emit_store_primitive(cg_raw, 0 as *u8, zero_l, slot);
+        let _sp = cg_emit_store_primitive(cg_raw, 0 as *u8, new_ptr, slot);
         let off8 = ir_new_tmp(ir, QBE_L());
-        ir_emit_str(ir, "    %t" as *u8);
-        ir_emit_int(ir, "%d" as *u8, off8.id);
-        ir_emit_str(ir, " =l add %t" as *u8);
-        ir_emit_int(ir, "%d" as *u8, slot.id);
-        ir_emit_str(ir, ", 8\n" as *u8);
-        let _st2 = cg_emit_store_primitive(cg_raw, 0 as *u8, zero_l, off8);
+        ir_emit_binary(ir, off8, "add" as *u8, slot, ir_new_int(8 as i64));
+        let _sl = cg_emit_store_primitive(cg_raw, 0 as *u8, new_len, off8);
         return slot;
     }
 
