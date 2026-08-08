@@ -11,14 +11,23 @@ typedef enum {
     IRVAL_BLOCK,   /* @name — block label */
 } IRValKind;
 
+/* IRVal layout MUST match jhyy-side type IRVal = struct { kind: i32, id: i32,
+   ival: i64, name: *u8, qbe_type: i32 }. v0 emits jhyy struct literal field
+   writes at jhyy-specified offsets but emits C struct field accesses using THIS
+   struct's offsets. If they disagree (e.g. id @ offset 4 here vs union @ offset
+   8), reads of fields filled by jhyy code return wrong values — W-005 systemic
+   bug (3 cg_copy_struct call sites produce `copy %t0` because src_addr.id reads
+   as 0 from ival instead of id).
+
+   Removed union: id is independent of ival (no C-side code uses the union as a
+   discriminator). Total struct size is unchanged (32 bytes, padded to 8-byte
+   alignment for ival). */
 typedef struct {
-    IRValKind kind;
-    union {
-        int id;           /* IRVAL_TEMP: temp number */
-        int64_t ival;     /* IRVAL_INT: immediate value */
-    };
-    const char *name;     /* IRVAL_BLOCK: label name, IRVAL_STR: $data name */
-    char qbe_type;        /* 'w', 'l', 's', 'd' */
+    IRValKind kind;       /* offset 0, 4 bytes (matches jhyy) */
+    int id;               /* offset 4, 4 bytes (matches jhyy) */
+    int64_t ival;         /* offset 8, 8 bytes (matches jhyy; overlaps with id logically but not physically) */
+    const char *name;     /* offset 16, 8 bytes (matches jhyy) */
+    char qbe_type;        /* offset 24, 1 byte (matches jhyy) */
 } IRVal;
 
 /* ── Key: which QBE type character to use for a jhyy Type ── */

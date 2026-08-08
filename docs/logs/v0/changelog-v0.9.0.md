@@ -3052,3 +3052,62 @@ HEAD rebuild 路径 (jhyy_v1_dbg.exe) 只用于 debug, 不入 baseline。
 - `memory/project_sprint4_4_cleanup_crash_discovery.md` — 基于 phantom 的 cleanup crash 发现
 - `memory/project_sprint4_1_phantom_baseline_finding.md` — 2026-08-07 commit 2.29 同类问题
 - `memory/feedback_regress_baseline_binary_hash.md` — MANDATORY sha256sum check
+
+## v0.9 wip commit 2.45 (2026-08-08) — Sprint 4.6 step 3 W-005 真修 LANDED: IRVal struct layout alignment
+
+### 根因 (replaces prior GCC O2 hypothesis)
+
+W-005 真修不是 GCC O2 dead-store elimination — 是 **IRVal struct 布局 C-side vs jhyy-side 不匹配**。
+
+- **jhyy-side** `type IRVal = struct { kind: i32, id: i32, ival: i64, name: *u8, qbe_type: i32 }` → id @ offset 4
+- **C-side (旧)** `typedef struct { IRValKind kind; union { int id; int64_t ival; }; ... } IRVal;` → id @ offset **8** (alignment padding)
+- v0 emit jhyy struct literal 写 offset 4, 但 codegen.c C struct 字段访问 offset 8 → 读 `id` 时实际读到 `ival` 低 32 bits
+- 对 fresh `let mut x: IRVal = ir_new_tmp(...)`: x.ival uninit = 0, x.id 也是 ir_new_tmp 写的 (offset 4), 但 C-side 读 offset 8 → 看到 0 → emit `copy %t0` (temp #0 = global arena default size)
+
+### 实证
+
+1. **O0 build 也 fail** (sha 2c5f0e96 jhyy.exe) — 不是 GCC O2 dead-store
+2. **3 cg_copy_struct call sites** 同一 bug 模式 (`copy %t0` in memcpy src)
+3. **IRVal struct size 不变** (32 bytes) → 改 layout 不破坏 ABI
+
+### 修
+
+`compiler/src/ir.h` — 去 union, 顺序字段:
+```c
+typedef struct {
+    IRValKind kind;       // offset 0
+    int id;               // offset 4  ← 关键
+    int64_t ival;         // offset 8
+    const char *name;     // offset 16
+    char qbe_type;        // offset 24
+} IRVal;  // sizeof = 32 (unchanged)
+```
+
+跟 jhyy-side `type IRVal` 完全对齐。
+
+### 度量
+
+| 指标 | 旧 | 新 | Δ |
+|---|---|---|---|
+| C-side regress | 47/53 (3 failed) | **50/53 PASS, 0 failed, 3 skipped** | **+3 PASS** |
+| slice_subrange.jhyy (C-side) | ACCESS_VIOLATION | **EXIT=60 ✓** | RESOLVED |
+| jhyy_v1 build codegen.jhyy | QBE "copy %t0" error | no error | RESOLVED |
+| regress_v1 (jhyy_v1) | 47/53 baseline | 47/53 | 持平 |
+| jhyy_v1.exe.exe sha | 85f1df84 | **a7817e40** | rebuilt |
+
+### Reverted (per protocol <3/5)
+
+- Sprint 4.6 step 2 Option 2 workaround (immutable 2nd local) — 验证不真修
+- Sprint 4.6 step 3 phase 1 Option 4 Variant 1 (inline `%tN+offset` syntax in cg_copy_struct) — QBE parser 不支持
+- Sprint 4.6 step 3 phase 1 Option 4 Variant 2 (hoist src_off/dst_off outside loop) — 未改善
+
+### Task #146 (slice_subrange via jhyy_v1) 状态
+
+仍 DEFERRED — jhyy_v1 编 slice_subrange.jhyy 现在 no QBE error 但 segfault (`loadl 0` = NULL deref)。根因是 src0/codegen.jhyy slice subrange emit 不读 slice.ptr 字段 — 跟 W-005 无关, 单独 sprint 处理。
+
+### 相关 memory
+
+- `memory/project_sprint4_6_irval_layout_fix.md` — 本次 ship 完整记录
+- `memory/project_sprint4_6_workaround_failed.md` — Option 2/4 Variants 1+2 实证
+- `memory/feedback_fix_evaluation_rule.md` — 5/5 PASS 规则 (W-005 实修 trial 拒了 2 个 5/5 segfault fix)
+- `memory/feedback_codegen_workaround_linkage.md` — W-005 联动 W-008/W-009/W-007
