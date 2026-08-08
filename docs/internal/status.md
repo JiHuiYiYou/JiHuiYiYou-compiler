@@ -22,7 +22,7 @@
 
 回归基线：
 - **jhyy_0 (C 编译) regress**: **50/53 passed, 0 failed, 3 skipped**（3 skipped 是库文件，无 `main_jhyy`）
-- **jhyy_v1 (自举) regress_v1**: **42/53 passed, 8 failed, 3 skipped**（Sprint 4.5 B ship commit 2.40 + 2.41 — Task #145 cmd_compile double-free 修 + baseline lock；HEAD v6 binary sha 181375d7...；8 fail 诊断详 changelog-v0.8.0.md 末尾）
+- **jhyy_v1 (自举) regress_v1**: **44/53 passed, 6 failed, 3 skipped**（Sprint 4.5 C step 1 commit 2.42 — len() builtin fix (sema + codegen 双修)；HEAD v7 binary sha 87ce6733...；+2 PASS 来自 slice_iterate / slice_len；6 fail 诊断详 changelog-v0.8.0.md 末尾）
 - **stage1 byte-equal**: **6/7 PASS 持平 baseline**（v0.9 wip commit 2.17 ship；const_array 失败是 pre-existing Task #52）
 
 ---
