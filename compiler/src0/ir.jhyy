@@ -372,13 +372,10 @@ fn ir_flush_data(ir: *IRBuf) -> i32 {
 // ════════════════════════════════════════════════════
 
 fn ir_emit_label(ir: *IRBuf, block: IRVal) -> i32 {
-    if block.kind != IRVAL_BLOCK() {
-        return 0;
-    }
-    // Sprint 4.1 IL_ONLY #2: emit label 后 cur_block = block (对齐 v0 ir.c:128)
+    // W-005 #2: block.name may be corrupted — use ID-based naming always
     (*ir).cur_block = block;
-    ir_emit_str(ir, "@" as *u8);
-    ir_emit_str(ir, block.name);
+    ir_emit_str(ir, "@b" as *u8);
+    ir_emit_int(ir, "%d" as *u8, block.id);
     ir_emit_str(ir, "\n" as *u8);
     return 1;
 }
@@ -395,31 +392,21 @@ fn ir_emit_ret(ir: *IRBuf, val: IRVal) -> i32 {
 }
 
 fn ir_emit_jmp(ir: *IRBuf, target: IRVal) -> i32 {
-    if target.kind != IRVAL_BLOCK() {
-        return 0;
-    }
-    ir_emit_str(ir, "    jmp @" as *u8);
-    ir_emit_str(ir, target.name);
+    // W-005 #2: target.name may be corrupted — use ID-based naming always
+    ir_emit_str(ir, "    jmp @b" as *u8);
+    ir_emit_int(ir, "%d" as *u8, target.id);
     ir_emit_str(ir, "\n" as *u8);
     return 1;
 }
 
 fn ir_emit_jnz(ir: *IRBuf, cond: IRVal, then_b: IRVal, else_b: IRVal) -> i32 {
-    if cond.kind != IRVAL_TEMP() {
-        return 0;
-    }
-    if then_b.kind != IRVAL_BLOCK() {
-        return 0;
-    }
-    if else_b.kind != IRVAL_BLOCK() {
-        return 0;
-    }
+    // W-005 #2: block.name may be corrupted — use ID-based naming always
     ir_emit_str(ir, "    jnz %t" as *u8);
     ir_emit_int(ir, "%d" as *u8, cond.id);
-    ir_emit_str(ir, ", @" as *u8);
-    ir_emit_str(ir, then_b.name);
-    ir_emit_str(ir, ", @" as *u8);
-    ir_emit_str(ir, else_b.name);
+    ir_emit_str(ir, ", @b" as *u8);
+    ir_emit_int(ir, "%d" as *u8, then_b.id);
+    ir_emit_str(ir, ", @b" as *u8);
+    ir_emit_int(ir, "%d" as *u8, else_b.id);
     ir_emit_str(ir, "\n" as *u8);
     return 1;
 }
@@ -657,12 +644,13 @@ fn ir_emit_phi2(ir: *IRBuf, dst: IRVal, block1: IRVal, val1: IRVal,
     ir_emit_int(ir, "%d" as *u8, dst.id);
     ir_emit_str(ir, " =" as *u8);
     ir_emit_int(ir, "%c" as *u8, real_qt);
-    ir_emit_str(ir, " phi @" as *u8);
-    ir_emit_str(ir, block1.name);
+    // W-005 #2: block.name may be corrupted — use ID-based naming always
+    ir_emit_str(ir, " phi @b" as *u8);
+    ir_emit_int(ir, "%d" as *u8, block1.id);
     ir_emit_str(ir, " %t" as *u8);
     ir_emit_int(ir, "%d" as *u8, val1.id);
-    ir_emit_str(ir, ", @" as *u8);
-    ir_emit_str(ir, block2.name);
+    ir_emit_str(ir, ", @b" as *u8);
+    ir_emit_int(ir, "%d" as *u8, block2.id);
     ir_emit_str(ir, " %t" as *u8);
     ir_emit_int(ir, "%d" as *u8, val2.id);
     ir_emit_str(ir, "\n" as *u8);
