@@ -308,7 +308,9 @@ fn resolve_one_import_v1(mod_path: *u8, mod_name: *u8, arena: *Arena,
                 let mut nc: i64 = (*out_cap) * (2 as i64); if nc < (8 as i64) { nc = 8 as i64; }
                 let nb = arena_alloc(arena, nc * (8 as i64));
                 let mut ci: i64 = 0 as i64;
-                while ci < (*out_count) { *((nb as i64 + ci*(8 as i64)) as **u8) = *(((*out_decls) as i64 + ci*(8 as i64)) as **u8); ci = ci + (1 as i64); }
+                // W-005 #2 guard: (*out_count) may be corrupted → cap copy loop
+                let mut max_copy = (*out_cap); if (*out_count) < max_copy { max_copy = (*out_count); }
+                while ci < max_copy { *((nb as i64 + ci*(8 as i64)) as **u8) = *(((*out_decls) as i64 + ci*(8 as i64)) as **u8); ci = ci + (1 as i64); }
                 (*out_decls) = nb; (*out_cap) = nc;
             }
             *(((*out_decls) as i64 + (*out_count)*(8 as i64)) as **Node) = idecl;
@@ -413,7 +415,7 @@ fn inline_imports(module: *Node, main_path: *u8, arena: *Arena) -> i32 {
 
     // append main module's non-import decls after imported
     let mut im: i64 = 0 as i64;
-    while im < nmain {
+    while im < nmain && new_count < new_cap {
         let slot_app = (new_decls as i64 + new_count * (8 as i64)) as **Node;
         (*slot_app) = *((main_decls as i64 + im * (8 as i64)) as **Node);
         new_count = new_count + (1 as i64);
