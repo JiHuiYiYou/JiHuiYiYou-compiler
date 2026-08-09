@@ -452,7 +452,7 @@ fn build_il(input: *u8, output: *u8) -> i32 {
         blocks: 0 as *u8,
         def_size: 0 as i64,
     };
-    arena_init(&arena, (16 as i64) * (1024 as i64) * (1024 as i64));
+    arena_init(&arena, (32 as i64) * (1024 as i64) * (1024 as i64));
 
     // ── TypeArena ──
     let mut ta_v1: TypeArena = TypeArena {
