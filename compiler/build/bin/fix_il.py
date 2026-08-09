@@ -91,6 +91,22 @@ def fix_il(input_path, output_path):
                 starts_added += 1
         i += 1
     lines = result2
+
+    # Fix 6: normalize corrupted label names → @l0, @l1, ...
+    label_map = {}
+    label_seq = 0
+    for i in range(len(lines)):
+        stripped = lines[i].strip()
+        if stripped.startswith(b'@') and not stripped.startswith(b'@start'):
+            m = re.match(rb'@(\S+)', stripped)
+            if m and m.group(0) not in label_map:
+                label_map[m.group(0)] = ('@l' + str(label_seq)).encode()
+                label_seq += 1
+    if label_map:
+        for i in range(len(lines)):
+            for old, new in label_map.items():
+                lines[i] = lines[i].replace(old, new)
+
     data = b'\n'.join(lines)
 
     with open(output_path, 'wb') as f:
@@ -98,7 +114,7 @@ def fix_il(input_path, output_path):
 
     t0_count = data.count(b'%t0')
     nul_count = data.count(b'\x00')
-    print(f"Fixed: {sret_count} sret funcs, {dupes_removed} dupes removed, {starts_added} @starts added, %t0={t0_count}, NUL={nul_count}")
+    print(f"Fixed: {sret_count} sret funcs, {dupes_removed} dupes removed, {starts_added} @starts made, {label_seq} labels normalized, %t0={t0_count}, NUL={nul_count}")
 
 if __name__ == '__main__':
     fix_il(sys.argv[1], sys.argv[2])
