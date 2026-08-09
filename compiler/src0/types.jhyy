@@ -364,12 +364,16 @@ fn type_eq(a: *Type, b: *Type) -> i32 {
         return type_eq((*a).ret as *Type, (*b).ret as *Type);
     }
     if k == KIND_STRUCT() {
-        // nominal: 同 name 视为相等
-        if (*a).name == (*b).name { return 1 as i32; }
+        // nominal: 同 name 字符串视为相等 (不靠 Sym 指针, inline_imports 可能生成多份 Sym)
+        let a_sym = (*a).name as *Sym;
+        let b_sym = (*b).name as *Sym;
+        if strcmp((*a_sym).name, (*b_sym).name) == (0 as i32) { return 1 as i32; }
         return 0 as i32;
     }
     if k == KIND_ENUM() {
-        if (*a).name == (*b).name { return 1 as i32; }
+        let a_sym = (*a).name as *Sym;
+        let b_sym = (*b).name as *Sym;
+        if strcmp((*a_sym).name, (*b_sym).name) == (0 as i32) { return 1 as i32; }
         return 0 as i32;
     }
     if k == KIND_ALIAS() {

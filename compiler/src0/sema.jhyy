@@ -1530,8 +1530,11 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
             if (*decl).kind == NODE_TYPE_DECL() {
                 let td = node_type_decl_data(decl);
                 let td_sym = (*td).sym as *Sym;
-                (*td_sym).kind = SYM_TYPE();
-                let _x = symtab_insert_sym((*ctx).global_scope, td_sym);
+                let dup = symtab_lookup((*ctx).global_scope, (*td_sym).name);
+                if dup == (0 as *Sym) {
+                    (*td_sym).kind = SYM_TYPE();
+                    let _x = symtab_insert_sym((*ctx).global_scope, td_sym);
+                }
             } else {
                 // v0.9 wip commit 2.20 / Task #52 + #42 合并: NODE_CONST_DECL 跟 SYM_CONST
                 //   跟 C 端 sema.c:1034-1038 check_module Pass 1 对齐

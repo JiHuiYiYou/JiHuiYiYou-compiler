@@ -40,17 +40,8 @@ extern fn jh_fmt_d_stderr(fmt: *u8, val: i32) -> i32;
 extern fn jh_fmt_lld_stderr(fmt: *u8, val: i64) -> i32;
 extern fn jh_print_loc_stderr(loc_filename: *u8, line: i32, col: i32) -> i32;
 
-// ════════════════════════════════════════════════════
-// Arena 类型声明（从 arena.jhyy 复制）
-// ════════════════════════════════════════════════════
-
-type Arena = struct {
-    start:    *u8,
-    cur:      *u8,
-    end:      *u8,
-    blocks:   *u8,
-    def_size: i64,
-}
+// Arena type is imported from arena.jhyy (line 18)
+// (was duplicated here; removed in Sprint 4.12 to fix inline_imports merge)
 
 // ════════════════════════════════════════════════════
 // StringBuilder

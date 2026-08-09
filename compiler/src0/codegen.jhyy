@@ -929,8 +929,6 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
     }
 
     // ── NODE_RETURN（stmt-position + expr-position 都走这里，cg_stmt 已 merge 到 cg_expr）──
-    // v0 codegen bug 临时绕开：sret 处理需要 cg.sret_slot 字段。commit 4 才用得上（当前
-    // commit 3 还没用到）。先写最简 expr-only 版本。
     if kind == NODE_RETURN() {
         let d = node_return_data(n);
         if (*d).expr != (0 as *Node) {
@@ -942,6 +940,10 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         }
         return zero;
     }
+
+    // NOTE: sret void function return fix is handled via IL post-processing
+    // (fix_il.py in cmd_compile) — cg_func can't fix NODE_RETURN emit here
+    // because cg_copy_struct inside cg_expr triggers v0 codegen SIGSEGV.
 
     // ── NODE_BLOCK（expr-position: block 最后一个 expr 的值）──
     // v0 codegen bug 16 workaround: `last = cg_expr(...)` 把 40 字节 IRVal
