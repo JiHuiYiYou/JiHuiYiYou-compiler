@@ -222,24 +222,20 @@ fn ir_buf_str(ir: *IRBuf) -> *u8 {
 // IRVal 构造
 // ════════════════════════════════════════════════════
 
-fn ir_new_tmp(ir: *IRBuf, qbe_type: i32) -> IRVal {
-    // Sprint 4.4 commit 2.36 (latent bug fix): pre-increment 让 first id = 1
-    //   修 QBE "invalid type for first operand %t0 in csltl" — %t0 是 QBE call
-    //   return 专用 register, 不可作普通 temp 操作数. 改 pre-increment 后
-    //   不管 reset arena 多少次, first ir_new_tmp 都返回 id=1, 根治.
+fn ir_new_tmp(ir: *IRBuf, qbe_type: i32) -> *IRVal {
+    // W-005 #2 fix: arena-allocated return, no sret corruption
     (*ir).next_tmp = (*ir).next_tmp + (1 as i32);
-    let v = IRVal {
-        kind:     IRVAL_TEMP(),
-        id:       (*ir).next_tmp,
-        ival:     0 as i64,
-        name:     0 as *u8,
-        qbe_type: qbe_type,
-    };
-    return v;
+    let p = arena_alloc((*ir).arena, IRVAL_SIZE()) as *IRVal;
+    (*p).kind = IRVAL_TEMP();
+    (*p).id = (*ir).next_tmp;
+    (*p).ival = 0 as i64;
+    (*p).name = 0 as *u8;
+    (*p).qbe_type = qbe_type;
+    return p;
 }
 
-fn ir_new_block(ir: *IRBuf, hint: *u8) -> IRVal {
-    // 等价 C: arena_sprintf("%s%d", hint, id)
+fn ir_new_block(ir: *IRBuf, hint: *u8) -> *IRVal {
+    // W-005 #2 fix: arena-allocated return, no sret corruption
     let mut tmp_sb = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
     sb_init((*ir).arena, &tmp_sb);
     if hint != (0 as *u8) {
@@ -250,15 +246,14 @@ fn ir_new_block(ir: *IRBuf, hint: *u8) -> IRVal {
     sb_appendf((*ir).arena, &tmp_sb, "%d" as *u8, (*ir).next_block);
     let name = sb_cstr((*ir).arena, &tmp_sb);
 
-    let v = IRVal {
-        kind:     IRVAL_BLOCK(),
-        id:       (*ir).next_block,
-        ival:     0 as i64,
-        name:     name,
-        qbe_type: 0 as i32,
-    };
+    let p = arena_alloc((*ir).arena, IRVAL_SIZE()) as *IRVal;
+    (*p).kind = IRVAL_BLOCK();
+    (*p).id = (*ir).next_block;
+    (*p).ival = 0 as i64;
+    (*p).name = name;
+    (*p).qbe_type = 0 as i32;
     (*ir).next_block = (*ir).next_block + (1 as i32);
-    return v;
+    return p;
 }
 
 // ════════════════════════════════════════════════════
