@@ -301,6 +301,7 @@ fn resolve_one_import_v1(mod_path: *u8, mod_name: *u8, arena: *Arena,
             errors_ti = errors_ti + rv1_err;
             let _f1 = free(npath); let _f2 = free(dir_buf);
         } else {
+            if idecl == (0 as *Node) { j = j + (1 as i64); } else {
             let mut owner_sym_raw: *u8 = 0 as *u8;
             if (*idecl).kind == NODE_FUNC_DECL() { owner_sym_raw = (*node_func_decl_data(idecl)).sym; }
             if owner_sym_raw != (0 as *u8) { (*(owner_sym_raw as *Sym)).module = mod_name; }
@@ -313,8 +314,11 @@ fn resolve_one_import_v1(mod_path: *u8, mod_name: *u8, arena: *Arena,
                 while ci < max_copy { *((nb as i64 + ci*(8 as i64)) as **u8) = *(((*out_decls) as i64 + ci*(8 as i64)) as **u8); ci = ci + (1 as i64); }
                 (*out_decls) = nb; (*out_cap) = nc;
             }
-            *(((*out_decls) as i64 + (*out_count)*(8 as i64)) as **Node) = idecl;
-            (*out_count) = (*out_count) + (1 as i64);
+            if (*out_count) < (*out_cap) {
+                *(((*out_decls) as i64 + (*out_count)*(8 as i64)) as **Node) = idecl;
+                (*out_count) = (*out_count) + (1 as i64);
+            }
+            }  // close else from NULL guard
         }
         j = j + (1 as i64);
     }
