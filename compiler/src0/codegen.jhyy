@@ -2031,6 +2031,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         // body
         ir_emit_label(ir, loop_body);
         let _ = cg_expr(cg_raw, body_node);
+        ir_emit_label(ir, loop_cont);
         ir_emit_jmp(ir, loop_start);
 
         // end
