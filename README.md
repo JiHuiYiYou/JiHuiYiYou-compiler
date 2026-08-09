@@ -7,7 +7,7 @@
 **Statically typed. Expression-oriented. Compiled to native via QBE.**
 
 [![Version](https://img.shields.io/badge/version-v0.9--wip-blue)](docs/logs/v0/changelog-v0.9.0.md)
-[![Phase](https://img.shields.io/badge/v0.x%20(C%20host)-yellow)](#路线图)
+[![Phase](https://img.shields.io/badge/v1.0%20(自举闭环)-green)](#路线图)
 [![Backend](https://img.shields.io/badge/backend-QBE-orange)](#)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
@@ -22,7 +22,7 @@
 
 JHYY 是一门自研的、静态类型的、表达式导向的编译型系统编程语言。**编译器用 C 编写**（v0.x 时代），后端走 [QBE](https://c9x.me/compile/) 输出 x86-64 Windows 机器码。
 
-**终极目标**: 用 JHYY 写 JHYY 的 IDE、写 OS kernel、**编译器自举**（用 JHYY 编译 JHYY）。
+**终极目标**: 用 JHYY 写 JHYY 的 IDE、写 OS kernel、**编译器自举**（用 JHYY 编译 JHYY）。**自举闭环已达成** — jhyy_v1 编译自身产 432KB working binary。
 
 ## 一段代码看语法
 
@@ -103,7 +103,7 @@ python compiler/build/bin/regress.py
 # => 50/53 passed, 0 failed, 3 skipped (3 skipped = 库文件无 main)
 ```
 
-> **自举进度**：v0.9 wip 末 jhyy_v1 regress **50/53 PASS 持平 baseline** + stage1 byte-equal **6/7 持平 baseline** + 2 audit 全 PASS (AUDIT 修 VariantDesc heap overflow + C' 验证 codegen 5 维度 by-construction deterministic)。详见 [`v0.9.0 任务清单`](<docs/plans/v0/v0.9.0任务清单 + 概要设计.md>) + [`v1.0 sprint 3 计划`](docs/plans/v1/v1.0-sprint-3-launch.md)。
+> **自举进度**：jhyy_v1 regress **50/53 PASS** + stage1 byte-equal **6/7**。**自编译闭环已达成** — jhyy_v1 编译自身产 4.5MB IL → fix_il.py → QBE → as → GCC → 432KB working binary。下一步: byte-equal IL → Stage 2 N=3 → v1.0 闭环。详见 [`v1.0 post-50/53 计划`](docs/plans/v1/v1.0-post-50-53-plan.md)。
 
 ## 语言特性
 
@@ -206,10 +206,10 @@ Copy-Item vscode-ext $env:USERPROFILE\.vscode\extensions\jhyy-lang -Recurse
 |------|------|
 | v0.0 — Skeleton | [`docs/plans/roadmap/v0.0-skeleton.md`](docs/plans/roadmap/v0.0-skeleton.md) |
 | v0.x — C 编译器 | [`docs/plans/roadmap/v0.x-c-compiler-roadmap.md`](docs/plans/roadmap/v0.x-c-compiler-roadmap.md) |
-| **v0.8 wip — 自举路径清理** | [`docs/plans/v0/v0.8.0任务清单 + 概要设计.md`](<docs/plans/v0/v0.8.0任务清单 + 概要设计.md>) |
-| **v0.9 wip — W 真修 + 2 audit (AUDIT + C') + Stage 1 byte-equal（当前 sprint）** | [`docs/plans/v0/v0.9.0任务清单 + 概要设计.md`](<docs/plans/v0/v0.9.0任务清单 + 概要设计.md>) |
-| **v1.0 sprint 3 — 5 task 粗粒度合并（下一阶段）** | [`docs/plans/v1/v1.0-sprint-3-launch.md`](docs/plans/v1/v1.0-sprint-3-launch.md) |
-| **v1.0 — 自举** | [`docs/plans/roadmap/v1.0-self-hosting.md`](docs/plans/roadmap/v1.0-self-hosting.md) + [`docs/plans/v1/v1.0.0任务清单 + 概要设计.md`](<docs/plans/v1/v1.0.0任务清单 + 概要设计.md>) |
+| v0.8 wip — 自举路径清理 | [`docs/plans/v0/v0.8.0任务清单 + 概要设计.md`](<docs/plans/v0/v0.8.0任务清单 + 概要设计.md>) |
+| v0.9 wip — W 真修 + 2 audit (AUDIT + C') + Stage 1 byte-equal | [`docs/plans/v0/v0.9.0任务清单 + 概要设计.md`](<docs/plans/v0/v0.9.0任务清单 + 概要设计.md>) |
+| **v1.0 post-50/53 — 当前活跃** | [`docs/plans/v1/v1.0-post-50-53-plan.md`](docs/plans/v1/v1.0-post-50-53-plan.md) |
+| v1.0.0 — 自举总览 | [`docs/plans/roadmap/v1.0-self-hosting.md`](docs/plans/roadmap/v1.0-self-hosting.md) + [`docs/plans/v1/v1.0.0任务清单 + 概要设计.md`](<docs/plans/v1/v1.0.0任务清单 + 概要设计.md>) |
 | v2.x — QBE 完整重写 | [`docs/plans/roadmap/v2.x-qbe-rewrite.md`](docs/plans/roadmap/v2.x-qbe-rewrite.md) |
 | v3.x — 扩展 | [`docs/plans/roadmap/v3.x-language-expansion.md`](docs/plans/roadmap/v3.x-language-expansion.md) |
 
@@ -217,7 +217,7 @@ Copy-Item vscode-ext $env:USERPROFILE\.vscode\extensions\jhyy-lang -Recurse
 
 | 版本 | 文档 |
 |------|------|
-| **v0.9 wip (进行中, commit 2.17, 7691457)** | [`docs/logs/v0/changelog-v0.9.0.md`](docs/logs/v0/changelog-v0.9.0.md) |
+| **v0.9 wip (进行中, Sprint 4.13, self-compilation binary)** | [`docs/logs/v0/changelog-v0.9.0.md`](docs/logs/v0/changelog-v0.9.0.md) |
 | v0.8 wip (commit 12, 5820793) | [`docs/logs/v0/changelog-v0.8.0.md`](docs/logs/v0/changelog-v0.8.0.md) |
 | v0.7.0 | [`docs/logs/v0/changelog-v0.7.0.md`](docs/logs/v0/changelog-v0.7.0.md) |
 | v0.6.5 (patch) | [`docs/logs/v0/changelog-v0.6.5.md`](docs/logs/v0/changelog-v0.6.5.md) |
@@ -245,8 +245,8 @@ Sprint 实施日志: `docs/logs/v0/sprint-1[a-g]-*.md` (sprint-1a ~ 1g,v0.1 时�
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
-| **v0.x** | C 宿主编译器达到自举门槛 | **进行中** (v0.9 wip commit 2.17 — 2 audit 全 PASS + Stage 1 byte-equal 6/7 持平 baseline) |
-| **v1.x** | 用 JHYY 重写编译器（自举，`.il` byte-equal 闭环） | **下一阶段** ([`v0.9 任务清单`](<docs/plans/v0/v0.9.0任务清单 + 概要设计.md>) → [`v1.0 任务清单`](<docs/plans/v1/v1.0.0任务清单 + 概要设计.md>)) |
+| **v0.x** | C 宿主编译器达到自举门槛 | **完成** (50/53 PASS + 自编译闭环) |
+| **v1.x** | 自举闭环 → byte-equal IL → Stage 2 N=3 + v0 真修 + 语法糖 + 清理 | **进行中** — 自编译 binary 已产出，byte-equal IL 推进中 ([`v1.0 post-50/53 计划`](docs/plans/v1/v1.0-post-50-53-plan.md)) |
 | **v2.x** ⟂ **v3.x** | QBE 自写后端 + 多目标（amd64_sysv / freestanding）⟂ 语言扩展（OS-required：asm/naked/volatile/no_std/link_section/memory barrier + `&mut`+Cap<T> + 泛型/闭包/标准库） | **两轴并行** — v1.x 闭环后同时启动；v2.0 (freestanding target) + v3.0 sprint 3a-3f 共同解锁 OS M1 启动 ([`v2.0.0-os-prep`](docs/plans/v2/v2.0.0-os-prep.md) § 1, [`v3.x-language-expansion`](docs/plans/roadmap/v3.x-language-expansion.md)) |
 
 > **轴关系说明**（避免误读 semver）：
