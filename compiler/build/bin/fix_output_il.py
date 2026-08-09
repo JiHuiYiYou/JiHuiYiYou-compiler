@@ -147,6 +147,76 @@ def fix_output_il(input_path, output_path):
                 lines[i] = prefix + new_type + rest
                 type_fixes += 1
 
+    # Fix 8: SSA-like temp dedup + renumbering
+    # W-005 #2 can assign same corrupted temp ID to different values.
+    # First pass: find duplicate definitions and split them into unique temps.
+    import re as re2
+    seen_defs = {}  # old_id → first_def_line
+    dupe_splits = []  # (line_idx, old_id, new_unique_id)
+    next_new_id = 1000000  # high sentinel to avoid collisions
+    for i in range(len(lines)):
+        m_def = re2.match(rb'    %t(\d+) =', lines[i])
+        if m_def:
+            tid = int(m_def.group(1))
+            if tid in seen_defs:
+                # Duplicate definition — give it a new unique ID
+                dupe_splits.append((i, tid, next_new_id))
+                next_new_id += 1
+            else:
+                seen_defs[tid] = i
+
+    # Apply duplicate splits: rename the duplicate definition + all refs after it
+    # until the temp is redefined again
+    for line_idx, old_id, new_id in dupe_splits:
+        # Rename the definition
+        lines[line_idx] = re2.sub(
+            rb'    %t' + str(old_id).encode() + rb' =',
+            ('    %t' + str(new_id) + ' =').encode(),
+            lines[line_idx]
+        )
+        # Rename subsequent uses until next redefinition of this old_id
+        for j in range(line_idx + 1, len(lines)):
+            # Stop at next redefinition of old_id
+            if re2.match(rb'    %t' + str(old_id).encode() + rb' =', lines[j]):
+                break
+            # Replace all references to old_id with new_id
+            lines[j] = re2.sub(
+                rb'%t' + str(old_id).encode() + rb'\b',
+                ('%t' + str(new_id)).encode(),
+                lines[j]
+            )
+
+    # Now renumber all temps sequentially
+    all_temps = set()
+    def_order = []
+    for line in lines:
+        m_def = re2.match(rb'    %t(\d+) =', line)
+        if m_def:
+            tid = int(m_def.group(1))
+            if tid not in all_temps:
+                all_temps.add(tid)
+                def_order.append(tid)
+        for m_ref in re2.finditer(rb'%t(\d+)', line):
+            all_temps.add(int(m_ref.group(1)))
+
+    renum = {}
+    next_id = 0
+    for old_id in def_order:
+        renum[old_id] = next_id
+        next_id += 1
+    for old_id in sorted(all_temps):
+        if old_id not in renum:
+            renum[old_id] = next_id
+            next_id += 1
+
+    def replace_temp(m):
+        old_id = int(m.group(1))
+        return ('%t' + str(renum.get(old_id, old_id))).encode()
+
+    for i in range(len(lines)):
+        lines[i] = re2.sub(rb'%t(\d+)', replace_temp, lines[i])
+
+    renum_count = len(renum)
     data = b'\n'.join(lines)
 
     with open(output_path, 'wb') as f:
@@ -154,7 +224,7 @@ def fix_output_il(input_path, output_path):
 
     t0 = data.count(b'%t0')
     nul = data.count(b'\x00')
-    print(f"Output fix: {ret_fixes} ret fixes, {type_fixes} type fixes, %t0={t0}, NUL={nul}")
+    print(f"Output fix: {ret_fixes} ret fixes, {type_fixes} type fixes, {renum_count} temps renumbered, %t0={t0}, NUL={nul}")
 
 if __name__ == '__main__':
     fix_output_il(sys.argv[1], sys.argv[2])
