@@ -486,7 +486,8 @@ fn _bin_tmp(ir: *IRBuf, dst: IRVal, op: *u8, a: IRVal, b: IRVal, qt: i32) -> i32
 }
 
 fn ir_emit_binary(ir: *IRBuf, dst: IRVal, op: *u8, a: IRVal, b: IRVal) -> i32 {
-    let qt = dst.qbe_type;
+    let mut qt = dst.qbe_type;
+    if qt == (0 as i32) { qt = QBE_W(); }  // W-005 #2: default 'w'
     if a.kind == IRVAL_INT() {
         return _bin_int(ir, dst, op, a, b, qt);
     }
@@ -494,11 +495,13 @@ fn ir_emit_binary(ir: *IRBuf, dst: IRVal, op: *u8, a: IRVal, b: IRVal) -> i32 {
 }
 
 fn ir_emit_copy(ir: *IRBuf, dst: IRVal, val: i64) -> i32 {
+    let mut qt = dst.qbe_type;
+    if qt == (0 as i32) { qt = QBE_W(); }  // W-005 #2: default 'w'
     // "    %tD =q copy V"
     ir_emit_str(ir, "    %t" as *u8);
     ir_emit_int(ir, "%d" as *u8, dst.id);
     ir_emit_str(ir, " =" as *u8);
-    ir_emit_int(ir, "%c" as *u8, dst.qbe_type);
+    ir_emit_int(ir, "%c" as *u8, qt);
     ir_emit_str(ir, " copy " as *u8);
     ir_emit_lld(ir, "%lld" as *u8, val);
     ir_emit_str(ir, "\n" as *u8);

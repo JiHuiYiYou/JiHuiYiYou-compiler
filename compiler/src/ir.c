@@ -35,7 +35,7 @@ void ir_init(IRBuf *ir, Arena *arena) {
     ir->buf = arena_alloc(arena, ir->cap);
     ir->buf[0] = '\0';
     ir->len = 0;
-    ir->next_tmp = 0;
+    ir->next_tmp = 1;  /* W-005 #2: start at 1 so %t0 = zero-IRVal sentinel */
     ir->next_block = 0;
     ir->next_data = 0;
     ir->data_buf = NULL;
@@ -145,7 +145,7 @@ void ir_emit_jnz(IRBuf *ir, IRVal cond, IRVal then_b, IRVal else_b) {
 }
 
 void ir_emit_binary(IRBuf *ir, IRVal dst, const char *op, IRVal a, IRVal b) {
-    char qt = dst.qbe_type;
+    char qt = dst.qbe_type ? dst.qbe_type : 'w';  /* W-005 #2: default 'w' */
     if (a.kind == IRVAL_INT && b.kind == IRVAL_INT) {
         ir_emit(ir, "    %%t%d =%c copy %lld\n", dst.id, qt, (long long)a.ival);
     } else if (a.kind == IRVAL_INT) {
@@ -158,7 +158,8 @@ void ir_emit_binary(IRBuf *ir, IRVal dst, const char *op, IRVal a, IRVal b) {
 }
 
 void ir_emit_copy(IRBuf *ir, IRVal dst, int64_t val) {
-    ir_emit(ir, "    %%t%d =%c copy %lld\n", dst.id, dst.qbe_type, (long long)val);
+    char qt = dst.qbe_type ? dst.qbe_type : 'w';  /* W-005 #2: default 'w' */
+    ir_emit(ir, "    %%t%d =%c copy %lld\n", dst.id, qt, (long long)val);
 }
 
 void ir_emit_call(IRBuf *ir, IRVal dst, const char *fn, IRVal *args, int n) {
@@ -166,10 +167,11 @@ void ir_emit_call(IRBuf *ir, IRVal dst, const char *fn, IRVal *args, int n) {
     ir_emit(ir, "    %%t%d =%c call $%s(", dst.id, qt, fn);
     for (int i = 0; i < n; i++) {
         if (i > 0) ir_emit(ir, ", ");
+        char aqt = args[i].qbe_type ? args[i].qbe_type : 'w';  /* W-005 #2: default 'w' */
         if (args[i].kind == IRVAL_STR) {
-            ir_emit(ir, "%c %s", args[i].qbe_type, args[i].name);
+            ir_emit(ir, "%c %s", aqt, args[i].name);
         } else {
-            ir_emit(ir, "%c %%t%d", args[i].qbe_type, args[i].id);
+            ir_emit(ir, "%c %%t%d", aqt, args[i].id);
         }
     }
     ir_emit(ir, ")\n");
@@ -179,10 +181,11 @@ void ir_emit_call_void(IRBuf *ir, const char *fn, IRVal *args, int n) {
     ir_emit(ir, "    call $%s(", fn);
     for (int i = 0; i < n; i++) {
         if (i > 0) ir_emit(ir, ", ");
+        char aqt = args[i].qbe_type ? args[i].qbe_type : 'w';  /* W-005 #2: default 'w' */
         if (args[i].kind == IRVAL_STR) {
-            ir_emit(ir, "%c %s", args[i].qbe_type, args[i].name);
+            ir_emit(ir, "%c %s", aqt, args[i].name);
         } else {
-            ir_emit(ir, "%c %%t%d", args[i].qbe_type, args[i].id);
+            ir_emit(ir, "%c %%t%d", aqt, args[i].id);
         }
     }
     ir_emit(ir, ")\n");
@@ -208,7 +211,8 @@ void ir_emit_store(IRBuf *ir, char qbe_type, IRVal val, IRVal addr) {
 void ir_emit_load(IRBuf *ir, IRVal dst, char qbe_type, IRVal addr) {
     const char *pref = (qbe_type == 'w') ? "loadw" : (qbe_type == 'l') ? "loadl" :
                        (qbe_type == 's') ? "loads" : (qbe_type == 'd') ? "loadd" : "loadw";
-    ir_emit(ir, "    %%t%d =%c %s %%t%d\n", dst.id, dst.qbe_type, pref, addr.id);
+    char qt = dst.qbe_type ? dst.qbe_type : qbe_type;  /* W-005 #2: default to instr type */
+    ir_emit(ir, "    %%t%d =%c %s %%t%d\n", dst.id, qt, pref, addr.id);
 }
 
 void ir_emit_phi(IRBuf *ir, IRVal dst, int npairs, ...) {
