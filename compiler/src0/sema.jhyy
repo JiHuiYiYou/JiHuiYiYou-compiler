@@ -1518,6 +1518,9 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
     let md = node_module_data(module);
 
     // Pass 1: register decls into global scope
+    jh_fputs_stderr("[sema] P1 ndeccls=" as *u8);
+    jh_fmt_lld_stderr("%d" as *u8, (*md).ndeccls);
+    jh_fputs_stderr("\n" as *u8);
     let mut i: i64 = 0 as i64;
     while i < (*md).ndeccls {
         let decl = *(((*md).decls as i64 + i * (8 as i64)) as **Node);
@@ -1713,6 +1716,8 @@ fn sema_init(ctx: *SemaContext, arena: *Arena, ta: *TypeArena) -> i32 {
 fn sema_check(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
     (*ctx).module = module;
     (*ctx).current_scope = (*ctx).global_scope;
+    jh_fputs_stderr("[sema] check_module enter\n" as *u8);
     check_module(ctx, ta, module);
+    jh_fputs_stderr("[sema] check_module exit\n" as *u8);
     return (*ctx).error_count;
 }

@@ -281,6 +281,7 @@ fn resolve_one_import_v1(mod_path: *u8, mod_name: *u8, arena: *Arena,
         let idecl = *(((*imd).decls as i64 + j * (8 as i64)) as **Node);
         if (*idecl).kind == NODE_IMPORT_DECL() {
             // transitive import: resolve nested module
+            jh_fputs_stderr("[trans] " as *u8); jh_fputs_stderr((*(*node_import_decl_data(idecl)).sym as *Sym).name); jh_fputs_stderr("\n" as *u8);
             let iid = node_import_decl_data(idecl);
             let iid_sym_p = (*iid).sym as *Sym;
             let nested_name = (*iid_sym_p).name;
@@ -319,6 +320,22 @@ fn resolve_one_import_v1(mod_path: *u8, mod_name: *u8, arena: *Arena,
             (*out_count) = (*out_count) + (1 as i64);
         }
         j = j + (1 as i64);
+    }
+    // mark as completed for deduplication
+    if (*ncompleted) < (64 as i64) {
+        let slot_c = (completed as i64 + (*ncompleted) * (512 as i64)) as *u8;
+        let nlen = strlen(mod_path);
+        let mut cpy2: i64 = 0 as i64;
+        while cpy2 < nlen {
+            let s_p = (mod_path as i64 + cpy2) as *u8;
+            let d_p = (slot_c as i64 + cpy2) as *u8;
+            let s_pi = s_p as *i32; let d_pi = d_p as *i32;
+            (*d_pi) = (*s_pi);
+            cpy2 = cpy2 + (1 as i64);
+        }
+        let nul_c = (slot_c as i64 + nlen) as *u8;
+        store_byte_i32(nul_c, 0 as i32);
+        (*ncompleted) = (*ncompleted) + (1 as i64);
     }
     free(mod_source); free(ml_buf); free(mp_buf);
     return errors_ti;
@@ -399,6 +416,7 @@ fn inline_imports(module: *Node, main_path: *u8, arena: *Arena) -> i32 {
             off_m = str_concat_at(mod_path_buf, off_m, ext_m);
             let nul_mp = (mod_path_buf as i64 + off_m) as *u8;
             store_byte_i32(nul_mp, 0 as i32);
+            jh_fputs_stderr("[import] " as *u8); jh_fputs_stderr(mod_name_str); jh_fputs_stderr("\n" as *u8);
             errors = errors + resolve_one_import_v1(mod_path_buf, mod_name_str, arena,
                                                      (&new_decls as **u8), &new_count, &new_cap,
                                                      in_progress, &nin_progress,
@@ -529,11 +547,13 @@ fn build_il(input: *u8, output: *u8) -> i32 {
         loop_depth:       0 as i32,
     };
     sema_init(&sema_v1, &arena, &ta_v1);
+    jh_fputs_stderr("[phase] sema check start\n" as *u8);
     if sema_check(&sema_v1, &ta_v1, ast_node) > (0 as i32) {
         jh_fputs_stderr("semantic errors\n" as *u8);
         free(source);
         return 1 as i32;
     }
+    jh_fputs_stderr("[phase] sema done\n" as *u8);
 
     // ── IR + Codegen ──
     let mut ir_v1: IRBuf = IRBuf {
@@ -546,8 +566,11 @@ fn build_il(input: *u8, output: *u8) -> i32 {
         data_used:  0 as i32,
     };
     // Sprint 4.1 IL_ONLY #2: cur_block 由 ir_init 设 (避开 v0 codegen struct-field assign bug)
+    jh_fputs_stderr("[phase] ir_init start\n" as *u8);
     ir_init(&ir_v1, &arena);
+    jh_fputs_stderr("[phase] ir_init done, codegen start\n" as *u8);
     cg_module(&ir_v1, ast_node);
+    jh_fputs_stderr("[phase] codegen done, flushing\n" as *u8);
     ir_flush_data(&ir_v1);
 
     // ── 写 <output>.il ──
@@ -670,6 +693,7 @@ fn cmd_build(argc_v1: i32, argv_v1: *u8) -> i32 {
 // regress_v1.py 传 `-o` 写 regress 结果，但 v0.8 commit 2 翻译时漏了 -o 解析
 // → regress_v1.py NORUN=7）
 fn cmd_compile(argc_v2: i32, argv_v2: *u8) -> i32 {
+    jh_fputs_stderr("[phase] cmd_compile enter\n" as *u8);
     if argc_v2 < (1 as i32) {
         jh_fputs_stderr("usage: jhyy compile <file.jhyy> [-o output]\n" as *u8);
         return 1 as i32;
