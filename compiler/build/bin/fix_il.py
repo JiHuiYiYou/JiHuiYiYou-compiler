@@ -77,6 +77,20 @@ def fix_il(input_path, output_path):
         i += 1
 
     lines = result
+
+    # Fix 5: insert missing @start labels after function headers
+    result2 = []
+    i = 0
+    starts_added = 0
+    while i < len(lines):
+        line = lines[i]
+        result2.append(line)
+        if (line.startswith(b'export function ') or line.startswith(b'function ')) and line.rstrip().endswith(b'{'):
+            if i + 1 < len(lines) and not lines[i + 1].strip().startswith(b'@'):
+                result2.append(b'@start')
+                starts_added += 1
+        i += 1
+    lines = result2
     data = b'\n'.join(lines)
 
     with open(output_path, 'wb') as f:
@@ -84,7 +98,7 @@ def fix_il(input_path, output_path):
 
     t0_count = data.count(b'%t0')
     nul_count = data.count(b'\x00')
-    print(f"Fixed: {sret_count} sret funcs, {dupes_removed} dupes removed, %t0={t0_count}, NUL={nul_count}")
+    print(f"Fixed: {sret_count} sret funcs, {dupes_removed} dupes removed, {starts_added} @starts added, %t0={t0_count}, NUL={nul_count}")
 
 if __name__ == '__main__':
     fix_il(sys.argv[1], sys.argv[2])
