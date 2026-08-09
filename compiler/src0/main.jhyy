@@ -273,12 +273,34 @@ fn resolve_one_import_v1(mod_path: *u8, mod_name: *u8, arena: *Arena,
         free(mod_source); free(ml_buf); free(mp_buf);
         return 1 as i32;
     }
-    // Sprint 4.10: minimal decl processing
+    // Sprint 4.12: decl processing with transitive import
+    let mut errors_ti: i32 = 0 as i32;
     let imd = node_module_data(mod_ast);
     let mut j: i64 = 0 as i64;
     while j < (*imd).ndeccls {
         let idecl = *(((*imd).decls as i64 + j * (8 as i64)) as **Node);
-        if (*idecl).kind != NODE_IMPORT_DECL() {
+        if (*idecl).kind == NODE_IMPORT_DECL() {
+            // transitive import: nested_name = *(sym as **u8) (name is at offset 0 of Sym)
+            let iid = node_import_decl_data(idecl);
+            let nested_name = *((*iid).sym as **u8);
+            let dir_buf = malloc(512 as i64);
+            dir_from_path(mod_path, dir_buf);
+            let npath = malloc(1024 as i64);
+            let mut off_n: i64 = 0 as i64;
+            off_n = str_concat_at(npath, off_n, dir_buf);
+            off_n = str_concat_at(npath, off_n, "/" as *u8);
+            off_n = str_concat_at(npath, off_n, nested_name);
+            off_n = str_concat_at(npath, off_n, ".jhyy" as *u8);
+            let nul_np = (npath as i64 + off_n) as *u8;
+            store_byte_i32(nul_np, 0 as i32);
+            let rv1_err = resolve_one_import_v1(npath, nested_name, arena,
+                                                 out_decls, out_count, out_cap,
+                                                 in_progress, nin_progress,
+                                                 completed, ncompleted,
+                                                 mod_path);
+            errors_ti = errors_ti + rv1_err;
+            let _f1 = free(npath); let _f2 = free(dir_buf);
+        } else {
             let mut owner_sym_raw: *u8 = 0 as *u8;
             if (*idecl).kind == NODE_FUNC_DECL() { owner_sym_raw = (*node_func_decl_data(idecl)).sym; }
             if owner_sym_raw != (0 as *u8) { (*(owner_sym_raw as *Sym)).module = mod_name; }
@@ -295,7 +317,7 @@ fn resolve_one_import_v1(mod_path: *u8, mod_name: *u8, arena: *Arena,
         j = j + (1 as i64);
     }
     free(mod_source); free(ml_buf); free(mp_buf);
-    return 0 as i32;
+    return errors_ti;
 }
 
 // inline_imports: 翻译 v0 main.c:241 resolve_imports
@@ -479,8 +501,10 @@ fn build_il(input: *u8, output: *u8) -> i32 {
         return 1 as i32;
     }
 
-    // ── Inline imports (AST-level merge, translates v0 resolve_imports) ──
+    // ── Inline imports ──
+    jh_fputs_stderr("[1] imports start\n" as *u8);
     let imp_err = inline_imports(ast_node, input, &arena);
+    jh_fputs_stderr("[2] imports done\n" as *u8);
     if imp_err > (0 as i32) {
         jh_fputs_stderr("import resolution failed\n" as *u8);
         free(source);
@@ -488,6 +512,7 @@ fn build_il(input: *u8, output: *u8) -> i32 {
     }
 
     // ── Sema ──
+    jh_fputs_stderr("[3] sema start\n" as *u8);
     let mut sema_v1: SemaContext = SemaContext {
         arena:            0 as *Arena,
         module:           0 as *Node,
