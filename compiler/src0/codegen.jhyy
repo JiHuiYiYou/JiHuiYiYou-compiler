@@ -2639,9 +2639,11 @@ fn cg_emit_const_data_elem(ir: *IRBuf, e: *Node, t: *Type, first_ptr: *u8) -> i3
 // cg_body_returns 定义移到 cg_expr 之前（v1.0.0 sprint 5：NODE_IF 也用）
 
 fn cg_func(cg_raw: *u8, n: *Node) -> i32 {
+    if n == (0 as *Node) { return 0; }
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
     let fd = node_func_decl_data(n);
+    if fd == (0 as *u8) { return 0; }
     if (*fd).is_extern != (0 as i32) {
         return 1;
     }
@@ -2822,6 +2824,7 @@ fn cg_module(ir: *IRBuf, module: *Node) -> i32 {
     while di_a < ndeccls {
         let d_slot_a = ptr_add_u8((*md).decls, di_a * (8 as i64)) as **Node;
         let d_node_a = *d_slot_a;
+        if d_node_a == (0 as *Node) { di_a = di_a + (1 as i64); } else {
         if (*d_node_a).kind == NODE_CONST_DECL() {
             let d_a = node_const_decl_data(d_node_a);
             let arr_t_raw = (*((*d_a).sym as *Sym)).type_ptr;
@@ -2907,17 +2910,26 @@ fn cg_module(ir: *IRBuf, module: *Node) -> i32 {
                 }
             }
         }
+        }  // close else from NULL guard
         di_a = di_a + (1 as i64);
     }
 
     // Pass B: 逐个 func decl dispatch → cg_func
+    jh_fputs_stderr("[cg] Pass B start\n" as *u8);
     let mut di: i64 = 0 as i64;
     while di < ndeccls {
+        if di % (1000 as i64) == (0 as i64) {
+            jh_fputs_stderr("[cg] B i=" as *u8);
+            jh_fmt_lld_stderr("%d" as *u8, di);
+            jh_fputs_stderr("\n" as *u8);
+        }
         let d_slot = ptr_add_u8((*md).decls, di * (8 as i64)) as **Node;
         let d_node = *d_slot;
+        if d_node == (0 as *Node) { di = di + (1 as i64); } else {
         if (*d_node).kind == NODE_FUNC_DECL() {
             cg_func(cg_raw, d_node);
         }
+        }  // close else from NULL guard
         di = di + (1 as i64);
     }
     return 1;

@@ -533,19 +533,15 @@ fn build_il(input: *u8, output: *u8) -> i32 {
     }
 
     // ── IR + Codegen ──
-    let mut ir_v1: IRBuf = IRBuf {
-        arena:      0 as *Arena,
-        sb:         0 as *StringBuilder,
-        next_tmp:   0 as i32,
-        next_block: 0 as i32,
-        next_data:  0 as i32,
-        data_sb:    0 as *StringBuilder,
-        data_used:  0 as i32,
-    };
-    // Sprint 4.1 IL_ONLY #2: cur_block 由 ir_init 设 (避开 v0 codegen struct-field assign bug)
-    ir_init(&ir_v1, &arena);
-    cg_module(&ir_v1, ast_node);
-    ir_flush_data(&ir_v1);
+    jh_fputs_stderr("[4] post-sema\n" as *u8);
+    // W-005 #2 workaround: malloc IRBuf avoids both stack overflow and arena exhaustion
+    let ir_v1 = malloc(128 as i64) as *IRBuf;
+    ir_init(ir_v1, &arena);
+    jh_fputs_stderr("[4a] ir_init done\n" as *u8);
+    cg_module(ir_v1, ast_node);
+    jh_fputs_stderr("[4b] cg_module done\n" as *u8);
+    ir_flush_data(ir_v1);
+    jh_fputs_stderr("[4] codegen done\n" as *u8);
 
     // ── 写 <output>.il ──
     let il_path_buf = malloc(1024 as i64);
@@ -565,7 +561,7 @@ fn build_il(input: *u8, output: *u8) -> i32 {
         return 1 as i32;
     }
     // fwrite((*ir.sb).buf, 1, (*ir.sb).len, ilf)
-    let sb_inner = ir_v1.sb;
+    let sb_inner = (*ir_v1).sb;
     let buf_p = (*sb_inner).buf;
     let buf_len = (*sb_inner).len;
     fwrite(buf_p, (1 as i64), buf_len, ilf);
