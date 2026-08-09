@@ -807,8 +807,6 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             int is_stack = 0;
             IRVal val = cg_find_local(cg, id->sym, &is_stack);
             if (is_stack) {
-                IRVal result = ir_new_tmp(cg->ir, 'l');
-                ir_emit_copy(cg->ir, result, 0);
                 /* return the stack slot address */
                 return val;
             }
