@@ -105,6 +105,48 @@ def fix_output_il(input_path, output_path):
         else:
             i += 1
 
+    # Fix 7: repair corrupted QBE type chars in instructions
+    # W-005 #2 corrupts the qbe_type byte after "=" in "%tN =X op ..."
+    valid_types = {ord('w'), ord('l'), ord('s'), ord('d'), ord('b'), ord('h')}
+    type_fixes = 0
+    for i in range(len(lines)):
+        line = lines[i]
+        # Match: "    %tN =X ..." where X is the result type
+        m = re.match(rb'(    %t\d+ =)(.)(.+)', line)
+        if m:
+            prefix = m.group(1)
+            type_byte = m.group(2)
+            rest = m.group(3)
+            if type_byte[0] not in valid_types:
+                # Determine correct type from instruction
+                rest_stripped = rest.lstrip()
+                if rest_stripped.startswith(b'copy'):
+                    new_type = b'w'
+                elif rest_stripped.startswith(b'loadw') or rest_stripped.startswith(b'storew'):
+                    new_type = b'w'
+                elif rest_stripped.startswith(b'loadl') or rest_stripped.startswith(b'storel'):
+                    new_type = b'l'
+                elif rest_stripped.startswith(b'loads') or rest_stripped.startswith(b'stores'):
+                    new_type = b's'
+                elif rest_stripped.startswith(b'loadd') or rest_stripped.startswith(b'stored'):
+                    new_type = b'd'
+                elif rest_stripped.startswith(b'ceqw') or rest_stripped.startswith(b'csltw') or rest_stripped.startswith(b'cultw'):
+                    new_type = b'w'
+                elif rest_stripped.startswith(b'ceql') or rest_stripped.startswith(b'csltl') or rest_stripped.startswith(b'cultl') or rest_stripped.startswith(b'csgtl'):
+                    new_type = b'l'
+                elif rest_stripped.startswith(b'alloc'):
+                    new_type = b'l'
+                elif rest_stripped.startswith(b'call') or rest_stripped.startswith(b'phi'):
+                    new_type = b'w'
+                elif rest_stripped.startswith(b'extsw') or rest_stripped.startswith(b'extsb') or rest_stripped.startswith(b'extsh'):
+                    new_type = b'l'
+                elif rest_stripped.startswith(b'add') or rest_stripped.startswith(b'sub') or rest_stripped.startswith(b'mul') or rest_stripped.startswith(b'div'):
+                    new_type = b'w'
+                else:
+                    new_type = b'w'  # default
+                lines[i] = prefix + new_type + rest
+                type_fixes += 1
+
     data = b'\n'.join(lines)
 
     with open(output_path, 'wb') as f:
@@ -112,7 +154,7 @@ def fix_output_il(input_path, output_path):
 
     t0 = data.count(b'%t0')
     nul = data.count(b'\x00')
-    print(f"Output fix: {ret_fixes} ret fixes, %t0={t0}, NUL={nul}")
+    print(f"Output fix: {ret_fixes} ret fixes, {type_fixes} type fixes, %t0={t0}, NUL={nul}")
 
 if __name__ == '__main__':
     fix_output_il(sys.argv[1], sys.argv[2])
