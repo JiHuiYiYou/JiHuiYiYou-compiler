@@ -31,3 +31,30 @@
 - v0 codegen.c W-005 #2 真修 (用户授权后)
 - Stage 2 N=3 byte-equal (M4 hard)
 - tag v1.0.0 (post-M4)
+
+---
+
+## Sprint 4.24 — inline_imports dedup 真修 (W-011 RESOLVED, 2026-08-10)
+
+**commit 2.80:** `compiler/src0/main.jhyy` `resolve_one_import_v1` 加 in_progress push + pop+completed push 块（镜像 `compiler/src/main.c:159-229`）。
+
+### 验证数据
+
+| 指标 | 修前 | 修后 |
+|------|------|------|
+| `jhyy_v2.exe.il` `^export function` 计数 | 4715 | **567** (≈560 预期) |
+| `arena__*` 副本数 | 89 | **1** |
+| `util__*` 副本数 | 47 | **1** |
+| `as` 阶段 `symbol already defined` | 1500+ | 0 |
+| regress.py (C-side) | 50/53 | **50/53** (持平) |
+| regress_v1.py (jhyy_v1) | 50/53 | **50/53** (持平) |
+
+### 已知限制（Stage 2 self-build 仍未闭环）
+
+jhyy_v2 self-build (jhyy_v2 → jhyy_v2.exe.exe) 在 QBE 阶段 fail — `export function $parser__empty_token` 等 sret 函数 emit `ret %t4259`，QBE 报 `newline expected`。独立于 W-011 的 sret emit bug,需要 Sprint 4.25+ 修（选项: A) cg_expr 内联手写 struct 字段拷贝 / B) cmd_compile 自动调用 fix_il.py）。
+
+### 引用
+
+- W-011: `docs/internal/workarounds.md`
+- 计划: `C:\Users\liuzhen\.claude\plans\jaunty-orbiting-naur.md`
+- C-side 镜像: `compiler/src/main.c:159-229` (push/pop 正确实现)

@@ -276,6 +276,23 @@ fn resolve_one_import_v1(mod_path: *u8, mod_name: *u8, arena: *Arena,
     // Sprint 4.12: decl processing with transitive import
     let mut errors_ti: i32 = 0 as i32;
     let imd = node_module_data(mod_ast);
+
+    // Sprint 4.24: push mod_path to in_progress BEFORE recursion (cycle detection)
+    // mirror C-side main.c:159-161
+    // Slot layout: first 8 bytes = *u8 pointer to a separate heap path buf,
+    // next 504 bytes unused. Path buf lives forever (heap leak, like mod_path).
+    if (*nin_progress) < (64 as i64) {
+        let ip_path_buf = malloc(512 as i64);
+        let mut ip_off: i64 = 0 as i64;
+        ip_off = str_concat_at(ip_path_buf as *u8, ip_off, mod_path);
+        let ip_nul = (ip_path_buf as i64 + ip_off) as *u8;
+        store_byte_i32(ip_nul, 0 as i32);
+        // Write the *u8 pointer at slot offset (slot is interpreted as **u8)
+        let ip_slot_pp = (in_progress as i64 + (*nin_progress) * (512 as i64)) as **u8;
+        (*ip_slot_pp) = ip_path_buf as *u8;
+        (*nin_progress) = (*nin_progress) + (1 as i64);
+    }
+
     let mut j: i64 = 0 as i64;
     while j < (*imd).ndeccls {
         let idecl = *(((*imd).decls as i64 + j * (8 as i64)) as **Node);
@@ -322,6 +339,40 @@ fn resolve_one_import_v1(mod_path: *u8, mod_name: *u8, arena: *Arena,
         }
         j = j + (1 as i64);
     }
+
+    // Sprint 4.24: pop mod_path from in_progress, push to completed (dedup)
+    // mirror C-side main.c:215-229
+    let mut ip_k: i64 = 0 as i64;
+    let mut ip_found: i32 = 0 as i32;
+    while ip_k < (*nin_progress) {
+        let ip_slot = (in_progress as i64 + ip_k * (512 as i64)) as **u8;
+        if strcmp((*ip_slot), mod_path) == (0 as i32) {
+            // shift remaining down (preserve order, match C-side semantics)
+            let mut ip_m: i64 = ip_k;
+            while ip_m < (*nin_progress) - (1 as i64) {
+                let src_slot = (in_progress as i64 + (ip_m + (1 as i64)) * (512 as i64)) as **u8;
+                let dst_slot = (in_progress as i64 + ip_m * (512 as i64)) as **u8;
+                (*dst_slot) = (*src_slot);
+                ip_m = ip_m + (1 as i64);
+            }
+            (*nin_progress) = (*nin_progress) - (1 as i64);
+            ip_found = 1 as i32;
+        }
+        ip_k = ip_k + (1 as i64);
+    }
+    // push to completed (cap 64, match C-side)
+    // Same layout as in_progress push above.
+    if (*ncompleted) < (64 as i64) {
+        let cp_path_buf = malloc(512 as i64);
+        let mut cp_off: i64 = 0 as i64;
+        cp_off = str_concat_at(cp_path_buf as *u8, cp_off, mod_path);
+        let cp_nul = (cp_path_buf as i64 + cp_off) as *u8;
+        store_byte_i32(cp_nul, 0 as i32);
+        let cp_slot_pp = (completed as i64 + (*ncompleted) * (512 as i64)) as **u8;
+        (*cp_slot_pp) = cp_path_buf as *u8;
+        (*ncompleted) = (*ncompleted) + (1 as i64);
+    }
+
     free(mod_source); free(ml_buf); free(mp_buf);
     return errors_ti;
 }

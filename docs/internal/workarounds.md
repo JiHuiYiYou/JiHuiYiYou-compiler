@@ -1089,3 +1089,36 @@ QBE：`invalid type for second operand %t29 in ceql`
 - [`project_sprint4_22_cgexpr_signature_mismatch.md`](../../../../Users/liuzhen/.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_sprint4_22_cgexpr_signature_mismatch.md) — Sprint 4.22 假说错误 postmortem
 - Sprint 4.23 plan: `C:\Users\liuzhen\.claude\plans\jaunty-orbiting-naur.md`
 
+---
+
+## W-011: inline_imports emit module 全量重复（Stage 2 设计缺陷）— RESOLVED
+
+**ID:** W-011
+**状态:** ✅ RESOLVED (Sprint 4.24 commit 2.80)
+**日期:** 2026-08-10
+**触发面:** `jhyy_v2` 编 `compiler/src0/main.jhyy` (12 个 module + transitive imports)，所有 module 函数在 IL 里 emit 多份（arena 89 份/util 47 份）
+**症状:** QBE 通过，但 `as` 报 1500+ 处 `symbol 'X' is already defined`；jhyy_v2 self-build 在 link 阶段 fail
+**根因:** `compiler/src0/main.jhyy` 的 `resolve_one_import_v1` 实现了 `completed[]` / `in_progress[]` 数组（64×512 byte slots）+ helper (`completed_match` / `in_progress_match`)，但**全文件零次写**这两个数组。C-side `compiler/src/main.c:159-229` 正确实现 push/pop 机制（push to in_progress BEFORE recursion, pop + push to completed AFTER recursion）。jhyy-side 缺这两段关键代码
+
+**fix (Sprint 4.24 commit 2.80):** 在 `resolve_one_import_v1` 加两个 block：
+1. **Step 1 (line ~280)**: parse 校验通过后、decl 迭代前 push mod_path 到 `in_progress[]`（cycle detection）
+2. **Step 2 (line ~339)**: decl 迭代完后、free 前 pop mod_path from `in_progress[]` + push to `completed[]`（dedup）
+
+字节复制用 `str_concat_at`（不能存指针，因为 mod_path 是父 frame 的临时 npath）；slot layout 用 `*u8` 指针 + 单独 `malloc(512)` heap buffer（与 C-side 64×512 byte 数组兼容）
+
+**结果 (验证):**
+- IL `^export function` 计数：**4715 → 567**（接近 plan 预期 ~560）
+- `arena__*` 副本数：**89 → 1**
+- `util__*` 副本数：**47 → 1**
+- `regress.py` (C-side)：**50/53 PASS**（持平 baseline）
+- `regress_v1.py` (jhyy_v1)：**50/53 PASS**（持平 baseline）
+- `jhyy_v1.exe.exe` (sha `402b03e1...`) 编 `main.jhyy` 成功
+- `jhyy_v2.exe.il` (sha `9b67e53...`) export 唯一计数达成
+
+**Out of scope (Sprint 4.24):** jhyy_v2 self-build (jhyy_v2 → jhyy_v2.exe.exe) 仍 fail — QBE 在 line 10157 报 `newline expected, got ?? instead`，是独立 sret emit bug（`cg_expr` 的 `NODE_RETURN` 在 has_sret 时 emit `ret %tN` 而非 `ret`），跟 W-011 正交。修复需要 Sprint 4.25+ 走 cg_copy_struct inline rewrite 或 cmd_compile 自动调用 fix_il.py
+
+**引用:**
+- Sprint 4.24 plan: `C:\Users\liuzhen\.claude\plans\jaunty-orbiting-naur.md`
+- v0.9 wip commit 2.80 (Sprint 4.24 dedup 真修)
+- C-side reference: `compiler/src/main.c:159-229` (correct push/pop logic)
+
