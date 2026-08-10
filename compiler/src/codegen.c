@@ -52,15 +52,18 @@ static void cg_add_local(CGContext *cg, Sym *sym, IRVal val, int is_stack) {
     }
 }
 
-static IRVal cg_find_local(CGContext *cg, Sym *sym, int *is_stack) {
+/* W-005 #2: out-param form avoids struct pass-by-value corruption at GCC -O2.
+   Caller passes pointer to a stack-allocated IRVal; cg_find_local writes the
+   resolved value through *out. */
+static void cg_find_local(CGContext *cg, Sym *sym, int *is_stack, IRVal *out) {
     for (int i = 0; i < cg->nlocals; i++) {
         if (cg->locals[i].sym == sym) {
             if (is_stack) *is_stack = cg->locals[i].is_stack;
-            return cg->locals[i].value;
+            *out = cg->locals[i].value;
+            return;
         }
     }
-    IRVal zero = {0};
-    return zero;
+    *out = (IRVal){0};  /* zero sentinel: id=0, kind=IRVAL_TEMP */
 }
 
 /* ── forward ── */
@@ -303,7 +306,8 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             return v;
         }
         int is_stack = 0;
-        IRVal loc = cg_find_local(cg, d->sym, &is_stack);
+        IRVal loc;
+        cg_find_local(cg, d->sym, &is_stack, &loc);
         if (is_stack) {
             /* structs/arrays/slices are always manipulated via address */
             if (n->type && (n->type->kind == KIND_STRUCT ||
@@ -805,7 +809,8 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         if (d->expr->kind == NODE_IDENT) {
             NodeIdent *id = node_ident_data(d->expr);
             int is_stack = 0;
-            IRVal val = cg_find_local(cg, id->sym, &is_stack);
+            IRVal val;
+            cg_find_local(cg, id->sym, &is_stack, &val);
             if (is_stack) {
                 /* return the stack slot address */
                 return val;
@@ -1027,7 +1032,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
                 base = cg_expr(cg, d->expr);  /* emits `addr $name` */
             } else {
                 int is_stack = 0;
-                base = cg_find_local(cg, id->sym, &is_stack);
+                cg_find_local(cg, id->sym, &is_stack, &base);
             }
         } else if (is_slice) {
             IRVal slice_addr = cg_expr(cg, d->expr);
@@ -1335,7 +1340,8 @@ static void cg_stmt(CGContext *cg, Node *n) {
             /* variable assignment */
             NodeIdent *id = node_ident_data(d->target);
             int is_stack = 0;
-            IRVal slot = cg_find_local(cg, id->sym, &is_stack);
+            IRVal slot;
+            cg_find_local(cg, id->sym, &is_stack, &slot);
             if (is_stack) {
                 if (d->target->type && d->target->type->kind == KIND_STRUCT) {
                     /* struct copy: val is source address */
@@ -1357,7 +1363,7 @@ static void cg_stmt(CGContext *cg, Node *n) {
                 if (is_array && idx->expr->kind == NODE_IDENT) {
                     NodeIdent *id = node_ident_data(idx->expr);
                     int is_stack = 0;
-                    base = cg_find_local(cg, id->sym, &is_stack);
+                    cg_find_local(cg, id->sym, &is_stack, &base);
                 } else {
                     base = cg_expr(cg, idx->expr);
                 }
