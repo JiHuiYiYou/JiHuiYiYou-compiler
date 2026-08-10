@@ -3111,3 +3111,52 @@ typedef struct {
 - `memory/project_sprint4_6_workaround_failed.md` — Option 2/4 Variants 1+2 实证
 - `memory/feedback_fix_evaluation_rule.md` — 5/5 PASS 规则 (W-005 实修 trial 拒了 2 个 5/5 segfault fix)
 - `memory/feedback_codegen_workaround_linkage.md` — W-005 联动 W-008/W-009/W-007
+
+---
+
+## v0.9 wip commit 2.81 (2026-08-10) — Sprint 4.25 W-005 #2 + sret 一并真修 (sentinel 守卫路径)
+
+**任务**: 真修 W-005 #2 (sentinel pollution — `cg_copy_struct` emit `copy %t0` 当 src/dst 是 undef IRVal) + sret emit bug (cg_expr NODE_RETURN has_sret 时 emit `ret %tN` 而非 `ret`)。
+
+**前情 (Sprint 4.21–4.24 多次 attempt)**: W-005 #2 真修路径从 Sprint 4.13 IRVal layout alignment → Sprint 4.21 Phase B+C+D+G (IRVal pass-by-value → 指针) → Sprint 4.22 (cg_match_pattern `let mut + if/else` 改条件表达式) → 全部 假说错误/不可达。
+
+**Sprint 4.25 真根因 (Plan agent 验证 2026-08-10)**:
+1. `next_tmp = 1` (ir.c:38) → `kind=IRVAL_TEMP, id=0` 是 sentinel（永不被合法分配）
+2. `cg_body_returns()` 纯语法检查（只看最后 stmt）
+3. 函数体 `if c { return A } else { return B }` → `body_returns()==false` → epilogue 跑 → `body_val` = NODE_BLOCK 的 `IRVal last = {0}` (codegen.c:698)
+4. epilogue → `cg_copy_struct` → 逐字段 emit `copy %t0` → QBE reject
+5. NODE_RETURN sret 分支 (codegen.c:1474) 同理
+
+**真修 (A′ 路径, 8 处)**:
+1. `compiler/src/ir.h:33-42`: 加 `static inline int irval_is_undef(IRVal v)` helper（`v.kind == IRVAL_TEMP && v.id == 0`）
+2. `compiler/src/codegen.c:142-148`: `cg_copy_struct` 开头 early-return if src or dst undef
+3. `compiler/src/codegen.c:1481-1486`: NODE_RETURN sret 分支守卫
+4. `compiler/src/codegen.c:1718-1728`: cg_func epilogue sret 守卫
+5-8. `compiler/src0/ir.jhyy` + `compiler/src0/codegen.jhyy`: 镜像 4 处（双源一致性）
+
+**关键不变量**: 守卫只在 sentinel (id=0) 时短路；`next_tmp=1` 让 sentinel 永不被 `ir_new_tmp` 分配；任何走 sentinel 路径的代码本来就会 emit 非法 IL — 所以守卫**不改正确程序输出**。
+
+**撤 WIP**: 之前 stash@0 的 WIP `irval_read` helper (按值返回 IRVal, 自相矛盾) + `NODE_RETURN has_sret` bare-`ret` 分支 (sret void 假设) — 全部 `git stash drop`, 因为 A′ 守卫 supersede 两个 workaround。
+
+**最小复现验证** (`compiler/build/bin/_repro_t0.jhyy`, 函数体 `if c { return A } else { return B }` + struct return):
+- BEFORE fix: `qbe:_repro_t0.il.il:50: invalid type for first operand %t0 in copy`
+- AFTER fix: compiled successfully, **EXIT=30 ✓** (10+20)
+
+**度量 (2026-08-10)**:
+| 指标 | 旧 | 新 | Δ |
+|---|---|---|---|
+| regress.py (C-side) | 50/53 baseline | **50/53 PASS** | 持平 |
+| regress_v1.py (jhyy_v1) | 50/53 baseline | **50/53 PASS** | 持平 |
+| Stage 1 byte-equal | 7/7 baseline | **7/7 PASS** | 持平 |
+| jhyy_v1.exe.exe sha | 9b67e53... | **43c66665...** | rebuilt (clean HEAD rebuild) |
+
+**workarounds.md**: 新增 W-012 完整 entry + 索引（sentinel pollution 真修描述 + 触发面 + fix 点 + 不变量 + 验证）
+
+**不 tag v1.0.0**: Sprint 4.26 Stage 2 N=3 byte-equal 重测后再决定（已知仍可能有别的 Stage 2 差异）
+
+**Sprint 4.25 plan**: `C:\Users\liuzhen\.claude\plans\jaunty-orbiting-naur.md`
+
+### 相关 memory
+
+- (留底后补 — Sprint 4.25 真根因 plan agent 验证 + A′ 守卫实施)
+- `memory/feedback_codegen_workaround_linkage.md` — W-005/W-008/W-009/W-007 联动 (本 fix 是 W-005 #2 family 最后一块拼图)

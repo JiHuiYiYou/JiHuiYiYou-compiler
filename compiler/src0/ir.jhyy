@@ -104,6 +104,26 @@ type IRVal = struct {
 
 fn IRVAL_SIZE() -> i64 { return 40 as i64; }
 
+// Sprint 4.25 W-005 #2 真修: `next_tmp` starts at 1 (ir.jhyy 对应 ir.c:38), so
+// id==0 is reserved as the "undefined / sentinel" IRVal. Callers initialize
+// locals with `IRVal v = {0,...};` then never overwrite them when codegen
+// decides to skip emission (e.g. NODE_IF when both arms terminate with return,
+// NODE_BLOCK after return). Letting that sentinel reach cg_copy_struct /
+// ir_emit_ret / ir_emit_store emits `copy %t0` / `\0 %t0` — QBE rejects with
+// "invalid type for first operand". Guard each downstream consumer with
+// irval_is_undef(v) BEFORE emitting. Mirror of compiler/src/ir.h.
+fn irval_is_undef(v: IRVal) -> i32 {
+    if v.kind != 0 {
+        return 0;
+    }
+    if v.id != 0 {
+        return 0;
+    }
+    return 1;
+}
+
+// IRVAL_TEMP() = 0 (codegen.jhyy:kind enum order)。kind==0 + id==0 是 sentinel.
+
 // ════════════════════════════════════════════════════
 // IRBuf
 // ════════════════════════════════════════════════════

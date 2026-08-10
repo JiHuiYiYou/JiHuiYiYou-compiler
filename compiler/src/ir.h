@@ -30,6 +30,17 @@ typedef struct {
     char qbe_type;        /* offset 24, 1 byte (matches jhyy) */
 } IRVal;
 
+/* Sprint 4.25 W-005 #2 真修: `next_tmp` starts at 1 (ir.c:38), so id==0 is
+   reserved as the "undefined / sentinel" IRVal. Callers initialize locals with
+   `IRVal v = {0};` then never overwrite them when codegen decides to skip
+   emission (e.g. NODE_IF when both arms terminate with return). Letting that
+   sentinel reach cg_copy_struct / ir_emit_ret / ir_emit_store emits
+   `copy %t0` / `\0 %t0` — QBE rejects with "invalid type for first operand".
+   Guard each downstream consumer with irval_is_undef(v) BEFORE emitting. */
+static inline int irval_is_undef(IRVal v) {
+    return v.kind == IRVAL_TEMP && v.id == 0;
+}
+
 /* ── Key: which QBE type character to use for a jhyy Type ── */
 char qbe_type_of(Type *t);
 

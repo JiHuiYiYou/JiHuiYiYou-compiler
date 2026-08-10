@@ -419,6 +419,17 @@ fn cg_copy_struct(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) ->
     if (*st).kind != KIND_STRUCT() {
         return 0;
     }
+    // Sprint 4.25 W-005 #2 真修: callers may pass a sentinel IRVal (kind=0,
+    // id=0) when the value source was unreachable (e.g. cg_func epilogue with
+    // body = `if c { return A } else { return B }`). Without this guard, the
+    // inner field-by-field emit loop produces `%t%d =l copy %t0` lines that
+    // QBE rejects with "invalid type for first operand %t0".
+    if irval_is_undef(src_addr) != 0 {
+        return 0;
+    }
+    if irval_is_undef(dst_addr) != 0 {
+        return 0;
+    }
     let nfields = (*st).nfields;
     let fields = (*st).fields;
     let mut i: i64 = 0 as i64;
@@ -932,11 +943,30 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
     if kind == NODE_RETURN() {
         let d = node_return_data(n);
         if (*d).expr != (0 as *Node) {
-            let val = cg_expr(cg_raw, (*d).expr);
-            let _ = ir_emit_ret(ir, val);
+            if (*cg).has_sret != 0 {
+                // Sprint 4.25 W-005 #2 真修: sret struct return path.
+                //   cg_expr(expr) returns value; copy to sret slot via cg_copy_struct
+                //   (guarded against sentinel src); then bare `ret`.
+                //   Mirror of compiler/src/codegen.c NODE_RETURN sret branch.
+                let src = cg_expr(cg_raw, (*d).expr);
+                let sret_addr = IRVal { kind: 0, id: (*cg).sret_slot_id as i32, ival: 0 as i64, name: 0 as *u8, qbe_type: QBE_L() };
+                if irval_is_undef(src) == 0 {
+                    let _ = cg_copy_struct(cg_raw, (*cg).current_ret_type, sret_addr, src);
+                }
+                let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+                let _ = ir_emit_ret(ir, v);
+            } else {
+                let val = cg_expr(cg_raw, (*d).expr);
+                let _ = ir_emit_ret(ir, val);
+            }
         } else {
-            let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-            let _ = ir_emit_ret(ir, v);
+            if (*cg).has_sret != 0 {
+                // sret void return (rare): bare `ret\n`
+                let _ = ir_emit_str(ir, "    ret\n" as *u8);
+            } else {
+                let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+                let _ = ir_emit_ret(ir, v);
+            }
         }
         return zero;
     }
@@ -2780,7 +2810,15 @@ fn cg_func(cg_raw: *u8, n: *Node) -> i32 {
             // 用 IRVal literal (struct 构造) 包 sret_slot_id, 避免读
             // (*cg).sret_slot 触发 bug 8 struct-to-buffer copy
             let sret_addr = IRVal { kind: 0, id: (*cg).sret_slot_id as i32, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-            let _ = cg_copy_struct(cg_raw, ret_type, sret_addr, body_val);
+            // Sprint 4.25 W-005 #2 真修: body_val is sentinel IRVal{id=0} when
+            // `cg_body_returns()` is syntactic-only (e.g. body is `if c { return A }
+            // else { return B }` — both arms terminate, but the if-expression
+            // still produces a value, and codegen returns the pre-return then_val
+            // which was never overwritten). Without this guard, cg_copy_struct
+            // emits `copy %t0` and QBE rejects the whole function.
+            if irval_is_undef(body_val) == 0 {
+                let _ = cg_copy_struct(cg_raw, ret_type, sret_addr, body_val);
+            }
             let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
             ir_emit_ret(ir, v);
         } else if ret_qt != (0 as i32) {

@@ -142,6 +142,12 @@ static void cg_emit_store(CGContext *cg, Type *t, IRVal val, IRVal addr) {
    Handles nested structs recursively. */
 static void cg_copy_struct(CGContext *cg, Type *st, IRVal dst_addr, IRVal src_addr) {
     if (!st || st->kind != KIND_STRUCT) return;
+    /* Sprint 4.25 W-005 #2 真修: callers may pass a sentinel IRVal (kind=IRVAL_TEMP,
+       id=0) when the value source was unreachable (e.g. cg_func epilogue with
+       body = `if c { return A } else { return B }`). Without this guard, the
+       inner field-by-field emit loop produces `%%t%d =l copy %%t0` lines that
+       QBE rejects with "invalid type for first operand %t0". */
+    if (irval_is_undef(src_addr) || irval_is_undef(dst_addr)) return;
     for (size_t i = 0; i < st->struct_type.nfields; i++) {
         Type *ft = st->struct_type.fields[i].type;
         size_t offset = st->struct_type.fields[i].offset;
@@ -1474,7 +1480,12 @@ static void cg_stmt(CGContext *cg, Node *n) {
                 IRVal sret_addr = {0};
                 sret_addr.id = cg->sret_slot_id;
                 sret_addr.qbe_type = 'l';
-                cg_copy_struct(cg, cg->current_ret_type, sret_addr, src);
+                /* Sprint 4.25 W-005 #2 真修: skip cg_copy_struct when src is the
+                   sentinel (e.g. unreachable expression); cg_copy_struct itself
+                   is guarded but skipping early keeps the `ret` clean. */
+                if (!irval_is_undef(src)) {
+                    cg_copy_struct(cg, cg->current_ret_type, sret_addr, src);
+                }
                 IRVal v = {0};
                 ir_emit_ret(cg->ir, v);
             } else {
@@ -1705,7 +1716,15 @@ static void cg_func(IRBuf *ir, Node *n) {
             IRVal sret_addr = {0};
             sret_addr.id = cg.sret_slot_id;
             sret_addr.qbe_type = 'l';
-            cg_copy_struct(&cg, ret_type, sret_addr, body_val);
+            /* Sprint 4.25 W-005 #2 真修: body_val is sentinel IRVal{id=0} when
+               `body_returns()` is syntactic-only (e.g. body is `if c { return A }
+               else { return B }` — both arms terminate, but the if-expression
+               still produces a value, and codegen returns the pre-return then_val
+               which was never overwritten). Without this guard, cg_copy_struct
+               emits `copy %t0` and QBE rejects the whole function. */
+            if (!irval_is_undef(body_val)) {
+                cg_copy_struct(&cg, ret_type, sret_addr, body_val);
+            }
             IRVal v = {0};
             ir_emit_ret(ir, v);
         } else if (ret_qt != 0 && body_val.qbe_type != 0) {

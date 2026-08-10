@@ -37,6 +37,7 @@
 | [B-let2 (cross-ref)](#cross-ref-b-let2-stage-1-byte-equal-codegen-gap) | RESOLVED (v0.9 commit 2.5) | jhyy_v1 `cg_convert_arg` 缺 `src=l, dst=w` narrow 分支 → `i64 → i32` 字段赋值 / `as` 转换 emit 错 IL。详见 [`codegen-pitfalls.md` § 2.2](codegen-pitfalls.md) |
 | [W-008 ↔ W-009 ↔ W-007 ↔ W-005 (cross-ref)](#cross-ref-w-008--w-009--w-007--w-005-codegen-转化路径联动) | mixed (W-005 RESOLVED, W-008/W-009 RESOLVED, W-007 ACTIVE) | 4 个 workaround 都在 jhyy_v1 `cg_convert_arg` + NODE_ASSIGN + NODE_FIELD codegen 路径, 真修需要联动考虑 |
 | [W-010](#w-010-jhyy-端-max_locals--512-vs-c-端-1024--cg_add_local-静默溢出致-t0-污染) | RESOLVED (v0.9 wip commit 2.79) | jhyy-side `MAX_LOCALS=512` 比 C-side `1024` 小 2× → cg_expr 本地变量数溢出时 cg_add_local 静默返回 0 → cg_find_local miss → emit `%t0`(QBE temp 0,sentinel); align jhyy-side 到 1024 全消除 |
+| [W-012](#w-012-codegen-emit-layer-sentinel-pollution-cg_copy_struct-emit-copy--t0-when-src_addrundef) | RESOLVED (v0.9 wip commit 2.81) | C/jhyy `cg_copy_struct` 在 src/dst 是 sentinel `IRVal{0}` (kind=IRVAL_TEMP, id=0) 时仍逐字段 emit `copy %t0`, QBE reject. 真修: `irval_is_undef(v)` sentinel 守卫 (3 emit 点 + 1 helper). |
 
 ---
 
@@ -1121,4 +1122,68 @@ QBE：`invalid type for second operand %t29 in ceql`
 - Sprint 4.24 plan: `C:\Users\liuzhen\.claude\plans\jaunty-orbiting-naur.md`
 - v0.9 wip commit 2.80 (Sprint 4.24 dedup 真修)
 - C-side reference: `compiler/src/main.c:159-229` (correct push/pop logic)
+
+---
+
+## W-012: codegen emit-layer sentinel pollution — cg_copy_struct emit `copy %t0` when src/dst undef
+
+**ID:** W-012
+**状态:** ✅ RESOLVED (v0.9 wip commit 2.81, Sprint 4.25)
+**日期:** 2026-08-10
+**触发面:** 函数体是 `if c { return A } else { return B }` 这种**两条 return 分支**的结构，其中：
+- B = struct return 函数（has_sret = 1, 返回 aggregate type）
+- A, B 都是非平凡表达式
+
+**症状:**
+- `compiler/build/bin/*.il` 出现 `copy %t0` / `\0 %t0`（QBE 错：`invalid type for first operand %t0 in copy` / `in csltl` 等）
+- 单文件 regress 不触发（结构简单，return 直接 emit 不经过 cg_copy_struct）
+- jhyy_v2 编 src0/main.jhyy 触发（大函数 + 多个 struct-return 模式）
+
+**根因 (Plan agent 验证, 2026-08-10):**
+1. `ir_init` (`compiler/src/ir.c:38`) 设 `next_tmp = 1`，所以 `%t0` 永不被合法分配 → IRVal `kind=IRVAL_TEMP, id=0` 是 sentinel
+2. **Cg_func epilogue** (`compiler/src/codegen.c:1700-1710`) 用 `cg_body_returns()` 做**纯语法检查**（只看最后一条 stmt）
+3. 但函数体是 `if c { return A } else { return B }` 时：`cg_body_returns() == false`（最后 stmt 不是 return）→ epilogue 跑 → `body_val` 来自 NODE_BLOCK 的 `IRVal last = {0}`（codegen.c:698，return 之前值未覆写）
+4. epilogue → `cg_copy_struct(cg, ret_type, sret_addr, body_val)` → 逐字段 emit `=l copy %t0`
+5. NODE_RETURN sret 分支 (`codegen.c:1474`) 同理：expr 是 unreachable 时仍 emit `cg_copy_struct` → 同 `copy %t0` 污染
+
+**真修 (Sprint 4.25 commit 2.81):** 在 3 个 emit 点 + 1 个 helper 加 `irval_is_undef(v)` 守卫：
+1. `compiler/src/ir.h:33-42`: 加 `static inline int irval_is_undef(IRVal v)` helper（`v.kind == IRVAL_TEMP && v.id == 0`）
+2. `compiler/src/codegen.c:142-148`: `cg_copy_struct` 开头 early-return if src or dst undef
+3. `compiler/src/codegen.c:1481-1486`: NODE_RETURN sret 分支，加 `if (!irval_is_undef(src)) cg_copy_struct(...)` 守卫
+4. `compiler/src/codegen.c:1718-1728`: cg_func epilogue sret 分支，加 `if (!irval_is_undef(body_val)) cg_copy_struct(...)` 守卫
+5. `compiler/src0/ir.jhyy:107-118`: 镜像 `fn irval_is_undef(v: IRVal) -> i32`
+6. `compiler/src0/codegen.jhyy:412-422`: 镜像 cg_copy_struct 守卫
+7. `compiler/src0/codegen.jhyy:931-960`: 镜像 NODE_RETURN sret 分支（has_sret 时走完整 copy，**非** bare `ret`）
+8. `compiler/src0/codegen.jhyy:2780-2792`: 镜像 cg_func epilogue sret 守卫
+
+**关键不变量（byte-equal 保护）:**
+- 守卫只在 `kind=IRVAL_TEMP && id=0`（即 sentinel）时短路
+- `next_tmp = 1` 让 sentinel 永不被 `ir_new_tmp` 分配
+- 任何走 sentinel 路径的代码本来就会 emit 非法 IL（QBE 必 fail 或 runtime 错）
+- 所以守卫**不改正确程序输出** — 7/7 byte-equal 由构造保持
+
+**结果 (验证 2026-08-10):**
+- 最小复现 `_repro_t0.jhyy`: 函数体 `if c { return A } else { return B }` + struct return
+  - BEFORE fix: `qbe:_repro_t0.il.il:50: invalid type for first operand %t0 in copy`
+  - AFTER fix: compiled successfully, **EXIT=30 ✓** (10+20)
+- regress.py (C-side): 50/53 PASS（持平 baseline）
+- regress_v1.py (jhyy_v1.exe.exe sha `43c66665...`): 50/53 PASS（持平 baseline）
+- Stage 1 byte-equal: 7/7 PASS（持平 baseline, 由构造保证）
+
+**Sprint 历史:**
+- Sprint 4.13 IRVal layout alignment (commit 2.45) — 修 IRVal union layout（**DEFINITION 层**），但 `next_tmp=1` + `body_returns()` 纯语法检查仍漏 emit 层 sentinel
+- Sprint 4.21 Phase C (`cg_copy_struct` 改 `const IRVal*`) — 试图用引用改签名，**没修 emit 层 sentinel 短路**
+- Sprint 4.25 (commit 2.81) — Plan agent 找出真根因 (cg_body_returns 纯语法检查 + cg_copy_struct 不 short-circuit), 用 8 处 sentinel 守卫真修
+
+**失效条件:**
+- 任何 `cg_expr` emit IL 时假定 `kind=IRVAL_TEMP, id=0` 是合法值（违反 `next_tmp=1` 不变量）
+- 新的 emit 点加入时忘记加 `irval_is_undef` 守卫
+
+**superseder:** 长期看，`cg_body_returns()` 应该改成可达性分析（data-flow），但这是独立重构；本 fix 在 emit 层挡下游，已足够。
+
+**不 tag v1.0.0:** Sprint 4.26 Stage 2 N=3 byte-equal 重测后再决定（已知仍可能有别的 Stage 2 差异）
+
+**引用:**
+- Sprint 4.25 plan: `C:\Users\liuzhen\.claude\plans\jaunty-orbiting-naur.md`
+- v0.9 wip commit 2.81 (Sprint 4.25 sentinel 真修)
 
