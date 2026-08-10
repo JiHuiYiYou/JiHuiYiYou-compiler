@@ -65,7 +65,7 @@ extern fn jh_sprintf_f32(buf: *u8, val: f64) -> i32;
 // 局部表容量常量（对应 C #define MAX_LOCALS / MAX_LOOP_DEPTH）
 // ════════════════════════════════════════════════════
 
-fn MAX_LOCALS()     -> i32 { return 512 as i32; }
+fn MAX_LOCALS()     -> i32 { return 1024 as i32; }  // Sprint 4.23 step 1: align with C-side (was 512)
 fn MAX_LOOP_DEPTH() -> i32 { return 32 as i32; }
 fn MAX_MATCH_ARMS() -> i32 { return 32 as i32; }
 

@@ -36,6 +36,7 @@
 | [W-009](#w-009-jhyy_v1-cg_convert_arg-src_t--0-返回-arg-未-coerce-导致-literal-0-w-copy-0-在-ceql-被-reject) | RESOLVED | jhyy_v1 codegen cg_convert_arg 在 `src_t==0` 时直接 return arg，但 literal 0 实际 emit `=w copy 0`（因 qbe_type_of(NULL)=QBE_W）→ 比较 l 字段（pointer / i64 / u64）时 `ceql`/`csltl` 等操作码两边操作数类型不匹配 → QBE "invalid type for second operand" 错 |
 | [B-let2 (cross-ref)](#cross-ref-b-let2-stage-1-byte-equal-codegen-gap) | RESOLVED (v0.9 commit 2.5) | jhyy_v1 `cg_convert_arg` 缺 `src=l, dst=w` narrow 分支 → `i64 → i32` 字段赋值 / `as` 转换 emit 错 IL。详见 [`codegen-pitfalls.md` § 2.2](codegen-pitfalls.md) |
 | [W-008 ↔ W-009 ↔ W-007 ↔ W-005 (cross-ref)](#cross-ref-w-008--w-009--w-007--w-005-codegen-转化路径联动) | mixed (W-005 RESOLVED, W-008/W-009 RESOLVED, W-007 ACTIVE) | 4 个 workaround 都在 jhyy_v1 `cg_convert_arg` + NODE_ASSIGN + NODE_FIELD codegen 路径, 真修需要联动考虑 |
+| [W-010](#w-010-jhyy-端-max_locals--512-vs-c-端-1024--cg_add_local-静默溢出致-t0-污染) | RESOLVED (v0.9 wip commit 2.79) | jhyy-side `MAX_LOCALS=512` 比 C-side `1024` 小 2× → cg_expr 本地变量数溢出时 cg_add_local 静默返回 0 → cg_find_local miss → emit `%t0`(QBE temp 0,sentinel); align jhyy-side 到 1024 全消除 |
 
 ---
 
@@ -1040,4 +1041,51 @@ QBE：`invalid type for second operand %t29 in ceql`
 - v0.9 wip commit 2.11 — W-005 真修 phase 2 (CGContext 对齐)
 - v0.9 wip commit 2.13 — W-005 加固 16 处 revert 回 let mut
 - v0.9 wip commit 2.14 (本 commit) — cross-ref 联动关系文档化
+
+---
+
+## W-010: jhyy-端 MAX_LOCALS=512 vs C-端 1024 → cg_add_local 静默溢出致 `%t0` 污染
+
+**ID:** W-010
+**状态:** RESOLVED (v0.9 wip commit 2.79)
+**日期:** 2026-08-10（Sprint 4.21–4.23 triage 实证）
+**触发面:** jhyy_v2 编译 `compiler/src0/main.jhyy`（cg_expr 内本地变量数 > 512）
+**症状:**
+- jhyy_v2.exe.il 末尾 ~470 行窗口内出现 ~39 处 `%t0` 引用
+- 形式：`ceqw %t0, X`、`csltl %t0, X`、`=l call $ir__ir_new_tmp(l %t77637,  %t0)`（双空格是 qbe_type sigil 为空的物证）
+- QBE reject：`invalid type for first operand %t0 in copy`（行 165792 类）
+- 不在 regress 单文件测试中出现（单文件 cg_expr 本地变量数远低于 512）
+
+**根因:**
+1. `compiler/src0/codegen.jhyy:68` 定义 `fn MAX_LOCALS() -> i32 { return 512 as i32; }`
+2. `compiler/src/codegen.c:17` 定义 `#define MAX_LOCALS 1024`
+3. 两侧差 2×，**jhyy 端容量更小**
+4. `cg_add_local` 在 `idx >= MAX_LOCALS` 时静默 return 0（codegen.jhyy:173），不报错
+5. `cg_find_local` miss 返回零 sentinel `(IRVal){0}`（kind=IRVAL_TEMP, id=0）
+6. `ir_init` next_tmp 从 1 开始，**temp 0 永不分配** → emit `%t0`（缺 qbe_type sigil）
+
+**workaround:** 无（不报错 + 影响 jhyy_v2 自举构建）
+
+**失效条件:**
+- 单文件 regress 测试（cg_expr 本地变量数 < 512）不触发
+- jhyy_v1 编 main.jhyy（C-side MAX_LOCALS=1024 够用）不触发
+- **jhyy_v2 编 main.jhyy 才触发**（自举第二步 = 关键路径）
+
+**superseder:** v0.9 wip commit 2.79 — jhyy-side `MAX_LOCALS` 512 → 1024，跟 C-side 对齐
+
+**解决实证 (2026-08-10):**
+- `compiler/build/bin/jhyy_v2.exe.il` 的 `grep "%t0,"` 计数从 39+ → **0**
+- `grep " %t0," compiler/build/bin/jhyy_v2.exe.il` → **0 命中**
+- regress.py 50/53 PASS（持平 baseline）
+- regress_v1.py 50/53 PASS（持平 baseline）
+- jhyy_v2 编 hello.jhyy 的 QBE 错（`invalid type for jump argument %t748`）跟本 bug **无关**——是 inline_imports 引发的函数重复 emit 问题（g_as 报 ~1500+ 处 `symbol X already defined`），属于 Stage 2 inline_imports 设计缺陷，跟 W-010 正交
+
+**Sprint 历史:**
+- Sprint 4.21 Phase B+C+D+G（IRVal struct pass-by-value → 指针）— **未触及根因**，4 workaround 站点仍 fail
+- Sprint 4.22（cg_match_pattern `let mut + if/else` 改条件表达式）— **假说错误**，2 种写法 emit 同样的 `%t0` 污染（行号漂 2-12）
+- Sprint 4.23 Explore agent（2026-08-10）— 找到 `%t0` 集中出现 + MAX_LOCALS 双源不一致 → 本 fix
+
+**引用:**
+- [`project_sprint4_22_cgexpr_signature_mismatch.md`](../../../../Users/liuzhen/.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_sprint4_22_cgexpr_signature_mismatch.md) — Sprint 4.22 假说错误 postmortem
+- Sprint 4.23 plan: `C:\Users\liuzhen\.claude\plans\jaunty-orbiting-naur.md`
 
