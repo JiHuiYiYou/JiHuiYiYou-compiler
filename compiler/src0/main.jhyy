@@ -372,7 +372,7 @@ fn inline_imports(module: *Node, main_path: *u8, arena: *Arena) -> i32 {
     }
 
     // merged decls: imported first, main decls after
-    let new_cap: i64 = 16384 as i64;
+    let new_cap: i64 = 65536 as i64;
     let new_decls = arena_alloc(arena, new_cap * (8 as i64));
     let mut new_count: i64 = 0 as i64;
 
