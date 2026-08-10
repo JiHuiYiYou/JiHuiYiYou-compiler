@@ -67,7 +67,7 @@ static void cg_find_local(CGContext *cg, Sym *sym, int *is_stack, IRVal *out) {
 }
 
 /* ── forward ── */
-static IRVal cg_expr(CGContext *cg, Node *n);
+static void   cg_expr(CGContext *cg, Node *n, IRVal *out);
 static void   cg_stmt(CGContext *cg, Node *n);
 
 /* ── helpers ── */
@@ -185,11 +185,13 @@ static IRVal cg_match_pattern(CGContext *cg, IRVal matched, Node *pattern) {
     case NODE_PATTERN_RANGE: {
         NodePatternRange *pr = node_pattern_range_data(pattern);
         /* lo <= matched */
-        IRVal lo_val = cg_expr(cg, pr->lo);
+        IRVal lo_val = {0};
+        cg_expr(cg, pr->lo, &lo_val);
         IRVal cmp_lo = ir_new_tmp(cg->ir, 'w');
         ir_emit_binary(cg->ir, cmp_lo, "cslew", lo_val, matched);
         /* matched <= hi */
-        IRVal hi_val = cg_expr(cg, pr->hi);
+        IRVal hi_val = {0};
+        cg_expr(cg, pr->hi, &hi_val);
         IRVal cmp_hi = ir_new_tmp(cg->ir, 'w');
         ir_emit_binary(cg->ir, cmp_hi, "cslew", matched, hi_val);
         /* lo <= matched && matched <= hi */
@@ -236,21 +238,21 @@ static IRVal cg_convert_arg(CGContext *cg, IRVal arg, Type *src_t, Type *dst_t) 
     return result;
 }
 
-static IRVal cg_expr(CGContext *cg, Node *n) {
-    if (!n) { IRVal v = {0}; return v; }
+static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
+    if (!n) { *out = (IRVal){0}; return; }
 
     switch (n->kind) {
     case NODE_INT: {
         NodeInt *d = node_int_data(n);
         IRVal v = ir_new_tmp(cg->ir, qbe_type_of(n->type));
         ir_emit_copy(cg->ir, v, d->value);
-        return v;
+        *out = (v); return;
     }
     case NODE_BOOL: {
         NodeBool *d = node_bool_data(n);
         IRVal v = ir_new_tmp(cg->ir, 'w');
         ir_emit_copy(cg->ir, v, d->value ? 1 : 0);
-        return v;
+        *out = (v); return;
     }
     case NODE_FLOAT: {
         NodeFloat *d = node_float_data(n);
@@ -279,7 +281,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
 
         IRVal v = ir_new_tmp(cg->ir, qbe_type_char);
         ir_emit(cg->ir, "    %%t%d =%c copy %s\n", v.id, qbe_type_char, buf);
-        return v;
+        *out = (v); return;
     }
     case NODE_STRING: {
         NodeString *d = node_string_data(n);
@@ -288,13 +290,13 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         /* Copy data label to an SSA temp for use in expressions */
         IRVal v = ir_new_tmp(cg->ir, 'l');
         ir_emit(cg->ir, "    %%t%d =l copy %s\n", v.id, str_val.name);
-        return v;
+        *out = (v); return;
     }
     case NODE_CHAR: {
         NodeChar *d = node_char_data(n);
         IRVal v = ir_new_tmp(cg->ir, 'w');
         ir_emit_copy(cg->ir, v, (unsigned char)d->ch);
-        return v;
+        *out = (v); return;
     }
     case NODE_IDENT: {
         NodeIdent *d = node_ident_data(n);
@@ -303,7 +305,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         if (d->sym && d->sym->kind == SYM_CONST) {
             IRVal v = ir_new_tmp(cg->ir, 'l');
             ir_emit(cg->ir, "    %%t%d =l copy $%s\n", v.id, d->sym->name);
-            return v;
+            *out = (v); return;
         }
         int is_stack = 0;
         IRVal loc;
@@ -313,25 +315,26 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             if (n->type && (n->type->kind == KIND_STRUCT ||
                             n->type->kind == KIND_ARRAY ||
                             n->type->kind == KIND_SLICE)) {
-                return loc;
+                *out = (loc); return;
             }
             /* load from stack */
             IRVal v = ir_new_tmp(cg->ir, qbe_type_of(n->type));
             cg_emit_load(cg, v, n->type, loc);
-            return v;
+            *out = (v); return;
         }
-        return loc; /* SSA value */
+        *out = (loc); return; /* SSA value */
     }
     case NODE_UNARY: {
         NodeUnary *d = node_unary_data(n);
-        IRVal inner = cg_expr(cg, d->expr);
+        IRVal inner = {0};
+        cg_expr(cg, d->expr, &inner);
         switch (d->op) {
         case TOKEN_MINUS: {
             IRVal result = ir_new_tmp(cg->ir, inner.qbe_type);
             IRVal zero = ir_new_tmp(cg->ir, inner.qbe_type);
             ir_emit_copy(cg->ir, zero, 0);
             ir_emit_binary(cg->ir, result, "sub", zero, inner);
-            return result;
+            *out = (result); return;
         }
         case TOKEN_BANG: {
             /* !expr → logical NOT: result = ceqw(expr, 0) */
@@ -339,7 +342,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             IRVal zero = ir_new_tmp(cg->ir, inner.qbe_type ? inner.qbe_type : 'w');
             ir_emit_copy(cg->ir, zero, 0);
             ir_emit_binary(cg->ir, result, "ceqw", inner, zero);
-            return result;
+            *out = (result); return;
         }
         case TOKEN_TILDE: {
             /* ~expr → bitwise NOT: result = xor(expr, -1) */
@@ -347,15 +350,16 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             IRVal neg_one = ir_new_tmp(cg->ir, inner.qbe_type);
             ir_emit_copy(cg->ir, neg_one, -1);
             ir_emit_binary(cg->ir, result, "xor", inner, neg_one);
-            return result;
+            *out = (result); return;
         }
         default:
-            return inner;
+            *out = (inner); return;
         }
     }
     case NODE_BINARY: {
         NodeBinary *d = node_binary_data(n);
-        IRVal left = cg_expr(cg, d->left);
+        IRVal left = {0};
+        cg_expr(cg, d->left, &left);
 
         /* short-circuit && and || */
         if (d->op == TOKEN_AMPAMP || d->op == TOKEN_PIPEPIPE) {
@@ -374,7 +378,8 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
                 ir_emit_jmp(cg->ir, merge);
 
                 ir_emit_label(cg->ir, eval_b);
-                IRVal right_and = cg_expr(cg, d->right);
+                IRVal right_and = {0};
+                cg_expr(cg, d->right, &right_and);
                 IRVal rb_and = ir_new_tmp(cg->ir, 'w');
                 ir_emit_binary(cg->ir, rb_and, "cnew", right_and, ir_new_int(0));
                 ir_emit_jmp(cg->ir, merge);
@@ -392,7 +397,8 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
                 ir_emit_jmp(cg->ir, merge);
 
                 ir_emit_label(cg->ir, eval_b);
-                IRVal right_or = cg_expr(cg, d->right);
+                IRVal right_or = {0};
+                cg_expr(cg, d->right, &right_or);
                 IRVal rb_or = ir_new_tmp(cg->ir, 'w');
                 ir_emit_binary(cg->ir, rb_or, "cnew", right_or, ir_new_int(0));
                 ir_emit_jmp(cg->ir, merge);
@@ -400,11 +406,12 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
                 ir_emit_label(cg->ir, merge);
                 ir_emit_phi(cg->ir, result, 2, true_block, one, eval_b, rb_or);
             }
-            return result;
+            *out = (result); return;
         }
 
         /* non-short-circuit: evaluate right eagerly */
-        IRVal right = cg_expr(cg, d->right);
+        IRVal right = {0};
+        cg_expr(cg, d->right, &right);
         IRVal result = ir_new_tmp(cg->ir, qbe_type_of(n->type));
 
         /* determine operand width and signedness for comparisons */
@@ -479,7 +486,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             right = cg_convert_arg(cg, right, d->right->type, d->left->type);
         }
         ir_emit_binary(cg->ir, result, op, left, right);
-        return result;
+        *out = (result); return;
     }
     case NODE_CALL: {
         NodeCall *d = node_call_data(n);
@@ -521,7 +528,8 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         size_t nparams = (fn_sym && fn_sym->type && fn_sym->type->kind == KIND_FUNC)
                          ? fn_sym->type->func.nparams : 0;
         for (size_t i = 0; i < d->nargs; i++) {
-            IRVal arg = cg_expr(cg, d->args[i]);
+            IRVal arg = {0};
+            cg_expr(cg, d->args[i], &arg);
             Type *at = d->args[i]->type;
             if (at && at->kind == KIND_STRUCT) {
                 /* copy struct to a new stack slot for pass-by-value */
@@ -542,12 +550,12 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
 
         if (is_sret) {
             ir_emit_call_void(cg->ir, fn_name, args, (int)d->nargs + 1);
-            return ret_slot;
+            *out = (ret_slot); return;
         }
         char qt = n->type ? qbe_type_of(n->type) : 'w';
         IRVal result = ir_new_tmp(cg->ir, qt);
         ir_emit_call(cg->ir, result, fn_name, args, (int)d->nargs);
-        return result;
+        *out = (result); return;
     }
     case NODE_QUALIFIED_CALL: {
         NodeQualifiedCall *d = node_qualified_call_data(n);
@@ -582,7 +590,8 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         size_t nparams = (fn_sym && fn_sym->type && fn_sym->type->kind == KIND_FUNC)
                          ? fn_sym->type->func.nparams : 0;
         for (size_t i = 0; i < d->nargs; i++) {
-            IRVal arg = cg_expr(cg, d->args[i]);
+            IRVal arg = {0};
+            cg_expr(cg, d->args[i], &arg);
             Type *at = d->args[i]->type;
             if (at && at->kind == KIND_STRUCT) {
                 int asize = (int)type_size(at);
@@ -602,16 +611,17 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
 
         if (is_sret) {
             ir_emit_call_void(cg->ir, fn_name, args, (int)d->nargs + 1);
-            return ret_slot;
+            *out = (ret_slot); return;
         }
         char qt = n->type ? qbe_type_of(n->type) : 'w';
         IRVal result = ir_new_tmp(cg->ir, qt);
         ir_emit_call(cg->ir, result, fn_name, args, (int)d->nargs);
-        return result;
+        *out = (result); return;
     }
     case NODE_IF: {
         NodeIf *d = node_if_data(n);
-        IRVal cond = cg_expr(cg, d->cond);
+        IRVal cond = {0};
+        cg_expr(cg, d->cond, &cond);
 
         IRVal then_block = ir_new_block(cg->ir, "then");
         IRVal else_block = ir_new_block(cg->ir, "else");
@@ -631,7 +641,8 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
 
         /* then */
         ir_emit_label(cg->ir, then_block);
-        IRVal then_val = cg_expr(cg, d->then_body);
+        IRVal then_val = {0};
+        cg_expr(cg, d->then_body, &then_val);
         int then_returns = body_terminates(d->then_body);
         /* current block after recursion may be a nested merge block (if then_body
            contains its own if/else). Use it as phi predecessor so the value is
@@ -651,7 +662,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         int else_returns = 0;
         IRVal else_phi_pred = else_block;
         if (d->else_body) {
-            else_val = cg_expr(cg, d->else_body);
+            cg_expr(cg, d->else_body, &else_val);
             else_returns = body_terminates(d->else_body);
             /* current block is now wherever recursion ended (inner_merge for nested).
                Use it as phi predecessor so the value is actually defined there. */
@@ -667,20 +678,20 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         if (n->type && n->type->kind == KIND_VOID) {
             #undef body_terminates
             IRVal v = {0};
-            return v;
+            *out = (v); return;
         }
         if (d->else_body && !then_returns && !else_returns) {
             IRVal result = ir_new_tmp(cg->ir, then_val.qbe_type);
             ir_emit_phi(cg->ir, result, 2, then_phi_pred, then_val, else_phi_pred, else_val);
-            return result;
+            *out = (result); return;
         }
         #undef body_terminates
 
         if (n->type && n->type->kind == KIND_VOID) {
             IRVal v = {0};
-            return v;
+            *out = (v); return;
         }
-        return then_val; /* fallback */
+        *out = (then_val); return; /* fallback */
     }
     case NODE_BLOCK: {
         NodeBlock *d = node_block_data(n);
@@ -689,7 +700,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             Node *stmt = d->stmts[i];
             if (stmt->kind == NODE_RETURN || stmt->kind == NODE_BREAK || stmt->kind == NODE_CONTINUE) {
                 cg_stmt(cg, stmt);
-                return last;
+                *out = (last); return;
             }
             if (stmt->kind == NODE_EXPR_STMT) {
                 NodeExprStmt *es = node_expr_stmt_data(stmt);
@@ -697,34 +708,37 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
                     cg_stmt(cg, es->expr);
                 } else {
                     /* capture value as potential block return value */
-                    last = cg_expr(cg, es->expr);
+                    cg_expr(cg, es->expr, &last);
                 }
             } else if (stmt->kind == NODE_IF || stmt->kind == NODE_MATCH || stmt->kind == NODE_BLOCK) {
                 /* These expression-statement forms may also yield a value
                    (e.g., `if x { 0 } else { 1 }` as a block's last statement
                    is the block's return value). */
-                last = cg_expr(cg, stmt);
+                cg_expr(cg, stmt, &last);
             } else {
                 cg_stmt(cg, stmt);
             }
         }
-        return last;
+        *out = (last); return;
     }
     case NODE_RETURN: {
         NodeReturn *d = node_return_data(n);
         if (d->expr) {
-            IRVal val = cg_expr(cg, d->expr);
+            IRVal val = {0};
+            cg_expr(cg, d->expr, &val);
             ir_emit_ret(cg->ir, val);
         } else {
             IRVal v = {0};
             ir_emit_ret(cg->ir, v);
         }
         IRVal v = {0};
-        return v;
+        *out = (v); return;
     }
     case NODE_EXPR_STMT: {
         NodeExprStmt *d = node_expr_stmt_data(n);
-        return cg_expr(cg, d->expr);
+        IRVal __cg_expr_tmp_ret_1 = {0};
+        cg_expr(cg, d->expr, &__cg_expr_tmp_ret_1);
+        *out = (__cg_expr_tmp_ret_1); return;
     }
 
     /* ── cast: expr as Type ── */
@@ -732,9 +746,10 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         NodeCast *d = node_cast_data(n);
         Type *src_t = d->expr->type;
         Type *dst_t = n->type;
-        IRVal inner = cg_expr(cg, d->expr);
+        IRVal inner = {0};
+        cg_expr(cg, d->expr, &inner);
         if (!src_t || !dst_t) {
-            return inner;
+            *out = (inner); return;
         }
         /* array -> slice: build 16-byte slice struct {ptr, len} */
         if (src_t->kind == KIND_ARRAY && dst_t->kind == KIND_SLICE) {
@@ -750,19 +765,19 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             IRVal len_v = ir_new_tmp(cg->ir, 'l');
             ir_emit_copy(cg->ir, len_v, (int64_t)nitems);
             ir_emit(cg->ir, "    storel %%t%d, %%t%d\n", len_v.id, off8.id);
-            return slot;
+            *out = (slot); return;
         }
         char src_qt = qbe_type_of(src_t);
         char dst_qt = qbe_type_of(dst_t);
         if (src_qt == dst_qt && src_t->kind == dst_t->kind && src_t->prim == dst_t->prim) {
             /* no-op */
-            return inner;
+            *out = (inner); return;
         }
         /* sub-word -> word: already word after loadub/loadsb/loaduh/loadsh */
         if ((src_qt == 'b' || src_qt == 'h') && (dst_qt == 'w' || dst_qt == 'l')) {
             IRVal result = ir_new_tmp(cg->ir, dst_qt);
             ir_emit(cg->ir, "    %%t%d =%c copy %%t%d\n", result.id, dst_qt, inner.id);
-            return result;
+            *out = (result); return;
         }
         IRVal result = ir_new_tmp(cg->ir, dst_qt);
         /* pick a QBE conversion instruction */
@@ -791,15 +806,15 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
                 /* narrowing l->w: QBE 'copy' from a long truncates implicitly */
                 ir_emit(cg->ir, "    %%t%d =w copy %%t%d\n", result.id, inner.id);
             }
-            return result;
+            *out = (result); return;
         }
         if (!conv) {
             IRVal v = {0};
-            return v;
+            *out = (v); return;
         }
         ir_emit(cg->ir, "    %%t%d =%c %s %%t%d\n",
                 result.id, dst_qt, conv, inner.id);
-        return result;
+        *out = (result); return;
     }
 
     /* ── address-of: &variable ── */
@@ -813,7 +828,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             cg_find_local(cg, id->sym, &is_stack, &val);
             if (is_stack) {
                 /* return the stack slot address */
-                return val;
+                *out = (val); return;
             }
             /* SSA temp: spill to a new stack slot, update local entry, return slot */
             int size = (int)type_size(id->sym->type);
@@ -822,25 +837,27 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             ir_emit_alloc(cg->ir, slot, size);
             cg_emit_store(cg, id->sym->type, val, slot);
             cg_add_local(cg, id->sym, slot, 1);
-            return slot;
+            *out = (slot); return;
         }
         /* fallback: evaluate as expression (won't work for SSA temps) */
-        IRVal v = cg_expr(cg, d->expr);
-        return v;
+        IRVal v = {0};
+        cg_expr(cg, d->expr, &v);
+        *out = (v); return;
     }
 
     /* ── dereference: *ptr ── */
     case NODE_DEREF: {
         NodeDeref *d = node_deref_data(n);
-        IRVal ptr = cg_expr(cg, d->expr);
+        IRVal ptr = {0};
+        cg_expr(cg, d->expr, &ptr);
         /* Pointer-to-struct: return the pointer itself (struct manipulated by address) */
         if (n->type && n->type->kind == KIND_STRUCT) {
-            return ptr;
+            *out = (ptr); return;
         }
         char qt = n->type ? qbe_type_of(n->type) : 'w';
         IRVal result = ir_new_tmp(cg->ir, qt);
         cg_emit_load(cg, result, n->type, ptr);
-        return result;
+        *out = (result); return;
     }
 
     /* ── struct literal: TypeName { field: val, ... } ── */
@@ -848,7 +865,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         NodeStructLit *d = node_struct_lit_data(n);
         Type *st = n->type;
         if (!st || st->kind != KIND_STRUCT) {
-            IRVal v = {0}; return v;
+            *out = (IRVal){0}; return;
         }
         int size = (int)type_size(st);
         if (size < 4) size = 4;
@@ -856,7 +873,8 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         ir_emit_alloc(cg->ir, slot, size);
 
         for (size_t i = 0; i < d->nfields; i++) {
-            IRVal fval = cg_expr(cg, d->fields[i].value);
+            IRVal fval = {0};
+            cg_expr(cg, d->fields[i].value, &fval);
             /* find field offset */
             size_t offset = 0;
             for (size_t j = 0; j < st->struct_type.nfields; j++) {
@@ -870,7 +888,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             ir_emit_binary(cg->ir, addr, "add", slot, ir_new_int((int64_t)offset));
             cg_emit_store(cg, d->fields[i].value->type, fval, addr);
         }
-        return slot;
+        *out = (slot); return;
     }
 
     /* ── enum variant construction: TypeName::Variant(args) ── */
@@ -878,7 +896,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         NodeEnumVariant *d = node_enum_variant_data(n);
         Type *et = n->type;
         if (!et || et->kind != KIND_ENUM) {
-            IRVal v = {0}; return v;
+            *out = (IRVal){0}; return;
         }
         int size = (int)type_size(et);
         if (size < 4) size = 4;
@@ -908,16 +926,18 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             size_t payload_offset = et->enum_type.payload_offset;
             IRVal payload_addr = ir_new_tmp(cg->ir, 'l');
             ir_emit_binary(cg->ir, payload_addr, "add", slot, ir_new_int((int64_t)payload_offset));
-            IRVal pval = cg_expr(cg, d->payload);
+            IRVal pval = {0};
+            cg_expr(cg, d->payload, &pval);
             cg_emit_store(cg, payload_type, pval, payload_addr);
         }
-        return slot;
+        *out = (slot); return;
     }
 
     /* ── match expression ── */
     case NODE_MATCH: {
         NodeMatch *d = node_match_data(n);
-        IRVal matched = cg_expr(cg, d->expr);
+        IRVal matched = {0};
+        cg_expr(cg, d->expr, &matched);
 
         char qt = (n->type && n->type->kind != KIND_VOID) ? qbe_type_of(n->type) : 0;
         IRVal merge_block = ir_new_block(cg->ir, "merge");
@@ -954,7 +974,8 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
 
             /* body */
             ir_emit_label(cg->ir, body_block);
-            IRVal body_val = cg_expr(cg, arm->body);
+            IRVal body_val = {0};
+            cg_expr(cg, arm->body, &body_val);
             int arm_returns = ((arm->body && arm->body->kind == NODE_RETURN) ||
                                (arm->body && arm->body->kind == NODE_BLOCK &&
                                 node_block_data(arm->body)->nstmts > 0 &&
@@ -999,11 +1020,11 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
                 ir_emit(cg->ir, "@%s %%t%d", body_blocks[i].name, body_values[i].id);
             }
             ir_emit(cg->ir, "\n");
-            return result;
+            *out = (result); return;
         }
         #undef MAX_MATCH_ARMS
         IRVal v = {0};
-        return v;
+        *out = (v); return;
     }
 
     /* ── array index: arr[i] ── */
@@ -1011,7 +1032,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         NodeIndex *d = node_index_data(n);
         Type *arr_type = d->expr->type;
         if (!arr_type || (arr_type->kind != KIND_ARRAY && arr_type->kind != KIND_POINTER && arr_type->kind != KIND_SLICE)) {
-            IRVal v = {0}; return v;
+            *out = (IRVal){0}; return;
         }
         int is_array = (arr_type->kind == KIND_ARRAY);
         int is_slice = (arr_type->kind == KIND_SLICE);
@@ -1029,20 +1050,22 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         if (is_array && d->expr->kind == NODE_IDENT) {
             NodeIdent *id = node_ident_data(d->expr);
             if (id->sym && id->sym->kind == SYM_CONST) {
-                base = cg_expr(cg, d->expr);  /* emits `addr $name` */
+                cg_expr(cg, d->expr, &base);  /* emits `addr $name` */
             } else {
                 int is_stack = 0;
                 cg_find_local(cg, id->sym, &is_stack, &base);
             }
         } else if (is_slice) {
-            IRVal slice_addr = cg_expr(cg, d->expr);
+            IRVal slice_addr = {0};
+            cg_expr(cg, d->expr, &slice_addr);
             base = ir_new_tmp(cg->ir, 'l');
             ir_emit(cg->ir, "    %%t%d =l loadl %%t%d\n", base.id, slice_addr.id);
         } else {
-            base = cg_expr(cg, d->expr);
+            cg_expr(cg, d->expr, &base);
         }
         /* compute index */
-        IRVal idx = cg_expr(cg, d->index);
+        IRVal idx = {0};
+        cg_expr(cg, d->index, &idx);
 
         /* offset = index * elem_size */
         IRVal offset = ir_new_tmp(cg->ir, 'l');
@@ -1070,7 +1093,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         /* Struct element: return the address (struct is manipulated by address,
            matches NODE_DEREF behavior). Caller applies field offset / load. */
         if (elem_type && elem_type->kind == KIND_STRUCT) {
-            return addr;
+            *out = (addr); return;
         }
 
         /* load from computed address.
@@ -1083,7 +1106,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
                          ? 'w' : elem_qt;
         IRVal result = ir_new_tmp(cg->ir, result_qt);
         cg_emit_load(cg, result, elem_type, addr);
-        return result;
+        *out = (result); return;
     }
 
     /* ── array literal: [1, 2, 3] ── */
@@ -1091,7 +1114,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         NodeArrayLit *d = node_array_lit_data(n);
         Type *arr_type = n->type;
         if (!arr_type || arr_type->kind != KIND_ARRAY) {
-            IRVal v = {0}; return v;
+            *out = (IRVal){0}; return;
         }
         Type *elem_type = arr_type->array.elem;
         size_t elem_size = type_size(elem_type);
@@ -1104,7 +1127,8 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
 
         /* store each element at its offset */
         for (size_t i = 0; i < d->nelems; i++) {
-            IRVal elem_val = cg_expr(cg, d->elems[i]);
+            IRVal elem_val = {0};
+            cg_expr(cg, d->elems[i], &elem_val);
             if (i == 0) {
                 /* offset 0: addr is just the slot */
                 cg_emit_store(cg, elem_type, elem_val, slot);
@@ -1116,14 +1140,15 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
                 cg_emit_store(cg, elem_type, elem_val, addr);
             }
         }
-        return slot;
+        *out = (slot); return;
     }
 
     /* ── slice literal: &[1, 2, 3] ── */
     case NODE_SLICE_LIT: {
         NodeSliceLit *d = node_slice_lit_data(n);
         /* Codegen the underlying array first; this returns its stack slot */
-        IRVal arr_slot = cg_expr(cg, d->array);
+        IRVal arr_slot = {0};
+        cg_expr(cg, d->array, &arr_slot);
         /* Build 16-byte slice struct {arr_slot, nitems} */
         NodeArrayLit *al = node_array_lit_data(d->array);
         int nitems = (int)al->nelems;
@@ -1135,7 +1160,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         IRVal len_v = ir_new_tmp(cg->ir, 'l');
         ir_emit_copy(cg->ir, len_v, (int64_t)nitems);
         ir_emit(cg->ir, "    storel %%t%d, %%t%d\n", len_v.id, off8.id);
-        return slot;
+        *out = (slot); return;
     }
 
     /* ── sub-range: s[a..b] ── */
@@ -1149,14 +1174,16 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
 
         IRVal base;
         if (is_slice) {
-            IRVal slice_addr = cg_expr(cg, d->base);
+            IRVal slice_addr = {0};
+            cg_expr(cg, d->base, &slice_addr);
             base = ir_new_tmp(cg->ir, 'l');
             ir_emit(cg->ir, "    %%t%d =l loadl %%t%d\n", base.id, slice_addr.id);
         } else {
-            base = cg_expr(cg, d->base);
+            cg_expr(cg, d->base, &base);
         }
 
-        IRVal start_v = cg_expr(cg, d->start);
+        IRVal start_v = {0};
+        cg_expr(cg, d->start, &start_v);
         /* start_off = start * esz */
         IRVal start_off = ir_new_tmp(cg->ir, 'l');
         if (d->start->kind == NODE_INT) {
@@ -1174,7 +1201,8 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         IRVal new_ptr = ir_new_tmp(cg->ir, 'l');
         ir_emit_binary(cg->ir, new_ptr, "add", base, start_off);
 
-        IRVal end_v = cg_expr(cg, d->end);
+        IRVal end_v = {0};
+        cg_expr(cg, d->end, &end_v);
         IRVal new_len = ir_new_tmp(cg->ir, 'l');
         if (d->start->kind == NODE_INT && d->end->kind == NODE_INT) {
             ir_emit_copy(cg->ir, new_len,
@@ -1199,7 +1227,7 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         IRVal off8 = ir_new_tmp(cg->ir, 'l');
         ir_emit(cg->ir, "    %%t%d =l add %%t%d, 8\n", off8.id, slot.id);
         ir_emit(cg->ir, "    storel %%t%d, %%t%d\n", new_len.id, off8.id);
-        return slot;
+        *out = (slot); return;
     }
 
     /* ── field access with pointer auto-deref ── */
@@ -1208,27 +1236,29 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         Type *expr_type = d->expr->type;
         if (expr_type && expr_type->kind == KIND_SLICE) {
             /* synthetic .ptr / .len fields, slice value is a 16-byte stack slot */
-            IRVal slot = cg_expr(cg, d->expr);
+            IRVal slot = {0};
+            cg_expr(cg, d->expr, &slot);
             if (strcmp(d->field, "ptr") == 0) {
                 IRVal v = ir_new_tmp(cg->ir, 'l');
                 ir_emit(cg->ir, "    %%t%d =l loadl %%t%d\n", v.id, slot.id);
-                return v;
+                *out = (v); return;
             }
             if (strcmp(d->field, "len") == 0) {
                 IRVal off = ir_new_tmp(cg->ir, 'l');
                 ir_emit(cg->ir, "    %%t%d =l add %%t%d, 8\n", off.id, slot.id);
                 IRVal v = ir_new_tmp(cg->ir, 'l');
                 ir_emit(cg->ir, "    %%t%d =l loadl %%t%d\n", v.id, off.id);
-                return v;
+                *out = (v); return;
             }
             IRVal v = {0};
-            return v;
+            *out = (v); return;
         }
         if (expr_type && expr_type->kind == KIND_POINTER &&
             expr_type->pointer.elem && expr_type->pointer.elem->kind == KIND_STRUCT) {
             /* pointer-to-struct: load pointer, add offset, load field */
             Type *elem = expr_type->pointer.elem;
-            IRVal ptr = cg_expr(cg, d->expr);
+            IRVal ptr = {0};
+            cg_expr(cg, d->expr, &ptr);
             /* find field offset */
             size_t offset = 0;
             Type *field_type = NULL;
@@ -1248,13 +1278,14 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
             }
             IRVal result = ir_new_tmp(cg->ir, field_type ? qbe_type_of(field_type) : 'w');
             cg_emit_load(cg, result, field_type, addr);
-            return result;
+            *out = (result); return;
         }
         /* For struct value field access: the value IS the stack slot pointer */
-        IRVal base = cg_expr(cg, d->expr);
+        IRVal base = {0};
+        cg_expr(cg, d->expr, &base);
         Type *st = expr_type;
         if (!st || st->kind != KIND_STRUCT) {
-            IRVal v = {0}; return v;
+            *out = (IRVal){0}; return;
         }
         size_t offset = 0;
         Type *field_type = NULL;
@@ -1274,12 +1305,12 @@ static IRVal cg_expr(CGContext *cg, Node *n) {
         }
         IRVal result = ir_new_tmp(cg->ir, field_type ? qbe_type_of(field_type) : 'w');
         cg_emit_load(cg, result, field_type, addr);
-        return result;
+        *out = (result); return;
     }
 
     default: {
         IRVal v = {0};
-        return v;
+        *out = (v); return;
     }
     }
 }
@@ -1295,11 +1326,13 @@ static void cg_stmt(CGContext *cg, Node *n) {
             /* For array/struct literal init, use its slot directly (no double alloc) */
             if ((is_array && d->init && d->init->kind == NODE_ARRAY_LIT) ||
                 (is_struct && d->init && d->init->kind == NODE_STRUCT_LIT)) {
-                IRVal init_val = cg_expr(cg, d->init);
+                IRVal init_val = {0};
+                cg_expr(cg, d->init, &init_val);
                 cg_add_local(cg, d->sym, init_val, 1);
             } else if (is_struct && d->init) {
                 /* Struct from function call or other expression: alloc and copy */
-                IRVal src = cg_expr(cg, d->init);
+                IRVal src = {0};
+                cg_expr(cg, d->init, &src);
                 int size = (int)type_size(d->sym->type);
                 if (size < 4) size = 4;
                 IRVal slot = ir_new_tmp(cg->ir, 'l');
@@ -1307,7 +1340,8 @@ static void cg_stmt(CGContext *cg, Node *n) {
                 cg_copy_struct(cg, d->sym->type, slot, src);
                 cg_add_local(cg, d->sym, slot, 1);
             } else {
-                IRVal init_val = cg_expr(cg, d->init);
+                IRVal init_val = {0};
+                cg_expr(cg, d->init, &init_val);
                 int size = (int)type_size(d->sym->type);
                 if (size < 4) size = 4;
                 IRVal slot = ir_new_tmp(cg->ir, 'l');
@@ -1318,10 +1352,12 @@ static void cg_stmt(CGContext *cg, Node *n) {
         } else {
             /* immutable struct: keep slot address as SSA value */
             if (is_struct && d->init) {
-                IRVal init_val = cg_expr(cg, d->init);
+                IRVal init_val = {0};
+                cg_expr(cg, d->init, &init_val);
                 cg_add_local(cg, d->sym, init_val, 0);
             } else {
-                IRVal init_val = cg_expr(cg, d->init);
+                IRVal init_val = {0};
+                cg_expr(cg, d->init, &init_val);
                 cg_add_local(cg, d->sym, init_val, 0);
             }
         }
@@ -1329,12 +1365,14 @@ static void cg_stmt(CGContext *cg, Node *n) {
     }
     case NODE_ASSIGN: {
         NodeAssign *d = node_assign_data(n);
-        IRVal val = cg_expr(cg, d->value);
+        IRVal val = {0};
+        cg_expr(cg, d->value, &val);
 
         if (d->target->kind == NODE_DEREF) {
             /* *ptr = value — store to pointer target */
             NodeDeref *dd = node_deref_data(d->target);
-            IRVal ptr = cg_expr(cg, dd->expr);
+            IRVal ptr = {0};
+            cg_expr(cg, dd->expr, &ptr);
             cg_emit_store(cg, d->target->type, val, ptr);
         } else if (d->target->kind == NODE_IDENT) {
             /* variable assignment */
@@ -1365,9 +1403,10 @@ static void cg_stmt(CGContext *cg, Node *n) {
                     int is_stack = 0;
                     cg_find_local(cg, id->sym, &is_stack, &base);
                 } else {
-                    base = cg_expr(cg, idx->expr);
+                    cg_expr(cg, idx->expr, &base);
                 }
-                IRVal idx_val = cg_expr(cg, idx->index);
+                IRVal idx_val = {0};
+                cg_expr(cg, idx->index, &idx_val);
 
                 /* offset = index * elem_size */
                 IRVal offset = ir_new_tmp(cg->ir, 'l');
@@ -1404,7 +1443,8 @@ static void cg_stmt(CGContext *cg, Node *n) {
                 struct_type = expr_type;
             }
             if (struct_type) {
-                IRVal base = cg_expr(cg, df->expr);
+                IRVal base = {0};
+                cg_expr(cg, df->expr, &base);
                 size_t offset = 0;
                 Type *field_type = NULL;
                 for (size_t i = 0; i < struct_type->struct_type.nfields; i++) {
@@ -1429,7 +1469,8 @@ static void cg_stmt(CGContext *cg, Node *n) {
         if (dr->expr) {
             if (cg->has_sret) {
                 /* struct return via sret: copy to return slot */
-                IRVal src = cg_expr(cg, dr->expr);
+                IRVal src = {0};
+                cg_expr(cg, dr->expr, &src);
                 IRVal sret_addr = {0};
                 sret_addr.id = cg->sret_slot_id;
                 sret_addr.qbe_type = 'l';
@@ -1437,7 +1478,8 @@ static void cg_stmt(CGContext *cg, Node *n) {
                 IRVal v = {0};
                 ir_emit_ret(cg->ir, v);
             } else {
-                IRVal val = cg_expr(cg, dr->expr);
+                IRVal val = {0};
+                cg_expr(cg, dr->expr, &val);
                 ir_emit_ret(cg->ir, val);
             }
         } else {
@@ -1465,7 +1507,8 @@ static void cg_stmt(CGContext *cg, Node *n) {
         if (inner->kind == NODE_ASSIGN) {
             cg_stmt(cg, inner);
         } else {
-            cg_expr(cg, inner);
+            IRVal __cg_expr_tmp_stmt_2 = {0};
+            cg_expr(cg, inner, &__cg_expr_tmp_stmt_2);
         }
         break;
     }
@@ -1473,8 +1516,10 @@ static void cg_stmt(CGContext *cg, Node *n) {
         NodeFor *df = node_for_data(n);
         /* for i in start..end { body }
            Compile as: allocate mutable slot for i, loop with load/compare/increment */
-        IRVal start_val = cg_expr(cg, df->start);
-        IRVal end_val = cg_expr(cg, df->end);
+        IRVal start_val = {0};
+        cg_expr(cg, df->start, &start_val);
+        IRVal end_val = {0};
+        cg_expr(cg, df->end, &end_val);
 
         /* determine loop variable type */
         Type *var_type = df->var->type;
@@ -1527,7 +1572,8 @@ static void cg_stmt(CGContext *cg, Node *n) {
 
         /* body */
         ir_emit_label(cg->ir, body_b);
-        cg_expr(cg, df->body);
+        IRVal __cg_expr_tmp_stmt_3 = {0};
+        cg_expr(cg, df->body, &__cg_expr_tmp_stmt_3);
 
         /* increment: load i, add 1, store back */
         ir_emit_label(cg->ir, incr_b);
@@ -1559,11 +1605,13 @@ static void cg_stmt(CGContext *cg, Node *n) {
         ir_emit_jmp(cg->ir, loop_hdr);
 
         ir_emit_label(cg->ir, loop_hdr);
-        IRVal cond = cg_expr(cg, dw->cond);
+        IRVal cond = {0};
+        cg_expr(cg, dw->cond, &cond);
         ir_emit_jnz(cg->ir, cond, body_b, exit_b);
 
         ir_emit_label(cg->ir, body_b);
-        cg_expr(cg, dw->body);
+        IRVal __cg_expr_tmp_stmt_4 = {0};
+        cg_expr(cg, dw->body, &__cg_expr_tmp_stmt_4);
         ir_emit_jmp(cg->ir, loop_hdr);
 
         ir_emit_label(cg->ir, exit_b);
@@ -1571,7 +1619,8 @@ static void cg_stmt(CGContext *cg, Node *n) {
         break;
     }
     default:
-        cg_expr(cg, n);
+        IRVal __cg_expr_tmp_stmt_5 = {0};
+        cg_expr(cg, n, &__cg_expr_tmp_stmt_5);
         break;
     }
 }
@@ -1640,7 +1689,8 @@ static void cg_func(IRBuf *ir, Node *n) {
         cg_add_local(&cg, fd->params[i].sym, param_val, 0);
     }
 
-    IRVal body_val = cg_expr(&cg, fd->body);
+    IRVal body_val = {0};
+    cg_expr(&cg, fd->body, &body_val);
 
     /* check if body already ended with an explicit return */
     #define body_returns(body) \
