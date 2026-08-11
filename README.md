@@ -1,33 +1,66 @@
 <div align="center">
 
+<img src="vscode-ext/icon.svg" width="96" alt="JHYY logo">
+
 # JHYY
 
-### 机会翼游 — 自研静态类型编译型系统编程语言
+### 机会翼游 — A self-hosted, statically typed, compiled systems programming language
 
 **Statically typed. Expression-oriented. Compiled to native via QBE.**
 
-[![Version](https://img.shields.io/badge/version-v0.9--wip-blue)](docs/logs/v0/changelog-v0.9.0.md)
-[![Phase](https://img.shields.io/badge/v1.0%20(自举闭环)-green)](#路线图)
-[![Backend](https://img.shields.io/badge/backend-QBE-orange)](#)
-[![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#)
-[![License](https://img.shields.io/badge/license-MIT-green)](#license)
+[![Version](https://img.shields.io/badge/version-v1.0.0-00d4aa)](docs/logs/v1/changelog-v1.0.0.md)
+[![Status](https://img.shields.io/badge/self--host-byte--equal%20v1%E2%86%92v4-success)](docs/logs/v1/changelog-v1.0.0.md)
+[![Backend](https://img.shields.io/badge/backend-QBE-orange)](https://c9x.me/compile/)
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#build)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![中文](https://img.shields.io/badge/lang-中文-red)](README.zh-CN.md)
 
-[快速开始](#快速开始) · [语言特性](#语言特性) · [命令行](#命令行) · [VS Code](#vs-code-集成) · [文档](#文档) · [路线图](#路线图)
+[Quick Start](#quick-start) · [Language](#language) · [CLI](#cli) · [Architecture](#architecture) · [Roadmap](#roadmap) · [Docs](#docs)
 
 </div>
 
 ---
 
-## 这是什么
+## v1.0.0 — Self-hosting closure achieved
 
-JHYY 是一门自研的、静态类型的、表达式导向的编译型系统编程语言。**编译器用 C 编写**（v0.x 时代），后端走 [QBE](https://c9x.me/compile/) 输出 x86-64 Windows 机器码。
+`jhyy_v1 → jhyy_v2 → jhyy_v3 → jhyy_v4` compile themselves and emit **byte-equal QBE intermediate representation**:
 
-**终极目标**: 用 JHYY 写 JHYY 的 IDE、写 OS kernel、**编译器自举**（用 JHYY 编译 JHYY）。**自举闭环已达成** — jhyy_v1 编译自身产 432KB working binary。
+```
+jhyy_v1.exe  → src0/main.jhyy →  jhyy_v2.il
+jhyy_v2.exe  → src0/main.jhyy →  jhyy_v3.il     ← byte-equal to v2.il
+jhyy_v3.exe  → src0/main.jhyy →  jhyy_v4.il     ← byte-equal to v2.il
+                                                 sha 2445e97d…
+```
 
-## 一段代码看语法
+All four raw `.il` files share an identical sha256 (1.378 MB, no fix-up post-processing). The fixed point is an attractor, not a transient. **M4 milestone reached — tagged at commit `eabee0d` on 2026-08-10.**
+
+| Metric | Value |
+|--------|-------|
+| `regress.py` (C-side `jhyy.exe`) | **50/53 PASS, 0 failed** |
+| `regress_v1.py` (self-hosted `jhyy_v1.exe.exe`) | **50/53 PASS, 0 failed** |
+| Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | **7/7 PASS** |
+| Stage 2 N=3 byte-equal (`v1→v2→v3→v4`) | **stable** |
+| `jhyy_v2` compiling `_repro_t0.jhyy` | `EXIT=100` ✓ |
+| `jhyy_v2` compiling `fib(10)` | `EXIT=55` ✓ |
+
+> [!NOTE]
+> **v1.0.0 is both a milestone and a starting point.** The C-side compiler (`compiler/src/*.c`) remains the production path; `compiler/src0/*.jhyy` (the jhyy-side translated source) already produces byte-equal output, and subsequent sprints plan to gradually migrate the production path onto the self-hosted compiler (`v1.x → v2.x` roadmap).
+
+---
+
+## What is JHYY
+
+JHYY is a self-designed, statically typed, expression-oriented, compiled systems programming language. The backend is [QBE](https://c9x.me/compile/), producing native x86-64 Windows binaries.
+
+**Design goals**:
+- **Self-hosting** — the compiler written in itself, achieving byte-equal closure (✓ v1.0.0)
+- **OS development** — aligned with the [`jhyy_OS`](../jhyy_OS) project, providing OS-required extensions like inline asm / volatile / naked / `no_std` / `&mut` + lifetime (v3.x roadmap)
+- **Native performance** — QBE backend, no runtime / no GC, directly produces PE/COFF binaries
+
+## A tour of the syntax
 
 ```rust
-// 函数、变量、控制流、struct、match、enum、FFI 一次展示
+// Functions / variables / control flow / struct / match / enum / FFI
 type Point = struct { x: i32, y: i32 }
 
 fn dist_sq(a: Point, b: Point) -> i32 {
@@ -39,7 +72,7 @@ fn dist_sq(a: Point, b: Point) -> i32 {
 fn classify(n: i32) -> *u8 {
     match n {
         0        => "zero",
-        1..10    => "single digit",   // 半开区间
+        1..10    => "single digit",
         10 | 20  => "round number",
         _        => "other",
     }
@@ -56,15 +89,17 @@ fn main_jhyy() -> i32 {
 }
 ```
 
-## 快速开始
+---
 
-### 环境要求
+## Quick Start
 
-- Windows 10+ / MSYS2 (ucrt64)
-- `C:\msys64\ucrt64\bin\gcc.exe` (GCC 15+)
-- 已 vendor 在 `qbe/` 的 QBE (Windows x64 target)
+### Requirements
 
-### 构建编译器
+- Windows 10+ + MSYS2 (ucrt64)
+- GCC 15+ at `C:\msys64\ucrt64\bin\gcc.exe`
+- Vendored QBE at `qbe/qbe.exe` (Windows x64 target)
+
+### Build the compiler
 
 ```bash
 git clone https://github.com/JiHuiYiYou/JiHuiYiYou-compiler
@@ -76,224 +111,239 @@ cd JiHuiYiYou-compiler
     -I compiler/src
 ```
 
-> 推荐把 `compiler/build/bin/` 加入 `PATH`，下文假定 `jhyy` 已可用。
+Or use the project-root `Makefile`:
 
-### Hello World
+```bash
+make
+```
+
+### Hello world
 
 ```rust
 // hello.jhyy
-extern fn puts(s: *u8) -> i32;
-
 fn main_jhyy() -> i32 {
-    puts("Hello, world!");
-    0
+    42
 }
 ```
 
 ```bash
-jhyy compile hello.jhyy -o hello
+./compiler/build/bin/jhyy.exe compile hello.jhyy -o hello
 ./hello.exe
-# => Hello, world!
+echo $?    # => 42
 ```
 
-### 跑测试
+### Run the regression suite
 
 ```bash
 python compiler/build/bin/regress.py
-# => 50/53 passed, 0 failed, 3 skipped (3 skipped = 库文件无 main)
+# => 50/53 passed, 0 failed, 3 skipped
 ```
 
-> **自举进度**：jhyy_v1 regress **50/53 PASS** + stage1 byte-equal **6/7**。**自编译闭环已达成** — jhyy_v1 编译自身产 4.5MB IL → fix_il.py → QBE → as → GCC → 432KB working binary。下一步: byte-equal IL → Stage 2 N=3 → v1.0 闭环。详见 [`v1.0 post-50/53 计划`](docs/plans/v1/v1.0-post-50-53-plan.md)。
-
-## 语言特性
-
-> 当前已实现: v0.7.0 + v0.8 wip + v0.9 wip
-
-| 类别 | 支持 |
-|------|------|
-| **类型** | `i8/i16/i32/i64`, `u8/u16/u32/u64`, `f32/f64`, `bool`, `*T`, `[T; N]`, `struct`, `enum` |
-| **类型转换** | `as` 关键字 — 整数/浮点互转、扩宽/截断、`*T ↔ i64/u64` |
-| **控制流** | `if`/`else` (含表达式值), `while`, `for start..end`, `break`, `continue`, `match` (字面量/范围/通配符/enum + 穷尽性检查) |
-| **模式** | enum 短名 pattern (`Some(v)` / `None`) — v0.7 |
-| **顶层 const** | `const NAME: [T; N] = [...]` — emit 到 `.data` 段，0-cost load (v0.7) |
-| **逻辑** | `&&` / `\|\|` 短路求值, `!` / `~` 一元运算 |
-| **函数** | 头等函数、递归、复合赋值 (`+=` `-=` `*=` `/=` `%=`) |
-| **模块** | `import`、传递性导入、多文件编译、`mod::fn()` 命名空间 |
-| **FFI** | `extern fn` 调用 C (printf、文件 I/O、多参数) |
-| **内存** | 运行时 Arena 分配器 |
-
-完整变更历史见 [changelog-v0.7.0](docs/logs/v0/changelog-v0.7.0.md)。
-
-## 命令行
+### Verify self-hosting closure
 
 ```bash
-jhyy compile <file.jhyy> [-o name]   # 编译为 .exe
-jhyy run     <file.jhyy>             # 编译并运行
-jhyy build   <file.jhyy> [-o name]   # 仅生成 QBE IL (.il 文件)
-jhyy check   <file.jhyy>             # 仅做语法/语义检查
-jhyy                                  # 打印帮助
+# Stage 2 N=3 byte-equal — jhyy compiles jhyy
+python compiler/build/bin/jhyy_v1.py 2>/dev/null || true
+# See docs/logs/v1/changelog-v1.0.0.md for full procedure
 ```
 
-## VS Code 集成
+---
 
-### 安装语言扩展
+## Language
 
-将 `vscode-ext/` 文件夹拷贝到 VS Code 扩展目录：
+| Category | Supported |
+|----------|-----------|
+| **Types** | `i8/i16/i32/i64`, `u8/u16/u32/u64`, `f32/f64`, `bool`, `*T`, `[T; N]`, `[*]T` (slice), `struct`, `enum` |
+| **Casts** | `as` — integer/float conversion, widening/narrowing, `*T ↔ i64/u64` |
+| **Control flow** | `if`/`else` (expression-valued), `while`, `for i in start..end`, `break`, `continue`, `match` (literal/range/enum/wildcard, with exhaustiveness check) |
+| **Top-level const** | `const NAME: [T; N] = [...]` — compile-time emit to `.data` section |
+| **Logic** | `&&` / `\|\|` short-circuit, `!` / `~` unary |
+| **Functions** | first-class, recursion, compound assignment (`+=` `-=` `*=` `/=` `%=`), block-expression closures |
+| **Modules** | `import` + transitive imports, multi-file CLI, `mod::fn()` namespaces |
+| **FFI** | `extern fn` calling C (printf, file I/O, multi-arg) |
+| **Memory** | runtime Arena allocator (`arena_alloc` via FFI) |
 
-```powershell
-# PowerShell（管理员）
-Copy-Item vscode-ext $env:USERPROFILE\.vscode\extensions\jhyy-lang -Recurse
+Full specification: [`docs/abis/jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md) (locked); known limitations in Appendix B.
+
+---
+
+## CLI
+
+```text
+jhyy compile <file.jhyy> [-o name]   compile to .exe (default amd64_win)
+jhyy run     <file.jhyy>             compile and run
+jhyy build   <file.jhyy> [-o name]   emit QBE IL only (.il file)
+jhyy check   <file.jhyy>             syntax / semantic check only, no codegen
+jhyy                                 print help
 ```
 
-或直接拖拽 `vscode-ext` 到 `C:\Users\<用户名>\.vscode\extensions\` 并重命名为 `jhyy-lang`。
+> [!TIP]
+> For multi-file compilation, list every `.jhyy` source on the command line: `jhyy compile main.jhyy lib.jhyy -o app`
 
-### 安装 Code Runner（获得 ▶ 按钮）
+---
 
-1. VS Code 扩展商店搜索 `Code Runner`（`formulahendry.code-runner`）
-2. 安装后重启 VS Code
+## Architecture
 
-### 配置 Code Runner
-
-`Ctrl+,` → 右上角 `{}` 打开 `settings.json`：
-
-```json
-{
-    "code-runner.executorMap": {
-        "jhyy": "cd $dirWithoutTrailingSlash && jhyy run $fileName"
-    },
-    "code-runner.runInTerminal": true,
-    "code-runner.saveFileBeforeRun": true,
-    "code-runner.clearPreviousOutput": true
-}
-```
-
-`Ctrl+K Ctrl+S` → `keybindings.json` 加 F6 快捷键：
-
-```json
-[
-    {
-        "key": "f6",
-        "command": "code-runner.run",
-        "when": "editorLangId == jhyy"
-    }
-]
-```
-
-### 快捷键
-
-| 操作 | 触发方式 |
-|------|---------|
-| ▶ 按钮 | 编辑器右上角 → Run Code |
-| **F6** | 编译并运行当前 .jhyy 文件 |
-| Ctrl+Shift+B | VS Code 默认构建任务（运行当前文件） |
-| Ctrl+Shift+P → "JHYY: Compile" | 只编译 |
-
-## 文档
-
-### 规范 & ABI
-
-| 文档 | 路径 |
-|------|------|
-| 语言规范 (latest, v1.1.0) | [`docs/abis/jhyy-lang-spec-v1.1.0.md`](docs/abis/jhyy-lang-spec-v1.1.0.md) |
-| 语言规范 (v1.0.0) | [`docs/abis/jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md) |
-| ABI 白皮书 (locked v1.0.0) | [`docs/abis/jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) |
-| 早期 ABI 草案 (v0.0.1) | [`docs/abis/jhyy-abi-v0.0.1.md`](docs/abis/jhyy-abi-v0.0.1.md) |
-| 早期语言规范 (v0.2.1) | [`docs/abis/jhyy-lang-spec-v0.2.1.md`](docs/abis/jhyy-lang-spec-v0.2.1.md) |
-
-### 路线图 & 计划
-
-| 文档 | 路径 |
-|------|------|
-| v0.0 — Skeleton | [`docs/plans/roadmap/v0.0-skeleton.md`](docs/plans/roadmap/v0.0-skeleton.md) |
-| v0.x — C 编译器 | [`docs/plans/roadmap/v0.x-c-compiler-roadmap.md`](docs/plans/roadmap/v0.x-c-compiler-roadmap.md) |
-| v0.8 wip — 自举路径清理 | [`docs/plans/v0/v0.8.0任务清单 + 概要设计.md`](<docs/plans/v0/v0.8.0任务清单 + 概要设计.md>) |
-| v0.9 wip — W 真修 + 2 audit (AUDIT + C') + Stage 1 byte-equal | [`docs/plans/v0/v0.9.0任务清单 + 概要设计.md`](<docs/plans/v0/v0.9.0任务清单 + 概要设计.md>) |
-| **v1.0 post-50/53 — 当前活跃** | [`docs/plans/v1/v1.0-post-50-53-plan.md`](docs/plans/v1/v1.0-post-50-53-plan.md) |
-| v1.0.0 — 自举总览 | [`docs/plans/roadmap/v1.0-self-hosting.md`](docs/plans/roadmap/v1.0-self-hosting.md) + [`docs/plans/v1/v1.0.0任务清单 + 概要设计.md`](<docs/plans/v1/v1.0.0任务清单 + 概要设计.md>) |
-| v2.x — QBE 完整重写 | [`docs/plans/roadmap/v2.x-qbe-rewrite.md`](docs/plans/roadmap/v2.x-qbe-rewrite.md) |
-| v3.x — 扩展 | [`docs/plans/roadmap/v3.x-language-expansion.md`](docs/plans/roadmap/v3.x-language-expansion.md) |
-
-### 变更日志
-
-| 版本 | 文档 |
-|------|------|
-| **v0.9 wip (进行中, Sprint 4.13, self-compilation binary)** | [`docs/logs/v0/changelog-v0.9.0.md`](docs/logs/v0/changelog-v0.9.0.md) |
-| v0.8 wip (commit 12, 5820793) | [`docs/logs/v0/changelog-v0.8.0.md`](docs/logs/v0/changelog-v0.8.0.md) |
-| v0.7.0 | [`docs/logs/v0/changelog-v0.7.0.md`](docs/logs/v0/changelog-v0.7.0.md) |
-| v0.6.5 (patch) | [`docs/logs/v0/changelog-v0.6.5.md`](docs/logs/v0/changelog-v0.6.5.md) |
-| v0.6.4 (patch) | [`docs/logs/v0/changelog-v0.6.4.md`](docs/logs/v0/changelog-v0.6.4.md) |
-| v0.6.3 (patch) | [`docs/logs/v0/changelog-v0.6.3.md`](docs/logs/v0/changelog-v0.6.3.md) |
-| v0.6.2 (草稿, 未发) | [`docs/logs/v0/changelog-v0.6.2.md`](docs/logs/v0/changelog-v0.6.2.md) |
-| v0.6.0 | [`docs/logs/v0/changelog-v0.6.0.md`](docs/logs/v0/changelog-v0.6.0.md) |
-| v0.5.0 | [`docs/logs/v0/changelog-v0.5.0.md`](docs/logs/v0/changelog-v0.5.0.md) |
-| v0.4.0 | [`docs/logs/v0/changelog-v0.4.0.md`](docs/logs/v0/changelog-v0.4.0.md) |
-| v0.3.0 | [`docs/logs/v0/changelog-v0.3.0.md`](docs/logs/v0/changelog-v0.3.0.md) |
-| v0.2.1 | [`docs/logs/v0/changelog-v0.2.1.md`](docs/logs/v0/changelog-v0.2.1.md) |
-| v0.0.1 | [`docs/logs/v0/changelog-v0.0.1.md`](docs/logs/v0/changelog-v0.0.1.md) |
-
-Sprint 实施日志: `docs/logs/v0/sprint-1[a-g]-*.md` (sprint-1a ~ 1g,v0.1 时代命名) — 索引见 [`docs/logs/v0/README.md`](docs/logs/v0/README.md)
-
-### 工具 & 集成
-
-| 工具 | 路径 |
-|------|------|
-| Claude Code MCP 服务 | [`mcp-jhyy/`](mcp-jhyy/) — 7 tools + 4 resources |
-| MCP 使用说明 | [`mcp-jhyy/README.md`](mcp-jhyy/README.md) |
-| VS Code 语言扩展 | [`vscode-ext/`](vscode-ext/) |
-
-## 路线图
-
-| 阶段 | 内容 | 状态 |
-|------|------|------|
-| **v0.x** | C 宿主编译器达到自举门槛 | **完成** (50/53 PASS + 自编译闭环) |
-| **v1.x** | 自举闭环 → byte-equal IL → Stage 2 N=3 + v0 真修 + 语法糖 + 清理 | **进行中** — 自编译 binary 已产出，byte-equal IL 推进中 ([`v1.0 post-50/53 计划`](docs/plans/v1/v1.0-post-50-53-plan.md)) |
-| **v2.x** ⟂ **v3.x** | QBE 自写后端 + 多目标（amd64_sysv / freestanding）⟂ 语言扩展（OS-required：asm/naked/volatile/no_std/link_section/memory barrier + `&mut`+Cap<T> + 泛型/闭包/标准库） | **两轴并行** — v1.x 闭环后同时启动；v2.0 (freestanding target) + v3.0 sprint 3a-3f 共同解锁 OS M1 启动 ([`v2.0.0-os-prep`](docs/plans/v2/v2.0.0-os-prep.md) § 1, [`v3.x-language-expansion`](docs/plans/roadmap/v3.x-language-expansion.md)) |
-
-> **轴关系说明**（避免误读 semver）：
-> - `v0.x → v1.x → v2.x / v3.x`：**严格顺序**（每条都是强前置）
-> - `v2.x || v3.x`：**并行轴**（v2.99 跟 v3.0 不是先后关系，是各自推进；OS M1 启动前两轴各自达成即可）
-
-### v0.7.0 已完成（自举前最后一波）
-
-- ✅ enum match 穷尽性检查（sema 强制覆盖）
-- ✅ 短名 variant pattern（`Some(v)` / `None` 语法糖）
-- ✅ 顶层 const 数组声明（`const NAME: [T; N] = [...]`，emit 到 QBE `.data` 段）
-- ✅ arr_of_structs[i].field codegen 修复（附带修 pre-existing bug）
-
-### v0.6.0 已完成
-
-- ✅ 切片 `[*]T` codegen
-- ✅ 模块命名空间（`mod::fn()` 限定调用 + `Sym.module` 字段）
-- ✅ `*T ↔ i64` 互转
-- ✅ Stage 0 自举试点（`compiler/jhyy-src/arena.jhyy` arena.c → JHYY）
-
-## 项目结构
+The JHYY compiler exists in two **fully equivalent** implementations that emit byte-equal QBE IL:
 
 ```
+                  ┌─────────────────────────────────────────┐
+                  │              compiler/src/              │
+                  │   C-side (legacy, v0.x — production)    │
+                  │   main.c / lexer / parser / sema /      │
+                  │   ir / codegen / symtab / types         │
+                  └────────────────────┬────────────────────┘
+                                       │ gcc → jhyy.exe
+                                       ▼
+                  ┌─────────────────────────────────────────┐
+   .jhyy source → │                  QBE                   │ → .il → as → link → .exe
+                  │   (vendored, qbe/qbe.exe -t amd64_win)  │
+                  └────────────────────▲────────────────────┘
+                                       │ jhyy.exe → jhyy_v1.exe
+                  ┌────────────────────┴────────────────────┐
+                  │             compiler/src0/              │
+                  │  jhyy-side (target, v1.x — self-host)   │
+                  │  main.jhyy / lexer / parser / sema /    │
+                  │  ir / codegen / symtab / types          │
+                  └─────────────────────────────────────────┘
+```
+
+| Implementation | Role | Status |
+|----------------|------|--------|
+| `compiler/src/*.c` | C-side compiler (v0.x era) | production path, maintained |
+| `compiler/src0/*.jhyy` | jhyy-side translated source (v1.x era) | self-host path, byte-equal to C-side |
+| `compiler/runtime/*.c` | C runtime (Arena + main entry) | linked at compile time |
+
+Both paths emit **byte-equal QBE intermediate representation** — Stage 1 (`jhyy_0` vs `jhyy_v1`) 7/7 byte-equal, Stage 2 (`jhyy_v1 → v2 → v3 → v4`) N=3 closure reached.
+
+---
+
+## Project layout
+
+```
+JiHuiYiYou-compiler/
 ├── compiler/
-│   ├── src/                    # C 编译器源码 (10 个 .c + 9 个 .h)
-│   ├── runtime/                # C 运行时 (Arena + main 入口)
-│   ├── src0/                   # v1.x 自举翻译稿 (v1.0.0 WIP)
-│   └── tests/
-│       ├── unit/               # C 单元测试
-│       └── examples/           # .jhyy 集成测试 (50 个)
-├── vscode-ext/                 # VS Code 语言扩展
-├── qbe/                        # Vendored QBE 后端
-├── mcp-jhyy/                   # Claude Code MCP 集成
-├── docs/                       # 规范、ABI、计划、变更日志
-│   ├── abis/                   # 语言规范 + ABI 白皮书
-│   ├── plans/                  # 阶段计划 + 版本任务清单
-│   └── logs/                   # 变更日志 + Sprint 实施日志
-└── .vscode/                    # VS Code 项目配置 (tasks、推荐扩展)
+│   ├── src/                    C-side compiler source (10 .c / 9 .h files)
+│   ├── src0/                   jhyy-side translated source (10 .jhyy) — self-host path
+│   ├── runtime/                C runtime (Arena + main entry)
+│   ├── tests/
+│   │   ├── examples/           integration tests (47 .jhyy) — regress.py auto-runs
+│   │   └── unit/               C unit tests
+│   └── build/
+│       └── bin/
+│           ├── jhyy.exe        C-side compiler binary
+│           ├── jhyy_v1.exe     self-hosted compiler (jhyy compiled src0/)
+│           └── regress.py      regression script
+├── qbe/                        vendored QBE backend (c9x.me/compile)
+├── mcp-jhyy/                   Claude Code MCP server (4 tools)
+├── vscode-ext/                 VS Code language extension (syntax highlighting)
+├── docs/
+│   ├── abis/                   language spec + ABI whitepaper (locked)
+│   ├── plans/                  roadmap + sprint plans
+│   ├── internal/               architecture / build / status / tests / workarounds
+│   └── logs/                   changelogs + sprint logs
+├── Makefile                    one-line build (make)
+├── README.md                   English (this file)
+├── README.zh-CN.md              简体中文
+└── CLAUDE.md                   AI-collaboration entry point
 ```
+
+---
+
+## Verification status
+
+| Check | Command | Expected |
+|-------|---------|----------|
+| C-side regression | `python compiler/build/bin/regress.py` | 50/53 PASS |
+| Self-host regression | `python compiler/build/bin/regress_v1.py` | 50/53 PASS |
+| Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | `python compiler/tests/stage1-expanded.sh` | 7/7 PASS |
+| Stage 2 N=3 byte-equal (`v1→v2→v3→v4`) | MCP `jhyy_selfhost_check` | `all_byte_equal=true`, stable il_sha256 |
+| MCP smoke (14 in-process tests) | `pytest mcp-jhyy/tests/` | 14 pass |
+| One-line build | `make` | 0 warnings (-Wall -Wextra) |
+
+---
+
+## Roadmap
+
+The project uses a **single version axis**, no phase-N numbering:
+
+| Axis | Scope | Goal | Status |
+|------|-------|------|--------|
+| **v0.x** | C-side compiler itself | reach self-host threshold | **done** |
+| **v1.x** | jhyy self-hosting | byte-equal `.il` closure | **v1.0.0 tagged** |
+| **v2.x** | full QBE rewrite + multi-target / OS prep | amd64_sysv / freestanding | not started |
+| **v3.x** | language extensions | OS-required: asm / volatile / naked / `no_std` / `&mut` + lifetime | not started |
+
+**Axis relationships**:
+- `v0.x → v1.x → v2.x / v3.x`: **strict order** (each is a hard prerequisite of the next)
+- `v2.x || v3.x`: **parallel axes** (each progresses independently; both must finish before OS M1 starts)
+
+> [!IMPORTANT]
+> **Alignment with the jhyy_OS project**: 12 cross-boundary questions + 6 decisions are closed (per [`coordination.md § 6`](../jhyy_OS/docs/coordination.md)). The v2.0 sprint design input is [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md).
+
+---
+
+## Tooling & Integration
+
+### Claude Code MCP server
+
+`mcp-jhyy/` ships 4 MCP tools wired into the Claude Code workflow:
+
+| Tool | Purpose |
+|------|---------|
+| `jhyy_regress` | run C-side / jhyy-side regression, return PASS/FAIL list |
+| `jhyy_il_diff` | byte-equal check on two `.il` files + contextual diff |
+| `jhyy_selfhost_check` | one-shot v1→v2→v3→v4 byte-equal verification |
+| `jhyy_workarounds` | query W-NNN workaround status / details |
+
+Details in [`mcp-jhyy/README.md`](mcp-jhyy/README.md).
+
+### VS Code extension
+
+`vscode-ext/` ships syntax highlighting (TextMate grammar + file icon). Install instructions in [`vscode-ext/`](vscode-ext/) (the bilingual README retains legacy VS Code setup details for the Chinese version).
+
+---
+
+## Docs
+
+### Specification & ABI (locked)
+
+| Doc | Description |
+|-----|-------------|
+| [`docs/abis/jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md) | language spec v1.0.0 |
+| [`docs/abis/jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) | ABI whitepaper v1.0.0 (struct pass-by-value / FFI / namespaces / slices) |
+
+### Internal
+
+| Doc | Description |
+|-----|-------------|
+| [`docs/internal/architecture.md`](docs/internal/architecture.md) | pipeline / modules / QBE IL cheat sheet |
+| [`docs/internal/build.md`](docs/internal/build.md) | build / run / QBE backend pitfalls (Windows) |
+| [`docs/internal/status.md`](docs/internal/status.md) | current version / implemented features / history |
+| [`docs/internal/workarounds.md`](docs/internal/workarounds.md) | W-NNN workaround status index |
+| [`docs/internal/tests.md`](docs/internal/tests.md) | integration test catalog + how to run |
+
+### Roadmap & plans
+
+| Doc | Description |
+|-----|-------------|
+| [`docs/plans/roadmap/v0.x-c-compiler-roadmap.md`](docs/plans/roadmap/v0.x-c-compiler-roadmap.md) | C compiler evolution |
+| [`docs/plans/roadmap/v1.0-self-hosting.md`](docs/plans/roadmap/v1.0-self-hosting.md) | self-hosting overview |
+| [`docs/plans/roadmap/v2.x-qbe-rewrite.md`](docs/plans/roadmap/v2.x-qbe-rewrite.md) | QBE rewrite direction |
+| [`docs/plans/roadmap/v3.x-language-expansion.md`](docs/plans/roadmap/v3.x-language-expansion.md) | language extension direction |
+| [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md) | compiler-side authority on OS startup chain |
+
+### Changelog
+
+Latest: [`docs/logs/v1/changelog-v1.0.0.md`](docs/logs/v1/changelog-v1.0.0.md) — **v1.0.0 self-hosting closure reached**
+
+Historical index: [`docs/logs/`](docs/logs/).
+
+---
 
 ## Contributors
 
-- **人类作者**: JHYY ([JHYY@local](https://github.com/JiHuiYiYou))
-- **AI 协作**: [MiniMax-M3](https://MiniMax) — 通过 [Claude Code](https://claude.ai/code) CLI 工作流参与设计、编码、调试、文档
+- **Human author**: JHYY
+- **AI collaborator**: MiniMax-M3 (working through the [Claude Code](https://claude.ai/code) CLI workflow on design, coding, debugging, documentation)
 
-> 自 v0.6 起所有 sprint 的实现 + 文档由 JHYY + MiniMax-M3 协作完成。MiniMax-M3 是 [MiniMax](https://MiniMax) 出品的基础模型，**不是** Anthropic Claude / OpenAI GPT 系列。
-
-## License
-
-[MIT](LICENSE)
+Since v0.6 every sprint's implementation + documentation has been co-authored by JHYY + MiniMax-M3.

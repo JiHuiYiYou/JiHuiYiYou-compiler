@@ -1,0 +1,349 @@
+<div align="center">
+
+<img src="vscode-ext/icon.svg" width="96" alt="JHYY 标志">
+
+# JHYY
+
+### 机会翼游 — 自研静态类型编译型系统编程语言
+
+**静态类型 · 表达式导向 · 通过 QBE 编译为原生机器码**
+
+[![版本](https://img.shields.io/badge/版本-v1.0.0-00d4aa)](docs/logs/v1/changelog-v1.0.0.md)
+[![状态](https://img.shields.io/badge/自举-byte--equal%20v1%E2%86%92v4-success)](docs/logs/v1/changelog-v1.0.0.md)
+[![后端](https://img.shields.io/badge/后端-QBE-orange)](https://c9x.me/compile/)
+[![平台](https://img.shields.io/badge/平台-Windows%20x64-lightgrey)](#构建)
+[![协议](https://img.shields.io/badge/协议-MIT-blue)](LICENSE)
+[![English](https://img.shields.io/badge/lang-English-blue)](README.md)
+
+[快速开始](#快速开始) · [语言特性](#语言特性) · [命令行](#命令行) · [架构](#架构) · [路线图](#路线图) · [文档](#文档)
+
+</div>
+
+---
+
+## v1.0.0 — 自举闭环达成
+
+`jhyy_v1 → jhyy_v2 → jhyy_v3 → jhyy_v4` 编译自身,产出 **字节相同的 QBE 中间表示**:
+
+```
+jhyy_v1.exe  → src0/main.jhyy →  jhyy_v2.il
+jhyy_v2.exe  → src0/main.jhyy →  jhyy_v3.il     ← 与 v2.il 字节相同
+jhyy_v3.exe  → src0/main.jhyy →  jhyy_v4.il     ← 与 v2.il 字节相同
+                                                 sha 2445e97d…
+```
+
+四份 raw `.il` 文件 sha256 完全一致(1.378 MB,无 fix-up 后处理),fixed point 是 attractor,不是 transient。**M4 里程碑达成,2026-08-10 tag 在 commit `eabee0d`。**
+
+| 指标 | 值 |
+|------|----|
+| `regress.py` (C 端 `jhyy.exe`) | **50/53 PASS, 0 failed** |
+| `regress_v1.py` (自举 `jhyy_v1.exe.exe`) | **50/53 PASS, 0 failed** |
+| Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | **7/7 PASS** |
+| Stage 2 N=3 byte-equal (`v1→v2→v3→v4`) | **稳定** |
+| `jhyy_v2` 编 `_repro_t0.jhyy` | `EXIT=100` ✓ |
+| `jhyy_v2` 编 `fib(10)` | `EXIT=55` ✓ |
+
+> [!NOTE]
+> **v1.0.0 既是里程碑也是起点**。C 端编译器(`compiler/src/*.c`)仍是生产路径;`compiler/src0/*.jhyy`(jhyy 端翻译稿)已产出 byte-equal 编译结果,后续 sprint 计划逐步将生产路径迁移到自举编译器上(`v1.x → v2.x` 路线图)。
+
+---
+
+## 这是什么
+
+JHYY 是一门自研的、静态类型的、表达式导向的编译型系统编程语言。后端采用 [QBE](https://c9x.me/compile/),输出 x86-64 Windows 原生二进制。
+
+**设计目标**:
+- **自举能力** — 编译器用自身语言写自身,达成 byte-equal 闭环(✓ v1.0.0)
+- **OS 开发** — 与 [`jhyy_OS`](../jhyy_OS) 项目对齐,提供 inline asm / volatile / naked / `no_std` / `&mut` + lifetime 等 OS-required 特性(v3.x 路线)
+- **原生性能** — QBE 后端,无运行时 / 无 GC,直接产出 PE/COFF 二进制
+
+## 一段代码看语法
+
+```rust
+// 函数 / 变量 / 控制流 / struct / match / enum / FFI
+type Point = struct { x: i32, y: i32 }
+
+fn dist_sq(a: Point, b: Point) -> i32 {
+    let dx = a.x - b.x;
+    let dy = b.y - a.y;
+    dx * dx + dy * dy
+}
+
+fn classify(n: i32) -> *u8 {
+    match n {
+        0        => "zero",
+        1..10    => "single digit",
+        10 | 20  => "round number",
+        _        => "other",
+    }
+}
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    let p = Point { x: 3, y: 4 };
+    let q = Point { x: 0, y: 0 };
+    printf("d² = %d\n", dist_sq(p, q));
+    printf("%s\n", classify(42));
+    0
+}
+```
+
+---
+
+## 快速开始
+
+### 环境要求
+
+- Windows 10+ + MSYS2 (ucrt64)
+- GCC 15+ at `C:\msys64\ucrt64\bin\gcc.exe`
+- 已 vendor 在 `qbe/qbe.exe` 的 QBE(Windows x64 target)
+
+### 构建编译器
+
+```bash
+git clone https://github.com/JiHuiYiYou/JiHuiYiYou-compiler
+cd JiHuiYiYou-compiler
+
+/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra \
+    compiler/src/*.c \
+    -o compiler/build/bin/jhyy.exe \
+    -I compiler/src
+```
+
+或用项目根目录的 `Makefile`:
+
+```bash
+make
+```
+
+### Hello world
+
+```rust
+// hello.jhyy
+fn main_jhyy() -> i32 {
+    42
+}
+```
+
+```bash
+./compiler/build/bin/jhyy.exe compile hello.jhyy -o hello
+./hello.exe
+echo $?    # => 42
+```
+
+### 跑回归测试
+
+```bash
+python compiler/build/bin/regress.py
+# => 50/53 passed, 0 failed, 3 skipped
+```
+
+### 验证自举闭环
+
+```bash
+# Stage 2 N=3 byte-equal — jhyy 编译 jhyy
+python compiler/build/bin/jhyy_v1.py 2>/dev/null || true
+# 完整流程见 docs/logs/v1/changelog-v1.0.0.md
+```
+
+---
+
+## 语言特性
+
+| 类别 | 支持 |
+|------|------|
+| **类型** | `i8/i16/i32/i64`, `u8/u16/u32/u64`, `f32/f64`, `bool`, `*T`, `[T; N]`, `[*]T` (切片), `struct`, `enum` |
+| **类型转换** | `as` — 整数/浮点互转、扩宽/截断、`*T ↔ i64/u64` |
+| **控制流** | `if`/`else` (含表达式值)、`while`、`for i in start..end`、`break`、`continue`、`match` (字面量/范围/enum/通配符,带穷尽性检查) |
+| **顶层 const** | `const NAME: [T; N] = [...]` — 编译期 emit 到 `.data` 段 |
+| **逻辑** | `&&` / `\|\|` 短路求值, `!` / `~` 一元运算 |
+| **函数** | 头等函数、递归、复合赋值 (`+=` `-=` `*=` `/=` `%=`)、块表达式闭包 |
+| **模块** | `import` + 传递性导入、多文件 CLI、`mod::fn()` 命名空间 |
+| **FFI** | `extern fn` 调用 C(printf、文件 I/O、多参数) |
+| **内存** | 运行时 Arena 分配器(`arena_alloc` via FFI) |
+
+完整语言规范见 [`docs/abis/jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md)(已锁定);已知限制见附录 B。
+
+---
+
+## 命令行
+
+```text
+jhyy compile <file.jhyy> [-o name]   编译为 .exe (默认 amd64_win)
+jhyy run     <file.jhyy>             编译并运行
+jhyy build   <file.jhyy> [-o name]   仅生成 QBE IL (.il 文件)
+jhyy check   <file.jhyy>             仅做语法 / 语义检查,不生成代码
+jhyy                                 打印帮助
+```
+
+> [!TIP]
+> 多文件编译直接列出多个 `.jhyy` 源文件:`jhyy compile main.jhyy lib.jhyy -o app`
+
+---
+
+## 架构
+
+JHYY 编译器存在两份**完全等价**的实现,产出 byte-equal 的 QBE IL:
+
+```
+                  ┌─────────────────────────────────────────┐
+                  │              compiler/src/              │
+                  │   C 端 (legacy, v0.x — 生产路径)        │
+                  │   main.c / lexer / parser / sema /      │
+                  │   ir / codegen / symtab / types         │
+                  └────────────────────┬────────────────────┘
+                                       │ gcc 编译 → jhyy.exe
+                                       ▼
+                  ┌─────────────────────────────────────────┐
+   .jhyy source → │                  QBE                   │ → .il → as → 链接 → .exe
+                  │   (已 vendor, qbe/qbe.exe -t amd64_win)  │
+                  └────────────────────▲────────────────────┘
+                                       │ jhyy.exe 编译 → jhyy_v1.exe
+                  ┌────────────────────┴────────────────────┐
+                  │             compiler/src0/              │
+                  │  jhyy 端 (target, v1.x — 自举路径)     │
+                  │  main.jhyy / lexer / parser / sema /    │
+                  │  ir / codegen / symtab / types          │
+                  └─────────────────────────────────────────┘
+```
+
+| 实现 | 角色 | 状态 |
+|------|------|------|
+| `compiler/src/*.c` | C 端编译器(v0.x 时代) | 生产路径,持续维护 |
+| `compiler/src0/*.jhyy` | jhyy 端翻译稿(v1.x 时代) | 自举路径,与 C 端 byte-equal |
+| `compiler/runtime/*.c` | C 运行时(Arena + main 入口) | 编译时链接 |
+
+两路径产出**字节相同的** QBE 中间表示 — Stage 1 (`jhyy_0` vs `jhyy_v1`) 7/7 byte-equal,Stage 2 (`jhyy_v1 → v2 → v3 → v4`) N=3 闭环达成。
+
+---
+
+## 项目结构
+
+```
+JiHuiYiYou-compiler/
+├── compiler/
+│   ├── src/                    C 端编译器源码 (10 个 .c / 9 个 .h)
+│   ├── src0/                   jhyy 端翻译稿 (10 个 .jhyy) — 自举路径
+│   ├── runtime/                C 运行时 (Arena + main 入口)
+│   ├── tests/
+│   │   ├── examples/           集成测试 (47 个 .jhyy) — regress.py 自动跑
+│   │   └── unit/               C 单元测试
+│   └── build/
+│       └── bin/
+│           ├── jhyy.exe        C 端编译器二进制
+│           ├── jhyy_v1.exe     自举编译器(jhyy 编 src0/)
+│           └── regress.py      回归脚本
+├── qbe/                        已 vendor 的 QBE 后端 (c9x.me/compile)
+├── mcp-jhyy/                   Claude Code MCP 服务 (4 个工具)
+├── vscode-ext/                 VS Code 语言扩展(语法高亮)
+├── docs/
+│   ├── abis/                   语言规范 + ABI 白皮书(已锁定)
+│   ├── plans/                  版本路线图 + sprint 计划
+│   ├── internal/               架构 / 构建 / 状态 / 测试 / workarounds
+│   └── logs/                   变更日志 + sprint 实施日志
+├── Makefile                    一行构建(make)
+├── README.md                   English
+├── README.zh-CN.md              简体中文(本文件)
+└── CLAUDE.md                   AI 协作入口
+```
+
+---
+
+## 验证状态
+
+| 验证项 | 命令 | 期望 |
+|--------|------|------|
+| C 端编译回归 | `python compiler/build/bin/regress.py` | 50/53 PASS |
+| 自举编译回归 | `python compiler/build/bin/regress_v1.py` | 50/53 PASS |
+| Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | `python compiler/tests/stage1-expanded.sh` | 7/7 PASS |
+| Stage 2 N=3 byte-equal (`v1→v2→v3→v4`) | MCP `jhyy_selfhost_check` | `all_byte_equal=true`, il_sha256 稳定 |
+| MCP smoke (14 个 in-process 测试) | `pytest mcp-jhyy/tests/` | 14 pass |
+| 一行构建 | `make` | 0 warning(-Wall -Wextra) |
+
+---
+
+## 路线图
+
+项目用**单一版本轴**,不再用 phase-N 编号:
+
+| 轴 | 范围 | 目标 | 状态 |
+|---|---|---|---|
+| **v0.x** | C 端编译器自身 | 达成自举启动门槛 | **完成** |
+| **v1.x** | jhyy 自举 | byte-equal `.il` 闭环 | **v1.0.0 tagged** |
+| **v2.x** | QBE 完整重写 + 多目标 / OS 准备 | amd64_sysv / freestanding | 未启动 |
+| **v3.x** | 语言特性扩展 | OS-required: asm / volatile / naked / `no_std` / `&mut` + lifetime | 未启动 |
+
+**轴之间的关系**:
+- `v0.x → v1.x → v2.x / v3.x`:**严格顺序**(每条都是强前置)
+- `v2.x || v3.x`:**并行轴**(各自推进;OS M1 启动前两轴各自达成即可,不互相阻塞)
+
+> [!IMPORTANT]
+> **与 jhyy_OS 项目对齐**:12 个跨边界问题 + 6 个决定已闭环(per [`coordination.md § 6`](../jhyy_OS/docs/coordination.md))。v2.0 sprint 设计输入详见 [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md)。
+
+---
+
+## 工具 & 集成
+
+### Claude Code MCP 服务
+
+`mcp-jhyy/` 提供 4 个 MCP 工具,直接对接 Claude Code 工作流:
+
+| 工具 | 用途 |
+|------|------|
+| `jhyy_regress` | 跑 C 端 / jhyy 端回归,返回 PASS/FAIL 列表 |
+| `jhyy_il_diff` | 两个 `.il` 文件 byte-equal 检查 + 上下文 diff |
+| `jhyy_selfhost_check` | 一键 v1→v2→v3→v4 byte-equal 验证 |
+| `jhyy_workarounds` | 查 W-NNN workaround 状态 / 详情 |
+
+详见 [`mcp-jhyy/README.md`](mcp-jhyy/README.md)。
+
+### VS Code 扩展
+
+`vscode-ext/` 提供语法高亮(TextMate grammar + 文件图标)。安装方式见 [`vscode-ext/`](vscode-ext/) 目录;历史 PowerShell / Code Runner 配置片段见 `docs/internal/` 旧档。
+
+---
+
+## 文档
+
+### 规范 & ABI(locked)
+
+| 文档 | 说明 |
+|------|------|
+| [`docs/abis/jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md) | 语言规范 v1.0.0 |
+| [`docs/abis/jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) | ABI 白皮书 v1.0.0(struct pass-by-value / FFI / 命名空间 / 切片) |
+
+### 项目内部
+
+| 文档 | 说明 |
+|------|------|
+| [`docs/internal/architecture.md`](docs/internal/architecture.md) | 流水线 / 模块 / QBE IL 速查 |
+| [`docs/internal/build.md`](docs/internal/build.md) | 编译 / 运行 / QBE 后端坑(Windows) |
+| [`docs/internal/status.md`](docs/internal/status.md) | 当前版本 / 已实现特性 / 历史 |
+| [`docs/internal/workarounds.md`](docs/internal/workarounds.md) | W-NNN workaround 状态清单 |
+| [`docs/internal/tests.md`](docs/internal/tests.md) | 集成测试清单 + 运行方法 |
+
+### 路线图 & 计划
+
+| 文档 | 说明 |
+|------|------|
+| [`docs/plans/roadmap/v0.x-c-compiler-roadmap.md`](docs/plans/roadmap/v0.x-c-compiler-roadmap.md) | C 编译器演进 |
+| [`docs/plans/roadmap/v1.0-self-hosting.md`](docs/plans/roadmap/v1.0-self-hosting.md) | 自举总览 |
+| [`docs/plans/roadmap/v2.x-qbe-rewrite.md`](docs/plans/roadmap/v2.x-qbe-rewrite.md) | QBE 重写方向 |
+| [`docs/plans/roadmap/v3.x-language-expansion.md`](docs/plans/roadmap/v3.x-language-expansion.md) | 语言特性扩展 |
+| [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md) | OS 启动链路编译器侧权威 |
+
+### 变更日志
+
+最新:`[docs/logs/v1/changelog-v1.0.0.md](docs/logs/v1/changelog-v1.0.0.md)` — **v1.0.0 自举闭环达成**
+
+历史索引见 [`docs/logs/`](docs/logs/)。
+
+---
+
+## Contributors
+
+- **人类作者**: JHYY
+- **AI 协作**: MiniMax-M3(通过 [Claude Code](https://claude.ai/code) CLI 工作流参与设计、编码、调试、文档)
+
+自 v0.6 起所有 sprint 的实现 + 文档由 JHYY + MiniMax-M3 协作完成。
