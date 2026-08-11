@@ -24,7 +24,7 @@ from pathlib import Path
 
 def read_lines(path: Path) -> list[str]:
     with path.open("r", encoding="utf-8") as f:
-        return [line.rstrip("\n") for line in f]
+        return [line.rstrip("\r\n") for line in f]
 
 
 def diff_lines(expected: list[str], actual: list[str]) -> tuple[int, int]:

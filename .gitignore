@@ -5,6 +5,7 @@ compiler/build/bin/*
 !compiler/build/bin/regress.py
 !compiler/build/bin/regress_v1.py
 _*.txt
+!compiler/src0/_W002_rename_map.txt
 _*.py
 _*.s
 _*.il
@@ -27,8 +28,10 @@ __pycache__/
 *.pyc
 # 忽略 Claude Code 本地配置
 .claude
-# 项目级 Claude Code 协作入口（不随仓库公开；本地保留以供 AI 跨会话阅读）
+# 项目级 Claude Code 协作入口（不随仓库公开；本地保留以供 AI 跨会话阅读）；
+# mcp-jhyy/CLAUDE.md 例外：该 subdir 的指令文件公开跟踪
 CLAUDE.md
+!mcp-jhyy/CLAUDE.md
 # codegraph 索引（daemon.pid mtime 抖动会污染 git status）
 .codegraph/
 
@@ -61,3 +64,10 @@ tmp/
 
 # pytest 测试发现需要 __init__.py — _*.py 通配会清掉
 !mcp-jhyy/tests/__init__.py
+
+# 跨平台编辑器 / IDE 临时文件防御（当前 Windows env 无 leak，加着预防）
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
