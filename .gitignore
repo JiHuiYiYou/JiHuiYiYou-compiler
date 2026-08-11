@@ -47,3 +47,15 @@ compiler/src0/*.exe
 # tmp/ — 工作目录临时调试 artifact（do_w*.py / tm_*.jhyy / test_*.jhyy / r1.* 等 200+ 文件）
 # 用 `tmp/` 目录而不是 repo 根散落文件，避免 git status 噪音
 tmp/
+
+# 关键编译器二进制例外 — 上方 *.exe 通配会清掉这些，git clean -fdX 前必须保留
+# v1.0.0 self-host 闭环依赖此 6 个 binary
+!compiler/build/bin/jhyy.exe
+!compiler/build/bin/jhyy_v1.exe
+!compiler/build/bin/jhyy_v1.exe.exe
+!compiler/build/bin/jhyy_v2.exe
+!compiler/build/bin/jhyy_v3.exe
+!compiler/build/bin/jhyy_v4.exe
+
+# pytest 测试发现需要 __init__.py — _*.py 通配会清掉
+!mcp-jhyy/tests/__init__.py
