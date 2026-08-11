@@ -1137,7 +1137,7 @@ fn sum_tree(t: *Tree) -> i32 {
 - **for 循环单独 `incr_b` 块**：`continue` 正确跳到 i++
 - **i32 整数溢出**：二补码环绕（明确语义）
 - **零警告构建**：`main.c` cmd buffer 4096
-- **Claude Code MCP 服务**：11 工具 + 4 资源（v0.5 + mcp-jhyy Sprint 1 2026-08-11）
+- **Claude Code MCP 服务**：7 工具 + 4 资源（v0.5 起；mcp-jhyy Sprint 1 2026-08-11 加 4 个生产级工具 → 11 工具，见 `mcp-jhyy/README.md`）
 - **ABI v1.0.0 锁定**
 
 ### 状态变化（从"限制"移到"已实现"）
