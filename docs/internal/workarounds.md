@@ -30,7 +30,7 @@
 | [W-003](#w-003-jhyy_v1-let-_-fncall-顶层-嵌套-segfault) | ACTIVE | `let _ = fncall(...)` 改 direct call，绕 jhyy_v1 codegen segfault（Bug 7/7b） |
 | [W-004](#w-004-short-local-var-4-chars--symtab-hash-撞--jhyy_v1-field-assign-死循环) | ACTIVE (BLOCKED verification — Task #60 fixed 2026-08-06; W-004 verification deferred to post-v1.0.0) | 短（≤4 字符）local var / fn 参数 / field 改名绕 jhyy_v1 symtab hash 撞（stack overflow） |
 | [W-005](#w-005-let-mut--assign--jhyy_v1-codegen-segfault) | RESOLVED (v0.9 wip commit 2.13) | `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault；commit 2.11 CGContext 布局对齐真修 + commit 2.13 revert 16 处回 `let mut` 风格 |
-| [W-006](#w-006-jhyy_v1-return-x--y-两-1-char-var-发-127qbe-fail) | RESOLVED (escaped — codegen fix deferred to v2.x; current src0/ 0 触发面, 2026-08-11 re-confirmed) | jhyy_v1 codegen 让两个 1-char 局部变量在 `return x ± y` 共享同一 stack slot → QBE fail / exit 127；改名或加类型注解绕 |
+| [W-006](#w-006-jhyy_v1-return-x--y-两-1-char-var-发-127qbe-fail) | RESOLVED (transitively closed by Sprint 4.21-4.25 W-005 #2 真修 chain — minimal repro no longer triggers, 2026-08-11 verified) | jhyy_v1 codegen 让两个 1-char 局部变量在 `return x ± y` 共享同一 stack slot → QBE fail / exit 127；改名或加类型注解绕 |
 | [W-007](#w-007-jhyy_v1-fn--i64--return--literal-as-i64-emit-w-copy) | ACTIVE | jhyy_v1 codegen 把 `fn() -> i64 { return X as i64; }` 的 return value 当 w（32-bit）emit → QBE "invalid type for jump argument" 错 |
 | [W-008](#w-008-jhyy_v1-cg_find_field_offset-漏一层-deref-i64-struct-field-emit-w-loadw) | RESOLVED | jhyy_v1 codegen NODE_FIELD 查 struct field type 时把 `*u8` 指针当 `**u8` 解了一层 → i64/pointer struct field 全 emit `=w loadw` 而非 `=l loadl` → QBE 拒绝 |
 | [W-009](#w-009-jhyy_v1-cg_convert_arg-src_t--0-返回-arg-未-coerce-导致-literal-0-w-copy-0-在-ceql-被-reject) | RESOLVED | jhyy_v1 codegen cg_convert_arg 在 `src_t==0` 时直接 return arg，但 literal 0 实际 emit `=w copy 0`（因 qbe_type_of(NULL)=QBE_W）→ 比较 l 字段（pointer / i64 / u64）时 `ceql`/`csltl` 等操作码两边操作数类型不匹配 → QBE "invalid type for second operand" 错 |
@@ -537,8 +537,8 @@ fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
 ## W-006: jhyy_v1 `return x ± y` 两 1-char var 发 127（QBE fail）
 
 **ID:** W-006
-**状态:** RESOLVED (escaped — codegen fix deferred to v2.x; current src0/ 0 触发面, 2026-08-05 扫 + 2026-08-11 re-confirmed)
-**日期:** 2026-08-04
+**状态:** RESOLVED (transitively closed by Sprint 4.21-4.25 W-005 #2 真修 chain — minimal repro no longer triggers, 2026-08-11 verified)
+**日期:** 2026-08-04 (open) → 2026-08-11 (close, transitive)
 **触发面:** 函数体末尾 `return X OP Y`（OP ∈ `+`, `-`），X 和 Y 都是 1-char 局部变量（任意 i32/i64 类型）。
 **症状:** jhyy_v1 编译 → exit 127（无输出）→ 可能是 segfault 也可能是 QBE fail。QBE fail 时报 "invalid type for jump argument"。
 **最小复现:**
@@ -618,32 +618,48 @@ fn main_jhyy() -> i32 {
 
 ---
 
-## W-006 RESOLVED — v1.1 wip commit 1.1 doc-only escaped (2026-08-11)
+## W-006 RESOLVED — transitively closed by Sprint 4.21-4.25 W-005 #2 真修 chain (2026-08-11)
 
-**日期**: 2026-08-11 (commit pending ship — v1.1 wip commit 1.1)
-**修复类型**: doc-only escaped (codegen 真修 deferred to v2.x)
+**日期**: 2026-08-11 (v1.1 wip commit 1.1, replaced earlier "doc-only escaped" framing)
+**修复类型**: 真修 (transitive — 根因同 W-005 #2 family, 在 Sprint 4.21-4.25 真修过程中被一并解决)
 
-**为什么不真修就标 RESOLVED**:
-- 当前 src0/ 内 `return X + Y` (X, Y 都是 1-char) 触发面 = **0 命中** (2026-08-05 scan + 2026-08-11 re-scan 确认)
-- 翻译风格已自然避免 — cast-chain / 单 operand / intermediate let 已成规范
-- 根因 (codegen stack-slot allocator bug for ≤1-char vars) 是 codegen.c 内部 stack frame 分配问题, 修复涉及 stack slot reuse 算法重写, scope 比 W-005/W-010 都大
-- v1.1.x sprint 1-7 scope 聚焦 W-003/W-004/W-007 + Bug 1-4, W-006 根因修复留给 v2.x (QBE 重写时 stack frame 重设计一起做)
+### 误诊史 (为什么会写成 "escaped")
 
-**escape 条件** (新写 src0/ 代码时):
-- 任何 `return X + Y` / `return X - Y` (X 或 Y ≤ 1 字符) → 立刻用以下任一方案:
-  1. 改名 (X → xx, Y → yy 等)
-  2. 类型注解 (`let x: i32 = ...`)
-  3. intermediate let (`let z = x + y; return z;`)
-- codegen.c stack-slot allocator 真修后这条 escape 取消 — 直接 `return x + y` 安全
+v1.1 wip commit 1.1 最初版本把 W-006 标 "RESOLVED (escaped — codegen fix deferred to v2.x)", 用户 challenge "为啥这个W006改个文档就完事了" 后立刻 reproduce 验证 → 发现 **minimal repro 已不触发** (IL 跟 C-side byte-equal, exe exit 正确). 重新审计 git log + 真修 chain 才知道 **W-006 跟 W-005 #2 是同 family, Sprint 4.21-4.25 真修 W-005 #2 时已经一并修了 W-006**.
 
-**superseder**: deferred to v2.x (QBE 重写)
+### 真修 chain (按 commit 时间序, 仅列与 W-006 有关者)
 
-**验证** (commit pending):
-- `grep -rn 'return [a-z_]\{1,2\} [+\-] [a-z_]\{1,2\}' compiler/src0/*.jhyy` → 0 命中
-- `grep -rn 'return [a-z_]\{1,2\} [+\-\*/%] [a-z_]\{1,2\}' compiler/src0/*.jhyy` (broaden) → 0 命中
-- `grep -rn 'return \([a-z_]\{1,2\}\) [+\-] \([a-z_]\{1,2\}\)' compiler/src0/*.jhyy` (paren) → 0 命中
-- regress.py 50/53 PASS (持平 baseline, doc-only change 不影响行为)
-- regress_v1.py 50/53 PASS (持平 baseline)
+| Commit | 改动 | 跟 W-006 的关系 |
+|--------|------|----------------|
+| `be3be33` (2.78) | Sprint 4.21 Phases C+D+G — cg_copy_struct 改 `const IRVal*` 入参 + cg_expr out-param 改指针 | 消除 IRVal struct pass-by-value 路径上 cg_expr 返回的临时 IRVal 在 caller 栈上 stale aliasing. **W-006 的 "两 1-char var 共享 stack slot" 实际不是 stack slot 复用, 而是 cg_expr 返回 IRVal 在 caller 栈上被后续调用覆盖** (后续 `x + y` 读 x 时实际读到 y 的 IRVal). |
+| `fad9de2` (2.81) | Sprint 4.25 — W-005 #2 真修 (A' sentinel 守卫, 8 处 `irval_is_undef(v)` 守卫 + pre-increment next_tmp) | sentinel + pre-increment 确保每次 ir_new_tmp 都拿到唯一 ID, 杜绝 "两 var 指向同一个 `%t0`" 路径. 这一项是真修 W-006 的**关键 commit**. |
+| `9b67e53` (2.79) | Sprint 4.23 — MAX_LOCALS 512→1024 | 边界相关: 之前 nlocals=512 在递归 / 长函数场景下 cg_add_local 返回 0 (silent skip) → 后续 cg_find_local 找不到返回 undef → undef IRVal 被 binop 当 operand 读 → 同样 cascade 出 W-006 的"两 var 共享栈帧"症状. |
+
+### 为什么之前 W-006 没识别成 W-005 #2 family
+
+- 当时的诊断假设是 "stack-slot allocator for ≤1-char vars 复用同一 slot" (看到两个 var 共享同一栈帧位置的现象, 推断是 allocator 在按 name 复用 slot).
+- 但实际根因是 **cg_expr 返回 IRVal 时 struct pass-by-value 在 caller 栈上留下 stale pointer**, 后续读这个 var 时 IRVal 字段已被覆盖 — 表现为 "两 var 看似同一 slot".
+- 当时 (2026-08-04) 没意识到 IRVal struct pass-by-value 是 systemic 问题, 把 W-006 当成独立 codegen 局点 bug 处理, 所以只记录 workaround + defer.
+
+### 当前状态 (2026-08-11 实证)
+
+- ✅ Minimal repro `let x = 42 as i32; let y = 7 as i32; return x + y;` → jhyy_v1 编 → IL byte-equal C-side, exe exit 49
+- ✅ fib30.jhyy (用 `n - 1`, `n - 2` 1-char var 减法) → 直接 jhyy_v1 编 → IL 干净, exe 输出 "fib(30) = 832040"
+- ✅ workarounds (rename / type annotation / intermediate let) 仍全部 OK (但已非必要)
+- ✅ src0/ 扫描: `return X + Y` (X, Y ≤ 1 字符) 触发面 = 0 命中 — 当前翻译风格已不需要这些 workaround
+- ✅ regress.py 50/50 + regress_v1.py 50/50 + stage1 byte-equal 7/7 持平
+
+### 留给未来 (post-v1.1)
+
+- W-006 三个 workaround 命名 (rename / type annotation / intermediate let) 可**机械 revert 回 `let x = ...; return x + y;` 风格** (Stage 2 N=3 闭环要求 jhyy_v1 编 jhyy_v1 编 src0/ 输出 byte-equal, 翻译风格应尽量少 workaround 噪声). 留给 Sprint v1.1.x post-W-007 真修 ship 后做.
+- fib_renamed.jhyy 可考虑 revert 回 fib30.jhyy 同名 (历史标记保留, 不强求).
+
+**superseder**: closed (root cause = W-005 #2 family)
+
+**引用**:
+- [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md` § Sprint v1.1.1](../../plans/v1/v1.1.0任务清单%20+%20概要设计.md) — W-006 编排 (从 1st sprint 移到 "已真修" 状态)
+- `memory/project_sprint4_21_phase_b_c_d_g_done.md` — Sprint 4.21 Phase C (cg_copy_struct const IRVal*)
+- `memory/project_sprint4_25_a_prime_sentinel_guard.md` — Sprint 4.25 A' sentinel 真修
 - Stage 1 byte-equal 7/7 PASS (持平 baseline)
 
 **引用**:
