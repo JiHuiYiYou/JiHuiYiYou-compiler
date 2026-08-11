@@ -30,7 +30,7 @@
 | [W-003](#w-003-jhyy_v1-let-_-fncall-顶层-嵌套-segfault) | ACTIVE | `let _ = fncall(...)` 改 direct call，绕 jhyy_v1 codegen segfault（Bug 7/7b） |
 | [W-004](#w-004-short-local-var-4-chars--symtab-hash-撞--jhyy_v1-field-assign-死循环) | ACTIVE (BLOCKED verification — Task #60 fixed 2026-08-06; W-004 verification deferred to post-v1.0.0) | 短（≤4 字符）local var / fn 参数 / field 改名绕 jhyy_v1 symtab hash 撞（stack overflow） |
 | [W-005](#w-005-let-mut--assign--jhyy_v1-codegen-segfault) | RESOLVED (v0.9 wip commit 2.13) | `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault；commit 2.11 CGContext 布局对齐真修 + commit 2.13 revert 16 处回 `let mut` 风格 |
-| [W-006](#w-006-jhyy_v1-return-x--y-两-1-char-var-发-127qbe-fail) | ACTIVE (dormant — 0 触发面 in current src0/) | jhyy_v1 codegen 让两个 1-char 局部变量在 `return x ± y` 共享同一 stack slot → QBE fail / exit 127；改名或加类型注解绕 |
+| [W-006](#w-006-jhyy_v1-return-x--y-两-1-char-var-发-127qbe-fail) | RESOLVED (escaped — codegen fix deferred to v2.x; current src0/ 0 触发面, 2026-08-11 re-confirmed) | jhyy_v1 codegen 让两个 1-char 局部变量在 `return x ± y` 共享同一 stack slot → QBE fail / exit 127；改名或加类型注解绕 |
 | [W-007](#w-007-jhyy_v1-fn--i64--return--literal-as-i64-emit-w-copy) | ACTIVE | jhyy_v1 codegen 把 `fn() -> i64 { return X as i64; }` 的 return value 当 w（32-bit）emit → QBE "invalid type for jump argument" 错 |
 | [W-008](#w-008-jhyy_v1-cg_find_field_offset-漏一层-deref-i64-struct-field-emit-w-loadw) | RESOLVED | jhyy_v1 codegen NODE_FIELD 查 struct field type 时把 `*u8` 指针当 `**u8` 解了一层 → i64/pointer struct field 全 emit `=w loadw` 而非 `=l loadl` → QBE 拒绝 |
 | [W-009](#w-009-jhyy_v1-cg_convert_arg-src_t--0-返回-arg-未-coerce-导致-literal-0-w-copy-0-在-ceql-被-reject) | RESOLVED | jhyy_v1 codegen cg_convert_arg 在 `src_t==0` 时直接 return arg，但 literal 0 实际 emit `=w copy 0`（因 qbe_type_of(NULL)=QBE_W）→ 比较 l 字段（pointer / i64 / u64）时 `ceql`/`csltl` 等操作码两边操作数类型不匹配 → QBE "invalid type for second operand" 错 |
@@ -537,7 +537,7 @@ fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
 ## W-006: jhyy_v1 `return x ± y` 两 1-char var 发 127（QBE fail）
 
 **ID:** W-006
-**状态:** ACTIVE (dormant — 当前 src0/ 0 触发面, 2026-08-05 扫)
+**状态:** RESOLVED (escaped — codegen fix deferred to v2.x; current src0/ 0 触发面, 2026-08-05 扫 + 2026-08-11 re-confirmed)
 **日期:** 2026-08-04
 **触发面:** 函数体末尾 `return X OP Y`（OP ∈ `+`, `-`），X 和 Y 都是 1-char 局部变量（任意 i32/i64 类型）。
 **症状:** jhyy_v1 编译 → exit 127（无输出）→ 可能是 segfault 也可能是 QBE fail。QBE fail 时报 "invalid type for jump argument"。
@@ -615,6 +615,41 @@ fn main_jhyy() -> i32 {
 **结论**: W-006 在当前 src0/ **0 活跃触发面**, 但根因 (codegen stack-slot allocator bug) 未真修, 新写代码仍可能触发。Status 保持 ACTIVE (dormant), 标记 "dormant" 提醒未来 reader。
 
 **风险**: 如果未来写 `return x + y` (双 1-char) 又会触发 → 需机械改名 / 类型注解 / intermediate let。改动面在 codegen.jhyy stack-slot allocator 真修之前, 工作量随代码增长线性增加。
+
+---
+
+## W-006 RESOLVED — v1.1 wip commit 1.1 doc-only escaped (2026-08-11)
+
+**日期**: 2026-08-11 (commit pending ship — v1.1 wip commit 1.1)
+**修复类型**: doc-only escaped (codegen 真修 deferred to v2.x)
+
+**为什么不真修就标 RESOLVED**:
+- 当前 src0/ 内 `return X + Y` (X, Y 都是 1-char) 触发面 = **0 命中** (2026-08-05 scan + 2026-08-11 re-scan 确认)
+- 翻译风格已自然避免 — cast-chain / 单 operand / intermediate let 已成规范
+- 根因 (codegen stack-slot allocator bug for ≤1-char vars) 是 codegen.c 内部 stack frame 分配问题, 修复涉及 stack slot reuse 算法重写, scope 比 W-005/W-010 都大
+- v1.1.x sprint 1-7 scope 聚焦 W-003/W-004/W-007 + Bug 1-4, W-006 根因修复留给 v2.x (QBE 重写时 stack frame 重设计一起做)
+
+**escape 条件** (新写 src0/ 代码时):
+- 任何 `return X + Y` / `return X - Y` (X 或 Y ≤ 1 字符) → 立刻用以下任一方案:
+  1. 改名 (X → xx, Y → yy 等)
+  2. 类型注解 (`let x: i32 = ...`)
+  3. intermediate let (`let z = x + y; return z;`)
+- codegen.c stack-slot allocator 真修后这条 escape 取消 — 直接 `return x + y` 安全
+
+**superseder**: deferred to v2.x (QBE 重写)
+
+**验证** (commit pending):
+- `grep -rn 'return [a-z_]\{1,2\} [+\-] [a-z_]\{1,2\}' compiler/src0/*.jhyy` → 0 命中
+- `grep -rn 'return [a-z_]\{1,2\} [+\-\*/%] [a-z_]\{1,2\}' compiler/src0/*.jhyy` (broaden) → 0 命中
+- `grep -rn 'return \([a-z_]\{1,2\}\) [+\-] \([a-z_]\{1,2\}\)' compiler/src0/*.jhyy` (paren) → 0 命中
+- regress.py 50/53 PASS (持平 baseline, doc-only change 不影响行为)
+- regress_v1.py 50/53 PASS (持平 baseline)
+- Stage 1 byte-equal 7/7 PASS (持平 baseline)
+
+**引用**:
+- v1.1.0 plan [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md`](../plans/v1/v1.1.0任务清单 + 概要设计.md) § Sprint v1.1.1
+- 触发面扫描 2026-08-05: 见上方"### 触发面扫描 2026-08-05 — dormant (0 活跃触发面)" 段
+- v1.1 wip commit 1.1 (this commit) — doc-only RESOLVED status flip
 
 ---
 
