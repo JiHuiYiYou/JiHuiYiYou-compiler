@@ -2,13 +2,17 @@
 # -*- coding: utf-8 -*-
 """JHYY MCP Server — 让 Claude Code 能编译、运行、检查 .jhyy 代码。
 
-提供 6 个工具:
-  - jhyy_compile      编译 .jhyy 文件
-  - jhyy_run          编译并运行
-  - jhyy_check        仅做语法/语义检查
-  - jhyy_lang_ref     查询语言规范
-  - jhyy_abi_info     查询 ABI 信息
-  - jhyy_format       代码格式化 (简单对齐 / 占位)
+提供 10 个工具:
+  - jhyy_compile         编译 .jhyy 文件
+  - jhyy_run             编译并运行
+  - jhyy_check           仅做语法/语义检查
+  - jhyy_lang_ref        查询语言规范
+  - jhyy_abi_info        查询 ABI 信息
+  - jhyy_format          代码格式化 (简单对齐 / 占位)
+  - jhyy_regress         跑 regress (Sprint mcp-1, 替代 Bash regress.py)
+  - jhyy_il_diff         diff 两个 .il 文件 (Sprint mcp-1, 替代 sha256sum + diff)
+  - jhyy_selfhost_check  v1→v2→v3 byte-equal 验证 (Sprint mcp-1, 替代 ~30 行 bash)
+  - jhyy_workarounds     搜 workarounds.md (Sprint mcp-1, 替代 grep workarounds.md)
 
 提供 4 个资源:
   - jhyy://spec       语言规范 (v0.5.0)
@@ -50,10 +54,14 @@ Routing (intent → tool):
 - "does JHYY support X" / syntax questions → jhyy_lang_ref
 - ABI / struct passing / FFI / calling convention → jhyy_abi_info
 - format code → jhyy_format
+- run regress / verify no regression → jhyy_regress
+- diff two .il / byte-equal check → jhyy_il_diff
+- verify selfhost closure (v1→v2→v3 byte-equal) → jhyy_selfhost_check
+- search workarounds / "is W-XXX still active" → jhyy_workarounds
 
-DO NOT: Bash("jhyy.exe ..."), Read("docs/abis/jhyy-*.md"), Read("compiler/build/bin/*.il"). Use the tools above.
+DO NOT: Bash("jhyy.exe ..."), Bash("python regress*.py"), Bash("sha256sum *.il"), Read("docs/abis/jhyy-*.md"), Read("compiler/build/bin/*.il"), Read("docs/internal/workarounds.md"). Use the tools above.
 
-Default to jhyy_run for any "run" / "test" intent.
+Default to jhyy_run for any "run" / "test" intent. Default to jhyy_regress for any "verify nothing regressed" intent.
 """
 
 mcp = FastMCP("jhyy", instructions=JHYY_INSTRUCTIONS)
@@ -61,6 +69,8 @@ mcp = FastMCP("jhyy", instructions=JHYY_INSTRUCTIONS)
 # Import jhyy_runner
 sys.path.insert(0, str(MCP_DIR))
 import jhyy_runner as runner  # noqa: E402
+import jhyy_regress as regress_mod  # noqa: E402
+import jhyy_workarounds as workarounds_mod  # noqa: E402
 
 
 # ========== Tools: 编译/运行/检查 ==========
@@ -309,6 +319,123 @@ def _simple_format(src: str) -> str:
     if not result.endswith("\n"):
         result += "\n"
     return result
+
+
+# ========== Tools: 回归 / 自举 / 工作区 (Sprint mcp-1) ==========
+
+@mcp.tool
+def jhyy_regress(
+    binary: str = "compiler/build/bin/jhyy.exe",
+    tests: Optional[list] = None,
+    timeout: int = 10,
+    enforce_baseline_hash: bool = True,
+) -> dict:
+    """Run regression tests against a JHYY compiler binary.
+
+    USE THIS WHEN the user wants to verify a compiler change didn't regress the test suite.
+    Triggers: "run regress", "verify baseline", "check no regression", "run all tests",
+              "did my fix break anything", "跑测试", "验证回归", "baseline 还稳吗".
+
+    Default binary = C-side jhyy.exe. Pass `binary="compiler/build/bin/jhyy_v1.exe.exe"`
+    for jhyy_v1 self-hosting regress.
+
+    Args:
+        binary: 编译器路径 (相对 JHYY 根或绝对). 默认 C 端 jhyy.exe
+        tests: 测试子集 (None = 全部 .jhyy). 例 ["hello.jhyy", "fib.jhyy"]
+        timeout: 单测试运行超时 (秒)
+        enforce_baseline_hash: True 时跟 <binary>.sha256 baseline 比, 不匹配 → fail-fast
+                                (防 phantom binary 陷阱, per memory feedback_regress_baseline_binary_hash)
+
+    Returns:
+        {ok, binary, binary_sha256, baseline_match, baseline_sha256, total, passed,
+         failed, skipped, failed_tests, duration_sec, baseline_warning?, early_abort?}
+
+    跑 regress 比直接 Bash `python regress.py` 好: 返回结构化结果 + baseline hash 守护 +
+    失败测试列表 + duration_sec, 不用 grep 输出.
+    """
+    return regress_mod.run_all(binary, tests, timeout, enforce_baseline_hash)
+
+
+@mcp.tool
+def jhyy_il_diff(file_a: str, file_b: str, context: int = 3) -> dict:
+    """Diff two QBE .il files for byte-equality and structural changes.
+
+    USE THIS WHEN comparing compiler output (Stage 1 / Stage 2 byte-equal verification).
+    Triggers: "diff .il", "compare IL", "byte-equal check",
+              "did my codegen change break byte-equal", "verify selfhost closure",
+              "比 .il", "看 sha 一不一樣".
+
+    Args:
+        file_a, file_b: .il 文件路径 (相对 JHYY 根或绝对)
+        context: 首差异行的 ±context 行 unified diff (default 3)
+
+    Returns:
+        {ok, byte_equal, sha256_a, sha256_b, size_bytes_a, size_bytes_b,
+         line_count_a, line_count_b, first_diff_line | None, first_diff_context | None}
+
+    比 Bash sha256sum + diff 好: 一次返回 sha + 行数 + 首差异行 + diff context,
+    不用先 sha 再 cat 再 diff 三步走.
+    """
+    return runner.il_diff(file_a, file_b, context)
+
+
+@mcp.tool
+def jhyy_selfhost_check(
+    src: str = "compiler/src0/main.jhyy",
+    auto_rebuild: bool = False,
+    timeout: int = 600,
+) -> dict:
+    """Run the v1→v2→v3→v4 byte-equal self-hosting closure chain.
+
+    USE THIS WHEN verifying that the self-hosting closure still holds after a change.
+    Triggers: "verify selfhost", "check closure", "is self-hosting still working",
+              "v1 v2 v3 byte-equal", "run the closure check", "byte-equal 还稳吗",
+              "自举闭环还在吗".
+
+    Default auto_rebuild=False — missing binary fails fast with clear error
+    (per Plan agent risk analysis: auto-rebuild masks phantom binary traps).
+    Pass auto_rebuild=True to auto-rebuild jhyy_v1 from src0/main.jhyy via jhyy.exe.
+
+    Args:
+        src: 编译源文件 (default compiler/src0/main.jhyy)
+        auto_rebuild: True 时自动 rebuild jhyy_v1 (gcc + jhyy.exe 编 src0/main.jhyy)
+        timeout: 每阶段 timeout (秒, default 600 = 10 分钟)
+
+    Returns:
+        {ok, all_byte_equal, il_sha256 | None,
+         binary_chain: [{stage, binary_path, binary_sha256, il_path, il_sha256, duration_sec}],
+         il_files: {stage.il: sha256},
+         early_abort | None,
+         duration_sec}
+
+    比手写 ~30 行 bash chain 好: 一键, 失败 fail-fast + 列出失败阶段, 不用手动循环.
+    """
+    return runner.selfhost_check(src, auto_rebuild, timeout)
+
+
+@mcp.tool
+def jhyy_workarounds(query: str, status: Optional[str] = None) -> dict:
+    """Search the workarounds registry (docs/internal/workarounds.md) by keyword or W-XXX ID.
+
+    USE THIS WHEN investigating a known bug pattern or checking if a workaround is ACTIVE.
+    Triggers: "is W-005 still active", "what's the workaround for X",
+              "search workarounds", "find workaround for let mut",
+              "W-005 现在状态", "let mut 触发面有 workaround 吗".
+
+    Args:
+        query: 搜索词 (substring, 大小写不敏感). 可为 W-XXX ID (e.g. "W-005") 或触发模式
+               (e.g. "let mut", "sentinel", "inline_imports", "MAX_LOCALS")
+        status: 可选过滤 "ACTIVE" / "RESOLVED" / "SUPERSEDED" (substring match)
+
+    Returns:
+        {ok, query, status_filter, matches: [{id, status, date, trigger, symptom,
+         root_cause, workaround, scope, superseder}],
+         active_count, resolved_count, superseded_count, total}
+
+    比 Read workarounds.md + grep 好: 自动处理中英字段混用, 按 alias 表解析,
+    返回结构化结果, 不用正则手撕 markdown.
+    """
+    return workarounds_mod.search(query, status)
 
 
 # ========== MCP Resources ==========

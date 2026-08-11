@@ -14,6 +14,10 @@
 | 查 "JHYY 支持 X 吗 / 怎么写 Y" | `jhyy_lang_ref` |
 | 查 ABI / struct 传参 / FFI / 调用约定 | `jhyy_abi_info` |
 | 格式化 .jhyy 源码 | `jhyy_format` |
+| 跑回归 / 验证 baseline 没破 | `jhyy_regress` |
+| 比两个 .il / Stage 1 byte-equal | `jhyy_il_diff` |
+| 验证自举闭环 (v1→v2→v3 byte-equal) | `jhyy_selfhost_check` |
+| 搜 workarounds / "W-XXX 状态?" | `jhyy_workarounds` |
 | 列出 / 读示例代码 | 资源 `jhyy://examples` |
 | 读最新 changelog | 资源 `jhyy://changelog` |
 
@@ -22,9 +26,14 @@
 | ❌ 别这样做 | ✅ 改用 |
 |------------|--------|
 | `Bash("jhyy.exe compile foo.jhyy && ./foo")` | `jhyy_run` |
+| `Bash("python regress*.py")` 跑回归 | `jhyy_regress` |
+| `Bash("sha256sum *.il")` 比 .il | `jhyy_il_diff` |
+| 手写 bash chain 跑 v1→v2→v3 验证 | `jhyy_selfhost_check` |
+| `grep -A 5 "W-XXX" docs/internal/workarounds.md` | `jhyy_workarounds` |
 | `Read("docs/abis/jhyy-lang-spec-v0.2.1.md")` 答语法问题 | `jhyy_lang_ref` |
 | `Read("compiler/build/bin/foo.il")` 看 IL | `jhyy_get_il` |
 | `Bash("cat ...il")` 抄 IL 出来 | `jhyy_get_il`（直接返回文本） |
+| `Read("docs/internal/workarounds.md")` 查 W-XXX | `jhyy_workarounds` |
 | 手动 `subprocess.run([...])` 走 subprocess | 永远走 MCP 工具 |
 
 ## 触发示例
@@ -34,6 +43,10 @@
 - "改完 codegen，看看 IL 长啥样" → `jhyy_get_il`
 - "JHYY 的 struct 怎么按值传" → `jhyy_abi_info`（不要去翻 ABI markdown）
 - "match 支持范围模式吗" → `jhyy_lang_ref`
+- "回归还稳吗" → `jhyy_regress`（默认 enforce_baseline_hash=True 防 phantom binary）
+- "v1.il 跟 v2.il 还一致吗" → `jhyy_il_diff`（一次返回 sha + 行数 + 首差异 context）
+- "自举闭环还在吗" → `jhyy_selfhost_check`（一键 v1→v2→v3→v4 byte-equal）
+- "W-005 现在状态" → `jhyy_workarounds("W-005")`（不用 grep workarounds.md）
 
 ## MCP 不稳定时的回退
 
