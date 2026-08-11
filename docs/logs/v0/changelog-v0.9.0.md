@@ -3160,3 +3160,77 @@ typedef struct {
 
 - (留底后补 — Sprint 4.25 真根因 plan agent 验证 + A′ 守卫实施)
 - `memory/feedback_codegen_workaround_linkage.md` — W-005/W-008/W-009/W-007 联动 (本 fix 是 W-005 #2 family 最后一块拼图)
+
+---
+
+## v0.9 wip commit 2.83: Phase 2 Style Cleanup — stale W-NNN comments + mcp-jhyy doc drift
+
+**日期**: 2026-08-11
+**承接**: v0.9 wip commit 2.82 (mcp-jhyy Sprint 1 ship)
+**范围**: 纯样式整理 (注释/naming/格式/doc). **不动语义, 不动 workaround 代码本身**.
+
+### 目标
+
+v1.0.0 tag 后 (commit `eabee0d`, 2026-08-10), commit `6f52ac7` 留下的 Phase 2 STYLE CLEANUP 标记开始动手:
+- 16 处 stale `// v0 codegen bug workaround ...` 注释 → 加 `[Status: 真修 W-NNN in C-side (commit X.Y); src0/ workaround kept for历史读者了解历史]` 标签
+- util.jhyy:186 (W-004 仍 ACTIVE BLOCKED) → 加 `[Status: W-004 ACTIVE (BLOCKED verification, ...); 代码仍按 workaround 写]` 标签
+- 3 处 C-side header comments (ast.c:454 / lexer.c:396 / types.c:190 "Debug name") → 正式 docstring 形式
+- mcp-jhyy/jhyy_runner.py 1-行 docstring → 5-行 Public API list
+- docs/internal/workarounds.md W-004 index → 标 "Task #60 fixed 2026-08-06; W-004 verification deferred to post-v1.0.0" (修正 index vs body 不一致)
+
+**明确不做**:
+- 不动 workaround 代码本身 (16 处 workaround 代码一字未改)
+- 不动 plan.md Phase 2 W-003/W-004/W-006 + Bug 1-4 真修 (4-6 sprint, 单独设计)
+- 不动 jh_fmt / dump_node / W-005 #2 守卫 3 处 load-bearing items (Step 1 grep 守门)
+- 不动 compiler/src/ 主体 (除 3 处 header comment 形式化)
+
+### 完成定义 (全达成 ✅)
+
+- ✅ src0/ 16 处 stale workaround 注释加 status tag (workaround 代码本身保留)
+- ✅ util.jhyy:186 W-004 ACTIVE status 标清晰
+- ✅ 3 处 C-side header comment 形式化
+- ✅ mcp-jhyy/jhyy_runner.py docstring 完整化 (与其他 3 个 mcp-jhyy 模块对齐)
+- ✅ workarounds.md W-004 index vs body 一致 (Task #60 已修, W-004 verification deferred)
+- ✅ 风险守门 grep 通过 (Step 1):
+  - jh_fmt_*_stderr: codegen.jhyy:1 + sema.jhyy:3 + util.jhyy:2 = 6 调用 (preserved)
+  - dump_node/dump_sym: ast.c:81 + types.c:1 = 82 references (preserved)
+  - irval_is_undef: ir.jhyy 2 occurrences (declaration + helper; 8 site guards 在 comments 里, 不在 call sites — unchanged from Sprint 4.25)
+
+### 度量
+
+| 指标 | 旧 | 新 | Δ |
+|---|---|---|---|
+| regress.py (C-side) | 50/50 baseline | **50/50 PASS** | 持平 |
+| regress_v1.py (jhyy_v1) | 50/50 baseline | **50/50 PASS** | 持平 |
+| Selfhost v1→v2→v3→v4 byte-equal | sha `2445e97d...` | **sha `2445e97d...`** | 持平 |
+| git diff --stat | (clean) | 33 insertions, 5 deletions, 9 files | 净 +28 行 (注释主导) |
+| 净行数 vs plan 上限 | (n/a) | +28 | < 200 上限 ✓ |
+
+**Selfhost chain**: 手动 v1→v2→v3→v4 (用不同 output 名 `v1_step`/`v2_step`/`v3_step`/`v4_step` 绕开 Windows 同名覆盖限制) — 4 个 .il 全部 sha `2445e97d...` 跟 baseline 一致 ✓. jhyy_selfhost_check() 工具本身有 pre-existing Windows issue (同一 stage 的 input/output 同名 → gcc 覆盖 running binary 失败) — 与本 commit 改动无关.
+
+### Critical files (净 +28 行)
+
+| 文件 | 修改类型 | 行数 |
+|------|---------|------|
+| `compiler/src0/codegen.jhyy` | 13 处 `[Status: ...]` tag 插入 | +13 |
+| `compiler/src0/ir.jhyy` | 3 处 `[Status: ...]` tag 插入 | +3 |
+| `compiler/src0/sema.jhyy` | 1 处 `[Status: ...]` tag 插入 | +1 |
+| `compiler/src0/util.jhyy` | 1 处 W-004 ACTIVE status 标签 | +2 |
+| `compiler/src/ast.c` | "Debug name" → 正式 docstring | ±1 |
+| `compiler/src/lexer.c` | "token name for debugging" → 正式 docstring | ±1 |
+| `compiler/src/types.c` | "type to string (for debugging)" → 正式 docstring | ±1 |
+| `mcp-jhyy/jhyy_runner.py` | docstring 1-行 → 5-行 Public API | +10/-1 |
+| `docs/internal/workarounds.md` | W-004 index status 描述 | ±1 |
+| **合计** | 9 files | **+28 净** |
+
+### 不做但留给后续 sprint
+
+- plan.md Phase 2 W-003/W-004/W-006 + Bug 1-4 真修 (4-6 sprint, 单独 sprint 设计)
+- `_v1` 后缀 107 处残留的清理 (跨文件改名, 风险中; 留给专 sprint)
+- mcp-jhyy Tier 2 tools (function-level IL diff / minimal repro)
+- v2.x / v3.x OS 相关工作
+
+### 关键 memory
+
+- `memory/project_mcp_jhyy_sprint1.md` — mcp-jhyy Sprint 1 (上一 commit)
+- 本 commit 留底: `memory/feedback_v0_phase2_style_cleanup.md` (下一 file)

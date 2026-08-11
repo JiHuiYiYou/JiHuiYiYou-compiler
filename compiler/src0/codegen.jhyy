@@ -143,6 +143,7 @@ type CGContext = struct {
     locals:           *u8,        // *LocalEntry 数组（arena alloc，MAX_LOCALS * LOCALENTRY_SIZE）
     nlocals:          i32,
     current_ret_type: *u8,        // *Type
+    // [Status: 真修 W-005 #2 in C-side (commit 2.81); src0/ workaround kept for历史读者了解历史.]
     // v0 codegen bug workaround: sret_slot 改为 i64 (just temp number) 而不是 IRVal
     //   struct — 避免 (*cg).sret_slot = X 这种 5-field struct value assignment
     //   在 v0 jhyy compiler 里 emit 错的 struct-to-buffer copy (bug 8: loadw
@@ -174,6 +175,7 @@ fn cg_add_local(cg_raw: *u8, sym: *u8, val: IRVal, is_stack: i32) -> i32 {
         return 0;
     }
     let entry_ptr = ptr_add_u8((*cg).locals, (idx as i64) * LOCALENTRY_SIZE()) as *u8;
+    // [Status: 真修 W-005 #2 in C-side (commit 2.81); src0/ workaround kept for历史读者了解历史.]
     // v0 codegen bug workaround: 避免 (*entry_ptr).value = val 这种 struct value
     //   field assignment (bug 8: multi-field struct 走 cg_copy_struct 时会 emit
     //   错 sret body). 改走 ptr_add_u8 + 字段级 store.
@@ -200,6 +202,7 @@ fn cg_add_local(cg_raw: *u8, sym: *u8, val: IRVal, is_stack: i32) -> i32 {
 
 // cg_find_local: 找 sym 对应的 IRVal，写到 out_buf。返回 1 if found, 0 if not。
 //
+// [Status: 真修 W-005 + W-005 #2 in C-side (commit 2.45 + 2.81); src0/ workaround kept for历史读者了解历史.]
 // v0 codegen bug workaround (复合):
 //   - bug 1: 避免 (*entry_ptr).value.field 这种嵌套 struct field access
 //     （v0 codegen LEA 32-bit 字段会算错 offset，emit 出 loadw on loadw）。
@@ -211,6 +214,7 @@ fn cg_find_local(cg_raw: *u8, sym: *u8, out_buf: *u8) -> i32 {
     let mut i: i32 = 0 as i32;
     let n = (*cg).nlocals;
     while i < n {
+        // [Status: 真修 W-005 (IRVal layout) in C-side (commit 2.45); src0/ workaround kept for历史读者了解历史.]
         // v0 codegen bug 10 workaround: 避免 (*entry_ptr).sym 这种 struct field
         //   access（jhyy codegen 在 nested struct + 32-bit field 上会算错 offset）。
         //   改走 ptr_add_u8 + scalar deref：entry 0..8 是 sym *u8 字段。
@@ -265,6 +269,7 @@ fn cg_find_local_is_stack(cg_raw: *u8, sym: *u8) -> i32 {
     let mut i: i32 = 0 as i32;
     let n = (*cg).nlocals;
     while i < n {
+        // [Status: 真修 W-005 in C-side (commit 2.45); src0/ workaround kept for历史读者了解历史.]
         // v0 codegen bug 10 workaround: 同 cg_find_local
         let entry_ptr = ptr_add_u8((*cg).locals, (i as i64) * LOCALENTRY_SIZE());
         let entry_sym_p = entry_ptr as **u8;
@@ -613,6 +618,7 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
             }
         }
     }
+    // [Status: 真修 B-φ1 (if-else phi predecessor) in C-side (commit 2.6); src0/ workaround kept for历史读者了解历史.]
     // v0 codegen bug 2 workaround: 避免 &&/|| 嵌套 short-circuit (nested phi predecessor mismatch)
     // 改成 nested if-else，无短路
     // Sprint 4.5 C step 2 fix (float_cmp): D→S case was unreachable
@@ -869,6 +875,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             }
         }
         let is_stack = cg_find_local_is_stack(cg_raw, sym);
+        // [Status: 真修 W-005 #2 in C-side (commit 2.81); src0/ workaround kept for历史读者了解历史.]
         // v0 codegen bug workaround: 不要在 caller 栈上 declare IRVal 然后 cast
         //   `(loc_buf as *u8)` 取地址 — jhyy codegen 对 IRVal struct value 做
         //   as-pointer 时会 emit 错的 loadw/loadl 链。改在 arena 里 alloc 一个
@@ -976,6 +983,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
     // because cg_copy_struct inside cg_expr triggers v0 codegen SIGSEGV.
 
     // ── NODE_BLOCK（expr-position: block 最后一个 expr 的值）──
+    // [Status: 真修 W-005 #2 in C-side (commit 2.81); src0/ workaround kept for历史读者了解历史.]
     // v0 codegen bug 16 workaround: `last = cg_expr(...)` 把 40 字节 IRVal
     // 按值赋给 mutable local，在 second-function + 嵌套 expr 时触发 v0 jhyy
     // codegen stack buffer 错位 → rc=127。改走 arena_alloc + field-level
@@ -1109,6 +1117,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         } else if target_kind == NODE_IDENT() {
             let id = node_ident_data(target);
             let is_stack = cg_find_local_is_stack(cg_raw, (*id).sym);
+            // [Status: 真修 W-005 #2 in C-side (commit 2.81); src0/ workaround kept for历史读者了解历史.]
             // v0 codegen bug 16 workaround (W-005): 不要 `let slot_buf = IRVal {...}` 然后
             // `slot_buf as *u8` —— v0 codegen 把 IRVal literal 当 32-bit alloc,然后
             // (slot_buf as *u8) 走 extsw 截断指针 → cg_find_local 收截断的 out_buf,
@@ -1150,6 +1159,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                     // 路径 1: 数组 + IDENT 标识符 → 直接用 stack slot
                     if is_array != 0 && (*idx_expr_node).kind == NODE_IDENT() {
                         let id = node_ident_data(idx_expr_node);
+                        // [Status: 真修 W-005 #2 in C-side (commit 2.81); src0/ workaround kept for历史读者了解历史.]
                         // v0 codegen bug 16 workaround (W-005): 同 NODE_ASSIGN — arena_alloc + field-level read
                         let real_base_buf_u8 = arena_alloc((*ir).arena, IRVAL_SIZE());
                         let _found3 = cg_find_local(cg_raw, (*id).sym, real_base_buf_u8);
@@ -1282,6 +1292,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
 
         // short-circuit && 和 ||
         //
+        // [Status: 真修 B-φ1 (if-else phi predecessor) in C-side (commit 2.6); src0/ workaround kept for历史读者了解历史.]
         // v0 codegen bug 2 workaround：phi predecessor mismatch when recursive
         // cg_expr call inside one branch of if-else。改走 store/load 模式：
         //   - alloc result slot at outer scope
@@ -2349,6 +2360,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         let inner_kind = (*inner_node).kind;
         if inner_kind == NODE_IDENT() {
             let id = node_ident_data(inner_node);
+            // [Status: 真修 W-005 #2 in C-side (commit 2.81); src0/ workaround kept for历史读者了解历史.]
             // v0 codegen bug 16 workaround (W-005): 同 NODE_ASSIGN — arena_alloc + field-level read
             let loc_buf_u8 = arena_alloc((*ir).arena, IRVAL_SIZE());
             let _found4 = cg_find_local(cg_raw, (*id).sym, loc_buf_u8);
@@ -2731,6 +2743,7 @@ fn cg_func(cg_raw: *u8, n: *Node) -> i32 {
             if (*pt_t).kind == KIND_STRUCT() {
                 ir_emit_str(ir, "l %" as *u8);
             } else {
+                // [Status: v0 codegen bug 真修历史保留; workaround 代码保留作历史文档 (非 W-NNN 编号).]
                 // v0 codegen bug workaround: 不能用 "%c %"（sprintf 把末尾 literal % 吃掉）
                 // 拆成 2 个 emit：先 "w " + "%" + name
                 ir_emit_int(ir, "%c " as *u8, qbe_type_of(pt));

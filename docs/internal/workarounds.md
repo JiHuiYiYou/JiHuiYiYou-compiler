@@ -28,7 +28,7 @@
 | [W-001](#w-001-hash_string-用-i32-deref-绕-v0-codegen-loadsb-错) | RESOLVED (v0.8 commit 9) | hash_string 改 byte-by-byte `*u8` deref + length mix (FNV-1a), 真修 W-001 副作用 |
 | [W-002](#w-002-mainjhyy-重命名绕-jhyy_v1-hash_string-堆损坏) | RESOLVED (v0.9 wip commit 2.12) | 211 个 src0 标识符 `_v1` 后缀化 revert 回原名, W-001 真修后失效 |
 | [W-003](#w-003-jhyy_v1-let-_-fncall-顶层-嵌套-segfault) | ACTIVE | `let _ = fncall(...)` 改 direct call，绕 jhyy_v1 codegen segfault（Bug 7/7b） |
-| [W-004](#w-004-short-local-var-4-chars--symtab-hash-撞--jhyy_v1-field-assign-死循环) | ACTIVE (BLOCKED verification — Task #60 parse_expr while/else blocks isolation) | 短（≤4 字符）local var / fn 参数 / field 改名绕 jhyy_v1 symtab hash 撞（stack overflow） |
+| [W-004](#w-004-short-local-var-4-chars--symtab-hash-撞--jhyy_v1-field-assign-死循环) | ACTIVE (BLOCKED verification — Task #60 fixed 2026-08-06; W-004 verification deferred to post-v1.0.0) | 短（≤4 字符）local var / fn 参数 / field 改名绕 jhyy_v1 symtab hash 撞（stack overflow） |
 | [W-005](#w-005-let-mut--assign--jhyy_v1-codegen-segfault) | RESOLVED (v0.9 wip commit 2.13) | `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault；commit 2.11 CGContext 布局对齐真修 + commit 2.13 revert 16 处回 `let mut` 风格 |
 | [W-006](#w-006-jhyy_v1-return-x--y-两-1-char-var-发-127qbe-fail) | ACTIVE (dormant — 0 触发面 in current src0/) | jhyy_v1 codegen 让两个 1-char 局部变量在 `return x ± y` 共享同一 stack slot → QBE fail / exit 127；改名或加类型注解绕 |
 | [W-007](#w-007-jhyy_v1-fn--i64--return--literal-as-i64-emit-w-copy) | ACTIVE | jhyy_v1 codegen 把 `fn() -> i64 { return X as i64; }` 的 return value 当 w（32-bit）emit → QBE "invalid type for jump argument" 错 |

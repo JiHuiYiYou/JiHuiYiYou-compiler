@@ -220,6 +220,7 @@ fn ir_init(ir: *IRBuf, arena: *Arena) -> i32 {
 
 // Sprint 4.1 IL_ONLY #2: ir_current_block (对齐 v0 ir.c:50-52)
 // 返回当前 emit 所在的 block IRVal。phi predecessor 用。
+// [Status: 真修 W-005 #2 in C-side (commit 2.81); src0/ workaround kept for历史读者了解历史.]
 // v0 codegen bug 8 workaround: 避免 `return (*ir).cur_block` 这种"struct-字段作为表达式"
 // 模式（codegen 走 cg_copy_struct 时把 first field value 当成 struct base，产生错 IL：
 //   %tA =w loadw %tB    ; cur_block.kind value
@@ -673,6 +674,7 @@ fn ir_emit_phi2(ir: *IRBuf, dst: IRVal, block1: IRVal, val1: IRVal,
 // ════════════════════════════════════════════════════
 
 // 写一段 raw byte 到 data_sb（带 %c 处理）
+// [Status: v0 codegen bug 真修历史保留; workaround 代码保留作历史文档 (非 W-NNN 编号).]
 // 绕开 v0 codegen bug：jhyy 不支持 `&local_var`（地址 + 后续 store，codegen
 // 漏 store）。改用 arena_alloc(4) + *i32 写低字节。
 fn data_putc(ir: *IRBuf, c: i32) -> i32 {
@@ -840,6 +842,7 @@ fn ir_emit_func_header(ir: *IRBuf, name: *u8, ret_qt: i32,
             ir_emit_str(ir, ", " as *u8);
         }
         let qt = *((params_qt as i64 + (i as i64) * (4 as i64)) as *i32);
+        // [Status: 真修 W-001 in C-side (commit 2.12); src0/ 保留 4-byte 路径作为历史 fallback.]
         // v0 codegen bug：*u8 deref emit loadub（1 字节），不是 loadl（8 字节
         // 指针）。改用 *i64 deref + cast 拿回 8 字节指针。
         let nm_raw_i64 = *((params_name as i64 + (i as i64) * (8 as i64)) as *i64);

@@ -1,6 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""jhyy_runner.py — subprocess 封装 + 诊断解析 + IL diff + selfhost check"""
+"""jhyy_runner.py — subprocess 封装 + 诊断解析 + IL diff + selfhost check
+
+Sprint mcp-1 (2026-08-11): 抽 subprocess 共享逻辑 + 2 个核心 helper (il_diff / selfhost_check).
+
+Public API:
+    run_subprocess(args, timeout=600) -> dict
+    parse_diagnostics(text)           -> list[str]
+    il_diff(file_a, file_b, context=3) -> dict
+    selfhost_check(src, auto_rebuild=False, timeout=600) -> dict
+"""
 import subprocess
 import os
 import re

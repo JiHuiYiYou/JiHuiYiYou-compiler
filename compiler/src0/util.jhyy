@@ -183,6 +183,8 @@ fn HASHMAP_INITIAL_SIZE() -> i64 { return 256 as i64; }
 fn FNV_OFFSET() -> i64 { return 0xcbf29ce484222325 as i64; }
 fn FNV_PRIME() -> i64 { return 0x100000001b3 as i64; }
 
+// [Status: W-004 ACTIVE (BLOCKED verification, 待 src0/ 翻译层稳定后再做).
+//  代码仍按 workaround 写 — 见 docs/internal/workarounds.md W-004.]
 // 绕 W-004：原 4-byte aligned read 让 hash 撞 → jhyy_v1 stack overflow on
 // 短/特定长度 ident 的 field assign。
 //

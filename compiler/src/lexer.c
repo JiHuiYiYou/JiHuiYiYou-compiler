@@ -393,7 +393,7 @@ Token lexer_next(Lexer *l) {
     }
 }
 
-/* ── token name for debugging ── */
+/* token_kind_name — TokenKind → human-readable name (used by error messages + lexer dump) */
 
 const char *token_kind_name(TokenKind kind) {
     switch (kind) {

@@ -187,7 +187,7 @@ bool type_eq(Type *a, Type *b) {
     }
 }
 
-/* ── type to string (for debugging) ── */
+/* type_to_string — Type → human-readable name (used by error messages + dump_sym) */
 
 const char *type_to_string(Type *t) {
     static char buf[128];

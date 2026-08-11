@@ -451,7 +451,7 @@ Node *ast_new_module(Arena *a, SourceLoc loc, Node **decls, size_t ndeccls) {
     return n;
 }
 
-/* ── Debug name ── */
+/* node_kind_name — NodeKind → human-readable name (used by error messages + dump_node) */
 
 const char *node_kind_name(NodeKind kind) {
     switch (kind) {

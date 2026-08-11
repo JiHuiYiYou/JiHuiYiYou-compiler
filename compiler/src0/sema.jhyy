@@ -115,6 +115,7 @@ fn sema_local_at(locals: *u8, idx: i64) -> *u8 {
 
 fn sema_local_sym(locals: *u8, idx: i64) -> *Sym {
     let p = sema_local_at(locals, idx);
+    // [Status: 真修 W-005 family in C-side (commit 2.45); src0/ workaround kept for历史读者了解历史.]
     // v0 codegen bug workaround: 不要 `*(p as *Sym)` 直接 deref cast 取回 ptr
     //   — jhyy_v1 codegen 对 NODE_DEREF(NODE_CAST) 在 inner_node.type_ptr 被
     //     sema 设置但 elem 类型不可解的情况下漏 emit loadl, 改 extsw truncate
