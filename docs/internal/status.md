@@ -2,30 +2,28 @@
 
 > 语言特性 / 已知限制 / 历史修复。版本进展详见 `docs/logs/`。
 
-## 当前版本: v0.9 wip (commit 2.17, 7691457)
+## 当前版本: v1.0.0 tagged (commit `eabee0d`, 2026-08-10)
 
-> v0.x — C 语言宿主编译器。v1.0.0 启动完整自举。v0.9 定位 = W-001~W-009 真修 + main.c 翻译 + Stage 1 byte-equal 闭环 + 2 个 audit (AUDIT + C')：
-> - **v0.9 commit 1**（ce93f64）：29-extsw hypothesis 验证（未命中，extsw 是 .il 体积噪音）
-> - **v0.9 wip commit 2.5**（stage1 byte-equal 7 测试集 baseline + 修 B-let2 codegen 差异）
-> - **v0.9 wip commit 2.6-2.9**（B-φ1/B-data/B-struct/B-match 真修 — codegen emit 顺序对齐 v0）
-> - **v0.9 wip commit 2.10-2.11**（W-005 真修 phase 1+2 — CGContext C/jhyy 布局对齐, AUDIT 立项的源头 case）
-> - **v0.9 wip commit 2.12a/2.12b**（B-match-sema/codegen 真修 — match_exhaustive byte-equal 5/7 → 6/7）
-> - **v0.9 wip commit 2.13**（W-005 加固 revert 16 处 *pos_ptr_vN → let mut 风格）
-> - **v0.9 wip commit 2.14**（W-004 BLOCKED verification + W-002 archive + W-006 dormant + cross-ref 联动段）
-> - **v0.9 wip commit 2.15**（Task #60 真修 — parse_if body inline parse_while 嵌套 TOKEN_WHILE 分支）
-> - **v0.9 wip commit 2.16**（AUDIT — VariantDesc 加 payload 字段 + VARIANT_DESC_SIZE 16→24 = heap overflow 修）
-> - **v0.9 wip commit 2.17**（C' codegen 确定性 audit — 5 维度全 by-construction deterministic, 0 真修, 3 stage1 测试 byte-equal 实证）
+> **v1.0.0** — Stage 2 N=3 byte-equal 闭环达成。`jhyy_v1 → jhyy_v2 → jhyy_v3 → jhyy_v4` 编译自身,产出 4 份 sha 完全一致的 raw `.il` 文件 (sha `2445e97d...`, 1.378 MB, 无 fix-up 后处理)。
+>
+> 详尽 ship 记录见 [`docs/logs/v1/changelog-v1.0.0.md`](../logs/v1/changelog-v1.0.0.md)。本文件专注当前功能状态 + 已知限制 + 历史修复索引。
+>
+> v0.9 wip 阶段（commit 2.1-2.83）作为 v0.x 收尾主线，主要里程碑：
+> - **v0.9 commit 1** (ce93f64) — 29-extsw hypothesis 验证
+> - **v0.9 wip commit 2.5-2.9** — Stage 1 byte-equal 7 测试集 + B-let2/B-φ1/B-data/B-struct/B-match 真修
+> - **v0.9 wip commit 2.10-2.11** — W-005 真修 (CGContext C/jhyy 布局对齐)
+> - **v0.9 wip commit 2.12a-2.12b** — match-expr 翻译补全 (byte-equal 5/7 → 6/7)
+> - **v0.9 wip commit 2.13-2.17** — W-005 加固 / W-004 文档 / Task #60 真修 / AUDIT 5 struct / C' 确定性 audit
+> - **v0.9 wip commit 2.42-2.43** (Sprint 4.5 C) — len() builtin 翻译层 bug 修 + cg_convert_arg D→S unreachable 分支修
+> - **v0.9 wip commit 2.75-2.83** (Sprint 4.18-4.5 E+ style cleanup) — fix_il.py 完整化 / Sprint 4.25 W-005 #2 + sret 真修 / Stage 2 N=3 byte-equal 实证 / workarounds.md W-008 文档 / Phase 2 Style Cleanup
 >
 > v0.8 wip commit 12 是 v0.9 前一版（12 commits → Stage 0 closure 解锁）。v0.7.0 是更前版（7A enum first-class + 7B 顶层 const 数组）。
->>
->> **v0.8 wip commit 2.42-2.43**（Sprint 4.5 C ship）：len() builtin 3 处翻译层 bug 修 (commit 2.42) + cg_convert_arg unreachable D→S 分支修 (commit 2.43)。jhyy_v1 regress_v1 **44 → 45** (+2/+1)，回归持平。
->
-> **完成定义校准**：原"jhyy_v1 推到 47/47 = M4 真自举闭环"目标在 v0.8 wip commit 6 重新校准为"持平 baseline（12 OK 持平即可）" — 详见 [`docs/plans/v0/v0.8.0任务清单 + 概要设计.md`](../plans/v0/v0.8.0任务清单 + 概要设计.md) § 完成定义校准。v0.9 wip 沿用同一基准 (regress 50/53 PASS + stage1 byte-equal 6/7 持平) + 加 2 个 audit 维度 (AUDIT + C')。下一阶段 v1.0 sprint 3 = Task #52 / B (resolve_imports 翻译) / Task #61 / W-004 verification / D。
 
-回归基线：
-- **jhyy_0 (C 编译) regress**: **50/53 passed, 0 failed, 3 skipped**（3 skipped 是库文件，无 `main_jhyy`）
-- **jhyy_v1 (自举) regress_v1**: **47/53 passed, 3 failed, 3 skipped**（Sprint 4.5 C step 3 commit 2.44 — parse_expr inline match-as-expression dispatch (literal int + wildcard + ident binding)；HEAD v9 binary sha 85f1df8430a5f4cd...；+2 PASS 来自 match + dungeon_game；3 fail 剩余：slice_subrange (Task #146) + import_test/namespace_dup (Task #43)）
-- **stage1 byte-equal**: **6/7 PASS 持平 baseline**（v0.9 wip commit 2.17 ship；const_array 失败是 pre-existing Task #52）
+回归基线 (v1.0.0 锁定)：
+- **jhyy_0 (C 编译) regress.py**: **50/53 passed, 0 failed, 3 skipped**（3 skipped 是库文件，无 `main_jhyy`）
+- **jhyy_v1 (自举) regress_v1.py**: **50/53 passed, 0 failed, 3 skipped**（与 C 端 baseline 持平）
+- **Stage 1 byte-equal**: **7/7 PASS**（jhyy_0 vs jhyy_v1 对 7 测试集产出 byte-equal `.il`）
+- **Stage 2 N=3 byte-equal**: ✅ **sha `2445e97d...` 4-hop 稳定**（jhyy_v1/v2/v3/v4 四份 raw `.il` 字节相同, fixed point 是 attractor）
 
 ---
 
@@ -66,8 +64,9 @@
 | import 模块系统 (含传递性导入) | 完成 (v0.4) |
 | 多文件 CLI 输入 | 完成 (v0.4) |
 | 模块命名空间 `mod::fn()` | 完成 (v0.6) |
-| Claude Code MCP 服务 (7 工具 + 4 资源) | 完成 (v0.5) |
+| Claude Code MCP 服务 (11 工具 + 4 资源) | 完成 (v0.5 + mcp-jhyy Sprint 1 2026-08-11) |
 | Stage 0 自举试点 (`arena.jhyy` 翻译) | 完成 (v0.6) |
+| **v1.0.0 真自举 byte-equal 闭环** | **完成 (2026-08-10 commit `eabee0d`)** |
 | 控制台输出 (中文 UTF-8 + 数字 printf) | 完成 |
 | Arena allocator (via FFI) | 完成 |
 
@@ -134,7 +133,7 @@ abi § 11.1 五个阻塞自举问题（A1-A5）中，A1/A2/A4 已 ✓。**A3 / A
 - **extern fn 不再 mangle**：`arena.jhyy` 的 `extern fn malloc` 直接 emit 原名
 - **resolve_imports dir fallback**：主文件路径无 slash 时回退到 `"."`
 - **regress.py 跳过库文件**：无 `main_jhyy` 的文件 SKIP，不算 failed
-- **Stage 0 翻译**：`compiler/jhyy-src/arena.jhyy`（arena.c → JHYY），验证自举能力
+- **Stage 0 翻译**：`compiler/src0/arena.jhyy`（arena.c → JHYY），验证自举能力
 - **新增 7 个测试**：slice_*, namespace_dup, cast_ptr_to_int
 - **43/46 回归通过**（3 skipped = 库文件）
 
@@ -151,7 +150,7 @@ abi § 11.1 五个阻塞自举问题（A1-A5）中，A1/A2/A4 已 ✓。**A3 / A
 - **新增 10 个专项测试**：break_continue, float_arith, fib30, big_array, overflow, nested_if, void_if, ptr_self_assign, big_test
 - **Python 回归脚本**：`compiler/build/bin/regress.py` 自动运行所有 .jhyy 测试
 - **ABI 白皮书 v1.0.0**：锁定 struct pass-by-value, 多文件, FFI, break/continue
-- **MCP 服务**：7 工具 (compile/run/check/get_il/lang_ref/abi_info/format) + 4 资源
+- **MCP 服务**：11 工具 (compile/run/check/get_il/lang_ref/abi_info/format + regress/il_diff/selfhost_check/workarounds) + 4 资源
 
 ## 已修复 — v0.4.0
 
@@ -198,16 +197,17 @@ abi § 11.1 五个阻塞自举问题（A1-A5）中，A1/A2/A4 已 ✓。**A3 / A
 
 ## 当前 sprint / 下一阶段
 
-**v0.9 wip**（commit 2.17 ship, 7691457）：jhyy_v1 regress **50/53 PASS 持平 baseline** + stage1 byte-equal **6/7 持平 baseline** + **2 个 audit 全 PASS** (AUDIT 修 VariantDesc heap overflow / C' 验证 5 维度 by-construction deterministic)。详细进度见 `docs/logs/v0/changelog-v0.9.0.md` + `docs/plans/v0/v0.9.0任务清单 + 概要设计.md`。
+**v0.9 wip**（commit 2.83 ship, 2026-08-11）：v0.x 收尾主线 — Stage 1 byte-equal **7/7** + Stage 2 N=3 byte-equal 闭环 (sha `2445e97d...`) + 2 个 audit 全 PASS (AUDIT 修 VariantDesc heap overflow / C' 验证 5 维度 by-construction deterministic)。v0.9 wip 最后 sprint = **v0.9 wip commit 2.83 Phase 2 Style Cleanup**（mcp-jhyy docstring 补全 + workarounds.md W-008 文档 + 18 处 `[Status: ...]` tag 插入）。详细进度见 [`docs/logs/v0/changelog-v0.9.0.md`](../logs/v0/changelog-v0.9.0.md)。
 
-下一阶段：**v1.0 sprint 3 启动**（5 task 粗粒度合并）→ `docs/plans/v1/v1.0-sprint-3-*.md`。完成定义 = jhyy_v1 编 src0/main.jhyy 真闭环 + N=3 byte-equal + W-004 RESOLVED。
+**v1.0.0 真自举闭环** ✅（2026-08-10 commit `eabee0d`）：Stage 2 N=3 byte-equal 达成 — 详尽 ship 记录见 [`docs/logs/v1/changelog-v1.0.0.md`](../logs/v1/changelog-v1.0.0.md)。
 
-再下一阶段：**v1.0.0 真自举 byte-equal .il 闭环**（v1.0 sprint 3 末 → v1.0 sprint 5）→ `docs/plans/v1/v1.0.0任务清单 + 概要设计.md`。
+下一阶段：**v2.x** (QBE 完整重写 + amd64_sysv / freestanding) / **v3.x** (inline asm / `no_std` / `&mut` lifetime) **并行**（OS 准备）→ [`docs/plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-os-prep.md) + [`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md`](../plans/roadmap/v2-v3-parallel-sprint-plan.md)。OS 端等编译器推进（per [`memory/project_os_wait_state.md`](~/.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_os_wait_state.md)，v1.0 闭环达成前不主动 prep OS）。
 
-已知 v0.9 / v1.0 sprint 3 / v1.0.0 未完成项（明确延后）：
-- Pattern binding codegen（`Some(v) => v` 提取 payload）—— v1.0 sprint 3 末 patch
+已知 v1.0.0 后续未完成项（明确延后，非 blocker）：
+- Stage 1 byte-equal 6/7 → 7/7（const_array 因 parser 翻译层缺 NODE_CONST_DECL 推迟；v1.x post-50-53 plan 处理）
+- Pattern binding codegen（`Some(v) => v` 提取 payload）—— v1.x post-50-53 patch
 - OR pattern 一致性检查（`Some(x) | Some(y)` 两边必须绑同名）
 - 嵌套 const array（`[[i32; N]; M]`）—— 自举需要时再开
 - const pointer / const slice / const enum array —— 需要 RTTI
 - const fn / 编译期函数求值 —— 大特性，单独 sprint
-- v0 codegen bug 1/2/3/4（LEA / phi / loadub / &local）—— workaround 已在 jhyy 源码里，v1.0 sprint 5 收尾
+- v0 codegen bug 1/2/3/4（LEA / phi / loadub / &local）—— workaround 已在 jhyy 源码里，v1.x post-50-53 收尾

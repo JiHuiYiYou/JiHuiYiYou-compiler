@@ -143,7 +143,10 @@ python compiler/build/bin/regress.py
 
 ```bash
 # Stage 2 N=3 byte-equal — jhyy compiles jhyy
-python compiler/build/bin/jhyy_v1.py 2>/dev/null || true
+# Method 1: regress through self-hosted compiler
+python compiler/build/bin/regress_v1.py
+# Method 2: one-shot closure check via MCP (recommended)
+# ask Claude Code: "verify self-host closure" → jhyy_selfhost_check
 # See docs/logs/v1/changelog-v1.0.0.md for full procedure
 ```
 
@@ -163,7 +166,7 @@ python compiler/build/bin/jhyy_v1.py 2>/dev/null || true
 | **FFI** | `extern fn` calling C (printf, file I/O, multi-arg) |
 | **Memory** | runtime Arena allocator (`arena_alloc` via FFI) |
 
-Full specification: [`docs/abis/jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md) (locked); known limitations in Appendix B.
+Full specification: [`docs/abis/jhyy-lang-spec-v1.1.0.md`](docs/abis/jhyy-lang-spec-v1.1.0.md) (locked; v1.1.0 = v1.0.0 + v0.7 7A/7B); known limitations in Appendix B.
 
 ---
 
@@ -186,26 +189,17 @@ jhyy                                 print help
 
 The JHYY compiler exists in two **fully equivalent** implementations that emit byte-equal QBE IL:
 
-```
-                  ┌─────────────────────────────────────────┐
-                  │              compiler/src/              │
-                  │   C-side (legacy, v0.x — production)    │
-                  │   main.c / lexer / parser / sema /      │
-                  │   ir / codegen / symtab / types         │
-                  └────────────────────┬────────────────────┘
-                                       │ gcc → jhyy.exe
-                                       ▼
-                  ┌─────────────────────────────────────────┐
-   .jhyy source → │                  QBE                   │ → .il → as → link → .exe
-                  │   (vendored, qbe/qbe.exe -t amd64_win)  │
-                  └────────────────────▲────────────────────┘
-                                       │ jhyy.exe → jhyy_v1.exe
-                  ┌────────────────────┴────────────────────┐
-                  │             compiler/src0/              │
-                  │  jhyy-side (target, v1.x — self-host)   │
-                  │  main.jhyy / lexer / parser / sema /    │
-                  │  ir / codegen / symtab / types          │
-                  └─────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    cs["<b>compiler/src/</b><br/>C-side · v0.x — production<br/>main.c · lexer · parser · sema<br/>ir · codegen · symtab · types"]
+    cs -->|gcc builds| bin1["jhyy.exe"]
+    s0["<b>compiler/src0/</b><br/>jhyy-side · v1.x — self-host<br/>main.jhyy · lexer · parser · sema<br/>ir · codegen · symtab · types"]
+    bin1 -->|compiles src0| s0
+    s0 --> bin2["jhyy_v1.exe"]
+    src[".jhyy source"] --> qbe["<b>QBE</b><br/>(qbe/qbe.exe -t amd64_win)"]
+    bin1 --> qbe
+    bin2 --> qbe
+    qbe --> il[".il"] --> as_["as"] --> ln["link"] --> exe[".exe"]
 ```
 
 | Implementation | Role | Status |
@@ -224,10 +218,10 @@ Both paths emit **byte-equal QBE intermediate representation** — Stage 1 (`jhy
 JiHuiYiYou-compiler/
 ├── compiler/
 │   ├── src/                    C-side compiler source (10 .c / 9 .h files)
-│   ├── src0/                   jhyy-side translated source (10 .jhyy) — self-host path
+│   ├── src0/                   jhyy-side translated source (13 main modules + 11 _driver tests) — self-host path
 │   ├── runtime/                C runtime (Arena + main entry)
 │   ├── tests/
-│   │   ├── examples/           integration tests (47 .jhyy) — regress.py auto-runs
+│   │   ├── examples/           integration tests (53 .jhyy) — regress.py auto-runs
 │   │   └── unit/               C unit tests
 │   └── build/
 │       └── bin/
@@ -244,8 +238,7 @@ JiHuiYiYou-compiler/
 │   └── logs/                   changelogs + sprint logs
 ├── Makefile                    one-line build (make)
 ├── README.md                   English (this file)
-├── README.zh-CN.md              简体中文
-└── CLAUDE.md                   AI-collaboration entry point
+└── README.zh-CN.md              简体中文
 ```
 
 ---
@@ -287,7 +280,7 @@ The project uses a **single version axis**, no phase-N numbering:
 
 ### Claude Code MCP server
 
-`mcp-jhyy/` ships 4 MCP tools wired into the Claude Code workflow:
+`mcp-jhyy/` ships **11 MCP tools** wired into the Claude Code workflow (Sprint 1 of mcp-jhyy, 2026-08-11, added 4 production-ready tools — `jhyy_regress` / `jhyy_il_diff` / `jhyy_selfhost_check` / `jhyy_workarounds` — and rebased the original 7 (`jhyy_run` / `jhyy_check` / `jhyy_compile` / `jhyy_get_il` / `jhyy_lang_ref` / `jhyy_abi_info` / `jhyy_format`) onto a thin regress.py shim):
 
 | Tool | Purpose |
 |------|---------|
@@ -295,6 +288,8 @@ The project uses a **single version axis**, no phase-N numbering:
 | `jhyy_il_diff` | byte-equal check on two `.il` files + contextual diff |
 | `jhyy_selfhost_check` | one-shot v1→v2→v3→v4 byte-equal verification |
 | `jhyy_workarounds` | query W-NNN workaround status / details |
+| `jhyy_run` / `jhyy_check` / `jhyy_compile` / `jhyy_get_il` | compile / run / inspect `.jhyy` |
+| `jhyy_lang_ref` / `jhyy_abi_info` / `jhyy_format` | language / ABI / format queries |
 
 Details in [`mcp-jhyy/README.md`](mcp-jhyy/README.md).
 
@@ -310,7 +305,7 @@ Details in [`mcp-jhyy/README.md`](mcp-jhyy/README.md).
 
 | Doc | Description |
 |-----|-------------|
-| [`docs/abis/jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md) | language spec v1.0.0 |
+| [`docs/abis/jhyy-lang-spec-v1.1.0.md`](docs/abis/jhyy-lang-spec-v1.1.0.md) | language spec v1.1.0 (v0.7+; enum exhaustiveness + 顶层 const 数组) |
 | [`docs/abis/jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) | ABI whitepaper v1.0.0 (struct pass-by-value / FFI / namespaces / slices) |
 
 ### Internal

@@ -2,7 +2,7 @@
 
 **日期**: 2026-06-17
 **状态**: 锁定 — 基于编译器 v0.4.0 / v0.5.0 实现
-**目标**: 锁定自举前的最终 ABI，所有 Phase 1 后续版本必须兼容
+**目标**: 锁定自举前的最终 ABI，所有 v0.x 后续版本必须兼容
 **取代**: v0.0.1
 
 ---
@@ -19,9 +19,9 @@
 | **中间表示** | QBE IL (`-t amd64_win`) |
 
 **决策记录**:
-- 唯一目标是 Windows x64。Linux ELF64 需等 Phase 3 (v0.7.0+)
+- 唯一目标是 Windows x64。Linux ELF64 需等 v2.x（QBE 完整重写 + 多目标）
 - 32 位 x86 永久不支持
-- ARM/ARM64/WASM 不在 Phase 1 范围内
+- ARM/ARM64/WASM 不在 v0.x / v1.x 范围内
 - OS 阶段再评估 freestanding 目标
 
 ---
@@ -230,7 +230,7 @@ JHYY 编译器通过 QBE 的 `-t amd64_win` 目标继承 **Microsoft x64 Calling
 | `[T; N]` 定长数组 | **v0.4.0 起**: 调用方在栈上分配副本，传递副本地址 (类似 struct) |
 | `struct` | **v0.4.0 起**: 调用方在栈上分配副本，**逐字段**复制，传递副本地址 (隐式 `l` 参数) |
 | `enum` | 同 struct: 副本地址 |
-| `[*]T` 切片 | P2，未实现 codegen |
+| `[*]T` 切片 | **v0.6.0 sprint 6A 起**: 按 struct pass-by-value sret 处理(`{data: *T, len: u64}` 16 字节,逐字段拷贝) |
 
 **实现细节 (struct pass-by-value)**:
 ```
@@ -604,7 +604,7 @@ fn main_jhyy() -> i32 {
 **不支持**:
 - struct/enum 按值跨 FFI 边界 (Windows x64 ABI 复杂，当前未实现)
 - 变参函数 (`printf` 的 `...` 在 JHYY 侧需要逐参数列出)
-- 回调函数 (P3，Phase 2 考虑)
+- 回调函数 (P3，v1.x 考虑)
 
 ### 7.5 字符串字面量
 
@@ -666,7 +666,7 @@ fn use_helper() -> i32 { helper(42) }  // 直接调用 mylib 中的 helper
 fn helper(x: i32) -> i32 { x + 1 }
 ```
 
-**限制**: 不同模块中同名函数会**冲突** (后定义覆盖前者)。模块系统 v2.0 (Phase 2) 将引入命名空间。
+**限制**: 不同模块中同名函数会**冲突** (后定义覆盖前者)。模块系统 v0.6.0 sprint 6B 已引入命名空间 (`mod::fn()` + `$mod__name` mangle + `Sym.module` 字段)。
 
 ### 8.4 错误信息
 
@@ -781,7 +781,7 @@ JHYY 字符串字面量在 QBE data 段中以 UTF-8 + NUL 终止符存储。
 
 ## 11. 已知局限 (v1.0.0 锁定)
 
-### 11.1 阻塞自举的关键问题 (Phase 2 必须解决)
+### 11.1 阻塞自举的关键问题 (v1.x 必须解决)
 
 | # | 问题 | 影响 | 状态 |
 |---|------|------|------|
@@ -807,7 +807,7 @@ JHYY 字符串字面量在 QBE data 段中以 UTF-8 + NUL 终止符存储。
 
 ### 11.3 ABI 兼容承诺
 
-任何 Phase 1 后续 v0.5.x / v0.6.x 版本**不得**改变本文件锁定的内容。变更必须:
+任何 v0.x 后续版本**不得**改变本文件锁定的内容。变更必须:
 1. 升级 ABI 主版本号 (v1.0.0 → v1.1.0)
 2. 在 `docs/changelog-vX.Y.Z.md` 记录
 3. 提供迁移路径
@@ -842,4 +842,4 @@ int result = main_jhyy();
 2. **手动调用 QBE**: `qbe/qbe.exe -t amd64_win -o output.s output.il`
 3. **查看汇编**: `cat output.s`
 4. **最小化测试**: 从失败的 .jhyy 抽出最小复现到独立的 .jhyy 文件
-5. **回归测试**: `python compiler/build/bin/regress.py` 跑全部 43 个集成测试（v0.6.0 验证 43/46 passed, 3 skipped 库文件）
+5. **回归测试**: `python compiler/build/bin/regress.py` 跑全部 50 个集成测试（v1.0.0 验证 **50/53 PASS, 0 failed, 3 skipped** 库文件）

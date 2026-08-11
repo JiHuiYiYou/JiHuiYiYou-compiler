@@ -148,7 +148,7 @@ jnz %t0, @then, @else    # 条件跳转
 
 ## Stage 0 自举试点
 
-`compiler/jhyy-src/arena.jhyy` 是 `compiler/src/arena.c` 的 JHYY 翻译（v0.6）。
+`compiler/src0/arena.jhyy` 是 `compiler/src/arena.c` 的 JHYY 翻译（v0.6）。
 
 **翻译要点**：
 - `size_t → i64`、`void* → *u8`
@@ -158,4 +158,4 @@ jnz %t0, @then, @else    # 条件跳转
 
 测试 driver：`compiler/tests/examples/arena_test/arena_test.jhyy`
 
-验证了 v0.6 编译器对编译自身模块的能力。下一期 v1.0.0 启动完整自举。
+验证了 v0.6 编译器对编译自身模块的能力。**v1.0.0 已完成完整自举**（`jhyy_v1 → v2 → v3 → v4` 产出 byte-equal `.il`，sha `2445e97d...`，commit `eabee0d`，2026-08-10）。后续 v2.x / v3.x 路线图见 [`docs/plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-os-prep.md) 与 [`docs/plans/roadmap/v2.x-qbe-rewrite.md`](../plans/roadmap/v2.x-qbe-rewrite.md)。

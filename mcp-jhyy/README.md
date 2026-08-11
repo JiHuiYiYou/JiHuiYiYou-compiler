@@ -95,6 +95,10 @@ JHYY MCP 是**全局注册**的（写在 `~/.claude.json` 里），装一次即�
 | 工具 | 何时使用 | 备注 |
 |------|---------|------|
 | `jhyy_format` | 简单格式化 | v0.5.0 最小占位实现 |
+| `jhyy_regress` | 跑回归 / 验证 baseline 没破 | mcp-jhyy Sprint 1 ship (2026-08-11) |
+| `jhyy_il_diff` | 比两个 .il / Stage 1 byte-equal | mcp-jhyy Sprint 1 ship |
+| `jhyy_selfhost_check` | 验证自举闭环 (v1→v2→v3 byte-equal) | mcp-jhyy Sprint 1 ship |
+| `jhyy_workarounds` | 搜 workarounds / "W-XXX 状态?" | mcp-jhyy Sprint 1 ship |
 
 Claude Code 会根据工具描述中的触发条件**自动判断何时调用**，无需你手动指定。
 
@@ -119,10 +123,11 @@ Claude Code 会根据工具描述中的触发条件**自动判断何时调用**�
 
 ```
 mcp-jhyy/
-├── server.py              # MCP 服务器主程序（FastMCP 入口，7 tools + 4 resources）
+├── server.py              # MCP 服务器主程序（FastMCP 入口，11 tools + 4 resources）
 ├── jhyy_runner.py         # subprocess 封装（compile / run / check / get_il）
 ├── spec_data.json         # 语言规范数据（从 v0.2.1 spec 提取）
 ├── abi_data.json          # ABI 数据（从 v1.0.0 白皮书提取）
+├── tests/                 # 14 in-process tests (pytest)
 └── README.md              # 本文件
 ```
 

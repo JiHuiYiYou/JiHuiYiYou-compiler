@@ -92,7 +92,7 @@ python compiler/build/bin/regress.py
 
 输出示例：
 ```
-===== 43/46 passed, 0 failed, 3 skipped =====
+===== 50/53 passed, 0 failed, 3 skipped =====
 ```
 
 ### 单个测试

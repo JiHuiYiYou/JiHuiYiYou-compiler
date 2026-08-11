@@ -7,8 +7,8 @@
 ```
 C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/
 ├── compiler/src/*.c        # 编译器源
+├── compiler/src0/          # jhyy 端自举翻译（v1.x — 与 src/ byte-equal 输出）
 ├── compiler/runtime/       # 运行时（main → main_jhyy 桥接）
-├── compiler/jhyy-src/      # Stage 0 自举翻译（arena.jhyy 等）
 ├── compiler/tests/         # 测试
 │   ├── examples/*.jhyy     # 集成测试
 │   └── unit/*.c            # 单元测试
@@ -91,7 +91,7 @@ python compiler/build/bin/regress.py
 
 自动运行 `compiler/tests/examples/*.jhyy` 所有测试，输出：
 ```
-===== 43/46 passed, 0 failed, 3 skipped =====
+===== 50/53 passed, 0 failed, 3 skipped =====
 ```
 
 无 `main_jhyy` 的库文件（`mylib.jhyy`、`ns_dup_*.jhyy`）自动 SKIP，不计入 passed/failed。

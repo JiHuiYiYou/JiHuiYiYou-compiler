@@ -1,9 +1,11 @@
 # JHYY 语言规范 v1.0.0
 
 **日期**: 2026-06-21
-**状态**: 锁定（self-hosting 启动门槛）
+**状态**: 锁定（self-hosting 启动门槛）— **已被 v1.1.0 取代**（v1.1.0 加 v0.7 7A/7B 增量）
 **覆盖**: 编译器 v0.6.0 全部可用语法
 **不覆盖**: 已声明但 codegen 缺失的特性（见附录 B）
+
+> **SUPERSEDED 2026-08-11**: 此文件历史版本,新内容请看 [`jhyy-lang-spec-v1.1.0.md`](jhyy-lang-spec-v1.1.0.md)。v1.0.0 启动门槛已于 2026-08-10 达成（commit `eabee0d` = Stage 2 N=3 byte-equal 闭环）。附录 B/C 内容保留供历史参考。
 
 ---
 
@@ -1077,7 +1079,7 @@ fn sum_tree(t: *Tree) -> i32 {
 
 ## 附录 B：已知限制
 
-下列特性在 sema 中已部分接受，但 codegen 缺失或不可用。**Phase 1 不阻塞**，但影响 v0.6+ 候选。
+下列特性在 sema 中已部分接受，但 codegen 缺失或不可用。**v0.x 不阻塞**，但影响 v0.6+ 候选。
 
 | # | 严重度 | 描述 | 影响范围 |
 |---|--------|------|---------|
@@ -1086,7 +1088,7 @@ fn sum_tree(t: *Tree) -> i32 {
 | **P3** | 缺失 | 浮点 fmod (`%`) — 整数 `%` 工作，浮点 `%` 拒绝 | 自举可绕过（用整数 mod） |
 | **P3** | 缺失 | struct / enum 跨 FFI 边界（Windows x64 ABI 不兼容） | 需 C ABI 兼容 struct 传递（v0.6 候选） |
 | **P3** | 缺失 | 变参函数 (`printf` 的 `...`) — JHYY 侧需手动展开为多个 extern | 自举可手写 wrapper |
-| **P3** | 缺失 | 函数回调（把 JHYY 函数指针传给 C 调用） | Phase 2+ 考虑 |
+| **P3** | 缺失 | 函数回调（把 JHYY 函数指针传给 C 调用） | v1.x 考虑 |
 | ~~**P3**~~ | ~~缺失~~ | ~~模块命名空间（v0.4 多文件后符号冲突）~~ | **v0.6.0 sprint 6B 已实现**：`Sym.module` 字段 + `$mod__name` mangle + `mod::fn()` 限定调用 |
 | **P3** | 缺失 | 嵌套 import 路径 (`utils::io`) — 当前仅 `import utils; utils::io_func()` | v0.6+ 候选（v0.6 sprint 6B 未实现） |
 | ~~**P2**~~ | ~~pre-existing~~ | ~~`import_test.jhyy` 找不到 `mylib.jhyy`（CLI 多文件参数路径 bug）~~ | **v0.6.0 sprint 6D.1 已修复**：dir 提取 fallback 到 `"."` |
@@ -1095,7 +1097,7 @@ fn sum_tree(t: *Tree) -> i32 {
 
 ## 附录 C：自举兼容性
 
-**自举 (self-hosting) = 用 JHYY 写 JHYY 编译器**。Phase 2 启动门槛：本 spec v1.0.0 覆盖的子集必须能表达 JHYY 编译器源（C 版本）的全部语义。
+**自举 (self-hosting) = 用 JHYY 写 JHYY 编译器**。v1.x 启动门槛：本 spec v1.0.0 覆盖的子集必须能表达 JHYY 编译器源（C 版本）的全部语义。**v1.0.0 已达成**（commit `eabee0d`, 2026-08-10）。
 
 ### C 编译器架构 → JHYY 子集需求映射
 
@@ -1129,7 +1131,7 @@ fn sum_tree(t: *Tree) -> i32 {
 3. **C ABI 兼容 struct 传递** (P3)：替换当前 stack-copy ABI，让自举的 JHYY 编译器能直接调用 C 标准库（**v0.6 sprint 6D 部分修 pointer-to-struct 语义，全 ABI 兼容仍待 phase-2**）
 4. **`as` 支持指针 ↔ usize 互转** (P2)：方便做指针 ↔ 整数互转做 hash（**v0.6.0 sprint 6C 已实现** ✓）
 
-### Phase 2 启动条件
+### v1.x 启动条件（v1.0.0 已 ✅ 达成）
 
 ✅ 本 spec 覆盖的全部特性在 v0.5.1 编译器中可用
 ✅ 已知限制（P2/P3）有 fallback 路径

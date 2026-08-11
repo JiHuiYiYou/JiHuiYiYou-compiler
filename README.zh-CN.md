@@ -13,7 +13,7 @@
 [![后端](https://img.shields.io/badge/后端-QBE-orange)](https://c9x.me/compile/)
 [![平台](https://img.shields.io/badge/平台-Windows%20x64-lightgrey)](#构建)
 [![协议](https://img.shields.io/badge/协议-MIT-blue)](LICENSE)
-[![English](https://img.shields.io/badge/lang-English-blue)](README.md)
+[![English](https://img.shields.io/badge/lang-English-red)](README.md)
 
 [快速开始](#快速开始) · [语言特性](#语言特性) · [命令行](#命令行) · [架构](#架构) · [路线图](#路线图) · [文档](#文档)
 
@@ -143,7 +143,10 @@ python compiler/build/bin/regress.py
 
 ```bash
 # Stage 2 N=3 byte-equal — jhyy 编译 jhyy
-python compiler/build/bin/jhyy_v1.py 2>/dev/null || true
+# 方法 1: 走自举编译器回归
+python compiler/build/bin/regress_v1.py
+# 方法 2: MCP 一键验证(推荐)
+# 问 Claude Code: "verify self-host closure" → jhyy_selfhost_check
 # 完整流程见 docs/logs/v1/changelog-v1.0.0.md
 ```
 
@@ -163,7 +166,7 @@ python compiler/build/bin/jhyy_v1.py 2>/dev/null || true
 | **FFI** | `extern fn` 调用 C(printf、文件 I/O、多参数) |
 | **内存** | 运行时 Arena 分配器(`arena_alloc` via FFI) |
 
-完整语言规范见 [`docs/abis/jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md)(已锁定);已知限制见附录 B。
+完整语言规范见 [`docs/abis/jhyy-lang-spec-v1.1.0.md`](docs/abis/jhyy-lang-spec-v1.1.0.md)(已锁定;v1.1.0 = v1.0.0 + v0.7 7A/7B 增量);已知限制见附录 B。
 
 ---
 
@@ -186,26 +189,17 @@ jhyy                                 打印帮助
 
 JHYY 编译器存在两份**完全等价**的实现,产出 byte-equal 的 QBE IL:
 
-```
-                  ┌─────────────────────────────────────────┐
-                  │              compiler/src/              │
-                  │   C 端 (legacy, v0.x — 生产路径)        │
-                  │   main.c / lexer / parser / sema /      │
-                  │   ir / codegen / symtab / types         │
-                  └────────────────────┬────────────────────┘
-                                       │ gcc 编译 → jhyy.exe
-                                       ▼
-                  ┌─────────────────────────────────────────┐
-   .jhyy source → │                  QBE                   │ → .il → as → 链接 → .exe
-                  │   (已 vendor, qbe/qbe.exe -t amd64_win)  │
-                  └────────────────────▲────────────────────┘
-                                       │ jhyy.exe 编译 → jhyy_v1.exe
-                  ┌────────────────────┴────────────────────┐
-                  │             compiler/src0/              │
-                  │  jhyy 端 (target, v1.x — 自举路径)     │
-                  │  main.jhyy / lexer / parser / sema /    │
-                  │  ir / codegen / symtab / types          │
-                  └─────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    cs["<b>compiler/src/</b><br/>C 端 · v0.x — 生产路径<br/>main.c · lexer · parser · sema<br/>ir · codegen · symtab · types"]
+    cs -->|gcc 构建| bin1["jhyy.exe"]
+    s0["<b>compiler/src0/</b><br/>jhyy 端 · v1.x — 自举路径<br/>main.jhyy · lexer · parser · sema<br/>ir · codegen · symtab · types"]
+    bin1 -->|编译 src0| s0
+    s0 --> bin2["jhyy_v1.exe"]
+    src[".jhyy 源码"] --> qbe["<b>QBE</b><br/>(qbe/qbe.exe -t amd64_win)"]
+    bin1 --> qbe
+    bin2 --> qbe
+    qbe --> il[".il"] --> as_["as"] --> ln["link"] --> exe[".exe"]
 ```
 
 | 实现 | 角色 | 状态 |
@@ -224,10 +218,10 @@ JHYY 编译器存在两份**完全等价**的实现,产出 byte-equal 的 QBE IL
 JiHuiYiYou-compiler/
 ├── compiler/
 │   ├── src/                    C 端编译器源码 (10 个 .c / 9 个 .h)
-│   ├── src0/                   jhyy 端翻译稿 (10 个 .jhyy) — 自举路径
+│   ├── src0/                   jhyy 端翻译稿 (13 个主体模块 + 11 个 _driver 测试) — 自举路径
 │   ├── runtime/                C 运行时 (Arena + main 入口)
 │   ├── tests/
-│   │   ├── examples/           集成测试 (47 个 .jhyy) — regress.py 自动跑
+│   │   ├── examples/           集成测试 (53 个 .jhyy) — regress.py 自动跑
 │   │   └── unit/               C 单元测试
 │   └── build/
 │       └── bin/
@@ -244,8 +238,7 @@ JiHuiYiYou-compiler/
 │   └── logs/                   变更日志 + sprint 实施日志
 ├── Makefile                    一行构建(make)
 ├── README.md                   English
-├── README.zh-CN.md              简体中文(本文件)
-└── CLAUDE.md                   AI 协作入口
+└── README.zh-CN.md              简体中文(本文件)
 ```
 
 ---
@@ -287,7 +280,7 @@ JiHuiYiYou-compiler/
 
 ### Claude Code MCP 服务
 
-`mcp-jhyy/` 提供 4 个 MCP 工具,直接对接 Claude Code 工作流:
+`mcp-jhyy/` 提供 **11 个 MCP 工具**(mcp-jhyy Sprint 1 在 2026-08-11 加 4 个生产级工具 — `jhyy_regress` / `jhyy_il_diff` / `jhyy_selfhost_check` / `jhyy_workarounds` — 把原 7 个 (`jhyy_run` / `jhyy_check` / `jhyy_compile` / `jhyy_get_il` / `jhyy_lang_ref` / `jhyy_abi_info` / `jhyy_format`) 薄壳化到 regress.py),直接对接 Claude Code 工作流:
 
 | 工具 | 用途 |
 |------|------|
@@ -295,6 +288,8 @@ JiHuiYiYou-compiler/
 | `jhyy_il_diff` | 两个 `.il` 文件 byte-equal 检查 + 上下文 diff |
 | `jhyy_selfhost_check` | 一键 v1→v2→v3→v4 byte-equal 验证 |
 | `jhyy_workarounds` | 查 W-NNN workaround 状态 / 详情 |
+| `jhyy_run` / `jhyy_check` / `jhyy_compile` / `jhyy_get_il` | 编译 / 运行 / 检查 `.jhyy` |
+| `jhyy_lang_ref` / `jhyy_abi_info` / `jhyy_format` | 语言 / ABI / 格式化查询 |
 
 详见 [`mcp-jhyy/README.md`](mcp-jhyy/README.md)。
 
@@ -310,7 +305,7 @@ JiHuiYiYou-compiler/
 
 | 文档 | 说明 |
 |------|------|
-| [`docs/abis/jhyy-lang-spec-v1.0.0.md`](docs/abis/jhyy-lang-spec-v1.0.0.md) | 语言规范 v1.0.0 |
+| [`docs/abis/jhyy-lang-spec-v1.1.0.md`](docs/abis/jhyy-lang-spec-v1.1.0.md) | 语言规范 v1.1.0(v0.7+;enum 穷尽性 + 顶层 const 数组) |
 | [`docs/abis/jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) | ABI 白皮书 v1.0.0(struct pass-by-value / FFI / 命名空间 / 切片) |
 
 ### 项目内部
@@ -335,7 +330,7 @@ JiHuiYiYou-compiler/
 
 ### 变更日志
 
-最新:`[docs/logs/v1/changelog-v1.0.0.md](docs/logs/v1/changelog-v1.0.0.md)` — **v1.0.0 自举闭环达成**
+最新:[`docs/logs/v1/changelog-v1.0.0.md`](docs/logs/v1/changelog-v1.0.0.md) — **v1.0.0 自举闭环达成**
 
 历史索引见 [`docs/logs/`](docs/logs/)。
 
