@@ -2382,6 +2382,48 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             let _ = cg_emit_store(cg_raw, (*inner_node).type_ptr, v, slot);
             return slot;
         }
+        // Bug 1 真修 (v0.9 wip commit 2.84): &EXPR.field should return the FIELD ADDRESS,
+        // not the field value (fall-through to `return zero` was emitting `loadw 0`).
+        // Mirror of C-side codegen.c NODE_ADDR_OF NODE_FIELD branch.
+        if inner_kind == NODE_FIELD() {
+            let fd = node_field_data(inner_node);
+            let fd_expr_node = (*fd).expr as *Node;
+            let expr_type = (*fd_expr_node).type_ptr;
+            if expr_type != (0 as *u8) {
+                let et = expr_type as *Type;
+                // pointer-to-struct: base = ptr, offset = field offset
+                if (*et).kind == KIND_POINTER() && (*et).elem != (0 as *u8) {
+                    let elem_t = (*et).elem;
+                    let et2 = elem_t as *Type;
+                    if (*et2).kind == KIND_STRUCT() {
+                        let base = cg_expr(cg_raw, fd_expr_node);
+                        let foff_buf = arena_alloc((*ir).arena, 16 as i64);
+                        cg_find_field_offset(elem_t, (*fd).field, foff_buf);
+                        let offset: i64 = *(foff_buf as *i64);
+                        if offset > (0 as i64) {
+                            let addr = *ir_new_tmp(ir, QBE_L());
+                            ir_emit_binary(ir, addr, "add" as *u8, base, ir_new_int(offset));
+                            return addr;
+                        }
+                        return base;  // offset 0: addr is the pointer
+                    }
+                }
+                // struct value field: base = stack slot of value
+                if (*et).kind == KIND_STRUCT() {
+                    let base = cg_expr(cg_raw, fd_expr_node);
+                    let foff_buf = arena_alloc((*ir).arena, 16 as i64);
+                    cg_find_field_offset(expr_type, (*fd).field, foff_buf);
+                    let offset: i64 = *(foff_buf as *i64);
+                    if offset > (0 as i64) {
+                        let addr = *ir_new_tmp(ir, QBE_L());
+                        ir_emit_binary(ir, addr, "add" as *u8, base, ir_new_int(offset));
+                        return addr;
+                    }
+                    return base;  // offset 0
+                }
+            }
+            return zero;
+        }
         return zero;
     }
 

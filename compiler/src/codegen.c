@@ -845,6 +845,55 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
             cg_add_local(cg, id->sym, slot, 1);
             *out = (slot); return;
         }
+        /* Bug 1 真修: &EXPR.field should return the FIELD ADDRESS, not the field value.
+         * Old behavior: fell through to cg_expr(d->expr) which loads the field VALUE,
+         * then caller dereferences it → reads random memory (or segfault). */
+        if (d->expr->kind == NODE_FIELD) {
+            NodeField *fd = node_field_data(d->expr);
+            Type *expr_type = fd->expr->type;
+            /* determine base pointer + field offset (mirror of NODE_FIELD logic, no load) */
+            IRVal base = {0};
+            if (expr_type && expr_type->kind == KIND_POINTER &&
+                expr_type->pointer.elem && expr_type->pointer.elem->kind == KIND_STRUCT) {
+                /* (*ptr).field: base = ptr, offset = field offset in pointee struct */
+                cg_expr(cg, fd->expr, &base);
+                Type *elem = expr_type->pointer.elem;
+                size_t offset = 0;
+                for (size_t i = 0; i < elem->struct_type.nfields; i++) {
+                    if (strcmp(elem->struct_type.fields[i].name->name, fd->field) == 0) {
+                        offset = elem->struct_type.fields[i].offset;
+                        break;
+                    }
+                }
+                if (offset > 0) {
+                    IRVal addr = ir_new_tmp(cg->ir, 'l');
+                    ir_emit_binary(cg->ir, addr, "add", base, ir_new_int((int64_t)offset));
+                    *out = (addr); return;
+                }
+                *out = (base); return; /* offset 0: addr is the pointer */
+            }
+            /* struct value field: base = stack slot of value */
+            if (expr_type && expr_type->kind == KIND_STRUCT) {
+                cg_expr(cg, fd->expr, &base);
+                size_t offset = 0;
+                for (size_t i = 0; i < expr_type->struct_type.nfields; i++) {
+                    if (strcmp(expr_type->struct_type.fields[i].name->name, fd->field) == 0) {
+                        offset = expr_type->struct_type.fields[i].offset;
+                        break;
+                    }
+                }
+                if (offset > 0) {
+                    IRVal addr = ir_new_tmp(cg->ir, 'l');
+                    ir_emit_binary(cg->ir, addr, "add", base, ir_new_int((int64_t)offset));
+                    *out = (addr); return;
+                }
+                *out = (base); return;
+            }
+            /* fallback: evaluate as expression (won't work for SSA temps) */
+            IRVal v = {0};
+            cg_expr(cg, d->expr, &v);
+            *out = (v); return;
+        }
         /* fallback: evaluate as expression (won't work for SSA temps) */
         IRVal v = {0};
         cg_expr(cg, d->expr, &v);
