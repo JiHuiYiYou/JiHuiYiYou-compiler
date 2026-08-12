@@ -707,6 +707,42 @@ fn cg_body_returns(body_node: *Node) -> i32 {
                 return 1;
             }
         }
+        return 0;
+    }
+    // Bug 2 真修 (v0.9 wip commit 2.85): NODE_IF / NODE_MATCH 是 value-producing expr.
+    // 若 then AND else 都 return, then 整个 if 表达式语义上"终止"控制流(无 value 流向 phi).
+    // 原版只查 NODE_RETURN/BLOCK/BREAK/CONTINUE,误判 nested 3-way dispatch (if A { if B {...} else {...} } else if C {...} else {...})
+    // 为 non-termin,走 phi emit 路径,emit `phi %t0 %t0` 引用 sentinel → QBE reject.
+    // 递归检查: then AND else 都 termin 时 → if expr 等价 termin.
+    if (*body_node).kind == NODE_IF() {
+        let nid = node_if_data(body_node);
+        let then_n = (*nid).then_body as *Node;
+        let else_n = (*nid).else_body as *Node;
+        let then_term = cg_body_returns(then_n);
+        let else_term = if else_n != (0 as *Node) { cg_body_returns(else_n) } else { 1 };
+        if then_term != 0 && else_term != 0 {
+            return 1;
+        }
+        return 0;
+    }
+    if (*body_node).kind == NODE_MATCH() {
+        let nm = node_match_data(body_node);
+        let n_arms = (*nm).narms;
+        if n_arms > (0 as i64) {
+            // 检查所有 arm 都 termin
+            let mut all_term: i32 = 1;
+            let mut ai: i64 = 0 as i64;
+            while ai < n_arms {
+                let arm_slot = ptr_add_u8((*nm).arms, ai * (8 as i64)) as **Node;
+                let arm = *arm_slot;
+                if cg_body_returns(arm) == 0 {
+                    all_term = 0;
+                }
+                ai = ai + (1 as i64);
+            }
+            if all_term != 0 { return 1; }
+        }
+        return 0;
     }
     return 0;
 }

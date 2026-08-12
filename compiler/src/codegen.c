@@ -244,6 +244,53 @@ static IRVal cg_convert_arg(CGContext *cg, IRVal arg, Type *src_t, Type *dst_t) 
     return result;
 }
 
+/* Bug 2 真修 (v0.9 wip commit 2.85): recursive body terminator check.
+ * Detects when a body NODE_IF or NODE_MATCH has all branches terminating
+ * (return/break/continue), in which case the parent if/match expression
+ * itself terminates control flow (no value flows to phi). The original
+ * macro only checked direct NODE_RETURN/BLOCK/BREAK/CONTINUE, missing
+ * nested 3-way dispatch (`if A { if B {...} else {...} } else if C {...} else {...}`)
+ * which wrongly fell into phi emit path and produced `phi %t0 %t0`
+ * referencing sentinel — QBE rejected.
+ *
+ * Forward decl of cg_expr needed (used for NODE_MATCH arm recurse only via
+ * kind check, no actual cg_expr call). */
+static int body_terminates_recursive(Node *body);
+
+/* helper: is last stmt of block a terminator (return/break/continue)? */
+static int block_last_is_term(Node *block) {
+    if (!block || block->kind != NODE_BLOCK) return 0;
+    NodeBlock *bd = node_block_data(block);
+    if (bd->nstmts <= 0) return 0;
+    Node *last = bd->stmts[bd->nstmts - 1];
+    return last && (last->kind == NODE_RETURN ||
+                    last->kind == NODE_BREAK ||
+                    last->kind == NODE_CONTINUE);
+}
+
+static int body_terminates_recursive(Node *body) {
+    if (!body) return 0;
+    if (body->kind == NODE_RETURN ||
+        body->kind == NODE_BREAK  ||
+        body->kind == NODE_CONTINUE) return 1;
+    if (body->kind == NODE_BLOCK) return block_last_is_term(body);
+    if (body->kind == NODE_IF) {
+        NodeIf *nid = node_if_data(body);
+        int then_t = body_terminates_recursive(nid->then_body);
+        int else_t = nid->else_body ? body_terminates_recursive(nid->else_body) : 1;
+        return then_t && else_t;
+    }
+    if (body->kind == NODE_MATCH) {
+        NodeMatch *nm = node_match_data(body);
+        if (nm->narms <= 0) return 0;
+        for (size_t i = 0; i < nm->narms; i++) {
+            if (!body_terminates_recursive(nm->arms[i])) return 0;
+        }
+        return 1;
+    }
+    return 0;
+}
+
 static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
     if (!n) { *out = (IRVal){0}; return; }
 
@@ -635,21 +682,11 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
 
         ir_emit_jnz(cg->ir, cond, then_block, else_block);
 
-        /* helper to detect if a body ends with a terminator (return/break/continue) */
-        #define body_terminates(body) \
-            ((body) && ((body)->kind == NODE_RETURN || \
-                        (body)->kind == NODE_BREAK || \
-                        (body)->kind == NODE_CONTINUE || \
-             ((body)->kind == NODE_BLOCK && node_block_data(body)->nstmts > 0 && \
-              (node_block_data(body)->stmts[node_block_data(body)->nstmts - 1]->kind == NODE_RETURN || \
-               node_block_data(body)->stmts[node_block_data(body)->nstmts - 1]->kind == NODE_BREAK || \
-               node_block_data(body)->stmts[node_block_data(body)->nstmts - 1]->kind == NODE_CONTINUE))))
-
         /* then */
         ir_emit_label(cg->ir, then_block);
         IRVal then_val = {0};
         cg_expr(cg, d->then_body, &then_val);
-        int then_returns = body_terminates(d->then_body);
+        int then_returns = body_terminates_recursive(d->then_body);
         /* current block after recursion may be a nested merge block (if then_body
            contains its own if/else). Use it as phi predecessor so the value is
            actually defined there. */
@@ -669,7 +706,7 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
         IRVal else_phi_pred = else_block;
         if (d->else_body) {
             cg_expr(cg, d->else_body, &else_val);
-            else_returns = body_terminates(d->else_body);
+            else_returns = body_terminates_recursive(d->else_body);
             /* current block is now wherever recursion ended (inner_merge for nested).
                Use it as phi predecessor so the value is actually defined there. */
             IRVal cur = ir_current_block(cg->ir);
@@ -682,7 +719,6 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
         ir_emit_label(cg->ir, merge_block);
         /* Sprint 5A.3: skip phi emission entirely when if expr is void */
         if (n->type && n->type->kind == KIND_VOID) {
-            #undef body_terminates
             IRVal v = {0};
             *out = (v); return;
         }
@@ -691,7 +727,6 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
             ir_emit_phi(cg->ir, result, 2, then_phi_pred, then_val, else_phi_pred, else_val);
             *out = (result); return;
         }
-        #undef body_terminates
 
         if (n->type && n->type->kind == KIND_VOID) {
             IRVal v = {0};
