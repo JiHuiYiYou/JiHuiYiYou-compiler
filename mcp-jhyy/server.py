@@ -169,8 +169,8 @@ def jhyy_get_il(file: str) -> dict:
 # ========== Tools: 语言/ABI 文档查询 ==========
 
 @mcp.tool
-def jhyy_lang_ref(query: str) -> dict:
-    """Search the JHYY language specification (v0.5.0) by keyword.
+def jhyy_lang_ref(query: str, limit: int = 20) -> dict:
+    """Search the JHYY language specification (v1.1.0) by keyword.
 
     USE THIS WHEN the user asks about JHYY language features, syntax, or semantics.
     Triggers: "does JHYY support X", "how do I write Y in JHYY", "JHYY syntax for Z",
@@ -182,41 +182,15 @@ def jhyy_lang_ref(query: str) -> dict:
     read docs/abis/jhyy-lang-spec-*.md directly — this tool does the search.
 
     Args:
-        query: 关键词 (如 "struct", "match", "for", "pointer", "as")
+        query: 关键词 (中文/英文/混合, 如 "struct pass-by-value", "命名空间", "match 范围")
+        limit: 最大返回条数 (默认 20)
 
     Returns:
-        {ok, query, matches: [...], spec_version}
+        {ok, version, query, matches: [{section, title, level, score, excerpt}, ...]}
+        section e.g. "10.4" — 直接对应 jhyy-lang-spec-v1.1.0.md 章节号, 可引用.
     """
-    spec_path = MCP_DIR / "spec_data.json"
-    if not spec_path.exists():
-        return {"ok": False, "error": f"spec_data.json not found: {spec_path}"}
-    with open(spec_path, encoding="utf-8") as f:
-        spec = json.load(f)
-
-    # Naive search: find query in spec dict
-    query_lower = query.lower()
-    matches = []
-
-    def search_in(obj, path=""):
-        if isinstance(obj, dict):
-            for k, v in obj.items():
-                new_path = f"{path}.{k}" if path else k
-                if query_lower in k.lower():
-                    matches.append({"key": new_path, "value": str(v)[:300]})
-                search_in(v, new_path)
-        elif isinstance(obj, list):
-            for i, item in enumerate(obj):
-                search_in(item, f"{path}[{i}]")
-        elif isinstance(obj, str) and query_lower in obj.lower():
-            matches.append({"key": path, "value": obj[:300]})
-
-    search_in(spec)
-    return {
-        "ok": True,
-        "query": query,
-        "spec_version": spec.get("version", "unknown"),
-        "matches": matches[:20],
-    }
+    import jhyy_lang_ref as langref_mod
+    return langref_mod.search(query, limit=limit)
 
 
 @mcp.tool
@@ -238,35 +212,24 @@ def jhyy_abi_info(query: str) -> dict:
     Returns:
         {ok, query, matches: [...], abi_version}
     """
-    abi_path = MCP_DIR / "abi_data.json"
-    if not abi_path.exists():
-        return {"ok": False, "error": f"abi_data.json not found: {abi_path}"}
-    with open(abi_path, encoding="utf-8") as f:
-        abi = json.load(f)
-
-    query_lower = query.lower()
-    matches = []
-
-    def search_in(obj, path=""):
-        if isinstance(obj, dict):
-            for k, v in obj.items():
-                new_path = f"{path}.{k}" if path else k
-                if query_lower in k.lower():
-                    matches.append({"key": new_path, "value": json.dumps(v, ensure_ascii=False)[:500]})
-                search_in(v, new_path)
-        elif isinstance(obj, list):
-            for i, item in enumerate(obj):
-                search_in(item, f"{path}[{i}]")
-        elif isinstance(obj, str) and query_lower in obj.lower():
-            matches.append({"key": path, "value": obj[:300]})
-
-    search_in(abi)
-    return {
-        "ok": True,
-        "query": query,
-        "abi_version": abi.get("version", "unknown"),
-        "matches": matches[:20],
-    }
+    try:
+        import jhyy_spec_doc
+        abi_md = jhyy_spec_doc.load_spec_doc(JHYY_ROOT / "docs/abis/jhyy-abi-v1.0.0.md")
+        md_result = jhyy_spec_doc.search_spec_doc(abi_md, query, limit=limit)
+        return {
+            "ok": True,
+            "query": query,
+            "abi_version": md_result["version"],
+            "matches": [
+                {"section": m["section"], "title": m["title"],
+                 "level": m["level"], "score": m["score"],
+                 "excerpt": m["excerpt"],
+                 "key": f"§ {m['section']} {m['title']}"}
+                for m in md_result["matches"]
+            ],
+        }
+    except Exception as e:
+        return {"ok": False, "query": query, "error": f"failed to load jhyy-abi-v1.0.0.md: {e}"}
 
 
 @mcp.tool
