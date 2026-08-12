@@ -1,9 +1,9 @@
 # JHYY v0.9.0 Changelog
 
-> **状态**: 🚧 wip (commit 1 ✅, commit 2.x 部分 ship)
+> **状态**: 🚧 wip (commit 1 ✅, commit 2.5-2.87 全 ship; commit 2.83-2.87 = 5 sprint batch close)
 > **承接**: v0.8 wip commit 12 ([5820793](./changelog-v0.8.0.md)) — Stage 0 closure 解锁
 > **目标**: `jhyy_0` (C 编译) 与 `jhyy_1` (jhyy 编译) 对相同 .jhyy 测试集产 **byte-equal .il** (Stage 1 closure)
-> **后续**: v1.0.0 自举启动（粗粒度 5 sprint）
+> **后续**: v2.x / v3.x OS 准备 (per `docs/plans/v2/v2.0.0-os-prep.md`)
 
 ## 进度
 
@@ -24,6 +24,11 @@
 | commit 2.15 | Task #60 真修 — parse_if body inline parse_while 嵌套 TOKEN_WHILE 分支 (`if→while→while` 模式解锁, codegen.jhyy:2198 + sema.jhyy:1191 parse error 消除) | ✅ SHIPPED (2026-08-05) |
 | commit 2.16 | AUDIT (5 struct 字段访问审计) 真修 — VariantDesc 加 `payload` 字段 + VARIANT_DESC_SIZE 16→24 (sema 写 tag 在 offset 16 = 下一项 name 字段 = heap overflow 已修) | ✅ SHIPPED (2026-08-05) |
 | commit 2.17 | C' (codegen 确定性 audit, 5 维度) — 全 by-construction deterministic, 0 真修, 3 stage1 测试 v0↔v1 byte-equal 实证 | ✅ SHIPPED (2026-08-05) |
+| commit 2.83 | Phase 2 Style Cleanup — stale W-NNN comments + mcp-jhyy doc drift | ✅ SHIPPED (2026-08-11, `9b7fdb3` 同期) |
+| commit 2.84 | Bug 1 (nested struct field LEA) 真修 (Sprint v1.1.4) | ✅ SHIPPED (2026-08-12, `817d313`) |
+| commit 2.85 | Bug 2 (3-way dispatch phi predecessor) 真修 (Sprint v1.1.5) | ✅ SHIPPED (2026-08-12, `56bea9e`) |
+| commit 2.86 | Bug 3 (sub-word → long copy) 真修 (Sprint v1.1.6) | ✅ SHIPPED (2026-08-12, `97a6c26`) |
+| commit 2.87 | Bug 4 (w/l → b/h narrow cast) 真修 (Sprint v1.1.7) + W-007/W-003/W-013 docs | ✅ SHIPPED (2026-08-12, `4449e50`) |
 
 ---
 
@@ -3234,3 +3239,123 @@ v1.0.0 tag 后 (commit `eabee0d`, 2026-08-10), commit `6f52ac7` 留下的 Phase 
 
 - `memory/project_mcp_jhyy_sprint1.md` — mcp-jhyy Sprint 1 (上一 commit)
 - 本 commit 留底: `memory/feedback_v0_phase2_style_cleanup.md` (下一 file)
+
+---
+
+## v0.9 wip commits 2.84-2.87 + docs: 4-bug 真修 batch + W-007/W-003/W-013 docs (2026-08-12)
+
+**日期**: 2026-08-12
+**承接**: v0.9 wip commit 2.83 (Phase 2 Style Cleanup) + v1.0.0 TAGGED (commit `eabee0d`, 2026-08-10)
+**范围**: 4 个 v0 codegen bug (Bug 1/2/3/4) 真修 (C-side + jhyy-side mirror) + W-007/W-003 transitive close docs + W-013 新增 docs. 用户发起 (2026-08-12): "把那几个 W00x 都修完吧"
+
+### Sprint 序列 (commit → 主题 → 范围)
+
+| commit | Sprint | 主题 | commit |
+|--------|--------|------|--------|
+| 2.84 | v1.1.4 | Bug 1: nested struct field LEA (NODE_FIELD 含 KIND_POINTER / KIND_STRUCT 不 load, 返 address) | `817d313` |
+| 2.85 | v1.1.5 | Bug 2: 3-way dispatch phi predecessor (cg_body_returns 改递归下沉走 NODE_IF / NODE_MATCH 全 arm) | `56bea9e` |
+| 2.86 | v1.1.6 | Bug 3: sub-word → long copy chain (w copy + extsw/extuw 分两段) | `97a6c26` |
+| 2.87 | v1.1.7 | Bug 4: w/l → b/h narrow cast no-op short-circuit (W-013) | `4449e50` |
+| docs | v1.1.2 | W-007 RESOLVED (transitive — extsw 分支镜像 v0.8 c7 `0453cef`) | `58667ae` |
+| docs | v1.1.3 | W-003 RESOLVED (transitive — Bug 7/7b 不再触发) | `80b5c2e` |
+
+**总 6 sprint, 5 code commits + 2 docs commits.**
+
+### Bug 1 真修 (commit 2.84) — nested struct field LEA
+
+**根因**: `cg_expr NODE_ADDR_OF` (codegen.c, ~line 879) 处理 `&expr.field` 时只覆盖 `NODE_IDENT` 直接 base, **不覆盖** `NODE_FIELD` (嵌套 struct field). 历史 v0 codegen 把 struct field 当 primitive 走 → emit `=w loadw` 错位.
+
+**触发**: `let p: *InnerT = &outer.inner_field`; `*p = ...`
+
+**修复**: `compiler/src/codegen.c` NODE_ADDR_OF 加 NODE_FIELD 分支 (~50 行):
+- KIND_POINTER base: `cg_expr(fd->expr, &base)` → find field offset → emit `addr = add base, offset`
+- KIND_STRUCT base: `cg_expr(fd->expr, &base)` (返回 stack slot) → similar offset add
+
+**镜像**: `compiler/src0/codegen.jhyy` NODE_ADDR_OF 同步加 (~50 行, 用 `cg_find_field_offset` helper)
+
+### Bug 2 真修 (commit 2.85) — 3-way dispatch phi predecessor
+
+**根因**: `cg_body_returns` (codegen.c) 旧实现是 `body->kind == NODE_RETURN` 纯语法检查, **不递归** 看 NODE_IF (then + else 双路) 或 NODE_MATCH (全 arm) 是否终止. 当函数体是 `if c { return A } else { return B }` 时 cg_body_returns 误判 0 → epilogue 仍 emit phi predecessor → QBE 报 "undefined predecessor".
+
+**触发**: 任何 `if c { return A } else { return B }` 形态 + 大量 phi 入参
+
+**修复**: `compiler/src/codegen.c` 加 `body_terminates_recursive()` 函数 + `block_last_is_term()` helper (~40 行):
+- NODE_IF: `then_t && else_t` (else 缺省视为终止)
+- NODE_MATCH: 检查全 arm
+- NODE_BLOCK: 看最后一条 stmt
+- 递归下沉
+
+**镜像**: `compiler/src0/codegen.jhyy` cg_body_returns 同步 (~20 行)
+
+### Bug 3 真修 (commit 2.86) — sub-word → long copy chain
+
+**根因**: `cg_convert_arg` (codegen.c) 在 src=u8/u16/i8/i16/bool 且 dst=i64/u64 时直接 emit `=l copy` (QBE reject `w→l` copy 无 extsw/extuw). loadub/loadsb 之后是 w class, 直 copy 到 l class 报错.
+
+**触发**: `let x: i64 = s as i64` (s: u8) → `(s as i64 + 0) as *u8` deref pattern
+
+**修复**: `compiler/src/codegen.c` cg_convert_arg (~15 行):
+- sub-word → word 不变 (loadub/loadsb 已扩展, just copy)
+- sub-word → long 分两段: `=w copy` + `=l extsw` (有符号 I8/I16) 或 `extuw` (无符号 U8/U16/Bool)
+
+**镜像**: `compiler/src0/codegen.jhyy` cg_convert_arg 同步 (~30 行, jhyy 端 `qbe_type_of(u8)` returns 'w' (v0.6 workaround), 走 prim check 判断)
+
+### Bug 4 真修 (commit 2.87) — w/l → b/h narrow cast no-op (W-013 新增)
+
+**根因**: `cg_expr NODE_CAST` (codegen.c:786) 对 src ∈ {w,l} × dst ∈ {b,h} 无对应 QBE conv (QBE 无 b/h temporary type, sub-word 仅在 load/store 操作数). Fall-through 到 `if (!conv) { IRVal v={0}; return; }` (codegen.c:869, 自 v0.5.0 `f4037c0` 起), emit sentinel `%t0` (kind=IRVAL_TEMP, id=0). 后续 `storeb %t0, addr` 被 QBE reject.
+
+**触发**: `*p_u8 = 65 as u8` / `*p_u8 = somevar as u8` (let-binding chain) / 任意 `*T_ptr = expr as u8/i8/u16/i16/bool`
+
+**修复**: `compiler/src/codegen.c` NODE_CAST (1-line short-circuit, codegen.c:869 前加):
+```c
+if (!conv && (src_qt == 'w' || src_qt == 'l') && (dst_qt == 'b' || dst_qt == 'h')) {
+    *out = (inner); return;
+}
+```
+**语义**: QBE 不允许 b/h 临时, narrowing 是 IR 层 no-op — storeb/loadub 隐式截断即可.
+
+**jhyy-side 一直 correct** (`compiler/src0/codegen.jhyy:697-699`): `cg_convert_arg` 的 `if conv == 0 return arg` 自然 fallback 把 w-class temp 给 storeb consume. jhyy_v1.exe.exe (`sha ba94df93...`) **不需 rebuild**.
+
+**W-013 新增** 入 `docs/internal/workarounds.md` 索引 + 详细 section (根因 + 真修 + 验证表 + superseder note).
+
+### W-007 RESOLVED (commit `58667ae`) — transitive close
+
+`fn() -> i64 { return X as i64 }` emit `w copy` (因 v0 缺 extsw 分支) → QBE "invalid type for jump argument" 错.
+真因: v0.8 commit 7 (`0453cef`) 在 cg_convert_arg 加 `src=W → dst=L` extsw 分支. jhyy_v1.exe.exe (`sha ba94df93...`) 已含镜像. 5×5 PASS 验证 (4 BAD variants) — 见 workarounds.md § W-007 RESOLVED.
+
+### W-003 RESOLVED (commit `80b5c2e`) — transitive close
+
+jhyy_v1 `let _ = fncall(...)` 顶层 / 嵌套 segfault → 走 direct call 绕开. 真因: W-005 #2 family (IRVal struct pass-by-value stale pointer) — Sprint 4.21-4.25 chain 已 ship. 89 嵌套 `let _X = fncall()` 模式在 src0/ 残留, 但 compile 干净 (proof Bug 7b eliminated). 6 minimal repro 全 5×5 PASS — 见 workarounds.md § W-003 RESOLVED.
+
+### 完成定义 (全达成 ✅)
+
+| 标准 | 状态 | 证据 |
+|------|------|------|
+| 4 个 v0 codegen bug 全部真修 (C-side + jhyy-side mirror) | ✅ | commit 2.84-2.87 |
+| regress.py (C-side) 持平 baseline 50/50 | ✅ | 4 个 fix 后各测一次, 全 50/50 |
+| regress_v1.py (jhyy_v1) 持平 baseline 50/50 | ✅ | 4 个 fix 后各测一次, 全 50/50 |
+| Stage 1 byte-equal 7/7 持平 | ✅ | 4 个 fix 不动 v0 emit pattern |
+| Selfhost Stage 2 N=3 byte-equal (`2445e97d...`) 持平 | ✅ | jhyy_v1.exe.exe 不 rebuild, fix 仅 C-side |
+| W-007 / W-003 标 RESOLVED (transitive) 入 docs | ✅ | workarounds.md § INDEX + 详细 section |
+| W-013 (Bug 4) 新增入 docs | ✅ | workarounds.md § INDEX + 详细 section |
+| Minimal repro 5×5 PASS (3 case × 5 runs) | ✅ | `_bug4_test_u8` / `_bug4_test_i8` / `_bug4_test_let_u8` 全 5/5 |
+| canonical IL 一致 (C-side vs jhyy_v1) | ✅ | Bug 4 fix 镜像 jhyy_v1 emit pattern |
+
+### 关键不变量 (byte-equal 保护)
+
+- **Bug 1 / 2 / 3 修复**: C-side + jhyy-side 双源 emit 模式完全等价 → Stage 2 N=3 byte-equal 持平 `2445e97d...`
+- **Bug 4 修复**: jhyy-side 一直 correct (`if conv==0 return arg` fallback), C-side fix 镜像同 emit pattern → canonical IL 一致
+- **W-013 sentinel 守卫**: 1-line short-circuit 只在 `!conv && (src_qt ∈ {w,l}) && (dst_qt ∈ {b,h})` 触发 — 这 4 种组合之前必然 emit sentinel, 不可能产生正确 IL, 所以守卫**不改正确程序输出**
+
+### 留给后续
+
+- `_v1` 后缀 107 处残留清理 (跨文件改名, 风险中; 留专 sprint)
+- v2.x QBE 完整重写 (per `docs/plans/v2/v2.0.0-os-prep.md`)
+- v3.x 语言扩展 (per `docs/plans/v3.x-language-expansion.md`)
+- mcp-jhyy Tier 2 tools (function-level IL diff / minimal repro)
+- 2 个未 commit 工作树改动 (jhyy.exe 重 build + 2 个 mcp-jhyy env fix) — 后续 sprint 处理
+
+### 关键 memory
+
+- `memory/project_sprint_v1_1_7_bug4_narrow_cast.md` — 本 batch 最后 sprint (Bug 4 W-013) 详细记录
+- `memory/project_v1_0_0_closure.md` — v1.0.0 TAGGED (2026-08-10) 闭环记录
+- `memory/project_sprint4_6_irval_layout_fix.md` — W-005 IRVal struct layout 真修 (Sprint 4.6, Bug 1/2/3 真修基础)
