@@ -841,15 +841,15 @@ JHYY 字符串字面量在 QBE data 段中以 UTF-8 + NUL 终止符存储。
 
 c-typedef 草案见 [`v3.x-capability-spec.md`](../../plans/roadmap/v3.x-capability-spec.md) § 内存布局(初步 8B = cnode_idx(u32) + depth(u8) + rights(u16) + 1B padding;phantom field 0 字节)。
 
-**wire-format c-typedef 全字段**(per [`v0.0.4-debug-abi.md § 7`](../../../../../jhyy_OS/docs/v0.0.4-debug-abi.md),含 DAG 扩展,sprint 3g.5 phantom 实施时定最终大小):
+**wire-format c-typedef 全字段**(per [`v0.0.4-debug-abi.md § 7`](../../../../../jhyy_OS/docs/v0.0.4-debug-abi.md) 🔒 Locked 2026-08-12,含 DAG 扩展):
 
 ```c
 typedef struct {
     SourceLoc  constructed_at;      // 24  @0   (align 8)
     uint32_t   constructed_by;      // 4   @24  (FnId)
     uint32_t   _pad_chain;          // 4   @28  (u64 alignment for chain ptrs)
-    uint64_t   grant_chain_off;     // 8   @32
-    uint64_t   revoke_chain_off;    // 8   @40
+    uint64_t   grant_chain_off;     // 8   @32  (jhyy 侧 *ProvenanceInfo,per D40;NULL = root)
+    uint64_t   revoke_chain_off;    // 8   @40  (同上)
     uint32_t   current_holder;      // 4   @48  (ProcessId)
     uint16_t   rights;              // 2   @52
     uint16_t   _pad_ts;             // 2   @54
@@ -859,7 +859,7 @@ typedef struct {
     uint8_t    parents_len;         // 1   @128
     uint8_t    children_len;        // 1   @129
     uint16_t   _pad_end;            // 2   @130
-} ProvenanceInfo;                  // sizeof = 136 字节(8-aligned;初步估算)
+} ProvenanceInfo;                  // sizeof = 136 字节, alignof = 8(D40 后 jhyy 侧同为 136B)
 ```
 
 ### 13.3 IPC msg header(含 cap-offset 表,D16 闭环)
@@ -873,14 +873,22 @@ typedef struct {
 
 `n_caps = 0` 时,`cap_offsets` 字段省略(只剩 8B header)。`msg_tag` 决定 payload 协议类型。**Cap<T> 在 IPC 中的 cnode_idx 改写** 由 cap-offset 表驱动(per `v0.0.4-debug-abi.md` § 7 + `v0.0.1-capability.md` § 1 + D16)。
 
-### 13.4 Debug ABI(`v0.0.4-debug-abi.md` 镜像)
+### 13.4 Debug ABI(`v0.0.4-debug-abi.md` 镜像,🔒 2026-08-12 锁)
 
-OS 端 debug infra 的 c-typedef + wire format,落地在本 §:
+OS 端 debug infra 的 c-typedef + wire format,落地在本 §。**尺寸全部 align 8,已定案**(per D41):
 
-- § 13.4.1 `DebugEvent`(54B header,c-typedef + nested payload 约定)— 见 `v0.0.4-debug-abi.md` § 2 + § 3 + § 4
-- § 13.4.2 `ErrChain`(64B,c-typedef + SourceLoc 内嵌)— 见 `v0.0.4-debug-abi.md` § 5
-- § 13.4.3 `KernelState` enum + `StateTransition`(48B)+ `KernelStateHistory`(ring buffer N=256)— 见 `v0.0.4-debug-abi.md` § 6
-- § 13.4.4 `ProvenanceInfo` DAG 扩展(Confidence 三级标记 + parents/children K=8)— 见 `v0.0.4-debug-abi.md` § 4 + § 7(**同 § 13.2 c-typedef,镜像对齐**)
+| # | 类型 | 尺寸 | 来源 |
+|---|------|------|------|
+| § 13.4.1 | `DebugEvent`(定长 header + nested payload 约定)| **56B** | `v0.0.4-debug-abi.md` § 2 + § 3 + § 4 |
+| § 13.4.2 | `ErrChain`(含 SourceLoc 24B 内嵌)| **64B** | 同 § 5 |
+| § 13.4.3 | `StateTransition` / `KernelStateHistory`(ring buffer N=256)| **48B** / **12304B** | 同 § 6 |
+| § 13.4.4 | `ProvenanceInfo`(Confidence 三级标记 + DAG parents/children K=8)| **136B** | 同 § 4 + § 7(**同 § 13.2 c-typedef,镜像对齐**)|
+
+**布局总原则**(per D41 R1/R2,适用于本 § 全部 wire-format):jhyy **无 `packed` / `repr(...)`**,紧凑布局不可表达 → 所有跨边界 struct 一律**自然对齐**,字段按对齐降序排列,padding 必须在 c-typedef 里显式写成 `_pad*` 字段(不允许隐式空洞,否则两侧尺寸对不上)。
+
+**jhyy 侧类型对应**(per D40):wire-format 有显式 `*_len` 字段 → jhyy 侧用 `[*]T` 切片(16B,per § 2.3);wire-format 是 NULL 结尾单向链 → jhyy 侧用 `*T` 裸指针。故 `ProvenanceInfo.grant_chain`/`revoke_chain` 与 `ErrChain.prev` 用 `*T`,`ErrChain.trace`/`context` 用 `[*]T`。
+
+**FFI 提醒**(per D41 R4):本 § 全部 struct 均为**内存布局契约**(指针传递),不得按值跨 FFI 边界 —— 见 § 7.4。M3 集成 `SysError.chain` 时须以指针传 `ErrChain`。
 
 `v1.0.0 § 11 已知局限` 锁的影响:§ 13.4 新增内容在 debug build 启用,release build strip(per `v0.0.1-capability.md § 5.2` "side table 可 strip")— **不污染 v1.0.0 locked baseline 的 runtime layout**。
 
@@ -891,7 +899,7 @@ OS 端 debug infra 的 c-typedef + wire format,落地在本 §:
 | § 13.1 多 target 表 | v2.0(v2.0.0-os-prep § 5.1 #5)| M1 启动可达 | multi-target dispatcher test |
 | § 13.2 Cap<T> wire | v3.1 sprint 3g.5(D23/D27)| M4 capability | byte-equal 跟 OS 端 cap 表 |
 | § 13.3 IPC header | v3.1 sprint 3g(D16)| M5b IPC | cap-offset 双路径 emit(fast + metadata 段)|
-| § 13.4 Debug ABI | v3.1 sprint 3g(Q-Compiler-007)| M5b IPC | kernel introspection syscall 落地见 `v0.0.5-syscall-abi-update.md`(待 OS 起)|
+| § 13.4 Debug ABI | v3.1 sprint 3g(Q-Compiler-007 ✅ 2026-08-12 闭环 / D41)| M5b IPC | spec 🔒 已锁,尺寸已定案;kernel introspection syscall 落地见 `v0.0.5-syscall-abi-update.md`(阻塞已解除,待 OS 起)|
 
 ---
 
