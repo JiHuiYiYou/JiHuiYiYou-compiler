@@ -24,27 +24,9 @@ JHYY_ROOT = Path("C:/Users/liuzhen/Desktop/coding/JiHuiYiYou")
 TEST_DIR = JHYY_ROOT / "compiler/tests/examples"
 
 
-NTSTATUS_NAMES = {
-    0xC0000005: "ACCESS_VIOLATION",
-    0xC0000006: "INVALID_HANDLE",
-    0xC0000008: "INVALID_HANDLE",
-    0xC000001D: "ILLEGAL_INSTRUCTION",
-    0xC000008C: "ARRAY_BOUNDS_EXCEEDED",
-    0xC0000094: "INTEGER_DIVIDE_BY_ZERO",
-    0xC0000096: "PRIVILEGED_INSTRUCTION",
-    0xC00000FD: "STACK_OVERFLOW",
-    0xC0000374: "HEAP_CORRUPTION",
-    0xC0000409: "STACK_BUFFER_OVERRUN",
-    0xC000041D: "STATUS_FATAL_USER_CALLBACK_EXCEPTION",
-}
-
-
-def ntstatus_name(code):
-    if code is None or code < 0:
-        return None
-    if code >= 0xC0000000:
-        return NTSTATUS_NAMES.get(code, f"NTSTATUS_0x{code:08X}")
-    return None
+# Sprint mcp-2: NTSTATUS table 抽到 jhyy_ntstatus.py 共享给 jhyy_runner.compile_and_run.
+# Re-export here 保 back-compat (test_regress.py / regress.py shim 都 import 此模块).
+from jhyy_ntstatus import NTSTATUS_NAMES, ntstatus_name  # noqa: E402,F401
 
 
 def _resolve_binary(binary: str) -> str:

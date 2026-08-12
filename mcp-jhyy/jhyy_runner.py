@@ -115,6 +115,30 @@ def _run_cmd(cmd: list, timeout: int = 30, cwd: Optional[str] = None) -> dict:
         }
 
 
+def _safe_remove(path: str, retries: int = 3, delay_ms: int = 500) -> bool:
+    """Remove a file, retrying on Windows PermissionError (file lock).
+
+    On Windows, even after subprocess exits, the OS file handle can stay open
+    for a few hundred ms. ld.exe open-write to the same path will then fail
+    with PermissionError. We sleep + retry up to N times.
+
+    Returns True if removed, False if still locked (caller can decide to
+    continue or abort).
+    """
+    if not os.path.exists(path):
+        return True
+    for attempt in range(retries):
+        try:
+            os.remove(path)
+            return True
+        except PermissionError:
+            time.sleep(delay_ms / 1000.0)
+        except OSError:
+            # File in use or other transient error
+            time.sleep(delay_ms / 1000.0)
+    return False
+
+
 def compile_file(file: str, output: Optional[str] = None, extra_inputs: list = None) -> dict: # type: ignore
     """编译 .jhyy 文件为可执行程序。"""
     src = _resolve_path(file)
@@ -178,10 +202,18 @@ def compile_and_run(file: str, extra_inputs: list = None, timeout: int = 10) -> 
             "stderr": cresult["stderr"],
         }
     rresult = run_exe(output, timeout=timeout)
+    # Sprint mcp-2 (D): NTSTATUS gate. fib30.jhyy exit 832040 is a normal program
+    # exit, NOT a Windows crash (NTSTATUS codes live in 0xC0000000-0xCFFFFFFF).
+    # Previously `ok = rresult["ok"]` made any non-zero exit look like a failure.
+    # Now: crash iff exit_code is a known NTSTATUS. See jhyy_ntstatus.py.
+    from jhyy_ntstatus import ntstatus_name
+    ntstatus = ntstatus_name(rresult["exit_code"])
+    ok = rresult["ok"] or ntstatus is None
     return {
-        "ok": rresult["ok"],
+        "ok": ok,
         "stage": "run",
         "exit_code": rresult["exit_code"],
+        "ntstatus": ntstatus,  # None for normal exit, "ACCESS_VIOLATION" for crash
         "stdout": rresult["stdout"],
         "stderr": rresult["stderr"],
         "compile_stderr": cresult["stderr"],
@@ -472,6 +504,11 @@ def selfhost_check(src: str = "compiler/src0/main.jhyy", auto_rebuild: bool = Fa
                                f"Run with auto_rebuild=True, or first build it manually.",
                 "duration_sec": round(time.time() - start, 2),
             }
+        # Sprint mcp-2 (A): pre-stage cleanup. Previous selfhost_check run may have
+        # left a stale .exe with Windows file lock held briefly after subprocess exit.
+        # ld.exe open-write then fails with PermissionError. Remove + retry on lock.
+        _safe_remove(output_base + ".exe")
+        _safe_remove(output_base + ".il")
         stage_start = time.time()
         # compile src → output_base (jhyy.exe adds .il suffix automatically per memory)
         cmd = [exe_path, "compile", src_abs, "-o", output_base]
