@@ -712,6 +712,12 @@ static Node *prefix_bool(Parser *p, Token token) {
     return ast_new_bool(p->arena, token.loc, val);
 }
 
+/* v1.3.1: null keyword → NODE_NULL (type filled by sema from context) */
+static Node *prefix_null(Parser *p, Token token) {
+    (void)token;
+    return ast_new_null(p->arena, token.loc);
+}
+
 static Node *prefix_ident(Parser *p, Token token) {
     const char *name = tok_name(p, token);
     Sym *sym = symtab_lookup(p->current_scope, name);
@@ -986,6 +992,7 @@ static void init_rules(Parser *p) {
     register_rule(p, TOKEN_STRING, PREC_PRIMARY, prefix_string, NULL);
     register_rule(p, TOKEN_CHAR,   PREC_PRIMARY, prefix_char,   NULL);
     register_rule(p, TOKEN_BOOL,   PREC_PRIMARY, prefix_bool,   NULL);
+    register_rule(p, TOKEN_NULL,   PREC_PRIMARY, prefix_null,   NULL);  /* v1.3.1: null → NODE_NULL (sema fills type) */
     register_rule(p, TOKEN_IDENT,  PREC_PRIMARY, prefix_ident,  NULL);
     register_rule(p, TOKEN_MINUS,  PREC_TERM,    prefix_unary,  infix_binary);
     register_rule(p, TOKEN_BANG,   PREC_UNARY,   prefix_unary,  NULL);

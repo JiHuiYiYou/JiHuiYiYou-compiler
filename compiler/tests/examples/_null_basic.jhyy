@@ -1,0 +1,10 @@
+// null_basic.jhyy — v1.3.1 `null` keyword basic test (NODE_NULL NodeKind)
+// null auto-coerces to declared pointer type via sema context-fill.
+
+fn main_jhyy() -> i32 {
+    let p: *u8 = null;     // NODE_NULL fills *u8 from decl_type
+    if p == null {         // binary context-fill: null gets *u8 from other side
+        return 42;         // EXPECT: 42
+    }
+    return 1;              // not reached
+}

@@ -1,0 +1,10 @@
+// null_cast.jhyy — v1.3.1 `null as *u8` cast works
+// Tests NODE_CAST context-fill: null fills from cast target type.
+
+fn main_jhyy() -> i32 {
+    let p = null as *u8;   // cast target fills null type
+    if p == null {
+        return 0;          // EXPECT: 0
+    }
+    return 1;              // not reached
+}

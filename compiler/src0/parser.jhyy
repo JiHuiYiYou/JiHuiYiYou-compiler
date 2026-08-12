@@ -375,6 +375,11 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         }
         left = ast_new_bool((*p).arena, loc_lf, loc_ll, loc_lc, val);
     }
+    // v1.3.1: null keyword → NODE_NULL (sema 上下文填充类型)
+    else if t.kind == TOKEN_NULL() {
+        parser_advance(p, &t);
+        left = ast_new_null((*p).arena, loc_lf, loc_ll, loc_lc);
+    }
     else if t.kind == TOKEN_IDENT() {
         parser_advance(p, &t);
         let name = parser_tok_name(p, &t);

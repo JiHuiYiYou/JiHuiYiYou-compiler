@@ -301,6 +301,15 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
         ir_emit_copy(cg->ir, v, d->value);
         *out = (v); return;
     }
+    /* v1.3.1: null → 0 of expected pointer width.
+       Sema must have set n->type to KIND_POINTER via context-fill;
+       guard with 'w' fallback if somehow unfilled (defensive). */
+    case NODE_NULL: {
+        char qt = (n->type && n->type->kind == KIND_POINTER) ? 'l' : 'w';
+        IRVal v = ir_new_tmp(cg->ir, qt);
+        ir_emit_copy(cg->ir, v, 0);
+        *out = (v); return;
+    }
     case NODE_BOOL: {
         NodeBool *d = node_bool_data(n);
         IRVal v = ir_new_tmp(cg->ir, 'w');

@@ -33,6 +33,7 @@ static const Keyword keywords[] = {
     {"const",   TOKEN_CONST},
     {"true",    TOKEN_BOOL},
     {"false",   TOKEN_BOOL},
+    {"null",    TOKEN_NULL},
 };
 #define NKEYWORDS (sizeof(keywords) / sizeof(keywords[0]))
 
@@ -464,6 +465,7 @@ const char *token_kind_name(TokenKind kind) {
     case TOKEN_FATARROW:  return "=>";
     case TOKEN_EOF:       return "EOF";
     case TOKEN_ERROR:     return "ERROR";
+    case TOKEN_NULL:      return "null";
     default:              return "?";
     }
 }

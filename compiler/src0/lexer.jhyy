@@ -107,6 +107,8 @@ fn TOKEN_FATARROW()    -> i32 { return 66 as i32; }   /* => */
 
 fn TOKEN_EOF()         -> i32 { return 67 as i32; }
 fn TOKEN_ERROR()       -> i32 { return 68 as i32; }
+// v1.3.1: null keyword (sugar for 0 in pointer context)
+fn TOKEN_NULL()        -> i32 { return 69 as i32; }
 
 // ════════════════════════════════════════════════════
 // Token + Lexer 结构（平铺字段，无 nested struct）
@@ -161,6 +163,7 @@ fn lookup_keyword(name: *u8, len: i64) -> i32 {
         if strncmp(name, "true" as *u8, 4 as i64) == 0 as i32 { return TOKEN_BOOL(); }
         if strncmp(name, "type" as *u8, 4 as i64) == 0 as i32 { return TOKEN_TYPE(); }
         if strncmp(name, "enum" as *u8, 4 as i64) == 0 as i32 { return TOKEN_ENUM(); }
+        if strncmp(name, "null" as *u8, 4 as i64) == 0 as i32 { return TOKEN_NULL(); }
     }
     if len == 5 as i64 {
         if strncmp(name, "while" as *u8, 5 as i64) == 0 as i32 { return TOKEN_WHILE(); }
@@ -846,5 +849,6 @@ fn token_kind_name(kind: i32) -> *u8 {
     if kind == TOKEN_FATARROW() { return "=>" as *u8; }
     if kind == TOKEN_EOF() { return "EOF" as *u8; }
     if kind == TOKEN_ERROR() { return "ERROR" as *u8; }
+    if kind == TOKEN_NULL() { return "null" as *u8; }
     return "?" as *u8;
 }

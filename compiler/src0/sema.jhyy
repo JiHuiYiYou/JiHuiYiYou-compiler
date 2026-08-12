@@ -457,6 +457,11 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         (*n).type_ptr = t as *u8;
         return t;
     }
+    // v1.3.1: null literal — type 由 caller 上下文填充 (sentinel NULL here)
+    if (*n).kind == NODE_NULL() {
+        (*n).type_ptr = 0 as *u8;
+        return 0 as *Type;
+    }
 
     // ── identifier ──
     if (*n).kind == NODE_IDENT() {
@@ -551,8 +556,24 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     // ── binary ──
     if (*n).kind == NODE_BINARY() {
         let d = node_binary_data(n);
-        let lt = infer_type(ctx, ta, (*d).left as *Node);
-        let rt = infer_type(ctx, ta, (*d).right as *Node);
+        let mut lt: *Type = infer_type(ctx, ta, (*d).left as *Node);
+        let mut rt: *Type = infer_type(ctx, ta, (*d).right as *Node);
+        // v1.3.1: null fills other-operand's pointer type (e.g. `if p == null`)
+        if (*((*d).left as *Node)).kind == NODE_NULL() {
+            if rt != (0 as *Type) {
+                if (*rt).kind == KIND_POINTER() {
+                    (*((*d).left as *Node)).type_ptr = rt as *u8;
+                    lt = rt;
+                }
+            }
+        } else if (*((*d).right as *Node)).kind == NODE_NULL() {
+            if lt != (0 as *Type) {
+                if (*lt).kind == KIND_POINTER() {
+                    (*((*d).right as *Node)).type_ptr = lt as *u8;
+                    rt = lt;
+                }
+            }
+        }
 
         let op = (*d).op;
         if op == TOKEN_PLUS() || op == TOKEN_MINUS() || op == TOKEN_STAR() ||
@@ -586,6 +607,15 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     // ── cast ──
     if (*n).kind == NODE_CAST() {
         let d = node_cast_data(n);
+        // v1.3.1: null cast fills target type (e.g. `null as *u8`)
+        if (*((*d).expr as *Node)).kind == NODE_NULL() {
+            if (*d).target_type != (0 as *u8) {
+                let to = resolve_type_node(ctx, ta, (*d).target_type as *Node);
+                (*((*d).expr as *Node)).type_ptr = to as *u8;
+                (*n).type_ptr = to as *u8;
+                return to;
+            }
+        }
         let from = infer_type(ctx, ta, (*d).expr as *Node);
         if (*d).target_type != (0 as *u8) {
             let to = resolve_type_node(ctx, ta, (*d).target_type as *Node);
@@ -1026,7 +1056,24 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                 }
             }
         }
-        let init_type = infer_type(ctx, ta, (*d).init as *Node);
+        let mut init_type: *Type = infer_type(ctx, ta, (*d).init as *Node);
+        // v1.3.1: null auto-coerces to declared pointer type; else error
+        if (*d).init != (0 as *u8) {
+            if (*((*d).init as *Node)).kind == NODE_NULL() {
+                if decl_type != (0 as *Type) {
+                    if (*decl_type).kind == KIND_POINTER() {
+                        (*((*d).init as *Node)).type_ptr = decl_type as *u8;
+                        init_type = decl_type;
+                    } else {
+                        let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                                "cannot assign `null` to non-pointer type" as *u8);
+                    }
+                } else {
+                    let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                            "cannot infer type of `null` (declare as *T, e.g. `let p: *u8 = null;`)" as *u8);
+                }
+            }
+        }
         if decl_type == (0 as *Type) {
             decl_type = init_type;
         }
@@ -1119,8 +1166,26 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let dr = node_return_data(n);
         let mut expr_type: *Type = type_void(ta);
         if (*dr).expr != (0 as *u8) {
-            expr_type = infer_type(ctx, ta, (*dr).expr as *Node);
-            (*n).type_ptr = expr_type as *u8;
+            // v1.3.1: null fills function's return pointer type
+            if (*((*dr).expr as *Node)).kind == NODE_NULL() {
+                let ret_t = (*ctx).current_ret_type as *Type;
+                if ret_t != (0 as *Type) {
+                    if (*ret_t).kind == KIND_POINTER() {
+                        (*((*dr).expr as *Node)).type_ptr = ret_t as *u8;
+                        expr_type = ret_t;
+                        (*n).type_ptr = expr_type as *u8;
+                    } else {
+                        expr_type = infer_type(ctx, ta, (*dr).expr as *Node);
+                        (*n).type_ptr = expr_type as *u8;
+                    }
+                } else {
+                    expr_type = infer_type(ctx, ta, (*dr).expr as *Node);
+                    (*n).type_ptr = expr_type as *u8;
+                }
+            } else {
+                expr_type = infer_type(ctx, ta, (*dr).expr as *Node);
+                (*n).type_ptr = expr_type as *u8;
+            }
         } else {
             let v = type_void(ta);
             (*n).type_ptr = v as *u8;

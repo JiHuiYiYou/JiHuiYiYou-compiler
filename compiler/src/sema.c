@@ -218,6 +218,13 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         n->type = type_primitive(ctx->arena, PRIM_BOOL);
         return n->type;
     }
+    /* v1.3.1: null literal — type is context-dependent (filled by NODE_LET /
+       NODE_BINARY / NODE_RETURN / NODE_CAST context-fill rules below).
+       Sentinel NULL here; codegen guarded with KIND_POINTER check. */
+    case NODE_NULL: {
+        n->type = NULL;
+        return n->type;
+    }
 
     /* ── identifier ── */
     case NODE_IDENT: {
@@ -282,6 +289,15 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         Type *lt = infer_type(ctx, d->left);
         Type *rt = infer_type(ctx, d->right);
 
+        /* v1.3.1: null fills other-operand's pointer type (e.g. `if p == null`). */
+        if (d->left->kind == NODE_NULL && rt && rt->kind == KIND_POINTER) {
+            d->left->type = rt;
+            lt = rt;
+        } else if (d->right->kind == NODE_NULL && lt && lt->kind == KIND_POINTER) {
+            d->right->type = lt;
+            rt = lt;
+        }
+
         switch (d->op) {
         case TOKEN_PLUS:
         case TOKEN_MINUS:
@@ -317,6 +333,13 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
     /* ── cast: expr as Type ── */
     case NODE_CAST: {
         NodeCast *d = node_cast_data(n);
+        /* v1.3.1: null cast fills target type (e.g. `null as *u8`). */
+        if (d->expr->kind == NODE_NULL && d->target_type) {
+            Type *to = resolve_type_node(ctx, d->target_type);
+            d->expr->type = to;
+            n->type = to;
+            return n->type;
+        }
         Type *from = infer_type(ctx, d->expr);
         if (d->target_type) {
             Type *to = resolve_type_node(ctx, d->target_type);
@@ -615,6 +638,20 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
             d->init->type = decl_type;
         }
         Type *init_type = infer_type(ctx, d->init);
+        /* v1.3.1: null auto-coerces to declared pointer type; else error. */
+        if (d->init && d->init->kind == NODE_NULL) {
+            if (decl_type && decl_type->kind == KIND_POINTER) {
+                d->init->type = decl_type;
+                init_type = decl_type;
+            } else if (decl_type) {
+                sema_error(ctx, n->loc,
+                           "cannot assign `null` to non-pointer type %s (declare as *T)",
+                           type_to_string(decl_type));
+            } else {
+                sema_error(ctx, n->loc,
+                           "cannot infer type of `null` (declare as *T, e.g. `let p: *u8 = null;`)");
+            }
+        }
         if (!decl_type) decl_type = init_type;
 
         if (d->type_annot) {
@@ -723,8 +760,16 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         NodeReturn *dr = node_return_data(n);
         Type *expr_type = type_void();
         if (dr->expr) {
-            expr_type = infer_type(ctx, dr->expr);
-            n->type = expr_type;  /* propagate expr type for block inference */
+            /* v1.3.1: null fills function's return pointer type. */
+            if (dr->expr->kind == NODE_NULL &&
+                ctx->current_ret_type && ctx->current_ret_type->kind == KIND_POINTER) {
+                dr->expr->type = ctx->current_ret_type;
+                expr_type = ctx->current_ret_type;
+                n->type = expr_type;
+            } else {
+                expr_type = infer_type(ctx, dr->expr);
+                n->type = expr_type;  /* propagate expr type for block inference */
+            }
         } else {
             n->type = type_void();
         }

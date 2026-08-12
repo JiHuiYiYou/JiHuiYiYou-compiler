@@ -72,6 +72,7 @@ typedef enum {
 
     /* top level */
     NODE_MODULE,         /* root: list of declarations */
+    NODE_NULL,           /* v1.3.1: null literal (source-distinguishable pointer-null) */
 } NodeKind;
 
 /* ── Node ── */
@@ -330,6 +331,7 @@ Node *ast_new_let(struct Arena *a, SourceLoc loc, bool is_mut, Sym *sym, Node *t
 Node *ast_new_assign(struct Arena *a, SourceLoc loc, Node *target, Node *value);
 Node *ast_new_return(struct Arena *a, SourceLoc loc, Node *expr);
 Node *ast_new_break(struct Arena *a, SourceLoc loc);
+Node *ast_new_null(struct Arena *a, SourceLoc loc);  /* v1.3.1 */
 Node *ast_new_continue(struct Arena *a, SourceLoc loc);
 Node *ast_new_expr_stmt(struct Arena *a, SourceLoc loc, Node *expr);
 Node *ast_new_match(struct Arena *a, SourceLoc loc, Node *expr, Node **arms, size_t narms);

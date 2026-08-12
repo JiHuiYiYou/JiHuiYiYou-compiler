@@ -119,6 +119,8 @@ fn NODE_MODULE()         -> i32 { return 48 as i32; }
 // v0.9 wip commit 2.20 / Task #52 + #42 合并: NODE_CONST_DECL 漏定义补
 //   跟 C 端 ast.h:NodeKind 枚举对齐 (const decl = 49, 在 NODE_MODULE 之后)
 fn NODE_CONST_DECL()     -> i32 { return 49 as i32; }
+// v1.3.1: null literal (source-distinguishable pointer-null), 在 NODE_CONST_DECL 之后
+fn NODE_NULL()           -> i32 { return 50 as i32; }
 
 fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_INT()            { return "INT" as *u8; }
@@ -170,6 +172,7 @@ fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_EXTERN_DECL()    { return "EXTERN_DECL" as *u8; }
     if kind == NODE_IMPORT_DECL()    { return "IMPORT_DECL" as *u8; }
     if kind == NODE_MODULE()        { return "MODULE" as *u8; }
+    if kind == NODE_NULL()          { return "NULL" as *u8; }
     return "?" as *u8;
 }
 
@@ -997,6 +1000,14 @@ fn node_return_data(n: *Node) -> *NodeReturn {
 fn ast_new_break(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32) -> *Node {
     let buf = arena_alloc(a, NODE_SIZE() + NODE_BREAK_SIZE());
     let n = ast_init_node(buf, NODE_BREAK(), loc_filename, loc_line, loc_col);
+    return n;
+}
+
+// NODE_NULL (v1.3.1)：仅 header，无 variant data，无 accessor (类型由 sema 上下文填充)
+fn NODE_NULL_SIZE() -> i64 { return 0 as i64; }
+fn ast_new_null(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_NULL_SIZE());
+    let n = ast_init_node(buf, NODE_NULL(), loc_filename, loc_line, loc_col);
     return n;
 }
 

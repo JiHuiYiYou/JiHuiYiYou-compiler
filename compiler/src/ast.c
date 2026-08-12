@@ -297,6 +297,11 @@ Node *ast_new_break(Arena *a, SourceLoc loc) {
     return new_node(a, NODE_BREAK, loc, 0);
 }
 
+/* v1.3.1: null literal — no variant data (type set by sema from context) */
+Node *ast_new_null(Arena *a, SourceLoc loc) {
+    return new_node(a, NODE_NULL, loc, 0);
+}
+
 Node *ast_new_continue(Arena *a, SourceLoc loc) {
     return new_node(a, NODE_CONTINUE, loc, 0);
 }
@@ -505,6 +510,7 @@ const char *node_kind_name(NodeKind kind) {
     case NODE_IMPORT_DECL:   return "import_decl";
     case NODE_CONST_DECL:    return "const_decl";
     case NODE_MODULE:        return "module";
+    case NODE_NULL:          return "null";  /* v1.3.1 */
     default:                 return "?";
     }
 }
@@ -767,6 +773,7 @@ static void dump_node(Node *n, int depth) {
         }
         case NODE_BREAK:
         case NODE_CONTINUE:
+        case NODE_NULL:  /* v1.3.1: no variant data */
             break;  /* no variant data */
         case NODE_EXPR_STMT: {
             NodeExprStmt *d = node_expr_stmt_data(n);

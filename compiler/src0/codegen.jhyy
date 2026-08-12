@@ -836,6 +836,22 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         return v;
     }
 
+    // ── NODE_NULL (v1.3.1) ──
+    //   null → 0 of expected pointer width (sema fills KIND_POINTER via context).
+    //   qbe_type_of 内部 NULL type 防御: 已设的 type_ptr 才走; 否则 fallback W.
+    if kind == NODE_NULL() {
+        let mut qt: i32 = QBE_W();
+        let nt = (*n).type_ptr as *Type;
+        if nt != (0 as *Type) {
+            if (*nt).kind == KIND_POINTER() {
+                qt = QBE_L();
+            }
+        }
+        let v = *ir_new_tmp(ir, qt);
+        ir_emit_copy(ir, v, 0);
+        return v;
+    }
+
     // ── NODE_BOOL ──
     if kind == NODE_BOOL() {
         let d = node_bool_data(n);

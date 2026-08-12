@@ -1,0 +1,14 @@
+// null_compare.jhyy — v1.3.1 `null` comparisons in various positions
+// Tests all 4 sema context-fill rules:
+//   1. NODE_LET: null → declared pointer type
+//   2. NODE_BINARY: null fills from other operand (both sides)
+
+fn main_jhyy() -> i32 {
+    let p: *u8 = null;     // (1) decl fills null
+    if p == null {         // (2a) null on right: fills from p
+        if null == p {     // (2b) null on left: fills from p
+            return 0;      // EXPECT: 0
+        }
+    }
+    return 99;             // not reached
+}
