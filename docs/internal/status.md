@@ -211,3 +211,37 @@ abi § 11.1 五个阻塞自举问题（A1-A5）中，A1/A2/A4 已 ✓。**A3 / A
 - const pointer / const slice / const enum array —— 需要 RTTI
 - const fn / 编译期函数求值 —— 大特性，单独 sprint
 - v0 codegen bug 1/2/3/4（LEA / phi / loadub / &local）—— workaround 已在 jhyy 源码里，v1.x post-50-53 收尾
+
+---
+
+## C-side vs jhyy_v1 IL divergence (Sprint v1.1.2 调查结论, 2026-08-12)
+
+**观察**: `compiler/build/bin/jhyy.exe compile compiler/src0/main.jhyy -o jhyy_v2` 产出 `.il` sha `bccc452e...` ≠ tracked `v1.il` sha `2445e97d...`。
+
+**结论 (调查后)**: **这是历史/期望行为,不是回归**。Stage 2 N=3 byte-equal 闭环只覆盖 self-hosted chain (`jhyy_v1 → v2 → v3 → v4`),**不覆盖 C-side**。
+
+| 编译器 | 产出 .il sha | 大小 | 用途 |
+|--------|------------|------|------|
+| `jhyy_v1.exe.exe` (tracked closure) | `2445e97d...` | 1.378 MB | Stage 2 闭环 canonical |
+| `jhyy.exe` (C-side) | `bccc452e...` | 1.402 MB | 日常开发 / Stage 0 jhyy_v1 重建 |
+| `jhyy_v2.exe` / `v3.exe` (closure chain) | `2445e97d...` | 1.378 MB | Stage 2 闭环 4-hop 稳定 |
+
+**差异根因**: Sprint 4.21-4.25 W-005 #2 真修 chain (commits `be3be33` / `fad9de2`) 在 C-side `compiler/src/codegen.c` 加了 8 处 `irval_is_undef` 守卫 + IRVal struct pass-by-value 真修。jhyy-side (`compiler/src0/codegen.jhyy`) 镜像同样守卫但 emit 不需要额外 `=l copy`(arena IRVal 不存在 stale pointer 问题)。**C-side 多 emit 的 `copy` 是 QBE no-op**(defensive copy for stale pointer guard),程序语义等价。
+
+**Bisect 验证** (`git checkout <commit> -- compiler/src/`, 10 个候选):
+- `1b86277` (v0.8 commit 1) → C-side emit `bc2331b8...`(已不同于 closure canonical)
+- `589b91f` / `7e7632f` / `69be7c9` / `57f9845` / `f3dc1b1` → 各自不同 sha
+- `f3dc1b1` (Stage 1 closure) → `bccc452e...`(stable since)
+- `d3242e4` / `be3be33` / `fad9de2` / `7af6b45` → 全部 `bccc452e...`(已 stable)
+- **从未有 C-side commit 产出 `2445e97d`** — jhyy_v1 emit 跟 C-side emit **历史就不同**
+
+**操作规则 (新, 加进 conventions)**:
+- ✅ C-side (`jhyy.exe`) 可写 `compiler/build/bin/jhyy.exe` + `.il` 派生(开发态)
+- ❌ C-side **绝不可写** `jhyy_v1.exe` / `jhyy_v2.exe` / `jhyy_v3.exe`(污染 closure 链)
+- ✅ C-side 写 `jhyy_v1.exe` 仅在初始 bootstrap(jhyy.exe 编 src0/main.jhyy → jhyy_v1.exe 一次性,产出后 freeze sha)
+- ✅ 验证 closure 时用 `jhyy_vN.exe.exe` 编 `src0/main.jhyy`,永远不写回 `jhyy_v*.exe`
+
+**本次 session 修复** (commit 不在 v1.0.0 主线):
+1. `jhyy_v2.il` 被 C-side overwrite 为 `bccc452e` → 从 canonical `jhyy_v1.exe.exe` 重新生成 → 现在 `2445e97d` byte-equal v1/v3
+2. `jhyy_v1.exe` / `jhyy_v2.exe` / `jhyy_v3.exe` 三个 tracked binary 被 C-side overwrite → `git checkout 3fa0983 -- compiler/build/bin/jhyy_v{1,2,3}.exe` 恢复 tracked canonical shas (`aa57849c` / `d3aeed09` / `536ffcb2`)
+3. 仅 `jhyy_v1.exe.exe` (sha `ba94df93`) 保持干净,因该文件被 MCP `jhyy_regress` 强制 baseline 校验保护
