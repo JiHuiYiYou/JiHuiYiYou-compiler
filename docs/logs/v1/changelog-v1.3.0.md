@@ -36,6 +36,15 @@
 
 ## 联动文档改动 (v1.3.1 commit 范围内,需在 changelog 显式记录)
 
+**v1.3.1 commit (`c2acbd1`) 实际改动文件清单 (per `git show --stat`)**:
+
+- 2 binary (`compiler/build/bin/jhyy.exe` + `jhyy_v1.exe`)
+- 5 C src (`lexer.c` / `lexer.h` / `ast.h` / `ast.c` / `parser.c` / `sema.c` / `codegen.c`)
+- 5 jhyy src0 (`lexer.jhyy` / `parser.jhyy` / `ast.jhyy` / `sema.jhyy` / `codegen.jhyy`)
+- 5 test (`_null_basic` / `_null_compare` / `_null_ret` / `_null_cast` / `_null_untyped_err`)
+
+**v1.3.1 commit 零 docs 文件改动** — 之前 audit 误把 commit `4c26038` (D40/D41 闭环, 2026-08-12 16:10, 早于 v1.3.1 6 小时) 的 ABI § 13.4 / v3.x-language-expansion.md 改动归到 v1.3.1 头上。**修正**:那些改动是独立的合法 cross-boundary 同步 (Q-Compiler-007 闭环, per `coordination.md § 3` D40/D41 locked),不是 v1.3.1 产物,也不需要 reverse。
+
 | 文档 | 改动 | 性质 |
 |------|------|------|
 | `compiler/src/lexer.c` / `compiler/src0/lexer.jhyy` | +`TOKEN_NULL` keyword + name | 计划内 |
@@ -44,11 +53,13 @@
 | `compiler/src/parser.c` / `compiler/src0/parser.jhyy` | `prefix_null` + register_rule | 计划内 |
 | `compiler/src/sema.c` / `compiler/src0/sema.jhyy` | NODE_NULL infer_type sentinel + 4 context-fill rules | 计划内 (4 sites 是 design pivot 产物) |
 | `compiler/src/codegen.c` / `compiler/src0/codegen.jhyy` | NODE_NULL emit (QBE_L / QBE_W) | 计划外 (plan 原说 codegen 不变) |
-| `compiler/src/main.c` / `compiler/src0/main.jhyy` | 2 行微调 (commit diff 显示) | 计划外 |
-| `docs/abis/jhyy-abi-v1.0.0.md` | 30 行 (commit diff 显示) | **🔴 需 audit** — plan line 504 承诺 "NOT EDITED, locked";需确认这 30 行是否真的只补 emit 注解 (NODE_NULL → QBE_L vs QBE_W),**不是** ABI 实质放宽 |
-| `docs/plans/roadmap/v3.x-language-expansion.md` | 12 行 (commit diff 显示) | **🟡 flag** — plan 没列跨 plan 改动,需同步进 v1.3 plan § Critical files |
-| `mcp-jhyy/server.py` | 3 行 (适配新 NODE_NULL) | 计划外 |
 | `docs/internal/workarounds.md` line 1489 | +"Sprint mcp-2 W-014 plan: 跟 v1.3.1 plan 同 session" | 计划内 (line 503 已留注 "v1.3.0 0 W-XXX 引入") |
+
+**非 v1.3.1 commit 产物 (误归因修正)**:
+
+- `docs/abis/jhyy-abi-v1.0.0.md` § 13.4 — 来自 commit `4c26038` (D40/D41 闭环,Q-Compiler-007 锁定);**合法改动**,不归 v1.3.1 范围
+- `docs/plans/roadmap/v3.x-language-expansion.md` Sprint 3g — 同 `4c26038`,加 ErrChain / D40 / Confidence 三条语法约束;**合法改动**,独立 commit
+- `mcp-jhyy/server.py` 改动 — 需单独 audit 哪个 commit,本 changelog 不归因 (v1.3.1 commit `c2acbd1` 实际未触碰 mcp-jhyy/ 任何文件)
 
 ## 验证
 
