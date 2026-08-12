@@ -165,6 +165,7 @@ def run_test(
     # Run
     try:
         r2 = subprocess.run([exe], capture_output=True, text=True, timeout=timeout,
+                            stdin=subprocess.DEVNULL,  # ⚠️ MCP server 无有效 stdin → 子进程阻塞
                             encoding="utf-8", errors="replace", env=_build_subprocess_env())
         actual = r2.returncode
         output = (r2.stdout or "") + (r2.stderr or "")
