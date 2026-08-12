@@ -272,3 +272,65 @@
 - v1.2.1/v1.2.2/v1.2.3 changelog — 同样 pure rename 验证 (Stage 2 N=3 7 行 cascade 跨 sprint 一致)
 - [[project-sprint-v1-1-2-c-side-divergence]] — C-side vs jhyy_v1 IL divergence 性质 (rename 后 sha 变化是预期)
 - [[feedback-regress-baseline-binary-hash]] — sha256sum 检查守门 (本次全程 jhyy_v1.exe.exe `ba94df93` + jhyy_v*.exe 4 个 closure binary canonical sha 0 干扰)
+
+---
+
+## v1.2 wip commit 1.5 — Doc sync (workarounds.md + status.md + changelog 收尾) — 2026-08-12
+
+**类型**: doc-only (no code change)
+**估时**: 0.3 sprint
+**workarounds.md**: W-005 / W-003 状态从 "code revert 完" → "完整闭环 (v0 fix ship + src0/ 代码撤回双 ship)"
+
+### 工作
+
+- **`docs/internal/status.md` 修改**:
+  - § "当前 sprint / 下一阶段": 加 v1.2.0 sprint 块 (4 commits 一览),串入 v1.1.0 + v1.0.0 + v0.9 wip 主线
+  - 下一阶段: v2.x/v3.x → **v1.3 (v1.x 语法糖 Phase 4)** 优先 (per user feedback 2026-08-12)
+  - 新增 § "src0/ 自然化 (v1.2.0 sprint, 2026-08-12 ship)" section: 4 sprint 一览表 + 纯 rename 验证 (跨 4 commit 7 行 cascade 一致) + 不动的 defense 列表 + Plan / 记录链接
+
+- **`docs/internal/workarounds.md` 修改**:
+  - § W-005 末尾加 "v1.2.0 cross-ref" 段: 16 处 revert + 99 处 `_vN` cleanup + 完整闭环确认
+  - § W-003 RESOLVED 段加 "v1.2.0 cross-ref" 段: 24 处 revert + out-of-scope "29 处" 实际工作已 ship 确认
+  - List 表格 (line 30 + 32) W-003 / W-005 状态文字已 ship 状态文档对齐全
+
+- **`docs/logs/v1/changelog-v1.2.0.md` § v1.2 wip commit 1.5** (本 entry): 收尾整 v1.2.0 sprint 5 commit 记录
+
+### 验证
+
+- **doc 一致性**: workarounds.md (W-005/W-003 cross-ref) / changelog-v1.2.0.md (commit 1.1-1.5 完整) / status.md (新 src0/ 自然化 section) 三方对齐 ✅
+- **不需 code regress** (doc-only): 仍跑双 50/50 守门 ✅
+  - regress.py 50/50 PASS (jhyy.exe sha `d442ba3f...`)
+  - regress_v1.py 50/50 PASS (jhyy_v1.exe.exe sha `ba94df93...`)
+
+### v1.2.0 整体完成 (5 commits 总览)
+
+| v1.2.x | 类型 | commit | 改动 | grep 命中 |
+|--------|------|--------|------|----------|
+| 1.1 | W-005 revert | `2c92cf4` | src0/ 3 files | 16 处 `let mut x_v1` |
+| 1.2 | W-003 revert | `f49e64d` | src0/ 1 file (codegen) | 24 处 `let _ = fncall()` |
+| 1.3 | `_v1` cleanup | `1c24841` | src0/ 3 files | 63 处 / 19 unique identifier |
+| 1.4 | `_v2`/`_v3`/`_v4`/`_v5` cleanup | `0026098` | src0/ 3 files | 36 处 / 18 unique identifier |
+| 1.5 | doc sync | (this) | docs/ 3 files | 0 code change |
+
+**累计**: 5 commits, 99 处 code rename + 3 docs file, 2.3 sprint 实际用 ~1 sprint (1-day batch ship)
+
+**对照 plan 估时**:
+- v1.2.1: 0.5 sprint (估) ≈ 0.2 sprint (实)
+- v1.2.2: 0.5 sprint (估) ≈ 0.1 sprint (实)
+- v1.2.3: 0.5 sprint (估) ≈ 0.2 sprint (实)
+- v1.2.4: 0.5 sprint (估) ≈ 0.1 sprint (实)
+- v1.2.5: 0.3 sprint (估) ≈ 0.1 sprint (实)
+- **总计**: 2.3 sprint (估) ≈ 0.7 sprint (实) — 节省 1.6 sprint (per v1.2 sed 模式 + 4-commit 一次 batch ship)
+
+### 留给后续
+
+- **v1.3 (下一阶段)** v1.x 语法糖 Phase 4 of v1.0-post-50-53-plan.md — null / else if / sizeof / for-in / `#[inline]` / defer / Pattern binding / OR pattern, 5-7 sprint
+- v1.3 全 ship 后启动 **v2.x** (QBE 完整重写) || **v3.x** (语言扩展) 并行 (OS 准备)
+
+### 引用
+
+- v1.2.1/v1.2.2/v1.2.3/v1.2.4 changelog — 4 sprint 完整 ship 记录
+- [`docs/internal/status.md` § src0/ 自然化](../status.md) — status.md 新 section
+- [`docs/internal/workarounds.md` § W-005 / § W-003 cross-ref](../workarounds.md) — workarounds.md v1.2.0 cross-ref
+- [[project-v1-0-post-50-53-plan]] § Phase 3.1 — W-005 / W-003 / `_vN` 清理原始 plan
+- [[project-sprint-v1-1-2-c-side-divergence]] — C-side vs jhyy_v1 IL divergence

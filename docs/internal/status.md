@@ -197,11 +197,15 @@ abi § 11.1 五个阻塞自举问题（A1-A5）中，A1/A2/A4 已 ✓。**A3 / A
 
 ## 当前 sprint / 下一阶段
 
-**v0.9 wip**（commit 2.83 ship, 2026-08-11）：v0.x 收尾主线 — Stage 1 byte-equal **7/7** + Stage 2 N=3 byte-equal 闭环 (sha `2445e97d...`) + 2 个 audit 全 PASS (AUDIT 修 VariantDesc heap overflow / C' 验证 5 维度 by-construction deterministic)。v0.9 wip 最后 sprint = **v0.9 wip commit 2.83 Phase 2 Style Cleanup**（mcp-jhyy docstring 补全 + workarounds.md W-008 文档 + 18 处 `[Status: ...]` tag 插入）。详细进度见 [`docs/logs/v0/changelog-v0.9.0.md`](../logs/v0/changelog-v0.9.0.md)。
+**v1.2.0 — src0/ 自然化**（4 commits ship, 2026-08-12 — commits `2c92cf4` / `f49e64d` / `1c24841` / `0026098`）：v1.0.0 闭环后第一个 v1.x 清理 sprint — 完成 W-005 (16 处 `let mut x_v1` style revert) + W-003 (24 处 `let _ = fncall()` revert) + `_v1`/`_v2`/`_v3`/`_v4`/`_v5` 后缀 99 处 cleanup 跨 src0/ 3 文件。Plan 见 [`docs/plans/v1/v1.2.0任务清单 + 概要设计.md`](../plans/v1/v1.2.0任务清单 + 概要设计.md);ship 记录见 [`docs/logs/v1/changelog-v1.2.0.md`](../logs/v1/changelog-v1.2.0.md)。
+
+**v1.1.0 batch ship**（commits 1.1-1.9, 2026-08-05 ~ 2026-08-11）：6 sprint 全部 ship — W-007 docs / W-003 docs / Bug 1-4 真修 / batch close。详细 ship 记录见 [`docs/logs/v1/changelog-v1.1.0.md`](../logs/v1/changelog-v1.1.0.md)。
 
 **v1.0.0 真自举闭环** ✅（2026-08-10 commit `eabee0d`）：Stage 2 N=3 byte-equal 达成 — 详尽 ship 记录见 [`docs/logs/v1/changelog-v1.0.0.md`](../logs/v1/changelog-v1.0.0.md)。
 
-下一阶段：**v2.x** (QBE 完整重写 + amd64_sysv / freestanding) / **v3.x** (inline asm / `no_std` / `&mut` lifetime) **并行**（OS 准备）→ [`docs/plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-os-prep.md) + [`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md`](../plans/roadmap/v2-v3-parallel-sprint-plan.md)。OS 端等编译器推进（per [`memory/project_os_wait_state.md`](~/.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_os_wait_state.md)，v1.0 闭环达成前不主动 prep OS）。
+**v0.9 wip**（commit 2.83 ship, 2026-08-11）：v0.x 收尾主线 — Stage 1 byte-equal **7/7** + Stage 2 N=3 byte-equal 闭环 (sha `2445e97d...`) + 2 个 audit 全 PASS (AUDIT 修 VariantDesc heap overflow / C' 验证 5 维度 by-construction deterministic)。详细进度见 [`docs/logs/v0/changelog-v0.9.0.md`](../logs/v0/changelog-v0.9.0.md)。
+
+下一阶段：**v1.3** (v1.x 语法糖 Phase 4 of v1.0-post-50-53-plan.md) — null / else if / sizeof / for-in / `#[inline]` / defer / Pattern binding / OR pattern, 5-7 sprint。**v1.3 全 ship 后**启动 **v2.x** (QBE 完整重写 + amd64_sysv / freestanding) || **v3.x** (inline asm / `no_std` / `&mut` lifetime) 并行（OS 准备）→ [`docs/plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-os-prep.md) + [`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md`](../plans/roadmap/v2-v3-parallel-sprint-plan.md)。OS 端等编译器推进（per `memory/project_os_wait_state.md`，v1.0 闭环达成前不主动 prep OS）。
 
 已知 v1.0.0 后续未完成项（明确延后，非 blocker）：
 - Stage 1 byte-equal 6/7 → 7/7（const_array 因 parser 翻译层缺 NODE_CONST_DECL 推迟；v1.x post-50-53 plan 处理）
@@ -245,3 +249,37 @@ abi § 11.1 五个阻塞自举问题（A1-A5）中，A1/A2/A4 已 ✓。**A3 / A
 1. `jhyy_v2.il` 被 C-side overwrite 为 `bccc452e` → 从 canonical `jhyy_v1.exe.exe` 重新生成 → 现在 `2445e97d` byte-equal v1/v3
 2. `jhyy_v1.exe` / `jhyy_v2.exe` / `jhyy_v3.exe` 三个 tracked binary 被 C-side overwrite → `git checkout 3fa0983 -- compiler/build/bin/jhyy_v{1,2,3}.exe` 恢复 tracked canonical shas (`aa57849c` / `d3aeed09` / `536ffcb2`)
 3. 仅 `jhyy_v1.exe.exe` (sha `ba94df93`) 保持干净,因该文件被 MCP `jhyy_regress` 强制 baseline 校验保护
+
+---
+
+## src0/ 自然化 (v1.2.0 sprint, 2026-08-12 ship)
+
+**背景**: v1.0.0 自举闭环 (`eabee0d`) 用的 src0/ `main.jhyy` 是 v0 C 端 codegen.c 的**翻译产物** — 翻译过程为防 W-005 / W-003 stale-name 触发面加了防御性 `_vN` 后缀 + 替代语法 (`let mut xxx_v1` / `let _ = fncall()`)。v0.9 wip + v1.1.0 batch ship 全部把 W-005 #2 + W-003 + Bug 1-4 都真修了,这些 defense 不再需要 — 但 src0/ 还残留 99 处 pure rename 翻译产物,影响可读性 / 可审计性 / 后续 v3.x 命名空间清理。
+
+**目标**: 把 src0/ 翻译产物里的 defense 全部撤回,接近"自然 jhyy"代码风格,但**不改任何 IR emit** (pure rename,Stage 1 byte-equal 7/7 持+Stage 2 N=3 byte-equal 7 行 cascade 持)。
+
+**实施 (4 commits, 2026-08-12)**:
+
+| Sprint | Commit | 类型 | grep 命中 | 跨 sprint |
+|--------|--------|------|----------|----------|
+| v1.2.1 | `2c92cf4` | W-005 `let mut x_v1` revert | 16 处 | regress 50/50, v2.il `a75bcd6e` |
+| v1.2.2 | `f49e64d` | W-003 `let _ = fncall()` revert | 24 处 | regress 50/50, v2.il `a75bcd6e` (同 v1.2.1) |
+| v1.2.3 | `1c24841` | `_v1` 后缀 cleanup | 63 处 / 19 unique identifier | regress 50/50, v2.il `348884af` |
+| v1.2.4 | `0026098` | `_v2`/`_v3`/`_v4`/`_v5` 后缀 cleanup | 36 处 / 18 unique identifier | regress 50/50, v2.il `f75ef7e2` |
+
+**纯 rename 验证 (跨 4 commit 一致)**:
+- Stage 2 N=3 7 行 cascade（`@mergeXXXX` label 编号）：跨 v1.2.1/2.2/2.3/2.4 一致,证明 rename 零 IR 行为影响
+- v2.il sha 跨 sprint 变化 (rename 改 QBE 符号名) 是预期的,跟 [[project-sprint-v1-1-2-c-side-divergence]] 一致性质
+- regress.py 50/50 + regress_v1.py 50/50 + jhyy_v1.exe.exe sha `ba94df93` 全程持平
+
+**不动的 defense (按 plan out-of-scope)**:
+- 函数名 `resolve_one_import_v1` / `var_name_eq_v1` (改函数名是 v3.x 命名空间范畴)
+- 描述 `jhyy_vN` / `regress_vN.py` 的 comment (历史叙述)
+- `_W002_rename_map.txt` 翻译映射 comment
+
+**Plan / 记录**:
+- Plan: [`docs/plans/v1/v1.2.0任务清单 + 概要设计.md`](../plans/v1/v1.2.0任务清单 + 概要设计.md)
+- Ship: [`docs/logs/v1/changelog-v1.2.0.md`](../logs/v1/changelog-v1.2.0.md)
+- v1.2.5 commit 5 = doc sync (workarounds.md + status.md + changelog 收尾)
+
+**下一阶段**: v1.3 (v1.x 语法糖 Phase 4 of v1.0-post-50-53-plan.md) — null / else if / sizeof / for-in / `#[inline]` / defer / Pattern binding / OR pattern, 5-7 sprint。

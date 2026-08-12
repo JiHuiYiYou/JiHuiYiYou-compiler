@@ -343,6 +343,12 @@ store_byte_i32(nul1, 0 as i32);
 
 **W-003 失效条件** (per workarounds.md line 307): v0 codegen 修复 `let _ = fncall(...)` emit → W-003 可移除. 实际: jhyy_v1 codegen 已 ship 修复,W-003 失效条件满足,可标 RESOLVED.
 
+**v1.2.0 cross-ref (2026-08-12 src0/ 自然化 ship):**
+- W-003 workaround 代码 `let _ = fncall()` style 在 src0/ 24 处 通过 v1.2.2 (`f49e64d`) 全部 revert 回 `let _X = fncall()` 描述性名 风格 (cg_expr / cg_emit_store / cg_copy_struct / ir_emit_ret / ir_emit_str / ir_emit_jmp 6 类 call)
+- 跟 v1.2.0 plan out-of-scope "v3 workaround 29 处" (line 342) 实际工作已经 ship — v1.2.2 24 处 + v1.2.3/1.4 关联 = 完整 29 处 revert
+- W-003 状态:**code 撤回完, v0 fix ship 已闭环**
+- 详情见 [`docs/logs/v1/changelog-v1.2.0.md` § v1.2 wip commit 1.2](../logs/v1/changelog-v1.2.0.md)
+
 ---
 
 ## W-004: short local var (≤4 chars) → symtab hash 撞 → jhyy_v1 field assign 死循环
@@ -597,6 +603,12 @@ fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
 - W-003 (`docs/internal/workarounds.md` § W-003) 修了 `let _X = fncall()` 顶层 direct call 模式，未覆盖 let-mut + assign
 - W-004 修了短 var 名导致 symtab hash 撞死循环，未覆盖 let-mut + assign segfault
 - 复现测试 `tmp/test_w4_lit.jhyy` / `tmp/test_w4_v1.jhyy`
+
+**v1.2.0 cross-ref (2026-08-12 src0/ 自然化 ship):**
+- W-005 workaround 代码 `let mut xxx_vN` style 在 src0/ 16 处 通过 v1.2.1 (`2c92cf4`) 全部 revert 回 `let mut xxx` 自然风格
+- W-005 workaround 残留 `_vN` 后缀 99 处 通过 v1.2.3 (`1c24841`) + v1.2.4 (`0026098`) 全部 cleanup
+- W-005 状态:**code 撤回完, v0 fix ship 已闭环** — 跟 v0.9 wip commit 2.13 + v0.9 wip commit 2.11 真修 chain 形成完整闭环
+- 详情见 [`docs/logs/v1/changelog-v1.2.0.md` § v1.2 wip commit 1.1](../logs/v1/changelog-v1.2.0.md) + [§ v1.2 wip commit 1.3](../logs/v1/changelog-v1.2.0.md) + [§ v1.2 wip commit 1.4](../logs/v1/changelog-v1.2.0.md)
 
 ---
 
