@@ -194,7 +194,7 @@ def jhyy_lang_ref(query: str, limit: int = 20) -> dict:
 
 
 @mcp.tool
-def jhyy_abi_info(query: str) -> dict:
+def jhyy_abi_info(query: str, limit: int = 20) -> dict:
     """Search the JHYY ABI v1.0.0 information by keyword.
 
     USE THIS WHEN the user asks about ABI conventions, struct passing, FFI rules,
@@ -208,9 +208,11 @@ def jhyy_abi_info(query: str) -> dict:
 
     Args:
         query: 关键词 (如 "struct_passing", "calling_convention", "primitives")
+        limit: 最大返回条数 (默认 20)
 
     Returns:
-        {ok, query, matches: [...], abi_version}
+        {ok, version, query, matches: [{section, title, level, score, excerpt, key}, ...]}
+        section e.g. "4.2" — 直接对应 jhyy-abi-v1.0.0.md 章节号, 可引用.
     """
     try:
         import jhyy_spec_doc
