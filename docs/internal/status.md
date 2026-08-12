@@ -197,24 +197,27 @@ abi § 11.1 五个阻塞自举问题（A1-A5）中，A1/A2/A4 已 ✓。**A3 / A
 
 ## 当前 sprint / 下一阶段
 
-**v1.2.0 — src0/ 自然化**（4 commits ship, 2026-08-12 — commits `2c92cf4` / `f49e64d` / `1c24841` / `0026098`）：v1.0.0 闭环后第一个 v1.x 清理 sprint — 完成 W-005 (16 处 `let mut x_v1` style revert) + W-003 (24 处 `let _ = fncall()` revert) + `_v1`/`_v2`/`_v3`/`_v4`/`_v5` 后缀 99 处 cleanup 跨 src0/ 3 文件。Plan 见 [`docs/plans/v1/v1.2.0任务清单 + 概要设计.md`](../plans/v1/v1.2.0任务清单 + 概要设计.md);ship 记录见 [`docs/logs/v1/changelog-v1.2.0.md`](../logs/v1/changelog-v1.2.0.md)。
+**v1.3.1 SHIP**（commit `c2acbd1`, 2026-08-12 22:19）— v1.x 语法糖 Phase 4 第一个 sprint ship,`null` 关键字 via dedicated `NODE_NULL` NodeKind + 4 sema context-fill rules。Design 在执行期临时调整 (plan 原设 NODE_INT_LIT(0) 复用 + untyped infer),ship 改为 dedicated NodeKind + untyped hard error (Rust/C++ 语义)。Plan 见 [`docs/plans/v1/v1.3.0任务清单 + 概要设计.md`](../plans/v1/v1.3.0任务清单 + 概要设计.md) (已同步反映 design pivot);ship 记录见 [`docs/logs/v1/changelog-v1.3.0.md`](../logs/v1/changelog-v1.3.0.md)。
 
-**v1.1.0 batch ship**（commits 1.1-1.9, 2026-08-05 ~ 2026-08-11）：6 sprint 全部 ship — W-007 docs / W-003 docs / Bug 1-4 真修 / batch close。详细 ship 记录见 [`docs/logs/v1/changelog-v1.1.0.md`](../logs/v1/changelog-v1.1.0.md)。
+**v1.2.0 — src0/ 自然化**（5 wip commits ship, 2026-08-12 — commits `0e0ebf1` (1.1) / `6149ac9` (1.2) / `1c24841` (1.3) / `0026098` (1.4) / `78f5227` (1.5 doc sync)）：v1.0.0 闭环后第一个 v1.x 清理 sprint — 完成 W-005 (16 处 `let mut x_v1` style revert) + W-003 (24 处 `let _ = fncall()` revert) + `_v1`/`_v2`/`_v3`/`_v4`/`_v5` 后缀 99 处 cleanup 跨 src0/ 3 文件。Plan 见 [`docs/plans/v1/v1.2.0任务清单 + 概要设计.md`](../plans/v1/v1.2.0任务清单 + 概要设计.md) (已标 ✅ ALL SHIP header);ship 记录见 [`docs/logs/v1/changelog-v1.2.0.md`](../logs/v1/changelog-v1.2.0.md)。
+
+**v1.1.0 batch ship**（commits 1.1-1.9, 2026-08-05 ~ 2026-08-12）：6 sprint 全部 ship — W-006/W-004 transitive close / W-007 docs / W-003 docs / Bug 1-4 真修 / batch close。详细 ship 记录见 [`docs/logs/v1/changelog-v1.1.0.md`](../logs/v1/changelog-v1.1.0.md)。Plan 文档已标 ✅ ALL SHIP header。
 
 **v1.0.0 真自举闭环** ✅（2026-08-10 commit `eabee0d`）：Stage 2 N=3 byte-equal 达成 — 详尽 ship 记录见 [`docs/logs/v1/changelog-v1.0.0.md`](../logs/v1/changelog-v1.0.0.md)。
 
-**v0.9 wip**（commit 2.83 ship, 2026-08-11）：v0.x 收尾主线 — Stage 1 byte-equal **7/7** + Stage 2 N=3 byte-equal 闭环 (sha `2445e97d...`) + 2 个 audit 全 PASS (AUDIT 修 VariantDesc heap overflow / C' 验证 5 维度 by-construction deterministic)。详细进度见 [`docs/logs/v0/changelog-v0.9.0.md`](../logs/v0/changelog-v0.9.0.md)。
+**v0.9 wip**（commit 2.83 ship, 2026-08-11）：v0.x 收尾主线 — Stage 1 byte-equal **7/7** + Stage 2 N=3 byte-equal 闭环 (sha `2445e97d...`,**v1.3.1 ship 后刷新成 `a26f4768...`**) + 2 个 audit 全 PASS (AUDIT 修 VariantDesc heap overflow / C' 验证 5 维度 by-construction deterministic)。详细进度见 [`docs/logs/v0/changelog-v0.9.0.md`](../logs/v0/changelog-v0.9.0.md)。
 
-下一阶段：**v1.3** (v1.x 语法糖 Phase 4 of v1.0-post-50-53-plan.md) — null / else if / sizeof / for-in / `#[inline]` / defer / Pattern binding / OR pattern, 5-7 sprint。**v1.3 全 ship 后**启动 **v2.x** (QBE 完整重写 + amd64_sysv / freestanding) || **v3.x** (inline asm / `no_std` / `&mut` lifetime) 并行（OS 准备）→ [`docs/plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-os-prep.md) + [`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md`](../plans/roadmap/v2-v3-parallel-sprint-plan.md)。OS 端等编译器推进（per `memory/project_os_wait_state.md`，v1.0 闭环达成前不主动 prep OS）。
+下一阶段：**v1.3.2** (`else if` 语法糖, 0.5 sprint, 极低风险 — 纯 parser sugar) → v1.3.3 sizeof → v1.3.4 for-in → v1.3.5 `#[inline]` → v1.3.6 defer → v1.3.7 Pattern binding + OR pattern → v1.3.8 doc sync (lang-spec v1.2.0 + changelog) — **v1.3 全 ship 后**启动 **v1.4** (src0 production flip) → **v1.5** (WiX installer) → 才到 **v2.x** (QBE 完整重写 + amd64_sysv / freestanding) || **v3.x** (inline asm / `no_std` / `&mut` lifetime) 并行 (OS 准备) → [`docs/plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-os-prep.md) + [`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md`](../plans/roadmap/v2-v3-parallel-sprint-plan.md)。OS 端等编译器推进 (per `memory/project_os_wait_state.md`,v1.0 闭环达成前不主动 prep OS)。
 
 已知 v1.0.0 后续未完成项（明确延后，非 blocker）：
 - Stage 1 byte-equal 6/7 → 7/7（const_array 因 parser 翻译层缺 NODE_CONST_DECL 推迟；v1.x post-50-53 plan 处理）
-- Pattern binding codegen（`Some(v) => v` 提取 payload）—— v1.x post-50-53 patch
-- OR pattern 一致性检查（`Some(x) | Some(y)` 两边必须绑同名）
+- Pattern binding codegen（`Some(v) => v` 提取 payload）—— **v1.3.7 处理**
+- OR pattern 一致性检查（`Some(x) | Some(y)` 两边必须绑同名）—— **v1.3.7 处理**
 - 嵌套 const array（`[[i32; N]; M]`）—— 自举需要时再开
 - const pointer / const slice / const enum array —— 需要 RTTI
 - const fn / 编译期函数求值 —— 大特性，单独 sprint
-- v0 codegen bug 1/2/3/4（LEA / phi / loadub / &local）—— workaround 已在 jhyy 源码里，v1.x post-50-53 收尾
+- v0 codegen bug 1/2/3/4（LEA / phi / loadub / &local）—— v1.1.0 已 ship 真修 (Bug 1-4 wip commits 1.5-1.8);不再 blocker
+- ~~`null` 关键字 (sugar for `0 as *u8`)~~ — **v1.3.1 已 ship** (commit `c2acbd1`, NODE_NULL NodeKind + 4 context-fill rules)
 
 ---
 
