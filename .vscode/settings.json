@@ -4,6 +4,6 @@
         "editor.insertSpaces": true
     },
     "terminal.integrated.env.windows": {
-        "Path": "${env:Path};${workspaceFolder}/compiler/build/bin"
+        "Path": "${env:Path};${workspaceFolder}/compiler/build/bin;C:/msys64/ucrt64/bin"
     }
 }
