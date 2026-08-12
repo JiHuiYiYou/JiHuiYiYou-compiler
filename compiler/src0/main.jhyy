@@ -70,11 +70,11 @@ fn HELPERS_C() -> *u8 { return "C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compi
 
 // path_to_win: / → \ 转换（Windows cmd.exe 需要）
 // 注：直接 walk 直到 '\0'，不用 strlen
-fn path_to_win(p_v1: *u8) -> i32 {
-    let n = strlen(p_v1);
+fn path_to_win(p: *u8) -> i32 {
+    let n = strlen(p);
     let mut idx: i64 = 0 as i64;
     while idx < n {
-        let c_p = (p_v1 as i64 + idx) as *u8;
+        let c_p = (p as i64 + idx) as *u8;
         let c_pi = c_p as *i32;
         if (*c_pi) == (47 as i32) {  // '/' = 47
             (*c_pi) = (92 as i32);   // '\\' = 92
@@ -85,8 +85,8 @@ fn path_to_win(p_v1: *u8) -> i32 {
 }
 
 // read_file: 读整个文件到 malloc'd buffer
-fn read_file(path_v1: *u8) -> *u8 {
-    let fp = fopen(path_v1, "rb" as *u8);
+fn read_file(path: *u8) -> *u8 {
+    let fp = fopen(path, "rb" as *u8);
     if fp == (0 as *u8) {
         jh_fputs_stderr("cannot open file\n" as *u8);
         return 0 as *u8;
@@ -111,9 +111,9 @@ fn read_file(path_v1: *u8) -> *u8 {
 }
 
 // store_byte_i32: 写 i32 值到 *u8 位置（按 1 byte 存）
-fn store_byte_i32(p_v2: *u8, val_v1: i32) -> i32 {
+fn store_byte_i32(p_v2: *u8, val: i32) -> i32 {
     let pi = p_v2 as *i32;
-    (*pi) = val_v1;
+    (*pi) = val;
     return 0 as i32;
 }
 
@@ -124,12 +124,12 @@ fn load_byte_i32(p_v3: *u8) -> i32 {
 }
 
 // str_concat: 拷贝 src 到 dst，返回写入字节数（不含 NUL）
-fn str_copy(dst_v1: *u8, src_v1: *u8) -> i64 {
-    let n = strlen(src_v1);
+fn str_copy(dst: *u8, src: *u8) -> i64 {
+    let n = strlen(src);
     let mut i: i64 = 0 as i64;
     while i < n {
-        let s_p = (src_v1 as i64 + i) as *u8;
-        let d_p = (dst_v1 as i64 + i) as *u8;
+        let s_p = (src as i64 + i) as *u8;
+        let d_p = (dst as i64 + i) as *u8;
         let s_pi = s_p as *i32;
         let d_pi = d_p as *i32;
         (*d_pi) = (*s_pi);
@@ -139,18 +139,18 @@ fn str_copy(dst_v1: *u8, src_v1: *u8) -> i64 {
 }
 
 // str_concat_at: 把 src append 到 dst+offset，返回新 offset
-fn str_concat_at(dst_v2: *u8, off_v1: i64, src_v2: *u8) -> i64 {
+fn str_concat_at(dst_v2: *u8, off: i64, src_v2: *u8) -> i64 {
     let n = strlen(src_v2);
     let mut i: i64 = 0 as i64;
     while i < n {
         let s_p = (src_v2 as i64 + i) as *u8;
-        let d_p = (dst_v2 as i64 + off_v1 + i) as *u8;
+        let d_p = (dst_v2 as i64 + off + i) as *u8;
         let s_pi = s_p as *i32;
         let d_pi = d_p as *i32;
         (*d_pi) = (*s_pi);
         i = i + (1 as i64);
     }
-    return off_v1 + n;
+    return off + n;
 }
 
 // ════════════════════════════════════════════════════
@@ -592,12 +592,12 @@ fn build_il(input: *u8, output: *u8) -> i32 {
     // ── IR + Codegen ──
     jh_fputs_stderr("[4] post-sema\n" as *u8);
     // W-005 #2 workaround: malloc IRBuf avoids both stack overflow and arena exhaustion
-    let ir_v1 = malloc(128 as i64) as *IRBuf;
-    ir_init(ir_v1, &arena);
+    let ir = malloc(128 as i64) as *IRBuf;
+    ir_init(ir, &arena);
     jh_fputs_stderr("[4a] ir_init done\n" as *u8);
-    cg_module(ir_v1, ast_node);
+    cg_module(ir, ast_node);
     jh_fputs_stderr("[4b] cg_module done\n" as *u8);
-    ir_flush_data(ir_v1);
+    ir_flush_data(ir);
     jh_fputs_stderr("[4] codegen done\n" as *u8);
 
     // ── 写 <output>.il ──
@@ -618,7 +618,7 @@ fn build_il(input: *u8, output: *u8) -> i32 {
         return 1 as i32;
     }
     // fwrite((*ir.sb).buf, 1, (*ir.sb).len, ilf)
-    let sb_inner = (*ir_v1).sb;
+    let sb_inner = (*ir).sb;
     let buf_p = (*sb_inner).buf;
     let buf_len = (*sb_inner).len;
     fwrite(buf_p, (1 as i64), buf_len, ilf);
@@ -701,13 +701,13 @@ fn derive_output_name(input: *u8, out_buf: *u8) -> i32 {
 }
 
 // cmd_build: lex → parse → sema → codegen → 写 .il
-fn cmd_build(argc_v1: i32, argv_v1: *u8) -> i32 {
-    if argc_v1 < (1 as i32) {
+fn cmd_build(argc: i32, argv: *u8) -> i32 {
+    if argc < (1 as i32) {
         jh_fputs_stderr("usage: jhyy build <file.jhyy> [-o output]\n" as *u8);
         return 1 as i32;
     }
     // argv is *u8 → first arg is at *(argv as **u8)
-    let argv_arr = argv_v1 as **u8;
+    let argv_arr = argv as **u8;
     let input = (*argv_arr);
     let out_buf = malloc(1024 as i64);
     derive_output_name(input, out_buf);

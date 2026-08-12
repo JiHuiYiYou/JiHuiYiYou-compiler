@@ -135,3 +135,70 @@
 
 - [[project-v1-0-post-50-53-plan]] § Phase 3.1 — W-003 原始 plan
 - v1.2.1 changelog — 同样 pure rename 验证 (`a75bcd6e` 跨 sprint 一致)
+
+---
+
+## v1.2 wip commit 1.3 — `_v1` 后缀 63 处 cleanup (19 个 unique identifier) — 2026-08-12
+
+**类型**: cleanup (workaround 后缀撤回)
+**估时**: 0.5 sprint
+**workarounds.md**: 不直接对应 W-XXX,但属于 v1.1.0 batch ship 后的 stale-name 防御清理
+
+### 工作
+
+- **Audit (63 处,19 个 unique `_v1` identifier)**:
+  - Plan 估时 119 处 (估计错误,实际只有 63 — plan 估的是把 `xxx_v1` 当作每个 unique 算多份)
+  - 跨 3 个 src0/ 文件:codecen.jhyy (20) / main.jhyy (31) / _driver_ir.jhyy (2)
+  - 还有 parser.jhyy (1) / sema.jhyy (5) / util.jhyy (2) 共 8 处,加上 codegen+main+_driver = 60,实际总 63 (含 3 处嵌套多行)
+
+- **排除项 (函数名,不删)**:
+  - `resolve_one_import_v1` (main.jhyy:234) — 函数名,改会破坏 v0 调用方对照
+  - `var_name_eq_v1` (sema.jhyy:59) — 同上,函数名
+  - 2 个函数名都保留 `_v1` 后缀 (跟 v0 C-side 对齐,后续 v3.x 命名空间清理再做)
+
+- **Revert 19 个 identifier** (`xxx_v1` → `xxx`):
+  - 函数参数:`argc_v1`/`argv_v1`/`p_v1`/`path_v1`/`val_v1`/`src_v1`/`dst_v1`/`off_v1` (8 个)
+  - 局部变量:`bb_slot_v1`/`bv_slot_v1`/`d_variant_sym_v1`/`ftype_slot_v1`/`ir_v1`/`nvariants_v1`/`off_payload_v1`/`off_zero_v1`/`phi_v1`/`sym_p_v1`/`variants_buf_v1` (11 个)
+  - 用 19 个 sed 一次替换 (per-identifier),验证 0 命中可替换 `_v1` 后
+
+- **不动的 `_v1` 命中 (10 处,全部在 comments)**:
+  - 描述 `jhyy_v1 binary` 的 comment (codegen.jhyy + jhyy_helpers.c + main.jhyy + parser.jhyy + sema.jhyy + util.jhyy)
+  - 描述 `regress_v1.py` 的 comment (main.jhyy)
+  - 描述 `jhyy_v1 inline_imports` 等 W-005 workaround 的 comment
+  - 这些是历史叙述,不是 identifier
+
+### 验证
+
+- **jhyy_v1 编 src0/main.jhyy** (canonical `aa57849c...`):
+  - Compile 成功,exit=0
+  - 输出 `_v123_jhyy_v2.il` sha `348884af...`
+  - **跟 v1.2.1/v1.2.2 (`a75bcd6e`) 不同** — 这是预期的:identifier rename 改了 QBE 符号名 (symbol table 顺序/size),emit IL 必然不同
+  - 关键看 **sprint 内部** v1==v2 byte-equal (跟 v1.2.1/v1.2.2 同模式)
+
+- **Stage 2 N=3 byte-equal** (cascade 验证):
+  - v1.il sha `348884af` vs v3.il sha `554e7bde` — 7 行 cascade (跟 v1.2.1/v1.2.2 一致 7 行)
+  - diff /tmp/_v123_jhyy_v2.il /tmp/_v123_v3.il | wc -l = 12 (= 7+5 context)
+  - **7 行 cascade 仍是 Sprint 4.5+ 已知现象**,不是 v1.2.3 引入
+
+- **regress.py 50/53 PASS** (jhyy.exe `d442ba3f...`):
+  - 50 passed, 0 failed, 3 skipped ✅
+  - baseline 持平
+
+- **regress_v1.py 50/50 PASS 预期** (后台跑中)
+
+### 不动
+
+- 跟 v1.2.1/v1.2.2 同:函数名 `resolve_one_import_v1` / `var_name_eq_v1` (改函数名是 v3.x 命名空间范畴)
+- 跟 v1.2.1/v1.2.2 同:comment 里描述 `jhyy_v1` / `regress_v1.py` 的历史叙述
+- 别的 session untracked 文件
+
+### 留给后续
+
+- v1.2.4 `_v2`/`_v3`/`_v4`/`_v5` 后缀 84 处 cleanup (同模式)
+- v1.2.5 doc 同步 (workarounds.md + status.md + changelog 收尾)
+- v1.3 (下一阶段) v1.x 语法糖
+
+### 引用
+
+- v1.2.1 changelog — Stage 2 N=3 7 行 cascade 已知现象
+- [[project-sprint-v1-1-2-c-side-divergence]] — C-side vs jhyy_v1 IL divergence 性质 (rename 后 sha 变化是预期)

@@ -262,9 +262,9 @@ fn main_jhyy(_argc: i32, _argv: *u8) -> i32 {
 
     // ──── 测试 ir_emit_phi2 ────
     let phi_dst = ir_new_tmp(&ir, QBE_W());
-    let phi_v1 = ir_new_tmp(&ir, QBE_W());
+    let phi = ir_new_tmp(&ir, QBE_W());
     let phi_v2 = ir_new_tmp(&ir, QBE_W());
-    ir_emit_phi2(&ir, phi_dst, b0, phi_v1, b1, phi_v2);
+    ir_emit_phi2(&ir, phi_dst, b0, phi, b1, phi_v2);
     let want_phi = "    %t14 =w phi @start0 %t15, @b1 %t16\n" as *u8;
     let buf_phi = ir_buf_str(&ir);
     if strcmp(buf_phi, want_phi) == 0 {

@@ -446,8 +446,8 @@ fn cg_copy_struct(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) ->
         // W-008 fix: 漏一层 deref。ptr_add_u8(...) as *Type 给的是 *Type 指向
         //   fdesc+8 处的字节（即 type 字段存储位置），并不是 type 字段存的值。
         //   要拿到真正的 Type* 必须再 deref 一层：*(fdesc+8 as **Type)。
-        let ftype_slot_v1 = ptr_add_u8(fdesc_ptr, 8 as i64) as **Type;
-        let ftype = *ftype_slot_v1;
+        let ftype_slot = ptr_add_u8(fdesc_ptr, 8 as i64) as **Type;
+        let ftype = *ftype_slot;
         let foffset_ptr = ptr_add_u8(fdesc_ptr, 16 as i64) as *i64;
         let offset = *foffset_ptr;
 
@@ -507,8 +507,8 @@ fn cg_find_field_offset(st_raw: *u8, field_name: *u8, out_buf: *u8) -> i32 {
         //   field_type_raw=garbage → emit `=w loadw` 错 IL。
         //   修法：deref Sym*，读 Sym.name (Sym 字节布局 name @ offset 0)。
         //   C 端 codegen.c:854 等价 `st->fields[j].name->name`。
-        let sym_p_v1 = *(fdesc as **Sym);
-        let fname_str = *(ptr_add_u8(sym_p_v1 as *u8, 0 as i64) as **u8);
+        let sym_p = *(fdesc as **Sym);
+        let fname_str = *(ptr_add_u8(sym_p as *u8, 0 as i64) as **u8);
         if strcmp(fname_str, field_name) == 0 {
             let foff = ptr_add_u8(fdesc, 16 as i64) as *i64;
             let out_off = out_buf as *i64;
@@ -2370,19 +2370,19 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         ir_emit_alloc(ir, slot, size2);
 
         // 找 variant: 按 name 比较 (strcmp 字符串, 跟 v0 端 sema.c:851 / codegen.c:889 一致)
-        let variants_buf_v1 = (*et).variants;
-        let nvariants_v1 = (*et).nvariants;
-        let d_variant_sym_v1 = (*nev).variant_sym as *Sym;
+        let variants_buf = (*et).variants;
+        let nvariants = (*et).nvariants;
+        let d_variant_sym = (*nev).variant_sym as *Sym;
         let mut tag: i32 = 0 as i32;
         let mut found: i32 = 0 as i32;
         let mut payload_type_raw: *u8 = 0 as *u8;
         let mut i: i64 = 0 as i64;
-        while i < nvariants_v1 {
-            let v_off = ptr_add_u8(variants_buf_v1, i * VARIANT_DESC_SIZE());
+        while i < nvariants {
+            let v_off = ptr_add_u8(variants_buf, i * VARIANT_DESC_SIZE());
             let v_name_ptr = *(v_off as **Sym);
             if v_name_ptr != (0 as *Sym) {
-                if d_variant_sym_v1 != (0 as *Sym) {
-                    if strcmp((*v_name_ptr).name, (*d_variant_sym_v1).name) == (0 as i32) {
+                if d_variant_sym != (0 as *Sym) {
+                    if strcmp((*v_name_ptr).name, (*d_variant_sym).name) == (0 as i32) {
                         tag = i as i32;
                         payload_type_raw = *((v_off as i64 + (8 as i64)) as **Type) as *u8;
                         found = 1 as i32;
@@ -2396,8 +2396,8 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
 
         // store tag at offset 0
         let tag_addr = *ir_new_tmp(ir, QBE_L());
-        let off_zero_v1 = ir_new_int(0 as i64);
-        ir_emit_binary(ir, tag_addr, "add" as *u8, slot, off_zero_v1);
+        let off_zero = ir_new_int(0 as i64);
+        ir_emit_binary(ir, tag_addr, "add" as *u8, slot, off_zero);
         let tag_val = *ir_new_tmp(ir, QBE_W());
         ir_emit_copy(ir, tag_val, tag as i64);
         ir_emit_store(ir, QBE_W(), tag_val, tag_addr);
@@ -2406,8 +2406,8 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         if (*nev).payload != (0 as *u8) {
             if payload_type_raw != (0 as *u8) {
                 let payload_addr = *ir_new_tmp(ir, QBE_L());
-                let off_payload_v1 = ir_new_int((*et).payload_off);
-                ir_emit_binary(ir, payload_addr, "add" as *u8, slot, off_payload_v1);
+                let off_payload = ir_new_int((*et).payload_off);
+                ir_emit_binary(ir, payload_addr, "add" as *u8, slot, off_payload);
                 let pval = cg_expr(cg_raw, (*nev).payload as *Node);
                 cg_emit_store(cg_raw, payload_type_raw, pval, payload_addr);
             }
@@ -2607,10 +2607,10 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             if arm_returns == 0 {
                 if *nphi_p < (32 as i64) {
                     // 写 body_block 到 phi_buf[nphi*40], body_val 到 phi_buf[32*40 + nphi*40]
-                    let bb_slot_v1 = ptr_add_u8(phi_buf, (*nphi_p) * (40 as i64)) as *IRVal;
-                    *bb_slot_v1 = body_block;
-                    let bv_slot_v1 = ptr_add_u8(phi_buf, (32 as i64) * (40 as i64) + (*nphi_p) * (40 as i64)) as *IRVal;
-                    *bv_slot_v1 = body_val;
+                    let bb_slot = ptr_add_u8(phi_buf, (*nphi_p) * (40 as i64)) as *IRVal;
+                    *bb_slot = body_block;
+                    let bv_slot = ptr_add_u8(phi_buf, (32 as i64) * (40 as i64) + (*nphi_p) * (40 as i64)) as *IRVal;
+                    *bv_slot = body_val;
                     *nphi_p = *nphi_p + (1 as i64);
                 }
                 ir_emit_jmp(ir, merge_block);
