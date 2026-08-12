@@ -459,16 +459,16 @@ docs/internal/
 
 ---
 
-## § 15 待 user 后续决定(本次重构不锁,留 OS 端协调)
+## § 15 待 user 后续决定(2026-08-05 全 ✅ 锁,per `coordination.md § 3`)
 
-| # | 决定项 | 建议 | 等谁 |
+| # | 决定项 | 决定 | 锁定 |
 |---|--------|------|------|
-| 1 | v0.9 codegen bug 真修顺序(W-001~W-009 全修还是分批)| 全修,v0.9 一口气清干净 | 编译器 agent |
-| 2 | v2.0 `amd64_win_freestanding` 实现路径(走 QBE 还是自写 IL → .s 阶段)| v2.0 仍用 QBE + GCC;QBE 自写推到 v2.x 中期 | 编译器 agent |
-| 3 | v2.0 .exe byte-equal 必要性 | 推荐纳为完成定义(OS 镜像可重现)| 编译器 + OS 联合 |
-| 4 | sprint 3g `&mut + lifetime` 跟 Cap<T> 联动实现顺序 | 3g 主体 + 3g.5 phantom + 3g.7 联调 三段 | 编译器 agent |
-| 5 | v3.x 后续(3h-3n)启动时机 | 跟 OS 实际用上时间对齐;M1 启动后立刻推 3g,M11 启动前推 3i+3j+3l | 编译器 + OS 联合 |
-| 6 | v0.8 / v0.9 changelog 撰写 | v0.8 收尾写(commit 1-12 全记),v0.9 启动前 | 编译器 agent |
+| 1 | v0.9 codegen bug 真修顺序(W-001~W-009 全修还是分批)| ✅ 全修,v0.9 一口气清干净 | D24（2026-08-05） |
+| 2 | v2.0 `amd64_win_freestanding` 实现路径(走 QBE 还是自写 IL → .s 阶段)| ✅ v2.0 仍用 QBE + GCC;QBE 自写推到 v2.x 中期 | D25（2026-08-05） |
+| 3 | v2.0 .exe byte-equal 必要性 | ✅ 纳为完成定义(OS 镜像可重现)| D26（2026-08-05） |
+| 4 | sprint 3g `&mut + lifetime` 跟 Cap<T> 联动实现顺序 | ✅ 3g 主体 + 3g.5 phantom + 3g.7 联调 三段 | D27（2026-08-05） |
+| 5 | v3.x 后续(3h-3n)启动时机 | ✅ M1 启动后立刻推 3g,M11 启动前推 3i+3j+3l | D28（2026-08-05） |
+| 6 | v0.8 / v0.9 changelog 撰写 | ✅ v0.8 收尾写(commit 1-12 全记),v0.9 启动前 | D29（2026-08-05） |
 
 ---
 

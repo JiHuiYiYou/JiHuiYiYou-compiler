@@ -55,23 +55,17 @@
 
 | 项 | 当前状态 | 完成定义 |
 |----|---------|---------|
-| v0.9 末(Stage 1 单层 byte-equal) | 🚧 wip commit 2.21,Task #61 PARTIAL | C 版 jhyy 编 src0/main.jhyy → jhyy_0 → 编 src0/main.jhyy → jhyy_1;`diff jhyy_0.il jhyy_1.il` byte-equal;regress.py 持平 12 OK baseline |
-| v1.0 末(M4 hard,Stage 2 三层 N=3 fixed point) | 未启动 | jhyy_1 编 src0/main.jhyy → jhyy_2;jhyy_2 编 → jhyy_3;`diff jhyy_2.il jhyy_3.il` byte-equal;regress 持平 baseline;main.jhyy runtime 跑通 |
+| v0.9 末(Stage 1 单层 byte-equal) | ✅ shipped 2026-08-11 (wip commit 2.83) | C 版 jhyy 编 src0/main.jhyy → jhyy_0 → 编 src0/main.jhyy → jhyy_1;`diff jhyy_0.il jhyy_1.il` byte-equal;regress.py 持平 baseline |
+| v1.0 末(M4 hard,Stage 2 三层 N=3 fixed point) | ✅ TAGGED 2026-08-10 (commit `eabee0d`) | jhyy_1 编 src0/main.jhyy → jhyy_2;jhyy_2 编 → jhyy_3;`diff jhyy_2.il jhyy_3.il` byte-equal (sha `2445e97d...`);regress 持平 50/53 baseline;main.jhyy runtime 跑通 |
 
-> **⚠️ 术语澄清**:`v0.9 末` ≠ `v1.0 末(M4 hard)`。v0.9 是 Stage 1 单层(jhyy_0 vs jhyy_1 byte-equal);v1.0 是 Stage 2 三层 N=3(jhyy_1/2/3 fixed point)。**v2.0/v3.0 真正硬前置是 v1.0 末(M4 hard),不是 v0.9 末** — 后者只到 Stage 1,后者进度不影响 v2.0/v3.0 启动时点。
+> **⚠️ 术语澄清**:`v0.9 末` ≠ `v1.0 末(M4 hard)`。v0.9 是 Stage 1 单层(jhyy_0 vs jhyy_1 byte-equal);v1.0 是 Stage 2 三层 N=3(jhyy_1/2/3 fixed point)。**v2.0/v3.0 真正硬前置是 v1.0 末(M4 hard),不是 v0.9 末** — 后者只到 Stage 1,后者进度不影响 v2.0/v3.0 启动时点。**两者皆 ✅ ship**(2026-08-10 / 2026-08-11),v2.0/v3.0 sprint 启动无编译器侧前置阻塞。
 
-**v0.9 距 commit 2.21 待做**(per `architecture-refactor § 16.3`):
-- commit 2.22: 29-extsw hypothesis 验证 + 修 arena.jhyy 翻译稿(若 50/50 命中)
-- commit 2.23: W-001~W-009 全部真修 + 删 jhyy 端 workaround 注释 + 3 处 C 端 codegen.c 改
-- commit 2.24: 翻译 main.c → main.jhyy(523 行)
-- commit 2.25: Stage 1 byte-equal 验证 + regress.py `JHYY_CC` env var 改
+**v1.0 距 v0.9 末 plan 回顾**(per `v1.0.0 任务清单` 5 sprint 框架,2026-08-10 已 ship):
+- sprint 1-2: 翻译 codegen.c / jhyy_helpers.c 主体 → jhyy_0 / jhyy_1 ✅
+- sprint 3-4: 全 src0/*.jhyy 翻译 + Stage 2 三层验证(N=3 byte-equal) ✅
+- sprint 5: regress.py jhyy_1 跑通 + v1.0.0 changelog 收尾 ✅
 
-**v1.0 距 v0.9 末待做**(per `v1.0.0 任务清单` 5 sprint 框架):
-- sprint 1-2: 翻译 codegen.c / jhyy_helpers.c 主体 → jhyy_0 / jhyy_1
-- sprint 3-4: 全 src0/*.jhyy 翻译 + Stage 2 三层验证(N=3 byte-equal)
-- sprint 5: regress.py jhyy_1 跑通 + v1.0.0 changelog 收尾
-
-**v2.0/v3.0 总前置**:**v0.9 末 + v1.0 末(M4 hard)**
+**v2.0/v3.0 总前置**:**v0.9 末 + v1.0 末(M4 hard) — 两者 ✅ ship**,sprint 启动无编译器侧前置阻塞。
 
 ---
 
@@ -83,7 +77,7 @@
 |------|------|------|
 | **主改** | codegen 后端(QBE → 自写)/ target dispatcher | lang-spec + sema + codegen 单点 emit |
 | **路径** | `compiler/src0/target/` + `compiler/src0/qbe/`(v2.0 启动) | `compiler/src0/sema.jhyy` + `compiler/src0/codegen.jhyy` 单点 |
-| **依赖** | v0 C 端 `codegen.c` + QBE 工具链 | `jhyy-lang-spec-v1.0.0.md` + `jhyy-abi-v1.0.0.md` |
+| **依赖** | v0 C 端 `codegen.c` + QBE 工具链 | `jhyy-lang-spec-v1.1.0.md` + `jhyy-abi-v1.0.0.md` |
 
 ### 3.2 ABI 影响隔离
 
@@ -129,7 +123,7 @@
 
 | Sprint | 内容 | 依赖 |
 |--------|------|------|
-| **v0.9 末** | W-001~W-009 真修 + main.c 翻译 + Stage 1 byte-equal | (当前 wip commit 2.21) |
+| **v0.9 末** | W-001~W-009 真修 + main.c 翻译 + Stage 1 byte-equal | ✅ shipped (commit 2.83, 2026-08-11) |
 | **v1.0**(5 sprint 框架) | codegen.c / jhyy_helpers.c 翻译 + 全 src0/ 翻译 + Stage 2 三层 N=3 fixed point | v0.9 末 |
 | **v1.1.0** ⟂ **v2.0 sprint A** 前段 | lang-spec § 18-21 + abi § 12 草案 / amd64_win_freestanding target 起步 | v0.9 末 / v1.0 末 |
 | **v2.0 sprint A** ⟂ **v3.0 3a** | amd64_win_freestanding target + QBE + GCC / inline asm | v1.0 末 / v1.0 末 |
@@ -177,8 +171,8 @@
 
 | 里程碑 | 关键节点 |
 |--------|---------|
-| **v0.9 末**(Stage 1 单层 byte-equal) | 当前 → 2.22(29-extsw 验证)→ 2.23(W 真修)→ 2.24(main.c 翻译)→ 2.25(Stage 1 + regress.py JHYY_CC) |
-| **v1.0 末**(M4 hard,Stage 2 三层 N=3) | v0.9 末 → 5 sprint 框架 |
+| **v0.9 末**(Stage 1 单层 byte-equal) | ✅ shipped (commits 2.22-2.83, 2026-08-11 完成) |
+| **v1.0 末**(M4 hard,Stage 2 三层 N=3) | ✅ TAGGED (commit `eabee0d`, 2026-08-10) |
 | **OS 端可设计 / prep** | v0.9 末起 — OS 团队写 kernel 源码(用 `*mut T` raw pointer per D5),不编 |
 | **OS 端可编译 + 跑**(编 + OVMF 实际 M1 验证) | v1.0 末 + v2.0 + v3.0 3a-3c/3e-3f 全 ship |
 | **OS M1 launch**(kernel boot, printk 到 framebuffer) | v2.0 + v3.0 3a-3c/3e-3f 全 ship(3d 软,M1 不依赖) |
@@ -192,10 +186,10 @@
 ## § 6 OS M1 launch 路径(详细顺序图)
 
 ```
-当前 (2026-08-06)
+当前 (2026-08-12)
   │
-  ↓ (commits 2.22-2.25)
-v0.9 末(Stage 1 单层 byte-equal)✅
+  ↓ (commits 2.22-2.83)
+v0.9 末(Stage 1 单层 byte-equal)✅ (2026-08-11)
   │
   ├──> OS 端可立刻开始 prep + 用 raw pointer (`*mut T` per D5) 写 kernel 源码
   │    (注:写完不编,要等 v1.0 末 + v2.0 + v3.0 3a-3c/3e-3f 全部 ship 后才能跑)
