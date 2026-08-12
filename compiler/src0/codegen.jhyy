@@ -2373,8 +2373,8 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         let variants_buf_v1 = (*et).variants;
         let nvariants_v1 = (*et).nvariants;
         let d_variant_sym_v1 = (*nev).variant_sym as *Sym;
-        let mut tag_v1: i32 = 0 as i32;
-        let mut found_v1: i32 = 0 as i32;
+        let mut tag: i32 = 0 as i32;
+        let mut found: i32 = 0 as i32;
         let mut payload_type_raw: *u8 = 0 as *u8;
         let mut i: i64 = 0 as i64;
         while i < nvariants_v1 {
@@ -2383,23 +2383,23 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             if v_name_ptr != (0 as *Sym) {
                 if d_variant_sym_v1 != (0 as *Sym) {
                     if strcmp((*v_name_ptr).name, (*d_variant_sym_v1).name) == (0 as i32) {
-                        tag_v1 = i as i32;
+                        tag = i as i32;
                         payload_type_raw = *((v_off as i64 + (8 as i64)) as **Type) as *u8;
-                        found_v1 = 1 as i32;
+                        found = 1 as i32;
                     }
                 }
             }
-            if found_v1 != (0 as i32) { break; }
+            if found != (0 as i32) { break; }
             i = i + (1 as i64);
         }
-        // 没找到: tag_v1 保持 0 (跟 v0 端 codegen.c:900 silent 行为一致)
+        // 没找到: tag 保持 0 (跟 v0 端 codegen.c:900 silent 行为一致)
 
         // store tag at offset 0
         let tag_addr = *ir_new_tmp(ir, QBE_L());
         let off_zero_v1 = ir_new_int(0 as i64);
         ir_emit_binary(ir, tag_addr, "add" as *u8, slot, off_zero_v1);
         let tag_val = *ir_new_tmp(ir, QBE_W());
-        ir_emit_copy(ir, tag_val, tag_v1 as i64);
+        ir_emit_copy(ir, tag_val, tag as i64);
         ir_emit_store(ir, QBE_W(), tag_val, tag_addr);
 
         // store payload if present

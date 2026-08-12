@@ -51,11 +51,11 @@ fn ptr_add(p: *u8, off: i64) -> *u8 {
 }
 
 fn arena_new_block(a: *Arena, min_size: i64) -> i32 {
-    let mut size_v1: i64 = (*a).def_size;
-    if size_v1 < min_size {
-        size_v1 = min_size;
+    let mut size: i64 = (*a).def_size;
+    if size < min_size {
+        size = min_size;
     }
-    let total = 16 as i64 + size_v1;
+    let total = 16 as i64 + size;
     let raw = malloc(total);
     if raw == (0 as *u8) {
         return 0;
@@ -66,7 +66,7 @@ fn arena_new_block(a: *Arena, min_size: i64) -> i32 {
     let data = ptr_add(raw, 16 as i64);
     (*a).start = data;
     (*a).cur = data;
-    (*a).end = ptr_add(data, size_v1);
+    (*a).end = ptr_add(data, size);
     return 1;
 }
 
