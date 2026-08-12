@@ -28,9 +28,11 @@ __pycache__/
 *.pyc
 # 忽略 Claude Code 本地配置
 .claude
+.agents
 # 项目级 Claude Code 协作入口（不随仓库公开；本地保留以供 AI 跨会话阅读）；
 # mcp-jhyy/CLAUDE.md 例外：该 subdir 的指令文件公开跟踪
 CLAUDE.md
+skills-lock.json
 !mcp-jhyy/CLAUDE.md
 # codegraph 索引（daemon.pid mtime 抖动会污染 git status）
 .codegraph/
