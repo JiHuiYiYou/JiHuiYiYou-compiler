@@ -54,11 +54,7 @@ JHYY is a self-designed, statically typed, expression-oriented, compiled systems
 
 **Design goals**:
 - **Self-hosting** — the compiler written in itself, achieving byte-equal closure (✓ v1.0.0)
-<<<<<<< HEAD
 - **OS development** — aligned with the [JiHuiYiYou-OS](https://github.com/JiHuiYiYou/JiHuiYiYou-OS) project, providing OS-required extensions like inline asm / volatile / naked / `no_std` / `&mut` + lifetime (v3.x roadmap)
-=======
-- **OS development** — aligned with the [`jhyy_OS`]([../jhyy_OS](https://github.com/JiHuiYiYou/JiHuiYiYou-OS)) project, providing OS-required extensions like inline asm / volatile / naked / `no_std` / `&mut` + lifetime (v3.x roadmap)
->>>>>>> 2069d843d22cda52b6ae1654b9ed8e293e6ac607
 - **Native performance** — QBE backend, no runtime / no GC, directly produces PE/COFF binaries
 
 ## A tour of the syntax
