@@ -59,6 +59,10 @@ def _build_subprocess_env() -> dict:
 
     Mirror jhyy_runner.py:_build_subprocess_env (modules 独立, 不互相 import).
     Rationale + empirical 见 jhyy_runner.py.
+
+    ⚠️ 必须 FORCE 写 Windows-style PATH — 不能只补缺. 当 MCP server 自身在 MSYS bash 下
+    启动, os.environ['PATH'] 是 `/c/...` 格式, jhyy.exe 内部 `system("cmd /c gcc ...")` 拿这个
+    PATH 给 cmd.exe 用, cmd.exe 不认 `/c/...` 路径 → gcc 找 cc1/as/ld 失败 → "gcc link failed".
     """
     env = os.environ.copy()
     if not env.get("TMP"):
@@ -67,8 +71,15 @@ def _build_subprocess_env() -> dict:
         env["TEMP"] = r"C:\Users\liuzhen\AppData\Local\Temp"
     if not env.get("TMPDIR"):
         env["TMPDIR"] = r"C:\Users\liuzhen\AppData\Local\Temp"
-    if not env.get("PATH"):
-        env["PATH"] = r"C:\Windows\System32;C:\Windows;C:\msys64\ucrt64\bin"
+    # ALWAYS force Windows-style PATH (即使 os.environ 已有, 也要 sanitize 掉 MSYS `/c/...` 格式)
+    win_path = r"C:\Windows\System32;C:\Windows;C:\msys64\ucrt64\bin;C:\msys64\usr\bin"
+    if env.get("PATH") and not env["PATH"].startswith("/") and not env["PATH"].startswith("/c"):
+        # 已 Windows-style, 补 ucrt64 进 head (gcc/cc1 在这里)
+        if r"C:\msys64\ucrt64\bin" not in env["PATH"]:
+            env["PATH"] = r"C:\msys64\ucrt64\bin;" + env["PATH"]
+    else:
+        # 空 / MSYS-style / 其他, 用 Windows fallback
+        env["PATH"] = win_path
     if not env.get("SystemRoot"):
         env["SystemRoot"] = r"C:\Windows"
     if not env.get("SystemDrive"):

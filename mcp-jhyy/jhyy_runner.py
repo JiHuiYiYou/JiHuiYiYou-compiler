@@ -44,8 +44,14 @@ def _build_subprocess_env() -> dict:
     Empirical (env -i simulation, 2026-08-12): gcc 需要 TMP/TEMP (collect2 tmp file)
     + PATH 含 /c/msys64/ucrt64/bin (ld.exe). 缺任一 → EXIT=1 silent.
 
-    Fix: 拷贝 os.environ (already-populated 时不动) + 补 critical 缺失 vars.
-    Direct python regress.py 调用时 os.environ 已 full, 拷贝后只补 missing —
+    ⚠️ 2026-08-12 加: 当 MCP server 在 MSYS bash 下 spawn, os.environ['PATH'] 可能是
+    `/c/...` 格式. 即使 PATH 不为空, 这种格式传给 jhyy.exe 内部的 cmd.exe 仍然坏:
+    cmd.exe 不认 `/c/...` 虚拟路径, gcc subprocess (cc1/as/ld) 找不到 → "gcc link failed".
+    所以 PATH 处理必须 FORCE Windows-style, 不是只补缺.
+
+    Fix: 拷贝 os.environ (already-populated 时不动) + 补 critical 缺失 vars
+    + sanitize PATH 为 Windows-style.
+    Direct python regress.py 调用时 os.environ 已 Windows-style, sanitize no-op —
     不破坏现有 env.
     """
     env = os.environ.copy()
@@ -55,8 +61,15 @@ def _build_subprocess_env() -> dict:
         env["TEMP"] = r"C:\Users\liuzhen\AppData\Local\Temp"
     if not env.get("TMPDIR"):
         env["TMPDIR"] = r"C:\Users\liuzhen\AppData\Local\Temp"
-    if not env.get("PATH"):
-        env["PATH"] = r"C:\Windows\System32;C:\Windows;C:\msys64\ucrt64\bin"
+    # ALWAYS force Windows-style PATH
+    win_path = r"C:\Windows\System32;C:\Windows;C:\msys64\ucrt64\bin;C:\msys64\usr\bin"
+    if env.get("PATH") and not env["PATH"].startswith("/"):
+        # 已 Windows-style, 补 ucrt64 进 head (gcc/cc1 在这里)
+        if r"C:\msys64\ucrt64\bin" not in env["PATH"]:
+            env["PATH"] = r"C:\msys64\ucrt64\bin;" + env["PATH"]
+    else:
+        # 空 / MSYS-style (`/c/...`), 用 Windows fallback
+        env["PATH"] = win_path
     if not env.get("SystemRoot"):
         env["SystemRoot"] = r"C:\Windows"
     if not env.get("SystemDrive"):

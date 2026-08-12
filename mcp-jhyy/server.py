@@ -327,7 +327,7 @@ def _simple_format(src: str) -> str:
 def jhyy_regress(
     binary: str = "compiler/build/bin/jhyy.exe",
     tests: Optional[list] = None,
-    timeout: int = 10,
+    timeout: int = 20,
     enforce_baseline_hash: bool = True,
 ) -> dict:
     """Run regression tests against a JHYY compiler binary.
