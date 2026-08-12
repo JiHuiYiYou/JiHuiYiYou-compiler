@@ -54,7 +54,7 @@ JHYY 是一门自研的、静态类型的、表达式导向的编译型系统编
 
 **设计目标**:
 - **自举能力** — 编译器用自身语言写自身,达成 byte-equal 闭环(✓ v1.0.0)
-- **OS 开发** — 与 [`jhyy_OS`](../jhyy_OS) 项目对齐,提供 inline asm / volatile / naked / `no_std` / `&mut` + lifetime 等 OS-required 特性(v3.x 路线)
+- **OS 开发** — 与 [JiHuiYiYou-OS](https://github.com/JiHuiYiYou/JiHuiYiYou-OS) 项目对齐,提供 inline asm / volatile / naked / `no_std` / `&mut` + lifetime 等 OS-required 特性(v3.x 路线)
 - **原生性能** — QBE 后端,无运行时 / 无 GC,直接产出 PE/COFF 二进制
 
 ## 一段代码看语法
@@ -272,7 +272,7 @@ JiHuiYiYou-compiler/
 - `v2.x || v3.x`:**并行轴**(各自推进;OS M1 启动前两轴各自达成即可,不互相阻塞)
 
 > [!IMPORTANT]
-> **与 jhyy_OS 项目对齐**:12 个跨边界问题 + 6 个决定已闭环(per [`coordination.md § 6`](../jhyy_OS/docs/coordination.md))。v2.0 sprint 设计输入详见 [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md)。
+> **与 [JiHuiYiYou-OS](https://github.com/JiHuiYiYou/JiHuiYiYou-OS) 项目对齐**:12 个跨边界问题 + 6 个决定已闭环,并反映在 [docs/plans/v2/v2.0.0-os-prep.md](docs/plans/v2/v2.0.0-os-prep.md) 的 OS 准备规划中。v2.0 sprint 设计输入也是该计划。
 
 ---
 

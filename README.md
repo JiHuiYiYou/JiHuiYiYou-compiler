@@ -54,7 +54,7 @@ JHYY is a self-designed, statically typed, expression-oriented, compiled systems
 
 **Design goals**:
 - **Self-hosting** — the compiler written in itself, achieving byte-equal closure (✓ v1.0.0)
-- **OS development** — aligned with the [`jhyy_OS`](../jhyy_OS) project, providing OS-required extensions like inline asm / volatile / naked / `no_std` / `&mut` + lifetime (v3.x roadmap)
+- **OS development** — aligned with the [JiHuiYiYou-OS](https://github.com/JiHuiYiYou/JiHuiYiYou-OS) project, providing OS-required extensions like inline asm / volatile / naked / `no_std` / `&mut` + lifetime (v3.x roadmap)
 - **Native performance** — QBE backend, no runtime / no GC, directly produces PE/COFF binaries
 
 ## A tour of the syntax
@@ -229,7 +229,7 @@ JiHuiYiYou-compiler/
 │           ├── jhyy_v1.exe     self-hosted compiler (jhyy compiled src0/)
 │           └── regress.py      regression script
 ├── qbe/                        vendored QBE backend (c9x.me/compile)
-├── mcp-jhyy/                   Claude Code MCP server (4 tools)
+├── mcp-jhyy/                   Claude Code MCP server (11 tools)
 ├── vscode-ext/                 VS Code language extension (syntax highlighting)
 ├── docs/
 │   ├── abis/                   language spec + ABI whitepaper (locked)
@@ -272,7 +272,7 @@ The project uses a **single version axis**, no phase-N numbering:
 - `v2.x || v3.x`: **parallel axes** (each progresses independently; both must finish before OS M1 starts)
 
 > [!IMPORTANT]
-> **Alignment with the jhyy_OS project**: 12 cross-boundary questions + 6 decisions are closed (per [`coordination.md § 6`](../jhyy_OS/docs/coordination.md)). The v2.0 sprint design input is [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md).
+> **Alignment with the [JiHuiYiYou-OS](https://github.com/JiHuiYiYou/JiHuiYiYou-OS) project**: 12 cross-boundary questions + 6 decisions are closed and reflected in the OS prep plan at [docs/plans/v2/v2.0.0-os-prep.md](docs/plans/v2/v2.0.0-os-prep.md). The v2.0 sprint design input is the same plan.
 
 ---
 

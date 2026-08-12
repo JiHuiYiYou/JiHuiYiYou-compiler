@@ -2,10 +2,11 @@
 # -*- coding: utf-8 -*-
 """JHYY MCP Server — 让 Claude Code 能编译、运行、检查 .jhyy 代码。
 
-提供 10 个工具:
+提供 11 个工具:
   - jhyy_compile         编译 .jhyy 文件
   - jhyy_run             编译并运行
   - jhyy_check           仅做语法/语义检查
+  - jhyy_get_il          获取 QBE IL 输出
   - jhyy_lang_ref        查询语言规范
   - jhyy_abi_info        查询 ABI 信息
   - jhyy_format          代码格式化 (简单对齐 / 占位)
