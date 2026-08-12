@@ -1410,3 +1410,84 @@ if (!conv && (src_qt == 'w' || src_qt == 'l') && (dst_qt == 'b' || dst_qt == 'h'
 - Sprint 4.7 IRVal pass-by-value memory: `project_sprint4_7_irval_pass_by_value_bug.md`
 - v0.9 wip commit 2.87 (Sprint v1.1.7 Bug 4 narrow 真修)
 
+## W-014: `jhyy_selfhost_check` MCP pre-stage cleanup deletes canonical closure binaries
+
+**ID:** W-014
+**状态:** ✅ RESOLVED (2026-08-12, Sprint mcp-2 W-014)
+**日期:** 2026-08-12
+**触发面:** `mcp__jhyy__jhyy_selfhost_check` (默认 `auto_rebuild=False`) — 调 `mcp-jhyy/jhyy_runner.py:selfhost_check()`,Stage 2/3 pre-stage cleanup 把 chain input binary 删了 → FileNotFoundError → 整链 early-abort,canonical closure binaries (`jhyy_v2.exe` / `jhyy_v3.exe`) 被销毁。
+
+**根因 (2026-08-12 闭环):**
+
+`mcp-jhyy/jhyy_runner.py` 的 chain 设计是**output path 跟 input path 同名(只差 .exe 后缀)**:
+- Stage 1: input = `jhyy_v1.exe.exe`,output = `jhyy_v1.exe` (→ `jhyy_v1.il`)
+- Stage 2: input = `jhyy_v2.exe`,output = `jhyy_v2.exe` ← **同一个文件!**
+- Stage 3: input = `jhyy_v3.exe`,output = `jhyy_v3.exe` ← **同一个文件!**
+- Stage 4: input = `jhyy_v3.exe`,output = `jhyy_v3.exe.exe` (named to match output suffix)
+
+Sprint mcp-2 (commit `5eb10bf`) 加的 pre-stage cleanup:
+```python
+_safe_remove(output_base + ".exe")  # 删 output (.exe)
+_safe_remove(output_base + ".il")   # 删 output (.il)
+```
+
+跑 stage 2 时,`_safe_remove("compiler/build/bin/jhyy_v2.exe" + ".exe")` → 把 stage 2 的 **input binary** 删了!Stage 3 同样删 `jhyy_v3.exe`。然后下一行 `_safe_remove(".il")` 也走同 output_base → 删 input 不存在的 .il(无害)。
+
+Stage 2 的 compile 命令:
+```python
+cmd = [exe_path, "compile", src_abs, "-o", output_base]  # exe_path = jhyy_v2.exe (刚被删)
+```
+
+→ `subprocess.run` 报 **FileNotFoundError** (Windows) / "Command not found (exit=-1)"(Linux)。整链 early-abort 在 stage 2,**stage 3-4 都没跑**。
+
+**结果 (验证 2026-08-12):**
+- BEFORE fix MCP `jhyy_selfhost_check` (auto_rebuild=False):
+  - 早 abort at stage 2: `"jhyy_v2 compile failed (exit=-1): Command not found"`
+  - **canonical `compiler/build/bin/jhyy_v2.exe` (sha `d3aeed09...`, v1.0.0 tag 锁定) 被永久删除**
+  - 需要 `git restore compiler/build/bin/jhyy_v2.exe` 才能恢复
+- AFTER fix (output 用 `_sh_vN` scratch prefix):
+  - 直接 Python 调 `jhyy_runner.selfhost_check()`:`{"ok": True, "all_byte_equal": True, "il_sha256": "749be833..."}`
+  - canonical `jhyy_v2.exe` / `jhyy_v3.exe` / `jhyy_v4.exe` **全部不动**
+  - 4 个 stage IL sha 全部 byte-equal `749be833...`(Stage 2 N=3 闭环 仍在)
+
+**Fix 设计 (核心 2 行 + cleanup):**
+
+```python
+chain = [
+    ("jhyy_v1", "compiler/build/bin/jhyy_v1.exe.exe", "compiler/build/bin/_sh_v1"),  # ← 改
+    ("jhyy_v2", "compiler/build/bin/jhyy_v2.exe",     "compiler/build/bin/_sh_v2"),  # ← 改
+    ("jhyy_v3", "compiler/build/bin/jhyy_v3.exe",     "compiler/build/bin/_sh_v3"),  # ← 改
+    ("jhyy_v4", "compiler/build/bin/jhyy_v3.exe",     "compiler/build/bin/_sh_v4"),  # ← 改 (v4 = v3 编 src)
+]
+
+# After chain done: cleanup scratch
+for stage, _, output_rel in chain:
+    for ext in (".exe", ".il", ".s"):
+        _safe_remove(_resolve_path(output_rel) + ext, retries=2, delay_ms=200)
+```
+
+input (canonical) 跟 output (scratch `_sh_vN`) 物理分开 → pre-stage cleanup 只动 scratch,canonical 不动。Chain 结束主动清 scratch(包括 ld.exe 留下的 `.s`)。
+
+**为什么不直接 disable pre-stage cleanup?** Sprint mcp-2 加它的目的是解 Windows file lock:上次 selfhost_check 跑完 ld.exe 进程可能短暂 hold 文件,下一次 `_safe_remove` 要 retry on lock。如果 disable,下次跑会撞 `PermissionError` (lock) 而不是 `FileNotFoundError` (本 bug)。所以 **保留 cleanup,只换 output path**。
+
+**为什么不 rename output 到 `<input>.out`?** Windows 命令行 + QBE 后端对 `-o` 参数解析里 `.exe` 后缀处理有历史包袱(见 W-005 #1 family);`output_base + ".il"` 路径走 `output_base` + 显式 `.il` 后缀(jhyy.exe append `.il` 机制 per `feedback_qbe_crlf_root_cause`),改成 `_sh_vN` + `.exe` / `.il` 后缀跟原 path 形态一一对应,改动最小。
+
+**Sprint 历史:**
+- v1.0.0 tag (`eabee0d`, 2026-08-10)— Stage 2 N=3 byte-equal 闭环 commit,**MCP `jhyy_selfhost_check` 尚未引入**,所有链是手动 `subprocess.run` 跑,无 cleanup 步骤
+- Sprint mcp-2 (commit `5eb10bf`, 2026-08-12 早期)— 加 `jhyy_*` MCP 工具链 + pre-stage cleanup,**引入本 bug**(没人测 stage 2+)
+- Sprint mcp-2 W-014 (2026-08-12)— 闭环。直接 Python 调验证 OK,MCP server 仍 cache 老代码需重启
+
+**superseder:** 无 — chain input/output 分开是稳定设计,未来若加 stage 5+ 用同样模式
+
+**不变量 (canonical binary 保护):**
+- chain 列表里每个 `(stage, exe_rel, output_rel)` 必须满足 `output_rel != exe_rel`(或至少不同 base name);`jhyy_vN.exe` 跟 `_sh_vN` 是不同 base
+- pre-stage `_safe_remove` 只走 output_base(input 不动)
+- post-chain cleanup loop 只清 `_sh_*` scratch
+- 如果未来加新 stage,要重新检查 input/output 命名不能冲撞
+
+**引用:**
+- Sprint mcp-2 W-014 plan: 跟 v1.3.1 plan 同 session
+- v1.0.0 tag `eabee0d`:`docs/logs/v1/changelog-v1.0.0.md` Stage 2 N=3 闭环 commit
+- W-005 #1 family (Windows `.exe` suffix): `feedback_qbe_crlf_root_cause.md`
+- baseline binary hash 守门:`feedback_regress_baseline_binary_hash.md`(防 phantom binary)
+

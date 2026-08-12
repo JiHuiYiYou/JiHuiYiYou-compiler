@@ -478,11 +478,18 @@ def selfhost_check(src: str = "compiler/src0/main.jhyy", auto_rebuild: bool = Fa
             }
 
     # Check binaries exist
+    # W-014 fix (2026-08-12): outputs use _sh_ scratch prefix so pre-stage cleanup
+    # doesn't delete the canonical jhyy_v2.exe / jhyy_v3.exe input binaries.
+    # Before fix: stages 2/3 had input == output (only .exe suffix differs), so
+    # `_safe_remove(output_base + ".exe")` deleted the input → FileNotFoundError
+    # → "Command not found (exit=-1)". Canonical closure binaries committed at
+    # v1.0.0 tag were destroyed on every selfhost_check call. Now outputs go to
+    # scratch files (_sh_vN.exe / _sh_vN.il), leaving canonical binaries intact.
     chain = [
-        ("jhyy_v1", "compiler/build/bin/jhyy_v1.exe.exe", "compiler/build/bin/jhyy_v1"),
-        ("jhyy_v2", "compiler/build/bin/jhyy_v2.exe", "compiler/build/bin/jhyy_v2"),
-        ("jhyy_v3", "compiler/build/bin/jhyy_v3.exe", "compiler/build/bin/jhyy_v3"),
-        ("jhyy_v4", "compiler/build/bin/jhyy_v3.exe", "compiler/build/bin/jhyy_v4"),  # v4 = v3 编 src 再一次
+        ("jhyy_v1", "compiler/build/bin/jhyy_v1.exe.exe", "compiler/build/bin/_sh_v1"),
+        ("jhyy_v2", "compiler/build/bin/jhyy_v2.exe",     "compiler/build/bin/_sh_v2"),
+        ("jhyy_v3", "compiler/build/bin/jhyy_v3.exe",     "compiler/build/bin/_sh_v3"),
+        ("jhyy_v4", "compiler/build/bin/jhyy_v3.exe",     "compiler/build/bin/_sh_v4"),  # v4 = v3 编 src 再一次
     ]
     src_abs = _resolve_path(src)
 
@@ -560,6 +567,12 @@ def selfhost_check(src: str = "compiler/src0/main.jhyy", auto_rebuild: bool = Fa
     unique_shas = set(il_files.values())
     all_byte_equal = len(unique_shas) == 1
     common_sha = next(iter(unique_shas)) if all_byte_equal else None
+
+    # W-014 cleanup: remove scratch _sh_vN.exe + _sh_vN.il + .s (ld.exe also emits .s).
+    # Keep canonical jhyy_vN.exe (committed at v1.0.0) untouched.
+    for stage, _, output_rel in chain:
+        for ext in (".exe", ".il", ".s"):
+            _safe_remove(_resolve_path(output_rel) + ext, retries=2, delay_ms=200)
 
     return {
         "ok": all_byte_equal,
