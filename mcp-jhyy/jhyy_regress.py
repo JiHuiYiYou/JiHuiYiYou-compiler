@@ -276,6 +276,24 @@ def run_all(
     print(f"\n===== {passed}/{passed + failed} passed, {failed} failed, {skipped} skipped "
           f"(of {len(files)} total) =====")
 
+    # Sprint mcp-2: cleanup _regress_* artifacts for tests that didn't fail.
+    # Pass → clean dir after run; Fail → keep .il/.s/.exe for inspection
+    # (per feedback_il_s_debugging_pattern: .il 比 gdb 无符号更有效).
+    failed_names = {os.path.splitext(ft["file"])[0] for ft in failed_tests}
+    cleaned = 0
+    for fname in files:
+        name = os.path.splitext(fname)[0]
+        if name not in failed_names:
+            for ext in (".il", ".s", ".exe"):
+                p = str(JHYY_ROOT / "compiler/build/bin" / f"_regress_{name}{ext}")
+                try:
+                    os.remove(p)
+                    cleaned += 1
+                except FileNotFoundError:
+                    pass
+    if cleaned > 0:
+        print(f"  (cleaned {cleaned} _regress_* artifacts; failed tests preserved)")
+
     return {
         "ok": failed == 0,
         "binary": binary,
