@@ -28,7 +28,7 @@
 | [W-001](#w-001-hash_string-用-i32-deref-绕-v0-codegen-loadsb-错) | RESOLVED (v0.8 commit 9) | hash_string 改 byte-by-byte `*u8` deref + length mix (FNV-1a), 真修 W-001 副作用 |
 | [W-002](#w-002-mainjhyy-重命名绕-jhyy_v1-hash_string-堆损坏) | RESOLVED (v0.9 wip commit 2.12) | 211 个 src0 标识符 `_v1` 后缀化 revert 回原名, W-001 真修后失效 |
 | [W-003](#w-003-jhyy_v1-let-_-fncall-顶层-嵌套-segfault) | ACTIVE | `let _ = fncall(...)` 改 direct call，绕 jhyy_v1 codegen segfault（Bug 7/7b） |
-| [W-004](#w-004-short-local-var-4-chars--symtab-hash-撞--jhyy_v1-field-assign-死循环) | ACTIVE (BLOCKED verification — Task #60 fixed 2026-08-06; W-004 verification deferred to post-v1.0.0) | 短（≤4 字符）local var / fn 参数 / field 改名绕 jhyy_v1 symtab hash 撞（stack overflow） |
+| [W-004](#w-004-short-local-var-4-chars--symtab-hash-撞--jhyy_v1-field-assign-死循环) | RESOLVED (transitively closed by W-001 byte-by-byte FNV-1a 真修 — minimal repro + 4 boundary variations all pass codegen on jhyy_v1 (sha `ba94df93...`), 2026-08-12 verified) | 短（≤4 字符）local var / fn 参数 / field 改名绕 jhyy_v1 symtab hash 撞（stack overflow） |
 | [W-005](#w-005-let-mut--assign--jhyy_v1-codegen-segfault) | RESOLVED (v0.9 wip commit 2.13) | `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault；commit 2.11 CGContext 布局对齐真修 + commit 2.13 revert 16 处回 `let mut` 风格 |
 | [W-006](#w-006-jhyy_v1-return-x--y-两-1-char-var-发-127qbe-fail) | RESOLVED (transitively closed by Sprint 4.21-4.25 W-005 #2 真修 chain — minimal repro no longer triggers, 2026-08-11 verified) | jhyy_v1 codegen 让两个 1-char 局部变量在 `return x ± y` 共享同一 stack slot → QBE fail / exit 127；改名或加类型注解绕 |
 | [W-007](#w-007-jhyy_v1-fn--i64--return--literal-as-i64-emit-w-copy) | ACTIVE | jhyy_v1 codegen 把 `fn() -> i64 { return X as i64; }` 的 return value 当 w（32-bit）emit → QBE "invalid type for jump argument" 错 |
@@ -322,7 +322,7 @@ store_byte_i32(nul1, 0 as i32);
 ## W-004: short local var (≤4 chars) → symtab hash 撞 → jhyy_v1 field assign 死循环
 
 **ID:** W-004
-**状态:** ACTIVE (v0.9 wip commit 2.14 验证 BLOCKED — 详见下方"验证状态 2026-08-05")
+**状态:** RESOLVED (transitive — W-001 byte-by-byte FNV-1a 真修 indirect coverage; minimal repro + 4 boundary variations all pass codegen on jhyy_v1 (sha `ba94df93...`) with EXIT=1 (link stage only), 2026-08-12 verified)
 **日期:** 2026-08-03
 **触发面:** 同时存在 ① 短（≤4 字符）函数名 + ② 短（≤4 字符）`let` 局部 var 名 + ③ struct field 赋值的组合。具体阈值取决于三者长度之和（如 `fn main` 4 + `let a` 1 + `field cur` 3 = fail；`fn entry` 5 + `let a` 1 + `field cur` 3 = OK）。
 **症状:** jhyy_v1 编译含此模式的源码 → 0xC00000FD STACK OVERFLOW（exit 3221226356）。**不是** segfault（exit 3221225477）。
@@ -373,7 +373,7 @@ fn ab() -> i32 {                              // fn 长度 2，但其它都长
 
 **失效条件:** jhyy_v1 的 codegen 对 `*i32` deref 4-byte read 改成 byte-by-byte 不再 overread（修 W-001 根因）→ W-004 可移除。
 
-**superseder:** TBD（v0 codegen fix sprint，post v1.0.0）
+**superseder:** ✅ closed (root cause = W-001 byte-by-byte FNV-1a 真修 ship in v0.8 commit 9 `d570c72`, Task #60 真修 unblocked verification path in v0.9 wip commit 2.15 `52843b6`) — 详见下方"## W-004 RESOLVED — transitively closed by W-001 byte-by-byte 真修 (2026-08-12)" 段
 
 **引用:**
 - `memory/feedback_v0_codegen_bug_workarounds.md` Bug 6 (let-mut assignment) + Bug 1 (hash_string overread)
@@ -397,6 +397,46 @@ fn ab() -> i32 {                              // fn 长度 2，但其它都长
 **结论**: W-004 标 RESOLVED 失效条件 (i) 无法满足, 推 v1.0.0 sprint 3+ Task #60 修后**再做 W-004 验证**。W-004 status 保持 ACTIVE (BLOCKED verification)。
 
 **contingency**: 如果 Task #60 修后, jhyy_v1 编 src0/codegen.jhyy / parser.jhyy / sema.jhyy 不再 stack overflow → W-004 可标 RESOLVED (W-001 真修已间接覆盖);如果仍 stack overflow → 立刻开 commit 2.15 (W-004 批量改名, 触发面消除)。
+
+### 验证状态 2026-08-12 (Sprint v1.1.1) — ✅ PASS → 标 RESOLVED (transitive)
+
+**Task #60 真修 ship 2026-08-06** (commit `52843b6` v0.9 wip commit 2.15) → 验证路径 unblocked. Sprint v1.1.1 实际跑了 6 个最小 repro (BAD + GOOD + 4 boundary variations), jhyy_v1 (sha `ba94df93...`) 全部**通过 codegen 阶段** (不再触发 0xC00000FD STACK OVERFLOW):
+
+| 测试 | 触发面 (fn / var / field) | C-side 行为 | jhyy_v1 行为 | 期望 (W-004 真修) |
+|------|---------------------------|-------------|--------------|---------------------|
+| BAD (workarounds.md L343-349) | `main`(4) / `a`(1) / `cur`(3) | EXIT=1 (link fail due to `main` symbol conflict with runtime.c) | EXIT=1 (same) | ✅ codegen OK |
+| GOOD (workarounds.md L351-358) | `ab`(2) / `arena_local`(11) / `current_value`(13) | EXIT=1 (link fail) | EXIT=1 (same) | ✅ codegen OK |
+| v1 (extreme short) | `a`(1) / `b`(1) / `c`(1) | EXIT=1 | EXIT=1 | ✅ codegen OK |
+| v2 (all 4-char) | `aaaa`(4) / `bbbb`(4) / `cccc`(4) | EXIT=1 | EXIT=1 | ✅ codegen OK |
+| v3 (5-char fn) | `entry`(5) / `b`(1) / `c`(1) | EXIT=1 | EXIT=1 | ✅ codegen OK |
+| v4 (7-char field) | `a`(1) / `b`(1) / `current`(7) | EXIT=1 | EXIT=1 | ✅ codegen OK |
+
+**关键观察**: jhyy_v1 在所有 6 个测试中, codegen 阶段日志 `Pass B start → B i=0 → cg_module done → codegen done` 完整, 后续 link 阶段失败只是因为 fn 名 (`main` / `a` / `ab` 等) 跟 runtime.c 的 `int main(int, char**)` 冲突 — **不是 W-004 触发**. 之前 W-004 触发是 exit 3221226356 (0xC00000FD STACK OVERFLOW), 现在 6/6 都是 EXIT=1 + "gcc link failed", 完全没有 stack overflow.
+
+**W-004 vs W-006 真因 关系 (避免误诊)**:
+- W-006 真因 = W-005 #2 family (cg_expr IRVal struct pass-by-value stale pointer) — Sprint 4.21-4.25 真修时一并解决
+- W-004 真因 = W-001 family (hash_string `*i32` deref overread → symtab 撞 → cg_emit_store / cg_copy_struct 走错 sym → 死循环)
+- **不同 family** — W-006 transitive close 不连带 W-004. W-004 独立被 W-001 byte-by-byte FNV-1a 真修覆盖.
+
+**为什么之前 W-004 没识别成 W-001 family**:
+- 当时 (2026-08-03) 诊断假设是 "stack-slot allocator for 短名复用 slot" (看到死循环 + 短名现象)
+- 但实际根因是 `hash_string` 用 `*i32` deref 一次读 4 byte, 短字符串 (≤4 char) 把后续 slack 字节吸进 hash 值, 多个不同 ident 撞同一 slot
+- W-002 当时 (2026-08-04) 修了 211 个全局/函数名, 但漏掉**局部 var + struct field** (per W-004 entry line 331)
+- W-001 真修 (2026-08-04 commit `d570c72`) 改 byte-by-byte `*u8` deref + length mix (FNV-1a) → 短名不再 overread → symtab 不再撞 → W-004 失效条件 (i) 满足
+
+### 真修 chain (按 commit 时间序, 仅列与 W-004 有关者)
+
+| Commit | Sprint | 改动 | 跟 W-004 关系 |
+|--------|--------|------|----------------|
+| `d570c72` (v0.8 commit 9) | — | W-001 byte-by-byte FNV-1a 真修 (`hash_string` 改 `*u8` deref + length mix) | **关键 commit** — 短名不再 overread, symtab 不再撞 |
+| `52843b6` (v0.9 wip 2.15) | — | Task #60 真修 (parse_if body inline parse_while 嵌套 TOKEN_WHILE 分支) | 验证路径 unblock — 不修则 src0/{codegen,sema}.jhyy 编不过 |
+| Sprint 4.21-4.25 chain | 4.21-4.25 | W-005 #2 family 真修 (CGContext layout, IRVal const ptr, sentinel guard) | **非 W-004 直接根因** — W-006 跟 W-005 同 family 被一并修, 但 W-004 是 W-001 family 独立 |
+
+### 留给未来 (post-v1.1.1 ship)
+
+- W-004 workaround 代码本身 (`let arena_local` 等长名 + `arena_local.current_value` 等长 field) **不需 revert** — 当前不被触发, 保留不破坏 src0/ 自然性 (跟 W-002 同样风格的 211 改名为对照)
+- 短名 (`let x`, `let y`, field `cur` 等) 的 revert 留给 Sprint v1.1.x post-W-007 真修 ship 后做, 跟 src0/*.jhyy 100% natural 目标一起
+- 未来 reader: 若看到 src0/ 里有 `arena_local.current_value` 等"看起来不必要的长名", 不要误以为是 stale workaround — 是 W-004 历史 fallback, 当前 W-001 真修已使其非必要但保留以维持翻译风格一致
 
 ---
 
