@@ -33,6 +33,37 @@ def _resolve_path(p: str) -> str:
     return str(JHYY_ROOT / p)
 
 
+def _build_subprocess_env() -> dict:
+    """构造 subprocess env. 修复 MCP server env={} 引起的 'gcc link failed'.
+
+    Root cause (2026-08-12): ~/.claude.json 把 jhyy MCP server 启动为 env={},
+    Python 进程 inherit empty env → os.environ 空 → subprocess.run inherit empty →
+    jhyy.exe system("C:/msys64/ucrt64/bin/gcc.exe ...") 的 gcc 也 empty env →
+    collect2 找不到 tmp dir → silent exit 1 → "gcc link failed".
+
+    Empirical (env -i simulation, 2026-08-12): gcc 需要 TMP/TEMP (collect2 tmp file)
+    + PATH 含 /c/msys64/ucrt64/bin (ld.exe). 缺任一 → EXIT=1 silent.
+
+    Fix: 拷贝 os.environ (already-populated 时不动) + 补 critical 缺失 vars.
+    Direct python regress.py 调用时 os.environ 已 full, 拷贝后只补 missing —
+    不破坏现有 env.
+    """
+    env = os.environ.copy()
+    if not env.get("TMP"):
+        env["TMP"] = r"C:\Users\liuzhen\AppData\Local\Temp"
+    if not env.get("TEMP"):
+        env["TEMP"] = r"C:\Users\liuzhen\AppData\Local\Temp"
+    if not env.get("TMPDIR"):
+        env["TMPDIR"] = r"C:\Users\liuzhen\AppData\Local\Temp"
+    if not env.get("PATH"):
+        env["PATH"] = r"C:\Windows\System32;C:\Windows;C:\msys64\ucrt64\bin"
+    if not env.get("SystemRoot"):
+        env["SystemRoot"] = r"C:\Windows"
+    if not env.get("SystemDrive"):
+        env["SystemDrive"] = "C:"
+    return env
+
+
 def _run_cmd(cmd: list, timeout: int = 30, cwd: Optional[str] = None) -> dict:
     """运行命令并返回结果。统一处理 Windows 编码问题。"""
     try:
@@ -44,6 +75,7 @@ def _run_cmd(cmd: list, timeout: int = 30, cwd: Optional[str] = None) -> dict:
             encoding="utf-8",
             errors="replace",
             cwd=cwd or str(JHYY_ROOT),
+            env=_build_subprocess_env(),
         )
         return {
             "ok": r.returncode == 0,

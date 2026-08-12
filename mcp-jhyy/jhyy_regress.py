@@ -54,6 +54,28 @@ def _resolve_binary(binary: str) -> str:
     return str(JHYY_ROOT / binary)
 
 
+def _build_subprocess_env() -> dict:
+    """构造 subprocess env. 修复 MCP server env={} 引起的 'gcc link failed'.
+
+    Mirror jhyy_runner.py:_build_subprocess_env (modules 独立, 不互相 import).
+    Rationale + empirical 见 jhyy_runner.py.
+    """
+    env = os.environ.copy()
+    if not env.get("TMP"):
+        env["TMP"] = r"C:\Users\liuzhen\AppData\Local\Temp"
+    if not env.get("TEMP"):
+        env["TEMP"] = r"C:\Users\liuzhen\AppData\Local\Temp"
+    if not env.get("TMPDIR"):
+        env["TMPDIR"] = r"C:\Users\liuzhen\AppData\Local\Temp"
+    if not env.get("PATH"):
+        env["PATH"] = r"C:\Windows\System32;C:\Windows;C:\msys64\ucrt64\bin"
+    if not env.get("SystemRoot"):
+        env["SystemRoot"] = r"C:\Windows"
+    if not env.get("SystemDrive"):
+        env["SystemDrive"] = "C:"
+    return env
+
+
 def _sha256_file(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -122,7 +144,7 @@ def run_test(
         for inp in extra_inputs:
             cmd.insert(2, _resolve_binary(inp))
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=20,
-                       encoding="utf-8", errors="replace")
+                       encoding="utf-8", errors="replace", env=_build_subprocess_env())
     if r.returncode != 0:
         return (False, expected, -1, f"compile failed: {r.stderr[:200]}")
     exe = os.path.abspath(out_base + ".exe")
@@ -132,7 +154,7 @@ def run_test(
     # Run
     try:
         r2 = subprocess.run([exe], capture_output=True, text=True, timeout=timeout,
-                            encoding="utf-8", errors="replace")
+                            encoding="utf-8", errors="replace", env=_build_subprocess_env())
         actual = r2.returncode
         output = (r2.stdout or "") + (r2.stderr or "")
     except subprocess.TimeoutExpired:
