@@ -1161,8 +1161,8 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             // immutable 标量：keep as SSA
             // 重新算 init_v（C 端 codegen.c 这里重算一份；jhyy 的 if/else 是
             // 兄弟 block，init_v 在 else 里不可见，必须重 declare 才能拿到正确 SSA）
-            let init_v2 = cg_expr(cg_raw, init_node);
-            cg_add_local(cg_raw, (*d).sym, init_v2, 0);
+            let init_v = cg_expr(cg_raw, init_node);
+            cg_add_local(cg_raw, (*d).sym, init_v, 0);
         }
         return zero;
     }
@@ -2628,10 +2628,10 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 let undef = *ir_new_tmp(ir, undef_qt);
                 ir_emit_copy(ir, undef, 0);
                 if *nphi_p < (32 as i64) {
-                    let bb_slot_v2 = ptr_add_u8(phi_buf, (*nphi_p) * (40 as i64)) as *IRVal;
-                    *bb_slot_v2 = next_check;
-                    let bv_slot_v2 = ptr_add_u8(phi_buf, (32 as i64) * (40 as i64) + (*nphi_p) * (40 as i64)) as *IRVal;
-                    *bv_slot_v2 = undef;
+                    let bb_slot = ptr_add_u8(phi_buf, (*nphi_p) * (40 as i64)) as *IRVal;
+                    *bb_slot = next_check;
+                    let bv_slot = ptr_add_u8(phi_buf, (32 as i64) * (40 as i64) + (*nphi_p) * (40 as i64)) as *IRVal;
+                    *bv_slot = undef;
                     *nphi_p = *nphi_p + (1 as i64);
                 }
                 ir_emit_jmp(ir, merge_block);
@@ -2653,12 +2653,12 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 if pi > (0 as i64) {
                     ir_emit_str(ir, ", " as *u8);
                 }
-                let bb_v3 = *(ptr_add_u8(phi_buf, pi * (40 as i64)) as *IRVal);
-                let bv_v3 = *(ptr_add_u8(phi_buf, (32 as i64) * (40 as i64) + pi * (40 as i64)) as *IRVal);
+                let bb = *(ptr_add_u8(phi_buf, pi * (40 as i64)) as *IRVal);
+                let bv = *(ptr_add_u8(phi_buf, (32 as i64) * (40 as i64) + pi * (40 as i64)) as *IRVal);
                 ir_emit_str(ir, "@" as *u8);
-                ir_emit_str(ir, bb_v3.name);
+                ir_emit_str(ir, bb.name);
                 ir_emit_str(ir, " %t" as *u8);
-                ir_emit_int(ir, "%d" as *u8, bv_v3.id);
+                ir_emit_int(ir, "%d" as *u8, bv.id);
                 pi = pi + (1 as i64);
             }
             ir_emit_str(ir, "\n" as *u8);

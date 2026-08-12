@@ -203,3 +203,72 @@
 
 - v1.2.1 changelog — Stage 2 N=3 7 行 cascade 已知现象
 - [[project-sprint-v1-1-2-c-side-divergence]] — C-side vs jhyy_v1 IL divergence 性质 (rename 后 sha 变化是预期)
+
+---
+
+## v1.2 wip commit 1.4 — `_v2`/`_v3`/`_v4`/`_v5` 后缀 36 处 cleanup (18 unique identifier) — 2026-08-12
+
+**类型**: cleanup (workaround 后缀撤回)
+**估时**: 0.5 sprint
+**workarounds.md**: 不直接对应 W-XXX,跟 v1.2.3 同模式,延续 stale-name 防御清理
+
+### 工作
+
+- **Audit (36 处,18 个 unique `_v2`/`_v3`/`_v4`/`_v5` identifier)**:
+  - Plan 估时 84 处 (估计错误,实际只有 36 — 同 v1.2.3 估时偏差模式)
+  - 跨 3 个 src0/ 文件:codecen.jhyy (10) / main.jhyy (24) / _driver_ir.jhyy (2)
+  - 18 个 unique identifier 分布:
+    - `_v2` 后缀 (9 个):`argc_v2` / `argv_v2` / `bb_slot_v2` / `bv_slot_v2` / `dst_v2` / `init_v2` / `p_v2` / `phi_v2` / `src_v2`
+    - `_v3` 后缀 (5 个):`argc_v3` / `argv_v3` / `bb_v3` / `bv_v3` / `p_v3`
+    - `_v4` 后缀 (2 个):`argc_v4` / `argv_v4`
+    - `_v5` 后缀 (2 个):`argc_v5` / `argv_v5`
+
+- **Revert 18 个 identifier** (`xxx_vN` → `xxx`, 几个 `bb_v3`/`bv_v3`/`init_v2` 特殊 rename):
+  - `bb_v3` → `bb` / `bv_v3` → `bv` (跟 `bb_slot`/`bv_slot` 区分,各自不同 scope 安全)
+  - `init_v2` → `init_v` (跟 comment "init_val" 描述对齐)
+  - 其余 15 个 `xxx_v2/3/4/5` → `xxx` 纯 rename
+  - 用 18 个 sed 一次替换 (per-identifier),验证 `grep -rEn '\b[a-z_]+_v[2-5]\b'` 只剩 `_W002_rename_map.txt` comment 一处 ✅
+
+- **不动的 `_vN` 命中 (历史 comment)**:
+  - `compiler/src0/_W002_rename_map.txt` comment 一处描述 `init_v2 -> init_v2_v1` 翻译映射
+  - 描述 `jhyy_v2` / `jhyy_v3` / `jhyy_v4` 的 comment (closure binary 命名,不能动)
+  - 描述 `regress_v1.py` 的 comment
+
+- **重要 rename 关系说明**:
+  - `bb_v3` / `bv_v3` 是 **跟 `bb_slot_v2` / `bv_slot_v2` 完全不同的变量**,在 `cg_match_pattern` phi 收集循环里 (`codegen.jhyy:2656-2657`),独立 scope
+  - `argc_v2` / `argc_v3` / `argc_v4` / `argc_v5` 是 4 个不同 fn 参数 (`cmd_compile` / `cmd_run` / `cmd_dump` / `main_jhyy`),各自独立 scope 都改 `argc` 安全
+  - `init_v` x2 重复经 audit 验证 (mutable/array/struct path vs immutable path) 是 if/else 兄弟分支,scope 不重叠,安全
+  - `bb_slot` / `bv_slot` x2 重复经 audit 验证 (2607-2617 vs 2624-2638 两个 if block),scope 不重叠,安全
+
+- **Diff 验证**:
+  - `git diff --stat compiler/src0/`: 36+/36- 完美对称,纯 rename,无功能改动
+
+### 验证
+
+- **jhyy_v1 编 src0/main.jhyy** (canonical `ba94df93...`):
+  - Compile 成功,exit=0
+  - 输出 `_v124_jhyy_v2.il` sha `f75ef7e2...`
+  - v2 → v3 cascade: `_v124_v3.il` sha `5673c107...`, diff = 12 行 (7 cascade + 5 context) ✅
+  - **跨 v1.2.1/v1.2.2/v1.2.3/v1.2.4 7 行 cascade 一致** — 证明 v1.2.4 zero IR impact beyond QBE symbol rename
+
+- **regress.py 50/50 PASS** (C-side,`jhyy.exe` sha `d442ba3f...`): baseline 持平 ✅
+- **regress_v1.py 50/50 PASS** (jhyy_v1 编 src0/,canonical `ba94df93...`): baseline 持平 ✅
+- **closure binaries canonical sha 不变**:`jhyy_v1.exe` `aa57849c` / `jhyy_v2.exe` `d3aeed09` / `jhyy_v3.exe` `536ffcb2` / `jhyy_v4.exe` `eb8b7a3b` — v1.2.4 零干扰
+
+### 不动
+
+- 跟 v1.2.3 同:函数名 (`resolve_one_import_v1` / `var_name_eq_v1` 等保留,改函数名是 v3.x 命名空间范畴)
+- 跟 v1.2.3 同:comment 里描述 `jhyy_vN` / `regress_vN.py` 的历史叙述
+- 别的 session untracked 文件
+- 跟 v1.2.3 同:`_W002_rename_map.txt` 翻译映射 comment
+
+### 留给后续
+
+- v1.2.5 doc 同步 (workarounds.md W-XXX 标 RESOLVED + status.md "src0/ 自然化" section + changelog 收尾)
+- v1.3 (下一阶段) v1.x 语法糖
+
+### 引用
+
+- v1.2.1/v1.2.2/v1.2.3 changelog — 同样 pure rename 验证 (Stage 2 N=3 7 行 cascade 跨 sprint 一致)
+- [[project-sprint-v1-1-2-c-side-divergence]] — C-side vs jhyy_v1 IL divergence 性质 (rename 后 sha 变化是预期)
+- [[feedback-regress-baseline-binary-hash]] — sha256sum 检查守门 (本次全程 jhyy_v1.exe.exe `ba94df93` + jhyy_v*.exe 4 个 closure binary canonical sha 0 干扰)
