@@ -859,7 +859,7 @@ fn cmd_dump(argc: i32, argv: *u8) -> i32 {
 
 fn main_jhyy(argc: i32, argv: *u8) -> i32 {
     if argc < (2 as i32) {
-        printf("jhyy compiler v0.8 (self-hosted)\n" as *u8, 0);
+        printf("jhyy compiler v1.0.0 (self-hosted)\n" as *u8, 0);
         printf("usage: jhyy <command> [args]\n" as *u8, 0);
         printf("  compile <file.jhyy> [-o output]\n" as *u8, 0);
         printf("  build   <file.jhyy> [-o output]\n" as *u8, 0);

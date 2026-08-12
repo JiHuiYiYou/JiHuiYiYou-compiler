@@ -533,7 +533,7 @@ static int cmd_dump(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("jhyy compiler v0.6.4\n");
+        printf("jhyy compiler v1.0.0\n");
         printf("usage: jhyy <command> [args]\n");
         printf("  compile <file.jhyy> [-o output]   compile to executable\n");
         printf("  build   <file.jhyy> [-o output]   compile to .il only\n");
