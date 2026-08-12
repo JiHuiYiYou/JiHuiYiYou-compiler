@@ -116,7 +116,8 @@
   - 50 passed, 0 failed, 3 skipped ✅
   - baseline 持平
 
-- **regress_v1.py 50/53 PASS 预期** (后台跑中)
+- **regress_v1.py 50/50 PASS** (jhyy_v1 编 src0/ → 50 .jhyy 测试 ground truth): 50 passed, 0 failed, 3 skipped ✅
+  - baseline 持平 (50/50)
 
 ### 不动
 
