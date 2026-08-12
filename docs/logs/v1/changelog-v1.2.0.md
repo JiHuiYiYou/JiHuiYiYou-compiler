@@ -71,3 +71,66 @@
 - [[project-v1-0-post-50-53-plan]] § Phase 3.1 — W-005 / W-003 / `_vN` 清理原始 plan
 - [[project-sprint-v1-1-2-c-side-divergence]] — C-side vs jhyy_v1 IL divergence 已知性质 (`a75bcd6e` ≠ `2445e97d` 是预期)
 - [[feedback-regress-baseline-binary-hash]] — sha256sum 检查守门 (本次事故 jhyy_v1.exe 被改 → git restore 恢复 `aa57849c...` + jhyy_v2.exe 恢复 `d3aeed09...` + jhyy_v1.il 已在 MCP selfhost_check 重写后被改 → 不 critical,因 jhyy_v1.il 不是 tracked)
+
+---
+
+## v1.2 wip commit 1.2 — W-003 `let _ = fncall()` revert (24 处) — 2026-08-12
+
+**类型**: cleanup (workaround 代码撤回)
+**估时**: 0.5 sprint
+**workarounds.md**: W-003 状态从 ACTIVE → "code revert 完,v0 fix ship 已闭环" (等 v1.2.5 doc sync 标 RESOLVED)
+
+### 工作
+
+- **Audit (24 处 `let _ = X(...)`)**:
+  - 全部 24 处在 `compiler/src0/codegen.jhyy` (W-003 workaround 主要聚集 codegen,因 codegen 是 side-effect emit 密集区)
+  - call 分布:`cg_expr` 7 处 / `cg_emit_store` 8 处 / `cg_copy_struct` 3 处 / `ir_emit_ret` 3 处 / `ir_emit_str` 1 处 / `ir_emit_jmp` 2 处
+  - 0 在 main.jhyy / util.jhyy / parser.jhyy / sema.jhyy / ir.jhyy / _driver_*.jhyy (那些是 `let _x` / `let _found2` 等有名字 binding,不是 W-003 范畴)
+
+- **Revert 24 处** (`let _ = X(...)` → `let _X = X(...)` 描述性名):
+  - 7 处 `let _expr = cg_expr(...)` (NODE_BLOCK expr-position / NODE_IF/NODE_MATCH / while body)
+  - 8 处 `let _store = cg_emit_store(...)` (NODE_ASSIGN / NODE_FIELD_ASSIGN / NODE_INDEX_ASSIGN / array/slice elem store)
+  - 3 处 `let _copy = cg_copy_struct(...)` (sret 路径 / NODE_RETURN sret / array arr 路径)
+  - 3 处 `let _ret = ir_emit_ret(...)` (NODE_RETURN 三 path)
+  - 1 处 `let _str = ir_emit_str(...)` (sret void return bare `ret\n`)
+  - 2 处 `let _jmp = ir_emit_jmp(...)` (break / continue emit)
+  - 用 6 个 sed 一次替换,sed 验证后 0 命中 `let _ = ` (除 driver 测试 _x/_x2 等)
+
+- **关键观察 (pure rename 不影响 emit)**:
+  - 跟 v1.2.1 同样的纯 rename (side-effect-only discard)
+  - 跟 v1.2.1 一样的 IR 行为:bound vs unbound IRVal 在 codegen emit 时都自动被丢弃(没有 store/use 路径)
+  - 预期:`jhyy_v1` 编 src0/main.jhyy 的输出 sha **跟 v1.2.1 完全相同** `a75bcd6e...` (零差异,纯 source-level rename)
+
+### 验证
+
+- **jhyy_v1 编 src0/main.jhyy** (canonical `aa57849c...`):
+  - Compile 成功,exit=0
+  - 输出 `_v122_jhyy_v2.il` sha `a75bcd6e...` — **跟 v1.2.1 完全一致** ✅
+  - 跨 sprint sha 一致 = 纯 rename 验证
+
+- **Stage 2 N=3 byte-equal**:
+  - v1.il sha `a75bcd6e` vs v3.il sha `9b022a72` — 7 行 cascade (跟 v1.2.1 一样)
+  - 跟 v1.2.1 跨 sprint 一致,证明 v1.2.2 零 IR 影响
+
+- **regress.py 50/53 PASS** (C-side 端,jhyy.exe `d442ba3f...`):
+  - 50 passed, 0 failed, 3 skipped ✅
+  - baseline 持平
+
+- **regress_v1.py 50/53 PASS 预期** (后台跑中)
+
+### 不动
+
+- 跟 v1.2.1 一样:W-003 v0 C-side 真修 (Sprint v1.1.4 commit 1.4 docs-only ship)
+- 别的 session untracked 文件
+
+### 留给后续
+
+- v1.2.3 `_v1` 后缀 119 处 cross-file cleanup
+- v1.2.4 `_v2`/`_v3`/`_v4`/`_v5` 后缀 84 处 cleanup
+- v1.2.5 doc 同步
+- v1.3 (下一阶段) v1.x 语法糖
+
+### 引用
+
+- [[project-v1-0-post-50-53-plan]] § Phase 3.1 — W-003 原始 plan
+- v1.2.1 changelog — 同样 pure rename 验证 (`a75bcd6e` 跨 sprint 一致)

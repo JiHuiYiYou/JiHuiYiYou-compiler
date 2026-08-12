@@ -1022,21 +1022,21 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 let src = cg_expr(cg_raw, (*d).expr);
                 let sret_addr = IRVal { kind: 0, id: (*cg).sret_slot_id as i32, ival: 0 as i64, name: 0 as *u8, qbe_type: QBE_L() };
                 if irval_is_undef(src) == 0 {
-                    let _ = cg_copy_struct(cg_raw, (*cg).current_ret_type, sret_addr, src);
+                    let _copy = cg_copy_struct(cg_raw, (*cg).current_ret_type, sret_addr, src);
                 }
                 let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-                let _ = ir_emit_ret(ir, v);
+                let _ret = ir_emit_ret(ir, v);
             } else {
                 let val = cg_expr(cg_raw, (*d).expr);
-                let _ = ir_emit_ret(ir, val);
+                let _ret = ir_emit_ret(ir, val);
             }
         } else {
             if (*cg).has_sret != 0 {
                 // sret void return (rare): bare `ret\n`
-                let _ = ir_emit_str(ir, "    ret\n" as *u8);
+                let _str = ir_emit_str(ir, "    ret\n" as *u8);
             } else {
                 let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-                let _ = ir_emit_ret(ir, v);
+                let _ret = ir_emit_ret(ir, v);
             }
         }
         return zero;
@@ -1065,7 +1065,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             let stmt_slot = ptr_add_u8((*d).stmts, i * (8 as i64)) as **Node;
             let stmt = *stmt_slot as *Node;
             if (*stmt).kind == NODE_RETURN() || (*stmt).kind == NODE_BREAK() || (*stmt).kind == NODE_CONTINUE() {
-                let _ = cg_expr(cg_raw, stmt);
+                let _expr = cg_expr(cg_raw, stmt);
                 let last = IRVal {
                     kind: *(last_buf as *i32),
                     id: *(ptr_add_u8(last_buf, 4 as i64) as *i32),
@@ -1079,7 +1079,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 let es = node_expr_stmt_data(stmt);
                 let inner_node = (*es).expr as *Node;
                 if (*inner_node).kind == NODE_ASSIGN() {
-                    let _ = cg_expr(cg_raw, stmt);
+                    let _expr = cg_expr(cg_raw, stmt);
                 } else {
                     let r = cg_expr(cg_raw, inner_node);
                     *(last_buf as *i32) = r.kind;
@@ -1103,7 +1103,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 *(ptr_add_u8(last_buf, 16 as i64) as **u8) = r.name;
                 *(ptr_add_u8(last_buf, 24 as i64) as *i32) = r.qbe_type;
             } else {
-                let _ = cg_expr(cg_raw, stmt);
+                let _expr = cg_expr(cg_raw, stmt);
             }
             i = i + (1 as i64);
         }
@@ -1177,7 +1177,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         if target_kind == NODE_DEREF() {
             let dd = node_deref_data(target);
             let ptr = cg_expr(cg_raw, (*dd).expr);
-            let _ = cg_emit_store(cg_raw, (*target).type_ptr, val, ptr);
+            let _store = cg_emit_store(cg_raw, (*target).type_ptr, val, ptr);
         } else if target_kind == NODE_IDENT() {
             let id = node_ident_data(target);
             let is_stack = cg_find_local_is_stack(cg_raw, (*id).sym);
@@ -1201,9 +1201,9 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 if tgt_t != (0 as *u8) {
                     let tt = tgt_t as *Type;
                     if (*tt).kind == KIND_STRUCT() {
-                        let _ = cg_copy_struct(cg_raw, tgt_t, slot, val);
+                        let _copy = cg_copy_struct(cg_raw, tgt_t, slot, val);
                     } else {
-                        let _ = cg_emit_store(cg_raw, tgt_t, val, slot);
+                        let _store = cg_emit_store(cg_raw, tgt_t, val, slot);
                     }
                 }
             }
@@ -1246,7 +1246,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                         }
                         let final_addr = *ir_new_tmp(ir, QBE_L());
                         ir_emit_binary(ir, final_addr, "add" as *u8, real_base, offset2);
-                        let _ = cg_emit_store(cg_raw, elem_type, val, final_addr);
+                        let _store = cg_emit_store(cg_raw, elem_type, val, final_addr);
                     } else {
                         // 路径 2: 通用 → base from expr + offset
                         let base = cg_expr(cg_raw, idx_expr_node);
@@ -1276,7 +1276,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                         // addr = base + offset
                         let addr = *ir_new_tmp(ir, QBE_L());
                         ir_emit_binary(ir, addr, "add" as *u8, base, offset);
-                        let _ = cg_emit_store(cg_raw, elem_type, val, addr);
+                        let _store = cg_emit_store(cg_raw, elem_type, val, addr);
                     }
                 }
             }
@@ -1309,7 +1309,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                     addr = *ir_new_tmp(ir, QBE_L());
                     ir_emit_binary(ir, addr, "add" as *u8, base, ir_new_int(offset));
                 }
-                let _ = cg_emit_store(cg_raw, field_type_raw, val, addr);
+                let _store = cg_emit_store(cg_raw, field_type_raw, val, addr);
             }
         }
         return zero;
@@ -1320,7 +1320,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         if (*cg).loop_depth > 0 {
             let ends_ptr = (*cg).loop_ends as *IRVal;
             let end_label = *(ptr_add_u8(ends_ptr as *u8, (((*cg).loop_depth - (1 as i32)) as i64) * (40 as i64)) as *IRVal);
-            let _ = ir_emit_jmp(ir, end_label);
+            let _jmp = ir_emit_jmp(ir, end_label);
         }
         return zero;
     }
@@ -1330,7 +1330,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         if (*cg).loop_depth > 0 {
             let conts_ptr = (*cg).loop_continues as *IRVal;
             let cont_label = *(ptr_add_u8(conts_ptr as *u8, (((*cg).loop_depth - (1 as i32)) as i64) * (40 as i64)) as *IRVal);
-            let _ = ir_emit_jmp(ir, cont_label);
+            let _jmp = ir_emit_jmp(ir, cont_label);
         }
         return zero;
     }
@@ -1340,9 +1340,9 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         let inner = node_expr_stmt_data(n);
         let inner_node = (*inner).expr as *Node;
         if (*inner_node).kind == NODE_ASSIGN() {
-            let _ = cg_expr(cg_raw, inner_node);
+            let _expr = cg_expr(cg_raw, inner_node);
         } else {
-            let _ = cg_expr(cg_raw, inner_node);
+            let _expr = cg_expr(cg_raw, inner_node);
         }
         return zero;
     }
@@ -2087,7 +2087,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
 
         // loop_body: emit body
         ir_emit_label(ir, loop_body_b);
-        let _ = cg_expr(cg_raw, body_node);
+        let _expr = cg_expr(cg_raw, body_node);
 
         // loop_inc: load i, add 1, store, jmp loop_start
         ir_emit_label(ir, loop_inc);
@@ -2135,7 +2135,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
 
         // body
         ir_emit_label(ir, loop_body);
-        let _ = cg_expr(cg_raw, body_node);
+        let _expr = cg_expr(cg_raw, body_node);
         ir_emit_label(ir, loop_cont);
         ir_emit_jmp(ir, loop_start);
 
@@ -2217,7 +2217,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             let off_arr = ir_new_int(i_arr * elem_sz_arr);
             let elem_addr_arr = *ir_new_tmp(ir, QBE_L());
             ir_emit_binary(ir, elem_addr_arr, "add" as *u8, slot, off_arr);
-            let _ = cg_emit_store(cg_raw, elem_t_arr, e_val, elem_addr_arr);
+            let _store = cg_emit_store(cg_raw, elem_t_arr, e_val, elem_addr_arr);
             i_arr = i_arr + (1 as i64);
         }
         return slot;
@@ -2245,7 +2245,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             let off_sl = ir_new_int(isl * elem_sz_sl);
             let es_addr = *ir_new_tmp(ir, QBE_L());
             ir_emit_binary(ir, es_addr, "add" as *u8, elem_buf, off_sl);
-            let _ = cg_emit_store(cg_raw, elem_t_sl, es_val, es_addr);
+            let _store = cg_emit_store(cg_raw, elem_t_sl, es_val, es_addr);
             isl = isl + (1 as i64);
         }
         let slice_slot = *ir_new_tmp(ir, QBE_L());
@@ -2443,7 +2443,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             let v = cg_expr(cg_raw, inner_node);
             let slot = *ir_new_tmp(ir, QBE_L());
             ir_emit_alloc(ir, slot, 8 as i32);
-            let _ = cg_emit_store(cg_raw, (*inner_node).type_ptr, v, slot);
+            let _store = cg_emit_store(cg_raw, (*inner_node).type_ptr, v, slot);
             return slot;
         }
         // Bug 1 真修 (v0.9 wip commit 2.84): &EXPR.field should return the FIELD ADDRESS,
@@ -2936,7 +2936,7 @@ fn cg_func(cg_raw: *u8, n: *Node) -> i32 {
             // which was never overwritten). Without this guard, cg_copy_struct
             // emits `copy %t0` and QBE rejects the whole function.
             if irval_is_undef(body_val) == 0 {
-                let _ = cg_copy_struct(cg_raw, ret_type, sret_addr, body_val);
+                let _copy = cg_copy_struct(cg_raw, ret_type, sret_addr, body_val);
             }
             let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
             ir_emit_ret(ir, v);
