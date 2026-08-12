@@ -27,7 +27,7 @@
 |----|------|------|
 | [W-001](#w-001-hash_string-用-i32-deref-绕-v0-codegen-loadsb-错) | RESOLVED (v0.8 commit 9) | hash_string 改 byte-by-byte `*u8` deref + length mix (FNV-1a), 真修 W-001 副作用 |
 | [W-002](#w-002-mainjhyy-重命名绕-jhyy_v1-hash_string-堆损坏) | RESOLVED (v0.9 wip commit 2.12) | 211 个 src0 标识符 `_v1` 后缀化 revert 回原名, W-001 真修后失效 |
-| [W-003](#w-003-jhyy_v1-let-_-fncall-顶层-嵌套-segfault) | ACTIVE | `let _ = fncall(...)` 改 direct call，绕 jhyy_v1 codegen segfault（Bug 7/7b） |
+| [W-003](#w-003-jhyy_v1-let-_-fncall-顶层-嵌套-segfault) | ✅ RESOLVED (transitive — jhyy_v1.exe.exe sha `ba94df93...` 已消除 Bug 7/7b 触发面; minimal repros for top-level + nested + NODE_ASSIGN[NODE_FIELD] all 5×5 PASS on canonical, 2026-08-12 verified) | `let _ = fncall(...)` 改 direct call，绕 jhyy_v1 codegen segfault（Bug 7/7b） |
 | [W-004](#w-004-short-local-var-4-chars--symtab-hash-撞--jhyy_v1-field-assign-死循环) | RESOLVED (transitively closed by W-001 byte-by-byte FNV-1a 真修 — minimal repro + 4 boundary variations all pass codegen on jhyy_v1 (sha `ba94df93...`), 2026-08-12 verified) | 短（≤4 字符）local var / fn 参数 / field 改名绕 jhyy_v1 symtab hash 撞（stack overflow） |
 | [W-005](#w-005-let-mut--assign--jhyy_v1-codegen-segfault) | RESOLVED (v0.9 wip commit 2.13) | `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault；commit 2.11 CGContext 布局对齐真修 + commit 2.13 revert 16 处回 `let mut` 风格 |
 | [W-006](#w-006-jhyy_v1-return-x--y-两-1-char-var-发-127qbe-fail) | RESOLVED (transitively closed by Sprint 4.21-4.25 W-005 #2 真修 chain — minimal repro no longer triggers, 2026-08-11 verified) | jhyy_v1 codegen 让两个 1-char 局部变量在 `return x ± y` 共享同一 stack slot → QBE fail / exit 127；改名或加类型注解绕 |
@@ -254,8 +254,8 @@ W-002 revert 实施时产生的 archive 文件保留作为可重放参考:
 ## W-003: jhyy_v1 `let _ = fncall(...)` 顶层 / 嵌套 segfault → direct call (top-level only)
 
 **ID:** W-003
-**状态:** ACTIVE (partial — v3 只覆盖顶层)
-**日期:** 2026-08-03
+**状态:** ✅ RESOLVED (transitive — jhyy_v1.exe.exe sha `ba94df93...` 已消除 Bug 7/7b 触发面,minimal repros for top-level + nested + NODE_ASSIGN[NODE_FIELD] all 5×5 PASS, 2026-08-12 verified)
+**日期:** 2026-08-03 (ACTIVE) → 2026-08-12 (RESOLVED transitive)
 **触发面:** 任何 `let _NAME = fncall(...)` 模式，无论 `_NAME` 是什么；无论 fncall 是否在函数顶层或嵌套 if/while 块内
 **症状:** jhyy_v1 编译含此模式的源码 → 0xC0000005 segfault（exit 139）
 **根因嫌疑:** v0 codegen 对 `let _ = fncall(...)` emit IL 缺漏（详见 `memory/feedback_v0_codegen_bug_workarounds.md` Bug 7 / Bug 7b）
@@ -316,6 +316,31 @@ store_byte_i32(nul1, 0 as i32);
 **引用:**
 - `memory/feedback_v0_codegen_bug_workarounds.md` Bug 7 / Bug 7b
 - 决策过程见 `memory/project_bootstrap_closure_state.md` § W-003 iterations
+
+### W-003 RESOLVED — transitively closed by Sprint 4.21-4.25 W-005 #2 真修 chain (2026-08-12)
+
+**Sprint v1.1.3 verification (5×5 PASS on canonical jhyy_v1.exe.exe sha `ba94df93`)**:
+
+| Trigger | Source | Expected | 5×5 |
+|---------|--------|----------|------|
+| **Bug 7 (top-level)** | `fn main_jhyy() -> i32 { let _x = noop(42); return 0; }` | EXIT=0 | ✅ 5/5 |
+| **Bug 7 (top-level wide, 10 calls)** | 10 个连续 `let _X = store_byte(N, 0);` | EXIT=42 | ✅ 5/5 |
+| **Bug 7b (1-level nested if)** | `if x==1 { if x==1 { let _d = noop(x); } }` | EXIT=0 | ✅ 5/5 |
+| **Bug 7b (2-level nested if-if-if)** | `if x==1 { if y==2 { if z==3 { let _d = noop(x+y+z); ... } } }` | EXIT=5 | ✅ 5/5 |
+| **Bug 7b + NODE_ASSIGN[NODE_FIELD]** | struct `Pair {a,b}` 嵌套 if + `let _s = sink(o.a); o.a = 99;` | EXIT=99 | ✅ 5/5 |
+| **Bug 7b + for + if + mut** | `for i in 0..5 { if i>0 { let _d = noop(sum+i); sum = sum + i; } }` | EXIT=10 | ✅ 5/5 |
+
+**关键证据 — 当前 src0/ 实际状态**:89 处 `let _X = fncall()` 仍存 (其中 **7** 在 codegen.jhyy,**54** 在 sema.jhyy,**17** lexer,**5** parser,**3** main,**2** _driver_sema,**1** ir.jhyy)。**所有 89 处都在嵌套 if/while 块内 (depth ≥ 2)** — 即正是 Bug 7b 的触发面,且全部正常 compile 通过 (regress_v1 50/50 PASS)。证明 Bug 7b 已自然消除,workaround v3 仅出于历史保险性保留。
+
+**真因** (per Sprint 4.21-4.25 W-005 #2 真修 chain,commits `be3be33` / `fad9de2`):
+- Bug 7/7b 根因 = IRVal struct pass-by-value stale pointer(per `project_sprint4_7_irval_pass_by_value_bug.md`)
+- 真修在 jhyy_v1 `cg_copy_struct` + `irval_is_undef` 守卫 (8 处)+ C-side 同步对齐(per `feedback_codegen_workaround_linkage.md` 链路 1-3)
+- 守卫消除 stale pointer 后,`let _ = fncall()` 不再 emit `=w copy %t0` 污染 IL,codegen 路径正常
+
+**Out of scope (NOT W-003)**:
+- **v3 workaround 29 处** `let _X = fncall()` → `fncall()` 的 revert 不在本 sprint 范围. 类比 W-002 commit 2.12 (211 个 `_v1` 后缀 revert),W-003 revert 需要单独 cleanup commit. **可在 Sprint v1.1.x 后续做**:验证 baseline 50/53 持平下 revert 29 处 top-level 改回 `let _X = fncall()` 风格,恢复代码自然性.
+
+**W-003 失效条件** (per workarounds.md line 307): v0 codegen 修复 `let _ = fncall(...)` emit → W-003 可移除. 实际: jhyy_v1 codegen 已 ship 修复,W-003 失效条件满足,可标 RESOLVED.
 
 ---
 
