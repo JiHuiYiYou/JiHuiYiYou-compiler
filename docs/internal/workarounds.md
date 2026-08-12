@@ -31,11 +31,11 @@
 | [W-004](#w-004-short-local-var-4-chars--symtab-hash-撞--jhyy_v1-field-assign-死循环) | RESOLVED (transitively closed by W-001 byte-by-byte FNV-1a 真修 — minimal repro + 4 boundary variations all pass codegen on jhyy_v1 (sha `ba94df93...`), 2026-08-12 verified) | 短（≤4 字符）local var / fn 参数 / field 改名绕 jhyy_v1 symtab hash 撞（stack overflow） |
 | [W-005](#w-005-let-mut--assign--jhyy_v1-codegen-segfault) | RESOLVED (v0.9 wip commit 2.13) | `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault；commit 2.11 CGContext 布局对齐真修 + commit 2.13 revert 16 处回 `let mut` 风格 |
 | [W-006](#w-006-jhyy_v1-return-x--y-两-1-char-var-发-127qbe-fail) | RESOLVED (transitively closed by Sprint 4.21-4.25 W-005 #2 真修 chain — minimal repro no longer triggers, 2026-08-11 verified) | jhyy_v1 codegen 让两个 1-char 局部变量在 `return x ± y` 共享同一 stack slot → QBE fail / exit 127；改名或加类型注解绕 |
-| [W-007](#w-007-jhyy_v1-fn--i64--return--literal-as-i64-emit-w-copy) | ACTIVE | jhyy_v1 codegen 把 `fn() -> i64 { return X as i64; }` 的 return value 当 w（32-bit）emit → QBE "invalid type for jump argument" 错 |
+| [W-007](#w-007-jhyy_v1-fn--i64--return--literal-as-i64-emit-w-copy) | ✅ RESOLVED (transitive — jhyy_v1.exe.exe sha `ba94df93...` 已含 cg_convert_arg `src=W → dst=L` extsw 分支镜像 v0.8 commit 7 `0453cef`, 2026-08-12 5x5 PASS verified on 4 BAD variants, IL byte-equal C-side) | jhyy_v1 codegen 把 `fn() -> i64 { return X as i64; }` 的 return value 当 w（32-bit）emit → QBE "invalid type for jump argument" 错 |
 | [W-008](#w-008-jhyy_v1-cg_find_field_offset-漏一层-deref-i64-struct-field-emit-w-loadw) | RESOLVED | jhyy_v1 codegen NODE_FIELD 查 struct field type 时把 `*u8` 指针当 `**u8` 解了一层 → i64/pointer struct field 全 emit `=w loadw` 而非 `=l loadl` → QBE 拒绝 |
 | [W-009](#w-009-jhyy_v1-cg_convert_arg-src_t--0-返回-arg-未-coerce-导致-literal-0-w-copy-0-在-ceql-被-reject) | RESOLVED | jhyy_v1 codegen cg_convert_arg 在 `src_t==0` 时直接 return arg，但 literal 0 实际 emit `=w copy 0`（因 qbe_type_of(NULL)=QBE_W）→ 比较 l 字段（pointer / i64 / u64）时 `ceql`/`csltl` 等操作码两边操作数类型不匹配 → QBE "invalid type for second operand" 错 |
 | [B-let2 (cross-ref)](#cross-ref-b-let2-stage-1-byte-equal-codegen-gap) | RESOLVED (v0.9 commit 2.5) | jhyy_v1 `cg_convert_arg` 缺 `src=l, dst=w` narrow 分支 → `i64 → i32` 字段赋值 / `as` 转换 emit 错 IL。详见 [`codegen-pitfalls.md` § 2.2](codegen-pitfalls.md) |
-| [W-008 ↔ W-009 ↔ W-007 ↔ W-005 (cross-ref)](#cross-ref-w-008--w-009--w-007--w-005-codegen-转化路径联动) | mixed (W-005 RESOLVED, W-008/W-009 RESOLVED, W-007 ACTIVE) | 4 个 workaround 都在 jhyy_v1 `cg_convert_arg` + NODE_ASSIGN + NODE_FIELD codegen 路径, 真修需要联动考虑 |
+| [W-008 ↔ W-009 ↔ W-007 ↔ W-005 (cross-ref)](#cross-ref-w-008--w-009--w-007--w-005-codegen-转化路径联动) | ✅ ALL RESOLVED (W-005 v0.9 wip 2.13 / W-008 v0.8 c11 / W-009 v0.8 c12 / W-007 transitive 2026-08-12) | 4 个 workaround 都在 jhyy_v1 `cg_convert_arg` + NODE_ASSIGN + NODE_FIELD codegen 路径, 全 RESOLVED |
 | [W-010](#w-010-jhyy-端-max_locals--512-vs-c-端-1024--cg_add_local-静默溢出致-t0-污染) | RESOLVED (v0.9 wip commit 2.79) | jhyy-side `MAX_LOCALS=512` 比 C-side `1024` 小 2× → cg_expr 本地变量数溢出时 cg_add_local 静默返回 0 → cg_find_local miss → emit `%t0`(QBE temp 0,sentinel); align jhyy-side 到 1024 全消除 |
 | [W-012](#w-012-codegen-emit-layer-sentinel-pollution-cg_copy_struct-emit-copy--t0-when-src_addrundef) | RESOLVED (v0.9 wip commit 2.81) | C/jhyy `cg_copy_struct` 在 src/dst 是 sentinel `IRVal{0}` (kind=IRVAL_TEMP, id=0) 时仍逐字段 emit `copy %t0`, QBE reject. 真修: `irval_is_undef(v)` sentinel 守卫 (3 emit 点 + 1 helper). |
 
@@ -712,8 +712,8 @@ v1.1 wip commit 1.1 最初版本把 W-006 标 "RESOLVED (escaped — codegen fix
 ## W-007: jhyy_v1 `fn() -> i64 { return X as i64; }` emit `w copy`
 
 **ID:** W-007
-**状态:** ACTIVE
-**日期:** 2026-08-04
+**状态:** ✅ RESOLVED (transitive — jhyy_v1.exe.exe sha `ba94df93...` 已含 type propagation fix per v0.8 commit 7 `0453cef` `cg_convert_arg src=W → dst=L extsw 分支补全`,2026-08-12 verified 5x5 PASS on 4 BAD variants, IL byte-equal C-side)
+**日期:** 2026-08-04 (ACTIVE) → 2026-08-12 (RESOLVED transitive)
 **触发面:** 函数体末尾 `return literal as i64;` 或 `let x = literal as i64; return x;`，且 literal 是字面整数常量。
 **症状:** QBE 拒绝 → "invalid type for jump argument %t0 in block @start0"。jhyy_v1 编译 exit 1。
 **最小复现:**
@@ -764,12 +764,44 @@ fn small_const() -> i64 { return some_64(); }
 
 **失效条件:** jhyy_v1 codegen 在 NODE_INT_LIT 的 emit 路径上加 type propagation（看 return type / cast 类型决定 copy 的 class）→ W-007 可移除。
 
-**superseder:** TBD（jhyy_v1 codegen fix sprint，post v1.0.0 落地后）
+**superseder:** v0.8 commit 7 `0453cef` (cg_convert_arg src=W → dst=L extsw 分支补全) — 已 ship,镜像到 jhyy_v1 `compiler/src0/codegen.jhyy:657-661`
+
+### W-007 RESOLVED — transitively closed by v0.8 commit 7 extsw 分支 (2026-08-12)
+
+**Sprint v1.1.2 verification (5x5 PASS)**:
+
+| Variant | Source | Expected | 5x5 PASS |
+|---------|--------|----------|----------|
+| V1 | `fn small_const() -> i64 { return 5 as i64; }` | EXIT=5 | ✅ 5/5 |
+| V2 | `let x = 5 as i64; return x;` | EXIT=5 | ✅ 5/5 |
+| V3 | `return (4 + 1) as i64;` | EXIT=5 | ✅ 5/5 |
+| V4 | `return 0 as i64;` | EXIT=0 | ✅ 5/5 |
+
+**canonical jhyy_v1 emit** (sha `ba94df93`, vs prior buggy `%t0 =w copy 5; ret %t0`):
+```qbe
+export function l $small_const() {
+@start0
+    %t1 =w copy 5
+    %t2 =l extsw %t1     ← cg_convert_arg `src=W → dst=L` 分支补全生效
+    ret %t2
+}
+```
+
+**真因** (per v0.8 commit 7 + jhyy_v1 镜像 `codegen.jhyy:657-661`):
+- NODE_INT_LIT 默认 emit 类是 `w` (QBE literal 不能 `l` class 直接 emit)
+- 旧版 cg_convert_arg 缺 `src=W → dst=L` 分支 → emit `w copy; ret` → QBE fail
+- v0.8 commit 7 加 `src=QBE_W && dst=QBE_L → emit extsw` 分支,jhyy_v1 翻译时已镜像 (codegen.jhyy:657-661 "W-007 fix (v0.8 bug 11 analog)" 注释)
+
+**Out of scope (NOT W-007, separate shared bug)**:
+- **大整数 literal (超出 INT32_MAX, 如 `0xcbf29ce484222325`)** → C-side AND jhyy_v1 都 emit `%t1 =w copy 9223372036854775807` (INT64_MAX 截断),后 `extsw`. 这是 NODE_INT_LIT parse 层 bug (lex 阶段把 hex literal 存为 i32 后溢出转 i64) — 双编译器共享,需要单独 sprint 修,不是 W-007
+- **`-1 as i64`** → runtime crash (EXIT=127), C-side AND jhyy_v1 同样行为. IL 正确(`w copy 1; sub 0,1; extsw`),但运行时负数比较/QBE extsw 路径有 bug — 不是 W-007 触发面 (跟 W-007 literal-as-i64 emit type propagation 无关)
+
+**W-007 失效条件** (per workarounds.md line 765): jhyy_v1 codegen NODE_INT_LIT emit path 加 type propagation → 失效条件已满足,标 RESOLVED.
 
 **引用:**
-- 复现 `_test_small.jhyy` / `_test_small4.jhyy` / `_test_small6.jhyy` / `_test_small8.jhyy`
-- v0 同源码 emit 正确 IL（`%t0 =l copy ...`），jhyy_v1 emit `w copy`，bug 在 jhyy_v1 自身
-- 与 W-006 触发面不同（无 1-char var 介入），是独立 bug
+- 复现 `_test_small.jhyy` / `_test_small4.jhyy` / `_test_small6.jhyy` / `_test_small8.jhyy` (4 BAD variants 全 PASS)
+- v0 同源码 emit 正确 IL（`%t0 =l copy ...`），jhyy_v1 emit `w copy + extsw`，现在 byte-equal to v0
+- 与 W-006 触发面不同（无 1-char var 介入），是独立 bug — W-006 也 RESOLVED (Sprint 4.21-4.25 W-005 #2 family transitive close)
 
 ---
 
