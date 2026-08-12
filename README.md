@@ -93,29 +93,20 @@ fn main_jhyy() -> i32 {
 
 ## Quick Start
 
-### Requirements
+### After clone — pick one
 
-- Windows 10+ + MSYS2 (ucrt64)
-- GCC 15+ at `C:\msys64\ucrt64\bin\gcc.exe`
-- Vendored QBE at `qbe/qbe.exe` (Windows x64 target)
-
-### Build the compiler
-
-```bash
-git clone https://github.com/JiHuiYiYou/JiHuiYiYou-compiler
-cd JiHuiYiYou-compiler
-
-/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra \
-    compiler/src/*.c \
-    -o compiler/build/bin/jhyy.exe \
-    -I compiler/src
+```text
+just cloned? run ONE of these and you have a working jhyy.exe
 ```
 
-Or use the project-root `Makefile`:
+| Platform | Command | What it does |
+|----------|---------|--------------|
+| **Windows (cmd / PowerShell)** | `bootstrap.cmd` | builds `jhyy.exe` from C source + runs the regression suite |
+| **MSYS2 bash / Git Bash** | `./bootstrap.sh` | same |
+| **MSYS2 bash** | `make` | same as `bootstrap.sh` step 1 (build only, no regression) |
+| **Manual** | see [Manual build](#manual-build) below | explicit gcc invocation |
 
-```bash
-make
-```
+All four produce the same `compiler/build/bin/jhyy.exe` and verify against `python compiler/build/bin/regress.py` (baseline: **50/50 passed, 0 failed, 3 skipped**).
 
 ### Hello world
 
@@ -136,8 +127,32 @@ echo $?    # => 42
 
 ```bash
 python compiler/build/bin/regress.py
-# => 50/53 passed, 0 failed, 3 skipped
+# => 50/50 passed, 0 failed, 3 skipped (of 53 total)
 ```
+
+### Manual build
+
+If you prefer to skip the bootstrap scripts:
+
+```bash
+git clone https://github.com/JiHuiYiYou/JiHuiYiYou-compiler
+cd JiHuiYiYou-compiler
+
+/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra \
+    compiler/src/*.c \
+    -o compiler/build/bin/jhyy.exe \
+    -I compiler/src
+```
+
+Or use the project-root `Makefile` from MSYS2 bash:
+
+```bash
+make
+```
+
+### Run with VSCode
+
+The repo ships `.vscode/tasks.json` — open any `.jhyy` file and press **`Ctrl+Shift+B`** to compile + run it. Other tasks: `Ctrl+Shift+P` → **Tasks: Run Task** → `JHYY: Run` / `JHYY: Compile` / `JHYY: Build IR` / `JHYY: Bootstrap`. `.vscode/settings.json` adds `compiler/build/bin` to the integrated terminal PATH so you can also type `jhyy run hello.jhyy` directly. `F5` launches the compiled `.exe` under MSYS2's gdb (cppdbg).
 
 ### Verify self-hosting closure
 

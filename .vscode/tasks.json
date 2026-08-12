@@ -31,7 +31,7 @@
             ],
             "group": {
                 "kind": "build",
-                "isDefault": false
+                "isDefault": true
             },
             "presentation": {
                 "reveal": "always",
@@ -40,7 +40,7 @@
                 "clear": true
             },
             "problemMatcher": [],
-            "detail": "Compile and run the current .jhyy file"
+            "detail": "Compile and run the current .jhyy file (default Ctrl+Shift+B)"
         },
         {
             "label": "JHYY: Compile",
@@ -76,26 +76,19 @@
         },
         {
             "type": "cppbuild",
-            "label": "C/C++: g++.exe 生成活动文件",
-            "command": "C:\\msys64\\ucrt64\\bin\\g++.exe",
-            "args": [
-                "-fdiagnostics-color=always",
-                "-g",
-                "${file}",
-                "-o",
-                "${fileDirname}\\${fileBasenameNoExtension}.exe"
-            ],
-            "options": {
-                "cwd": "${fileDirname}"
+            "label": "JHYY: Bootstrap (build + regress)",
+            "command": "${workspaceFolder}/bootstrap.cmd",
+            "windows": {
+                "command": "${workspaceFolder}/bootstrap.cmd"
             },
-            "problemMatcher": [
-                "$gcc"
-            ],
-            "group": {
-                "kind": "build",
-                "isDefault": true
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "focus": true,
+                "clear": true
             },
-            "detail": "调试器生成的任务。"
+            "problemMatcher": [],
+            "detail": "One-command setup: build jhyy.exe and run regression suite"
         }
     ]
 }
