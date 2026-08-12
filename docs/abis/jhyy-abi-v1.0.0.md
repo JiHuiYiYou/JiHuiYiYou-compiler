@@ -816,6 +816,87 @@ JHYY 字符串字面量在 QBE data 段中以 UTF-8 + NUL 终止符存储。
 
 ## 12. 版本历史
 
+> **章节号说明**:OS-era ABI 内容(`Cap<T>` wire format + 多 target ABI + Debug ABI)按 [`coordination.md`](../../../../../jhyy_OS/docs/coordination.md) § 5 规划落 § 13。**v1.0.0 § 12 仅保留为版本历史**,不扩展;v2.0 启动后 § 13 增补不开 v1.0.0 lock 边界。
+
+---
+
+## 13. OS-era ABI(Sprint 3g / v2.0 / v3.x 落地,v2.0 启动前锁)
+
+> **状态**:⏳ 草案 — 等 sprint 3g 主体 + v2.0 milestone 启动前锁。内容由下列 spec 起草:
+> - [`v3.x-capability-spec.md`](../../plans/roadmap/v3.x-capability-spec.md) § 内存布局(`Cap<T>` runtime layout)
+> - [`v2.0.0-os-prep.md`](../../plans/v2/v2.0.0-os-prep.md) § 5.1 #5 + D7(多 target + freestanding)
+> - [`v0.0.4-debug-abi.md`](../../../../../jhyy_OS/docs/v0.0.4-debug-abi.md)(DebugEvent / ErrChain / KernelStateHistory + ProvenanceInfo DAG)
+> - D16(Q-OS-007 闭环):cap-offset IPC msg header wire 形式 `{msg_tag: u32, n_caps: u16, cap_offsets: [u16; n]}`
+
+### 13.1 多 target ABI 表
+
+| Target | 调用约定 | Calling convention 链接 | OS 使用 |
+|--------|---------|------------------------|---------|
+| `amd64_win` | Windows x64 / MSVC | per § 3.1(c 端 locked baseline) | host + 跨 FFI |
+| `amd64_win_freestanding` | Windows x64, 不 link ucrt | per D25,v2.0 milestone 启动前锁 | M1 boot .efi(走 OVMF)|
+| `amd64_sysv` | System V AMD64 | per `v2.x-qbe-rewrite.md`,v2.x 末 | post-MVP Linux port |
+| `amd64_sysv_freestanding` | SysV AMD64, 不 link libc | per `v2.x-qbe-rewrite.md`,v2.x 末 | post-MVP Linux 嵌入式 |
+
+### 13.2 Cap<T> Wire Format(`Cap<T>` runtime layout)
+
+c-typedef 草案见 [`v3.x-capability-spec.md`](../../plans/roadmap/v3.x-capability-spec.md) § 内存布局(初步 8B = cnode_idx(u32) + depth(u8) + rights(u16) + 1B padding;phantom field 0 字节)。
+
+**wire-format c-typedef 全字段**(per [`v0.0.4-debug-abi.md § 7`](../../../../../jhyy_OS/docs/v0.0.4-debug-abi.md),含 DAG 扩展,sprint 3g.5 phantom 实施时定最终大小):
+
+```c
+typedef struct {
+    SourceLoc  constructed_at;      // 24  @0   (align 8)
+    uint32_t   constructed_by;      // 4   @24  (FnId)
+    uint32_t   _pad_chain;          // 4   @28  (u64 alignment for chain ptrs)
+    uint64_t   grant_chain_off;     // 8   @32
+    uint64_t   revoke_chain_off;    // 8   @40
+    uint32_t   current_holder;      // 4   @48  (ProcessId)
+    uint16_t   rights;              // 2   @52
+    uint16_t   _pad_ts;             // 2   @54
+    uint64_t   created_at_ns;       // 8   @56
+    uint32_t   parents[8];          // 32  @64  (DAG)
+    uint32_t   children[8];         // 32  @96  (DAG)
+    uint8_t    parents_len;         // 1   @128
+    uint8_t    children_len;        // 1   @129
+    uint16_t   _pad_end;            // 2   @130
+} ProvenanceInfo;                  // sizeof = 136 字节(8-aligned;初步估算)
+```
+
+### 13.3 IPC msg header(含 cap-offset 表,D16 闭环)
+
+```
++----------------+-----------------+----------------------------+
+| msg_tag (u32)  | n_caps (u16)    | cap_offsets ([u16; n_caps])|
++----------------+-----------------+----------------------------+
+|<--- 8B --->|<-- 8B --------->|<-- 2B × n_caps -------------->|
+```
+
+`n_caps = 0` 时,`cap_offsets` 字段省略(只剩 8B header)。`msg_tag` 决定 payload 协议类型。**Cap<T> 在 IPC 中的 cnode_idx 改写** 由 cap-offset 表驱动(per `v0.0.4-debug-abi.md` § 7 + `v0.0.1-capability.md` § 1 + D16)。
+
+### 13.4 Debug ABI(`v0.0.4-debug-abi.md` 镜像)
+
+OS 端 debug infra 的 c-typedef + wire format,落地在本 §:
+
+- § 13.4.1 `DebugEvent`(54B header,c-typedef + nested payload 约定)— 见 `v0.0.4-debug-abi.md` § 2 + § 3 + § 4
+- § 13.4.2 `ErrChain`(64B,c-typedef + SourceLoc 内嵌)— 见 `v0.0.4-debug-abi.md` § 5
+- § 13.4.3 `KernelState` enum + `StateTransition`(48B)+ `KernelStateHistory`(ring buffer N=256)— 见 `v0.0.4-debug-abi.md` § 6
+- § 13.4.4 `ProvenanceInfo` DAG 扩展(Confidence 三级标记 + parents/children K=8)— 见 `v0.0.4-debug-abi.md` § 4 + § 7(**同 § 13.2 c-typedef,镜像对齐**)
+
+`v1.0.0 § 11 已知局限` 锁的影响:§ 13.4 新增内容在 debug build 启用,release build strip(per `v0.0.1-capability.md § 5.2` "side table 可 strip")— **不污染 v1.0.0 locked baseline 的 runtime layout**。
+
+### 13.5 验收标准 / 触发条件
+
+| 内容 | 触发 sprint | OS 节点 | 详细度 |
+|------|------------|--------|-------|
+| § 13.1 多 target 表 | v2.0(v2.0.0-os-prep § 5.1 #5)| M1 启动可达 | multi-target dispatcher test |
+| § 13.2 Cap<T> wire | v3.1 sprint 3g.5(D23/D27)| M4 capability | byte-equal 跟 OS 端 cap 表 |
+| § 13.3 IPC header | v3.1 sprint 3g(D16)| M5b IPC | cap-offset 双路径 emit(fast + metadata 段)|
+| § 13.4 Debug ABI | v3.1 sprint 3g(Q-Compiler-007)| M5b IPC | kernel introspection syscall 落地见 `v0.0.5-syscall-abi-update.md`(待 OS 起)|
+
+---
+
+## 12. 版本历史
+
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
 | v0.0.1 | 2026-06-05 | 初稿，基于 v0.0.2 |

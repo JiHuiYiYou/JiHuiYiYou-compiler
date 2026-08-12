@@ -83,7 +83,7 @@
 
 | 改动 | v2.x 影响 | v3.x 影响 |
 |------|---------|-----------|
-| spec 增补 | § 12(多 target ABI) | 各特性节(§ 14 / § 15 / § 16) |
+| spec 增补 | § 13(多 target ABI) | 各特性节(§ 14 / § 15 / § 16) |
 | 不冲突 | ✓ | ✓ |
 
 ---
@@ -125,7 +125,7 @@
 |--------|------|------|
 | **v0.9 末** | W-001~W-009 真修 + main.c 翻译 + Stage 1 byte-equal | ✅ shipped (commit 2.83, 2026-08-11) |
 | **v1.0**(5 sprint 框架) | codegen.c / jhyy_helpers.c 翻译 + 全 src0/ 翻译 + Stage 2 三层 N=3 fixed point | v0.9 末 |
-| **v1.1.0** ⟂ **v2.0 sprint A** 前段 | lang-spec § 18-21 + abi § 12 草案 / amd64_win_freestanding target 起步 | v0.9 末 / v1.0 末 |
+| **v1.1.0** ⟂ **v2.0 sprint A** 前段 | lang-spec § 18-21 + abi § 13 草案 / amd64_win_freestanding target 起步 | v0.9 末 / v1.0 末 |
 | **v2.0 sprint A** ⟂ **v3.0 3a** | amd64_win_freestanding target + QBE + GCC / inline asm | v1.0 末 / v1.0 末 |
 | **v2.0 sprint B** ⟂ **v3.0 3b** | hello-freestanding.efi 跑 OVMF / #[naked] fn | v2.0 A / v1.0 末 |
 | **v2.0 sprint C** ⟂ **v3.0 3c** | 多目标 dispatcher + **byte-equal 三件套**(per `coordination.md § 3 D26`:`jhyy_v1.il == jhyy_v2.il` + `.s == .s` + `.exe byte-equal` 兜底 `gcc -g0 + strip + SOURCE_DATE_EPOCH + --build-id=none`) / volatile load/store | v2.0 A / v1.0 末 |

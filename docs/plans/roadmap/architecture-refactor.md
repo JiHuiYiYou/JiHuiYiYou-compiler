@@ -362,7 +362,7 @@ v2.x-qbe-rewrite.md **整体重写**。原文件保留"OS 对齐增量"段(已�
 
 ### 改动
 
-v3.x-capability-spec.md § "内存布局(abi § 12 草案)" 段:
+v3.x-capability-spec.md § "内存布局(abi § 13.2 草案)" 段:
 - 旧:Cap<T> 16 字节({cnode_idx:u32 + depth:u8 + rights:u16 + _phantom:*T})
 - **新**:Cap<T> **运行时 8 字节**({cnode_idx:u32 + depth:u8 + rights:u16} 7 字节 + 1 字节 padding)+ `_phantom: *T` 是**编译期 0 字节字段**(phantom type 惯用法)
 - 加一行:跟 `coordination.md` § 3 "Cap<T> phantom type 8 字节布局锁" cross-link
@@ -545,11 +545,11 @@ v0.8 wip → v0.9.0 → v1.0.0 → v1.1.0 → v2.0.0 → v2.x → v3.0.0 → v3.
 | 项 | 内容 |
 |---|------|
 | **目标** | spec 增补 + jhyy_helpers.c 清理 + 文档同步 |
-| **做法** | 1. **lang-spec 增补**:§ 18 Cap<T> + § 19 unsafe_cap + § 20 Type-driven IPC + § 21 provenance(spec drafting,不动实现) <br> 2. **abi 增补**:§ 12 Cap wire format + cnode 引用布局 <br> 3. **jhyy_helpers.c 清理**:v0.9 末 + v1.0 期间累积的 bridge fn 评估;能砍的砍,能内联的内联 <br> 4. **v0.x 历史 sprint 文档归档**:v0.0~v0.7 任务清单 → `docs/logs/v0/`,L3 表格里只留 v0.6+ 已发版 <br> 5. v1.1.0 changelog + spec patch |
+| **做法** | 1. **lang-spec 增补**:§ 18 Cap<T> + § 19 unsafe_cap + § 20 Type-driven IPC + § 21 provenance(spec drafting,不动实现) <br> 2. **abi 增补**:§ 13 Cap wire format + cnode 引用布局 <br> 3. **jhyy_helpers.c 清理**:v0.9 末 + v1.0 期间累积的 bridge fn 评估;能砍的砍,能内联的内联 <br> 4. **v0.x 历史 sprint 文档归档**:v0.0~v0.7 任务清单 → `docs/logs/v0/`,L3 表格里只留 v0.6+ 已发版 <br> 5. v1.1.0 changelog + spec patch |
 | **事实依据** | OS 端 coordination § 5 已列 spec 增补 backlog;jhyy_helpers.c 范围扩了 3 次(v0.8 commit 10 + commit 11 + commit 12)需要清理 |
 | **OS 对接** | 0.5 — spec 增补锁 = v3.1 sprint 3g 启动的硬前置(spec 锁定才能实现)|
 | **R 链接** | R-3 + R-4(v1.0 任务清单 / 详细方案 spec drafting 项) |
-| **完成定义** | lang-spec § 18-21 全部起草完(50 行/节级别) + abi § 12 起草完 + jhyy_helpers.c 评估报告 |
+| **完成定义** | lang-spec § 18-21 全部起草完(50 行/节级别) + abi § 13 起草完 + jhyy_helpers.c 评估报告 |
 
 ---
 
@@ -634,7 +634,7 @@ v0.8 wip → v0.9.0 → v1.0.0 → v1.1.0 → v2.0.0 → v2.x → v3.0.0 → v3.
 | v0.8 wip | v1.0 baseline(12 OK 持平) | v1.0 跑 regress 对比基线 |
 | v0.9.0 | Stage 1 闭环(`.il byte-equal`)| v1.0 跑 3 层自举 |
 | v1.0.0 | jhyy_1 跑 regress 持平 + C 端编译器退役 | v1.1 启动 spec 增补;v2.0 启动多目标 |
-| v1.1.0 | lang-spec § 18-21 + abi § 12 锁定 | v3.1 sprint 3g 启动按 spec 实现 |
+| v1.1.0 | lang-spec § 18-21 + abi § 13 锁定 | v3.1 sprint 3g 启动按 spec 实现 |
 | v2.0.0 | `amd64_win_freestanding` target + 编 kernel.efi | OS 端 M1 启动链路第一项 |
 | v2.x | 自写 IL → .s + 多目标 + N 代 fixed point | OS 端 OS 完全 self-contained 编 |
 | v3.0.0 | sprint 3a-3f 6 特性 | OS 端 M1 启动(jhyy 编 kernel.efi → OVMF → printk) |
