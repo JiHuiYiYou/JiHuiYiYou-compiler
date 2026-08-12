@@ -38,6 +38,7 @@
 | [W-008 ↔ W-009 ↔ W-007 ↔ W-005 (cross-ref)](#cross-ref-w-008--w-009--w-007--w-005-codegen-转化路径联动) | ✅ ALL RESOLVED (W-005 v0.9 wip 2.13 / W-008 v0.8 c11 / W-009 v0.8 c12 / W-007 transitive 2026-08-12) | 4 个 workaround 都在 jhyy_v1 `cg_convert_arg` + NODE_ASSIGN + NODE_FIELD codegen 路径, 全 RESOLVED |
 | [W-010](#w-010-jhyy-端-max_locals--512-vs-c-端-1024--cg_add_local-静默溢出致-t0-污染) | RESOLVED (v0.9 wip commit 2.79) | jhyy-side `MAX_LOCALS=512` 比 C-side `1024` 小 2× → cg_expr 本地变量数溢出时 cg_add_local 静默返回 0 → cg_find_local miss → emit `%t0`(QBE temp 0,sentinel); align jhyy-side 到 1024 全消除 |
 | [W-012](#w-012-codegen-emit-layer-sentinel-pollution-cg_copy_struct-emit-copy--t0-when-src_addrundef) | RESOLVED (v0.9 wip commit 2.81) | C/jhyy `cg_copy_struct` 在 src/dst 是 sentinel `IRVal{0}` (kind=IRVAL_TEMP, id=0) 时仍逐字段 emit `copy %t0`, QBE reject. 真修: `irval_is_undef(v)` sentinel 守卫 (3 emit 点 + 1 helper). |
+| [W-013](#w-013-c-side-cg_expr-node_cast-w--b-narrowing-emit-sentinel-t0) | ✅ RESOLVED (v0.9 wip commit 2.87, Sprint v1.1.7) | C-side `cg_expr` NODE_CAST 在 w/l → b/h narrowing (i32/i64 literal → u8/i8/u16/i16) 无 conv 时 emit sentinel `IRVal{0}` (`%t0`) → 后续 `storeb %t0, addr` 被 QBE reject ("invalid type for first operand %t0 in storeb"). jhyy-side 因 `if conv==0 return arg` 自然 fallback 一直正确 |
 
 ---
 
@@ -1334,4 +1335,66 @@ QBE：`invalid type for second operand %t29 in ceql`
 **引用:**
 - Sprint 4.25 plan: `C:\Users\liuzhen\.claude\plans\jaunty-orbiting-naur.md`
 - v0.9 wip commit 2.81 (Sprint 4.25 sentinel 真修)
+
+---
+
+## W-013: C-side cg_expr NODE_CAST w/l → b/h narrowing emit sentinel `%t0`
+
+**ID:** W-013
+**状态:** ✅ RESOLVED (v0.9 wip commit 2.87, Sprint v1.1.7)
+**日期:** 2026-08-12
+**触发面:** 任意 `*T_ptr = expr as u8/i8/u16/i16/bool` (T ∈ {i32,i64,u32,u64})：
+- `*p_u8 = 65 as u8` (literal → sub-word)
+- `*p_u8 = somevar as u8` (let-binding chain)
+- 任意 codegen 路径下, w/l → b/h narrowing cast (literal 或 through `let _T = expr as subword`)
+
+**症状:**
+- `compiler/build/bin/*.il` 出现 `storeb %t0, addr` / `storeh %t0, addr` (QBE 错: `invalid type for first operand %t0 in storeb/storeh`)
+- C-side `jhyy.exe compile *_test*.jhyy -o out` 触发 (例如 Sprint 4.7 最小复现 `_bug4_v2.jhyy`)
+- jhyy_v1 (`sha ba94df93...`) **不触发** — jhyy-side `cg_convert_arg` 因 `if conv==0 return arg` 自然 fallback, 一直返回 w-class temp 给 storeb consume (QBE implicit truncate)
+
+**根因 (traced 2026-08-12):**
+1. `cg_expr` NODE_CAST handler (`compiler/src/codegen.c:786-876`) 对每个 src/dst 类型组合查 conv instruction (extsw/extuw/dtosl/stosi/...)
+2. **缺失 case**: `src ∈ {w,l}` × `dst ∈ {b,h}` — QBE 无 b/h temporary type (sub-word 仅在 load/store 操作数上), 所以 cast 是 IR 层 no-op (consuming storeb/loadub 隐式截断)
+3. Fall-through 到 `if (!conv) { IRVal v = {0}; *out = (v); return; }` (codegen.c:869-872, 自 v0.5.0 f4037c0 起)
+4. **Sentinel pollution**: `IRVal{0}` (kind=IRVAL_TEMP, id=0) 被 storeb 当源操作数 emit → QBE reject
+5. 此 pattern 是 W-005 #2 family 的另一种形态 — 任何"应该返回 word-class temp 但返回 sentinel IRVal{0}"的 codegen 路径都会触发
+
+**真修 (Sprint v1.1.7 commit 2.87):** 在 codegen.c:869 之前加 w/l → b/h narrow no-op short-circuit：
+```c
+if (!conv && (src_qt == 'w' || src_qt == 'l') && (dst_qt == 'b' || dst_qt == 'h')) {
+    *out = (inner); return;
+}
+```
+- 语义: QBE 不允许 b/h 临时, 所以 narrowing 在 IR 层是 no-op — storeb/loadub 隐式截断即可
+- jhyy-side 无需改 — `cg_convert_arg` (`compiler/src0/codegen.jhyy:567-711`) 的 `if conv == 0 return arg` 已正确 fallback
+
+**结果 (验证 2026-08-12):**
+- 最小复现 `_bug4.jhyy` (`*p_u8 = 65 as u8`):
+  - BEFORE fix C-side: `qbe:_bug4.il:6: invalid type for first operand %t0 in storeb`
+  - AFTER fix C-side: compiled successfully, **EXIT=65 ✓**
+  - jhyy_v1 (canonical pre-fix): compiled successfully, EXIT=65 ✓ (一直 correct)
+- 5x5 PASS 验证 (3 case × 5 runs):
+  - `_bug4_test_u8.jhyy`: 5/5 PASS EXIT=65
+  - `_bug4_test_i8.jhyy`: 5/5 PASS EXIT=255 (-1 as i8 sign-extended back to i64)
+  - `_bug4_test_let_u8.jhyy`: 5/5 PASS EXIT=65 (let-binding chain)
+- regress.py (C-side): 50/50 PASS（持平 baseline）
+- regress_v1.py (jhyy_v1.exe.exe sha `ba94df93...`): 50/50 PASS（持平 baseline）
+- IL 对比 (C-side vs jhyy_v1): 完全等价 (jhyy_v1 一直 correct, C-side fix 镜像同 emit pattern)
+
+**Sprint 历史:**
+- Sprint 4.7 (commit 2.46) — 首次发现 Bug 4 (stub v2 workaround 避开 struct pass-by-value), 当时归类为 W-005 #2 family 的 EMIT-layer 形态
+- Sprint 4.21-4.25 W-005 #2 真修 chain — 修了 IRVal struct pass-by-value stale pointer, 但 cg_copy_struct 守卫不覆盖 cg_expr NODE_CAST 的 narrow no-op 路径
+- Sprint v1.1.7 (commit 2.87) — 补 w/l → b/h narrow no-op 守卫, 4 个 v0 codegen bug 全部真修
+
+**superseder:** 无 — 本 fix 是 cg_expr NODE_CAST conv-table 的最后缺失 case, 之后不会再有类似 narrow 漏 emit
+
+**不变量 (byte-equal 保护):**
+- 新增 short-circuit 只在 `!conv && (src_qt ∈ {w,l}) && (dst_qt ∈ {b,h})` 时触发 — 这 4 种组合之前必然 emit sentinel, 不可能产生正确 IL, 所以守卫**不改正确程序输出**
+- jhyy_v1.exe.exe (`sha ba94df93...`) 不需要 rebuild — jhyy-side 一直 correct
+
+**引用:**
+- Sprint v1.1.7 plan: `C:\Users\liuzhen\.claude\plans\jaunty-orbiting-naur.md` (related W-013 entry)
+- Sprint 4.7 IRVal pass-by-value memory: `project_sprint4_7_irval_pass_by_value_bug.md`
+- v0.9 wip commit 2.87 (Sprint v1.1.7 Bug 4 narrow 真修)
 

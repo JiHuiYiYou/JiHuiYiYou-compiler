@@ -866,6 +866,17 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
             }
             *out = (result); return;
         }
+        /* Bug 4 真修 (Sprint v1.1.7): narrowing word -> sub-word (w->b, w->h,
+           l->b, l->h) has no explicit QBE conversion instruction, AND QBE
+           has no b/h temporary type at all (sub-word only appears as
+           load/store operand). The cast is a no-op at IR level — the
+           consuming load/store instruction (storeb/loadub/storeh/loaduh)
+           takes a word-class source and truncates implicitly. Returning
+           inner (word-class) is correct; emitting nothing + sentinel
+           IRVal{0} was the historical Bug 4 (storeb %t0 sentinel pollution). */
+        if (!conv && (src_qt == 'w' || src_qt == 'l') && (dst_qt == 'b' || dst_qt == 'h')) {
+            *out = (inner); return;
+        }
         if (!conv) {
             IRVal v = {0};
             *out = (v); return;
