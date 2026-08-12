@@ -814,11 +814,28 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
             /* no-op */
             *out = (inner); return;
         }
-        /* sub-word -> word: already word after loadub/loadsb/loaduh/loadsh */
+        /* sub-word -> word or long: must extend through w class.
+ * loadub/loadsb/loaduh/loadsh returns w-class already extended.
+ * But if we're converting between sub-word and long (w->l or h->l or b->l),
+ * we cannot `=l copy` directly — QBE rejects without extuw/extsw.
+ * Chain: b/h -> w (copy, already extended by loadub/loadsb/loaduh/loadsh)
+ *        w -> l (extuw for unsigned u8/u16, extsw for signed i8/i16)
+ */
         if ((src_qt == 'b' || src_qt == 'h') && (dst_qt == 'w' || dst_qt == 'l')) {
-            IRVal result = ir_new_tmp(cg->ir, dst_qt);
-            ir_emit(cg->ir, "    %%t%d =%c copy %%t%d\n", result.id, dst_qt, inner.id);
-            *out = (result); return;
+            if (dst_qt == 'w') {
+                /* b/h -> w: already word after loadub/loadsb/loaduh/loadsh */
+                IRVal result = ir_new_tmp(cg->ir, dst_qt);
+                ir_emit(cg->ir, "    %%t%d =%c copy %%t%d\n", result.id, dst_qt, inner.id);
+                *out = (result); return;
+            }
+            /* dst == l: must extend w -> l via extuw (unsigned) or extsw (signed) */
+            int is_signed = (src_t->prim == PRIM_I8 || src_t->prim == PRIM_I16);
+            IRVal w_tmp = ir_new_tmp(cg->ir, 'w');
+            ir_emit(cg->ir, "    %%t%d =w copy %%t%d\n", w_tmp.id, inner.id);
+            IRVal l_tmp = ir_new_tmp(cg->ir, 'l');
+            ir_emit(cg->ir, "    %%t%d =l %s %%t%d\n", l_tmp.id,
+                    is_signed ? "extsw" : "extuw", w_tmp.id);
+            *out = (l_tmp); return;
         }
         IRVal result = ir_new_tmp(cg->ir, dst_qt);
         /* pick a QBE conversion instruction */

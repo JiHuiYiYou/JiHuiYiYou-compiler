@@ -592,10 +592,13 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
                 }
             }
         }
-        // sub-word (u8/u16/i8/i16/bool) → word (i32/u32) / long (i64): emit copy
-        //   对齐 v0 codegen.c:757-762 (sub-word → word/long)。jhyy 端 qbe_type_of 对 u8 返回 'w'
-        //   (v0.6 workaround) — 所以走 prim check 而非 src_qt/b vs dst_qt/w 判断。
-        //   判定: src prim ∈ {I8,U8,I16,U16,BOOL} 且 dst prim ∈ {I32,U32,I64,U64} → emit copy
+        // sub-word (u8/u16/i8/i16/bool) → word (i32/u32) / long (i64)
+//   v0.6 jhyy workaround: qbe_type_of(u8) returns 'w' (not 'b' like C-side),
+//   so判断走 prim check 而非 src_qt/b vs dst_qt/w.
+// Bug 3 真修 (v0.9 wip commit 2.86): sub-word → long 不能直 emit `=l copy`
+//   (QBE 拒绝 w→l copy 无 extsw/extuw)。必须链: sub-word → w (loadub/loadsb 已经扩展)
+//   然后 w → l (extuw 符号 or extsw 有符号).
+//   判定: src prim ∈ {I8,U8,I16,U16,BOOL} 且 dst prim ∈ {I32,U32,I64,U64}
         if src_t != (0 as *u8) && dst_t != (0 as *u8) {
             let src2 = src_t as *Type;
             let dst2 = dst_t as *Type;
@@ -605,15 +608,40 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
                 let src_sub: i32 = if sp == PRIM_I8() || sp == PRIM_U8() || sp == PRIM_I16() || sp == PRIM_U16() || sp == PRIM_BOOL() { 1 } else { 0 };
                 let dst_word: i32 = if dp == PRIM_I32() || dp == PRIM_U32() || dp == PRIM_I64() || dp == PRIM_U64() { 1 } else { 0 };
                 if src_sub != 0 && dst_word != 0 {
-                    let result = *ir_new_tmp(ir, dst_qt);
+                    let is_long: i32 = if dp == PRIM_I64() || dp == PRIM_U64() { 1 } else { 0 };
+                    let is_signed: i32 = if sp == PRIM_I8() || sp == PRIM_I16() { 1 } else { 0 };
+                    if is_long == 0 {
+                        // sub-word → word: loadub/loadsb/loaduh/loadsh already extended, just copy
+                        let result = *ir_new_tmp(ir, dst_qt);
+                        ir_emit_str(ir, "    %t" as *u8);
+                        ir_emit_int(ir, "%d" as *u8, result.id);
+                        ir_emit_str(ir, " =" as *u8);
+                        ir_emit_int(ir, "%c" as *u8, dst_qt);
+                        ir_emit_str(ir, " copy %t" as *u8);
+                        ir_emit_int(ir, "%d" as *u8, arg.id);
+                        ir_emit_str(ir, "\n" as *u8);
+                        return result;
+                    }
+                    // sub-word → long: chain w copy then w→l extsw/extuw
+                    let w_tmp = *ir_new_tmp(ir, QBE_W());
                     ir_emit_str(ir, "    %t" as *u8);
-                    ir_emit_int(ir, "%d" as *u8, result.id);
-                    ir_emit_str(ir, " =" as *u8);
-                    ir_emit_int(ir, "%c" as *u8, dst_qt);
-                    ir_emit_str(ir, " copy %t" as *u8);
+                    ir_emit_int(ir, "%d" as *u8, w_tmp.id);
+                    ir_emit_str(ir, " =w copy %t" as *u8);
                     ir_emit_int(ir, "%d" as *u8, arg.id);
                     ir_emit_str(ir, "\n" as *u8);
-                    return result;
+                    let l_tmp = *ir_new_tmp(ir, QBE_L());
+                    ir_emit_str(ir, "    %t" as *u8);
+                    ir_emit_int(ir, "%d" as *u8, l_tmp.id);
+                    ir_emit_str(ir, " =l " as *u8);
+                    if is_signed != 0 {
+                        ir_emit_str(ir, "extsw" as *u8);
+                    } else {
+                        ir_emit_str(ir, "extuw" as *u8);
+                    }
+                    ir_emit_str(ir, " %t" as *u8);
+                    ir_emit_int(ir, "%d" as *u8, w_tmp.id);
+                    ir_emit_str(ir, "\n" as *u8);
+                    return l_tmp;
                 }
             }
         }
