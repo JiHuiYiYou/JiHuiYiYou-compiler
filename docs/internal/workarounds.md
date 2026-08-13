@@ -39,6 +39,9 @@
 | [W-010](#w-010-jhyy-端-max_locals--512-vs-c-端-1024--cg_add_local-静默溢出致-t0-污染) | RESOLVED (v0.9 wip commit 2.79) | jhyy-side `MAX_LOCALS=512` 比 C-side `1024` 小 2× → cg_expr 本地变量数溢出时 cg_add_local 静默返回 0 → cg_find_local miss → emit `%t0`(QBE temp 0,sentinel); align jhyy-side 到 1024 全消除 |
 | [W-012](#w-012-codegen-emit-layer-sentinel-pollution-cg_copy_struct-emit-copy--t0-when-src_addrundef) | RESOLVED (v0.9 wip commit 2.81) | C/jhyy `cg_copy_struct` 在 src/dst 是 sentinel `IRVal{0}` (kind=IRVAL_TEMP, id=0) 时仍逐字段 emit `copy %t0`, QBE reject. 真修: `irval_is_undef(v)` sentinel 守卫 (3 emit 点 + 1 helper). |
 | [W-013](#w-013-c-side-cg_expr-node_cast-w--b-narrowing-emit-sentinel-t0) | ✅ RESOLVED (v0.9 wip commit 2.87, Sprint v1.1.7) | C-side `cg_expr` NODE_CAST 在 w/l → b/h narrowing (i32/i64 literal → u8/i8/u16/i16) 无 conv 时 emit sentinel `IRVal{0}` (`%t0`) → 后续 `storeb %t0, addr` 被 QBE reject ("invalid type for first operand %t0 in storeb"). jhyy-side 因 `if conv==0 return arg` 自然 fallback 一直正确 |
+| [W-014](#w-014-jhyy_selfhost_check-mcp-pre-stage-cleanup-deletes-canonical-closure-binaries) | ✅ RESOLVED | `jhyy_selfhost_check` MCP server 启动时 pre-stage cleanup 误把 `compiler/build/bin/jhyy_v1.exe.exe` (canonical closure binary) 当 stale artifact 删 → `enforce_baseline_hash=True` fail-fast 触发 |
+| [W-015](#w-015-node_sizeof-节点-arena-分配-8-字节--sema-const-fold-写-16-字节溢出到下一块) | ✅ RESOLVED (v1.3.3) | `ast_new_sizeof` / `ast_new_alignof` 只 alloc 8 字节,sema const-fold `node_int_data(n)` 写 16 字节溢出到 next arena chunk → 随机 data corruption |
+| [W-016](#w-016-8-字节-enum-参数-abi-mismatch--caller-用-l-slot-传callee-用-w-value-收) | ✅ RESOLVED (v1.3.7 fix) | enum payload > 4 字节时 caller 用 `l` (slot) 传,callee codegen 默认按 `w` (value) 收 → x86_64 SysV 读 %edi 拿到 slot pointer 低 32 位 → tag compare 永远 false → pattern binding `v` 拿不到值 |
 
 ---
 
@@ -1533,4 +1536,67 @@ input (canonical) 跟 output (scratch `_sh_vN`) 物理分开 → pre-stage clean
 - v1.3.3 sprint plan: `docs/plans/v1/v1.3.3-sizeof-compile-time-const.md`
 - W-005 #1 family (buffer size 计算错): `feedback_il_s_debugging_pattern.md`
 - baseline binary hash 守门:`feedback_regress_baseline_binary_hash.md`(本 bug 在 jhyy_v1 自身编 src0/main.jhyy 才暴露,跟 W-014 closure 验证路径同)
+
+---
+
+## W-016: 8 字节 enum 参数 ABI mismatch — caller 用 `l` (slot) 传,callee 用 `w` (value) 收
+
+**Status:** ✅ RESOLVED (v1.3.7 fix commit TBD, 2026-08-13)
+
+**触发面 (v1.3.7 pattern binding 引入)**:enum 携带 payload(> 4 字节,如 `Option::Some(i32)` = 8 字节),caller 通过 `l` (slot pointer) 传给 callee,但 codegen 早期默认所有 enum 都按 `w` (4-byte value) emit → callee 拿到的是 slot 指针的低 32 位(garbage),tag compare 永远 false,`Some(v) => v` 实际 fallback 到 always-match 但 `v` 没绑 → 测试 exit=0(应是 v 的值)。
+
+**最小复现:**
+```jhyy
+enum Option { Some(i32); None; }
+
+fn unwrap_or(o: Option, dflt: i32) -> i32 {
+    match o {
+        Some(v) => v,    // v 应绑到 payload,但 ABI mismatch 时 v=0
+        None => dflt
+    }
+}
+
+fn main() -> i32 {
+    return unwrap_or(Some(42), 0);   // expect 42,实际 0
+}
+```
+
+**IL 错误状态 (before fix):**
+```
+%t25 =l alloc8 8           ← caller 准备 slot
+...
+%t31 =w call $unwrap_or(l %t25, w %t26)   ← caller 传 slot (l class)
+export function w $unwrap_or(w %opt, ...)  ← ❌ callee 声明 w!
+       ^^^ x86_64 SysV 读 %edi = 低 32 位 of %rdi (= slot pointer 截断)
+```
+
+**根因:**
+`compiler/src/codegen.c:1918-1922` (`cg_func` param declaration) + `:1951` (param copy) — 默认 `qbe_type_of(pt)` 对 enum 返回 `QBE_W` (4-byte),不论 enum `total_size`。C-side 与 jhyy-side 都漏处理 large enum。
+
+**修复:**
+- `compiler/src/codegen.c:1918-1922`:param declaration 加 `else if (pt && pt->kind == KIND_ENUM && pt->enum_type.total_size > 4) ir_emit(ir, "l ...");`
+- `compiler/src/codegen.c:1951`:param copy 类型选 `l` if large enum
+- `compiler/src0/codegen.jhyy:2999-3070`:mirror — jhyy-side 用 `(*pt_t).size > 4` (`size` 不是 `total_size`,per jhyy Type struct 字段)
+
+**验证 (5/5 PASS per `feedback_fix_evaluation_rule`):**
+- `_v137_payload_bind_basic.jhyy`: exit=42 ✅
+- `_v137_or_same_bind.jhyy`: exit=42 ✅
+- `_v137_or_diff_bind_err.jhyy`: SemaError "OR pattern bindings must match" ✅
+- `_v137_or_exhaust.jhyy`: exit=1 ✅
+- `regress.py 50/50` + `regress_v1.py 50/50` ✅
+- Stage 2 N=3 closure v2=v3=v4 byte-equal 持平 ✅
+
+**Self-hosting impact:**
+- v1.il = v2.il sha `7c5ca427...`(new C-built canonical)
+- v3.il = v4.il sha `aefa3bb3...`(jhyy-built chain stable)
+- v2.il ≠ v3.il — **pre-existing** C-side vs jhyy-side 冗余 copy 差异(per v1.3.6 changelog W-005 #2 chain products),非 W-016 引入
+
+**跟 W-005 #2 冗余 copy 的区分:** W-016 是 ABI mismatch(类型 emit 错,导致语义错误),W-005 #2 是 codegen 优化不彻底(C 端多 emit 几个 `copy %t` 但语义正确)。两条独立 fix。
+
+**失效条件:** 不再写 `l` 类声明 large enum param,或者 enum ABI 改成 all-by-value(无 slot 概念)。
+
+**引用:**
+- v1.3.7 changelog: [`docs/logs/v1/changelog-v1.3.7-w007.md`](../logs/v1/changelog-v1.3.7-w007.md)
+- v1.3.7 父 sprint: `docs/plans/v1/v1.3.0任务清单 + 概要设计.md` § v1.3.7
+- ABI spec: [`docs/abis/jhyy-abi-v1.0.0.md`](../abis/jhyy-abi-v1.0.0.md) § enum pass semantics (大 enum = slot 传)
 

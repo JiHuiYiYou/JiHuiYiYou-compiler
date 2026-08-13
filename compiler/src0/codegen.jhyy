@@ -2999,11 +2999,22 @@ fn cg_func(cg_raw: *u8, n: *Node) -> i32 {
             if (*pt_t).kind == KIND_STRUCT() {
                 ir_emit_str(ir, "l %" as *u8);
             } else {
-                // [Status: v0 codegen bug 真修历史保留; workaround 代码保留作历史文档 (非 W-NNN 编号).]
-                // v0 codegen bug workaround: 不能用 "%c %"（sprintf 把末尾 literal % 吃掉）
-                // 拆成 2 个 emit：先 "w " + "%" + name
-                ir_emit_int(ir, "%c " as *u8, qbe_type_of(pt));
-                ir_emit_str(ir, "%" as *u8);
+                // W-007 fix: large enums declare as l (slot pointer).
+                let mut is_large_enum: i32 = 0 as i32;
+                if (*pt_t).kind == KIND_ENUM() {
+                    if (*pt_t).size > (4 as i64) {
+                        is_large_enum = 1 as i32;
+                    }
+                }
+                if is_large_enum == (1 as i32) {
+                    ir_emit_str(ir, "l %" as *u8);
+                } else {
+                    // [Status: v0 codegen bug 真修历史保留; workaround 代码保留作历史文档 (非 W-NNN 编号).]
+                    // v0 codegen bug workaround: 不能用 "%c %"（sprintf 把末尾 literal % 吃掉）
+                    // 拆成 2 个 emit：先 "w " + "%" + name
+                    ir_emit_int(ir, "%c " as *u8, qbe_type_of(pt));
+                    ir_emit_str(ir, "%" as *u8);
+                }
             }
         } else {
             ir_emit_str(ir, "w %" as *u8);
@@ -3054,7 +3065,16 @@ fn cg_func(cg_raw: *u8, n: *Node) -> i32 {
             if (*pt2_t).kind == KIND_STRUCT() {
                 pq = QBE_L();
             } else {
-                pq = qbe_type_of(pt2);
+                // W-007 fix: large enums use l (slot pointer) — same as struct.
+                if (*pt2_t).kind == KIND_ENUM() {
+                    if (*pt2_t).size > (4 as i64) {
+                        pq = QBE_L();
+                    } else {
+                        pq = qbe_type_of(pt2);
+                    }
+                } else {
+                    pq = qbe_type_of(pt2);
+                }
             }
         }
         let pv = *ir_new_tmp(ir, pq);

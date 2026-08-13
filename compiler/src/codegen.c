@@ -1916,7 +1916,12 @@ static void cg_func(IRBuf *ir, Node *n) {
         if (!first) ir_emit(ir, ", ");
         first = 0;
         Type *pt = fd->params[i].sym->type;
+        /* W-007 fix: enums with total_size > 4 are passed by slot pointer
+           (l), matching the caller's slot allocation. Mirrors KIND_STRUCT
+           handling. */
         if (pt && pt->kind == KIND_STRUCT)
+            ir_emit(ir, "l %%%s", fd->params[i].sym->name);
+        else if (pt && pt->kind == KIND_ENUM && pt->enum_type.total_size > 4)
             ir_emit(ir, "l %%%s", fd->params[i].sym->name);
         else
             ir_emit(ir, "%c %%%s", qbe_type_of(pt), fd->params[i].sym->name);
@@ -1948,7 +1953,10 @@ static void cg_func(IRBuf *ir, Node *n) {
     /* register params as locals (copy into SSA temps) */
     for (size_t i = 0; i < fd->nparams; i++) {
         Type *pt = fd->params[i].sym->type;
-        char qt = (pt && pt->kind == KIND_STRUCT) ? 'l' : qbe_type_of(pt);
+        /* W-007 fix: large enums use l (slot pointer) — same as struct. */
+        char qt = (pt && pt->kind == KIND_STRUCT) ? 'l'
+                 : (pt && pt->kind == KIND_ENUM && pt->enum_type.total_size > 4) ? 'l'
+                 : qbe_type_of(pt);
         IRVal param_val = ir_new_tmp(ir, qt);
         ir_emit(ir, "    %%t%d =%c copy %%%s\n",
                 param_val.id, qt, fd->params[i].sym->name);
