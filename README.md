@@ -332,7 +332,6 @@ Details in [`mcp-jhyy/README.md`](mcp-jhyy/README.md).
 |-----|-------------|
 | [`docs/internal/architecture.md`](docs/internal/architecture.md) | pipeline / modules / QBE IL cheat sheet |
 | [`docs/internal/build.md`](docs/internal/build.md) | build / run / QBE backend pitfalls (Windows) |
-| [`docs/internal/status.md`](docs/internal/status.md) | current version / implemented features / history |
 | [`docs/internal/workarounds.md`](docs/internal/workarounds.md) | W-NNN workaround status index |
 | [`docs/internal/tests.md`](docs/internal/tests.md) | integration test catalog + how to run |
 

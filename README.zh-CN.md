@@ -338,7 +338,6 @@ JiHuiYiYou-compiler/
 |------|------|
 | [`docs/internal/architecture.md`](docs/internal/architecture.md) | 流水线 / 模块 / QBE IL 速查 |
 | [`docs/internal/build.md`](docs/internal/build.md) | 编译 / 运行 / QBE 后端坑(Windows) |
-| [`docs/internal/status.md`](docs/internal/status.md) | 当前版本 / 已实现特性 / 历史 |
 | [`docs/internal/workarounds.md`](docs/internal/workarounds.md) | W-NNN workaround 状态清单 |
 | [`docs/internal/tests.md`](docs/internal/tests.md) | 集成测试清单 + 运行方法 |
 
