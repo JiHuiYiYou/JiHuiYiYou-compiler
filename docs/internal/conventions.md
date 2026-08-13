@@ -2,6 +2,28 @@
 
 > JHYY 编译器自身的开发规范。
 
+## 项目结构
+
+```
+compiler/
+  src/              *.c / *.h      C 端编译器实现（v0.x 主线）
+  src0/             *.jhyy         jhyy 端编译器实现（v1.0 自举翻译产物；目标 = C 端弃用）
+  runtime/                         JHYY 运行时（C 端链接）
+  tests/examples/   *.jhyy         集成测试（regress.py 自动跑）
+  build/bin/        regress.py     回归脚本 + jhyy.exe
+mcp-jhyy/                          JHYY MCP 服务
+docs/
+  internal/         架构 / 构建 / 约定 / 测试
+  abis/             语言规范 + ABI（locked）
+  plans/
+    roadmap/        vX.Y 轴长线路线图（v0.x / v1.0 / v2.x / v3.x）
+    v0/             C 编译器 sprint 计划（v0.4 / v0.5 / v0.6 / v0.7 / v0.8）
+    v1/             jhyy 自举 sprint 计划（v1.0.0）
+  logs/
+    v0/             C 编译器 changelog + 早期 sprint
+    v1/             jhyy 自举时代 changelog + sprint
+```
+
 ## C 代码
 
 1. **C11 标准**：`gcc -std=c11 -Wall -Wextra`，**零警告**
