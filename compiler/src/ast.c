@@ -271,6 +271,21 @@ Node *ast_new_for(Arena *a, SourceLoc loc, Sym *var, Node *start, Node *end, Nod
     d->start = start;
     d->end = end;
     d->body = body;
+    d->is_slice = false;
+    return n;
+}
+
+/* v1.3.4: factory for slice form `for x in slice { body }`. Pre-desugars to
+   `for i in 0..slice.len { let x = slice[i]; body }` via AST shape — start=0,
+   end=slice.len field access, body already has `let x = slice[i]` injected. */
+Node *ast_new_for_slice(Arena *a, SourceLoc loc, Sym *var, Node *slice, Node *body) {
+    Node *n = new_node(a, NODE_FOR, loc, sizeof(NodeFor));
+    NodeFor *d = node_for_data(n);
+    d->var = var;
+    d->start = ast_new_int(a, loc, 0, PRIM_I64);
+    d->end = ast_new_field(a, loc, slice, "len");
+    d->body = body;
+    d->is_slice = true;
     return n;
 }
 

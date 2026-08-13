@@ -358,14 +358,15 @@ type NodeWhile = struct {
 }
 fn NODE_WHILE_SIZE() -> i64 { return 16 as i64; }
 
-// var(*u8 8) + start(*u8 8) + end(*u8 8) + body(*u8 8) = 32
+// v1.3.4: var(*u8 8) + start(*u8 8) + end(*u8 8) + body(*u8 8) + is_slice(i32 4 + pad 4) = 40
 type NodeFor = struct {
-    var:   *u8,       // *Sym
-    start: *u8,       // *Node
-    end:   *u8,
-    body:  *u8,
+    var:      *u8,    // *Sym
+    start:    *u8,    // *Node
+    end:      *u8,
+    body:     *u8,
+    is_slice: i32,    // 1 for `for x in slice { body }` form, 0 for range form
 }
-fn NODE_FOR_SIZE() -> i64 { return 32 as i64; }
+fn NODE_FOR_SIZE() -> i64 { return 40 as i64; }
 
 // is_mutable(i32 4 + pad 4) + sym(*u8 8) + type_annot(*u8 8) + init(*u8 8) = 32
 type NodeLet = struct {
@@ -955,6 +956,22 @@ fn ast_new_for(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
     (*d).start = start as *u8;
     (*d).end = end as *u8;
     (*d).body = body as *u8;
+    (*d).is_slice = 0 as i32;
+    return n;
+}
+
+// v1.3.4: factory for slice form `for x in slice { body }`. Pre-desugars to
+//   `for i in 0..slice.len { let x = slice[i]; body }` via AST shape.
+fn ast_new_for_slice(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                     var: *Sym, slice: *Node, body: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_FOR_SIZE());
+    let n = ast_init_node(buf, NODE_FOR(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeFor;
+    (*d).var = var as *u8;
+    (*d).start = ast_new_int(a, loc_filename, loc_line, loc_col, 0 as i64, PRIM_I64()) as *u8;
+    (*d).end = ast_new_field(a, loc_filename, loc_line, loc_col, slice, "len" as *u8) as *u8;
+    (*d).body = body as *u8;
+    (*d).is_slice = 1 as i32;
     return n;
 }
 

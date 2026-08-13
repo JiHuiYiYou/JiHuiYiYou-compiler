@@ -1,0 +1,13 @@
+fn main_jhyy() -> i32 {
+    let s: [*]i32 = &[1, 2, 3, 4, 5];
+    let mut sum_sugar: i32 = 0;
+    for x in s {
+        sum_sugar = sum_sugar + x;
+    }
+    let mut sum_manual: i32 = 0;
+    for i in 0..s.len {
+        let x: i32 = s[i];
+        sum_manual = sum_manual + x;
+    }
+    return sum_sugar - sum_manual;
+}

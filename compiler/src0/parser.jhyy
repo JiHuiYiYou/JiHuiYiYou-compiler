@@ -1669,98 +1669,216 @@ fn parse_for(p: *Parser) -> *Node {
 
     parser_expect(p, TOKEN_IN(), "in" as *u8, &t);
 
-    let start = parse_expr(p, PREC_NONE());
-    parser_expect(p, TOKEN_DOTDOT(), ".." as *u8, &t);
-    let end = parse_expr(p, PREC_NONE());
+    let first_expr = parse_expr(p, PREC_NONE());
 
-    // ── body: inlined block (with parse_if for if-inside-for) ──
-    parser_expect(p, TOKEN_LBRACE(), "{ after for range" as *u8, &t);
-    parser_push_scope(p);
-    let sym = symtab_insert((*p).current_scope, vname, SYM_VAR(),
-                            0 as *u8, 0 as i32, (*p).scope_depth);
+    // v1.3.4: disambiguate range form `for x in a..b` vs slice form `for x in slice { body }`.
+    if parser_check(p, TOKEN_DOTDOT()) != (0 as i32) {
+        // ── range form (existing) ──
+        parser_expect(p, TOKEN_DOTDOT(), ".." as *u8, &t);
+        let end = parse_expr(p, PREC_NONE());
 
-    let mut stmts: *u8 = 0 as *u8;
-    let mut nstmts: i64 = 0 as i64;
-    let mut cap: i64 = 0 as i64;
+        // ── body: inlined block (with parse_if for if-inside-for) ──
+        parser_expect(p, TOKEN_LBRACE(), "{ after for range" as *u8, &t);
+        parser_push_scope(p);
+        let sym = symtab_insert((*p).current_scope, vname, SYM_VAR(),
+                                0 as *u8, 0 as i32, (*p).scope_depth);
 
-    while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
-        if parser_check(p, TOKEN_EOF()) != (0 as i32) {
-            break;
-        }
-        // v0.8 commit 6 dispatcher: simple_only + parse_if + parse_for (self) +
-        // parse_while（inlined limited 版本 — body 不嵌套 while）
-        let mut stmt: *Node = 0 as *Node;
-        if parser_check(p, TOKEN_IF()) != (0 as i32) {
-            stmt = parse_if(p);
-        } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
-            stmt = parse_for(p);
-        } else if parser_check(p, TOKEN_WHILE()) != (0 as i32) {
-            // ── inline parse_while（limited body：simple_only + parse_if + parse_for） ──
-            let mut wt = empty_token();
-            parser_peek(p, &wt);
-            let wlf = wt.loc_filename;
-            let wll = wt.loc_line;
-            let wlc = wt.loc_col;
-            parser_advance(p, &wt);
-            let wcond = parse_expr(p, PREC_NONE());
-            parser_expect(p, TOKEN_LBRACE(), "{ after while condition" as *u8, &wt);
-            parser_push_scope(p);
-            let mut wstmts: *u8 = 0 as *u8;
-            let mut wnstmts: i64 = 0 as i64;
-            let mut wcap: i64 = 0 as i64;
-            while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
-                if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
-                let mut wstmt: *Node = 0 as *Node;
-                if parser_check(p, TOKEN_IF()) != (0 as i32) {
-                    wstmt = parse_if(p);
-                } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
-                    wstmt = parse_for(p);
-                } else {
-                    wstmt = parse_dispatch_simple_only(p);
-                }
-                if wstmt != (0 as *Node) {
-                    if wnstmts >= wcap {
-                        wcap = if wcap != (0 as i64) { wcap * (2 as i64) } else { (8 as i64) };
-                        let wns = arena_alloc((*p).arena, wcap * (8 as i64));
-                        if wstmts != (0 as *u8) {
-                            if wnstmts > (0 as i64) { memcpy(wns, wstmts, wnstmts * (8 as i64)); }
+        let mut stmts: *u8 = 0 as *u8;
+        let mut nstmts: i64 = 0 as i64;
+        let mut cap: i64 = 0 as i64;
+
+        while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+            if parser_check(p, TOKEN_EOF()) != (0 as i32) {
+                break;
+            }
+            let mut stmt: *Node = 0 as *Node;
+            if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                stmt = parse_if(p);
+            } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
+                stmt = parse_for(p);
+            } else if parser_check(p, TOKEN_WHILE()) != (0 as i32) {
+                let mut wt = empty_token();
+                parser_peek(p, &wt);
+                let wlf = wt.loc_filename;
+                let wll = wt.loc_line;
+                let wlc = wt.loc_col;
+                parser_advance(p, &wt);
+                let wcond = parse_expr(p, PREC_NONE());
+                parser_expect(p, TOKEN_LBRACE(), "{ after while condition" as *u8, &wt);
+                parser_push_scope(p);
+                let mut wstmts: *u8 = 0 as *u8;
+                let mut wnstmts: i64 = 0 as i64;
+                let mut wcap: i64 = 0 as i64;
+                while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+                    if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+                    let mut wstmt: *Node = 0 as *Node;
+                    if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                        wstmt = parse_if(p);
+                    } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
+                        wstmt = parse_for(p);
+                    } else {
+                        wstmt = parse_dispatch_simple_only(p);
+                    }
+                    if wstmt != (0 as *Node) {
+                        if wnstmts >= wcap {
+                            wcap = if wcap != (0 as i64) { wcap * (2 as i64) } else { (8 as i64) };
+                            let wns = arena_alloc((*p).arena, wcap * (8 as i64));
+                            if wstmts != (0 as *u8) {
+                                if wnstmts > (0 as i64) { memcpy(wns, wstmts, wnstmts * (8 as i64)); }
+                            }
+                            wstmts = wns;
                         }
-                        wstmts = wns;
-                    }
-                    let wslot = (wstmts as i64 + wnstmts * (8 as i64)) as **Node;
-                    *wslot = wstmt;
-                    wnstmts = wnstmts + (1 as i64);
-                }
-            }
-            parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &wt);
-            parser_pop_scope(p);
-            let wbody = ast_new_block((*p).arena, wlf, wll, wlc, wstmts, wnstmts);
-            stmt = ast_new_while((*p).arena, wlf, wll, wlc, wcond, wbody);
-        } else {
-            stmt = parse_dispatch_simple_only(p);
-        }
-        if stmt != (0 as *Node) {
-            if nstmts >= cap {
-                cap = if cap != (0 as i64) { cap * (2 as i64) } else { (8 as i64) };
-                let ns = arena_alloc((*p).arena, cap * (8 as i64));
-                if stmts != (0 as *u8) {
-                    if nstmts > (0 as i64) {
-                        memcpy(ns, stmts, nstmts * (8 as i64));
+                        let wslot = (wstmts as i64 + wnstmts * (8 as i64)) as **Node;
+                        *wslot = wstmt;
+                        wnstmts = wnstmts + (1 as i64);
                     }
                 }
-                stmts = ns;
+                parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &wt);
+                parser_pop_scope(p);
+                let wbody = ast_new_block((*p).arena, wlf, wll, wlc, wstmts, wnstmts);
+                stmt = ast_new_while((*p).arena, wlf, wll, wlc, wcond, wbody);
+            } else {
+                stmt = parse_dispatch_simple_only(p);
             }
-            let slot = (stmts as i64 + nstmts * (8 as i64)) as **Node;
-            *slot = stmt;
-            nstmts = nstmts + (1 as i64);
+            if stmt != (0 as *Node) {
+                if nstmts >= cap {
+                    cap = if cap != (0 as i64) { cap * (2 as i64) } else { (8 as i64) };
+                    let ns = arena_alloc((*p).arena, cap * (8 as i64));
+                    if stmts != (0 as *u8) {
+                        if nstmts > (0 as i64) {
+                            memcpy(ns, stmts, nstmts * (8 as i64));
+                        }
+                    }
+                    stmts = ns;
+                }
+                let slot = (stmts as i64 + nstmts * (8 as i64)) as **Node;
+                *slot = stmt;
+                nstmts = nstmts + (1 as i64);
+            }
         }
+
+        parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
+        parser_pop_scope(p);
+        let body = ast_new_block((*p).arena, loc_lf, loc_ll, loc_lc, stmts, nstmts);
+
+        return ast_new_for((*p).arena, loc_lf, loc_ll, loc_lc, sym, first_expr, end, body);
     }
 
-    parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
-    parser_pop_scope(p);
-    let body = ast_new_block((*p).arena, loc_lf, loc_ll, loc_lc, stmts, nstmts);
+    if parser_check(p, TOKEN_LBRACE()) != (0 as i32) {
+        // ── slice form: `for x in slice { body }` — pre-desugar to
+        //    `for i in 0..slice.len { let x = slice[i]; body }` ──
+        let slice = first_expr;
+        parser_push_scope(p);
+        let i_sym = symtab_insert((*p).current_scope, "i" as *u8, SYM_VAR(),
+                                  0 as *u8, 0 as i32, (*p).scope_depth);
+        // bind x BEFORE body parse so prefix_ident doesn't auto-insert x (which would
+        // collide with our injected `let x = slice[i]` later)
+        let x_sym = symtab_insert((*p).current_scope, vname, SYM_VAR(),
+                                  0 as *u8, 0 as i32, (*p).scope_depth);
+        parser_expect(p, TOKEN_LBRACE(), "{ after for-in slice" as *u8, &t);
 
-    return ast_new_for((*p).arena, loc_lf, loc_ll, loc_lc, sym, start, end, body);
+        let mut stmts: *u8 = 0 as *u8;
+        let mut nstmts: i64 = 0 as i64;
+        let mut cap: i64 = 0 as i64;
+
+        while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+            if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+            let mut stmt: *Node = 0 as *Node;
+            if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                stmt = parse_if(p);
+            } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
+                stmt = parse_for(p);
+            } else if parser_check(p, TOKEN_WHILE()) != (0 as i32) {
+                let mut wt = empty_token();
+                parser_peek(p, &wt);
+                let wlf = wt.loc_filename;
+                let wll = wt.loc_line;
+                let wlc = wt.loc_col;
+                parser_advance(p, &wt);
+                let wcond = parse_expr(p, PREC_NONE());
+                parser_expect(p, TOKEN_LBRACE(), "{ after while condition" as *u8, &wt);
+                parser_push_scope(p);
+                let mut wstmts: *u8 = 0 as *u8;
+                let mut wnstmts: i64 = 0 as i64;
+                let mut wcap: i64 = 0 as i64;
+                while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+                    if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+                    let mut wstmt: *Node = 0 as *Node;
+                    if parser_check(p, TOKEN_IF()) != (0 as i32) {
+                        wstmt = parse_if(p);
+                    } else if parser_check(p, TOKEN_FOR()) != (0 as i32) {
+                        wstmt = parse_for(p);
+                    } else {
+                        wstmt = parse_dispatch_simple_only(p);
+                    }
+                    if wstmt != (0 as *Node) {
+                        if wnstmts >= wcap {
+                            wcap = if wcap != (0 as i64) { wcap * (2 as i64) } else { (8 as i64) };
+                            let wns = arena_alloc((*p).arena, wcap * (8 as i64));
+                            if wstmts != (0 as *u8) {
+                                if wnstmts > (0 as i64) { memcpy(wns, wstmts, wnstmts * (8 as i64)); }
+                            }
+                            wstmts = wns;
+                        }
+                        let wslot = (wstmts as i64 + wnstmts * (8 as i64)) as **Node;
+                        *wslot = wstmt;
+                        wnstmts = wnstmts + (1 as i64);
+                    }
+                }
+                parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &wt);
+                parser_pop_scope(p);
+                let wbody = ast_new_block((*p).arena, wlf, wll, wlc, wstmts, wnstmts);
+                stmt = ast_new_while((*p).arena, wlf, wll, wlc, wcond, wbody);
+            } else {
+                stmt = parse_dispatch_simple_only(p);
+            }
+            if stmt != (0 as *Node) {
+                if nstmts >= cap {
+                    cap = if cap != (0 as i64) { cap * (2 as i64) } else { (8 as i64) };
+                    let ns = arena_alloc((*p).arena, cap * (8 as i64));
+                    if stmts != (0 as *u8) {
+                        if nstmts > (0 as i64) {
+                            memcpy(ns, stmts, nstmts * (8 as i64));
+                        }
+                    }
+                    stmts = ns;
+                }
+                let slot = (stmts as i64 + nstmts * (8 as i64)) as **Node;
+                *slot = stmt;
+                nstmts = nstmts + (1 as i64);
+            }
+        }
+
+        parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
+
+        let i_ident = ast_new_ident((*p).arena, loc_lf, loc_ll, loc_lc, i_sym);
+        let index_node = ast_new_index((*p).arena, loc_lf, loc_ll, loc_lc, slice, i_ident);
+        let let_x = ast_new_let((*p).arena, loc_lf, loc_ll, loc_lc,
+                                0 as i32, x_sym, 0 as *Node, index_node);
+
+        // prepend let x = slice[i]; to body stmts
+        let new_stmts = arena_alloc((*p).arena, (nstmts + (1 as i64)) * (8 as i64));
+        let slot0 = new_stmts as **Node;
+        *slot0 = let_x;
+        if nstmts > (0 as i64) {
+            let dst = (new_stmts as i64 + (1 as i64) * (8 as i64)) as *u8;
+            memcpy(dst, stmts, nstmts * (8 as i64));
+        }
+        let body = ast_new_block((*p).arena, loc_lf, loc_ll, loc_lc, new_stmts, nstmts + (1 as i64));
+        parser_pop_scope(p);
+
+        return ast_new_for_slice((*p).arena, loc_lf, loc_ll, loc_lc, i_sym, slice, body);
+    }
+
+    // Neither .. nor { — error
+    let mut nt = empty_token();
+    parser_peek(p, &nt);
+    jh_print_loc_stderr(nt.loc_filename, nt.loc_line, nt.loc_col);
+    jh_fputs_stderr("error: expected '..' or '{' after for-in expression, got " as *u8);
+    jh_fputs_stderr(token_kind_name(nt.kind));
+    jh_fputs_stderr("\n" as *u8);
+    (*p).error_count = (*p).error_count + (1 as i32);
+    return 0 as *Node;
 }
 
 // ════════════════════════════════════════════════════

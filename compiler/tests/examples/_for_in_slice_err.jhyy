@@ -1,0 +1,6 @@
+fn main_jhyy() -> i32 {
+    for x in 42 {
+        return x;
+    }
+    return 0;
+}

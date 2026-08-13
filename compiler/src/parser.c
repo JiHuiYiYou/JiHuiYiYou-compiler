@@ -296,16 +296,64 @@ static Node *parse_for(Parser *p) {
 
     expect(p, TOKEN_IN, "in");
 
-    Node *start = parse_expr(p, PREC_NONE);
-    expect(p, TOKEN_DOTDOT, "..");
-    Node *end = parse_expr(p, PREC_NONE);
+    Node *first_expr = parse_expr(p, PREC_NONE);
 
-    push_scope(p);
-    Sym *sym = symtab_insert(p->current_scope, vname, SYM_VAR, NULL, false, p->scope_depth);
-    Node *body = parse_block(p);
-    pop_scope(p);
+    /* v1.3.4: disambiguate range form `for x in a..b { body }` vs slice form
+       `for x in slice { body }` by peeking after the first expression. */
+    if (peek(p).kind == TOKEN_DOTDOT) {
+        advance(p); /* consume '..' */
+        Node *end = parse_expr(p, PREC_NONE);
+        push_scope(p);
+        Sym *sym = symtab_insert(p->current_scope, vname, SYM_VAR, NULL, false, p->scope_depth);
+        Node *body = parse_block(p);
+        pop_scope(p);
+        return ast_new_for(p->arena, loc, sym, first_expr, end, body);
+    }
 
-    return ast_new_for(p->arena, loc, sym, start, end, body);
+    if (peek(p).kind == TOKEN_LBRACE) {
+        /* slice form: `for x in slice { body }` — pre-desugar to standard range
+           form `for i in 0..slice.len { let x = slice[i]; body }`. i is auto-
+           generated so it doesn't conflict with user-declared names. */
+        Node *slice = first_expr;
+        push_scope(p);
+        Sym *i_sym = symtab_insert(p->current_scope, "i", SYM_VAR, NULL, false, p->scope_depth);
+        /* bind x BEFORE body parse so prefix_ident doesn't auto-insert x
+           at depth N (which would collide with the injected `let x` later). */
+        Sym *x_sym = symtab_insert(p->current_scope, vname, SYM_VAR, NULL, false, p->scope_depth);
+        advance(p); /* consume '{' */
+        Node **stmts = NULL;
+        size_t nstmts = 0, cap = 0;
+        while (!check(p, TOKEN_RBRACE) && !check(p, TOKEN_EOF)) {
+            Node *stmt = parse_stmt(p);
+            if (stmt) {
+                if (nstmts >= cap) {
+                    cap = cap ? cap * 2 : 8;
+                    Node **new_stmts = arena_alloc(p->arena, cap * sizeof(Node *));
+                    if (stmts && nstmts > 0)
+                        memcpy(new_stmts, stmts, nstmts * sizeof(Node *));
+                    stmts = new_stmts;
+                }
+                stmts[nstmts++] = stmt;
+            }
+        }
+        expect(p, TOKEN_RBRACE, "}");
+        Node *i_ident = ast_new_ident(p->arena, loc, i_sym);
+        Node *index_node = ast_new_index(p->arena, loc, slice, i_ident);
+        Node *let_x = ast_new_let(p->arena, loc, false, x_sym, NULL, index_node);
+        /* prepend let x = slice[i]; to body stmts */
+        Node **new_stmts = arena_alloc(p->arena, (nstmts + 1) * sizeof(Node *));
+        new_stmts[0] = let_x;
+        if (nstmts > 0) memcpy(new_stmts + 1, stmts, nstmts * sizeof(Node *));
+        Node *body = ast_new_block(p->arena, loc, new_stmts, nstmts + 1);
+        pop_scope(p);
+        return ast_new_for_slice(p->arena, loc, i_sym, slice, body);
+    }
+
+    Token t = peek(p);
+    fprintf(stderr, "%s:%d:%d: error: expected '..' or '{' after for-in expression, got %s\n",
+            t.loc.filename, t.loc.line, t.loc.col, token_kind_name(t.kind));
+    p->error_count++;
+    return NULL;
 }
 
 static Node *parse_match(Parser *p) {

@@ -157,7 +157,10 @@ typedef struct {
 } NodeIf;
 
 typedef struct { Node *cond; Node *body; } NodeWhile;
-typedef struct { Sym *var; Node *start; Node *end; Node *body; } NodeFor;
+/* v1.3.4: added is_slice — true for `for x in slice { body }` form (parser
+   pre-desugars to `for i in 0..slice.len { let x = slice[i]; body }`).
+   Sema uses flag to set var->type to elem type instead of start_type (i64). */
+typedef struct { Sym *var; Node *start; Node *end; Node *body; bool is_slice; } NodeFor;
 
 typedef struct {
     bool  is_mutable;
@@ -327,6 +330,7 @@ Node *ast_new_block(struct Arena *a, SourceLoc loc, Node **stmts, size_t nstmts)
 Node *ast_new_if(struct Arena *a, SourceLoc loc, Node *cond, Node *then_body, Node *else_body);
 Node *ast_new_while(struct Arena *a, SourceLoc loc, Node *cond, Node *body);
 Node *ast_new_for(struct Arena *a, SourceLoc loc, Sym *var, Node *start, Node *end, Node *body);
+Node *ast_new_for_slice(struct Arena *a, SourceLoc loc, Sym *var, Node *slice, Node *body);
 Node *ast_new_let(struct Arena *a, SourceLoc loc, bool is_mut, Sym *sym, Node *type_annot, Node *init);
 Node *ast_new_assign(struct Arena *a, SourceLoc loc, Node *target, Node *value);
 Node *ast_new_return(struct Arena *a, SourceLoc loc, Node *expr);

@@ -1,0 +1,10 @@
+fn main_jhyy() -> i32 {
+    let s: [*][*]i32 = &[&[1, 2, 3], &[10, 20, 30]];
+    let mut total: i32 = 0;
+    for row in s {
+        for x in row {
+            total = total + x;
+        }
+    }
+    return total;
+}
