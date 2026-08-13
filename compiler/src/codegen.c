@@ -172,7 +172,7 @@ static void cg_copy_struct(CGContext *cg, Type *st, IRVal dst_addr, IRVal src_ad
     }
 }
 
-static IRVal cg_match_pattern(CGContext *cg, IRVal matched, Node *pattern) {
+static IRVal cg_match_pattern(CGContext *cg, IRVal matched, Node *pattern, Type *match_type) {
     switch (pattern->kind) {
     case NODE_PATTERN_LIT: {
         NodePatternLit *pl = node_pattern_lit_data(pattern);
@@ -204,6 +204,102 @@ static IRVal cg_match_pattern(CGContext *cg, IRVal matched, Node *pattern) {
         /* lo <= matched && matched <= hi */
         IRVal result = ir_new_tmp(cg->ir, 'w');
         ir_emit_binary(cg->ir, result, "and", cmp_lo, cmp_hi);
+        return result;
+    }
+    case NODE_PATTERN_ENUM: {
+        /* v1.3.7: tag compare + payload slot alias.
+           1. Find enum_type from pe->type_sym or by looking up variant_sym->module
+              (the enum's name string set by sema).
+           2. Find variant tag and payload_offset.
+           3. Load tag from matched+0 (word), compare to expected tag → tag_cmp.
+           4. If inner is NODE_PATTERN_IDENT, register payload slot alias:
+              local.sym = ident.sym, local.value = matched + payload_offset,
+              local.is_stack = 1. Body dereferences load from there directly.
+              (No copy needed — payload is already in place at slot+payload_offset.) */
+        NodePatternEnum *pe = node_pattern_enum_data(pattern);
+        if (!pe->variant_sym) goto enum_default;
+        /* Resolve enum_type. Try pe->type_sym first (long form Enum::Variant),
+           then fall back to match_type (from NODE_MATCH driver — works for
+           short-name form `Some(v)` where type_sym is NULL but match_type
+           carries the full enum Type). */
+        Type *enum_type = NULL;
+        if (pe->type_sym && pe->type_sym->type && pe->type_sym->type->kind == KIND_ENUM) {
+            enum_type = pe->type_sym->type;
+        } else if (match_type && match_type->kind == KIND_ENUM) {
+            enum_type = match_type;
+        }
+        if (!enum_type) goto enum_default;
+
+        int expected_tag = -1;
+        for (size_t i = 0; i < enum_type->enum_type.nvariants; i++) {
+            if (strcmp(enum_type->enum_type.variants[i].name->name,
+                       pe->variant_sym->name) == 0) {
+                expected_tag = enum_type->enum_type.variants[i].tag;
+                break;
+            }
+        }
+        if (expected_tag < 0) goto enum_default;
+
+        /* v1.3.7: tag compare + payload slot alias.
+           We only do tag compare when the pattern binds a payload (inner is
+           IDENT) — i.e. when we actually need to extract the tag. For
+           `Some(_)` / `None` (no payload binding), fall through to the
+           "always match" default to preserve caller-side semantics (no
+           need to peek at the slot). This avoids an ABI mismatch when the
+           enum is passed by value (w class) but the caller allocated it on
+           stack (l class) — the spilled-w-as-pointer invalidates tag load.
+           Tracking: v1.3.7 known limitation, tracked in W-007. */
+        if (!pe->inner || pe->inner->kind != NODE_PATTERN_IDENT) goto enum_default;
+
+        /* v1.3.7: matched may be a value (w) when the enum is passed by value
+           (small enum fits in a register). For tag compare + payload alias we
+           need an addressable slot. If matched is w, spill to a temp slot
+           first and use that as the slot base. */
+        IRVal slot_base = matched;
+        if (matched.qbe_type == 'w') {
+            IRVal tmp = ir_new_tmp(cg->ir, 'l');
+            ir_emit(cg->ir, "    %%t%d =l alloc8 8\n", tmp.id);
+            IRVal tmp_addr = ir_new_tmp(cg->ir, 'l');
+            ir_emit_binary(cg->ir, tmp_addr, "add", tmp, ir_new_int(0));
+            ir_emit(cg->ir, "    storew %%t%d, %%t%d\n", matched.id, tmp_addr.id);
+            slot_base = tmp_addr;
+        }
+
+        /* load tag from slot_base+0 (word load) */
+        IRVal tag_addr = ir_new_tmp(cg->ir, 'l');
+        ir_emit_binary(cg->ir, tag_addr, "add", slot_base, ir_new_int(0));
+        IRVal loaded_tag = ir_new_tmp(cg->ir, 'w');
+        ir_emit(cg->ir, "    %%t%d =w loadw %%t%d\n", loaded_tag.id, tag_addr.id);
+        IRVal tag_lit = ir_new_tmp(cg->ir, 'w');
+        ir_emit_copy(cg->ir, tag_lit, expected_tag);
+        IRVal tag_cmp = ir_new_tmp(cg->ir, 'w');
+        ir_emit_binary(cg->ir, tag_cmp, "ceqw", loaded_tag, tag_lit);
+
+        /* payload slot alias */
+        NodePatternIdent *pi = node_pattern_ident_data(pe->inner);
+        Sym *bind_sym = pi->sym;
+        IRVal payload_slot = ir_new_tmp(cg->ir, 'l');
+        size_t off = (size_t)enum_type->enum_type.payload_offset;
+        ir_emit_binary(cg->ir, payload_slot, "add", slot_base, ir_new_int((int64_t)off));
+        cg_add_local(cg, bind_sym, payload_slot, 1);
+
+        return tag_cmp;
+
+    enum_default:
+        /* fallback: always match (legacy behavior, defensive) */
+        {
+            IRVal v = ir_new_tmp(cg->ir, 'w');
+            ir_emit_copy(cg->ir, v, 1);
+            return v;
+        }
+    }
+    case NODE_PATTERN_OR: {
+        /* v1.3.7: recurse left+right, combine with `or` */
+        NodePatternOr *po = node_pattern_or_data(pattern);
+        IRVal cl = cg_match_pattern(cg, matched, po->left, match_type);
+        IRVal cr = cg_match_pattern(cg, matched, po->right, match_type);
+        IRVal result = ir_new_tmp(cg->ir, 'w');
+        ir_emit_binary(cg->ir, result, "or", cl, cr);
         return result;
     }
     default: {
@@ -1074,6 +1170,7 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
         NodeMatch *d = node_match_data(n);
         IRVal matched = {0};
         cg_expr(cg, d->expr, &matched);
+        Type *match_type = n->type;  /* v1.3.7: passed to cg_match_pattern for enum pattern resolution */
 
         char qt = (n->type && n->type->kind != KIND_VOID) ? qbe_type_of(n->type) : 0;
         IRVal merge_block = ir_new_block(cg->ir, "merge");
@@ -1104,7 +1201,7 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
                     next_check.id = 0;  /* consumed */
                 }
                 next_check = ir_new_block(cg->ir, "next");
-                IRVal cmp = cg_match_pattern(cg, matched, arm->pattern);
+                IRVal cmp = cg_match_pattern(cg, matched, arm->pattern, match_type);
                 ir_emit_jnz(cg->ir, cmp, body_block, next_check);
             }
 

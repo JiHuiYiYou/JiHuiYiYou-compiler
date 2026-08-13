@@ -411,9 +411,79 @@ fn process_match_pattern(ctx: *SemaContext, pat: *Node, match_type: *Type) -> i3
     }
 
     if (*pat).kind == NODE_PATTERN_OR() {
+        // v1.3.7: OR pattern — check binding consistency before recursing.
+        // Required: if both sides bind, names must match. If only one side
+        // binds, that's asymmetric (e.g. Some(x) | None).
         let po = node_pattern_or_data(pat);
-        let _x1 = process_match_pattern(ctx, (*po).left as *Node, match_type);
-        let _x2 = process_match_pattern(ctx, (*po).right as *Node, match_type);
+        let left = (*po).left as *Node;
+        let right = (*po).right as *Node;
+        // Walk OR tree to find first ENUM leaf on each side (handles nested OR).
+        let mut ln_binding: *u8 = 0 as *u8;
+        let mut rn_binding: *u8 = 0 as *u8;
+        let mut l_cur: *Node = left;
+        while l_cur != (0 as *Node) {
+            if (*l_cur).kind == NODE_PATTERN_OR() {
+                let lpo = node_pattern_or_data(l_cur);
+                l_cur = (*lpo).left as *Node;
+            } else {
+                if (*l_cur).kind == NODE_PATTERN_ENUM() {
+                    let lpe = node_pattern_enum_data(l_cur);
+                    if (*lpe).inner != (0 as *u8) {
+                        let inner_n = (*lpe).inner as *Node;
+                        if inner_n != (0 as *Node) {
+                            if (*inner_n).kind == NODE_PATTERN_IDENT() {
+                                let lpi = node_pattern_ident_data(inner_n);
+                                let lsym = (*lpi).sym as *Sym;
+                                ln_binding = (*lsym).name;
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        let mut r_cur: *Node = right;
+        while r_cur != (0 as *Node) {
+            if (*r_cur).kind == NODE_PATTERN_OR() {
+                let rpo = node_pattern_or_data(r_cur);
+                r_cur = (*rpo).left as *Node;
+            } else {
+                if (*r_cur).kind == NODE_PATTERN_ENUM() {
+                    let rpe = node_pattern_enum_data(r_cur);
+                    if (*rpe).inner != (0 as *u8) {
+                        let inner_n = (*rpe).inner as *Node;
+                        if inner_n != (0 as *Node) {
+                            if (*inner_n).kind == NODE_PATTERN_IDENT() {
+                                let rpi = node_pattern_ident_data(inner_n);
+                                let rsym = (*rpi).sym as *Sym;
+                                rn_binding = (*rsym).name;
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        if ln_binding != (0 as *u8) {
+            if rn_binding == (0 as *u8) {
+                let _x = sema_error_str(ctx, (*pat).loc_filename, (*pat).loc_line, (*pat).loc_col,
+                        "OR pattern bindings must match (left binds, right doesn't)" as *u8);
+                return 1;
+            }
+            if strcmp(ln_binding, rn_binding) != (0 as i32) {
+                let _x = sema_error_str(ctx, (*pat).loc_filename, (*pat).loc_line, (*pat).loc_col,
+                        "OR pattern bindings must match" as *u8);
+                return 1;
+            }
+        } else {
+            if rn_binding != (0 as *u8) {
+                let _x = sema_error_str(ctx, (*pat).loc_filename, (*pat).loc_line, (*pat).loc_col,
+                        "OR pattern bindings must match (right binds, left doesn't)" as *u8);
+                return 1;
+            }
+        }
+        let _x1 = process_match_pattern(ctx, left, match_type);
+        let _x2 = process_match_pattern(ctx, right, match_type);
         return 1;
     }
 
@@ -1499,6 +1569,61 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                                         }
                                     }
                                     j = j + (1 as i64);
+                                }
+                            }
+                        } else {
+                            // v1.3.7: OR pattern — mark both branches' variants.
+                            if (*pat).kind == NODE_PATTERN_OR() {
+                                let po = node_pattern_or_data(pat);
+                                let left = (*po).left as *Node;
+                                if left != (0 as *Node) {
+                                    if (*left).kind == NODE_PATTERN_ENUM() {
+                                        let lpe = node_pattern_enum_data(left);
+                                        let lvsym = (*lpe).variant_sym as *Sym;
+                                        if lvsym != (0 as *Sym) {
+                                            let lvname = (*lvsym).name;
+                                            let mut jj: i64 = 0 as i64;
+                                            while jj < nv {
+                                                let slot = ptr_add_u8(variants_buf, jj * (8 as i64)) as **Sym;
+                                                let v_sym = *slot;
+                                                if v_sym != (0 as *Sym) {
+                                                    if strcmp((*v_sym).name, lvname) == (0 as i32) {
+                                                        *slot = 0 as *Sym;
+                                                    }
+                                                }
+                                                jj = jj + (1 as i64);
+                                            }
+                                        }
+                                    } else {
+                                        if (*left).kind == NODE_PATTERN_WILD() {
+                                            has_wildcard = 1 as i32;
+                                        }
+                                    }
+                                }
+                                let right = (*po).right as *Node;
+                                if right != (0 as *Node) {
+                                    if (*right).kind == NODE_PATTERN_ENUM() {
+                                        let rpe = node_pattern_enum_data(right);
+                                        let rvsym = (*rpe).variant_sym as *Sym;
+                                        if rvsym != (0 as *Sym) {
+                                            let rvname = (*rvsym).name;
+                                            let mut jj: i64 = 0 as i64;
+                                            while jj < nv {
+                                                let slot = ptr_add_u8(variants_buf, jj * (8 as i64)) as **Sym;
+                                                let v_sym = *slot;
+                                                if v_sym != (0 as *Sym) {
+                                                    if strcmp((*v_sym).name, rvname) == (0 as i32) {
+                                                        *slot = 0 as *Sym;
+                                                    }
+                                                }
+                                                jj = jj + (1 as i64);
+                                            }
+                                        }
+                                    } else {
+                                        if (*right).kind == NODE_PATTERN_WILD() {
+                                            has_wildcard = 1 as i32;
+                                        }
+                                    }
                                 }
                             }
                         }

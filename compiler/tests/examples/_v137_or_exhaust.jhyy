@@ -1,0 +1,10 @@
+// EXPECT: 42
+// v1.3.7: OR pattern with wildcard completes coverage (`None | Some(_)`)
+
+type Option = enum { Some(i32), None }
+
+fn main_jhyy() -> i32 {
+    match Option::Some(42) {
+        Option::None | Option::Some(_) => 1,
+    }
+}

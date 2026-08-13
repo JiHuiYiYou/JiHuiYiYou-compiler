@@ -1277,7 +1277,16 @@ fn parse_match(p: *Parser) -> *Node {
         if parser_check(p, TOKEN_EOF()) != (0 as i32) {
             break;
         }
-        let pat = parse_pattern(p);
+        let mut pat: *Node = parse_pattern(p);
+        // v1.3.7: OR pattern — left-associative loop on `|`.
+        while parser_check(p, TOKEN_PIPE()) != (0 as i32) {
+            parser_advance(p);
+            let rloc_lf = (*pat).loc_filename;
+            let rloc_ll = (*pat).loc_line;
+            let rloc_lc = (*pat).loc_col;
+            let right = parse_pattern(p);
+            pat = ast_new_pattern_or((*p).arena, rloc_lf, rloc_ll, rloc_lc, pat, right);
+        }
         parser_expect(p, TOKEN_FATARROW(), "=>" as *u8, &t);
         let body = parse_expr(p, PREC_NONE());
 

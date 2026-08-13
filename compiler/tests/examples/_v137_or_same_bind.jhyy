@@ -1,0 +1,11 @@
+// EXPECT: 42
+// v1.3.7: OR pattern `Some(v) | Some(v)` should match (same name)
+
+type Option = enum { Some(i32), None }
+
+fn main_jhyy() -> i32 {
+    match Option::Some(42) {
+        Option::Some(v) | Option::Some(v) => v,
+        Option::None => 0,
+    }
+}

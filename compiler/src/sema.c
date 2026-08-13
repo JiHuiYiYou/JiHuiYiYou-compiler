@@ -106,8 +106,102 @@ static Type *resolve_type_node(SemaContext *ctx, Node *tn) {
    current scope + locals. `match_type` is the type of the matched value;
    for NODE_PATTERN_ENUM the function looks up the variant's payload type
    and recurses on the inner pattern with that payload type. */
+
+/* v1.3.7: OR pattern consistency check.
+   Walks both branches of NODE_PATTERN_OR, collects (variant_name,
+   bind_name, payload_type) flat lists, and requires binding names to
+   match pairwise. Rules:
+   - `Some(x) | Some(x)` ✅ same variant + same binding
+   - `Some(x) | Some(y)` ❌ different binding name
+   - `None | Some(_)` ✅ different variants, neither binds (matching null)
+   - `Some(x) | None`   ❌ left binds, right doesn't (asymmetric)
+   WILD bindings produce no entry (treated as no binding). */
+typedef struct {
+    const char *variant_name;
+    const char *bind_name;
+    Type       *payload_type;
+} OrBinding;
+
+static void or_collect_bindings(Node *pat, Type *match_type,
+                                OrBinding *out, int *count, int cap) {
+    if (!pat || *count >= cap) return;
+    if (pat->kind == NODE_PATTERN_OR) {
+        NodePatternOr *po = node_pattern_or_data(pat);
+        or_collect_bindings(po->left, match_type, out, count, cap);
+        or_collect_bindings(po->right, match_type, out, count, cap);
+        return;
+    }
+    if (pat->kind == NODE_PATTERN_ENUM) {
+        NodePatternEnum *pe = node_pattern_enum_data(pat);
+        const char *vname = pe->variant_sym ? pe->variant_sym->name : "?";
+        const char *bname = NULL;
+        Type *ptype = NULL;
+        if (pe->inner && pe->inner->kind == NODE_PATTERN_IDENT) {
+            NodePatternIdent *pi = node_pattern_ident_data(pe->inner);
+            bname = pi->sym ? pi->sym->name : NULL;
+        }
+        /* resolve payload type (same logic as process_match_pattern) */
+        Type *enum_type = NULL;
+        if (pe->type_sym && pe->type_sym->type && pe->type_sym->type->kind == KIND_ENUM) {
+            enum_type = pe->type_sym->type;
+        } else if (match_type && match_type->kind == KIND_ENUM) {
+            enum_type = match_type;
+        }
+        if (enum_type && pe->variant_sym) {
+            for (size_t i = 0; i < enum_type->enum_type.nvariants; i++) {
+                if (strcmp(enum_type->enum_type.variants[i].name->name,
+                           pe->variant_sym->name) == 0) {
+                    ptype = enum_type->enum_type.variants[i].payload;
+                    break;
+                }
+            }
+        }
+        out[*count].variant_name = vname;
+        out[*count].bind_name = bname;
+        out[*count].payload_type = ptype;
+        (*count)++;
+        return;
+    }
+    /* WILD / LIT / RANGE / IDENT (non-enum) produce no entry */
+}
+
+#define OR_BIND_CAP 16
+static void check_or_consistency(SemaContext *ctx, Node *pat) {
+    if (!pat || pat->kind != NODE_PATTERN_OR) return;
+    OrBinding l[OR_BIND_CAP];
+    OrBinding r[OR_BIND_CAP];
+    int ln = 0, rn = 0;
+    NodePatternOr *po = node_pattern_or_data(pat);
+    or_collect_bindings(po->left,  pat->type, l, &ln, OR_BIND_CAP);
+    or_collect_bindings(po->right, pat->type, r, &rn, OR_BIND_CAP);
+    /* Empty binding list on both sides → OK (e.g. `None | Some(_)` where
+       neither binds anything). */
+    if (ln == 0 && rn == 0) return;
+    /* Binding count must match (one side bind, other no → asymmetric). */
+    if (ln != rn) {
+        sema_error(ctx, pat->loc, "OR pattern bindings must match (left has %d, right has %d)", ln, rn);
+        return;
+    }
+    for (int i = 0; i < ln; i++) {
+        /* Note: variants are allowed to differ (that's the OR's purpose).
+           Only binding names must match. */
+        const char *ln_b = l[i].bind_name ? l[i].bind_name : "(none)";
+        const char *rn_b = r[i].bind_name ? r[i].bind_name : "(none)";
+        if (strcmp(ln_b, rn_b) != 0) {
+            sema_error(ctx, pat->loc,
+                       "OR pattern bindings must match ('%s' vs '%s')",
+                       ln_b, rn_b);
+            return;
+        }
+    }
+}
+
 static void process_match_pattern(SemaContext *ctx, Node *pat, Type *match_type) {
     if (!pat) return;
+
+    if (pat->kind == NODE_PATTERN_OR) {
+        check_or_consistency(ctx, pat);
+    }
 
     switch (pat->kind) {
     case NODE_PATTERN_IDENT: {
@@ -191,6 +285,33 @@ static int is_const_expr(Node *n, SymTable *global_scope) {
 }
 
 /* ── type inference for expressions ── */
+static Type *infer_type(SemaContext *ctx, Node *n);
+
+/* v1.3.7: mark covered variants for OR pattern sub-pattern. Used by
+   NODE_MATCH's exhaustive check. Only handles ENUM leaf (one level
+   deep — no nested OR per v1.3.7 scope). WILD pattern inside OR marks
+   all remaining variants as covered (catch-all). */
+static void mark_or_variants(Node *pat, Sym **variants, int nv) {
+    if (!pat) return;
+    if (pat->kind == NODE_PATTERN_ENUM) {
+        NodePatternEnum *pe = node_pattern_enum_data(pat);
+        const char *vname = pe->variant_sym ? pe->variant_sym->name : NULL;
+        if (vname) {
+            for (int j = 0; j < nv; j++) {
+                if (variants[j] && strcmp(variants[j]->name, vname) == 0) {
+                    variants[j] = NULL;
+                    break;
+                }
+            }
+        }
+    } else if (pat->kind == NODE_PATTERN_WILD) {
+        /* wildcard inside OR → catch-all remaining */
+        for (int j = 0; j < nv; j++) {
+            if (variants[j]) variants[j] = NULL;
+        }
+    }
+}
+
 static Type *infer_type(SemaContext *ctx, Node *n) {
     if (!n) return type_void();
     if (n->type) return n->type;  /* already inferred */
@@ -961,7 +1082,6 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         NodeMatch *d = node_match_data(n);
         Type *match_type = infer_type(ctx, d->expr);
         Type *common_type = NULL;
-
         /* v0.7 7A: exhaustive match check for enums.
            If match expr type is enum, every variant must be covered by some arm.
            `_` wildcard acts as catch-all (must be last). */
@@ -988,6 +1108,13 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
             if (is_enum_match && nv > 0) {
                 if (pat->kind == NODE_PATTERN_WILD) {
                     has_wildcard = 1;
+                } else if (pat->kind == NODE_PATTERN_OR) {
+                    /* v1.3.7: OR pattern — recurse left+right to mark all
+                       covered variants. NULL-mark is implicit dedupe (re-mark
+                       is a no-op). */
+                    NodePatternOr *po = node_pattern_or_data(pat);
+                    mark_or_variants(po->left, variants, nv);
+                    mark_or_variants(po->right, variants, nv);
                 } else if (pat->kind == NODE_PATTERN_ENUM) {
                     NodePatternEnum *pe = node_pattern_enum_data(pat);
                     /* vsym may be a parser-allocated local-scope sym (different ptr
@@ -1002,7 +1129,7 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
                         }
                     }
                 }
-                /* NODE_PATTERN_IDENT / LIT / RANGE / OR: don't cover enum variants
+                /* NODE_PATTERN_IDENT / LIT / RANGE: don't cover enum variants
                    (catch-all wildcard handles them if present). */
             }
 

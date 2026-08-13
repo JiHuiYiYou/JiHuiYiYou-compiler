@@ -1,0 +1,11 @@
+// EXPECT: ERROR expected (compile-time sema error)
+// v1.3.7: OR pattern `Some(x) | Some(y)` should be rejected — must use same binding name
+
+type Option = enum { Some(i32), None }
+
+fn main_jhyy() -> i32 {
+    match Option::Some(42) {
+        Option::Some(x) | Option::Some(y) => x + y,
+        Option::None => 0,
+    }
+}

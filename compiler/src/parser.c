@@ -368,6 +368,16 @@ static Node *parse_match(Parser *p) {
 
     while (!check(p, TOKEN_RBRACE) && !check(p, TOKEN_EOF)) {
         Node *pat = parse_pattern(p);
+        /* v1.3.7: OR pattern — left-associative loop on `|`.
+           `Some(x) | Some(y)` → NODE_PATTERN_OR(Some(x), Some(y)).
+           Nested OR (`A | B | C`) parses as (A|B)|C which sema will reject
+           (consistency check);single OR (`A | B`) works. */
+        while (check(p, TOKEN_PIPE)) {
+            advance(p);
+            SourceLoc rloc = pat->loc;
+            Node *right = parse_pattern(p);
+            pat = ast_new_pattern_or(p->arena, rloc, pat, right);
+        }
         expect(p, TOKEN_FATARROW, "=>");
         Node *body = parse_expr(p, PREC_NONE);
         if (check(p, TOKEN_COMMA)) advance(p);

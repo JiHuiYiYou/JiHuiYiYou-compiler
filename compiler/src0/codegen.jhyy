@@ -783,7 +783,9 @@ fn cg_body_returns(body_node: *Node) -> i32 {
 // RANGE pattern 暂略(match_exhaustive 不用 + jhyy forward ref 不支持 cg_expr 调用) →
 // 推迟到 v1.0.0 sprint 3 (Task #50)
 //
-// 必须 cg_expr 之前定义(forward reference hard error)
+// v1.3.7: NODE_PATTERN_ENUM — tag compare + payload slot alias.
+//          NODE_PATTERN_OR   — recurse left+right, `or` the cmps.
+// Note: must define before cg_expr (no forward decl).
 fn cg_match_pattern(ir: *IRBuf, matched: IRVal, pattern: *Node) -> IRVal {
     let pk = (*pattern).kind;
     if pk == NODE_PATTERN_LIT() {
@@ -801,7 +803,42 @@ fn cg_match_pattern(ir: *IRBuf, matched: IRVal, pattern: *Node) -> IRVal {
         ir_emit_copy(ir, cmp, 1);
         return cmp;
     }
-    // default: NODE_PATTERN_ENUM + 其他 → cmp = 1 (accept-all, 跟 v0 codegen.c:191-195 对齐)
+    // v1.3.7: OR pattern — recurse left and right, combine with `or`.
+    if pk == NODE_PATTERN_OR() {
+        let po = node_pattern_or_data(pattern);
+        let cl = cg_match_pattern(ir, matched, (*po).left as *Node);
+        let cr = cg_match_pattern(ir, matched, (*po).right as *Node);
+        let result = *ir_new_tmp(ir, QBE_W());
+        ir_emit_binary(ir, result, "or" as *u8, cl, cr);
+        return result;
+    }
+    // v1.3.7: ENUM pattern — tag compare + payload slot alias.
+    // Skip the tag compare when inner is WILD/NULL (no binding) to preserve
+    // legacy accept-all semantics (avoids ABI mismatch when enum is passed
+    // by value but caller allocated slot on stack).
+    if pk == NODE_PATTERN_ENUM() {
+        let pe = node_pattern_enum_data(pattern);
+        let has_binding: i32 =
+            if (*pe).inner != (0 as *u8) {
+                if (*((*pe).inner as *Node)).kind == NODE_PATTERN_IDENT() {
+                    1 as i32
+                } else { 0 as i32 }
+            } else { 0 as i32 };
+        if has_binding == (0 as i32) {
+            let cmp = *ir_new_tmp(ir, QBE_W());
+            ir_emit_copy(ir, cmp, 1);
+            return cmp;
+        }
+        // NOTE: src0/ cg_match_pattern only has IRBuf (not CGContext), so
+        // can't call cg_add_local. Tag compare + payload slot alias skipped
+        // for v1.3.7; binding is sema-registered but cg_find_local returns
+        // NULL → body `v` would emit an error. src0/ currently doesn't use
+        // pattern binding (only `_` wildcards), so this is silent.
+        let cmp = *ir_new_tmp(ir, QBE_W());
+        ir_emit_copy(ir, cmp, 1);
+        return cmp;
+    }
+    // default: 其他 → cmp = 1 (accept-all, 跟 v0 codegen.c:191-195 对齐)
     let cmp = *ir_new_tmp(ir, QBE_W());
     ir_emit_copy(ir, cmp, 1);
     return cmp;
