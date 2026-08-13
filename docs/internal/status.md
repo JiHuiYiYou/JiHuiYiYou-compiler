@@ -122,12 +122,6 @@ Stage 2 N=3 byte-equal closure IL sha `7c035615...`（v1.3.7 终态）。完整 
 
 | 严重度 | 描述 | 影响 / 计划 |
 |--------|------|-------------|
-| P2 | 浮点比较 (`==`/`<`/...) 部分场景未完全类型化 | 极端 NaN/Inf 行为未规约,大多数场景工作 |
-| P3 | 浮点 fmod (`%`) 未实现 | 整数 `%` 工作,自举可绕过 |
-| P3 | struct/enum 跨 FFI 边界（Windows x64 ABI 不兼容） | 编译器自身用不到（v1.x FFI 列表全 pointer/scalar）,v3.x 处理 |
-| P3 | 变参函数 (`printf` 的 `...`) 在 JHYY 侧需手动展开 | 自举可手写 wrapper |
-| P3 | 函数回调（JHYY 函数指针传给 C 调用） | v3.x 处理 |
-| P3 | 嵌套 const array (`[[i32; N]; M]`)、const pointer / const slice / const enum array | sema 拒绝,自举需要时再开 |
 | P2 | **jhyy 编译器 amd64_win 后端 stack-spill**（`infer_type → IDENT → symtab_lookup_local → symtab_lookup_one` 在特定调用栈深度 + 大结构传参下崩溃） | 临时 workaround `compiler/src0/symtab.jhyy:255-258`（`sb_init` 触发 arena_alloc 改变栈帧大小）。完整记录 [`v1.0.0详细实现方案.md`](../plans/v1/v1.0.0详细实现方案.md) § 3.6 + [`sprint-3-commit-6-sema-cleanup.md`](../logs/v1/sprint-3-commit-6-sema-cleanup.md)。**修复路径: v2.x QBE rewrite** |
 
 ### v1.0.0 已 ship 解除的旧限制（历史记录）
@@ -163,3 +157,7 @@ Stage 2 N=3 byte-equal closure IL sha `7c035615...`（v1.3.7 终态）。完整 
 - 嵌套 const array (`[[i32; N]; M]`) — 自举需要时再开
 - const pointer / const slice / const enum array — 需要 RTTI
 - const fn / 编译期函数求值 — 大特性, 单独 sprint
+- 浮点 fmod (`%` 操作符支持 f64/f32) — 当前 codegen.c:640 `TOKEN_PERCENT` 固定 emit `"rem"`(整数);自举不需要 float mod
+- struct/enum 跨 FFI 边界(Windows x64 ABI 8-byte struct 重叠) — `compiler/src0/ffi.jhyy` 全 pointer/scalar,自举用不到;v3.x 处理
+- JHYY 函数指针传给 C 函数(callback) — `src0/` 0 命中;v3.x 处理
+- 变参函数 native syntax (`printf(fmt, ...)` 多参) — 当前稳定通过 single-val wrappers (`printf(fmt,val)` / `sprintf_lld(buf,fmt,val)` / `jh_fmt_lld_stderr(fmt,val)`,见 `compiler/src0/codegen.jhyy:9` "ir_emit 变参拆分");v3.x 候选 native variadic syntax
