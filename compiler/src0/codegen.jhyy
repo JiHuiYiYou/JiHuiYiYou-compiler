@@ -155,14 +155,15 @@ type CGContext = struct {
     loop_starts:      *u8,        // *IRVal[32]
     loop_ends:        *u8,        // *IRVal[32]
     loop_continues:   *u8,        // *IRVal[32]
+    current_fn:       *u8,        // *NodeFuncDecl (v1.3.6: for cg_emit_defers on ret)
 }
 
-// CGContext size (after sret_slot → sret_slot_id i64 workaround): 9 字段 =
-//   5*i64 (ir, locals, nlocals_pad, current_ret_type, sret_slot_id) = 40 +
+// CGContext size (after sret_slot → sret_slot_id i64 workaround + v1.3.6 current_fn):
+//   6*i64 (ir, locals, nlocals_pad, current_ret_type, sret_slot_id, current_fn) = 48 +
 //   has_sret(i32) + loop_depth(i32) = 8 +
 //   3*i64 (loop_starts, loop_ends, loop_continues) = 24
-//   = 72 (was 104 before workaround; original had 5*8 + 40 + 3*8 = 104)
-fn CGCONTEXT_SIZE() -> i64 { return 72 as i64; }
+//   = 80 (was 72 before v1.3.6)
+fn CGCONTEXT_SIZE() -> i64 { return 80 as i64; }
 
 // ════════════════════════════════════════════════════
 // cg_add_local / cg_find_local
@@ -1040,17 +1041,106 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 if irval_is_undef(src) == 0 {
                     let _copy = cg_copy_struct(cg_raw, (*cg).current_ret_type, sret_addr, src);
                 }
+                // v1.3.6: emit LIFO defers before `ret` (sret path)
+                //   (inline — jhyy 无 forward decl → 不能抽成 helper call from cg_expr)
+                let fd_a = (*cg).current_fn;
+                if fd_a != (0 as *u8) {
+                    let fd_a_d = fd_a as *NodeFuncDecl;
+                    let nd_a = (*fd_a_d).ndefers;
+                    let dr_a = (*fd_a_d).defers;
+                    if nd_a > (0 as i64) && dr_a != (0 as *u8) {
+                        let mut ia: i64 = nd_a;
+                        while ia > (0 as i64) {
+                            let dsa = ptr_add_u8(dr_a, (ia - (1 as i64)) * (8 as i64)) as **Node;
+                            let dna = *dsa;
+                            if dna != (0 as *Node) {
+                                let dd_a = node_defer_data(dna);
+                                let er_a = (*dd_a).expr;
+                                if er_a != (0 as *u8) {
+                                    let _ca = cg_expr(cg_raw, er_a as *Node);
+                                }
+                            }
+                            ia = ia - (1 as i64);
+                        }
+                    }
+                }
                 let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
                 let _ret = ir_emit_ret(ir, v);
             } else {
                 let val = cg_expr(cg_raw, (*d).expr);
+                // v1.3.6: emit LIFO defers before `ret` (value path)
+                let fd_b = (*cg).current_fn;
+                if fd_b != (0 as *u8) {
+                    let fd_b_d = fd_b as *NodeFuncDecl;
+                    let nd_b = (*fd_b_d).ndefers;
+                    let dr_b = (*fd_b_d).defers;
+                    if nd_b > (0 as i64) && dr_b != (0 as *u8) {
+                        let mut ib: i64 = nd_b;
+                        while ib > (0 as i64) {
+                            let dsb = ptr_add_u8(dr_b, (ib - (1 as i64)) * (8 as i64)) as **Node;
+                            let dnb = *dsb;
+                            if dnb != (0 as *Node) {
+                                let dd_b = node_defer_data(dnb);
+                                let er_b = (*dd_b).expr;
+                                if er_b != (0 as *u8) {
+                                    let _cb = cg_expr(cg_raw, er_b as *Node);
+                                }
+                            }
+                            ib = ib - (1 as i64);
+                        }
+                    }
+                }
                 let _ret = ir_emit_ret(ir, val);
             }
         } else {
             if (*cg).has_sret != 0 {
                 // sret void return (rare): bare `ret\n`
+                // v1.3.6: emit LIFO defers before bare `ret` (sret void path)
+                let fd_c = (*cg).current_fn;
+                if fd_c != (0 as *u8) {
+                    let fd_c_d = fd_c as *NodeFuncDecl;
+                    let nd_c = (*fd_c_d).ndefers;
+                    let dr_c = (*fd_c_d).defers;
+                    if nd_c > (0 as i64) && dr_c != (0 as *u8) {
+                        let mut ic: i64 = nd_c;
+                        while ic > (0 as i64) {
+                            let dsc = ptr_add_u8(dr_c, (ic - (1 as i64)) * (8 as i64)) as **Node;
+                            let dnc = *dsc;
+                            if dnc != (0 as *Node) {
+                                let dd_c = node_defer_data(dnc);
+                                let er_c = (*dd_c).expr;
+                                if er_c != (0 as *u8) {
+                                    let _cc = cg_expr(cg_raw, er_c as *Node);
+                                }
+                            }
+                            ic = ic - (1 as i64);
+                        }
+                    }
+                }
                 let _str = ir_emit_str(ir, "    ret\n" as *u8);
             } else {
+                // v1.3.6: emit LIFO defers before `ret` (void path)
+                let fd_d = (*cg).current_fn;
+                if fd_d != (0 as *u8) {
+                    let fd_d_d = fd_d as *NodeFuncDecl;
+                    let nd_d = (*fd_d_d).ndefers;
+                    let dr_d = (*fd_d_d).defers;
+                    if nd_d > (0 as i64) && dr_d != (0 as *u8) {
+                        let mut id_: i64 = nd_d;
+                        while id_ > (0 as i64) {
+                            let dsd = ptr_add_u8(dr_d, (id_ - (1 as i64)) * (8 as i64)) as **Node;
+                            let dnd = *dsd;
+                            if dnd != (0 as *Node) {
+                                let dd_d = node_defer_data(dnd);
+                                let er_d = (*dd_d).expr;
+                                if er_d != (0 as *u8) {
+                                    let _cd = cg_expr(cg_raw, er_d as *Node);
+                                }
+                            }
+                            id_ = id_ - (1 as i64);
+                        }
+                    }
+                }
                 let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
                 let _ret = ir_emit_ret(ir, v);
             }
@@ -2683,6 +2773,13 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         return zero;
     }
 
+    // ── NODE_DEFER ──
+    // v1.3.6: defer body 在 cg_emit_defers (cg_stmt NODE_RETURN 前) 已
+    //   emit. 这里只是 stmt position 访问,no-op → zero.
+    if kind == NODE_DEFER() {
+        return zero;
+    }
+
     // ── 未实现 case：返回 zero IRVal（commit 4 补全）──
     return zero;
 }
@@ -2888,6 +2985,7 @@ fn cg_func(cg_raw: *u8, n: *Node) -> i32 {
     (*cg).has_sret = is_sret;
     (*cg).loop_depth = 0;
     (*cg).nlocals = 0;
+    (*cg).current_fn = fd as *u8;  /* v1.3.6: cg_emit_defers reads fd->defers in cg_stmt NODE_RETURN */
 
     // arena alloc loop label arrays
     (*cg).loop_starts = arena_alloc((*ir).arena, 32 as i64 * IRVAL_SIZE());

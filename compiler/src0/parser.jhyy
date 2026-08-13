@@ -1051,6 +1051,32 @@ fn parse_continue(p: *Parser) -> *Node {
     return ast_new_continue((*p).arena, loc_lf, loc_ll, loc_lc);
 }
 
+// v1.3.6: defer fncall();
+//   - Only allowed at function-body top level (scope_depth <= 2).
+//   - sema validates expr is NODE_CALL / NODE_QUALIFIED_CALL.
+fn parse_defer(p: *Parser) -> *Node {
+    let mut t = empty_token();
+    parser_peek(p, &t);
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
+
+    parser_advance(p, &t);  // consume 'defer'
+    if (*p).scope_depth > (2 as i32) {
+        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+        jh_fputs_stderr("error: defer not allowed in nested scope (only at function-body top level)\n" as *u8);
+        (*p).error_count = (*p).error_count + (1 as i32);
+    }
+    let expr = parse_expr(p, PREC_NONE());
+    if parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+        if parser_check(p, TOKEN_EOF()) == (0 as i32) {
+            parser_expect(p, TOKEN_SEMICOLON(), ";" as *u8, &t);
+        }
+    }
+
+    return ast_new_defer((*p).arena, loc_lf, loc_ll, loc_lc, expr);
+}
+
 // parse_expr_stmt: expr [;] — allow omitting ; before }
 // commit 4 保留：parse_expr 现在是完整 Pratt（定义在 line ~200，本函数之后），
 // parse_expr_stmt 仍是 5 处 inlined block dispatcher 的"表达式语句"入口。
@@ -1320,6 +1346,9 @@ fn parse_dispatch_simple_only(p: *Parser) -> *Node {
     }
     if parser_check(p, TOKEN_CONTINUE()) != (0 as i32) {
         return parse_continue(p);
+    }
+    if parser_check(p, TOKEN_DEFER()) != (0 as i32) {
+        return parse_defer(p);
     }
     if parser_check(p, TOKEN_MATCH()) != (0 as i32) {
         return parse_match(p);
@@ -1919,6 +1948,8 @@ fn parse_while(p: *Parser) -> *Node {
             stmt = parse_break(p);
         } else if parser_check(p, TOKEN_CONTINUE()) != (0 as i32) {
             stmt = parse_continue(p);
+        } else if parser_check(p, TOKEN_DEFER()) != (0 as i32) {
+            stmt = parse_defer(p);
         } else if parser_check(p, TOKEN_MATCH()) != (0 as i32) {
             stmt = parse_match(p);
         } else if parser_check(p, TOKEN_IF()) != (0 as i32) {
@@ -1968,6 +1999,7 @@ fn parse_stmt(p: *Parser) -> *Node {
     if parser_check(p, TOKEN_RETURN())   != (0 as i32) { return parse_return(p); }
     if parser_check(p, TOKEN_BREAK())    != (0 as i32) { return parse_break(p); }
     if parser_check(p, TOKEN_CONTINUE()) != (0 as i32) { return parse_continue(p); }
+    if parser_check(p, TOKEN_DEFER())    != (0 as i32) { return parse_defer(p); }
     return parse_expr_stmt(p);
 }
 
@@ -2072,6 +2104,8 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
                 stmt = parse_break(p);
             } else if parser_check(p, TOKEN_CONTINUE()) != (0 as i32) {
                 stmt = parse_continue(p);
+            } else if parser_check(p, TOKEN_DEFER()) != (0 as i32) {
+                stmt = parse_defer(p);
             } else if parser_check(p, TOKEN_MATCH()) != (0 as i32) {
                 stmt = parse_match(p);
             } else if parser_check(p, TOKEN_IF()) != (0 as i32) {

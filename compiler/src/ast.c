@@ -52,6 +52,7 @@ ACCESSOR(node_let_data, NodeLet)
 ACCESSOR(node_assign_data, NodeAssign)
 ACCESSOR(node_return_data, NodeReturn)
 ACCESSOR(node_expr_stmt_data, NodeExprStmt)
+ACCESSOR(node_defer_data, NodeDefer)
 ACCESSOR(node_match_data, NodeMatch)
 ACCESSOR(node_match_arm_data, NodeMatchArm)
 ACCESSOR(node_pattern_lit_data, NodePatternLit)
@@ -326,6 +327,13 @@ Node *ast_new_continue(Arena *a, SourceLoc loc) {
     return new_node(a, NODE_CONTINUE, loc, 0);
 }
 
+/* v1.3.6: defer fncall(); — node carries the call expr, body emits before ret. */
+Node *ast_new_defer(Arena *a, SourceLoc loc, Node *expr) {
+    Node *n = new_node(a, NODE_DEFER, loc, sizeof(NodeDefer));
+    node_defer_data(n)->expr = expr;
+    return n;
+}
+
 Node *ast_new_expr_stmt(Arena *a, SourceLoc loc, Node *expr) {
     Node *n = new_node(a, NODE_EXPR_STMT, loc, sizeof(NodeExprStmt));
     node_expr_stmt_data(n)->expr = expr;
@@ -436,6 +444,8 @@ Node *ast_new_func_decl(Arena *a, SourceLoc loc, Sym *sym, NodeFuncDeclParam *pa
     d->ret_type = ret_type;
     d->body = body;
     d->is_extern = is_extern;
+    d->defers = NULL;        /* v1.3.6: defer stack starts empty (sema fills) */
+    d->ndefers = 0;
     return n;
 }
 
@@ -531,6 +541,7 @@ const char *node_kind_name(NodeKind kind) {
     case NODE_CONST_DECL:    return "const_decl";
     case NODE_MODULE:        return "module";
     case NODE_NULL:          return "null";  /* v1.3.1 */
+    case NODE_DEFER:         return "defer";  /* v1.3.6 */
     default:                 return "?";
     }
 }

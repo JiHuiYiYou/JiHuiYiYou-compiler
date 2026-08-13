@@ -86,10 +86,9 @@ type VariantDesc = struct {
 // SemaContext
 // ════════════════════════════════════════════════════
 
-// locals 是 *u8 指向 arena_alloc(SEMA_MAX_LOCALS * 16) 数组
-// SemaContext 自身字节数: arena(8) + module(8) + global_scope(8) + current_scope(8)
+// v1.3.6: SemaContext 自身字节数: arena(8) + module(8) + global_scope(8) + current_scope(8)
 //                       + locals(8) + nlocals(8) + scope_depth(8) + error_count(8)
-//                       + current_ret_type(8) + loop_depth(8) = 80
+//                       + current_ret_type(8) + loop_depth(8) + current_fn(8) = 88
 type SemaContext = struct {
     arena:             *Arena,
     module:            *Node,
@@ -101,9 +100,10 @@ type SemaContext = struct {
     error_count:       i32,
     current_ret_type:  *u8,        // *Type
     loop_depth:        i32,
+    current_fn:        *u8,        // *NodeFuncDecl (v1.3.6: for defer collection)
 }
 
-fn SEMA_CONTEXT_SIZE() -> i64 { return 80 as i64; }
+fn SEMA_CONTEXT_SIZE() -> i64 { return 88 as i64; }
 
 // ════════════════════════════════════════════════════
 // SemaLocal 访问 helper（locals[i].sym / locals[i].type）
@@ -1273,6 +1273,42 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         return v;
     }
 
+    // ── v1.3.6: defer fncall(); — validate expr is fncall, register into fd->defers ──
+    if (*n).kind == NODE_DEFER() {
+        let d = node_defer_data(n);
+        let expr = (*d).expr as *Node;
+        if expr == (0 as *Node) {
+            let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                    "defer requires fncall (got non-call expression)" as *u8);
+        } else if (*expr).kind != NODE_CALL() && (*expr).kind != NODE_QUALIFIED_CALL() {
+            let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                    "defer requires fncall (got non-call expression)" as *u8);
+        }
+        if expr != (0 as *Node) {
+            let _v = infer_type(ctx, expr);
+        }
+        let v = type_void(ta);
+        (*n).type_ptr = v as *u8;
+        // collect into current fn's defer stack (sema walks in source order,
+        // so fd->defers ends up declaration-ordered; codegen reverses for LIFO)
+        if (*ctx).current_fn != (0 as *u8) {
+            let fd = (*ctx).current_fn as *NodeFuncDecl;
+            let old_n = (*fd).ndefers;
+            let new_n = old_n + (1 as i64);
+            let new_defers = arena_alloc((*ctx).arena, new_n * (8 as i64)) as **Node;
+            if old_n > (0 as i64) {
+                if (*fd).defers != (0 as *u8) {
+                    memcpy(new_defers as *u8, (*fd).defers, old_n * (8 as i64));
+                }
+            }
+            let slot = (new_defers as i64 + old_n * (8 as i64)) as **Node;
+            *slot = n;
+            (*fd).defers = new_defers as *u8;
+            (*fd).ndefers = new_n;
+        }
+        return v;
+    }
+
     // ── struct lit ──
     if (*n).kind == NODE_STRUCT_LIT() {
         let d = node_struct_lit_data(n);
@@ -1567,9 +1603,11 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
         if (*fd).is_extern == (0 as i32) {
             (*ctx).current_ret_type = ret_type as *u8;
             (*ctx).loop_depth = 0 as i32;
+            (*ctx).current_fn = fd as *u8;  // v1.3.6: NODE_DEFER case collects into fd->defers
             let body_type = infer_type(ctx, ta, (*fd).body as *Node);
             (*ctx).current_ret_type = 0 as *u8;
             (*ctx).loop_depth = 0 as i32;
+            (*ctx).current_fn = 0 as *u8;
             if (*ret_type).kind != KIND_VOID() {
                 if type_eq(body_type, ret_type) == (0 as i32) {
                     let _x = sema_error_str(ctx, (*((*fd).body as *Node)).loc_filename,
@@ -1809,6 +1847,7 @@ fn sema_init(ctx: *SemaContext, arena: *Arena, ta: *TypeArena) -> i32 {
     (*ctx).error_count = 0 as i32;
     (*ctx).current_ret_type = 0 as *u8;
     (*ctx).loop_depth = 0 as i32;
+    (*ctx).current_fn = 0 as *u8;
     // init type arena（lazy init 也会触发）
     (*ta).arena = arena;
     (*ta).inited = 0 as i32;

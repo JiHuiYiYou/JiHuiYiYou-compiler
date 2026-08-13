@@ -87,6 +87,7 @@ typedef enum {
     TOKEN_EOF,
     TOKEN_ERROR,
     TOKEN_NULL,        /* v1.3.1: null keyword, sugar for 0 in pointer context */
+    TOKEN_DEFER,       /* v1.3.6: defer fncall(); LIFO cleanup */
 } TokenKind;
 
 /* ── Source location ── */

@@ -109,6 +109,8 @@ fn TOKEN_EOF()         -> i32 { return 67 as i32; }
 fn TOKEN_ERROR()       -> i32 { return 68 as i32; }
 // v1.3.1: null keyword (sugar for 0 in pointer context)
 fn TOKEN_NULL()        -> i32 { return 69 as i32; }
+// v1.3.6: defer fncall(); LIFO cleanup
+fn TOKEN_DEFER()       -> i32 { return 70 as i32; }
 
 // ════════════════════════════════════════════════════
 // Token + Lexer 结构（平铺字段，无 nested struct）
@@ -170,6 +172,8 @@ fn lookup_keyword(name: *u8, len: i64) -> i32 {
         if strncmp(name, "match" as *u8, 5 as i64) == 0 as i32 { return TOKEN_MATCH(); }
         if strncmp(name, "false" as *u8, 5 as i64) == 0 as i32 { return TOKEN_BOOL(); }
         if strncmp(name, "break" as *u8, 5 as i64) == 0 as i32 { return TOKEN_BREAK(); }
+        // v1.3.6: defer keyword
+        if strncmp(name, "defer" as *u8, 5 as i64) == 0 as i32 { return TOKEN_DEFER(); }
         // v0.9 wip commit 2.20 / Task #52 + #42 合并: const 关键字漏, 补
         if strncmp(name, "const" as *u8, 5 as i64) == 0 as i32 { return TOKEN_CONST(); }
     }
@@ -850,5 +854,6 @@ fn token_kind_name(kind: i32) -> *u8 {
     if kind == TOKEN_EOF() { return "EOF" as *u8; }
     if kind == TOKEN_ERROR() { return "ERROR" as *u8; }
     if kind == TOKEN_NULL() { return "null" as *u8; }
+    if kind == TOKEN_DEFER() { return "defer" as *u8; }
     return "?" as *u8;
 }

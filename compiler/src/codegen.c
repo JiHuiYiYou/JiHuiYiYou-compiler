@@ -41,6 +41,7 @@ typedef struct {
     IRVal       *loop_starts;        /* calloc'd MAX_LOOP_DEPTH entries */
     IRVal       *loop_ends;
     IRVal       *loop_continues;
+    NodeFuncDecl *current_fn;        /* v1.3.6: current fn (for cg_emit_defers on ret) */
 } CGContext;
 
 static void cg_add_local(CGContext *cg, Sym *sym, IRVal val, int is_stack) {
@@ -1450,8 +1451,29 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
     }
 }
 
+/* v1.3.6: emit all defers in LIFO order (reverse declaration order) before
+   a `ret` instruction. Each defer is a NODE_CALL or NODE_QUALIFIED_CALL; we
+   type-check the call via cg_expr to fire any side-effecting IR emission
+   (struct copy, etc.), discarding the return value. */
+static void cg_emit_defers(CGContext *cg, NodeFuncDecl *fd) {
+    if (!fd || fd->ndefers == 0) return;
+    for (size_t i = fd->ndefers; i > 0; i--) {
+        Node *defer = fd->defers[i - 1];
+        NodeDefer *dd = node_defer_data(defer);
+        if (dd->expr) {
+            IRVal discard = {0};
+            cg_expr(cg, dd->expr, &discard);
+        }
+    }
+}
+
 static void cg_stmt(CGContext *cg, Node *n) {
     switch (n->kind) {
+    case NODE_DEFER: {
+        /* v1.3.6: defer body is emitted by cg_emit_defers before `ret`,
+           not at declaration site. No-op here. */
+        break;
+    }
     case NODE_LET: {
         NodeLet *d = node_let_data(n);
         int is_array = (d->sym->type && d->sym->type->kind == KIND_ARRAY);
@@ -1615,14 +1637,20 @@ static void cg_stmt(CGContext *cg, Node *n) {
                 if (!irval_is_undef(src)) {
                     cg_copy_struct(cg, cg->current_ret_type, sret_addr, src);
                 }
+                /* v1.3.6: emit LIFO defers before `ret` */
+                cg_emit_defers(cg, cg->current_fn);
                 IRVal v = {0};
                 ir_emit_ret(cg->ir, v);
             } else {
                 IRVal val = {0};
                 cg_expr(cg, dr->expr, &val);
+                /* v1.3.6: emit LIFO defers before `ret` */
+                cg_emit_defers(cg, cg->current_fn);
                 ir_emit_ret(cg->ir, val);
             }
         } else {
+            /* v1.3.6: emit LIFO defers before `ret` (void path) */
+            cg_emit_defers(cg, cg->current_fn);
             IRVal v = {0};
             ir_emit_ret(cg->ir, v);
         }
@@ -1807,6 +1835,7 @@ static void cg_func(IRBuf *ir, Node *n) {
     cg.has_sret = is_sret;
     cg.sret_slot_id = -1;
     cg.loop_depth = 0;
+    cg.current_fn = fd;  /* v1.3.6: cg_emit_defers reads fd->defers in cg_return */
     /* heap-alloc locals + loop label arrays (matches jhyy-side layout) */
     cg.locals        = (LocalEntry*)calloc(MAX_LOCALS,     sizeof(LocalEntry));
     cg.loop_starts   = (IRVal*)     calloc(MAX_LOOP_DEPTH, sizeof(IRVal));

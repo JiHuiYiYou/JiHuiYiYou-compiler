@@ -843,6 +843,32 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         return n->type;
     }
 
+    /* ── v1.3.6: defer fncall(); — validate expr is a fncall, register
+       into current fn's defer stack (collected in source order). */
+    case NODE_DEFER: {
+        NodeDefer *dd = node_defer_data(n);
+        if (!dd->expr || (dd->expr->kind != NODE_CALL &&
+                          dd->expr->kind != NODE_QUALIFIED_CALL)) {
+            sema_error(ctx, n->loc, "defer requires fncall (got non-call expression)");
+        }
+        if (dd->expr)
+            infer_type(ctx, dd->expr);  /* type-check the call */
+        n->type = type_void();
+        /* collect into current fn's defer stack (sema walks in source order,
+           so fd->defers ends up declaration-ordered; codegen reverses for LIFO) */
+        if (ctx->current_fn) {
+            size_t old_n = ctx->current_fn->ndefers;
+            size_t new_n = old_n + 1;
+            Node **new_defers = arena_alloc(ctx->arena, new_n * sizeof(Node *));
+            if (old_n > 0 && ctx->current_fn->defers)
+                memcpy(new_defers, ctx->current_fn->defers, old_n * sizeof(Node *));
+            new_defers[old_n] = n;
+            ctx->current_fn->defers = new_defers;
+            ctx->current_fn->ndefers = new_n;
+        }
+        return n->type;
+    }
+
     /* ── struct literal ── */
     case NODE_STRUCT_LIT: {
         NodeStructLit *d = node_struct_lit_data(n);
@@ -1054,9 +1080,11 @@ static void check_func_decl(SemaContext *ctx, Node *n) {
     if (fd->body && !fd->is_extern) {
         ctx->current_ret_type = ret_type;
         ctx->loop_depth = 0;
+        ctx->current_fn = fd;  /* v1.3.6: NODE_DEFER case collects into fd->defers */
         Type *body_type = infer_type(ctx, fd->body);
         ctx->current_ret_type = NULL;
         ctx->loop_depth = 0;
+        ctx->current_fn = NULL;
         if (ret_type->kind != KIND_VOID && !type_eq(body_type, ret_type)) {
             sema_error(ctx, fd->body->loc, "function body type %s does not match return type %s",
                        type_to_string(body_type), type_to_string(ret_type));
@@ -1210,6 +1238,7 @@ void sema_init(SemaContext *ctx, Arena *arena) {
     ctx->error_count = 0;
     ctx->current_ret_type = NULL;
     ctx->loop_depth = 0;
+    ctx->current_fn = NULL;
 }
 
 int sema_check(SemaContext *ctx, Node *module) {

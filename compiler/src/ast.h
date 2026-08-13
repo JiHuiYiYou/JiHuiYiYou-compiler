@@ -73,6 +73,7 @@ typedef enum {
     /* top level */
     NODE_MODULE,         /* root: list of declarations */
     NODE_NULL,           /* v1.3.1: null literal (source-distinguishable pointer-null) */
+    NODE_DEFER,          /* v1.3.6: defer fncall(); LIFO cleanup, body emits before ret */
 } NodeKind;
 
 /* ── Node ── */
@@ -172,6 +173,10 @@ typedef struct {
 typedef struct { Node *target; Node *value; } NodeAssign;
 typedef struct { Node *expr; } NodeReturn;
 typedef struct { Node *expr; } NodeExprStmt;
+/* v1.3.6: defer fncall(); — sema collects these into fd->defers[]; codegen
+   emits them in LIFO order before every `ret`. expr is a NODE_CALL or
+   NODE_QUALIFIED_CALL (sema validates). */
+typedef struct { Node *expr; } NodeDefer;
 
 /* break / continue: no variant data needed */
 
@@ -229,6 +234,10 @@ typedef struct {
     Node              *ret_type;
     Node              *body;
     bool               is_extern;
+    /* v1.3.6: defer statements collected by sema in source order. codegen
+       reads these (reverse) to emit LIFO before every `ret`. */
+    Node             **defers;
+    size_t             ndefers;
 } NodeFuncDecl;
 
 typedef struct {
@@ -283,6 +292,7 @@ NodeLet          *node_let_data(Node *n);
 NodeAssign       *node_assign_data(Node *n);
 NodeReturn       *node_return_data(Node *n);
 NodeExprStmt     *node_expr_stmt_data(Node *n);
+NodeDefer        *node_defer_data(Node *n);
 NodeMatch        *node_match_data(Node *n);
 NodeMatchArm     *node_match_arm_data(Node *n);
 NodePatternLit   *node_pattern_lit_data(Node *n);
@@ -334,6 +344,7 @@ Node *ast_new_for_slice(struct Arena *a, SourceLoc loc, Sym *var, Node *slice, N
 Node *ast_new_let(struct Arena *a, SourceLoc loc, bool is_mut, Sym *sym, Node *type_annot, Node *init);
 Node *ast_new_assign(struct Arena *a, SourceLoc loc, Node *target, Node *value);
 Node *ast_new_return(struct Arena *a, SourceLoc loc, Node *expr);
+Node *ast_new_defer(struct Arena *a, SourceLoc loc, Node *expr);
 Node *ast_new_break(struct Arena *a, SourceLoc loc);
 Node *ast_new_null(struct Arena *a, SourceLoc loc);  /* v1.3.1 */
 Node *ast_new_continue(struct Arena *a, SourceLoc loc);

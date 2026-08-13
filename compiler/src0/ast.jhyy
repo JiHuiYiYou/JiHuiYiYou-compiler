@@ -121,6 +121,8 @@ fn NODE_MODULE()         -> i32 { return 48 as i32; }
 fn NODE_CONST_DECL()     -> i32 { return 49 as i32; }
 // v1.3.1: null literal (source-distinguishable pointer-null), 在 NODE_CONST_DECL 之后
 fn NODE_NULL()           -> i32 { return 50 as i32; }
+// v1.3.6: defer fncall(); — sema collects into fd->defers; codegen emits LIFO before ret
+fn NODE_DEFER()          -> i32 { return 51 as i32; }
 
 fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_INT()            { return "INT" as *u8; }
@@ -173,6 +175,7 @@ fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_IMPORT_DECL()    { return "IMPORT_DECL" as *u8; }
     if kind == NODE_MODULE()        { return "MODULE" as *u8; }
     if kind == NODE_NULL()          { return "NULL" as *u8; }
+    if kind == NODE_DEFER()         { return "DEFER" as *u8; }
     return "?" as *u8;
 }
 
@@ -394,6 +397,12 @@ fn NODE_RETURN_SIZE() -> i64 { return 8 as i64; }
 fn NODE_BREAK_SIZE() -> i64 { return 0 as i64; }
 fn NODE_CONTINUE_SIZE() -> i64 { return 0 as i64; }
 
+// v1.3.6: defer fncall(); — expr(*u8 8) = 8
+type NodeDefer = struct {
+    expr: *u8,    // *Node（must be NODE_CALL or NODE_QUALIFIED_CALL, sema validates）
+}
+fn NODE_DEFER_SIZE() -> i64 { return 8 as i64; }
+
 // expr(*u8 8) = 8
 type NodeExprStmt = struct {
     expr: *u8,
@@ -523,7 +532,8 @@ type NodeEnumDef = struct {
 }
 fn NODE_ENUM_DEF_SIZE() -> i64 { return 16 as i64; }
 
-// sym(*u8 8) + params(*u8 8) + nparams(i64 8) + ret_type(*u8 8) + body(*u8 8) + is_extern(i32+pad) = 48
+// v1.3.6: sym(*u8 8) + params(*u8 8) + nparams(i64 8) + ret_type(*u8 8) + body(*u8 8) +
+//   is_extern(i32+pad 8) + defers(*u8 8) + ndefers(i64 8) = 64
 type NodeFuncDecl = struct {
     sym:      *u8,    // *Sym
     params:   *u8,    // *NodeFuncDeclParam 数组
@@ -531,8 +541,10 @@ type NodeFuncDecl = struct {
     ret_type: *u8,    // *Node（可空）
     body:     *u8,    // *Node（extern 时 NULL）
     is_extern: i32,   // bool
+    defers:   *u8,    // *Node 数组 (sema-fill, codegen-read LIFO)
+    ndefers:  i64,
 }
-fn NODE_FUNC_DECL_SIZE() -> i64 { return 48 as i64; }
+fn NODE_FUNC_DECL_SIZE() -> i64 { return 64 as i64; }
 
 // sym(*u8 8) + body(*u8 8) = 16
 type NodeTypeDecl = struct {
@@ -1044,6 +1056,18 @@ fn ast_new_continue(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32) -
     return n;
 }
 
+// v1.3.6: defer fncall(); — node carries the call expr; body emits before ret.
+fn node_defer_data(n: *Node) -> *NodeDefer {
+    return (n as i64 + NODE_SIZE()) as *NodeDefer;
+}
+fn ast_new_defer(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32, expr: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_DEFER_SIZE());
+    let n = ast_init_node(buf, NODE_DEFER(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeDefer;
+    (*d).expr = expr as *u8;
+    return n;
+}
+
 fn ast_new_expr_stmt(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
                      expr: *Node) -> *Node {
     let buf = arena_alloc(a, NODE_SIZE() + NODE_EXPR_STMT_SIZE());
@@ -1277,6 +1301,8 @@ fn ast_new_func_decl(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
     (*d).ret_type = ret_type as *u8;
     (*d).body = body as *u8;
     (*d).is_extern = is_extern;
+    (*d).defers = 0 as *u8;   // v1.3.6: defer stack starts empty (sema fills)
+    (*d).ndefers = 0 as i64;
     return n;
 }
 

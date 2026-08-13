@@ -413,6 +413,22 @@ static Node *parse_continue(Parser *p) {
     return ast_new_continue(p->arena, loc);
 }
 
+/* v1.3.6: defer fncall(); — only allowed at function-body top level
+   (scope_depth <= 2 from global). Nested defer (if/for/while body) rejected. */
+static Node *parse_defer(Parser *p) {
+    SourceLoc loc = peek(p).loc;
+    advance(p); /* consume 'defer' */
+    if (p->scope_depth > 2) {
+        fprintf(stderr, "%s:%d:%d: error: defer not allowed in nested scope (only at function-body top level)\n",
+                loc.filename, loc.line, loc.col);
+        p->error_count++;
+    }
+    Node *expr = parse_expr(p, PREC_NONE);
+    if (!check(p, TOKEN_RBRACE) && !check(p, TOKEN_EOF))
+        expect(p, TOKEN_SEMICOLON, ";");
+    return ast_new_defer(p->arena, loc, expr);
+}
+
 static Node *parse_expr_stmt(Parser *p) {
     Node *expr = parse_expr(p, PREC_NONE);
     /* allow omitting ; before } (expression as last statement in block) */
@@ -430,6 +446,7 @@ static Node *parse_stmt(Parser *p) {
     if (check(p, TOKEN_RETURN))   return parse_return(p);
     if (check(p, TOKEN_BREAK))    return parse_break(p);
     if (check(p, TOKEN_CONTINUE)) return parse_continue(p);
+    if (check(p, TOKEN_DEFER))    return parse_defer(p);
     if (check(p, TOKEN_LBRACE))   return parse_block(p);
     return parse_expr_stmt(p);
 }
