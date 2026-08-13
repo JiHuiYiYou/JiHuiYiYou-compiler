@@ -31,6 +31,12 @@
 3. **改动前先看 git status**：避免误提交上次的临时文件
 4. **每个 sprint 一个 commit**：commit message 用中文概述 + Co-Authored-By: MiniMax-M3 <noreply@MiniMax>
 5. **版本号用 git tag**：`git tag v0.X.Y`
+6. **C-side vs jhyy_v1 closure chain binary 操作规则**（Sprint v1.1.2 调查结论, 2026-08-12）：
+   - ✅ C-side (`jhyy.exe`) 可写 `compiler/build/bin/jhyy.exe` + 派生 `.il`(开发态)
+   - ❌ C-side **绝不可写** `jhyy_v1.exe` / `jhyy_v2.exe` / `jhyy_v3.exe` / `jhyy_v4.exe` — 这些是 closure 链 canonical binary,被污染后 Stage 2 byte-equal 验证失效
+   - ✅ C-side 写 `jhyy_v1.exe.exe` OK(每次 Stage 0 jhyy_v1 重建会被 MCP `jhyy_regress` baseline 校验保护)
+   - ✅ 验证 closure 时用 `jhyy_vN.exe.exe` 编 `src0/main.jhyy`,永远不写回 `jhyy_v*.exe`
+   - **为什么需要这条规则**: C-side (`bccc452e...`) 跟 jhyy_v1 (`2445e97d...` → `7c035615...`) emit 的 `.il` 历史就不同(`Sprint 4.21-4.25 W-005 #2 真修 chain` 在 C-side 加 `irval_is_undef` 守卫导致多 emit 几个 `copy`,QBE no-op 但 sha 不同)。Stage 2 N=3 closure **不覆盖 C-side**,所以 C-side binary 跑出来 sha 跟 jhyy_v1 不同是预期行为。
 
 ### 改动后必跑（按层面）
 
