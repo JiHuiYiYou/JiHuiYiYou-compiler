@@ -1,0 +1,15 @@
+// v1.3.3 sizeof basic test — primitive types + reverse byte-equal with manual size
+fn main_jhyy() -> i32 {
+    // Expected: 4 + 8 + 1 + 8 + 8 = 29
+    let s1: i64 = sizeof(i32);     // 4
+    let s2: i64 = sizeof(*u8);     // 8 (pointer)
+    let s3: i64 = sizeof(bool);    // 1
+    let s4: i64 = sizeof(i64);     // 8
+    let s5: i64 = sizeof(f64);     // 8
+    let total: i64 = s1 + s2 + s3 + s4 + s5;
+    if total == 29 {
+        return 42;
+    }
+    return total as i32;
+}
+//EXPECT:42

@@ -1,0 +1,6 @@
+// v1.3.3 negative test — sizeof(unknown_type) → sema error.
+// resolve_type_node returns NULL → "unknown type 'UnknownType'" reported.
+fn main_jhyy() -> i32 {
+    return sizeof(UnknownType) as i32;
+}
+//EXPECT:-1

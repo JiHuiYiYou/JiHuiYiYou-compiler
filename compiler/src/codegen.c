@@ -301,6 +301,14 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
         ir_emit_copy(cg->ir, v, d->value);
         *out = (v); return;
     }
+    /* v1.3.3: sizeof(TypeName) — sema fills n->type=i64 + node_int_data(value).
+       Emit like NODE_INT (value is the compile-time-computed size). */
+    case NODE_SIZEOF: {
+        NodeInt *d = node_int_data(n);
+        IRVal v = ir_new_tmp(cg->ir, qbe_type_of(n->type));
+        ir_emit_copy(cg->ir, v, d->value);
+        *out = (v); return;
+    }
     /* v1.3.1: null → 0 of expected pointer width.
        Sema must have set n->type to KIND_POINTER via context-fill;
        guard with 'w' fallback if somehow unfilled (defensive). */

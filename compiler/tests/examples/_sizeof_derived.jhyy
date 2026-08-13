@@ -1,0 +1,24 @@
+// v1.3.3 sizeof derived test — user types (struct, enum, slice, array)
+type Point = struct {
+    x: i32,
+    y: i32
+}
+
+type Color = enum {
+    Red,
+    Green,
+    Blue
+}
+
+fn main_jhyy() -> i32 {
+    let sp: i64 = sizeof(Point);     // 8 (i32 + i32)
+    let sc: i64 = sizeof(Color);     // 4 (smallest enum tag)
+    let ss: i64 = sizeof([*]i32);    // 16 (ptr + len)
+    let sa: i64 = sizeof([i32; 5]);  // 20 (5 * i32)
+    let total: i64 = sp + sc + ss + sa;  // 8 + 4 + 16 + 20 = 48
+    if total == 48 {
+        return 42;
+    }
+    return total as i32;
+}
+//EXPECT:42

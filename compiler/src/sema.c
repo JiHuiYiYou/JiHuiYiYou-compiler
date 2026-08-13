@@ -225,6 +225,21 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         n->type = NULL;
         return n->type;
     }
+    /* v1.3.3: sizeof(TypeName) — compile-time const. Resolve target type,
+       compute size, fill n->type=i64 + node_int_data(value/prim) so codegen
+       emits like NODE_INT (mirror INT path). */
+    case NODE_SIZEOF: {
+        NodeSizeof *sd = node_sizeof_data(n);
+        Type *target_type = resolve_type_node(ctx, sd->target);
+        if (!target_type) {
+            sema_error(ctx, n->loc, "unknown type in sizeof");
+        }
+        n->type = type_primitive(ctx->arena, PRIM_I64);
+        NodeInt *id = node_int_data(n);
+        id->value = (int64_t)type_size(target_type);
+        id->prim = PRIM_I64;
+        return n->type;
+    }
 
     /* ── identifier ── */
     case NODE_IDENT: {

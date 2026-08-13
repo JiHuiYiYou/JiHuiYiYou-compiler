@@ -1491,3 +1491,46 @@ input (canonical) 跟 output (scratch `_sh_vN`) 物理分开 → pre-stage clean
 - W-005 #1 family (Windows `.exe` suffix): `feedback_qbe_crlf_root_cause.md`
 - baseline binary hash 守门:`feedback_regress_baseline_binary_hash.md`(防 phantom binary)
 
+---
+
+## W-015: `NODE_SIZEOF` 节点 arena 分配 8 字节 → sema const-fold 写 16 字节溢出到下一块
+
+**Status:** ✅ RESOLVED (commit TBD, v1.3.3)
+
+**触发面:** v1.3.3 sizeof end-to-end implement。`ast_new_sizeof` 跟 `ast_new_alignof` 分配 `NODE_SIZE() + sizeof(NodeSizeof)` (= 8 bytes for `*Node target`),sema const-fold 透过 `node_int_data(n)` 写 `int64_t value` (8) + `TypePrimitive prim` (4) 共 16 bytes 溢出 8 bytes 到 next arena chunk → 随机 data corruption,典型症状: `sizeof(i32)` emit `208` (读 garbage),jhyy_v1 编 src0/main.jhyy 崩溃 `[4a] ir_init done`。
+
+**为什么不早被 catch?** v1.0.0 时 sizeof 在 lexer + parser + AST 都有,sema 跟 codegen 完全没实现(早期 src0 翻译时留 stub,新字段写 `i32` 错误 token 然后报错走 unknown path),走不到 16-byte write 路径。Basic 测试不 cover sizeof,所以 baseline regress 50/50 PASS 看不到问题 — 直到 closure chain 递归编 src0/main.jhyy 才在 jhyy_v1 编自身 时触发(`src0/cleanup` 引入 `sizeof(CGContext)`).
+
+**根因 (跟 W-005 / W-014 关系):** 跟 W-005 #1 family(W-005 #1: `cast` 字面 0 emit 空 buf)同类 — buffer 大小计算错。W-005 是 jhyy-side 没初始化 buf,W-015 是 C-side 跟 jhyy-side 同步算错了 node 后置 data 大小。
+
+**修复:**
+- `compiler/src/ast.c:213-228`:`ast_new_sizeof` 跟 `ast_new_alignof` 改用 `max(sizeof(NodeSizeof), sizeof(NodeInt))` (16 bytes)
+- `compiler/src0/ast.jhyy:841-867`:mirror 同步 — `NODE_INT_SIZE() = 16` 已知,跟 `NODE_SIZEOF_SIZE() = 8` / `NODE_ALIGNOF_SIZE() = 8` 取 max
+- 物理分开 sizeof node 的 data buf(sizeof = 16) 跟 sizeof 结构(sizeof = 8):sema 写 `id->value` + `id->prim` 不再 overflow
+
+**为什么不直接 fill 要 16-byte data 进 8-byte struct?** 改 `NodeSizeof` struct 加 `int64_t value` + `TypePrimitive prim` 字段 看起来更"干净",但:
+- `id->value` 跟 `id->prim` 跟 NODE_INT 共用 payload layout (sema 跟 codegen 一致依赖 `node_int_data(n)` 拿 data),改 sizeof struct 自定义 layout 会破 NODE_INT 共用 → 必须改 codegen 写两份
+- 像 `type_size` 之类的"常量类型表达式" v1.3.x 后续可能再加 (`alignof` 同路径,还有 `traits` 之类 trait-as-type AST 节点),靠 `node_int_data` 共用 payload 是更普适的 pattern
+- 选 `max` 是 conservative fix:不破 existing NODE_INT emit,zero risk
+
+**为什么不_init 16 bytes to 0?** v1.3.3 之前 `NodeSizeof` 只有 8 bytes 用,改成 init 16 浪费 8 bytes 且对 bug 本身无补救(const-fold 写完 16 bytes 之后 data 还是错的)。问题是"buf 太小" 不是 "buf 没初始化"。
+
+**Sprint 历史:**
+- v1.0.0 tag (`eabee0d`, 2026-08-10) — NODE_SIZEOF stub,无 sema/codegen
+- v1.3.1 (c2acbd1, 2026-08-12) — null literal,跟 sizeof 同语义模式
+- v1.3.2 (2026-08-12,e746461) — `else if` audit 顺带跨 sizeof,Lang 文法 audit pass
+- v1.3.3 (TBD, 2026-08-13) — end-to-end sizeof + W-015 fix
+
+**superseder:** 无 — `max(struct, NodeInt)` pattern 是稳定 design,以后加同类 const-fold 表达式 (alignof/type_traits) 照搬
+
+**不变量 (sizeof node 写法):**
+- `ast_new_sizeof` / `ast_new_alignof` 必须 allocate `max(sizeof(NodeXxx), sizeof(NodeInt))` bytes for node 后置 data
+- sema const-fold 只能通过 `node_int_data(n)` 写入 (rely on NodeInt 共用 layout)
+- codegen mirror NODE_INT emit (`qbe_type_of` + `ir_emit_copy`)
+- 任何新 const-fold AST node 需审计同样的 8/16 byte mismatch
+
+**引用:**
+- v1.3.3 sprint plan: `docs/plans/v1/v1.3.3-sizeof-compile-time-const.md`
+- W-005 #1 family (buffer size 计算错): `feedback_il_s_debugging_pattern.md`
+- baseline binary hash 守门:`feedback_regress_baseline_binary_hash.md`(本 bug 在 jhyy_v1 自身编 src0/main.jhyy 才暴露,跟 W-014 closure 验证路径同)
+

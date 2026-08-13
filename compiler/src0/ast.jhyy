@@ -312,13 +312,13 @@ fn NODE_SLICE_RANGE_SIZE() -> i64 { return 24 as i64; }
 
 // target(*u8 8) = 8
 type NodeSizeof = struct {
-    target: *u8,     // *Type
+    target: *u8,     // *Node (type annotation AST)
 }
 fn NODE_SIZEOF_SIZE() -> i64 { return 8 as i64; }
 
 // target(*u8 8) = 8
 type NodeAlignof = struct {
-    target: *u8,
+    target: *u8,     // *Node (type annotation AST)
 }
 fn NODE_ALIGNOF_SIZE() -> i64 { return 8 as i64; }
 
@@ -839,8 +839,14 @@ fn node_slice_range_data(n: *Node) -> *NodeSliceRange {
 }
 
 fn ast_new_sizeof(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
-                  target: *Type) -> *Node {
-    let buf = arena_alloc(a, NODE_SIZE() + NODE_SIZEOF_SIZE());
+                  target: *Node) -> *Node {
+    // v1.3.3: sema const-fills NodeInt fields (value/prim) into same arena slot via
+    // node_int_data(n). Allocate max(sizeof(NodeSizeof), sizeof(NodeInt)) so the
+    // int64+prim write doesn't overflow into next arena chunk.
+    let nsz = NODE_SIZEOF_SIZE();
+    let isz = NODE_INT_SIZE();
+    let sz = if nsz > isz { nsz } else { isz };
+    let buf = arena_alloc(a, NODE_SIZE() + sz);
     let n = ast_init_node(buf, NODE_SIZEOF(), loc_filename, loc_line, loc_col);
     let d = (buf as i64 + NODE_SIZE()) as *NodeSizeof;
     (*d).target = target as *u8;
@@ -852,8 +858,11 @@ fn node_sizeof_data(n: *Node) -> *NodeSizeof {
 }
 
 fn ast_new_alignof(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
-                   target: *Type) -> *Node {
-    let buf = arena_alloc(a, NODE_SIZE() + NODE_ALIGNOF_SIZE());
+                   target: *Node) -> *Node {
+    let nsz = NODE_ALIGNOF_SIZE();
+    let isz = NODE_INT_SIZE();
+    let sz = if nsz > isz { nsz } else { isz };
+    let buf = arena_alloc(a, NODE_SIZE() + sz);
     let n = ast_init_node(buf, NODE_ALIGNOF(), loc_filename, loc_line, loc_col);
     let d = (buf as i64 + NODE_SIZE()) as *NodeAlignof;
     (*d).target = target as *u8;

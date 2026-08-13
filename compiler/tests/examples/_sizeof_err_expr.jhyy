@@ -1,0 +1,7 @@
+// v1.3.3 negative test — sizeof requires type name, not expression.
+// parse_type rejects binary expressions → parser error.
+// Note: jhyy check (not jhyy run) — this file should NOT compile.
+fn main_jhyy() -> i32 {
+    return sizeof(1 + 2) as i32;
+}
+//EXPECT:-1

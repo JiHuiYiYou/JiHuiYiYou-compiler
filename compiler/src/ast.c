@@ -210,14 +210,19 @@ Node *ast_new_slice_range(Arena *a, SourceLoc loc, Node *base, Node *start, Node
     return n;
 }
 
-Node *ast_new_sizeof(Arena *a, SourceLoc loc, Type *target) {
-    Node *n = new_node(a, NODE_SIZEOF, loc, sizeof(NodeSizeof));
+Node *ast_new_sizeof(Arena *a, SourceLoc loc, Node *target) {
+    /* v1.3.3: sema const-fills NodeInt fields (value/prim) into same arena slot via
+       node_int_data(n). NODE_SIZE() + max(NodeSizeof, NodeInt) so the int64+prim
+       write doesn't overflow into next arena chunk. */
+    size_t sz = sizeof(NodeSizeof) > sizeof(NodeInt) ? sizeof(NodeSizeof) : sizeof(NodeInt);
+    Node *n = new_node(a, NODE_SIZEOF, loc, sz);
     node_sizeof_data(n)->target = target;
     return n;
 }
 
-Node *ast_new_alignof(Arena *a, SourceLoc loc, Type *target) {
-    Node *n = new_node(a, NODE_ALIGNOF, loc, sizeof(NodeAlignof));
+Node *ast_new_alignof(Arena *a, SourceLoc loc, Node *target) {
+    size_t sz = sizeof(NodeAlignof) > sizeof(NodeInt) ? sizeof(NodeAlignof) : sizeof(NodeInt);
+    Node *n = new_node(a, NODE_ALIGNOF, loc, sz);
     node_alignof_data(n)->target = target;
     return n;
 }

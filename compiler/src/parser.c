@@ -866,17 +866,18 @@ static Node *prefix_paren(Parser *p, Token token) {
 
 static Node *prefix_sizeof(Parser *p, Token token) {
     expect(p, TOKEN_LPAREN, "(");
-    parse_type(p); /* target type */
+    Node *type_node = parse_type(p); /* target type */
     expect(p, TOKEN_RPAREN, ")");
-    /* sema will resolve type */
-    return ast_new_sizeof(p->arena, token.loc, NULL);
+    /* v1.3.3: pass parsed type AST node to sema for resolve_type_node */
+    return ast_new_sizeof(p->arena, token.loc, type_node);
 }
 
 static Node *prefix_alignof(Parser *p, Token token) {
     expect(p, TOKEN_LPAREN, "(");
-    parse_type(p); /* target type */
+    Node *type_node = parse_type(p); /* target type */
     expect(p, TOKEN_RPAREN, ")");
-    return ast_new_alignof(p->arena, token.loc, NULL);
+    /* v1.3.3: mirror sizeof fix — capture parsed type AST */
+    return ast_new_alignof(p->arena, token.loc, type_node);
 }
 
 /* ── Infix functions ── */

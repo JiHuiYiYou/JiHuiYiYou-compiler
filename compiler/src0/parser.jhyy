@@ -563,16 +563,16 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
     else if t.kind == TOKEN_SIZEOF() {
         parser_advance(p, &t);
         parser_expect(p, TOKEN_LPAREN(), "(" as *u8, &t);
-        let _target = parse_type(p);
+        let target = parse_type(p);
         parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
-        left = ast_new_sizeof((*p).arena, loc_lf, loc_ll, loc_lc, 0 as *Type);
+        left = ast_new_sizeof((*p).arena, loc_lf, loc_ll, loc_lc, target);
     }
     else if t.kind == TOKEN_ALIGNOF() {
         parser_advance(p, &t);
         parser_expect(p, TOKEN_LPAREN(), "(" as *u8, &t);
-        let _target = parse_type(p);
+        let target = parse_type(p);
         parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
-        left = ast_new_alignof((*p).arena, loc_lf, loc_ll, loc_lc, 0 as *Type);
+        left = ast_new_alignof((*p).arena, loc_lf, loc_ll, loc_lc, target);
     }
     else if t.kind == TOKEN_IF() {
         /* if-as-expression（Phase A-1, v0.8 commit 5）：`let r = if cond { a } else { b };`

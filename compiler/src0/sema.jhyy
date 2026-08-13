@@ -462,6 +462,21 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         (*n).type_ptr = 0 as *u8;
         return 0 as *Type;
     }
+    // v1.3.3: sizeof(TypeName) — compile-time const. Mirror C-side sema.c.
+    // Resolve target type, compute size, fill n->type=i64 + node_int_data.
+    if (*n).kind == NODE_SIZEOF() {
+        let sd = node_sizeof_data(n);
+        let target_type = resolve_type_node(ctx, ta, (*sd).target as *Node);
+        if target_type == (0 as *Type) {
+            sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col, "unknown type in sizeof" as *u8);
+        }
+        let t = type_primitive(ta, PRIM_I64());
+        (*n).type_ptr = t as *u8;
+        let id = node_int_data(n);
+        (*id).value = type_size(target_type as *Type);
+        (*id).prim = PRIM_I64() as i32;
+        return t;
+    }
 
     // ── identifier ──
     if (*n).kind == NODE_IDENT() {

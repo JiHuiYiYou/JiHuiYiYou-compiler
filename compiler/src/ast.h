@@ -129,8 +129,8 @@ typedef struct { Node **elems; size_t nelems; } NodeArrayLit;
 typedef struct { Node *elem_type; } NodeSliceType;
 typedef struct { Node *array; } NodeSliceLit;
 typedef struct { Node *base; Node *start; Node *end; } NodeSliceRange;
-typedef struct { Type *target; } NodeSizeof;
-typedef struct { Type *target; } NodeAlignof;
+typedef struct { Node *target; } NodeSizeof;
+typedef struct { Node *target; } NodeAlignof;
 typedef struct { Node *expr; } NodeAddrOf;
 typedef struct { Node *expr; } NodeDeref;
 
@@ -319,8 +319,8 @@ Node *ast_new_array_lit(struct Arena *a, SourceLoc loc, Node **elems, size_t nel
 Node *ast_new_slice_type(struct Arena *a, SourceLoc loc, Node *elem_type);
 Node *ast_new_slice_lit(struct Arena *a, SourceLoc loc, Node *array);
 Node *ast_new_slice_range(struct Arena *a, SourceLoc loc, Node *base, Node *start, Node *end);
-Node *ast_new_sizeof(struct Arena *a, SourceLoc loc, Type *target);
-Node *ast_new_alignof(struct Arena *a, SourceLoc loc, Type *target);
+Node *ast_new_sizeof(struct Arena *a, SourceLoc loc, Node *target);
+Node *ast_new_alignof(struct Arena *a, SourceLoc loc, Node *target);
 Node *ast_new_addr_of(struct Arena *a, SourceLoc loc, Node *expr);
 Node *ast_new_deref(struct Arena *a, SourceLoc loc, Node *expr);
 Node *ast_new_block(struct Arena *a, SourceLoc loc, Node **stmts, size_t nstmts);
