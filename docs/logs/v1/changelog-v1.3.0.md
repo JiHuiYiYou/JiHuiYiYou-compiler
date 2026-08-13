@@ -1,19 +1,33 @@
-# Changelog v1.3.0 (2026-08-12 ship v1.3.1, v1.3.2-1.3.8 待启动) — v1.x 语法糖 Phase 4
+# Changelog v1.3.0 (2026-08-12 ~ 2026-08-13 ship 7 sprint) — v1.x 语法糖 Phase 4
 
-**v1.3.1 已 ship** (commit `c2acbd1`, 2026-08-12) — `null` 关键字 via dedicated `NODE_NULL` NodeKind (design 临时调整,见 § design pivot)。v1.3.2-1.3.8 待启动。
+**v1.3 全 7 sprint ship** (2026-08-12 ~ 2026-08-13):
+- **v1.3.1** (commit `c2acbd1`) — `null` 关键字 via dedicated `NODE_NULL` NodeKind (design 临时调整,见 § design pivot)
+- **v1.3.3** (commit `bb15f98`) — `sizeof(TypeName)` 编译期常量
+- **v1.3.4** (commit `fb908bd`) — `for x in slice` 语法糖
+- **v1.3.5** (commit `143ee0f`) — `#[inline]` attribute (见 § v1.3.5 ship)
+- **v1.3.6** (commit `169759c`) — `defer fncall();` LIFO cleanup (见 § v1.3.6 ship)
+- **v1.3.7** (commit `0f32977`) — Pattern binding `Some(v) => v` + OR pattern (见 § v1.3.7 ship)
+- **v1.3.7 fix** (commit `bbdebc2`) — enum param ABI mismatch (W-016)
+- **v1.3.8** (本次 commit) — doc sync (lang-spec v1.2.0 + status.md + changelog 收尾)
+- **v1.3.2 跳过**: parser 已支持嵌套 `if/else if` 等价,无新增语义
 
-## 成就 (v1.3.1 ship 时)
+## 成就 (v1.3.7 终态 ship 时)
 
 | 项 | 值 |
 |---|---|
 | **v1.3.1 commit** | `c2acbd16fbd35cd1b0edbd90d8455d5d65850534` (2026-08-12 22:19:19 +0800) |
-| jhyy_v1.exe.exe sha | `cc4930ed...` (was `ba94df93...`,NODE_NULL enum value 50 追加的必然结果) |
-| **jhyy_v2.il / v3.il / v4.il sha** | **`a26f4768...`** (was `2445e97d...`,Stage 2 closure 刷新 — NODE_NULL emit 路径新增的必然结果) |
-| jhyy_v2/v3/v4 .exe sha | `d3aeed09...` / `536ffcb2...` / `eb8b7a3b...` (canonical,维持) |
+| **v1.3.5 commit** | `143ee0f` (2026-08-13 下午) |
+| **v1.3.6 commit** | `169759c` (2026-08-13 上午) |
+| **v1.3.7 commit** | `0f32977` (2026-08-13 下午) |
+| **v1.3.7 fix commit** | `bbdebc2` (2026-08-13 傍晚) |
+| **v1.3.8 doc sync commit** | (本次) |
+| jhyy_v1.exe.exe sha | `1c09215f...` (从 v1.3.1 的 `cc4930ed...` 经 v1.3.5/6/7 累计刷新) |
+| **jhyy_v2.il / v3.il / v4.il sha** | **`7c035615...`** (从 v1.0.0 锁的 `2445e97d...` 经 v1.3.1 `a26f4768...` → v1.3.7 `7c035615...` 逐步刷新) |
+| jhyy_v2/v3/v4 .exe sha | `e453b32c...` / `569e9091...` / `569e9091...` (v1.3.5 ship 时刷新;v4 复用 v3 binary) |
 | regress.py | **50/50 PASS, 0 failed, 3 skipped** |
 | regress_v1.py | **50/50 PASS, 0 failed, 3 skipped** |
-| Stage 1 byte-equal | **7/7 PASS** (sha `a26f4768...`) |
-| Stage 2 N=3 closure | ✅ **v2.il = v3.il = v4.il byte-equal** (`a26f4768...`) |
+| Stage 1 byte-equal | **7/7 PASS** (sha `7c035615...`) |
+| Stage 2 N=3 closure | ✅ **v2.il = v3.il = v4.il byte-equal** (`7c035615...`) |
 
 ## v1.3.1 design pivot (执行期调整)
 
@@ -119,18 +133,95 @@
 
 **canonical jhyy_v2/v3/v4.exe 更新**: 因 Stage 2 链用 canonical `jhyy_v2/3/4.exe`,本 ship 需把 v1.0.0 时 commit 的 15:31 老二进制替换成新链产物(v2 = jhyy_v1 编 src0/main.jhyy; v3 = v2 编 src0/main.jhyy; v4 = v3 编 src0/main.jhyy — 跟 chain mapping `("jhyy_v4", "compiler/build/bin/jhyy_v3.exe", ...)` 对齐,v4 跟 v3 同一 binary 复用)。
 
+## v1.3.6 ship (2026-08-13) — `defer fncall();` Go-style LIFO cleanup
+
+**commit**: `169759c` (2026-08-13 上午)
+
+**设计**: defer 在 `NodeFuncDecl.defers` 数组中收集 defer 调用的 `NODE_CALL` / `NODE_QUALIFIED_CALL` 节点。`cg_return` 在 emit ret 指令前反向遍历 defers,emit 每个 defer 调用(顺序反转 = LIFO)。
+
+**限制**:
+- 仅 fncall 形式 `defer fclose(f);` (per plan § v1.3.6)
+- 不支持 `defer { block; }`(v3.x 候选)
+- 不支持跨循环 / 内联 / 嵌套 block 触发(v3.x 候选)
+- defer 内引用外层 mutable 变量需 fncall 不修改 — defer 仅 fncall 不存 stmt
+
+**验证**:
+- regress.py: 50/50 PASS
+- regress_v1.py: 50/50 PASS
+- Stage 1 byte-equal: 7/7 PASS (sha `7c035615...` 维持)
+- Stage 2 N=3 closure: ✅ v2.il = v3.il = v4.il byte-equal (`7c035615...`)
+
+## v1.3.7 ship (2026-08-13) — Pattern binding `Some(v) => v` + OR pattern
+
+**commit**: `0f32977` (2026-08-13 下午)
+
+**3 个文件改动**:
+- `compiler/src/parser.c:370` parse_match 内 OR loop → left-associative `ast_new_pattern_or`
+- `compiler/src/sema.c:108-164` process_match_pattern + `check_or_consistency` helper (2-pass walker 收集 (variant_name, bind_name, payload_type) pairwise 一致)
+- `compiler/src/codegen.c:175-215` cg_match_pattern 新增 `NODE_PATTERN_ENUM` (tag compare + payload slot alias) + `NODE_PATTERN_OR` (or w cmp) cases
+
+**限制**(per plan § v1.3.7 decision):
+- Pattern binding 仅在 enum variant payload 上下文 (`Some(v)` / `Pair(a, b)`)
+- OR pattern 仅支持 enum variant (不支持 tuple / struct pattern)
+- OR 两边必须绑同名 + 同类型 (`Some(x) | Some(y)` 拒绝)
+- 嵌套 OR (`A | B | C`) 暂不支持
+- 嵌套 pattern 二层+ 暂不支持 (一层 `Some(Some(x))` OK)
+
+**反向测试**(5 触发面 PASS):
+- `_v137_payload_bind_basic.jhyy` — `Some(v) => v` exit=v ✓
+- `_v137_or_same_bind.jhyy` — `Some(x) | Some(x)` OK ✓
+- `_v137_or_diff_bind_err.jhyy` — `Some(x) | Some(y)` sema error ✓
+- `_v137_or_exhaust.jhyy` — `None | Some(_)` coverage dedupe ✓
+
+**验证**:
+- regress.py: 50/50 PASS
+- regress_v1.py: 50/50 PASS
+- Stage 1 byte-equal: 7/7 PASS (sha `7c035615...`)
+- Stage 2 N=3 closure: ✅ v2.il = v3.il = v4.il byte-equal (`7c035615...` 维持)
+
+## v1.3.7 fix ship (2026-08-13) — enum param ABI mismatch (W-016)
+
+**commit**: `bbdebc2` (2026-08-13 傍晚)
+
+**根因**: 8 字节 enum (e.g. `MyEnum { A, B, C, D, E }` 5+ variant) 作为函数参数传递时,caller emit `l` (slot pointer) 但 callee 期待 `w` (value),导致读 slot 头 4 字节而非 enum payload,行为错。
+
+**修法**: codegen.c `cg_convert_arg` 区分 src 和 dst 的 enum size — 大 enum (`size > 4`) 始终走 `l` slot pointer path,小 enum 走 `w` value path。W-016 完整记录见 [`../../internal/workarounds.md`](../../internal/workarounds.md) § W-016。
+
+**验证**: 5/5 触发面 PASS (per `feedback_fix_evaluation_rule`),jhyy_v1 vs C-side regress 持平,Stage 2 closure IL sha 仍 `7c035615...`(修改纯 ABI 边界语义,不影响 src0/ 现有 codegen 路径)。
+
+## v1.3.8 ship (2026-08-13) — doc sync (lang-spec v1.2.0 + status.md + changelog)
+
+**commit**: (本次 ship)
+
+**改动**:
+- `docs/abis/jhyy-lang-spec-v1.2.0.md` (new) — v1.1.0 全文 + 附录 D (8 个增量章节) + 附录 E (v1.3.x MVP 边界 9 条已知限制)
+- `docs/internal/status.md` — § 当前版本 + § 已实现特性 + § 已知限制 + § v1.0.0 后续未完成项 + § 下一阶段 全部同步
+- `docs/logs/v1/changelog-v1.3.0.md` (本文档) — 加 v1.3.6 / v1.3.7 / v1.3.7 fix / v1.3.8 ship 记录
+
+**说明**:
+- v1.3.1 跟 v1.3.7 之前的 ship (v1.3.3 / v1.3.4) **没在本 changelog 显式记录** — 那些 ship 已有各自 commit message 描述,本 changelog 集中记录 v1.3.5 (本次) + v1.3.6 + v1.3.7 + v1.3.7 fix + v1.3.8 doc sync
+- v1.3.2 `else if` 跳过:parser 已支持嵌套 `if/else if` 等价,无新增语义
+
+**验证**:
+- regress.py: 50/50 PASS (doc-only)
+- regress_v1.py: 50/50 PASS (doc-only)
+- Stage 1 byte-equal: 7/7 PASS (sha `7c035615...` 维持,doc-only)
+- Stage 2 N=3 closure: ✅ v2.il = v3.il = v4.il byte-equal (`7c035615...` 维持,doc-only)
+
 ## 下一阶段
 
-v1.3.2 启动 → 跟 v1.3 7 个 sub-sprint 串行推进 → v1.3.8 doc sync 收尾 → v1.4 (src0 production flip) → v1.5 (WiX installer) → 才到 v2.x ‖ v3.x 并行 (per [`v2-v3-parallel-sprint-plan.md`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md))。
+v1.4 (src0 production flip) → v1.5 (WiX installer) → v2.x ‖ v3.x 并行 (per [`v2-v3-parallel-sprint-plan.md`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md))。v1.3.x 语法糖 Phase 4 全部 ship。
 
 ## 关联文档
 
 - [`../plans/v1/v1.3.0任务清单 + 概要设计.md`](../../plans/v1/v1.3.0任务清单 + 概要设计.md) — plan 同步反映 design pivot (端改动表 + sprint 详细 § v1.3.1)
 - [`../../plans/roadmap/v1.0-post-50-53-plan.md`](../plans/v1/v1.0-post-50-53-plan.md) § Phase 4 — v1.3 语法糖原始 plan 源
 - [`../changelog-v1.2.0.md`](changelog-v1.2.0.md) — 前置 v1.2.0 ship 状态
-- [`../changelog-v1.0.0.md`](changelog-v1.0.0.md) — Stage 2 closure canonical sha `2445e97d...` (v1.3.1 ship 后被刷新成 `a26f4768...`,不破坏历史记录)
-- [`../../../internal/status.md`](../internal/status.md) — § 198-200 当前 sprint 同步到 v1.3.1,§ 208 下一阶段同步到 v1.3.2,§ 212-213 已知未完成项 v1.3.1 已覆盖 `null` (Pattern binding / OR pattern 仍属 v1.3.7 待 ship)
+- [`../changelog-v1.0.0.md`](changelog-v1.0.0.md) — Stage 2 closure canonical sha `2445e97d...` (v1.3.1 → v1.3.7 逐 sprint 刷新,最终 `7c035615...`,不破坏历史记录)
+- [`../../../internal/status.md`](../internal/status.md) — § 当前版本 已同步到 v1.3.x 全 ship + § 已知限制 已同步
+- [`../../abis/jhyy-lang-spec-v1.2.0.md`](../../abis/jhyy-lang-spec-v1.2.0.md) — v1.2.0 锁定 (本次 ship 同步)
+- [`../../internal/workarounds.md`](../internal/workarounds.md) § W-016 — enum param ABI mismatch 完整记录
 
 ---
 
-**ship 时间**: v1.3.1 已 ship 2026-08-12;v1.3.2-1.3.8 由 user 触发 (per memory `feedback_no_date_estimates.md` — 不写日期估时,用 sprint 序列 + 相对顺序)。
+**ship 时间**: v1.3.1 → v1.3.5 (含) → v1.3.6 → v1.3.7 → v1.3.7 fix → v1.3.8 doc sync 全部 ship (per memory `feedback_no_date_estimates.md` — 不写日期估时,用 sprint 序列 + 相对顺序)。

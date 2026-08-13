@@ -2,11 +2,13 @@
 
 > 语言特性 / 已知限制 / 历史修复。版本进展详见 `docs/logs/`。
 
-## 当前版本: v1.0.0 tagged (commit `eabee0d`, 2026-08-10)
+## 当前版本: v1.0.0 tagged (commit `eabee0d`, 2026-08-10) + v1.3.x 语法糖 Phase 4 ship (2026-08-12 ~ 2026-08-13)
 
-> **v1.0.0** — Stage 2 N=3 byte-equal 闭环达成。`jhyy_v1 → jhyy_v2 → jhyy_v3 → jhyy_v4` 编译自身,产出 4 份 sha 完全一致的 raw `.il` 文件 (sha `2445e97d...`, 1.378 MB, 无 fix-up 后处理)。
+> **v1.0.0** — Stage 2 N=3 byte-equal 闭环达成。`jhyy_v1 → jhyy_v2 → jhyy_v3 → jhyy_v4` 编译自身,产出 4 份 sha 完全一致的 raw `.il` 文件 (sha `2445e97d...` → **v1.3.1 ship 刷新成 `a26f4768...`** → **v1.3.7 ship 刷新成 `7c035615...`**)。
 >
-> 详尽 ship 记录见 [`docs/logs/v1/changelog-v1.0.0.md`](../logs/v1/changelog-v1.0.0.md)。本文件专注当前功能状态 + 已知限制 + 历史修复索引。
+> **v1.3.x 语法糖 Phase 4**（v1.0.0 后续未完成项,2026-08-12 ~ 2026-08-13 ship 6 sprint）:null literal / sizeof / for-in / `#[inline]` / defer / Pattern binding + OR pattern。**v1.3.2 (`else if` sugar) 跳过** — parser 已支持嵌套 `if/else if`,等价格式。**v1.3.7 fix (W-016)** — enum param ABI mismatch 真修,Stage 2 closure IL sha 刷新到 `7c035615...`。
+>
+> 详尽 ship 记录见 [`docs/logs/v1/changelog-v1.0.0.md`](../logs/v1/changelog-v1.0.0.md) + [`docs/logs/v1/changelog-v1.3.0.md`](../logs/v1/changelog-v1.3.0.md) (本次 v1.3.8 doc sync 收尾)。本文件专注当前功能状态 + 已知限制 + 历史修复索引。
 >
 > v0.9 wip 阶段（commit 2.1-2.83）作为 v0.x 收尾主线，主要里程碑：
 > - **v0.9 commit 1** (ce93f64) — 29-extsw hypothesis 验证
@@ -19,11 +21,11 @@
 >
 > v0.8 wip commit 12 是 v0.9 前一版（12 commits → Stage 0 closure 解锁）。v0.7.0 是更前版（7A enum first-class + 7B 顶层 const 数组）。
 
-回归基线 (v1.0.0 锁定)：
+回归基线 (v1.0.0 + v1.3.x 锁定)：
 - **jhyy_0 (C 编译) regress.py**: **50/53 passed, 0 failed, 3 skipped**（3 skipped 是库文件，无 `main_jhyy`）
 - **jhyy_v1 (自举) regress_v1.py**: **50/53 passed, 0 failed, 3 skipped**（与 C 端 baseline 持平）
 - **Stage 1 byte-equal**: **7/7 PASS**（jhyy_0 vs jhyy_v1 对 7 测试集产出 byte-equal `.il`）
-- **Stage 2 N=3 byte-equal**: ✅ **sha `2445e97d...` 4-hop 稳定**（jhyy_v1/v2/v3/v4 四份 raw `.il` 字节相同, fixed point 是 attractor）
+- **Stage 2 N=3 byte-equal**: ✅ **sha `7c035615...` 4-hop 稳定**（jhyy_v1/v2/v3/v4 四份 raw `.il` 字节相同, fixed point 是 attractor;从 v1.0.0 锁的 `2445e97d...` 经 v1.3.1 → v1.3.7 逐步刷新,详见 changelog-v1.3.0.md）
 
 ---
 
@@ -69,6 +71,14 @@
 | **v1.0.0 真自举 byte-equal 闭环** | **完成 (2026-08-10 commit `eabee0d`)** |
 | 控制台输出 (中文 UTF-8 + 数字 printf) | 完成 |
 | Arena allocator (via FFI) | 完成 |
+| `null` 关键字 (typed pointer 上下文 literal) | 完成 (v1.3.1 commit `c2acbd1`) |
+| `else if` 语法糖 | 完成 (v1.3.2 计划;**实际未 ship**,`if/else` 表达式已支持嵌套写法) |
+| `sizeof(TypeName)` 编译期常量 | 完成 (v1.3.3 commit `bb15f98`) |
+| `for x in slice` 语法糖 | 完成 (v1.3.4 commit `fb908bd`) |
+| `#[inline]` attribute (call-site 展开) | 完成 (v1.3.5 commit `143ee0f`) |
+| `defer` 语句 (Go-style LIFO cleanup) | 完成 (v1.3.6 commit `169759c`) |
+| Pattern binding (`Some(v) => v` 提取 payload) | 完成 (v1.3.7 commit `0f32977`) |
+| OR pattern (`Some(x) \| Some(x)` 一致性检查) | 完成 (v1.3.7 commit `0f32977`) |
 
 ---
 
@@ -82,7 +92,8 @@
 | **P3** | 缺失 | 变参函数 (`printf` 的 `...`) 在 JHYY 侧需展开 |
 | **P3** | 缺失 | 函数回调 (v1.x 考虑) |
 | **P3** | 缺失 | Windows 下 `jhyy run` 子命令 `system()` 路径有 bug (P1) |
-| **P3** | 缺失 | Pattern binding codegen（`Some(v) => v` 提取 payload）—— 7A 仅 sema 层注册 binding，codegen 用 `_` 通配符规避 |
+| ~~**P3**~~ | ~~缺失~~ | ~~Pattern binding codegen（`Some(v) => v` 提取 payload）—— 7A 仅 sema 层注册 binding，codegen 用 `_` 通配符规避~~ | **v1.3.7 已 ship** (commit `0f32977`) |
+| ~~**P3**~~ | ~~缺失~~ | ~~OR pattern 一致性检查（`Some(x) \| Some(y)` 两边必须绑同名）~~ | **v1.3.7 已 ship** (commit `0f32977`) |
 | **P3** | 缺失 | 嵌套 const array（`[[i32; N]; M]`）、const pointer / const slice / const enum array —— sema 拒绝 |
 | **P2** | 后端 bug | **jhyy 编译器 amd64_win 后端 stack-spill**（sprint 3 commit 5/6 实测）：`infer_type → IDENT → symtab_lookup_local → symtab_lookup_one` 在特定调用栈深度 + 大结构传参下崩溃。临时 workaround 在 `compiler/src0/symtab.jhyy:255-258`（`sb_init` 触发 arena_alloc 改变栈帧大小）。完整记录见 `docs/plans/v1/v1.0.0详细实现方案.md` § 3.6 和 `docs/logs/v1/sprint-3-commit-6-sema-cleanup.md`。修复路径：v2.x QBE rewrite |
 
@@ -207,17 +218,22 @@ abi § 11.1 五个阻塞自举问题（A1-A5）中，A1/A2/A4 已 ✓。**A3 / A
 
 **v0.9 wip**（commit 2.83 ship, 2026-08-11）：v0.x 收尾主线 — Stage 1 byte-equal **7/7** + Stage 2 N=3 byte-equal 闭环 (sha `2445e97d...`,**v1.3.1 ship 后刷新成 `a26f4768...`**) + 2 个 audit 全 PASS (AUDIT 修 VariantDesc heap overflow / C' 验证 5 维度 by-construction deterministic)。详细进度见 [`docs/logs/v0/changelog-v0.9.0.md`](../logs/v0/changelog-v0.9.0.md)。
 
-下一阶段：**v1.3.2** (`else if` 语法糖, 0.5 sprint, 极低风险 — 纯 parser sugar) → v1.3.3 sizeof → v1.3.4 for-in → v1.3.5 `#[inline]` → v1.3.6 defer → v1.3.7 Pattern binding + OR pattern → v1.3.8 doc sync (lang-spec v1.2.0 + changelog) — **v1.3 全 ship 后**启动 **v1.4** (src0 production flip) → **v1.5** (WiX installer) → 才到 **v2.x** (QBE 完整重写 + amd64_sysv / freestanding) || **v3.x** (inline asm / `no_std` / `&mut` lifetime) 并行 (OS 准备) → [`docs/plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-os-prep.md) + [`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md`](../plans/roadmap/v2-v3-parallel-sprint-plan.md)。OS 端等编译器推进 (per `memory/project_os_wait_state.md`,v1.0 闭环达成前不主动 prep OS)。
+下一阶段：**v1.3 全 6 sprint 已 ship**（v1.3.1 null / v1.3.3 sizeof / v1.3.4 for-in / v1.3.5 inline / v1.3.6 defer / v1.3.7 pattern binding + OR pattern;v1.3.2 `else if` 跳过 — parser 已支持嵌套 `if/else if` 写法等价）。**v1.3.8 doc sync** (本 sprint) 收尾后 → 启动 **v1.4** (src0 production flip) → **v1.5** (WiX installer) → 才到 **v2.x** (QBE 完整重写 + amd64_sysv / freestanding) || **v3.x** (inline asm / `no_std` / `&mut` lifetime) 并行 (OS 准备) → [`docs/plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-os-prep.md) + [`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md`](../plans/roadmap/v2-v3-parallel-sprint-plan.md)。OS 端等编译器推进 (per `memory/project_os_wait_state.md`,v1.0 闭环达成前不主动 prep OS)。
 
 已知 v1.0.0 后续未完成项（明确延后，非 blocker）：
 - Stage 1 byte-equal 6/7 → 7/7（const_array 因 parser 翻译层缺 NODE_CONST_DECL 推迟；v1.x post-50-53 plan 处理）
-- Pattern binding codegen（`Some(v) => v` 提取 payload）—— **v1.3.7 处理**
-- OR pattern 一致性检查（`Some(x) | Some(y)` 两边必须绑同名）—— **v1.3.7 处理**
+- ~~Pattern binding codegen（`Some(v) => v` 提取 payload）~~ — **v1.3.7 已 ship** (commit `0f32977`)
+- ~~OR pattern 一致性检查（`Some(x) | Some(y)` 两边必须绑同名）~~ — **v1.3.7 已 ship** (commit `0f32977`)
 - 嵌套 const array（`[[i32; N]; M]`）—— 自举需要时再开
 - const pointer / const slice / const enum array —— 需要 RTTI
 - const fn / 编译期函数求值 —— 大特性，单独 sprint
 - v0 codegen bug 1/2/3/4（LEA / phi / loadub / &local）—— v1.1.0 已 ship 真修 (Bug 1-4 wip commits 1.5-1.8);不再 blocker
 - ~~`null` 关键字 (sugar for `0 as *u8`)~~ — **v1.3.1 已 ship** (commit `c2acbd1`, NODE_NULL NodeKind + 4 context-fill rules)
+- ~~`sizeof(TypeName)` 编译期常量~~ — **v1.3.3 已 ship** (commit `bb15f98`)
+- ~~`for x in slice` 语法糖~~ — **v1.3.4 已 ship** (commit `fb908bd`)
+- ~~`#[inline]` attribute (call-site 展开)~~ — **v1.3.5 已 ship** (commit `143ee0f`)
+- ~~`defer` 语句 (Go-style LIFO cleanup)~~ — **v1.3.6 已 ship** (commit `169759c`)
+- ~~enum param ABI mismatch (W-016) 真修~~ — **v1.3.7 fix 已 ship** (commit `bbdebc2`)
 
 ---
 
