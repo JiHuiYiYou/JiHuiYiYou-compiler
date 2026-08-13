@@ -84,10 +84,40 @@
 - v1.3.2 `else if` 语法糖 — 纯 parser sugar,0 风险
 - v1.3.3 `sizeof(TypeName)` 内建函数 — sema const-fold
 - v1.3.4 `for x in slice` — sema desugar 到 index loop
-- v1.3.5 `#[inline]` attribute — codegen callsite inline
+- v1.3.5 `#[inline]` attribute — codegen callsite inline **(shipped 2026-08-13, see below)**
 - v1.3.6 `defer` 语句 — codegen LIFO emit
 - v1.3.7 Pattern binding + OR pattern — sema + codegen
 - v1.3.8 doc sync — lang-spec v1.2.0 + status.md + changelog
+
+## v1.3.5 ship (2026-08-13) — `#[inline]` attribute
+
+**v1.3.5 在 v1.3.0 计划列出但 2026-08-12 跳过**,当日 follow-up 补回。MVP 设计:
+
+- lexer: 新 `TOKEN_HASH` (=71) + char 35 (`#`) 单字符 token emit
+- parser: `parse_attributes(p: *Parser) -> i32` helper,识别 `#[inline]`(忽略未知 attr)
+- ast: `NodeFuncDecl` 加 `is_inline: i32` 字段(共享 8-byte slot with `is_extern`,struct 仍 64B)
+- codegen: `cg_module` Pass A 收集 `is_inline=1` 的 fn decl → `inline_fns[]` 表;`cg_expr` NODE_CALL / NODE_QUALIFIED_CALL 在 call site 查表,若 body 是单条 `return <expr>;` 且非递归(struct return / sret 跳过) → 现场展开 args + params + body,恢复 caller state
+
+**递归守卫**: `cg->current_inline_sym` 在 `cg_func` 入口设成 `fd->sym`(非 NULL),inline 展开时再次设成被展开 fn 的 sym;`current_inline_sym == fn_sym` 时 fall back 到 `call $fn`,避免无限 inline 展开。
+
+**最小可用 (MVP)**: 仅展开单条 `return <expr>;` 的 body;if/else / 循环 / 多 stmt / struct 返回 都 fall back 到 `call $name`(per CLAUDE.md workarounds 规则记录到 `docs/internal/workarounds.md`)。
+
+**5/5 触发面 PASS** (per `feedback_fix_evaluation_rule`):
+- `_v135_inline_basic.jhyy` — `#[inline] fn dbl(x) { return x*2; }`,exit=42
+- `_v135_inline_nested.jhyy` — `dbl(dbl(5))`,exit=20
+- `_v135_inline_chain.jhyy` — `inc(inc(inc(10)))`,exit=13
+- `_v135_inline_recursive_fallback.jhyy` — `fact(n)` 含 if/else,fall back 到 `call`,exit=120
+- `_v135_inline_simple_recursive.jhyy` — 简单 body 但递归,recursion guard 走 fallback
+
+**src0/ 试用**: `compiler/src0/util.jhyy:181` `#[inline] fn HASH_ENTRY_SIZE()` — 真实使用场景。
+
+**验证 (per closure chain)**:
+- regress.py: 50/50 PASS
+- regress_v1.py: 50/50 PASS
+- Stage 1 byte-equal: 7/7 PASS (sha `7c035615...`)
+- Stage 2 N=3 closure: ✅ v2.il = v3.il = v4.il byte-equal (`7c035615...`)
+
+**canonical jhyy_v2/v3/v4.exe 更新**: 因 Stage 2 链用 canonical `jhyy_v2/3/4.exe`,本 ship 需把 v1.0.0 时 commit 的 15:31 老二进制替换成新链产物(v2 = jhyy_v1 编 src0/main.jhyy; v3 = v2 编 src0/main.jhyy; v4 = v3 编 src0/main.jhyy — 跟 chain mapping `("jhyy_v4", "compiler/build/bin/jhyy_v3.exe", ...)` 对齐,v4 跟 v3 同一 binary 复用)。
 
 ## 下一阶段
 

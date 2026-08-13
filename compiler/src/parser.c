@@ -465,7 +465,30 @@ static Node *parse_stmt(Parser *p) {
    DECLARATION PARSING
    ══════════════════════════════════════════════ */
 
+/* v1.3.5: parse leading `#[...]` attributes before a function decl.
+   Returns is_inline flag (currently only #[inline] is recognized).
+   Caller invokes this only when current token is `#[` or `fn` — we use
+   TOKEN_HASH as the discriminator. */
+static bool parse_attributes(Parser *p) {
+    bool is_inline = false;
+    while (check(p, TOKEN_HASH)) {
+        advance(p); /* consume '#' */
+        expect(p, TOKEN_LBRACKET, "[ after #");
+        Token attr = expect(p, TOKEN_IDENT, "attribute name");
+        const char *aname = tok_name(p, attr);
+        if (strcmp(aname, "inline") == 0) {
+            is_inline = true;
+        } else {
+            /* unknown attribute: parse but ignore (forward-compatible) */
+        }
+        expect(p, TOKEN_RBRACKET, "] after attribute");
+    }
+    return is_inline;
+}
+
 static Node *parse_func(Parser *p, bool is_extern) {
+    /* v1.3.5: #[inline] may appear before `fn`. Capture before consuming fn. */
+    bool is_inline = parse_attributes(p);
     SourceLoc loc = peek(p).loc;
     advance(p); /* consume 'fn' */
 
@@ -522,7 +545,7 @@ static Node *parse_func(Parser *p, bool is_extern) {
 
     pop_scope(p);
 
-    return ast_new_func_decl(p->arena, loc, sym, params, nparams, ret_type, body, is_extern);
+    return ast_new_func_decl(p->arena, loc, sym, params, nparams, ret_type, body, is_extern, is_inline);
 }
 
 static Node *parse_type_decl(Parser *p) {
@@ -676,6 +699,8 @@ static Node *parse_decl(Parser *p) {
     if (check(p, TOKEN_EXTERN)) return parse_extern_decl(p);
     if (check(p, TOKEN_IMPORT)) return parse_import_decl(p);
     if (check(p, TOKEN_CONST))  return parse_const_decl(p);
+    /* v1.3.5: #[attr] before fn — recurse to parse_func which calls parse_attributes */
+    if (check(p, TOKEN_HASH))   return parse_func(p, false);
     /* unknown at top level: try as statement */
     return parse_stmt(p);
 }

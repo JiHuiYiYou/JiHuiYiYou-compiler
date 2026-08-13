@@ -156,14 +156,22 @@ type CGContext = struct {
     loop_ends:        *u8,        // *IRVal[32]
     loop_continues:   *u8,        // *IRVal[32]
     current_fn:       *u8,        // *NodeFuncDecl (v1.3.6: for cg_emit_defers on ret)
+    // v1.3.5: #[inline] attribute. inline_fns/n_inline_fns 是 cg_module pass A
+    //   构建的 #[inline] fn decl 数组。call site 检查 inline_fns 决定是否 in-place
+    //   展开 fn body 而不是 emit `call $fn`。current_inline_sym 用于递归守卫:
+    //   检测 "正在 emit 自己的 body" 时回退到 call 防无限 inline 展开.
+    inline_fns:       *u8,        // *NodeFuncDecl 数组 (arena_alloc)
+    n_inline_fns:     i64,
+    current_inline_sym: *u8,     // *Sym
 }
 
-// CGContext size (after sret_slot → sret_slot_id i64 workaround + v1.3.6 current_fn):
-//   6*i64 (ir, locals, nlocals_pad, current_ret_type, sret_slot_id, current_fn) = 48 +
+// CGContext size (v1.3.5: + 3*i64 for inline_fns / n_inline_fns / current_inline_sym):
+//   9*i64 (ir, locals, nlocals_pad, current_ret_type, sret_slot_id, current_fn,
+//          inline_fns, n_inline_fns, current_inline_sym) = 72 +
 //   has_sret(i32) + loop_depth(i32) = 8 +
 //   3*i64 (loop_starts, loop_ends, loop_continues) = 24
-//   = 80 (was 72 before v1.3.6)
-fn CGCONTEXT_SIZE() -> i64 { return 80 as i64; }
+//   = 104 (was 80 before v1.3.5)
+fn CGCONTEXT_SIZE() -> i64 { return 104 as i64; }
 
 // ════════════════════════════════════════════════════
 // cg_add_local / cg_find_local
@@ -261,6 +269,57 @@ fn cg_find_local(cg_raw: *u8, sym: *u8, out_buf: *u8) -> i32 {
     let zq = ptr_add_u8(out_buf, 24 as i64) as *i32;
     *zq = 0;
     return 0;
+}
+
+// ════════════════════════════════════════════════════
+// v1.3.5: #[inline] call-site expansion helpers
+// ════════════════════════════════════════════════════
+
+// cg_find_inline_decl: 查 inline_fns 表，找 sym 对应的 NodeFuncDecl。找不到返回 0。
+fn cg_find_inline_decl(cg_raw: *u8, fn_sym: *u8) -> *u8 {
+    let cg = cg_raw as *CGContext;
+    if (*cg).inline_fns == (0 as *u8) {
+        return 0 as *u8;
+    }
+    if fn_sym == (0 as *u8) {
+        return 0 as *u8;
+    }
+    let mut i: i64 = 0 as i64;
+    while i < (*cg).n_inline_fns {
+        let fd_ptr = ptr_add_u8((*cg).inline_fns, i * NODE_FUNC_DECL_SIZE() as i64);
+        let fd = fd_ptr as *NodeFuncDecl;
+        if (*fd).sym == fn_sym {
+            return fd_ptr;
+        }
+        i = i + (1 as i64);
+    }
+    return 0 as *u8;
+}
+
+// cg_inline_simple_return_expr: 仅支持 body 是单条 `return <expr>;` 的 fn。
+// 返回 return expr node (or 0 if 不符合).
+// NodeBlock layout: nstmts(i64 0) + stmts(*u8 8) = 16
+//   stmts 是 *Node 数组
+fn cg_inline_simple_return_expr(body: *Node) -> *Node {
+    if body == (0 as *Node) {
+        return 0 as *Node;
+    }
+    if (*body).kind != NODE_BLOCK() {
+        return 0 as *Node;
+    }
+    let nstmts_field = body as *i64;
+    let nstmts = *nstmts_field;
+    if nstmts != (1 as i64) {
+        return 0 as *Node;
+    }
+    let stmts_ptr = ptr_add_u8(body as *u8, 8 as i64) as *u8;
+    let stmt = (*((stmts_ptr as i64) as **Node)) as *Node;
+    if (*stmt).kind != NODE_RETURN() {
+        return 0 as *Node;
+    }
+    let expr_field = stmt as *u8;
+    let expr = *((expr_field as i64) as **u8) as *Node;
+    return expr;
 }
 
 // cg_find_local 带 is_stack out 参数（C 端用 int*；jhyy 不支持 output 参数，
@@ -1883,6 +1942,72 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             }
         }
 
+        // v1.3.5: #[inline] call-site expansion. Try inline first; fall back to
+        //   `call $name` if body 不简单或递归。
+        let inline_decl_raw = cg_find_inline_decl(cg_raw, fn_sym_raw);
+        let mut inline_decl: *u8 = 0 as *u8;
+        if inline_decl_raw != (0 as *u8) {
+            inline_decl = inline_decl_raw;
+        }
+        let mut simple_expr: *Node = 0 as *Node;
+        if inline_decl != (0 as *u8) {
+            let inline_decl_t = inline_decl as *NodeFuncDecl;
+            simple_expr = cg_inline_simple_return_expr((*inline_decl_t).body as *Node);
+        }
+        let mut try_inline: i32 = 0 as i32;
+        if inline_decl != (0 as *u8) {
+            if (*cg).current_inline_sym != fn_sym_raw {
+                if (*n).type_ptr != (0 as *u8) {
+                    let nt2 = (*n).type_ptr as *Type;
+                    if (*nt2).kind != KIND_STRUCT() {
+                        if simple_expr != (0 as *Node) {
+                            try_inline = 1 as i32;
+                        }
+                    }
+                }
+            }
+        }
+        if try_inline != (0 as i32) {
+            let inline_decl_t = inline_decl as *NodeFuncDecl;
+            let ret_expr = simple_expr;
+            // 评估 args 到 buffer (cg_expr 直接, 不走 struct-copy / sret — locals 直接用值)
+            // v1.3.5 MVP: 仅 primitive args; struct arg 走 call fallback
+            let mut arg_vals_raw: *u8 = 0 as *u8;
+            if nargs > (0 as i64) {
+                arg_vals_raw = arena_alloc((*ir).arena, (nargs as i64) * IRVAL_SIZE());
+                let mut ai: i64 = 0 as i64;
+                while ai < nargs {
+                    let arg_slot_node2 = ptr_add_u8(args_node, ai * (8 as i64)) as **Node;
+                    let arg_node2 = *arg_slot_node2;
+                    let av = cg_expr(cg_raw, arg_node2);
+                    let out_slot = ptr_add_u8(arg_vals_raw, ai * IRVAL_SIZE()) as *IRVal;
+                    *out_slot = av;
+                    ai = ai + (1 as i64);
+                }
+            }
+            // 保存 caller state;把 params 注册为 locals with arg values
+            let saved_nlocals = (*cg).nlocals;
+            let saved_loop_depth = (*cg).loop_depth;
+            let prev_inline = (*cg).current_inline_sym;
+            (*cg).current_inline_sym = fn_sym_raw;
+            let mut pi2: i64 = 0 as i64;
+            while pi2 < (*inline_decl_t).nparams {
+                let param_slot3 = ptr_add_u8((*inline_decl_t).params, pi2 * NODE_FUNC_DECL_PARAM_SIZE()) as *NodeFuncDeclParam;
+                let p3_sym_raw = (*param_slot3).sym;
+                let av_slot = ptr_add_u8(arg_vals_raw, pi2 * IRVAL_SIZE()) as *IRVal;
+                let av_val = *av_slot;
+                cg_add_local(cg_raw, p3_sym_raw, av_val, 0);
+                pi2 = pi2 + (1 as i64);
+            }
+            // emit body return expr
+            let result = cg_expr(cg_raw, ret_expr);
+            // 恢复 caller state
+            (*cg).nlocals = saved_nlocals;
+            (*cg).loop_depth = saved_loop_depth;
+            (*cg).current_inline_sym = prev_inline;
+            return result;
+        }
+
         // args arena alloc（(nargs + extra) * IRVAL_SIZE）
         let mut extra: i32 = 0;
         if is_sret != 0 {
@@ -1996,6 +2121,67 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                     nparams = (*fst).nparams;
                 }
             }
+        }
+
+        // v1.3.5: #[inline] call-site expansion (qualified call). Try inline first;
+        //   fall back to `call $mod__$name` if 不简单或递归。
+        let inline_decl_raw2 = cg_find_inline_decl(cg_raw, fn_sym_raw);
+        let mut inline_decl2: *u8 = 0 as *u8;
+        if inline_decl_raw2 != (0 as *u8) {
+            inline_decl2 = inline_decl_raw2;
+        }
+        let mut simple_expr2: *Node = 0 as *Node;
+        if inline_decl2 != (0 as *u8) {
+            let inline_decl2_t = inline_decl2 as *NodeFuncDecl;
+            simple_expr2 = cg_inline_simple_return_expr((*inline_decl2_t).body as *Node);
+        }
+        let mut try_inline2: i32 = 0 as i32;
+        if inline_decl2 != (0 as *u8) {
+            if (*cg).current_inline_sym != fn_sym_raw {
+                if (*n).type_ptr != (0 as *u8) {
+                    let nt3 = (*n).type_ptr as *Type;
+                    if (*nt3).kind != KIND_STRUCT() {
+                        if simple_expr2 != (0 as *Node) {
+                            try_inline2 = 1 as i32;
+                        }
+                    }
+                }
+            }
+        }
+        if try_inline2 != (0 as i32) {
+            let inline_decl2_t = inline_decl2 as *NodeFuncDecl;
+            let ret_expr2 = simple_expr2;
+            let mut arg_vals_raw2: *u8 = 0 as *u8;
+            if nargs > (0 as i64) {
+                arg_vals_raw2 = arena_alloc((*ir).arena, (nargs as i64) * IRVAL_SIZE());
+                let mut ai2: i64 = 0 as i64;
+                while ai2 < nargs {
+                    let arg_slot_node3 = ptr_add_u8(args_node, ai2 * (8 as i64)) as **Node;
+                    let arg_node3 = *arg_slot_node3;
+                    let av2 = cg_expr(cg_raw, arg_node3);
+                    let out_slot2 = ptr_add_u8(arg_vals_raw2, ai2 * IRVAL_SIZE()) as *IRVal;
+                    *out_slot2 = av2;
+                    ai2 = ai2 + (1 as i64);
+                }
+            }
+            let saved_nlocals2 = (*cg).nlocals;
+            let saved_loop_depth2 = (*cg).loop_depth;
+            let prev_inline2 = (*cg).current_inline_sym;
+            (*cg).current_inline_sym = fn_sym_raw;
+            let mut pi3: i64 = 0 as i64;
+            while pi3 < (*inline_decl2_t).nparams {
+                let param_slot4 = ptr_add_u8((*inline_decl2_t).params, pi3 * NODE_FUNC_DECL_PARAM_SIZE()) as *NodeFuncDeclParam;
+                let p4_sym_raw = (*param_slot4).sym;
+                let av_slot2 = ptr_add_u8(arg_vals_raw2, pi3 * IRVAL_SIZE()) as *IRVal;
+                let av_val2 = *av_slot2;
+                cg_add_local(cg_raw, p4_sym_raw, av_val2, 0);
+                pi3 = pi3 + (1 as i64);
+            }
+            let result2 = cg_expr(cg_raw, ret_expr2);
+            (*cg).nlocals = saved_nlocals2;
+            (*cg).loop_depth = saved_loop_depth2;
+            (*cg).current_inline_sym = prev_inline2;
+            return result2;
         }
 
         let mut extra: i32 = 0;
@@ -2936,7 +3122,10 @@ fn cg_emit_const_data_elem(ir: *IRBuf, e: *Node, t: *Type, first_ptr: *u8) -> i3
 // 每个函数 arena_alloc 一组 loop label arrays（jhyy 不支持 fixed-size struct field）。
 // cg_body_returns 定义移到 cg_expr 之前（v1.0.0 sprint 5：NODE_IF 也用）
 
-fn cg_func(cg_raw: *u8, n: *Node) -> i32 {
+// cg_func — emit 一整个函数定义（含 header / locals / body / ret）
+// v1.3.5: 加 inline_fns + n_inline_fns 参数 — cg_module pass A 构建的 #[inline] fn 表;
+//   call site 用 cg_find_inline_decl 查表决定是否 in-place 展开 fn body。
+fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64) -> i32 {
     if n == (0 as *Node) { return 0; }
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
@@ -3034,6 +3223,12 @@ fn cg_func(cg_raw: *u8, n: *Node) -> i32 {
     (*cg).loop_depth = 0;
     (*cg).nlocals = 0;
     (*cg).current_fn = fd as *u8;  /* v1.3.6: cg_emit_defers reads fd->defers in cg_stmt NODE_RETURN */
+    // v1.3.5: #[inline] table + recursion guard. Set current_inline_sym to fd->sym
+    //   so calls to fd from within its own body fall back to `call $fn` instead of
+    //   recursing inline (would infinite-expand).
+    (*cg).inline_fns = inline_fns;
+    (*cg).n_inline_fns = n_inline_fns;
+    (*cg).current_inline_sym = fd_sym_raw;
 
     // arena alloc loop label arrays
     (*cg).loop_starts = arena_alloc((*ir).arena, 32 as i64 * IRVAL_SIZE());
@@ -3242,6 +3437,45 @@ fn cg_module(ir: *IRBuf, module: *Node) -> i32 {
         di_a = di_a + (1 as i64);
     }
 
+    // v1.3.5: build #[inline] fn table. Pass A pass — collect all
+    //   NODE_FUNC_DECL with is_inline=1. Used by cg_expr NODE_CALL / NODE_QUALIFIED_CALL.
+    let mut n_inline: i64 = 0 as i64;
+    let mut di_a2: i64 = 0 as i64;
+    while di_a2 < ndeccls {
+        let ds = ptr_add_u8((*md).decls, di_a2 * (8 as i64)) as **Node;
+        let dn = *ds;
+        if dn != (0 as *Node) {
+            if (*dn).kind == NODE_FUNC_DECL() {
+                let fd_p = node_func_decl_data(dn);
+                if (*fd_p).is_inline != (0 as i32) {
+                    n_inline = n_inline + (1 as i64);
+                }
+            }
+        }
+        di_a2 = di_a2 + (1 as i64);
+    }
+    let mut inline_fns_raw: *u8 = 0 as *u8;
+    if n_inline > (0 as i64) {
+        inline_fns_raw = arena_alloc((*ir).arena, n_inline * NODE_FUNC_DECL_SIZE() as i64);
+        let mut k: i64 = 0 as i64;
+        let mut di_a3: i64 = 0 as i64;
+        while di_a3 < ndeccls {
+            let ds2 = ptr_add_u8((*md).decls, di_a3 * (8 as i64)) as **Node;
+            let dn2 = *ds2;
+            if dn2 != (0 as *Node) {
+                if (*dn2).kind == NODE_FUNC_DECL() {
+                    let fd_p2 = node_func_decl_data(dn2);
+                    if (*fd_p2).is_inline != (0 as i32) {
+                        let slot = ptr_add_u8(inline_fns_raw, k * NODE_FUNC_DECL_SIZE() as i64) as *NodeFuncDecl;
+                        *slot = *fd_p2;
+                        k = k + (1 as i64);
+                    }
+                }
+            }
+            di_a3 = di_a3 + (1 as i64);
+        }
+    }
+
     // Pass B: 逐个 func decl dispatch → cg_func
     jh_fputs_stderr("[cg] Pass B start\n" as *u8);
     let mut di: i64 = 0 as i64;
@@ -3255,7 +3489,7 @@ fn cg_module(ir: *IRBuf, module: *Node) -> i32 {
         let d_node = *d_slot;
         if d_node == (0 as *Node) { di = di + (1 as i64); } else {
         if (*d_node).kind == NODE_FUNC_DECL() {
-            cg_func(cg_raw, d_node);
+            cg_func(cg_raw, d_node, inline_fns_raw, n_inline);
         }
         }  // close else from NULL guard
         di = di + (1 as i64);

@@ -1,0 +1,9 @@
+#[inline]
+fn inc(x: i32) -> i32 { return x + 1; }
+
+#[inline]
+fn add3(x: i32) -> i32 { return inc(inc(inc(x))); }
+
+fn main_jhyy() -> i32 {
+    return add3(10);
+}

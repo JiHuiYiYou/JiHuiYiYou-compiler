@@ -1,0 +1,6 @@
+#[inline]
+fn loopy(n: i32) -> i32 { return n + loopy(n - 1); }
+
+fn main_jhyy() -> i32 {
+    return loopy(5);
+}

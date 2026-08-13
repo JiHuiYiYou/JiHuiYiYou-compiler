@@ -2017,8 +2017,32 @@ fn parse_stmt(p: *Parser) -> *Node {
 // 顺序：在所有 sub-stmts + parse_stmt 之后定义
 // ════════════════════════════════════════════════════
 
+// v1.3.5: parse leading #[...] attributes. Currently only #[inline] is meaningful.
+// Returns is_inline (1 if any of the attrs is `inline`, else 0).
+// Forward-compatible: unknown attributes are parsed + ignored.
+fn parse_attributes(p: *Parser) -> i32 {
+    let mut is_inline: i32 = 0 as i32;
+    let mut t = empty_token();
+    while (parser_check(p, TOKEN_HASH()) != (0 as i32)) {
+        parser_advance(p, &t);  // consume '#'
+        parser_expect(p, TOKEN_LBRACKET(), "[ after #" as *u8, &t);
+        parser_expect(p, TOKEN_IDENT(), "attribute name" as *u8, &t);
+        let aname = parser_tok_name(p, &t);
+        // strcmp(aname, "inline") == 0
+        if strcmp(aname, "inline" as *u8) == (0 as i32) {
+            is_inline = 1 as i32;
+        }
+        parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
+    }
+    return is_inline;
+}
+
 fn parse_func(p: *Parser, is_extern: i32) -> *Node {
     let mut t = empty_token();
+
+    // v1.3.5: parse leading #[attr] before fn
+    let is_inline = parse_attributes(p);
+
     parser_peek(p, &t);
     let loc_lf = t.loc_filename;
     let loc_ll = t.loc_line;
@@ -2150,7 +2174,7 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
     parser_pop_scope(p);
 
     return ast_new_func_decl((*p).arena, loc_lf, loc_ll, loc_lc,
-                             sym, params, nparams, ret_type, body, is_extern);
+                             sym, params, nparams, ret_type, body, is_extern, is_inline);
 }
 
 // ════════════════════════════════════════════════════
@@ -2411,6 +2435,10 @@ fn parse_decl(p: *Parser) -> *Node {
     }
     if parser_check(p, TOKEN_CONST()) != (0 as i32) {
         return parse_const_decl(p);
+    }
+    // v1.3.5: #[attr] before fn — recurse to parse_func which calls parse_attributes
+    if parser_check(p, TOKEN_HASH()) != (0 as i32) {
+        return parse_func(p, 0 as i32);
     }
     // 未识别顶层 token → 走 parse_stmt 兜底
     return parse_stmt(p);

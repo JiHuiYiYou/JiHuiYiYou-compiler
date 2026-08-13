@@ -376,6 +376,9 @@ Token lexer_next(Lexer *l) {
     /* ^ */
     case '^': return make_token(l, TOKEN_CARET, start, 1);
 
+    /* # (v1.3.5: #[attr] attribute prefix) */
+    case '#': return make_token(l, TOKEN_HASH, start, 1);
+
     /* number */
     case '0': case '1': case '2': case '3': case '4':
     case '5': case '6': case '7': case '8': case '9':
@@ -468,6 +471,7 @@ const char *token_kind_name(TokenKind kind) {
     case TOKEN_ERROR:     return "ERROR";
     case TOKEN_NULL:      return "null";
     case TOKEN_DEFER:     return "defer";
+    case TOKEN_HASH:      return "#";
     default:              return "?";
     }
 }

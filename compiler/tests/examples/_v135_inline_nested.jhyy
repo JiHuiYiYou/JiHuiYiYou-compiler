@@ -1,0 +1,9 @@
+#[inline]
+fn dbl(x: i32) -> i32 { return x * 2; }
+
+#[inline]
+fn quad(x: i32) -> i32 { return dbl(dbl(x)); }
+
+fn main_jhyy() -> i32 {
+    return quad(5);
+}

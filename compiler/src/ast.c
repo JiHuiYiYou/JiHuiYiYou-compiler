@@ -435,7 +435,8 @@ Node *ast_new_enum_def(Arena *a, SourceLoc loc, EnumVariantDecl *variants, size_
 }
 
 Node *ast_new_func_decl(Arena *a, SourceLoc loc, Sym *sym, NodeFuncDeclParam *params,
-                         size_t nparams, Node *ret_type, Node *body, bool is_extern) {
+                         size_t nparams, Node *ret_type, Node *body, bool is_extern,
+                         bool is_inline) {
     Node *n = new_node(a, NODE_FUNC_DECL, loc, sizeof(NodeFuncDecl));
     NodeFuncDecl *d = node_func_decl_data(n);
     d->sym = sym;
@@ -444,6 +445,7 @@ Node *ast_new_func_decl(Arena *a, SourceLoc loc, Sym *sym, NodeFuncDeclParam *pa
     d->ret_type = ret_type;
     d->body = body;
     d->is_extern = is_extern;
+    d->is_inline = is_inline;   /* v1.3.5: #[inline] attribute */
     d->defers = NULL;        /* v1.3.6: defer stack starts empty (sema fills) */
     d->ndefers = 0;
     return n;

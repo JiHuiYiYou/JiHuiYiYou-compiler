@@ -111,6 +111,8 @@ fn TOKEN_ERROR()       -> i32 { return 68 as i32; }
 fn TOKEN_NULL()        -> i32 { return 69 as i32; }
 // v1.3.6: defer fncall(); LIFO cleanup
 fn TOKEN_DEFER()       -> i32 { return 70 as i32; }
+// v1.3.5: # (start of #[attr] attribute prefix)
+fn TOKEN_HASH()        -> i32 { return 71 as i32; }
 
 // ════════════════════════════════════════════════════
 // Token + Lexer 结构（平铺字段，无 nested struct）
@@ -737,6 +739,12 @@ fn lexer_next(l: *Lexer, t: *Token) -> i32 {
         return 0 as i32;
     }
 
+    // '#' (v1.3.5: #[attr] attribute prefix)
+    if c == (35 as i32) {
+        lex_make_token(l, TOKEN_HASH(), start, 1 as i64, t);
+        return 0 as i32;
+    }
+
     // digit
     if isdigit(c) != (0 as i32) {
         return lex_scan_number(l, t);
@@ -855,5 +863,6 @@ fn token_kind_name(kind: i32) -> *u8 {
     if kind == TOKEN_ERROR() { return "ERROR" as *u8; }
     if kind == TOKEN_NULL() { return "null" as *u8; }
     if kind == TOKEN_DEFER() { return "defer" as *u8; }
+    if kind == TOKEN_HASH() { return "#" as *u8; }
     return "?" as *u8;
 }

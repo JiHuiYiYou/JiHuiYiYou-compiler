@@ -22,7 +22,7 @@ typedef struct {
     int   is_stack;     /* 1 if value is a stack slot address */
 } LocalEntry;
 
-/* CGContext layout MUST match jhyy-side codegen.jhyy CGCONTEXT_SIZE = 72.
+/* CGContext layout MUST match jhyy-side codegen.jhyy CGCONTEXT_SIZE.
    Fields are heap-allocated (calloc) rather than inline arrays so the
    layout is portable between C-side (inline arrays OK but huge) and
    jhyy-side (no fixed-size struct fields). See docs/internal/workarounds.md
@@ -42,6 +42,15 @@ typedef struct {
     IRVal       *loop_ends;
     IRVal       *loop_continues;
     NodeFuncDecl *current_fn;        /* v1.3.6: current fn (for cg_emit_defers on ret) */
+    /* v1.3.5: #[inline] attribute. inline_fns/n_inline_fns is the table of
+       all fn decls with is_inline=1 (built by cg_module pass A). When emitting
+       a call to one of these, expand the body at the callsite instead of
+       emitting `call $name`. current_inline_sym is the sym currently being
+       inlined (for recursion guard: detect "I'm inside my own body" and fall
+       back to `call`). */
+    NodeFuncDecl **inline_fns;
+    size_t         n_inline_fns;
+    Sym           *current_inline_sym;
 } CGContext;
 
 static void cg_add_local(CGContext *cg, Sym *sym, IRVal val, int is_stack) {
@@ -65,6 +74,35 @@ static void cg_find_local(CGContext *cg, Sym *sym, int *is_stack, IRVal *out) {
         }
     }
     *out = (IRVal){0};  /* zero sentinel: id=0, kind=IRVAL_TEMP */
+}
+
+/* v1.3.5: #[inline] call-site expansion helpers.
+   The inline FNS table (built by cg_module pass A) maps Sym* → NodeFuncDecl
+   for all functions marked #[inline]. */
+
+/* Look up fn_sym in the inline table; return its decl or NULL. */
+static NodeFuncDecl *cg_find_inline_decl(CGContext *cg, Sym *fn_sym) {
+    if (!cg->inline_fns || !fn_sym) return NULL;
+    for (size_t i = 0; i < cg->n_inline_fns; i++) {
+        NodeFuncDecl *fd = cg->inline_fns[i];
+        if (fd->sym == fn_sym) return fd;
+    }
+    return NULL;
+}
+
+/* v1.3.5 MVP scope: only support bodies that are a single `return <expr>;`
+   statement. Anything else (let, if, loops, multiple stmts) requires full
+   control-flow expansion (basic block splitting, ret → jmp, etc.) — left for
+   v3.x or future sprint.
+   Returns the inner expression node if simple, or NULL. */
+static Node *cg_inline_simple_return_expr(Node *body) {
+    if (!body || body->kind != NODE_BLOCK) return NULL;
+    NodeBlock *bd = node_block_data(body);
+    if (bd->nstmts != 1) return NULL;
+    Node *stmt = bd->stmts[0];
+    if (stmt->kind != NODE_RETURN) return NULL;
+    NodeReturn *rd = node_return_data(stmt);
+    return rd->expr;  /* may be NULL for `return;` (void), treat as non-inlineable */
 }
 
 /* ── forward ── */
@@ -673,6 +711,47 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
             fn_name = fn_sym ? fn_sym->name : "?";
         }
 
+        /* v1.3.5: #[inline] call-site expansion. Try inline first; fall back
+           to `call $name` if the body is not a simple `return <expr>;` or
+           the call is recursive. */
+        NodeFuncDecl *inline_decl = cg_find_inline_decl(cg, fn_sym);
+        Node *simple_expr = inline_decl ? cg_inline_simple_return_expr(inline_decl->body) : NULL;
+        int try_inline = (inline_decl != NULL)
+                      && (cg->current_inline_sym != fn_sym)
+                      && (n->type && n->type->kind != KIND_STRUCT)
+                      && (simple_expr != NULL);
+        if (try_inline) {
+            Node *ret_expr = cg_inline_simple_return_expr(inline_decl->body);
+            /* Evaluate args into a fresh buffer (using cg_expr, no struct-copy
+               / sret — locals use values directly). v1.3.5 MVP: primitive
+               args only; struct args fall back to call. */
+            IRVal *arg_vals = NULL;
+            if (d->nargs > 0) {
+                arg_vals = arena_alloc(cg->ir->arena, d->nargs * sizeof(IRVal));
+                for (size_t i = 0; i < d->nargs; i++) {
+                    IRVal v = {0};
+                    cg_expr(cg, d->args[i], &v);
+                    arg_vals[i] = v;
+                }
+            }
+            /* Save caller state and substitute params with arg values. */
+            int saved_nlocals = cg->nlocals;
+            int saved_loop_depth = cg->loop_depth;
+            Sym *prev_inline = cg->current_inline_sym;
+            cg->current_inline_sym = fn_sym;
+            for (size_t i = 0; i < inline_decl->nparams; i++) {
+                cg_add_local(cg, inline_decl->params[i].sym, arg_vals[i], 0);
+            }
+            /* Emit the body return expr. IDENT refs to params resolve to the
+               arg IRVals we just registered as locals. */
+            cg_expr(cg, ret_expr, out);
+            /* Restore caller state. */
+            cg->nlocals = saved_nlocals;
+            cg->loop_depth = saved_loop_depth;
+            cg->current_inline_sym = prev_inline;
+            return;
+        }
+
         int is_sret = (n->type && n->type->kind == KIND_STRUCT);
         IRVal ret_slot;
         if (is_sret) {
@@ -735,6 +814,39 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
             fn_name = mangled;
         } else {
             fn_name = fn_sym ? fn_sym->name : "?";
+        }
+
+        /* v1.3.5: #[inline] call-site expansion for qualified calls (e.g.
+           module::fn()). Same logic as NODE_CALL but uses d->resolved sym. */
+        NodeFuncDecl *inline_decl2 = cg_find_inline_decl(cg, fn_sym);
+        Node *simple_expr2 = inline_decl2 ? cg_inline_simple_return_expr(inline_decl2->body) : NULL;
+        int try_inline2 = (inline_decl2 != NULL)
+                       && (cg->current_inline_sym != fn_sym)
+                       && (n->type && n->type->kind != KIND_STRUCT)
+                       && (simple_expr2 != NULL);
+        if (try_inline2) {
+            Node *ret_expr2 = simple_expr2;
+            IRVal *arg_vals2 = NULL;
+            if (d->nargs > 0) {
+                arg_vals2 = arena_alloc(cg->ir->arena, d->nargs * sizeof(IRVal));
+                for (size_t i = 0; i < d->nargs; i++) {
+                    IRVal v = {0};
+                    cg_expr(cg, d->args[i], &v);
+                    arg_vals2[i] = v;
+                }
+            }
+            int saved_nlocals2 = cg->nlocals;
+            int saved_loop_depth2 = cg->loop_depth;
+            Sym *prev_inline2 = cg->current_inline_sym;
+            cg->current_inline_sym = fn_sym;
+            for (size_t i = 0; i < inline_decl2->nparams; i++) {
+                cg_add_local(cg, inline_decl2->params[i].sym, arg_vals2[i], 0);
+            }
+            cg_expr(cg, ret_expr2, out);
+            cg->nlocals = saved_nlocals2;
+            cg->loop_depth = saved_loop_depth2;
+            cg->current_inline_sym = prev_inline2;
+            return;
         }
 
         int is_sret = (n->type && n->type->kind == KIND_STRUCT);
@@ -1892,7 +2004,7 @@ static void cg_stmt(CGContext *cg, Node *n) {
 
 /* ── function codegen ── */
 
-static void cg_func(IRBuf *ir, Node *n) {
+static void cg_func(IRBuf *ir, Node *n, NodeFuncDecl **inline_fns, size_t n_inline_fns) {
     NodeFuncDecl *fd = node_func_decl_data(n);
     if (fd->is_extern) return; /* no body to emit */
 
@@ -1938,6 +2050,12 @@ static void cg_func(IRBuf *ir, Node *n) {
     cg.sret_slot_id = -1;
     cg.loop_depth = 0;
     cg.current_fn = fd;  /* v1.3.6: cg_emit_defers reads fd->defers in cg_return */
+    /* v1.3.5: #[inline] table + recursion guard. Set current_inline_sym to
+       fd->sym so calls to fd from within its own body fall back to `call $fn`
+       instead of recursing inline (would infinite-expand). */
+    cg.inline_fns = inline_fns;
+    cg.n_inline_fns = n_inline_fns;
+    cg.current_inline_sym = fd->sym;
     /* heap-alloc locals + loop label arrays (matches jhyy-side layout) */
     cg.locals        = (LocalEntry*)calloc(MAX_LOCALS,     sizeof(LocalEntry));
     cg.loop_starts   = (IRVal*)     calloc(MAX_LOOP_DEPTH, sizeof(IRVal));
@@ -2084,11 +2202,33 @@ void cg_module(IRBuf *ir, Node *module) {
             ir_emit_data(ir, " }\n");
         }
     }
+    /* v1.3.5: build #[inline] fn table for call-site expansion lookup.
+       Only collects fn decls with is_inline=1. Used by cg_expr NODE_CALL. */
+    size_t n_inline = 0;
+    for (size_t i = 0; i < md->ndeccls; i++) {
+        Node *decl = md->decls[i];
+        if (decl->kind == NODE_FUNC_DECL) {
+            NodeFuncDecl *fd = node_func_decl_data(decl);
+            if (fd->is_inline) n_inline++;
+        }
+    }
+    NodeFuncDecl **inline_fns = NULL;
+    if (n_inline > 0) {
+        inline_fns = arena_alloc(ir->arena, n_inline * sizeof(NodeFuncDecl*));
+        size_t k = 0;
+        for (size_t i = 0; i < md->ndeccls; i++) {
+            Node *decl = md->decls[i];
+            if (decl->kind == NODE_FUNC_DECL) {
+                NodeFuncDecl *fd = node_func_decl_data(decl);
+                if (fd->is_inline) inline_fns[k++] = fd;
+            }
+        }
+    }
     /* Pass B: emit all functions */
     for (size_t i = 0; i < md->ndeccls; i++) {
         Node *decl = md->decls[i];
         if (decl->kind == NODE_FUNC_DECL) {
-            cg_func(ir, decl);
+            cg_func(ir, decl, inline_fns, n_inline);
         }
     }
 }

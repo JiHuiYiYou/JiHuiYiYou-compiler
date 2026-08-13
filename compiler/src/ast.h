@@ -234,6 +234,11 @@ typedef struct {
     Node              *ret_type;
     Node              *body;
     bool               is_extern;
+    /* v1.3.5: #[inline] attribute. codegen expands the body inline at every
+       callsite instead of emitting `call $fn`. Falls back to `call` for
+       recursive calls (detected via cg->current_inline_fn). Layout note:
+       is_extern + is_inline share one 8-byte slot (both 4-byte). */
+    bool               is_inline;
     /* v1.3.6: defer statements collected by sema in source order. codegen
        reads these (reverse) to emit LIFO before every `ret`. */
     Node             **defers;
@@ -361,7 +366,7 @@ Node *ast_new_struct_lit(struct Arena *a, SourceLoc loc, Sym *type_sym, NodeFiel
 Node *ast_new_enum_variant(struct Arena *a, SourceLoc loc, Sym *type_sym, Sym *variant_sym, Node *payload);
 Node *ast_new_struct_def(struct Arena *a, SourceLoc loc, StructFieldDecl *fields, size_t nfields);
 Node *ast_new_enum_def(struct Arena *a, SourceLoc loc, EnumVariantDecl *variants, size_t nvariants);
-Node *ast_new_func_decl(struct Arena *a, SourceLoc loc, Sym *sym, NodeFuncDeclParam *params, size_t nparams, Node *ret_type, Node *body, bool is_extern);
+Node *ast_new_func_decl(struct Arena *a, SourceLoc loc, Sym *sym, NodeFuncDeclParam *params, size_t nparams, Node *ret_type, Node *body, bool is_extern, bool is_inline);
 Node *ast_new_type_decl(struct Arena *a, SourceLoc loc, Sym *sym, Node *body);
 Node *ast_new_extern_decl(struct Arena *a, SourceLoc loc, Sym *sym);
 Node *ast_new_import_decl(struct Arena *a, SourceLoc loc, Sym *sym);

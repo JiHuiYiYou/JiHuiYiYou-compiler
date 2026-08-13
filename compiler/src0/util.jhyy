@@ -178,6 +178,7 @@ type HashMap = struct {
     arena:    *Arena,
 }
 
+#[inline]
 fn HASH_ENTRY_SIZE() -> i64 { return 24 as i64; }
 fn HASHMAP_INITIAL_SIZE() -> i64 { return 256 as i64; }
 fn FNV_OFFSET() -> i64 { return 0xcbf29ce484222325 as i64; }
