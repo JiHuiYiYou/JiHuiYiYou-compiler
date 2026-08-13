@@ -184,7 +184,7 @@ python compiler/build/bin/regress_v1.py
 | **FFI** | `extern fn` calling C (printf, file I/O, multi-arg) |
 | **Memory** | runtime Arena allocator (`arena_alloc` via FFI) |
 
-Full specification: [`docs/abis/jhyy-lang-spec-v1.1.0.md`](docs/abis/jhyy-lang-spec-v1.1.0.md) (locked; v1.1.0 = v1.0.0 + v0.7 7A/7B); known limitations in Appendix B.
+Full specification: [`docs/abis/jhyy-lang-spec-v1.3.0.md`](docs/abis/jhyy-lang-spec-v1.3.0.md) (locked; v1.3.0 = v1.1.0 + 7 v1.3.x features); known limitations in Appendix B + Appendix E.
 
 ---
 
@@ -323,7 +323,7 @@ Details in [`mcp-jhyy/README.md`](mcp-jhyy/README.md).
 
 | Doc | Description |
 |-----|-------------|
-| [`docs/abis/jhyy-lang-spec-v1.1.0.md`](docs/abis/jhyy-lang-spec-v1.1.0.md) | language spec v1.1.0 (v0.7+; enum exhaustiveness + 顶层 const 数组) |
+| [`docs/abis/jhyy-lang-spec-v1.3.0.md`](docs/abis/jhyy-lang-spec-v1.3.0.md) | language spec v1.3.0 (v1.1.0 + 7 v1.3.x features; limitations in Appendix B + E) |
 | [`docs/abis/jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) | ABI whitepaper v1.0.0 (struct pass-by-value / FFI / namespaces / slices) |
 
 ### Internal

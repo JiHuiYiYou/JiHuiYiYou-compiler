@@ -188,7 +188,7 @@ def jhyy_lang_ref(query: str, limit: int = 20) -> dict:
 
     Returns:
         {ok, version, query, matches: [{section, title, level, score, excerpt}, ...]}
-        section e.g. "10.4" — 直接对应 jhyy-lang-spec-v1.1.0.md 章节号, 可引用.
+        section e.g. "10.4" — 直接对应 jhyy-lang-spec-v1.3.0.md 章节号, 可引用.
     """
     import jhyy_lang_ref as langref_mod
     return langref_mod.search(query, limit=limit)

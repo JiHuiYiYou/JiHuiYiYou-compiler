@@ -115,7 +115,7 @@ Claude Code 会根据工具描述中的触发条件**自动判断何时调用**�
 
 | 类别 | 来源 | 文件 |
 |------|------|------|
-| 语言规范 | `docs/abis/jhyy-lang-spec-v0.2.1.md` | `spec_data.json` |
+| 语言规范 | `docs/abis/jhyy-lang-spec-v1.3.0.md` | `spec_data.json` |
 | ABI 信息 | `docs/abis/jhyy-abi-v1.0.0.md` | `abi_data.json` |
 | 集成测试 | `compiler/tests/examples/*.jhyy` | 由 `jhyy_run` 动态读 |
 

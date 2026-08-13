@@ -190,7 +190,7 @@ python compiler/build/bin/regress_v1.py
 | **FFI** | `extern fn` 调用 C(printf、文件 I/O、多参数) |
 | **内存** | 运行时 Arena 分配器(`arena_alloc` via FFI) |
 
-完整语言规范见 [`docs/abis/jhyy-lang-spec-v1.1.0.md`](docs/abis/jhyy-lang-spec-v1.1.0.md)(已锁定;v1.1.0 = v1.0.0 + v0.7 7A/7B 增量);已知限制见附录 B。
+完整语言规范见 [`docs/abis/jhyy-lang-spec-v1.3.0.md`](docs/abis/jhyy-lang-spec-v1.3.0.md)(已锁定;v1.3.0 = v1.1.0 + v1.3.x 7 章节);已知限制见附录 B + 附录 E。
 
 ---
 
@@ -329,7 +329,7 @@ JiHuiYiYou-compiler/
 
 | 文档 | 说明 |
 |------|------|
-| [`docs/abis/jhyy-lang-spec-v1.1.0.md`](docs/abis/jhyy-lang-spec-v1.1.0.md) | 语言规范 v1.1.0(v0.7+;enum 穷尽性 + 顶层 const 数组) |
+| [`docs/abis/jhyy-lang-spec-v1.3.0.md`](docs/abis/jhyy-lang-spec-v1.3.0.md) | 语言规范 v1.3.0(v1.1.0 + v1.3.x 7 features;限制在附录 B + E) |
 | [`docs/abis/jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) | ABI 白皮书 v1.0.0(struct pass-by-value / FFI / 命名空间 / 切片) |
 
 ### 项目内部
