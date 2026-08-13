@@ -53,9 +53,8 @@ compiler/src0/*.exe
 tmp/
 
 # 关键编译器二进制例外 — 上方 *.exe 通配会清掉这些，git clean -fdX 前必须保留
-# v1.0.0 self-host 闭环依赖此 6 个 binary
+# v1.0.0 self-host 闭环依赖此 5 个 binary (v1.3.7 commit 0f32977 删 jhyy_v1.exe,canonical 统一到 .exe.exe)
 !compiler/build/bin/jhyy.exe
-!compiler/build/bin/jhyy_v1.exe
 !compiler/build/bin/jhyy_v1.exe.exe
 !compiler/build/bin/jhyy_v2.exe
 !compiler/build/bin/jhyy_v3.exe
