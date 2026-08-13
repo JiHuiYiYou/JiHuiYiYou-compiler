@@ -1595,7 +1595,7 @@ export function w $unwrap_or(w %opt, ...)  ← ❌ callee 声明 w!
 **失效条件:** 不再写 `l` 类声明 large enum param,或者 enum ABI 改成 all-by-value(无 slot 概念)。
 
 **引用:**
-- v1.3.7 changelog: [`docs/logs/v1/changelog-v1.3.7-w007.md`](../logs/v1/changelog-v1.3.7-w007.md)
+- v1.3.7 fix ship (umbrella): [`docs/logs/v1/changelog-v1.3.0.md`](../logs/v1/changelog-v1.3.0.md) § v1.3.7 fix ship
 - v1.3.7 父 sprint: `docs/plans/v1/v1.3.0任务清单 + 概要设计.md` § v1.3.7
 - ABI spec: [`docs/abis/jhyy-abi-v1.0.0.md`](../abis/jhyy-abi-v1.0.0.md) § enum pass semantics (大 enum = slot 传)
 
