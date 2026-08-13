@@ -34,7 +34,7 @@
 | [W-007](#w-007-jhyy_v1-fn--i64--return--literal-as-i64-emit-w-copy) | ✅ RESOLVED (transitive — jhyy_v1.exe.exe sha `ba94df93...` 已含 cg_convert_arg `src=W → dst=L` extsw 分支镜像 v0.8 commit 7 `0453cef`, 2026-08-12 5x5 PASS verified on 4 BAD variants, IL byte-equal C-side) | jhyy_v1 codegen 把 `fn() -> i64 { return X as i64; }` 的 return value 当 w（32-bit）emit → QBE "invalid type for jump argument" 错 |
 | [W-008](#w-008-jhyy_v1-cg_find_field_offset-漏一层-deref-i64-struct-field-emit-w-loadw) | RESOLVED | jhyy_v1 codegen NODE_FIELD 查 struct field type 时把 `*u8` 指针当 `**u8` 解了一层 → i64/pointer struct field 全 emit `=w loadw` 而非 `=l loadl` → QBE 拒绝 |
 | [W-009](#w-009-jhyy_v1-cg_convert_arg-src_t--0-返回-arg-未-coerce-导致-literal-0-w-copy-0-在-ceql-被-reject) | RESOLVED | jhyy_v1 codegen cg_convert_arg 在 `src_t==0` 时直接 return arg，但 literal 0 实际 emit `=w copy 0`（因 qbe_type_of(NULL)=QBE_W）→ 比较 l 字段（pointer / i64 / u64）时 `ceql`/`csltl` 等操作码两边操作数类型不匹配 → QBE "invalid type for second operand" 错 |
-| [B-let2 (cross-ref)](#cross-ref-b-let2-stage-1-byte-equal-codegen-gap) | RESOLVED (v0.9 commit 2.5) | jhyy_v1 `cg_convert_arg` 缺 `src=l, dst=w` narrow 分支 → `i64 → i32` 字段赋值 / `as` 转换 emit 错 IL。详见 [`codegen-pitfalls.md` § 2.2](codegen-pitfalls.md) |
+| [B-let2 (cross-ref)](#cross-ref-b-let2-stage-1-byte-equal-codegen-gap) | RESOLVED (v0.9 commit 2.5) | jhyy_v1 `cg_convert_arg` 缺 `src=l, dst=w` narrow 分支 → `i64 → i32` 字段赋值 / `as` 转换 emit 错 IL |
 | [W-008 ↔ W-009 ↔ W-007 ↔ W-005 (cross-ref)](#cross-ref-w-008--w-009--w-007--w-005-codegen-转化路径联动) | ✅ ALL RESOLVED (W-005 v0.9 wip 2.13 / W-008 v0.8 c11 / W-009 v0.8 c12 / W-007 transitive 2026-08-12) | 4 个 workaround 都在 jhyy_v1 `cg_convert_arg` + NODE_ASSIGN + NODE_FIELD codegen 路径, 全 RESOLVED |
 | [W-010](#w-010-jhyy-端-max_locals--512-vs-c-端-1024--cg_add_local-静默溢出致-t0-污染) | RESOLVED (v0.9 wip commit 2.79) | jhyy-side `MAX_LOCALS=512` 比 C-side `1024` 小 2× → cg_expr 本地变量数溢出时 cg_add_local 静默返回 0 → cg_find_local miss → emit `%t0`(QBE temp 0,sentinel); align jhyy-side 到 1024 全消除 |
 | [W-012](#w-012-codegen-emit-layer-sentinel-pollution-cg_copy_struct-emit-copy--t0-when-src_addrundef) | RESOLVED (v0.9 wip commit 2.81) | C/jhyy `cg_copy_struct` 在 src/dst 是 sentinel `IRVal{0}` (kind=IRVAL_TEMP, id=0) 时仍逐字段 emit `copy %t0`, QBE reject. 真修: `irval_is_undef(v)` sentinel 守卫 (3 emit 点 + 1 helper). |
@@ -1136,7 +1136,6 @@ QBE：`invalid type for second operand %t29 in ceql`
 - 三个 fix 缺一不可,jhyy_v1 cg_convert_arg 才算完整
 
 **引用:**
-- [`docs/internal/codegen-pitfalls.md` § 2.2](codegen-pitfalls.md) —— B-let2 详解(diff + 修复代码 + 验证)
 - `compiler/src0/codegen.jhyy:613-619` —— 修复代码
 - `compiler/tests/examples/arith.jhyy` —— 触发用例
 - `compiler/tests/stage1-expanded.sh` —— 验收脚本
