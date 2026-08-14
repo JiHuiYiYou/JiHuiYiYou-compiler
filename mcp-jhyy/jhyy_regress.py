@@ -17,6 +17,7 @@ import re
 import hashlib
 import time
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List, Tuple
 
 # 路径配置
@@ -136,7 +137,8 @@ def run_test(
     if extra_inputs:
         for inp in extra_inputs:
             cmd.insert(2, _resolve_binary(inp))
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=20,
+    # 60s (not 20s): 并行跑时单个 compile 会因 CPU 争抢拉长
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
                        encoding="utf-8", errors="replace", env=_build_subprocess_env())
     if r.returncode != 0:
         return (False, expected, -1, f"compile failed: {r.stderr[:200]}")
@@ -253,9 +255,14 @@ def run_all(
 
     passed, failed, skipped = 0, 0, 0
     failed_tests = []
+
+    workers = min(len(files), os.cpu_count() or 4)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(run_test, str(TEST_DIR / f), binary, timeout): f for f in files}
+        results = {futures[fut]: fut.result() for fut in as_completed(futures)}
+
     for fname in files:
-        path = str(TEST_DIR / fname)
-        ok, exp, act, msg = run_test(path, binary, timeout=timeout)
+        ok, exp, act, msg = results[fname]
         if ok and msg == "skipped (library)":
             print(f"SKIP  {fname:<30}  (library, no main)")
             skipped += 1
