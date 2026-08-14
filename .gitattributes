@@ -10,8 +10,3 @@
 *.sh     text eol=lf
 *.ini    text eol=lf
 Makefile text eol=lf
-# .cmd / .bat 必须 CRLF: 中文 Windows console codepage CP936 不认
-# UTF-8 多字节 REM 注释, cmd.exe 解析时把字节序列当命令解释, 脚本会挂。
-# ASCII-only 注释 + CRLF 行尾 是 bootstrap.cmd 能跑通的前提。
-*.cmd    text eol=crlf
-*.bat    text eol=crlf
