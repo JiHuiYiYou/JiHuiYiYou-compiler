@@ -4,6 +4,7 @@ compiler/build/bin/*
 !compiler/build/bin/.gitkeep
 !compiler/build/bin/regress.py
 !compiler/build/bin/regress_v1.py
+!compiler/build/bin/regress_stage0.py
 _*.txt
 !compiler/src0/_W002_rename_map.txt
 _*.py

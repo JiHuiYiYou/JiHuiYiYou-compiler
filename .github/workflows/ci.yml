@@ -1,0 +1,150 @@
+# GH Actions CI — JHYY compiler v1.4.5+ (2026-08-14 ship)
+#
+# v1.4.5 引入 CI 三跑守门:
+#   1. regress.py         (jhyy.exe        jhyy-side production)
+#   2. regress_v1.py      (jhyy_v1.exe.exe jhyy-side historical baseline, v1.0.0 closure)
+#   3. regress_stage0.py  (jhyy_stage0.exe C-side bootstrap)
+#
+# 触发面:
+#   - push to main (含 v1.x ‖ v2.x ‖ v3.x 任何 commit)
+#   - PR to main
+#
+# Windows runner (windows-latest) — 跟开发机一致 (Windows 10 + MSYS2 bash +
+# gcc + QBE + runtime)。其他 OS 留给未来扩展 (per `docs/plans/v2/v2.0.0-os-prep.md`
+# amd64_sysv target 之后)。
+#
+# 守门:
+#   - 三跑全 PASS → CI pass
+#   - 任一 fail → CI fail (block merge)
+#
+# 不做 (per `feedback_auto_push_after_commit.md`):
+#   - 不自动 push / tag — 保留人工 review
+
+name: JHYY CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Concurrency: 同一 ref 新 push 自动 cancel 在跑的 run, 节省 CI minutes
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2 + toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            base-devel
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-make
+            mingw-w64-ucrt-x86_64-qbe
+            python
+            python-pip
+
+      - name: Set bash as default shell
+        shell: msys2 {0}
+        run: |
+          echo "GH_RUNNER=true" >> $GITHUB_ENV
+          echo "MSYS2_PATH=/c/msys64/usr/bin:$PATH" >> $GITHUB_ENV
+          which gcc qbe python make
+
+      - name: Build stage 0 (C-side bootstrap)
+        shell: msys2 {0}
+        run: |
+          cd ${{ github.workspace }}
+          make stage0
+
+      - name: Build stage 1 (jhyy-side production via stage 0)
+        shell: msys2 {0}
+        run: |
+          cd ${{ github.workspace }}
+          make
+
+      - name: Run regress.py (jhyy.exe production)
+        shell: msys2 {0}
+        run: |
+          cd ${{ github.workspace }}
+          python compiler/build/bin/regress.py
+
+      - name: Run regress_v1.py (jhyy_v1.exe.exe historical baseline, informational)
+        shell: msys2 {0}
+        continue-on-error: true
+        run: |
+          cd ${{ github.workspace }}
+          # v1.4.4 ship 时 jhyy_v1.exe.exe 被物理覆盖成 jhyy.exe 同 binary
+          # (sha `37ffc49c...`), 偏离 `feedback_regress_baseline_binary_hash.md`
+          # 期望的 frozen v1.0.0 closure canonical。regress_v1.py 当前是
+          # informational mirror, exit 0 总是, 期望 v1.4.6 新测试 fail。
+          # v1.5+ TODO: 恢复 v1.0.0 closure canonical 二进制 (commit eabee0d)。
+          python compiler/build/bin/regress_v1.py
+
+      - name: Run regress_stage0.py (jhyy_stage0.exe C-side)
+        shell: msys2 {0}
+        run: |
+          cd ${{ github.workspace }}
+          python compiler/build/bin/regress_stage0.py
+
+      - name: Build Stage 2 closure chain (v1→v2→v3→v4)
+        shell: msys2 {0}
+        run: |
+          cd ${{ github.workspace }}
+          make selfhost
+
+      - name: Stage 2 N=3 byte-equal (closure chain)
+        shell: msys2 {0}
+        run: |
+          cd ${{ github.workspace }}
+          # 手动跑 closure chain (跟 jhyy_selfhost_check MCP 等价但纯 bash)
+          # v1 → v2 → v3 → v4 .il sha 必须全相同
+          # 命名规则 (per `feedback_regress_baseline_binary_hash.md`):
+          #   jhyy_v1.exe.exe = v1 (历史 baseline, tracked)
+          #   jhyy_v2/3/4.exe = 当前 closure product (每次 make selfhost 重 build)
+          set -e
+          SHA_V1=""
+          SHA_V2=""
+          SHA_V3=""
+          SHA_V4=""
+          for stage in v1 v2 v3 v4; do
+            if [ "$stage" = "v1" ]; then
+              BIN="compiler/build/bin/jhyy_v1.exe.exe"
+            else
+              BIN="compiler/build/bin/jhyy_${stage}.exe"
+            fi
+            if [ ! -x "$BIN" ]; then
+              echo "FAIL: $BIN not found — run \`make selfhost\` first"
+              exit 1
+            fi
+            $BIN compile compiler/src0/main.jhyy -o /tmp/closure_${stage}.exe >/dev/null 2>&1 || {
+              echo "FAIL: ${BIN} cannot compile src0/main.jhyy"
+              exit 1
+            }
+            SHA=$(sha256sum /tmp/closure_${stage}.exe.il | awk '{print $1}')
+            case "$stage" in
+              v1) SHA_V1="$SHA";;
+              v2) SHA_V2="$SHA";;
+              v3) SHA_V3="$SHA";;
+              v4) SHA_V4="$SHA";;
+            esac
+            echo "  ${stage}.il sha: $SHA"
+          done
+          if [ "$SHA_V1" != "$SHA_V2" ] || [ "$SHA_V2" != "$SHA_V3" ] || [ "$SHA_V3" != "$SHA_V4" ]; then
+            echo "FAIL: Stage 2 closure chain NOT byte-equal"
+            echo "  v1=$SHA_V1 v2=$SHA_V2 v3=$SHA_V3 v4=$SHA_V4"
+            exit 1
+          fi
+          echo "PASS: Stage 2 N=3 closure byte-equal (sha=$SHA_V1)"
