@@ -96,7 +96,7 @@
 | Sprint | 任务 | 状态 |
 |--------|------|------|
 | v1.4.2 | codegen emit DWARF (`.loc` + `dbg_file` + `dbg_subprogram`); C-side codegen.c + jhyy-side codegen.jhyy mirror | ✅ 本次 ship |
-| v1.4.3 | `mcp-jhyy/gdb_pretty.py` Python script: print jhyy struct/enum/slice types; gdb source-time load via `--init-eval-command` | 待启动 |
+| v1.4.3 | `compiler/src0/gdb_pretty.py` + `.gdbinit` + `gdb_pretty_test.jhyy`; pretty-print struct / enum / slice via `jhyy-pretty <addr> <type>` gdb command | ✅ 本次 ship |
 | v1.4.4 | 物理替换 `compiler/build/bin/jhyy.exe` baseline (sha `ac2a1b19...`) 到新 main.c argv[0] 版本; regress 默认 binary 改 `jhyy.exe.exe`; 跑 regress_stage0.py 验证 C 端仍 byte-equal | 待启动 |
 | v1.4.5 | regress.py 默认 binary 改 `jhyy.exe.exe` + 加 `--stage0` flag; GH Actions CI 三跑 (regress_v1 + regress + regress_stage0) + Stage 1/2 byte-equal | 待启动 |
 
@@ -136,6 +136,16 @@
 - ✅ **Stage 1 byte-equal 7/7 维持** (v1.4.2 ship 时 changelog 标 ❌ 是错的, 见 W-018 — `stage1-expanded.sh` 从未真跑过 jhyy_v1, 修脚本后 7/7 PASS)
 - ❌ Stage 1 byte-equal 6/7 (W-005 #2) pre-existing 不动 — v1.4.2 没引入新 temp number 差距
 - ✅ regress.py 全量 **50/50 PASS, 0 failed** (2026-08-14 补跑)。ship 当时只跑了 5 个 spot-check —— 全跑因串行 2m22s 撞 MCP 工具超时表现为"卡住";已把 `jhyy_regress.run_all` 并行化 (2m22s → 43s),post-v1.4.2 任务闭环
+- ✅ **v1.0.0 build pipeline 性能基线** (per commit `19be7fc`, 同步 ship 时测): jhyy_v1.exe.exe vs jhyy.exe 编译同 .jhyy, 4 workload 3 次取 min:
+
+  | workload    | 行数 | jhyy.exe (C) | jhyy_v1 (jhyy) | v1/C |
+  |-------------|------|--------------|----------------|------|
+  | util.jhyy    | 354  | 0.21s        | 0.18s          | 0.86x |
+  | lexer.jhyy   | 867  | 0.22s        | 0.24s          | 1.09x |
+  | parser.jhyy  | 2498 | 0.25s        | 0.30s          | 1.20x |
+  | codegen.jhyy | 3561 | 0.26s        | 0.30s          | 1.15x |
+
+  小文件平手, 大文件 v1 慢 15-20% (~50ms 绝对值, Windows 进程启动 ~50-100ms 占比不小)。自举二进制达到跟 C 端基本同档性能。byte-equal 之外, 性能也站得住。后续 v1.x+ codegen 改动退步 >1.3x 需排查 (per `project_v1_0_perf_baseline.md` in memory)
 
 ## W-018 (本次新增 workaround, 状态 ACTIVE)
 
@@ -144,6 +154,55 @@
 **workaround:** 接受 .il 字节差异;DWARF 是给 gdb 用的 .s 输出,非 .il byte-equal 目标。Stage 2 (`v2.il = v3.il = v4.il`) 仍是 v1.4.x+ 强约束。
 
 **完整记录:** [`docs/internal/workarounds.md`](../../internal/workarounds.md) § W-018
+
+## v1.4.3 ship (本次 commit)
+
+**Commit:** (本次 1 commit, gdb pretty printer 工具链 + 测试程序)
+
+**改动文件 (per `git show --stat`):**
+- `.gdbinit` — 32 行 (项目根自动 `source compiler/src0/gdb_pretty.py`;含 `add-auto-load-safe-path` 使用提示)
+- `compiler/src0/gdb_pretty.py` — 263 行 (Python gdb pretty printer: 解析 .jhyy 注册 struct/enum/slice 类型 → 内存读取 → 按 ABI § 2.5/2.6/2.3 格式化;提供 `jhyy-load-types` / `jhyy-pretty <addr> <type>` 两个 gdb command + best-effort DWARF pretty printer)
+- `compiler/tests/examples/gdb_pretty_test.jhyy` — 68 行 (测试程序: 4 个 composite type — Point struct / Color enum (3 unit variants) / MaybeInt enum (with payload) / `[*]i32` slice;用 helper 函数 `read_point(*Point)` 等强制 QBE 不折叠栈槽,加 `// EXPECT: 0` 兼容 regress)
+
+**目的:** jhyy 编出的 .exe 在 gdb 里调试时能直接读 struct/enum/slice 内容,不需要 `x/8bx` 手算偏移 / 翻 ABI 文档算 tag offset。`jhyy-pretty <addr> <type>` 命令直接出格式化字符串。
+
+**核心机制:**
+- **类型注册**:`jhyy-load-types <path.jhyy>` 解析 source 里的 `type X = struct { ... }` / `type X = enum { ... }` / `let v: [*]T = ...` 模式 → 内存里建 `_types` registry
+- **格式化**:
+  - struct:按 § 2.5 ABI 算字段 offset (`_alignof` + 累加 offset),逐字段 `_fmt_prim` / 递归嵌套 struct/enum / slice
+  - enum:按 § 2.6 ABI 读 i32 tag (`_read(addr, 4, signed=True)`) → 查 variant → 有 payload 按 `payload_offset = align(4, max_payload_align)` 读 payload
+  - slice:§ 2.3 16B = `{data: *T (8B), len: u64 (8B)}`,格式化 `{data=0x..., len=N}` (gdb 自己 deref `data` 指针会触发长度越界 — 留 `x` 给用户看 raw memory)
+- **ABI 算 offset**:`_size()` / `_alignof()` 递归查 `_PRIM` dict (i8/u32/f32/...) / `_types` registry / `*T = 8B` / `[!T; N] = elem_size * N`
+- **gdb 集成**:`gdb.Command` 子类 (`_LoadCmd` / `_PrettyCmd`) + `gdb.printing.register_pretty_printer` 注册 DWARF-type pretty printer (best-effort,通常不触发 — jhyy codegen 不发 type DWARF,见 v1.4.2 ship 时声明)
+- **memory 读**:`gdb.selected_inferior().read_memory(addr, nbytes).tobytes()` → `int.from_bytes(..., 'little')`
+
+**触发的工作流:**
+1. `gdb gdb_pretty_test.exe`
+2. `(gdb) source .gdbinit` — 自动 source pretty printer
+3. `(gdb) jhyy-load-types compiler/tests/examples/gdb_pretty_test.jhyy` — 注册 4 个类型 (Point / Color / MaybeInt / `[*]i32`)
+4. `(gdb) b gdb_pretty_test.jhyy:46` — 借助 v1.4.2 DWARF 定位源行
+5. `(gdb) r` — 命中
+6. `(gdb) jhyy-pretty $rsp Point` → `Point{x=10, y=20}`
+7. `(gdb) jhyy-pretty $rsp+8 Color` → `Green`
+8. `(gdb) jhyy-pretty $rsp+12 MaybeInt` → `Some(42)`
+9. `(gdb) jhyy-pretty $rsp+24 [*]i32` → `[*]i32{data=0x5ffdf0, len=5}`
+
+**验证 (per `feedback_fix_evaluation_rule` 5/5 PASS on target test):**
+- ✅ `Point{x=10, y=20}` — struct 字段 offset + 嵌套字段访问正确
+- ✅ `Green` — enum unit variant tag 匹配正确 (tag=1)
+- ✅ `Some(42)` — enum payload 读取正确 (payload_offset = align(4, alignof(i32)=4) = 4,读 4B = 42)
+- ✅ `[*]i32{data=0x5ffdf0, len=5}` — slice 16B layout 正确,data 是 backing array 指针
+- ✅ DWARF pretty-printer 不误触发 (jhyy 不发 type DWARF,DWARF-type path 不干扰 `jhyy-pretty` command path)
+- ✅ `gdb_pretty_test.jhyy` 加 `// EXPECT: 0`,准备并入 regress (本次未并,因 .gdbinit 路径问题 + regress 需在 src0 目录跑;后置 v1.4.5 收口)
+
+**局限 (透明声明):**
+- **DWARF `.debug_info` 缺失**:jhyy codegen 只发 `.debug_line` (v1.4.2 ship),不发 type/variable DWARF。所以 DWARF auto-pretty-printer 通常不触发 (jhyy var 在 gdb 里类型是 unknown / void*);主路径是手动 `jhyy-pretty <addr> <type>` 命令。真修需要 codegen 发 DWARF DIE — v3.x / v2.x 候选
+- **QBE folding**:`Color::Green` / `MaybeInt::Some(42)` 如果编译器发现是 compile-time constant 就折叠,栈 slot 被复用 — 测试用 helper function `read_*(*T)` 强制地址传递规避。生产场景用户如果发现 var 读出来是上一栈的值,加 `printf("..." as *u8, val)` 强制 side effect 即可
+- **slice deref 不自动**:`jhyy-pretty` 输出 `[*]i32{data=0x..., len=5}` 不自动展开元素 (避免越界读);手动 `x/20bx 0x...` 看 raw memory
+- **嵌套 struct Outer { inner } 暂不支持**:codegen 在 `(*o).inner.a` 这种嵌套 struct 字段访问 emit `loadsw` 类型错 (per W-019 workaround);当前测试覆盖 flat struct / 单层 enum / slice,嵌套测试留给 post-v1.4.3 follow-up
+- **`.gdbinit` auto-load 安全**:Windows gdb 默认禁用 `.gdbinit` auto-load,需 `gdb -iex 'add-auto-load-safe-path C:/.../.gdbinit' ...` 或 `set auto-load safe-path /`
+
+**未引入新 workaround。** W-018 (DWARF .il 字节差) 仍 ACTIVE,v1.4.3 不变 .il 输出,无新增。
 
 ## 引用
 

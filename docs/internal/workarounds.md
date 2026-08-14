@@ -43,6 +43,8 @@
 | [W-015](#w-015-node_sizeof-节点-arena-分配-8-字节--sema-const-fold-写-16-字节溢出到下一块) | ✅ RESOLVED (v1.3.3) | `ast_new_sizeof` / `ast_new_alignof` 只 alloc 8 字节,sema const-fold `node_int_data(n)` 写 16 字节溢出到 next arena chunk → 随机 data corruption |
 | [W-016](#w-016-8-字节-enum-参数-abi-mismatch--caller-用-l-slot-传callee-用-w-value-收) | ✅ RESOLVED (v1.3.7 fix) | enum payload > 4 字节时 caller 用 `l` (slot) 传,callee codegen 默认按 `w` (value) 收 → x86_64 SysV 读 %edi 拿到 slot pointer 低 32 位 → tag compare 永远 false → pattern binding `v` 拿不到值 |
 | [W-017](#w-017-jhyy-顶层-let-mut-*-u8--0--codegen-常量折叠-全局状态-失效) | ACTIVE (v1.4.1, 暂绕 C runtime) | jhyy 端 codegen 不实现真正的顶层 `let mut g_x: *u8 = 0 as *u8;` — global initializer `0` 在 codegen 阶段被常量折叠为 0,后续所有读 `g_x` 的 QBE IR 都是 `=l copy 0`,sentinel null pointer;路径硬编码消除被迫委托 C runtime `jhyy_helpers.c` 持有 path state |
+| [W-018](#w-018-v142-dwarf-emit-引入-stage-1-il-字节差异-非功能) | ✅ RESOLVED 2026-08-14 | v1.4.2 DWARF emit 引入 Stage 1 .il 字节差异 (非功能) — 实测 `stage1-expanded.sh` 脚本错写路径吞错,改后 7/7 PASS,W-018 是误报 RESOLVED |
+| [W-019](#w-019-codegen-嵌套-struct-innerx-emit-loadsw-类型错) | ACTIVE (v1.4.3, 暂绕 test 用 flat-only) | codegen `cg_field_addr` 在处理 `(*o).inner.a` 这种嵌套 struct 字段时,emit 的 `loadsw`/`loadw` 第一操作数类型错(QBE reject: "invalid type for first operand in loadsw")。当前 v1.4.3 测试用例只覆盖 flat struct,嵌套 struct 留给 post-v1.4.3 修 |
 
 ---
 
@@ -1696,4 +1698,40 @@ v1.4.2 DWARF 改动对 .il byte-equal 无影响。
 **引用:**
 - 根因: `compiler/tests/stage1-expanded.sh` 的 `JHY_1` 路径错 + stderr 被吞
 - 验证: `bash compiler/tests/stage1-expanded.sh` → 7/7 PASS (2026-08-14)
+
+## W-019: codegen 嵌套 struct `(o).inner.a` emit `loadsw` 类型错
+
+**Status:** ACTIVE (2026-08-14, v1.4.3 暂绕测试只用 flat struct)
+
+**触发面:** `(*outer_ptr).inner.field` 这种嵌套 struct 字段访问。Outer / Inner 都是 ABI struct 类型,Inner 至少含一个 i32 字段。
+
+**症状:** QBE reject `loadsw`/`loadw` 第一操作数类型错。例:
+```
+type Inner = struct { a: i32, b: i32 }
+type Outer = struct { inner: Inner }
+fn read_inner(o: *Outer) -> i32 { return (*o).inner.a + (*o).inner.b; }
+```
+`compile wnested_test.jhyy` 报:
+```
+qbe:wnested_test.il:15: invalid type for first operand %t2 in loadsw
+```
+line 15 通常是读取 `(*o).inner.a` 对应 `loadsw` 那行。
+
+**根因嫌疑:** `cg_field_addr` 在 chain `.inner.a` 时,把外层 `.inner` 当作 struct field 而不是 sub-struct 看待 — emit 的 `.inner` 偏移处的 `loadsw` 把 outer 地址当 `b`/`h` 大小解码,实际 inner 字段是 `w` (4 字节 i32)。或者 `qbe_type_of` 在 inner struct ptr 解一层时返回错类型。未经确诊 — post-v1.4.3 follow-up。
+
+**workaround (v1.4.3 测试):** `compiler/tests/examples/gdb_pretty_test.jhyy` 只覆盖 flat struct / single-layer enum / slice,不写嵌套 struct 测试用例。生产代码遇到嵌套 struct 字段访问时,临时绕过:
+1. 用 `let inner_copy: Inner = (*o).inner; let r = inner_copy.a + inner_copy.b;` 把内层值拷出来再读字段
+2. 或直接 `(*o).inner.a` 拆成两步:`let i_ptr: *Inner = &((*o).inner); (*i_ptr).a`
+
+**影响范围:**
+- 任何用户写嵌套 struct 字段访问的 .jhyy 文件都会触发 (少见但合法)
+- jhyy 编 lexer.jhyy / parser.jhyy / codegen.jhyy 不触发 (用 enum + flat struct)
+
+**失效条件:** fix 后必须 revert 测试里的 `// NOTE: nested struct` 注释并补 nested-struct 用例
+
+**superseder:** 待 post-v1.4.3 fix (sprint 计划见下个 sprint 设计)
+
+**引用:**
+- repro: v1.4.3 验证时跑的 `wnested_test.jhyy` (内嵌在会话日志,未 commit)
+- W-008 (已 RESOLVED) 类似路径但单层 field offset;W-019 是嵌套场景的复发
 

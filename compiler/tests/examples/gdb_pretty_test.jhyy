@@ -1,0 +1,69 @@
+// gdb_pretty_test.jhyy — v1.4.3 test for gdb_pretty.py
+// EXPECT: 0
+//
+// Covers the three composite types handled by the pretty printer:
+//   - struct (Point: 2 flat fields)
+//   - enum   (Color: 3 unit variants; MaybeInt: variant with payload)
+//   - slice  ([*]i32: ptr + len)
+//
+// Why printf? — Without side effects, QBE aggressively folds enum values
+// (match on unit-variant → constant) and re-uses the stack slot for the
+// next allocation. The slice backing array ends up overwriting the enum
+// slots. Calling printf forces each var to remain addressable (printf
+// takes `*u8` so the compiler can't fold the call site into a constant).
+//
+// NOTE: nested struct (Outer { inner: Inner }) is excluded — the current
+// codegen has a pre-existing bug reading inner.x (W-019 workaround) that
+// would mask our pretty-printer test signal. Add nested-struct coverage
+// once W-019 is fixed (post-v1.4.3).
+//
+// Run:
+//   jhyy.exe compile gdb_pretty_test.jhyy -o gdb_pretty_test
+//   qbe -t amd64_win -o gdb_pretty_test.s gdb_pretty_test.il
+//   gcc gdb_pretty_test.s runtime.c -O0 -o gdb_pretty_test.exe
+//   gdb -batch \
+//     -ex "source .gdbinit" \
+//     -ex "source compiler/src0/gdb_pretty.py" \
+//     -ex "jhyy-load-types compiler/tests/examples/gdb_pretty_test.jhyy" \
+//     -ex "b gdb_pretty_test.jhyy:46" -ex "r" \
+//     -ex "jhyy-pretty \$rsp Point" \
+//     -ex "jhyy-pretty \$rsp+8 Color" \
+//     -ex "jhyy-pretty \$rsp+12 MaybeInt" \
+//     -ex "jhyy-pretty \$rsp+24 [*]i32" \
+//     gdb_pretty_test.exe
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+type Point = struct { x: i32, y: i32 }
+type Color = enum { Red, Green, Blue }
+type MaybeInt = enum { Some(i32), None }
+
+// Helper functions: take each composite type by-pointer (the address
+// itself is computed by the caller). This forces QBE to allocate a real
+// stack slot for each var (because its address must be passed to the
+// callee and the callee may read it). Per ABI § 3.2, struct/enum/slice
+// pass-by-value goes through a hidden slot anyway, but taking the address
+// explicitly via `&` is the simplest way to *also* keep the original
+// caller-side slot alive.
+fn read_point(p: *Point) -> i32 { return (*p).x + (*p).y; }
+fn read_color(c: *Color) -> i32 {
+    return match *c { Color::Red => 0, Color::Green => 1, Color::Blue => 2 };
+}
+fn read_maybe(m: *MaybeInt) -> i32 {
+    return match *m { MaybeInt::Some(v) => v, MaybeInt::None => 0 };
+}
+fn read_slice(s: [*]i32) -> i32 { return s[0] + s[4]; }
+
+fn main_jhyy() -> i32 {
+    let p: Point = Point { x: 10, y: 20 };
+    let c: Color = Color::Green;
+    let m: MaybeInt = MaybeInt::Some(42);
+    let s: [*]i32 = &[10, 20, 30, 40, 50];
+    // Use each var's address — compiler must allocate slots for them
+    // because their addresses are passed into the helper.
+    // (Note: jhyy's `&` on a struct returns `*T` per struct ABI; pass
+    // through `*Point` / `*Color` / `*MaybeInt`.)
+    printf("p=%d c=%d m=%d s=%d\n" as *u8,
+           read_point(&p) + read_color(&c) + read_maybe(&m) + read_slice(s));
+    return 0;
+}
