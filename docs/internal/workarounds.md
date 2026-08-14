@@ -45,6 +45,7 @@
 | [W-017](#w-017-jhyy-顶层-let-mut-*-u8--0--codegen-常量折叠-全局状态-失效) | ACTIVE (v1.4.1, 暂绕 C runtime) | jhyy 端 codegen 不实现真正的顶层 `let mut g_x: *u8 = 0 as *u8;` — global initializer `0` 在 codegen 阶段被常量折叠为 0,后续所有读 `g_x` 的 QBE IR 都是 `=l copy 0`,sentinel null pointer;路径硬编码消除被迫委托 C runtime `jhyy_helpers.c` 持有 path state |
 | [W-018](#w-018-v142-dwarf-emit-引入-stage-1-il-字节差异-非功能) | ✅ RESOLVED 2026-08-14 | v1.4.2 DWARF emit 引入 Stage 1 .il 字节差异 (非功能) — 实测 `stage1-expanded.sh` 脚本错写路径吞错,改后 7/7 PASS,W-018 是误报 RESOLVED |
 | [W-019](#w-019-codegen-嵌套-struct-innerx-emit-loadsw-类型错) | ACTIVE (v1.4.3, 暂绕 test 用 flat-only) | codegen `cg_field_addr` 在处理 `(*o).inner.a` 这种嵌套 struct 字段时,emit 的 `loadsw`/`loadw` 第一操作数类型错(QBE reject: "invalid type for first operand in loadsw")。当前 v1.4.3 测试用例只覆盖 flat struct,嵌套 struct 留给 post-v1.4.3 修 |
+| [W-020](#w-020-jhyy-side-parserjhyy-parse_pattern-colorvariant-分支-bug) | ACTIVE (v1.4.4, 暂绕 test 用 let-binding 替代 enum pattern) | jhyy-side `parser.jhyy` parse_pattern 在 match arm 上下文中处理 `Color::Variant` 时,`parser_check(p, TOKEN_COLONCOLON())` 返回 0 即使下一个 token 实际是 `::`,parser 走 ident-pattern 分支提前返回,留下 `::` 让 expr 解析报 `expected =>, got ::`。C-side `parser.c` (line 124-138) 正确处理同样输入。bug 在 v1.4.4 物理 production flip 前被 C-side `jhyy.exe` 遮住 |
 
 ---
 
@@ -1734,4 +1735,64 @@ line 15 通常是读取 `(*o).inner.a` 对应 `loadsw` 那行。
 **引用:**
 - repro: v1.4.3 验证时跑的 `wnested_test.jhyy` (内嵌在会话日志,未 commit)
 - W-008 (已 RESOLVED) 类似路径但单层 field offset;W-019 是嵌套场景的复发
+
+## W-020: jhyy-side `parser.jhyy` parse_pattern `Color::Variant` 分支 bug
+
+**Status:** ACTIVE (2026-08-14, v1.4.4 暂绕 gdb_pretty_test 用 flat-only / 待 fix)
+
+**触发面:** 任何 jhyy-side 编译遇到 match arm 中 `EnumName::Variant` 或 `EnumName::Variant(payload)` 这种 fully-qualified enum pattern。
+
+**症状:** `compile gdb_pretty_test.jhyy` 报:
+```
+gdb_pretty_test.jhyy:50:28: error: expected =>, got ::
+gdb_pretty_test.jhyy:50:28: error: unexpected token '::' in expression
+...
+parse errors
+```
+line 50 是 `match *c { Color::Red => 0, ... }`,col 28 是 `Color::Red` 中 `::` 位置。最小 repro:
+```jhyy
+type Color = enum { Red, Green, Blue }
+fn main_jhyy() -> i32 {
+    return match 1 { Color::Red => 0, Color::Green => 1, Color::Blue => 2 };
+}
+```
+jhyy-side 编译失败;C-side (`jhyy_stage0.exe`) 编译通过。
+
+**根因:** `compiler/src0/parser.jhyy:1134` `parse_pattern` 在 `parser_advance(p, &t)` 消耗 outer ident `Color` 后,`parser_check(p, TOKEN_COLONCOLON())` 返回 0,即使下一个 token 实际是 `::`。parser 走 line 1158+ ident-pattern 路径(line 1171 短名 variant 分支),最终返回 NODE_PATTERN_IDENT,留下 `::` 给上层 expr parser,expr parser 报 `expected =>, got ::`。
+
+**C-side 对照 (`compiler/src/parser.c:124-138`):**
+```c
+advance(p);  // line 124
+if (match(p, TOKEN_COLONCOLON)) {  // line 125 - atomic check + advance
+    Token vt = expect(p, TOKEN_IDENT, "variant name");
+    ...
+}
+```
+C-side 用 `match` (原子 check + advance) 正常处理同样输入。jhyy-side 用 `parser_check` + 后续 `parser_advance` 分离两步,理论等价,但实际在 match arm 上下文中返回错值 — 未经确诊是不是 token peek cache (`lexer.has_peek`) 在某种状态下未正确恢复 / invalidate,或 jhyy-side 编译器参数个数检查缺失(line 1283 `parser_advance(p)` 调用缺第二个参数 `&t` 也没报编译错)。
+
+**workaround (v1.4.4 测试):** `compiler/tests/examples/gdb_pretty_test.jhyy` line 50 / 53 的 enum pattern 暂不动(等真修);如果要做回归,临时用 let-binding 替代:
+```jhyy
+let tag: i32 = color_tag(*c);   // 调用外部 helper 提取 enum tag (i32)
+match tag { 0 => ..., 1 => ..., 2 => ... }
+```
+
+**影响范围:**
+- 任何用户写 match arm `EnumName::Variant` 的 .jhyy 都会触发
+- jhyy 编 lexer.jhyy / parser.jhyy / codegen.jhyy **不触发**(用 `match` on i32,不用 enum pattern)
+- C-side 不受影响(C 端 parse_pattern line 124-138 正确)
+- v1.4.4 之前 production `jhyy.exe` 实际是 C-side (sha `c9cff76...`),bug 被遮住;v1.4.4 物理替换为 jhyy-side (sha `37ffc49c...`) 后首次暴露
+
+**失效条件 (任一即可移除 W-020):**
+1. 改 `compiler/src0/parser.jhyy` parse_pattern `Color::Variant` 分支 (line 1134) + OR-pattern (line 1282-1288),使 jhyy-side 跟 C-side 行为一致
+2. C-side / jhyy-side mirror byte-equal 测试 (`stage1-byte-equal.sh`) 加 match-arm-with-enum-pattern 用例
+
+**修复路径候选:**
+- v1.4.6 跟 W-019 合并真修 (parser 是 codegen 无关,但跟 codegen W-019 同期改 cross-mirror 风险可控)
+- 或单独 v1.4.7 修 parser
+
+**引用:**
+- repro: `compiler/tests/examples/gdb_pretty_test.jhyy:50,53`;最小 repro `_min_enum.jhyy`
+- v1.4.4 ship 时 changelog 把此 bug 误标 "pre-existing v1.4.3" 已更正 → [`docs/logs/v1/changelog-v1.4.0.md`](../logs/v1/changelog-v1.4.0.md) § v1.4.4 ship
+- W-019 是 codegen 嵌套 struct,跟 W-020 (parser enum pattern) 不同面,但同样等真修;建议 v1.4.6 合并
+
 

@@ -1,0 +1,4 @@
+type Color = enum { Red, Green, Blue }
+fn main_jhyy() -> i32 {
+    return match 1 { Color::Red => 0, Color::Green => 1, Color::Blue => 2 };
+}

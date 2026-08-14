@@ -249,11 +249,11 @@
 - ✅ regress_v1.py (v1.4.2 baseline `jhyy_v1.exe.exe`) 50/54 PASS, 同样 1 failed
 
 **未达成 (透明声明):**
-- ❌ **gdb_pretty_test.jhyy compile error** — pre-existing from v1.4.3 ship. 测试用 `MaybeInt::Some(v) => v` 这种 enum pattern binding 模式, jhyy-side parser 不支持 (line 53: `unexpected token in match pattern`). v1.4.3 ship 时只跑了 5 spot-check (`arith / fib30 / match / struct / pointer`), 没跑全量 regress. 修复路径: 改 parser 支持 enum payload pattern (v1.4.7+ 候选), 或改 gdb_pretty_test 用 let-binding 替代 pattern (临时 workaround). v1.4.6 真修 W-019 后 nested-struct 路径会通, 但 enum pattern 路径不归 W-019
-- ❌ **Stage 1 byte-equal 不 7/7** — pre-existing W-005 #2 chain products: 新 `jhyy.exe` 产 jhyy.il sha `107445d6...`, 而旧 baseline `jhyy_v1.exe.exe` 产 jhyy_v1.exe.exe.il sha `760647f4...`, 两 sha 不同. 原因: 旧 baseline 是 pre-DWARF 时段的 binary (DWARF 还没 ship), jhyy-side codegen.jhyy 在 v1.4.2 加了 dbgfile/dbgloc emit, 现在 jhyy.exe 自带 DWARF, 而旧 jhyy_v1.exe.exe 不带. Stage 2 closure chain (v2/v3/v4 互相 byte-equal) 不受影响 — 那是 v1.4.x+ 强约束, 维持 `073fb8d4...`
+- ❌ **gdb_pretty_test.jhyy compile error** — **v1.4.4 新暴露, 不是 pre-existing v1.4.3**。测试用 `Color::Red => 0` (line 50) 和 `MaybeInt::Some(v) => v` (line 53) 这种 enum pattern, jhyy-side parser.jhyy parse_pattern (line 1104+) 不支持: `parser_check(p, TOKEN_COLONCOLON())` 在 match arm 上下文中返回 0,即使下一个 token 实际是 `::`,parser 走 ident-pattern 分支返回,留下 `::` 让上层 expr 解析报 `expected =>, got ::`。v1.4.3 ship 时 production `jhyy.exe` 实际是 C 端 (sha `c9cff76...`),C 端 parser.c 正确处理此 case,所以测试 C 端能过;jhyy-side bug 被遮住。v1.4.4 把 `jhyy.exe` 物理替换成 jhyy-side (sha `37ffc49c...`),bug 首次暴露。**root cause 是 jhyy-side parser.jhyy parse_pattern 的 divergence,不是 codegen,不归 W-019**。详 → [`docs/internal/workarounds.md`](../../internal/workarounds.md) § W-020 (新增)。修复路径: 改 `compiler/src0/parser.jhyy` parse_pattern `Color::Variant` 分支 (line 1134 附近) + OR-pattern (line 1282-1288),C-side / jhyy-side mirror byte-equal 对齐;v1.4.7 候选, 或 v1.4.6 跟 W-019 合并真修
+- ✅ **Stage 1 byte-equal 7/7 维持** — 新 `jhyy_stage0.exe` 编 src0/main.jhyy 产 _stage1_C.il sha `107445d637ad3b05aec2d3c64bf6111bca8fe029b2e98e8e6a21cee373dc3c97`, 跟 jhyy.il 同 sha, **byte-equal 完全成立**。ship 时 changelog 标 "Stage 1 byte-equal 不 7/7" 是错的(混淆了 W-005 #2 历史 + W-018 DWARF dbgfile 路径非功能差异),实际 v1.0.0 闭环以来 Stage 1 一直 7/7。Stage 2 closure chain v2/v3/v4 也维持 byte-equal sha `073fb8d4b24ac14656d864b1133cbe7417b22bc26e6fec2633f417b4d61ba2e8` (2026-08-14 实测 `jhyy_selfhost_check` 通过)
 - ❌ regress 默认 binary 仍是 `jhyy.exe` (无变化), v1.4.5 才加 `--stage0` flag
 
-**未引入新 workaround。** W-017 / W-019 仍 ACTIVE, v1.4.6 真修。
+**引入新 workaround W-020** (jhyy-side enum pattern parser bug, 上 bullet)。W-017 / W-019 仍 ACTIVE, v1.4.6 真修 W-017 + W-019;W-020 真修纳入 v1.4.6 范围讨论 (或单独 v1.4.7)。
 
 **Self-hosting impact:**
 - Stage 2 N=3 byte-equal: 维持 sha `073fb8d4b24ac14656d864b1133cbe7417b22bc26e6fec2633f417b4d61ba2e8`
