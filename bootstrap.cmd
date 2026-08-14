@@ -10,6 +10,7 @@ REM     Download: https://www.msys2.org/
 REM   * Python on PATH (for regress.py)
 
 setlocal
+cd /d "%~dp0"
 
 set "GCC=C:\msys64\ucrt64\bin\gcc.exe"
 set "SRC=compiler\src"
@@ -23,20 +24,29 @@ if not exist "%GCC%" (
     exit /b 1
 )
 
-echo [1/3] Building %BIN% ...
+echo [1/4] Building %BIN% ...
 "%GCC%" -std=c11 -Wall -Wextra %SRC%\*.c -o %BIN% -I %SRC%
 if errorlevel 1 (
     echo [ERROR] Build failed. See output above.
     exit /b 1
 )
 
-echo [2/3] Running regression suite ...
+REM 刚构建的二进制就是新基准 — 不重锁 baseline 的话, regress 会因 sha 漂移
+REM early-abort, 一个测试都不跑却报 "failures".
+echo [2/4] Locking regress baseline to freshly built binary ...
+python mcp-jhyy\jhyy_regress.py --save-baseline --binary %BIN%
+if errorlevel 1 (
+    echo [ERROR] Could not save baseline. Is Python on PATH?
+    exit /b 1
+)
+
+echo [3/4] Running regression suite ...
 python compiler\build\bin\regress.py
 if errorlevel 1 (
     echo [WARN] Regression reported failures - see output above.
 )
 
-echo [3/3] Bootstrap complete.
+echo [4/4] Bootstrap complete.
 echo.
 echo Next steps:
 echo   * In this terminal:    jhyy run compiler\tests\examples\hello.jhyy
