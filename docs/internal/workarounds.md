@@ -42,10 +42,10 @@
 | [W-014](#w-014-jhyy_selfhost_check-mcp-pre-stage-cleanup-deletes-canonical-closure-binaries) | ✅ RESOLVED | `jhyy_selfhost_check` MCP server 启动时 pre-stage cleanup 误把 `compiler/build/bin/jhyy_v1.exe.exe` (canonical closure binary) 当 stale artifact 删 → `enforce_baseline_hash=True` fail-fast 触发 |
 | [W-015](#w-015-node_sizeof-节点-arena-分配-8-字节--sema-const-fold-写-16-字节溢出到下一块) | ✅ RESOLVED (v1.3.3) | `ast_new_sizeof` / `ast_new_alignof` 只 alloc 8 字节,sema const-fold `node_int_data(n)` 写 16 字节溢出到 next arena chunk → 随机 data corruption |
 | [W-016](#w-016-8-字节-enum-参数-abi-mismatch--caller-用-l-slot-传callee-用-w-value-收) | ✅ RESOLVED (v1.3.7 fix) | enum payload > 4 字节时 caller 用 `l` (slot) 传,callee codegen 默认按 `w` (value) 收 → x86_64 SysV 读 %edi 拿到 slot pointer 低 32 位 → tag compare 永远 false → pattern binding `v` 拿不到值 |
-| [W-017](#w-017-jhyy-顶层-let-mut-*-u8--0--codegen-常量折叠-全局状态-失效) | ACTIVE (v1.4.1, 暂绕 C runtime) | jhyy 端 codegen 不实现真正的顶层 `let mut g_x: *u8 = 0 as *u8;` — global initializer `0` 在 codegen 阶段被常量折叠为 0,后续所有读 `g_x` 的 QBE IR 都是 `=l copy 0`,sentinel null pointer;路径硬编码消除被迫委托 C runtime `jhyy_helpers.c` 持有 path state |
+| [W-017](#w-017-jhyy-顶层-let-mut-*-u8--0--codegen-常量折叠-全局状态-失效) | ✅ RESOLVED 2026-08-14 (v1.4.6 commit `f20e36d`) | jhyy 端 codegen 不实现真正的顶层 `let mut g_x: *u8 = 0 as *u8;` — global initializer `0` 在 codegen 阶段被常量折叠为 0,后续所有读 `g_x` 的 QBE IR 都是 `=l copy 0`,sentinel null pointer;路径硬编码消除被迫委托 C runtime `jhyy_helpers.c` 持有 path state |
 | [W-018](#w-018-v142-dwarf-emit-引入-stage-1-il-字节差异-非功能) | ✅ RESOLVED 2026-08-14 | v1.4.2 DWARF emit 引入 Stage 1 .il 字节差异 (非功能) — 实测 `stage1-expanded.sh` 脚本错写路径吞错,改后 7/7 PASS,W-018 是误报 RESOLVED |
-| [W-019](#w-019-codegen-嵌套-struct-innerx-emit-loadsw-类型错) | ACTIVE (v1.4.3, 暂绕 test 用 flat-only) | codegen `cg_field_addr` 在处理 `(*o).inner.a` 这种嵌套 struct 字段时,emit 的 `loadsw`/`loadw` 第一操作数类型错(QBE reject: "invalid type for first operand in loadsw")。当前 v1.4.3 测试用例只覆盖 flat struct,嵌套 struct 留给 post-v1.4.3 修 |
-| [W-020](#w-020-jhyy-side-parserjhyy-parse_pattern-colorvariant-分支-bug) | ACTIVE (v1.4.4, 暂绕 test 用 let-binding 替代 enum pattern) | jhyy-side `parser.jhyy` parse_pattern 在 match arm 上下文中处理 `Color::Variant` 时,`parser_check(p, TOKEN_COLONCOLON())` 返回 0 即使下一个 token 实际是 `::`,parser 走 ident-pattern 分支提前返回,留下 `::` 让 expr 解析报 `expected =>, got ::`。C-side `parser.c` (line 124-138) 正确处理同样输入。bug 在 v1.4.4 物理 production flip 前被 C-side `jhyy.exe` 遮住 |
+| [W-019](#w-019-codegen-嵌套-struct-innerx-emit-loadsw-类型错) | ✅ RESOLVED 2026-08-14 (v1.4.6 commit `6638134`) | codegen `cg_field_addr` 在处理 `(*o).inner.a` 这种嵌套 struct 字段时,emit 的 `loadsw`/`loadw` 第一操作数类型错(QBE reject: "invalid type for first operand in loadsw")。当前 v1.4.3 测试用例只覆盖 flat struct,嵌套 struct 留给 post-v1.4.3 修 |
+| [W-020](#w-020-jhyy-side-parserjhyy-parse_pattern-colorvariant-分支-bug) | ✅ RESOLVED 2026-08-14 (v1.4.6 commit `ad42117`) | jhyy-side `parser.jhyy` parse_pattern 在 match arm 上下文中处理 `Color::Variant` 时,`parser_check(p, TOKEN_COLONCOLON())` 返回 0 即使下一个 token 实际是 `::`,parser 走 ident-pattern 分支提前返回,留下 `::` 让 expr 解析报 `expected =>, got ::`。C-side `parser.c` (line 124-138) 正确处理同样输入。bug 在 v1.4.4 物理 production flip 前被 C-side `jhyy.exe` 遮住 |
 
 ---
 
@@ -1605,7 +1605,27 @@ export function w $unwrap_or(w %opt, ...)  ← ❌ callee 声明 w!
 
 ## W-017: jhyy 顶层 `let mut *u8 = 0` codegen 常量折叠 → 全局状态失效
 
-**Status:** 🔶 ACTIVE (v1.4.1, jhyy_v1 codegen 限制未修, 暂绕 C runtime)
+**Status:** ✅ RESOLVED 2026-08-14 (commit `f20e36d`, v1.4.6 W-017 真修)
+
+**Why RESOLVED:** v1.4.6 W-017 真修 — cg_module pass A 加 NODE_LET 分支 emit
+QBE `.data` section (e.g. `data $g_x = { w 41 }`) + 注册到 `mod_globals` dict
+(`Sym*` → `$g_qbe`); `cg_find_local` fallthrough 到 globals; `cg_expr` /
+`cg_stmt` NODE_IDENT 路径 dispatch on `addr.kind == IRVAL_STR` 触发
+`ir_emit_load` / `ir_emit_store` 发 `loadw/storew $g_x` (QBE data section
+引用)。同时 `ir_emit_arg` helper (Sprint 4.4 commit 2.36 latent bug fix 引入)
+mirror 加到 C-side `src/ir.c`,改 `ir_emit_store` / `ir_emit_load` dispatch
+through `ir_emit_arg` — Stage 1 byte-equal 守门恢复 (jhyy_v1 → v2 → v3 → v4
+闭包链字节相同)。CGCONTEXT_SIZE bump 112 → 128 (C-side + jhyy-side 同 commit
+bump, per W-005 layout 锁)。
+
+**superseder:** commit `f20e36d` (2026-08-14, "fix(v1.4.6 W-017): module-level
+let mut 真修 — QBE data section + ir_emit_arg mirror")
+
+**后续 (post-v1.4.6):**
+- `jhyy_helpers.c` DEPRECATED — 不再需要委托 path state 到 C runtime,但文件
+  保留 1-2 sprint 观察期,v1.5 installer 设计时决定删 / 留。
+- 顶层 `let mut` literal 折叠已修;非 literal initializer (e.g. `fn call()`)
+  当前 zero-init fallback — 完整 init expr codegen 留给后续 sprint (TODO)。
 
 **触发面 (v1.4.1 路径硬编码消除时发现)**: 
 - 计划 (per `docs/plans/v1/v1.4.0任务清单 + 概要设计.md` § v1.4.1):在 `main.jhyy` 顶层声明 `let mut g_qbe: *u8 = 0 as *u8;` 持有 QBE 路径,`compute_paths(argv0)` 在 `main_jhyy` 入口推项目根 → 写 4 个全局字符串 → `QBE_PATH()` 等 getter 返回 `g_qbe` 内容。
@@ -1702,7 +1722,22 @@ v1.4.2 DWARF 改动对 .il byte-equal 无影响。
 
 ## W-019: codegen 嵌套 struct `(o).inner.a` emit `loadsw` 类型错
 
-**Status:** ACTIVE (2026-08-14, v1.4.3 暂绕测试只用 flat struct)
+**Status:** ✅ RESOLVED 2026-08-14 (commit `6638134`, v1.4.6 W-019 真修)
+
+**Why RESOLVED:** v1.4.6 W-019 真修 — `cg_expr NODE_FIELD` 嵌套 struct 路径
+加 "field is STRUCT → return addr (don't load)" guard,跟 NODE_DEREF 现有 pattern
+一致 (`*ptr.field` 解引用 → 加 offset → 不 load;外层 `.field` 把内层 addr 当
+`l` 类型继续加 offset → emit `loadsw %tN, addr+a` 时第一操作数是 `l`,QBE
+接受)。C-side `src/codegen.c` + jhyy-side `src0/codegen.jhyy` 镜像 byte-equal
+改动 (per W-005 layout 锁)。新增 `nested_struct_test.jhyy` 验证 nested
+field chain (`Inner.a` + `Inner.b`) EXIT=15。
+
+**superseder:** commit `6638134` (2026-08-14, "fix(v1.4.6 W-019): nested
+struct field chain + payload binding codegen mirror")
+
+**后续 (post-v1.4.6):**
+- `gdb_pretty_test.jhyy` nested 用例 (W-019 修复后补齐) — gdb `jhyy-pretty
+  <addr> Outer` pretty-print `Outer{inner={a=7, b=8}}` 可视化验证
 
 **触发面:** `(*outer_ptr).inner.field` 这种嵌套 struct 字段访问。Outer / Inner 都是 ABI struct 类型,Inner 至少含一个 i32 字段。
 
@@ -1738,7 +1773,26 @@ line 15 通常是读取 `(*o).inner.a` 对应 `loadsw` 那行。
 
 ## W-020: jhyy-side `parser.jhyy` parse_pattern `Color::Variant` 分支 bug
 
-**Status:** ACTIVE (2026-08-14, v1.4.4 暂绕 gdb_pretty_test 用 flat-only / 待 fix)
+**Status:** ✅ RESOLVED 2026-08-14 (commit `ad42117`, v1.4.6 W-020 真修)
+
+**Why RESOLVED:** v1.4.6 W-020 真修 — `parse_pattern` + `parse_match` 上移到
+`parse_expr` 之前 (reorder); inline match 在 `parse_expr` 里改用 `parse_match`
+delegation (替换 Sprint 4.5 C step 3a 加的 ~165 行 inline duplicate);
+`parse_pattern` 的 range hi 改用新加的 `parse_pattern_primary` (inline
+primary expression, 不调 `parse_expr` 解 mutual recursion — 跟 jhyy 现有
+array count inline int literal 模式一致); `parse_match` OR pattern 分支
+`parser_advance(p)` 缺 `&t` 参数 UB 修。验证: `_min_enum.jhyy` jhyy-side
+编译通过; `gdb_pretty_test.jhyy` EXIT=0; `_v137_or_exhaust.jhyy` EXIT=1
+(OR pattern 不退化); match.jhyy / match_exhaustive.jhyy 不退化。
+
+**superseder:** commit `ad42117` (2026-08-14, "fix(v1.4.6 W-020): parse_pattern
+上移 + inline primary + simplify inline match")
+
+**后续 (post-v1.4.6):**
+- `parse_pattern_primary` 的限制保留:range hi 只能是 literal / ident / paren /
+  struct literal (不能 `x..arr.len()`),跟 jhyy 现有 array count 模式一致 —
+  full expression 留给后续 spec 扩展
+- jhyy-side forward decl 不引入(不需要,jhyy-side 无此语法 — 用 reorder 解)
 
 **触发面:** 任何 jhyy-side 编译遇到 match arm 中 `EnumName::Variant` 或 `EnumName::Variant(payload)` 这种 fully-qualified enum pattern。
 

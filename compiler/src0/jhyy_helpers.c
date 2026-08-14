@@ -132,7 +132,14 @@ __attribute__((used)) int jh_fmt_lld_stderr(const char *fmt, long long val) {
    - jh_paths_init(argv0) 一次: argv[0] 推项目根, 填 4 个 static buffer
    - jh_path_*() 多次读: 返回 const char* 到 static buffer
    ABI: argv0=*u8(i64 ptr), 返回 i32 (=0 OK / !=0 err)
-   与 main.c compute_project_root 镜像 (C 端不调这个 fn, jhyy 端才调)。 */
+   与 main.c compute_project_root 镜像 (C 端不调这个 fn, jhyy 端才调)。
+
+   v1.4.6 W-017 DEPRECATED: jhyy-side codegen 现在能 emit 真 module-level
+   global (QBE data section + mod_globals dict), 不再需要委托 path state 到
+   C runtime。本节保留 1-2 sprint 观察期, v1.5 installer 设计时决定删 / 留。
+   v1.4.6 后续: 可以逐步从 main.jhyy 移除 extern decl + wrapper, 改用顶层
+   `let mut path_qbe: *u8 = ...` 模式, 配合 init 函数一次性写入。
+   详见 docs/internal/workarounds.md W-017 superseder 段。 */
 static char jh_path_qbe_buf[1024];
 static char jh_path_gcc_buf[1024];
 static char jh_path_runtime_buf[1024];

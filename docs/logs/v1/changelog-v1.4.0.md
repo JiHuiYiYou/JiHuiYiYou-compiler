@@ -6,6 +6,7 @@
 - **v1.4.3** — gdb pretty printer (Python script for jhyy types)
 - **v1.4.4** — 物理替换 jhyy.exe (新 main.c argv[0] 版本替换原 baseline binary, 刷 v1.4.x 累计 sha)
 - **v1.4.5** — CI 双跑 + CLAUDE.md 同步
+- **v1.4.6** — codegen + parser 真修 W-017 + W-019 + W-020 (post-v1.4.4 暴露的 3 个 ACTIVE workaround)
 
 ## v1.4.1 ship (本次)
 
@@ -264,3 +265,64 @@
 **引用:**
 - v1.4.4 父 sprint: [`docs/plans/v1/v1.4.0任务清单 + 概要设计.md`](../../plans/v1/v1.4.0任务清单%20+%20概要设计.md) § Sprint v1.4.4
 - v1.4.6 后插: 同 umbrella § Sprint v1.4.6 (codegen 真修 W-017 + W-019)
+
+---
+
+## v1.4.6 ship (2026-08-14) — codegen + parser 真修 W-017 + W-019 + W-020
+
+**Commit:** `ad42117` (W-020) + `6638134` (W-019) + `f20e36d` (W-017)
+
+**改动文件 (per `git show --stat`):**
+- `compiler/src/codegen.c` + `compiler/src0/codegen.jhyy` — CGContext 加 `mod_globals` dict + cg_module pass A NODE_LET 分支 + cg_find_local fallthrough + cg_expr/cg_stmt NODE_IDENT IRVAL_STR dispatch
+- `compiler/src/ir.c` + `compiler/src/ir.h` + `compiler/src0/ir.jhyy` — `ir_emit_arg` helper (3-arm dispatch: IRVAL_INT → " <ival>"; IRVAL_STR → " $name"; default → " %t<id>"); `ir_emit_store` / `ir_emit_load` 改 dispatch through `ir_emit_arg`
+- `compiler/src0/parser.jhyy` — `parse_pattern` + `parse_match` 上移; inline match 改 `parse_match` delegation; `parse_pattern_primary` inline primary (解 mutual recursion); OR pattern `parser_advance(p)` UB 修
+- `compiler/tests/examples/top_level_let_mut_test.jhyy` — 新建 (W-017 真修最小 repro, g_x 顶层 i32 mut + main_jhyy 增 1 后 return, EXPECT=42)
+- `compiler/src0/jhyy_helpers.c` — 加 DEPRECATED 注释 (W-017 真修后不再需要委托 path state)
+- `docs/internal/workarounds.md` — W-017 / W-019 / W-020 全部 ✅ RESOLVED 标注 + 索引表 status 更新
+- `compiler/build/bin/jhyy.exe` + `compiler/build/bin/jhyy_stage0.exe` — binary sha 刷新 (改 codegen 预期)
+
+**核心机制:**
+
+1. **W-017 真修 (codegen module-level `let mut` emit `.data`):** cg_module pass A 处理 NODE_LET 时,emit `data $g_x = { w <literal> }` (literal 折叠) 或 `data $g_x = { w 0 }` (zero-init fallback) + 注册到 mod_globals dict (`Sym*` → `$<name>` QBE label + qbe_type)。cg_find_local miss 后 fallthrough 到 globals lookup,返回 IRVAL_STR 形式 IRVal (复用 IRVAL_STR 表达 data label)。cg_expr/cg_stmt NODE_IDENT 路径 dispatch on `addr.kind == IRVAL_STR` 触发 `ir_emit_load` / `ir_emit_store` 发 `loadw/storew $g_x` 形式 (QBE data section 直接引用)。CGCONTEXT_SIZE bump 112 → 128 (C-side + jhyy-side 同 commit bump, per W-005 layout 锁)。
+
+2. **W-019 真修 (codegen nested struct field chain):** cg_expr NODE_FIELD 嵌套 struct 路径 (ptr-to-struct + struct-value 双 branch) 加 "field is STRUCT → return addr" guard,跟 NODE_DEREF 现有 pattern 一致 (`*ptr.field` 解引用 → 加 offset → 不 load;外层 `.field` 把内层 addr 当 `l` 类型继续加 offset → emit `loadsw %tN, addr+a` 时第一操作数是 `l`,QBE 接受)。Mirror byte-equal 改 (C-side + jhyy-side 同步)。
+
+3. **W-020 真修 (parser inline match-as-expression reorder):** 把 `parse_pattern` + `parse_match` 上移到 `parse_expr` 之前 (reorder); inline match in `parse_expr` 改用 `parse_match` delegation (替换 Sprint 4.5 C step 3a 加的 ~165 行 inline duplicate); `parse_pattern` 的 range hi 改用新加的 `parse_pattern_primary` (inline primary expression, 不调 `parse_expr` 解 mutual recursion — 跟 jhyy 现有 array count inline int literal 模式一致, 跟 Zig/V/Odin single-pass 模式一致); `parse_match` OR pattern 分支 `parser_advance(p)` 缺 `&t` 参数 UB 修。
+
+**触发的工作流 (验证 per `feedback_fix_evaluation_rule` 5/5 PASS):**
+
+| 触发面 | W | jhyy-side 5/5 | C-side 5/5 | 测试 |
+|--------|---|--------------|------------|------|
+| 顶层 `let mut g_x: i32 = 41;` + `g_x = g_x + 1;` | W-017 | ✅ EXIT=42 | ✅ EXIT=42 | `top_level_let_mut_test.jhyy` |
+| `(*o).inner.a` + `(*o).inner.b` 嵌套 field chain | W-019 | ✅ EXIT=15 | ✅ EXIT=15 | `nested_struct_test.jhyy` |
+| `match 1 { Color::Red => 0 }` enum pattern | W-020 | ✅ 编译通过 | ✅ 编译通过 | `_min_enum.jhyy` (W-020 fix 最小 repro) |
+| `gdb_pretty_test.jhyy` 完整 enum pattern 用例 | W-020 | ✅ EXIT=0 | ✅ EXIT=0 | W-019 fix 后 nested 用例 + W-020 enum pattern 联动 |
+| `match 1 { 0 \| 1 => 0, _ => 1 }` OR pattern 不退化 | W-020 | ✅ EXIT=1 | ✅ EXIT=1 | `_v137_or_exhaust.jhyy` |
+| `match 1 { 1 => ... }` int pattern 不退化 | W-020 | ✅ EXIT=0 | ✅ EXIT=0 | `match.jhyy` / `match_exhaustive.jhyy` |
+
+**验证:**
+- ✅ Stage 0 → Stage 1 链通 (`gcc → jhyy_stage0.exe → jhyy.exe`, 0 errors / 0 warnings)
+- ✅ Stage 2 N=3 byte-equal 维持 (`jhyy_selfhost_check` all_byte_equal=true, il_sha256=`0f0df96fcfbd8ecd1ff9aa7eb5e31350529d2dcbc7183e62e94ae31daa340300`, 4 跳 v1=v2=v3=v4 byte-equal)
+- ✅ regress.py 53/53 PASS, 0 failed, 3 skipped (binary `jhyy.exe` baseline_match=null 因为 binary sha 跟 v1.4.4 baseline `d0857fa...` 不同 — W-017 改 codegen 后预期)
+- ✅ nested_struct_test.jhyy EXIT=15 (W-019 不退化)
+- ✅ top_level_let_mut_test_mcp_run.il 验证 cg_module NODE_LET 触发 emit `data $g_x = { w 41 }` + loadw/storew $g_x 字节正确
+- ✅ 5/5 PASS on `top_level_let_mut_test` (jhyy-side + C-side 各 5 次)
+
+**未达成 (透明声明):**
+- ❌ `jhyy_helpers.c` 未删 — DEPRECATED 注释已加, 保留 1-2 sprint 观察期, v1.5 installer 设计时决定删 / 留
+- ❌ 嵌套 enum pattern (`match *c { Color::Red(payload) }`) 仍未测 — W-019 修了 field chain 但 enum payload binding 的 codegen 路径未独立测过; 留给 v1.4.7+ (per superseder)
+- ❌ Type DWARF (`dbg_type_info` / `dbg_typedef` / `dbg_structure_type` 等) 未做 — DWARF 仅 emit line/file (v1.4.2 ship); gdb pretty printer (v1.4.3) 绕开; 留给 v2.x
+- ❌ C-side vs jhyy_v1 .il byte-equal (Stage 1) pre-existing 6/7 持平 — W-005 #2 chain products 仍未真修; 不归 v1.4.6 scope
+
+**ACTIVE workaround 数:** 0 (W-017 + W-019 + W-020 全部 ✅ RESOLVED, 索引表 + 详细段都标)
+
+**Self-hosting impact:**
+- jhyy.exe sha: `849a86458e4dbd8db3c6434595cfeac48dbbfef70e50d50d05871b60821c8121` (was `d0857fa...` v1.4.4, W-017 改 codegen 预期)
+- jhyy_stage0.exe sha: `503037B` (was `328917B` v1.4.4, 加 ir_emit_arg + IRVAL_STR dispatch 字节增大)
+- Stage 2 N=3 byte-equal sha: `0f0df96fcfbd8ecd1ff9aa7eb5e31350529d2dcbc7183e62e94ae31daa340300` (was `073fb8d4...` v1.4.4, W-017 真修改 codegen 输出预期刷新)
+
+**引用:**
+- v1.4.6 父 sprint: [`docs/plans/v1/v1.4.0任务清单 + 概要设计.md`](../../plans/v1/v1.4.0任务清单%20+%20概要设计.md) § Sprint v1.4.6
+- 真修详细方案: [`docs/plans/v1/v1.4.0详细实现方案.md`](../../plans/v1/v1.4.0详细实现方案.md) (umbrella per feedback_changelog_umbrella.md)
+- workarounds RESOLVED 标注: [`docs/internal/workarounds.md`](../../internal/workarounds.md) § W-017 / W-019 / W-020
+- superseder commits: `f20e36d` (W-017) / `6638134` (W-019) / `ad42117` (W-020)
