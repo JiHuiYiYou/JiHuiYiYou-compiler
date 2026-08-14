@@ -42,6 +42,7 @@
 | [W-014](#w-014-jhyy_selfhost_check-mcp-pre-stage-cleanup-deletes-canonical-closure-binaries) | ✅ RESOLVED | `jhyy_selfhost_check` MCP server 启动时 pre-stage cleanup 误把 `compiler/build/bin/jhyy_v1.exe.exe` (canonical closure binary) 当 stale artifact 删 → `enforce_baseline_hash=True` fail-fast 触发 |
 | [W-015](#w-015-node_sizeof-节点-arena-分配-8-字节--sema-const-fold-写-16-字节溢出到下一块) | ✅ RESOLVED (v1.3.3) | `ast_new_sizeof` / `ast_new_alignof` 只 alloc 8 字节,sema const-fold `node_int_data(n)` 写 16 字节溢出到 next arena chunk → 随机 data corruption |
 | [W-016](#w-016-8-字节-enum-参数-abi-mismatch--caller-用-l-slot-传callee-用-w-value-收) | ✅ RESOLVED (v1.3.7 fix) | enum payload > 4 字节时 caller 用 `l` (slot) 传,callee codegen 默认按 `w` (value) 收 → x86_64 SysV 读 %edi 拿到 slot pointer 低 32 位 → tag compare 永远 false → pattern binding `v` 拿不到值 |
+| [W-017](#w-017-jhyy-顶层-let-mut-*-u8--0--codegen-常量折叠-全局状态-失效) | ACTIVE (v1.4.1, 暂绕 C runtime) | jhyy 端 codegen 不实现真正的顶层 `let mut g_x: *u8 = 0 as *u8;` — global initializer `0` 在 codegen 阶段被常量折叠为 0,后续所有读 `g_x` 的 QBE IR 都是 `=l copy 0`,sentinel null pointer;路径硬编码消除被迫委托 C runtime `jhyy_helpers.c` 持有 path state |
 
 ---
 
@@ -1598,4 +1599,82 @@ export function w $unwrap_or(w %opt, ...)  ← ❌ callee 声明 w!
 - v1.3.7 fix ship (umbrella): [`docs/logs/v1/changelog-v1.3.0.md`](../logs/v1/changelog-v1.3.0.md) § v1.3.7 fix ship
 - v1.3.7 父 sprint: `docs/plans/v1/v1.3.0任务清单 + 概要设计.md` § v1.3.7
 - ABI spec: [`docs/abis/jhyy-abi-v1.0.0.md`](../abis/jhyy-abi-v1.0.0.md) § enum pass semantics (大 enum = slot 传)
+
+## W-017: jhyy 顶层 `let mut *u8 = 0` codegen 常量折叠 → 全局状态失效
+
+**Status:** 🔶 ACTIVE (v1.4.1, jhyy_v1 codegen 限制未修, 暂绕 C runtime)
+
+**触发面 (v1.4.1 路径硬编码消除时发现)**: 
+- 计划 (per `docs/plans/v1/v1.4.0任务清单 + 概要设计.md` § v1.4.1):在 `main.jhyy` 顶层声明 `let mut g_qbe: *u8 = 0 as *u8;` 持有 QBE 路径,`compute_paths(argv0)` 在 `main_jhyy` 入口推项目根 → 写 4 个全局字符串 → `QBE_PATH()` 等 getter 返回 `g_qbe` 内容。
+- 实测:jhyy_v1 codegen 把 `let mut g_qbe: *u8 = 0 as *u8;` 在 module 顶层当作 **常量 0** 编译期折叠 — 后续所有读 `g_qbe` 的 QBE IR 都是 `%t =l copy 0`,sentinel null pointer。
+- 后果:`run_qbe` 拼出 `" -t amd64_win -o foo.s foo.il"` (qbe 路径是空字符串),system() 失败 → "QBE failed"。
+
+**最小复现 (`compiler/src0/main.jhyy` 测试代码, 已 revert):**
+```jhyy
+// 顶层 — 不在 fn 内部
+let mut g_qbe: *u8 = 0 as *u8;
+
+fn compute_paths() -> i32 {
+    g_qbe = "C:/some/path/qbe.exe" as *u8;  // 写应该改 runtime state
+    return 0 as i32;
+}
+
+fn QBE_PATH() -> *u8 { return g_qbe; }    // 读应该返回新值
+```
+
+```bash
+$ jhyy_v1.exe.exe compile foo.jhyy -o foo
+[cg] Pass B start
+ret     ← ❌ QBE_PATH() emit 的 ret 没 operand,function signature 声明 *u8 返回 → QBE 拒绝
+```
+
+**IL 错误状态 (codegen jhyy 端的 top-level let mut fold 产物):**
+```
+export function l $QBE_PATH() {
+        ret               ← QBE: "non-void return needs a value"
+}
+```
+
+**根因:** jhyy_v1 codegen 顶层 `let mut` (NodeKind=NODE_LEV / 模拟 module-level var) 的 initializer 在 IR 生成阶段就 **编译期折叠** 成 `IRVal{kind=IRVAL_INT, val=0}` (zero-extend to l),后续 `cg_find_local` 命中 `local id=0` 直接返回这个 folded value,运行时 `store` 到 global slot 的指令被 dead-code-eliminated (因为 IR 不区分"runtime store"和"compile-time init")。C-side (codegen.c) 在 module-level 处理 `let mut g_x: T = expr;` 时 emit `store` 指令到 module-level data section,不折叠 → jhyy-side 缺这一段。
+
+**workaround (本 v1.4.1 ship):**
+- 路径状态从 jhyy 端迁出 → 委托 `compiler/src0/jhyy_helpers.c` (C runtime)。
+- 5 个 extern fn:`jh_paths_init(argv0) -> i32` (一次 init, 写 4 个 static buffer) + `jh_path_qbe/gcc/runtime/helpers() -> *u8` (4 次读, 返回 const char*)。
+- `main.jhyy` 顶部:5 个 extern fn decl + `QBE_PATH/GCC_PATH/RUNTIME_C/HELPERS_C` 4 个 thin wrapper fn(就是 return jh_path_*)。
+- `main_jhyy` 入口:调 `jh_paths_init(argv[0])` 一次。
+- `__attribute__((used))` 防止 gcc strip unused symbols (jhyy_v1 codegen 不直接调 `jh_paths_init`,通过 extern 间接调,gcc 可能 strip)。
+
+**跟 main.c (`compiler/src/main.c`) 关系:**
+- main.c 同步加 `compute_project_root(argv0)` + `g_project_root[1024]` global(C-side 有真正的 module-level static storage,emit 到 .data section)。
+- C 端 QBE / gcc / runtime / helpers 路径都拼 `g_project_root` 直接用,**不调** `jh_path_*` (jhyy 端才调,因为 jhyy 端没有真正的 global)。
+- jhyy_helpers.c 的 `jh_paths_init` 跟 main.c 的 `compute_project_root` 算法镜像 (dirname × 4 + GetModuleFileNameA 兜底),保持单一来源真相。
+
+**真修路径 (post-v1.4.1 / v2.x 候选):**
+- jhyy codegen 顶层 `let mut x: T = expr;` emit 真正的 store 指令 (不编译期折叠)。
+- 或者:加 `static mut x: T;` 关键字 (`unsafe` block),明确 runtime 初始化语义。
+- 或者:codegen 在 module 顶层加 `.data` section emit (C-side 已经做,但 jhyy-side 的 NODE_LEV 处理路径漏了 module-level case)。
+
+**失效条件 (任一即可移除 W-017):**
+- jhyy codegen 实现 module-level mutable global (上面"真修路径"任意一条)。
+- 或者 jhyy 改成只支持 pure-functional / 不需要 path state (jhyy_OS kernel coding 后无外部命令调用)。
+
+**验证 (v1.4.1 ship criteria, 5/5 PASS):**
+- `compiler/src/main.c` 0 hardcoded path (grep "C:/Users" 0 命中, 仅注释提及) ✅
+- `compiler/src0/main.jhyy` 0 hardcoded path ✅
+- `compiler/src0/jhyy_helpers.c` 0 hardcoded path ✅
+- regress.py 50/50 PASS ✅
+- Stage 2 N=3 byte-equal (`jhyy_v2.exe.il = jhyy_v3.exe.il = jhyy_v4.exe.il`) 维持 ✅
+- Clone 到 `/tmp/v14_clone_test/JiHuiYiYou/`(保留 canonical `compiler/build/bin/jhyy.exe` layout) 跑 hello.jhyy EXIT=42 ✅
+
+**Self-hosting impact:**
+- jhyy_v1.exe.exe sha: `1c09215f...` → `f36faeadd05c0...` (v1.4.1 刷新)
+- jhyy_v2/v3/v4 .exe sha: `e453b32c...`/`569e9091...`/`569e9091...` → `7e1917c8...`/`5cad02db...`/`de3c924f...` (v1.4.1 刷新)
+- jhyy_v2.il / v3.il / v4.il sha: `7c035615...` → `4c91f246...` (新 jhyy_v1 closure chain 输出;字节级变化是因为新 jhyy_v1 在 init 阶段调用了 5 个新 extern fn,新增了 module-level 函数体,不影响 .s 字节(因为 dead-code-eliminated 的 init call 在 .s 仍存在 — sha 变化是 expected))
+- Stage 1 byte-equal (C-side vs jhyy_v1): pre-existing 6/7 持平(W-005 #2 chain products 仍未真修);v1.4.1 路径生成不污染 IL
+
+**引用:**
+- v1.4.1 父 sprint: `docs/plans/v1/v1.4.0任务清单 + 概要设计.md` § Sprint v1.4.1
+- 跟 W-005 #2 区分:W-005 #2 是 codegen 优化不彻底(多 emit 几个 `copy %t` 但语义正确),W-017 是 codegen 缺 module-level global storage(完全没 runtime state,只能编译期常量)
+- 跟 main.c `compute_project_root` mirror:`compiler/src/main.c:30-77` (C 端有 module-level `static char g_project_root[1024]`,emit 到 .data,jhyy 端做不到)
+- jhyy ABI: `docs/abis/jhyy-lang-spec-v1.3.0.md` § global state (TODO: 需 spec 加"顶层 `let mut` 是 compile-time only, runtime state 必须用 extern fn 委托 C"这条规则)
 

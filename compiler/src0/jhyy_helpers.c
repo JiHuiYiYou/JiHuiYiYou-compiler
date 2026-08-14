@@ -12,6 +12,12 @@
 
 #include <stdio.h>
 #include <stdlib.h>  // atof (v1 sprint 3 commit 4 prefix_float)
+#include <string.h>  // strrchr (v1.4.1 jh_paths_init dirname)
+
+#ifdef _WIN32
+/* Forward-declare to avoid pulling windows.h (potential name conflicts) */
+unsigned long __stdcall GetModuleFileNameA(void *hModule, char *lpFilename, unsigned long nSize);
+#endif
 
 /* sprintf_lld：i64 参数 sprintf wrapper（jhyy extern 不能 variadic）。
    Windows x64 ABI 下 i64 和 i32 都走 RCX/RDX/R8/R9 GPR，所以转发安全。
@@ -120,3 +126,52 @@ __attribute__((used)) int jh_fmt_d_stderr(const char *fmt, int val) {
 __attribute__((used)) int jh_fmt_lld_stderr(const char *fmt, long long val) {
     return fprintf(stderr, fmt, val);
 }
+
+/* v1.4.1: 路径硬编码消除 — jhyy 端 codegen 不实现真正的顶层 let mut global
+   (g_qbe 等会被常量折叠为 0), 所以路径状态放在 C runtime。
+   - jh_paths_init(argv0) 一次: argv[0] 推项目根, 填 4 个 static buffer
+   - jh_path_*() 多次读: 返回 const char* 到 static buffer
+   ABI: argv0=*u8(i64 ptr), 返回 i32 (=0 OK / !=0 err)
+   与 main.c compute_project_root 镜像 (C 端不调这个 fn, jhyy 端才调)。 */
+static char jh_path_qbe_buf[1024];
+static char jh_path_gcc_buf[1024];
+static char jh_path_runtime_buf[1024];
+static char jh_path_helpers_buf[1024];
+static int  jh_paths_initialized = 0;
+
+__attribute__((used)) int jh_paths_init(const char *argv0) {
+    char exe_path[1024];
+    int has_sep = argv0 && (strchr(argv0, '/') || strchr(argv0, '\\'));
+#ifdef _WIN32
+    if (!has_sep) {
+        unsigned long n = GetModuleFileNameA(NULL, exe_path, sizeof(exe_path));
+        if (n == 0 || n >= sizeof(exe_path)) return 1;
+    } else
+#endif
+    {
+        if (!argv0) return 1;
+        snprintf(exe_path, sizeof(exe_path), "%s", argv0);
+    }
+    /* dirname × 4: .../compiler/build/bin/jhyy.exe → project root */
+    for (int i = 0; i < 4; i++) {
+        char *slash = strrchr(exe_path, '/');
+        char *bslash = strrchr(exe_path, '\\');
+        char *last = slash > bslash ? slash : bslash;
+        if (!last) return 1;
+        *last = '\0';
+    }
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wformat-truncation"
+    snprintf(jh_path_qbe_buf,     sizeof(jh_path_qbe_buf),     "%s/qbe/qbe.exe", exe_path);
+    snprintf(jh_path_gcc_buf,     sizeof(jh_path_gcc_buf),     "gcc");
+    snprintf(jh_path_runtime_buf, sizeof(jh_path_runtime_buf), "%s/compiler/runtime/runtime.c", exe_path);
+    snprintf(jh_path_helpers_buf, sizeof(jh_path_helpers_buf), "%s/compiler/src0/jhyy_helpers.c", exe_path);
+    #pragma GCC diagnostic pop
+    jh_paths_initialized = 1;
+    return 0;
+}
+
+__attribute__((used)) const char *jh_path_qbe(void)     { return jh_path_qbe_buf; }
+__attribute__((used)) const char *jh_path_gcc(void)     { return jh_path_gcc_buf; }
+__attribute__((used)) const char *jh_path_runtime(void) { return jh_path_runtime_buf; }
+__attribute__((used)) const char *jh_path_helpers(void) { return jh_path_helpers_buf; }
