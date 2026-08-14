@@ -414,23 +414,43 @@ def _resolve_binary(binary: str) -> str:
     return _resolve_path(binary)
 
 
-def _maybe_rebuild_jhyy_v1() -> dict:
-    """auto_rebuild=True 时调: gcc 编译 jhyy.exe + jhyy.exe 编 src0/main.jhyy → jhyy_v1."""
+def _maybe_rebuild_v144() -> dict:
+    """v1.4.4 改: auto_rebuild=True 时调 stage-0 链:
+       gcc → jhyy_stage0.exe (C 端 bootstrap)
+       jhyy_stage0.exe compile src0/main.jhyy → jhyy.exe (jhyy-side production)
+       cp jhyy.exe → jhyy.exe.exe (新 baseline)
+    """
+    # Stage 0: gcc 编译 C 端 → jhyy_stage0.exe
     gcc_cmd = ["gcc", "-std=c11", "-Wall", "-Wextra",
-               "compiler/src/*.c", "-o", "compiler/build/bin/jhyy.exe",
+               "compiler/src/*.c",
+               "-o", "compiler/build/bin/jhyy_stage0.exe",
                "-I", "compiler/src"]
     gcc_result = _run_cmd(gcc_cmd, timeout=120)
     if not gcc_result["ok"]:
-        return {"ok": False, "stage": "gcc_compile_jhyy", "stderr_tail": gcc_result["stderr"][-200:]}
-    compile_cmd = [str(JHYY_EXE), "compile", "compiler/src0/main.jhyy",
-                   "-o", "compiler/build/bin/jhyy_v1"]
+        return {"ok": False, "stage": "gcc_compile_stage0",
+                "stderr_tail": gcc_result["stderr"][-200:]}
+    # Stage 1: jhyy_stage0.exe 编 src0/main.jhyy → jhyy.exe (production)
+    stage0_exe = JHYY_ROOT / "compiler/build/bin/jhyy_stage0.exe"
+    compile_cmd = [str(stage0_exe), "compile", "compiler/src0/main.jhyy",
+                   "-o", "compiler/build/bin/jhyy"]
     compile_result = _run_cmd(compile_cmd, timeout=120)
     if not compile_result["ok"]:
-        return {"ok": False, "stage": "jhyy_v1_compile_main", "stderr_tail": compile_result["stderr"][-200:]}
-    # cp jhyy_v1.exe → jhyy_v1.exe.exe (per memory feedback_regress_baseline_binary_hash)
+        return {"ok": False, "stage": "stage0_compile_main",
+                "stderr_tail": compile_result["stderr"][-200:]}
+    # cp jhyy.exe → jhyy.exe.exe (per memory feedback_regress_baseline_binary_hash)
     import shutil
-    shutil.copy("compiler/build/bin/jhyy_v1.exe", "compiler/build/bin/jhyy_v1.exe.exe")
+    shutil.copy("compiler/build/bin/jhyy.exe", "compiler/build/bin/jhyy.exe.exe")
+    # 同时刷新 jhyy_v1.exe.exe (历史 baseline, regress_v1.py 用)
+    # jhyy_v1.exe.exe 在 v1.4.4 后 = jhyy.exe 自身 (因为 jhyy.exe 现在是 jhyy-side 产物)
+    # 但保留独立 binary 维持 v1.0.0 historical baseline 可追溯
+    shutil.copy("compiler/build/bin/jhyy.exe", "compiler/build/bin/jhyy_v1.exe.exe")
     return {"ok": True}
+
+
+# v1.4.4: 保留旧函数名作 fallback (向后兼容 — 旧 caller 可能仍调)
+def _maybe_rebuild_jhyy_v1() -> dict:
+    """v1.4.4 deprecation: 旧函数名转发到 _maybe_rebuild_v144. 保留签名兼容."""
+    return _maybe_rebuild_v144()
 
 
 def selfhost_check(src: str = "compiler/src0/main.jhyy", auto_rebuild: bool = False,

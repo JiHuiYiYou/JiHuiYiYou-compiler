@@ -24,16 +24,38 @@ C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/
 
 ---
 
-## 编译编译器
+## 编译编译器 (v1.4.4 stage-0 链)
+
+**Stage 0**: gcc 编译 C 端 bootstrap → `compiler/build/bin/jhyy_stage0.exe`
 
 ```bash
-/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra \
+gcc -std=c11 -Wall -Wextra \
     compiler/src/*.c \
-    -o compiler/build/bin/jhyy.exe \
+    -o compiler/build/bin/jhyy_stage0.exe \
     -I compiler/src
 ```
 
-构建产物在 `compiler/build/bin/jhyy.exe`。`-Wall -Wextra` 必须零警告。
+**Stage 1**: jhyy_stage0.exe 编译 src0/main.jhyy → `compiler/build/bin/jhyy.exe` (production)
+
+```bash
+compiler/build/bin/jhyy_stage0.exe compile compiler/src0/main.jhyy \
+    -o compiler/build/bin/jhyy
+```
+
+**或用 Makefile 一键**:
+```bash
+make           # = stage0 + stage1, 产 jhyy.exe
+make stage0    # 只 stage 0 (改 src/*.c 后)
+make selfhost  # stage 1 + 3 次自举 closure (v1 → v2 → v3 → v4 byte-equal)
+```
+
+构建产物:
+- `compiler/build/bin/jhyy.exe` — jhyy-side 产物 (production, users invoke)
+- `compiler/build/bin/jhyy_stage0.exe` — C 端 bootstrap (改 src/*.c 后重建)
+- `compiler/build/bin/jhyy.exe.exe` — jhyy.exe baseline (per baseline binary hash rule)
+- `compiler/build/bin/jhyy_v1.exe.exe` — v1.0.0 historical baseline (regress_v1.py 用, 不可退役)
+
+`-Wall -Wextra` 必须零警告。
 
 ---
 
