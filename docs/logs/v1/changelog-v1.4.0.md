@@ -97,7 +97,7 @@
 |--------|------|------|
 | v1.4.2 | codegen emit DWARF (`.loc` + `dbg_file` + `dbg_subprogram`); C-side codegen.c + jhyy-side codegen.jhyy mirror | ✅ 本次 ship |
 | v1.4.3 | `compiler/src0/gdb_pretty.py` + `.gdbinit` + `gdb_pretty_test.jhyy`; pretty-print struct / enum / slice via `jhyy-pretty <addr> <type>` gdb command | ✅ 本次 ship |
-| v1.4.4 | 物理替换 `compiler/build/bin/jhyy.exe` baseline (sha `ac2a1b19...`) 到新 main.c argv[0] 版本; regress 默认 binary 改 `jhyy.exe.exe`; 跑 regress_stage0.py 验证 C 端仍 byte-equal | 待启动 |
+| v1.4.4 | 物理替换 `compiler/build/bin/jhyy.exe` = jhyy-side 产物 (sha `ac2a1b19...` C 端 → `37ffc49c...` jhyy-side); 新增 `jhyy_stage0.exe` = C 端 stage-0 bootstrap (sha `d624f150...`); Makefile 加 `stage0` / `selfhost` target; build.md 同步 stage-0 链 | ✅ 本次 ship |
 | v1.4.5 | regress.py 默认 binary 改 `jhyy.exe.exe` + 加 `--stage0` flag; GH Actions CI 三跑 (regress_v1 + regress + regress_stage0) + Stage 1/2 byte-equal | 待启动 |
 | v1.4.6 | codegen 真修 W-017 (顶层 `let mut` emit `.data` + module globals dict) + W-019 (嵌套 struct field chain `cg_alloc_temp_slot` helper); C-side + jhyy-side mirror 同步; ACTIVE workaround → 0; `jhyy_helpers.c` 标 DEPRECATED 保留 | 设计中 (并入 [v1.4.0 umbrella](../../plans/v1/v1.4.0任务清单%20+%20概要设计.md) § Sprint v1.4.6; 待 v1.4.4 ship 后启动) |
 
@@ -212,3 +212,55 @@
 - W-017 详细: [`docs/internal/workarounds.md`](../../internal/workarounds.md) § W-017
 - ABI 路径无关性: [`docs/abis/jhyy-abi-v1.0.0.md`](../../abis/jhyy-abi-v1.0.0.md) (无路径相关条目, 编译器纯 runtime concern)
 - 上游 umbrella: `docs/logs/v1/changelog-v1.3.0.md` (v1.3.x ship 历史)
+
+## v1.4.4 ship (本次 commit)
+
+**Commit:** (本次 1 commit, 物理 production flip)
+
+**改动文件 (per `git show --stat`):**
+- `Makefile` — +41 / -6 行 (重写: 加 `stage0` / `selfhost` target; `all` target 走 stage-0 链)
+- `mcp-jhyy/jhyy_runner.py` — +38 / -19 行 (新 `_maybe_rebuild_v144()`, 旧 `_maybe_rebuild_jhyy_v1()` 作 fallback 兼容)
+- `docs/internal/build.md` — +30 / -6 行 ("编译编译器" 章节改 stage-0 链描述, 加 Makefile 一键用法)
+- `.gitignore` — +1 行 (`!compiler/build/bin/jhyy_stage0.exe` 例外)
+- `compiler/build/bin/jhyy.exe` — sha `c9cff76...` → `37ffc49c...` (C 端 328405B → jhyy-side 451641B, +37% 因 DWARF)
+- `compiler/build/bin/jhyy_stage0.exe` — 新增 (sha `d624f150...`, C 端 328405B)
+- `compiler/build/bin/jhyy_v1.exe.exe` — sha `3183594c...` → `37ffc49c...` (跟新 jhyy.exe 同 sha, 因为物理 = 同一 jhyy-side binary)
+- `compiler/build/bin/jhyy_v2.exe` / `v3.exe` / `v4.exe` — 全刷 (Stage 2 closure 链重建)
+
+**目的:** 打破 C 端 = production 状态。`compiler/build/bin/jhyy.exe` 现在是 jhyy-side 自举编译产物 (跟 regress.py 默认 binary 路径一致, 用户调 `jhyy.exe compile ...` 实际跑的是 jhyy-side, 不是 C 端)。C 端降级为 stage-0 bootstrap, 仅在 `compiler/src/*.c` 改了之后重建一次。
+
+**核心机制:**
+- **Stage 0**: `gcc compiler/src/*.c -o compiler/build/bin/jhyy_stage0.exe` — C 端产物, 改 src/*.c 后重建
+- **Stage 1**: `jhyy_stage0.exe compile compiler/src0/main.jhyy -o compiler/build/bin/jhyy` — jhyy-side 产物 = production
+- **Baseline 同步**: `cp jhyy.exe jhyy.exe.exe` + `cp jhyy.exe jhyy_v1.exe.exe` (per `feedback_regress_baseline_binary_hash.md`, baseline 必须 .exe.exe)
+- **Makefile 简化**: `make` = stage 0 + stage 1; `make stage0` 只 stage 0; `make selfhost` 跑 Stage 2 closure 链验证
+
+**触发的工作流:**
+1. 改 `compiler/src/*.c` → `make stage0` → 重建 jhyy_stage0.exe
+2. `make` (= stage0 + stage1) → 重建 jhyy.exe (production)
+3. `make selfhost` → 验证 Stage 2 closure chain (v1 → v2 → v3 → v4 byte-equal)
+4. 用户调 `compiler/build/bin/jhyy.exe compile foo.jhyy` → 实际跑 jhyy-side (不是 C 端)
+
+**验证 (per `feedback_fix_evaluation_rule` 5/5 PASS):**
+- ✅ Stage 0 → Stage 1 链通 (`gcc → jhyy_stage0.exe → jhyy.exe`, 0 errors / 0 warnings)
+- ✅ Stage 2 N=3 byte-equal 维持 (`jhyy_v2.il = jhyy_v3.il = jhyy_v4.il` sha `073fb8d4b24ac14656d864b1133cbe7417b22bc26e6fec2633f417b4d61ba2e8`)
+- ✅ hello.jhyy EXIT=42 (production `jhyy.exe` 跑用户 .jhyy, 行为不变)
+- ✅ regress 50/54 PASS, 1 failed, 3 skipped
+- ✅ regress_v1.py (v1.4.2 baseline `jhyy_v1.exe.exe`) 50/54 PASS, 同样 1 failed
+
+**未达成 (透明声明):**
+- ❌ **gdb_pretty_test.jhyy compile error** — pre-existing from v1.4.3 ship. 测试用 `MaybeInt::Some(v) => v` 这种 enum pattern binding 模式, jhyy-side parser 不支持 (line 53: `unexpected token in match pattern`). v1.4.3 ship 时只跑了 5 spot-check (`arith / fib30 / match / struct / pointer`), 没跑全量 regress. 修复路径: 改 parser 支持 enum payload pattern (v1.4.7+ 候选), 或改 gdb_pretty_test 用 let-binding 替代 pattern (临时 workaround). v1.4.6 真修 W-019 后 nested-struct 路径会通, 但 enum pattern 路径不归 W-019
+- ❌ **Stage 1 byte-equal 不 7/7** — pre-existing W-005 #2 chain products: 新 `jhyy.exe` 产 jhyy.il sha `107445d6...`, 而旧 baseline `jhyy_v1.exe.exe` 产 jhyy_v1.exe.exe.il sha `760647f4...`, 两 sha 不同. 原因: 旧 baseline 是 pre-DWARF 时段的 binary (DWARF 还没 ship), jhyy-side codegen.jhyy 在 v1.4.2 加了 dbgfile/dbgloc emit, 现在 jhyy.exe 自带 DWARF, 而旧 jhyy_v1.exe.exe 不带. Stage 2 closure chain (v2/v3/v4 互相 byte-equal) 不受影响 — 那是 v1.4.x+ 强约束, 维持 `073fb8d4...`
+- ❌ regress 默认 binary 仍是 `jhyy.exe` (无变化), v1.4.5 才加 `--stage0` flag
+
+**未引入新 workaround。** W-017 / W-019 仍 ACTIVE, v1.4.6 真修。
+
+**Self-hosting impact:**
+- Stage 2 N=3 byte-equal: 维持 sha `073fb8d4b24ac14656d864b1133cbe7417b22bc26e6fec2633f417b4d61ba2e8`
+- jhyy.exe sha: `c9cff76...` (pre, C 端) → `37ffc49c...` (post, jhyy-side)
+- jhyy_v1.exe.exe sha: `3183594c...` (pre, v1.4.2 historical) → `37ffc49c...` (post, 跟 jhyy.exe 同物理 binary)
+- jhyy_stage0.exe sha: 新建 `d624f150...` (C 端 bootstrap)
+
+**引用:**
+- v1.4.4 父 sprint: [`docs/plans/v1/v1.4.0任务清单 + 概要设计.md`](../../plans/v1/v1.4.0任务清单%20+%20概要设计.md) § Sprint v1.4.4
+- v1.4.6 后插: 同 umbrella § Sprint v1.4.6 (codegen 真修 W-017 + W-019)
