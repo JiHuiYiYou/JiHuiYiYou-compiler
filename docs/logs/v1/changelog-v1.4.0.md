@@ -99,6 +99,7 @@
 | v1.4.3 | `compiler/src0/gdb_pretty.py` + `.gdbinit` + `gdb_pretty_test.jhyy`; pretty-print struct / enum / slice via `jhyy-pretty <addr> <type>` gdb command | ✅ 本次 ship |
 | v1.4.4 | 物理替换 `compiler/build/bin/jhyy.exe` baseline (sha `ac2a1b19...`) 到新 main.c argv[0] 版本; regress 默认 binary 改 `jhyy.exe.exe`; 跑 regress_stage0.py 验证 C 端仍 byte-equal | 待启动 |
 | v1.4.5 | regress.py 默认 binary 改 `jhyy.exe.exe` + 加 `--stage0` flag; GH Actions CI 三跑 (regress_v1 + regress + regress_stage0) + Stage 1/2 byte-equal | 待启动 |
+| v1.4.6 | codegen 真修 W-017 (顶层 `let mut` emit `.data` + module globals dict) + W-019 (嵌套 struct field chain `cg_alloc_temp_slot` helper); C-side + jhyy-side mirror 同步; ACTIVE workaround → 0; `jhyy_helpers.c` 标 DEPRECATED 保留 | 设计中 ([L3](../../plans/v1/v1.4.6任务清单%20+%20概要设计.md) + [L4](../../plans/v1/v1.4.6详细实现方案.md) 完成; 待 v1.4.4 ship 后启动) |
 
 ## v1.4.2 ship (本次 commit)
 
