@@ -8,15 +8,23 @@ REM Requires:
 REM   * MSYS2 (ucrt64) at C:\msys64\ -- installs GCC + binutils
 REM     Download: https://www.msys2.org/
 REM   * Python on PATH (for regress.py)
+REM
+REM IMPORTANT: this file must stay pure ASCII. cmd.exe under Chinese
+REM Windows uses CP936 by default and cannot parse UTF-8 multi-byte
+REM sequences in REM comments -- it tries to execute fragments of the
+REM comment as commands and aborts. Run "python -c '...'" before
+REM committing if any edit added non-ASCII characters.
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
-REM 双击运行时 cmd.exe 带 /c 启动, 跑完窗口立刻关掉, 什么都看不见 —— 这种
-REM 情况才在结束前 pause; 从已开的终端调用则不 pause。
-REM 用字符串替换判断而不是 `echo %cmdcmdline% | find`: 管道会起子 cmd, 在
-REM MSYS2 bash 下(PATH 是 /c/... Unix 格式)直接报 "系统找不到指定的路径" 把脚本打死。
-REM CI / 脚本若也走 `cmd /c bootstrap.cmd`, 传 --no-pause 强制关掉。
+REM When double-clicked, cmd.exe starts with /c and the window closes
+REM the moment the script exits -- user sees nothing. In that case,
+REM pause before exit; from an already-open terminal, do not pause.
+REM Use pure string-substitution (no `echo %cmdcmdline% | find`): the
+REM pipe spawns a child cmd which dies on MSYS2 bash because it
+REM inherits a Unix-style PATH.
+REM CI / scripts running `cmd /c bootstrap.cmd` can pass --no-pause.
 set "PAUSE_ON_EXIT="
 set "CL=%cmdcmdline%"
 if not "!CL:%~nx0=!"=="!CL!" set "PAUSE_ON_EXIT=1"
@@ -41,8 +49,9 @@ if errorlevel 1 (
     goto :fail
 )
 
-REM 刚构建的二进制就是新基准 — 不重锁 baseline 的话, regress 会因 sha 漂移
-REM early-abort, 一个测试都不跑却报 "failures".
+REM The freshly built binary IS the new baseline. Without re-locking,
+REM regress would early-abort on sha drift and print "failures" even
+REM though zero tests ran.
 echo [2/4] Locking regress baseline to freshly built binary ...
 python mcp-jhyy\jhyy_regress.py --save-baseline --binary %BIN%
 if errorlevel 1 (
@@ -50,7 +59,7 @@ if errorlevel 1 (
     goto :fail
 )
 
-echo [3/4] Running regression suite ^(~1 min^) ...
+echo [3/4] Running regression suite (~1 min) ...
 python compiler\build\bin\regress.py
 if errorlevel 1 (
     echo [WARN] Regression reported failures - see output above.
