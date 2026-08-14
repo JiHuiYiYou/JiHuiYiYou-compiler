@@ -133,7 +133,7 @@
 - ✅ regress 5 个 spot-check tests pass (arith, fib30, match, struct, pointer)
 
 **未达成 (透明声明):**
-- ❌ **Stage 1 byte-equal 持平** 原计划说 "DWARF 不在 .il 里, 在 .s 里" — 实测 DWARF 既在 .il 也在 .s (QBE 直接 pass-through),C-side vs jhyy-side .il byte-equal 在 dbgfile filename (绝对路径 vs 短名) + dbgloc 行数 (jhyy 多 emit `dbgloc 5` / `dbgloc 7`) 两处 diff。**功能无影响** (gdb 只读 .s/.file, 不读 .il),但严格 byte-equal 不再成立。Stage 2 N=3 closure chain **不** 涉及 C-side,所以 v2.il=v3.il=v4.il byte-equal 维持。
+- ✅ **Stage 1 byte-equal 7/7 维持** (v1.4.2 ship 时 changelog 标 ❌ 是错的, 见 W-018 — `stage1-expanded.sh` 从未真跑过 jhyy_v1, 修脚本后 7/7 PASS)
 - ❌ Stage 1 byte-equal 6/7 (W-005 #2) pre-existing 不动 — v1.4.2 没引入新 temp number 差距
 - ✅ regress.py 全量 **50/50 PASS, 0 failed** (2026-08-14 补跑)。ship 当时只跑了 5 个 spot-check —— 全跑因串行 2m22s 撞 MCP 工具超时表现为"卡住";已把 `jhyy_regress.run_all` 并行化 (2m22s → 43s),post-v1.4.2 任务闭环
 
