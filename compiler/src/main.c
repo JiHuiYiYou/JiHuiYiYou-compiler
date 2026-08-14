@@ -1,6 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+/* Forward-declare to avoid pulling windows.h (which clashes with our
+   TOKEN_TYPE enum in lexer.h). */
+unsigned long __stdcall GetModuleFileNameA(void *hModule, char *lpFilename, unsigned long nSize);
+#endif
 #include "arena.h"
 #include "lexer.h"
 #include "parser.h"
@@ -16,6 +21,43 @@ static void path_to_win(char *p) {
 static int resolve_imports(Node *module, const char *main_path, Arena *arena,
                            char extra_paths[16][512], char extra_names[16][256],
                            int nextra);
+
+/* Project root, derived from argv[0] in main() once at startup.
+   Used to locate qbe.exe / runtime.c / jhyy_helpers.c without
+   hardcoding C:/Users/liuzhen/... (v1.4.1). */
+static char g_project_root[1024];
+
+/* Derive project root from argv[0] via dirname × 4.
+   Layout: <root>/compiler/build/bin/jhyy.exe → dirname × 4 = <root>.
+   If argv[0] has no path separator (PATH-resolved bare-name invocation),
+   fall back to GetModuleFileNameA(NULL, ...) on Windows. */
+static void compute_project_root(const char *argv0) {
+    char exe_path[1024];
+    int has_sep = argv0 && (strchr(argv0, '/') || strchr(argv0, '\\'));
+#ifdef _WIN32
+    if (!has_sep) {
+        unsigned long n = GetModuleFileNameA(NULL, exe_path, sizeof(exe_path));
+        if (n == 0 || n >= sizeof(exe_path)) {
+            fprintf(stderr, "jhyy: cannot determine project root (GetModuleFileName failed)\n");
+            exit(1);
+        }
+    } else
+#endif
+    {
+        snprintf(exe_path, sizeof(exe_path), "%s", argv0 ? argv0 : "");
+    }
+    for (int i = 0; i < 4; i++) {
+        char *slash = strrchr(exe_path, '/');
+        char *bslash = strrchr(exe_path, '\\');
+        char *last = slash > bslash ? slash : bslash;
+        if (!last) {
+            fprintf(stderr, "jhyy: cannot derive project root from '%s'\n", exe_path);
+            exit(1);
+        }
+        *last = '\0';
+    }
+    snprintf(g_project_root, sizeof(g_project_root), "%s", exe_path);
+}
 
 static char *read_file(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -428,22 +470,33 @@ static int compile(const char **inputs, int ninputs, const char *output) {
     snprintf(asm_path, sizeof(asm_path), "%s.s", output);
     path_to_win(il_path);
     path_to_win(asm_path);
+    char qbe_exe[1024];
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wformat-truncation"
+    snprintf(qbe_exe, sizeof(qbe_exe), "%s/qbe/qbe.exe", g_project_root);
+    #pragma GCC diagnostic pop
     char cmd[4096];
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wformat-truncation"
     snprintf(cmd, sizeof(cmd),
-             "C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/qbe/qbe.exe -t amd64_win -o %s %s",
-             asm_path, il_path);
+             "%s -t amd64_win -o %s %s",
+             qbe_exe, asm_path, il_path);
+    #pragma GCC diagnostic pop
     if (system(cmd) != 0) {
         fprintf(stderr, "QBE failed\n");
         arena_free(&arena); free(main_source); return 1;
     }
 
-    /* link with gcc */
+    /* link with gcc (PATH-resolved) */
     char exe_path[1024];
     snprintf(exe_path, sizeof(exe_path), "%s.exe", output);
     path_to_win(exe_path);
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wformat-truncation"
     snprintf(cmd, sizeof(cmd),
-             "C:/msys64/ucrt64/bin/gcc.exe %s C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/runtime/runtime.c C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/src0/jhyy_helpers.c -o %s -lm",
-             asm_path, exe_path);
+             "gcc %s %s/compiler/runtime/runtime.c %s/compiler/src0/jhyy_helpers.c -o %s -lm",
+             asm_path, g_project_root, g_project_root, exe_path);
+    #pragma GCC diagnostic pop
     if (system(cmd) != 0) {
         fprintf(stderr, "gcc link failed\n");
         arena_free(&arena); free(main_source); return 1;
@@ -532,6 +585,8 @@ static int cmd_dump(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+    compute_project_root(argv[0]);
+
     if (argc < 2) {
         printf("jhyy compiler v1.0.0\n");
         printf("usage: jhyy <command> [args]\n");
