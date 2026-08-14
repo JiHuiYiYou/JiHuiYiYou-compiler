@@ -79,7 +79,13 @@ def _sha256_file(path: str) -> str:
 
 
 def save_baseline_hash(binary: str) -> str:
-    """算 binary sha256 并写到 <binary>.sha256 文件. 返回 sha256."""
+    """算 binary sha256 并写到 <binary>.sha256 文件. 返回 sha256.
+
+    ⚠️ .exe binary build 是非确定性的 (时间戳 / relocation / PIC), 同一份
+    source 每次 build 都得到不同 sha. baseline sha 只在 build 之后立刻
+    写一次有意义; 之后任何时刻的 sha 都可能漂移, 不要拿它做 byte-equal
+    信号. 真正的回归信号是 .il byte-equal (per [[feedback_il_byte_equal]]).
+    """
     bin_path = _resolve_binary(binary)
     sha = _sha256_file(bin_path)
     sha_path = bin_path + ".sha256"
@@ -88,14 +94,35 @@ def save_baseline_hash(binary: str) -> str:
     return sha
 
 
-def _check_baseline_hash(binary: str, sha_path: str) -> Tuple[bool, Optional[str], Optional[str]]:
-    """对比 binary 当前 sha256 跟 sha_path. 返回 (match, current_sha, baseline_sha_or_None)."""
-    current = _sha256_file(binary)
-    if not os.path.exists(sha_path):
-        return (True, current, None)  # missing baseline = skip (warning, not fail)
-    with open(sha_path, encoding="utf-8") as f:
-        baseline = f.read().strip()
-    return (current == baseline, current, baseline)
+def _check_baseline_freshness(binary: str, src_dir: str = "compiler/src") -> Tuple[bool, str]:
+    """检查 binary 是否在 src 之后被构建过. 防止 phantom binary (忘记
+    重编就跑 regress).
+
+    Returns:
+        (is_fresh, message)
+        is_fresh=True 当: 源文件全部比 binary 旧 (binary mtime >= max(src mtime))
+                       OR baseline 文件不存在 (warning, 不 fail)
+        is_fresh=False 当: 源里有文件比 binary 新, 怀疑 binary 是旧 build
+
+    Rationale: .il byte-equal 是真回归信号, .exe sha 防不了非确定性 drift
+    也没必要防. binary mtime 跟 src mtime 的相对关系才决定 binary 是不是
+    "新构建的" — 这才是 phantom binary 场景的真信号.
+    """
+    bin_mtime = os.path.getmtime(binary)
+    src_root = JHYY_ROOT / src_dir
+    if not src_root.exists():
+        return (True, f"src dir missing ({src_root}), skipping freshness check")
+    newest_src = max(
+        (os.path.getmtime(p) for p in Path(src_root).rglob("*") if p.is_file()),
+        default=0.0,
+    )
+    if bin_mtime + 0.5 >= newest_src:  # 0.5s 容忍文件系统 mtime 精度
+        return (True, f"binary mtime {bin_mtime:.0f} >= newest src mtime {newest_src:.0f}")
+    return (False, (
+        f"binary is older than source: binary mtime={bin_mtime:.0f}, "
+        f"newest src mtime={newest_src:.0f} — suspect phantom binary. "
+        f"Rebuild before running regress."
+    ))
 
 
 def run_test(
@@ -215,32 +242,37 @@ def run_all(
             "early_abort": f"binary not found: {bin_path}",
         }
 
-    # Baseline hash check
-    sha_path = bin_path + ".sha256"
+    # Freshness check: binary 是否在 src 之后被构建过. 取代之前的 .exe
+    # sha 比对 (build 非确定性, .il byte-equal 才是真回归信号).
     if enforce_baseline_hash:
-        match, current_sha, baseline_sha = _check_baseline_hash(bin_path, sha_path)
-        if not match and baseline_sha is not None:
+        current_sha = _sha256_file(bin_path)
+        sha_path = bin_path + ".sha256"
+        if not os.path.exists(sha_path):
+            baseline_sha = None
+            baseline_warning = (
+                f"baseline file missing at {sha_path} — skipping hash check "
+                f"(run `python -m jhyy_regress --save-baseline` to record a "
+                f"build-time snapshot, informational only)"
+            )
+        else:
+            with open(sha_path, encoding="utf-8") as f:
+                baseline_sha = f.read().strip()
+            baseline_warning = None
+        is_fresh, freshness_msg = _check_baseline_freshness(bin_path)
+        if not is_fresh:
             return {
                 "ok": False,
                 "binary": binary,
                 "binary_sha256": current_sha,
-                "baseline_match": False,
+                "baseline_match": None,
                 "baseline_sha256": baseline_sha,
                 "total": 0, "passed": 0, "failed": 0, "skipped": 0,
                 "failed_tests": [],
                 "duration_sec": time.time() - start,
                 "baseline_warning": None,
-                "early_abort": (
-                    f"binary drifted since baseline lock: current={current_sha[:16]}... "
-                    f"baseline={baseline_sha[:16]}... Run `python -m jhyy_regress --save-baseline` "
-                    f"to update, or pass enforce_baseline_hash=False to bypass."
-                ),
+                "early_abort": freshness_msg,
             }
-        baseline_match = match
-        baseline_warning = None if baseline_sha else (
-            f"baseline file missing at {sha_path} — skipping hash check "
-            f"(run `python -m jhyy_regress --save-baseline` to lock)"
-        )
+        baseline_match = None  # sha drift 正常, 不再判定 match
     else:
         current_sha = _sha256_file(bin_path)
         baseline_sha = None
@@ -325,9 +357,11 @@ if __name__ == "__main__":
     ap.add_argument("--binary", default="compiler/build/bin/jhyy.exe",
                     help="Compiler binary path (relative JHYY root or absolute)")
     ap.add_argument("--save-baseline", action="store_true",
-                    help="Save current binary sha256 as baseline")
+                    help="Record current binary sha256 as a build-time snapshot "
+                         "(informational only — .exe sha is non-deterministic, "
+                         ".il byte-equal is the real regression signal)")
     ap.add_argument("--no-baseline-check", action="store_true",
-                    help="Skip baseline hash enforcement")
+                    help="Skip phantom-binary (mtime) check")
     ap.add_argument("--tests", nargs="*", default=None,
                     help="Subset of tests to run (default: all)")
     ap.add_argument("--timeout", type=int, default=10)
@@ -344,4 +378,6 @@ if __name__ == "__main__":
         timeout=args.timeout,
         enforce_baseline_hash=not args.no_baseline_check,
     )
+    if result["early_abort"]:
+        print(f"[ABORT] {result['early_abort']}", file=sys.stderr)
     sys.exit(0 if result["ok"] else 1)

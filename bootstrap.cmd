@@ -42,30 +42,20 @@ if not exist "%GCC%" (
     goto :fail
 )
 
-echo [1/4] Building %BIN% ...
+echo [1/3] Building %BIN% ...
 "%GCC%" -std=c11 -Wall -Wextra %SRC%\*.c -o %BIN% -I %SRC%
 if errorlevel 1 (
     echo [ERROR] Build failed. See output above.
     goto :fail
 )
 
-REM The freshly built binary IS the new baseline. Without re-locking,
-REM regress would early-abort on sha drift and print "failures" even
-REM though zero tests ran.
-echo [2/4] Locking regress baseline to freshly built binary ...
-python mcp-jhyy\jhyy_regress.py --save-baseline --binary %BIN%
-if errorlevel 1 (
-    echo [ERROR] Could not save baseline. Is Python on PATH?
-    goto :fail
-)
-
-echo [3/4] Running regression suite (~1 min) ...
+echo [2/3] Running regression suite (~1 min) ...
 python compiler\build\bin\regress.py
 if errorlevel 1 (
     echo [WARN] Regression reported failures - see output above.
 )
 
-echo [4/4] Bootstrap complete.
+echo [3/3] Bootstrap complete.
 echo.
 echo Next steps:
 echo   * In this terminal:    jhyy run compiler\tests\examples\hello.jhyy

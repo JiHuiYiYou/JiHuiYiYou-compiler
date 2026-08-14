@@ -24,18 +24,13 @@ if [ ! -x "$GCC" ]; then
     exit 1
 fi
 
-echo "[1/4] Building $BIN ..."
+echo "[1/3] Building $BIN ..."
 "$GCC" -std=c11 -Wall -Wextra $SRC/*.c -o "$BIN" -I "$SRC"
 
-# 刚构建的二进制就是新基准 — 不重锁 baseline 的话, regress 会因 sha 漂移
-# early-abort, 一个测试都不跑却报 "failures".
-echo "[2/4] Locking regress baseline to freshly built binary ..."
-python mcp-jhyy/jhyy_regress.py --save-baseline --binary "$BIN"
-
-echo "[3/4] Running regression suite ..."
+echo "[2/3] Running regression suite ..."
 python compiler/build/bin/regress.py || echo "[WARN] Regression reported failures - see output above."
 
-echo "[4/4] Bootstrap complete."
+echo "[3/3] Bootstrap complete."
 echo
 echo "Next steps:"
 echo "  * In this terminal:    jhyy run compiler/tests/examples/hello.jhyy"
