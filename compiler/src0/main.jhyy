@@ -60,11 +60,19 @@ extern fn memset(p: *u8, c: i32, n: i64) -> *u8;
 // fseek whence: SEEK_SET=0, SEEK_CUR=1, SEEK_END=2 (POSIX/Windows)
 fn SEEK_END_VAL() -> i32 { return 2 as i32; }
 
-// QBE + gcc 绝对路径（per v1.0.0 L1 § 134 决策）
-fn QBE_PATH() -> *u8 { return "C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/qbe/qbe.exe" as *u8; }
-fn GCC_PATH() -> *u8 { return "C:/msys64/ucrt64/bin/gcc.exe" as *u8; }
-fn RUNTIME_C() -> *u8 { return "C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/runtime/runtime.c" as *u8; }
-fn HELPERS_C() -> *u8 { return "C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/src0/jhyy_helpers.c" as *u8; }
+// v1.4.1: 路径硬编码消除 — 委托 jhyy_helpers.c (C runtime)
+//   jhyy 端 codegen 不实现真正的顶层 let mut global (compile-time 0 constant fold),
+//   所以路径状态放在 C runtime: jh_paths_init() 一次, jh_path_*() 多次读
+extern fn jh_paths_init(argv0: *u8) -> i32;
+extern fn jh_path_qbe() -> *u8;
+extern fn jh_path_gcc() -> *u8;
+extern fn jh_path_runtime() -> *u8;
+extern fn jh_path_helpers() -> *u8;
+
+fn QBE_PATH() -> *u8 { return jh_path_qbe(); }
+fn GCC_PATH() -> *u8 { return jh_path_gcc(); }
+fn RUNTIME_C() -> *u8 { return jh_path_runtime(); }
+fn HELPERS_C() -> *u8 { return jh_path_helpers(); }
 
 // ═══ Helpers ═══
 
@@ -858,6 +866,17 @@ fn cmd_dump(argc: i32, argv: *u8) -> i32 {
 // ═══ Entry point ═══
 
 fn main_jhyy(argc: i32, argv: *u8) -> i32 {
+    // v1.4.1: 初始化路径 (C runtime 持有状态, jhyy 端只调一次)
+    if argc >= (1 as i32) {
+        let argv0_arr = argv as **u8;
+        let argv0 = (*argv0_arr);
+        let r = jh_paths_init(argv0);
+        if r != (0 as i32) {
+            jh_fputs_stderr("jhyy: cannot derive project root from argv[0]\n" as *u8);
+            return 1 as i32;
+        }
+    }
+
     if argc < (2 as i32) {
         printf("jhyy compiler v1.0.0 (self-hosted)\n" as *u8, 0);
         printf("usage: jhyy <command> [args]\n" as *u8, 0);
