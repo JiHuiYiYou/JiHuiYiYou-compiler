@@ -99,21 +99,6 @@ fn main_jhyy() -> i32 {
 - GCC 15+ at `C:\msys64\ucrt64\bin\gcc.exe`
 - 已 vendor 在 `qbe/qbe.exe` 的 QBE(Windows x64 target)
 
-### 克隆后第一步 — 选一个跑
-
-```text
-刚 clone 完?跑下面任何一个就能拿到可用的 jhyy.exe
-```
-
-| 平台 | 命令 | 作用 |
-|------|------|------|
-| **Windows (cmd / PowerShell)** | `bootstrap.cmd` | 编译 `jhyy.exe` + 跑回归测试套件 |
-| **MSYS2 bash / Git Bash** | `./bootstrap.sh` | 同上 |
-| **MSYS2 bash** | `make` | 同 `bootstrap.sh` 第 1 步(只编译,不跑回归) |
-| **手动** | 见下方 [手动构建](#手动构建) | 直接 gcc 调用 |
-
-四种方式都产出同一个 `compiler/build/bin/jhyy.exe`,并对 `python compiler/build/bin/regress.py` 校验(基线 **50/50 通过, 0 失败, 3 跳过**)。
-
 ### Hello world
 
 ```rust
@@ -136,32 +121,12 @@ python compiler/build/bin/regress.py
 # => 50/50 通过, 0 失败, 3 跳过 (共 53)
 ```
 
-### 手动构建
-
-不想用 bootstrap 脚本的话:
-
-```bash
-git clone https://github.com/JiHuiYiYou/JiHuiYiYou-compiler
-cd JiHuiYiYou-compiler
-
-/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra \
-    compiler/src/*.c \
-    -o compiler/build/bin/jhyy.exe \
-    -I compiler/src
-```
-
-或从 MSYS2 bash 用项目根目录的 `Makefile`:
-
-```bash
-make
-```
-
 ### 用 VSCode 跑
 
-仓库自带 `.vscode/tasks.json` —— 打开任意 `.jhyy` 文件,按 **`Ctrl+Shift+B`** 即编译 + 运行。其他任务:`Ctrl+Shift+P` → **Tasks: Run Task** → `JHYY: Run` / `JHYY: Compile` / `JHYY: Build IR` / `JHYY: Bootstrap`。`.vscode/settings.json` 会把 `compiler/build/bin` 和 `C:/msys64/ucrt64/bin` 加到集成终端 PATH,可以直接 `jhyy run hello.jhyy`。`F5` 用 MSYS2 gdb (cppdbg) 启动编译出的 `.exe` 调试。
+仓库自带 `.vscode/tasks.json` —— 打开任意 `.jhyy` 文件,按 **`Ctrl+Shift+B`** 即编译 + 运行。其他任务:`Ctrl+Shift+P` → **Tasks: Run Task** → `JHYY: Run` / `JHYY: Compile` / `JHYY: Build IR`。`.vscode/settings.json` 会把 `compiler/build/bin` 和 `C:/msys64/ucrt64/bin` 加到集成终端 PATH,可以直接 `jhyy run hello.jhyy`。`F5` 用 MSYS2 gdb (cppdbg) 启动编译出的 `.exe` 调试。
 
 > [!IMPORTANT]
-> **MSYS2 PATH 要求** —— `jhyy run` 会 spawn `gcc` 做链接,gcc 内部又会 spawn `cc1.exe` / `as.exe` / `ld.exe`,这三个都在 `C:\msys64\ucrt64\bin`。VSCode 之外的 PowerShell / cmd 用户需要把 MSYS2 加到系统 PATH(否则 `gcc link failed` 静默失败)。`.vscode/settings.json` 自动给集成终端加了;外部 shell 要么跑一次 `bootstrap.cmd`,要么手动把 `C:\msys64\ucrt64\bin` 加到用户 PATH。
+> **MSYS2 PATH 要求** —— `jhyy run` 会 spawn `gcc` 做链接,gcc 内部又会 spawn `cc1.exe` / `as.exe` / `ld.exe`,这三个都在 `C:\msys64\ucrt64\bin`。VSCode 之外的 PowerShell / cmd 用户需要把 MSYS2 加到系统 PATH(否则 `gcc link failed` 静默失败)。`.vscode/settings.json` 自动给集成终端加了;外部 shell 手动把 `C:\msys64\ucrt64\bin` 加到用户 PATH。
 
 ### 验证自举闭环
 

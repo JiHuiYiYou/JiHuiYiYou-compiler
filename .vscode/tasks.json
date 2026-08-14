@@ -73,22 +73,6 @@
             },
             "problemMatcher": [],
             "detail": "Compile .jhyy to .il only (no linking)"
-        },
-        {
-            "type": "cppbuild",
-            "label": "JHYY: Bootstrap (build + regress)",
-            "command": "${workspaceFolder}/bootstrap.cmd",
-            "windows": {
-                "command": "${workspaceFolder}/bootstrap.cmd"
-            },
-            "presentation": {
-                "reveal": "always",
-                "panel": "new",
-                "focus": true,
-                "clear": true
-            },
-            "problemMatcher": [],
-            "detail": "One-command setup: build jhyy.exe and run regression suite"
         }
     ]
 }
