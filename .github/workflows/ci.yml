@@ -1,9 +1,9 @@
-# GH Actions CI — JHYY compiler v1.4.5+ (2026-08-14 ship)
+# GH Actions CI — JHYY compiler v1.4.7+ (2026-08-14 ship)
 #
-# v1.4.5 引入 CI 三跑守门:
-#   1. regress.py         (jhyy.exe        jhyy-side production)
-#   2. regress_v1.py      (jhyy_v1.exe.exe jhyy-side historical baseline, v1.0.0 closure)
-#   3. regress_stage0.py  (jhyy_stage0.exe C-side bootstrap)
+# v1.4.7 单 regress 入口 + matrix 守门 (取代 v1.4.5 三跑 shim):
+#   1. python regress.py --all                            (gated: jhyy.exe + jhyy_stage0.exe)
+#   2. python regress.py --all --include-informational    (matrix only: jhyy_v1.exe.exe historical)
+#   3. make selfhost                                       (Stage 2 N=3 byte-equal closure)
 #
 # 触发面:
 #   - push to main (含 v1.x ‖ v2.x ‖ v3.x 任何 commit)
@@ -14,8 +14,9 @@
 # amd64_sysv target 之后)。
 #
 # 守门:
-#   - 三跑全 PASS → CI pass
-#   - 任一 fail → CI fail (block merge)
+#   - gated binary 全 PASS → CI pass
+#   - 任一 gated fail → CI fail (block merge)
+#   - informational fail → log only, 不 block PR (matrix row)
 #
 # 不做 (per `feedback_auto_push_after_commit.md`):
 #   - 不自动 push / tag — 保留人工 review
@@ -75,29 +76,23 @@ jobs:
           cd ${{ github.workspace }}
           make
 
-      - name: Run regress.py (jhyy.exe production)
+      - name: Run regress.py --all (gated: jhyy.exe + jhyy_stage0.exe)
         shell: msys2 {0}
         run: |
           cd ${{ github.workspace }}
-          python compiler/build/bin/regress.py
+          python compiler/build/bin/regress.py --all
 
-      - name: Run regress_v1.py (jhyy_v1.exe.exe historical baseline, informational)
+      - name: Run regress.py --all --include-informational (v1 historical baseline, matrix only)
         shell: msys2 {0}
         continue-on-error: true
         run: |
           cd ${{ github.workspace }}
-          # v1.4.4 ship 时 jhyy_v1.exe.exe 被物理覆盖成 jhyy.exe 同 binary
-          # (sha `37ffc49c...`), 偏离 `feedback_regress_baseline_binary_hash.md`
-          # 期望的 frozen v1.0.0 closure canonical。regress_v1.py 当前是
-          # informational mirror, exit 0 总是, 期望 v1.4.6 新测试 fail。
+          # jhyy_v1.exe.exe 是 v1.4.4 ship 时的 binary (sha `37ffc49c...`),
+          # 跑 v1.4.6 加的 2 个 test (top_level_let_mut_test, gdb_pretty_test)
+          # 必然 fail (缺 W-017/W-019/W-020 fix) — 这是 expected, 不是 bug。
+          # 见 `feedback_regress_baseline_binary_hash.md` + v1.4.7 plan。
           # v1.5+ TODO: 恢复 v1.0.0 closure canonical 二进制 (commit eabee0d)。
-          python compiler/build/bin/regress_v1.py
-
-      - name: Run regress_stage0.py (jhyy_stage0.exe C-side)
-        shell: msys2 {0}
-        run: |
-          cd ${{ github.workspace }}
-          python compiler/build/bin/regress_stage0.py
+          python compiler/build/bin/regress.py --all --include-informational
 
       - name: Build Stage 2 closure chain (v1→v2→v3→v4)
         shell: msys2 {0}

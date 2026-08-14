@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""jhyy_regress.py — 共享 regress 逻辑 (mcp-jhyy tool + regress.py / regress_v1.py shim 共用)
+"""jhyy_regress.py — 共享 regress 逻辑 (mcp-jhyy tool + regress.py shim 共用)
 
-Sprint mcp-1 (2026-08-11): 抽 NTSTATUS_NAMES + run_test + run_all 出来, 消除 regress.py / regress_v1.py 95% 重复.
+Sprint mcp-1 (2026-08-11): 抽 NTSTATUS_NAMES + run_test + run_all 出来, 消除 regress.py 重复.
+Sprint v1.4.7 (2026-08-14): regress.py 合并成单入口 (--all / --include-informational),
+                             regress_v1.py / regress_stage0.py 删除, 此模块只剩 MCP tool + regress.py shim 共用.
 
 Public API:
     ntstatus_name(code)            -> str | None

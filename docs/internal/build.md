@@ -53,7 +53,7 @@ make selfhost  # stage 1 + 3 次自举 closure (v1 → v2 → v3 → v4 byte-equ
 - `compiler/build/bin/jhyy.exe` — jhyy-side 产物 (production, users invoke)
 - `compiler/build/bin/jhyy_stage0.exe` — C 端 bootstrap (改 src/*.c 后重建)
 - `compiler/build/bin/jhyy.exe.exe` — jhyy.exe baseline (per baseline binary hash rule)
-- `compiler/build/bin/jhyy_v1.exe.exe` — v1.0.0 historical baseline (regress_v1.py 用, 不可退役)
+- `compiler/build/bin/jhyy_v1.exe.exe` — v1.0.0 historical baseline (regress.py --binary=jhyy_v1.exe.exe 用, 不可退役 — v1.4.7 合并进 regress.py)
 
 `-Wall -Wextra` 必须零警告。
 

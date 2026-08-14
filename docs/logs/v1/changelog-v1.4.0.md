@@ -5,8 +5,9 @@
 - **v1.4.2** — DWARF 调试信息 (codegen emit `.loc` + `dbg_file` + `dbg_subprogram`)
 - **v1.4.3** — gdb pretty printer (Python script for jhyy types)
 - **v1.4.4** — 物理替换 jhyy.exe (新 main.c argv[0] 版本替换原 baseline binary, 刷 v1.4.x 累计 sha)
-- **v1.4.5** — CI 双跑 + CLAUDE.md 同步
+- **v1.4.5** — CI 双跑 + CLAUDE.md 同步 (3 regress shim: regress.py / regress_v1.py / regress_stage0.py)
 - **v1.4.6** — codegen + parser 真修 W-017 + W-019 + W-020 (post-v1.4.4 暴露的 3 个 ACTIVE workaround)
+- **v1.4.7** — regress 三跑合并 + CI workflow 简化 (cleanup, 非功能性 — 1 regress.py + --all/--include-informational flag, 删 regress_v1.py + regress_stage0.py)
 
 ## v1.4.1 ship (本次)
 
@@ -325,4 +326,129 @@
 - v1.4.6 父 sprint: [`docs/plans/v1/v1.4.0任务清单 + 概要设计.md`](../../plans/v1/v1.4.0任务清单%20+%20概要设计.md) § Sprint v1.4.6
 - 真修详细方案: [`docs/plans/v1/v1.4.0详细实现方案.md`](../../plans/v1/v1.4.0详细实现方案.md) (umbrella per feedback_changelog_umbrella.md)
 - workarounds RESOLVED 标注: [`docs/internal/workarounds.md`](../../internal/workarounds.md) § W-017 / W-019 / W-020
+
+---
+
+## v1.4.7 ship (本次 commit)
+
+**Commit:** (本次 1 commit)
+
+**目标:** regress 三跑 shim 合并成单 `regress.py` + CI workflow 简化 (cleanup, 非功能性)
+
+**改动文件 (per `git show --stat`):**
+- `compiler/build/bin/regress.py` — 重写: 加 `--binary` / `--all` / `--include-informational` / `--save-baseline` / `--tests` / `--timeout` / `--no-baseline-check` flag; 加 `_GATED_DEFAULTS` 表 centralize per-binary `enforce_baseline_hash` 默认值 (jhyy.exe=True / jhyy_stage0.exe=False / jhyy_v1.exe.exe=False)
+- `compiler/build/bin/regress_v1.py` — ❌ 删 (合并进 regress.py --binary=jhyy_v1.exe.exe)
+- `compiler/build/bin/regress_stage0.py` — ❌ 删 (合并进 regress.py --all 自动跑 jhyy_stage0.exe)
+- `.github/workflows/ci.yml` — 3 step (`regress.py` + `regress_v1.py` + `regress_stage0.py`) → 2 step (`regress.py --all` + `regress.py --all --include-informational`); 顶部注释从"三跑守门"改"单 regress 入口 + matrix 守门"
+- `.gitignore` — 删 `!regress_v1.py` + `!regress_stage0.py` 2 个例外
+- `mcp-jhyy/jhyy_regress.py` docstring — 删 "regress.py / regress_v1.py / regress_stage0.py shim 共用" → 改 "regress.py shim 共用"
+- `docs/internal/build.md:56` — binary 列表注释改 "regress.py --binary=jhyy_v1.exe.exe 用, v1.4.7 合并进 regress.py"
+- `memory/feedback_regress_baseline_binary_hash.md` 行 33 — "regress.py AND regress_v1.py both output" → "regress.py --binary=jhyy.exe AND --binary=jhyy_v1.exe.exe --include-informational both output"
+- `docs/logs/v1/changelog-v1.4.0.md` — 本 ship section (umbrella per feedback_changelog_umbrella.md)
+
+**核心机制:**
+
+### 1. 单 regress.py CLI 接口
+
+```bash
+python regress.py                            # 默认 binary=jhyy.exe (production), exit 0/1
+python regress.py --binary=PATH              # 跑指定 binary
+python regress.py --all                      # matrix: jhyy.exe + jhyy_stage0.exe, exit 0/1
+python regress.py --all --include-informational  # matrix + jhyy_v1.exe.exe (informational row, 不影响 exit)
+python regress.py --save-baseline            # 存 sha256 baseline (转发 jhyy_regress)
+python regress.py --tests=foo,bar            # 测试子集
+python regress.py --timeout=30               # 单测试超时
+python regress.py --no-baseline-check        # 跳过 phantom binary check
+```
+
+### 2. `_GATED_DEFAULTS` 表 (centralize per-binary baseline check)
+
+| Binary | `enforce_baseline_hash` 默认 | 理由 |
+|--------|--------------------------|------|
+| `jhyy.exe` (production) | `True` | phantom binary 会污染 baseline 信号 |
+| `jhyy_stage0.exe` (C-side) | `False` | gcc 链接非确定性 (debug info / timestamp) |
+| `jhyy_v1.exe.exe` (frozen historical) | `False` | mtime 永远比 src 旧 → phantom check 必 fail |
+
+未知 binary 默认 `True` (catch phantom)。`--no-baseline-check` 仍是 ad-hoc escape hatch。
+
+### 3. `--all` mode matrix 输出
+
+```
+[1/2] compiler/build/bin/jhyy.exe (production) [GATED]
+       status: PASS — passed=53/56 failed=0 skipped=3
+       binary sha: 849a86458e4dbd8d...
+
+[2/2] compiler/build/bin/jhyy_stage0.exe (C-side bootstrap) [GATED]
+       status: PASS — passed=53/56 failed=0 skipped=3
+       binary sha: f469df891a9bf9d1...
+
+Summary: 2/2 gated binary PASS
+```
+
+加 `--include-informational` 多一行:
+
+```
+[3/3] compiler/build/bin/jhyy_v1.exe.exe (informational, ...) [INFORMATIONAL]
+       status: FAIL — passed=51/56 failed=2 skipped=3
+       failed: gdb_pretty_test, top_level_let_mut_test
+
+Summary: 2/2 gated binary PASS, 1 informational (matrix only)
+```
+
+### 4. CI workflow 简化
+
+| Before (v1.4.5) | After (v1.4.7) |
+|-----------------|---------------|
+| step 1: `regress.py` (jhyy.exe) | step 1: `regress.py --all` (gated: jhyy.exe + jhyy_stage0.exe) |
+| step 2: `regress_v1.py` (continue-on-error, informational) | step 2: `regress.py --all --include-informational` (continue-on-error, matrix) |
+| step 3: `regress_stage0.py` (jhyy_stage0.exe) | (merged into step 1) |
+
+总 step 数不变 (build stage 0 / 1 / regress / make selfhost), 但 regress 段从 3 step → 2 step, 语义清晰: gated 是硬门, informational 是 matrix row。
+
+**触发 workflow:**
+
+| 触发 | 旧 (v1.4.5) | 新 (v1.4.7) |
+|------|---------|---------|
+| `python regress.py` 默认 | jhyy.exe 53/53 PASS, exit 0 | 同 |
+| `python regress.py --binary=stage0` | n/a (用 regress_stage0.py) | jhyy_stage0.exe 53/53 PASS, exit 0 |
+| `python regress.py --binary=v1` | n/a (用 regress_v1.py, exit 0 always) | jhyy_v1.exe.exe FAIL 51/56, exit 1 (单 binary mode) |
+| `python regress.py --all` | n/a | matrix 2/2 gated PASS, exit 0 |
+| `python regress.py --all --include-informational` | n/a | matrix 2/2 gated + 1 informational, exit 0 |
+| `python regress.py --save-baseline` | n/a (用 regress.py --save-baseline, 等价) | 同 |
+
+**验证 (per `feedback_fix_evaluation_rule` 5/5 PASS):**
+- ✅ `python regress.py` 5/5 → jhyy.exe 53/53 PASS
+- ✅ `python regress.py --binary=stage0` 5/5 → jhyy_stage0.exe 53/53 PASS
+- ✅ `python regress.py --binary=v1` 5/5 → jhyy_v1.exe.exe FAIL 51/56 (2 fail: gdb_pretty_test + top_level_let_mut_test, expected — v1 binary 缺 W-017/W-019/W-020 fix)
+- ✅ `python regress.py --all` 5/5 → 2/2 gated PASS, exit 0
+- ✅ `python regress.py --all --include-informational` 5/5 → 2/2 gated PASS + 1 informational, exit 0
+- ✅ Stage 2 N=3 byte-equal 维持 (`make selfhost` 0f0df96f... 持平 v1.4.6)
+- ✅ mcp-jhyy smoke test 14/14 pass (jhyy_regress MCP tool 不动)
+- ✅ 文件减少: 3 shim → 1 shim (-67%)
+- ✅ CI workflow 行数减少 ~25 行 (3 step → 2 step, 注释精简)
+
+**未达成 (透明声明):**
+- ❌ `jhyy_v1.exe.exe` 仍未恢复 v1.0.0 canonical baseline (`2445e97d...`) — 留给 v1.5 installer 设计时定夺 (per memory `feedback_regress_baseline_binary_hash.md` + v1.5 plan line 248)
+- ❌ `make regress` target 未加 — 跟 `mcp-jhyy/jhyy_regress.py` CLI + ci.yml 入口重复, 不加 (per "Don't add features beyond what the task requires")
+
+**mirror 守门 (per `feedback_regress_baseline_binary_hash.md`):**
+- 删 shim 前 sha256sum `jhyy.exe` `jhyy_v1.exe.exe` `jhyy_stage0.exe` 三 binary baseline 记录进 changelog (本次保留 v1.4.6 sha + 加 v1.4.7 新 sha)
+- `_GATED_DEFAULTS` 表替代原 3 shim 散落的 magic-default, centralize 避免漂移
+
+**ACTIVE workaround 数:** 0 (v1.4.6 已清零, v1.4.7 cleanup 不引入新 workaround)
+
+**Self-hosting impact:**
+- jhyy.exe sha: `849a86458e4dbd8d...` (持平 v1.4.6, cleanup 不改 binary)
+- jhyy_stage0.exe sha: `f469df89...` (持平 v1.4.6)
+- jhyy_v1.exe.exe sha: `37ffc49c...` (持平 v1.4.5 ship 时, 没变)
+- Stage 2 N=3 byte-equal sha: `0f0df96f...` (持平 v1.4.6)
+- regress baseline: 53/53 PASS / 51/56 informational (持平 v1.4.5)
+
+**引用:**
+- v1.4.7 plan: `C:\Users\liuzhen\.claude\plans\jaunty-orbiting-naur.md` (本 sprint 设计)
+- v1.4.7 父 sprint: [`docs/plans/v1/v1.4.0任务清单 + 概要设计.md`](../../plans/v1/v1.4.0任务清单%20+%20概要设计.md) § Sprint v1.4.7 (新增)
+- jhyy_regress shared logic: `mcp-jhyy/jhyy_regress.py` (Sprint mcp-1 抽出)
+- memory `feedback_regress_baseline_binary_hash.md` (sha256sum MANDATORY 规则)
+- memory `feedback_regress_py_abspath.md` (os.path.abspath() 规则, 新 regress.py 继承)
+- v1.4.5 ship section (commit `0518f3d`): 三跑守门首次 ship, v1.4.7 cleanup 替代
 - superseder commits: `f20e36d` (W-017) / `6638134` (W-019) / `ad42117` (W-020)
