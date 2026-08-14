@@ -301,6 +301,221 @@ fn parse_type(p: *Parser) -> *Node {
 //   - **int 后缀 (42i32 / 100u8) 走 jh_int_suffix_prim**（jhyy 无 atoi）。
 // ════════════════════════════════════════════════════
 
+// ════════════════════════════════════════════════════
+// parse_pattern_primary: 简单 primary 表达式（literal / ident / paren）
+// v1.4.6 W-020 fix：parse_pattern 的 range hi 用本 helper 替代 parse_expr
+// 避免 parse_pattern ↔ parse_expr mutual recursion（jhyy 无 forward decl）。
+// 限制：跟 array count inline int literal (parser.jhyy:202-223) 同型 —
+//       不解析 infix / field / index / call args, 仅 literal / ident / paren。
+//       jhyy 现有 range pattern 测试（_v137_or_exhaust.jhyy）用 literal/ident,
+//       足够 cover。range hi 是完整 expression (如 x..arr.len()) 不支持。
+// ════════════════════════════════════════════════════
+
+fn parse_pattern_primary(p: *Parser) -> *Node {
+    let mut t = empty_token();
+    parser_peek(p, &t);
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
+
+    // ── TOKEN_INT 分支 ──
+    if t.kind == TOKEN_INT() {
+        parser_advance(p, &t);
+        let val = strtoll(t.start, 0 as *u8, 0 as i32);
+        return ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_I32());
+    }
+
+    // ── TOKEN_IDENT 分支 ──
+    if t.kind == TOKEN_IDENT() {
+        parser_advance(p, &t);
+        let iname = arena_strdup((*p).arena, t.start, t.length);
+        let mut isym = symtab_lookup((*p).current_scope, iname);
+        if isym == (0 as *Sym) {
+            isym = symtab_insert((*p).current_scope, iname, SYM_VAR(),
+                                 0 as *u8, 0 as i32, (*p).scope_depth);
+        }
+        return ast_new_ident((*p).arena, loc_lf, loc_ll, loc_lc, isym);
+    }
+
+    // ── TOKEN_LPAREN 分支（递归 parse_pattern_primary, 不调 parse_expr）──
+    if t.kind == TOKEN_LPAREN() {
+        parser_advance(p, &t);
+        let inner = parse_pattern_primary(p);
+        parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
+        return inner;
+    }
+
+    // ── default: silent ──
+    // 不输出 error string — 让上层 parse_pattern range 分支 / caller 报错。
+    // 保持 Stage 1 byte-equal: C-side parse_expr(PREC_PRIMARY) 不输出额外 string,
+    // jhyy-side parse_pattern_primary 也不输出 (jhyy-side 多个 string 就 byte-equal 失守)。
+    return 0 as *Node;
+}
+
+// ════════════════════════════════════════════════════
+// parse_pattern: 完整实现（commit 3）
+// 对应 C 端 parser.c:113-204
+// 自递归 OK（mutual recursion 走 internal calls 也 OK，因为所有 callee 都已定义）
+// v1.4.6 W-020 fix: 上移到 parse_expr 之前（避免 forward ref + range hi 用
+//                   parse_pattern_primary 替代 parse_expr, 解 mutual recursion）。
+// ════════════════════════════════════════════════════
+
+fn parse_pattern(p: *Parser) -> *Node {
+    let mut t = empty_token();
+    parser_peek(p, &t);
+
+    let loc_lf = t.loc_filename;
+    let loc_ll = t.loc_line;
+    let loc_lc = t.loc_col;
+
+    // ── TOKEN_IDENT 分支 ──
+    if t.kind == TOKEN_IDENT() {
+        // wildcard _
+        if t.length == (1 as i64) {
+            // t.start may not be 4-byte aligned; use aligned read
+            let p_addr = t.start as i64;
+            let aligned = p_addr & (~(3 as i64));
+            let rem = (p_addr - aligned) as i32;
+            let w = *((aligned) as *i32);
+            let shift = rem * (8 as i32);
+            let c0 = (w >> shift) & (255 as i32);
+            if c0 == (95 as i32) {  // '_' = ASCII 95
+                parser_advance(p, &t);
+                return ast_new_pattern_wild((*p).arena, loc_lf, loc_ll, loc_lc);
+            }
+        }
+        parser_advance(p, &t);
+
+        // Name::Variant
+        // 关键：outer ident 必须在 consume `::` 之前保存。
+        // line 414 已经 consume 了 outer ident（prev_* 现在指向 outer ident）。
+        // t.start/t.length 也还指向 outer ident。
+        if parser_check(p, TOKEN_COLONCOLON()) != (0 as i32) {
+            // outer ident 当前在 t 里（已 advance 过），先存
+            let outer_name = arena_strdup((*p).arena, t.start, t.length);
+            parser_advance(p, &t);  // consume ::
+            parser_expect(p, TOKEN_IDENT(), "variant name" as *u8, &t);
+            let vname = parser_tok_name(p, &t);
+            let mut tsym = symtab_lookup((*p).current_scope, outer_name);
+            if tsym == (0 as *Sym) {
+                tsym = symtab_insert((*p).current_scope, outer_name, SYM_TYPE(),
+                                     0 as *u8, 0 as i32, (*p).scope_depth);
+            }
+            let mut vsym = symtab_lookup((*p).current_scope, vname);
+            if vsym == (0 as *Sym) {
+                vsym = symtab_insert((*p).current_scope, vname, SYM_VAR(),
+                                     0 as *u8, 0 as i32, (*p).scope_depth);
+            }
+            let mut inner: *Node = 0 as *Node;
+            if parser_match(p, TOKEN_LPAREN(), &t) != (0 as i32) {
+                inner = parse_pattern(p);
+                parser_expect(p, TOKEN_RPAREN(), ") after enum pattern" as *u8, &t);
+            }
+            return ast_new_pattern_enum((*p).arena, loc_lf, loc_ll, loc_lc, tsym, vsym, inner);
+        }
+
+        // range lo..hi  —— v1.4.6 W-020: hi 走 parse_pattern_primary（避免 mutual recursion）
+        if parser_match(p, TOKEN_DOTDOT(), &t) != (0 as i32) {
+            let hi = parse_pattern_primary(p);
+            let lo_name = arena_strdup((*p).arena, t.start, t.length);
+            let mut sym = symtab_lookup((*p).current_scope, lo_name);
+            if sym == (0 as *Sym) {
+                sym = symtab_insert((*p).current_scope, lo_name, SYM_VAR(),
+                                    0 as *u8, 0 as i32, (*p).scope_depth);
+            }
+            let lo = ast_new_pattern_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
+            return ast_new_pattern_range((*p).arena, loc_lf, loc_ll, loc_lc, lo, hi);
+        }
+
+        // short-name variant（v0.7 7A）：Name 解析到 SYM_VARIANT in global_scope
+        //   Some(v) → NODE_PATTERN_ENUM + inner=v
+        //   None    → NODE_PATTERN_ENUM + inner=NULL
+        let ident_name = arena_strdup((*p).arena, t.start, t.length);
+        let mut gsym = symtab_lookup((*p).global_scope, ident_name);
+        if gsym != (0 as *Sym) {
+            if (*gsym).kind == SYM_VARIANT() {
+                if parser_check(p, TOKEN_LPAREN()) != (0 as i32) {
+                    parser_advance(p, &t);  // consume (
+                    let inner = parse_pattern(p);
+                    parser_expect(p, TOKEN_RPAREN(), ") after enum pattern" as *u8, &t);
+                    return ast_new_pattern_enum((*p).arena, loc_lf, loc_ll, loc_lc,
+                                                0 as *Sym, gsym, inner);
+                }
+                // bare variant: None
+                return ast_new_pattern_enum((*p).arena, loc_lf, loc_ll, loc_lc,
+                                            0 as *Sym, gsym, 0 as *Node);
+            }
+        }
+
+        // 普通 ident pattern（binding）
+        let mut sym = symtab_lookup((*p).current_scope, ident_name);
+        if sym == (0 as *Sym) {
+            sym = symtab_insert((*p).current_scope, ident_name, SYM_VAR(),
+                                0 as *u8, 0 as i32, (*p).scope_depth);
+        }
+        return ast_new_pattern_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
+    }
+
+    // ── TOKEN_INT 分支 ──
+    if t.kind == TOKEN_INT() {
+        parser_advance(p, &t);
+        let val = strtoll(t.start, 0 as *u8, 0 as i32);
+        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_I32());
+    }
+
+    // ── TOKEN_BOOL 分支 ──
+    if t.kind == TOKEN_BOOL() {
+        parser_advance(p, &t);
+        // "true" = 4 bytes; "false" = 5 bytes; check length + first 4 chars
+        let mut val = 0 as i64;
+        if t.length == (4 as i64) {
+            let r = strncmp(t.start, "true" as *u8, 4 as i64);
+            if r == (0 as i32) {
+                val = 1 as i64;
+            }
+        }
+        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_BOOL());
+    }
+
+    // ── TOKEN_CHAR 分支 ──
+    if t.kind == TOKEN_CHAR() {
+        parser_advance(p, &t);
+        // t.start[0] = '\'', t.start[1] = char, t.start[2] = '\''
+        // qbe_type_of(*u8) 默认 'b' bug（plan § 0 #6），绕开：4-byte aligned read + mask
+        // 对齐 lexer.jhyy::lex_peek_char 的写法
+        let p_addr = t.start as i64;
+        let aligned = p_addr & (~(3 as i64));
+        let rem = (p_addr - aligned) as i32;
+        let w = *((aligned) as *i32);
+        let shift = rem * (8 as i32);
+        let masked = (w >> shift) & (255 as i32);
+        let ch = masked & (255 as i32);
+        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, ch as i64, PRIM_U8());
+    }
+
+    // ── TOKEN_MINUS 分支 ──
+    if t.kind == TOKEN_MINUS() {
+        parser_advance(p, &t);  // consume '-'
+        parser_expect(p, TOKEN_INT(), "integer after - in pattern" as *u8, &t);
+        let val = strtoll(t.start, 0 as *u8, 0 as i32);
+        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, -val, PRIM_I32());
+    }
+
+    // ── default: error ──
+    jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+    jh_fputs_stderr("error: unexpected token '" as *u8);
+    jh_fputs_stderr(token_kind_name(t.kind));
+    jh_fputs_stderr("' in pattern\n" as *u8);
+    (*p).error_count = (*p).error_count + (1 as i32);
+    parser_advance(p, &t);
+    return 0 as *Node;
+}
+
+// parse_match 在 parse_expr 之后定义（v1.4.6 W-020 fix：parse_pattern 上移到
+// parse_expr 之前用 parse_pattern_primary 解 mutual recursion; parse_match 因
+// 调 parse_expr (subj/body) 不能 forward ref, 保持原位置。OR pattern 的
+// parser_advance(p) 已修 &t 缺参 UB）。
+
 fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
@@ -674,12 +889,12 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         left = ast_new_if((*p).arena, loc_lf, loc_ll, loc_lc, ifx_cond, ifx_then_body, ifx_else_body);
     }
     else if t.kind == TOKEN_MATCH() {
-        /* match-as-expression（Sprint 4.5 C step 3a）：
-         *   let result = match x { 1 => 10, 2 => 20, _ => 0 };
-         * jhyy 无 forward reference（parse_match 定义在 parse_expr 之后），
-         * 所以不能调 parse_match。这里 inline 一份 match 解析。
-         * 模式只支持 literal int + wildcard（match.jhyy + dungeon_game.jhyy 触发面已足）；
-         * enum/range/binding pattern 走原 parse_match。*/
+        /* v1.4.6 W-020 fix: 简化 inline match (Sprint 4.5 C step 3a 留下的
+         * minimal 版本仅支持 int/wildcard, 看 Color 报 "expected =>, got ::")。
+         * 现在直接调 parse_pattern (parse_pattern 已上移到 parse_expr 之前,
+         * 可调), 支持 enum/range/binding pattern 全集。statement 形式走 parse_match,
+         * expression 形式 (let r = match X { ... }) 走本 inline match, 共享 pattern
+         * parser。*/
         parser_advance(p, &t);  // consume 'match'
         let mx_subj = parse_expr(p, PREC_NONE());
         parser_expect(p, TOKEN_LBRACE(), "{ after match subject" as *u8, &t);
@@ -691,58 +906,19 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
             if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
 
-            // inline minimal pattern: literal int (TOKEN_INT) + wildcard (single-char '_' ident)
-            let mut mx_pat: *Node = 0 as *Node;
-            let mut pt = empty_token();
-            parser_peek(p, &pt);
-            let p_lf = pt.loc_filename;
-            let p_ll = pt.loc_line;
-            let p_lc = pt.loc_col;
-
-            if pt.kind == TOKEN_INT() {
-                parser_advance(p, &pt);
-                let pval = strtoll(pt.start, 0 as *u8, 0 as i32);
-                mx_pat = ast_new_pattern_lit((*p).arena, p_lf, p_ll, p_lc, pval, PRIM_I32());
-            } else if pt.kind == TOKEN_IDENT() {
-                // check wildcard '_' (single-char ident)
-                let mut is_wild = 0 as i32;
-                if pt.length == (1 as i64) {
-                    let p_addr = pt.start as i64;
-                    let aligned = p_addr & (~(3 as i64));
-                    let rem = (p_addr - aligned) as i32;
-                    let w = *((aligned) as *i32);
-                    let shift = rem * (8 as i32);
-                    let c0 = (w >> shift) & (255 as i32);
-                    if c0 == (95 as i32) {
-                        is_wild = 1 as i32;
-                    }
-                }
-                if is_wild != (0 as i32) {
-                    parser_advance(p, &pt);
-                    mx_pat = ast_new_pattern_wild((*p).arena, p_lf, p_ll, p_lc);
-                } else {
-                    // ident binding fallback（parse_pattern forward ref 限制下最简实现）
-                    parser_advance(p, &pt);
-                    let iname = arena_strdup((*p).arena, pt.start, pt.length);
-                    let mut isym = symtab_lookup((*p).current_scope, iname);
-                    if isym == (0 as *Sym) {
-                        isym = symtab_insert((*p).current_scope, iname, SYM_VAR(),
-                                             0 as *u8, 0 as i32, (*p).scope_depth);
-                    }
-                    mx_pat = ast_new_pattern_ident((*p).arena, p_lf, p_ll, p_lc, isym);
-                }
-            } else {
-                jh_print_loc_stderr(p_lf, p_ll, p_lc);
-                jh_fputs_stderr("error: unexpected token in match pattern\n" as *u8);
-                (*p).error_count = (*p).error_count + (1 as i32);
-                parser_advance(p, &pt);
-                mx_pat = 0 as *Node;  // type-anchor: 让 if/else chain 末表达式类型一致
+            let mut mx_pat: *Node = parse_pattern(p);
+            // OR pattern — left-associative loop on `|` (跟 parse_match 一致)
+            while parser_check(p, TOKEN_PIPE()) != (0 as i32) {
+                parser_advance(p, &t);
+                let rloc_lf = (*mx_pat).loc_filename;
+                let rloc_ll = (*mx_pat).loc_line;
+                let rloc_lc = (*mx_pat).loc_col;
+                let right = parse_pattern(p);
+                mx_pat = ast_new_pattern_or((*p).arena, rloc_lf, rloc_ll, rloc_lc, mx_pat, right);
             }
-
             parser_expect(p, TOKEN_FATARROW(), "=>" as *u8, &t);
             let mx_body = parse_expr(p, PREC_NONE());
 
-            // optional trailing comma
             let _mx_c = parser_match(p, TOKEN_COMMA(), &t);
 
             let mx_arm = ast_new_match_arm((*p).arena, loc_lf, loc_ll, loc_lc, mx_pat, mx_body);
@@ -1095,166 +1271,14 @@ fn parse_expr_stmt(p: *Parser) -> *Node {
     return 0 as *Node;
 }
 
-// ════════════════════════════════════════════════════
-// parse_pattern: 完整实现（commit 3）
-// 对应 C 端 parser.c:113-204
-// 自递归 OK（mutual recursion 走 internal calls 也 OK，因为所有 callee 都已定义）
-// ════════════════════════════════════════════════════
-
-fn parse_pattern(p: *Parser) -> *Node {
-    let mut t = empty_token();
-    parser_peek(p, &t);
-
-    let loc_lf = t.loc_filename;
-    let loc_ll = t.loc_line;
-    let loc_lc = t.loc_col;
-
-    // ── TOKEN_IDENT 分支 ──
-    if t.kind == TOKEN_IDENT() {
-        // wildcard _
-        if t.length == (1 as i64) {
-            // t.start may not be 4-byte aligned; use aligned read
-            let p_addr = t.start as i64;
-            let aligned = p_addr & (~(3 as i64));
-            let rem = (p_addr - aligned) as i32;
-            let w = *((aligned) as *i32);
-            let shift = rem * (8 as i32);
-            let c0 = (w >> shift) & (255 as i32);
-            if c0 == (95 as i32) {  // '_' = ASCII 95
-                parser_advance(p, &t);
-                return ast_new_pattern_wild((*p).arena, loc_lf, loc_ll, loc_lc);
-            }
-        }
-        parser_advance(p, &t);
-
-        // Name::Variant
-        // 关键：outer ident 必须在 consume `::` 之前保存。
-        // line 414 已经 consume 了 outer ident（prev_* 现在指向 outer ident）。
-        // t.start/t.length 也还指向 outer ident。
-        if parser_check(p, TOKEN_COLONCOLON()) != (0 as i32) {
-            // outer ident 当前在 t 里（已 advance 过），先存
-            let outer_name = arena_strdup((*p).arena, t.start, t.length);
-            parser_advance(p, &t);  // consume ::
-            parser_expect(p, TOKEN_IDENT(), "variant name" as *u8, &t);
-            let vname = parser_tok_name(p, &t);
-            let mut tsym = symtab_lookup((*p).current_scope, outer_name);
-            if tsym == (0 as *Sym) {
-                tsym = symtab_insert((*p).current_scope, outer_name, SYM_TYPE(),
-                                     0 as *u8, 0 as i32, (*p).scope_depth);
-            }
-            let mut vsym = symtab_lookup((*p).current_scope, vname);
-            if vsym == (0 as *Sym) {
-                vsym = symtab_insert((*p).current_scope, vname, SYM_VAR(),
-                                     0 as *u8, 0 as i32, (*p).scope_depth);
-            }
-            let mut inner: *Node = 0 as *Node;
-            if parser_match(p, TOKEN_LPAREN(), &t) != (0 as i32) {
-                inner = parse_pattern(p);
-                parser_expect(p, TOKEN_RPAREN(), ") after enum pattern" as *u8, &t);
-            }
-            return ast_new_pattern_enum((*p).arena, loc_lf, loc_ll, loc_lc, tsym, vsym, inner);
-        }
-
-        // range lo..hi  —— hi 走 parse_expr（PREC_PRIMARY），commit 3 parse_expr 是 stub 返回 NULL
-        if parser_match(p, TOKEN_DOTDOT(), &t) != (0 as i32) {
-            let hi = parse_expr(p, PREC_PRIMARY());
-            let lo_name = arena_strdup((*p).arena, t.start, t.length);
-            let mut sym = symtab_lookup((*p).current_scope, lo_name);
-            if sym == (0 as *Sym) {
-                sym = symtab_insert((*p).current_scope, lo_name, SYM_VAR(),
-                                    0 as *u8, 0 as i32, (*p).scope_depth);
-            }
-            let lo = ast_new_pattern_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
-            return ast_new_pattern_range((*p).arena, loc_lf, loc_ll, loc_lc, lo, hi);
-        }
-
-        // short-name variant（v0.7 7A）：Name 解析到 SYM_VARIANT in global_scope
-        //   Some(v) → NODE_PATTERN_ENUM + inner=v
-        //   None    → NODE_PATTERN_ENUM + inner=NULL
-        let ident_name = arena_strdup((*p).arena, t.start, t.length);
-        let mut gsym = symtab_lookup((*p).global_scope, ident_name);
-        if gsym != (0 as *Sym) {
-            if (*gsym).kind == SYM_VARIANT() {
-                if parser_check(p, TOKEN_LPAREN()) != (0 as i32) {
-                    parser_advance(p, &t);  // consume (
-                    let inner = parse_pattern(p);
-                    parser_expect(p, TOKEN_RPAREN(), ") after enum pattern" as *u8, &t);
-                    return ast_new_pattern_enum((*p).arena, loc_lf, loc_ll, loc_lc,
-                                                0 as *Sym, gsym, inner);
-                }
-                // bare variant: None
-                return ast_new_pattern_enum((*p).arena, loc_lf, loc_ll, loc_lc,
-                                            0 as *Sym, gsym, 0 as *Node);
-            }
-        }
-
-        // 普通 ident pattern（binding）
-        let mut sym = symtab_lookup((*p).current_scope, ident_name);
-        if sym == (0 as *Sym) {
-            sym = symtab_insert((*p).current_scope, ident_name, SYM_VAR(),
-                                0 as *u8, 0 as i32, (*p).scope_depth);
-        }
-        return ast_new_pattern_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
-    }
-
-    // ── TOKEN_INT 分支 ──
-    if t.kind == TOKEN_INT() {
-        parser_advance(p, &t);
-        let val = strtoll(t.start, 0 as *u8, 0 as i32);
-        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_I32());
-    }
-
-    // ── TOKEN_BOOL 分支 ──
-    if t.kind == TOKEN_BOOL() {
-        parser_advance(p, &t);
-        // "true" = 4 bytes; "false" = 5 bytes; check length + first 4 chars
-        let mut val = 0 as i64;
-        if t.length == (4 as i64) {
-            let r = strncmp(t.start, "true" as *u8, 4 as i64);
-            if r == (0 as i32) {
-                val = 1 as i64;
-            }
-        }
-        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_BOOL());
-    }
-
-    // ── TOKEN_CHAR 分支 ──
-    if t.kind == TOKEN_CHAR() {
-        parser_advance(p, &t);
-        // t.start[0] = '\'', t.start[1] = char, t.start[2] = '\''
-        // qbe_type_of(*u8) 默认 'b' bug（plan § 0 #6），绕开：4-byte aligned read + mask
-        // 对齐 lexer.jhyy::lex_peek_char 的写法
-        let p_addr = t.start as i64;
-        let aligned = p_addr & (~(3 as i64));
-        let rem = (p_addr - aligned) as i32;
-        let w = *((aligned) as *i32);
-        let shift = rem * (8 as i32);
-        let masked = (w >> shift) & (255 as i32);
-        let ch = masked & (255 as i32);
-        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, ch as i64, PRIM_U8());
-    }
-
-    // ── TOKEN_MINUS 分支 ──
-    if t.kind == TOKEN_MINUS() {
-        parser_advance(p, &t);  // consume '-'
-        parser_expect(p, TOKEN_INT(), "integer after - in pattern" as *u8, &t);
-        let val = strtoll(t.start, 0 as *u8, 0 as i32);
-        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, -val, PRIM_I32());
-    }
-
-    // ── default: error ──
-    jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
-    jh_fputs_stderr("error: unexpected token '" as *u8);
-    jh_fputs_stderr(token_kind_name(t.kind));
-    jh_fputs_stderr("' in pattern\n" as *u8);
-    (*p).error_count = (*p).error_count + (1 as i32);
-    parser_advance(p, &t);
-    return 0 as *Node;
-}
+// parse_pattern 在 parse_expr 之前已定义（v1.4.6 W-020 reorder — 用
+// parse_pattern_primary 解 mutual recursion; parse_match 因调 parse_expr
+// (subj/body) 不能 forward ref, 保持 parse_expr 之后定义）。
 
 // ════════════════════════════════════════════════════
 // parse_match: match expr { pat => body [, ...] }
 // arm body 走 parse_expr stub（commit 3 限制：返回 NULL）
+// v1.4.6 W-020 fix: OR pattern parser_advance(p) 修 &t 缺参 UB（t slot uninit 写入）。
 // ════════════════════════════════════════════════════
 
 fn parse_match(p: *Parser) -> *Node {
@@ -1279,8 +1303,9 @@ fn parse_match(p: *Parser) -> *Node {
         }
         let mut pat: *Node = parse_pattern(p);
         // v1.3.7: OR pattern — left-associative loop on `|`.
+        // v1.4.6: parser_advance(p) → parser_advance(p, &t) — 修 &t 缺参 UB。
         while parser_check(p, TOKEN_PIPE()) != (0 as i32) {
-            parser_advance(p);
+            parser_advance(p, &t);
             let rloc_lf = (*pat).loc_filename;
             let rloc_ll = (*pat).loc_line;
             let rloc_lc = (*pat).loc_col;
