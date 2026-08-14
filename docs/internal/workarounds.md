@@ -52,8 +52,8 @@
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
 **ID:** W-001
-**状态:** ACTIVE
-**日期:** v0.6 sprint（~2026-05）
+**状态:** RESOLVED (v0.8 commit 9 `d570c72`, 2026-08-03) — 见下方"W-001 RESOLVED" section (byte-by-byte FNV-1a 真修, 移除了 *i32 overread workaround + W-002 失效)
+**日期:** v0.6 sprint（~2026-05, ACTIVE）→ 2026-08-03 (RESOLVED)
 **触发面:** `hash_string` 函数里需要 deref `*u8` 一次读 1 byte
 **症状:**
 - v0 codegen 对 `*((p) as *u8)` deref emit `%=b loadsb p`（destination 是 `b` class）
