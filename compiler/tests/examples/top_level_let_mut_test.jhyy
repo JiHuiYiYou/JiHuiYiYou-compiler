@@ -1,0 +1,17 @@
+// top_level_let_mut_test.jhyy — v1.4.6 test for W-017 真修
+// EXPECT: 42
+//
+// Covers module-level `let mut g_x: T = expr;`:
+// - data section emit + mod_globals dict registration (cg_module pass A)
+// - cg_find_local fallthrough to globals
+// - cg_emit_load/store dispatch on IRVAL_STR addr (loadw/storew $g_x)
+//
+// W-017 ACTIVE pre-fix: jhyy-side codegen 不 implement 顶层 let mut global,
+// 委托 path state 到 jhyy_helpers.c runtime; C-side 也是 silently-skipped.
+
+let mut g_x: i32 = 41;
+
+fn main_jhyy() -> i32 {
+    g_x = g_x + 1;
+    return g_x;
+}

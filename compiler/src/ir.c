@@ -205,14 +205,39 @@ void ir_emit_alloc(IRBuf *ir, IRVal dst, int size) {
 void ir_emit_store(IRBuf *ir, char qbe_type, IRVal val, IRVal addr) {
     const char *pref = (qbe_type == 'w') ? "storew" : (qbe_type == 'l') ? "storel" :
                        (qbe_type == 's') ? "stores" : (qbe_type == 'd') ? "stored" : "storew";
-    ir_emit(ir, "    %s %%t%d, %%t%d\n", pref, val.id, addr.id);
+    /* v1.4.6 W-017: dispatch on addr.kind via ir_emit_arg (mirror src0/ir.jhyy
+       599-622) — keeps Stage 1 byte-equal. ir_emit_arg handles IRVAL_STR
+       (global data label $g_x), IRVAL_INT (literal), default (SSA temp). */
+    ir_emit(ir, "    %s %%t%d,", pref, val.id);
+    ir_emit_arg(ir, addr);
+    ir_emit(ir, "\n");
 }
 
 void ir_emit_load(IRBuf *ir, IRVal dst, char qbe_type, IRVal addr) {
     const char *pref = (qbe_type == 'w') ? "loadw" : (qbe_type == 'l') ? "loadl" :
                        (qbe_type == 's') ? "loads" : (qbe_type == 'd') ? "loadd" : "loadw";
     char qt = dst.qbe_type ? dst.qbe_type : qbe_type;  /* W-005 #2: default to instr type */
-    ir_emit(ir, "    %%t%d =%c %s %%t%d\n", dst.id, qt, pref, addr.id);
+    /* v1.4.6 W-017: dispatch on addr.kind via ir_emit_arg (mirror src0/ir.jhyy
+       625+) — keeps Stage 1 byte-equal. */
+    ir_emit(ir, "    %%t%d =%c %s", dst.id, qt, pref);
+    ir_emit_arg(ir, addr);
+    ir_emit(ir, "\n");
+}
+
+/* v1.4.6 W-017: emit one operand with kind dispatch (mirror src0/ir.jhyy:310
+   ir_emit_arg). Used by ir_emit_store / ir_emit_load to keep Stage 1 byte-equal
+   with jhyy-side (jhyy-side callers dispatch through this helper, not inline).
+     - IRVAL_INT  → " <ival>"     (literal)
+     - IRVAL_STR  → " $name"      (global data label)
+     - default    → " %t<id>"     (SSA temp / block) */
+void ir_emit_arg(IRBuf *ir, IRVal val) {
+    if (val.kind == IRVAL_INT) {
+        ir_emit(ir, " %lld", (long long)val.ival);
+    } else if (val.kind == IRVAL_STR) {
+        ir_emit(ir, " %s", val.name);
+    } else {
+        ir_emit(ir, " %%t%d", val.id);
+    }
 }
 
 void ir_emit_phi(IRBuf *ir, IRVal dst, int npairs, ...) {

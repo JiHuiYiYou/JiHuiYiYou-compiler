@@ -22,6 +22,14 @@ typedef struct {
     int   is_stack;     /* 1 if value is a stack slot address */
 } LocalEntry;
 
+/* v1.4.6 W-017: module-level globals dict (Sym* → QBE data label).
+   Mirrors jhyy-side CGModGlobal layout (24 bytes). */
+typedef struct {
+    Sym        *sym;
+    const char *qbe_name;   /* "$<name>" — QBE global identifier */
+    char        qbe_type;   /* 'w' / 'l' / 'b' / 's' / 'd' */
+} CGModGlobal;
+
 /* CGContext layout MUST match jhyy-side codegen.jhyy CGCONTEXT_SIZE.
    Fields are heap-allocated (calloc) rather than inline arrays so the
    layout is portable between C-side (inline arrays OK but huge) and
@@ -51,12 +59,18 @@ typedef struct {
     NodeFuncDecl **inline_fns;
     size_t         n_inline_fns;
     Sym           *current_inline_sym;
-    /* v1.4.2: DWARF debug info emit. Layout MUST match jhyy-side CGCONTEXT_SIZE=112.
+    /* v1.4.2: DWARF debug info emit. Layout MUST match jhyy-side CGCONTEXT_SIZE=128.
        last_dbg_line dedups consecutive dbgloc emits (cg_expr fires many times per
        source line; only emit when line changes). dbg_file_emitted tracks whether
        `dbgfile "<src>"` was already written at cg_module top. */
     int           last_dbg_line;
     int           dbg_file_emitted;
+    /* v1.4.6 W-017: module-level globals (Sym* → QBE data label). Mirrors
+       jhyy-side CGCONTEXT_SIZE: +3 fields (mod_globals ptr + 2*i32 count/cap)
+       bumping total size 112 → 128. */
+    CGModGlobal   *mod_globals;     /* heap-allocated, NULL when empty */
+    int            n_mod_globals;
+    int            cap_mod_globals;
 } CGContext;
 
 static void cg_add_local(CGContext *cg, Sym *sym, IRVal val, int is_stack) {
@@ -71,6 +85,39 @@ static void cg_add_local(CGContext *cg, Sym *sym, IRVal val, int is_stack) {
 /* W-005 #2: out-param form avoids struct pass-by-value corruption at GCC -O2.
    Caller passes pointer to a stack-allocated IRVal; cg_find_local writes the
    resolved value through *out. */
+static void cg_mod_global_register(CGContext *cg, Sym *sym,
+                                   const char *qbe_name, char qbe_type) {
+    if (cg->n_mod_globals >= cg->cap_mod_globals) {
+        int new_cap = cg->cap_mod_globals ? cg->cap_mod_globals * 2 : 8;
+        CGModGlobal *ng = realloc(cg->mod_globals,
+                                  new_cap * sizeof(CGModGlobal));
+        /* first alloc: realloc(NULL, ...) acts like malloc */
+        cg->mod_globals = ng;
+        cg->cap_mod_globals = new_cap;
+    }
+    cg->mod_globals[cg->n_mod_globals].sym       = sym;
+    cg->mod_globals[cg->n_mod_globals].qbe_name  = qbe_name;
+    cg->mod_globals[cg->n_mod_globals].qbe_type  = qbe_type;
+    cg->n_mod_globals++;
+}
+
+static int cg_mod_global_lookup(CGContext *cg, Sym *sym, IRVal *out) {
+    if (!cg->mod_globals) return 0;
+    for (int i = 0; i < cg->n_mod_globals; i++) {
+        if (cg->mod_globals[i].sym == sym) {
+            IRVal v;
+            v.kind     = IRVAL_STR;       /* QBE global data label form */
+            v.id       = 0;
+            v.ival     = 0;
+            v.name     = cg->mod_globals[i].qbe_name;
+            v.qbe_type = cg->mod_globals[i].qbe_type;
+            *out = v;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void cg_find_local(CGContext *cg, Sym *sym, int *is_stack, IRVal *out) {
     for (int i = 0; i < cg->nlocals; i++) {
         if (cg->locals[i].sym == sym) {
@@ -78,6 +125,11 @@ static void cg_find_local(CGContext *cg, Sym *sym, int *is_stack, IRVal *out) {
             *out = cg->locals[i].value;
             return;
         }
+    }
+    /* v1.4.6 W-017: fallthrough — module-level globals. */
+    if (cg_mod_global_lookup(cg, sym, out)) {
+        if (is_stack) *is_stack = 0;  /* globals are SSA via load, not stack slot */
+        return;
     }
     *out = (IRVal){0};  /* zero sentinel: id=0, kind=IRVAL_TEMP */
 }
@@ -557,6 +609,13 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
                 *out = (loc); return;
             }
             /* load from stack */
+            IRVal v = ir_new_tmp(cg->ir, qbe_type_of(n->type));
+            cg_emit_load(cg, v, n->type, loc);
+            *out = (v); return;
+        }
+        /* v1.4.6 W-017: module-level global (IRVAL_STR addr) — load via
+           cg_emit_load which dispatches on addr.kind (loadw $g_x). */
+        if (loc.kind == IRVAL_STR) {
             IRVal v = ir_new_tmp(cg->ir, qbe_type_of(n->type));
             cg_emit_load(cg, v, n->type, loc);
             *out = (v); return;
@@ -1796,6 +1855,12 @@ static void cg_stmt(CGContext *cg, Node *n) {
                     cg_emit_store(cg, d->target->type, val, slot);
                 }
             }
+            /* v1.4.6 W-017: module-level global — cg_find_local returns
+               IRVAL_STR with name = "$g_x". cg_emit_load/Store dispatch
+               on addr.kind. */
+            else if (slot.kind == IRVAL_STR) {
+                cg_emit_store(cg, d->target->type, val, slot);
+            }
         } else if (d->target->kind == NODE_INDEX) {
             /* arr[i] = value */
             NodeIndex *idx = node_index_data(d->target);
@@ -2046,7 +2111,7 @@ static void cg_stmt(CGContext *cg, Node *n) {
 
 /* ── function codegen ── */
 
-static void cg_func(IRBuf *ir, Node *n, NodeFuncDecl **inline_fns, size_t n_inline_fns) {
+static void cg_func(CGContext *cg, IRBuf *ir, Node *n, NodeFuncDecl **inline_fns, size_t n_inline_fns) {
     NodeFuncDecl *fd = node_func_decl_data(n);
     if (fd->is_extern) return; /* no body to emit */
 
@@ -2084,37 +2149,32 @@ static void cg_func(IRBuf *ir, Node *n, NodeFuncDecl **inline_fns, size_t n_inli
     ir_emit_label(ir, ir_new_block(ir, "start"));
 
     /* setup context */
-    CGContext cg;
-    cg.ir = ir;
-    cg.nlocals = 0;
-    cg.current_ret_type = ret_type;
-    cg.has_sret = is_sret;
-    cg.sret_slot_id = -1;
-    cg.loop_depth = 0;
-    cg.current_fn = fd;  /* v1.3.6: cg_emit_defers reads fd->defers in cg_return */
+    /* v1.4.6 W-017: cg is module-level (allocated in cg_module). cg_func
+       only resets per-function state. locals/loop arrays/mod_globals survive. */
+    cg->nlocals = 0;
+    cg->current_ret_type = ret_type;
+    cg->has_sret = is_sret;
+    cg->sret_slot_id = -1;
+    cg->loop_depth = 0;
+    cg->current_fn = fd;  /* v1.3.6: cg_emit_defers reads fd->defers in cg_return */
     /* v1.3.5: #[inline] table + recursion guard. Set current_inline_sym to
        fd->sym so calls to fd from within its own body fall back to `call $fn`
        instead of recursing inline (would infinite-expand). */
-    cg.inline_fns = inline_fns;
-    cg.n_inline_fns = n_inline_fns;
-    cg.current_inline_sym = fd->sym;
+    cg->inline_fns = inline_fns;
+    cg->n_inline_fns = n_inline_fns;
+    cg->current_inline_sym = fd->sym;
     /* v1.4.2: reset last_dbg_line for the new function. The first cg_expr call
        will emit the appropriate dbgloc based on the first stmt/expr's source
        line. (Don't emit from cg_func — it would be redundant with cg_expr's
        first emit if the body starts on the same line as the decl, AND wasteful
        if it starts on a later line.) */
-    cg.last_dbg_line = 0;
-    cg.dbg_file_emitted = 1;  /* dbgfile emitted in cg_module; reset per-func is irrelevant */
-    /* heap-alloc locals + loop label arrays (matches jhyy-side layout) */
-    cg.locals        = (LocalEntry*)calloc(MAX_LOCALS,     sizeof(LocalEntry));
-    cg.loop_starts   = (IRVal*)     calloc(MAX_LOOP_DEPTH, sizeof(IRVal));
-    cg.loop_ends     = (IRVal*)     calloc(MAX_LOOP_DEPTH, sizeof(IRVal));
-    cg.loop_continues= (IRVal*)     calloc(MAX_LOOP_DEPTH, sizeof(IRVal));
+    cg->last_dbg_line = 0;
+    cg->dbg_file_emitted = 1;  /* dbgfile emitted in cg_module; reset per-func is irrelevant */
 
     /* register sret slot if needed */
     if (is_sret) {
-        cg.sret_slot_id = ir_new_tmp(ir, 'l').id;
-        ir_emit(ir, "    %%t%d =l copy %%ret\n", cg.sret_slot_id);
+        cg->sret_slot_id = ir_new_tmp(ir, 'l').id;
+        ir_emit(ir, "    %%t%d =l copy %%ret\n", cg->sret_slot_id);
     }
 
     /* register params as locals (copy into SSA temps) */
@@ -2127,11 +2187,11 @@ static void cg_func(IRBuf *ir, Node *n, NodeFuncDecl **inline_fns, size_t n_inli
         IRVal param_val = ir_new_tmp(ir, qt);
         ir_emit(ir, "    %%t%d =%c copy %%%s\n",
                 param_val.id, qt, fd->params[i].sym->name);
-        cg_add_local(&cg, fd->params[i].sym, param_val, 0);
+        cg_add_local(cg, fd->params[i].sym, param_val, 0);
     }
 
     IRVal body_val = {0};
-    cg_expr(&cg, fd->body, &body_val);
+    cg_expr(cg, fd->body, &body_val);
 
     /* check if body already ended with an explicit return */
     #define body_returns(body) \
@@ -2144,7 +2204,7 @@ static void cg_func(IRBuf *ir, Node *n, NodeFuncDecl **inline_fns, size_t n_inli
         if (is_sret) {
             /* copy result to sret slot before returning */
             IRVal sret_addr = {0};
-            sret_addr.id = cg.sret_slot_id;
+            sret_addr.id = cg->sret_slot_id;
             sret_addr.qbe_type = 'l';
             /* Sprint 4.25 W-005 #2 真修: body_val is sentinel IRVal{id=0} when
                `body_returns()` is syntactic-only (e.g. body is `if c { return A }
@@ -2153,7 +2213,7 @@ static void cg_func(IRBuf *ir, Node *n, NodeFuncDecl **inline_fns, size_t n_inli
                which was never overwritten). Without this guard, cg_copy_struct
                emits `copy %t0` and QBE rejects the whole function. */
             if (!irval_is_undef(body_val)) {
-                cg_copy_struct(&cg, ret_type, sret_addr, body_val);
+                cg_copy_struct(cg, ret_type, sret_addr, body_val);
             }
             IRVal v = {0};
             ir_emit_ret(ir, v);
@@ -2168,11 +2228,8 @@ static void cg_func(IRBuf *ir, Node *n, NodeFuncDecl **inline_fns, size_t n_inli
 
     ir_emit(ir, "}\n\n");
 
-    /* free heap-allocated CGContext arrays */
-    free(cg.locals);
-    free(cg.loop_starts);
-    free(cg.loop_ends);
-    free(cg.loop_continues);
+    /* v1.4.6 W-017: CGContext is module-level; locals/loop arrays/mod_globals
+       are freed by cg_module after Pass B. */
 }
 
 /* ── module codegen ── */
@@ -2233,12 +2290,22 @@ static void cg_emit_const_data_elem(IRBuf *ir, Node *e, Type *t, int *first) {
 
 void cg_module(IRBuf *ir, Node *module) {
     NodeModule *md = node_module_data(module);
+    /* v1.4.6 W-017: alloc CGContext at module level (jhyy-side mirror). Locals
+       + loop arrays + mod_globals dict live for the whole module — cg_func
+       resets only nlocals per function. Mirrors jhyy-side cg_module layout. */
+    CGContext cg = {0};
+    cg.ir = ir;
+    cg.locals        = (LocalEntry*)calloc(MAX_LOCALS,     sizeof(LocalEntry));
+    cg.loop_starts   = (IRVal*)     calloc(MAX_LOOP_DEPTH, sizeof(IRVal));
+    cg.loop_ends     = (IRVal*)     calloc(MAX_LOOP_DEPTH, sizeof(IRVal));
+    cg.loop_continues= (IRVal*)     calloc(MAX_LOOP_DEPTH, sizeof(IRVal));
     /* v1.4.2: emit `dbgfile "<source>"` for DWARF line info.
        QBE: dbgfile → .file N "<name>" in .s. C-side: codegen reads
        module->loc.filename (parser透传 lexer 的 filename),所以直接 emit.
        jhyy-side mirror 同步 (per W-018). */
     if (module->loc.filename) {
         cg_dbg_emit_file(ir, module->loc.filename);
+        cg.dbg_file_emitted = 1;
     }
     /* Pass A: emit all const decls as data section (deferred to flush) */
     for (size_t i = 0; i < md->ndeccls; i++) {
@@ -2256,6 +2323,32 @@ void cg_module(IRBuf *ir, Node *module) {
                 cg_emit_const_data_elem(ir, arr->elems[j], elem_t, &first);
             }
             ir_emit_data(ir, " }\n");
+        }
+        /* v1.4.6 W-017: module-level `let mut g_x: T = expr;` → emit QBE data
+           section + register in mod_globals dict for runtime read/write.
+           Init expr folded into data section when literal; otherwise zero-init
+           + leave runtime init via main() prologue (TODO future sprint). */
+        else if (decl->kind == NODE_LET) {
+            NodeLet *d = node_let_data(decl);
+            if (!d->sym || !d->sym->type) continue;
+            Type *lt = d->sym->type;
+            /* only primitive globals supported in v1.4.6 MVP */
+            if (lt->kind != KIND_PRIMITIVE) continue;
+            char qt = qbe_type_of(lt);
+            if (qt == 0) continue;
+            ir_emit_data(ir, "data $%s = { %c ", d->sym->name, qt);
+            if (d->init && d->init->kind == NODE_INT) {
+                int64_t v = node_int_data(d->init)->value;
+                ir_emit_data(ir, "%lld", (long long)v);
+            } else {
+                ir_emit_data(ir, "0");
+            }
+            ir_emit_data(ir, " }\n");
+            char qname[256];
+            snprintf(qname, sizeof(qname), "$%s", d->sym->name);
+            cg_mod_global_register(&cg, d->sym,
+                                    arena_strdup(ir->arena, qname, strlen(qname)),
+                                    qt);
         }
     }
     /* v1.3.5: build #[inline] fn table for call-site expansion lookup.
@@ -2284,7 +2377,13 @@ void cg_module(IRBuf *ir, Node *module) {
     for (size_t i = 0; i < md->ndeccls; i++) {
         Node *decl = md->decls[i];
         if (decl->kind == NODE_FUNC_DECL) {
-            cg_func(ir, decl, inline_fns, n_inline);
+            cg_func(&cg, ir, decl, inline_fns, n_inline);
         }
     }
+    /* v1.4.6 W-017: free module-level CGContext arrays */
+    free(cg.locals);
+    free(cg.loop_starts);
+    free(cg.loop_ends);
+    free(cg.loop_continues);
+    free(cg.mod_globals);
 }

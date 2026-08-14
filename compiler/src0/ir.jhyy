@@ -312,6 +312,11 @@ fn ir_emit_arg(ir: *IRBuf, val: IRVal) -> i32 {
         ir_emit_str(ir, " " as *u8);
         return ir_emit_lld(ir, "%lld" as *u8, val.ival);
     }
+    // v1.4.6 W-017: IRVAL_STR (global data label) → " $name"
+    if val.kind == IRVAL_STR() {
+        ir_emit_str(ir, " " as *u8);
+        return ir_emit_str(ir, val.name);
+    }
     ir_emit_str(ir, " %t" as *u8);
     return ir_emit_int(ir, "%d" as *u8, val.id);
 }
@@ -592,7 +597,8 @@ fn ir_emit_alloc(ir: *IRBuf, dst: IRVal, size: i32) -> i32 {
 }
 
 fn ir_emit_store(ir: *IRBuf, qbe_type: i32, val: IRVal, addr: IRVal) -> i32 {
-    // "    storeT %tV, %tA"
+    // "    storeT %tV, <addr>" — addr IRVAL_TEMP → "%t<id>"; IRVAL_STR → "$name"
+    // (v1.4.6 W-017: IRVAL_STR = module-level global label)
     let mut pref: *u8 = 0 as *u8;
     if qbe_type == QBE_W() {
         pref = "storew" as *u8;
@@ -609,8 +615,9 @@ fn ir_emit_store(ir: *IRBuf, qbe_type: i32, val: IRVal, addr: IRVal) -> i32 {
     ir_emit_str(ir, pref);
     ir_emit_str(ir, " %t" as *u8);
     ir_emit_int(ir, "%d" as *u8, val.id);
-    ir_emit_str(ir, ", %t" as *u8);
-    ir_emit_int(ir, "%d" as *u8, addr.id);
+    ir_emit_str(ir, "," as *u8);
+    // v1.4.6 W-017: dispatch on addr.kind (re-use ir_emit_arg — IRVAL_STR → " $name")
+    let _a = ir_emit_arg(ir, addr);
     ir_emit_str(ir, "\n" as *u8);
     return 1;
 }

@@ -81,6 +81,11 @@ void ir_emit_call_void(IRBuf *ir, const char *fn, IRVal *args, int n);
 void ir_emit_alloc(IRBuf *ir, IRVal dst, int size);
 void ir_emit_store(IRBuf *ir, char qbe_type, IRVal val, IRVal addr);
 void ir_emit_load(IRBuf *ir, IRVal dst, char qbe_type, IRVal addr);
+/* v1.4.6 W-017: emit one operand with kind dispatch (mirror src0/ir.jhyy:310
+   ir_emit_arg) — IRVAL_INT → " <ival>"; IRVAL_STR → " $name"; default → " %t<id>".
+   Required for Stage 1 byte-equal (jhyy-side callers like ir_emit_store /
+   ir_emit_load dispatch through this helper, not inline). */
+void ir_emit_arg(IRBuf *ir, IRVal val);
 void ir_emit_phi(IRBuf *ir, IRVal dst, int npairs, ...);
 
 /* emit data (deferred until ir_flush_data) */

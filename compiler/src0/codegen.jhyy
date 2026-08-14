@@ -170,16 +170,100 @@ type CGContext = struct {
     //                  is NULL (per C-side mirror).
     last_dbg_line:    i32,
     dbg_file_emitted: i32,
+    // v1.4.6 W-017: module-level globals dict (Sym* → QBE data label).
+    //   cg_module pass A 在遇到 NODE_LET 时 emit `data $g_x = { w 41 }` +
+    //   register; cg_find_local fallthrough; cg_expr/cg_stmt 用 IRVAL_STR 形式
+    //   触发 ir_emit_load/store emit `$name` (per C-side mirror).
+    //   字段顺序 + 总 size 必须跟 C-side codegen.c CGContext byte-equal (per W-005)。
+    mod_globals:      *u8,        // *CGModGlobal 数组 (arena_alloc)
+    n_mod_globals:    i32,
+    cap_mod_globals:  i32,
 }
 
+// CGModGlobal layout (24 bytes): sym(0..8) + qbe_name(8..16) + qbe_type(16..20), padded to 24
+fn CGMOD_GLOBAL_SIZE() -> i64 { return 24 as i64; }
+
 // CGContext size (v1.3.5: + 3*i64 for inline_fns / n_inline_fns / current_inline_sym;
-//                   v1.4.2: + 2*i32 for last_dbg_line / dbg_file_emitted):
+//                   v1.4.2: + 2*i32 for last_dbg_line / dbg_file_emitted;
+//                   v1.4.6 W-017: + 1*i64 (mod_globals) + 2*i32 (n_mod_globals, cap_mod_globals) = +16):
 //   9*i64 (ir, locals, nlocals_pad, current_ret_type, sret_slot_id, current_fn,
 //          inline_fns, n_inline_fns, current_inline_sym) = 72 +
-//   has_sret(i32) + loop_depth(i32) + last_dbg_line(i32) + dbg_file_emitted(i32) = 16 +
-//   3*i64 (loop_starts, loop_ends, loop_continues) = 24
-//   = 112 (was 104 before v1.4.2)
-fn CGCONTEXT_SIZE() -> i64 { return 112 as i64; }
+//   has_sret(i32) + loop_depth(i32) + last_dbg_line(i32) + dbg_file_emitted(i32)
+//   + n_mod_globals(i32) + cap_mod_globals(i32) = 24 +
+//   3*i64 (loop_starts, loop_ends, loop_continues) = 24 +
+//   1*i64 (mod_globals) = 8
+//   = 128 (was 112 before v1.4.6)
+fn CGCONTEXT_SIZE() -> i64 { return 128 as i64; }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.4.6 W-017: CGModGlobal struct + register/lookup helpers
+//   CGModGlobal layout MUST match C-side CGModGlobal (24 bytes) — Stage 2
+//   closure chain (jhyy_v1→v2→v3→v4 编 src0/main.jhyy) writes to same offsets.
+// ═══════════════════════════════════════════════════════════════════════════
+
+type CGModGlobal = struct {
+    sym:       *u8,        // 0..8
+    qbe_name:  *u8,        // 8..16
+    qbe_type:  i32,        // 16..20
+}
+
+// cg_mod_global_register: append (sym, qbe_name, qbe_type) to cg->mod_globals.
+// Mirrors C-side cg_mod_global_register. arena_alloc new array when full.
+fn cg_mod_global_register(cg_raw: *u8, sym: *u8, qbe_name: *u8, qbe_type: i32) -> i32 {
+    let cg = cg_raw as *CGContext;
+    let n = (*cg).n_mod_globals;
+    let cap = (*cg).cap_mod_globals;
+    if n >= cap {
+        let mut new_cap: i32 = cap * (2 as i32);
+        if new_cap < (8 as i32) { new_cap = 8 as i32; }
+        let new_size = (new_cap as i64) * CGMOD_GLOBAL_SIZE();
+        let new_arr = arena_alloc((*((*cg).ir as *IRBuf)).arena, new_size);
+        // copy existing entries
+        let mut i: i32 = 0 as i32;
+        while i < n {
+            let old_p = ptr_add_u8((*cg).mod_globals, (i as i64) * CGMOD_GLOBAL_SIZE());
+            let new_p = ptr_add_u8(new_arr, (i as i64) * CGMOD_GLOBAL_SIZE());
+            *(new_p as **u8) = *(old_p as **u8);
+            *(ptr_add_u8(new_p, 8 as i64) as **u8) = *(ptr_add_u8(old_p, 8 as i64) as **u8);
+            *(ptr_add_u8(new_p, 16 as i64) as *i32) = *(ptr_add_u8(old_p, 16 as i64) as *i32);
+            i = i + (1 as i32);
+        }
+        (*cg).mod_globals = new_arr;
+        (*cg).cap_mod_globals = new_cap;
+    }
+    let entry_p = ptr_add_u8((*cg).mod_globals, (n as i64) * CGMOD_GLOBAL_SIZE());
+    *(entry_p as **u8) = sym;
+    *(ptr_add_u8(entry_p, 8 as i64) as **u8) = qbe_name;
+    *(ptr_add_u8(entry_p, 16 as i64) as *i32) = qbe_type;
+    (*cg).n_mod_globals = n + (1 as i32);
+    return 1;
+}
+
+// cg_mod_global_lookup: out_buf 写 IRVAL_STR (kind=IRVAL_STR, name=qbe_name, qbe_type=qbe_type).
+// 找到返回 1, 没找到返回 0。
+fn cg_mod_global_lookup(cg_raw: *u8, sym: *u8, out_buf: *u8) -> i32 {
+    let cg = cg_raw as *CGContext;
+    if (*cg).mod_globals == (0 as *u8) { return 0; }
+    let n = (*cg).n_mod_globals;
+    let mut i: i32 = 0 as i32;
+    while i < n {
+        let entry_p = ptr_add_u8((*cg).mod_globals, (i as i64) * CGMOD_GLOBAL_SIZE());
+        let entry_sym = *(entry_p as **u8);
+        if entry_sym == sym {
+            let entry_name = *(ptr_add_u8(entry_p, 8 as i64) as **u8);
+            let entry_qt = *(ptr_add_u8(entry_p, 16 as i64) as *i32);
+            // IRVal layout: kind(0) + id(4) + ival(8) + name(16) + qbe_type(24)
+            *(out_buf as *i32) = IRVAL_STR();
+            *(ptr_add_u8(out_buf, 4 as i64) as *i32) = 0;
+            *(ptr_add_u8(out_buf, 8 as i64) as *i64) = 0 as i64;
+            *(ptr_add_u8(out_buf, 16 as i64) as **u8) = entry_name;
+            *(ptr_add_u8(out_buf, 24 as i64) as *i32) = entry_qt;
+            return 1;
+        }
+        i = i + (1 as i32);
+    }
+    return 0;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // v1.4.2: DWARF debug info emit helpers
@@ -293,7 +377,11 @@ fn cg_find_local(cg_raw: *u8, sym: *u8, out_buf: *u8) -> i32 {
         }
         i = i + (1 as i32);
     }
-    // not found — zero out
+    // not found in locals — fallthrough to module-level globals (v1.4.6 W-017)
+    if cg_mod_global_lookup(cg_raw, sym, out_buf) != 0 {
+        return 1;
+    }
+    // not found anywhere — zero out
     let zk = out_buf as *i32;
     *zk = 0;
     let zi = ptr_add_u8(out_buf, 4 as i64) as *i32;
@@ -448,13 +536,13 @@ fn cg_emit_load(cg_raw: *u8, dst: IRVal, t_raw: *u8, addr: IRVal) -> i32 {
             insn = "loaduh" as *u8;
         }
         if insn != (0 as *u8) {
-            /* sub-word: always returns word. "    %tD =w insn %tA" */
+            /* sub-word: always returns word. "    %tD =w insn <addr>" — IRVAL_STR addr
+               (W-017 global) dispatches via ir_emit_arg. */
             ir_emit_str(ir, "    %t" as *u8);
             ir_emit_int(ir, "%d" as *u8, dst.id);
             ir_emit_str(ir, " =w " as *u8);
             ir_emit_str(ir, insn);
-            ir_emit_str(ir, " %t" as *u8);
-            ir_emit_int(ir, "%d" as *u8, addr.id);
+            let _a = ir_emit_arg(ir, addr);
             ir_emit_str(ir, "\n" as *u8);
             return 1;
         }
@@ -483,19 +571,19 @@ fn cg_emit_store_primitive(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> 
     if (*t).kind == KIND_PRIMITIVE() {
         let prim = (*t).prim;
         if prim == PRIM_I8() || prim == PRIM_U8() || prim == PRIM_BOOL() {
-            /* "    storeb %tV, %tA" */
+            /* "    storeb %tV, <addr>" — addr IRVAL_STR → "$name" (W-017 globals) */
             ir_emit_str(ir, "    storeb %t" as *u8);
             ir_emit_int(ir, "%d" as *u8, val.id);
-            ir_emit_str(ir, ", %t" as *u8);
-            ir_emit_int(ir, "%d" as *u8, addr.id);
+            ir_emit_str(ir, "," as *u8);
+            let _a = ir_emit_arg(ir, addr);
             ir_emit_str(ir, "\n" as *u8);
             return 1;
         }
         if prim == PRIM_I16() || prim == PRIM_U16() {
             ir_emit_str(ir, "    storeh %t" as *u8);
             ir_emit_int(ir, "%d" as *u8, val.id);
-            ir_emit_str(ir, ", %t" as *u8);
-            ir_emit_int(ir, "%d" as *u8, addr.id);
+            ir_emit_str(ir, "," as *u8);
+            let _a = ir_emit_arg(ir, addr);
             ir_emit_str(ir, "\n" as *u8);
             return 1;
         }
@@ -1221,6 +1309,13 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             cg_emit_load(cg_raw, v, (*n).type_ptr, loc);
             return v;
         }
+        /* v1.4.6 W-017: module-level global (IRVAL_STR addr) — load via
+           cg_emit_load which dispatches on addr.kind (loadw $g_x). */
+        if *loc_kind_p == IRVAL_STR() {
+            let v = *ir_new_tmp(ir, qbe_type_of((*n).type_ptr));
+            cg_emit_load(cg_raw, v, (*n).type_ptr, loc);
+            return v;
+        }
         return loc;  /* SSA value */
     }
 
@@ -1545,6 +1640,12 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                         let _store = cg_emit_store(cg_raw, tgt_t, val, slot);
                     }
                 }
+            }
+            /* v1.4.6 W-017: module-level global — slot.kind = IRVAL_STR,
+               cg_emit_store dispatch on addr.kind (storew %val, $g_x). */
+            else if *(slot_buf_u8 as *i32) == IRVAL_STR() {
+                let tgt_t2 = (*target).type_ptr;
+                let _store2 = cg_emit_store(cg_raw, tgt_t2, val, slot);
             }
         } else if target_kind == NODE_INDEX() {
             // arr[i] = value
@@ -3486,6 +3587,10 @@ fn cg_module(ir: *IRBuf, module: *Node) -> i32 {
     //   (parser 透传 lexer 的 filename),所以直接 emit. C-side mirror 同步 (per W-018).
     (*cg_ptr).last_dbg_line = 0;
     (*cg_ptr).dbg_file_emitted = 0;
+    // v1.4.6 W-017: initialize mod_globals dict to empty (NULL ptr + 0 count/cap)
+    (*cg_ptr).mod_globals = 0 as *u8;
+    (*cg_ptr).n_mod_globals = 0;
+    (*cg_ptr).cap_mod_globals = 0;
     if (*module).loc_filename != (0 as *u8) {
         if cg_dbg_emit_file(ir, (*module).loc_filename) != 0 {
             (*cg_ptr).dbg_file_emitted = 1;
@@ -3584,6 +3689,55 @@ fn cg_module(ir: *IRBuf, module: *Node) -> i32 {
                             j = j + (1 as i64);
                         }
                         ir_emit_data_str(ir, " }\n" as *u8);
+                    }
+                }
+            }
+        }
+        // v1.4.6 W-017: module-level `let mut g_x: T = expr;` → emit QBE data
+        //   section + register in mod_globals dict. Init expr folded into data
+        //   section when NODE_INT literal; otherwise zero-init (TODO future sprint).
+        else if (*d_node_a).kind == NODE_LET() {
+            let d_l = node_let_data(d_node_a);
+            let d_l_sym_raw = (*d_l).sym;
+            if d_l_sym_raw != (0 as *u8) {
+                let d_l_t_raw = (*(d_l_sym_raw as *Sym)).type_ptr;
+                if d_l_t_raw != (0 as *u8) {
+                    let d_l_t = d_l_t_raw as *Type;
+                    if (*d_l_t).kind == KIND_PRIMITIVE() {
+                        let qt = qbe_type_of(d_l_t_raw);
+                        if qt != (0 as i32) {
+                            ir_emit_data_str(ir, "data $" as *u8);
+                            ir_emit_data_str(ir, (*(d_l_sym_raw as *Sym)).name);
+                            ir_emit_data_str(ir, " = { " as *u8);
+                            ir_emit_data_int(ir, "%c" as *u8, qt);
+                            ir_emit_data_str(ir, " " as *u8);
+                            let d_l_init_raw = (*d_l).init;
+                            if d_l_init_raw != (0 as *u8) {
+                                let d_l_init = d_l_init_raw as *Node;
+                                if (*d_l_init).kind == NODE_INT() {
+                                    let d_l_int_val = (*(node_int_data(d_l_init))).value;
+                                    ir_emit_data_lld(ir, "%lld" as *u8, d_l_int_val);
+                                } else {
+                                    ir_emit_data_str(ir, "0" as *u8);
+                                }
+                            } else {
+                                ir_emit_data_str(ir, "0" as *u8);
+                            }
+                            ir_emit_data_str(ir, " }\n" as *u8);
+                            // build qbe_name = "$g_x" via arena sprintf + register
+                            let name_str = (*(d_l_sym_raw as *Sym)).name;
+                            let name_len = strlen(name_str);
+                            let qbe_name = arena_alloc((*ir).arena, (name_len + (2 as i64)) as i64);
+                            *(qbe_name as *i32) = 36; // '$'
+                            let mut ci: i64 = 0 as i64;
+                            while ci < name_len {
+                                *(ptr_add_u8(qbe_name, (1 as i64) + ci) as *i32) =
+                                    *(ptr_add_u8(name_str, ci) as *i32);
+                                ci = ci + (1 as i64);
+                            }
+                            *(ptr_add_u8(qbe_name, (1 as i64) + name_len) as *i32) = 0; // NUL
+                            let _reg = cg_mod_global_register(cg_raw, d_l_sym_raw, qbe_name, qt);
+                        }
                     }
                 }
             }

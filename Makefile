@@ -20,7 +20,6 @@ BIN_DIR      = $(BUILD_DIR)/bin
 # Source files
 SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/arena.c \
-       $(SRC_DIR)/diagnostics.c \
        $(SRC_DIR)/lexer.c \
        $(SRC_DIR)/parser.c \
        $(SRC_DIR)/ast.c \
@@ -28,8 +27,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/symtab.c \
        $(SRC_DIR)/sema.c \
        $(SRC_DIR)/ir.c \
-       $(SRC_DIR)/codegen.c \
-       $(SRC_DIR)/util.c
+       $(SRC_DIR)/codegen.c
 
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
 RUNTIME_OBJ = $(OBJ_DIR)/runtime.o
@@ -55,8 +53,9 @@ $(OBJ_DIR)/runtime.o: $(RUNTIME_DIR)/runtime.c
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# v1.4.4: C 端产物改名 jhyy_stage0.exe
-$(BIN_DIR)/jhyy_stage0.exe: $(OBJS) $(RUNTIME_OBJ)
+# v1.4.4: C 端产物改名 jhyy_stage0.exe (runtime.o 不链入 — 它是给 jhyy.exe 用
+# 的, 含重复符号 arena_alloc/main, 会跟 main.c/arena.c 冲突)
+$(BIN_DIR)/jhyy_stage0.exe: $(OBJS)
 	@mkdir -p $(BIN_DIR)
 	$(CC) $(CFLAGS) $^ -o $@
 
