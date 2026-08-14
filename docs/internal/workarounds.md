@@ -1678,3 +1678,55 @@ export function l $QBE_PATH() {
 - 跟 main.c `compute_project_root` mirror:`compiler/src/main.c:30-77` (C 端有 module-level `static char g_project_root[1024]`,emit 到 .data,jhyy 端做不到)
 - jhyy ABI: `docs/abis/jhyy-lang-spec-v1.3.0.md` § global state (TODO: 需 spec 加"顶层 `let mut` 是 compile-time only, runtime state 必须用 extern fn 委托 C"这条规则)
 
+---
+
+## W-018: v1.4.2 DWARF emit 引入 Stage 1 .il 字节差异 (非功能)
+
+**Status:** 🟡 ACTIVE (v1.4.2, C-side vs jhyy-side .il byte-equal 在 dbgfile/dbg loc 行数有差异)
+
+**触发面 (v1.4.2 引入 DWARF 后):**
+- C-side `compiler/src/codegen.c` `cg_module` emit `dbgfile "<module->loc.filename>"` (短名, 取决于 lexer 给的 filename)
+- jhyy-side `compiler/src0/codegen.jhyy` emit `dbgfile "<module.loc_filename>"` (可能是绝对路径, parser 透传 lexer)
+- 同样 `cg_expr` 的 `cg_dbg_emit_loc` 在两边都 emit,但 jhyy-side 的 NODE_*_STMT loc_line 填充策略跟 C-side 不完全一致 (某些 stmt 在 jhyy 端填充了 loc_line,C 端没有或反之),导致 `dbgloc N` 行数不一致
+
+**非功能影响:**
+- gdb 读 `.s` 的 `.file N "<name>"` + `.loc N <line>` — 这些是 QBE pass-through .il 里的 dbgfile/dbg loc 生成的,**两边都生成**,gdb 都能用
+- Stage 1 byte-equal (C-side vs jhyy-side 同一 .jhyy 产出的 .il 字节相同) **不再是 7/7** — 计划原意"DWARF 不在 .il 里"未实现 (DWARF 信息通过 QBE pass-through 实际上同时进了 .il 和 .s)
+- Stage 2 N=3 closure chain (`jhyy_v1.exe.exe` 编 `main.jhyy` 产出 v2/v3/v4) **不受影响** — closure chain 只跟 jhyy-side 自己比较,不含 C-side
+- gdb breakpoint + 单步 + `info source` 全部正常工作 (target test 5/5 PASS)
+
+**根因:**
+1. **路径差异:** jhyy-side parser 把 lexer 给的 filename 直接存到 Node.loc_filename (可能是绝对路径);C-side parser 也存,但 C-side `argv[0]` 路径解析跟 jhyy-side 不一定对齐
+2. **loc_line 填充差异:** jhyy-side parser/sema 在更多 NODE_*_STMT 类型上设置 loc_line (例如 if/for/while 的 body 末尾 `}` 行),C-side 没那么激进。两边都正确,但 emit 的 dbgloc 行数因此不同
+
+**workaround (本 v1.4.2 ship):**
+- 接受 .il 字节差异;DWARF 是给 gdb 用的 .s 输出,不是 .il byte-equal 的目标
+- Stage 2 N=3 closure chain (`v2.il = v3.il = v4.il`) 仍是所有 v1.4.x+ sprint 的强约束
+- v1.4.4 / v1.4.5 (post-v1.4.2) 不依赖 Stage 1 byte-equal,只依赖 Stage 2
+
+**真修路径 (post-v2.x / v3.x):**
+- jhyy-side parser 改用 cwd-relative 路径 (跟 C-side 镜像) 当 loc_filename 写入
+- jhyy-side sema 同步所有 NODE_*_STMT 的 loc_line 填充策略 — 跟 C-side 完全一致
+- 或者 v2.x codegen 完全重写时统一两个 source 的 path resolution + loc tracking
+
+**失效条件 (任一即可移除 W-018):**
+- Stage 1 byte-equal 重新达成 7/7 (即 C-side 与 jhyy-side 的 .il 在 dbgfile/dbg loc 行数完全一致)
+- 或者 v2.x 决定放弃 Stage 1 byte-equal 指标,只保留 Stage 2 (closure chain) — 当前已有此倾向
+
+**验证 (v1.4.2 ship criteria, 5/5 PASS):**
+- ✅ `gdb fib30_dbg.exe` → `b fib30_dbg.jhyy:5` resolved
+- ✅ breakpoint hit on run + `info source` 显示 DWARF 3 + Located in `fib30_dbg.jhyy`
+- ✅ source line text 在 gdb prompt 可见
+- ✅ regress spot-check 5/5 pass (arith / fib30 / match / struct / pointer)
+
+**Self-hosting impact:**
+- jhyy_v1.exe.exe sha 刷 (new codegen.jhyy emits `dbgfile` + `dbgloc`)
+- jhyy.exe sha 刷 (new codegen.c mirror)
+- Stage 1 byte-equal 不再 7/7 (W-018 active, 2 处新增非功能 diff)
+- Stage 2 closure chain 不涉及 C-side, v2.il = v3.il = v4.il byte-equal 维持
+- regress.py 全量 **50/50 PASS** (2026-08-14 补跑;当时因串行 2m22s 撞 MCP 超时未跑,现已并行化 → 43s)
+
+**引用:**
+- v1.4.2 父 sprint: `docs/plans/v1/v1.4.0任务清单 + 概要设计.md` § Sprint v1.4.2
+- 跟前序 W-005 #2 区分:W-005 #2 是 codegen 优化不彻底(temp number 多余 `copy %t`),W-018 是 DWARF emit 引入的 .il 字节差异 (非功能, .s 完全正常)
+

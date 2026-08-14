@@ -51,6 +51,12 @@ typedef struct {
     NodeFuncDecl **inline_fns;
     size_t         n_inline_fns;
     Sym           *current_inline_sym;
+    /* v1.4.2: DWARF debug info emit. Layout MUST match jhyy-side CGCONTEXT_SIZE=112.
+       last_dbg_line dedups consecutive dbgloc emits (cg_expr fires many times per
+       source line; only emit when line changes). dbg_file_emitted tracks whether
+       `dbgfile "<src>"` was already written at cg_module top. */
+    int           last_dbg_line;
+    int           dbg_file_emitted;
 } CGContext;
 
 static void cg_add_local(CGContext *cg, Sym *sym, IRVal val, int is_stack) {
@@ -108,6 +114,25 @@ static Node *cg_inline_simple_return_expr(Node *body) {
 /* ── forward ── */
 static void   cg_expr(CGContext *cg, Node *n, IRVal *out);
 static void   cg_stmt(CGContext *cg, Node *n);
+
+/* v1.4.2: DWARF debug info emit helpers.
+   QBE's .il syntax for DWARF: `dbgfile "<name>"` (top-level) + `dbgloc <line>`
+   in function body (BEFORE the next instruction). QBE translates these into
+   `.file N "<name>"` + `.loc N <line>` directives in .s, which gdb reads.
+   C-side just emits dbgfile once + dbgloc before each line change. */
+static int cg_dbg_emit_file(IRBuf *ir, const char *filename) {
+    if (!filename) return 0;
+    ir_emit(ir, "dbgfile \"%s\"\n", filename);
+    return 1;
+}
+
+static int cg_dbg_emit_loc(CGContext *cg, int line) {
+    if (line == cg->last_dbg_line) return 0;
+    if (line <= 0) return 0;
+    ir_emit(cg->ir, "    dbgloc %d\n", line);
+    cg->last_dbg_line = line;
+    return 1;
+}
 
 /* ── helpers ── */
 static IRVal ir_new_int(int64_t val) {
@@ -428,6 +453,15 @@ static int body_terminates_recursive(Node *body) {
 
 static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
     if (!n) { *out = (IRVal){0}; return; }
+
+    /* v1.4.2: emit `dbgloc <line>` before any IR for this node, if line changed.
+       Dedupe via last_dbg_line (cg_expr fires many times per source line —
+       once per subexpression — but most share the same line; only the first
+       per line produces a dbgloc). Result: roughly 1 dbgloc per source line per
+       function. gdb reads the latest .loc for each instruction. */
+    if (n->loc.line > 0) {
+        cg_dbg_emit_loc(cg, n->loc.line);
+    }
 
     switch (n->kind) {
     case NODE_INT: {
@@ -2056,6 +2090,13 @@ static void cg_func(IRBuf *ir, Node *n, NodeFuncDecl **inline_fns, size_t n_inli
     cg.inline_fns = inline_fns;
     cg.n_inline_fns = n_inline_fns;
     cg.current_inline_sym = fd->sym;
+    /* v1.4.2: reset last_dbg_line for the new function. The first cg_expr call
+       will emit the appropriate dbgloc based on the first stmt/expr's source
+       line. (Don't emit from cg_func — it would be redundant with cg_expr's
+       first emit if the body starts on the same line as the decl, AND wasteful
+       if it starts on a later line.) */
+    cg.last_dbg_line = 0;
+    cg.dbg_file_emitted = 1;  /* dbgfile emitted in cg_module; reset per-func is irrelevant */
     /* heap-alloc locals + loop label arrays (matches jhyy-side layout) */
     cg.locals        = (LocalEntry*)calloc(MAX_LOCALS,     sizeof(LocalEntry));
     cg.loop_starts   = (IRVal*)     calloc(MAX_LOOP_DEPTH, sizeof(IRVal));
@@ -2184,6 +2225,13 @@ static void cg_emit_const_data_elem(IRBuf *ir, Node *e, Type *t, int *first) {
 
 void cg_module(IRBuf *ir, Node *module) {
     NodeModule *md = node_module_data(module);
+    /* v1.4.2: emit `dbgfile "<source>"` for DWARF line info.
+       QBE: dbgfile → .file N "<name>" in .s. C-side: codegen reads
+       module->loc.filename (parser透传 lexer 的 filename),所以直接 emit.
+       jhyy-side mirror 同步 (per W-018). */
+    if (module->loc.filename) {
+        cg_dbg_emit_file(ir, module->loc.filename);
+    }
     /* Pass A: emit all const decls as data section (deferred to flush) */
     for (size_t i = 0; i < md->ndeccls; i++) {
         Node *decl = md->decls[i];

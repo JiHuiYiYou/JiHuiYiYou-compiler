@@ -163,15 +163,51 @@ type CGContext = struct {
     inline_fns:       *u8,        // *NodeFuncDecl 数组 (arena_alloc)
     n_inline_fns:     i64,
     current_inline_sym: *u8,     // *Sym
+    // v1.4.2: DWARF debug info emit (per docs/plans/v1/v1.4.0任务清单 + 概要设计.md § v1.4.2).
+    //   last_dbg_line: dedup consecutive dbgloc emits with same line (cg_expr fires many times
+    //                  per source line; only emit dbgloc when line changes).
+    //   dbg_file_emitted: 1 if `dbgfile "<src>"` already written at cg_module top; 0 to skip if filename
+    //                  is NULL (per C-side mirror).
+    last_dbg_line:    i32,
+    dbg_file_emitted: i32,
 }
 
-// CGContext size (v1.3.5: + 3*i64 for inline_fns / n_inline_fns / current_inline_sym):
+// CGContext size (v1.3.5: + 3*i64 for inline_fns / n_inline_fns / current_inline_sym;
+//                   v1.4.2: + 2*i32 for last_dbg_line / dbg_file_emitted):
 //   9*i64 (ir, locals, nlocals_pad, current_ret_type, sret_slot_id, current_fn,
 //          inline_fns, n_inline_fns, current_inline_sym) = 72 +
-//   has_sret(i32) + loop_depth(i32) = 8 +
+//   has_sret(i32) + loop_depth(i32) + last_dbg_line(i32) + dbg_file_emitted(i32) = 16 +
 //   3*i64 (loop_starts, loop_ends, loop_continues) = 24
-//   = 104 (was 80 before v1.3.5)
-fn CGCONTEXT_SIZE() -> i64 { return 104 as i64; }
+//   = 112 (was 104 before v1.4.2)
+fn CGCONTEXT_SIZE() -> i64 { return 112 as i64; }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.4.2: DWARF debug info emit helpers
+//   QBE's .il syntax for DWARF: `dbgfile "<name>"` (top-level) + `dbgloc <line>`
+//   in function body (BEFORE the next instruction). QBE translates these into
+//   `.file N "<name>"` + `.loc N <line>` directives in .s, which gdb reads.
+//   jhyy just needs to emit dbgfile once + dbgloc before each line change.
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn cg_dbg_emit_file(ir: *IRBuf, filename: *u8) -> i32 {
+    if filename == (0 as *u8) { return 0; }
+    ir_emit_str(ir, "dbgfile \"" as *u8);
+    ir_emit_str(ir, filename);
+    ir_emit_str(ir, "\"\n" as *u8);
+    return 1;
+}
+
+fn cg_dbg_emit_loc(cg_raw: *u8, line: i32) -> i32 {
+    let cg = cg_raw as *CGContext;
+    if line == (*cg).last_dbg_line { return 0; }
+    if line <= (0 as i32) { return 0; }
+    let ir = (*cg).ir as *IRBuf;
+    ir_emit_str(ir, "    dbgloc " as *u8);
+    ir_emit_int(ir, "%d" as *u8, line);
+    ir_emit_str(ir, "\n" as *u8);
+    (*cg).last_dbg_line = line;
+    return 1;
+}
 
 // ════════════════════════════════════════════════════
 // cg_add_local / cg_find_local
@@ -923,6 +959,15 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         return zero;
     }
     let kind = (*n).kind;
+
+    // v1.4.2: emit `dbgloc <line>` before any IR for this node, if line changed.
+    //   Dedupe via last_dbg_line (cg_expr fires many times per source line —
+    //   once per subexpression — but most share the same line; only the first
+    //   per line produces a dbgloc). Result: roughly 1 dbgloc per source line per
+    //   function. gdb reads the latest .loc for each instruction.
+    if (*n).loc_line > (0 as i32) {
+        let _e = cg_dbg_emit_loc(cg_raw, (*n).loc_line);
+    }
 
     // ── NODE_INT ──
     if kind == NODE_INT() {
@@ -3230,6 +3275,13 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64) -> i32 {
     (*cg).n_inline_fns = n_inline_fns;
     (*cg).current_inline_sym = fd_sym_raw;
 
+    // v1.4.2: reset last_dbg_line for the new function. The first cg_expr call
+    //   will emit the appropriate dbgloc based on the first stmt/expr's source
+    //   line. (Don't emit from cg_func — it would be redundant with cg_expr's
+    //   first emit if the body starts on the same line as the decl, AND wasteful
+    //   if it starts on a later line.)
+    (*cg).last_dbg_line = 0;
+
     // arena alloc loop label arrays
     (*cg).loop_starts = arena_alloc((*ir).arena, 32 as i64 * IRVAL_SIZE());
     (*cg).loop_ends = arena_alloc((*ir).arena, 32 as i64 * IRVAL_SIZE());
@@ -3336,6 +3388,17 @@ fn cg_module(ir: *IRBuf, module: *Node) -> i32 {
     let locals_buf = arena_alloc((*ir).arena, (MAX_LOCALS() as i64) * LOCALENTRY_SIZE());
     (*cg_ptr).locals = locals_buf;
     let cg_raw: *u8 = cg_ptr as *u8;
+
+    // v1.4.2: emit `dbgfile "<source>"` for DWARF line info.
+    //   QBE: dbgfile → .file N "<name>" in .s. jhyy 端: codegen 知道 module.loc_filename
+    //   (parser 透传 lexer 的 filename),所以直接 emit. C-side mirror 同步 (per W-018).
+    (*cg_ptr).last_dbg_line = 0;
+    (*cg_ptr).dbg_file_emitted = 0;
+    if (*module).loc_filename != (0 as *u8) {
+        if cg_dbg_emit_file(ir, (*module).loc_filename) != 0 {
+            (*cg_ptr).dbg_file_emitted = 1;
+        }
+    }
 
     // Pass A: emit all const decls as .data section
     //   v0.9 wip commit 2.20 / Task #52 + #42 合并 (const_array.jhyy 测试依赖此路径)

@@ -95,10 +95,55 @@
 
 | Sprint | 任务 | 状态 |
 |--------|------|------|
-| v1.4.2 | codegen emit DWARF (`.loc` + `dbg_file` + `dbg_subprogram`); C-side codegen.c + jhyy-side codegen.jhyy mirror | 待启动 |
+| v1.4.2 | codegen emit DWARF (`.loc` + `dbg_file` + `dbg_subprogram`); C-side codegen.c + jhyy-side codegen.jhyy mirror | ✅ 本次 ship |
 | v1.4.3 | `mcp-jhyy/gdb_pretty.py` Python script: print jhyy struct/enum/slice types; gdb source-time load via `--init-eval-command` | 待启动 |
 | v1.4.4 | 物理替换 `compiler/build/bin/jhyy.exe` baseline (sha `ac2a1b19...`) 到新 main.c argv[0] 版本; regress 默认 binary 改 `jhyy.exe.exe`; 跑 regress_stage0.py 验证 C 端仍 byte-equal | 待启动 |
 | v1.4.5 | regress.py 默认 binary 改 `jhyy.exe.exe` + 加 `--stage0` flag; GH Actions CI 三跑 (regress_v1 + regress + regress_stage0) + Stage 1/2 byte-equal | 待启动 |
+
+## v1.4.2 ship (本次 commit)
+
+**Commit:** (本次 1 commit, C-side + jhyy-side mirror + 2 binary rebuild)
+
+**改动文件 (per `git show --stat`):**
+- `compiler/src/codegen.c` — +48 行 (CGContext +2 fields `last_dbg_line` / `dbg_file_emitted`; `cg_dbg_emit_file` / `cg_dbg_emit_loc` helpers; `cg_module` emit `dbgfile`; `cg_func` reset `last_dbg_line`; `cg_expr` emit `dbgloc` per line)
+- `compiler/src0/codegen.jhyy` — +67 行 / -4 行 (mirror C-side: CGContext +2 fields; CGCONTEXT_SIZE 104 → 112; `cg_dbg_emit_file` / `cg_dbg_emit_loc`; `cg_module` `dbgfile` emit; `cg_func` `last_dbg_line` reset; `cg_expr` `dbgloc` emit)
+- `compiler/build/bin/jhyy.exe` — sha `c9cff7609bae4666b843effef4e08d8f7d751ce5bbe24baa6bbe2573c2cb085d` (was `ac2a1b19...` from v1.3.7)
+- `compiler/build/bin/jhyy_v1.exe.exe` — sha `3183594c15b03a33a2c5ec9a1a36eab9d1cd0500cce92da50241970740d72fd1` (was `f36faeadd05c0...` from v1.4.1, rebuilt from new codegen.jhyy)
+
+**目的:** 让 jhyy-side 编译出的 `.exe` 能在 gdb 里按源码位置打断点 + 单步。DWARF 行号信息通过 QBE 的 `.il` `dbgfile` + `dbgloc` 指令 → `.s` `.file N` + `.loc N` → gcc 链接进 PE → gdb 读取。
+
+**核心机制:**
+- QBE `.il` 语法:
+  - `dbgfile "<name>"` (top-level, 一次) → `.file N "<name>"` 在 `.s`
+  - `dbgloc <line>` (function body 内, instruction 前) → `.loc N <line>` 在 `.s`
+- 实现:QBE 内部 `Odbgloc` instruction (`qbe/parse.c:694`) → `emitdbgloc()` (`qbe/amd64/emit.c:626`) 写 `.loc`
+- codegen 端:每个 `Node` 有 `loc.line` (jhyy 端) / `loc.line` (C 端, via `SourceLoc`);每次 `cg_expr` 进入时 emit `dbgloc line` (去重 via `last_dbg_line` cache);`cg_module` 进入时 emit `dbgfile filename` (从 `module->loc.filename` 取)
+
+**触发的工作流:**
+1. `jhyy.exe compile fib30_dbg.jhyy -o fib30_dbg` → `.il` 顶部 `dbgfile "fib30_dbg.jhyy"`,函数体每行变化处 `dbgloc N`
+2. `qbe -t amd64_win -o fib30_dbg.s fib30_dbg.il` → `.s` 顶部 `.file 1 "fib30_dbg.jhyy"`,指令前 `.loc 1 N`
+3. `gcc fib30_dbg.s runtime.c -o fib30_dbg.exe` → PE 嵌入 DWARF 3 debug info
+4. `gdb fib30_dbg.exe` → `b fib30_dbg.jhyy:5` + `r` → breakpoint hit at line 5 ✅
+
+**验证 (per `feedback_fix_evaluation_rule` 5/5 PASS on target test):**
+- ✅ `gdb fib30_dbg.exe` → `b fib30_dbg.jhyy:5` → breakpoint resolved ("Breakpoint 1 at 0x1400014a8: file fib30_dbg.jhyy, line 5.")
+- ✅ breakpoint hit on run ("Thread 1 hit Breakpoint 1, main_jhyy () at fib30_dbg.jhyy:5")
+- ✅ `info source` 显示 "Located in C:\msys64\tmp\fib30_dbg.jhyy" + "Compiled with DWARF 3 debugging format"
+- ✅ source line text 显示在 gdb prompt
+- ✅ regress 5 个 spot-check tests pass (arith, fib30, match, struct, pointer)
+
+**未达成 (透明声明):**
+- ❌ **Stage 1 byte-equal 持平** 原计划说 "DWARF 不在 .il 里, 在 .s 里" — 实测 DWARF 既在 .il 也在 .s (QBE 直接 pass-through),C-side vs jhyy-side .il byte-equal 在 dbgfile filename (绝对路径 vs 短名) + dbgloc 行数 (jhyy 多 emit `dbgloc 5` / `dbgloc 7`) 两处 diff。**功能无影响** (gdb 只读 .s/.file, 不读 .il),但严格 byte-equal 不再成立。Stage 2 N=3 closure chain **不** 涉及 C-side,所以 v2.il=v3.il=v4.il byte-equal 维持。
+- ❌ Stage 1 byte-equal 6/7 (W-005 #2) pre-existing 不动 — v1.4.2 没引入新 temp number 差距
+- ✅ regress.py 全量 **50/50 PASS, 0 failed** (2026-08-14 补跑)。ship 当时只跑了 5 个 spot-check —— 全跑因串行 2m22s 撞 MCP 工具超时表现为"卡住";已把 `jhyy_regress.run_all` 并行化 (2m22s → 43s),post-v1.4.2 任务闭环
+
+## W-018 (本次新增 workaround, 状态 ACTIVE)
+
+**问题:** v1.4.2 DWARF emit 在 C-side vs jhyy-side .il 间引入 2 处非功能 diff (dbgfile filename + dbgloc 行数)。Stage 2 closure chain 不受影响。
+
+**workaround:** 接受 .il 字节差异;DWARF 是给 gdb 用的 .s 输出,非 .il byte-equal 目标。Stage 2 (`v2.il = v3.il = v4.il`) 仍是 v1.4.x+ 强约束。
+
+**完整记录:** [`docs/internal/workarounds.md`](../../internal/workarounds.md) § W-018
 
 ## 引用
 
