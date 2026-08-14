@@ -251,6 +251,7 @@ M1 launch (OS 编 kernel.efi + QEMU + OVMF + printk)
 | [v3.x-language-expansion.md](v3.x-language-expansion.md) | v3.x 轴权威 L1 文档(本文件是其 sprint 级细化 + 并行视角) |
 | [v2.0.0-os-prep.md](../v2/v2.0.0-os-prep.md) | OS 启动链路 + 跨项目接口权威(本文件引用其 M1-M11) |
 | [v1.0-self-hosting.md](v1.0-self-hosting.md) | v1.0 真闭环 L1 文档(本文件共同前置) |
+| [v1.x-phase-4-m5-boot-from-scratch.md](v1.x-phase-4-m5-boot-from-scratch.md) | **M5 推迟决策**(2026-08-14) — v2.x 末 (QBE 移除) + v3.x 末 (runtime 重写) 都 ship 后, 一次性删 `src/*.c` + untrack QBE + 删 runtime.c; M5 是 v1.x 末 Phase 4 单独 sprint |
 | [v1.0.0任务清单 + 概要设计.md](../v1/v1.0.0任务清单 + 概要设计.md) | v1.0 5 sprint 框架(M4 hard = sprint 3-4 末达成,本文件 § 2 + § 5.1 引用) |
 | [architecture-refactor.md](architecture-refactor.md) | 整体重构 L1 文档(本文件是其 § R-6 细化) |
 | [../../jhyy_OS/docs/coordination.md](../../../../jhyy_OS/docs/coordination.md) | 跨项目对齐(本文件 M1-M11 引用其决策) |
