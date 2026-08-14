@@ -1655,6 +1655,10 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
             } else {
                 addr = ptr; /* offset 0: addr is just the pointer */
             }
+            /* v1.4.6 W-019 mirror: struct field → return addr (don't load) */
+            if (field_type && field_type->kind == KIND_STRUCT) {
+                *out = (addr); return;
+            }
             IRVal result = ir_new_tmp(cg->ir, field_type ? qbe_type_of(field_type) : 'w');
             cg_emit_load(cg, result, field_type, addr);
             *out = (result); return;
@@ -1681,6 +1685,10 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
             ir_emit_binary(cg->ir, addr, "add", base, ir_new_int((int64_t)offset));
         } else {
             addr = base; /* offset 0 */
+        }
+        /* v1.4.6 W-019 mirror: struct field → return addr (don't load) */
+        if (field_type && field_type->kind == KIND_STRUCT) {
+            *out = (addr); return;
         }
         IRVal result = ir_new_tmp(cg->ir, field_type ? qbe_type_of(field_type) : 'w');
         cg_emit_load(cg, result, field_type, addr);

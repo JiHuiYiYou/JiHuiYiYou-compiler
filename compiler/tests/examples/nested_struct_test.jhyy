@@ -1,0 +1,22 @@
+// nested_struct_test.jhyy — v1.4.6 test for W-019 真修
+// EXPECT: 15
+//
+// Covers `(*o).inner.a` style nested struct field access:
+// - type Inner = struct { a: i32, b: i32 }
+// - type Outer = struct { inner: Inner }
+// - (*o).inner.a + (*o).inner.b
+//
+// W-019 ACTIVE: codegen.c (C-side) missed "return addr if STRUCT" guard
+// that codegen.jhyy (jhyy-side) already has. After真修, both sides mirror.
+
+type Inner = struct { a: i32, b: i32 }
+type Outer = struct { inner: Inner }
+
+fn read_inner(o: *Outer) -> i32 {
+    return (*o).inner.a + (*o).inner.b;
+}
+
+fn main_jhyy() -> i32 {
+    let o: Outer = Outer { inner: Inner { a: 7, b: 8 } };
+    return read_inner(&o);
+}

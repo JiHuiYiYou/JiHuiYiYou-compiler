@@ -880,8 +880,15 @@ fn cg_body_returns(body_node: *Node) -> i32 {
 //
 // v1.3.7: NODE_PATTERN_ENUM — tag compare + payload slot alias.
 //          NODE_PATTERN_OR   — recurse left+right, `or` the cmps.
+// v1.4.6 W-019 真修 expanded: signature now takes CGContext + match_type so
+//   NODE_PATTERN_ENUM can do full tag compare + payload slot alias via
+//   cg_add_local (mirror codegen.c:272-358). 之前 src0/ silently skipped,
+//   body `v` 在 arm body reference 时 cg_find_local miss → phi %t0 缺定义
+//   → QBE "invalid type for operand %t0 in phi" (gdb_pretty_test fail)。
 // Note: must define before cg_expr (no forward decl).
-fn cg_match_pattern(ir: *IRBuf, matched: IRVal, pattern: *Node) -> IRVal {
+fn cg_match_pattern(cg_raw: *u8, matched: IRVal, pattern: *Node, match_type: *u8) -> IRVal {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
     let pk = (*pattern).kind;
     if pk == NODE_PATTERN_LIT() {
         let pl = node_pattern_lit_data(pattern);
@@ -901,34 +908,119 @@ fn cg_match_pattern(ir: *IRBuf, matched: IRVal, pattern: *Node) -> IRVal {
     // v1.3.7: OR pattern — recurse left and right, combine with `or`.
     if pk == NODE_PATTERN_OR() {
         let po = node_pattern_or_data(pattern);
-        let cl = cg_match_pattern(ir, matched, (*po).left as *Node);
-        let cr = cg_match_pattern(ir, matched, (*po).right as *Node);
+        let cl = cg_match_pattern(cg_raw, matched, (*po).left as *Node, match_type);
+        let cr = cg_match_pattern(cg_raw, matched, (*po).right as *Node, match_type);
         let result = *ir_new_tmp(ir, QBE_W());
         ir_emit_binary(ir, result, "or" as *u8, cl, cr);
         return result;
     }
-    // v1.3.7: ENUM pattern — tag compare + payload slot alias.
-    // Skip the tag compare when inner is WILD/NULL (no binding) to preserve
-    // legacy accept-all semantics (avoids ABI mismatch when enum is passed
-    // by value but caller allocated slot on stack).
+    // v1.4.6 W-019 真修: ENUM pattern — tag compare + payload slot alias (mirror codegen.c:272-358).
+    // 1. Find enum_type from pe->type_sym (long form `MaybeInt::Some`) or fallback to match_type (short form).
+    // 2. Find variant tag + payload_offset.
+    // 3. Load tag from matched+0 (word), compare to expected tag → tag_cmp.
+    // 4. If inner is NODE_PATTERN_IDENT, register payload slot alias via cg_add_local
+    //    so body dereferences load from there directly. (No copy needed.)
+    //    Skip the tag compare when no binding (Some(_) / None) to preserve legacy
+    //    accept-all semantics.
     if pk == NODE_PATTERN_ENUM() {
         let pe = node_pattern_enum_data(pattern);
-        let has_binding: i32 =
-            if (*pe).inner != (0 as *u8) {
-                if (*((*pe).inner as *Node)).kind == NODE_PATTERN_IDENT() {
-                    1 as i32
-                } else { 0 as i32 }
-            } else { 0 as i32 };
-        if has_binding == (0 as i32) {
-            let cmp = *ir_new_tmp(ir, QBE_W());
-            ir_emit_copy(ir, cmp, 1);
-            return cmp;
+        let variant_sym_raw = (*pe).variant_sym;
+        if variant_sym_raw != (0 as *u8) {
+            // Resolve enum_type
+            let mut enum_type_raw: *u8 = 0 as *u8;
+            let type_sym_raw = (*pe).type_sym;
+            if type_sym_raw != (0 as *u8) {
+                let type_sym = type_sym_raw as *Sym;
+                let type_field = (*type_sym).type_ptr;
+                if type_field != (0 as *u8) {
+                    let tt = type_field as *Type;
+                    if (*tt).kind == KIND_ENUM() {
+                        enum_type_raw = type_field;
+                    }
+                }
+            }
+            if enum_type_raw == (0 as *u8) {
+                if match_type != (0 as *u8) {
+                    let mt = match_type as *Type;
+                    if (*mt).kind == KIND_ENUM() {
+                        enum_type_raw = match_type;
+                    }
+                }
+            }
+            if enum_type_raw != (0 as *u8) {
+                let enum_type = enum_type_raw as *Type;
+                // Find expected_tag by variant name
+                let variant_sym = variant_sym_raw as *Sym;
+                let mut expected_tag: i32 = (0 as i32) - (1 as i32);
+                let nvariants: i64 = (*enum_type).nvariants;
+                let mut vi: i64 = 0 as i64;
+                while vi < nvariants {
+                    let vd_ptr = ptr_add_u8((*enum_type).variants, vi * VARIANT_DESC_SIZE());
+                    let vd = vd_ptr as *VariantDesc;
+                    let v_name_sym_raw = (*vd).name;
+                    if v_name_sym_raw != (0 as *u8) {
+                        let v_name_sym = v_name_sym_raw as *Sym;
+                        let v_name = (*v_name_sym).name;
+                        if strcmp(v_name, (*variant_sym).name) == (0 as i32) {
+                            expected_tag = (*vd).tag;
+                            break;
+                        }
+                    }
+                    vi = vi + (1 as i64);
+                }
+                if expected_tag != ((0 as i32) - (1 as i32)) {
+                    // Check binding (inner is NODE_PATTERN_IDENT → register payload slot)
+                    let inner_raw = (*pe).inner;
+                    let mut has_binding: i32 = 0 as i32;
+                    if inner_raw != (0 as *u8) {
+                        let inner_node = inner_raw as *Node;
+                        if (*inner_node).kind == NODE_PATTERN_IDENT() {
+                            has_binding = 1 as i32;
+                        }
+                    }
+                    if has_binding == (1 as i32) {
+                        // matched may be w when enum fits in a register. Spill to slot for tag compare + payload alias.
+                        let mut slot_base = matched;
+                        if matched.qbe_type == QBE_W() {
+                            let tmp = *ir_new_tmp(ir, QBE_L());
+                            ir_emit_str(ir, "    %t" as *u8);
+                            ir_emit_int(ir, "%d" as *u8, tmp.id);
+                            ir_emit_str(ir, " =l alloc8 8\n" as *u8);
+                            let tmp_addr = *ir_new_tmp(ir, QBE_L());
+                            ir_emit_binary(ir, tmp_addr, "add" as *u8, tmp, ir_new_int(0 as i64));
+                            ir_emit_str(ir, "    storew %t" as *u8);
+                            ir_emit_int(ir, "%d" as *u8, matched.id);
+                            ir_emit_str(ir, ", %t" as *u8);
+                            ir_emit_int(ir, "%d" as *u8, tmp_addr.id);
+                            ir_emit_str(ir, "\n" as *u8);
+                            slot_base = tmp_addr;
+                        }
+                        // load tag from slot_base+0
+                        let tag_addr = *ir_new_tmp(ir, QBE_L());
+                        ir_emit_binary(ir, tag_addr, "add" as *u8, slot_base, ir_new_int(0 as i64));
+                        let loaded_tag = *ir_new_tmp(ir, QBE_W());
+                        ir_emit_str(ir, "    %t" as *u8);
+                        ir_emit_int(ir, "%d" as *u8, loaded_tag.id);
+                        ir_emit_str(ir, " =w loadw %t" as *u8);
+                        ir_emit_int(ir, "%d" as *u8, tag_addr.id);
+                        ir_emit_str(ir, "\n" as *u8);
+                        let tag_lit = *ir_new_tmp(ir, QBE_W());
+                        ir_emit_copy(ir, tag_lit, expected_tag as i64);
+                        let tag_cmp = *ir_new_tmp(ir, QBE_W());
+                        ir_emit_binary(ir, tag_cmp, "ceqw" as *u8, loaded_tag, tag_lit);
+                        // payload slot alias
+                        let pi = node_pattern_ident_data((*pe).inner as *Node);
+                        let bind_sym = (*pi).sym;
+                        let payload_slot = *ir_new_tmp(ir, QBE_L());
+                        let off: i64 = (*enum_type).payload_off;
+                        ir_emit_binary(ir, payload_slot, "add" as *u8, slot_base, ir_new_int(off));
+                        let _al = cg_add_local(cg_raw, bind_sym, payload_slot, 1);
+                        return tag_cmp;
+                    }
+                }
+            }
         }
-        // NOTE: src0/ cg_match_pattern only has IRBuf (not CGContext), so
-        // can't call cg_add_local. Tag compare + payload slot alias skipped
-        // for v1.3.7; binding is sema-registered but cg_find_local returns
-        // NULL → body `v` would emit an error. src0/ currently doesn't use
-        // pattern binding (only `_` wildcards), so this is silent.
+        // fallback: always match (legacy, defensive)
         let cmp = *ir_new_tmp(ir, QBE_W());
         ir_emit_copy(ir, cmp, 1);
         return cmp;
@@ -2969,7 +3061,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 }
                 next_check = *ir_new_block(ir, "next" as *u8);
                 next_check_id = 1 as i64;
-                let cmp = cg_match_pattern(ir, matched, arm_pattern);
+                let cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*n).type_ptr);
                 ir_emit_jnz(ir, cmp, body_block, next_check);
             }
 
