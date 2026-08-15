@@ -168,20 +168,9 @@ jobs:
       - name: Run regress (gated — must PASS)
         shell: msys2 {0}
         run: |
-          # W-027 v4: env after _build_subprocess_env uses RUNNER_TEMP-driven MSYS2 root.
-          echo "RUNNER_TEMP=$RUNNER_TEMP"
-          echo ""
-          python3 <<'PYEOF'
-          import sys; sys.path.insert(0, 'mcp-jhyy')
-          import jhyy_regress
-          env = jhyy_regress._build_subprocess_env()
-          print('env PATH (first 500):')
-          print(env['PATH'][:500])
-          PYEOF
-          echo ""
-
-          # regress.py _build_subprocess_env() (W-027 v4) deterministic MSYS2 root
-          # ($RUNNER_TEMP\msys64 on CI, C:\msys64 locally) — prepends known bin subdirs.
+          # W-027 v4 + W-028 fixes:
+          # W-027: deterministic MSYS2 root from RUNNER_TEMP (CI) / C:\msys64 (local)
+          # W-028: Windows process exit code is 8-bit; compare EXPECT mod 256
           # Sanity: compile one .jhyy directly to verify jhyy.exe works
           echo "=== Sanity: compile arith.jhyy directly ==="
           compiler/build/bin/jhyy.exe compile compiler/tests/examples/arith.jhyy -o /tmp/sanity_arith.exe 2>&1 | tail -20

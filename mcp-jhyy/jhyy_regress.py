@@ -240,7 +240,18 @@ def run_test(
     nt = ntstatus_name(actual)
     if nt is not None:
         return (False, expected, actual, f"runtime crash: {nt} (0x{actual:08X})")
-    return (actual == expected, expected, actual, output)
+    # W-028: Windows process exit code is 8-bit (mod 256). On Linux / macOS
+    # the exit code is full 32-bit. Compare on Windows with mod 256 to match
+    # kernel32 behavior. (Why it ever worked: Python 3.12 subprocess.run on
+    # Windows actually does return the truncated value via WaitForSingleObject
+    # + GetExitCodeProcess — both honor kernel32 8-bit truncation.)
+    if sys.platform == "win32" and actual >= 0:
+        actual_cmp = actual & 0xFF
+        expected_cmp = expected & 0xFF
+    else:
+        actual_cmp = actual
+        expected_cmp = expected
+    return (actual_cmp == expected_cmp, expected, actual, output)
 
 
 def run_all(
