@@ -168,24 +168,9 @@ jobs:
       - name: Run regress (gated — must PASS)
         shell: msys2 {0}
         run: |
-          # W-026 debug: print actual env + gcc location to diagnose 'gcc not recognized'
-          echo "=== W-026 DEBUG: actual env + gcc resolution ==="
-          echo "bash PATH (env|grep PATH):"
-          env | grep -E '^PATH=' || echo "(no PATH in env)"
-          echo ""
-          echo "where gcc (Windows resolution):"
-          cmd //c "where gcc" 2>&1 || echo "(cmd /c where gcc failed)"
-          echo ""
-          echo "ls gcc locations:"
-          ls -la /c/msys64/ucrt64/bin/gcc.exe 2>&1 || echo "no gcc at ucrt64"
-          ls -la /c/msys64/mingw64/bin/gcc.exe 2>&1 || echo "no gcc at mingw64"
-          echo ""
-          echo "Python os.environ[PATH] (sanity probe):"
-          python -c "import os; print(repr(os.environ.get('PATH', '(unset)'))[:500])"
-          echo ""
-          echo "=== END DEBUG ==="
-          echo ""
-
+          # regress.py _build_subprocess_env() (W-027) auto-detects gcc/qbe/python/make
+          # locations via shutil.which — works for both local (C:\msys64) and CI
+          # ($RUNNER_TEMP\msys64 = D:\a\_temp\msys64) layouts.
           # Sanity: compile one .jhyy directly to verify jhyy.exe works
           echo "=== Sanity: compile arith.jhyy directly ==="
           compiler/build/bin/jhyy.exe compile compiler/tests/examples/arith.jhyy -o /tmp/sanity_arith.exe 2>&1 | tail -20

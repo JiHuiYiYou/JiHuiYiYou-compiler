@@ -47,6 +47,8 @@
 | [W-019](#w-019-codegen-嵌套-struct-innerx-emit-loadsw-类型错) | ✅ RESOLVED 2026-08-14 (v1.4.6 commit `6638134`) | codegen `cg_field_addr` 在处理 `(*o).inner.a` 这种嵌套 struct 字段时,emit 的 `loadsw`/`loadw` 第一操作数类型错(QBE reject: "invalid type for first operand in loadsw")。当前 v1.4.3 测试用例只覆盖 flat struct,嵌套 struct 留给 post-v1.4.3 修 |
 | [W-020](#w-020-jhyy-side-parserjhyy-parse_pattern-colorvariant-分支-bug) | ✅ RESOLVED 2026-08-14 (v1.4.6 commit `ad42117`) | jhyy-side `parser.jhyy` parse_pattern 在 match arm 上下文中处理 `Color::Variant` 时,`parser_check(p, TOKEN_COLONCOLON())` 返回 0 即使下一个 token 实际是 `::`,parser 走 ident-pattern 分支提前返回,留下 `::` 让 expr 解析报 `expected =>, got ::`。C-side `parser.c` (line 124-138) 正确处理同样输入。bug 在 v1.4.4 物理 production flip 前被 C-side `jhyy.exe` 遮住 |
 | [W-021](#w-021-wix-7-cli-ext-name-查找失败---ext-wixtoolsetbalwixext-找不到) | ACTIVE (v1.5.3, workaround in `installer/build.ps1`) | WiX 7.0.0+b8977d6 CLI 的 `-ext WixToolset.Bal.wixext` 名字查找 WIX0144 fail — 装的 DLL 文件名是 `WixToolset.BootstrapperApplications.wixext.dll` (不是 `WixToolset.Bal.wixext.dll`),CLI extension-name lookup 不识别,要求传 DLL 绝对路径 |
+| [W-026](#w-026-regresspy-80-stderr-截断隐藏真实-qbegcc-错误) | ✅ RESOLVED 2026-08-15 (commit `0d58efe`) | regress.py FAIL print `[:80]` 截断隐藏 QBE/gcc link 错误 → 改成完整 stderr 输出 |
+| [W-027](#w-027-gh-actions-setup-msys2v2-把-msys2-装在-runnertempmsys64-ci--d-atempmsys64不在-cmsys64--硬编码-cmsys64ucrt64bin-找不到-gcc) | ✅ RESOLVED 2026-08-15 (commit `df71824`) | `setup-msys2@v2` CI 装在 `$RUNNER_TEMP\msys64` (D:\a\_temp\msys64) 不在 C:\msys64 → hardcoded path 找不到 gcc;改用 `shutil.which()` auto-detect |
 
 ---
 
@@ -2152,36 +2154,60 @@ if (Test-Path $qbeLocal) {
 - workaround 实现: vendored 41 qbe files + `.github/workflows/release.yml` (Build qbe.exe step) + `installer/build.ps1` (qbe.exe resolution)
 - v1.5.5 ship commit (post vendoring)
 
-## W-026: regress.py `[:80]` stderr 截断隐藏真实 QBE/gcc 错误 + `_build_subprocess_env()` 条件分支不可靠
+## W-026: regress.py `[:80]` stderr 截断隐藏真实 QBE/gcc 错误
 
-**状态:** ACTIVE (2026-08-15, v1.5.5 release.yml debug)
+**状态:** RESOLVED (2026-08-15, commit `0d58efe` — full stderr print)
 **日期:** 2026-08-15
-**触发面:** `.github/workflows/release.yml` Run regress step (53/53 FAIL on CI but 53/53 PASS locally)
+**触发面:** `mcp-jhyy/jhyy_regress.py` run_all() FAIL print
 
 **症状:**
-GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step 53/53 FAIL, stderr 截断到 `[sema] P1 ndec` (80 字符)。Sanity check (`jhyy.exe compile arith.jhyy`) 同 step 跑出来 exit 0 + 完整 `[4] codegen done`。两边二进制 (jhyy.exe + jhyy_stage0.exe) 同样 fail。
+GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step 53/53 FAIL, stderr 截断到 `[sema] P1 ndec` (80 字符)。Sanity check (`jhyy.exe compile arith.jhyy`) 同 step 跑出来 exit 0 + 完整 `[4] codegen done`。
 
-**根因嫌疑:**
-1. **`jhyy_regress.py:309` 的 `[:80]` 截断** — `print(f"FAIL ... {msg[:80]}")` 把真实错误消息截掉了。QBE / gcc 的 link 错误永远出现在 `[4] codegen done` 之后, 总 >80 字符, 截断后看不到。
-2. **`_build_subprocess_env()` 条件分支不可靠** — `if env["PATH"].startswith("/") or "/c"` 的检测不能覆盖所有空/混合格式。原逻辑只覆盖了 `startswith("/c")` 的 MSYS 路径和 Windows-style 路径; CI runner 上 `setup-msys2@v2` + `$GITHUB_PATH` 可能产生 `""` 空 PATH 或混合正反斜杠的怪格式 → 走 `else` 兜底时 win_path **本身是对的** (`C:\msys64\ucrt64\bin` 已经在 PATH) 但 jhyy.exe 内部 `system("cmd /c gcc ...")` 仍报 `'gcc' is not recognized`。
-3. 真实 CI 错误 (从 #31863594640 完整 stderr 拿到): `'gcc' is not recognized as an internal or external command / operable program or batch file. / gcc link failed`
+**根因:**
+`jhyy_regress.py:309` 的 `print(f"FAIL ... {msg[:80]}")` 把真实错误消息截掉了。QBE / gcc 的 link 错误永远出现在 `[4] codegen done` 之后, 总 >80 字符, 截断后看不到。
 
 **workaround:**
-1. **去掉 `[:80]` 截断** — `jhyy_regress.py:309` 改成 `print(... {msg})`, 让 FAIL 输出完整 stderr。下次 dry-run 能直接看到 QBE/gcc 错误。
-2. **`_build_subprocess_env()` 无条件覆盖 PATH** — 改成总是 prepend Windows-style `C:\msys64\ucrt64\bin;C:\msys64\usr\bin;C:\Windows\System32;C:\Windows`, 然后 append 原 PATH (兜底用户工具)。去掉 startswith 条件分支。
+去掉 `[:80]` 截断, 改成 `print(... {msg})`, 让 FAIL 输出完整 stderr。下次 dry-run 能直接看到 QBE/gcc 错误。
 
 **影响范围:**
-- 仅 `mcp-jhyy/jhyy_regress.py` (_build_subprocess_env + run_all print)
-- 本地 53/53 PASS 不破 (改动只影响 PATH 构造, 不改 regress 算法)
+- 仅 `mcp-jhyy/jhyy_regress.py` run_all() print
+- 本地 53/53 PASS 不破
+
+**引用:**
+- 错误日志: GH Actions runs 31861809057, 31863594640
+- workaround 实现: `mcp-jhyy/jhyy_regress.py` line 313 (FAIL print)
+- fix commit: `0d58efe`
+
+## W-027: GH Actions `setup-msys2@v2` 把 MSYS2 装在 `$RUNNER_TEMP\msys64` (CI = `D:\a\_temp\msys64`), 不在 `C:\msys64` — 硬编码 `C:\msys64\ucrt64\bin` 找不到 gcc
+
+**状态:** RESOLVED (2026-08-15, commit `df71824` — shutil.which auto-detect)
+**日期:** 2026-08-15
+**触发面:** `.github/workflows/release.yml` Run regress step (53/53 FAIL)
+
+**症状:**
+W-026 fix 提交后, dry-run #31863873870 仍然 `'gcc' is not recognized`。Debug step (#31864035818) 揭露:
+- `cmd.exe where gcc` → `D:\a\_temp\msys64\ucrt64\bin\gcc.exe`
+- `ls /c/msys64/ucrt64/bin/gcc.exe` → `No such file or directory`
+- bash `PATH` = `/ucrt64/bin:/usr/local/bin:/usr/bin:/bin:/c/Windows/System32:...`
+
+**根因:**
+`msys2/setup-msys2@v2` 默认把 MSYS2 装到 `$RUNNER_TEMP\msys64` (在 windows-latest runner = `D:\a\_temp\msys64`), **不在** `C:\msys64`。原 `_build_subprocess_env()` 硬编码 `C:\msys64\ucrt64\bin` 是错的 — 在本地是对的 (本地 dev 装在 C:\msys64), 在 CI 完全错。
+
+W-026 fix (无条件 prepend `C:\msys64\ucrt64\bin`) 也错。
+
+**workaround:**
+用 `shutil.which('gcc', path=env['PATH'])` 自动探 gcc / qbe / python / make 实际所在目录, 把这些目录 (转 Windows backslash) prepend 进 env['PATH']。环境异质 (C:\msys64 / D:\a\_temp\msys64 / /usr/bin) 都能 cover。
+
+**影响范围:**
+- 仅 `mcp-jhyy/jhyy_regress.py` _build_subprocess_env
+- 本地 53/53 PASS 不破
 - CI 下次 dry-run 应该 53/53 PASS
 
 **失效条件 / 未来 fix:**
-- 如果 W-026 修完 CI 还 FAIL, 真根因可能是 (a) `setup-msys2@v2` 没装 `C:\msys64\ucrt64\bin` 而是别的路径, 或 (b) `cmd.exe` 不认 env 的 PATH (Windows AppExecutionAlias 拦截), 需进一步查
-- v2.x: PATH 处理逻辑应该重构成不依赖 MSYS2 路径硬编码 (用 `shutil.which('gcc')` 直接探, 找到就 setenv)
+- v2.x: 用 `shutil.which('gcc', path=...)` (per [[feedback_qbe_crlf_root_cause]]) — 已实现, 当前用
 
 **引用:**
-- 错误日志: GH Actions runs 31861809057, 31863594640 (Run regress step stderr)
-- workaround 实现: `mcp-jhyy/jhyy_regress.py` lines 44-79 (_build_subprocess_env), lines 309-316 (FAIL print)
-- v1.5.5 ship commit (post W-026 fix)
+- debug 输出: GH Actions run #31864035818 (W-026 DEBUG section)
+- fix commit: `df71824`
 
 
