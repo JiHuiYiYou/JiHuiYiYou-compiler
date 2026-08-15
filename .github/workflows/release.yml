@@ -170,19 +170,19 @@ jobs:
         run: |
           # W-027 debug v3: probe what env jhyy.exe child subprocess sees
           echo "=== W-027 DEBUG v3: env after _build_subprocess_env ==="
-          python -c "
-import sys; sys.path.insert(0, 'mcp-jhyy')
-import jhyy_regress
-env = jhyy_regress._build_subprocess_env()
-print('env PATH after W-027 v2 fix:')
-print(env.get('PATH', '(unset)')[:600])
-print()
-print('cmd //c where gcc (with W-027 v2 env):')
-import subprocess
-r = subprocess.run(['cmd', '/c', 'where', 'gcc'], capture_output=True, text=True, env=env, timeout=5)
-print('  stdout:', repr(r.stdout))
-print('  rc:', r.returncode)
-"
+          python3 <<'PYEOF'
+          import sys; sys.path.insert(0, 'mcp-jhyy')
+          import jhyy_regress
+          env = jhyy_regress._build_subprocess_env()
+          print('env PATH after W-027 v2 fix:')
+          print(env.get('PATH', '(unset)')[:600])
+          print()
+          print('cmd //c where gcc (with W-027 v2 env):')
+          import subprocess
+          r = subprocess.run(['cmd', '/c', 'where', 'gcc'], capture_output=True, text=True, env=env, timeout=5)
+          print('  stdout:', repr(r.stdout))
+          print('  rc:', r.returncode)
+          PYEOF
           echo ""
           echo "=== END DEBUG ==="
           echo ""
