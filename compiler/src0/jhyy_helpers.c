@@ -182,3 +182,121 @@ __attribute__((used)) const char *jh_path_qbe(void)     { return jh_path_qbe_buf
 __attribute__((used)) const char *jh_path_gcc(void)     { return jh_path_gcc_buf; }
 __attribute__((used)) const char *jh_path_runtime(void) { return jh_path_runtime_buf; }
 __attribute__((used)) const char *jh_path_helpers(void) { return jh_path_helpers_buf; }
+
+/* v1.5.6: jh_gcc_path — A 派 Driver 探测层 (类型 4 per
+   feedback_compiler_toolchain_path_resolution memory).
+   4 层优先级: JHY_GCC env → JHYY_HOME\env.txt → MSYS2 magic → SearchPathA
+   → fallback "gcc". Static buf 缓存, jhyy.exe 启动一次性 resolve.
+   替代 W-027 v8 Python 侧 30 行 magic (release.yml + regress.py + jh_path_gcc
+   三处探测逻辑收敛到这一处).
+   v1.5.6 Windows-only; v2.x 加 #ifdef __linux__ / __APPLE__ 分支.
+   详见 docs/plans/v1/v1.5.6任务清单 + 概要设计.md § 设计 1. */
+static char jh_gcc_path_buf[1024];
+static int  jh_gcc_path_initialized = 0;
+
+#ifdef _WIN32
+/* Forward-declare to avoid pulling windows.h (matches jh_paths_init pattern) */
+unsigned long __stdcall SearchPathA(const char *path, const char *file, const char *ext,
+                                    unsigned long buflen, char *buf, char **part);
+unsigned long __stdcall GetFileAttributesA(const char *path);
+#define INVALID_FILE_ATTRIBUTES 0xFFFFFFFFu
+
+__attribute__((used)) const char *jh_gcc_path(void) {
+    if (jh_gcc_path_initialized) return jh_gcc_path_buf;
+
+    /* Priority 1: JHY_GCC env (user/CI explicit override) */
+    {
+        const char *env_gcc = getenv("JHY_GCC");
+        if (env_gcc && env_gcc[0] != '\0') {
+            snprintf(jh_gcc_path_buf, sizeof(jh_gcc_path_buf), "%s", env_gcc);
+            jh_gcc_path_initialized = 1;
+            return jh_gcc_path_buf;
+        }
+    }
+
+    /* Priority 2: JHYY_HOME\env.txt (单行 KEY=VALUE; 注释行 # 开头跳过) */
+    {
+        const char *jhyy_home = getenv("JHYY_HOME");
+        if (jhyy_home && jhyy_home[0] != '\0') {
+            char env_file[1024];
+            snprintf(env_file, sizeof(env_file), "%s\\env.txt", jhyy_home);
+            FILE *f = fopen(env_file, "r");
+            if (f) {
+                char line[1024];
+                while (fgets(line, sizeof(line), f)) {
+                    /* skip comment / blank */
+                    const char *p = line;
+                    while (*p == ' ' || *p == '\t') p++;
+                    if (*p == '#' || *p == '\n' || *p == '\r' || *p == '\0') continue;
+                    if (strncmp(p, "JHY_GCC=", 8) != 0) continue;
+                    /* p+8 may point into the read-only line buffer; copy to local */
+                    char val_buf[1024];
+                    snprintf(val_buf, sizeof(val_buf), "%s", p + 8);
+                    size_t len = strlen(val_buf);
+                    while (len > 0 && (val_buf[len-1] == '\n' || val_buf[len-1] == '\r'))
+                        val_buf[--len] = '\0';
+                    if (len > 0) {
+                        snprintf(jh_gcc_path_buf, sizeof(jh_gcc_path_buf), "%s", val_buf);
+                        jh_gcc_path_initialized = 1;
+                        fclose(f);
+                        return jh_gcc_path_buf;
+                    }
+                }
+                fclose(f);
+            }
+        }
+    }
+
+    /* Priority 3: Windows MSYS2 magic (跟 W-027 v8 同构, 但收敛到 1 处) */
+    {
+        const char *msys2_magic[] = {
+            "C:\\msys64\\ucrt64\\bin\\gcc.exe",
+            "C:\\msys64\\mingw64\\bin\\gcc.exe",
+            "C:\\msys64\\usr\\bin\\gcc.exe",
+            NULL
+        };
+        for (int i = 0; msys2_magic[i]; i++) {
+            if (GetFileAttributesA(msys2_magic[i]) != INVALID_FILE_ATTRIBUTES) {
+                snprintf(jh_gcc_path_buf, sizeof(jh_gcc_path_buf), "%s", msys2_magic[i]);
+                jh_gcc_path_initialized = 1;
+                return jh_gcc_path_buf;
+            }
+        }
+    }
+
+    /* Priority 4: PATH 探测 (Windows API SearchPathA, 比 W-027 v8 用的
+       shutil.which / cmd.exe where 稳 — 不依赖 subprocess / encoding) */
+    {
+        char path_buf[1024];
+        unsigned long n = SearchPathA(NULL, "gcc", ".exe", sizeof(path_buf), path_buf, NULL);
+        if (n > 0 && n < sizeof(path_buf)) {
+            snprintf(jh_gcc_path_buf, sizeof(jh_gcc_path_buf), "%s", path_buf);
+            jh_gcc_path_initialized = 1;
+            return jh_gcc_path_buf;
+        }
+    }
+
+    /* Fallback: return "gcc" 走 PATH 解析 (跟 W-027 v8 之前一致; 错误信息保留
+       gcc not found → cmd error) */
+    snprintf(jh_gcc_path_buf, sizeof(jh_gcc_path_buf), "gcc");
+    jh_gcc_path_initialized = 1;
+    return jh_gcc_path_buf;
+}
+#else
+/* Linux / macOS: v1.5.6 placeholder (return "gcc" 走 PATH); v2.x sprint 填
+   真实多平台探测 (类型 4 升级 + manifest lite 类型 2 注入) */
+__attribute__((used)) const char *jh_gcc_path(void) {
+    if (jh_gcc_path_initialized) return jh_gcc_path_buf;
+    snprintf(jh_gcc_path_buf, sizeof(jh_gcc_path_buf), "gcc");
+    jh_gcc_path_initialized = 1;
+    return jh_gcc_path_buf;
+}
+#endif
+
+/* v1.5.6: jh_gcc_invoke — system() 包装, 内部调 jh_gcc_path() 拿 resolved gcc.
+   main.jhyy link_with_gcc 改用此函数 (替代裸 system("gcc ...") 拼 cmd_buf).
+   ABI: caller 提供 cmd_args (e.g. "ASM_PATH RUNTIME_C HELPERS_C -o EXE -lm"),
+   返回写入字节数 (跟 sprintf_lld 同模式); out_buf 至少 2048 字节. */
+__attribute__((used)) int jh_gcc_invoke(char *out_buf, int out_size, const char *args) {
+    return snprintf(out_buf, (size_t)out_size, "\"%s\" %s", jh_gcc_path(), args);
+}
