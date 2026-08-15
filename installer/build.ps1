@@ -173,6 +173,7 @@ switch ($Target) {
             -loc "installer/compiler/Locale.zh-CN.wxl" `
             -ext WixToolset.Util.wixext -ext WixToolset.UI.wixext `
             -d "JHY_VERSION=$($env:JHY_VERSION)" `
+            -d "JHY_VERSION_DISPLAY=$JHY_VERSION_DISPLAY" `
             -o "installer/build-artifacts/jhyy-compiler-$JHY_VERSION_DISPLAY.msi"
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[ERROR] compiler MSI build failed."

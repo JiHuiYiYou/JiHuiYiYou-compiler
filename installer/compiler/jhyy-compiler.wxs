@@ -130,7 +130,7 @@
                       Name="CommandPath" />
     </Property>
     <SetProperty Id="InstallVSCodeExtCmd"
-                 Value="&quot;[JHYY_COMSPEC]&quot; /c &quot;[INSTALLDIR]bin\install-vsix.bat&quot; /VSIX=&quot;[VSCodeExtDir]jhyy-lang-$(var.JHY_VERSION).vsix&quot;"
+                 Value="&quot;[JHYY_COMSPEC]&quot; /c &quot;[INSTALLDIR]bin\install-vsix.bat&quot; /VSIX=&quot;[VSCodeExtDir]jhyy-lang-$(var.JHY_VERSION_DISPLAY).vsix&quot;"
                  Before="InstallVSCodeExt"
                  Sequence="execute" />
     <CustomAction Id="InstallVSCodeExt"
@@ -250,13 +250,14 @@
       [VSCodeExtDir] property. CustomAction runs install-vsix.bat which calls
       `code (with install-extension flag) <path>` (检测 PATH 里有 `code` 才行).
 
-      VSIX file name 跟 compiler version 同步 (jhyy-lang-X.Y.Z.vsix),
+      VSIX file name 跟 compiler DISPLAY version 同步 (jhyy-lang-X.Y.Z[-rcN].vsix).
+      For RC releases, file includes -rcN suffix (matches the MSI filename).
       build.ps1 负责 copy 到 bindpath/vscode-ext/.
     -->
     <ComponentGroup Id="JHYYVSCodeExt" Directory="VSCodeExtDir">
       <Component Id="VSCodeExtVSIX" Bitness="always64" Guid="2BD62503-5942-4364-8052-B86ABC43C5C8">
         <File Id="VSCodeExtVSIXFile"
-              Source="!(bindpath.vscode-ext)\jhyy-lang-$(var.JHY_VERSION).vsix"
+              Source="!(bindpath.vscode-ext)\jhyy-lang-$(var.JHY_VERSION_DISPLAY).vsix"
               KeyPath="yes" />
       </Component>
     </ComponentGroup>
