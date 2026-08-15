@@ -161,26 +161,13 @@ jobs:
           sha256sum compiler/build/bin/jhyy.exe
           ls -la compiler/build/bin/jhyy.exe
 
-      - name: Propagate MSYS2 paths to subprocess PATH
-        shell: msys2 {0}
-        run: |
-          # regress.py uses subprocess.run (Python) which on Windows resolves
-          # gcc via os.environ['PATH'] (Windows PATH), not MSYS2 bash PATH.
-          # setup-msys2 adds /c/msys64/ucrt64/bin etc. only to bash PATH.
-          # Prepend MSYS2 bin paths to $GITHUB_PATH so subsequent pwsh /
-          # python steps find gcc, qbe, make.
-          echo "/c/msys64/ucrt64/bin:/c/msys64/usr/bin" >> "$GITHUB_PATH"
-          echo "MSYS2_BIN_PATH=/c/msys64/ucrt64/bin:/c/msys64/usr/bin" >> "$GITHUB_ENV"
-          which gcc
-          which python
-          which make
-
       - name: Run regress (gated — must PASS)
         shell: msys2 {0}
         run: |
-          # W-027 v4 + W-028 fixes:
-          # W-027: deterministic MSYS2 root from RUNNER_TEMP (CI) / C:\msys64 (local)
-          # W-028: Windows process exit code is 8-bit; compare EXPECT mod 256
+          # v1.5.6: W-027 RESOLVED — jhyy.exe 自己探测 gcc 路径 (4-tier via
+          # jh_gcc_path()), regress.py 不再需要 prepend MSYS2 bin 到 PATH.
+          # 之前 "Propagate MSYS2 paths" step 已删 (W-029 superseder).
+          # W-028 保留 ACTIVE: Windows process exit code 8-bit, compare mod 256.
           # Sanity: compile one .jhyy directly to verify jhyy.exe works
           echo "=== Sanity: compile arith.jhyy directly ==="
           compiler/build/bin/jhyy.exe compile compiler/tests/examples/arith.jhyy -o /tmp/sanity_arith.exe 2>&1 | tail -20

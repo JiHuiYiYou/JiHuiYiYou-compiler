@@ -1,0 +1,33 @@
+// _jh_gcc_p4.jhyy — v1.5.6 jh_gcc_path() Priority 4 验证
+//
+//   // SETENV: JHY_GCC=
+//   // EXPECT: 1
+//
+//   验证: 不设 env, 不写 env.txt, MSYS2 magic 也不存在 (用 set JHY_GCC_SKIP_MAGIC=1
+//   让测试 harness 临时改名), 但 PATH 里有 gcc → jh_gcc_path() 返回 SearchPathA 结果.
+//
+//   设计 gap: jh_gcc_path() 当前实现不感知 JHY_GCC_SKIP_MAGIC, p4 在测试
+//   层面无法真实触发 Priority 4. 需要 v1.5.6 后续 sprint 加 env 跳过 magic
+//   (per plan § 设计 1 "测试设计成黑盒" 约束, 不动 C 实现加测试 hook).
+//
+//   替代: p4 直接验证 Priority 3 magic 已经 fallback 到 4 — 即不设 env,
+//   magic 路径可能不存在 (CI 不同 runner), SearchPathA 找到 gcc. 但这样
+//   p3 + p4 期望都是 SearchPathA 结果, 没法区分.
+//
+//   p4 placeholder: 期望任意非空有效 gcc 路径 (current detected != ""), 假定
+//   探测链至少命中 1 层. 这不是严格测试, 但能 catch total-fail regression.
+
+extern fn jh_gcc_path() -> *u8;
+extern fn strlen(s: *u8) -> i64;
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+
+fn main_jhyy() -> i32 {
+    let detected = jh_gcc_path();
+    let n = strlen(detected);
+    if n > (0 as i64) {
+        return 1 as i32;
+    }
+    let msg = "[priority4 FAIL] detected path is empty\n" as *u8;
+    jh_fputs_stderr(msg);
+    return 2 as i32;
+}

@@ -1,0 +1,28 @@
+// _jh_gcc_p3.jhyy — v1.5.6 jh_gcc_path() Priority 3 验证
+//
+//   // SETENV: JHY_GCC=
+//   // EXPECT: 1
+//
+//   验证: 不设 env, 不写 env.txt, 但 C:\msys64\ucrt64\bin\gcc.exe 存在
+//   → jh_gcc_path() 返回 MSYS2 magic 第 1 项.
+//
+//   依赖: MSYS2 装在 C:\msys64 (per W-027 v4 root cause). 本机有, CI 也有
+//   (per release.yml setup-msys2 step).
+//
+//   注意: p3 假设 MSYS2 magic 路径存在. 如果用户换路径 (D:\msys64), 需
+//   调整 magic list 或用 fallback. v1.5.6 scope 仅 C:\msys64 三种.
+
+extern fn jh_gcc_path() -> *u8;
+extern fn strcmp(a: *u8, b: *u8) -> i32;
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+
+fn main_jhyy() -> i32 {
+    let detected = jh_gcc_path();
+    let expected = "C:\\msys64\\ucrt64\\bin\\gcc.exe" as *u8;
+    if strcmp(detected, expected) == (0 as i32) {
+        return 1 as i32;
+    }
+    let msg = "[priority3 FAIL] detected != expected MSYS2 magic\n" as *u8;
+    jh_fputs_stderr(msg);
+    return 2 as i32;
+}

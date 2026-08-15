@@ -20,7 +20,7 @@ import hashlib
 import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 
 # 路径配置 — derive from script location (works on any machine, no
 # hardcoded user path; per v1.5.5 release.yml CI fix).
@@ -42,36 +42,24 @@ def _resolve_binary(binary: str) -> str:
 
 
 def _build_subprocess_env() -> dict:
-    """构造 subprocess env. 修复 'gcc link failed' ('gcc is not recognized').
+    """构造 subprocess env. 基础 env (TMP / SystemRoot / SystemDrive).
+
+    v1.5.6 (superseder W-027 v8): jhyy.exe 自己负责探测 gcc 路径 (见
+    jh_gcc_path() 4-tier probe), 不再需要 Python 侧主动 prepend MSYS2 bin
+    到 PATH. 之前 W-026/W-027 全部 MSYS2 探测逻辑 (~30 行) 收敛到 jhyy.exe
+    内部一处, regress.py 只保留基础 env + SETENV 注入.
 
     Mirror jhyy_runner.py:_build_subprocess_env (modules 独立, 不互相 import).
 
-    W-026 (2026-08-15): CI GH Actions release.yml regress 53/53 FAIL, real
-    error 'gcc is not recognized as an internal or external command'.
-
-    W-027 v4 (2026-08-15 same-day): setup-msys2@v2 把 MSYS2 装到
-    `$RUNNER_TEMP\\msys64` (CI = `D:\\a\\_temp\\msys64`), 不在
-    `C:\\msys64`。
-
-    Root cause chain (3 failures found):
-    v1 hardcode `C:\\msys64\\ucrt64\\bin`: wrong on CI
-    v2 shutil.which: returns MSYS2 virtual path (`/ucrt64/bin/gcc`),
-      only valid inside MSYS2; converting `/`→`\\` gives `\\ucrt64\\bin`,
-      not a valid Win32 path
-    v3 `cmd /c where` via Python subprocess: from MSYS2-launched Python,
-      subprocess returns interactive shell prompt (not gcc path) — unreliable
-    v3.5 `bash -c "cmd //c where gcc"` via Python subprocess: subprocess
-      encoding/decoding breaks on bash UTF-16 LE output, returns None,
-      and `cmd //c 'where gcc'` from subprocess.run gets eaten by MSYS2
-      quoting — only works from real bash, not from Python subprocess
-
-    Fix v4: compute MSYS2 root deterministically.
-    - GitHub Actions `setup-msys2@v2` puts MSYS2 at `$RUNNER_TEMP\\msys64`
-      where `$RUNNER_TEMP` = `D:\\a\\_temp` on `windows-latest` runner.
-    - Local dev: `C:\\msys64` (or wherever user installed).
-    Read `os.environ['RUNNER_TEMP']` if set, fall back to `C:\\msys64`.
-    Then check known bin subdirs: ucrt64/bin, mingw64/bin, usr/bin, bin.
-    Each existing dir is added to found_dirs (in Win32 form).
+    历史 (per docs/internal/workarounds.md W-027 v8):
+    W-026 (2026-08-15): CI GH Actions release.yml regress 53/53 FAIL,
+      'gcc is not recognized'.
+    W-027 v4 (2026-08-15): setup-msys2@v2 装 MSYS2 到 $RUNNER_TEMP\\msys64
+      (CI) 不在 C:\\msys64. 试了 shutil.which / cmd where / bash cmd where,
+      都有 quoting / encoding 问题. v4 用 deterministic MSYS2 root + 已知
+      bin subdirs.
+    v1.5.6 fix: 把 W-027 v4 整段 (含 found_dirs + shutil.which + msys2_roots)
+      删掉, 改由 jhyy.exe jh_gcc_path() 接管. 见 workarounds.md W-029.
     """
     env = os.environ.copy()
     if not env.get("TMP"):
@@ -84,36 +72,6 @@ def _build_subprocess_env() -> dict:
         env["SystemRoot"] = r"C:\Windows"
     if not env.get("SystemDrive"):
         env["SystemDrive"] = "C:"
-    # W-027 v4: deterministic MSYS2 root + known bin subdirs.
-    found_dirs = []
-    import shutil
-    # Source (a): shutil.which — only accept Win32 paths
-    for tool in ("gcc", "qbe", "python", "make"):
-        loc = shutil.which(tool, path=env.get("PATH", ""))
-        if loc and len(loc) >= 3 and loc[1] == ":" and "\\" in loc:
-            d_win = os.path.dirname(loc)
-            if d_win not in found_dirs:
-                found_dirs.append(d_win)
-    # Source (b): known MSYS2 install roots (deterministic)
-    runner_temp = env.get("RUNNER_TEMP", "")
-    msys2_roots = []
-    if runner_temp:
-        # CI: $RUNNER_TEMP\msys64 — convert /c/foo to C:\foo or D:\a\_temp to D:\a\_temp
-        rt_win = runner_temp.replace("/", "\\")
-        if not rt_win.endswith("\\"):
-            rt_win += "\\"
-        msys2_roots.append(rt_win + "msys64")
-    msys2_roots.append(r"C:\msys64")  # local dev default
-    for root in msys2_roots:
-        # Known MSYS2 bin subdirs that contain gcc / qbe / make
-        for sub in ("ucrt64\\bin", "mingw64\\bin", "usr\\bin", "bin"):
-            candidate = root + "\\" + sub
-            if os.path.isdir(candidate) and candidate not in found_dirs:
-                found_dirs.append(candidate)
-    # Prepend discovered Win32 dirs + System32. Append original PATH.
-    win_dirs = ";".join(found_dirs) + ";" + r"C:\Windows\System32;C:\Windows"
-    original = env.get("PATH", "")
-    env["PATH"] = win_dirs + (";" + original if original else "")
     return env
 
 
@@ -191,6 +149,10 @@ def run_test(
     # Read expected exit from comment if present
     expected = None
     has_main = False
+    # v1.5.6: SETENV directive — 解析 // SETENV: KEY=VALUE 行, 注入到
+    # _build_subprocess_env() 返回的 env. 测试用: 验证 jh_gcc_path() 在不同
+    # env 状态下的探测行为 (Priority 1 JHY_GCC / Priority 2 JHYY_HOME).
+    setenv_overrides = {}  # type: Dict[str, str]
     try:
         with open(jhyy_file, encoding="utf-8") as f:
             src = f.read()
@@ -199,12 +161,24 @@ def run_test(
             expected = int(m.group(1))
         # Skip library files (no main entry)
         has_main = bool(re.search(r"\bfn\s+main_jhyy\b", src))
+        # SETENV: 解析多行 KEY=VALUE (注释行从 # 起; 行尾 # 也算注释)
+        for line in src.splitlines():
+            line_stripped = line.strip()
+            sm = re.match(r"//\s*SETENV\s*:\s*([A-Za-z_][A-Za-z0-9_]*)=(.*?)(?:\s*#.*)?$", line_stripped)
+            if sm:
+                key, val = sm.group(1), sm.group(2).strip()
+                setenv_overrides[key] = val
     except UnicodeDecodeError:
         pass
 
     if not has_main:
         # Library file: skip (no standalone run possible)
         return (True, None, None, "skipped (library)")
+
+    # v1.5.6: 用 SETENV 覆盖的 env 跑 compile + run.
+    # _build_subprocess_env() 已经在 PATH 段做 MSYS2 探测, SETENV 覆盖在它之上.
+    test_env = _build_subprocess_env()
+    test_env.update(setenv_overrides)
 
     # Compile
     cmd = [_resolve_binary(binary), "compile", jhyy_file, "-o", out_base]
@@ -213,7 +187,7 @@ def run_test(
             cmd.insert(2, _resolve_binary(inp))
     # 60s (not 20s): 并行跑时单个 compile 会因 CPU 争抢拉长
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
-                       encoding="utf-8", errors="replace", env=_build_subprocess_env())
+                       encoding="utf-8", errors="replace", env=test_env)
     if r.returncode != 0:
         return (False, expected, -1, f"compile failed: {r.stderr[:200]}")
     exe = os.path.abspath(out_base + ".exe")
@@ -224,7 +198,7 @@ def run_test(
     try:
         r2 = subprocess.run([exe], capture_output=True, text=True, timeout=timeout,
                             stdin=subprocess.DEVNULL,  # ⚠️ MCP server 无有效 stdin → 子进程阻塞
-                            encoding="utf-8", errors="replace", env=_build_subprocess_env())
+                            encoding="utf-8", errors="replace", env=test_env)
         actual = r2.returncode
         output = (r2.stdout or "") + (r2.stderr or "")
     except subprocess.TimeoutExpired:

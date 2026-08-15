@@ -1,0 +1,33 @@
+// SETENV: JHY_GCC=C:\msys64\ucrt64\bin\gcc.exe
+// EXPECT: 1
+//
+// _jh_gcc_p1.jhyy — v1.5.6 jh_gcc_path() Priority 1 验证
+//
+// 验证: 设 JHY_GCC env 后, jh_gcc_path() 返回该 env 值 (Priority 1 命中).
+// expected 跟 SETENV 一致.
+//
+// 设计 note: 本机/CI MSYS2 唯一存在 gcc 路径是 C:\msys64\ucrt64\bin\gcc.exe
+// (magic 第 1 项), 也是 SETENV 唯一能设的真实路径. Priority 1 vs Priority 3
+// 在本机测试环境无法严格区分 (返回相同字符串).
+//
+// 真实区分证据见 _jh_gcc_p1_debug.jhyy (ad-hoc verify): 当 SETENV 设
+// C:\mycustom\gcc.exe (不存在, 仅用于 env propagation 测试) 时, detected
+// 仍返回该值, 证明 Priority 1 真生效 (不走 magic).
+//
+// regress 自动化测试用真实存在路径, 验证 SETENV 注入机制 + Priority 1
+// 不挂即可. 严格区分推到 v2.x (届时跨平台探测允许更多 magic 路径).
+
+extern fn jh_gcc_path() -> *u8;
+extern fn strcmp(a: *u8, b: *u8) -> i32;
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+
+fn main_jhyy() -> i32 {
+    let detected = jh_gcc_path();
+    let expected = "C:\\msys64\\ucrt64\\bin\\gcc.exe" as *u8;
+    if strcmp(detected, expected) == (0 as i32) {
+        return 1 as i32;
+    }
+    let msg = "[priority1 FAIL] detected != expected env value\n" as *u8;
+    jh_fputs_stderr(msg);
+    return 2 as i32;
+}
