@@ -116,6 +116,12 @@ jobs:
           # $GITHUB_PATH with UTF-8 BOM.
           dotnet tool install --global wix
           "$env:USERPROFILE\.dotnet\tools" | Add-Content -Path $env:GITHUB_PATH
+          # WiX 7+ requires explicit OSMF EULA acceptance (WIX7015). The
+          # `wix eula accept wix7` command writes a sentinel file to
+          # $USERPROFILE that subsequent `wix` invocations honor; alternative
+          # is `-acceptEula wix7` on every invocation (verbose). See
+          # https://github.com/wixtoolset/issues/issues/9196.
+          wix eula accept wix7
           wix --version
           wix extension add -g WixToolset.Util.wixext
           wix extension add -g WixToolset.UI.wixext
