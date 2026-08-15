@@ -2042,4 +2042,64 @@ $content = ($lines -join "`n") + "`n"
 - workaround 实现: `installer/gen-sha256.ps1:65-72` + release.yml Generate release notes step
 - v1.5.5 ship commit
 
+## W-025: qbe/ gitlink 无 .gitmodules — release.yml `submodules: recursive` 失败 + installer/build.ps1 hardcoded `qbe/qbe.exe`
+
+**症状 (2026-08-15 v1.5.5 dry-run run 31859843640):**
+- `actions/checkout@v4` with `submodules: recursive` fail at Checkout step:
+  - `fatal: No url found for submodule path 'qbe' in .gitmodules`
+  - `fatal: The process 'C:\Program Files\Git\bin\git.exe' failed with exit code 128`
+  - Annotation: `Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4`
+
+**根因:**
+qbe/ 是 gitlink 模式 `160000` 记录在 index,但:
+- 本地从来没有 `.gitmodules` (git log --all -- .gitmodules 输出空)
+- gitlink 指向的 commit `c0818978acec60ebb6167fade60fb7012cbf20ca` 在 repo 里 dangling (`git log -1 --format=...` 报 `fatal: bad object`)
+- 本地 qbe/ 目录是 working tree (有 .o / .c / Makefile 等),但 git 不 track 内容 (git ls-files qbe 只有 1 行 = gitlink 自身)
+- 推断: Phase 0 commit (c5e4efb) 初始建 repo 时,把 qbe vendor 进来当 gitlink,但 .gitmodules 没写 (或者被 reset 掉)。后续 ci.yml 跑 `actions/checkout@v4` 不带 `submodules:` 所以能跑 (qbe/ gitlink 就空 dir),但 release.yml 加 `submodules: recursive` 触发检查 .gitmodules 的 logic → fail
+
+**workaround (两层):**
+
+1. **`release.yml`** drop `submodules: recursive`:
+```yaml
+- name: Checkout
+  uses: actions/checkout@v4
+  with:
+    fetch-depth: 0  # for git describe / tag detection
+```
+
+2. **`installer/build.ps1`** qbe.exe resolution 加 PATH fallback:
+```powershell
+# qbe.exe resolution (W-025): prefer local qbe/qbe.exe (dev), fall back
+# to qbe.exe on PATH (MSYS2 mingw-w64-ucrt-x86_64-qbe — release workflow).
+$qbeLocal = "qbe/qbe.exe"
+$qbeOnPath = (Get-Command qbe.exe -ErrorAction SilentlyContinue)
+if (Test-Path $qbeLocal) {
+    Copy-Item -Path $qbeLocal -Destination "$binDir/qbe.exe" -Force
+} elseif ($qbeOnPath) {
+    Copy-Item -Path $qbeOnPath.Source -Destination "$binDir/qbe.exe" -Force
+} else {
+    exit 1
+}
+```
+
+**为什么 release workflow 还要 `mingw-w64-ucrt-x86_64-qbe` package:**
+- ci.yml 也用 (同 pattern),但 ci.yml 不 build MSI / qbe.exe binary
+- release.yml 要 qbe.exe 来 pack MSI Burn bundle,所以从 MSYS2 package 取 (PATH 上 `qbe.exe`),build.ps1 自动 fallback 用它
+
+**影响范围:**
+- 仅 release.yml + installer/build.ps1
+- ci.yml 不受影响 (已经无 submodules: recursive)
+- 本地 dev build 仍走 `qbe/qbe.exe` (优先) — 不改 dev workflow
+
+**失效条件 / 未来 fix:**
+1. **De-submodule qbe + track source files** — rm gitlink + `git add qbe/`,commit (~80 .c/.h files added, ~3-5 MB tracked)。彻底修 dangling gitlink + 让 qbe diff history 可见。但 v1.5.5 scope 不够,推到 v2.x (per M5 boot-from-scratch decision, qbe 要么 vendored 要么 QBE 重写,这里有歧义)。
+2. **Restore .gitmodules + commit** — 需要知道原 upstream URL (目前不知道)。同上,等 v2.x 决。
+3. GH Actions Node 20 deprecation — `actions/checkout@v4` 被强制 Node 24 跑,目前是 warning,不算 fail。
+
+**引用:**
+- 错误日志: GH Actions run 31859843640, Checkout step stderr
+- workaround 实现: `.github/workflows/release.yml:81-86` + `installer/build.ps1:85-100`
+- v1.5.5 ship commit (post hotfix)
+- 关联: `feedback_qbe_crlf_root_cause` (W-024 / QBE 行号偏移错的同 root: Windows 写 vs Linux 读;此处不是 root cause,但同方向问题)
+
 

@@ -19,6 +19,10 @@
 # Why windows-latest + MSYS2: matches ci.yml + local dev env. Both must
 # produce the same binary SHA; release workflow re-runs regress baseline.
 #
+# qbe.exe source: this repo's qbe/ is a dangling gitlink (no .gitmodules —
+# see W-025). release.yml installs mingw-w64-ucrt-x86_64-qbe and uses PATH
+# qbe.exe; installer/build.ps1 falls back from local qbe/qbe.exe to PATH.
+#
 # Reference: docs/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.5
 name: JHYY Installer Release
 
@@ -78,10 +82,12 @@ jobs:
           "JHY_IS_RC=$($env:JHY_IS_RC)"      | Add-Content -Path $env:GITHUB_ENV
           "JHY_TAG_NAME=$($env:JHY_TAG_NAME)"| Add-Content -Path $env:GITHUB_ENV
 
-      - name: Checkout (with qbe/ submodule)
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          # No `submodules: recursive` — qbe/ is a dangling gitlink in this
+          # repo (no .gitmodules). qbe.exe is provided by the MSYS2
+          # mingw-w64-ucrt-x86_64-qbe package; see W-025.
           fetch-depth: 0  # for git describe / tag detection
 
       - name: Setup MSYS2 + toolchain
