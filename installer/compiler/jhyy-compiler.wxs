@@ -132,22 +132,28 @@
 
     <!--
       W-031 fix: removed <Property><RegistrySearch> on INSTALLDIR + <SetDirectory>
-      (WiX 4 emits SetINSTALLDIR type-33 CA with Condition="NOT INSTALLDIR" —
+      (WiX 4 emits SetINSTALLDIR type-51 CA with Condition="NOT INSTALLDIR" —
       but INSTALLDIR is pre-populated from <Directory> parent resolution to
       C:\JHYY\ before AppSearch runs, so NOT INSTALLDIR is always false → CA
       never fires → fresh installs land at C:\JHYY\ instead of C:\Program Files\).
 
-      Fix: use <SetProperty> to set INSTALLDIR after CostFinalize when registry
-      search for prior install path is empty (fresh install). This works because
-      INSTALLDIR_REG_FOUND is a separate property (set by RegistrySearch) — it
-      stays "1" if prior install found, "empty" otherwise. The SetINSTALLDIR CA
-      WiX emits for <SetDirectory> never fires (same NOT INSTALLDIR problem), so
-      we explicitly handle the fresh-install case here.
+      Fix: use <DirectoryRef> to put INSTALLDIR under ProgramFiles6432Folder
+      directly. This way INSTALLDIR's default value is [ProgramFiles6432Folder]JHYY
+      from directory table resolution — no CustomAction needed, no ICE12 issue.
+      WiX's WixUI_Minimal InstallDir dialog still lets the user override at install time.
+
+      For upgrade/repair, the registry-based INSTALLDIR_REG_FOUND property is
+      unused at the default-install level — WixUI_Minimal will display the prior
+      path via INSTALLDIR property resolution (WiX 4 sets INSTALLDIR from the
+      registry during AppSearch when <Property><RegistrySearch> matches).
     -->
-    <SetProperty Id="INSTALLDIR"
-                 Value="[ProgramFiles6432Folder]JHYY"
-                 Condition="NOT INSTALLDIR_REG_FOUND"
-                 After="CostFinalize" />
+    <DirectoryRef Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLDIR" Name="JHYY">
+        <Directory Id="BinDir" Name="bin" FileSource="!(bindpath.bin)" />
+        <Directory Id="CommonDir" Name="common" FileSource="!(bindpath.common)" />
+        <Directory Id="VSCodeExtDir" Name="vscode-ext" FileSource="!(bindpath.vscode-ext)" />
+      </Directory>
+    </DirectoryRef>
 
     <Property Id="INSTALLDIR_REG_FOUND">
       <RegistrySearch Id="JHYYInstallDirSearch"
@@ -158,18 +164,10 @@
     </Property>
 
     <!--
-      W-031 (2): <SetDirectory> removed. WiX 4 auto-generates a SetINSTALLDIR
-      type-33 CA with Condition="NOT INSTALLDIR" — INSTALLDIR property is
-      pre-resolved at CostInitialize (directory table resolution), so the CA
-      never fires. We rely on SetProperty above + the WixUI_Minimal InstallDir
-      dialog for user-chosen paths (MSI standard UI flow).
+      W-031 (2): <SetDirectory> removed. The DirectoryRef above replaces the
+      old <Directory Id="INSTALLDIR"> under TARGETDIR, giving fresh installs
+      C:\Program Files\JHYY\ as the default without any CustomAction.
     -->
-
-    <Directory Id="INSTALLDIR" Name="JHYY">
-      <Directory Id="BinDir" Name="bin" FileSource="!(bindpath.bin)" />
-      <Directory Id="CommonDir" Name="common" FileSource="!(bindpath.common)" />
-      <Directory Id="VSCodeExtDir" Name="vscode-ext" FileSource="!(bindpath.vscode-ext)" />
-    </Directory>
 
     <Feature Id="JHYYCompilerFeature"
              Title="!(loc.FeatureJHYYTitle)"
