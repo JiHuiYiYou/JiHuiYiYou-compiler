@@ -83,18 +83,18 @@ switch ($Target) {
         $binDir = "installer/build-artifacts/bin"
         if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
         Copy-Item -Path "compiler/build/bin/jhyy.exe" -Destination "$binDir/jhyy.exe" -Force
-        # qbe.exe resolution (W-025): prefer local qbe/qbe.exe (dev), fall back
-        # to qbe.exe on PATH (MSYS2 mingw-w64-ucrt-x86_64-qbe — release workflow).
+        # qbe.exe resolution (W-025): prefer local qbe/qbe.exe (vendored source
+        # — always present post v1.5.5). PATH fallback retained for safety.
         $qbeLocal = "qbe/qbe.exe"
         $qbeOnPath = (Get-Command qbe.exe -ErrorAction SilentlyContinue)
         if (Test-Path $qbeLocal) {
             Copy-Item -Path $qbeLocal -Destination "$binDir/qbe.exe" -Force
-            Write-Host "[OK] qbe.exe from local submodule ($qbeLocal)"
+            Write-Host "[OK] qbe.exe from local source ($qbeLocal)"
         } elseif ($qbeOnPath) {
             Copy-Item -Path $qbeOnPath.Source -Destination "$binDir/qbe.exe" -Force
             Write-Host "[OK] qbe.exe from PATH ($($qbeOnPath.Source))"
         } else {
-            Write-Host "[ERROR] qbe.exe not found: build `qbe/qbe.exe` locally, or install MSYS2 mingw-w64-ucrt-x86_64-qbe"
+            Write-Host "[ERROR] qbe.exe not found: run `cd qbe && make` to build from vendored source"
             exit 1
         }
 

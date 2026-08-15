@@ -2102,4 +2102,54 @@ if (Test-Path $qbeLocal) {
 - v1.5.5 ship commit (post hotfix)
 - 关联: `feedback_qbe_crlf_root_cause` (W-024 / QBE 行号偏移错的同 root: Windows 写 vs Linux 读;此处不是 root cause,但同方向问题)
 
+---
+
+## W-025 follow-up (2026-08-15 same-day): MSYS2 qbe package 不存在 → 必须 vendoring qbe source
+
+**追加症状 (dry-run run 31860099231):**
+- 第二个 dry-run 过了 Checkout (上一节 workaround 生效),但在 Setup MSYS2 step fail:
+  ```
+  error: target not found: mingw-w64-ucrt-x86_64-qbe
+  ```
+- MSYS2 ucrt64 repo 没 ship qbe package (https://packages.msys2.org/packages/?q=qbe 0 hit)。其他 repo (mingw64 / clang64) 也没有
+- 假定 MSYS2 qbe package 是错的 — 这是 release.yml 初版的设计失误
+
+**根因:**
+- qbe.exe 是 QBE 编译器 binary,QBE upstream (8l/qbe) 没有 official release 跟 prebuilt binary
+- 本地 qbe/ 是 QBE upstream fork (有 amd64/winabi.c 等 Windows 适配),不能直接 clone upstream 替换
+- qbe/ 历史 gitlink 指向的 commit c0818978... 在 repo 里 dangling,无法 `git submodule update` 拿回来
+
+**fix (一层 — 推到 v1.5.5 ship):**
+彻底 vendor qbe source 到 repo:
+1. `git rm --cached qbe` (删 gitlink)
+2. `git add qbe/.gitignore qbe/README qbe/LICENSE qbe/Makefile qbe/*.c qbe/*.h qbe/amd64/* qbe/arm64/* qbe/rv64/*` (41 个 source + headers + LICENSE + README + Makefile + .gitignore, ~376 KB;`qbe/test/` `qbe/tools/` `qbe/minic/` `qbe/doc/` 不 track — 不是 build 必需)
+3. `qbe/.gitignore` 加 `qbe.exe` (Windows build output)
+4. release.yml 新加 step:
+   ```yaml
+   - name: Build qbe.exe (vendored source under qbe/)
+     shell: msys2 {0}
+     run: |
+       cd qbe
+       make
+       sha256sum qbe.exe
+   ```
+5. release.yml 删 `mingw-w64-ucrt-x86_64-qbe` MSYS2 package
+6. installer/build.ps1 qbe.exe resolution 保持 — `qbe/qbe.exe` (local) 优先;PATH 兜底 (CI fallback)
+
+**影响范围:**
+- 仅 release.yml + installer/build.ps1 + qbe/ vendoring
+- ci.yml 不受影响 (no qbe build step)
+- 本地 dev build 走 `qbe/qbe.exe` (不变)
+- qbe diff history 从 gitlink dangling 转到 visible tracked (39 commits 在 qbe source history;现在只有 1 个 commit 因为是 de-submodule 整批 add)
+
+**失效条件 / 未来 fix:**
+1. **M5 boot-from-scratch** (per `project_m5_boot_from_scratch_decision`) — v2/v3 末可能删 qbe/ (QBE 自写) 或更新到新 QBE upstream
+2. **QBE upstream major version bump** — 现 v1.5.5 vendor 跟 upstream HEAD (d62b154) 不一致 (local fork);升级需要 sync
+3. GH Actions Node 20 deprecation (carry over from above)
+
+**引用:**
+- 错误日志: GH Actions run 31860099231, Setup MSYS2 step stderr
+- workaround 实现: vendored 41 qbe files + `.github/workflows/release.yml` (Build qbe.exe step) + `installer/build.ps1` (qbe.exe resolution)
+- v1.5.5 ship commit (post vendoring)
+
 

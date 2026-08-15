@@ -19,9 +19,9 @@
 # Why windows-latest + MSYS2: matches ci.yml + local dev env. Both must
 # produce the same binary SHA; release workflow re-runs regress baseline.
 #
-# qbe.exe source: this repo's qbe/ is a dangling gitlink (no .gitmodules —
-# see W-025). release.yml installs mingw-w64-ucrt-x86_64-qbe and uses PATH
-# qbe.exe; installer/build.ps1 falls back from local qbe/qbe.exe to PATH.
+# qbe.exe source: vendored copy of QBE compiler source under qbe/. Built by
+# the "Build qbe.exe" step below. Historical gitlink was dangling (no
+# .gitmodules) — see W-025 for the v1.5.5 vendoring fix.
 #
 # Reference: docs/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.5
 name: JHYY Installer Release
@@ -85,9 +85,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # No `submodules: recursive` — qbe/ is a dangling gitlink in this
-          # repo (no .gitmodules). qbe.exe is provided by the MSYS2
-          # mingw-w64-ucrt-x86_64-qbe package; see W-025.
+          # qbe/ is a vendored copy of the QBE compiler source (v1.5.5 vendoring
+          # fix for the historical dangling gitlink). See W-025.
           fetch-depth: 0  # for git describe / tag detection
 
       - name: Setup MSYS2 + toolchain
@@ -100,7 +99,6 @@ jobs:
             base-devel
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-make
-            mingw-w64-ucrt-x86_64-qbe
             python
             python-pip
             zip
@@ -114,6 +112,18 @@ jobs:
           wix extension add -g WixToolset.Util.wixext
           wix extension add -g WixToolset.UI.wixext
           wix extension add -g WixToolset.Bal.wixext
+
+      - name: Build qbe.exe (vendored source under qbe/)
+        shell: msys2 {0}
+        run: |
+          # W-025: qbe/ was historically a dangling gitlink; v1.5.5 vendored
+          # the Windows-fork source (with amd64/winabi.c etc.) directly into
+          # the repo. Build qbe.exe from vendored source.
+          cd qbe
+          make
+          ls -la qbe.exe
+          sha256sum qbe.exe
+          cd ..
 
       - name: Build stage 0 (C-side bootstrap)
         shell: msys2 {0}
