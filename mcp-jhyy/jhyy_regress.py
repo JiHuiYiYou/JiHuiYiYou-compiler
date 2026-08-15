@@ -306,7 +306,9 @@ def run_all(
             print(f"PASS  {fname:<30}  EXIT={act}")
             passed += 1
         else:
-            print(f"FAIL  {fname:<30}  expected={exp} got={act}  {msg[:80]}")
+            # Sprint v1.5.5: print full stderr so CI logs include QBE/gcc link
+            # errors (always after "[4] codegen done", past 80 chars).
+            print(f"FAIL  {fname:<30}  expected={exp} got={act}  {msg}")
             failed += 1
             failed_tests.append({
                 "file": fname,
