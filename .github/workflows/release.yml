@@ -178,7 +178,7 @@ jobs:
           ls -la /tmp/sanity_arith.exe 2>&1 || echo "no exe created"
           echo "=== End sanity ==="
           echo ""
-          python compiler/build/bin/regress.py --all
+          JHYY_DEBUG_W028=1 python compiler/build/bin/regress.py --all
           # exit code 0 = pass; non-zero = fail (will block release)
 
       - name: Build installer (Burn bundle + MSI + .vsix)

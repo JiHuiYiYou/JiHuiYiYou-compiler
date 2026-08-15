@@ -251,6 +251,10 @@ def run_test(
     else:
         actual_cmp = actual
         expected_cmp = expected
+    # DEBUG W-028: print raw + cmp
+    import os as _os
+    if _os.environ.get("JHYY_DEBUG_W028"):
+        print(f"[W-028] fname={os.path.basename(jhyy_file)} actual={actual} expected={expected} actual_cmp={actual_cmp} expected_cmp={expected_cmp} sys.platform={sys.platform}")
     return (actual_cmp == expected_cmp, expected, actual, output)
 
 
