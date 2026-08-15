@@ -2,36 +2,44 @@
 
 Windows 引导式安装器 — 把 JHYY 编译器装到 `C:\Program Files\JHYY\`, 自动配 PATH, 用户零配置。
 
-## 当前状态 (v1.5.2)
+## 当前状态 (v1.5.3)
 
 ✅ **v1.5.2 done** — `compiler/jhyy-compiler.wxs` 写出, `build.ps1 compiler` 跑通, `jhyy-compiler-1.0.0.msi` (991KB) 生成, **`wix msi validate` 0 ICE errors** (ICE43/ICE57/ICE80 全过).
 
-**v1.5.2 scope (已完成)**:
-- jhyy.exe + qbe.exe → `C:\Program Files\JHYY\bin\`
-- 系统 PATH (HKLM, per-machine) 自动加 `bin/`
-- HKLM `SOFTWARE\JiHuiYiYou\JHYY` 写 InstallDir + Version
-- 开始菜单 shortcut (HKCU registry KeyPath, per ICE43/57)
-- 双语 RTF license (中英)
-- 中文 UI strings (`Locale.zh-CN.wxl`)
-- Launch condition 检测 MSYS2 + GCC (warn only, 不 block install — `力度 1 检测+引导` per user 决策)
-- WiX 4 语法 (`<Package>` 顶层 `<Launch>`, `Bitness="always64"`, `<String Value="..."/>`, `<ui:WixUI>`)
-- 64-bit Package (via `wix build -arch x64`, per ICE80)
+✅ **v1.5.3 done** — `Bundle.wxs` 写出, `build.ps1 bundle` 跑通, `jhyy-installer-1.5.3.exe` (1.6MB) 生成。Burn bundle 走 standard `WixStandardBootstrapperApplication` UI (next-next-finish, RTF license, MSYS2 prereq 提示在 Welcome page, post-install 提示在 Success page)。
+
+**v1.5.3 scope (已完成)**:
+- `installer/Bundle.wxs` — Burn bundle, 链 `JHYYCompilerMsi` (v1.5.2 MSI)
+- `installer/Theme.xml` — Burn custom theme (Welcome/Progress/Modify/Success/Failure page, MSYS2 prereq 提示 + https://www.msys2.org/ 链接)
+- `installer/Bundle.zh-CN.wxl` — 中文 UI strings (跟 v1.5.2 Locale 同步)
+- `installer/banner.bmp` — 256x64 24-bit logo BMP (Burn 内部转 PNG)
+- `installer/common/license.rtf` — 双语 RTF license (Burn + MSI 共享)
+- `build.ps1 bundle` 入口 (chain compiler MSI build if missing)
+- `wix build -arch x64` (per ICE80 一致性)
+- Theme=`rtfLicense` + LicenseFile=`license.rtf` 配 RTF license dialog
+- 关键 fix: `<bal:WixStandardBootstrapperApplication>` 必须在 `<BootstrapperApplication>` wrapper 内 (per BalCompiler.cs ParsePossibleKeyPathElement case "BootstrapperApplication"), 缺 `Theme` 属性 → WIX0010; Theme enum 选 `rtfLicense` (跟 RTF LicenseFile 配套)
+
+**v1.5.3 design decisions**:
+- **力度 1 检测+引导** (per user 决策 2026-08-14): Burn 不打包 GCC toolchain (~85MB 太重, 不在 v1.5 scope); 检测 MSYS2 + ucrt64 GCC, 装了 → 正常装 compiler MSI; 没装 → Welcome page 提示用户先装 MSYS2 (https://www.msys2.org/); 装完 compiler MSI 后, Success page 提示: "装 MSYS2 后用 jhyy 编 .jhyy"
+- **Bundle 走 standard WixStdBA UI** (不再写 custom BAFunctions): simple, 文档化, 跨版本稳; 留给 v1.5.4 装修 + v2.x BAFunctions 升级
+- **Bal extension DLL 通过绝对路径引** (workaround): `wix extension add -g WixToolset.Bal.wixext` 装的 DLL 文件名是 `WixToolset.BootstrapperApplications.wixext.dll` (不是 `WixToolset.Bal.wixext.dll`), wix CLI 7.0.0+b8977d6 的 `-ext WixToolset.Bal.wixext` 名字查找会 WIX0144 fail, workaround 是 -ext 传 DLL 绝对路径。详细见 `docs/internal/workarounds.md`
 
 **未完成** (后续 sprint):
-- v1.5.3: `Bundle.wxs` (Burn bundle 链 compiler MSI + 检测 + 自动装 MSYS2)
 - v1.5.4: UI 装修 + VSCode ext 组件
 - v1.5.5: GH Actions release workflow + 第三方 manifest
 
-**v1.5.2 install verification status**:
-- ✅ `wix msi validate` clean (all standard ICEs pass)
+**v1.5.3 install verification status**:
+- ✅ `wix build` clean (no errors)
+- ✅ Burn bundle manifest 验证 (内嵌 MSI / theme.xml / thm.wxl / logo.png / license.rtf / wixstdba.exe payload 全部齐全, per `wix-burndata.xml` 检查)
 - ⚠️ **手动 install/uninstall 验证需要在交互式 desktop session 跑** (per-machine MSI 要求 UAC elevation, headless bash 里 `Start-Process -Verb RunAs` 不会触发 prompt). 验证步骤:
   ```powershell
   # 交互式 PowerShell (有 desktop 的话)
-  msiexec /i installer/build-artifacts/jhyy-compiler-1.0.0.msi /passive /l*v install.log
-  # 期望: UAC prompt → accept → 文件装到 C:\Program Files\JHYY\bin\, PATH 自动加
+  jhyy-installer-1.5.3.exe  # 双击也行, Burn 弹 welcome dialog
+  # 期望: Welcome dialog (含 MSYS2 prereq 提示) → Install → UAC prompt → accept
+  #       → Progress → Success (含 post-install 提示) → Close
   where jhyy  # → C:\Program Files\JHYY\bin\jhyy.exe
-  jhyy --version  # → 1.4.6 (or current)
-  # 卸载 (Settings → Apps 或 msiexec /x)
+  jhyy --version  # → 1.5.3 (or current)
+  # 卸载 (Settings → Apps 或 Burn /uninstall)
   ```
 
 ## 目录结构

@@ -46,6 +46,7 @@
 | [W-018](#w-018-v142-dwarf-emit-引入-stage-1-il-字节差异-非功能) | ✅ RESOLVED 2026-08-14 | v1.4.2 DWARF emit 引入 Stage 1 .il 字节差异 (非功能) — 实测 `stage1-expanded.sh` 脚本错写路径吞错,改后 7/7 PASS,W-018 是误报 RESOLVED |
 | [W-019](#w-019-codegen-嵌套-struct-innerx-emit-loadsw-类型错) | ✅ RESOLVED 2026-08-14 (v1.4.6 commit `6638134`) | codegen `cg_field_addr` 在处理 `(*o).inner.a` 这种嵌套 struct 字段时,emit 的 `loadsw`/`loadw` 第一操作数类型错(QBE reject: "invalid type for first operand in loadsw")。当前 v1.4.3 测试用例只覆盖 flat struct,嵌套 struct 留给 post-v1.4.3 修 |
 | [W-020](#w-020-jhyy-side-parserjhyy-parse_pattern-colorvariant-分支-bug) | ✅ RESOLVED 2026-08-14 (v1.4.6 commit `ad42117`) | jhyy-side `parser.jhyy` parse_pattern 在 match arm 上下文中处理 `Color::Variant` 时,`parser_check(p, TOKEN_COLONCOLON())` 返回 0 即使下一个 token 实际是 `::`,parser 走 ident-pattern 分支提前返回,留下 `::` 让 expr 解析报 `expected =>, got ::`。C-side `parser.c` (line 124-138) 正确处理同样输入。bug 在 v1.4.4 物理 production flip 前被 C-side `jhyy.exe` 遮住 |
+| [W-021](#w-021-wix-7-cli-ext-name-查找失败---ext-wixtoolsetbalwixext-找不到) | ACTIVE (v1.5.3, workaround in `installer/build.ps1`) | WiX 7.0.0+b8977d6 CLI 的 `-ext WixToolset.Bal.wixext` 名字查找 WIX0144 fail — 装的 DLL 文件名是 `WixToolset.BootstrapperApplications.wixext.dll` (不是 `WixToolset.Bal.wixext.dll`),CLI extension-name lookup 不识别,要求传 DLL 绝对路径 |
 
 ---
 
@@ -1848,5 +1849,42 @@ match tag { 0 => ..., 1 => ..., 2 => ... }
 - repro: `compiler/tests/examples/gdb_pretty_test.jhyy:50,53`;最小 repro `_min_enum.jhyy`
 - v1.4.4 ship 时 changelog 把此 bug 误标 "pre-existing v1.4.3" 已更正 → [`docs/logs/v1/changelog-v1.4.0.md`](../logs/v1/changelog-v1.4.0.md) § v1.4.4 ship
 - W-019 是 codegen 嵌套 struct,跟 W-020 (parser enum pattern) 不同面,但同样等真修;建议 v1.4.6 合并
+
+## W-021: WiX 7 CLI `-ext` name 查找失败 — `-ext WixToolset.Bal.wixext` 找不到
+
+**触发场景:** Sprint v1.5.3 Burn bundle build, `wix build installer/Bundle.wxs -ext WixToolset.Bal.wixext ...` 时报 WIX0144 (`The extension 'WixToolset.Bal.wixext' could not be found. Checked paths: WixToolset.Bal.wixext`)。
+
+**根因:** `dotnet tool install --global wix` 装 WiX 7.0.0+b8977d6 后,`wix extension add -g WixToolset.Bal.wixext` 把 DLL 装到 `%USERPROFILE%\.wix\extensions\WixToolset.Bal.wixext\7.0.0\wixext7\` 目录,但 **DLL 文件名是 `WixToolset.BootstrapperApplications.wixext.dll`**,不是预期的 `WixToolset.Bal.wixext.dll`(wix CLI 名字解析逻辑是按 DLL basename 找,但 `Bal.wixext` extension 的产物 DLL basename 是 `BootstrapperApplications`,跟 extension 名不对应)。同样情况可能影响其他 Bal sub-extensions。MSI 用的 `WixToolset.Util.wixext` / `WixToolset.UI.wixext` 名字-文件名一致所以不触发。
+
+**workaround (v1.5.3):** `installer/build.ps1` 显式构造 DLL 绝对路径传给 `-ext`,跳过 CLI 名字解析:
+```powershell
+$balDll = "$env:USERPROFILE\.wix\extensions\WixToolset.Bal.wixext\7.0.0\wixext7\WixToolset.BootstrapperApplications.wixext.dll"
+if (-not (Test-Path $balDll)) {
+    Write-Host "[ERROR] Bal extension DLL not found at: $balDll"
+    Write-Host "Run:  wix extension add -g WixToolset.Bal.wixext"
+    exit 1
+}
+& wix build ... -ext "$balDll" ...
+```
+
+**影响范围:**
+- 只影响 Burn bundle build (`build.ps1 bundle`),不影响 MSI build (`build.ps1 compiler`) — Util/UI 名字一致不触发
+- 不影响最终产物 (`jhyy-installer-X.Y.Z.exe` 一样能 build, payload 一样齐全)
+- workaround 是 stable 的,WiX 7.x 一直用 `BootstrapperApplications.wixext.dll` 文件名
+
+**失效条件 (任一即可移除 W-021):**
+1. WiX 7 改回把 Bal extension DLL 命名为 `WixToolset.Bal.wixext.dll`(跟 extension 名一致)
+2. wix CLI 加 `-ext-folder=<path>` flag 允许传目录,自动找 DLL
+3. 写 custom BAFunctions (替代 Bal extension),完全不依赖 Bal.wixext
+
+**修复路径候选:**
+- 短期: workaround 留,build.ps1 已记录
+- 中期: 等 WiX 上游改 DLL 命名 (可能性小,Bal sub-extensions 都按功能命名,不按 extension 名)
+- 长期: v2.x 可能写 custom BAFunctions(MVP 化 Burn UX),彻底绕开 Bal.wixext
+
+**引用:**
+- repro: 跑 `wix build installer/Bundle.wxs -ext WixToolset.Bal.wixext ...` 看 WIX0144
+- workaround 实现: `installer/build.ps1:131-136`
+- v1.5.3 ship commit (this commit)
 
 

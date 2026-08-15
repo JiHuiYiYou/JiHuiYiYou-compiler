@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  installer/Bundle.zh-CN.wxl : Burn bundle localization (v1.5.3)
+
+  Strings referenced by Theme.xml (UI 文案) + Bundle.wxs (error messages).
+  WiX 4 语法: <String> 必须用 Value 属性 (per WIX0400 error, 跟 MSI wxl 一致).
+
+  Reference:
+    - docs/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.3
+-->
+<WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="zh-CN">
+
+  <String Id="Language" Overridable="no" Value="2052" />
+
+  <!-- Welcome page -->
+  <String Id="WelcomeHeader"
+          Value="欢迎使用 [ProductName]" />
+  <String Id="WelcomeDescription"
+          Value="本安装向导将在您的计算机上安装 JHYY 编译器。
+
+JHYY 是一门自研静态类型编程语言, 配有自研编译器。
+
+按 安装 继续。" />
+  <String Id="MSYS2PrereqWarning"
+          Value="前置要求: JHYY 编译器需要 MSYS2 + GCC 才能编译 .jhyy 程序。
+
+如果您还没安装 MSYS2, 请先访问下方链接安装。" />
+
+  <!-- Buttons -->
+  <String Id="InstallButton" Value="安装" />
+  <String Id="CancelButton" Value="取消" />
+  <String Id="RepairButton" Value="修复" />
+  <String Id="UninstallButton" Value="卸载" />
+  <String Id="CloseButton" Value="关闭" />
+  <String Id="LaunchButton" Value="启动" />
+
+  <!-- Progress page -->
+  <String Id="ProgressHeader"
+          Value="正在安装 [ProductName]" />
+  <String Id="ProgressDescription"
+          Value="请稍候, 安装程序正在复制文件并配置环境。" />
+
+  <!-- Modify page -->
+  <String Id="ModifyHeader"
+          Value="修改 [ProductName] 安装" />
+
+  <!-- Success page -->
+  <String Id="SuccessHeader"
+          Value="[ProductName] 安装成功" />
+  <String Id="SuccessDescription"
+          Value="JHYY 编译器已经安装到您的计算机。" />
+  <String Id="PostInstallHint"
+          Value="下一步: 打开新的 cmd 窗口运行 'jhyy --version' 验证。
+
+如果之前没装 MSYS2 + GCC, 请先安装:
+  1. 下载 MSYS2: https://www.msys2.org/
+  2. 打开 MSYS2 ucrt64 终端, 运行: pacman -S mingw-w64-ucrt-x86_64-gcc
+  3. 重启 cmd, 运行 'jhyy' 编译您的第一个 .jhyy 程序。" />
+
+  <!-- Failure page -->
+  <String Id="FailureHeader"
+          Value="[ProductName] 安装失败" />
+
+</WixLocalization>

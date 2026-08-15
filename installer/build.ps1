@@ -106,9 +106,53 @@ switch ($Target) {
         exit 0
     }
     "bundle" {
-        Write-Host "[build.ps1] === Burn bundle build (v1.5.3, not yet implemented) ==="
-        Write-Host "[TODO] v1.5.3: implement installer/Bundle.wxs"
-        exit 1
+        Write-Host "[build.ps1] === Burn bundle build (v1.5.3) ==="
+        # 1. ensure compiler MSI is built first (bundle chains it)
+        $msiPath = "installer/build-artifacts/jhyy-compiler-$($env:JHY_VERSION).msi"
+        if (-not (Test-Path $msiPath)) {
+            Write-Host "[build.ps1] compiler MSI missing, building first..."
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath compiler
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[ERROR] compiler MSI build failed, aborting bundle build"
+                exit 1
+            }
+        }
+        # 2. build Burn bundle via wix build - outputs .exe
+        #   -ext <Bal.dll> for WixStandardBootstrapperApplication
+        #   bindpath msi/ -> jhyy-compiler-*.msi payload
+        #   bindpath common/ -> license.rtf
+        #   loc Bundle.zh-CN.wxl for Chinese UI strings
+        #
+        #   NOTE: `wix extension add -g WixToolset.Bal.wixext` ships the DLL
+        #   named WixToolset.BootstrapperApplications.wixext.dll (NOT
+        #   WixToolset.Bal.wixext.dll). The wix CLI extension-name lookup
+        #   fails on Windows 7.0.0+b8977d6 (WIX0144). Workaround: reference
+        #   the DLL by absolute path.
+        $balDll = "$env:USERPROFILE\.wix\extensions\WixToolset.Bal.wixext\7.0.0\wixext7\WixToolset.BootstrapperApplications.wixext.dll"
+        if (-not (Test-Path $balDll)) {
+            Write-Host "[ERROR] Bal extension DLL not found at: $balDll"
+            Write-Host "Run:  wix extension add -g WixToolset.Bal.wixext"
+            exit 1
+        }
+        & wix build `
+            installer/Bundle.wxs `
+            -arch x64 `
+            -b "msi=installer/build-artifacts" `
+            -b "common=installer/common" `
+            -loc "installer/Bundle.zh-CN.wxl" `
+            -ext "$balDll" `
+            -d "JHY_VERSION=$($env:JHY_VERSION)" `
+            -d "JHY_COMPILER_MSI_PATH=installer\build-artifacts\jhyy-compiler-$($env:JHY_VERSION).msi" `
+            -d "JHY_THEME_XML_PATH=installer\Theme.xml" `
+            -d "JHY_LICENSE_RTF_PATH=installer\common\license.rtf" `
+            -d "JHY_LOGO_BMP_PATH=installer\banner.bmp" `
+            -o "installer/build-artifacts/jhyy-installer-$($env:JHY_VERSION).exe"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[ERROR] bundle build failed."
+            exit 1
+        }
+        Write-Host "[OK] installer/build-artifacts/jhyy-installer-$($env:JHY_VERSION).exe built"
+        exit 0
     }
 }
 

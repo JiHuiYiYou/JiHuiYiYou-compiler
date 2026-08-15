@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  installer/Theme.xml : JHYY Burn bundle theme (v1.5.3)
+
+  WiX 4 WixStandardBootstrapperApplication Theme. Defines dialog layout,
+  fonts, colors, and the chain of pages (welcome → progress → finish).
+
+  Minimal theme that overrides only what we need (MSYS2 detection message
+  on Welcome page; otherwise uses default controls/layout).
+
+  Format: WiX 4 Theme XML is XAML-style with:
+    - <Font> declarations
+    - <Page> declarations (Name + children: <Text>, <Hyperlink>, <Button>, <Checkbox>)
+    - All elements inside <Page> are placed by WiX runtime based on the
+      Page Name (Welcome/Progress/Finish).
+
+  Reference:
+    - https://wixtoolset.org/docs/v4/bundle/wixstdba/
+    - docs/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.3
+-->
+<Theme xmlns="http://wixtoolset.org/schemas/v4/thm">
+
+  <Window Width="600" Height="450" Title="[ProductName] Setup">
+    <Font Id="WelcomeHeaderFont" Height="-20" Weight="bold" />
+  </Window>
+
+  <Page Name="Install">
+    <Text X="20" Y="20" Width="-20" Height="-20" FontId="WelcomeHeaderFont">
+      !(loc.WelcomeHeader)
+    </Text>
+    <Text X="20" Y="80" Width="-20" Height="40">
+      !(loc.WelcomeDescription)
+    </Text>
+    <Text X="20" Y="160" Width="-20" Height="80" FontId="WelcomeHeaderFont">
+      !(loc.MSYS2PrereqWarning)
+    </Text>
+    <Hyperlink X="20" Y="220" Width="-20" Height="20">
+      https://www.msys2.org/
+    </Hyperlink>
+    <Button Name="InstallButton" X="-91" Y="-11" Width="75" Height="32" TabIndex="1">
+      !(loc.InstallButton)
+    </Button>
+    <Button Name="CancelButton" X="-11" Y="-11" Width="75" Height="32" TabIndex="2">
+      !(loc.CancelButton)
+    </Button>
+  </Page>
+
+  <Page Name="Progress">
+    <Text X="20" Y="20" Width="-20" Height="20" FontId="WelcomeHeaderFont">
+      !(loc.ProgressHeader)
+    </Text>
+    <Text X="20" Y="60" Width="-20" Height="40">
+      [ProgressDescription]
+    </Text>
+    <Progressbar X="20" Y="120" Width="-20" Height="20" />
+    <Text X="20" Y="160" Width="200" Height="20">
+      [ProgressActionText]
+    </Text>
+    <Text X="-220" Y="160" Width="200" Height="20" HorizontalAlignment="right">
+      [ProgressActivity]
+    </Text>
+    <Button Name="CancelButton" X="-11" Y="-11" Width="75" Height="32" TabIndex="2">
+      !(loc.CancelButton)
+    </Button>
+  </Page>
+
+  <Page Name="Modify">
+    <Text X="20" Y="20" Width="-20" Height="-20" FontId="WelcomeHeaderFont">
+      !(loc.ModifyHeader)
+    </Text>
+    <Button Name="RepairButton" X="-171" Y="-11" Width="75" Height="32" TabIndex="1">
+      !(loc.RepairButton)
+    </Button>
+    <Button Name="UninstallButton" X="-91" Y="-11" Width="75" Height="32" TabIndex="2">
+      !(loc.UninstallButton)
+    </Button>
+    <Button Name="CancelButton" X="-11" Y="-11" Width="75" Height="32" TabIndex="3">
+      !(loc.CancelButton)
+    </Button>
+  </Page>
+
+  <Page Name="Success">
+    <Text X="20" Y="20" Width="-20" Height="20" FontId="WelcomeHeaderFont">
+      !(loc.SuccessHeader)
+    </Text>
+    <Text X="20" Y="80" Width="-20" Height="40">
+      !(loc.SuccessDescription)
+    </Text>
+    <Text X="20" Y="160" Width="-20" Height="80">
+      !(loc.PostInstallHint)
+    </Text>
+    <Button Name="LaunchButton" X="-91" Y="-11" Width="75" Height="32" TabIndex="1">
+      !(loc.LaunchButton)
+    </Button>
+    <Button Name="CloseButton" X="-11" Y="-11" Width="75" Height="32" TabIndex="2">
+      !(loc.CloseButton)
+    </Button>
+  </Page>
+
+  <Page Name="Failure">
+    <Text X="20" Y="20" Width="-20" Height="20" FontId="WelcomeHeaderFont">
+      !(loc.FailureHeader)
+    </Text>
+    <Text X="20" Y="80" Width="-20" Height="-80">
+      [FailureLogMessage]
+    </Text>
+    <Button Name="CloseButton" X="-11" Y="-11" Width="75" Height="32" TabIndex="2">
+      !(loc.CloseButton)
+    </Button>
+  </Page>
+
+</Theme>

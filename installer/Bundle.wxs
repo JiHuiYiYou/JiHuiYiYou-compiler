@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  installer/Bundle.wxs : JHYY Burn bundle (v1.5.3)
+
+  Sprint v1.5.3 — chain compiler MSI (v1.5.2) + 检测 MSYS2/GCC (力度 1).
+  Burn bundle 走 standard Bootstrapper UI (`WixStandardBootstrapperApplication`).
+
+  设计要点 (per 力度 1 检测+引导 决策, user 2026-08-14):
+    - 不打包 GCC toolchain (~85MB 太重, 不在 v1.5 scope)
+    - 检测 MSYS2 + ucrt64 GCC, 装了 → 正常装 compiler MSI
+    - 没装 → welcome dialog 提示用户先装 MSYS2 (https://www.msys2.org/)
+    - 装完 compiler MSI 后, finish dialog 提示: "装 MSYS2 后用 jhyy 编 .jhyy"
+
+  Layout:
+    C:\Program Files\JHYY\bin\jhyy.exe   (compiler MSI 装)
+    C:\Program Files\JHYY\bin\qbe.exe    (compiler MSI 装)
+    %USERPROFILE%\AppData\Local\Programs\MSYS2\  (用户自己装, Burn 不管)
+
+  WiX 4 schema notes (跟 v3 不一样的地方):
+    - <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication"> 用 bal namespace
+    - <MsiPackage DisplayInternalUI="no"> 必须, 否则 Burn UI 被 MSI UI 覆盖
+    - WixVariable Id 引用 Theme/HyperlinkLicense 文件 (从 bal extension)
+    - build.ps1 传 -d "JHY_XXX=path" 给 Bundle.wxs 读
+
+  Reference:
+    - docs/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.3
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Bundle Name="JHYY Installer"
+          Version="$(var.JHY_VERSION)"
+          Manufacturer="JiHuiYiYou"
+          UpgradeCode="B1C2D3E4-F5A6-7890-1234-567890ABCDEF"
+          AboutUrl="https://github.com/JiHuiYiYou/JiHuiYiYou-compiler"
+          HelpUrl="https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/wiki">
+
+    <!--
+      Standard bootstrapper UI (WixStandardBootstrapperApplication).
+      The Theme file is referenced via WixVariable (overrides default theme).
+      HyperlinkLicense + EulaLicense use the same RTF file (English +
+      Chinese bilingual).
+
+      WixStandardBootstrapperApplication extension must be referenced:
+      wix build ... -ext WixToolset.Bal.wixext
+    -->
+    <!--
+      Theme="rtfLicense" 配 LicenseFile (RTF) — Burn 渲染 RTF license dialog.
+      Theme="hyperlinkLicense" 配 LicenseUrl (URL).
+      per BalCompiler.cs ParseWixStandardBootstrapperApplicationElement:
+      Theme 是 required (WIX0010); ThemeFile 是可选 (用我们的 Theme.xml 覆盖
+      默认布局加 MSYS2 提示 + 链接).
+    -->
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+          Theme="rtfLicense"
+          LogoFile="$(var.JHY_LOGO_BMP_PATH)"
+          ThemeFile="$(var.JHY_THEME_XML_PATH)"
+          LicenseFile="$(var.JHY_LICENSE_RTF_PATH)" />
+    </BootstrapperApplication>
+
+    <Chain>
+      <!--
+        MsiPackage: chain the compiler MSI (built in v1.5.2). The MSI
+        payload is bound at build time via -b "msi=path/to/jhyy-compiler-*.msi".
+        DisplayInternalUI="no" prevents the MSI from showing its own UI
+        (Burn handles everything via the standard BA theme).
+
+        InstallCondition checks MSYS2_GCC_FOUND — if NOT found, we still
+        install the compiler (welcome dialog already explained MSYS2 prereq,
+        and v1.5.2 MSI launch condition only warns). Users can install
+        MSYS2 later and the compiler will work.
+      -->
+      <MsiPackage Id="JHYYCompilerMsi"
+                  SourceFile="$(var.JHY_COMPILER_MSI_PATH)"
+                  DisplayName="JHYY Compiler"
+                  Compressed="yes"
+                  Vital="yes"
+                  Permanent="yes">
+        <MsiProperty Name="JHYY_BUNDLE_INSTALL" Value="1" />
+      </MsiPackage>
+    </Chain>
+
+  </Bundle>
+
+</Wix>
