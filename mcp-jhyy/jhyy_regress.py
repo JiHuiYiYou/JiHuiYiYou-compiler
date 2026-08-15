@@ -42,14 +42,23 @@ def _resolve_binary(binary: str) -> str:
 
 
 def _build_subprocess_env() -> dict:
-    """构造 subprocess env. 修复 MCP server env={} 引起的 'gcc link failed'.
+    """构造 subprocess env. 修复 'gcc link failed' ('gcc is not recognized').
 
     Mirror jhyy_runner.py:_build_subprocess_env (modules 独立, 不互相 import).
-    Rationale + empirical 见 jhyy_runner.py.
 
-    ⚠️ 必须 FORCE 写 Windows-style PATH — 不能只补缺. 当 MCP server 自身在 MSYS bash 下
-    启动, os.environ['PATH'] 是 `/c/...` 格式, jhyy.exe 内部 `system("cmd /c gcc ...")` 拿这个
-    PATH 给 cmd.exe 用, cmd.exe 不认 `/c/...` 路径 → gcc 找 cc1/as/ld 失败 → "gcc link failed".
+    ⚠️ 必须 FORCE 写 Windows-style PATH — 不能只补缺. 当 MCP server / regress
+    runner 在 MSYS bash 下启动, os.environ['PATH'] 是 `/c/...` 格式, jhyy.exe
+    内部 `system("cmd /c gcc ...")` 拿这个 PATH 给 cmd.exe 用, cmd.exe 不认
+    `/c/...` 路径 → gcc 找 cc1/as/ld 失败 → "gcc link failed"。
+
+    W-026 (2026-08-15): CI GH Actions release.yml regress 53/53 FAIL, real
+    error 'gcc is not recognized as an internal or external command'. The
+    conditional PATH sanitization above (if/else on `/c/...` prefix) didn't
+    cover the case where os.environ['PATH'] is empty string or contains a
+    mix of forward + backslash paths that defeats the startswith check.
+    Fix: ALWAYS overwrite with a known-good Windows PATH (gcc at ucrt64).
+    Keep the original PATH appended (best-effort) so user-installed tools
+    still resolve.
     """
     env = os.environ.copy()
     if not env.get("TMP"):
@@ -58,19 +67,16 @@ def _build_subprocess_env() -> dict:
         env["TEMP"] = r"C:\Users\liuzhen\AppData\Local\Temp"
     if not env.get("TMPDIR"):
         env["TMPDIR"] = r"C:\Users\liuzhen\AppData\Local\Temp"
-    # ALWAYS force Windows-style PATH (即使 os.environ 已有, 也要 sanitize 掉 MSYS `/c/...` 格式)
-    win_path = r"C:\Windows\System32;C:\Windows;C:\msys64\ucrt64\bin;C:\msys64\usr\bin"
-    if env.get("PATH") and not env["PATH"].startswith("/") and not env["PATH"].startswith("/c"):
-        # 已 Windows-style, 补 ucrt64 进 head (gcc/cc1 在这里)
-        if r"C:\msys64\ucrt64\bin" not in env["PATH"]:
-            env["PATH"] = r"C:\msys64\ucrt64\bin;" + env["PATH"]
-    else:
-        # 空 / MSYS-style / 其他, 用 Windows fallback
-        env["PATH"] = win_path
     if not env.get("SystemRoot"):
         env["SystemRoot"] = r"C:\Windows"
     if not env.get("SystemDrive"):
         env["SystemDrive"] = "C:"
+    # W-026: unconditionally prepend Windows-style MSYS2 ucrt64 bin + System32.
+    # Append original PATH so anything not MSYS-specific (e.g. user tools,
+    # Python's own bin) still resolves.
+    win_path = r"C:\msys64\ucrt64\bin;C:\msys64\usr\bin;C:\Windows\System32;C:\Windows"
+    original = env.get("PATH", "")
+    env["PATH"] = win_path + (";" + original if original else "")
     return env
 
 

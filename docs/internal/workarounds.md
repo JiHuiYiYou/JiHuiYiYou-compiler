@@ -2152,4 +2152,36 @@ if (Test-Path $qbeLocal) {
 - workaround 实现: vendored 41 qbe files + `.github/workflows/release.yml` (Build qbe.exe step) + `installer/build.ps1` (qbe.exe resolution)
 - v1.5.5 ship commit (post vendoring)
 
+## W-026: regress.py `[:80]` stderr 截断隐藏真实 QBE/gcc 错误 + `_build_subprocess_env()` 条件分支不可靠
+
+**状态:** ACTIVE (2026-08-15, v1.5.5 release.yml debug)
+**日期:** 2026-08-15
+**触发面:** `.github/workflows/release.yml` Run regress step (53/53 FAIL on CI but 53/53 PASS locally)
+
+**症状:**
+GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step 53/53 FAIL, stderr 截断到 `[sema] P1 ndec` (80 字符)。Sanity check (`jhyy.exe compile arith.jhyy`) 同 step 跑出来 exit 0 + 完整 `[4] codegen done`。两边二进制 (jhyy.exe + jhyy_stage0.exe) 同样 fail。
+
+**根因嫌疑:**
+1. **`jhyy_regress.py:309` 的 `[:80]` 截断** — `print(f"FAIL ... {msg[:80]}")` 把真实错误消息截掉了。QBE / gcc 的 link 错误永远出现在 `[4] codegen done` 之后, 总 >80 字符, 截断后看不到。
+2. **`_build_subprocess_env()` 条件分支不可靠** — `if env["PATH"].startswith("/") or "/c"` 的检测不能覆盖所有空/混合格式。原逻辑只覆盖了 `startswith("/c")` 的 MSYS 路径和 Windows-style 路径; CI runner 上 `setup-msys2@v2` + `$GITHUB_PATH` 可能产生 `""` 空 PATH 或混合正反斜杠的怪格式 → 走 `else` 兜底时 win_path **本身是对的** (`C:\msys64\ucrt64\bin` 已经在 PATH) 但 jhyy.exe 内部 `system("cmd /c gcc ...")` 仍报 `'gcc' is not recognized`。
+3. 真实 CI 错误 (从 #31863594640 完整 stderr 拿到): `'gcc' is not recognized as an internal or external command / operable program or batch file. / gcc link failed`
+
+**workaround:**
+1. **去掉 `[:80]` 截断** — `jhyy_regress.py:309` 改成 `print(... {msg})`, 让 FAIL 输出完整 stderr。下次 dry-run 能直接看到 QBE/gcc 错误。
+2. **`_build_subprocess_env()` 无条件覆盖 PATH** — 改成总是 prepend Windows-style `C:\msys64\ucrt64\bin;C:\msys64\usr\bin;C:\Windows\System32;C:\Windows`, 然后 append 原 PATH (兜底用户工具)。去掉 startswith 条件分支。
+
+**影响范围:**
+- 仅 `mcp-jhyy/jhyy_regress.py` (_build_subprocess_env + run_all print)
+- 本地 53/53 PASS 不破 (改动只影响 PATH 构造, 不改 regress 算法)
+- CI 下次 dry-run 应该 53/53 PASS
+
+**失效条件 / 未来 fix:**
+- 如果 W-026 修完 CI 还 FAIL, 真根因可能是 (a) `setup-msys2@v2` 没装 `C:\msys64\ucrt64\bin` 而是别的路径, 或 (b) `cmd.exe` 不认 env 的 PATH (Windows AppExecutionAlias 拦截), 需进一步查
+- v2.x: PATH 处理逻辑应该重构成不依赖 MSYS2 路径硬编码 (用 `shutil.which('gcc')` 直接探, 找到就 setenv)
+
+**引用:**
+- 错误日志: GH Actions runs 31861809057, 31863594640 (Run regress step stderr)
+- workaround 实现: `mcp-jhyy/jhyy_regress.py` lines 44-79 (_build_subprocess_env), lines 309-316 (FAIL print)
+- v1.5.5 ship commit (post W-026 fix)
+
 
