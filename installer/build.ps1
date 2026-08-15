@@ -31,17 +31,36 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Helper: extract RC suffix from version string, leave $clean without suffix.
+# Examples: "1.5.5-rc1" -> $clean="1.5.5", suffix="-rc1"
+#           "1.5.5"     -> $clean="1.5.5", suffix=""
+#           "1.5.5-rc10" -> $clean="1.5.5", suffix="-rc10"
+#           "v1.5.5-rc1" -> $clean="1.5.5", suffix="-rc1" (caller strips 'v' first)
+function _split_rc_suffix($verIn, [ref]$suffixOut) {
+    if ($verIn -match '^(.+?)-([a-z]+\d+)$') {
+        $suffixOut.Value = "-" + $matches[2]
+        return $matches[1]
+    }
+    $suffixOut.Value = ""
+    return $verIn
+}
+
 # 1. version detection
 #   MSI package version MUST be major.minor.build.revision with each < 65536
 #   and only digits. git describe output (e.g. v1.0.0-107-g73dd3cb) is invalid
 #   for MSI — strip git suffix and use only major.minor.build.
+#   RC tag (e.g. v1.5.5-rc1) has -rcN suffix — extract separately so MSI version
+#   stays numeric ("1.5.5") while display name + filename keep "-rc1" suffix.
 #   Override via $env:JHY_VERSION = "1.5.2" for release builds.
+$JHY_VERSION_RC_SUFFIX = ""
 if (-not $env:JHY_VERSION) {
     try {
         $rawVer = (& git describe --tags --always 2>$null) -as [string]
         if ($rawVer) {
-            # Strip leading 'v' and git suffix: "v1.0.0-107-g73dd3cb" -> "1.0.0"
-            $clean = $rawVer -replace '^v', '' -replace '-.*$', ''
+            $clean = $rawVer -replace '^v', ''
+            $clean = _split_rc_suffix $clean ([ref]$JHY_VERSION_RC_SUFFIX)
+            # Strip git suffix: "1.5.5-107-g73dd3cb" -> "1.5.5"
+            $clean = $clean -replace '-.*$', ''
             $parts = $clean.Split('.')
             if ($parts.Length -ge 3) {
                 $env:JHY_VERSION = "$($parts[0]).$($parts[1]).$($parts[2])"
@@ -50,9 +69,23 @@ if (-not $env:JHY_VERSION) {
             }
         }
     } catch { }
+} else {
+    # Override path: $env:JHY_VERSION may already contain RC suffix
+    # (e.g. release.yml sets JHY_VERSION=1.5.5-rc1 from ${{ env.VERSION }}).
+    $verIn = $env:JHY_VERSION -replace '^v', ''
+    $verIn = _split_rc_suffix $verIn ([ref]$JHY_VERSION_RC_SUFFIX)
+    $parts = $verIn.Split('.')
+    if ($parts.Length -ge 3) {
+        $env:JHY_VERSION = "$($parts[0]).$($parts[1]).$($parts[2])"
+    } else {
+        $env:JHY_VERSION = $verIn
+    }
 }
 if (-not $env:JHY_VERSION) { $env:JHY_VERSION = "1.5.2" }
-Write-Host "[build.ps1] target=$Target version=$($env:JHY_VERSION)"
+# Display version includes RC suffix for filenames + display names.
+# MSI ProductVersion (passed via -d JHY_VERSION) must stay numeric (no "-rc1").
+$JHY_VERSION_DISPLAY = "$($env:JHY_VERSION)$JHY_VERSION_RC_SUFFIX"
+Write-Host "[build.ps1] target=$Target version=$($env:JHY_VERSION) display=$JHY_VERSION_DISPLAY rc_suffix=$JHY_VERSION_RC_SUFFIX"
 
 # 2. verify wix CLI
 $wixCmd = Get-Command wix -ErrorAction SilentlyContinue
@@ -114,8 +147,8 @@ switch ($Target) {
         #   but MSI bindpath should be a stable location so we re-point.
         $vscodeExtDir = "installer/build-artifacts/vscode-ext"
         if (-not (Test-Path $vscodeExtDir)) { New-Item -ItemType Directory -Path $vscodeExtDir -Force | Out-Null }
-        Copy-Item -Path "installer/build-artifacts/jhyy-lang-$($env:JHY_VERSION).vsix" `
-                  -Destination "$vscodeExtDir/jhyy-lang-$($env:JHY_VERSION).vsix" -Force
+        Copy-Item -Path "installer/build-artifacts/jhyy-lang-$JHY_VERSION_DISPLAY.vsix" `
+                  -Destination "$vscodeExtDir/jhyy-lang-$JHY_VERSION_DISPLAY.vsix" -Force
 
         # 3. build MSI via WiX 4/7
         #   bindpath bin/ -> jhyy.exe + qbe.exe + install-vsix.bat
@@ -132,12 +165,12 @@ switch ($Target) {
             -loc "installer/compiler/Locale.zh-CN.wxl" `
             -ext WixToolset.Util.wixext -ext WixToolset.UI.wixext `
             -d "JHY_VERSION=$($env:JHY_VERSION)" `
-            -o "installer/build-artifacts/jhyy-compiler-$($env:JHY_VERSION).msi"
+            -o "installer/build-artifacts/jhyy-compiler-$JHY_VERSION_DISPLAY.msi"
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[ERROR] compiler MSI build failed."
             exit 1
         }
-        Write-Host "[OK] installer/build-artifacts/jhyy-compiler-$($env:JHY_VERSION).msi built"
+        Write-Host "[OK] installer/build-artifacts/jhyy-compiler-$JHY_VERSION_DISPLAY.msi built"
         exit 0
     }
     "bundle" {
@@ -177,16 +210,16 @@ switch ($Target) {
             -loc "installer/Bundle.zh-CN.wxl" `
             -ext "$balDll" `
             -d "JHY_VERSION=$($env:JHY_VERSION)" `
-            -d "JHY_COMPILER_MSI_PATH=installer\build-artifacts\jhyy-compiler-$($env:JHY_VERSION).msi" `
+            -d "JHY_COMPILER_MSI_PATH=installer\build-artifacts\jhyy-compiler-$JHY_VERSION_DISPLAY.msi" `
             -d "JHY_THEME_XML_PATH=installer\Theme.xml" `
             -d "JHY_LICENSE_RTF_PATH=installer\common\license.rtf" `
             -d "JHY_LOGO_BMP_PATH=installer\banner.bmp" `
-            -o "installer/build-artifacts/jhyy-installer-$($env:JHY_VERSION).exe"
+            -o "installer/build-artifacts/jhyy-installer-$JHY_VERSION_DISPLAY.exe"
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[ERROR] bundle build failed."
             exit 1
         }
-        Write-Host "[OK] installer/build-artifacts/jhyy-installer-$($env:JHY_VERSION).exe built"
+        Write-Host "[OK] installer/build-artifacts/jhyy-installer-$JHY_VERSION_DISPLAY.exe built"
 
         # v1.5.5: also generate SHA256.txt for the 3 release artifacts
         # (Burn bundle + MSI + VSCode ext). Called from CI as a separate step
