@@ -168,29 +168,20 @@ jobs:
       - name: Run regress (gated — must PASS)
         shell: msys2 {0}
         run: |
-          # W-027 debug v4: probe bash/cmd resolution methods
-          echo "=== W-027 DEBUG v4: probe gcc location methods ==="
-          echo "[A] bash -c 'which gcc' (POSIX path):"
-          bash -c "which gcc" 2>&1 || echo "  FAIL"
+          # W-027 v4: env after _build_subprocess_env uses RUNNER_TEMP-driven MSYS2 root.
+          echo "RUNNER_TEMP=$RUNNER_TEMP"
           echo ""
-          echo "[B] bash -c 'cmd //c where gcc' (via bash, should return Win32):"
-          bash -c "cmd //c 'where gcc'" 2>&1 || echo "  FAIL"
-          echo ""
-          echo "[C] bash -c 'cygpath -w $(which gcc)' (POSIX → Win32):"
-          bash -c "cygpath -w \$(which gcc)" 2>&1 || echo "  FAIL"
-          echo ""
-          echo "[D] python3 -c 'import shutil; print(shutil.which(\"gcc\"))':"
-          python3 -c "import shutil; loc=shutil.which('gcc'); print(loc if loc else 'NOT FOUND')" 2>&1
-          echo ""
-          echo "[E] python3 -c 'subprocess.run([\"bash\", \"-c\", \"cygpath -w $(which gcc)\"])' :"
-          python3 -c "import subprocess; r = subprocess.run(['bash', '-c', 'cygpath -w \$(which gcc)'], capture_output=True, text=True); print('stdout:', repr(r.stdout)); print('stderr:', repr(r.stderr))" 2>&1
-          echo ""
-          echo "=== END DEBUG ==="
+          python3 <<'PYEOF'
+          import sys; sys.path.insert(0, 'mcp-jhyy')
+          import jhyy_regress
+          env = jhyy_regress._build_subprocess_env()
+          print('env PATH (first 500):')
+          print(env['PATH'][:500])
+          PYEOF
           echo ""
 
-          # regress.py _build_subprocess_env() (W-027) auto-detects gcc/qbe/python/make
-          # locations via shutil.which — works for both local (C:\msys64) and CI
-          # ($RUNNER_TEMP\msys64 = D:\a\_temp\msys64) layouts.
+          # regress.py _build_subprocess_env() (W-027 v4) deterministic MSYS2 root
+          # ($RUNNER_TEMP\msys64 on CI, C:\msys64 locally) — prepends known bin subdirs.
           # Sanity: compile one .jhyy directly to verify jhyy.exe works
           echo "=== Sanity: compile arith.jhyy directly ==="
           compiler/build/bin/jhyy.exe compile compiler/tests/examples/arith.jhyy -o /tmp/sanity_arith.exe 2>&1 | tail -20

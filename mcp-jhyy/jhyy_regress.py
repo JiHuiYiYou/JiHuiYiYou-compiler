@@ -49,24 +49,29 @@ def _build_subprocess_env() -> dict:
     W-026 (2026-08-15): CI GH Actions release.yml regress 53/53 FAIL, real
     error 'gcc is not recognized as an internal or external command'.
 
-    W-027 v3 (2026-08-15 same-day): setup-msys2@v2 把 MSYS2 装到
+    W-027 v4 (2026-08-15 same-day): setup-msys2@v2 把 MSYS2 装到
     `$RUNNER_TEMP\\msys64` (CI = `D:\\a\\_temp\\msys64`), 不在
-    `C:\\msys64`。 cmd.exe `where gcc` 解析到
-    `D:\\a\\_temp\\msys64\\ucrt64\\bin\\gcc.exe`, 但 hardcoded
-    `C:\\msys64\\ucrt64\\bin` 不对 → cmd.exe 找不到 gcc。
+    `C:\\msys64`。
 
     Root cause chain (3 failures found):
     v1 hardcode `C:\\msys64\\ucrt64\\bin`: wrong on CI
     v2 shutil.which: returns MSYS2 virtual path (`/ucrt64/bin/gcc`),
       only valid inside MSYS2; converting `/`→`\\` gives `\\ucrt64\\bin`,
       not a valid Win32 path
-    v3 cmd /c where via Python subprocess: on CI from MSYS2-launched
-      Python, the cmd.exe `where` invocation is unreliable (returns
-      interactive shell prompt or no result), so found_dirs is empty
+    v3 `cmd /c where` via Python subprocess: from MSYS2-launched Python,
+      subprocess returns interactive shell prompt (not gcc path) — unreliable
+    v3.5 `bash -c "cmd //c where gcc"` via Python subprocess: subprocess
+      encoding/decoding breaks on bash UTF-16 LE output, returns None,
+      and `cmd //c 'where gcc'` from subprocess.run gets eaten by MSYS2
+      quoting — only works from real bash, not from Python subprocess
 
-    Fix v3: use `bash -c "where gcc"` from Python subprocess. bash
-    (MSYS2) can correctly call cmd.exe `where` via `cmd //c where gcc`
-    and returns Win32 paths reliably. Filter to Win32-style paths only.
+    Fix v4: compute MSYS2 root deterministically.
+    - GitHub Actions `setup-msys2@v2` puts MSYS2 at `$RUNNER_TEMP\\msys64`
+      where `$RUNNER_TEMP` = `D:\\a\\_temp` on `windows-latest` runner.
+    - Local dev: `C:\\msys64` (or wherever user installed).
+    Read `os.environ['RUNNER_TEMP']` if set, fall back to `C:\\msys64`.
+    Then check known bin subdirs: ucrt64/bin, mingw64/bin, usr/bin, bin.
+    Each existing dir is added to found_dirs (in Win32 form).
     """
     env = os.environ.copy()
     if not env.get("TMP"):
@@ -79,32 +84,32 @@ def _build_subprocess_env() -> dict:
         env["SystemRoot"] = r"C:\Windows"
     if not env.get("SystemDrive"):
         env["SystemDrive"] = "C:"
-    # W-027 v3: Use bash to call `cmd //c where <tool>`. bash handles
-    # the cmd.exe quoting properly on MSYS2 + Windows, returning Win32 paths.
+    # W-027 v4: deterministic MSYS2 root + known bin subdirs.
     found_dirs = []
     import shutil
+    # Source (a): shutil.which — only accept Win32 paths
     for tool in ("gcc", "qbe", "python", "make"):
-        # Source (a): shutil.which — only accept Win32 paths
         loc = shutil.which(tool, path=env.get("PATH", ""))
         if loc and len(loc) >= 3 and loc[1] == ":" and "\\" in loc:
             d_win = os.path.dirname(loc)
             if d_win not in found_dirs:
                 found_dirs.append(d_win)
-        # Source (b): bash `cmd //c where <tool>` — reliable Win32 resolution
-        try:
-            r = subprocess.run(
-                ["bash", "-c", f"cmd //c 'where {tool}'"],
-                capture_output=True, text=True, timeout=10,
-                encoding="utf-8", errors="replace",
-            )
-            for line in (r.stdout or "").splitlines():
-                line = line.strip()
-                if line and len(line) >= 3 and line[1] == ":" and "\\" in line:
-                    d_win = os.path.dirname(line)
-                    if d_win and d_win not in found_dirs:
-                        found_dirs.append(d_win)
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            pass
+    # Source (b): known MSYS2 install roots (deterministic)
+    runner_temp = env.get("RUNNER_TEMP", "")
+    msys2_roots = []
+    if runner_temp:
+        # CI: $RUNNER_TEMP\msys64 — convert /c/foo to C:\foo or D:\a\_temp to D:\a\_temp
+        rt_win = runner_temp.replace("/", "\\")
+        if not rt_win.endswith("\\"):
+            rt_win += "\\"
+        msys2_roots.append(rt_win + "msys64")
+    msys2_roots.append(r"C:\msys64")  # local dev default
+    for root in msys2_roots:
+        # Known MSYS2 bin subdirs that contain gcc / qbe / make
+        for sub in ("ucrt64\\bin", "mingw64\\bin", "usr\\bin", "bin"):
+            candidate = root + "\\" + sub
+            if os.path.isdir(candidate) and candidate not in found_dirs:
+                found_dirs.append(candidate)
     # Prepend discovered Win32 dirs + System32. Append original PATH.
     win_dirs = ";".join(found_dirs) + ";" + r"C:\Windows\System32;C:\Windows"
     original = env.get("PATH", "")
