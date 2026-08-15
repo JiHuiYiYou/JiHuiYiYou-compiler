@@ -2,11 +2,22 @@
 
 Windows 引导式安装器 — 把 JHYY 编译器装到 `C:\Program Files\JHYY\`, 自动配 PATH, 用户零配置。
 
-## 当前状态 (v1.5.3)
+## 当前状态 (v1.5.4)
 
 ✅ **v1.5.2 done** — `compiler/jhyy-compiler.wxs` 写出, `build.ps1 compiler` 跑通, `jhyy-compiler-1.0.0.msi` (991KB) 生成, **`wix msi validate` 0 ICE errors** (ICE43/ICE57/ICE80 全过).
 
 ✅ **v1.5.3 done** — `Bundle.wxs` 写出, `build.ps1 bundle` 跑通, `jhyy-installer-1.5.3.exe` (1.6MB) 生成。Burn bundle 走 standard `WixStandardBootstrapperApplication` UI (next-next-finish, RTF license, MSYS2 prereq 提示在 Welcome page, post-install 提示在 Success page)。
+
+✅ **v1.5.4 done** — VSCode ext auto-install (`.vsix` + CustomAction `code --install-extension`), `.jhyy` file association (双击 → `jhyy run file.jhyy`), Start Menu 增强 (Documentation / Quick Start 走 Internet Shortcut `.url`)。`wix msi validate` 0 ICE errors。
+
+**v1.5.4 scope (已完成)**:
+- `installer/vscode-ext/package.ps1` — VSCode ext 打包 (vsce package + version patch)
+- `installer/common/install-vsix.bat` — 检测 `code` 命令 + 装 .vsix 脚本 (CustomAction deferred 调用)
+- `installer/common/JHYY Documentation.url` + `JHYY Quick Start.url` — Internet Shortcut files (MSI Shortcut.Target 不允许 URL, 用 .url 文件)
+- `installer/compiler/jhyy-compiler.wxs` 新增 ComponentGroups: `JHYYVSCodeExt` (.vsix payload), `JHYYFileAssoc` (HKCR\.jhyy ProgID + shell\open\command), `JHYYURLShortcuts` (.url files)
+- CustomAction `InstallVSCodeExt` (deferred, after InstallFiles, Return="ignore", ComSpec registry search)
+- `build.ps1 compiler` 自动 chain vsce package + 准备 vscode-ext/ bindpath
+- 关键 fix: WiX 4 ICE03 (`Invalid registry path` — leading backslash 不允许, `\.jhyy` 改 `.jhyy`); ICE03 (`Bad shortcut target` — URL 不允许, 改用 Internet Shortcut `.url` 文件); RegistryKey Id 需 `ForceCreateOnInstall="yes"` 才允许 attribute; RemoveRegistryValue 无 `Action` attribute
 
 **v1.5.3 scope (已完成)**:
 - `installer/Bundle.wxs` — Burn bundle, 链 `JHYYCompilerMsi` (v1.5.2 MSI)
@@ -25,20 +36,22 @@ Windows 引导式安装器 — 把 JHYY 编译器装到 `C:\Program Files\JHYY\`
 - **Bal extension DLL 通过绝对路径引** (workaround): `wix extension add -g WixToolset.Bal.wixext` 装的 DLL 文件名是 `WixToolset.BootstrapperApplications.wixext.dll` (不是 `WixToolset.Bal.wixext.dll`), wix CLI 7.0.0+b8977d6 的 `-ext WixToolset.Bal.wixext` 名字查找会 WIX0144 fail, workaround 是 -ext 传 DLL 绝对路径。详细见 `docs/internal/workarounds.md`
 
 **未完成** (后续 sprint):
-- v1.5.4: UI 装修 + VSCode ext 组件
-- v1.5.5: GH Actions release workflow + 第三方 manifest
+- v1.5.5: GH Actions release workflow + 第三方 manifest (winget / scoop / choco) + SHA256
 
-**v1.5.3 install verification status**:
-- ✅ `wix build` clean (no errors)
-- ✅ Burn bundle manifest 验证 (内嵌 MSI / theme.xml / thm.wxl / logo.png / license.rtf / wixstdba.exe payload 全部齐全, per `wix-burndata.xml` 检查)
+**v1.5.4 install verification status**:
+- ✅ `wix msi validate` clean (all standard ICEs pass)
+- ✅ Burn bundle manifest 验证 (内嵌 MSI / theme.xml / thm.wxl / logo.png / license.rtf / wixstdba.exe payload 全部齐全 + .vsix chain via MSI embedded payload)
 - ⚠️ **手动 install/uninstall 验证需要在交互式 desktop session 跑** (per-machine MSI 要求 UAC elevation, headless bash 里 `Start-Process -Verb RunAs` 不会触发 prompt). 验证步骤:
   ```powershell
   # 交互式 PowerShell (有 desktop 的话)
-  jhyy-installer-1.5.3.exe  # 双击也行, Burn 弹 welcome dialog
-  # 期望: Welcome dialog (含 MSYS2 prereq 提示) → Install → UAC prompt → accept
-  #       → Progress → Success (含 post-install 提示) → Close
-  where jhyy  # → C:\Program Files\JHYY\bin\jhyy.exe
-  jhyy --version  # → 1.5.3 (or current)
+  jhyy-installer-1.5.4.exe  # 双击也行, Burn 弹 welcome dialog
+  # 期望: Welcome → Install → UAC → Progress → Success → Close
+  # 期望 (post-install):
+  #   1. where jhyy  → C:\Program Files\JHYY\bin\jhyy.exe
+  #   2. jhyy --version  → 1.5.4
+  #   3. 双击 hello.jhyy  → jhyy.exe run (file association)
+  #   4. code --list-extensions  → 含 jhyy.jhyy-lang (VSCode ext 自动装, 若有 code)
+  #   5. Start Menu → JHYY → Documentation / Quick Start / Compiler
   # 卸载 (Settings → Apps 或 Burn /uninstall)
   ```
 
@@ -55,7 +68,10 @@ installer/
 ├── compiler/             ← v1.5.2 主 MSI (done)
 │   ├── jhyy-compiler.wxs ← Package / Feature / Component definitions
 │   └── Locale.zh-CN.wxl  ← 中文 UI string
-├── vscode-ext/           ← v1.5.4 待建 (VSCode extension component)
+├── vscode-ext/           ← v1.5.4 done (VSCode extension)
+│   ├── package.ps1       ← vsce package 脚本
+│   ├── jhyy-lang-X.Y.Z.vsix  ← build 产物 (gitignored)
+│   └── (build 完产物在 installer/build-artifacts/)
 ├── os/                   ← jhyy_OS placeholder (后续 OS sprint 填)
 │   ├── .gitkeep
 │   └── README.md
@@ -100,7 +116,8 @@ wix msi validate installer/build-artifacts/jhyy-compiler-1.0.0.msi
 ### 产物
 
 - `installer/_stub/stub.msi` (~28KB) — minimal stub, 不参与实际 installer
-- `installer/build-artifacts/jhyy-compiler-X.Y.Z.msi` (~991KB) — 主 MSI, 装 jhyy.exe + qbe.exe
+- `installer/build-artifacts/jhyy-compiler-X.Y.Z.msi` (~995KB) — 主 MSI, 装 jhyy.exe + qbe.exe + .vsix + file association + Start Menu
+- `installer/build-artifacts/jhyy-lang-X.Y.Z.vsix` (~4KB) — VSCode extension
 - `installer/build-artifacts/*.wixpdb` — WiX 调试符号 (gitignored)
 
 ## v1.5.3+ 计划

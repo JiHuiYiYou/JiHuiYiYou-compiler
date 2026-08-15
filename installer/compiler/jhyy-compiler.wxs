@@ -78,6 +78,7 @@
     <Directory Id="INSTALLDIR" Name="JHYY">
       <Directory Id="BinDir" Name="bin" FileSource="!(bindpath.bin)" />
       <Directory Id="CommonDir" Name="common" FileSource="!(bindpath.common)" />
+      <Directory Id="VSCodeExtDir" Name="vscode-ext" FileSource="!(bindpath.vscode-ext)" />
     </Directory>
 
     <Feature Id="JHYYCompilerFeature"
@@ -88,8 +89,11 @@
              TypicalDefault="install">
 
       <ComponentGroupRef Id="JHYYBinFiles" />
+      <ComponentGroupRef Id="JHYYURLShortcuts" />
       <ComponentGroupRef Id="JHYYPathRegistry" />
       <ComponentGroupRef Id="JHYYShortcuts" />
+      <ComponentGroupRef Id="JHYYVSCodeExt" />
+      <ComponentGroupRef Id="JHYYFileAssoc" />
       <ComponentRef Id="LicenseFile" />
 
     </Feature>
@@ -103,6 +107,38 @@
     <Icon Id="JHYYIcon" SourceFile="!(bindpath.bin)\jhyy.exe" />
     <Property Id="ARPPRODUCTICON" Value="JHYYIcon" />
     <Property Id="ARPHELPLINK" Value="https://github.com/JiHuiYiYou/JiHuiYiYou-compiler" />
+
+    <!--
+      VSCode extension auto-installer (v1.5.4).
+      CustomAction runs install-vsix.bat deferred (after InstallFiles).
+      `Return="ignore"` 让 install 失败不阻塞 MSI (per-machine install,
+      用户没装 VSCode 就 skip).
+
+      WiX 4 CustomAction syntax: 需要 Property (executable path) + ExeCommand (args).
+      用 ComSpec (cmd.exe) 作为 Property, /c 后跟 .bat 路径 + args.
+      Property 必须 <SetProperty> 在 execute sequence 提前 define (deferred CA
+      无 property context). InstallVSCodeExtCmdProperty 装 .bat + .vsix 路径.
+    -->
+    <Property Id="JHYY_COMSPEC">
+      <RegistrySearch Id="ComSpecSearch"
+                      Type="directory"
+                      Root="HKLM"
+                      Key="SOFTWARE\Microsoft\Command Processor"
+                      Name="CommandPath" />
+    </Property>
+    <SetProperty Id="InstallVSCodeExtCmd"
+                 Value="&quot;[JHYY_COMSPEC]&quot; /c &quot;[INSTALLDIR]bin\install-vsix.bat&quot; /VSIX=&quot;[VSCodeExtDir]jhyy-lang-$(var.JHY_VERSION).vsix&quot;"
+                 Before="InstallVSCodeExt"
+                 Sequence="execute" />
+    <CustomAction Id="InstallVSCodeExt"
+                  Property="InstallVSCodeExtCmd"
+                  ExeCommand="[InstallVSCodeExtCmd]"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="InstallVSCodeExt" After="InstallFiles" Condition="NOT Installed" />
+    </InstallExecuteSequence>
 
   </Package>
 
@@ -131,6 +167,35 @@
               Source="!(bindpath.bin)\qbe.exe"
               KeyPath="yes"
               Checksum="yes" />
+      </Component>
+
+      <!--
+        install-vsix.bat: VSCode extension auto-installer script.
+        Invoked by CustomAction InstallVSCodeExt (deferred, after InstallFiles).
+        Lives in INSTALLDIR\bin\ (next to jhyy.exe / qbe.exe) so cmd can find it.
+      -->
+      <Component Id="InstallVSIXBat" Bitness="always64" Guid="55555555-5555-5555-5555-555555555555">
+        <File Id="InstallVSIXBatFile"
+              Source="!(bindpath.common)\install-vsix.bat"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!--
+      Internet Shortcut (.url) files (v1.5.4) — used by Start Menu shortcuts
+      to open docs / quick-start URLs (MSI Shortcut.Target must be a file,
+      not URL). Lives in INSTALLDIR\common\ alongside license.rtf.
+    -->
+    <ComponentGroup Id="JHYYURLShortcuts" Directory="CommonDir">
+      <Component Id="JhyyDocsURL" Bitness="always64" Guid="AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA">
+        <File Id="JhyyDocsURLFile"
+              Source="!(bindpath.common)\JHYY Documentation.url"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="JhyyQuickStartURL" Bitness="always64" Guid="BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB">
+        <File Id="JhyyQuickStartURLFile"
+              Source="!(bindpath.common)\JHYY Quick Start.url"
+              KeyPath="yes" />
       </Component>
     </ComponentGroup>
   </Fragment>
@@ -175,6 +240,23 @@
             Source="!(bindpath.common)\license.rtf"
             KeyPath="yes" />
     </Component>
+
+    <!--
+      VSCodeExt ComponentGroup (v1.5.4): install .vsix to INSTALLDIR\vscode-ext\
+      so MSI owns the file + CustomAction InstallVSCodeExt can find it via
+      [VSCodeExtDir] property. CustomAction runs install-vsix.bat which calls
+      `code (with install-extension flag) <path>` (检测 PATH 里有 `code` 才行).
+
+      VSIX file name 跟 compiler version 同步 (jhyy-lang-X.Y.Z.vsix),
+      build.ps1 负责 copy 到 bindpath/vscode-ext/.
+    -->
+    <ComponentGroup Id="JHYYVSCodeExt" Directory="VSCodeExtDir">
+      <Component Id="VSCodeExtVSIX" Bitness="always64" Guid="66666666-6666-6666-6666-666666666666">
+        <File Id="VSCodeExtVSIXFile"
+              Source="!(bindpath.vscode-ext)\jhyy-lang-$(var.JHY_VERSION).vsix"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
   </Fragment>
 
   <Fragment>
@@ -204,6 +286,123 @@
                   Icon="JHYYIcon" />
         <RemoveRegistryKey Root="HKCU"
                            Key="Software\JiHuiYiYou\JHYY"
+                           Action="removeOnUninstall" />
+      </Component>
+
+      <!--
+        DocsShortcut: opens JHYY wiki in default browser (v1.5.4).
+        Target is Internet Shortcut (.url) file in INSTALLDIR\common\.
+        MSI Shortcut.Target must be a file path (URL not allowed per ICE03).
+      -->
+      <Component Id="JhyyDocsShortcut"
+                 Guid="88888888-8888-8888-8888-888888888888"
+                 Bitness="always64">
+        <RegistryKey Root="HKCU"
+                     Key="Software\JiHuiYiYou\JHYY">
+          <RegistryValue Type="string"
+                         Name="DocsShortcutInstalled"
+                         Value="1"
+                         KeyPath="yes" />
+        </RegistryKey>
+        <Shortcut Id="JhyyDocsStartMenuShortcut"
+                  Directory="ProgramMenuFolder"
+                  Name="JHYY Documentation"
+                  Target="[INSTALLDIR]common\JHYY Documentation.url" />
+        <RemoveRegistryValue Root="HKCU"
+                              Key="Software\JiHuiYiYou\JHYY"
+                              Name="DocsShortcutInstalled" />
+      </Component>
+
+      <!--
+        QuickStartShortcut: opens spec/quick-start in default browser (v1.5.4).
+        Target is Internet Shortcut (.url) file in INSTALLDIR\common\.
+      -->
+      <Component Id="JhyyQuickStartShortcut"
+                 Guid="99999999-9999-9999-9999-999999999999"
+                 Bitness="always64">
+        <RegistryKey Root="HKCU"
+                     Key="Software\JiHuiYiYou\JHYY">
+          <RegistryValue Type="string"
+                         Name="QuickStartShortcutInstalled"
+                         Value="1"
+                         KeyPath="yes" />
+        </RegistryKey>
+        <Shortcut Id="JhyyQuickStartStartMenuShortcut"
+                  Directory="ProgramMenuFolder"
+                  Name="JHYY Quick Start"
+                  Target="[INSTALLDIR]common\JHYY Quick Start.url" />
+        <RemoveRegistryValue Root="HKCU"
+                              Key="Software\JiHuiYiYou\JHYY"
+                              Name="QuickStartShortcutInstalled" />
+      </Component>
+    </ComponentGroup>
+
+    <!--
+      FileAssoc Component (v1.5.4): .jhyy file association via HKCR
+      (per-machine install → HKLM\SOFTWARE\Classes).
+      写 HKCR\JHYY.SourceFile ProgID + shell\open\command 让双击 .jhyy → jhyy.exe run.
+      KeyPath 用 HKLM registry value (per ICE43: file KeyPath + per-machine data OK).
+
+      Layout:
+        HKCR\.jhyy\             (default) = "JHYY.SourceFile"
+        HKCR\JHYY.SourceFile\   (default) = "JHYY Source File"
+                                  DefaultIcon\(default) = "[INSTALLDIR]bin\jhyy.exe,0"
+                                  shell\open\(default) = "Run with JHYY"
+                                  shell\open\command\(default) = '"[INSTALLDIR]bin\jhyy.exe" run "%1"'
+
+      Note: WiX HKCR 映射 — per-machine MSI 自动写 HKLM\SOFTWARE\Classes.
+      用户没有 admin 装 MSI 时, 这 Component 装不了 (HKLM 要 admin). Already MSI 是
+      Scope=perMachine + InstallerVersion=500 要求 admin.
+    -->
+    <ComponentGroup Id="JHYYFileAssoc" Directory="INSTALLDIR">
+      <Component Id="JHYYFileAssocReg"
+                 Bitness="always64"
+                 Guid="77777777-7777-7777-7777-777777777777">
+        <RegistryKey Id="HKCR_JhyyExt"
+                     Root="HKCR"
+                     Key=".jhyy"
+                     ForceCreateOnInstall="yes"
+                     ForceDeleteOnUninstall="yes">
+          <RegistryValue Type="string"
+                         Name="JHYYSourceFileMapping"
+                         Value="JHYY.SourceFile"
+                         KeyPath="yes" />
+        </RegistryKey>
+        <RegistryKey Id="HKCR_JhyyProgID"
+                     Root="HKCR"
+                     Key="JHYY.SourceFile"
+                     ForceCreateOnInstall="yes"
+                     ForceDeleteOnUninstall="yes">
+          <RegistryValue Type="string"
+                         Value="JHYY Source File" />
+          <RegistryKey Id="HKCR_JhyyDefaultIcon"
+                       Key="DefaultIcon"
+                       ForceCreateOnInstall="yes">
+            <RegistryValue Type="string"
+                           Value="[INSTALLDIR]bin\jhyy.exe,0" />
+          </RegistryKey>
+          <RegistryKey Id="HKCR_JhyyShell"
+                       Key="shell"
+                       ForceCreateOnInstall="yes">
+            <RegistryKey Id="HKCR_JhyyShellOpen"
+                         Key="open"
+                         ForceCreateOnInstall="yes">
+              <RegistryValue Type="string"
+                             Value="Run with JHYY" />
+              <RegistryKey Id="HKCR_JhyyShellOpenCommand"
+                           Key="command"
+                           ForceCreateOnInstall="yes">
+                <RegistryValue Type="string"
+                               Value="&quot;[INSTALLDIR]bin\jhyy.exe&quot; run &quot;%1&quot;" />
+              </RegistryKey>
+            </RegistryKey>
+          </RegistryKey>
+        </RegistryKey>
+        <RemoveRegistryKey Root="HKCR"
+                           Key="JHYY.SourceFile"
+                           Action="removeOnUninstall" />
+        <RemoveRegistryKey Root="HKCR"
+                           Key=".jhyy"
                            Action="removeOnUninstall" />
       </Component>
     </ComponentGroup>

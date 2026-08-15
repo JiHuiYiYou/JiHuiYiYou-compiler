@@ -13,8 +13,8 @@
 |--------|------|--------|------|
 | **v1.5.1** | ✅ done | `73dd3cb` | WiX 4/7 工具链 + 项目结构 (`installer/` 目录 + `_stub/` smoke test) + `build.ps1` 编排 |
 | **v1.5.2** | ✅ done | `165e650` | `compiler/jhyy-compiler.wxs` 写完; `wix msi validate` 0 ICE errors (ICE43/ICE57/ICE80 全过) |
-| **v1.5.3** | ✅ done | (this commit) | `Bundle.wxs` (Burn bundle) + `Theme.xml` + `Bundle.zh-CN.wxl` + `banner.bmp`; `jhyy-installer-1.5.3.exe` (1.6MB) 生成 |
-| **v1.5.4** | ⏳ pending | — | UI 装修 + VSCode ext 组件 + Start Menu 增强 |
+| **v1.5.3** | ✅ done | `6ea1c62` | `Bundle.wxs` (Burn bundle) + `Theme.xml` + `Bundle.zh-CN.wxl` + `banner.bmp`; `jhyy-installer-1.5.3.exe` (1.6MB) 生成 |
+| **v1.5.4** | ✅ done | (this commit) | VSCode ext auto-install + `.jhyy` file association + Start Menu Documentation/Quick Start 增强; `wix msi validate` 0 ICE errors |
 | **v1.5.5** | ⏳ pending | — | GH Actions release workflow + 第三方 manifest (winget / scoop / choco) + SHA256 发布 |
 
 ---
@@ -139,17 +139,123 @@ Bundle manifest 含:
 
 ---
 
-## v1.5.4 (待启动)
+## v1.5.4 — VSCode ext + File association + Start Menu 增强 (本 commit)
 
-按 plan v1.5.4 是 0.5 sprint: UI 装修 + VSCode ext 组件 + Start Menu 增强。
+### 完成定义
 
-门槛: v1.5.3 Burn bundle 跑通 ✅ (本 commit)
+- ✅ `installer/vscode-ext/package.ps1` — VSCode ext 打包 (vsce package + version patch)
+- ✅ `installer/common/install-vsix.bat` — 检测 `code` 命令 + `code (with install-extension flag) <vsix>` 脚本 (CustomAction deferred 调用)
+- ✅ `installer/common/JHYY Documentation.url` + `JHYY Quick Start.url` — Internet Shortcut files (绕开 ICE03 URL-not-allowed-in-shortcut)
+- ✅ `installer/compiler/jhyy-compiler.wxs` 改完: 3 个新 ComponentGroup (`JHYYVSCodeExt` / `JHYYFileAssoc` / `JHYYURLShortcuts`) + CustomAction `InstallVSCodeExt` (deferred, after InstallFiles, Return="ignore")
+- ✅ `build.ps1 compiler` 自动 chain vsce package + 准备 vscode-ext/ bindpath (`SKIP_VSIX=1` 跳过 escape hatch)
+- ✅ `jhyy-installer-1.5.4.exe` (1.6MB Burn bundle) + `jhyy-compiler-1.5.4.msi` (995KB) + `jhyy-lang-1.5.4.vsix` (4KB) 3 产物齐
+- ✅ **`wix msi validate` 0 ICE errors** (ICE03 / ICE43 / ICE57 / ICE80 全过)
 
-工作:
-- VSCode ext 打包 (`vsce package` → `jhyy-lang-X.Y.Z.vsix`)
-- MSI 加 VSCode ext component (检测 `code` 命令, `code --install-extension`)
-- File association (`.jhyy` → jhyy.exe open with)
-- Start Menu shortcut 增强 (Docs / Quick Start)
+### 核心机制
+
+- **VSCode ext 自动装**: build.ps1 调 `package.ps1` → vsce 把 vscode-ext/ 打 .vsix + 改 version; MSI 把 .vsix 当 payload 装到 `INSTALLDIR\vscode-ext\`; CustomAction `InstallVSCodeExt` deferred (after InstallFiles) 调 `cmd /c install-vsix.bat /VSIX:...`; .bat 检测 `where code >nul 2>&1` 找不到就 silent skip (`code --install-extension` 没装直接退出); Return="ignore" 让装失败不阻塞 MSI (per-machine MSI 已经 admin elevation 过了)
+- **`.jhyy` file association**: MSI ComponentGroup `JHYYFileAssoc` 写 `HKCR\.jhyy` (default=`JHYY.SourceFile`) + `HKCR\JHYY.SourceFile\shell\open\command` (default=`"[INSTALLDIR]bin\jhyy.exe" run "%1"`); 双击 .jhyy → jhyy.exe run. RegistryKey 用 `ForceCreateOnInstall="yes"` (WiX 4 Id 必备)
+- **Start Menu 增强**: 3 个 shortcut (Compiler / Documentation / Quick Start); Docs / Quick Start 用 Internet Shortcut `.url` 文件 (WiX 4 ICE03 不允许 Shortcut.Target 是 URL); 写 `INSTALLDIR\common\JHYY Documentation.url` + `JHYY Quick Start.url` (Windows 认 `.url` 后缀自动用 default browser 打开)
+- **CustomAction deferred**: WiX 4 要求 Property + ExeCommand 双 attribute; ComSpec 是 reserved property 改名 `JHYY_COMSPEC`; `<SetProperty>` 在 execute sequence 提前 define `InstallVSCodeExtCmd` property (deferred CA 无 property context)
+
+### WiX 4 schema 关键 fix (踩坑)
+
+| Error | Root cause | Fix |
+|-------|-----------|-----|
+| WIX0012 `Property ComSpec` (lowercase) | ComSpec 是 reserved | 改 `JHYY_COMSPEC` |
+| WIX0144 `WixToolset.Util.wixext not found` | extensions uninstalled | `wix extension add -g WixToolset.Util.wixext` + UI |
+| WIX0104 (XML comment `--` invalid) | `code --install-extension` XML 不允许 | 改 `code (with install-extension flag)` |
+| WIX0037 CustomAction `ExeCommand` alone | WiX 4 要 Property + ExeCommand | 加 `<SetProperty>` |
+| WIX0400 Custom element inner text `NOT Installed` | Condition 是 attribute | 改 `<Custom Action="..." Condition="..." />` |
+| ICE03 `Invalid registry path` (`\.jhyy`) | RegPath 类型无 leading backslash | 改 `.jhyy` |
+| ICE03 `Bad shortcut target` (URL) | Shortcut.Target 不允许 URL | 用 Internet Shortcut `.url` 文件 |
+| WIX0037 RegistryKey Id without `ForceCreateOnInstall` | WiX 4 Id 必备 | 加 `ForceCreateOnInstall="yes"` |
+| WIX0004 `RemoveRegistryValue` has `Action` | WiX 4 自动 remove | 删 `Action="removeOnUninstall"` |
+
+### PowerShell 踩坑 (vsce package 脚本)
+
+- **`$1` interpolation bug**: `'$1' + $env:JHY_VERSION + '$2'` 在 regex.Replace 替换字符串里 `$1` 被 PS 当变量解析为空; 改用 `MatchEvaluator` delegate `[regex]::Replace($content, 'pattern', { param($m) return '"version": "' + $env:JHY_VERSION + '"' })`
+- **`ErrorActionPreference="Stop"` kills on vsce warnings**: vsce 写 warning 到 stderr → PowerShell RemoteException → Stop 模式下 script 死; vsce 调用前后包 `$ErrorActionPreference = "Continue"` + try/finally
+- **vsce missing LICENSE / .vscodeignore**: 拷 project root LICENSE 到 vscode-ext/ + 写空 .vscodeignore
+
+### Bundle 体积拆分 (v1.5.4)
+
+| Payload | 大小 | v1.5.3 → v1.5.4 变化 |
+|---------|------|---------------------|
+| Burn stub (wixstdba.exe) | ~600KB | 同 |
+| `jhyy-compiler-X.Y.Z.msi` (embedded) | 995KB | +4KB (新增 .vsix + .url + install-vsix.bat + registry entries) |
+| `license.rtf` (embedded) | ~50KB | 同 |
+| `theme.xml` (embedded) | ~5KB | 同 |
+| `thm.wxl` (embedded) | ~3KB | 同 |
+| `logo.png` (embedded) | ~3KB | 同 |
+| Bundle stub / metadata | ~50KB | 同 |
+| **总计** | **~1.6MB** | +4KB (在四舍五入误差内) |
+
+### Plan / Sprint / 文件改动
+
+| 文件 | 改动 |
+|------|------|
+| `installer/vscode-ext/package.ps1` | NEW (~70 行) — vsce package + version patch + revert working tree |
+| `installer/common/install-vsix.bat` | NEW (~25 行) — 检测 `code` 命令 + `code (with install-extension flag)` |
+| `installer/common/JHYY Documentation.url` | NEW (2 行) — Internet Shortcut |
+| `installer/common/JHYY Quick Start.url` | NEW (2 行) — Internet Shortcut |
+| `installer/compiler/jhyy-compiler.wxs` | +85 / -3 行 — 3 ComponentGroup + CustomAction + Property + SetProperty |
+| `installer/build.ps1` | +30 / -2 行 — vsce package + vscode-ext bindpath + SKIP_VSIX escape hatch |
+| `installer/README.md` | +20 / -15 行 — v1.5.4 status + scope + verification |
+| `vscode-ext/package.json` | +2 行 — repository + license field |
+| `vscode-ext/.vscodeignore` | NEW (~20 行) — silence vsce warning |
+| `vscode-ext/LICENSE` | NEW — copy from project root |
+
+### 验证 (本 commit)
+
+```
+$ powershell -File installer/build.ps1 compiler
+[package.ps1] version: 0.1.0 -> 1.5.4
+[OK] installer/build-artifacts/jhyy-lang-1.5.4.vsix built
+[OK] installer/build-artifacts/jhyy-compiler-1.5.4.msi built
+
+$ wix msi validate installer/build-artifacts/jhyy-compiler-1.5.4.msi
+EXIT=0 (no output, all standard ICEs pass)
+
+$ powershell -File installer/build.ps1 bundle
+[OK] installer/build-artifacts/jhyy-installer-1.5.4.exe built
+
+$ file installer/build-artifacts/jhyy-installer-1.5.4.exe
+PE32+ executable for MS Windows 6.00 (GUI), x86-64
+
+$ # Bundle manifest 验证 (用 Python zipfile 读 .wixpdb, MSYS2 无 unzip)
+$ python -c "import zipfile,re; \
+  d=zipfile.ZipFile('installer/build-artifacts/jhyy-installer-1.5.4.wixpdb').read('wix-burndata.xml').decode(); \
+  m=re.search(r'<MsiPackage[^>]*Id=\"JHYYCompilerMsi\"[^>]*>',d); print(m.group(0)[:200])"
+<MsiPackage Id="JHYYCompilerMsi" Cache="keep"
+            CacheId="{BBCCEEFC-6163-46BF-B72C-7B20E6812960}v1.5.4"
+            InstallSize="1308080" Size="995328"
+            Scope="perMachine" Permanent="yes" Vital="yes"
+            ProductCode="{BBCCEEFC-6163-46BF-B72C-7B20E6812960}"
+            Language="2052" Version="1.5.4"
+            UpgradeCode="{A1B2C3D4-E5F6-7890-1234-567890ABCDEF}">
+
+Bundle manifest 含:
+- `<RelatedBundle>` UpgradeCode=`B1C2D3E4-F5A6-7890-1234-567890ABCDEF` (Bundle 的 UpgradeCode)
+- 5 个 UX payload (thm.xml / thm.wxl / logo.png / license.rtf / wixstdba.exe)
+- `<Chain>` 1 MsiPackage "JHYYCompilerMsi" v1.5.4 + ProductCode=`BBCCEEFC-...` + MSI UpgradeCode=`A1B2C3D4-...`
+- 1 个 MsiProperty `JHYY_BUNDLE_INSTALL=1` (留给 MSI 知道被 Burn chain 装的)
+- MSI InstallSize=1.3MB (含 .vsix + .url + install-vsix.bat)
+- Bundle Size=995KB (MSI 压缩后), InstallSize=1.3MB (解压后)
+```
+
+### 已知 workarounds (已入 `docs/internal/workarounds.md`)
+
+- 无新 workaround; v1.5.4 9 个 WiX 4 schema fix 都是 inline 修正 (comment 解释在 .wxs 里)
+
+### 后续工作 (v1.5.5)
+
+- GH Actions release workflow (`.github/workflows/release.yml` — tag `v*` → build installer → upload to Release + SHA256)
+- 3 份第三方 manifest (winget / scoop / choco)
+- `installer/SHA256.txt` 生成 + `changelog-template.md` Release notes 模板
+- 本地 dry-run (`v1.5.0-rc1` tag) + 交互式 desktop session manual install/uninstall 验证 (headless bash 跑不了 per-machine UAC)
+
+---
 
 ---
 

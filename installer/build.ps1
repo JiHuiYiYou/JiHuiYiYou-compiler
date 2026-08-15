@@ -78,15 +78,36 @@ switch ($Target) {
         exit 0
     }
     "compiler" {
-        Write-Host "[build.ps1] === compiler MSI build (v1.5.2) ==="
+        Write-Host "[build.ps1] === compiler MSI build (v1.5.4) ==="
         # 1. prepare bin/ payload (jhyy.exe + qbe.exe)
         $binDir = "installer/build-artifacts/bin"
         if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
         Copy-Item -Path "compiler/build/bin/jhyy.exe" -Destination "$binDir/jhyy.exe" -Force
         Copy-Item -Path "qbe/qbe.exe" -Destination "$binDir/qbe.exe" -Force
-        # 2. build MSI via WiX 4/7
-        #   bindpath bin/ -> jhyy.exe + qbe.exe
+
+        # 1b. v1.5.4: package VSCode extension (.vsix) for MSI payload
+        #   Skippable via SKIP_VSIX=1 (e.g. for quick MSI rebuild without vsix)
+        if (-not $env:SKIP_VSIX) {
+            Write-Host "[build.ps1] packaging VSCode extension (.vsix)..."
+            & powershell -NoProfile -ExecutionPolicy Bypass -File "installer/vscode-ext/package.ps1"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[ERROR] vsix packaging failed, aborting MSI build"
+                exit 1
+            }
+        }
+
+        # 2. prepare vscode-ext/ bindpath dir for MSI (holds .vsix)
+        #   Reuse build-artifacts dir: package.ps1 already copied vsix there,
+        #   but MSI bindpath should be a stable location so we re-point.
+        $vscodeExtDir = "installer/build-artifacts/vscode-ext"
+        if (-not (Test-Path $vscodeExtDir)) { New-Item -ItemType Directory -Path $vscodeExtDir -Force | Out-Null }
+        Copy-Item -Path "installer/build-artifacts/jhyy-lang-$($env:JHY_VERSION).vsix" `
+                  -Destination "$vscodeExtDir/jhyy-lang-$($env:JHY_VERSION).vsix" -Force
+
+        # 3. build MSI via WiX 4/7
+        #   bindpath bin/ -> jhyy.exe + qbe.exe + install-vsix.bat
         #   bindpath common/ -> license.rtf
+        #   bindpath vscode-ext/ -> jhyy-lang-X.Y.Z.vsix
         #   loc Locale.zh-CN.wxl for Chinese UI strings
         #   -ext WixUtilExtension for WixUI_Minimal dialog set
         & wix build `
@@ -94,6 +115,7 @@ switch ($Target) {
             -arch x64 `
             -b "bin=$binDir" `
             -b "common=installer/common" `
+            -b "vscode-ext=$vscodeExtDir" `
             -loc "installer/compiler/Locale.zh-CN.wxl" `
             -ext WixToolset.Util.wixext -ext WixToolset.UI.wixext `
             -d "JHY_VERSION=$($env:JHY_VERSION)" `

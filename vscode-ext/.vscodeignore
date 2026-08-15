@@ -1,0 +1,12 @@
+# vscode-ext/.vscodeignore : VSCode extension package ignore
+#
+# Only package necessary files. package.json + LICENSE + language config +
+# syntaxes + icon. Exclude everything else (test fixtures, dev scripts).
+**
+
+# but include:
+!package.json
+!LICENSE
+!language-configuration.json
+!icon.svg
+!syntaxes/**
