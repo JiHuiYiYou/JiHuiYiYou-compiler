@@ -49,15 +49,22 @@ def _build_subprocess_env() -> dict:
     W-026 (2026-08-15): CI GH Actions release.yml regress 53/53 FAIL, real
     error 'gcc is not recognized as an internal or external command'.
 
-    W-027 (2026-08-15 same-day follow-up): setup-msys2@v2 把 MSYS2 装到
+    W-027 (2026-08-15 same-day): setup-msys2@v2 把 MSYS2 装到
     `$RUNNER_TEMP\\msys64` (CI = `D:\\a\\_temp\\msys64`), 不在
     `C:\\msys64`。 cmd.exe `where gcc` 解析到
     `D:\\a\\_temp\\msys64\\ucrt64\\bin\\gcc.exe`, 但 hardcoded
     `C:\\msys64\\ucrt64\\bin` 不对 → cmd.exe 找不到 gcc。
 
-    Fix: 用 shutil.which 自动探 gcc / qbe / python / make 实际所在目录,
-    找到的话把那个目录 (转 Windows backslash) prepend 进 env['PATH']。
-    任何 layout (C:\\msys64 / D:\\a\\_temp\\msys64 / /usr/bin) 都能 cover。
+    W-027 v2 (2026-08-15 same-day): shutil.which 在 MSYS2 bash launched
+    Python 下返回 MSYS2 虚拟路径 (e.g. `/ucrt64/bin/gcc`), 这种路径只在
+    MSYS2 bash 里有效 — 拼进 env['PATH'] 后 Windows subprocess (cmd.exe)
+    找不到 (转换 `/`→`\\` 仍得 `\\ucrt64\\bin`, 不是合法 Windows path)。
+    真正能在 Windows subprocess 解析的路径必须用 `cmd //c where <tool>`
+    取 (返回 `D:\\a\\_temp\\msys64\\ucrt64\\bin\\gcc.exe`)。
+
+    Fix v2: 同时用 `cmd //c where <tool>` 找 Windows path (cmd.exe 在
+    Windows env 里 PATH 解析, 必然返回 Win32 路径), 跟 shutil.which 结果
+    union, 只 prepend Windows-style 路径到 env['PATH']。
     """
     env = os.environ.copy()
     if not env.get("TMP"):
@@ -70,18 +77,34 @@ def _build_subprocess_env() -> dict:
         env["SystemRoot"] = r"C:\Windows"
     if not env.get("SystemDrive"):
         env["SystemDrive"] = "C:"
-    # W-027: shutil.which respects env's PATH (incl MSYS-style) and resolves
-    # to real Windows path on win32.
+    # W-027 v2: collect Windows paths from two sources:
+    # (a) shutil.which — fast, but may return MSYS2 virtual paths
+    # (b) `cmd //c where` — slow but always returns real Win32 paths
     import shutil
     found_dirs = []
     for tool in ("gcc", "qbe", "python", "make"):
+        # Source (a): shutil.which — filter to Windows-style paths only
         loc = shutil.which(tool, path=env.get("PATH", ""))
-        if loc:
-            d_win = os.path.dirname(loc).replace("/", "\\")
-            if d_win and d_win not in found_dirs:
+        if loc and (len(loc) >= 2 and loc[1] == ":") and "\\" in loc:
+            d_win = os.path.dirname(loc)
+            if d_win not in found_dirs:
                 found_dirs.append(d_win)
-    # Prepend discovered dirs + System32. Append original PATH (best-effort
-    # fallback for user-installed tools not on the discovered paths).
+        # Source (b): cmd.exe `where` — always returns Win32 paths
+        try:
+            r = subprocess.run(
+                ["cmd", "/c", "where", tool],
+                capture_output=True, text=True, timeout=5,
+                encoding="utf-8", errors="replace",
+            )
+            for line in (r.stdout or "").splitlines():
+                line = line.strip()
+                if line and len(line) >= 3 and line[1] == ":" and "\\" in line:
+                    d_win = os.path.dirname(line)
+                    if d_win and d_win not in found_dirs:
+                        found_dirs.append(d_win)
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+    # Prepend discovered Win32 dirs + System32. Append original PATH.
     win_dirs = ";".join(found_dirs) + ";" + r"C:\Windows\System32;C:\Windows"
     original = env.get("PATH", "")
     env["PATH"] = win_dirs + (";" + original if original else "")
