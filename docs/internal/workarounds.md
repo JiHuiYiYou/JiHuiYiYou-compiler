@@ -2264,5 +2264,20 @@ return (actual_cmp == expected_cmp, expected, actual, output)
 - GH Actions dry-run #31867221428 (W-028 trace 确认 `sys.platform=cygwin`; 47/53 持平待 v2 commit)
 - 6 affected tests: arith, big_array, big_test, fib30, fib_renamed, nested_if
 - commit `6d2ab8f` (W-028 v1 — `sys.platform == "win32"` 不完整)
+- commit `03f58c6` (W-028 v2 — `sys.platform in ("win32", "cygwin", "msys")`; 53/53 PASS in CI)
+- GH Actions dispatch #31876684128 (v1.5.5 RC 1st attempt — vsix filename mismatch; 53/53 PASS regress + Build installer FAIL)
+- GH Actions dispatch #31877022451 (v1.5.5 RC 2nd attempt — WIX0103 .wxs Source path; regress + Build FAIL)
+- GH Actions dispatch #31877336261 (v1.5.5 RC 3rd attempt — SUCCESS; 53/53 regress + Burn+MSI+.vsix build + SHA256 verify + MSI validate + release publish; v1.5.5-rc1 release created with 4 assets)
+
+**后续 fixes (installer pipeline, post-W-028):**
+- commit `425fd77` (release.yml 安装 vsce — VSCode ext packaging CI 依赖)
+- commit `9ed97c9` (installer/build.ps1 RC tag version strip + display suffix)
+- commit `72c6555` (installer/build.ps1 sub-script 传 JHY_VERSION+RC suffix)
+- commit `99d75c2` (vsix filename 用 JHY_VERSION_DISPLAY + vsce package 后 rename)
+- commit `16dcaad` (jhyy-compiler.wxs vsix 引用改用 JHY_VERSION_DISPLAY)
+- commit `143c644` (release.yml Create GitHub Release dry_run gate boolean fix — `inputs.dry_run != 'true'` 类型不匹配, 改用 `${{ !inputs.dry_run }}`)
+
+**release.yml dry_run gate bug 发现:**
+dry_run=true 仍 publish release — `if: inputs.dry_run != 'true' || github.event_name == 'push'` 因 boolean vs string 比较类型不匹配, 永远 != → step 永远 run. v1.5.5-rc1 release 在 dry_run=true 下被 publish (但内容正确, prerelease + 4 assets); 修法见 commit `143c644`.
 
 
