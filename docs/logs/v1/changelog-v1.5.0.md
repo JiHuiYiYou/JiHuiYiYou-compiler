@@ -369,6 +369,17 @@ gh workflow run release.yml -f version=1.5.5-rc1 -f dry_run=true
 - **W-022 (新增) Add-Content vs Out-File -Encoding utf8 for $GITHUB_ENV**: Windows PowerShell 5.1 `Out-File -Encoding utf8` 加 UTF-8 BOM, GH parser 解析 $GITHUB_ENV fail; workaround `Add-Content` (BOM-safe)
 - **W-023 (新增) MSYS2 bash `${VAR}` 不展开 `${{ env.X }}`**: GH 表达式仅 yaml 解析时替换; bash step 要 `echo $VAR` 拿 export 过的 env var, 不 `${VAR}` 占位符
 - **W-024 (新增) `Out-File -Encoding utf8` BOM in PowerShell**: 影响所有写 UTF-8 文本场景 (changelog-template.md, gen-sha256.txt, release-notes.md), 改 `[System.IO.File]::WriteAllLines(..., $utf8NoBom)` 或 `Set-Content -NoNewline`
+- **W-025 (新增) qbe/ gitlink 无 .gitmodules — release.yml `submodules: recursive` 失败 + installer/build.ps1 hardcoded `qbe/qbe.exe`**: qbe/ 在 v1.5.5 之前是 dangling gitlink (无 .gitmodules), checkout 拿不到 qbe.exe source; fix vendoring qbe/ 到 repo (`cd qbe && make`), release.yml 删 `submodules: recursive`; regress 跟 local build 都 verify vendored copy 完整 (sha256sum 比对 qbe.exe binary). (commit `9ed97c9` 周边的 W-025 follow-up, 2026-08-15 same-day)
+- **W-026 (新增) regress.py `[:80]` stderr 截断隐藏真实 QBE/gcc 错误**: CI FAIL 只 print `[:80]` 截断后 stderr, link error 看不见; fix 改成完整 stderr 输出, 加 CI-friendly 标记. (commit `0d58efe`, 2026-08-15)
+- **W-027 (新增) `setup-msys2@v2` 把 MSYS2 装在 `$RUNNER_TEMP\msys64` (CI = `D:\a\_temp\msys64`), 不在 `C:\msys64`**: 硬编码 `C:\msys64\ucrt64\bin` 找不到 gcc; v1-v7 (7 iters) 各种探测方法全 FAIL, v8 final 改用 deterministic `$RUNNER_TEMP` (CI) / `C:\msys64` (local) + known bin subdirs `ucrt64/bin` + `usr/bin`, no subprocess call. (commit `4623a3b` v8 final)
+- **W-028 (新增) Windows process exit code 是 8-bit (mod 256), EXPECT 注释里的值 > 255 在 CI regress FAIL**: `kernel32!ExitProcess` exit code 只取低 8 bit (`exit code & 0xFF`), EXPECT 注释里的 `1000042` 等大值在 CI 显示成 `got=106` 不是 `got=1000042`; v1 (commit `6d2ab8f`) 加 `if sys.platform == "win32"` 改 mod 256 comparison, 但 MSYS2-launched Python `sys.platform == "cygwin"`, v1 不触发; v2 (commit `03f58c6`) 扩展为 `sys.platform in ("win32", "cygwin", "msys")`, CI 53/53 PASS.
+
+### Ship 验证 (v1.5.5 stable, 2026-08-15)
+
+- ✅ GH Actions dispatch #31877795241 (push tag v1.5.5) — 全 14 step green: regress 53/53 PASS, Burn bundle + MSI + .vsix build, SHA256 verify, MSI validate (0 ICE), release publish
+- ✅ GitHub Release [v1.5.5](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v1.5.5) created — Latest, 4 assets (jhyy-installer-1.5.5.exe 1.6MB / jhyy-compiler-1.5.5.msi 962KB / jhyy-lang-1.5.5.vsix 4KB / SHA256.txt)
+- ✅ RC release [v1.5.5-rc1](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v1.5.5-rc1) 保留 — Pre-release, 4 assets with -rc1 suffix
+- ✅ 6 installer pipeline fixes 串联: W-028 v2 (regress cygwin) + vsce install (release.yml) + RC version strip (build.ps1) + sub-script RC suffix + vsix DISPLAY version + .wxs DISPLAY references + dry_run gate boolean fix
 
 ### 后续工作 (v1.5.0 umbrella ship)
 
