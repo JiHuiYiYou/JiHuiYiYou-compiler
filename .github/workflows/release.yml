@@ -127,6 +127,16 @@ jobs:
           wix extension add -g WixToolset.UI.wixext
           wix extension add -g WixToolset.Bal.wixext
 
+      - name: Install vsce (VSCode Extension CLI)
+        shell: pwsh
+        run: |
+          # vsce is used by installer/build.ps1 to package the VSCode
+          # extension as a .vsix for the installer bundle. Required for
+          # v1.5.4+ release workflow (prior runs locally had vsce, but
+          # CI runner doesn't include it by default).
+          npm install -g @vscode/vsce
+          vsce --version
+
       - name: Build qbe.exe (vendored source under qbe/)
         shell: msys2 {0}
         run: |
