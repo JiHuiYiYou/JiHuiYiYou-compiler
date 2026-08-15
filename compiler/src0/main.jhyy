@@ -68,6 +68,10 @@ extern fn jh_path_qbe() -> *u8;
 extern fn jh_path_gcc() -> *u8;
 extern fn jh_path_runtime() -> *u8;
 extern fn jh_path_helpers() -> *u8;
+// v1.5.6: A 派 Driver 探测 — link_with_gcc 改用 jh_gcc_invoke (resolved gcc 路径
+// + 引号包裹, 替代裸 system("gcc ...") 拼 cmd_buf). 4 层优先级: JHY_GCC env →
+// env.txt → MSYS2 magic → SearchPathA → fallback "gcc".
+extern fn jh_gcc_invoke(out_buf: *u8, out_size: i32, args: *u8) -> i32;
 
 fn QBE_PATH() -> *u8 { return jh_path_qbe(); }
 fn GCC_PATH() -> *u8 { return jh_path_gcc(); }
@@ -664,14 +668,14 @@ fn run_qbe(il_path: *u8, asm_path: *u8) -> i32 {
     return 0 as i32;
 }
 
-// link_with_gcc: gcc ASM_PATH RUNTIME_C HELPERS_C -o EXE_PATH -lm
+// link_with_gcc: jh_gcc_invoke(ASM_PATH RUNTIME_C HELPERS_C -o EXE_PATH -lm)
+//   v1.5.6: 替代裸 system("gcc ...") 拼 cmd_buf. jh_gcc_invoke 内部调
+//   jh_gcc_path() 拿 resolved gcc 路径 + 引号包裹, 写 cmd_buf 头部;
+//   cmd_buf 后续段 (args + -o EXE -lm) 由 caller 拼. 全 cmd 仍传 system().
 fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     let cmd_buf = malloc(16384 as i64);
     let mut pos: i64 = 0 as i64;
-    let gcc = GCC_PATH();
-    pos = str_concat_at(cmd_buf, pos, gcc);
     let sp = " " as *u8;
-    pos = str_concat_at(cmd_buf, pos, sp);
     pos = str_concat_at(cmd_buf, pos, asm_path);
     pos = str_concat_at(cmd_buf, pos, sp);
     pos = str_concat_at(cmd_buf, pos, RUNTIME_C());
@@ -686,7 +690,14 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     store_byte_i32(nul_p, 0 as i32);
 
     path_to_win(exe_path);
-    let r = system(cmd_buf);
+    // v1.5.6: jh_gcc_invoke 把 "RESOLVED_GCC_PATH" + space + cmd_buf 写到 invoke_buf;
+    // gcc 路径有空格 (e.g. "C:\Program Files\...") 也安全.
+    let invoke_buf = malloc(16384 as i64);
+    let args_start = cmd_buf;
+    let _wrote = jh_gcc_invoke(invoke_buf, 16384 as i32, args_start);
+    path_to_win(exe_path);
+    let r = system(invoke_buf);
+    free(invoke_buf);
     free(cmd_buf);
     if r != (0 as i32) {
         jh_fputs_stderr("gcc link failed\n" as *u8);

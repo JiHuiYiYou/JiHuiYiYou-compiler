@@ -3,6 +3,7 @@ compiler/build/*
 compiler/build/bin/*
 !compiler/build/bin/.gitkeep
 !compiler/build/bin/regress.py
+!compiler/build/bin/jhyy.exe.sha256
 _*.txt
 !compiler/src0/_W002_rename_map.txt
 _*.py
