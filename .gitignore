@@ -70,3 +70,15 @@ tmp/
 *~
 .DS_Store
 Thumbs.db
+
+# installer build artifacts (per memory feedback_no_build_artifacts_in_git)
+# v1.5 installer 产物 (.msi / .exe / .vsix) 是 WiX build 输出, 不能 commit
+# installer/ 目录本身 + .wxs / .cmd / .md / .rtf / .bmp / .gitkeep 全部 tracked
+installer/*.msi
+installer/*.exe
+installer/*.vsix
+installer/**/*.msi
+installer/**/*.exe
+installer/**/*.vsix
+installer/**/*.wixpdb
+installer/**/*.wixlib
