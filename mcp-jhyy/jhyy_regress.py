@@ -49,22 +49,24 @@ def _build_subprocess_env() -> dict:
     W-026 (2026-08-15): CI GH Actions release.yml regress 53/53 FAIL, real
     error 'gcc is not recognized as an internal or external command'.
 
-    W-027 (2026-08-15 same-day): setup-msys2@v2 把 MSYS2 装到
+    W-027 v3 (2026-08-15 same-day): setup-msys2@v2 把 MSYS2 装到
     `$RUNNER_TEMP\\msys64` (CI = `D:\\a\\_temp\\msys64`), 不在
     `C:\\msys64`。 cmd.exe `where gcc` 解析到
     `D:\\a\\_temp\\msys64\\ucrt64\\bin\\gcc.exe`, 但 hardcoded
     `C:\\msys64\\ucrt64\\bin` 不对 → cmd.exe 找不到 gcc。
 
-    W-027 v2 (2026-08-15 same-day): shutil.which 在 MSYS2 bash launched
-    Python 下返回 MSYS2 虚拟路径 (e.g. `/ucrt64/bin/gcc`), 这种路径只在
-    MSYS2 bash 里有效 — 拼进 env['PATH'] 后 Windows subprocess (cmd.exe)
-    找不到 (转换 `/`→`\\` 仍得 `\\ucrt64\\bin`, 不是合法 Windows path)。
-    真正能在 Windows subprocess 解析的路径必须用 `cmd //c where <tool>`
-    取 (返回 `D:\\a\\_temp\\msys64\\ucrt64\\bin\\gcc.exe`)。
+    Root cause chain (3 failures found):
+    v1 hardcode `C:\\msys64\\ucrt64\\bin`: wrong on CI
+    v2 shutil.which: returns MSYS2 virtual path (`/ucrt64/bin/gcc`),
+      only valid inside MSYS2; converting `/`→`\\` gives `\\ucrt64\\bin`,
+      not a valid Win32 path
+    v3 cmd /c where via Python subprocess: on CI from MSYS2-launched
+      Python, the cmd.exe `where` invocation is unreliable (returns
+      interactive shell prompt or no result), so found_dirs is empty
 
-    Fix v2: 同时用 `cmd //c where <tool>` 找 Windows path (cmd.exe 在
-    Windows env 里 PATH 解析, 必然返回 Win32 路径), 跟 shutil.which 结果
-    union, 只 prepend Windows-style 路径到 env['PATH']。
+    Fix v3: use `bash -c "where gcc"` from Python subprocess. bash
+    (MSYS2) can correctly call cmd.exe `where` via `cmd //c where gcc`
+    and returns Win32 paths reliably. Filter to Win32-style paths only.
     """
     env = os.environ.copy()
     if not env.get("TMP"):
@@ -77,23 +79,22 @@ def _build_subprocess_env() -> dict:
         env["SystemRoot"] = r"C:\Windows"
     if not env.get("SystemDrive"):
         env["SystemDrive"] = "C:"
-    # W-027 v2: collect Windows paths from two sources:
-    # (a) shutil.which — fast, but may return MSYS2 virtual paths
-    # (b) `cmd //c where` — slow but always returns real Win32 paths
-    import shutil
+    # W-027 v3: Use bash to call `cmd //c where <tool>`. bash handles
+    # the cmd.exe quoting properly on MSYS2 + Windows, returning Win32 paths.
     found_dirs = []
+    import shutil
     for tool in ("gcc", "qbe", "python", "make"):
-        # Source (a): shutil.which — filter to Windows-style paths only
+        # Source (a): shutil.which — only accept Win32 paths
         loc = shutil.which(tool, path=env.get("PATH", ""))
-        if loc and (len(loc) >= 2 and loc[1] == ":") and "\\" in loc:
+        if loc and len(loc) >= 3 and loc[1] == ":" and "\\" in loc:
             d_win = os.path.dirname(loc)
             if d_win not in found_dirs:
                 found_dirs.append(d_win)
-        # Source (b): cmd.exe `where` — always returns Win32 paths
+        # Source (b): bash `cmd //c where <tool>` — reliable Win32 resolution
         try:
             r = subprocess.run(
-                ["cmd", "/c", "where", tool],
-                capture_output=True, text=True, timeout=5,
+                ["bash", "-c", f"cmd //c 'where {tool}'"],
+                capture_output=True, text=True, timeout=10,
                 encoding="utf-8", errors="replace",
             )
             for line in (r.stdout or "").splitlines():
