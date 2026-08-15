@@ -1,0 +1,18 @@
+# winget version manifest - JHYY 1.5.5
+#
+# winget multi-file manifest v1.5.0 schema (https://github.com/microsoft/winget-cli)
+# Package: JiHuiYiYou.JHYY
+# Version: 1.5.5
+#
+# Sprint v1.5.5 — reference manifest, not yet published to winget-pkgs.
+# Per plan decision-11: actual publish deferred to v2.x.
+
+PackageIdentifier: JiHuiYiYou.JHYY
+PackageVersion: 1.5.5
+PackageLocale: en-US
+PackageName: JHYY Compiler
+Publisher: JiHuiYiYou
+License: MIT
+ShortDescription: JHYY (机会翼游) — statically-typed language + bootstrapping compiler for Windows
+ManifestType: version
+ManifestVersion: 1.5.0

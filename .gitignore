@@ -82,3 +82,6 @@ installer/**/*.exe
 installer/**/*.vsix
 installer/**/*.wixpdb
 installer/**/*.wixlib
+# v1.5.5: SHA256.txt (build.ps1 bundle 自动生成, 跟 .msi/.exe 同 lifecycle)
+installer/SHA256.txt
+installer/**/SHA256.txt

@@ -1887,4 +1887,159 @@ if (-not (Test-Path $balDll)) {
 - workaround 实现: `installer/build.ps1:131-136`
 - v1.5.3 ship commit (this commit)
 
+---
+
+## W-022: Windows PowerShell 5.1 `Out-File -Encoding utf8` 加 UTF-8 BOM 污染 `$GITHUB_ENV`
+
+**状态:** ACTIVE (PowerShell 5.1 在 windows-latest runner 是 default; GH Actions 升级 PS7 之前持续)
+
+**触发场景:**
+在 `.github/workflows/release.yml` 的 pwsh step 里写 env 到 `$GITHUB_ENV`:
+```powershell
+"VERSION=1.5.5" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+"IS_RC=0"      | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+```
+
+**症状:**
+后续 step 看不到 `VERSION` / `IS_RC` 环境变量。`${{ env.VERSION }}` 在 yaml 表达式里空字符串。`$env:VERSION` 在 pwsh 里 `$null`。
+
+**根因:**
+Windows PowerShell 5.1 (windows-latest runner 默认) 的 `Out-File -Encoding utf8` 实际输出是 **UTF-8 with BOM** (`EF BB BF` 三个字节开头)。GitHub Actions 解析 `$GITHUB_ENV` 文件时按 plain text 读,看到 BOM 当成普通字符,导致第一行变成 `﻿VERSION=1.5.5`,env var 名变成 `﻿VERSION`,后续 step `${{ env.﻿VERSION }}` 拿不到值 (因为 yaml 表达式不接受 BOM 前缀)。
+
+PowerShell 7+ 的 `Out-File -Encoding utf8` 是 UTF-8 no BOM (没有这个 bug),但 GH Actions Windows runner 默认 PS5.1。
+
+**workaround:**
+```powershell
+"VERSION=$($env:VERSION)" | Add-Content -Path $env:GITHUB_ENV
+```
+`Add-Content` 默认走 `[System.IO.File]::AppendAllText`,在 PS5.1 下用 UTF-8 **without BOM** 写,跟 `$GITHUB_ENV` 期望的 plain text 一致。
+
+或者用 `Set-Content -Encoding utf8` (PS5.1 也加 BOM,不推荐)。
+
+**影响范围:**
+- 只影响 PowerShell step 写 `$GITHUB_ENV` / `$GITHUB_OUTPUT` / `$GITHUB_PATH` 的场景
+- 不影响 bash step (bash 的 `echo "X=Y" >> $GITHUB_ENV` 是 plain text,无 BOM 问题)
+
+**失效条件:**
+1. GH Actions windows-latest runner 升级到 PowerShell 7+ 默认 shell
+2. GH parser 升级支持 BOM 前缀
+
+**引用:**
+- repro: 写 `"X=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append`, 看 `${{ env.X }}` 在下一步 yaml 表达式里空
+- workaround 实现: `.github/workflows/release.yml` Compute VERSION step
+- v1.5.5 ship commit
+
+---
+
+## W-023: MSYS2 bash step 里 `${VAR}` 不展开 `${{ env.X }}` GH 表达式
+
+**状态:** ACTIVE (yaml 表达式 + bash sub-shell 语义鸿沟, GH Actions 设计就这样)
+
+**触发场景:**
+`.github/workflows/release.yml` 的 msys2 bash step:
+```yaml
+- name: Set env
+  shell: msys2 {0}
+  run: |
+    echo "MSYS2_PATH=/c/msys64/usr/bin:$PATH" >> $GITHUB_ENV
+    echo "VERSION=${VERSION} IS_RC=${IS_RC}"   # ❌ 空字符串
+```
+
+**症状:**
+`echo` 输出 `VERSION= IS_RC=`,后续 step 拿到空 `VERSION`。
+
+**根因:**
+`${{ env.VERSION }}` 是 GitHub Actions 的 **yaml 表达式**,仅在 yaml 解析阶段被 GH 替换成实际值,然后 yaml 解析后的字符串塞进 bash sub-shell 的 stdin。bash 看到的字符串是 `"echo \"VERSION=1.5.5 IS_RC=0\""`(假设 `VERSION=1.5.5`),但 `${VERSION}` 是 bash 的语法, 跟 yaml 表达式是两回事 — yaml 表达式替换后**不**写回 env 上下文,bash 自己读 `$VERSION` (空) 写 `${VERSION}` (空,作废语法)。
+
+实际正确写法:
+```yaml
+- name: Set env
+  shell: msys2 {0}
+  run: |
+    echo "MSYS2_PATH=/c/msys64/usr/bin:$PATH" >> $GITHUB_ENV
+    echo "VERSION=$VERSION IS_RC=$IS_RC"      # ✓ 读已经 export 到 env 的 $VERSION
+```
+
+需要先在某个 step 把 VERSION 写到 `$GITHUB_ENV` (per W-022 用 `Add-Content`), 然后下一个 bash step 拿 `$VERSION`。
+
+**影响范围:**
+- 仅 msys2 bash step + yaml 表达式 (其他 step 类型用 `${{ env.X }}` 直接 yaml 替换,不涉及 bash 变量展开)
+- pwsh step 用 `$env:VERSION` 读,语法不冲突
+
+**失效条件:**
+- N/A (设计如此,workaround 是规范用法)
+
+**引用:**
+- repro: 写 `echo "X=${VAR}"` 在 bash step, 看 `${VAR}` 输出空 (假设 VAR 已经在 $GITHUB_ENV export 过)
+- workaround 实现: `.github/workflows/release.yml` Set bash as default shell step (v1.5.5 起,本 commit)
+- v1.5.5 ship commit
+
+---
+
+## W-024: PowerShell 5.1 `Set-Content` / `Out-File` 写 UTF-8 文本默认加 BOM + CRLF
+
+**状态:** ACTIVE (PS5.1 default 在 windows-latest runner)
+
+**触发场景:**
+PowerShell 写 UTF-8 文本文件 (用于上传到 GitHub Release 或下游工具消费):
+```powershell
+$notes = Get-Content installer/changelog-template.md -Raw
+# ... replace 占位符 ...
+Set-Content -Path release-notes.md -Value $notes -NoNewline  # ❌ 加 BOM + CRLF
+"jhyy-installer  $hash" | Out-File -Encoding utf8 -Append     # ❌ 加 BOM + CRLF
+[IO.File]::WriteAllLines('sha256.txt', $lines, $utf8NoBom)   # ❌ CRLF only (BOM OK)
+```
+
+**症状:**
+- 文件前 3 字节 `EF BB BF` (BOM)
+- 行尾是 `\r\n` (CRLF), 不是 `\n` (LF)
+- `sha256sum -c SHA256.txt` 在某些 Linux 平台 (scoop autoupdate 用 Linux container) 不识别:
+  - 带 BOM 的 file: BOM 当成 hash 第一字符
+  - 带 CRLF 的 file: `\r` 被当成 filename 一部分 → "No such file or directory"
+- winget `wingetcreate validate` 报 BOM 不是预期 (实际上容忍,但 release notes 显示乱码)
+- GitHub web UI render markdown 时 BOM 当成 invisible char,某些 markdown linter 报 "first char not LF"
+
+**根因 (BOM):**
+Windows PowerShell 5.1 的 `Set-Content -Encoding utf8` 和 `Out-File -Encoding utf8` 都用 UTF-8 with BOM (默认).NET Encoding `utf8` 是带 BOM 的。
+PowerShell 7+ (pwsh) 的 `utf8` 是 UTF-8 without BOM, Windows PS 5.1 才有这个 BOM 问题。
+
+**根因 (CRLF):**
+Windows PS5.1 的 `[System.IO.File]::WriteAllLines` / `[IO.File]::WriteAllText` (默认 encoding 参数) 用 `Environment.NewLine`,Windows 上是 `\r\n`。
+Linux/macOS 上是 `\n`。`sha256sum` (GNU coreutils) 对文件名严格 — `\r` 当成普通字符,实际查找 `<hash>  <name>\r` 文件,失败。
+
+Per memory `feedback_qbe_crlf_root_cause` — 同根因,Windows fopen 默认 LF→CRLF 转换,跟 QBE .il 行号偏移错的根因一样。所有 PS 写的 UTF-8 行文件被 Linux 工具消费都要 LF + no BOM。
+
+**workaround:**
+用 `[System.IO.File]::WriteAllText` + 显式 UTF8Encoding(false) + 自己用 `\n` join (不要 `Environment.NewLine`):
+```powershell
+# 一次性写文件 (single string, explicit LF, no BOM)
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$content = ($lines -join "`n") + "`n"  # trailing newline for POSIX
+[System.IO.File]::WriteAllText('release-notes.md', $content, $utf8NoBom)
+
+# 同样 pattern for SHA256.txt (per installer/gen-sha256.ps1)
+$lines = foreach ($f in $files) {
+    $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+    "{0}  {1}" -f $hash, $f.Name
+}
+$content = ($lines -join "`n") + "`n"
+[System.IO.File]::WriteAllText('installer/SHA256.txt', $content, $utf8NoBom)
+```
+
+或者换 pwsh 7+ (`shell: pwsh`),但 GH Actions windows-latest runner 默认 PS5.1, 强制 pwsh 7 需要 `pester/setup-pwsh@v1` action。
+
+**影响范围:**
+- 所有 PowerShell 5.1 step 写 UTF-8 文件的场景 (release notes / SHA256.txt / release assets / gen-* 脚本)
+- SHA256.txt 是 `sha256sum -c` 校验的源, CRLF + BOM 双坑
+- per `feedback_qbe_crlf_root_cause` — 任何 Windows 写 + Linux 读的行文件都要 LF no BOM
+
+**失效条件:**
+1. GH Actions windows-latest runner 升级默认 shell 到 pwsh 7
+2. 或者 PS5.1 加 `-Encoding utf8NoBom` flag (PowerShell team 已经讨论,未 ship)
+
+**引用:**
+- repro: `[System.IO.File]::WriteAllText('test.txt', "a`nb", [System.Text.UTF8Encoding]::new($false))` → 头 3 字节无 BOM,行尾 `\n` ✓; 改 `[System.Text.Encoding]::UTF8` → 头 3 字节 BOM,行尾 `\r\n` ❌
+- workaround 实现: `installer/gen-sha256.ps1:65-72` + release.yml Generate release notes step
+- v1.5.5 ship commit
+
 

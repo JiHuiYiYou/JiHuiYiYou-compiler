@@ -1,0 +1,28 @@
+# winget installer manifest - JHYY 1.5.5
+#
+# Sprint v1.5.5 — InstallerSha256 to be filled by GH Actions release workflow
+# (reads installer/SHA256.txt and substitutes the value at release time).
+# For local reference / dry-run validation, use the SHA from the actual
+# GitHub Release SHA256.txt asset once uploaded.
+#
+# Why Burn bundle: WiX 4 Burn bundles are first-class winget installers
+# (`InstallerType: burn`); winget CLI runs them with `BurnArgs`.
+
+PackageLocale: en-US
+PackageVersion: 1.5.5
+Platform:
+  - Windows.Desktop
+MinimumOSVersion: 10.0.17763.0
+InstallerType: burn
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v1.5.5/jhyy-installer-1.5.5.exe
+    InstallerSha256: <FILL_AT_RELEASE_TIME_FROM_SHA256.txt>
+    InstallerSwitches:
+      Silent: /quiet
+      SilentWithProgress: /passive
+    UpgradeBehavior: install
+    Commands:
+      - jhyy
+ManifestType: installer
+ManifestVersion: 1.5.0

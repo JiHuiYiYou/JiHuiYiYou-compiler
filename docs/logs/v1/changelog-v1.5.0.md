@@ -14,8 +14,8 @@
 | **v1.5.1** | ✅ done | `73dd3cb` | WiX 4/7 工具链 + 项目结构 (`installer/` 目录 + `_stub/` smoke test) + `build.ps1` 编排 |
 | **v1.5.2** | ✅ done | `165e650` | `compiler/jhyy-compiler.wxs` 写完; `wix msi validate` 0 ICE errors (ICE43/ICE57/ICE80 全过) |
 | **v1.5.3** | ✅ done | `6ea1c62` | `Bundle.wxs` (Burn bundle) + `Theme.xml` + `Bundle.zh-CN.wxl` + `banner.bmp`; `jhyy-installer-1.5.3.exe` (1.6MB) 生成 |
-| **v1.5.4** | ✅ done | (this commit) | VSCode ext auto-install + `.jhyy` file association + Start Menu Documentation/Quick Start 增强; `wix msi validate` 0 ICE errors |
-| **v1.5.5** | ⏳ pending | — | GH Actions release workflow + 第三方 manifest (winget / scoop / choco) + SHA256 发布 |
+| **v1.5.4** | ✅ done | (1a9dd9b) | VSCode ext auto-install + `.jhyy` file association + Start Menu Documentation/Quick Start 增强; `wix msi validate` 0 ICE errors |
+| **v1.5.5** | ✅ done | (this commit) | GH Actions release workflow (tag v* + workflow_dispatch) + winget + scoop manifest reference + SHA256 生成 + Release notes 模板; v1.5.0 umbrella ship 闭环 |
 
 ---
 
@@ -259,20 +259,126 @@ Bundle manifest 含:
 
 ---
 
-## v1.5.5 (待启动)
+## v1.5.5 — GH Actions release workflow + 第三方 manifest (本 commit)
 
-按 plan v1.5.5 是 0.6 sprint: 构建流程 + GH Actions + 第三方 manifest。
+### 完成定义
 
-门槛: v1.5.4 跑通
+- ✅ `.github/workflows/release.yml` — 14-step GH Actions workflow (checkout + MSYS2 + WiX + make stage0 + make + regress + bundle + SHA256 verify + release notes + MSI validate + release create + dry-run summary)
+- ✅ `installer/gen-sha256.ps1` — `Get-FileHash` 扫 build-artifacts → `SHA256.txt` (sha256sum-compatible 格式, UTF-8 no BOM)
+- ✅ `installer/build.ps1` — bundle target 自动调 gen-sha256 (本地 build 一并产出 SHA256.txt)
+- ✅ `installer/changelog-template.md` — Release notes 模板 (VERSION / ISO_DATE / URL 占位符, GH Actions 替换)
+- ✅ winget 3 manifest (`installer/winget/manifests/j/JiHuiYiYou/JHYY/1.5.5/JiHuiYiYou.JHYY{.yaml, .installer.yaml, .locale.en-US.yaml}`)
+- ✅ scoop 1 manifest (`installer/scoop/jhyy.json`)
+- ✅ `installer/README.md` — 加 "发布流程" 段 (本地 build / tag push / workflow_dispatch dry-run / manifest publish deferred)
+- ✅ `.gitignore` — 加 `installer/SHA256.txt` / `installer/**/SHA256.txt`
+- ⚠️ **Real GH Actions workflow_dispatch dry-run** 在 commit 后跑 (per `feedback_auto_push_after_commit.md`, 等 user 触发); RC tag `v1.5.5-rc1` 也等 user 决策
+- ⚠️ **winget + scoop manifest publish** 推到 v2.x (per plan 决策-11; 当前仅 reference, no PR 到 winget-pkgs / ScoopInstaller/Main)
+- ⚠️ **Dev placeholder GUID (`BBCCEEFC-...`)** 没替换真 GUID — 当前 manifest 用占位符; v1.5.0 ship 前 user 决策时机
 
-工作:
-- `build.cmd` 完善 (--version / --sign / --skip-vsix flag)
-- `.github/workflows/release.yml` (tag `v*` → install WiX → build installer → upload to GitHub Release → 生成 SHA256)
-- 3 份第三方 manifest (winget / scoop / choco) 写完待 publish
-- `installer/SHA256.txt` 生成
-- `installer/changelog-template.md` (Release notes 模板)
-- 本地 dry-run (`v1.5.0-rc1` tag, GH Actions 跑)
-- `installer/README.md` 完善 (怎么构建 + 怎么上传 + 怎么 smoke test)
+### 核心机制
+
+#### 1. 双触发 release workflow
+
+- **push tag `v*`** → 自动 build + upload + create Release (make_latest: true); `v1.5.5-rc1` 这种 RC tag 自动 mark prerelease
+- **`workflow_dispatch`** (manual) → escape hatch, dry_run=true 时 build 但不 upload 不 create Release
+
+#### 2. 14-step workflow 流水线
+
+| Step | 工具 | 说明 |
+|------|------|------|
+| 1 | `pwsh` | Compute VERSION + IS_RC + JHY_TAG_NAME (push 走 `github.ref_name`, dispatch 走 `inputs.version`; 始终 strip leading `v`) |
+| 2 | `actions/checkout@v4` | Checkout (submodules: recursive for qbe/) |
+| 3 | `msys2/setup-msys2@v2` | 装 gcc / make / qbe / python / zip |
+| 4 | `pwsh` env= | Install WiX 4/7 + 3 extension (Util / UI / Bal) |
+| 5 | msys2 bash | `make stage0` (C 端 bootstrap binary) |
+| 6 | msys2 bash | `make` (jhyy.exe production binary) |
+| 7 | msys2 bash | `python regress.py --all` (gated — must PASS, 是 release gate) |
+| 8 | pwsh env=JHY_VERSION | `powershell -File installer/build.ps1 bundle` (Burn + MSI + .vsix + SHA256) |
+| 9 | pwsh | Verify SHA256.txt 内容 (3 产物 hash 都对) |
+| 10 | pwsh | Generate release-notes.md (从 changelog-template.md 替换占位符) |
+| 11 | pwsh | `wix msi validate` (0 ICE errors 必须) |
+| 12 | pwsh (dry_run) | Confirm artifacts present (5 file) |
+| 13 | `softprops/action-gh-release@v2` | Create Release + upload 4 assets |
+| 14 | pwsh (dry_run) | Summary 输出 |
+
+#### 3. PowerShell `$GITHUB_ENV` write (踩坑)
+
+- `Out-File -Encoding utf8` 在 Windows PowerShell 5.1 加 UTF-8 BOM, GH parser 解析 $GITHUB_ENV 时 BOM 出错 → 用 `Add-Content` (BOM-safe 路径) 替代
+- bash `${VERSION}` 占位符在 MSYS2 bash 不展开 `${{ env.VERSION }}` (那是 GH 表达式, 仅在 yaml 解析时替换); 实际 bash step 跑时 `VERSION` 已经通过 $GITHUB_ENV export, 直接用 `$VERSION` 即可
+- pwsh step 用 `$env:VERSION` 读 (PowerShell env var syntax), 不 `$VERSION`
+
+#### 4. winget + scoop manifest (reference, no publish)
+
+- **winget multi-file manifest** (v1.5.0 schema): version + installer + locale en-US 三个 YAML 在 `manifests/j/JiHuiYiYou/JHYY/1.5.5/`; `InstallerSha256` 是 `<FILL_AT_RELEASE_TIME_FROM_SHA256.txt>` placeholder (release 时 CI 替换)
+- **scoop manifest** (`jhyy.json`): Burn bundle URL + sha256 placeholder + 3 个 Start Menu shortcut + autoupdate (regex 抓 GH release tag)
+- **chocolatey 推 v2.x**: 用户决策 (per `ask_user` 选项 "只写 winget + scoop"); choco manifest 复杂 (admin shell + install script)
+
+### Plan / Sprint / 文件改动
+
+| 文件 | 改动 |
+|------|------|
+| `.github/workflows/release.yml` | NEW (~230 行) — 14-step GH Actions workflow |
+| `installer/gen-sha256.ps1` | NEW (~55 行) — SHA256.txt 生成 |
+| `installer/changelog-template.md` | NEW (~50 行) — Release notes 模板 |
+| `installer/winget/manifests/j/JiHuiYiYou/JHYY/1.5.5/JiHuiYiYou.JHYY.yaml` | NEW (~15 行) — version manifest |
+| `installer/winget/manifests/j/JiHuiYiYou/JHYY/1.5.5/JiHuiYiYou.JHYY.installer.yaml` | NEW (~25 行) — installer manifest |
+| `installer/winget/manifests/j/JiHuiYiYou/JHYY/1.5.5/JiHuiYiYou.JHYY.locale.en-US.yaml` | NEW (~30 行) — locale en-US |
+| `installer/scoop/jhyy.json` | NEW (~50 行) — scoop manifest |
+| `installer/build.ps1` | +13 / -1 行 — bundle target 调 gen-sha256.ps1 |
+| `installer/README.md` | +40 / -10 行 — v1.5.5 status + 发布流程段 |
+| `docs/logs/v1/changelog-v1.5.0.md` | +110 / -10 行 — v1.5.5 section (本 commit) |
+| `.gitignore` | +2 行 — `installer/SHA256.txt` / `installer/**/SHA256.txt` |
+
+### 验证 (本 commit — 本地)
+
+```
+$ powershell -File installer/gen-sha256.ps1
+[OK] installer/SHA256.txt written (8 entries)
+    6429a1833b2b486c46482b779f193b9ea124979075727e98f82d968d8253ba5d  jhyy-compiler-1.5.4.msi
+    0b8dd1a88c4f52a5ca75c890c0b148f4b8d2b0729d943da27bf585f52932714d  jhyy-installer-1.5.4.exe
+    2666c769d5abed6b5eed8c3aa9ecbf38d4df09d0821ce9ac2dac1c336567d216  jhyy-lang-1.5.4.vsix
+    ...
+
+$ sha256sum installer/build-artifacts/jhyy-installer-1.5.4.exe
+0b8dd1a88c4f52a5ca75c890c0b148f4b8d2b0729d943da27bf585f52932714d *installer/build-artifacts/jhyy-installer-1.5.4.exe
+# (matches line in SHA256.txt ✓)
+
+$ python -c "import yaml; yaml.safe_load(open('.github/workflows/release.yml'))"
+# 14 steps valid ✓
+
+$ python -c "import json; json.load(open('installer/scoop/jhyy.json'))"
+# valid ✓
+
+$ python -c "import yaml; [yaml.safe_load(open(f'.../JHYY/1.5.5/JiHuiYiYou.JHYY{x}.yaml')) for x in ['', '.installer', '.locale.en-US']]"
+# all 3 valid ✓
+
+$ python regress.py
+PASS 53/53, 0 fail, 3 skipped
+# baseline 守门 ✓
+```
+
+### GH Actions workflow_dispatch dry-run (推送后)
+
+```bash
+gh workflow run release.yml -f version=1.5.5-rc1 -f dry_run=true
+# 期望: GH Actions UI run → 14 step 全 green → 无 Release 创建 → summary 在 console
+```
+
+### 已知 workarounds (已入 `docs/internal/workarounds.md`)
+
+- **W-022 (新增) Add-Content vs Out-File -Encoding utf8 for $GITHUB_ENV**: Windows PowerShell 5.1 `Out-File -Encoding utf8` 加 UTF-8 BOM, GH parser 解析 $GITHUB_ENV fail; workaround `Add-Content` (BOM-safe)
+- **W-023 (新增) MSYS2 bash `${VAR}` 不展开 `${{ env.X }}`**: GH 表达式仅 yaml 解析时替换; bash step 要 `echo $VAR` 拿 export 过的 env var, 不 `${VAR}` 占位符
+- **W-024 (新增) `Out-File -Encoding utf8` BOM in PowerShell**: 影响所有写 UTF-8 文本场景 (changelog-template.md, gen-sha256.txt, release-notes.md), 改 `[System.IO.File]::WriteAllLines(..., $utf8NoBom)` 或 `Set-Content -NoNewline`
+
+### 后续工作 (v1.5.0 umbrella ship)
+
+- ✅ v1.5.5 done → v1.5.0 umbrella 5/5 sprint 全部 ship
+- **真 GUID 替换** (dev placeholder → uuidgen): v1.5.0 ship 前 user 决策; 改 `.wxs` + manifest (InstallerSha256 跟 ProductCode 都关联)
+- **v1.5.0 ship tag** + GitHub Release 标 "stable"
+- **winget + scoop manifest publish** 推到 v2.x (per 决策-11)
+- **Authenticode code signing** 推到 v2.x (需 HSM / EV cert)
+
+---
 
 ---
 

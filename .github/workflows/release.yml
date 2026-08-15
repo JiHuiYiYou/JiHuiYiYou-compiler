@@ -1,0 +1,235 @@
+# GH Actions release workflow — JHYY installer (v1.5.5+)
+#
+# Triggers:
+#   1. push tag matching `v*` (e.g. v1.5.5, v1.5.5-rc1)
+#   2. workflow_dispatch (manual; for dry-run / RC validation without tag push)
+#
+# Per-sprint scope (v1.5.5):
+#   - Build jhyy.exe from src0 via stage-0 chain (make stage0 + make)
+#   - Run gated regress (must pass; release gate)
+#   - Build Burn bundle + MSI + VSCode ext via installer/build.ps1
+#   - Generate SHA256.txt + release notes (from changelog-template.md)
+#   - Upload 4 assets + create GitHub Release
+#
+# Out of scope (per plan):
+#   - Code signing (Authenticode) — deferred to v2.x
+#   - Cross-platform installer (Linux/macOS) — deferred to v2.x
+#   - Multi-Windows-version matrix — single windows-latest runner
+#
+# Why windows-latest + MSYS2: matches ci.yml + local dev env. Both must
+# produce the same binary SHA; release workflow re-runs regress baseline.
+#
+# Reference: docs/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.5
+name: JHYY Installer Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 1.5.5, 1.5.5-rc1)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Dry-run (skip upload + release creation)'
+        type: boolean
+        default: false
+
+# Release builds cannot be cancelled mid-flight (assets would be partial).
+# concurrency cancel-in-progress: false ensures a tag push waits for prior runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # create Release
+
+jobs:
+  build-and-release:
+    name: Build installer + create GitHub Release
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    env:
+      # IS_RC: '1' if version contains '-rc' suffix
+      # (computed in the prep step below; this default is for display only)
+      IS_RC: '0'
+
+    steps:
+      - name: Compute VERSION + IS_RC + JHY_TAG_NAME
+        shell: pwsh
+        run: |
+          # Determine VERSION: prefer workflow_dispatch input, else strip 'v' from tag ref.
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $env:VERSION = "${{ inputs.version }}"
+          } else {
+            # push tag: github.ref_name like "v1.5.5-rc1" -> "1.5.5-rc1"
+            $env:VERSION = "${{ github.ref_name }}" -replace '^v', ''
+          }
+          $env:JHY_IS_RC = ($env:VERSION -match '-rc') ? '1' : '0'
+          $env:JHY_TAG_NAME = "v$($env:VERSION)"
+          Write-Host "VERSION=$($env:VERSION)"
+          Write-Host "JHY_IS_RC=$($env:JHY_IS_RC)"
+          Write-Host "JHY_TAG_NAME=$($env:JHY_TAG_NAME)"
+          "VERSION=$($env:VERSION)"           | Add-Content -Path $env:GITHUB_ENV
+          "JHY_VERSION=$($env:VERSION)"      | Add-Content -Path $env:GITHUB_ENV
+          "JHY_IS_RC=$($env:JHY_IS_RC)"      | Add-Content -Path $env:GITHUB_ENV
+          "JHY_TAG_NAME=$($env:JHY_TAG_NAME)"| Add-Content -Path $env:GITHUB_ENV
+
+      - name: Checkout (with qbe/ submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0  # for git describe / tag detection
+
+      - name: Setup MSYS2 + toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            base-devel
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-make
+            mingw-w64-ucrt-x86_64-qbe
+            python
+            python-pip
+            zip
+
+      - name: Install WiX 4/7 toolchain
+        shell: msys2 {0}
+        run: |
+          dotnet tool install --global wix
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+          wix --version
+          wix extension add -g WixToolset.Util.wixext
+          wix extension add -g WixToolset.UI.wixext
+          wix extension add -g WixToolset.Bal.wixext
+
+      - name: Build stage 0 (C-side bootstrap)
+        shell: msys2 {0}
+        run: |
+          make stage0
+
+      - name: Build jhyy.exe (jhyy-side production via stage 0)
+        shell: msys2 {0}
+        run: |
+          make
+          sha256sum compiler/build/bin/jhyy.exe
+          ls -la compiler/build/bin/jhyy.exe
+
+      - name: Run regress (gated — must PASS)
+        shell: msys2 {0}
+        run: |
+          python compiler/build/bin/regress.py --all
+          # exit code 0 = pass; non-zero = fail (will block release)
+
+      - name: Build installer (Burn bundle + MSI + .vsix)
+        shell: pwsh
+        env:
+          JHY_VERSION: ${{ env.VERSION }}
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File installer/build.ps1 bundle
+          # bundle target auto-calls gen-sha256.ps1, so SHA256.txt is ready
+
+      - name: Verify SHA256.txt content
+        shell: pwsh
+        run: |
+          Get-Content installer/SHA256.txt
+          Write-Host ""
+          Write-Host "Expected files:"
+          foreach ($f in @(
+            "installer/build-artifacts/jhyy-installer-$env:VERSION.exe",
+            "installer/build-artifacts/jhyy-compiler-$env:VERSION.msi",
+            "installer/build-artifacts/jhyy-lang-$env:VERSION.vsix"
+          )) {
+            if (Test-Path $f) {
+              $info = Get-Item $f
+              Write-Host "  $($info.Name) ($($info.Length) bytes)"
+            } else {
+              Write-Host "  [MISSING] $f"
+            }
+          }
+
+      - name: Generate release notes from template
+        shell: pwsh
+        run: |
+          $template = Get-Content installer/changelog-template.md -Raw
+          $isoDate = (Get-Date -Format "yyyy-MM-dd")
+          $installerUrl = "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v$($env:VERSION)/jhyy-installer-$($env:VERSION).exe"
+          $sha256Url = "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v$($env:VERSION)/SHA256.txt"
+          $minor = ($env:VERSION -split '\.')[0..1] -join '.'
+          $notes = $template `
+            -replace '\$\{VERSION\}', $env:VERSION `
+            -replace '\$\{ISO_DATE\}', $isoDate `
+            -replace '\$\{INSTALLER_URL\}', $installerUrl `
+            -replace '\$\{SHA256_URL\}', $sha256Url `
+            -replace '\$\{MINOR\}', $minor
+          Set-Content -Path release-notes.md -Value $notes -NoNewline
+          Write-Host "[OK] release-notes.md written"
+          Get-Content release-notes.md | Select-Object -First 30
+
+      - name: Validate MSI (wix msi validate)
+        shell: pwsh
+        run: |
+          wix msi validate installer/build-artifacts/jhyy-compiler-$($env:VERSION).msi
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "[ERROR] MSI validation failed (ICE errors found)"
+            exit 1
+          }
+          Write-Host "[OK] MSI validation passed (0 ICE errors)"
+
+      - name: Confirm artifacts present (dry-run gate)
+        if: inputs.dry_run == 'true' && github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          foreach ($f in @(
+            "installer/build-artifacts/jhyy-installer-$($env:VERSION).exe",
+            "installer/build-artifacts/jhyy-compiler-$($env:VERSION).msi",
+            "installer/build-artifacts/jhyy-lang-$($env:VERSION).vsix",
+            "installer/SHA256.txt",
+            "release-notes.md"
+          )) {
+            if (-not (Test-Path $f)) {
+              Write-Host "[ERROR] missing artifact: $f"
+              exit 1
+            }
+          }
+          Write-Host "[OK] all 5 artifacts present"
+
+      - name: Create GitHub Release
+        if: inputs.dry_run != 'true' || github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.JHY_TAG_NAME }}
+          name: 'JHYY ${{ env.VERSION }}${{ env.JHY_IS_RC == ''1'' && '' [RC]'' || '''' }}'
+          body_path: release-notes.md
+          draft: false
+          prerelease: ${{ env.JHY_IS_RC == '1' }}
+          make_latest: ${{ env.JHY_IS_RC != '1' }}
+          fail_on_unmatched_files: true
+          files: |
+            installer/build-artifacts/jhyy-installer-${{ env.VERSION }}.exe
+            installer/build-artifacts/jhyy-compiler-${{ env.VERSION }}.msi
+            installer/build-artifacts/jhyy-lang-${{ env.VERSION }}.vsix
+            installer/SHA256.txt
+          # GITHUB_TOKEN auto-provided; no extra secrets needed.
+
+      - name: Dry-run summary
+        if: inputs.dry_run == 'true' && github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "============================================="
+          Write-Host "DRY RUN — nothing uploaded, no Release created"
+          Write-Host "VERSION=$($env:VERSION) TAG=$($env:JHY_TAG_NAME) IS_RC=$($env:JHY_IS_RC)"
+          Write-Host "Built artifacts:"
+          foreach ($f in Get-ChildItem installer/build-artifacts/*.{exe,msi,vsix} | Where-Object { $_.Name -match $env:VERSION }) {
+            Write-Host "  $($f.Name) ($($f.Length) bytes)"
+          }
+          Write-Host "SHA256 (for this VERSION):"
+          Get-Content installer/SHA256.txt | Where-Object { $_ -match $env:VERSION }
+          Write-Host "============================================="

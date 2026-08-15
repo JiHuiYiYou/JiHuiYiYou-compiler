@@ -1,0 +1,54 @@
+{
+    "version": "1.5.5",
+    "description": "JHYY (机会翼游) — statically-typed language + bootstrapping compiler for Windows",
+    "homepage": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler",
+    "license": {
+        "identifier": "MIT",
+        "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/LICENSE"
+    },
+    "depends": "",
+    "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v1.5.5/jhyy-installer-1.5.5.exe",
+    "hash": "<FILL_AT_RELEASE_TIME_FROM_SHA256.txt>",
+    "shortcuts": [
+        ["JHYY Compiler", "C:\\Program Files\\JHYY\\bin\\jhyy.exe", ""],
+        ["JHYY Documentation", "C:\\Program Files\\JHYY\\common\\JHYY Documentation.url", ""],
+        ["JHYY Quick Start", "C:\\Program Files\\JHYY\\common\\JHYY Quick Start.url", ""]
+    ],
+    "persist": [
+        "C:\\Program Files\\JHYY\\vscode-ext"
+    ],
+    "pre_install": [
+        "// Burn bundle is a per-machine MSI wrapper; admin elevation required.",
+        "// Scoop is per-user by default — the bundled MSI's per-machine install",
+        "// writes to C:\\Program Files\\JHYY\\ and HKLM PATH. Run elevated:",
+        "//   scoop install jhyy --global",
+        "// Or accept the UAC prompt during install."
+    ],
+    "post_install": [
+        "// After Burn bundle installs jhyy.exe to C:\\Program Files\\JHYY\\bin\\,",
+        "// verify it is reachable: 'where jhyy' should list it under Program Files.",
+        "// Note: jhyy.exe requires MSYS2 + ucrt64 GCC for compile/link (qbe+as+ld).",
+        "// See https://www.msys2.org/ — the installer Welcome page also prompts."
+    ],
+    "uninstaller": {
+        "script": [
+            "// Burn bundle uninstall — same ProductCode as MSI.",
+            "// For per-machine install, run elevated:",
+            "//   msiexec /x {BBCCEEFC-6163-46BF-B72C-7B20E6812960} /quiet",
+            "// Or: Settings -> Apps -> JHYY Compiler -> Uninstall.",
+            "// Note: the GUID above is a v1.5.4 dev placeholder; the real release",
+            "// GUID will be filled before v1.5.0 ship (uuidgen). See .wxs comments."
+        ]
+    },
+    "checkver": {
+        "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/tags",
+        "regex": "releases/tag/v([\\d.]+)"
+    },
+    "autoupdate": {
+        "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v$version/jhyy-installer-$version.exe",
+        "hash": {
+            "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v$version/SHA256.txt",
+            "regex": "^([a-f0-9]{64})  jhyy-installer-$version.exe$"
+        }
+    }
+}

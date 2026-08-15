@@ -2,13 +2,23 @@
 
 Windows 引导式安装器 — 把 JHYY 编译器装到 `C:\Program Files\JHYY\`, 自动配 PATH, 用户零配置。
 
-## 当前状态 (v1.5.4)
+## 当前状态 (v1.5.5)
 
 ✅ **v1.5.2 done** — `compiler/jhyy-compiler.wxs` 写出, `build.ps1 compiler` 跑通, `jhyy-compiler-1.0.0.msi` (991KB) 生成, **`wix msi validate` 0 ICE errors** (ICE43/ICE57/ICE80 全过).
 
 ✅ **v1.5.3 done** — `Bundle.wxs` 写出, `build.ps1 bundle` 跑通, `jhyy-installer-1.5.3.exe` (1.6MB) 生成。Burn bundle 走 standard `WixStandardBootstrapperApplication` UI (next-next-finish, RTF license, MSYS2 prereq 提示在 Welcome page, post-install 提示在 Success page)。
 
 ✅ **v1.5.4 done** — VSCode ext auto-install (`.vsix` + CustomAction `code --install-extension`), `.jhyy` file association (双击 → `jhyy run file.jhyy`), Start Menu 增强 (Documentation / Quick Start 走 Internet Shortcut `.url`)。`wix msi validate` 0 ICE errors。
+
+✅ **v1.5.5 done** — GitHub Actions release workflow (`.github/workflows/release.yml`, tag `v*` + manual `workflow_dispatch`), 第三方 manifest reference (winget 3 文件 + scoop 1 文件, schema 校验通过, no actual publish), `installer/gen-sha256.ps1` 写 SHA256.txt, `installer/changelog-template.md` Release notes 模板。`tag v*` push → 自动 build + upload + Release; RC tag 自动 mark prerelease; workflow_dispatch dry-run 入口作为 escape hatch。
+
+**v1.5.5 scope (已完成)**:
+- `.github/workflows/release.yml` — GH Actions release workflow (14 steps: checkout + MSYS2 + WiX + make stage0 + make + regress + bundle + SHA256 verify + release notes + MSI validate + release create + dry-run summary)
+- `installer/gen-sha256.ps1` — SHA256.txt 生成 (sha256sum-compatible 格式, UTF-8 no BOM); `build.ps1 bundle` 自动调
+- `installer/changelog-template.md` — Release notes 模板 (VERSION / ISO_DATE / URL 占位符)
+- `installer/winget/manifests/j/JiHuiYiYou/JHYY/1.5.5/` — winget multi-file manifest (version + installer + locale en-US); InstallerSha256 在 release 时由 CI 填
+- `installer/scoop/jhyy.json` — scoop manifest v3 schema (Burn bundle install + shortcuts + autoupdate)
+- 关键 fix: bash `${VERSION}` 占位符在 MSYS2 bash 不展开 → 改 `${{ env.VERSION }}` ($env:VERSION in pwsh); `Add-Content` 写 GH Actions env file (no BOM 比 Out-File -Encoding utf8 稳)
 
 **v1.5.4 scope (已完成)**:
 - `installer/vscode-ext/package.ps1` — VSCode ext 打包 (vsce package + version patch)
@@ -117,8 +127,50 @@ wix msi validate installer/build-artifacts/jhyy-compiler-1.0.0.msi
 
 - `installer/_stub/stub.msi` (~28KB) — minimal stub, 不参与实际 installer
 - `installer/build-artifacts/jhyy-compiler-X.Y.Z.msi` (~995KB) — 主 MSI, 装 jhyy.exe + qbe.exe + .vsix + file association + Start Menu
+- `installer/build-artifacts/jhyy-installer-X.Y.Z.exe` (~1.6MB) — Burn bundle (installer wrapper)
 - `installer/build-artifacts/jhyy-lang-X.Y.Z.vsix` (~4KB) — VSCode extension
 - `installer/build-artifacts/*.wixpdb` — WiX 调试符号 (gitignored)
+- `installer/SHA256.txt` — 3 产物 SHA256 (gitignored; build 完自动生成)
+
+## v1.5.5+ 发布流程
+
+### 本地 build (任意版本)
+
+```powershell
+# 单一入口
+JHY_VERSION=1.5.5 powershell -File installer/build.ps1 bundle
+# 期望产出: installer/build-artifacts/jhyy-installer-1.5.5.exe + jhyy-compiler-1.5.5.msi + jhyy-lang-1.5.5.vsix + SHA256.txt
+```
+
+### GitHub Actions — tag 触发 (正式 release)
+
+```bash
+git tag v1.5.5
+git push origin v1.5.5
+# GH Actions 自动: build jhyy.exe → regress → build.ps1 bundle → SHA256 → release notes → upload 4 assets → create GitHub Release
+# 期望: GitHub Release "JHYY 1.5.5" 标 latest, 4 个 asset (.exe / .msi / .vsix / SHA256.txt)
+```
+
+### GitHub Actions — RC dry-run (workflow_dispatch)
+
+```bash
+gh workflow run release.yml -f version=1.5.5-rc1 -f dry_run=false
+# 期望: GH Release "JHYY 1.5.5-rc1 [RC]" 标 prerelease
+```
+
+### GitHub Actions — 完全 dry-run (build 闭环, 不上传)
+
+```bash
+gh workflow run release.yml -f version=1.5.5-rc1 -f dry_run=true
+# 期望: build 跑通 + SHA256 生成, 但不 upload 不 create release; summary 在 GH Actions UI
+```
+
+### 第三方 manifest publish (deferred v2.x)
+
+- **winget**: `installer/winget/manifests/j/JiHuiYiYou/JHYY/${VERSION}/` 3 文件 — 实际 PR 到 [winget-pkgs](https://github.com/microsoft/winget-pkgs) 推到 v2.x
+- **scoop**: `installer/scoop/jhyy.json` — 实际 PR 到 [ScoopInstaller/Main](https://github.com/ScoopInstaller/Main) 推到 v2.x
+
+⚠️ **Manifest 文件是 reference (no publish)**: 当前 CI 仅生成 SHA256.txt 给 Release asset; manifest 文件的 `InstallerSha256` 字段是 `<FILL_AT_RELEASE_TIME_FROM_SHA256.txt>` placeholder, 推 v2.x 前需要 (a) 真发布 GUID 替换 dev placeholder + (b) CI step 读 SHA256 填 manifest + (c) manifest 跟 release 同 PR。
 
 ## v1.5.3+ 计划
 

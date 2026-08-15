@@ -174,6 +174,16 @@ switch ($Target) {
             exit 1
         }
         Write-Host "[OK] installer/build-artifacts/jhyy-installer-$($env:JHY_VERSION).exe built"
+
+        # v1.5.5: also generate SHA256.txt for the 3 release artifacts
+        # (Burn bundle + MSI + VSCode ext). Called from CI as a separate step
+        # too (release.yml), but doing it here means `JHY_VERSION=1.5.5
+        # powershell -File installer/build.ps1 bundle` produces both .exe and
+        # SHA256.txt in one go for local smoke testing.
+        & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot/gen-sha256.ps1"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[WARN] SHA256 generation failed (build still succeeded)"
+        }
         exit 0
     }
 }
