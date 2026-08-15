@@ -168,6 +168,13 @@ jobs:
       - name: Run regress (gated — must PASS)
         shell: msys2 {0}
         run: |
+          # Sanity: compile one .jhyy directly to verify jhyy.exe works
+          echo "=== Sanity: compile arith.jhyy directly ==="
+          compiler/build/bin/jhyy.exe compile compiler/tests/examples/arith.jhyy -o /tmp/sanity_arith.exe 2>&1 | tail -20
+          echo "Sanity exit: $?"
+          ls -la /tmp/sanity_arith.exe 2>&1 || echo "no exe created"
+          echo "=== End sanity ==="
+          echo ""
           python compiler/build/bin/regress.py --all
           # exit code 0 = pass; non-zero = fail (will block release)
 
