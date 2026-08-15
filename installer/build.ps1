@@ -32,13 +32,26 @@ param(
 $ErrorActionPreference = "Stop"
 
 # 1. version detection
+#   MSI package version MUST be major.minor.build.revision with each < 65536
+#   and only digits. git describe output (e.g. v1.0.0-107-g73dd3cb) is invalid
+#   for MSI — strip git suffix and use only major.minor.build.
+#   Override via $env:JHY_VERSION = "1.5.2" for release builds.
 if (-not $env:JHY_VERSION) {
     try {
-        $ver = (& git describe --tags --always 2>$null) -as [string]
-        if ($ver) { $env:JHY_VERSION = $ver }
+        $rawVer = (& git describe --tags --always 2>$null) -as [string]
+        if ($rawVer) {
+            # Strip leading 'v' and git suffix: "v1.0.0-107-g73dd3cb" -> "1.0.0"
+            $clean = $rawVer -replace '^v', '' -replace '-.*$', ''
+            $parts = $clean.Split('.')
+            if ($parts.Length -ge 3) {
+                $env:JHY_VERSION = "$($parts[0]).$($parts[1]).$($parts[2])"
+            } else {
+                $env:JHY_VERSION = $clean
+            }
+        }
     } catch { }
 }
-if (-not $env:JHY_VERSION) { $env:JHY_VERSION = "1.5.1-dev" }
+if (-not $env:JHY_VERSION) { $env:JHY_VERSION = "1.5.2" }
 Write-Host "[build.ps1] target=$Target version=$($env:JHY_VERSION)"
 
 # 2. verify wix CLI
@@ -65,9 +78,32 @@ switch ($Target) {
         exit 0
     }
     "compiler" {
-        Write-Host "[build.ps1] === compiler MSI build (v1.5.2, not yet implemented) ==="
-        Write-Host "[TODO] v1.5.2: implement installer/compiler/jhyy-compiler.wxs"
-        exit 1
+        Write-Host "[build.ps1] === compiler MSI build (v1.5.2) ==="
+        # 1. prepare bin/ payload (jhyy.exe + qbe.exe)
+        $binDir = "installer/build-artifacts/bin"
+        if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
+        Copy-Item -Path "compiler/build/bin/jhyy.exe" -Destination "$binDir/jhyy.exe" -Force
+        Copy-Item -Path "qbe/qbe.exe" -Destination "$binDir/qbe.exe" -Force
+        # 2. build MSI via WiX 4/7
+        #   bindpath bin/ -> jhyy.exe + qbe.exe
+        #   bindpath common/ -> license.rtf
+        #   loc Locale.zh-CN.wxl for Chinese UI strings
+        #   -ext WixUtilExtension for WixUI_Minimal dialog set
+        & wix build `
+            installer/compiler/jhyy-compiler.wxs `
+            -arch x64 `
+            -b "bin=$binDir" `
+            -b "common=installer/common" `
+            -loc "installer/compiler/Locale.zh-CN.wxl" `
+            -ext WixToolset.Util.wixext -ext WixToolset.UI.wixext `
+            -d "JHY_VERSION=$($env:JHY_VERSION)" `
+            -o "installer/build-artifacts/jhyy-compiler-$($env:JHY_VERSION).msi"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[ERROR] compiler MSI build failed."
+            exit 1
+        }
+        Write-Host "[OK] installer/build-artifacts/jhyy-compiler-$($env:JHY_VERSION).msi built"
+        exit 0
     }
     "bundle" {
         Write-Host "[build.ps1] === Burn bundle build (v1.5.3, not yet implemented) ==="

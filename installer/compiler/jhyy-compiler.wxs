@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  compiler/jhyy-compiler.wxs : JHYY compiler MSI definition (v1.5.2)
+
+  Sprint v1.5.2 — 装 jhyy.exe + qbe.exe 到 C:\Program Files\JHYY\bin\,
+  写系统 PATH (HKLM, 要 admin), 检测 MSYS2 + gcc 没就 warn
+  (不自动装, 自动装推到 v1.5.3 Burn bundle per `力度 1 检测+引导` 决策).
+
+  Layout:
+    C:\Program Files\JHYY\
+    ├── bin\
+    │   ├── jhyy.exe    (jhyy-side production binary, per v1.4.0 flip)
+    │   └── qbe.exe     (vendored)
+    └── common\
+        └── license.rtf (双语)
+
+  WiX 4 schema notes (跟 v3 不一样的地方):
+    - <Package> 里直接 <Condition> 是 valid 但要在 <Package> 顶层, 顺序固定
+    - <Component> 用 Bitness="always64" 代替 v3 的 Win64="yes"
+    - <String> 必须用 Value 属性 (WIX0400)
+    - <SetDirectory> 用 Condition attribute, 不能 inner text
+    - <Property><RegistrySearch> 改用 <RegistrySearch> 直接 child of <Package>
+    - <Directory> FileSource attribute 接受 !(bindpath.x) 形式
+
+  Reference:
+    - docs/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.2
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="JHYY Compiler"
+           Version="$(var.JHY_VERSION)"
+           Manufacturer="JiHuiYiYou"
+           UpgradeCode="A1B2C3D4-E5F6-7890-1234-567890ABCDEF"
+           Scope="perMachine"
+           InstallerVersion="500">
+
+    <!--
+      Component GUIDs (1111.../2222.../3333.../4444...) are dev placeholder.
+      For v1.5.5 release: replace with real random GUIDs (use uuidgen | tr A-F a-f).
+      UpgradeCode stays stable across versions — Component GUIDs should change
+      only if Component content/structure changes.
+    -->
+
+    <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeErrorMessage)" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!--
+      Prereq check: MSYS2 ucrt64 + gcc must be installed for jhyy.exe to
+      actually link .jhyy → .exe. We only WARN here (v1.5.2 单 MSI 不能
+      自动装 MSYS2, 自动装推到 v1.5.3 Burn bundle).
+
+      WiX 4 launch condition syntax: <Launch Condition="..." Message="..." />
+      (跟 v3 <Condition Message="..."> 不同, per GitHub discussion #6304)
+    -->
+    <Launch Condition="Installed OR MSYS2_GCC_FOUND" Message="!(loc.MSYS2NotFound)" />
+
+    <Property Id="MSYS2_GCC_FOUND">
+      <RegistrySearch Id="MSYS2GccSearch"
+                      Type="raw"
+                      Root="HKLM"
+                      Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\ucrt64 GCC"
+                      Name="DisplayVersion" />
+    </Property>
+
+    <Property Id="INSTALLDIR">
+      <RegistrySearch Id="JHYYInstallDirSearch"
+                      Type="directory"
+                      Root="HKLM"
+                      Key="SOFTWARE\JiHuiYiYou\JHYY"
+                      Name="InstallDir" />
+    </Property>
+
+    <SetDirectory Id="INSTALLDIR" Value="[ProgramFiles6432Folder]JHYY" Condition="NOT FOUND" />
+
+    <Directory Id="INSTALLDIR" Name="JHYY">
+      <Directory Id="BinDir" Name="bin" FileSource="!(bindpath.bin)" />
+      <Directory Id="CommonDir" Name="common" FileSource="!(bindpath.common)" />
+    </Directory>
+
+    <Feature Id="JHYYCompilerFeature"
+             Title="!(loc.FeatureJHYYTitle)"
+             Description="!(loc.FeatureJHYYDescription)"
+             Level="1"
+             AllowAdvertise="no"
+             TypicalDefault="install">
+
+      <ComponentGroupRef Id="JHYYBinFiles" />
+      <ComponentGroupRef Id="JHYYPathRegistry" />
+      <ComponentGroupRef Id="JHYYShortcuts" />
+      <ComponentRef Id="LicenseFile" />
+
+    </Feature>
+
+    <UI>
+      <ui:WixUI Id="WixUI_Minimal" />
+    </UI>
+
+    <WixVariable Id="WixUILicenseRtf" Value="!(bindpath.common)\license.rtf" />
+
+    <Icon Id="JHYYIcon" SourceFile="!(bindpath.bin)\jhyy.exe" />
+    <Property Id="ARPPRODUCTICON" Value="JHYYIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/JiHuiYiYou/JiHuiYiYou-compiler" />
+
+  </Package>
+
+  <Fragment>
+    <!--
+      Files in bin\ : jhyy.exe + qbe.exe (production binaries).
+      NOT included: GCC toolchain (per `力度 1 检测+引导` 决策, user 装 v1.5.2
+      时已有 MSYS2 + gcc, 或 v1.5.3 Burn bundle 自动装 MSYS2).
+    -->
+    <ComponentGroup Id="JHYYBinFiles" Directory="BinDir">
+      <!--
+        JhyyExe: pure file component, no shortcut, per-machine KeyPath.
+        Shortcut moved to separate Component "JhyyExeShortcut" below to fix
+        ICE43/ICE57 (per-user shortcut + per-machine file in same Component
+        with file KeyPath is invalid).
+      -->
+      <Component Id="JhyyExe" Bitness="always64" Guid="11111111-1111-1111-1111-111111111111">
+        <File Id="JhyyExeFile"
+              Source="!(bindpath.bin)\jhyy.exe"
+              KeyPath="yes"
+              Checksum="yes" />
+      </Component>
+
+      <Component Id="QbeExe" Bitness="always64" Guid="22222222-2222-2222-2222-222222222222">
+        <File Id="QbeExeFile"
+              Source="!(bindpath.bin)\qbe.exe"
+              KeyPath="yes"
+              Checksum="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <!--
+      PATH registry: write HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment
+      PATH append C:\Program Files\JHYY\bin. Requires admin (Scope=perMachine).
+
+      On uninstall, registry entry rolls back via standard MSI RemoveEnvironment.
+    -->
+    <ComponentGroup Id="JHYYPathRegistry" Directory="INSTALLDIR">
+      <Component Id="JHYYPathReg" Bitness="always64">
+        <Environment Id="JHYYBinPath"
+                     Name="PATH"
+                     Value="[INSTALLDIR]bin"
+                     Permanent="no"
+                     System="yes"
+                     Action="set"
+                     Part="last" />
+
+        <RegistryKey Root="HKLM"
+                     Key="SOFTWARE\JiHuiYiYou\JHYY">
+          <RegistryValue Type="string" Name="InstallDir" Value="[INSTALLDIR]" />
+          <RegistryValue Type="string" Name="Version" Value="$(var.JHY_VERSION)" />
+        </RegistryKey>
+
+        <RemoveRegistryKey Root="HKLM" Key="SOFTWARE\JiHuiYiYou\JHYY" Action="removeOnUninstall" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <!--
+      LicenseFile: 64-bit Bitness for consistency with other Components
+      (ICE80: Package cannot mix 32-bit and 64-bit Components). jhyy.exe +
+      qbe.exe are 64-bit, so all other Components in this MSI must also
+      be 64-bit.
+    -->
+    <Component Id="LicenseFile" Directory="CommonDir" Bitness="always64" Guid="44444444-4444-4444-4444-444444444444">
+      <File Id="LicenseFileRtf"
+            Source="!(bindpath.common)\license.rtf"
+            KeyPath="yes" />
+    </Component>
+  </Fragment>
+
+  <Fragment>
+    <!--
+      JhyyExeShortcut: Start Menu shortcut (per-user data) with HKCU
+      registry key as KeyPath (per ICE43/ICE57 requirement: per-user
+      data Component must have HKCU KeyPath, not file).
+      Component resides under INSTALLDIR for structural placement but
+      contains no per-machine data.
+    -->
+    <ComponentGroup Id="JHYYShortcuts" Directory="INSTALLDIR">
+      <Component Id="JhyyExeShortcut"
+                 Guid="33333333-3333-3333-3333-333333333333"
+                 Bitness="always64">
+        <RegistryKey Root="HKCU"
+                     Key="Software\JiHuiYiYou\JHYY">
+          <RegistryValue Type="string"
+                         Name="ShortcutInstalled"
+                         Value="[INSTALLDIR]bin\jhyy.exe"
+                         KeyPath="yes" />
+        </RegistryKey>
+        <Shortcut Id="JhyyStartMenuShortcut"
+                  Directory="ProgramMenuFolder"
+                  Name="JHYY Compiler"
+                  Target="[INSTALLDIR]bin\jhyy.exe"
+                  WorkingDirectory="INSTALLDIR"
+                  Icon="JHYYIcon" />
+        <RemoveRegistryKey Root="HKCU"
+                           Key="Software\JiHuiYiYou\JHYY"
+                           Action="removeOnUninstall" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

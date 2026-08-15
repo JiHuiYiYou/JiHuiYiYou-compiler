@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  compiler/Locale.zh-CN.wxl : 中文 UI string (v1.5.2)
+
+  WiX 4 UI 默认英文, 这份 wxl 加中文 localization. 用户面 OS 是中文时
+  Burn / MSI dialog 自动 pick 这个.
+
+  WiX 4 语法: <String> 必须用 Value 属性 (不能 inner text, per WIX0400 error).
+  &amp; &lt; &gt; 是 XML 保留字符转义.
+
+  Reference:
+    - docs/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.2
+-->
+<WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="zh-CN">
+
+  <String Id="Language" Overridable="no" Value="2052" />
+
+  <String Id="DowngradeErrorMessage"
+          Value="[ProductName] 已经安装更新的版本。请先卸载现有版本, 再安装本版本。" />
+
+  <String Id="MSYS2NotFound"
+          Value="未检测到 MSYS2 ucrt64 + GCC 环境。JHYY 编译器需要 GCC 链接 .jhyy 程序。
+请先安装 MSYS2 (https://www.msys2.org/) 并通过 pacman -S mingw-w64-ucrt-x86_64-gcc 装 GCC,
+然后重新运行本安装程序。
+JHYY 编译器本体会被安装, 但 jhyy run / jhyy compile 命令在没有 GCC 时会失败。" />
+
+  <String Id="FeatureJHYYTitle" Value="JHYY 编译器核心" />
+  <String Id="FeatureJHYYDescription"
+          Value="JHYY 编译器 (jhyy.exe) + QBE IL 编译器 (qbe.exe)。需要 MSYS2 + GCC 环境用于链接。" />
+
+  <String Id="WelcomeDlgTitle" Value="欢迎使用 [ProductName] 安装向导" />
+  <String Id="WelcomeDlgDescription"
+          Value="本安装向导将引导您完成 [ProductName] 在您的计算机上的安装。
+
+JHYY 是一门自研静态类型编程语言, 配有自己的编译器。安装程序会复制 jhyy.exe 和 qbe.exe 到您的系统, 并配置 PATH。
+
+按 下一步 继续。" />
+
+  <String Id="InstallDirDlgTitle" Value="安装文件夹" />
+  <String Id="InstallDirDlgDescription"
+          Value="请选择安装文件夹。
+
+默认: [INSTALLDIR]
+
+按 下一步 继续。" />
+
+  <String Id="ProgressDlgTitleInstalling" Value="正在安装 [ProductName]" />
+  <String Id="ProgressDlgTitleRepairing" Value="正在修复 [ProductName]" />
+  <String Id="ProgressDlgTitleRemoving" Value="正在卸载 [ProductName]" />
+
+</WixLocalization>
