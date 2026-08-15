@@ -18,8 +18,10 @@ if __name__ == "__main__" and __package__ is None:
 from jhyy_spec_doc import load_spec_doc, search_spec_doc  # noqa: E402
 
 
-# Locked spec path — per CLAUDE.md authoritative docs
-JHYY_ROOT = Path("C:/Users/liuzhen/Desktop/coding/JiHuiYiYou")
+# Locked spec path — per CLAUDE.md authoritative docs.
+# JHYY_ROOT derived from script location (works on any machine, no hardcoded
+# user path; per v1.5.5 release.yml CI fix). mcp-jhyy/ → parents[1] = root.
+JHYY_ROOT = Path(__file__).resolve().parents[1]
 LANG_SPEC_PATH = JHYY_ROOT / "docs/abis/jhyy-lang-spec-v1.3.0.md"
 
 

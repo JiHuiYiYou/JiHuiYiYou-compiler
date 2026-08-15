@@ -37,8 +37,9 @@ try:
 except (AttributeError, OSError):
     pass
 
-# 路径配置
-JHYY_ROOT = Path("C:/Users/liuzhen/Desktop/coding/JiHuiYiYou")
+# 路径配置 — JHYY_ROOT derived from script location (works on any machine;
+# per v1.5.5 release.yml CI fix). mcp-jhyy/server.py → parents[1] = root.
+JHYY_ROOT = Path(__file__).resolve().parents[1]
 MCP_DIR = Path(__file__).resolve().parent
 
 # ========== Server-level instructions ==========

@@ -22,8 +22,10 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List, Tuple
 
-# 路径配置
-JHYY_ROOT = Path("C:/Users/liuzhen/Desktop/coding/JiHuiYiYou")
+# 路径配置 — derive from script location (works on any machine, no
+# hardcoded user path; per v1.5.5 release.yml CI fix).
+# mcp-jhyy/jhyy_regress.py → parents[1] = project root
+JHYY_ROOT = Path(__file__).resolve().parents[1]
 TEST_DIR = JHYY_ROOT / "compiler/tests/examples"
 
 

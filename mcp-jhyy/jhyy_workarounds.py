@@ -13,7 +13,9 @@ import re
 from pathlib import Path
 from typing import Optional
 
-JHYY_ROOT = Path("C:/Users/liuzhen/Desktop/coding/JiHuiYiYou")
+# JHYY_ROOT derived from script location (works on any machine; per
+# v1.5.5 release.yml CI fix). mcp-jhyy/ → parents[1] = project root.
+JHYY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PATH = JHYY_ROOT / "docs/internal/workarounds.md"
 
 # 字段 alias 表: canonical_field → [alias1, alias2, ...]
