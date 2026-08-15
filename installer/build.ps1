@@ -176,11 +176,19 @@ switch ($Target) {
     "bundle" {
         Write-Host "[build.ps1] === Burn bundle build (v1.5.3) ==="
         # 1. ensure compiler MSI is built first (bundle chains it)
-        $msiPath = "installer/build-artifacts/jhyy-compiler-$($env:JHY_VERSION).msi"
+        $msiPath = "installer/build-artifacts/jhyy-compiler-$JHY_VERSION_DISPLAY.msi"
         if (-not (Test-Path $msiPath)) {
             Write-Host "[build.ps1] compiler MSI missing, building first..."
+            # Pass the ORIGINAL JHY_VERSION (with RC suffix if any) to the sub-script
+            # so it can recompute RC_SUFFIX + DISPLAY internally. Without this,
+            # sub-script sees JHY_VERSION=1.5.5 (already stripped by parent) and
+            # cannot reconstruct the -rc1 suffix for filenames.
+            $savedJHY = $env:JHY_VERSION
+            $env:JHY_VERSION = "$($env:JHY_VERSION)$JHY_VERSION_RC_SUFFIX"
             & powershell -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath compiler
-            if ($LASTEXITCODE -ne 0) {
+            $rc = $LASTEXITCODE
+            $env:JHY_VERSION = $savedJHY
+            if ($rc -ne 0) {
                 Write-Host "[ERROR] compiler MSI build failed, aborting bundle build"
                 exit 1
             }
