@@ -46,19 +46,18 @@ def _build_subprocess_env() -> dict:
 
     Mirror jhyy_runner.py:_build_subprocess_env (modules 独立, 不互相 import).
 
-    ⚠️ 必须 FORCE 写 Windows-style PATH — 不能只补缺. 当 MCP server / regress
-    runner 在 MSYS bash 下启动, os.environ['PATH'] 是 `/c/...` 格式, jhyy.exe
-    内部 `system("cmd /c gcc ...")` 拿这个 PATH 给 cmd.exe 用, cmd.exe 不认
-    `/c/...` 路径 → gcc 找 cc1/as/ld 失败 → "gcc link failed"。
-
     W-026 (2026-08-15): CI GH Actions release.yml regress 53/53 FAIL, real
-    error 'gcc is not recognized as an internal or external command'. The
-    conditional PATH sanitization above (if/else on `/c/...` prefix) didn't
-    cover the case where os.environ['PATH'] is empty string or contains a
-    mix of forward + backslash paths that defeats the startswith check.
-    Fix: ALWAYS overwrite with a known-good Windows PATH (gcc at ucrt64).
-    Keep the original PATH appended (best-effort) so user-installed tools
-    still resolve.
+    error 'gcc is not recognized as an internal or external command'.
+
+    W-027 (2026-08-15 same-day follow-up): setup-msys2@v2 把 MSYS2 装到
+    `$RUNNER_TEMP\\msys64` (CI = `D:\\a\\_temp\\msys64`), 不在
+    `C:\\msys64`。 cmd.exe `where gcc` 解析到
+    `D:\\a\\_temp\\msys64\\ucrt64\\bin\\gcc.exe`, 但 hardcoded
+    `C:\\msys64\\ucrt64\\bin` 不对 → cmd.exe 找不到 gcc。
+
+    Fix: 用 shutil.which 自动探 gcc / qbe / python / make 实际所在目录,
+    找到的话把那个目录 (转 Windows backslash) prepend 进 env['PATH']。
+    任何 layout (C:\\msys64 / D:\\a\\_temp\\msys64 / /usr/bin) 都能 cover。
     """
     env = os.environ.copy()
     if not env.get("TMP"):
@@ -71,12 +70,21 @@ def _build_subprocess_env() -> dict:
         env["SystemRoot"] = r"C:\Windows"
     if not env.get("SystemDrive"):
         env["SystemDrive"] = "C:"
-    # W-026: unconditionally prepend Windows-style MSYS2 ucrt64 bin + System32.
-    # Append original PATH so anything not MSYS-specific (e.g. user tools,
-    # Python's own bin) still resolves.
-    win_path = r"C:\msys64\ucrt64\bin;C:\msys64\usr\bin;C:\Windows\System32;C:\Windows"
+    # W-027: shutil.which respects env's PATH (incl MSYS-style) and resolves
+    # to real Windows path on win32.
+    import shutil
+    found_dirs = []
+    for tool in ("gcc", "qbe", "python", "make"):
+        loc = shutil.which(tool, path=env.get("PATH", ""))
+        if loc:
+            d_win = os.path.dirname(loc).replace("/", "\\")
+            if d_win and d_win not in found_dirs:
+                found_dirs.append(d_win)
+    # Prepend discovered dirs + System32. Append original PATH (best-effort
+    # fallback for user-installed tools not on the discovered paths).
+    win_dirs = ";".join(found_dirs) + ";" + r"C:\Windows\System32;C:\Windows"
     original = env.get("PATH", "")
-    env["PATH"] = win_path + (";" + original if original else "")
+    env["PATH"] = win_dirs + (";" + original if original else "")
     return env
 
 
