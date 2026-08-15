@@ -168,16 +168,21 @@ jobs:
       - name: Run regress (gated — must PASS)
         shell: msys2 {0}
         run: |
-          # W-027 debug: verify shutil.which() correctly finds gcc on CI
-          echo "=== W-027 DEBUG v2: shutil.which + cmd.exe resolution ==="
-          echo "Python env PATH (raw):"
-          python -c "import os; print(repr(os.environ.get('PATH', '(unset)'))[:500])"
-          echo ""
-          echo "shutil.which gcc (auto-detect):"
-          python -c "import shutil; loc=shutil.which('gcc'); print(loc if loc else 'NOT FOUND')"
-          echo ""
-          echo "cmd //c where gcc (Windows cmd.exe resolution):"
-          cmd //c "where gcc" 2>&1 || echo "(cmd /c where gcc failed)"
+          # W-027 debug v3: probe what env jhyy.exe child subprocess sees
+          echo "=== W-027 DEBUG v3: env after _build_subprocess_env ==="
+          python -c "
+import sys; sys.path.insert(0, 'mcp-jhyy')
+import jhyy_regress
+env = jhyy_regress._build_subprocess_env()
+print('env PATH after W-027 v2 fix:')
+print(env.get('PATH', '(unset)')[:600])
+print()
+print('cmd //c where gcc (with W-027 v2 env):')
+import subprocess
+r = subprocess.run(['cmd', '/c', 'where', 'gcc'], capture_output=True, text=True, env=env, timeout=5)
+print('  stdout:', repr(r.stdout))
+print('  rc:', r.returncode)
+"
           echo ""
           echo "=== END DEBUG ==="
           echo ""
