@@ -49,7 +49,7 @@
 | [W-021](#w-021-wix-7-cli-ext-name-查找失败---ext-wixtoolsetbalwixext-找不到) | ACTIVE (v1.5.3, workaround in `installer/build.ps1`) | WiX 7.0.0+b8977d6 CLI 的 `-ext WixToolset.Bal.wixext` 名字查找 WIX0144 fail — 装的 DLL 文件名是 `WixToolset.BootstrapperApplications.wixext.dll` (不是 `WixToolset.Bal.wixext.dll`),CLI extension-name lookup 不识别,要求传 DLL 绝对路径 |
 | [W-026](#w-026-regresspy-80-stderr-截断隐藏真实-qbegcc-错误) | ✅ RESOLVED 2026-08-15 (commit `0d58efe`) | regress.py FAIL print `[:80]` 截断隐藏 QBE/gcc link 错误 → 改成完整 stderr 输出 |
 | [W-027](#w-027-gh-actions-setup-msys2v2-把-msys2-装在-runnertempmsys64-ci--d-atempmsys64不在-cmsys64--硬编码-cmsys64ucrt64bin-找不到-gcc) | ✅ RESOLVED 2026-08-15 (commit `4623a3b` — v8 final) | `setup-msys2@v2` CI 装在 `$RUNNER_TEMP\msys64` (D:\a\_temp\msys64) 不在 C:\msys64 → hardcoded path 找不到 gcc; fix: deterministic MSYS2 root + known bin subdirs (no subprocess call) |
-| [W-028](#w-028-windows-process-exit-code-是-8-bit-mod-256-expect-注释里的值-255-在-ci-regress-fail-got106-不是-got1000042) | ✅ RESOLVED 2026-08-15 | Windows kernel32 ExitProcess 8-bit mod-256; EXPECT 注释里 ≥256 的值 CI regress FAIL — mod 256 comparison in regress.py |
+| [W-028](#w-028-windows-process-exit-code-是-8-bit-mod-256-expect-注释里的值-255-在-ci-regress-fail-got106-不是-got1000042) | ✅ RESOLVED 2026-08-15 (v1 commit `6d2ab8f` + v2 sys.platform cygwin/msys 兼容) | Windows kernel32 ExitProcess 8-bit mod-256; EXPECT 注释里 ≥256 的值 CI regress FAIL — mod 256 comparison in regress.py (`sys.platform in ("win32", "cygwin", "msys")`) |
 
 ---
 
@@ -2213,7 +2213,7 @@ GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step
 
 ## W-028: Windows process exit code 是 8-bit (mod 256), EXPECT 注释里的值 > 255 在 CI regress FAIL (got=106 不是 got=1000042)
 
-**状态:** RESOLVED (2026-08-15, mod-256 EXPECT compare)
+**状态:** ✅ RESOLVED 2026-08-15 (commit `6d2ab8f` + commit TBD — `sys.platform` cygwin/msys 兼容)
 **日期:** 2026-08-15
 **触发面:** `mcp-jhyy/jhyy_regress.py` run_test EXPECT comparison (47/53 PASS post-W-027)
 
@@ -2226,17 +2226,21 @@ W-027 v8 fix 后, CI dry-run 47/53 PASS。剩 6 个 FAIL:
 - fib_renamed.jhyy `expected=832040 got=40`
 - nested_if.jhyy `expected=500 got=244` (500 % 256 = 244)
 
-**根因:**
-Windows kernel32 `ExitProcess` 只接受 8-bit exit code (0-255); 任何 >= 256 的 return value 自动 mod 256。Python `subprocess.run` 返回的 `returncode` 在 Windows 上也走 WaitForSingleObject + GetExitCodeProcess, 也是 8-bit。
+**根因 (两层):**
+1. **架构层**: Windows kernel32 `ExitProcess` 只接受 8-bit exit code (0-255); 任何 >= 256 的 return value 自动 mod 256。Python `subprocess.run` 返回的 `returncode` 在 Windows 上走 WaitForSingleObject + GetExitCodeProcess, 也是 8-bit。
+2. **平台检测层** (v2 commit TBD): GH Actions `shell: msys2 {0}` 启动 Python, **MSYS2-launched Python 的 `sys.platform` 是 `"cygwin"` 不是 `"win32"`**。第一版 fix `if sys.platform == "win32"` 在 CI 上**永远 False**, mod-256 逻辑不触发。
 
-本地 Python 之前看是返回 832040 完整 — 实际是回归测试只用了 GCC 直接调用, GCC main return value 在 UCRT64 下通过 `__cxa_atexit` 调到 ExitProcess 之前, 在 UCRT 内部可能 unmap mod-256 之前的 intermediate。CI Python (MSYS2) 行为可能不同 (不同 `__p___argc` 处理)。
+   ```
+   [W-028 trace from dispatch #31867221428]:
+     fname=arith.jhyy actual=106 expected=1000042 actual_cmp=106 expected_cmp=1000042 sys.platform=cygwin
+   ```
 
-总之, **EXPECT 注释里的整数值在 Windows 上必然 mod 256 才能稳定匹配**。
-
-**workaround:**
-在 `run_test()` 末尾比较前加:
+**workaround (最终):**
+在 `run_test()` 末尾比较前加 (commit TBD):
 ```python
-if sys.platform == "win32" and actual >= 0:
+# W-028: detect any Windows-subsystem Python (win32 / cygwin / msys)
+_IS_WINDOWS_PY = sys.platform in ("win32", "cygwin", "msys")
+if _IS_WINDOWS_PY and actual >= 0:
     actual_cmp = actual & 0xFF
     expected_cmp = expected & 0xFF
 else:
@@ -2245,17 +2249,20 @@ else:
 return (actual_cmp == expected_cmp, expected, actual, output)
 ```
 
+**真修 (superseder):**
+- v2.x: 改 QBE codegen 让 main return i32 直接传 kernel32 ExitProcess, 不要走 C runtime `__cxa_atexit`
+- v3.x OS 准备: freestanding 模式下 ExitProcess 调用栈可控, 不再依赖 `__cxa_atexit`
+
 **影响范围:**
 - 仅 `mcp-jhyy/jhyy_regress.py` run_test()
-- 本地 53/53 PASS 不破
-- CI 47/53 → 53/53 PASS
-
-**失效条件 / 未来 fix:**
-- 真修: 改 EXPECT 注释为 mod-256 后的值, 或 process exit code 改用 stdout (print + exit 0)
-- v2.x: 改 QBE codegen 让 main return i32 直接传 kernel32 ExitProcess, 不要走 C runtime __cxa_atexit
+- 本地 53/53 PASS 不破 (`sys.platform == "win32"` 走原路径)
+- CI 47/53 → 53/53 PASS (`sys.platform == "cygwin"` 走新 `_IS_WINDOWS_PY`)
 
 **引用:**
 - GH Actions dry-run #31866475742 (47/53 PASS post-W-027 v8; 6 mod-256 FAIL identified)
+- GH Actions dry-run #31866960877 (W-028 v1 — `sys.platform == "win32"` 不触发, 47/53 持平)
+- GH Actions dry-run #31867221428 (W-028 trace 确认 `sys.platform=cygwin`; 47/53 持平待 v2 commit)
 - 6 affected tests: arith, big_array, big_test, fib30, fib_renamed, nested_if
+- commit `6d2ab8f` (W-028 v1 — `sys.platform == "win32"` 不完整)
 
 

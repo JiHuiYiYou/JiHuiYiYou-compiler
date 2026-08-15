@@ -245,7 +245,12 @@ def run_test(
     # kernel32 behavior. (Why it ever worked: Python 3.12 subprocess.run on
     # Windows actually does return the truncated value via WaitForSingleObject
     # + GetExitCodeProcess — both honor kernel32 8-bit truncation.)
-    if sys.platform == "win32" and actual >= 0:
+    #
+    # sys.platform on MSYS2-launched Python is "cygwin" (not "win32")! CI
+    # runner runs Python via `shell: msys2 {0}` in release.yml, so we get
+    # "cygwin" / "msys". Detect any Windows-subsystem Python and apply mod-256.
+    _IS_WINDOWS_PY = sys.platform in ("win32", "cygwin", "msys")
+    if _IS_WINDOWS_PY and actual >= 0:
         actual_cmp = actual & 0xFF
         expected_cmp = expected & 0xFF
     else:
@@ -254,7 +259,7 @@ def run_test(
     # DEBUG W-028: print raw + cmp
     import os as _os
     if _os.environ.get("JHYY_DEBUG_W028"):
-        print(f"[W-028] fname={os.path.basename(jhyy_file)} actual={actual} expected={expected} actual_cmp={actual_cmp} expected_cmp={expected_cmp} sys.platform={sys.platform}")
+        print(f"[W-028] fname={os.path.basename(jhyy_file)} actual={actual} expected={expected} actual_cmp={actual_cmp} expected_cmp={expected_cmp} sys.platform={sys.platform} is_win_py={_IS_WINDOWS_PY}")
     return (actual_cmp == expected_cmp, expected, actual, output)
 
 
