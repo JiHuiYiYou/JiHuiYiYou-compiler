@@ -21,6 +21,10 @@ param()
 $ErrorActionPreference = "Stop"
 
 # 1. version detection (跟 installer/build.ps1 一致)
+#    vsix filename uses $JHY_VERSION_DISPLAY (with optional -rcN suffix) when
+#    set by parent installer/build.ps1 — keeps the .vsix name aligned with
+#    the MSI/bundle filenames for RC releases (e.g. jhyy-lang-1.5.5-rc1.vsix).
+#    Falls back to JHY_VERSION (numeric) for local builds / no override.
 if (-not $env:JHY_VERSION) {
     try {
         $rawVer = (& git describe --tags --always 2>$null) -as [string]
@@ -36,6 +40,7 @@ if (-not $env:JHY_VERSION) {
     } catch { }
 }
 if (-not $env:JHY_VERSION) { $env:JHY_VERSION = "1.5.3" }
+$JHY_VERSION_DISPLAY = if ($env:JHY_VERSION_DISPLAY) { $env:JHY_VERSION_DISPLAY } else { $env:JHY_VERSION }
 
 # 2. verify vsce
 $vsce = Get-Command vsce -ErrorAction SilentlyContinue
@@ -74,11 +79,19 @@ try {
     }
     # vsce returns nonzero on warnings (LICENSE / .vscodeignore) but still
     # writes the .vsix. Check file presence instead of exit code.
-    $expectedVsix = "jhyy-lang-$($env:JHY_VERSION).vsix"
-    if (-not (Test-Path $expectedVsix)) {
+    # vsce always names the output after package.json's version field (which
+    # we patched to JHY_VERSION numeric). For RC releases, vsix filename
+    # must match MSI/bundle (e.g. jhyy-lang-1.5.5-rc1.vsix), so we rename
+    # the file after vsce produces it (vsce has no --output flag).
+    $vsceOutputVsix = "jhyy-lang-$($env:JHY_VERSION).vsix"
+    if (-not (Test-Path $vsceOutputVsix)) {
         Write-Host "[ERROR] vsce package failed (no .vsix produced):"
         $output | ForEach-Object { Write-Host "  $_" }
         exit 1
+    }
+    $displayVsix = "jhyy-lang-$JHY_VERSION_DISPLAY.vsix"
+    if ($JHY_VERSION_DISPLAY -ne $env:JHY_VERSION -and (Test-Path $vsceOutputVsix)) {
+        Rename-Item -Path $vsceOutputVsix -NewName $displayVsix -Force
     }
     $output | Where-Object { $_ -match 'WARNING' } | ForEach-Object {
         Write-Host "[WARN] $_"
@@ -90,14 +103,16 @@ try {
 }
 
 # 5. move to build-artifacts
-$vsix = "vscode-ext/jhyy-lang-$($env:JHY_VERSION).vsix"
+#    After step 4 rename, the vsix filename matches DISPLAY version
+#    (e.g. jhyy-lang-1.5.5-rc1.vsix) — same as MSI/bundle filenames.
+$vsix = "vscode-ext/jhyy-lang-$JHY_VERSION_DISPLAY.vsix"
 if (-not (Test-Path $vsix)) {
     Write-Host "[ERROR] vsix not found at $vsix"
     exit 1
 }
 $destDir = "installer/build-artifacts"
 if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
-Copy-Item $vsix "$destDir/jhyy-lang-$($env:JHY_VERSION).vsix" -Force
-Write-Host "[OK] $destDir/jhyy-lang-$($env:JHY_VERSION).vsix built"
+Copy-Item $vsix "$destDir/jhyy-lang-$JHY_VERSION_DISPLAY.vsix" -Force
+Write-Host "[OK] $destDir/jhyy-lang-$JHY_VERSION_DISPLAY.vsix built"
 
 exit 0

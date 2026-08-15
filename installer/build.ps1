@@ -133,10 +133,18 @@ switch ($Target) {
 
         # 1b. v1.5.4: package VSCode extension (.vsix) for MSI payload
         #   Skippable via SKIP_VSIX=1 (e.g. for quick MSI rebuild without vsix)
+        #   Pass JHY_VERSION_DISPLAY (with -rcN suffix) so vsix filename
+        #   matches the MSI/bundle (e.g. jhyy-lang-1.5.5-rc1.vsix). Without
+        #   this, package.ps1 falls back to JHY_VERSION (numeric, e.g. 1.5.5)
+        #   and the Copy-Item below fails to find the RC-tagged vsix.
         if (-not $env:SKIP_VSIX) {
             Write-Host "[build.ps1] packaging VSCode extension (.vsix)..."
+            $savedDisplay = $env:JHY_VERSION_DISPLAY
+            $env:JHY_VERSION_DISPLAY = $JHY_VERSION_DISPLAY
             & powershell -NoProfile -ExecutionPolicy Bypass -File "installer/vscode-ext/package.ps1"
-            if ($LASTEXITCODE -ne 0) {
+            $rc = $LASTEXITCODE
+            $env:JHY_VERSION_DISPLAY = $savedDisplay
+            if ($rc -ne 0) {
                 Write-Host "[ERROR] vsix packaging failed, aborting MSI build"
                 exit 1
             }
