@@ -32,7 +32,7 @@
   <Bundle Name="JHYY Installer"
           Version="$(var.JHY_VERSION)"
           Manufacturer="JiHuiYiYou"
-          UpgradeCode="B1C2D3E4-F5A6-7890-1234-567890ABCDEF"
+          UpgradeCode="E6AC60CA-8FED-4DDE-8001-9A07B40E80D3"
           AboutUrl="https://github.com/JiHuiYiYou/JiHuiYiYou-compiler"
           HelpUrl="https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/wiki">
 

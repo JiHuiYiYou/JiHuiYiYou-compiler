@@ -32,15 +32,18 @@
   <Package Name="JHYY Compiler"
            Version="$(var.JHY_VERSION)"
            Manufacturer="JiHuiYiYou"
-           UpgradeCode="A1B2C3D4-E5F6-7890-1234-567890ABCDEF"
+           UpgradeCode="FC3FC7FC-3479-43EB-A64D-490BAEB32066"
            Scope="perMachine"
            InstallerVersion="500">
 
     <!--
-      Component GUIDs (1111.../2222.../3333.../4444...) are dev placeholder.
-      For v1.5.5 release: replace with real random GUIDs (use uuidgen | tr A-F a-f).
+      Component GUIDs + UpgradeCode are real (v1.5.5 hotfix).
+      See installer/GUIDS.md for the GUID ledger (stable across versions).
+
       UpgradeCode stays stable across versions — Component GUIDs should change
-      only if Component content/structure changes.
+      only if Component content/structure changes. If you add/remove a Component,
+      generate a new GUID via `python -c "import uuid; print(uuid.uuid4())"` and
+      append to installer/GUIDS.md.
     -->
 
     <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeErrorMessage)" />
@@ -155,14 +158,14 @@
         ICE43/ICE57 (per-user shortcut + per-machine file in same Component
         with file KeyPath is invalid).
       -->
-      <Component Id="JhyyExe" Bitness="always64" Guid="11111111-1111-1111-1111-111111111111">
+      <Component Id="JhyyExe" Bitness="always64" Guid="A76D4595-11CE-4F86-B70A-170A6FDA06B0">
         <File Id="JhyyExeFile"
               Source="!(bindpath.bin)\jhyy.exe"
               KeyPath="yes"
               Checksum="yes" />
       </Component>
 
-      <Component Id="QbeExe" Bitness="always64" Guid="22222222-2222-2222-2222-222222222222">
+      <Component Id="QbeExe" Bitness="always64" Guid="096E27A7-65E2-465C-BA58-399A02C0F000">
         <File Id="QbeExeFile"
               Source="!(bindpath.bin)\qbe.exe"
               KeyPath="yes"
@@ -174,7 +177,7 @@
         Invoked by CustomAction InstallVSCodeExt (deferred, after InstallFiles).
         Lives in INSTALLDIR\bin\ (next to jhyy.exe / qbe.exe) so cmd can find it.
       -->
-      <Component Id="InstallVSIXBat" Bitness="always64" Guid="55555555-5555-5555-5555-555555555555">
+      <Component Id="InstallVSIXBat" Bitness="always64" Guid="5D1C3BC5-EBC3-472A-9744-1F96692A2E6F">
         <File Id="InstallVSIXBatFile"
               Source="!(bindpath.common)\install-vsix.bat"
               KeyPath="yes" />
@@ -187,12 +190,12 @@
       not URL). Lives in INSTALLDIR\common\ alongside license.rtf.
     -->
     <ComponentGroup Id="JHYYURLShortcuts" Directory="CommonDir">
-      <Component Id="JhyyDocsURL" Bitness="always64" Guid="AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA">
+      <Component Id="JhyyDocsURL" Bitness="always64" Guid="4065743A-3D07-48DE-A0E3-7FF8D5FEFA79">
         <File Id="JhyyDocsURLFile"
               Source="!(bindpath.common)\JHYY Documentation.url"
               KeyPath="yes" />
       </Component>
-      <Component Id="JhyyQuickStartURL" Bitness="always64" Guid="BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB">
+      <Component Id="JhyyQuickStartURL" Bitness="always64" Guid="98BA5444-5A01-4FD4-9995-623AC6869020">
         <File Id="JhyyQuickStartURLFile"
               Source="!(bindpath.common)\JHYY Quick Start.url"
               KeyPath="yes" />
@@ -235,7 +238,7 @@
       qbe.exe are 64-bit, so all other Components in this MSI must also
       be 64-bit.
     -->
-    <Component Id="LicenseFile" Directory="CommonDir" Bitness="always64" Guid="44444444-4444-4444-4444-444444444444">
+    <Component Id="LicenseFile" Directory="CommonDir" Bitness="always64" Guid="A4874A53-15B4-4010-8AF5-E6D47BD328CB">
       <File Id="LicenseFileRtf"
             Source="!(bindpath.common)\license.rtf"
             KeyPath="yes" />
@@ -251,7 +254,7 @@
       build.ps1 负责 copy 到 bindpath/vscode-ext/.
     -->
     <ComponentGroup Id="JHYYVSCodeExt" Directory="VSCodeExtDir">
-      <Component Id="VSCodeExtVSIX" Bitness="always64" Guid="66666666-6666-6666-6666-666666666666">
+      <Component Id="VSCodeExtVSIX" Bitness="always64" Guid="2BD62503-5942-4364-8052-B86ABC43C5C8">
         <File Id="VSCodeExtVSIXFile"
               Source="!(bindpath.vscode-ext)\jhyy-lang-$(var.JHY_VERSION).vsix"
               KeyPath="yes" />
@@ -269,7 +272,7 @@
     -->
     <ComponentGroup Id="JHYYShortcuts" Directory="INSTALLDIR">
       <Component Id="JhyyExeShortcut"
-                 Guid="33333333-3333-3333-3333-333333333333"
+                 Guid="9F008EC5-EF58-41B9-B6BE-8C4DD707E40A"
                  Bitness="always64">
         <RegistryKey Root="HKCU"
                      Key="Software\JiHuiYiYou\JHYY">
@@ -295,7 +298,7 @@
         MSI Shortcut.Target must be a file path (URL not allowed per ICE03).
       -->
       <Component Id="JhyyDocsShortcut"
-                 Guid="88888888-8888-8888-8888-888888888888"
+                 Guid="32C375AD-328D-47CF-A422-8155A092CA04"
                  Bitness="always64">
         <RegistryKey Root="HKCU"
                      Key="Software\JiHuiYiYou\JHYY">
@@ -318,7 +321,7 @@
         Target is Internet Shortcut (.url) file in INSTALLDIR\common\.
       -->
       <Component Id="JhyyQuickStartShortcut"
-                 Guid="99999999-9999-9999-9999-999999999999"
+                 Guid="181ADF1A-21D7-40A0-BF9D-64695522D202"
                  Bitness="always64">
         <RegistryKey Root="HKCU"
                      Key="Software\JiHuiYiYou\JHYY">
@@ -357,7 +360,7 @@
     <ComponentGroup Id="JHYYFileAssoc" Directory="INSTALLDIR">
       <Component Id="JHYYFileAssocReg"
                  Bitness="always64"
-                 Guid="77777777-7777-7777-7777-777777777777">
+                 Guid="C74ED968-E9D7-4061-AFC6-8FA37401F481">
         <RegistryKey Id="HKCR_JhyyExt"
                      Root="HKCR"
                      Key=".jhyy"
