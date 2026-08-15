@@ -12,6 +12,12 @@
 
   <String Id="Language" Overridable="no" Value="2052" />
 
+  <!-- License page -->
+  <String Id="LicenseHeader"
+          Value="[ProductName] 许可协议" />
+  <String Id="LicenseAcceptCheckbox"
+          Value="我接受许可协议的条款" />
+
   <!-- Welcome page -->
   <String Id="WelcomeHeader"
           Value="欢迎使用 [ProductName]" />

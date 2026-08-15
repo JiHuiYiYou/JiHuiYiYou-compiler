@@ -1,22 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  installer/Theme.xml : JHYY Burn bundle theme (v1.5.3)
+  installer/Theme.xml : JHYY Burn bundle theme (v1.5.6)
 
   WiX 4 WixStandardBootstrapperApplication Theme. Defines dialog layout,
-  fonts, colors, and the chain of pages (welcome → progress → finish).
+  fonts, colors, and the chain of pages (license → install → progress → finish).
 
-  Minimal theme that overrides only what we need (MSYS2 detection message
-  on Welcome page; otherwise uses default controls/layout).
+  Customizes the default theme to add:
+    - MSYS2 prereq warning on Install page (with hyperlink to msys2.org)
+    - PostInstall hint on Success page (jhyy --version check + MSYS2 install steps)
 
-  Format: WiX 4 Theme XML is XAML-style with:
-    - <Font> declarations
-    - <Page> declarations (Name + children: <Text>, <Hyperlink>, <Button>, <Checkbox>)
-    - All elements inside <Page> are placed by WiX runtime based on the
-      Page Name (Welcome/Progress/Finish).
+  Page chain (per WixStdBA Theme="rtfLicense"):
+    License (accept) → Install (prereq warning) → Progress → Success | Failure | Modify
+
+  W-032 (v1.5.6): added <Page Name="License">. Without it, Burn's rtfLicense
+  theme opens the License accept dialog but the Theme.xml override has no
+  License page → blank window with "Setup" caption and no controls → user
+  sees only a white window before cancel.
 
   Reference:
     - https://wixtoolset.org/docs/v4/bundle/wixstdba/
-    - docs/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.3
+    - docs/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.6 hotfix
 -->
 <Theme xmlns="http://wixtoolset.org/schemas/v4/thm">
 
@@ -24,6 +27,27 @@
 
   <Window Width="600" Height="450" Caption="[ProductName] Setup" FontId="WelcomeHeaderFont">
   </Window>
+
+  <!--
+    W-032: License accept page (rtfLicense theme). Required as the first page
+    Burn displays. Shows the RTF license text + Accept / Decline buttons.
+    Default control names: LicenseTextBox (multiline), AcceptButton, DeclineButton.
+    Reference: WiX 4 WixStdBA RtfLicense controls.
+  -->
+  <Page Name="License">
+    <Text X="20" Y="20" Width="-20" Height="-20" FontId="WelcomeHeaderFont">
+      !(loc.LicenseHeader)
+    </Text>
+    <LicenseTextBox X="20" Y="60" Width="-20" Height="-90" TabIndex="1" />
+    <Checkbox Name="LicenseAcceptedCheckBox" X="-250" Y="-41" Width="230" Height="20"
+              TabIndex="2" Text="!(loc.LicenseAcceptCheckbox)" />
+    <Button Name="AcceptButton" X="-91" Y="-11" Width="75" Height="32" TabIndex="3">
+      !(loc.InstallButton)
+    </Button>
+    <Button Name="DeclineButton" X="-11" Y="-11" Width="75" Height="32" TabIndex="4">
+      !(loc.CancelButton)
+    </Button>
+  </Page>
 
   <Page Name="Install">
     <Text X="20" Y="20" Width="-20" Height="-20" FontId="WelcomeHeaderFont">
