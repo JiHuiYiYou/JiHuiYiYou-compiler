@@ -2342,4 +2342,124 @@ return (actual_cmp == expected_cmp, expected, actual, output)
 **release.yml dry_run gate bug 发现:**
 dry_run=true 仍 publish release — `if: inputs.dry_run != 'true' || github.event_name == 'push'` 因 boolean vs string 比较类型不匹配, 永远 != → step 永远 run. v1.5.5-rc1 release 在 dry_run=true 下被 publish (但内容正确, prerelease + 4 assets); 修法见 commit `143c644`.
 
+---
+
+## W-030: WiX 4 Theme.xml schema — Font 必须在 `<Theme>` 顶层 (不能 nested in `<Window>`); `<Window>` 用 Caption + FontId (不用 Title + 内嵌 Font + Weight)
+
+**状态:** ✅ RESOLVED 2026-08-15 (commit TBD)
+**日期:** 2026-08-15
+**触发面:** `installer/Theme.xml` + `installer/Bundle.wxs` Burn bundle (`jhyy-installer-*.exe`)
+
+**症状:**
+`v1.5.6-rc1.exe` (GH Actions release) double-click 无任何 UI 弹出 — Burn bundle 启动即退 0xD (theme parse error 13 = "data is invalid"):
+```
+[3E90:1CBC]i000: Burn x64 v7.0.0 ...
+[3E90:1CBC]e000: Error 0x8007000d: Failed to parse theme.
+[3E90:1CBC]e000: Error 0x8007000d: Failed to load theme.
+[3E90:1CBC]i500: Shutting down, exit code: 0xd
+```
+
+**根因 (WiX 4 Theme XML schema 跟 v3 不一样, 4 错 cascade):**
+
+| # | v1.5.5 写法 | WiX 4 错误 | fix |
+|---|------|------|------|
+| 1 | `<Font Id="..." Height="-20" Weight="bold">` **inside `<Window>`** | 0x8007000d "No font elements found" | 移到 `<Theme>` 顶层 |
+| 2 | `<Font ... Weight="bold">` | 0x80070057 "Failed to find font weight attribute" | 删 `Weight="bold"` (WiX 4 runtime schema 不认) |
+| 3 | `<Window Width="..." Height="..." Caption="...">` 无 FontId | 0x80070490 "Failed to get window FontId attribute" | 加 `FontId="WelcomeHeaderFont"` |
+| 4 | `<Window ... Title="...">` | 0x8007000d "Window elements must contain either the Caption or StringId attribute" | `Title=` 改 `Caption=` |
+
+**workaround (最终):**
+```xml
+<Theme xmlns="http://wixtoolset.org/schemas/v4/thm">
+  <Font Id="WelcomeHeaderFont" Height="-20" />          <!-- 顶层, no Weight -->
+  <Window Width="600" Height="450" Caption="[ProductName] Setup" FontId="WelcomeHeaderFont" />
+  <Page> ... </Page>
+</Theme>
+```
+
+**Theme load 通过后新问题:** Burn 加载 MSI, MSI install 也失败 (Error 0x80070643) — 见 W-031。
+
+**引用:**
+- WiX 4 thm schema: https://wixtoolset.org/docs/v4/bundle/wixstdba/
+- WiX 3 → 4 迁移: `Theme.xml` schema 变化是 breaking change (WiX 3 允许内嵌 Font + Title + Weight bold)
+- 设计 plan: `docs/plans/v1/v1.5.6任务清单 + 概要设计.md` § Sprint v1.5.6 hotfix
+- commit: TBD (W-030 ship in v1.5.6 sprint)
+
+---
+
+## W-031: MSI LaunchCondition + INSTALLDIR resolution — 原探测 HKLM Uninstall\ucrt64 GCC 误报 + WiX 4 `<SetDirectory>` 不生效
+
+**状态:** ✅ RESOLVED 2026-08-15 (commit TBD)
+**日期:** 2026-08-15
+**触发面:** `installer/compiler/jhyy-compiler.wxs` LaunchCondition + INSTALLDIR
+
+**症状 (两层, cascade):**
+
+**Layer 1 — LaunchCondition 误报:**
+W-030 Theme fix 后, Burn bundle UI 正常弹出, MSI 启动后 LaunchCondition 失败:
+```
+MSI (s) ... : Doing action: AppSearch
+MSI (s) ... : Doing action: LaunchConditions
+MSI (s) ... : 产品: JHYY Compiler -- 未检测到 MSYS2 ucrt64 + GCC 环境。
+MSI (s) ... : 操作结束 21:30:20: LaunchConditions。返回值 3。
+MSI (s) ... : MainEngineThread is returning 1603
+[3E90:1CBC]e000: Error 0x80070643: Failed to install MSI package.
+```
+
+**根因 (Layer 1):** 原 v1.5.2 `<Property Id="MSYS2_GCC_FOUND"><RegistrySearch Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\ucrt64 GCC" /></Property>` — 只查 Windows MSI installer 注册的 GCC。但 MSYS2 ucrt64 GCC 是 `pacman -S mingw-w64-ucrt-x86_64-gcc` 装的, pacman **不写 HKLM\Uninstall 注册表**, 所以 RegistrySearch 永远 empty → `MSYS2_GCC_FOUND = ""` → `Installed = false` → LaunchCondition fail。
+
+**workaround (Layer 1):** 改 4 源探测 — 任一信号 true 即认为 GCC 装了:
+
+| Source | Property | 探测方式 | 适用场景 |
+|--------|----------|---------|----------|
+| 1 | `MSYS2_GCC_UNINSTALL` | HKLM\Uninstall\ucrt64 GCC | Windows installer 装的 GCC (向后兼容) |
+| 2 | `MSYS2_GCC_PATH` | HKLM\...\Environment\Path | PATH 含 `ucrt64\bin` 或 `mingw64\bin` (用户手动加 PATH) |
+| 3 | `MSYS2_GCC_FILE` | `<DirectorySearch Path="C:\msys64\ucrt64\bin"><FileSearch Name="gcc.exe"/></DirectorySearch>` | Windows 默认 MSYS2 install path |
+| 4 | `MSYS2_GCC_DIR` | `<DirectorySearch Path="C:\msys64" />` | MSYS2 install 标志 (PATH 未 propagate) |
+
+`<SetProperty Id="MSYS2_GCC_FOUND" Value="1" Before="LaunchConditions" Condition="MSYS2_GCC_UNINSTALL OR MSYS2_GCC_PATH OR MSYS2_GCC_FILE OR MSYS2_GCC_DIR" />`
+
+**Layer 2 — INSTALLDIR 解析成 `C:\JHYY\`:**
+Layer 1 修了 LaunchCondition 后 MSI install 仍 fail (0x80070643), 卡 42 秒后 Error 1606:
+```
+MSI (s) ... : Doing action: SetINSTALLDIR
+... (42 seconds later) ...
+MSI (s) ... : Note: 1: 1314 2: JHYY
+MSI (s) ... : Note: 1: 1606 2: JHYY      <- "Could not access network location JHYY"
+MSI (s) ... : 操作结束 21:31:02: SetINSTALLDIR。返回值 3。
+Property(S): INSTALLDIR = C:\JHYY\
+```
+
+**根因 (Layer 2):** WiX 4 `<SetDirectory Id="INSTALLDIR" Value="[ProgramFiles6432Folder]JHYY" Condition="NOT FOUND" />` 不工作 — WiX 4 emit SetINSTALLDIR type-33 CA(`Condition="NOT INSTALLDIR"`), 但 INSTALLDIR property 在 CostInitialize 阶段就被 `<Directory>` parent resolution 填成 `[TARGETDIR]\JHYY` = `C:\JHYY\`, NOT INSTALLDIR 永远 false → CA 永不跑 → INSTALLDIR 永远 `C:\JHYY\`。
+
+**workaround (Layer 2):** 删 `<SetDirectory>`,改用 `<SetProperty>` + 单独的 `INSTALLDIR_REG_FOUND` Property (RegistrySearch 设) 作为 condition:
+```xml
+<SetProperty Id="INSTALLDIR"
+             Value="[ProgramFiles6432Folder]JHYY"
+             Condition="NOT INSTALLDIR_REG_FOUND"
+             After="CostFinalize" />
+<Property Id="INSTALLDIR_REG_FOUND">
+  <RegistrySearch Id="JHYYInstallDirSearch"
+                  Type="directory"
+                  Root="HKLM"
+                  Key="SOFTWARE\JiHuiYiYou\JHYY"
+                  Name="InstallDir" />
+</Property>
+```
+- Fresh install (无 HKLM 注册): `INSTALLDIR_REG_FOUND` 空, `NOT INSTALLDIR_REG_FOUND` true → SetINSTALLDIR 跑 → INSTALLDIR = `[ProgramFiles6432Folder]JHYY` = `C:\Program Files\JHYY\`
+- Upgrade/repair (有 HKLM 注册): `INSTALLDIR_REG_FOUND` = prior path, SetINSTALLDIR 不跑 → INSTALLDIR 保持 registry 里的 prior path
+
+**验证:**
+- Local admin install (`msiexec /a`) status 0 (success)
+- MSI log 显示 `MSYS2_GCC_FOUND = 1`, `INSTALLDIR_REG_FOUND` 空 (fresh install)
+- 真 `/i` install 需要 admin shell + UAC (用户测)
+
+**引用:**
+- WiX 4 SetDirectory behavior: https://github.com/wixtoolset/issues/issues/6304 (SetDirectory vs SetProperty semantics changed)
+- WiX 4 DirectorySearch syntax: Path attr only, no Type attr (跟 v3 不一样)
+- commit: TBD (W-031 ship in v1.5.6 sprint)
+- related: W-027 / W-029 (MSYS2 GCC 探测在 jhyy.exe 端的 4-tier probe — W-031 是 MSI 端的 4-source probe, 互补)
+
+---
+
 

@@ -20,8 +20,9 @@
 -->
 <Theme xmlns="http://wixtoolset.org/schemas/v4/thm">
 
-  <Window Width="600" Height="450" Title="[ProductName] Setup">
-    <Font Id="WelcomeHeaderFont" Height="-20" Weight="bold" />
+  <Font Id="WelcomeHeaderFont" Height="-20" />
+
+  <Window Width="600" Height="450" Caption="[ProductName] Setup" FontId="WelcomeHeaderFont">
   </Window>
 
   <Page Name="Install">

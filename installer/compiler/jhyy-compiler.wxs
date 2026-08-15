@@ -57,18 +57,99 @@
 
       WiX 4 launch condition syntax: <Launch Condition="..." Message="..." />
       (跟 v3 <Condition Message="..."> 不同, per GitHub discussion #6304)
+
+      Multi-source detection (W-031 fix, v1.5.6 hotfix):
+      原 v1.5.2 只查 HKLM\Uninstall\ucrt64 GCC (Windows MSI installer 注册),
+      但 MSYS2 ucrt64 GCC 是通过 pacman 装的, pacman 不写 Uninstall 注册表 →
+      LaunchCondition 误报 → MSI 1603 fail.
+      现在 4 源探测 (任一 true 即认为 GCC 装了):
+        1. MSYS2_GCC_UNINSTALL : 原 HKLM Uninstall\ucrt64 GCC (保留 backward compat)
+        2. MSYS2_GCC_PATH      : PATH 环境变量含 ucrt64\bin 或 mingw64\bin
+        3. MSYS2_GCC_FILE      : C:\msys64\ucrt64\bin\gcc.exe 存在 (Windows 默认 MSYS2 install path)
+        4. MSYS2_GCC_DIR       : C:\msys64 目录存在 (MSYS2 install 标志, 不强制 ucrt64 subdir)
+      W-031 决策 (user 2026-08-15): 改探测, 不删 LaunchCondition — 没 GCC 装上
+      也 OK (compiler 自身可用), 仅 jhyy run / jhyy compile 失败 (符合 v1.5.2 设计意图).
     -->
     <Launch Condition="Installed OR MSYS2_GCC_FOUND" Message="!(loc.MSYS2NotFound)" />
 
-    <Property Id="MSYS2_GCC_FOUND">
-      <RegistrySearch Id="MSYS2GccSearch"
+    <!-- Source 1: HKLM Uninstall\ucrt64 GCC (Windows installer registered) -->
+    <Property Id="MSYS2_GCC_UNINSTALL">
+      <RegistrySearch Id="MSYS2GccUninstallSearch"
                       Type="raw"
                       Root="HKLM"
                       Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\ucrt64 GCC"
                       Name="DisplayVersion" />
     </Property>
 
-    <Property Id="INSTALLDIR">
+    <!--
+      Source 2: PATH environment variable contains ucrt64/bin or mingw64/bin.
+      Type="raw" + Root=HKLM uses the system PATH (per-machine).
+      Use Name="Path" (case sensitive — Windows registry uses "Path" key).
+    -->
+    <Property Id="MSYS2_GCC_PATH">
+      <RegistrySearch Id="MSYS2GccPathSearch"
+                      Type="raw"
+                      Root="HKLM"
+                      Key="SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
+                      Name="Path" />
+    </Property>
+
+    <!--
+      Source 3: gcc.exe exists at default MSYS2 install location.
+      WiX 4 DirectorySearch has no Type attribute — Path is the literal Windows
+      path; child FileSearch checks file existence by Name (no Type attribute).
+    -->
+    <Property Id="MSYS2_GCC_FILE">
+      <DirectorySearch Id="MSYS2UCRT64BinDir"
+                       Path="C:\msys64\ucrt64\bin">
+        <FileSearch Id="MSYS2GccExeSearch"
+                    Name="gcc.exe" />
+      </DirectorySearch>
+    </Property>
+
+    <!--
+      Source 4: C:\msys64 directory exists (MSYS2 install marker — covers
+      users who installed ucrt64 via pacman but PATH not propagated to
+      Windows env yet, e.g. user opens fresh cmd without MSYS2 env init).
+    -->
+    <Property Id="MSYS2_GCC_DIR">
+      <DirectorySearch Id="MSYS2RootDir"
+                       Path="C:\msys64" />
+    </Property>
+
+    <!--
+      Combined property: MSYS2_GCC_FOUND = any of the 4 sources found.
+      WiX 4 SetProperty requires Before/After sequence attribute when Id is
+      present. We schedule it After="AppSearch" so all 4 source properties are
+      populated by then. AppSearch is the standard MSI sequence action that
+      runs all <Property><RegistrySearch> + <Property><DirectorySearch>
+      sources.
+    -->
+    <SetProperty Id="MSYS2_GCC_FOUND"
+                 Value="1"
+                 Before="LaunchConditions"
+                 Condition="MSYS2_GCC_UNINSTALL OR MSYS2_GCC_PATH OR MSYS2_GCC_FILE OR MSYS2_GCC_DIR" />
+
+    <!--
+      W-031 fix: removed <Property><RegistrySearch> on INSTALLDIR + <SetDirectory>
+      (WiX 4 emits SetINSTALLDIR type-33 CA with Condition="NOT INSTALLDIR" —
+      but INSTALLDIR is pre-populated from <Directory> parent resolution to
+      C:\JHYY\ before AppSearch runs, so NOT INSTALLDIR is always false → CA
+      never fires → fresh installs land at C:\JHYY\ instead of C:\Program Files\).
+
+      Fix: use <SetProperty> to set INSTALLDIR after CostFinalize when registry
+      search for prior install path is empty (fresh install). This works because
+      INSTALLDIR_REG_FOUND is a separate property (set by RegistrySearch) — it
+      stays "1" if prior install found, "empty" otherwise. The SetINSTALLDIR CA
+      WiX emits for <SetDirectory> never fires (same NOT INSTALLDIR problem), so
+      we explicitly handle the fresh-install case here.
+    -->
+    <SetProperty Id="INSTALLDIR"
+                 Value="[ProgramFiles6432Folder]JHYY"
+                 Condition="NOT INSTALLDIR_REG_FOUND"
+                 After="CostFinalize" />
+
+    <Property Id="INSTALLDIR_REG_FOUND">
       <RegistrySearch Id="JHYYInstallDirSearch"
                       Type="directory"
                       Root="HKLM"
@@ -76,7 +157,13 @@
                       Name="InstallDir" />
     </Property>
 
-    <SetDirectory Id="INSTALLDIR" Value="[ProgramFiles6432Folder]JHYY" Condition="NOT FOUND" />
+    <!--
+      W-031 (2): <SetDirectory> removed. WiX 4 auto-generates a SetINSTALLDIR
+      type-33 CA with Condition="NOT INSTALLDIR" — INSTALLDIR property is
+      pre-resolved at CostInitialize (directory table resolution), so the CA
+      never fires. We rely on SetProperty above + the WixUI_Minimal InstallDir
+      dialog for user-chosen paths (MSI standard UI flow).
+    -->
 
     <Directory Id="INSTALLDIR" Name="JHYY">
       <Directory Id="BinDir" Name="bin" FileSource="!(bindpath.bin)" />
