@@ -103,11 +103,19 @@ jobs:
             python-pip
             zip
 
+      - name: Setup .NET 8 (WiX 4/7 prerequisite)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+
       - name: Install WiX 4/7 toolchain
-        shell: msys2 {0}
+        shell: pwsh
         run: |
+          # WiX CLI ships as a .NET tool; install globally and add to PATH.
+          # Use Add-Content (per W-022) — Out-File -Encoding utf8 corrupts
+          # $GITHUB_PATH with UTF-8 BOM.
           dotnet tool install --global wix
-          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+          "$env:USERPROFILE\.dotnet\tools" | Add-Content -Path $env:GITHUB_PATH
           wix --version
           wix extension add -g WixToolset.Util.wixext
           wix extension add -g WixToolset.UI.wixext

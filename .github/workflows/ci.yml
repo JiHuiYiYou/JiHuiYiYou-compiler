@@ -53,7 +53,6 @@ jobs:
             base-devel
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-make
-            mingw-w64-ucrt-x86_64-qbe
             python
             python-pip
 
@@ -62,7 +61,17 @@ jobs:
         run: |
           echo "GH_RUNNER=true" >> $GITHUB_ENV
           echo "MSYS2_PATH=/c/msys64/usr/bin:$PATH" >> $GITHUB_ENV
-          which gcc qbe python make
+          which gcc python make
+
+      - name: Build qbe.exe (vendored source under qbe/)
+        shell: msys2 {0}
+        run: |
+          # W-025: MSYS2 has no qbe package; build from vendored source.
+          # Same step as release.yml (see .github/workflows/release.yml).
+          cd qbe
+          make
+          ls -la qbe.exe
+          cd ..
 
       - name: Build stage 0 (C-side bootstrap)
         shell: msys2 {0}
