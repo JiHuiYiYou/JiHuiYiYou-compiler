@@ -85,3 +85,13 @@ installer/**/*.wixlib
 # v1.5.5: SHA256.txt (build.ps1 bundle 自动生成, 跟 .msi/.exe 同 lifecycle)
 installer/SHA256.txt
 installer/**/SHA256.txt
+# v1.5.5: build-artifacts/ 完整 ignore (WiX 中间产物 + mingw64 链接器库 +
+# install.log / .wxs 重定向副本). directory 整个 ignore 避免 140+ GH Actions
+# 产物 leak 到 untracked (mingw64/lib/gcc/* libgcc.a etc. 每次 run 重新生成)
+installer/build-artifacts/
+# v1.5.5: vendored QBE source 上游子目录 (test suite / minic / tools / doc)
+# 不在我们 build 链路里, 仅 source 跟踪 (qbe/*.c / *.h / Makefile / README)
+qbe/test/
+qbe/tools/
+qbe/minic/
+qbe/doc/
