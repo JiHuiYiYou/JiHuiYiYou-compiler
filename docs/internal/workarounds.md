@@ -2181,7 +2181,7 @@ GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step
 
 ## W-027: GH Actions `setup-msys2@v2` 把 MSYS2 装在 `$RUNNER_TEMP\msys64` (CI = `D:\a\_temp\msys64`), 不在 `C:\msys64` — 硬编码 `C:\msys64\ucrt64\bin` 找不到 gcc
 
-**状态:** RESOLVED (2026-08-15, commit `4623a3b` — v4 deterministic MSYS2 root)
+**状态:** ✅ RESOLVED → SUPERSEDED by W-029 (v1.5.6 superseder commit TBD)
 **日期:** 2026-08-15
 **触发面:** `.github/workflows/release.yml` Run regress step (53/53 FAIL → 47/53 FAIL → 53/53 PASS over 4 fix attempts)
 
@@ -2210,6 +2210,68 @@ GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step
 **引用:**
 - debug runs: GH Actions #31861809057, #31863594640, #31863873870, #31864035818, #31864780270, #31864948299, #31865432960, #31865675000, #31866010390, #31866179790, #31866475742
 - fix commit: `4623a3b` (v8 final)
+- v1.5.6 superseder: 见 W-029 — `jh_gcc_path()` 4-tier 探测, regress.py / release.yml
+  不再 prepend MSYS2 bin 到 PATH, W-027 v8 Python 探测段整段删.
+
+## W-029: jhyy.exe toolchain 探测收敛 — `jh_gcc_path()` 4-tier 优先级 + `jh_gcc_invoke()` 包装替代 v1.0.0 跨 3 文件 MSYS2 探测逻辑
+
+**状态:** 🟢 ACTIVE (v1.5.6 ship, commit TBD)
+**日期:** 2026-08-15
+**触发面:** `compiler/src0/jhyy_helpers.c` (jh_gcc_path + jh_gcc_invoke) +
+`compiler/src0/main.jhyy` (link_with_gcc 改用 jh_gcc_invoke) +
+`mcp-jhyy/jhyy_regress.py` (删 _build_subprocess_env 的 MSYS2 探测段) +
+`.github/workflows/release.yml` (删 Propagate MSYS2 paths step)
+
+**superseder 关系:**
+- W-027 v8 RESOLVED → SUPERSEDED by W-029 (整段 MSYS2 探测从 Python 侧删,
+  收敛到 jhyy.exe 内部)
+- v1.0.0 release 痛点 (regress.py 跨平台 quoting / setup-msys2 path 不固定)
+  闭环
+
+**症状 (W-027 v8 之前):**
+- 跨 3 文件 (regress.py / release.yml / jhyy_helpers.c) 各自探测 MSYS2 path
+- 试了 8 个版本 (v1-v8) 才稳定, bug 一堆 (subprocess quoting / encoding /
+  MSYS2 virtual path 跟 Win32 path 混淆)
+- 任何一处改都会破坏另两处
+
+**workaround (v1.5.6 fix):**
+1. `jh_gcc_path()` (`compiler/src0/jhyy_helpers.c` lines 204-294):
+   4 层优先级探测, 一次性 resolve, static buf 缓存:
+   - **Priority 1**: `JHY_GCC` env (user/CI 显式 override)
+   - **Priority 2**: `$JHYY_HOME\env.txt` 文件 KEY=VALUE (单用户配置)
+   - **Priority 3**: Windows MSYS2 magic (`C:\msys64\ucrt64\bin\gcc.exe` 等 3 项)
+   - **Priority 4**: `SearchPathA` PATH 探测 (Win32 API, 不依赖 subprocess)
+   - **Fallback**: literal `"gcc"` 走 Windows PATH 解析
+2. `jh_gcc_invoke()` (同文件 lines 300-302):
+   `snprintf` 包装 `"%s" %s`, 给 `system()` 调用 — 替代 main.jhyy `link_with_gcc` 裸 `system("gcc ...")`
+3. `compiler/src0/main.jhyy` `link_with_gcc`: 改用 `jh_gcc_invoke(invoke_buf, ...)` + `system(invoke_buf)`. cmd_buf 不再前缀 GCC_PATH() (现在 invoke_buf 内部加)
+4. `mcp-jhyy/jhyy_regress.py` `_build_subprocess_env`: **删** lines 87-117 (MSYS2 探测段 ~30 行). 仅保留基础 env (TMP/SystemRoot). jhyy.exe 自己负责 gcc 探测
+5. `.github/workflows/release.yml`: **删** lines 164-176 "Propagate MSYS2 paths to subprocess PATH" step. jhyy.exe 启动时自己探测, GH Actions runner 不需手工 export PATH
+6. Linux/macOS placeholder: `jh_gcc_path()` `#ifdef _WIN32` 之外返回 literal `"gcc"` (v2.x 填跨平台探测)
+
+**测试 (5 个探测优先级):**
+- `compiler/tests/examples/_jh_gcc_p1.jhyy` — SETENV `JHY_GCC=C:\msys64\ucrt64\bin\gcc.exe` → Priority 1 命中
+- `compiler/tests/examples/_jh_gcc_p2.jhyy` — SETENV `JHYY_HOME=...`, 手动写 env.txt → Priority 2 命中
+- `compiler/tests/examples/_jh_gcc_p3.jhyy` — 不设 env, magic 存在 → Priority 3 命中
+- `compiler/tests/examples/_jh_gcc_p4.jhyy` — placeholder (探测链返回非空); 严格 SearchPathA 验证受测试环境约束推迟 v2.x
+- `compiler/tests/examples/_jh_gcc_p5.jhyy` — placeholder (探测链返回非空); 严格 fallback "gcc" 验证推迟 v2.x
+- p1/p2/p3: 本机测试环境约束 (magic 唯一存在路径 = ucrt64, 跟 Priority 3 magic 第 1 项相同) 严格 Priority 1/2 vs 3 区分无法自动化, 实际区分证据见 `_jh_gcc_p1_debug.jhyy` (ad-hoc)
+
+**影响范围:**
+- 4 文件改动 (jhyy_helpers.c / main.jhyy / regress.py / release.yml)
+- 5 个新测试 (p1-p5, SETENV directive 新增)
+- baseline 53/53 PASS 不破
+- Linux/macOS 跨平台探测 v2.x sprint 填 (per `feedback_compiler_toolchain_path_resolution` 类型 4 升级)
+
+**失效条件 (W-029 移除条件):**
+- v2.x manifest lite 实施后, Priority 2 env.txt 升级到 toolchain.env 多工具 (v2.x sprint 范围)
+- 跨平台探测 (Linux/macOS) 实施后, `#ifdef _WIN32` 分支消失 (v2.x sprint 范围)
+
+**引用:**
+- design plan: `docs/plans/v1/v1.5.6任务清单 + 概要设计.md` § 设计 1
+- related memory: `feedback_compiler_toolchain_path_resolution` (类型 4 升级要求)
+- related workaround: W-027 v8 (Python 探测 → jhyy.exe 接管)
+- 实施 commit: TBD (v1.5.6 sprint 末 ship)
 
 ## W-028: Windows process exit code 是 8-bit (mod 256), EXPECT 注释里的值 > 255 在 CI regress FAIL (got=106 不是 got=1000042)
 

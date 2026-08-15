@@ -381,6 +381,70 @@ gh workflow run release.yml -f version=1.5.5-rc1 -f dry_run=true
 - ✅ RC release [v1.5.5-rc1](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v1.5.5-rc1) 保留 — Pre-release, 4 assets with -rc1 suffix
 - ✅ 6 installer pipeline fixes 串联: W-028 v2 (regress cygwin) + vsce install (release.yml) + RC version strip (build.ps1) + sub-script RC suffix + vsix DISPLAY version + .wxs DISPLAY references + dry_run gate boolean fix
 
+## v1.5.6 — `jh_gcc_path()` 4-tier 探测收敛跨 3 文件 MSYS2 探测逻辑 (本 commit)
+
+### 完成定义
+
+- ✅ `compiler/src0/jhyy_helpers.c` — `jh_gcc_path()` (Windows 4-tier + Linux placeholder) + `jh_gcc_invoke()` 包装 (~118 行新增)
+- ✅ `compiler/src0/main.jhyy` — `link_with_gcc` 改用 `jh_gcc_invoke` (替代裸 `system("gcc ...")` 拼 cmd_buf), cmd_buf 不再前缀 GCC_PATH()
+- ✅ 5 个新测试 `compiler/tests/examples/_jh_gcc_p1.jhyy` ... `_p5.jhyy` — 探测优先级黑盒验证 (5/5 PASS)
+- ✅ `mcp-jhyy/jhyy_regress.py` — `_build_subprocess_env` 删 W-027 v4 MSYS2 探测段 (~30 行), 仅保留基础 env; 新增 `SETENV` 注释 directive 注入 env var 到 test
+- ✅ `.github/workflows/release.yml` — 删 "Propagate MSYS2 paths to subprocess PATH" step (12 行); Run regress 注释更新指向 W-027/W-029 superseder
+- ✅ `.gitignore` — 加 `compiler/tests/examples/_tmp_jhyy_home/` (p2 测试 env.txt setup 目录)
+- ✅ `docs/internal/workarounds.md` — W-027 标 "RESOLVED → SUPERSEDED by W-029"; 新增 W-029 ACTIVE 记录新设计
+- ⚠️ **Linux/macOS 跨平台探测** (Priority 4 SearchPathA / 多 magic 路径) 推迟到 v2.x manifest lite sprint (per `feedback_compiler_toolchain_path_resolution` 类型 4 升级)
+- ⚠️ **p4/p5 严格测试** (SearchPathA / fallback "gcc") 推迟到 v2.x (本机测试环境无法构造 magic 全不存在的状态)
+- ⚠️ **Real GH Actions CI dry-run** 等 commit 后 user 触发 (per `feedback_auto_push_after_commit.md`)
+
+### 核心机制
+
+#### 1. `jh_gcc_path()` 4-tier 优先级探测
+
+| Priority | 来源 | 场景 |
+|----------|------|------|
+| 1 | `JHY_GCC` env | user/CI 显式 override (测试 + CI 最常用) |
+| 2 | `$JHYY_HOME\env.txt` KEY=VALUE | 单用户配置 (装时探测结果写入) |
+| 3 | Windows MSYS2 magic 3 项 | `C:\msys64\ucrt64\bin\gcc.exe` 等, 本机默认 |
+| 4 | `SearchPathA` PATH 探测 | Win32 API 替代 W-027 v8 的 shutil.which / cmd where (no subprocess) |
+| 5 (fallback) | literal `"gcc"` | 走 Windows PATH 解析 (跟 W-027 v8 之前一致) |
+
+Static buf 缓存, 启动一次性 resolve, 后续多次读返回 const char*. Linux/macOS 占位符 `#ifdef _WIN32` 之外返回 `"gcc"` (v2.x 填跨平台探测).
+
+#### 2. `jh_gcc_invoke()` system() 包装
+
+```c
+int jh_gcc_invoke(char *out_buf, int out_size, const char *args) {
+    return snprintf(out_buf, (size_t)out_size, "\"%s\" %s", jh_gcc_path(), args);
+}
+```
+
+`main.jhyy link_with_gcc` 改用:
+```jhyy
+let invoke_buf = malloc(16384 as i64);
+let _wrote = jh_gcc_invoke(invoke_buf, 16384 as i32, args_start);
+let r = system(invoke_buf);
+```
+
+替代之前 `system("gcc <args>")` 裸调用, GCC_PATH() 前缀从 main.jhyy 移到 jh_gcc_invoke 内部 (一处真理).
+
+#### 3. SETENV directive (regress.py 新增)
+
+`// SETENV: KEY=VALUE` 注释行被 regress.py 解析, 注入到 `_build_subprocess_env()` 输出 env dict, 然后用 `env=test_env` 跑 compile + run subprocess. 之前需要 bash pre-step `export JHY_GCC=...` 才能验证 env 行为, 现在 inline 在 .jhyy 源里 — test 跟 source 一起版本控制.
+
+5 个测试都用 SETENV (除 p3 不设 env 走 magic). p1 SETENV `JHY_GCC=C:\msys64\ucrt64\bin\gcc.exe` (magic 第 1 项) → Priority 1 命中直接通过.
+
+#### 4. regress.py + release.yml cleanup
+
+- `_build_subprocess_env()` 删 W-027 v4 整段 (shutil.which / RUNNER_TEMP / MSYS2 root 探测), 只剩 TMP/SystemRoot 基础 env. ~30 行 → 0 行.
+- "Propagate MSYS2 paths to subprocess PATH" step 整段删 (12 行). release.yml 从 13 step → 12 step.
+- 删后逻辑: jhyy.exe 启动时自己调 jh_gcc_path() 探测 gcc 路径, Python / GH Actions 不再操心 MSYS2 在哪. 跨 3 文件 8 个版本的 workaround (W-027 v1-v8) 全部收敛到 jhyy.exe 内部一处.
+
+### 已知 workarounds (已入 `docs/internal/workarounds.md`)
+
+- **W-027 (RESOLVED → SUPERSEDED by W-029)** `setup-msys2@v2` 装 MSYS2 到 `$RUNNER_TEMP\msys64` (CI) / `C:\msys64` (local): 跨 3 文件 8 个版本探测逻辑收敛到 jhyy.exe `jh_gcc_path()` 内部, regress.py / release.yml 不再 prepend MSYS2 bin 到 PATH
+- **W-028 (RESOLVED)** Windows process exit code 8-bit (mod 256): v1.5.5 实施, v1.5.6 保持
+- **W-029 (新增 ACTIVE)** jhyy.exe toolchain 探测收敛: `jh_gcc_path()` 4-tier + `jh_gcc_invoke()` 包装替代 v1.0.0 跨 3 文件 MSYS2 探测逻辑. Linux/macOS 跨平台探测推迟 v2.x
+
 ### 后续工作 (v1.5.0 umbrella ship)
 
 - ✅ v1.5.5 done → v1.5.0 umbrella 5/5 sprint 全部 ship
