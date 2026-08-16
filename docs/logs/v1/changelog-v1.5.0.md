@@ -444,6 +444,10 @@ let r = system(invoke_buf);
 - **W-027 (RESOLVED → SUPERSEDED by W-029)** `setup-msys2@v2` 装 MSYS2 到 `$RUNNER_TEMP\msys64` (CI) / `C:\msys64` (local): 跨 3 文件 8 个版本探测逻辑收敛到 jhyy.exe `jh_gcc_path()` 内部, regress.py / release.yml 不再 prepend MSYS2 bin 到 PATH
 - **W-028 (RESOLVED)** Windows process exit code 8-bit (mod 256): v1.5.5 实施, v1.5.6 保持
 - **W-029 (新增 ACTIVE)** jhyy.exe toolchain 探测收敛: `jh_gcc_path()` 4-tier + `jh_gcc_invoke()` 包装替代 v1.0.0 跨 3 文件 MSYS2 探测逻辑. Linux/macOS 跨平台探测推迟 v2.x
+- **W-030 (RESOLVED)** WiX 4 Theme.xml schema — Font 顶层 / 删 Weight bold / 加 FontId / Caption 替 Title
+- **W-031 (RESOLVED)** MSI LaunchCondition 4-source probe + INSTALLDIR resolution `<SetProperty>` 替 `<SetDirectory>`
+- **W-032 (RESOLVED → SUPERSEDED by W-033)** 试图加独立 `<Page Name="License">` — 错方向, wixstdba 默认 license 整合在 Install page
+- **W-033 (RESOLVED — v1.5.6 hotfix)** Theme.xml XML 1.0 well-formedness (line 10 comment `--` 违 spec) + WiX 4 thmutil schema + wixstdba 默认控件名 (EulaAcceptCheckbox / InstallButton / InstallCancelButton / EulaRichedit) + Bundle.zh-CN.wxl string IDs 全对齐 (InstallAcceptCheckbox / InstallInstallButton / InstallCancelButton 等). 修后 `v1.5.6-rc1.exe` 静默模式 exit 0 + UI 模式 Burn log 走到 i199 detect complete. 完全基于 wixstdba 默认 RtfTheme.xml / RtfTheme.wxl 重写, 加 MSYS2 prereq warning (Install page) + post-install hint (Success page) JHYY customization. 详见 `docs/internal/workarounds.md` W-033
 
 ### 后续工作 (v1.5.0 umbrella ship)
 

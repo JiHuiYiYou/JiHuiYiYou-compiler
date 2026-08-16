@@ -1,70 +1,115 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  installer/Bundle.zh-CN.wxl : Burn bundle localization (v1.5.3)
+  installer/Bundle.zh-CN.wxl : Burn bundle localization (v1.5.6 hotfix W-033)
 
-  Strings referenced by Theme.xml (UI 文案) + Bundle.wxs (error messages).
-  WiX 4 语法: <String> 必须用 Value 属性 (per WIX0400 error, 跟 MSI wxl 一致).
+  Based on wixstdba default RtfTheme.wxl (WiX 4 / Burn 7.0.0).
+  Source: extracted from WixToolset.BootstrapperApplications.wixext.dll
+          (resource WixToolset.BootstrapperApplications.bas.wixlib
+           zip member wix-ir/RtfTheme.wxl).
+
+  All default RtfTheme string IDs are kept (overridden with Chinese text);
+  W-033 adds 3 JHYY-specific strings: MSYS2PrereqWarning, MSYS2PrereqDetail,
+  MSYS2PrereqLink, PostInstallHint.
+
+  W-033: previous Bundle.zh-CN.wxl used string IDs that did not exist in
+  wixstdba default wxl (LicenseHeader, InstallButton, CancelButton, ...).
+  With the corrected Theme.xml pointing to the canonical names
+  (InstallAcceptCheckbox, InstallInstallButton, InstallCancelButton, ...)
+  the bundle failed at the missing-localization step (Burn reported
+  unresolved loc IDs in addition to the theme XML error).
 
   Reference:
-    - docs/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.3
+    - WiX 4 source: src/wix/WixToolset.BootstrapperApplications.wixext/
+    - docs/internal/workarounds.md W-033
 -->
 <WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="zh-CN">
 
-  <String Id="Language" Overridable="no" Value="2052" />
+  <!-- Window chrome -->
+  <String Id="Caption" Overridable="yes" Value="[WixBundleName] 安装程序" />
+  <String Id="Title" Overridable="yes" Value="[WixBundleName] [WixBundleVersion]" />
+  <String Id="InstallVersion" Overridable="yes" Value="版本 [WixBundleVersion]" />
+  <String Id="CheckingForUpdatesLabel" Overridable="yes" Value="正在检查更新..." />
+  <String Id="UpdateButton" Overridable="yes" Value="升级到版本 [WixStdBAUpdateAvailable] (&amp;U)" />
+  <String Id="ConfirmCancelMessage" Overridable="yes" Value="确定要取消安装吗?" />
+  <String Id="ExecuteUpgradeRelatedBundleMessage" Overridable="yes" Value="旧版本" />
 
-  <!-- License page -->
-  <String Id="LicenseHeader"
-          Value="[ProductName] 许可协议" />
-  <String Id="LicenseAcceptCheckbox"
-          Value="我接受许可协议的条款" />
+  <!-- Help page -->
+  <String Id="HelpHeader" Overridable="yes" Value="安装帮助" />
+  <String Id="HelpText" Overridable="yes" Value="/install | /repair | /uninstall | /layout [目录] - 安装、修复、卸载,或在目录中创建完整的安装包副本。默认是安装。&#xA;&#xA;/passive | /quiet - 显示最简界面无任何提示,或完全不显示界面无任何提示。默认显示界面和所有提示。&#xA;&#xA;/norestart   - 禁止任何重启尝试。默认在重启前会提示。&#xA;/log log.txt - 将日志写入指定文件。默认在 %TEMP% 下创建日志。" />
+  <String Id="HelpCloseButton" Overridable="yes" Value="关闭 (&amp;C)" />
 
-  <!-- Welcome page -->
-  <String Id="WelcomeHeader"
-          Value="欢迎使用 [ProductName]" />
-  <String Id="WelcomeDescription"
-          Value="本安装向导将在您的计算机上安装 JHYY 编译器。
+  <!-- Install page (WixStdBA Theme="rtfLicense") -->
+  <String Id="InstallAcceptCheckbox" Overridable="yes" Value="我同意接受本许可协议的全部条款 (&amp;A)" />
+  <String Id="InstallOptionsButton" Overridable="yes" Value="选项 (&amp;O)" />
+  <String Id="InstallInstallButton" Overridable="yes" Value="安装 (&amp;I)" />
+  <String Id="InstallCancelButton" Overridable="yes" Value="取消 (&amp;C)" />
 
-JHYY 是一门自研静态类型编程语言, 配有自研编译器。
+  <!-- W-033 JHYY customization: MSYS2 prereq warning shown above EulaRichedit -->
+  <String Id="MSYS2PrereqWarning" Overridable="yes" Value="前置要求: JHYY 编译器需要 MSYS2 + GCC" />
+  <String Id="MSYS2PrereqDetail" Overridable="yes" Value="JHYY 编译器自带,但运行需要 MSYS2 (含 ucrt64 GCC 工具链) 才能编译 .jhyy 程序。如果还没有安装,请先点击下方链接安装。" />
+  <String Id="MSYS2PrereqLink" Overridable="yes" Value="&lt;a href=&quot;https://www.msys2.org/&quot;&gt;下载 MSYS2 (https://www.msys2.org/)&lt;/a&gt;" />
 
-按 安装 继续。" />
-  <String Id="MSYS2PrereqWarning"
-          Value="前置要求: JHYY 编译器需要 MSYS2 + GCC 才能编译 .jhyy 程序。
-
-如果您还没安装 MSYS2, 请先访问下方链接安装。" />
-
-  <!-- Buttons -->
-  <String Id="InstallButton" Value="安装" />
-  <String Id="CancelButton" Value="取消" />
-  <String Id="RepairButton" Value="修复" />
-  <String Id="UninstallButton" Value="卸载" />
-  <String Id="CloseButton" Value="关闭" />
-  <String Id="LaunchButton" Value="启动" />
+  <!-- Options page -->
+  <String Id="OptionsHeader" Overridable="yes" Value="安装选项" />
+  <String Id="OptionsLocationLabel" Overridable="yes" Value="安装位置:" />
+  <String Id="OptionsPerUserScopeText" Overridable="yes" Value="只为当前用户安装 (&amp;M)" />
+  <String Id="OptionsPerMachineScopeText" Overridable="yes" Value="为所有用户安装 (&amp;U)" />
+  <String Id="OptionsBrowseButton" Overridable="yes" Value="浏览 (&amp;B)..." />
+  <String Id="OptionsOkButton" Overridable="yes" Value="确定 (&amp;O)" />
+  <String Id="OptionsCancelButton" Overridable="yes" Value="取消 (&amp;C)" />
 
   <!-- Progress page -->
-  <String Id="ProgressHeader"
-          Value="正在安装 [ProductName]" />
-  <String Id="ProgressDescription"
-          Value="请稍候, 安装程序正在复制文件并配置环境。" />
+  <String Id="ProgressHeader" Overridable="yes" Value="正在安装" />
+  <String Id="ProgressLabel" Overridable="yes" Value="处理:" />
+  <String Id="OverallProgressPackageText" Overridable="yes" Value="正在初始化..." />
+  <String Id="ProgressCancelButton" Overridable="yes" Value="取消 (&amp;C)" />
 
   <!-- Modify page -->
-  <String Id="ModifyHeader"
-          Value="修改 [ProductName] 安装" />
+  <String Id="ModifyHeader" Overridable="yes" Value="修改安装" />
+  <String Id="ModifyRepairButton" Overridable="yes" Value="修复 (&amp;R)" />
+  <String Id="ModifyUninstallButton" Overridable="yes" Value="卸载 (&amp;U)" />
+  <String Id="ModifyCancelButton" Overridable="yes" Value="取消 (&amp;C)" />
 
   <!-- Success page -->
-  <String Id="SuccessHeader"
-          Value="[ProductName] 安装成功" />
-  <String Id="SuccessDescription"
-          Value="JHYY 编译器已经安装到您的计算机。" />
-  <String Id="PostInstallHint"
-          Value="下一步: 打开新的 cmd 窗口运行 'jhyy --version' 验证。
+  <String Id="SuccessHeader" Overridable="yes" Value="安装成功" />
+  <String Id="SuccessCacheHeader" Overridable="yes" Value="缓存完成" />
+  <String Id="SuccessInstallHeader" Overridable="yes" Value="安装已成功完成" />
+  <String Id="SuccessLayoutHeader" Overridable="yes" Value="布局已成功完成" />
+  <String Id="SuccessModifyHeader" Overridable="yes" Value="修改已成功完成" />
+  <String Id="SuccessRepairHeader" Overridable="yes" Value="修复已成功完成" />
+  <String Id="SuccessUninstallHeader" Overridable="yes" Value="卸载已成功完成" />
+  <String Id="SuccessUnsafeUninstallHeader" Overridable="yes" Value="卸载已成功完成" />
+  <String Id="SuccessLaunchButton" Overridable="yes" Value="启动 (&amp;L)" />
+  <String Id="SuccessRestartText" Overridable="yes" Value="您必须重启计算机才能使用本软件。" />
+  <String Id="SuccessUninstallRestartText" Overridable="yes" Value="您必须重启计算机才能完成本软件的卸载。" />
+  <String Id="SuccessRestartButton" Overridable="yes" Value="重启 (&amp;R)" />
+  <String Id="SuccessCloseButton" Overridable="yes" Value="关闭 (&amp;C)" />
 
-如果之前没装 MSYS2 + GCC, 请先安装:
-  1. 下载 MSYS2: https://www.msys2.org/
-  2. 打开 MSYS2 ucrt64 终端, 运行: pacman -S mingw-w64-ucrt-x86_64-gcc
-  3. 重启 cmd, 运行 'jhyy' 编译您的第一个 .jhyy 程序。" />
+  <!-- W-033 JHYY customization: post-install hint shown on Success page -->
+  <String Id="PostInstallHint" Overridable="yes" Value="下一步:&#xA;&#xA;1. 打开新的 cmd 窗口运行 &quot;jhyy --version&quot; 验证安装。&#xA;2. 如果之前没装 MSYS2 + GCC, 请访问 https://www.msys2.org/ 下载并安装。&#xA;3. 打开 MSYS2 ucrt64 终端, 运行: pacman -S mingw-w64-ucrt-x86_64-gcc&#xA;4. 重启 cmd, 运行 &quot;jhyy run helloworld.jhyy&quot; 编译您的第一个 JHYY 程序。" />
 
   <!-- Failure page -->
-  <String Id="FailureHeader"
-          Value="[ProductName] 安装失败" />
+  <String Id="FailureHeader" Overridable="yes" Value="安装失败" />
+  <String Id="FailureCacheHeader" Overridable="yes" Value="缓存失败" />
+  <String Id="FailureInstallHeader" Overridable="yes" Value="安装失败" />
+  <String Id="FailureLayoutHeader" Overridable="yes" Value="布局失败" />
+  <String Id="FailureModifyHeader" Overridable="yes" Value="修改失败" />
+  <String Id="FailureRepairHeader" Overridable="yes" Value="修复失败" />
+  <String Id="FailureUninstallHeader" Overridable="yes" Value="卸载失败" />
+  <String Id="FailureUnsafeUninstallHeader" Overridable="yes" Value="卸载失败" />
+  <String Id="FailureHyperlinkLogText" Overridable="yes" Value="安装失败。请查看 &lt;a href=&quot;#&quot;&gt;日志文件&lt;/a&gt; 获取详细信息。" />
+  <String Id="FailureRestartText" Overridable="yes" Value="您必须重启计算机才能完成本软件的回滚。" />
+  <String Id="FailureRestartButton" Overridable="yes" Value="重启 (&amp;R)" />
+  <String Id="FailureCloseButton" Overridable="yes" Value="关闭 (&amp;C)" />
+
+  <!-- Files-in-use dialog (only shown if a required file is locked) -->
+  <String Id="FilesInUseTitle" Overridable="yes" Value="文件被占用" />
+  <String Id="FilesInUseLabel" Overridable="yes" Value="下列应用程序正在使用需要更新的文件:" />
+  <String Id="FilesInUseNetfxCloseRadioButton" Overridable="yes" Value="关闭应用程序 (&amp;A)。" />
+  <String Id="FilesInUseCloseRadioButton" Overridable="yes" Value="关闭应用程序并在之后尝试重启它们 (&amp;A)。" />
+  <String Id="FilesInUseDontCloseRadioButton" Overridable="yes" Value="不关闭应用程序 (&amp;D)。安装结束后需要重启。" />
+  <String Id="FilesInUseRetryButton" Overridable="yes" Value="重试 (&amp;R)" />
+  <String Id="FilesInUseIgnoreButton" Overridable="yes" Value="忽略 (&amp;I)" />
+  <String Id="FilesInUseExitButton" Overridable="yes" Value="退出 (&amp;X)" />
 
 </WixLocalization>

@@ -2462,4 +2462,61 @@ Property(S): INSTALLDIR = C:\JHYY\
 
 ---
 
+## W-033: Theme.xml XML 1.0 well-formedness + WiX 4 thmutil schema + wixstdba 默认控件名/string ID 完整对齐
+
+**状态:** ✅ RESOLVED 2026-08-16 (commit TBD)
+**日期:** 2026-08-16
+**触发面:** `installer/Theme.xml` + `installer/Bundle.zh-CN.wxl` — Burn bundle (`jhyy-installer-*.exe`)
+
+**症状:**
+W-030 已修 4 个 Theme.xml schema 错 (Font 位置 / Weight bold / FontId / Title vs Caption) 后,本地 rebuild 的 `v1.5.6-rc1.exe` 双击仍然"完全无反应" — 不弹 SmartScreen、不弹 UI、Burn 启动 ~50ms 后退出:
+```
+[5090:5ED0][2026-08-16T08:34:51]i001: Burn x64 v7.0.0 ...
+[5090:5ED0][2026-08-16T08:34:51]e000: Error 0x8007006e: Failed to load theme file as XML document.
+[5090:5ED0][2026-08-16T08:34:51]e000: Error 0x8007006e: Failed to load theme from path: ...\.ba\thm.xml
+[5090:5ED0][2026-08-16T08:34:51]e000: Error 0x8007006e: Failed to initialize theme.
+[5090:5ED0][2026-08-16T08:34:51]i500: Shutting down, exit code: 0x6e
+```
+
+Win32 error 0x8007006e = decimal 110 = `ERROR_BAD_FORMAT` — Burn 拒绝接受 Theme.xml 因为它根本不是 well-formed XML。
+
+**根因 (XML 1.0 spec violation + 5 个 WiX 4 / wixstdba 默认契约违反 cascade):**
+
+| # | 触发 | 出处 |
+|---|------|------|
+| 1 | **XML 1.0 spec violation** — Theme.xml line 10 注释里有 `jhyy --version` 文字。XML 1.0 规定 comment 里不允许 `--`(连续两个连字符)。`xml.etree` 验证: `not well-formed (invalid token): line 10, column 47`。**这是 exit 0x6e 的直接原因。** | XML 1.0 spec § 2.5 Comments |
+| 2 | `xmlns="http://wixtoolset.org/schemas/v4/thm"` — 应为 `thmutil`。W-030 也没修对 — `thm` 这个 schema 在 WiX 4 runtime 不存在 | WiX 4 thmutil XSD |
+| 3 | `<Text>...</Text>` 元素 — 应为 `<Label>...</Label>`。`<Text>` 在 thmutil schema 里是 `<Button>` 内部的子元素(用来放按钮文字),不是 page-level 文本 | WiX 4 thmutil XSD |
+| 4 | `<LicenseTextBox>` — 应为 `<Richedit Name="EulaRichedit">`。`LicenseTextBox` 不是 thmutil 元素 | 同上 |
+| 5 | 自创控件名 `LicenseAcceptedCheckBox` / `AcceptButton` / `DeclineButton` — wixstdba 默认硬编码查找 `EulaAcceptCheckbox` / `InstallButton` / `InstallCancelButton`。命名不对 → wixstdba 找不到 accept checkbox → 即便 Theme.xml parse 过、UI 起来后用户也不能 accept license | wixstdba source: `WixStdBAViewModel.cs` |
+| 6 | `<Page Name="License">` 独立 License page — wixstdba 默认 `Theme="rtfLicense"` 把 license accept 整合在 `<Page Name="Install">` 里,根本没有 License page 概念 | wixstdba source: `WixStdBAViewModel.cs` |
+| 7 | `Bundle.zh-CN.wxl` 引用了一堆不存在的 string ID (`LicenseHeader` / `InstallButton` / `CancelButton` / `CloseButton` / `LaunchButton` / `RepairButton` / `UninstallButton` / `WelcomeHeader` / `WelcomeDescription` / `MSYS2PrereqWarning` / `ProgressDescription` / `ModifyHeader` / `SuccessDescription` / `PostInstallHint` / `FailureHeader` / `Language`)。wixstdba 默认 wxl 用 `InstallAcceptCheckbox` / `InstallInstallButton` / `InstallCancelButton` / `ModifyRepairButton` / `ModifyUninstallButton` / `SuccessLaunchButton` / `SuccessCloseButton` / `Caption` / `Title` / `ProgressHeader` / `ModifyHeader` / `SuccessInstallHeader` / `FailureHeader` 等 | extracted `RtfTheme.wxl` from `WixToolset.BootstrapperApplications.wixext.dll` |
+
+**workaround (最终 — 完全基于 wixstdba 默认 RtfTheme.xml + RtfTheme.wxl 重写):**
+1. Theme.xml 用 `thmutil` schema + 4 个 `<Font>` 顶层定义 + `<Window HexStyle="100a0000" FontId="0" Caption="#(loc.Caption)">` + `ImageControl` + `Title` Label (顶部 logo 旁) — 全照搬默认 RtfTheme.xml。
+2. 7 个 `<Page>` 全照搬默认 — Help / Loading / Install / Options / Progress / Modify / Success / Failure。
+3. W-033 JHYY customization:
+   - Install page: 在 EulaRichedit 上面加 3 个控件 — `MSYS2PrereqWarning` Label (粗体) / `MSYS2PrereqDetail` Label (说明) / `MSYS2PrereqLink` Hyperlink (链接 https://www.msys2.org/)。EulaRichedit 位置从 `Y=80` 改 `Y=175`,Height 减小 (`-115` 而非 `-70`) 给 warning 留位置。
+   - Success page: 在 SuccessInstallHeader Label 下面加 `PostInstallHint` Label,带 `VisibleCondition="WixBundleAction = 6"` 只在 install 成功时显示,内容是 jhyy 验证步骤 + MSYS2 安装步骤。
+4. Window size: 默认 485×300 → 600×420 给 MSYS2 warning 留垂直空间。
+5. Fonts 0/2/3 改 Microsoft YaHei UI (默认 Segoe UI 中文显示 fallback 不好看),Font 1 (Title 用) 也改 YaHei UI 粗体。
+6. Bundle.zh-CN.wxl 重写: 全部 default wxl 的 string IDs 都给中文值 + 3 个 W-033 新增(`MSYS2PrereqWarning` / `MSYS2PrereqDetail` / `MSYS2PrereqLink` / `PostInstallHint`)。`Caption` / `Title` / `InstallVersion` 等加上 `Overridable="yes"` 让 wiX 接受 override。
+
+**验证 (W-033 ship 后):**
+- Python `xml.etree.ElementTree.parse` 两个文件都 OK
+- Cross-check script: Theme.xml 引用 54 个 loc IDs,wxl 全部定义,**无 missing**
+- Burn log 重建后 `jhyy-installer-1.5.6-rc1.exe` UI 模式启动 6 秒后 log 走到 `i199: Detect complete, result: 0x0` + 评估 `WixStdBAUpdateAvailable` / `NOT WixStdBASuppressOptionsUI` — 即 Theme.xml parse 成功 + WixStdBA 进入 UI 渲染 + i100 detect 成功
+- 静默模式 (`/quiet /norestart`) exit code = 0
+
+**引用:**
+- XML 1.0 spec § 2.5 Comments: https://www.w3.org/TR/xml/#sec-comments
+- WiX 4 thmutil XSD: extracted from `C:\msys64\tmp\wixlib-extract\wix-ir\RtfTheme.xml`
+- wixstdba default wxl: extracted from `C:\msys64\tmp\wixlib-extract\wix-ir\RtfTheme.wxl`
+- WiX 4 wixstdba source: `src/wix/WixStdBA/` (WixStdBAViewModel hard-codes control names)
+- related: W-030(WiX 4 schema Font/Window 部分;W-033 是 round 2,把剩余 thmutil/Text/LicenseTextBox/控件名/string IDs 全部修齐)
+- related: W-032(试图加独立 License page — 错方向,正确做法是 wixstdba 默认就在 Install page)
+- commit: TBD (W-033 ship in v1.5.6 sprint hotfix)
+
+---
+
 
