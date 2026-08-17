@@ -16,8 +16,7 @@
 #include <sys/stat.h>  // stat (W-035 layout detection — portable file existence check)
 
 #ifdef _WIN32
-/* Forward-declare to avoid pulling windows.h (potential name conflicts) */
-unsigned long __stdcall GetModuleFileNameA(void *hModule, char *lpFilename, unsigned long nSize);
+#include <windows.h>  // GetModuleFileNameA (jh_paths_init) + CreateProcessA etc (W-038 jh_run)
 #endif
 
 /* sprintf_lld：i64 参数 sprintf wrapper（jhyy extern 不能 variadic）。
@@ -254,11 +253,8 @@ static char jh_gcc_path_buf[1024];
 static int  jh_gcc_path_initialized = 0;
 
 #ifdef _WIN32
-/* Forward-declare to avoid pulling windows.h (matches jh_paths_init pattern) */
-unsigned long __stdcall SearchPathA(const char *path, const char *file, const char *ext,
-                                    unsigned long buflen, char *buf, char **part);
-unsigned long __stdcall GetFileAttributesA(const char *path);
-#define INVALID_FILE_ATTRIBUTES 0xFFFFFFFFu
+/* windows.h already included at top — GetFileAttributesA + INVALID_FILE_ATTRIBUTES
+   come from fileapi.h. SearchPathA also already declared. */
 
 __attribute__((used)) const char *jh_gcc_path(void) {
     if (jh_gcc_path_initialized) return jh_gcc_path_buf;
@@ -359,3 +355,43 @@ __attribute__((used)) const char *jh_gcc_path(void) {
 __attribute__((used)) int jh_gcc_invoke(char *out_buf, int out_size, const char *args) {
     return snprintf(out_buf, (size_t)out_size, "\"%s\" %s", jh_gcc_path(), args);
 }
+
+/* v1.5.6 W-038: jh_run — bypass cmd.exe /C, use CreateProcessA directly.
+   cmd.exe /C parses command line and tokenizes by whitespace, so paths with
+   spaces (e.g. "C:\Program Files\...") break cmd_run / run_qbe / link_with_gcc.
+   CreateProcessA's command-line parser handles quoted paths properly per
+   Win32 rules (first token between matching "" is the application name).
+   Returns child exit code (0 = success), -1 on failure.
+   Linux/macOS: just call system() (POSIX has no cmd.exe issue). */
+#ifdef _WIN32
+__attribute__((used)) int jh_run(const char *cmd_line) {
+    size_t cmd_len = 0;
+    while (cmd_line[cmd_len]) cmd_len++;
+    char *cmd_buf = (char *)HeapAlloc(GetProcessHeap(), 0, cmd_len + 1);
+    if (!cmd_buf) return -1;
+    for (size_t i = 0; i <= cmd_len; i++) cmd_buf[i] = cmd_line[i];
+
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    ZeroMemory(&pi, sizeof(pi));
+    si.cb = sizeof(si);
+
+    if (!CreateProcessA(NULL, cmd_buf, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        HeapFree(GetProcessHeap(), 0, cmd_buf);
+        return -1;
+    }
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exit_code = 0;
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    HeapFree(GetProcessHeap(), 0, cmd_buf);
+    return (int)exit_code;
+}
+#else
+__attribute__((used)) int jh_run(const char *cmd_line) {
+    /* POSIX: shell handles quoting correctly */
+    return system(cmd_line);
+}
+#endif

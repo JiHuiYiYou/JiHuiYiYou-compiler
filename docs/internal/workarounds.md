@@ -2682,4 +2682,77 @@ return 1;  /* no layout matched */
 
 ---
 
+## W-038: cmd.exe /C 不处理带空格 path — CreateProcessA 替代 system()
+
+**状态:** ✅ RESOLVED 2026-08-17
+**日期:** 2026-08-17
+**触发面:** `compiler/src0/jhyy_helpers.c:jh_run` + `run_qbe` / `link_with_gcc` / `cmd_run` 全部从 `system()` 切到 `jh_run()`
+
+**症状:**
+W-034 + W-035 ship 后,`jhyy run dungeon_game.jhyy` 在 source-tree 路径 (e.g. `C:\Users\liuzhen\Desktop\coding\...\qbe\qbe.exe`) 工作正常,但在 installer 路径 (`C:\Program Files\JHYY\bin\qbe.exe`) 仍 QBE failed:
+```
+'C:\Program' is not recognized as an internal or external command
+QBE failed: C:\Program Files\JHYY\bin\qbe.exe -t amd64_win -o dungeon_game_run.s dungeon_game_run.il
+```
+
+**根因:**
+cmd.exe /C 对 command line 做 tokenization,空格当 separator。`<cmdline>` 第一 token 当 command name。`"C:\Program Files\..."` 直接 tokenize → `C:\Program` (第一 token, cmd.exe 找不到) → 失败。
+
+Quote wrap 行不行:
+- Rule 1 (preserve): 要 2 quotes + whitespace between + 是 executable
+- Rule 2 (strip): 其他情况 — 剥首尾引号
+- 单 executable + 单 quote + whitespace 在 path 里 → Rule 1 适用(成功)
+- 多个 executable path + 多个 quote (e.g. gcc + runtime.c + helpers.c) → 6 quotes,Rule 1 不适用,Rule 2 strip → 残缺 command
+
+**workaround:**
+新增 C helper `jh_run(cmd_line)` 用 `CreateProcessA` 直接执行,绕开 cmd.exe /C。CreateProcessA 的 command-line parser 严格按 Win32 规则处理 quotes:
+- 匹配 `""` 之间的第一段作 application name
+- Args 按 whitespace 分,quote 内 whitespace 不分
+
+```c
+__attribute__((used)) int jh_run(const char *cmd_line) {
+    size_t cmd_len = 0;
+    while (cmd_line[cmd_len]) cmd_len++;
+    char *cmd_buf = (char *)HeapAlloc(GetProcessHeap(), 0, cmd_len + 1);
+    for (size_t i = 0; i <= cmd_len; i++) cmd_buf[i] = cmd_line[i];
+
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    ZeroMemory(&pi, sizeof(pi));
+    si.cb = sizeof(si);
+
+    if (!CreateProcessA(NULL, cmd_buf, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        HeapFree(GetProcessHeap(), 0, cmd_buf);
+        return -1;
+    }
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exit_code = 0;
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    HeapFree(GetProcessHeap(), 0, cmd_buf);
+    return (int)exit_code;
+}
+```
+
+main.jhyy 三处 `system(...)` 全部改 `jh_run(...)`:
+- `run_qbe` (qbe path 可能 `C:\Program Files\...`)
+- `link_with_gcc` (gcc + runtime.c + helpers.c 都可能 `C:\Program Files\...`)
+- `cmd_run` (绝对 exe path,绕过 cmd.exe 不搜 cwd bug)
+
+**影响范围:** `compiler/src0/jhyy_helpers.c:jh_run` (新增 C helper) + `compiler/src0/main.jhyy:run_qbe/link_with_gcc/cmd_run` (3 处 system→jh_run)。
+
+**失效条件:** 永久 work around (CreateProcessA 是 Win32 标准 API,行为不变)。
+
+**superseder:** 不需要真修,workaround 是 cleanest 方案(无需改 cmd.exe 行为,无需改 PATH/cwd,无需 quote 转义)。
+
+**引用:**
+- CreateProcessA command-line parsing: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessa (search "Parsing the command line")
+- cmd.exe /C quote rule: https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cmd (search "preserved" + "/C")
+- related: W-034 (jh_fullpath 绝对路径 → cmd_run 不需要 tokenize);W-038 是更彻底的兜底,任何 system() 调用都安全
+- related: regress.py 仍不测 cmd_run exec + qbe + link 的 system 链路
+
+---
+
 
