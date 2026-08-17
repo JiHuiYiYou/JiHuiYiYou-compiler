@@ -93,6 +93,8 @@ installer/**/SHA256.txt
 # install.log / .wxs 重定向副本). directory 整个 ignore 避免 140+ GH Actions
 # 产物 leak 到 untracked (mingw64/lib/gcc/* libgcc.a etc. 每次 run 重新生成)
 installer/build-artifacts/
+# v1.5.6-patch2: vscode-ext/jhyy-lang-*.vsix 是 package.ps1 build 输出, 不 commit
+vscode-ext/*.vsix
 # v1.5.5: vendored QBE source 上游子目录 (test suite / minic / tools / doc)
 # 不在我们 build 链路里, 仅 source 跟踪 (qbe/*.c / *.h / Makefile / README)
 qbe/test/

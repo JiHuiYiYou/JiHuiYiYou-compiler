@@ -1,0 +1,44 @@
+# winget locale manifest (en-US) - JHYY 1.5.6
+#
+# Sprint v1.5.6 — patch2 (Code Runner integration):
+#   winget locale. Only en-US for now (per plan, MSI UI has
+#   zh-CN via Locale.zh-CN.wxl; winget locale is for store-style descriptions
+#   which English-first is the common Windows convention).
+
+PackageVersion: 1.5.6
+PackageLocale: en-US
+Publisher: JiHuiYiYou
+PackageName: JHYY Compiler
+License: MIT
+ShortDescription: JHYY (机会翼游) — statically-typed language + bootstrapping compiler for Windows
+Description: |-
+  JHYY (机会翼游) is a statically-typed programming language with a self-bootstrapping compiler.
+  The compiler is written in JHYY itself (v1.0.0+ self-hosting closure achieved), targeting
+  amd64 Windows via QBE IL. This installer bundles the jhyy.exe production binary, the
+  vendored QBE backend, a VSCode extension (.vsix, auto-installed if `code` is on PATH),
+  the Code Runner extension (auto-installed if `code` is on PATH) with the jhyy
+  language wired into its executorMap (so right-click "Run Code" on .jhyy files
+  compiles + runs via jhyy.exe), .jhyy file association, and Start Menu shortcuts.
+
+  Requires MSYS2 + ucrt64 GCC for the compile/link step (jhyy.exe produces QBE IL,
+  which GCC then assembles and links). The installer Welcome page guides new users
+  through installing MSYS2 first.
+
+  Build instructions and source code: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler
+  Language spec: docs/abis/jhyy-lang-spec-v1.1.0.md
+Moniker: jhyy
+Tags:
+  - compiler
+  - programming-language
+  - bootstrapping
+  - statically-typed
+ReleaseNotes: |-
+  v1.5.6 patch2: VSCode Code Runner integration — auto-installs formulahendry.code-runner
+  + writes code-runner.executorMap → jhyy run mapping to VSCode user settings.json.
+  Also fixes 3 path-quoting bugs (W-038, W-039, W-040) that broke jhyy run / compile
+  when installed under "C:\Program Files\...". See docs/logs/v1/changelog-v1.5.0.md
+  for the full v1.5.x umbrella changelog.
+ReleaseNotesUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/logs/v1/changelog-v1.5.0.md
+PurchaseUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler
+ManifestType: locale
+ManifestVersion: 1.5.0

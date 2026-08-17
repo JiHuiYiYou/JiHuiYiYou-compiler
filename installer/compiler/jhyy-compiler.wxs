@@ -215,7 +215,7 @@
                       Name="CommandPath" />
     </Property>
     <SetProperty Id="InstallVSCodeExtCmd"
-                 Value="&quot;[JHYY_COMSPEC]&quot; /c &quot;[INSTALLDIR]bin\install-vsix.bat&quot; /VSIX=&quot;[VSCodeExtDir]jhyy-lang-$(var.JHY_VERSION_DISPLAY).vsix&quot;"
+                 Value="&quot;[JHYY_COMSPEC]&quot; /c &quot;[INSTALLDIR]bin\install-vsix.bat&quot; /VSIX=&quot;[VSCodeExtDir]jhyy-lang-$(var.JHY_VERSION_DISPLAY).vsix&quot; /CONFIGURE_PS1=&quot;[INSTALLDIR]bin\configure-coderunner.ps1&quot; /JHY_DIR=&quot;[INSTALLDIR]&quot;"
                  Before="InstallVSCodeExt"
                  Sequence="execute" />
     <CustomAction Id="InstallVSCodeExt"
@@ -265,6 +265,18 @@
       <Component Id="InstallVSIXBat" Bitness="always64" Guid="5D1C3BC5-EBC3-472A-9744-1F96692A2E6F">
         <File Id="InstallVSIXBatFile"
               Source="!(bindpath.common)\install-vsix.bat"
+              KeyPath="yes" />
+      </Component>
+
+      <!--
+        configure-coderunner.ps1 (v1.5.6-patch2): writes code-runner.executorMap
+        → jhyy run mapping into VSCode user settings.json. Called by
+        install-vsix.bat after Code Runner extension is installed. Lives in
+        INSTALLDIR\bin\ so install-vsix.bat can resolve its sibling path.
+      -->
+      <Component Id="ConfigureCodeRunnerPS1" Bitness="always64" Guid="F7A2D6E0-9B3C-4D1A-9E5F-3C7B8A2D6E01">
+        <File Id="ConfigureCodeRunnerPS1File"
+              Source="!(bindpath.common)\configure-coderunner.ps1"
               KeyPath="yes" />
       </Component>
     </ComponentGroup>

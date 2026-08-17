@@ -2857,4 +2857,68 @@ pos = str_concat_at(cmd_buf, pos, rq);  // 右 "
 
 ---
 
+## W-041: VSCode Code Runner 集成 — installer 自动装 extension + 写 settings.json
+
+**状态:** ✅ RESOLVED 2026-08-17 (in v1.5.6-patch2)
+**日期:** 2026-08-17
+**触发面:** MSI 安装完 → 用户打开 VSCode → 没有"Run Code" 选项 for `.jhyy` files
+
+**症状:**
+v1.5.5 ship 后,用户装到 `C:\Program Files\JHYY\` (默认)。打开 VSCode 后:
+- jhyy-lang extension 已自动装 (per `install-vsix.bat`),但 Code Runner extension **没有**自动装
+- Code Runner 的 `executorMap` 默认不知道 `.jhyy` 怎么跑
+- 用户必须手动:`code --install-extension formulahendry.code-runner` + 手动改 `%APPDATA%\Code\User\settings.json`
+- "**初心**" 是别人下载 jhyy 后打开 VSCode 直接跟开发者有一样的 Code Runner 体验 — 这个体验缺失
+
+**根因:**
+v1.5.5 `install-vsix.bat` 只装 jhyy-lang .vsix,**不**碰 Code Runner。Code Runner 是第三方 extension,需要单独装 + 配置。
+
+**workaround (workaround == 真修):**
+v1.5.6-patch2 加 2 件:
+1. **`installer/common/configure-coderunner.ps1`** (NEW, ~80 行):
+   - 检测 `%APPDATA%\Code\User\` (VSCode 没装 → silent skip, exit 0)
+   - parse + add + `ConvertTo-Json` re-serialize `settings.json`
+   - 插入/更新 4 个 key:
+     - `code-runner.executorMap` → `{ "jhyy": "cd $dirWithoutTrailingSlash && jhyy run $fileName" }`
+     - `code-runner.runInTerminal: true`
+     - `code-runner.saveFileBeforeRun: true`
+     - `code-runner.clearPreviousOutput: true`
+   - 保留其他所有 key/value (theme / python / 等用户手工调)
+   - BOM-less UTF-8 atomic write (匹配 VSCode 默认格式)
+2. **`installer/common/install-vsix.bat` 升级**:
+   - 装 jhyy-lang .vsix (原)
+   - **装 Code Runner extension** `code --install-extension formulahendry.code-runner --force`
+   - **调 configure-coderunner.ps1** `powershell -File ... -JHY_DIR ...`
+
+**算法选型:** `parse → add → ConvertTo-Json` re-serialize,**不**用 targeted text patch。
+
+**Why:** 文本 patch 在嵌套 block end 场景下 (executorMap 是 dict,末尾是 `}` `}`) regex 不能可靠识别 top-level vs inner block,会产出非法 JSON。ConvertTo-Json 重写格式 (`:` 后多个空格, 2-space 缩进 for nested) 但保证 JSON 合法 + 所有键保留。VSCode 读出等价语义。
+
+**已验证 5 场景:**
+| 场景 | 输入 | 输出 |
+|------|------|------|
+| no-op (4 key 都在) | 用户的 43-key settings.json | 字节级重排,但语义等价 + 43 key 全保留 |
+| partial (executorMap 在,3 simple key 缺) | 41-key 文件 | 4 key 全到位,其他保留 |
+| fresh (settings.json 不存在) | `Code\User\` 是空目录 | 4-key 新文件 |
+| VSCode 没装 (`%APPDATA%\Code\User\` 不存在) | 任意 | silent skip, exit 0 |
+| Malformed JSON (用户手工改坏了) | `{ this is not json` | exit 1 + 文件 byte 级保留 + 提示用户手动修 |
+
+**影响范围:**
+- NEW: `installer/common/configure-coderunner.ps1`
+- MODIFIED: `installer/common/install-vsix.bat` (+30 行)
+- MODIFIED: `installer/compiler/jhyy-compiler.wxs` (+15 行: 1 Component + SetProperty 改)
+- MODIFIED: `installer/GUIDS.md` (+1 行)
+- NEW: `installer/winget/manifests/j/JiHuiYiYou/JHYY/1.5.6/` (3 文件,从 1.5.5 复制)
+- MODIFIED: `docs/plans/v1/v1.5.6任务清单 + 概要设计.md` (加 patch2 段)
+
+**失效条件:** 永久 work around (PowerShell 5.1 兼容,Windows 10+ ships)。
+
+**superseder:** 不需要真修 — workaround 是 cleanest 方案 (parse + add + re-serialize 是 JSON 编辑的标准模式)。
+
+**引用:**
+- related: W-038/W-039/W-040 (installer 路径 quote 链)
+- related: install-vsix.bat 已存在的 jhyy-lang .vsix install 逻辑
+- related: regress.py 不测 installer 行为 — W-041 同样 ship 但没在 CI 暴露 (本地 5 场景手动测)
+- lesson: v2.x installer 升级时把 PowerShell 脚本链打包到 `installer/vscode/` 子目录,避免根 common/ 过度膨胀
+
 

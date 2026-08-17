@@ -3,7 +3,7 @@
 > **承接**: v1.4.7 shipped (regress 三跑合并 + CI workflow 简化).
 > **目标**: 用户下载 `jhyy-installer-X.Y.Z.exe` 双击 → next-next-finish 装好 jhyy + qbe.exe, 系统 PATH 自动配, 用户零配置。
 > **scope**: WiX 4/7 + Burn bundle + MSI; Windows-only; per `docs/plans/v1/v1.5.0任务清单 + 概要设计.md`。
-> **本 umbrella 涵盖 5 个 sprint**: v1.5.1 / v1.5.2 / v1.5.3 / v1.5.4 / v1.5.5, 各 sprint 状态如下。
+> **本 umbrella 涵盖 5 + 2 个 sprint**: v1.5.1 / v1.5.2 / v1.5.3 / v1.5.4 / v1.5.5 / v1.5.6 / v1.5.6-patch2, 各 sprint 状态如下。
 
 ---
 
@@ -16,6 +16,8 @@
 | **v1.5.3** | ✅ done | `6ea1c62` | `Bundle.wxs` (Burn bundle) + `Theme.xml` + `Bundle.zh-CN.wxl` + `banner.bmp`; `jhyy-installer-1.5.3.exe` (1.6MB) 生成 |
 | **v1.5.4** | ✅ done | (1a9dd9b) | VSCode ext auto-install + `.jhyy` file association + Start Menu Documentation/Quick Start 增强; `wix msi validate` 0 ICE errors |
 | **v1.5.5** | ✅ done | (this commit) | GH Actions release workflow (tag v* + workflow_dispatch) + winget + scoop manifest reference + SHA256 生成 + Release notes 模板; v1.5.0 umbrella ship 闭环 |
+| **v1.5.6** | ✅ done | (this commit) | `jh_gcc_path()` 4-tier 探测收敛跨 3 文件 MSYS2 探测逻辑; W-029 ACTIVE (Windows 4-tier + Linux placeholder); regress.py / release.yml 删 MSYS2 探测段 |
+| **v1.5.6-patch2** | ✅ done | (this commit) | VSCode Code Runner 集成 — `configure-coderunner.ps1` (parse + add + re-serialize settings.json); `install-vsix.bat` 升级 3 步 (jhyy-lang + Code Runner + settings.json); MSI Component `ConfigureCodeRunnerPS1` (新 GUID); winget 1.5.6 复制自 1.5.5 |
 
 ---
 
@@ -456,6 +458,65 @@ let r = system(invoke_buf);
 - **v1.5.0 ship tag** + GitHub Release 标 "stable"
 - **winget + scoop manifest publish** 推到 v2.x (per 决策-11)
 - **Authenticode code signing** 推到 v2.x (需 HSM / EV cert)
+
+---
+
+## v1.5.6-patch2 — VSCode Code Runner 集成 (本 commit)
+
+### 完成定义
+
+- ✅ `installer/common/configure-coderunner.ps1` (NEW, ~80 行) — 解析 + 加 4 个 code-runner key + re-serialize
+- ✅ `installer/common/install-vsix.bat` — 升级 3 步 (jhyy-lang vsix + Code Runner + settings.json)
+- ✅ `installer/compiler/jhyy-compiler.wxs` — 新 Component `ConfigureCodeRunnerPS1` (GUID `F7A2D6E0-...`);SetProperty 加 `/CONFIGURE_PS1` + `/JHY_DIR` args
+- ✅ `installer/GUIDS.md` — 加 Component GUID 条目
+- ✅ `installer/winget/manifests/j/JiHuiYiYou/JHYY/1.5.6/` — 复制 1.5.5, 改 version + ReleaseNotes
+- ✅ `docs/plans/v1/v1.5.6任务清单 + 概要设计.md` — 加 patch2 段
+- ✅ `docs/internal/workarounds.md` — 加 W-041 entry (RESOLVED)
+- ⚠️ **MSI smoke build** + **Burn bundle smoke build** + **真机 install 验证** 等 user 触发
+
+### 核心机制
+
+#### 1. `configure-coderunner.ps1` — parse + add + re-serialize
+
+PowerShell 5.1 脚本,处理 5 场景:
+
+| 场景 | 输入 | 输出 |
+|------|------|------|
+| no-op | 用户的 43-key settings.json | 字节级重排,语义等价 + 43 key 全保留 |
+| partial | 41-key 文件 (executorMap 在,3 simple key 缺) | 4 key 全到位,其他保留 |
+| fresh | `Code\User\` 是空目录 | 4-key 新文件 |
+| VSCode 没装 | `%APPDATA%\Code\User\` 不存在 | silent skip, exit 0 |
+| Malformed JSON | 用户手工改坏了 | exit 1 + 文件 byte 级保留 |
+
+**算法选型:** parse + Add-Member + ConvertTo-Json -Depth 10,**不**用 targeted text patch (text patch 在嵌套 block end 场景 regex 不能可靠识别)。
+
+#### 2. `install-vsix.bat` 3 步流程
+
+```
+Step 1: code --install-extension <jhyy-lang.vsix> --force
+Step 2: code --install-extension formulahendry.code-runner --force
+Step 3: powershell -File <configure-coderunner.ps1> -JHY_DIR <INSTALLDIR>
+```
+
+每个步骤独立 try/fail-soft (exit 0 + warn log),任一失败不阻塞 MSI。
+
+#### 3. MSI Component `ConfigureCodeRunnerPS1`
+
+- GUID `F7A2D6E0-9B3C-4D1A-9E5F-3C7B8A2D6E01` (新生成)
+- Source `!(bindpath.common)\configure-coderunner.ps1` (MSI build 时从 `installer/common/` 拉)
+- Directory="BinDir" (装到 `INSTALLDIR\bin\configure-coderunner.ps1`)
+- CustomAction `InstallVSCodeExtCmd` 加 2 args:`/CONFIGURE_PS1="[INSTALLDIR]bin\configure-coderunner.ps1"` `/JHY_DIR="[INSTALLDIR]"`
+
+### 已知 workarounds (已入 `docs/internal/workarounds.md`)
+
+- **W-041 (新增 RESOLVED in v1.5.6-patch2)** VSCode Code Runner 集成: `configure-coderunner.ps1` parse + add + re-serialize 算法 (`install-vsix.bat` 3 步流程; MSI Component `ConfigureCodeRunnerPS1`)。永久 work around — PowerShell 5.1 兼容,Windows 10+ ships。
+
+### 后续工作 (patch2 ship 后)
+
+- ⚠️ **MSI smoke build + 真机 install 验证** 等 user 触发 (headless bash 跑不了 per-machine MSI UAC)
+- ⚠️ **winget 1.5.5 保留**,1.5.6 是新 dir (per Windows winget 不允许覆盖已 publish manifest)
+- v2.x installer 升级时把 PowerShell 脚本链打包到 `installer/vscode/` 子目录,避免根 `common/` 过度膨胀
+- v2.x 跨平台时 `configure-coderunner.ps1` 需要 macOS/Linux 分支 (`$env:APPDATA` 不存在 → `$XDG_CONFIG_HOME` / `$HOME/Library/Application Support`)
 
 ---
 
