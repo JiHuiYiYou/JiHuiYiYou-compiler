@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>  // atof (v1 sprint 3 commit 4 prefix_float)
 #include <string.h>  // strrchr (v1.4.1 jh_paths_init dirname)
+#include <sys/stat.h>  // stat (W-035 layout detection — portable file existence check)
 
 #ifdef _WIN32
 /* Forward-declare to avoid pulling windows.h (potential name conflicts) */
@@ -148,6 +149,9 @@ static int  jh_paths_initialized = 0;
 
 __attribute__((used)) int jh_paths_init(const char *argv0) {
     char exe_path[1024];
+    char dir_path[1024];
+    char root[1024];
+    char test_path[1024];
     int has_sep = argv0 && (strchr(argv0, '/') || strchr(argv0, '\\'));
 #ifdef _WIN32
     if (!has_sep) {
@@ -159,29 +163,84 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
         if (!argv0) return 1;
         snprintf(exe_path, sizeof(exe_path), "%s", argv0);
     }
-    /* dirname × 4: .../compiler/build/bin/jhyy.exe → project root */
-    for (int i = 0; i < 4; i++) {
-        char *slash = strrchr(exe_path, '/');
-        char *bslash = strrchr(exe_path, '\\');
-        char *last = slash > bslash ? slash : bslash;
-        if (!last) return 1;
-        *last = '\0';
+
+    /* v1.5.6 W-037: layout detection (取代 v1.4.1 hardcoded dirname × 4).
+       原 bug: dirname × 4 假设 jhyy.exe 在 <root>\compiler\build\bin\ (源码树),
+       但 installer layout 是 <INSTALLDIR>\bin\jhyy.exe (只有 1 层), dirname × 4
+       走到 C:\ → qbe/qbe.exe 找不到 → "QBE failed". 用户 Code Runner 用 installer
+       版 jhyy.exe (PATH 排第一) 时 100% 触发.
+       修法: 先试 installer layout (sibling qbe.exe), 否则 walk-up 找 <root>\qbe\qbe.exe.
+       详情 docs/internal/workarounds.md W-037. */
+
+    /* Normalize path: ensure backslashes for consistent parsing */
+    for (char *p = exe_path; *p; p++) if (*p == '/') *p = '\\';
+
+    /* Extract directory containing jhyy.exe */
+    char *last = strrchr(exe_path, '\\');
+    if (!last) return 1;
+    *last = '\0';
+    snprintf(dir_path, sizeof(dir_path), "%s", exe_path);
+
+    /* Layout (a) — sibling qbe.exe (installer 布局) */
+    snprintf(test_path, sizeof(test_path), "%s\\qbe.exe", dir_path);
+    {
+        struct stat st;
+        if (stat(test_path, &st) == 0) {
+            #pragma GCC diagnostic push
+            #pragma GCC diagnostic ignored "-Wformat-truncation"
+            snprintf(jh_path_qbe_buf,     sizeof(jh_path_qbe_buf),     "%s\\qbe.exe", dir_path);
+            snprintf(jh_path_runtime_buf, sizeof(jh_path_runtime_buf), "%s\\runtime.c", dir_path);
+            snprintf(jh_path_helpers_buf, sizeof(jh_path_helpers_buf), "%s\\jhyy_helpers.c", dir_path);
+            snprintf(jh_path_gcc_buf,     sizeof(jh_path_gcc_buf),     "gcc");
+            #pragma GCC diagnostic pop
+            jh_paths_initialized = 1;
+            return 0;
+        }
     }
-    #pragma GCC diagnostic push
-    #pragma GCC diagnostic ignored "-Wformat-truncation"
-    snprintf(jh_path_qbe_buf,     sizeof(jh_path_qbe_buf),     "%s/qbe/qbe.exe", exe_path);
-    snprintf(jh_path_gcc_buf,     sizeof(jh_path_gcc_buf),     "gcc");
-    snprintf(jh_path_runtime_buf, sizeof(jh_path_runtime_buf), "%s/compiler/runtime/runtime.c", exe_path);
-    snprintf(jh_path_helpers_buf, sizeof(jh_path_helpers_buf), "%s/compiler/src0/jhyy_helpers.c", exe_path);
-    #pragma GCC diagnostic pop
-    jh_paths_initialized = 1;
-    return 0;
+
+    /* Layout (b) — source-tree: walk up to find <root>\qbe\qbe.exe */
+    snprintf(root, sizeof(root), "%s", dir_path);
+    for (int i = 0; i < 8; i++) {
+        snprintf(test_path, sizeof(test_path), "%s\\qbe\\qbe.exe", root);
+        {
+            struct stat st;
+            if (stat(test_path, &st) == 0) {
+                #pragma GCC diagnostic push
+                #pragma GCC diagnostic ignored "-Wformat-truncation"
+                snprintf(jh_path_qbe_buf,     sizeof(jh_path_qbe_buf),     "%s\\qbe\\qbe.exe", root);
+                snprintf(jh_path_runtime_buf, sizeof(jh_path_runtime_buf), "%s\\compiler\\runtime\\runtime.c", root);
+                snprintf(jh_path_helpers_buf, sizeof(jh_path_helpers_buf), "%s\\compiler\\src0\\jhyy_helpers.c", root);
+                snprintf(jh_path_gcc_buf,     sizeof(jh_path_gcc_buf),     "gcc");
+                #pragma GCC diagnostic pop
+                jh_paths_initialized = 1;
+                return 0;
+            }
+        }
+        /* walk up one level */
+        char *up = strrchr(root, '\\');
+        if (!up || up == root) break;  /* reached drive root, give up */
+        *up = '\0';
+    }
+    return 1;  /* no layout matched */
 }
 
 __attribute__((used)) const char *jh_path_qbe(void)     { return jh_path_qbe_buf; }
 __attribute__((used)) const char *jh_path_gcc(void)     { return jh_path_gcc_buf; }
 __attribute__((used)) const char *jh_path_runtime(void) { return jh_path_runtime_buf; }
 __attribute__((used)) const char *jh_path_helpers(void) { return jh_path_helpers_buf; }
+
+/* v1.5.6 W-034: jh_fullpath — convert relative → absolute path.
+   Used by cmd_run to produce absolute exe path, since cmd.exe /C only
+   searches PATH (not cwd) for bare basenames. _fullpath is MSVCRT
+   (mingw has it); falls back to realpath() on POSIX.
+   Returns 0 on success, 1 on failure (out_buf unchanged). */
+__attribute__((used)) int jh_fullpath(char *out_buf, const char *rel_path, int max_len) {
+#ifdef _WIN32
+    return _fullpath(out_buf, rel_path, max_len) != NULL ? 0 : 1;
+#else
+    return realpath(rel_path, out_buf) != NULL ? 0 : 1;
+#endif
+}
 
 /* v1.5.6: jh_gcc_path — A 派 Driver 探测层 (类型 4 per
    feedback_compiler_toolchain_path_resolution memory).

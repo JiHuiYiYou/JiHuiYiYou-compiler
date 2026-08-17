@@ -72,6 +72,8 @@ extern fn jh_path_helpers() -> *u8;
 // + 引号包裹, 替代裸 system("gcc ...") 拼 cmd_buf). 4 层优先级: JHY_GCC env →
 // env.txt → MSYS2 magic → SearchPathA → fallback "gcc".
 extern fn jh_gcc_invoke(out_buf: *u8, out_size: i32, args: *u8) -> i32;
+// v1.5.6 W-034: convert relative path → absolute (cmd.exe /C searches PATH only)
+extern fn jh_fullpath(out_buf: *u8, rel_path: *u8, max_len: i32) -> i32;
 
 fn QBE_PATH() -> *u8 { return jh_path_qbe(); }
 fn GCC_PATH() -> *u8 { return jh_path_gcc(); }
@@ -843,27 +845,52 @@ fn cmd_run(argc: i32, argv: *u8) -> i32 {
     let nul1 = (out_buf as i64 + off1) as *u8;
     store_byte_i32(nul1, 0 as i32);
 
-    // build argv for cmd_compile: {input}
-    let arg_arr = malloc(8 as i64);
+    // build argv for cmd_compile: {input, "-o", out_buf_with_run}
+    // cmd_compile defaults to "<input_no_ext>"; cmd_run uses "<input_no_ext>_run"
+    // to avoid clobbering an existing build artifact. Pass -o explicitly.
+    let arg_arr = malloc((3 as i64) * (8 as i64));
     let arg_arr_pp = arg_arr as **u8;
     (*arg_arr_pp) = input;
+    let arg_arr_pp2 = ptr_add_u8(arg_arr, (8 as i64)) as **u8;
+    (*arg_arr_pp2) = "-o" as *u8;
+    let arg_arr_pp3 = ptr_add_u8(arg_arr, (16 as i64)) as **u8;
+    (*arg_arr_pp3) = out_buf;
 
-    let r = cmd_compile(1 as i32, arg_arr);
+    let r = cmd_compile(3 as i32, arg_arr);
     free(arg_arr);
     if r != (0 as i32) {
         free(out_buf);
         return r;
     }
-    // system("out.exe")
-    let exe_path = malloc(1024 as i64);
-    let no = strlen(out_buf);
-    str_copy(exe_path, out_buf);
-    let off2 = str_concat_at(exe_path, no, ".exe" as *u8);
-    let nul2 = (exe_path as i64 + off2) as *u8;
-    store_byte_i32(nul2, 0 as i32);
-    path_to_win(exe_path);
-    let rc = system(exe_path);
-    free(exe_path);
+    // W-034: build ABSOLUTE path to exe via jh_fullpath. cmd.exe /C only searches
+    // PATH (not cwd) for bare basenames, AND strips the leading/trailing quote
+    // characters when there is no whitespace between them (cmd.exe /C quote
+    // rule 2). For input "compiler\tests\foo.jhyy", out_buf is also relative,
+    // so cmd.exe would treat "compiler" as command name and fail with
+    // "'compiler' is not recognized". Resolving to absolute path bypasses both
+    // issues — cmd.exe finds the file by full path.
+    let abs_in = malloc(1024 as i64);
+    let fr = jh_fullpath(abs_in, input, 1024 as i32);
+    if fr != (0 as i32) {
+        jh_fputs_stderr("jhyy: cannot resolve absolute path for input\n" as *u8);
+        free(abs_in);
+        free(out_buf);
+        return 1 as i32;
+    }
+    // Build abs_exe = abs_in (with .jhyy → _run.exe)
+    let abs_exe = malloc(1024 as i64);
+    str_copy(abs_exe, abs_in);
+    let ext_dot = strrchr(abs_exe, (46 as i32));
+    if ext_dot != (0 as *u8) {
+        let _sdx = store_byte_i32(ext_dot, 0 as i32);
+    }
+    let abs_n = strlen(abs_exe);
+    let ae1 = str_concat_at(abs_exe, abs_n, "_run.exe" as *u8);
+    let ae_nul = (abs_exe as i64 + ae1) as *u8;
+    store_byte_i32(ae_nul, 0 as i32);
+    let rc = system(abs_exe);
+    free(abs_exe);
+    free(abs_in);
     free(out_buf);
     return rc;
 }

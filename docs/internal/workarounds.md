@@ -2519,4 +2519,167 @@ Win32 error 0x8007006e = decimal 110 = `ERROR_BAD_FORMAT` — Burn 拒绝接受 
 
 ---
 
+## W-034: cmd_run system() — 用 jh_fullpath 解析绝对路径绕 cmd.exe cwd/PATH 解析陷阱
+
+**状态:** ✅ RESOLVED 2026-08-17
+**日期:** 2026-08-17
+**触发面:** `compiler/src0/main.jhyy:cmd_run` + `compiler/src0/jhyy_helpers.c:jh_fullpath` — `jhyy run <file.jhyy>` 命令
+
+**症状:**
+用户 Code Runner 报 "code language not supported or defined" / PowerShell 直跑 `jhyy run dungeon_game.jhyy` 报 "QBE failed" 后,我修了 PATH 解析让源码树 jhyy.exe 赢,然后发现 `jhyy run dungeon_game.jhyy` 编译成功但执行失败:
+```
+[4] codegen done
+'dungeon_game_run.exe' is not recognized as an internal or external command,
+operable program or batch file.
+```
+cmd_run 走完 cmd_compile(QBE + GCC link 成功),然后 `system("dungeon_game_run.exe")` → cmd.exe /C 找不到 exe。
+
+**根因 (3 层陷阱):**
+1. **cmd.exe /C 不搜索 cwd** — 只搜 PATH;basename `dungeon_game_run.exe` 不在 PATH → "is not recognized"。
+2. **cmd.exe /C quote rule 2** — 简单包 `"path"` 没用:cmd.exe 看到 `/C "<command>"` 时,如果两个 `"` 之间**没有 whitespace**,会**剥掉**首尾的 `"`,留下 `path`(没引号)。然后 cmd.exe 按空格 tokenize 第一个 token 当 command name。
+3. **多 token 解析** — 即使 `input` 有 path 前缀(如 `compiler\tests\examples\dungeon_game.jhyy`),`exe_path = "compiler\tests\examples\dungeon_game_run.exe"`,cmd.exe 把 `compiler` 当 command name → "'compiler' is not recognized"。
+
+历史 bug: regress.py 只测 `cmd_compile`(compile-only),从来没测过 `cmd_run` exec 阶段 → bug 一直藏到用户 Code Runner "▶" 按钮真触发执行才暴露。从 v1.4.1 cmd_run 引入就是这逻辑,改名/重构也没改。
+
+**workaround (v2 — 当前,2026-08-17 ship):**
+用 `jh_fullpath()` 把 `input` 解析为绝对路径 → `exe_path = "<abs_dir>/<basename>_run.exe"`。绝对路径绕开所有 3 个陷阱 — cmd.exe 直接按全路径查找文件,不走 PATH,不 tokenize,不剥引号(根本没用引号)。
+
+新增 C helper (`compiler/src0/jhyy_helpers.c`):
+```c
+__attribute__((used)) int jh_fullpath(char *out_buf, const char *rel_path, int max_len) {
+#ifdef _WIN32
+    return _fullpath(out_buf, rel_path, max_len) != NULL ? 0 : 1;
+#else
+    return realpath(rel_path, out_buf) != NULL ? 0 : 1;
+#endif
+}
+```
+`_fullpath` 是 MSVCRT 标准函数(MinGW 也带);POSIX 端走 `realpath`。
+
+cmd_run 改写:
+```jhyy
+// pass -o out_buf to cmd_compile so it produces <basename>_run.exe
+let arg_arr = malloc(24);
+let arg_arr_pp = arg_arr as **u8;
+(*arg_arr_pp) = input;
+(*(ptr_add_u8(arg_arr, 8) as **u8)) = "-o";
+(*(ptr_add_u8(arg_arr, 16) as **u8)) = out_buf;
+let r = cmd_compile(3, arg_arr);
+
+// resolve absolute path of exe
+let abs_in = malloc(1024);
+jh_fullpath(abs_in, input, 1024);
+let abs_exe = malloc(1024);
+str_copy(abs_exe, abs_in);
+*strrchr(abs_exe, '.') = 0;
+str_concat_at(abs_exe, strlen(abs_exe), "_run.exe");
+let rc = system(abs_exe);  // system("C:\abs\path\foo_run.exe") — cmd.exe finds it
+```
+
+**v1 workaround (2026-08-17 中午被废):** 用 `.\\` 前缀绕过 cwd 不搜索陷阱。但 v1 解决不了根因 2/3 — path-prefixed input(`compiler\tests\foo.jhyy`)仍被 cmd.exe tokenize。Code Runner 真实场景是 path-prefixed(vscode 传文件绝对/相对路径),所以 v1 workaround 不够。v2 (jh_fullpath 绝对路径)才是真修。
+
+**影响范围:** `compiler/src0/main.jhyy:cmd_run` 整段重写 + 新 C helper `jh_fullpath` (`compiler/src0/jhyy_helpers.c`)。
+
+**失效条件:** 永久 work around (cmd.exe 行为不变)。
+
+**superseder:** 不需要真修,workaround 是 cleanest 方案(无需改 cmd.exe 行为,无需改 PATH/cwd,无需改 installer 布局)。
+
+**引用:**
+- cmd.exe path resolution: https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cmd (search "current directory" + PATH)
+- cmd.exe /C quote handling: cmd.exe docs `/C` and `/K` switch semantics (rule 2 strip quotes)
+- related: W-035 (PATH 解析修好后,这个 exec bug 才暴露;W-034 + W-035 一起 ship)
+- related: regress.py 不测 cmd_run exec(测试盲区历史原因)
+
+---
+
+## W-035: jh_paths_init 布局检测 — installer 布局 vs source-tree 布局
+
+**状态:** ✅ RESOLVED 2026-08-17
+**日期:** 2026-08-17
+**触发面:** `compiler/src0/jhyy_helpers.c:jh_paths_init` — `jhyy.exe` 启动时一次性推导 4 个 path(qbe / gcc / runtime.c / jhyy_helpers.c)
+
+**症状:**
+用户 PowerShell 跑 `jhyy run dungeon_game.jhyy` 报 "QBE failed"(`The system cannot find the path specified.`)。
+
+诊断 `where.exe jhyy` 显示两个:
+```
+C:\Program Files\JHYY\bin\jhyy.exe                              ← installer,PATH 第一
+C:\Users\liuzhen\Desktop\coding\JiHuiYiYou\compiler\build\bin\jhyy.exe   ← source-tree
+```
+PowerShell PATH 里 installer 排第一 → 调 installer 版 → 推 qbe 路径失败。
+
+**根因:**
+v1.4.1 commit `8e7944f` 引入 `jh_paths_init` 时,假设 jhyy.exe 总在 `<root>\compiler\build\bin\`,硬编码 `dirname × 4` 走 4 层到 `<root>`:
+```c
+for (int i = 0; i < 4; i++) {
+    char *slash = strrchr(exe_path, '/');
+    char *bslash = strrchr(exe_path, '\\');
+    char *last = slash > bslash ? slash : bslash;
+    if (!last) return 1;
+    *last = '\0';
+}
+/* 现在 exe_path = "<root>" */
+snprintf(jh_path_qbe_buf, ..., "%s/qbe/qbe.exe", exe_path);
+```
+
+Installer 布局 `C:\Program Files\JHYY\bin\jhyy.exe` 只有 1 层(bin/jhyy.exe),dirname × 4 走到 `C:\` → qbe/qbe.exe = `C:\qbe\qbe.exe` 不存在 → `system(qbe_path)` → "QBE failed"。
+
+**workaround (布局检测 — 替代硬编码 dirname × 4):**
+两步:
+1. **Layout (a) — installer 布局**: jhyy.exe 同目录有 sibling `qbe.exe` → 全部 path 同目录:
+   ```
+   <INSTALLDIR>\bin\jhyy.exe
+   <INSTALLDIR>\bin\qbe.exe        ← sibling marker
+   <INSTALLDIR>\bin\runtime.c
+   <INSTALLDIR>\bin\jhyy_helpers.c
+   ```
+2. **Layout (b) — source-tree 布局**: sibling qbe.exe 不存在 → walk up 找 `<root>\qbe\qbe.exe`(最多 8 层),命中后构造 source-tree 路径。
+
+```c
+/* 抽 jhyy.exe 所在目录 dir_path */
+char *last = strrchr(exe_path, '\\'); *last = '\0';
+snprintf(dir_path, ..., "%s", exe_path);
+
+/* Layout (a) — sibling qbe.exe (installer 布局) */
+snprintf(test_path, ..., "%s\\qbe.exe", dir_path);
+if (GetFileAttributesA(test_path) != INVALID_FILE_ATTRIBUTES) {
+    snprintf(jh_path_qbe_buf,     ..., "%s\\qbe.exe", dir_path);
+    snprintf(jh_path_runtime_buf, ..., "%s\\runtime.c", dir_path);
+    snprintf(jh_path_helpers_buf, ..., "%s\\jhyy_helpers.c", dir_path);
+    snprintf(jh_path_gcc_buf,     ..., "gcc");
+    return 0;
+}
+
+/* Layout (b) — walk up 找 <root>\qbe\qbe.exe (source-tree) */
+char root[1024]; snprintf(root, ..., "%s", dir_path);
+for (int i = 0; i < 8; i++) {
+    snprintf(test_path, ..., "%s\\qbe\\qbe.exe", root);
+    if (GetFileAttributesA(test_path) != INVALID_FILE_ATTRIBUTES) {
+        snprintf(jh_path_qbe_buf,     ..., "%s\\qbe\\qbe.exe", root);
+        snprintf(jh_path_runtime_buf, ..., "%s\\compiler\\runtime\\runtime.c", root);
+        snprintf(jh_path_helpers_buf, ..., "%s\\compiler\\src0\\jhyy_helpers.c", root);
+        snprintf(jh_path_gcc_buf,     ..., "gcc");
+        return 0;
+    }
+    char *up = strrchr(root, '\\');
+    if (!up || up == root) break;
+    *up = '\0';
+}
+return 1;  /* no layout matched */
+```
+
+**影响范围:** `compiler/src0/jhyy_helpers.c:jh_paths_init`(全段重写,逻辑从硬编码 dirname × 4 改成两步布局检测)
+
+**失效条件:** 永久 — 两种布局约定不变。但 installer 重新布局(qbe.exe 移到 subdir 或 jhyy.exe 改路径)需更新。
+
+**superseder:** 不需要,workaround 是 cleanest(同时支持 installer + source-tree,无需改 installer 布局或加 config)。
+
+**引用:**
+- feedback_uncommitted_files_vanish(W-035 + W-034 跨 turn 必须 commit 才稳)
+- feedback_compiler_toolchain_path_resolution(原 v1.5.6 design 是 jhyy.exe toolchain 必须用绝对路径;W-035 是兜底,当 PATH 解析出错时也能 work — 但**根因还是用绝对路径最稳**)
+- related: W-034 (PATH 修好后 cmd_run exec 暴露, 一起 ship)
+- related: W-025/026/027 toolchain path resolution 教训链
+
+---
+
 
