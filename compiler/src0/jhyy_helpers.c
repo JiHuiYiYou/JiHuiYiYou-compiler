@@ -362,7 +362,14 @@ __attribute__((used)) int jh_gcc_invoke(char *out_buf, int out_size, const char 
    CreateProcessA's command-line parser handles quoted paths properly per
    Win32 rules (first token between matching "" is the application name).
    Returns child exit code (0 = success), -1 on failure.
-   Linux/macOS: just call system() (POSIX has no cmd.exe issue). */
+   Linux/macOS: just call system() (POSIX has no cmd.exe issue).
+
+   v1.5.6 W-039: callers (run_qbe, link_with_gcc via jh_gcc_invoke, cmd_run)
+   are responsible for wrapping the exe path in quotes. jh_run passes the
+   cmd_line through unchanged — callers have the full path context and can
+   quote the actual exe path (not just the first whitespace-delimited token,
+   which would be wrong for paths with internal whitespace like
+   "C:\Program Files\..."). */
 #ifdef _WIN32
 __attribute__((used)) int jh_run(const char *cmd_line) {
     size_t cmd_len = 0;

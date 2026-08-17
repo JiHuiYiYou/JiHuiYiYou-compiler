@@ -651,7 +651,15 @@ fn run_qbe(il_path: *u8, asm_path: *u8) -> i32 {
     let cmd_buf = malloc(16384 as i64);
     let mut pos: i64 = 0 as i64;
     let qbe = QBE_PATH();
+    // v1.5.6 W-039: wrap QBE_PATH in quotes so CreateProcessA treats the
+    // full path (e.g. "C:\Program Files\JHYY\bin\qbe.exe") as the module
+    // name. Without quotes, Windows tokenizes at first whitespace and
+    // launches C:\Program instead of qbe.exe if that file exists.
+    let lquote = "\"" as *u8;
+    pos = str_concat_at(cmd_buf, pos, lquote);
     pos = str_concat_at(cmd_buf, pos, qbe);
+    let rquote = "\"" as *u8;
+    pos = str_concat_at(cmd_buf, pos, rquote);
     let sep1 = " -t amd64_win -o " as *u8;
     pos = str_concat_at(cmd_buf, pos, sep1);
     pos = str_concat_at(cmd_buf, pos, asm_path);
@@ -667,6 +675,8 @@ fn run_qbe(il_path: *u8, asm_path: *u8) -> i32 {
     // qbe paths with spaces (e.g. "C:\Program Files\JHYY\bin\qbe.exe") are
     // handled correctly. cmd.exe /C tokenizes by whitespace and breaks on
     // space; CreateProcessA's command-line parser preserves quoted paths.
+    // v1.5.6 W-039: run_qbe wraps QBE_PATH in quotes (above) — jh_run passes
+    // the cmd_line through unchanged.
     let r = jh_run(cmd_buf);
     if r != (0 as i32) {
         // debug: print the actual command on failure so users can see which
@@ -901,9 +911,20 @@ fn cmd_run(argc: i32, argv: *u8) -> i32 {
     let ae1 = str_concat_at(abs_exe, abs_n, "_run.exe" as *u8);
     let ae_nul = (abs_exe as i64 + ae1) as *u8;
     store_byte_i32(ae_nul, 0 as i32);
+    // v1.5.6 W-039: wrap abs_exe in quotes so CreateProcessA treats the full
+    // path (e.g. "C:\Program Files\...\dungeon_game_run.exe") as the module
+    // name. Without quotes, Windows tokenizes at first whitespace and would
+    // launch C:\Program if that file exists.
+    let quoted_exe = malloc(1024 as i64);
+    let _qe0 = str_concat_at(quoted_exe, 0 as i64, "\"" as *u8);
+    let qe_n = strlen(quoted_exe);
+    let _qe1 = str_concat_at(quoted_exe, qe_n, abs_exe);
+    let qe_n2 = strlen(quoted_exe);
+    let _qe2 = str_concat_at(quoted_exe, qe_n2, "\"" as *u8);
     // v1.5.6 W-038: 用 jh_run (CreateProcessA) 替代 system(), 绕过 cmd.exe /C 不搜索 cwd.
-    // W-034 jh_fullpath 已把 abs_exe 解析为绝对路径, CreateProcessA 直接执行.
-    let rc = jh_run(abs_exe);
+    // W-034 jh_fullpath 已把 abs_exe 解析为绝对路径, W-039 已用 quotes 包裹.
+    let rc = jh_run(quoted_exe);
+    free(quoted_exe);
     free(abs_exe);
     free(abs_in);
     free(out_buf);

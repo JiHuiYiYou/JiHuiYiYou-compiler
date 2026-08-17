@@ -2747,6 +2747,8 @@ main.jhyy 三处 `system(...)` 全部改 `jh_run(...)`:
 
 **superseder:** 不需要真修,workaround 是 cleanest 方案(无需改 cmd.exe 行为,无需改 PATH/cwd,无需 quote 转义)。
 
+**W-039 跟进 (2026-08-17):** W-038 ship 后用户实测 installer 路径仍报 `'jhyy: cannot derive project root from argv[0]' + 'QBE failed'`。原因是 CreateProcessA 同样按 unquoted first-token 切 module name:`C:\Program Files\...\qbe.exe ...` 被 tokenize 成 module=`C:\Program`,Windows 在 `C:\` 找到一个真实的 464KB PE32+ 二进制 (`C:\Program`,SHA `9802b419...`)就 launch 它 — 那个 binary 输出 "cannot derive" 并 exit 1。W-039 修法:run_qbe / cmd_run 的 caller 显式 quote 自己的 exe path(`"<qbe_path>" <args>`)。jh_gcc_invoke 已经 quote,无需改。W-039 不能在 jh_run 里做(没有 exe path 边界信息)。
+
 **引用:**
 - CreateProcessA command-line parsing: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessa (search "Parsing the command line")
 - cmd.exe /C quote rule: https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cmd (search "preserved" + "/C")
@@ -2754,5 +2756,55 @@ main.jhyy 三处 `system(...)` 全部改 `jh_run(...)`:
 - related: regress.py 仍不测 cmd_run exec + qbe + link 的 system 链路
 
 ---
+
+## W-039: CreateProcessA 同样 unquoted-token 切错 — caller 显式 quote exe path
+
+**状态:** ✅ RESOLVED 2026-08-17
+**日期:** 2026-08-17
+**触发面:** `compiler/src0/main.jhyy:run_qbe` + `cmd_run`
+
+**症状:**
+W-038 ship 后,installer 路径 `jhyy run dungeon_game.jhyy` 仍报:
+```
+DEBUG jh_path_qbe: [C:\Program Files\JHYY\bin\qbe.exe]
+DEBUG run_qbe cmd_buf: [C:\Program Files\JHYY\bin\qbe.exe -t amd64_win -o ... ...]
+jhyy: cannot derive project root from argv[0]
+QBE failed: C:\Program Files\JHYY\bin\qbe.exe -t amd64_win -o ... ...
+```
+
+**根因 (W-038 文档没 cover 的 corner case):**
+W-038 假设 CreateProcessA 会"quote 正确处理",但实际 Win32 CreateProcessA 对 unquoted command line 同样按 first-whitespace-tokenize 切 module name。`C:\Program Files\JHYY\bin\qbe.exe ...` → module=`C:\Program`。如果 `C:\Program.exe` 或 `C:\Program` 在 drive root 存在,Windows 就 launch 它而不是 qbe.exe。
+
+本机实测:`C:\Program` 是真实 464KB PE32+ binary (SHA `9802b419e4fe5241df11cb99ff595b6902f4984314019263f156abafb56222b5`),含 `jh_paths_init` 符号 + `cannot derive project root` 字符串 — 是个 stale jhyy.exe,被某个测试 session 复制到 `C:\Program` (或类似)。CreateProcessA 找到它后 launch,它的 main 跑 jh_paths_init(argv0=`C:\Program`),layout detection 找不到 qbe.exe,return 1,print "cannot derive",exit 1。
+
+**workaround:**
+W-039: callers 显式 wrap exe path in quotes。run_qbe / cmd_run 在拼 cmd_buf 时把 `"` + path + `"` 拼前面。jh_gcc_invoke 已经 quote gcc path,无需改。
+
+不在 jh_run 里做的原因:jh_run 只接收 cmd_line 字符串,无法知道 exe path 边界 (first whitespace 不一定是 exe path 边界 — exe path 本身可能含空格如 `C:\Program Files\...`)。让 caller 显式 quote 是唯一可靠方案。
+
+```jhyy
+// run_qbe 新逻辑
+let qbe = QBE_PATH();
+pos = str_concat_at(cmd_buf, pos, "\"" as *u8);  // 左 quote
+pos = str_concat_at(cmd_buf, pos, qbe);
+pos = str_concat_at(cmd_buf, pos, "\"" as *u8);  // 右 quote
+let sep1 = " -t amd64_win -o " as *u8;
+pos = str_concat_at(cmd_buf, pos, sep1);
+// ... 后续 -o, il_path 等
+let r = jh_run(cmd_buf);  // jh_run 透传,CreateProcessA 看到 quoted module
+```
+
+cmd_run 同样:abs_exe 前加 `"`,后加 `"`,传给 jh_run。
+
+**影响范围:** `compiler/src0/main.jhyy:run_qbe` (QBE_PATH quote 包裹) + `compiler/src0/main.jhyy:cmd_run` (abs_exe quote 包裹)。`compiler/src0/jhyy_helpers.c:jh_run` 不变 (透传)。`jh_gcc_invoke` 已经 quote,无需改。
+
+**失效条件:** 永久 work around (caller 永远知道自己 exe path)。
+
+**superseder:** 不需要真修,workaround 是 cleanest 方案(无需依赖 caller 不在 drive root 放 stray binary)。
+
+**引用:**
+- CreateProcessA 跟 cmd.exe /C 一样按 first-token 切 module name (W-038 doc 误以为会"quote 正确处理")
+- related: W-038 (CreateProcessA 替代 system() 是 W-039 的前置 — 没有 jh_run,W-039 也做不了 caller-side quote 后透传)
+- related: regress.py 仍不测 installer 路径 (only source-tree layout) — 这是 W-039 能 ship 但没在 CI 暴露的原因
 
 
