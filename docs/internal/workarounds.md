@@ -2754,6 +2754,7 @@ main.jhyy 三处 `system(...)` 全部改 `jh_run(...)`:
 - cmd.exe /C quote rule: https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cmd (search "preserved" + "/C")
 - related: W-034 (jh_fullpath 绝对路径 → cmd_run 不需要 tokenize);W-038 是更彻底的兜底,任何 system() 调用都安全
 - related: regress.py 仍不测 cmd_run exec + qbe + link 的 system 链路
+- superseder: 已被 W-040 取代(quote 范围不全,link_with_gcc 也需 quote)
 
 ---
 
@@ -2800,11 +2801,60 @@ cmd_run 同样:abs_exe 前加 `"`,后加 `"`,传给 jh_run。
 
 **失效条件:** 永久 work around (caller 永远知道自己 exe path)。
 
-**superseder:** 不需要真修,workaround 是 cleanest 方案(无需依赖 caller 不在 drive root 放 stray binary)。
+**superseder:** W-039 不完整 — link_with_gcc 也需要 quote。W-040 是 superseder。
 
 **引用:**
 - CreateProcessA 跟 cmd.exe /C 一样按 first-token 切 module name (W-038 doc 误以为会"quote 正确处理")
 - related: W-038 (CreateProcessA 替代 system() 是 W-039 的前置 — 没有 jh_run,W-039 也做不了 caller-side quote 后透传)
 - related: regress.py 仍不测 installer 路径 (only source-tree layout) — 这是 W-039 能 ship 但没在 CI 暴露的原因
+
+---
+
+## W-040: link_with_gcc 也需 quote path args (asm_path / RUNTIME_C / HELPERS_C / exe_path)
+
+**状态:** ✅ RESOLVED 2026-08-17
+**日期:** 2026-08-17
+**触发面:** `compiler/src0/main.jhyy:link_with_gcc`
+
+**症状:**
+W-039 ship 后,installer 路径 `jhyy run dungeon_game.jhyy` 部分场景仍 fail:
+```
+[4] codegen done
+cc1.exe: fatal error: Files\JHYY\bin\runtime.c: No such file or directory
+compilation terminated.
+cc1.exe: fatal error: Files\JHYY\bin\jhyy_helpers.c: No such file or directory
+compilation terminated.
+gcc link failed
+```
+
+**根因:**
+W-039 只 quote 了 `QBE_PATH()` (run_qbe) + `abs_exe` (cmd_run),漏了 link_with_gcc 这一段。`RUNTIME_C()` / `HELPERS_C()` resolve 到 `<INSTALLDIR>\bin\runtime.c` / `jhyy_helpers.c`,installer layout 下路径含空格 (`C:\Program Files\JHYY\bin\...`)。link_with_gcc 把这些 paths 不 quote 直接拼到 gcc args,gcc tokenize 时拆成 `C:\Program` + `Files\JHYY\bin\runtime.c`,cc1.exe 找不到 `Files\JHYY\bin\runtime.c`(因为 gcc 把 `Files\...` 当 source file relative path,从 `C:\Program` 起跳,实际不存在)。
+
+asm_path / exe_path 也会撞同样的 bug,如果用户 cwd 是 `C:\Program Files\...` 或 `-o` 输出路径含空格。
+
+**workaround:**
+link_with_gcc 把 4 个 path args 全部 quote 包裹,跟 run_qbe 同样手动 quote:
+```jhyy
+pos = str_concat_at(cmd_buf, pos, lq);  // 左 "
+pos = str_concat_at(cmd_buf, pos, asm_path);
+pos = str_concat_at(cmd_buf, pos, rq);  // 右 "
+... (同样 wrap RUNTIME_C, HELPERS_C, exe_path)
+```
+
+`jh_gcc_invoke` 已经 quote gcc path,无需改。`jh_run` 透传 cmd_line 不变。
+
+**影响范围:** `compiler/src0/main.jhyy:link_with_gcc` (4 个 path args quote 包裹)。`compiler/src0/jhyy_helpers.c:jh_run` + `jh_gcc_invoke` 不变。
+
+**失效条件:** 永久 work around (caller 永远知道自己 args 的 path 边界)。
+
+**superseder:** 不需要真修,workaround 是 cleanest 方案(无需依赖 args 永远不含空格)。
+
+**引用:**
+- W-039 superseder (link_with_gcc quote 是 W-039 quote 全集的必要补全)
+- related: W-038 (CreateProcessA 替代 system() 链路)
+- related: regress.py 仍不测 installer 路径 — W-040 能 ship 但同样没在 CI 暴露
+- lesson: W-039 ship 前应该扫一遍所有 cmd_buf 拼接点找同类 bug,而不是只 fix qbe 跟 exe path
+
+---
 
 

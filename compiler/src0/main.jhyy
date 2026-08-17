@@ -696,17 +696,36 @@ fn run_qbe(il_path: *u8, asm_path: *u8) -> i32 {
 //   jh_gcc_path() 拿 resolved gcc 路径 + 引号包裹, 写 cmd_buf 头部;
 //   cmd_buf 后续段 (args + -o EXE -lm) 由 caller 拼. 全 cmd 仍传 system().
 fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
+    // v1.5.6 W-040: wrap each path arg in quotes so gcc's argv parser
+    // treats the full path as one token. RUNTIME_C() and HELPERS_C() resolve
+    // to "<INSTALLDIR>\bin\runtime.c" / "<INSTALLDIR>\bin\jhyy_helpers.c"
+    // which contain spaces under installer layout ("C:\Program Files\...").
+    // Without quotes, gcc tokenizes "C:\Program Files\...\runtime.c" into
+    // "C:\Program" + "Files\...\runtime.c" and cc1.exe fails with
+    // "Files\JHYY\bin\runtime.c: No such file or directory". asm_path and
+    // exe_path may also contain spaces when the user's cwd or -o output path
+    // has spaces, so quote all of them.
+    let lq = "\"" as *u8;
+    let rq = "\"" as *u8;
     let cmd_buf = malloc(16384 as i64);
     let mut pos: i64 = 0 as i64;
     let sp = " " as *u8;
+    pos = str_concat_at(cmd_buf, pos, lq);
     pos = str_concat_at(cmd_buf, pos, asm_path);
+    pos = str_concat_at(cmd_buf, pos, rq);
     pos = str_concat_at(cmd_buf, pos, sp);
+    pos = str_concat_at(cmd_buf, pos, lq);
     pos = str_concat_at(cmd_buf, pos, RUNTIME_C());
+    pos = str_concat_at(cmd_buf, pos, rq);
     pos = str_concat_at(cmd_buf, pos, sp);
+    pos = str_concat_at(cmd_buf, pos, lq);
     pos = str_concat_at(cmd_buf, pos, HELPERS_C());
+    pos = str_concat_at(cmd_buf, pos, rq);
     let oflag = " -o " as *u8;
     pos = str_concat_at(cmd_buf, pos, oflag);
+    pos = str_concat_at(cmd_buf, pos, lq);
     pos = str_concat_at(cmd_buf, pos, exe_path);
+    pos = str_concat_at(cmd_buf, pos, rq);
     let lmflag = " -lm" as *u8;
     pos = str_concat_at(cmd_buf, pos, lmflag);
     let nul_p = (cmd_buf as i64 + pos) as *u8;
@@ -717,6 +736,7 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     // gcc 路径有空格 (e.g. "C:\Program Files\...") 也安全.
     // v1.5.6 W-038: 用 jh_run (CreateProcessA) 替代 system(), 绕过 cmd.exe /C 的
     // 多重 quote 处理 bug. CreateProcessA 的 cmd-line parser 正确处理 quoted path.
+    // v1.5.6 W-040: path args 在 cmd_buf 已经 quote 包裹, gcc 看到 quoted argv.
     let invoke_buf = malloc(16384 as i64);
     let args_start = cmd_buf;
     let _wrote = jh_gcc_invoke(invoke_buf, 16384 as i32, args_start);
