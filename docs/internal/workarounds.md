@@ -3046,3 +3046,68 @@ layout (b) (source-tree walk-up) regress 走的是这条, 文件本来就在 `<r
 - W-040 (link_with_gcc 路径 quote, 跟 W-043 一起让 install 位置能跑)
 
 
+## W-044: MSI 漏装 runtime.h → install 后 `fatal error: runtime.h`
+
+**状态:** ✅ RESOLVED (v1.5.6 W-044, 2026-08-24)
+**日期:** 2026-08-24
+**触发面:** W-043 ship 后 fresh / upgrade install 跑 `jhyy run <file.jhyy>` → gcc 编译 `runtime.c` 阶段失败
+
+**症状:**
+User 装 v1.5.6 + W-043 后跑 `jhyy run 新建文本文档.jhyy`, 输出:
+```
+Error: can't open C:\Program Files\JHYY\bin\runtime.c:1:10: fatal error: runtime.h: No such file or directory
+    1 | #include "runtime.h"
+      |          ^~~~~~~~~~~
+compilation terminated.
+gcc link failed: ...
+```
+**根因:**
+W-043 (`installer/compiler/jhyy-compiler.wxs`) ship 了 `compiler/runtime/runtime.c` + `compiler/src0/jhyy_helpers.c`, 但 `runtime.c` line 1 `#include "runtime.h"` 的 sibling header (`compiler/runtime/runtime.h`) 没 ship。
+
+W-043 planning 时只 map 了 `.c` 文件集, 没 map include graph。`runtime.c` 有 1 个 local header dep (`runtime.h`), `jhyy_helpers.c` 0 个 local header dep。
+
+gcc 编译 `runtime.c` 时 `"local.h"` 查找顺序:
+1. `runtime.c` 所在 dir (= `INSTALLDIR\bin\` 因为 W-043 把 runtime.c 放在那) → 找不到
+2. `-I` include path → 没人加
+3. 系统路径 → `<runtime.h>` 是 GCC 内置?  不是, 只 `<*.h>` style 是
+
+→ die with "fatal error: runtime.h: No such file or directory"
+
+**fix (W-044):**
+1 个新 MSI Component ship 1 个 header 到 `<INSTALLDIR>\bin\`:
+
+| Component | GUID | File |
+|-----------|------|------|
+| `RuntimeH` | `D5C2880A-5AA4-4ED4-AAFC-8C18D1E650B8` | `runtime.h` (429 B) |
+
++ `installer/build.ps1` 加 1 行 `Copy-Item` 把 `compiler/runtime/runtime.h` 拷到 `$binDir/`
++ `installer/GUIDS.md` 表 +1 行
++ `jhyy_helpers.c` 0 个 local header dep — **不动**
++ `RuntimeC` + `HelpersC` Component GUID **不动** (W-043 用户可能已装)
+
+**不动:**
+- `compiler/runtime/runtime.c` / `runtime.h` source
+- `compiler/src0/jhyy_helpers.c` source
+- jhyy.exe (W-043 已不动, W-044 同样不动)
+- regress.py
+
+**自举影响:**
+无 — W-044 不动 jhyy.exe / src0/, 只动 installer MSI payload。jhyy_v1 stage1 byte-equal 自动 preserved。
+
+**验证:**
+1. `installer/build.ps1 compiler` rebuild → `$binDir/` 含 5 个 .c/.h + jhyy.exe + qbe.exe (新加 `runtime.h`)
+2. `wix msi validate jhyy-compiler-1.5.6.msi` → 0 ICE errors (新 Component 不破 ICE43/57/80)
+3. `wix msi decompile ... | grep RuntimeH` → 看到 RuntimeH Component
+4. `python compiler/build/bin/regress.py` → 53/53 PASS (unchanged, jhyy.exe SHA `e1663851163add22...` 不动)
+5. uninstall + install 新 bundle → `<INSTALLDIR>\bin\` 7 个文件 (jhyy.exe / qbe.exe / install-vsix.bat / configure-coderunner.ps1 / runtime.c / runtime.h / jhyy_helpers.c)
+6. `jhyy run 新建文本文档.jhyy` → "Hello, world!" 输出 (无 runtime.h error, 无 gcc link failed)
+
+**lesson:**
+sprint 设计 MSI payload 时, **必须** map 完整 include graph (`grep -E '^#include' file.c` + 递归 `.h`), 不是只看 `.c` 集合。W-043 教训: 1 个 missing 429-byte header 就能让 install 完败。
+
+**引用:**
+- W-043 (ship runtime.c + jhyy_helpers.c, 不完整 — 漏 runtime.h)
+- W-042 (诊断 + cmd_buf echo, 帮这次快速定位 root cause)
+- W-037 (jh_paths_init layout a 路径策略, runtime.c / runtime.h 必须同居 bin/)
+
+

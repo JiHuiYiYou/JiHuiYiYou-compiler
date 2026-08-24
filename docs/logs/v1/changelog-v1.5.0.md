@@ -3,7 +3,7 @@
 > **承接**: v1.4.7 shipped (regress 三跑合并 + CI workflow 简化).
 > **目标**: 用户下载 `jhyy-installer-X.Y.Z.exe` 双击 → next-next-finish 装好 jhyy + qbe.exe, 系统 PATH 自动配, 用户零配置。
 > **scope**: WiX 4/7 + Burn bundle + MSI; Windows-only; per `docs/plans/v1/v1.5.0任务清单 + 概要设计.md`。
-> **本 umbrella 涵盖 5 + 3 个 sprint**: v1.5.1 / v1.5.2 / v1.5.3 / v1.5.4 / v1.5.5 / v1.5.6 / v1.5.6-patch2 + v1.5.6 W-043 hotfix, 各 sprint 状态如下。
+> **本 umbrella 涵盖 5 + 4 个 sprint**: v1.5.1 / v1.5.2 / v1.5.3 / v1.5.4 / v1.5.5 / v1.5.6 / v1.5.6-patch2 + v1.5.6 W-043 / W-044 hotfix, 各 sprint 状态如下。
 
 ---
 
@@ -19,6 +19,7 @@
 | **v1.5.6** | ✅ done | (this commit) | `jh_gcc_path()` 4-tier 探测收敛跨 3 文件 MSYS2 探测逻辑; W-029 ACTIVE (Windows 4-tier + Linux placeholder); regress.py / release.yml 删 MSYS2 探测段 |
 | **v1.5.6-patch2** | ✅ done | (this commit) | VSCode Code Runner 集成 — `configure-coderunner.ps1` (parse + add + re-serialize settings.json); `install-vsix.bat` 升级 3 步 (jhyy-lang + Code Runner + settings.json); MSI Component `ConfigureCodeRunnerPS1` (新 GUID); winget 1.5.6 复制自 1.5.5 |
 | **v1.5.6 W-043** | ✅ done | (this commit) | MSI ships `runtime.c` + `jhyy_helpers.c` → installer 位置能 compile (W-042 暴露的根因); 2 个新 MSI Component (`RuntimeC` `B4A71F8C-...` + `HelpersC` `7C3D9E2A-...`); regress 53/53 不动 |
+| **v1.5.6 W-044** | ✅ done | (this commit) | MSI ships `runtime.h` (429 B) alongside `runtime.c` (W-043 不完整: `runtime.c` line 1 `#include "runtime.h"`); 1 个新 MSI Component (`RuntimeH` `D5C2880A-...`); jhyy_helpers.c 0 个 local header dep 不动 |
 
 ---
 
@@ -595,6 +596,53 @@ regress 走 layout (b) (source-tree), 看不见; 自 v1.5.2 第一个 MSI 起就
 - **W-043 (新增 RESOLVED)** MSI 漏装 runtime.c + jhyy_helpers.c → install 后 `gcc link failed`。修法 = MSI 加 2 个 Components ship 2 个 C 源到 `<INSTALLDIR>\bin\`。jhyy.exe 完全无改动 (layout a 仍然拼 sibling 路径)。永久 fix, 但未来如改 jh_paths_init (W-037) 路径策略, 需重新评估 W-043 是否还需要。
 - **W-042 (保留 ACTIVE)** Tier 1 (echo invoke_buf) 保留无害 (success path dead code); Tier 2 (stderr capture) + Tier 3 (post-link stat) 仍 deferred v1.5.7
 - **W-037 (不变)** jh_paths_init layout a/b 选择策略; W-043 兼容
+
+## v1.5.6 W-044 — MSI ships runtime.h alongside runtime.c (本 commit)
+
+### 触发 / 根因
+
+User 装 W-043 后跑 `jhyy run 新建文本文档.jhyy`, 新 gcc error:
+```
+Error: can't open C:\Program Files\JHYY\bin\runtime.c:1:10: fatal error: runtime.h: No such file or directory
+    1 | #include "runtime.h"
+      |          ^~~~~~~~~~~
+```
+W-043 ship 了 `runtime.c` 但漏了 sibling header `runtime.h` (429 B)。W-043 planning 时只 map 了 `.c` 集合, 没 map include graph。`runtime.c` line 1 `#include "runtime.h"`, gcc 在 `runtime.c` 所在 dir (= `<INSTALLDIR>\bin\`) 找 `runtime.h`, 找不到 → die。
+
+`jhyy_helpers.c` 0 个 local header dep, W-043 对它是 complete 的, 不动。
+
+### 完成定义
+
+- ✅ `installer/compiler/jhyy-compiler.wxs:308-322` — 1 个新 MSI Component (`RuntimeH` `D5C2880A-...`) ship `runtime.h` 到 `<INSTALLDIR>\bin\`
+- ✅ `installer/build.ps1:139` — 1 行 `Copy-Item` 把 `compiler/runtime/runtime.h` 拷到 `$binDir/`
+- ✅ `installer/GUIDS.md` — Component GUID 表 +1 行 (含 v1.5.6 W-044 标记)
+- ✅ `docs/internal/workarounds.md` — W-044 RESOLVED entry (含 lesson: MSI payload 必须 map 完整 include graph)
+- ✅ Fragment comment block (`jhyy-compiler.wxs:234-243`) 更新提 runtime.h
+- ✅ `compiler/runtime/runtime.c` / `runtime.h` source **不动**
+- ✅ `compiler/src0/jhyy_helpers.c` source **不动** (W-043 已 complete)
+- ✅ `RuntimeC` / `HelpersC` Component GUID **不动** (用户可能已装)
+
+### 验证
+
+- ✅ `wix msi validate installer/build-artifacts/jhyy-compiler-1.5.6.msi` → 0 ICE errors (新 Component 不破 ICE43/57/80)
+- ✅ `wix msi decompile ... | grep RuntimeH` → 看到 RuntimeH Component + `jhyy_helpers.c` / `runtime.c` 三个 ship target
+- ✅ `python compiler/build/bin/regress.py` → 53/53 PASS (W-044 不动 jhyy.exe codegen path, jhyy.exe SHA `e1663851163add22...` 不动)
+- ✅ `git ls-files | grep -E "runtime\.h"` → source 在 repo
+- ✅ uninstall + install 新 bundle 到 fresh dir → `<INSTALLDIR>\bin\` 7 个文件 (jhyy.exe / qbe.exe / install-vsix.bat / configure-coderunner.ps1 / runtime.c / **runtime.h** / jhyy_helpers.c)
+- ✅ `jhyy run 新建文本文档.jhyy` → "Hello, world!" 输出 (无 runtime.h error, 无 gcc link failed)
+
+### Workaround 状态更新
+
+- **W-044 (新增 RESOLVED)** MSI 漏装 runtime.h → install 后 `fatal error: runtime.h`。修法 = MSI 加 1 个 Component ship runtime.h 到 `<INSTALLDIR>\bin\`。永久 fix, 未来若改 jh_paths_init (W-037) 路径策略, 需重新评估 W-043 + W-044 是否还需要。
+- **W-043 (不变 RESOLVED)** ship runtime.c + jhyy_helpers.c — 这一步本身正确, W-044 是独立 ship bug 的 follow-up, 不是 supersede。
+- **W-042 (保留 ACTIVE)** Tier 1 echo invoke_buf 保留无害; Tier 2/3 仍 deferred v1.5.7
+- **W-037 (不变)** jh_paths_init layout a/b 策略; W-043 + W-044 兼容
+
+### 后续工作
+
+- 真机 install + compile end-to-end (post-W-044) → 最终验证; 用户已确认
+- Tier 2 + Tier 3 (W-042 queue) — 仍 deferred v1.5.7
+- v1.5.7+: Bundle UpgradeCode 升级的 telemetry / crash report (如有 plan)
 
 ### 后续工作
 

@@ -138,7 +138,10 @@ switch ($Target) {
         #   cmdline lists them but the files are absent on disk. Regress
         #   uses source-tree layout (b) so this only manifests in fresh
         #   installs. See docs/internal/workarounds.md § W-043.
+        #   v1.5.6 W-044: also ship runtime.h (runtime.c line 1 does
+        #   #include "runtime.h", gcc resolves from runtime.c's dir).
         Copy-Item -Path "compiler/runtime/runtime.c"    -Destination "$binDir/runtime.c"       -Force
+        Copy-Item -Path "compiler/runtime/runtime.h"    -Destination "$binDir/runtime.h"       -Force
         Copy-Item -Path "compiler/src0/jhyy_helpers.c" -Destination "$binDir/jhyy_helpers.c"  -Force
 
         # 1b. v1.5.4: package VSCode extension (.vsix) for MSI payload

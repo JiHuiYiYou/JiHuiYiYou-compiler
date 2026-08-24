@@ -233,13 +233,15 @@
   <Fragment>
     <!--
       Files in bin\ : jhyy.exe + qbe.exe (production binaries) + runtime.c
-      + jhyy_helpers.c (v1.5.6 W-043). The C sources are needed because
-      installer-layout jhyy.exe uses jh_paths_init layout (a) which
-      builds "<bindir>\runtime.c" + "<bindir>\jhyy_helpers.c" paths from
-      sibling qbe.exe. Without these files, gcc link fails because the
-      paths appear on cmdline but the files are absent on disk. Regress
-      uses source-tree layout (b), which is why this only manifests in
-      fresh-install scenarios. See docs/internal/workarounds.md § W-043.
+      + jhyy_helpers.c (v1.5.6 W-043) + runtime.h (v1.5.6 W-044).
+      The C sources are needed because installer-layout jhyy.exe uses
+      jh_paths_init layout (a) which builds "<bindir>\runtime.c" +
+      "<bindir>\jhyy_helpers.c" paths from sibling qbe.exe. runtime.h
+      is needed because runtime.c line 1 does #include "runtime.h"
+      and gcc resolves it from runtime.c's dir. Regress uses
+      source-tree layout (b), which is why these only manifest in
+      fresh-install scenarios. See docs/internal/workarounds.md § W-043
+      (RESOLVED) + § W-044 (RESOLVED).
 
       NOT included: GCC toolchain (per `力度 1 检测+引导` 决策, user 装 v1.5.2
       时已有 MSYS2 + gcc, 或 v1.5.3 Burn bundle 自动装 MSYS2).
@@ -298,6 +300,22 @@
       <Component Id="RuntimeC" Bitness="always64" Guid="B4A71F8C-9D32-4E6A-B5C8-7F1E3A92D104">
         <File Id="RuntimeCFile"
               Source="!(bindpath.bin)\runtime.c"
+              KeyPath="yes"
+              Checksum="yes" />
+      </Component>
+
+      <!--
+        RuntimeH (v1.5.6 W-044): ships compiler/runtime/runtime.h to
+        INSTALLDIR\bin\. Companion to RuntimeC — runtime.c line 1 does
+        #include "runtime.h" and gcc resolves it from runtime.c's dir.
+        Without this, fresh-install gcc compile fails with
+        "fatal error: runtime.h: No such file or directory" even after
+        W-043 ships runtime.c. (jhyy_helpers.c has no local header deps
+        so W-043 was complete for that file.)
+      -->
+      <Component Id="RuntimeH" Bitness="always64" Guid="D5C2880A-5AA4-4ED4-AAFC-8C18D1E650B8">
+        <File Id="RuntimeHFile"
+              Source="!(bindpath.bin)\runtime.h"
               KeyPath="yes"
               Checksum="yes" />
       </Component>
