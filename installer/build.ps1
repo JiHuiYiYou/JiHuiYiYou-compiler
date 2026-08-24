@@ -131,6 +131,16 @@ switch ($Target) {
             exit 1
         }
 
+        # 1a. v1.5.6 W-043: ship runtime.c + jhyy_helpers.c into bin\
+        #   installer-layout jhyy.exe (jh_paths_init layout a) builds
+        #   "<bindir>\runtime.c" + "<bindir>\jhyy_helpers.c" paths from
+        #   sibling qbe.exe. Without these, gcc link fails because the
+        #   cmdline lists them but the files are absent on disk. Regress
+        #   uses source-tree layout (b) so this only manifests in fresh
+        #   installs. See docs/internal/workarounds.md § W-043.
+        Copy-Item -Path "compiler/runtime/runtime.c"    -Destination "$binDir/runtime.c"       -Force
+        Copy-Item -Path "compiler/src0/jhyy_helpers.c" -Destination "$binDir/jhyy_helpers.c"  -Force
+
         # 1b. v1.5.4: package VSCode extension (.vsix) for MSI payload
         #   Skippable via SKIP_VSIX=1 (e.g. for quick MSI rebuild without vsix)
         #   Pass JHY_VERSION_DISPLAY (with -rcN suffix) so vsix filename

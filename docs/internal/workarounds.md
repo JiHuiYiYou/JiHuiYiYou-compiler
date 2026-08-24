@@ -2984,3 +2984,65 @@ Tier 2 (stderr capture via pipe) + Tier 3 (post-link .exe stat check) 都 ship �
 - `run_qbe:684-686` (镜像源 pattern)
 
 
+## W-043: MSI 漏装 runtime.c + jhyy_helpers.c → install 后 `gcc link failed`
+
+**状态:** ✅ RESOLVED (v1.5.6 W-043, 2026-08-24)
+**日期:** 2026-08-24
+**触发面:** 全新 / upgrade install 后, `jhyy run <file.jhyy>` → link 阶段失败
+
+**症状:**
+User 在 fresh v1.5.6 install 后跑 `jhyy run 新建文本文档.jhyy`, W-042 输出:
+```
+gcc link failed: "C:\msys64\ucrt64\bin\gcc.exe" "新建文本文档_run.s"
+  "C:\Program Files\JHYY\bin\runtime.c"
+  "C:\Program Files\JHYY\bin\jhyy_helpers.c"
+  -o "新建文本文档_run.exe" -lm
+```
+两个 C 源文件路径不存在。regress 全 PASS (53/53) — 因 regress 用 source-tree layout, 看不见这个。
+
+**根因:**
+MSI ComponentGroup `JHYYBinFiles` (`installer/compiler/jhyy-compiler.wxs:239`) 只 ship 4 个文件:
+- `jhyy.exe`, `qbe.exe`, `install-vsix.bat`, `configure-coderunner.ps1`
+
+`compiler/runtime/runtime.c` + `compiler/src0/jhyy_helpers.c` **缺失**。
+
+但 `jh_paths_init` (`compiler/src0/jhyy_helpers.c:184-198`, layout a) 当 sibling qbe.exe 存在时, 路径直接拼成 `<bindir>\runtime.c` + `<bindir>\jhyy_helpers.c`。cmdline 出现路径 → gcc 找不到文件 → 失败。
+
+layout (b) (source-tree walk-up) regress 走的是这条, 文件本来就在 `<root>\compiler\runtime\runtime.c` + `<root>\compiler\src0\jhyy_helpers.c`, 所以 regress 看不见。
+
+**真相:** 自 v1.5.2 (第一个 MSI) 就有, 此前没在 install 位置跑端到端 compile。
+
+**fix (W-043):**
+2 个新 MSI Components ship 2 个 C 源到 `<INSTALLDIR>\bin\`:
+
+| Component | GUID | File |
+|-----------|------|------|
+| `RuntimeC` | `B4A71F8C-9D32-4E6A-B5C8-7F1E3A92D104` | `runtime.c` |
+| `HelpersC` | `7C3D9E2A-4F1B-4A8E-9D6F-2B5E8C1A4F77` | `jhyy_helpers.c` |
+
++ `installer/build.ps1` 加 2 行 `Copy-Item` 把 source 拷到 `bin/` (line 134-138)
++ `installer/GUIDS.md` 表 +2 行
++ comment block at `jhyy-compiler.wxs:234-238` 更新说明
+
+**不动:**
+- `compiler/src0/jhyy_helpers.c` 不动 (layout a 路径逻辑 W-037 invariant, 改路径会破 regress)
+- regress 不动 (用 layout b)
+- ProductCode / UpgradeCode 不动
+
+**自举影响:**
+无 — W-043 不动 jhyy.exe codegen path, 只动 installer MSI payload。jhyy_v1 stage1 byte-equal 自动 preserved。
+
+**验证:**
+1. `installer/build.ps1 compiler` rebuild → `$binDir/` 含 6 个文件 (jhyy.exe / qbe.exe / install-vsix.bat / configure-coderunner.ps1 / runtime.c / jhyy_helpers.c)
+2. `git ls-files | grep -E "runtime\.c|jhyy_helpers\.c"` 检查 source 在 repo (不退化 jhyy_helpers.c source)
+3. `python compiler/build/bin/regress.py` → 53/53 PASS (unchanged)
+4. install MSI 到新 dir → `<INSTALLDIR>\bin\` 6 个文件
+5. `jhyy run 新建文本文档.jhyy` → "Hello, world!" 输出 (无 gcc link failed)
+6. `wix msi validate` → 0 ICE errors
+
+**引用:**
+- W-037 (jh_paths_init layout a 兄弟 qbe.exe probe, 不可改)
+- W-042 (诊断打开, 暴露了这个 ship bug)
+- W-040 (link_with_gcc 路径 quote, 跟 W-043 一起让 install 位置能跑)
+
+

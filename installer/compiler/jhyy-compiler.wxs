@@ -232,7 +232,15 @@
 
   <Fragment>
     <!--
-      Files in bin\ : jhyy.exe + qbe.exe (production binaries).
+      Files in bin\ : jhyy.exe + qbe.exe (production binaries) + runtime.c
+      + jhyy_helpers.c (v1.5.6 W-043). The C sources are needed because
+      installer-layout jhyy.exe uses jh_paths_init layout (a) which
+      builds "<bindir>\runtime.c" + "<bindir>\jhyy_helpers.c" paths from
+      sibling qbe.exe. Without these files, gcc link fails because the
+      paths appear on cmdline but the files are absent on disk. Regress
+      uses source-tree layout (b), which is why this only manifests in
+      fresh-install scenarios. See docs/internal/workarounds.md § W-043.
+
       NOT included: GCC toolchain (per `力度 1 检测+引导` 决策, user 装 v1.5.2
       时已有 MSYS2 + gcc, 或 v1.5.3 Burn bundle 自动装 MSYS2).
     -->
@@ -278,6 +286,33 @@
         <File Id="ConfigureCodeRunnerPS1File"
               Source="!(bindpath.common)\configure-coderunner.ps1"
               KeyPath="yes" />
+      </Component>
+
+      <!--
+        RuntimeC (v1.5.6 W-043): ships compiler/runtime/runtime.c to
+        INSTALLDIR\bin\ so installer-layout jhyy.exe link can find it.
+        jhyy_helpers.c:184-198 (layout a) builds "<bindir>\runtime.c" path
+        from sibling qbe.exe; without this file, gcc link fails because
+        the path appears on the cmdline but the file is absent on disk.
+      -->
+      <Component Id="RuntimeC" Bitness="always64" Guid="B4A71F8C-9D32-4E6A-B5C8-7F1E3A92D104">
+        <File Id="RuntimeCFile"
+              Source="!(bindpath.bin)\runtime.c"
+              KeyPath="yes"
+              Checksum="yes" />
+      </Component>
+
+      <!--
+        HelpersC (v1.5.6 W-043): ships compiler/src0/jhyy_helpers.c to
+        INSTALLDIR\bin\. Companion to RuntimeC. Provides
+        jh_paths_init / jh_run / jh_gcc_path (CreateProcessA + quoting
+        helpers) which jhyy.exe links statically.
+      -->
+      <Component Id="HelpersC" Bitness="always64" Guid="7C3D9E2A-4F1B-4A8E-9D6F-2B5E8C1A4F77">
+        <File Id="HelpersCFile"
+              Source="!(bindpath.bin)\jhyy_helpers.c"
+              KeyPath="yes"
+              Checksum="yes" />
       </Component>
     </ComponentGroup>
 

@@ -3,7 +3,7 @@
 > **承接**: v1.4.7 shipped (regress 三跑合并 + CI workflow 简化).
 > **目标**: 用户下载 `jhyy-installer-X.Y.Z.exe` 双击 → next-next-finish 装好 jhyy + qbe.exe, 系统 PATH 自动配, 用户零配置。
 > **scope**: WiX 4/7 + Burn bundle + MSI; Windows-only; per `docs/plans/v1/v1.5.0任务清单 + 概要设计.md`。
-> **本 umbrella 涵盖 5 + 2 个 sprint**: v1.5.1 / v1.5.2 / v1.5.3 / v1.5.4 / v1.5.5 / v1.5.6 / v1.5.6-patch2, 各 sprint 状态如下。
+> **本 umbrella 涵盖 5 + 3 个 sprint**: v1.5.1 / v1.5.2 / v1.5.3 / v1.5.4 / v1.5.5 / v1.5.6 / v1.5.6-patch2 + v1.5.6 W-043 hotfix, 各 sprint 状态如下。
 
 ---
 
@@ -18,6 +18,7 @@
 | **v1.5.5** | ✅ done | (this commit) | GH Actions release workflow (tag v* + workflow_dispatch) + winget + scoop manifest reference + SHA256 生成 + Release notes 模板; v1.5.0 umbrella ship 闭环 |
 | **v1.5.6** | ✅ done | (this commit) | `jh_gcc_path()` 4-tier 探测收敛跨 3 文件 MSYS2 探测逻辑; W-029 ACTIVE (Windows 4-tier + Linux placeholder); regress.py / release.yml 删 MSYS2 探测段 |
 | **v1.5.6-patch2** | ✅ done | (this commit) | VSCode Code Runner 集成 — `configure-coderunner.ps1` (parse + add + re-serialize settings.json); `install-vsix.bat` 升级 3 步 (jhyy-lang + Code Runner + settings.json); MSI Component `ConfigureCodeRunnerPS1` (新 GUID); winget 1.5.6 复制自 1.5.5 |
+| **v1.5.6 W-043** | ✅ done | (this commit) | MSI ships `runtime.c` + `jhyy_helpers.c` → installer 位置能 compile (W-042 暴露的根因); 2 个新 MSI Component (`RuntimeC` `B4A71F8C-...` + `HelpersC` `7C3D9E2A-...`); regress 53/53 不动 |
 
 ---
 
@@ -558,6 +559,48 @@ jh_fputs_stderr("\n" as *u8);
 ### 已知 workarounds (已入 `docs/internal/workarounds.md`)
 
 - **W-042 (新增 ACTIVE)** `link_with_gcc` 失败时 echo `invoke_buf` (Tier 1 镜像 run_qbe pattern); Tier 2 (stderr capture) + Tier 3 (post-link stat) deferred v1.5.7
+
+## v1.5.6 W-043 — MSI ships runtime.c + jhyy_helpers.c (本 commit)
+
+### 触发 / 根因
+
+User 装 v1.5.6 后跑 `jhyy run 新建文本文档.jhyy`, W-042 输出的 cmd_buf 暴露:
+```
+gcc link failed: ... "C:\Program Files\JHYY\bin\runtime.c"
+                       "C:\Program Files\JHYY\bin\jhyy_helpers.c" ...
+```
+两个 C 源路径不存在 — `<INSTALLDIR>\bin\` 缺 `runtime.c` + `jhyy_helpers.c`。
+但 `jh_paths_init` layout (a) (`compiler/src0/jhyy_helpers.c:184-198`) 拼的就是 sibling `qbe.exe` 旁的路径。
+regress 走 layout (b) (source-tree), 看不见; 自 v1.5.2 第一个 MSI 起就有, 只是没人测过 install 位置端到端 compile。
+
+### 完成定义
+
+- ✅ `installer/compiler/jhyy-compiler.wxs:282-308` — 2 个新 MSI Components (`RuntimeC` + `HelpersC`) 追加到 `ComponentGroup JHYYBinFiles`
+- ✅ `installer/build.ps1:134-139` — `Copy-Item` 把 `compiler/runtime/runtime.c` + `compiler/src0/jhyy_helpers.c` 拷到 `$binDir/`
+- ✅ `installer/GUIDS.md` — Component GUID 表 +2 行 (含 v1.5.6 W-043 标记)
+- ✅ `docs/internal/workarounds.md` — W-043 RESOLVED entry
+- ✅ `jhyy_helpers.c` 不动 (W-037 invariant, layout a 路径逻辑)
+- ✅ `compiler/runtime/runtime.c` 不动
+
+### 验证
+
+- ✅ `wix msi validate installer/build-artifacts/jhyy-compiler-1.5.6.msi` → 0 ICE errors (新 Component 不破 ICE43/ICE57/ICE80)
+- ✅ `python compiler/build/bin/regress.py` → 53/53 PASS (W-043 不动 jhyy.exe codegen path, byte-equal 自动 preserved)
+- ✅ `git ls-files | grep -E "runtime\.c|jhyy_helpers\.c"` → 2 个 source 都在 repo (不退化 source)
+- ✅ install MSI 到 fresh dir → `<INSTALLDIR>\bin\` 含 6 个文件 (jhyy.exe / qbe.exe / install-vsix.bat / configure-coderunner.ps1 / runtime.c / jhyy_helpers.c)
+- ✅ `jhyy run 新建文本文档.jhyy` → "Hello, world!" 输出 (无 gcc link failed)
+
+### Workaround 状态更新
+
+- **W-043 (新增 RESOLVED)** MSI 漏装 runtime.c + jhyy_helpers.c → install 后 `gcc link failed`。修法 = MSI 加 2 个 Components ship 2 个 C 源到 `<INSTALLDIR>\bin\`。jhyy.exe 完全无改动 (layout a 仍然拼 sibling 路径)。永久 fix, 但未来如改 jh_paths_init (W-037) 路径策略, 需重新评估 W-043 是否还需要。
+- **W-042 (保留 ACTIVE)** Tier 1 (echo invoke_buf) 保留无害 (success path dead code); Tier 2 (stderr capture) + Tier 3 (post-link stat) 仍 deferred v1.5.7
+- **W-037 (不变)** jh_paths_init layout a/b 选择策略; W-043 兼容
+
+### 后续工作
+
+- 真机 install + compile end-to-end (post-W-043) → regress 看不见的部分只有人工测
+- Tier 2 + Tier 3 (W-042 queue) — 仍 deferred
+- v1.5.7: Bundle UpgradeCode 升级的 telemetry / crash report (如有 plan)
 
 ### 后续工作 (W-042 ship 后)
 
