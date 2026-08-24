@@ -2921,4 +2921,66 @@ v1.5.6-patch2 加 2 件:
 - related: regress.py 不测 installer 行为 — W-041 同样 ship 但没在 CI 暴露 (本地 5 场景手动测)
 - lesson: v2.x installer 升级时把 PowerShell 脚本链打包到 `installer/vscode/` 子目录,避免根 common/ 过度膨胀
 
+## W-042: link_with_gcc 失败只打 "gcc link failed" — 缺 invoke_buf 诊断
+
+**状态:** 🟡 ACTIVE (v1.5.6 W-042, 2026-08-24) — Tier 1 镜像 run_qbe pattern
+**日期:** 2026-08-24
+**触发面:** `jhyy run <file.jhyy>` / `jhyy compile <file.jhyy>` 任一步失败, link_with_gcc 返回非 0 (`compiler/src0/main.jhyy:744`)
+
+**症状:**
+用户跑 helloworld 测:
+```jhyy
+extern fn puts(s: *u8) -> i32;
+fn main_jhyy() -> i32 {
+    puts("Hello, world!");
+    0
+}
+```
+compiler stages 全过 (imports / sema / ir_init / codegen 全 PASS), link 阶段只输出:
+```
+gcc link failed
+```
+没别的。用户 / agent 都无法判断根因。
+
+**根因:**
+`compiler/src0/main.jhyy:748` 失败分支只打 `"gcc link failed\n"`,**不**echo `invoke_buf` (gcc path + args)。
+
+3 种可能失败模式无法区分:
+- (A) `CreateProcessA` returned FALSE → `jh_run` returns -1 → gcc 从未启动 (fresh install 4-tier probe miss + fallback `"gcc"` → ERROR_FILE_NOT_FOUND)
+- (B) gcc 跑了但 exit code != 0 (real link error, stderr 没捕获或被 console 关掉前 race)
+- (C) gcc "succeeded" 但没产物 `.exe` (silent corruption)
+
+对比 `run_qbe` (`compiler/src0/main.jhyy:684-686`) 失败时**已**打 cmd_buf:
+```jhyy
+snprintf(msg_buf, ..., "QBE failed: %s\n" as *u8, cmd_buf);
+jh_fputs_stderr(msg_buf);
+```
+`link_with_gcc` 没镜像这个 pattern。
+
+**workaround:**
+`main.jhyy:744-756` 失败分支改成 3 段 jh_fputs_stderr (`"gcc link failed: "`, invoke_buf, `"\n"`), 镜像 run_qbe。free 移到分支内保证 invoke_buf 活着能 print。~5 行 jhyy-side 改动。
+
+不动的:
+- `jh_run` (`jhyy_helpers.c:374-398`) 不加 GetLastError print (改 CreateProcessA path 风险)
+- 不加 stderr capture pipe (Tier 2, deferred v1.5.7)
+- 不加 post-link stat (Tier 3, deferred v1.5.7)
+- W-038/W-039/W-040 quote 链路不动
+
+**影响范围:**
+- MODIFIED: `compiler/src0/main.jhyy:744-759` (link_with_gcc 失败分支 ~7 行改动)
+
+**自举影响:**
+成功路径 codegen **不变** — 改动只在 `r != 0` 分支 (dead code on success)。jhyy_v1 stage1 byte-equal preserved (W-001/W-002/W-006 都 dormant)。
+
+**失效条件:**
+Tier 2 (stderr capture via pipe) + Tier 3 (post-link .exe stat check) 都 ship 后, W-042 可标 RESOLVED。Tier 1 保留无害 (只是 dead code on success path)。
+
+**superseder:** 待 Tier 2/3 ship (v1.5.7 queue)。
+
+**引用:**
+- W-038 (CreateProcessA 替代 system())
+- W-039 (callers 显式 quote exe path)
+- W-040 (link_with_gcc 也需 quote path args)
+- `run_qbe:684-686` (镜像源 pattern)
+
 

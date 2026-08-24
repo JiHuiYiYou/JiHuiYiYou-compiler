@@ -742,12 +742,20 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     let _wrote = jh_gcc_invoke(invoke_buf, 16384 as i32, args_start);
     path_to_win(exe_path);
     let r = jh_run(invoke_buf);
-    free(invoke_buf);
-    free(cmd_buf);
     if r != (0 as i32) {
-        jh_fputs_stderr("gcc link failed\n" as *u8);
+        // v1.5.6 W-042: mirror run_qbe pattern (:684-686) — print actual gcc
+        // cmd_buf so user can distinguish CreateProcessA fail (gcc not
+        // found, return -1) from gcc exit != 0 (link error). See
+        // docs/internal/workarounds.md § W-042.
+        jh_fputs_stderr("gcc link failed: " as *u8);
+        jh_fputs_stderr(invoke_buf as *u8);
+        jh_fputs_stderr("\n" as *u8);
+        free(invoke_buf);
+        free(cmd_buf);
         return 1 as i32;
     }
+    free(invoke_buf);
+    free(cmd_buf);
     return 0 as i32;
 }
 

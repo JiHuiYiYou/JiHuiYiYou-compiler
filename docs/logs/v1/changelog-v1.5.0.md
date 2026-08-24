@@ -520,6 +520,56 @@ Step 3: powershell -File <configure-coderunner.ps1> -JHY_DIR <INSTALLDIR>
 
 ---
 
+## v1.5.6 W-042 — link_with_gcc 失败诊断 (Tier 1) (本 commit)
+
+### 完成定义
+
+- ✅ `compiler/src0/main.jhyy:744-756` — `link_with_gcc` 失败分支 echo `invoke_buf` (gcc path + args), 镜像 `run_qbe:684-686` 已有 pattern
+- ✅ `docs/internal/workarounds.md` — W-042 ACTIVE entry (Tier 1)
+- ⚠️ **Tier 2 (stderr capture via pipe) + Tier 3 (post-link .exe stat)** 推迟 v1.5.7, 待 user repro 输出决定 scope
+- ⚠️ **真机 install 验证** 等 user 触发 (`jhyy run 新建文本文档.jhyy` 应输出实际 gcc cmd_buf)
+
+### 核心机制
+
+`link_with_gcc` 失败时只打 `gcc link failed\n` (无 context), 用户无法判断:
+
+- (A) `CreateProcessA` returned FALSE → gcc 从未启动 (4-tier `jh_gcc_path()` probe miss + fallback `"gcc"` → ERROR_FILE_NOT_FOUND)
+- (B) gcc 跑了但 exit code != 0 (real link error, stderr scrolled off / 没捕获)
+- (C) gcc "succeeded" 但没产物 `.exe` (silent corruption)
+
+Tier 1 fix 镜像 `run_qbe:684-686` pattern:
+```jhyy
+// v1.5.6 W-042: mirror run_qbe pattern
+jh_fputs_stderr("gcc link failed: " as *u8);
+jh_fputs_stderr(invoke_buf as *u8);  // gcc path + asm + runtime.c + helpers.c + -o exe + -lm
+jh_fputs_stderr("\n" as *u8);
+```
+
+`free(invoke_buf)` / `free(cmd_buf)` 移到失败分支内 (invoke_buf 必须活着能 print)。
+
+**为什么不直接改 jh_run 加 GetLastError 打印:** CreateProcessA 失败原因可能涉及 gcc.exe 不存在 (4-tier probe 全 miss), antivirus 拦截, 或 32/64 mismatch, 这些都需要 cmd_buf 上下文才能修. Tier 1 先让用户看到 cmd_buf, 后续 commit 拿到 user feedback 后再判断根因。
+
+### 自举影响
+
+- 改动只在 `r != 0` 分支 (dead code on success), **成功路径 codegen 不变**
+- jhyy_v1 stage1 byte-equal preserved (W-001/W-002/W-006 dormant)
+- 不动 `jh_run` / `jh_gcc_invoke` / CreateProcessA path → W-038/W-039/W-040 不受影响
+
+### 已知 workarounds (已入 `docs/internal/workarounds.md`)
+
+- **W-042 (新增 ACTIVE)** `link_with_gcc` 失败时 echo `invoke_buf` (Tier 1 镜像 run_qbe pattern); Tier 2 (stderr capture) + Tier 3 (post-link stat) deferred v1.5.7
+
+### 后续工作 (W-042 ship 后)
+
+- 真机 install + `jhyy run 新建文本文档.jhyy` 验证: 输出应包含实际 gcc cmd_buf
+- 根据 cmd_buf 内容判断:
+  - 错的 gcc 路径 → 修 `jh_gcc_path()` 4-tier probe (v1.5.7 W-043?)
+  - 真 gcc error 在 console (cc1/ld errors) → 用户 .jhyy 端问题 (FFI / asm / link flag)
+  - cmd_buf 看起来对但 gcc 静默成功没产物 → Tier 3 (post-link stat) ship
+- Tier 2 stderr capture via pipe: 等 (A)/(B)/(C) 哪类问题先出现再决定 ship 优先级
+
+---
+
 ---
 
 ## 关联文档
