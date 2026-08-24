@@ -76,6 +76,8 @@ extern fn jh_gcc_invoke(out_buf: *u8, out_size: i32, args: *u8) -> i32;
 extern fn jh_fullpath(out_buf: *u8, rel_path: *u8, max_len: i32) -> i32;
 // v1.5.6 W-038: bypass cmd.exe /C, use CreateProcessA (handles paths with spaces)
 extern fn jh_run(cmd_line: *u8) -> i32;
+// v1.5.6 W-045: capture child stderr/stdout from jh_run (pipe-based)
+extern fn jh_run_get_output() -> *u8;
 
 fn QBE_PATH() -> *u8 { return jh_path_qbe(); }
 fn GCC_PATH() -> *u8 { return jh_path_gcc(); }
@@ -750,6 +752,20 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
         jh_fputs_stderr("gcc link failed: " as *u8);
         jh_fputs_stderr(invoke_buf as *u8);
         jh_fputs_stderr("\n" as *u8);
+        // v1.5.6 W-045: also print captured child stderr so the actual gcc
+        // error message is visible. Without this, gcc errors bypass the
+        // parent's stderr (cmd.exe /c '2>&1' only redirects cmd.exe's own
+        // stderr, not the child's) and the user sees "gcc link failed" with
+        // no explanation. See docs/internal/workarounds.md § W-045.
+        let captured = jh_run_get_output();
+        if captured != (0 as *u8) {
+            let c0 = (*captured);
+            if c0 != (0 as i32) {
+                jh_fputs_stderr("gcc stderr:\n" as *u8);
+                jh_fputs_stderr(captured);
+                jh_fputs_stderr("\n" as *u8);
+            }
+        }
         free(invoke_buf);
         free(cmd_buf);
         return 1 as i32;

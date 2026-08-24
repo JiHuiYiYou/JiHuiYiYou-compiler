@@ -3,7 +3,7 @@
 > **承接**: v1.4.7 shipped (regress 三跑合并 + CI workflow 简化).
 > **目标**: 用户下载 `jhyy-installer-X.Y.Z.exe` 双击 → next-next-finish 装好 jhyy + qbe.exe, 系统 PATH 自动配, 用户零配置。
 > **scope**: WiX 4/7 + Burn bundle + MSI; Windows-only; per `docs/plans/v1/v1.5.0任务清单 + 概要设计.md`。
-> **本 umbrella 涵盖 5 + 4 个 sprint**: v1.5.1 / v1.5.2 / v1.5.3 / v1.5.4 / v1.5.5 / v1.5.6 / v1.5.6-patch2 + v1.5.6 W-043 / W-044 hotfix, 各 sprint 状态如下。
+> **本 umbrella 涵盖 5 + 5 个 sprint**: v1.5.1 / v1.5.2 / v1.5.3 / v1.5.4 / v1.5.5 / v1.5.6 / v1.5.6-patch2 + v1.5.6 W-043 / W-044 / W-045 hotfix, 各 sprint 状态如下。
 
 ---
 
@@ -658,6 +658,55 @@ W-043 ship 了 `runtime.c` 但漏了 sibling header `runtime.h` (429 B)。W-043 
   - 真 gcc error 在 console (cc1/ld errors) → 用户 .jhyy 端问题 (FFI / asm / link flag)
   - cmd_buf 看起来对但 gcc 静默成功没产物 → Tier 3 (post-link stat) ship
 - Tier 2 stderr capture via pipe: 等 (A)/(B)/(C) 哪类问题先出现再决定 ship 优先级
+
+---
+
+## v1.5.6 W-045 — jh_run pipe-captures child stderr (本 commit)
+
+### 触发 / 根因
+
+User 装 W-044 后跑 `jhyy run 新建文本文档.jhyy`, 仍 fail:
+```
+gcc link failed: "C:\msys64\ucrt64\bin\gcc.exe" "hello.s" "C:\Program Files\JHYY\bin\runtime.c" ...
+```
+**没有 cc1.exe 实际错误** — W-042 Tier 1 echo invoke_buf 只能让用户看到 gcc cmd_buf 长啥样, 但 **gcc / cc1.exe 写 stderr 时被 child fresh console bypass** (CreateProcessA `bInheritHandles=FALSE` + cmd.exe `2>&1` 只 redirect cmd.exe 自己), 父进程 stderr 收不到。
+
+诊断陷入死局 — 知道 gcc fail, 但不知道为啥 fail。
+
+### fix (W-045 Tier 2 ship — 从 v1.5.7 提前)
+
+`compiler/src0/jhyy_helpers.c`:
+- `jh_run` 加 anonymous pipe (`CreatePipe`), write end inheritable, read end NOT inheritable (`SetHandleInformation`)
+- `si.hStdError = si.hStdOutput = hWritePipe; si.dwFlags |= STARTF_USESTDHANDLES`
+- `CreateProcessA(..., TRUE /* bInheritHandles */, ...)` ← 从 FALSE 改 TRUE (key fix)
+- Pre-wait drain loop + `WaitForSingleObject` + **post-wait drain loop** (race fix — child 在 wait 中可能 write)
+- 新 static `jh_run_outbuf[16384]` + `jh_run_outlen` 缓存
+- 新 `jh_run_get_output()` / `jh_run_get_output_len()` extern accessor
+
+`compiler/src0/main.jhyy`:
+- `extern fn jh_run_get_output() -> *u8;`
+- `link_with_gcc` 失败块 (after W-042 cmd_buf echo) 加 captured stderr print (if non-empty)
+
+### 验证 (5/5 per `feedback_fix_evaluation_rule`)
+
+- ✅ install-dir jhyy.exe SHA `D524B8D05EF86DF80DD1AF53858E89DB7BF9EB80384A0EE13684646C8A4A25E8` (size 467374)
+- ✅ Success path: `jhyy compile hello.jhyy` → `hello.exe` 152134 B → `./hello.exe` → `Hello, world!`
+- ✅ Fail path (删 runtime.c): cmd_buf + `gcc stderr: cc1.exe: fatal error: ... No such file or directory` 完整出现
+- ✅ regress 50/53 PASS 持平
+- ✅ 用户真机 install-dir end-to-end: `Hello, world!` 输出
+
+### Workaround 状态更新
+
+- **W-045 (新增 RESOLVED)** jh_run pipe-capture child stderr; cmd.exe `2>&1` 仍只 redirect cmd.exe own stderr — W-045 是补 cmd.exe redirect 不抓 child stderr 的缺口
+- **W-044 (不变 RESOLVED)** runtime.h MSI ship
+- **W-043 (不变 RESOLVED)** runtime.c / jhyy_helpers.c MSI ship
+- **W-042 Tier 1 (保留 ACTIVE)** echo invoke_buf 仍有用 (区分 CreateProcessA 失败 vs gcc exit != 0); Tier 2 已 ship (= W-045 主体); Tier 3 (post-link stat) 仍 deferred v1.5.7
+
+### 后续工作
+
+- 真机 install + run end-to-end (post-W-045) → 用户已确认 "Hello, world!"
+- Tier 3 (W-042 queue: post-link stat) — deferred v1.5.7
+- v1.5.7+: Bundle UpgradeCode 升级 telemetry (如有 plan)
 
 ---
 

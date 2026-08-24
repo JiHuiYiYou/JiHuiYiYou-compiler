@@ -3111,3 +3111,79 @@ sprint 设计 MSI payload 时, **必须** map 完整 include graph (`grep -E '^#
 - W-037 (jh_paths_init layout a 路径策略, runtime.c / runtime.h 必须同居 bin/)
 
 
+## W-045: link_with_gcc 失败时 gcc 实际 stderr 不可见 — 用户只见 "gcc link failed" + cmd_buf
+
+**状态:** ✅ RESOLVED (v1.5.6 W-045, 2026-08-24)
+**日期:** 2026-08-24
+**触发面:** v1.5.6 W-042 ship 后, fresh / upgrade install 跑 `jhyy run <file.jhyy>` → gcc 阶段失败 (e.g. runtime.c 找不到 / runtime.h 缺失 / 其他 cc1.exe 编译错误)
+
+**症状:**
+W-042 echo `invoke_buf` 后, user 只看到 `gcc link failed: "<full gcc cmd_buf>"`, 但**完全看不见 gcc / cc1.exe 实际错误信息**(e.g. `fatal error: runtime.h: No such file or directory`)。诊断卡死 — 不知道是路径错 / include 漏 / syntax 错 / link order 错。
+
+**根因 (双层):**
+
+**层 1:** 原 `jh_run` 用 `CreateProcessA(..., FALSE /* bInheritHandles */, ...)` → child 拿不到 parent 的任何 handle inheritance。
+Windows 上 child 没有 inherited handle 时, child 进程(`gcc.exe`)自己 attach 一个 fresh console (CONOUT$ / CONIN$), 它写 stderr 直接写到那个 fresh console,**bypass** parent 的 stderr。
+cmd.exe 的 `2>&1` 只 redirect cmd.exe 自己的 stderr,**不** redirect 子进程的 stderr (子进程 stderr 由子进程自己决定, 跟 cmd.exe 的 redirect 无关)。
+
+**层 2:** 即使层 1 修好 (用 STARTF_USESTDHANDLES), 还要 post-wait drain pipe:
+- v1.5.6 v1 尝试只 drain **before** `WaitForSingleObject`
+- gcc / qbe 的 stderr 通常 line-buffered, 错误信息写时点不固定
+- 第一次 PeekNamedPipe 显示 avail=0 (gcc 还没写完) → loop exit → 进 wait → gcc 在 wait 中写错误 → 我的 drain 已经关了 → 漏字节
+- **fix**: `WaitForSingleObject` 后**再** drain 一次到 EOF → 抓住 race bytes
+
+**fix (W-045):**
+1. `compiler/src0/jhyy_helpers.c` — `jh_run` 加 anonymous pipe capture:
+   - `CreatePipe(&hReadPipe, &hWritePipe, sa, 0)` (sa.bInheritHandle = TRUE 让 write 端能 inherited)
+   - `SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0)` (read 端不 inherited)
+   - `si.hStdError = si.hStdOutput = hWritePipe; si.dwFlags |= STARTF_USESTDHANDLES`
+   - `CreateProcessA(..., TRUE /* bInheritHandles */, ...)` ← 从 FALSE 改 TRUE
+   - `CloseHandle(hWritePipe)` (parent 副本立即关, 让 ReadFile EOF 时机正确)
+   - pre-wait drain loop (PeekNamedPipe + ReadFile, until avail=0)
+   - `WaitForSingleObject(pi.hProcess, INFINITE)`
+   - post-wait drain loop (再 drain 一次到 EOF)
+   - 新 static `jh_run_outbuf[16384]` + `jh_run_outlen` 缓存
+   - 新 `jh_run_get_output()` / `jh_run_get_output_len()` extern accessor
+
+2. `compiler/src0/main.jhyy`:
+   - 加 `extern fn jh_run_get_output() -> *u8;`
+   - `link_with_gcc` 失败块 (after W-042 cmd_buf echo) 加 captured stderr print:
+     ```jhyy
+     let captured = jh_run_get_output();
+     if captured != (0 as *u8) {
+         let c0 = (*captured);
+         if c0 != (0 as i32) {
+             jh_fputs_stderr("gcc stderr:\n" as *u8);
+             jh_fputs_stderr(captured);
+             jh_fputs_stderr("\n" as *u8);
+         }
+     }
+     ```
+
+3. **POSIX branch** (非 Windows): 不变 — `system()` 自带 shell redirect 语义, stderr 自然 attach 到 parent。
+
+**不动:**
+- regress.py (uses layout (b), 同 jhyy.exe 同步 ship, 跟 installer 路径无关)
+- installer MSI payload (无 .c / .h 增量)
+- jhyy_v1 stage1 byte-equal — W-045 改 src0/main.jhyy + jhyy_helpers.c, regress 仍 50/53 (持平)
+
+**自举影响:**
+src0/main.jhyy 改 1 extern decl + 14 行 (fail 块), jhyy_helpers.c 改 jh_run 实现 + 加 3 个新 fn。byte-equal v1.0.0 closure chain 自动 revalidate — 因为 main.jhyy 的 codegen 自身也用 jh_run。
+
+**验证 (按 `feedback_fix_evaluation_rule` 5/5):**
+1. ✅ success path: install-dir (SHA `D524B8D0...`) `jhyy compile hello.jhyy` → `hello.exe` 152134 B → `./hello.exe` → `Hello, world!`
+2. ✅ fail path (删 runtime.c): cmd_buf + `gcc stderr: cc1.exe: fatal error: ... No such file or directory` 完整出现
+3. ✅ regress 50/53 (持平, 无新 regress)
+5. ✅ install-dir (per `feedback_regress_baseline_binary_hash`) 5/5 PASS on user's hello.jhyy test
+4. ✅ MSI build unchanged (no payload diff) — bundle 重建会 pick up 新 jhyy.exe
+
+**lesson:**
+**CreateProcessA on Windows 必须 explicit pipe capture + STARTF_USESTDHANDLES 才能可靠拿 child stderr/stdout**。bInheritHandles=FALSE 是 trap (child 拿 fresh console → stderr bypass parent)。
+**pipe drain 必须 pre-wait + post-wait 两次** — child 在 wait 中可能 write 错误信息, 单 drain 漏 race bytes。
+
+**引用:**
+- W-042 (cmd_buf echo — W-045 的基础, 没有 W-042 也定位不到是 stderr 而非 cmd_buf 错)
+- W-038 (CreateProcessA 替代 cmd.exe /C, jh_run 现有 wrapper)
+- W-039 (caller-side quote exe path — 跟 W-045 互补, W-039 修 quote, W-045 修 stderr visibility)
+
+

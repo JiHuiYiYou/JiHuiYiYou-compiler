@@ -369,8 +369,23 @@ __attribute__((used)) int jh_gcc_invoke(char *out_buf, int out_size, const char 
    cmd_line through unchanged — callers have the full path context and can
    quote the actual exe path (not just the first whitespace-delimited token,
    which would be wrong for paths with internal whitespace like
-   "C:\Program Files\..."). */
+   "C:\Program Files\...").
+
+   v1.5.6 W-045: capture child stderr/stdout via anonymous pipe.
+   Without this, when bInheritHandles=FALSE the child gets a fresh console
+   and its gcc error output bypasses the parent's stderr →  cmd.exe /c '... 2>&1'
+   redirect misses the actual error. W-042 echo only shows cmd_buf, no
+   gcc error. With pipe capture, jh_run returns exit code AND caller can read
+   the captured output via jh_run_get_output(). Caller (link_with_gcc) prints
+   captured output on failure. */
 #ifdef _WIN32
+static char jh_run_outbuf[16384];
+static int  jh_run_outlen = 0;
+static int  jh_run_outcap = sizeof(jh_run_outbuf);
+
+__attribute__((used)) const char *jh_run_get_output(void) { return jh_run_outbuf; }
+__attribute__((used)) int  jh_run_get_output_len(void) { return jh_run_outlen; }
+
 __attribute__((used)) int jh_run(const char *cmd_line) {
     size_t cmd_len = 0;
     while (cmd_line[cmd_len]) cmd_len++;
@@ -378,21 +393,77 @@ __attribute__((used)) int jh_run(const char *cmd_line) {
     if (!cmd_buf) return -1;
     for (size_t i = 0; i <= cmd_len; i++) cmd_buf[i] = cmd_line[i];
 
+    /* W-045: anonymous pipe to capture child stderr (and stdout). */
+    HANDLE hReadPipe = NULL, hWritePipe = NULL;
+    SECURITY_ATTRIBUTES sa;
+    ZeroMemory(&sa, sizeof(sa));
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = NULL;
+    if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
+        HeapFree(GetProcessHeap(), 0, cmd_buf);
+        return -1;
+    }
+    /* Read end must NOT be inherited by child. */
+    SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
+
     STARTUPINFOA si;
     PROCESS_INFORMATION pi;
     ZeroMemory(&si, sizeof(si));
     ZeroMemory(&pi, sizeof(pi));
     si.cb = sizeof(si);
+    si.hStdError = hWritePipe;
+    si.hStdOutput = hWritePipe;
+    si.hStdInput = NULL;
+    si.dwFlags |= STARTF_USESTDHANDLES;
 
-    if (!CreateProcessA(NULL, cmd_buf, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+    jh_run_outlen = 0;
+    jh_run_outbuf[0] = '\0';
+
+    BOOL ok = CreateProcessA(NULL, cmd_buf, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+    /* Parent no longer needs write end; close so ReadFile can finish. */
+    CloseHandle(hWritePipe);
+    if (!ok) {
+        CloseHandle(hReadPipe);
         HeapFree(GetProcessHeap(), 0, cmd_buf);
         return -1;
     }
+    /* Drain pipe into outbuf (until EOF). */
+    {
+        DWORD avail = 0;
+        while (jh_run_outlen + 1 < jh_run_outcap &&
+               PeekNamedPipe(hReadPipe, NULL, 0, NULL, &avail, NULL) && avail > 0) {
+            DWORD to_read = (DWORD)((jh_run_outcap - 1 - jh_run_outlen));
+            if (to_read > avail) to_read = avail;
+            DWORD got = 0;
+            if (ReadFile(hReadPipe, jh_run_outbuf + jh_run_outlen, to_read, &got, NULL) && got > 0) {
+                jh_run_outlen += (int)got;
+                jh_run_outbuf[jh_run_outlen] = '\0';
+            } else {
+                break;
+            }
+        }
+    }
     WaitForSingleObject(pi.hProcess, INFINITE);
+    /* Drain any remaining bytes written between last PeekNamedPipe and child exit. */
+    {
+        DWORD avail = 0;
+        while (jh_run_outlen + 1 < jh_run_outcap &&
+               PeekNamedPipe(hReadPipe, NULL, 0, NULL, &avail, NULL) && avail > 0) {
+            DWORD to_read = (DWORD)((jh_run_outcap - 1 - jh_run_outlen));
+            if (to_read > avail) to_read = avail;
+            DWORD got = 0;
+            if (ReadFile(hReadPipe, jh_run_outbuf + jh_run_outlen, to_read, &got, NULL) && got > 0) {
+                jh_run_outlen += (int)got;
+                jh_run_outbuf[jh_run_outlen] = '\0';
+            } else { break; }
+        }
+    }
     DWORD exit_code = 0;
     GetExitCodeProcess(pi.hProcess, &exit_code);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
+    CloseHandle(hReadPipe);
     HeapFree(GetProcessHeap(), 0, cmd_buf);
     return (int)exit_code;
 }
