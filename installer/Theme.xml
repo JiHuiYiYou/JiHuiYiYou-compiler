@@ -37,13 +37,13 @@
 <Theme xmlns="http://wixtoolset.org/schemas/v4/thmutil">
 
     <Font Id="0" Height="-12" Weight="500" Foreground="windowtext" Background="window">Segoe UI</Font>
-    <Font Id="1" Height="-24" Weight="500" Foreground="windowtext">Microsoft YaHei UI</Font>
-    <Font Id="2" Height="-22" Weight="500" Foreground="graytext">Microsoft YaHei UI</Font>
-    <Font Id="3" Height="-12" Weight="500" Foreground="windowtext" Background="window">Microsoft YaHei UI</Font>
+    <Font Id="1" Height="-36" Weight="500" Foreground="windowtext">Segoe UI</Font>
+    <Font Id="2" Height="-14" Weight="500" Foreground="graytext">Segoe UI</Font>
+    <Font Id="3" Height="-12" Weight="500" Foreground="windowtext" Background="window">Segoe UI</Font>
 
-    <Window Width="600" Height="420" HexStyle="100a0000" FontId="0" Caption="#(loc.Caption)">
+    <Window Width="600" Height="430" HexStyle="100a0000" FontId="0" Caption="#(loc.Caption)">
         <ImageControl X="11" Y="11" Width="64" Height="64" ImageFile="logo.png" Visible="yes"/>
-        <Label X="80" Y="11" Width="-11" Height="64" FontId="1" Visible="yes" DisablePrefix="yes">#(loc.Title)</Label>
+        <Label X="92" Y="18" Width="-11" Height="64" FontId="1" Visible="yes" DisablePrefix="yes">#(loc.Title)</Label>
 
         <Page Name="Help">
             <Label X="11" Y="80" Width="-11" Height="30" FontId="2" DisablePrefix="yes">#(loc.HelpHeader)</Label>
@@ -59,22 +59,21 @@
         </Page>
 
         <Page Name="Install">
-            <!-- W-033: MSYS2 prereq warning (above EulaRichedit, below title) -->
+            <!-- W-035: MSYS2 prereq warning (above EulaRichedit, below title); MSYS2PrereqDetail dropped to fit 485x300 layout -->
             <Label X="11" Y="80" Width="-11" Height="20" FontId="2" DisablePrefix="yes">#(loc.MSYS2PrereqWarning)</Label>
-            <Label X="11" Y="105" Width="-11" Height="40" FontId="3" DisablePrefix="yes">#(loc.MSYS2PrereqDetail)</Label>
-            <Hyperlink X="11" Y="150" Width="-11" Height="17" FontId="3" TabStop="yes">#(loc.MSYS2PrereqLink)</Hyperlink>
+            <Hyperlink X="11" Y="100" Width="-11" Height="17" FontId="3" TabStop="yes" NavigateUri="https://www.msys2.org/">#(loc.MSYS2PrereqLink)</Hyperlink>
 
-            <!-- Default EulaRichedit (sized smaller than default to leave room for warning above) -->
-            <Richedit Name="EulaRichedit" X="11" Y="175" Width="-11" Height="-115" TabStop="yes" FontId="0" HexStyle="800000" />
-            <Checkbox Name="EulaAcceptCheckbox" X="-11" Y="-86" Width="260" Height="17" TabStop="yes" FontId="3" HideWhenDisabled="yes">#(loc.InstallAcceptCheckbox)</Checkbox>
+            <!-- EulaRichedit sized to leave room for EulaAcceptCheckbox (~4px gap) -->
+            <Richedit Name="EulaRichedit" X="11" Y="120" Width="-11" Height="-90" TabStop="yes" FontId="0" HexStyle="800000" />
+            <Checkbox Name="EulaAcceptCheckbox" X="-11" Y="-55" Width="260" Height="17" TabStop="yes" FontId="3" HideWhenDisabled="yes">#(loc.InstallAcceptCheckbox)</Checkbox>
 
-            <Button Name="InstallUpdateButton" X="11" Y="-11" Width="200" Height="23" TabStop="yes" FontId="0" EnableCondition="WixStdBAUpdateAvailable" HideWhenDisabled="yes">#(loc.UpdateButton)</Button>
-            <Button Name="OptionsButton" X="-171" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0" VisibleCondition="NOT WixStdBASuppressOptionsUI">
+            <Button Name="InstallUpdateButton" X="11" Y="-15" Width="200" Height="23" TabStop="yes" FontId="0" EnableCondition="WixStdBAUpdateAvailable" HideWhenDisabled="yes">#(loc.UpdateButton)</Button>
+            <Button Name="OptionsButton" X="-171" Y="-15" Width="75" Height="23" TabStop="yes" FontId="0" VisibleCondition="NOT WixStdBASuppressOptionsUI">
                 <Text>#(loc.InstallOptionsButton)</Text>
                 <ChangePageAction Page="Options" />
             </Button>
-            <Button Name="InstallButton" X="-91" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0">#(loc.InstallInstallButton)</Button>
-            <Button Name="InstallCancelButton" X="-11" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0">
+            <Button Name="InstallButton" X="-91" Y="-15" Width="75" Height="23" TabStop="yes" FontId="0">#(loc.InstallInstallButton)</Button>
+            <Button Name="InstallCancelButton" X="-11" Y="-15" Width="75" Height="23" TabStop="yes" FontId="0">
                 <Text>#(loc.InstallCancelButton)</Text>
                 <CloseWindowAction />
             </Button>

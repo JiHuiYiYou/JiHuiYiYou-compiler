@@ -230,7 +230,8 @@ switch ($Target) {
             -d "JHY_COMPILER_MSI_PATH=installer\build-artifacts\jhyy-compiler-$JHY_VERSION_DISPLAY.msi" `
             -d "JHY_THEME_XML_PATH=installer\Theme.xml" `
             -d "JHY_LICENSE_RTF_PATH=installer\common\license.rtf" `
-            -d "JHY_LOGO_BMP_PATH=installer\banner.bmp" `
+            -d "JHY_LOGO_BMP_PATH=installer\logo.png" `
+            -d "JHY_THEME_WXL_PATH=installer\Bundle.zh-CN.wxl" `
             -o "installer/build-artifacts/jhyy-installer-$JHY_VERSION_DISPLAY.exe"
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[ERROR] bundle build failed."

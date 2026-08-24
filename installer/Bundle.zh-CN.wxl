@@ -47,7 +47,7 @@
   <!-- W-033 JHYY customization: MSYS2 prereq warning shown above EulaRichedit -->
   <String Id="MSYS2PrereqWarning" Overridable="yes" Value="前置要求: JHYY 编译器需要 MSYS2 + GCC" />
   <String Id="MSYS2PrereqDetail" Overridable="yes" Value="JHYY 编译器自带,但运行需要 MSYS2 (含 ucrt64 GCC 工具链) 才能编译 .jhyy 程序。如果还没有安装,请先点击下方链接安装。" />
-  <String Id="MSYS2PrereqLink" Overridable="yes" Value="&lt;a href=&quot;https://www.msys2.org/&quot;&gt;下载 MSYS2 (https://www.msys2.org/)&lt;/a&gt;" />
+  <String Id="MSYS2PrereqLink" Overridable="yes" Value="下载 MSYS2 (https://www.msys2.org/)" />
 
   <!-- Options page -->
   <String Id="OptionsHeader" Overridable="yes" Value="安装选项" />
@@ -86,7 +86,7 @@
   <String Id="SuccessCloseButton" Overridable="yes" Value="关闭 (&amp;C)" />
 
   <!-- W-033 JHYY customization: post-install hint shown on Success page -->
-  <String Id="PostInstallHint" Overridable="yes" Value="下一步:&#xA;&#xA;1. 打开新的 cmd 窗口运行 &quot;jhyy --version&quot; 验证安装。&#xA;2. 如果之前没装 MSYS2 + GCC, 请访问 https://www.msys2.org/ 下载并安装。&#xA;3. 打开 MSYS2 ucrt64 终端, 运行: pacman -S mingw-w64-ucrt-x86_64-gcc&#xA;4. 重启 cmd, 运行 &quot;jhyy run helloworld.jhyy&quot; 编译您的第一个 JHYY 程序。" />
+  <String Id="PostInstallHint" Overridable="yes" Value="下一步:&#xA;&#xA;1. 打开新的 cmd 窗口运行 &quot;jhyy&quot; 验证安装。&#xA;2. 如果之前没装 MSYS2 + GCC, 请访问 https://www.msys2.org/ 下载并安装。&#xA;3. 打开 MSYS2 ucrt64 终端, 运行: pacman -S mingw-w64-ucrt-x86_64-gcc&#xA;4. 重启 cmd, 运行 &quot;jhyy run helloworld.jhyy&quot; 编译您的第一个 JHYY 程序。" />
 
   <!-- Failure page -->
   <String Id="FailureHeader" Overridable="yes" Value="安装失败" />
