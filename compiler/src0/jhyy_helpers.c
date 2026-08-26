@@ -466,9 +466,17 @@ __attribute__((used)) int jh_run(const char *cmd_line) {
     ZeroMemory(&si, sizeof(si));
     ZeroMemory(&pi, sizeof(pi));
     si.cb = sizeof(si);
+    /* v1.5.6 W-050: capture stderr only, inherit stdout/stdin.
+       W-045 originally redirected BOTH stdout and stderr to the pipe, which
+       swallowed the user program's output ("Hello, world!" etc.) into the
+       pipe buffer that no one read. cmd_run (the user-exe invocation) never
+       calls jh_run_get_output, so the buffer was discarded silently.
+       Capture stderr for gcc/cc1/qbe error diagnostics; let stdout/stdin pass
+       through so the user sees the program output and stdin still works for
+       interactive programs (dungeon_game etc). */
     si.hStdError = hWritePipe;
-    si.hStdOutput = hWritePipe;
-    si.hStdInput = NULL;
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);
     si.dwFlags |= STARTF_USESTDHANDLES;
 
     jh_run_outlen = 0;

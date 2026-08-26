@@ -785,6 +785,63 @@ captured stderr = 0 字节 (gcc 根本没产生输出), silent exit 1。
 
 ---
 
+## v1.5.6 W-050 — jh_run 只 pipe-capture stderr, 继承 stdout/stdin (本 commit)
+
+### 触发 / 根因
+
+W-045 ship 后跑 `jhyy run hello.jhyy` 修好 gcc silent fail, 但**用户程序的 stdout 也消失了**:
+
+- `jhyy run hello.jhyy` exit=0, exe 产出 (hello_run.exe 154KB), 但**不打印 "Hello, world!"**
+- 直接 `./hello_run.exe` 能打印 → exe 本身正常
+- regress 53/53 PASS (只 check exit code, 不 check stdout)
+- `dungeon_game` 等交互程序 stdin 也被 pipe 吞 → 无法读键盘
+
+**根因:** `compiler/src0/jhyy_helpers.c` `jh_run` (W-045) 把 **stdout 也 redirect 到 pipe**:
+```c
+si.hStdError  = hWritePipe;  // 捕获 (对 — gcc 错误走 stderr)
+si.hStdOutput = hWritePipe;  // ❌ 吞掉用户程序的 stdout
+si.hStdInput  = NULL;        // ❌ 切断 stdin
+```
+进 `jh_run_outbuf` 之后, `cmd_run` (line 1049) 调 `jh_run(quoted_exe)` 跑用户产物, **不调** `jh_run_get_output`, buffer 丢弃 → 用户看不到输出。
+
+regress 之所以没暴露: 大多数 test 只看 exit code, 1 个用 stdin 的 (input.jhyy) 在 v1.5 之前已经 ship, 但 dungeon_game 是 v1.5.6-patch2 加的, 它**有 stdin**, 但之前的 stdin 是 `NULL` (W-045 错误), 应该也是死锁/timeout, 但回归没细致跟踪。
+
+### fix (W-050)
+
+`compiler/src0/jhyy_helpers.c` (3 行改动):
+```c
+si.hStdError  = hWritePipe;                              // capture (for diagnostics)
+si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);        // inherit — user sees output
+si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);         // inherit — interactive stdin
+```
+
+**保留** W-045 的 stderr pipe + pre/post-wait drain + `jh_run_get_output()` accessor — gcc / cc1 / qbe 错误诊断链路完整。
+
+### 验证 (per `feedback_fix_evaluation_rule`)
+
+- ✅ `jhyy run hello.jhyy` (ASCII filename) → "Hello, world!" stdout 出现
+- ✅ `jhyy run 新建文本文档.jhyy` (Chinese filename) → "Hello, world!" stdout 出现 (W-047 + W-048 + W-050 三层叠加)
+- ✅ `jhyy run dungeon_game.jhyy` 喂 "d" stdin → 交互流程跑通
+- ✅ regress 53/53 PASS (持平, per `feedback_regress_baseline_binary_hash`)
+- ✅ jhyy.exe SHA `c94f91722e084798e07fc265676c938e6fcd4b591fdd23f422a40874b73991f5` (475703 B, +194 B vs W-048)
+
+### Workaround 状态更新
+
+- **W-050 (新增 RESOLVED)** jh_run 区分 stderr capture vs stdout/stdin inherit
+- **W-045 (修正描述, 不变 RESOLVED)** "pipe-capture **stderr only**, inherit stdout/stdin" — 之前的 "capture stdout" 是 W-045 的 overreach, 已纠正
+- **W-048 (不变 RESOLVED)** temp ASCII path
+- **W-047 (不变 RESOLVED)** runtime.c argv re-decode
+- **W-046 (不变 RESOLVED)** CP_ACP → UTF-16
+- **W-042 Tier 1 (保留 ACTIVE)** echo invoke_buf
+
+### 后续工作
+
+- W-050 + W-048 + W-047 + W-045 + W-046 五层叠加: end-to-end `jhyy run 新建文本文档.jhyy` 应在**任何** Windows 终端 (cmd / PS / bash) 都 work, 只要 mingw gcc 没被 Defender 拦截
+- 用户真机: Defender 排除 `C:\msys64` + `$env:TEMP` 让 mingw gcc subprocess 链不被 AV 静默拦截 (per `add_defender_exclusion_msys64.ps1`)
+- Tier 3 (W-042 queue) — deferred v1.5.7
+
+---
+
 ---
 
 ## 关联文档
