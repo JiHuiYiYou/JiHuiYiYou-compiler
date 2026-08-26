@@ -26,7 +26,9 @@ int sprintf_lld(char *buf, const char *fmt, long long val) {
     return sprintf(buf, fmt, val);
 }
 
-/* stderr/stdout 流桥（jhyy 拿不到 FILE* 地址） */
+/* stderr/stdout 流桥（jhyy 拿不到 FILE* 地址）。
+   v1.5.6 W-049: runtime.c 调 _setmode(_O_U8TEXT) 把 stdout/stderr 设成 UTF-8
+   mode,这里 fputs 直接走 UTF-8 输出,中文正确显示在 chcp 65001 终端。 */
 int jh_fputs_stderr(const char *s) {
     return fputs(s, stderr);
 }
@@ -356,6 +358,46 @@ __attribute__((used)) int jh_gcc_invoke(char *out_buf, int out_size, const char 
     return snprintf(out_buf, (size_t)out_size, "\"%s\" %s", jh_gcc_path(), args);
 }
 
+/* v1.5.6 W-048: temp ASCII path helpers — bypass mingw CRT argv decode on
+   Chinese filenames. cmd_buf may have UTF-8 bytes (jhyy-side heap) for paths
+   from src0 jhyy string literals; mingw-W64 CRT in MSYS2 gcc re-decodes
+   Unicode cmdline to ANSI via CP_ACP, producing mojibake argv on PowerShell.
+   Solution: feed gcc ASCII-only paths (always correct), copy .s to temp,
+   run gcc there, rename output .exe back to original Chinese location.
+   All return 0 on success, -1 on failure. Windows-only. */
+#ifdef _WIN32
+__attribute__((used)) int jh_mktemp_ascii(const char *tag, char *out, int out_cap) {
+    char temp_dir[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, temp_dir)) return -1;
+    /* pid + tid + static counter for uniqueness within one jhyy invocation.
+       8 hex chars = 4 billion combos; collision vanishingly rare. */
+    static unsigned int ctr = 0;
+    unsigned int seed = (unsigned int)(GetCurrentProcessId() ^ GetCurrentThreadId() ^ ++ctr);
+    int n = _snprintf(out, (size_t)out_cap, "%sjh%s%08x.tmp", temp_dir, tag, seed);
+    return (n > 0 && n < out_cap) ? 0 : -1;
+}
+
+__attribute__((used)) int jh_file_copy(const char *src, const char *dst) {
+    wchar_t wsrc[MAX_PATH], wdst[MAX_PATH];
+    if (!MultiByteToWideChar(CP_ACP, 0, src, -1, wsrc, MAX_PATH)) return -1;
+    if (!MultiByteToWideChar(CP_ACP, 0, dst, -1, wdst, MAX_PATH)) return -1;
+    return CopyFileW(wsrc, wdst, FALSE) ? 0 : -1;
+}
+
+__attribute__((used)) int jh_rename_file(const char *src, const char *dst) {
+    wchar_t wsrc[MAX_PATH], wdst[MAX_PATH];
+    if (!MultiByteToWideChar(CP_ACP, 0, src, -1, wsrc, MAX_PATH)) return -1;
+    if (!MultiByteToWideChar(CP_ACP, 0, dst, -1, wdst, MAX_PATH)) return -1;
+    return MoveFileExW(wsrc, wdst, MOVEFILE_REPLACE_EXISTING) ? 0 : -1;
+}
+
+__attribute__((used)) int jh_unlink_file(const char *path) {
+    wchar_t wpath[MAX_PATH];
+    if (!MultiByteToWideChar(CP_ACP, 0, path, -1, wpath, MAX_PATH)) return -1;
+    return DeleteFileW(wpath) ? 0 : -1;
+}
+#endif /* _WIN32 W-048 */
+
 /* v1.5.6 W-038: jh_run — bypass cmd.exe /C, use CreateProcessA directly.
    cmd.exe /C parses command line and tokenizes by whitespace, so paths with
    spaces (e.g. "C:\Program Files\...") break cmd_run / run_qbe / link_with_gcc.
@@ -393,6 +435,18 @@ __attribute__((used)) int jh_run(const char *cmd_line) {
     if (!cmd_buf) return -1;
     for (size_t i = 0; i <= cmd_len; i++) cmd_buf[i] = cmd_line[i];
 
+    /* v1.5.6 W-046: convert ANSI cmd_buf → UTF-16 for CreateProcessW.
+       CreateProcessA relies on CP_ACP (GB2312 on Chinese Windows) to decode
+       ANSI bytes → Unicode argv. When caller (PowerShell in UTF-8 mode) sends
+       UTF-8 bytes (e.g. "新建文本文档.jhyy"), Windows decodes as GB2312 →
+       mojibake Unicode argv → child (gcc) can't find file → silent exit 1.
+       CreateProcessW takes UTF-16 directly, bypassing ANSI codepage entirely. */
+    int wlen = MultiByteToWideChar(CP_ACP, 0, cmd_buf, -1, NULL, 0);
+    if (wlen <= 0) { HeapFree(GetProcessHeap(), 0, cmd_buf); return -1; }
+    wchar_t *wbuf = (wchar_t *)HeapAlloc(GetProcessHeap(), 0, wlen * sizeof(wchar_t));
+    if (!wbuf) { HeapFree(GetProcessHeap(), 0, cmd_buf); return -1; }
+    MultiByteToWideChar(CP_ACP, 0, cmd_buf, -1, wbuf, wlen);
+
     /* W-045: anonymous pipe to capture child stderr (and stdout). */
     HANDLE hReadPipe = NULL, hWritePipe = NULL;
     SECURITY_ATTRIBUTES sa;
@@ -407,7 +461,7 @@ __attribute__((used)) int jh_run(const char *cmd_line) {
     /* Read end must NOT be inherited by child. */
     SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
 
-    STARTUPINFOA si;
+    STARTUPINFOW si;
     PROCESS_INFORMATION pi;
     ZeroMemory(&si, sizeof(si));
     ZeroMemory(&pi, sizeof(pi));
@@ -420,7 +474,8 @@ __attribute__((used)) int jh_run(const char *cmd_line) {
     jh_run_outlen = 0;
     jh_run_outbuf[0] = '\0';
 
-    BOOL ok = CreateProcessA(NULL, cmd_buf, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+    BOOL ok = CreateProcessW(NULL, wbuf, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+    HeapFree(GetProcessHeap(), 0, wbuf);
     /* Parent no longer needs write end; close so ReadFile can finish. */
     CloseHandle(hWritePipe);
     if (!ok) {

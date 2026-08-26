@@ -710,6 +710,81 @@ gcc link failed: "C:\msys64\ucrt64\bin\gcc.exe" "hello.s" "C:\Program Files\JHYY
 
 ---
 
+## v1.5.6 W-048 — link_with_gcc via temp ASCII path (修 PowerShell + 中文文件名 silent fail) (本 commit)
+
+### 触发 / 根因
+
+W-045 ship 后 user 在 PowerShell 5.1 跑 `jhyy run 新建文本文档.jhyy` (Chinese filename), 仍 fail:
+```
+gcc link failed: "C:\msys64\ucrt64\bin\gcc.exe" "C:\Users\liuzhen\AppData\Local\Temp\jha...t.s" ...
+```
+captured stderr = 0 字节 (gcc 根本没产生输出), silent exit 1。
+
+**关键 3 个 fingerprint:**
+1. MSYS2 bash 跑同一命令正常 → bash → CreateProcessW 走 UTF-16 cmdline
+2. PowerShell 5.1 调 jhyy.exe → jhyy.exe 调 gcc.exe → silent exit 1
+3. QBE 不受影响 (vendor qbe.exe MSVC-built, Unicode argv throughout)
+
+**根因:** PowerShell 5.1 cmdline parser 已把 UTF-8 bytes (jhyy-side heap Chinese path) 当 GB2312 解错 → mojibake wide chars → mingw-w64 CRT `_initargv` 收到 Unicode cmdline 后再 `WideCharToMultiByte(CP_ACP, ...)` 拿 ANSI argv 给 `main()` → cc1.exe 拿到 garbage argv → silent exit 1。
+
+**之前尝试过 (均失败, 记录以避重蹈):**
+- 改 `jh_run` 用 `CP_UTF8` → 坏 QBE path (QBE path 是 C 端 `jh_fullpath` 返回的 CP_ACP 字节)
+- `_setmode(_O_U8TEXT)` → 把 PS stdout 整个吞掉 (W-049 失败)
+- gcc response file `@file` → Windows response file 解析依赖 codepage, 不靠谱
+- `MSYS2_ARG_CONV_EXCL=*` env → mingw CRT 还是自己 decode argv
+
+### fix (W-048)
+
+**物理隔离:** gcc 永远拿 ASCII-only 路径, 链接成功后 rename 回原 Chinese 路径。无 cmdline-level 编码修改。
+
+`compiler/src0/jhyy_helpers.c` 加 4 个 Windows-only helper (`#ifdef _WIN32` 包裹, 插在 `jh_gcc_invoke` 后):
+- `jh_mktemp_ascii(tag, out, out_cap)` — `GetTempPathA` + pid^tid^counter + `.tmp` 后缀 → ASCII temp path
+- `jh_file_copy(src, dst)` — `MultiByteToWideChar(CP_ACP)` + `CopyFileW`
+- `jh_rename_file(src, dst)` — 同上 + `MoveFileExW(REPLACE_EXISTING)`
+- `jh_unlink_file(path)` — 同上 + `DeleteFileW`
+
+`compiler/src0/main.jhyy` — `link_with_gcc` 改造:
+- 4 个 extern decl
+- `jh_mktemp_ascii("a"/"e", ...)` 生成 temp_asm / temp_exe
+- overwrite `.tmp` (固定 4 字节) → `.s` / `.exe`, nul-terminate
+- `jh_file_copy(asm_path, temp_asm)` — Chinese .s → ASCII temp
+- 拼 cmd_buf **用 temp_asm / temp_exe** (ASCII 路径)
+- `jh_run(invoke_buf)` — gcc 拿 ASCII cmdline, mingw CRT 无 mojibake
+- 链接成功: `jh_rename_file(temp_exe, exe_path)` → rename 回原 Chinese exe
+- `.s` / `.il` **保留**在原 Chinese 路径给用户调试 (per `.il + .s debugging pattern`)
+- 失败路径 cleanup: `jh_unlink_file(temp_asm)` + `free(temp_*)`
+
+### 踩坑 (suffix replacement)
+
+第一次实现用 `src_off = tmplen - suflen` → `.s` 是 2 字节, `.tmp` 是 4 字节, 算成 `tmplen - 2` → overwrite `'mp'` → temp 文件名变成 `.t.s` → gcc 找不到文件。
+**正确:** `src_off = tmplen - 4` (`.tmp` 固定 4 字节 anchor), overwrite 新 suffix, nul-terminate at `src_off + suflen`。
+**教训:** suffix 长度 mismatch 时 anchor 必须用 old suffix 长度, 不是 new suffix 长度。
+
+### 验证 (5/5 per `feedback_fix_evaluation_rule`)
+
+- ✅ install-dir jhyy.exe SHA `97AADEEA18514534169B7F4720F9D3A574EC7604EF5E8DCBD325F62C0696E3AA`
+- ✅ PowerShell 5.1 `jhyy run 新建文本文档.jhyy` → exit=0 + `Hello, world!` 输出 (新能力)
+- ✅ MSYS2 bash 同命令 → exit=0 + Hello world (no regression)
+- ✅ `.s` / `.il` 在原 Chinese 路径保留 (新建文本文档_run.s / .il 存在)
+- ✅ regress 53/53 PASS 持平 (per `feedback_regress_baseline_binary_hash`)
+- ✅ `C:\Users\liuzhen\AppData\Local\Temp\jha*.tmp` 跑完无残留 (cleanup 正确)
+
+### Workaround 状态更新
+
+- **W-048 (新增 RESOLVED)** temp ASCII path + copy + rename 绕 mingw CRT argv decode
+- **W-047 (不变 RESOLVED)** runtime.c argv re-decode (用户 exec 时的 argv 修复, 跟 W-048 是不同层面, 互补)
+- **W-045 (不变 RESOLVED)** jh_run pipe-capture child stderr; captured=0 字节正是 silent fail 的 fingerprint
+- **W-046 (不变 RESOLVED)** jh_run CP_ACP → UTF-16 cmdline 转码
+- **W-042 Tier 1 (保留 ACTIVE)** echo invoke_buf 仍有用
+
+### 后续工作
+
+- W-047 + W-048 双层修复后, install-dir 中文文件名 case 应该彻底闭环
+- Tier 3 (W-042 queue: post-link stat) — deferred v1.5.7
+- v1.5.7+: Bundle UpgradeCode 升级 telemetry (如有 plan)
+
+---
+
 ---
 
 ## 关联文档

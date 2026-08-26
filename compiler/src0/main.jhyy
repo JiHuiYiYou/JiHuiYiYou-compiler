@@ -78,6 +78,11 @@ extern fn jh_fullpath(out_buf: *u8, rel_path: *u8, max_len: i32) -> i32;
 extern fn jh_run(cmd_line: *u8) -> i32;
 // v1.5.6 W-045: capture child stderr/stdout from jh_run (pipe-based)
 extern fn jh_run_get_output() -> *u8;
+// v1.5.6 W-048: temp ASCII path + copy + rename 绕开 mingw CRT 中文 argv 编码歧义
+extern fn jh_mktemp_ascii(tag: *u8, out: *u8, out_cap: i32) -> i32;
+extern fn jh_file_copy(src: *u8, dst: *u8) -> i32;
+extern fn jh_rename_file(src: *u8, dst: *u8) -> i32;
+extern fn jh_unlink_file(path: *u8) -> i32;
 
 fn QBE_PATH() -> *u8 { return jh_path_qbe(); }
 fn GCC_PATH() -> *u8 { return jh_path_gcc(); }
@@ -698,6 +703,62 @@ fn run_qbe(il_path: *u8, asm_path: *u8) -> i32 {
 //   jh_gcc_path() 拿 resolved gcc 路径 + 引号包裹, 写 cmd_buf 头部;
 //   cmd_buf 后续段 (args + -o EXE -lm) 由 caller 拼. 全 cmd 仍传 system().
 fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
+    // v1.5.6 W-048: temp ASCII path 绕开 mingw CRT 中文 argv 编码歧义.
+    // src0 jhyy 是 UTF-8 源; path 字面量是 UTF-8 bytes. MSYS2 mingw-w64 CRT
+    // _initargv 拿到 Unicode cmdline 后再用 CP_ACP 转 ANSI argv — PowerShell
+    // cmdline parser 已把 UTF-8 bytes 当 GB2312 解错 → mojibake ANSI argv →
+    // gcc 找不到文件 → silent exit. 改 cmd_buf 用 ASCII temp path 绕开。
+    let temp_asm = malloc(1024 as i64);
+    let temp_exe = malloc(1024 as i64);
+    let _t1 = jh_mktemp_ascii("a" as *u8, temp_asm, 1024 as i32);
+    let _t2 = jh_mktemp_ascii("e" as *u8, temp_exe, 1024 as i32);
+    if _t1 != (0 as i32) || _t2 != (0 as i32) {
+        jh_fputs_stderr("W-048: cannot create temp path\n" as *u8);
+        free(temp_asm); free(temp_exe); return 1 as i32;
+    }
+    // jh_mktemp_ascii 输出 "...Temp\\jha<8hex>.tmp" / "jhe<8hex>.tmp".
+    // gcc 需要 .s / .exe 后缀 — 把末尾 ".tmp" (固定 4 字节) overwrite 为新 suffix,
+    // 然后 nul-terminate. W-048 fix: 之前用 `tmplen - suflen` 错算成 `tmplen - 2`,
+    // 导致 .tmp 变成 ".t.s" → gcc 找不到文件.
+    let suffix_s = ".s" as *u8;
+    let tmplen_a = strlen(temp_asm);
+    let suflen_s = strlen(suffix_s) as i64;
+    let src_off_a = tmplen_a - (4 as i64);   // ".tmp" = 4 字节, 从这位置开始 overwrite
+    let dst_p_a = (temp_asm as i64 + src_off_a) as *u8;
+    let mut k: i64 = 0 as i64;
+    while k < suflen_s {
+        let sp = (suffix_s as i64 + k) as *i32;
+        let dp = (dst_p_a as i64 + k) as *i32;
+        (*dp) = (*sp);
+        k = k + (1 as i64);
+    }
+    // nul-terminate after new suffix (".s" 短于 ".tmp", 后面 2 字节需清零)
+    let nul_at_a = (temp_asm as i64 + src_off_a + suflen_s) as *u8;
+    store_byte_i32(nul_at_a, 0 as i32);
+
+    let suffix_e = ".exe" as *u8;
+    let tmplen_e = strlen(temp_exe);
+    let suflen_e = strlen(suffix_e) as i64;
+    let src_off_e = tmplen_e - (4 as i64);   // ".tmp" = 4 字节
+    let dst_p_e = (temp_exe as i64 + src_off_e) as *u8;
+    k = 0 as i64;
+    while k < suflen_e {
+        let sp = (suffix_e as i64 + k) as *i32;
+        let dp = (dst_p_e as i64 + k) as *i32;
+        (*dp) = (*sp);
+        k = k + (1 as i64);
+    }
+    // nul-terminate (".exe" 同长于 ".tmp", 写在最后刚好)
+    let nul_at_e = (temp_exe as i64 + src_off_e + suflen_e) as *u8;
+    store_byte_i32(nul_at_e, 0 as i32);
+    // Copy 原 Chinese asm → temp_asm (ASCII)
+    let _cp = jh_file_copy(asm_path, temp_asm);
+    if _cp != (0 as i32) {
+        jh_fputs_stderr("W-048: copy asm failed\n" as *u8);
+        jh_unlink_file(temp_asm);
+        free(temp_asm); free(temp_exe); return 1 as i32;
+    }
+
     // v1.5.6 W-040: wrap each path arg in quotes so gcc's argv parser
     // treats the full path as one token. RUNTIME_C() and HELPERS_C() resolve
     // to "<INSTALLDIR>\bin\runtime.c" / "<INSTALLDIR>\bin\jhyy_helpers.c"
@@ -707,13 +768,14 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     // "Files\JHYY\bin\runtime.c: No such file or directory". asm_path and
     // exe_path may also contain spaces when the user's cwd or -o output path
     // has spaces, so quote all of them.
+    // v1.5.6 W-048: asm_path / exe_path 用 temp ASCII path (避免 mingw argv 编码 bug)
     let lq = "\"" as *u8;
     let rq = "\"" as *u8;
     let cmd_buf = malloc(16384 as i64);
     let mut pos: i64 = 0 as i64;
     let sp = " " as *u8;
     pos = str_concat_at(cmd_buf, pos, lq);
-    pos = str_concat_at(cmd_buf, pos, asm_path);
+    pos = str_concat_at(cmd_buf, pos, temp_asm);    // W-048: ASCII
     pos = str_concat_at(cmd_buf, pos, rq);
     pos = str_concat_at(cmd_buf, pos, sp);
     pos = str_concat_at(cmd_buf, pos, lq);
@@ -726,24 +788,26 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     let oflag = " -o " as *u8;
     pos = str_concat_at(cmd_buf, pos, oflag);
     pos = str_concat_at(cmd_buf, pos, lq);
-    pos = str_concat_at(cmd_buf, pos, exe_path);
+    pos = str_concat_at(cmd_buf, pos, temp_exe);    // W-048: ASCII
     pos = str_concat_at(cmd_buf, pos, rq);
     let lmflag = " -lm" as *u8;
     pos = str_concat_at(cmd_buf, pos, lmflag);
     let nul_p = (cmd_buf as i64 + pos) as *u8;
     store_byte_i32(nul_p, 0 as i32);
 
-    path_to_win(exe_path);
+    path_to_win(exe_path);  // 保留:exe_path 用于最终 rename dst
     // v1.5.6: jh_gcc_invoke 把 "RESOLVED_GCC_PATH" + space + cmd_buf 写到 invoke_buf;
     // gcc 路径有空格 (e.g. "C:\Program Files\...") 也安全.
     // v1.5.6 W-038: 用 jh_run (CreateProcessA) 替代 system(), 绕过 cmd.exe /C 的
     // 多重 quote 处理 bug. CreateProcessA 的 cmd-line parser 正确处理 quoted path.
     // v1.5.6 W-040: path args 在 cmd_buf 已经 quote 包裹, gcc 看到 quoted argv.
+    // v1.5.6 W-048: cmd_buf 用 ASCII temp path,mingw CRT 不再 misdecode.
     let invoke_buf = malloc(16384 as i64);
     let args_start = cmd_buf;
     let _wrote = jh_gcc_invoke(invoke_buf, 16384 as i32, args_start);
     path_to_win(exe_path);
     let r = jh_run(invoke_buf);
+    let captured = jh_run_get_output();
     if r != (0 as i32) {
         // v1.5.6 W-042: mirror run_qbe pattern (:684-686) — print actual gcc
         // cmd_buf so user can distinguish CreateProcessA fail (gcc not
@@ -757,7 +821,6 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
         // parent's stderr (cmd.exe /c '2>&1' only redirects cmd.exe's own
         // stderr, not the child's) and the user sees "gcc link failed" with
         // no explanation. See docs/internal/workarounds.md § W-045.
-        let captured = jh_run_get_output();
         if captured != (0 as *u8) {
             let c0 = (*captured);
             if c0 != (0 as i32) {
@@ -768,10 +831,26 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
         }
         free(invoke_buf);
         free(cmd_buf);
+        jh_unlink_file(temp_asm);  // W-048 cleanup
+        free(temp_asm); free(temp_exe);
+        return 1 as i32;
+    }
+    // W-048: 链接成功 — rename temp_exe → 原 Chinese exe_path
+    let _mv = jh_rename_file(temp_exe, exe_path);
+    if _mv != (0 as i32) {
+        jh_fputs_stderr("W-048: rename temp exe failed (kept at " as *u8);
+        jh_fputs_stderr(temp_exe);
+        jh_fputs_stderr(")\n" as *u8);
+        free(invoke_buf);
+        free(cmd_buf);
+        jh_unlink_file(temp_asm);
+        free(temp_asm); free(temp_exe);
         return 1 as i32;
     }
     free(invoke_buf);
     free(cmd_buf);
+    jh_unlink_file(temp_asm);  // temp asm 清理 (.s 留在原 Chinese 路径给用户调试)
+    free(temp_asm); free(temp_exe);
     return 0 as i32;
 }
 
