@@ -20,6 +20,7 @@
 | **v1.5.6-patch2** | ✅ done | (this commit) | VSCode Code Runner 集成 — `configure-coderunner.ps1` (parse + add + re-serialize settings.json); `install-vsix.bat` 升级 3 步 (jhyy-lang + Code Runner + settings.json); MSI Component `ConfigureCodeRunnerPS1` (新 GUID); winget 1.5.6 复制自 1.5.5 |
 | **v1.5.6 W-043** | ✅ done | (this commit) | MSI ships `runtime.c` + `jhyy_helpers.c` → installer 位置能 compile (W-042 暴露的根因); 2 个新 MSI Component (`RuntimeC` `B4A71F8C-...` + `HelpersC` `7C3D9E2A-...`); regress 53/53 不动 |
 | **v1.5.6 W-044** | ✅ done | (this commit) | MSI ships `runtime.h` (429 B) alongside `runtime.c` (W-043 不完整: `runtime.c` line 1 `#include "runtime.h"`); 1 个新 MSI Component (`RuntimeH` `D5C2880A-...`); jhyy_helpers.c 0 个 local header dep 不动 |
+| **v1.5.7-rc1** | ✅ done (2026-08-26) | (this commit) | MSI 加 HKLM RunOnce post-install 修 v1.5.6 ship 后发现的 OOTB gap:(1) `MSYS2_PATH_TYPE=inherit` User env var (MSYS2 bash 默认 minimal mode 看不到 HKLM PATH);(2) VSCode `terminal.integrated.defaultProfile.windows = "bash (MSYS2)"` + profile entry。**改用 RunOnce 而非 deferred CustomAction**(CustomAction type 34 在本机 systematic 报 1721,CreateProcess argv parser 在 SYSTEM context 下 mis-tokenize cmd /c 链)。MSI `installer/build-artifacts/jhyy-compiler-1.5.7.msi` 已构建 + 测试 install 0 错 + RunOnce 注册成功 |
 
 ---
 
@@ -842,6 +843,108 @@ si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);         // inherit — interacti
 
 ---
 
+## v1.5.7-rc1 — MSI HKLM RunOnce post-install config (本 commit)
+
+### 触发 / 根因
+
+v1.5.6 ship 后用户反馈 **"我 jhyy 跑不了 vscode 算哪门子编程语言"**, 查出来 2 个 OOTB gap:
+
+1. **MSYS2 bash 默认 `MSYS2_PATH_TYPE=minimal`** — 就算 MSI 把 `C:\Program Files\JHYY\bin` 写进 HKLM PATH, MSYS2 bash 也不 inherit, `jhyy` 在 bash 里报 command not found。cmd.exe / PowerShell 倒能看到 (走完整 Windows PATH), 但用户在 VSCode 集成终端 (默认 bash MSYS2) 就调不到
+2. **VSCode 集成终端默认 profile 是 PowerShell 或 cmd, 不是 bash (MSYS2)** — 即使修了 (1), 用户还得手动改 setting
+
+User 决策 (2026-08-26):"把要加的加了"。Defender exclusion 加 CA 的方案被 [[project-defender-gcc-myth-killed]] kill(实测 Defender 没拦 mingw gcc)— **不加** Defender-exclusion CA
+
+### 设计 — 3 个 post-install 步骤
+
+| 步骤 | 工具 | 效果 |
+|------|------|------|
+| 1 | `install-configure-env.ps1` | HKCU `MSYS2_PATH_TYPE=inherit` (User scope env, no admin) |
+| 2 | `install-configure-vscode.ps1` | 写 `terminal.integrated.defaultProfile.windows = "bash (MSYS2)"` + 加 profile entry 到 `%APPDATA%\Code\User\settings.json` (conservative merge, 若 defaultProfile 已设就不覆盖) |
+| 3 | `install-vsix.bat` (v1.5.4 / v1.5.6-patch2 已 ship) | 装 `jhyy-lang-*.vsix` + `formulahendry.code-runner` + 配 executorMap |
+
+### 实现 — 为什么 HKLM RunOnce 而不是 MSI CustomAction
+
+MSI deferred ExeCommand CustomAction (type 34) 在本机 systematic 报 1721:
+
+```
+Note: 1: 1721 2: InstallVSCodeExt 3: "C:\WINDOWS\system32\cmd.exe" /c "..."
+```
+
+调试 3 个 MSI build:
+- **rev 1**: `[%ComSpec]` 替换 + `cmd /c "powershell -File \"...\""` 多层 escape → 全 3 个 CA 1721
+- **rev 2**: `install-post-install.bat` 单层 quote wrapper (`powershell -File %~1`) → 仍 1721
+- **结论**: 根本不是 quote escaping, 是 MSI deferred CA context (SYSTEM token, no interactive profile) 下 CreateProcess argv 解析有 bug。同一命令手动跑 (`cmd.exe /c "..."`) 完全 OK
+
+**Pivot: HKLM RunOnce 注册表 entry**, 在用户下次 logon 时 Windows 自动以 USER context 跑:
+
+```xml
+<Component Id="JHYYRunOnceReg" Bitness="always64" Guid="D9E2F4A1-5B7C-4A8E-9F1D-3B6C8A2E5F71">
+  <RegistryKey Root="HKLM" Key="SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce">
+    <RegistryValue Type="string"
+                   Name="JHYYPostInstall"
+                   Value="&quot;[INSTALLDIR]bin\install-configure-all.bat&quot;"
+                   KeyPath="yes" />
+  </RegistryKey>
+  <RemoveRegistryValue Root="HKLM" ... />
+</Component>
+```
+
+Windows RunOnce 行为:
+- **何时触发**: 每个 user logon 时, 第一次触发后 Windows 自动 delete 该 entry
+- **执行 context**: **USER context** (不是 SYSTEM), 所以 HKCU 写、用户 PATH、powershell.exe user profile 全 work
+- **HKLM vs HKCU**: 用 HKLM 因为 per-machine install 写 HKCU 只对安装时 user 有用, 其他 user logon 时拿不到
+- **执行方式**: `CreateProcess(cmd_line)` — cmd_line = `"<path-with-spaces>"`, outer quotes 由 RunOnce parser strip
+
+`install-configure-all.bat` 是个 ASCII-only master orchestrator, 调 2 个 .ps1:
+```bat
+@echo off
+setlocal
+set "BIN_DIR=%~dp0"
+...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%BIN_DIR%install-configure-env.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%BIN_DIR%install-configure-vscode.ps1"
+exit /b 0
+```
+
+**为什么 ASCII-only**: cmd.exe 在中文 Windows 用 GBK codepage, .bat 内容含 UTF-8 多字节字符会被 mis-decode 拆成单字节 token, 词法解析破坏(实测:`'figure-all.bat' / 'eferred' / 'staller'` — file 名 + 注释词被切碎当成命令)。
+
+### install-vsix.bat — 决定从 orchestrator 拿掉 (regression)
+
+**orchestrator 初版** 调 install-vsix.bat 装 .vsix + Code Runner + executorMap, 但实测:
+- `code --install-extension` 在 RunOnce context (用户 logon 早期, VSCode 可能没起来) 经常 crash 或 hang, exit 255
+- 同样命令手动跑 OK
+- 用户首装 fresh, 还没开过 VSCode → `code` CLI shim 注册不到 PATH → fail
+
+**决定**: v1.5.7-rc1 **不自动装** .vsix + Code Runner。文档告诉用户手动跑:
+```
+code --install-extension "C:\Program Files\JHYY\vscode-ext\jhyy-lang-1.5.7.vsix"
+code --install-extension formulahendry.code-runner
+```
+**回归影响**: 已有 jhyy.exe + qbe.exe + PATH 的用户在 VSCode 里写 + run .jhyy 完全没问题(走 Code Runner 用户已配, 走 jhyy_v1 / 直接 jhyy 也行)。**仅**首装 fresh user 需多走一步。
+
+### 验证 (per `feedback_fix_evaluation_rule`)
+
+| 验证项 | 结果 |
+|--------|------|
+| MSI build OK | ✅ `jhyy-compiler-1.5.7.msi` 1.04MB, 0 error |
+| MSI install UI mode | ✅ exit 0, no 1925 / 1721 / 1603 |
+| HKLM RunOnce entry 注册 | ✅ `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce!JHYYPostInstall = "C:\Program Files\JHYY\bin\install-configure-all.bat"` |
+| orchestrator 手动 run (模拟 RunOnce fire) | ✅ exit 0, 2 个 .ps1 都成功, MSYS2_PATH_TYPE + VSCode defaultProfile 都设上 |
+| post-state 检查 | ✅ `MSYS2_PATH_TYPE = 'inherit'`, `VSCode defaultProfile = bash (MSYS2)` |
+| uninstall 清理 | ✅ `<RemoveRegistryValue>` 自动删 RunOnce entry (MSI 标配) |
+
+### Workaround 状态更新
+
+- **W-051 (新增 ACTIVE)** MSI deferred ExeCommand CustomAction type 34 在本机 systematic 报 1721 — 改用 HKLM RunOnce 解决 (`docs/internal/workarounds.md` § W-051)
+
+### 关联决策
+
+- **D5** (保留):不加 Defender-exclusion CA (myth killed)
+- **D6** (rev):post-install 走 HKLM RunOnce, **不**用 MSI CustomAction — RunOnce 在 USER context 跑避免 deferred CA 1721 问题,代价是需 user logoff/logon 一次
+- **D7** (新增):orchestrator **不**调 install-vsix.bat。`code --install-extension` 在 RunOnce context crash / hang, 用户 fresh 装时 VSCode 还没起来 → CLI shim 没 PATH。回归:user 手动装 (上面 2 行 cmd)。有 VSCode + Code Runner 已装 的用户不受影响
+
+---
+
 ---
 
 ## 关联文档
@@ -856,3 +959,7 @@ si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);         // inherit — interacti
 - **决策 D2** (2026-08-14): Bundle 走 standard WixStdBA UI, 不写 custom BAFunctions (simple + 文档化 + 跨版本稳)
 - **决策 D3** (2026-08-15): Bal extension DLL 通过绝对路径引 (workaround WiX CLI 7.0.0+b8977d6 名字查找 WIX0144)
 - **决策 D4** (2026-08-15): v1.5.5 release 时再跑 manual install/uninstall verification (headless bash 跑不了 per-machine MSI UAC)
+- **决策 D5** (2026-08-26): v1.5.7-rc1 **不加** Defender-exclusion CA(Defender 拦 mingw gcc 是 myth, revert 后 jhyy run 仍 OK — per [[project-defender-gcc-myth-killed]])。Installer 不该 silent 加 IT policy 相关排除项,跟 user opt-in add_jhyy_to_user_path.ps1 一致
+- **决策 D6** (2026-08-26 rev):post-install 走 **HKLM RunOnce**(USER context, 下次 logon 自动跑 `install-configure-all.bat`),**不**走 MSI deferred CustomAction。MSI deferred CA (type 34, ExeCommand) 在本机 systematic 报 1721 — CreateProcess argv parser 在 SYSTEM token context 下 mis-tokenize cmd /c 链;直接 powershell.exe 也 fail (修 quote 也 fail)。代价:user fresh 装后需 logoff/logon 一次让 config 生效
+- **决策 D7** (2026-08-26):orchestrator `install-configure-all.bat` **不**调 install-vsix.bat。`code --install-extension` 在 RunOnce context 经常 crash / hang (exit 255),且 fresh user VSCode 没开过 → CLI shim 没注册 PATH。回归:user 首装后手动跑 2 行 `code --install-extension ...`(VSCode 已开的用户不受影响,因为 Code Runner + executorMap 之前 1.5.6-patch2 已配)
+- **决策 D8** (2026-08-26):`install-configure-all.bat` + `install-vsix.bat` 必须 **ASCII-only**。cmd.exe 在中文 Windows 用 GBK codepage, 任何 UTF-8 多字节字符(GitHub 默认 commit 字节)被 mis-decode 拆词, 例如 `install-configure-all.bat` 注释里的 em dash `—` (E2 80 94) 被拆成 `figure-all.bat` / `eferred` 等碎片当成命令执行 → install 大量 garbled 错误

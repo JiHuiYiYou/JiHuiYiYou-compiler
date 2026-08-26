@@ -1,6 +1,7 @@
 # JHYY Installer GUIDs (v1.5.0+)
 
 > **Generated**: 2026-08-15 (v1.5.5 hotfix, replace dev placeholder GUIDs)
+> **Last added**: 2026-08-26 (v1.5.7-rc1 rev 2 — InstallConfigureAllBat + JHYYRunOnceReg, replaces broken deferred CAs)
 > **Generator**: Python `uuid.uuid4()` (RFC 4122 v4 random)
 > **Format**: UPPERCASE hex with dashes (Windows Installer canonical)
 
@@ -37,6 +38,11 @@ upgrades silently keep old version (silent corruption).
 | QbeExe | `096E27A7-65E2-465C-BA58-399A02C0F000` |
 | InstallVSIXBat | `5D1C3BC5-EBC3-472A-9744-1F96692A2E6F` |
 | ConfigureCodeRunnerPS1 (v1.5.6-patch2) | `F7A2D6E0-9B3C-4D1A-9E5F-3C7B8A2D6E01` |
+| InstallConfigEnvPS1 (v1.5.7-rc1, now invoked by RunOnce) | `0ADA340F-4463-466E-AFEE-302147CC0DD4` |
+| InstallConfigVSCodePS1 (v1.5.7-rc1, now invoked by RunOnce) | `0FA909A4-020F-4BEC-AACD-D9B3F5BB7A16` |
+| InstallConfigureAllBat (v1.5.7-rc1 rev 2 — RunOnce target) | `B7C4D5E9-2A1F-4E3B-9C8D-6F5A2E8B1C44` |
+| JHYYRunOnceReg (v1.5.7-rc1 rev 2 — HKLM RunOnce entry) | `D9E2F4A1-5B7C-4A8E-9F1D-3B6C8A2E5F71` |
+| ~~InstallPostInstallBat (v1.5.7-rc1 rev 1 — superseded by rev 2)~~ | ~~`A3B8E2F7-4D9C-4E1B-8F5A-2D6C9E8B1F32`~~ |
 | RuntimeC (v1.5.6 W-043) | `B4A71F8C-9D32-4E6A-B5C8-7F1E3A92D104` |
 | HelpersC (v1.5.6 W-043) | `7C3D9E2A-4F1B-4A8E-9D6F-2B5E8C1A4F77` |
 | RuntimeH (v1.5.6 W-044) | `D5C2880A-5AA4-4ED4-AAFC-8C18D1E650B8` |

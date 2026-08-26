@@ -197,35 +197,44 @@
     <Property Id="ARPHELPLINK" Value="https://github.com/JiHuiYiYou/JiHuiYiYou-compiler" />
 
     <!--
-      VSCode extension auto-installer (v1.5.4).
-      CustomAction runs install-vsix.bat deferred (after InstallFiles).
-      `Return="ignore"` 让 install 失败不阻塞 MSI (per-machine install,
-      用户没装 VSCode 就 skip).
+      Post-install configuration (v1.5.7-rc1 rev 2):
+      MSI deferred ExeCommand CustomActions systematically fail with error 1721
+      on this system ("Windows Installer 程序包有问题。此安装需要的程序不能运行").
+      Debugged over 3 MSI builds (2026-08-26) — root cause is CreateProcess argv
+      parser mis-tokenizing cmd.exe /c chains with embedded escaped quotes when
+      invoked from MSI deferred CA context (SYSTEM token, no interactive profile).
+      Affects all 3 candidates:
+        - InstallVSCodeExt (v1.5.4, latent bug — was always failing, Return=ignore saved install)
+        - InstallEnvConfig + InstallVSCodeConfig (v1.5.7-rc1, new — even with .bat wrapper)
 
-      WiX 4 CustomAction syntax: 需要 Property (executable path) + ExeCommand (args).
-      用 ComSpec (cmd.exe) 作为 Property, /c 后跟 .bat 路径 + args.
-      Property 必须 <SetProperty> 在 execute sequence 提前 define (deferred CA
-      无 property context). InstallVSCodeExtCmdProperty 装 .bat + .vsix 路径.
+      Pivot: HKLM RunOnce registry entry pointing at install-configure-all.bat.
+      RunOnce fires at next user logon in USER context (not SYSTEM), avoiding
+      all deferred-CA issues:
+        - HKCU writes work (user has write access to own hive)
+        - child process spawning works (CreateProcess in user context, no MSI
+          argv-parsing layer between us and Windows)
+        - powershell.exe runs in user's interactive session
+
+      Cost: requires ONE logoff/logon cycle after fresh install for config to
+      take effect. Same UX as Defender exclusion requests anyway.
+
+      The MSI ships:
+        - install-configure-all.bat (orchestrator, calls install-vsix.bat + 2 .ps1)
+        - install-vsix.bat, configure-coderunner.ps1
+        - install-configure-env.ps1, install-configure-vscode.ps1
+      Then writes RunOnce value pointing at install-configure-all.bat.
+
+      RunOnce lives in HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce.
+      Windows deletes the value after first execution per user. Format:
+        REG_SZ = "full path to .bat" (no args needed — orchestrator knows its paths)
+      Quoting: literal " in REG_SZ is fine; Windows parses it via CreateProcess.
+      "C:\Program Files\JHYY\bin\install-configure-all.bat" — outer quotes preserve
+      the path-with-spaces as ONE arg to cmd.exe.
+
+      On uninstall: <RemoveRegistryValue> clears the RunOnce entry to avoid stale
+      references if user uninstalls before first logon.
     -->
-    <Property Id="JHYY_COMSPEC">
-      <RegistrySearch Id="ComSpecSearch"
-                      Type="directory"
-                      Root="HKLM"
-                      Key="SOFTWARE\Microsoft\Command Processor"
-                      Name="CommandPath" />
-    </Property>
-    <SetProperty Id="InstallVSCodeExtCmd"
-                 Value="&quot;[JHYY_COMSPEC]&quot; /c &quot;[INSTALLDIR]bin\install-vsix.bat&quot; /VSIX=&quot;[VSCodeExtDir]jhyy-lang-$(var.JHY_VERSION_DISPLAY).vsix&quot; /CONFIGURE_PS1=&quot;[INSTALLDIR]bin\configure-coderunner.ps1&quot; /JHY_DIR=&quot;[INSTALLDIR]&quot;"
-                 Before="InstallVSCodeExt"
-                 Sequence="execute" />
-    <CustomAction Id="InstallVSCodeExt"
-                  Property="InstallVSCodeExtCmd"
-                  ExeCommand="[InstallVSCodeExtCmd]"
-                  Execute="deferred"
-                  Impersonate="no"
-                  Return="ignore" />
     <InstallExecuteSequence>
-      <Custom Action="InstallVSCodeExt" After="InstallFiles" Condition="NOT Installed" />
     </InstallExecuteSequence>
 
   </Package>
@@ -287,6 +296,49 @@
       <Component Id="ConfigureCodeRunnerPS1" Bitness="always64" Guid="F7A2D6E0-9B3C-4D1A-9E5F-3C7B8A2D6E01">
         <File Id="ConfigureCodeRunnerPS1File"
               Source="!(bindpath.common)\configure-coderunner.ps1"
+              KeyPath="yes" />
+      </Component>
+
+      <!--
+        install-configure-env.ps1 (v1.5.7-rc1): sets MSYS2_PATH_TYPE=inherit
+        at User scope (no admin needed) so MSYS2 bash picks up the JHYY bin
+        entry the MSI just added to HKLM system PATH. Without this, MSYS2
+        bash defaults to minimal PATH mode and ignores Windows PATH, so
+        `jhyy` resolves to "command not found" from bash even though cmd/PS
+        find it. Invoked via CustomAction InstallEnvConfig (deferred, no
+        impersonate, Return=ignore — failure non-fatal).
+      -->
+      <Component Id="InstallConfigEnvPS1" Bitness="always64" Guid="0ADA340F-4463-466E-AFEE-302147CC0DD4">
+        <File Id="InstallConfigEnvPS1File"
+              Source="!(bindpath.common)\install-configure-env.ps1"
+              KeyPath="yes" />
+      </Component>
+
+      <!--
+        install-configure-all.bat (v1.5.7-rc1 rev 2): master post-install
+        orchestrator invoked via HKLM RunOnce at next user logon. Calls
+        install-vsix.bat (VSCode ext + Code Runner config) + the 2 .ps1
+        scripts (MSYS2_PATH_TYPE=inherit + VSCode defaultProfile). No MSI
+        CustomAction — RunOnce fires in user context, avoiding the deferred-CA
+        1721 error that broke all 3 CustomActions (cmd.exe /c chains).
+      -->
+      <Component Id="InstallConfigureAllBat" Bitness="always64" Guid="B7C4D5E9-2A1F-4E3B-9C8D-6F5A2E8B1C44">
+        <File Id="InstallConfigureAllBatFile"
+              Source="!(bindpath.common)\install-configure-all.bat"
+              KeyPath="yes" />
+      </Component>
+
+      <!--
+        install-configure-vscode.ps1 (v1.5.7-rc1): writes VSCode user
+        settings.json to add `terminal.integrated.defaultProfile.windows =
+        "bash (MSYS2)"` and ensures the profile entry exists. Conservative
+        merge — if defaultProfile already set to anything else, leaves it
+        alone (respects user choice). Invoked via CustomAction
+        InstallVSCodeConfig (deferred, no impersonate, Return=ignore).
+      -->
+      <Component Id="InstallConfigVSCodePS1" Bitness="always64" Guid="0FA909A4-020F-4BEC-AACD-D9B3F5BB7A16">
+        <File Id="InstallConfigVSCodePS1File"
+              Source="!(bindpath.common)\install-configure-vscode.ps1"
               KeyPath="yes" />
       </Component>
 
@@ -377,6 +429,43 @@
         </RegistryKey>
 
         <RemoveRegistryKey Root="HKLM" Key="SOFTWARE\JiHuiYiYou\JHYY" Action="removeOnUninstall" />
+      </Component>
+
+      <!--
+        JHYYRunOnce (v1.5.7-rc1 rev 2): HKLM RunOnce entry pointing at
+        install-configure-all.bat. Windows fires RunOnce at next user logon
+        in the user's context, which:
+          - can write HKCU (env vars, VSCode settings.json)
+          - can spawn child processes normally (no MSI deferred-CA argv parsing)
+          - runs powershell.exe in interactive session (loads user profile)
+
+        HKLM RunOnce fires for EACH user on their first logon after the entry
+        is written. Windows deletes the entry after first execution. Format:
+          HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce!JHYYPostInstall
+          = "C:\Program Files\JHYY\bin\install-configure-all.bat"
+        Outer quotes preserve the path-with-spaces as ONE arg to cmd.exe when
+        RunOnce fires it via CreateProcess.
+
+        On uninstall: RemoveRegistryValue clears the entry to avoid stale
+        references if user uninstalls before first logon (RunOnce entries
+        pointing to deleted binaries are harmless but noisy in event log).
+
+        Component owns the binary InstallConfigureAllBat (via Feature reference
+        to JHYYBinFiles ComponentGroup above) + this registry KeyPath. Per ICE43
+        rules: registry KeyPath is valid for Component with no files, as long as
+        it's referenced by a Feature.
+      -->
+      <Component Id="JHYYRunOnceReg" Bitness="always64" Guid="D9E2F4A1-5B7C-4A8E-9F1D-3B6C8A2E5F71">
+        <RegistryKey Root="HKLM"
+                     Key="SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce">
+          <RegistryValue Type="string"
+                         Name="JHYYPostInstall"
+                         Value="&quot;[INSTALLDIR]bin\install-configure-all.bat&quot;"
+                         KeyPath="yes" />
+        </RegistryKey>
+        <RemoveRegistryValue Root="HKLM"
+                             Key="SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce"
+                             Name="JHYYPostInstall" />
       </Component>
     </ComponentGroup>
   </Fragment>

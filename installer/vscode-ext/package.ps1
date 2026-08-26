@@ -91,7 +91,13 @@ try {
     }
     $displayVsix = "jhyy-lang-$JHY_VERSION_DISPLAY.vsix"
     if ($JHY_VERSION_DISPLAY -ne $env:JHY_VERSION -and (Test-Path $vsceOutputVsix)) {
-        Rename-Item -Path $vsceOutputVsix -NewName $displayVsix -Force
+        # Rename-Item -Force does NOT overwrite on Windows (only clears ReadOnly
+        # attribute). If a previous build left $displayVsix around, the rename
+        # fails with "Cannot create a file when that file already exists." Workaround:
+        # delete the destination first, then rename. Captured 2026-08-26
+        # (v1.5.7-rc1 build retry loop).
+        if (Test-Path $displayVsix) { Remove-Item -Path $displayVsix -Force }
+        Rename-Item -Path $vsceOutputVsix -NewName $displayVsix
     }
     $output | Where-Object { $_ -match 'WARNING' } | ForEach-Object {
         Write-Host "[WARN] $_"

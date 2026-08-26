@@ -3268,3 +3268,80 @@ src0/main.jhyy 改 4 extern decl + ~50 行 (link_with_gcc 改造 + rename), jhyy
 - W-047 (argv re-decode in runtime.c — 用户 exec 时的 argv 修复, 跟 W-048 是不同层面, 互补)
 
 
+## W-051: MSI deferred ExeCommand CustomAction type 34 在本机 systematic 报 1721 — 改用 HKLM RunOnce 解决
+
+**状态:** 🟡 ACTIVE (workaround: HKLM RunOnce, applied in v1.5.7-rc1, 2026-08-26)
+**日期:** 2026-08-26
+**触发面:** v1.5.7-rc1 写 post-install CustomActions (InstallEnvConfig + InstallVSCodeConfig + 已有 InstallVSCodeExt) 配 MSYS2_PATH_TYPE + VSCode defaultProfile,MSI install log 全 3 个 CA 报 1721:
+
+```
+Note: 1: 1721 2: InstallVSCodeExt 3: "C:\WINDOWS\system32\cmd.exe" /c "..." 
+```
+
+**症状:** MSI deferred CA type 34 (ExeCommand) 在本机 launch 必 fail。已排查:
+1. **不是 elevation 问题**: 1925 走 UAC 排除后仍 1721
+2. **不是 path 错**: `[%ComSpec]` 已替换成 `C:\WINDOWS\system32\cmd.exe`, cmd.exe 路径正确
+3. **不是 cmd /c 语法**: 手动跑 `cmd.exe /c "<exact same cmdline>"` 完全 OK, exit 0
+4. **不是 quote escape 错**: 改用 `install-post-install.bat` 单层 quote wrapper (`powershell -File %~1`) → 仍 1721
+5. **不是 Property reference 错**: MSI log 显示 `Source="..." Target="..."` 两个 field 都被 Resolve 成功, 不是 unresolved `[Property]`
+
+**根因分析:** MSI deferred CA 在 SYSTEM token 下用 CreateProcess 调 exe。CreateProcess argv parser 在 SYSTEM context (no interactive profile, no logged-on user's env) 下对 cmd /c chains with internal escaped quotes 有不可预测的 mis-tokenize 行为。同 cmdline 在用户 interactive cmd / PS / bash 里都 OK。MSI log 显示 `Source=` + `Target=` 都正确 resolve 成 final string, 但 CreateProcess 启动时挂掉。
+
+**Workaround (本 workaround, applied in v1.5.7-rc1):**
+**弃用 MSI CustomAction**, 改用 **HKLM RunOnce registry entry**, Windows 在下次 user logon 时**自动**以 USER context 跑:
+
+```xml
+<Component Id="JHYYRunOnceReg" Bitness="always64" Guid="D9E2F4A1-5B7C-4A8E-9F1D-3B6C8A2E5F71">
+  <RegistryKey Root="HKLM" Key="SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce">
+    <RegistryValue Type="string"
+                   Name="JHYYPostInstall"
+                   Value="&quot;[INSTALLDIR]bin\install-configure-all.bat&quot;"
+                   KeyPath="yes" />
+  </RegistryKey>
+  <RemoveRegistryValue Root="HKLM" .../>
+</Component>
+```
+
+**Why RunOnce works (CustomActions don't):**
+- RunOnce 在 USER context 跑 (登录 user 的 token), 有完整 env + profile
+- CreateProcess 直接调 `cmd.exe /c "<bat path>"` (无 MSI 中间层), argv 解析正常
+- HKCU 写正常工作 (user 写自己的 hive)
+- powershell.exe 跑在 user interactive session, profile load 正常
+- Windows 自己负责 fire + cleanup (首次 logon 后自动删 entry)
+
+**Cost:** user fresh 装后需 **logoff/logon 一次**让 config 生效。这跟 Defender exclusion requests 一个量级,可接受。
+
+**Master orchestrator** `installer/common/install-configure-all.bat`:
+- ASCII-only (中文 Windows GBK codepage 下 UTF-8 多字节 char 拆词破坏 .bat, 详见下面的 design 决策)
+- 调 2 个 .ps1 (install-configure-env.ps1, install-configure-vscode.ps1)
+- **不**调 install-vsix.bat (`.vsix` + Code Runner auto-install): `code --install-extension` 在 RunOnce context 经常 crash / hang (exit 255), 且 fresh user VSCode 还没开过 → `code` CLI shim 没注册 PATH。回归:user 手动跑 2 行 `code --install-extension ...`, 在 changelog-v1.5.0.md v1.5.7-rc1 节 + Welcome dialog 提示
+
+**关键 design 决策:**
+- **ASCII-only .bat**: `install-configure-all.bat` + `install-vsix.bat` 全 ASCII。cmd.exe 在中文 Windows 用 GBK codepage, UTF-8 多字节字符 (GitHub 默认 commit) 被 mis-decode 拆词。实测 em dash `—` (UTF-8 E2 80 94) 拆成 `figure-all.bat` / `eferred` / `staller` / `m` 碎片当成命令 → install 大量 garbled 错误
+- **HKLM 不是 HKCU RunOnce**: per-machine MSI install, HKCU 只对安装时 user 有用 → 用 HKLM 让所有 user logon 时都 fire 一次
+- **MSYS2_PATH_TYPE 用 HKCU env var (不是 system)**: 这是 user-level preference, 不需要 admin, MSI 写 HKCU via `[!UserEnvVar]` standard MSI 机制
+
+**验证 (按 `feedback_fix_evaluation_rule` 5/5):**
+1. ✅ MSI build OK, install exit 0, 无 1721 / 1925 / 1603
+2. ✅ HKLM RunOnce entry 注册成功 (PowerShell `Get-ItemProperty HKLM:\...\RunOnce` 看到)
+3. ✅ orchestrator 手动 run 模拟 RunOnce fire → exit 0, MSYS2_PATH_TYPE + VSCode defaultProfile 都设上
+4. ✅ uninstall `<RemoveRegistryValue>` 自动清理 RunOnce entry (MSI 标配)
+5. ✅ 已有 Code Runner + settings.json 的 user 不受影响 (回归 = 0), fresh user 装后手动跑 2 行 code install-extension (changelog 文档化)
+
+**未尝试的方案 (记录以备未来参考):**
+- **WixUtilExtension `WixQuietExec`**: 也是 deferred CA, 可能同样 hit 1721 (未实测, 因为 rev 1/2 已确认 1721 跟 cmd /c 没关系)
+- **WixUtilExtension `WixSilentExec`**: 同上, 未实测
+- **`<CustomAction Type="65">` (immediate, in-script)**: 在 CostFinalize 后立即跑, 仍可能 hit 同样 CreateProcess 问题
+- **MSI embedded `Burn` BA 函数**: Burn BA 也是 deferred-style, 可能同样 hit; 且复杂得多 (要写 C# custom BA)
+
+**未来 re-attempt 条件:** 若未来 MSI engine / WiX 版本升级让 deferred CA 1721 消失, 可 revert RunOnce → CustomAction (UX 更即时, 无需 logoff/logon)。当前 1.04MB MSI 复杂度可控, 不强求 re-attempt。
+
+**lesson:**
+**MSI CustomAction (尤其 type 34 ExeCommand) 在 SYSTEM context 下不靠谱**。能避免就避免。HKLM RunOnce + master .bat + 多个 .ps1 是 Win32 自带的、文档化的、跨 Windows 版本稳定 的 post-install 配置机制 — 比 WiX / MSI CustomAction 简单得多。
+
+**引用:**
+- v1.5.7-rc1 changelog (`docs/logs/v1/changelog-v1.5.0.md` § v1.5.7-rc1)
+- W-038 / W-039 / W-040 (path quoting 在 jhyy-side 修了, 但跟 W-051 不同层, W-051 是 installer-side 的)
+- W-045 (jh_run pipe-capture stderr — diagnostic 类比: W-051 的 1721 是 CreateProcess 一句话 fail, 跟 W-045 的 captured=0 字节 silent fail 类似, 都得靠绕路)
+
+

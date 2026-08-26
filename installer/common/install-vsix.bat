@@ -1,26 +1,31 @@
 @echo off
 rem installer/common/install-vsix.bat : JHYY post-install VSCode wiring
 rem
-rem Sprint v1.5.4: 由 MSI CustomAction 调用, deferred (after InstallFiles).
-rem 检测 `code` (VSCode CLI) 在 PATH, 装了 → `code --install-extension` 装 .vsix.
-rem 没装 → silent skip (返回 0, 不阻塞 MSI).
+rem Sprint v1.5.4: invoked by MSI CustomAction (later via RunOnce orchestrator).
+rem Detects `code` (VSCode CLI) in PATH, runs `code --install-extension` for
+rem the .vsix. If VSCode not installed -> silent skip (returns 0, no abort).
 rem
 rem Sprint v1.5.6-patch2 (Code Runner integration):
 rem   1. install jhyy-lang .vsix
 rem   2. install Code Runner extension (formulahendry.code-runner)
-rem   3. write code-runner.executorMap → jhyy run mapping to VSCode user
+rem   3. write code-runner.executorMap -> jhyy run mapping to VSCode user
 rem      settings.json via PowerShell script (configure-coderunner.ps1)
 rem
-rem Per-machine install: VSCode extension 装到所有用户. 需要 admin (HKLM scope).
+rem Per-machine install: VSCode extension installed to all users. Needs admin
+rem (HKLM scope) for `code --install-extension` to write system extensions dir.
 rem
-rem Args (passed via CustomActionData):
-rem   /VSIX:"<path-to-vsix>"     必需, jhyy-lang .vsix 路径
-rem   /CONFIGURE_PS1:"<path>"    必需, configure-coderunner.ps1 路径
-rem   /JHY_DIR:"<install-dir>"   必需, JHYY 安装目录 (写入 settings.json 注释用)
+rem Args (passed via RunOnce / CustomActionData):
+rem   /VSIX:"<path-to-vsix>"     required, jhyy-lang .vsix path
+rem   /CONFIGURE_PS1:"<path>"    required, configure-coderunner.ps1 path
+rem   /JHY_DIR:"<install-dir>"   required, JHYY install dir (for settings.json)
 rem
 rem Exit codes:
 rem   0  success / skip (VSCode not found / install failed gracefully)
 rem   1  hard error (only if arg missing)
+rem
+rem IMPORTANT: This file is ASCII-only. cmd.exe on Chinese Windows uses GBK
+rem codepage; non-ASCII chars in .bat content get parsed as multi-byte sequences
+rem and break command tokenization.
 
 setlocal EnableDelayedExpansion
 

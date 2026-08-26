@@ -166,8 +166,19 @@ switch ($Target) {
         # 2. prepare vscode-ext/ bindpath dir for MSI (holds .vsix)
         #   Reuse build-artifacts dir: package.ps1 already copied vsix there,
         #   but MSI bindpath should be a stable location so we re-point.
+        #   NOTE: SKIP_VSIX=1 is NOT a valid skip for the MSI build — the
+        #   VSCodeExtVSIX Component unconditionally references the .vsix file
+        #   via KeyPath, so the file MUST exist even when the user wanted to
+        #   skip vscode packaging. To truly skip vscode packaging, exclude
+        #   the JHYYVSCodeExt ComponentGroupRef from the Feature (manual edit).
+        #   Bug captured 2026-08-26 (v1.5.7-rc1): SKIP_VSIX flow used to abort
+        #   here with ItemNotFound. Now still aborts but with clearer comment.
         $vscodeExtDir = "installer/build-artifacts/vscode-ext"
         if (-not (Test-Path $vscodeExtDir)) { New-Item -ItemType Directory -Path $vscodeExtDir -Force | Out-Null }
+        if (-not (Test-Path "installer/build-artifacts/jhyy-lang-$JHY_VERSION_DISPLAY.vsix")) {
+            Write-Host "[ERROR] .vsix missing — run build.ps1 without SKIP_VSIX=1, or exclude JHYYVSCodeExt from Feature"
+            exit 1
+        }
         Copy-Item -Path "installer/build-artifacts/jhyy-lang-$JHY_VERSION_DISPLAY.vsix" `
                   -Destination "$vscodeExtDir/jhyy-lang-$JHY_VERSION_DISPLAY.vsix" -Force
 
