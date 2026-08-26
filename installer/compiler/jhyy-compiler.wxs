@@ -183,6 +183,7 @@
       <ComponentGroupRef Id="JHYYVSCodeExt" />
       <ComponentGroupRef Id="JHYYFileAssoc" />
       <ComponentRef Id="LicenseFile" />
+      <ComponentRef Id="JhyyIconFile" />
 
     </Feature>
 
@@ -192,7 +193,30 @@
 
     <WixVariable Id="WixUILicenseRtf" Value="!(bindpath.common)\license.rtf" />
 
-    <Icon Id="JHYYIcon" SourceFile="!(bindpath.bin)\jhyy.exe" />
+    <!--
+      v1.5.7-rc1 rev 2: JHYY brand UI assets (navy #1a1a2e + mint #00d4aa).
+      Replace default Windows disc icon + red banner with brand-consistent
+      visuals. Assets built by installer/build-jhyy-icons.ps1 from
+      vscode-ext/icon.svg (user-provided source — single source of truth).
+
+      - jhyy-icon.ico     : multi-size (16+32+48+64+128+256) ARPPRODUCTICON
+                            + Start Menu shortcut icon (via Shortcut.Icon)
+                            + .jhyy FileAssoc DefaultIcon
+      - jhyy-banner.bmp   : 493x58 MSI dialog top banner ("JHYY Compiler" mint
+                            title + navy bg + mint "J" logo)
+      - jhyy-welcome.bmp : 493x312 MSI welcome dialog content (title +
+                            description + components list)
+
+      File source uses !(bindpath.bin) for consistency with binDir bindpath.
+      Files are NOT shipped (no <File> Component refers to them) — they're
+      only read by WiX at build time for embedding in the MSI Binary table.
+      The .ico IS shipped separately via the JhyyIconFile Component below so
+      FileAssoc DefaultIcon can reference the installed file path.
+    -->
+    <WixVariable Id="WixUIBannerBmp"  Value="!(bindpath.bin)\jhyy-banner.bmp" />
+    <WixVariable Id="WixUIWelcomeBmp" Value="!(bindpath.bin)\jhyy-welcome.bmp" />
+
+    <Icon Id="JHYYIcon" SourceFile="!(bindpath.bin)\jhyy-icon.ico" />
     <Property Id="ARPPRODUCTICON" Value="JHYYIcon" />
     <Property Id="ARPHELPLINK" Value="https://github.com/JiHuiYiYou/JiHuiYiYou-compiler" />
 
@@ -381,6 +405,20 @@
       <Component Id="HelpersC" Bitness="always64" Guid="7C3D9E2A-4F1B-4A8E-9D6F-2B5E8C1A4F77">
         <File Id="HelpersCFile"
               Source="!(bindpath.bin)\jhyy_helpers.c"
+              KeyPath="yes"
+              Checksum="yes" />
+      </Component>
+
+      <!--
+        JhyyIconFile (v1.5.7-rc1 rev 2): ships jhyy-icon.ico to INSTALLDIR\bin\
+        so FileAssoc DefaultIcon can reference the installed .ico (Windows
+        shell displays .jhyy files with this icon in Explorer). Also serves as
+        a stable source for any future shortcut icon updates without re-bundling
+        jhyy.exe. Multi-size (16/32/48/64/128/256) ICO format, Vista+ compatible.
+      -->
+      <Component Id="JhyyIconFile" Bitness="always64" Guid="1C8B7A4D-3E2F-4B6D-9A5C-7E8F2D1B4A03">
+        <File Id="JhyyIconFileFile"
+              Source="!(bindpath.bin)\jhyy-icon.ico"
               KeyPath="yes"
               Checksum="yes" />
       </Component>
@@ -621,8 +659,15 @@
           <RegistryKey Id="HKCR_JhyyDefaultIcon"
                        Key="DefaultIcon"
                        ForceCreateOnInstall="yes">
+            <!--
+              v1.5.7-rc1 rev 2: use brand-consistent .ico file (navy+mint "J")
+              instead of jhyy.exe's default icon (generic blue document icon).
+              JhyyIconFile Component above ships jhyy-icon.ico to
+              [INSTALLDIR]bin\. Windows shell resolves .ico via the file path
+              (no index suffix needed for .ico format).
+            -->
             <RegistryValue Type="string"
-                           Value="[INSTALLDIR]bin\jhyy.exe,0" />
+                           Value="[INSTALLDIR]bin\jhyy-icon.ico" />
           </RegistryKey>
           <RegistryKey Id="HKCR_JhyyShell"
                        Key="shell"

@@ -144,6 +144,25 @@ switch ($Target) {
         Copy-Item -Path "compiler/runtime/runtime.h"    -Destination "$binDir/runtime.h"       -Force
         Copy-Item -Path "compiler/src0/jhyy_helpers.c" -Destination "$binDir/jhyy_helpers.c"  -Force
 
+        # 1c. v1.5.7-rc1 rev 2: JHYY brand UI assets (navy #1a1a2e + mint #00d4aa)
+        #   jhyy-icon.ico     - ARPPRODUCTICON + FileAssoc DefaultIcon (multi-size)
+        #   jhyy-banner.bmp   - WixUI_Minimal top banner (493x58)
+        #   jhyy-welcome.bmp  - WixUI_Minimal welcome dialog content (493x312)
+        #   Built by installer/build-jhyy-icons.ps1 from vscode-ext/icon.svg.
+        #   Files are read by WiX at build time only (embedded in MSI binary
+        #   table); no <File> references them, so they are NOT installed.
+        if (-not (Test-Path "installer/jhyy-icon.ico")) {
+            Write-Host "[build.ps1] regenerating installer UI assets from icon.svg..."
+            & powershell -NoProfile -ExecutionPolicy Bypass -File "installer/build-jhyy-icons.ps1"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[ERROR] UI asset generation failed (run installer/build-jhyy-icons.ps1 manually)"
+                exit 1
+            }
+        }
+        Copy-Item -Path "installer/jhyy-icon.ico"    -Destination "$binDir/jhyy-icon.ico"    -Force
+        Copy-Item -Path "installer/jhyy-banner.bmp"  -Destination "$binDir/jhyy-banner.bmp"  -Force
+        Copy-Item -Path "installer/jhyy-welcome.bmp" -Destination "$binDir/jhyy-welcome.bmp" -Force
+
         # 1b. v1.5.4: package VSCode extension (.vsix) for MSI payload
         #   Skippable via SKIP_VSIX=1 (e.g. for quick MSI rebuild without vsix)
         #   Pass JHY_VERSION_DISPLAY (with -rcN suffix) so vsix filename

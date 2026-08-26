@@ -12,6 +12,8 @@ Windows 引导式安装器 — 把 JHYY 编译器装到 `C:\Program Files\JHYY\`
 
 ✅ **v1.5.5 done** — GitHub Actions release workflow (`.github/workflows/release.yml`, tag `v*` + manual `workflow_dispatch`), 第三方 manifest reference (winget 3 文件 + scoop 1 文件, schema 校验通过, no actual publish), `installer/gen-sha256.ps1` 写 SHA256.txt, `installer/changelog-template.md` Release notes 模板。`tag v*` push → 自动 build + upload + Release; RC tag 自动 mark prerelease; workflow_dispatch dry-run 入口作为 escape hatch。
 
+✅ **v1.5.7-rc1 done** — JHYY brand UI assets (navy `#1a1a2e` + mint `#00d4aa`) generated from `vscode-ext/icon.svg` via `installer/build-jhyy-icons.ps1`: multi-size `.ico` (16+32+48+64+128+256) for ARPPRODUCTICON + Start Menu shortcut + .jhyy FileAssoc, `jhyy-banner.bmp` (493x58) for WixUI_Minimal top banner, `jhyy-welcome.bmp` (493x312) for welcome dialog content. JhyyIconFile Component ships .ico to INSTALLDIR\bin\. Replaces default Windows disc icon + red banner with brand-consistent visuals.
+
 **v1.5.5 scope (已完成)**:
 - `.github/workflows/release.yml` — GH Actions release workflow (14 steps: checkout + MSYS2 + WiX + make stage0 + make + regress + bundle + SHA256 verify + release notes + MSI validate + release create + dry-run summary)
 - `installer/gen-sha256.ps1` — SHA256.txt 生成 (sha256sum-compatible 格式, UTF-8 no BOM); `build.ps1 bundle` 自动调
@@ -75,6 +77,11 @@ installer/
 │   └── stub.msi          ← build 产物 (gitignored, build 后存在)
 ├── common/               ← 共享资源 (license + bitmap)
 │   └── license.rtf       ← 双语 license (中英)
+├── jhyy-icon-{16,32,48,64,128,256}.png  ← brand icon PNGs (v1.5.7-rc1)
+├── jhyy-icon.ico         ← multi-size .ico (ARPPRODUCTICON + FileAssoc + Start Menu)
+├── jhyy-banner.bmp       ← MSI dialog top banner (493x58, brand)
+├── jhyy-welcome.bmp      ← MSI welcome dialog content (493x312, brand)
+├── build-jhyy-icons.ps1  ← regenerates .ico + BMPs from vscode-ext/icon.svg
 ├── compiler/             ← v1.5.2 主 MSI (done)
 │   ├── jhyy-compiler.wxs ← Package / Feature / Component definitions
 │   └── Locale.zh-CN.wxl  ← 中文 UI string

@@ -1,7 +1,7 @@
 # JHYY Installer GUIDs (v1.5.0+)
 
 > **Generated**: 2026-08-15 (v1.5.5 hotfix, replace dev placeholder GUIDs)
-> **Last added**: 2026-08-26 (v1.5.7-rc1 rev 2 — InstallConfigureAllBat + JHYYRunOnceReg, replaces broken deferred CAs)
+> **Last added**: 2026-08-26 (v1.5.7-rc1 rev 2 — JhyyIconFile for brand UI)
 > **Generator**: Python `uuid.uuid4()` (RFC 4122 v4 random)
 > **Format**: UPPERCASE hex with dashes (Windows Installer canonical)
 
@@ -52,6 +52,7 @@ upgrades silently keep old version (silent corruption).
 | JhyyDocsShortcut | `32C375AD-328D-47CF-A422-8155A092CA04` |
 | JhyyQuickStartShortcut | `181ADF1A-21D7-40A0-BF9D-64695522D202` |
 | JHYYFileAssocReg | `C74ED968-E9D7-4061-AFC6-8FA37401F481` |
+| JhyyIconFile (v1.5.7-rc1 rev 2 — brand .ico in INSTALLDIR\bin\) | `1C8B7A4D-3E2F-4B6D-9A5C-7E8F2D1B4A03` |
 | JhyyDocsURL | `4065743A-3D07-48DE-A0E3-7FF8D5FEFA79` |
 | JhyyQuickStartURL | `98BA5444-5A01-4FD4-9995-623AC6869020` |
 

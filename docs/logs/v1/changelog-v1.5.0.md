@@ -21,6 +21,7 @@
 | **v1.5.6 W-043** | ✅ done | (this commit) | MSI ships `runtime.c` + `jhyy_helpers.c` → installer 位置能 compile (W-042 暴露的根因); 2 个新 MSI Component (`RuntimeC` `B4A71F8C-...` + `HelpersC` `7C3D9E2A-...`); regress 53/53 不动 |
 | **v1.5.6 W-044** | ✅ done | (this commit) | MSI ships `runtime.h` (429 B) alongside `runtime.c` (W-043 不完整: `runtime.c` line 1 `#include "runtime.h"`); 1 个新 MSI Component (`RuntimeH` `D5C2880A-...`); jhyy_helpers.c 0 个 local header dep 不动 |
 | **v1.5.7-rc1** | ✅ done (2026-08-26) | (this commit) | MSI 加 HKLM RunOnce post-install 修 v1.5.6 ship 后发现的 OOTB gap:(1) `MSYS2_PATH_TYPE=inherit` User env var (MSYS2 bash 默认 minimal mode 看不到 HKLM PATH);(2) VSCode `terminal.integrated.defaultProfile.windows = "bash (MSYS2)"` + profile entry。**改用 RunOnce 而非 deferred CustomAction**(CustomAction type 34 在本机 systematic 报 1721,CreateProcess argv parser 在 SYSTEM context 下 mis-tokenize cmd /c 链)。MSI `installer/build-artifacts/jhyy-compiler-1.5.7.msi` 已构建 + 测试 install 0 错 + RunOnce 注册成功 |
+| **v1.5.7-rc1 rev 2** | ✅ done (2026-08-26) | (this commit) | **Installer UI 改成 JHYY 品牌**(navy `#1a1a2e` + mint `#00d4aa` "J") 替换默认 Windows 红色+disc。生成 multi-size `.ico` (16+32+48+64+128+256) for ARPPRODUCTICON + Start Menu shortcut + `.jhyy` FileAssoc + 493x58 banner BMP + 493x312 welcome BMP via `installer/build-jhyy-icons.ps1` 从 `vscode-ext/icon.svg` 生成。新 MSI Component `JhyyIconFile` ships `.ico` 到 INSTALLDIR\bin\。`wix msi validate` 0 ICE errors;regress 53/53 PASS 不动;jhyy.exe SHA `c94f91722e084798...` 不变 |
 
 ---
 
@@ -963,3 +964,59 @@ code --install-extension formulahendry.code-runner
 - **决策 D6** (2026-08-26 rev):post-install 走 **HKLM RunOnce**(USER context, 下次 logon 自动跑 `install-configure-all.bat`),**不**走 MSI deferred CustomAction。MSI deferred CA (type 34, ExeCommand) 在本机 systematic 报 1721 — CreateProcess argv parser 在 SYSTEM token context 下 mis-tokenize cmd /c 链;直接 powershell.exe 也 fail (修 quote 也 fail)。代价:user fresh 装后需 logoff/logon 一次让 config 生效
 - **决策 D7** (2026-08-26):orchestrator `install-configure-all.bat` **不**调 install-vsix.bat。`code --install-extension` 在 RunOnce context 经常 crash / hang (exit 255),且 fresh user VSCode 没开过 → CLI shim 没注册 PATH。回归:user 首装后手动跑 2 行 `code --install-extension ...`(VSCode 已开的用户不受影响,因为 Code Runner + executorMap 之前 1.5.6-patch2 已配)
 - **决策 D8** (2026-08-26):`install-configure-all.bat` + `install-vsix.bat` 必须 **ASCII-only**。cmd.exe 在中文 Windows 用 GBK codepage, 任何 UTF-8 多字节字符(GitHub 默认 commit 字节)被 mis-decode 拆词, 例如 `install-configure-all.bat` 注释里的 em dash `—` (E2 80 94) 被拆成 `figure-all.bat` / `eferred` 等碎片当成命令执行 → install 大量 garbled 错误
+
+---
+
+## v1.5.7-rc1 rev 2 — Installer UI brand identity (navy + mint) (本 commit)
+
+### 触发
+
+用户反馈 (2026-08-26):"鹅鹅鹅, 这个 installer 的 ui 好像变了, 我觉得可以改成我 JHYY 风格的, 加上那个 icon"。当前 MSI dialog 用 WiX UI 默认(红色 banner + disc 图标),跟 JHYY 品牌(深蓝 `#1a1a2e` 背景 + mint `#00d4aa` "J" 字母)完全不搭。
+
+### 设计
+
+**颜色 tokens**:
+- navy  `#1a1a2e` (背景)
+- mint  `#00d4aa` (强调 / logo)
+
+**Asset pipeline**: 单源 = `vscode-ext/icon.svg` (用户提供的 SVG, 5 行: navy bg + mint "J" + mint underline),用 `rsvg-convert` (MSYS2 librsvg) 渲染多尺寸 PNG → 合成 multi-size `.ico` + 2 个 BMP via PowerShell + `System.Drawing`。
+
+```
+vscode-ext/icon.svg  (single source of truth, 5 行 SVG)
+   ↓ rsvg-convert -w N -h N
+installer/jhyy-icon-{16,32,48,64,128,256}.png   ← 中间产物
+   ↓ PowerShell build-jhyy-icons.ps1
+installer/jhyy-icon.ico       (multi-size .ico, 7491 bytes)
+installer/jhyy-banner.bmp     (493x58 MSI dialog top, brand colors)
+installer/jhyy-welcome.bmp    (493x312 MSI welcome dialog content)
+```
+
+**为什么 PowerShell 不直接 PIL/Pillow**: MSYS2 没装 Pillow (per `feedback_msys2_minimal_path` minimal PATH mode), `System.Drawing` 是 PowerShell builtin 不需额外 install。
+
+### 实现
+
+**WiX 改动** (`installer/compiler/jhyy-compiler.wxs`):
+- `<WixVariable Id="WixUIBannerBmp" Value="!(bindpath.bin)\jhyy-banner.bmp" />`
+- `<WixVariable Id="WixUIWelcomeBmp" Value="!(bindpath.bin)\jhyy-welcome.bmp" />`
+- `<Icon Id="JHYYIcon" SourceFile="!(bindpath.bin)\jhyy-icon.ico" />` (替换 `jhyy.exe` icon reference)
+- 新 `ComponentGroupRef JhyyIconFile` (`1C8B7A4D-...`) ships `.ico` 到 INSTALLDIR\bin\ for FileAssoc DefaultIcon 引用
+- FileAssoc DefaultIcon value: `[INSTALLDIR]bin\jhyy.exe,0` → `[INSTALLDIR]bin\jhyy-icon.ico` (无 index 后缀,.ico 是 single-file 格式)
+- `JhyyExeShortcut Icon="JHYYIcon"` 自动用新 .ico (Short icon / Start Menu JHYY Compiler shortcut 跟 ARPPRODUCTICON 共用 same Icon reference)
+
+**build.ps1 改动**: 新增 1c 段,build 前 check `installer/jhyy-icon.ico` 存不存在,缺就自动跑 `build-jhyy-icons.ps1` 生成;然后 Copy-Item 3 个 asset 到 `$binDir` 作为 bindpath.bin payload。
+
+### 验证
+
+| 验证项 | 结果 |
+|--------|------|
+| `installer/build-jhyy-icons.ps1` 跑通 | ✅ 生成 6 sizes + 2 BMP + 1 ICO |
+| MSI build | ✅ `jhyy-compiler-1.5.7.msi` 663KB, 1 warning (WIX5436 DirectoryRef pre-existing, not new) |
+| `wix msi validate` | ✅ exit 0, 0 ICE errors |
+| `wix msi` Binary table dump | ✅ 6 Binary entries (WixUI_Bmp_Banner / WixUI_Bmp_Dialog / 等),brand BMP 替换 default |
+| MSI admin install /a + extract | ✅ `PFiles64\JHYY\bin\jhyy-icon.ico` SHA = source SHA (`4d9510c7b657812af13152e05131045bcf47c51c5608c8e019d9bf10a13dd75c`) |
+| regress baseline | ✅ 53/53 PASS 不动, jhyy.exe SHA `c94f91722e084798...` (installer change 不影响 compiler binary) |
+| 用户视觉验证 | (deferred to interactive install session, user 双击 MSI 看 banner / welcome 即可) |
+
+### 关联决策
+
+- **决策 D9** (2026-08-26):Installer UI 走 JHYY 品牌(自报 navy `#1a1a2e` + mint `#00d4aa`),替换默认 Windows red+disc。Single source of truth = `vscode-ext/icon.svg` (用户 provided SVG)。Asset pipeline: `rsvg-convert` (PNG) + PowerShell `System.Drawing` (BMP,ICO)。3 个 asset 进 WiX build(jhyy-icon.ico + 2 BMP),jhyy-icon.ico 也 install 到 INSTALLDIR\bin\ 作 FileAssoc 引用
