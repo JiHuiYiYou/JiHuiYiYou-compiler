@@ -1,0 +1,47 @@
+// EXPECT: 0
+// v1.6.x: literal range pattern in match arm (parity src + src0)
+// Mirrors README "A tour of the syntax" `classify()` example shape; covers:
+//   - INT..INT range (boundary lo/hi inclusivity, in-range, above, below)
+//   - negative literal range (-3..-1)
+//   - OR pattern combined with literal pattern (`10 | 20`)
+//   - wildcard fallthrough
+//
+// Exit code is the count of failed asserts.
+
+fn bucket_pos(n: i32) -> i32 {
+    match n {
+        0        => 0,
+        1..10    => 1,
+        10 | 20  => 2,
+        _        => -1,
+    }
+}
+
+fn bucket_neg(n: i32) -> i32 {
+    match n {
+        -3..-1   => 5,
+        _        => -1,
+    }
+}
+
+fn main_jhyy() -> i32 {
+    let mut err: i32 = 0;
+
+    // positive range (README example shape)
+    if bucket_pos(0)  != 0  { err = err + 1; }
+    if bucket_pos(5)  != 1  { err = err + 1; }
+    if bucket_pos(1)  != 1  { err = err + 1; }
+    if bucket_pos(9)  != 1  { err = err + 1; }
+    if bucket_pos(10) != 1  { err = err + 1; }
+    if bucket_pos(11) != -1 { err = err + 1; }
+    if bucket_pos(20) != 2  { err = err + 1; }
+    if bucket_pos(-1) != -1 { err = err + 1; }
+
+    // negative literal range -3..-1
+    if bucket_neg(-3) != 5  { err = err + 1; }
+    if bucket_neg(-1) != 5  { err = err + 1; }
+    if bucket_neg(-2) != 5  { err = err + 1; }
+    if bucket_neg(0)  != -1 { err = err + 1; }
+
+    err
+}

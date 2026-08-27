@@ -306,12 +306,24 @@ static IRVal cg_match_pattern(CGContext *cg, IRVal matched, Node *pattern, Type 
     }
     case NODE_PATTERN_RANGE: {
         NodePatternRange *pr = node_pattern_range_data(pattern);
-        /* lo <= matched */
+        char qt = matched.qbe_type ? matched.qbe_type : 'w';
+        /* v1.6.x: lo as NODE_PATTERN_LIT (literal range `1..10`) — manual emit.
+           Pre-existing cg_expr call worked for hi=NODE_INT/BOOL/CHAR/IDENT but
+           broke for lo=NODE_PATTERN_LIT (cg_expr has no NODE_PATTERN_LIT case →
+           falls to default zero IRVal sentinel → QBE reject). */
         IRVal lo_val = {0};
-        cg_expr(cg, pr->lo, &lo_val);
+        if (pr->lo->kind == NODE_PATTERN_LIT) {
+            NodePatternLit *pl = node_pattern_lit_data(pr->lo);
+            lo_val = ir_new_tmp(cg->ir, qt);
+            ir_emit_copy(cg->ir, lo_val, pl->value);
+        } else {
+            cg_expr(cg, pr->lo, &lo_val);
+        }
+        /* lo <= matched */
         IRVal cmp_lo = ir_new_tmp(cg->ir, 'w');
         ir_emit_binary(cg->ir, cmp_lo, "cslew", lo_val, matched);
-        /* matched <= hi */
+        /* matched <= hi — hi parsed via parse_expr(PREC_PRIMARY) on IDENT branch
+           so it's always an expression node cg_expr handles (INT/BOOL/CHAR/IDENT). */
         IRVal hi_val = {0};
         cg_expr(cg, pr->hi, &hi_val);
         IRVal cmp_hi = ir_new_tmp(cg->ir, 'w');

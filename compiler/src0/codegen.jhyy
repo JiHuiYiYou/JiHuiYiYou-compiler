@@ -1113,6 +1113,65 @@ fn cg_match_pattern(cg_raw: *u8, matched: IRVal, pattern: *Node, match_type: *u8
         ir_emit_copy(ir, cmp, 1);
         return cmp;
     }
+    // v1.6.x: NODE_PATTERN_RANGE — emit lo/hi manually (no cg_expr forward-call,
+    // jhyy 无 forward decl). Covers literal range `1..10` after parse_pattern +
+    // parse_pattern_primary extension (W-NNN follow-up):
+    //   - lo = NODE_PATTERN_LIT (parse_pattern TOKEN_INT/BOOL/CHAR/MINUS arm)
+    //   - hi = NODE_INT         (parse_pattern_primary extension)
+    // Both emitted as `copy N` with matched.qbe_type. IDENT range (`x..y`) goes
+    // lo=NODE_PATTERN_IDENT which has no value resolution path — fall through
+    // to cmp=1 accept-all (preexisting behavior, no test exercises it).
+    if pk == NODE_PATTERN_RANGE() {
+        let pr = node_pattern_range_data(pattern) as *NodePatternRange;
+        let mut qt: i32 = matched.qbe_type;
+        if qt == (0 as i32) { qt = QBE_W(); }
+
+        let zero = IRVal { kind: IRVAL_INT(), id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+        let mut lo_val: IRVal = zero;
+        let mut hi_val: IRVal = zero;
+        let mut unsupported: i32 = 0 as i32;
+
+        // emit lo: NODE_PATTERN_LIT only (literal range)
+        let lo_raw = (*pr).lo;
+        let lo_node = lo_raw as *Node;
+        if (*lo_node).kind == NODE_PATTERN_LIT() {
+            let pl = node_pattern_lit_data(lo_node);
+            let tmp = *ir_new_tmp(ir, qt);
+            ir_emit_copy(ir, tmp, (*pl).value);
+            lo_val = tmp;
+        } else {
+            // NODE_PATTERN_IDENT (IDENT range lo) + other → fall through to cmp=1
+            unsupported = 1 as i32;
+        }
+
+        // emit hi: NODE_INT only (parse_pattern_primary returns ast_new_int)
+        let hi_raw = (*pr).hi;
+        let hi_node = hi_raw as *Node;
+        if (*hi_node).kind == NODE_INT() {
+            let li = node_int_data(hi_node);
+            let tmp = *ir_new_tmp(ir, qt);
+            ir_emit_copy(ir, tmp, (*li).value);
+            hi_val = tmp;
+        } else {
+            unsupported = 1 as i32;
+        }
+
+        if unsupported != (0 as i32) {
+            // Ident range (x..y) or other unsupported lo/hi kind → cmp=1 accept-all
+            let cmp = *ir_new_tmp(ir, QBE_W());
+            ir_emit_copy(ir, cmp, 1);
+            return cmp;
+        }
+
+        // lo <= matched && matched <= hi
+        let cmp_lo = *ir_new_tmp(ir, QBE_W());
+        ir_emit_binary(ir, cmp_lo, "cslew" as *u8, lo_val, matched);
+        let cmp_hi = *ir_new_tmp(ir, QBE_W());
+        ir_emit_binary(ir, cmp_hi, "cslew" as *u8, matched, hi_val);
+        let result = *ir_new_tmp(ir, QBE_W());
+        ir_emit_binary(ir, result, "and" as *u8, cmp_lo, cmp_hi);
+        return result;
+    }
     // default: 其他 → cmp = 1 (accept-all, 跟 v0 codegen.c:191-195 对齐)
     let cmp = *ir_new_tmp(ir, QBE_W());
     ir_emit_copy(ir, cmp, 1);

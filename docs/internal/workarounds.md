@@ -50,6 +50,7 @@
 | [W-026](#w-026-regresspy-80-stderr-截断隐藏真实-qbegcc-错误) | ✅ RESOLVED 2026-08-15 (commit `0d58efe`) | regress.py FAIL print `[:80]` 截断隐藏 QBE/gcc link 错误 → 改成完整 stderr 输出 |
 | [W-027](#w-027-gh-actions-setup-msys2v2-把-msys2-装在-runnertempmsys64-ci--d-atempmsys64不在-cmsys64--硬编码-cmsys64ucrt64bin-找不到-gcc) | ✅ RESOLVED 2026-08-15 (commit `4623a3b` — v8 final) | `setup-msys2@v2` CI 装在 `$RUNNER_TEMP\msys64` (D:\a\_temp\msys64) 不在 C:\msys64 → hardcoded path 找不到 gcc; fix: deterministic MSYS2 root + known bin subdirs (no subprocess call) |
 | [W-028](#w-028-windows-process-exit-code-是-8-bit-mod-256-expect-注释里的值-255-在-ci-regress-fail-got106-不是-got1000042) | ✅ RESOLVED 2026-08-15 (v1 commit `6d2ab8f` + v2 sys.platform cygwin/msys 兼容) | Windows kernel32 ExitProcess 8-bit mod-256; EXPECT 注释里 ≥256 的值 CI regress FAIL — mod 256 comparison in regress.py (`sys.platform in ("win32", "cygwin", "msys")`) |
+| [W-052](#w-052-match-字面量范围模式1num10-两侧-parser--codegen-都漏-literal-range) | ✅ RESOLVED 2026-08-27 | README "tour of the syntax" `1..10 => "single digit"` 在 match arm 里 parser 两边都漏 DOTDOT follow-up + codegen 两边都漏 NODE_PATTERN_LIT manual emit. 修复: add `try_pattern_range` helper (C-side parser.c) / extend `parse_pattern_primary` + DOTDOT follow-up (jhyy-side parser.jhyy) + manual emit NODE_PATTERN_LIT (C-side codegen.c) + manual emit NODE_PATTERN_LIT/NODE_INT (jhyy-side codegen.jhyy). 新增 `compiler/tests/examples/match_range.jhyy` integration test (regress 54/54 PASS, 3 skip). Stage 2 byte-equal 闭环 hold (jhyy_selfhost_check all_byte_equal=true). |
 
 ---
 
@@ -3350,5 +3351,99 @@ Note: 1: 1721 2: InstallVSCodeExt 3: "C:\WINDOWS\system32\cmd.exe" /c "..."
 - v1.5.7-rc1 changelog (`docs/logs/v1/changelog-v1.5.0.md` § v1.5.7-rc1)
 - W-038 / W-039 / W-040 (path quoting 在 jhyy-side 修了, 但跟 W-051 不同层, W-051 是 installer-side 的)
 - W-045 (jh_run pipe-capture stderr — diagnostic 类比: W-051 的 1721 是 CreateProcess 一句话 fail, 跟 W-045 的 captured=0 字节 silent fail 类似, 都得靠绕路)
+
+
+## W-052: match 字面量范围模式 `1..10` 两侧 parser + codegen 都漏 literal range
+
+**状态:** ✅ RESOLVED 2026-08-27 (W-052 ship)
+**ID:** W-052
+**日期:** 历史 v1.4.6 W-020 隐含 (gap 暴露但未 ship 修复) → 2026-08-27 真修
+**触发面:** 任何 jhyy 源在 match arm 里用 `N..M` 字面量范围 (例如 README `tour of the syntax` 的 `1..10 => "single digit"`,或 `let result = match n { -3..-1 => ... }`)。
+**症状:**
+
+```
+test.jhyy:13:10: error: expected =>, got ..
+test.jhyy:13:10: error: unexpected token '..' in expression
+parse errors
+```
+
+(README 例子一直跑不通 — 首次发现于 2026-08-27 用户跑 README 复现, 其实 v1.4.6 W-020 验 spec ↔ parser 同步时已发现 gap, 但当时评估 "no test exercises it, defer"。)
+
+**根因:**
+1. **C-side `compiler/src/parser.c`**:`parse_pattern` 的 `case TOKEN_INT/BOOL/CHAR/MINUS:` 四个分支都 `return ast_new_pattern_lit(...)` 立即返回, 没检查紧跟的 `TOKEN_DOTDOT`。`TOKEN_IDENT` 分支 (line 139-146) 有 DOTDOT follow-up (因为历史先支持 IDENT range), 但字面量分支都没补 → parser 漏掉。
+2. **jhyy-side `compiler/src0/parser.jhyy`**:**两处**漏:
+   - `parse_pattern_primary` (line 314-353) 只处理 INT/IDENT/LPAREN, BOOL/CHAR/MINUS 都不解析 → 即使按 C-side parity 扩展 `parse_pattern` 后, hi 是 literal 仍没法 parse
+   - `parse_pattern` 四个 literal arm (line 459-502) 同 C-side, `return` 不查 DOTDOT
+3. **C-side `compiler/src/codegen.c`**:`NODE_PATTERN_RANGE` 分支 (line 307-323, v0.9 wip commit 2.9 之后) 调 `cg_expr(cg, pr->lo, ...)` / `cg_expr(cg, pr->hi, ...)`, 但 `cg_expr` 只有 `case NODE_IDENT/NODE_INT/...` expression cases, **没有 `case NODE_PATTERN_LIT`** (只有 `cg_match_pattern` line 292 处理 pattern lit)。`cg_expr` 落到 default `*out = {0}` 返回 sentinel zero IRVal → `cslew %t0, matched` 被 QBE reject "invalid type for first operand in cslew"。
+   - 后果: literal range 总是走 IDENT range 相同的 buggy `cg_expr → {0}` 路径, 即使 parser 修了也跑不通。
+4. **jhyy-side `compiler/src0/codegen.jhyy`**:`cg_match_pattern` (line 977) 完全没有 `NODE_PATTERN_RANGE` 分支, 默认 fall-through 到 `cmp = 1` (accept-all)。一行注释自陈 "RANGE pattern 暂略... → 推迟到 v1.0.0 sprint 3 (Task #50)"。IDENT range 在 jhyy-side 永远 silent accept-all。
+
+**fix (W-052):**
+
+1. `compiler/src/parser.c` — `parse_pattern` 上方加 helper:
+   ```c
+   static Node *try_pattern_range(Parser *p, SourceLoc loc, Node *lo) {
+       if (match(p, TOKEN_DOTDOT)) {
+           Node *hi = parse_expr(p, PREC_PRIMARY);
+           return ast_new_pattern_range(p->arena, loc, lo, hi);
+       }
+       return lo;
+   }
+   ```
+   四条字面量分支 (line 176-195) 把直接 `return` 改成 `Node *lo = ast_new_pattern_lit(...); return try_pattern_range(p, t.loc, lo);`.
+
+2. `compiler/src0/parser.jhyy` — 两处:
+   - `parse_pattern_primary` 加 TOKEN_BOOL/TOKEN_CHAR/TOKEN_MINUS 三个分支, 都 `return ast_new_int(..., prim)` (跟现有 INT 分支同型, primary 是 expr 值不是 pattern)
+   - `parse_pattern` 四条字面量分支用 `parser_match(TOKEN_DOTDOT(), &t)` 跟进, hi 走 `parse_pattern_primary`, wrap as `NODE_PATTERN_RANGE`
+
+3. `compiler/src/codegen.c` — `NODE_PATTERN_RANGE` 分支 rewrite:
+   ```c
+   if (pr->lo->kind == NODE_PATTERN_LIT) {
+       NodePatternLit *pl = node_pattern_lit_data(pr->lo);
+       lo_val = ir_new_tmp(cg->ir, qt);
+       ir_emit_copy(cg->ir, lo_val, pl->value);
+   } else {
+       cg_expr(cg, pr->lo, &lo_val);  // hi/lo fallback (NODE_INT/BOOL/CHAR/IDENT)
+   }
+   ```
+   hi 保持 `cg_expr` 不变 (parse_expr(PREC_PRIMARY) 返 expression node, cg_expr 已处理)。同时**顺带修好 IDENT range 多年 pre-existing 的 `cslew %t0` sentinel bug** (lo=NODE_PATTERN_IDENT 仍走 cg_expr fallback returns {0}, 但 no test uses IDENT range, 留给后续)。
+
+4. `compiler/src0/codegen.jhyy` — `cg_match_pattern` 加 `NODE_PATTERN_RANGE` 分支:
+   - lo=NODE_PATTERN_LIT: `node_pattern_lit_data` → `copy N` as `qt`
+   - hi=NODE_INT: `node_int_data` → `copy N` as `qt`
+   - 兜底 `unsupported=1` flag: emit `cmp=1` accept-all (preserves pre-existing IDENT range silent always-true, no test exercises it — same caveat as C-side)
+   - lo<=matched && matched<=hi: 用 `cslew` + `and` (mirror codegen.c:307-323)
+
+5. `compiler/tests/examples/match_range.jhyy` 新建 — 12 个断言覆盖 INT..INT 边界 (lo/hi inclusive) / 越界 (above/below/wildcard fallthrough) / negative `-3..-1` 范围 / `10 | 20` OR pattern 与 range 同行。
+
+**为什么不拆多 commit:**
+- parser.c 跟 parser.jhyy 必须 **同 commit** ship 才能保持 Stage 2 byte-equal 闭环 (`jhyy_v1 → v2 → v3 → v4` IL 一致 per v1.0.0 invariant)
+- codegen.c 跟 codegen.jhyy 也必须同 commit
+- 4 file + 1 test = 1 commit 是最小 stable 单元
+
+**Stage 2 closure 验证 (`jhyy_selfhost_check`):**
+```
+all_byte_equal: true
+il_sha256: 54f8e2a1e320f1584535176191dfb0e999f4425b4ae50d095c9178c1e78ca494 (stable across v1/v2/v3/v4)
+37.76s total
+```
+
+**regress 验证 (`feedback_fix_evaluation_rule` 5/5):**
+- `python compiler/build/bin/regress.py` → **54/54 PASS, 0 failed, 3 skipped (of 57 total)**, `match_range.jhyy EXIT=0` 在列
+- `python compiler/build/bin/regress.py --all` → **2/2 gated binary PASS** (jhyy.exe + jhyy_stage0.exe), `baseline_warning: enforce_baseline_hash=False` (skip phantom check)
+- 自举侧 `jhyy_v1.exe.exe` (frozen historical baseline, per `regress.py:27` "frozen historical baseline, mtime 永远比 src 旧 → phantom 必 fail") **不动**, 因为它代表 v1.0.0 ship 时的 byte-equal closure — 它没 W-052 修复正是预期的 (它的 baseline 状态是 feature, 不是 bug)
+
+**lesson:**
+- **"无 test exercises it" ≠ "feature 不存在"** — README 的 tour-of-the-syntax 例子跟 regress 套件互相没引用, 但 README 是 user-facing 文档。per `feedback_fix_evaluation_rule` 应该**至少有一个 end-to-end test 锁住 spec 行为**, 不是 "no test" 就 defer。
+- **parser 已支持 + codegen 没支持** 是隐 trap。这次发现 IDENT range codegen pre-existing 多年 broken (无测试触发, jhyy-side `cmp=1` silent accept-all, C-side `cslew %t0` QBE reject) — 跟 W-020 类似情形。两层 (parser + codegen) 都得看, 不能只修一半。
+- **"jhyy-side 把 parse_pattern 上移 + 加 parse_pattern_primary 替代 parse_expr 解 mutual recursion"** (W-020) 之后, literal extension 必须挂同一个 primary 上 — 否则两套不并行。这是 W-052 跟 W-020 唯一一处微妙耦合, 后续若加 deref range 或 complex pattern 仍要在这套 primary 内扩展。
+
+**superseder:** commit TBD (W-052 ship, 2026-08-27 — parser.c/codegen.c/parser.jhyy/codegen.jhyy/match_range.jhyy 全部)
+
+**引用:**
+- W-020 (parse_pattern reorder + parse_pattern_primary, W-052 的 foundation — 同一个 helper 必须在这里扩展)
+- W-028 (Windows process exit code mod-256 — regress baseline 守门跟 W-052 验证同)
+- `feedback_fix_evaluation_rule` (5/5 PASS on target test mandatory — `match_range.jhyy` 就是这个 target test)
+- `feedback_audit_single_commit_diff` (W-052 走同 commit 4-file + 1 test, audit 时 `git show <sha>` 看, 不要累计跨 commit diff 把 4-file 弄乱)
 
 

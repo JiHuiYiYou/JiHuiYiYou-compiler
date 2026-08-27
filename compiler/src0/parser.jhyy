@@ -345,6 +345,43 @@ fn parse_pattern_primary(p: *Parser) -> *Node {
         return inner;
     }
 
+    // ── TOKEN_BOOL 分支（v1.6.x: literal range hi support — `true..false` 解析）──
+    if t.kind == TOKEN_BOOL() {
+        parser_advance(p, &t);
+        let mut val = 0 as i64;
+        if t.length == (4 as i64) {
+            let r = strncmp(t.start, "true" as *u8, 4 as i64);
+            if r == (0 as i32) {
+                val = 1 as i64;
+            }
+        }
+        return ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_BOOL());
+    }
+
+    // ── TOKEN_CHAR 分支（v1.6.x: literal range hi support — `'a'..'z'` 解析）──
+    if t.kind == TOKEN_CHAR() {
+        parser_advance(p, &t);
+        // t.start[0] = '\'', t.start[1] = char, t.start[2] = '\''
+        // qbe_type_of(*u8) 默认 'b' bug（plan § 0 #6），绕开：4-byte aligned read + mask
+        // 对齐 lexer.jhyy::lex_peek_char 的写法
+        let p_addr = t.start as i64;
+        let aligned = p_addr & (~(3 as i64));
+        let rem = (p_addr - aligned) as i32;
+        let w = *((aligned) as *i32);
+        let shift = rem * (8 as i32);
+        let masked = (w >> shift) & (255 as i32);
+        let ch = masked & (255 as i32);
+        return ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, ch as i64, PRIM_U8());
+    }
+
+    // ── TOKEN_MINUS 分支（v1.6.x: literal range hi support — `-3..-1` 解析）──
+    if t.kind == TOKEN_MINUS() {
+        parser_advance(p, &t);  // consume '-'
+        parser_expect(p, TOKEN_INT(), "integer after - in pattern" as *u8, &t);
+        let val = strtoll(t.start, 0 as *u8, 0 as i32);
+        return ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, -val, PRIM_I32());
+    }
+
     // ── default: silent ──
     // 不输出 error string — 让上层 parse_pattern range 分支 / caller 报错。
     // 保持 Stage 1 byte-equal: C-side parse_expr(PREC_PRIMARY) 不输出额外 string,
@@ -460,7 +497,13 @@ fn parse_pattern(p: *Parser) -> *Node {
     if t.kind == TOKEN_INT() {
         parser_advance(p, &t);
         let val = strtoll(t.start, 0 as *u8, 0 as i32);
-        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_I32());
+        let lo = ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_I32());
+        // v1.6.x: literal range pattern `1..10` → wrap as NODE_PATTERN_RANGE
+        if parser_match(p, TOKEN_DOTDOT(), &t) != (0 as i32) {
+            let hi = parse_pattern_primary(p);
+            return ast_new_pattern_range((*p).arena, loc_lf, loc_ll, loc_lc, lo, hi);
+        }
+        return lo;
     }
 
     // ── TOKEN_BOOL 分支 ──
@@ -474,7 +517,13 @@ fn parse_pattern(p: *Parser) -> *Node {
                 val = 1 as i64;
             }
         }
-        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_BOOL());
+        let lo = ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_BOOL());
+        // v1.6.x: literal range pattern `true..true` → wrap as NODE_PATTERN_RANGE
+        if parser_match(p, TOKEN_DOTDOT(), &t) != (0 as i32) {
+            let hi = parse_pattern_primary(p);
+            return ast_new_pattern_range((*p).arena, loc_lf, loc_ll, loc_lc, lo, hi);
+        }
+        return lo;
     }
 
     // ── TOKEN_CHAR 分支 ──
@@ -490,7 +539,13 @@ fn parse_pattern(p: *Parser) -> *Node {
         let shift = rem * (8 as i32);
         let masked = (w >> shift) & (255 as i32);
         let ch = masked & (255 as i32);
-        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, ch as i64, PRIM_U8());
+        let lo = ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, ch as i64, PRIM_U8());
+        // v1.6.x: literal range pattern `'a'..'z'` → wrap as NODE_PATTERN_RANGE
+        if parser_match(p, TOKEN_DOTDOT(), &t) != (0 as i32) {
+            let hi = parse_pattern_primary(p);
+            return ast_new_pattern_range((*p).arena, loc_lf, loc_ll, loc_lc, lo, hi);
+        }
+        return lo;
     }
 
     // ── TOKEN_MINUS 分支 ──
@@ -498,7 +553,13 @@ fn parse_pattern(p: *Parser) -> *Node {
         parser_advance(p, &t);  // consume '-'
         parser_expect(p, TOKEN_INT(), "integer after - in pattern" as *u8, &t);
         let val = strtoll(t.start, 0 as *u8, 0 as i32);
-        return ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, -val, PRIM_I32());
+        let lo = ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, -val, PRIM_I32());
+        // v1.6.x: literal range pattern `-3..-1` → wrap as NODE_PATTERN_RANGE
+        if parser_match(p, TOKEN_DOTDOT(), &t) != (0 as i32) {
+            let hi = parse_pattern_primary(p);
+            return ast_new_pattern_range((*p).arena, loc_lf, loc_ll, loc_lc, lo, hi);
+        }
+        return lo;
     }
 
     // ── default: error ──

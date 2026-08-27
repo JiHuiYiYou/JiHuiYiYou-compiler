@@ -110,6 +110,20 @@ static Node *parse_type(Parser *p) {
    PATTERN PARSING
    ══════════════════════════════════════════════ */
 
+/* v1.6.x: helper — if next token is `..`, consume it + parse `hi`,
+   wrap `lo` as NODE_PATTERN_RANGE; else return `lo` unchanged. Used by the
+   four literal-pattern arms (INT / BOOL / CHAR / MINUS) to mirror the IDENT
+   branch's DOTDOT follow-up so that `1..10`, `true..true`, `'a'..'z'`,
+   `-3..-1` etc. all parse as NODE_PATTERN_RANGE. hi is any primary
+   expression (per the IDENT-range shape at line 140, parse_expr PREC_PRIMARY). */
+static Node *try_pattern_range(Parser *p, SourceLoc loc, Node *lo) {
+    if (match(p, TOKEN_DOTDOT)) {
+        Node *hi = parse_expr(p, PREC_PRIMARY);
+        return ast_new_pattern_range(p->arena, loc, lo, hi);
+    }
+    return lo;
+}
+
 static Node *parse_pattern(Parser *p) {
     Token t = peek(p);
 
@@ -176,22 +190,26 @@ static Node *parse_pattern(Parser *p) {
     case TOKEN_INT: {
         advance(p);
         int64_t val = strtoll(t.start, NULL, 0);
-        return ast_new_pattern_lit(p->arena, t.loc, val, PRIM_I32);
+        Node *lo = ast_new_pattern_lit(p->arena, t.loc, val, PRIM_I32);
+        return try_pattern_range(p, t.loc, lo);
     }
     case TOKEN_BOOL: {
         advance(p);
         bool val = (t.length == 4 && strncmp(t.start, "true", 4) == 0);
-        return ast_new_pattern_lit(p->arena, t.loc, val ? 1 : 0, PRIM_BOOL);
+        Node *lo = ast_new_pattern_lit(p->arena, t.loc, val ? 1 : 0, PRIM_BOOL);
+        return try_pattern_range(p, t.loc, lo);
     }
     case TOKEN_CHAR: {
         advance(p);
-        return ast_new_pattern_lit(p->arena, t.loc, (unsigned char)t.start[1], PRIM_U8);
+        Node *lo = ast_new_pattern_lit(p->arena, t.loc, (unsigned char)t.start[1], PRIM_U8);
+        return try_pattern_range(p, t.loc, lo);
     }
     case TOKEN_MINUS: {
         advance(p);
         Token n = expect(p, TOKEN_INT, "integer after - in pattern");
         int64_t val = -strtoll(n.start, NULL, 0);
-        return ast_new_pattern_lit(p->arena, t.loc, val, PRIM_I32);
+        Node *lo = ast_new_pattern_lit(p->arena, t.loc, val, PRIM_I32);
+        return try_pattern_range(p, t.loc, lo);
     }
     default:
     default_case:
