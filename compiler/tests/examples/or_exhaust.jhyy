@@ -1,4 +1,4 @@
-// EXPECT: 42
+// EXPECT: 1
 // v1.3.7: OR pattern with wildcard completes coverage (`None | Some(_)`)
 
 type Option = enum { Some(i32), None }

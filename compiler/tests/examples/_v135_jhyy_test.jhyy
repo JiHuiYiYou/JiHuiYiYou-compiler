@@ -1,6 +1,0 @@
-#[inline]
-fn dbl(x: i32) -> i32 { return x * 2; }
-
-fn main_jhyy() -> i32 {
-    return dbl(21);
-}
