@@ -217,7 +217,7 @@ static Token scan_char(Lexer *l) {
         /* handle escape */
         char e = peek_char(l);
         switch (e) {
-        case 'n': case 't': case 'r': case '\\': case '\'': case '0':
+        case 'n': case 't': case 'r': case '\\': case '\'': case '"': case '0':
             next_char(l); break;
         case 'x':
             next_char(l);

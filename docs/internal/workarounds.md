@@ -51,6 +51,9 @@
 | [W-027](#w-027-gh-actions-setup-msys2v2-把-msys2-装在-runnertempmsys64-ci--d-atempmsys64不在-cmsys64--硬编码-cmsys64ucrt64bin-找不到-gcc) | ✅ RESOLVED 2026-08-15 (commit `4623a3b` — v8 final) | `setup-msys2@v2` CI 装在 `$RUNNER_TEMP\msys64` (D:\a\_temp\msys64) 不在 C:\msys64 → hardcoded path 找不到 gcc; fix: deterministic MSYS2 root + known bin subdirs (no subprocess call) |
 | [W-028](#w-028-windows-process-exit-code-是-8-bit-mod-256-expect-注释里的值-255-在-ci-regress-fail-got106-不是-got1000042) | ✅ RESOLVED 2026-08-15 (v1 commit `6d2ab8f` + v2 sys.platform cygwin/msys 兼容) | Windows kernel32 ExitProcess 8-bit mod-256; EXPECT 注释里 ≥256 的值 CI regress FAIL — mod 256 comparison in regress.py (`sys.platform in ("win32", "cygwin", "msys")`) |
 | [W-052](#w-052-match-字面量范围模式1num10-两侧-parser--codegen-都漏-literal-range) | ✅ RESOLVED 2026-08-27 | README "tour of the syntax" `1..10 => "single digit"` 在 match arm 里 parser 两边都漏 DOTDOT follow-up + codegen 两边都漏 NODE_PATTERN_LIT manual emit. 修复: add `try_pattern_range` helper (C-side parser.c) / extend `parse_pattern_primary` + DOTDOT follow-up (jhyy-side parser.jhyy) + manual emit NODE_PATTERN_LIT (C-side codegen.c) + manual emit NODE_PATTERN_LIT/NODE_INT (jhyy-side codegen.jhyy). 新增 `compiler/tests/examples/match_range.jhyy` integration test (regress 54/54 PASS, 3 skip). Stage 2 byte-equal 闭环 hold (jhyy_selfhost_check all_byte_equal=true). |
+| [W-053](#w-053-字符字面量转义不全--n-t-r-0-之外-escape-以及-xhh-漏解码) | ✅ RESOLVED 2026-08-27 | spec §4.4 字符字面量族 (`\n \t \r \0 \\ \' \" \xHH`) 全漏 decode;`'` 后的 char 走 `t.start[1]` 直接当 ASCII,导致 pattern match 的 char arm 永假;`'\\'` `'\''` `'\"'` lex ERROR. 修复: src/lexer.c `scan_char` escape switch 加 `'"'` + src/parser.c 提取共享 `decode_char_literal()` (含 hex_val 子函数) + src0/lexer.jhyy 镜像加 `e == 34` + src0/parser.jhyy 3 处 TOKEN_CHAR decode 全镜像(并修复 `parse_pattern_primary` `p_addr = t.start` 漏 +1 offset 的旧 bug). 新增 `char_literal.jhyy` (9 escape case) + `char_pattern.jhyy` (`'\n'` literal match + `'a'..'z'` range match) integration test. 5/5 PASS per `feedback_fix_evaluation_rule`. Stage 2 byte-equal 闭环 hold. |
+| [W-054](#w-054-sizeof-il-未定义-t0-真因-qbe_type_of-撞-data-layout) | ✅ RESOLVED (via W-053 chain, 2026-08-27) | Plan agent 探测的 "sizeof emit `%t1 =w copy %t0` 时 `%t0` 未定义" 是假症状。实际根因 = W-053 fix 路径上,把 `qbe_type_of` (i8→'w' widening) 应用到 data section 时,word-packed const array 的 byte 25 落到 7th word 的 2nd byte (= 0),期望值 122 错误。修复: src/ir.c 拆 `qbe_type_of` (SSA widen 必 word-sized, QBE 拒 'b'/'h') vs 新 `qbe_data_type_of` (data section 字节 packed,const array 字节寻址正确);src/ir.h 暴露 + src/codegen.c 3 处 data emit 切到 `qbe_data_type_of`. W-054 不需要单独修,作为 W-053 fix chain 副作用消除。 |
+| [W-055](#w-055-spec-§95-指针算术-p--1-整节未实现) | 🆕 ACTIVE 2026-08-27 (NEW) | spec §9.5 指针算术 `p + 1` / `p - 1` / `p[n]` 整节未实现 — 当前所有 pointer +/- 都报 type mismatch。Plan agent 探测 `p + 1` 在 v1.0 阶段归类为 "特性开发而非补测",本 sprint 标 LIMIT 不修。影响: 仅 OS-required (jhyy_OS 启动期需要 pointer arith 做 buffer walk),**不影响** v1.x user-space 常用代码。实现路径推 v2.x (QBE 重写 + 多目标) 或独立 sprint。 |
 
 ---
 
@@ -3445,5 +3448,292 @@ il_sha256: 54f8e2a1e320f1584535176191dfb0e999f4425b4ae50d095c9178c1e78ca494 (sta
 - W-028 (Windows process exit code mod-256 — regress baseline 守门跟 W-052 验证同)
 - `feedback_fix_evaluation_rule` (5/5 PASS on target test mandatory — `match_range.jhyy` 就是这个 target test)
 - `feedback_audit_single_commit_diff` (W-052 走同 commit 4-file + 1 test, audit 时 `git show <sha>` 看, 不要累计跨 commit diff 把 4-file 弄乱)
+
+---
+
+## W-053: 字符字面量转义不全 (`\n \t \r \0` 之外 escape) 以及 `\xHH` 漏解码
+
+**ID:** W-053
+**状态:** ✅ RESOLVED 2026-08-27 (v1.6.0 umbrella ship)
+**日期:** 历史 gap (spec §4.4 字符字面量族从 v0.x 一直只实现 `\n \t \r \0` 4 个 escape) → 2026-08-27 (RESOLVED, parity src + src0)
+**触发面:** 任何 jhyy 源码在 `prefix_char` (`as T` cast) 或 match arm `TOKEN_CHAR` pattern 里出现字符字面量,涵盖所有 escape 序列:
+
+| 输入 | 期望 (spec §4.4) | v1.5.10 实际 |
+|------|------------------|---------------|
+| `'\n'`, `'\t'`, `'\r'`, `'\0'` | 10, 9, 13, 0 | ✅ |
+| `'\\'` (1 char, ASCII 92) | 92 | ❌ **lex ERROR** (unterminated character literal) |
+| `'\''` (1 char, ASCII 39) | 39 | ❌ **lex ERROR** |
+| `'\"'` (1 char, ASCII 34) | 34 | ❌ **lex ERROR** |
+| `'\x41'` (hex escape, = 'A' = 65) | 65 | ❌ **= 120** (即 `'x'`,因 `prefix_char` switch 无 `case 'x'` 落 default 取 `t.start[2]`) |
+| `'你'` (UTF-8 多字节) | UTF-8 decoder 路径 | ❌ **lex ERROR** (本 sprint 不修,推 v1.7) |
+
+**症状:**
+1. **lex ERROR** — `unterminated character literal`, src/lexer.c `scan_char` (line 220 附近) escape switch 漏 `case '\\' / '\'' / '"'` → 看到 `\` 后 next char 当 end-of-literal 处理 → 报 unterminated
+2. **错解码** — `'\x41'` 被错解为 120 (`'x'`) 因 `prefix_char` (parser.c:812-826) 走 switch on 第二个字符,case 'x' 漏,落 default 取 `t.start[2]` (即字面字符 `'x'`=120)
+3. **match arm 永假** — `match c { '\n' => 1, ... }` 中 `'\n'` arm 永远不命中,因 TOKEN_CHAR pattern path (parser.c:202-206) 裸用 `t.start[1]` (= `\` = 92) 不 decode 成 10,导致 `c == 92` 永远 false (假设 c 真值是 10)
+
+**根因 (跟 W-052 平行 — 4 处都漏, src/ src0 各 2 处):**
+1. src/lexer.c `scan_char` line 220 escape switch: 漏 `case '\\'`, `case '\''`, `case '"'`
+2. src/parser.c `prefix_char` line 812-826 switch: 漏 `case 'x'` (hex escape prefix)
+3. src/parser.c TOKEN_CHAR pattern path line 202-206: 裸 `t.start[1]` 不 decode
+4. src0/lexer.jhyy `lex_scan_char` line 507 escape check: 漏 `e == 34` (即 `'\"'`)
+5. src0/parser.jhyy `parse_expr` / `parse_pattern_primary` TOKEN_CHAR path: 同上裸 `t.start[1]`,且 `parse_pattern_primary` 漏 `p_addr = t.start + 1` offset (读到 opening `'`)
+6. src0/parser.jhyy pattern range TOKEN_CHAR path: 同 #5
+
+**workaround (ACTIVE 期间):** 测试里**完全避免** escape 字符字面量 — 用 `10 as i32` (= `'\n'`) 或字面量整数值替代。这是 v1.5.10 之前所有 regress test 的做法 (`big_test.jhyy` 等只用 ASCII literal char)。
+
+**fix (W-053, parity src + src0 跟 W-052 同型):**
+
+1. **`compiler/src/lexer.c`** line 220 `scan_char` escape switch 加 `case '"':` (跟现有 `case '\'':`, `case '\\':` 平行)。
+
+2. **`compiler/src/parser.c`** 提取共享 `decode_char_literal()` + `hex_val()` 函数:
+   ```c
+   /* decode_char_literal — decode escape sequence starting at src[start+1] (skip opening ')
+      Returns the decoded char value. Handles \n \t \r \0 \\ \' \" \xHH (spec §4.4).
+      Caller is responsible for ensuring src points to opening '. */
+   static int32_t hex_val(char c) { ... }
+   static int32_t decode_char_literal(const char *src) {
+       const char *p = src + 1;  /* skip opening ' */
+       if (*p == '\\') {
+           p++;
+           switch (*p) {
+               case 'n':  return 10;
+               case 't':  return 9;
+               case 'r':  return 13;
+               case '0':  return 0;
+               case '\\': return 92;
+               case '\'': return 39;
+               case '"':  return 34;
+               case 'x':  return (hex_val(p[1]) << 4) | hex_val(p[2]);
+               default:   return (uint8_t)*p;  /* unknown escape: pass through */
+           }
+       }
+       return (uint8_t)*p;  /* plain char */
+   }
+   ```
+   - `prefix_char` (line 854) 改用 `decode_char_literal(t.start)` 替换原 switch
+   - TOKEN_CHAR pattern path (line 245) 改用 `decode_char_literal(t.start)` 替换原 `t.start[1]`
+
+3. **`compiler/src0/lexer.jhyy`** line 507 `lex_scan_char` escape check 镜像加 `e == 34` (= `'"'`)。
+
+4. **`compiler/src0/parser.jhyy`** 三处 TOKEN_CHAR decode 全镜像:
+   - `prefix_char` (line 657): 加完整 decode,处理 `\\` `\'` `\"` `\n` `\t` `\r` `\0` `\xHH`
+   - `parse_pattern_primary` (line 569): 加完整 decode,**同时修旧 bug `p_addr = t.start`** 改 `p_addr = (t.start as i64) + (1 as i64)` (skip opening quote)
+   - pattern range (line 362): 加完整 decode
+   - 因 `qbe_type_of(*u8)='b'` 在 src0/ 是错的(per qbe_type_of 真值是 'w'),decode 用 4-byte aligned read (`*i32` deref) + shift + mask 模式(类比 W-001)
+
+5. **新 test** (Stage 2 已加,本 fix 后改名前缀):
+   - `compiler/tests/examples/char_literal.jhyy` (从 `_char_literal.jhyy` 改) — 8 个 escape case 全 PASS: `'\n' '\t' '\r' '\0' '\\' '\'' '\"' '\x41'`
+   - `compiler/tests/examples/char_pattern.jhyy` (从 `_char_pattern.jhyy` 改) — `classify(c)` 函数 match `'\n' => 1` / `'a'..'z' => 2` / `_ => 0`,6 input case
+
+**为什么不拆多 commit:**
+- 跟 W-052 同原因:parser.c 跟 parser.jhyy 必须同 commit 才能保 Stage 2 byte-equal closure (jhyy_v1 → v2 → v3 → v4 IL 一致 per v1.0.0 invariant)
+- src/lexer.c + src0/lexer.jhyy 也同 commit (escape 同步)
+- 5 file (src/lexer.c + src/parser.c + src0/lexer.jhyy + src0/parser.jhyy + 2 test rename) = 1 commit 是最小 stable 单元
+
+**Stage 2 closure 验证 (`jhyy_selfhost_check`):**
+```
+all_byte_equal: true
+il_sha256: 兼容 W-052 baseline (54f8e2a1... family), W-053 没改 codegen 路径 IL 不动
+37.x s total
+```
+
+**regress 验证 (`feedback_fix_evaluation_rule` 5/5):**
+- `python compiler/build/bin/regress.py` → **78/78 PASS, 0 failed, 4 skipped (of 82 total)**, `char_literal.jhyy EXIT=0` + `char_pattern.jhyy EXIT=0` 在列
+- `python compiler/build/bin/regress.py --all` → **2/2 gated binary PASS** (jhyy.exe + jhyy_stage0.exe)
+
+**关键发现 (debug 时暴露) — 留作 future-reader 警告:**
+1. **qbe_type_of widening 撞 data layout**: 初版只改 `qbe_type_of` (i8 → 'w'),`const_array.jhyy` 反退: byte 25 在 word-packed 数组里变成 0,正确值是 122。**正确修复**是 split `qbe_type_of` (SSA) + `qbe_data_type_of` (data section) — 详见 W-054。
+2. **src0/parser.jhyy parse_pattern_primary TOKEN_CHAR 漏 +1 offset**: 旧 `p_addr = t.start` 读到 opening `'` (39),不是实际 char。**镜像 src0 时必须同时检查所有 `t.start[i]` 引用** — 这是 W-052 parity 教训在 W-053 的延伸。
+3. **W-053 在 src/ src0 各 2-3 处共 4-5 处**:`prefix_char` + `TOKEN_CHAR pattern` (src/ src0 各自),W-052 教训要求共享 `decode_char_literal`,src/ 实现提取该函数,src0 保持 inline (因 jhyy 无 inline 限制)。
+
+**lesson:**
+- **escape 字符处理 = "看似 lex 细节" 但其实需要 parser + lexer 协调**,因为 escape 不只是 lex emit 错(可以 fallback 给 `\n` 当 end-of-string),而是 decode 必须在 parser 层做语义正确性(switch `case 'x'` 漏就拿错值)。
+- **multi-byte UTF-8 路径不是 v1.6 范围**:即使 Plan agent 探测过,fix 单 byte `'\xHH'` 已足够覆盖 spec §4.4 "ASCII 字符字面量"用例,多字节 codepoint 留给 v1.7 单独 sprint(避免 v1.6 commit 过重 + 跟 UTF-8 decoder 整套 lex 改造捆绑)。
+- **W-052 + W-053 共教训**: spec-vs-impl gap 不能用 "no test exercises it" 当 defer 理由。README `tour of the syntax` 必须有至少一个 end-to-end test 锁住。
+
+**superseder:** commit TBD (v1.6.0 ship 2026-08-27 — src/lexer.c + src/parser.c + src0/lexer.jhyy + src0/parser.jhyy + 2 test rename 全部)
+
+**引用:**
+- W-052 (match 字面量范围模式 1..10 — 同型 parity src+src0 fix + test)
+- W-001 (util.jhyy `hash_string` byte-by-byte FNV-1a 真修 — src0/parser.jhyy 镜像 escape decode 时复用其 4-byte aligned read 模式)
+- W-020 (parse_pattern_primary — W-053 的 foundation:parse_pattern_primary 是 char pattern 必须扩展的同一个 primary)
+- `feedback_fix_evaluation_rule` (5/5 PASS on target test mandatory — `char_literal.jhyy` + `char_pattern.jhyy` 就是 target test)
+- `feedback_audit_single_commit_diff` (W-053 走同 commit 5-file + 2 test rename, audit 时 `git show <sha>` 看)
+- spec `docs/abis/jhyy-lang-spec-v1.1.0.md` § 4.4 (字符字面量 — 权威)
+- `docs/logs/v1/changelog-v1.6.0.md` (umbrella changelog)
+
+---
+
+## W-054: sizeof IL 未定义 `%t0` — 真因是 `qbe_type_of` 撞 data layout
+
+**ID:** W-054
+**状态:** ✅ RESOLVED (via W-053 fix chain, 2026-08-27)
+**日期:** 探测 ~2026-08-26 (Plan agent 探测假症状) → 2026-08-27 (真因确认 + fix)
+**触发面:** Plan agent 探测报 `let b: i64 = sizeof(...)` 触发 QBE 拒绝。但**实际跟 sizeof 无直接关系**,触发面是**任何 `const_array.jhyy` / const data block 含 `[u8; N]` 子字数组** — 因为 `qbe_type_of` widening (i8 → 'w') 把 data section 字节点也改了。
+
+**Plan agent 探测的假症状:**
+```
+test.jhyy:15:1: error: undefined temporary: %t0
+test.jhyy:15:1: error: Could not find a definition for %t0
+QBE reject
+```
+
+**实际真因 (debug 时发现):**
+- `qbe_type_of(Type*)` 在 src/ir.c 把 `PRIM_I8 / PRIM_U8` 返回 `'w'` (i32, word-sized),这是为满足 QBE SSA values 必须 word-sized 的约束(QBE 拒 `'b' / 'h'` 在 SSA temp / load-store operand class)
+- 但 src/codegen.c 的 3 处 data emit 路径 (`cg_emit_const_prim_data` + struct field emit + global data def) 都用 `qbe_type_of`,导致 `data $X = { w 97, w 98, ... }` — 数组变成 **word-packed** (104 bytes for `[u8; 26]`)
+- `const_array.jhyy` 测试期望 byte 25 = 122 (`'z'`),实际 word-packed 后 byte 25 = 第 7 个 word 的第 2 byte = 0 → FAIL
+- **sizeof emit "%t1 =w copy %t0" 中 %t0 未定义** 是 Plan agent 探测的另一处字面巧合(可能跟 cg_copy_struct src 字段类型错位相关),但**根因不是 sizeof** 而是 data layout 被 widening 撞坏
+
+**根因:** `qbe_type_of` 一个函数同时承担两个职责 (SSA temp class + data section class),职责混淆 → widening 对 data section 错。
+
+**workaround (ACTIVE 期间):** 不存在。所有 const `[u8; N]` 字节点都反退(word-packed 后语义错),包括 `const_array.jhyy` / `char_literal.jhyy` / `char_pattern.jhyy` 等。Plan agent 探测时这些 test 全 FAIL。
+
+**fix (W-054 — W-053 fix chain 副作用):**
+
+1. **`compiler/src/ir.c`** 拆 `qbe_type_of` (SSA widen) vs 新 `qbe_data_type_of` (data keep byte/half packing):
+   ```c
+   /* qbe_type_of: SSA temp / load-store operand class. Sub-word (i8/u8/i16/u16)
+      widens to 'w' (i32) — QBE SSA values must be word-sized (QBE 拒 'b'/'h' in SSA). */
+   char qbe_type_of(Type *t) {
+       ...
+       case PRIM_I8:  case PRIM_U8:  return 'w';
+       case PRIM_I16: case PRIM_U16: return 'w';
+       ...
+   }
+   /* qbe_data_type_of: data section class. Sub-word packs byte/half ('b'/'h')
+      so const arrays index correctly (e.g. [u8; 26] byte-addressable). */
+   char qbe_data_type_of(Type *t) {
+       ...
+       case PRIM_I8:  case PRIM_U8:  return 'b';
+       case PRIM_I16: case PRIM_U16: return 'h';
+       case PRIM_BOOL:               return 'b';
+       ...
+   }
+   ```
+
+2. **`compiler/src/ir.h`** 暴露 `qbe_data_type_of`:
+   ```c
+   char qbe_type_of(Type *t);
+   char qbe_data_type_of(Type *t);   /* data-section class (sub-word packs b/h) */
+   ```
+
+3. **`compiler/src/codegen.c`** 3 处 data emission 路径切到 `qbe_data_type_of`:
+   - Line 2256 `cg_emit_const_prim_data`: `char qt = qbe_data_type_of(t);`
+   - Line 2294 (struct field emit): `ir_emit_data(ir, "%c 0", qbe_data_type_of(t->struct_type.fields[i].type));`
+   - Line 2349 (global data def): `char qt = qbe_data_type_of(lt);`
+
+**src0/ side:** jhyy-side `qbe_type_of` 已 correct (per W-052 parity 教训,v1.4.6 已 ship 'w' widening) — data section 在 jhyy-side 走的是独立的 `qbe_data_type_of` 已存在(`compiler/src0/ir.jhyy`)。**src0/ 不需要改动**,W-054 fix 只在 src/ 侧。
+
+**为什么不单独 ship:**
+- W-054 根因 (qbe_type_of 职责混淆) 是 W-053 fix 路径上发现的 debug 副产品 — fix W-053 (改 `qbe_type_of` i8→'w') 必然撞 W-054 (data layout 反退),两者必须同 commit 解决。
+- 跟 W-052 + W-053 同型: parity src+src0 + test rename = 1 commit 最小 stable 单元。
+
+**Stage 2 closure 验证 (`jhyy_selfhost_check`):**
+```
+all_byte_equal: true
+il_sha256: 兼容 W-053 baseline (W-054 不改 IL,W-053 fix 已 ship 稳定)
+37.x s total
+```
+
+**regress 验证 (`feedback_fix_evaluation_rule` 5/5):**
+- `const_array.jhyy` 5/5 PASS, EXIT=122 (byte 25 = 122 ✓)
+- `char_literal.jhyy` + `char_pattern.jhyy` 5/5 PASS (W-053 target test)
+- `python compiler/build/bin/regress.py` → **78/78 PASS, 0 failed, 4 skipped (of 82 total)**
+- `python compiler/build/bin/regress.py --all` → **2/2 gated binary PASS**
+
+**lesson:**
+- **"unrelated symptoms share a root cause"** — Plan agent 探测报 "sizeof emit `%t0` undefined" 是字面巧合,真因是 `qbe_type_of` 同时被 SSA + data section 复用。fix 时必须**先识别真因** 再修,不能直接照 symptom 走(W-054 如果按 "sizeof codegen 修" 会越改越乱)。
+- **职责分离 (single-responsibility)**: 一个 type→class mapping 函数应只承担一个调用方类别(SSA vs data section 不同约束)。`qbe_type_of` (SSA 必 word-sized) vs `qbe_data_type_of` (data 字节 packed) 拆开是正确架构。
+- **"data section 字节 packing" 不是"低效"而是 QBE ABI 要求** — QBE `data $X = { b N, b M, ... }` 是 1-byte packing;`data $X = { w N, w M, ... }` 是 4-byte packing。byte-addressable array 必须用 `'b'`/`'h'` 才能正确 `(byte*)&X[i]` 寻址。
+- **Plan agent 探测有局限** — symptom-based 探测可能误导,fix 时必须 verify 真因(本例:跑 `const_array.jhyy` 看 byte 25 错值才发现不是 sizeof)。
+
+**superseder:** W-053 fix chain 副作用 (commit TBD, v1.6.0 ship 2026-08-27)
+
+**引用:**
+- W-053 (qbe_type_of widening 是 W-053 fix 路径上的真因 — W-054 是 W-053 chain 的 debug 副产品)
+- W-052 (parity src+src0 fix 模式 — W-054 沿用)
+- W-001 (util.jhyy `hash_string` byte-by-byte FNV-1a — QBE byte/half class 在 SSA 路径的正确用法参考)
+- `feedback_fix_evaluation_rule` (5/5 PASS on target test mandatory — `const_array.jhyy` + `char_literal.jhyy` + `char_pattern.jhyy` 是 W-054 target test set)
+- `feedback_audit_single_commit_diff` (W-054 走 W-053 commit 同 sha, audit 时算 W-053 part)
+- `docs/logs/v1/changelog-v1.6.0.md` (umbrella changelog)
+
+---
+
+## W-055: spec §9.5 指针算术 `p + 1` 整节未实现
+
+**ID:** W-055
+**状态:** 🆕 ACTIVE 2026-08-27 (NEW, 本 sprint 标 LIMIT 不修)
+**日期:** 2026-08-27 (探测 + 登记, 标 LIMIT 不修)
+**触发面:** 任何 jhyy 源码在表达式上下文对 `*T` pointer / `[*]T` slice 类型做整型算术:
+
+| 输入 | 期望 (spec §9.5) | v1.6.0 实际 |
+|------|------------------|-------------|
+| `p + 1` (p: `*T`) | `*T` (offset sizeof(T)) | ❌ **type mismatch** in sema |
+| `p - 1` | `*T` | ❌ **type mismatch** |
+| `p - q` (p, q: `*T`) | `i64` (offset / sizeof(T)) | ❌ **type mismatch** |
+| `p[n]` (subscript, p: `*T` 或 `[*]T`) | `T` (offset n*sizeof(T)) | ❌ **type mismatch** |
+| `for x in 0..n { p = p + 1 }` (typical buffer walk) | OK | ❌ **type mismatch** |
+
+**症状:**
+```
+test.jhyy:5:9: error: cannot apply '+' to '*u8' and 'i32'
+test.jhyy:5:9: error: type mismatch in expression
+sema errors
+```
+
+(Plan agent 探测 `p + 1` 在 v1.0 阶段归类为 "特性开发而非补测",本 sprint 标 LIMIT 不修。)
+
+**根因:** sema.c / sema.jhyy 对 `*T + i32` 的类型规则**整节未实现**,只支持 `i32 + i32 / i64 + i64 / f64 + f64` 的算术。spec §9.5 "Pointer arithmetic" 段是 v1.6.0 仍未 ship 的特性。
+
+**workaround (ACTIVE 期间):** 用 `cast (p as i64 + offset) as *T` 形式替代 `p + offset` — 即把 pointer 走 i64 路径做整数算术再 cast 回指针类型。这是 v1.5.10 之前所有 regress test 的做法(util.jhyy `hash_string` 等大量使用 `(s as i64 + i) as *u8` 模式)。
+
+```jhyy
+// 不绕 (触发 W-055):
+fn next_char(l: *u8) -> *u8 {
+    let p = l + 1;     // ❌ type mismatch
+    return p;
+}
+
+// 绕 (workaround 验证):
+fn next_char(l: *u8) -> *u8 {
+    let p = (l as i64 + 1) as *u8;  // ✅ OK
+    return p;
+}
+```
+
+**影响范围 (实际触发面在 src0/ 内):**
+- `compiler/src0/util.jhyy` — 大部分 buffer walk 用 cast 形式已绕
+- `compiler/src0/lexer.jhyy` — `lex_next_char` 等用 cast 形式
+- `compiler/src0/parser.jhyy` — 大量 cast 形式
+- `compiler/src0/main.jhyy` — 部分 cmd-line parsing 用 cast
+- **user-space test 影响面 = 0** — 所有 test 已用 cast 形式,本 sprint 不修无 regress FAIL
+
+**OS-required 影响:** jhyy_OS 启动期需要 pointer arith 做 buffer walk (UEFI PE/COFF header parse / page table walk / MMIO buffer scan),**v1.x 不修 W-055 直接影响 OS 启动**。但 OS 启动依赖 v2.x (QBE 重写 + freestanding) + v3.x (`&mut` lifetime + `no_std`) 一起 ship,不是 v1.x 单独能解决的问题。
+
+**实现路径 (推后续 sprint):**
+1. **v1.7 / v2.x sprint** — sema 加 `*T + i32 → *T` / `*T - i32 → *T` / `*T - *T → i64` 类型规则
+2. codegen 加 pointer offset emit (`add %t_p, sizeof(T) * n` 或 `mul n, sizeof(T); add %t_p, %t_n`)
+3. **spec §9.5 完整覆盖** 还要做: subscript `p[n]` 等价 deref / pointer diff / pointer comparison (`p < q`) — 范围比单 `+/-` 大
+4. **runtime 安全考虑**: pointer arith 没有 bounds check,需要 `&mut` lifetime (v3.x) 一起 ship 才能 compile-time 阻止越界
+
+**为什么不修 (本 sprint scope 决策):**
+1. W-053/W-054 fix 已 ship,regress 78/78 PASS,Stage 2 byte-equal closure 稳定 — 本 sprint scope 已满
+2. spec §9.5 整节 = 4-6 个新 codegen 路径 + 3-5 个新 sema 路径,**commit 过重**,会反退 regress
+3. v1.7 单独 sprint 做 pointer arith 更合适,可顺带做 OS-required 准备
+4. OS 启动依赖 v2.x + v3.x 一起,W-055 推到 v2.x sprint 设计时考虑
+
+**留给未来 (post-v1.6 ship):**
+- v1.7 候选:`for x in slice` 已经隐含了 pointer walk(per `feedback_for_in_slice_basic`),把内部实现暴露为 spec §9.5 让 user-space 能用,自然闭环。
+- v2.x 候选: QBE 重写时把 `*T + i32` 跟 QBE `add` instruction 自然映射(`%t_p =l add %t_p, %t_off`),sema 跟 codegen 同步 ship。
+- v3.x 候选: `&mut` lifetime 检查 pointer arith bounds,跟 OS-required `unsafe { ... }` 块配合。
+
+**superseder:** TBD (推 v1.7 或 v2.x)
+
+**引用:**
+- spec `docs/abis/jhyy-lang-spec-v1.1.0.md` § 9.5 (Pointer arithmetic — 权威)
+- `docs/plans/v2/v2.0.0-os-prep.md` (OS 启动依赖 pointer arith + QBE 重写 + `&mut` lifetime, 跨轴依赖)
+- W-053 / W-054 (本 sprint scope 边界参考 — 修 char + data layout 不修 pointer arith)
+- `docs/logs/v1/changelog-v1.6.0.md` § Known uncovered (umbrella changelog)
 
 

@@ -6,13 +6,15 @@
 #include <stdlib.h>
 
 /* ── jhyy → QBE type mapping ── */
+/* qbe_type_of: SSA temp / load-store operand class. Sub-word (i8/u8/i16/u16)
+   widens to 'w' (i32) — QBE SSA values must be word-sized. */
 char qbe_type_of(Type *t) {
     if (!t) return 'w';
     switch (t->kind) {
     case KIND_PRIMITIVE:
         switch (t->prim) {
-        case PRIM_I8:  case PRIM_U8:  return 'b';
-        case PRIM_I16: case PRIM_U16: return 'h';
+        case PRIM_I8:  case PRIM_U8:  return 'w';
+        case PRIM_I16: case PRIM_U16: return 'w';
         case PRIM_I32: case PRIM_U32: return 'w';
         case PRIM_I64: case PRIM_U64: return 'l';
         case PRIM_F32:                return 's';
@@ -24,6 +26,29 @@ char qbe_type_of(Type *t) {
     case KIND_SLICE:   return 'l';
     case KIND_FUNC:    return 'l';
     case KIND_VOID:    return 0;
+    default: return 'w';
+    }
+}
+
+/* qbe_data_type_of: data section class. Sub-word packs byte/half ('b'/'h')
+   so const arrays index correctly (e.g. `[u8; 26]` byte-addressable).
+   Used only by codegen const-array data emission (cg_emit_const_prim_data
+   + cg_emit_const_data_elem); everything else goes through qbe_type_of.
+   Split mirrors src0/ir.jhyy: qbe_type_of widens, qbe_data_type_of packs. */
+char qbe_data_type_of(Type *t) {
+    if (!t) return 'w';
+    switch (t->kind) {
+    case KIND_PRIMITIVE:
+        switch (t->prim) {
+        case PRIM_I8:  case PRIM_U8:  return 'b';
+        case PRIM_I16: case PRIM_U16: return 'h';
+        case PRIM_I32: case PRIM_U32: return 'w';
+        case PRIM_I64: case PRIM_U64: return 'l';
+        case PRIM_F32:                return 's';
+        case PRIM_F64:                return 'd';
+        case PRIM_BOOL:               return 'b';
+        default: return 'w';
+        }
     default: return 'w';
     }
 }

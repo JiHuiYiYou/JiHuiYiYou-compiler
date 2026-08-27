@@ -43,6 +43,7 @@ static inline int irval_is_undef(IRVal v) {
 
 /* ── Key: which QBE type character to use for a jhyy Type ── */
 char qbe_type_of(Type *t);
+char qbe_data_type_of(Type *t);   /* data-section class (sub-word packs b/h) */
 
 /* ── IR Buffer ── */
 typedef struct {

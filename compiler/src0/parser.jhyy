@@ -361,16 +361,56 @@ fn parse_pattern_primary(p: *Parser) -> *Node {
     // ── TOKEN_CHAR 分支（v1.6.x: literal range hi support — `'a'..'z'` 解析）──
     if t.kind == TOKEN_CHAR() {
         parser_advance(p, &t);
-        // t.start[0] = '\'', t.start[1] = char, t.start[2] = '\''
+        // v1.6 W-053: use full char decode (handles '\n', '\xHH' etc).
+        // t.start[0] = '\'', t.start[1] = char (or '\\'), t.start[2] = (escape or '\'')
         // qbe_type_of(*u8) 默认 'b' bug（plan § 0 #6），绕开：4-byte aligned read + mask
-        // 对齐 lexer.jhyy::lex_peek_char 的写法
-        let p_addr = t.start as i64;
+        let p_addr = (t.start as i64) + (1 as i64);  // skip opening '
         let aligned = p_addr & (~(3 as i64));
         let rem = (p_addr - aligned) as i32;
         let w = *((aligned) as *i32);
         let shift = rem * (8 as i32);
-        let masked = (w >> shift) & (255 as i32);
-        let ch = masked & (255 as i32);
+        let c1 = (w >> shift) & (255 as i32);
+        let mut ch: i32 = 0;
+        if c1 == (92 as i32) {  // '\\'
+            let p2_addr = (t.start as i64) + (2 as i64);
+            let aligned2 = p2_addr & (~(3 as i64));
+            let rem2 = (p2_addr - aligned2) as i32;
+            let w2 = *((aligned2) as *i32);
+            let shift2 = rem2 * (8 as i32);
+            let c2 = (w2 >> shift2) & (255 as i32);
+            if c2 == (110 as i32) { ch = 10 as i32; }       // 'n'
+            else if c2 == (116 as i32) { ch = 9 as i32; }  // 't'
+            else if c2 == (114 as i32) { ch = 13 as i32; } // 'r'
+            else if c2 == (48 as i32) { ch = 0 as i32; }   // '0'
+            else if c2 == (92 as i32) { ch = 92 as i32; }  // '\\'
+            else if c2 == (39 as i32) { ch = 39 as i32; }  // '\''
+            else if c2 == (34 as i32) { ch = 34 as i32; }  // '"'
+            else if c2 == (120 as i32) {  // 'x' \xHH
+                let p3_addr = (t.start as i64) + (3 as i64);
+                let a3 = p3_addr & (~(3 as i64));
+                let r3 = (p3_addr - a3) as i32;
+                let w3 = *((a3) as *i32);
+                let s3 = r3 * (8 as i32);
+                let c3 = (w3 >> s3) & (255 as i32);
+                let p4_addr = (t.start as i64) + (4 as i64);
+                let a4 = p4_addr & (~(3 as i64));
+                let r4 = (p4_addr - a4) as i32;
+                let w4 = *((a4) as *i32);
+                let s4 = r4 * (8 as i32);
+                let c4 = (w4 >> s4) & (255 as i32);
+                let hi: i32 = if c3 >= (48 as i32) && c3 <= (57 as i32) { c3 - (48 as i32) }
+                              else if c3 >= (97 as i32) && c3 <= (102 as i32) { c3 - (97 as i32) + 10 }
+                              else if c3 >= (65 as i32) && c3 <= (70 as i32) { c3 - (65 as i32) + 10 }
+                              else { 0 as i32 };
+                let lo: i32 = if c4 >= (48 as i32) && c4 <= (57 as i32) { c4 - (48 as i32) }
+                              else if c4 >= (97 as i32) && c4 <= (102 as i32) { c4 - (97 as i32) + 10 }
+                              else if c4 >= (65 as i32) && c4 <= (70 as i32) { c4 - (65 as i32) + 10 }
+                              else { 0 as i32 };
+                ch = (hi << 4) | lo;
+            } else { ch = c2; }
+        } else {
+            ch = c1;
+        }
         return ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, ch as i64, PRIM_U8());
     }
 
@@ -529,16 +569,55 @@ fn parse_pattern(p: *Parser) -> *Node {
     // ── TOKEN_CHAR 分支 ──
     if t.kind == TOKEN_CHAR() {
         parser_advance(p, &t);
-        // t.start[0] = '\'', t.start[1] = char, t.start[2] = '\''
-        // qbe_type_of(*u8) 默认 'b' bug（plan § 0 #6），绕开：4-byte aligned read + mask
-        // 对齐 lexer.jhyy::lex_peek_char 的写法
-        let p_addr = t.start as i64;
+        // v1.6 W-053: full char decode (handles '\n', '\xHH' etc).
+        // t.start[0] = '\'', t.start[1] = char (or '\\'), t.start[2] = (escape or '\'')
+        let p_addr = (t.start as i64) + (1 as i64);  // skip opening '
         let aligned = p_addr & (~(3 as i64));
         let rem = (p_addr - aligned) as i32;
         let w = *((aligned) as *i32);
         let shift = rem * (8 as i32);
-        let masked = (w >> shift) & (255 as i32);
-        let ch = masked & (255 as i32);
+        let c1 = (w >> shift) & (255 as i32);
+        let mut ch: i32 = 0;
+        if c1 == (92 as i32) {  // '\\'
+            let p2_addr = (t.start as i64) + (2 as i64);
+            let aligned2 = p2_addr & (~(3 as i64));
+            let rem2 = (p2_addr - aligned2) as i32;
+            let w2 = *((aligned2) as *i32);
+            let shift2 = rem2 * (8 as i32);
+            let c2 = (w2 >> shift2) & (255 as i32);
+            if c2 == (110 as i32) { ch = 10 as i32; }       // 'n'
+            else if c2 == (116 as i32) { ch = 9 as i32; }  // 't'
+            else if c2 == (114 as i32) { ch = 13 as i32; } // 'r'
+            else if c2 == (48 as i32) { ch = 0 as i32; }   // '0'
+            else if c2 == (92 as i32) { ch = 92 as i32; }  // '\\'
+            else if c2 == (39 as i32) { ch = 39 as i32; }  // '\''
+            else if c2 == (34 as i32) { ch = 34 as i32; }  // '"'
+            else if c2 == (120 as i32) {  // 'x' \xHH
+                let p3_addr = (t.start as i64) + (3 as i64);
+                let a3 = p3_addr & (~(3 as i64));
+                let r3 = (p3_addr - a3) as i32;
+                let w3 = *((a3) as *i32);
+                let s3 = r3 * (8 as i32);
+                let c3 = (w3 >> s3) & (255 as i32);
+                let p4_addr = (t.start as i64) + (4 as i64);
+                let a4 = p4_addr & (~(3 as i64));
+                let r4 = (p4_addr - a4) as i32;
+                let w4 = *((a4) as *i32);
+                let s4 = r4 * (8 as i32);
+                let c4 = (w4 >> s4) & (255 as i32);
+                let hi: i32 = if c3 >= (48 as i32) && c3 <= (57 as i32) { c3 - (48 as i32) }
+                              else if c3 >= (97 as i32) && c3 <= (102 as i32) { c3 - (97 as i32) + 10 }
+                              else if c3 >= (65 as i32) && c3 <= (70 as i32) { c3 - (65 as i32) + 10 }
+                              else { 0 as i32 };
+                let lo: i32 = if c4 >= (48 as i32) && c4 <= (57 as i32) { c4 - (48 as i32) }
+                              else if c4 >= (97 as i32) && c4 <= (102 as i32) { c4 - (97 as i32) + 10 }
+                              else if c4 >= (65 as i32) && c4 <= (70 as i32) { c4 - (65 as i32) + 10 }
+                              else { 0 as i32 };
+                ch = (hi << 4) | lo;
+            } else { ch = c2; }
+        } else {
+            ch = c1;
+        }
         let lo = ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, ch as i64, PRIM_U8());
         // v1.6.x: literal range pattern `'a'..'z'` → wrap as NODE_PATTERN_RANGE
         if parser_match(p, TOKEN_DOTDOT(), &t) != (0 as i32) {
@@ -618,6 +697,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         parser_advance(p, &t);
         // 绕开 qbe_type_of(*u8)='b' bug：4-byte aligned read + shift + mask
         // t.start[0] = '\'', t.start[1] = char (or '\\'), t.start[2] = (escape or '\'')
+        // v1.6 W-053: handles \\ \' \" \n \t \r \0 \xHH (spec §4.4)
         let p1 = (t.start as i64) + (1 as i64);
         let a1 = p1 & (~(3 as i64));
         let r1 = (p1 - a1) as i32;
@@ -636,7 +716,32 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
             else if c2 == (116 as i32) { ch = 9 as i32; }  // 't'
             else if c2 == (114 as i32) { ch = 13 as i32; } // 'r'
             else if c2 == (48 as i32) { ch = 0 as i32; }   // '0'
-            else { ch = c2; }
+            else if c2 == (92 as i32) { ch = 92 as i32; }  // '\\'
+            else if c2 == (39 as i32) { ch = 39 as i32; }  // '\''
+            else if c2 == (34 as i32) { ch = 34 as i32; }  // '"'
+            else if c2 == (120 as i32) {  // 'x' \xHH — read 2 hex digits
+                let p3 = (t.start as i64) + (3 as i64);
+                let a3 = p3 & (~(3 as i64));
+                let r3 = (p3 - a3) as i32;
+                let w3 = *((a3) as *i32);
+                let s3 = r3 * (8 as i32);
+                let c3 = (w3 >> s3) & (255 as i32);
+                let p4 = (t.start as i64) + (4 as i64);
+                let a4 = p4 & (~(3 as i64));
+                let r4 = (p4 - a4) as i32;
+                let w4 = *((a4) as *i32);
+                let s4 = r4 * (8 as i32);
+                let c4 = (w4 >> s4) & (255 as i32);
+                let hi: i32 = if c3 >= (48 as i32) && c3 <= (57 as i32) { c3 - (48 as i32) }
+                              else if c3 >= (97 as i32) && c3 <= (102 as i32) { c3 - (97 as i32) + 10 }
+                              else if c3 >= (65 as i32) && c3 <= (70 as i32) { c3 - (65 as i32) + 10 }
+                              else { 0 as i32 };
+                let lo: i32 = if c4 >= (48 as i32) && c4 <= (57 as i32) { c4 - (48 as i32) }
+                              else if c4 >= (97 as i32) && c4 <= (102 as i32) { c4 - (97 as i32) + 10 }
+                              else if c4 >= (65 as i32) && c4 <= (70 as i32) { c4 - (65 as i32) + 10 }
+                              else { 0 as i32 };
+                ch = (hi << 4) | lo;
+            } else { ch = c2; }
         } else {
             ch = c1;
         }

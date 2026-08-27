@@ -2253,7 +2253,7 @@ static void cg_func(CGContext *cg, IRBuf *ir, Node *n, NodeFuncDecl **inline_fns
 static void cg_emit_const_data_elem(IRBuf *ir, Node *e, Type *t, int *first);
 
 static void cg_emit_const_prim_data(IRBuf *ir, Node *e, Type *t) {
-    char qt = qbe_type_of(t);
+    char qt = qbe_data_type_of(t);  /* v1.6 W-053: data section packs sub-word */
     int64_t val = 0;
     if (e->kind == NODE_INT) {
         val = node_int_data(e)->value;
@@ -2291,7 +2291,7 @@ static void cg_emit_const_data_elem(IRBuf *ir, Node *e, Type *t, int *first) {
                 cg_emit_const_prim_data(ir, fval, t->struct_type.fields[i].type);
             } else {
                 fprintf(stderr, "warning: struct literal missing field '%s' in const data — emitting 0\n", fname);
-                ir_emit_data(ir, "%c 0", qbe_type_of(t->struct_type.fields[i].type));
+                ir_emit_data(ir, "%c 0", qbe_data_type_of(t->struct_type.fields[i].type));
             }
         }
     } else {
@@ -2346,7 +2346,7 @@ void cg_module(IRBuf *ir, Node *module) {
             Type *lt = d->sym->type;
             /* only primitive globals supported in v1.4.6 MVP */
             if (lt->kind != KIND_PRIMITIVE) continue;
-            char qt = qbe_type_of(lt);
+            char qt = qbe_data_type_of(lt);  /* v1.6 W-053: data section packs sub-word */
             if (qt == 0) continue;
             ir_emit_data(ir, "data $%s = { %c ", d->sym->name, qt);
             if (d->init && d->init->kind == NODE_INT) {

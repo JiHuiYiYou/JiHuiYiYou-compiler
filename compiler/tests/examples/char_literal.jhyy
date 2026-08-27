@@ -1,0 +1,51 @@
+// EXPECT: 0
+// v1.6: W-053 char literal family (spec §4.4) — RESOLVED in v1.6 sprint
+//
+// Validates escape + hex escape char literals:
+// - '\n' (LF = 10)
+// - '\t' (HT = 9)
+// - '\r' (CR = 13)
+// - '\0' (NUL = 0)
+// - '\\' (backslash = 92)
+// - '\'' (single quote = 39)
+// - '\"' (double quote = 34) — per spec §4.4
+// - '\xHH' (hex escape, e.g. '\x41' = 'A' = 65)
+//
+// Char type resolves to PRIM_U8 (sema.c case NODE_CHAR).
+//
+// v1.6 fix (parity src + src0):
+// - scan_char / lex_scan_char: add " to escape switch
+// - prefix_char / decode_char_literal: handles \n \t \r \0 \\ \' \" \xHH
+// - TOKEN_CHAR pattern: same decode helper (shared, W-052 lesson)
+// - qbe_type_of: SSA temps widen i8/u8/i16/u16 to 'w' (QBE rejects 'b'/'h')
+// - qbe_data_type_of: data section keeps 'b'/'h' packing for byte-addressable arrays
+
+fn main_jhyy() -> i32 {
+    let mut err: i32 = 0;
+
+    let c_lf: u8 = '\n';
+    if c_lf as i32 != 10 { err = err + 1; }
+
+    let c_tab: u8 = '\t';
+    if c_tab as i32 != 9 { err = err + 1; }
+
+    let c_cr: u8 = '\r';
+    if c_cr as i32 != 13 { err = err + 1; }
+
+    let c_nul: u8 = '\0';
+    if c_nul as i32 != 0 { err = err + 1; }
+
+    let c_bs: u8 = '\\';
+    if c_bs as i32 != 92 { err = err + 1; }
+
+    let c_sq: u8 = '\'';
+    if c_sq as i32 != 39 { err = err + 1; }
+
+    let c_dq: u8 = '\"';
+    if c_dq as i32 != 34 { err = err + 1; }
+
+    let c_hex: u8 = '\x41';   // 'A'
+    if c_hex as i32 != 65 { err = err + 1; }
+
+    err
+}

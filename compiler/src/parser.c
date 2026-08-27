@@ -39,6 +39,47 @@ static void pop_scope(Parser *p) {
 }
 
 /* ── get a local name string from token ── */
+/* W-053/v1.6: full char literal decode (escape sequences + \xHH).
+   Shared by prefix_char + TOKEN_CHAR pattern path (was split — W-052 lesson). */
+static int hex_val(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static unsigned char decode_char_literal(const char *s, int len) {
+    /* s points at opening ' ; len is full token length (incl. quotes).
+       W-053: handles \n \t \r \0 \\ \' \" \xHH  (spec §4.4) */
+    if (len < 3 || s[0] != '\'' || s[len-1] != '\'') return 0;
+    if (s[1] != '\\') {
+        /* plain char: single byte between quotes */
+        return (unsigned char)s[1];
+    }
+    /* escape sequence */
+    if (len < 4) return 0;  /* '\\' alone, no escape */
+    switch (s[2]) {
+    case 'n':  return '\n';
+    case 't':  return '\t';
+    case 'r':  return '\r';
+    case '0':  return '\0';
+    case '\\': return '\\';
+    case '\'': return '\'';
+    case '"':  return '"';
+    case 'x': {
+        /* \xHH — exactly 2 hex digits */
+        if (len < 6) return 0;  /* not enough room for \xHH + closing ' */
+        int hi = hex_val(s[3]);
+        int lo = hex_val(s[4]);
+        if (hi < 0 || lo < 0) return 0;
+        return (unsigned char)((hi << 4) | lo);
+    }
+    default:
+        /* unknown escape — return raw byte (matches pre-fix lenient behavior) */
+        return (unsigned char)s[2];
+    }
+}
+
 static const char *tok_name(Parser *p, Token t) {
     return arena_strdup(p->arena, t.start, t.length);
 }
@@ -201,7 +242,11 @@ static Node *parse_pattern(Parser *p) {
     }
     case TOKEN_CHAR: {
         advance(p);
-        Node *lo = ast_new_pattern_lit(p->arena, t.loc, (unsigned char)t.start[1], PRIM_U8);
+        /* W-053/v1.6: use full char decode (handles '\n', '\xHH' etc)
+           instead of bare t.start[1] which only sees raw byte. */
+        Node *lo = ast_new_pattern_lit(p->arena, t.loc,
+                                       (unsigned char)decode_char_literal(t.start, t.length),
+                                       PRIM_U8);
         return try_pattern_range(p, t.loc, lo);
     }
     case TOKEN_MINUS: {
@@ -809,20 +854,11 @@ static Node *prefix_string(Parser *p, Token token) {
                           arena_strdup(p->arena, chars, len), len);
 }
 
+/* forward decl for prefix_char + TOKEN_CHAR pattern path */
+static unsigned char decode_char_literal(const char *s, int len);
+
 static Node *prefix_char(Parser *p, Token token) {
-    char ch = 0;
-    if (token.start[1] == '\\') {
-        switch (token.start[2]) {
-        case 'n': ch = '\n'; break;
-        case 't': ch = '\t'; break;
-        case 'r': ch = '\r'; break;
-        case '0': ch = '\0'; break;
-        default:  ch = token.start[2]; break;
-        }
-    } else {
-        ch = token.start[1];
-    }
-    return ast_new_char(p->arena, token.loc, ch);
+    return ast_new_char(p->arena, token.loc, decode_char_literal(token.start, token.length));
 }
 
 static Node *prefix_bool(Parser *p, Token token) {

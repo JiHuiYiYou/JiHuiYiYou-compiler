@@ -504,7 +504,9 @@ fn lex_scan_char(l: *Lexer, t: *Token) -> i32 {
     if c == (92 as i32) {  // '\\'
         let e = lex_peek_char(l);
         if e == (110 as i32) || e == (116 as i32) || e == (114 as i32)
-           || e == (92 as i32) || e == (39 as i32) || e == (48 as i32) {
+           || e == (92 as i32) || e == (39 as i32) || e == (34 as i32)
+           || e == (48 as i32) {
+            //                              v1.6 W-053 — added 34='"'
             let _x = lex_next_char(l);
         } else if e == (120 as i32) {  // 'x'
             let _x = lex_next_char(l);

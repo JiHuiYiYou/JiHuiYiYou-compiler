@@ -1,0 +1,32 @@
+// EXPECT: 0
+// v1.6: W-053 char pattern (spec §11.3) — RESOLVED in v1.6 sprint
+//
+// Validates char 做 match arm pattern:
+// - `'\n' => 1`  (literal char pattern, decoded via decode_char_literal)
+// - `'a'..'z' => 2`  (range pattern, lit..lit, spec §11.3)
+// - `_ => 0`  (wildcard fallthrough)
+//
+// v1.6 fix (parity src + src0):
+// - parser.c TOKEN_CHAR pattern path now calls decode_char_literal
+//   (was bare t.start[1] — would mismatch decoded values like '\n' = 10)
+
+fn classify(c: u8) -> i32 {
+    match c {
+        '\n'      => 1,
+        'a'..'z'  => 2,
+        _         => 0,
+    }
+}
+
+fn main_jhyy() -> i32 {
+    let mut err: i32 = 0;
+
+    if classify('\n' as u8) != 1 { err = err + 1; }
+    if classify('a' as u8) != 2 { err = err + 1; }
+    if classify('m' as u8) != 2 { err = err + 1; }
+    if classify('z' as u8) != 2 { err = err + 1; }
+    if classify('A' as u8) != 0 { err = err + 1; }   // 'A' not in a..z
+    if classify('0' as u8) != 0 { err = err + 1; }   // '0' not in a..z
+
+    err
+}
