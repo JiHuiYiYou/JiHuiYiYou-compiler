@@ -194,27 +194,24 @@
     <WixVariable Id="WixUILicenseRtf" Value="!(bindpath.common)\license.rtf" />
 
     <!--
-      v1.5.7-rc1 rev 2: JHYY brand UI assets (navy #1a1a2e + mint #00d4aa).
-      Replace default Windows disc icon + red banner with brand-consistent
-      visuals. Assets built by installer/build-jhyy-icons.ps1 from
-      vscode-ext/icon.svg (user-provided source — single source of truth).
+      v1.5.8: recolor default WiX red+disc → mint, replace disc with J logo.
+      Replaces rev 2 (navy bg + JHYY Compiler title text — too dark + duplicate
+      brand name overlap). User feedback 2026-08-27: tight mint box (96x96) +
+      80x80 J logo at upper-LEFT, no extra padding, square not rectangular.
 
       - jhyy-icon.ico     : multi-size (16+32+48+64+128+256) ARPPRODUCTICON
-                            + Start Menu shortcut icon (via Shortcut.Icon)
-                            + .jhyy FileAssoc DefaultIcon
-      - jhyy-banner.bmp   : 493x58 MSI dialog top banner ("JHYY Compiler" mint
-                            title + navy bg + mint "J" logo)
-      - jhyy-welcome.bmp : 493x312 MSI welcome dialog content (title +
-                            description + components list)
+                            + Start Menu shortcut icon + .jhyy FileAssoc
+      - jhyy-banner.bmp   : 493x58 MSI banner (default WiX recolored mint +
+                            40x40 J logo replacing disc at right)
+      - jhyy-welcome.bmp : 493x312 MSI welcome (default WiX recolored mint +
+                            96x96 mint box + 80x80 J logo at upper-LEFT)
 
-      File source uses !(bindpath.bin) for consistency with binDir bindpath.
-      Files are NOT shipped (no <File> Component refers to them) — they're
-      only read by WiX at build time for embedding in the MSI Binary table.
-      The .ico IS shipped separately via the JhyyIconFile Component below so
-      FileAssoc DefaultIcon can reference the installed file path.
+      Built by installer/build-jhyy-icons.ps1 from vscode-ext/icon.svg.
+      Files NOT shipped (no <File> Component references them); embedded in
+      MSI Binary table only. .ico IS shipped via JhyyIconFile Component.
     -->
     <WixVariable Id="WixUIBannerBmp"  Value="!(bindpath.bin)\jhyy-banner.bmp" />
-    <WixVariable Id="WixUIWelcomeBmp" Value="!(bindpath.bin)\jhyy-welcome.bmp" />
+    <WixVariable Id="WixUIDialogBmp"  Value="!(bindpath.bin)\jhyy-welcome.bmp" />
 
     <Icon Id="JHYYIcon" SourceFile="!(bindpath.bin)\jhyy-icon.ico" />
     <Property Id="ARPPRODUCTICON" Value="JHYYIcon" />

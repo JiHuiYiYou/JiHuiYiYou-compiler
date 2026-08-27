@@ -1,39 +1,28 @@
-# Generates .ico (multi-size) + banner BMP from icon.svg for MSI installer.
-# Sprint v1.5.7-rc1 rev 2: replace default Windows disc icon + red banner with
-# JHYY brand (navy #1a1a2e + mint #00d4aa) for consistent installer identity.
+# Generates installer UI assets (BMPs + ICO) from vscode-ext/icon.svg.
+# v1.5.8: recolor default WiX red+disc → mint, replace disc with J logo.
+# Replaces rev 2 (navy bg + JHYY Compiler title — too dark, duplicate brand name overlap).
 #
 # Outputs:
-#   installer/jhyy-icon.ico       - 16+32+48+64+128+256 (ARPPRODUCTICON)
-#   installer/jhyy-banner.bmp     - 493x58 MSI banner BMP (WixUI_Minimal top)
-#   installer/jhyy-welcome.bmp    - 493x312 MSI welcome dialog bitmap
+#   installer/jhyy-icon.ico       - 16+32+48+64+128+256 multi-size ICO
+#   installer/jhyy-banner.bmp     - 493x58 MSI banner (recolored mint + 40x40 J logo)
+#   installer/jhyy-welcome.bmp    - 493x312 MSI welcome (recolored mint + 96x96 mint box + 80x80 J logo)
 #
 # Pre-reqs: rsvg-convert (MSYS2 librsvg), System.Drawing (PowerShell builtin)
-
 $ErrorActionPreference = "Stop"
-
 Add-Type -AssemblyName System.Drawing
 
-$navy = [System.Drawing.Color]::FromArgb(0x1a, 0x1a, 0x2e)
-$mint = [System.Drawing.Color]::FromArgb(0x00, 0xd4, 0xaa)
+# === Multi-size .ico from icon.svg ===
 $iconSizes = @(16, 32, 48, 64, 128, 256)
-
-# 1. Render each size via rsvg-convert
 $pngBlobs = @()
 foreach ($sz in $iconSizes) {
     $png = "installer/jhyy-icon-${sz}.png"
     rsvg-convert -w $sz -h $sz "vscode-ext/icon.svg" -o $png 2>&1 | Out-Null
     $pngBlobs += ,([System.IO.File]::ReadAllBytes((Get-Item $png).FullName))
 }
-
-# 2. Compose multi-size .ico (PNG-in-ICO, Vista+)
 $icoPath = "installer/jhyy-icon.ico"
 $icoStream = New-Object System.IO.MemoryStream
 $writer = New-Object System.IO.BinaryWriter($icoStream)
-
-$writer.Write([uint16]0)
-$writer.Write([uint16]1)
-$writer.Write([uint16]$iconSizes.Count)
-
+$writer.Write([uint16]0); $writer.Write([uint16]1); $writer.Write([uint16]$iconSizes.Count)
 $headerSize = 6 + (16 * $iconSizes.Count)
 $runningOffset = $headerSize
 $offsets = @()
@@ -41,117 +30,95 @@ for ($i = 0; $i -lt $iconSizes.Count; $i++) {
     $offsets += $runningOffset
     $runningOffset += $pngBlobs[$i].Length
 }
-
 for ($i = 0; $i -lt $iconSizes.Count; $i++) {
     $sz = $iconSizes[$i]
     $width  = if ($sz -ge 256) { [byte]0 } else { [byte]$sz }
     $height = if ($sz -ge 256) { [byte]0 } else { [byte]$sz }
-    $writer.Write([byte]$width)
-    $writer.Write([byte]$height)
-    $writer.Write([byte]0)
-    $writer.Write([byte]0)
-    $writer.Write([uint16]1)
-    $writer.Write([uint16]32)
+    $writer.Write([byte]$width); $writer.Write([byte]$height)
+    $writer.Write([byte]0); $writer.Write([byte]0)
+    $writer.Write([uint16]1); $writer.Write([uint16]32)
     $writer.Write([uint32]$pngBlobs[$i].Length)
     $writer.Write([uint32]$offsets[$i])
 }
-for ($i = 0; $i -lt $iconSizes.Count; $i++) {
-    $writer.Write($pngBlobs[$i])
-}
-
+for ($i = 0; $i -lt $iconSizes.Count; $i++) { $writer.Write($pngBlobs[$i]) }
 [System.IO.File]::WriteAllBytes($icoPath, $icoStream.ToArray())
 $writer.Close()
-Write-Host "[OK] $icoPath ($([System.IO.File]::ReadAllBytes($icoPath).Length) bytes, $($iconSizes.Count) sizes)"
+Write-Host "[OK] $icoPath ($([System.IO.File]::ReadAllBytes($icoPath).Length) bytes)"
 
-# 3. Banner BMP (493 x 58) for MSI dialog top
-$bmp = New-Object System.Drawing.Bitmap(493, 58, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+# === Banner BMP: recolor default WiX red→mint, replace disc with J logo ===
+$bannerSrc = "C:/msys64/tmp/wix4-src/wix-b8977d6f88e7b68e000bac226a2814f236770570/src/ext/UI/wixlib/Bitmaps/bannrbmp.bmp"
+$bannerOut = "installer/jhyy-banner.bmp"
+$src = [System.Drawing.Image]::FromFile($bannerSrc)
+$w = $src.Width; $h = $src.Height
+$bmp = New-Object System.Drawing.Bitmap($w, $h, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-$g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
-$g.Clear($navy)
-
-$icon48 = [System.Drawing.Image]::FromFile("installer/jhyy-icon-48.png")
-$g.DrawImage($icon48, 5, 5, 48, 48)
-$icon48.Dispose()
-
-$fontTitle = New-Object System.Drawing.Font("Segoe UI", 18, [System.Drawing.FontStyle]::Bold)
-$brushMint = New-Object System.Drawing.SolidBrush($mint)
-$g.DrawString("JHYY Compiler", $fontTitle, $brushMint, 65, 8)
-
-$fontSub = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
-$brushMintDim = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(180, $mint.R, $mint.G, $mint.B))
-$g.DrawString("v1.5.7  -  self-hosted static-typed language", $fontSub, $brushMintDim, 65, 36)
-
-$brushBottom = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(64, $mint.R, $mint.G, $mint.B))
-$g.FillRectangle($brushBottom, 0, 54, 493, 4)
-
-$fontTitle.Dispose()
-$fontSub.Dispose()
-$brushMint.Dispose()
-$brushMintDim.Dispose()
-$brushBottom.Dispose()
-$g.Dispose()
-$bmp.Save("installer/jhyy-banner.bmp", [System.Drawing.Imaging.ImageFormat]::Bmp)
-$bmp.Dispose()
-Write-Host "[OK] installer/jhyy-banner.bmp (493x58)"
-
-# 4. Welcome BMP (493 x 312) for full welcome dialog content
-$bmpW = New-Object System.Drawing.Bitmap(493, 312, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
-$gW = [System.Drawing.Graphics]::FromImage($bmpW)
-$gW.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-$gW.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
-$gW.Clear($navy)
-
-$icon64 = [System.Drawing.Image]::FromFile("installer/jhyy-icon-64.png")
-$gW.DrawImage($icon64, 30, 30, 64, 64)
-$icon64.Dispose()
-
-$fontWTitle = New-Object System.Drawing.Font("Segoe UI", 18, [System.Drawing.FontStyle]::Bold)
-$brushWTitle = New-Object System.Drawing.SolidBrush($mint)
-$gW.DrawString("JHYY Compiler v1.5.7", $fontWTitle, $brushWTitle, 110, 38)
-
-$fontWSub = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Regular)
-$brushWSub = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(200, $mint.R, $mint.G, $mint.B))
-$gW.DrawString("Self-hosted static-typed programming language", $fontWSub, $brushWSub, 110, 70)
-
-$penMint = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(128, $mint.R, $mint.G, $mint.B), 1)
-$gW.DrawLine($penMint, 30, 110, 463, 110)
-
-$fontWBody = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Regular)
-$brushWBody = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(220, 240, 240, 240))
-
-$bodyLines = @(
-    "This installer will set up the JHYY compiler on your system."
-    ""
-    "Components installed:"
-    "  - jhyy.exe            compiler frontend + driver"
-    "  - qbe.exe             QBE IL compiler (vendored)"
-    "  - runtime.c/.h        JHYY runtime support"
-    "  - jhyy_helpers.c      process / path helpers"
-    ""
-    "After install, the post-install script will:"
-    "  - Set MSYS2_PATH_TYPE=inherit (User env)"
-    "    so MSYS2 bash picks up the JHYY bin PATH entry"
-    "  - Configure VSCode defaultProfile = bash (MSYS2)"
-    "    for seamless terminal integration"
-    "  - Logoff / logon once to trigger HKLM RunOnce config"
-)
-$y = 130
-foreach ($line in $bodyLines) {
-    $gW.DrawString($line, $fontWBody, $brushWBody, 30, $y)
-    $y += 18
+$g.DrawImage($src, 0, 0, $w, $h)
+$src.Dispose()
+$mintR = 0x00; $mintG = 0xd4; $mintB = 0xaa
+for ($y = 0; $y -lt $h; $y++) {
+    for ($x = 0; $x -lt $w; $x++) {
+        $p = $bmp.GetPixel($x, $y)
+        if ($p.R -gt 60 -and $p.R -gt ($p.G + 20) -and $p.R -gt ($p.B + 20)) {
+            $intensity = [Math]::Min(1.0, ($p.R - 40) / 180.0)
+            $r = [int]($mintR * $intensity)
+            $gg = [int]($mintG * $intensity + ($p.G * (1.0 - $intensity) * 0.5))
+            $b = [int]($mintB * $intensity + ($p.B * (1.0 - $intensity) * 0.5))
+            $bmp.SetPixel($x, $y, [System.Drawing.Color]::FromArgb($r, $gg, $b))
+        }
+    }
 }
+# Replace the disc (centered at X=461 Y=28, WxH=49x48) with J logo.
+$icon = [System.Drawing.Image]::FromFile("installer/jhyy-icon-64.png")
+$iconSize = 40
+$iconX = 461 - $iconSize / 2
+$iconY = 28 - $iconSize / 2
+$g.DrawImage($icon, $iconX, $iconY, $iconSize, $iconSize)
+$icon.Dispose()
+Write-Host "[icon] J logo at ($iconX, $iconY) ${iconSize}x${iconSize} (replaces default disc on banner)"
+$g.Dispose()
+$bmp.Save($bannerOut, [System.Drawing.Imaging.ImageFormat]::Bmp)
+$bmp.Dispose()
+Write-Host "[OK] $bannerOut ($w x $h) — default WiX banner recolored mint + J logo at disc position"
 
-$fontWTitle.Dispose()
-$fontWSub.Dispose()
-$fontWBody.Dispose()
-$brushWTitle.Dispose()
-$brushWSub.Dispose()
-$brushWBody.Dispose()
-$penMint.Dispose()
-$gW.Dispose()
-$bmpW.Save("installer/jhyy-welcome.bmp", [System.Drawing.Imaging.ImageFormat]::Bmp)
-$bmpW.Dispose()
-Write-Host "[OK] installer/jhyy-welcome.bmp (493x312)"
+# === Welcome BMP: recolor default WiX red→mint, tight mint box + J logo at disc area ===
+$welcomeSrc = "C:/msys64/tmp/wix4-src/wix-b8977d6f88e7b68e000bac226a2814f236770570/src/ext/UI/wixlib/Bitmaps/dlgbmp.bmp"
+$welcomeOut = "installer/jhyy-welcome.bmp"
+$src = [System.Drawing.Image]::FromFile($welcomeSrc)
+$w = $src.Width; $h = $src.Height
+$bmp = New-Object System.Drawing.Bitmap($w, $h, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+$g.DrawImage($src, 0, 0, $w, $h)
+$src.Dispose()
+for ($y = 0; $y -lt $h; $y++) {
+    for ($x = 0; $x -lt $w; $x++) {
+        $p = $bmp.GetPixel($x, $y)
+        if ($p.R -gt 60 -and $p.R -gt ($p.G + 20) -and $p.R -gt ($p.B + 20)) {
+            $intensity = [Math]::Min(1.0, ($p.R - 40) / 180.0)
+            $r = [int]($mintR * $intensity)
+            $gg = [int]($mintG * $intensity + ($p.G * (1.0 - $intensity) * 0.5))
+            $b = [int]($mintB * $intensity + ($p.B * (1.0 - $intensity) * 0.5))
+            $bmp.SetPixel($x, $y, [System.Drawing.Color]::FromArgb($r, $gg, $b))
+        }
+    }
+}
+# Tighter mint box around J logo (user wants narrow border). 96x96 box + 80x80 logo (8px pad).
+# Position: upper-LEFT, replacing original disc area.
+$discX = 60; $discY = 15; $discW = 96; $discH = 96
+$bgBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, $mintR, $mintG, $mintB))
+$g.FillRectangle($bgBrush, $discX, $discY, $discW, $discH)
+$bgBrush.Dispose()
+$icon = [System.Drawing.Image]::FromFile("installer/jhyy-icon-128.png")
+$iconSize = 80
+$iconX = $discX + ($discW - $iconSize) / 2
+$iconY = $discY + ($discH - $iconSize) / 2
+$g.DrawImage($icon, $iconX, $iconY, $iconSize, $iconSize)
+$icon.Dispose()
+Write-Host "[icon] J logo at ($iconX, $iconY) ${iconSize}x${iconSize} (tight mint box ${discW}x${discH} at upper-LEFT)"
+$g.Dispose()
+$bmp.Save($welcomeOut, [System.Drawing.Imaging.ImageFormat]::Bmp)
+$bmp.Dispose()
+Write-Host "[OK] $welcomeOut ($w x $h) — WiX default layout recolored mint + tight J logo box"
 
 Write-Host "DONE."
