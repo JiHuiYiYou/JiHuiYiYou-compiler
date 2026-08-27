@@ -12,19 +12,17 @@ rem   - HKCU writes work (user has write access to own hive)
 rem   - child process spawning works (CreateProcess in user context)
 rem   - powershell.exe runs in user's interactive session
 rem
-rem Steps performed (orchestration only - no code --install-extension):
+rem Steps performed:
 rem   1. install-configure-env.ps1: set MSYS2_PATH_TYPE=inherit (User scope env)
 rem   2. install-configure-vscode.ps1: write VSCode defaultProfile + bash MSYS2 entry
+rem   3. (v1.5.10) inline `code --install-extension <vsix>` if VSCode CLI in PATH
 rem
-rem Step 3 (install-vsix.bat: install jhyy-lang + Code Runner extensions) is
-rem INTENTIONALLY SKIPPED from this orchestrator. `code --install-extension`
-rem requires VSCode to be installed and the user to have run `code` once to
-rem register the CLI shim with PATH. Running it from a RunOnce context at
-rem user logon (before the user has opened VSCode) frequently crashes or hangs
-rem with exit 255. User can install the .vsix manually via:
-rem     code --install-extension "C:\Program Files\JHYY\vscode-ext\jhyy-lang-1.5.7.vsix"
-rem     code --install-extension formulahendry.code-runner
-rem Documented in changelog-v1.5.0.md.
+rem Step 3 re-evaluates v1.5.7's "RunOnce `code` exit 255" concern: empirically
+rem the issue was a parser bug in install-vsix.bat (dead code), NOT a RunOnce
+rem context issue. `code.cmd` shim works fine in RunOnce context if VSCode has
+rem been installed. `where code` detects missing CLI -> silent skip.
+rem User can still install manually:
+rem     code --install-extension "C:\Program Files\JHYY\vscode-ext\jhyy-lang-X.Y.Z.vsix" --force
 rem
 rem Exit codes:
 rem   0  all steps ran (individual failures don't block)
@@ -34,7 +32,7 @@ rem IMPORTANT: This file is ASCII-only. cmd.exe on Chinese Windows uses GBK
 rem codepage; non-ASCII chars in .bat content get parsed as multi-byte sequences
 rem and break command tokenization.
 
-setlocal
+setlocal EnableDelayedExpansion
 
 set "BIN_DIR=%~dp0"
 set "INSTALL_DIR=%BIN_DIR%..\"
@@ -58,6 +56,25 @@ if not exist "%BIN_DIR%install-configure-vscode.ps1" (
 )
 echo [install-configure-all] Configuring VSCode terminal profile...
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%BIN_DIR%install-configure-vscode.ps1"
+
+rem 3. (v1.5.10) Auto-install jhyy-lang .vsix into VSCode
+rem Skip if `code` CLI not in PATH (VSCode not installed yet) — non-fatal.
+where code >nul 2>&1
+if errorlevel 1 (
+    echo [install-configure-all] VSCode CLI 'code' not in PATH, skipping jhyy-lang extension install.
+    echo [install-configure-all] User can install manually after opening VSCode once:
+    echo [install-configure-all]   code --install-extension "%INSTALL_DIR%\vscode-ext\jhyy-lang-*.vsix" --force
+) else (
+    for %%F in ("%INSTALL_DIR%\vscode-ext\*.vsix") do (
+        echo [install-configure-all] code --install-extension "%%F" --force
+        code --install-extension "%%F" --force
+        if errorlevel 1 (
+            echo [install-configure-all] WARN: code --install-extension for %%F failed (exit !ERRORLEVEL!), continuing
+        ) else (
+            echo [install-configure-all] OK: VSCode extension installed: %%F
+        )
+    )
+)
 
 echo [install-configure-all] DONE.
 exit /b 0
