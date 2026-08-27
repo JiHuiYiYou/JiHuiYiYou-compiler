@@ -1,0 +1,23 @@
+// EXPECT: 0
+// v1.6: §9.5 指针算术 LIMIT 标记 (per spec §9.5, spec 列了 `p + 1` 形式,
+// 但 impl 未实现 — type mismatch in binary)
+//
+// 这是 W-055 ACTIVE 证据: 写出来预期编译失败, 但 runner 当前不验证编译失败,
+// 所以本 test 必须 _ 前缀跳过 default regress。
+//
+// 用法: 用户手动跑
+//   python compiler/build/bin/regress.py --tests=_ptr_arith_limit.jhyy --timeout=10
+// 期望 EXIT=1 (编译失败) — 但 runner 现在不区分编译失败 vs 运行失败, 此 test 实际是
+// documentation only, 跑过也只代表 compiler 偶然 EXIT=0 (这本身是个信号: 如果
+// 编译器让 `p + 1` 通过了, 那意味着 §9.5 已经实现, 这 test 应该改名为 ptr_arith.jhyy)。
+
+type Buf = struct { data: [u8; 16] }
+
+fn main_jhyy() -> i32 {
+    let mut buf: Buf = Buf { data: [0; 16] };
+    let p: *u8 = &buf.data[0] as *u8;
+    // p + 1 — spec §9.5 形式, 当前 impl 报 type mismatch
+    let q: *u8 = p + 1;
+    // 读 q[0] 应该等于 buf.data[1]
+    return (*q) as i32;
+}

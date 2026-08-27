@@ -1,0 +1,53 @@
+// EXPECT: 131
+// v1.6: mixed_struct_slice_match — struct + 数组 + slice + int range match (largest 混合)
+//
+// 综合测试 (large smoke test):
+// 1. struct 定义 (Point2D { x, y })
+// 2. 内联 struct 数组字面量 → slice + for-in 迭代
+// 3. fn struct → i32 字段访问 (lib 端, 参数访问)
+// 4. int range match (match_range.jhyy 已 verify 1..10 etc works)
+// 5. 多 case dispatch + 累加
+//
+// Calculation:
+// - pts = [{2,0}, {3,0}, {4,0}, {5,0}, {6,0}] sums: 2, 3, 4, 5, 6
+// - classify:
+//     0..2  → 100  (boundary inclusive)
+//     3..5  → 10
+//     _     → 1
+// - sum: 100 + 10 + 10 + 10 + 1 = 131
+//
+// NOTE (W-XXX ACTIVE 规避):
+//   - `let p = &pts[0]; p.x` (struct 字段访问 via local 变量) 当前 codegen
+//     emit `loadw %t0` 而 `%t0` 未定义 → QBE reject。
+//   - 把字段访问推到 lib 端 fn (sum_xy), 用参数访问绕过。
+
+type Point2D = struct { x: i32, y: i32 }
+
+fn sum_xy(p: Point2D) -> i32 {
+    p.x + p.y
+}
+
+fn classify(s: i32) -> i32 {
+    match s {
+        0..2  => 100,
+        3..5  => 10,
+        _     => 1,
+    }
+}
+
+fn main_jhyy() -> i32 {
+    let s: [*]Point2D = &[
+        Point2D { x: 2, y: 0 },
+        Point2D { x: 3, y: 0 },
+        Point2D { x: 4, y: 0 },
+        Point2D { x: 5, y: 0 },
+        Point2D { x: 6, y: 0 }
+    ];
+    let mut total: i32 = 0;
+    for i in 0..s.len {
+        let p: Point2D = s[i];
+        let v: i32 = sum_xy(p);
+        total = total + classify(v);
+    }
+    return total;
+}

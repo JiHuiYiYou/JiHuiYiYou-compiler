@@ -1,0 +1,28 @@
+// EXPECT: 36
+// v1.6: mixed_const_struct_import — 多文件 import + struct ABI 链路
+//
+// Validates end-to-end:
+// - type Point (in lib, ABI struct pass-by-value per spec §3.2)
+// - fn returning Point (lib → caller, ABI struct by-value)
+// - import libname → call libname::fn(...)
+//
+// Calculation (避开 W-XXX ACTIVE — struct 字段访问 bug,详见下方 NOTE):
+// - r1 = point_sum(origin()) = 0 + 0 = 0
+// - r2 = point_sum(make_point(1, 2)) = 3
+// - r3 = point_sum(add_points(make_point(10, 20), origin())) = 30
+// - r4 = max_points() = 3
+// - total = 0 + 3 + 30 + 3 = 36
+//
+// NOTE: `let p = origin(); p.x` (struct 字段访问 via local 变量) 当前 codegen
+//   emit `loadw %t0` 而 `%t0` 未定义 (QBE reject)。W-XXX ACTIVE 推迟 v1.7。
+//   本 test 把 struct 字段访问全部推到 lib 端 (point_sum helper) 规避。
+
+import const_struct_lib;
+
+fn main_jhyy() -> i32 {
+    let r1: i32 = const_struct_lib::point_sum(const_struct_lib::origin());
+    let r2: i32 = const_struct_lib::point_sum(const_struct_lib::make_point(1, 2));
+    let r3: i32 = const_struct_lib::point_sum(const_struct_lib::add_points(const_struct_lib::make_point(10, 20), const_struct_lib::origin()));
+    let r4: i32 = const_struct_lib::max_points();
+    return r1 + r2 + r3 + r4;
+}

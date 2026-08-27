@@ -1,0 +1,39 @@
+// EXPECT: 42
+// v1.6: W-XXX ACTIVE 证据 — enum match arm tag check 被 codegen 跳过
+//
+// 这个 test **故意**只调用 first arm 会匹配的输入 (`Some(42)` → first arm =
+// `Some(v) => v`), 不调用会触发 tag check bug 的路径 (`None`、literal pattern、
+// wildcard arm)。保持下划线跳过 default regress 是因为: 当前 codegen (per
+// `codegen.c:379`) 对 non-binding enum pattern 统一 `goto enum_default` 返回
+// `1` (always match), 多 arm 顺序 match 退化成"永远第一 arm"。
+//
+// 已知 broken pattern (W-XXX ACTIVE, 推迟 v1.7):
+//   match o {
+//       Option::Some(_) => 100,   // 永远走这里 (even for None)
+//       Option::None => 200,
+//   }
+//   → Option::None 也返回 100 (not 200)
+//
+//   match o {
+//       Option::Some(0) => 100,   // 永远走这里 (regardless of payload)
+//       Option::None => 200,
+//   }
+//   → Option::Some(99) 也返回 100 (not 200)
+//
+// Working 路径 (本 test 验证):
+//   match o {
+//       Option::Some(v) => v,     // binding pattern → 真 tag check
+//       Option::None => 0,
+//   }
+//   → Option::Some(42) → 42 ✓
+//
+// 第一条 working 路径保证 bug-记录本身不会误报 — 用 EXPECT=42 锁住。
+
+type Option = enum { Some(i32), None }
+
+fn main_jhyy() -> i32 {
+    return match Option::Some(42) {
+        Option::Some(v) => v,
+        Option::None    => 0,
+    };
+}

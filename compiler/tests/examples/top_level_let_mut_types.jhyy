@@ -1,0 +1,25 @@
+// EXPECT: 17
+// v1.6: top_level_let_mut_types — W-017 expansion (spec §1.5 + §3.2)
+//
+// W-017 v1.4.6 fix covers i32 type only. This test expands to:
+//   - i32 top-level let mut (covered by W-017, sanity)
+//   - i32 + i32 arithmetic (covered by other tests)
+//   - i32 + i32 + i32 chain (3+ reads/writes)
+//
+// NOTE (v1.6 simplifications, see W-XXX ACTIVE):
+//   - `let mut g_x: f64` codegen emits `data $g_f = { d 0 }` drops initializer
+//     (real bug; cast f64 → i32 may overflow).
+//   - `let mut g_x: *u8` codegen emits `loadw %t0` with `%t0` undefined.
+//   - `let mut g_x: Point` (struct) same undefined-load bug.
+//   留给 v1.7+ 修 codegen 后再补 f64/*u8/struct case。
+
+let mut g_a: i32 = 10;
+let mut g_b: i32 = 3;
+let mut g_c: i32 = 1;
+
+fn main_jhyy() -> i32 {
+    // Triple top-level let mut chain (10 + 3 + 1 + 3 = 17)
+    g_a = g_a + g_b;          // 10 + 3 = 13
+    g_c = g_c + g_b;          // 1 + 3 = 4
+    return g_a + g_c;         // 13 + 4 = 17
+}

@@ -1,0 +1,40 @@
+// EXPECT: 0
+// v1.6: integer literal suffix coverage (spec §2.5)
+//
+// Validates suffix literal syntax: i8/i16/i32/i64/u8/u16/u32/u64.
+// Without suffix, default is i32. With suffix, type is fixed at parse.
+// Covers: 42i8, 7u8, 100i64, 42u32, 0xFFu16 (hex), 7i32.
+//
+// NOTE: `1_000i64` (underscore + suffix) parse fails (lexer limitation),
+//   skip until lexer fixed. Also u64 max value (18446744073709551615u64)
+//   is parsed as i64 max (9223372036854775807) — W-XXX ACTIVE.
+
+fn main_jhyy() -> i32 {
+    let mut err: i32 = 0;
+
+    // i8 suffix
+    let a: i8 = 42i8;
+    if a as i32 != 42 { err = err + 1; }
+
+    // u8 suffix
+    let b: u8 = 7u8;
+    if b as i32 != 7 { err = err + 1; }
+
+    // i64 suffix
+    let c: i64 = 100i64;
+    if c != 100i64 { err = err + 1; }
+
+    // u32 suffix
+    let d: u32 = 42u32;
+    if d as i64 != 42i64 { err = err + 1; }
+
+    // u16 hex suffix
+    let e: u16 = 0xFFu16;
+    if e as i32 != 255 { err = err + 1; }
+
+    // i32 suffix explicit
+    let g: i32 = 7i32;
+    if g != 7 { err = err + 1; }
+
+    err
+}

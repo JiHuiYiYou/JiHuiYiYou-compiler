@@ -1,0 +1,50 @@
+// EXPECT: 65
+// v1.6: mixed_nested_struct_recursive — nested struct ABI + recursive fn
+//
+// Validates:
+// - nested struct type (Box has nested Cell, Cell has data field)
+// - struct by-value fn arg (wrap_box takes Box by value, returns Box)
+// - struct by-value nested field access (wrap_box reads inner.cell.data)
+// - multi-level composition via fn wrapping
+//
+// Calculation:
+// - Box1 = leaf_box(5) = Box { cell: { data: 5 }, depth: 1 }
+//   box_data + box_depth = 5 + 1 = 6
+// - Box2 = wrap_box(Box1, 10) = Box { data: 10 + 5 + 1 = 16, depth: 2 }
+//   box_data + box_depth = 16 + 2 = 18
+// - Box3 = wrap_box(Box2, 20) = Box { data: 20 + 16 + 2 = 38, depth: 3 }
+//   box_data + box_depth = 38 + 3 = 41
+// - total = 6 + 18 + 41 = 65
+//
+// NOTE (W-XXX ACTIVE 规避):
+//   - `let b = leaf_box(5); b.cell.data` struct 字段访问 via local 变量
+//     当前 codegen emit `loadw %t0` 而 `%t0` 未定义 → QBE reject (跟
+//     mixed_const_struct_import 同源问题)。
+//   - 把字段访问推到 lib 端 fn (box_data / box_depth), 用参数访问绕过。
+
+type Cell = struct { data: i32 }
+
+type Box = struct { cell: Cell, depth: i32 }
+
+fn leaf_box(v: i32) -> Box {
+    Box { cell: Cell { data: v }, depth: 1 }
+}
+
+fn wrap_box(inner: Box, v: i32) -> Box {
+    Box { cell: Cell { data: v + inner.cell.data + inner.depth }, depth: inner.depth + 1 }
+}
+
+fn box_data(b: Box) -> i32 {
+    b.cell.data
+}
+
+fn box_depth(b: Box) -> i32 {
+    b.depth
+}
+
+fn main_jhyy() -> i32 {
+    let r1: i32 = box_data(leaf_box(5)) + box_depth(leaf_box(5));     // 5+1=6
+    let r2: i32 = box_data(wrap_box(leaf_box(5), 10)) + box_depth(wrap_box(leaf_box(5), 10));  // 16+2=18
+    let r3: i32 = box_data(wrap_box(wrap_box(leaf_box(5), 10), 20)) + box_depth(wrap_box(wrap_box(leaf_box(5), 10), 20));  // 38+3=41
+    return r1 + r2 + r3;
+}

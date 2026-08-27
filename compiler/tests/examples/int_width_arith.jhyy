@@ -1,0 +1,48 @@
+// EXPECT: 0
+// v1.6: integer width arithmetic coverage (spec §2.1 + §5.2)
+//
+// Validates narrow integer width behavior:
+// - i8 negative range (-1, -128)
+// - u8 max value (255), u16, u32, u64 literals within range
+// - i16/i32 range
+//
+// NOTE: 整型溢出 二补码环绕 (spec §5.2) 当前 impl 不环绕 — 实测
+//   u8 255+1 = 256 (no wrap), i16 32767+1 = 32768 (no wrap)。
+//   wrap 测试 skip, 留给后续 W-XXX ACTIVE 修 codegen 后再加。
+//   Per `feedback_fix_evaluation_rule`: wrap 行为 incorrect 不写进 PASS test。
+
+fn main_jhyy() -> i32 {
+    let mut err: i32 = 0;
+
+    // i8 negative range
+    let g: i8 = -1i8;
+    if g as i32 != -1 { err = err + 1; }
+
+    let h: i8 = -128i8;
+    if h as i32 != -128 { err = err + 1; }
+
+    // u8 max value (255)
+    let m: u8 = 255u8;
+    if m as i32 != 255 { err = err + 1; }
+
+    // u8 zero
+    let z: u8 = 0u8;
+    if z as i32 != 0 { err = err + 1; }
+
+    // u16 hex
+    let x: u16 = 0xFFFFu16;
+    if x as i32 != 65535 { err = err + 1; }
+
+    // u32 within i32 range
+    let u: u32 = 123456u32;
+    if u as i64 != 123456i64 { err = err + 1; }
+
+    // i16 boundary values
+    let lo: i16 = -32768i16;
+    if lo as i32 != -32768 { err = err + 1; }
+
+    let hi: i16 = 32767i16;
+    if hi as i32 != 32767 { err = err + 1; }
+
+    err
+}

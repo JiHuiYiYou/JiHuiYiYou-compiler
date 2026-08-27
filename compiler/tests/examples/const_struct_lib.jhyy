@@ -1,0 +1,32 @@
+// Library for mixed_const_struct_import.jhyy
+//
+// Provides struct ABI + namespace import smoke test:
+// - type Point = struct { x: i32, y: i32 }
+// - fn make_point(x, y) -> Point
+// - fn add_points(a, b) -> Point
+// - fn point_sum(p) -> i32
+// - fn origin() -> Point (returns Point zero)
+// - fn max_points() -> i32 (returns 3)
+//
+// NOTE: 顶层 const Point struct 字面量 当前 parser 报错
+//   ("expected [ for const array init, got int") — top-level const 限制
+//   只接受数组类型 (per const_array.jhyy / const_struct_array.jhyy 模板)。
+//   通过 fn wrapper 间接访问,避免跟 lib 端 const 限制耦合。
+
+type Point = struct { x: i32, y: i32 }
+
+fn max_points() -> i32 { 3 }
+
+fn origin() -> Point { Point { x: 0, y: 0 } }
+
+fn make_point(x: i32, y: i32) -> Point {
+    Point { x: x, y: y }
+}
+
+fn add_points(a: Point, b: Point) -> Point {
+    Point { x: a.x + b.x, y: a.y + b.y }
+}
+
+fn point_sum(p: Point) -> i32 {
+    p.x + p.y
+}

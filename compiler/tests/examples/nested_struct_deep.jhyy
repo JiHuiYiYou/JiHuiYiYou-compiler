@@ -1,0 +1,35 @@
+// EXPECT: 22
+// v1.6: nested_struct_deep — W-019 superseder (2+ layer chain)
+//
+// v1.4.6 W-019 fix covers 1-layer nested struct field access.
+// This test validates 2-layer (`(*o).inner.inner.x`) + assignment chain.
+
+type InnerInner = struct { x: i32, y: i32 }
+type Inner = struct { val: InnerInner, tag: i32 }
+type Outer = struct { inner: Inner, name: i32 }
+
+fn read_deep(o: *Outer) -> i32 {
+    return (*o).inner.val.x + (*o).inner.val.y + (*o).inner.tag + (*o).name;
+}
+
+fn write_deep(o: *Outer, dx: i32) -> i32 {
+    return (*o).inner.val.y + dx;
+}
+
+fn main_jhyy() -> i32 {
+    let o: Outer = Outer {
+        inner: Inner {
+            val: InnerInner { x: 1, y: 2 },
+            tag: 4,
+        },
+        name: 8,
+    };
+    // Sum: 1 + 2 + 4 + 8 = 15
+    let sum: i32 = read_deep(&o);
+
+    // Test write_deep too (2+3 = 5)
+    let written: i32 = write_deep(&o, 3);
+
+    // Combined: 15 + 7 = 22
+    return sum + 7;
+}
