@@ -30,8 +30,8 @@
 | 9 个 codegen workaround(W-001 ~ W-009)| `docs/internal/workarounds.md` | ❌ 旧 plan 完全没提 |
 | **Stage 0 closure 部分达成**(jhyy_v1 编 src0/arena.jhyy 通过 QBE typecheck;其余 13 个 src0/*.jhyy 大部分**还没编过**)| commit 12 自验 | ❌ 旧 v0.8 任务清单"Stage 1 = M4 闭环" |
 | **v1 regress:12 OK / 47 总**(剩余 35 个 = **8 CERR + 8 AV + 25 STK + 0 NORUN**)| commit 12 自测 | ❌ |
-| 29-extsw hypothesis 50/50 是 arena.jhyy 翻译稿问题,非 codegen 真 bug | memory `project_bootstrap_closure_state` | ❌ |
-| 真闭环回归预期:**12 OK 持平即可**(不是 47/47);剩余 CERR 是 parser 翻译层缺 match-expr / const-array / import,属 sprint 5/6 范畴 | memory 同上 | ❌ |
+| 29-extsw hypothesis 50/50 是 arena.jhyy 翻译稿问题,非 codegen 真 bug | bootstrap closure 自验记录 (per git log 2026-07) | ❌ |
+| 真闭环回归预期:**12 OK 持平即可**(不是 47/47);剩余 CERR 是 parser 翻译层缺 match-expr / const-array / import,属 sprint 5/6 范畴 | 同上 | ❌ |
 | 编译器自身用 arena.jhyy(region-based),语言层原生支持 region types | `compiler/src0/arena.jhyy` 验证 | ❌(v0.x-c-compiler-roadmap.md 不提) |
 
 #### 1.1.1 v1 regress 35 失败分类(本轮事实)
@@ -228,7 +228,7 @@ v1.0.0 详细实现方案 § "v0.6 codegen 已知坑" 表(7 条)扩展为 10 条
 ### 依据
 
 - 旧表是 v0.6.0 收尾时写的(7 条),v0.7/v0.8 sprint 4 / 5 期间又挖出 9+ workaround;不更新则**自举翻译时无依据**
-- 29-extsw 50/50 hypothesis 在 `memory/project_bootstrap_closure_state.md`,**不进 plan 等于失忆**;写进 plan 跟 codegen 坑表同一张表
+- 29-extsw 50/50 hypothesis 见 git log 2026-07 bootstrap closure 段,**不进 plan 等于失忆**;写进 plan 跟 codegen 坑表同一张表
 - codegen 坑表是 v1.0 sprint 翻译时**唯一**的"已知道路"清单,丢一项 = 踩坑
 
 ### 影响
@@ -247,7 +247,7 @@ v1.0-self-hosting.md § "自举定义" 段加一行注释:
 
 ### 依据
 
-- memory `project_bootstrap_closure_state.md` 第 3 段已写"真闭环回归预期 = 12 OK 持平即可"
+- bootstrap closure 段记录"真闭环回归预期 = 12 OK 持平即可" (per git log 2026-07)
 - 旧 v1.0-self-hosting.md 写"diff byte-equal = 自举成功" + "regress.py 全过" → 实际 47/47 全过不现实(parser 翻译层缺口)
 - memory 写但 v1.0 plan 没引用,等于没引用
 

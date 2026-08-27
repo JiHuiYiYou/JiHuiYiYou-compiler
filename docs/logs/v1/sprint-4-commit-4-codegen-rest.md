@@ -152,7 +152,7 @@ QBE failed
 
 ## 已知 v0 codegen bug 增量
 
-commit 4 期间发现 3 个新 v0 codegen bug（已记入 `feedback_v0_codegen_bug_workarounds.md`）：
+commit 4 期间发现 3 个新 v0 codegen bug（已记入 git log sprint 4 codegen bug 段）：
 
 - **bug 8**: multi-field struct return 漏写 sret body
   - Workaround: out_buf pattern（caller alloc 缓冲，helper 写）

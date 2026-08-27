@@ -112,7 +112,7 @@ fn arena_strdup(a: *Arena, s: *u8, len: i64) -> *u8 {
 
 **根因**：parse_type 写 `let qsym = symtab_lookup(...)` 后 `qsym = symtab_insert(...)`。`qsym` 不可变，codegen 把这次"重新赋值"当 dead code 优化掉。后续 `ast_new_ident(..., qsym)` 用的还是 lookup 的 0 结果
 
-**修复**（compiler/src0/parser.jhyy:243, 255）：`let mut sym` / `let mut qsym`（参考 memory `feedback_let_mut_assignment_bug.md`）
+**修复**（compiler/src0/parser.jhyy:243, 255）：`let mut sym` / `let mut qsym`（解决 v0.6 codegen "let x = ... 后 if-block x = Y 被优化"已知 bug）
 
 **这是 v0.6 codegen 已知 bug**：let x = ... 后的 if-block 里 x = Y 会被优化掉；必须 `let mut x`
 

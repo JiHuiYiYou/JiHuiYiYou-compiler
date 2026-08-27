@@ -150,7 +150,7 @@
 - `memory/project_sprint4_13_pivot_failure.md` — Sprint 4.13 IRVal helper pivot 24 sites 失败
 - `memory/project_v1_plan_phase_reorder.md` — W-005 #2 真修从 Phase 2 提到 Phase 1
 - `memory/project_sprint4_25_merge_w005_sret.md` — Sprint 4.25 + 4.26 合并授权
-- `memory/project_self_hosting_roadmap.md` — 自举路线图 (phase-2 翻译 C 前端 → QBE 完整重写)
+- 自举路线图 (phase-2 翻译 C 前端 → QBE 完整重写) — per `memory/project_v2_v3_parallel_axes.md` 并行轴
 - `memory/project_v2_v3_parallel_axes.md` — v2 ⟂ v3 并行轴
 - `memory/project_os_wait_state.md` — OS 端等 compiler 推进 (11 D 锁 + 12 Q 闭环)
 

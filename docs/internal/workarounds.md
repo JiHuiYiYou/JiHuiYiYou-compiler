@@ -86,7 +86,7 @@ let c = ((w >> sh) & (255 as i32)) as i64;
 
 **引用:**
 - 源码注释 `util.jhyy:195-198`
-- 详尽 bug 清单见 `memory/feedback_v0_codegen_bug_workarounds.md` Bug 3
+- 详尽 bug 清单见 git log v0 codegen bug 段 (Bug 3)
 - 见 `docs/plans/v0/v0.6.0任务清单 + 概要设计.md`
 
 ---
@@ -181,7 +181,7 @@ let c = ((w >> sh) & (255 as i32)) as i64;
 | arena.jhyy | 17 |
 | **总计** | **2073** |
 
-**局限性（重要, 历史记录）：** W-002 修了 hash_string 触发面 bug，但 jhyy_v1 编 main.jhyy **仍然 segfault**（exit 139, 2026-08-04 之前观察）—— 因为 main.jhyy 还有别的触发 jhyy_v1 codegen bug 的模式（Bug 7 `let _ = fncall`、Bug 9 嵌套 if/else phi、Bug 13/16 struct 值传递等；详见 `memory/feedback_v0_codegen_bug_workarounds.md`）。**但** W-001 真正修复 + 后续 v0.9 wip commit 2.5~2.11 修了 B-φ1/B-struct/B-match/W-005 phase 1+2, main.jhyy segfault 触发面已大量消除 — v0.9 wip commit 2.12 revert 后是否还 segfault 由 commit 2.12 的 **observation step** 检验 (commit 2.12 plan § observation)。
+**局限性（重要, 历史记录）：** W-002 修了 hash_string 触发面 bug，但 jhyy_v1 编 main.jhyy **仍然 segfault**（exit 139, 2026-08-04 之前观察）—— 因为 main.jhyy 还有别的触发 jhyy_v1 codegen bug 的模式（Bug 7 `let _ = fncall`、Bug 9 嵌套 if/else phi、Bug 13/16 struct 值传递等；详见 git log v0 codegen bug 段）。**但** W-001 真正修复 + 后续 v0.9 wip commit 2.5~2.11 修了 B-φ1/B-struct/B-match/W-005 phase 1+2, main.jhyy segfault 触发面已大量消除 — v0.9 wip commit 2.12 revert 后是否还 segfault 由 commit 2.12 的 **observation step** 检验 (commit 2.12 plan § observation)。
 
 **失效条件:**（任一即可移除 W-002）
 - jhyy_v1 的 codegen 对 hash_string 生成的 IL 与 v0 IL byte-equal（diff 通过）→ 重新引入原名
@@ -192,12 +192,12 @@ let c = ((w >> sh) & (255 as i32)) as i64;
 **W-002 RESOLVED section:** 见下方"W-002 RESOLVED — v0.9 wip commit 2.12 211 revert"
 
 **引用:**
-- 详细 bisect 记录见 `memory/project_bootstrap_closure_state.md`
+- 详细 bisect 记录见 git log (2026-08-04 周边 commits)
 - 测试用例 `tmp/tm_*.jhyy`
 - 完整 rename 映射 `compiler/src0/_W002_rename_map.txt`
 - v0.8 commit 6 (efc41bf) `wip: bisect heap corruption`
 - v0.8 commit 7 (0453cef) `W-002: 211 个标识符 _v1 后缀化 + workarounds.md`
-- 战略决策 `memory/project_bootstrap_closure_state.md` § Bisect findings
+- 战略决策: Bisect findings (per git log 同区段)
 
 ---
 
@@ -270,7 +270,7 @@ W-002 revert 实施时产生的 archive 文件保留作为可重放参考:
 **日期:** 2026-08-03 (ACTIVE) → 2026-08-12 (RESOLVED transitive)
 **触发面:** 任何 `let _NAME = fncall(...)` 模式，无论 `_NAME` 是什么；无论 fncall 是否在函数顶层或嵌套 if/while 块内
 **症状:** jhyy_v1 编译含此模式的源码 → 0xC0000005 segfault（exit 139）
-**根因嫌疑:** v0 codegen 对 `let _ = fncall(...)` emit IL 缺漏（详见 `memory/feedback_v0_codegen_bug_workarounds.md` Bug 7 / Bug 7b）
+**根因嫌疑:** v0 codegen 对 `let _ = fncall(...)` emit IL 缺漏（详见 git log v0 codegen bug 段 Bug 7 / Bug 7b）
 **workaround (v3 — 限定顶层):** 把**函数顶层**的 `let _X = fncall(args);` 改成 `fncall(args);`（direct call，无 binding）。**嵌套 if/while/for 块内的同模式保持原样**——v3 不改，避免 v0 sema if/else 分支类型不匹配。
 
 ```jhyy
@@ -326,8 +326,8 @@ store_byte_i32(nul1, 0 as i32);
 - mutable pattern 会触发 v0 codegen bug（v2 失败）— 需要先验证 v0 codegen 是哪种 pattern 失败、是否能更精细地限定 mutable 范围。
 
 **引用:**
-- `memory/feedback_v0_codegen_bug_workarounds.md` Bug 7 / Bug 7b
-- 决策过程见 `memory/project_bootstrap_closure_state.md` § W-003 iterations
+- v0 codegen Bug 7 / Bug 7b (per git log)
+- 决策过程见 git log W-003 iterations 段
 
 ### W-003 RESOLVED — transitively closed by Sprint 4.21-4.25 W-005 #2 真修 chain (2026-08-12)
 
@@ -346,7 +346,7 @@ store_byte_i32(nul1, 0 as i32);
 
 **真因** (per Sprint 4.21-4.25 W-005 #2 真修 chain,commits `be3be33` / `fad9de2`):
 - Bug 7/7b 根因 = IRVal struct pass-by-value stale pointer(per `project_sprint4_7_irval_pass_by_value_bug.md`)
-- 真修在 jhyy_v1 `cg_copy_struct` + `irval_is_undef` 守卫 (8 处)+ C-side 同步对齐(per `feedback_codegen_workaround_linkage.md` 链路 1-3)
+- 真修在 jhyy_v1 `cg_copy_struct` + `irval_is_undef` 守卫 (8 处)+ C-side 同步对齐
 - 守卫消除 stale pointer 后,`let _ = fncall()` 不再 emit `=w copy %t0` 污染 IL,codegen 路径正常
 
 **Out of scope (NOT W-003)**:
@@ -419,7 +419,7 @@ fn ab() -> i32 {                              // fn 长度 2，但其它都长
 **superseder:** ✅ closed (root cause = W-001 byte-by-byte FNV-1a 真修 ship in v0.8 commit 9 `d570c72`, Task #60 真修 unblocked verification path in v0.9 wip commit 2.15 `52843b6`) — 详见下方"## W-004 RESOLVED — transitively closed by W-001 byte-by-byte 真修 (2026-08-12)" 段
 
 **引用:**
-- `memory/feedback_v0_codegen_bug_workarounds.md` Bug 6 (let-mut assignment) + Bug 1 (hash_string overread)
+- v0 codegen Bug 6 (let-mut assignment) + Bug 1 (hash_string overread)
 - W-002 (`docs/internal/workarounds.md` § W-002) 修了 211 个全局/函数名，未覆盖局部 var
 - 复现测试 `tmp/test_w4.jhyy` ~ `tmp/test_w8.jhyy`
 
@@ -610,7 +610,7 @@ fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
 **影响:** 不影响 commit 2.10 目标 (byte-equal 持平 5/7, regress 持平) —— 现状 byte-equal 5/7 已稳定,let-mut + assign 触发面继续走 W-005 workaround (`*pos_ptr_vN` 模式)。
 
 **引用:**
-- `memory/feedback_v0_codegen_bug_workarounds.md` Bug 6 (let-mut assignment) + Bug 7b (nested let-mut)
+- v0 codegen Bug 6 (let-mut assignment) + Bug 7b (nested let-mut)
 - W-003 (`docs/internal/workarounds.md` § W-003) 修了 `let _X = fncall()` 顶层 direct call 模式，未覆盖 let-mut + assign
 - W-004 修了短 var 名导致 symtab hash 撞死循环，未覆盖 let-mut + assign segfault
 - 复现测试 `tmp/test_w4_lit.jhyy` / `tmp/test_w4_v1.jhyy`
@@ -1499,7 +1499,7 @@ input (canonical) 跟 output (scratch `_sh_vN`) 物理分开 → pre-stage clean
 - Sprint mcp-2 W-014 plan: 跟 v1.3.1 plan 同 session
 - v1.0.0 tag `eabee0d`:`docs/logs/v1/changelog-v1.0.0.md` Stage 2 N=3 闭环 commit
 - W-005 #1 family (Windows `.exe` suffix): `feedback_qbe_crlf_root_cause.md`
-- baseline binary hash 守门:`feedback_regress_baseline_binary_hash.md`(防 phantom binary)
+- baseline binary hash 守门:sha256sum MANDATORY(防 phantom binary)
 
 ---
 
@@ -1542,7 +1542,7 @@ input (canonical) 跟 output (scratch `_sh_vN`) 物理分开 → pre-stage clean
 **引用:**
 - v1.3.3 sprint plan: `docs/plans/v1/v1.3.3-sizeof-compile-time-const.md`
 - W-005 #1 family (buffer size 计算错): `feedback_il_s_debugging_pattern.md`
-- baseline binary hash 守门:`feedback_regress_baseline_binary_hash.md`(本 bug 在 jhyy_v1 自身编 src0/main.jhyy 才暴露,跟 W-014 closure 验证路径同)
+- baseline binary hash 守门:sha256sum MANDATORY(本 bug 在 jhyy_v1 自身编 src0/main.jhyy 才暴露,跟 W-014 closure 验证路径同)
 
 ---
 
@@ -2261,7 +2261,7 @@ GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step
 - 4 文件改动 (jhyy_helpers.c / main.jhyy / regress.py / release.yml)
 - 5 个新测试 (p1-p5, SETENV directive 新增)
 - baseline 53/53 PASS 不破
-- Linux/macOS 跨平台探测 v2.x sprint 填 (per `feedback_compiler_toolchain_path_resolution` 类型 4 升级)
+- Linux/macOS 跨平台探测 v2.x sprint 填 (jhyy.exe toolchain 必须用绝对路径, 不靠 PATH 解析 — 类型 4 升级)
 
 **失效条件 (W-029 移除条件):**
 - v2.x manifest lite 实施后, Priority 2 env.txt 升级到 toolchain.env 多工具 (v2.x sprint 范围)
@@ -2269,7 +2269,7 @@ GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step
 
 **引用:**
 - design plan: `docs/plans/v1/v1.5.6任务清单 + 概要设计.md` § 设计 1
-- related memory: `feedback_compiler_toolchain_path_resolution` (类型 4 升级要求)
+- related: jhyy.exe toolchain 必须用绝对路径, 不靠 PATH 解析 (类型 4 升级要求)
 - related workaround: W-027 v8 (Python 探测 → jhyy.exe 接管)
 - 实施 commit: TBD (v1.5.6 sprint 末 ship)
 
@@ -2675,8 +2675,8 @@ return 1;  /* no layout matched */
 **superseder:** 不需要,workaround 是 cleanest(同时支持 installer + source-tree,无需改 installer 布局或加 config)。
 
 **引用:**
-- feedback_uncommitted_files_vanish(W-035 + W-034 跨 turn 必须 commit 才稳)
-- feedback_compiler_toolchain_path_resolution(原 v1.5.6 design 是 jhyy.exe toolchain 必须用绝对路径;W-035 是兜底,当 PATH 解析出错时也能 work — 但**根因还是用绝对路径最稳**)
+- 跨 turn 必须 commit 才稳 (W-035 + W-034)
+- 原 v1.5.6 design 是 jhyy.exe toolchain 必须用绝对路径;W-035 是兜底,当 PATH 解析出错时也能 work — 但**根因还是用绝对路径最稳**
 - related: W-034 (PATH 修好后 cmd_run exec 暴露, 一起 ship)
 - related: W-025/026/027 toolchain path resolution 教训链
 
@@ -2859,7 +2859,14 @@ pos = str_concat_at(cmd_buf, pos, rq);  // 右 "
 
 ## W-041: VSCode Code Runner 集成 — installer 自动装 extension + 写 settings.json
 
-**状态:** ✅ RESOLVED 2026-08-17 (in v1.5.6-patch2)
+> **⚠️ SUPERSEDED in v1.5.9** — Code Runner 集成完全移除, 替换为原生 jhyy-lang VSCode
+> 扩展 (ms-python.python 模式: commands + menus.editor/title/run + Terminal.sendText)。
+> v1.5.10 进一步 RunOnce 自动装 .vsix。
+>
+> 本节作为 v1.5.6-patch2 历史方案存档; 不再是当前实现。`configure-coderunner.ps1` /
+> `install-vsix.bat` / `InstallVSIXBat` + `ConfigureCodeRunnerPS1` Component 已在 v1.5.10 清理。
+
+**状态:** ✅ RESOLVED 2026-08-17 (in v1.5.6-patch2) → SUPERSEDED 2026-08-27 (in v1.5.9)
 **日期:** 2026-08-17
 **触发面:** MSI 安装完 → 用户打开 VSCode → 没有"Run Code" 选项 for `.jhyy` files
 
@@ -3174,7 +3181,7 @@ src0/main.jhyy 改 1 extern decl + 14 行 (fail 块), jhyy_helpers.c 改 jh_run 
 1. ✅ success path: install-dir (SHA `D524B8D0...`) `jhyy compile hello.jhyy` → `hello.exe` 152134 B → `./hello.exe` → `Hello, world!`
 2. ✅ fail path (删 runtime.c): cmd_buf + `gcc stderr: cc1.exe: fatal error: ... No such file or directory` 完整出现
 3. ✅ regress 50/53 (持平, 无新 regress)
-5. ✅ install-dir (per `feedback_regress_baseline_binary_hash`) 5/5 PASS on user's hello.jhyy test
+5. ✅ install-dir (sha256sum MANDATORY 守门) 5/5 PASS on user's hello.jhyy test
 4. ✅ MSI build unchanged (no payload diff) — bundle 重建会 pick up 新 jhyy.exe
 
 **lesson:**
@@ -3252,7 +3259,7 @@ src0/main.jhyy 改 4 extern decl + ~50 行 (link_with_gcc 改造 + rename), jhyy
 1. ✅ success path: PowerShell 5.1 `jhyy run 新建文本文档.jhyy` → exit=0 + `Hello, world!` 输出 (中文 filename, ASCII temp path internal)
 2. ✅ MSYS2 bash 同命令 → exit=0 + Hello world (no regression, baseline 持平)
 3. ✅ `.s` / `.il` 在原 Chinese 路径保留 (新建文本文档_run.s / .il 都存在)
-4. ✅ regress 53/53 PASS 持平 (per `feedback_regress_baseline_binary_hash`)
+4. ✅ regress 53/53 PASS 持平 (sha256sum MANDATORY 守门)
 5. ✅ `C:\Users\liuzhen\AppData\Local\Temp\jha*.tmp` 跑完无残留 (cleanup 正确)
 6. ✅ install-dir deploy SHA match (`97AADEEA18514534...`) + user PS 5/5 PASS
 

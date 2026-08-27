@@ -279,7 +279,7 @@ Bundle manifest 含:
 - ✅ scoop 1 manifest (`installer/scoop/jhyy.json`)
 - ✅ `installer/README.md` — 加 "发布流程" 段 (本地 build / tag push / workflow_dispatch dry-run / manifest publish deferred)
 - ✅ `.gitignore` — 加 `installer/SHA256.txt` / `installer/**/SHA256.txt`
-- ⚠️ **Real GH Actions workflow_dispatch dry-run** 在 commit 后跑 (per `feedback_auto_push_after_commit.md`, 等 user 触发); RC tag `v1.5.5-rc1` 也等 user 决策
+- ⚠️ **Real GH Actions workflow_dispatch dry-run** 在 commit 后跑 (auto-push hook 已弃用, 手动 `git push` 后触发, 等 user); RC tag `v1.5.5-rc1` 也等 user 决策
 - ⚠️ **winget + scoop manifest publish** 推到 v2.x (per plan 决策-11; 当前仅 reference, no PR 到 winget-pkgs / ScoopInstaller/Main)
 - ⚠️ **Dev placeholder GUID (`BBCCEEFC-...`)** 没替换真 GUID — 当前 manifest 用占位符; v1.5.0 ship 前 user 决策时机
 
@@ -400,9 +400,9 @@ gh workflow run release.yml -f version=1.5.5-rc1 -f dry_run=true
 - ✅ `.github/workflows/release.yml` — 删 "Propagate MSYS2 paths to subprocess PATH" step (12 行); Run regress 注释更新指向 W-027/W-029 superseder
 - ✅ `.gitignore` — 加 `compiler/tests/examples/_tmp_jhyy_home/` (p2 测试 env.txt setup 目录)
 - ✅ `docs/internal/workarounds.md` — W-027 标 "RESOLVED → SUPERSEDED by W-029"; 新增 W-029 ACTIVE 记录新设计
-- ⚠️ **Linux/macOS 跨平台探测** (Priority 4 SearchPathA / 多 magic 路径) 推迟到 v2.x manifest lite sprint (per `feedback_compiler_toolchain_path_resolution` 类型 4 升级)
+- ⚠️ **Linux/macOS 跨平台探测** (Priority 4 SearchPathA / 多 magic 路径) 推迟到 v2.x manifest lite sprint (jhyy.exe toolchain 必须用绝对路径, 不靠 PATH 解析 — 类型 4 升级)
 - ⚠️ **p4/p5 严格测试** (SearchPathA / fallback "gcc") 推迟到 v2.x (本机测试环境无法构造 magic 全不存在的状态)
-- ⚠️ **Real GH Actions CI dry-run** 等 commit 后 user 触发 (per `feedback_auto_push_after_commit.md`)
+- ⚠️ **Real GH Actions CI dry-run** 等 commit 后 user 触发 (手动 `git push`, auto-push hook 已弃用)
 
 ### 核心机制
 
@@ -468,6 +468,12 @@ let r = system(invoke_buf);
 ---
 
 ## v1.5.6-patch2 — VSCode Code Runner 集成 (本 commit)
+
+> **⚠️ SUPERSEDED** — v1.5.9 完全移除 Code Runner 集成(替换为原生 jhyy-lang VSCode 扩展 + ▶ 按钮);
+> v1.5.10 进一步 RunOnce 自动装 .vsix。`configure-coderunner.ps1` / `install-vsix.bat` /
+> `InstallVSIXBat` + `ConfigureCodeRunnerPS1` Component 在 v1.5.10 清理掉(commit 后续)。
+>
+> 本节作为 v1.5.6-patch2 历史设计存档保留;**不要**把它当当前实现参考。
 
 ### 完成定义
 
@@ -770,7 +776,7 @@ captured stderr = 0 字节 (gcc 根本没产生输出), silent exit 1。
 - ✅ PowerShell 5.1 `jhyy run 新建文本文档.jhyy` → exit=0 + `Hello, world!` 输出 (新能力)
 - ✅ MSYS2 bash 同命令 → exit=0 + Hello world (no regression)
 - ✅ `.s` / `.il` 在原 Chinese 路径保留 (新建文本文档_run.s / .il 存在)
-- ✅ regress 53/53 PASS 持平 (per `feedback_regress_baseline_binary_hash`)
+- ✅ regress 53/53 PASS 持平 (sha256sum MANDATORY 守门)
 - ✅ `C:\Users\liuzhen\AppData\Local\Temp\jha*.tmp` 跑完无残留 (cleanup 正确)
 
 ### Workaround 状态更新
@@ -826,7 +832,7 @@ si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);         // inherit — interacti
 - ✅ `jhyy run hello.jhyy` (ASCII filename) → "Hello, world!" stdout 出现
 - ✅ `jhyy run 新建文本文档.jhyy` (Chinese filename) → "Hello, world!" stdout 出现 (W-047 + W-048 + W-050 三层叠加)
 - ✅ `jhyy run dungeon_game.jhyy` 喂 "d" stdin → 交互流程跑通
-- ✅ regress 53/53 PASS (持平, per `feedback_regress_baseline_binary_hash`)
+- ✅ regress 53/53 PASS (持平, sha256sum MANDATORY 守门)
 - ✅ jhyy.exe SHA `c94f91722e084798e07fc265676c938e6fcd4b591fdd23f422a40874b73991f5` (475703 B, +194 B vs W-048)
 
 ### Workaround 状态更新
@@ -993,7 +999,7 @@ installer/jhyy-banner.bmp     (493x58 MSI dialog top, brand colors)
 installer/jhyy-welcome.bmp    (493x312 MSI welcome dialog content)
 ```
 
-**为什么 PowerShell 不直接 PIL/Pillow**: MSYS2 没装 Pillow (per `feedback_msys2_minimal_path` minimal PATH mode), `System.Drawing` 是 PowerShell builtin 不需额外 install。
+**为什么 PowerShell 不直接 PIL/Pillow**: MSYS2 minimal PATH mode 没装 Pillow, `System.Drawing` 是 PowerShell builtin 不需额外 install。
 
 ### 实现
 

@@ -2302,7 +2302,7 @@ Task #61 close-out 完整 ship: 翻译 v0 `resolve_imports` (main.c:241) + `reso
 | 触发 | 描述 | 估时 |
 |------|------|------|
 | **Stage 1 closure** | jhyy_v1 编 src0/{types,codegen,sema,parser,symtab,lexer,util,main}.jhyy 各自 codegen gap 诊断 + 真修 | 2-4 sprint |
-| **W-004 verification** | post-inline_imports closure,跑 Stage 1 byte-equal 7 测试集 (per `memory/feedback_w004_verification_blocked.md` — W-004 当前 BLOCKED,inline_imports 通了可重新验证) | 1-2 sprint |
+| **W-004 verification** | post-inline_imports closure,跑 Stage 1 byte-equal 7 测试集 (W-004 当前 BLOCKED,inline_imports 通了可重新验证) | 1-2 sprint |
 | **D (N=3 byte-equal)** | jhyy_v0 vs jhyy_v1 vs jhyy_v2 编 main.jhyy IL byte-equal N=3 闭合 | post Stage 1 |
 | **M4 hard closure** | N=3 byte-equal 7/7 + 真自举 | post D |
 
@@ -2321,9 +2321,8 @@ Task #61 close-out 完整 ship: 翻译 v0 `resolve_imports` (main.c:241) + `reso
 - `compiler/src0/main.jhyy:155-554` — jhyy 版 `inline_imports` + `resolve_one_import_v1` + helpers (~400 行)
 - `compiler/src0/symtab.jhyy:49-58` — `type Sym = struct { name: *u8, ... }` (Sym.name 访问锚)
 - `compiler/src0/ast.jhyy:547-557` — `type NodeImportDecl` (sym: *Sym 访问锚)
-- `memory/feedback_self_edit_authority.md` — 2026-08-04 授权非架构路线层 self-edit
-- `memory/feedback_w004_verification_blocked.md` — W-004 BLOCKED 状态 + inline_imports 通了可重测
-- `memory/feedback_codegen_workaround_linkage.md` — W-001/W-002/W-006 联动关系 (sprint 4 输入)
+- W-004 BLOCKED 状态 + inline_imports 通了可重测
+- W-001/W-002/W-006 联动关系 (sprint 4 输入)
 
 ---
 
@@ -2378,7 +2377,7 @@ commit 2.23 changelog 报 jhyy_v1 baseline = **10/53**, commit 2.24 (3bd7ce9) �
 
 实际发生: sprint 4.1 启动前, Path A rebuild jhyy_v1.exe 时 **使用的是 `/tmp/jhyy_src_test/codegen.jhyy` (md5 41b56d153e9b110a008b0b39e4141fc2, working tree 维护的 operational baseline)**, 而非 src0/ head。10/53 是 commit 2.22 后的 src0/ head 直接编 Path A 的状态; 34/53 是用 working tree /tmp/jhyy_src_test/ 那份编译的 Path A 状态。
 
-working tree 状态来自前期 sprint 2.5-2.13 多次 W-001/W-002/W-005 fix, **但这些 fix 没有 mirror 回 src0/**(per [[feedback_no_subagents_for_compiler_work]] 与 [[feedback_self_edit_authority]] 2026-08-04 授权 — 当时判断 jhyy_src_test/ 是 transitional,但没明确说什么时候 mirror 回 src0/)。
+working tree 状态来自前期 sprint 2.5-2.13 多次 W-001/W-002/W-005 fix, **但这些 fix 没有 mirror 回 src0/**(per 2026-08-04 授权 — 当时判断 jhyy_src_test/ 是 transitional,但没明确说什么时候 mirror 回 src0/)。
 
 ### 决定
 
@@ -2398,8 +2397,7 @@ working tree 状态来自前期 sprint 2.5-2.13 多次 W-001/W-002/W-005 fix, **
 
 - commit 2.23 changelog line 2355 (10/53 baseline)
 - commit 3bd7ce9 changelog line 2433 (34/53 → 35/53)
-- `memory/feedback_no_subagents_for_compiler_work.md` — working tree 维护历史
-- `memory/feedback_self_edit_authority.md` — 2026-08-04 授权范围
+- working tree 维护历史 (per 2026-08-04 授权范围)
 
 ## v0.9 wip commit 2.23-fix (2026-08-06): Sprint 4.1 IL-diff 真修 #1 — NODE_FOR + cg_body_returns
 
@@ -2483,7 +2481,7 @@ Fix: 加 2 行 — `(*body_node).kind == NODE_BREAK() || ... NODE_CONTINUE()` (�
 - v0 codegen.c:1468-1540 (NODE_FOR 参考实现,73 行)
 - `memory/project_sprint4_1_ildiff_break_continue.md` — IL diff 方法论 + NODE_FOR 缺失证据
 - `memory/project_sprint4_1_fix3_negative.md` — 3 anti-pattern fix 全 revert 记录
-- `memory/feedback_self_edit_authority.md` — 2026-08-04 授权 (本 commit 在授权范围内)
+- 2026-08-04 授权 (本 commit 在授权范围内)
 
 ## v0.9 wip commit 2.28 (2026-08-07): Sprint 4.1 IL-diff 真修 #3 — NODE_INDEX struct elem + const_struct_array data emit
 
@@ -2596,7 +2594,7 @@ let fdesc_name_str = (*fdesc_name_sym).name;
 - v0 codegen.c:1067-1083 (NODE_INDEX struct elem), 1702-1750 (cg_module data emit + cg_emit_const_data_elem)
 - `memory/feedback_fix_evaluation_rule.md` — 5/5 PASS 评估规则
 - `memory/project_sprint4_1_baseline_reset_14_53.md` — canonical baseline 起点
-- `memory/feedback_self_edit_authority.md` — 2026-08-04 授权范围
+- 2026-08-04 授权范围
 
 ---
 
@@ -2694,7 +2692,6 @@ commit 2.28 changelog 报告 `jhyy_v1 regress: 14/53 → 35/53 mode = +21`。但
 
 - `memory/project_sprint4_1_phantom_baseline_finding.md` — 完整溯源(本 commit 对应 memory)
 - `memory/project_sprint4_1_baseline_reset_14_53.md` — ⚠️ SUPERSEDED 2026-08-07 指向本文件
-- `memory/feedback_regress_baseline_binary_hash.md` — MANDATORY sha256sum check (本 commit 复测验证)
 - `memory/feedback_fix_evaluation_rule.md` — 5/5 PASS 评估规则
 - `memory/project_sprint4_1_ILdiff_break_continue.md` — IL-diff methodology 上下文
 - commit b69af98 (2.28) — changelog 数字错位的源头
@@ -3031,8 +3028,7 @@ Sprint 4.1-4.3 所有真修 (W-005/W-008/W-009/sprint 4.3 A) 也是 phantom 验�
 
 ### User 决策 (待)
 
-按 user 反馈 `feedback_regress_baseline_binary_hash.md` 严格执行 MANDATORY
-sha256sum check。本 commit 触发 user review,等待 3 选项决定:
+按 MANDATORY sha256sum check 规则执行。本 commit 触发 user review,等待 3 选项决定:
 
 - **A**: 维持 phantom binary, sprint 4.4 在 phantom 上跑 (现状)
 - **B**: 先 rebuild src0/ 让 HEAD rebuild = phantom 功能 (sprint 4.5 提前)
@@ -3051,7 +3047,6 @@ HEAD rebuild 路径 (jhyy_v1_dbg.exe) 只用于 debug, 不入 baseline。
 - `memory/project_sprint4_4_phantom_binary_finding.md` — 详细分析
 - `memory/project_sprint4_4_cleanup_crash_discovery.md` — 基于 phantom 的 cleanup crash 发现
 - `memory/project_sprint4_1_phantom_baseline_finding.md` — 2026-08-07 commit 2.29 同类问题
-- `memory/feedback_regress_baseline_binary_hash.md` — MANDATORY sha256sum check
 
 ## v0.9 wip commit 2.45 (2026-08-08) — Sprint 4.6 step 3 W-005 真修 LANDED: IRVal struct layout alignment
 
@@ -3110,7 +3105,7 @@ typedef struct {
 - `memory/project_sprint4_6_irval_layout_fix.md` — 本次 ship 完整记录
 - `memory/project_sprint4_6_workaround_failed.md` — Option 2/4 Variants 1+2 实证
 - `memory/feedback_fix_evaluation_rule.md` — 5/5 PASS 规则 (W-005 实修 trial 拒了 2 个 5/5 segfault fix)
-- `memory/feedback_codegen_workaround_linkage.md` — W-005 联动 W-008/W-009/W-007
+- W-005 联动 W-008/W-009/W-007
 
 ---
 
@@ -3159,7 +3154,7 @@ typedef struct {
 ### 相关 memory
 
 - (留底后补 — Sprint 4.25 真根因 plan agent 验证 + A′ 守卫实施)
-- `memory/feedback_codegen_workaround_linkage.md` — W-005/W-008/W-009/W-007 联动 (本 fix 是 W-005 #2 family 最后一块拼图)
+- W-005/W-008/W-009/W-007 联动 (本 fix 是 W-005 #2 family 最后一块拼图)
 
 ---
 
@@ -3233,4 +3228,4 @@ v1.0.0 tag 后 (commit `eabee0d`, 2026-08-10), commit `6f52ac7` 留下的 Phase 
 ### 关键 memory
 
 - `memory/project_mcp_jhyy_sprint1.md` — mcp-jhyy Sprint 1 (上一 commit)
-- 本 commit 留底: `memory/feedback_v0_phase2_style_cleanup.md` (下一 file)
+- 本 commit 留底: v0 Phase 2 style cleanup 段 (下一 file, per git log commit 2.83 段)

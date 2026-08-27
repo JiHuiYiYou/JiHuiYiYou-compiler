@@ -140,7 +140,7 @@
 - `compiler/src/codegen.c` (无改动 — 真修已 ship in v0.8 commit 9)
 - `compiler/src0/*.jhyy` (无改动 — workaround 代码本身保留, 翻译风格一致)
 - `compiler/tests/` (无改动)
-- 4 个 `tmp/w004_*.jhyy` 测试文件不入 git (按 `feedback_no_build_artifacts_in_git` 原则, 测试用例留 `tmp/` 不跟踪)
+- 4 个 `tmp/w004_*.jhyy` 测试文件不入 git (测试用例留 `tmp/` 不跟踪,per build artifacts 守门)
 
 ### 留给未来 (post-v1.1.1 ship)
 
@@ -155,7 +155,7 @@
 - [`docs/internal/workarounds.md` § W-006](../../internal/workarounds.md) — 关系澄清 (不同 family, 不连带)
 - [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md` § Sprint v1.1.1](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
 - `memory/project_w006_transitively_resolved.md` — W-006 transitive close 模板 (本文 mirror)
-- `memory/feedback_v0_codegen_bug_workarounds.md` — Bug 1 (hash_string overread) + Bug 6 (let-mut assignment) W-004 真因
+- v0 codegen Bug 1 (hash_string overread) + Bug 6 (let-mut assignment) W-004 真因 (per git log)
 - `memory/feedback_qbe_crlf_root_cause.md` — QBE 行号偏移错 (无关 W-004 但同 family 教训)
 - Stage 1 byte-equal 7/7 PASS (持平 baseline)
 - Task #60 fix: commit `52843b6` (v0.9 wip 2.15) — 验证路径 unblock
@@ -297,7 +297,7 @@
 ### 引用
 
 - [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md` § Sprint v1.1.4](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
-- `memory/feedback_v0_codegen_bug_workarounds.md` — 4 个 v0 codegen bug 列表 + 触发面
+- 4 个 v0 codegen bug 列表 + 触发面 (per git log sprint 4)
 
 ---
 
@@ -335,7 +335,7 @@
 ### 引用
 
 - [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md` § Sprint v1.1.5](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
-- `memory/feedback_v0_codegen_bug_workarounds.md` — Bug 2 描述
+- v0 codegen Bug 2 描述 (per git log)
 
 ---
 
@@ -373,7 +373,7 @@
 ### 引用
 
 - [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md` § Sprint v1.1.6](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
-- `memory/feedback_v0_codegen_bug_workarounds.md` — Bug 3 描述
+- v0 codegen Bug 3 描述 (per git log)
 
 ---
 
@@ -432,7 +432,7 @@ if (!conv && (src_qt == 'w' || src_qt == 'l') && (dst_qt == 'b' || dst_qt == 'h'
 - [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md` § Sprint v1.1.7](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
 - `memory/project_sprint_v1_1_7_bug4_narrow_cast.md` — 本 sprint 详细记录
 - `memory/project_sprint4_7_irval_pass_by_value_bug.md` — Sprint 4.7 首次发现 Bug 4 (W-005 #2 family EMIT-layer 形态)
-- `memory/feedback_v0_codegen_bug_workarounds.md` — Bug 4 描述
+- v0 codegen Bug 4 描述 (per git log)
 
 ---
 

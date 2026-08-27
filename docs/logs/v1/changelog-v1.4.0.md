@@ -234,7 +234,7 @@
 **核心机制:**
 - **Stage 0**: `gcc compiler/src/*.c -o compiler/build/bin/jhyy_stage0.exe` — C 端产物, 改 src/*.c 后重建
 - **Stage 1**: `jhyy_stage0.exe compile compiler/src0/main.jhyy -o compiler/build/bin/jhyy` — jhyy-side 产物 = production
-- **Baseline 同步**: `cp jhyy.exe jhyy.exe.exe` + `cp jhyy.exe jhyy_v1.exe.exe` (per `feedback_regress_baseline_binary_hash.md`, baseline 必须 .exe.exe)
+- **Baseline 同步**: `cp jhyy.exe jhyy.exe.exe` + `cp jhyy.exe jhyy_v1.exe.exe` (baseline 必须 .exe.exe, sha256sum MANDATORY 守门)
 - **Makefile 简化**: `make` = stage 0 + stage 1; `make stage0` 只 stage 0; `make selfhost` 跑 Stage 2 closure 链验证
 
 **触发的工作流:**
@@ -324,7 +324,7 @@
 
 **引用:**
 - v1.4.6 父 sprint: [`docs/plans/v1/v1.4.0任务清单 + 概要设计.md`](../../plans/v1/v1.4.0任务清单%20+%20概要设计.md) § Sprint v1.4.6
-- 真修详细方案: [`docs/plans/v1/v1.4.0详细实现方案.md`](../../plans/v1/v1.4.0详细实现方案.md) (umbrella per feedback_changelog_umbrella.md)
+- 真修详细方案: [`docs/plans/v1/v1.4.0详细实现方案.md`](../../plans/v1/v1.4.0详细实现方案.md) (umbrella per changelog umbrella convention)
 - workarounds RESOLVED 标注: [`docs/internal/workarounds.md`](../../internal/workarounds.md) § W-017 / W-019 / W-020
 
 ---
@@ -343,8 +343,8 @@
 - `.gitignore` — 删 `!regress_v1.py` + `!regress_stage0.py` 2 个例外
 - `mcp-jhyy/jhyy_regress.py` docstring — 删 "regress.py / regress_v1.py / regress_stage0.py shim 共用" → 改 "regress.py shim 共用"
 - `docs/internal/build.md:56` — binary 列表注释改 "regress.py --binary=jhyy_v1.exe.exe 用, v1.4.7 合并进 regress.py"
-- `memory/feedback_regress_baseline_binary_hash.md` 行 33 — "regress.py AND regress_v1.py both output" → "regress.py --binary=jhyy.exe AND --binary=jhyy_v1.exe.exe --include-informational both output"
-- `docs/logs/v1/changelog-v1.4.0.md` — 本 ship section (umbrella per feedback_changelog_umbrella.md)
+- regress.py 行 33 规则更新 — "regress.py AND regress_v1.py both output" → "regress.py --binary=jhyy.exe AND --binary=jhyy_v1.exe.exe --include-informational both output"
+- `docs/logs/v1/changelog-v1.4.0.md` — 本 ship section (单 umbrella changelog)
 
 **核心机制:**
 
@@ -428,10 +428,10 @@ Summary: 2/2 gated binary PASS, 1 informational (matrix only)
 - ✅ CI workflow 行数减少 ~25 行 (3 step → 2 step, 注释精简)
 
 **未达成 (透明声明):**
-- ❌ `jhyy_v1.exe.exe` 仍未恢复 v1.0.0 canonical baseline (`2445e97d...`) — 留给 v1.5 installer 设计时定夺 (per memory `feedback_regress_baseline_binary_hash.md` + v1.5 plan line 248)
+- ❌ `jhyy_v1.exe.exe` 仍未恢复 v1.0.0 canonical baseline (`2445e97d...`) — 留给 v1.5 installer 设计时定夺 (sha256sum 守门 + v1.5 plan line 248)
 - ❌ `make regress` target 未加 — 跟 `mcp-jhyy/jhyy_regress.py` CLI + ci.yml 入口重复, 不加 (per "Don't add features beyond what the task requires")
 
-**mirror 守门 (per `feedback_regress_baseline_binary_hash.md`):**
+**mirror 守门 (sha256sum MANDATORY):**
 - 删 shim 前 sha256sum `jhyy.exe` `jhyy_v1.exe.exe` `jhyy_stage0.exe` 三 binary baseline 记录进 changelog (本次保留 v1.4.6 sha + 加 v1.4.7 新 sha)
 - `_GATED_DEFAULTS` 表替代原 3 shim 散落的 magic-default, centralize 避免漂移
 
@@ -448,7 +448,7 @@ Summary: 2/2 gated binary PASS, 1 informational (matrix only)
 - v1.4.7 plan: `C:\Users\liuzhen\.claude\plans\jaunty-orbiting-naur.md` (本 sprint 设计)
 - v1.4.7 父 sprint: [`docs/plans/v1/v1.4.0任务清单 + 概要设计.md`](../../plans/v1/v1.4.0任务清单%20+%20概要设计.md) § Sprint v1.4.7 (新增)
 - jhyy_regress shared logic: `mcp-jhyy/jhyy_regress.py` (Sprint mcp-1 抽出)
-- memory `feedback_regress_baseline_binary_hash.md` (sha256sum MANDATORY 规则)
+- sha256sum MANDATORY 守门规则 (内化到 regress.py 守门流程)
 - memory `feedback_regress_py_abspath.md` (os.path.abspath() 规则, 新 regress.py 继承)
 - v1.4.5 ship section (commit `0518f3d`): 三跑守门首次 ship, v1.4.7 cleanup 替代
 - superseder commits: `f20e36d` (W-017) / `6638134` (W-019) / `ad42117` (W-020)

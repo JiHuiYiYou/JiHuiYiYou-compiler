@@ -45,7 +45,7 @@ jhyy.exe parse+sema 0 errors / QBE 阶段未触发，但 `jhyy.exe compile codeg
 **Workaround**：删 duplicate stmt-RETURN case（line 864-881），单 NODE_RETURN case 处理 expr-position；
 stmt-position 自动走同一分支（cg_stmt → cg_expr 合并）。sret 字段处理延迟到 commit 4（cg_func 配合）。
 
-memory `feedback_v0_codegen_bug_workarounds.md` 已加 bug 6 条目。
+v0 codegen bug 6 条目已记入 git log sprint 4 codegen bug 段。
 
 ### 3. NODE_BINARY 完整翻译（含 short-circuit + signed/unsigned 分派）
 

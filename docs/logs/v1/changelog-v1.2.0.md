@@ -70,7 +70,7 @@
 
 - [[project-v1-0-post-50-53-plan]] § Phase 3.1 — W-005 / W-003 / `_vN` 清理原始 plan
 - [[project-sprint-v1-1-2-c-side-divergence]] — C-side vs jhyy_v1 IL divergence 已知性质 (`a75bcd6e` ≠ `2445e97d` 是预期)
-- [[feedback-regress-baseline-binary-hash]] — sha256sum 检查守门 (本次事故 jhyy_v1.exe 被改 → git restore 恢复 `aa57849c...` + jhyy_v2.exe 恢复 `d3aeed09...` + jhyy_v1.il 已在 MCP selfhost_check 重写后被改 → 不 critical,因 jhyy_v1.il 不是 tracked)
+- sha256sum 检查守门 (本次事故 jhyy_v1.exe 被改 → git restore 恢复 `aa57849c...` + jhyy_v2.exe 恢复 `d3aeed09...` + jhyy_v1.il 已在 MCP selfhost_check 重写后被改 → 不 critical,因 jhyy_v1.il 不是 tracked)
 
 ---
 
@@ -271,7 +271,7 @@
 
 - v1.2.1/v1.2.2/v1.2.3 changelog — 同样 pure rename 验证 (Stage 2 N=3 7 行 cascade 跨 sprint 一致)
 - [[project-sprint-v1-1-2-c-side-divergence]] — C-side vs jhyy_v1 IL divergence 性质 (rename 后 sha 变化是预期)
-- [[feedback-regress-baseline-binary-hash]] — sha256sum 检查守门 (本次全程 jhyy_v1.exe.exe `ba94df93` + jhyy_v*.exe 4 个 closure binary canonical sha 0 干扰)
+- sha256sum 检查守门 (本次全程 jhyy_v1.exe.exe `ba94df93` + jhyy_v*.exe 4 个 closure binary canonical sha 0 干扰)
 
 ---
 
