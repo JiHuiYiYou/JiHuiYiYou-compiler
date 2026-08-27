@@ -284,7 +284,7 @@ JiHuiYiYou-compiler/
 
 ### VS Code 扩展
 
-`vscode-ext/` 提供语法高亮(TextMate grammar + 文件图标)。安装方式见 [`vscode-ext/`](vscode-ext/) 目录;历史 PowerShell / Code Runner 配置片段见 `docs/internal/` 旧档。
+`vscode-ext/` 提供语法高亮(TextMate grammar + 文件图标) + v1.5.9 原生 ▶ play 按钮 (替换 v1.5.6-patch2 的 Code Runner 集成)。安装方式见 [`vscode-ext/`](vscode-ext/) 目录;历史 PowerShell 配置片段见 `docs/internal/` 旧档。
 
 ---
 

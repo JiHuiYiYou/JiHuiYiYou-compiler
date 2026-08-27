@@ -9,6 +9,7 @@ Windows 引导式安装器 — 把 JHYY 编译器装到 `C:\Program Files\JHYY\`
 ✅ **v1.5.3 done** — `Bundle.wxs` 写出, `build.ps1 bundle` 跑通, `jhyy-installer-1.5.3.exe` (1.6MB) 生成。Burn bundle 走 standard `WixStandardBootstrapperApplication` UI (next-next-finish, RTF license, MSYS2 prereq 提示在 Welcome page, post-install 提示在 Success page)。
 
 ✅ **v1.5.4 done** — VSCode ext auto-install (`.vsix` + CustomAction `code --install-extension`), `.jhyy` file association (双击 → `jhyy run file.jhyy`), Start Menu 增强 (Documentation / Quick Start 走 Internet Shortcut `.url`)。`wix msi validate` 0 ICE errors。
+> **superseded by v1.5.7-rc1 / v1.5.10**: CustomAction 走 deferred cmd.exe 链触发 1721 错位;RunOnce 接管 + inline `code --install-extension` 是当前实现 (见 `install-configure-all.bat`)。
 
 ✅ **v1.5.5 done** — GitHub Actions release workflow (`.github/workflows/release.yml`, tag `v*` + manual `workflow_dispatch`), 第三方 manifest reference (winget 3 文件 + scoop 1 文件, schema 校验通过, no actual publish), `installer/gen-sha256.ps1` 写 SHA256.txt, `installer/changelog-template.md` Release notes 模板。`tag v*` push → 自动 build + upload + Release; RC tag 自动 mark prerelease; workflow_dispatch dry-run 入口作为 escape hatch。
 
@@ -24,7 +25,7 @@ Windows 引导式安装器 — 把 JHYY 编译器装到 `C:\Program Files\JHYY\`
 
 **v1.5.4 scope (已完成)**:
 - `installer/vscode-ext/package.ps1` — VSCode ext 打包 (vsce package + version patch)
-- `installer/common/install-vsix.bat` — 检测 `code` 命令 + 装 .vsix 脚本 (CustomAction deferred 调用)
+- ~~`installer/common/install-vsix.bat` — 检测 `code` 命令 + 装 .vsix 脚本 (CustomAction deferred 调用)~~ → **superseded in v1.5.10**, deleted (dead code since v1.5.7 — parser bug; RunOnce inline replaces it)
 - `installer/common/JHYY Documentation.url` + `JHYY Quick Start.url` — Internet Shortcut files (MSI Shortcut.Target 不允许 URL, 用 .url 文件)
 - `installer/compiler/jhyy-compiler.wxs` 新增 ComponentGroups: `JHYYVSCodeExt` (.vsix payload), `JHYYFileAssoc` (HKCR\.jhyy ProgID + shell\open\command), `JHYYURLShortcuts` (.url files)
 - CustomAction `InstallVSCodeExt` (deferred, after InstallFiles, Return="ignore", ComSpec registry search)

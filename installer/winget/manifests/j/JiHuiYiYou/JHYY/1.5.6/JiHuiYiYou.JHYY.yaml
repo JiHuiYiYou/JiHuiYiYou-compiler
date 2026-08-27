@@ -1,19 +1,37 @@
-# winget version manifest - JHYY 1.5.6
+# winget installer manifest - JHYY 1.5.6
 #
-# winget multi-file manifest v1.5.0 schema (https://github.com/microsoft/winget-cli)
-# Package: JiHuiYiYou.JHYY
-# Version: 1.5.6
+# *** SUPERSEDED in v1.5.9 / v1.5.10 ***
+# v1.5.6-patch2 originally shipped with Code Runner integration
+# (formulahendry.code-runner auto-install + code-runner.executorMap write).
+# v1.5.9 replaced Code Runner dependency with a native jhyy-lang VSCode
+# extension play button; v1.5.10 closes the OOTB gap by RunOnce-auto-installing
+# the .vsix. Code Runner is no longer bundled, installed, or configured.
+# This manifest is kept as the historical v1.5.6 release snapshot.
 #
-# Sprint v1.5.6 — patch2 (Code Runner integration):
-#   reference manifest, not yet published to winget-pkgs.
-#   Per plan decision-11: actual publish deferred to v2.x.
+# (informational; original notes retained below for the historical snapshot)
+#   InstallerSha256 to be filled by GH Actions release workflow
+#   (reads installer/SHA256.txt and substitutes the value at release time).
+#   For local reference / dry-run validation, use the SHA from the actual
+#   GitHub Release SHA256.txt asset once uploaded.
+#
+# Why Burn bundle: WiX 4 Burn bundles are first-class winget installers
+# (`InstallerType: burn`); winget CLI runs them with `BurnArgs`.
 
-PackageIdentifier: JiHuiYiYou.JHYY
-PackageVersion: 1.5.6
 PackageLocale: en-US
-PackageName: JHYY Compiler
-Publisher: JiHuiYiYou
-License: MIT
-ShortDescription: JHYY (机会翼游) — statically-typed language + bootstrapping compiler for Windows
-ManifestType: version
+PackageVersion: 1.5.6
+Platform:
+  - Windows.Desktop
+MinimumOSVersion: 10.0.17763.0
+InstallerType: burn
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v1.5.6/jhyy-installer-1.5.6.exe
+    InstallerSha256: <FILL_AT_RELEASE_TIME_FROM_SHA256.txt>
+    InstallerSwitches:
+      Silent: /quiet
+      SilentWithProgress: /passive
+    UpgradeBehavior: install
+    Commands:
+      - jhyy
+ManifestType: installer
 ManifestVersion: 1.5.0

@@ -36,8 +36,8 @@ upgrades silently keep old version (silent corruption).
 |-----------|------|
 | JhyyExe | `A76D4595-11CE-4F86-B70A-170A6FDA06B0` |
 | QbeExe | `096E27A7-65E2-465C-BA58-399A02C0F000` |
-| InstallVSIXBat | `5D1C3BC5-EBC3-472A-9744-1F96692A2E6F` |
-| ConfigureCodeRunnerPS1 (v1.5.6-patch2) | `F7A2D6E0-9B3C-4D1A-9E5F-3C7B8A2D6E01` |
+| ~~InstallVSIXBat (v1.5.4 — superseded in v1.5.10, dead code parser bug)~~ | ~~`5D1C3BC5-EBC3-472A-9744-1F96692A2E6F`~~ |
+| ~~ConfigureCodeRunnerPS1 (v1.5.6-patch2 — superseded in v1.5.10, Code Runner 集成已移除)~~ | ~~`F7A2D6E0-9B3C-4D1A-9E5F-3C7B8A2D6E01`~~ |
 | InstallConfigEnvPS1 (v1.5.7-rc1, now invoked by RunOnce) | `0ADA340F-4463-466E-AFEE-302147CC0DD4` |
 | InstallConfigVSCodePS1 (v1.5.7-rc1, now invoked by RunOnce) | `0FA909A4-020F-4BEC-AACD-D9B3F5BB7A16` |
 | InstallConfigureAllBat (v1.5.7-rc1 rev 2 — RunOnce target) | `B7C4D5E9-2A1F-4E3B-9C8D-6F5A2E8B1C44` |

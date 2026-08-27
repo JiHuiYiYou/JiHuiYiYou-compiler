@@ -205,11 +205,13 @@ switch ($Target) {
                   -Destination "$vscodeExtDir/jhyy-lang-$JHY_VERSION_DISPLAY.vsix" -Force
 
         # 3. build MSI via WiX 4/7
-        #   bindpath bin/ -> jhyy.exe + qbe.exe + install-vsix.bat
-        #   bindpath common/ -> license.rtf
+        #   bindpath bin/        -> jhyy.exe + qbe.exe + runtime.{c,h} + jhyy_helpers.c + UI assets
+        #   bindpath common/     -> license.rtf + install-configure-all.bat + 2 .ps1 helpers
         #   bindpath vscode-ext/ -> jhyy-lang-X.Y.Z.vsix
         #   loc Locale.zh-CN.wxl for Chinese UI strings
         #   -ext WixUtilExtension for WixUI_Minimal dialog set
+        #   (v1.5.10: install-vsix.bat + configure-coderunner.ps1 removed — see
+        #   install-configure-all.bat inline `code --install-extension` step.)
         & wix build `
             installer/compiler/jhyy-compiler.wxs `
             -arch x64 `

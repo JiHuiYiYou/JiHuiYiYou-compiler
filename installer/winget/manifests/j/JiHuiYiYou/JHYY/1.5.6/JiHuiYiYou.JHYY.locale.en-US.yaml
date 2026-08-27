@@ -1,6 +1,11 @@
 # winget locale manifest (en-US) - JHYY 1.5.6
 #
-# Sprint v1.5.6 — patch2 (Code Runner integration):
+# *** SUPERSEDED in v1.5.9 / v1.5.10 ***
+# v1.5.6-patch2 originally described Code Runner integration. v1.5.9 replaced
+# it with a native jhyy-lang VSCode extension play button. This manifest is
+# kept as the historical v1.5.6 release snapshot.
+#
+# Sprint v1.5.6 — patch2 (informational only; integration no longer present):
 #   winget locale. Only en-US for now (per plan, MSI UI has
 #   zh-CN via Locale.zh-CN.wxl; winget locale is for store-style descriptions
 #   which English-first is the common Windows convention).

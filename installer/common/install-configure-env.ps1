@@ -19,7 +19,8 @@
 # Idempotent: skip if already "inherit".
 #
 # CustomAction: deferred, impersonate=no, Return=ignore (failure non-fatal
-# per v1.5.2 pattern with install-vsix.bat).
+# per v1.5.2 pattern; v1.5.7-rc1 rev 2 pivot — install-vsix.bat superseded
+# in v1.5.10, this orchestrator now runs from HKLM RunOnce instead).
 
 $ErrorActionPreference = "Stop"
 

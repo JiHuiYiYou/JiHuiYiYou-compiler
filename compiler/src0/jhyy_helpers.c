@@ -168,8 +168,8 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
     /* v1.5.6 W-037: layout detection (取代 v1.4.1 hardcoded dirname × 4).
        原 bug: dirname × 4 假设 jhyy.exe 在 <root>\compiler\build\bin\ (源码树),
        但 installer layout 是 <INSTALLDIR>\bin\jhyy.exe (只有 1 层), dirname × 4
-       走到 C:\ → qbe/qbe.exe 找不到 → "QBE failed". 用户 Code Runner 用 installer
-       版 jhyy.exe (PATH 排第一) 时 100% 触发.
+       走到 C:\ → qbe/qbe.exe 找不到 → "QBE failed". 用户 VSCode 通过 PATH
+       调 installer 版 jhyy.exe (PATH 排第一) 时 100% 触发.
        修法: 先试 installer layout (sibling qbe.exe), 否则 walk-up 找 <root>\qbe\qbe.exe.
        详情 docs/internal/workarounds.md W-037. */
 
