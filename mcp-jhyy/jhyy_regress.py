@@ -149,6 +149,9 @@ def run_test(
     # Read expected exit from comment if present
     expected = None
     has_main = False
+    # v1.7.0 Stage 1: EXPECT-ERROR — 期望 compile fail 且 stderr 含 substring.
+    # 跟 EXPECT (整数 exit code) 互斥: 同一 test 只能用一个.
+    expect_error_kw = None
     # v1.5.6: SETENV directive — 解析 // SETENV: KEY=VALUE 行, 注入到
     # _build_subprocess_env() 返回的 env. 测试用: 验证 jh_gcc_path() 在不同
     # env 状态下的探测行为 (Priority 1 JHY_GCC / Priority 2 JHYY_HOME).
@@ -159,6 +162,9 @@ def run_test(
         m = re.search(r"//\s*EXPECT(?:ECT)?\s*[:=]\s*(\d+)", src)
         if m:
             expected = int(m.group(1))
+        m_err = re.search(r'//\s*EXPECT-ERROR\s*[:=]\s*"([^"]+)"', src)
+        if m_err:
+            expect_error_kw = m_err.group(1)
         # Skip library files (no main entry)
         has_main = bool(re.search(r"\bfn\s+main_jhyy\b", src))
         # SETENV: 解析多行 KEY=VALUE (注释行从 # 起; 行尾 # 也算注释)
@@ -189,6 +195,15 @@ def run_test(
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
                        encoding="utf-8", errors="replace", env=test_env)
     if r.returncode != 0:
+        # v1.7.0 Stage 1: EXPECT-ERROR test 期望 compile fail.
+        # kw check 用 full stderr (compile 启动 log 可能 200+ 字符);
+        # display msg 仍 truncate 200 字符 for human readability.
+        if expect_error_kw is not None:
+            if expect_error_kw in r.stderr:
+                return (True, None, -1, f"compile-failed (expected, kw={expect_error_kw!r})")
+            return (False, None, -1,
+                    f"compile failed but kw not found: expected={expect_error_kw!r}, "
+                    f"got stderr[:200]={r.stderr[:200]!r}")
         return (False, expected, -1, f"compile failed: {r.stderr[:200]}")
     exe = os.path.abspath(out_base + ".exe")
     if not os.path.exists(exe):
