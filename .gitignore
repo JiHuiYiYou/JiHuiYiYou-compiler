@@ -101,3 +101,7 @@ qbe/test/
 qbe/tools/
 qbe/minic/
 qbe/doc/
+# v1.5.9: vscode-ext/ Node.js build artifacts (npm install + tsc compile output)
+# package-lock.json 例外: track 用于 build 复现
+vscode-ext/node_modules/
+vscode-ext/out/

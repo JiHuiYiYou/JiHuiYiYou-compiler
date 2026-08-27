@@ -9,4 +9,7 @@
 !LICENSE
 !language-configuration.json
 !icon.svg
+!icon.png
 !syntaxes/**
+!out/**
+!out/**/**

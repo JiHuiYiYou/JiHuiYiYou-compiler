@@ -65,6 +65,33 @@ $patchedContent = [regex]::Replace($origContent, '"version"\s*:\s*"[^"]+"', {
 Set-Content -Path $pkgPath -Value $patchedContent -NoNewline
 Write-Host "[package.ps1] version: $origVersion -> $($env:JHY_VERSION)"
 
+# 3.5. tsc compile (skip if no src/, 兼容 manifest-only 扩展历史 build)
+$srcDir = "vscode-ext/src"
+if (Test-Path $srcDir) {
+    Write-Host "[package.ps1] compiling TypeScript..."
+    if (-not (Test-Path "vscode-ext/node_modules")) {
+        Write-Host "[package.ps1] installing devDependencies (one-time)..."
+        Push-Location "vscode-ext"
+        try { & npm install --no-audit --no-fund --omit=optional 2>&1 | Out-Host }
+        finally { Pop-Location }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[ERROR] npm install failed in vscode-ext/"
+            exit 1
+        }
+    }
+    if (-not (Get-Command npx -ErrorAction SilentlyContinue)) {
+        Write-Host "[ERROR] npx not found in PATH. Install Node.js."
+        exit 1
+    }
+    Push-Location "vscode-ext"
+    try { & npx --no-install tsc -p . 2>&1 | Out-Host }
+    finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] tsc failed; aborting vsce package"
+        exit 1
+    }
+}
+
 # 4. cd vscode-ext/ 然后 package (vsce 默认 cwd 找 package.json)
 Push-Location "vscode-ext"
 try {

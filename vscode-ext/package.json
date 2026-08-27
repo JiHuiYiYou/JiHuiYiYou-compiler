@@ -10,16 +10,52 @@
     },
     "license": "MIT",
     "engines": { "vscode": "^1.80.0" },
+    "icon": "./icon.png",
+    "main": "./out/extension.js",
+    "activationEvents": [
+        "onLanguage:jhyy",
+        "onCommand:jhyy.runFile",
+        "onCommand:jhyy.compileOnly"
+    ],
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "@types/vscode": "^1.80.0",
+        "typescript": "^5.4.5"
+    },
     "categories": ["Programming Languages"],
     "contributes": {
+        "commands": [
+            { "command": "jhyy.runFile",     "title": "Run JHYY File",              "icon": "$(play)" },
+            { "command": "jhyy.compileOnly", "title": "Compile JHYY File (no run)", "icon": "$(tools)" }
+        ],
+        "menus": {
+            "editor/title/run": [
+                { "command": "jhyy.runFile", "when": "resourceExtname == .jhyy", "group": "navigation" }
+            ],
+            "editor/title": [
+                { "command": "jhyy.compileOnly", "when": "resourceExtname == .jhyy", "group": "navigation" }
+            ]
+        },
+        "keybindings": [
+            { "command": "jhyy.runFile", "key": "ctrl+f5", "when": "editorLangId == jhyy" }
+        ],
+        "configuration": {
+            "title": "JHYY",
+            "properties": {
+                "jhyy.run.executor":      { "type": "string",  "default": "jhyy run", "description": "Command template. Use {file} for absolute path." },
+                "jhyy.run.executorPath":  { "type": "string",  "default": "",        "description": "Absolute path to jhyy.exe. Empty = use PATH (recommended)." },
+                "jhyy.run.terminalName":  { "type": "string",  "default": "JHYY",    "description": "Reusable terminal name." },
+                "jhyy.run.saveBeforeRun": { "type": "boolean", "default": true,      "description": "Save dirty document before run." }
+            }
+        },
         "languages": [{
             "id": "jhyy",
             "aliases": ["JHYY", "jhyy"],
             "extensions": [".jhyy"],
             "configuration": "./language-configuration.json",
             "icon": {
-                "light": "./icon.svg",
-                "dark": "./icon.svg"
+                "light": "./icon.png",
+                "dark": "./icon.png"
             }
         }],
         "grammars": [{
