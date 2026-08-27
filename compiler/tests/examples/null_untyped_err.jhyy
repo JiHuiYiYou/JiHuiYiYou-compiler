@@ -1,7 +1,8 @@
 // null_untyped_err.jhyy — v1.3.1 negative test: untyped null must error
 // `let p = null;` cannot infer type — sema must reject.
-// EXPECT: sema error "cannot infer type of `null` (declare as *T, ...)"
-// (This file is excluded from regress by `_` prefix — use jhyy_check to verify error.)
+// v1.7.0 Stage 1: promoted from `_null_untyped_err` → `null_untyped_err`.
+//                  EXPECT-ERROR replaces manual jhyy_check verification.
+// EXPECT-ERROR: "cannot infer type"
 
 fn main_jhyy() -> i32 {
     let p = null;          // MUST error: no declared pointer type

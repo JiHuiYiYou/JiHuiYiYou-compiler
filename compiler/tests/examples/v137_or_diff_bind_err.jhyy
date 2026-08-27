@@ -1,5 +1,6 @@
-// EXPECT: ERROR expected (compile-time sema error)
 // v1.3.7: OR pattern `Some(x) | Some(y)` should be rejected — must use same binding name
+// v1.7.0 Stage 1: EXPECT-ERROR replaces descriptive comment.
+// EXPECT-ERROR: "OR pattern"
 
 type Option = enum { Some(i32), None }
 

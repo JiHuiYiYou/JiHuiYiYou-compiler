@@ -1,3 +1,5 @@
+// v1.7.0 Stage 1: `for x in 42` should error — sema rejects non-iterable.
+// EXPECT-ERROR: "cannot index"
 fn main_jhyy() -> i32 {
     for x in 42 {
         return x;
