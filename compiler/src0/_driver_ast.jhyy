@@ -60,7 +60,7 @@ fn main_jhyy(_argc: i32, _argv: *u8) -> i32 {
     // ──── NODE_FLOAT ────
     // 注：v0.6.2 codegen bug #8 + #9 + QBE Windows backend bug（f64 存 struct 字段
     // emit `movsd %gpr`）：用 jh_f64_store C bridge 绕开（C 端 GCC emit 正确 movsd %xmm0）。
-    let n_float = ast_new_float(&a, "f.jhyy" as *u8, 1 as i32, 1 as i32, 3.14 as f64);
+    let n_float = ast_new_float(&a, "f.jhyy" as *u8, 1 as i32, 1 as i32, 3.14 as f64, PRIM_F64() as i32);  /* v1.7.0 Stage 5: prim added */
     if (*n_float).kind == NODE_FLOAT() {
         printf("A6\n", 0);
     } else {

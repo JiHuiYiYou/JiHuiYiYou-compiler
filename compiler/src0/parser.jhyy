@@ -685,7 +685,9 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         parser_advance(p, &t);
         let mut val: f64 = 0.0;
         jh_f64_atof(t.start, t.length, (&val) as *u8);
-        left = ast_new_float((*p).arena, loc_lf, loc_ll, loc_lc, val);
+        /* v1.7.0 Stage 5: detect f32/f64 suffix via jh_float_suffix_prim (mirror int path) */
+        let prim = jh_float_suffix_prim(t.start, t.length);
+        left = ast_new_float((*p).arena, loc_lf, loc_ll, loc_lc, val, prim);
     }
     else if t.kind == TOKEN_STRING() {
         parser_advance(p, &t);

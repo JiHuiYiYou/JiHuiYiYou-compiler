@@ -170,7 +170,16 @@ static Token scan_number(Lexer *l) {
             next_char(l);
     }
 
-    if (is_float) return make_token(l, TOKEN_FLOAT, start, l->current - start);
+    if (is_float) {
+        /* v1.7.0 Stage 5: scan float suffix f32/f64 (mirror INT path below).
+        // Suffix is part of the token text but parsed later by prefix_float. */
+        if (peek_char(l) == 'f') {
+            next_char(l);  /* skip f */
+            while (isdigit(peek_char(l)))
+                next_char(l);
+        }
+        return make_token(l, TOKEN_FLOAT, start, l->current - start);
+    }
 
     /* scan type suffix for integers: i8, i16, i32, i64, u8, u16, u32, u64 */
     /* the suffix is part of the token text but parsed later */

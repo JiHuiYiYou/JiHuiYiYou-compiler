@@ -324,7 +324,8 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         return n->type;
     }
     case NODE_FLOAT: {
-        n->type = type_primitive(ctx->arena, PRIM_F64);
+        NodeFloat *d = node_float_data(n);
+        n->type = type_primitive(ctx->arena, d->prim);  /* v1.7.0 Stage 5: read prim (was: hardcoded PRIM_F64) */
         return n->type;
     }
     case NODE_STRING: {

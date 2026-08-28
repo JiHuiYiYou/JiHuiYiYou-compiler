@@ -856,8 +856,22 @@ static Node *prefix_float(Parser *p, Token token) {
     char buf[64];
     size_t n = token.length < 63 ? token.length : 63;
     memcpy(buf, token.start, n); buf[n] = '\0';
+    /* v1.7.0 Stage 5: detect f32/f64 suffix (mirror prefix_int).
+       Suffix was consumed by lexer scan_number (just before TOKEN_FLOAT emit);
+       suffix sits at end of buf (e.g. "2.5f32" → strip "f32" → atof "2.5"). */
+    TypePrimitive prim = PRIM_F64;
+    for (size_t i = 0; i < n; i++) {
+        if (buf[i] == 'f' && i + 1 < n) {
+            int bits = atoi(buf + i + 1);
+            if (bits == 32)      prim = PRIM_F32;
+            else if (bits == 64) prim = PRIM_F64;
+            /* strip suffix from buf before atof */
+            buf[i] = '\0';
+            break;
+        }
+    }
     double val = atof(buf);
-    return ast_new_float(p->arena, token.loc, val);
+    return ast_new_float(p->arena, token.loc, val, prim);
 }
 
 static Node *prefix_string(Parser *p, Token token) {

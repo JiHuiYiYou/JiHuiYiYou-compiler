@@ -192,11 +192,12 @@ type NodeInt = struct {
 }
 fn NODE_INT_SIZE() -> i64 { return 16 as i64; }
 
-// value(f64 8) = 8
+// v1.7.0 Stage 5: value(f64 8) + prim(i32 4) + pad(4) = 16 (mirror NodeInt layout)
 type NodeFloat = struct {
     value: f64,
+    prim:  i32,
 }
-fn NODE_FLOAT_SIZE() -> i64 { return 8 as i64; }
+fn NODE_FLOAT_SIZE() -> i64 { return 16 as i64; }
 
 // chars(*u8 8) + len(i64 8) = 16
 type NodeString = struct {
@@ -612,13 +613,14 @@ fn node_int_data(n: *Node) -> *NodeInt {
 }
 
 fn ast_new_float(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
-                 val: f64) -> *Node {
+                 val: f64, prim: i32) -> *Node {  /* v1.7.0 Stage 5: prim added */
     let buf = arena_alloc(a, NODE_SIZE() + NODE_FLOAT_SIZE());
     let n = ast_init_node(buf, NODE_FLOAT(), loc_filename, loc_line, loc_col);
     let d = (buf as i64 + NODE_SIZE()) as *NodeFloat;
     // QBE Windows amd64 backend bug workaround：f64 存 struct 字段 emit
     // `movsd %gpr`（应该 XMM）。C 端 jh_f64_store 走 GCC emit（正确 movsd %xmm0）。
     jh_f64_store(d as *u8, val);
+    (*d).prim = prim;
     return n;
 }
 

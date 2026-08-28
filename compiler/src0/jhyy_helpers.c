@@ -70,6 +70,29 @@ int jh_f64_atof(const char *s, long long len, void *dst) {
     return 0;
 }
 
+/* v1.7.0 Stage 5：parse_expr prefix_float 解析 `2.5f32` / `2.5f64` 后缀。
+   返回 PRIM_F32 (8) / PRIM_F64 (9), 无后缀或无法识别返回 PRIM_F64 (default)。
+   Mirror jh_int_suffix_prim pattern. */
+int jh_float_suffix_prim(const char *s, long long len) {
+    for (long long i = 0; i < len; i++) {
+        char c = s[i];
+        if (c == 'f') {
+            int bits = 0;
+            long long j = i + 1;
+            while (j < len && s[j] >= '0' && s[j] <= '9') {
+                bits = bits * 10 + (s[j] - '0');
+                j++;
+            }
+            switch (bits) {
+                case 32: return 8;  /* PRIM_F32 */
+                case 64: return 9;  /* PRIM_F64 */
+            }
+            return 9;  /* fallback PRIM_F64 */
+        }
+    }
+    return 9;  /* no suffix → PRIM_F64 */
+}
+
 /* v1 sprint 3 commit 4：parse_expr prefix_int 解析 `42i32` / `100u8` 后缀。
    返回 PRIM_* 常量（0..10），无后缀或无法识别返回 PRIM_I32 (2)。 */
 int jh_int_suffix_prim(const char *s, long long len) {

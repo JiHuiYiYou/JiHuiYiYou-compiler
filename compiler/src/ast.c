@@ -81,9 +81,11 @@ Node *ast_new_int(Arena *a, SourceLoc loc, int64_t val, TypePrimitive prim) {
     return n;
 }
 
-Node *ast_new_float(Arena *a, SourceLoc loc, double val) {
+Node *ast_new_float(Arena *a, SourceLoc loc, double val, TypePrimitive prim) {  /* v1.7.0 Stage 5: prim added */
     Node *n = new_node(a, NODE_FLOAT, loc, sizeof(NodeFloat));
-    node_float_data(n)->value = val;
+    NodeFloat *d = node_float_data(n);
+    d->value = val;
+    d->prim  = prim;
     return n;
 }
 

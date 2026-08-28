@@ -439,6 +439,21 @@ fn lex_scan_number(l: *Lexer, t: *Token) -> i32 {
     }
 
     if is_float == (1 as i32) {
+        // v1.7.0 Stage 5: scan float suffix f32/f64 (mirror INT path below).
+        // Suffix is part of the token text but parsed later by prefix_float.
+        let pf = lex_peek_char(l);
+        if pf == (102 as i32) {  // 'f'
+            let _pf1 = lex_next_char(l);
+            let mut keep_f = 1 as i32;
+            while keep_f == (1 as i32) {
+                let c = lex_peek_char(l);
+                if isdigit(c) != (0 as i32) {
+                    let _pf2 = lex_next_char(l);
+                } else {
+                    keep_f = 0 as i32;
+                }
+            }
+        }
         lex_make_token(l, TOKEN_FLOAT(), start, ((*l).current as i64 - start as i64), t);
         return 0 as i32;
     }

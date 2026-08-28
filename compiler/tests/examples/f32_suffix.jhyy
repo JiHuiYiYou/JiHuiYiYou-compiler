@@ -1,0 +1,20 @@
+// EXPECT: 0
+// v1.7.0 Stage 5: Float suffix f32 显式 (spec §4.5)
+// 验证 `2.5f32` → f32 type + suffix 不静默吞
+//
+// Stage 5 起点 (修前): prefix_float 不解析 suffix, atof 静默吞 f32 后缀,
+// sema NODE_FLOAT 硬编 PRIM_F64, codegen 走 default f64 → 后跟 sema annotation
+// coerce 路径 truncate 到 f32 (let a: f32 = 2.5f32)。
+// Stage 5 ship 后: prefix_float 解析 f32/f64 suffix, ast_new_float 传 prim,
+// sema 直接设 type, codegen emit s_X 直 f32 literal。
+//
+// 用 f32→i32 cast (而不是 f32==f64 比较) 避开 coerce 路径 + 跨宽度 promote,
+// 强断言取整是 4 (即 suffix 生效, f32 直算, 不是 f64 静默走过)。
+
+fn main_jhyy() -> i32 {
+    let a: f32 = 2.5f32;
+    let b: f32 = 1.5f32;
+    let s: f32 = a + b;          // 4.0f32
+    let s_as_i: i32 = s as i32;  // 4
+    return s_as_i - 4;           // EXIT=0
+}

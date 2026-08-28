@@ -1,0 +1,14 @@
+// EXPECT: 0
+// v1.7.0 Stage 5: Float suffix f64 显式 (spec §4.5, redundant but accepted)
+// 验证 `2.5f64` → f64 type, suffix 不静默吞 (跟 default f64 等价)
+//
+// spec §4.5 只示例 f32 后缀 (因 f64 是 default), Stage 5 一致性接受 f64 后缀
+// (跟 Int suffix `42i32` 接受同理 — 跟 default 等价但不报错)。
+
+fn main_jhyy() -> i32 {
+    let a: f64 = 2.5f64;
+    let b: f64 = 1.5f64;
+    let s: f64 = a + b;          // 4.0f64
+    let s_as_i: i32 = s as i32;  // 4
+    return s_as_i - 4;           // EXIT=0
+}

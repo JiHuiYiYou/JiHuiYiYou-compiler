@@ -508,7 +508,9 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         return t;
     }
     if (*n).kind == NODE_FLOAT() {
-        let t = type_primitive(ta, PRIM_F64());
+        // v1.7.0 Stage 5: read d->prim (was: hardcoded PRIM_F64)
+        let d = node_float_data(n);
+        let t = type_primitive(ta, (*d).prim);
         (*n).type_ptr = t as *u8;
         return t;
     }

@@ -91,7 +91,10 @@ typedef struct {
     TypePrimitive prim;       /* i32, u64, etc. */
 } NodeInt;
 
-typedef struct { double value; } NodeFloat;
+typedef struct {
+    double        value;
+    TypePrimitive prim;       /* v1.7.0 Stage 5: f32 / f64 (default F64) — mirror NodeInt */
+} NodeFloat;
 typedef struct { const char *chars; size_t len; } NodeString;
 typedef struct { uint32_t ch; } NodeChar;  /* v1.7.0 Stage 3: widen to hold UTF-8 BMP codepoint (was: char) */
 typedef struct { bool value; } NodeBool;
@@ -320,7 +323,7 @@ NodeModule       *node_module_data(Node *n);
 struct Arena;
 
 Node *ast_new_int(struct Arena *a, SourceLoc loc, int64_t val, TypePrimitive prim);
-Node *ast_new_float(struct Arena *a, SourceLoc loc, double val);
+Node *ast_new_float(struct Arena *a, SourceLoc loc, double val, TypePrimitive prim);  /* v1.7.0 Stage 5: prim added */
 Node *ast_new_string(struct Arena *a, SourceLoc loc, const char *chars, size_t len);
 Node *ast_new_char(struct Arena *a, SourceLoc loc, uint32_t ch);  /* v1.7.0 Stage 3: was: char */
 Node *ast_new_bool(struct Arena *a, SourceLoc loc, bool val);

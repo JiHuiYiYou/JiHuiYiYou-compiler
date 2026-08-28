@@ -3,7 +3,7 @@
 > **承接**: v1.6.0 shipped (spec 语法全覆盖 + 混合 test + W-053/W-054 fix).
 > **目标**: 用 5 个候选 (W-055 pointer arith / UTF-8 char literal / EXPECT-ERROR runner / `_v135_inline_simple_recursive` STACK_OVERFLOW / Float suffix) 分多步走,不着急,先 ship Stage 1 + Stage 2 真的两段(其他 stage 推后续 sprint)。
 > **scope**: per `docs/plans/v1/v1.7.0任务清单 + 概要设计.md` + 用户节奏决策(2026-08-27)。
-> **本 umbrella 涵盖 4 已 ship 阶段**:Stage 1 EXPECT-ERROR runner + Stage 2 W-055 spec §9.5 pointer arithmetic + Stage 3 W-056 UTF-8 2-byte BMP char literal + char type `u8 → i32` (spec §4.4 align) + Stage 4 `_v135_inline_simple_recursive` diagnostic test promote (排查发现无 codegen bug, 范围重定义为 test 文件 promote)。Stage 5 (Float suffix `f32`/`f64`, spec §4 待 verify) 推后续 sprint。
+> **本 umbrella 涵盖 5 已 ship 阶段** (5/5 完成):Stage 1 EXPECT-ERROR runner + Stage 2 W-055 spec §9.5 pointer arithmetic + Stage 3 W-056 UTF-8 2-byte BMP char literal + char type `u8 → i32` (spec §4.4 align) + Stage 4 `_v135_inline_simple_recursive` diagnostic test promote (排查发现无 codegen bug, 范围重定义为 test 文件 promote) + **Stage 5 Float suffix `f32`/`f64` (spec §4.5 align, last umbrella candidate)**。
 
 ---
 
@@ -15,7 +15,7 @@
 | **Stage 2** | ✅ done (commit `6216138` + `187e8ab`) | **W-055 spec §9.5 pointer arithmetic 真修**: sema 加 `*T +/- int → *T` / `int + *T → *T` / `*T - *T → i64` 类型规则 + codegen emit pointer arith (const-fold NODE_INT + extsw w→l + mul sizeof(elem)) + `&NODE_INDEX` codegen 真修 (返地址非值) + 3 个诊断 test 进 default regress |
 | **Stage 3** | ✅ done (commits `934d9e0` + `3f89ce8`) | **W-056 UTF-8 2-byte BMP char literal + char type `u8 → i32` (spec §4.4 align)**: lexer lead-byte mask dispatch (1/2/3/4 bytes, 3/4 显式 reject) + decode_char_literal widen `unsigned char → uint32_t` + sema `PRIM_U8 → PRIM_I32` + codegen drop `(unsigned char)` + `& 255` mask + src0/parser.jhyy 3 处 inline copy 改共享 helper + 2 new BMP test 进 default regress |
 | **Stage 4** | ✅ done (this commit) | **`_v135_inline_simple_recursive` diagnostic test promote 进 default regress**: 排查发现无 codegen bug — 源程序缺 base case 是 infinite recursion, runtime STACK_OVERFLOW 是预期 OS-level 行为, codegen.c:902 `current_inline_sym != fn_sym` 守卫工作正常 (IL 验证 emit `call $loopy` 非 inline 展开)。加 base case `if n <= 0 { return 0; }` → loopy(5)=15 终止 → 加 `// EXPECT: 15` → git mv 改回非 underscore 名 → 进 default regress 验证 guard 路径生效 |
-| Stage 5 | ⏸️ 推后续 | Float suffix `f32`/`f64` (spec §4 待 verify) — 用户节奏决策"不着急" |
+| **Stage 5** | ✅ done (this commit) | **Float suffix `f32`/`f64` (spec §4.5 align, last umbrella candidate)**: lexer scan `f`+digits 仿 INT suffix 路径 + NodeFloat 加 `prim` 字段 (mirror NodeInt) + parser `prefix_float` 扫描 suffix bits → PRIM_F32/F64 dispatch + sema 读 `d->prim` 替代硬编 PRIM_F64 + codegen 已 ship dispatch 不动 + 2 new test 进 default regress (f32_suffix / f64_suffix) |
 
 ---
 
@@ -23,11 +23,11 @@
 
 | 指标 | v1.6.0 ship | v1.7.0 ship | Δ |
 |------|------------|-------------|---|
-| regress PASS (jhyy.exe) | 78/82 PASS + 4 SKIP | **89/89 PASS + 4 SKIP** | +11 PASS (Stage 2: +8, Stage 3: +2, Stage 4: +1) (-1 删 `_ptr_arith_limit.jhyy`) |
-| regress PASS (jhyy_stage0.exe) | 78/82 PASS + 4 SKIP | **89/89 PASS + 4 SKIP** | +11 PASS |
+| regress PASS (jhyy.exe) | 78/82 PASS + 4 SKIP | **91/91 PASS + 4 SKIP** | +13 PASS (Stage 2: +8, Stage 3: +2, Stage 4: +1, Stage 5: +2) (-1 删 `_ptr_arith_limit.jhyy`) |
+| regress PASS (jhyy_stage0.exe) | 78/82 PASS + 4 SKIP | **91/91 PASS + 4 SKIP** | +13 PASS |
 | ACTIVE workaround 数 | W-055 ACTIVE | -2 (W-055 + W-056 RESOLVED) | -2 |
-| src/ src0 byte-equal closure | ✅ (Stage 2 闭环) | ✅ (Stage 4 闭环仍闭, jhyy_v1.il == v2.il == v3.il == v4.il, sha 不变 7552aa94...) | unchanged (test-only change) |
-| 新 test 数 | — | 11 (Stage 1: 5 进 default, Stage 2: 3 进 default, Stage 3: 2 进 default, Stage 4: 1 进 default) | +11 |
+| src/ src0 byte-equal closure | ✅ (Stage 2 闭环) | ✅ (Stage 5 闭环仍闭, jhyy_v1.il == v2.il == v3.il == v4.il, 新 sha `02e8eb522eb18c2fd88660413f601fcc31da97107c4882c4206528978429df7d`) | unchanged (N=4 闭) |
+| 新 test 数 | — | 13 (Stage 1: 5 进 default, Stage 2: 3 进 default, Stage 3: 2 进 default, Stage 4: 1 进 default, Stage 5: 2 进 default) | +13 |
 | 删 test 数 | — | 1 (`_ptr_arith_limit.jhyy` — W-055 LIMIT 标记, RESOLVED 后无用) | -1 |
 
 ---
@@ -159,13 +159,11 @@
 
 ## Stage 4-5 推后续 sprint (per 用户节奏决策 "不着急")
 
-| Stage | 简述 | 启动时机 |
-|-------|------|---------|
-| **Stage 5** | Float suffix `f32`/`f64` (spec §4 待 verify) | Stage 4 ship 后, user 拍板 |
+> **Stage 5 (this commit, 已 ship)** — Float suffix `f32`/`f64` (spec §4.5 align)。本段已 ship, 转去下方 "Stage 5 — Float suffix `f32`/`f64` (spec §4.5 align)" 段 (line 229)。
 
 ---
 
-## Stage 4 — `_v135_inline_simple_recursive` diagnostic test promote 进 default regress (this commit)
+## Stage 4 — `_v135_inline_simple_recursive` diagnostic test promote 进 default regress (commit `31dc213`)
 
 > **承接**: Stage 3 ship (commits `934d9e0` + `3f89ce8`)。
 > **范围重定义**: 跟原 umbrella 描述"_v135_inline_simple_recursive STACK_OVERFLOW 真修 (diagnostic → fix)" 不一致 — 排查发现 **无 codegen bug**, 本 stage 实际是 **test 文件 promote**。
@@ -224,7 +222,101 @@
 1. **按 stage 走** — 不再 5 stage 一次性 plan, Stage 详细 plan + 后续 stage 一行索引 (master)
 2. **小步走** — 每 stage 拆 6-8 小步, 每步独立可 ship
 3. **不跑全量 regress** — 改用: 单 test → 受影响 subset → baseline 用 `--save-baseline` 锁定, 只在最后 ship 前跑一次 `--all`
-4. **小规划不写 docs/plans/** — 单 stage step-by-step plan 走 plan mode 或直接执行 (per `feedback_small_plans_no_docs.md`)
+4. **小规划不写 docs/plans/** — 单 stage step-by-plan 走 plan mode 或直接执行 (per `feedback_small_plans_no_docs.md`)
+
+---
+
+## Stage 5 — Float suffix `f32`/`f64` (spec §4.5 align, last umbrella candidate) (this commit)
+
+> **承接**: Stage 4 ship (commit `31dc213`)。
+> **Stage 性质**: 中低风险 — codegen + QBE dispatch + sema 已有 f32/f64 全套 (`float_arith_f32.jhyy` / `float_cmp.jhyy` 已 PASS), 缺的是 **suffix 解析路径**。Mirror Int suffix (`42i32`) 范式即可。
+> **Stage 5 ship 后** = **v1.7.0 umbrella 5/5 完成**, 可 ship v1.7.0 终 tag (tag 单独决策)。
+
+### 排查背景
+
+v1.6.0 changelog 把 `float suffix (2.5f32)` 列入 deferred-features table。Spec §4 (v1.1.0) §4.5 已经写 `let c = 2.0e10f32;` / `let tiny = 1e-5f32;` (lines 165, 238) — 但 lexer 没扫 `f` 前缀, parser 没 parse suffix, 实际 `2.5f32` 走 `atof("2.5f32")` → 静默丢 suffix (atof stops at non-digit), 当前 type 硬编 `PRIM_F64`。
+
+**Stage 5 起点 (深入排查)** — 摸底时发现:
+- lexer.c:173 `if (is_float) return make_token(...)` **立即 return**, **不消费** `f`+digits suffix (跟 INT path line 177-181 不对称 — INT 消费 `i`/`u`+digits 把 suffix 跟进 length)。所以 `2.5f32` 实际 lex 出 TOKEN_FLOAT "2.5" + TOKEN_IDENT "f32" 两 token, parser 报 "expected ;, got ident"。
+- 所以 Stage 5 scope 实际 = **lexer + parser + AST + sema 4 处改** (不是 plan 估的 3 处)。codegen + ir + QBE 全 ship 不动。
+
+### 完成定义
+
+- ✅ `compiler/src/lexer.c:173-181` lexer scan_number 仿 INT 路径加 `if (peek_char(l) == 'f') { next_char; while isdigit }` — 把 suffix 跟进 TOKEN_FLOAT length
+- ✅ `compiler/src0/lexer.jhyy:441-458` 镜像 (用现有 `lex_peek_char` + `lex_next_char` + `isdigit` 调用)
+- ✅ `compiler/src/ast.h:94` NodeFloat 加 `TypePrimitive prim` 字段 (mirror NodeInt)
+- ✅ `compiler/src/ast.h:326` `ast_new_float` signature 加 `TypePrimitive prim` 参
+- ✅ `compiler/src/ast.c:84-90` `ast_new_float` 写 `d->prim = prim`
+- ✅ `compiler/src0/ast.jhyy:196-200` `NodeFloat` struct 加 `prim: i32`, `NODE_FLOAT_SIZE() 8 → 16`
+- ✅ `compiler/src0/ast.jhyy:614-625` `ast_new_float` mirror (加 `prim: i32` 参 + `(*d).prim = prim`)
+- ✅ `compiler/src/parser.c:855-870` `prefix_float` 扫描 `buf[i] == 'f'` 找 suffix + atoi bits → PRIM_F32/F64 dispatch + strip suffix 走 atof + 传 prim 给 ast_new_float
+- ✅ `compiler/src/parser.c:860` 调用点 signature 自动适配 (新 prim 参)
+- ✅ `compiler/src0/parser.jhyy:684-690` 镜像 — 加 `let prim = jh_float_suffix_prim(...)` 走 C helper
+- ✅ `compiler/src0/jhyy_helpers.c` 加 `jh_float_suffix_prim` helper (mirror `jh_int_suffix_prim` 范式, 返 PRIM_F32=8 / PRIM_F64=9, 无后缀或无效返 9)
+- ✅ `compiler/src0/ffi.jhyy:43` 加 `extern fn jh_float_suffix_prim(...)` 声明
+- ✅ `compiler/src/sema.c:326-329` case NODE_FLOAT 改 `type_primitive(ctx->arena, d->prim)` (跟 NODE_INT line 321-325 同型)
+- ✅ `compiler/src0/sema.jhyy:510-515` 镜像 (读 `(*d).prim` 替代硬编 PRIM_F64)
+- ✅ `compiler/src/codegen.c:560-588` NODE_FLOAT codegen **不动** — 已 ship dispatch (line 567-569 读 `n->type->prim` → `'s'`/`'d'`, line 582 emit `s_X`/`d_X` QBE literal)
+- ✅ `compiler/src0/codegen.jhyy` 镜像 **不动** — parity 不动
+- ✅ `compiler/src/ir.c:20-21` `qbe_type_of` PRIM_F32→'s' / PRIM_F64→'d' **不动** — 已 ship
+- ✅ 2 new test 进 default regress:
+  - `f32_suffix.jhyy` (let a: f32 = 2.5f32; let b: f32 = 1.5f32; let s: f32 = a + b; return (s as i32) - 4) → EXIT=0 (验证 f32 直出 + 取整 4)
+  - `f64_suffix.jhyy` (let a: f64 = 2.5f64; let b: f64 = 1.5f64; let s: f64 = a + b; return (s as i32) - 4) → EXIT=0 (验证 f64 suffix 接受)
+- ✅ 3 existing float test EXIT 值不变 (Stage 5 走 suffix 直出 / 不依赖 annotation coerce):
+  - `float_arith.jhyy` EXIT=6
+  - `float_arith_f32.jhyy` EXIT=4
+  - `float_cmp.jhyy` EXIT=42
+
+### 关键 IL 验证 (Stage 5 跑前的 Stage 1 baseline vs 跑后)
+
+```diff
+# f32_suffix.jhyy
+- (Stage 1 baseline: 2.5f32 → atof 静默吞 f32, type 硬编 f64 → coerce f64→f32 via let a: f32 =
+-  stage0 codegen emit d_2.5 + truncd → f32 literal)
++ (Stage 5 ship: 2.5f32 → prefix_float 扫描 f32 → PRIM_F32 → sema 直设 → codegen 直 emit)
+  %t1 =s copy s_2.5
+  %t2 =s copy s_1.5
+  %t5 =w copy 4
+
+# f64_suffix.jhyy
++ %t1 =d copy d_2.5
++ %t2 =d copy d_1.5
++ %t5 =w copy 4
+
+# float_arith.jhyy (no suffix, default f64)
+  %t1 =d copy d_1.5
+  %t2 =d copy d_2.5
+  %t3 =d copy d_2
+```
+
+### 已知 limitation (Stage 5 不修, 推后续)
+
+1. **无效 suffix 静默吞** — `2.5f99` / `2.5x` 走 atof 静默 drop suffix (跟 Int suffix `42i99` 范式统一)。Stage 5 不引入显式 reject (Stage 3 '你' 显式 OOS 路径不同, 因 UTF-8 lead byte mask 有明确 valid 集合; f-suffix 集合 spec 只列 f32/f64, 其他全 reject 算 spec stretch)
+2. **f64 suffix 冗余** — spec §4.5 只示例 f32, f64 是 default。Stage 5 接受 `2.5f64` (跟 `42i32` 接受同理 — 跟 default 等价但不报错)
+3. **atof 跨平台精度** — Windows MSVCRT `atof` 跟 glibc `atof` 精度一致 (15-17 位 double round-trip safe). Stage 5 不引入新 atof call, 复用现有
+4. **`1e-5f32` scientific + suffix** — spec §4.5 line 238 示例 `let tiny = 1e-5f32;` (科学计数 + suffix). Stage 5 lexer 把整个 `1e-5f32` 走 prefix_float → atof 接受 `1e-5` 后 drop `f32` (atof stops at 'f'). Verify Step 5 .il 应见 `s_1e-05` 直出
+5. **umbrella 完成后 tag 决策** — Stage 5 ship 后 v1.7.0 5 stage 全部 ship, **tag 决策留给后续 sprint** (per 用户 2026-08-27 节奏决策 "tag 单独决定")
+
+### Jhyy-side 潜在 codegen 坑 (Stage 5 排查预判)
+
+1. **byte-by-byte buf read 范式** — src0/parser.jhyy prefix_float mirror 走 byte-by-byte 读 token text 找 'f', 跟 Stage 3 decode_char_literal 的 4-byte aligned `*i32` 读 pattern 不同。Stage 5 选 **C helper `jh_float_suffix_prim`** 简化 (走 store 模式, 跟 `jh_int_suffix_prim` 范式统一), jhyy 端只调 extern fn 拿 PRIM_* 常量返回 (无 f64 atoi / 字符串扫描 / 字节读等 jhyy 端复杂逻辑)
+2. **NODE_FLOAT_SIZE 改 8 → 16** — src0/ast.jhyy `NODE_FLOAT_SIZE()` 改 16 (double 8 + i32 4 + pad 4). Stage 5 已同步改
+3. **`f` byte collision in scientific notation** — `1.5e-3f32` token text 含 `f` 在 suffix 位置 (after digits + 'e' + '-3' + 'f32'). prefix_float 扫描 `f` 位置 → i = token text 里 'f' 的 index (在 suffix), strip 后 atof `1.5e-3` → 1.5e-3。**但** 若 token 是 `1e-5f32` (无小数点), `e` 不是 'f', 'f' 正确在 suffix 位置。Stage 5 扫描逻辑只看 'f', 不误判 'e'。safe
+
+### 验证 (5/5 PASS 必达 + Stage 5 byte-equal closure 必达)
+
+| 验证项 | 结果 |
+|--------|------|
+| f32_suffix.jhyy (`2.5f32` 直算 → 取整 4) | ✅ EXIT=0 (jhyy.exe + jhyy_stage0.exe 双 binary) |
+| f64_suffix.jhyy (`2.5f64` 直算 → 取整 4) | ✅ EXIT=0 (jhyy.exe + jhyy_stage0.exe 双 binary) |
+| float_arith.jhyy (`2.5` default f64) | ✅ EXIT=6 (双 binary) |
+| float_arith_f32.jhyy (`let a: f32 = 2.5` annotation 路径) | ✅ EXIT=4 (双 binary) |
+| float_cmp.jhyy (f64+f32 cmp + cross-width promote) | ✅ EXIT=42 (双 binary) |
+| 5-test float subset × 2 binary | ✅ 10/10 PASS (parity) |
+| full regress (jhyy.exe) | ✅ 91/91 PASS + 4 SKIP (vs Stage 4 89/89, +2 suffix tests) |
+| full regress (jhyy_stage0.exe) | ✅ 91/91 PASS + 4 SKIP (parity) |
+| Stage 5 N=4 byte-equal closure | ✅ jhyy_v1.il == v2.il == v3.il == v4.il sha `02e8eb522eb18c2fd88660413f601fcc31da97107c4882c4206528978429df7d` (新 sha 因 src/src0 改, 但 4 阶段 byte-equal 仍闭) |
+| f32_suffix.jhyy `.il` 直 emit `s_2.5` (f32 literal) | ✅ — IL 验证 `s_2.5` 跟 `s_1.5` (无 truncate) |
 
 ---
 
