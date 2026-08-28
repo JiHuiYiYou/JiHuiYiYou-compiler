@@ -431,6 +431,118 @@ v1.7.0 umbrella 5/5 ship 后, 主动扫 v1.8 候选必要性 (用户问 "还用�
 
 ---
 
+## v1.7.2 patch — 6 候选 fold (2 src0 parity + 3 test-only + 1 docs-only)
+
+> **承接**: v1.7.1 patch ship (`ce9915d`, 2026-08-28 — 4 强语言 fix + 2 docs RESOLVED + 1 deferred-nothing).
+> **触发**: 用户 2026-08-28 "查漏补缺，看看还有没有漏网之鱼排 1.7.2".
+> **决策**: 用户拍板 fold 6 候选进 v1.7.2 patch 不开 v1.8 umbrella (跟 v1.7.1 patch 同体量纪律).
+> **plan 性质**: 单 patch ship, 走 plan mode (per `feedback_small_plans_no_docs.md`).
+
+### Context
+
+v1.7.1 patch ship 后, 主动扫 v1.7.2 候选 (用户决策). Explore + fact-check 扫 6 优先级 source 出 4 候选 (3 test-only + 1 docs-only). 实施期 vendor QBE fact-check fail (A1 浮点 `%=` 不支持 remd/rems, 推 v2.x) → 删. **Plan agent 调查期新发现 2 src0 parity gap** (src0/codegen.jhyy 漏 NODE_SIZEOF case + 漏 NODE_PATTERN_ENUM 非-binding spill guard, 都镜像 src/codegen.c 已 ship 的代码) → fold 进 v1.7.2 patch, 总数 6 候选.
+
+### Ship 范围 (6 候选)
+
+#### Axis A' src0 parity 真修 2 候选 (Plan agent 调查期新发现)
+
+##### A1'. src0/codegen.jhyy 漏 NODE_SIZEOF case (~6 行) — 镜像 `src/codegen.c:570-575`
+- **类别**: src0 parity gap 真修 (新发现, 不在 W-015 范畴; W-015 修 arena 16-byte overflow 已 RESOLVED)
+- **文件**: `compiler/src0/codegen.jhyy` (line 1236 之后插入 ~6 行)
+- **根因**: `cg_expr` 显式 case 序列 NODE_INT/NODE_NULL/NODE_BOOL/NODE_FLOAT/NODE_STRING/NODE_CHAR/NODE_IDENT/.../NODE_MATCH 无 NODE_SIZEOF. fallthrough 时 `cg_expr` 返回 zero IRVal { kind: IRVAL_INT, id: 0, ival: 0 } (line 1214), 调用方 emit `=l copy 0`. sizeof_basic.il 实测 5 个 sizeof emit `copy 0` (而不是 4/8/1/8/8), total=0 → EXPECT=42 got=0
+- **真修**: 镜像 src/codegen.c:570-575 NODE_SIZEOF case — 用 `node_int_data(n)` 读 value (跟 `src0/sema.jhyy:548` 写入对齐), 用 `qbe_type_of((*n).type_ptr)` (跟 NODE_INT line 1232 镜像)
+- **状态**: → **新 src0 parity 真修, 不增 W-NNN** (per `feedback_changelog_umbrella`)
+
+##### A2'. src0/codegen.jhyy 漏 NODE_PATTERN_ENUM 非-binding spill guard (~10 行) — 镜像 `src/codegen.c:434-442`
+- **类别**: src0 parity gap 真修 (新发现; v1.7.1 patch A3 binding 路径已修, 非-binding 路径漏)
+- **文件**: `compiler/src0/codegen.jhyy` (line 1112 `let slot_base2 = matched;` 替换成 ~10 行 spill guard block)
+- **根因**: `let slot_base2 = matched;` 后直接 `add matched, 0` + `loadw slot_base2` + `ceqw`. 当 matched 是字面 IRVAL_INT (qbe_type='w') 没 stack slot, `add IRVAL_INT, 0` + `loadw literal` 是 UB. 触发 `match 1 { Color::Red => 0, ... }` cmp 永远乱 + `gdb_pretty_test.jhyy:read_color` (`match *c`) 同样 fail
+- **真修**: 镜像 src/codegen.c:434-442 `if matched.qbe_type == 'w'` spill guard (alloc8 + storew + loadw). C-side v1.7.1 patch A3 已修 binding 路径 + non-binding 路径, src0 mirror 只补 binding 路径漏了 non-binding. 修复后变量 rename `tmp_n` / `tmp_n_addr` 避免跟 binding path `tmp` / `tmp_addr` 冲突
+- **状态**: → **新 src0 parity 真修, 不增 W-NNN**
+
+#### Axis B Test-only 3 候选
+
+##### B1. `_sizeof_basic.jhyy` + `_sizeof_derived.jhyy` promote 进 default regress
+- **类别**: Underscore diagnostic → test promote (跟 Stage 4 v135_inline_*_run 同型)
+- **文件**: git mv `compiler/tests/examples/_sizeof_basic.jhyy` → `sizeof_basic.jhyy` + `_sizeof_derived.jhyy` → `sizeof_derived.jhyy`
+- **范围**: v1.3.3 期间写, W-015 + W-054 已 RESOLVED, sizeof 全功能可用. 但 src0-side 需 A1' 真修后才能在 jhyy.exe 跑通 — A1' + B1 coupled 同 ship
+- **行数**: 0 (纯 git mv, content 不改)
+
+##### B2. `min_enum.jhyy` test 设计 bug 修复
+- **类别**: Pre-existing test bug (v0.7+ 已存在, 跟 v1.7.1 patch 无关)
+- **文件**: `compiler/tests/examples/min_enum.jhyy`
+- **范围**: 改 `match 1 { Color::Red => 0, ... }` → `let c: Color = Color::Green; match c { ... }` (跟 gdb_pretty_test line 50 `match *c` 同型). 注意: B2 单独 ship 后 jhyy.exe 已能 PASS min_enum (let-bound 变量 qbe_type='l', spill guard 不触发), 但 A2' 仍是 gdb_pretty_test read_color (`*c` deref) 必须的 fix
+- **行数**: ~3 行 (加 let-bind + 改 match subject)
+
+##### B3. `gdb_pretty_test.jhyy` line 15-18 注释 fact-check 更新
+- **类别**: Doc hygiene (跟 `feedback_doc_refactor_factcheck` 同型)
+- **文件**: `compiler/tests/examples/gdb_pretty_test.jhyy:15-18`
+- **范围**: 注释提 "W-019 workaround ... would mask our pretty-printer test signal", W-019 已 RESOLVED 2026-08-14 (v1.4.6 commit `6638134`). 注释更新为"v1.8 umbrella defer" 语义 (nested struct DWARF pretty-printer 验证是单独 sprint 范围, 推 v1.8). 不加 nested struct coverage — 推 v1.8
+- **行数**: ~5 行 (注释替换)
+
+#### Axis C Docs-only 1 候选
+
+##### C1. workarounds.md master table vs section body fact-check 统一
+- **类别**: Doc hygiene (per `feedback_doc_refactor_factcheck` + `feedback_document_workarounds_in_docs.md`)
+- **文件**: `docs/internal/workarounds.md`
+- **范围**:
+  - **W-006** section body line 710 "Status 保持 ACTIVE (dormant)" 措辞修订 — 跟 master table line 33 ✅ RESOLVED 统一, "dormant" 改成"根因标 dormant 提醒未来 reader 不要 reset codegen stack-slot allocator"
+  - **W-007** section body line 1170 "🟡 ACTIVE (partial — struct field + global var 路径仍漏)" → ✅ RESOLVED (master table line 34 transitive 2026-08-12 验证 "5x5 PASS verified on 4 BAD variants — 单 return value + struct field + global var 全路径 cover")
+  - **W-042** master table 缺 row (v1.7.1 patch A1 ship 后没补 row) → 加 ✅ RESOLVED 2026-08-28 row; section body line 2941 "🟡 ACTIVE (v1.5.6)" → ✅ RESOLVED 2026-08-28 (v1.7.1 patch A1 Tier 1+2+3 全链 ship)
+  - **W-051** section body line 3287 + 3289 自相矛盾 ("✅ RESOLVED" + "🟡 ACTIVE" 同段) → 删 line 3289 "🟡 ACTIVE" 段 (master table line 53 + line 3287 已统一 ✅)
+- **行数**: ~10 行 (workarounds.md 局部修订)
+- **状态**: docs-only, **不增 W-NNN**
+
+### 关键约束 (per feedback_*, 跟 v1.7.0 Stage 1-5 + v1.7.1 patch 同型)
+
+- **Single umbrella changelog** per `feedback_changelog_umbrella.md` — v1.7.2 patch 段追加到 `changelog-v1.7.0.md` (v1.7 = v1.7.0 + v1.7.1 + v1.7.2 同一个 minor axis)
+- **No date estimates** per `feedback_no_date_estimates.md`
+- **5/5 PASS on target test** per `feedback_fix_evaluation_rule` — A1' sizeof 5/5 PASS + A2' min_enum/gdb_pretty 5/5 PASS, Stage 0 (jhyy_stage0.exe) / Stage 1 (jhyy.exe rebuild) / Stage 2 closure (jhyy_v2/v3/v4.exe) 全链 byte-equal
+- **Audit single-commit diff** per `feedback_audit_single_commit_diff`
+- **Author 必须 `JHYY <15901598712@163.com>`** per `feedback_git_identity_canonical`
+- **Co-author `MiniMax-M3 <noreply@MiniMax>`` per `feedback_commit_coauthor`
+- **小规划不走 docs/plans/** — v1.7.2 patch 走 plan mode (per `feedback_small_plans_no_docs.md`)
+- **fact-check 不只查 source 矛盾** per `feedback_doc_refactor_factcheck` — C1 严格逐条 fact-check + A1 vendor QBE 实施期发现 remd/rems 不支持 (fact-check 不只查 source 矛盾, 也要查 vendor 依赖)
+- **workaround 标 RESOLVED 不删除** per `feedback_document_workarounds_in_docs.md` — C1 section body 历史段保留
+
+### 验证 (6 候选 5/5 PASS 必达 + v1.7.2 patch N=4 byte-equal closure 必达)
+
+| 验证项 | 结果 |
+|--------|------|
+| A1' sizeof 5/5 PASS: Stage 0 / Stage 1 / v2 / v3 / v4 编 sizeof_basic.jhyy IL emit `=l copy 4` (各阶段 byte-equal closure) | ✅ 5/5 PASS |
+| A1' sizeof_basic run: jhyy.exe 编 + 跑 → EXIT=42 | ✅ PASS |
+| A1' sizeof_derived run: jhyy.exe 编 + 跑 → EXIT=42 | ✅ PASS |
+| A2' min_enum 5/5 PASS: Stage 0 / Stage 1 / v2 / v3 / v4 编 min_enum.jhyy (after B2 fix) IL emit 正确 | ✅ 5/5 PASS |
+| A2' min_enum run: jhyy.exe 编 + 跑 → EXIT=1 | ✅ PASS |
+| A2' gdb_pretty_test 5/5 PASS: Stage 0 / Stage 1 / v2 / v3 / v4 编 gdb_pretty_test.jhyy IL emit 正确 (read_color tag-compare 对) | ✅ 5/5 PASS |
+| A2' gdb_pretty_test run: jhyy.exe 编 + 跑 → EXIT=0 + (gdb pretty-printer 验证) | ✅ PASS |
+| B1 sizeof promote: _sizeof_basic/derived → sizeof_basic/derived 进 default regress | ✅ PASS |
+| B2 min_enum fix: min_enum.jhyy EXIT=1 (after A2' + B2 both ship) | ✅ PASS |
+| B3 gdb_pretty annotation: line 15-18 注释更新 + 行为不变 | ✅ PASS |
+| C1 docs: grep workarounds.md 验证 5 处 status 字段一致 (W-006 RESOLVED, W-007 RESOLVED, W-042 RESOLVED + master row, W-051 no self-contradicting ACTIVE) | ✅ PASS |
+| full regress (jhyy.exe, fresh rebuild) | ✅ **95/95 PASS + 4 SKIP** (vs v1.7.1 91/91+4, **+4 net**: A1' sizeof_basic + sizeof_derived promoted + A2' min_enum + gdb_pretty_test fixed) |
+| full regress (jhyy_stage0.exe parity — C-side src 没改) | ✅ **95/95 PASS + 4 SKIP** (parity) |
+| v1.7.2 patch N=4 byte-equal closure | ✅ jhyy_v1.il (sha `37ffc49c...` stage0-compiled) ≠ jhyy_v2.il = v3.il = v4.il (sha `04543cdb...` jhyy-side compiled). 新 sha 跟 v1.7.1 ship `3843271f...` 不同 — **expected**, A1'+A2' 改 src0/codegen.jhyy, jhyy-side 4 阶段 byte-equal 闭 |
+| save-baseline | ✅ 新 .sha256 文件 (`jhyy.exe.sha256 = c140708d...` 覆盖 v1.7.1 ship `68d65129...` + `jhyy_stage0.exe.sha256 = a7673a35...` 不变 lock) |
+
+### 净 ship 计数
+
+- **2 src0 parity 真修** (A1' NODE_SIZEOF case + A2' NODE_PATTERN_ENUM 非-binding spill guard, Plan agent 调查期新发现)
+- **2 test promote** (B1 sizeof_basic + sizeof_derived)
+- **1 test bug fix** (B2 min_enum test 设计)
+- **1 annotation fact-check** (B3 gdb_pretty_test W-019 stale 注释)
+- **1 docs-only RESOLVED** (C1 workarounds.md 5 处 fact-check 统一: W-006/W-007/W-042 master row add/W-042 section body/W-051 self-contradiction 删)
+- **1 deferred-to-nothing** (A1 浮点 `%=` 推 v2.x, vendor QBE 不支持 remd/rems)
+- **净**: 6 候选 ship + 1 deferred = **7 行项**, 实际改 ~16 行 src/src0 + ~8 行 test + ~10 行 docs + 2 git renames = **4 文件改 + 2 git renames + 1 changelog + 1 binary (jhyy.exe rebuild) + 1 sha256 baseline** ≈ 比 v1.7.1 patch 还小
+
+### 后续 (跟 Stage 5 + v1.7.1 patch ship 后同型 pause)
+
+1. **v1.7.x tag** — v1.7 (v1.7.0 + v1.7.1 + v1.7.2) ship 后, 是否 tag `v1.7.0` / `v1.7.1` / `v1.7.2`? (per `feedback_changelog_umbrella.md` vX.Y axis 单 umbrella changelog → 建议单 tag `v1.7.0` 包三 patch)
+2. **后续 sprint 候选** — 排 v1.8.x (新一轮 gap + workaround 扫描 + nested struct DWARF coverage + VariantsDesc offset bug 调研 + A1 fmod v2.x 范围 + Stage 1-5 umbrella fact-check)? 切 v2.x (QBE 完整重写 + 升级 vendor QBE 主线 + W-055 pointer arith 启动)? 切 v3.x (语言扩展 OS 准备)?
+3. **v1.7.2 误诊教训 fact-check** — v1.7.2 patch 实施期 Plan agent 调查期新发现 2 src0 parity gap (src0/codegen.jhyy 漏 NODE_SIZEOF case + NODE_PATTERN_ENUM spill guard), 跟 v1.7.1 patch A2 误诊教训同型纪律 (per `feedback_doc_refactor_factcheck`) — 建议 1 个 sprint 重新评估 v1.7.0 Stage 1-5 + v1.7.1/v1.7.2 候选是否还有"以为有 bug 实则无"项目
+
+---
+
 ## 引用
 
 - spec `docs/abis/jhyy-lang-spec-v1.1.0.md` § 9.5 (Pointer arithmetic — 权威)

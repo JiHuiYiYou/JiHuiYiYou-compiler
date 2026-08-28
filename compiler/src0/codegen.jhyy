@@ -1108,8 +1108,28 @@ fn cg_match_pattern(cg_raw: *u8, matched: IRVal, pattern: *Node, match_type: *u8
                     // v1.7.1 patch A3: non-binding enum pattern — 仍需 tag compare,
                     // 跟 binding 路径差异只在无 payload slot alias. 没这 fix 时
                     // `Option::None => 200` 走 fallback cmp=1, 永远第一 arm 命中
-                    // (per docs/internal/workarounds.md § Stage 3 已知限制 + W-XXX ACTIVE 段)
-                    let slot_base2 = matched;
+                    // (per docs/internal/workarounds.md § Stage 3 已知限制 + W-XXX ACTIVE 段).
+                    //
+                    // v1.7.2 patch A2': mirror src/codegen.c:434-442 spill guard.
+                    //   matched may be 'w' (literal/reg) when enum fits in a register —
+                    //   `add IRVAL_INT, 0` 把 literal 当 pointer + loadw literal 是 UB.
+                    //   触发 `match 1 { Color::Red => 0 }` cmp 永远乱 + gdb_pretty read_color fail.
+                    //   镜像 binding path 上方 (line 1070-1085) 的 spill block.
+                    let mut slot_base2 = matched;
+                    if matched.qbe_type == QBE_W() {
+                        let tmp_n = *ir_new_tmp(ir, QBE_L());
+                        ir_emit_str(ir, "    %t" as *u8);
+                        ir_emit_int(ir, "%d" as *u8, tmp_n.id);
+                        ir_emit_str(ir, " =l alloc8 8\n" as *u8);
+                        let tmp_n_addr = *ir_new_tmp(ir, QBE_L());
+                        ir_emit_binary(ir, tmp_n_addr, "add" as *u8, tmp_n, ir_new_int(0 as i64));
+                        ir_emit_str(ir, "    storew %t" as *u8);
+                        ir_emit_int(ir, "%d" as *u8, matched.id);
+                        ir_emit_str(ir, ", %t" as *u8);
+                        ir_emit_int(ir, "%d" as *u8, tmp_n_addr.id);
+                        ir_emit_str(ir, "\n" as *u8);
+                        slot_base2 = tmp_n_addr;
+                    }
                     let tag_addr2 = *ir_new_tmp(ir, QBE_L());
                     ir_emit_binary(ir, tag_addr2, "add" as *u8, slot_base2, ir_new_int(0 as i64));
                     let loaded_tag2 = *ir_new_tmp(ir, QBE_W());
@@ -1231,6 +1251,18 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         let d = node_int_data(n);
         let qt = qbe_type_of((*n).type_ptr);
         let v = *ir_new_tmp(ir, qt);
+        ir_emit_copy(ir, v, (*d).value);
+        return v;
+    }
+
+    // v1.7.2 patch A1': NODE_SIZEOF — sema fills n->type=i64 + node_int_data(value).
+    //   Emit like NODE_INT (value is the compile-time-computed size).
+    //   Mirror of src/codegen.c:570-575 (src-side has it; src0-side was missing).
+    //   Without this case sizeof(Type) falls through to zero IRVal (line 1214) and
+    //   emits `=l copy 0`, so sizeof_basic gets total=0 instead of 4+8+1+8+8=29.
+    if kind == NODE_SIZEOF() {
+        let d = node_int_data(n);
+        let v = *ir_new_tmp(ir, qbe_type_of((*n).type_ptr));
         ir_emit_copy(ir, v, (*d).value);
         return v;
     }

@@ -51,6 +51,7 @@
 | [W-027](#w-027-gh-actions-setup-msys2v2-把-msys2-装在-runnertempmsys64-ci--d-atempmsys64不在-cmsys64--硬编码-cmsys64ucrt64bin-找不到-gcc) | ✅ RESOLVED 2026-08-15 (commit `4623a3b` — v8 final) | `setup-msys2@v2` CI 装在 `$RUNNER_TEMP\msys64` (D:\a\_temp\msys64) 不在 C:\msys64 → hardcoded path 找不到 gcc; fix: deterministic MSYS2 root + known bin subdirs (no subprocess call) |
 | [W-028](#w-028-windows-process-exit-code-是-8-bit-mod-256-expect-注释里的值-255-在-ci-regress-fail-got106-不是-got1000042) | ✅ RESOLVED 2026-08-15 (v1 commit `6d2ab8f` + v2 sys.platform cygwin/msys 兼容) | Windows kernel32 ExitProcess 8-bit mod-256; EXPECT 注释里 ≥256 的值 CI regress FAIL — mod 256 comparison in regress.py (`sys.platform in ("win32", "cygwin", "msys")`) |
 | [W-051](#w-051-msi-deferred-execommand-customaction-type-34-在本机-systematic-报-1721--改用-hklm-runonce-解决) | ✅ RESOLVED 2026-08-28 (v1.7.1 patch B2, permanent workaround shipped v1.5.7-rc1) | MSI deferred CA type 34 在 SYSTEM token 下 systematic 报 1721 (`CreateProcess` argv mis-tokenize cmd/c 链); workaround = 改用 HKLM RunOnce (USER context 跑 master .bat + 多个 .ps1), trade-off 是 fresh install 需 logoff/logon 一次。WiX/MSI engine 升级不可预期, 不再尝试 revert |
+| [W-042](#w-042-link_with_gcc-失败只打-gcc-link-failed--缺-invoke_buf-诊断) | ✅ RESOLVED 2026-08-28 (v1.7.1 patch A1, Tier 1+2+3 全链 ship) | `link_with_gcc` 失败时只打 "gcc link failed" 缺 `invoke_buf` 诊断 → Tier 1 invoke_buf echo (v1.5.6) + Tier 2 stderr capture via pipe (v1.7.1 patch A1) + Tier 3 post-link .exe stat (v1.7.1 patch A1) 全链 ship |
 | [W-052](#w-052-match-字面量范围模式1num10-两侧-parser--codegen-都漏-literal-range) | ✅ RESOLVED 2026-08-27 | README "tour of the syntax" `1..10 => "single digit"` 在 match arm 里 parser 两边都漏 DOTDOT follow-up + codegen 两边都漏 NODE_PATTERN_LIT manual emit. 修复: add `try_pattern_range` helper (C-side parser.c) / extend `parse_pattern_primary` + DOTDOT follow-up (jhyy-side parser.jhyy) + manual emit NODE_PATTERN_LIT (C-side codegen.c) + manual emit NODE_PATTERN_LIT/NODE_INT (jhyy-side codegen.jhyy). 新增 `compiler/tests/examples/match_range.jhyy` integration test (regress 54/54 PASS, 3 skip). Stage 2 byte-equal 闭环 hold (jhyy_selfhost_check all_byte_equal=true). |
 | [W-053](#w-053-字符字面量转义不全--n-t-r-0-之外-escape-以及-xhh-漏解码) | ✅ RESOLVED 2026-08-27 | spec §4.4 字符字面量族 (`\n \t \r \0 \\ \' \" \xHH`) 全漏 decode;`'` 后的 char 走 `t.start[1]` 直接当 ASCII,导致 pattern match 的 char arm 永假;`'\\'` `'\''` `'\"'` lex ERROR. 修复: src/lexer.c `scan_char` escape switch 加 `'"'` + src/parser.c 提取共享 `decode_char_literal()` (含 hex_val 子函数) + src0/lexer.jhyy 镜像加 `e == 34` + src0/parser.jhyy 3 处 TOKEN_CHAR decode 全镜像(并修复 `parse_pattern_primary` `p_addr = t.start` 漏 +1 offset 的旧 bug). 新增 `char_literal.jhyy` (9 escape case) + `char_pattern.jhyy` (`'\n'` literal match + `'a'..'z'` range match) integration test. 5/5 PASS per `feedback_fix_evaluation_rule`. Stage 2 byte-equal 闭环 hold. |
 | [W-054](#w-054-sizeof-il-未定义-t0-真因-qbe_type_of-撞-data-layout) | ✅ RESOLVED (via W-053 chain, 2026-08-27) | Plan agent 探测的 "sizeof emit `%t1 =w copy %t0` 时 `%t0` 未定义" 是假症状。实际根因 = W-053 fix 路径上,把 `qbe_type_of` (i8→'w' widening) 应用到 data section 时,word-packed const array 的 byte 25 落到 7th word 的 2nd byte (= 0),期望值 122 错误。修复: src/ir.c 拆 `qbe_type_of` (SSA widen 必 word-sized, QBE 拒 'b'/'h') vs 新 `qbe_data_type_of` (data section 字节 packed,const array 字节寻址正确);src/ir.h 暴露 + src/codegen.c 3 处 data emit 切到 `qbe_data_type_of`. W-054 不需要单独修,作为 W-053 fix chain 副作用消除。 |
@@ -706,7 +707,7 @@ fn main_jhyy() -> i32 {
 - 翻译阶段已用 `return n;` / `return 0 as *u8;` / `return (n as i64 + NODE_SIZE()) as *Type;` 单 operand 形式替代 (codegen / sema / ast)
 - 翻译风格: `let z = x + y; return z;` intermediate let 已普遍 (避免直接 return sum)
 
-**结论**: W-006 在当前 src0/ **0 活跃触发面**, 但根因 (codegen stack-slot allocator bug) 未真修, 新写代码仍可能触发。Status 保持 ACTIVE (dormant), 标记 "dormant" 提醒未来 reader。
+**结论**: W-006 在当前 src0/ **0 活跃触发面**, 但根因 (codegen stack-slot allocator bug) 未真修, 新写代码仍可能触发。Workaround 状态 ✅ RESOLVED (0 活跃触发面 = 不需要 active 维护); 根因标 dormant 提醒未来 reader 不要 reset codegen stack-slot allocator (per `feedback_document_workarounds_in_docs.md` "superseded 标 RESOLVED 不删除" 原则, W-006 整段保留作为历史归档)。
 
 **风险**: 如果未来写 `return x + y` (双 1-char) 又会触发 → 需机械改名 / 类型注解 / intermediate let。改动面在 codegen.jhyy stack-slot allocator 真修之前, 工作量随代码增长线性增加。
 
@@ -1166,7 +1167,7 @@ QBE：`invalid type for second operand %t29 in ceql`
 | ID | 触发面 | 根因 | 真修状态 | commit |
 |----|-------|------|---------|--------|
 | **W-005** | `let mut x; x = expr;` (NODE_ASSIGN + NODE_IDENT) segfault | C/jhyy CGContext struct 布局不匹配 (9 字段 offset) | ✅ RESOLVED | v0.9 wip commit 2.11 (CGContext 对齐) + 2.13 (16 处 revert 回 `let mut`) |
-| **W-007** | `fn() -> i64 { return X as i64; }` emit `w copy` | cg_convert_arg 缺 `src=W, dst=L` extsw 分支 | 🟡 ACTIVE (partial — 单 return value 路径修了, struct field + global var 路径仍漏) | v0.8 commit 7 (`0453cef`) partial |
+| **W-007** | `fn() -> i64 { return X as i64; }` emit `w copy` | cg_convert_arg 缺 `src=W, dst=L` extsw 分支 | ✅ RESOLVED (transitive 2026-08-12, master table 5x5 PASS verified on 4 BAD variants — 单 return value + struct field + global var 全路径 cover) | v0.8 commit 7 (`0453cef`) 原始 + transitive 2026-08-12 验证 |
 | **W-008** | cg_find_field_offset 双层 deref 漏 → i64 struct field emit `=w loadw` | cg_find_field_offset helper 把 `*u8` 指针当 `**u8` 多解一层 | ✅ RESOLVED | v0.8 commit 11 |
 | **W-009** | cg_convert_arg src_t==0 早 bail → literal 0 在 ceql/csltl 中以 w 操作数出现 | cg_convert_arg 入口 `if src_t == 0 { return arg; }` 跳过 extsw 路径 | ✅ RESOLVED | v0.8 commit 12 |
 
@@ -2937,7 +2938,7 @@ v1.5.6-patch2 加 2 件:
 
 ## W-042: link_with_gcc 失败只打 "gcc link failed" — 缺 invoke_buf 诊断
 
-**状态:** 🟡 ACTIVE (v1.5.6 W-042, 2026-08-24) — Tier 1 镜像 run_qbe pattern
+**状态:** ✅ RESOLVED 2026-08-28 (v1.7.1 patch A1 — Tier 1 invoke_buf echo (v1.5.6 ship) + Tier 2 stderr capture via pipe + Tier 3 post-link .exe stat 全链 ship; master table line 53 + row 已加 2026-08-28)
 **日期:** 2026-08-24
 **触发面:** `jhyy run <file.jhyy>` / `jhyy compile <file.jhyy>` 任一步失败, link_with_gcc 返回非 0 (`compiler/src0/main.jhyy:744`)
 
@@ -3286,8 +3287,7 @@ src0/main.jhyy 改 4 extern decl + ~50 行 (link_with_gcc 改造 + rename), jhyy
 
 **状态:** ✅ RESOLVED 2026-08-28 (v1.7.1 patch B2, workaround 已 ship v1.5.7-rc1) — 永久 workaround 化, 标 RESOLVED 是因为 v1.7.1 patch ship 时 review 确认 underlying issue (MSI deferred CA type 34 SYSTEM context CreateProcess argv mis-tokenize) 真实根因不明 (试过 type 65 / WixQuietExec 都没解决), HKLM RunOnce 是已知最 stable 的替代路径。MSI engine 升级不可预期, 强标 ACTIVE 不解决任何 active 问题。
 
-**状态:** 🟡 ACTIVE (workaround: HKLM RunOnce, applied in v1.5.7-rc1, 2026-08-26)
-**日期:** 2026-08-26
+**日期:** 2026-08-26 (workaround ship v1.5.7-rc1) → 2026-08-28 (标 RESOLVED via v1.7.1 patch B2 review)
 **触发面:** v1.5.7-rc1 写 post-install CustomActions (InstallEnvConfig + InstallVSCodeConfig + 已有 InstallVSCodeExt) 配 MSYS2_PATH_TYPE + VSCode defaultProfile,MSI install log 全 3 个 CA 报 1721:
 
 ```
