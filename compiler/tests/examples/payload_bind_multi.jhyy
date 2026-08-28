@@ -1,0 +1,22 @@
+// SKIP: v1.8 — enum variant payload ABI mismatch (W-060)
+// EXPECT: 1234
+// v1.7.3 patch A5 (deferred to v1.8): enum variant 不同 payload type variety
+//
+// spec §D.7 限制: enum variant 仅支持单 payload, multi-payload `P(T, T)` parser
+// 拒绝 (推 v3.x); pattern 仅支持单 binding, multi binding `Pair(a, b)` parser
+// 拒绝 (推 v3.x)。
+//
+// v1.7.3 ship 期间发现: enum variant payload 提取 ABI mismatch — `Mixed::I(1234)`
+// match 走 wildcard path, EXIT=210 不是 1234. W-060 🟡 DEFERRED v1.8.
+// 本 test 暂保留为 v1.8 真修后启用 (regress skip).
+
+type Mixed = enum { I(i32), S(*u8), B(bool) }
+
+fn main_jhyy() -> i32 {
+    let m: Mixed = Mixed::I(1234);
+    return match m {
+        Mixed::I(v) => v,
+        Mixed::S(_) => -1,
+        Mixed::B(_) => -2,
+    };
+}

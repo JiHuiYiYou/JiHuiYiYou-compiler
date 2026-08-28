@@ -152,6 +152,9 @@ def run_test(
     # v1.7.0 Stage 1: EXPECT-ERROR — 期望 compile fail 且 stderr 含 substring.
     # 跟 EXPECT (整数 exit code) 互斥: 同一 test 只能用一个.
     expect_error_kw = None
+    # v1.7.3: SKIP directive — 期望 test 暂 skip (有已知 bug 推后续 ship,
+    # e.g. defer silent codegen crash 推 v1.8). 形式: `// SKIP: <reason>`.
+    skip_reason = None
     # v1.5.6: SETENV directive — 解析 // SETENV: KEY=VALUE 行, 注入到
     # _build_subprocess_env() 返回的 env. 测试用: 验证 jh_gcc_path() 在不同
     # env 状态下的探测行为 (Priority 1 JHY_GCC / Priority 2 JHYY_HOME).
@@ -165,6 +168,9 @@ def run_test(
         m_err = re.search(r'//\s*EXPECT-ERROR\s*[:=]\s*"([^"]+)"', src)
         if m_err:
             expect_error_kw = m_err.group(1)
+        m_skip = re.search(r"//\s*SKIP\s*:\s*(.+)", src)
+        if m_skip:
+            skip_reason = m_skip.group(1).strip()
         # Skip library files (no main entry)
         has_main = bool(re.search(r"\bfn\s+main_jhyy\b", src))
         # SETENV: 解析多行 KEY=VALUE (注释行从 # 起; 行尾 # 也算注释)
@@ -180,6 +186,11 @@ def run_test(
     if not has_main:
         # Library file: skip (no standalone run possible)
         return (True, None, None, "skipped (library)")
+
+    if skip_reason is not None:
+        # v1.7.3: SKIP directive — test 暂 skip (有已知 bug 推后续 ship).
+        # 期望后续 sprint 真修 bug 后移除 SKIP 行启用 default regress.
+        return (True, None, None, f"skipped ({skip_reason})")
 
     # v1.5.6: 用 SETENV 覆盖的 env 跑 compile + run.
     # _build_subprocess_env() 已经在 PATH 段做 MSYS2 探测, SETENV 覆盖在它之上.
@@ -351,8 +362,9 @@ def run_all(
 
     for fname in files:
         ok, exp, act, msg = results[fname]
-        if ok and msg == "skipped (library)":
-            print(f"SKIP  {fname:<30}  (library, no main)")
+        if ok and msg and msg.startswith("skipped"):
+            # v1.7.3: SKIP directive + library skip 都走这条 path.
+            print(f"SKIP  {fname:<30}  {msg}")
             skipped += 1
         elif ok:
             print(f"PASS  {fname:<30}  EXIT={act}")

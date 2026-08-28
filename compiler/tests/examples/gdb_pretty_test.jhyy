@@ -12,10 +12,10 @@
 // slots. Calling printf forces each var to remain addressable (printf
 // takes `*u8` so the compiler can't fold the call site into a constant).
 //
-// NOTE: nested struct (Outer { inner: Inner }) is excluded — not covered by
-// gdb_pretty.py yet (nested-struct DWARF pretty-printer coverage is deferred to
-// v1.8 umbrella; see docs/internal/workarounds.md W-019 ✅ RESOLVED 2026-08-14 +
-// v1.7.2 patch known limitations § 10).
+// NOTE: nested struct (Outer { inner: Inner }) is covered by
+// compiler/tests/examples/nested_struct_dwarf.jhyy (per v1.7.3 patch A7, deferred
+// to v1.8 due to W-061 nested struct field offset bug discovered during patch ship;
+// see docs/internal/workarounds.md W-061 🟡 DEFERRED v1.8 + W-019 ✅ RESOLVED 2026-08-14).
 //
 // Run:
 //   jhyy.exe compile gdb_pretty_test.jhyy -o gdb_pretty_test

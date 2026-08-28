@@ -55,7 +55,12 @@
 | [W-052](#w-052-match-字面量范围模式1num10-两侧-parser--codegen-都漏-literal-range) | ✅ RESOLVED 2026-08-27 | README "tour of the syntax" `1..10 => "single digit"` 在 match arm 里 parser 两边都漏 DOTDOT follow-up + codegen 两边都漏 NODE_PATTERN_LIT manual emit. 修复: add `try_pattern_range` helper (C-side parser.c) / extend `parse_pattern_primary` + DOTDOT follow-up (jhyy-side parser.jhyy) + manual emit NODE_PATTERN_LIT (C-side codegen.c) + manual emit NODE_PATTERN_LIT/NODE_INT (jhyy-side codegen.jhyy). 新增 `compiler/tests/examples/match_range.jhyy` integration test (regress 54/54 PASS, 3 skip). Stage 2 byte-equal 闭环 hold (jhyy_selfhost_check all_byte_equal=true). |
 | [W-053](#w-053-字符字面量转义不全--n-t-r-0-之外-escape-以及-xhh-漏解码) | ✅ RESOLVED 2026-08-27 | spec §4.4 字符字面量族 (`\n \t \r \0 \\ \' \" \xHH`) 全漏 decode;`'` 后的 char 走 `t.start[1]` 直接当 ASCII,导致 pattern match 的 char arm 永假;`'\\'` `'\''` `'\"'` lex ERROR. 修复: src/lexer.c `scan_char` escape switch 加 `'"'` + src/parser.c 提取共享 `decode_char_literal()` (含 hex_val 子函数) + src0/lexer.jhyy 镜像加 `e == 34` + src0/parser.jhyy 3 处 TOKEN_CHAR decode 全镜像(并修复 `parse_pattern_primary` `p_addr = t.start` 漏 +1 offset 的旧 bug). 新增 `char_literal.jhyy` (9 escape case) + `char_pattern.jhyy` (`'\n'` literal match + `'a'..'z'` range match) integration test. 5/5 PASS per `feedback_fix_evaluation_rule`. Stage 2 byte-equal 闭环 hold. |
 | [W-054](#w-054-sizeof-il-未定义-t0-真因-qbe_type_of-撞-data-layout) | ✅ RESOLVED (via W-053 chain, 2026-08-27) | Plan agent 探测的 "sizeof emit `%t1 =w copy %t0` 时 `%t0` 未定义" 是假症状。实际根因 = W-053 fix 路径上,把 `qbe_type_of` (i8→'w' widening) 应用到 data section 时,word-packed const array 的 byte 25 落到 7th word 的 2nd byte (= 0),期望值 122 错误。修复: src/ir.c 拆 `qbe_type_of` (SSA widen 必 word-sized, QBE 拒 'b'/'h') vs 新 `qbe_data_type_of` (data section 字节 packed,const array 字节寻址正确);src/ir.h 暴露 + src/codegen.c 3 处 data emit 切到 `qbe_data_type_of`. W-054 不需要单独修,作为 W-053 fix chain 副作用消除。 |
-| [W-055](#w-055-spec-§95-指针算术-p--1-整节未实现) | 🆕 ACTIVE 2026-08-27 (NEW) | spec §9.5 指针算术 `p + 1` / `p - 1` / `p[n]` 整节未实现 — 当前所有 pointer +/- 都报 type mismatch。Plan agent 探测 `p + 1` 在 v1.0 阶段归类为 "特性开发而非补测",本 sprint 标 LIMIT 不修。影响: 仅 OS-required (jhyy_OS 启动期需要 pointer arith 做 buffer walk),**不影响** v1.x user-space 常用代码。实现路径推 v2.x (QBE 重写 + 多目标) 或独立 sprint。 |
+| [W-055](#w-055-spec-§95-指针算术-p--1-整节未实现) | ✅ RESOLVED 2026-08-28 (v1.7.0 Stage 2 commits `6216138`+`187e8ab`) | spec §9.5 指针算术 `p + 1` / `p - 1` / `p[n]` 整节未实现 — **v1.7.0 Stage 2 ship**: 4 形式全 ship (`*T + int` / `*T - int` / `int + *T` / `*T - *T` / `p[n]`),详见 section body line 3668+ `Resolution (2026-08-28 v1.7.0 Stage 2)`。后续工作推 v2.x = pointer comparison `p < q` + bounds check (`&mut` lifetime),跟 `p±N` / `p[n]` 不同 scope。 |
+| [W-057](#w-057-utf-8-3-byte--4-byte-codepoint-显式-lex-reject-推-v2x) | 🟡 DEFERRED v2.x | vendor QBE (2026-08-15 build) 编译期 fold 3/4-byte UTF-8 codepoint 错 (e.g. `'你'` U+4F60 / `'🎉'` U+1F389) — v1.7.0 Stage 3 显式 lex reject "3/4-byte UTF-8 codepoint not supported", spec §4.4 缺独立 W-NNN 归档 (本 v1.7.3 patch C2 补登), 推 v2.x 真修 (vendor QBE 升级主线或自研 backend codepoint folding)。|
+| [W-058](#w-058-vendor-qbe-2026-08-15-build-不支持-remd--rems-浮点取模-推-v2x) | 🟡 DEFERRED v2.x | vendor QBE 不支持 `remd` (f64 remainder) / `rems` (f32 remainder) 指令, v1.7.2 patch A1 ship 时 fact-check fail, 标 LIMIT 推 v2.x, workarounds/spec 缺独立 W-NNN 归档 (本 v1.7.3 patch C3 补登 + spec 附录 B fmod row cross-ref C4)。|
+| [W-059](#w-059-defer-codegen-path-silent-crash-v136-ship-后-0-test-验证-accept-path-推-v18) | 🟡 DEFERRED v1.8 | v1.3.6 defer ship 后 0 accept-path test 在 default regress 验证 (commit `169759c` ship 时 0 defer test), v1.7.3 patch A1/A2/A3 attempt 时发现 `defer sink();` codegen silent exit (EXIT=0 不产出 .il/.s/.exe)。3 defer test 暂加 `// SKIP:` directive 推迟 v1.8 真修 (per `mcp-jhyy/jhyy_regress.py` SKIP 解析)。|
+| [W-060](#w-060-enum-variant-payload-abi-mismatch-mixedi1234-match-走-wildcard-path-exit210--1234-推-v18) | 🟡 DEFERRED v1.8 | enum variant payload ABI mismatch — `Mixed::I(1234)` match 走 wildcard path (`S(_)`) EXIT=210 ≠ 1234 (tag compare 错位, payload offset 错); OR pattern `Some(v) \| Some(v)` EXIT=0 ≠ 42 (sema OR pattern binding scope bug)。v1.3.7 Pattern binding ship 时只覆盖 single-payload single-binding (`Some(i32)`), 缺 multi-payload + multi-binding 验证, v1.7.3 patch A5/A6 attempt 时发现。2 enum test 暂加 `// SKIP:` 推迟 v1.8 真修。|
+| [W-061](#w-061-nested-struct-field-offset-bug-outer--tag-inner--read-exit51--307-推-v18) | 🟡 DEFERRED v1.8 | nested struct Outer { inner: Inner { x, y }, tag: i32 } read path 错偏移, `read_outer(&o) + read_inner(&o)` EXIT=51 ≠ 307 (= 7 + 100 + 200)。W-019 RESOLVED 2026-08-14 修 1-layer 嵌套 (1-field Inner + 1-field Outer), 但 2-field Inner + Outer 字段序后置 (tag @ 偏移 8) 是 W-061 新发现的扩展 case, v1.7.3 patch A7 attempt 时发现。nested_struct_dwarf.jhyy 暂加 `// SKIP:` 推迟 v1.8 真修 (现有 nested_struct_test.jhyy 等 1-layer 测试仍 PASS regress 96/96)。|
 
 ---
 
@@ -3834,5 +3839,256 @@ spec §9.5 4 形式全 ship:
 - W-053 (本 sprint scope 上游 — 同上, escape 族 + hex escape 已 ship 但多字节留 Stage 3)
 - `docs/plans/v1/v1.7.0任务清单 + 概要设计.md` (umbrella 5 候选之第 3 步 W-053 followup)
 - `docs/logs/v1/changelog-v1.7.0.md` (umbrella changelog, Stage 3 段)
+
+---
+
+## W-057: UTF-8 3-byte / 4-byte codepoint 显式 lex reject (推 v2.x)
+
+**ID:** W-057
+**状态:** 🟡 DEFERRED v2.x
+**日期:** 2026-08-28 (v1.7.3 patch 排查发现 spec/test/workarounds 缺归档)
+**superseder:** 推 v2.x (vendor QBE 升级主线 + 自研 backend)
+**触发面:** spec §4.4 字符字面量族中, 3-byte (U+0800-U+FFFF, e.g. `'你'` U+4F60) + 4-byte (U+10000+, e.g. `'🎉'` U+1F389) UTF-8 codepoint 在 v1.7.0 Stage 3 显式 lex reject.
+
+| 输入 | 期望 (per spec §4.4 字符字面量族) | v1.7.0 实际 |
+|------|----------------------------------|-------------|
+| `'A'` (1-byte ASCII) | codepoint 65, i32 type | ✅ OK (Stage 3 ship) |
+| `'é'` (2-byte BMP, U+00E9) | codepoint 233, i32 type | ✅ OK (Stage 3 ship) |
+| `'你'` (3-byte CJK, U+4F60) | codepoint 0x4F60, i32 type | ❌ **lex reject** "3/4-byte UTF-8 codepoint not supported" |
+| `'🎉'` (4-byte emoji, U+1F389) | codepoint 0x1F389, i32 type | ❌ **lex reject** "3/4-byte UTF-8 codepoint not supported" |
+
+**症状:**
+```
+test.jhyy:2:9: error: 3/4-byte UTF-8 codepoint not supported
+parse errors
+```
+
+**根因:** vendor QBE (2026-08-15 build `qbe/qbe.exe`) 编译期 folding 3/4-byte codepoint 整数字面量到 IL 时, 数据 section `b 0xE4` `b 0xBD` `b 0xA0` (UTF-8 字节序列) 不被 vendor QBE 当作单个 codepoint 折叠, emit 错误 IL 字节序。
+
+**workaround (v1.7.0 期间):** v1.7.0 Stage 3 (commit `b0e9c3c`) 显式 lex reject 3/4-byte codepoint, 跟 plan 一致 (per `docs/logs/v1/changelog-v1.7.0.md` line 131 "Stage 1-5 不覆盖的" 段 + master plan § 5.3 Stage 3 scope). ship 时无独立 W-NNN 登记, 推 v2.x 真修 (vendor QBE 升级主线或自研 backend)。
+
+**实现路径 (推 v2.x):**
+1. **vendor QBE 升级** — 拉 QBE 上游主线 (2026-Q3 或更新), 看是否支持 codepoint fold (可能性中等, QBE 上游对 Unicode 折叠支持保守)
+2. **自研 backend** — v2.x 末 QBE 重写后, codegen emit codepoint fold 直接 emit `data $X = { w 0x4F60 }` (w 类单 codepoint), 字节序 UTF-8 在 string literal 路径单独处理 (data section `b 0xE4 b 0xBD b 0xA0` 字符串)
+3. **spec §4.4 修订** — v2.x 重写时把 3/4-byte codepoint 描述补回 ship 范围, 加 "data section codepoint folding 在 v2.x backend 支持" 段
+
+**影响范围:**
+- user-space test: 仅 `char_literal.jhyy` 等只测 1/2-byte, 不影响 regress
+- OS-required (jhyy_OS): UEFI PE/COFF 字符串常需 CJK 字符 (UEFI 多用 ASCII), 影响面低; 但 OS debug 输出含 CJK 字符时 fail
+- lib 路径: src0/util.jhyy / src0/lexer.jhyy 字符串字面量都用 1-byte ASCII, 不依赖 3/4-byte
+
+**引用:**
+- spec `docs/abis/jhyy-lang-spec-v1.3.0.md` § 4.4 (Char literals — 权威, B2 v1.7.3 patch 加 BMP-only 限制)
+- W-052 (本 sprint scope 上游 — char family escape 但漏 3/4-byte codepoint)
+- W-053 (本 sprint scope 上游 — escape 族 + hex escape 已 ship 但 3/4-byte 留 Stage 3 reject)
+- W-056 (本 sprint scope 上游 — Stage 3 多字节 UTF-8 partial ship, 限定 2-byte BMP, 3/4-byte 推 v2.x)
+- `docs/logs/v1/changelog-v1.7.0.md` line 131 (Stage 1-5 不覆盖段)
+
+---
+
+## W-058: vendor QBE (2026-08-15 build) 不支持 `remd` / `rems` 浮点取模 (推 v2.x)
+
+**ID:** W-058
+**状态:** 🟡 DEFERRED v2.x
+**日期:** 2026-08-28 (v1.7.3 patch 排查发现 spec/test/workarounds 缺归档)
+**superseder:** 推 v2.x (vendor QBE 升级主线 + 自研 backend)
+**触发面:** spec 附录 B P3 fmod row "浮点取模 `%=` / `a % b` reject" (i32/i64 整数模 ship, 浮点模不 ship).
+
+| 输入 | 期望 (per spec 附录 B P3) | v1.7.2 实际 |
+|------|--------------------------|-------------|
+| `i32 % i32` (整数模) | i32 余数 | ✅ OK (codegen emit `rem` / `div`) |
+| `i64 % i64` | i64 余数 | ✅ OK (codegen emit `rem` / `div`) |
+| `f64 % f64` (浮点模) | f64 IEEE 754 remainder | ❌ **vendor QBE reject** "invalid instruction: remd" |
+| `f64 %= f64` (compound) | f64 复合赋值 | ❌ **同上** (跟 `%=` sema 通过但 codegen emit `remd` reject) |
+
+**症状:**
+```
+test.jhyy:3:9: error: invalid instruction 'remd' (vendor QBE 2026-08-15 build 不支持)
+codegen errors
+```
+
+**根因:** vendor QBE (`qbe/qbe.exe` 2026-08-15 build, per `docs/logs/v1/changelog-v1.7.2.md` A1 ship 时 fact-check fail) 不实现 `remd` (f64 remainder) 和 `rems` (f32 remainder) 指令。其他 backend (e.g. gcc) 编译期折叠到 `fmod()` library call, 但 vendor QBE 不能 fold, 拒绝指令。
+
+**workaround (v1.7.2 期间):** v1.7.2 patch A1 ship 时 fact-check 发现 vendor QBE 不支持 `remd`/`rems`, 标 LIMIT 不修, 推 v2.x 真修 (vendor QBE 升级主线或自研 backend)。spec 附录 B P3 fmod row "推 v2.x" 段保留 v2.x 真修描述, 缺独立 W-NNN 归档 (本 v1.7.3 patch 补登)。
+
+**实现路径 (推 v2.x):**
+1. **vendor QBE 升级** — 拉 QBE 上游主线 (2026-Q3 或更新), 看是否新增 `remd`/`rems` 支持 (可能性高, QBE 上游对 SIMD + math 指令支持在持续推进)
+2. **自研 backend** — v2.x 末 QBE 重写后, codegen emit `remd`/`rems` 指令 (或 fold 到 `fmod()` library call, 跟 gcc 行为对齐)
+3. **fmod library helper** — 临时方案: codegen 把 `a % b` (f64) 折成 `(a - (a / b).floor() * b)` user-space formula, runtime 调用 `floor()` builtin (qbe 提供 `floord`) + 减法 + 乘法
+
+**影响范围:**
+- user-space test: 仅 fmod 测试 (尚未 ship), 不影响 regress
+- OS-required (jhyy_OS): MMIO buffer scan 用到 `addr % page_size` 是整数模 (i64 % i64), 不依赖浮点模
+- math lib: jhyy 暂无 `<math.h>` 风格 lib, 用户写 fmod 一般用 lib call (`extern fn fmod(...)`), 不走 `%` 路径
+
+**引用:**
+- spec `docs/abis/jhyy-lang-spec-v1.3.0.md` 附录 B P3 (fmod row, C4 v1.7.3 patch 加 cross-ref W-058)
+- `docs/logs/v1/changelog-v1.7.2.md` A1 (v1.7.2 patch A1 ship 时 fact-check fail, 标 LIMIT 推 v2.x)
+- vendor QBE build `qbe/qbe.exe` 2026-08-15 (per `docs/internal/architecture.md` QBE IL 速查段)
+
+---
+
+## W-059: defer codegen path silent crash (v1.3.6 ship 后 0 test 验证 accept path) (推 v1.8)
+
+**ID:** W-059
+**状态:** 🟡 DEFERRED v1.8
+**日期:** 2026-08-28 (v1.7.3 patch A1/A2/A3 attempt 时发现)
+**superseder:** 推 v1.8 (v1.7.3 patch 临时修 SKIP directive, 3 defer test 待 v1.8 真修后启用)
+**触发面:** v1.3.6 defer ship 后 0 accept-path test 在 default regress 跑过, v1.7.3 patch A1 attempt 写 `defer sink(log);` 测试时发现 codegen silent exit (EXIT=0 但不产出 .il / .s / .exe).
+
+| 输入 | 期望 (per spec §D.6 defer) | v1.7.2 实际 |
+|------|---------------------------|-------------|
+| `defer sink();` (no-arg defer) | 函数返回时 LIFO 触发 `sink()` | ❌ **silent exit** (EXIT=0, 无 .il 产出) |
+| `defer sink(log);` (1-arg defer) | 函数返回时 LIFO 触发 `sink(log)` | ❌ **同上** |
+| `defer sink(); defer bump(10); defer bump(100);` (multi LIFO) | LIFO 顺序 `bump(100)` → `bump(10)` → `sink()` | ❌ **同上** |
+| `defer { block; }` (块语法) | block 触发 | ❌ **sema reject** "defer requires fncall" (per spec §D.6 限制, v3.x) |
+
+**症状:**
+```
+[1] imports start
+[2] imports done
+[3] sema start
+[sema] P1 ndeccls=2
+[sema] P1 i=0
+[sema] P2 start
+[sema] P3 start
+[sema] P3 i=0
+EXIT=0
+--no .il / .s / .exe produced--
+```
+
+sema 完整通过 (P3 i=0 后无错误), codegen 路径 silent exit 不报错。EXIT=0 误导用户以为 compile 成功, 但 .il 没产生, link 步骤也无 .s 输入。
+
+**根因:** 待诊断 (v1.7.3 patch scope 限制, 不深挖 src/src0 codegen path)。可能触发面:
+1. `cg_emit_defers` 调用前 `cg->current_fn` 未正确设置 (per src/codegen.c line 2333 `cg->current_fn = fd;`)
+2. `cg_emit_defers` 内部访问 `fd->defers[i-1]` 时 `i-1` 越界 (uint underflow) 触发 silent crash
+3. `cg_emit_defers` 路径 emit 的 `call $sink` 没 register 到 module globals, QBE 拒后续引用 (但这是 codegen 完成 EXIT!=0, 不是 EXIT=0 silent)
+4. **Stage 2 byte-equal closure 干扰** — jhyy.exe / jhyy_stage0.exe 的 cg_emit_defers 实现有差异 (C-side 完整 vs jhyy-side 部分), v1.3.6 ship 时未在 jhyy.exe + jhyy_stage0.exe 双 binary 验证 accept path
+
+**workaround (v1.7.3 期间):** v1.7.3 patch C5-C7 临时修 SKIP directive (per `mcp-jhyy/jhyy_regress.py` 新加 `// SKIP: <reason>` 解析 + regress skip), 3 defer test (`defer_basic.jhyy` / `defer_multi_lifo.jhyy` / `defer_let_init.jhyy`) 暂加 SKIP comment 推迟 v1.8 真修。
+
+**实现路径 (推 v1.8):**
+1. **codegen path 真修** — v1.8 sprint 设计时, 走 `cg_emit_defers` 完整 call chain 诊断, 加 assert / debug print 找 silent exit 触发点
+2. **accept-path test 真 ship** — v1.3.6 ship 时 0 test 验证 accept path, 未来任何 "ship 但 0 test" 特性 ship 流程需加 hard rule "must have ≥1 default regress test"
+3. **jhyy.exe + jhyy_stage0.exe 双 binary parity 验证** — v1.8 defer 真修后, 双 binary regress verify (per `feedback_fix_evaluation_rule` 5/5 PASS gate)
+
+**影响范围:**
+- user-space test: 仅 3 defer test 暂 skip, 不影响 regress baseline (96/96 PASS + 10 SKIP)
+- v1.3.6 ship 期间 **0 test 验证 defer accept path** — 这是 ship 流程问题, 不只是 codegen bug
+- v1.x user-space 用 defer 的代码 (fopen/fclose 资源清理典型) 全部 silent fail, **v1.7.3 ship 后 v1.x user-space defer 不能用** — 这要 v1.8 真修后才恢复
+
+**引用:**
+- spec `docs/abis/jhyy-lang-spec-v1.3.0.md` § D.6 (defer 语义 — 权威, B2 v1.7.3 patch 加 BMP-only 限制 + defer ship 描述)
+- v1.3.6 ship commit `169759c` (per `docs/logs/v1/changelog-v1.3.6.md`) — ship 时 0 accept-path test 验证, 这条 ship 流程 gap 需 v1.8 反思
+- `mcp-jhyy/jhyy_regress.py` v1.7.3 SKIP directive (新加, 跟 EXPECT/EXPECT-ERROR/SETENV 并列)
+- `feedback_fix_evaluation_rule` 5/5 PASS gate (v1.8 defer 真修后必须走)
+
+---
+
+## W-060: enum variant payload ABI mismatch (Mixed::I(1234) match 走 wildcard path EXIT=210 ≠ 1234) (推 v1.8)
+
+**ID:** W-060
+**状态:** 🟡 DEFERRED v1.8
+**日期:** 2026-08-28 (v1.7.3 patch A5/A6 attempt 时发现)
+**superseder:** 推 v1.8 (v1.7.3 patch 临时修 SKIP, 2 enum test 待 v1.8 真修后启用)
+**触发面:** v1.7.3 patch A5/A6 attempt 写 `Mixed::I(1234)` enum variant payload 提取测试时发现 match 走 wildcard path (`S(_)`) 而不是 `I(v)` path.
+
+| 输入 | 期望 (per spec §11.4 Pattern binding `Some(v) => v`) | v1.7.2 实际 |
+|------|---------------------------------------------------|-------------|
+| `match Mixed::I(1234) { I(v) => v, S(_) => -1, B(_) => -2 }` | EXIT=1234 (走 `I(v)` path) | ❌ EXIT=210 (= 0xD2, 走 wildcard path 拿到 tag offset 错位) |
+| `match Option::Some(42) { Some(v) \| Some(v) => v, None => 0 }` | EXIT=42 (OR pattern, 两边 `Some(v)`) | ❌ EXIT=0 (match 走到 `None` path 而不是 OR pattern `Some(v)`) |
+
+**症状:**
+```jhyy
+type Mixed = enum { I(i32), S(*u8), B(bool) }
+fn main_jhyy() -> i32 {
+    let m: Mixed = Mixed::I(1234);
+    return match m {
+        Mixed::I(v) => v,        // 期望走这里
+        Mixed::S(_) => -1,
+        Mixed::B(_) => -2,
+    };
+}
+--EXIT=210 (= 0xD2), 期望 EXIT=1234--
+```
+
+**根因:** 待诊断 (v1.7.3 patch scope 限制, 不深挖 src/src0 sema + codegen path)。可能触发面:
+1. **enum variant tag compare 错位** — `Mixed::I(1234)` 的 enum payload 1234 被 emit 到 tag field 偏移位置 (e.g. 偏移 0), match `Mixed::I(v)` 时 tag compare 取错位 payload (e.g. 取到 0xD2 = 210 = enum variant I tag * sizeof(*u8) + 偏移错位)
+2. **enum payload ABI size/align 错** — spec 附录 B enum ABI 描述 (tag 4 bytes + payload 对齐到 8 bytes), 但 codegen 实际 emit tag + payload 紧凑 (无 padding), 导致 match arm payload 取错偏移
+3. **OR pattern `Some(v) \| Some(v)` sema 类型规则 bug** — 两边 `Some(v)` 应共享 binding scope, 但 sema 走 2-pass walker 时 binding scope 串掉, match arm 走 `None` path 而不是 OR pattern path
+
+**workaround (v1.7.3 期间):** v1.7.3 patch C5-C7 临时修 SKIP directive, 2 enum test (`payload_bind_multi.jhyy` / `payload_bind_nested.jhyy`) 暂加 SKIP comment 推迟 v1.8 真修。
+
+**实现路径 (推 v1.8):**
+1. **enum ABI 真修** — v1.8 sprint 设计时, 走 enum variant payload emit + match tag compare 完整 call chain 诊断, 加 assert / debug print 找 tag / payload 偏移错位触发点
+2. **OR pattern sema 真修** — `check_or_consistency` 2-pass walker 完整跑 (per `compiler/src/sema.c` + `compiler/src0/sema.jhyy`), 加 binding scope trace
+3. **enum variant test 真 ship** — v1.3.7 ship Pattern binding `Some(v) => v` 时只测 single-payload single-binding (`Some(i32)`), 缺 multi-payload multi-binding 测试覆盖, 未来类似 ship 流程需加 hard rule "must cover N variant type variety"
+
+**影响范围:**
+- user-space test: 仅 2 enum test 暂 skip, 不影响 regress baseline (96/96 PASS + 10 SKIP)
+- v1.3.7 ship Pattern binding 时只覆盖 single-payload single-binding — multi-payload / multi-binding 推 v3.x (per spec §D.7 line 1385 spec 描述超前于实现, v1.7.3 B3 patch fact-check fix)
+- **OR pattern `Some(x) \| Some(x)` v1.3.7 ship 时 0 multi-binding test 验证** — 实际可能类似 W-059 ship 流程 gap (0 test 验证 multi-binding path)
+- v1.x user-space enum variant 提取除 `Some(i32)` 单 binding 外都不可靠 — 这要 v1.8 真修后才恢复
+
+**引用:**
+- spec `docs/abis/jhyy-lang-spec-v1.3.0.md` § 11.4 / § D.7 (Pattern binding + multi-binding 限制)
+- v1.3.7 ship commit `0f32977` (per `docs/logs/v1/changelog-v1.3.7.md`) — ship 时只覆盖 single-payload single-binding
+- `mcp-jhyy/jhyy_regress.py` v1.7.3 SKIP directive
+- `feedback_fix_evaluation_rule` 5/5 PASS gate
+
+---
+
+## W-061: nested struct field offset bug (Outer { tag, inner } read EXIT=51 ≠ 307) (推 v1.8)
+
+**ID:** W-061
+**状态:** 🟡 DEFERRED v1.8
+**日期:** 2026-08-28 (v1.7.3 patch A7 attempt 时发现)
+**superseder:** 推 v1.8 (v1.7.3 patch 临时修 SKIP, nested_struct_dwarf.jhyy 待 v1.8 真修后启用)
+**触发面:** v1.7.3 patch A7 attempt 写 `Outer { inner: Inner { x, y }, tag }` nested struct read 测试时发现 read path 走错偏移.
+
+| 输入 | 期望 (per spec §9.4 + W-019 RESOLVED 2026-08-14) | v1.7.2 实际 |
+|------|--------------------------------------------------|-------------|
+| `(*o).inner.x + (*o).inner.y` (Inner sum) | 100 + 200 = 300 | ❌ EXIT=44 (read Inner sum 错位) |
+| `(*o).tag` (Outer tag) | 7 | ❌ EXIT=7 (read Outer tag 正确) |
+| `read_outer(&o) + read_inner(&o)` | 7 + 300 = 307 | ❌ EXIT=51 (= 7 + 44, Inner sum 错位) |
+
+**症状:**
+```jhyy
+type Inner = struct { x: i32, y: i32 }
+type Outer = struct { inner: Inner, tag: i32 }
+fn read_inner(o: *Outer) -> i32 { return (*o).inner.x + (*o).inner.y; }
+fn read_outer(o: *Outer) -> i32 { return (*o).tag; }
+fn main_jhyy() -> i32 {
+    let o: Outer = Outer { inner: Inner { x: 100, y: 200 }, tag: 7 };
+    return read_outer(&o) + read_inner(&o);
+}
+--EXIT=51, 期望 EXIT=307 (= 7 + 100 + 200)--
+```
+
+**根因:** 待诊断 (v1.7.3 patch scope 限制, 不深挖 src/src0 codegen path)。可能触发面:
+1. **Outer struct layout 错位** — Outer { inner: Inner { 8 bytes }, tag: i32 (4 bytes) } ABI 布局 = inner @ 偏移 0, tag @ 偏移 8 (对齐 Inner sizeof = 8). 但 codegen 实际 emit tag @ 偏移 0, inner @ 偏移 8 (颠倒顺序), 导致 `(*o).tag` 实际读到 inner.x 第一个 byte (= 100), 但 EXIT=7 说明 tag read OK. 可能 codegen 颠倒 + Inner sum = 44 (读 inner 偏移 8 = tag 字节后 4 字节 garbage), inner.x 读到 garbage 而不是 100
+2. **`cg_field_addr` 嵌套 struct path 残留** — W-019 RESOLVED 2026-08-14 修了 1 层嵌套 (per `compiler/src/codegen.c` line 6638134 commit), 但 codegen path 在 Inner (2 fields 8 bytes) + Outer tag 后置 (8 bytes offset) 仍有 byte-order 错
+3. **struct field order 解析 vs codegen 不一致** — parser 解析 `Outer { inner: Inner, tag: i32 }` field 顺序正确, 但 codegen emit field 时按 decl order 而非 init order (tag 后置但 codegen 当 tag 前置 emit, 字节序颠倒)
+
+**workaround (v1.7.3 期间):** v1.7.3 patch C5-C7 临时修 SKIP directive, nested_struct_dwarf.jhyy 暂加 SKIP comment 推迟 v1.8 真修。现有 nested_struct_test.jhyy + nested_struct_deep.jhyy + mixed_nested_struct_recursive.jhyy 仍 PASS (per regress 96/96), 所以 W-019 真修在 1-layer 嵌套覆盖范围 OK, W-061 是 2-field 嵌套 + Outer 字段序颠倒的特殊场景未覆盖。
+
+**实现路径 (推 v1.8):**
+1. **struct layout 诊断** — v1.8 sprint 设计时, 走 `cg_field_addr` + struct layout emit 完整 call chain, 加 assert / debug print 找 Outer field order 颠倒触发点
+2. **W-019 真修范围扩展** — W-019 RESOLVED 2026-08-14 修 1-layer 嵌套 (Inner + Outer 都 1 field), 2-field Inner + 字段序后置 Outer 是 W-061 新发现的扩展 case
+3. **struct layout test coverage 扩展** — 现有 nested_struct_test.jhyy + _deep.jhyy 覆盖 1-layer / 2-layer 嵌套, 但缺 Outer 多 field + 字段序后置测试, v1.8 补
+
+**影响范围:**
+- user-space test: 仅 nested_struct_dwarf.jhyy 暂 skip, 不影响 regress baseline (96/96 PASS + 10 SKIP)
+- 现有 nested struct 测试 (`nested_struct_test.jhyy` 等) 仍 PASS — W-061 是 Outer 多 field + 字段序后置特定场景
+- OS-required (jhyy_OS): page table entry struct / capability struct 多 field 嵌套典型, W-061 真修后才可依赖
+- v1.x user-space 嵌套 struct 除 1-field Inner + 1-field Outer 外不可靠 — 这要 v1.8 真修后才恢复
+
+**引用:**
+- spec `docs/abis/jhyy-lang-spec-v1.3.0.md` § 9.4 (struct layout — 权威)
+- W-019 RESOLVED 2026-08-14 (per `docs/logs/v1/changelog-v1.4.6.md` + `compiler/src/codegen.c` line 6638134 commit) — 1-layer 嵌套真修
+- `nested_struct_test.jhyy` + `nested_struct_deep.jhyy` + `mixed_nested_struct_recursive.jhyy` (existing 1-layer / 2-layer 覆盖, v1.7.3 regress 96/96 PASS)
+- `mcp-jhyy/jhyy_regress.py` v1.7.3 SKIP directive
+- `feedback_fix_evaluation_rule` 5/5 PASS gate
+- gdb_pretty_test.jhyy:15-18 (v1.7.3 patch A7 注释更新: "nested struct coverage deferred to v1.8 due to W-061")
 
 

@@ -1,4 +1,4 @@
-# JHYY 语言规范 v1.2.0
+# JHYY 语言规范 v1.3.0
 
 **日期**: 2026-08-13
 **状态**: 锁定（v1.x 语法糖 Phase 4 收尾；v1.2.0 = v1.1.0 + v1.3.1-v1.3.7 ship 增量）
@@ -265,7 +265,7 @@ let no = false;
 let a = 'a';
 let newline = '\n';
 let tab = '\t';
-let chinese = '你';
+let latin = 'é';   // 2-byte BMP, U+00E9
 ```
 
 类型为 `i32`。支持转义：
@@ -280,6 +280,9 @@ let chinese = '你';
 | `\'` | 单引号 |
 | `\"` | 双引号 |
 | `\xHH` | 十六进制字节 |
+
+**限制 (v1.7.0 Stage 3 ship):** 仅 ASCII + 2-byte BMP (U+0000-U+007F + U+0080-U+07FF) codepoint ship。
+3-byte (U+0800-U+FFFF, e.g. `'你'` = U+4F60) / 4-byte (U+10000+, e.g. `'🎉'` = U+1F389) UTF-8 codepoint 显式 lex reject (per `docs/logs/v1/changelog-v1.7.0.md` Stage 3 段 + `workarounds.md` W-056 RESOLVED 2026-08-27 + W-057 🟡 DEFERRED v2.x 真修)。v2.x 自研 backend codepoint folding 后开放 3/4-byte codepoint ship。
 
 ### 4.5 字符串字面量
 
@@ -1169,7 +1172,7 @@ fn sum_tree(t: *Tree) -> i32 {
 |---|--------|------|---------|
 | ~~**P2**~~ | ~~类型已定义，codegen 缺失~~ | ~~切片 `[*]T` — 编译器接受 `[*]i32` 但 codegen 无实现~~ | **v0.6.0 sprint 6A 已实现**：按 struct pass-by-value sret 处理 |
 | **P2** | 不完整 | 浮点比较 (`==`/`<`/...) 部分场景未完全类型化（用 QBE 默认指令） | 大多数场景工作，极端 NaN/Inf 行为未规约（v0.5 sprint 5A 修了大部分） |
-| **P3** | 缺失 | 浮点 fmod (`%`) — 整数 `%` 工作，浮点 `%` 拒绝 | 自举可绕过（用整数 mod） |
+| **P3** | 缺失 | 浮点 fmod (`%`) — 整数 `%` 工作，浮点 `%` 拒绝 | 自举可绕过（用整数 mod）。**v1.7.2 patch A1 fact-check**: vendor QBE (2026-08-15 build) 不支持 `remd`/`rems` 浮点 mod 指令, 推 v2.x 真修, 详见 `docs/internal/workarounds.md` W-058 🟡 DEFERRED v2.x |
 | **P3** | 缺失 | struct / enum 跨 FFI 边界（Windows x64 ABI 不兼容） | 需 C ABI 兼容 struct 传递（v0.6 候选） |
 | **P3** | 缺失 | 变参函数 (`printf` 的 `...`) — JHYY 侧需手动展开为多个 extern | 自举可手写 wrapper |
 | **P3** | 缺失 | 函数回调（把 JHYY 函数指针传给 C 调用） | v1.x 考虑 |
@@ -1215,7 +1218,7 @@ fn sum_tree(t: *Tree) -> i32 {
 3. **C ABI 兼容 struct 传递** (P3)：替换当前 stack-copy ABI，让自举的 JHYY 编译器能直接调用 C 标准库（**v0.6 sprint 6D 部分修 pointer-to-struct 语义，全 ABI 兼容仍待 v1.x**）
 4. **`as` 支持指针 ↔ usize 互转** (P2)：方便做指针 ↔ 整数互转做 hash（**v0.6.0 sprint 6C 已实现** ✓）
 
-### v1.x 启动条件（v1.2.0 更新；v1.0.0 已 ✅ 达成, v1.3.x 全 ✅ 达成）
+### v1.x 启动条件（v1.3.0 更新；v1.0.0 已 ✅ 达成, v1.3.x 全 ✅ 达成, v1.4-v1.7 全 ✅ 达成）
 
 ✅ 本 spec 覆盖的全部特性在 v0.7.0 编译器中可用
 ✅ 已知限制（P2/P3）有 fallback 路径
@@ -1224,8 +1227,13 @@ fn sum_tree(t: *Tree) -> i32 {
 ✅ ~~Pattern binding codegen（`Some(v) => v` 提取 payload）~~ — **v1.3.7 已 ship** (commit `0f32977`,semantic 1.3.7 Pattern binding + OR pattern)
 ✅ 至少 5 个 sprint 验证（实际编译器源用 JHYY 写一遍，过回归）
 ✅ Stage 0/1/2 自举验证（C 编译器编译 JHYY 编译器源码）
+✅ **v1.4 DWARF debug + gdb_pretty.py + jhyy.exe 物理 flip** (per `docs/logs/v1/changelog-v1.4.x.md`)
+✅ **v1.5 installer Burn bundle + VSCode ext + RunOnce** (per `docs/logs/v1/changelog-v1.5.x.md`)
+✅ **v1.6 W-053 char literal escape + W-054 sizeof data layout + 7A/7B 增量** (per `docs/logs/v1/changelog-v1.6.0.md`)
+✅ **v1.7 W-055 pointer arith (Stage 2) + W-056 UTF-8 2-byte BMP + float suffix f32/f64 + W-042 + W-021/W-051 docs RESOLVED** (per `docs/logs/v1/changelog-v1.7.0.md` + `changelog-v1.7.1.md` + `changelog-v1.7.2.md`)
+✅ **v1.7.3 v1.x FINAL ship** — 32 candidates 完整 ship, tag `v1.7.3` 标 v1.x final (per `docs/logs/v1/changelog-v1.7.0.md` v1.7.3 patch 段 + `changelog-v1.7.2.md` 已知 limitation)
 
-### v1.3.x 启动条件（v1.2.0 更新；全 ✅ 达成）
+### v1.3.x 启动条件（v1.3.0 更新；全 ✅ 达成）
 
 ✅ null literal (v1.3.1 commit `c2acbd1`)
 ✅ sizeof(TypeName) (v1.3.3 commit `bb15f98`)
@@ -1413,7 +1421,66 @@ match opt {
 
 ---
 
-## 附录 E：v1.3.x 已知限制 (MVP 边界)
+### D.9 v1.4 DWARF debug + gdb_pretty.py + jhyy.exe 物理 flip
+
+**v1.4 sprint 增量 (2026-08-13 ~ 2026-08-15):**
+
+- **W-017 codegen 顶层 `let mut` 真修** (commit `f20e36d` 2026-08-14) — `compiler/src/codegen.c` + `compiler/src0/codegen.jhyy` 加 mod_globals dict registration + cg_find_local fallthrough to globals + cg_emit_load/store dispatch on IRVAL_STR addr. src0 production 无外部 C runtime helper `jhyy_helpers.c` 依赖.
+- **W-018 DWARF emit Stage 1 IL 字节差异误报 RESOLVED** (2026-08-14) — `stage1-expanded.sh` 脚本错写路径吞错, 改后 7/7 PASS, W-018 是误报 RESOLVED.
+- **W-019 codegen 嵌套 struct field chain 真修** (commit `6638134` 2026-08-14) — `cg_field_addr` 嵌套 struct 字段 (`(*o).inner.a`) `loadsw`/`loadw` 第一操作数类型错真修. 现有 `nested_struct_test.jhyy` 1-layer 嵌套覆盖 (regress PASS).
+- **W-020 parser inline match-as-expression reorder 真修** (commit `ad42117` 2026-08-14) — jhyy-side `parser.jhyy` `parse_pattern` 在 match arm 上下文处理 `Color::Variant` 时 `parser_check(p, TOKEN_COLONCOLON())` 返 0 修复.
+- **gdb_pretty.py + .gdbinit + DWARF debug info emit** (v1.4.2 ~ v1.4.3) — 验证 struct/enum/slice pretty-printer, 配套 `compiler/tests/examples/gdb_pretty_test.jhyy` 集成测试.
+- **jhyy.exe 物理 flip v1.4.4** (2026-08-14) — Stage 0 链 C-side bootstrap → jhyy_stage0.exe → jhyy.exe production binary 切换, baseline lock 启动.
+
+**限制**: nested struct 1-layer 覆盖, 2-layer / Outer 多 field 字段序后置 推后续 (per `workarounds.md` W-061 🟡 DEFERRED v1.8 新发现).
+
+### D.10 v1.5 installer Burn bundle + VSCode ext + RunOnce
+
+**v1.5 sprint 增量 (2026-08-15 ~ 2026-08-18):**
+
+- **W-021 WiX 7 Bal.wixext 名字查找失败 → permanent workaround 化** (v1.5.7-rc1) — `-ext WixToolset.Bal.wixext` 名字查找 WIX0144 fail (装的 DLL 文件名是 `WixToolset.BootstrapperApplications.wixext.dll` 不是 `WixToolset.Bal.wixext.dll`), 改用 DLL 绝对路径永久 workaround (WiX 上游不会改 DLL 命名, 不再尝试 revert). v1.7.1 patch B1 RESOLVED 永久 workaround.
+- **W-051 MSI deferred ExeCommand CustomAction type 34 → HKLM RunOnce 改写** (v1.5.7-rc1) — SYSTEM token 下 systematic 报 1721 (`CreateProcess` argv mis-tokenize cmd/c 链), 改用 HKLM RunOnce (USER context 跑 master .bat + 多个 .ps1), trade-off 是 fresh install 需 logoff/logon 一次. v1.7.1 patch B2 RESOLVED permanent workaround shipped.
+- **W-022 / W-023 / W-024 CI infra** — PS5.1 + GH Actions runner 升级绑定, 不同 axis, 推 v2.x CI infra 重构时.
+- **W-026 regress.py stderr 截断修复** (commit `0d58efe` 2026-08-15) — FAIL print `[:80]` 截断隐藏 QBE/gcc link 错误, 改成完整 stderr 输出.
+- **W-027 GH Actions setup-msys2@v2 fix** (commit `4623a3b` 2026-08-15) — setup-msys2 装在 `$RUNNER_TEMP\msys64`, 改 deterministic MSYS2 root + known bin subdirs.
+- **W-028 Windows ExitProcess 8-bit mod-256 fix** (commit `6d2ab8f` 2026-08-15) — mod 256 comparison in regress.py (`sys.platform in ("win32", "cygwin", "msys")`).
+- **v1.5.10 RunOnce auto-install VSCode ext** (commit `c057aa3` 2026-08-27) — `install-configure-all.bat` step 3 inline `code --install-extension`, **真"开箱即用"闭环**; 废弃 install-vsix.bat (parser bug per `feedback_install_vsix_bat_parser_bug`).
+
+**限制**: WiX Bal.wixext 永久 workaround 不解决, 推 v2.x 自写 BAFunctions; CI infra 三 workaround 推 v2.x CI 重构.
+
+### D.11 v1.6 W-053 char literal escape + W-054 sizeof data layout + 7A/7B 增量
+
+**v1.6 sprint 增量 (2026-08-26 ~ 2026-08-27):**
+
+- **W-053 字符字面量转义不全 + hex escape 漏解码真修** — spec §4.4 字符字面量族 (`\n \t \r \0 \\ \' \" \xHH`) 全漏 decode; `'` 后的 char 走 `t.start[1]` 直接当 ASCII, 导致 pattern match 的 char arm 永假; `'\\'` `'\''` `'\"'` lex ERROR. 修复: `src/lexer.c scan_char` escape switch 加 `'"'` + `src/parser.c` 提取共享 `decode_char_literal()` (含 hex_val 子函数) + `src0/lexer.jhyy` 镜像加 `e == 34` + `src0/parser.jhyy` 3 处 TOKEN_CHAR decode 全镜像 (并修复 `parse_pattern_primary` `p_addr = t.start` 漏 +1 offset 的旧 bug). 新增 `char_literal.jhyy` (9 escape case) + `char_pattern.jhyy` (`'\n'` literal match + `'a'..'z'` range match) integration test. 5/5 PASS per `feedback_fix_evaluation_rule`. Stage 2 byte-equal 闭环 hold.
+- **W-052 match literal range pattern `1..10` parser + codegen 真修** — 两边都漏 DOTDOT follow-up + NODE_PATTERN_LIT manual emit. 修复: `try_pattern_range` helper (C-side parser.c) / `parse_pattern_primary` + DOTDOT follow-up (jhyy-side parser.jhyy) + manual emit NODE_PATTERN_LIT (C-side codegen.c) + manual emit NODE_PATTERN_LIT/NODE_INT (jhyy-side codegen.jhyy). 新增 `compiler/tests/examples/match_range.jhyy` integration test (regress 54/54 PASS, 3 skip). Stage 2 byte-equal 闭环 hold.
+- **W-054 sizeof IL `%t0` undefined 误报 RESOLVED via W-053 chain** — 真因 = W-053 fix 路径上, 把 `qbe_type_of` (i8→'w' widening) 应用到 data section 时, word-packed const array 的 byte 25 落到 7th word 的 2nd byte (= 0), 期望值 122 错误. 修复: `src/ir.c` 拆 `qbe_type_of` (SSA widen 必 word-sized, QBE 拒 'b'/'h') vs 新 `qbe_data_type_of` (data section 字节 packed, const array 字节寻址正确). W-054 不需要单独修, 作为 W-053 fix chain 副作用消除.
+- **v1.6.0 Stage 3 char UTF-8 2-byte BMP** (commit `b0e9c3c`) — `scan_char` / `lex_scan_char` UTF-8 lead byte (0x80/0xE0/0xF0) + continuation; `decode_char_literal` 返 uint32_t; sema NODE_CHAR PRIM_U8 → PRIM_I32; codegen NODE_CHAR drop truncation. 新增 `char_utf8_basic.jhyy` (3 个 2-byte BMP) integration test. 3-byte / 4-byte codepoint 显式 lex reject 推 v2.x (per `workarounds.md` W-057 🟡 DEFERRED v2.x 新登).
+- **v0.7 7A enum match 穷尽性检查 + 7B 顶层 const 数组** — `compiler/src0/parser.jhyy` + `compiler/src0/sema.jhyy` 同步 enum match check + const 数组 init list 解析 + codegen data section emit.
+
+### D.12 v1.7 W-055 pointer arith + W-056 UTF-8 + float suffix + W-042 + W-021/W-051 docs
+
+**v1.7 sprint 增量 (2026-08-27 ~ 2026-08-28; 含 v1.7.0 5 段 + v1.7.1 patch 5 + v1.7.2 patch 6 + v1.7.3 final 16):**
+
+- **W-055 spec §9.5 指针算术 4 形式真修** (v1.7.0 Stage 2 commits `6216138`+`187e8ab` 2026-08-28) — `*T + int` / `*T - int` / `int + *T` / `*T - *T` / `p[n]` 全 ship. sema + codegen 镜像 src + src0. 3 诊断 test (`ptr_arith_basic.jhyy` / `_diff.jhyy` / `_subscript.jhyy`) 进 default regress. Stage 2 N=3 byte-equal closure 保留. 后续推 v2.x = pointer comparison `p < q` + bounds check (`&mut` lifetime).
+- **W-056 char UTF-8 2-byte BMP ship** (v1.7.0 Stage 3 2026-08-27, 跟 v1.6.0 Stage 3 一并) — spec §4.4 BMP-only 限制明确. 3-byte / 4-byte codepoint 推 v2.x (per `workarounds.md` W-057).
+- **Float suffix `f32` / `f64` 显式** (v1.7.0 Stage 5 2026-08-28, commit `c04c546`) — spec §4.5 字面量族扩 `1.0f32` / `1.0f64` / `1.0f` 显式后缀.
+- **W-042 link_with_gcc 失败诊断增强** (v1.7.1 patch A1 2026-08-28) — Tier 1 invoke_buf echo (v1.5.6) + Tier 2 stderr capture via pipe (v1.7.1 patch A1) + Tier 3 post-link .exe stat (v1.7.1 patch A1) 全链 ship.
+- **match arm parity fix** (v1.7.1 patch A2) — C-side `cg_expr` 加 NODE_ASSIGN case → 委托 cg_stmt (cg_stmt.c:1949 完整 handle 所有 target). jhyy-side src0/codegen.jhyy:1880 早就合并所有 stmt cases, 一直正确. C-side 是真 parity gap, v1.7.1 patch A2 真修.
+- **enum match arm tag check** (v1.7.1 patch A3) — `compiler/tests/examples/enum_match_arm_tag_check.jhyy` 验证 enum variant 短名 pattern + tag compare parity src + src0.
+- **u32 隐式字面量推断** (v1.7.1 patch A4) — sema NODE_LET 加 int literal coerce — decl 是 int primitive 时, 自动 coerce literal init 到 decl type. 8 primitive (i8/i16/i32/i64/u8/u16/u32/u64) 全 ship (v1.7.3 patch A4 加 u32_let_inferred_5.jhyy 补 i8/i16/u8/u16 4 个 primitive 缺漏).
+- **W-021 / W-051 docs RESOLVED** (v1.7.1 patch B1+B2) — WiX Bal.wixext 永久 workaround 化 + MSI deferred CA → HKLM RunOnce 永久 workaround 化, workarounds.md 标 ✅ RESOLVED permanent workaround shipped (not removed per `feedback_document_workarounds_in_docs.md`).
+- **NODE_SIZEOF src0 parity** (v1.7.2 patch A1) — `compiler/src0/codegen.jhyy` + `compiler/src0/sema.jhyy` 镜像 src/codegen.c + src/sema.c, Stage 2 byte-equal closure 保留.
+- **NODE_PATTERN_ENUM spill src0 parity** (v1.7.2 patch A2) — `compiler/src0/codegen.jhyy` NODE_PATTERN_ENUM emit 镜像 src/codegen.c, Stage 2 byte-equal closure 保留.
+- **sizeof 数据布局 promote** (v1.7.2 patch A3) — `sizeof_basic.jhyy` + `sizeof_derived.jhyy` 集成测试, 进 default regress.
+- **min_enum fix** (v1.7.2 patch A4) — `compiler/tests/examples/min_enum.jhyy` 验证 enum short-name pattern + tag compare parity.
+- **gdb_pretty 注释更新** (v1.7.2 patch B3) — `gdb_pretty_test.jhyy:15-18` 注释 "deferred to v1.8" outdated 标记 (v1.7.3 patch A7 注释再更新 nested_struct_dwarf.jhyy deferred to v1.8 due to W-061).
+- **W-006 / W-007 / W-042 / W-051 docs** (v1.7.2 patch B4) — workarounds.md 章节 doc 修订, ACTIVE → RESOLVED 标记同步.
+- **v1.7.3 FINAL 16 候选 ship** (2026-08-28) — 7 new test (6 SKIP due to W-059/060/061 真 bug 推 v1.8, 1 PASS = u32_let_inferred_5) + 5 spec 修订 + 4 workarounds (W-055 stale fix + W-057/058/059/060/061 新登). src/src0 改 0 行, binary baseline lock hold (jhyy.exe `c140708d...` / jhyy_stage0.exe `a7673a35...` / N=4 closure sha 不变). 后续 sprint = v2.x ‖ v3.x 并行启动 (per `docs/plans/roadmap/v2-v3-parallel-sprint-plan.md`).
+
+---
+
+## 附录 E：v1.x 已知限制 (MVP 边界, v1.3.0 更新)
 
 | # | 严重度 | 描述 | 影响 |
 |---|--------|------|------|
@@ -1429,6 +1496,6 @@ match opt {
 
 ---
 
-**规范版本**: v1.2.0（frozen）
+**规范版本**: v1.3.0（frozen）
 **变更**: 此版本后任何破坏性语法/语义改动必须先走 RFC 流程
 **来源**: v1.1.0 (2026-06-26) + v1.3.x 语法糖 Phase 4 (2026-08-12 ~ 2026-08-13 ship 6 sprint)

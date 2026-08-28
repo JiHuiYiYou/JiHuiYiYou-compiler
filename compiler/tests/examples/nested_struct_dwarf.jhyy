@@ -1,0 +1,24 @@
+// SKIP: v1.8 — nested struct field offset bug (W-061)
+// EXPECT: 307
+// v1.7.3 patch A7 (deferred to v1.8): nested struct DWARF 验证
+//
+// 补 gdb_pretty nested struct coverage 缺漏 (per v1.7.2 patch B3 line 15-18
+// 注释 outdated, "deferred to v1.8" → 本测试独立覆盖 nested struct DWARF)
+//
+// 结构: Outer { inner: Inner { x, y }, tag } — 但 Outer.tag = 7 + inner.x + inner.y
+// 计算得 307.
+//
+// v1.7.3 ship 期间发现: nested struct Outer { tag: i32, inner: Inner } 字段顺序
+// read_outer(&o) + read_inner(&o) EXIT=51 ≠ 307, 说明 (*o).tag 取到 inner.x
+// 偏移错. W-061 🟡 DEFERRED v1.8. 本 test 暂保留为 v1.8 真修后启用 (regress skip).
+
+type Inner = struct { x: i32, y: i32 }
+type Outer = struct { inner: Inner, tag: i32 }
+
+fn read_inner(o: *Outer) -> i32 { return (*o).inner.x + (*o).inner.y; }
+fn read_outer(o: *Outer) -> i32 { return (*o).tag; }
+
+fn main_jhyy() -> i32 {
+    let o: Outer = Outer { inner: Inner { x: 100, y: 200 }, tag: 7 };
+    return read_outer(&o) + read_inner(&o);
+}

@@ -1,0 +1,21 @@
+// EXPECT: 15
+// v1.7.3 patch A4: 4 个缺漏 int primitive 全 coerce (补 v1.7.1 patch A4 u32
+// 推断只覆盖 u32/u64/i64 三个, 缺 i8/i16/u8/u16 4 个 primitive 缺漏)
+//
+// 4 个缺漏 primitive (i8/i16/u8/u16) 都验证隐式 coerce:
+//   let a: i8  = 1;    // i8
+//   let b: i16 = 2;    // i16
+//   let c: u8  = 4;    // u8
+//   let d: u16 = 8;    // u16
+//   s = 1+2+4+8 = 15
+//
+// u32/u64/i64 三个 primitive 已由 v1.7.1 patch A4 u32_let_inferred.jhyy 覆盖。
+
+fn main_jhyy() -> i32 {
+    let a: i8 = 1;
+    let b: i16 = 2;
+    let c: u8 = 4;
+    let d: u16 = 8;
+    let s: i64 = a as i64 + b as i64 + c as i64 + d as i64;
+    return s as i32;
+}

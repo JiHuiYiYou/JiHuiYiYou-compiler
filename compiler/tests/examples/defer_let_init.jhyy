@@ -1,0 +1,15 @@
+// SKIP: v1.8 — defer codegen silent crash (W-059)
+// EXPECT: 123
+// v1.7.3 patch A3 (deferred to v1.8): defer 引用 fn 入口 let 局部
+//
+// v1.7.3 ship 期间发现: defer codegen 路径 silent crash. W-059 🟡 DEFERRED v1.8.
+// 本 test 暂保留为 v1.8 真修后启用 (regress skip).
+
+extern fn sink(v: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    let x: i32 = 100;
+    let y: i32 = 23;
+    defer sink(x);
+    return x + y;
+}

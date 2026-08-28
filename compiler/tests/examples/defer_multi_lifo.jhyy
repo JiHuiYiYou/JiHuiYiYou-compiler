@@ -1,0 +1,20 @@
+// SKIP: v1.8 — defer codegen silent crash (W-059)
+// EXPECT: 111
+// v1.7.3 patch A2 (deferred to v1.8): defer 多 defer LIFO 顺序断言
+//
+// v1.7.3 ship 期间发现: defer codegen 路径 silent crash. W-059 🟡 DEFERRED v1.8.
+// 本 test 暂保留为 v1.8 真修后启用 (regress skip).
+
+let mut g_counter: i32 = 0;
+
+fn bump(v: i32) -> i32 {
+    g_counter = g_counter + v;
+    return 0;
+}
+
+fn main_jhyy() -> i32 {
+    defer bump(1);
+    defer bump(10);
+    defer bump(100);
+    return g_counter;
+}

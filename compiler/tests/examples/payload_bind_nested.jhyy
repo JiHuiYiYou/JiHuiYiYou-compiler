@@ -1,0 +1,20 @@
+// SKIP: v1.8 — spec §D.7 限制 multi-binding / nested pattern 未 ship (W-060)
+// EXPECT: 42
+// v1.7.3 patch A6 (deferred to v1.8): OR pattern `Some(x) | Some(x)` 测试
+//
+// 原 plan 候选: "1 层嵌套 Some(Some(x))" — 但 spec §D.7 line 1386 描述超前于
+// 实现, parser 实际不支持嵌套 pattern. 改用 OR pattern 测试 (spec §D.8 ship,
+// 已 verify 1 layer OK).
+//
+// v1.7.3 ship 期间发现: OR pattern match ABI mismatch — 同 W-060 真因.
+// W-060 🟡 DEFERRED v1.8. 本 test 暂保留为 v1.8 真修后启用 (regress skip).
+
+type Option = enum { Some(i32), None }
+
+fn main_jhyy() -> i32 {
+    let o: Option = Option::Some(42);
+    return match o {
+        Option::Some(v) | Option::Some(v) => v,
+        Option::None                     => 0,
+    };
+}
