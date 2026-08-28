@@ -518,7 +518,8 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         return t;
     }
     if (*n).kind == NODE_CHAR() {
-        let t = type_primitive(ta, PRIM_U8());
+        // v1.7.0 Stage 3: spec §4.4 — char literal type is i32 (was PRIM_U8)
+        let t = type_primitive(ta, PRIM_I32());
         (*n).type_ptr = t as *u8;
         return t;
     }

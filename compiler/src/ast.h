@@ -93,7 +93,7 @@ typedef struct {
 
 typedef struct { double value; } NodeFloat;
 typedef struct { const char *chars; size_t len; } NodeString;
-typedef struct { char ch; } NodeChar;
+typedef struct { uint32_t ch; } NodeChar;  /* v1.7.0 Stage 3: widen to hold UTF-8 BMP codepoint (was: char) */
 typedef struct { bool value; } NodeBool;
 typedef struct { Sym *sym; } NodeIdent;
 
@@ -322,7 +322,7 @@ struct Arena;
 Node *ast_new_int(struct Arena *a, SourceLoc loc, int64_t val, TypePrimitive prim);
 Node *ast_new_float(struct Arena *a, SourceLoc loc, double val);
 Node *ast_new_string(struct Arena *a, SourceLoc loc, const char *chars, size_t len);
-Node *ast_new_char(struct Arena *a, SourceLoc loc, char ch);
+Node *ast_new_char(struct Arena *a, SourceLoc loc, uint32_t ch);  /* v1.7.0 Stage 3: was: char */
 Node *ast_new_bool(struct Arena *a, SourceLoc loc, bool val);
 Node *ast_new_ident(struct Arena *a, SourceLoc loc, Sym *sym);
 Node *ast_new_unary(struct Arena *a, SourceLoc loc, TokenKind op, Node *expr);

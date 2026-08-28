@@ -48,15 +48,31 @@ static int hex_val(char c) {
     return -1;
 }
 
-static unsigned char decode_char_literal(const char *s, int len) {
+static uint32_t decode_char_literal(const char *s, int len) {
     /* s points at opening ' ; len is full token length (incl. quotes).
-       W-053: handles \n \t \r \0 \\ \' \" \xHH  (spec §4.4) */
+       W-053: handles \n \t \r \0 \\ \' \" \xHH  (spec §4.4)
+       v1.7.0 Stage 3: widen return to uint32_t + UTF-8 2-byte BMP decode
+       (3/4-byte codepoints rejected by lexer; see lexer.c scan_char). */
     if (len < 3 || s[0] != '\'' || s[len-1] != '\'') return 0;
     if (s[1] != '\\') {
-        /* plain char: single byte between quotes */
-        return (unsigned char)s[1];
+        /* plain char: UTF-8 decode (ASCII or 2-byte BMP only).
+           Total len = 1 (open quote) + extra + 1 (lead) + 1 (close quote)
+                     = 3 + extra.
+           For 2-byte: len=4, extra=1, codepoint = 11 bits (0x0000..0x07FF). */
+        unsigned char lead = (unsigned char)s[1];
+        if ((lead & 0x80) == 0) {
+            /* ASCII: len must be 3 (open + 1 byte + close) */
+            if (len != 3) return 0;
+            return (uint32_t)lead;
+        } else if ((lead & 0xE0) == 0xC0) {
+            /* 2-byte BMP: lead + 1 cont + 2 quotes = 4 bytes total */
+            if (len != 4) return 0;
+            return ((uint32_t)(lead & 0x1F) << 6) | ((unsigned char)s[2] & 0x3F);
+        }
+        /* 3-byte / 4-byte codepoint rejected by lexer; defensive: */
+        return 0;
     }
-    /* escape sequence */
+    /* escape sequence (single byte result, fits in uint32_t) */
     if (len < 4) return 0;  /* '\\' alone, no escape */
     switch (s[2]) {
     case 'n':  return '\n';
@@ -72,11 +88,11 @@ static unsigned char decode_char_literal(const char *s, int len) {
         int hi = hex_val(s[3]);
         int lo = hex_val(s[4]);
         if (hi < 0 || lo < 0) return 0;
-        return (unsigned char)((hi << 4) | lo);
+        return (uint32_t)((hi << 4) | lo);
     }
     default:
         /* unknown escape — return raw byte (matches pre-fix lenient behavior) */
-        return (unsigned char)s[2];
+        return (uint32_t)(unsigned char)s[2];
     }
 }
 
@@ -243,10 +259,10 @@ static Node *parse_pattern(Parser *p) {
     case TOKEN_CHAR: {
         advance(p);
         /* W-053/v1.6: use full char decode (handles '\n', '\xHH' etc)
-           instead of bare t.start[1] which only sees raw byte. */
+           v1.7.0 Stage 3: cast removed — decode returns uint32_t (PRIM_I32). */
         Node *lo = ast_new_pattern_lit(p->arena, t.loc,
-                                       (unsigned char)decode_char_literal(t.start, t.length),
-                                       PRIM_U8);
+                                       (int64_t)decode_char_literal(t.start, t.length),
+                                       PRIM_I32);
         return try_pattern_range(p, t.loc, lo);
     }
     case TOKEN_MINUS: {
@@ -855,7 +871,7 @@ static Node *prefix_string(Parser *p, Token token) {
 }
 
 /* forward decl for prefix_char + TOKEN_CHAR pattern path */
-static unsigned char decode_char_literal(const char *s, int len);
+static uint32_t decode_char_literal(const char *s, int len);  /* v1.7.0 Stage 3: was unsigned char */
 
 static Node *prefix_char(Parser *p, Token token) {
     return ast_new_char(p->arena, token.loc, decode_char_literal(token.start, token.length));

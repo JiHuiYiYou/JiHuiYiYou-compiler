@@ -1313,8 +1313,10 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
     if kind == NODE_CHAR() {
         let d = node_char_data(n);
         let v = *ir_new_tmp(ir, QBE_W());
-        let ch = (*d).ch & (255 as i32);
-        ir_emit_copy(ir, v, ch as i64);
+        /* v1.7.0 Stage 3: drop & 255 mask — ch is now full BMP codepoint
+           (i32 in AST, fits 2-byte BMP U+0080..U+07FF + ASCII). */
+        let ch = (*d).ch as i64;
+        ir_emit_copy(ir, v, ch);
         return v;
     }
 

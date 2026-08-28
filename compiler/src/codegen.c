@@ -598,7 +598,9 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
     case NODE_CHAR: {
         NodeChar *d = node_char_data(n);
         IRVal v = ir_new_tmp(cg->ir, 'w');
-        ir_emit_copy(cg->ir, v, (unsigned char)d->ch);
+        /* v1.7.0 Stage 3: drop (unsigned char) cast — ch is now uint32_t,
+           BMP codepoints (0x00..0xFF for ASCII, 0x80..0x7FF for 2-byte) fit. */
+        ir_emit_copy(cg->ir, v, (int64_t)d->ch);
         *out = (v); return;
     }
     case NODE_IDENT: {

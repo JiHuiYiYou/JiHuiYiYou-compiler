@@ -226,6 +226,34 @@ static Token scan_char(Lexer *l) {
             break;
         default: break;
         }
+    } else {
+        /* v1.7.0 Stage 3: UTF-8 multi-byte char literal (spec §4.4, 2-byte BMP only).
+           Lead byte determines continuation byte count:
+           0xxxxxxx (1 byte ASCII), 110xxxxx (2 bytes BMP).
+           3-byte / 4-byte codepoints explicitly rejected (推 v2.x per master plan). */
+        unsigned char lead = (unsigned char)c;
+        int extra = 0;
+        if      ((lead & 0x80) == 0)    extra = 0;
+        else if ((lead & 0xE0) == 0xC0) extra = 1;
+        else if ((lead & 0xF0) == 0xE0) {
+            /* 3-byte codepoint (e.g. CJK U+4E00..U+9FFF, '你' = U+4F60).
+               Stage 3 scope is 2-byte BMP only — give clear OOS error
+               instead of confusing "unterminated" from over-consumption. */
+            return error_token(l, "3-byte UTF-8 codepoint not supported in v1.7.0 Stage 3 (use ASCII or 2-byte BMP, e.g. 'é'; CJK 推 v2.x)",
+                               l->current - start);
+        }
+        else if ((lead & 0xF8) == 0xF0) {
+            /* 4-byte codepoint (e.g. emoji, supplementary planes).
+               Stage 3 scope is 2-byte BMP only. */
+            return error_token(l, "4-byte UTF-8 codepoint not supported in v1.7.0 Stage 3 (use ASCII or 2-byte BMP; supplementary 推 v2.x)",
+                               l->current - start);
+        }
+        else return error_token(l, "invalid UTF-8 lead byte", l->current - start);
+        for (int i = 0; i < extra; i++) {
+            char cont = next_char(l);
+            if (((unsigned char)cont & 0xC0) != 0x80)
+                return error_token(l, "invalid UTF-8 continuation byte", l->current - start);
+        }
     }
     char closing = next_char(l);
     if (closing != '\'')

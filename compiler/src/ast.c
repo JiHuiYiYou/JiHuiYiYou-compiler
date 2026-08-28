@@ -95,7 +95,7 @@ Node *ast_new_string(Arena *a, SourceLoc loc, const char *chars, size_t len) {
     return n;
 }
 
-Node *ast_new_char(Arena *a, SourceLoc loc, char ch) {
+Node *ast_new_char(Arena *a, SourceLoc loc, uint32_t ch) {
     Node *n = new_node(a, NODE_CHAR, loc, sizeof(NodeChar));
     node_char_data(n)->ch = ch;
     return n;

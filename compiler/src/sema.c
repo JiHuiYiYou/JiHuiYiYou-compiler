@@ -332,7 +332,10 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         return n->type;
     }
     case NODE_CHAR: {
-        n->type = type_primitive(ctx->arena, PRIM_U8);
+        /* v1.7.0 Stage 3: spec §4.4 — char literal type is i32 (was PRIM_U8).
+           Aligns to spec; breaks existing char_literal.jhyy + char_pattern.jhyy
+           which use `: u8` annotations (Step 7 updates). */
+        n->type = type_primitive(ctx->arena, PRIM_I32);
         return n->type;
     }
     case NODE_BOOL: {

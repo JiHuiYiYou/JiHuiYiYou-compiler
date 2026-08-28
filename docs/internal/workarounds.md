@@ -3770,3 +3770,64 @@ spec §9.5 4 形式全 ship:
 - `docs/logs/v1/changelog-v1.6.0.md` § Known uncovered (umbrella changelog)
 
 
+## W-056: 多字节 UTF-8 char literal + char type `u8 → i32` (spec §4.4)
+
+**ID:** W-056
+
+**Status:** ✅ RESOLVED (2026-08-28 v1.7.0 Stage 3)
+
+**症状 (Stage 3 修前):**
+1. `let c = '你'` lexer 单字节 close-check → "unterminated character literal" (lexer.c:230 / lexer.jhyy:517)。3 字节 CJK / 4 字节 emoji 全 lex fail
+2. `sema.c:334 case NODE_CHAR` 走 `PRIM_U8` (spec §4.4 应为 `i32`) → char literal 类型跟 spec 不齐, 后续 `i32` 变量接收 char literal 无 coerce path
+3. `codegen.c:598 NODE_CHAR` 走 `(unsigned char)d->ch` (后改 `& 255` mask) → 强截断 2-byte BMP codepoint (0x80..0x7FF) 全变 ASCII
+
+**根因:**
+1. lexer.scan_char / lex_scan_char — 多字节 UTF-8 不识别 (lead byte 0xC0/0xE0/0xF0 视作 continuation pattern 干扰,缺 lead-byte mask dispatch)
+2. sema NODE_CHAR — `u8` 是 v0.7 早期选择 (跟 Stage 0 C-side `char` 类型对齐的妥协), spec §4.4 后改 `i32` 但 codegen 没跟上
+3. codegen NODE_CHAR — `(unsigned char)` cast 是 C-side 默认 promotion 路径, jhyy-side 镜像用 `& 255` mask (W-052 路径), 都截断高字节
+
+**修复 (Stage 3, parity src + src0):**
+1. `compiler/src/lexer.c:213-234` scan_char + `compiler/src0/lexer.jhyy:500-524` lex_scan_char — 按 lead byte mask dispatch 字节数 (1/2/3/4), 消费对应数 continuation byte (0xC0==0x80 mask 验证)。3-byte / 4-byte 显式 error ("3/4-byte UTF-8 codepoint not supported in v1.7.0 Stage 3, use ASCII or 2-byte BMP; CJK/emoji 推 v2.x") — per master plan scope (Stage 1-5 不覆盖的)
+2. `compiler/src/ast.h:96 + :325` NodeChar.ch `char → uint32_t` + ast_new_char signature。src0/ast.jhyy NodeChar.ch: i32 已够, 不动
+3. `compiler/src/parser.c:44-81 + :861 + :248` decode_char_literal return type `unsigned char → uint32_t` + UTF-8 multi-byte decode (lead + 1 cont → 11-bit codepoint)。src0/parser.jhyy 新加共享 helper `decode_char_literal` 替换 3 处 inline copy (line 362, 570, 696) — W-053 教训: 漏 1 处 silent fail
+4. `compiler/src/sema.c:334-337 + compiler/src0/sema.jhyy:520-524` NODE_CHAR — `PRIM_U8 → PRIM_I32` (spec §4.4)
+5. `compiler/src/codegen.c:598-603 + compiler/src0/codegen.jhyy:1312-1318` NODE_CHAR codegen — 去掉 `(unsigned char)` + `& 255` 截断。IR temp 已 `'w'` (32-bit), 只透传 codepoint
+
+**Side fix (Stage 3 排查过程发现):**
+- src0/parser.jhyy:463 + :623 char pattern codepath 仍用 `PRIM_U8()` 标记 NodeInt/NodePatternLit (与 src/parser.c:250 + :263 + :272 已改 `PRIM_I32` 不齐)。改后 src0/parser.jhyy 也走 `PRIM_I32()` — 这才是导致 char_utf8_expr Stage 0 路径 EXIT=0 vs v1 EXIT=5 不一致的真因 (mask `& 255` 没截断 codepoint, 但 PRIM_U8 类型让 sema 接受常量后 codegen 路径走丢)
+
+**测试:**
+- 新 `compiler/tests/examples/char_utf8_basic.jhyy` — 3 个 BMP char literal 值断言 (`'é'` = 233 / `'ñ'` = 241 / `'ü'` = 252) → EXIT=0
+- 新 `compiler/tests/examples/char_utf8_expr.jhyy` — BMP char 在 match arm pattern + match value → EXIT=5
+- 改 `compiler/tests/examples/char_literal.jhyy` — 8 个 `: u8 → : i32` + 3 个 BMP case 追加
+- 改 `compiler/tests/examples/char_pattern.jhyy` — `fn classify(c: u8) → c: i32` + call sites 去掉 `as u8` cast
+
+**验证 (5/5 PASS 必达 + Stage 3 byte-equal closure 保留):**
+- char_utf8_basic.jhyy → EXIT=0 (3/3 BMP char value)
+- char_utf8_expr.jhyy → EXIT=5 (BMP char in match arm)
+- char_literal.jhyy → EXIT=0 (12 char family incl 3 BMP)
+- char_pattern.jhyy → EXIT=0 (6 patterns incl range)
+- full regress 88/88 PASS + 4 SKIP (jhyy.exe + jhyy_stage0.exe 双 binary, parity)
+- Stage 3 N=4 byte-equal closure 保留 (jhyy_v1.il == v2.il == v3.il == v4.il sha = 7552aa94...)
+
+**已知限制 (Stage 3 不修, 推后续):**
+1. **3-byte / 4-byte UTF-8 codepoint** — `let c = '你'` (U+4F60) 仍 lex fail, 推 v2.x (per master plan §"Stage 1-5 不覆盖的")
+2. **char type signedness** — Stage 3 严格按 spec 走 `i32`, 若 spec revision 改 `u32` / `u8` 推 v2.x
+3. **char → u8 implicit coerce** — `let x: u8 = 'a'` 现 type mismatch (i32 → u8 需 `as`), 无 coerce path。后续写 `let x = 'a'` (类型推导) 自动 `i32`
+4. **match arm body `=> r = N` stage0 codegen gap** — 在 char_utf8_expr.jhyy 排查时发现 stage0 codegen 对 match arm body 是 `NODE_ASSIGN` (单 stmt 非 block) 时, arm body 的 storew 不 emit (IL 只 `jmp @merge`, 不写 local)。test 改用 single-expr arm (`=> N`) 绕开 (per char_pattern.jhyy 范式)。根因 stage0/codegen.jhyy NODE_ASSIGN path 跟 NODE_BLOCK path 不全等价, 推后续 sprint 真修 (新 W-NNN candidate)
+
+**Jhyy-side codegen 同步坑 (Stage 3 排查记录):**
+1. **shared helper 替换 inline copy** — src0/parser.jhyy 3 处 inline decode_char_literal (line 362, 570, 696) 用 `decode_char_literal(start, length)` 共享 helper 替换, 必须 3 处都改 (W-053 教训: 漏 1 处 silent fail)
+2. **`&& with ||` phi mismatch** — src0/lexer.jhyy UTF-8 多字节扫描用 nested if (`lead_x_check { ... extra_check { ... } }`) + while (`while i < extra { ... }`), 避免 `A && (B || C)` 范式 (跟 Stage 2 同型)
+3. **`PRIM_U8() → PRIM_I32()` side effect** — char pattern codepath 用 `ast_new_int(arena, loc, val, PRIM_*)` 标记 type, src0/parser.jhyy 漏改 2 处 (line 463 + 623), stage0 跟 v1 parity 失守。诊断通过对比双方 .il 输出 (per feedback_fix_evaluation_rule + feedback_il_s_debugging_pattern)
+
+**superseder:** v1.7.0 Stage 3 commit (post-Stage 2 ship)
+
+**引用:**
+- spec `docs/abis/jhyy-lang-spec-v1.1.0.md` § 4.4 (Char literals — 权威)
+- W-052 (本 sprint scope 上游 — 修 char family escape 但漏多字节 UTF-8 + type 对齐)
+- W-053 (本 sprint scope 上游 — 同上, escape 族 + hex escape 已 ship 但多字节留 Stage 3)
+- `docs/plans/v1/v1.7.0任务清单 + 概要设计.md` (umbrella 5 候选之第 3 步 W-053 followup)
+- `docs/logs/v1/changelog-v1.7.0.md` (umbrella changelog, Stage 3 段)
+
+
