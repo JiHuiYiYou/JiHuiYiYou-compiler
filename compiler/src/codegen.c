@@ -722,6 +722,81 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
         /* non-short-circuit: evaluate right eagerly */
         IRVal right = {0};
         cg_expr(cg, d->right, &right);
+
+        /* v1.7.0 Stage 2: pointer arithmetic (spec §9.5).
+           - *T + int / *T - int → *T (offset = int * sizeof(elem))
+           - int + *T → *T (symmetric)
+           - *T - *T → i64 (diff in elements = (left - right) / sizeof(elem)) */
+        if ((d->op == TOKEN_PLUS || d->op == TOKEN_MINUS) && n->type) {
+            int left_is_ptr = (d->left->type && d->left->type->kind == KIND_POINTER);
+            int right_is_ptr = (d->right->type && d->right->type->kind == KIND_POINTER);
+            int arith_kind = -1; /* 0=plus, 1=minus */
+            if (d->op == TOKEN_PLUS) arith_kind = 0;
+            else if (d->op == TOKEN_MINUS) arith_kind = 1;
+
+            /* *T +/- int → *T */
+            if (left_is_ptr && !right_is_ptr && arith_kind >= 0) {
+                Type *elem_type = d->left->type->pointer.elem;
+                size_t elem_size = type_size(elem_type);
+                IRVal offset = ir_new_tmp(cg->ir, 'l');
+                if (d->right->kind == NODE_INT) {
+                    int64_t const_off = node_int_data(d->right)->value * (int64_t)elem_size;
+                    ir_emit_copy(cg->ir, offset, const_off);
+                } else {
+                    IRVal r64 = ir_new_tmp(cg->ir, 'l');
+                    if (right.qbe_type == 'l') {
+                        r64 = right;
+                    } else {
+                        ir_emit(cg->ir, "    %%t%d =l extsw %%t%d\n", r64.id, right.id);
+                    }
+                    IRVal es = ir_new_tmp(cg->ir, 'l');
+                    ir_emit_copy(cg->ir, es, (int64_t)elem_size);
+                    ir_emit_binary(cg->ir, offset, "mul", r64, es);
+                }
+                IRVal result_ptr = ir_new_tmp(cg->ir, 'l');
+                const char *op_name = (arith_kind == 0) ? "add" : "sub";
+                ir_emit_binary(cg->ir, result_ptr, op_name, left, offset);
+                *out = (result_ptr); return;
+            }
+
+            /* int + *T → *T (symmetric) */
+            if (!left_is_ptr && right_is_ptr && arith_kind == 0) {
+                Type *elem_type = d->right->type->pointer.elem;
+                size_t elem_size = type_size(elem_type);
+                IRVal offset = ir_new_tmp(cg->ir, 'l');
+                if (d->left->kind == NODE_INT) {
+                    int64_t const_off = node_int_data(d->left)->value * (int64_t)elem_size;
+                    ir_emit_copy(cg->ir, offset, const_off);
+                } else {
+                    IRVal l64 = ir_new_tmp(cg->ir, 'l');
+                    if (left.qbe_type == 'l') {
+                        l64 = left;
+                    } else {
+                        ir_emit(cg->ir, "    %%t%d =l extsw %%t%d\n", l64.id, left.id);
+                    }
+                    IRVal es = ir_new_tmp(cg->ir, 'l');
+                    ir_emit_copy(cg->ir, es, (int64_t)elem_size);
+                    ir_emit_binary(cg->ir, offset, "mul", l64, es);
+                }
+                IRVal result_ptr = ir_new_tmp(cg->ir, 'l');
+                ir_emit_binary(cg->ir, result_ptr, "add", offset, right);
+                *out = (result_ptr); return;
+            }
+
+            /* *T - *T → i64 (diff in elements) */
+            if (left_is_ptr && right_is_ptr && arith_kind == 1) {
+                Type *elem_type = d->left->type->pointer.elem;
+                size_t elem_size = type_size(elem_type);
+                IRVal byte_diff = ir_new_tmp(cg->ir, 'l');
+                ir_emit_binary(cg->ir, byte_diff, "sub", left, right);
+                IRVal elem_sz = ir_new_tmp(cg->ir, 'l');
+                ir_emit_copy(cg->ir, elem_sz, (int64_t)elem_size);
+                IRVal result_diff = ir_new_tmp(cg->ir, 'l');
+                ir_emit_binary(cg->ir, result_diff, "div", byte_diff, elem_sz);
+                *out = (result_diff); return;
+            }
+        }
+
         IRVal result = ir_new_tmp(cg->ir, qbe_type_of(n->type));
 
         /* determine operand width and signedness for comparisons */
@@ -1238,6 +1313,49 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
             cg_emit_store(cg, id->sym->type, val, slot);
             cg_add_local(cg, id->sym, slot, 1);
             *out = (slot); return;
+        }
+        /* v1.7.0 Stage 2: &arr[i] should return the element ADDRESS, not the element VALUE.
+         * Old behavior: fell through to fallback (line 1291) which calls cg_expr(arr[i]) and
+         * loads the value → caller treats value as *T → segfault on p[j] subscript. */
+        if (d->expr->kind == NODE_INDEX) {
+            NodeIndex *nd = node_index_data(d->expr);
+            Type *arr_type = nd->expr->type;
+            if (arr_type && arr_type->kind == KIND_ARRAY) {
+                Type *elem_type = arr_type->array.elem;
+                size_t elem_size = type_size(elem_type);
+                IRVal base = {0};
+                if (nd->expr->kind == NODE_IDENT) {
+                    NodeIdent *id = node_ident_data(nd->expr);
+                    if (id->sym && id->sym->kind == SYM_CONST) {
+                        cg_expr(cg, nd->expr, &base);
+                    } else {
+                        int is_stack = 0;
+                        cg_find_local(cg, id->sym, &is_stack, &base);
+                    }
+                } else {
+                    cg_expr(cg, nd->expr, &base);
+                }
+                IRVal idx = {0};
+                cg_expr(cg, nd->index, &idx);
+                IRVal offset = ir_new_tmp(cg->ir, 'l');
+                if (nd->index->kind == NODE_INT) {
+                    int64_t const_off = node_int_data(nd->index)->value * (int64_t)elem_size;
+                    ir_emit_copy(cg->ir, offset, const_off);
+                } else {
+                    IRVal idx64 = ir_new_tmp(cg->ir, 'l');
+                    if (idx.qbe_type == 'l') {
+                        idx64 = idx;
+                    } else {
+                        ir_emit(cg->ir, "    %%t%d =l extsw %%t%d\n", idx64.id, idx.id);
+                    }
+                    IRVal elem_size_val = ir_new_tmp(cg->ir, 'l');
+                    ir_emit_copy(cg->ir, elem_size_val, (int64_t)elem_size);
+                    ir_emit_binary(cg->ir, offset, "mul", idx64, elem_size_val);
+                }
+                IRVal addr = ir_new_tmp(cg->ir, 'l');
+                ir_emit_binary(cg->ir, addr, "add", base, offset);
+                *out = (addr); return;
+            }
         }
         /* Bug 1 真修: &EXPR.field should return the FIELD ADDRESS, not the field value.
          * Old behavior: fell through to cg_expr(d->expr) which loads the field VALUE,

@@ -1907,6 +1907,100 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
 
         // 非短路：eager eval right
         let right = cg_expr(cg_raw, right_node);
+
+        // v1.7.0 Stage 2: pointer arithmetic (spec §9.5).
+        //   - *T + int / *T - int → *T (offset = int * sizeof(elem))
+        //   - int + *T → *T (symmetric)
+        //   - *T - *T → i64 (diff in elements = (left - right) / sizeof(elem))
+        // Mirror of C-side codegen.c NODE_BINARY pointer arith dispatch.
+        // NOTE: 避免 if-expression 含 let block (jhyy parser 限制); 改用 statement-level
+        // 单 branch if + 默认值 (跟 C 端 if/else void 语义对齐 — 两 branch 末同 type)。
+        if d_op == TOKEN_PLUS() || d_op == TOKEN_MINUS() {
+            let left_t_raw = (*left_node).type_ptr;
+            let right_t_raw = (*right_node).type_ptr;
+            let mut left_is_ptr: i32 = 0;
+            let mut right_is_ptr: i32 = 0;
+            if left_t_raw != (0 as *u8) {
+                let lt = left_t_raw as *Type;
+                if (*lt).kind == KIND_POINTER() { left_is_ptr = 1; }
+            }
+            if right_t_raw != (0 as *u8) {
+                let rt = right_t_raw as *Type;
+                if (*rt).kind == KIND_POINTER() { right_is_ptr = 1; }
+            }
+
+            // *T +/- int → *T
+            if left_is_ptr == 1 && right_is_ptr == 0 {
+                let elem_t = (*(left_t_raw as *Type)).elem;
+                let elem_sz = type_size(elem_t as *Type);
+                let byte_off = *ir_new_tmp(ir, QBE_L());
+                if (*right_node).kind == NODE_INT() {
+                    let nd_r = node_int_data(right_node);
+                    let const_off = (*nd_r).value * elem_sz;
+                    ir_emit_copy(ir, byte_off, const_off);
+                } else {
+                    // 单 branch if + 默认 r64 = right (no new tmp alloc if already l)
+                    let mut r64: IRVal = right;
+                    if right.qbe_type != QBE_L() {
+                        r64 = *ir_new_tmp(ir, QBE_L());
+                        ir_emit_str(ir, "    %t" as *u8);
+                        ir_emit_int(ir, "%d" as *u8, r64.id);
+                        ir_emit_str(ir, " =l extsw %t" as *u8);
+                        ir_emit_int(ir, "%d" as *u8, right.id);
+                        ir_emit_str(ir, "\n" as *u8);
+                    }
+                    let es = *ir_new_tmp(ir, QBE_L());
+                    ir_emit_copy(ir, es, elem_sz);
+                    ir_emit_binary(ir, byte_off, "mul" as *u8, r64, es);
+                }
+                let result_ptr = *ir_new_tmp(ir, QBE_L());
+                let op_name: *u8 = if d_op == TOKEN_PLUS() { "add" as *u8 } else { "sub" as *u8 };
+                ir_emit_binary(ir, result_ptr, op_name, left, byte_off);
+                return result_ptr;
+            }
+
+            // int + *T → *T (symmetric)
+            if left_is_ptr == 0 && right_is_ptr == 1 && d_op == TOKEN_PLUS() {
+                let elem_t = (*(right_t_raw as *Type)).elem;
+                let elem_sz = type_size(elem_t as *Type);
+                let byte_off = *ir_new_tmp(ir, QBE_L());
+                if (*left_node).kind == NODE_INT() {
+                    let nd_l = node_int_data(left_node);
+                    let const_off = (*nd_l).value * elem_sz;
+                    ir_emit_copy(ir, byte_off, const_off);
+                } else {
+                    let mut l64: IRVal = left;
+                    if left.qbe_type != QBE_L() {
+                        l64 = *ir_new_tmp(ir, QBE_L());
+                        ir_emit_str(ir, "    %t" as *u8);
+                        ir_emit_int(ir, "%d" as *u8, l64.id);
+                        ir_emit_str(ir, " =l extsw %t" as *u8);
+                        ir_emit_int(ir, "%d" as *u8, left.id);
+                        ir_emit_str(ir, "\n" as *u8);
+                    }
+                    let es = *ir_new_tmp(ir, QBE_L());
+                    ir_emit_copy(ir, es, elem_sz);
+                    ir_emit_binary(ir, byte_off, "mul" as *u8, l64, es);
+                }
+                let result_ptr = *ir_new_tmp(ir, QBE_L());
+                ir_emit_binary(ir, result_ptr, "add" as *u8, byte_off, right);
+                return result_ptr;
+            }
+
+            // *T - *T → i64 (diff in elements)
+            if left_is_ptr == 1 && right_is_ptr == 1 && d_op == TOKEN_MINUS() {
+                let elem_t = (*(left_t_raw as *Type)).elem;
+                let elem_sz = type_size(elem_t as *Type);
+                let byte_diff = *ir_new_tmp(ir, QBE_L());
+                ir_emit_binary(ir, byte_diff, "sub" as *u8, left, right);
+                let es = *ir_new_tmp(ir, QBE_L());
+                ir_emit_copy(ir, es, elem_sz);
+                let result_diff = *ir_new_tmp(ir, QBE_L());
+                ir_emit_binary(ir, result_diff, "div" as *u8, byte_diff, es);
+                return result_diff;
+            }
+        }
+
         let result = *ir_new_tmp(ir, qbe_type_of((*n).type_ptr));
 
         // operand width + signedness
@@ -3071,6 +3165,69 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             ir_emit_alloc(ir, slot, 8 as i32);
             let _store = cg_emit_store(cg_raw, (*inner_node).type_ptr, v, slot);
             return slot;
+        }
+        // v1.7.0 Stage 2: &arr[i] 应返回元素地址,不是元素值.
+        // 之前 fall-through 到 `return zero` 让 caller 拿到 IRVAL_INT 0 → p[j] 走 `add 0, off` segfault.
+        // Mirror of C-side codegen.c NODE_ADDR_OF NODE_INDEX branch.
+        if inner_kind == NODE_INDEX() {
+            let nd = node_index_data(inner_node);
+            let base_node = (*nd).expr as *Node;
+            let idx_node = (*nd).index as *Node;
+            let arr_type_raw = (*base_node).type_ptr;
+            if arr_type_raw != (0 as *u8) {
+                let arr_t = arr_type_raw as *Type;
+                if (*arr_t).kind == KIND_ARRAY() {
+                    let elem_t = (*arr_t).elem;
+                    let elem_sz = type_size(elem_t as *Type);
+                    // compute base address (mirror C-side logic)
+                    let mut base: IRVal = zero;
+                    if (*base_node).kind == NODE_IDENT() {
+                        let id = node_ident_data(base_node);
+                        let sym_raw = (*id).sym;
+                        if sym_raw != (0 as *u8) {
+                            let sym = sym_raw as *Sym;
+                            if (*sym).kind == SYM_CONST() {
+                                base = cg_expr(cg_raw, base_node);
+                            } else {
+                                let loc_buf = arena_alloc((*ir).arena, IRVAL_SIZE());
+                                let _fnd = cg_find_local(cg_raw, (*id).sym, loc_buf);
+                                base = IRVal {
+                                    kind:     *(loc_buf as *i32),
+                                    id:       *(ptr_add_u8(loc_buf, 4 as i64) as *i32),
+                                    ival:     *(ptr_add_u8(loc_buf, 8 as i64) as *i64),
+                                    name:     *(ptr_add_u8(loc_buf, 16 as i64) as **u8),
+                                    qbe_type: *(ptr_add_u8(loc_buf, 24 as i64) as *i32),
+                                };
+                            }
+                        }
+                    } else {
+                        base = cg_expr(cg_raw, base_node);
+                    }
+                    // compute index
+                    let idx_val = cg_expr(cg_raw, idx_node);
+                    let byte_off = *ir_new_tmp(ir, QBE_L());
+                    if (*idx_node).kind == NODE_INT() {
+                        let nd_int = node_int_data(idx_node);
+                        let const_off = (*nd_int).value * elem_sz;
+                        ir_emit_copy(ir, byte_off, const_off);
+                    } else {
+                        if idx_val.qbe_type == QBE_L() {
+                            ir_emit_binary(ir, byte_off, "mul" as *u8, idx_val, ir_new_int(elem_sz));
+                        } else {
+                            let idx64 = *ir_new_tmp(ir, QBE_L());
+                            ir_emit_str(ir, "    %t" as *u8);
+                            ir_emit_int(ir, "%d" as *u8, idx64.id);
+                            ir_emit_str(ir, " =l extsw %t" as *u8);
+                            ir_emit_int(ir, "%d" as *u8, idx_val.id);
+                            ir_emit_str(ir, "\n" as *u8);
+                            ir_emit_binary(ir, byte_off, "mul" as *u8, idx64, ir_new_int(elem_sz));
+                        }
+                    }
+                    let addr = *ir_new_tmp(ir, QBE_L());
+                    ir_emit_binary(ir, addr, "add" as *u8, base, byte_off);
+                    return addr;
+                }
+            }
         }
         // Bug 1 真修 (v0.9 wip commit 2.84): &EXPR.field should return the FIELD ADDRESS,
         // not the field value (fall-through to `return zero` was emitting `loadw 0`).

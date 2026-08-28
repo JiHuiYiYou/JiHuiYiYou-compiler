@@ -665,6 +665,39 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
            op == TOKEN_SLASH() || op == TOKEN_PERCENT() ||
            op == TOKEN_PIPE()  || op == TOKEN_AMP()   || op == TOKEN_CARET() ||
            op == TOKEN_LTLT()  || op == TOKEN_GTGT() {
+            // v1.7.0 Stage 2: spec §9.5 pointer arithmetic
+            // - *T + int / *T - int → *T
+            // - int + *T → *T
+            // - *T - *T → i64 (same elem type)
+            // NOTE: 避免 `A && (B || C)` pattern — jhyy-side codegen 在 && RHS
+            // 含 || 时 phi predecessors 错配 (per Stage 2 Step 3 build break)。
+            // 改写为 nested if, 跟 C-side sema.c 行为对齐 (sema.c 不受影响)。
+            if lt != (0 as *Type) && rt != (0 as *Type) {
+                let lt_kind = (*lt).kind;
+                let rt_kind = (*rt).kind;
+                if lt_kind == KIND_POINTER() {
+                    if rt_kind == KIND_PRIMITIVE() || rt_kind == KIND_POINTER() {
+                        if op == TOKEN_PLUS() || op == TOKEN_MINUS() {
+                            if rt_kind == KIND_PRIMITIVE() {
+                                (*n).type_ptr = lt as *u8;
+                                return lt;
+                            }
+                            if rt_kind == KIND_POINTER() && op == TOKEN_MINUS() {
+                                if type_eq((*lt).elem as *Type, (*rt).elem as *Type) != (0 as i32) {
+                                    let i64_t = type_primitive(ta, PRIM_I64());
+                                    (*n).type_ptr = i64_t as *u8;
+                                    return i64_t;
+                                }
+                            }
+                        }
+                    }
+                }
+                if op == TOKEN_PLUS() && rt_kind == KIND_POINTER() &&
+                   lt_kind == KIND_PRIMITIVE() {
+                    (*n).type_ptr = rt as *u8;
+                    return rt;
+                }
+            }
             if type_eq(lt, rt) == (0 as i32) {
                 let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                         "type mismatch in binary" as *u8);

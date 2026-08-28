@@ -445,6 +445,32 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
         case TOKEN_CARET:
         case TOKEN_LTLT:
         case TOKEN_GTGT:
+            /* v1.7.0 Stage 2: spec §9.5 pointer arithmetic.
+               - *T + int → *T (and *T - int → *T)
+               - int + *T → *T (symmetry)
+               - *T - *T → i64 (offset in elements, signed) */
+            if (lt && lt->kind == KIND_POINTER && rt &&
+                (rt->kind == KIND_PRIMITIVE || rt->kind == KIND_POINTER)) {
+                if (d->op == TOKEN_PLUS || d->op == TOKEN_MINUS) {
+                    if (rt->kind == KIND_PRIMITIVE) {
+                        /* *T + int / *T - int → *T */
+                        n->type = lt;
+                        return n->type;
+                    }
+                    if (rt->kind == KIND_POINTER && d->op == TOKEN_MINUS &&
+                        type_eq(lt->pointer.elem, rt->pointer.elem)) {
+                        /* *T - *T → i64 */
+                        n->type = type_primitive(ctx->arena, PRIM_I64);
+                        return n->type;
+                    }
+                }
+            }
+            if (d->op == TOKEN_PLUS && rt && rt->kind == KIND_POINTER &&
+                lt && lt->kind == KIND_PRIMITIVE) {
+                /* int + *T → *T */
+                n->type = rt;
+                return n->type;
+            }
             if (!type_eq(lt, rt))
                 sema_error(ctx, n->loc, "type mismatch in binary: %s vs %s",
                            type_to_string(lt), type_to_string(rt));

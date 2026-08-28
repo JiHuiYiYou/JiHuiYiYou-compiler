@@ -3663,8 +3663,9 @@ il_sha256: 兼容 W-053 baseline (W-054 不改 IL,W-053 fix 已 ship 稳定)
 ## W-055: spec §9.5 指针算术 `p + 1` 整节未实现
 
 **ID:** W-055
-**状态:** 🆕 ACTIVE 2026-08-27 (NEW, 本 sprint 标 LIMIT 不修)
-**日期:** 2026-08-27 (探测 + 登记, 标 LIMIT 不修)
+**状态:** ✅ RESOLVED 2026-08-28 (v1.7.0 Stage 2)
+**日期:** 2026-08-27 (探测 + 登记, 标 LIMIT 不修) → 2026-08-28 (Stage 2 真修)
+**superseder:** v1.7.0 Stage 2 commit (per `docs/logs/v1/changelog-v1.7.0.md`)
 **触发面:** 任何 jhyy 源码在表达式上下文对 `*T` pointer / `[*]T` slice 类型做整型算术:
 
 | 输入 | 期望 (spec §9.5) | v1.6.0 实际 |
@@ -3728,7 +3729,39 @@ fn next_char(l: *u8) -> *u8 {
 - v2.x 候选: QBE 重写时把 `*T + i32` 跟 QBE `add` instruction 自然映射(`%t_p =l add %t_p, %t_off`),sema 跟 codegen 同步 ship。
 - v3.x 候选: `&mut` lifetime 检查 pointer arith bounds,跟 OS-required `unsafe { ... }` 块配合。
 
-**superseder:** TBD (推 v1.7 或 v2.x)
+**Resolution (2026-08-28 v1.7.0 Stage 2):**
+
+spec §9.5 4 形式全 ship:
+- `*T + int` / `*T - int` → `*T` (offset = int * sizeof(elem))
+- `int + *T` → `*T` (symmetry)
+- `*T - *T` → `i64` (diff in elements = byte_diff / sizeof(elem))
+- `p[n]` (subscript via `&NODE_INDEX` codegen fix) → `T` (offset n * sizeof(elem))
+
+**实现 4 段:**
+1. `compiler/src/sema.c` + `compiler/src0/sema.jhyy` — TOKEN_PLUS/TOKEN_MINUS 分支前加 `*T +/- int → *T` / `*T - *T → i64` / `int + *T → *T` 类型规则
+2. `compiler/src/codegen.c` + `compiler/src0/codegen.jhyy` — NODE_BINARY case 加 pointer arith dispatch:offset = int * sizeof(elem) (const-fold NODE_INT 直接 emit copy, else extsw + mul), base +/- offset; *T - *T 走 byte_diff / sizeof(elem)
+3. `compiler/src/codegen.c` + `compiler/src0/codegen.jhyy` — NODE_ADDR_OF NODE_INDEX 真修 (`&arr[i]` 返地址非值): 跟 NODE_INDEX 计算路径对齐 (base + idx * sizeof(elem)), 之前 fall-through `return zero` 让 caller 拿到 IRVAL_INT 0 走 `add 0, off` segfault
+4. 3 个诊断 test (`compiler/tests/examples/ptr_arith_basic.jhyy` / `_diff.jhyy` / `_subscript.jhyy`) 进 default regress 验证 4 形式
+
+**已知限制 (Stage 2 不修, 推后续):**
+1. **mixed-width int promotion 不存在** — `i64 + i32` 仍 type mismatch。`d + 100` 在 ptr_arith_diff.jhyy 里改成 `d + 100i64` 绕开 (test 备注) — 真修要 mixed-width promotion (per spec §6 待 verify)
+2. **pointer comparison** `p < q` 不在 Stage 2 scope (spec §9.5 隐含但未明示, 推 v2.x)
+3. **bounds check** — *T +/- int 不查越界, 需 `&mut` lifetime (v3.x) compile-time 拦截
+4. **subscript `p[n]` 仅 `*T` 类型** — `[*]T` slice 已有 builtin `s[i]` 走 slice_get helper (per v1.6.0),不走 `p + n` 路径
+
+**验证 (5/5 PASS 必达 + Stage 2 byte-equal closure 保留):**
+- ptr_arith_basic.jhyy (`*T + int` × 2 + `*r - *p - 10`) → EXIT=10
+- ptr_arith_diff.jhyy (`*T - *T` + `d + 100i64`) → EXIT=102 (强断言 d != 0)
+- ptr_arith_subscript.jhyy (`p[2]`) → EXIT=30
+- full regress 86/86 PASS (jhyy.exe + jhyy_stage0.exe 双 binary)
+- Stage 2 N=3 byte-equal closure 保留 (jhyy_v2.il == j3.il == v4.il sha 一致)
+
+**Jhyy-side codegen 同步坑 (Stage 2 排查记录):**
+1. `A && (B || C)` pattern — jhyy-side codegen 在 && RHS 含 || 时 phi predecessors 错配 (per Step 3 build break)。Stage 2 改写为 nested if (`A { if B || C { ... } }` 避免 `&&` with `||`)
+2. if-expression 含 let block — jhyy parser 不允许 (`unexpected token 'let' in expression`)。Stage 2 改用 statement-level 单 branch if + 默认值 (`let mut r64 = right; if right.qbe_type != L { r64 = new_tmp; emit extsw }`)
+3. if/else 两 branch 末必须同 type — jhyy sema 限制 (C 端无 — C 是 statement-level)。Stage 2 改用单 branch if 避免
+
+**superseder:** v1.7.0 Stage 2 commit (post-v1.6 ship)
 
 **引用:**
 - spec `docs/abis/jhyy-lang-spec-v1.1.0.md` § 9.5 (Pointer arithmetic — 权威)
