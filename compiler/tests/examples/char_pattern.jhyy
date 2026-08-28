@@ -1,5 +1,6 @@
 // EXPECT: 0
 // v1.6: W-053 char pattern (spec §11.3) — RESOLVED in v1.6 sprint
+// v1.7.0 Stage 3: char type u8 → i32 (spec §4.4 alignment)
 //
 // Validates char 做 match arm pattern:
 // - `'\n' => 1`  (literal char pattern, decoded via decode_char_literal)
@@ -9,8 +10,12 @@
 // v1.6 fix (parity src + src0):
 // - parser.c TOKEN_CHAR pattern path now calls decode_char_literal
 //   (was bare t.start[1] — would mismatch decoded values like '\n' = 10)
+//
+// v1.7.0 Stage 3 (parity src + src0):
+// - classify parameter u8 → i32 (matches new PRIM_I32 char type)
+// - call sites drop `as u8` cast (char literal already i32)
 
-fn classify(c: u8) -> i32 {
+fn classify(c: i32) -> i32 {
     match c {
         '\n'      => 1,
         'a'..'z'  => 2,
@@ -21,12 +26,12 @@ fn classify(c: u8) -> i32 {
 fn main_jhyy() -> i32 {
     let mut err: i32 = 0;
 
-    if classify('\n' as u8) != 1 { err = err + 1; }
-    if classify('a' as u8) != 2 { err = err + 1; }
-    if classify('m' as u8) != 2 { err = err + 1; }
-    if classify('z' as u8) != 2 { err = err + 1; }
-    if classify('A' as u8) != 0 { err = err + 1; }   // 'A' not in a..z
-    if classify('0' as u8) != 0 { err = err + 1; }   // '0' not in a..z
+    if classify('\n') != 1 { err = err + 1; }
+    if classify('a') != 2 { err = err + 1; }
+    if classify('m') != 2 { err = err + 1; }
+    if classify('z') != 2 { err = err + 1; }
+    if classify('A') != 0 { err = err + 1; }   // 'A' not in a..z
+    if classify('0') != 0 { err = err + 1; }   // '0' not in a..z
 
     err
 }

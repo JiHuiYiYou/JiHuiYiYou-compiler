@@ -1,0 +1,28 @@
+// EXPECT: 0
+// v1.7.0 Stage 3: UTF-8 2-byte BMP char literal (W-053 followup, spec §4.4)
+//
+// Validates UTF-8 multi-byte char literals decode to correct codepoints:
+// - 'é' (U+00E9 = 233, UTF-8: C3 A9)
+// - 'ñ' (U+00F1 = 241, UTF-8: C3 B1)
+// - 'ü' (U+00FC = 252, UTF-8: C3 BC)
+//
+// Stage 3 scope (per master plan §"Stage 1-5 不覆盖的"): 2-byte BMP only.
+// 3-byte / 4-byte codepoints (e.g. '你' = U+4F60) deferred to v2.x — master
+// plan explicitly excludes 3/4-byte from v1.7.
+//
+// Char type resolves to PRIM_I32 (sema NODE_CHAR, spec §4.4 alignment).
+
+fn main_jhyy() -> i32 {
+    let mut err: i32 = 0;
+
+    let c_e: i32 = 'é';
+    if c_e != 233 { err = err + 1; }
+
+    let c_n: i32 = 'ñ';
+    if c_n != 241 { err = err + 1; }
+
+    let c_u: i32 = 'ü';
+    if c_u != 252 { err = err + 1; }
+
+    err
+}

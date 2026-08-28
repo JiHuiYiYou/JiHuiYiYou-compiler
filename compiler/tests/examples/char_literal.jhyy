@@ -1,7 +1,8 @@
 // EXPECT: 0
 // v1.6: W-053 char literal family (spec §4.4) — RESOLVED in v1.6 sprint
+// v1.7.0 Stage 3: 3 2-byte BMP literals added (W-053 followup)
 //
-// Validates escape + hex escape char literals:
+// Validates escape + hex escape + 2-byte BMP char literals:
 // - '\n' (LF = 10)
 // - '\t' (HT = 9)
 // - '\r' (CR = 13)
@@ -10,8 +11,12 @@
 // - '\'' (single quote = 39)
 // - '\"' (double quote = 34) — per spec §4.4
 // - '\xHH' (hex escape, e.g. '\x41' = 'A' = 65)
+// - 'é' (U+00E9 = 233, UTF-8: C3 A9)   ← Stage 3 2-byte BMP
+// - 'ñ' (U+00F1 = 241, UTF-8: C3 B1)   ← Stage 3 2-byte BMP
+// - 'ü' (U+00FC = 252, UTF-8: C3 BC)   ← Stage 3 2-byte BMP
 //
-// Char type resolves to PRIM_U8 (sema.c case NODE_CHAR).
+// Char type resolves to PRIM_I32 (sema NODE_CHAR, spec §4.4 alignment).
+// v1.7.0 Stage 3 promoted u8 → i32; existing tests now annotate : i32.
 //
 // v1.6 fix (parity src + src0):
 // - scan_char / lex_scan_char: add " to escape switch
@@ -19,33 +24,49 @@
 // - TOKEN_CHAR pattern: same decode helper (shared, W-052 lesson)
 // - qbe_type_of: SSA temps widen i8/u8/i16/u16 to 'w' (QBE rejects 'b'/'h')
 // - qbe_data_type_of: data section keeps 'b'/'h' packing for byte-addressable arrays
+//
+// v1.7.0 Stage 3 fix (parity src + src0):
+// - scan_char / lex_scan_char: UTF-8 lead byte (0x80/0xE0/0xF0) + continuation
+// - decode_char_literal: return uint32_t (was unsigned char)
+// - sema NODE_CHAR: PRIM_U8 → PRIM_I32 (spec §4.4)
+// - codegen NODE_CHAR: drop (unsigned char) / & 255 truncation
+// - 3-byte / 4-byte codepoints (e.g. '你' = U+4F60) deferred to v2.x
 
 fn main_jhyy() -> i32 {
     let mut err: i32 = 0;
 
-    let c_lf: u8 = '\n';
-    if c_lf as i32 != 10 { err = err + 1; }
+    let c_lf: i32 = '\n';
+    if c_lf != 10 { err = err + 1; }
 
-    let c_tab: u8 = '\t';
-    if c_tab as i32 != 9 { err = err + 1; }
+    let c_tab: i32 = '\t';
+    if c_tab != 9 { err = err + 1; }
 
-    let c_cr: u8 = '\r';
-    if c_cr as i32 != 13 { err = err + 1; }
+    let c_cr: i32 = '\r';
+    if c_cr != 13 { err = err + 1; }
 
-    let c_nul: u8 = '\0';
-    if c_nul as i32 != 0 { err = err + 1; }
+    let c_nul: i32 = '\0';
+    if c_nul != 0 { err = err + 1; }
 
-    let c_bs: u8 = '\\';
-    if c_bs as i32 != 92 { err = err + 1; }
+    let c_bs: i32 = '\\';
+    if c_bs != 92 { err = err + 1; }
 
-    let c_sq: u8 = '\'';
-    if c_sq as i32 != 39 { err = err + 1; }
+    let c_sq: i32 = '\'';
+    if c_sq != 39 { err = err + 1; }
 
-    let c_dq: u8 = '\"';
-    if c_dq as i32 != 34 { err = err + 1; }
+    let c_dq: i32 = '\"';
+    if c_dq != 34 { err = err + 1; }
 
-    let c_hex: u8 = '\x41';   // 'A'
-    if c_hex as i32 != 65 { err = err + 1; }
+    let c_hex: i32 = '\x41';   // 'A'
+    if c_hex != 65 { err = err + 1; }
+
+    let c_e: i32 = 'é';        // 2-byte BMP, U+00E9 = 233
+    if c_e != 233 { err = err + 1; }
+
+    let c_n: i32 = 'ñ';        // 2-byte BMP, U+00F1 = 241
+    if c_n != 241 { err = err + 1; }
+
+    let c_u: i32 = 'ü';        // 2-byte BMP, U+00FC = 252
+    if c_u != 252 { err = err + 1; }
 
     err
 }

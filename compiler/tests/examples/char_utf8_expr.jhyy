@@ -1,0 +1,21 @@
+// EXPECT: 5
+// v1.7.0 Stage 3: UTF-8 2-byte BMP char in match arm + comparison
+//
+// Validates UTF-8 multi-byte chars work in:
+// - match arm literal pattern: 'ñ' => 7, 'é' => 5, 'ü' => 9
+// - BMP char as match value: let c: i32 = 'é'
+// (range pattern 'é'..'ñ' covered by char_utf8_basic test pattern path)
+//
+// Note: arms use single-expression form (not `=> r = N`) — same pattern
+// as char_pattern.jhyy. Assignment-as-arm-body has a known stage0 codegen
+// gap (W-NNN candidate) not exercised here.
+
+fn main_jhyy() -> i32 {
+    let c: i32 = 'é';
+    match c {
+        'ñ' => 7,
+        'é' => 5,
+        'ü' => 9,
+        _   => 0,
+    }
+}
