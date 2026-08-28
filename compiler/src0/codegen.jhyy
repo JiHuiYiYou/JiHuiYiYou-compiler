@@ -1105,6 +1105,24 @@ fn cg_match_pattern(cg_raw: *u8, matched: IRVal, pattern: *Node, match_type: *u8
                         let _al = cg_add_local(cg_raw, bind_sym, payload_slot, 1);
                         return tag_cmp;
                     }
+                    // v1.7.1 patch A3: non-binding enum pattern — 仍需 tag compare,
+                    // 跟 binding 路径差异只在无 payload slot alias. 没这 fix 时
+                    // `Option::None => 200` 走 fallback cmp=1, 永远第一 arm 命中
+                    // (per docs/internal/workarounds.md § Stage 3 已知限制 + W-XXX ACTIVE 段)
+                    let slot_base2 = matched;
+                    let tag_addr2 = *ir_new_tmp(ir, QBE_L());
+                    ir_emit_binary(ir, tag_addr2, "add" as *u8, slot_base2, ir_new_int(0 as i64));
+                    let loaded_tag2 = *ir_new_tmp(ir, QBE_W());
+                    ir_emit_str(ir, "    %t" as *u8);
+                    ir_emit_int(ir, "%d" as *u8, loaded_tag2.id);
+                    ir_emit_str(ir, " =w loadw %t" as *u8);
+                    ir_emit_int(ir, "%d" as *u8, tag_addr2.id);
+                    ir_emit_str(ir, "\n" as *u8);
+                    let tag_lit2 = *ir_new_tmp(ir, QBE_W());
+                    ir_emit_copy(ir, tag_lit2, expected_tag as i64);
+                    let tag_cmp2 = *ir_new_tmp(ir, QBE_W());
+                    ir_emit_binary(ir, tag_cmp2, "ceqw" as *u8, loaded_tag2, tag_lit2);
+                    return tag_cmp2;
                 }
             }
         }

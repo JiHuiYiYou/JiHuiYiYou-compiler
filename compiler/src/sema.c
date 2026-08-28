@@ -803,6 +803,18 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
             (decl_type->prim == PRIM_F32 || decl_type->prim == PRIM_F64)) {
             d->init->type = decl_type;
         }
+        /* v1.7.1 patch A4: int literal coerce — `let x: u32 = 10` 不再 type mismatch.
+           只 coerce 到 int primitive (i8/i16/i32/i64/u8/u16/u32/u64);bool/float 不 coerce
+           (let b: bool = 1 还是 type error, let f: f32 = 10 也走 float-coerce 路径).
+           跟 src0/sema.jhyy 镜像. */
+        if (d->init && d->init->kind == NODE_INT && decl_type &&
+            decl_type->kind == KIND_PRIMITIVE &&
+            (decl_type->prim == PRIM_I8 || decl_type->prim == PRIM_I16 ||
+             decl_type->prim == PRIM_I32 || decl_type->prim == PRIM_I64 ||
+             decl_type->prim == PRIM_U8 || decl_type->prim == PRIM_U16 ||
+             decl_type->prim == PRIM_U32 || decl_type->prim == PRIM_U64)) {
+            d->init->type = decl_type;
+        }
         Type *init_type = infer_type(ctx, d->init);
         /* v1.3.1: null auto-coerces to declared pointer type; else error. */
         if (d->init && d->init->kind == NODE_NULL) {

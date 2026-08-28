@@ -1177,6 +1177,22 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                 }
             }
         }
+        // v1.7.1 patch A4: int literal coerce — `let x: u32 = 10` 不再 type mismatch.
+        // 只 coerce 到 int primitive (i8/i16/i32/i64/u8/u16/u32/u64); bool/float 不 coerce.
+        // 跟 src/sema.c 镜像.
+        if (*d).init != (0 as *u8) {
+            if (*((*d).init as *Node)).kind == NODE_INT() {
+                if decl_type != (0 as *Type) {
+                    if (*decl_type).kind == KIND_PRIMITIVE() {
+                        let p = (*decl_type).prim;
+                        if p == PRIM_I8() || p == PRIM_I16() || p == PRIM_I32() || p == PRIM_I64() ||
+                           p == PRIM_U8() || p == PRIM_U16() || p == PRIM_U32() || p == PRIM_U64() {
+                            (*((*d).init as *Node)).type_ptr = decl_type as *u8;
+                        }
+                    }
+                }
+            }
+        }
         let mut init_type: *Type = infer_type(ctx, ta, (*d).init as *Node);
         // v1.3.1: null auto-coerces to declared pointer type; else error
         if (*d).init != (0 as *u8) {

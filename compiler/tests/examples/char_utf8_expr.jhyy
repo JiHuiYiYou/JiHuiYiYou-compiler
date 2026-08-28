@@ -2,20 +2,27 @@
 // v1.7.0 Stage 3: UTF-8 2-byte BMP char in match arm + comparison
 //
 // Validates UTF-8 multi-byte chars work in:
-// - match arm literal pattern: 'ñ' => 7, 'é' => 5, 'ü' => 9
+// - match arm literal pattern: 'ñ' => r = 7, 'é' => r = 5, 'ü' => r = 9
 // - BMP char as match value: let c: i32 = 'é'
 // (range pattern 'é'..'ñ' covered by char_utf8_basic test pattern path)
 //
-// Note: arms use single-expression form (not `=> r = N`) — same pattern
-// as char_pattern.jhyy. Assignment-as-arm-body has a known stage0 codegen
-// gap (W-NNN candidate) not exercised here.
+// v1.7.1 patch A2 真修: match arm body `=> r = N` 是 NODE_ASSIGN (parser 直接
+// 返回 expr 不 wrap EXPR_STMT), stage0 cg_expr (codegen.c:549-1935) 之前没
+// NODE_ASSIGN case → default 返回 sentinel IRVal{0}, storew 不 emit → arm
+// body 走默认 path 不写 local. 真修: cg_expr 加 NODE_ASSIGN case → cg_stmt
+// (delegates to cg_stmt 完整 handle). 跟 src0/codegen.jhyy 镜像 — jhyy-side
+// cg_expr 早合并所有 stmt cases (LET/ASSIGN/RETURN/BREAK/CONTINUE/EXPR_STMT)
+// per src0/codegen.jhyy:3490 comment, 所以 jhyy-side 一直正确. C-side 是
+// 真 parity gap, 不是 "NOT A BUG".
 
 fn main_jhyy() -> i32 {
+    let mut r: i32 = 0;
     let c: i32 = 'é';
     match c {
-        'ñ' => 7,
-        'é' => 5,
-        'ü' => 9,
-        _   => 0,
+        'ñ' => r = 7,
+        'é' => r = 5,
+        'ü' => r = 9,
+        _   => r = 0,
     }
+    return r;
 }

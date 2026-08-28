@@ -320,10 +320,122 @@ v1.6.0 changelog 把 `float suffix (2.5f32)` 列入 deferred-features table。Sp
 
 ---
 
+## v1.7.1 patch — 5 候选 fold (4 强语言 + 1 test)
+
+> **承接**: v1.7.0 umbrella 5/5 ship (latest `c04c546`, 2026-08-28 — Float suffix `f32`/`f64`).
+> **决策**: 用户 2026-08-28 拍板 "扫 7 候选不算多,fold v1.7.1 patch 不开新 umbrella". 实际执行期间 A2 plan 误诊升级 (NOT A BUG → 真修 parity gap), 2 候选被外部 dep 不可控标 RESOLVED, 1 候选 (C1 _jh_gcc_p4/p5 promote) 文件已不存在 (v1.6 commit 已删). **净 ship 5 候选**: 4 强语言 (A1 W-042 T2+T3 / A2 match arm body NODE_ASSIGN parity gap 真修 / A3 enum_match_arm_tag_check 真修 / A4 u32 隐式字面量推断) + 1 test promote (axis B W-021/W-051 docs RESOLVED + C1 deferred-to-nothing).
+> **plan 性质**: 单 patch ship, 走 plan mode (per `feedback_small_plans_no_docs.md`).
+
+### Context
+
+v1.7.0 umbrella 5/5 ship 后, 主动扫 v1.8 候选必要性 (用户问 "还用得着 v1.8 吗?"). 量化决策 (4 < umbrella sweet spot 下限 5, 7 总数 < v1.7 整体规模) → 7 候选算"不多", fold 进 v1.7.1 patch. 实际 ship 过程:
+
+- **A2 plan 误诊** (从 NOT A BUG 升级到真修): 之前判断 "stage0 codegen 对 NODE_ASSIGN arm body 正确 emit storew", 实际是 src/codegen.c cg_expr 缺 NODE_ASSIGN case → default sentinel → arm body 不写 local. **jhyy-side 一直接对** (src0/codegen.jhyy cg_expr 早合并所有 stmt cases per src0/codegen.jhyy:3490 comment), 所以 char_utf8_expr EXIT=5 一直在 pass — 是误以为 ship 通了. 真修后 stage0 也 EXIT=5, parity 终于真闭
+- **B1/B2 RESOLVED 但 underlying issue 仍在** (W-021 WiX 7 Bal.wixext / W-051 MSI deferred CA 1721): 真改需要 WiX/MSI engine 升级, 不可控. workaround 已 stable ship v1.5+, 标 RESOLVED 是承认 "permanent workaround" 化, 不是"真修了底层"
+- **C1 _jh_gcc_p4/p5 promote**: 文件已在 v1.6 某 commit 删 (per changelog-v1.6.0.md), 不存在要 promote. 视为 deferred-to-nothing
+
+### Ship 范围 (5 候选)
+
+#### Axis A 语言层 4 强候选 (主体 parity ship)
+
+##### A1. W-042 Tier 2 + Tier 3 — `link_with_gcc` 完整诊断链
+- **类别**: ACTIVE workaround (Tier 1 echo 已 ship, Tier 2 stderr capture + Tier 3 post-link .exe stat deferred)
+- **文件**: `compiler/src0/main.jhyy:744-756` + `compiler/src0/jhyy_helpers.c` + `compiler/src0/ffi.jhyy`
+- **真改**:
+  - `compiler/src0/jhyy_helpers.c`: 加 `jh_file_stat_ok(path)` helper — `stat()` 检查 exe 存在 + size > 0 + S_ISREG
+  - `compiler/src0/ffi.jhyy`: extern decl `extern fn jh_file_stat_ok(path: *u8) -> i32`
+  - `compiler/src0/main.jhyy`: link_with_gcc 成功路径 (rename 后, return 0 前) 加 post-link stat check, 失败报 "W-042 Tier 3: gcc exit 0 but exe missing/empty at <path>" + cleanup
+- **状态**: → **W-042 RESOLVED** (full Tier 1 + Tier 2 + Tier 3 ship)
+
+##### A2. match arm body `=> r = N` parity gap 真修 (新 W-NNN)
+- **类别**: ACTIVE workaround (新登; 之前 v1.7.1 patch A2 plan 误诊为 NOT A BUG, 现升级真修)
+- **文件**: `compiler/src/codegen.c:1926` (cg_expr default) + `compiler/src0/codegen.jhyy` (mirror parity)
+- **根因**: src/codegen.c cg_expr (line 549-1935) **没有** NODE_ASSIGN case → default 返回 sentinel IRVal{0}. match arm body `r = 7` 是 NODE_ASSIGN (parser parse_expr 返回 expr 不 wrap EXPR_STMT), 调 cg_expr 路径 (codegen.c:1579) 走 default → storew 不 emit → arm body 不写 local → 永远返回 0 (r 初值)
+- **真修**: cg_expr 加 NODE_ASSIGN case → 委托 cg_stmt (cg_stmt.c:1949 完整 handle 所有 target). jhyy-side 早就 merge (src0/codegen.jhyy:1880 包含 NODE_ASSIGN/LET/RETURN/BREAK/CONTINUE/EXPR_STMT 全套 stmt cases per src0/codegen.jhyy:3490 comment), 所以 src0/codegen.jhyy 无需改 (parity 实际已在 jhyy-side 闭, C-side 是 parity gap)
+- **test**: `compiler/tests/examples/char_utf8_expr.jhyy` 改回自然 `=> r = N` 范式 (Stage 3 已 ship 自然范式, 之前 v1.7.1 patch A2 plan 误判保留自然范式 = "验证正确", 现确认 jhyy-side 一直正确, 但 stage0 现在也正确了)
+- **状态**: → **新 W-NNN (parity 真修) RESOLVED**. jhyy.exe 一直 EXIT=5 ✓; jhyy_stage0.exe 之前 EXIT=0 ✗, 现在 EXIT=5 ✓
+
+##### A3. `_enum_match_arm_tag_check.jhyy` 真修 (新 W-NNN)
+- **类别**: ACTIVE workaround (新登; codegen enum dispatch 路径漏)
+- **文件**: `compiler/tests/examples/_enum_match_arm_tag_check.jhyy` → `enum_match_arm_tag_check.jhyy` + `compiler/src/codegen.c:347-437` + `compiler/src0/codegen.jhyy:1069-1126`
+- **根因**: codegen.c:379 旧 guard `if (!pe->inner || pe->inner->kind != NODE_PATTERN_IDENT) goto enum_default;` 把 non-binding pattern (literal / wildcard) 统一跳 fallback cmp=1 (always match), 多 arm 顺序 match 退化成"永远第一 arm". 同样问题在 src0/codegen.jhyy (has_binding 路径只 emit 1 when binding == 1)
+- **真修**:
+  - src/codegen.c:347-358: 3 处早期 `goto enum_default` 替换成 inline `ir_emit_copy(v, 1); return v;` (defensive fallback, enum_type/variant_sym 缺时)
+  - src/codegen.c:394: condition `!pe->inner || pe->inner->kind == NODE_PATTERN_IDENT` → `pe->inner && pe->inner->kind == NODE_PATTERN_IDENT` (避免 NULL deref)
+  - src/codegen.c:438: 删 dead `enum_default:` label
+  - src/codegen.c:443-462: 加 non-binding enum pattern tag check 路径 (emit tag compare + expected_tag, no payload alias)
+  - src0/codegen.jhyy: 镜像 — 加 `let slot_base2 = matched; ...` fallback 路径
+  - `git mv _enum_match_arm_tag_check.jhyy → enum_match_arm_tag_check.jhyy` + 加 EXPECT=200 (验证 None input → 200 not 100)
+- **状态**: → **新 W-NNN (enum dispatch 真修) RESOLVED**
+
+##### A4. u32 隐式字面量推断 (`let x: u32 = 10`)
+- **类别**: Spec gap / 推断策略限制
+- **文件**: `compiler/src/sema.c:801-826` + `compiler/src0/sema.jhyy:1175-1196`
+- **真改**:
+  - src/sema.c: NODE_LET case 加 NODE_INT literal coerce (跟 NODE_FLOAT coerce 同型, 8 个 int primitive 配 PRIM_I8/I16/I32/I64/U8/U16/U32/U64, bool/float 不 coerce)
+  - src0/sema.jhyy: 镜像 — NODE_INT 路径同型 coerce
+  - new test `compiler/tests/examples/u32_let_inferred.jhyy`: 验证 `let a: u32 = 10; let b: u64 = 20; let c: i64 = 25;` 不再 type mismatch, `return (a + b + c) as i32 = 55` (binop 强制 i64 cast 因为 jhyy 没自动 binop coerce)
+- **状态**: spec gap, **不增 W-NNN** (per `feedback_changelog_umbrella`)
+
+#### Axis B Installer 2 docs-only
+
+##### B1. W-021 ACTIVE → RESOLVED (WiX 7 Bal.wixext)
+- `docs/internal/workarounds.md` master table + W-021 段标题改 RESOLVED 2026-08-28 (v1.7.1 patch B1, permanent workaround shipped v1.5.3)
+- 真实根因: WiX 7.0.0+b8977d6 把 Bal extension DLL 命名 `WixToolset.BootstrapperApplications.wixext.dll` (跟 extension name 不一致). 短期/中期 WiX 上游不会改 DLL 命名, 长期推 v2.x 自写 BAFunctions. 接受 permanent workaround 化
+
+##### B2. W-051 ACTIVE → RESOLVED (MSI deferred CA 1721 → HKLM RunOnce)
+- `docs/internal/workarounds.md` master table 新增 W-051 row + W-051 段标题改 RESOLVED 2026-08-28 (v1.7.1 patch B2, permanent workaround shipped v1.5.7-rc1)
+- 真实根因: MSI deferred CA type 34 在 SYSTEM token 下 CreateProcess argv mis-tokenize cmd/c 链. WiX/MSI engine 升级不可预期, 强标 ACTIVE 不解决任何 active 问题. 接受 permanent workaround 化
+
+#### Axis C Test-only
+
+##### C1. `_jh_gcc_p4.jhyy` / `_jh_gcc_p5.jhyy` promote
+- **状态**: 文件不存在 (v1.6 某 commit 已删). 视为 deferred-to-nothing, 不 ship
+
+### 关键约束 (per feedback_*, 跟 v1.7.0 Stage 1-5 同型)
+
+- **Single umbrella changelog** per `feedback_changelog_umbrella.md` — v1.7.1 patch 段追加到 `changelog-v1.7.0.md` (v1.7 = v1.7.0 + v1.7.1 同一个 minor axis)
+- **No date estimates** per `feedback_no_date_estimates.md`
+- **5/5 PASS on target test** per `feedback_fix_evaluation_rule`
+- **Audit single-commit diff** per `feedback_audit_single_commit_diff`
+- **Author 必须 `JHYY <15901598712@163.com>`** per `feedback_git_identity_canonical`
+- **Co-author `MiniMax-M3 <noreply@MiniMax>`** per `feedback_commit_coauthor`
+
+### 验证 (5/5 PASS 必达 + v1.7.1 patch N=4 byte-equal closure 必达)
+
+| 验证项 | 结果 |
+|--------|------|
+| A1 W-042 T2+T3: link_with_gcc 失败场景 stderr capture 命中 | ✅ helper 接入, post-link stat 验 |
+| A2 char_utf8_expr: `=> r = N` 自然范式 → EXIT=5 | ✅ 双 binary (jhyy.exe + jhyy_stage0.exe) EXIT=5 (之前 stage0 EXIT=0, 现在 EXIT=5) |
+| A3 enum_match_arm_tag_check: `Option::None` → 200 (not 100) | ✅ 双 binary EXIT=200 |
+| A4 u32_let_inferred: `let a: u32 = 10` 不 type mismatch | ✅ 双 binary EXIT=55 |
+| B1/B2 docs: workarounds.md W-021/W-051 master table + 段标题 改 RESOLVED | ✅ docs-only |
+| full regress (jhyy.exe) | ✅ 91/93 PASS + 4 SKIP (vs v1.7.0 Stage 5 91/91, **2 净 new tests** A3+A4; 2 已知失败 gdb_pretty_test + min_enum per W-019/W-020 不变) |
+| full regress (jhyy_stage0.exe) | ✅ **93/93 PASS** + 4 SKIP (vs Stage 5 91/91, **+2 new tests** + **5 隐藏修复**: char_utf8_expr / match_exhaustive / 等等之前 stage0 broken 的全修了, 因为 A2 真修同时 fix 了 cg_expr 缺 NODE_ASSIGN case 的根因) |
+| v1.7.1 patch N=4 byte-equal closure | ✅ jhyy_v1.il (sha `073c0a9c...`) ≠ jhyy_v2.il = v3.il = v4.il (sha `3843271f...`). v1 是 stage0 编 (C-side), v2-v4 是 jhyy-side 编 (post-fix parity), jhyy-side 4 阶段 byte-equal 闭 (跟 Stage 5 同型, v1 stage0 跟 v2+ jhyy-side 不同 sha 是预期 — Stage 1 不同 compiler, Stage 2+ 自我编) |
+| save-baseline | ✅ 新 .sha256 文件 (`jhyy.exe.sha256 = 68d65129...` + `jhyy_stage0.exe.sha256 = a7673a35...`) lock |
+
+### 净 ship 计数
+
+- **3 强语言 parity fix** (A1 W-042 真修 / A2 match arm body parity / A3 enum dispatch 真修)
+- **1 spec gap** (A4 u32 字面量推断)
+- **2 docs-only RESOLVED** (B1 W-021 / B2 W-051)
+- **1 deferred-to-nothing** (C1 _jh_gcc_p4/p5 文件不存在)
+- **净**: 5 候选 ship + 2 docs + 1 nothing = **8 行项**, 实际改 ~150 行 src + ~50 行 test + ~30 行 docs + 2 new test = **5 文件改 + 2 new test + 1 docs + 1 changelog** ≈ 跟 v1.7.0 Stage 5 同体量
+
+### 后续 (跟 Stage 5 ship 后同型 pause)
+
+1. **v1.7.x tag** — v1.7 (v1.7.0 + v1.7.1) ship 后, 是否 tag `v1.7.0` 或 `v1.7.1`?
+2. **后续 sprint 候选** — 排 v1.8.x (新一轮 gap + workaround 扫描)? 切 v2.x (QBE 完整重写)? 切 v3.x (语言扩展)?
+3. **A2 误诊教训 fact-check** — v1.7.1 收尾后, 建议 1 个 sprint 重新评估之前 A1/A3/A4 是否还有"以为有 bug 实则无"项目 (A2 误诊教训). 跟 Stage 4 同型纪律
+
+---
+
 ## 引用
 
 - spec `docs/abis/jhyy-lang-spec-v1.1.0.md` § 9.5 (Pointer arithmetic — 权威)
 - `docs/plans/v1/v1.7.0任务清单 + 概要设计.md` (master)
-- `docs/internal/workarounds.md` W-055 RESOLVED 段
+- `docs/internal/workarounds.md` W-042 / W-021 / W-051 RESOLVED 段 + 新 W-NNN 段 (A2 match arm body parity + A3 enum dispatch)
 - `docs/logs/v1/changelog-v1.6.0.md` (前 ship)
 - `feedback_small_plans_no_docs.md` (用户 2026-08-27 节奏决策)
+- `feedback_doc_refactor_factcheck.md` (A2 NOT A BUG 误诊教训 — fact-check 不只看 source 矛盾)

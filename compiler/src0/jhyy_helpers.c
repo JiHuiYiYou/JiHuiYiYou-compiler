@@ -70,6 +70,18 @@ int jh_f64_atof(const char *s, long long len, void *dst) {
     return 0;
 }
 
+/* v1.7.1 patch A1 — W-042 Tier 3: post-link .exe stat check.
+   链接成功 (jh_run 返回 0) 后, stat exe_path 验文件存在且 size > 0.
+   抓 gcc "succeeded" 但 produce 0 字节 / missing 文件的 silent corruption case.
+   W-042 Tier 1+2 已 ship (Tier 1: invoke_buf echo; Tier 2: stderr pipe capture via W-045).
+   Tier 3 是最后一段, ship 后 → W-042 RESOLVED. */
+int jh_file_stat_ok(const char *path) {
+    struct stat st;
+    if (stat(path, &st) != 0) return 0;
+    if (!S_ISREG(st.st_mode)) return 0;
+    return st.st_size > 0 ? 1 : 0;
+}
+
 /* v1.7.0 Stage 5：parse_expr prefix_float 解析 `2.5f32` / `2.5f64` 后缀。
    返回 PRIM_F32 (8) / PRIM_F64 (9), 无后缀或无法识别返回 PRIM_F64 (default)。
    Mirror jh_int_suffix_prim pattern. */

@@ -1,0 +1,20 @@
+// EXPECT: 55
+// v1.7.1 patch A4: u32 隐式字面量推断 (`let x: u32 = 10` 不再 type mismatch)
+//
+// 之前推断策略: int literal 默认 PRIM_I32, decl_type annotation u32 → type mismatch
+// (必须 `10u32` suffix 或 `10 as u32` cast). 现在 sema 在 NODE_LET 加 int literal
+// coerce — decl 是 int primitive (i8/i16/i32/i64/u8/u16/u32/u64) 时, 自动 coerce
+// literal init 到 decl type. 跟 src/sema.c + src0/sema.jhyy 镜像.
+//
+// 本 test 验证 u32 + u64 + i64 三种 int primitive 都能隐式 coerce:
+//   let a: u32 = 10;     // u32
+//   let b: u64 = 20;     // u64
+//   let c: i64 = 25;     // i64
+//   return (a + b + c) as i32;   // 10 + 20 + 25 = 55
+
+fn main_jhyy() -> i32 {
+    let a: u32 = 10;
+    let b: u64 = 20;
+    let c: i64 = 25;
+    return (a as i64 + b as i64 + c) as i32;
+}

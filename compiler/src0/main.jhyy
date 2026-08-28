@@ -847,6 +847,19 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
         free(temp_asm); free(temp_exe);
         return 1 as i32;
     }
+    // v1.7.1 patch A1 — W-042 Tier 3: post-link .exe stat check.
+    // 链接返回 0 + rename OK 不代表 .exe 真有产物 (silent corruption case).
+    // stat exe_path 验文件存在且 size > 0 → 否则 fail.
+    if jh_file_stat_ok(exe_path) == (0 as i32) {
+        jh_fputs_stderr("W-042 Tier 3: gcc exit 0 but exe missing/empty at " as *u8);
+        jh_fputs_stderr(exe_path);
+        jh_fputs_stderr("\n" as *u8);
+        free(invoke_buf);
+        free(cmd_buf);
+        jh_unlink_file(temp_asm);
+        free(temp_asm); free(temp_exe);
+        return 1 as i32;
+    }
     free(invoke_buf);
     free(cmd_buf);
     jh_unlink_file(temp_asm);  // temp asm 清理 (.s 留在原 Chinese 路径给用户调试)

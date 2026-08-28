@@ -42,6 +42,8 @@ extern fn jh_f64_atof(s: *u8, len: i64, dst: *u8) -> i32;
 extern fn jh_int_suffix_prim(s: *u8, len: i64) -> i32;
 // v1.7.0 Stage 5: float suffix f32/f64 (mirror int suffix)
 extern fn jh_float_suffix_prim(s: *u8, len: i64) -> i32;
+// v1.7.1 patch A1: W-042 Tier 3 post-link .exe stat check
+extern fn jh_file_stat_ok(path: *u8) -> i32;
 
 // ═══ 控制台输出（单 i32 参数，覆盖 v0.6 用例） ═══
 extern fn printf(fmt: *u8, val: i32) -> i32;

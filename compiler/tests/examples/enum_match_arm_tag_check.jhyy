@@ -1,0 +1,23 @@
+// EXPECT: 200
+// v1.7.1 patch A3: enum match arm tag check 真修
+//
+// 之前 codegen 对 non-binding enum pattern (literal / wildcard) 统一
+// `goto enum_default` → 多 arm 顺序 match 退化成"永远第一 arm"。
+// fix: codegen 按 expected_tag 真做 tag compare, payload slot alias 只在
+// binding pattern 时 emit (per docs/internal/workarounds.md § Stage 3 +
+// W-057 ACTIVE 段, 2026-08-28 ship 后标 RESOLVED).
+//
+// 本 test 验证两条路径都正确:
+//   - binding pattern: `Some(v) => v` — payload 提取 + tag check
+//   - non-binding pattern: `Some(_) => 100` + `None => 200` — 真 tag dispatch
+// 输入 None 走第二 arm (200), 不是永远第一 arm (100).
+
+type Option = enum { Some(i32), None }
+
+fn main_jhyy() -> i32 {
+    // 输入 None — 必须命中 Option::None arm (= 200), 不是 Some(_) (= 100).
+    return match Option::None {
+        Option::Some(_) => 100,
+        Option::None    => 200,
+    };
+}

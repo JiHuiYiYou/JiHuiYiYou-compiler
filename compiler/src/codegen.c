@@ -344,7 +344,12 @@ static IRVal cg_match_pattern(CGContext *cg, IRVal matched, Node *pattern, Type 
               local.is_stack = 1. Body dereferences load from there directly.
               (No copy needed — payload is already in place at slot+payload_offset.) */
         NodePatternEnum *pe = node_pattern_enum_data(pattern);
-        if (!pe->variant_sym) goto enum_default;
+        if (!pe->variant_sym) {
+            /* no variant sym — fallback always-match (defensive) */
+            IRVal v = ir_new_tmp(cg->ir, 'w');
+            ir_emit_copy(cg->ir, v, 1);
+            return v;
+        }
         /* Resolve enum_type. Try pe->type_sym first (long form Enum::Variant),
            then fall back to match_type (from NODE_MATCH driver — works for
            short-name form `Some(v)` where type_sym is NULL but match_type
@@ -355,7 +360,12 @@ static IRVal cg_match_pattern(CGContext *cg, IRVal matched, Node *pattern, Type 
         } else if (match_type && match_type->kind == KIND_ENUM) {
             enum_type = match_type;
         }
-        if (!enum_type) goto enum_default;
+        if (!enum_type) {
+            /* no enum type info — fallback always-match (defensive) */
+            IRVal v = ir_new_tmp(cg->ir, 'w');
+            ir_emit_copy(cg->ir, v, 1);
+            return v;
+        }
 
         int expected_tag = -1;
         for (size_t i = 0; i < enum_type->enum_type.nvariants; i++) {
@@ -365,7 +375,12 @@ static IRVal cg_match_pattern(CGContext *cg, IRVal matched, Node *pattern, Type 
                 break;
             }
         }
-        if (expected_tag < 0) goto enum_default;
+        if (expected_tag < 0) {
+            /* unknown variant name — fallback always-match (defensive) */
+            IRVal v = ir_new_tmp(cg->ir, 'w');
+            ir_emit_copy(cg->ir, v, 1);
+            return v;
+        }
 
         /* v1.3.7: tag compare + payload slot alias.
            We only do tag compare when the pattern binds a payload (inner is
@@ -376,48 +391,64 @@ static IRVal cg_match_pattern(CGContext *cg, IRVal matched, Node *pattern, Type 
            enum is passed by value (w class) but the caller allocated it on
            stack (l class) — the spilled-w-as-pointer invalidates tag load.
            Tracking: v1.3.7 known limitation, tracked in W-007. */
-        if (!pe->inner || pe->inner->kind != NODE_PATTERN_IDENT) goto enum_default;
+        if (pe->inner && pe->inner->kind == NODE_PATTERN_IDENT) {
+            /* v1.3.7: matched may be a value (w) when the enum is passed by value
+               (small enum fits in a register). For tag compare + payload alias we
+               need an addressable slot. If matched is w, spill to a temp slot
+               first and use that as the slot base. */
+            IRVal slot_base = matched;
+            if (matched.qbe_type == 'w') {
+                IRVal tmp = ir_new_tmp(cg->ir, 'l');
+                ir_emit(cg->ir, "    %%t%d =l alloc8 8\n", tmp.id);
+                IRVal tmp_addr = ir_new_tmp(cg->ir, 'l');
+                ir_emit_binary(cg->ir, tmp_addr, "add", tmp, ir_new_int(0));
+                ir_emit(cg->ir, "    storew %%t%d, %%t%d\n", matched.id, tmp_addr.id);
+                slot_base = tmp_addr;
+            }
 
-        /* v1.3.7: matched may be a value (w) when the enum is passed by value
-           (small enum fits in a register). For tag compare + payload alias we
-           need an addressable slot. If matched is w, spill to a temp slot
-           first and use that as the slot base. */
-        IRVal slot_base = matched;
-        if (matched.qbe_type == 'w') {
-            IRVal tmp = ir_new_tmp(cg->ir, 'l');
-            ir_emit(cg->ir, "    %%t%d =l alloc8 8\n", tmp.id);
-            IRVal tmp_addr = ir_new_tmp(cg->ir, 'l');
-            ir_emit_binary(cg->ir, tmp_addr, "add", tmp, ir_new_int(0));
-            ir_emit(cg->ir, "    storew %%t%d, %%t%d\n", matched.id, tmp_addr.id);
-            slot_base = tmp_addr;
+            /* load tag from slot_base+0 (word load) */
+            IRVal tag_addr = ir_new_tmp(cg->ir, 'l');
+            ir_emit_binary(cg->ir, tag_addr, "add", slot_base, ir_new_int(0));
+            IRVal loaded_tag = ir_new_tmp(cg->ir, 'w');
+            ir_emit(cg->ir, "    %%t%d =w loadw %%t%d\n", loaded_tag.id, tag_addr.id);
+            IRVal tag_lit = ir_new_tmp(cg->ir, 'w');
+            ir_emit_copy(cg->ir, tag_lit, expected_tag);
+            IRVal tag_cmp = ir_new_tmp(cg->ir, 'w');
+            ir_emit_binary(cg->ir, tag_cmp, "ceqw", loaded_tag, tag_lit);
+
+            /* payload slot alias (binding only) */
+            NodePatternIdent *pi = node_pattern_ident_data(pe->inner);
+            Sym *bind_sym = pi->sym;
+            IRVal payload_slot = ir_new_tmp(cg->ir, 'l');
+            size_t off = (size_t)enum_type->enum_type.payload_offset;
+            ir_emit_binary(cg->ir, payload_slot, "add", slot_base, ir_new_int((int64_t)off));
+            cg_add_local(cg, bind_sym, payload_slot, 1);
+
+            return tag_cmp;
         }
-
-        /* load tag from slot_base+0 (word load) */
-        IRVal tag_addr = ir_new_tmp(cg->ir, 'l');
-        ir_emit_binary(cg->ir, tag_addr, "add", slot_base, ir_new_int(0));
-        IRVal loaded_tag = ir_new_tmp(cg->ir, 'w');
-        ir_emit(cg->ir, "    %%t%d =w loadw %%t%d\n", loaded_tag.id, tag_addr.id);
-        IRVal tag_lit = ir_new_tmp(cg->ir, 'w');
-        ir_emit_copy(cg->ir, tag_lit, expected_tag);
-        IRVal tag_cmp = ir_new_tmp(cg->ir, 'w');
-        ir_emit_binary(cg->ir, tag_cmp, "ceqw", loaded_tag, tag_lit);
-
-        /* payload slot alias */
-        NodePatternIdent *pi = node_pattern_ident_data(pe->inner);
-        Sym *bind_sym = pi->sym;
-        IRVal payload_slot = ir_new_tmp(cg->ir, 'l');
-        size_t off = (size_t)enum_type->enum_type.payload_offset;
-        ir_emit_binary(cg->ir, payload_slot, "add", slot_base, ir_new_int((int64_t)off));
-        cg_add_local(cg, bind_sym, payload_slot, 1);
-
-        return tag_cmp;
-
-    enum_default:
-        /* fallback: always match (legacy behavior, defensive) */
+        /* v1.7.1 patch A3: non-binding enum pattern — 仍 emit tag compare,
+           只是 no payload slot alias. 没这 fix 时 `Option::None => 200` 走 fallback cmp=1,
+           永远第一 arm 命中 (per docs/internal/workarounds.md § Stage 3 已知限制 +
+           W-XXX ACTIVE 段). 跟 src0/codegen.jhyy 镜像. */
         {
-            IRVal v = ir_new_tmp(cg->ir, 'w');
-            ir_emit_copy(cg->ir, v, 1);
-            return v;
+            IRVal slot_base2 = matched;
+            if (matched.qbe_type == 'w') {
+                IRVal tmp2 = ir_new_tmp(cg->ir, 'l');
+                ir_emit(cg->ir, "    %%t%d =l alloc8 8\n", tmp2.id);
+                IRVal tmp_addr2 = ir_new_tmp(cg->ir, 'l');
+                ir_emit_binary(cg->ir, tmp_addr2, "add", tmp2, ir_new_int(0));
+                ir_emit(cg->ir, "    storew %%t%d, %%t%d\n", matched.id, tmp_addr2.id);
+                slot_base2 = tmp_addr2;
+            }
+            IRVal tag_addr2 = ir_new_tmp(cg->ir, 'l');
+            ir_emit_binary(cg->ir, tag_addr2, "add", slot_base2, ir_new_int(0));
+            IRVal loaded_tag2 = ir_new_tmp(cg->ir, 'w');
+            ir_emit(cg->ir, "    %%t%d =w loadw %%t%d\n", loaded_tag2.id, tag_addr2.id);
+            IRVal tag_lit2 = ir_new_tmp(cg->ir, 'w');
+            ir_emit_copy(cg->ir, tag_lit2, expected_tag);
+            IRVal tag_cmp2 = ir_new_tmp(cg->ir, 'w');
+            ir_emit_binary(cg->ir, tag_cmp2, "ceqw", loaded_tag2, tag_lit2);
+            return tag_cmp2;
         }
     }
     case NODE_PATTERN_OR: {
@@ -1886,6 +1917,17 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
         *out = (result); return;
     }
 
+    /* v1.7.1 patch A2 真修: match arm body `=> r = N` 是 NODE_ASSIGN (parser
+       parse_expr 直接返回 expr, 不 wrap NODE_EXPR_STMT), 而 cg_expr (codegen.c:549)
+       之前没 NODE_ASSIGN case → default 返回 sentinel, storew 不 emit.
+       arm body 调 cg_expr 路径 (codegen.c:1579) 必须 handle NODE_ASSIGN — 直接转
+       cg_stmt (cg_stmt.c:1949 完整处理 NODE_ASSIGN 各种 target). 跟 src0/codegen.jhyy
+       镜像 — jhyy-side cg_expr 也走 cg_stmt 处理. */
+    case NODE_ASSIGN: {
+        cg_stmt(cg, n);
+        IRVal v = {0};
+        *out = (v); return;
+    }
     default: {
         IRVal v = {0};
         *out = (v); return;
