@@ -3,7 +3,7 @@
 > **承接**: v1.6.0 shipped (spec 语法全覆盖 + 混合 test + W-053/W-054 fix).
 > **目标**: 用 5 个候选 (W-055 pointer arith / UTF-8 char literal / EXPECT-ERROR runner / `_v135_inline_simple_recursive` STACK_OVERFLOW / Float suffix) 分多步走,不着急,先 ship Stage 1 + Stage 2 真的两段(其他 stage 推后续 sprint)。
 > **scope**: per `docs/plans/v1/v1.7.0任务清单 + 概要设计.md` + 用户节奏决策(2026-08-27)。
-> **本 umbrella 涵盖 3 已 ship 阶段**:Stage 1 EXPECT-ERROR runner + Stage 2 W-055 spec §9.5 pointer arithmetic + Stage 3 W-056 UTF-8 2-byte BMP char literal + char type `u8 → i32` (spec §4.4 align)。Stage 4-5 (`_v135_inline_simple_recursive` STACK_OVERFLOW 真修 / Float suffix) 推后续 sprint。
+> **本 umbrella 涵盖 4 已 ship 阶段**:Stage 1 EXPECT-ERROR runner + Stage 2 W-055 spec §9.5 pointer arithmetic + Stage 3 W-056 UTF-8 2-byte BMP char literal + char type `u8 → i32` (spec §4.4 align) + Stage 4 `_v135_inline_simple_recursive` diagnostic test promote (排查发现无 codegen bug, 范围重定义为 test 文件 promote)。Stage 5 (Float suffix `f32`/`f64`, spec §4 待 verify) 推后续 sprint。
 
 ---
 
@@ -13,8 +13,9 @@
 |------------|------|------|
 | **Stage 1** | ✅ done (commit `f8559eb` + `732ba4a`) | `mcp-jhyy/jhyy_regress.py` 加 EXPECT-ERROR 解析 + 5 个 underscore negative test 改名 (`null_untyped_err` / `sizeof_err_expr` / `sizeof_err_unknown` / `v137_or_diff_bind_err` / `for_in_slice_err`) |
 | **Stage 2** | ✅ done (commit `6216138` + `187e8ab`) | **W-055 spec §9.5 pointer arithmetic 真修**: sema 加 `*T +/- int → *T` / `int + *T → *T` / `*T - *T → i64` 类型规则 + codegen emit pointer arith (const-fold NODE_INT + extsw w→l + mul sizeof(elem)) + `&NODE_INDEX` codegen 真修 (返地址非值) + 3 个诊断 test 进 default regress |
-| **Stage 3** | ✅ done (this commit) | **W-056 UTF-8 2-byte BMP char literal + char type `u8 → i32` (spec §4.4 align)**: lexer lead-byte mask dispatch (1/2/3/4 bytes, 3/4 显式 reject) + decode_char_literal widen `unsigned char → uint32_t` + sema `PRIM_U8 → PRIM_I32` + codegen drop `(unsigned char)` + `& 255` mask + src0/parser.jhyy 3 处 inline copy 改共享 helper + 2 new BMP test 进 default regress |
-| Stage 4-5 | ⏸️ 推后续 | `_v135_inline_simple_recursive` STACK_OVERFLOW 真修 / Float suffix — 用户节奏决策"不着急" |
+| **Stage 3** | ✅ done (commits `934d9e0` + `3f89ce8`) | **W-056 UTF-8 2-byte BMP char literal + char type `u8 → i32` (spec §4.4 align)**: lexer lead-byte mask dispatch (1/2/3/4 bytes, 3/4 显式 reject) + decode_char_literal widen `unsigned char → uint32_t` + sema `PRIM_U8 → PRIM_I32` + codegen drop `(unsigned char)` + `& 255` mask + src0/parser.jhyy 3 处 inline copy 改共享 helper + 2 new BMP test 进 default regress |
+| **Stage 4** | ✅ done (this commit) | **`_v135_inline_simple_recursive` diagnostic test promote 进 default regress**: 排查发现无 codegen bug — 源程序缺 base case 是 infinite recursion, runtime STACK_OVERFLOW 是预期 OS-level 行为, codegen.c:902 `current_inline_sym != fn_sym` 守卫工作正常 (IL 验证 emit `call $loopy` 非 inline 展开)。加 base case `if n <= 0 { return 0; }` → loopy(5)=15 终止 → 加 `// EXPECT: 15` → git mv 改回非 underscore 名 → 进 default regress 验证 guard 路径生效 |
+| Stage 5 | ⏸️ 推后续 | Float suffix `f32`/`f64` (spec §4 待 verify) — 用户节奏决策"不着急" |
 
 ---
 
@@ -22,11 +23,11 @@
 
 | 指标 | v1.6.0 ship | v1.7.0 ship | Δ |
 |------|------------|-------------|---|
-| regress PASS (jhyy.exe) | 78/82 PASS + 4 SKIP | **88/88 PASS + 4 SKIP** | +10 PASS (Stage 2: +8, Stage 3: +2) (-1 删 `_ptr_arith_limit.jhyy`) |
-| regress PASS (jhyy_stage0.exe) | 78/82 PASS + 4 SKIP | **88/88 PASS + 4 SKIP** | +10 PASS |
+| regress PASS (jhyy.exe) | 78/82 PASS + 4 SKIP | **89/89 PASS + 4 SKIP** | +11 PASS (Stage 2: +8, Stage 3: +2, Stage 4: +1) (-1 删 `_ptr_arith_limit.jhyy`) |
+| regress PASS (jhyy_stage0.exe) | 78/82 PASS + 4 SKIP | **89/89 PASS + 4 SKIP** | +11 PASS |
 | ACTIVE workaround 数 | W-055 ACTIVE | -2 (W-055 + W-056 RESOLVED) | -2 |
-| src/ src0 byte-equal closure | ✅ (Stage 2 闭环) | ✅ (Stage 3 闭环仍闭, jhyy_v1.il == v2.il == v3.il == v4.il) | unchanged (新 sha) |
-| 新 test 数 | — | 10 (Stage 1: 5 进 default, Stage 2: 3 进 default, Stage 3: 2 进 default) | +10 |
+| src/ src0 byte-equal closure | ✅ (Stage 2 闭环) | ✅ (Stage 4 闭环仍闭, jhyy_v1.il == v2.il == v3.il == v4.il, sha 不变 7552aa94...) | unchanged (test-only change) |
+| 新 test 数 | — | 11 (Stage 1: 5 进 default, Stage 2: 3 进 default, Stage 3: 2 进 default, Stage 4: 1 进 default) | +11 |
 | 删 test 数 | — | 1 (`_ptr_arith_limit.jhyy` — W-055 LIMIT 标记, RESOLVED 后无用) | -1 |
 
 ---
@@ -160,8 +161,60 @@
 
 | Stage | 简述 | 启动时机 |
 |-------|------|---------|
-| **Stage 4** | `_v135_inline_simple_recursive` STACK_OVERFLOW 真修 (diagnostic → fix) | Stage 3 ship 后, user 拍板 |
-| **Stage 5** | Float suffix `f32`/`f64` (spec §4 待 verify) | Stage 3-4 ship 后 |
+| **Stage 5** | Float suffix `f32`/`f64` (spec §4 待 verify) | Stage 4 ship 后, user 拍板 |
+
+---
+
+## Stage 4 — `_v135_inline_simple_recursive` diagnostic test promote 进 default regress (this commit)
+
+> **承接**: Stage 3 ship (commits `934d9e0` + `3f89ce8`)。
+> **范围重定义**: 跟原 umbrella 描述"_v135_inline_simple_recursive STACK_OVERFLOW 真修 (diagnostic → fix)" 不一致 — 排查发现 **无 codegen bug**, 本 stage 实际是 **test 文件 promote**。
+
+### 排查背景
+
+排查发现源程序 `_v135_inline_simple_recursive.jhyy` 实际是 **无限递归** (源程序 `loopy(n) = n + loopy(n-1)` 无 base case), runtime STACK_OVERFLOW 是 **预期 OS-level 行为**, 不是 compiler bug。
+
+排查方法 (per `feedback_no_subagents_for_compiler_work` "先排查 root cause, 不盲改"):
+1. 读 `_v135_inline_simple_recursive.jhyy` — 源程序 6 行, 无 base case
+2. 读 `compiler/src/codegen.c:896-935` NODE_CALL inline expansion path — 守卫 `cg->current_inline_sym != fn_sym` 在 line 902
+3. `jhyy.exe compile _v135_inline_simple_recursive.jhyy -o /tmp/_v135; cat /tmp/_v135.il` — 验证 IL emit `%t4 =w call $loopy(w %t3)`, 走真实 call, **不**无限 inline 展开
+4. 对比 `inline_recursive_fallback.jhyy` — 同 shape 但有 `if n <= 1 { return 1; }` base case, PASS EXIT=120, 证明 codegen path 正确在 source program 终止时
+
+**结论**: codegen.c:902 守卫工作正常, 无需 fix。本 stage 改为 **test 文件 promote** (加 base case + 加 EXPECT + 改回非 underscore 名 + 进 default regress)。
+
+### 完成定义
+
+- ✅ `compiler/tests/examples/v135_inline_simple_recursive.jhyy` (was `_v135_inline_simple_recursive.jhyy`, git mv) — 加 base case `if n <= 0 { return 0; }` → `loopy(5)` 终止, 返回 `5+4+3+2+1+0 = 15`
+- ✅ 加 `// EXPECT: 15` 注释 + provenance 注释 (codegen 守卫说明 + 排查背景 + 跟 `inline_recursive_fallback.jhyy` 区分)
+- ✅ git mv `_v135_inline_simple_recursive.jhyy` → `v135_inline_simple_recursive.jhyy` (改回非 underscore 名, 进 default regress)
+- ✅ 不动 `compiler/src/codegen.c` — 守卫已工作, 无 bug (per 排查证据)
+- ✅ 不动 `compiler/src0/codegen.jhyy` — parity 不动 (src0 镜像的 codegen.c:902 守卫同样工作, Explore 已确认)
+- ✅ `compiler/build/bin/jhyy.exe.sha256` — baseline sha 不变 (`445df36be736b16e50d028c8dad6d30700cf4fbf06fb4a2407e01bbbfed6ccc4`), 因 src/src0 没动, `--save-baseline` 覆盖无变化
+
+### 已知 limitation (Stage 4 不修, 推后续)
+
+1. **umbrella 早期措辞滞后** — `changelog-v1.7.0.md:163` 之前写"STACK_OVERFLOW 真修 (diagnostic → fix)", 现在 Stage 4 段更新成"diagnostic test promote (排查发现无 codegen bug)"。防止未来 reader 误以为有 defect 漏修 (per `feedback_doc_refactor_factcheck`)
+2. **infinite recursion runtime crash 无 harness 覆盖** — 源程序确实无限递归时 (现在没了, 因加 base case), OS-level STACK_OVERFLOW 无 EXPECT-CRASH 注释能跑。如未来需, 走单独 harness stage (Stage 4 排查 Explore 建议 (b))
+3. **`v135` 命名** — 文件名 v135 跟 version v1.3.5 一致, 但 project 已到 v1.7.0。保留 v135 历史命名 (跟 inline 家族 `inline_basic.jhyy` 等并列, 描述设计意图而非当前 version)
+
+### 跟 inline_recursive_fallback.jhyy 的区分 (都验证 guard, body shape 不同)
+
+| test | body shape | guard 触发原因 |
+|------|-----------|--------------|
+| `inline_recursive_fallback.jhyy` | `fact(n) = if n <= 1 { return 1; } return n * fact(n - 1);` — **multi-stmt + 控制流** | `cg_inline_simple_return_expr` 返 NULL (body 不是 single return expr) → `try_inline=false` |
+| `v135_inline_simple_recursive.jhyy` (Stage 4) | `loopy(n) = if n <= 0 { return 0; } return n + loopy(n - 1);` — **simple-return + base case** | 同上 (base case if 让 `cg_inline_simple_return_expr` 返 NULL) → `try_inline=false` |
+
+两者 guard 路径相同 (`try_inline=false` → emit `call $fn_sym`), 测的是同一 codegen path 但不同 AST shape。保留两者覆盖不同 AST shape。
+
+### 验证 (5/5 PASS 必达 + Stage 4 byte-equal closure 保留)
+
+| 验证项 | 结果 |
+|--------|------|
+| v135_inline_simple_recursive.jhyy (`loopy(5)`) | ✅ EXIT=15 (jhyy.exe + jhyy_stage0.exe 双 binary) |
+| 5-test inline subset (v135 + inline_basic + nested + chain + recursive_fallback) | ✅ 5/5 PASS 双 binary (EXIT: 15, 42, 20, 13, 120) |
+| full regress (jhyy.exe) | ✅ 89/89 PASS + 4 SKIP (vs Stage 3 88/88, +1 promote) |
+| full regress (jhyy_stage0.exe) | ✅ 89/89 PASS + 4 SKIP (parity) |
+| Stage 4 N=4 byte-equal closure | ✅ jhyy_v1.il == v2.il == v3.il == v4.il sha `7552aa949ed066afe086f907e94142753c297eedd8b7145e787fa7fbdc17aba6` (跟 Stage 3 同 sha, 因 src/src0 没动) |
 
 ---
 

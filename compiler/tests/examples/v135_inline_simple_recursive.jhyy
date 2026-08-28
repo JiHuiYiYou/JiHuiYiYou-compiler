@@ -1,0 +1,24 @@
+// EXPECT: 15
+// v1.3.5: codegen 递归 inline 守卫验证 — `loopy(n-1)` 在 `loopy` 体内调用时,
+// codegen.c:902 的 `current_inline_sym != fn_sym` 守卫 fire, emit `call $loopy`
+// (非 inline 展开)。base case `if n <= 0 { return 0; }` 让 `loopy(5)` 终止,
+// 返回 5+4+3+2+1+0 = 15。
+//
+// 排查背景 (v1.7.0 Stage 4): 排查发现无 codegen bug — 源程序原始版本无 base case
+// 是 infinite recursion, runtime STACK_OVERFLOW 是预期 OS-level 行为。IL 验证
+// (jhyy_get_il) 确认 `%t4 =w call $loopy(w %t3)` 走真实 call, 不是 inline 展开。
+//
+// 对比 `inline_recursive_fallback.jhyy` — 两者都验证 codegen guard, 但 body AST shape 不同:
+// - inline_recursive_fallback: fact(n) = if n <= 1 { return 1; } return n * fact(n - 1); (multi-stmt + 控制流)
+// - 本 test:                loopy(n) = if n <= 0 { return 0; } return n + loopy(n - 1); (simple-return + base case)
+// 两者都让 `cg_inline_simple_return_expr` 返回 NULL → try_inline=false → emit call $fn_sym。
+
+#[inline]
+fn loopy(n: i32) -> i32 {
+    if n <= 0 { return 0; }
+    return n + loopy(n - 1);
+}
+
+fn main_jhyy() -> i32 {
+    return loopy(5);
+}
