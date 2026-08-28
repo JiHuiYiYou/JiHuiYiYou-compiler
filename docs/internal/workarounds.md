@@ -58,9 +58,9 @@
 | [W-055](#w-055-spec-§95-指针算术-p--1-整节未实现) | ✅ RESOLVED 2026-08-28 (v1.7.0 Stage 2 commits `6216138`+`187e8ab`) | spec §9.5 指针算术 `p + 1` / `p - 1` / `p[n]` 整节未实现 — **v1.7.0 Stage 2 ship**: 4 形式全 ship (`*T + int` / `*T - int` / `int + *T` / `*T - *T` / `p[n]`),详见 section body line 3668+ `Resolution (2026-08-28 v1.7.0 Stage 2)`。后续工作推 v2.x = pointer comparison `p < q` + bounds check (`&mut` lifetime),跟 `p±N` / `p[n]` 不同 scope。 |
 | [W-057](#w-057-utf-8-3-byte--4-byte-codepoint-显式-lex-reject-推-v2x) | 🟡 DEFERRED v2.x | vendor QBE (2026-08-15 build) 编译期 fold 3/4-byte UTF-8 codepoint 错 (e.g. `'你'` U+4F60 / `'🎉'` U+1F389) — v1.7.0 Stage 3 显式 lex reject "3/4-byte UTF-8 codepoint not supported", spec §4.4 缺独立 W-NNN 归档 (本 v1.7.3 patch C2 补登), 推 v2.x 真修 (vendor QBE 升级主线或自研 backend codepoint folding)。|
 | [W-058](#w-058-vendor-qbe-2026-08-15-build-不支持-remd--rems-浮点取模-推-v2x) | 🟡 DEFERRED v2.x | vendor QBE 不支持 `remd` (f64 remainder) / `rems` (f32 remainder) 指令, v1.7.2 patch A1 ship 时 fact-check fail, 标 LIMIT 推 v2.x, workarounds/spec 缺独立 W-NNN 归档 (本 v1.7.3 patch C3 补登 + spec 附录 B fmod row cross-ref C4)。|
-| [W-059](#w-059-defer-codegen-path-silent-crash-v136-ship-后-0-test-验证-accept-path-推-v18) | 🟡 DEFERRED v1.8 | v1.3.6 defer ship 后 0 accept-path test 在 default regress 验证 (commit `169759c` ship 时 0 defer test), v1.7.3 patch A1/A2/A3 attempt 时发现 `defer sink();` codegen silent exit (EXIT=0 不产出 .il/.s/.exe)。3 defer test 暂加 `// SKIP:` directive 推迟 v1.8 真修 (per `mcp-jhyy/jhyy_regress.py` SKIP 解析)。|
-| [W-060](#w-060-enum-variant-payload-abi-mismatch-mixedi1234-match-走-wildcard-path-exit210--1234-推-v18) | 🟡 DEFERRED v1.8 | enum variant payload ABI mismatch — `Mixed::I(1234)` match 走 wildcard path (`S(_)`) EXIT=210 ≠ 1234 (tag compare 错位, payload offset 错); OR pattern `Some(v) \| Some(v)` EXIT=0 ≠ 42 (sema OR pattern binding scope bug)。v1.3.7 Pattern binding ship 时只覆盖 single-payload single-binding (`Some(i32)`), 缺 multi-payload + multi-binding 验证, v1.7.3 patch A5/A6 attempt 时发现。2 enum test 暂加 `// SKIP:` 推迟 v1.8 真修。|
-| [W-061](#w-061-nested-struct-field-offset-bug-outer--tag-inner--read-exit51--307-推-v18) | 🟡 DEFERRED v1.8 | nested struct Outer { inner: Inner { x, y }, tag: i32 } read path 错偏移, `read_outer(&o) + read_inner(&o)` EXIT=51 ≠ 307 (= 7 + 100 + 200)。W-019 RESOLVED 2026-08-14 修 1-layer 嵌套 (1-field Inner + 1-field Outer), 但 2-field Inner + Outer 字段序后置 (tag @ 偏移 8) 是 W-061 新发现的扩展 case, v1.7.3 patch A7 attempt 时发现。nested_struct_dwarf.jhyy 暂加 `// SKIP:` 推迟 v1.8 真修 (现有 nested_struct_test.jhyy 等 1-layer 测试仍 PASS regress 96/96)。|
+| [W-059](#w-059-defer-codegen-path-silent-crash-v136-ship-后-0-test-验证-accept-path-推-v18) | ✅ RESOLVED 2026-08-28 (v1.8.0) | 根因 = `compiler/src0/sema.jhyy` `sema_defer_register` (NODE_DEFER case) 调 `infer_type(ctx, expr)` 漏传 `ta` (TypeArena arg) → sema 阶段 silent corrupt stack → `[sema] P3 i=0` 后 crash 0 .il/.s/.exe. 修复: 1-line fix line 1410 `let _v = infer_type(ctx, ta, expr);` (jhyy-side `infer_type` 3-arg signature, 漏 `ta` 等于传 garbage). C-side 正确因为 `infer_type` 是 2-arg. Phase 1A empirical (MCP-only) + Phase 1B bisection 定位 + Phase 2 真修. 3 defer test (`defer_basic.jhyy` / `defer_multi_lifo.jhyy` / `defer_let_init.jhyy`) SKIP directive 删, 全 PASS regress (jhyy.exe 102/102 + jhyy_stage0.exe parity 102/102). N=4 byte-equal closure hold (v2/v3/v4 sha=`03a1cdd4...`). 5/5 PASS on each target test per `feedback_fix_evaluation_rule`. |
+| [W-060](#w-060-enum-variant-payload-abi-mismatch-mixedi1234-match-走-wildcard-path-exit210--1234-推-v18) | ❌ INVALID 2026-08-28 (v1.8.0) | v1.7.3 ship 期间 fact-check 误判为真 bug: 实为 bash `$?` 8-bit truncation (EXIT=210 = 1234 & 0xFF) + Windows `subprocess.run` 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比較. v1.8.0 Phase 1 调查 (Agent 3) 确认 W-060 = test artifact. OR pattern `Some(v) \| Some(v)` 分支 EXIT=42 实无 bug (line 1 SKIP 标签把 spec 限制跟 OR pattern 测试混淆). 2 enum test (`payload_bind_multi.jhyy` / `payload_bind_nested.jhyy`) SKIP directive 删, 全 PASS regress. |
+| [W-061](#w-061-nested-struct-field-offset-bug-outer--tag-inner--read-exit51--307-推-v18) | ❌ INVALID 2026-08-28 (v1.8.0) | v1.7.3 ship 期间 fact-check 误判为真 bug: 实为 bash `$?` 8-bit truncation (EXIT=51 = 307 & 0xFF) + Windows `subprocess.run` 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比較. v1.8.0 Phase 1 调查 (Agent 3) 确认 W-061 = test artifact. `(*o).inner.x + (*o).inner.y` 实 EXIT=300 (无 bug, 推测 OR-pattern 部分 follow-up 误解). nested_struct_dwarf.jhyy SKIP directive 删, 全 PASS regress. |
 
 ---
 
@@ -3931,9 +3931,9 @@ codegen errors
 ## W-059: defer codegen path silent crash (v1.3.6 ship 后 0 test 验证 accept path) (推 v1.8)
 
 **ID:** W-059
-**状态:** 🟡 DEFERRED v1.8
-**日期:** 2026-08-28 (v1.7.3 patch A1/A2/A3 attempt 时发现)
-**superseder:** 推 v1.8 (v1.7.3 patch 临时修 SKIP directive, 3 defer test 待 v1.8 真修后启用)
+**状态:** ✅ RESOLVED 2026-08-28 (v1.8.0)
+**日期:** 2026-08-28 (v1.7.3 patch A1/A2/A3 attempt 时发现) → 2026-08-28 (v1.8.0 Phase 2 真修)
+**superseder:** v1.8.0 Phase 2 真修 (1-line fix `src0/sema.jhyy:1410`, 3 defer test SKIP 删)
 **触发面:** v1.3.6 defer ship 后 0 accept-path test 在 default regress 跑过, v1.7.3 patch A1 attempt 写 `defer sink(log);` 测试时发现 codegen silent exit (EXIT=0 但不产出 .il / .s / .exe).
 
 | 输入 | 期望 (per spec §D.6 defer) | v1.7.2 实际 |
@@ -3983,14 +3983,48 @@ sema 完整通过 (P3 i=0 后无错误), codegen 路径 silent exit 不报错。
 - `mcp-jhyy/jhyy_regress.py` v1.7.3 SKIP directive (新加, 跟 EXPECT/EXPECT-ERROR/SETENV 并列)
 - `feedback_fix_evaluation_rule` 5/5 PASS gate (v1.8 defer 真修后必须走)
 
+**Resolution (2026-08-28 v1.8.0):**
+
+**根因 (empirical, MCP-only Phase 1A):**
+`compiler/src0/sema.jhyy` `sema_defer_register` (NODE_DEFER case line 1399-1435) 调 `infer_type(ctx, expr)` 漏传 `ta` (TypeArena arg) — jhyy-side `infer_type` 是 3-arg signature `(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type` (per `compiler/src0/sema.jhyy` line 499), C-side 是 2-arg `(ctx, n)` (per `compiler/src/sema.c` line 315). jhyy-side 漏 `ta` 等于把 `expr` ptr 当 `ta` 传 → sema 阶段 silent corrupt stack frame → `[sema] P3 i=0` print 后 crash 0 .il/.s/.exe. C-side 调用 `infer_type(ctx, dd->expr)` (line 1018) 正确因为 signature 对得上.
+
+**Phase 1A empirical characterization (0 src/src0 改动):**
+- `jhyy_get_il` on `defer_basic.jhyy` → outcome B (no IL produced)
+- `jhyy_check` on `defer_basic.jhyy` → outcome Y (sema phase crash)
+- 决策矩陣: B+Y → crash 在 sema, 跟 `[sema] P3 i=0` 报告一致
+- `jhyy_stage0.exe compile defer_basic.jhyy` 成功 — Stage 0 没 bug, bug 是 jhyy-side 独有 (漏 `ta` arg)
+
+**Phase 1B bisection (minimal debug print):**
+在 `src0/sema.jhyy` NODE_DEFER case 入口 + infer_type 调用前后加 fprintf → rebuild → 复现 → 定位 crash 时机在 `infer_type(ctx, expr)` 实际 call 时 (jhyy-side infer_type 把 `expr` ptr 当 `ta` 读, deref 越界).
+
+**Phase 2 真修:**
+1-line fix `compiler/src0/sema.jhyy` line 1410:
+```diff
+-            let _v = infer_type(ctx, expr);
++            let _v = infer_type(ctx, ta, expr);
+```
+C-side 不需改 (signature 是 2-arg, 调用正确).
+
+**回歸 verification:**
+- 5/5 PASS on each target test per `feedback_fix_evaluation_rule`:
+  - `defer_basic.jhyy` EXIT=0 ✓ (sink(42) side-effect, return 0)
+  - `defer_multi_lifo.jhyy` EXIT=0 ✓ (Go-style defer: return value capture 先, defer LIFO 后跑)
+  - `defer_let_init.jhyy` EXIT=123 ✓ (return x+y = 123, defer sink(x) 仅 side-effect)
+- regress baseline: 96/96+10 → **102/102+4** (+6 PASS, -6 SKIP, baseline 不变)
+- jhyy.exe parity regress: 102/102+4 (跟 jhyy_stage0.exe 一致)
+- N=4 byte-equal closure: v2/v3/v4 sha=`03a1cdd4...` (closure hold)
+
+**反思 (ship 流程 gap, v1.3.6 教训):**
+v1.3.6 defer ship 时 0 accept-path test 验证 (commit `169759c` ship 时 defer test 0 个). v1.8.0 反思: 未来任何 "ship 但 0 test" 特性 ship 流程需加 hard rule "must have ≥1 default regress test". 3 defer test (`defer_basic.jhyy` / `defer_multi_lifo.jhyy` / `defer_let_init.jhyy`) 现 default regress PASS, ship 流程 gap 闭环.
+
 ---
 
 ## W-060: enum variant payload ABI mismatch (Mixed::I(1234) match 走 wildcard path EXIT=210 ≠ 1234) (推 v1.8)
 
 **ID:** W-060
-**状态:** 🟡 DEFERRED v1.8
-**日期:** 2026-08-28 (v1.7.3 patch A5/A6 attempt 时发现)
-**superseder:** 推 v1.8 (v1.7.3 patch 临时修 SKIP, 2 enum test 待 v1.8 真修后启用)
+**状态:** ❌ INVALID 2026-08-28 (v1.8.0) — v1.7.3 ship 期间 fact-check 误判为真 bug, v1.8.0 Phase 1 调查 (Agent 3) 确认 = test artifact (bash `$?` 8-bit truncation + W-028 mod-256 fix 已 equalize 比較)
+**日期:** 2026-08-28 (v1.7.3 patch A5/A6 attempt 时 fact-check 误判) → 2026-08-28 (v1.8.0 Phase 1 INVALID 闭环)
+**superseder:** v1.8.0 Phase 3 INVALID 清理 (2 enum test SKIP 删, regress W-028 fix PASS)
 **触发面:** v1.7.3 patch A5/A6 attempt 写 `Mixed::I(1234)` enum variant payload 提取测试时发现 match 走 wildcard path (`S(_)`) 而不是 `I(v)` path.
 
 | 输入 | 期望 (per spec §11.4 Pattern binding `Some(v) => v`) | v1.7.2 实际 |
@@ -4036,14 +4070,38 @@ fn main_jhyy() -> i32 {
 - `mcp-jhyy/jhyy_regress.py` v1.7.3 SKIP directive
 - `feedback_fix_evaluation_rule` 5/5 PASS gate
 
+**INVALID status (2026-08-28 v1.8.0 Phase 1 调查, Agent 3):**
+
+**真因 (NOT 真 bug):**
+v1.7.3 ship 期间 fact-check 把 bash `$?` 8-bit truncation artifact 误判为 enum variant payload ABI bug:
+- `Mixed::I(1234)` 实 EXIT=1234 — bash `$?` truncates 8-bit → 1234 & 0xFF = 210 (0xD2)
+- `subprocess.run` on Windows 同步 8-bit truncate → regress.py line 246 注释明示 "Windows returns 8-bit truncated"
+- regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比較 → 210 == (1234 mod 256) → PASS
+
+**OR pattern `Some(v) | Some(v)` EXIT=0:**
+v1.7.3 patch A6 误诊 line 1 SKIP 标签把 spec §D.7 multi-binding 限制跟 OR pattern 测试混淆. v1.8.0 Phase 1 验证: OR pattern 实 EXIT=42 (无 ABI mismatch, `Some(42)` 走 OR arm 正常返回 42). spec §D.8 ship OR pattern (1 layer OK), `Some(v) | Some(v)` 是合法 OR pattern (两边同 binding 名).
+
+**SKIP 删后 verify:**
+- `payload_bind_multi.jhyy` (W-060 第一个): SKIP directive 删 → regress PASS (EXIT=210 → mod-256 equalize → 210 == 1234 mod 256 = 210)
+- `payload_bind_nested.jhyy` (W-060 第二个, OR pattern): SKIP directive 删 → regress PASS (EXIT=42 == EXPECT=42)
+
+**回歸 verification:**
+- regress baseline: 99/99+7 → **102/102+4** (+3 PASS, -3 SKIP)
+- jhyy.exe parity regress: 102/102+4 (跟 jhyy_stage0.exe 一致)
+- 0 src/src0 改动 (INVALID 闭环 = 纯文档 + test SKIP 删, 无 code 改动)
+- N=4 byte-equal closure hold (跟 v1.7.3 ship 一致, v2/v3/v4 sha 不变)
+
+**教訓 (fact-check 流程 gap):**
+v1.7.3 fact-check 只看了 EXIT vs EXPECT 数字不同就标 DEFERRED v1.8, 没 trace 到 bash `$?` 8-bit truncation 根因. v1.8.0 反思: fact-check EXIT mismatch 必先 trace 到 exit code propagation path (bash / subprocess.run / regress.py / W-028 fix 是否 equalize), 再决定 bug 状态. INVALID ≠ 错误分类, 是 fact-check 流程漏了 root cause verification.
+
 ---
 
 ## W-061: nested struct field offset bug (Outer { tag, inner } read EXIT=51 ≠ 307) (推 v1.8)
 
 **ID:** W-061
-**状态:** 🟡 DEFERRED v1.8
-**日期:** 2026-08-28 (v1.7.3 patch A7 attempt 时发现)
-**superseder:** 推 v1.8 (v1.7.3 patch 临时修 SKIP, nested_struct_dwarf.jhyy 待 v1.8 真修后启用)
+**状态:** ❌ INVALID 2026-08-28 (v1.8.0) — v1.7.3 ship 期间 fact-check 误判为真 bug, v1.8.0 Phase 1 调查 (Agent 3) 确认 = test artifact (bash `$?` 8-bit truncation + W-028 mod-256 fix 已 equalize 比較)
+**日期:** 2026-08-28 (v1.7.3 patch A7 attempt 时 fact-check 误判) → 2026-08-28 (v1.8.0 Phase 1 INVALID 闭环)
+**superseder:** v1.8.0 Phase 3 INVALID 清理 (nested_struct_dwarf.jhyy SKIP 删, regress W-028 fix PASS)
 **触发面:** v1.7.3 patch A7 attempt 写 `Outer { inner: Inner { x, y }, tag }` nested struct read 测试时发现 read path 走错偏移.
 
 | 输入 | 期望 (per spec §9.4 + W-019 RESOLVED 2026-08-14) | v1.7.2 实际 |
@@ -4090,5 +4148,28 @@ fn main_jhyy() -> i32 {
 - `mcp-jhyy/jhyy_regress.py` v1.7.3 SKIP directive
 - `feedback_fix_evaluation_rule` 5/5 PASS gate
 - gdb_pretty_test.jhyy:15-18 (v1.7.3 patch A7 注释更新: "nested struct coverage deferred to v1.8 due to W-061")
+
+**INVALID status (2026-08-28 v1.8.0 Phase 1 调查, Agent 3):**
+
+**真因 (NOT 真 bug):**
+v1.7.3 ship 期间 fact-check 把 bash `$?` 8-bit truncation artifact 误判为 nested struct field offset bug:
+- `read_outer(&o) + read_inner(&o)` 实 EXIT=307 (= 7 + 100 + 200) — bash `$?` truncates 8-bit → 307 & 0xFF = 51
+- `subprocess.run` on Windows 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比較 → 51 == (307 mod 256) → PASS
+- 实际 EXIT table (per W-061 上面表): tag=7 ✓ + inner.x + inner.y = 300 ✓ → 7 + 300 = 307 (全对, 无 read 错位)
+
+**Inner sum 错位表 line 4085 错标:**
+"100 + 200 = 300 → ❌ EXIT=44 (read Inner sum 错位)" — v1.8.0 Phase 1 调查确认: 实 EXIT=300 (correct). line 4085 错标因为 follow-up 误算 `44 = 7 + 44 - 7` (= read_outer+read_inner EXIT=51, 减 read_outer=7, 推 read_inner=44 — 但实际 read_inner 实 EXIT=300, 不是 44). 同 root cause = fact-check 没 trace 到 exit propagation path.
+
+**SKIP 删后 verify:**
+- `nested_struct_dwarf.jhyy`: SKIP directive 删 → regress PASS (EXIT=51 → mod-256 equalize → 51 == 307 mod 256 = 51)
+
+**回歸 verification:**
+- regress baseline: 99/99+7 → **102/102+4** (+3 PASS, -3 SKIP)
+- jhyy.exe parity regress: 102/102+4 (跟 jhyy_stage0.exe 一致)
+- 0 src/src0 改动 (INVALID 闭环 = 纯文档 + test SKIP 删, 无 code 改动)
+- N=4 byte-equal closure hold (跟 v1.7.3 ship 一致, v2/v3/v4 sha 不变)
+
+**教訓 (跟 W-060 同):**
+fact-check EXIT mismatch 必先 trace 到 exit code propagation path. v1.7.3 误把 bash `$?` 8-bit truncation 当 read offset bug 标 DEFERRED, 是流程 gap. v1.8.0 改: fact-check EXIT mismatch 必先 verify exit code path (bash / subprocess / regress.py / W-028 fix), 再标 bug 状态. W-019 RESOLVED 2026-08-14 已覆盖 1-layer 嵌套; W-061 = 2-field Inner + Outer 字段序后置 spec §9.4 layout 实对, 不需新修.
 
 

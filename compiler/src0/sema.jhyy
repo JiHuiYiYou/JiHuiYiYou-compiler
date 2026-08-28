@@ -1407,7 +1407,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                                     "defer requires fncall (got non-call expression)" as *u8);
         }
         if expr != (0 as *Node) {
-            let _v = infer_type(ctx, expr);
+            let _v = infer_type(ctx, ta, expr);
         }
         let v = type_void(ta);
         (*n).type_ptr = v as *u8;

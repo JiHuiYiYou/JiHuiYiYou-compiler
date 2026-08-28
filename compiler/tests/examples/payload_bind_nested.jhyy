@@ -1,13 +1,13 @@
-// SKIP: v1.8 — spec §D.7 限制 multi-binding / nested pattern 未 ship (W-060)
 // EXPECT: 42
-// v1.7.3 patch A6 (deferred to v1.8): OR pattern `Some(x) | Some(x)` 测试
+// v1.7.3 patch A6: OR pattern `Some(x) | Some(x)` 测试
 //
 // 原 plan 候选: "1 层嵌套 Some(Some(x))" — 但 spec §D.7 line 1386 描述超前于
 // 实现, parser 实际不支持嵌套 pattern. 改用 OR pattern 测试 (spec §D.8 ship,
 // 已 verify 1 layer OK).
 //
-// v1.7.3 ship 期间发现: OR pattern match ABI mismatch — 同 W-060 真因.
-// W-060 🟡 DEFERRED v1.8. 本 test 暂保留为 v1.8 真修后启用 (regress skip).
+// v1.7.3 ship 期间 fact-check 误判 W-060 OR pattern 分支: v1.8.0 Phase 1 调查
+// 确认 OR pattern 实 EXIT=42 (无 ABI mismatch), 误判因 line 1 SKIP 标签把 spec
+// 限制跟 OR pattern 测试混淆. v1.8.0 标 W-060 = ❌ INVALID.
 
 type Option = enum { Some(i32), None }
 

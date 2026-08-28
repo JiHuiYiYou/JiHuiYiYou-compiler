@@ -1,14 +1,14 @@
-// SKIP: v1.8 — enum variant payload ABI mismatch (W-060)
 // EXPECT: 1234
-// v1.7.3 patch A5 (deferred to v1.8): enum variant 不同 payload type variety
+// v1.7.3 patch A5: enum variant 不同 payload type variety
 //
 // spec §D.7 限制: enum variant 仅支持单 payload, multi-payload `P(T, T)` parser
 // 拒绝 (推 v3.x); pattern 仅支持单 binding, multi binding `Pair(a, b)` parser
 // 拒绝 (推 v3.x)。
 //
-// v1.7.3 ship 期间发现: enum variant payload 提取 ABI mismatch — `Mixed::I(1234)`
-// match 走 wildcard path, EXIT=210 不是 1234. W-060 🟡 DEFERRED v1.8.
-// 本 test 暂保留为 v1.8 真修后启用 (regress skip).
+// v1.7.3 ship 期间 fact-check 误判 W-060 (EXIT=210 vs EXPECT=1234): 实为 bash `$?`
+// 8-bit truncation (1234 & 0xFF = 210) + Windows `subprocess.run` 同步 8-bit
+// truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比較.
+// v1.8.0 Phase 1 调查确认 W-060 = ❌ INVALID (test artifact, 非真 bug).
 
 type Mixed = enum { I(i32), S(*u8), B(bool) }
 

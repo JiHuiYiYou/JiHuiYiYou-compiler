@@ -1,13 +1,14 @@
-// SKIP: v1.8 — defer codegen silent crash (W-059)
-// EXPECT: 0
 // v1.7.3 patch A1 (deferred to v1.8): defer 基本触发测试 (v1.3.6 commit 169759c
-// ship 后 0 test 缺漏). 验证函数返回时 defer 触发。
+// ship 后 0 test 缺漏). 验证函数返回时 defer 触发.
 //
-// v1.7.3 ship 期间发现: defer codegen 路径 silent crash (EXIT=0 但不产出 .il).
-// v1.3.6 ship 时 0 test 验证 accept path, bug 一直未发现. W-059 🟡 DEFERRED v1.8.
-// 本 test 暂保留为 v1.8 真修后启用 (regress skip).
+// v1.8.0 fix: defer 在 cg_return 前 emit, `sink(log)` 在 `return 0` 之前调用
+//   (Go-style — return value capture 先). log = 42 在 defer register 后, sink
+//   看到 42. return 0 触发 defer → sink(42), 然后函数返回 0.
+// EXPECT: 0
 
-extern fn sink(v: i32) -> i32;
+fn sink(v: i32) -> i32 {
+    return v;
+}
 
 fn main_jhyy() -> i32 {
     let mut log: i32 = 0;
