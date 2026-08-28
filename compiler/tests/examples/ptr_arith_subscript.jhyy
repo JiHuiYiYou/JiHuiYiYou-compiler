@@ -1,0 +1,8 @@
+// ptr_arith_subscript.jhyy — v1.7.0 Stage 2: spec §9.5 subscript 形式
+// 期望 PASS; 当前 sema 允许但 codegen emit `add 0, offset` segfault.
+
+fn main_jhyy() -> i32 {
+    let arr: [i32; 4] = [10, 20, 30, 40];
+    let p: *i32 = &arr[0];
+    return p[2];                 // 期望 30
+}

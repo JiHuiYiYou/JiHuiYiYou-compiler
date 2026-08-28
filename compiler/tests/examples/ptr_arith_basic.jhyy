@@ -1,0 +1,10 @@
+// ptr_arith_basic.jhyy — v1.7.0 Stage 2: spec §9.5 指针算术基础形式
+// 期望 PASS (Stage 2 完成后); 当前会 FAIL (sema type mismatch).
+
+fn main_jhyy() -> i32 {
+    let arr: [i32; 3] = [10, 20, 30];
+    let p: *i32 = &arr[0];
+    let q: *i32 = p + 1;        // spec §9.5: q = &arr[1]
+    let r: *i32 = q + 1;        // r = &arr[2]
+    return (*r) - (*p) - 10;    // = 30 - 10 - 10 = 10
+}

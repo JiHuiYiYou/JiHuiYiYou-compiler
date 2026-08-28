@@ -1,0 +1,13 @@
+// ptr_arith_diff.jhyy — v1.7.0 Stage 2: spec §9.5 pointer diff 形式
+// 期望 PASS (Stage 2 完成后); 当前会 FAIL (sema type mismatch)。
+// NOTE: `d + 100i64` 而不是 `d + 100` — i32+i64 promotion 不在 v1.7 scope
+// (per workarounds.md 已知限制 — spec §9.5 pointer arith 已有此限制).
+
+fn main_jhyy() -> i32 {
+    let arr: [i32; 4] = [10, 20, 30, 40];
+    let p: *i32 = &arr[0];
+    let q: *i32 = &arr[2];
+    let d: i64 = q - p;          // 期望 (q - p) / sizeof(i32) = 2 (i64)
+    let d2: i64 = d + 100i64;    // 期望 102 (强断言 d != 0)
+    return d2 as i32;
+}
