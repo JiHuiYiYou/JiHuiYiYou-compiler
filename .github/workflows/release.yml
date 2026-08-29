@@ -183,8 +183,12 @@ jobs:
         env:
           JHY_VERSION: ${{ env.VERSION }}
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File installer/build.ps1 bundle
-          # bundle target auto-calls gen-sha256.ps1, so SHA256.txt is ready
+          pwsh -NoProfile -ExecutionPolicy Bypass -File installer/build.ps1 bundle
+          # Use pwsh (PowerShell 7+) to match step shell — Windows PowerShell 5.1
+          # in some runner images mis-parses switch ($Target) { "bundle" { ... } }
+          # block syntax (failure mode: "Unexpected token '{'" + "Missing statement
+          # block in switch statement clause"). build.ps1 also runs successfully
+          # locally on PowerShell 5.1 + 7.
 
       - name: Verify SHA256.txt content
         shell: pwsh
