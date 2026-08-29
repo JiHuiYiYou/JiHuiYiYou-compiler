@@ -7,6 +7,7 @@ CC       = gcc
 CFLAGS   = -std=c11 -Wall -Wextra -g
 QBE      = qbe/qbe.exe
 QBEFLAGS = -t amd64_win
+WINDRES  = windres
 
 # Directories
 COMPILER_DIR = compiler
@@ -16,6 +17,11 @@ RUNTIME_DIR  = $(COMPILER_DIR)/runtime
 BUILD_DIR    = $(COMPILER_DIR)/build
 OBJ_DIR      = $(BUILD_DIR)/obj
 BIN_DIR      = $(BUILD_DIR)/bin
+
+# v1.8.1 patch: branded "J" icon embedded into jhyy_stage0.exe (and via main.c
+# system() spawn, into jhyy.exe + every .jhyy-compiled program).
+ICON_SRC = installer/jhyy-icon.ico
+RES_OBJ  = $(OBJ_DIR)/jhyy-res.o
 
 # Source files
 SRCS = $(SRC_DIR)/main.c \
@@ -53,9 +59,15 @@ $(OBJ_DIR)/runtime.o: $(RUNTIME_DIR)/runtime.c
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# v1.8.1 patch: windres rule producing icon resource .o (RT_ICON group).
+$(RES_OBJ): $(SRC_DIR)/jhyy.rc $(ICON_SRC)
+	@mkdir -p $(OBJ_DIR)
+	$(WINDRES) -i $< -O coff -o $@
+
 # v1.4.4: C 端产物改名 jhyy_stage0.exe (runtime.o 不链入 — 它是给 jhyy.exe 用
 # 的, 含重复符号 arena_alloc/main, 会跟 main.c/arena.c 冲突)
-$(BIN_DIR)/jhyy_stage0.exe: $(OBJS)
+# v1.8.1: jhyy-res.o (icon RT_ICON group) 链入 stage0,branded "J" 进 exe。
+$(BIN_DIR)/jhyy_stage0.exe: $(OBJS) $(RES_OBJ)
 	@mkdir -p $(BIN_DIR)
 	$(CC) $(CFLAGS) $^ -o $@
 

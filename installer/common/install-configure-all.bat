@@ -76,5 +76,21 @@ if errorlevel 1 (
     )
 )
 
+rem 4. (v1.8.1 patch) Cleanup HKCU\Software\Classes\.jhyy shadow.
+rem    MSYS2 / Git Bash registers HKCU\Software\Classes\.<ext> = "<name>_auto_file"
+rem    whenever it sees a `chmod +x <ext>` invocation, which shadows the
+rem    per-machine MSI-installed HKCR\.jhyy\(default) = "JHYY.SourceFile".
+rem    Without this cleanup, Explorer still picks the MSYS2 auto-class file
+rem    (no DefaultIcon) and falls back to the white-document icon.
+rem    Idempotent: reg delete on an absent key returns errorlevel 1, which we ignore.
+rem    For users wanting the icon NOW without logoff/logon: run from admin shell
+rem    "reg delete \"HKCU\Software\Classes\.jhyy\" /f" + "ie4uinit.exe -show".
+reg.exe delete "HKCU\Software\Classes\.jhyy" /f >nul 2>&1
+if errorlevel 1 (
+    echo [install-configure-all] HKCU shadow cleanup: no .jhyy shadow present (exit !ERRORLEVEL!), continuing
+) else (
+    echo [install-configure-all] OK: HKCU\Software\Classes\.jhyy shadow cleared
+)
+
 echo [install-configure-all] DONE.
 exit /b 0

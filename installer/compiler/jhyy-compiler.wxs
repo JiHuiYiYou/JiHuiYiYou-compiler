@@ -597,10 +597,18 @@
     </ComponentGroup>
 
     <!--
-      FileAssoc Component (v1.5.4): .jhyy file association via HKCR
-      (per-machine install → HKLM\SOFTWARE\Classes).
+      FileAssoc Component (v1.5.4, v1.8.1 patch 真修): .jhyy file association
+      via HKCR (per-machine install → HKLM\SOFTWARE\Classes).
       写 HKCR\JHYY.SourceFile ProgID + shell\open\command 让双击 .jhyy → jhyy.exe run.
-      KeyPath 用 HKLM registry value (per ICE43: file KeyPath + per-machine data OK).
+
+      v1.8.1 patch:
+      - HKCR\.jhyy\(default) 现在真的写到 "JHYY.SourceFile" (v1.5.4 当时误把
+        ProgID 写到 named value "JHYYSourceFileMapping",但 Explorer 只读
+        (default),所以 lookup 退到 MSYS2 HKCU shadow = "jhyy_auto_file",
+        全白板图标 1.5.4 → 1.5.10 都中招,直至 1.8.1 真修).
+      - DefaultIcon 改成 [INSTALLDIR]bin\jhyy.exe,0 (v1.8.1 之后 jhyy.exe 自己
+        embed RT_ICON group via Makefile + compiler/src/jhyy.rc),去掉对独立
+        jhyy-icon.ico 的运行时依赖.
 
       Layout:
         HKCR\.jhyy\             (default) = "JHYY.SourceFile"
@@ -609,7 +617,9 @@
                                   shell\open\(default) = "Run with JHYY"
                                   shell\open\command\(default) = '"[INSTALLDIR]bin\jhyy.exe" run "%1"'
 
-      Note: WiX HKCR 映射 — per-machine MSI 自动写 HKLM\SOFTWARE\Classes.
+      KeyPath 用 HKLM registry value (per ICE43: file KeyPath + per-machine data OK).
+
+      Note: WiX HKCR 映射 — per-machine MSI 自动写 HKLM\SOFTWARE\Classes。
       用户没有 admin 装 MSI 时, 这 Component 装不了 (HKLM 要 admin). Already MSI 是
       Scope=perMachine + InstallerVersion=500 要求 admin.
     -->
@@ -622,8 +632,14 @@
                      Key=".jhyy"
                      ForceCreateOnInstall="yes"
                      ForceDeleteOnUninstall="yes">
+          <!--
+            v1.8.1 patch: drop Name="..." so this RegistryValue writes to the
+            key's (default) slot, NOT a named value. Explorer walk for ProgID
+            reads (default) only — the v1.5.4 named-value form silently
+            failed to associate .jhyy with JHYY.SourceFile, leaving the
+            default install to fall through to MSYS2's HKCU shadow.
+          -->
           <RegistryValue Type="string"
-                         Name="JHYYSourceFileMapping"
                          Value="JHYY.SourceFile"
                          KeyPath="yes" />
         </RegistryKey>
@@ -638,14 +654,19 @@
                        Key="DefaultIcon"
                        ForceCreateOnInstall="yes">
             <!--
-              v1.5.7-rc1 rev 2: use brand-consistent .ico file (navy+mint "J")
-              instead of jhyy.exe's default icon (generic blue document icon).
-              JhyyIconFile Component above ships jhyy-icon.ico to
-              [INSTALLDIR]bin\. Windows shell resolves .ico via the file path
-              (no index suffix needed for .ico format).
+              v1.8.1 patch: point DefaultIcon at jhyy.exe's embedded RT_ICON
+              group (jhyy.exe,0). v1.5.7-rc1 rev 2 used the standalone
+              [INSTALLDIR]bin\jhyy-icon.ico file (named value mapping then
+              silently broken). jhyy.exe now embeds the same branded 6-frame
+              Vista+ ICO via windres (Makefile + compiler/src/jhyy.rc +
+              compiler/src/main.c), matching the brand asset and removing
+              the 7491-byte .ico runtime dependency for FileAssoc.
+
+              Python uses the same idiom: HKCR\Python.File\DefaultIcon =
+              "C:\Python312\python.exe,0".
             -->
             <RegistryValue Type="string"
-                           Value="[INSTALLDIR]bin\jhyy-icon.ico" />
+                           Value="[INSTALLDIR]bin\jhyy.exe,0" />
           </RegistryKey>
           <RegistryKey Id="HKCR_JhyyShell"
                        Key="shell"

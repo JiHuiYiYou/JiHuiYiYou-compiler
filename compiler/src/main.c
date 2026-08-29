@@ -17,6 +17,14 @@ static void path_to_win(char *p) {
     for (; *p; p++) if (*p == '/') *p = '\\';
 }
 
+/* v1.8.1 patch: convert backslashes to forward slashes. Used for paths fed
+   to windres (and the matching gcc line), where mingw accepts both but the
+   gcc -E preprocessor inside windres strips '\\' as escape, mangling the
+   path. Forward slashes survive end-to-end. */
+static void path_to_fwd(char *p) {
+    for (; *p; p++) if (*p == '\\') *p = '/';
+}
+
 /* Forward declarations */
 static int resolve_imports(Node *module, const char *main_path, Arena *arena,
                            char extra_paths[16][512], char extra_names[16][256],
@@ -487,20 +495,50 @@ static int compile(const char **inputs, int ninputs, const char *output) {
         arena_free(&arena); free(main_source); return 1;
     }
 
-    /* link with gcc (PATH-resolved) */
+    /* v1.8.1 patch: produce icon RT_ICON .o via windres (mirrors the
+       Makefile rule that does the same for jhyy_stage0.exe). <output>.ico.o
+       is fed to the gcc link line below and unlinked after the link.
+
+       Note: do NOT path_to_win() these -- windres preprocesses the .rc
+       through gcc -E which strips '\' as escape, mangling backslash paths.
+       Use path_to_fwd() so the leading g_project_root backslashes become
+       forward slashes; mingw's windres + gcc both accept forward slashes. */
+    char ico_res_path[1024];
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wformat-truncation"
+    snprintf(ico_res_path, sizeof(ico_res_path), "%s.ico.o", output);
+    char rc_path[1024];
+    snprintf(rc_path, sizeof(rc_path), "%s/compiler/src/jhyy.rc", g_project_root);
+    #pragma GCC diagnostic pop
+    path_to_fwd(rc_path);
+    path_to_fwd(ico_res_path);
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wformat-truncation"
+    snprintf(cmd, sizeof(cmd),
+             "windres -i %s -O coff -o %s", rc_path, ico_res_path);
+    #pragma GCC diagnostic pop
+    if (system(cmd) != 0) {
+        fprintf(stderr, "windres (icon RC compile) failed\n");
+        arena_free(&arena); free(main_source); return 1;
+    }
+
+    /* link with gcc (PATH-resolved). v1.8.1: also link <output>.ico.o so the
+       branded "J" RT_ICON group ends up in the compiled .exe. */
     char exe_path[1024];
     snprintf(exe_path, sizeof(exe_path), "%s.exe", output);
     path_to_win(exe_path);
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wformat-truncation"
     snprintf(cmd, sizeof(cmd),
-             "gcc %s %s/compiler/runtime/runtime.c %s/compiler/src0/jhyy_helpers.c -o %s -lm",
-             asm_path, g_project_root, g_project_root, exe_path);
+             "gcc %s %s %s/compiler/runtime/runtime.c %s/compiler/src0/jhyy_helpers.c -o %s -lm",
+             asm_path, ico_res_path, g_project_root, g_project_root, exe_path);
     #pragma GCC diagnostic pop
     if (system(cmd) != 0) {
         fprintf(stderr, "gcc link failed\n");
+        remove(ico_res_path);
         arena_free(&arena); free(main_source); return 1;
     }
+    remove(ico_res_path);  /* exe now links in the RT_ICON group — temp .o no longer needed */
 
     printf("Compiled: %s.exe\n", output);
     arena_free(&arena);

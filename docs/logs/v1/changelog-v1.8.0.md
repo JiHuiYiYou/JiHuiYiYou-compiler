@@ -383,6 +383,61 @@ sha256sum $PWD/compiler/build/bin/jhyy_v{2,3,4}.il
 
 ---
 
+## v1.8.1 patch — `.jhyy` 文件圖標真修 + jhyy.exe embed
+
+**觸發**:v1.8.0 ship 後 user 報「資源管理器 `.jhyy` 還是白板圖標」,不是 v1.5.7-rc1 rev 2 ship 的 `JHYYFileAssoc` ComponentGroup 完全沒做,**寫錯位 + HKCU shadow**。
+
+**兩個獨立 bug**:
+
+1. **WiX `(default)` 寫到命名值**(`installer/compiler/jhyy-compiler.wxs:625-628`):
+   ```xml
+   <RegistryValue Type="string" Name="JHYYSourceFileMapping"
+                  Value="JHYY.SourceFile" KeyPath="yes" />
+   ```
+   `Name="..."` 寫到 `HKCR\.jhyy\JHYYSourceFileMapping`,但 Explorer 找 ProgID 走 `.jhyy\(default)` —— 這條命名值根本沒人讀。裝完 MSI 實際狀態:
+   ```
+   HKCR\.jhyy\(default)            = <空>                ← Explorer 失敗
+   HKCR\.jhyy\JHYYSourceFileMapping = "JHYY.SourceFile"  ← 寫了但沒人用
+   ```
+
+2. **MSYS2 HKCU shadow**:Git Bash / MSYS2 看到 `chmod +x *.jhyy` 啟發 `*_auto_file` heuristic,寫 `HKCU\Software\Classes\.jhyy\(default) = "jhyy_auto_file"`。HKCU 優先級 > HKCR,直接壓住(就算修了 WiX (default) 值這條 shadow 還在)。`jhyy_auto_file` 沒 DefaultIcon → Explorer 回退白板。
+
+**結果鏈**:`.jhyy` → Explorer 看 `(default)` → 拿 `jhyy_auto_file`(無 DefaultIcon) → 白板。
+
+**Phase 5a — 修復內容**:
+
+| 文件 | 變更 |
+|------|------|
+| `installer/compiler/jhyy-compiler.wxs` | (a) `<RegistryValue Name="JHYYSourceFileMapping">` → 去 `Name=`(寫 `(default)`);(b) `DefaultIcon` 從 `[INSTALLDIR]bin\jhyy-icon.ico` → `[INSTALLDIR]bin\jhyy.exe,0`;(c) top comment block 同步 |
+| `installer/common/install-configure-all.bat` | step 4:`reg.exe delete "HKCU\Software\Classes\.jhyy" /f`(idempotent,RunOnce 內跑,user logoff/logon 後長期保持 shadow-free) |
+| `compiler/src/jhyy.rc`(新) | `IDI_ICON1 ICON "../../installer/jhyy-icon.ico"` — windres 資源腳本 |
+| `Makefile` | 加 `WINDRES = windres`、`$(OBJ_DIR)/jhyy-res.o` rule,`$(BIN_DIR)/jhyy_stage0.exe` 鏈入 `$(RES_OBJ)` |
+| `compiler/src/main.c` | `compile()` 函數 gcc spawn 前 windres 編 `<output>.ico.o`,鏈接加入;清理 tmp .ico.o。新增 `path_to_fwd()` helper(backslash → forward slash),規避 gcc `-E` 把 `\` 當 escape 的 windres 子進程失敗坑 |
+| `docs/internal/build.md` | 加一句"Stage 0/1 用 `windres` embed 圖標,改 `installer/jhyy-icon.ico` 後需重 build stage0 + stage1" |
+
+**embed 範圍**:
+- `jhyy_stage0.exe`(C 端 stage-0 bootstrap,Makefile 直接鏈 `jhyy-res.o`)
+- `jhyy.exe`(jhyy-side 產物,main.c 系統調用 windres + link 注入)
+- **user-compiled `.jhyy` 程序也帶圖標**(同一段 `compile()` 代碼 path,通過 windres → tmp `.ico.o` → gcc 鏈接;Python `python.exe,0` 同款做法)
+
+**驗證**:
+- `objdump -h compiler/build/bin/jhyy_stage0.exe` 顯示 `.rsrc` 段(9184B)+ `objdump -h compiler/build/bin/jhyy.exe` 顯示 `.rsrc` 段 + grep `89 50 4e 47` × 6 確認每個 ICO frame PNG signature 都在(256×256 navy + mint "J", Vista+ 6 frame 完整)
+- `make clean && make stage0 && make` → 兩 binary 重建無 warning
+- `make selfhost` → `sha256sum jhyy_v{2,3,4}.exe` 仍 byte-equal 1(C-side main.c 改 → stage0 重編 → stage1 重編,閉包校一次;**符合 `feedback_fix_evaluation_rule.md` 5/5 PASS on target test 才能聲稱 fix work**)
+- `python regress.py` → 102/102 + 4 SKIP(v1.8.0 baseline 持平;本 patch 不改 codegen 語義)
+- MSI rebuild + 測試機裝 → `reg query "HKCR\.jhyy" /v ""` 應回 `JHYY.SourceFile`;`reg query "HKCR\JHYY.SourceFile\DefaultIcon" /v ""` 應回 `C:\Program Files\JHYY\bin\jhyy.exe,0`;`ie4uinit.exe -show` 刷圖標緩存後資源管理器立即看到「J」品牌
+
+**不動的**:
+- `compiler/runtime/runtime.c` / `compiler/src0/jhyy_helpers.c`(只參與鏈接,不改源碼)
+- `vscode-ext/icon.png` / `icon.svg`(VSCode ext 自有圖標,不同源)
+- `installer/jhyy-icon.ico`(6-frame Vista+,256×256 RGBA 已合用)
+- `docs/abis/jhyy-lang-spec-v1.3.0.md` / `jhyy-abi-v1.0.0.md`(圖標不在 spec/ABI 範圍)
+- `docs/internal/workarounds.md`(這是 fix 不是 workaround)
+
+**umbrella**:本 patch 進 `changelog-v1.8.0.md`(per `feedback_changelog_umbrella.md`,v1.x 軸單 umbrella CHANGELOG);commit tag `fix(v1.8.0):` 對齊最近 5 個 commit 格式。
+
+---
+
 ## 引用
 
 - **spec** `docs/abis/jhyy-lang-spec-v1.3.0.md` — 锁定 (v1.8.0 不修訂, v1.x FINAL 锁)

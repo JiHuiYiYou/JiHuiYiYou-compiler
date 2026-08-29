@@ -1,0 +1,9 @@
+// compiler/src/jhyy.rc -- JHYY compiler PE icon resource.
+//
+// v1.8.1 patch: embed the branded JHYY "J" icon (matches Windows Explorer
+// FileAssoc DefaultIcon) into jhyy.exe + every .jhyy-compiled program.
+//
+// Windres rule + .o link lives in the project Makefile (stage0) and
+// compiler/src/main.c (system() spawn, per-build temp .ico.o).
+// Path is relative to compiler/src/ (this file's location) at windres-time.
+IDI_ICON1 ICON "../../installer/jhyy-icon.ico"

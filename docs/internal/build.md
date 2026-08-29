@@ -70,6 +70,24 @@ make selfhost  # stage 1 + 3 次自举 closure (v1 → v2 → v3 → v4 byte-equ
 ./compiler/build/bin/jhyy.exe compile main.jhyy lib_a.jhyy lib_b.jhyy -o output
 ```
 
+**v1.8.1 patch — 图标 embed (`windres` 流程)**:
+
+所有 binary 都內嵌 branded "J" 圖標(256×256 RGBA, Vista+ 6 frame),通過 MinGW `windres.exe` 把 `installer/jhyy-icon.ico` 編為 COFF `.o` 鏈入 PE 資源段 `.rsrc`:
+
+- **`jhyy_stage0.exe`**:Makefile 直接編 `compiler/src/jhyy.rc` → `compiler/build/obj/jhyy-res.o` → 鏈入(`$(RES_OBJ)`)
+- **`jhyy.exe`**:**以及**所有 user-compiled `.jhyy` 程序:`compiler/src/main.c` 的 `compile()` 函數在 `system()` 拼出的 gcc 命令前先調 `windres` 把 `compiler/src/jhyy.rc` 編為 `<output>.ico.o`,鏈接加入 gcc 命令末尾,結束後 `unlink()` 清理 tmp 文件
+
+**改圖標後必須重 build stage0 + stage1**:
+```bash
+make clean && make stage0 && make
+```
+
+不重 build stage0,`jhyy.exe` 內嵌的還是舊 icon(.ico 修改走 `installer/build-jhyy-icons.ps1`,deterministic 重出 6-frame ICO)。
+
+**path 坑**:`windres` 內部走 `gcc -E` 預處理,路徑裡的 `\` 會被當 escape 字符吃掉。`compiler/src/main.c` 用 `path_to_fwd()` 把 `\` 全部轉 `/` 才傳給 windres(教訓 2026-08-27 v1.8.1 patch 階段)。
+
+**驗證**: `objdump -h compiler/build/bin/jhyy.exe | grep rsrc` 應見 `.rsrc` 段(9184B);`grep -c '89 50 4e 47' <(objdump -s -j .rsrc ...)` 應為 6(每個 ICO frame 內嵌 PNG signature)。
+
 ---
 
 ## 编译并运行
@@ -113,7 +131,7 @@ python compiler/build/bin/regress.py
 
 自动运行 `compiler/tests/examples/*.jhyy` 所有测试，输出：
 ```
-===== 50/53 passed, 0 failed, 3 skipped =====
+===== 102/102 passed, 0 failed, 4 skipped (of 106 total) =====
 ```
 
 无 `main_jhyy` 的库文件（`mylib.jhyy`、`ns_dup_*.jhyy`）自动 SKIP，不计入 passed/failed。
