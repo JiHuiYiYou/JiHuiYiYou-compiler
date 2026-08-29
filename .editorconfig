@@ -60,7 +60,7 @@ indent_style = tab
 [scripts/dev/**]
 indent_size = 4
 
-# Vendored QBE — 维持上游 CRLF, 不动
+# Vendored QBE — 上游是 LF (commit 6811cff 已按 LF 入库), 保持 LF 跟 HEAD 对齐, 避免 CRLF 漂移
 [qbe/**]
-end_of_line = crlf
+end_of_line = lf
 trim_trailing_whitespace = false
