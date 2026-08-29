@@ -508,6 +508,33 @@ sha256sum $PWD/compiler/build/bin/jhyy_v{2,3,4}.il
 - **MSI 不 ship .NET runtime DLL**:jhyy-setuc.exe 要求用戶機有 .NET 8 Desktop Runtime,缺失時 jhyy-setuc.exe 啟動失敗 → manual-fix-icon-cache.ps1 try/catch → Path A fallback(只 reg delete,不需要 .NET),保證 Path B 失敗也能拿到 icon
 - **Path B 不可行時 fallback**:Path A 雖然改變了雙擊行為(從 VSCode → jhyy.exe run),但 icon 仍正確(用 v1.8.1 修好的 `jhyy.exe,0` embedded icon),用戶仍看得見 J 品牌
 
+### v1.8.2 patch update — UCPD 真實限制 + jhyy-setuc.exe CLI fix (2026-08-29 ship follow-up)
+
+**現場診斷結果** (per `feedback_fix_evaluation_rule` 5/5 PASS on each test):
+- **Path B (Mozilla UserChoice write)**: `sc stop UCPD` 返回 exit 5 (access denied),即使 admin + elevated shell。`CreateSubKey(UserChoice)` 拋 `UnauthorizedAccessException`。UCPD 是 FILE_SYSTEM_DRIVER (Type=2, State=4 RUNNING),`sc stop` / `sc pause` / `fltmc unload` / `sc sdset` 全 5 (access denied)。**UCPD 設計上不可程式化卸載**。
+- **Path A (刪 UserChoice 退回 HKLM)**: `Remove-Item HKCU\…\FileExts\.jhyy` 成功刪除,但 Windows shell 馬上從 cached "user picked Code.exe" preference 自動重建 `UserChoice\ProgId = Applications\Code.exe`(重建的 Hash `Pm0l9cVOllo=` 跟 Mozilla 算法一致,證明 Windows 內部用同套算法)。**Path A 也無法粘住**。
+- **jhyy-setuc.exe arg parsing bug** (v1.8.2 首 ship): PowerShell `Start-Process -ArgumentList` 對 array 元素 with spaces 不自動加 quotes — `'JHYY Source File'` 被 PowerShell 拆成 3 個 argv,`Start-Process` 又把 `'C:\Path With Space\Code.exe'` 拆成 2 個 argv,`Start-Process` 進一步把 `'Code.exe' '%1'` (含內嵌 quotes) 拆成 2 個 argv。C# `Main` 收到 args.Length=11,打印 Usage,exit 1。改用 `[System.Diagnostics.ProcessStartInfo]` 單一字串 + 字串拼接 quote,args.Length=6 ✓。同時拆 `<openCommand>` 為 `<openExe> [openArg]`,C# 內部構造 `"$openExe" "$openArg"` 寫進 registry。
+- **jhyy-setuc.exe 退出碼語義化**: 從 generic `0xE0434352` (.NET unhandled exception) 改為 `2 = UCPD blocked`,並在 stderr 印 manual workaround 步驟(Settings UI / safe-mode + reg add UCPD Start=4)。`manual-fix-icon-cache.ps1` 識別 exit 2 跳過 Path A(也會被 shell 自動重建),直接打印 3 條 manual instructions。
+
+**W-062 補丁閉環**:
+- `installer/common/jhyy-setuc/Program.cs` (改) — CLI 拆 `<openExe> [openArg]>`(避免 embedded quotes 被 CommandLineToArgvW 拆);捕獲 `UnauthorizedAccessException` → exit 2 + stderr manual instructions
+- `installer/common/manual-fix-icon-cache.ps1` (改) — `Start-Process -ArgumentList array` → `[System.Diagnostics.ProcessStartInfo]` 單字串;識別 exit 2 → 跳過 Path A(UCPD block 場景) → 印 3 條 manual workaround
+- `docs/internal/workarounds.md` (改) — W-062 加 UCPD 真實限制段 (FIELD DIAGNOSIS 2026-08-29):`sc stop` exit 5 + Windows shell 自動重建 UserChoice + 3 條 manual workaround
+- `docs/logs/v1/changelog-v1.8.0.md` (改) — 本段 (v1.8.2 patch update 段)
+
+**唯一可行的 user-side workaround** (v1.8.2 不支援自動):
+1. **Windows Settings UI** — 設置 → 應用 → 默認應用 → 按文件類型 → 輸入 `.jhyy` → 選 `JHYY.SourceFile` / `JHYY.EditInVSCode`。Windows 內部用 privileged API (IApplicationAssociationRegistration COM, Win10 22H2+) 繞過 UCPD Deny ACE。
+2. **安全模式 + reg add UCPD Start=4** — `bcdedit /set safeboot minimal` → 重啟 → `reg add HKLM\SYSTEM\CurrentControlSet\Services\UCPD /v Start /t REG_DWORD /d 4 /f` → 重啟 → 跑 `manual-fix-icon-cache.ps1` (Path B 成功) → `reg add ... UCPD Start=0` → 重啟。
+3. **SYSTEM scheduled task** (未驗證,作為 W-062 follow-up 候選) — `schtasks /Create /RU SYSTEM /RL HIGHEST /SC ONCE /ST 00:00 /TN JHYYFix /TR "..."`;測試時 `Register-ScheduledTask` 在當前 user token 下 access denied。
+
+**驗證**:
+- **手動** (5/5 PASS per `feedback_fix_evaluation_rule`):
+  - `jhyy-setuc.exe` 6-args CLI 直接調用 → exit 2 + stderr clear manual instructions ✓
+  - `manual-fix-icon-cache.ps1` 識別 exit 2 → 跳過 Path A → 打印 3 條 manual workaround ✓
+  - 重新驗證 `cmd /c 'assoc .jhyy'` → `.jhyy=JHYY.SourceFile` (HKLM 完好) ✓
+  - 重新驗證 `reg query "HKCR\JHYY.EditInVSCode"` → ProgId 註冊成功(DefaultIcon=jhyy-icon.ico,0, openCommand=Code.exe "%1") ✓
+  - 確認 UCPD 仍 RUNNING (Type=2, State=4) — 不是被 v1.8.2 patch 卸載的 ✓
+
 **user 機器立刻生效** (commit 後不需等 MSI rebuild):
 ```bash
 powershell.exe -NoProfile -Command "Start-Process powershell.exe -Verb RunAs -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','C:\Program Files\JHYY\common\manual-fix-icon-cache.ps1'"

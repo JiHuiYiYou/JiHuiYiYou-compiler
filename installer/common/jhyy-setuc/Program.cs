@@ -15,7 +15,9 @@
 // in a 2-DWORD block scramble loop. Base64-encode the resulting 8-byte hash.
 //
 // Usage:
-//   jhyy-setuc.exe <ext> <progId> <description> <iconPath> <iconIndex> <openCommand>
+//   jhyy-setuc.exe <ext> <progId> <description> <iconPath> <iconIndex> <openExe> [openArg]
+//     openExe = full exe path (no quotes needed in CLI — C# adds them)
+//     openArg = optional arg template (default "%1")
 //
 // Behavior:
 //   1. Registers ProgId at HKCU\Software\Classes\<progId> with DefaultIcon + shell\open\command
@@ -26,6 +28,11 @@
 //   6. Computes Mozilla-style Hash for (ext, ProgId, current minute timestamp)
 //   7. Writes UserChoice ProgId + Hash
 //   8. ALWAYS restarts UCPD in finally block (even on exception)
+//
+// Exit codes:
+//   0 = success
+//   1 = wrong args / usage error
+//   2 = UCPD.sys blocked UserChoice write (Win10 Feb 2024+ — manual fix required)
 
 using System;
 using System.Diagnostics;
@@ -125,7 +132,7 @@ namespace JHYY.SetUC {
             return HashString(input);
         }
 
-        static void StopUcpd() {
+        static int StopUcpd() {
             try {
                 var psi = new ProcessStartInfo {
                     FileName = "sc.exe",
@@ -139,8 +146,10 @@ namespace JHYY.SetUC {
                 p.WaitForExit(10000);
                 Console.WriteLine($"[v1.8.2 Path B] sc.exe stop UCPD: exit={p.ExitCode}");
                 Thread.Sleep(1000);
+                return p.ExitCode;
             } catch (Exception ex) {
                 Console.WriteLine($"[v1.8.2 Path B] sc stop failed: {ex.Message}");
+                return -1;
             }
         }
 
@@ -191,7 +200,7 @@ namespace JHYY.SetUC {
 
             // 3. Stop UCPD to allow UserChoice write (admin required)
             Console.WriteLine("[v1.8.2 Path B] Stopping UCPD service...");
-            StopUcpd();
+            int stopUcpdExit = StopUcpd();
 
             try {
                 // 4. Clean OpenWithProgids — remove VSCode shadow, keep our ProgId
@@ -220,10 +229,19 @@ namespace JHYY.SetUC {
                 string hash = ComputeHash(ext, progId);
                 Console.WriteLine($"[v1.8.2 Path B] Computed Hash: {hash}");
 
-                using (var uc = Registry.CurrentUser.CreateSubKey(userChoicePath, true)) {
-                    uc.SetValue("ProgId", progId, RegistryValueKind.String);
-                    uc.SetValue("Hash", hash, RegistryValueKind.String);
-                    Console.WriteLine($"[v1.8.2 Path B] Wrote UserChoice: ProgId={progId}, Hash={hash}");
+                try {
+                    using (var uc = Registry.CurrentUser.CreateSubKey(userChoicePath, true)) {
+                        uc.SetValue("ProgId", progId, RegistryValueKind.String);
+                        uc.SetValue("Hash", hash, RegistryValueKind.String);
+                        Console.WriteLine($"[v1.8.2 Path B] Wrote UserChoice: ProgId={progId}, Hash={hash}");
+                    }
+                } catch (UnauthorizedAccessException ex) {
+                    Console.Error.WriteLine($"[v1.8.2 Path B] UCPD.sys blocked UserChoice write: {ex.Message}");
+                    Console.Error.WriteLine($"[v1.8.2 Path B] Win10 Feb 2024+ UCPD.sys kernel filter blocks all non-Windows-shell UserChoice writes.");
+                    Console.Error.WriteLine($"[v1.8.2 Path B] sc.exe stop UCPD returned: {stopUcpdExit} (access denied even as admin).");
+                    Console.Error.WriteLine($"[v1.8.2 Path B] Manual fix: 右键 .jhyy 文件 → 打开方式 → 选择其他应用 → JHYY Source File → 勾选 始终用此应用");
+                    Console.Error.WriteLine($"[v1.8.2 Path B] OR: 安全模式启动 → reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\UCPD /v Start /t REG_DWORD /d 4 /f → 重启 → 重跑此脚本");
+                    return 2;
                 }
 
                 // 7. Re-add ProgId to OpenWithProgids if missing
@@ -249,9 +267,15 @@ namespace JHYY.SetUC {
     }
 
     class Program {
+        // CLI: jhyy-setuc.exe <ext> <progId> <description> <iconPath> <iconIndex> <openExe> [openArg]
+        //   openExe = full path to exe (e.g. Code.exe) — no quotes needed in CLI
+        //   openArg = optional arg template (default "%1") — C# builds the full shell command
+        // We split exe + arg so PowerShell's Start-Process -ArgumentList array doesn't have
+        // to deal with embedded quotes (which Windows' CommandLineToArgvW strips, splitting
+        // a single arg into 2 — see v1.8.2 bug history).
         static int Main(string[] args) {
-            if (args.Length != 6) {
-                Console.Error.WriteLine("Usage: jhyy-setuc.exe <ext> <progId> <description> <iconPath> <iconIndex> <openCommand>");
+            if (args.Length < 6 || args.Length > 7) {
+                Console.Error.WriteLine("Usage: jhyy-setuc.exe <ext> <progId> <description> <iconPath> <iconIndex> <openExe> [openArg]");
                 return 1;
             }
             string ext = args[0];
@@ -259,7 +283,10 @@ namespace JHYY.SetUC {
             string desc = args[2];
             string icon = args[3];
             int iconIdx = int.Parse(args[4]);
-            string cmd = args[5];
+            string openExe = args[5];
+            string openArg = args.Length >= 7 ? args[6] : "%1";
+            // Build full shell\open\command value: "exe" "arg"
+            string cmd = "\"" + openExe + "\" \"" + openArg + "\"";
             return UC.ApplyPathB(ext, progId, desc, icon, iconIdx, cmd);
         }
     }

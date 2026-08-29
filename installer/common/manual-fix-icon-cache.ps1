@@ -70,15 +70,59 @@ if (-not (Test-Path $iconPath)) {
 }
 
 # 4. Run the jhyy-setuc tool (Path B: register ProgId + write UserChoice)
-$openCmd = "`"$codePath`" `"%1`""
+# 4-pre. Cleanup malformed `UserChoice"` subkey (leftover from earlier debugging
+#      of the Mozilla Hash algorithm). The trailing quote in subkey name is
+#      invalid — Explorer won't read it but reg delete / reg add may collide.
+#      We delete via PowerShell `Remove-Item -Path "$key`"` (literal backtick
+#      escape for the trailing quote).
+$malformedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.jhyy\UserChoice"'
+if (Test-Path $malformedKey) {
+    try {
+        Remove-Item -Path $malformedKey -Recurse -Force -ErrorAction Stop
+        Log "[v1.8.2 fix] Cleanup: malformed UserChoice`" subkey removed"
+    } catch {
+        Log "[v1.8.2 fix] Cleanup: malformed UserChoice`" subkey removal failed: $($_.Exception.Message)"
+    }
+}
+
+# 4-pre2. Also reset OpenWithList MRU order so jhyy.exe is first
+#      (not Code.exe). If UserChoice somehow gets cleared, Windows shell
+#      auto-promotes MRU[0] to UserChoice — we want jhyy.exe to win.
+$owListKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.jhyy\OpenWithList'
+if (Test-Path $owListKey) {
+    try {
+        $ow = Get-ItemProperty -Path $owListKey -ErrorAction Stop
+        $newMruList = 'ba'
+        Set-ItemProperty -Path $owListKey -Name 'MRUList' -Value $newMruList -ErrorAction Stop
+        Log "[v1.8.2 fix] OpenWithList MRUList=ba (jhyy.exe first, Code.exe second)"
+    } catch {
+        Log "[v1.8.2 fix] OpenWithList MRUList update skipped: $($_.Exception.Message)"
+    }
+}
+
+$openCmdExe = $codePath
 $pathBSuccess = $false
+$pathBBlocked = $false
 Log "[v1.8.2 fix] Running Path B: register ProgId + write UserChoice..."
 try {
-    $proc = Start-Process -FilePath $setucExe `
-        -ArgumentList '.jhyy','JHYY.EditInVSCode','JHYY Source File',$iconPath,'0',$openCmd `
-        -NoNewWindow -Wait -PassThru `
-        -RedirectStandardOutput "$env:TEMP\jhyy-setuc.out" `
-        -RedirectStandardError "$env:TEMP\jhyy-setuc.err"
+    # 6 args: ext, progId, desc, iconPath, iconIndex, openExe (C# appends "%1")
+    # Start-Process -ArgumentList array does NOT quote strings with spaces —
+    # PowerShell splits "JHYY Source File" into 3 args. Use ProcessStartInfo
+    # with Arguments property (single string) instead, with manual quoting.
+    # Earlier CLI took openCommand as one arg with embedded quotes — stripped
+    # by CommandLineToArgvW, split to 7-8 args.
+    $argLine = '.jhyy JHYY.EditInVSCode "' + 'JHYY Source File' + '" "' + $iconPath + '" 0 "' + $openCmdExe + '"'
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $setucExe
+    $psi.Arguments = $argLine
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $proc.WaitForExit()
+    [System.IO.File]::WriteAllText("$env:TEMP\jhyy-setuc.out", $proc.StandardOutput.ReadToEnd())
+    [System.IO.File]::WriteAllText("$env:TEMP\jhyy-setuc.err", $proc.StandardError.ReadToEnd())
     Log "[v1.8.2 fix] jhyy-setuc exit code: $($proc.ExitCode)"
     if (Test-Path "$env:TEMP\jhyy-setuc.out") {
         Get-Content "$env:TEMP\jhyy-setuc.out" | ForEach-Object { Log "[jhyy-setuc stdout] $_" }
@@ -88,6 +132,10 @@ try {
     }
     if ($proc.ExitCode -eq 0) {
         $pathBSuccess = $true
+    } elseif ($proc.ExitCode -eq 2) {
+        # Exit 2 = UCPD.sys blocked UserChoice write — Path A also blocked.
+        $pathBBlocked = $true
+        Log "[v1.8.2 fix] Path B blocked by UCPD.sys. Path A fallback will also fail."
     } else {
         Log "[v1.8.2 fix] Path B failed (exit $($proc.ExitCode)). Falling back to Path A."
     }
@@ -95,11 +143,13 @@ try {
     Log "[v1.8.2 fix] Path B threw exception: $($_.Exception.Message). Falling back to Path A."
 }
 
-# 4a. Path A fallback: if Path B failed (.NET 8 Desktop Runtime missing, UCPD
-#     pause blocked, etc.), fall back to delete-only approach. Explorer will
-#     fall through to HKLM\SOFTWARE\Classes\.jhyy\(default) = JHYY.SourceFile
-#     whose DefaultIcon = jhyy.exe,0 (the same branded icon, just embedded in
-#     jhyy.exe itself per v1.8.1 patch).
+# 4a. Path A fallback: if Path B failed (.NET 8 Desktop Runtime missing, etc.),
+#     fall back to delete-only approach. Explorer will fall through to
+#     HKLM\SOFTWARE\Classes\.jhyy\(default) = JHYY.SourceFile whose DefaultIcon
+#     = jhyy.exe,0 (the same branded icon, embedded in jhyy.exe per v1.8.1 patch).
+#     NOTE: on Win10 2024-02+ with UCPD.sys, Windows shell auto-rebuilds UserChoice
+#     right after our delete — Path A alone is not enough. Use Path B if available
+#     (before UCPD came along) OR manual workaround below.
 if (-not $pathBSuccess) {
     Log "[v1.8.2 fix] Path A fallback: clearing HKCU shadows..."
     $fileExtsKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.jhyy'
@@ -136,6 +186,23 @@ Log "[v1.8.2 fix] Restarting explorer.exe..."
 Start-Process explorer.exe
 if ($pathBSuccess) {
     Log "[v1.8.2 fix] DONE (Path B). Open a NEW Explorer window to see branded J icon on .jhyy files."
+} elseif ($pathBBlocked) {
+    # UCPD.sys blocked — no programmatic UserChoice write works on Win10 2024-02+.
+    # Windows shell auto-rebuilds UserChoice from a cached preference, so Path A
+    # also can't stick. The user MUST take manual action:
+    #   (a) Explorer → 右键 .jhyy → 打开方式 → 选择其他应用 → JHYY Source File → 始终用此应用
+    #   (b) Windows 设置 → 应用 → 默认应用 → 按文件类型 → 找 .jhyy → 选 JHYY Source File
+    Log "[v1.8.2 fix] Path B blocked by UCPD.sys (Win10 Feb 2024+ kernel filter)."
+    Log "[v1.8.2 fix] Path A also blocked (Windows shell auto-rebuilds UserChoice from cached preference)."
+    Log "[v1.8.2 fix]"
+    Log "[v1.8.2 fix] MANUAL FIX required — pick one:"
+    Log "[v1.8.2 fix]   (1) 资源管理器 → 右键任意 .jhyy → 打开方式 → 选择其他应用 → JHYY Source File → 勾选 始终用此应用"
+    Log "[v1.8.2 fix]   (2) Windows 设置 → 应用 → 默认应用 → 按文件类型 → 输入 .jhyy → 选 JHYY.SourceFile"
+    Log "[v1.8.2 fix]   (3) (高级) 安全模式启动 → reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\UCPD /v Start /t REG_DWORD /d 4 /f"
+    Log "[v1.8.2 fix]       → 重启 → 重跑本脚本 → 重启 → reg add ... UCPD Start=0 重启"
+    Log "[v1.8.2 fix]"
+    Log "[v1.8.2 fix] ProgId JHYY.EditInVSCode 已注册 (icon=jhyy-icon.ico, command=VSCode)。"
+    Log "[v1.8.2 fix] UserChoice 写不进去, 但 ProgId 可用 — 上面任一手动方式选 JHYY.EditInVSCode 即可。"
 } else {
     Log "[v1.8.2 fix] DONE (Path A fallback). Open a NEW Explorer window to see branded J icon on .jhyy files."
 }

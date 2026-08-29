@@ -4313,6 +4313,16 @@ v1.8.1 patch 修了:
 - VSCode 自動更新時可能再設 `UserChoice = Applications\Code.exe` → 用戶再跑一次 `manual-fix-icon-cache.ps1`
 - UCPD.sys 隨 Windows update 改行為時 algorithm 可能要重 tune (Mozilla 算法 reverse-engineered 從 Windows 10 早期, Windows 11 24H2+ 可能有變)
 
+**UCPD.sys 真实限制 (v1.8.2 现场诊断新增, 2026-08-29):**
+- **Symptom**: Path B (`sc stop UCPD` → Mozilla 算法寫 UserChoice) 在 Win10 2024-02+ 上失敗 — `sc stop UCPD` 返回 exit 5 (access denied), 即使 admin;後續 `CreateSubKey(...\UserChoice)` 拋 `UnauthorizedAccessException`。
+- **Root cause**: UCPD 是 FILE_SYSTEM_DRIVER (Type=2, State=4 RUNNING), 內核 filter 加 non-inherited Deny ACE on `HKCU\…\FileExts\.<ext>\UserChoice`。`sc stop` / `sc pause` / `fltmc unload` / `sc sdset` 全部 access denied (5)。UCPD 設計上就是不可程式化卸載。
+- **Path A 也部分壞**: `Remove-Item HKCU\…\FileExts\.jhyy` 可以成功刪,但 Windows shell 馬上從 cached "user picked Code.exe" preference 自動重建 `UserChoice\ProgId = Applications\Code.exe` (重建的 Hash `Pm0l9cVOllo=` 跟 Mozilla 算法一致, 證明 Windows 內部也用同套算法)。
+- **唯一可行的 manual workaround (v1.8.2 不支援自動)**:
+  1. **Windows Settings UI**: 設置 → 應用 → 默認應用 → 按文件類型 → 輸入 `.jhyy` → 選 `JHYY.SourceFile` (或 `JHYY.EditInVSCode`) → 確定。Windows 內部用 IApplicationAssociationRegistration COM 走 privileged API 繞過 UCPD Deny ACE。
+  2. **安全模式 + reg add UCPD Start=4** (進階): `bcdedit /set safeboot minimal` → 重啟 → `reg add HKLM\SYSTEM\CurrentControlSet\Services\UCPD /v Start /t REG_DWORD /d 4 /f` → 重啟 → 重跑 `manual-fix-icon-cache.ps1` → `reg add ... UCPD Start=0` → 重啟。
+  3. **(理論) SYSTEM scheduled task** 寫 UserChoice: `schtasks /Create /RU SYSTEM /RL HIGHEST /SC ONCE /ST 00:00 /TN JHYYFix /TR "..."` — 測試時 `Register-ScheduledTask` 仍 access denied (per Win10 19045 默認權限), 未驗證 UCPD 是否 bypass;**未 ship, 作為 W-062 follow-up 候選**。
+- **jhyy-setuc.exe exit code 2**: 識別 UCPD block, 給清晰 manual workaround instructions (不再 generic UnauthorizedAccessException)。
+
 **教訓 (Path A vs Path B 設計 + v1.8.1 patch scope gap):**
 - v1.8.1 只想 Path A(純刪 UserChoice 退回 HKLM) — 太簡化, 忽略 user 雙擊行為變化 (從 VSCode → jhyy.exe run)
 - v1.8.2 Path B(自定 ProgId) 保留 user 工作流 + 強制 icon, 較合理
