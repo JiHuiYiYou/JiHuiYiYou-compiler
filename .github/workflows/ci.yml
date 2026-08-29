@@ -96,11 +96,15 @@ jobs:
         continue-on-error: true
         run: |
           cd ${{ github.workspace }}
-          # jhyy_v1.exe.exe 是 v1.4.4 ship 时的 binary (sha `37ffc49c...`),
-          # 跑 v1.4.6 加的 2 个 test (top_level_let_mut_test, gdb_pretty_test)
-          # 必然 fail (缺 W-017/W-019/W-020 fix) — 这是 expected, 不是 bug。
-          # 见 `feedback_regress_baseline_binary_hash.md` + v1.4.7 plan。
-          # v1.5+ TODO: 恢复 v1.0.0 closure canonical 二进制 (commit eabee0d)。
+          # jhyy_v1.exe.exe 在 v1.4.4+ 是 jhyy.exe 的副本 (per mcp-jhyy/jhyy_runner.py
+          # copy 约定),v1 = 当前 jhyy-side production binary。closure chain 靠
+          # .il sha 验证 byte-equal (不靠 binary sha),副本语义 OK。
+          # 跟 v1.4.7 写注释时的原意 (v1 frozen historical baseline, v1.4.6 新 test
+          # 必然 fail) 已脱节:v1 binary = 当前 production → 应该 PASS 所有当前 regress
+          # test,不再是 expected-fail frozen baseline。该 step informational
+          # (continue-on-error),v1 fail 不阻塞 PR,只作 matrix row。
+          # v1.0.0 closure canonical (commit eabee0d) v1.4.4 后不再保留,原 TODO
+          # "v1.5+ 恢复" moot。
           python compiler/build/bin/regress.py --all --include-informational
 
       - name: Build Stage 2 closure chain (v1→v2→v3→v4)
@@ -116,7 +120,7 @@ jobs:
           # 手动跑 closure chain (跟 jhyy_selfhost_check MCP 等价但纯 bash)
           # v1 → v2 → v3 → v4 .il sha 必须全相同
           # 命名规则 (per `feedback_regress_baseline_binary_hash.md`):
-          #   jhyy_v1.exe.exe = v1 (历史 baseline, tracked)
+          #   jhyy_v1.exe.exe = v1 (jhyy.exe copy, tracked — v1.4.4+ 副本约定)
           #   jhyy_v2/3/4.exe = 当前 closure product (每次 make selfhost 重 build)
           set -e
           SHA_V1=""
