@@ -10,7 +10,7 @@
     },
     "license": "MIT",
     "engines": { "vscode": "^1.80.0" },
-    "icon": "./icon.png",
+    "icon": "./icon.svg",
     "main": "./out/extension.js",
     "activationEvents": [
         "onLanguage:jhyy",
@@ -54,8 +54,8 @@
             "extensions": [".jhyy"],
             "configuration": "./language-configuration.json",
             "icon": {
-                "light": "./icon.png",
-                "dark": "./icon.png"
+                "light": "./icon.svg",
+                "dark": "./icon.svg"
             }
         }],
         "grammars": [{
