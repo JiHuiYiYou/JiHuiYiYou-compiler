@@ -87,6 +87,13 @@ if (-not $env:JHY_VERSION) { $env:JHY_VERSION = "1.5.2" }
 $JHY_VERSION_DISPLAY = "$($env:JHY_VERSION)$JHY_VERSION_RC_SUFFIX"
 Write-Host "[build.ps1] target=$Target version=$($env:JHY_VERSION) display=$JHY_VERSION_DISPLAY rc_suffix=$JHY_VERSION_RC_SUFFIX"
 
+# Detect PowerShell host: prefer pwsh (7+) for `switch` block syntax that some
+# Windows PowerShell 5.1 builds (e.g. GH Actions Windows-2022 5.1.20348) reject.
+# Fall back to Windows PowerShell 5.1 if pwsh isn't installed (e.g. local dev
+# box without PowerShell 7).
+$script:PsExe = (Get-Command pwsh -ErrorAction SilentlyContinue) ? 'pwsh' : 'powershell'
+Write-Host "[build.ps1] psHost=$script:PsExe"
+
 # 2. verify wix CLI
 $wixCmd = Get-Command wix -ErrorAction SilentlyContinue
 if (-not $wixCmd) {
@@ -156,7 +163,7 @@ switch ($Target) {
         # table); no <File> Component references them, so they are NOT installed.
         if (-not (Test-Path "installer/jhyy-icon.ico") -or -not (Test-Path "installer/jhyy-welcome.bmp")) {
             Write-Host "[build.ps1] regenerating installer UI assets from icon.svg..."
-            & powershell -NoProfile -ExecutionPolicy Bypass -File "installer/build-jhyy-icons.ps1"
+            & $script:PsExe -NoProfile -ExecutionPolicy Bypass -File "installer/build-jhyy-icons.ps1"
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "[ERROR] UI asset generation failed (run installer/build-jhyy-icons.ps1 manually)"
                 exit 1
@@ -176,7 +183,7 @@ switch ($Target) {
             Write-Host "[build.ps1] packaging VSCode extension (.vsix)..."
             $savedDisplay = $env:JHY_VERSION_DISPLAY
             $env:JHY_VERSION_DISPLAY = $JHY_VERSION_DISPLAY
-            & powershell -NoProfile -ExecutionPolicy Bypass -File "installer/vscode-ext/package.ps1"
+            & $script:PsExe -NoProfile -ExecutionPolicy Bypass -File "installer/vscode-ext/package.ps1"
             $rc = $LASTEXITCODE
             $env:JHY_VERSION_DISPLAY = $savedDisplay
             if ($rc -ne 0) {
@@ -242,7 +249,7 @@ switch ($Target) {
             # cannot reconstruct the -rc1 suffix for filenames.
             $savedJHY = $env:JHY_VERSION
             $env:JHY_VERSION = "$($env:JHY_VERSION)$JHY_VERSION_RC_SUFFIX"
-            & powershell -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath compiler
+            & $script:PsExe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath compiler
             $rc = $LASTEXITCODE
             $env:JHY_VERSION = $savedJHY
             if ($rc -ne 0) {
@@ -325,7 +332,7 @@ switch ($Target) {
         # too (release.yml), but doing it here means `JHY_VERSION=1.5.5
         # powershell -File installer/build.ps1 bundle` produces both .exe and
         # SHA256.txt in one go for local smoke testing.
-        & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot/gen-sha256.ps1"
+        & $script:PsExe -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot/gen-sha256.ps1"
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[WARN] SHA256 generation failed (build still succeeded)"
         }
