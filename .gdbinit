@@ -21,10 +21,10 @@ import os
 # gdb's Python doesn't expose `__file__`. Try gdb current objfile's
 # compilation dir as a fallback, otherwise just hardcode the relative
 # path (project root cwd).
-pretty = "compiler/src0/gdb_pretty.py"
+pretty = "compiler/src0/scripts/dev/gdb_pretty.py"
 if not os.path.exists(pretty):
     # Try to derive from the current working directory
-    pretty = os.path.join(os.getcwd(), "compiler", "src0", "gdb_pretty.py")
+    pretty = os.path.join(os.getcwd(), "compiler", "src0", "scripts", "dev", "gdb_pretty.py")
 if os.path.exists(pretty):
     gdb.execute(f"source {pretty}")
     print(f"[.gdbinit] auto-sourced {pretty}")

@@ -20,7 +20,7 @@ BIN_DIR      = $(BUILD_DIR)/bin
 
 # v1.8.1 patch: branded "J" icon embedded into jhyy_stage0.exe (and via main.c
 # system() spawn, into jhyy.exe + every .jhyy-compiled program).
-ICON_SRC = installer/jhyy-icon.ico
+ICON_SRC = installer/assets/icons/jhyy-icon.ico
 RES_OBJ  = $(OBJ_DIR)/jhyy-res.o
 
 # Source files

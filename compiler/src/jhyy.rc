@@ -6,4 +6,4 @@
 // Windres rule + .o link lives in the project Makefile (stage0) and
 // compiler/src/main.c (system() spawn, per-build temp .ico.o).
 // Path is relative to compiler/src/ (this file's location) at windres-time.
-IDI_ICON1 ICON "../../installer/jhyy-icon.ico"
+IDI_ICON1 ICON "../../installer/assets/icons/jhyy-icon.ico"

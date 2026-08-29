@@ -23,7 +23,7 @@
 //   gcc gdb_pretty_test.s runtime.c -O0 -o gdb_pretty_test.exe
 //   gdb -batch \
 //     -ex "source .gdbinit" \
-//     -ex "source compiler/src0/gdb_pretty.py" \
+//     -ex "source compiler/src0/scripts/dev/gdb_pretty.py" \
 //     -ex "jhyy-load-types compiler/tests/examples/gdb_pretty_test.jhyy" \
 //     -ex "b gdb_pretty_test.jhyy:46" -ex "r" \
 //     -ex "jhyy-pretty \$rsp Point" \
