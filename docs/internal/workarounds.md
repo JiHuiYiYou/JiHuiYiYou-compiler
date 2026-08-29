@@ -59,8 +59,8 @@
 | [W-057](#w-057-utf-8-3-byte--4-byte-codepoint-显式-lex-reject-推-v2x) | 🟡 DEFERRED v2.x | vendor QBE (2026-08-15 build) 编译期 fold 3/4-byte UTF-8 codepoint 错 (e.g. `'你'` U+4F60 / `'🎉'` U+1F389) — v1.7.0 Stage 3 显式 lex reject "3/4-byte UTF-8 codepoint not supported", spec §4.4 缺独立 W-NNN 归档 (本 v1.7.3 patch C2 补登), 推 v2.x 真修 (vendor QBE 升级主线或自研 backend codepoint folding)。|
 | [W-058](#w-058-vendor-qbe-2026-08-15-build-不支持-remd--rems-浮点取模-推-v2x) | 🟡 DEFERRED v2.x | vendor QBE 不支持 `remd` (f64 remainder) / `rems` (f32 remainder) 指令, v1.7.2 patch A1 ship 时 fact-check fail, 标 LIMIT 推 v2.x, workarounds/spec 缺独立 W-NNN 归档 (本 v1.7.3 patch C3 补登 + spec 附录 B fmod row cross-ref C4)。|
 | [W-059](#w-059-defer-codegen-path-silent-crash-v136-ship-后-0-test-验证-accept-path-推-v18) | ✅ RESOLVED 2026-08-28 (v1.8.0) | 根因 = `compiler/src0/sema.jhyy` `sema_defer_register` (NODE_DEFER case) 调 `infer_type(ctx, expr)` 漏传 `ta` (TypeArena arg) → sema 阶段 silent corrupt stack → `[sema] P3 i=0` 后 crash 0 .il/.s/.exe. 修复: 1-line fix line 1410 `let _v = infer_type(ctx, ta, expr);` (jhyy-side `infer_type` 3-arg signature, 漏 `ta` 等于传 garbage). C-side 正确因为 `infer_type` 是 2-arg. Phase 1A empirical (MCP-only) + Phase 1B bisection 定位 + Phase 2 真修. 3 defer test (`defer_basic.jhyy` / `defer_multi_lifo.jhyy` / `defer_let_init.jhyy`) SKIP directive 删, 全 PASS regress (jhyy.exe 102/102 + jhyy_stage0.exe parity 102/102). N=4 byte-equal closure hold (v2/v3/v4 sha=`03a1cdd4...`). 5/5 PASS on each target test per `feedback_fix_evaluation_rule`. |
-| [W-060](#w-060-enum-variant-payload-abi-mismatch-mixedi1234-match-走-wildcard-path-exit210--1234-推-v18) | ❌ INVALID 2026-08-28 (v1.8.0) | v1.7.3 ship 期间 fact-check 误判为真 bug: 实为 bash `$?` 8-bit truncation (EXIT=210 = 1234 & 0xFF) + Windows `subprocess.run` 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比較. v1.8.0 Phase 1 调查 (Agent 3) 确认 W-060 = test artifact. OR pattern `Some(v) \| Some(v)` 分支 EXIT=42 实无 bug (line 1 SKIP 标签把 spec 限制跟 OR pattern 测试混淆). 2 enum test (`payload_bind_multi.jhyy` / `payload_bind_nested.jhyy`) SKIP directive 删, 全 PASS regress. |
-| [W-061](#w-061-nested-struct-field-offset-bug-outer--tag-inner--read-exit51--307-推-v18) | ❌ INVALID 2026-08-28 (v1.8.0) | v1.7.3 ship 期间 fact-check 误判为真 bug: 实为 bash `$?` 8-bit truncation (EXIT=51 = 307 & 0xFF) + Windows `subprocess.run` 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比較. v1.8.0 Phase 1 调查 (Agent 3) 确认 W-061 = test artifact. `(*o).inner.x + (*o).inner.y` 实 EXIT=300 (无 bug, 推测 OR-pattern 部分 follow-up 误解). nested_struct_dwarf.jhyy SKIP directive 删, 全 PASS regress. |
+| [W-060](#w-060-enum-variant-payload-abi-mismatch-mixedi1234-match-走-wildcard-path-exit210--1234-推-v18) | ❌ INVALID 2026-08-28 (v1.8.0) | v1.7.3 ship 期间 fact-check 误判为真 bug: 实为 bash `$?` 8-bit truncation (EXIT=210 = 1234 & 0xFF) + Windows `subprocess.run` 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比较. v1.8.0 Phase 1 调查 (Agent 3) 确认 W-060 = test artifact. OR pattern `Some(v) \| Some(v)` 分支 EXIT=42 实无 bug (line 1 SKIP 标签把 spec 限制跟 OR pattern 测试混淆). 2 enum test (`payload_bind_multi.jhyy` / `payload_bind_nested.jhyy`) SKIP directive 删, 全 PASS regress. |
+| [W-061](#w-061-nested-struct-field-offset-bug-outer--tag-inner--read-exit51--307-推-v18) | ❌ INVALID 2026-08-28 (v1.8.0) | v1.7.3 ship 期间 fact-check 误判为真 bug: 实为 bash `$?` 8-bit truncation (EXIT=51 = 307 & 0xFF) + Windows `subprocess.run` 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比较. v1.8.0 Phase 1 调查 (Agent 3) 确认 W-061 = test artifact. `(*o).inner.x + (*o).inner.y` 实 EXIT=300 (无 bug, 推测 OR-pattern 部分 follow-up 误解). nested_struct_dwarf.jhyy SKIP directive 删, 全 PASS regress. |
 | [W-062](#w-062-vscode-userchoice-hijack--msys2-openwithprogids-双层-shadow--jhyy-图标-不显示-推-v182) | ✅ RESOLVED 2026-08-29 (v1.8.3.1 patch) | 双层独立 hijack: (1) VSCode UserChoice hijack (`HKCU\…\FileExts\.jhyy\UserChoice\ProgId = Applications\Code.exe`, UCPD.sys 加 Deny ACE 防非 admin SetValue, 需 admin + UCPD pause/restart);(2) MSYS2 OpenWithProgids 残留 (`HKCU\…\FileExts\.jhyy\OpenWithProgids\jhyy_auto_file` + `HKCU\Software\Classes\jhyy_auto_file`, v1.8.1 patch 没清 OpenWithProgids 子键). v1.8.1 patch 只修了 WiX `(default)` 写错位 + `jhyy.exe,0` embedded icon, **不修** 这两层 shell hijack. Explorer folder view 用 UserChoice ProgId 取 icon → `Applications\Code.exe\DefaultIcon` 解析 quirk → shell32 白板. 修复: v1.8.2 Path B 注册自定义 ProgId `JHYY.EditInVSCode` (`DefaultIcon = jhyy-icon.ico,0` + `shell\open\command = Code.exe "%1"`),用 Mozilla reverse-engineered UserChoice Hash 算法 (`SHA/MD5 + 2-pass scramble`, MPL 2.0) 把 `UserChoice\ProgId` 写成 `JHYY.EditInVSCode`. C# tool `installer/common/jhyy-setuc/Program.cs` (.NET 8-windows) port Mozilla 算法. **v1.8.3 ship 时**把 manual Path B 升级到 WiX MSI CustomAction `JHYYSetUCForAllUsers` (SYSTEM context 绕 UCPD kernel filter),通过 immediate `SetUCProp` + deferred `--system-context` 2-step 模式在 install 时自动触发。**v1.8.3.1 patch 真修**: ship 时 CustomAction 0x80004005 静默失败 — 3-attempt diagnosis (1. `ExeCommand` 引用 `[JHYYSetUCBin]` property 在 deferred CA 不 resolve; 2. WiX `<Binary>` 不自动创建 property; 3. `.NET 8 apphost model` 需 ship `.exe` + `.dll` + `.deps.json` + `.runtimeconfig.json` 4 个 file,v1.8.3 只 ship 了 `.exe`)。**最终 fix**: 2-step immediate→deferred CA pattern (`SetUCProp` capture `[INSTALLDIR]` → `JHYYSetUCCmd` → deferred `Directory="INSTALLDIR" ExeCommand="[JHYYSetUCCmd]"`) + ship 4 个 .NET 8 file 落地 `INSTALLDIR\bin\`。顺带修 `manual-fix-icon-cache.ps1` 自 v1.8.2 ship 起 Path B jhyy-setuc.exe 路径错(指向 build 产物路径而非 INSTALLDIR\bin\)。MSI install field test 2026-08-29: CA 完成 17:50, sentinel written, UserChoice Hash `/dbBVe4aYxo=`, 4 files 落地, Explorer `.jhyy` 显示 JHYY 品牌 "J" icon。5/5 PASS gate per `feedback_fix_evaluation_rule`。 |
 
 ---
@@ -3992,7 +3992,7 @@ sema 完整通过 (P3 i=0 后无错误), codegen 路径 silent exit 不报错。
 **Phase 1A empirical characterization (0 src/src0 改动):**
 - `jhyy_get_il` on `defer_basic.jhyy` → outcome B (no IL produced)
 - `jhyy_check` on `defer_basic.jhyy` → outcome Y (sema phase crash)
-- 决策矩陣: B+Y → crash 在 sema, 跟 `[sema] P3 i=0` 报告一致
+- 决策矩阵: B+Y → crash 在 sema, 跟 `[sema] P3 i=0` 报告一致
 - `jhyy_stage0.exe compile defer_basic.jhyy` 成功 — Stage 0 没 bug, bug 是 jhyy-side 独有 (漏 `ta` arg)
 
 **Phase 1B bisection (minimal debug print):**
@@ -4006,7 +4006,7 @@ sema 完整通过 (P3 i=0 后无错误), codegen 路径 silent exit 不报错。
 ```
 C-side 不需改 (signature 是 2-arg, 调用正确).
 
-**回歸 verification:**
+**回归 verification:**
 - 5/5 PASS on each target test per `feedback_fix_evaluation_rule`:
   - `defer_basic.jhyy` EXIT=0 ✓ (sink(42) side-effect, return 0)
   - `defer_multi_lifo.jhyy` EXIT=0 ✓ (Go-style defer: return value capture 先, defer LIFO 后跑)
@@ -4023,7 +4023,7 @@ v1.3.6 defer ship 时 0 accept-path test 验证 (commit `169759c` ship 时 defer
 ## W-060: enum variant payload ABI mismatch (Mixed::I(1234) match 走 wildcard path EXIT=210 ≠ 1234) (推 v1.8)
 
 **ID:** W-060
-**状态:** ❌ INVALID 2026-08-28 (v1.8.0) — v1.7.3 ship 期间 fact-check 误判为真 bug, v1.8.0 Phase 1 调查 (Agent 3) 确认 = test artifact (bash `$?` 8-bit truncation + W-028 mod-256 fix 已 equalize 比較)
+**状态:** ❌ INVALID 2026-08-28 (v1.8.0) — v1.7.3 ship 期间 fact-check 误判为真 bug, v1.8.0 Phase 1 调查 (Agent 3) 确认 = test artifact (bash `$?` 8-bit truncation + W-028 mod-256 fix 已 equalize 比较)
 **日期:** 2026-08-28 (v1.7.3 patch A5/A6 attempt 时 fact-check 误判) → 2026-08-28 (v1.8.0 Phase 1 INVALID 闭环)
 **superseder:** v1.8.0 Phase 3 INVALID 清理 (2 enum test SKIP 删, regress W-028 fix PASS)
 **触发面:** v1.7.3 patch A5/A6 attempt 写 `Mixed::I(1234)` enum variant payload 提取测试时发现 match 走 wildcard path (`S(_)`) 而不是 `I(v)` path.
@@ -4077,7 +4077,7 @@ fn main_jhyy() -> i32 {
 v1.7.3 ship 期间 fact-check 把 bash `$?` 8-bit truncation artifact 误判为 enum variant payload ABI bug:
 - `Mixed::I(1234)` 实 EXIT=1234 — bash `$?` truncates 8-bit → 1234 & 0xFF = 210 (0xD2)
 - `subprocess.run` on Windows 同步 8-bit truncate → regress.py line 246 注释明示 "Windows returns 8-bit truncated"
-- regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比較 → 210 == (1234 mod 256) → PASS
+- regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比较 → 210 == (1234 mod 256) → PASS
 
 **OR pattern `Some(v) | Some(v)` EXIT=0:**
 v1.7.3 patch A6 误诊 line 1 SKIP 标签把 spec §D.7 multi-binding 限制跟 OR pattern 测试混淆. v1.8.0 Phase 1 验证: OR pattern 实 EXIT=42 (无 ABI mismatch, `Some(42)` 走 OR arm 正常返回 42). spec §D.8 ship OR pattern (1 layer OK), `Some(v) | Some(v)` 是合法 OR pattern (两边同 binding 名).
@@ -4086,13 +4086,13 @@ v1.7.3 patch A6 误诊 line 1 SKIP 标签把 spec §D.7 multi-binding 限制跟 
 - `payload_bind_multi.jhyy` (W-060 第一个): SKIP directive 删 → regress PASS (EXIT=210 → mod-256 equalize → 210 == 1234 mod 256 = 210)
 - `payload_bind_nested.jhyy` (W-060 第二个, OR pattern): SKIP directive 删 → regress PASS (EXIT=42 == EXPECT=42)
 
-**回歸 verification:**
+**回归 verification:**
 - regress baseline: 99/99+7 → **102/102+4** (+3 PASS, -3 SKIP)
 - jhyy.exe parity regress: 102/102+4 (跟 jhyy_stage0.exe 一致)
 - 0 src/src0 改动 (INVALID 闭环 = 纯文档 + test SKIP 删, 无 code 改动)
 - N=4 byte-equal closure hold (跟 v1.7.3 ship 一致, v2/v3/v4 sha 不变)
 
-**教訓 (fact-check 流程 gap):**
+**教训 (fact-check 流程 gap):**
 v1.7.3 fact-check 只看了 EXIT vs EXPECT 数字不同就标 DEFERRED v1.8, 没 trace 到 bash `$?` 8-bit truncation 根因. v1.8.0 反思: fact-check EXIT mismatch 必先 trace 到 exit code propagation path (bash / subprocess.run / regress.py / W-028 fix 是否 equalize), 再决定 bug 状态. INVALID ≠ 错误分类, 是 fact-check 流程漏了 root cause verification.
 
 ---
@@ -4100,7 +4100,7 @@ v1.7.3 fact-check 只看了 EXIT vs EXPECT 数字不同就标 DEFERRED v1.8, 没
 ## W-061: nested struct field offset bug (Outer { tag, inner } read EXIT=51 ≠ 307) (推 v1.8)
 
 **ID:** W-061
-**状态:** ❌ INVALID 2026-08-28 (v1.8.0) — v1.7.3 ship 期间 fact-check 误判为真 bug, v1.8.0 Phase 1 调查 (Agent 3) 确认 = test artifact (bash `$?` 8-bit truncation + W-028 mod-256 fix 已 equalize 比較)
+**状态:** ❌ INVALID 2026-08-28 (v1.8.0) — v1.7.3 ship 期间 fact-check 误判为真 bug, v1.8.0 Phase 1 调查 (Agent 3) 确认 = test artifact (bash `$?` 8-bit truncation + W-028 mod-256 fix 已 equalize 比较)
 **日期:** 2026-08-28 (v1.7.3 patch A7 attempt 时 fact-check 误判) → 2026-08-28 (v1.8.0 Phase 1 INVALID 闭环)
 **superseder:** v1.8.0 Phase 3 INVALID 清理 (nested_struct_dwarf.jhyy SKIP 删, regress W-028 fix PASS)
 **触发面:** v1.7.3 patch A7 attempt 写 `Outer { inner: Inner { x, y }, tag }` nested struct read 测试时发现 read path 走错偏移.
@@ -4155,7 +4155,7 @@ fn main_jhyy() -> i32 {
 **真因 (NOT 真 bug):**
 v1.7.3 ship 期间 fact-check 把 bash `$?` 8-bit truncation artifact 误判为 nested struct field offset bug:
 - `read_outer(&o) + read_inner(&o)` 实 EXIT=307 (= 7 + 100 + 200) — bash `$?` truncates 8-bit → 307 & 0xFF = 51
-- `subprocess.run` on Windows 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比較 → 51 == (307 mod 256) → PASS
+- `subprocess.run` on Windows 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比较 → 51 == (307 mod 256) → PASS
 - 实际 EXIT table (per W-061 上面表): tag=7 ✓ + inner.x + inner.y = 300 ✓ → 7 + 300 = 307 (全对, 无 read 错位)
 
 **Inner sum 错位表 line 4085 错标:**
@@ -4164,13 +4164,13 @@ v1.7.3 ship 期间 fact-check 把 bash `$?` 8-bit truncation artifact 误判为 
 **SKIP 删后 verify:**
 - `nested_struct_dwarf.jhyy`: SKIP directive 删 → regress PASS (EXIT=51 → mod-256 equalize → 51 == 307 mod 256 = 51)
 
-**回歸 verification:**
+**回归 verification:**
 - regress baseline: 99/99+7 → **102/102+4** (+3 PASS, -3 SKIP)
 - jhyy.exe parity regress: 102/102+4 (跟 jhyy_stage0.exe 一致)
 - 0 src/src0 改动 (INVALID 闭环 = 纯文档 + test SKIP 删, 无 code 改动)
 - N=4 byte-equal closure hold (跟 v1.7.3 ship 一致, v2/v3/v4 sha 不变)
 
-**教訓 (跟 W-060 同):**
+**教训 (跟 W-060 同):**
 fact-check EXIT mismatch 必先 trace 到 exit code propagation path. v1.7.3 误把 bash `$?` 8-bit truncation 当 read offset bug 标 DEFERRED, 是流程 gap. v1.8.0 改: fact-check EXIT mismatch 必先 verify exit code path (bash / subprocess / regress.py / W-028 fix), 再标 bug 状态. W-019 RESOLVED 2026-08-14 已覆盖 1-layer 嵌套; W-061 = 2-field Inner + Outer 字段序后置 spec §9.4 layout 实对, 不需新修.
 
 
@@ -4243,7 +4243,7 @@ v1.8.1 patch 修了:
 - 算法: UTF-16LE `<progId>` + null terminator → MD5 → 2-pass scramble with constant multipliers → 8-byte Base64 string
 - Verified: `Applications\Code.exe` + `.jhyy` + timestamp `2026-06-04 22:43:00` → `Pm0l9cVOllo=`
 - CLI args: `<ext> <progId> <description> <iconPath> <iconIndex> <openCommand>`
-- Try/finally 保證 UCPD service restart (即使 algorithm 失败也要 restart)
+- Try/finally 保证 UCPD service restart (即使 algorithm 失败也要 restart)
 - Verifies via `reg add` ProgId 成功 + `reg add` Hash 失败 (access denied = UCPD blocking, expected)
 
 ### Phase 2: MSI Component shipping
@@ -4266,17 +4266,17 @@ v1.8.1 patch 修了:
   → Explorer 找 UserChoice ProgId = JHYY.EditInVSCode  (Path B 写入)
     → JHYY.EditInVSCode\DefaultIcon = "C:\Program Files\JHYY\bin\jhyy-icon.ico,0"
       → 256×256 navy + mint "J" 品牌 ✅
-  → 雙擊 .jhyy → shell\open\command = "Code.exe" "%1"" → VSCode 開啟
+  → 双击 .jhyy → shell\open\command = "Code.exe" "%1"" → VSCode 开启
 ```
 
 ### icon chain 修复后 (Path A fallback, Path B 失败时):
 ```
 .jhyy file
-  → Explorer 找 UserChoice (Path A 刪空)
+  → Explorer 找 UserChoice (Path A 删空)
     → 退回 HKLM\SOFTWARE\Classes\.jhyy\(default) = JHYY.SourceFile
       → JHYY.SourceFile\DefaultIcon = "C:\Program Files\JHYY\bin\jhyy.exe,0"
-        → jhyy.exe embedded RT_ICON → 6-frame Vista+ ICO → navy "J" + mint 圓點 ✅
-  → 雙擊 .jhyy → shell\open\command = "jhyy.exe" run "%1"" → compile + run
+        → jhyy.exe embedded RT_ICON → 6-frame Vista+ ICO → navy "J" + mint 圆点 ✅
+  → 双击 .jhyy → shell\open\command = "jhyy.exe" run "%1"" → compile + run
 ```
 
 **user 机器立刻生效** (v1.8.2 时期 commit 后不需等 MSI rebuild):
@@ -4302,9 +4302,9 @@ v1.8.1 patch 修了:
 - **ProgId verify**: `reg query "HKCR\JHYY.EditInVSCode" /v ""` → `"JHYY Source File"` ✓
 - **DefaultIcon verify**: `reg query "HKCR\JHYY.EditInVSCode\DefaultIcon" /v ""` → `"C:\Program Files\JHYY\bin\jhyy-icon.ico,0"` ✓
 - **OpenCommand verify**: `reg query "HKCR\JHYY.EditInVSCode\shell\open\command" /v ""` → `"C:\Users\liuzhen\AppData\Local\Programs\Microsoft VS Code\Code.exe" "%1"` ✓
-- **Cleanup verify**: `reg query "HKCU\Software\Classes\jhyy_auto_file"` → ERROR: 系統找不到指定的登錄機碼或值 ✓
-- **Icon visual verify**: 开新 Explorer 视窗(不是 F5 刷已有, icon cache 可能缓存)→ `.jhyy` 顯示 navy + mint "J" 品牌, 不再是白板 ✓
-- **Algorithm verify**: 用 Mozilla 已知输入 (`Applications\Code.exe` + `.jhyy` + timestamp `2026-06-04 22:43:00`) 應产生 `Pm0l9cVOllo=` (unit-tested 过) ✓
+- **Cleanup verify**: `reg query "HKCU\Software\Classes\jhyy_auto_file"` → ERROR: 系统找不到指定的登录机码或值 ✓
+- **Icon visual verify**: 开新 Explorer 视窗(不是 F5 刷已有, icon cache 可能缓存)→ `.jhyy` 显示 navy + mint "J" 品牌, 不再是白板 ✓
+- **Algorithm verify**: 用 Mozilla 已知输入 (`Applications\Code.exe` + `.jhyy` + timestamp `2026-06-04 22:43:00`) 应产生 `Pm0l9cVOllo=` (unit-tested 过) ✓
 - **regress 不退化**: `mcp__jhyy__jhyy_regress` 102/102 + 4 SKIP 不变 (v1.8.2 不改 codegen, 只改 installer/MSI/PowerShell) ✓
 
 **影响范围:**
@@ -4313,26 +4313,26 @@ v1.8.1 patch 修了:
 - **回退条件**: VSCode 自动更新时可能再设 UserChoice → 用户再跑一次 `manual-fix-icon-cache.ps1` (per `feedback_fix_evaluation_rule` 5/5 PASS gate)
 
 **已知 limitation (v1.8.2 不修):**
-- 桌面 / 開始功能表 / 工作列的 `.jhyy` shortcut 圖標仍可能緩存舊 icon → brute-force cache flush 後新視窗 OK
-- VSCode 自動更新時可能再設 `UserChoice = Applications\Code.exe` → 用戶再跑一次 `manual-fix-icon-cache.ps1`
-- UCPD.sys 隨 Windows update 改行為時 algorithm 可能要重 tune (Mozilla 算法 reverse-engineered 從 Windows 10 早期, Windows 11 24H2+ 可能有變)
+- 桌面 / 开始功能表 / 工作列的 `.jhyy` shortcut 图标仍可能缓存旧 icon → brute-force cache flush 后新视窗 OK
+- VSCode 自动更新时可能再设 `UserChoice = Applications\Code.exe` → 用户再跑一次 `manual-fix-icon-cache.ps1`
+- UCPD.sys 随 Windows update 改行为时 algorithm 可能要重 tune (Mozilla 算法 reverse-engineered 从 Windows 10 早期, Windows 11 24H2+ 可能有变)
 
 **UCPD.sys 真实限制 (v1.8.2 现场诊断新增, 2026-08-29):**
-- **Symptom**: Path B (`sc stop UCPD` → Mozilla 算法寫 UserChoice) 在 Win10 2024-02+ 上失敗 — `sc stop UCPD` 返回 exit 5 (access denied), 即使 admin;後續 `CreateSubKey(...\UserChoice)` 拋 `UnauthorizedAccessException`。
-- **Root cause**: UCPD 是 FILE_SYSTEM_DRIVER (Type=2, State=4 RUNNING), 內核 filter 加 non-inherited Deny ACE on `HKCU\…\FileExts\.<ext>\UserChoice`。`sc stop` / `sc pause` / `fltmc unload` / `sc sdset` 全部 access denied (5)。UCPD 設計上就是不可程式化卸載。
-- **Path A 也部分壞**: `Remove-Item HKCU\…\FileExts\.jhyy` 可以成功刪,但 Windows shell 馬上從 cached "user picked Code.exe" preference 自動重建 `UserChoice\ProgId = Applications\Code.exe` (重建的 Hash `Pm0l9cVOllo=` 跟 Mozilla 算法一致, 證明 Windows 內部也用同套算法)。
-- **唯一可行的 manual workaround (v1.8.2 不支援自動)**:
-  1. **Windows Settings UI**: 設置 → 應用 → 默認應用 → 按文件類型 → 輸入 `.jhyy` → 選 `JHYY.SourceFile` (或 `JHYY.EditInVSCode`) → 確定。Windows 內部用 IApplicationAssociationRegistration COM 走 privileged API 繞過 UCPD Deny ACE。
-  2. **安全模式 + reg add UCPD Start=4** (進階): `bcdedit /set safeboot minimal` → 重啟 → `reg add HKLM\SYSTEM\CurrentControlSet\Services\UCPD /v Start /t REG_DWORD /d 4 /f` → 重啟 → 重跑 `manual-fix-icon-cache.ps1` → `reg add ... UCPD Start=0` → 重啟。
-  3. **(理論) SYSTEM scheduled task** 寫 UserChoice: `schtasks /Create /RU SYSTEM /RL HIGHEST /SC ONCE /ST 00:00 /TN JHYYFix /TR "..."` — 測試時 `Register-ScheduledTask` 仍 access denied (per Win10 19045 默認權限), 未驗證 UCPD 是否 bypass;**未 ship, 作為 W-062 follow-up 候選**。
-- **jhyy-setuc.exe exit code 2**: 識別 UCPD block, 給清晰 manual workaround instructions (不再 generic UnauthorizedAccessException)。
+- **Symptom**: Path B (`sc stop UCPD` → Mozilla 算法写 UserChoice) 在 Win10 2024-02+ 上失败 — `sc stop UCPD` 返回 exit 5 (access denied), 即使 admin;后续 `CreateSubKey(...\UserChoice)` 抛 `UnauthorizedAccessException`。
+- **Root cause**: UCPD 是 FILE_SYSTEM_DRIVER (Type=2, State=4 RUNNING), 内核 filter 加 non-inherited Deny ACE on `HKCU\…\FileExts\.<ext>\UserChoice`。`sc stop` / `sc pause` / `fltmc unload` / `sc sdset` 全部 access denied (5)。UCPD 设计上就是不可程式化卸载。
+- **Path A 也部分坏**: `Remove-Item HKCU\…\FileExts\.jhyy` 可以成功删,但 Windows shell 马上从 cached "user picked Code.exe" preference 自动重建 `UserChoice\ProgId = Applications\Code.exe` (重建的 Hash `Pm0l9cVOllo=` 跟 Mozilla 算法一致, 证明 Windows 内部也用同套算法)。
+- **唯一可行的 manual workaround (v1.8.2 不支援自动)**:
+  1. **Windows Settings UI**: 设置 → 应用 → 默认应用 → 按文件类型 → 输入 `.jhyy` → 选 `JHYY.SourceFile` (或 `JHYY.EditInVSCode`) → 确定。Windows 内部用 IApplicationAssociationRegistration COM 走 privileged API 绕过 UCPD Deny ACE。
+  2. **安全模式 + reg add UCPD Start=4** (进阶): `bcdedit /set safeboot minimal` → 重启 → `reg add HKLM\SYSTEM\CurrentControlSet\Services\UCPD /v Start /t REG_DWORD /d 4 /f` → 重启 → 重跑 `manual-fix-icon-cache.ps1` → `reg add ... UCPD Start=0` → 重启。
+  3. **(理论) SYSTEM scheduled task** 写 UserChoice: `schtasks /Create /RU SYSTEM /RL HIGHEST /SC ONCE /ST 00:00 /TN JHYYFix /TR "..."` — 测试时 `Register-ScheduledTask` 仍 access denied (per Win10 19045 默认权限), 未验证 UCPD 是否 bypass;**未 ship, 作为 W-062 follow-up 候选**。
+- **jhyy-setuc.exe exit code 2**: 识别 UCPD block, 给清晰 manual workaround instructions (不再 generic UnauthorizedAccessException)。
 
-**教訓 (Path A vs Path B 設計 + v1.8.1 patch scope gap):**
-- v1.8.1 只想 Path A(純刪 UserChoice 退回 HKLM) — 太簡化, 忽略 user 雙擊行為變化 (從 VSCode → jhyy.exe run)
-- v1.8.2 Path B(自定 ProgId) 保留 user 工作流 + 強制 icon, 較合理
-- v1.8.1 patch scope 漏: `OpenWithProgids` 子鍵引用 + `jhyy_auto_file` ProgId 本身 + `UserChoice` hijack 整棵 — 任何 registry-walk icon chain 修復要列舉所有可能 hijack layer, 不能只清表面
-- UCPD 是 Windows 10 2024-02 後的事實: 任何 .ext 雙擊行為改變都要 admin + UCPD pause (Mozilla 算法合法 per MPL 2.0)
-- 算法 porting 跨語言坑: PowerShell `-band` uint32 overflow (5.43E+19) → C# `uint` native, 注意 null terminator INCLUDED in Mozilla source (`(lstrlenW + 1) * sizeof(wchar_t)`)
+**教训 (Path A vs Path B 设计 + v1.8.1 patch scope gap):**
+- v1.8.1 只想 Path A(纯删 UserChoice 退回 HKLM) — 太简化, 忽略 user 双击行为变化 (从 VSCode → jhyy.exe run)
+- v1.8.2 Path B(自定 ProgId) 保留 user 工作流 + 强制 icon, 较合理
+- v1.8.1 patch scope 漏: `OpenWithProgids` 子键引用 + `jhyy_auto_file` ProgId 本身 + `UserChoice` hijack 整棵 — 任何 registry-walk icon chain 修复要列举所有可能 hijack layer, 不能只清表面
+- UCPD 是 Windows 10 2024-02 后的事实: 任何 .ext 双击行为改变都要 admin + UCPD pause (Mozilla 算法合法 per MPL 2.0)
+- 算法 porting 跨语言坑: PowerShell `-band` uint32 overflow (5.43E+19) → C# `uint` native, 注意 null terminator INCLUDED in Mozilla source (`(lstrlenW + 1) * sizeof(wchar_t)`)
 
 **引用:**
 - Mozilla `browser/components/shell/WindowsUserChoice.cpp` (MPL 2.0, 算法 reverse-engineered reference)
@@ -4436,7 +4436,7 @@ dir "C:\Program Files\JHYY\bin\jhyy-setuc*"
 
 # visual verify
 explorer.exe .
-# → .jhyy files 顯示 JHYY 品牌 "J" icon  ✓
+# → .jhyy files 显示 JHYY 品牌 "J" icon  ✓
 ```
 
 ### 教训 (3-attempt root cause chain)
@@ -4520,7 +4520,7 @@ explorer.exe .
 - **每 user 需登录一次触发 sentinel 生效** — MSI install 在 SYSTEM context 写 liuzhen hive, user 已在 session → 不需 logout; 但新建 user 后首次登录 RunOnce step 6 已被 sentinel skip → 该 user icon 不更新 → v1.8.4 follow-up 候选 (MSI repair trigger 重跑 CA 写新 user hive)
 - **UCPD.sys 行为变化** — Win11 24H2+ 可能加更严 Deny ACE; Phase 0 验证了 Win10 19045, Win11 24H2+ 待验证
 
-### 教訓 (Phase 0 vs Phase 1 設計)
+### 教训 (Phase 0 vs Phase 1 设计)
 
 - **Phase 0 现场验证 ≥ Phase 1 设计**: 写 .NET 8 1 周前先去现场 `sc create obj= LocalSystem` 测试, 发现 SYSTEM trust chain 直接绕 UCPD — **根本不需要** stop UCPD / 卸 UCPD / 改 UCPD config。Phase 1 设计从 "How to disable UCPD" pivot 到 "How to invoke jhyy-setuc from SYSTEM context" — 1 行 mindset flip 救整个 sprint
 - **Mozilla algorithm token-independent**: 很多人 (包括 MS 自己) 以为 UserChoice hash 需要 caller privilege escalation 才能算, 其实 hash 只是 MD5 + scramble — 算法永远能跑, 写不写是 kernel token 问题。**算法是 reverse-engineered, 写入路径是 MS-protected**

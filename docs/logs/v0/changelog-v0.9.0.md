@@ -593,7 +593,7 @@ let arm_body = (*arm_slot).body as *Node;
 **修复**:
 ```jhyy
 // alloc sz+4 (not sz+1): 下面 (*last_i_v1)=0 是 *i32 写 (4字节), 在 sz+1 边界写 4 字节
-// 会 overflow heap。改成 sz+4 让边界 4 字节內可写。v0.9 wip commit 2.9 修。
+// 会 overflow heap。改成 sz+4 让边界 4 字节内可写。v0.9 wip commit 2.9 修。
 let buf = malloc(sz + (4 as i64));
 ```
 

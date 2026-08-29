@@ -72,21 +72,21 @@ make selfhost  # stage 1 + 3 次自举 closure (v1 → v2 → v3 → v4 byte-equ
 
 **v1.8.1 patch — 图标 embed (`windres` 流程)**:
 
-所有 binary 都內嵌 branded "J" 圖標(256×256 RGBA, Vista+ 6 frame),通過 MinGW `windres.exe` 把 `installer/jhyy-icon.ico` 編為 COFF `.o` 鏈入 PE 資源段 `.rsrc`:
+所有 binary 都内嵌 branded "J" 图标(256×256 RGBA, Vista+ 6 frame),通过 MinGW `windres.exe` 把 `installer/jhyy-icon.ico` 编为 COFF `.o` 链入 PE 资源段 `.rsrc`:
 
-- **`jhyy_stage0.exe`**:Makefile 直接編 `compiler/src/jhyy.rc` → `compiler/build/obj/jhyy-res.o` → 鏈入(`$(RES_OBJ)`)
-- **`jhyy.exe`**:**以及**所有 user-compiled `.jhyy` 程序:`compiler/src/main.c` 的 `compile()` 函數在 `system()` 拼出的 gcc 命令前先調 `windres` 把 `compiler/src/jhyy.rc` 編為 `<output>.ico.o`,鏈接加入 gcc 命令末尾,結束後 `unlink()` 清理 tmp 文件
+- **`jhyy_stage0.exe`**:Makefile 直接编 `compiler/src/jhyy.rc` → `compiler/build/obj/jhyy-res.o` → 链入(`$(RES_OBJ)`)
+- **`jhyy.exe`**:**以及**所有 user-compiled `.jhyy` 程序:`compiler/src/main.c` 的 `compile()` 函数在 `system()` 拼出的 gcc 命令前先调 `windres` 把 `compiler/src/jhyy.rc` 编为 `<output>.ico.o`,链接加入 gcc 命令末尾,结束后 `unlink()` 清理 tmp 文件
 
-**改圖標後必須重 build stage0 + stage1**:
+**改图标后必须重 build stage0 + stage1**:
 ```bash
 make clean && make stage0 && make
 ```
 
-不重 build stage0,`jhyy.exe` 內嵌的還是舊 icon(.ico 修改走 `installer/build-jhyy-icons.ps1`,deterministic 重出 6-frame ICO)。
+不重 build stage0,`jhyy.exe` 内嵌的还是旧 icon(.ico 修改走 `installer/build-jhyy-icons.ps1`,deterministic 重出 6-frame ICO)。
 
-**path 坑**:`windres` 內部走 `gcc -E` 預處理,路徑裡的 `\` 會被當 escape 字符吃掉。`compiler/src/main.c` 用 `path_to_fwd()` 把 `\` 全部轉 `/` 才傳給 windres(教訓 2026-08-27 v1.8.1 patch 階段)。
+**path 坑**:`windres` 内部走 `gcc -E` 预处理,路径里的 `\` 会被当 escape 字符吃掉。`compiler/src/main.c` 用 `path_to_fwd()` 把 `\` 全部转 `/` 才传给 windres(教训 2026-08-27 v1.8.1 patch 阶段)。
 
-**驗證**: `objdump -h compiler/build/bin/jhyy.exe | grep rsrc` 應見 `.rsrc` 段(9184B);`grep -c '89 50 4e 47' <(objdump -s -j .rsrc ...)` 應為 6(每個 ICO frame 內嵌 PNG signature)。
+**验证**: `objdump -h compiler/build/bin/jhyy.exe | grep rsrc` 应见 `.rsrc` 段(9184B);`grep -c '89 50 4e 47' <(objdump -s -j .rsrc ...)` 应为 6(每个 ICO frame 内嵌 PNG signature)。
 
 ---
 
@@ -206,12 +206,12 @@ MSI rebuild 时自动重新包进 `INSTALLDIR\common\jhyy-setuc\bin\Release\net8
 
 ## v1.8.3 patch — WiX MSI SYSTEM-context CustomAction 写 per-user UserChoice (UCPD.sys kernel filter bypass)
 
-**问题**: v1.8.2 Path B (`sc stop UCPD` → Mozilla 算法寫 UserChoice) 在 Win10 2024-02+ 失敗 — `sc stop UCPD` 返回 exit 5 (access denied), 即使 admin + elevated shell。**UCPD.sys** (User Choice Protection Driver, FILE_SYSTEM_DRIVER Type=2 State=4 RUNNING) 是 kernel filter, 加 non-inherited Deny ACE on `HKCU\…\FileExts\.<ext>\UserChoice`, user-mode caller 即使 admin 也被擋。`sc stop` / `sc pause` / `fltmc unload` / `sc sdset` 全 access denied — UCPD 設計上不可程式化卸載。
+**问题**: v1.8.2 Path B (`sc stop UCPD` → Mozilla 算法写 UserChoice) 在 Win10 2024-02+ 失败 — `sc stop UCPD` 返回 exit 5 (access denied), 即使 admin + elevated shell。**UCPD.sys** (User Choice Protection Driver, FILE_SYSTEM_DRIVER Type=2 State=4 RUNNING) 是 kernel filter, 加 non-inherited Deny ACE on `HKCU\…\FileExts\.<ext>\UserChoice`, user-mode caller 即使 admin 也被挡。`sc stop` / `sc pause` / `fltmc unload` / `sc sdset` 全 access denied — UCPD 设计上不可程式化卸载。
 
 **Field diagnosis 2026-08-29** (per `feedback_fix_evaluation_rule` 5/5 PASS on target test):
-- `sc create obj= LocalSystem type= own start= demand` 創的 LocalSystem service 調 `Registry.CurrentUser.CreateSubKey(UserChoice)` **成功** — 寫 `HKEY_USERS\S-1-5-18\…\FileExts\.jhyy\UserChoice` 完整。
+- `sc create obj= LocalSystem type= own start= demand` 创的 LocalSystem service 调 `Registry.CurrentUser.CreateSubKey(UserChoice)` **成功** — 写 `HKEY_USERS\S-1-5-18\…\FileExts\.jhyy\UserChoice` 完整。
 - SYSTEM trust chain (有 `SeRestorePrivilege` + `SeBackupPrivilege` + `SeTakeOwnershipPrivilege`) **bypass UCPD Deny ACE**, 不需要停 UCPD。
-- SYSTEM 的 HKCU 是 `S-1-5-18` 自己 hive — 要寫其他 user HKCU, 直接 enumerate `HKEY_USERS` S-1-5-21-… SIDs + 寫每個 user 的 `HKEY_USERS\<sid>\…`。
+- SYSTEM 的 HKCU 是 `S-1-5-18` 自己 hive — 要写其他 user HKCU, 直接 enumerate `HKEY_USERS` S-1-5-21-… SIDs + 写每个 user 的 `HKEY_USERS\<sid>\…`。
 
 **修复 (v1.8.3 SYSTEM-context CA + Bundle .NET 8 chain)**:
 
@@ -220,9 +220,9 @@ MSI rebuild 时自动重新包进 `INSTALLDIR\common\jhyy-setuc\bin\Release\net8
 ```bash
 jhyy-setuc.exe --system-context .jhyy JHYY.SourceFile
 ```
-- 遍歷 `HKEY_USERS` S-1-5-21-… SIDs (跳過 SYSTEM / LocalService / NetworkService / `_Classes` mirror)
-- 對每個 user: 算 Mozilla Hash (用 **target user SID**, 不是 caller SID) + 寫 `HKEY_USERS\<sid>\…\FileExts\<ext>\UserChoice` + ApplicationAssociationToasts
-- Full success 寫 sentinel `HKLM\SOFTWARE\JiHuiYiYou\JHYY\UserChoiceSystemContextApplied` (HKLM → per-user RunOnce 可讀)
+- 遍历 `HKEY_USERS` S-1-5-21-… SIDs (跳过 SYSTEM / LocalService / NetworkService / `_Classes` mirror)
+- 对每个 user: 算 Mozilla Hash (用 **target user SID**, 不是 caller SID) + 写 `HKEY_USERS\<sid>\…\FileExts\<ext>\UserChoice` + ApplicationAssociationToasts
+- Full success 写 sentinel `HKLM\SOFTWARE\JiHuiYiYou\JHYY\UserChoiceSystemContextApplied` (HKLM → per-user RunOnce 可读)
 
 ### Phase 2 — WiX MSI CustomAction (`installer/compiler/jhyy-compiler.wxs`)
 ```xml
@@ -241,11 +241,11 @@ jhyy-setuc.exe --system-context .jhyy JHYY.SourceFile
 </InstallExecuteSequence>
 ```
 
-關鍵 attribute:
-- `BinaryRef="JHYYSetUCBin"` + `<Binary>` definition → MSI extract 到 temp + auto-resolve `[JHYYSetUCBin]` property (Type 50 CA, 不需 CustomActionData 預設)
+关键 attribute:
+- `BinaryRef="JHYYSetUCBin"` + `<Binary>` definition → MSI extract 到 temp + auto-resolve `[JHYYSetUCBin]` property (Type 50 CA, 不需 CustomActionData 预设)
 - `Execute="deferred"` + `Impersonate="no"` → **SYSTEM context** (LocalSystem perMachine install)
-- `Return="ignore"` → CA 失敗不 rollback install (icon 是 best-effort)
-- `Condition="NOT Installed"` (WiX 4 必須 `Condition` attribute, 不是 inner text — WIX0400 error)
+- `Return="ignore"` → CA 失败不 rollback install (icon 是 best-effort)
+- `Condition="NOT Installed"` (WiX 4 必须 `Condition` attribute, 不是 inner text — WIX0400 error)
 
 `<RemoveRegistryValue>` 清 sentinel on uninstall (per `JHYYPathReg` Component)。
 
@@ -270,14 +270,14 @@ jhyy-setuc.exe --system-context .jhyy JHYY.SourceFile
 </Chain>
 ```
 
-關鍵 attribute (WiX 4 跟 v3 不一樣):
+关键 attribute (WiX 4 跟 v3 不一样):
 - `<util:RegistrySearch>` 用 `Result="value"` (不是 v3 `Format="raw"`) — 需要 `WixToolset.Util.wixext` extension
 - `<ExePackage>` 用 `InstallArguments` (不是 v3 `InstallCommand`) — `RepairArguments` / `UninstallArguments` 同理
 - `DetectCondition` 在 `ExePackage` 是 supported (vs MsiPackage 用 InstallCondition)
 - `Permanent="yes"` → shared runtime, Bundle uninstall 不移除
 
 ### Phase 4 — install-configure-all.bat sentinel
-Step 6 頭加 sentinel check:
+Step 6 头加 sentinel check:
 ```batch
 reg.exe query "HKLM\SOFTWARE\JiHuiYiYou\JHYY" /v UserChoiceSystemContextApplied >nul 2>&1
 if not errorlevel 1 (
@@ -285,16 +285,16 @@ if not errorlevel 1 (
     goto :skip_post_install_user_choice
 )
 ```
-若 sentinel 存在 → 跳過 `manual-fix-icon-cache.ps1` (避免 RunOnce user-context 重新寫覆蓋 v1.8.3 SYSTEM-context 寫)。
+若 sentinel 存在 → 跳过 `manual-fix-icon-cache.ps1` (避免 RunOnce user-context 重新写覆盖 v1.8.3 SYSTEM-context 写)。
 
 ### Bundle build (`installer/build.ps1 bundle`)
-- 自動 download .NET 8 Desktop Runtime 8.0.30 (~28MB) 到 `installer/build-artifacts/dotnet/dotnet-runtime-8.0.30-win-x64.exe` (從 `https://dotnetcli.azureedge.net/dotnet/Runtime/8.0.30/`),若已 cache skip download
+- 自动 download .NET 8 Desktop Runtime 8.0.30 (~28MB) 到 `installer/build-artifacts/dotnet/dotnet-runtime-8.0.30-win-x64.exe` (从 `https://dotnetcli.azureedge.net/dotnet/Runtime/8.0.30/`),若已 cache skip download
 - `wix build ... -ext "$balDll" -ext WixToolset.Util.wixext -d "JHY_DOTNET8_RUNTIME_EXE_PATH=..."`
 
-### 驗證 (5/5 PASS per `feedback_fix_evaluation_rule`)
-- ✅ jhyy-setuc.exe --system-context 從 SYSTEM service 寫 liuzhen HKEY_USERS UserChoice (Hash 含 target SID)
-- ✅ HKEY_USERS\S-1-5-18 (SYSTEM) **不動** (v1.8.3 顯式 skip)
-- ✅ Sentinel 寫入 (full success)
-- ✅ MSI 1.29 MB (跟 v1.8.2 持平, `<Binary>` reference 不重複 ship)
+### 验证 (5/5 PASS per `feedback_fix_evaluation_rule`)
+- ✅ jhyy-setuc.exe --system-context 从 SYSTEM service 写 liuzhen HKEY_USERS UserChoice (Hash 含 target SID)
+- ✅ HKEY_USERS\S-1-5-18 (SYSTEM) **不动** (v1.8.3 显式 skip)
+- ✅ Sentinel 写入 (full success)
+- ✅ MSI 1.29 MB (跟 v1.8.2 持平, `<Binary>` reference 不重复 ship)
 - ✅ Bundle 29.99 MB (MSI + .NET 8 + Burn overhead)
 - ✅ `regress` 102/102 + 4 SKIP (v1.8.2 baseline 持平, v1.8.3 不改 codegen)
