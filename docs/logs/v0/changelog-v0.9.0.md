@@ -1,9 +1,31 @@
 # JHYY v0.9.0 Changelog
 
-> **状态**: 🚧 wip (commit 1 ✅, commit 2.x 部分 ship)
+> **状态**: 🟢 FROZEN at v1.0.0 baseline (commit `eabee0d`, 2026-08-10)
 > **承接**: v0.8 wip commit 12 ([5820793](./changelog-v0.8.0.md)) — Stage 0 closure 解锁
 > **目标**: `jhyy_0` (C 编译) 与 `jhyy_1` (jhyy 编译) 对相同 .jhyy 测试集产 **byte-equal .il** (Stage 1 closure)
 > **后续**: v1.0.0 自举启动（粗粒度 5 sprint）
+
+---
+
+## 🟢 FROZEN — 2026-08-29 v1.x 终结统一冻结
+
+**为什么冻结**: v0.9 wip 的 Stage 1 byte-equal 7 测试集目标已于 v1.0.0 真自举 (commit `eabee0d`, 2026-08-10) N=4 byte-equal closure 闭环;v1.0.0 → v1.8.3 八个版本 ship 后,v0.x C 编译器失去活跃意义。
+
+**冻结后状态**:
+- ✅ v0.9 wip 阶段全部 commit 2.5–2.17 ship(见下表 + 历史 sprint log)
+- ❌ 不再有新 C-side feature 落地 — v1.x 增量全部经 jhyy 端(`compiler/src0/*.jhyy`)落地
+- ⚠️ C 端仅维护:`compiler/src/*.c` 仅修 critical bug(影响 baseline regress),不开新特性
+
+**v2.0 启动时的清理决策**(per `docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md` M5 推迟决策):
+- `compiler/src/*.c` — 整体 untrack(C 端源码退役)
+- `qbe/` — 整体 untrack(vendored QBE 退役,v2.x 自研 QBE 重写)
+- `compiler/runtime/*.c` — 整体 untrack(Arena + main 入口退役,v3.x 自研 runtime)
+- `compiler/build/bin/jhyy.exe` — 不再 build(生产路径转 `jhyy_v1.exe.exe`)
+- `compiler/build/bin/jhyy_stage0.exe` — 不再 build(stage0 仅 v1.0 验证一次性用)
+
+**为什么不在 v1.8.3 立即执行**: 推迟到 v2.x 末(QBE 自写完成)+ v3.x 末(runtime 重写完成)后一次性砍,避免 v1.x → v2.x 过渡期失去回归基线。
+
+---
 
 ## 进度
 

@@ -1,7 +1,7 @@
 # JHYY ${VERSION} Release
 
 > **Release date**: ${ISO_DATE}
-> **Download**: [jhyy-installer-${VERSION}.exe](${INSTALLER_URL}) (~1.6MB Burn bundle)
+> **Download**: [jhyy-installer-${VERSION}.exe](${INSTALLER_URL}) (~30MB Burn bundle — v1.8.x 起含 .NET 8 Desktop Runtime embed;v1.5.x = ~1.6MB 无 .NET 8)
 > **SHA256**: 见 [SHA256.txt](${SHA256_URL})
 > **Compatibility**: Windows 10 1809+ / Windows 11 / Windows Server 2019+ (x64)
 

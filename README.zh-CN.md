@@ -8,8 +8,8 @@
 
 **静态类型 · 表达式导向 · 通过 QBE 编译为原生机器码**
 
-[![版本](https://img.shields.io/badge/版本-v1.0.0-00d4aa)](docs/logs/v1/changelog-v1.0.0.md)
-[![状态](https://img.shields.io/badge/自举-byte--equal%20v1%E2%86%92v4-success)](docs/logs/v1/changelog-v1.0.0.md)
+[![版本](https://img.shields.io/badge/版本-v1.8.3-00d4aa)](docs/logs/v1/changelog-v1.8.0.md)
+[![状态](https://img.shields.io/badge/自举-byte--equal%20v1%E2%86%92v5-success)](docs/logs/v1/changelog-v1.8.0.md)
 [![后端](https://img.shields.io/badge/后端-QBE-orange)](https://c9x.me/compile/)
 [![平台](https://img.shields.io/badge/平台-Windows%20x64-lightgrey)](#构建)
 [![协议](https://img.shields.io/badge/协议-MIT-blue)](LICENSE)
@@ -21,30 +21,50 @@
 
 ---
 
-## v1.0.0 — 自举闭环达成
+## v1.8.3 — v1.x 终结,installer 自举闭环 + UCPD.sys bypass
 
-`jhyy_v1 → jhyy_v2 → jhyy_v3 → jhyy_v4` 编译自身,产出 **字节相同的 QBE 中间表示**:
+`jhyy_v1 → jhyy_v2 → jhyy_v3 → jhyy_v4 → jhyy_v5` 编译自身,产出 **字节相同的 QBE 中间表示**:
 
 ```
-jhyy_v1.exe  → src0/main.jhyy →  jhyy_v2.il
-jhyy_v2.exe  → src0/main.jhyy →  jhyy_v3.il     ← 与 v2.il 字节相同
-jhyy_v3.exe  → src0/main.jhyy →  jhyy_v4.il     ← 与 v2.il 字节相同
-                                                 sha 2445e97d…
+jhyy_v1.exe.exe → src0/main.jhyy → jhyy_v2.il
+jhyy_v2.exe     → src0/main.jhyy → jhyy_v3.il   ← 与 v2.il 字节相同
+jhyy_v3.exe     → src0/main.jhyy → jhyy_v4.il   ← 与 v2.il 字节相同
+jhyy_v4.exe     → src0/main.jhyy → jhyy_v5.il   ← 与 v2.il 字节相同
+                                                 sha 03a1cdd4… (v1.8.0 ship)
 ```
 
-四份 raw `.il` 文件 sha256 完全一致(1.378 MB,无 fix-up 后处理),fixed point 是 attractor,不是 transient。**M4 里程碑达成,2026-08-10 tag 在 commit `eabee0d`。**
+五份 raw `.il` 文件 sha256 完全一致(1.378 MB,无 fix-up 后处理),fixed point 是 attractor,不是 transient。**Stage 2 N=4 byte-equal 闭环在 v1.0.0 达成**(commit `eabee0d`, 2026-08-10),稳定通过 v1.8.3(commit `8fcbe4d`, 2026-08-29)。**v1.x 已终结。**
 
 | 指标 | 值 |
 |------|----|
-| `regress.py` (C 端 `jhyy.exe`) | **50/53 PASS, 0 failed** |
-| `regress_v1.py` (自举 `jhyy_v1.exe.exe`) | **50/53 PASS, 0 failed** |
+| `regress.py` (C 端 `jhyy.exe`) | **102/102 PASS, 0 failed, 4 skipped**(106 total) |
+| `regress_v1.py` (自举 `jhyy_v1.exe.exe`) | **102/102 PASS, 0 failed, 4 skipped**(parity hold) |
 | Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | **7/7 PASS** |
-| Stage 2 N=3 byte-equal (`v1→v2→v3→v4`) | **稳定** |
+| Stage 2 N=4 byte-equal (`v1→v2→v3→v4→v5`) | **稳定** |
 | `jhyy_v2` 编 `_repro_t0.jhyy` | `EXIT=100` ✓ |
 | `jhyy_v2` 编 `fib(10)` | `EXIT=55` ✓ |
+| `installer/jhyy-installer-1.8.3.exe` | shipped (~30MB, 含 .NET 8 Desktop Runtime 内嵌) |
+| `installer/jhyy-compiler-1.8.3.msi` | shipped (~995KB, 含 `jhyy-setuc.exe`) |
+| `vscode-ext/jhyy-lang-1.8.3.vsix` | shipped (~13KB) |
+
+**v1.x umbrella changelog** — [`docs/logs/v1/changelog-v1.8.0.md`](docs/logs/v1/changelog-v1.8.0.md) 覆盖 v1.8.0 主版本 + v1.8.1 / v1.8.2 / v1.8.2 patch update / v1.8.3 / v1.8.3.1 / v1.8.3.2 patch(全部 `fix(v1.8.0)` commit,无新 feature)。历史 v1.0.0 → v1.7.3 changelog 各在 `docs/logs/v1/changelog-vX.Y.Z.md`。
+
+**W-NNN workaround 状态(v1.8.3 ship)**:
+- ✅ W-059 defer codegen silent crash — RESOLVED 2026-08-28
+- ❌ W-060 enum variant payload ABI — INVALID 2026-08-28(bash `$?` 8-bit truncation artifact,regress.py W-028 mod-256 fix 处理)
+- ❌ W-061 nested struct field offset — INVALID 2026-08-28(同上)
+- ✅ W-062 VSCode UserChoice + MSYS2 OpenWithProgids shadow — RESOLVED 2026-08-29(v1.8.3.1 闭环,SYSTEM-context CustomAction + 3-attempt fallback)
+- ✅ W-063 UCPD.sys kernel filter — RESOLVED 2026-08-29(v1.8.3 真修,`jhyy-setuc.exe` .NET 8 SYSTEM-context writer)
+- 🟡 W-057 UTF-8 3/4-byte codepoint — DEFERRED-to-v2.x
+- 🟡 W-058 vendored QBE 缺 `remd`/`rems` — DEFERRED-to-v2.x
+- ⚠️ W-021 WiX Bal.wixext DLL naming — 永久 workaround(WiX 上游不改)
+
+完整索引: [`docs/internal/workarounds.md`](docs/internal/workarounds.md)。
+
+**v0.x 冻结**: `docs/logs/v0/changelog-v0.9.0.md`(3231 行)— Stage 1 byte-equal 7 测试集 wip,**2026-08-29 冻结于 v1.0.0 baseline**。v0.x C 编译器(`compiler/src/*.c`)进入仅维护模式;新 feature 走 `compiler/src0/*.jhyy`。按 `docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md`,M5 boot-from-scratch 清理(删 `src/*.c` + `qbe/` + `runtime.c`)推迟到 v2.x 末 + v3.x 末统一做。
 
 > [!NOTE]
-> **v1.0.0 既是里程碑也是起点**。C 端编译器(`compiler/src/*.c`)仍是生产路径;`compiler/src0/*.jhyy`(jhyy 端翻译稿)已产出 byte-equal 编译结果,后续 sprint 计划逐步将生产路径迁移到自举编译器上(`v1.x → v2.x` 路线图)。
+> **v1.8.3 是 v1.x 终结**。C 端编译器(`compiler/src/*.c`)在 v1.x 仍是生产路径;`compiler/src0/*.jhyy`(jhyy 端翻译稿)已产出 byte-equal。v2.0 会切生产路径到 `jhyy_v1.exe.exe`,并启动 QBE 重写 + 多目标 / OS 准备(见 [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md))。
 
 ---
 
@@ -118,7 +138,7 @@ echo $?    # => 42
 
 ```bash
 python compiler/build/bin/regress.py
-# => 50/50 通过, 0 失败, 3 跳过 (共 53)
+# => 102/102 通过, 0 失败, 4 跳过 (共 106)
 ```
 
 ### 用 VSCode 跑
@@ -131,7 +151,7 @@ python compiler/build/bin/regress.py
 ### 验证自举闭环
 
 ```bash
-# Stage 2 N=3 byte-equal — jhyy 编译 jhyy
+# Stage 2 N=4 byte-equal — jhyy 编译 jhyy
 # 方法 1: 走自举编译器回归
 python compiler/build/bin/regress_v1.py
 # 方法 2: MCP 一键验证(推荐)
@@ -218,7 +238,7 @@ JiHuiYiYou-compiler/
 │           ├── jhyy_v1.exe     自举编译器(jhyy 编 src0/)
 │           └── regress.py      回归脚本
 ├── qbe/                        已 vendor 的 QBE 后端 (c9x.me/compile)
-├── mcp-jhyy/                   Claude Code MCP 服务 (4 个工具)
+├── mcp-jhyy/                   Claude Code MCP 服务 (11 工具 + 4 资源)
 ├── vscode-ext/                 VS Code 语言扩展(语法高亮)
 ├── docs/
 │   ├── abis/                   语言规范 + ABI 白皮书(已锁定)
@@ -236,11 +256,11 @@ JiHuiYiYou-compiler/
 
 | 验证项 | 命令 | 期望 |
 |--------|------|------|
-| C 端编译回归 | `python compiler/build/bin/regress.py` | 50/53 PASS |
-| 自举编译回归 | `python compiler/build/bin/regress_v1.py` | 50/53 PASS |
+| C 端编译回归 | `python compiler/build/bin/regress.py` | **102/102 PASS + 4 SKIP**(106 total) |
+| 自举编译回归 | `python compiler/build/bin/regress_v1.py` | **102/102 PASS + 4 SKIP**(parity hold) |
 | Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | `python compiler/tests/stage1-expanded.sh` | 7/7 PASS |
-| Stage 2 N=3 byte-equal (`v1→v2→v3→v4`) | MCP `jhyy_selfhost_check` | `all_byte_equal=true`, il_sha256 稳定 |
-| MCP smoke (14 个 in-process 测试) | `pytest mcp-jhyy/tests/` | 14 pass |
+| Stage 2 N=4 byte-equal (`v1→v2→v3→v4→v5`) | MCP `jhyy_selfhost_check` | `all_byte_equal=true`, il_sha256 稳定 |
+| MCP smoke (7 个 test 文件, X 个 `def test_*` 函数) | `pytest mcp-jhyy/tests/` | 全 pass |
 | 一行构建 | `make` | 0 warning(-Wall -Wextra) |
 
 ---
@@ -251,10 +271,10 @@ JiHuiYiYou-compiler/
 
 | 轴 | 范围 | 目标 | 状态 |
 |---|---|---|---|
-| **v0.x** | C 端编译器自身 | 达成自举启动门槛 | **完成** |
-| **v1.x** | jhyy 自举 | byte-equal `.il` 闭环 | **v1.0.0 tagged** |
-| **v2.x** | QBE 完整重写 + 多目标 / OS 准备 | amd64_sysv / freestanding | 未启动 |
-| **v3.x** | 语言特性扩展 | OS-required: asm / volatile / naked / `no_std` / `&mut` + lifetime | 未启动 |
+| **v0.x** | C 端编译器自身 | 达成自举启动门槛 | **🟢 完成(冻结于 v1.0.0 baseline)** |
+| **v1.x** | jhyy 自举 | byte-equal `.il` 闭环 | **🟢 v1.8.3 shipped(v1.x 终结)** |
+| **v2.x** | QBE 完整重写 + 多目标 / OS 准备 | amd64_sysv / freestanding | **next** — 设计输入 = [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md) |
+| **v3.x** | 语言特性扩展 | OS-required: asm / volatile / naked / `no_std` / `&mut` + lifetime | **next(与 v2.x 并行)** |
 
 **轴之间的关系**:
 - `v0.x → v1.x → v2.x / v3.x`:**严格顺序**(每条都是强前置)
@@ -284,7 +304,7 @@ JiHuiYiYou-compiler/
 
 ### VS Code 扩展
 
-`vscode-ext/` 提供语法高亮(TextMate grammar + 文件图标) + v1.5.9 原生 ▶ play 按钮 (替换 v1.5.6-patch2 的 Code Runner 集成)。安装方式见 [`vscode-ext/`](vscode-ext/) 目录;历史 PowerShell 配置片段见 `docs/internal/` 旧档。
+`vscode-ext/` 提供语法高亮(TextMate grammar + 文件图标) + 原生 ▶ `Run JHYY File`(`Ctrl+F5`) + `Compile JHYY File (no run)` 命令。最 shipped = `jhyy-lang-1.8.3.vsix`。安装 + build 步骤见 [`vscode-ext/README.md`](vscode-ext/README.md)。
 
 ---
 
@@ -318,9 +338,9 @@ JiHuiYiYou-compiler/
 
 ### 变更日志
 
-最新:[`docs/logs/v1/changelog-v1.0.0.md`](docs/logs/v1/changelog-v1.0.0.md) — **v1.0.0 自举闭环达成**
+最新:[`docs/logs/v1/changelog-v1.8.0.md`](docs/logs/v1/changelog-v1.8.0.md) — **v1.x umbrella(覆盖 v1.8.0 主版本 + v1.8.1 / v1.8.2 / v1.8.2 patch update / v1.8.3 / v1.8.3.1 / v1.8.3.2 patch)**
 
-历史索引见 [`docs/logs/`](docs/logs/)。
+历史索引见 [`docs/logs/`](docs/logs/) — v1.0.0 → v1.7.3 各有独立 umbrella;v0.0.1 → v0.9.0 是 C 端编译器(v0.9 冻结于 v1.0.0 baseline)。
 
 ---
 

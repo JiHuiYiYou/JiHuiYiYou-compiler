@@ -77,13 +77,15 @@ $(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(BIN_DIR)/jhyy_st
 	@mkdir -p $(BIN_DIR)
 	$(BIN_DIR)/jhyy_stage0.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy
 
-# Self-host closure chain (v1.0.0 byte-equal 验证): jhyy.exe 编自己 3 次
+# Self-host closure chain: v1.0.0 baseline = v1→v2→v3→v4 (Stage 2 N=3 byte-equal);
+# v1.8.3 = v1→v2→v3→v4→v5 (Stage 2 N=4 byte-equal closure, sha 03a1cdd4...)
 selfhost: $(BIN_DIR)/jhyy.exe
-	@echo "Stage 2 closure chain: v1 → v2 → v3 → v4 byte-equal check"
+	@echo "Stage 2 closure chain: v1 → v2 → v3 → v4 → v5 byte-equal check (v1.8.3 N=4 baseline)"
 	$(BIN_DIR)/jhyy.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy_v2
 	$(BIN_DIR)/jhyy_v2.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy_v3
 	$(BIN_DIR)/jhyy_v3.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy_v4
-	@echo "Check: sha256sum jhyy_v2.exe jhyy_v3.exe jhyy_v4.exe must match"
+	$(BIN_DIR)/jhyy_v4.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy_v5
+	@echo "Check: sha256sum jhyy_v2.exe jhyy_v3.exe jhyy_v4.exe jhyy_v5.exe must match"
 
 test:
 	@echo "Running tests..."

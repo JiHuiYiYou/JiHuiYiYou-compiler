@@ -4179,7 +4179,7 @@ fact-check EXIT mismatch 必先 trace 到 exit code propagation path. v1.7.3 误
 ## W-062: VSCode UserChoice hijack + MSYS2 OpenWithProgids 双层 shadow → `.jhyy` 图标不显示 (推 v1.8.2)
 
 **ID:** W-062
-**状态:** ✅ RESOLVED 2026-08-29 (v1.8.3 patch — WiX MSI SYSTEM-context CustomAction 写 per-user UserChoice, 绕过 UCPD.sys kernel filter)
+**状态:** ✅ RESOLVED 2026-08-29 (v1.8.3.1 patch — WiX MSI SYSTEM-context CustomAction 写 per-user UserChoice, 绕过 UCPD.sys kernel filter;v1.8.3 首次实现但 CustomAction 静默失败,v1.8.3.1 加 3-attempt fallback 真修)
 **日期:** 2026-08-29 (v1.8.1 patch ship 后 user 反馈图标仍白板)
 **superseder:** v1.8.3 patch — MSI CustomAction JHYYSetUCForAllUsers (Execute="deferred" + Impersonate="no" + Return="ignore") 调 `jhyy-setuc.exe --system-context` 枚举 `HKEY_USERS` S-1-5-21-… SIDs, 写每用户 UserChoice。SYSTEM trust chain 绕过 UCPD kernel filter (verified Phase 0 2026-08-29)。Bundle.wxs 加 .NET 8 Desktop Runtime 链式安装确保 prereq。
 **触发面:** Windows 10/11 装了 JHYY + VSCode 双应用的机器, `.jhyy` 副档名被 VSCode 设为默认 opener 后, 文件总管文件夹视图显示白板文档图标

@@ -2,6 +2,8 @@
 
 让 Claude Code 能**编译、运行、检查 JHYY 程序**的 MCP (Model Context Protocol) 服务器。
 
+> **Last updated**: v1.8.3 (2026-08-29) — 11 tools + 4 resources(v1.0.0 7 + Sprint 1 加 4);7 个 pytest test 文件,每文件含多个 `def test_*` 函数;`jhyy_ntstatus.py` 是内部 helper 未注册 MCP 工具。
+
 装上之后，Claude Code 在帮你写 `.jhyy` 代码时，能自动调用编译器查语法错、跑回归、看生成的 QBE IL、查语言规范 / ABI 信息，省去手动跑 `jhyy compile && ./a.out` 的来回。
 
 ## 工作原理
@@ -125,11 +127,30 @@ Claude Code 会根据工具描述中的触发条件**自动判断何时调用**�
 mcp-jhyy/
 ├── server.py              # MCP 服务器主程序（FastMCP 入口，11 tools + 4 resources）
 ├── jhyy_runner.py         # subprocess 封装（compile / run / check / get_il）
-├── spec_data.json         # 语言规范数据（从 v0.2.1 spec 提取）
-├── abi_data.json          # ABI 数据（从 v1.0.0 白皮书提取）
-├── tests/                 # 14 in-process tests (pytest)
+├── jhyy_regress.py        # jhyy_regress / jhyy_il_diff / jhyy_selfhost_check 实现（Sprint 1, 2026-08-11）
+├── jhyy_lang_ref.py       # jhyy_lang_ref tool 实现（关键词搜索 spec）
+├── jhyy_spec_doc.py       # spec 文档解析辅助（spec_data.json 生成上游）
+├── jhyy_workarounds.py    # jhyy_workarounds tool 实现（W-NNN 索引搜索）
+├── jhyy_ntstatus.py       # 内部 NTSTATUS helper —— 未注册 MCP 工具，留给 OS sprint
+├── (jhyy_format tool  实现内联在 server.py line 240 区域，无独立 .py 文件)
+├── spec_data.json         # 语言规范数据快照（从 jhyy-lang-spec-v1.3.0.md 提取）
+├── abi_data.json          # ABI 数据快照（从 jhyy-abi-v1.0.0.md 提取）
+├── CLAUDE.md              # 局部 Claude Code 项目指令（给"打开 mcp-jhyy/"场景用）
+├── tests/                 # pytest 测试
+│   ├── __init__.py
+│   ├── conftest.py        # pytest fixture
+│   ├── pytest.ini         # pytest 配置
+│   ├── test_abi_info.py
+│   ├── test_il_diff.py
+│   ├── test_lang_ref.py
+│   ├── test_ntstatus.py
+│   ├── test_regress.py
+│   ├── test_selfhost_check.py
+│   └── test_workarounds.py
 └── README.md              # 本文件
 ```
+
+**测试数 note**: 7 个 `test_*.py` 文件,每个含多个 `def test_*` 函数;pytest collection 自动累加(具体函数个数随 Sprint 演进,以 `pytest mcp-jhyy/tests/` 实际输出为准)。
 
 ## 维护
 
@@ -180,3 +201,5 @@ A: `jhyy_runner.py` 用了 `encoding="utf-8", errors="replace"`，Windows GBK �
 - 仅支持 Windows x64（与 JHYY 编译器当前目标一致）
 - `jhyy_format` 仅为最小占位实现
 - 编译/运行结果通过 `subprocess.run` 同步获取，大程序可能 timeout
+- `jhyy_ntstatus.py` 是内部 helper（NTSTATUS 解析）—— **未注册 MCP 工具**，保留给后续 OS sprint（per `docs/plans/v2/v2.0.0-os-prep.md` OS Debug ABI）
+- C-side 默认路径硬编码 `C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/build/bin/jhyy.exe`（改路径需编辑 `jhyy_runner.py` 顶部 `JHYY_ROOT`）

@@ -1,6 +1,8 @@
 # 编码约定
 
 > JHYY 编译器自身的开发规范。
+>
+> **Last updated**: v1.8.3 (2026-08-29) — v1.x 终结 baseline。二进制命名(`jhyy.exe` / `jhyy_v1.exe.exe` / `jhyy-setuc.exe`)仍为当前真值;v2.0 启动时按 `docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md` 推迟决策统一砍 C 端(`src/*.c`) + `qbe/` + `runtime.c`。
 
 ## 项目结构
 

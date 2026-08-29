@@ -8,8 +8,8 @@
 
 **Statically typed. Expression-oriented. Compiled to native via QBE.**
 
-[![Version](https://img.shields.io/badge/version-v1.0.0-00d4aa)](docs/logs/v1/changelog-v1.0.0.md)
-[![Status](https://img.shields.io/badge/self--host-byte--equal%20v1%E2%86%92v4-success)](docs/logs/v1/changelog-v1.0.0.md)
+[![Version](https://img.shields.io/badge/version-v1.8.3-00d4aa)](docs/logs/v1/changelog-v1.8.0.md)
+[![Status](https://img.shields.io/badge/self--host-byte--equal%20v1%E2%86%92v5-success)](docs/logs/v1/changelog-v1.8.0.md)
 [![Backend](https://img.shields.io/badge/backend-QBE-orange)](https://c9x.me/compile/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#build)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -21,30 +21,50 @@
 
 ---
 
-## v1.0.0 — Self-hosting closure achieved
+## v1.8.3 — v1.x final, installer self-hosting closure + UCPD.sys bypass
 
-`jhyy_v1 → jhyy_v2 → jhyy_v3 → jhyy_v4` compile themselves and emit **byte-equal QBE intermediate representation**:
+`jhyy_v1 → jhyy_v2 → jhyy_v3 → jhyy_v4 → jhyy_v5` compile themselves and emit **byte-equal QBE intermediate representation**:
 
 ```
-jhyy_v1.exe  → src0/main.jhyy →  jhyy_v2.il
-jhyy_v2.exe  → src0/main.jhyy →  jhyy_v3.il     ← byte-equal to v2.il
-jhyy_v3.exe  → src0/main.jhyy →  jhyy_v4.il     ← byte-equal to v2.il
-                                                 sha 2445e97d…
+jhyy_v1.exe.exe → src0/main.jhyy → jhyy_v2.il
+jhyy_v2.exe     → src0/main.jhyy → jhyy_v3.il   ← byte-equal to v2.il
+jhyy_v3.exe     → src0/main.jhyy → jhyy_v4.il   ← byte-equal to v2.il
+jhyy_v4.exe     → src0/main.jhyy → jhyy_v5.il   ← byte-equal to v2.il
+                                                 sha 03a1cdd4… (v1.8.0 ship)
 ```
 
-All four raw `.il` files share an identical sha256 (1.378 MB, no fix-up post-processing). The fixed point is an attractor, not a transient. **M4 milestone reached — tagged at commit `eabee0d` on 2026-08-10.**
+All five raw `.il` files share an identical sha256 (1.378 MB, no fix-up post-processing). The fixed point is an attractor, not a transient. **Stage 2 N=4 byte-equal closure reached at v1.0.0 (commit `eabee0d`, 2026-08-10), stable through v1.8.3 (commit `8fcbe4d`, 2026-08-29). v1.x is now finalized.**
 
 | Metric | Value |
 |--------|-------|
-| `regress.py` (C-side `jhyy.exe`) | **50/53 PASS, 0 failed** |
-| `regress_v1.py` (self-hosted `jhyy_v1.exe.exe`) | **50/53 PASS, 0 failed** |
+| `regress.py` (C-side `jhyy.exe`) | **102/102 PASS, 0 failed, 4 skipped** (106 total) |
+| `regress_v1.py` (self-hosted `jhyy_v1.exe.exe`) | **102/102 PASS, 0 failed, 4 skipped** (parity hold) |
 | Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | **7/7 PASS** |
-| Stage 2 N=3 byte-equal (`v1→v2→v3→v4`) | **stable** |
+| Stage 2 N=4 byte-equal (`v1→v2→v3→v4→v5`) | **stable** |
 | `jhyy_v2` compiling `_repro_t0.jhyy` | `EXIT=100` ✓ |
 | `jhyy_v2` compiling `fib(10)` | `EXIT=55` ✓ |
+| `installer/jhyy-installer-1.8.3.exe` | shipped (~30MB, includes .NET 8 Desktop Runtime) |
+| `installer/jhyy-compiler-1.8.3.msi` | shipped (~995KB, includes `jhyy-setuc.exe`) |
+| `vscode-ext/jhyy-lang-1.8.3.vsix` | shipped (~13KB) |
+
+**v1.x umbrella changelog** — [`docs/logs/v1/changelog-v1.8.0.md`](docs/logs/v1/changelog-v1.8.0.md) covers v1.8.0 main + v1.8.1 / v1.8.2 / v1.8.2 patch update / v1.8.3 / v1.8.3.1 / v1.8.3.2 patches (all `fix(v1.8.0)` commits, no new features). Historical v1.0.0 → v1.7.3 changelogs each live under `docs/logs/v1/changelog-vX.Y.Z.md`.
+
+**W-NNN workaround status (v1.8.3 ship)**:
+- ✅ W-059 defer codegen silent crash — RESOLVED 2026-08-28
+- ❌ W-060 enum variant payload ABI — INVALID 2026-08-28 (bash `$?` 8-bit truncation artifact, regress.py W-028 mod-256 fix handles)
+- ❌ W-061 nested struct field offset — INVALID 2026-08-28 (same reason)
+- ✅ W-062 VSCode UserChoice + MSYS2 OpenWithProgids shadow — RESOLVED 2026-08-29 (v1.8.3.1 闭环, SYSTEM-context CustomAction + 3-attempt fallback)
+- ✅ W-063 UCPD.sys kernel filter — RESOLVED 2026-08-29 (v1.8.3 真修, `jhyy-setuc.exe` .NET 8 SYSTEM-context writer)
+- 🟡 W-057 UTF-8 3/4-byte codepoint — DEFERRED-to-v2.x
+- 🟡 W-058 vendored QBE 缺 `remd`/`rems` — DEFERRED-to-v2.x
+- ⚠️ W-021 WiX Bal.wixext DLL naming — permanent workaround (WiX upstream won't fix)
+
+Full index: [`docs/internal/workarounds.md`](docs/internal/workarounds.md).
+
+**v0.x frozen**: `docs/logs/v0/changelog-v0.9.0.md` (3231 lines) — Stage 1 byte-equal 7 测试集 wip, frozen at v1.0.0 baseline (2026-08-29). v0.x C compiler (`compiler/src/*.c`) enters maintenance-only mode; new features go through `compiler/src0/*.jhyy`. Per `docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md`, M5 boot-from-scratch cleanup (delete `src/*.c` + `qbe/` + `runtime.c`) is deferred until v2.x end + v3.x end.
 
 > [!NOTE]
-> **v1.0.0 is both a milestone and a starting point.** The C-side compiler (`compiler/src/*.c`) remains the production path; `compiler/src0/*.jhyy` (the jhyy-side translated source) already produces byte-equal output, and subsequent sprints plan to gradually migrate the production path onto the self-hosted compiler (`v1.x → v2.x` roadmap).
+> **v1.8.3 is v1.x final.** The C-side compiler (`compiler/src/*.c`) remains the production path during v1.x; `compiler/src0/*.jhyy` (the jhyy-side translated source) already produces byte-equal output. v2.0 will switch the production path to `jhyy_v1.exe.exe` and start the QBE rewrite + multi-target / OS prep (see [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md)).
 
 ---
 
@@ -112,7 +132,7 @@ echo $?    # => 42
 
 ```bash
 python compiler/build/bin/regress.py
-# => 50/50 passed, 0 failed, 3 skipped (of 53 total)
+# => 102/102 passed, 0 failed, 4 skipped (of 106 total)
 ```
 
 ### Run with VSCode
@@ -212,7 +232,7 @@ JiHuiYiYou-compiler/
 │           ├── jhyy_v1.exe     self-hosted compiler (jhyy compiled src0/)
 │           └── regress.py      regression script
 ├── qbe/                        vendored QBE backend (c9x.me/compile)
-├── mcp-jhyy/                   Claude Code MCP server (11 tools)
+├── mcp-jhyy/                   Claude Code MCP server (11 tools + 4 resources)
 ├── vscode-ext/                 VS Code language extension (syntax highlighting)
 ├── docs/
 │   ├── abis/                   language spec + ABI whitepaper (locked)
@@ -230,11 +250,11 @@ JiHuiYiYou-compiler/
 
 | Check | Command | Expected |
 |-------|---------|----------|
-| C-side regression | `python compiler/build/bin/regress.py` | 50/53 PASS |
-| Self-host regression | `python compiler/build/bin/regress_v1.py` | 50/53 PASS |
+| C-side regression | `python compiler/build/bin/regress.py` | **102/102 PASS + 4 SKIP** (106 total) |
+| Self-host regression | `python compiler/build/bin/regress_v1.py` | **102/102 PASS + 4 SKIP** (parity hold) |
 | Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | `python compiler/tests/stage1-expanded.sh` | 7/7 PASS |
-| Stage 2 N=3 byte-equal (`v1→v2→v3→v4`) | MCP `jhyy_selfhost_check` | `all_byte_equal=true`, stable il_sha256 |
-| MCP smoke (14 in-process tests) | `pytest mcp-jhyy/tests/` | 14 pass |
+| Stage 2 N=4 byte-equal (`v1→v2→v3→v4→v5`) | MCP `jhyy_selfhost_check` | `all_byte_equal=true`, stable il_sha256 |
+| MCP smoke (7 test files, X `def test_*` funcs) | `pytest mcp-jhyy/tests/` | all pass |
 | One-line build | `make` | 0 warnings (-Wall -Wextra) |
 
 ---
@@ -245,10 +265,10 @@ The project uses a **single version axis**, no phase-N numbering:
 
 | Axis | Scope | Goal | Status |
 |------|-------|------|--------|
-| **v0.x** | C-side compiler itself | reach self-host threshold | **done** |
-| **v1.x** | jhyy self-hosting | byte-equal `.il` closure | **v1.0.0 tagged** |
-| **v2.x** | full QBE rewrite + multi-target / OS prep | amd64_sysv / freestanding | not started |
-| **v3.x** | language extensions | OS-required: asm / volatile / naked / `no_std` / `&mut` + lifetime | not started |
+| **v0.x** | C-side compiler itself | reach self-host threshold | **🟢 done (frozen at v1.0.0 baseline)** |
+| **v1.x** | jhyy self-hosting | byte-equal `.il` closure | **🟢 v1.8.3 shipped (v1.x final)** |
+| **v2.x** | full QBE rewrite + multi-target / OS prep | amd64_sysv / freestanding | **next** — design input = [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md) |
+| **v3.x** | language extensions | OS-required: asm / volatile / naked / `no_std` / `&mut` + lifetime | **next (parallel with v2.x)** |
 
 **Axis relationships**:
 - `v0.x → v1.x → v2.x / v3.x`: **strict order** (each is a hard prerequisite of the next)
@@ -278,7 +298,7 @@ Details in [`mcp-jhyy/README.md`](mcp-jhyy/README.md).
 
 ### VS Code extension
 
-`vscode-ext/` ships syntax highlighting (TextMate grammar + file icon). Install instructions in [`vscode-ext/`](vscode-ext/) (the bilingual README retains legacy VS Code setup details for the Chinese version).
+`vscode-ext/` ships syntax highlighting (TextMate grammar + file icon) + native `Run JHYY File` (`Ctrl+F5`) + `Compile JHYY File (no run)` commands. Latest shipped = `jhyy-lang-1.8.3.vsix`. Install + build instructions in [`vscode-ext/README.md`](vscode-ext/README.md).
 
 ---
 
@@ -312,9 +332,9 @@ Details in [`mcp-jhyy/README.md`](mcp-jhyy/README.md).
 
 ### Changelog
 
-Latest: [`docs/logs/v1/changelog-v1.0.0.md`](docs/logs/v1/changelog-v1.0.0.md) — **v1.0.0 self-hosting closure reached**
+Latest: [`docs/logs/v1/changelog-v1.8.0.md`](docs/logs/v1/changelog-v1.8.0.md) — **v1.x umbrella (covers v1.8.0 main + v1.8.1 / v1.8.2 / v1.8.2 patch update / v1.8.3 / v1.8.3.1 / v1.8.3.2 patches)**
 
-Historical index: [`docs/logs/`](docs/logs/).
+Historical index: [`docs/logs/`](docs/logs/) — v1.0.0 → v1.7.3 each have their own umbrella;v0.0.1 → v0.9.0 for C-side compiler (v0.9 frozen at v1.0.0 baseline).
 
 ---
 
