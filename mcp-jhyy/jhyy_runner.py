@@ -56,13 +56,15 @@ def _build_subprocess_env() -> dict:
     Direct python regress.py 调用时 os.environ 已 Windows-style, sanitize no-op —
     不破坏现有 env.
     """
+    import tempfile
+    default_tmp = tempfile.gettempdir()
     env = os.environ.copy()
     if not env.get("TMP"):
-        env["TMP"] = r"C:\Users\liuzhen\AppData\Local\Temp"
+        env["TMP"] = default_tmp
     if not env.get("TEMP"):
-        env["TEMP"] = r"C:\Users\liuzhen\AppData\Local\Temp"
+        env["TEMP"] = default_tmp
     if not env.get("TMPDIR"):
-        env["TMPDIR"] = r"C:\Users\liuzhen\AppData\Local\Temp"
+        env["TMPDIR"] = default_tmp
     # ALWAYS force Windows-style PATH
     win_path = r"C:\Windows\System32;C:\Windows;C:\msys64\ucrt64\bin;C:\msys64\usr\bin"
     if env.get("PATH") and not env["PATH"].startswith("/"):

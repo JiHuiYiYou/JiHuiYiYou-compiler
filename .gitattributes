@@ -10,3 +10,6 @@
 *.sh     text eol=lf
 *.ini    text eol=lf
 Makefile text eol=lf
+# qbe/ vendored source 上游是 CRLF; 声明 eol=lf 让 git 知道仓库意图是 LF.
+# 实际 normalization 需 `git add --renormalize qbe/` 单独触发 (避免本 commit 100+ 文件 mass diff)
+qbe/** text eol=lf

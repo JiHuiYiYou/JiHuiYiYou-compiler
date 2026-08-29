@@ -9,6 +9,7 @@
 Sprint mcp-1 (2026-08-11).
 """
 import os
+from pathlib import Path
 
 import pytest
 
@@ -74,7 +75,7 @@ async def test_regress_baseline_drift_detection(mcp_client):
 
     Setup: 临时建一个 fake baseline 文件, sha 跟实际 binary 不匹配.
     """
-    bin_path = "C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/build/bin/jhyy.exe"
+    bin_path = str(Path(__file__).resolve().parents[2] / "compiler/build/bin/jhyy.exe")
     sha_path = bin_path + ".sha256"
 
     # Backup real baseline if it exists

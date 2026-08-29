@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import jhyy_spec_doc
 
 
-ABI_PATH = Path("C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/docs/abis/jhyy-abi-v1.0.0.md")
+ABI_PATH = Path(__file__).resolve().parents[2] / "docs/abis/jhyy-abi-v1.0.0.md"
 
 
 def _search(query, limit=20):

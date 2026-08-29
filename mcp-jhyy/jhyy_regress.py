@@ -61,13 +61,15 @@ def _build_subprocess_env() -> dict:
     v1.5.6 fix: 把 W-027 v4 整段 (含 found_dirs + shutil.which + msys2_roots)
       删掉, 改由 jhyy.exe jh_gcc_path() 接管. 见 workarounds.md W-029.
     """
+    import tempfile
+    default_tmp = tempfile.gettempdir()
     env = os.environ.copy()
     if not env.get("TMP"):
-        env["TMP"] = r"C:\Users\liuzhen\AppData\Local\Temp"
+        env["TMP"] = default_tmp
     if not env.get("TEMP"):
-        env["TEMP"] = r"C:\Users\liuzhen\AppData\Local\Temp"
+        env["TEMP"] = default_tmp
     if not env.get("TMPDIR"):
-        env["TMPDIR"] = r"C:\Users\liuzhen\AppData\Local\Temp"
+        env["TMPDIR"] = default_tmp
     if not env.get("SystemRoot"):
         env["SystemRoot"] = r"C:\Windows"
     if not env.get("SystemDrive"):

@@ -6,6 +6,7 @@ fail-fast 路径 (binary 缺失 + 错误 src) 不验证全链路, 全链路留�
 Sprint mcp-1 (2026-08-11).
 """
 import os
+from pathlib import Path
 
 import pytest
 
@@ -16,7 +17,7 @@ import pytest
 async def test_selfhost_check_fail_fast_missing_binary(mcp_client):
     """jhyy_v1.exe 缺失 → fail-fast + clear error."""
     # Setup: rename jhyy_v1.exe.exe 临时避开
-    bin_path = "C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/build/bin/jhyy_v1.exe.exe"
+    bin_path = str(Path(__file__).resolve().parents[2] / "compiler/build/bin/jhyy_v1.exe.exe")
     backup = bin_path + ".test_backup"
     renamed = False
     if os.path.exists(bin_path):
@@ -43,12 +44,12 @@ async def test_selfhost_check_fail_fast_missing_binary(mcp_client):
 @pytest.mark.asyncio
 async def test_selfhost_check_result_schema(mcp_client):
     """完整跑 (跳过 missing-binary 测试) 验证 schema 字段."""
-    bin_path = "C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/build/bin/jhyy_v1.exe.exe"
+    bin_path = str(Path(__file__).resolve().parents[2] / "compiler/build/bin/jhyy_v1.exe.exe")
     if not os.path.exists(bin_path):
         pytest.skip("jhyy_v1.exe.exe not built — skip end-to-end schema test")
 
     # Use _repro_t0.jhyy which is known to work (per memory project_v1_0_0_closure).
-    repro_src = "C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/tests/examples/_repro_t0.jhyy"
+    repro_src = str(Path(__file__).resolve().parents[2] / "compiler/tests/examples/_repro_t0.jhyy")
     if not os.path.exists(repro_src):
         pytest.skip(f"_repro_t0.jhyy not found at {repro_src}")
 
