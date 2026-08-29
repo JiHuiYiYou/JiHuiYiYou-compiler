@@ -399,6 +399,37 @@
               KeyPath="yes"
               Checksum="yes" />
       </Component>
+
+      <!--
+        ManualFixIconCachePS1 (v1.8.2 patch): ships manual-fix-icon-cache.ps1
+        to INSTALLDIR\common\. Invoked via install-configure-all.bat RunOnce
+        step 6 to do Path B icon fix (register JHYY.EditInVSCode ProgId +
+        write UserChoice Hash). Self-elevates via UAC if not running as admin.
+        For existing installs: user can run from admin shell directly.
+      -->
+      <Component Id="ManualFixIconCachePS1" Bitness="always64" Guid="A2F4B7E9-5D3C-4E8B-A6F1-7C9D2E3B5A88">
+        <File Id="ManualFixIconCachePS1File"
+              Source="!(bindpath.common)\manual-fix-icon-cache.ps1"
+              KeyPath="yes" />
+      </Component>
+
+      <!--
+        JHYYSetUCExe (v1.8.2 patch): ships jhyy-setuc.exe (UserChoice Hash
+        writer tool). Built via dotnet from installer/common/jhyy-setuc/Program.cs.
+        Called by manual-fix-icon-cache.ps1 step 4 to do the actual Hash compute
+        + UserChoice write (with UCPD pause/restart). admin-only (UCPD requires).
+
+        Note: requires .NET 8 Desktop Runtime on user's machine. If missing,
+        jhyy-setuc.exe fails to launch with a clear error — manual-fix-icon-cache.ps1
+        catches this and continues (Path A fallback: just delete the existing
+        shadow + brute-force cache flush).
+      -->
+      <Component Id="JHYYSetUCExe" Bitness="always64" Guid="B3D5C8F2-6E4D-4F9C-B7E2-8D1A3F4C6B99">
+        <File Id="JHYYSetUCExeFile"
+              Source="!(bindpath.common)\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.exe"
+              KeyPath="yes"
+              Checksum="yes" />
+      </Component>
     </ComponentGroup>
 
     <!--

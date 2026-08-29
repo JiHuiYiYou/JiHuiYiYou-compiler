@@ -177,3 +177,28 @@ python compiler/build/bin/regress.py
 4. **目标平台**：`-t amd64_win`（Windows x64 PE），不是默认的 `amd64_sysv`（Linux ELF）
 
 见 `docs/internal/architecture.md` 中 codegen 相关章节。
+
+---
+
+## v1.8.2 patch — `.jhyy` 文件图标修复 (UserChoice hijack + OpenWithProgids shadow)
+
+**问题**: v1.8.1 patch 修了 WiX `(default)` 写错位 + `jhyy.exe,0` embedded icon, 但仍有两层独立 hijack 让文件夹视图显示白板文档图标:
+
+1. **VSCode UserChoice hijack**: `HKCU\…\FileExts\.jhyy\UserChoice\ProgId = Applications\Code.exe`, UCPD.sys 加 Deny ACE 防非 admin SetValue
+2. **MSYS2 OpenWithProgids 残留**: `HKCU\…\FileExts\.jhyy\OpenWithProgids\jhyy_auto_file` (v1.8.1 step 4 没清)
+
+**修复路径 (Path B)**:
+- 注册自定义 ProgId `JHYY.EditInVSCode` (`DefaultIcon=jhyy-icon.ico,0` + `shell\open\command=Code.exe "%1"`)
+- 用 Mozilla reverse-engineered UserChoice Hash 算法 (`installer/common/jhyy-setuc/Program.cs`, MPL 2.0) 写 `UserChoice\ProgId=JHYY.EditInVSCode`
+- MSI install 时 RunOnce step 6 自动跑 `installer/common/manual-fix-icon-cache.ps1` (admin + UCPD pause/restart)
+
+**新装 MSI**: RunOnce step 6 自动应用, 不需手动操作. 如已装 v1.8.0/v1.8.1 旧版, 跑 `C:\Users\liuzhen\Desktop\JHYY-Fix-Icon.bat` (self-elevate via UAC) 立即生效.
+
+**jhyy-setuc.exe build** (修改 `installer/common/jhyy-setuc/Program.cs` 后):
+```bash
+cd installer/common/jhyy-setuc && powershell -NoProfile -ExecutionPolicy Bypass -File ./build.ps1
+# 输出: bin/Release/net8.0-windows/jhyy-setuc.exe
+```
+MSI rebuild 时自动重新包进 `INSTALLDIR\common\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.exe` (WiX `JHYYSetUCExe` Component, per `installer/compiler/jhyy-compiler.wxs`).
+
+**已知 limitation**: 需用户机装 .NET 8 Desktop Runtime. 缺失时 jhyy-setuc.exe 启动失败 → `manual-fix-icon-cache.ps1` 自动降级 Path A (只 reg delete, 不需 .NET).

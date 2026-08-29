@@ -83,13 +83,44 @@ rem    per-machine MSI-installed HKCR\.jhyy\(default) = "JHYY.SourceFile".
 rem    Without this cleanup, Explorer still picks the MSYS2 auto-class file
 rem    (no DefaultIcon) and falls back to the white-document icon.
 rem    Idempotent: reg delete on an absent key returns errorlevel 1, which we ignore.
-rem    For users wanting the icon NOW without logoff/logon: run from admin shell
-rem    "reg delete \"HKCU\Software\Classes\.jhyy\" /f" + "ie4uinit.exe -show".
 reg.exe delete "HKCU\Software\Classes\.jhyy" /f >nul 2>&1
 if errorlevel 1 (
     echo [install-configure-all] HKCU shadow cleanup: no .jhyy shadow present (exit !ERRORLEVEL!), continuing
 ) else (
     echo [install-configure-all] OK: HKCU\Software\Classes\.jhyy shadow cleared
+)
+
+rem 5. (v1.8.2 patch) Cleanup HKCU\…\Explorer\FileExts\.jhyy UserChoice + OpenWithProgids
+rem    v1.8.1 only cleaned HKCU\Software\Classes\.jhyy. v1.8.2 also nukes the
+rem    FileExts subtree because UserChoice hijack (Applications\Code.exe) is a
+rem    SEPARATE mechanism that v1.8.1 missed. UCPD.sys will re-block the UserChoice
+rem    path — that's why step 6 calls manual-fix-icon-cache.ps1 which stops UCPD
+rem    temporarily via admin token.
+reg.exe delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.jhyy" /f >nul 2>&1
+if errorlevel 1 (
+    echo [install-configure-all] FileExts\.jhyy cleanup: no shadow present, continuing
+) else (
+    echo [install-configure-all] OK: FileExts\.jhyy cleared (UserChoice + OpenWithProgids shadow removed)
+)
+
+rem 6. (v1.8.2 patch) Path B: register JHYY.EditInVSCode ProgId + write UserChoice Hash.
+rem    Runs manual-fix-icon-cache.ps1 elevated. This script:
+rem      a. Stops UCPD service (admin)
+rem      b. Writes JHYY.EditInVSCode ProgId with DefaultIcon=jhyy-icon.ico + Code.exe command
+rem      c. Computes Mozilla reverse-engineered UserChoice Hash
+rem      d. Writes UserChoice=JHYY.EditInVSCode with Hash
+rem      e. Restarts UCPD service (admin)
+rem    If RunOnce context doesn't have admin token, the inner ps1 self-elevates via UAC.
+if not exist "%BIN_DIR%manual-fix-icon-cache.ps1" (
+    echo [install-configure-all] ERROR: manual-fix-icon-cache.ps1 missing
+    exit /b 1
+)
+echo [install-configure-all] Running Path B icon fix (UserChoice Hash write)...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%BIN_DIR%manual-fix-icon-cache.ps1"
+if errorlevel 1 (
+    echo [install-configure-all] WARN: manual-fix-icon-cache.ps1 exited !ERRORLEVEL!, continuing
+) else (
+    echo [install-configure-all] OK: Path B icon fix applied
 )
 
 echo [install-configure-all] DONE.

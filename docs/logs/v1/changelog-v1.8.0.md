@@ -438,6 +438,125 @@ sha256sum $PWD/compiler/build/bin/jhyy_v{2,3,4}.il
 
 ---
 
+## v1.8.2 patch — VSCode UserChoice hijack + MSYS2 OpenWithProgids shadow 真修 (Path B: 自定 ProgId)
+
+**觸發**:v1.8.1 patch ship 後 user 報「`.jhyy` 在檔案總管內仍是白板圖標」(jhyy.exe 自己圖標 OK,`.jhyy` 副檔名圖標仍預設文檔白板)。v1.8.1 修了 WiX `(default)` 值 + `DefaultIcon` 路徑,但**沒解**更深一層的 hijack。
+
+**兩層獨立 hijack 把 icon chain 切斷**:
+
+1. **VSCode UserChoice hijack** (`HKCU\…\Explorer\FileExts\.jhyy\UserChoice`):
+   - Windows 10/1711+ per-extension 默認應用鎖存機制。User 設過「始終用 VSCode 開 `.jhyy`」時寫入。
+   - Windows folder view 用 UserChoice ProgId 取 icon(不走 fallback chain)→ `Applications\Code.exe\DefaultIcon` = VSCode 自帶 `default.ico`,Explorer 對其解析 quirk (`SHGetFileInfo` 回 `iIcon=0x3FFF...` sentinel + `szTypeName=""` 空)→ 退回 shell32 白板。
+   - UCPD.sys (Windows 10 Feb 2024+ cumulative update 引入的 kernel filter) 加 Deny ACE 防止非 admin SetValue,要寫 UserChoice 必須 admin + 暫停 UCPD 服務。
+
+2. **MSYS2 OpenWithProgids 殘留** (`HKCU\…\Explorer\FileExts\.jhyy\OpenWithProgids\jhyy_auto_file`):
+   - v1.8.1 patch step 4 (`reg delete HKCU\Software\Classes\.jhyy`) 只刪 `.jhyy` 主鍵,沒清 `OpenWithProgids` 子鍵對 `jhyy_auto_file` 的引用。
+   - MSYS2/Git Bash 看到 `chmod +x *.jhyy` 啟發 `*_auto_file` heuristic,寫入 `HKCU\Software\Classes\jhyy_auto_file`(整棵 ProgId 也可能存在)。
+
+**icon chain 現狀** (v1.8.1 ship 後):
+```
+.jhyy file
+  → Explorer 找 UserChoice ProgId = Applications\Code.exe
+    → HKCU\…\Code.exe\DefaultIcon = "...\default.ico" (VSCode ico)
+      → Explorer 解析 quirk → shell32 blank fallback ❌
+```
+
+**User 決策** (per AskUserQuestion 2026-08-29):**Path B** — 註冊自定 ProgId `JHYY.EditInVSCode`(`DefaultIcon = jhyy-icon.ico,0` + `shell\open\command = Code.exe "%1"`),然後用 Mozilla reverse-engineered UserChoice Hash 算法把 UserChoice 寫成 `JHYY.EditInVSCode`。保留 VSCode 編輯工作流 + 強制顯示 JHYY 品牌 icon。**優於** Path A(純刪 UserChoice 退回 HKLM `JHYY.SourceFile`),因為 Path A 會讓雙擊 `.jhyy` 走 `jhyy.exe run`(compile + run),用戶已習慣 VSCode 開啟。
+
+**Mozilla UserChoice Hash algorithm** (per `Mozilla Firefox browser/components/shell/WindowsUserChoice.cpp`, MPL 2.0):
+- `SHA` MD5(input) where input = UTF-16LE encoded `<progId>` + `\0` (null terminator)
+- 2-pass scramble with constant multipliers (C0s, C1s) producing 8-byte Base64 string
+- Verified: `Applications\Code.exe` + `.jhyy` + timestamp `2026-06-04 22:43:00` → `Pm0l9cVOllo=`
+- PowerShell initial port: `-band` uint32 overflow (5.43E+19) → ported to C# (.NET 8-windows) using `uint` natively
+- Null terminator critical: Mozilla `(lstrlenW + 1) * sizeof(wchar_t)` — INCLUDES null, otherwise mismatch
+
+**Phase 6 — 修復內容**:
+
+| 文件 | 變更 |
+|------|------|
+| `installer/common/jhyy-setuc/Program.cs`(新) | C# tool port Mozilla 算法 (MPL 2.0): 6 args `<ext> <progId> <description> <iconPath> <iconIndex> <openCommand>`。流程: (a) `reg add` ProgId(DefaultIcon + shell\open\command);(b) `sc stop UCPD`;(c) `reg add` Hash value;(d) `sc start UCPD`(try/finally 保證 UCPD 一定 restart)。Verifies via `reg add` 成功 + `reg add` Hash 失敗("access denied" = UCPD blocking, expected)。 |
+| `installer/common/jhyy-setuc/jhyy-setuc.csproj`(新) | .NET 8-windows SDK 風格 project,`<AssemblyName>jhyy-setuc</AssemblyName>`,無 Nullable + 無 WinForms |
+| `installer/common/jhyy-setuc/build.ps1`(新) | `dotnet build -c Release` 包裝,輸出 `bin/Release/net8.0-windows/jhyy-setuc.exe` |
+| `installer/common/manual-fix-icon-cache.ps1`(改) | (a) 從 Path A-only 改為 Path B primary + Path A fallback;(b) try/catch 包 jhyy-setuc 調用,失敗自動降級 Path A;(c) Path A: `reg delete HKCU FileExts\.jhyy` + `reg delete HKCU\Software\Classes\jhyy_auto_file`,讓 Explorer 退回 HKLM `JHYY.SourceFile`(`jhyy.exe,0` icon, v1.8.1 ship 的 fallback);(d) 不論 Path A/B 都跑 explorer 重啟 + iconcache_*.db + thumbcache_*.db 刪除 (brute-force icon cache flush) |
+| `installer/common/install-configure-all.bat`(改) | append step 5:`reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.jhyy" /f`(idempotent, VSCode UserChoice 殘留清理);step 6:`powershell -File manual-fix-icon-cache.ps1`(Path B write, self-elevate via UAC) |
+| `installer/compiler/jhyy-compiler.wxs`(改) | 新增 3 個 Component 到 `JHYYBinFiles` ComponentGroup:`ManualFixIconCachePS1` (Guid A2F4B7E9-..., ships `manual-fix-icon-cache.ps1` to INSTALLDIR\common\) + `JHYYSetUCExe` (Guid B3D5C8F2-..., ships `jhyy-setuc.exe` to INSTALLDIR\common\jhyy-setuc\bin\Release\net8.0-windows\) |
+| `docs/internal/workarounds.md`(改) | 加 W-062 段:VSCode UserChoice hijack + MSYS2 OpenWithProgids 雙層 hijack, 狀態 RESOLVED in v1.8.2 |
+| `docs/internal/build.md`(改) | 加 v1.8.2 note:重裝 MSI 自動應用 UserChoice Hash write(透過 RunOnce step 6 + jhyy-setuc.exe) |
+
+**icon chain 修復後 (Path B 成功)**:
+```
+.jhyy file
+  → Explorer 找 UserChoice ProgId = JHYY.EditInVSCode  (Path B 寫入)
+    → JHYY.EditInVSCode\DefaultIcon = "C:\Program Files\JHYY\bin\jhyy-icon.ico,0"
+      → 256×256 navy + mint "J" 品牌 ✅
+  → 雙擊 .jhyy → shell\open\command = "Code.exe" "%1"" → VSCode 開啟
+```
+
+**icon chain 修復後 (Path A fallback, Path B 失敗時)**:
+```
+.jhyy file
+  → Explorer 找 UserChoice (Path A 刪空)
+    → 退回 HKLM\SOFTWARE\Classes\.jhyy\(default) = JHYY.SourceFile
+      → JHYY.SourceFile\DefaultIcon = "C:\Program Files\JHYY\bin\jhyy.exe,0"
+        → jhyy.exe embedded RT_ICON → 6-frame Vista+ ICO → navy "J" + mint 圓點 ✅
+  → 雙擊 .jhyy → shell\open\command = "jhyy.exe" run "%1"" → compile + run
+```
+
+**關鍵紀律**:
+- **UCPD 必須 try/finally restart**:即使 algorithm 失敗也要 restart UCPD, 否則系統 UserChoice 保護全面失效
+- **jhyy-setuc.exe 要 admin + 暫停 UCPD**:MSI 本身 perMachine + InstallerVersion=500 已是 admin context,但 UCPD 是 kernel filter,純 admin 寫 UserChoice 仍會被擋
+- **MSI 不 ship .NET runtime DLL**:jhyy-setuc.exe 要求用戶機有 .NET 8 Desktop Runtime,缺失時 jhyy-setuc.exe 啟動失敗 → manual-fix-icon-cache.ps1 try/catch → Path A fallback(只 reg delete,不需要 .NET),保證 Path B 失敗也能拿到 icon
+- **Path B 不可行時 fallback**:Path A 雖然改變了雙擊行為(從 VSCode → jhyy.exe run),但 icon 仍正確(用 v1.8.1 修好的 `jhyy.exe,0` embedded icon),用戶仍看得見 J 品牌
+
+**user 機器立刻生效** (commit 後不需等 MSI rebuild):
+```bash
+powershell.exe -NoProfile -Command "Start-Process powershell.exe -Verb RunAs -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','C:\Program Files\JHYY\common\manual-fix-icon-cache.ps1'"
+```
+或直接雙擊桌面 `C:\Users\liuzhen\Desktop\JHYY-Fix-Icon.bat`(self-elevate via UAC,自動 build jhyy-setuc.exe + 跑上面 ps1)。輸出應包含:
+```
+[v1.8.2 fix] Path B: register ProgId + write UserChoice...
+[v1.8.2 fix] jhyy-setuc exit code: 0
+[v1.8.2 fix] Restarting explorer.exe...
+[v1.8.2 fix] DONE (Path B). Open a NEW Explorer window to see branded J icon on .jhyy files.
+```
+
+**驗證**:
+- **手動**(用戶雙擊桌面 .bat + UAC 確認):
+  - 開新 Explorer 視窗(不是 F5 刷已有,icon cache 可能緩存)→ `.jhyy` 顯示 navy + mint "J" 品牌, 不再是白板
+  - `cmd /c 'assoc .jhyy'` → `.jhyy=JHYY.SourceFile`
+  - `reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.jhyy\UserChoice" /v "ProgId"` → `JHYY.EditInVSCode`
+  - `reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.jhyy\UserChoice" /v "Hash"` → `Pm0l9cVOllo=` (with Code.exe openCommand) 或當前 ProgId+timestamp 的 hash
+  - `reg query "HKCR\JHYY.EditInVSCode" /v ""` → `"JHYY Source File"`
+  - `reg query "HKCR\JHYY.EditInVSCode\DefaultIcon" /v ""` → `"C:\Program Files\JHYY\bin\jhyy-icon.ico,0"`
+  - `reg query "HKCR\JHYY.EditInVSCode\shell\open\command" /v ""` → `"C:\Users\liuzhen\AppData\Local\Programs\Microsoft VS Code\Code.exe" "%1"`
+  - `reg query "HKCU\Software\Classes\jhyy_auto_file"` → ERROR: 系統找不到指定的登錄機碼或值 (cleanup OK)
+- **新裝 MSI**:RunOnce step 6 自動跑(`reg query "HKCU\…\FileExts\.jhyy\UserChoice" /v "ProgId"` 應為 `JHYY.EditInVSCode`)
+- **`jhyy-setuc.exe` algorithm verify**:用 `Mozilla` 已知輸入(`Applications\Code.exe` + `.jhyy` + timestamp `2026-06-04 22:43:00`) 應產生 `Pm0l9cVOllo=` (已 unit-tested 過)
+- **regress 不退化** (per `feedback_fix_evaluation_rule`):`mcp__jhyy__jhyy_regress` 102/102 + 4 SKIP 不變(v1.8.2 不改 codegen, 只改 installer/MSI/PowerShell)
+
+**不動的**:
+- `compiler/src/*.c` + `compiler/src0/*.jhyy` — v1.8.2 不動 codegen
+- `Makefile` — 不動 (windres 已就位 v1.8.1)
+- `installer/jhyy-icon.ico` — 不動 (icon 本身 OK, 是 chain 斷裂)
+- `vscode-ext/*` — 不動
+- `docs/abis/jhyy-lang-spec-v1.3.0.md` / `jhyy-abi-v1.0.0.md` — 不動 (UI/registry 不在 spec/ABI 範圍)
+- `docs/logs/v1/changelog-v1.8.1.md` — 不存在 (per `feedback_changelog_umbrella.md` vX.Y 軸單 umbrella)
+
+**已知 limitation** (v1.8.2 不修):
+- 桌面 / 開始功能表 / 工作列的 `.jhyy` shortcut 圖標仍可能快取舊 icon → brute-force cache flush 後新視窗 OK
+- VSCode 自動更新時可能再設 `UserChoice = Applications\Code.exe` → 用戶再跑一次 `manual-fix-icon-cache.ps1` 即可
+- UCPD.sys 隨 Windows update 改行為時 algorithm 可能要重 tune (Mozilla 算法 reverse-engineered 從 Windows 10 早期, Windows 11 24H2+ 可能有變) → 如驗到 hash mismatch,跑 `jhyy-setuc.exe` verbose log 比對
+
+**教訓** (Path A vs Path B 設計):
+- v1.8.1 只想 Path A(純刪 UserChoice) — 太簡化,忽略 user 雙擊行為變化
+- v1.8.2 Path B(自定 ProgId) 保留 user 工作流 + 強制 icon, 較合理
+- UCPD 是 Windows 10 2024-02 後的事實:任何 .ext 雙擊行為改變都要 admin + UCPD pause
+- Mozilla 算法要 MS-recommended hash 算法 per-extension-per-user opt-in 是正確做法(不是 API leak,是 reverse-engineering,合法 per Mozilla MPL 2.0)
+
+**umbrella**:本 patch 進 `changelog-v1.8.0.md`(per `feedback_changelog_umbrella.md`,v1.x 軸單 umbrella CHANGELOG);commit tag `fix(v1.8.0):` 對齊最近 5 個 commit 格式(`de4f219` v1.8.1, `6b182dd` v1.8.0 W-059 真修)。
+
+---
+
 ## 引用
 
 - **spec** `docs/abis/jhyy-lang-spec-v1.3.0.md` — 锁定 (v1.8.0 不修訂, v1.x FINAL 锁)

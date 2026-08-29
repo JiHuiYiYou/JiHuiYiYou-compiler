@@ -1,0 +1,4 @@
+# dotnet build outputs (jhyy-setuc is .NET 8-windows project).
+# Build via build.ps1; bin/obj regenerated.
+bin/
+obj/
