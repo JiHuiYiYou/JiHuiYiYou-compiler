@@ -4279,10 +4279,14 @@ v1.8.1 patch 修了:
   → 雙擊 .jhyy → shell\open\command = "jhyy.exe" run "%1"" → compile + run
 ```
 
-**user 机器立刻生效** (commit 后不需等 MSI rebuild):
+**user 机器立刻生效** (v1.8.2 时期 commit 后不需等 MSI rebuild):
 ```bash
-# 双击桌面 C:\Users\liuzhen\Desktop\JHYY-Fix-Icon.bat (self-elevate via UAC)
+# v1.8.2 时期: 双击桌面 C:\Users\liuzhen\Desktop\JHYY-Fix-Icon.bat (self-elevate via UAC)
 # 自动: build jhyy-setuc.exe (如果未 build) → 调 manual-fix-icon-cache.ps1 → Path B write → icon cache flush
+#
+# v1.8.3.1+ 已 supersede: MSI install WiX CustomAction SYSTEM-context 自动跑 jhyy-setuc.exe
+# --system-context, 写每 user HKCU, 无需手动跑任何 bat/ps1。 桌面 bat 已删(2026-08-29)。
+# 若需手动跑(developer / 旧版升级), 直接 powershell -File "C:\Program Files\JHYY\bin\manual-fix-icon-cache.ps1"
 ```
 输出应包含:
 ```

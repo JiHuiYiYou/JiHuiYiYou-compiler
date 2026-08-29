@@ -187,12 +187,13 @@ python compiler/build/bin/regress.py
 1. **VSCode UserChoice hijack**: `HKCU\…\FileExts\.jhyy\UserChoice\ProgId = Applications\Code.exe`, UCPD.sys 加 Deny ACE 防非 admin SetValue
 2. **MSYS2 OpenWithProgids 残留**: `HKCU\…\FileExts\.jhyy\OpenWithProgids\jhyy_auto_file` (v1.8.1 step 4 没清)
 
-**修复路径 (Path B)**:
+**修复路径 (v1.8.3.1 ship 后 — MSI install 全自动)**:
 - 注册自定义 ProgId `JHYY.EditInVSCode` (`DefaultIcon=jhyy-icon.ico,0` + `shell\open\command=Code.exe "%1"`)
-- 用 Mozilla reverse-engineered UserChoice Hash 算法 (`installer/common/jhyy-setuc/Program.cs`, MPL 2.0) 写 `UserChoice\ProgId=JHYY.EditInVSCode`
-- MSI install 时 RunOnce step 6 自动跑 `installer/common/manual-fix-icon-cache.ps1` (admin + UCPD pause/restart)
+- 用 Mozilla reverse-engineered UserChoice Hash 算法 (`installer/common/jhyy-setuc/Program.cs`, MPL 2.0) 写 `UserChoice\ProgId=JHYY.SourceFile`(v1.8.3.1 起改用 `JHYY.SourceFile`,跟 HKLM 默认 ProgId 对齐)
+- MSI install 时 WiX CustomAction `JHYYSetUCForAllUsers` (Execute="deferred" + Impersonate="no" + SYSTEM context, per `installer/compiler/jhyy-compiler.wxs`) 自动跑 `jhyy-setuc.exe --system-context` 写每个 interactive user 的 `HKEY_USERS\<sid>\…\UserChoice`。SYSTEM trust chain bypass UCPD.sys kernel filter,完全无人手参与。
+- v1.8.3.1 真修 (`ba071d8`): 3-attempt 修 CustomAction `0x80004005` 静默失败 (property resolve in deferred CA → WiX `<Binary>` ≠ property → `.NET 8 apphost` 缺 `.dll/.deps.json/.runtimeconfig.json`),最终 ship 4 个 .NET 8 file + 2-step immediate→deferred CA pattern。
 
-**新装 MSI**: RunOnce step 6 自动应用, 不需手动操作. 如已装 v1.8.0/v1.8.1 旧版, 跑 `C:\Users\liuzhen\Desktop\JHYY-Fix-Icon.bat` (self-elevate via UAC) 立即生效.
+**新装 MSI (v1.8.3.1+)**: WiX CustomAction install 时自动写 UserChoice, **完全无需手动操作**。老的 v1.8.0/v1.8.1/v1.8.2 机器如需升级 icon, 跑 `powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\JHYY\bin\manual-fix-icon-cache.ps1"` (admin elevate, **不要用 v1.8.2 时期 `C:\Users\liuzhen\Desktop\JHYY-Fix-Icon.bat`** — 该脚本已删, 它 wrap 的 ps1 现在直接通过 INSTALLDIR 路径跑)。
 
 **jhyy-setuc.exe build** (修改 `installer/common/jhyy-setuc/Program.cs` 后):
 ```bash
