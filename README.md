@@ -234,12 +234,18 @@ JiHuiYiYou-compiler/
 ├── qbe/                        vendored QBE backend (c9x.me/compile)
 ├── mcp-jhyy/                   Claude Code MCP server (11 tools + 4 resources)
 ├── vscode-ext/                 VS Code language extension (syntax highlighting)
+├── scripts/
+│   └── dev/                    dev/ install-uninstall helpers, bench, test orchestrators (relative paths, portable)
 ├── docs/
 │   ├── abis/                   language spec + ABI whitepaper (locked)
 │   ├── plans/                  roadmap + sprint plans
 │   ├── internal/               architecture / build / status / tests / workarounds
-│   └── logs/                   changelogs + sprint logs
+│   ├── CHANGELOG.md            changelog index (umbrella per `feedback_changelog_umbrella`)
+│   └── logs/                   changelogs + sprint logs (per-version umbrella)
+├── tools/
+│   └── check_dangling.py       scan .md files for broken local links + hidden zero-width chars
 ├── Makefile                    one-line build (make)
+├── .editorconfig               cross-editor indent/EOL/charset config
 ├── README.md                   English (this file)
 └── README.zh-CN.md              简体中文
 ```

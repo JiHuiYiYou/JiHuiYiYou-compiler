@@ -1,0 +1,66 @@
+# EditorConfig — JHYY repo-wide consistency
+# https://editorconfig.org/
+
+root = true
+
+# Default for all files
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+# C/C++ source (4 空格 indent, K&R-style braces 由 formatter 决定)
+[*.{c,h}]
+indent_size = 4
+
+# JHYY source (4 空格 indent, 跟 C 一致)
+[*.jhyy]
+indent_size = 4
+
+# Python (4 空格, PEP 8)
+[*.py]
+indent_size = 4
+
+# Markdown (允许 trailing whitespace = 2+ spaces = hard line break)
+[*.md]
+trim_trailing_whitespace = false
+indent_size = 2
+
+# JSON (2 空格, 行业惯例)
+[*.json]
+indent_size = 2
+
+# YAML (2 空格)
+[*.{yml,yaml}]
+indent_size = 2
+
+# TOML (2 空格)
+[*.toml]
+indent_size = 2
+
+# PowerShell (4 空格)
+[*.ps1]
+indent_size = 4
+
+# Batch / cmd (4 空格, 跟 shell 一致)
+[*.{cmd,bat}]
+indent_size = 4
+
+# Shell (4 空格)
+[*.sh]
+indent_size = 4
+
+# Makefile (必须用 tab indent, 不能改)
+[Makefile]
+indent_style = tab
+
+# Windows batch scripts inside scripts/dev/
+[scripts/dev/**]
+indent_size = 4
+
+# Vendored QBE — 维持上游 CRLF, 不动
+[qbe/**]
+end_of_line = crlf
+trim_trailing_whitespace = false

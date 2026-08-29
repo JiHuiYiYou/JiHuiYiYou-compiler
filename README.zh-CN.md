@@ -240,12 +240,18 @@ JiHuiYiYou-compiler/
 ├── qbe/                        已 vendor 的 QBE 后端 (c9x.me/compile)
 ├── mcp-jhyy/                   Claude Code MCP 服务 (11 工具 + 4 资源)
 ├── vscode-ext/                 VS Code 语言扩展(语法高亮)
+├── scripts/
+│   └── dev/                    开发/安装卸载辅助、benchmark、测试编排器 (相对路径,可移植)
 ├── docs/
 │   ├── abis/                   语言规范 + ABI 白皮书(已锁定)
 │   ├── plans/                  版本路线图 + sprint 计划
 │   ├── internal/               架构 / 构建 / 状态 / 测试 / workarounds
+│   ├── CHANGELOG.md            changelog 索引(每轴单 umbrella, per `feedback_changelog_umbrella`)
 │   └── logs/                   变更日志 + sprint 实施日志
+├── tools/
+│   └── check_dangling.py       扫 .md 文件悬空本地链接 + 零宽字符
 ├── Makefile                    一行构建(make)
+├── .editorconfig               跨编辑器 indent/EOL/charset 一致
 ├── README.md                   English
 └── README.zh-CN.md              简体中文(本文件)
 ```
