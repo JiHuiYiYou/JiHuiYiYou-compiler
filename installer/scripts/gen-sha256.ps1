@@ -1,4 +1,4 @@
-# installer/gen-sha256.ps1 - Generate SHA256.txt for build artifacts (v1.5.5)
+# installer/scripts/gen-sha256.ps1 - Generate SHA256.txt for build artifacts (v1.5.5)
 #
 # Sprint v1.5.5: GH Actions release workflow consumes this file to:
 #   - Upload SHA256.txt as Release asset
@@ -9,8 +9,8 @@
 # `sha256sum` output) so `sha256sum -c SHA256.txt` works downstream.
 #
 # Usage:
-#   powershell -File installer/gen-sha256.ps1           # default: installer/build-artifacts/
-#   powershell -File installer/gen-sha256.ps1 -ArtifactsDir <dir>  # override
+#   powershell -File installer/scripts/gen-sha256.ps1           # default: installer/build-artifacts/
+#   powershell -File installer/scripts/gen-sha256.ps1 -ArtifactsDir <dir>  # override
 #
 # Exit codes:
 #   0  SHA256.txt written (or already up-to-date)

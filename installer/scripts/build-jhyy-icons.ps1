@@ -8,11 +8,11 @@
 # install UI want app-style, not document-style.
 #
 # Outputs:
-#   installer/jhyy-icon.ico       - 16+32+48+64+128+256 multi-size ICO (file-type, 米白文件+J)
-#   installer/jhyy-icon-N.png     - intermediate, 上面 ICO 的源 PNG (file-type)
-#   installer/jhyy-logo-N.png     - intermediate, BMP 用的 app-style logo PNG (深底+J)
-#   installer/jhyy-banner.bmp     - 493x58 MSI banner (recolored mint + 40x40 J logo)
-#   installer/jhyy-welcome.bmp    - 493x312 MSI welcome (recolored mint + 96x96 mint box + 80x80 J logo)
+#   installer/assets/icons/jhyy-icon.ico       - 16+32+48+64+128+256 multi-size ICO (file-type, 米白文件+J)
+#   installer/assets/icons/jhyy-icon-N.png     - intermediate, 上面 ICO 的源 PNG (file-type)
+#   installer/assets/icons/jhyy-logo-N.png     - intermediate, BMP 用的 app-style logo PNG (深底+J)
+#   installer/assets/bitmaps/jhyy-banner.bmp   - 493x58 MSI banner (recolored mint + 40x40 J logo)
+#   installer/assets/bitmaps/jhyy-welcome.bmp  - 493x312 MSI welcome (recolored mint + 96x96 mint box + 80x80 J logo)
 #
 # Pre-reqs: rsvg-convert (MSYS2 librsvg), System.Drawing (PowerShell builtin)
 $ErrorActionPreference = "Stop"
@@ -22,17 +22,17 @@ Add-Type -AssemblyName System.Drawing
 $iconSizes = @(16, 32, 48, 64, 128, 256)
 $pngBlobs = @()
 foreach ($sz in $iconSizes) {
-    $png = "installer/jhyy-icon-${sz}.png"
-    rsvg-convert -w $sz -h $sz "installer/jhyy-file-icon.svg" -o $png 2>&1 | Out-Null
+    $png = "installer/assets/icons/jhyy-icon-${sz}.png"
+    rsvg-convert -w $sz -h $sz "installer/assets/icons/jhyy-file-icon.svg" -o $png 2>&1 | Out-Null
     $pngBlobs += ,([System.IO.File]::ReadAllBytes((Get-Item $png).FullName))
 }
 
 # === App-style logo PNGs for BMP (深底 + J, BMP mint 背景要叠在上面) ===
 # BMP 用 System.Drawing.Image 直接画, 不能用 jhyy-icon-* (那是 file-type 风格)
 # 单独从 vscode-ext/icon.svg 渲染 logo PNG.
-rsvg-convert -w 64 -h 64 "vscode-ext/icon.svg" -o "installer/jhyy-logo-64.png" 2>&1 | Out-Null
-rsvg-convert -w 128 -h 128 "vscode-ext/icon.svg" -o "installer/jhyy-logo-128.png" 2>&1 | Out-Null
-$icoPath = "installer/jhyy-icon.ico"
+rsvg-convert -w 64 -h 64 "vscode-ext/icon.svg" -o "installer/assets/icons/jhyy-logo-64.png" 2>&1 | Out-Null
+rsvg-convert -w 128 -h 128 "vscode-ext/icon.svg" -o "installer/assets/icons/jhyy-logo-128.png" 2>&1 | Out-Null
+$icoPath = "installer/assets/icons/jhyy-icon.ico"
 $icoStream = New-Object System.IO.MemoryStream
 $writer = New-Object System.IO.BinaryWriter($icoStream)
 $writer.Write([uint16]0); $writer.Write([uint16]1); $writer.Write([uint16]$iconSizes.Count)
@@ -60,7 +60,7 @@ Write-Host "[OK] $icoPath ($([System.IO.File]::ReadAllBytes($icoPath).Length) by
 
 # === Banner BMP: recolor default WiX red→mint, replace disc with J logo ===
 $bannerSrc = "C:/msys64/tmp/wix4-src/wix-b8977d6f88e7b68e000bac226a2814f236770570/src/ext/UI/wixlib/Bitmaps/bannrbmp.bmp"
-$bannerOut = "installer/jhyy-banner.bmp"
+$bannerOut = "installer/assets/bitmaps/jhyy-banner.bmp"
 $src = [System.Drawing.Image]::FromFile($bannerSrc)
 $w = $src.Width; $h = $src.Height
 $bmp = New-Object System.Drawing.Bitmap($w, $h, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
@@ -82,7 +82,7 @@ for ($y = 0; $y -lt $h; $y++) {
     }
 }
 # Replace the disc (centered at X=461 Y=28, WxH=49x48) with J logo.
-$icon = [System.Drawing.Image]::FromFile("installer/jhyy-icon-64.png")
+$icon = [System.Drawing.Image]::FromFile("installer/assets/icons/jhyy-icon-64.png")
 $iconSize = 40
 $iconX = 461 - $iconSize / 2
 $iconY = 28 - $iconSize / 2
@@ -96,7 +96,7 @@ Write-Host "[OK] $bannerOut ($w x $h) — default WiX banner recolored mint + J 
 
 # === Welcome BMP: recolor default WiX red→mint, tight mint box + J logo at disc area ===
 $welcomeSrc = "C:/msys64/tmp/wix4-src/wix-b8977d6f88e7b68e000bac226a2814f236770570/src/ext/UI/wixlib/Bitmaps/dlgbmp.bmp"
-$welcomeOut = "installer/jhyy-welcome.bmp"
+$welcomeOut = "installer/assets/bitmaps/jhyy-welcome.bmp"
 $src = [System.Drawing.Image]::FromFile($welcomeSrc)
 $w = $src.Width; $h = $src.Height
 $bmp = New-Object System.Drawing.Bitmap($w, $h, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
@@ -122,7 +122,7 @@ $discX = 60; $discY = 15; $discW = 96; $discH = 96
 $bgBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, $mintR, $mintG, $mintB))
 $g.FillRectangle($bgBrush, $discX, $discY, $discW, $discH)
 $bgBrush.Dispose()
-$icon = [System.Drawing.Image]::FromFile("installer/jhyy-icon-128.png")
+$icon = [System.Drawing.Image]::FromFile("installer/assets/icons/jhyy-icon-128.png")
 $iconSize = 80
 $iconX = $discX + ($discW - $iconSize) / 2
 $iconY = $discY + ($discH - $iconSize) / 2

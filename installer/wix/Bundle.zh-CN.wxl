@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  installer/Bundle.zh-CN.wxl : Burn bundle localization (v1.5.6 hotfix W-033)
+  installer/wix/Bundle.zh-CN.wxl : Burn bundle localization (v1.5.6 hotfix W-033)
 
   Based on wixstdba default RtfTheme.wxl (WiX 4 / Burn 7.0.0).
   Source: extracted from WixToolset.BootstrapperApplications.wixext.dll

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  installer/Bundle.wxs : JHYY Burn bundle (v1.5.3, v1.8.3 patch)
+  installer/wix/Bundle.wxs : JHYY Burn bundle (v1.5.3, v1.8.3 patch)
 
   Sprint v1.5.3 — chain compiler MSI (v1.5.2) + 检测 MSYS2/GCC (力度 1).
   Burn bundle 走 standard Bootstrapper UI (`WixStandardBootstrapperApplication`).

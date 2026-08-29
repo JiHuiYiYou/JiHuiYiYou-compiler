@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  installer/Theme.xml : JHYY Burn bundle theme (v1.5.6 hotfix W-033)
+  installer/wix/Theme.xml : JHYY Burn bundle theme (v1.5.6 hotfix W-033)
 
   Based on wixstdba default RtfTheme.xml (WiX 4 / Burn 7.0.0).
   Source: extracted from WixToolset.BootstrapperApplications.wixext.dll
@@ -42,7 +42,7 @@
     <Font Id="3" Height="-12" Weight="500" Foreground="windowtext" Background="window">Segoe UI</Font>
 
     <Window Width="600" Height="430" HexStyle="100a0000" FontId="0" Caption="#(loc.Caption)">
-        <ImageControl X="11" Y="11" Width="64" Height="64" ImageFile="logo.png" Visible="yes"/>
+        <ImageControl X="11" Y="11" Width="64" Height="64" ImageFile="../assets/icons/jhyy-icon-128.png" Visible="yes"/>
         <Label X="92" Y="18" Width="-11" Height="64" FontId="1" Visible="yes" DisablePrefix="yes">#(loc.Title)</Label>
 
         <Page Name="Help">

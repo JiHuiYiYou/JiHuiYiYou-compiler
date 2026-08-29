@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  compiler/jhyy-compiler.wxs : JHYY compiler MSI definition (v1.5.2)
+  installer/wix/compiler/jhyy-compiler.wxs : JHYY compiler MSI definition (v1.5.2)
 
   Sprint v1.5.2 — 装 jhyy.exe + qbe.exe 到 C:\Program Files\JHYY\bin\,
   写系统 PATH (HKLM, 要 admin), 检测 MSYS2 + gcc 没就 warn
@@ -191,7 +191,7 @@
       <ui:WixUI Id="WixUI_Minimal" />
     </UI>
 
-    <WixVariable Id="WixUILicenseRtf" Value="!(bindpath.common)\license.rtf" />
+    <WixVariable Id="WixUILicenseRtf" Value="!(bindpath.assets)\license.rtf" />
 
     <!--
       v1.5.8: recolor default WiX red+disc → mint, replace disc with J logo.
@@ -206,7 +206,7 @@
       - jhyy-welcome.bmp : 493x312 MSI welcome (default WiX recolored mint +
                             96x96 mint box + 80x80 J logo at upper-LEFT)
 
-      Built by installer/build-jhyy-icons.ps1 from vscode-ext/icon.svg.
+      Built by installer/scripts/build-jhyy-icons.ps1 from vscode-ext/icon.svg.
       Files NOT shipped (no <File> Component references them); embedded in
       MSI Binary table only. .ico IS shipped via JhyyIconFile Component.
     -->
@@ -377,7 +377,7 @@
       -->
       <Component Id="InstallConfigEnvPS1" Bitness="always64" Guid="0ADA340F-4463-466E-AFEE-302147CC0DD4">
         <File Id="InstallConfigEnvPS1File"
-              Source="!(bindpath.common)\install-configure-env.ps1"
+              Source="!(bindpath.scripts)\common\install-configure-env.ps1"
               KeyPath="yes" />
       </Component>
 
@@ -407,7 +407,7 @@
       -->
       <Component Id="InstallConfigVSCodePS1" Bitness="always64" Guid="0FA909A4-020F-4BEC-AACD-D9B3F5BB7A16">
         <File Id="InstallConfigVSCodePS1File"
-              Source="!(bindpath.common)\install-configure-vscode.ps1"
+              Source="!(bindpath.scripts)\common\install-configure-vscode.ps1"
               KeyPath="yes" />
       </Component>
 
@@ -477,7 +477,7 @@
       -->
       <Component Id="ManualFixIconCachePS1" Bitness="always64" Guid="A2F4B7E9-5D3C-4E8B-A6F1-7C9D2E3B5A88">
         <File Id="ManualFixIconCachePS1File"
-              Source="!(bindpath.common)\manual-fix-icon-cache.ps1"
+              Source="!(bindpath.scripts)\common\manual-fix-icon-cache.ps1"
               KeyPath="yes" />
       </Component>
 
