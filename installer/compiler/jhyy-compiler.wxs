@@ -255,9 +255,52 @@
 
       On uninstall: <RemoveRegistryValue> clears the RunOnce entry to avoid stale
       references if user uninstalls before first logon.
+
+      v1.8.3 patch: add JHYYSetUCForAllUsers CustomAction to write per-user
+      UserChoice directly from SYSTEM context. SYSTEM trust chain bypasses
+      UCPD.sys (Win10 2024-02+) — see docs/internal/workarounds.md W-062.
+      The CA runs in deferred sequence after InstallFiles so jhyy-setuc.exe
+      is already on disk; Impersonate="no" ensures SYSTEM context (LocalSystem
+      perMachine install); Return="ignore" so a CA failure doesn't rollback
+      the entire install (icon is best-effort).
     -->
     <InstallExecuteSequence>
+      <Custom Action="JHYYSetUCForAllUsers" After="InstallFiles" Condition="NOT Installed" />
     </InstallExecuteSequence>
+
+    <!--
+      v1.8.3: Binary table entry for jhyy-setuc.exe. WiX extracts this to a
+      temp location at CA execution time; the [JHYYSetUCBin] property
+      resolves to that temp path. SourceFile is the same file already
+      shipped via JHYYSetUCExe Component — no duplicate file in the MSI,
+      just a reference to the embedded Binary copy.
+    -->
+    <Binary Id="JHYYSetUCBin"
+            SourceFile="!(bindpath.common)\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.exe" />
+
+    <!--
+      v1.8.3 CustomAction: invoke jhyy-setuc.exe with the system-context flag.
+      Enumerates HKEY_USERS S-1-5-21-… SIDs and writes each user's UserChoice
+      directly. SYSTEM trust chain bypasses UCPD.sys kernel filter (verified
+      2026-08-29 — see docs/internal/workarounds.md W-062).
+
+      Execute="deferred" + Impersonate="no" = SYSTEM context (LocalSystem).
+      Return="ignore" = icon is best-effort; CA failure doesn't rollback install.
+      ExeCommand quotes [JHYYSetUCBin] (binary temp path) plus system-context
+      args. Path/args have no spaces so no inner quoting needed.
+
+      Note: requires .NET 8 Desktop Runtime on target machine. If missing,
+      exe fails to launch (clear error from .NET runtime) and the CA exits
+      with code != 0 — MSI sees Return="ignore" and continues. Bundle.wxs
+      (v1.8.3) chains the .NET 8 runtime installer when present; users who
+      install via direct MSI (not Bundle) need .NET 8 separately.
+    -->
+    <CustomAction Id="JHYYSetUCForAllUsers"
+                  BinaryRef="JHYYSetUCBin"
+                  ExeCommand="&quot;[JHYYSetUCBin]&quot; --system-context .jhyy JHYY.SourceFile"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
 
   </Package>
 
@@ -473,6 +516,18 @@
           <RegistryValue Type="string" Name="InstallDir" Value="[INSTALLDIR]" />
           <RegistryValue Type="string" Name="Version" Value="$(var.JHY_VERSION)" />
         </RegistryKey>
+
+        <!--
+          v1.8.3 patch: clear UserChoiceSystemContextApplied sentinel on uninstall.
+          jhyy-setuc.exe (run by v1.8.3 SYSTEM-context CustomAction) writes this
+          sentinel to HKLM\SOFTWARE\JiHuiYiYou\JHYY on full success, so that
+          install-configure-all.bat RunOnce step 6 skips its redundant user-context
+          UserChoice write. On uninstall we remove it so a subsequent reinstall
+          re-runs the system-context CA and re-sets the sentinel cleanly.
+        -->
+        <RemoveRegistryValue Root="HKLM"
+                             Key="SOFTWARE\JiHuiYiYou\JHYY"
+                             Name="UserChoiceSystemContextApplied" />
 
         <RemoveRegistryKey Root="HKLM" Key="SOFTWARE\JiHuiYiYou\JHYY" Action="removeOnUninstall" />
       </Component>

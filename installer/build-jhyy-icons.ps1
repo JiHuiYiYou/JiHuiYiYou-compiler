@@ -1,9 +1,16 @@
-# Generates installer UI assets (BMPs + ICO) from vscode-ext/icon.svg.
+# Generates installer UI assets (BMPs + ICO).
 # v1.5.8: recolor default WiX red+disc → mint, replace disc with J logo.
 # Replaces rev 2 (navy bg + JHYY Compiler title — too dark, duplicate brand name overlap).
 #
+# v1.8.2 patch split SVG sources — file-type ICO uses "document-style" icon
+# (米白文件 + J + 横线, 跟 Python/Java/C#/C++ 文件图标一致), while BMP/MSI/VSCode
+# ext keeps "app-style" icon (深色圆角矩形 + J) since Start Menu shortcuts and MSI
+# install UI want app-style, not document-style.
+#
 # Outputs:
-#   installer/jhyy-icon.ico       - 16+32+48+64+128+256 multi-size ICO
+#   installer/jhyy-icon.ico       - 16+32+48+64+128+256 multi-size ICO (file-type, 米白文件+J)
+#   installer/jhyy-icon-N.png     - intermediate, 上面 ICO 的源 PNG (file-type)
+#   installer/jhyy-logo-N.png     - intermediate, BMP 用的 app-style logo PNG (深底+J)
 #   installer/jhyy-banner.bmp     - 493x58 MSI banner (recolored mint + 40x40 J logo)
 #   installer/jhyy-welcome.bmp    - 493x312 MSI welcome (recolored mint + 96x96 mint box + 80x80 J logo)
 #
@@ -11,14 +18,20 @@
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
 
-# === Multi-size .ico from icon.svg ===
+# === Multi-size .ico from jhyy-file-icon.svg (file-type: 米白文件 + J) ===
 $iconSizes = @(16, 32, 48, 64, 128, 256)
 $pngBlobs = @()
 foreach ($sz in $iconSizes) {
     $png = "installer/jhyy-icon-${sz}.png"
-    rsvg-convert -w $sz -h $sz "vscode-ext/icon.svg" -o $png 2>&1 | Out-Null
+    rsvg-convert -w $sz -h $sz "installer/jhyy-file-icon.svg" -o $png 2>&1 | Out-Null
     $pngBlobs += ,([System.IO.File]::ReadAllBytes((Get-Item $png).FullName))
 }
+
+# === App-style logo PNGs for BMP (深底 + J, BMP mint 背景要叠在上面) ===
+# BMP 用 System.Drawing.Image 直接画, 不能用 jhyy-icon-* (那是 file-type 风格)
+# 单独从 vscode-ext/icon.svg 渲染 logo PNG.
+rsvg-convert -w 64 -h 64 "vscode-ext/icon.svg" -o "installer/jhyy-logo-64.png" 2>&1 | Out-Null
+rsvg-convert -w 128 -h 128 "vscode-ext/icon.svg" -o "installer/jhyy-logo-128.png" 2>&1 | Out-Null
 $icoPath = "installer/jhyy-icon.ico"
 $icoStream = New-Object System.IO.MemoryStream
 $writer = New-Object System.IO.BinaryWriter($icoStream)

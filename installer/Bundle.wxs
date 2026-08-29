@@ -1,9 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  installer/Bundle.wxs : JHYY Burn bundle (v1.5.3)
+  installer/Bundle.wxs : JHYY Burn bundle (v1.5.3, v1.8.3 patch)
 
   Sprint v1.5.3 — chain compiler MSI (v1.5.2) + 检测 MSYS2/GCC (力度 1).
   Burn bundle 走 standard Bootstrapper UI (`WixStandardBootstrapperApplication`).
+
+  v1.8.3 patch — chain .NET 8 Desktop Runtime as prereq for jhyy-setuc.exe.
+    - 检测 HKLM\SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedhost!Version
+      → 如果 >= "8.0" 跳过 .NET 8 install
+      → 否则 silent install /quiet /norestart
+    - Chain 顺序: .NET 8 → JHYYCompilerMsi (MSI install 完了才进 v1.8.3 CA)
+    - source: $(var.JHY_DOTNET8_RUNTIME_EXE_PATH) — build.ps1 自动 download
+      `dotnet-runtime-8.0.30-win-x64.exe` (~28MB) 到
+      installer/build-artifacts/dotnet/
 
   设计要点 (per 力度 1 检测+引导 决策, user 2026-08-14):
     - 不打包 GCC toolchain (~85MB 太重, 不在 v1.5 scope)
@@ -14,6 +23,7 @@
   Layout:
     C:\Program Files\JHYY\bin\jhyy.exe   (compiler MSI 装)
     C:\Program Files\JHYY\bin\qbe.exe    (compiler MSI 装)
+    C:\Program Files\dotnet\             (.NET 8 runtime, Bundle 装)
     %USERPROFILE%\AppData\Local\Programs\MSYS2\  (用户自己装, Burn 不管)
 
   WiX 4 schema notes (跟 v3 不一样的地方):
@@ -24,6 +34,7 @@
 
   Reference:
     - docs/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.3
+    - docs/internal/workarounds.md W-062 (v1.8.3 SYSTEM-context CA)
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
@@ -61,7 +72,49 @@
           LocalizationFile="$(var.JHY_THEME_WXL_PATH)" />
     </BootstrapperApplication>
 
+    <!--
+      v1.8.3 patch: detect existing .NET 8 runtime installation.
+      RegistrySearch sets Net8RuntimeVersion property from
+      HKLM\SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedhost!Version
+      (e.g. "8.0.30"). If present, Burn skips the .NET 8 ExePackage chain.
+
+      Format="raw" preserves the literal string value (no type coercion).
+      DetectCondition on ExePackage checks Net8RuntimeVersion is non-empty —
+      "8.0.30" is true in Burn's wxl-like expression syntax.
+    -->
+    <util:RegistrySearch Id="Net8RuntimeSearch"
+                         Variable="Net8RuntimeVersion"
+                         Root="HKLM"
+                         Key="SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedhost"
+                         Result="value" />
+
     <Chain>
+      <!--
+        v1.8.3 patch: chain .NET 8 Desktop Runtime 8.0.30 (~28MB) as prereq
+        for jhyy-setuc.exe (which is shipped in the MSI and invoked from
+        v1.8.3 SYSTEM-context CustomAction).
+
+        ExePackage: Burn invokes the runtime exe with InstallCommand on chain
+        install. /quiet /norestart = silent install, no reboot prompt.
+
+        DetectCondition: Net8RuntimeVersion is non-empty when .NET 8+ already
+        installed (registry value at sharedhost!Version). If empty, Burn
+        skips detection and runs InstallCommand.
+
+        Permanent="yes": .NET 8 install persists across Bundle uninstall
+        (it's a shared runtime — removing it would break unrelated apps).
+      -->
+      <ExePackage Id="Net8Runtime"
+                  SourceFile="$(var.JHY_DOTNET8_RUNTIME_EXE_PATH)"
+                  DisplayName=".NET 8 Desktop Runtime"
+                  Compressed="yes"
+                  Vital="yes"
+                  Permanent="yes"
+                  InstallArguments="/quiet /norestart"
+                  RepairArguments="/quiet /norestart"
+                  UninstallArguments="/uninstall /quiet /norestart"
+                  DetectCondition="Net8RuntimeVersion" />
+
       <!--
         MsiPackage: chain the compiler MSI (built in v1.5.2). The MSI
         payload is bound at build time via -b "msi=path/to/jhyy-compiler-*.msi".
@@ -72,6 +125,10 @@
         install the compiler (welcome dialog already explained MSYS2 prereq,
         and v1.5.2 MSI launch condition only warns). Users can install
         MSYS2 later and the compiler will work.
+
+        v1.8.3 CustomAction JHYYSetUCForAllUsers runs inside this MSI install
+        (deferred sequence, Impersonate="no", Return="ignore") and writes
+        per-user UserChoice via SYSTEM trust chain — see W-062.
       -->
       <MsiPackage Id="JHYYCompilerMsi"
                   SourceFile="$(var.JHY_COMPILER_MSI_PATH)"

@@ -231,7 +231,7 @@ switch ($Target) {
         exit 0
     }
     "bundle" {
-        Write-Host "[build.ps1] === Burn bundle build (v1.5.3) ==="
+        Write-Host "[build.ps1] === Burn bundle build (v1.5.3, v1.8.3 patch) ==="
         # 1. ensure compiler MSI is built first (bundle chains it)
         $msiPath = "installer/build-artifacts/jhyy-compiler-$JHY_VERSION_DISPLAY.msi"
         if (-not (Test-Path $msiPath)) {
@@ -249,6 +249,37 @@ switch ($Target) {
                 Write-Host "[ERROR] compiler MSI build failed, aborting bundle build"
                 exit 1
             }
+        }
+        # 1a. v1.8.3: ensure .NET 8 Desktop Runtime exe is downloaded for
+        #     Bundle chain. Source: official MS dotnetcli mirror.
+        #     Path: installer/build-artifacts/dotnet/dotnet-runtime-8.0.30-win-x64.exe
+        #     Why 8.0.30: latest 8.0 LTS patch as of 2026-08-29 (verified via
+        #     https://dotnetcli.azureedge.net/dotnet/Runtime/8.0/latest.version).
+        #     If the file exists from a previous build, skip download (CI caching).
+        $dotnet8Exe = "installer/build-artifacts/dotnet/dotnet-runtime-8.0.30-win-x64.exe"
+        $dotnet8Dir = Split-Path -Parent $dotnet8Exe
+        if (-not (Test-Path $dotnet8Exe)) {
+            if (-not (Test-Path $dotnet8Dir)) {
+                New-Item -ItemType Directory -Path $dotnet8Dir -Force | Out-Null
+            }
+            Write-Host "[build.ps1] downloading .NET 8 Desktop Runtime 8.0.30 (~28MB)..."
+            try {
+                Invoke-WebRequest -Uri "https://dotnetcli.azureedge.net/dotnet/Runtime/8.0.30/dotnet-runtime-8.0.30-win-x64.exe" `
+                                  -OutFile $dotnet8Exe `
+                                  -UseBasicParsing `
+                                  -ErrorAction Stop
+            } catch {
+                Write-Host "[ERROR] .NET 8 runtime download failed: $($_.Exception.Message)"
+                Write-Host "Manually download from https://dotnet.microsoft.com/download/dotnet/8.0 and place at: $dotnet8Exe"
+                exit 1
+            }
+            if (-not (Test-Path $dotnet8Exe)) {
+                Write-Host "[ERROR] .NET 8 runtime download returned no file"
+                exit 1
+            }
+            Write-Host "[OK] .NET 8 runtime downloaded: $dotnet8Exe"
+        } else {
+            Write-Host "[OK] .NET 8 runtime already cached: $dotnet8Exe"
         }
         # 2. build Burn bundle via wix build - outputs .exe
         #   -ext <Bal.dll> for WixStandardBootstrapperApplication
@@ -274,12 +305,14 @@ switch ($Target) {
             -b "common=installer/common" `
             -loc "installer/Bundle.zh-CN.wxl" `
             -ext "$balDll" `
+            -ext WixToolset.Util.wixext `
             -d "JHY_VERSION=$($env:JHY_VERSION)" `
             -d "JHY_COMPILER_MSI_PATH=installer\build-artifacts\jhyy-compiler-$JHY_VERSION_DISPLAY.msi" `
             -d "JHY_THEME_XML_PATH=installer\Theme.xml" `
             -d "JHY_LICENSE_RTF_PATH=installer\common\license.rtf" `
             -d "JHY_LOGO_BMP_PATH=installer\logo.png" `
             -d "JHY_THEME_WXL_PATH=installer\Bundle.zh-CN.wxl" `
+            -d "JHY_DOTNET8_RUNTIME_EXE_PATH=$dotnet8Exe" `
             -o "installer/build-artifacts/jhyy-installer-$JHY_VERSION_DISPLAY.exe"
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[ERROR] bundle build failed."

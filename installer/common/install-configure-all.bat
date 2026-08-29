@@ -103,7 +103,7 @@ if errorlevel 1 (
     echo [install-configure-all] OK: FileExts\.jhyy cleared (UserChoice + OpenWithProgids shadow removed)
 )
 
-rem 6. (v1.8.2 patch) Path B: register JHYY.EditInVSCode ProgId + write UserChoice Hash.
+rem 6. (v1.8.2 patch, v1.8.3 sentinel) Path B: register JHYY.EditInVSCode ProgId + write UserChoice Hash.
 rem    Runs manual-fix-icon-cache.ps1 elevated. This script:
 rem      a. Stops UCPD service (admin)
 rem      b. Writes JHYY.EditInVSCode ProgId with DefaultIcon=jhyy-icon.ico + Code.exe command
@@ -111,6 +111,24 @@ rem      c. Computes Mozilla reverse-engineered UserChoice Hash
 rem      d. Writes UserChoice=JHYY.EditInVSCode with Hash
 rem      e. Restarts UCPD service (admin)
 rem    If RunOnce context doesn't have admin token, the inner ps1 self-elevates via UAC.
+rem
+rem    v1.8.3 sentinel check: if the MSI CustomAction JHYYSetUCForAllUsers already
+rem    ran system-context jhyy-setuc.exe successfully (writes sentinel at
+rem    HKLM\SOFTWARE\JiHuiYiYou\JHYY\UserChoiceSystemContextApplied), skip
+rem    this redundant user-context write. Sentinel is HKLM so all users can read.
+rem
+rem    Why skip: the MSI CA writes per-user UserChoice directly via SYSTEM
+rem    trust chain (bypasses UCPD.sys kernel filter — see W-062). Re-running
+rem    the manual fix here would re-overwrite each user's UserChoice with a
+rem    different (later minute) hash + different ProgId (JHYY.EditInVSCode vs
+rem    JHYY.SourceFile), causing Explorer to fall back to default icon until
+rem    the next minute boundary. Skipping preserves the v1.8.3 system-context
+rem    write.
+reg.exe query "HKLM\SOFTWARE\JiHuiYiYou\JHYY" /v UserChoiceSystemContextApplied >nul 2>&1
+if not errorlevel 1 (
+    echo [install-configure-all] v1.8.3 sentinel found — MSI CustomAction already wrote per-user UserChoice, skipping step 6
+    goto :skip_post_install_user_choice
+)
 if not exist "%BIN_DIR%manual-fix-icon-cache.ps1" (
     echo [install-configure-all] ERROR: manual-fix-icon-cache.ps1 missing
     exit /b 1
@@ -122,6 +140,7 @@ if errorlevel 1 (
 ) else (
     echo [install-configure-all] OK: Path B icon fix applied
 )
+:skip_post_install_user_choice
 
 echo [install-configure-all] DONE.
 exit /b 0

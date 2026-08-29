@@ -202,3 +202,98 @@ cd installer/common/jhyy-setuc && powershell -NoProfile -ExecutionPolicy Bypass 
 MSI rebuild 时自动重新包进 `INSTALLDIR\common\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.exe` (WiX `JHYYSetUCExe` Component, per `installer/compiler/jhyy-compiler.wxs`).
 
 **已知 limitation**: 需用户机装 .NET 8 Desktop Runtime. 缺失时 jhyy-setuc.exe 启动失败 → `manual-fix-icon-cache.ps1` 自动降级 Path A (只 reg delete, 不需 .NET).
+
+## v1.8.3 patch — WiX MSI SYSTEM-context CustomAction 写 per-user UserChoice (UCPD.sys kernel filter bypass)
+
+**问题**: v1.8.2 Path B (`sc stop UCPD` → Mozilla 算法寫 UserChoice) 在 Win10 2024-02+ 失敗 — `sc stop UCPD` 返回 exit 5 (access denied), 即使 admin + elevated shell。**UCPD.sys** (User Choice Protection Driver, FILE_SYSTEM_DRIVER Type=2 State=4 RUNNING) 是 kernel filter, 加 non-inherited Deny ACE on `HKCU\…\FileExts\.<ext>\UserChoice`, user-mode caller 即使 admin 也被擋。`sc stop` / `sc pause` / `fltmc unload` / `sc sdset` 全 access denied — UCPD 設計上不可程式化卸載。
+
+**Field diagnosis 2026-08-29** (per `feedback_fix_evaluation_rule` 5/5 PASS on target test):
+- `sc create obj= LocalSystem type= own start= demand` 創的 LocalSystem service 調 `Registry.CurrentUser.CreateSubKey(UserChoice)` **成功** — 寫 `HKEY_USERS\S-1-5-18\…\FileExts\.jhyy\UserChoice` 完整。
+- SYSTEM trust chain (有 `SeRestorePrivilege` + `SeBackupPrivilege` + `SeTakeOwnershipPrivilege`) **bypass UCPD Deny ACE**, 不需要停 UCPD。
+- SYSTEM 的 HKCU 是 `S-1-5-18` 自己 hive — 要寫其他 user HKCU, 直接 enumerate `HKEY_USERS` S-1-5-21-… SIDs + 寫每個 user 的 `HKEY_USERS\<sid>\…`。
+
+**修复 (v1.8.3 SYSTEM-context CA + Bundle .NET 8 chain)**:
+
+### Phase 1 — `jhyy-setuc.exe --system-context` mode
+新增 CLI flag path (`installer/common/jhyy-setuc/Program.cs`):
+```bash
+jhyy-setuc.exe --system-context .jhyy JHYY.SourceFile
+```
+- 遍歷 `HKEY_USERS` S-1-5-21-… SIDs (跳過 SYSTEM / LocalService / NetworkService / `_Classes` mirror)
+- 對每個 user: 算 Mozilla Hash (用 **target user SID**, 不是 caller SID) + 寫 `HKEY_USERS\<sid>\…\FileExts\<ext>\UserChoice` + ApplicationAssociationToasts
+- Full success 寫 sentinel `HKLM\SOFTWARE\JiHuiYiYou\JHYY\UserChoiceSystemContextApplied` (HKLM → per-user RunOnce 可讀)
+
+### Phase 2 — WiX MSI CustomAction (`installer/compiler/jhyy-compiler.wxs`)
+```xml
+<Binary Id="JHYYSetUCBin"
+        SourceFile="!(bindpath.common)\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.exe" />
+
+<CustomAction Id="JHYYSetUCForAllUsers"
+              BinaryRef="JHYYSetUCBin"
+              ExeCommand="&quot;[JHYYSetUCBin]&quot; --system-context .jhyy JHYY.SourceFile"
+              Execute="deferred"
+              Impersonate="no"
+              Return="ignore" />
+
+<InstallExecuteSequence>
+  <Custom Action="JHYYSetUCForAllUsers" After="InstallFiles" Condition="NOT Installed" />
+</InstallExecuteSequence>
+```
+
+關鍵 attribute:
+- `BinaryRef="JHYYSetUCBin"` + `<Binary>` definition → MSI extract 到 temp + auto-resolve `[JHYYSetUCBin]` property (Type 50 CA, 不需 CustomActionData 預設)
+- `Execute="deferred"` + `Impersonate="no"` → **SYSTEM context** (LocalSystem perMachine install)
+- `Return="ignore"` → CA 失敗不 rollback install (icon 是 best-effort)
+- `Condition="NOT Installed"` (WiX 4 必須 `Condition` attribute, 不是 inner text — WIX0400 error)
+
+`<RemoveRegistryValue>` 清 sentinel on uninstall (per `JHYYPathReg` Component)。
+
+### Phase 3 — Bundle .NET 8 chain (`installer/Bundle.wxs`)
+```xml
+<util:RegistrySearch Id="Net8RuntimeSearch"
+                     Variable="Net8RuntimeVersion"
+                     Root="HKLM"
+                     Key="SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedhost"
+                     Result="value" />
+
+<Chain>
+  <ExePackage Id="Net8Runtime"
+              SourceFile="$(var.JHY_DOTNET8_RUNTIME_EXE_PATH)"
+              DisplayName=".NET 8 Desktop Runtime"
+              Compressed="yes" Vital="yes" Permanent="yes"
+              InstallArguments="/quiet /norestart"
+              RepairArguments="/quiet /norestart"
+              UninstallArguments="/uninstall /quiet /norestart"
+              DetectCondition="Net8RuntimeVersion" />
+  <MsiPackage Id="JHYYCompilerMsi" ... />
+</Chain>
+```
+
+關鍵 attribute (WiX 4 跟 v3 不一樣):
+- `<util:RegistrySearch>` 用 `Result="value"` (不是 v3 `Format="raw"`) — 需要 `WixToolset.Util.wixext` extension
+- `<ExePackage>` 用 `InstallArguments` (不是 v3 `InstallCommand`) — `RepairArguments` / `UninstallArguments` 同理
+- `DetectCondition` 在 `ExePackage` 是 supported (vs MsiPackage 用 InstallCondition)
+- `Permanent="yes"` → shared runtime, Bundle uninstall 不移除
+
+### Phase 4 — install-configure-all.bat sentinel
+Step 6 頭加 sentinel check:
+```batch
+reg.exe query "HKLM\SOFTWARE\JiHuiYiYou\JHYY" /v UserChoiceSystemContextApplied >nul 2>&1
+if not errorlevel 1 (
+    echo [install-configure-all] v1.8.3 sentinel found - MSI CustomAction already wrote per-user UserChoice, skipping step 6
+    goto :skip_post_install_user_choice
+)
+```
+若 sentinel 存在 → 跳過 `manual-fix-icon-cache.ps1` (避免 RunOnce user-context 重新寫覆蓋 v1.8.3 SYSTEM-context 寫)。
+
+### Bundle build (`installer/build.ps1 bundle`)
+- 自動 download .NET 8 Desktop Runtime 8.0.30 (~28MB) 到 `installer/build-artifacts/dotnet/dotnet-runtime-8.0.30-win-x64.exe` (從 `https://dotnetcli.azureedge.net/dotnet/Runtime/8.0.30/`),若已 cache skip download
+- `wix build ... -ext "$balDll" -ext WixToolset.Util.wixext -d "JHY_DOTNET8_RUNTIME_EXE_PATH=..."`
+
+### 驗證 (5/5 PASS per `feedback_fix_evaluation_rule`)
+- ✅ jhyy-setuc.exe --system-context 從 SYSTEM service 寫 liuzhen HKEY_USERS UserChoice (Hash 含 target SID)
+- ✅ HKEY_USERS\S-1-5-18 (SYSTEM) **不動** (v1.8.3 顯式 skip)
+- ✅ Sentinel 寫入 (full success)
+- ✅ MSI 1.29 MB (跟 v1.8.2 持平, `<Binary>` reference 不重複 ship)
+- ✅ Bundle 29.99 MB (MSI + .NET 8 + Burn overhead)
+- ✅ `regress` 102/102 + 4 SKIP (v1.8.2 baseline 持平, v1.8.3 不改 codegen)

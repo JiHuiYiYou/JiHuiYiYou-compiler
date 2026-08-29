@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  jhyy-file-icon.svg : .jhyy 文件类型图标源 (32x32 viewBox, 矢量)
+
+  v1.8.3 rev9: 顶部白保留 + 折角深色细描边去白反光 (user 反馈)
+    - 底面: 顶部 0-10% 纯白 (#ffffff), 之后品牌色渐变 (跟 v7 一致, 用户确认保留)
+    - 折角: 三段渐变 (浅 -> 中 -> 深) + 深色细描边 (#1a1a2e, stroke-width=0.3)
+            去掉白色反光线 (跟用户 "边缘线也是白的不清楚" 一致)
+    - J: 严格按 vscode-ext/icon.svg 比例
+
+  viewBox=32, 6 个目标尺寸 (16/32/48/64/128/256) 都是整数倍
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <!-- 文件底面: 顶部 10% 纯白, 之后品牌色渐变 (跟 v7 一致) -->
+    <linearGradient id="bodyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="10%" stop-color="#c8cdd3"/>
+      <stop offset="50%" stop-color="#4a4a5e"/>
+      <stop offset="100%" stop-color="#1a1a2e"/>
+    </linearGradient>
+
+    <!-- 折角: 三段渐变 (折点浅, 斜边深, 体现立体) -->
+    <linearGradient id="foldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#d8dde3"/>
+      <stop offset="50%" stop-color="#8a8e94"/>
+      <stop offset="100%" stop-color="#3a3a4e"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 文件主体: 顶部短白 + 主体品牌色渐变 + 深色边框 -->
+  <path d="M 4 1 L 22 1 L 29 8 L 29 30 Q 29 31 28 31 L 4 31 Q 3 31 3 30 L 3 2 Q 3 1 4 1 Z"
+        fill="url(#bodyGrad)"
+        stroke="#0a0a14"
+        stroke-width="0.3"/>
+
+  <!-- 折角: 三段渐变 + 深色细描边 (stroke=#1a1a2e, stroke-width=0.3, 去白反光) -->
+  <path d="M 22 1 L 29 8 L 22 8 Z"
+        fill="url(#foldGrad)"
+        stroke="#1a1a2e"
+        stroke-width="0.3"
+        stroke-linejoin="round"/>
+
+  <!-- J: 严格按 vscode-ext/icon.svg 比例 (128 viewBox / 4) -->
+  <text x="16" y="22"
+        font-family="Segoe UI,Arial,sans-serif"
+        font-size="20"
+        font-weight="bold"
+        fill="#00d4aa"
+        text-anchor="middle">J</text>
+
+  <!-- 横线: 严格按比例, opacity=0.6 -->
+  <rect x="8" y="24" width="16" height="1" rx="0.5"
+        fill="#00d4aa" opacity="0.6"/>
+</svg>

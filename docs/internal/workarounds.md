@@ -4179,9 +4179,9 @@ fact-check EXIT mismatch 必先 trace 到 exit code propagation path. v1.7.3 误
 ## W-062: VSCode UserChoice hijack + MSYS2 OpenWithProgids 双层 shadow → `.jhyy` 图标不显示 (推 v1.8.2)
 
 **ID:** W-062
-**状态:** ✅ RESOLVED 2026-08-29 (v1.8.2 patch — Path B 自定 ProgId)
+**状态:** ✅ RESOLVED 2026-08-29 (v1.8.3 patch — WiX MSI SYSTEM-context CustomAction 写 per-user UserChoice, 绕过 UCPD.sys kernel filter)
 **日期:** 2026-08-29 (v1.8.1 patch ship 后 user 反馈图标仍白板)
-**superseder:** v1.8.2 patch — Path B: 注册自定义 ProgId `JHYY.EditInVSCode` + Mozilla UserChoice Hash 算法写 `UserChoice\ProgId`
+**superseder:** v1.8.3 patch — MSI CustomAction JHYYSetUCForAllUsers (Execute="deferred" + Impersonate="no" + Return="ignore") 调 `jhyy-setuc.exe --system-context` 枚举 `HKEY_USERS` S-1-5-21-… SIDs, 写每用户 UserChoice。SYSTEM trust chain 绕过 UCPD kernel filter (verified Phase 0 2026-08-29)。Bundle.wxs 加 .NET 8 Desktop Runtime 链式安装确保 prereq。
 **触发面:** Windows 10/11 装了 JHYY + VSCode 双应用的机器, `.jhyy` 副档名被 VSCode 设为默认 opener 后, 文件总管文件夹视图显示白板文档图标
 
 **症状:**
@@ -4341,5 +4341,94 @@ v1.8.1 patch 修了:
 - `feedback_fix_evaluation_rule` 5/5 PASS gate
 - `feedback_document_workarounds_in_docs` workaround 必须详细登记
 - v1.8.1 patch commit `de4f219` (前一 sprint 修了 WiX (default) + embedded icon, 但漏 2 层 hijack)
+
+---
+
+### v1.8.3 Resolution — WiX MSI SYSTEM-context CustomAction 写 per-user UserChoice (UCPD.sys kernel filter bypass)
+
+**UCPD 真实限制根因** (per v1.8.2 现场诊断 2026-08-29): UCPD.sys 是 Win10 2024-02+ cumulative update 引入的 `FILE_SYSTEM_DRIVER` (Type=2, State=4 RUNNING), 在内核 filter 层加 non-inherited Deny ACE on `HKCU\…\FileExts\.<ext>\UserChoice`。任何 user-mode caller (即使是 admin / elevated shell) 调 `Registry.CreateSubKey(UserChoice)` 都被拒 (`UnauthorizedAccessException`)。`sc stop UCPD` 返回 exit 5 (access denied) — UCPD 设计上就是不可程式化卸载。Mozilla UserChoice Hash 算法 token-independent (算法本身能跑), 但写路径 kernel-protected。
+
+**Phase 0 现场验证关键发现** (2026-08-29):
+- ✅ `sc create obj= LocalSystem type= own start= demand` 创建的 LocalSystem service 调 `Registry.CurrentUser.CreateSubKey(UserChoice)` 成功 — 写 `HKEY_USERS\S-1-5-18\…\FileExts\.jhyy\UserChoice` 完整。
+- ✅ `sc stop UCPD` 从 SYSTEM 也是 exit 1052 (boot-start driver 没装 stop handler), 所以不需要也不能停 UCPD。
+- ✅ SYSTEM token (`NT AUTHORITY\SYSTEM`) 有 `SeRestorePrivilege` + `SeBackupPrivilege` + `SeTakeOwnershipPrivilege`, **bypass UCPD Deny ACE**, 不需要停 UCPD。
+- ⚠️ SYSTEM 的 HKCU 是 `S-1-5-18` 自己的 hive, **不是 liuzhen 的**。要写 liuzhen 的 HKCU, 要么 impersonate (复杂), 要么直接写 `HKEY_USERS\<liuzhen-SID>\…` (干净)。
+
+**修复 (v1.8.3 SYSTEM-context CustomAction):**
+
+### Phase 1 — `jhyy-setuc.exe --system-context` mode
+- 新增 `ApplyPathBSystemContext(ext, progId)` 静态方法 (`installer/common/jhyy-setuc/Program.cs`)
+- 遍历 `HKEY_USERS` sub  keys, 筛选 `S-1-5-21-…` SIDs (跳过 SYSTEM / LocalService / NetworkService / `_Classes` mirror)
+- 对每个用户 SID: 算 Mozilla Hash (用 **TARGET 用户的 SID**, 不是 caller SID), 写 `HKEY_USERS\<sid>\…\FileExts\<ext>\UserChoice` + ApplicationAssociationToasts
+- 单用户失败 log + continue (partial success OK), `return 2`;全部成功 `return 0`
+- Full success 写 sentinel `HKLM\SOFTWARE\JiHuiYiYou\JHYY\UserChoiceSystemContextApplied = <iso8601>` (HKLM 让 per-user RunOnce 可读)
+- 现有 single-user path (`ApplyPathB`) 不动, 保持 `manual-fix-icon-cache.ps1` 兼容
+
+### Phase 2 — WiX MSI CustomAction (jhyy-compiler.wxs)
+- `<Binary Id="JHYYSetUCBin" SourceFile="!(bindpath.common)\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.exe" />` — ship 进 MSI Binary table, WiX 在 CA 运行时自动 extract 到 temp
+- `<CustomAction Id="JHYYSetUCForAllUsers" BinaryRef="JHYYSetUCBin" ExeCommand="&quot;[JHYYSetUCBin]&quot; --system-context .jhyy JHYY.SourceFile" Execute="deferred" Impersonate="no" Return="ignore" />`
+- `Execute="deferred"` + `Impersonate="no"` = **SYSTEM context** (LocalSystem perMachine install)
+- `Return="ignore"` = CA 失败不 rollback install (icon 是 best-effort)
+- `<InstallExecuteSequence>` 加 `<Custom Action="JHYYSetUCForAllUsers" After="InstallFiles" Condition="NOT Installed" />`
+- `<RemoveRegistryValue>` clear sentinel on uninstall (per `JHYYPathReg` Component)
+
+### Phase 3 — Bundle .NET 8 chain (Bundle.wxs)
+- `<util:RegistrySearch Id="Net8RuntimeSearch" Variable="Net8RuntimeVersion" Root="HKLM" Key="SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedhost" Result="value" />` 检测现有 .NET 8
+- `<ExePackage Id="Net8Runtime" SourceFile="$(var.JHY_DOTNET8_RUNTIME_EXE_PATH)" DisplayName=".NET 8 Desktop Runtime" Compressed="yes" Vital="yes" Permanent="yes" InstallArguments="/quiet /norestart" DetectCondition="Net8RuntimeVersion" />` — 缺失则 silent install 8.0.30
+- `.NET 8` chain 在 `JHYYCompilerMsi` 之前 (MSI install 完跑 v1.8.3 CA)
+- `Permanent="yes"` — shared runtime, Bundle uninstall 不移除
+
+### Phase 4 — install-configure-all.bat sentinel 跳 step 6
+- step 6 头部 `reg query "HKLM\SOFTWARE\JiHuiYiYou\JHYY" /v UserChoiceSystemContextApplied`, 若非空 → `goto :skip_post_install_user_choice` 跳过 manual-fix (避免 RunOnce user-context 重新写覆盖 v1.8.3 SYSTEM-context 写)
+- 若空 → 跑原 step 6 (向后兼容 v1.8.2 manual fix path)
+
+### 验证 (5/5 PASS on each test, per `feedback_fix_evaluation_rule`)
+
+**单元测试** (`jhyy-setuc.exe --system-context` 行为):
+- ✅ compile 成功 (0 warning, 0 error)
+- ✅ `--system-context .jhyy JHYY.SourceFile` 从 SYSTEM service 跑 → 写 `HKEY_USERS\S-1-5-21-2800878244-2814466599-1096304708-1001\…\FileExts\.jhyy\UserChoice` = `ProgId=JHYY.SourceFile + Hash=fcriTl+YsZ4=`
+- ✅ `HKEY_USERS\S-1-5-18\…\FileExts\.jhyy\UserChoice` **不动** (v1.8.3 显式 skip SYSTEM hive)
+- ✅ per-user `ApplicationAssociationToasts\JHYY.SourceFile_.jhyy = 0` 写入 liuzhen hive (新 v1.8.3 code path)
+- ✅ sentinel `HKLM\SOFTWARE\JiHuiYiYou\JHYY\UserChoiceSystemContextApplied` 写入 (full success)
+
+**MSI build** (`installer/build.ps1 compiler`):
+- ✅ `jhyy-compiler-1.8.0.msi` 1.29 MB (跟 v1.8.2 持平, `<Binary>` reference 不重复 ship)
+- ✅ WiX 4 schema 正确 (`Condition` attribute 不是 inner text, learned from WIX0400 error)
+
+**Bundle build** (`installer/build.ps1 bundle`):
+- ✅ .NET 8 runtime 28.6 MB cached (`installer/build-artifacts/dotnet/dotnet-runtime-8.0.30-win-x64.exe`)
+- ✅ `jhyy-installer-1.8.0.exe` 29.99 MB (MSI + .NET 8 + Burn overhead)
+- ✅ WiX 4 `ExePackage` 用 `InstallArguments` 不是 `InstallCommand` (learned from WIX0004)
+
+**install-configure-all.bat sentinel 逻辑**:
+- ✅ Sentinel absent → 跑 step 6 原 path
+- ✅ Sentinel present → 跳过 step 6 (`goto :skip_post_install_user_choice`)
+
+**regress baseline 不退化**:
+- `mcp__jhyy__jhyy_regress` 102/102 PASS + 4 SKIP (v1.8.2 ship baseline 持平, v1.8.3 不改 codegen)
+
+### 已知 limitation (v1.8.3 不修)
+
+- **MSI install without Bundle** — 用户手动 `msiexec /i jhyy-compiler-1.8.3.msi` 没 .NET 8 → CA 失败 (`Return="ignore"` 不 rollback, 但 `jhyy-setuc.exe` 启动失败不写 UserChoice) → icon 仍 default; Bundle install 自动链 .NET 8 即可
+- **每 user 需登录一次触发 sentinel 生效** — MSI install 在 SYSTEM context 写 liuzhen hive, user 已在 session → 不需 logout; 但新建 user 后首次登录 RunOnce step 6 已被 sentinel skip → 该 user icon 不更新 → v1.8.4 follow-up 候选 (MSI repair trigger 重跑 CA 写新 user hive)
+- **UCPD.sys 行为变化** — Win11 24H2+ 可能加更严 Deny ACE; Phase 0 验证了 Win10 19045, Win11 24H2+ 待验证
+
+### 教訓 (Phase 0 vs Phase 1 設計)
+
+- **Phase 0 现场验证 ≥ Phase 1 设计**: 写 .NET 8 1 周前先去现场 `sc create obj= LocalSystem` 测试, 发现 SYSTEM trust chain 直接绕 UCPD — **根本不需要** stop UCPD / 卸 UCPD / 改 UCPD config。Phase 1 设计从 "How to disable UCPD" pivot 到 "How to invoke jhyy-setuc from SYSTEM context" — 1 行 mindset flip 救整个 sprint
+- **Mozilla algorithm token-independent**: 很多人 (包括 MS 自己) 以为 UserChoice hash 需要 caller privilege escalation 才能算, 其实 hash 只是 MD5 + scramble — 算法永远能跑, 写不写是 kernel token 问题。**算法是 reverse-engineered, 写入路径是 MS-protected**
+- **v1.8.2 manual fallback vs v1.8.3 automated**: v1.8.2 ship 时没实测 MSI / Bundle install 路径, 纯想 Path A/B 流程。v1.8.3 直接从 "MSI install 自动做" 倒推 → 6 phases 设计对齐 WIX 4/7 spec + Mozilla + UCPD 三套体系
+- **SYSTEM token 行为常识**: `LocalSystem` service 有 `SeRestorePrivilege` + `SeBackupPrivilege` + `SeTakeOwnershipPrivilege`, 但 HKCU 是 S-1-5-18 自己的 hive。写其他 user 的 HKCU → 必须直接写 `HKEY_USERS\<sid>\…` (SYSTEM token 有权写, 因为 SYSTEM 是 kernel-level owner of registry)
+- **MSI CustomAction Type 50 vs Type 34**: Type 50 (Binary stored in Binary table) WiX 自动 extract + auto-resolve `[JHYYSetUCBin]` property → 不需 CustomActionData 预设 → 简单 + 0 MSI table pollution。Type 34 (cmd.exe /c) 需要 immediate CA 预设 property → 多一层复杂度
+
+### 引用 (v1.8.3)
+
+- `installer/common/jhyy-setuc/Program.cs` (v1.8.3 改, 加 `--system-context` mode + sentinel write)
+- `installer/compiler/jhyy-compiler.wxs` (v1.8.3 改, `<Binary>` + `<CustomAction>` + `<InstallExecuteSequence>` + `<RemoveRegistryValue>`)
+- `installer/Bundle.wxs` (v1.8.3 改, `<util:RegistrySearch>` + `<ExePackage>` .NET 8 chain)
+- `installer/build.ps1` (v1.8.3 改, .NET 8 auto-download + Bundle `wix build` 加 `-ext WixToolset.Util.wixext`)
+- `installer/common/install-configure-all.bat` (v1.8.3 改, step 6 sentinel check + `goto :skip_post_install_user_choice`)
+- `installer/build-artifacts/dotnet/dotnet-runtime-8.0.30-win-x64.exe` (v1.8.3 新, 28.6 MB .NET 8 Desktop Runtime)
+- `docs/logs/v1/changelog-v1.8.0.md` v1.8.3 patch 段 (umbrella)
 
 
