@@ -30,19 +30,15 @@ function Log($msg) { Write-Host $msg; $msg | Out-File $logPath -Append }
 
 Log "[v1.8.2 fix] Elevated session running as: $env:USERNAME"
 
-# 0. Locate jhyy-setuc.exe (build if missing)
+# 0. Locate jhyy-setuc.exe. The script lives in INSTALLDIR\bin\ alongside
+#    jhyy-setuc.exe (shipped via JHYYSetUCExe Component since v1.8.2 patch;
+#    v1.8.3.1 also ships jhyy-setuc.dll + .deps.json + .runtimeconfig.json
+#    so the .NET 8 apphost can find its companion assembly).
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$setucExe = Join-Path $ScriptDir "jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.exe"
+$setucExe = Join-Path $ScriptDir "jhyy-setuc.exe"
 if (-not (Test-Path $setucExe)) {
-    Log "[v1.8.2 fix] jhyy-setuc.exe not found, building..."
-    $buildScript = Join-Path $ScriptDir "jhyy-setuc\build.ps1"
-    if (Test-Path $buildScript) {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $buildScript | Out-Null
-    }
-    if (-not (Test-Path $setucExe)) {
-        Log "[v1.8.2 fix] FATAL: jhyy-setuc.exe build failed"
-        exit 1
-    }
+    Log "[v1.8.2 fix] jhyy-setuc.exe not found in $ScriptDir — MSI install incomplete?"
+    exit 1
 }
 Log "[v1.8.2 fix] Using jhyy-setuc: $setucExe"
 

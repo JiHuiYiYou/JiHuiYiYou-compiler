@@ -263,31 +263,56 @@
       is already on disk; Impersonate="no" ensures SYSTEM context (LocalSystem
       perMachine install); Return="ignore" so a CA failure doesn't rollback
       the entire install (icon is best-effort).
+
+      Pattern (v1.8.3.1 fix): SetUCProp (immediate) captures [INSTALLDIR]
+      resolved path into CustomActionData property [JHYYSetUCCmd], then
+      JHYYSetUCForAllUsers (deferred) reads [JHYYSetUCCmd].
+
+      v1.8.3 first ship tried ExeCommand referencing [JHYYSetUCBin] directly
+      which doesn't resolve in deferred CA context — produced 0x80004005
+      (E_FAIL) in production MSI.
+
+      v1.8.3.1 first try used <Binary Id="JHYYSetUCBin"> + BinaryRef +
+      [JHYYSetUCBin] in SetUCProp Value — but WiX does NOT auto-create a
+      property from a Binary Id, so [JHYYSetUCBin] resolved to empty string
+      even in immediate CA. Same 0x80004005 failure.
+
+      v1.8.3.1 second try (current): use the binary that's already shipped
+      via JHYYSetUCExe File Component (C:\Program Files\JHYY\bin\
+      jhyy-setuc.exe). The Directory="INSTALLDIR" attribute on the deferred
+      CA sets the working directory to INSTALLDIR resolved path, then
+      ExeCommand uses relative path "bin\jhyy-setuc.exe" — MSI resolves
+      [INSTALLDIR] via SetUCProp immediate CA capture. This is the standard
+      pattern for invoking installed executables from deferred CAs.
     -->
     <InstallExecuteSequence>
+      <Custom Action="SetUCProp" Before="JHYYSetUCForAllUsers" />
       <Custom Action="JHYYSetUCForAllUsers" After="InstallFiles" Condition="NOT Installed" />
     </InstallExecuteSequence>
 
     <!--
-      v1.8.3: Binary table entry for jhyy-setuc.exe. WiX extracts this to a
-      temp location at CA execution time; the [JHYYSetUCBin] property
-      resolves to that temp path. SourceFile is the same file already
-      shipped via JHYYSetUCExe Component — no duplicate file in the MSI,
-      just a reference to the embedded Binary copy.
+      v1.8.3.1 immediate CA: captures [INSTALLDIR] (resolved to
+      "C:\Program Files\JHYY\") into CustomActionData property [JHYYSetUCCmd].
+      MSI evaluates [INSTALLDIR] at this immediate CA execution time (before
+      deferred CA), so the resolved path is captured into CustomActionData
+      table for JHYYSetUCForAllUsers (deferred) to read. Path is in cmd.exe
+      form (quoted, no trailing slash) ready for cmd /c invocation.
     -->
-    <Binary Id="JHYYSetUCBin"
-            SourceFile="!(bindpath.common)\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.exe" />
+    <CustomAction Id="SetUCProp"
+                  Property="JHYYSetUCCmd"
+                  Value="&quot;[INSTALLDIR]bin\jhyy-setuc.exe&quot; --system-context .jhyy JHYY.SourceFile" />
 
     <!--
-      v1.8.3 CustomAction: invoke jhyy-setuc.exe with the system-context flag.
-      Enumerates HKEY_USERS S-1-5-21-… SIDs and writes each user's UserChoice
-      directly. SYSTEM trust chain bypasses UCPD.sys kernel filter (verified
-      2026-08-29 — see docs/internal/workarounds.md W-062).
+      v1.8.3.1 deferred CustomAction: invoke jhyy-setuc.exe with the
+      system-context flag. Enumerates HKEY_USERS S-1-5-21-… SIDs and writes
+      each user's UserChoice directly. SYSTEM trust chain bypasses UCPD.sys
+      kernel filter (verified 2026-08-29 — see docs/internal/workarounds.md
+      W-062).
 
       Execute="deferred" + Impersonate="no" = SYSTEM context (LocalSystem).
+      Directory="INSTALLDIR" sets cwd to the install dir (resolved path).
       Return="ignore" = icon is best-effort; CA failure doesn't rollback install.
-      ExeCommand quotes [JHYYSetUCBin] (binary temp path) plus system-context
-      args. Path/args have no spaces so no inner quoting needed.
+      ExeCommand reads [JHYYSetUCCmd] (captured by SetUCProp immediate CA).
 
       Note: requires .NET 8 Desktop Runtime on target machine. If missing,
       exe fails to launch (clear error from .NET runtime) and the CA exits
@@ -296,8 +321,8 @@
       install via direct MSI (not Bundle) need .NET 8 separately.
     -->
     <CustomAction Id="JHYYSetUCForAllUsers"
-                  BinaryRef="JHYYSetUCBin"
-                  ExeCommand="&quot;[JHYYSetUCBin]&quot; --system-context .jhyy JHYY.SourceFile"
+                  Directory="INSTALLDIR"
+                  ExeCommand="[JHYYSetUCCmd]"
                   Execute="deferred"
                   Impersonate="no"
                   Return="ignore" />
@@ -472,6 +497,20 @@
               Source="!(bindpath.common)\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.exe"
               KeyPath="yes"
               Checksum="yes" />
+        <!--
+          v1.8.3.1 fix: .NET 8 apphost model — jhyy-setuc.exe is a small launcher
+          that loads jhyy-setuc.dll from the same directory. Without the dll +
+          runtimeconfig + deps.json, the exe fails with "application to execute
+          does not exist: jhyy-setuc.dll" and returns 0x80004005. v1.8.3 first
+          ship only included the exe, so the deferred CA silently failed even
+          though ExeCommand was correct.
+        -->
+        <File Id="JHYYSetUCExeDll"
+              Source="!(bindpath.common)\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.dll" />
+        <File Id="JHYYSetUCExeDeps"
+              Source="!(bindpath.common)\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.deps.json" />
+        <File Id="JHYYSetUCExeRuntime"
+              Source="!(bindpath.common)\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.runtimeconfig.json" />
       </Component>
     </ComponentGroup>
 

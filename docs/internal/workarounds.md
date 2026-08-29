@@ -61,7 +61,7 @@
 | [W-059](#w-059-defer-codegen-path-silent-crash-v136-ship-后-0-test-验证-accept-path-推-v18) | ✅ RESOLVED 2026-08-28 (v1.8.0) | 根因 = `compiler/src0/sema.jhyy` `sema_defer_register` (NODE_DEFER case) 调 `infer_type(ctx, expr)` 漏传 `ta` (TypeArena arg) → sema 阶段 silent corrupt stack → `[sema] P3 i=0` 后 crash 0 .il/.s/.exe. 修复: 1-line fix line 1410 `let _v = infer_type(ctx, ta, expr);` (jhyy-side `infer_type` 3-arg signature, 漏 `ta` 等于传 garbage). C-side 正确因为 `infer_type` 是 2-arg. Phase 1A empirical (MCP-only) + Phase 1B bisection 定位 + Phase 2 真修. 3 defer test (`defer_basic.jhyy` / `defer_multi_lifo.jhyy` / `defer_let_init.jhyy`) SKIP directive 删, 全 PASS regress (jhyy.exe 102/102 + jhyy_stage0.exe parity 102/102). N=4 byte-equal closure hold (v2/v3/v4 sha=`03a1cdd4...`). 5/5 PASS on each target test per `feedback_fix_evaluation_rule`. |
 | [W-060](#w-060-enum-variant-payload-abi-mismatch-mixedi1234-match-走-wildcard-path-exit210--1234-推-v18) | ❌ INVALID 2026-08-28 (v1.8.0) | v1.7.3 ship 期间 fact-check 误判为真 bug: 实为 bash `$?` 8-bit truncation (EXIT=210 = 1234 & 0xFF) + Windows `subprocess.run` 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比較. v1.8.0 Phase 1 调查 (Agent 3) 确认 W-060 = test artifact. OR pattern `Some(v) \| Some(v)` 分支 EXIT=42 实无 bug (line 1 SKIP 标签把 spec 限制跟 OR pattern 测试混淆). 2 enum test (`payload_bind_multi.jhyy` / `payload_bind_nested.jhyy`) SKIP directive 删, 全 PASS regress. |
 | [W-061](#w-061-nested-struct-field-offset-bug-outer--tag-inner--read-exit51--307-推-v18) | ❌ INVALID 2026-08-28 (v1.8.0) | v1.7.3 ship 期间 fact-check 误判为真 bug: 实为 bash `$?` 8-bit truncation (EXIT=51 = 307 & 0xFF) + Windows `subprocess.run` 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比較. v1.8.0 Phase 1 调查 (Agent 3) 确认 W-061 = test artifact. `(*o).inner.x + (*o).inner.y` 实 EXIT=300 (无 bug, 推测 OR-pattern 部分 follow-up 误解). nested_struct_dwarf.jhyy SKIP directive 删, 全 PASS regress. |
-| [W-062](#w-062-vscode-userchoice-hijack--msys2-openwithprogids-双层-shadow--jhyy-图标-不显示-推-v182) | ✅ RESOLVED 2026-08-29 (v1.8.2 patch) | 双层独立 hijack: (1) VSCode UserChoice hijack (`HKCU\…\FileExts\.jhyy\UserChoice\ProgId = Applications\Code.exe`, UCPD.sys 加 Deny ACE 防非 admin SetValue, 需 admin + UCPD pause/restart);(2) MSYS2 OpenWithProgids 残留 (`HKCU\…\FileExts\.jhyy\OpenWithProgids\jhyy_auto_file` + `HKCU\Software\Classes\jhyy_auto_file`, v1.8.1 patch 没清 OpenWithProgids 子键). v1.8.1 patch 只修了 WiX `(default)` 写错位 + `jhyy.exe,0` embedded icon, **不修** 这两层 shell hijack. Explorer folder view 用 UserChoice ProgId 取 icon → `Applications\Code.exe\DefaultIcon` 解析 quirk → shell32 白板. 修复: Path B (用户决策) — 注册自定义 ProgId `JHYY.EditInVSCode` (`DefaultIcon = jhyy-icon.ico,0` + `shell\open\command = Code.exe "%1"`),用 Mozilla reverse-engineered UserChoice Hash 算法 (`SHA/MD5 + 2-pass scramble`, MPL 2.0) 把 `UserChoice\ProgId` 写成 `JHYY.EditInVSCode`. C# tool `installer/common/jhyy-setuc/Program.cs` (.NET 8-windows) port Mozilla 算法, try/finally 保證 UCPD restart. MSI 装 (admin) + RunOnce step 6 跑 `installer/common/manual-fix-icon-cache.ps1` 调 jhyy-setuc. Path B 失败时 (e.g. .NET 8 Desktop Runtime 缺失) 降级 Path A fallback (只 reg delete UserChoice + jhyy_auto_file, 退回 HKLM `JHYY.SourceFile` ProgId = `jhyy.exe,0` embedded icon). user 手动跑 `C:\Users\liuzhen\Desktop\JHYY-Fix-Icon.bat` (self-elevate via UAC) 立即生效, 不需等 MSI rebuild. |
+| [W-062](#w-062-vscode-userchoice-hijack--msys2-openwithprogids-双层-shadow--jhyy-图标-不显示-推-v182) | ✅ RESOLVED 2026-08-29 (v1.8.3.1 patch) | 双层独立 hijack: (1) VSCode UserChoice hijack (`HKCU\…\FileExts\.jhyy\UserChoice\ProgId = Applications\Code.exe`, UCPD.sys 加 Deny ACE 防非 admin SetValue, 需 admin + UCPD pause/restart);(2) MSYS2 OpenWithProgids 残留 (`HKCU\…\FileExts\.jhyy\OpenWithProgids\jhyy_auto_file` + `HKCU\Software\Classes\jhyy_auto_file`, v1.8.1 patch 没清 OpenWithProgids 子键). v1.8.1 patch 只修了 WiX `(default)` 写错位 + `jhyy.exe,0` embedded icon, **不修** 这两层 shell hijack. Explorer folder view 用 UserChoice ProgId 取 icon → `Applications\Code.exe\DefaultIcon` 解析 quirk → shell32 白板. 修复: v1.8.2 Path B 注册自定义 ProgId `JHYY.EditInVSCode` (`DefaultIcon = jhyy-icon.ico,0` + `shell\open\command = Code.exe "%1"`),用 Mozilla reverse-engineered UserChoice Hash 算法 (`SHA/MD5 + 2-pass scramble`, MPL 2.0) 把 `UserChoice\ProgId` 写成 `JHYY.EditInVSCode`. C# tool `installer/common/jhyy-setuc/Program.cs` (.NET 8-windows) port Mozilla 算法. **v1.8.3 ship 时**把 manual Path B 升级到 WiX MSI CustomAction `JHYYSetUCForAllUsers` (SYSTEM context 绕 UCPD kernel filter),通过 immediate `SetUCProp` + deferred `--system-context` 2-step 模式在 install 时自动触发。**v1.8.3.1 patch 真修**: ship 时 CustomAction 0x80004005 静默失败 — 3-attempt diagnosis (1. `ExeCommand` 引用 `[JHYYSetUCBin]` property 在 deferred CA 不 resolve; 2. WiX `<Binary>` 不自动创建 property; 3. `.NET 8 apphost model` 需 ship `.exe` + `.dll` + `.deps.json` + `.runtimeconfig.json` 4 个 file,v1.8.3 只 ship 了 `.exe`)。**最终 fix**: 2-step immediate→deferred CA pattern (`SetUCProp` capture `[INSTALLDIR]` → `JHYYSetUCCmd` → deferred `Directory="INSTALLDIR" ExeCommand="[JHYYSetUCCmd]"`) + ship 4 个 .NET 8 file 落地 `INSTALLDIR\bin\`。顺带修 `manual-fix-icon-cache.ps1` 自 v1.8.2 ship 起 Path B jhyy-setuc.exe 路径错(指向 build 产物路径而非 INSTALLDIR\bin\)。MSI install field test 2026-08-29: CA 完成 17:50, sentinel written, UserChoice Hash `/dbBVe4aYxo=`, 4 files 落地, Explorer `.jhyy` 显示 JHYY 品牌 "J" icon。5/5 PASS gate per `feedback_fix_evaluation_rule`。 |
 
 ---
 
@@ -4334,12 +4334,115 @@ v1.8.1 patch 修了:
 - Mozilla `browser/components/shell/WindowsUserChoice.cpp` (MPL 2.0, 算法 reverse-engineered reference)
 - PS-SFTA by DanysysTeam / SetUserFTA by kolbi (MIT, 替代工具 cross-ref)
 - `installer/common/jhyy-setuc/Program.cs` (v1.8.2 新, C# .NET 8-windows tool)
-- `installer/common/manual-fix-icon-cache.ps1` (v1.8.2 改 Path B + Path A fallback)
+- `installer/common/manual-fix-icon-cache.ps1` (v1.8.2 改 Path B + Path A fallback;v1.8.3.1 修 Path B jhyy-setuc.exe 路径)
 - `installer/common/install-configure-all.bat` (v1.8.2 step 5 + 6)
-- `installer/compiler/jhyy-compiler.wxs` (v1.8.2 新增 ManualFixIconCachePS1 + JHYYSetUCExe Components)
-- `docs/logs/v1/changelog-v1.8.0.md` v1.8.2 patch 段 (umbrella)
+- `installer/compiler/jhyy-compiler.wxs` (v1.8.2 新增 ManualFixIconCachePS1 + JHYYSetUCExe Components;v1.8.3 加 MSI CustomAction;v1.8.3.1 加 SetUCProp immediate CA + 4-file .NET 8 apphost ship + Directory=INSTALLDIR pattern)
+- `docs/logs/v1/changelog-v1.8.0.md` v1.8.2 / v1.8.3 / v1.8.3.1 patch 段 (umbrella)
 - `feedback_fix_evaluation_rule` 5/5 PASS gate
 - `feedback_document_workarounds_in_docs` workaround 必须详细登记
+- `feedback_changelog_umbrella` v1.x 单 umbrella CHANGELOG
+- `feedback_audit_single_commit_diff` audit 走 `git show <sha>` 不跨 commit diff
+- `feedback_commit_coauthor` MiniMax-M3 co-author
+
+**v1.8.3.1 真修详情 (2026-08-29 ship 后 field test):**
+
+### Symptom
+v1.8.3 ship 在 fresh MSI install (admin elevation) 触发 CustomAction `JHYYSetUCForAllUsers` 时返回 `0x80004005`。`install.log` 显示:
+```
+CustomAction JHYYSetUCForAllUsers returned actual error code 1603 (note: may not be 100% accurate if translation failed)
+```
+`Return="ignore"` 不 rollback install,但 jhyy-setuc.exe 从未启动 → UserChoice 没写 → icon 仍 default。
+
+### 3-attempt root cause chain
+
+**Attempt 1 — property resolution in deferred CA**:
+- 原始: `ExeCommand="&quot;[JHYYSetUCBin]&quot; --system-context .jhyy JHYY.SourceFile"`
+- 问题: MSI properties 在 deferred CA **不 resolve**(只有 immediate CA resolve)。`[JHYYSetUCBin]` 即使在 immediate CA 加 `Custom Action="SetUCProp" Property="JHYYSetUCBin" Value="..." Before="JHYYSetUCForAllUsers"` capture,仍失败。
+
+**Attempt 2 — WiX `<Binary>` 不自动创建 property**:
+- 诊断: WiX 4 `<Binary Id="JHYYSetUCBin" SourceFile="...">` 只往 MSI Binary table 加 row。`<CustomAction BinaryRef="JHYYSetUCBin">` 通过 Binary Key 引用,**不需 property**。但若 `ExeCommand` 想引用 binary 的 disk 路径,必须用其他机制(`<FileRef>` 或 `Directory=` cwd-based)。
+- 修复: 移除 `<Binary>`,改成 `Directory="INSTALLDIR"` + `ExeCommand="&quot;[INSTALLDIR]bin\jhyy-setuc.exe&quot; --system-context ..."`(WiX 4 `Directory` attribute 注入 cwd,`[INSTALLDIR]` 从 `<Property>` table 取得 → 跑得通)。
+- 同时改成 immediate + deferred 2-step 模式: `SetUCProp` (immediate) 写 `JHYYSetUCCmd` property capture `[INSTALLDIR]` → `JHYYSetUCForAllUsers` (deferred) `ExeCommand="[JHYYSetUCCmd]"` 从 CustomActionData 读。
+
+**Attempt 3 — .NET 8 apphost missing assembly**:
+- 新症状: Fix 1+2 后 CA 仍 fail,但 `0x80004005` 不再出。ProcMon trace 显示 `jhyy-setuc.exe` 进程立刻 exit 1,stderr: `Could not load file or assembly 'jhyy-setuc, Version=1.0.0.0...'`。
+- 根因: `.NET 8 apphost model` — `jhyy-setuc.exe` 是 launcher,实际代码在 `jhyy-setuc.dll`(同 base name)。host 启动时按 base name 找同目录的 `.dll`。
+- v1.8.3 ship 只 ship 了 `<File Source="...jhyy-setuc.exe" />`,**缺少 `.dll` + `.deps.json` + `.runtimeconfig.json`**。
+- 最终修复: `<Component Id="JHYYSetUCExe">` 加 3 个 `<File>` entries,4 个 file 一起 ship 落地 `INSTALLDIR\bin\`。
+
+### 最终 fix 代码 (after 3 attempts)
+
+```xml
+<InstallExecuteSequence>
+  <Custom Action="SetUCProp" Before="JHYYSetUCForAllUsers" />
+  <Custom Action="JHYYSetUCForAllUsers" After="InstallFiles" Condition="NOT Installed" />
+</InstallExecuteSequence>
+
+<CustomAction Id="SetUCProp"
+              Property="JHYYSetUCCmd"
+              Value="&quot;[INSTALLDIR]bin\jhyy-setuc.exe&quot; --system-context .jhyy JHYY.SourceFile" />
+
+<CustomAction Id="JHYYSetUCForAllUsers"
+              Directory="INSTALLDIR"
+              ExeCommand="[JHYYSetUCCmd]"
+              Execute="deferred"
+              Impersonate="no"
+              Return="ignore" />
+
+<Component Id="JHYYSetUCExe" Bitness="always64" Guid="B3D5C8F2-6E4D-4F9C-B7E2-8D1A3F4C6B99">
+  <File Id="JHYYSetUCExeFile"
+        Source="!(bindpath.common)\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.exe"
+        KeyPath="yes" Checksum="yes" />
+  <File Id="JHYYSetUCExeDll"
+        Source="!(bindpath.common)\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.dll" />
+  <File Id="JHYYSetUCExeDeps"
+        Source="!(bindpath.common)\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.deps.json" />
+  <File Id="JHYYSetUCExeRuntime"
+        Source="!(bindpath.common)\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.runtimeconfig.json" />
+</Component>
+```
+
+### manual-fix-icon-cache.ps1 Path B 顺带修 (自 v1.8.2 ship 起坏)
+
+- 问题: 脚本用 `$setucExe = Join-Path $ScriptDir "jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.exe"` 找 binary,但**MSI install 后 `jhyy-setuc.exe` 落在 `INSTALLDIR\bin\`**(经 `JHYYSetUCExe` Component),不是 build 产物路径。**v1.8.2 ship 起 Path B 跑就 exit 1**(找不到 exe) → fallback Path A → 但 Path A 对付不了 UCPD → 等于 manual fix 没效。
+- 修复: `$setucExe = Join-Path $ScriptDir "jhyy-setuc.exe"`(脚本位于 `INSTALLDIR\bin\` 自 v1.8.3 起,exe 同目录;若找不到 → exit 1 报 "MSI install incomplete")。
+
+### Field verification (2026-08-29 fresh MSI install)
+
+```
+# install bundle silently
+JHYY-1.8.3.1.exe /quiet /norestart
+
+# verify CA 完成 (sentinel registry value)
+Get-ItemProperty "HKLM:\SOFTWARE\JiHuiYiYou\JHYY" -Name "UserChoiceSystemContextApplied"
+# → 2026-08-29T08:50:51.9285310Z  ✓
+
+# verify UserChoice 写入 (liuzhen hive)
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.jhyy\UserChoice"
+# → ProgId    REG_SZ    JHYY.SourceFile
+# → Hash      REG_SZ    /dbBVe4aYxo=  ✓ (Mozilla algorithm)
+
+# verify 4 files 落地
+dir "C:\Program Files\JHYY\bin\jhyy-setuc*"
+# → jhyy-setuc.exe  .dll  .deps.json  .runtimeconfig.json  ✓
+
+# verify direct invocation
+"C:\Program Files\JHYY\bin\jhyy-setuc.exe"
+# → Usage: ... → exit 0  ✓
+
+# visual verify
+explorer.exe .
+# → .jhyy files 顯示 JHYY 品牌 "J" icon  ✓
+```
+
+### 教训 (3-attempt root cause chain)
+
+1. **MSI deferred CA 属性解析**: MSI properties 在 deferred CA 执行时**不**自动 resolve。对 deferred CA 用 property,必须先由 immediate CA 写入 `CustomActionData`(`Custom Action="X" Property="Y" Value="..." Before="..."`)。常见误区: 在 `ExeCommand` 写 `[PropertyName]` 期待自动 expand。
+2. **WiX `<Binary>` ≠ property**: `<Binary Id="X">` 只把 binary stream 加进 MSI Binary table。`<CustomAction BinaryRef="X">` 通过 Binary table 引用,不需 property。但若 `ExeCommand` 想引用 binary 的 disk 路径,必须用其他机制。
+3. **.NET 8 apphost model**: `appname.exe` 是 launcher,实际代码在 `appname.dll`(同 base name)。**ship .NET 8 app 必须 ship 4 个 file**: `.exe` + `.dll` + `.deps.json` + `.runtimeconfig.json`。WiX `<File>` 一一 ship,无 magic 整组抓。
+4. **silent failure debugging path**: `CustomAction X returned actual error code N (note: may not be 100% accurate if translation failed)` 是 MSI 对 CA 内部错误的兜底 message。**真原因** 要看 Event Viewer / INSTALLDIR log / ProcMon trace file I/O。
+5. **stale build artifact 诊断**: v1.8.3 ship MSI build 15:53 + bundle build 后 user 16:17 重跑 icon regen → 16:17 regen log timestamp 比 install log 早 24 分钟 → 容易误判 "icon cache 没 flush"。**stale build artifact 也要清**: `Remove-Item installer/build-artifacts/jhyy-compiler-*.msi,jhyy-compiler-*.exe` 后 rebuild。
+6. **v1.8.2 manual Path B 自 ship 起就 broken**: `manual-fix-icon-cache.ps1` 路径错指 build 产物路径,MSI install 后 exe 在 `INSTALLDIR\bin\` 不是 build 路径。**field test on fresh install 应发现**,但 v1.8.2 ship 只跑 self-elevate on existing machine(那里 `INSTALLDIR\common\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.exe` 是 build copy,跟 install path 重合,误以为 Path B work)。
 - v1.8.1 patch commit `de4f219` (前一 sprint 修了 WiX (default) + embedded icon, 但漏 2 层 hijack)
 
 ---
