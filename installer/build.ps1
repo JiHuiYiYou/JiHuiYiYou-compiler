@@ -91,7 +91,12 @@ Write-Host "[build.ps1] target=$Target version=$($env:JHY_VERSION) display=$JHY_
 # Windows PowerShell 5.1 builds (e.g. GH Actions Windows-2022 5.1.20348) reject.
 # Fall back to Windows PowerShell 5.1 if pwsh isn't installed (e.g. local dev
 # box without PowerShell 7).
-$script:PsExe = (Get-Command pwsh -ErrorAction SilentlyContinue) ? 'pwsh' : 'powershell'
+# Use if/else (NOT `?:` ternary — 5.1 doesn't support `?:`; pwsh 7 does).
+if (Get-Command pwsh -ErrorAction SilentlyContinue) {
+    $script:PsExe = 'pwsh'
+} else {
+    $script:PsExe = 'powershell'
+}
 Write-Host "[build.ps1] psHost=$script:PsExe"
 
 # 2. verify wix CLI
@@ -210,6 +215,27 @@ switch ($Target) {
         }
         Copy-Item -Path "installer/build-artifacts/jhyy-lang-$JHY_VERSION_DISPLAY.vsix" `
                   -Destination "$vscodeExtDir/jhyy-lang-$JHY_VERSION_DISPLAY.vsix" -Force
+
+        # 2a. v1.8.3.1+: build jhyy-setuc.exe (UserChoice Hash writer, .NET 8).
+        #   WiX .wxs ships 4 files from installer/common/jhyy-setuc/bin/Release/net8.0-windows/
+        #   (jhyy-setuc.exe + .dll + .deps.json + .runtimeconfig.json — .NET 8 apphost model).
+        #   bin/ + obj/ are gitignored, so fresh CI checkout has nothing — must build here
+        #   before WiX compile (otherwise WIX0103 "Cannot find File ..." errors at line 496+).
+        #   Re-run is idempotent: dotnet build skips when up-to-date. No SKIP flag — jhyy-setuc
+        #   is required by the deferred CustomAction (JHYYSetUCForAllUsers).
+        Write-Host "[build.ps1] building jhyy-setuc.exe (.NET 8 UserChoice writer)..."
+        & $script:PsExe -NoProfile -ExecutionPolicy Bypass -File "installer/common/jhyy-setuc/build.ps1"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[ERROR] jhyy-setuc build failed, aborting MSI build"
+            exit 1
+        }
+        $setucBin = "installer/common/jhyy-setuc/bin/Release/net8.0-windows"
+        foreach ($f in @("jhyy-setuc.exe", "jhyy-setuc.dll", "jhyy-setuc.deps.json", "jhyy-setuc.runtimeconfig.json")) {
+            if (-not (Test-Path "$setucBin/$f")) {
+                Write-Host "[ERROR] jhyy-setuc build did not produce $f (expected at $setucBin)"
+                exit 1
+            }
+        }
 
         # 3. build MSI via WiX 4/7
         #   bindpath bin/        -> jhyy.exe + qbe.exe + runtime.{c,h} + jhyy_helpers.c + UI assets
