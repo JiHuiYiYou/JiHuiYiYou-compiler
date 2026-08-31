@@ -15,67 +15,55 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![中文](https://img.shields.io/badge/lang-中文-red)](README.zh-CN.md)
 
-[Quick Start](#quick-start) · [Language](#language) · [CLI](#cli) · [Architecture](#architecture) · [Roadmap](#roadmap) · [Docs](#docs)
+[Quick Start](#quick-start) · [Install](#install) · [Language](#language) · [CLI](#cli) · [Architecture](#architecture) · [Status](#status-v183--v1x-final) · [Roadmap](#roadmap) · [Docs](#docs)
 
 </div>
 
 ---
 
-## v1.8.3 — v1.x final, installer self-hosting closure + UCPD.sys bypass
-
-`jhyy_v1 → jhyy_v2 → jhyy_v3 → jhyy_v4 → jhyy_v5` compile themselves and emit **byte-equal QBE intermediate representation**:
-
-```
-jhyy_v1.exe.exe → src0/main.jhyy → jhyy_v2.il
-jhyy_v2.exe     → src0/main.jhyy → jhyy_v3.il   ← byte-equal to v2.il
-jhyy_v3.exe     → src0/main.jhyy → jhyy_v4.il   ← byte-equal to v2.il
-jhyy_v4.exe     → src0/main.jhyy → jhyy_v5.il   ← byte-equal to v2.il
-                                                 sha 03a1cdd4… (v1.8.0 ship)
-```
-
-All five raw `.il` files share an identical sha256 (1.378 MB, no fix-up post-processing). The fixed point is an attractor, not a transient. **Stage 2 N=4 byte-equal closure reached at v1.0.0 (tag `9b05c0f` / commit `eabee0d`, 2026-08-10), stable through v1.8.3 (tag `98c8272`, 2026-08-29). v1.x is now finalized.**
-
-| Metric | Value |
-|--------|-------|
-| `regress.py` (C-side `jhyy.exe`) | **102/102 PASS, 0 failed, 4 skipped** (106 total) |
-| `regress.py --binary=jhyy_v1.exe.exe` (self-hosted `jhyy_v1.exe.exe`) | **102/102 PASS, 0 failed, 4 skipped** (parity hold) |
-| Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | **7/7 PASS** |
-| Stage 2 N=4 byte-equal (`v1→v2→v3→v4→v5`) | **stable** |
-| `jhyy_v2` compiling `_repro_t0.jhyy` | `EXIT=100` ✓ |
-| `jhyy_v2` compiling `fib(10)` | `EXIT=55` ✓ |
-| `installer/jhyy-installer-1.8.3.exe` | shipped (~30MB, includes .NET 8 Desktop Runtime) |
-| `installer/jhyy-compiler-1.8.3.msi` | shipped (~995KB, includes `jhyy-setuc.exe`) |
-| `vscode-ext/jhyy-lang-1.8.3.vsix` | shipped (~13KB) |
-
-**v1.x umbrella changelog** — [`docs/logs/v1/changelog-v1.8.0.md`](docs/logs/v1/changelog-v1.8.0.md) covers v1.8.0 main + v1.8.1 / v1.8.2 / v1.8.2 patch update / v1.8.3 / v1.8.3.1 / v1.8.3.2 patches (all `fix(v1.8.0)` commits, no new features). Historical v1.0.0 → v1.7.3 changelogs each live under `docs/logs/v1/changelog-vX.Y.Z.md`.
-
-**W-NNN workaround status (v1.8.3 ship)**:
-- ✅ W-059 defer codegen silent crash — RESOLVED 2026-08-28
-- ❌ W-060 enum variant payload ABI — INVALID 2026-08-28 (bash `$?` 8-bit truncation artifact, regress.py W-028 mod-256 fix handles)
-- ❌ W-061 nested struct field offset — INVALID 2026-08-28 (same reason)
-- ✅ W-062 VSCode UserChoice + MSYS2 OpenWithProgids shadow — RESOLVED 2026-08-29 (v1.8.3.1 闭环, SYSTEM-context CustomAction + 3-attempt fallback)
-- ✅ W-063 UCPD.sys kernel filter — RESOLVED 2026-08-29 (v1.8.3 真修, `jhyy-setuc.exe` .NET 8 SYSTEM-context writer)
-- 🟡 W-057 UTF-8 3/4-byte codepoint — DEFERRED-to-v2.x
-- 🟡 W-058 vendored QBE 缺 `remd`/`rems` — DEFERRED-to-v2.x
-- ⚠️ W-021 WiX Bal.wixext DLL naming — permanent workaround (WiX upstream won't fix)
-
-Full index: [`docs/internal/workarounds.md`](docs/internal/workarounds.md).
-
-**v0.x frozen**: `docs/logs/v0/changelog-v0.9.0.md` (3231 lines) — Stage 1 byte-equal 7 测试集 wip, frozen at v1.0.0 baseline (2026-08-29). v0.x C compiler (`compiler/src/*.c`) enters maintenance-only mode; new features go through `compiler/src0/*.jhyy`. Per `docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md`, M5 boot-from-scratch cleanup (delete `src/*.c` + `qbe/` + `runtime.c`) is deferred until v2.x end + v3.x end.
-
-> [!NOTE]
-> **v1.8.3 is v1.x final.** The C-side compiler (`compiler/src/*.c`) remains the production path during v1.x; `compiler/src0/*.jhyy` (the jhyy-side translated source) already produces byte-equal output. v2.0 will switch the production path to `jhyy_v1.exe.exe` and start the QBE rewrite + multi-target / OS prep (see [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md)).
-
----
-
 ## What is JHYY
 
-JHYY is a self-designed, statically typed, expression-oriented, compiled systems programming language. The backend is [QBE](https://c9x.me/compile/), producing native x86-64 Windows binaries.
+JHYY (机会翼游) is a self-designed, statically typed, expression-oriented, compiled systems programming language. The backend is [QBE](https://c9x.me/compile/), producing native x86-64 Windows binaries.
 
 **Design goals**:
 - **Self-hosting** — the compiler written in itself, achieving byte-equal closure (✓ v1.0.0)
 - **OS development** — aligned with the [JiHuiYiYou-OS](https://github.com/JiHuiYiYou/JiHuiYiYou-OS) project, providing OS-required extensions like inline asm / volatile / naked / `no_std` / `&mut` + lifetime (v3.x roadmap)
 - **Native performance** — QBE backend, no runtime / no GC, directly produces PE/COFF binaries
+
+## Install
+
+**Prerequisites** (Windows, v1.x 是 Windows-only;Linux/macOS 在 v2.x amd64_sysv 路线):
+
+1. **MSYS2** — <https://www.msys2.org/> (Windows 10+ x64)
+2. **GCC + binutils** (ucrt64 工具链) — 在 MSYS2 终端里跑:
+   ```bash
+   pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils
+   ```
+3. **PATH** — 把 `C:\msys64\ucrt64\bin` 加到 Windows 用户 PATH(PowerShell 用户:`$env:Path += ";C:\msys64\ucrt64\bin"`)
+
+**Build** (一键):
+
+```bash
+git clone https://github.com/JiHuiYiYou/JiHuiYiYou-compiler.git
+cd JiHuiYiYou-compiler
+make           # → compiler/build/bin/jhyy.exe (~5MB)
+```
+
+**One-shot installer**(推荐给最终用户):`installer/jhyy-installer-1.8.3.exe` 把 `jhyy.exe` + `.jhyy` 文件关联 + VSCode 扩展 + PATH 注册一步到位。`installer/jhyy-compiler-1.8.3.msi` 是企业 / SCCM 分发版本(无 GUI)。详见 [`installer/README.md`](installer/README.md)。
+
+**Docker**(可选):
+
+```bash
+docker run -it msys2/mingw-w64-ucrt-x86_64 bash
+# 然后在容器内按上面 1-3 步
+```
+
+**VSCode 用户**:打开本 repo,`.vscode/settings.json` 自动加 `compiler/build/bin` + MSYS2 PATH 到集成终端,无需手动配。
+
+> [!IMPORTANT]
+> 不要用 Git Bash 自带的 MinGW `gcc`(`/c/Program\ Files/Git/mingw64/bin/gcc.exe`)— 它不支持 PE+ 链接,会 link 失败。
+
+---
 
 ## A tour of the syntax
 
@@ -249,6 +237,53 @@ JiHuiYiYou-compiler/
 ├── README.md                   English (this file)
 └── README.zh-CN.md              简体中文
 ```
+
+---
+
+## Status (v1.8.3 — v1.x final)
+
+`jhyy_v1 → jhyy_v2 → jhyy_v3 → jhyy_v4 → jhyy_v5` compile themselves and emit **byte-equal QBE intermediate representation**:
+
+```
+jhyy_v1.exe.exe → src0/main.jhyy → jhyy_v2.il
+jhyy_v2.exe     → src0/main.jhyy → jhyy_v3.il   ← byte-equal to v2.il
+jhyy_v3.exe     → src0/main.jhyy → jhyy_v4.il   ← byte-equal to v2.il
+jhyy_v4.exe     → src0/main.jhyy → jhyy_v5.il   ← byte-equal to v2.il
+                                                 sha 03a1cdd4… (v1.8.0 ship)
+```
+
+All five raw `.il` files share an identical sha256 (1.378 MB, no fix-up post-processing). The fixed point is an attractor, not a transient. **Stage 2 N=4 byte-equal closure reached at v1.0.0 (tag `9b05c0f` / commit `eabee0d`, 2026-08-10), stable through v1.8.3 (tag `98c8272`, 2026-08-29). v1.x is now finalized.**
+
+| Metric | Value |
+|--------|-------|
+| `regress.py` (C-side `jhyy.exe`) | **102/102 PASS, 0 failed, 4 skipped** (106 total) |
+| `regress.py --binary=jhyy_v1.exe.exe` (self-hosted `jhyy_v1.exe.exe`) | **102/102 PASS, 0 failed, 4 skipped** (parity hold) |
+| Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | **7/7 PASS** |
+| Stage 2 N=4 byte-equal (`v1→v2→v3→v4→v5`) | **stable** |
+| `jhyy_v2` compiling `_repro_t0.jhyy` | `EXIT=100` ✓ |
+| `jhyy_v2` compiling `fib(10)` | `EXIT=55` ✓ |
+| `installer/jhyy-installer-1.8.3.exe` | shipped (~30MB, includes .NET 8 Desktop Runtime) |
+| `installer/jhyy-compiler-1.8.3.msi` | shipped (~995KB, includes `jhyy-setuc.exe`) |
+| `vscode-ext/jhyy-lang-1.8.3.vsix` | shipped (~13KB) |
+
+**v1.x umbrella changelog** — [`docs/logs/v1/changelog-v1.8.0.md`](docs/logs/v1/changelog-v1.8.0.md) covers v1.8.0 main + v1.8.1 / v1.8.2 / v1.8.2 patch update / v1.8.3 / v1.8.3.1 / v1.8.3.2 patches (all `fix(v1.8.0)` commits, no new features). Historical v1.0.0 → v1.7.3 changelogs each live under `docs/logs/v1/changelog-vX.Y.Z.md`.
+
+**W-NNN workaround status (v1.8.3 ship)**:
+- ✅ W-059 defer codegen silent crash — RESOLVED 2026-08-28
+- ❌ W-060 enum variant payload ABI — INVALID 2026-08-28 (bash `$?` 8-bit truncation artifact, regress.py W-028 mod-256 fix handles)
+- ❌ W-061 nested struct field offset — INVALID 2026-08-28 (same reason)
+- ✅ W-062 VSCode UserChoice + MSYS2 OpenWithProgids shadow — RESOLVED 2026-08-29 (v1.8.3.1 闭环, SYSTEM-context CustomAction + 3-attempt fallback)
+- ✅ W-063 UCPD.sys kernel filter — RESOLVED 2026-08-29 (v1.8.3 真修, `jhyy-setuc.exe` .NET 8 SYSTEM-context writer)
+- 🟡 W-057 UTF-8 3/4-byte codepoint — DEFERRED-to-v2.x
+- 🟡 W-058 vendored QBE 缺 `remd`/`rems` — DEFERRED-to-v2.x
+- ⚠️ W-021 WiX Bal.wixext DLL naming — permanent workaround (WiX upstream won't fix)
+
+Full index: [`docs/internal/workarounds.md`](docs/internal/workarounds.md).
+
+**v0.x frozen**: `docs/logs/v0/changelog-v0.9.0.md` (3231 lines) — Stage 1 byte-equal 7 测试集 wip, frozen at v1.0.0 baseline (2026-08-29). v0.x C compiler (`compiler/src/*.c`) enters maintenance-only mode; new features go through `compiler/src0/*.jhyy`. Per `docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md`, M5 boot-from-scratch cleanup (delete `src/*.c` + `qbe/` + `runtime.c`) is deferred until v2.x end + v3.x end.
+
+> [!NOTE]
+> **v1.8.3 is v1.x final.** The C-side compiler (`compiler/src/*.c`) remains the production path during v1.x; `compiler/src0/*.jhyy` (the jhyy-side translated source) already produces byte-equal output. v2.0 will switch the production path to `jhyy_v1.exe.exe` and start the QBE rewrite + multi-target / OS prep (see [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md)).
 
 ---
 
