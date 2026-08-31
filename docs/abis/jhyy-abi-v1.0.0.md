@@ -816,7 +816,7 @@ JHYY 字符串字面量在 QBE data 段中以 UTF-8 + NUL 终止符存储。
 
 ## 12. 版本历史
 
-> **章节号说明**:OS-era ABI 内容(`Cap<T>` wire format + 多 target ABI + Debug ABI)按 [`coordination.md`](../../../../../jhyy_OS/docs/coordination.md) § 5 规划落 § 13。**v1.0.0 § 12 仅保留为版本历史**,不扩展;v2.0 启动后 § 13 增补不开 v1.0.0 lock 边界。
+> **章节号说明**:OS-era ABI 内容(`Cap<T>` wire format + 多 target ABI + Debug ABI)按 [`coordination.md`](../../../jhyy_OS/docs/coordination.md) § 5 规划落 § 13。**v1.0.0 § 12 仅保留为版本历史**,不扩展;v2.0 启动后 § 13 增补不开 v1.0.0 lock 边界。
 
 ---
 
@@ -825,7 +825,7 @@ JHYY 字符串字面量在 QBE data 段中以 UTF-8 + NUL 终止符存储。
 > **状态**:⏳ 草案 — 等 sprint 3g 主体 + v2.0 milestone 启动前锁。内容由下列 spec 起草:
 > - [`v3.x-capability-spec.md`](../../plans/roadmap/v3.x-capability-spec.md) § 内存布局(`Cap<T>` runtime layout)
 > - [`v2.0.0-os-prep.md`](../../plans/v2/v2.0.0-os-prep.md) § 5.1 #5 + D7(多 target + freestanding)
-> - [`v0.0.4-debug-abi.md`](../../../../../jhyy_OS/docs/v0.0.4-debug-abi.md)(DebugEvent / ErrChain / KernelStateHistory + ProvenanceInfo DAG)
+> - [`v0.0.4-debug-abi.md`](../../../jhyy_OS/docs/v0.0.4-debug-abi.md)(DebugEvent / ErrChain / KernelStateHistory + ProvenanceInfo DAG)
 > - D16(Q-OS-007 闭环):cap-offset IPC msg header wire 形式 `{msg_tag: u32, n_caps: u16, cap_offsets: [u16; n]}`
 
 ### 13.1 多 target ABI 表
@@ -841,7 +841,7 @@ JHYY 字符串字面量在 QBE data 段中以 UTF-8 + NUL 终止符存储。
 
 c-typedef 草案见 [`v3.x-capability-spec.md`](../../plans/roadmap/v3.x-capability-spec.md) § 内存布局(初步 8B = cnode_idx(u32) + depth(u8) + rights(u16) + 1B padding;phantom field 0 字节)。
 
-**wire-format c-typedef 全字段**(per [`v0.0.4-debug-abi.md § 7`](../../../../../jhyy_OS/docs/v0.0.4-debug-abi.md) 🔒 Locked 2026-08-12,含 DAG 扩展):
+**wire-format c-typedef 全字段**(per [`v0.0.4-debug-abi.md § 7`](../../../jhyy_OS/docs/v0.0.4-debug-abi.md) 🔒 Locked 2026-08-12,含 DAG 扩展):
 
 ```c
 typedef struct {

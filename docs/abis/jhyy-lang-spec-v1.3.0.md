@@ -952,7 +952,7 @@ jhyy compile <file.jhyy> [-o output]       # 编译为 .exe
 jhyy compile a.jhyy b.jhyy -o output       # 多文件编译（v0.4）
 jhyy build   <file.jhyy> [-o output]       # 仅生成 QBE IL (.il)
 jhyy run     <file.jhyy>                   # 编译并运行（Windows path 修复见下）
-jhyy check   <file.jhyy>                   # 仅语法/语义检查，不生成二进制（v0.5 MCP 用）
+jhyy dump    <file.jhyy>                   # dump AST（debug 用）
 jhyy                                      # 显示帮助
 ```
 
@@ -1099,13 +1099,13 @@ fn main_jhyy() -> i32 {
 
 **math.jhyy**：
 ```rust
-pub fn factorial(n: i32) -> i32 {
+fn factorial(n: i32) -> i32 {
     if n <= 1 { return 1; }
     n * factorial(n - 1)
 }
 ```
 
-注：`pub` 关键字**当前不强制**，所有顶层声明默认公开。
+注：v1.x lexer 不识别 `pub` 关键字(顶层声明默认公开,无需 `pub` 标注)。复制本示例请保留 `fn factorial` 形式。
 
 ### 16.9 递归枚举（Tree）
 
@@ -1378,7 +1378,7 @@ fn main_jhyy() -> i32 {
 **语法**: enum variant pattern 内可绑定 payload 字段名,body 内可直接引用 binding 名。
 
 ```rust
-enum Option { Some(i32), None }
+type Option = enum { Some(i32), None }
 
 fn unwrap(o: Option) -> i32 {
     return match o {

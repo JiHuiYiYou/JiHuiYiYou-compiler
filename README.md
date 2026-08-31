@@ -38,7 +38,7 @@ All five raw `.il` files share an identical sha256 (1.378 MB, no fix-up post-pro
 | Metric | Value |
 |--------|-------|
 | `regress.py` (C-side `jhyy.exe`) | **102/102 PASS, 0 failed, 4 skipped** (106 total) |
-| `regress_v1.py` (self-hosted `jhyy_v1.exe.exe`) | **102/102 PASS, 0 failed, 4 skipped** (parity hold) |
+| `regress.py --binary=jhyy_v1.exe.exe` (self-hosted `jhyy_v1.exe.exe`) | **102/102 PASS, 0 failed, 4 skipped** (parity hold) |
 | Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | **7/7 PASS** |
 | Stage 2 N=4 byte-equal (`v1→v2→v3→v4→v5`) | **stable** |
 | `jhyy_v2` compiling `_repro_t0.jhyy` | `EXIT=100` ✓ |
@@ -145,9 +145,9 @@ The repo ships `.vscode/tasks.json` — open any `.jhyy` file and press **`Ctrl+
 ### Verify self-hosting closure
 
 ```bash
-# Stage 2 N=3 byte-equal — jhyy compiles jhyy
-# Method 1: regress through self-hosted compiler
-python compiler/build/bin/regress_v1.py
+# Stage 2 N=4 byte-equal — jhyy compiles jhyy
+# Method 1: regress through self-hosted compiler (v1.4.7+ single regress entry)
+python compiler/build/bin/regress.py --all --include-informational
 # Method 2: one-shot closure check via MCP (recommended)
 # ask Claude Code: "verify self-host closure" → jhyy_selfhost_check
 # See docs/logs/v1/changelog-v1.0.0.md for full procedure
@@ -179,7 +179,7 @@ Full specification: [`docs/abis/jhyy-lang-spec-v1.3.0.md`](docs/abis/jhyy-lang-s
 jhyy compile <file.jhyy> [-o name]   compile to .exe (default amd64_win)
 jhyy run     <file.jhyy>             compile and run
 jhyy build   <file.jhyy> [-o name]   emit QBE IL only (.il file)
-jhyy check   <file.jhyy>             syntax / semantic check only, no codegen
+jhyy dump    <file.jhyy>             dump parsed AST to stdout (debug)
 jhyy                                 print help
 ```
 
@@ -257,7 +257,7 @@ JiHuiYiYou-compiler/
 | Check | Command | Expected |
 |-------|---------|----------|
 | C-side regression | `python compiler/build/bin/regress.py` | **102/102 PASS + 4 SKIP** (106 total) |
-| Self-host regression | `python compiler/build/bin/regress_v1.py` | **102/102 PASS + 4 SKIP** (parity hold) |
+| Self-host regression | `python compiler/build/bin/regress.py --all --include-informational` | **102/102 PASS + 4 SKIP** (parity hold) |
 | Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | `python compiler/tests/stage1-expanded.sh` | 7/7 PASS |
 | Stage 2 N=4 byte-equal (`v1→v2→v3→v4→v5`) | MCP `jhyy_selfhost_check` | `all_byte_equal=true`, stable il_sha256 |
 | MCP smoke (7 test files, X `def test_*` funcs) | `pytest mcp-jhyy/tests/` | all pass |

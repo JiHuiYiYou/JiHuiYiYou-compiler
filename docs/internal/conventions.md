@@ -67,7 +67,7 @@ docs/
 | 改的文件 | 必跑 | 备注 |
 |----------|------|------|
 | `compiler/src/*.c` (C 编译器源) | `python compiler/build/bin/regress.py` | 0 failed 才算完成 |
-| `compiler/src0/*.jhyy` (jhyy 编译器源) | (1) `python compiler/build/bin/regress.py` (jhyy_0 编 regress)<br>(2) `python compiler/build/bin/regress_v1.py` (jhyy_v1 编 regress，持平 baseline) | v0.9 wip commit 2.83 + v1.0.0 阶段必跑 |
+| `compiler/src0/*.jhyy` (jhyy 编译器源) | (1) `python compiler/build/bin/regress.py` (jhyy_0 编 regress)<br>(2) `python compiler/build/bin/regress.py --all --include-informational` (jhyy_v1 编 regress，持平 baseline,v1.4.7+ 单入口) | v0.9 wip commit 2.83 + v1.0.0 阶段必跑 |
 | `compiler/tests/examples/*.jhyy` | `python compiler/build/bin/regress.py` | 加新测试必跑 |
 | `docs/abis/jhyy-lang-spec-*.md` / `docs/abis/jhyy-abi-*.md` | (1) 同步更新 v0.x / v1.x / v2.x 路线图引用<br>(2) `regress.py`（spec 改动可能影响 jhyy 端解析） | spec 改动 = 跨多 sprint 影响 |
 | `docs/plans/v0/*` / `docs/plans/v1/*` / `docs/plans/v2/*` / `docs/plans/roadmap/*` | 至少 review 跨文件引用一致性 | doc-only 改动不强制 regress，但建议跑一次验证 jhyy 编译器仍编得出 hello.jhyy |

@@ -114,8 +114,8 @@ cat compiler/build/bin/test.il
 # 3. 手动调用 QBE
 ./qbe/qbe.exe -t amd64_win -o test.s compiler/build/bin/test.il
 
-# 4. 手动链接
-/c/msys64/ucrt64/bin/gcc.exe test.s compiler/runtime/runtime.c -o test.exe
+# 4. 手动链接(需 runtime.c + jhyy_helpers.c,jhyy 编 jhyy 必需)
+/c/msys64/ucrt64/bin/gcc.exe test.s compiler/runtime/runtime.c compiler/src0/jhyy_helpers.c -o test.exe -lm
 
 # 5. 检查退出码
 ./test.exe; echo $?

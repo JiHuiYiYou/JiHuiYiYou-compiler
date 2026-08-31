@@ -373,7 +373,7 @@ if (*src).kind != KIND_PRIMITIVE() { return arg; }
 NODE_SLICE_RANGE 翻译 仍 FAIL `\0 %t0` (4th arg of cg_match_pattern call) — phantom binary
 范畴问题, 跟 Task #146 phantom binary finding 同根。
 
-**内存记录**: [[`project_sprint4_4_b_latent_codegen_bug.md`]](../../../../.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_sprint4_4_b_latent_codegen_bug.md) (含 IL diff 实证)
+**内存记录**: *(项目 memory 私有 — `project_sprint4_4_b_latent_codegen_bug.md`,含 IL diff 实证)*
 
 **Sprint 4.4 A ship**:
 - ✅ commit 2.36: latent bug fix (pre-increment + kind dispatch)
@@ -414,7 +414,7 @@ NODE_SLICE_RANGE 翻译 仍 FAIL `\0 %t0` (4th arg of cg_match_pattern call) —
 3. **EXIT=60 真 PASS 验证** — Task #146 完成 (slice_subrange codegen fix 真 PASS).
 4. **phantom binary 锁定** — phantom sha e2064a6b 是当前唯一 working baseline. 任何 phantom binary 修改 = baseline 重置,需同步 reset regress_v1 baseline 数字.
 
-**内存记录**: [[`project_sprint4_4_phantom_binary_finding.md`]](../../../../.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_sprint4_4_phantom_binary_finding.md) (corrected from commit 2.34 postmortem)
+**内存记录**: *(项目 memory 私有 — `project_sprint4_4_phantom_binary_finding.md`,corrected from commit 2.34 postmortem)*
 
 ---
 
@@ -474,7 +474,7 @@ JHYY = os.path.abspath("compiler/build/bin/jhyy_v1.exe.exe")
 - 🔴 8 个真 fail 已诊断 (5 个 codegen, 2 个 parser/sema, 1 个 QBE 类型)
 - 🔴 下一步: Task #146 (slice_subrange codegen fix) — 这才是真正的"再加 1 PASS"路径
 
-**内存记录**: [[`project_sprint4_4_cleanup_crash_discovery.md`]](../../../../.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_sprint4_4_cleanup_crash_discovery.md) (UPDATED 加 cmd_compile double-free 根因)
+**内存记录**: *(项目 memory 私有 — `project_sprint4_4_cleanup_crash_discovery.md`,UPDATED 加 cmd_compile double-free 根因)*
 
 ---
 
@@ -526,7 +526,7 @@ regress.py (C 端): 50/53 passed, 0 failed, 3 skipped (持平 baseline, no regre
 
 **Baseline log**: `compiler/build/bin/_regress_v1_baseline_HEADv6.log` (55 行, 完整 PASS/FAIL 输出)
 
-**内存记录**: [[`project_sprint4_5_b_step2_baseline_lock.md`]](../../../../.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_sprint4_5_b_step2_baseline_lock.md)
+**内存记录**: *(项目 memory 私有 — `project_sprint4_5_b_step2_baseline_lock.md`)*
 
 ---
 

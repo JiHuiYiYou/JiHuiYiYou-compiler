@@ -438,7 +438,7 @@ docs/internal/
   ├─ tests.md (集成测试)
   └─ workarounds.md (W-001~W-009 现状,R-4 引用)
 
-[../../../../jhyy_OS/docs/](../../../../jhyy_OS/docs/) (OS 端,跟本 repo 同级)
+[../../../jhyy_OS/docs/](../../../jhyy_OS/docs/) (OS 端,跟本 repo 同级)
   └─ coordination.md (跨项目对齐,本 repo 通过绝对路径引用)
 ```
 
@@ -692,6 +692,6 @@ v3.2+(3l std lib) ───────────────→ M11 硬前置
 - [architecture.md](../../internal/architecture.md) — 内部架构(本重构不改,但 cross-ref)
 - [status.md](../../internal/status.md) — 当前状态(本重构不改,但 cross-ref)
 - [workarounds.md](../../internal/workarounds.md) — W-001~W-009 现状(R-4 引用)
-- [../../../../jhyy_OS/docs/coordination.md](../../../../jhyy_OS/docs/coordination.md) — 跨项目对齐
-- [../../../../jhyy_OS/docs/v0.0.2-foundation-revision.md](../../../../jhyy_OS/docs/v0.0.2-foundation-revision.md) — OS 端 5 决策
-- [../../../../jhyy_OS/docs/v0.0.1.5-M5b-prereqs.md](../../../../jhyy_OS/docs/v0.0.1.5-M5b-prereqs.md) — M5b 启动硬条件
+- [../../../jhyy_OS/docs/coordination.md](../../../jhyy_OS/docs/coordination.md) — 跨项目对齐
+- [../../../jhyy_OS/docs/v0.0.2-foundation-revision.md](../../../jhyy_OS/docs/v0.0.2-foundation-revision.md) — OS 端 5 决策
+- [../../../jhyy_OS/docs/v0.0.1.5-M5b-prereqs.md](../../../jhyy_OS/docs/v0.0.1.5-M5b-prereqs.md) — M5b 启动硬条件

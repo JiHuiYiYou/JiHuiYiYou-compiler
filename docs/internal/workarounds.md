@@ -1270,8 +1270,8 @@ QBE：`invalid type for second operand %t29 in ceql`
 - Sprint 4.23 Explore agent（2026-08-10）— 找到 `%t0` 集中出现 + MAX_LOCALS 双源不一致 → 本 fix
 
 **引用:**
-- [`project_sprint4_22_cgexpr_signature_mismatch.md`](../../../../Users/liuzhen/.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_sprint4_22_cgexpr_signature_mismatch.md) — Sprint 4.22 假说错误 postmortem
-- Sprint 4.23 plan: `C:\Users\liuzhen\.claude\plans\jaunty-orbiting-naur.md`
+- *(Sprint 4.22 假说错误 postmortem — 项目 memory 私有记录,不在公开 doc 留链接)*
+- Sprint 4.23 plan: *(私有 plan 文件,不在公开 doc 留路径)*
 
 ---
 
