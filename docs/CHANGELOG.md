@@ -18,12 +18,12 @@
 | v1.8.0 | 2026-08-28 | [`logs/v1/changelog-v1.8.0.md`](logs/v1/changelog-v1.8.0.md) | W-059 defer codegen 真修 + W-060/W-061 INVALID 闭环 (1 行 fix) |
 | v1.7.3 | 2026-08-28 | (per `git show 57f89dc`) | 32 candidates 完整 ship (Stage 1-5 + v1.7.1/2/3 patches), spec v1.3.0 locked = v1.x FINAL marker |
 | v1.7.0 | 2026-08-15 | [`logs/v1/changelog-v1.7.0.md`](logs/v1/changelog-v1.7.0.md) | EXPECT-ERROR annotation + Stage 1-4 |
-| v1.6.0 | 2026-08-13 | (per `git show`) | regress.py 收口 + baseline binary tracking |
-| v1.5.x | 2026-08-12 → 2026-08-27 | [`logs/v1/changelog-v1.5.5.md`](logs/v1/changelog-v1.5.5.md) | RunOnce auto-install VSCode ext (v1.5.10); 多次 patch |
+| v1.6.0 | 2026-08-13 | [`logs/v1/changelog-v1.6.0.md`](logs/v1/changelog-v1.6.0.md) | regress.py 收口 + baseline binary tracking |
+| v1.5.x | 2026-08-12 → 2026-08-27 | [`logs/v1/changelog-v1.5.0.md`](logs/v1/changelog-v1.5.0.md) | RunOnce auto-install VSCode ext (v1.5.10); 多次 patch |
 | v1.4.x | 2026-08-11 → 2026-08-13 | [`logs/v1/changelog-v1.4.0.md`](logs/v1/changelog-v1.4.0.md) | argv[0] 推项目根 + W-019/W-020 真修 + jhyy_v1.exe.exe canonical |
 | v1.3.0 | 2026-08-10 | [`logs/v1/changelog-v1.3.0.md`](logs/v1/changelog-v1.3.0.md) | spec 增量 + slice 文档 |
 | v1.2.x | 2026-08-09 → 2026-08-10 | [`logs/v1/changelog-v1.2.0.md`](logs/v1/changelog-v1.2.0.md) | jhyy_v1.exe + mcp-jhyy/server.py 整合 |
-| v1.1.0 | 2026-08-08 | (per `git show`) | Stage 1-3 起步 |
+| v1.1.0 | 2026-08-08 | [`logs/v1/changelog-v1.1.0.md`](logs/v1/changelog-v1.1.0.md) | Stage 1-3 起步 |
 | **v1.0.0** | 2026-08-10 | [`logs/v1/changelog-v1.0.0.md`](logs/v1/changelog-v1.0.0.md) | 真自举 byte-equal 闭环 (Stage 2 N=3) — jhyy 编 jhyy 里程碑 |
 | v1.0.0-rc | 2026-08-09 | [`logs/v1/changelog-v1.0.0-rc.md`](logs/v1/changelog-v1.0.0-rc.md) | RC 候选 |
 
