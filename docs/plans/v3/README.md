@@ -8,11 +8,13 @@ v3.x 是语言特性扩展轴,服务于 [jhyy_OS](../../../jhyy_OS/) 的 OS-requ
 
 | Sprint | 特性 | 用途 |
 |--------|------|------|
-| v3.0 | inline asm | OS kernel 写汇编片段 (e.g. cpuid, msr, lgdt) |
-| v3.0 | `#[volatile]` | 防止编译器 reorder (MMIO 读写) |
-| v3.0 | `#[naked]` | 不生成 prologue/epilogue (中断 handler entry point) |
-| v3.1 | `#[no_std]` / `#![no_std]` | 切掉 runtime / panic_handler, 写 freestanding kernel |
-| v3.2+ | `&mut` + lifetime | OS 资源借用的 borrow check (per D11 决策) |
+| v3.0 (3a) | inline asm | OS kernel 写汇编片段 (e.g. cpuid, msr, lgdt) |
+| v3.0 (3b) | `#[naked]` fn | 不生成 prologue/epilogue (boot / interrupt entry) |
+| v3.0 (3c) | volatile load/store | 防止编译器 reorder (MMIO 设备寄存器) |
+| v3.0 (3d) | `#[no_std]` / `#![no_std]` | 切掉 runtime / panic_handler, 写 freestanding kernel |
+| v3.0 (3e) | `#[link_section]` | 自定义目标 section (e.g. `.text.boot`) |
+| v3.0 (3f) | memory barrier | compiler fence (e.g. `fence_seq_cst`) |
+| v3.1 (3g+3g.5+3g.7) | `&mut` + lifetime + Cap<T> 8 规则 + phantom 0 字节 | OS 模块间共享指针的 borrow check (per D11 决策) |
 
 完整 OS 启动链路 (`M1 → M11`) 见 [`../v2/v2.0.0-os-prep.md`](../v2/v2.0.0-os-prep.md)。
 
