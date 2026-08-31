@@ -900,6 +900,103 @@ OS 端 debug infra 的 c-typedef + wire format,落地在本 §。**尺寸全部 
 | § 13.2 Cap<T> wire | v3.1 sprint 3g.5(D23/D27)| M4 capability | byte-equal 跟 OS 端 cap 表 |
 | § 13.3 IPC header | v3.1 sprint 3g(D16)| M5b IPC | cap-offset 双路径 emit(fast + metadata 段)|
 | § 13.4 Debug ABI | v3.1 sprint 3g(Q-Compiler-007 ✅ 2026-08-12 闭环 / D41)| M5b IPC | spec 🔒 已锁,尺寸已定案;kernel introspection syscall 落地见 `v0.0.5-syscall-abi-update.md`(阻塞已解除,待 OS 起)|
+| § 13.6 GUI wire types + version | v3.x sprint 3i / 3j / M8d(per coordination.md § 3 D-GUI-1 ~ D-GUI-10,2026-09-01 🔒)| M8d compositor | `Cap<Shm>` wire + 5 GUI cap types + append-only version,语义锁;layout 由 sprint 3i 定|
+
+### 13.6 GUI wire types + append-only protocol version(per coordination.md § 3 D-GUI-1 ~ D-GUI-10)
+
+> **状态**:🔒 语义锁(layout/wire 由 sprint 3i / 3j / M8d 落地,以下为不可改方向)。
+> **关联**:[`coordination.md`](../../../jhyy_OS/docs/coordination.md) § 3 D-GUI-1 ~ D-GUI-10;[`v3.x-capability-spec.md`](../../plans/roadmap/v3.x-capability-spec.md) `Cap<Shm>` 例外条款;[`jhyy_OS/docs/deep_research/报告§11§12决策与拍板流程说明.markdown`](../../../jhyy_OS/docs/deep_research/报告§11§12决策与拍板流程说明.markdown) § 11 协议草案。
+
+#### 13.6.1 `Cap<Shm>` wire format(sprint 3i 落地)
+
+wire 形式遵循通用 `Cap<T>` 8 字节 layout(per § 13.2 + `v3.x-capability-spec.md` `Cap<Shm>` 例外条款):
+
+```
++----------+-------+--------+---------+
+| cnode_idx| depth | rights | _pad    |
+| u32 (4B) | u8(1B)| u16(2B)| 1B      |
++----------+-------+--------+---------+
+```
+
+- `rights` 位分配(sprint 3i 定,语义锁):
+  - bit 0: `R`(Read) — 映射可读
+  - bit 1: `W`(Write) — 映射可写
+  - bit 2: `RO`(Read-Only,跨 RW 派生后)
+  - bit 3: `SHARE`(跨域 unsafe_share 标志)
+  - bit 4-15: reserved(必须 0)
+- `Cap<Shm, RO>` / `Cap<Shm, W>` 是独立类型(per `v3.x-capability-spec.md` `Cap<Shm>` 例外 1),各自有独立 cnode slot;**禁止**同 slot 跨权利类型复用(避免升权攻击)
+
+#### 13.6.2 IPC msg header(Cap<Shm> 跨域封送)
+
+`Cap<Shm>` 经 § 13.3 IPC header 封送,跨域封送额外带 `(region_id: u32, rights: u16, epoch: u32)` 9 字节三元组(per `v0.0.4-debug-abi.md` § 7 byte-equal axiom + D-GUI-2 audit record):
+
+```
+IPC msg payload(Cap<Shm> 场景,append-only):
++--------------------+------------------+-----------+--------+
+| cap_offset (u16)   | region_id (u32)  | rights(u16)| epoch  |
++--------------------+------------------+-----------+--------+
+         ↓ 引用 § 13.3 cap_offsets         ↓ 三元组(per D-GUI-2)
+```
+
+`epoch` 走 D-GUI-7 协议(Logical invalidation → Mapping protection → Explicit confirmation → Resource release),`AckRevoke(epoch)` 由 client 主动发;grace period 默认值 TBD(🔧 10ms 倾向)。
+
+#### 13.6.3 GUI cap 类型清单(M8d v0,per D-GUI-10)
+
+M8d v0 仅 4 个 interface + 5 个 cap 类型(per `v0.0.4-gui-explorations.md` § 6 D34 + `jhyy_gui_subsystem.md § 9`):
+
+| jhyy cap 类型 | OS 对象 | 持有者 | rights |
+|--------------|---------|--------|--------|
+| `Cap<Compositor>` | compositor 服务(endpoint) | client | `R / Call` |
+| `Cap<Surface>` | window / view(per `v0.0.1-capability.md § 0` 句柄表) | client(创建者) | `R / W / Compose / Destroy` |
+| `Cap<Buffer>` | shm-backed pixel buffer | client + compositor | `R / W`(互斥,per L2) |
+| `Cap<Seat>` | input device focus | 仅 trusted compositor(single-owner,per D-GUI-3) | `R / Focus / Inject` |
+| `Cap<Shm>` | shared memory region(per § 13.6.1) | client + compositor | `R / W / RO / SHARE` |
+
+**Axiom C1 强制**(per D-GUI-5):任何 cap 引用经 `Cap<T>` + D16 offset,wire-format 不出现物理地址 / 文件描述符 / CSpace 索引 / GPU resource id / device handle。
+
+#### 13.6.4 协议版本策略(append-only,per D-GUI-8)
+
+```
+GUI_PROTOCOL_VERSION: u32 = 0
+```
+
+**版本协商**:连接建立时 compositor 与 client 交换 `GUI_PROTOCOL_VERSION`;**只接受 ≥ 已实现版本号**,不接受降级。
+
+**append-only 规则**:
+- ✅ 新增 interface / request / event / cap parameter **仅追加到现有 list 末尾**(字段顺序不改,新字段加末尾)
+- ✅ `rights` 位分配 reserved 区(per § 13.6.1 bit 4-15)可启用,启用后低版本 client 收到 `GUI_PROTOCOL_VERSION_MISMATCH` 拒绝
+- ❌ **禁止**删除 request / event / cap / 字段
+- ❌ **禁止**改 cap move 语义 / revoke 协议 / epoch 计数器行为
+- ❌ **禁止**重排 cap-offset 字段顺序 / 改 rights 位编码
+
+**breaking change**(删 request / 改 cap move 语义 / 重排 cap-offset 字段 / 改 epoch 协议)→ 升 `GUI_PROTOCOL_VERSION := 1`,compositor 与 client 必须同时支持新旧两版才能协商通过。
+
+#### 13.6.5 L1–L4 生命周期不变式(per D-GUI-9)
+
+runtime 由 OS 端强制,jhyy 类型层无新字段:
+
+- **L1 commit_seq 严格单调**:u64,wrap-around forbidden(2^64 周期足够;比较器单 `b > a`,per `v0.0.4-gui-explorations.md` § 3.3 锁定)
+- **L2 排他写窗口**:`AttachBuffer` 至对应 `BufferReleased` 期间 client 不得写 buffer;compositor / scanout 独占读
+- **L3 release 前不可复用**:client 收到 `BufferReleased` 后方可恢复写
+- **L4 destroy 级联**:`Surface.Destroy` 或 client cap 被 revoke → surface 进 `Dying`,所有未确认 buffer 进 revoke(per D-GUI-7 4 阶段)
+
+#### 13.6.6 Seat focus-epoch 验证
+
+`focus_epoch: u64` 改变使所有 pending event 失效;事件投递前**重新验证** `focus == target && epoch still valid`(Nitpicker 模式,per `v0.0.4-gui-explorations.md` § 3.3 D28 锁定);`Cap<Seat>` single-owner 由 trusted compositor 持有,client 仅持 `Cap<Seat, Listen>` 派生。
+
+#### 13.6.7 错误码(`GuiError` tag,u32,per `jhyy_gui_subsystem.md § 8`)
+
+| Tag | Code | 含义 |
+|-----|------|------|
+| `EPERM_RIGHTS` | 1 | cap rights 不足 |
+| `ESEQ_COMMIT` | 2 | commit_seq 乱序 / 回绕 |
+| `EEPOCH_REVOKE` | 3 | epoch 已被 revoke(per D-GUI-7) |
+| `EBAD_CAPOFF` | 4 | cap_offset 越界 / 不合法 |
+| `EBUSY_SCANOUT` | 5 | buffer 处于 scanout 独占期(per L2) |
+| `ENOMEM_LAYOUT` | 6 | surface layout 资源耗尽 |
+| `ETIMEOUT_REVOKE` | 7 | revoke grace period 超时未 ack |
+
+kernel error → `GuiError { tag: u32, code: u32, cap_id: u32, epoch: u32 }`(wire 16B);**禁止暴露**物理地址 / 页表 / CSpace / driver 内部结构。
 
 ---
 
