@@ -11,7 +11,7 @@
 [![Version](https://img.shields.io/badge/version-v1.8.3-00d4aa)](docs/logs/v1/changelog-v1.8.0.md)
 [![Status](https://img.shields.io/badge/self--host-byte--equal%20v1%E2%86%92v5-success)](docs/logs/v1/changelog-v1.8.0.md)
 [![Backend](https://img.shields.io/badge/backend-QBE-orange)](https://c9x.me/compile/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#build)
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#quick-start)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![中文](https://img.shields.io/badge/lang-中文-red)](README.zh-CN.md)
 
@@ -33,7 +33,7 @@ jhyy_v4.exe     → src0/main.jhyy → jhyy_v5.il   ← byte-equal to v2.il
                                                  sha 03a1cdd4… (v1.8.0 ship)
 ```
 
-All five raw `.il` files share an identical sha256 (1.378 MB, no fix-up post-processing). The fixed point is an attractor, not a transient. **Stage 2 N=4 byte-equal closure reached at v1.0.0 (commit `eabee0d`, 2026-08-10), stable through v1.8.3 (commit `8fcbe4d`, 2026-08-29). v1.x is now finalized.**
+All five raw `.il` files share an identical sha256 (1.378 MB, no fix-up post-processing). The fixed point is an attractor, not a transient. **Stage 2 N=4 byte-equal closure reached at v1.0.0 (tag `9b05c0f` / commit `eabee0d`, 2026-08-10), stable through v1.8.3 (tag `98c8272`, 2026-08-29). v1.x is now finalized.**
 
 | Metric | Value |
 |--------|-------|

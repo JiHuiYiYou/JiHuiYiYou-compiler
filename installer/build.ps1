@@ -15,7 +15,7 @@
 #   powershell -File installer\build.ps1 bundle     # build jhyy-installer-*.exe (v1.5.3)
 #
 # Env vars:
-#   JHY_VERSION    installer version (default: git describe, fallback 1.5.1-dev)
+#   JHY_VERSION    installer version (default: git describe, fallback 1.8.3-dev)
 #   SKIP_VSIX      1 to skip vscode-ext pack (v1.5.4+)
 #
 # Exit codes:
@@ -51,7 +51,7 @@ function _split_rc_suffix($verIn, [ref]$suffixOut) {
 #   for MSI — strip git suffix and use only major.minor.build.
 #   RC tag (e.g. v1.5.5-rc1) has -rcN suffix — extract separately so MSI version
 #   stays numeric ("1.5.5") while display name + filename keep "-rc1" suffix.
-#   Override via $env:JHY_VERSION = "1.5.2" for release builds.
+#   Override via $env:JHY_VERSION = "1.8.3" for release builds.
 $JHY_VERSION_RC_SUFFIX = ""
 if (-not $env:JHY_VERSION) {
     try {
@@ -81,7 +81,7 @@ if (-not $env:JHY_VERSION) {
         $env:JHY_VERSION = $verIn
     }
 }
-if (-not $env:JHY_VERSION) { $env:JHY_VERSION = "1.5.2" }
+if (-not $env:JHY_VERSION) { $env:JHY_VERSION = "1.8.3" }
 # Display version includes RC suffix for filenames + display names.
 # MSI ProductVersion (passed via -d JHY_VERSION) must stay numeric (no "-rc1").
 $JHY_VERSION_DISPLAY = "$($env:JHY_VERSION)$JHY_VERSION_RC_SUFFIX"

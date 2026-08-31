@@ -160,4 +160,4 @@ jnz %t0, @then, @else    # 条件跳转
 
 测试 driver：`compiler/tests/examples/arena_test/arena_test.jhyy`
 
-验证了 v0.6 编译器对编译自身模块的能力。**v1.0.0 已完成完整自举**（`jhyy_v1 → v2 → v3 → v4` 产出 byte-equal `.il`，sha `2445e97d...`，commit `eabee0d`，2026-08-10）。v1.4 → v1.8 系列 ship 后，**Stage 2 N=4 byte-equal closure 稳定**（`jhyy_v1 → v2 → v3 → v4 → v5`，sha `03a1cdd4...`，tag `v1.8.0` post-commit `8fcbe4d`，2026-08-29）。后续 v2.x / v3.x 路线图见 [`docs/plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-os-prep.md) 与 [`docs/plans/roadmap/v2.x-qbe-rewrite.md`](../plans/roadmap/v2.x-qbe-rewrite.md)。
+验证了 v0.6 编译器对编译自身模块的能力。**v1.0.0 已完成完整自举**（`jhyy_v1 → v2 → v3 → v4` 产出 byte-equal `.il`，sha `2445e97d...`，tag `9b05c0f` / commit `eabee0d`，2026-08-10）。v1.4 → v1.8 系列 ship 后，**Stage 2 N=4 byte-equal closure 稳定**（`jhyy_v1 → v2 → v3 → v4 → v5`，sha `03a1cdd4...`，tag `v1.8.3` `98c8272`，2026-08-29）。后续 v2.x / v3.x 路线图见 [`docs/plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-os-prep.md) 与 [`docs/plans/roadmap/v2.x-qbe-rewrite.md`](../plans/roadmap/v2.x-qbe-rewrite.md)。

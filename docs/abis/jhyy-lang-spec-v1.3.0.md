@@ -979,12 +979,7 @@ JHYY 程序的退出码是 `main_jhyy()` 的返回值。Windows 用 `echo %ERROR
 
 ### 15.5 已知 `run` 子命令问题
 
-Windows 下 `jhyy run` 在某些路径场景有 bug（P1，未修）。临时替代：
-
-```bash
-jhyy compile foo.jhyy -o foo
-./foo.exe
-```
+Windows 下 `jhyy run` 在某些路径场景有 bug — **v1.x 已修** (`main.c:591` `path_to_win(exe)` 已处理 MSYS ↔ Win32 路径转换)。如在更新版编译器中复发,以 `jhyy compile foo.jhyy -o foo && ./foo.exe` 作为 fallback。
 
 ---
 
