@@ -77,7 +77,13 @@ jobs:
         shell: msys2 {0}
         run: |
           cd ${{ github.workspace }}
-          make stage0
+          echo "=== debug: toolchain probe ==="
+          which gcc make windres 2>&1 || true
+          gcc --version 2>&1 | head -1
+          echo "=== debug: tree ==="
+          ls -la Makefile compiler/src/jhyy.rc installer/assets/icons/jhyy-icon.ico 2>&1 || true
+          echo "=== debug: make stage0 (with output capture) ==="
+          make stage0 2>&1 || { echo "FAIL_EXIT=$?"; exit 1; }
 
       - name: Build stage 1 (jhyy-side production via stage 0)
         shell: msys2 {0}
