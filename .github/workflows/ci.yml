@@ -77,26 +77,22 @@ jobs:
       - name: Build stage 0 (C-side bootstrap)
         shell: msys2 {0}
         run: |
-          cd ${{ github.workspace }}
           make stage0
 
       - name: Build stage 1 (jhyy-side production via stage 0)
         shell: msys2 {0}
         run: |
-          cd ${{ github.workspace }}
           make
 
       - name: "Run regress.py --all (gated: jhyy.exe + jhyy_stage0.exe)"
         shell: msys2 {0}
         run: |
-          cd ${{ github.workspace }}
           python compiler/build/bin/regress.py --all
 
       - name: Run regress.py --all --include-informational (v1 historical baseline, matrix only)
         shell: msys2 {0}
         continue-on-error: true
         run: |
-          cd ${{ github.workspace }}
           # jhyy_v1.exe.exe 在 v1.4.4+ 是 jhyy.exe 的副本 (per mcp-jhyy/jhyy_runner.py
           # copy 约定),v1 = 当前 jhyy-side production binary。closure chain 靠
           # .il sha 验证 byte-equal (不靠 binary sha),副本语义 OK。
@@ -111,13 +107,11 @@ jobs:
       - name: Build Stage 2 closure chain (v1→v2→v3→v4)
         shell: msys2 {0}
         run: |
-          cd ${{ github.workspace }}
           make selfhost
 
       - name: Stage 2 N=3 byte-equal (closure chain)
         shell: msys2 {0}
         run: |
-          cd ${{ github.workspace }}
           # 手动跑 closure chain (跟 jhyy_selfhost_check MCP 等价但纯 bash)
           # v1 → v2 → v3 → v4 .il sha 必须全相同
           # 命名规则 (per `feedback_regress_baseline_binary_hash.md`):
