@@ -77,14 +77,23 @@ jobs:
       - name: Build stage 0 (C-side bootstrap)
         shell: msys2 {0}
         run: |
+          set +e
           cd ${{ github.workspace }}
-          echo "=== windres probe ==="
+          echo "=== env probe ==="
+          echo "PWD=$(pwd)"
+          echo "msystem=$msystem"
           echo "PATH=$PATH"
-          which windres || echo "windres NOT on PATH"
-          ls -la /c/msys64/ucrt64/bin/windres* 2>&1 || echo "no windres under ucrt64"
-          pacman -Q mingw-w64-ucrt-x86_64-binutils 2>&1 || echo "binutils pkg not installed"
-          echo "=== make stage0 (verbose) ==="
-          make stage0 V=1 2>&1 || { echo "MAKE_EXIT=$?"; exit 1; }
+          echo "--- which windres ---"
+          which windres
+          echo "--- ls ucrt64/bin/windres* ---"
+          ls -la /c/msys64/ucrt64/bin/windres* 2>&1
+          echo "--- ls usr/bin/windres* ---"
+          ls -la /c/msys64/usr/bin/windres* 2>&1
+          echo "--- pacman Q binutils ---"
+          pacman -Q mingw-w64-ucrt-x86_64-binutils 2>&1
+          echo "--- make stage0 ---"
+          make stage0 2>&1
+          echo "---FINAL_EXIT=$?---"
 
       - name: Build stage 1 (jhyy-side production via stage 0)
         shell: msys2 {0}
