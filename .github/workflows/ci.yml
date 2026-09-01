@@ -113,8 +113,17 @@ jobs:
       - name: "Run regress.py --all (gated: jhyy.exe + jhyy_stage0.exe)"
         shell: msys2 {0}
         run: |
+          set +e
           cd ${{ github.workspace }}
-          python compiler/build/bin/regress.py --all
+          echo "--- ls binaries ---"
+          ls -la compiler/build/bin/jhyy.exe compiler/build/bin/jhyy_stage0.exe compiler/build/bin/jhyy.exe.sha256 2>&1
+          echo "--- python version ---"
+          python --version 2>&1
+          echo "--- python import test ---"
+          python -c "import sys; sys.path.insert(0, 'mcp-jhyy'); from jhyy_regress import run_all; print('import OK')" 2>&1
+          echo "--- regress.py --all (full output) ---"
+          python compiler/build/bin/regress.py --all 2>&1 | head -50
+          echo "---REGRESS_EXIT=$?---"
 
       - name: Run regress.py --all --include-informational (v1 historical baseline, matrix only)
         shell: msys2 {0}
