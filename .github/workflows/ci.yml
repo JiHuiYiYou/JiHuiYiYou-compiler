@@ -77,53 +77,20 @@ jobs:
       - name: Build stage 0 (C-side bootstrap)
         shell: msys2 {0}
         run: |
-          set +e
           cd ${{ github.workspace }}
-          echo "=== env probe ==="
-          echo "PWD=$(pwd)"
-          echo "msystem=$msystem"
-          echo "PATH=$PATH"
-          echo "--- which windres ---"
-          which windres
-          echo "--- ls ucrt64/bin/windres* ---"
-          ls -la /c/msys64/ucrt64/bin/windres* 2>&1
-          echo "--- ls usr/bin/windres* ---"
-          ls -la /c/msys64/usr/bin/windres* 2>&1
-          echo "--- pacman Q binutils ---"
-          pacman -Q mingw-w64-ucrt-x86_64-binutils 2>&1
-          echo "--- make stage0 ---"
-          make stage0 2>&1
-          echo "---FINAL_EXIT=$?---"
+          make stage0
 
       - name: Build stage 1 (jhyy-side production via stage 0)
         shell: msys2 {0}
         run: |
-          set +e
           cd ${{ github.workspace }}
-          echo "--- ls build/bin ---"
-          ls -la compiler/build/bin/ 2>&1
-          echo "--- ls qbe ---"
-          ls -la qbe/ 2>&1 | head -10
-          echo "--- which gcc windres qbe ---"
-          which gcc; which windres; which qbe
-          echo "--- make all verbose ---"
-          make 2>&1
-          echo "---FINAL_EXIT=$?---"
+          make
 
       - name: "Run regress.py --all (gated: jhyy.exe + jhyy_stage0.exe)"
         shell: msys2 {0}
         run: |
-          set +e
           cd ${{ github.workspace }}
-          echo "--- ls binaries ---"
-          ls -la compiler/build/bin/jhyy.exe compiler/build/bin/jhyy_stage0.exe compiler/build/bin/jhyy.exe.sha256 2>&1
-          echo "--- python version ---"
-          python --version 2>&1
-          echo "--- python import test ---"
-          python -c "import sys; sys.path.insert(0, 'mcp-jhyy'); from jhyy_regress import run_all; print('import OK')" 2>&1
-          echo "--- regress.py --all (full output) ---"
-          python compiler/build/bin/regress.py --all 2>&1 | head -50
-          echo "---REGRESS_EXIT=$?---"
+          python compiler/build/bin/regress.py --all
 
       - name: Run regress.py --all --include-informational (v1 historical baseline, matrix only)
         shell: msys2 {0}
@@ -144,28 +111,19 @@ jobs:
       - name: Build Stage 2 closure chain (v1→v2→v3→v4)
         shell: msys2 {0}
         run: |
-          set +e
           cd ${{ github.workspace }}
-          echo "--- ls build/bin before selfhost ---"
-          ls -la compiler/build/bin/ | head -20
-          echo "--- make selfhost verbose ---"
-          make selfhost 2>&1
-          echo "---SELFHOST_EXIT=$?---"
-          echo "--- ls build/bin after selfhost ---"
-          ls -la compiler/build/bin/ | head -20
+          make selfhost
 
       - name: Stage 2 N=3 byte-equal (closure chain)
         shell: msys2 {0}
         run: |
-          set +e
           cd ${{ github.workspace }}
-          echo "--- ls build/bin before closure check ---"
-          ls -la compiler/build/bin/jhyy_v1.exe.exe compiler/build/bin/jhyy_v2.exe compiler/build/bin/jhyy_v3.exe compiler/build/bin/jhyy_v4.exe 2>&1
           # 手动跑 closure chain (跟 jhyy_selfhost_check MCP 等价但纯 bash)
           # v1 → v2 → v3 → v4 .il sha 必须全相同
           # 命名规则 (per `feedback_regress_baseline_binary_hash.md`):
           #   jhyy_v1.exe.exe = v1 (jhyy.exe copy, tracked — v1.4.4+ 副本约定)
           #   jhyy_v2/3/4.exe = 当前 closure product (每次 make selfhost 重 build)
+          set -e
           SHA_V1=""
           SHA_V2=""
           SHA_V3=""
@@ -176,16 +134,15 @@ jobs:
             else
               BIN="compiler/build/bin/jhyy_${stage}.exe"
             fi
-            echo "--- stage=$stage BIN=$BIN ---"
             if [ ! -x "$BIN" ]; then
               echo "FAIL: $BIN not found — run \`make selfhost\` first"
               exit 1
             fi
-            $BIN compile compiler/src0/main.jhyy -o /tmp/closure_${stage}.exe 2>&1 || {
+            $BIN compile compiler/src0/main.jhyy -o /tmp/closure_${stage}.exe >/dev/null 2>&1 || {
               echo "FAIL: ${BIN} cannot compile src0/main.jhyy"
               exit 1
             }
-            SHA=$(sha256sum /tmp/closure_${stage}.exe.il 2>&1 | awk '{print $1}')
+            SHA=$(sha256sum /tmp/closure_${stage}.exe.il | awk '{print $1}')
             case "$stage" in
               v1) SHA_V1="$SHA";;
               v2) SHA_V2="$SHA";;
