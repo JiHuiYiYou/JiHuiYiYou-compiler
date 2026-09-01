@@ -98,8 +98,17 @@ jobs:
       - name: Build stage 1 (jhyy-side production via stage 0)
         shell: msys2 {0}
         run: |
+          set +e
           cd ${{ github.workspace }}
-          make
+          echo "--- ls build/bin ---"
+          ls -la compiler/build/bin/ 2>&1
+          echo "--- ls qbe ---"
+          ls -la qbe/ 2>&1 | head -10
+          echo "--- which gcc windres qbe ---"
+          which gcc; which windres; which qbe
+          echo "--- make all verbose ---"
+          make 2>&1
+          echo "---FINAL_EXIT=$?---"
 
       - name: "Run regress.py --all (gated: jhyy.exe + jhyy_stage0.exe)"
         shell: msys2 {0}
