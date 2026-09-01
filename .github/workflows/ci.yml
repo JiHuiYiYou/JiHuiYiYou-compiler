@@ -157,13 +157,15 @@ jobs:
       - name: Stage 2 N=3 byte-equal (closure chain)
         shell: msys2 {0}
         run: |
+          set +e
           cd ${{ github.workspace }}
+          echo "--- ls build/bin before closure check ---"
+          ls -la compiler/build/bin/jhyy_v1.exe.exe compiler/build/bin/jhyy_v2.exe compiler/build/bin/jhyy_v3.exe compiler/build/bin/jhyy_v4.exe 2>&1
           # 手动跑 closure chain (跟 jhyy_selfhost_check MCP 等价但纯 bash)
           # v1 → v2 → v3 → v4 .il sha 必须全相同
           # 命名规则 (per `feedback_regress_baseline_binary_hash.md`):
           #   jhyy_v1.exe.exe = v1 (jhyy.exe copy, tracked — v1.4.4+ 副本约定)
           #   jhyy_v2/3/4.exe = 当前 closure product (每次 make selfhost 重 build)
-          set -e
           SHA_V1=""
           SHA_V2=""
           SHA_V3=""
@@ -174,15 +176,16 @@ jobs:
             else
               BIN="compiler/build/bin/jhyy_${stage}.exe"
             fi
+            echo "--- stage=$stage BIN=$BIN ---"
             if [ ! -x "$BIN" ]; then
               echo "FAIL: $BIN not found — run \`make selfhost\` first"
               exit 1
             fi
-            $BIN compile compiler/src0/main.jhyy -o /tmp/closure_${stage}.exe >/dev/null 2>&1 || {
+            $BIN compile compiler/src0/main.jhyy -o /tmp/closure_${stage}.exe 2>&1 || {
               echo "FAIL: ${BIN} cannot compile src0/main.jhyy"
               exit 1
             }
-            SHA=$(sha256sum /tmp/closure_${stage}.exe.il | awk '{print $1}')
+            SHA=$(sha256sum /tmp/closure_${stage}.exe.il 2>&1 | awk '{print $1}')
             case "$stage" in
               v1) SHA_V1="$SHA";;
               v2) SHA_V2="$SHA";;
