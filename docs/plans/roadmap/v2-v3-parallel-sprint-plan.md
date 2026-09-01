@@ -155,7 +155,7 @@
 | **v2.1.0** | ABI 抽离(abi_amd64_win + abi_amd64_win_freestanding + codegen 抽离调用 + ABI 单元测试) | v2.0.0 |
 | **v2.2.0** | spec 锁定(abi § 13 + lang-spec § 18-21 + build.md + jhyy_OS cross-check) | v2.1.0 |
 | **v2.3.0** | hello-freestanding.efi 跑 OVMF(UEFI + PE/COFF 链路验证)| v2.2.0 |
-| **v2.4.0** | 多目标 dispatcher + **byte-equal 三件套**(per `coordination.md § 3 D26`:`jhyy_v1.il == jhyy_v2.il` + `.s == .s` + `.exe byte-equal` 兜底 `gcc -g0 + strip + SOURCE_DATE_EPOCH + --build-id=none`)| v2.3.0 |
+| **v2.4.0** | 多目标 dispatcher + **byte-equal 三件套**(per `coordination.md § 3 D26`:`jhyy_v1.il == jhyy_v2.il` + `.s == .s` + `.exe byte-equal` 兜底 recipe per [`v2.4.0 § 2.1.1 byte_equal.sh`](../v2/v2.4.0任务清单 + 概要设计.md))| v2.3.0 |
 | **v3.0 3a-3f**(⟂ 异步)| v2.0 阶段 ship 后启动:3a inline asm / 3b #[naked] fn / 3c volatile load/store / 3e #[link_section] / 3f memory barrier / 3d #[no_std](软,任何时点做 per D10)| v2.4.0(6 特性独立,内部不强依赖;**3c 硬约束**:v2.x 自写后端在 3c ship 后才移植 volatile 语义,per § 4.2)|
 | **M1 launch** | OS 编 kernel.efi + QEMU + OVMF + printk(端到端联调)| v2.0 阶段 + v3.0 3a-3c/3e-3f 全 ship(3d 软,M1 不依赖)|
 

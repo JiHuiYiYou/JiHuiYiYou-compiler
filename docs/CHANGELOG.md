@@ -27,7 +27,7 @@
 | **v1.0.0** | 2026-08-10 | [`logs/v1/changelog-v1.0.0.md`](logs/v1/changelog-v1.0.0.md) | 真自举 byte-equal 闭环 (Stage 2 N=3) — jhyy 编 jhyy 里程碑 |
 | v1.0.0-rc | 2026-08-09 | [`logs/v1/changelog-v1.0.0-rc.md`](logs/v1/changelog-v1.0.0-rc.md) | RC 候选 |
 
-> **v1.x 终结** (2026-08-29): W-019/W-020 ACTIVE workaround 真修 + 11 个 W WIP/INVALID 闭环 + spec/abi locked. ACTIVE workaround 数 = 0. 下一阶段 v2.x (QBE 重写) / v3.x (语言扩展) 并行启动 — 见 [`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md`](plans/roadmap/v2-v3-parallel-sprint-plan.md) + [`docs/plans/v2/v2.0.0-os-prep.md`](plans/v2/v2.0.0-os-prep.md).
+> **v1.x 终结** (2026-08-29): W-019/W-020 ACTIVE workaround 真修 + 11 个 W WIP/INVALID 闭环 + spec/abi locked. ACTIVE workaround 数 = 0. 下一阶段 v2.0 阶段串行 ship(v2.0.0 → v2.4.0 顺序)→ v3.0 3a-3f 异步启动(2026-09-01 user 决定)→ v2.x 中/末 ‖ v3 全线 异步并行 — 见 [`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md`](plans/roadmap/v2-v3-parallel-sprint-plan.md) + [`docs/plans/v2/v2.0.0-os-prep.md`](plans/v2/v2.0.0-os-prep.md).
 
 ---
 
@@ -52,7 +52,7 @@
 ## 跨版本影响 / Sprint 索引
 
 - **当前 sprint**: 🟢 无活跃 sprint (v0.9 wip 冻结 2026-08-29 + v1.8.3 v1.x 终结)
-- **下一阶段**: v2.x sprint 3a (QBE 重写起步) + v3.x sprint 3a (语言扩展起步) 并行 — 等 user 启动
+- **下一阶段**: **v2.0 阶段串行 ship**(v2.0.0 → v2.4.0 顺序,2026-09-01 user 决定)→ v3.0 3a-3f 异步启动 → v2.x 中/末 ‖ v3 全线 异步并行 — 等 user 启动 v2.0.0
 - **Sprint 设计入口**: [`plans/roadmap/`](plans/roadmap/) (L1) → `plans/v0/v0.X.0任务清单 + 概要设计.md` / `plans/v1/v1.X.0任务清单 + 概要设计.md` (L3) → L4 详细实现方案
 - **OS 准备清单**: [`plans/v2/v2.0.0-os-prep.md`](plans/v2/v2.0.0-os-prep.md) (M1-M11 硬前置 + 跨项目时间线)
 
