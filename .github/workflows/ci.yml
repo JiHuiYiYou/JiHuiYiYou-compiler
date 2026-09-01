@@ -85,7 +85,7 @@ jobs:
           cd ${{ github.workspace }}
           make
 
-      - name: Run regress.py --all (gated: jhyy.exe + jhyy_stage0.exe)
+      - name: "Run regress.py --all (gated: jhyy.exe + jhyy_stage0.exe)"
         shell: msys2 {0}
         run: |
           cd ${{ github.workspace }}
