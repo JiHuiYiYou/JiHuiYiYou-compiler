@@ -62,6 +62,9 @@
 | [W-060](#w-060-enum-variant-payload-abi-mismatch-mixedi1234-match-走-wildcard-path-exit210--1234-推-v18) | ❌ INVALID 2026-08-28 (v1.8.0) | v1.7.3 ship 期间 fact-check 误判为真 bug: 实为 bash `$?` 8-bit truncation (EXIT=210 = 1234 & 0xFF) + Windows `subprocess.run` 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比较. v1.8.0 Phase 1 调查 (Agent 3) 确认 W-060 = test artifact. OR pattern `Some(v) \| Some(v)` 分支 EXIT=42 实无 bug (line 1 SKIP 标签把 spec 限制跟 OR pattern 测试混淆). 2 enum test (`payload_bind_multi.jhyy` / `payload_bind_nested.jhyy`) SKIP directive 删, 全 PASS regress. |
 | [W-061](#w-061-nested-struct-field-offset-bug-outer--tag-inner--read-exit51--307-推-v18) | ❌ INVALID 2026-08-28 (v1.8.0) | v1.7.3 ship 期间 fact-check 误判为真 bug: 实为 bash `$?` 8-bit truncation (EXIT=51 = 307 & 0xFF) + Windows `subprocess.run` 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比较. v1.8.0 Phase 1 调查 (Agent 3) 确认 W-061 = test artifact. `(*o).inner.x + (*o).inner.y` 实 EXIT=300 (无 bug, 推测 OR-pattern 部分 follow-up 误解). nested_struct_dwarf.jhyy SKIP directive 删, 全 PASS regress. |
 | [W-062](#w-062-vscode-userchoice-hijack--msys2-openwithprogids-双层-shadow--jhyy-图标-不显示-推-v182) | ✅ RESOLVED 2026-08-29 (v1.8.3.1 patch) | 双层独立 hijack: (1) VSCode UserChoice hijack (`HKCU\…\FileExts\.jhyy\UserChoice\ProgId = Applications\Code.exe`, UCPD.sys 加 Deny ACE 防非 admin SetValue, 需 admin + UCPD pause/restart);(2) MSYS2 OpenWithProgids 残留 (`HKCU\…\FileExts\.jhyy\OpenWithProgids\jhyy_auto_file` + `HKCU\Software\Classes\jhyy_auto_file`, v1.8.1 patch 没清 OpenWithProgids 子键). v1.8.1 patch 只修了 WiX `(default)` 写错位 + `jhyy.exe,0` embedded icon, **不修** 这两层 shell hijack. Explorer folder view 用 UserChoice ProgId 取 icon → `Applications\Code.exe\DefaultIcon` 解析 quirk → shell32 白板. 修复: v1.8.2 Path B 注册自定义 ProgId `JHYY.EditInVSCode` (`DefaultIcon = jhyy-icon.ico,0` + `shell\open\command = Code.exe "%1"`),用 Mozilla reverse-engineered UserChoice Hash 算法 (`SHA/MD5 + 2-pass scramble`, MPL 2.0) 把 `UserChoice\ProgId` 写成 `JHYY.EditInVSCode`. C# tool `installer/common/jhyy-setuc/Program.cs` (.NET 8-windows) port Mozilla 算法. **v1.8.3 ship 时**把 manual Path B 升级到 WiX MSI CustomAction `JHYYSetUCForAllUsers` (SYSTEM context 绕 UCPD kernel filter),通过 immediate `SetUCProp` + deferred `--system-context` 2-step 模式在 install 时自动触发。**v1.8.3.1 patch 真修**: ship 时 CustomAction 0x80004005 静默失败 — 3-attempt diagnosis (1. `ExeCommand` 引用 `[JHYYSetUCBin]` property 在 deferred CA 不 resolve; 2. WiX `<Binary>` 不自动创建 property; 3. `.NET 8 apphost model` 需 ship `.exe` + `.dll` + `.deps.json` + `.runtimeconfig.json` 4 个 file,v1.8.3 只 ship 了 `.exe`)。**最终 fix**: 2-step immediate→deferred CA pattern (`SetUCProp` capture `[INSTALLDIR]` → `JHYYSetUCCmd` → deferred `Directory="INSTALLDIR" ExeCommand="[JHYYSetUCCmd]"`) + ship 4 个 .NET 8 file 落地 `INSTALLDIR\bin\`。顺带修 `manual-fix-icon-cache.ps1` 自 v1.8.2 ship 起 Path B jhyy-setuc.exe 路径错(指向 build 产物路径而非 INSTALLDIR\bin\)。MSI install field test 2026-08-29: CA 完成 17:50, sentinel written, UserChoice Hash `/dbBVe4aYxo=`, 4 files 落地, Explorer `.jhyy` 显示 JHYY 品牌 "J" icon。5/5 PASS gate per `feedback_fix_evaluation_rule`。 |
+| [W-063](#w-063-短名-enum-模式匹配-somev--v-bind--codegen-传错-type--phi-t0-未定义) | ✅ RESOLVED 2026-09-01 (v1.8.3.2 patch, probe-then-fix) | codegen `cg_match_pattern` NODE_PATTERN_ENUM 分支在 `pe->variant_sym == NULL` 时走 silent always-match fallback (emit `jnz %t2, @arm2, @next3` + `%t2 =w copy 1`), 不再 emit payload slot alias 的 `loadw`. 当 phi 引用该 slot (`%t6 =w phi @arm2 %t0`) 时 %t0 未定义 → QBE reject "invalid type for operand %t0 in phi %t6". 短名 form (`Some(v)` 无 `Option::` qualifier) 在 parser.c `parse_pattern_enum` (line 225-235) 把 `type_sym=NULL` 直接传 ast_new_pattern_enum → 触发 fallback. 长名 form (`Option::Some(v)`) `type_sym` set,不触发. 修复: `compiler/src0/codegen.jhyy:3468` NODE_MATCH 入口 `cg_match_pattern` 调用 `cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*matched_node).type_ptr)` — 改传 **subject type** (`(*matched_node).type_ptr`) 而非 match result type (`(*n).type_ptr`), 让 fallback 路径能反查 match_type->enum_type.variants 拿名字. `cg_match_pattern` 内部 l:977-1015 用 match_type 兜底解析 variant name + emit payload alias loadw. 新增 `compiler/tests/examples/payload_bind_short.jhyy` integration test (5/5 PASS per `feedback_fix_evaluation_rule`)。regress 103/103 + Stage 2 N=4 byte-equal 闭环 (v2/v3/v4/v5 .il sha=`fa1137e5...`)。C-side `compiler/src/codegen.c:347-352` 平行位置同 bug,**未真修** — 后续 v2.x 启动前需补(C-side 不在 production path 但保留 bootstrap 用途, 暂 DEFERRED)。 |
+| [W-064](#w-064-run_qbe-失败只打-qbe-failed--缺-stderr-捕获-qbe-真实诊断丢失) | ✅ RESOLVED 2026-09-01 (v1.8.3.2 patch) | `run_qbe` (compiler/src0/main.jhyy:657-699) QBE 失败时只 echo `cmd_buf` (`QBE failed: "..."\n`), 不读 jh_run 已 capture 的 child stderr. QBE 真实诊断 ("invalid type for operand %t0 in phi %t6" / "undefined symbol" / "type mismatch") 全丢, 用户只见 "QBE failed" 一行, 难定位是 QBE reject 哪条 IL. 修复: 镜像 `link_with_gcc` W-045 pattern — `run_qbe` 失败分支加 `let captured = jh_run_get_output(); if captured != (0 as *u8) && (*captured) != (0 as i32) { jh_fputs_stderr("QBE stderr:\n" as *u8); jh_fputs_stderr(captured); jh_fputs_stderr("\n" as *u8); }`. `jh_run` per-call reset `jh_run_outlen = 0` (jhyy_helpers.c:517-518) 保证 QBE→gcc 链顺序不污染. **link_with_gcc 已 ship W-045**, `run_qbe` 是唯一剩没接 stderr capture 的 child process site. 顺带 bump l:1091 stale version literal `v1.0.0` → `v1.8.3.2` (jhyy.exe -h 可见)。回归 103/103 + Stage 2 闭环 hold. C-side `compiler/src/main.c` 未镜像 (production 用 jhyy-side, stage0 bootstrap 不修)。 |
+| [W-065](#w-065-jhyy-run-不预检-fn-main_jhyy--库-snippet-报-undefined-reference-to-main_jhyy-对用户不友好) | ✅ RESOLVED 2026-09-01 (v1.8.3.2 patch) | `jhyy run` 接 input 后直接调 `cmd_compile` (→ QBE → gcc link) — 库 snippet (无 `fn main_jhyy`, 仅 `fn unwrap` / `fn dist_sq` 这种) link 时 gcc 报 `undefined reference to main_jhyy`, 错误晚出且 noisy. 修复: `cmd_run` 入口 (compiler/src0/main.jhyy:987) 在 `cmd_compile` 之前加 cheap byte-level scan — `fopen(input, "rb")` + `fread` 131072 bytes + fclose, 然后 byte-by-byte 搜 needle `"fn main_jhyy"`. 找到 → 继续 compile; 找不到 → `jh_fputs_stderr("jhyy run: '<file>' has no 'fn main_jhyy() -> i32' (required for 'jhyy run'; use 'jhyy compile <file>.jhyy' for libraries)\n" as *u8)` + return 1. **scope**: 只动 `cmd_run`, `cmd_compile` 保持允许库-only 编译 (compile 不需要 main_jhyy, 可产 .s/.exe 给后续 link 用)。**byte-comparison 实现**: 第一次 commit (`src0/main.jhyy:1015-1029`) 用 `*i32` cast deref 4-byte 而非 1-byte, scan 永远不 match (即使文件真有 `fn main_jhyy`)。第二次 commit 改 `*u8` cast + `as i32` promote 才正确。首次 fix 在 fresh build 后 user case (test.jhyy / test2.jhyy) 仍报 "no fn main_jhyy" 才暴露 — 不写 5/5 PASS loop 不会发现 byte-comparison bug。regress 103/103 + Stage 2 闭环 hold (v2/v3/v4/v5 .il sha=`fa1137e5...`)。**C-side `src/main.c` 未镜像** (production path 走 jhyy-side)。 |
 
 ---
 
@@ -4537,5 +4540,158 @@ explorer.exe .
 - `installer/common/install-configure-all.bat` (v1.8.3 改, step 6 sentinel check + `goto :skip_post_install_user_choice`)
 - `installer/build-artifacts/dotnet/dotnet-runtime-8.0.30-win-x64.exe` (v1.8.3 新, 28.6 MB .NET 8 Desktop Runtime)
 - `docs/logs/v1/changelog-v1.8.0.md` v1.8.3 patch 段 (umbrella)
+
+
+## W-063: 短名 enum 模式匹配 `Some(v) => v` bind, codegen 传错 type → phi %t0 未定义
+
+**ID:** W-063
+**状态:** ✅ RESOLVED 2026-09-01 (v1.8.3.2 patch, probe-then-fix)
+**日期:** v1.7.1 (introduced — 短名 form parser 允许但 codegen 无对应路径) → 2026-09-01 (RESOLVED)
+**触发面:** 任何用 `match` + 短名 enum 模式 (e.g. `match o { Some(v) => v, None => 0 }` 不带 `Option::` 前缀) + bind payload 的代码 — 官网 04 tab `unwrap` 例子, 教科书 enum-bind 例子
+**症状:** QBE 拒绝 .il, 报 `invalid type for operand %t0 in phi %t6` (or similar SSA reference). 用户只见 `QBE failed: "..."\n` 一行 (旧版, 无 stderr capture). 实际 .il 长这样 (regress from `test.jhyy` unwrap 例子):
+
+```
+@arm2
+    dbgloc 8
+    jmp @merge1
+@merge1
+    %t6 =w phi @arm2 %t0, ...   ← @arm2 没 emit %t0 定义, %t0 phantom
+    ret %t6
+```
+
+注意 `@arm2` block 只有 `jmp @merge1` 0 行 — payload slot alias `loadw` 根本没 emit.
+
+**根因嫌疑:** jhyy-side `compiler/src0/codegen.jhyy` `cg_match_pattern` (line 977-1217) NODE_PATTERN_ENUM 分支在 `pe->variant_sym == NULL` 时 silent fallthrough (return `cmp=1`, "always-match" — emit `jnz %t2, @arm2, @next3` with `%t2 =w copy 1`). 该 fallback **跳过 emit payload alias `loadw`** (which would define `%t0`). 后端 phi node 引用 arm body 里的 `v` (resolved via binding branch's `cg_add_local`) → 引用未定义 SSA → QBE reject. 短名 form (`Some(v)`) 触发: parser.c `parse_pattern_enum` (line 225-235) `gsym = symtab_lookup(...)` 设 `variant_sym` 后 `ast_new_pattern_enum(..., NULL, gsym, inner)` (`type_sym=NULL`); codegen 看到 `pe->type_sym == NULL` → 进 fallback. 长名 form (`Option::Some(v)`) `pe->type_sym` set → 不触发. W-019 (v1.4.6) 试图修同名 form 但只动了 parser 端, 漏了 codegen 调用站点.
+
+实际 codegen 调用站点 (NODE_MATCH driver line 3378-3503) 把 **match result type** (`(*n).type_ptr` — e.g. `i32` for `match o { Some(v) => v, ... }`) 传给 `cg_match_pattern`. 这是 bug: short-name fallback 路径上, `cg_match_pattern` 用 match result type 在 `match_type->enum_type.variants` 反查 variant 名字 — match result type 不是 KIND_ENUM → 反查永远 miss → 永远走 silent fallback. 应传 **subject type** (`(*matched_node).type_ptr` — e.g. `Option`).
+
+**workaround (v1.8.3.2 真修):** `compiler/src0/codegen.jhyy:3468` NODE_MATCH driver 入口 `cg_match_pattern` 调用改:
+
+```jhyy
+// 旧 (bug):
+let cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*n).type_ptr);
+// 新 (fix):
+let cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*matched_node).type_ptr);
+```
+
+注释里完整记录 WHY — subject type 才有 KIND_ENUM → 才能反查 variant name → emit payload alias `loadw` → phi 引用 `%t0` 有定义。
+
+**probe-then-fix 路径 (per plan):**
+1. 第一次 probe 在 `compiler/src/codegen.c:347-352` 加 `fprintf(stderr, "DEBUG pe=%p variant_sym=%p match_type=%p\n", ...)` — probe 0 fire, 因 production 用 `src0/codegen.jhyy` 非 `src/codegen.c`
+2. probe 移到 `src0/codegen.jhyy` cg_match_pattern 入口 + NODE_MATCH 入口 — 确认: `variant_sym` 已 set (parser 设了) + match_type 传错 (call site 传 `(*n).type_ptr` 是 match result type, 不是 KIND_ENUM)
+3. 删 probe, 真修传参 → .il 重新 emit `%t7 =w loadw %t6` (payload alias defined) → QBE exit 0
+4. 加 regress test `compiler/tests/examples/payload_bind_short.jhyy`
+
+**影响范围:**
+- `compiler/src0/codegen.jhyy:3468` (1 行参数修改 + 14 行 WHY 注释)
+- `compiler/tests/examples/payload_bind_short.jhyy` (新增)
+- `docs/logs/v1/changelog-v1.8.0.md` v1.8.3.2 patch 段 (umbrella)
+
+**失效条件:** 不适用 — 真修 chain 已 ship. C-side `compiler/src/codegen.c:347-352` 平行位置同 bug,**未真修** — 后续 v2.x 启动前需补(C-side 不在 production path 但保留 bootstrap 用途, 暂 DEFERRED)。
+
+**superseder:** v1.8.3.2 真修 (1-line 参数传 subject type)
+**引用:**
+- `compiler/src0/codegen.jhyy:977-1015` (`cg_match_pattern` fallback 路径 — match_type 反查 + payload alias emit)
+- `compiler/src0/codegen.jhyy:3468` (NODE_MATCH driver call site — fix point)
+- `compiler/src/parser.c:225-235` (短名 form parser — `type_sym=NULL` AST node)
+- `compiler/tests/examples/payload_bind_short.jhyy` (新增 regress test)
+- `docs/logs/v1/changelog-v1.8.0.md` v1.8.3.2 patch 段
+
+**验证:**
+- 5/5 PASS on `payload_bind_short.jhyy` per `feedback_fix_evaluation_rule` (5 iter 跑同一个 file, 全 exit=42)
+- 全 regress 103/103 PASS + 4 SKIP
+- Stage 2 selfhost closure N=4 byte-equal (`v2/v3/v4/v5` .il sha `fa1137e5b9621ab46bc95ad976b5f33e0a60e98e5ec59ef31d084203e146e242`)
+
+
+## W-064: run_qbe 失败只打 `QBE failed: ...` 缺 stderr 捕获, QBE 真实诊断丢失
+
+**ID:** W-064
+**状态:** ✅ RESOLVED 2026-09-01 (v1.8.3.2 patch)
+**日期:** v1.5.6 (introduced — `jh_run` 加 stderr pipe capture 但 `run_qbe` 没接 `jh_run_get_output()`) → 2026-09-01 (RESOLVED)
+**触发面:** 任何 QBE 失败场景 — codegen emit invalid .il (W-063 + W-012 残留 + W-054 等); QBE binary 找不到 (W-021 升级后); .il syntax 错 (罕见)
+**症状:** 用户只见单行 `QBE failed: "<full qbe cmd_buf>"\n`, 不知道 QBE 实际诊断 (e.g. `invalid type for operand %t0 in phi %t6` / `undefined symbol %t3` / `type mismatch in storew` 等). 跟 `gcc link failed` 旧症状一样 — 错误晚出 + 信息丢失, 用户无从下手.
+**根因嫌疑:** `compiler/src0/main.jhyy:run_qbe` (line 657-699) v1.5.6 W-038 改 `system()` → `jh_run` (CreateProcessA) 但**漏接** `jh_run_get_output()` capture. v1.5.6 W-045 同时 ship 的 `link_with_gcc` stderr capture helper (`jh_run_get_output` + 失败时 echo) 没应用到 run_qbe. 原因推测: W-038 跟 W-045 是不同 sub-sprint, run_qbe 只被 audit `cmd_buf` quote (W-039), stderr capture 漏 audit.
+**workaround (v1.8.3.2 真修):** 镜像 `link_with_gcc` (line 805-836) W-045 pattern:
+
+```jhyy
+let r = jh_run(cmd_buf);
+let captured = jh_run_get_output();   // 新增 — buffer per-call reset (jh_run 内 l:517-518)
+if r != (0 as i32) {
+    jh_fputs_stderr("QBE failed: " as *u8);
+    jh_fputs_stderr(cmd_buf as *u8);
+    jh_fputs_stderr("\n" as *u8);
+    if captured != (0 as *u8) {        // 新增
+        let c0 = (*captured);
+        if c0 != (0 as i32) {
+            jh_fputs_stderr("QBE stderr:\n" as *u8);
+            jh_fputs_stderr(captured);
+            jh_fputs_stderr("\n" as *u8);
+        }
+    }
+    free(cmd_buf);
+    return 1 as i32;
+}
+```
+
+顺带 bump `src0/main.jhyy:1091` stale `printf("jhyy compiler v1.0.0 (self-hosted)\n"...)` → `v1.8.3.2`. `jhyy -h` 可见。
+
+**影响范围:**
+- `compiler/src0/main.jhyy:687-700` (run_qbe — 13 行修改 + 6 行 WHY 注释)
+- `compiler/src0/main.jhyy:1091` (1 行 version literal bump)
+
+**失效条件:** 不适用 — 真修 chain 已 ship. **link_with_gcc 已 ship W-045 真修**, `run_qbe` 是唯一剩没接 stderr capture 的 child process site (windres 没 capture 是 v0.4 阶段产物, windres 失败模式不常见, 不修).
+
+**superseder:** v1.8.3.2 真修 (`run_qbe` 接 `jh_run_get_output` capture)
+**引用:**
+- `compiler/src0/main.jhyy:657-700` (`run_qbe` — fix point)
+- `compiler/src0/main.jhyy:805-836` (`link_with_gcc` W-045 pattern 模板)
+- `compiler/src0/jhyy_helpers.c:466-567` (`jh_run` CreateProcessW + pipe capture + per-call buffer reset l:517-518)
+- `docs/logs/v1/changelog-v1.8.0.md` v1.8.3.2 patch 段
+
+**验证:** regress 103/103 + Stage 2 闭环 hold (v2/v3/v4/v5 .il sha `fa1137e5...`).
+
+
+## W-065: `jhyy run` 不预检 `fn main_jhyy` — 库 snippet 报 `undefined reference to main_jhyy` 对用户不友好
+
+**ID:** W-065
+**状态:** ✅ RESOLVED 2026-09-01 (v1.8.3.2 patch)
+**日期:** v1.4.4 (introduced — `jhyy run` 入口 direct `cmd_compile` → link, 库文件直接 link 必报 undefined reference) → 2026-09-01 (RESOLVED)
+**触发面:** 用户复制官网 02 (dist_sq) / 04 (unwrap) 这种**库 snippet**(只定义 `fn dist_sq` / `fn unwrap`, 没 `fn main_jhyy`) 直接 `jhyy run` → gcc link 报 `undefined reference to main_jhyy`, 错误晚出 + noisy, 用户搞不清是 snippet 缺 main 还是 compiler bug.
+**症状:** gcc stderr 一长串 `undefined reference to 'main_jhyy'` + link exit 1. 实际 root cause 是 snippet 缺 entry point, 编译器只是按 spec 拒绝 link.
+**根因嫌疑:** `cmd_run` (compiler/src0/main.jhyy:987) 入口直接 `cmd_compile(3, arg_arr)`, 中间没 pre-check 输入文件是否含 `fn main_jhyy`. cmd_compile 不应加 (compile 应允许 library-only 编译), 所以加在 cmd_run 单一 site.
+**workaround (v1.8.3.2 真修):** `cmd_run` 入口加 cheap byte-level scan — `fopen(input, "rb")` + `fread(131072)` + fclose, byte-by-byte 搜 needle `"fn main_jhyy"`. 找到 → 继续 compile; 找不到 → `jh_fputs_stderr("jhyy run: '<file>' has no 'fn main_jhyy() -> i32' (required for 'jhyy run'; use 'jhyy compile <file>.jhyy' for libraries)\n" as *u8)` + return 1.
+
+**第一次 commit bug (自查发现):** byte-comparison 实现用 `*i32` cast deref 4-byte 而非 1-byte (`let a_p = ... as *i32; if (*a_p) != (*b_p) { ... }`), scan 永远不 match — 即使文件真有 `fn main_jhyy` 也报 no main. 第一次 fix 后 fresh build 跑 user case (test.jhyy / test2.jhyy) **仍报 "no fn main_jhyy"** — 不写 5/5 PASS loop 不会发现 byte-comparison bug. 第二次 commit 改 `*u8` cast + `as i32` promote 才正确:
+
+```jhyy
+let a_p = (scan_buf as i64 + j + k2) as *u8;    // 正确: 单 byte deref
+let b_p = (needle as i64 + k2) as *u8;
+let av = (*a_p) as i32;                          // sign-extend byte to i32
+let bv = (*b_p) as i32;
+if av != bv { match_ok = 0 as i32; }
+```
+
+**scope:** 只动 `cmd_run`, `cmd_compile` 保持允许库-only 编译. `jhyy compile foo.jhyy` 仍然产 .s/.exe 不需要 main_jhyy (供后续 link 用).
+
+**影响范围:**
+- `compiler/src0/main.jhyy:993-1043` (cmd_run 入口 — 50 行新 pre-check code)
+
+**失效条件:** 不适用 — 真修 chain 已 ship.
+
+**superseder:** v1.8.3.2 真修 (cmd_run pre-check)
+**引用:**
+- `compiler/src0/main.jhyy:987-1068` (cmd_run — fix point)
+- `compiler/src0/main.jhyy:1000-1029` (byte-comparison 实现 — 第一次 bug 已被第二次 fix 取代)
+- `docs/logs/v1/changelog-v1.8.0.md` v1.8.3.2 patch 段
+
+**验证:**
+- user case `test.jhyy` (unwrap) / `test2.jhyy` (dist_sq) → 干净 actionable error "jhyy run: '...' has no 'fn main_jhyy() -> i32' (required for 'jhyy run'; use 'jhyy compile <file>.jhyy' for libraries)"
+- 加 `fn main_jhyy` wrapper 后 (`test_short_enum.jhyy`) → 5/5 PASS exit=99 per `feedback_fix_evaluation_rule`
+- regress 103/103 + Stage 2 闭环 hold (v2/v3/v4/v5 .il sha `fa1137e5...`)
+
+**教训:**
+- **任何 byte-level inline 算法, 5/5 PASS loop 是真修 gate**: 第一次 commit 跑自己写的 wrapper (有 main_jhyy) 都过 — 但跑 user 原 case (库 snippet, 无 main_jhyy) 暴露 byte-comparison bug。如果只跑 wrapper, 永远不知道 fix 本身错。
+- **`*i32` cast deref 是 silent footgun**: jhyy `*i32` deref 4-byte, `*u8` deref 1-byte. 在 C/Python 看像 trivial, 在 jhyy codegen 后端会 emit `loadw` vs `loadsb` — 4-byte overread 是常见的 silent corruption 源头 (W-001 RESOLVED chain 同型教训)。
+- **scope discipline 赢 scope creep**: 计划阶段想加 helper `jh_file_read_all` + matching stub, 实际 inline fopen/fread/fclose + byte loop 就够 (50 行, 0 new helper, 0 C-side sync work)。**scope discipline > code reuse**。
 
 

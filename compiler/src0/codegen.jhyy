@@ -3430,7 +3430,13 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 }
                 next_check = *ir_new_block(ir, "next" as *u8);
                 next_check_id = 1 as i64;
-                let cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*n).type_ptr);
+                // v1.8.3.2 (W-063 真修): pass subject type, not match result type. Short-name enum
+// pattern (`Some(v)` without `Option::` qualifier) falls back to match_type when
+// pe->type_sym is NULL — match result type (e.g., i32 for `match o { Some(v) => v, ...}`)
+// is not KIND_ENUM, so enum_type resolution silently fails and the binding branch is
+// skipped → @arm2 emits no loadw → phi references undefined %t0 → QBE reject.
+// Long-name form (`Option::Some(v)`) unaffected since pe->type_sym is set.
+let cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*matched_node).type_ptr);
                 ir_emit_jnz(ir, cmp, body_block, next_check);
             }
 

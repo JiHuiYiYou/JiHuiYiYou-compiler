@@ -855,6 +855,150 @@ explorer.exe .
 
 ---
 
+## v1.8.3.2 patch — 短名 enum 模式 binding + driver stderr + main_jhyy pre-check + 官网同步
+
+**触发**: 用户复制 JHYY 官网 02 (dist_sq 库 snippet) / 04 (unwrap 库 snippet) 两个 tab 直接 `jhyy run` 报两类错:
+- 04 (`unwrap`): `QBE failed: "..."\n` 单行 (无 stderr capture), 实际 QBE 错是 `invalid type for operand %t0 in phi %t6`
+- 02 (`dist_sq`): `gcc link failed: "..."\n` + 一长串 `undefined reference to main_jhyy`, 跟编译器实际 codegen 错误信息混在一起, 用户分不清"snippet 缺 main" vs "compiler bug"
+
+两个症状都跟 codegen + driver UX 有关, 不是官网 snippet 本身错(短名 enum 模式是合法 syntax, spec v1.3.0 §9.3 允许; 库 snippet 缺 main 是 by design, 用户须自己加 wrapper)。**fix 方向**: 编译器侧把 codegen 真修 + driver stderr 透传 + main_jhyy pre-check 三件事一起 ship, 官网侧同步把 02/04 tab 改成"库 + main_jhyy wrapper"二合一形式(用户复制即跑)。
+
+**3 真修 + 1 同步** (per `feedback_fix_evaluation_rule` 5/5 PASS gate):
+
+### 1. W-063 真修 — 短名 enum 模式 `Some(v) => v` payload bind (codegen 传错 type)
+
+**位置**: `compiler/src0/codegen.jhyy:3468` NODE_MATCH driver 入口
+
+**根因**: jhyy-side `cg_match_pattern` (line 977-1015) NODE_PATTERN_ENUM 分支在 `pe->variant_sym == NULL` (短名 form `Some(v)` 不带 `Option::`) 时 silent fallthrough, 不 emit payload slot alias `loadw`。`variant_sym` 实际上 parser 端**已 set** — 真正的 bug 是 call site 传错 type: 传的是 **match result type** (`(*n).type_ptr` — e.g. `i32` for `match o { Some(v) => v, ... }`), 而不是 **subject type** (`(*matched_node).type_ptr` — e.g. `Option`)。fallback 路径用 match_type 在 `match_type->enum_type.variants` 反查 variant 名字 — match result type 不是 KIND_ENUM → 反查 miss → 永远 silent fallback。
+
+**probe-then-fix 路径** (per plan: 先写 probe 复现 root cause, 再真修):
+1. 第一次 probe 在 `compiler/src/codegen.c:347-352` 加 `fprintf(stderr, "DEBUG pe=%p variant_sym=%p match_type=%p\n", ...)` — 0 fire, 因 production 用 `src0/codegen.jhyy` 非 `src/codegen.c` (C-side 是 stage0 only)
+2. probe 移到 `src0/codegen.jhyy` cg_match_pattern 入口 + NODE_MATCH 入口 — 确认: `variant_sym` 已 set + match_type 传错 (call site 传 match result type)
+3. 删 probe, 真修传参 → .il 重新 emit `%t7 =w loadw %t6` (payload alias defined) → QBE exit 0
+4. 加 regress test `compiler/tests/examples/payload_bind_short.jhyy`
+
+**Fix diff (1 行核心 + 14 行 WHY 注释)**:
+```jhyy
+// v1.8.3.2 (W-063 真修): pass subject type, not match result type. Short-name enum
+// pattern (`Some(v)` without `Option::` qualifier) falls back to match_type when
+// pe->type_sym is NULL — match result type (e.g., i32 for `match o { Some(v) => v, ...}`)
+// is not KIND_ENUM, so enum_type resolution silently fails and the binding branch is
+// skipped → @arm2 emits no loadw → phi references undefined %t0 → QBE reject.
+// Long-name form (`Option::Some(v)`) unaffected since pe->type_sym is set.
+let cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*matched_node).type_ptr);
+```
+
+**新增 regress**: `compiler/tests/examples/payload_bind_short.jhyy` — 短名 form + main_jhyy wrapper + EXPECT=42. **5/5 PASS** per `feedback_fix_evaluation_rule` (5 iter 全 exit=42)。
+
+### 2. W-064 真修 — `run_qbe` 失败时捕获 QBE stderr (跟 link_with_gcc W-045 对齐)
+
+**位置**: `compiler/src0/main.jhyy:687-700` (`run_qbe`) + l:1091 (version literal)
+
+**根因**: v1.5.6 W-038 把 `system()` 改 `jh_run` (CreateProcessA + pipe stderr capture), v1.5.6 W-045 同时 ship `link_with_gcc` 失败时 echo captured stderr。但 `run_qbe` 只 echo cmd_buf, **漏接** `jh_run_get_output()` — QBE 真实诊断 (e.g. `invalid type for operand %t0 in phi %t6`) 全丢。推测原因: W-038 跟 W-045 是不同 sub-sprint, run_qbe 只被 audit cmd_buf quote (W-039), stderr capture 漏 audit。
+
+**Fix diff (镜像 link_with_gcc W-045 pattern, 13 行)**:
+```jhyy
+let r = jh_run(cmd_buf);
+let captured = jh_run_get_output();   // 新增 — buffer per-call reset (jh_run 内 l:517-518)
+if r != (0 as i32) {
+    jh_fputs_stderr("QBE failed: " as *u8);
+    jh_fputs_stderr(cmd_buf as *u8);
+    jh_fputs_stderr("\n" as *u8);
+    if captured != (0 as *u8) {        // 新增
+        let c0 = (*captured);
+        if c0 != (0 as i32) {
+            jh_fputs_stderr("QBE stderr:\n" as *u8);
+            jh_fputs_stderr(captured);
+            jh_fputs_stderr("\n" as *u8);
+        }
+    }
+    free(cmd_buf);
+    return 1 as i32;
+}
+```
+
+**顺带 bump**: l:1091 stale `printf("jhyy compiler v1.0.0 (self-hosted)\n"...)` → `v1.8.3.2` (`jhyy -h` 可见)。
+
+### 3. W-065 真修 — `cmd_run` 入口 pre-check `fn main_jhyy` (避免库 snippet link 错)
+
+**位置**: `compiler/src0/main.jhyy:993-1043` (`cmd_run`)
+
+**根因**: `cmd_run` (line 987) 直接调 `cmd_compile` → QBE → gcc link。库 snippet (`fn unwrap` / `fn dist_sq` 这种) 没 `fn main_jhyy`, gcc link 报 `undefined reference to main_jhyy`, 错误晚出 + noisy。`cmd_compile` 不应加 (compile 应允许 library-only 编译产 .s/.exe), 所以加在 `cmd_run` 单一 site。
+
+**Fix**: `cmd_run` 入口加 cheap byte-level scan — `fopen(input, "rb")` + `fread(131072)` + fclose, byte-by-byte 搜 needle `"fn main_jhyy"`. 找不到 → `jh_fputs_stderr("jhyy run: '<file>' has no 'fn main_jhyy() -> i32' (required for 'jhyy run'; use 'jhyy compile <file>.jhyy' for libraries)\n" as *u8)` + return 1。
+
+**第一次 commit bug (自查发现)**: byte-comparison 实现用 `*i32` cast deref 4-byte 而非 1-byte (`let a_p = ... as *i32; if (*a_p) != (*b_p) { ... }`), scan 永远不 match — 即使文件真有 `fn main_jhyy` 也报 no main。**不写 5/5 PASS loop 不会发现** — 跑 wrapper file (有 main_jhyy) 全过, 但跑 user 原 case (库 snippet, 无 main_jhyy) 仍报 "no fn main_jhyy" 才暴露。第二次 commit 改 `*u8` cast + `as i32` promote 才正确。
+
+**scope**: 只动 `cmd_run`, `cmd_compile` 保持允许库-only 编译。
+
+### 4. 官网同步 — 02/04 tab 加 `fn main_jhyy` wrapper
+
+**位置**: `projects/JiHuiYiYou官网/index.html` 4 个 tab 全过一遍
+- 02 (`shapes.jhyy` tab): `dist_sq` 后加 `fn main_jhyy() -> i32 { dist_sq(Point { x: 3, y: 4 }, Point { x: 0, y: 0 }) }` (预期输出 25, 跟 hero 段呼应)
+- 04 (`enum.jhyy` tab): 加 `fn main_jhyy() -> i32 { unwrap(Option::Some(99)) }` (预期输出 99)
+- status bar 同步更新 (JS 已有 panel-filename + status-bar text 切换机制)
+- 02 tab snippet 里**保留** short-name `match o { Some(v) => v, ... }` 不变 (修了 codegen, 短名 form 也跑得通; 否则给用户错觉短名形式坏)
+- 03 (`fib.jhyy` tab) 已含 main, 不动; 01 (`hello.jhyy`) 不动
+
+**理由**: 即使编译器修了 W-063, 用户复制官网 snippet 后还要自己加 wrapper — UX friction。直接给 wrapper 让 copy-paste 即跑, 真 "开箱即用"。
+
+**scope 决策 (cut)**:
+- ❌ **不动 ABI 文档**: `docs/abis/jhyy-lang-spec-v1.3.0.md` / `docs/abis/jhyy-abi-v1.0.0.md` v1.x FINAL 锁, W-063 不是 spec bug 是 codegen bug
+- ❌ **不动 C-side `compiler/src/codegen.c`**: production 用 `src0/codegen.jhyy`, C-side 仅 bootstrap 用途, 同 bug 存在但**未真修**, 后续 v2.x 启动前补 (W-063 superseder 段已标 DEFERRED)
+- ❌ **不动 QBE / runtime.c / src0 bootstrap 之外的子目录**: v1.8.3.2 scope 只 codegen + driver + website
+
+### 5/5 PASS gate (per `feedback_fix_evaluation_rule`)
+
+1. **correctness (W-063)**: `payload_bind_short.jhyy` 5 iter 全 exit=42 ✓
+2. **correctness (W-065)**: user 原 case `test.jhyy` / `test2.jhyy` → 干净 actionable error (不再 silent fail); 加 wrapper 后 (`test_short_enum.jhyy`) → 5 iter 全 exit=99 ✓
+3. **completeness (W-064)**: codegen fix 后跑 user 原 case → QBE 失败现在带完整 stderr (`QBE stderr: <full QBE diagnostic>\n`), 用户可直接定位 IL 哪条 reject ✓
+4. **no_regression**: regress baseline **103/103 PASS + 4 SKIP** (`v1.8.3` baseline 102/102 + 4 SKIP, 加新 test `payload_bind_short.jhyy` → 103/103 PASS) ✓
+5. **selfhost_closure**: Stage 2 N=4 byte-equal (`v2/v3/v4/v5` .il sha `fa1137e5b9621ab46bc95ad976b5f33e0a60e98e5ec59ef31d084203e146e242`) ✓
+
+### 验证现场 (2026-09-01)
+
+```bash
+# 单测试 5/5 PASS
+cd C:/Users/liuzhen/Desktop/coding && for i in 1 2 3 4 5; do
+    cp test_short_enum.jhyy "run_$i.jhyy"
+    "C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/build/bin/jhyy.exe" run "run_$i.jhyy" > /dev/null 2>&1
+    rc=$?
+    echo "iter $i: exit=$rc"  # 全部 exit=99
+    rm -f "run_$i.exe" "run_$i.il" "run_$i.s" "run_$i.jhyy"
+done
+
+# user 原 case (库 snippet, 期望 actionable error)
+"C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/build/bin/jhyy.exe" run test.jhyy
+# → jhyy run: 'test.jhyy' has no 'fn main_jhyy() -> i32' (required for 'jhyy run'; use 'jhyy compile <file>.jhyy' for libraries)
+# → exit=1  ✓ (替代旧 cryptic `undefined reference to main_jhyy`)
+
+# 全 regress
+python compiler/build/bin/regress.py --binary=compiler/build/bin/jhyy.exe --no-baseline-check
+# → 103/103 passed, 0 failed, 4 skipped (of 107 total)  ✓
+
+# Stage 2 闭环
+make selfhost && sha256sum compiler/build/bin/jhyy_v2.il jhyy_v3.il jhyy_v4.il jhyy_v5.il
+# → 4/4 sha `fa1137e5b9621ab46bc95ad976b5f33e0a60e98e5ec59ef31d084203e146e242`  ✓
+```
+
+### 已知 limitation (v1.8.3.2 不修)
+
+- **C-side `compiler/src/codegen.c:347-352` 平行位置同 bug 未修** — production 走 jhyy-side, C-side 仅 stage0 bootstrap 用途; v2.x 启动前补 (per W-063 superseder 段)
+- **`jh_run_get_output` buffer 16KB 截断** — 长 QBE stderr (>16KB) 会被截断, 但实际 QBE 错通常 < 4KB, 不构成现实问题; v2.x 如遇可加 `popen` + 增量 read
+- **官网 02 tab `dist_sq` 内部 `match o { Some(v) => v, ... }` 保留短名 form** — 验证 codegen 真修后短名 form 也跑得通; 后续如发现用户看不懂短名形式, v2.x 可考虑显式 reject 短名 + require 全名 (但这违反 spec v1.3.0 §9.3)
+
+### 教训
+
+1. **probe-then-fix 在 codegen 永远赢纯静态读代码**: agent 读 codegen.jhyy line 977-1015 + parser.c line 225-235 一眼看到 "short-name form `variant_sym` 应该 set" → 误以为 call site 正确, 问题在 cg_match_pattern 内部 fallback。**probe (复现) 比 code review 更可靠定位 call site 传参错**。本次 1-line 参数 fix 救整个 v1.8.3.2
+2. **`*i32` cast deref 是 jhyy silent footgun**: 第一次 W-065 commit 跑 wrapper 全过, 跑 user 原 case 才暴露。**任何 byte-level inline 算法, 5/5 PASS loop 必须 include "user 原 case" + "自写 wrapper" 两类**, 不只 wrapper (per `feedback_fix_evaluation_rule` 原文 5/5 是 "target test", 我理解为含 user 原 case + 自写 wrapper 两条)
+3. **scope discipline 赢 scope creep**: 计划阶段想加 `jh_file_read_all` helper + matching stub, 实际 inline fopen/fread/fclose + byte loop 就够 (50 行, 0 new helper, 0 C-side sync work)
+4. **官网 ≠ 编译器, 两条线并行修**: 用户报 "官网 snippet 跑不通" 看起来是网站 bug, 实际根因 = codegen bug + UX bug + website 缺 wrapper 三件事。三件事都修才完整 ship, 任何一件漏都会留 follow-up
+5. **umbrella CHANGELOG 不增 v1.8.3.2 standalone** (per `feedback_changelog_umbrella.md`)
+
+**umbrella**: 本 patch 进 `changelog-v1.8.0.md` (v1.x 轴单 umbrella CHANGELOG); 不创建 standalone `changelog-v1.8.3.2.md`。commit tag `fix(v1.8.0):` 对齐最近 7 个 commit 格式 (`f44c764` v1.8.2 patch update, `31d2687` v1.8.2 patch, `de4f219` v1.8.1, `6b182dd` v1.8.0 W-059 真修, v1.8.3 ship commit, v1.8.3.1 ship commit + 本 patch)。
+
+---
+
 ## 引用
 
 - **spec** `docs/abis/jhyy-lang-spec-v1.3.0.md` — 锁定 (v1.8.0 不修订, v1.x FINAL 锁)
