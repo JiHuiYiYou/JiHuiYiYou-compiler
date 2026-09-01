@@ -144,8 +144,15 @@ jobs:
       - name: Build Stage 2 closure chain (v1→v2→v3→v4)
         shell: msys2 {0}
         run: |
+          set +e
           cd ${{ github.workspace }}
-          make selfhost
+          echo "--- ls build/bin before selfhost ---"
+          ls -la compiler/build/bin/ | head -20
+          echo "--- make selfhost verbose ---"
+          make selfhost 2>&1
+          echo "---SELFHOST_EXIT=$?---"
+          echo "--- ls build/bin after selfhost ---"
+          ls -la compiler/build/bin/ | head -20
 
       - name: Stage 2 N=3 byte-equal (closure chain)
         shell: msys2 {0}
