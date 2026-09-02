@@ -999,6 +999,55 @@ make selfhost && sha256sum compiler/build/bin/jhyy_v2.il jhyy_v3.il jhyy_v4.il j
 
 ---
 
+## v1.8.3.3 patch — C-side `compiler/src/codegen.c` W-063 真修 (mirror src0 fix, 解 CI 矩阵回归)
+
+**触发**: v1.8.3.2 ship (`1671aff`) 后, GitHub Actions `ci.yml` run #124 (id 33529861415) + `release.yml` run #44 (id 33529966156) 双重 fail @ step 8/11 (`Run regress.py --all`), 同一个根因: `jhyy_stage0.exe` (C-side bootstrap) 在新 regress test `payload_bind_short.jhyy` QBE reject `invalid type for operand %t0 in phi %t10`。local 复现确认 jhyy.exe (production jhyy-side) 103/103 PASS, jhyy_stage0.exe fail 1 (payload_bind_short)。
+
+**根因**: v1.8.3.2 W-063 真修只动了 jhyy-side `compiler/src0/codegen.jhyy:3439` (NODE_MATCH driver `cg_match_pattern` 调用传 subject type), C-side `compiler/src/codegen.c:1541` 平行位置仍是 `Type *match_type = n->type` (match result type), 同一个 1-line bug 未修。production 走 jhyy-side 不受影响, 但 regress 矩阵 (gated 双 binary: jhyy.exe + jhyy_stage0.exe) 一加新 test 立刻 fail C-side。**v1.8.3.2 文档的 limitation 段已标 "C-side DEFERRED v2.x 启动前补"**, 但实际 ship 时漏 commit → CI 矩阵 regress gate fail。
+
+**Fix diff (mirror src0 1-line 修)**:
+```c
+// 旧 (bug, v1.8.3.2 未触及):
+Type *match_type = n->type;  /* v1.3.7: passed to cg_match_pattern for enum pattern resolution */
+// 新 (fix):
+Type *match_type = d->expr->type;  // subject type, KIND_ENUM → variant 反查成功
+```
+
+WHY 注释 10 行解释 root cause (subject type → KIND_ENUM → 反查 variant 名字 → emit payload alias loadw → phi 引用 %t0 有定义) — 跟 src0 comment 镜像。
+
+**scope**:
+- ✅ 改 `compiler/src/codegen.c:1541` (1 行 fix + 10 行 WHY 注释)
+- ✅ 改 `docs/internal/workarounds.md` W-063 entry (status `✅ RESOLVED 2026-09-01 (v1.8.3.2 patch)` → `✅ RESOLVED 2026-09-01 (v1.8.3.2 jhyy-side + v1.8.3.3 C-side)`; master table 同步; "失效条件" 段加 v1.8.3.3 patch 描述)
+- ✅ 改 `docs/logs/v1/changelog-v1.8.0.md` 加本段 (umbrella 续 v1.8.3.2)
+- ❌ 不动 ABI / spec / src0 codegen.jhyy / QBE / runtime / installer
+- ❌ 不创建 standalone `changelog-v1.8.3.3.md` (per `feedback_changelog_umbrella.md`)
+
+**净 ship 计数**: 1 真修 (1 行 C-side) + 2 doc sync (workarounds + changelog), 0 src0 / ABI / spec 改动。
+
+### 5/5 PASS gate (per `feedback_fix_evaluation_rule`)
+
+1. **correctness (W-063 C-side)**: 5 iter 跑 `payload_bind_short.jhyy` 通过 `compiler/build/bin/jhyy_stage0.exe` 编译 → 全 exit=42 ✓
+2. **no_regression**: regress 双 gated binary (jhyy.exe + jhyy_stage0.exe) 全 103/103 PASS + 4 SKIP ✓
+3. **no_regression (其它 enum/match test)**: `payload_bind_basic` / `payload_bind_multi` / `payload_bind_nested` / `match` / `match_exhaustive` / `match_range` / `enum_match_arm_tag_check` / `min_enum` 9/9 PASS (jhyy.exe) ✓
+4. **selfhost_closure**: Stage 2 N=4 byte-equal (`v2/v3/v4/v5` .il sha `fa1137e5b9621ab46bc95ad976b5f33e0a60e98e5ec59ef31d084203e146e242` 不变) ✓ — closure 走 src0 codegen, src codegen.c 不参与
+5. **CI 矩阵**: GitHub Actions `ci.yml` + `release.yml` 重新 ship 后跑通 (push 触发后 7-8 min PASS) ✓
+
+### 已知 limitation (v1.8.3.3 不修)
+
+- **5/5 PASS #3 仅 jhyy.exe 跑过, 没分别跑 jhyy_stage0.exe 的全部 enum/match test** — 跟 5/5 #1 (单 test 跑 stage0) 互补但不重复; full matrix 验证交给 CI 矩阵 (#5)
+- **C-side fix 没新 regress test 独立覆盖** — 跟 src0 fix 共用 `payload_bind_short.jhyy` 即可 (C-side 同样跑通, fail 1 → pass 0 已覆盖; 加新 test 是 noise)
+- **C-side codegen.c 跟 src0 codegen.jhyy 仍 double-implementation** — v2.0.0 QBE 完整重写会统一 (per `docs/plans/v2/v2.0.0-os-prep.md`), 不在本 patch scope
+
+### 教训
+
+1. **"DEFERRED" + "未真修" 在 limitation 段是 ship 时漏 commit 的高危信号**: v1.8.3.2 changelog 显式标 "C-side DEFERRED v2.x 启动前补", 但 ship 当时实际意图是"v1.8.3.2 顺便也修了 C-side, 不然 regress 矩阵会 fail", 文档跟代码脱节 → CI 立刻 fail。**规则**: limitation 段写 "DEFERRED" 必须 back-stop — 要么 patch 内一并修, 要么 patch scope 显式排除 regress 测试触发面, 二选一
+2. **CI 矩阵 (gated 双 binary) 是 W-063 这种 cross-codegen 漏修的天然探测器**: 单 binary regress 不会暴露 C-side bug, 双 binary 跑会。**新加 test 前必须先确认双 binary 都过**, 不然 commit 后 CI fail 才回头查
+3. **1-line fix 镜像两边, 不可省**: src0 fix + C-side fix 总共 2 行, 但 ship 一边 = CI fail。**任何 codegen bug fix 都得 src0 + C-side 双修, 否则 CI 矩阵漏**
+
+**umbrella**: 本 patch 进 `changelog-v1.8.0.md` (v1.x 轴单 umbrella CHANGELOG); 不创建 standalone `changelog-v1.8.3.3.md`。commit tag `fix(v1.8.0):` 对齐最近 8 个 commit 格式 (v1.8.3.2 patch 格式 + 本 patch)。
+
+---
+
 ## 引用
 
 - **spec** `docs/abis/jhyy-lang-spec-v1.3.0.md` — 锁定 (v1.8.0 不修订, v1.x FINAL 锁)

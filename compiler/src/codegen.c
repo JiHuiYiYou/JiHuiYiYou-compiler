@@ -1538,7 +1538,17 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
         NodeMatch *d = node_match_data(n);
         IRVal matched = {0};
         cg_expr(cg, d->expr, &matched);
-        Type *match_type = n->type;  /* v1.3.7: passed to cg_match_pattern for enum pattern resolution */
+        /* v1.8.3.2 W-063 真修: pass SUBJECT type (d->expr->type), not match RESULT type
+         * (n->type). Short-name enum pattern `Some(v) => v` falls back to match_type
+         * for variant resolution (pe->type_sym is NULL). Subject type (`Option` enum)
+         * is KIND_ENUM, so enum_type resolution succeeds + payload slot alias is
+         * registered via cg_add_local + body loadw emits. Match result type (i32)
+         * is not KIND_ENUM → enum_type silently NULL → cg_match_pattern falls
+         * through to "always match cmp=1" fallback → @arm body has no loadw for
+         * binding `v` → phi @arm %t0 references undefined %t0 → QBE reject.
+         * Mirror src0/codegen.jhyy W-063 fix (commit 1671aff).
+         */
+        Type *match_type = d->expr->type;
 
         char qt = (n->type && n->type->kind != KIND_VOID) ? qbe_type_of(n->type) : 0;
         IRVal merge_block = ir_new_block(cg->ir, "merge");
