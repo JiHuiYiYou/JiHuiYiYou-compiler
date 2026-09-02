@@ -618,8 +618,16 @@
       be 64-bit.
     -->
     <Component Id="LicenseFile" Directory="CommonDir" Bitness="always64" Guid="A4874A53-15B4-4010-8AF5-E6D47BD328CB">
+      <!--
+        v1.8.3.3 fix: post-425970d refactor, license.rtf lives in installer/assets/
+        (not installer/common/). Use !(bindpath.assets) — see Bundle.wxs which
+        uses -d JHY_LICENSE_RTF_PATH=installer\assets\license.rtf for the same
+        reason (Bundle can't bindpath-rename either; the source path must
+        match reality). The MSI bakes license.rtf as a payload File (not
+        WixUILicenseRtf which already uses !bindpath.assets).
+      -->
       <File Id="LicenseFileRtf"
-            Source="!(bindpath.common)\license.rtf"
+            Source="!(bindpath.assets)\license.rtf"
             KeyPath="yes" />
     </Component>
 

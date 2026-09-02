@@ -4696,3 +4696,47 @@ if av != bv { match_ok = 0 as i32; }
 - **scope discipline 赢 scope creep**: 计划阶段想加 helper `jh_file_read_all` + matching stub, 实际 inline fopen/fread/fclose + byte loop 就够 (50 行, 0 new helper, 0 C-side sync work)。**scope discipline > code reuse**。
 
 
+## W-066: post-425970d refactor 漏改 jhyy-compiler.wxs:622 — license.rtf 仍 ref `!(bindpath.common)\license.rtf`, 实际文件在 installer/assets/ → WIX0103
+
+**ID:** W-066
+**状态:** ✅ RESOLVED 2026-09-02 (v1.8.3.3 patch follow-up #2)
+**日期:** 2026-08-29 (introduced — 425970d installer deep restructure 把 `license.rtf` 移到 `installer/assets/`, 但 `jhyy-compiler.wxs:622` 仍指 `installer/common/license.rtf`) → 2026-09-02 (RESOLVED)
+**触发面:** release run #46 (tag v1.8.3.3 @ 65e897a) step "Build installer" — `wix build ... installer/wix/compiler/jhyy-compiler.wxs` 报 `WIX0103: Cannot find the File file '!(bindpath.common)\license.rtf'. The following paths were checked: !(bindpath.common)\license.rtf, installer/common\license.rtf`. 出包链路 build.ps1 → exit 1 → release.yml 整条红。
+
+**症状:** 在 CI (windows-2025-vs2026 runner) 直接报 WIX0103, MSI 不存在。 GitHub Actions UI 只显示 "1 error and 1 warning" — 第一个 (SVG icon) 是 vsce reject; 第二错就是 WIX0103, 容易当 transient / cache miss 忽略掉。
+
+**根因:** `425970d` 跑的是 docs-only + minor restructuring, 没跑 full `installer/build.ps1 bundle` verify pass。`!(bindpath.common)` 在 build.ps1 里 bind 到 `installer/common`, 但 refactor 后 `license.rtf` 实际搬去 `installer/assets/license.rtf` (`git show 425970d --stat` 看 license.rtf 路径变化)。Bundle.wxs 没受影响 — bundle 那边 `license.rtf` 是用 `-d JHY_LICENSE_RTF_PATH=installer\assets\license.rtf` 直接传 path, 不走 bindpath rename, 所以 bundle path 早就对了。只有 MSI payload (File element) 这条走 bindpath。
+
+**workaround (v1.8.3.3 fix):** 把 `jhyy-compiler.wxs:622` 的 `Source="!(bindpath.common)\license.rtf"` 改成 `Source="!(bindpath.assets)\license.rtf"` — `WixUILicenseRtf` (line 194) 早就用 `!(bindpath.assets)\license.rtf`, 现在 File element 也对齐, 一致性 + 真修。
+
+**scope:** 1 行真修 + 9 行 comment (v1.8.3.3 fix rationale + reference Bundle.wxs 同型 path; 防下个 refactor 再踩)。不动 build.ps1 (不用再传额外 `-b`, `-b assets=installer/assets` 早就在), 不动 Bundle.wxs (已 OK)。
+
+**影响范围:**
+- `installer/wix/compiler/jhyy-compiler.wxs:622` (Source attr) + `installer/wix/compiler/jhyy-compiler.wxs:621-630` (fix rationale comment)
+
+**失效条件:** 不适用 — license.rtf 物理路径已锁在 `installer/assets/`, `!(bindpath.assets)` 跟 build.ps1 `-b assets=installer/assets` 永远 align。除非再有人动 refactor 重命名, 否则不再触发。
+
+**superseder:** v1.8.3.3 patch follow-up #2 (commit TBD — `fix(installer): jhyy-compiler.wxs license.rtf bindpath post-425970d refactor (v1.8.3.3 release 解锁)`)
+
+**引用:**
+- `installer/wix/compiler/jhyy-compiler.wxs:622` (fix point)
+- `installer/wix/compiler/jhyy-compiler.wxs:194` (WixUILicenseRtf — 早就是 assets)
+- `installer/wix/Bundle.wxs` (`-d JHY_LICENSE_RTF_PATH=installer\assets\license.rtf` — 早就是 assets)
+- `installer/build.ps1:248-260` (`wix build` bindpath map: `bin/common/assets/scripts/vscode-ext` 都 OK, common 不再含 license.rtf)
+- `installer/assets/license.rtf` (物理位置)
+- `git show 425970d --stat` (refactor commit — license.rtf path move)
+- `docs/logs/v1/changelog-v1.8.0.md` v1.8.3.3 patch 段
+
+**验证:**
+- 本地 `installer/build.ps1 compiler` (pwsh 缺失, fallback Windows PowerShell 5.1) → `[OK] installer/build-artifacts/jhyy-compiler-1.8.3.msi built` (1.16 MB)
+- 本地 `installer/build.ps1 bundle` → `[OK] installer/build-artifacts/jhyy-installer-1.8.3.exe` (29.95 MB)
+- WIX5436 warning (ProgramFiles6432Folder DirectoryRef deprecation) — pre-existing 既有 warn, 不动
+- CI 待验: tag v1.8.3.3 重推后 release run 应 0 error / 1 warning
+
+**教训:**
+- **WiX bindpath 是 transitive contract** — refactor 时**任何**移文件的 commit 都必须 grep `!(bindpath.X)` + 对应 build.ps1 `-b X=...` 双向查。Bundle 路径 vs File payload 路径走不同 code path, 一个对了另一个未必对 (这 case 就是 bundle OK / File element 漏)。
+- **refactor commit 不跑下游 verify = bug ship**: 425970d commit message 写的是 "deep restructure - wix/assets/scripts/distribution dirs + build.ps1 sync" — "build.ps1 sync" 听像是 verify 过, 实际只 sync 了 build.ps1 自己, 没跑 `bundle` 端到端。这是 DEFERRED-like 的 ship gap — 标 "RESOLVED" 但下游契约没 verify。
+- **`WIX0103` + "1 error and 1 warning" 的 UI 表述**: GitHub Actions UI 把 error + warning 计数平铺, 第一眼容易被 "1 error" 吓到去查 SVG 之类 obvious 的事; 实际是 `1 error` (SVG) + `1 warning` (WIX5436) + 第 2 错 (WIX0103) 的语义重叠 case。**必须看 raw log** (`gh run view <id> --log | grep -E "WIX|error"`) 才能拿到真错。
+- **`pwsh` 缺环境 fallback**: CI runner 有 PowerShell 7 (`/c/Program Files/PowerShell/7/pwsh.exe`), 本地用户机器可能只有 PS 5.1。`build.ps1` 是 syntax-compatible (switch 都对), 但 `wix` 工具链本身跑得动 — 不代表 5.1 跑的 verify 跟 7 完全等价; 真要稳还是 pwsh 7。**(per `feedback_ci_yaml_debugging` msys2 + set +e 教训同源 — verify 工具链必须跟 CI 一致)**
+
+

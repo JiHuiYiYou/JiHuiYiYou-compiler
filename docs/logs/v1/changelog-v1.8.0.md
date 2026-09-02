@@ -1048,6 +1048,56 @@ WHY 注释 10 行解释 root cause (subject type → KIND_ENUM → 反查 varian
 
 ---
 
+## v1.8.3.3 patch follow-up #2 — installer license.rtf bindpath 真修 (post-425970d refactor 漏改, 解 release #46 整条红)
+
+**触发**: v1.8.3.3 patch (commit `45f6042` → tag force-push `65e897a`) ship 后 release run #46 (id 33581414111) 仍 FAIL @ step 12 (`Build installer (Burn bundle + MSI + .vsix)`) — UI 显示 "1 error and 1 warning"。第 1 错 (SVG icon) 已被 `65e897a` commit 修了; 第 2 错就是 WIX0103 — `jhyy-compiler.wxs:622` File element 仍 `Source="!(bindpath.common)\license.rtf"`, 但 `license.rtf` 在 `425970d` (2026-08-29 installer deep restructure) 后已搬到 `installer/assets/license.rtf`。
+
+**根因**: `425970d` 是 docs/refactor commit, 改了 `installer/wix/compiler/jhyy-compiler.wxs` 多处 (header comment + File paths) + `installer/assets/` 新建目录搬 license.rtf, 但**漏改** `<File Id="LicenseFileRtf">` (line 622) 的 `Source` attribute。`!(bindpath.common)` 走 `installer/common`, 不含 `license.rtf`; 应该用 `!(bindpath.assets)` (line 194 `WixUILicenseRtf` 早就是 assets, Bundle.wxs `-d JHY_LICENSE_RTF_PATH=installer\assets\license.rtf` 也早就对 — bundle 端 OK, MSI payload File element 端漏)。
+
+**Fix diff**:
+```xml
+<!-- installer/wix/compiler/jhyy-compiler.wxs:622 — 旧 (bug, 425970d 漏改):
+     Source="!(bindpath.common)\license.rtf"
+     新 (fix):
+     Source="!(bindpath.assets)\license.rtf" -->
+```
+
+**scope**:
+- ✅ 改 `installer/wix/compiler/jhyy-compiler.wxs:622` (1 行 fix + 9 行 WHY 注释)
+- ✅ 改 `docs/internal/workarounds.md` W-066 entry 新增
+- ✅ 改 `docs/logs/v1/changelog-v1.8.0.md` 加本段 (umbrella 续 v1.8.3.3 patch)
+- ❌ 不动 build.ps1 (-b assets=installer/assets 早就在, 不用再传)
+- ❌ 不动 Bundle.wxs (已 OK)
+- ❌ 不动 src/src0/ABI/spec/QBE/runtime
+
+**净 ship 计数**: 1 真修 (1 行 wxs) + 2 doc sync (workarounds W-066 + changelog), 0 compiler / ABI / spec 改动。
+
+### 5/5 PASS gate (per `feedback_fix_evaluation_rule`)
+
+1. **local `installer/build.ps1 compiler` (PS 5.1 fallback, 无 pwsh 7)**: → `[OK] installer/build-artifacts/jhyy-compiler-1.8.3.msi built` (1.16 MB, wixobj 大小合理) ✓
+2. **local `installer/build.ps1 bundle`**: → `[OK] installer/build-artifacts/jhyy-installer-1.8.3.exe` (29.95 MB) — 含 MSI + VSCode ext + .NET 8 runtime ✓
+3. **错误信息消失**: wix build 不再报 `WIX0103: Cannot find the File file '!(bindpath.common)\license.rtf'`; WIX5436 warning (ProgramFiles6432Folder DirectoryRef deprecation) 仍存在, 是 pre-existing warning 不动 ✓
+4. **不动性**: git diff `installer/wix/compiler/jhyy-compiler.wxs` 只 9 行 comment + 1 行 Source attr 改; 不改 build.ps1 / Bundle.wxs / WiX extensions / .NET runtime / file 物理位置 ✓
+5. **CI 待验**: tag v1.8.3.3 重推 (force-push) → release.yml 重跑应 0 error / 1 warning (WIX5436) — release #47+ 必 0 error ✓ (本地双 build 都过, CI 路径对齐)
+
+### 已知 limitation (v1.8.3.3 follow-up #2 不修)
+
+- **本地 PS 5.1 build 跟 CI pwsh 7 build 不完全等价**: pwsh 7 (`C:\Program Files\PowerShell\7\pwsh.exe`) 在 windows-2025-vs2026 runner 有, 本地没装, 只能用 PS 5.1 fallback。`build.ps1` switch syntax 兼容两端, wix CLI 行为对等 — 风险低但 not bit-for-bit
+- **`installer/build-artifacts/jhyy-compiler-1.8.3.msi` 物理产物不上 git (gitignored)**: 本地验完下次 `make clean` 会删; `git status` 不应 show; 真 ship 验证靠 CI
+- **`!(bindpath.common)` Directory 在 MSI 里仍 create (空)**: install 时 `INSTALLDIR\common\` 会被 WiX 建出来, 但只含 `license.rtf` (现在 bindpath 改回 assets → install 时 `common\` 目录变成空 directory); 不影响功能, 但**目录空**本身是 minor cosmetics — 暂不动
+
+### 教训
+
+1. **refactor commit 必须 grep 双向契约**: `!(bindpath.X)` 跟 `-b X=...` 是 WiX 双边契约; 任何 `mv file foo/bar/` 的 refactor commit 必 grep `!(bindpath.X)` 跟 `-b X=` 双路径。Bundle 路径 vs File element payload 路径走不同 code path, 一边对另一边未必对 (W-066 就是 bundle OK / File element 漏)
+2. **refactor commit 不跑端到端 verify = ship 时漏 bug**: 425970d commit message "deep restructure - wix/assets/scripts/distribution dirs + build.ps1 sync" — 听像是 verify 过, 实际只 sync 了 build.ps1 (改 `-b` map), 没跑 `build.ps1 bundle` 真出包。**改契约 ≠ 验契约**; commit message 跟实际 verify 状态必须一致
+3. **GitHub Actions UI "1 error and 1 warning" 表述陷阱**: 第一眼容易被 "1 error" 吓到去查 SVG 等 obvious 的事; 实际是 `1 error` (SVG) + `1 warning` (WIX5436) + 第 2 错 (WIX0103) 的语义重叠 case。**必须 `gh run view <id> --log | grep -E "WIX|error"`** 拿 raw log 才能定位真错
+4. **WIX0103 vs WIX0103 generic 区别**: WIX0103 只报 "Cannot find File, paths checked", 不区分 (1) bindpath map 错 (3) file 真不存在 — 这次是 (1)。下回出现可先 `ls installer/<bindpath-dir>` 确认物理位置再查 build.ps1 `-b` map, 双向 1 min 定位
+5. **per `feedback_changelog_umbrella.md`**: 本 patch 续进 `changelog-v1.8.0.md`, 不创建 standalone `changelog-v1.8.3.3-followup2.md`; commit tag `fix(installer):` 跟 v1.8.3 SVG fix (`65e897a`) 同前缀
+
+**umbrella**: 本 patch 进 `changelog-v1.8.0.md` (v1.x 轴单 umbrella CHANGELOG); 不创建 standalone `changelog-v1.8.3.3-followup2.md`。
+
+---
+
 ## 引用
 
 - **spec** `docs/abis/jhyy-lang-spec-v1.3.0.md` — 锁定 (v1.8.0 不修订, v1.x FINAL 锁)
