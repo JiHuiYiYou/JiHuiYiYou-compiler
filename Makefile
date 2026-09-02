@@ -33,7 +33,8 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/symtab.c \
        $(SRC_DIR)/sema.c \
        $(SRC_DIR)/ir.c \
-       $(SRC_DIR)/codegen.c
+       $(SRC_DIR)/codegen.c \
+       $(SRC_DIR)/target/target_dispatch.c
 
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
 RUNTIME_OBJ = $(OBJ_DIR)/runtime.o
@@ -52,11 +53,11 @@ all: $(BIN_DIR)/jhyy.exe
 stage0: $(BIN_DIR)/jhyy_stage0.exe
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
-	@mkdir -p $(OBJ_DIR)
+	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/runtime.o: $(RUNTIME_DIR)/runtime.c
-	@mkdir -p $(OBJ_DIR)
+	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # v1.8.1 patch: windres rule producing icon resource .o (RT_ICON group).

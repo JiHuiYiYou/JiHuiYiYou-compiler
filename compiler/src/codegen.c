@@ -2472,7 +2472,23 @@ static void cg_emit_const_data_elem(IRBuf *ir, Node *e, Type *t, int *first) {
     *first = 0;
 }
 
-void cg_module(IRBuf *ir, Node *module) {
+void cg_module(IRBuf *ir, Node *module, Target t) {
+    /* v2.0.0 target dispatch: Amd64Win keeps full v1.x path (fall through to
+       the unchanged body below); other targets fatal at entry pointing at the
+       version where they ship. ABI 抽离 = v2.1.0; amd64_sysv = v2.x M2. */
+    switch (t) {
+    case TARGET_AMD64_WIN:
+        break;
+    case TARGET_AMD64_WIN_FREESTANDING:
+        fprintf(stderr,
+            "amd64_win_freestanding target: ABI 抽离在 v2.1.0 实现\n");
+        exit(1);
+    case TARGET_AMD64_SYSV_STUB:
+        fprintf(stderr,
+            "amd64_sysv target: 实现留 v2.x M2\n");
+        exit(1);
+    }
+
     NodeModule *md = node_module_data(module);
     /* v1.4.6 W-017: alloc CGContext at module level (jhyy-side mirror). Locals
        + loop arrays + mod_globals dict live for the whole module — cg_func

@@ -43,6 +43,7 @@ import ast;
 import symtab;
 import ir;
 import lexer;  // TOKEN_* 常量（commit 2 用 TOKEN_MINUS/BANG/TILDE）
+import target_dispatch;  // v2.0.0: Target tag constants (cg_module dispatch)
 
 // ════════════════════════════════════════════════════
 // FFI（util.jhyy / ir.jhyy 已声明 strlen/strcmp/memset/sprintf_lld；补 codegen 需要）
@@ -3841,9 +3842,22 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64) -> i32 {
 // cg_module — Pass A const data + Pass B function emit
 // ════════════════════════════════════════════════════
 
-fn cg_module(ir: *IRBuf, module: *Node) -> i32 {
+fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
     if module == (0 as *Node) {
         return 0;
+    }
+    // v2.0.0 target dispatch (Sprint A Stage 1). Amd64Win keeps full v1.x
+    // path (fall through to the unchanged body below); other targets fatal
+    // at entry pointing at the version where they ship. ABI 抽离 = v2.1.0;
+    // amd64_sysv = v2.x M2. Return 0 on fatal (jhyy convention: 1=success,
+    // 0=error) so build_il's if-cascade check propagates without QBE/gcc.
+    if t == TARGET_AMD64_WIN_FREESTANDING() {
+        jh_fputs_stderr("amd64_win_freestanding target: ABI 抽离在 v2.1.0 实现\n" as *u8);
+        return 0 as i32;
+    }
+    if t == TARGET_AMD64_SYSV_STUB() {
+        jh_fputs_stderr("amd64_sysv target: 实现留 v2.x M2\n" as *u8);
+        return 0 as i32;
     }
     let md = node_module_data(module);
     let ndeccls = (*md).ndeccls;

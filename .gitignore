@@ -7,9 +7,11 @@ compiler/build/bin/*
 _*.txt
 !compiler/src0/bootstrap/v1.0/_W002_rename_map.txt
 _*.py
-_*.s
-_*.il
-_*.exe
+# stray build/test artifacts anywhere in repo (was `_*.s/_*.il/_*.exe` — too narrow,
+# caught only underscore-prefixed; test_mcp_run.il / dist_sq_fresh.s etc. leaked)
+*.s
+*.il
+*.exe
 _*_test.jhyy
 _*_min.jhyy
 _*_minimal_*.jhyy

@@ -39,6 +39,7 @@ import parser;
 import sema;
 import ir;
 import codegen;
+import target_dispatch;  // v2.0.0: --target=<triple> CLI + thread through to cg_module
 
 // ═══ Local externs (ffi.jhyy 已声明 malloc/free/fopen/fread/fwrite/fclose/
 //    strlen/strcmp/system/jh_fputs_stderr/jh_fopen_wb 等；这里只补 main.jhyy
@@ -512,7 +513,8 @@ fn inline_imports(module: *Node, main_path: *u8, arena: *Arena) -> i32 {
 
 // build_il: 完整 lex → parse → sema → codegen → 写 .il
 // 返回 0 成功，1 失败
-fn build_il(input: *u8, output: *u8) -> i32 {
+// v2.0.0: 加 `t: i32` 参数 (Target tag) → cg_module dispatch; 默认 = TARGET_AMD64_WIN
+fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
     let source = read_file(input);
     if source == (0 as *u8) {
         return 1 as i32;
@@ -618,7 +620,13 @@ fn build_il(input: *u8, output: *u8) -> i32 {
     let ir = malloc(128 as i64) as *IRBuf;
     ir_init(ir, &arena);
     jh_fputs_stderr("[4a] ir_init done\n" as *u8);
-    cg_module(ir, ast_node);
+    // v2.0.0: cg_module returns 1 on success, 0 on fatal (jhyy convention).
+    // Stub targets (amd64_win_freestanding / amd64_sysv) fatal at cg_module
+    // top → return 0 → build_il returns 1 → cmd_compile skips QBE/gcc.
+    if cg_module(ir, ast_node, t) == (0 as i32) {
+        jh_fputs_stderr("[4b-FAIL] cg_module fatal\n" as *u8);
+        return 1 as i32;
+    }
     jh_fputs_stderr("[4b] cg_module done\n" as *u8);
     ir_flush_data(ir);
     jh_fputs_stderr("[4] codegen done\n" as *u8);
@@ -654,7 +662,7 @@ fn build_il(input: *u8, output: *u8) -> i32 {
 }
 
 // run_qbe: invoke QBE on .il → .s
-fn run_qbe(il_path: *u8, asm_path: *u8) -> i32 {
+fn run_qbe(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
     let cmd_buf = malloc(16384 as i64);
     let mut pos: i64 = 0 as i64;
     let qbe = QBE_PATH();
@@ -667,8 +675,14 @@ fn run_qbe(il_path: *u8, asm_path: *u8) -> i32 {
     pos = str_concat_at(cmd_buf, pos, qbe);
     let rquote = "\"" as *u8;
     pos = str_concat_at(cmd_buf, pos, rquote);
-    let sep1 = " -t amd64_win -o " as *u8;
+    // v2.0.0: -t <target_name(t)> — only TARGET_AMD64_WIN actually reaches
+    // here (other targets fatal at cg_module). Replacing hardcoded
+    // "-t amd64_win -o " lets v2.x later flip target without surgery here.
+    let sep1 = " -t " as *u8;
     pos = str_concat_at(cmd_buf, pos, sep1);
+    pos = str_concat_at(cmd_buf, pos, target_name(t));
+    let sep1b = " -o " as *u8;
+    pos = str_concat_at(cmd_buf, pos, sep1b);
     pos = str_concat_at(cmd_buf, pos, asm_path);
     let sep2 = " " as *u8;
     pos = str_concat_at(cmd_buf, pos, sep2);
@@ -894,7 +908,8 @@ fn derive_output_name(input: *u8, out_buf: *u8) -> i32 {
 }
 
 // cmd_build: lex → parse → sema → codegen → 写 .il
-fn cmd_build(argc: i32, argv: *u8) -> i32 {
+// v2.0.0: 加 `t: i32` Target 参数 → build_il → cg_module dispatch
+fn cmd_build(argc: i32, argv: *u8, t: i32) -> i32 {
     if argc < (1 as i32) {
         jh_fputs_stderr("usage: jhyy build <file.jhyy> [-o output]\n" as *u8);
         return 1 as i32;
@@ -904,7 +919,7 @@ fn cmd_build(argc: i32, argv: *u8) -> i32 {
     let input = (*argv_arr);
     let out_buf = malloc(1024 as i64);
     derive_output_name(input, out_buf);
-    let r = build_il(input, out_buf);
+    let r = build_il(input, out_buf, t);
     free(out_buf);
     return r;
 }
@@ -912,7 +927,8 @@ fn cmd_build(argc: i32, argv: *u8) -> i32 {
 // cmd_compile: build + QBE + gcc。支持 `-o <output>` flag（v0.8 commit 4 补；
 // regress_v1.py 传 `-o` 写 regress 结果，但 v0.8 commit 2 翻译时漏了 -o 解析
 // → regress_v1.py NORUN=7）
-fn cmd_compile(argc: i32, argv: *u8) -> i32 {
+// v2.0.0: 加 `t: i32` Target 参数 → build_il + run_qbe
+fn cmd_compile(argc: i32, argv: *u8, t: i32) -> i32 {
     if argc < (1 as i32) {
         jh_fputs_stderr("usage: jhyy compile <file.jhyy> [-o output]\n" as *u8);
         return 1 as i32;
@@ -959,7 +975,7 @@ fn cmd_compile(argc: i32, argv: *u8) -> i32 {
         out_buf = user_out;
     }
     // 1. build .il
-    if build_il(input, out_buf) != (0 as i32) {
+    if build_il(input, out_buf, t) != (0 as i32) {
         if user_out == (0 as *u8) { free(derived); }  // Sprint 4.5 B Task #145 fix: avoid double-free when user_out was set
         return 1 as i32;
     }
@@ -981,7 +997,7 @@ fn cmd_compile(argc: i32, argv: *u8) -> i32 {
     let nul3 = (exe_path as i64 + off3) as *u8;
     store_byte_i32(nul3, 0 as i32);
 
-    let r1 = run_qbe(il_path, asm_path);
+    let r1 = run_qbe(il_path, asm_path, t);
     if r1 != (0 as i32) {
         if user_out == (0 as *u8) { free(derived); }
         free(il_path); free(asm_path); free(exe_path);
@@ -997,7 +1013,8 @@ fn cmd_compile(argc: i32, argv: *u8) -> i32 {
 }
 
 // cmd_run: cmd_compile + system(exe)
-fn cmd_run(argc: i32, argv: *u8) -> i32 {
+// v2.0.0: 加 `t: i32` Target 参数 → cmd_compile
+fn cmd_run(argc: i32, argv: *u8, t: i32) -> i32 {
     if argc < (1 as i32) {
         jh_fputs_stderr("usage: jhyy run <file.jhyy>\n" as *u8);
         return 1 as i32;
@@ -1075,7 +1092,7 @@ fn cmd_run(argc: i32, argv: *u8) -> i32 {
     let arg_arr_pp3 = ptr_add_u8(arg_arr, (16 as i64)) as **u8;
     (*arg_arr_pp3) = out_buf;
 
-    let r = cmd_compile(3 as i32, arg_arr);
+    let r = cmd_compile(3 as i32, arg_arr, t);
     free(arg_arr);
     if r != (0 as i32) {
         free(out_buf);
@@ -1128,7 +1145,8 @@ fn cmd_run(argc: i32, argv: *u8) -> i32 {
 }
 
 // cmd_dump: stub for now
-fn cmd_dump(argc: i32, argv: *u8) -> i32 {
+// v2.0.0: 加 `t: i32` Target 参数 (unused; dump 不做 codegen)
+fn cmd_dump(argc: i32, argv: *u8, t: i32) -> i32 {
     jh_fputs_stderr("cmd_dump not yet implemented (sprint 5 commit 2c)\n" as *u8);
     return 1 as i32;
 }
@@ -1150,6 +1168,7 @@ fn main_jhyy(argc: i32, argv: *u8) -> i32 {
     if argc < (2 as i32) {
         printf("jhyy compiler v1.8.3.2 (self-hosted)\n" as *u8, 0);
         printf("usage: jhyy <command> [args]\n" as *u8, 0);
+        printf("  --target=<triple> (default amd64_win)\n" as *u8, 0);
         printf("  compile <file.jhyy> [-o output]\n" as *u8, 0);
         printf("  build   <file.jhyy> [-o output]\n" as *u8, 0);
         printf("  run     <file.jhyy>\n" as *u8, 0);
@@ -1162,21 +1181,90 @@ fn main_jhyy(argc: i32, argv: *u8) -> i32 {
     let cmd_p = (argv as i64 + (8 as i64)) as *u8;
     let cmd_arr = cmd_p as **u8;
     let cmd = (*cmd_arr);
-    let rest_argc = argc - (2 as i32);
+    // v2.0.0: scan argv for --target=<triple> (last one wins) +
+    // in-place compact argv so the dispatcher sees --target= stripped out
+    // (else argv[1] would be the flag and cmd dispatcher says "unknown command").
+    // Default = TARGET_AMD64_WIN (v1.x 兼容).
+    let mut target: i32 = target_default();
+    let mut si: i32 = 1 as i32;
+    while si < argc {
+        let si64 = si as i64;
+        let sarg_p = ptr_add_u8(argv, si64 * (8 as i64)) as **u8;
+        let sarg = (*sarg_p);
+        // strncmp(sarg, "--target=", 9) == 0
+        let prefix = "--target=" as *u8;
+        let mut is_target: i32 = 1 as i32;
+        let mut pi: i32 = 0 as i32;
+        while pi < (9 as i32) {
+            let cp_a = (sarg as i64 + (pi as i64)) as *u8;
+            let cp_b = (prefix as i64 + (pi as i64)) as *u8;
+            let av = (*cp_a) as i32;
+            let bv = (*cp_b) as i32;
+            if av != bv { is_target = 0 as i32; }
+            pi = pi + (1 as i32);
+        }
+        if is_target == (1 as i32) {
+            let val_p = (sarg as i64 + (9 as i64)) as *u8;
+            let parsed = target_parse(val_p);
+            if parsed < (0 as i32) {
+                // fatal: target_parse 已 jh_fputs_stderr 了错误
+                return 1 as i32;
+            }
+            target = parsed;
+        }
+        si = si + (1 as i32);
+    }
+    // In-place compaction: shift argv[i] down to argv[w] if argv[i] is not
+    // --target=. Mirrors C-side main() loop. argv is *u8 (cast of **u8) so
+    // each element is 8 bytes; we overwrite pointers (not the strings themselves,
+    // which are owned by the C runtime and stay alive for the process lifetime).
+    let mut w: i32 = 1 as i32;
+    let mut r: i32 = 1 as i32;
+    while r < argc {
+        let r64 = r as i64;
+        let rarg_p = ptr_add_u8(argv, r64 * (8 as i64)) as **u8;
+        let rarg = (*rarg_p);
+        let prefix2 = "--target=" as *u8;
+        let mut is_t: i32 = 1 as i32;
+        let mut p2: i32 = 0 as i32;
+        while p2 < (9 as i32) {
+            let cp_a2 = (rarg as i64 + (p2 as i64)) as *u8;
+            let cp_b2 = (prefix2 as i64 + (p2 as i64)) as *u8;
+            let av2 = (*cp_a2) as i32;
+            let bv2 = (*cp_b2) as i32;
+            if av2 != bv2 { is_t = 0 as i32; }
+            p2 = p2 + (1 as i32);
+        }
+        if is_t == (0 as i32) {
+            if w != r {
+                let w64 = w as i64;
+                let wp = ptr_add_u8(argv, w64 * (8 as i64)) as **u8;
+                (*wp) = rarg;
+            }
+            w = w + (1 as i32);
+        }
+        r = r + (1 as i32);
+    }
+    // Recompute cmd + rest from compacted argv. cmd = argv[1], rest = argv[2..w].
+    let argv_arr2 = argv as **u8;
+    let cmd_p2 = (argv as i64 + (8 as i64)) as *u8;
+    let cmd_arr2 = cmd_p2 as **u8;
+    let cmd_dispatched = (*cmd_arr2);
+    let rest_argc = w - (2 as i32);
     let rest_argv_p = (argv as i64 + (16 as i64)) as *u8;
     let rest_argv = rest_argv_p;
 
-    if strcmp(cmd, "compile" as *u8) == (0 as i32) {
-        return cmd_compile(rest_argc, rest_argv);
+    if strcmp(cmd_dispatched, "compile" as *u8) == (0 as i32) {
+        return cmd_compile(rest_argc, rest_argv, target);
     }
-    if strcmp(cmd, "build" as *u8) == (0 as i32) {
-        return cmd_build(rest_argc, rest_argv);
+    if strcmp(cmd_dispatched, "build" as *u8) == (0 as i32) {
+        return cmd_build(rest_argc, rest_argv, target);
     }
-    if strcmp(cmd, "run" as *u8) == (0 as i32) {
-        return cmd_run(rest_argc, rest_argv);
+    if strcmp(cmd_dispatched, "run" as *u8) == (0 as i32) {
+        return cmd_run(rest_argc, rest_argv, target);
     }
-    if strcmp(cmd, "dump" as *u8) == (0 as i32) {
-        return cmd_dump(rest_argc, rest_argv);
+    if strcmp(cmd_dispatched, "dump" as *u8) == (0 as i32) {
+        return cmd_dump(rest_argc, rest_argv, target);
     }
     jh_fputs_stderr("unknown command\n" as *u8);
     return 1 as i32;

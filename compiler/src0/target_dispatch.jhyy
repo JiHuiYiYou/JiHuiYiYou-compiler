@@ -1,0 +1,69 @@
+// target_dispatch.jhyy — v2.0.0 target dispatcher (Sprint A Stage 1)
+// C-side mirror: compiler/src/target/target_dispatch.{c,h}
+//
+// Three targets recognized at parse time:
+//   - TARGET_AMD64_WIN              : x86_64-w64-mingw32 (default; v1.x 兼容)
+//   - TARGET_AMD64_WIN_FREESTANDING : x86_64-w64-none (UEFI; ships v2.1.0)
+//   - TARGET_AMD64_SYSV_STUB        : x86_64-linux-none (ships v2.x M2)
+//
+// In v2.0.0 only TARGET_AMD64_WIN reaches codegen. The other two fatal at
+// cg_module entry pointing at the version where they ship. ABI 抽离 in v2.1.0;
+// real freestanding .efi + OVMF demo in v2.3.0.
+//
+// Stage 2 byte-equal closure: tag values match 1:1 with C-side enum in
+// compiler/src/target/target_dispatch.h (Amd64Win=0, Amd64WinFreestanding=1,
+// Amd64SysvStub=2). Closure invariant is .il byte-equal (not binary byte-equal),
+// so this enum is consumed only as a function parameter — no shared memory
+// layout with jhyy-side (unlike W-005 CGContext 128B invariant).
+
+extern fn strcmp(a: *u8, b: *u8) -> i32;
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+
+// ════════════════════════════════════════════════════
+// Target tag constants (i32; jhyy-side enum-mimic pattern from ast.jhyy:67+)
+// ════════════════════════════════════════════════════
+
+fn TARGET_AMD64_WIN()              -> i32 { return 0 as i32; }
+fn TARGET_AMD64_WIN_FREESTANDING() -> i32 { return 1 as i32; }
+fn TARGET_AMD64_SYSV_STUB()        -> i32 { return 2 as i32; }
+
+// ════════════════════════════════════════════════════
+// target_parse — CLI triple string → tag (or fatal sentinel)
+// ════════════════════════════════════════════════════
+
+fn target_parse(s: *u8) -> i32 {
+    if strcmp(s, "amd64_win" as *u8) == (0 as i32) {
+        return TARGET_AMD64_WIN();
+    }
+    if strcmp(s, "amd64_win_freestanding" as *u8) == (0 as i32) {
+        return TARGET_AMD64_WIN_FREESTANDING();
+    }
+    if strcmp(s, "amd64_sysv" as *u8) == (0 as i32) {
+        return TARGET_AMD64_SYSV_STUB();
+    }
+    jh_fputs_stderr("unknown target '" as *u8);
+    jh_fputs_stderr(s);
+    jh_fputs_stderr("', available: amd64_win, amd64_win_freestanding (amd64_sysv in v2.x M2)\n" as *u8);
+    return -(1 as i32);  // sentinel; caller (main_jhyy CLI loop) treats as fatal
+}
+
+// ════════════════════════════════════════════════════
+// target_default — default tag (v1.x 兼容)
+// ════════════════════════════════════════════════════
+
+fn target_default() -> i32 {
+    return TARGET_AMD64_WIN();
+}
+
+// ════════════════════════════════════════════════════
+// target_name — tag → triple string (also QBE -t flag for v2.0.0)
+// Only TARGET_AMD64_WIN is actually passed to QBE; the other two fatal at
+// cg_module before QBE invocation.
+// ════════════════════════════════════════════════════
+
+fn target_name(t: i32) -> *u8 {
+    if t == TARGET_AMD64_WIN()              { return "amd64_win" as *u8; }
+    if t == TARGET_AMD64_WIN_FREESTANDING() { return "amd64_win_freestanding" as *u8; }
+    if t == TARGET_AMD64_SYSV_STUB()        { return "amd64_sysv" as *u8; }
+    return "amd64_win" as *u8;  // unreachable; satisfy -Wreturn-type
+}

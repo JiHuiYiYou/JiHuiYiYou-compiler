@@ -11,6 +11,7 @@ unsigned long __stdcall GetModuleFileNameA(void *hModule, char *lpFilename, unsi
 #include "parser.h"
 #include "sema.h"
 #include "codegen.h"
+#include "target/target_dispatch.h"
 
 /* Convert forward slashes to backslashes for Windows cmd.exe compatibility */
 static void path_to_win(char *p) {
@@ -34,6 +35,10 @@ static int resolve_imports(Node *module, const char *main_path, Arena *arena,
    Used to locate qbe.exe / runtime.c / jhyy_helpers.c without
    hardcoding C:/Users/liuzhen/... (v1.4.1). */
 static char g_project_root[1024];
+
+/* v2.0.0: target dispatcher state (Sprint A Stage 1). Scanned from argv in
+   main() once at startup; defaults to TARGET_AMD64_WIN (v1.x 兼容). */
+static Target g_target = TARGET_AMD64_WIN;
 
 /* Derive project root from argv[0] via dirname × 4.
    Layout: <root>/compiler/build/bin/jhyy.exe → dirname × 4 = <root>.
@@ -127,7 +132,7 @@ static int cmd_build(int argc, char **argv) {
 
     IRBuf ir;
     ir_init(&ir, &arena);
-    cg_module(&ir, ast);
+    cg_module(&ir, ast, g_target);
     ir_flush_data(&ir);  /* prepend string data definitions */
 
     char il_path[1024];
@@ -459,7 +464,7 @@ static int compile(const char **inputs, int ninputs, const char *output) {
     /* codegen */
     IRBuf ir;
     ir_init(&ir, &arena);
-    cg_module(&ir, ast);
+    cg_module(&ir, ast, g_target);
     ir_flush_data(&ir);
 
     /* write .il file */
@@ -487,8 +492,8 @@ static int compile(const char **inputs, int ninputs, const char *output) {
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wformat-truncation"
     snprintf(cmd, sizeof(cmd),
-             "%s -t amd64_win -o %s %s",
-             qbe_exe, asm_path, il_path);
+             "%s -t %s -o %s %s",
+             qbe_exe, target_name(g_target), asm_path, il_path);
     #pragma GCC diagnostic pop
     if (system(cmd) != 0) {
         fprintf(stderr, "QBE failed\n");
@@ -624,6 +629,24 @@ static int cmd_dump(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     compute_project_root(argv[0]);
+
+    /* v2.0.0: scan argv for --target=<triple>. Last one wins (standard
+       CLI convention). Default = TARGET_AMD64_WIN (v1.x 兼容).
+       Then compact argv in place so they don't leak to subcommands
+       (which would otherwise treat them as input file paths). */
+    for (int i = 1; i < argc; i++) {
+        if (strncmp(argv[i], "--target=", 9) == 0) {
+            g_target = target_parse(argv[i] + 9);
+        }
+    }
+    int w = 1;
+    for (int r = 1; r < argc; r++) {
+        if (strncmp(argv[r], "--target=", 9) != 0) {
+            if (w != r) argv[w] = argv[r];
+            w++;
+        }
+    }
+    argc = w;
 
     if (argc < 2) {
         printf("jhyy compiler v1.0.0\n");
