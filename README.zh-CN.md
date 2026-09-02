@@ -15,7 +15,7 @@
 [![协议](https://img.shields.io/badge/协议-MIT-blue)](LICENSE)
 [![English](https://img.shields.io/badge/lang-English-red)](README.md)
 
-[快速开始](#快速开始) · [语言特性](#语言特性) · [命令行](#命令行) · [架构](#架构) · [路线图](#路线图) · [文档](#文档)
+[状态](#v183--v1x-终结installer-自举闭环--ucpdsys-bypass) · [快速开始](#快速开始) · [安装](#安装) · [语言特性](#语言特性) · [命令行](#命令行) · [架构](#架构) · [路线图](#路线图) · [文档](#文档)
 
 </div>
 
@@ -38,7 +38,7 @@ jhyy_v4.exe     → src0/main.jhyy → jhyy_v5.il   ← 与 v2.il 字节相同
 | 指标 | 值 |
 |------|----|
 | `regress.py` (C 端 `jhyy.exe`) | **102/102 PASS, 0 failed, 4 skipped**(106 total) |
-| `regress_v1.py` (自举 `jhyy_v1.exe.exe`) | **102/102 PASS, 0 failed, 4 skipped**(parity hold) |
+| `regress.py --binary=jhyy_v1.exe.exe`(自举 `jhyy_v1.exe.exe`) | **102/102 PASS, 0 failed, 4 skipped**(parity hold) |
 | Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | **7/7 PASS** |
 | Stage 2 N=4 byte-equal (`v1→v2→v3→v4→v5`) | **稳定** |
 | `jhyy_v2` 编 `_repro_t0.jhyy` | `EXIT=100` ✓ |
@@ -111,6 +111,41 @@ fn main_jhyy() -> i32 {
 
 ---
 
+## 安装
+
+**前置条件**(Windows,v1.x 仅 Windows;Linux/macOS 在 v2.x amd64_sysv 路线):
+
+1. **MSYS2** —— <https://www.msys2.org/>(Windows 10+ x64)
+2. **GCC + binutils**(ucrt64 工具链)—— 在 MSYS2 终端里跑:
+   ```bash
+   pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils
+   ```
+3. **PATH** —— 把 `C:\msys64\ucrt64\bin` 加到 Windows 用户 PATH(PowerShell 用户:`$env:Path += ";C:\msys64\ucrt64\bin"`)
+
+**构建**(一行命令):
+
+```bash
+git clone https://github.com/JiHuiYiYou/JiHuiYiYou-compiler.git
+cd JiHuiYiYou-compiler
+make           # → compiler/build/bin/jhyy.exe (~5MB)
+```
+
+**One-shot installer**(推荐给最终用户):`installer/jhyy-installer-1.8.3.exe` 把 `jhyy.exe` + `.jhyy` 文件关联 + VSCode 扩展 + PATH 注册一步到位。`installer/jhyy-compiler-1.8.3.msi` 是企业 / SCCM 分发版本(无 GUI)。详见 [`installer/README.md`](installer/README.md)。
+
+**Docker**(可选):
+
+```bash
+docker run -it msys2/mingw-w64-ucrt-x86_64 bash
+# 然后在容器内按上面 1-3 步
+```
+
+**VSCode 用户**:打开本仓,`.vscode/settings.json` 自动加 `compiler/build/bin` + MSYS2 PATH 到集成终端,无需手动配。
+
+> [!IMPORTANT]
+> 不要用 Git Bash 自带的 MinGW `gcc`(`/c/Program\ Files/Git/mingw64/bin/gcc.exe`)—— 它不支持 PE+ 链接,会 link 失败。
+
+---
+
 ## 快速开始
 
 ### 环境要求
@@ -153,7 +188,7 @@ python compiler/build/bin/regress.py
 ```bash
 # Stage 2 N=4 byte-equal — jhyy 编译 jhyy
 # 方法 1: 走自举编译器回归
-python compiler/build/bin/regress_v1.py
+python compiler/build/bin/regress.py --all --include-informational
 # 方法 2: MCP 一键验证(推荐)
 # 问 Claude Code: "verify self-host closure" → jhyy_selfhost_check
 # 完整流程见 docs/logs/v1/changelog-v1.0.0.md
@@ -185,7 +220,7 @@ python compiler/build/bin/regress_v1.py
 jhyy compile <file.jhyy> [-o name]   编译为 .exe (默认 amd64_win)
 jhyy run     <file.jhyy>             编译并运行
 jhyy build   <file.jhyy> [-o name]   仅生成 QBE IL (.il 文件)
-jhyy check   <file.jhyy>             仅做语法 / 语义检查,不生成代码
+jhyy dump    <file.jhyy>             dump 解析后的 AST 到 stdout (调试用)
 jhyy                                 打印帮助
 ```
 
@@ -217,7 +252,7 @@ flowchart TB
 | `compiler/src0/*.jhyy` | jhyy 端翻译稿(v1.x 时代) | 自举路径,与 C 端 byte-equal |
 | `compiler/runtime/*.c` | C 运行时(Arena + main 入口) | 编译时链接 |
 
-两路径产出**字节相同的** QBE 中间表示 — Stage 1 (`jhyy_0` vs `jhyy_v1`) 7/7 byte-equal,Stage 2 (`jhyy_v1 → v2 → v3 → v4`) N=3 闭环达成。
+两路径产出**字节相同的** QBE 中间表示 — Stage 1 (`jhyy_0.exe` vs `jhyy_v1.exe.exe`) 7/7 byte-equal,Stage 2 (`jhyy_v1 → v2 → v3 → v4 → v5`) N=4 闭环达成。
 
 ---
 
@@ -235,7 +270,7 @@ JiHuiYiYou-compiler/
 │   └── build/
 │       └── bin/
 │           ├── jhyy.exe        C 端编译器二进制
-│           ├── jhyy_v1.exe     自举编译器(jhyy 编 src0/)
+│           ├── jhyy_v1.exe.exe 自举编译器(jhyy 编 src0/)
 │           └── regress.py      回归脚本
 ├── qbe/                        已 vendor 的 QBE 后端 (c9x.me/compile)
 ├── mcp-jhyy/                   Claude Code MCP 服务 (11 工具 + 4 资源)
@@ -263,10 +298,10 @@ JiHuiYiYou-compiler/
 | 验证项 | 命令 | 期望 |
 |--------|------|------|
 | C 端编译回归 | `python compiler/build/bin/regress.py` | **102/102 PASS + 4 SKIP**(106 total) |
-| 自举编译回归 | `python compiler/build/bin/regress_v1.py` | **102/102 PASS + 4 SKIP**(parity hold) |
+| 自举编译回归 | `python compiler/build/bin/regress.py --all --include-informational` | **102/102 PASS + 4 SKIP**(parity hold) |
 | Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | `python compiler/tests/stage1-expanded.sh` | 7/7 PASS |
 | Stage 2 N=4 byte-equal (`v1→v2→v3→v4→v5`) | MCP `jhyy_selfhost_check` | `all_byte_equal=true`, il_sha256 稳定 |
-| MCP smoke (7 个 test 文件, X 个 `def test_*` 函数) | `pytest mcp-jhyy/tests/` | 全 pass |
+| MCP smoke (7 个 test 文件, 39 个 `def test_*` 函数) | `pytest mcp-jhyy/tests/` | 全 pass |
 | 一行构建 | `make` | 0 warning(-Wall -Wextra) |
 
 ---
@@ -280,11 +315,12 @@ JiHuiYiYou-compiler/
 | **v0.x** | C 端编译器自身 | 达成自举启动门槛 | **🟢 完成(冻结于 v1.0.0 baseline)** |
 | **v1.x** | jhyy 自举 | byte-equal `.il` 闭环 | **🟢 v1.8.3 shipped(v1.x 终结)** |
 | **v2.x** | QBE 完整重写 + 多目标 / OS 准备 | amd64_sysv / freestanding | **next** — 设计输入 = [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md) |
-| **v3.x** | 语言特性扩展 | OS-required: asm / volatile / naked / `no_std` / `&mut` + lifetime | **next(与 v2.x 并行)** |
+| **v3.x** | 语言特性扩展 | OS-required: asm / volatile / naked / `no_std` / `&mut` + lifetime | **v2.0 阶段 ship 后启动** — v2.x 中/末 + v3.x 异步并行 |
 
 **轴之间的关系**:
-- `v0.x → v1.x → v2.x / v3.x`:**严格顺序**(每条都是强前置)
-- `v2.x || v3.x`:**并行轴**(各自推进;OS M1 启动前两轴各自达成即可,不互相阻塞)
+- `v0.x → v1.x → v2.x`:**严格顺序**(每条都是强前置)
+- `v1.x → v3.x`:**严格顺序**(v3.0 sprint 3a-3f 在 v2.0 阶段 ship 后启动 — 2026-09-01 user 决定)
+- `v2.x 中/末 ⟂ v3.x`:**异步并行**(不强配对;各自 ship;OS M1 启动前都达成即可)
 
 > [!IMPORTANT]
 > **与 [JiHuiYiYou-OS](https://github.com/JiHuiYiYou/JiHuiYiYou-OS) 项目对齐**:12 个跨边界问题 + 6 个决定已闭环,并反映在 [docs/plans/v2/v2.0.0-os-prep.md](docs/plans/v2/v2.0.0-os-prep.md) 的 OS 准备规划中。v2.0 sprint 设计输入也是该计划。
@@ -310,7 +346,7 @@ JiHuiYiYou-compiler/
 
 ### VS Code 扩展
 
-`vscode-ext/` 提供语法高亮(TextMate grammar + 文件图标) + 原生 ▶ `Run JHYY File`(`Ctrl+F5`) + `Compile JHYY File (no run)` 命令。最 shipped = `jhyy-lang-1.8.3.vsix`。安装 + build 步骤见 [`vscode-ext/README.md`](vscode-ext/README.md)。
+`vscode-ext/` 提供语法高亮(TextMate grammar + 文件图标) + 原生 ▶ `Run JHYY File`(`Ctrl+F5`) + `Compile JHYY File (no run)` 命令。最近 shipped = `jhyy-lang-1.8.3.vsix`。安装 + build 步骤见 [`vscode-ext/README.md`](vscode-ext/README.md)。
 
 ---
 

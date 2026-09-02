@@ -32,16 +32,16 @@ JHYY (机会翼游) is a self-designed, statically typed, expression-oriented, c
 
 ## Install
 
-**Prerequisites** (Windows, v1.x 是 Windows-only;Linux/macOS 在 v2.x amd64_sysv 路线):
+**Prerequisites** (Windows; v1.x is Windows-only — Linux/macOS land in v2.x via amd64_sysv):
 
 1. **MSYS2** — <https://www.msys2.org/> (Windows 10+ x64)
-2. **GCC + binutils** (ucrt64 工具链) — 在 MSYS2 终端里跑:
+2. **GCC + binutils** (ucrt64 toolchain) — run in an MSYS2 terminal:
    ```bash
    pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils
    ```
-3. **PATH** — 把 `C:\msys64\ucrt64\bin` 加到 Windows 用户 PATH(PowerShell 用户:`$env:Path += ";C:\msys64\ucrt64\bin"`)
+3. **PATH** — add `C:\msys64\ucrt64\bin` to your Windows user PATH (PowerShell: `$env:Path += ";C:\msys64\ucrt64\bin"`)
 
-**Build** (一键):
+**Build** (one line):
 
 ```bash
 git clone https://github.com/JiHuiYiYou/JiHuiYiYou-compiler.git
@@ -49,19 +49,19 @@ cd JiHuiYiYou-compiler
 make           # → compiler/build/bin/jhyy.exe (~5MB)
 ```
 
-**One-shot installer**(推荐给最终用户):`installer/jhyy-installer-1.8.3.exe` 把 `jhyy.exe` + `.jhyy` 文件关联 + VSCode 扩展 + PATH 注册一步到位。`installer/jhyy-compiler-1.8.3.msi` 是企业 / SCCM 分发版本(无 GUI)。详见 [`installer/README.md`](installer/README.md)。
+**One-shot installer** (recommended for end users): `installer/jhyy-installer-1.8.3.exe` wires up `jhyy.exe` + `.jhyy` file association + VSCode extension + PATH registration in one step. `installer/jhyy-compiler-1.8.3.msi` is the enterprise / SCCM distribution (no GUI). See [`installer/README.md`](installer/README.md).
 
-**Docker**(可选):
+**Docker** (optional):
 
 ```bash
 docker run -it msys2/mingw-w64-ucrt-x86_64 bash
-# 然后在容器内按上面 1-3 步
+# then follow steps 1-3 above inside the container
 ```
 
-**VSCode 用户**:打开本 repo,`.vscode/settings.json` 自动加 `compiler/build/bin` + MSYS2 PATH 到集成终端,无需手动配。
+**VSCode users**: opening this repo triggers `.vscode/settings.json` to add `compiler/build/bin` and MSYS2 PATH to the integrated terminal automatically — no manual setup needed.
 
 > [!IMPORTANT]
-> 不要用 Git Bash 自带的 MinGW `gcc`(`/c/Program\ Files/Git/mingw64/bin/gcc.exe`)— 它不支持 PE+ 链接,会 link 失败。
+> Do NOT use the MinGW `gcc` shipped with Git Bash (`/c/Program\ Files/Git/mingw64/bin/gcc.exe`) — it does not support PE+ linking and will fail at link time.
 
 ---
 
@@ -186,7 +186,7 @@ flowchart TB
     cs -->|gcc builds| bin1["jhyy.exe"]
     s0["<b>compiler/src0/</b><br/>jhyy-side · v1.x — self-host<br/>main.jhyy · lexer · parser · sema<br/>ir · codegen · symtab · types"]
     bin1 -->|compiles src0| s0
-    s0 --> bin2["jhyy_v1.exe"]
+    s0 --> bin2["jhyy_v1.exe.exe"]
     src[".jhyy source"] --> qbe["<b>QBE</b><br/>(qbe/qbe.exe -t amd64_win)"]
     bin1 --> qbe
     bin2 --> qbe
@@ -199,7 +199,7 @@ flowchart TB
 | `compiler/src0/*.jhyy` | jhyy-side translated source (v1.x era) | self-host path, byte-equal to C-side |
 | `compiler/runtime/*.c` | C runtime (Arena + main entry) | linked at compile time |
 
-Both paths emit **byte-equal QBE intermediate representation** — Stage 1 (`jhyy_0` vs `jhyy_v1`) 7/7 byte-equal, Stage 2 (`jhyy_v1 → v2 → v3 → v4`) N=3 closure reached.
+Both paths emit **byte-equal QBE intermediate representation** — Stage 1 (`jhyy_0.exe` vs `jhyy_v1.exe.exe`) 7/7 byte-equal, Stage 2 (`jhyy_v1 → v2 → v3 → v4 → v5`) N=4 closure reached.
 
 ---
 
@@ -217,7 +217,7 @@ JiHuiYiYou-compiler/
 │   └── build/
 │       └── bin/
 │           ├── jhyy.exe        C-side compiler binary
-│           ├── jhyy_v1.exe     self-hosted compiler (jhyy compiled src0/)
+│           ├── jhyy_v1.exe.exe self-hosted compiler (jhyy compiled src0/)
 │           └── regress.py      regression script
 ├── qbe/                        vendored QBE backend (c9x.me/compile)
 ├── mcp-jhyy/                   Claude Code MCP server (11 tools + 4 resources)
@@ -272,15 +272,15 @@ All five raw `.il` files share an identical sha256 (1.378 MB, no fix-up post-pro
 - ✅ W-059 defer codegen silent crash — RESOLVED 2026-08-28
 - ❌ W-060 enum variant payload ABI — INVALID 2026-08-28 (bash `$?` 8-bit truncation artifact, regress.py W-028 mod-256 fix handles)
 - ❌ W-061 nested struct field offset — INVALID 2026-08-28 (same reason)
-- ✅ W-062 VSCode UserChoice + MSYS2 OpenWithProgids shadow — RESOLVED 2026-08-29 (v1.8.3.1 闭环, SYSTEM-context CustomAction + 3-attempt fallback)
-- ✅ W-063 UCPD.sys kernel filter — RESOLVED 2026-08-29 (v1.8.3 真修, `jhyy-setuc.exe` .NET 8 SYSTEM-context writer)
+- ✅ W-062 VSCode UserChoice + MSYS2 OpenWithProgids shadow — RESOLVED 2026-08-29 (v1.8.3.1 closed loop, SYSTEM-context CustomAction + 3-attempt fallback)
+- ✅ W-063 UCPD.sys kernel filter — RESOLVED 2026-08-29 (v1.8.3 real fix, `jhyy-setuc.exe` .NET 8 SYSTEM-context writer)
 - 🟡 W-057 UTF-8 3/4-byte codepoint — DEFERRED-to-v2.x
-- 🟡 W-058 vendored QBE 缺 `remd`/`rems` — DEFERRED-to-v2.x
+- 🟡 W-058 vendored QBE missing `remd`/`rems` — DEFERRED-to-v2.x
 - ⚠️ W-021 WiX Bal.wixext DLL naming — permanent workaround (WiX upstream won't fix)
 
 Full index: [`docs/internal/workarounds.md`](docs/internal/workarounds.md).
 
-**v0.x frozen**: `docs/logs/v0/changelog-v0.9.0.md` (3231 lines) — Stage 1 byte-equal 7 测试集 wip, frozen at v1.0.0 baseline (2026-08-29). v0.x C compiler (`compiler/src/*.c`) enters maintenance-only mode; new features go through `compiler/src0/*.jhyy`. Per `docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md`, M5 boot-from-scratch cleanup (delete `src/*.c` + `qbe/` + `runtime.c`) is deferred until v2.x end + v3.x end.
+**v0.x frozen**: `docs/logs/v0/changelog-v0.9.0.md` (3231 lines) — Stage 1 byte-equal 7-test-set wip, frozen at v1.0.0 baseline (2026-08-29). v0.x C compiler (`compiler/src/*.c`) enters maintenance-only mode; new features go through `compiler/src0/*.jhyy`. Per `docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md`, M5 boot-from-scratch cleanup (delete `src/*.c` + `qbe/` + `runtime.c`) is deferred until v2.x end + v3.x end.
 
 > [!NOTE]
 > **v1.8.3 is v1.x final.** The C-side compiler (`compiler/src/*.c`) remains the production path during v1.x; `compiler/src0/*.jhyy` (the jhyy-side translated source) already produces byte-equal output. v2.0 will switch the production path to `jhyy_v1.exe.exe` and start the QBE rewrite + multi-target / OS prep (see [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md)).
@@ -295,7 +295,7 @@ Full index: [`docs/internal/workarounds.md`](docs/internal/workarounds.md).
 | Self-host regression | `python compiler/build/bin/regress.py --all --include-informational` | **102/102 PASS + 4 SKIP** (parity hold) |
 | Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | `python compiler/tests/stage1-expanded.sh` | 7/7 PASS |
 | Stage 2 N=4 byte-equal (`v1→v2→v3→v4→v5`) | MCP `jhyy_selfhost_check` | `all_byte_equal=true`, stable il_sha256 |
-| MCP smoke (7 test files, X `def test_*` funcs) | `pytest mcp-jhyy/tests/` | all pass |
+| MCP smoke (7 test files, 39 `def test_*` funcs) | `pytest mcp-jhyy/tests/` | all pass |
 | One-line build | `make` | 0 warnings (-Wall -Wextra) |
 
 ---
@@ -309,11 +309,12 @@ The project uses a **single version axis**, no phase-N numbering:
 | **v0.x** | C-side compiler itself | reach self-host threshold | **🟢 done (frozen at v1.0.0 baseline)** |
 | **v1.x** | jhyy self-hosting | byte-equal `.il` closure | **🟢 v1.8.3 shipped (v1.x final)** |
 | **v2.x** | full QBE rewrite + multi-target / OS prep | amd64_sysv / freestanding | **next** — design input = [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md) |
-| **v3.x** | language extensions | OS-required: asm / volatile / naked / `no_std` / `&mut` + lifetime | **next (parallel with v2.x)** |
+| **v3.x** | language extensions | OS-required: asm / volatile / naked / `no_std` / `&mut` + lifetime | **after v2.0 phase ships** — v2.x mid/late + v3.x async parallel |
 
 **Axis relationships**:
-- `v0.x → v1.x → v2.x / v3.x`: **strict order** (each is a hard prerequisite of the next)
-- `v2.x || v3.x`: **parallel axes** (each progresses independently; both must finish before OS M1 starts)
+- `v0.x → v1.x → v2.x`: **strict order** (each is a hard prerequisite of the next)
+- `v1.x → v3.x`: **strict order** (v3.0 sprint 3a-3f starts after v2.0 phase ships — 2026-09-01 decision)
+- `v2.x mid/late ⟂ v3.x`: **async parallel** (no fixed pairing; each ships independently; both done before OS M1 starts)
 
 > [!IMPORTANT]
 > **Alignment with the [JiHuiYiYou-OS](https://github.com/JiHuiYiYou/JiHuiYiYou-OS) project**: 12 cross-boundary questions + 6 decisions are closed and reflected in the OS prep plan at [docs/plans/v2/v2.0.0-os-prep.md](docs/plans/v2/v2.0.0-os-prep.md). The v2.0 sprint design input is the same plan.
@@ -330,7 +331,7 @@ The project uses a **single version axis**, no phase-N numbering:
 |------|---------|
 | `jhyy_regress` | run C-side / jhyy-side regression, return PASS/FAIL list |
 | `jhyy_il_diff` | byte-equal check on two `.il` files + contextual diff |
-| `jhyy_selfhost_check` | one-shot v1→v2→v3→v4 byte-equal verification |
+| `jhyy_selfhost_check` | one-shot v1→v2→v3→v4→v5 byte-equal verification |
 | `jhyy_workarounds` | query W-NNN workaround status / details |
 | `jhyy_run` / `jhyy_check` / `jhyy_compile` / `jhyy_get_il` | compile / run / inspect `.jhyy` |
 | `jhyy_lang_ref` / `jhyy_abi_info` / `jhyy_format` | language / ABI / format queries |
