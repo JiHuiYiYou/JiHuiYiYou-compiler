@@ -2,7 +2,7 @@
 
 <img src="vscode-ext/icon.svg" width="96" alt="JHYY logo">
 
-# JHYY
+<img src="vscode-ext/jhyy-calligraphy.png" width="220" alt="机会翼游 calligraphy logo">
 
 ### 机会翼游 — A self-hosted, statically typed, compiled systems programming language
 
@@ -64,12 +64,6 @@ docker run -it msys2/mingw-w64-ucrt-x86_64 bash
 > Do NOT use the MinGW `gcc` shipped with Git Bash (`/c/Program\ Files/Git/mingw64/bin/gcc.exe`) — it does not support PE+ linking and will fail at link time.
 
 ---
-
-<div align="center">
-
-<img src="vscode-ext/jhyy-calligraphy.png" width="160" alt="机会翼游 calligraphy logo">
-
-</div>
 
 ## A tour of the syntax
 
