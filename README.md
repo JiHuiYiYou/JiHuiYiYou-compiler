@@ -65,6 +65,12 @@ docker run -it msys2/mingw-w64-ucrt-x86_64 bash
 
 ---
 
+<div align="center">
+
+<img src="vscode-ext/jhyy-calligraphy.png" width="160" alt="机会翼游 calligraphy logo">
+
+</div>
+
 ## A tour of the syntax
 
 ```rust

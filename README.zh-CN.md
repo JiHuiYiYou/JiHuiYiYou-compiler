@@ -77,6 +77,12 @@ JHYY 是一门自研的、静态类型的、表达式导向的编译型系统编
 - **OS 开发** — 与 [JiHuiYiYou-OS](https://github.com/JiHuiYiYou/JiHuiYiYou-OS) 项目对齐,提供 inline asm / volatile / naked / `no_std` / `&mut` + lifetime 等 OS-required 特性(v3.x 路线)
 - **原生性能** — QBE 后端,无运行时 / 无 GC,直接产出 PE/COFF 二进制
 
+<div align="center">
+
+<img src="vscode-ext/jhyy-calligraphy.png" width="160" alt="机会翼游 书法 logo">
+
+</div>
+
 ## 一段代码看语法
 
 ```rust
