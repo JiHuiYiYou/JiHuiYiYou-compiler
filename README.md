@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="vscode-ext/icon.svg" width="96" alt="JHYY logo">
+<div><img src="vscode-ext/icon.svg" width="96" alt="JHYY logo"></div>
 
-<img src="vscode-ext/jhyy-calligraphy.png" width="220" alt="机会翼游 calligraphy logo">
+<div><img src="vscode-ext/jhyy-calligraphy.png" width="220" alt="机会翼游 calligraphy logo"></div>
 
 ### 机会翼游 — A self-hosted, statically typed, compiled systems programming language
 

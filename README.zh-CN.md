@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="vscode-ext/icon.svg" width="96" alt="JHYY 标志">
+<div><img src="vscode-ext/icon.svg" width="96" alt="JHYY 标志"></div>
 
-<img src="vscode-ext/jhyy-calligraphy.png" width="220" alt="机会翼游 书法 logo">
+<div><img src="vscode-ext/jhyy-calligraphy.png" width="220" alt="机会翼游 书法 logo"></div>
 
 ### 机会翼游 — 自研静态类型编译型系统编程语言
 
