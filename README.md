@@ -1,6 +1,6 @@
 <div align="center">
 
-<div><img src="vscode-ext/icon.svg" width="96" alt="JHYY logo"></div>
+<div><img src="vscode-ext/icon-animated.svg" width="96" alt="JHYY logo"></div>
 
 <div><img src="vscode-ext/jhyy-calligraphy.png" width="220" alt="机会翼游 calligraphy logo"></div>
 

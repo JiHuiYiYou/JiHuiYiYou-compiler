@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  icon-animated.svg : 玻璃质感 JHYY 品牌 logo,带一次性动画
+
+  设计 (per user 反馈):
+  - 玻璃卡片: 深紫蓝渐变背景 + 顶部反光高光 (静态)
+  - 绿 J: 一直填充 (gradient #00ffd0 → #00a080), 不是「白线勾完再填充」
+  - 光描边: 1.2px 白色细线沿 J 字轮廓勾一圈 (stroke-dasharray),
+            勾完后从尾部慢慢往回擦掉消失 (一次性, 2s)
+  - 对角扫描: 45° BL→TR, 30px 宽白光带 (offset-path), 跟描边同步 (一次性)
+  - 静态玻璃反射: J 顶部白色 shine (静态, 永远可见)
+  - 横线: 保持青绿 #00d4aa (不改色, 静态默认可见; 浏览器动画时从中心延展出现)
+  - 总时长 2s, 一次性 (animation-fill-mode: forwards), 不循环
+
+  双渲染兼容:
+  - 浏览器 / HTML 嵌入: 播放完整动画 (描边 + 扫描 + 横线延展)
+  - GitHub README 静态渲染: 显示默认完整态 (玻璃卡 + 绿 J + 横线 + shine),
+    动画 CSS 被剥离也不影响外观
+
+  对应原 vscode-ext/icon.svg (静态, VSCode 扩展图标 — 不动)。
+  用途: README / 官网 hero / 文档插图。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="glassBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#252545"/>
+      <stop offset="100%" stop-color="#0a0a18"/>
+    </linearGradient>
+    <linearGradient id="cardShine" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"  stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="28%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="jGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#00ffd0"/>
+      <stop offset="100%" stop-color="#00a080"/>
+    </linearGradient>
+    <linearGradient id="jShine" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"  stop-color="#ffffff" stop-opacity="0.45"/>
+      <stop offset="30%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="scanGrad" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="35%"  stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="50%"  stop-color="#ffffff" stop-opacity="0.85"/>
+      <stop offset="65%"  stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="cardClip">
+      <rect width="128" height="128" rx="16"/>
+    </clipPath>
+  </defs>
+
+  <style><![CDATA[
+    .j {
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      font-size: 80px;
+      font-weight: 700;
+      text-anchor: middle;
+      fill: url(#jGrad);
+      stroke: #ffffff;
+      stroke-width: 1.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-dasharray: 600;
+      stroke-dashoffset: 600;
+      stroke-opacity: 0;
+      animation: traceAndFade 2s ease-in-out 1 forwards;
+    }
+    .j-shine {
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      font-size: 80px;
+      font-weight: 700;
+      text-anchor: middle;
+      fill: url(#jShine);
+      opacity: 1;
+    }
+    .bar {
+      fill: #00d4aa;
+      opacity: 0.6;
+      transform-origin: 50% 50%;
+      transform-box: fill-box;
+      transform: scaleX(1);
+      animation: barAppear 2s ease-in-out 1 forwards;
+    }
+    .scan {
+      offset-path: path("M -40 168 L 168 -40");
+      offset-rotate: 0deg;
+      opacity: 0;
+      animation: scanSweep 2s ease-in-out 1 forwards;
+    }
+    /* 光围着绿 J 勾一圈 → 从尾部慢慢往回擦掉消失
+       dasharray=600, path≈250:
+         - offset 600→350 (0-25%): 描出, 可见部分从 0 到 full
+         - offset 350→600 (25-100%): 从尾部往回擦, 可见部分从 full 到 0
+         同步 stroke-opacity 1→0 让擦的过程也淡出 */
+    @keyframes traceAndFade {
+      0%   { stroke-dashoffset: 600; stroke-opacity: 1; }
+      25%  { stroke-dashoffset: 350; stroke-opacity: 1; }
+      100% { stroke-dashoffset: 600; stroke-opacity: 0; }
+    }
+    /* 横线 (浏览器里) 从中心延展出现, 静态默认已可见 */
+    @keyframes barAppear {
+      0%, 60% { opacity: 0;   transform: scaleX(0); }
+      88%     { opacity: 0.6; transform: scaleX(1); }
+      100%    { opacity: 0.6; transform: scaleX(1); }
+    }
+    /* 对角扫描: 0% → 100%, 跟描边同步 (峰值 22-50%) */
+    @keyframes scanSweep {
+      0%   { offset-distance: 0%;   opacity: 0; }
+      10%  { offset-distance: 0%;   opacity: 0; }
+      22%  { offset-distance: 25%;  opacity: 0.7; }
+      50%  { offset-distance: 60%;  opacity: 0.9; }
+      78%  { offset-distance: 100%; opacity: 0; }
+      100% { offset-distance: 100%; opacity: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .j    { animation: none; }
+      .bar  { animation: none; }
+      .scan { animation: none; }
+    }
+  ]]></style>
+
+  <g clip-path="url(#cardClip)">
+    <rect width="128" height="128" rx="16" fill="url(#glassBg)"/>
+    <rect width="128" height="128" rx="16" fill="url(#cardShine)"/>
+    <text class="j" x="64" y="88">J</text>
+    <text class="j-shine" x="64" y="88">J</text>
+    <rect class="bar" x="32" y="96" width="64" height="4" rx="2"/>
+    <g class="scan">
+      <rect x="-15" y="-120" width="30" height="240"
+            fill="url(#scanGrad)"
+            transform="rotate(-45)"/>
+    </g>
+  </g>
+</svg>
