@@ -82,6 +82,34 @@ jobs:
           "JHY_IS_RC=$($env:JHY_IS_RC)"      | Add-Content -Path $env:GITHUB_ENV
           "JHY_TAG_NAME=$($env:JHY_TAG_NAME)"| Add-Content -Path $env:GITHUB_ENV
 
+      - name: Compute JHY_VERSION_DISPLAY (mirror build.ps1 strip-to-3 logic)
+        shell: pwsh
+        run: |
+          # v1.8.3.3 fix: release.yml used $VERSION directly in artifact paths, but
+          # installer/build.ps1 strips 4-segment VERSION down to 3 segments for
+          # MSI ProductVersion constraint (e.g. 1.8.3.3 -> 1.8.3). Artifact files
+          # use the stripped version in their filenames, so release.yml must
+          # reference JHY_VERSION_DISPLAY not VERSION. Without this, validate +
+          # upload steps look for jhyy-compiler-1.8.3.3.msi which never exists.
+          # See installer/build.ps1:75-83 for the canonical strip logic — kept
+          # in sync here so the workflow doesn't drift from build.ps1 again.
+          $verIn = $env:VERSION -replace '^v', ''
+          $parts = $verIn.Split('.')
+          if ($parts.Length -ge 3) {
+            $env:JHY_VERSION_DISPLAY = "$($parts[0]).$($parts[1]).$($parts[2])"
+          } else {
+            $env:JHY_VERSION_DISPLAY = $verIn
+          }
+          # Re-attach RC suffix if present (e.g. 1.5.5-rc1 → display 1.5.5-rc1)
+          if ($env:VERSION -match '-rc') {
+            $rcSuffix = ($env:VERSION -split '-rc')[1]
+            if ($rcSuffix) {
+              $env:JHY_VERSION_DISPLAY = "$($env:JHY_VERSION_DISPLAY)-rc$rcSuffix"
+            }
+          }
+          Write-Host "JHY_VERSION_DISPLAY=$($env:JHY_VERSION_DISPLAY)"
+          "JHY_VERSION_DISPLAY=$($env:JHY_VERSION_DISPLAY)" | Add-Content -Path $env:GITHUB_ENV
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -197,9 +225,9 @@ jobs:
           Write-Host ""
           Write-Host "Expected files:"
           foreach ($f in @(
-            "installer/build-artifacts/jhyy-installer-$env:VERSION.exe",
-            "installer/build-artifacts/jhyy-compiler-$env:VERSION.msi",
-            "installer/build-artifacts/jhyy-lang-$env:VERSION.vsix"
+            "installer/build-artifacts/jhyy-installer-$env:JHY_VERSION_DISPLAY.exe",
+            "installer/build-artifacts/jhyy-compiler-$env:JHY_VERSION_DISPLAY.msi",
+            "installer/build-artifacts/jhyy-lang-$env:JHY_VERSION_DISPLAY.vsix"
           )) {
             if (Test-Path $f) {
               $info = Get-Item $f
@@ -214,7 +242,10 @@ jobs:
         run: |
           $template = Get-Content installer/changelog-template.md -Raw
           $isoDate = (Get-Date -Format "yyyy-MM-dd")
-          $installerUrl = "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v$($env:VERSION)/jhyy-installer-$($env:VERSION).exe"
+          # Tag path uses VERSION (e.g. v1.8.3.3); filename uses JHY_VERSION_DISPLAY
+          # (e.g. jhyy-installer-1.8.3.exe) because installer/build.ps1 strips 4-segment
+          # VERSION down to 3 segments for MSI ProductVersion constraint.
+          $installerUrl = "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v$($env:VERSION)/jhyy-installer-$($env:JHY_VERSION_DISPLAY).exe"
           $sha256Url = "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v$($env:VERSION)/SHA256.txt"
           $minor = ($env:VERSION -split '\.')[0..1] -join '.'
           $notes = $template `
@@ -230,7 +261,7 @@ jobs:
       - name: Validate MSI (wix msi validate)
         shell: pwsh
         run: |
-          wix msi validate installer/build-artifacts/jhyy-compiler-$($env:VERSION).msi
+          wix msi validate installer/build-artifacts/jhyy-compiler-$($env:JHY_VERSION_DISPLAY).msi
           if ($LASTEXITCODE -ne 0) {
             Write-Host "[ERROR] MSI validation failed (ICE errors found)"
             exit 1
@@ -242,9 +273,9 @@ jobs:
         shell: pwsh
         run: |
           foreach ($f in @(
-            "installer/build-artifacts/jhyy-installer-$($env:VERSION).exe",
-            "installer/build-artifacts/jhyy-compiler-$($env:VERSION).msi",
-            "installer/build-artifacts/jhyy-lang-$($env:VERSION).vsix",
+            "installer/build-artifacts/jhyy-installer-$($env:JHY_VERSION_DISPLAY).exe",
+            "installer/build-artifacts/jhyy-compiler-$($env:JHY_VERSION_DISPLAY).msi",
+            "installer/build-artifacts/jhyy-lang-$($env:JHY_VERSION_DISPLAY).vsix",
             "installer/SHA256.txt",
             "release-notes.md"
           )) {
@@ -267,9 +298,9 @@ jobs:
           make_latest: ${{ env.JHY_IS_RC != '1' }}
           fail_on_unmatched_files: true
           files: |
-            installer/build-artifacts/jhyy-installer-${{ env.VERSION }}.exe
-            installer/build-artifacts/jhyy-compiler-${{ env.VERSION }}.msi
-            installer/build-artifacts/jhyy-lang-${{ env.VERSION }}.vsix
+            installer/build-artifacts/jhyy-installer-${{ env.JHY_VERSION_DISPLAY }}.exe
+            installer/build-artifacts/jhyy-compiler-${{ env.JHY_VERSION_DISPLAY }}.msi
+            installer/build-artifacts/jhyy-lang-${{ env.JHY_VERSION_DISPLAY }}.vsix
             installer/SHA256.txt
           # GITHUB_TOKEN auto-provided; no extra secrets needed.
 
@@ -280,11 +311,11 @@ jobs:
           Write-Host ""
           Write-Host "============================================="
           Write-Host "DRY RUN — nothing uploaded, no Release created"
-          Write-Host "VERSION=$($env:VERSION) TAG=$($env:JHY_TAG_NAME) IS_RC=$($env:JHY_IS_RC)"
+          Write-Host "VERSION=$($env:VERSION) DISPLAY=$($env:JHY_VERSION_DISPLAY) TAG=$($env:JHY_TAG_NAME) IS_RC=$($env:JHY_IS_RC)"
           Write-Host "Built artifacts:"
-          foreach ($f in Get-ChildItem installer/build-artifacts/*.{exe,msi,vsix} | Where-Object { $_.Name -match $env:VERSION }) {
+          foreach ($f in Get-ChildItem installer/build-artifacts/*.{exe,msi,vsix} | Where-Object { $_.Name -match $env:JHY_VERSION_DISPLAY }) {
             Write-Host "  $($f.Name) ($($f.Length) bytes)"
           }
           Write-Host "SHA256 (for this VERSION):"
-          Get-Content installer/SHA256.txt | Where-Object { $_ -match $env:VERSION }
+          Get-Content installer/SHA256.txt | Where-Object { $_ -match $env:JHY_VERSION_DISPLAY }
           Write-Host "============================================="
