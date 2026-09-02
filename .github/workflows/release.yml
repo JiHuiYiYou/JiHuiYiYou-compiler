@@ -82,33 +82,14 @@ jobs:
           "JHY_IS_RC=$($env:JHY_IS_RC)"      | Add-Content -Path $env:GITHUB_ENV
           "JHY_TAG_NAME=$($env:JHY_TAG_NAME)"| Add-Content -Path $env:GITHUB_ENV
 
-      - name: Compute JHY_VERSION_DISPLAY (mirror build.ps1 strip-to-3 logic)
-        shell: pwsh
-        run: |
-          # v1.8.3.3 fix: release.yml used $VERSION directly in artifact paths, but
-          # installer/build.ps1 strips 4-segment VERSION down to 3 segments for
-          # MSI ProductVersion constraint (e.g. 1.8.3.3 -> 1.8.3). Artifact files
-          # use the stripped version in their filenames, so release.yml must
-          # reference JHY_VERSION_DISPLAY not VERSION. Without this, validate +
-          # upload steps look for jhyy-compiler-1.8.3.3.msi which never exists.
-          # See installer/build.ps1:75-83 for the canonical strip logic — kept
-          # in sync here so the workflow doesn't drift from build.ps1 again.
-          $verIn = $env:VERSION -replace '^v', ''
-          $parts = $verIn.Split('.')
-          if ($parts.Length -ge 3) {
-            $env:JHY_VERSION_DISPLAY = "$($parts[0]).$($parts[1]).$($parts[2])"
-          } else {
-            $env:JHY_VERSION_DISPLAY = $verIn
-          }
-          # Re-attach RC suffix if present (e.g. 1.5.5-rc1 → display 1.5.5-rc1)
-          if ($env:VERSION -match '-rc') {
-            $rcSuffix = ($env:VERSION -split '-rc')[1]
-            if ($rcSuffix) {
-              $env:JHY_VERSION_DISPLAY = "$($env:JHY_VERSION_DISPLAY)-rc$rcSuffix"
-            }
-          }
-          Write-Host "JHY_VERSION_DISPLAY=$($env:JHY_VERSION_DISPLAY)"
-          "JHY_VERSION_DISPLAY=$($env:JHY_VERSION_DISPLAY)" | Add-Content -Path $env:GITHUB_ENV
+      # v1.8.3.3 follow-up #3 (W-067): JHY_VERSION_DISPLAY is computed inside
+      # installer/build.ps1 (line ~87, single source of truth) and exported to
+      # $env:GITHUB_ENV when the script runs in CI. release.yml no longer
+      # duplicates the strip-to-3 logic — eliminating the drift risk that broke
+      # v1.8.3.3 release run #46/47 (WIX0103 was fixed; the 4-seg filename
+      # mismatch in Validate MSI was a separate latent bug from this same
+      # duplication). The export happens in the "Build installer" step below;
+      # subsequent steps read ${{ env.JHY_VERSION_DISPLAY }} directly.
 
       - name: Checkout
         uses: actions/checkout@v4

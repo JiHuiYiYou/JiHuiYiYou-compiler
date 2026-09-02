@@ -99,6 +99,20 @@ if (Get-Command pwsh -ErrorAction SilentlyContinue) {
 }
 Write-Host "[build.ps1] psHost=$script:PsExe"
 
+# v1.8.3.3 fix (W-067): when running under GitHub Actions ($env:GITHUB_ENV
+# is set + writable), export JHY_VERSION_DISPLAY so release.yml can read it
+# instead of mirroring the strip-to-3 logic in two places (drift risk).
+# Single source of truth = this script's `$JHY_VERSION_DISPLAY` assignment
+# above (line ~87). Local runs without $env:GITHUB_ENV are unaffected.
+if ($env:GITHUB_ENV -and (Test-Path -Path $env:GITHUB_ENV -IsValid)) {
+    try {
+        "JHY_VERSION_DISPLAY=$JHY_VERSION_DISPLAY" | Add-Content -Path $env:GITHUB_ENV -ErrorAction Stop
+        Write-Host "[build.ps1] exported JHY_VERSION_DISPLAY=$JHY_VERSION_DISPLAY to GITHUB_ENV"
+    } catch {
+        Write-Host "[WARN] could not export JHY_VERSION_DISPLAY to GITHUB_ENV: $_"
+    }
+}
+
 # 2. verify wix CLI
 $wixCmd = Get-Command wix -ErrorAction SilentlyContinue
 if (-not $wixCmd) {

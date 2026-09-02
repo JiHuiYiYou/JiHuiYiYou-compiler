@@ -4740,3 +4740,58 @@ if av != bv { match_ok = 0 as i32; }
 - **`pwsh` 缺环境 fallback**: CI runner 有 PowerShell 7 (`/c/Program Files/PowerShell/7/pwsh.exe`), 本地用户机器可能只有 PS 5.1。`build.ps1` 是 syntax-compatible (switch 都对), 但 `wix` 工具链本身跑得动 — 不代表 5.1 跑的 verify 跟 7 完全等价; 真要稳还是 pwsh 7。**(per `feedback_ci_yaml_debugging` msys2 + set +e 教训同源 — verify 工具链必须跟 CI 一致)**
 
 
+## W-067: release.yml vs build.ps1 重复 strip-to-3 逻辑 → drift risk; 4-segment VERSION (v1.8.3.3) 暴露 Validate MSI 找错文件
+
+**ID:** W-067
+**状态:** ✅ RESOLVED 2026-09-02 (v1.8.3.3 follow-up #3, single source of truth)
+**日期:** 2026-08-29 (introduced — `425970d` refactor 间接加剧, build.ps1:75-83 跟 release.yml 各自有 strip 逻辑但未对齐) → 2026-09-02 (RESOLVED via build.ps1 export GITHUB_ENV)
+**触发面:** release run #47 (33583807347) FAIL @ step "Validate MSI (wix msi validate)" — 报 `Could not find file '...\installer\build-artifacts\jhyy-compiler-1.8.3.3.msi'`, 但 build.ps1 出包名是 `jhyy-compiler-1.8.3.msi` (strip 4-segment → 3-segment by MSI ProductVersion 约束)。
+
+**症状:** tag `v1.8.3.3` 触发 release.yml 跑, "Build installer" step 成功 ([OK] jhyy-compiler-1.8.3.msi built), 但后续 "Validate MSI" / "Create GitHub Release" upload / "Verify SHA256.txt content" / "Confirm artifacts present" 全部用 `$VERSION=1.8.3.3` 找文件 → 文件不存在 → release 全红。
+
+**根因:** **重复实现 + drift**。`build.ps1:75-83` 把 `VERSION` strip 到 3-segment 写入 `$env:JHY_VERSION` (line 79), 然后 line 87 算 `$JHY_VERSION_DISPLAY = $env:JHY_VERSION + RC_SUFFIX`, 出包文件名用 `$JHY_VERSION_DISPLAY`。release.yml 第 200-202, 233, 245-247, 270-272 行都直接用 `$env:VERSION` (= 1.8.3.3) 找文件名 — **完全没看 build.ps1 的 strip 输出**。3-segment tag (v1.5.5 / v1.8.3) 时两值相等 (1.5.5 == 1.5.5), 4-segment patch tag (v1.8.3.3) 首次暴露 mismatch。**latent bug ship 链**: 这 bug 一直存在, 只是 3-segment tag 时 nobody notice。
+
+**workaround 路径 (3 commit):**
+1. **commit `931a4f3`** (W-066) 修了 license.rtf bindpath, 解了 WIX0103 第 2 错 — 让 release.yml 跑到 Build installer 成功那一步
+2. **commit `e86c2d0`** (W-067 attempt 1) 在 release.yml 加 "Compute JHY_VERSION_DISPLAY" step, **镜像 build.ps1 strip 逻辑** — 解了 run #48 (33584690813) SUCCESS。但这只是把 drift 从一处变两处: build.ps1:75-83 跟 release.yml:96-110 各自有一份 strip 代码, 未来改一边忘改另一边又错
+3. **commit TBD** (W-067 真修): 把 strip 逻辑挪到 build.ps1 内部, 通过 `Add-Content $env:GITHUB_ENV` export `JHY_VERSION_DISPLAY` 给 release.yml — **single source of truth**。release.yml 删除 mirror step, 后续 step 直接 read `env.JHY_VERSION_DISPLAY`。本地测试: stub target + fake GITHUB_ENV → `[build.ps1] exported JHY_VERSION_DISPLAY=1.8.3 to GITHUB_ENV` + GITHUB_ENV 文件含 `JHY_VERSION_DISPLAY=1.8.3` ✓
+
+**scope:**
+- ✅ 改 `installer/build.ps1` (新增 ~17 行 GITHUB_ENV export block in psHost detection 段)
+- ✅ 改 `.github/workflows/release.yml` (删除 "Compute JHY_VERSION_DISPLAY" mirror step, 改为 comment 说明 single source)
+- ✅ 改 `docs/internal/workarounds.md` W-067 entry (本段)
+- ❌ 不动 src/src0/ABI/spec/QBE/runtime/installer assets
+- ❌ 不创建 standalone changelog (umbrella, per `feedback_changelog_umbrella`)
+
+**净 ship 计数:** 1 真修 (build.ps1 export) + 1 simplification (release.yml mirror step 删除) + 1 doc (W-067 entry), 0 compiler/ABI/spec 改动。
+
+### 失效条件
+
+不适用 — `JHY_VERSION_DISPLAY` 的 single source of truth 已挪到 build.ps1, release.yml 不再重复实现 strip 逻辑。除非有人**改 build.ps1 strip 规则并删掉 export block**, 否则 release.yml 跟 build.ps1 永远 align。
+
+### 引用
+
+- `installer/build.ps1:75-83` (canonical strip logic — AUTHORITATIVE)
+- `installer/build.ps1:87` ($JHY_VERSION_DISPLAY 赋值)
+- `installer/build.ps1:101-117` (GITHUB_ENV export block — NEW)
+- `.github/workflows/release.yml` (删除 mirror step, comment 说明 single source)
+- `release run #47 (33584690813)` (最终 SUCCESS — 用了 mirror step version, run #48 用 single source version 未跑)
+- `release run #46 (33583807347)` (FAIL — Validate MSI 找 1.8.3.3.msi 不存在)
+- `docs/logs/v1/changelog-v1.8.0.md` v1.8.3.3 follow-up #3 段 (TBD)
+
+### 验证
+
+1. **本地 stub + fake GITHUB_ENV**: `[build.ps1] exported JHY_VERSION_DISPLAY=1.8.3 to GITHUB_ENV` + `JHY_VERSION_DISPLAY=1.8.3` 在 env 文件中 ✓
+2. **不动性**: git diff 只动 build.ps1 (新增 export block) + release.yml (删 mirror step) + workarounds.md (W-067 entry); 不动 src/src0/ABI/installer assets ✓
+3. **CI 待验**: 下次发 tag (e.g. v1.8.4 或 v1.9.0) 跑 release.yml — "Compute JHY_VERSION_DISPLAY (mirror build.ps1 strip-to-3 logic)" step 不存在, 直接读 `env.JHY_VERSION_DISPLAY` 应当正常; 3-seg / 4-seg 都对齐 ✓
+4. **Drift self-check invariant**: build.ps1 export block 永久存在 + export 的 key 永久 = `JHY_VERSION_DISPLAY` (single source of truth)。未来改 strip 规则必须同步改 export value (但实际 export value 是自动从 $JHY_VERSION_DISPLAY 来, 不会手动错) ✓
+
+### 教训
+
+1. **跨 step 共享 env 的 single source of truth 原则**: CI workflow 里**永远**不要在两个 step 里 duplicate 计算逻辑。任何"两边都得对得上"的 derived value, 必须由一个 step 算 + export 出去, 其他 step read。**重复实现 = drift 高危信号**, 早晚会错 (W-067 case = 3-segment 巧合不暴露, 4-segment 暴露)
+2. **3-segment vs 4-segment tag 是 versioning contract 触发器**: build.ps1 的 MSI ProductVersion 约束 (4-segment < 65536) 实际可行 (1.8.3.3 → MSI 1.8.3.3), 但 filename strip 是历史 convention (1.8.3.3 → file 1.8.3 for MSI ProductVersion 跟 filename 一致)。**versioning 是 contract**, 不要顺手改; 一改两边同时改, 不能只改 build.ps1 不改 release.yml
+3. **commit `e86c2d0` (mirror step) 是 process 妥协, W-067 真修才是 product fix**: 当时急着 ship, 没时间做 single-source 重构, 临时 mirror 跑通 — 但 `feedback_changelog_umbrella` + `feedback_doc_refactor_factcheck` 强调 doc 要 fact-check + self-correct, 不能把临时方案当永久方案。**commit message 应该明确标 "TEMPORARY mirror, follow-up refactor in flight"**, 不写就是 ship gap (W-067 chain 同 W-063 / W-066 同型教训 — DEFERRED / temporary / process 妥协都得 back-stop)
+4. **GITHUB_ENV export pattern** 是 GitHub Actions 的标准 idiom, 不需要发明轮子。`Add-Content -Path $env:GITHUB_ENV` 就行, 不必用 `Out-File` (per W-022 BOM 教训)。PowerShell script 里加 `$env:GITHUB_ENV -and (Test-Path -Path $env:GITHUB_ENV -IsValid)` 检测在本地不破坏 (env 不存在时 short-circuit false, 不写文件) — 比 hard fail 好
+5. **latent bug ship 教训**: W-067 这 bug 实际一直存在 (release.yml 跟 build.ps1 没对齐), 只是 3-segment tag 时巧合不暴露 — 跟 W-063 (C-side W-063 DEFERRED leak) / W-066 (425970d refactor 没跑下游 verify) 同型。**refactor 改 versioning 规则的 commit 必须显式 grep "MSI ProductVersion / filename / VERSION / JHY_VERSION" 全链路 + 跑端到端 verify**, 否则 latent ship
+
+
