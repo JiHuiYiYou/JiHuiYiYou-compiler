@@ -20,6 +20,7 @@
 
 #include "target/abi_amd64_win.h"
 #include "ir.h"   /* qbe_type_of — non-static, declared in ir.h:45 */
+#include "arena.h"  /* arena_alloc for abi_win_emit_call_prelude */
 
 /* v2.1.0 abi_win_classify_arg — Type → QBE type letter.
  *
@@ -152,4 +153,37 @@ void abi_win_emit_return(IRBuf *ir, IRVal val, int is_sret) {
         IRVal v = {0};
         ir_emit_ret(ir, v);
     }
+}
+
+/* v2.1.0 abi_win_emit_call_prelude — sret slot alloc + args buffer.
+ *
+ * Replaces the prelude block at codegen.c:cg_expr NODE_CALL ~lines 964-979
+ * and the equivalent block at NODE_QUALIFIED_CALL ~lines 1061-1074. The
+ * per-arg struct-copy loop stays inline at the call sites (will be
+ * extracted in Stage 1a.5 via `abi_win_emit_struct_arg_slot`).
+ *
+ * Byte-equal behaviour:
+ *   - sret=1: alloc8 ret_slot, args buffer of size n+1, args[0] = ret_slot
+ *   - sret=0: args buffer of size n (or NULL if n=0)
+ *   - non-sret returns ret_slot = {0}
+ */
+IRVal abi_win_emit_call_prelude(
+    IRBuf *ir,
+    struct Arena *arena,
+    size_t n_user_args,
+    int is_sret,
+    int rsize,
+    IRVal **out_args
+) {
+    size_t extra = is_sret ? 1 : 0;
+    *out_args = (n_user_args + extra > 0)
+        ? (IRVal *)arena_alloc(arena, (n_user_args + extra) * sizeof(IRVal))
+        : NULL;
+    IRVal ret_slot = {0};
+    if (is_sret) {
+        ret_slot = ir_new_tmp(ir, 'l');
+        ir_emit_alloc(ir, ret_slot, rsize);
+        (*out_args)[0] = ret_slot;
+    }
+    return ret_slot;
 }

@@ -93,4 +93,38 @@ void abi_win_emit_function_header(
  */
 void abi_win_emit_return(IRBuf *ir, IRVal val, int is_sret);
 
+/* v2.1.0 Stage 1a.4: abi_win_emit_call_prelude handles the QBE side of
+ * setting up a call expression (cg_expr NODE_CALL / NODE_QUALIFIED_CALL).
+ *
+ * For is_sret calls, this:
+ *   - allocates a stack slot of `rsize` bytes (via ir_emit_alloc)
+ *   - allocates an args array of size (n_user_args + 1)
+ *   - sets args[0] = ret_slot (the hidden sret parameter per ABI § 3)
+ *
+ * For non-sret calls, this:
+ *   - allocates an args array of size n_user_args
+ *
+ * Returns ret_slot (or {0} if not sret). The caller fills
+ * args[extra..n_user_args+extra-1] with evaluated param IRVals, then
+ * calls ir_emit_call* with the args.
+ *
+ * The caller still owns:
+ *   - arg evaluation loop (cg_expr per arg, plus optional cg_convert_arg
+ *     for f64→f32 implicit conversion)
+ *   - struct-arg copy-to-slot (per arg) — separate sub-step 1a.5's
+ *     `abi_win_emit_struct_arg_slot`
+ *   - final ir_emit_call / ir_emit_call_void emission
+ *
+ * Mirrors jhyy-side `abi_win_emit_call_prelude` in
+ * `compiler/src0/target/abi_amd64_win.jhyy` Stage 1.4.
+ */
+IRVal abi_win_emit_call_prelude(
+    IRBuf *ir,
+    struct Arena *arena,
+    size_t n_user_args,
+    int is_sret,
+    int rsize,
+    IRVal **out_args
+);
+
 #endif

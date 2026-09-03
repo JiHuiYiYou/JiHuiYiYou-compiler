@@ -962,21 +962,14 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
         }
 
         int is_sret = (n->type && n->type->kind == KIND_STRUCT);
-        IRVal ret_slot;
-        if (is_sret) {
-            int rsize = (int)type_size(n->type);
-            if (rsize < 4) rsize = 4;
-            ret_slot = ir_new_tmp(cg->ir, 'l');
-            ir_emit_alloc(cg->ir, ret_slot, rsize);
-        }
-
-        /* Evaluate args, copying structs to stack slots */
-        int extra = is_sret ? 1 : 0;
+        /* v2.1.0 Stage 1a.4: abi_win_emit_call_prelude handles sret slot
+           alloc + args buffer setup. Replaces prior inline block. */
+        int rsize = is_sret ? (int)type_size(n->type) : 0;
+        if (rsize < 4) rsize = 4;
         IRVal *args = NULL;
-        if (d->nargs + extra > 0)
-            args = arena_alloc(cg->ir->arena, (d->nargs + extra) * sizeof(IRVal));
-        /* sret: hidden return slot pointer is first argument */
-        if (is_sret) args[0] = ret_slot;
+        IRVal ret_slot = abi_win_emit_call_prelude(cg->ir, cg->ir->arena,
+                                                    d->nargs, is_sret, rsize, &args);
+        int extra = is_sret ? 1 : 0;  /* sret hidden pointer offset */
         /* parameter types (for v1.0.0: implicit f64→f32 conversion at call site) */
         Type **param_ts = (fn_sym && fn_sym->type && fn_sym->type->kind == KIND_FUNC)
                          ? fn_sym->type->func.params : NULL;
@@ -1059,19 +1052,14 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
         }
 
         int is_sret = (n->type && n->type->kind == KIND_STRUCT);
-        IRVal ret_slot;
-        if (is_sret) {
-            int rsize = (int)type_size(n->type);
-            if (rsize < 4) rsize = 4;
-            ret_slot = ir_new_tmp(cg->ir, 'l');
-            ir_emit_alloc(cg->ir, ret_slot, rsize);
-        }
-
-        int extra = is_sret ? 1 : 0;
+        /* v2.1.0 Stage 1a.4: abi_win_emit_call_prelude handles sret slot
+           alloc + args buffer setup. Replaces prior inline block. */
+        int rsize = is_sret ? (int)type_size(n->type) : 0;
+        if (rsize < 4) rsize = 4;
         IRVal *args = NULL;
-        if (d->nargs + extra > 0)
-            args = arena_alloc(cg->ir->arena, (d->nargs + extra) * sizeof(IRVal));
-        if (is_sret) args[0] = ret_slot;
+        IRVal ret_slot = abi_win_emit_call_prelude(cg->ir, cg->ir->arena,
+                                                    d->nargs, is_sret, rsize, &args);
+        int extra = is_sret ? 1 : 0;
         /* parameter types (for v1.0.0: implicit f64→f32 conversion at call site) */
         Type **param_ts = (fn_sym && fn_sym->type && fn_sym->type->kind == KIND_FUNC)
                          ? fn_sym->type->func.params : NULL;
