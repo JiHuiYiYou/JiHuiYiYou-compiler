@@ -19,7 +19,7 @@ C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/
 
 工具：
 - GCC：`/c/msys64/ucrt64/bin/gcc.exe` (15.2.0 MSYS2 ucrt64)
-- QBE：`./qbe/qbe.exe -t amd64_win`
+- QBE：`./qbe/qbe.exe -t <target>` — v2.0.0+ 由 `--target=<triple>` CLI flag 决定(`amd64_win` / `amd64_win_freestanding` / `amd64_sysv_stub`,per [`jhyy-abi-v1.0.0.md` § 13.1](../abis/jhyy-abi-v1.0.0.md));v1.x 默认 `amd64_win`
 - Git：`/d/Program Files/Git/bin/git.exe`
 
 ---
@@ -111,8 +111,8 @@ make clean && make stage0 && make
 # 2. 查看 QBE IL
 cat compiler/build/bin/test.il
 
-# 3. 手动调用 QBE
-./qbe/qbe.exe -t amd64_win -o test.s compiler/build/bin/test.il
+# 3. 手动调用 QBE (target 由 --target 决定,v1.x 默认 amd64_win)
+./qbe/qbe.exe -t <target> -o test.s compiler/build/bin/test.il
 
 # 4. 手动链接(需 runtime.c + jhyy_helpers.c,jhyy 编 jhyy 必需)
 /c/msys64/ucrt64/bin/gcc.exe test.s compiler/runtime/runtime.c compiler/src0/jhyy_helpers.c -o test.exe -lm
@@ -120,6 +120,37 @@ cat compiler/build/bin/test.il
 # 5. 检查退出码
 ./test.exe; echo $?
 ```
+
+---
+
+## 多 target 编译示例 (v2.0.0+)
+
+> v2.0.0 起 `jhyy.exe compile <src.jhyy> --target=<triple> -o <out>` CLI flag 决定目标 target;默认 `amd64_win`(v1.x 兼容)。完整 target 三元组 + ABI 差异表见 [`jhyy-abi-v1.0.0.md` § 13.1-13.2](../abis/jhyy-abi-v1.0.0.md)。
+
+### amd64_win (hosted, default)
+
+```bash
+jhyy.exe compile hello.jhyy -o hello.exe                    # 默认 target
+jhyy.exe compile hello.jhyy --target=amd64_win -o hello.exe
+```
+
+行为跟 v1.x 完全一致。生成 PE/COFF x86-64 `.exe`,链 ucrt + vcruntime(MSYS2 GCC)。
+
+### amd64_win_freestanding (UEFI / 裸机)
+
+```bash
+jhyy.exe compile hello_efi.jhyy --target=amd64_win_freestanding -o hello.obj
+```
+
+生成 PE/COFF x86-64 `.obj`,**不**链 ucrt / vcruntime / libc。entry 由用户 `extern fn efi_main` / `_start` 提供(per [`jhyy-lang-spec-v1.3.0.md` § 18](../abis/jhyy-lang-spec-v1.3.0.md))。v2.3.0 才接 lld-link `/SUBSYSTEM:EFI_APPLICATION /ENTRY:efi_main hello.obj /OUT:hello.efi` + OVMF boot;v2.2.0 仅编 `.obj`(详见 [`jhyy-abi-v1.0.0.md` § 13.3 freestanding 约定](../abis/jhyy-abi-v1.0.0.md))。
+
+### amd64_sysv_stub (Linux 兼容 stub)
+
+```bash
+jhyy.exe compile hello.jhyy --target=amd64_sysv_stub -o hello.s
+```
+
+**当前 `cg_module` 在此 target 仍 fatal**(`amd64_sysv target: 实现留 v2.x M2`),只产出占位 `.s`;实实现 SysV ABI 推 v2.x M2。target_dispatch + CLI flag 已就位(per [`compiler/src0/target_dispatch.jhyy`](../../src0/target_dispatch.jhyy)),仅 codegen 路径未实现。
 
 ---
 
@@ -174,7 +205,7 @@ python compiler/build/bin/regress.py
 1. **临时变量必须带字母前缀**：`%t0`, `%t1`... 不能用 `%0`, `%1`（QBE Windows 构建拒绝纯数字）
 2. **缩进必须是空格**：4 空格，不能用 tab（QBE Windows 构建 tab 解析有 bug）
 3. **QBE 参数顺序**：`qbe -o output.s input.il`（输出在前，和常见 CLI 相反）
-4. **目标平台**：`-t amd64_win`（Windows x64 PE），不是默认的 `amd64_sysv`（Linux ELF）
+4. **目标平台**：`-t <target>` 由 `--target=` CLI flag 决定(v2.0.0+,per [`jhyy-abi-v1.0.0.md` § 13.1](../abis/jhyy-abi-v1.0.0.md));v2.0 接受 `amd64_win` / `amd64_win_freestanding` / `amd64_sysv_stub` 三值,v1.x 仅 `amd64_win`(Windows x64 PE)。QBE 实际 backend 只认 `amd64_win` / `amd64_sysv` 两值,freestanding 复用 `amd64_win`(per D-GUI-12);SYSV 实 impl 推 v2.x M2
 
 见 `docs/internal/architecture.md` 中 codegen 相关章节。
 
