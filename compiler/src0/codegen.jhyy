@@ -2461,15 +2461,11 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             let arg_node = *arg_slot_node;
             let mut arg_v = cg_expr(cg_raw, arg_node);
             let arg_t = (*arg_node).type_ptr;
-            // struct arg → 拷贝到 stack slot
+            // struct arg → 拷贝到 stack slot (v2.1.0 Stage 1c.5)
             if arg_t != (0 as *u8) {
                 let at = arg_t as *Type;
                 if (*at).kind == KIND_STRUCT() {
-                    let asize = type_size(arg_t as *Type) as i32;
-                    let mut asize2 = asize;
-                    if asize2 < (4 as i32) { asize2 = 4; }
-                    let copy_slot = *ir_new_tmp(ir, QBE_L());
-                    ir_emit_alloc(ir, copy_slot, asize2);
+                    let copy_slot = abi_win_emit_struct_arg_slot(ir, arg_t);
                     cg_copy_struct(cg_raw, arg_t, copy_slot, arg_v);
                     arg_v = copy_slot;
                 } else {
@@ -2638,11 +2634,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             if arg_t != (0 as *u8) {
                 let at = arg_t as *Type;
                 if (*at).kind == KIND_STRUCT() {
-                    let asize = type_size(arg_t as *Type) as i32;
-                    let mut asize2 = asize;
-                    if asize2 < (4 as i32) { asize2 = 4; }
-                    let copy_slot = *ir_new_tmp(ir, QBE_L());
-                    ir_emit_alloc(ir, copy_slot, asize2);
+                    let copy_slot = abi_win_emit_struct_arg_slot(ir, arg_t);
                     cg_copy_struct(cg_raw, arg_t, copy_slot, arg_v);
                     arg_v = copy_slot;
                 } else {

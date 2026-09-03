@@ -239,3 +239,37 @@ fn abi_win_emit_call_prelude(
     }
     return args_arr;
 }
+
+// ════════════════════════════════════════════
+// Stage 1c.5: abi_win_emit_struct_arg_slot
+// ════════════════════════════════════════════
+//
+// Per ABI § 3 LOCKED: struct args are passed by slot pointer. Allocate
+// a stack slot of `type_size(struct_type)` bytes (rounded up to 4) and
+// return the slot address IRVal. Caller is responsible for copying the
+// source struct into the slot via cg_copy_struct (which lives in
+// codegen.jhyy and stays there — jhyy can't handle the circular import
+// codegen ↔ abi_amd64_win that an inlined copy would create).
+//
+// Mirrors C-side abi_win_emit_struct_arg_slot at compiler/src/target/
+// abi_amd64_win.c:289-296 in spirit (alloc + return slot) but NOT in
+// surface (C-side inlines the struct copy into the abi module; jhyy
+// can't import codegen without a circular import — see commit log).
+//
+// Replaces 2 sites in cg_expr NODE_CALL (~lines 2468-2474) and
+// NODE_QUALIFIED_CALL (~lines 2635-2641) — 7 lines of inline struct
+// alloc + cg_copy_struct call replaced with abi call + caller-side
+// cg_copy_struct call.
+
+fn abi_win_emit_struct_arg_slot(ir: *IRBuf, struct_type_raw: *u8) -> IRVal {
+    let mut asize: i32 = 0;
+    if struct_type_raw != (0 as *u8) {
+        asize = type_size(struct_type_raw as *Type) as i32;
+    }
+    if asize < (4 as i32) {
+        asize = 4;
+    }
+    let copy_slot = *ir_new_tmp(ir, QBE_L());
+    ir_emit_alloc(ir, copy_slot, asize);
+    return copy_slot;
+}
