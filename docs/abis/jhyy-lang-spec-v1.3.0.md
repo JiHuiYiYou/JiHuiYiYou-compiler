@@ -1120,6 +1120,239 @@ fn sum_tree(t: *Tree) -> i32 {
 
 ---
 
+## 17. OS 启动前置语言层准备 (v2.2.0 🔒 语法预留)
+
+> **状态**:🔒 v2.2.0 锁定 v3.0 6 特性的**语法形式草案**。**v2.0 期间不实施** — 编译器当前拒绝所有 6 attribute 与内联 asm 字面量(sema 报错路径见 § 17.7)。实施时走 v3.0 sprint 3a-3f(per [`v2-v3-parallel-sprint-plan.md`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md))。
+>
+> **§ 编号决策**:本 § 17-20 = v2.2.0 连续顺延 4 个新 sections(因 lang-spec doc 最高只到 § 16 + Appendix A-E)。同时避开 [`v3.x-language-expansion.md`](../../plans/roadmap/v3.x-language-expansion.md) § 19 / § 21 同号异义冲突(那里是 `unsafe cap { ... }` + `Cap::provenance()` 语法,v3.0 启动时整体重排)。
+
+### 17.1 `inline asm` — 内联汇编(v3.0 sprint 3a)
+
+```jhyy
+asm {
+    "mov %1, %0"
+    : "=r"(result)             // outputs
+    : "r"(input)                // inputs
+    : "memory", "cc"            // clobbers
+}
+```
+
+- 字符串字面量 + 冒号分隔 outputs / inputs / clobbers 4 段;约束符走 GCC extended asm 语法
+- 仅在 `#[no_std]` + freestanding 模式下可启用(per § 17.4 + § 18)
+- 类型推断:output 跟变量绑定类型一致,input 接受 `*T` / 整数 / 浮点
+
+### 17.2 `#[naked]` — 无 prologue/epilogue 函数体(v3.0 sprint 3b)
+
+```jhyy
+#[naked]
+fn efi_entry() -> () {
+    // 编译器不插入任何 prologue/epilogue;函数体必须是 inline asm
+    asm { "ret" }
+}
+```
+
+- 编译器**不**插入 callee-saved 寄存器保存 / 栈帧分配 / `ret` 指令
+- 函数体必须以 inline asm 结尾(否则 sema 拒绝);常用于中断处理 / entry stub
+- ABI 仍按目标 target 走(per § 13)
+
+### 17.3 `volatile *T` — volatile 指针(v3.0 sprint 3c)
+
+```jhyy
+let ptr: volatile *u8 = 0xFEE00000 as volatile *u8;
+let val = *ptr;       // 读 — 不允许被优化掉
+*ptr = 0x01;          // 写 — 不允许被合并 / 重排
+```
+
+- 解引用 `*` 强制产生 `load` / `store` 指令,不参与优化器 CSE / 死代码消除
+- 仅对单次解引用有效;`*(ptr + 1)` 需重新标记 `volatile`
+
+### 17.4 `#[no_std]` — 不依赖 jhyy runtime(v3.0 sprint 3d)
+
+```jhyy
+#[no_std]
+fn kernel_entry() -> () {
+    // 不能用 println! / malloc / vec! / 等依赖 jhyy runtime 的 std lib
+    // extern fn 必须显式声明
+    extern fn write_to_serial(c: *u8) -> i32;
+}
+```
+
+- 编译器不链 `compiler/runtime/runtime.c`(per `Makefile` RUNTIME_OBJ)
+- 配合 `target=amd64_win_freestanding` 使用(per § 13.3)
+- 必须在文件 / module 级声明(不在函数级)
+
+### 17.5 `#[link_section = "..."]` — 自定义链接段(v3.0 sprint 3e)
+
+```jhyy
+#[link_section = ".text.boot"]
+fn _start() -> () {
+    // 编译器 emit .text.boot 段(QBE `section` directive)
+    efi_main(0 as *u8, 0 as *u8);
+}
+```
+
+- 编译器在 emit QBE IL 时加 `section "name"` 指令
+- 段名按 PE/COFF / ELF section 命名约定(`_start` 必须 `.text.boot`)
+
+### 17.6 `fence()` — memory barrier(v3.0 sprint 3f)
+
+```jhyy
+fence();   // 全屏障,等价 GCC asm volatile("" ::: "memory")
+```
+
+- 编译器 emit `fence` QBE 指令(对应 QBE 0.2+ 支持)
+- 不接受参数,全屏障语义(后续 v3.x 可能加 `fence(acquire)` / `fence(release)`)
+- 用于 OS 端同步原语,freestanding / `#[no_std]` 模式下使用
+
+### 17.7 v2.0 期间 sema 拒绝路径
+
+编译器在 v2.0 期间对上述 6 个 attribute + `asm { ... }` 字面量 + `volatile` 类型修饰符**全部拒绝**:
+
+- `asm { ... }` → sema error `"asm block not yet supported (v3.0 sprint 3a)"`
+- `#[naked]` / `#[no_std]` / `#[link_section = "..."]` → sema error `"attribute X not yet supported (v3.0 sprint 3b-3e)"`
+- `volatile *T` 类型 → sema error `"volatile qualifier not yet supported (v3.0 sprint 3c)"`
+- `fence()` → sema error `"fence() not yet supported (v3.0 sprint 3f)"`
+
+错误提示指向对应 v3.0 sprint,用户可参照本节语法草案准备代码。
+
+---
+
+## 18. freestanding 模式 (v2.2.0 🔒 约定)
+
+> **状态**:🔒 v2.2.0 锁定 freestanding 模式约定。**v2.0 期间仅文档化,不引入新语法**;entry point 走用户 `extern fn` 模式(per § 18.1)+ 编译示例见 § 18.2。
+
+### 18.1 entry 符号约定
+
+freestanding 模式(仅 `amd64_win_freestanding` target 启用,per § 13.3)要求用户自行提供 entry point:
+
+| 场景 | entry 符号 | 签名 |
+|------|-----------|------|
+| **UEFI** | `efi_main` | `fn efi_main(ImageHandle: *u8, SystemTable: *u8) -> Status` |
+| **裸机** | `_start` | `fn _start() -> ()` |
+
+- `efi_main`:跟 UEFI spec 第 2.1.2 节定义一致;`Status` 是 `usize` 别名,0 = EFI_SUCCESS
+- `_start`:裸机 entry,无参数无返回值;退出走 `hlt` 或 `ret`(裸机场景下 `ret` 通常非法)
+- 编译器**不**提供默认 entry(per § 13.3);未定义 entry 符号时链接期报错
+
+### 18.2 freestanding 编译示例
+
+```bash
+# Step 1: 编 .obj
+jhyy.exe compile hello_efi.jhyy --target=amd64_win_freestanding -o hello.obj
+
+# Step 2: 链 .efi (v2.3.0 实际跑 OVMF 时验证;v2.2.0 仅编 .obj)
+lld-link /SUBSYSTEM:EFI_APPLICATION /ENTRY:efi_main hello.obj /OUT:hello.efi
+```
+
+**约束**(per § 13.3):
+- 不能引用 jhyy runtime helper(`memcpy` / `memset` / `malloc` 等)
+- 不链 ucrt / vcruntime / libc / glibc / musl
+- 外部 `extern fn` 必须显式声明并按 MS x64 ABI 调用
+
+---
+
+## 19. Debug ABI (v2.2.0 🔒 per D41)
+
+> **状态**:🔒 v2.2.0 锁定 Debug ABI 跨项目契约。**OS 端镜像** 见 [`../../../jhyy_OS/docs/v0.0.4-debug-abi.md`](../../../jhyy_OS/docs/v0.0.4-debug-abi.md)(🔒 Locked 2026-08-12,Q-Compiler-007 闭环 / D41)。
+>
+> **doc version pinning**:本 § 19 锁定时引用 OS doc **commit/tag**;OS 端后续更新走 Q-Compiler-007 流程同步,v2.2.0 不引入新 cross-boundary 问题。
+
+### 19.1 尺寸定案(per D41)
+
+| 类型 | 尺寸 | 说明 |
+|------|------|------|
+| `DebugEvent`(定长 header + nested payload)| **56B** | OS 端 kernel introspection 输出 |
+| `ErrChain`(含 `SourceLoc` 24B 内嵌)| **64B** | 错误链,NULL-ended |
+| `ProvenanceInfo`(DAG parents/children K=8)| **136B** | `Cap<T>` runtime trace metadata |
+
+**布局总原则**(per D41 R1/R2):jhyy **无 `packed` / `repr(...)`**;所有跨边界 struct 一律自然对齐;padding 显式写成 `_pad*` 字段。
+
+### 19.2 jhyy 侧类型表达
+
+jhyy 侧类型表达**严格遵循 § 20 wire-format 规则**(per D40):
+
+| wire 字段 | jhyy 表达 | 说明 |
+|----------|----------|------|
+| `ProvenanceInfo.grant_chain` / `revoke_chain` | `*ProvenanceInfo`(裸指针)| NULL 结尾单向链 |
+| `ErrChain.prev` | `*ErrChain`(裸指针)| NULL 结尾单向链 |
+| `ErrChain.trace` / `ErrChain.context` | `[*]TraceEntry` / `[*]u8` 切片 | 显式 `*_len: usize` 字段 |
+| `DebugEvent.payload` | `*u8` + `payload_len: usize` | 跨 FFI 用指针,长度由显式字段提供 |
+
+### 19.3 jhyy 编译器不生成 DWARF debug info(per D41 R3)
+
+- jhyy 当前 emit `dbgfile` + `dbgloc` 指令(QBE → .file N / .loc N in `.s`),**仅 line table**
+- **不**生成 DWARF `.debug_info` / `.debug_abbrev` / `.debug_line` 完整 section
+- debug 数据由 OS 端 runtime side table 承载(per `v0.0.1-capability.md § 5.2` "side table 可 strip")
+- release build 可 strip runtime debug info,不污染 v1.0.0 locked baseline
+
+### 19.4 FFI 边界提醒(per D41 R4)
+
+§ 19 全部 struct 都是**内存布局契约**(指针传递),不得按值跨 FFI 边界;见 § 7.4(FFI 整体规则)。M3 集成 `SysError.chain` 时必须以指针传 `ErrChain`。
+
+---
+
+## 20. Wire Format ↔ jhyy-side 表达规则 (v2.2.0 🔒 per D40)
+
+> **状态**:🔒 v2.2.0 锁定跨 FFI 边界时 wire-format C struct 字段到 jhyy 类型表达的系统规则(per D40,2026-08-12 锁,修订 D14 字段类型部分,D14 主体不变)。
+
+### 20.1 两条核心映射
+
+| wire 字段特征 | jhyy 表达 | 尺寸 | 说明 |
+|--------------|----------|------|------|
+| wire 有显式 `*_len: usize` 字段 | `[*]T` 切片 | 16B(ptr + len)| 长度由字段提供 |
+| wire 是 NULL-terminated 单向链 | `*T` 裸指针 | 8B | NULL 表示 chain 末尾 |
+
+### 20.2 wire `*_len` → `[*]T` 切片 示例
+
+```c
+// wire (C)
+typedef struct {
+    uint8_t*  data;
+    uint64_t  data_len;   // 显式长度字段
+} Buffer;
+```
+
+```jhyy
+// jhyy 侧 (per § 20.1)
+type Buffer = struct {
+    data: [*]u8   // 切片 = ptr(8B) + len(8B)
+}
+```
+
+- `data` 是 wire `uint8_t*` + `data_len` 合并表达,**jhyy 类型层不区分**(因为 wire 两字段是同一个语义)
+- 跨 FFI 时 codegen 负责 wire ↔ jhyy 转换(走 `abi_amd64_win.*` 的结构体字段处理)
+
+### 20.3 wire NULL-ended chain → `*T` 裸指针 示例
+
+```c
+// wire (C)
+typedef struct ErrChain {
+    struct ErrChain* prev;   // NULL = chain root
+    SourceLoc        loc;
+    uint32_t         code;
+} ErrChain;
+```
+
+```jhyy
+// jhyy 侧 (per § 20.1)
+type ErrChain = struct {
+    prev: *ErrChain    // NULL-ended 单向链
+    loc: SourceLoc
+    code: u32
+}
+```
+
+- `*ErrChain` 裸指针 = wire `ErrChain*`(NULL = chain root)
+- 跨 FFI 时 codegen 直接 emit 对应 QBE IL(指针字段即裸 `l` 类型)
+
+### 20.4 跟 D14 (FFI 边界) 关系
+
+- D14 主体规则不变;§ 20 是 D14 在 wire-format 字段类型层的具体扩展
+- 任何与 D40 锁的偏差走 Q-Compiler-XXX 流程
+- § 20 跟 § 13.4 (UEFI=MS x64) / § 19 (Debug ABI) / § 14.2 (Cap wire) 用例一致 — `Cap<T>` runtime `*T` 链 + `ProvenanceInfo.grant_chain` `*T` 链全部用 `*T` 裸指针
+
+---
+
 ## 附录 A：与 v0.2.1 的差异
 
 ### v0.3.0 新增
