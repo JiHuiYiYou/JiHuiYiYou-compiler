@@ -55,3 +55,90 @@ fn abi_win_classify_arg(t_raw: *u8) -> i32 {
     // Delegate: KIND_PRIMITIVE / POINTER / SLICE / FUNC / VOID / unknown
     return qbe_type_of(t_raw);
 }
+
+// ════════════════════════════════════════════
+// Stage 1c.2: abi_win_emit_function_header
+// ════════════════════════════════════════════
+//
+// Emit QBE signature line + @start label. Replaces cg_func lines 3677-3723
+// (the inline header block). Caller (cg_func) pre-computes ret_qt via
+// abi_win_classify_arg and passes it in; this function only owns the
+// `export function ... {` + `) {` + `@start` emission.
+//
+// Behaviour byte-equal to the prior inline block:
+//   - `export function [<ret_qt>] $mod__name(l %ret, <pt1> %p1, ...) {`
+//   - mangled name: "$mod__name" if sym has module, else "$name"
+//   - sret prepends hidden `l %ret` as first parameter
+//   - @start label follows `{` (QBE requires entry label)
+//   - `%c %` sprintf workaround: 2 emits (qbe_type_letter + " " + "%" + name)
+
+// Emit "$mod__name" if sym has module, else "$name". Equivalent to the
+// (now-removed) `emit_mangled_name` in codegen.jhyy:478. Kept here as an
+// abi-internal helper to avoid a circular codegen ↔ abi import.
+fn abi_win_emit_mangled_name(ir: *IRBuf, sym_raw: *u8) -> i32 {
+    let sym = sym_raw as *Sym;
+    if (*sym).module != (0 as *u8) {
+        ir_emit_str(ir, "$" as *u8);
+        ir_emit_str(ir, (*sym).module);
+        ir_emit_str(ir, "__" as *u8);
+        ir_emit_str(ir, (*sym).name);
+    } else {
+        ir_emit_str(ir, "$" as *u8);
+        if (*sym).name != (0 as *u8) {
+            ir_emit_str(ir, (*sym).name);
+        } else {
+            ir_emit_str(ir, "?" as *u8);
+        }
+    }
+    return 1;
+}
+
+fn abi_win_emit_function_header(
+    ir: *IRBuf,
+    fn_sym: *Sym,
+    ret_qt: i32,
+    is_sret: i32,
+    params: *u8,    // *NodeFuncDeclParam
+    nparams: i64
+) -> i32 {
+    ir_emit_str(ir, "export function " as *u8);
+    if ret_qt != (0 as i32) {
+        ir_emit_int(ir, "%c " as *u8, ret_qt);
+    }
+    abi_win_emit_mangled_name(ir, fn_sym as *u8);
+    ir_emit_str(ir, "(" as *u8);
+    let mut first: i32 = 1;
+    if is_sret != 0 {
+        ir_emit_str(ir, "l %ret" as *u8);
+        first = 0;
+    }
+    let mut pi: i64 = 0 as i64;
+    while pi < nparams {
+        if first == 0 {
+            ir_emit_str(ir, ", " as *u8);
+        }
+        first = 0;
+        let param_slot = ptr_add_u8(params, pi * NODE_FUNC_DECL_PARAM_SIZE()) as *NodeFuncDeclParam;
+        let p_sym_raw = (*param_slot).sym;
+        let p_sym = p_sym_raw as *Sym;
+        let mut pt: *u8 = 0 as *u8;
+        if (*p_sym).type_ptr != (0 as *u8) {
+            pt = (*p_sym).type_ptr;
+        }
+        if pt != (0 as *u8) {
+            let pqt = abi_win_classify_arg(pt);
+            // v0 codegen bug workaround: 不能用 "%c %"（sprintf 把末尾 literal % 吃掉）
+            // 拆成 2 个 emit：先 "<pqt> " + "%" + name
+            ir_emit_int(ir, "%c " as *u8, pqt);
+            ir_emit_str(ir, "%" as *u8);
+        } else {
+            ir_emit_str(ir, "w %" as *u8);
+        }
+        ir_emit_str(ir, (*p_sym).name);
+        pi = pi + (1 as i64);
+    }
+    ir_emit_str(ir, ") {\n" as *u8);
+    let start_block = *ir_new_block(ir, "start" as *u8);
+    ir_emit_label(ir, start_block);
+    return 1;
+}
