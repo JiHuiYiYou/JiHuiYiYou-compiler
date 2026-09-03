@@ -4,7 +4,7 @@
 # binary, jhyy_stage0.exe 只用于 bootstrap (改 compiler/src/*.c 后重建)。
 
 CC       = gcc
-CFLAGS   = -std=c11 -Wall -Wextra -g
+CFLAGS   = -std=c11 -Wall -Wextra -g -I$(SRC_DIR)
 QBE      = qbe/qbe.exe
 QBEFLAGS = -t amd64_win
 WINDRES  = windres
@@ -34,7 +34,8 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/sema.c \
        $(SRC_DIR)/ir.c \
        $(SRC_DIR)/codegen.c \
-       $(SRC_DIR)/target/target_dispatch.c
+       $(SRC_DIR)/target/target_dispatch.c \
+       $(SRC_DIR)/target/abi_amd64_win.c
 
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
 RUNTIME_OBJ = $(OBJ_DIR)/runtime.o

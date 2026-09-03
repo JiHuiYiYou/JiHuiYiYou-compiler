@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "target/abi_amd64_win.h"  /* v2.1.0 Stage 1a.1: abi_win_classify_arg */
 
 /* ── name mangling: emit $mod__name when sym has an owning module ── */
 static void emit_mangled_name(IRBuf *ir, Sym *sym) {
@@ -2302,7 +2303,7 @@ static void cg_func(CGContext *cg, IRBuf *ir, Node *n, NodeFuncDecl **inline_fns
     Type *ret_type = fd->sym->type && fd->sym->type->kind == KIND_FUNC
                      ? fd->sym->type->func.ret : NULL;
     int is_sret = (ret_type && ret_type->kind == KIND_STRUCT);
-    char ret_qt = (ret_type && !is_sret) ? qbe_type_of(ret_type) : 0;
+    char ret_qt = (ret_type && !is_sret) ? abi_win_classify_arg(ret_type) : 0;
 
     /* emit header (mangled name when function is owned by a module) */
     if (ret_qt)
@@ -2319,15 +2320,11 @@ static void cg_func(CGContext *cg, IRBuf *ir, Node *n, NodeFuncDecl **inline_fns
         if (!first) ir_emit(ir, ", ");
         first = 0;
         Type *pt = fd->params[i].sym->type;
-        /* W-007 fix: enums with total_size > 4 are passed by slot pointer
-           (l), matching the caller's slot allocation. Mirrors KIND_STRUCT
-           handling. */
-        if (pt && pt->kind == KIND_STRUCT)
-            ir_emit(ir, "l %%%s", fd->params[i].sym->name);
-        else if (pt && pt->kind == KIND_ENUM && pt->enum_type.total_size > 4)
-            ir_emit(ir, "l %%%s", fd->params[i].sym->name);
-        else
-            ir_emit(ir, "%c %%%s", qbe_type_of(pt), fd->params[i].sym->name);
+        /* v2.1.0 Stage 1a.1: abi_win_classify_arg centralises the type-letter
+           selection (struct → l, large enum → l, primitive via qbe_type_of).
+           Replaces the prior inline KIND_STRUCT / KIND_ENUM.total_size > 4
+           check + fallback. */
+        ir_emit(ir, "%c %%%s", abi_win_classify_arg(pt), fd->params[i].sym->name);
     }
     ir_emit(ir, ") {\n");
     ir_emit_label(ir, ir_new_block(ir, "start"));
@@ -2364,10 +2361,10 @@ static void cg_func(CGContext *cg, IRBuf *ir, Node *n, NodeFuncDecl **inline_fns
     /* register params as locals (copy into SSA temps) */
     for (size_t i = 0; i < fd->nparams; i++) {
         Type *pt = fd->params[i].sym->type;
-        /* W-007 fix: large enums use l (slot pointer) — same as struct. */
-        char qt = (pt && pt->kind == KIND_STRUCT) ? 'l'
-                 : (pt && pt->kind == KIND_ENUM && pt->enum_type.total_size > 4) ? 'l'
-                 : qbe_type_of(pt);
+        /* v2.1.0 Stage 1a.1: abi_win_classify_arg centralises the type-letter
+           selection for local-register copies (struct → l, large enum → l,
+           primitive via qbe_type_of). Replaces the prior inline ternary. */
+        char qt = abi_win_classify_arg(pt);
         IRVal param_val = ir_new_tmp(ir, qt);
         ir_emit(ir, "    %%t%d =%c copy %%%s\n",
                 param_val.id, qt, fd->params[i].sym->name);
