@@ -2348,19 +2348,29 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         }
 
         // sret if return type is struct
+        // v2.1.0 Stage 1c.4: abi_win_emit_call_prelude handles sret detection +
+        // alloc + ret_slot alloc + args buffer init. Replaces prior inline block.
         let mut is_sret: i32 = 0;
-        let mut ret_slot: IRVal = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
         if (*n).type_ptr != (0 as *u8) {
             let nt = (*n).type_ptr as *Type;
             if (*nt).kind == KIND_STRUCT() {
                 is_sret = 1;
-                let rsize = type_size((*n).type_ptr as *Type) as i32;
-                let mut rsize2 = rsize;
-                if rsize2 < (4 as i32) { rsize2 = 4; }
-                ret_slot = *ir_new_tmp(ir, QBE_L());
-                ir_emit_alloc(ir, ret_slot, rsize2);
             }
         }
+        let mut rsize: i32 = 0;
+        if is_sret != 0 {
+            rsize = type_size((*n).type_ptr as *Type) as i32;
+            if rsize < (4 as i32) { rsize = 4; }
+        }
+        let ret_slot_buf: *u8 = arena_alloc((*ir).arena, IRVAL_SIZE());
+        let args_arr2: *u8 = abi_win_emit_call_prelude(ir, (*ir).arena, nargs, is_sret, rsize, ret_slot_buf);
+        let ret_slot: IRVal = IRVal {
+            kind: *(ret_slot_buf as *i32),
+            id: *(ptr_add_u8(ret_slot_buf, 4 as i64) as *i32),
+            ival: *(ptr_add_u8(ret_slot_buf, 8 as i64) as *i64),
+            name: *(ptr_add_u8(ret_slot_buf, 16 as i64) as **u8),
+            qbe_type: *(ptr_add_u8(ret_slot_buf, 24 as i64) as *i32)
+        };
 
         // 取 param_types + nparams（fn_sym 是 fn 时）
         let mut param_ts_raw: *u8 = 0 as *u8;
@@ -2442,22 +2452,8 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             return result;
         }
 
-        // args arena alloc（(nargs + extra) * IRVAL_SIZE）
-        let mut extra: i32 = 0;
-        if is_sret != 0 {
-            extra = 1 as i32;
-        } else {
-            extra = 0 as i32;
-        }
-        let mut args_arr: *u8 = 0 as *u8;
-        let total_n: i64 = (nargs as i64) + (extra as i64);
-        if total_n > (0 as i64) {
-            args_arr = arena_alloc((*ir).arena, total_n * IRVAL_SIZE());
-        }
-        if is_sret != 0 {
-            let slot_ptr = args_arr as *IRVal;
-            *slot_ptr = ret_slot;
-        }
+        // args buffer + ret_slot already set by abi_win_emit_call_prelude above
+        let extra: i64 = if is_sret != 0 { (1 as i64) } else { (0 as i64) };
 
         let mut i: i64 = 0 as i64;
         while i < nargs {
@@ -2487,13 +2483,13 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                     }
                 }
             }
-            let out_slot = ptr_add_u8(args_arr, ((extra as i64) + i) * IRVAL_SIZE()) as *IRVal;
+            let out_slot = ptr_add_u8(args_arr2, ((extra as i64) + i) * IRVAL_SIZE()) as *IRVal;
             *out_slot = arg_v;
             i = i + (1 as i64);
         }
 
         if is_sret != 0 {
-            ir_emit_call_void(ir, fn_name, args_arr, ((nargs + (extra as i64)) as i32));
+            ir_emit_call_void(ir, fn_name, args_arr2, ((nargs + (extra as i64)) as i32));
             return ret_slot;
         }
         let mut qt: i32 = QBE_W();
@@ -2501,7 +2497,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             qt = qbe_type_of((*n).type_ptr);
         }
         let result = *ir_new_tmp(ir, qt);
-        ir_emit_call(ir, result, fn_name, args_arr, (nargs as i32));
+        ir_emit_call(ir, result, fn_name, args_arr2, (nargs as i32));
         return result;
     }
 
@@ -2530,19 +2526,29 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         }
 
         // sret 同 NODE_CALL
+        // v2.1.0 Stage 1c.4: abi_win_emit_call_prelude handles sret detection +
+        // alloc + ret_slot alloc + args buffer init.
         let mut is_sret: i32 = 0;
-        let mut ret_slot: IRVal = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
         if (*n).type_ptr != (0 as *u8) {
             let nt = (*n).type_ptr as *Type;
             if (*nt).kind == KIND_STRUCT() {
                 is_sret = 1;
-                let rsize = type_size((*n).type_ptr as *Type) as i32;
-                let mut rsize2 = rsize;
-                if rsize2 < (4 as i32) { rsize2 = 4; }
-                ret_slot = *ir_new_tmp(ir, QBE_L());
-                ir_emit_alloc(ir, ret_slot, rsize2);
             }
         }
+        let mut rsize2: i32 = 0;
+        if is_sret != 0 {
+            rsize2 = type_size((*n).type_ptr as *Type) as i32;
+            if rsize2 < (4 as i32) { rsize2 = 4; }
+        }
+        let ret_slot_buf2: *u8 = arena_alloc((*ir).arena, IRVAL_SIZE());
+        let args_arr2: *u8 = abi_win_emit_call_prelude(ir, (*ir).arena, nargs, is_sret, rsize2, ret_slot_buf2);
+        let ret_slot: IRVal = IRVal {
+            kind: *(ret_slot_buf2 as *i32),
+            id: *(ptr_add_u8(ret_slot_buf2, 4 as i64) as *i32),
+            ival: *(ptr_add_u8(ret_slot_buf2, 8 as i64) as *i64),
+            name: *(ptr_add_u8(ret_slot_buf2, 16 as i64) as **u8),
+            qbe_type: *(ptr_add_u8(ret_slot_buf2, 24 as i64) as *i32)
+        };
 
         let mut param_ts_raw: *u8 = 0 as *u8;
         let mut nparams: i64 = 0 as i64;
@@ -2618,21 +2624,10 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             return result2;
         }
 
-        let mut extra: i32 = 0;
-        if is_sret != 0 {
-            extra = 1 as i32;
-        } else {
-            extra = 0 as i32;
-        }
-        let mut args_arr: *u8 = 0 as *u8;
-        let total_n: i64 = (nargs as i64) + (extra as i64);
-        if total_n > (0 as i64) {
-            args_arr = arena_alloc((*ir).arena, total_n * IRVAL_SIZE());
-        }
-        if is_sret != 0 {
-            let slot_ptr = args_arr as *IRVal;
-            *slot_ptr = ret_slot;
-        }
+        // v2.1.0 Stage 1c.4: extra + args_arr already set up by
+        // abi_win_emit_call_prelude above (lines 2543-2544). ret_slot
+        // written to args_arr[0] inside the abi if is_sret.
+        let extra: i64 = if is_sret != 0 { (1 as i64) } else { (0 as i64) };
 
         let mut i: i64 = 0 as i64;
         while i < nargs {
@@ -2660,13 +2655,13 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                     }
                 }
             }
-            let out_slot = ptr_add_u8(args_arr, ((extra as i64) + i) * IRVAL_SIZE()) as *IRVal;
+            let out_slot = ptr_add_u8(args_arr2, ((extra as i64) + i) * IRVAL_SIZE()) as *IRVal;
             *out_slot = arg_v;
             i = i + (1 as i64);
         }
 
         if is_sret != 0 {
-            ir_emit_call_void(ir, fn_name, args_arr, ((nargs + (extra as i64)) as i32));
+            ir_emit_call_void(ir, fn_name, args_arr2, ((nargs + (extra as i64)) as i32));
             return ret_slot;
         }
         let mut qt: i32 = QBE_W();
@@ -2674,7 +2669,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             qt = qbe_type_of((*n).type_ptr);
         }
         let result = *ir_new_tmp(ir, qt);
-        ir_emit_call(ir, result, fn_name, args_arr, (nargs as i32));
+        ir_emit_call(ir, result, fn_name, args_arr2, (nargs as i32));
         return result;
     }
 

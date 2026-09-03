@@ -18,6 +18,7 @@ import types;
 import ir;
 import ast;  // for Sym (used by emit_function_header)
 import symtab;
+import arena;  // for arena_alloc (used by emit_call_prelude)
 
 // ════════════════════════════════════════════
 // Stage 1c.1: abi_win_classify_arg
@@ -171,4 +172,70 @@ fn abi_win_emit_return(ir: *IRBuf, val: IRVal, is_sret: i32) -> i32 {
         let _r = ir_emit_ret(ir, v);
     }
     return 1;
+}
+
+// ════════════════════════════════════════════
+// Stage 1c.4: abi_win_emit_call_prelude
+// ════════════════════════════════════════════
+//
+// Alloc args buffer + sret return slot (if struct return). Mirrors
+// C-side abi_win_emit_call_prelude. Replaces 2 prelude blocks in
+// cg_expr NODE_CALL (codegen.jhyy:2350-2363 + 2445-2460) and
+// NODE_QUALIFIED_CALL (codegen.jhyy:2532-2545 + 2621-2635).
+//
+// Behaviour byte-equal to the prior inline code:
+//   - is_sret=1: alloc ret_slot (`alloc8 <rsize>`), args buffer of
+//     size nargs+1, args[0] = ret_slot
+//   - is_sret=0: args buffer of size nargs (or NULL if nargs=0)
+//   - non-sret returns ret_slot = sentinel IRVal{qbe_type=0}
+//
+// arena is *u8 (forward-declared); cast to *Arena inside.
+//
+// Returns the args buffer pointer. Caller reads ret_slot from
+// out_ret_slot buffer (IRVal layout: kind(0)/id(4)/ival(8)/name(16)
+// /qbe_type(24)). This two-output split avoids **u8 parameters,
+// which jhyy codegen mishandles (segfault during src0 compile).
+
+fn abi_win_emit_call_prelude(
+    ir: *IRBuf,
+    arena: *u8,        // *Arena
+    n_user_args: i64,
+    is_sret: i32,
+    rsize: i32,
+    out_ret_slot: *u8, // IRVal layout buffer (40 bytes)
+) -> *u8 {            // returns args_arr pointer (or NULL)
+    let extra: i64 = if is_sret != 0 { (1 as i64) } else { (0 as i64) };
+    let total = n_user_args + extra;
+    let mut args_arr: *u8 = 0 as *u8;
+    if total > 0 {
+        let arena_a = arena as *Arena;
+        args_arr = arena_alloc(arena_a, total * IRVAL_SIZE());
+    }
+    let mut ret_slot: IRVal = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+    if is_sret != 0 {
+        ret_slot = *ir_new_tmp(ir, QBE_L());
+        ir_emit_alloc(ir, ret_slot, rsize);
+        if total > 0 {
+            let slot0 = args_arr as *i32;
+            *slot0 = ret_slot.kind;
+            *(ptr_add_u8(args_arr, 4 as i64) as *i32) = ret_slot.id;
+            *(ptr_add_u8(args_arr, 8 as i64) as *i64) = ret_slot.ival;
+            *(ptr_add_u8(args_arr, 16 as i64) as **u8) = ret_slot.name;
+            *(ptr_add_u8(args_arr, 24 as i64) as *i32) = ret_slot.qbe_type;
+        }
+    }
+    // Write ret_slot into out_ret_slot (IRVal layout: 0/4/8/16/24)
+    if out_ret_slot != (0 as *u8) {
+        let kind_p = out_ret_slot as *i32;
+        let id_p = ptr_add_u8(out_ret_slot, 4 as i64) as *i32;
+        let ival_p = ptr_add_u8(out_ret_slot, 8 as i64) as *i64;
+        let name_p = ptr_add_u8(out_ret_slot, 16 as i64) as **u8;
+        let qt_p = ptr_add_u8(out_ret_slot, 24 as i64) as *i32;
+        *kind_p = ret_slot.kind;
+        *id_p = ret_slot.id;
+        *ival_p = ret_slot.ival;
+        *name_p = ret_slot.name;
+        *qt_p = ret_slot.qbe_type;
+    }
+    return args_arr;
 }
