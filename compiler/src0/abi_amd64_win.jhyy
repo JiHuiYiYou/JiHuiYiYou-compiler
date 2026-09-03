@@ -1,0 +1,57 @@
+// abi_amd64_win.jhyy — v2.1.0 Stage 1c mirror of compiler/src/target/abi_amd64_win.c
+//
+// Mirrors the C-side ABI extraction. All 5 ABI functions (classify_arg /
+// emit_function_header / emit_return / emit_call_prelude /
+// emit_struct_arg_slot + emit_struct_copy) live here.
+//
+// Note: lives flat in compiler/src0/ (not in a subdir) — jhyy import
+// syntax doesn't support paths with `/` (parser only accepts flat
+// module names per `parse_import_decl` codegen.c:731).
+//
+// Scope (per docs/plans/v2/v2.1.0详细实现方案.md § 1.4):
+//   JHYY emits QBE IL, not raw x64. QBE handles rcx/rdx/r8/r9 register
+//   allocation, 32-byte shadow space, frame layout, callee-saved register
+//   save/restore. The compiler only owns signature construction +
+//   struct-arg copy patterns.
+
+import types;
+import ir;
+import ast;  // for Sym (used by emit_function_header)
+import symtab;
+
+// ════════════════════════════════════════════
+// Stage 1c.1: abi_win_classify_arg
+// ════════════════════════════════════════════
+//
+// Returns QBE type letter (i32) for a JHYY Type*. Behaviour byte-equal
+// to the inline ternary previously in cg_func (codegen.jhyy:3701-3720,
+// 3776-3780). Single source of truth for signature type-letter selection.
+//
+// Returns:
+//   QBE_L() for KIND_STRUCT / KIND_ARRAY / KIND_ENUM with size > 4
+//   QBE_W() for KIND_ENUM with size <= 4 (delegates to qbe_type_of)
+//   0       for KIND_VOID (delegates)
+//   qbe_type_of(t) for KIND_PRIMITIVE / POINTER / SLICE / FUNC / unknown
+
+fn abi_win_classify_arg(t_raw: *u8) -> i32 {
+    if t_raw == (0 as *u8) {
+        return QBE_W();
+    }
+    let t = t_raw as *Type;
+    let kind = (*t).kind;
+    if kind == KIND_STRUCT() {
+        return QBE_L();
+    }
+    if kind == KIND_ARRAY() {
+        return QBE_L();
+    }
+    if kind == KIND_ENUM() {
+        // W-007 fix: large enums (>4 bytes size) by slot pointer
+        if (*t).size > (4 as i64) {
+            return QBE_L();
+        }
+        return QBE_W();
+    }
+    // Delegate: KIND_PRIMITIVE / POINTER / SLICE / FUNC / VOID / unknown
+    return qbe_type_of(t_raw);
+}

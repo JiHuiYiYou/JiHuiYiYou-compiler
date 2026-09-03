@@ -40,6 +40,7 @@ import sema;
 import ir;
 import codegen;
 import target_dispatch;  // v2.0.0: --target=<triple> CLI + thread through to cg_module
+import abi_amd64_win;  // v2.1.0: QBE-level ABI shaping (5 functions, mirrors compiler/src/target/abi_amd64_win.c)
 
 // ═══ Local externs (ffi.jhyy 已声明 malloc/free/fopen/fread/fwrite/fclose/
 //    strlen/strcmp/system/jh_fputs_stderr/jh_fopen_wb 等；这里只补 main.jhyy

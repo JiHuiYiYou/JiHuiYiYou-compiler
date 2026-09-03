@@ -44,6 +44,7 @@ import symtab;
 import ir;
 import lexer;  // TOKEN_* 常量（commit 2 用 TOKEN_MINUS/BANG/TILDE）
 import target_dispatch;  // v2.0.0: Target tag constants (cg_module dispatch)
+import abi_amd64_win;  // v2.1.0 Stage 1c.1: QBE-level ABI classify_arg
 
 // ════════════════════════════════════════════════════
 // FFI（util.jhyy / ir.jhyy 已声明 strlen/strcmp/memset/sprintf_lld；补 codegen 需要）
@@ -3666,7 +3667,10 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64) -> i32 {
         if (*rt).kind == KIND_STRUCT() {
             is_sret = 1;
         } else {
-            ret_qt = qbe_type_of(ret_type);
+            // v2.1.0 Stage 1c.1: abi_win_classify_arg centralises type-letter
+            // selection (struct → l, large enum → l, primitive via qbe_type_of).
+            // Replaces the prior qbe_type_of inline call.
+            ret_qt = abi_win_classify_arg(ret_type);
         }
     }
 
@@ -3697,27 +3701,15 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64) -> i32 {
             pt = (*p_sym).type_ptr;
         }
         if pt != (0 as *u8) {
-            let pt_t = pt as *Type;
-            if (*pt_t).kind == KIND_STRUCT() {
-                ir_emit_str(ir, "l %" as *u8);
-            } else {
-                // W-007 fix: large enums declare as l (slot pointer).
-                let mut is_large_enum: i32 = 0 as i32;
-                if (*pt_t).kind == KIND_ENUM() {
-                    if (*pt_t).size > (4 as i64) {
-                        is_large_enum = 1 as i32;
-                    }
-                }
-                if is_large_enum == (1 as i32) {
-                    ir_emit_str(ir, "l %" as *u8);
-                } else {
-                    // [Status: v0 codegen bug 真修历史保留; workaround 代码保留作历史文档 (非 W-NNN 编号).]
-                    // v0 codegen bug workaround: 不能用 "%c %"（sprintf 把末尾 literal % 吃掉）
-                    // 拆成 2 个 emit：先 "w " + "%" + name
-                    ir_emit_int(ir, "%c " as *u8, qbe_type_of(pt));
-                    ir_emit_str(ir, "%" as *u8);
-                }
-            }
+            // v2.1.0 Stage 1c.1: abi_win_classify_arg centralises the type-letter
+            // selection (struct → l, large enum → l, primitive via qbe_type_of).
+            // Replaces the prior inline KIND_STRUCT / KIND_ENUM.size > 4 check.
+            let pqt = abi_win_classify_arg(pt);
+            // [Status: v0 codegen bug 真修历史保留; workaround 代码保留作历史文档 (非 W-NNN 编号).]
+            // v0 codegen bug workaround: 不能用 "%c %"（sprintf 把末尾 literal % 吃掉）
+            // 拆成 2 个 emit：先 "w " + "%" + name
+            ir_emit_int(ir, "%c " as *u8, pqt);
+            ir_emit_str(ir, "%" as *u8);
         } else {
             ir_emit_str(ir, "w %" as *u8);
         }
@@ -3776,21 +3768,10 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64) -> i32 {
         }
         let mut pq: i32 = QBE_W();
         if pt2 != (0 as *u8) {
-            let pt2_t = pt2 as *Type;
-            if (*pt2_t).kind == KIND_STRUCT() {
-                pq = QBE_L();
-            } else {
-                // W-007 fix: large enums use l (slot pointer) — same as struct.
-                if (*pt2_t).kind == KIND_ENUM() {
-                    if (*pt2_t).size > (4 as i64) {
-                        pq = QBE_L();
-                    } else {
-                        pq = qbe_type_of(pt2);
-                    }
-                } else {
-                    pq = qbe_type_of(pt2);
-                }
-            }
+            // v2.1.0 Stage 1c.1: abi_win_classify_arg centralises the
+            // type-letter selection (struct → l, large enum → l, primitive
+            // via qbe_type_of). Replaces the prior inline ternary.
+            pq = abi_win_classify_arg(pt2);
         }
         let pv = *ir_new_tmp(ir, pq);
         ir_emit_str(ir, "    %t" as *u8);
