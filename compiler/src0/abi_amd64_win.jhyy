@@ -142,3 +142,33 @@ fn abi_win_emit_function_header(
     ir_emit_label(ir, start_block);
     return 1;
 }
+
+// ════════════════════════════════════════════
+// Stage 1c.3: abi_win_emit_return
+// ════════════════════════════════════════════
+//
+// Emit QBE `ret` instruction per the 3-way decision (mirrors C-side
+// Stage 1a.3):
+//   - is_sret=1         → empty `ret` (caller already wrote struct to sret slot)
+//   - val.qbe_type != 0 → `ret <val>` (non-void value return)
+//   - val.qbe_type == 0 → empty `ret` (void / sentinel)
+//
+// Replaces 4 cg_stmt NODE_RETURN sites + 3 cg_func trailing sites in
+// codegen.jhyy (note: 4 cg_stmt sites because jhyy split the sret+void
+// branch into a separate ir_emit_str path; functionally identical to
+// `ir_emit_ret(sentinel)` since sentinel.qbe_type=0 → empty ret).
+//
+// All 7 call sites byte-equal to prior inline emission.
+
+fn abi_win_emit_return(ir: *IRBuf, val: IRVal, is_sret: i32) -> i32 {
+    if is_sret != 0 {
+        let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+        let _r = ir_emit_ret(ir, v);
+    } else if val.qbe_type != (0 as i32) {
+        let _r = ir_emit_ret(ir, val);
+    } else {
+        let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+        let _r = ir_emit_ret(ir, v);
+    }
+    return 1;
+}

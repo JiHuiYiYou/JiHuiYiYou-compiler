@@ -1492,7 +1492,9 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                     }
                 }
                 let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-                let _ret = ir_emit_ret(ir, v);
+                // v2.1.0 Stage 1c.3: abi_win_emit_return centralises the
+                // `ret` line decision. sret branch → empty ret.
+                let _ret = abi_win_emit_return(ir, v, 1);
             } else {
                 let val = cg_expr(cg_raw, (*d).expr);
                 // v1.3.6: emit LIFO defers before `ret` (value path)
@@ -1517,7 +1519,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                         }
                     }
                 }
-                let _ret = ir_emit_ret(ir, val);
+                let _ret = abi_win_emit_return(ir, val, 0);
             }
         } else {
             if (*cg).has_sret != 0 {
@@ -1544,7 +1546,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                         }
                     }
                 }
-                let _str = ir_emit_str(ir, "    ret\n" as *u8);
+                let _str = abi_win_emit_return(ir, IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 }, 1);
             } else {
                 // v1.3.6: emit LIFO defers before `ret` (void path)
                 let fd_d = (*cg).current_fn;
@@ -1569,7 +1571,8 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                     }
                 }
                 let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-                let _ret = ir_emit_ret(ir, v);
+                // v2.1.0 Stage 1c.3: abi_win_emit_return — void (val undef → empty).
+                let _ret = abi_win_emit_return(ir, v, 0);
             }
         }
         return zero;
@@ -3750,12 +3753,15 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64) -> i32 {
                 let _copy = cg_copy_struct(cg_raw, ret_type, sret_addr, body_val);
             }
             let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-            ir_emit_ret(ir, v);
+            // v2.1.0 Stage 1c.3: abi_win_emit_return — sret branch → empty ret.
+            let _r = abi_win_emit_return(ir, v, 1);
         } else if ret_qt != (0 as i32) {
-            ir_emit_ret(ir, body_val);
+            // v2.1.0 Stage 1c.3: abi_win_emit_return — value branch.
+            let _r = abi_win_emit_return(ir, body_val, 0);
         } else {
             let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-            ir_emit_ret(ir, v);
+            // v2.1.0 Stage 1c.3: abi_win_emit_return — void/sentinel branch.
+            let _r = abi_win_emit_return(ir, v, 0);
         }
     }
 
