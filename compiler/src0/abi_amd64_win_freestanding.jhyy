@@ -1,0 +1,93 @@
+// abi_amd64_win_freestanding.jhyy — v2.1.0 Stage 2 mirror of
+// compiler/src/target/abi_amd64_win_freestanding.c
+//
+// UEFI-style (freestanding) ABI for Windows x64. Per D-GUI-12, the MS
+// x64 calling convention (rcx/rdx/r8/r9, 32-byte shadow space) is
+// byte-identical between hosted and freestanding. So the 3 signature
+// shaping functions (function_header / return / call_prelude) just
+// delegate to their abi_win_* counterparts in abi_amd64_win.jhyy.
+// The 2 freestanding-specific hooks (emit_entry_point / no_crt_init)
+// are stubs in v2.1.0; real UEFI EFIAPI wrapper ships in v2.3.0.
+//
+// Note: lives flat in compiler/src0/ (not in a subdir) — jhyy import
+// syntax doesn't support paths with `/` (per `parse_import_decl`
+// codegen.c:731 — same restriction as abi_amd64_win.jhyy).
+
+import abi_amd64_win;  // for abi_win_emit_function_header / _return / _call_prelude
+
+// ════════════════════════════════════════════
+// Stage 2: abi_fs_emit_function_header
+// ════════════════════════════════════════════
+//
+// Delegate to abi_win_emit_function_header (D-GUI-12: MS x64
+// calling convention is byte-identical hosted vs freestanding).
+fn abi_fs_emit_function_header(
+    ir: *IRBuf,
+    fn_sym: *Sym,
+    ret_type: *u8,
+    is_sret: i32,
+    params: *u8,
+    nparams: i64
+) -> i32 {
+    // v2.1.0 jhyy-side has no separate param_types / param_names arrays
+    // (cg_func builds them inline). Pass NULLs for now — abi_win_emit_
+    // function_header reads param syms directly from `params`.
+    let _r = abi_win_emit_function_header(ir, fn_sym, ret_type as *Type, is_sret, params, nparams);
+    return 1;
+}
+
+// ════════════════════════════════════════════
+// Stage 2: abi_fs_emit_return
+// ════════════════════════════════════════════
+fn abi_fs_emit_return(ir: *IRBuf, val: IRVal, is_sret: i32) -> i32 {
+    let _r = abi_win_emit_return(ir, val, is_sret);
+    return 1;
+}
+
+// ════════════════════════════════════════════
+// Stage 2: abi_fs_emit_call_prelude
+// ════════════════════════════════════════════
+fn abi_fs_emit_call_prelude(
+    ir: *IRBuf,
+    arena: *u8,
+    n_user_args: i64,
+    is_sret: i32,
+    rsize: i32,
+    out_ret_slot: *u8
+) -> *u8 {
+    return abi_win_emit_call_prelude(ir, arena, n_user_args, is_sret, rsize, out_ret_slot);
+}
+
+// ════════════════════════════════════════════
+// Stage 2: abi_fs_emit_entry_point
+// ════════════════════════════════════════════
+//
+// v2.1.0: minimal — no UEFI EFIAPI wrapper. The user's main_jhyy is
+// compiled as a normal exported QBE function; QBE -t amd64_win
+// handles the actual ABI. Future v2.x may emit:
+//   - callee-saved save (push rbp, push rbx, ...)
+//   - load args from rcx/r8 (EFI_HANDLE, EFI_SYSTEM_TABLE)
+//   - call user's main_jhyy
+//   - exit via `ret` (UEFI doesn't return) or `hlt`
+//
+// v2.1.0 no-op: just acknowledge the entry name. QBE IL doesn't
+// need anything extra for a .obj that GCC will link normally.
+fn abi_fs_emit_entry_point(ir: *IRBuf, entry_name: *u8) -> i32 {
+    let _ir = ir;       // suppress unused warning
+    let _en = entry_name;
+    return 1;
+}
+
+// ════════════════════════════════════════════
+// Stage 2: abi_fs_no_crt_init
+// ════════════════════════════════════════════
+//
+// v2.1.0: no-op. v2.1.0 ships PE/COFF .obj via QBE → GCC link chain.
+// GCC pulls in ucrt startup (__security_cookie etc.) that a true
+// freestanding link (lld-link /subsystem:efi) would not provide. v2.3.0
+// lld-link + OVMF boot handles the no-crt fixup.
+//
+// Hook exists so the dispatch site has a single chokepoint.
+fn abi_fs_no_crt_init() -> i32 {
+    return 1;
+}

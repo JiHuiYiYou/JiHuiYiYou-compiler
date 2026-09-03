@@ -35,7 +35,8 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/ir.c \
        $(SRC_DIR)/codegen.c \
        $(SRC_DIR)/target/target_dispatch.c \
-       $(SRC_DIR)/target/abi_amd64_win.c
+       $(SRC_DIR)/target/abi_amd64_win.c \
+       $(SRC_DIR)/target/abi_amd64_win_freestanding.c
 
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
 RUNTIME_OBJ = $(OBJ_DIR)/runtime.o
