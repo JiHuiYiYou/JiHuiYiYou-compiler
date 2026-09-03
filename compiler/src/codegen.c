@@ -5,14 +5,9 @@
 #include <string.h>
 #include "target/abi_amd64_win.h"  /* v2.1.0 Stage 1a.1: abi_win_classify_arg */
 
-/* ── name mangling: emit $mod__name when sym has an owning module ── */
-static void emit_mangled_name(IRBuf *ir, Sym *sym) {
-    if (sym && sym->module) {
-        ir_emit(ir, "$%s__%s", sym->module, sym->name);
-    } else {
-        ir_emit(ir, "$%s", sym->name ? sym->name : "?");
-    }
-}
+/* v2.1.0 Stage 1a.2: name mangling moved to abi_win_emit_function_header
+ * (in target/abi_amd64_win.c). The compiler's emit_mangled_name helper is
+ * no longer needed; ABI module owns the rule. */
 
 /* ── side table: map Sym* → IRVal for local vars ── */
 #define MAX_LOCALS 1024
@@ -2303,31 +2298,27 @@ static void cg_func(CGContext *cg, IRBuf *ir, Node *n, NodeFuncDecl **inline_fns
     Type *ret_type = fd->sym->type && fd->sym->type->kind == KIND_FUNC
                      ? fd->sym->type->func.ret : NULL;
     int is_sret = (ret_type && ret_type->kind == KIND_STRUCT);
+    /* ret_qt is used later in cg_func (body trailing `ret` emission) — keep
+       it computed here even though Stage 1a.2's abi_win_emit_function_header
+       re-derives it internally. */
     char ret_qt = (ret_type && !is_sret) ? abi_win_classify_arg(ret_type) : 0;
 
-    /* emit header (mangled name when function is owned by a module) */
-    if (ret_qt)
-        ir_emit(ir, "export function %c ", ret_qt), emit_mangled_name(ir, fd->sym), ir_emit(ir, "(");
-    else
-        ir_emit(ir, "export function "), emit_mangled_name(ir, fd->sym), ir_emit(ir, "(");
-    int first = 1;
-    /* sret: hidden return slot pointer is first parameter */
-    if (is_sret) {
-        ir_emit(ir, "l %%ret");
-        first = 0;
+    /* v2.1.0 Stage 1a.2: abi_win_emit_function_header centralises the QBE
+       signature line (`export function <qt> $name(<args>) {\n@start`)
+       construction. Replaces the prior inline block at lines 2308-2330 of
+       the pre-v2.1.0 file. The arrays are transient — arena-allocated
+       and discarded after the call returns. */
+    size_t np = fd->nparams;
+    Type **param_types = np > 0
+        ? (Type **)arena_alloc(ir->arena, np * sizeof(Type *)) : NULL;
+    const char **param_names = np > 0
+        ? (const char **)arena_alloc(ir->arena, np * sizeof(const char *)) : NULL;
+    for (size_t i = 0; i < np; i++) {
+        param_types[i] = fd->params[i].sym->type;
+        param_names[i] = fd->params[i].sym->name;
     }
-    for (size_t i = 0; i < fd->nparams; i++) {
-        if (!first) ir_emit(ir, ", ");
-        first = 0;
-        Type *pt = fd->params[i].sym->type;
-        /* v2.1.0 Stage 1a.1: abi_win_classify_arg centralises the type-letter
-           selection (struct → l, large enum → l, primitive via qbe_type_of).
-           Replaces the prior inline KIND_STRUCT / KIND_ENUM.total_size > 4
-           check + fallback. */
-        ir_emit(ir, "%c %%%s", abi_win_classify_arg(pt), fd->params[i].sym->name);
-    }
-    ir_emit(ir, ") {\n");
-    ir_emit_label(ir, ir_new_block(ir, "start"));
+    abi_win_emit_function_header(ir, fd->sym, ret_type, is_sret,
+                                  param_types, param_names, np);
 
     /* setup context */
     /* v1.4.6 W-017: cg is module-level (allocated in cg_module). cg_func

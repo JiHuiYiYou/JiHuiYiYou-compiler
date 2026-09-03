@@ -76,3 +76,54 @@ char abi_win_classify_arg(Type *t) {
         return qbe_type_of(t);
     }
 }
+
+/* v2.1.0 abi_win_emit_function_header — QBE signature line + @start.
+ *
+ * Replaces the inline block at codegen.c:cg_func lines 2308-2330. The
+ * extraction is byte-equal refactor — same emission order, same spacing,
+ * same name mangling rule.
+ *
+ * Implementation note: the mangled-name rule is duplicated here (was
+ * `codegen.c:emit_mangled_name`) so the ABI module stays self-contained
+ * (no codegen-internal include). The two implementations must stay
+ * byte-equal; if codegen's mangling ever changes, mirror here.
+ */
+void abi_win_emit_function_header(
+    IRBuf *ir,
+    Sym *fn_sym,
+    Type *ret_type,
+    int is_sret,
+    Type **param_types,
+    const char **param_names,
+    size_t n_params
+) {
+    char ret_qt = (ret_type && !is_sret) ? abi_win_classify_arg(ret_type) : 0;
+
+    /* `export function [<ret_qt>] $name(` */
+    if (ret_qt)
+        ir_emit(ir, "export function %c ", ret_qt);
+    else
+        ir_emit(ir, "export function ");
+    /* Name mangling — mirrors codegen.c:emit_mangled_name */
+    if (fn_sym && fn_sym->module)
+        ir_emit(ir, "$%s__%s", fn_sym->module, fn_sym->name ? fn_sym->name : "?");
+    else
+        ir_emit(ir, "$%s", fn_sym && fn_sym->name ? fn_sym->name : "?");
+    ir_emit(ir, "(");
+
+    int first = 1;
+    /* sret: hidden return slot pointer is first parameter */
+    if (is_sret) {
+        ir_emit(ir, "l %%ret");
+        first = 0;
+    }
+    for (size_t i = 0; i < n_params; i++) {
+        if (!first) ir_emit(ir, ", ");
+        first = 0;
+        ir_emit(ir, "%c %%%s",
+                abi_win_classify_arg(param_types[i]),
+                param_names[i] ? param_names[i] : "?");
+    }
+    ir_emit(ir, ") {\n");
+    ir_emit_label(ir, ir_new_block(ir, "start"));
+}

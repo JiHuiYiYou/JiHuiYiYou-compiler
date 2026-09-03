@@ -15,7 +15,8 @@
  * struct-arg copy patterns. See `docs/plans/v2/v2.1.0详细实现方案.md` § 1.1.
  */
 
-#include "ast.h"   /* Type, TypeKind */
+#include "ast.h"   /* Type, TypeKind, Sym */
+#include "ir.h"    /* IRBuf, ir_emit, ir_emit_label, ir_new_block */
 
 /* Classify a JHYY Type as a QBE type letter for function signatures.
  *
@@ -34,5 +35,40 @@
  * `compiler/src0/target/abi_amd64_win.jhyy` Stage 1.
  */
 char abi_win_classify_arg(Type *t);
+
+/* Emit a QBE IL function signature line + the entry `@start` block label.
+ *
+ * Replaces the inline block at `codegen.c:cg_func` lines 2308-2330 (the
+ * `export function <qt> $name(<args>) {\n@start` construction). The caller
+ * is responsible for CGContext bookkeeping (locals reset, has_sret flag,
+ * sret slot register + sret param-register, param-local registration) — those
+ * stay in `cg_func` since they touch `CGContext` state, not QBE IL.
+ *
+ * Behaviour:
+ *   - ret_type == NULL or is_sret==1 → emit `export function $name(`
+ *   - else emit `export function <ret_qt> $name(` where ret_qt =
+ *     abi_win_classify_arg(ret_type)
+ *   - is_sret==1 prepends `l %ret` as the first parameter (sret hidden
+ *     pointer — per ABI § 3 LOCKED, struct return via caller-allocated slot)
+ *   - For each (param_types[i], param_names[i]) emit `<qt> %<name>`
+ *     comma-separated, qt = abi_win_classify_arg(param_types[i])
+ *   - Emit `) {\n` and `@start` label via ir_new_block
+ *
+ * Name mangling: if `fn_sym->module` is non-NULL, emit `$<module>__<name>`;
+ * else `$<name>`. Mirrors codegen.c:emit_mangled_name logic (kept inline
+ * here to keep ABI module self-contained — no codegen internal dep).
+ *
+ * Mirrors jhyy-side `abi_win_emit_function_header` in
+ * `compiler/src0/target/abi_amd64_win.jhyy` Stage 1.2.
+ */
+void abi_win_emit_function_header(
+    IRBuf *ir,
+    Sym *fn_sym,
+    Type *ret_type,
+    int is_sret,
+    Type **param_types,
+    const char **param_names,
+    size_t n_params
+);
 
 #endif
