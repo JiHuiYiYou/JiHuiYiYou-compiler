@@ -679,9 +679,12 @@ fn run_qbe(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
     // v2.0.0: -t <target_name(t)> — only TARGET_AMD64_WIN actually reaches
     // here (other targets fatal at cg_module). Replacing hardcoded
     // "-t amd64_win -o " lets v2.x later flip target without surgery here.
+    // v2.1.0: use target_qbe_flag() so freestanding (ABI-identical MS x64)
+    // and hosted both map to "amd64_win"; only amd64_sysv is a real QBE-
+    // different backend (ships v2.x M2).
     let sep1 = " -t " as *u8;
     pos = str_concat_at(cmd_buf, pos, sep1);
-    pos = str_concat_at(cmd_buf, pos, target_name(t));
+    pos = str_concat_at(cmd_buf, pos, target_qbe_flag(t));
     let sep1b = " -o " as *u8;
     pos = str_concat_at(cmd_buf, pos, sep1b);
     pos = str_concat_at(cmd_buf, pos, asm_path);

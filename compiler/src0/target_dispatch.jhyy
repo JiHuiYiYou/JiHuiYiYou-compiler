@@ -67,3 +67,16 @@ fn target_name(t: i32) -> *u8 {
     if t == TARGET_AMD64_SYSV_STUB()        { return "amd64_sysv" as *u8; }
     return "amd64_win" as *u8;  // unreachable; satisfy -Wreturn-type
 }
+
+// ════════════════════════════════════════════
+// target_qbe_flag — tag → QBE -t flag string
+// v2.1.0: hosted + freestanding both emit MS x64 (D-GUI-12). Only amd64_sysv
+// is a real QBE-different target (ships v2.x M2).
+// ════════════════════════════════════════════
+
+fn target_qbe_flag(t: i32) -> *u8 {
+    if t == TARGET_AMD64_WIN()              { return "amd64_win" as *u8; }
+    if t == TARGET_AMD64_WIN_FREESTANDING() { return "amd64_win" as *u8; }
+    if t == TARGET_AMD64_SYSV_STUB()        { return "amd64_sysv" as *u8; }
+    return "amd64_win" as *u8;  // unreachable; satisfy -Wreturn-type
+}

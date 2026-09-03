@@ -493,7 +493,7 @@ static int compile(const char **inputs, int ninputs, const char *output) {
     #pragma GCC diagnostic ignored "-Wformat-truncation"
     snprintf(cmd, sizeof(cmd),
              "%s -t %s -o %s %s",
-             qbe_exe, target_name(g_target), asm_path, il_path);
+             qbe_exe, target_qbe_flag(g_target), asm_path, il_path);
     #pragma GCC diagnostic pop
     if (system(cmd) != 0) {
         fprintf(stderr, "QBE failed\n");

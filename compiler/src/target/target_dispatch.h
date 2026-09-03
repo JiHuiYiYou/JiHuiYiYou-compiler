@@ -27,9 +27,16 @@ typedef enum {
 Target target_parse(const char *s);
 Target target_default(void);
 
-/* Triple string for the target — also serves as QBE `-t` flag for v2.0.0.
-   Only TARGET_AMD64_WIN is actually passed to QBE; the other two fatal at
-   cg_module before QBE invocation. */
+/* Triple string for the target (user-facing name, e.g. `amd64_win`). */
 const char *target_name(Target t);
+
+/* QBE `-t` flag for the target.
+ *
+ * v2.1.0: TARGET_AMD64_WIN and TARGET_AMD64_WIN_FREESTANDING both map to
+ * `"amd64_win"` since the MS x64 calling convention is byte-identical
+ * (D-GUI-12). TARGET_AMD64_SYSV_STUB still returns `"amd64_sysv"` so
+ * users get the error from QBE if it slips past cg_module dispatch.
+ */
+const char *target_qbe_flag(Target t);
 
 #endif

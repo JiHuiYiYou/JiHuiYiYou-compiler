@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "target/abi_amd64_win.h"  /* v2.1.0 Stage 1a.1: abi_win_classify_arg */
+#include "target/abi_amd64_win_freestanding.h"  /* v2.1.0 Stage 2: UE/PE/COFF entry + no_crt hooks */
 
 /* v2.1.0 Stage 1a.2: name mangling moved to abi_win_emit_function_header
  * (in target/abi_amd64_win.c). The compiler's emit_mangled_name helper is
@@ -2428,9 +2429,15 @@ void cg_module(IRBuf *ir, Node *module, Target t) {
     case TARGET_AMD64_WIN:
         break;
     case TARGET_AMD64_WIN_FREESTANDING:
-        fprintf(stderr,
-            "amd64_win_freestanding target: ABI 抽离在 v2.1.0 实现\n");
-        exit(1);
+        /* v2.1.0 Stage 2: abi_fs_emit_entry_point + abi_fs_no_crt_init are
+           no-ops (real UEFI EFIAPI wrapper + lld-link /subsystem:efi land in
+           v2.3.0). We still need to call them somewhere so the dispatch site
+           has a single chokepoint — call here at module top, fall through
+           to default body which uses abi_win_* (D-GUI-12: hosted vs
+           freestanding MS x64 signature is byte-identical for v2.1.0). */
+        (void)abi_fs_emit_entry_point(ir, "main_jhyy");
+        (void)abi_fs_no_crt_init();
+        break;
     case TARGET_AMD64_SYSV_STUB:
         fprintf(stderr,
             "amd64_sysv target: 实现留 v2.x M2\n");

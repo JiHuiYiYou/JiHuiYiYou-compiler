@@ -25,3 +25,16 @@ const char *target_name(Target t) {
     }
     return "amd64_win";  /* unreachable; satisfy -Wreturn-type */
 }
+
+/* v2.1.0: hosted + freestanding both emit MS x64 (D-GUI-12). Only
+ * amd64_sysv is a real QBE-different target (ships v2.x M2). */
+const char *target_qbe_flag(Target t) {
+    switch (t) {
+    case TARGET_AMD64_WIN:
+    case TARGET_AMD64_WIN_FREESTANDING:
+        return "amd64_win";
+    case TARGET_AMD64_SYSV_STUB:
+        return "amd64_sysv";
+    }
+    return "amd64_win";  /* unreachable; satisfy -Wreturn-type */
+}

@@ -1,0 +1,64 @@
+// abi_test.jhyy — v2.1.0 Stage 3 ABI signature-level tests
+// EXPECT: 80  (35 sret + 35 struct arg + 10 quad arg)
+//
+// Each function exercises one ABI shape rule from `docs/abis/jhyy-abi-v1.0.0.md`
+// § 2/3. The QBE .il signature string is what matters here (not x64 register
+// placement — that's QBE internal). Use `jhyy_get_il` to inspect.
+//
+// Run:  jhyy.exe compile abi_test.jhyy -o abi_test
+//       jhyy_get_il abi_test    # see signatures
+//
+// Exit code = sum of all test results, so any change that breaks a signature
+// is visible at run time too (not just IL inspection).
+
+// ════════════════════════════════════════════
+// test_signature_sret — struct return → hidden `l %ret` pointer + sret alloc
+// Expected .il signature: `function w $make_point(l %ret, w %x, w %y)`
+// (sret classified via abi_win_classify_arg returning ARGCLASS_SRET)
+// ════════════════════════════════════════════
+type Point = struct {
+    x: i32,
+    y: i32
+}
+
+fn make_point(x: i32, y: i32) -> Point {
+    Point { x: x, y: y }
+}
+
+// ════════════════════════════════════════════
+// test_signature_struct_arg — struct value arg → alloc8 slot + cg_copy_struct
+// Expected .il at call site: alloc8 8 + memcpy before call, slot passed in
+// register. abi_win_emit_struct_arg_slot returns the alloc'd slot; caller
+// does cg_copy_struct (per ABI § 3 LOCKED rule + abi module boundary).
+// ════════════════════════════════════════════
+fn take_point(p: Point) -> i32 {
+    p.x + p.y
+}
+
+// ════════════════════════════════════════════
+// test_signature_multi_arg — 4 scalar args → QBE registers
+// Expected .il signature: `function w $add4(w %a, w %b, w %c, w %d)`
+// (QBE assigns rcx/rdx/r8/r9 internally per `-t amd64_win`)
+// n_args > 4 not exercised here — that's v2.x mid-sprint territory
+// ════════════════════════════════════════════
+fn add4(a: i32, b: i32, c: i32, d: i32) -> i32 {
+    a + b + c + d
+}
+
+// ════════════════════════════════════════════
+// main_jhyy — drive all 3 tests + return sum (so any single breakage
+// shows as nonzero exit)
+// ════════════════════════════════════════════
+fn main_jhyy() -> i32 {
+    // test_signature_sret
+    let p = make_point(10, 25);
+    let sret_sum = p.x + p.y;  // expect 35
+
+    // test_signature_struct_arg
+    let arg_sum = take_point(p);  // expect 35
+
+    // test_signature_multi_arg
+    let quad_sum = add4(1, 2, 3, 4);  // expect 10
+
+    sret_sum + arg_sum + quad_sum  // expect 80
+}
