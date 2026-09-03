@@ -71,4 +71,26 @@ void abi_win_emit_function_header(
     size_t n_params
 );
 
+/* v2.1.0 Stage 1a.3: abi_win_emit_return centralises the QBE `ret`
+ * instruction decision at function exit. Replaces the `ir_emit_ret(...)`
+ * lines in `cg_func` trailing (codegen.c ~lines 2391-2397) and
+ * `cg_stmt NODE_RETURN` (codegen.c ~lines 2139, 2145, 2151).
+ *
+ * Decision tree (mirrors the original ternary chain byte-equal):
+ *   - is_sret == 1 → emit empty `ret` (caller has already copied the
+ *     struct to the sret slot via cg_copy_struct — that codegen
+ *     helper stays inline since it traverses jhyy types, not QBE IL)
+ *   - is_sret == 0 && val.qbe_type != 0 → emit `ret <val>` (non-void
+ *     value return)
+ *   - is_sret == 0 && val.qbe_type == 0 → emit empty `ret` (void / sentinel)
+ *
+ * The ret_qt guard `ret_qt != 0 && body_val.qbe_type != 0` from the
+ * cg_func trailing block stays inline (caller's responsibility — ABI
+ * doesn't know about jhyy return-type rules, only the QBE ret emission).
+ *
+ * Mirrors jhyy-side `abi_win_emit_return` in
+ * `compiler/src0/target/abi_amd64_win.jhyy` Stage 1.3.
+ */
+void abi_win_emit_return(IRBuf *ir, IRVal val, int is_sret);
+
 #endif

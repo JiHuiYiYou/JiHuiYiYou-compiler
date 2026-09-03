@@ -2135,20 +2135,22 @@ static void cg_stmt(CGContext *cg, Node *n) {
                 }
                 /* v1.3.6: emit LIFO defers before `ret` */
                 cg_emit_defers(cg, cg->current_fn);
-                IRVal v = {0};
-                ir_emit_ret(cg->ir, v);
+                /* v2.1.0 Stage 1a.3: abi_win_emit_return centralises the
+                   `ret` line decision. sret branch → empty ret. */
+                abi_win_emit_return(cg->ir, src, 1);
             } else {
                 IRVal val = {0};
                 cg_expr(cg, dr->expr, &val);
                 /* v1.3.6: emit LIFO defers before `ret` */
                 cg_emit_defers(cg, cg->current_fn);
-                ir_emit_ret(cg->ir, val);
+                /* v2.1.0 Stage 1a.3: abi_win_emit_return — non-sret value. */
+                abi_win_emit_return(cg->ir, val, 0);
             }
         } else {
             /* v1.3.6: emit LIFO defers before `ret` (void path) */
             cg_emit_defers(cg, cg->current_fn);
-            IRVal v = {0};
-            ir_emit_ret(cg->ir, v);
+            /* v2.1.0 Stage 1a.3: abi_win_emit_return — void (val undef → empty). */
+            abi_win_emit_return(cg->ir, (IRVal){0}, 0);
         }
         break;
     }
@@ -2387,13 +2389,17 @@ static void cg_func(CGContext *cg, IRBuf *ir, Node *n, NodeFuncDecl **inline_fns
             if (!irval_is_undef(body_val)) {
                 cg_copy_struct(cg, ret_type, sret_addr, body_val);
             }
-            IRVal v = {0};
-            ir_emit_ret(ir, v);
+            /* v2.1.0 Stage 1a.3: abi_win_emit_return — sret branch → empty ret. */
+            abi_win_emit_return(ir, body_val, 1);
         } else if (ret_qt != 0 && body_val.qbe_type != 0) {
-            ir_emit_ret(ir, body_val);
+            /* v2.1.0 Stage 1a.3: abi_win_emit_return — value branch. The
+               `ret_qt != 0` guard stays here because ABI doesn't know about
+               jhyy return-type rules; abi_win_emit_return only owns the
+               `ret` line emission. */
+            abi_win_emit_return(ir, body_val, 0);
         } else {
-            IRVal v = {0};
-            ir_emit_ret(ir, v);
+            /* v2.1.0 Stage 1a.3: abi_win_emit_return — void/sentinel branch. */
+            abi_win_emit_return(ir, body_val, 0);
         }
     }
     #undef body_returns

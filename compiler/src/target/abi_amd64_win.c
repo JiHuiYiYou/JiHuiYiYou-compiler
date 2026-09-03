@@ -127,3 +127,29 @@ void abi_win_emit_function_header(
     ir_emit(ir, ") {\n");
     ir_emit_label(ir, ir_new_block(ir, "start"));
 }
+
+/* v2.1.0 abi_win_emit_return — QBE function-exit `ret` decision.
+ *
+ * Replaces 6 inline `ir_emit_ret(...)` sites in codegen.c (3 in cg_stmt
+ * NODE_RETURN + 3 in cg_func trailing). The sret copy via cg_copy_struct
+ * stays inline at the call sites — abi_win_emit_return only owns the
+ * `ret` line emission.
+ *
+ * Behaviour:
+ *   - is_sret == 1 → empty `ret` (caller already wrote struct to sret slot)
+ *   - is_sret == 0 && val.qbe_type != 0 → `ret <val>`
+ *   - is_sret == 0 && val.qbe_type == 0 → empty `ret` (void / sentinel)
+ *
+ * Byte-equal refactor: same emission, same condition order.
+ */
+void abi_win_emit_return(IRBuf *ir, IRVal val, int is_sret) {
+    if (is_sret) {
+        IRVal v = {0};
+        ir_emit_ret(ir, v);
+    } else if (val.qbe_type != 0) {
+        ir_emit_ret(ir, val);
+    } else {
+        IRVal v = {0};
+        ir_emit_ret(ir, v);
+    }
+}
