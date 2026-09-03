@@ -127,4 +127,42 @@ IRVal abi_win_emit_call_prelude(
     IRVal **out_args
 );
 
+/* v2.1.0 Stage 1a.5: emit_struct_copy — moved from codegen.c (was
+ * `cg_copy_struct`) to abi_amd64_win.c. The function emits QBE IL for
+ * a field-by-field struct value copy. Used by:
+ *   - cg_emit_store for KIND_STRUCT (line 236)
+ *   - cg_copy_struct recursive (line 277)
+ *   - NODE_CALL struct arg copy (line 988)
+ *   - NODE_QUALIFIED_CALL struct arg copy (line 1077)
+ *   - NODE_LET struct init copy (line 1975)
+ *   - NODE_ASSIGN struct copy (line 2021)
+ *   - NODE_RETURN sret copy (line 2122)
+ *   - cg_func trailing sret copy (line 2378)
+ *
+ * Signature changed: was `(CGContext *cg, ...)` → now `(IRBuf *ir, ...)`.
+ * The function only used cg->ir internally, so the IRBuf-only form is
+ * a clean ABI extraction (no CGContext dep).
+ */
+void emit_struct_copy(IRBuf *ir, Type *st, IRVal dst_addr, IRVal src_addr);
+
+/* v2.1.0 Stage 1a.5: abi_win_emit_struct_arg_slot — single struct arg
+ * pass-by-value pattern: alloc8 + emit_struct_copy, returns slot IRVal.
+ *
+ * Replaces the inline struct branch in `cg_expr NODE_CALL` and
+ * `cg_expr NODE_QUALIFIED_CALL` (codegen.c ~lines 985-989 + ~1074-1078):
+ *
+ *   if (at && at->kind == KIND_STRUCT) {
+ *       int asize = (int)type_size(at);
+ *       if (asize < 4) asize = 4;
+ *       IRVal copy_slot = ir_new_tmp(cg->ir, 'l');
+ *       ir_emit_alloc(cg->ir, copy_slot, asize);
+ *       cg_copy_struct(cg, at, copy_slot, arg);
+ *       args[extra + i] = copy_slot;
+ *   }
+ *
+ * Mirrors jhyy-side `abi_win_emit_struct_arg_slot` in
+ * `compiler/src0/target/abi_amd64_win.jhyy` Stage 1.5.
+ */
+IRVal abi_win_emit_struct_arg_slot(IRBuf *ir, IRVal src, Type *struct_type);
+
 #endif

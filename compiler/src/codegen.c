@@ -224,7 +224,8 @@ static void cg_emit_load(CGContext *cg, IRVal dst, Type *t, IRVal addr) {
 /* Emit correct store instruction for the given type.
    Sub-word types use byte/half stores; struct values are field-by-field copy
    (since QBE has no aggregate store). */
-static void cg_copy_struct(CGContext *cg, Type *st, IRVal dst_addr, IRVal src_addr);  /* fwd decl */
+/* v2.1.0 Stage 1a.5: cg_copy_struct moved to abi_amd64_win.c as
+   emit_struct_copy (now takes IRBuf* instead of CGContext*). */
 
 static void cg_emit_store(CGContext *cg, Type *t, IRVal val, IRVal addr) {
     if (!t) {
@@ -233,7 +234,8 @@ static void cg_emit_store(CGContext *cg, Type *t, IRVal val, IRVal addr) {
     }
     if (t->kind == KIND_STRUCT) {
         /* struct value: `val` is the struct's stack-slot address; copy field-by-field */
-        cg_copy_struct(cg, t, addr, val);
+        /* v2.1.0 Stage 1a.5: emit_struct_copy moved to abi_amd64_win.c, takes IRBuf*. */
+        emit_struct_copy(cg->ir, t, addr, val);
         return;
     }
     if (t->kind == KIND_PRIMITIVE) {
@@ -248,39 +250,6 @@ static void cg_emit_store(CGContext *cg, Type *t, IRVal val, IRVal addr) {
         }
     }
     ir_emit_store(cg->ir, qbe_type_of(t), val, addr);
-}
-
-/* Copy a struct value from src_addr to dst_addr, field by field.
-   Handles nested structs recursively. */
-static void cg_copy_struct(CGContext *cg, Type *st, IRVal dst_addr, IRVal src_addr) {
-    if (!st || st->kind != KIND_STRUCT) return;
-    /* Sprint 4.25 W-005 #2 真修: callers may pass a sentinel IRVal (kind=IRVAL_TEMP,
-       id=0) when the value source was unreachable (e.g. cg_func epilogue with
-       body = `if c { return A } else { return B }`). Without this guard, the
-       inner field-by-field emit loop produces `%%t%d =l copy %%t0` lines that
-       QBE rejects with "invalid type for first operand %t0". */
-    if (irval_is_undef(src_addr) || irval_is_undef(dst_addr)) return;
-    for (size_t i = 0; i < st->struct_type.nfields; i++) {
-        Type *ft = st->struct_type.fields[i].type;
-        size_t offset = st->struct_type.fields[i].offset;
-        /* compute field addresses */
-        IRVal src_off = ir_new_tmp(cg->ir, 'l');
-        IRVal dst_off = ir_new_tmp(cg->ir, 'l');
-        if (offset > 0) {
-            ir_emit_binary(cg->ir, src_off, "add", src_addr, ir_new_int((int64_t)offset));
-            ir_emit_binary(cg->ir, dst_off, "add", dst_addr, ir_new_int((int64_t)offset));
-        } else {
-            ir_emit(cg->ir, "    %%t%d =l copy %%t%d\n", src_off.id, src_addr.id);
-            ir_emit(cg->ir, "    %%t%d =l copy %%t%d\n", dst_off.id, dst_addr.id);
-        }
-        if (ft->kind == KIND_STRUCT) {
-            cg_copy_struct(cg, ft, dst_off, src_off);
-        } else {
-            IRVal fval = ir_new_tmp(cg->ir, qbe_type_of(ft));
-            cg_emit_load(cg, fval, ft, src_off);
-            cg_emit_store(cg, ft, fval, dst_off);
-        }
-    }
 }
 
 static IRVal cg_match_pattern(CGContext *cg, IRVal matched, Node *pattern, Type *match_type) {
@@ -980,13 +949,9 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
             cg_expr(cg, d->args[i], &arg);
             Type *at = d->args[i]->type;
             if (at && at->kind == KIND_STRUCT) {
-                /* copy struct to a new stack slot for pass-by-value */
-                int asize = (int)type_size(at);
-                if (asize < 4) asize = 4;
-                IRVal copy_slot = ir_new_tmp(cg->ir, 'l');
-                ir_emit_alloc(cg->ir, copy_slot, asize);
-                cg_copy_struct(cg, at, copy_slot, arg);
-                args[extra + i] = copy_slot;
+                /* v2.1.0 Stage 1a.5: abi_win_emit_struct_arg_slot centralises
+                   the alloc + struct-copy pattern. Replaces 4-line inline. */
+                args[extra + i] = abi_win_emit_struct_arg_slot(cg->ir, arg, at);
             } else {
                 /* implicit conversion (e.g. f64 literal → f32 param via truncd) */
                 if (param_ts && i < nparams && param_ts[i]) {
@@ -1070,12 +1035,9 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
             cg_expr(cg, d->args[i], &arg);
             Type *at = d->args[i]->type;
             if (at && at->kind == KIND_STRUCT) {
-                int asize = (int)type_size(at);
-                if (asize < 4) asize = 4;
-                IRVal copy_slot = ir_new_tmp(cg->ir, 'l');
-                ir_emit_alloc(cg->ir, copy_slot, asize);
-                cg_copy_struct(cg, at, copy_slot, arg);
-                args[extra + i] = copy_slot;
+                /* v2.1.0 Stage 1a.5: abi_win_emit_struct_arg_slot centralises
+                   the alloc + struct-copy pattern. Replaces 4-line inline. */
+                args[extra + i] = abi_win_emit_struct_arg_slot(cg->ir, arg, at);
             } else {
                 /* implicit conversion (e.g. f64 literal → f32 param via truncd) */
                 if (param_ts && i < nparams && param_ts[i]) {
@@ -1972,7 +1934,8 @@ static void cg_stmt(CGContext *cg, Node *n) {
                 if (size < 4) size = 4;
                 IRVal slot = ir_new_tmp(cg->ir, 'l');
                 ir_emit_alloc(cg->ir, slot, size);
-                cg_copy_struct(cg, d->sym->type, slot, src);
+                /* v2.1.0 Stage 1a.5: emit_struct_copy (was cg_copy_struct, moved to ABI). */
+                emit_struct_copy(cg->ir, d->sym->type, slot, src);
                 cg_add_local(cg, d->sym, slot, 1);
             } else {
                 IRVal init_val = {0};
@@ -2018,7 +1981,8 @@ static void cg_stmt(CGContext *cg, Node *n) {
             if (is_stack) {
                 if (d->target->type && d->target->type->kind == KIND_STRUCT) {
                     /* struct copy: val is source address */
-                    cg_copy_struct(cg, d->target->type, slot, val);
+                    /* v2.1.0 Stage 1a.5: emit_struct_copy (was cg_copy_struct). */
+                    emit_struct_copy(cg->ir, d->target->type, slot, val);
                 } else {
                     cg_emit_store(cg, d->target->type, val, slot);
                 }
@@ -2119,7 +2083,8 @@ static void cg_stmt(CGContext *cg, Node *n) {
                    sentinel (e.g. unreachable expression); cg_copy_struct itself
                    is guarded but skipping early keeps the `ret` clean. */
                 if (!irval_is_undef(src)) {
-                    cg_copy_struct(cg, cg->current_ret_type, sret_addr, src);
+                    /* v2.1.0 Stage 1a.5: emit_struct_copy (was cg_copy_struct). */
+                    emit_struct_copy(cg->ir, cg->current_ret_type, sret_addr, src);
                 }
                 /* v1.3.6: emit LIFO defers before `ret` */
                 cg_emit_defers(cg, cg->current_fn);
@@ -2375,7 +2340,8 @@ static void cg_func(CGContext *cg, IRBuf *ir, Node *n, NodeFuncDecl **inline_fns
                which was never overwritten). Without this guard, cg_copy_struct
                emits `copy %t0` and QBE rejects the whole function. */
             if (!irval_is_undef(body_val)) {
-                cg_copy_struct(cg, ret_type, sret_addr, body_val);
+                /* v2.1.0 Stage 1a.5: emit_struct_copy (was cg_copy_struct). */
+                emit_struct_copy(ir, ret_type, sret_addr, body_val);
             }
             /* v2.1.0 Stage 1a.3: abi_win_emit_return — sret branch → empty ret. */
             abi_win_emit_return(ir, body_val, 1);

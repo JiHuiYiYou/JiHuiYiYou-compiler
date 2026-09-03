@@ -187,3 +187,110 @@ IRVal abi_win_emit_call_prelude(
     }
     return ret_slot;
 }
+
+/* v2.1.0 emit_struct_copy — moved from codegen.c (was `cg_copy_struct`).
+ *
+ * Copies a struct value from src_addr to dst_addr, field by field.
+ * Handles nested structs recursively. The QBE-side field load/store
+ * instructions are inlined here (used to call codegen.c's static
+ * cg_emit_load / cg_emit_store — which took CGContext). To keep this
+ * function ABI-pure (no CGContext dep), the sub-word load/store
+ * patterns from cg_emit_load/store are replicated inline.
+ *
+ * The mirror of this function in codegen.c MUST stay byte-equal to this
+ * implementation. Since cg_emit_load/store are private to codegen.c
+ * (still static), we don't move the helper functions; instead, the
+ * pattern is small enough to inline.
+ *
+ * Behaviour byte-equal to the original cg_copy_struct:
+ *   - skip if st is NULL or not KIND_STRUCT
+ *   - skip if src or dst is sentinel IRVal{id=0}
+ *   - per field: compute offset addresses, recurse if nested struct,
+ *     else load+store (sub-word uses loadub/storeb etc.)
+ */
+void emit_struct_copy(IRBuf *ir, Type *st, IRVal dst_addr, IRVal src_addr) {
+    if (!st || st->kind != KIND_STRUCT) return;
+    if (irval_is_undef(src_addr) || irval_is_undef(dst_addr)) return;
+    for (size_t i = 0; i < st->struct_type.nfields; i++) {
+        Type *ft = st->struct_type.fields[i].type;
+        size_t offset = st->struct_type.fields[i].offset;
+        /* compute field addresses */
+        IRVal src_off = ir_new_tmp(ir, 'l');
+        IRVal dst_off = ir_new_tmp(ir, 'l');
+        if (offset > 0) {
+            /* Inline ir_new_int (was static in codegen.c:186; ABI module
+               can't depend on codegen-internal helpers). */
+            IRVal offset_val;
+            offset_val.kind = IRVAL_INT;
+            offset_val.ival = (int64_t)offset;
+            offset_val.qbe_type = 'l';
+            offset_val.name = NULL;
+            ir_emit_binary(ir, src_off, "add", src_addr, offset_val);
+            ir_emit_binary(ir, dst_off, "add", dst_addr, offset_val);
+        } else {
+            ir_emit(ir, "    %%t%d =l copy %%t%d\n", src_off.id, src_addr.id);
+            ir_emit(ir, "    %%t%d =l copy %%t%d\n", dst_off.id, dst_addr.id);
+        }
+        if (ft->kind == KIND_STRUCT) {
+            emit_struct_copy(ir, ft, dst_off, src_off);
+        } else {
+            /* Inline cg_emit_load + cg_emit_store for ft (primitive / ptr / etc.) */
+            IRVal fval = ir_new_tmp(ir, qbe_type_of(ft));
+            /* load */
+            if (ft->kind == KIND_PRIMITIVE) {
+                const char *insn = NULL;
+                switch (ft->prim) {
+                case PRIM_I8:   insn = "loadsb"; break;
+                case PRIM_U8:   insn = "loadub"; break;
+                case PRIM_BOOL: insn = "loadub"; break;
+                case PRIM_I16:  insn = "loadsh"; break;
+                case PRIM_U16:  insn = "loaduh"; break;
+                default: break;
+                }
+                if (insn) {
+                    /* sub-word: always returns word */
+                    ir_emit(ir, "    %%t%d =w %s %%t%d\n", fval.id, insn, src_off.id);
+                } else {
+                    ir_emit_load(ir, fval, qbe_type_of(ft), src_off);
+                }
+            } else {
+                ir_emit_load(ir, fval, qbe_type_of(ft), src_off);
+            }
+            /* store */
+            if (ft->kind == KIND_PRIMITIVE) {
+                switch (ft->prim) {
+                case PRIM_I8: case PRIM_U8: case PRIM_BOOL:
+                    ir_emit(ir, "    storeb %%t%d, %%t%d\n", fval.id, dst_off.id);
+                    break;
+                case PRIM_I16: case PRIM_U16:
+                    ir_emit(ir, "    storeh %%t%d, %%t%d\n", fval.id, dst_off.id);
+                    break;
+                default:
+                    ir_emit_store(ir, qbe_type_of(ft), fval, dst_off);
+                    break;
+                }
+            } else {
+                ir_emit_store(ir, qbe_type_of(ft), fval, dst_off);
+            }
+        }
+    }
+}
+
+/* v2.1.0 abi_win_emit_struct_arg_slot — pass a struct arg by slot pointer.
+ *
+ * Per ABI § 3 LOCKED: struct args are passed by slot pointer. Allocate
+ * a stack slot of `type_size(struct_type)` bytes (rounded up to 4), copy
+ * the source struct into it, and return the slot address IRVal. The
+ * caller passes this slot as the actual argument to `call $fn`.
+ *
+ * Byte-equal refactor of the inline struct-branch in cg_expr NODE_CALL
+ * and NODE_QUALIFIED_CALL.
+ */
+IRVal abi_win_emit_struct_arg_slot(IRBuf *ir, IRVal src, Type *struct_type) {
+    int asize = struct_type ? (int)type_size(struct_type) : 0;
+    if (asize < 4) asize = 4;
+    IRVal copy_slot = ir_new_tmp(ir, 'l');
+    ir_emit_alloc(ir, copy_slot, asize);
+    emit_struct_copy(ir, struct_type, copy_slot, src);
+    return copy_slot;
+}
