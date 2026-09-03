@@ -814,21 +814,84 @@ JHYY 字符串字面量在 QBE data 段中以 UTF-8 + NUL 终止符存储。
 
 ---
 
-## 12. 版本历史
+## 13. Multi-target ABI & UEFI Alignment (v2.2.0 🔒)
 
-> **章节号说明**:OS-era ABI 内容(`Cap<T>` wire format + 多 target ABI + Debug ABI)按 [`coordination.md`](../../../jhyy_OS/docs/coordination.md) § 5 规划落 § 13。**v1.0.0 § 12 仅保留为版本历史**,不扩展;v2.0 启动后 § 13 增补不开 v1.0.0 lock 边界。
+> **状态**:🔒 v2.2.0 锁定。本节描述 v2.0 阶段 ship 的多 target ABI 表面 + freestanding 约定 + UEFI 跟 MS x64 对齐契约,跟 [`compiler/src0/abi_amd64_win.jhyy`](../../src0/abi_amd64_win.jhyy) + [`compiler/src0/abi_amd64_win_freestanding.jhyy`](../../src0/abi_amd64_win_freestanding.jhyy) v2.1.0 实现字节一致。
+> **OS-era wire types / Cap / IPC / Debug / GUI** 落地内容已搬至 § 14(per v2.2.0 restructure,避开 v2.0 multi-target 内容跟 v3.x wire-format 内容同号异义)。
+> **引用**:D-GUI-12 LOCKED(UEFI = MS x64)/ D1 / D25 / D40 / D41 / D43;[`../jhyy_OS/docs/coordination.md § 3`](../../../jhyy_OS/docs/coordination.md)。
+
+### 13.1 Target 三元组(arch-vendor-os-environment)
+
+v2.0 阶段 ship 3 active targets + 1 reserved(per `compiler/src/target/target_dispatch.h:21-25` + `compiler/src0/target_dispatch.jhyy:26-28`):
+
+| Triple | Architecture | Vendor | OS | Environment | Status |
+|--------|--------------|--------|----|-------------|--------|
+| `amd64_win` | x86_64 | w64 | mingw32 | hosted | v1.x 兼容(default v2.0)|
+| `amd64_win_freestanding` | x86_64 | w64 | none | freestanding(UEFI / 裸机)| v2.1.0 ship |
+| `amd64_sysv_stub` | x86_64 | linux | none | hosted(stub)| v2.0 active,cg_module 仍 fatal;实 impl v2.x M2 |
+| `amd64_sysv_freestanding` | (reserved) | (TBD) | (TBD) | freestanding(SysV)| v2.x M2 预留,实 impl v2.x M2 |
+
+**CLI dispatch**:`jhyy.exe compile <src.jhyy> --target=<triple> -o <out>`;默认 = `amd64_win`(per v1.x 兼容)。
+
+### 13.2 多 target ABI 差异表
+
+per v2.1.0 实测(Stage 3 byte-equal 实验证明 hosted vs freestanding MS x64 signature 一致;`jhyy_il_diff` 验证):
+
+| 维度 | `amd64_win` | `amd64_win_freestanding` | `amd64_sysv_stub` (v2.x M2) |
+|------|-------------|--------------------------|------------------------------|
+| 参数寄存器 | rcx/rdx/r8/r9(4)| rcx/rdx/r8/r9(4)| rdi/rsi/rdx/rcx/r8/r9(6)|
+| shadow space | 32 B | 32 B | 0 |
+| link ucrt | ✅(hosted)| ❌ | ❌ |
+| link vcruntime | ✅(hosted)| ❌ | ❌ |
+| link glibc / musl | ❌ | ❌ | ✅(hosted)/ ❌(freestanding)|
+| 函数 entry | `main_jhyy`(CRT 调)| 用户写 `efi_main` / `_start` | 用户写 `main`(libc 调)/ `_start`(freestanding)|
+| struct pass-by-value | per v0.4 ABI(MS x64)| per v0.4 ABI(同 MS x64)| per v0.4 ABI(SysV)|
+| 寄存器返回值 | rax | rax | rax |
+| QBE `-t` flag | `amd64_win` | `amd64_win`(per `target_qbe_flag()`)| `amd64_sysv` |
+
+### 13.3 freestanding 约定
+
+- **entry point** 必须由用户自行提供:`efi_main(ImageHandle: *u8, SystemTable: *u8) -> Status`(UEFI 场景)/ `_start() -> ()`(裸机场景)。jhyy runtime 不提供默认 entry。
+- **jhyy runtime helper 不可用**:`memcpy` / `memset` / `malloc` 等 jhyy runtime bridge **不**出现在 freestanding binary 里(per `compiler/runtime/runtime.c` NOT linked)。所有依赖由用户通过 `extern fn` 显式声明 + 按目标 ABI 调用。
+- **不 link** ucrt / vcruntime / libc / glibc / musl;用户可手动 link 自己的 lib(per lld-link /v2.3.0 OVMF boot)。
+- **ABI 调用**:hosted → MS x64(`amd64_win_freestanding`)/ SysV(`amd64_sysv_stub_freestanding`,待 v2.x);所有 `extern fn` 显式声明遵循对应 ABI。
+- **数据段 / 符号**:`.data` / `.bss` 走 QBE 默认,无 `_` prefix(vs MSVC `_main` 风格;jhyy hosted 同样无 prefix)。
+- **v2.1.0 no-crt 简化**:`abi_fs_no_crt_init` 是 no-op(per `compiler/src/target/abi_amd64_win_freestanding.c:73-84`);真 ucrt-bypass 走 v2.3.0 lld-link `/SUBSYSTEM:EFI_APPLICATION` + OVMF boot 验证。
+
+### 13.4 UEFI 跟 Windows x64 ABI 对齐(per D-GUI-12)
+
+**契约**:UEFI 调用约定 = EFIAPI = MS x64(per D-GUI-12,2026-08-05 LOCKED)。这意味着 `amd64_win_freestanding` 编出的 binary 走 OVMF 时不需要 ABI 切换 — MS x64 直接生效。
+
+具体规则:
+- **4 参数寄存器**:`rcx` / `rdx` / `r8` / `r9`(顺序),多余参数走 stack(QBE `- -t amd64_win` 处理)
+- **shadow space**:32 字节(由调用方分配;QBE 处理)
+- **struct pass-by-value**:per v0.4 ABI(>8 字节走 sret 隐藏指针,`l %ret` 前置;≤8 字节直接寄存器)
+- **callee-saved 保存恢复**:rbx / rbp / rdi / rsi / r12-r15(QBE 处理)
+
+**实验证据**:v2.1.0 Stage 3 byte-equal .il diff(`jhyy_il_diff`)证明 hosted vs freestanding 同源 .il 字节一致(`a4f8d744...` sha256 一致),确认 MS x64 signature 在两个 target 间无差异。
+
+**OS 端对齐**:`coordination.md § 3 D-GUI-12` 已锁;UEFI 启动由 OVMF 直接接受 PE/COFF x86-64 binary。
+
+### 13.5 跟 jhyy_OS 端 ABI 对齐(per `coordination.md § 0` Critical Path)
+
+- **v2.0 期间定基础 ABI**(§ 13.1-13.4),作为 M1 OS 启动的跨项目契约。
+- **M1 启动前**跟 jhyy_OS 端 cross-check 详细 ABI(struct layout / calling convention);Stage 1 末跟 `coordination.md § 3` 决议 D-GUI-12 / D1 / D25 / D40 / D41 / D43 对齐。
+- **跨边界 Q-OS-001~009 全闭环**(per `coordination.md § 6` + 2026-08-12 校准);Q-Compiler-001~007 全 ✅(per CLAUDE.md)。
+- **v2.2.0 期间不引入新 cross-boundary 问题**;任何 OS 端 vs 编译器 spec 措辞冲突走 Q-OS-XXX / Q-Compiler-XXX 流程。
 
 ---
 
-## 13. OS-era ABI(Sprint 3g / v2.0 / v3.x 落地,v2.0 启动前锁)
+## 14. OS-era ABI wire types (v3.x landing) 🔒 semantically locked
 
-> **状态**:⏳ 草案 — 等 sprint 3g 主体 + v2.0 milestone 启动前锁。内容由下列 spec 起草:
+> **状态**:🔒 语义锁(从 v1.0.0 § 13 搬入,§ 编号 +1 避开 v2.2.0 multi-target 内容冲突)。内容由 v3.x 阶段的 OS 端 sprint 3g / 3i / 3j / M8d 落地;layout / wire 字节由对应 sprint 决定。
+> **renumbered 注**:本 § 14 = 旧 v1.0.0 § 13.1-13.6 verbatim 搬入(per v2.2.0 restructure)。除 § 编号 +1 + 段首 renumbered note 外,正文一字不改。
+> **关联**:
+> - [`coordination.md`](../../../jhyy_OS/docs/coordination.md) § 3 D-GUI-1 ~ D-GUI-10 / D16 / D25
 > - [`v3.x-capability-spec.md`](../../plans/roadmap/v3.x-capability-spec.md) § 内存布局(`Cap<T>` runtime layout)
-> - [`v2.0.0-os-prep.md`](../../plans/v2/v2.0.0-os-prep.md) § 5.1 #5 + D7(多 target + freestanding)
+> - [`v2.0.0-os-prep.md`](../../plans/v2/v2.0.0-os-prep.md) § 5.1 #5 + D7
 > - [`v0.0.4-debug-abi.md`](../../../jhyy_OS/docs/v0.0.4-debug-abi.md)(DebugEvent / ErrChain / KernelStateHistory + ProvenanceInfo DAG)
-> - D16(Q-OS-007 闭环):cap-offset IPC msg header wire 形式 `{msg_tag: u32, n_caps: u16, cap_offsets: [u16; n]}`
 
-### 13.1 多 target ABI 表
+### 14.1 多 target ABI 表(v3.x 视角)
 
 | Target | 调用约定 | Calling convention 链接 | OS 使用 |
 |--------|---------|------------------------|---------|
@@ -837,7 +900,9 @@ JHYY 字符串字面量在 QBE data 段中以 UTF-8 + NUL 终止符存储。
 | `amd64_sysv` | System V AMD64 | per `v2.x-qbe-rewrite.md`,v2.x 末 | post-MVP Linux port |
 | `amd64_sysv_freestanding` | SysV AMD64, 不 link libc | per `v2.x-qbe-rewrite.md`,v2.x 末 | post-MVP Linux 嵌入式 |
 
-### 13.2 Cap<T> Wire Format(`Cap<T>` runtime layout)
+> **注**:v3.x 阶段 4-target 视角;v2.0 当前 ship 3 active(per § 13.1)。`amd64_sysv_freestanding` 是 v3.x 预留,实 impl 推 v2.x M2。
+
+### 14.2 Cap<T> Wire Format(`Cap<T>` runtime layout)
 
 c-typedef 草案见 [`v3.x-capability-spec.md`](../../plans/roadmap/v3.x-capability-spec.md) § 内存布局(初步 8B = cnode_idx(u32) + depth(u8) + rights(u16) + 1B padding;phantom field 0 字节)。
 
@@ -862,7 +927,7 @@ typedef struct {
 } ProvenanceInfo;                  // sizeof = 136 字节, alignof = 8(D40 后 jhyy 侧同为 136B)
 ```
 
-### 13.3 IPC msg header(含 cap-offset 表,D16 闭环)
+### 14.3 IPC msg header(含 cap-offset 表,D16 闭环)
 
 ```
 +----------------+-----------------+----------------------------+
@@ -873,16 +938,16 @@ typedef struct {
 
 `n_caps = 0` 时,`cap_offsets` 字段省略(只剩 8B header)。`msg_tag` 决定 payload 协议类型。**Cap<T> 在 IPC 中的 cnode_idx 改写** 由 cap-offset 表驱动(per `v0.0.4-debug-abi.md` § 7 + `v0.0.1-capability.md` § 1 + D16)。
 
-### 13.4 Debug ABI(`v0.0.4-debug-abi.md` 镜像,🔒 2026-08-12 锁)
+### 14.4 Debug ABI(`v0.0.4-debug-abi.md` 镜像,🔒 2026-08-12 锁)
 
 OS 端 debug infra 的 c-typedef + wire format,落地在本 §。**尺寸全部 align 8,已定案**(per D41):
 
 | # | 类型 | 尺寸 | 来源 |
 |---|------|------|------|
-| § 13.4.1 | `DebugEvent`(定长 header + nested payload 约定)| **56B** | `v0.0.4-debug-abi.md` § 2 + § 3 + § 4 |
-| § 13.4.2 | `ErrChain`(含 SourceLoc 24B 内嵌)| **64B** | 同 § 5 |
-| § 13.4.3 | `StateTransition` / `KernelStateHistory`(ring buffer N=256)| **48B** / **12304B** | 同 § 6 |
-| § 13.4.4 | `ProvenanceInfo`(Confidence 三级标记 + DAG parents/children K=8)| **136B** | 同 § 4 + § 7(**同 § 13.2 c-typedef,镜像对齐**)|
+| § 14.4.1 | `DebugEvent`(定长 header + nested payload 约定)| **56B** | `v0.0.4-debug-abi.md` § 2 + § 3 + § 4 |
+| § 14.4.2 | `ErrChain`(含 SourceLoc 24B 内嵌)| **64B** | 同 § 5 |
+| § 14.4.3 | `StateTransition` / `KernelStateHistory`(ring buffer N=256)| **48B** / **12304B** | 同 § 6 |
+| § 14.4.4 | `ProvenanceInfo`(Confidence 三级标记 + DAG parents/children K=8)| **136B** | 同 § 4 + § 7(**同 § 14.2 c-typedef,镜像对齐**)|
 
 **布局总原则**(per D41 R1/R2,适用于本 § 全部 wire-format):jhyy **无 `packed` / `repr(...)`**,紧凑布局不可表达 → 所有跨边界 struct 一律**自然对齐**,字段按对齐降序排列,padding 必须在 c-typedef 里显式写成 `_pad*` 字段(不允许隐式空洞,否则两侧尺寸对不上)。
 
@@ -890,26 +955,26 @@ OS 端 debug infra 的 c-typedef + wire format,落地在本 §。**尺寸全部 
 
 **FFI 提醒**(per D41 R4):本 § 全部 struct 均为**内存布局契约**(指针传递),不得按值跨 FFI 边界 —— 见 § 7.4。M3 集成 `SysError.chain` 时须以指针传 `ErrChain`。
 
-`v1.0.0 § 11 已知局限` 锁的影响:§ 13.4 新增内容在 debug build 启用,release build strip(per `v0.0.1-capability.md § 5.2` "side table 可 strip")— **不污染 v1.0.0 locked baseline 的 runtime layout**。
+`v1.0.0 § 11 已知局限` 锁的影响:§ 14.4 新增内容在 debug build 启用,release build strip(per `v0.0.1-capability.md § 5.2` "side table 可 strip")— **不污染 v1.0.0 locked baseline 的 runtime layout**。
 
-### 13.5 验收标准 / 触发条件
+### 14.5 验收标准 / 触发条件
 
 | 内容 | 触发 sprint | OS 节点 | 详细度 |
 |------|------------|--------|-------|
-| § 13.1 多 target 表 | v2.0(v2.0.0-os-prep § 5.1 #5)| M1 启动可达 | multi-target dispatcher test |
-| § 13.2 Cap<T> wire | v3.1 sprint 3g.5(D23/D27)| M4 capability | byte-equal 跟 OS 端 cap 表 |
-| § 13.3 IPC header | v3.1 sprint 3g(D16)| M5b IPC | cap-offset 双路径 emit(fast + metadata 段)|
-| § 13.4 Debug ABI | v3.1 sprint 3g(Q-Compiler-007 ✅ 2026-08-12 闭环 / D41)| M5b IPC | spec 🔒 已锁,尺寸已定案;kernel introspection syscall 落地见 `v0.0.5-syscall-abi-update.md`(阻塞已解除,待 OS 起)|
-| § 13.6 GUI wire types + version | v3.x sprint 3i / 3j / M8d(per coordination.md § 3 D-GUI-1 ~ D-GUI-10,2026-09-01 🔒)| M8d compositor | `Cap<Shm>` wire + 5 GUI cap types + append-only version,语义锁;layout 由 sprint 3i 定|
+| § 14.1 多 target 表 | v2.0(v2.0.0-os-prep § 5.1 #5)| M1 启动可达 | multi-target dispatcher test |
+| § 14.2 Cap<T> wire | v3.1 sprint 3g.5(D23/D27)| M4 capability | byte-equal 跟 OS 端 cap 表 |
+| § 14.3 IPC header | v3.1 sprint 3g(D16)| M5b IPC | cap-offset 双路径 emit(fast + metadata 段)|
+| § 14.4 Debug ABI | v3.1 sprint 3g(Q-Compiler-007 ✅ 2026-08-12 闭环 / D41)| M5b IPC | spec 🔒 已锁,尺寸已定案;kernel introspection syscall 落地见 `v0.0.5-syscall-abi-update.md`(阻塞已解除,待 OS 起)|
+| § 14.6 GUI wire types + version | v3.x sprint 3i / 3j / M8d(per coordination.md § 3 D-GUI-1 ~ D-GUI-10,2026-09-01 🔒)| M8d compositor | `Cap<Shm>` wire + 5 GUI cap types + append-only version,语义锁;layout 由 sprint 3i 定|
 
-### 13.6 GUI wire types + append-only protocol version(per coordination.md § 3 D-GUI-1 ~ D-GUI-10)
+### 14.6 GUI wire types + append-only protocol version(per coordination.md § 3 D-GUI-1 ~ D-GUI-10)
 
 > **状态**:🔒 语义锁(layout/wire 由 sprint 3i / 3j / M8d 落地,以下为不可改方向)。
 > **关联**:[`coordination.md`](../../../jhyy_OS/docs/coordination.md) § 3 D-GUI-1 ~ D-GUI-10;[`v3.x-capability-spec.md`](../../plans/roadmap/v3.x-capability-spec.md) `Cap<Shm>` 例外条款;[`jhyy_OS/docs/deep_research/报告§11§12决策与拍板流程说明.markdown`](../../../jhyy_OS/docs/deep_research/报告§11§12决策与拍板流程说明.markdown) § 11 协议草案。
 
-#### 13.6.1 `Cap<Shm>` wire format(sprint 3i 落地)
+#### 14.6.1 `Cap<Shm>` wire format(sprint 3i 落地)
 
-wire 形式遵循通用 `Cap<T>` 8 字节 layout(per § 13.2 + `v3.x-capability-spec.md` `Cap<Shm>` 例外条款):
+wire 形式遵循通用 `Cap<T>` 8 字节 layout(per § 14.2 + `v3.x-capability-spec.md` `Cap<Shm>` 例外条款):
 
 ```
 +----------+-------+--------+---------+
@@ -926,21 +991,21 @@ wire 形式遵循通用 `Cap<T>` 8 字节 layout(per § 13.2 + `v3.x-capability-
   - bit 4-15: reserved(必须 0)
 - `Cap<Shm, RO>` / `Cap<Shm, W>` 是独立类型(per `v3.x-capability-spec.md` `Cap<Shm>` 例外 1),各自有独立 cnode slot;**禁止**同 slot 跨权利类型复用(避免升权攻击)
 
-#### 13.6.2 IPC msg header(Cap<Shm> 跨域封送)
+#### 14.6.2 IPC msg header(Cap<Shm> 跨域封送)
 
-`Cap<Shm>` 经 § 13.3 IPC header 封送,跨域封送额外带 `(region_id: u32, rights: u16, epoch: u32)` 9 字节三元组(per `v0.0.4-debug-abi.md` § 7 byte-equal axiom + D-GUI-2 audit record):
+`Cap<Shm>` 经 § 14.3 IPC header 封送,跨域封送额外带 `(region_id: u32, rights: u16, epoch: u32)` 9 字节三元组(per `v0.0.4-debug-abi.md` § 7 byte-equal axiom + D-GUI-2 audit record):
 
 ```
 IPC msg payload(Cap<Shm> 场景,append-only):
 +--------------------+------------------+-----------+--------+
 | cap_offset (u16)   | region_id (u32)  | rights(u16)| epoch  |
 +--------------------+------------------+-----------+--------+
-         ↓ 引用 § 13.3 cap_offsets         ↓ 三元组(per D-GUI-2)
+         ↓ 引用 § 14.3 cap_offsets         ↓ 三元组(per D-GUI-2)
 ```
 
 `epoch` 走 D-GUI-7 协议(Logical invalidation → Mapping protection → Explicit confirmation → Resource release),`AckRevoke(epoch)` 由 client 主动发;grace period 默认值 TBD(🔧 10ms 倾向)。
 
-#### 13.6.3 GUI cap 类型清单(M8d v0,per D-GUI-10)
+#### 14.6.3 GUI cap 类型清单(M8d v0,per D-GUI-10)
 
 M8d v0 仅 4 个 interface + 5 个 cap 类型(per `v0.0.4-gui-explorations.md` § 6 D34 + `jhyy_gui_subsystem.md § 9`):
 
@@ -950,11 +1015,11 @@ M8d v0 仅 4 个 interface + 5 个 cap 类型(per `v0.0.4-gui-explorations.md` �
 | `Cap<Surface>` | window / view(per `v0.0.1-capability.md § 0` 句柄表) | client(创建者) | `R / W / Compose / Destroy` |
 | `Cap<Buffer>` | shm-backed pixel buffer | client + compositor | `R / W`(互斥,per L2) |
 | `Cap<Seat>` | input device focus | 仅 trusted compositor(single-owner,per D-GUI-3) | `R / Focus / Inject` |
-| `Cap<Shm>` | shared memory region(per § 13.6.1) | client + compositor | `R / W / RO / SHARE` |
+| `Cap<Shm>` | shared memory region(per § 14.6.1) | client + compositor | `R / W / RO / SHARE` |
 
 **Axiom C1 强制**(per D-GUI-5):任何 cap 引用经 `Cap<T>` + D16 offset,wire-format 不出现物理地址 / 文件描述符 / CSpace 索引 / GPU resource id / device handle。
 
-#### 13.6.4 协议版本策略(append-only,per D-GUI-8)
+#### 14.6.4 协议版本策略(append-only,per D-GUI-8)
 
 ```
 GUI_PROTOCOL_VERSION: u32 = 0
@@ -964,14 +1029,14 @@ GUI_PROTOCOL_VERSION: u32 = 0
 
 **append-only 规则**:
 - ✅ 新增 interface / request / event / cap parameter **仅追加到现有 list 末尾**(字段顺序不改,新字段加末尾)
-- ✅ `rights` 位分配 reserved 区(per § 13.6.1 bit 4-15)可启用,启用后低版本 client 收到 `GUI_PROTOCOL_VERSION_MISMATCH` 拒绝
+- ✅ `rights` 位分配 reserved 区(per § 14.6.1 bit 4-15)可启用,启用后低版本 client 收到 `GUI_PROTOCOL_VERSION_MISMATCH` 拒绝
 - ❌ **禁止**删除 request / event / cap / 字段
 - ❌ **禁止**改 cap move 语义 / revoke 协议 / epoch 计数器行为
 - ❌ **禁止**重排 cap-offset 字段顺序 / 改 rights 位编码
 
 **breaking change**(删 request / 改 cap move 语义 / 重排 cap-offset 字段 / 改 epoch 协议)→ 升 `GUI_PROTOCOL_VERSION := 1`,compositor 与 client 必须同时支持新旧两版才能协商通过。
 
-#### 13.6.5 L1–L4 生命周期不变式(per D-GUI-9)
+#### 14.6.5 L1–L4 生命周期不变式(per D-GUI-9)
 
 runtime 由 OS 端强制,jhyy 类型层无新字段:
 
@@ -980,11 +1045,11 @@ runtime 由 OS 端强制,jhyy 类型层无新字段:
 - **L3 release 前不可复用**:client 收到 `BufferReleased` 后方可恢复写
 - **L4 destroy 级联**:`Surface.Destroy` 或 client cap 被 revoke → surface 进 `Dying`,所有未确认 buffer 进 revoke(per D-GUI-7 4 阶段)
 
-#### 13.6.6 Seat focus-epoch 验证
+#### 14.6.6 Seat focus-epoch 验证
 
 `focus_epoch: u64` 改变使所有 pending event 失效;事件投递前**重新验证** `focus == target && epoch still valid`(Nitpicker 模式,per `v0.0.4-gui-explorations.md` § 3.3 D28 锁定);`Cap<Seat>` single-owner 由 trusted compositor 持有,client 仅持 `Cap<Seat, Listen>` 派生。
 
-#### 13.6.7 错误码(`GuiError` tag,u32,per `jhyy_gui_subsystem.md § 8`)
+#### 14.6.7 错误码(`GuiError` tag,u32,per `jhyy_gui_subsystem.md § 8`)
 
 | Tag | Code | 含义 |
 |-----|------|------|
