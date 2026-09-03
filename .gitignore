@@ -1,5 +1,6 @@
 compiler/build/*
 !compiler/build/bin/
+!compiler/build/ovmf/.gitignore          # v2.3.0 OVMF firmware dir carveout (inner .gitignore ignores *.fd)
 compiler/build/bin/*
 !compiler/build/bin/.gitkeep
 !compiler/build/bin/regress.py
