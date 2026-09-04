@@ -1,0 +1,88 @@
+// efi.jhyy — v2.3.0 Stage 1: UEFI 2.10 minimal struct/protocol definitions
+// for hello-freestanding.efi. Per D-GUI-12, EFIAPI = MS x64. Per D40,
+// NULL-ended chain → *T (ConOut pointer); per D41, no DWARF generated.
+//
+// Layout strictly per UEFI 2.10 § 4.3 Table 4-3 (EFI_SYSTEM_TABLE) and
+// § 12.4 (EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL). Skipped fields kept as u64
+// placeholders to preserve offsets.
+//
+// This file lives under compiler/tests/examples/hello-freestanding/.
+// Importing: `import efi;` (jhyy import syntax is flat — no path with `/`).
+//
+// Function pointer limitation (v2.3.0 W-062): jhyy parser rejects
+// `fn (...) -> ...` as a type alias. Protocol fn ptrs are modeled as u64
+// placeholders and invoked via the assembly helper `efi_call_via_ptr`
+// (efi_helpers.s, linked by scripts/dev/build/build-efi.sh).
+//
+// Reference:
+//   docs/abis/jhyy-abi-v1.0.0.md § 13 (multi-target ABI + freestanding)
+//   docs/abis/jhyy-lang-spec-v1.3.0.md § 18 (freestanding mode)
+//   UEFI 2.10 § 4.3 (EFI_SYSTEM_TABLE), § 12.4 (EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL)
+
+// EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL (UEFI 2.10 § 12.4). 9 fn ptrs × 8 bytes = 72 bytes.
+// Function pointers modeled as u64 due to W-062 (jhyy parser limitation).
+//   +0x00  reset                EFI_TEXT_RESET
+//   +0x08  output_string        EFI_TEXT_STRING       ← only one we call
+//   +0x10  test_string          u64 placeholder
+//   +0x18  query_mode           u64 placeholder
+//   +0x20  set_mode             u64 placeholder
+//   +0x28  set_attribute        u64 placeholder
+//   +0x30  clear_screen         u64 placeholder
+//   +0x38  set_cursor_position  u64 placeholder
+//   +0x40  enable_cursor        u64 placeholder
+type EfiSimpleTextOutputProtocol = struct {
+    reset: u64,
+    output_string: u64,
+    test_string: u64,
+    query_mode: u64,
+    set_mode: u64,
+    set_attribute: u64,
+    clear_screen: u64,
+    set_cursor_position: u64,
+    enable_cursor: u64,
+}
+
+// EFI_TABLE_HEADER (UEFI 2.10 § 4.2 Table 4-2): 24 bytes total
+type EfiTableHeader = struct {
+    signature: u64,
+    revision: u32,
+    header_size: u32,
+    crc32: u32,
+    reserved: u32,
+}
+
+// EFI_SYSTEM_TABLE (UEFI 2.10 § 4.3 Table 4-3). Minimum fields to reach ConOut.
+// Fields between firmware_revision and con_out kept as u64 placeholders to
+// preserve offsets (ConOut lives at offset 0x40 in the spec).
+//
+// Layout (x86_64, all pointers 8-byte aligned):
+//   +0x00  hdr                  EFI_TABLE_HEADER        (24 bytes)
+//   +0x18  firmware_vendor      *u8   (CHAR16* actually, but unused here)
+//   +0x20  firmware_revision    u32
+//   +0x24  _pad                 u32  (alignment pad before next pointer)
+//   +0x28  console_in_handle    EFI_HANDLE  (u64 placeholder)
+//   +0x30  con_in               *u8 placeholder
+//   +0x38  console_out_handle   EFI_HANDLE  (u64 placeholder)
+//   +0x40  con_out              *EfiSimpleTextOutputProtocol  ← TARGET
+//   +0x48  standard_error_handle EFI_HANDLE (u64 placeholder)
+//   +0x50  std_err              *u8 placeholder
+//   +0x58  runtime_services     *u8 placeholder
+//   +0x60  boot_services        *u8 placeholder
+//   +0x68  number_of_table_entries u64
+//   +0x70  configuration_table  *u8 placeholder
+type EfiSystemTable = struct {
+    hdr: EfiTableHeader,
+    firmware_vendor: *u8,
+    firmware_revision: u32,
+    pad1: u32,
+    placeholder_0x28: u64,
+    placeholder_0x30: u64,
+    placeholder_0x38: u64,
+    con_out: *EfiSimpleTextOutputProtocol,
+    placeholder_0x48: u64,
+    placeholder_0x50: u64,
+    placeholder_0x58: u64,
+    placeholder_0x60: u64,
+    placeholder_0x68: u64,
+    placeholder_0x70: u64,
+}
