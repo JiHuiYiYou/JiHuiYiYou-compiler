@@ -32,6 +32,8 @@ Sprint v1.4.7 (2026-08-14): 加 --all / --include-informational / _GATED_DEFAULT
 """
 import argparse
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -91,6 +93,85 @@ def _run_one(binary: str, label: str, tests, timeout, enforce_baseline_hash):
     return result
 
 
+def test_byte_equal(tests=None):
+    """Run byte-equal 三件套 (D26) on a list of target tests.
+    Per coordination.md § 3 D26 (2026-08-05 锁): closure invariant is .il
+    + .s byte-equal. Per D43 (2026-09-01 锁): 阶段性 self-equal, jhyy_N ==
+    jhyy_{N+1}, not cross-version.
+
+    Args:
+        tests: list of test names without .jhyy suffix, or None for default
+               5 tests (hello / struct_val_pass / fib_renamed /
+               nested_struct_deep / big_test).
+
+    Returns 0 on 5/5 PASS, 1 on any FAIL (per feedback_fix_evaluation_rule).
+    """
+    if tests is None:
+        tests = [
+            "hello.jhyy",
+            "struct_val_pass.jhyy",
+            "fib_renamed.jhyy",
+            "nested_struct_deep.jhyy",
+            "big_test.jhyy",
+        ]
+    else:
+        tests = [t if t.endswith(".jhyy") else f"{t}.jhyy" for t in tests]
+
+    examples_dir = Path(__file__).resolve().parents[2] / "tests" / "examples"
+    bootstrap_dir = examples_dir.parent / "bootstrap"
+    byte_equal_sh = bootstrap_dir / "byte_equal.sh"
+
+    if not byte_equal_sh.exists():
+        print(f"byte-equal: byte_equal.sh not found at {byte_equal_sh}", file=sys.stderr)
+        return 1
+
+    passed = 0
+    failed = 0
+    for t in tests:
+        test_path = examples_dir / t
+        if not test_path.exists():
+            print(f"byte-equal: SKIP {t} (file not found)")
+            continue
+        try:
+            # text=True + errors='replace' so non-UTF-8 bytes from bash
+            # output don't crash the reader thread (some compile flows emit
+            # binary debug info that includes raw bytes). On Windows, must
+            # resolve "bash" to full path via shutil.which — bare "bash" gets
+            # routed to WSL installer alias instead of MSYS2 bash.
+            bash_path = shutil.which("bash") or "bash"
+            result = subprocess.run(
+                [bash_path, str(byte_equal_sh), str(test_path)],
+                env=os.environ.copy(),
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=60,
+            )
+            rc = result.returncode
+        except subprocess.TimeoutExpired:
+            print(f"byte-equal: FAIL {t} (timeout)")
+            failed += 1
+            continue
+        except Exception as e:
+            print(f"byte-equal: FAIL {t} (exception: {e})")
+            failed += 1
+            continue
+
+        if rc == 0:
+            passed += 1
+            print(f"byte-equal: PASS {t}")
+        else:
+            failed += 1
+            print(f"byte-equal: FAIL {t}")
+            if result.stdout:
+                print(result.stdout)
+            if result.stderr:
+                print(result.stderr, file=sys.stderr)
+
+    print(f"byte-equal: {passed}/5 PASS" if len(tests) == 5 else f"byte-equal: {passed} PASS / {failed} FAIL")
+    return 0 if failed == 0 else 1
+
+
 def _print_matrix_row(idx, total, binary, label, result, is_informational):
     """Print one matrix row."""
     tag = "INFORMATIONAL" if is_informational else "GATED"
@@ -135,6 +216,10 @@ def main():
                     help="Per-test timeout in seconds (default 20).")
     ap.add_argument("--no-baseline-check", action="store_true",
                     help="Skip phantom-binary (mtime vs source) check for all runs.")
+    ap.add_argument("--byte-equal", action="store_true",
+                    help="Run byte-equal 三件套 check (per D26, requires JHYY_V1 "
+                         "+ JHYY_V2 env vars; default jhyy_v1.exe.exe + jhyy.exe). "
+                         "Opt-in: does NOT affect default regress baseline (104/104).")
     args = ap.parse_args()
 
     # Parse --tests (comma-separated → list)
@@ -148,6 +233,11 @@ def main():
         sha = save_baseline_hash(args.binary)
         print(f"Saved baseline: {args.binary}.sha256 = {sha}")
         sys.exit(0)
+
+    if args.byte_equal:
+        # D26 byte-equal 三件套 (opt-in; doesn't affect default regress)
+        rc = test_byte_equal(tests)
+        sys.exit(rc)
 
     if args.run_all_gated:
         # Matrix mode: gated binaries + optional informational
