@@ -2,7 +2,7 @@
 
 > JHYY 编译器自身的开发规范。
 >
-> **Last updated**: v1.8.3 (2026-08-29) — v1.x 终结 baseline。二进制命名(`jhyy.exe` / `jhyy_v1.exe.exe` / `jhyy-setuc.exe`)仍为当前真值;v2.0 启动时按 `docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md` 推迟决策统一砍 C 端(`src/*.c`) + `qbe/` + `runtime.c`。
+> **Last updated**: v2.4.0 (2026-09-04) — **v2.0 阶段 (v2.0.0 → v2.4.0) 5 版本全 ship** baseline (tags `v2.3.0` / `v2.4.0`)。二进制命名(`jhyy.exe` / `jhyy_v1.exe.exe` / `jhyy-setuc.exe`)仍为当前真值;**v2.0 阶段未砍 C 端** (per M5 deferral 2026-08-14 — 仍等 v2.x 末 QBE 自写 + v3.x 末 runtime 重写后,一次性删 `src/*.c` + untrack `qbe/` + 删 `runtime.c`,完成 "jhyy 编 jhyy" 0 C 依赖闭环; v1.5 installer ship 不触发 M5)。
 
 ## 项目结构
 

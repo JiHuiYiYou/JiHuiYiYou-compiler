@@ -2,7 +2,7 @@
 
 > 集成测试清单 + 运行方法。详细每条 .jhyy 的预期值见 `compiler/tests/examples/`。
 >
-> **Last updated**: v1.8.3 (2026-08-29) — `regress.py` baseline = **102/102 PASS + 4 SKIP** (106 total);Stage 2 N=4 byte-equal closure 稳定。
+> **Last updated**: v2.4.0 (2026-09-04) — `regress.py` baseline = **104/104 PASS + 4 SKIP** (108 total);Stage 2 N=4 byte-equal closure re-baselined sha `51376ce5...` per D43。
 
 ## 集成测试位置
 
@@ -92,16 +92,18 @@
 python compiler/build/bin/regress.py
 ```
 
-输出示例(v1.8.3 baseline):
+输出示例(v2.4.0 baseline):
 ```
-===== 102/102 passed, 0 failed, 4 skipped =====
+===== 104/104 passed, 0 failed, 4 skipped =====
 ```
 
 baseline 历史:
 - v0.6 — 50/53 PASS + 3 SKIP
 - v1.0.0 — 50/53 PASS + 3 SKIP(自举 parity)
 - v1.7.3 — 96/96 PASS + 10 SKIP(106 total)
-- **v1.8.3 — 102/102 PASS + 4 SKIP(106 total)** ← 当前
+- v1.8.3 — 102/102 PASS + 4 SKIP(106 total)
+- v2.0.0 → v2.4.0 — 104/104 PASS + 4 SKIP(108 total,frozen v2.0.0 → v2.4.0 持平)
+- **v2.4.0 — 104/104 PASS + 4 SKIP(108 total)** ← 当前
 
 ### 单个测试
 

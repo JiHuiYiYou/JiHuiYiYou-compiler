@@ -19,7 +19,7 @@ C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/
 
 工具：
 - GCC：`/c/msys64/ucrt64/bin/gcc.exe` (15.2.0 MSYS2 ucrt64)
-- QBE：`./qbe/qbe.exe -t <target>` — v2.0.0+ 由 `--target=<triple>` CLI flag 决定(`amd64_win` / `amd64_win_freestanding` / `amd64_sysv_stub`,per [`jhyy-abi-v1.0.0.md` § 13.1](../abis/jhyy-abi-v1.0.0.md));v1.x 默认 `amd64_win`
+- QBE：`./qbe/qbe.exe -t <target>` — **v2.0+ 起**,`jhyy compile --target=<triple>` CLI flag 决定 target(`amd64_win` / `amd64_win_freestanding` / `amd64_sysv_stub`,per [`jhyy-abi-v1.0.0.md` § 13.1](../abis/jhyy-abi-v1.0.0.md));v1.x 默认 `amd64_win`
 - Git：`/d/Program Files/Git/bin/git.exe`
 
 ---
@@ -96,7 +96,7 @@ make clean && make stage0 && make
 ./compiler/build/bin/jhyy.exe run <file.jhyy>
 ```
 
-> **注意**：Windows 下 `system()` 路径有 P1 bug，`run` 子命令可能失败。临时替代：先 `compile`，再手动 `./output.exe`。
+> **注意**:**v1.x 已修** (`main.c:591` `path_to_win(exe)` 已处理 MSYS ↔ Win32 路径转换),`run` 子命令可用;v1.8.3.2 patch 加 `cmd_run main_jhyy` byte-scan pre-check (W-065,避免库 snippet 报 "undefined reference to main_jhyy")。
 
 ---
 
@@ -142,7 +142,7 @@ jhyy.exe compile hello.jhyy --target=amd64_win -o hello.exe
 jhyy.exe compile hello_efi.jhyy --target=amd64_win_freestanding -o hello.obj
 ```
 
-生成 PE/COFF x86-64 `.obj`,**不**链 ucrt / vcruntime / libc。entry 由用户 `extern fn efi_main` / `_start` 提供(per [`jhyy-lang-spec-v1.3.0.md` § 18](../abis/jhyy-lang-spec-v1.3.0.md))。v2.3.0 才接 lld-link `/SUBSYSTEM:EFI_APPLICATION /ENTRY:efi_main hello.obj /OUT:hello.efi` + OVMF boot;v2.2.0 仅编 `.obj`(详见 [`jhyy-abi-v1.0.0.md` § 13.3 freestanding 约定](../abis/jhyy-abi-v1.0.0.md))。
+生成 PE/COFF x86-64 `.obj`,**不**链 ucrt / vcruntime / libc。entry 由用户 `extern fn efi_main` / `_start` 提供(per [`jhyy-lang-spec-v1.3.0.md` § 18](../abis/jhyy-lang-spec-v1.3.0.md))。**v2.3.0 已 ship** (tag `v2.3.0` commit `54d93df`, 2026-09-04) — 完整 E2E 链路:`scripts/dev/build/build-efi.sh` (jhyy → .obj → lld-link `/SUBSYSTEM:EFI_APPLICATION /ENTRY:efi_main hello.obj /OUT:hello.efi`) + `scripts/dev/test/run-ovmf.sh` (QEMU + OVMF q35 + FAT12 image + serial capture);**E2E 5/5 PASS** 同 .efi 5 次启动输出 "Hello from jhyy freestanding!\n"(详见 [`jhyy-abi-v1.0.0.md` § 13.3 freestanding 约定](../abis/jhyy-abi-v1.0.0.md))。
 
 ### amd64_sysv_stub (Linux 兼容 stub)
 
@@ -150,7 +150,7 @@ jhyy.exe compile hello_efi.jhyy --target=amd64_win_freestanding -o hello.obj
 jhyy.exe compile hello.jhyy --target=amd64_sysv_stub -o hello.s
 ```
 
-**当前 `cg_module` 在此 target 仍 fatal**(`amd64_sysv target: 实现留 v2.x M2`),只产出占位 `.s`;实实现 SysV ABI 推 v2.x M2。target_dispatch + CLI flag 已就位(per [`compiler/src0/target_dispatch.jhyy`](../../src0/target_dispatch.jhyy)),仅 codegen 路径未实现。
+**当前 `cg_module` 在此 target 仍 fatal**(`amd64_sysv target: 实现留 v2.x M2`,per 2026-09-04 user 决定保留 fatal 不动 `codegen.jhyy:3783-3786`),只产出占位 `.s`;实实现 SysV ABI 推 v2.x M2 (跟 v2.x 中期自写 QBE 后端同期)。target_dispatch + CLI flag + `target_help` / `target_status` 已就位(per [`compiler/src0/target_dispatch.jhyy`](../../src0/target_dispatch.jhyy) v2.4.0 Stage 1),仅 codegen 路径未实现。
 
 ---
 
@@ -160,9 +160,9 @@ jhyy.exe compile hello.jhyy --target=amd64_sysv_stub -o hello.s
 python compiler/build/bin/regress.py
 ```
 
-自动运行 `compiler/tests/examples/*.jhyy` 所有测试，输出：
+自动运行 `compiler/tests/examples/*.jhyy` 所有测试，输出(v2.4.0 baseline):
 ```
-===== 102/102 passed, 0 failed, 4 skipped (of 106 total) =====
+===== 104/104 passed, 0 failed, 4 skipped (of 108 total) =====
 ```
 
 无 `main_jhyy` 的库文件（`mylib.jhyy`、`ns_dup_*.jhyy`）自动 SKIP，不计入 passed/failed。
