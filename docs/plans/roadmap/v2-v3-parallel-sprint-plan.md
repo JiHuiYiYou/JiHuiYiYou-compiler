@@ -150,13 +150,13 @@
 | Sprint | 内容 | 依赖 |
 |--------|------|------|
 | **v0.9 末** | W-001~W-009 真修 + main.c 翻译 + Stage 1 byte-equal | ✅ shipped (commit 2.83, 2026-08-11) |
-| **v1.0**(5 sprint 框架) | codegen.c / jhyy_helpers.c 翻译 + 全 src0/ 翻译 + Stage 2 三层 N=3 fixed point | v0.9 末 |
-| **v1.1.0** ⟂ **v2.0.0** | lang-spec § 18-21 + abi § 13 草案(.md)/ amd64_win_freestanding target 起步(.jhyy + QBE + GCC)| v0.9 末 / v1.0 末(spec 改 .md,codegen 改 .jhyy,无冲突,可并行)|
-| **v2.1.0** | ABI 抽离(abi_amd64_win + abi_amd64_win_freestanding + codegen 抽离调用 + ABI 单元测试) | v2.0.0 |
-| **v2.2.0** | spec 锁定(abi § 13 + lang-spec § 18-21 + build.md + jhyy_OS cross-check) | v2.1.0 |
-| **v2.3.0** | hello-freestanding.efi 跑 OVMF(UEFI + PE/COFF 链路验证)| v2.2.0 |
-| **v2.4.0** | 多目标 dispatcher + **byte-equal 三件套**(per `coordination.md § 3 D26`:`jhyy_v1.il == jhyy_v2.il` + `.s == .s` + `.exe byte-equal` 兜底 recipe per [`v2.4.0 § 2.1.1 byte_equal.sh`](../v2/v2.4.0任务清单 + 概要设计.md))| v2.3.0 |
-| **v3.0 3a-3f**(⟂ 异步)| v2.0 阶段 ship 后启动:3a inline asm / 3b #[naked] fn / 3c volatile load/store / 3e #[link_section] / 3f memory barrier / 3d #[no_std](软,任何时点做 per D10)| v2.4.0(6 特性独立,内部不强依赖;**3c 硬约束**:v2.x 自写后端在 3c ship 后才移植 volatile 语义,per § 4.2)|
+| **v1.0**(5 sprint 框架) ✅ shipped (2026-08-10 tag `eabee0d`) | codegen.c / jhyy_helpers.c 翻译 + 全 src0/ 翻译 + Stage 2 三层 N=3 fixed point | v0.9 末 |
+| **v1.1.0** ⟂ **v2.0.0** ✅ shipped (2026-09-02 commit `719ec25`)| lang-spec § 18-21 + abi § 13 草案(.md)/ amd64_win_freestanding target 起步(.jhyy + QBE + GCC)| v0.9 末 / v1.0 末(spec 改 .md,codegen 改 .jhyy,无冲突,可并行)|
+| **v2.1.0** ✅ shipped (2026-09-03 commit `8ac3608`) | ABI 抽离(abi_amd64_win + abi_amd64_win_freestanding + codegen 抽离调用 + ABI 单元测试) | v2.0.0 |
+| **v2.2.0** ✅ shipped (2026-09-03 commit `896a329`) | spec 锁定(abi § 13 + lang-spec § 18-21 + build.md + jhyy_OS cross-check) | v2.1.0 |
+| **v2.3.0** ✅ shipped (2026-09-04 tag `v2.3.0` commit `54d93df`) | hello-freestanding.efi 跑 OVMF(UEFI + PE/COFF 链路验证)| v2.2.0 |
+| **v2.4.0** ✅ shipped (2026-09-04 tag `v2.4.0` commit `7fb735b`) | 多目标 dispatcher + **byte-equal 三件套**(per `coordination.md § 3 D26`:`jhyy_v1.il == jhyy_v2.il` + `.s == .s` + `.exe byte-equal` 兜底 recipe per [`v2.4.0 § 2.1.1 byte_equal.sh`](../v2/v2.4.0任务清单 + 概要设计.md))| v2.3.0 |
+| **v3.0 3a-3f**(⟂ 异步)⏳ 待启动 | v2.0 阶段 ship 后启动:3a inline asm / 3b #[naked] fn / 3c volatile load/store / 3e #[link_section] / 3f memory barrier / 3d #[no_std](软,任何时点做 per D10)| v2.4.0(6 特性独立,内部不强依赖;**3c 硬约束**:v2.x 自写后端在 3c ship 后才移植 volatile 语义,per § 4.2)|
 | **M1 launch** | OS 编 kernel.efi + QEMU + OVMF + printk(端到端联调)| v2.0 阶段 + v3.0 3a-3c/3e-3f 全 ship(3d 软,M1 不依赖)|
 
 **关键**:
@@ -164,6 +164,8 @@
 - **v3.0 3a-3f 启动时点 = v2.4.0 ship 后**(不是 v1.0 末)— 节奏比原方案保守,放弃 wall-clock 并行优化,换取 v2.0 阶段节奏可控
 - **v3.0 6 特性内部独立**,user 可按个人节奏穿插(双 sprint 设计者参考 § 7 实操建议)
 - **保留硬约束**:v3.0 3c volatile 先 ship,再 v2.x 自写后端移植 volatile 语义(per § 4.2)
+
+> **2026-09-04 状态更新**:v2.0 阶段 5 版本全 ship (v2.0.0 → v2.4.0, 2026-09-02 ~ 09-04, tags `v2.3.0` / `v2.4.0`, commits 719ec25 / 8ac3608 / 896a329 / 54d93df / 7fb735b);Stage 2 N=4 byte-equal closure sha `51376ce5...` re-baselined per D43;regress 104/104 PASS + 4 SKIP;hello-freestanding.efi E2E 5/5 PASS on OVMF。**v3.0 3a-3f 下一步启动**(等 user 决定);v2.x 中/末 ‖ v3 全线 异步并行(per § 5.2 / § 5.3)。
 
 ### 5.2 路径 B: v2.x 中期 ‖ v3.1 3g/3g.5/3g.7 异步并行 → OS M4
 
@@ -245,17 +247,17 @@ v1.0 末(M4 hard,Stage 2 三层 N=3)✅ (2026-08-10 tag `eabee0d`)
   │
   ↓ v2.0 阶段串行(2026-09-01 user 决定,放弃原方案路径 A 的 wall-clock 并行)
   │
-  [v2.0.0] - Sprint A Stage 1: target dispatcher 起步(Amd64Win 完整路径 + 其他 stub + `--target` CLI)
+  [v2.0.0 ✅] - Sprint A Stage 1: target dispatcher 起步(Amd64Win 完整路径 + 其他 stub + `--target` CLI) — 2026-09-02 commit `719ec25`
   │
-  [v2.1.0] - Sprint A Stage 2: ABI 抽离(abi_amd64_win + abi_amd64_win_freestanding + codegen 抽离调用 + ABI 单元测试)
+  [v2.1.0 ✅] - Sprint A Stage 2: ABI 抽离(abi_amd64_win + abi_amd64_win_freestanding + codegen 抽离调用 + ABI 单元测试) — 2026-09-03 commit `8ac3608`
   │
-  [v2.2.0] - Sprint A Stage 3: spec 锁定(abi § 13 + lang-spec § 18-21 + build.md + jhyy_OS cross-check)
+  [v2.2.0 ✅] - Sprint A Stage 3: spec 锁定(abi § 13 + lang-spec § 18-21 + build.md + jhyy_OS cross-check) — 2026-09-03 commit `896a329`
   │
-  [v2.3.0] - Sprint B: hello-freestanding.efi 跑 OVMF(UEFI + PE/COFF 链路验证)
+  [v2.3.0 ✅] - Sprint B: hello-freestanding.efi 跑 OVMF(UEFI + PE/COFF 链路验证) — 2026-09-04 tag `v2.3.0` commit `54d93df`
   │
-  [v2.4.0] - Sprint C: 多目标 dispatcher 完整化 + byte-equal 三件套(per D26)
+  [v2.4.0 ✅] - Sprint C: 多目标 dispatcher 完整化 + byte-equal 三件套(per D26) — 2026-09-04 tag `v2.4.0` commit `7fb735b`
   │
-  ↓ v2.0 ship 后,v3.0 3a-3f 启动(⟂ 异步并行,不强配对)
+  ↓ v2.0 阶段全 ship (2026-09-04),v3.0 3a-3f 启动(⟂ 异步并行,不强配对,等 user 决定)
   │
   [v3.0 3a-3f] (6 个 sprint, 关键路径 = 3a-3c/3e-3f;3d 软可推迟)
         - 3a inline asm

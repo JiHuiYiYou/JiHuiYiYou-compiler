@@ -21,7 +21,7 @@ v3.x 是语言特性扩展轴,服务于 [jhyy_OS](../../../jhyy_OS/) 的 OS-requ
 ## 决策锁 (per `project_v2_v3_parallel_axes`)
 
 - v2.x ‖ v3.x 并行推进 (semver 推论 v2.99 < v3.0 但实际 OS M1 启动前两轴各自达成即可)
-- 每 sprint 设计前必读 [`../v2/v2.0.0-os-prep.md`](../v2/v2.0.0-os-prep.md) § 1 OS 启动里程碑表 + § 6 关键决策点
+- 每 sprint 设计前必读 [`../v2/v2.0.0-os-prep.md`](../v2/v2.0.0-os-prep.md) § 1 OS 启动里程碑表 + § 3 关键决策点 (D1-D10)
 - 跨边界冲突走 [`../../../jhyy_OS/docs/coordination.md`](../../../jhyy_OS/docs/coordination.md) § 7 规则
 
 ## 当前内容

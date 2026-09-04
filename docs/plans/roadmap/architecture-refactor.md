@@ -1,6 +1,6 @@
 # Architecture Refactor — 整体路线图修订
 
-> **状态**: 草案
+> **状态**: R-1..R-9 已实施 (2026-09-04 校准);本文件作为历史决策记录
 > **目的**: 把所有 v*.* 计划文件跟当前真实状态对齐 + 整合 jhyy_OS 协调结果
 > **关联**: 触发本次重构的源材料 — v0.8 wip commit 12 实测 + jhyy_OS 协调(`coordination.md` / `v0.0.2-foundation-revision.md` / `v0.0.1.5-M5b-prereqs.md`)
 > **修改的文档**: 列出每条改动 + 改动依据 + 影响面
