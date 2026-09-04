@@ -1,0 +1,13 @@
+// no-op.jhyy — diagnostic: minimal efi_main that does nothing
+
+import efi;
+
+extern fn efi_call_via_ptr(fn_ptr: u64, this: u64, arg2: u64) -> u64;
+extern fn jhyy_ascii_to_ucs2(input: *u8, output: *u16, max_chars: i64) -> i64;
+extern fn serial_putc(c: u64) -> i64;
+extern fn serial_puts(s: *u8) -> i64;
+
+fn efi_main(image_handle: u64, system_table: *EfiSystemTable) -> u64 {
+    let r: u64 = 0;
+    return r;
+}
