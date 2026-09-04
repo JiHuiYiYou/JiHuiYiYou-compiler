@@ -38,3 +38,28 @@ const char *target_qbe_flag(Target t) {
     }
     return "amd64_win";  /* unreachable; satisfy -Wreturn-type */
 }
+
+/* v2.4.0 Stage 1: returns multi-line help text for --help CLI.
+ * Mirrors jhyy-side `target_help()` in target_dispatch.jhyy — keep in sync.
+ */
+const char *target_help(void) {
+    return "targets:\n"
+           "  amd64_win                x86_64-w64-mingw32 (default; hosted Windows)\n"
+           "  amd64_win_freestanding   x86_64-w64-none (UEFI; v2.1.0+, OVMF demo v2.3.0)\n"
+           "  amd64_sysv               x86_64-linux-none (v2.x M2)\n";
+}
+
+/* v2.4.0 Stage 1: short status suffix for error messages. */
+const char *target_status(Target t) {
+    switch (t) {
+    case TARGET_AMD64_WIN:              return "(default; hosted Windows)";
+    case TARGET_AMD64_WIN_FREESTANDING: return "(UEFI; v2.1.0+, OVMF demo v2.3.0)";
+    case TARGET_AMD64_SYSV_STUB:        return "(v2.x M2)";
+    }
+    return "";
+}
+
+/* v2.4.0 Stage 1: number of supported targets. */
+int jh_target_count(void) {
+    return 3;
+}

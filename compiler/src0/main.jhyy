@@ -1179,6 +1179,39 @@ fn main_jhyy(argc: i32, argv: *u8) -> i32 {
         printf("  dump    <file.jhyy>\n" as *u8, 0);
         return 0 as i32;
     }
+
+    // v2.4.0 Stage 1: scan argv for --help flag. If found anywhere, print
+    // full help (commands + flags + targets) and exit 0. Done BEFORE the
+    // --target scan so --help wins regardless of position.
+    let mut help_requested: i32 = 0 as i32;
+    let mut hi: i32 = 1 as i32;
+    while hi < argc {
+        let hi64 = hi as i64;
+        let harg_p = ptr_add_u8(argv, hi64 * (8 as i64)) as **u8;
+        let harg = (*harg_p);
+        if strcmp(harg, "--help" as *u8) == (0 as i32) {
+            help_requested = 1 as i32;
+        }
+        hi = hi + (1 as i32);
+    }
+    if help_requested == (1 as i32) {
+        printf("jhyy compiler v2.4.0 (self-hosted, v2.0 series)\n" as *u8, 0);
+        printf("\n" as *u8, 0);
+        printf("usage: jhyy [--target=<triple>] [--help] <command> [args]\n" as *u8, 0);
+        printf("\n" as *u8, 0);
+        printf("commands:\n" as *u8, 0);
+        printf("  compile <file.jhyy> [-o output]   compile to .obj (link with .exe on Windows)\n" as *u8, 0);
+        printf("  build   <file.jhyy> [-o output]   compile + link to .exe\n" as *u8, 0);
+        printf("  run     <file.jhyy>              compile + link + execute\n" as *u8, 0);
+        printf("  dump    <file.jhyy>              print parsed AST / typed IR for debugging\n" as *u8, 0);
+        printf("\n" as *u8, 0);
+        printf("flags:\n" as *u8, 0);
+        printf("  --target=<triple>  select target (default amd64_win); see targets below\n" as *u8, 0);
+        printf("  --help             show this message and exit\n" as *u8, 0);
+        printf("\n" as *u8, 0);
+        printf(target_help());  // multi-line target list (v2.4.0)
+        return 0 as i32;
+    }
     // argv is *u8 (passed from C runtime). Each element is *u8, 8 bytes.
     // argv[0] = program path, argv[1] = command, argv[2...] = args
     let argv_arr = argv as **u8;

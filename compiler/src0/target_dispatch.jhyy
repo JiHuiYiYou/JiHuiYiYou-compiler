@@ -15,6 +15,9 @@
 // Amd64SysvStub=2). Closure invariant is .il byte-equal (not binary byte-equal),
 // so this enum is consumed only as a function parameter — no shared memory
 // layout with jhyy-side (unlike W-005 CGContext 128B invariant).
+//
+// v2.4.0 Stage 1: add target_help() for --help CLI surface + jh_target_count()
+// for use by main.jhyy (avoids [*][*]u8 array literal syntax complexity).
 
 extern fn strcmp(a: *u8, b: *u8) -> i32;
 extern fn jh_fputs_stderr(s: *u8) -> i32;
@@ -26,6 +29,17 @@ extern fn jh_fputs_stderr(s: *u8) -> i32;
 fn TARGET_AMD64_WIN()              -> i32 { return 0 as i32; }
 fn TARGET_AMD64_WIN_FREESTANDING() -> i32 { return 1 as i32; }
 fn TARGET_AMD64_SYSV_STUB()        -> i32 { return 2 as i32; }
+
+// ════════════════════════════════════════════════════
+// jh_target_count — number of supported targets (v2.4.0 helper)
+// Used by main.jhyy to enumerate targets for --help / error messages
+// without needing array literal syntax in jhyy-side. jhyy-side returns
+// the count; main.jhyy calls target_name(jh_target_count()-1-idx) etc.
+// ════════════════════════════════════════════════════
+
+fn jh_target_count() -> i32 {
+    return 3 as i32;
+}
 
 // ════════════════════════════════════════════════════
 // target_parse — CLI triple string → tag (or fatal sentinel)
@@ -68,15 +82,39 @@ fn target_name(t: i32) -> *u8 {
     return "amd64_win" as *u8;  // unreachable; satisfy -Wreturn-type
 }
 
-// ════════════════════════════════════════════
+// ════════════════════════════════════════════════════
 // target_qbe_flag — tag → QBE -t flag string
 // v2.1.0: hosted + freestanding both emit MS x64 (D-GUI-12). Only amd64_sysv
 // is a real QBE-different target (ships v2.x M2).
-// ════════════════════════════════════════════
+// ════════════════════════════════════════════════════
 
 fn target_qbe_flag(t: i32) -> *u8 {
     if t == TARGET_AMD64_WIN()              { return "amd64_win" as *u8; }
     if t == TARGET_AMD64_WIN_FREESTANDING() { return "amd64_win" as *u8; }
     if t == TARGET_AMD64_SYSV_STUB()        { return "amd64_sysv" as *u8; }
     return "amd64_win" as *u8;  // unreachable; satisfy -Wreturn-type
+}
+
+// ════════════════════════════════════════════════════
+// target_help — multi-line help text for --help CLI
+// v2.4.0 Stage 1: includes status notes per target. Returned as a static
+// C string literal; caller (main.jhyy --help) printf it directly.
+// Mirrors C-side target_help() in compiler/src/target/target_dispatch.c.
+// ════════════════════════════════════════════════════
+
+fn target_help() -> *u8 {
+    return "targets:\n  amd64_win                x86_64-w64-mingw32 (default; hosted Windows)\n  amd64_win_freestanding   x86_64-w64-none (UEFI; v2.1.0+, OVMF demo v2.3.0)\n  amd64_sysv               x86_64-linux-none (v2.x M2)\n" as *u8;
+}
+
+// ════════════════════════════════════════════════════
+// target_status — short status suffix for a target (v2.4.0 helper)
+// Used by main.jhyy to print "(default)" / "(UEFI)" / "(v2.x M2)" next to
+// each target in error messages. Returns static string.
+// ════════════════════════════════════════════════════
+
+fn target_status(t: i32) -> *u8 {
+    if t == TARGET_AMD64_WIN()              { return "(default; hosted Windows)" as *u8; }
+    if t == TARGET_AMD64_WIN_FREESTANDING() { return "(UEFI; v2.1.0+, OVMF demo v2.3.0)" as *u8; }
+    if t == TARGET_AMD64_SYSV_STUB()        { return "(v2.x M2)" as *u8; }
+    return "" as *u8;
 }

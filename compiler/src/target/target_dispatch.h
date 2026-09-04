@@ -39,4 +39,21 @@ const char *target_name(Target t);
  */
 const char *target_qbe_flag(Target t);
 
+/* Multi-line help text listing all supported targets + status (v2.4.0).
+ * Used by main.c `--help` flag (C-side init path) and reflected 1:1 by
+ * jhyy-side `target_help()` in target_dispatch.jhyy. Keep in sync.
+ */
+const char *target_help(void);
+
+/* Short status suffix for a target (e.g. "(default; hosted Windows)").
+ * v2.4.0 Stage 1: used in target error messages.
+ */
+const char *target_status(Target t);
+
+/* Number of supported targets (v2.4.0).
+ * Exposed for callers that need to enumerate targets without hard-coding
+ * the count.
+ */
+int jh_target_count(void);
+
 #endif
