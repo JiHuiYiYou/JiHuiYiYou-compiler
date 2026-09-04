@@ -3,10 +3,10 @@
 > **承接**: v1.8.3 ship (`98c8272`, 2026-08-29, tag `v1.8.3` = v1.x FINAL marker) — installer v1.8.3 WiX + UCPD.sys bypass,v1.x 终结。
 > **触发**: 用户 2026-09-01 "v2.0 阶段 5 版本 sprint 计划" 决策(commit `dbadb7f`)— v2.0 阶段串行 ship(放弃原方案 wall-clock 并行优化),v3.0 3a-3f 等 v2.0 阶段 ship 后启动。
 > **scope**:
-> - **v2.0.0** = Sprint A Stage 1: target dispatcher 起步(`compiler/src0/target/target_dispatch.jhyy` 新建 + `codegen.jhyy` target switch + `main.jhyy` 加 `--target=<triple>` CLI + 默认 `Amd64Win`)
+> - **v2.0.0** = Sprint A Stage 1: target dispatcher 起步(`compiler/src0/target_dispatch.jhyy` 新建 + `codegen.jhyy` target switch + `main.jhyy` 加 `--target=<triple>` CLI + 默认 `Amd64Win`)
 > - 后续 patch(v2.0.1 / v2.0.2 等)— 内容回填到本 umbrella
 >
-> **plan 性质**: per [`v2.0.0任务清单 + 概要设计.md`](../../plans/v2/v2.0.0任务清单 + 概要设计.md)。**新 umbrella changelog**(per `feedback_changelog_umbrella.md` vX.Y axis 单 umbrella;v2.0 minor axis 单一 umbrella)。
+> **plan 性质**: per [`v2.0.0任务清单 + 概要设计.md`](../../plans/v2/v2.0.0任务清单 + 概要设计.md)。**umbrella changelog**(per `feedback_changelog_umbrella.md` vX.Y axis 单 umbrella;v2.0 minor axis 单一 umbrella)。
 >
 > **关键纪律**:
 > - **Author 必须 `JHYY <15901598712@163.com>`** per `feedback_git_identity_canonical` + Co-author `MiniMax-M3 <noreply@MiniMax>` per `feedback_commit_coauthor`
@@ -21,15 +21,46 @@
 
 ## Sprint 状态总览
 
-> **2026-09-01**:v2.0 阶段**未启动**。下表为规划状态。
+> **2026-09-02 收**:v2.0.0 ✅ **shipped** (commit `719ec25`, 2026-09-02, single-commit ship)。**未打 v2.0.0 tag**(per v2.0 阶段策略 = 阶段 ship 后才打 tag,v2.3.0 / v2.4.0 是 阶段首批 tag)。
+>
+> 下表 = 阶段 sprint 序列 + 实际 ship 状态。
 
-| Sprint | 状态(2026-09-01) | 摘要 |
+| Sprint | 状态(2026-09-04) | 摘要 |
 |--------|-----------------|------|
-| **v2.0.0** | 🟡 待启动 | target dispatcher 起步: `target_dispatch.jhyy` 新建 + `codegen.jhyy` target switch + `main.jhyy` `--target=` CLI;regress 持平 v1.0 baseline(50/53 PASS,0 failed,3 skipped);byte-equal 5/5 PASS(per `feedback_fix_evaluation_rule`)|
-| **v2.1.0** | 🟡 待启动(前置:v2.0.0) | ABI 抽离:`abi_amd64_win.jhyy` 新建(Windows x64 ABI 抽离:4 参数寄存器 + shadow space + struct sret)+ `abi_amd64_win_freestanding.jhyy` 新建(UEFI 风格 ABI:复用 MS x64 + no_crt_init + entry emit)+ codegen.jhyy 抽离调用 + ABI 单元测试 |
-| **v2.2.0** | 🟡 待启动(前置:v2.1.0) | spec 锁定:`jhyy-abi-v1.0.0.md` 增 § 13(多 target ABI + freestanding 约定 + Cap<T> wire format 草案 + Debug ABI)+ `jhyy-lang-spec-v1.3.0.md` 增 § 18-21(OS-related 语法预留位 + freestanding 模式 + Debug ABI + Wire Format)+ `build.md` multi-target dispatch 说明 + jhyy_OS 端 cross-check |
-| **v2.3.0** | 🟡 待启动(前置:v2.2.0) | hello-freestanding.efi 跑 OVMF: `efi.jhyy` 新建(UEFI struct + protocol 定义)+ `hello-freestanding.jhyy` + `link.ld` + `build_efi.sh`(lld-link → .efi)+ `run_ovmf.sh`(QEMU + OVMF 启动 + printk 到 framebuffer)|
-| **v2.4.0** | 🟡 待启动(前置:v2.3.0) | 多目标 dispatcher + byte-equal 三件套: `target_dispatch.jhyy` 完整化 + CLI flag 完善(`--help` / `-c` / `-o` / `--target=`)+ `byte_equal.sh`(per D26 三件套验证: `.il + .s + .exe` byte-equal,`.exe` 兜底 `gcc -g0 + strip + SOURCE_DATE_EPOCH + --build-id=none`)+ `regress.py` 集成 byte-equal 检查 + .s deterministic output 前置 |
+| **v2.0.0** | ✅ shipped `719ec25` 2026-09-02 | target dispatcher 起步: `target_dispatch.jhyy` 新建 + `codegen.jhyy` target switch + `main.jhyy` `--target=` CLI;regress 持平(jhyy_v1.exe ↔ jhyy.exe byte-equal)| |
+| **v2.1.0** | ✅ shipped `8ac3608` 2026-09-03 | ABI 抽离: `abi_amd64_win.jhyy` + `abi_amd64_win_freestanding.jhyy` 新建;codegen.jhyy 抽离调用;freestanding .obj 编出 |
+| **v2.2.0** | ✅ shipped `896a329` 2026-09-03 | spec 锁定: `jhyy-abi-v1.0.0.md` § 13 + `jhyy-lang-spec-v1.3.0.md` § 17-20 + `build.md` multi-target dispatch |
+| **v2.3.0** | ✅ shipped tag `v2.3.0` `54d93df` 2026-09-04 | hello-freestanding.efi 跑 OVMF: `efi.jhyy` + `hello-freestanding.jhyy` + `link.ld` + `build-efi.sh` + `run-ovmf.sh`;QEMU + OVMF 启动验证通过 |
+| **v2.4.0** | ✅ shipped tag `v2.4.0` `7fb735b` 2026-09-04 | 多目标 dispatcher + byte-equal 三件套: `target_help` + `--help` flag + `byte_equal.sh` 5/5 PASS + `regress.py --byte-equal` opt-in |
+| v3.0 3a-3f | 🟡 等 user 启动 | inline asm / #[naked] / volatile / #[no_std] / #[link_section] / memory barrier — **v2.0 阶段 ship ✅ = 启动前置全部解除** |
+
+> **v2.0 阶段 5 个 sprint 串行 ship,2026-09-02 → 2026-09-04 共 3 天**(per 2026-09-01 user 决定:放弃原方案 wall-clock 并行优化,换节奏可控)。**v3.0 3a-3f 启动前置全部解除**,等 user 启动。
+
+---
+
+## v2.0.0 实际 ship 内容(per commit `719ec25` diff)
+
+### 新建
+- `compiler/src/target/target_dispatch.{c,h}` (62 行): Target enum + 3 target 占位
+- `compiler/src0/target_dispatch.jhyy` (69 行): jhyy-side mirror — `TARGET_AMD64_WIN()` / `TARGET_AMD64_WIN_FREESTANDING()` / `TARGET_AMD64_SYSV_STUB()` 常量 + `target_name(t)`
+
+### 改动
+- `compiler/src0/main.jhyy` (+130 行): `--target=<triple>` CLI flag 解析 + argv scan + 默认 `Amd64Win`
+- `compiler/src0/codegen.jhyy` (+16 行): `cg_module` 内加 `switch t` dispatch + emit 函数拆分布局(Amd64Win 完整路径不变 + 其他 stub)
+- `compiler/src/codegen.c` / `compiler/src/codegen.h` (+18 / +6 行): C-side mirror 同步
+- `compiler/src/main.c` (+31 行): C-side `--target=` argv scan(供 jhyy_stage0.exe 用)
+- `Makefile` / `.gitignore` (+7 / +8 行): build script 调整 + 新目录 ignore carve-out
+
+### Binary 状态
+- `jhyy.exe`: 510826 bytes (sha=`376084ba...` — v2.0 期间 frozen baseline,v2.1.0 仍同 sha,v2.4.0 改 sha=3f22a7a5...)
+- `jhyy_stage0.exe`: 534997 bytes
+- `jhyy_v1.exe.exe`: 510826 bytes(同 v2.0.0 jhyy.exe,因 v1.4.4 ship 时已物理 flip;v2.0 期间 v1 ≡ v2 binary)
+
+### 验收
+- ✅ regress baseline 持平(`regress.py` 104/104 PASS, 0 failed, 4 skipped)
+- ✅ multi-target 跑通:`--target=amd64_win` 编 hosted;`--target=amd64_win_freestanding` 编 stub(无 .efi link,v2.1.0 才接 freestanding)
+- ✅ 未知 target 报错:`--target=amd64_unknown` exit 1 + 列可用 target
+- ✅ selfhost closure 4-stage byte-equal(per v1.x baseline 继承)
 
 ---
 
@@ -39,21 +70,26 @@
 |---|------|------|
 | **D25** | v2.0 freestanding target 走 QBE + GCC | v2.0 期间 codegen 仍用 QBE 工具链(实施快);v2.x 末自写 IL → .s |
 | **D26** | byte-equal 三件套(.il + .s + .exe)= v2.0 期间要求 | v2.4.0 完整脚本;v2.0.0-v2.3.0 阶段性 self-equal(per D43)|
-| **D-GUI-12** | UEFI = EFIAPI = MS x64 | abi_amd64_win_freestanding 复用 abi_amd64_win |
-| **D40** | wire-format ↔ jhyy-side 表达规则 | v2.2.0 锁 lang-spec § 21;Cap<T> wire format 草案 syntax-only(forward-looking,3g 落地前 layout 待 3g.5 锁)|
-| **D41** | Debug ABI spec 🔒 锁 + 所有权 | v2.2.0 锁 lang-spec § 20;尺寸 DebugEvent 56B / ErrChain 64B / ProvenanceInfo 136B(per `jhyy_OS/docs/v0.0.4-debug-abi.md`)|
+| **D-GUI-12** | UEFI = EFIAPI = MS x64 | abi_amd64_win_freestanding 复用 abi_amd64_win(v2.1.0 落地)|
+| **D40** | wire-format ↔ jhyy-side 表达规则 | v2.2.0 锁 lang-spec § 20;Cap<T> wire format 草案 syntax-only(forward-looking,3g 落地前 layout 待 3g.5 锁)|
+| **D41** | Debug ABI spec 🔒 锁 + 所有权 | v2.2.0 锁 lang-spec § 19;尺寸 DebugEvent 56B / ErrChain 64B / ProvenanceInfo 136B(per `jhyy_OS/docs/v0.0.4-debug-abi.md`)|
 | **D42** | 3a inline asm 启动不依赖 v2.x 完成 | v2.x 完成前 asm 走 QBE 工具链 .s 输出路径(直接插入汇编);v2.x 完成后 asm 走自写后端 escape hatch 路径 |
 | **D43** | byte-equal 阶段性 self-equal(不跨版本)| v2.0 / v2.x 末 byte-equal = jhyy_N == jhyy_{N+1} 自洽;v3.0 / v3.1 落地后 .s / .il 因新特性(asm / volatile / link_section / Cap<T> layout)变化,必须重新 baseline |
 
 ---
 
-## 关键数字(2026-09-01 锁定)
+## 关键数字(2026-09-04 锁定)
 
 | 数字 | 值 | 来源 |
 |------|-----|------|
-| regress baseline | 50/53 PASS,0 failed,3 skipped | `v1.0.0详细实现方案 § 自举定义` + `v1.0-self-hosting.md` |
-| byte-equal 5/5 PASS target test | hello / fib / ackermann / nqueens / struct_pass | `feedback_fix_evaluation_rule` |
-| OVMF.fd | edk2 UDK2018 RELEASEX64_OVMF.fd(2018 release,需 v2.3.0 启动前 verify 现代 QEMU 兼容性)| `v2.3.0任务清单 + 概要设计.md § 3.1.2` |
+| regress baseline | 104/104 PASS, 0 failed, 4 skipped | v2.0 期间各 sprint 持平 |
+| selfhost closure(v2.0.0 ship 未显式 pin)| v1↔v2↔v3↔v4 .il byte-equal PASS per v2.0.0 commit message(无具体 sha) | v2.0.0 ship commit `719ec25` "MCP jhyy_selfhost_check 验证 PASS" |
+| selfhost closure(v2.1.0 首次 pin)| v1↔v2↔v3↔v4 .il byte-equal sha=`312ee9ff` | v2.1.0 ship commit `8ac3608` commit message "Closure verified: il_sha256 312ee9ff" |
+| selfhost closure(v2.4.0 重 baseline)| v1↔v2↔v3↔v4 .il byte-equal sha=`51376ce5721bccb0c81c7deabead1a6012fb76648c424238391018f1890b5761` | v2.4.0 ship commit `7fb735b`(per `jhyy_selfhost_check` MCP 验证) |
+| jhyy.exe binary sha(v2.0 期间)| `376084bacd70dab15b22f6cb11d024c2e2cab67d24ccca313b8a0fcd134f3205` | v2.0.0 `719ec25` / v2.1.0 `8ac3608` / v2.2.0 `896a329` / v2.3.0 `v2.3.0` 全同 |
+| jhyy.exe binary sha(v2.4.0)| `3f22a7a53d81c8a5cbef1a63a76c1d53074740df0f1467f90f7e6c21e2761343` | v2.4.0 D26 byte-equal recipe 落地后 |
+| byte-equal 5/5 PASS target test | hello / struct_val_pass / fib_renamed / nested_struct_deep / big_test | v2.4.0 byte_equal.sh 验收 |
+| OVMF.fd | edk2 UDK2018 RELEASEX64_OVMF.fd(2018 release) | v2.3.0 ship,QEMU 启动验证通过 |
 | Debug ABI 尺寸 | DebugEvent 56B / ErrChain 64B / ProvenanceInfo 136B | `jhyy_OS/docs/v0.0.4-debug-abi.md`(D41 锁)|
 | Cap<T> 8 字节布局 | `{cnode_idx: u32, depth: u8, rights: u16}` + phantom 0 字节 | `coordination.md § 3` D6 锁 |
 | ARG_REGS_WIN | rcx/rdx/r8/r9(4 个)| per MS x64;`v2.1.0任务清单 + 概要设计.md § 1.1.1` |
@@ -81,3 +117,4 @@
 - v3.x 语言扩展长线 → [`../../plans/roadmap/v3.x-language-expansion.md`](../../plans/roadmap/v3.x-language-expansion.md)
 - 跨项目 OS 时间线 → [`../../../../jhyy_OS/docs/coordination.md`](../../../../jhyy_OS/docs/coordination.md)
 - 上代 v1.x 实施日志 → [`../v1/`](../v1/)
+- v2.0 阶段后续 umbrella → [`changelog-v2.1.0.md`](changelog-v2.1.0.md) / [v2.2.0](changelog-v2.2.0.md) / [v2.3.0](changelog-v2.3.0.md) / [v2.4.0](changelog-v2.4.0.md)
