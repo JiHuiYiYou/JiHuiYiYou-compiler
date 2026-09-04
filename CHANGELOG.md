@@ -4,14 +4,33 @@
 
 ## 最新 release
 
-### v1.8.3 — 2026-08-29 — **v1.x FINAL** 🎯
+### v2.0 阶段 — 2026-09-04 — **v2.0 阶段全 ship ✅**
 
-**Tag**: `v1.8.3` `98c8272`
-**Status**: v1.x 终结,v0.9 wip 冻结,下一步 v2.x (QBE 重写) / v3.x (语言扩展) 并行启动。
+**Tags**: `v2.3.0` (commit `54d93df`) + `v2.4.0` (commit `7fb735b`); 阶段内 v2.0.0 / v2.1.0 / v2.2.0 未打 tag (per 2026-09-01 user 决定:阶段首批 ship 即可打 tag)
+**Status**: v2.0 阶段 (v2.0.0 → v2.4.0) 全 ship;下一步 = **v3.0 3a-3f** (inline asm / `#[naked]` / volatile / `#[link_section]` / memory barrier / `#[no_std]` 软 ship) 等 user 启动;v2.x 中/末 ‖ v3.x 异步并行。
 
 **Highlights**:
 
-- **Stage 2 N=4 byte-equal 自举闭环稳定** — `jhyy_v1 → v2 → v3 → v4 → v5` 产出 byte-equal `.il` (sha `03a1cdd4...`)
+- **Multi-target dispatcher** — `jhyy compile --target=amd64_win` / `--target=amd64_win_freestanding` / `--target=amd64_sysv_stub`(stub fatal,推 v2.x 中/末)
+- **hello-freestanding.efi 跑 OVMF 5/5 PASS** — QEMU + OVMF (q35 machine) 启动 + FAT12 image + serial capture;ConOut->OutputString 间接调用通过 efi_call_via_ptr
+- **spec 锁定**: lang-spec § 17-20 (OS 启动前置 + freestanding + Debug + Wire); abi § 13/14 (Multi-target ABI + wire types)
+- **byte-equal 三件套** — `.il + .s + .exe` 三层 byte-equal 跨 jhyy_v1 ↔ jhyy_v2;D26 reproducibility recipe (`gcc -g0 -Wl,--build-id=none` + `SOURCE_DATE_EPOCH=1234567890` via `jh_setenv`)
+- **Stage 2 N=4 closure re-baselined** — sha `51376ce5...` (per D43 阶段性 self-equal hold,v2.4.0 Stage 1+2 触发 src0 emit 微变 → 重 baseline)
+- regress baseline 104/104 PASS + 4 SKIP (108 total)
+- ACTIVE workaround 数 → 0;W-057 / W-058 仍 DEFERRED-to-v2.x 中/末(QBE 自写时修)
+
+**完整 changelog**: 5 个 umbrella = [`docs/logs/v2/changelog-v2.0.0.md`](docs/logs/v2/changelog-v2.0.0.md) / [v2.1.0](docs/logs/v2/changelog-v2.1.0.md) / [v2.2.0](docs/logs/v2/changelog-v2.2.0.md) / [v2.3.0](docs/logs/v2/changelog-v2.3.0.md) / [v2.4.0](docs/logs/v2/changelog-v2.4.0.md)
+
+---
+
+### v1.8.3 — 2026-08-29 — **v1.x FINAL** 🎯
+
+**Tag**: `v1.8.3` `98c8272`
+**Status**: v1.x 终结,v0.9 wip 冻结;v2.0 阶段 ship ✅ 走完 (2026-09-04),下一步 = v3.0 3a-3f 等 user 启动。
+
+**Highlights**:
+
+- **Stage 2 N=4 byte-equal 自举闭环稳定** — `jhyy_v1 → v2 → v3 → v4 → v5` 产出 byte-equal `.il` (sha `03a1cdd4...` v1.8.0 → `51376ce5...` v2.4.0 re-baseline)
 - **Installer v1.8.3 WiX** — UCPD.sys Deny ACE bypass + Windows 文件关联 4 层清理 (HKCR + UserChoice + OpenWithProgids + jhyy_auto_file ProgId)
 - **`jhyy-setuc.exe`** reverse-engineered Mozilla UCPD Hash 算法 (C# port),try/finally UCPD restart
 - **v1.7.x 32 candidates 完整 ship**(Stage 1-5 + v1.7.1/2/3 patches)
@@ -25,8 +44,8 @@
 |---|---|---|
 | **v0.x** | C 编译器自身 (`compiler/src/*.c`) | 🟢 frozen at v1.0.0 baseline |
 | **v1.x** | jhyy 自举 (`compiler/src0/*.jhyy`) | 🟢 **v1.8.3 shipped = v1.x FINAL** |
-| **v2.x** | QBE 完整重写 + amd64_sysv / freestanding | ⚪ next (OS 准备) |
-| **v3.x** | 语言特性扩展 (inline asm / `#[no_std]` / `&mut` + lifetime) | ⚪ next (与 v2.x 并行) |
+| **v2.x** | QBE 完整重写 + amd64_sysv / freestanding | ✅ **v2.0 阶段 ship** (2026-09-04, tags `v2.3.0` / `v2.4.0`); v2.x 中/末 ⏳ 未启动 (QBE 自写 / amd64_sysv 实 impl / N 代 fixed point) |
+| **v3.x** | 语言特性扩展 (inline asm / `#[no_std]` / `&mut` + lifetime) | ⚪ next (v2.0 阶段 ✅ ship, 3a-3f 等 user 启动) |
 
 ## v1.x ship 时间线
 
@@ -46,7 +65,7 @@
 
 ## 下一阶段
 
-**v2.x (QBE 重写)** + **v3.x (语言扩展)** 并行启动 — OS 准备:
+**v3.0 3a-3f** (语言扩展 OS-required) 等 user 启动 — v2.0 阶段 ✅ ship 走完(2026-09-04);**v2.x 中/末 跟 v3.x 异步并行**(QBE 自写 / amd64_sysv 实 impl / N 代 fixed point 仍待 v2.x 中/末) — OS 准备:
 
 - 路线图: [`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md`](docs/plans/roadmap/v2-v3-parallel-sprint-plan.md)
 - OS 启动链路: [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md)

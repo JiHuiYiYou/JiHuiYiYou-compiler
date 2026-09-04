@@ -9,7 +9,7 @@
 **Statically typed. Expression-oriented. Compiled to native via QBE.**
 
 [![Version](https://img.shields.io/badge/version-v1.8.3-00d4aa)](docs/logs/v1/changelog-v1.8.0.md)
-[![Status](https://img.shields.io/badge/self--host-byte--equal%20v1%E2%86%92v5-success)](docs/logs/v1/changelog-v1.8.0.md)
+[![Status](https://img.shields.io/badge/self--host-byte--equal%20v1%E2%86%92v4-success)](docs/logs/v2/changelog-v2.4.0.md)
 [![Backend](https://img.shields.io/badge/backend-QBE-orange)](https://c9x.me/compile/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#quick-start)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -120,7 +120,7 @@ echo $?    # => 42
 
 ```bash
 python compiler/build/bin/regress.py
-# => 102/102 passed, 0 failed, 4 skipped (of 106 total)
+# => 104/104 passed, 0 failed, 4 skipped (of 108 total) — v2.4.0 baseline
 ```
 
 ### Run with VSCode
@@ -249,15 +249,16 @@ jhyy_v1.exe.exe → src0/main.jhyy → jhyy_v2.il
 jhyy_v2.exe     → src0/main.jhyy → jhyy_v3.il   ← byte-equal to v2.il
 jhyy_v3.exe     → src0/main.jhyy → jhyy_v4.il   ← byte-equal to v2.il
 jhyy_v4.exe     → src0/main.jhyy → jhyy_v5.il   ← byte-equal to v2.il
-                                                 sha 03a1cdd4… (v1.8.0 ship)
+                                                 sha 03a1cdd4… (v1.8.0 ship, frozen)
+                                                 sha 51376ce5… (v2.4.0 re-baseline per D43)
 ```
 
-All five raw `.il` files share an identical sha256 (1.378 MB, no fix-up post-processing). The fixed point is an attractor, not a transient. **Stage 2 N=4 byte-equal closure reached at v1.0.0 (tag `9b05c0f` / commit `eabee0d`, 2026-08-10), stable through v1.8.3 (tag `98c8272`, 2026-08-29). v1.x is now finalized.**
+All five raw `.il` files share an identical sha256 (1.378 MB, no fix-up post-processing). The fixed point is an attractor, not a transient. **Stage 2 N=4 byte-equal closure reached at v1.0.0 (tag `9b05c0f` / commit `eabee0d`, 2026-08-10), stable through v1.8.3 (tag `98c8272`, 2026-08-29), then re-baselined at v2.4.0 (tag `v2.4.0` / commit `7fb735b`, 2026-09-04) per D43 阶段性 self-equal hold (new sha `51376ce5…`). v1.x is now finalized; v2.0 阶段 (v2.0.0 → v2.4.0) 全 ship.**
 
 | Metric | Value |
 |--------|-------|
-| `regress.py` (C-side `jhyy.exe`) | **102/102 PASS, 0 failed, 4 skipped** (106 total) |
-| `regress.py --binary=jhyy_v1.exe.exe` (self-hosted `jhyy_v1.exe.exe`) | **102/102 PASS, 0 failed, 4 skipped** (parity hold) |
+| `regress.py` (C-side `jhyy.exe`) | **104/104 PASS, 0 failed, 4 skipped** (108 total) |
+| `regress.py --binary=jhyy_v1.exe.exe` (self-hosted `jhyy_v1.exe.exe`) | **104/104 PASS, 0 failed, 4 skipped** (parity hold) |
 | Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | **7/7 PASS** |
 | Stage 2 N=4 byte-equal (`v1→v2→v3→v4→v5`) | **stable** |
 | `jhyy_v2` compiling `_repro_t0.jhyy` | `EXIT=100` ✓ |
@@ -274,6 +275,8 @@ All five raw `.il` files share an identical sha256 (1.378 MB, no fix-up post-pro
 - ❌ W-061 nested struct field offset — INVALID 2026-08-28 (same reason)
 - ✅ W-062 VSCode UserChoice + MSYS2 OpenWithProgids shadow — RESOLVED 2026-08-29 (v1.8.3.1 closed loop, SYSTEM-context CustomAction + 3-attempt fallback)
 - ✅ W-063 UCPD.sys kernel filter — RESOLVED 2026-08-29 (v1.8.3 real fix, `jhyy-setuc.exe` .NET 8 SYSTEM-context writer)
+- ✅ W-064 run_qbe stderr capture — RESOLVED 2026-09-01 (v1.8.3.2 patch, 镜像 W-045 link_with_gcc pattern, QBE 真实诊断不再丢失)
+- ✅ W-065 cmd_run main_jhyy pre-check — RESOLVED 2026-09-01 (v1.8.3.2 patch, byte-scan `fn main_jhyy` 避免 link 时报 "undefined reference")
 - 🟡 W-057 UTF-8 3/4-byte codepoint — DEFERRED-to-v2.x
 - 🟡 W-058 vendored QBE missing `remd`/`rems` — DEFERRED-to-v2.x
 - ⚠️ W-021 WiX Bal.wixext DLL naming — permanent workaround (WiX upstream won't fix)
@@ -283,7 +286,7 @@ Full index: [`docs/internal/workarounds.md`](docs/internal/workarounds.md).
 **v0.x frozen**: `docs/logs/v0/changelog-v0.9.0.md` (3231 lines) — Stage 1 byte-equal 7-test-set wip, frozen at v1.0.0 baseline (2026-08-29). v0.x C compiler (`compiler/src/*.c`) enters maintenance-only mode; new features go through `compiler/src0/*.jhyy`. Per `docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md`, M5 boot-from-scratch cleanup (delete `src/*.c` + `qbe/` + `runtime.c`) is deferred until v2.x end + v3.x end.
 
 > [!NOTE]
-> **v1.8.3 is v1.x final.** The C-side compiler (`compiler/src/*.c`) remains the production path during v1.x; `compiler/src0/*.jhyy` (the jhyy-side translated source) already produces byte-equal output. v2.0 will switch the production path to `jhyy_v1.exe.exe` and start the QBE rewrite + multi-target / OS prep (see [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md)).
+> **v1.8.3 is v1.x final.** The C-side compiler (`compiler/src/*.c`) remains the production path during v1.x; `compiler/src0/*.jhyy` (the jhyy-side translated source) already produces byte-equal output. v2.0.0 阶段 (v2.0.0 → v2.4.0) shipped 2026-09-04 — multi-target dispatcher + freestanding ABI + hello-freestanding.efi E2E 5/5 PASS on OVMF (see [`docs/logs/v2/changelog-v2.{0..4}.0.md`](docs/logs/v2/changelog-v2.4.0.md) + [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md)).
 
 ---
 
@@ -291,8 +294,8 @@ Full index: [`docs/internal/workarounds.md`](docs/internal/workarounds.md).
 
 | Check | Command | Expected |
 |-------|---------|----------|
-| C-side regression | `python compiler/build/bin/regress.py` | **102/102 PASS + 4 SKIP** (106 total) |
-| Self-host regression | `python compiler/build/bin/regress.py --all --include-informational` | **102/102 PASS + 4 SKIP** (parity hold) |
+| C-side regression | `python compiler/build/bin/regress.py` | **104/104 PASS + 4 SKIP** (108 total) |
+| Self-host regression | `python compiler/build/bin/regress.py --all --include-informational` | **104/104 PASS + 4 SKIP** (parity hold) |
 | Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | `python compiler/tests/stage1-expanded.sh` | 7/7 PASS |
 | Stage 2 N=4 byte-equal (`v1→v2→v3→v4→v5`) | MCP `jhyy_selfhost_check` | `all_byte_equal=true`, stable il_sha256 |
 | MCP smoke (7 test files, 39 `def test_*` funcs) | `pytest mcp-jhyy/tests/` | all pass |
@@ -308,12 +311,12 @@ The project uses a **single version axis**, no phase-N numbering:
 |------|-------|------|--------|
 | **v0.x** | C-side compiler itself | reach self-host threshold | **🟢 done (frozen at v1.0.0 baseline)** |
 | **v1.x** | jhyy self-hosting | byte-equal `.il` closure | **🟢 v1.8.3 shipped (v1.x final)** |
-| **v2.x** | full QBE rewrite + multi-target / OS prep | amd64_sysv / freestanding | **next** — design input = [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md) |
-| **v3.x** | language extensions | OS-required: asm / volatile / naked / `no_std` / `&mut` + lifetime | **after v2.0 phase ships** — v2.x mid/late + v3.x async parallel |
+| **v2.x** | full QBE rewrite + multi-target / OS prep | amd64_sysv / freestanding | **✅ v2.0 阶段 ship (2026-09-04, tags `v2.3.0` / `v2.4.0`)**; v2.x 中/末 ⏳ 未启动 (QBE 自写 / amd64_sysv 实 impl / N 代 fixed point) — design input = [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md) |
+| **v3.x** | language extensions | OS-required: asm / volatile / naked / `no_std` / `&mut` + lifetime | **next** (v2.0 阶段 ✅ ship, 3a-3f 等 user 启动) — v2.x 中/末 + v3.x async parallel |
 
 **Axis relationships**:
 - `v0.x → v1.x → v2.x`: **strict order** (each is a hard prerequisite of the next)
-- `v1.x → v3.x`: **strict order** (v3.0 sprint 3a-3f starts after v2.0 phase ships — 2026-09-01 decision)
+- `v1.x → v3.x`: **strict order** (v3.0 sprint 3a-3f starts after v2.0 phase ships ✅; per 2026-09-01 user decision)
 - `v2.x mid/late ⟂ v3.x`: **async parallel** (no fixed pairing; each ships independently; both done before OS M1 starts)
 
 > [!IMPORTANT]

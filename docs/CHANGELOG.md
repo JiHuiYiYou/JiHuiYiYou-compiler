@@ -2,7 +2,7 @@
 
 > **Entry point**: 找具体版本变更看下面 per-version changelog。Umbrella changelog 包含 sprint 状态总览 + 关键数字 + 决策点 + 跨 sprint 影响。
 >
-> **轴约定**: `vX.Y.Z` semver; **v0.x** = C 编译器自身 (frozen at v1.0.0 baseline), **v1.x** = jhyy 自举 (v1.8.3 = v1.x FINAL), **v2.x** = QBE 重写 (next), **v3.x** = 语言扩展 (与 v2.x 并行)。
+> **轴约定**: `vX.Y.Z` semver; **v0.x** = C 编译器自身 (frozen at v1.0.0 baseline), **v1.x** = jhyy 自举 (v1.8.3 = v1.x FINAL), **v2.x** = QBE 重写 + multi-target (v2.0 阶段 ✅ ship 2026-09-04, v2.x 中/末 ⏳ 未启动), **v3.x** = 语言扩展 (next, v3.0 3a-3f 等 user 启动)。
 >
 > **Author / Co-author / No date / 5/5 PASS / Audit single commit / Doc fact-check** 等规则 per 项目根 `CLAUDE.md` + `feedback_*` 系列。
 
@@ -27,7 +27,7 @@
 | **v1.0.0** | 2026-08-10 | [`logs/v1/changelog-v1.0.0.md`](logs/v1/changelog-v1.0.0.md) | 真自举 byte-equal 闭环 (Stage 2 N=3) — jhyy 编 jhyy 里程碑 |
 | v1.0.0-rc | 2026-08-09 | [`logs/v1/changelog-v1.0.0-rc.md`](logs/v1/changelog-v1.0.0-rc.md) | RC 候选 |
 
-> **v1.x 终结** (2026-08-29): W-019/W-020 ACTIVE workaround 真修 + 11 个 W WIP/INVALID 闭环 + spec/abi locked. ACTIVE workaround 数 = 0. 下一阶段 v2.0 阶段串行 ship(v2.0.0 → v2.4.0 顺序)→ v3.0 3a-3f 异步启动(2026-09-01 user 决定)→ v2.x 中/末 ‖ v3 全线 异步并行 — 见 [`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md`](plans/roadmap/v2-v3-parallel-sprint-plan.md) + [`docs/plans/v2/v2.0.0-os-prep.md`](plans/v2/v2.0.0-os-prep.md).
+> **v1.x 终结** (2026-08-29): W-019/W-020 ACTIVE workaround 真修 + 11 个 W WIP/INVALID 闭环 + spec/abi locked. ACTIVE workaround 数 = 0. **v2.0 阶段已 ship** (2026-09-02 ~ 09-04, 5 版本串行 per 2026-09-01 user 决定),下一步 = **v3.0 3a-3f** 等 user 启动;v2.x 中/末 ‖ v3 全线 异步并行 — 见 [`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md`](plans/roadmap/v2-v3-parallel-sprint-plan.md) + [`docs/plans/v2/v2.0.0-os-prep.md`](plans/v2/v2.0.0-os-prep.md).
 
 ---
 
@@ -49,10 +49,24 @@
 
 ---
 
+## v2.x — QBE 重写 + multi-target (v2.0 阶段 ✅ ship 2026-09-04)
+
+| Version | Date | Umbrella Changelog | 摘要 |
+|---------|------|--------------------|------|
+| **v2.4.0** | 2026-09-04 | [`logs/v2/changelog-v2.4.0.md`](logs/v2/changelog-v2.4.0.md) | 多目标 dispatcher 完整化 + byte-equal 三件套 (`gcc -g0 -Wl,--build-id=none` + `SOURCE_DATE_EPOCH`) + D26 reproducibility recipe; tag `v2.4.0` commit `7fb735b` |
+| **v2.3.0** | 2026-09-04 | [`logs/v2/changelog-v2.3.0.md`](logs/v2/changelog-v2.3.0.md) | hello-freestanding.efi 跑 OVMF 5/5 PASS — QEMU + OVMF (q35) + FAT12 image + serial capture; tag `v2.3.0` commit `54d93df` |
+| v2.2.0 | 2026-09-03 | [`logs/v2/changelog-v2.2.0.md`](logs/v2/changelog-v2.2.0.md) | spec 锁定: lang-spec § 17-20 (OS 启动前置 + freestanding + Debug + Wire); abi § 13/14 restructure; build.md multi-target dispatch update |
+| v2.1.0 | 2026-09-03 | [`logs/v2/changelog-v2.1.0.md`](logs/v2/changelog-v2.1.0.md) | QBE-level ABI 抽离: `abi_amd64_win_freestanding` UEFI PE/COFF + codegen dispatch + freestanding .obj 编出 |
+| v2.0.0 | 2026-09-02 | [`logs/v2/changelog-v2.0.0.md`](logs/v2/changelog-v2.0.0.md) | target dispatcher 起步 (`Sprint A Stage 1`): `--target=amd64_win` / `amd64_win_freestanding` / `amd64_sysv_stub` CLI 三件套 |
+
+> **v2.0 阶段 ship 走完** (2026-09-04): 5 版本串行 (v2.0.0 → v2.4.0),per 2026-09-01 user 决定。Stage 2 N=4 closure sha `51376ce5...` (re-baselined per D43);regress baseline 104/104 PASS + 4 SKIP;hello-freestanding.efi E2E 5/5 PASS on OVMF;`build-efi.sh` + `run-ovmf.sh` + `install-freestanding-toolchain.sh` 工具链就位;**amd64_sysv 仍是 fatal stub**(per 2026-09-04 user 决定,留 v2.x 中期自写 QBE 后端时实 impl)。下一步 = **v3.0 3a-3f** 等 user 启动;v2.x 中/末 (QBE 自写 / amd64_sysv 实 impl / N 代 fixed point / peephole) 跟 v3.x 异步并行。
+
+---
+
 ## 跨版本影响 / Sprint 索引
 
-- **当前 sprint**: 🟢 无活跃 sprint (v0.9 wip 冻结 2026-08-29 + v1.8.3 v1.x 终结)
-- **下一阶段**: **v2.0 阶段串行 ship**(v2.0.0 → v2.4.0 顺序,2026-09-01 user 决定)→ v3.0 3a-3f 异步启动 → v2.x 中/末 ‖ v3 全线 异步并行 — 等 user 启动 v2.0.0
+- **当前 sprint**: 🟢 无活跃 sprint (v2.0 阶段 5 版本 ship 完毕 2026-09-02 ~ 09-04, tags `v2.3.0` / `v2.4.0`)
+- **下一阶段**: **v3.0 3a-3f** 等 user 启动 (inline asm / `#[naked]` / volatile / `#[link_section]` / memory barrier / `#[no_std]` 软 ship);v2.x 中/末 ‖ v3 全线 异步并行
 - **Sprint 设计入口**: [`plans/roadmap/`](plans/roadmap/) (L1) → `plans/v0/v0.X.0任务清单 + 概要设计.md` / `plans/v1/v1.X.0任务清单 + 概要设计.md` (L3) → L4 详细实现方案
 - **OS 准备清单**: [`plans/v2/v2.0.0-os-prep.md`](plans/v2/v2.0.0-os-prep.md) (M1-M11 硬前置 + 跨项目时间线)
 
