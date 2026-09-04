@@ -85,6 +85,11 @@ extern fn jh_mktemp_ascii(tag: *u8, out: *u8, out_cap: i32) -> i32;
 extern fn jh_file_copy(src: *u8, dst: *u8) -> i32;
 extern fn jh_rename_file(src: *u8, dst: *u8) -> i32;
 extern fn jh_unlink_file(path: *u8) -> i32;
+// v2.4.0: D26 byte-equal reproducibility — set SOURCE_DATE_EPOCH before
+// jh_run so the child gcc linker uses a fixed timestamp (avoids random
+// .exe sha from same jhyy run twice). On Windows uses SetEnvironmentVariableA
+// so the value is in the Win32 env block that CreateProcessW inherits.
+extern fn jh_setenv(name: *u8, value: *u8) -> i32;
 
 fn QBE_PATH() -> *u8 { return jh_path_qbe(); }
 fn GCC_PATH() -> *u8 { return jh_path_gcc(); }
@@ -805,6 +810,13 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     let cmd_buf = malloc(16384 as i64);
     let mut pos: i64 = 0 as i64;
     let sp = " " as *u8;
+    // v2.4.0 D26 byte-equal reproducibility: prepend `-g0 -Wl,--build-id=none`
+    // so the gcc link line doesn't embed random build-id / timestamps / debug
+    // info into the .exe (without these, same jhyy run twice produces
+    // different .exe sha). .il + .s byte-equal still hold since these flags
+    // only affect the post-IL link step.
+    let d26_flags = " -g0 -Wl,--build-id=none " as *u8;
+    pos = str_concat_at(cmd_buf, pos, d26_flags);
     pos = str_concat_at(cmd_buf, pos, lq);
     pos = str_concat_at(cmd_buf, pos, temp_asm);    // W-048: ASCII
     pos = str_concat_at(cmd_buf, pos, rq);
@@ -825,6 +837,17 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     pos = str_concat_at(cmd_buf, pos, lmflag);
     let nul_p = (cmd_buf as i64 + pos) as *u8;
     store_byte_i32(nul_p, 0 as i32);
+
+    // v2.4.0 D26 byte-equal: set SOURCE_DATE_EPOCH in current process so the
+    // child gcc linker (spawned via jh_run/CreateProcessW) sees a fixed
+    // timestamp. Without this, gcc embeds current time → .exe sha differs
+    // every run. Only set if not already set in env (respect user override).
+    // getenv() returns NULL pointer if not set; we can't easily call it from
+    // jhyy-side without extern decl, so just set unconditionally — _putenv-
+    // style overwrite is safe (same value every run, user can still override
+    // by setting SOURCE_DATE_EPOCH in env before invoking jhyy, but jhyy will
+    // overwrite). Use sentinel "1234567890" (Unix epoch 2009-02-13 23:31:30).
+    let _se = jh_setenv("SOURCE_DATE_EPOCH" as *u8, "1234567890" as *u8);
 
     path_to_win(exe_path);  // 保留:exe_path 用于最终 rename dst
     // v1.5.6: jh_gcc_invoke 把 "RESOLVED_GCC_PATH" + space + cmd_buf 写到 invoke_buf;

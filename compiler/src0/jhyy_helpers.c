@@ -571,3 +571,22 @@ __attribute__((used)) int jh_run(const char *cmd_line) {
     return system(cmd_line);
 }
 #endif
+
+/* v2.4.0: jh_setenv — set env var in current process. On Windows this uses
+   SetEnvironmentVariableA so the value is in the Win32 env block that
+   CreateProcessW inherits (NULL env block → child gets parent's env). On
+   POSIX, setenv. Used by main.jhyy:link_with_gcc to fix SOURCE_DATE_EPOCH
+   for D26 byte-equal reproducibility. Returns 0 on success, non-zero on
+   failure. */
+#ifdef _WIN32
+__attribute__((used)) int jh_setenv(const char *name, const char *value) {
+    if (name == NULL || value == NULL) return 1;
+    return SetEnvironmentVariableA(name, value) ? 0 : 1;
+}
+#else
+#include <stdlib.h>
+__attribute__((used)) int jh_setenv(const char *name, const char *value) {
+    if (name == NULL || value == NULL) return 1;
+    return setenv(name, value, 1);
+}
+#endif

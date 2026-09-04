@@ -528,7 +528,13 @@ static int compile(const char **inputs, int ninputs, const char *output) {
     }
 
     /* link with gcc (PATH-resolved). v1.8.1: also link <output>.ico.o so the
-       branded "J" RT_ICON group ends up in the compiled .exe. */
+       branded "J" RT_ICON group ends up in the compiled .exe.
+       NOTE: jhyy.exe (jhyy-side, src0/main.jhyy) does NOT use this C-side
+       path — it has its own jh_gcc_invoke + jh_run (CreateProcessA) flow
+       that builds the gcc command jhyy-side. The D26 reproducibility recipe
+       (`-g0 -Wl,--build-id=none` + SOURCE_DATE_EPOCH) is applied there.
+       This C-side path is only used by jhyy_stage0.exe (Stage 0 bootstrap),
+       which doesn't need byte-equal reproducibility — it's a build-time tool. */
     char exe_path[1024];
     snprintf(exe_path, sizeof(exe_path), "%s.exe", output);
     path_to_win(exe_path);
