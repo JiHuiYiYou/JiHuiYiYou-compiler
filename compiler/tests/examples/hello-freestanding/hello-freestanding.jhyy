@@ -1,0 +1,62 @@
+// hello-freestanding.jhyy — v2.3.0 Stage 2: minimal UEFI app for OVMF
+//
+// Build:  scripts/dev/build/build-efi.sh hello-freestanding.jhyy
+// Boot:   scripts/dev/test/run-ovmf.sh hello-freestanding.efi
+//
+// Per D-GUI-12, EFIAPI = MS x64. Per D41, jhyy emits no DWARF.
+// Per UEFI 2.10 § 4.1, the EFI loader jumps to the entry point with:
+//   rcx = ImageHandle  (this EFI application)
+//   rdx = *EFI_SYSTEM_TABLE  (passed in by firmware)
+//
+// W-062 workaround: jhyy v2.3.0 has no function pointer type support, so we
+// cannot directly call ConOut->OutputString. Instead:
+//   1. Load con_out pointer from system_table.con_out (per D40, *T raw ptr)
+//   2. Load output_string fn ptr from con_out.output_string (8-byte u64 field)
+//   3. Call via extern helper `efi_call_via_ptr` (efi_helpers.s) which
+//      does the indirect MS x64 call through the fn pointer.
+//   4. Convert ASCII literal to UCS-2 (UEFI CHAR16) via `jhyy_ascii_to_ucs2`
+//      (also in efi_helpers.s).
+//
+// External helpers (linked by build-efi.sh):
+//   efi_call_via_ptr(fn_ptr: u64, this: u64, arg2: u64) -> u64
+//   jhyy_ascii_to_ucs2(input: *u8, output: *u16, max_chars: i64) -> i64
+//   serial_putc(c: u64) -> i64
+//   serial_puts(s: *u8) -> i64
+
+import efi;
+
+extern fn efi_call_via_ptr(fn_ptr: u64, this: u64, arg2: u64) -> u64;
+extern fn jhyy_ascii_to_ucs2(input: *u8, output: *u16, max_chars: i64) -> i64;
+extern fn serial_putc(c: u64) -> i64;
+extern fn serial_puts(s: *u8) -> i64;
+
+fn efi_main(image_handle: u64, system_table: *EfiSystemTable) -> u64 {
+    // Stage A: prove we reached efi_main (no struct access yet)
+    serial_puts("A");
+
+    // Stage B: load con_out pointer from system_table (struct field access)
+    let con_out: *EfiSimpleTextOutputProtocol = (*system_table).con_out;
+    serial_puts("B");
+
+    // Stage C: prepare UCS-2 buffer (array on stack)
+    let hello_buf: [u16; 32] = [0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16];
+    let hello_ascii: *u8 = "Hello from jhyy freestanding!\n" as *u8;
+    serial_puts("C");
+
+    // Stage D: convert ASCII → UCS-2 via helper
+    let n: i64 = jhyy_ascii_to_ucs2(hello_ascii, &hello_buf as *u16, 31);
+    serial_puts("D");
+
+    // Stage E: load fn pointer from con_out.output_string
+    let fn_ptr: u64 = (*con_out).output_string;
+    serial_puts("E");
+
+    // Stage F: call via MS x64 ABI helper (W-062 workaround)
+    let r: u64 = efi_call_via_ptr(fn_ptr, con_out as u64, &hello_buf as *u16 as u64);
+    serial_puts("F\n");
+
+    // Stage G: write same message via COM1 (VGA-blind capture for verification)
+    serial_puts(hello_ascii);
+
+    return r;
+}
