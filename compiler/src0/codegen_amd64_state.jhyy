@@ -1,0 +1,150 @@
+// codegen_amd64_state.jhyy — v2.5.0 M1-A shared state + types
+//
+// Module-split 设计:codegen_amd64 主 entry 只放 state init + parse loop + D42 stub;
+// 15 个 emit 函数拆到 3 个 sibling 模块(codegen_amd64_emit_{mem,ctrl,call}.jhyy);
+// 本模块定义 shared state struct + QBE type 常量 + 辅助常量,emit 模块全部 import 此。
+//
+// 这是 v2.5.0 并行施工的接口契约(per V2-A batch plan,本 session /batch 拆 4 个并行 agent):
+//   A1: codegen_amd64_lexer.jhyy        — QBE IL lexer (300 行,no state dep)
+//   A2: codegen_amd64_emit_mem.jhyy     — alloc/store/load/loadsub (4 functions)
+//   A3: codegen_amd64_emit_ctrl.jhyy    — jmp/jnz/label/ret/func_header/data_string (6 functions)
+//   A4: codegen_amd64_emit_call.jhyy    — call/phi/copy/binop/volatile (5 functions)
+//   A5: codegen_amd64.jhyy (main)       — state init + parse loop + D42 stub + file I/O
+//
+// 关键约束:
+//   - D42 escape hatch:codegen_amd64_emit_raw_asm stub in A5 main,V3-B v3.0.1 填充
+//   - 3c volatile token:emit_volatile 函数在 A4;lexer(A1)识别 volatile keyword
+//   - D43 self-equal closure 维持 sha 51376ce5...(codegen.jhyy 主干不动)
+//   - D26 byte-equal 三件套:.il / .s / .exe byte-equal
+//
+// Note: lives flat in compiler/src0/ (not in a subdir) — jhyy import
+// syntax doesn't support paths with `/` (per `parse_import_decl`
+// codegen.c:731 — same restriction as abi_amd64_win.jhyy).
+
+// ════════════════════════════════════════════════════
+// QBE type constants(per ir.jhyy `QBE_W='w'=119` 等)
+// ════════════════════════════════════════════════════
+
+fn QBE_W_LOCAL() -> i32 { return 119 as i32; }  // 'w' — 32-bit word
+fn QBE_L_LOCAL() -> i32 { return 108 as i32; }  // 'l' — 64-bit long
+fn QBE_S_LOCAL() -> i32 { return 115 as i32; }  // 's' — 32-bit float
+fn QBE_D_LOCAL() -> i32 { return 100 as i32; }  // 'd' — 64-bit double
+fn QBE_B_LOCAL() -> i32 { return 98 as i32; }   // 'b' — 8-bit byte
+fn QBE_H_LOCAL() -> i32 { return 104 as i32; }  // 'h' — 16-bit half
+fn QBE_VOLATILE_MARKER() -> i32 { return -1 as i32; }  // volatile token marker
+
+// ════════════════════════════════════════════════════
+// IL token kind(per L4 § 2.1,15 个 token + EOF)
+// ════════════════════════════════════════════════════
+
+fn ILTOK_EOF()          -> i32 { return 0 as i32; }
+fn ILTOK_ALLOC()        -> i32 { return 1 as i32; }
+fn ILTOK_STORE()        -> i32 { return 2 as i32; }
+fn ILTOK_LOADSUB()      -> i32 { return 3 as i32; }
+fn ILTOK_LOAD()         -> i32 { return 4 as i32; }
+fn ILTOK_CALL()         -> i32 { return 5 as i32; }
+fn ILTOK_PHI()          -> i32 { return 6 as i32; }
+fn ILTOK_COPY()         -> i32 { return 7 as i32; }
+fn ILTOK_BINOP()        -> i32 { return 8 as i32; }
+fn ILTOK_RET()          -> i32 { return 9 as i32; }
+fn ILTOK_JMP()          -> i32 { return 10 as i32; }
+fn ILTOK_JNZ()          -> i32 { return 11 as i32; }
+fn ILTOK_LABEL()        -> i32 { return 12 as i32; }
+fn ILTOK_FUNC_HEADER()  -> i32 { return 13 as i32; }
+fn ILTOK_DATA_STRING()  -> i32 { return 14 as i32; }
+fn ILTOK_VOLATILE()     -> i32 { return 15 as i32; }
+
+// ════════════════════════════════════════════════════
+// IL token struct(由 lexer.jhyy 构造,parse loop 消费)
+// ════════════════════════════════════════════════════
+
+type ILToken = struct {
+    kind:     i32,     // ILTOK_*
+    text:     *u8,     // token 字符串(filenames / block names / etc.)
+    text_len: i64,
+    int_val:  i64,     // numeric literals
+    qbe_type: i32,     // 'w'/'l'/'s'/'d'/'b'/'h' 或 QBE_VOLATILE_MARKER
+    line:     i32,
+}
+
+// ════════════════════════════════════════════════════
+// CGState(per-function codegen state)
+// ════════════════════════════════════════════════════
+//
+// 1-to-1 简化栈分配(per L4 § 4.3):每个 %tN 对应一个 stack offset。
+// 32-byte shadow + %rbp save + locals。
+// V2-B v2.6.0 加 regalloc 后,这一段会被 alloc pass 重构,emit 函数接口不变。
+
+type CGState = struct {
+    out:         *u8,   // *StringBuilder(util.sb_* API)
+    arena:       *u8,   // *Arena(arena.jhyy)
+    next_offset: i64,   // 当前 stack offset(从 0 起,负方向)
+    total_alloc: i64,   // sum of all allocN sizes(per function)
+    cur_fn_name: *u8,   // 当前 emit 的函数名(QBE IL `export function ... $name`)
+
+    // — MS x64 frame 固定字段(per L4 § 3.4)—
+    shadow_space: i64,  // 32-byte shadow space (MS x64 calling convention)
+    nparams:      i64,  // 当前函数的参数个数(影响 prologue size)
+}
+
+// CGState 初始化 helper
+fn cg_state_init(out: *u8, arena: *u8, fn_name: *u8) -> i32 {
+    // 主 entry 调:state.out = out; state.arena = arena; state.next_offset = 0;
+    //            state.total_alloc = 0; state.cur_fn_name = fn_name;
+    //            state.shadow_space = 32; state.nparams = 0;
+    return 0;
+}
+
+// CGState 重置(per function prologue)
+fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
+    // next_offset = 0; total_alloc = 0; cur_fn_name = fn_name;
+    return 0;
+}
+
+// ════════════════════════════════════════════════════
+// Stack offset 计算 helpers(emit 模块共用)
+// ════════════════════════════════════════════════════
+
+// offset_for_temp(t: i64) -> i64
+// 输入:%tN 编号(N),返回 stack offset(负方向)
+// v2.5.0 简化:每个 %tN 直接对应一个 8-byte slot
+fn cg_offset_for_temp(t: i64) -> i64 {
+    // v2.5.0:每 temp 8 bytes,base = -32(shadow space)
+    // offset = -(32 + t * 8)
+    let _ = t;
+    return 0;
+}
+
+// alloc_slot(size: i64) -> i64
+// 输入:allocN size,返回对齐后的 slot offset
+fn cg_alloc_slot(state: *u8, size: i64) -> i64 {
+    // aligned_size = (size + 7) & ~7
+    // state.next_offset -= aligned_size; state.total_alloc += aligned_size
+    // return new offset
+    let _ = state;
+    let _ = size;
+    return 0;
+}
+
+// ════════════════════════════════════════════════════
+// Emit function extern declarations(给 main entry import 时用)
+// ════════════════════════════════════════════════════
+//
+// 实际定义在 sibling modules(A2/A3/A4 emit 模块):
+//   codegen_amd64_emit_mem.jhyy   → emit_alloc / emit_store / emit_loadsub / emit_load
+//   codegen_amd64_emit_ctrl.jhyy  → emit_jmp / emit_jnz / emit_label / emit_ret
+//                                   emit_func_header / emit_data_string
+//   codegen_amd64_emit_call.jhyy  → emit_call / emit_phi / emit_copy / emit_binop
+//                                   emit_volatile
+//
+// 所有 emit 函数统一签名:(state: *u8, tok: *u8) -> i32
+//   - state: *CGState
+//   - tok: *ILToken
+//   - return: 0 = success, non-zero = error
+
+// emit_mem 系列(A2 写)— extern decl 给 main entry 用,实现去 codegen_amd64_emit_mem.jhyy
+// emit_ctrl 系列(A3 写)— extern decl 给 main entry 用,实现去 codegen_amd64_emit_ctrl.jhyy
+// emit_call 系列(A4 写)— extern decl 给 main entry 用,实现去 codegen_amd64_emit_call.jhyy
+//
+// 注意:jhyy 当前 extern 不支持多文件 forward decl,所有跨模块 import 的函数必须在 import 文件中
+// 有 def(或 extern decl)。本模块定义所有 extern decl,emit 模块定义实现,main import 本模块即可。
