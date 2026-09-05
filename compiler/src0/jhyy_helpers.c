@@ -590,3 +590,20 @@ __attribute__((used)) int jh_setenv(const char *name, const char *value) {
     return setenv(name, value, 1);
 }
 #endif
+
+/* v2.5.0: jh_getenv — read env var from current process. Returns a pointer
+   to the value string (in the Win32 env block or POSIX environ) on success,
+   or NULL if the var is not set. Caller does NOT free the returned pointer.
+   Used by main.jhyy:run_backend to honor QBE_FALLBACK=1 env var for
+   emergency QBE baseline rollback (per L4 § 1.4). */
+#ifdef _WIN32
+__attribute__((used)) const char *jh_getenv(const char *name) {
+    if (name == NULL) return NULL;
+    return getenv(name);
+}
+#else
+__attribute__((used)) const char *jh_getenv(const char *name) {
+    if (name == NULL) return NULL;
+    return getenv(name);
+}
+#endif
