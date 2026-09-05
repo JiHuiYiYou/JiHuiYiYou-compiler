@@ -88,16 +88,29 @@ type CGState = struct {
 }
 
 // CGState 初始化 helper
-fn cg_state_init(out: *u8, arena: *u8, fn_name: *u8) -> i32 {
-    // 主 entry 调:state.out = out; state.arena = arena; state.next_offset = 0;
-    //            state.total_alloc = 0; state.cur_fn_name = fn_name;
-    //            state.shadow_space = 32; state.nparams = 0;
+// V2-B v2.6.0 (Unit B Stub-Fill): real impl — zero struct + init fields.
+// Note: signature gained `state` first param (v2.5.0 stub lacked it; call
+// site only existed as aspirational comment, so no callers to update).
+fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
+    let s = state as *CGState;
+    (*s).out = out;
+    (*s).arena = arena;
+    (*s).next_offset = 0 as i64;
+    (*s).total_alloc = 0 as i64;
+    (*s).cur_fn_name = fn_name;
+    (*s).shadow_space = 32 as i64;  // MS x64 calling convention
+    (*s).nparams = 0 as i64;
     return 0;
 }
 
 // CGState 重置(per function prologue)
+// V2-B v2.6.0 (Unit B Stub-Fill): real impl — reset per-function fields.
 fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
-    // next_offset = 0; total_alloc = 0; cur_fn_name = fn_name;
+    let s = state as *CGState;
+    (*s).next_offset = 0 as i64;
+    (*s).total_alloc = 0 as i64;
+    (*s).cur_fn_name = fn_name;
+    (*s).nparams = 0 as i64;
     return 0;
 }
 
@@ -116,14 +129,16 @@ fn cg_offset_for_temp(t: i64) -> i64 {
 }
 
 // alloc_slot(size: i64) -> i64
-// 输入:allocN size,返回对齐后的 slot offset
+// 输入:allocN size,返回对齐后的 slot offset(负方向,栈向下增长)
+// V2-B v2.6.0 (Unit B Stub-Fill): real impl — align-up + advance offset.
 fn cg_alloc_slot(state: *u8, size: i64) -> i64 {
-    // aligned_size = (size + 7) & ~7
-    // state.next_offset -= aligned_size; state.total_alloc += aligned_size
-    // return new offset
-    let _ = state;
-    let _ = size;
-    return 0 as i64;
+    // align-up to 8-byte boundary: (size + 7) & ~7
+    let aligned = (size + (7 as i64)) & ((0 as i64) - (8 as i64));
+    let s = state as *CGState;
+    let off = (*s).next_offset - aligned;
+    (*s).next_offset = off;
+    (*s).total_alloc = (*s).total_alloc + aligned;
+    return off;
 }
 
 // ════════════════════════════════════════════════════

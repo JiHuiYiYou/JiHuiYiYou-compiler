@@ -40,6 +40,7 @@
 import codegen_amd64_state;
 import arena;
 import ffi;
+import util;  // V2-B v2.6.0 Unit B: ptr_add_u8 (used at lex_advance + lex helpers)
 
 // ════════════════════════════════════════════════════
 // Lexer state(per-token local cursor,not 嵌套 struct)
@@ -350,9 +351,12 @@ fn next_token_loadsub(s: *LexState, arena: *u8, t: *u8) -> i32 {
     if b1 != (115 as i32) && b1 != (117 as i32) { return -1 as i32; }  // 's' or 'u'
     let b2 = lex_peek_byte_at(s, 1 as i64);
     let mut sub_type: i32 = 0 as i32;
-    if b2 == (98 as i32) { sub_type = 98 as i32; }   // 'b'
-    else if b2 == (104 as i32) { sub_type = 104 as i32; }  // 'h'
-    else { return -1 as i32; }
+    // V2-B v2.6.0 (Unit B Stub-Fill): refactor — early-return guard + set,
+    // to avoid if/else type mismatch (was: 3 branches with mixed () vs i32).
+    if b2 != (98 as i32) && b2 != (104 as i32) {
+        return -1 as i32;
+    }
+    sub_type = b2;  // 98 ('b') or 104 ('h')
     // consume 2 chars
     let _x2 = lex_next_byte(s);
     let _x3 = lex_next_byte(s);
@@ -439,26 +443,29 @@ fn next_token_binop(s: *LexState, arena: *u8, t: *u8, op_byte: i32) -> i32 {
         op_name = "sub" as *u8;
     } else if op_byte == (109 as i32) {
         // "mul" 或 "mod" — consume "ul" or "od" (dispatcher 只 consume 'm' 了 1 char)
+        // V2-B v2.6.0 (Unit B Stub-Fill): refactor — early-return guards for
+        // validity, then set op_name. Avoids if/else chain type mismatch
+        // (was: 3 branches with mixed () vs i32).
         let n1 = lex_peek_byte_at(s, 1 as i64);
         let n2 = lex_peek_byte_at(s, 2 as i64);
-        if n1 == (117 as i32) && n2 == (108 as i32) {
-            // "mul"
-            let mut i: i64 = 0 as i64;
-            while i < (2 as i64) {
-                let _x = lex_next_byte(s);
-                i = i + (1 as i64);
-            }
-            op_name = "mul" as *u8;
-        } else if n1 == (111 as i32) && n2 == (100 as i32) {
-            // "mod"
-            let mut i: i64 = 0 as i64;
-            while i < (2 as i64) {
-                let _x = lex_next_byte(s);
-                i = i + (1 as i64);
-            }
-            op_name = "mod" as *u8;
-        } else {
+        // validity: n1 ∈ {117='u', 111='o'} && n2 ∈ {108='l', 100='d'}
+        if n1 != (117 as i32) && n1 != (111 as i32) {
             return -1 as i32;
+        }
+        if n2 != (108 as i32) && n2 != (100 as i32) {
+            return -1 as i32;
+        }
+        // consume 2 bytes (only on valid path)
+        let mut i: i64 = 0 as i64;
+        while i < (2 as i64) {
+            let _x = lex_next_byte(s);
+            i = i + (1 as i64);
+        }
+        // map to op_name (both branches return ())
+        if n1 == (117 as i32) {
+            op_name = "mul" as *u8;
+        } else {
+            op_name = "mod" as *u8;
         }
     } else if op_byte == (100 as i32) {
         // "div" — consume "iv"
@@ -472,6 +479,12 @@ fn next_token_binop(s: *LexState, arena: *u8, t: *u8, op_byte: i32) -> i32 {
         }
         op_name = "div" as *u8;
     } else {
+        // V2-B v2.6.0 (Unit B Stub-Fill): refactor — set sentinel (was
+        // `return -1`), uniform type across chain branches. Check after.
+        op_name = 0 as *u8;
+    }
+    // post-chain guard: op_name still 0 ⇒ no branch matched ⇒ error
+    if op_name == (0 as *u8) {
         return -1 as i32;
     }
     let _s = lex_skip_ws_and_comments(s);
