@@ -276,6 +276,145 @@ M1 launch (OS 编 kernel.efi + QEMU + OVMF + printk)
 
 ---
 
+## § 6 Branch 操作约定(axis-v2 / axis-v3 并行施工)
+
+> **2026-09-05 校准**:v2.0 阶段全 ship 后,user 决定分 **axis-v2 + axis-v3** 两个 long-lived branch 并行施工;每轴内顺序推荐,两轴并行。Branch flow 跟 Path A(§ 5.1)对齐 — v2.0 阶段 ship 后 = Path A 的"v2.x 中/末 ‖ v3 全线异步并行"phase 启动点。
+
+### § 6.1 Branch 命名 + Fork Point
+
+| Branch | 用途 | Fork point |
+|--------|------|-----------|
+| `main` | umbrella + M1 launch 集成 | (持续存在) |
+| `axis-v2` | v2 axis:v2.x M1-A → M1-B → M2 → 末(QBE 自写 / amd64_sysv / N 代 fixed point) | `main @ 7fb735b` (v2.4.0) |
+| `axis-v3` | v3 axis:v3.0 3d 试水 → 3a → 3b → 3c → 3e → 3f → v3.1 3g → 3g.5 → 3g.7 | `main @ 7fb735b` (v2.4.0) |
+
+**Branch 创建**(一次性,2026-09-05 done):
+```bash
+git checkout -b axis-v2 7fb735b
+git checkout -b axis-v3 7fb735b
+git push -u origin axis-v2
+git push -u origin axis-v3
+```
+
+### § 6.2 Tag Scheme(sequential)
+
+| Axis | Tag 序列 | 含义 |
+|------|---------|------|
+| **v2 axis** | `v2.5.0` → `v2.6.0` → `v2.7.0` → `v2.8.0` | M1-A (windows 后端) → M1-B (regalloc + peephole + 跨 target 联调) → M2 (sysv + sysv_freestanding) → 末 (N 代 fixed point + QBE 移除) |
+| **v3 axis** | `v3.0.0` → `v3.0.1` → `v3.0.2` → `v3.0.3` → `v3.0.4` → `v3.0.5` → `v3.1.0` → `v3.1.1` → `v3.1.2` | 3d 试水 (#[no_std]) → 3a (inline asm) → 3b (#[naked]) → 3c (volatile load/store) → 3e (#[link_section]) → 3f (memory barrier) → 3g (&mut + lifetime + Cap<T> 8) → 3g.5 (phantom 0-byte) → 3g.7 (cap table) |
+
+> **3d 试水原因**:`#[no_std]` 不动 `codegen.jhyy` 主干(只动 codegen 的 runtime emit + parser 的 `#![no_std]` attr),跟 v2 axis M1-A windows 后端起步 file 层冲突最小,branch 流程试水风险最低。
+> **3d 软 ship per D10**:M1 launch 不依赖,M1 启动后合并跑集成测试即可。
+
+### § 6.3 Rebase 节奏(每个 sub-sprint ship 前必做)
+
+```bash
+# 当前在 axis-vX 上
+git fetch origin main
+git rebase origin/main
+# 解决冲突(罕见,因 axis 内 file 层跟 main 不重叠)
+git push --force-with-lease
+```
+
+**Rebase 触发条件**(每 sub-sprint ship 前必做):
+1. 另一个 axis ship 了新 tag → main HEAD 前进 → 当前 axis rebase
+2. main 上有 M1 集成修复(罕见,v2.0 阶段 ship 后 main 锁) → 当前 axis rebase
+3. **跨 axis 硬约束变化**(如协调 D42 / D43 / D-GUI-12 等) → 当前 axis review doc 后 rebase
+
+**禁止**:`git rebase --force`(无 `--force-with-lease` 保护);在 axis branch 上 `git merge main`(会污染 linear history)。
+
+### § 6.4 跨 Axis 硬约束(branch 隔离后仍要遵守)
+
+| 约束 | 内容 | 来源 |
+|------|------|------|
+| **D42** | v3.0 3a inline asm 在 v2.x 自写后端完成**前**走 QBE .s 输出路径直接插入汇编(不依赖 `codegen_amd64.jhyy`);v2.x 末完成后才走自写后端 escape hatch | [coordination.md § 3 D42](../../../jhyy_OS/docs/coordination.md) |
+| **3c volatile 优先** | v3.0 3c `volatile` load/store 必须**先 ship**,再 v2.x 自写后端移植 volatile 语义(避免双倍 baseline 漂移) | [v2-v3-parallel-sprint-plan.md § 4.2](#) |
+| **D27** | v3.1 `3g → 3g.5 → 3g.7` 串行不可调换(phantom 0-byte 依赖 3g codegen;cap table 联调依赖 3g.5 锁定的 8 字节布局) | [coordination.md § 3 D27](../../../jhyy_OS/docs/coordination.md) |
+| **D43** | 阶段性 self-equal hold:每轴内 Stage 2 N=4 byte-equal closure 是 `jhyy_N == jhyy_N+1` self-equal,**不**跨版本;v3 axis ship 改 codegen 特性 → v2 axis 后续 sub-sprint 重新 baseline | [coordination.md § 3 D43](../../../jhyy_OS/docs/coordination.md) |
+
+### § 6.5 Self-equal Baseline(D43 阶段性 hold)
+
+每 axis 独立维护自己的 byte-equal closure baseline:
+- **v2 axis baseline** = `jhyy_N` 编 `src0/main.jhyy` 跟 `jhyy_N+1` 产出 byte-equal `.il`(自举 closure 不变,v2 axis 不依赖 v3 特性)
+- **v3 axis baseline** = 每 ship 一个改 `codegen.jhyy` / `ir.jhyy` 的 sub-sprint(3a/3b/3c/3e/3f/3g 等),重新 baseline:
+  - 当前 closure sha `51376ce5...`(v2.4.0 末)
+  - 3d ship(不改 codegen 主干)→ closure hold ✅
+  - 3a ship(改 .s emit 路径)→ 重新 baseline,新 sha X1
+  - 3b ship(改 codegen fn prologue)→ 重新 baseline,新 sha X2
+  - 3c ship(改 load/store emit)→ 重新 baseline,新 sha X3
+  - 等等
+
+**每 ship 必跑**:
+```bash
+python compiler/build/bin/regress.py                                    # 104/104 PASS 不变
+python compiler/build/bin/regress.py --all --include-informational      # jhyy_v1/v2/v3/v4 byte-equal hold
+./byte_equal.sh                                                         # per D26 三件套(改 .il/.s/.exe 时)
+```
+
+### § 6.6 M1 Launch 集成 Gate(双 axis ship 完毕才合并 main)
+
+**集成 checklist**(M1 launch 前必全过):
+- [ ] v2 axis:`v2.5.0` → `v2.6.0` → `v2.7.0` → `v2.8.0` 全 ship
+- [ ] v3 axis:`v3.0.0` → `v3.0.1` → `v3.0.2` → `v3.0.3` → `v3.0.4` → `v3.0.5` 全 ship(`v3.1.0`+ 不要求)
+- [ ] axis-v2 + axis-v3 都 rebase 到最新 main 无冲突
+- [ ] 跨 axis 集成 PR:`axis-v2` → `main` + `axis-v3` → `main`(squash merge 顺序由 user 决定)
+- [ ] `regress.py` 104/104 PASS + `regress.py --byte-equal` 5/5 PASS
+- [ ] hello-freestanding.efi 跑 OVMF 5/5 PASS
+- [ ] `jhyy_OS` 编 `kernel.efi` → QEMU + OVMF → printk 端到端联调(per `coordination.md § 0`)
+
+### § 6.7 Batch 模式(双 axis 各开 batch,准备充分才施工)
+
+**Batch 定义**:一个 axis 内多个 sub-sprint **串行连续** ship,中间不等待 user 中间确认(per `feedback_auto_push_after_commit`):
+- L3 任务清单 + L4 详细实现方案 **批量预先铺好**(在第一波 batch 施工前)
+- 每 sub-sprint ship 跑 self-equal 验证 + tag + push,无失败自动进入下一个
+- 失败 / 阻塞 → 停下来报告 user,不静默跳过
+
+**施工前准备清单**(必须全部 ready 才开 batch):
+1. ✅ Branch flow setup(axis-v2 + axis-v3 都从 `7fb735b` fork 并 push)— 2026-09-05 done
+2. ⏳ L3 任务清单(每 sub-sprint 一份):
+   - `docs/plans/v2/v2.5.0任务清单 + 概要设计.md`(v2 axis 第一波)
+   - `docs/plans/v3/v3.0.0任务清单 + 概要设计.md`(v3 axis 第一波 3d 试水)
+3. ⏳ L4 详细实现方案(每 sub-sprint 一份,大 sprint 必做):
+   - `docs/plans/v2/v2.5.0详细实现方案.md`(M1-A windows 后端)
+   - `docs/plans/v3/v3.0.0详细实现方案.md`(3d #[no_std])
+4. ⏳ § 6 Branch 操作约定(本节)— commit on main,2026-09-05 done
+5. ⏳ 阶段性 byte-equal 三件套 自动化脚本就位(per D26)— `compiler/build/bin/byte_equal.sh` 已 ship v2.3.0
+6. ⏳ 跨 axis 影响面分析(每个 L4 doc 必须含 § X 跨 axis 影响 + D42/3c/D27/D43 hard 约束 review)
+
+**第一波 batch 内容**(待 user 说"开 batch"才启):
+- **v2 axis batch** = `v2.5.0`(v2.x M1-A,amd64_codegen.jhyy windows 后端起步)
+- **v3 axis batch** = `v3.0.0`(v3.0 3d `#[no_std]` 试水,软 ship per D10)
+
+后续 wave(v2.6.0/v2.7.0/v2.8.0 + v3.0.1..v3.1.2)在第一波 ship 后,user 决定是否继续开 batch。
+
+### § 6.8 Worktree 约定(per `feedback_no_subagents_for_compiler_work`)
+
+- **sub-sprint 设计 / 实施在 axis branch 上**(不用 worktree 也行,branch checkout 即足够)
+- **如果开 worktree**(如多 sub-sprint 同时筹备设计 doc),worktree 路径必须**显式指定项目内路径**(e.g. `git worktree add ../JiHuiYiYou-axis-v2-wt axis-v2`),不放在 `$TEMP` 等临时目录
+- **不使用 sub-agent + worktree 自动施工**(v0.6 三个并行 worktree agent 被叫停的教训);手动 worktree OK
+- **禁止** `git worktree add` 到 worktree 外的路径(branch 引用会乱)
+
+### § 6.9 Sprint Doc 命名 + 提交规则
+
+每 sub-sprint 必配 L3 + (大 sprint) L4 文档,在**对应 axis branch** 上提交:
+- `docs/plans/v2/vX.Y.0任务清单 + 概要设计.md`(L3)
+- `docs/plans/v2/vX.Y.0详细实现方案.md`(L4,大 sprint 必做)
+- `docs/plans/v3/vX.Y.Z任务清单 + 概要设计.md`(L3)
+- `docs/plans/v3/vX.Y.Z详细实现方案.md`(L4,大 sprint 必做)
+
+**Commit message 风格**(沿用项目 convention):
+```
+feat(v2.X.0): <一句话标题>
+
+<L3 摘要: 关键决策 + sprint 范围 + 验收标准>
+
+Co-Authored-By: MiniMax-M3 <noreply@MiniMax>
+```
+
+**Changelog**(per `feedback_changelog_umbrella`):vX.Y axis 只 1 个 umbrella changelog,所有 patch + sub-sprint 回填到同一 changelog。
+
+---
+
 ## § 7 实操建议(单/双 sprint 切换)
 
 > **2026-09-01 user 决定更新**:v2.0 阶段单线串行(v2.0.0 → v2.1.0 → v2.2.0 → v2.3.0 → v2.4.0,粗粒度 Sprint A Stage 1/2/3 + Sprint B + Sprint C),不切 v3;v2.0 阶段 ship 后才进入 v2.x 中/末 ‖ v3 全线异步并行阶段(此时才有双线切换需求)。
