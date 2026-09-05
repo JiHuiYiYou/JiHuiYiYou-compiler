@@ -226,7 +226,7 @@
   - for+if+mut: `for i in 0..n { if c { let mut x = g(); x += 1; } }` → 5/5 PASS ✅
 - **Re-scan src0/** for `let _ = fncall()` 残留触发面:
   - `grep -rn 'let _ = ' compiler/src0/*.jhyy` → 89 命中 (codegen.jhyy / sema.jhyy / util.jhyy / ir.jhyy)
-  - 全部 compile 干净 (per `feedback_no_subagents_for_compiler_work` jhyy-side 翻译风格自然避免深度 Bug 7b)
+  - 全部 compile 干净 (jhyy-side 翻译风格自然避免深度 Bug 7b)
 - **Root cause audit**: W-003 当时诊断 "let _ emit segfault" 是表层现象,真因 = W-005 #2 family (cg_expr IRVal struct pass-by-value stale pointer) — Sprint 4.21 (commit 2.78) + 4.25 (commit 2.81) chain 已 ship 真修
 - **更新 `workarounds.md`**:
   - § 索引 line 30: W-003 status → ✅ RESOLVED (transitive)

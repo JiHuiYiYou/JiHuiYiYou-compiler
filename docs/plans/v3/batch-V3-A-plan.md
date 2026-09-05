@@ -7,7 +7,7 @@
 **V3-A 目的**:
 1. 跑通 v3 axis dev workflow(ship → baseline → push → 进 V3-B)
 2. 给 OS kernel 编写者一个最小可用 no_std 入口(panic_handler stub + 自定义 entry)
-3. 验证"controller (v3 axis) 跟 producer (v2 axis) file 层零冲突"(per `feedback_no_subagents_for_compiler_work`)
+3. 验证"controller (v3 axis) 跟 producer (v2 axis) file 层零冲突"
 
 **在 v3 axis 内位置**:
 - v2 axis V2-A + V2-B + V2-C 是 v3 axis 完全并行(per 2026-09-01 user 决定)
