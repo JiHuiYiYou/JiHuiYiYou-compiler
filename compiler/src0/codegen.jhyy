@@ -4086,22 +4086,47 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
     }
 
     // Pass B: 逐个 func decl dispatch → cg_func
-    jh_fputs_stderr("[cg] Pass B start\n" as *u8);
     let mut di: i64 = 0 as i64;
+    // v3.0.4 (3e link_section): open side-file `_section_directive.buf` for
+    // writing per-function section directives. main.jhyy reads this after QBE
+    // generates the .s and walks the file to insert `.section <name>` lines
+    // before each function's label. Format: `<mangled_name>|<section_name>\n`.
+    // Skipped for naked fns (they go through `_inline_asm.buf`, not QBE).
+    let mut section_fp: *u8 = 0 as *u8;
+    let section_path = "compiler/build/obj/_section_directive.buf" as *u8;
+    let section_open_fp = fopen(section_path, "wb" as *u8);
+    if section_open_fp != (0 as *u8) {
+        section_fp = section_open_fp;
+    }
     while di < ndeccls {
-        if di % (1000 as i64) == (0 as i64) {
-            jh_fputs_stderr("[cg] B i=" as *u8);
-            jh_fmt_lld_stderr("%d" as *u8, di);
-            jh_fputs_stderr("\n" as *u8);
-        }
         let d_slot = ptr_add_u8((*md).decls, di * (8 as i64)) as **Node;
         let d_node = *d_slot;
         if d_node == (0 as *Node) { di = di + (1 as i64); } else {
         if (*d_node).kind == NODE_FUNC_DECL() {
+            // v3.0.4 (3e link_section): if non-naked fn has link_section,
+            // write `<mangled>|<section_name>\n` to side-file BEFORE cg_func.
+            // Naked fns skip this — they emit their own .globl + label via
+            // _inline_asm.buf and don't appear in QBE .s output.
+            let fd_node = node_func_decl_data(d_node);
+            if (*fd_node).is_naked == (0 as i32) {
+                if (*fd_node).link_section != (0 as *u8) {
+                    if section_fp != (0 as *u8) {
+                        let fn_sym = (*fd_node).sym as *Sym;
+                        let _w1 = fwrite((*fn_sym).name, 1 as i64, strlen((*fn_sym).name), section_fp);
+                        let _w2 = fwrite("|" as *u8, 1 as i64, 1 as i64, section_fp);
+                        let _w3 = fwrite((*fd_node).link_section, 1 as i64, strlen((*fd_node).link_section), section_fp);
+                        let _w4 = fwrite("\n" as *u8, 1 as i64, 1 as i64, section_fp);
+                    }
+                }
+            }
             cg_func(cg_raw, d_node, inline_fns_raw, n_inline);
         }
         }  // close else from NULL guard
         di = di + (1 as i64);
+    }
+    // Close section_directive side-file. main.jhyy unlinks after reading.
+    if section_fp != (0 as *u8) {
+        let _sc = fclose(section_fp);
     }
 
     // v3.0.0 (3d no_std): if is_no_std=1, write a side-file marker that

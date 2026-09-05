@@ -1842,6 +1842,37 @@ fn check_naked_body(ctx: *SemaContext, body: *Node) -> i32 {
     return 1 as i32;
 }
 
+// v3.0.4 (3e link_section): validate ELF section name. Reject empty / NUL /
+// non-printable / whitespace / quote (would break `.section <name>` directive
+// parser). Defined BEFORE check_func_decl — jhyy has no forward decls.
+fn check_link_section_name(ctx: *SemaContext, loc_filename: *u8,
+                            loc_line: i32, loc_col: i32, name: *u8) -> i32 {
+    if name == (0 as *u8) { return 0 as i32; }
+    let nlen = strlen(name);
+    if nlen == (0 as i64) {
+        let _e = sema_error_str(ctx, loc_filename, loc_line, loc_col,
+                                "link_section name is empty" as *u8);
+        return 0 as i32;
+    }
+    let mut k: i64 = 0 as i64;
+    while k < nlen {
+        let c = *(ptr_add_u8(name, k) as *u8) as i32;
+        // printable ASCII range 0x21..0x7E (excludes space, tab, NL, CR, NUL, DEL)
+        if c < (33 as i32) {
+            let _e = sema_error_str(ctx, loc_filename, loc_line, loc_col,
+                                    "link_section name contains non-printable byte" as *u8);
+            return 0 as i32;
+        }
+        if c > (126 as i32) {
+            let _e = sema_error_str(ctx, loc_filename, loc_line, loc_col,
+                                    "link_section name contains non-ASCII byte" as *u8);
+            return 0 as i32;
+        }
+        k = k + (1 as i64);
+    }
+    return 1 as i32;
+}
+
 // check_func_decl
 // ════════════════════════════════════════════════════
 
@@ -1916,12 +1947,27 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
             if (*fd).is_naked != (0 as i32) {
                 let _nk = check_naked_body(ctx, (*fd).body as *Node);
             }
+            // v3.0.4 (3e link_section): validate that the section name is non-empty
+            // and contains only ASCII printable chars (no whitespace, no quote,
+            // no NUL). The name is emitted verbatim to a `.section <name>` directive
+            // in the .s side-file, so unprintable bytes would corrupt the assembler
+            // input. Multiple fns per section is allowed (linker merges).
+            if (*fd).link_section != (0 as *u8) {
+                let _ls = check_link_section_name(ctx, (*n).loc_filename,
+                                                  (*n).loc_line, (*n).loc_col,
+                                                  (*fd).link_section);
+            }
         }
     }
 
     sema_pop_scope(ctx);
     return 1;
 }
+
+// v3.0.4 (3e link_section): validate ELF section name. Reject empty / NUL /
+// non-printable / whitespace / quote (would break `.section <name>` directive
+// parser). Moved BEFORE check_func_decl — see line 1808 area — jhyy has no
+// forward decls.
 
 // v3.0.2 (3b naked): validate naked fn body. Body must be a NODE_BLOCK whose
 // every stmt is either:

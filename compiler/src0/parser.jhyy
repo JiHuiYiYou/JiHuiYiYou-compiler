@@ -86,10 +86,14 @@ type Parser = struct {
     // — parse_module_attributes stashes it (for file-top `#[naked]\nfn ...`),
     // parse_attributes folds it into is_naked for the next fn, then resets.
     pending_naked: i32,
+    // v3.0.4 (3e link_section): `#[link_section("name")]` attribute. Stores
+    // the section name string (heap/arena-allocated, owned) for parse_attributes
+    // to fold into NodeFuncDecl.link_section for the next fn, then resets.
+    pending_link_section: *u8,
 }
 
-// Parser 字节数 = 2 * 8 (ptr) + 6 * 8 (token fields) + 2 * 8 (scope) + 2 * 4 (depth/count) + 2 pad + 1 * 4 (pending_inline) + 1 * 4 (pending_naked) = 96
-fn PARSER_SIZE() -> i64 { return 96 as i64; }
+// Parser 字节数 = 2 * 8 (ptr) + 6 * 8 (token fields) + 2 * 8 (scope) + 2 * 4 (depth/count) + 2 pad + 1 * 4 (pending_inline) + 1 * 4 (pending_naked) + 1 * 8 (pending_link_section) = 104
+fn PARSER_SIZE() -> i64 { return 104 as i64; }
 
 // ════════════════════════════════════════════════════
 // Token helpers（caller 栈分配 Token，let mut t: Token = ...）
@@ -2360,12 +2364,13 @@ fn parse_stmt(p: *Parser) -> *Node {
 // 顺序：在所有 sub-stmts + parse_stmt 之后定义
 // ════════════════════════════════════════════════════
 
-// v1.3.5: parse leading #[...] attributes. Currently #[inline] and #[naked]
-// are meaningful.
+// v1.3.5: parse leading #[...] attributes. Currently #[inline], #[naked], and
+// #[link_section("name")] are meaningful.
 // Returns is_inline (1 if any of the attrs is `inline`, else 0).
 // Sets is_naked out-param to 1 if `#[naked]` is present (v3.0.2).
+// Sets *link_section_out to the section name string (or NULL) for v3.0.4.
 // Forward-compatible: unknown attributes are parsed + ignored.
-fn parse_attributes(p: *Parser, is_naked_out: *i32) -> i32 {
+fn parse_attributes(p: *Parser, is_naked_out: *i32, link_section_out: **u8) -> i32 {
     // v3.0.0 (3d no_std): fold pending_inline (stashed by parse_module_attributes
     // when `#[inline]` was at file top) into is_inline for this fn. Then clear
     // it so subsequent fns don't inherit the flag by accident.
@@ -2374,6 +2379,9 @@ fn parse_attributes(p: *Parser, is_naked_out: *i32) -> i32 {
     // v3.0.2 (3b naked): fold pending_naked similarly.
     *is_naked_out = (*p).pending_naked;
     (*p).pending_naked = 0 as i32;
+    // v3.0.4 (3e link_section): fold pending_link_section similarly (owned string).
+    *link_section_out = (*p).pending_link_section;
+    (*p).pending_link_section = 0 as *u8;
     let mut t = empty_token();
     while (parser_check(p, TOKEN_HASH()) != (0 as i32)) {
         parser_advance(p, &t);  // consume '#'
@@ -2383,16 +2391,40 @@ fn parse_attributes(p: *Parser, is_naked_out: *i32) -> i32 {
         // strcmp(aname, "inline") == 0
         if strcmp(aname, "inline" as *u8) == (0 as i32) {
             is_inline = 1 as i32;
-        } else {
+            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
+        } else if strcmp(aname, "naked" as *u8) == (0 as i32) {
             // v3.0.2 (3b naked): `#[naked]` attribute — emit raw asm via D42
             // side-file passthrough (per L4 inline asm escape hatch). sema
             // validates body has only asm!() statements; codegen skips QBE
             // function export + skips prologue/epilogue for naked fns.
-            if strcmp(aname, "naked" as *u8) == (0 as i32) {
-                *is_naked_out = 1 as i32;
+            *is_naked_out = 1 as i32;
+            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
+        } else if strcmp(aname, "link_section" as *u8) == (0 as i32) {
+            // v3.0.4 (3e link_section): `#[link_section("name")]` attribute —
+            // puts the function in a custom ELF section (e.g. ".text.boot" for
+            // boot code). Expect parenthesized string literal argument.
+            parser_expect(p, TOKEN_LPAREN(), "( after link_section" as *u8, &t);
+            parser_expect(p, TOKEN_STRING(), "section name string" as *u8, &t);
+            // Token includes surrounding quotes — strip them (same pattern as
+            // asm!() string literal handling).
+            let chars = ((t.start as i64) + (1 as i64)) as *u8;
+            let chars_len = t.length - (2 as i64);
+            let dup = arena_alloc((*p).arena, chars_len + (1 as i64));
+            memcpy(dup, chars, chars_len);
+            *(ptr_add_u8(dup, chars_len) as *u8) = 0 as u8;
+            *link_section_out = dup;
+            parser_expect(p, TOKEN_RPAREN(), ") after section name" as *u8, &t);
+            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
+        } else {
+            // Unknown attribute — consume the bracketed ident list. Forward-compat.
+            while parser_check(p, TOKEN_RBRACKET()) == (0 as i32) {
+                if parser_check(p, TOKEN_EOF()) != (0 as i32) {
+                    break;
+                }
+                parser_advance(p, &t);
             }
+            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
         }
-        parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
     }
     return is_inline;
 }
@@ -2401,9 +2433,11 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
     let mut t = empty_token();
 
     // v1.3.5: parse leading #[attr] before fn. v3.0.2 (3b naked): parse_attributes
-    // also returns is_naked via out-param.
+    // also returns is_naked via out-param. v3.0.4 (3e link_section): also
+    // returns the section name string via out-param.
     let mut is_naked_v: i32 = 0 as i32;
-    let is_inline = parse_attributes(p, &is_naked_v);
+    let mut link_section_v: *u8 = 0 as *u8;
+    let is_inline = parse_attributes(p, &is_naked_v, &link_section_v);
 
     parser_peek(p, &t);
     let loc_lf = t.loc_filename;
@@ -2536,7 +2570,7 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
     parser_pop_scope(p);
 
     return ast_new_func_decl((*p).arena, loc_lf, loc_ll, loc_lc,
-                             sym, params, nparams, ret_type, body, is_extern, is_inline, is_naked_v);
+                             sym, params, nparams, ret_type, body, is_extern, is_inline, is_naked_v, link_section_v);
 }
 
 // ════════════════════════════════════════════════════
@@ -2825,6 +2859,7 @@ fn parser_init(p: *Parser, lex: *Lexer, a: *Arena) -> i32 {
     (*p).current_scope = (*p).global_scope;
     (*p).pending_inline = 0 as i32;
     (*p).pending_naked = 0 as i32;
+    (*p).pending_link_section = 0 as *u8;
     return 0;
 }
 
@@ -2847,19 +2882,38 @@ fn parse_module_attributes(p: *Parser, is_no_std: *i32) -> i32 {
         let aname = parser_tok_name(p, &t);
         if strcmp(aname, "no_std" as *u8) == (0 as i32) {
             *is_no_std = 1 as i32;
+            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
+        } else if strcmp(aname, "inline" as *u8) == (0 as i32) {
+            // Stash for next fn; parse_attributes will fold into is_inline.
+            (*p).pending_inline = 1 as i32;
+            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
+        } else if strcmp(aname, "naked" as *u8) == (0 as i32) {
+            // v3.0.2: stash for next fn; parse_attributes will fold into is_naked.
+            (*p).pending_naked = 1 as i32;
+            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
+        } else if strcmp(aname, "link_section" as *u8) == (0 as i32) {
+            // v3.0.4 (3e link_section): parse parenthesized string arg, dup into
+            // arena, stash in pending_link_section for next fn.
+            parser_expect(p, TOKEN_LPAREN(), "( after link_section" as *u8, &t);
+            parser_expect(p, TOKEN_STRING(), "section name string" as *u8, &t);
+            let chars = ((t.start as i64) + (1 as i64)) as *u8;
+            let chars_len = t.length - (2 as i64);
+            let dup = arena_alloc((*p).arena, chars_len + (1 as i64));
+            memcpy(dup, chars, chars_len);
+            *(ptr_add_u8(dup, chars_len) as *u8) = 0 as u8;
+            (*p).pending_link_section = dup;
+            parser_expect(p, TOKEN_RPAREN(), ") after section name" as *u8, &t);
+            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
         } else {
-            if strcmp(aname, "inline" as *u8) == (0 as i32) {
-                // Stash for next fn; parse_attributes will fold into is_inline.
-                (*p).pending_inline = 1 as i32;
-            } else {
-                if strcmp(aname, "naked" as *u8) == (0 as i32) {
-                    // v3.0.2: stash for next fn; parse_attributes will fold into is_naked.
-                    (*p).pending_naked = 1 as i32;
+            // Unknown attr: consume `]` (forward-compatible). Don't error — v3.x may add new attrs.
+            while parser_check(p, TOKEN_RBRACKET()) == (0 as i32) {
+                if parser_check(p, TOKEN_EOF()) != (0 as i32) {
+                    break;
                 }
-                // unknown attrs: forward-compatible parse + ignore
+                parser_advance(p, &t);
             }
+            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
         }
-        parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
     }
     if (*p).error_count == (0 as i32) {
         return 1 as i32;

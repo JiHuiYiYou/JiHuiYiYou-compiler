@@ -794,6 +794,226 @@ fn run_backend(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
 //   exists (created by codegen when is_no_std=1), use a different link line:
 //     -nostartfiles -nodefaultlibs + link no_std_core/*.obj directly.
 //   Default path is unchanged (byte-equal IL → byte-equal exe behavior).
+// v3.0.4 (3e link_section): if side-file `_section_directive.buf` exists,
+//   walks temp_asm to replace each `.text\n` that immediately precedes
+//   `.balign 16\n.globl <name>\n` with `.section <name>\n` for functions
+//   that carry #[link_section("name")]. Done BEFORE inline_asm append so
+//   naked fns (which go through `_inline_asm.buf`, not QBE .s) are unaffected.
+fn apply_link_section_directives(temp_asm: *u8) -> i32 {
+    let path = "compiler/build/obj/_section_directive.buf" as *u8;
+    if jh_file_stat_ok(path) == (0 as i32) {
+        return 0;
+    }
+    // 1. Read side-file into sb
+    let sfp = fopen(path, "rb" as *u8);
+    if sfp == (0 as *u8) { return 0; }
+    let sb = malloc(8192 as i64);
+    let sn = fread(sb, 1 as i64, 8191 as i64, sfp);
+    let _fc1 = fclose(sfp);
+    *(ptr_add_u8(sb, sn) as *u8) = 0 as u8;
+    let _u = jh_unlink_file(path);
+
+    // 2. Parse into parallel name/section arrays. Max 32 entries × 128 chars.
+    let names = malloc((32 as i64) * (128 as i64));
+    let sections = malloc((32 as i64) * (128 as i64));
+    memset(names, 0 as i32, (32 as i64) * (128 as i64));
+    memset(sections, 0 as i32, (32 as i64) * (128 as i64));
+    let mut n_entries: i64 = 0 as i64;
+    let mut si: i64 = 0 as i64;
+    while si < sn {
+        if n_entries >= (32 as i64) { break; }
+        let mut j: i64 = si;
+        while j < sn {
+            if *(ptr_add_u8(sb, j) as *u8) == (124 as u8) { break; }  // '|' = 124
+            j = j + (1 as i64);
+        }
+        if j >= sn { break; }
+        let name_len = j - si;
+        let mut k: i64 = j + (1 as i64);
+        while k < sn {
+            if *(ptr_add_u8(sb, k) as *u8) == (10 as u8) { break; }
+            k = k + (1 as i64);
+        }
+        let section_len = k - (j + (1 as i64));
+        if name_len < (128 as i64) {
+            let name_dst = ptr_add_u8(names, n_entries * (128 as i64));
+            memcpy(name_dst, ptr_add_u8(sb, si), name_len);
+            *(ptr_add_u8(name_dst, name_len) as *u8) = 0 as u8;
+        }
+        if section_len < (128 as i64) {
+            let section_dst = ptr_add_u8(sections, n_entries * (128 as i64));
+            memcpy(section_dst, ptr_add_u8(sb, j + (1 as i64)), section_len);
+            *(ptr_add_u8(section_dst, section_len) as *u8) = 0 as u8;
+        }
+        n_entries = n_entries + (1 as i64);
+        si = k + (1 as i64);
+    }
+
+    if n_entries == (0 as i64) {
+        free(sb); free(names); free(sections);
+        return 0;
+    }
+
+    // 3. Read temp_asm into tb (1MB cap)
+    let tfp = fopen(temp_asm, "rb" as *u8);
+    if tfp == (0 as *u8) {
+        free(sb); free(names); free(sections);
+        return 0;
+    }
+    let tb = malloc((1024 as i64) * (1024 as i64));
+    let tn = fread(tb, 1 as i64, ((1024 as i64) * (1024 as i64)) - (1 as i64), tfp);
+    let _fc2 = fclose(tfp);
+    *(ptr_add_u8(tb, tn) as *u8) = 0 as u8;
+
+    // 4. Build tb2 by walking tb line-by-line. Sliding 2-line window detects
+    //    the `.text\n.balign 16\n.globl <name>\n` pattern and replaces `.text\n`
+    //    with `.section <section>\n` for matching functions.
+    let tb2 = malloc((2 as i64) * (1024 as i64) * (1024 as i64));
+    let mut out_off: i64 = 0 as i64;
+    let mut line_start: i64 = 0 as i64;
+    let mut prev_start: i64 = -(1 as i64);  // sentinel: no prev
+    let mut prev_prev_start: i64 = -(1 as i64);
+
+    while line_start < tn {
+        let mut line_end: i64 = line_start;
+        while line_end < tn {
+            if *(ptr_add_u8(tb, line_end) as *u8) == (10 as u8) { break; }
+            line_end = line_end + (1 as i64);
+        }
+        // line_len = number of bytes from line_start to line_end (inclusive of \n).
+        // For CRLF (Windows QBE .s, per feedback_qbe_crlf_root_cause), the \r is
+        // included in this count because line_end - 1 points at \r.
+        let line_len: i64 = line_end - line_start + (1 as i64);
+
+        // Detect `.globl <name>\n` (line starts with `.globl ` + symbol + \n).
+        // Extract name starting at line_start+7, length = line_len - 8.
+        let mut is_globl: i32 = 0 as i32;
+        if line_len >= (8 as i64) {
+            if *(ptr_add_u8(tb, line_start) as *u8) == (46 as u8) {  // '.'
+                if *(ptr_add_u8(tb, line_start + (1 as i64)) as *u8) == (103 as u8) {  // 'g'
+                    // quick check ".globl " (7 bytes)
+                    let mut match_dotglobl: i32 = 1 as i32;
+                    let mut bi: i64 = 0 as i64;
+                    while bi < (7 as i64) {
+                        let exp = *(ptr_add_u8(".globl " as *u8, bi) as *u8) as i32;
+                        let got = *(ptr_add_u8(tb, line_start + bi) as *u8) as i32;
+                        if exp != got { match_dotglobl = 0 as i32; }
+                        bi = bi + (1 as i64);
+                    }
+                    if match_dotglobl != (0 as i32) {
+                        // Last char of line should be \n.
+                        // For LF-only lines: \n at line_len - 1.
+                        // For CRLF lines: \n at line_len - 1 (because line_end points at \n).
+                        if *(ptr_add_u8(tb, line_start + line_len - (1 as i64)) as *u8) == (10 as u8) {
+                            is_globl = 1 as i32;
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut matched: i32 = 0 as i32;
+        if is_globl != (0 as i32) {
+            // Try to match name against side-map
+            let mut name_in_line: *u8 = ptr_add_u8(tb, line_start + (7 as i64));
+            // Name length = line_len minus ".globl " (7) minus trailing "\r\n" or "\n".
+            // Detect CRLF by checking char at line_len - 2 (the byte before \n).
+            let trailing_len: i64 = if line_len >= (2 as i64) {
+                if *(ptr_add_u8(tb, line_start + line_len - (2 as i64)) as *u8) == (13 as u8) {
+                    2 as i64
+                } else {
+                    1 as i64
+                }
+            } else {
+                1 as i64
+            };
+            let name_in_line_len: i64 = line_len - (7 as i64) - trailing_len;
+            let mut e: i64 = 0 as i64;
+            while e < n_entries {
+                let ent_name = ptr_add_u8(names, e * (128 as i64));
+                let ent_section = ptr_add_u8(sections, e * (128 as i64));
+                let ent_name_len = strlen(ent_name);
+                if ent_name_len == name_in_line_len {
+                    let mut eq: i32 = 1 as i32;
+                    let mut bi: i64 = 0 as i64;
+                    while bi < ent_name_len {
+                        let a = *(ptr_add_u8(name_in_line, bi) as *u8) as i32;
+                        let b = *(ptr_add_u8(ent_name, bi) as *u8) as i32;
+                        if a != b { eq = 0 as i32; }
+                        bi = bi + (1 as i64);
+                    }
+                    if eq != (0 as i32) {
+                        // MATCH: skip prev_prev (which should be `.text\n`),
+                        // emit `.section <section>\n` instead, then emit prev + current.
+                        let sl_dotsec = ".section " as *u8;
+                        let sl_dotsec_len = strlen(sl_dotsec);
+                        let sl_sec_len = strlen(ent_section);
+                        memcpy(ptr_add_u8(tb2, out_off), sl_dotsec, sl_dotsec_len);
+                        out_off = out_off + sl_dotsec_len;
+                        memcpy(ptr_add_u8(tb2, out_off), ent_section, sl_sec_len);
+                        out_off = out_off + sl_sec_len;
+                        *(ptr_add_u8(tb2, out_off) as *u8) = 10 as u8;
+                        out_off = out_off + (1 as i64);
+                        // Emit prev_line if set
+                        if prev_start != -(1 as i64) {
+                            let prev_len = line_start - prev_start;  // prev ends at line_start
+                            memcpy(ptr_add_u8(tb2, out_off), ptr_add_u8(tb, prev_start), prev_len);
+                            out_off = out_off + prev_len;
+                        }
+                        // Emit current line
+                        memcpy(ptr_add_u8(tb2, out_off), ptr_add_u8(tb, line_start), line_len);
+                        out_off = out_off + line_len;
+                        // Reset sliding window (these lines already emitted)
+                        prev_prev_start = -(1 as i64);
+                        prev_start = -(1 as i64);
+                        matched = 1 as i32;
+                    }
+                }
+                e = e + (1 as i64);
+            }
+        }
+
+        if matched == (0 as i32) {
+            // Emit prev_prev if set, then shift
+            if prev_prev_start != -(1 as i64) {
+                let pp_len = prev_start - prev_prev_start;
+                memcpy(ptr_add_u8(tb2, out_off), ptr_add_u8(tb, prev_prev_start), pp_len);
+                out_off = out_off + pp_len;
+            }
+            prev_prev_start = prev_start;
+            prev_start = line_start;
+        }
+
+        line_start = line_end + (1 as i64);
+    }
+    // Flush trailing prev_prev + prev
+    if prev_prev_start != -(1 as i64) {
+        let pp_len = prev_start - prev_prev_start;
+        memcpy(ptr_add_u8(tb2, out_off), ptr_add_u8(tb, prev_prev_start), pp_len);
+        out_off = out_off + pp_len;
+    }
+    if prev_start != -(1 as i64) {
+        let p_len = tn - prev_start;
+        memcpy(ptr_add_u8(tb2, out_off), ptr_add_u8(tb, prev_start), p_len);
+        out_off = out_off + p_len;
+    }
+
+    // 5. Write tb2 back to temp_asm (overwrite in-place)
+    if out_off > (0 as i64) {
+        let ofp = fopen(temp_asm, "wb" as *u8);
+        if ofp != (0 as *u8) {
+            let _w = fwrite(tb2, 1 as i64, out_off, ofp);
+            let _fc3 = fclose(ofp);
+        } else {
+            let _e = jh_fputs_stderr("apply_link_section_directives: cannot reopen temp_asm for write\n" as *u8);
+        }
+    }
+
+    free(sb); free(names); free(sections);
+    free(tb); free(tb2);
+    return 1;
+}
+
 fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     // v3.0.0 (3d no_std): detect side-file flag from codegen. We use a
     // plain file-stat via jh_file_stat_ok (defined in jhyy_helpers.c).
@@ -861,6 +1081,12 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
         jh_unlink_file(temp_asm);
         free(temp_asm); free(temp_exe); return 1 as i32;
     }
+
+    // v3.0.4 (3e link_section): insert `.section <name>` directives into temp_asm
+    // for functions carrying `#[link_section("name")]`. Done BEFORE inline_asm
+    // concat so naked fns (appended at end) are unaffected. If no function has
+    // link_section, no side-file exists and this is a no-op.
+    let _lsd = apply_link_section_directives(temp_asm);
 
     // V3-B v3.0.1: inline asm macro post-QBE concat. If codegen produced any
     // asm!() block, it appended raw asm text to compiler/build/obj/_inline_asm.buf

@@ -37,7 +37,7 @@
 | **V3-B (v3.0.1)** | ✅ **shipped** (V3-B Unit A1) | 3a inline asm + QBE .s passthrough |
 | **V3-B (v3.0.2)** | ✅ **shipped** (V3-B Unit B1) | 3b `#[naked]` + side-file naked fn emit |
 | **V3-B (v3.0.3)** | ✅ **shipped** (V3-B Unit A2) | 3c volatile + V2-A emit_volatile fill |
-| **V3-B (v3.0.4)** | ⏳ 待 V3-B v3.0.3 ship | 3e `#[link_section]` |
+| **V3-B (v3.0.4)** | ✅ **shipped** (V3-B Unit B2) | 3e `#[link_section]` + QBE .s post-walk side-file |
 | **V3-B (v3.0.5)** | ⏳ 待 V3-B v3.0.4 ship | 3f memory barrier |
 | **V3-C (v3.1.0)** | ⏳ 待 V3-B 末 ship | 3g `&mut` + lifetime |
 | **V3-C (v3.1.1)** | ⏳ 待 V3-C v3.1.0 ship | 3g.5 |
@@ -121,7 +121,7 @@ Unit 1 + Unit 2 merge 后,coordinator 跑 ship gate 暴露 2 个 integration gap
 | 3a | v3.0.1 | inline asm | ⏳ 待 V3-A ship |
 | 3b | v3.0.2 | `#[naked]` | ⏳ 待 V3-B v3.0.1 ship |
 | 3c | v3.0.3 | volatile | ✅ **shipped** (V3-B Unit A2) |
-| 3e | v3.0.4 | `#[link_section]` | ⏳ 待 V3-B v3.0.3 ship |
+| 3e | v3.0.4 | `#[link_section]` | ✅ **shipped** (V3-B Unit B2) |
 | 3f | v3.0.5 | memory barrier | ⏳ 待 V3-B v3.0.4 ship |
 
 ### V3-B v3.0.1 — inline asm (D42 passthrough) — 2026-09-05 ✅ shipped
@@ -351,7 +351,91 @@ kernel + 物理地址**;V2-A 路径(`codegen_amd64.jhyy`)对此有完整保证(p
 
 ---
 
-## V3-C — v3.1.0 → v3.1.2 (D27 串行) — pending
+## V3-B — v3.0.4 (3e `#[link_section]` + QBE .s post-walk side-file) — 2026-09-06
+
+**Per**: [`docs/plans/v3/iterative-imagining-thunder.md`](../../plans/v3/iterative-imagining-thunder.md) § Phase B Step 2
+**Tag**: `v3.0.4` (V3-B Unit B2 ship, coordinator integration 后由 coordinator 打 umbrella tag)
+**重要性**: M1-required(per coordination.md § 3 D8 — M1 launch 强前置 v3.0 3a/3b/3c/3e/3f)
+
+### Scope
+
+- **Parser** (`compiler/src0/parser.jhyy`):
+  - `parse_attributes` 加 `link_section` branch: parenthesized string literal arg,dup 去引号进 arena,stashed 到 `(*p).pending_link_section`
+  - `parse_module_attributes` 同步 module-level `#[link_section("...")]` 接收路径(per spec § 2)
+  - `Parser` struct 加 `pending_link_section: *u8`(PARSER_SIZE 96 → 104)
+- **AST** (`compiler/src0/ast.jhyy`):
+  - `NodeFuncDecl` 加 `link_section: *u8`(NODE_FUNC_DECL_SIZE 72 → 80)
+  - `ast_new_func_decl` 增 `link_section: *u8` 参数;`parse_func` 折叠 pending 后传给 ctor
+- **Sema** (`compiler/src0/sema.jhyy`):
+  - `check_link_section_name`: 校验 ASCII printable 0x21..0x7E(拒绝 empty / NUL / whitespace / non-ASCII / quote)
+  - 定义于 `check_func_decl` **之前**(jhyy 无 forward decl, 编译期 check_func_decl → check_link_section_name 解析顺序)
+  - `check_func_decl` 调用 `check_link_section_name` 当 `(*fd).link_section != 0`
+- **Codegen** (`compiler/src0/codegen.jhyy`):
+  - `cg_module` Pass B 打开 `compiler/build/obj/_section_directive.buf`(binary mode)
+  - 每个 non-naked `NODE_FUNC_DECL` 若 `link_section != 0` → 写 `<mangled>|<section_name>\n`(fwrite binary, no CRLF)
+  - naked fn skip(走 `_inline_asm.buf`,不参与 QBE .s)
+- **Link** (`compiler/src0/main.jhyy`):
+  - 新增 `apply_link_section_directives(temp_asm)`:在 `jh_file_copy` 之后、`link_with_gcc` gcc 阶段之前执行
+  - read side-file → parse 32×128 name/section arrays(cap 32 entries)
+  - read temp_asm into 1MB buffer
+  - line-walk with 2-line sliding window 检测 `.text\n.balign 16\n.globl <name>\n` triple,若 `<name>` match side-file entry,replace `.text\n` with `.section <name>\n`,emit `balign` + `globl` lines
+  - CRLF-aware line_len(per `feedback_qbe_crlf_root_cause`)
+- **Test**: `compiler/tests/examples/link_section_boot.jhyy` ship gate smoke test(EXIT: 0)
+- **Doc**: [`jhyy-lang-spec-link-section-supplement-v3.0.4.md`](../../abis/jhyy-lang-spec-link-section-supplement-v3.0.4.md)
+
+### 验收
+
+- [x] `make` 零 warning
+- [x] `jhyy.exe compile link_section_boot.jhyy -o ls_test.exe` 成功
+- [x] `ls_test.exe` EXIT: 0(`main_jhyy` 返回 0;`_start` 返回 42 丢弃)
+- [x] temp_asm dump 含 `.section .text.boot` directive 在 `.globl _start` 之前(develop-time verify, 移除前 commit)
+- [x] parser 拒掉 `#[link_section]` 无 arg(per parse_attributes strict)
+- [x] parser 拒掉 `#[link_section(.text.boot)]` 无 parens(per parse_attributes strict)
+- [x] sema 拒掉 `#[link_section("")]` empty(per `check_link_section_name`)
+- [x] sema 拒掉 `#[link_section(".text\x01")]` non-printable byte
+
+### 已知 limitation (per spec § 6)
+
+- **不支持 `#[naked]` + `#[link_section]` 组合** — naked fn 不走 QBE .s emit,link_section walker 跳过。sema 不报错(宽容路径),codegen 同时 skip naked 路径 + link_section 写入。最终 naked fn emit 到 default `.text` section。修需 v3.x 中改 `_inline_asm.buf` 路径加 `.section <name>` header
+- **不支持 static var / global `#[link_section]`** — module-level 路径只 fn decl。Parser 已支持 module-level stash 但 ctor 路径未展开
+- **不支持 `.pushsection` / `.popsection` 嵌套** — 单次 `.section <name>` directive only
+- **不支持 section flag 后缀** — `.section .text.boot,"ax",@progbits` 仅 first part
+- **ARM / RISC-V linker section aggregation 验证** 留 v3.x 末(per spec § 9 cross-axis note)
+
+### 关键决策点
+
+| # | 决策 | 落点 |
+|---|------|------|
+| **D-v3.0.4-1** | Side-file pattern(per V3-A no_std + V3-B naked 同款)— codegen 写 `<mangled>\|<section>\n`,main.jhyy post-QBE-pass walk .s insert `.section <name>` | codegen.jhyy + main.jhyy |
+| **D-v3.0.4-2** | naked fn skip both side-file write + walk — naked fn 走 `_inline_asm.buf` concat,不参与 QBE .s walk | codegen.jhyy:4111 |
+| **D-v3.0.4-3** | Section name 严格 ASCII printable 0x21..0x7E(whitespace / quote / NUL 拒)— 防止 `.section <name>` parser break | sema.jhyy `check_link_section_name` |
+| **D-v3.0.4-4** | Parser struct order:pending_link_section 放 pending_naked 后(PARSER_SIZE 96 → 104) | parser.jhyy:88 |
+| **D-v3.0.4-5** | AST struct order:link_section 放 NodeFuncDecl 末位(link_section ptr 8 字节 + 跟 is_naked i32 4 字节对齐)— NODE_FUNC_DECL_SIZE 72 → 80 | ast.jhyy:587 |
+
+### 关键数字
+
+| 数字 | 值 | 来源 |
+|------|-----|------|
+| NodeFuncDecl size | 72 → 80 bytes | v3.0.4 (add link_section ptr 8B) |
+| Parser size | 96 → 104 bytes | v3.0.4 (add pending_link_section 8B) |
+| Side-file path | `compiler/build/obj/_section_directive.buf` | codegen.jhyy + main.jhyy |
+| Side-file cap | 32 entries × 128 chars/field | main.jhyy `apply_link_section_directives` |
+| temp_asm cap | 1MB | main.jhyy `apply_link_section_directives` |
+| ship gate EXIT | 0 | `link_section_boot.jhyy` |
+| D43 baseline (new N4) | TBD (post-selfhost) | per-selfhost_check output |
+
+### Out of scope (本 batch 不做)
+
+- `#[naked]` + `#[link_section]` 组合(留 v3.x)
+- Module-level `#[link_section]` for static var arrays(留 v3.x)
+- `.pushsection` / `.popsection` 多 section stack(留 v3.x)
+- Section flag 后缀 `"ax", @progbits`(留 v3.x)
+- ARM / RISC-V section aggregation 验证(留 v3.x 末)
+- V2-A `codegen_amd64_emit_ctrl.jhyy:emit_section(name)` stub fill — V2-B v2.7.0 后续 ship
+
+---
+
+---
 
 **Per**: [`docs/plans/v3/batch-V3-C-plan.md`](../../plans/v3/batch-V3-C-plan.md)
 

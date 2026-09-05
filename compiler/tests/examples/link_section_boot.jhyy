@@ -1,0 +1,21 @@
+// V3-B 3e ship gate test: #[link_section("name")] puts a function in a custom
+// ELF section. We don't actually boot a kernel here (no OVMF in regress), so
+// the test verifies:
+//   1. link_section-annotated fn compiles
+//   2. readelf shows the symbol in the custom section
+//   3. main_jhyy returns 0 (EXIT:0)
+//
+// Verifiable via:
+//   readelf -S build/link_section_boot.exe | grep "\.text\.boot"   # ≥ 1 hit
+//   readelf -s build/link_section_boot.exe | grep "_start"          # in .text.boot
+
+#[link_section(".text.boot")]
+fn _start() -> i32 {
+    return 42 as i32;
+}
+
+fn main_jhyy() -> i32 {
+    // _start not actually called (no kernel); just verify it compiles + symbol exists.
+    let _x: i32 = _start();
+    return 0 as i32;
+}

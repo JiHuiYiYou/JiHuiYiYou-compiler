@@ -573,20 +573,22 @@ fn NODE_ENUM_DEF_SIZE() -> i64 { return 16 as i64; }
 // v1.3.5: is_inline — #[inline] attribute; codegen callsite inline expansion
 // v1.3.6: defers/ndefers — defer stack (sema-fill, codegen-read LIFO)
 // v3.0.2 (3b naked): is_naked — #[naked] attribute; codegen skips QBE export + skips prologue/epilogue
-//   is_naked 4 bytes → tail-pad → 68 → 8-byte align → 72
+// v3.0.4 (3e link_section): link_section — #[link_section("name")] puts fn in custom ELF section
+//   link_section 8 bytes → 80 → 8-byte align → 80
 type NodeFuncDecl = struct {
-    sym:      *u8,    // *Sym
-    params:   *u8,    // *NodeFuncDeclParam 数组
-    nparams:  i64,
-    ret_type: *u8,    // *Node（可空）
-    body:     *u8,    // *Node（extern 时 NULL）
-    is_extern: i32,   // bool
-    is_inline: i32,   // v1.3.5: #[inline] attribute
-    defers:   *u8,    // *Node 数组 (sema-fill, codegen-read LIFO)
-    ndefers:  i64,
-    is_naked: i32,    // v3.0.2 (3b naked): #[naked] attribute
+    sym:          *u8,    // *Sym
+    params:       *u8,    // *NodeFuncDeclParam 数组
+    nparams:      i64,
+    ret_type:     *u8,    // *Node（可空）
+    body:         *u8,    // *Node（extern 时 NULL）
+    is_extern:    i32,    // bool
+    is_inline:    i32,    // v1.3.5: #[inline] attribute
+    defers:       *u8,    // *Node 数组 (sema-fill, codegen-read LIFO)
+    ndefers:      i64,
+    is_naked:     i32,    // v3.0.2 (3b naked): #[naked] attribute
+    link_section: *u8,    // v3.0.4 (3e link_section): custom ELF section name (or NULL)
 }
-fn NODE_FUNC_DECL_SIZE() -> i64 { return 72 as i64; }
+fn NODE_FUNC_DECL_SIZE() -> i64 { return 80 as i64; }
 
 // sym(*u8 8) + body(*u8 8) = 16
 type NodeTypeDecl = struct {
@@ -1373,7 +1375,8 @@ fn node_enum_def_data(n: *Node) -> *NodeEnumDef {
 fn ast_new_func_decl(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
                      sym: *Sym, params: *u8, nparams: i64,
                      ret_type: *Node, body: *Node, is_extern: i32,
-                     is_inline: i32, is_naked: i32) -> *Node {
+                     is_inline: i32, is_naked: i32,
+                     link_section: *u8) -> *Node {
     let buf = arena_alloc(a, NODE_SIZE() + NODE_FUNC_DECL_SIZE());
     let n = ast_init_node(buf, NODE_FUNC_DECL(), loc_filename, loc_line, loc_col);
     let d = (buf as i64 + NODE_SIZE()) as *NodeFuncDecl;
@@ -1387,6 +1390,7 @@ fn ast_new_func_decl(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
     (*d).defers = 0 as *u8;   // v1.3.6: defer stack starts empty (sema fills)
     (*d).ndefers = 0 as i64;
     (*d).is_naked = is_naked;  // v3.0.2 (3b naked): #[naked] attribute
+    (*d).link_section = link_section;  // v3.0.4 (3e link_section): custom ELF section (or NULL)
     return n;
 }
 
