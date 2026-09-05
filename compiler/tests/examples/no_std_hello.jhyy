@@ -1,0 +1,10 @@
+// V3-A ship gate test: minimal #[no_std] program exits with 42.
+// Verifies parser recognizes #[no_std], codegen skips runtime bridge,
+// main.jhyy link line uses -nostartfiles -nodefaultlibs.
+//
+// See: docs/abis/jhyy-lang-spec-no_std-supplement-v3.0.0.md
+
+#[no_std]
+fn main() -> i32 {
+    return 42 as i32;
+}
