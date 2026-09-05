@@ -1,0 +1,21 @@
+// V3-B 3b ship gate test: #[naked] fn with asm!() body emits raw .s
+// without prologue/epilogue. We can't actually wire an IRQ handler here
+// (no kernel), so the test just verifies:
+//   1. naked fn compiles
+//   2. naked fn symbol is exported (.globl in .s)
+//   3. naked fn body asm!() is in the .s
+//   4. naked fn has NO `push %rbp` prologue
+//   5. main_jhyy returns 0 (EXIT:0)
+//
+// Verifiable via:
+//   grep -c "push %rbp" naked_interrupt_entry.s   # main_jhyy has 1, naked fn has 0
+//   grep "irq_entry" naked_interrupt_entry.s       # .globl + label present
+
+#[naked]
+fn irq_entry() {
+    asm!("iret");
+}
+
+fn main_jhyy() -> i32 {
+    return 0 as i32;
+}

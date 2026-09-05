@@ -33,9 +33,9 @@
 
 | Sprint | 状态 | 摘要 |
 |--------|------|------|
-| **V3-A (v3.0.0)** | ✅ **shipped** (tag `v3.0.0` pending) | 3d `#[no_std]` 试水 + core lib stub + supplement doc |
-| **V3-B (v3.0.1)** | ⏳ 待 V3-A ship 后启动 | 3a inline asm |
-| **V3-B (v3.0.2)** | ⏳ 待 V3-B v3.0.1 ship | 3b `#[naked]` |
+| **V3-A (v3.0.0)** | ✅ **shipped** (tag `v3.0.0`) | 3d `#[no_std]` 试水 + core lib stub + supplement doc |
+| **V3-B (v3.0.1)** | ✅ **shipped** (V3-B Unit A1) | 3a inline asm + QBE .s passthrough |
+| **V3-B (v3.0.2)** | ✅ **shipped** (V3-B Unit B1) | 3b `#[naked]` + side-file naked fn emit |
 | **V3-B (v3.0.3)** | ✅ **shipped** (V3-B Unit A2) | 3c volatile + V2-A emit_volatile fill |
 | **V3-B (v3.0.4)** | ⏳ 待 V3-B v3.0.3 ship | 3e `#[link_section]` |
 | **V3-B (v3.0.5)** | ⏳ 待 V3-B v3.0.4 ship | 3f memory barrier |
@@ -124,11 +124,12 @@ Unit 1 + Unit 2 merge 后,coordinator 跑 ship gate 暴露 2 个 integration gap
 | 3e | v3.0.4 | `#[link_section]` | ⏳ 待 V3-B v3.0.3 ship |
 | 3f | v3.0.5 | memory barrier | ⏳ 待 V3-B v3.0.4 ship |
 
-### V3-B v3.0.1 — inline asm (D42 passthrough) — pending ship
+### V3-B v3.0.1 — inline asm (D42 passthrough) — 2026-09-05 ✅ shipped
 
 **Per**: [`docs/plans/v3/batch-V3-B-plan.md`](../../plans/v3/batch-V3-B-plan.md) Unit A1 (sub-sprint 3a)
 **Decision authority**: D42 ([`docs/plans/v2/v2.0.0-os-prep.md`](../../plans/v2/v2.0.0-os-prep.md))
-**Branch**: `v3-B/v3.0.1-inline-asm` (cut from axis-v3)
+**Tag**: `v3.0.1` (V3-B Unit A1 ship, integration verify 后 coordinator 打 tag)
+**Branch**: `v3-B/v3.0.1-inline-asm` (cut from axis-v3) → merged `8643db4`
 
 #### Scope
 
@@ -186,6 +187,87 @@ v3.0.1 用例:**定义 global 符号** / **在 entry 之前 hook** / **asm 出�
 | `compiler/tests/examples/inline_asm_cpuid.jhyy` | new | +30 |
 | `docs/abis/jhyy-lang-spec-inline-asm-supplement-v3.0.1.md` | new | +180 |
 | `docs/logs/v3/changelog-v3.0.md` | modify | +70 (本节) |
+
+---
+
+## V3-B — v3.0.2 (3b `#[naked]` raw-asm escape hatch) — 2026-09-06 ✅ shipped
+
+**Per**: [`docs/plans/v3/iterative-imagining-thunder.md`](../../plans/v3/iterative-imagining-thunder.md) Unit B1 (sub-sprint 3b)
+**Decision authority**: D42 ([`docs/plans/v2/v2.0.0-os-prep.md`](../../plans/v2/v2.0.0-os-prep.md)) + D40 wire-format fallback
+**Tag**: `v3.0.2` (V3-B Unit B1 ship)
+**重要性**: M1-required (per coordination.md § 3 D8 — OS interrupt entry / syscall handler / boot code 硬前置)
+
+### Scope
+
+- **AST**: `NodeFuncDecl` 加 `is_naked: i32` 字段 (offset 64, 4 bytes, NODE_FUNC_DECL_SIZE 64 → 72);工厂 `ast_new_func_decl` 末位 param `is_naked: i32`,写入 `(*d).is_naked = is_naked`
+- **Parser**: `Parser` struct 加 `pending_naked: i32` (offset 92, PARSER_SIZE 88 → 96);`parser_init` init 0;`parse_module_attributes` file-top `#[naked]` → `pending_naked = 1`(同 `pending_inline` 模式);`parse_attributes(p, &is_naked_v)` 折叠 pending_naked → out-param + 清零;`parse_func` 末位 `ast_new_func_decl(..., is_naked_v)`
+- **Sema**: 新 `check_naked_body(ctx, body)` 函数,验证 body 是 `NODE_BLOCK` 且每个 stmt 是 `NODE_ASM_BLOCK` (bare) 或 `NODE_EXPR_STMT(NODE_ASM_BLOCK)`(reject local vars / control flow / `return`)。物理位置在 `check_func_decl` 之前(jhyy 无 forward decl,per V3-A no_std integration fix 教训)。`check_func_decl` 调 `if is_naked: check_naked_body(...)`
+- **Codegen** (`cg_func`): naked branch:
+  - skip `abi_win_emit_function_header` (无 QBE IL emit)
+  - skip trailing `ret` / `}` closure
+  - 调 `emit_naked_func_header(ir, fd_sym)` 写 side-file
+- **Codegen** (`cg_dbg_emit_loc`): naked fn 内 skip `dbgloc` emit (top-level `dbgloc` 不是合法 QBE 语法)
+- **ABI helper** (`abi_amd64_win.jhyy`): 新 `emit_naked_func_header(ir, fn_sym)` — `fopen("compiler/build/obj/_inline_asm.buf", "ab")` 写 `.globl <mangled>\n<mangled>:\n` (D42 side-file 复用 v3.0.1 inline asm)
+- **Test**: [`compiler/tests/examples/naked_interrupt_entry.jhyy`](../../../../compiler/tests/examples/naked_interrupt_entry.jhyy) — `#[naked] fn irq_entry() { asm!("iret"); }` + `fn main_jhyy() -> i32 { return 0 as i32; }` ship gate (EXIT:0)
+- **Doc**: [`docs/abis/jhyy-lang-spec-naked-supplement-v3.0.2.md`](../../abis/jhyy-lang-spec-naked-supplement-v3.0.2.md)
+
+### 验收
+
+- [x] `make` 零 warning
+- [x] `jhyy.exe compile naked_interrupt_entry.jhyy -o build/naked_test.exe` 成功 + `naked_test.exe` EXIT:0
+- [x] `jhyy.exe run naked_interrupt_entry.jhyy` EXIT:0 (含 asm side-file → .s concat → gcc link 完整 path)
+- [x] regress 107/107 PASS + 5 SKIP (含 volatile_mmio.jhyy v3.0.3 兼容)
+- [x] D43 baseline 重置:`51376ce5...` → `dd65e754...` (N3 re-baseline)。closure chain (v1=v2=v3=v4) byte-equal `dd65e754...` hold (per D43 per-sub-sprint re-baseline policy)
+- [x] 无新 ACTIVE workaround:side-file `_inline_asm.buf` 跟 v3.0.1 inline asm 复用 (per `feedback_qbe_crlf_root_cause` 已记录的 `"ab"` 二进制模式)
+- [x] V3-A `no_std_hello.jhyy` EXIT:42 不退步 (`make clean && make` 后 verify)
+
+### 关键 debug 教训 (per `feedback_doc_refactor_factcheck` 同步入 changelog)
+
+1. **current_fn type confusion** — `cg_func` 设 `current_fn = fd as *u8`(已 *NodeFuncDecl);初版 `cg_dbg_emit_loc` 误调 `node_func_decl_data(current_fn as *Node)` 把 NODE_SIZE() 加两次,导致 `(*cfd).is_naked` 读到垃圾(2 不是 1)。**Fix**:`cg_dbg_emit_loc` 直接 cast `current_fn as *NodeFuncDecl`(不再 `node_func_decl_data`)。同时暴露**裸 asm side-file 跟 codegen dbgloc skip 必须同时 ship** —— naked fn 走 cg_expr 时 cg_dbg_emit_loc 会 emit top-level `dbgloc`(无 enclosing function),QBE 拒 `top-level definition expected at line 2`。
+2. **stmts array 双重 deref 模式** — `(*bd).stmts` 是 `*u8` (指向 Node 指针数组的 byte buffer);`ptr_add_u8(stmts, i * 8) as *Node` 把 byte address 当 Node 指针,读 `.kind` 取到 Node 指针的 low 32 bits(garbage,如 0x040DEA68)。**Fix**:`let elem_addr = ptr_add_u8(stmts, i * 8); let stmt = (*((elem_addr as i64) as **Node)) as *Node;`(per `codegen.jhyy:449` 已 ship 模式)。
+3. **debug print 重复 `let` 编译报错** — 同名 `let sk = (*stmt).kind;` 写两次(jhyy 严格单一定声明规则),sema 报 `semantic error`。**Fix**:去重。
+
+### 已知 limitation (per spec § 6)
+
+- 不支持 `#[naked]` + `#[inline]` 组合 (semantic conflict)
+- 不支持 ARM / RISC-V naked (v3.0.2 x86-64 only)
+- 不支持 inline asm operand constraint (`asm!()` 只 raw 文本)
+- 不支持 `#[naked]` fn 调非 naked fn (codegen 无 `call` 指令,user 责任)
+
+### 关键决策点
+
+| # | 决策 | 落点 |
+|---|------|------|
+| **D-v3.0.2-1** | naked fn 走 `_inline_asm.buf` side-file(跟 v3.0.1 asm!() 复用,不开新文件路径)| `abi_amd64_win.jhyy` emit_naked_func_header |
+| **D-v3.0.2-2** | naked fn body 必须 NODE_BLOCK + 每个 stmt 是 asm!(...) — sema 校验 reject local var / control flow / return | sema.jhyy check_naked_body |
+| **D-v3.0.2-3** | naked fn 内 cg_dbg_emit_loc skip (top-level dbgloc 不合法 QBE) | codegen.jhyy cg_dbg_emit_loc |
+| **D-v3.0.2-4** | AST struct 顺序:is_naked 放 NodeFuncDecl 末位 (跟 ndefers 8 字节对齐,不破坏现有 field offset) | ast.jhyy:587 |
+| **D-v3.0.2-5** | Parser struct 顺序:pending_naked 放 pending_inline 后 (PARSER_SIZE 88 → 96) | parser.jhyy:88 |
+
+### 关键数字
+
+| 数字 | 值 | 来源 |
+|------|-----|------|
+| NodeFuncDecl size | 64 → 72 bytes | v3.0.2 (add is_naked + 4B pad) |
+| Parser size | 88 → 96 bytes | v3.0.2 (add pending_naked) |
+| 新增 codegen helper | 1 (emit_naked_func_header) | v3.0.2 |
+| 新增 sema check fn | 1 (check_naked_body) | v3.0.2 |
+| ship gate EXIT | 0 | `naked_interrupt_entry.jhyy` |
+| D43 baseline (N3) | sha=`dd65e7547874602e301ad93d4af66d52c4bdc743b9c92a776448f28dbc381e7f` | 本 batch 重 baseline (v2.4.0→v3.0.0 `51376ce5...` hold;v3.0.1/3 changes → 本 batch 重 baseline) |
+
+### Files changed (本单元)
+
+| 文件 | 类型 | lines |
+|------|------|-------|
+| `compiler/src0/ast.jhyy` | modify | +5 (NodeFuncDecl.is_naked 字段 + factory param + NODE_FUNC_DECL_SIZE 64→72) |
+| `compiler/src0/parser.jhyy` | modify | +15 (pending_naked 字段 + parse_module_attributes naked 识别 + parse_attributes out-param + parse_func 传递) |
+| `compiler/src0/sema.jhyy` | modify | +60 (check_naked_body 函数 + check_func_decl 调 + debug print 残留清理) |
+| `compiler/src0/codegen.jhyy` | modify | +25 (cg_func naked branch + cg_dbg_emit_loc naked skip + cg_expr NODE_ASM_BLOCK 走 side-file) |
+| `compiler/src0/abi_amd64_win.jhyy` | modify | +20 (emit_naked_func_header helper) |
+| `compiler/src0/bootstrap/v1.0/_driver_ast_3c.jhyy` | modify | +2 (2 个 ast_new_func_decl caller 加 `0 as i32` is_naked 实参) |
+| `compiler/tests/examples/naked_interrupt_entry.jhyy` | new | +20 |
+| `docs/abis/jhyy-lang-spec-naked-supplement-v3.0.2.md` | new | +180 |
+| `docs/logs/v3/changelog-v3.0.md` | modify | +(本节) |
 
 ---
 

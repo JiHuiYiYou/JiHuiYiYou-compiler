@@ -189,7 +189,7 @@ fn main_jhyy(_argc: i32, _argv: *u8) -> i32 {
     *fparams_p = fp1;
     let n_fdecl = ast_new_func_decl(&a, "fd.jhyy" as *u8, 6 as i32, 1 as i32,
                                     s_main, fparams_buf, 1 as i64,
-                                    dummy_int, dummy_int, 0 as i32);
+                                    dummy_int, dummy_int, 0 as i32, 0 as i32);
     if (*n_fdecl).kind == NODE_FUNC_DECL() {
         printf("C23\n", 0);
     } else {
@@ -215,7 +215,7 @@ fn main_jhyy(_argc: i32, _argv: *u8) -> i32 {
     // ──── C27: NODE_FUNC_DECL with is_extern=1 ────
     let n_fdecl_ext = ast_new_func_decl(&a, "fe.jhyy" as *u8, 7 as i32, 1 as i32,
                                         s_main, 0 as *u8, 0 as i64,
-                                        dummy_int, 0 as *Node, 1 as i32);
+                                        dummy_int, 0 as *Node, 1 as i32, 0 as i32);
     if (*node_func_decl_data(n_fdecl_ext)).is_extern == 1 as i32 {
         printf("C27\n", 0);
     } else {

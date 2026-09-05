@@ -293,6 +293,18 @@ fn cg_dbg_emit_file(ir: *IRBuf, filename: *u8) -> i32 {
 
 fn cg_dbg_emit_loc(cg_raw: *u8, line: i32) -> i32 {
     let cg = cg_raw as *CGContext;
+    // v3.0.2 (3b naked): naked fns emit NO QBE IR, so `dbgloc` at top-level
+    // (no enclosing function) is invalid QBE syntax. Skip dbgloc emit when
+    // the current function is naked. The asm body still gets its source line
+    // recorded in the .s via the inline asm itself (no DWARF needed).
+    if (*cg).current_fn != (0 as *u8) {
+        // current_fn is already a *NodeFuncDecl (set in cg_func: `current_fn = fd as *u8`).
+        // Do NOT call node_func_decl_data — that would double-add NODE_SIZE().
+        let cfd = (*cg).current_fn as *NodeFuncDecl;
+        if (*cfd).is_naked != (0 as i32) {
+            return 0;
+        }
+    }
     if line == (*cg).last_dbg_line { return 0; }
     if line <= (0 as i32) { return 0; }
     let ir = (*cg).ir as *IRBuf;
@@ -3706,7 +3718,16 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64) -> i32 {
     // v2.1.0 Stage 1c.2: abi_win_emit_function_header owns the QBE signature
     // line + @start label. Replaces the prior inline 50-line header block.
     let nparams = (*fd).nparams;
-    let _hdr = abi_win_emit_function_header(ir, fd_sym, ret_qt, is_sret, (*fd).params, nparams);
+    // v3.0.2 (3b naked): naked fns skip QBE export entirely. The asm body is
+    // emitted to the D42 side-file (_inline_asm.buf) via cg_expr NODE_ASM_BLOCK.
+    // QBE sees no declaration for the naked fn → no generated .s symbol →
+    // linker resolves `call naked_fn` (from QBE-emitted code in callers) to
+    // the `.globl naked_fn` + `naked_fn:` declared in the raw asm side-file.
+    if (*fd).is_naked != (0 as i32) {
+        let _nhdr = emit_naked_func_header(ir, fd_sym);
+    } else {
+        let _hdr = abi_win_emit_function_header(ir, fd_sym, ret_qt, is_sret, (*fd).params, nparams);
+    }
 
     // reset cg (per-function)
     (*cg).current_ret_type = ret_type;
@@ -3772,39 +3793,49 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64) -> i32 {
     }
 
     // body
+    // v3.0.2 (3b naked): body still goes through cg_expr so asm!() stmts get
+    // their text appended to the side-file via NODE_ASM_BLOCK handler.
+    // But the standard QBE epilogue (cg_body_returns check + abi_win_emit_return
+    // + closing brace) is skipped — naked fn has no QBE IR, just side-file.
     let body_val = cg_expr(cg_raw, (*fd).body as *Node);
 
-    // body_returns check
-    let body_returns: i32 = cg_body_returns((*fd).body as *Node);
+    if (*fd).is_naked == (0 as i32) {
+        // body_returns check
+        let body_returns: i32 = cg_body_returns((*fd).body as *Node);
 
-    if body_returns == 0 {
-        if is_sret != 0 {
-            // 用 IRVal literal (struct 构造) 包 sret_slot_id, 避免读
-            // (*cg).sret_slot 触发 bug 8 struct-to-buffer copy
-            let sret_addr = IRVal { kind: 0, id: (*cg).sret_slot_id as i32, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-            // Sprint 4.25 W-005 #2 真修: body_val is sentinel IRVal{id=0} when
-            // `cg_body_returns()` is syntactic-only (e.g. body is `if c { return A }
-            // else { return B }` — both arms terminate, but the if-expression
-            // still produces a value, and codegen returns the pre-return then_val
-            // which was never overwritten). Without this guard, cg_copy_struct
-            // emits `copy %t0` and QBE rejects the whole function.
-            if irval_is_undef(body_val) == 0 {
-                let _copy = cg_copy_struct(cg_raw, ret_type, sret_addr, body_val);
+        if body_returns == 0 {
+            if is_sret != 0 {
+                // 用 IRVal literal (struct 构造) 包 sret_slot_id, 避免读
+                // (*cg).sret_slot 触发 bug 8 struct-to-buffer copy
+                let sret_addr = IRVal { kind: 0, id: (*cg).sret_slot_id as i32, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+                // Sprint 4.25 W-005 #2 真修: body_val is sentinel IRVal{id=0} when
+                // `cg_body_returns()` is syntactic-only (e.g. body is `if c { return A }
+                // else { return B }` — both arms terminate, but the if-expression
+                // still produces a value, and codegen returns the pre-return then_val
+                // which was never overwritten). Without this guard, cg_copy_struct
+                // emits `copy %t0` and QBE rejects the whole function.
+                if irval_is_undef(body_val) == 0 {
+                    let _copy = cg_copy_struct(cg_raw, ret_type, sret_addr, body_val);
+                }
+                let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+                // v2.1.0 Stage 1c.3: abi_win_emit_return — sret branch → empty ret.
+                let _r = abi_win_emit_return(ir, v, 1);
+            } else if ret_qt != (0 as i32) {
+                // v2.1.0 Stage 1c.3: abi_win_emit_return — value branch.
+                let _r = abi_win_emit_return(ir, body_val, 0);
+            } else {
+                let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+                // v2.1.0 Stage 1c.3: abi_win_emit_return — void/sentinel branch.
+                let _r = abi_win_emit_return(ir, v, 0);
             }
-            let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-            // v2.1.0 Stage 1c.3: abi_win_emit_return — sret branch → empty ret.
-            let _r = abi_win_emit_return(ir, v, 1);
-        } else if ret_qt != (0 as i32) {
-            // v2.1.0 Stage 1c.3: abi_win_emit_return — value branch.
-            let _r = abi_win_emit_return(ir, body_val, 0);
-        } else {
-            let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-            // v2.1.0 Stage 1c.3: abi_win_emit_return — void/sentinel branch.
-            let _r = abi_win_emit_return(ir, v, 0);
         }
-    }
 
-    ir_emit_str(ir, "}\n\n" as *u8);
+        ir_emit_str(ir, "}\n\n" as *u8);
+    }
+    // Naked fn: no QBE epilogue. The side-file raw asm body (appended by
+    // cg_expr NODE_ASM_BLOCK) ends with the asm!() statements — caller is
+    // responsible for emitting `ret` / `iret` / etc. as needed (validated by
+    // sema check_naked_body that body has asm!() stmts).
     return 1;
 }
 

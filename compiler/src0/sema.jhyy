@@ -1801,6 +1801,47 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
 }
 
 // ════════════════════════════════════════════════════
+// check_naked_body (v3.0.2 / 3b)
+//   Defined BEFORE check_func_decl (jhyy has no forward decl).
+//   Naked fn body must be a NODE_BLOCK whose every stmt is an asm!(...) call.
+//   Local vars / control flow forbidden — naked is raw-asm escape hatch.
+fn check_naked_body(ctx: *SemaContext, body: *Node) -> i32 {
+    if body == (0 as *Node) { return 0 as i32; }
+    if (*body).kind != NODE_BLOCK() {
+        let _e = sema_error_str(ctx, (*body).loc_filename, (*body).loc_line, (*body).loc_col,
+                                "naked function body must be a block { ... }" as *u8);
+        return 0 as i32;
+    }
+    let bd = node_block_data(body);
+    let stmts = (*bd).stmts;
+    let nstmts = (*bd).nstmts;
+    let mut i: i64 = 0 as i64;
+    while i < nstmts {
+        let elem_addr = ptr_add_u8(stmts, i * (8 as i64));
+        let stmt = (*((elem_addr as i64) as **Node)) as *Node;
+        let sk = (*stmt).kind;
+        if sk == NODE_ASM_BLOCK() {
+            // parser quirk: bare asm!() as a stmt (not wrapped in EXPR_STMT)
+            i = i + (1 as i64);
+            continue;
+        }
+        if sk == NODE_EXPR_STMT() {
+            let esd = node_expr_stmt_data(stmt);
+            let inner = (*esd).expr as *Node;
+            if inner != (0 as *Node) {
+                if (*inner).kind == NODE_ASM_BLOCK() {
+                    i = i + (1 as i64);
+                    continue;
+                }
+            }
+        }
+        let _e = sema_error_str(ctx, (*stmt).loc_filename, (*stmt).loc_line, (*stmt).loc_col,
+                                "naked function body may only contain asm!(...) statements" as *u8);
+        i = i + (1 as i64);
+    }
+    return 1 as i32;
+}
+
 // check_func_decl
 // ════════════════════════════════════════════════════
 
@@ -1869,12 +1910,28 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
                     (*fn_sym).type_ptr = new_fn_type as *u8;
                 }
             }
+            // v3.0.2 (3b naked): validate that naked fn body has only asm!() expr stmts.
+            // Naked fns skip QBE export + skip prologue/epilogue, so any control flow
+            // or local var would break. We walk body stmts + reject non-asm.
+            if (*fd).is_naked != (0 as i32) {
+                let _nk = check_naked_body(ctx, (*fd).body as *Node);
+            }
         }
     }
 
     sema_pop_scope(ctx);
     return 1;
 }
+
+// v3.0.2 (3b naked): validate naked fn body. Body must be a NODE_BLOCK whose
+// every stmt is either:
+//   - NODE_EXPR_STMT wrapping NODE_ASM_BLOCK, OR
+//   - NODE_ASM_BLOCK directly (parser-level single-stmt body).
+// Local vars (NODE_LET), control flow (NODE_IF, NODE_WHILE, NODE_RETURN, etc.)
+// are forbidden — naked fns are pure raw-asm escape hatches per L4 inline asm.
+// Reports sema errors via sema_error_str.
+// (Definition moved BEFORE check_func_decl — see line 1808 area — jhyy has no
+// forward decls.)
 
 // ════════════════════════════════════════════════════
 // check_module（3-pass）
