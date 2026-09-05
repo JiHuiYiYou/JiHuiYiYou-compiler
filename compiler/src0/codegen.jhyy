@@ -513,6 +513,21 @@ fn ir_new_int(val: i64) -> IRVal {
 fn cg_emit_load(cg_raw: *u8, dst: IRVal, t_raw: *u8, addr: IRVal) -> i32 {
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
+    // v3.0.3 (3c volatile): 标记 volatile load.emit comment "volatile" 让 .il
+    //   grep 可命中,也提醒 reader 此 load 是 volatile。每次 load 已强制 fresh temp
+    //   (cg_expr NODE_IDENT 路径走 ir_new_tmp + cg_emit_load),无 regalloc reuse;
+    //   QBE IL 不识别 volatile keyword,所以仅发注释 — codegen 主路径下保证"no regalloc"
+    //   靠 cg_expr NODE_IDENT 每次新 temp 的纪律,不靠 qbe 本身。
+    let mut is_volatile_load: i32 = 0 as i32;
+    if t_raw != (0 as *u8) {
+        let vt = t_raw as *Type;
+        if (*vt).is_volatile != (0 as i32) {
+            is_volatile_load = 1 as i32;
+        }
+    }
+    if is_volatile_load != (0 as i32) {
+        ir_emit_str(ir, "    # volatile load\n" as *u8);
+    }
     if t_raw == (0 as *u8) {
         return ir_emit_load(ir, dst, QBE_W(), addr);
     }
@@ -556,6 +571,13 @@ fn cg_emit_load(cg_raw: *u8, dst: IRVal, t_raw: *u8, addr: IRVal) -> i32 {
 fn cg_emit_store_primitive(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> i32 {
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
+    // v3.0.3 (3c volatile): 标记 volatile store(per cg_emit_load 同逻辑)。
+    if t_raw != (0 as *u8) {
+        let vt = t_raw as *Type;
+        if (*vt).is_volatile != (0 as i32) {
+            ir_emit_str(ir, "    # volatile store\n" as *u8);
+        }
+    }
     if t_raw == (0 as *u8) {
         // Sprint 4.3 A fix: NULL type 时用 val.qbe_type 决定 store 宽度 — 不是 hardcoded QBE_W().
         //   修 slice/array 路径 heap corruption 根因: 写 64-bit ptr (QBE_L) 时应该用 storel,

@@ -1,0 +1,50 @@
+// V3-B 3c (v3.0.3) ship gate test: volatile 修饰的 primitive type 在 codegen 阶段
+// 走 "no regalloc" 路径。
+//
+// 由于 codegen 主路径走 qbe.exe → .s,QBE 本身不识别 volatile keyword。QBE
+// 通过 load.c / gvn.c 等 pass 会做 load elimination 与 register promotion —
+// 这意味着 codegen 主路径下 volatile 语义只能保证 type-level(parser / sema
+// 强制 primitive-only + no chained per spec § 6) + .il-level(每次 load 都 alloc
+// fresh temp + emit `    # volatile load` 注释)。真实 "no regalloc" 语义仅在
+// V2-A 路径 (codegen_amd64.jhyy) 强制(per V2-A emit_volatile design);主路径下
+// 需要 OS-level kernel + 物理地址 MMIO 才能真正观察到 "每次 access 都独立"。
+//
+// 本测试是 codegen 层面 smoke test:
+//   1. parser / sema 接受 volatile 修饰的 primitive type(无报错)
+//   2. codegen 路径 emit 完整 .il(包含 # volatile load / store 注释)
+//   3. 程序编译 + 链接 + 跑通,EXIT: 0 (a == 42 && b == 42)
+// spec § 5 实施部分明确说明主路径 vs V2-A 路径的语义差;真实 MMIO semantic
+// 验证走 V2-A 路径 + OVMF,不在本 ship gate scope。
+//
+// Spec: docs/abis/jhyy-lang-spec-volatile-supplement-v3.0.3.md
+
+// opaque source — defeat constant propagation / register promotion
+fn read_sensor() -> i32 {
+    return 42 as i32;
+}
+
+// opaque sink — defeat dead-store elimination
+fn write_log(v: i32) -> i32 {
+    return v;
+}
+
+fn main_jhyy() -> i32 {
+    // ── 最小 volatile 用例 ──
+    let mut x: volatile i32 = read_sensor();
+
+    // 1st volatile load + opaque sink → 不能 fold 到 stored value
+    let a: i32 = x;
+    let _h1 = write_log(a);
+
+    // opaque call 之间修改 volatile → QBE 不能跨 call 做 constant propagation
+    x = read_sensor();
+
+    // 2nd volatile load + opaque sink → 必须 ANOTHER 独立 mem read
+    let b: i32 = x;
+    let _h2 = write_log(b);
+
+    if a == 42 && b == 42 {
+        return 0 as i32;
+    }
+    return 1 as i32;
+}

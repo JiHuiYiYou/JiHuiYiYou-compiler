@@ -66,7 +66,7 @@ fn PRIM_BOOL() -> i32 { return 10 as i32; }
 // Type struct（max-size union 模式）
 // ════════════════════════════════════════════════════
 
-// 19 字段 × 8 bytes = 152 bytes
+// 19 字段 × 8 bytes + is_volatile(i32 4) + pad_volatile(i32 4) = 160 bytes
 // 字段映射（按 C union variant）：
 //   KIND_PRIMITIVE: kind + prim
 //   KIND_POINTER:   kind + elem
@@ -78,31 +78,37 @@ fn PRIM_BOOL() -> i32 { return 10 as i32; }
 //   KIND_ALIAS:     kind + sym + underlying
 //   KIND_VOID:      kind
 //
+// v3.0.3 (3c volatile): 新增 is_volatile 标记。volatile 修饰的 type 在 codegen 走
+// "no regalloc + no barrier" 路径,每次 load 都用 fresh temp。compound 类型不允许
+// volatile(per spec § 6 限制),sema 阶段拒绝。
+//
 // 注：所有 *Type 在 jhyy 中用 *u8（struct 内前向引用问题）
 type Type = struct {
-    kind:        i32,
-    prim:        i32,
-    elem:        *u8,        // KIND_POINTER/SLICE/ARRAY: *Type
-    arr_count:   i64,        // KIND_ARRAY
-    params:      *u8,        // KIND_FUNC: **Type（实际是 *[*]Type 数组，offset 访问）
-    nparams:     i64,        // KIND_FUNC
-    ret:         *u8,        // KIND_FUNC: *Type
-    name:        *u8,        // KIND_STRUCT/ENUM: *Sym
-    fields:      *u8,        // KIND_STRUCT: *FieldDesc
-    nfields:     i64,        // KIND_STRUCT
-    size:        i64,        // KIND_STRUCT/ENUM
-    align:       i64,        // KIND_STRUCT
-    variants:    *u8,        // KIND_ENUM: *VariantDesc
-    nvariants:   i64,        // KIND_ENUM
-    tag_size:    i64,        // KIND_ENUM
-    payload_off: i64,        // KIND_ENUM
-    payload_sz:  i64,        // KIND_ENUM
-    sym:         *u8,        // KIND_ALIAS: *Sym
-    underlying:  *u8,        // KIND_ALIAS: *Type
+    kind:         i32,
+    prim:         i32,
+    elem:         *u8,        // KIND_POINTER/SLICE/ARRAY: *Type
+    arr_count:    i64,        // KIND_ARRAY
+    params:       *u8,        // KIND_FUNC: **Type（实际是 *[*]Type 数组，offset 访问）
+    nparams:      i64,        // KIND_FUNC
+    ret:          *u8,        // KIND_FUNC: *Type
+    name:         *u8,        // KIND_STRUCT/ENUM: *Sym
+    fields:       *u8,        // KIND_STRUCT: *FieldDesc
+    nfields:      i64,        // KIND_STRUCT
+    size:         i64,        // KIND_STRUCT/ENUM
+    align:        i64,        // KIND_STRUCT
+    variants:     *u8,        // KIND_ENUM: *VariantDesc
+    nvariants:    i64,        // KIND_ENUM
+    tag_size:     i64,        // KIND_ENUM
+    payload_off:  i64,        // KIND_ENUM
+    payload_sz:   i64,        // KIND_ENUM
+    sym:          *u8,        // KIND_ALIAS: *Sym
+    underlying:   *u8,        // KIND_ALIAS: *Type
+    is_volatile:  i32,        // v3.0.3: 1 if type is `volatile T`, 0 otherwise
+    _pad_volatile: i32,       // 4-byte tail pad to keep 8-byte struct alignment
 }
 
-// Type struct 字节数
-fn TYPE_SIZE() -> i64 { return 152 as i64; }
+// Type struct 字节数 (v3.0.3: 160 = 152 + 8 for is_volatile+pad)
+fn TYPE_SIZE() -> i64 { return 160 as i64; }
 
 // ════════════════════════════════════════════════════
 // TypeArena：11 prim + 1 void 的 lazy 缓存

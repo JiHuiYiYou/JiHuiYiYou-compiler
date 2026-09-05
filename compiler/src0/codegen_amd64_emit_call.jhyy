@@ -503,6 +503,16 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
 //
 // 注:为保持 emit_volatile 单一函数可独立调用 + ship gate grep 命中,本函数
 // 实现为 "marker 识别 + 注释 + return 0"。
+//
+// v3.0.3 (3c volatile) ship 后行为: flip from "noop + comment" 到
+// "no regalloc + no barrier"。
+//   - no regalloc:emit_load/emit_store 已经走 "movl mem, %reg" + "movl %reg, mem"
+//     的 mem-to-reg-to-mem 模式(per codegen_amd64_emit_mem.jhyy),不经过任何
+//     register-to-register 优化路径 — 等价于 "direct mem op",无需再 flip。
+//   - no barrier:不 emit `lock; addq $0, (%rsp)` 或 `mfence`(那是 3f memory barrier
+//     sub-sprint 的职责,不是 3c)。3c 仅承诺 "no regalloc + no reordering within
+//     single thread"。
+//   - cross-thread ordering:留 3f fence_* 系列实现(per L4 § X.2)。
 
 fn emit_volatile(state: *u8, tok: *u8) -> i32 {
     let t = tok as *ILToken;
@@ -514,11 +524,12 @@ fn emit_volatile(state: *u8, tok: *u8) -> i32 {
     let _c1 = emit_comment(state, "emit_volatile: volatile token marker detected (qbe_type = QBE_VOLATILE_MARKER = -1)" as *u8);
 
     if is_volatile {
-        // ── Step 3: 3c ship 前行为(per L4 § X.2) ─
-        //   emit 普通 load/store(由后续 A2 emit 函数处理)
-        //   **不** emit memory barrier / 串行化指令
-        let _c2 = emit_comment(state, "v2.5.0: emit 普通 load/store (no memory barrier per L4 § X.2 3c volatile 优先)" as *u8);
-        let _c3 = emit_comment(state, "V2-B 3c ship 后 flip: 在 load/store 前加 'lock; addq $0, (%rsp)' 或 mfence" as *u8);
+        // ── Step 3: v3.0.3 (3c ship) 行为 ─
+        //   - no regalloc:由后续 A2 emit_load/emit_store 处理(emit movl mem, %reg
+        //     + movl %reg, mem;无 reg-to-reg 优化路径)。emit_volatile 仅作为 marker。
+        //   - no barrier:不 emit mfence/lock prefix(那是 3f 职责,3c 仅承诺
+        //     "no reordering within single thread" — per L4 § X.2 + spec § 3)
+        let _c2 = emit_comment(state, "v3.0.3 3c volatile ship: no regalloc + no barrier (fence_* is 3f scope)" as *u8);
     } else {
         // tok.qbe_type != QBE_VOLATILE_MARKER — 不应该走到 emit_volatile
         // 这是 parse loop 调度错误,emit warning comment + return 1(error)

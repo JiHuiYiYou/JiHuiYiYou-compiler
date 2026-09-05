@@ -339,6 +339,53 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
         return type_slice((*ctx).arena, elem);
     }
 
+    // v3.0.3 (3c volatile): NODE_VOLATILE_TYPE wrapper — resolve inner,
+    // 校验 inner 是 primitive (struct/pointer/array 在 parser 阶段 soft warn,
+    // 这里做强校验兜底),然后 alloc new Type = copy(inner) + is_volatile=1。
+    if (*tn).kind == NODE_VOLATILE_TYPE() {
+        let vt = node_volatile_type_data(tn);
+        let inner = resolve_type_node(ctx, ta, (*vt).inner as *Node);
+        if inner == (0 as *Type) {
+            return type_primitive(ta, PRIM_I32());  // error recovery
+        }
+        // 拒绝 chained (TYPE 已有 is_volatile=1) — parser 已拦,这里再次兜底
+        if (*inner).is_volatile != (0 as i32) {
+            let _x = sema_error_str(ctx, (*tn).loc_filename, (*tn).loc_line, (*tn).loc_col,
+                                    "chained `volatile volatile` not allowed" as *u8);
+            return type_primitive(ta, PRIM_I32());  // error recovery
+        }
+        // 拒绝 compound types — only KIND_PRIMITIVE 接受
+        if (*inner).kind != KIND_PRIMITIVE() {
+            let _x = sema_error_str(ctx, (*tn).loc_filename, (*tn).loc_line, (*tn).loc_col,
+                                    "`volatile` only allowed on primitive types (struct/pointer/array not allowed per spec § 6)" as *u8);
+            return type_primitive(ta, PRIM_I32());  // error recovery
+        }
+        // 分配新 Type = 复制 inner 的所有字段 + is_volatile=1
+        let vt_type = arena_alloc((*ctx).arena, TYPE_SIZE()) as *Type;
+        (*vt_type).kind = (*inner).kind;
+        (*vt_type).prim = (*inner).prim;
+        (*vt_type).elem = (*inner).elem;
+        (*vt_type).arr_count = (*inner).arr_count;
+        (*vt_type).params = (*inner).params;
+        (*vt_type).nparams = (*inner).nparams;
+        (*vt_type).ret = (*inner).ret;
+        (*vt_type).name = (*inner).name;
+        (*vt_type).fields = (*inner).fields;
+        (*vt_type).nfields = (*inner).nfields;
+        (*vt_type).size = (*inner).size;
+        (*vt_type).align = (*inner).align;
+        (*vt_type).variants = (*inner).variants;
+        (*vt_type).nvariants = (*inner).nvariants;
+        (*vt_type).tag_size = (*inner).tag_size;
+        (*vt_type).payload_off = (*inner).payload_off;
+        (*vt_type).payload_sz = (*inner).payload_sz;
+        (*vt_type).sym = (*inner).sym;
+        (*vt_type).underlying = (*inner).underlying;
+        (*vt_type).is_volatile = 1 as i32;
+        (*vt_type)._pad_volatile = 0 as i32;
+        return vt_type;
+    }
+
     let _x = sema_error_str(ctx, (*tn).loc_filename, (*tn).loc_line, (*tn).loc_col,
                             "invalid type annotation" as *u8);
     return type_primitive(ta, PRIM_I32());
@@ -1738,6 +1785,15 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         return ret_t;
     }
 
+    // v3.0.3 (3c volatile): NODE_VOLATILE_TYPE — 应在 type annotation 阶段已被
+    // resolve_type_node 处理掉,但表达式路径里若出现(罕见)fallback 处理。
+    if (*n).kind == NODE_VOLATILE_TYPE() {
+        let vt = node_volatile_type_data(n);
+        let t = resolve_type_node(ctx, ta, (*vt).inner as *Node);
+        (*n).type_ptr = t as *u8;
+        return t;
+    }
+
     // default: skip for now
     let v = type_void(ta);
     (*n).type_ptr = v as *u8;
@@ -1770,6 +1826,8 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
         (*param_sym).kind = SYM_VAR();
         let _x1 = symtab_insert((*ctx).current_scope, (*param_sym).name, SYM_VAR(),
                                 pt as *u8, 0 as i32, (*ctx).scope_depth);
+        // v3.0.3 (3c volatile): volatile param 是常见 MMIO callback 模式(per spec § 3
+        //   examples)。允许 — 不 warn(codegen 已正确处理;warn 会污染 regress baseline)。
         i = i + (1 as i64);
     }
 

@@ -357,6 +357,92 @@ fn parse_type(p: *Parser) -> *Node {
                            0 as i64, PRIM_I32());
     }
 
+    // ════════════════════════════════════════════════════
+    // v3.0.3 (3c volatile): `volatile` type qualifier prefix
+    // ════════════════════════════════════════════════════
+    // 规则(per spec § 2):
+    //   - 必须紧跟 primitive type ident (i8/i16/i32/i64/u8/u16/u32/u64/f32/f64/bool)
+    //   - `volatile T` 套 compound type (struct/pointer/array/slice) → compile error
+    //   - `volatile volatile T` → compile error (chained rejected)
+    //   - `volatile` 单独出现(无后续 type) → 走 default TOKEN_IDENT 路径报 "type name"
+    //
+    // 设计:parse_type 顶层 peek → 看到 volatile 先 consume,然后 inline 解析
+    // primitive ident 作 inner。这里选择直接 inline 实现而非递归 parse_type —
+    // 避免给非 volatile 路径增加 framing,以及避免误把 *T/[*]T 套 volatile
+    // 的内层给 recursive 走通。
+    if parser_check(p, TOKEN_VOLATILE()) != (0 as i32) {
+        let mut vt = empty_token();
+        parser_peek(p, &vt);
+        let vol_lf = vt.loc_filename;
+        let vol_ll = vt.loc_line;
+        let vol_lc = vt.loc_col;
+        parser_advance(p, &t);
+
+        // ── 拒绝 chained volatile ──
+        if parser_check(p, TOKEN_VOLATILE()) != (0 as i32) {
+            let mut chained_t = empty_token();
+            parser_peek(p, &chained_t);
+            jh_print_loc_stderr(chained_t.loc_filename, chained_t.loc_line, chained_t.loc_col);
+            jh_fputs_stderr("error: chained `volatile volatile` is not allowed (volatile is primitive-only qualifier)\n" as *u8);
+            (*p).error_count = (*p).error_count + (1 as i32);
+            // error recovery:仍 consume 第二个 volatile 避免后续误报
+            parser_advance(p, &t);
+            // 继续 consume 一个 token 以走完 type annotation 边界
+            parser_advance(p, &t);
+            return ast_new_int((*p).arena, vol_lf, vol_ll, vol_lc,
+                               0 as i64, PRIM_I32());
+        }
+
+        // ── 读取 inner type(必须是 primitive ident)──
+        // peek next token;若不是 TOKEN_IDENT 立即报错(避免误把 *T/[*]T/struct 等
+        // 解析为 volatile inner)
+        let mut next_t = empty_token();
+        parser_peek(p, &next_t);
+        if next_t.kind != TOKEN_IDENT() {
+            jh_print_loc_stderr(next_t.loc_filename, next_t.loc_line, next_t.loc_col);
+            jh_fputs_stderr("error: `volatile` must be followed by a primitive type (i8/i16/i32/i64/u8/u16/u32/u64/f32/f64/bool), got " as *u8);
+            jh_fputs_stderr(token_kind_name(next_t.kind));
+            jh_fputs_stderr("\n" as *u8);
+            (*p).error_count = (*p).error_count + (1 as i32);
+            // error recovery:尝试走 default ident path 让后续 type-name error 也报
+            parser_expect(p, TOKEN_IDENT(), "primitive type after volatile" as *u8, &t);
+            return ast_new_int((*p).arena, vol_lf, vol_ll, vol_lc,
+                               0 as i64, PRIM_I32());
+        }
+
+        parser_advance(p, &t);
+        let inner_name = parser_tok_name(p, &t);
+        let mut inner_sym = symtab_lookup((*p).current_scope, inner_name);
+        if inner_sym == (0 as *Sym) {
+            inner_sym = symtab_insert((*p).current_scope, inner_name, SYM_TYPE(),
+                                       0 as *u8, 0 as i32, (*p).scope_depth);
+        }
+        let inner_node = ast_new_ident((*p).arena, t.loc_filename, t.loc_line, t.loc_col, inner_sym);
+
+        // ── 校验 inner 是 primitive。compound type ident (struct name 等) 拒掉 —
+        //    sema 阶段会再次校验,这里给清晰错误信息。──
+        let is_prim = (strcmp(inner_name, "i8" as *u8) == (0 as i32)) ||
+                      (strcmp(inner_name, "i16" as *u8) == (0 as i32)) ||
+                      (strcmp(inner_name, "i32" as *u8) == (0 as i32)) ||
+                      (strcmp(inner_name, "i64" as *u8) == (0 as i32)) ||
+                      (strcmp(inner_name, "u8" as *u8) == (0 as i32)) ||
+                      (strcmp(inner_name, "u16" as *u8) == (0 as i32)) ||
+                      (strcmp(inner_name, "u32" as *u8) == (0 as i32)) ||
+                      (strcmp(inner_name, "u64" as *u8) == (0 as i32)) ||
+                      (strcmp(inner_name, "f32" as *u8) == (0 as i32)) ||
+                      (strcmp(inner_name, "f64" as *u8) == (0 as i32)) ||
+                      (strcmp(inner_name, "bool" as *u8) == (0 as i32));
+        if is_prim == (0 as i32) {
+            jh_print_loc_stderr(vol_lf, vol_ll, vol_lc);
+            jh_fputs_stderr("error: `volatile` requires a primitive type (struct/pointer/array not allowed per spec § 6), got `" as *u8);
+            jh_fputs_stderr(inner_name);
+            jh_fputs_stderr("`\n" as *u8);
+            (*p).error_count = (*p).error_count + (1 as i32);
+        }
+
+        return ast_new_volatile_type((*p).arena, vol_lf, vol_ll, vol_lc, inner_node);
+    }
+
     // Ident [:: Ident]*
     parser_expect(p, TOKEN_IDENT(), "type name" as *u8, &t);
     let name = parser_tok_name(p, &t);
