@@ -12,7 +12,7 @@
 | [`v2.0.0任务清单 + 概要设计.md`](v2.0.0任务清单 + 概要设计.md) | **sprint 计划**(2026-09-01 user 决定) | v2.0.0 = Sprint A Stage 1: target dispatcher 起步 |
 | [`v2.1.0任务清单 + 概要设计.md`](v2.1.0任务清单 + 概要设计.md) | **sprint 计划** | v2.1.0 = Sprint A Stage 2: ABI 抽离（Windows x64 + UEFI 风格）|
 | [`v2.1.0详细实现方案.md`](v2.1.0详细实现方案.md) | **sprint 计划**(详细实现) | v2.1.0 = 每个 ABI 函数的具体实现 + codegen 抽离调用细节 + byte-equal 验证脚本 |
-| [`v2.2.0任务清单 + 概要设计.md`](v2.2.0任务清单 + 概要设计.md) | **sprint 计划** | v2.2.0 = Sprint A Stage 3: spec 锁定（abi § 13 + lang-spec § 18-21 + build.md）|
+| [`v2.2.0任务清单 + 概要设计.md`](v2.2.0任务清单 + 概要设计.md) | **sprint 计划** | v2.2.0 = Sprint A Stage 3: spec 锁定（abi § 13 + lang-spec § 17-20 + build.md）|
 | [`v2.3.0任务清单 + 概要设计.md`](v2.3.0任务清单 + 概要设计.md) | **sprint 计划** | v2.3.0 = Sprint B: hello-freestanding.efi 跑 OVMF（EFI struct + lld-link + QEMU 启动 + printk）|
 | [`v2.4.0任务清单 + 概要设计.md`](v2.4.0任务清单 + 概要设计.md) | **sprint 计划** | v2.4.0 = Sprint C: 多目标 dispatcher + byte-equal 三件套（cross-jhyy-version 验证）|
 
