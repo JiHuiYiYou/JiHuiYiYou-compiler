@@ -124,6 +124,69 @@ Unit 1 + Unit 2 merge 后,coordinator 跑 ship gate 暴露 2 个 integration gap
 | 3e | v3.0.4 | `#[link_section]` | ⏳ 待 V3-B v3.0.3 ship |
 | 3f | v3.0.5 | memory barrier | ⏳ 待 V3-B v3.0.4 ship |
 
+### V3-B v3.0.1 — inline asm (D42 passthrough) — pending ship
+
+**Per**: [`docs/plans/v3/batch-V3-B-plan.md`](../../plans/v3/batch-V3-B-plan.md) Unit A1 (sub-sprint 3a)
+**Decision authority**: D42 ([`docs/plans/v2/v2.0.0-os-prep.md`](../../plans/v2/v2.0.0-os-prep.md))
+**Branch**: `v3-B/v3.0.1-inline-asm` (cut from axis-v3)
+
+#### Scope
+
+- **Parser**: IDENT branch 2-token lookahead 检测 `asm!` macro,新 `parse_asm_block` 函数 consume `!` `(` `string-literal` `)`,错误路径清晰(operand-not-supported / non-string-first-arg)
+- **AST**: 新 `NODE_ASM_BLOCK` enum value + `NodeAsmBlock` struct (text, noperands, operands) = 24 bytes
+- **Sema**: `infer_type` 加 `case NODE_ASM_BLOCK: return unit_type;`(asm 是 stmt-position, type = unit ())
+- **Codegen** (`cg_expr`): `case NODE_ASM_BLOCK` — **不 emit QBE IL**,直接 `fopen("compiler/build/obj/_inline_asm.buf", "ab")` 把 raw asm 文本 append 进去,return zero IRVal
+- **V2-A escape hatch** (`codegen_amd64_emit_raw_asm`): V2-A 已 ship 签名,空 body;V3-B v3.0.1 填 body = 跟 cg_expr 同样 side-file append 实现
+- **main.jhyy** (`link_with_gcc`): 在 `jh_file_copy(asm_path, temp_asm)` 之后,gcc 链接之前,fopen("rb") 读 `_inline_asm.buf` 内容 → fopen("ab") 写到 temp_asm → unlink side-file
+- **Test**: `compiler/tests/examples/inline_asm_cpuid.jhyy` — 验证 asm 文本出现在 .s 末(grep cpuid ≥ 1)+ cpuid 字节 (0f a2) 出现在最终 .exe (objdump -d 验证)
+- **Doc**: [`docs/abis/jhyy-lang-spec-inline-asm-supplement-v3.0.1.md`](../../abis/jhyy-lang-spec-inline-asm-supplement-v3.0.1.md) — 7 节 supplement(scope / syntax / semantics / ABI / implementation / limitations / examples)
+
+#### 验收
+
+- [x] `make` 零 warning
+- [x] `jhyy compile compiler/tests/examples/inline_asm_cpuid.jhyy -o build/cpuid_test` 成功
+- [x] `grep -c cpuid build/cpuid_test.s` ≥ 1
+- [x] `ls -la build/cpuid_test.exe` size > 0
+- [x] `objdump -d build/cpuid_test.exe | grep cpuid` ≥ 1
+- [x] `./build/cpuid_test.exe` exit 0
+- [x] D43 baseline hold:默认 `is_no_std=0` 路径(无 asm!)byte-equal `51376ce5...` 不变 — verified via `jhyy build compiler/tests/examples/hello.jhyy` 产出 .il 跟 v2.4.0 ship 9 行一致
+- [x] 无新 ACTIVE workaround:side-file 路径走 `feedback_qbe_crlf_root_cause` 已记录的 `"ab"` 二进制模式(不是新 workarounds)
+- [ ] `mcp__jhyy__jhyy_regress` — 留 coordinator integration verify 时跑(axis-v3 worktree);本单元只 self-verify
+
+#### 关键限制(per spec § 6)
+
+| 限制 | v3.0.1 现状 | v3.1+ planned |
+|------|------------|---------------|
+| Operand constraints | ❌ 单一 string literal only | ✅ `in(reg)` / `out(reg)` / `clobber("eax")` |
+| Inline placement | ❌ appended 到 .s 末(global scope) | ✅ 函数体内 inline |
+| Register clobber 自动 emit | ❌ user 责任 | ✅ clobber 列表自动 emit |
+| Multi-arch | ❌ x86-64 AT&T only | ✅ ARM64 / RISC-V per-target |
+
+v3.0.1 用例:**定义 global 符号** / **在 entry 之前 hook** / **asm 出现在 binary 供 objdump 验证**。inline 调用 (e.g. `if eax != 0` based on cpuid) 需要 v3.1+。
+
+#### 关键决策
+
+| # | 决策 | 落点 |
+|---|------|------|
+| D42 | inline asm 走 QBE .s passthrough(v2.x 中期前);V2-A escape hatch 同步填 body | V2-A commit `729073c` stub + V3-B v3.0.1 填 |
+| 实施决策 | Side-file `_inline_asm.buf` 走 `feedback_no_std_flag_path` 同模式(file 在 `compiler/build/obj/`),不走 CGContext 字段加法(避免动 D43 byte-equal baseline struct) | codegen.jhyy:3499 + main.jhyy:875 |
+| 实施决策 | `parse_asm_block` 物理位置必须在 `parse_expr` 之前(jhyy 无 forward decl);从文件末移到 line 684 | parser.jhyy reorder |
+| 实施决策 | `if/else branches must have same type: i32 vs ()` 错误:debug 路径嵌套 if-else + let-bound debug printf 返回 i32 + else 无 value → 简化为单层结构 + free ia_buf 在 outer else 之前 | main.jhyy:865-892 |
+
+#### Files changed (本单元)
+
+| 文件 | 类型 | lines |
+|------|------|-------|
+| `compiler/src0/ast.jhyy` | modify | +20 (NODE_ASM_BLOCK enum value + kind_name case + NodeAsmBlock struct + ast_new_asm_block factory + node_asm_block_data accessor) |
+| `compiler/src0/parser.jhyy` | modify | +95 (IDENT 分支 asm 检测 + parse_asm_block 上移到 line 684) |
+| `compiler/src0/sema.jhyy` | modify | +10 (infer_type case NODE_ASM_BLOCK → type_void) |
+| `compiler/src0/codegen.jhyy` | modify | +22 (extern fopen/fwrite/fclose/strlen + cg_expr case NODE_ASM_BLOCK) |
+| `compiler/src0/codegen_amd64.jhyy` | modify | +20 (extern + codegen_amd64_emit_raw_asm body fill) |
+| `compiler/src0/main.jhyy` | modify | +30 (link_with_gcc side-file read+append+unlink) |
+| `compiler/tests/examples/inline_asm_cpuid.jhyy` | new | +30 |
+| `docs/abis/jhyy-lang-spec-inline-asm-supplement-v3.0.1.md` | new | +180 |
+| `docs/logs/v3/changelog-v3.0.md` | modify | +70 (本节) |
+
 ---
 
 ## V3-C — v3.1.0 → v3.1.2 (D27 串行) — pending

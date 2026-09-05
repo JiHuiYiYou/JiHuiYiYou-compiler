@@ -55,6 +55,13 @@ extern fn jh_fputs_stderr(s: *u8) -> i32;
 extern fn jh_sprintf_f64(buf: *u8, val: f64) -> i32;
 extern fn jh_sprintf_f32(buf: *u8, val: f64) -> i32;
 
+// V3-B v3.0.1: inline asm side-file append (per feedback_qbe_crlf_root_cause:
+//   IL/ASM/binary files use "ab" not "a" to avoid Windows \n→\r\n mangling).
+extern fn fopen(path: *u8, mode: *u8) -> *u8;
+extern fn fwrite(buf: *u8, size: i64, count: i64, fp: *u8) -> i64;
+extern fn fclose(fp: *u8) -> i32;
+extern fn strlen(s: *u8) -> i64;
+
 // fprintf 重定向：v0 codegen 用 fprintf(stderr, ...) 写 warning。jhyy 走
 // jh_fputs_stderr 单字符串参数风格 → caller 用 StringBuilder 拼好单字符串再传
 // 注：本 commit 不实际 emit warning（C 端 codegen 也不太 emit warning），占位
@@ -3491,6 +3498,28 @@ let cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*matched_node).type_pt
     // v1.3.6: defer body 在 cg_emit_defers (cg_stmt NODE_RETURN 前) 已
     //   emit. 这里只是 stmt position 访问,no-op → zero.
     if kind == NODE_DEFER() {
+        return zero;
+    }
+
+    // ── NODE_ASM_BLOCK ──
+    // V3-B v3.0.1: asm!(...) inline asm macro per D42 (docs/plans/v2/v2.0.0-os-prep.md).
+    //   codegen does NOT emit QBE IL — instead appends raw asm string to a
+    //   side-file (compiler/build/obj/_inline_asm.buf, fopen "ab" per
+    //   feedback_qbe_crlf_root_cause). main.jhyy concatenates that file to
+    //   the .s file before gcc link. v3.0.1 only supports a single string
+    //   literal — operands array always NULL.
+    if kind == NODE_ASM_BLOCK() {
+        let ad = node_asm_block_data(n);
+        let asm_buf_path = "compiler/build/obj/_inline_asm.buf" as *u8;
+        let afp = fopen(asm_buf_path, "ab" as *u8);
+        if afp != (0 as *u8) {
+            let text_len = strlen((*ad).text);
+            let _w1 = fwrite((*ad).text, 1 as i64, text_len, afp);
+            let nl = "\n" as *u8;
+            let _w2 = fwrite(nl, 1 as i64, 1 as i64, afp);
+            let _c = fclose(afp);
+        }
+        // Return zero IRVal (asm is stmt-position; never used as expr value).
         return zero;
     }
 

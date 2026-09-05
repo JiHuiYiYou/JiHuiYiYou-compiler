@@ -664,6 +664,81 @@ fn parse_pattern(p: *Parser) -> *Node {
 // 调 parse_expr (subj/body) 不能 forward ref, 保持原位置。OR pattern 的
 // parser_advance(p) 已修 &t 缺参 UB）。
 
+// ════════════════════════════════════════════════════
+// V3-B v3.0.1: parse_asm_block — asm!("...") inline asm macro
+//   per `docs/plans/v2/v2.0.0-os-prep.md` D42.
+//
+// Caller 已 consume `asm` ident + 验证 peek 是 `!`. 本函数:
+//   1. consume `!` (BANG token)
+//   2. consume `(` (LPAREN)
+//   3. require string literal — extract chars (between quotes), arena_strdup
+//   4. consume `)` (RPAREN) — must come RIGHT after string literal (no comma,
+//      no operands in v3.0.1)
+//   5. build NodeAsmBlock(text, 0, NULL) — v3.0.1 noperands=0 always
+//   6. return *Node
+//
+// Defined BEFORE parse_expr (line 745+ call site) — jhyy has no forward
+// decl, so the helper must physically precede the caller. parse_expr is the
+// first caller (IDENT branch in prefix dispatch).
+// ════════════════════════════════════════════════════
+fn parse_asm_block(p: *Parser, loc_lf: *u8, loc_ll: i32, loc_lc: i32) -> *Node {
+    let mut t = empty_token();
+
+    // consume `!`
+    parser_expect(p, TOKEN_BANG(), "! in asm!(...)" as *u8, &t);
+
+    // consume `(`
+    parser_expect(p, TOKEN_LPAREN(), "( in asm!(...)" as *u8, &t);
+
+    // v3.0.1: only string literal allowed as first arg.
+    if parser_check(p, TOKEN_STRING()) == (0 as i32) {
+        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+        jh_fputs_stderr("error: asm!(...) requires a string literal as the first argument (v3.0.1)\n" as *u8);
+        (*p).error_count = (*p).error_count + (1 as i32);
+        // skip to `)` to avoid cascading errors
+        while parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
+            if parser_check(p, TOKEN_EOF()) != (0 as i32) { return 0 as *Node; }
+            parser_advance(p, &t);
+        }
+        parser_expect(p, TOKEN_RPAREN(), ") in asm!(...)" as *u8, &t);
+        return 0 as *Node;
+    }
+
+    // consume string token + extract body (between quotes, already done by
+    // lexer — start points to opening quote, length includes both quotes).
+    parser_advance(p, &t);
+    let chars = ((t.start as i64) + (1 as i64)) as *u8;
+    let len = t.length - (2 as i64);
+    if len < (0 as i64) {
+        // defensive: malformed token (length < 2), bail
+        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+        jh_fputs_stderr("error: malformed string literal in asm!(...)\n" as *u8);
+        (*p).error_count = (*p).error_count + (1 as i32);
+        return 0 as *Node;
+    }
+    let arena_chars = arena_strdup((*p).arena, chars, len);
+
+    // v3.0.1: no operands. Require immediate `)`. If next token is `,`,
+    // emit clear error telling user v3.1 will add operand support.
+    if parser_check(p, TOKEN_COMMA()) != (0 as i32) {
+        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+        jh_fputs_stderr("error: asm!(...) operands are not supported in v3.0.1 (single-string-literal only; v3.1 will add operand constraints)\n" as *u8);
+        (*p).error_count = (*p).error_count + (1 as i32);
+        // skip to `)` to avoid cascading errors
+        while parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
+            if parser_check(p, TOKEN_EOF()) != (0 as i32) { return 0 as *Node; }
+            parser_advance(p, &t);
+        }
+        parser_expect(p, TOKEN_RPAREN(), ") in asm!(...)" as *u8, &t);
+        return 0 as *Node;
+    }
+
+    // consume `)`
+    parser_expect(p, TOKEN_RPAREN(), ") in asm!(...)" as *u8, &t);
+
+    return ast_new_asm_block((*p).arena, loc_lf, loc_ll, loc_lc, arena_chars, 0 as i64, 0 as *u8);
+}
+
 fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
@@ -726,6 +801,30 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
     else if t.kind == TOKEN_IDENT() {
         parser_advance(p, &t);
         let name = parser_tok_name(p, &t);
+
+        // V3-B v3.0.1: asm!(...) inline asm macro. After consuming the `asm`
+        // ident, peek for `!`. If next token is BANG, dispatch to
+        // parse_asm_block (defined at end of file — jhyy has no forward
+        // decl, so we accept 2-token peek via parser_check below).
+        // strcmp "asm" — only 3 bytes so use strncmp(start, "asm", 3) == 0
+        // via t.length comparison to keep single-call check safe.
+        let mut is_asm_macro: i32 = 0 as i32;
+        if (*p).prev_length == (3 as i64) {
+            if strncmp((*p).prev_start, "asm" as *u8, 3 as i64) == (0 as i32) {
+                if parser_check(p, TOKEN_BANG()) != (0 as i32) {
+                    is_asm_macro = 1 as i32;
+                }
+            }
+        }
+        if is_asm_macro != (0 as i32) {
+            left = parse_asm_block(p, loc_lf, loc_ll, loc_lc);
+            // parse_asm_block 已经处理完 asm!(...) — left 已 set, 直接
+            // 跳过 IDENT 分支的剩余部分, 但 prefix dispatch 已 return 走
+            // 后面的 infix Pratt loop. 这里不能 return(否则漏掉 infix),
+            // 但因为 asm! 永远 stmt-position, 不会有 infix 跟在后面.
+            // 为安全:让控制流自然落到 if left != NULL 守卫 + Pratt loop,
+            // Pratt loop 看到 TOKEN_SEMICOLON / TOKEN_RBRACE 会直接 return.
+        } else {
         let mut sym = symtab_lookup((*p).current_scope, name);
         if sym == (0 as *Sym) {
             sym = symtab_insert((*p).current_scope, name, SYM_VAR(),
@@ -831,6 +930,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         else {
             left = ast_new_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
         }
+        } // V3-B v3.0.1: close is_asm_macro else
     }
     // ── unary prefix: - ! ~ ──
     else if t.kind == TOKEN_MINUS() {
@@ -2692,3 +2792,6 @@ fn parser_parse(p: *Parser) -> *Node {
 
     return ast_new_module((*p).arena, loc_lf, loc_ll, loc_lc, decls, ndecls, is_no_std);
 }
+
+// (parse_asm_block 已上移到 parse_expr 之前,jhyy 无 forward decl — 物理上
+// 必须 prepend。)
