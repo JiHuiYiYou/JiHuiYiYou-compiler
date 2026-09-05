@@ -184,7 +184,7 @@
 
 排查发现源程序 `_v135_inline_simple_recursive.jhyy` 实际是 **无限递归** (源程序 `loopy(n) = n + loopy(n-1)` 无 base case), runtime STACK_OVERFLOW 是 **预期 OS-level 行为**, 不是 compiler bug。
 
-排查方法 (per `feedback_no_subagents_for_compiler_work` "先排查 root cause, 不盲改"):
+排查方法("先排查 root cause, 不盲改"):
 1. 读 `_v135_inline_simple_recursive.jhyy` — 源程序 6 行, 无 base case
 2. 读 `compiler/src/codegen.c:896-935` NODE_CALL inline expansion path — 守卫 `cg->current_inline_sym != fn_sym` 在 line 902
 3. `jhyy.exe compile _v135_inline_simple_recursive.jhyy -o /tmp/_v135; cat /tmp/_v135.il` — 验证 IL emit `%t4 =w call $loopy(w %t3)`, 走真实 call, **不**无限 inline 展开

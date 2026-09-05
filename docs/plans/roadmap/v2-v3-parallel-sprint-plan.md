@@ -387,11 +387,10 @@ python compiler/build/bin/regress.py --all --include-informational      # jhyy_v
 
 后续 wave(v2.6.0/v2.7.0/v2.8.0 + v3.0.1..v3.1.2)在第一波 ship 后,user 决定是否继续开 batch。
 
-### § 6.8 Worktree 约定(per `feedback_no_subagents_for_compiler_work`)
+### § 6.8 Worktree 约定
 
 - **sub-sprint 设计 / 实施在 axis branch 上**(不用 worktree 也行,branch checkout 即足够)
 - **如果开 worktree**(如多 sub-sprint 同时筹备设计 doc),worktree 路径必须**显式指定项目内路径**(e.g. `git worktree add ../JiHuiYiYou-axis-v2-wt axis-v2`),不放在 `$TEMP` 等临时目录
-- **不使用 sub-agent + worktree 自动施工**(v0.6 三个并行 worktree agent 被叫停的教训);手动 worktree OK
 - **禁止** `git worktree add` 到 worktree 外的路径(branch 引用会乱)
 
 ### § 6.9 Sprint Doc 命名 + 提交规则
