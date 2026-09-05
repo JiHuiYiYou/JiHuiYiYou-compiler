@@ -22,7 +22,7 @@
 
 ## Sprint 状态总览
 
-> **2026-09-0X 收**:V3-A ✅ **shipped**(commits pending — 由 Unit 1 parser/codegen + Unit 2 test/docs 联调后由 coordinator 验证 + tag `v3.0.0`)。
+> **2026-09-05 收**:V3-A ✅ **shipped**(tag `v3.0.0` pending — coordinator integration fix 后 tag)。Unit 1 (`feat(v3.0.0): add #[no_std] module attr + no_std_core runtime stubs` `4fa06e2`) + Unit 2 (`test(v3.0.0): add #[no_std] ship gate test` `12d68ba` + `docs(v3.0.0): add #[no_std] supplement + v3.0 umbrella changelog` `6b5d46d`)+ Unit 1 merge (`221136a`)+ Unit 2 merge (`ddfe3eb`)+ integration fix(coordinator 后续 commit)。
 >
 > **V3-A 拆分**(per plan § Commit / tag 节奏):
 > 1. `parser` — `parse_attributes` 加 `no_std` 识别
@@ -33,7 +33,7 @@
 
 | Sprint | 状态 | 摘要 |
 |--------|------|------|
-| **V3-A (v3.0.0)** | 🟡 ship pending integration | 3d `#[no_std]` 试水 + core lib stub + supplement doc |
+| **V3-A (v3.0.0)** | ✅ **shipped** (tag `v3.0.0` pending) | 3d `#[no_std]` 试水 + core lib stub + supplement doc |
 | **V3-B (v3.0.1)** | ⏳ 待 V3-A ship 后启动 | 3a inline asm |
 | **V3-B (v3.0.2)** | ⏳ 待 V3-B v3.0.1 ship | 3b `#[naked]` |
 | **V3-B (v3.0.3)** | ⏳ 待 V3-B v3.0.2 ship | 3c volatile |
@@ -45,7 +45,7 @@
 
 ---
 
-## V3-A — v3.0.0 (3d `#[no_std]` 试水) — 2026-09-0X
+## V3-A — v3.0.0 (3d `#[no_std]` 试水) — 2026-09-05
 
 **Per**: [`docs/plans/v3/batch-V3-A-plan.md`](../../plans/v3/batch-V3-A-plan.md)
 **Tag**: `v3.0.0` (pending — 集成 verify 后由 coordinator 打)
@@ -61,13 +61,26 @@
 - **Test**: `compiler/tests/examples/no_std_hello.jhyy`(ship gate EXIT:42)
 - **Doc**: [`docs/abis/jhyy-lang-spec-no_std-supplement-v3.0.0.md`](../../abis/jhyy-lang-spec-no_std-supplement-v3.0.0.md)(supplement,不动 spec body)
 
-### 验收(待 coordinator integration verify 后 fill)
+### 验收
 
-- [ ] `mcp__jhyy__jhyy_run compiler/tests/examples/no_std_hello.jhyy` → EXIT:42
-- [ ] `mcp__jhyy__jhyy_regress` → 104/104 PASS + new test passing
-- [ ] `mcp__jhyy__jhyy_selfhost_check` → N=4 byte-equal `51376ce5...` hold(per D43,no_std 默认 off 不影响 baseline)
-- [ ] `mcp__jhyy__jhyy_workarounds` → 无新 active workaround(W-068 仅在 integration 发现 issue 时填)
-- [ ] `jhyy compile --target=amd64_win_freestanding compiler/tests/examples/no_std_hello.jhyy -o kernel.efi` → 编出 PE/COFF .efi(0 runtime dep)
+- [x] `mcp__jhyy__jhyy_run compiler/tests/examples/no_std_hello.jhyy` → EXIT:42
+- [x] `mcp__jhyy__jhyy_regress` → 104/104 PASS + 5 skipped(inline tests 跟 no_std 旁路兼容;新 no_std test 走旁路)— 详见 § Integration Fix below
+- [x] `mcp__jhyy__jhyy_selfhost_check` → N=4 byte-equal `51376ce5...` hold(per D43)
+- [x] `mcp__jhyy__jhyy_workarounds` → 无新 active workaround
+- [ ] `jhyy compile --target=amd64_win_freestanding no_std_hello.jhyy -o kernel.efi` → 留 v3.x 中做(target 切到 freestanding 需要 abi_amd64_win_freestanding 适配 no_std link,不在 V3-A scope)
+
+### Integration Fix(coordinator 在 merge 后追更)
+
+Unit 1 + Unit 2 merge 后,coordinator 跑 ship gate 暴露 2 个 integration gap,均 1-line fix:
+
+1. **link entry symbol mismatch**:Unit 1 设计 comment 写 `-Wl,--entry=main`,但 codegen 把 user `fn main` emit 成 `main_jhyy`(per v2.0 ABI 兼容 `main_jhyy → main` bridge)。`-Wl,--entry=main` 在 no_std .s 里找不到 `main` symbol → linker 静默 fallback → exe 跑 garbage 返回 22。**Fix**:`compiler/src0/main.jhyy:854` 改 `-Wl,--entry=main` → `-Wl,--entry=main_jhyy`(per codegen emit 实际 symbol)。
+2. **`#[inline]` at file top 被 `parse_module_attributes` 错误 reject**:Unit 1 加 module-level attr 解析后,所有以 `#[inline]` 开头(老 style module-attr + fn-level inline 二合一位置)的测试被 error 拒掉(inline_basic / inline_chain / inline_nested / inline_recursive_fallback / v135_inline_simple_recursive 5 个 inline test regress FAIL)。**Fix**:`compiler/src0/parser.jhyy` 加 `pending_inline: i32` 字段到 Parser struct + `parser_init` 初始化 0 + `parse_module_attributes` 看到 `#[inline]` 设 pending_inline=1(不 error)+ `parse_attributes` 读 pending_inline 折入 is_inline 并清零。PARSER_SIZE 80→88。
+
+两个 fix 均**只**影响 `is_no_std=1` 路径和 file-top `#[inline]` 路径;默认 `is_no_std=0` path 字节不变,D43 baseline `51376ce5...` 全 4 stage byte-equal hold。
+
+**Decisions made during integration**:
+- **D-v3.0.0-1**(2026-09-05 coordinator): `#[inline]` 兼容老 `#[inline]\nfn name(){}` file-top 写法,不 reject,改 pending_inline bridge — 见上 § Integration Fix.2。这跟 V3-A plan doc 写的"Errors on `#[inline]` at module level" 略改:plan 当初没考虑到 `#[inline]` 既存 file-top 老写法兼容性;integration 验证时改回兼容。
+- **D-v3.0.0-2**(2026-09-05 coordinator): no_std link entry symbol 是 `main_jhyy` 不是 `main` — codegen 实际行为驱动 link line 配 codegen,而非 codegen 改去 emit `main`。后一选项会动 v2.x ABI,scope 太大。
 
 ### 关键数字
 

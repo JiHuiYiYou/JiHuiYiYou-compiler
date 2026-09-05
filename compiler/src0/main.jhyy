@@ -837,8 +837,10 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     pos = str_concat_at(cmd_buf, pos, rq);
     // v3.0.0 (3d no_std): if is_no_std=1, link line skips runtime.c +
     // jhyy_helpers.c (no C runtime bridge) and adds `-nostartfiles
-    // -nodefaultlibs -Wl,--entry=main` so user's `fn main` is the OS entry
-    // point. Default path (is_no_std=0) keeps the v2.4.0 link line untouched.
+    // -nodefaultlibs -Wl,--entry=main_jhyy` so the user-defined `fn main`
+    // (which codegen emits as `main_jhyy` regardless of is_no_std) is the
+    // OS entry point. Default path (is_no_std=0) keeps the v2.4.0 link
+    // line untouched.
     if is_no_std == (0 as i32) {
         pos = str_concat_at(cmd_buf, pos, sp);
         pos = str_concat_at(cmd_buf, pos, lq);
@@ -851,7 +853,7 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     } else {
         // no_std path: no runtime.c, no helpers.c, but still need kernel
         // entry + entry-point override.
-        let no_std_flags = " -nostartfiles -nodefaultlibs -Wl,--entry=main " as *u8;
+        let no_std_flags = " -nostartfiles -nodefaultlibs -Wl,--entry=main_jhyy " as *u8;
         pos = str_concat_at(cmd_buf, pos, no_std_flags);
     }
     let oflag = " -o " as *u8;

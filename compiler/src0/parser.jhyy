@@ -76,10 +76,16 @@ type Parser = struct {
     current_scope: *u8,
     scope_depth:   i32,
     error_count:   i32,
+    // v3.0.0 (3d no_std): `#[inline]` at file top is still fn-level (the OLD
+    // parse_decl → parse_func → parse_attributes path). parse_module_attributes
+    // consumes it but stores the flag here so parse_attributes can fold it into
+    // is_inline for the next fn. Reset to 0 by parse_attributes after read.
+    // Field added at end → tail padding holds struct size to 8-byte alignment.
+    pending_inline: i32,
 }
 
 // Parser 字节数 = 2 * 8 (ptr) + 6 * 8 (token fields) + 2 * 8 (scope) + 2 * 4 (depth/count) + 2 pad = 80
-fn PARSER_SIZE() -> i64 { return 80 as i64; }
+fn PARSER_SIZE() -> i64 { return 88 as i64; }
 
 // ════════════════════════════════════════════════════
 // Token helpers（caller 栈分配 Token，let mut t: Token = ...）
@@ -2168,7 +2174,11 @@ fn parse_stmt(p: *Parser) -> *Node {
 // Returns is_inline (1 if any of the attrs is `inline`, else 0).
 // Forward-compatible: unknown attributes are parsed + ignored.
 fn parse_attributes(p: *Parser) -> i32 {
-    let mut is_inline: i32 = 0 as i32;
+    // v3.0.0 (3d no_std): fold pending_inline (stashed by parse_module_attributes
+    // when `#[inline]` was at file top) into is_inline for this fn. Then clear
+    // it so subsequent fns don't inherit the flag by accident.
+    let mut is_inline: i32 = (*p).pending_inline;
+    (*p).pending_inline = 0 as i32;
     let mut t = empty_token();
     while (parser_check(p, TOKEN_HASH()) != (0 as i32)) {
         parser_advance(p, &t);  // consume '#'
@@ -2608,11 +2618,16 @@ fn parser_init(p: *Parser, lex: *Lexer, a: *Arena) -> i32 {
     (*p).prev_lc = 0 as i32;
     (*p).global_scope = symtab_new(a, 0 as *u8);
     (*p).current_scope = (*p).global_scope;
+    (*p).pending_inline = 0 as i32;
     return 0;
 }
 
 // v3.0.0 (3d no_std): parse module-level outer attrs at file top.
-// Only `#[no_std]` is meaningful. Errors on `#[inline]` at module level.
+// `#[no_std]` is meaningful (sets is_no_std=1). `#[inline]` at file top is
+// the OLD fn-level style (e.g. `#[inline]\nfn dbl() -> ...` at file top) —
+// we consume it here but stash the flag in (*p).pending_inline so
+// parse_attributes (called from parse_func for the next fn) folds it into
+// is_inline. Unknown attrs: forward-compatible parse + ignore.
 // is_no_std is an out-param (1 if file had `#[no_std]`, else 0).
 // Defined before parser_parse so it's visible (jhyy has no forward refs).
 fn parse_module_attributes(p: *Parser, is_no_std: *i32) -> i32 {
@@ -2627,12 +2642,8 @@ fn parse_module_attributes(p: *Parser, is_no_std: *i32) -> i32 {
             *is_no_std = 1 as i32;
         } else {
             if strcmp(aname, "inline" as *u8) == (0 as i32) {
-                // inline is fn-only (per v1.3.5); module-level is a user mistake.
-                let mut tloc = empty_token();
-                parser_peek(p, &tloc);
-                jh_print_loc_stderr(tloc.loc_filename, tloc.loc_line, tloc.loc_col);
-                jh_fputs_stderr("error: #[inline] is a function-level attribute, not module-level\n" as *u8);
-                (*p).error_count = (*p).error_count + (1 as i32);
+                // Stash for next fn; parse_attributes will fold into is_inline.
+                (*p).pending_inline = 1 as i32;
             }
             // unknown attrs: forward-compatible parse + ignore
         }
