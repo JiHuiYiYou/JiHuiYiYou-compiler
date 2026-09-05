@@ -1,0 +1,482 @@
+// codegen_amd64_emit_mem.jhyy — v2.5.0 A2: memory ops emit (alloc / store / loadsub / load)
+//
+// 替换路径:main.jhyy run_qbe() → run_backend() → codegen_amd64_run() (self=1);
+// 回退路径:run_backend() → run_qbe() (self=0 或 QBE_FALLBACK=1)。本模块是
+// codegen_amd64.jhyy parse loop 的 4 个 leaf emit callback,不自带 entry。
+//
+// 关键约束(per docs/plans/v2/v2.5.0详细实现方案.md):
+//   - § 3.5 E1-E4 emit 模板 = 本模块 4 个函数的权威规范
+//   - § 3.3 + § 4.3:v2.5.0 **不做 regalloc**,每个 %tN 直接 spill 到栈槽;
+//     regalloc 留 V2-B v2.6.0,届时只换 cg_offset_for_temp 实现,本模块接口不动
+//   - § 2.4 / § X.2 3c volatile:qbe_type == QBE_VOLATILE_MARKER 走普通 load/store,
+//     **不**插 memory barrier(3c ship 后再 flip 行为)
+//   - § X.4 D43:本模块是新文件,不碰 codegen.jhyy 主干 → self-equal closure sha 不动
+//   - D42 escape hatch(raw asm)在 codegen_amd64.jhyy,不在本模块
+//
+// Note: lives flat in compiler/src0/ (not in a subdir) — jhyy import
+// syntax doesn't support paths with `/` (per `parse_import_decl`
+// codegen.c:731 — same restriction as abi_amd64_win.jhyy).
+
+import codegen_amd64_state;  // CGState / ILToken / ILTOK_* / QBE_*_LOCAL / cg_offset_for_temp / cg_alloc_slot
+import util;                 // StringBuilder + sb_* + ptr_add_u8
+import arena;                // Arena (CGState.arena 的真实类型)
+
+// ════════════════════════════════════════════════════
+// Token 操作数编码契约(与 A1 lexer 对齐)
+// ════════════════════════════════════════════════════
+//
+// 统一 emit 签名 `(state: *u8, tok: *u8) -> i32` 只带 1 个 token,而 IL 指令
+// 最多 2 个操作数(`storew %t2, %t1`)。因此操作数走 ILToken 的既有字段,
+// 不额外扩 struct(A0 已锁 ILToken 布局):
+//
+//   tok.kind     = ILTOK_ALLOC / STORE / LOADSUB / LOAD
+//   tok.qbe_type = 结果 QBE 类型 'w'/'l'/'b'/'h'(或 QBE_VOLATILE_MARKER)
+//   tok.int_val  = 目标 %tN 编号(STORE 无目标 → < 0)
+//   tok.text/len = 指令原文(含 mnemonic + 操作数),如
+//                  "alloc8 16" / "%t2, %t1" / "loadsbl %t1" / "loadw %t1"
+//
+// 本模块从 tok.text 里按序扫 `%tN` / 整数字面量,mnemonic(loadsb/ub/sh/uh)
+// 也从 text 认。这样 4 个 emit 函数自包含:不依赖 A1 token 流的相邻布局,
+// A1 只需保证 text 覆盖单条指令、int_val 给出目标 temp 编号。
+
+// ════════════════════════════════════════════════════
+// 小工具(本模块私有,mem_ 前缀避免跟 sibling emit 模块撞名)
+// ════════════════════════════════════════════════════
+
+// 取 s[i] 的字节值。jhyy 的 *u8 解引用返回 u8,统一提成 i32 便于比较。
+fn mem_byte_at(s: *u8, i: i64) -> i32 {
+    let p = ptr_add_u8(s, i);
+    let c = *p;
+    return c as i32;
+}
+
+fn mem_is_digit(c: i32) -> i32 {
+    if c >= (48 as i32) && c <= (57 as i32) {
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
+// 8 字节向上对齐。栈槽最小粒度 = 8(MS x64 要求 locals 至少 8 对齐)。
+fn mem_align_up8(n: i64) -> i64 {
+    return (n + (7 as i64)) & (~(7 as i64));
+}
+
+// 在 text[0..len) 里找 pat 首次出现的下标,找不到返回 -1。
+fn mem_find_sub(text: *u8, len: i64, pat: *u8) -> i64 {
+    if text == (0 as *u8) {
+        return -(1 as i64);
+    }
+    let plen = strlen(pat);
+    if plen <= (0 as i64) || plen > len {
+        return -(1 as i64);
+    }
+    let mut i: i64 = 0 as i64;
+    while i + plen <= len {
+        let mut j: i64 = 0 as i64;
+        let mut hit: i32 = 1 as i32;
+        while j < plen {
+            if mem_byte_at(text, i + j) != mem_byte_at(pat, j) {
+                hit = 0 as i32;
+                j = plen;
+            } else {
+                j = j + (1 as i64);
+            }
+        }
+        if hit != (0 as i32) {
+            return i;
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
+
+// 扫 text 里第 idx 个(0-based)`%tN`,返回 N;不存在返回 -1。
+// `%` 后必须紧跟 't' 才算 temp — 避开 `%rbp` 之类(text 是 IL 不是 GAS,但防御性写)。
+fn mem_parse_temp(text: *u8, len: i64, idx: i64) -> i64 {
+    if text == (0 as *u8) || len <= (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut seen: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i + (1 as i64) < len {
+        if mem_byte_at(text, i) == (37 as i32) && mem_byte_at(text, i + (1 as i64)) == (116 as i32) {
+            // 命中 "%t",往后收数字
+            let mut k: i64 = i + (2 as i64);
+            let mut val: i64 = 0 as i64;
+            let mut ndig: i64 = 0 as i64;
+            while k < len && mem_is_digit(mem_byte_at(text, k)) != (0 as i32) {
+                val = val * (10 as i64) + ((mem_byte_at(text, k) - (48 as i32)) as i64);
+                ndig = ndig + (1 as i64);
+                k = k + (1 as i64);
+            }
+            if ndig > (0 as i64) {
+                if seen == idx {
+                    return val;
+                }
+                seen = seen + (1 as i64);
+            }
+            i = k;
+        } else {
+            i = i + (1 as i64);
+        }
+    }
+    return -(1 as i64);
+}
+
+// 扫 text 里从 from 起第一个十进制整数字面量,返回值;没有返回 -1。
+// `alloc8 16` 的 size 走这条(from 跳过 mnemonic 自带的 "8")。
+fn mem_parse_int_from(text: *u8, len: i64, from: i64) -> i64 {
+    if text == (0 as *u8) || from < (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut i: i64 = from;
+    while i < len {
+        if mem_is_digit(mem_byte_at(text, i)) != (0 as i32) {
+            let mut val: i64 = 0 as i64;
+            while i < len && mem_is_digit(mem_byte_at(text, i)) != (0 as i32) {
+                val = val * (10 as i64) + ((mem_byte_at(text, i) - (48 as i32)) as i64);
+                i = i + (1 as i64);
+            }
+            return val;
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
+
+// volatile token 归一:QBE_VOLATILE_MARKER 没带宽度信息,退回 'w'(per § 2.4,
+// emit 成普通 load/store,不插 barrier;3c ship 后才 flip 行为)。
+fn mem_effective_qbe_type(qt: i32) -> i32 {
+    if qt == QBE_VOLATILE_MARKER() {
+        return QBE_W_LOCAL();
+    }
+    if qt == QBE_L_LOCAL() || qt == QBE_B_LOCAL() || qt == QBE_H_LOCAL() {
+        return qt;
+    }
+    // 'w' / 's' / 未知一律按 32-bit word 处理(v2.5.0 不碰浮点栈搬运)
+    return QBE_W_LOCAL();
+}
+
+// GAS mov 后缀:w→l(32) / l→q(64) / b→b(8) / h→w(16),per qbe/amd64/emit.c 表。
+fn mem_mov_suffix(qt: i32) -> *u8 {
+    if qt == QBE_L_LOCAL() { return "q" as *u8; }
+    if qt == QBE_B_LOCAL() { return "b" as *u8; }
+    if qt == QBE_H_LOCAL() { return "w" as *u8; }
+    return "l" as *u8;
+}
+
+// scratch 寄存器:x86 没有 mem→mem mov,栈到栈必须过一次寄存器。
+// %rax 是 MS x64 的 volatile/返回寄存器,跨指令不需要保存 → 拿来当中转最省。
+fn mem_scratch_reg(qt: i32) -> *u8 {
+    if qt == QBE_L_LOCAL() { return "%rax" as *u8; }
+    if qt == QBE_B_LOCAL() { return "%al" as *u8; }
+    if qt == QBE_H_LOCAL() { return "%ax" as *u8; }
+    return "%eax" as *u8;
+}
+
+// %tN 的栈偏移。A0 的 cg_offset_for_temp 当前是 stub(恒 0),但契约文档化为
+// `-(32 + t*8)`;stub 期用同一公式兜底,A0 填实现后返回负值,兜底自然失效。
+// 这样本模块不重复 A0 的 frame 布局知识,又能在 stub 期产出可读 .s。
+fn mem_temp_offset(t: i64) -> i64 {
+    if t < (0 as i64) {
+        return 0 as i64;
+    }
+    let off = cg_offset_for_temp(t);
+    if off != (0 as i64) {
+        return off;
+    }
+    return -((32 as i64) + t * (8 as i64));
+}
+
+// ── StringBuilder 包装(4 个 emit 函数共用,省掉每处 cast)──
+
+fn mem_sb(state: *u8) -> *StringBuilder {
+    let s = state as *CGState;
+    return (*s).out as *StringBuilder;
+}
+
+fn mem_arena(state: *u8) -> *Arena {
+    let s = state as *CGState;
+    return (*s).arena as *Arena;
+}
+
+fn mem_put(state: *u8, text: *u8) -> i32 {
+    return sb_append_cstr(mem_arena(state), mem_sb(state), text);
+}
+
+fn mem_put_i64(state: *u8, val: i64) -> i32 {
+    return sb_appendf_lld(mem_arena(state), mem_sb(state), "%lld" as *u8, val);
+}
+
+// `<off>(%rbp)` 操作数。1-to-1 栈分配下所有 %tN 都长这样。
+fn mem_put_slot(state: *u8, off: i64) -> i32 {
+    mem_put_i64(state, off);
+    return mem_put(state, "(%rbp)" as *u8);
+}
+
+// state / tok 任一为空 → 调用方 bug,直接失败(§ 4.3:不做错误恢复)。
+fn mem_args_bad(state: *u8, tok: *u8) -> i32 {
+    if state == (0 as *u8) || tok == (0 as *u8) {
+        return 1 as i32;
+    }
+    let s = state as *CGState;
+    if (*s).out == (0 as *u8) || (*s).arena == (0 as *u8) {
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// E1 emit_alloc — `%t1 =l alloc8 16`
+// ════════════════════════════════════════════════════
+//
+// per L4 § 3.5 E1:alloc **不 emit 指令**。栈空间在 function prologue 的
+// `subq $N, %rsp` 里一次性开(N = total_alloc + shadow),所以这里只做两件事:
+//   1. 累加对齐后的 size 到 state.total_alloc(prologue 要用)
+//   2. emit 一行注释,标出 %tN ↔ 栈偏移,便于 .s 人肉对读 .il
+fn emit_alloc(state: *u8, tok: *u8) -> i32 {
+    if mem_args_bad(state, tok) != (0 as i32) {
+        return 1 as i32;
+    }
+    let t = tok as *ILToken;
+    if (*t).kind != ILTOK_ALLOC() {
+        return 1 as i32;
+    }
+
+    let dst = (*t).int_val;
+    if dst < (0 as i64) {
+        return 1 as i32;
+    }
+
+    // size 在 mnemonic 之后:`alloc8 16` / `alloc16 32`。必须先**整段**跳过
+    // mnemonic 自带的对齐位再取整数 — 固定跳 1 位会把 `alloc16` 的 "6" 当 size。
+    let head = mem_find_sub((*t).text, (*t).text_len, "alloc" as *u8);
+    if head < (0 as i64) {
+        return 1 as i32;
+    }
+    let mut after: i64 = head + (5 as i64);
+    while after < (*t).text_len && mem_is_digit(mem_byte_at((*t).text, after)) != (0 as i32) {
+        after = after + (1 as i64);
+    }
+    let size = mem_parse_int_from((*t).text, (*t).text_len, after);
+    if size <= (0 as i64) {
+        return 1 as i32;  // `allocN 0` / 缺 size — lexer 不该产出
+    }
+    let aligned = mem_align_up8(size);
+
+    // 走 A0 的 slot 分配器(推进 state.next_offset + total_alloc)。
+    let slot = cg_alloc_slot(state, aligned);
+
+    // A0 stub 期 cg_alloc_slot 恒 0 且不动 state,这里补记账,保证 prologue
+    // 的 subq 数字不为 0;A0 填实现后 slot != 0,记账交还给 A0 避免双算。
+    let s = state as *CGState;
+    let mut off: i64 = slot;
+    if slot == (0 as i64) {
+        (*s).next_offset = (*s).next_offset - aligned;
+        (*s).total_alloc = (*s).total_alloc + aligned;
+        off = (*s).next_offset;
+    }
+
+    // `\t# alloc 16 (aligned 16) -> %t1 (offset -48(%rbp))`
+    mem_put(state, "\t# alloc " as *u8);
+    mem_put_i64(state, size);
+    mem_put(state, " (aligned " as *u8);
+    mem_put_i64(state, aligned);
+    mem_put(state, ") -> %t" as *u8);
+    mem_put_i64(state, dst);
+    mem_put(state, " (offset " as *u8);
+    mem_put_slot(state, off);
+    mem_put(state, ")\n" as *u8);
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// E2 emit_store — `storew %t2, %t1`
+// ════════════════════════════════════════════════════
+//
+// per L4 § 3.5 E2:1-to-1 简化下 src 和 addr 都是栈槽,而 x86 没有 mem→mem mov,
+// 所以拆成 load-to-scratch + store-from-scratch 两条:
+//   movl -40(%rbp), %eax     # %t2
+//   movl %eax, -32(%rbp)     # -> %t1
+// volatile store 走同一路径(§ 2.4:不插 barrier)。
+//
+// ⚠️ v2.5.0 简化边界(L4 § 3.5 E2 "用 t2.offset 而非 t2_reg,直接栈栈"明确锁的):
+// QBE 的 `%addr` 是**指针值**,真语义是 `movl %eax, (%raddr)` 间接写。这里按
+// L4 的 1-to-1 模板直接写 addr 的栈槽,只对 addr = alloc 出来的栈对象成立
+// (regress 用例的形态)。真间接写留 V2-B v2.6.0 regalloc pass 一起补。
+fn emit_store(state: *u8, tok: *u8) -> i32 {
+    if mem_args_bad(state, tok) != (0 as i32) {
+        return 1 as i32;
+    }
+    let t = tok as *ILToken;
+    if (*t).kind != ILTOK_STORE() {
+        return 1 as i32;
+    }
+
+    let src = mem_parse_temp((*t).text, (*t).text_len, 0 as i64);
+    let dst = mem_parse_temp((*t).text, (*t).text_len, 1 as i64);
+    if src < (0 as i64) || dst < (0 as i64) {
+        return 1 as i32;  // 常量源(`storew 42, %t1`)v2.5.0 不在 scope
+    }
+
+    let qt = mem_effective_qbe_type((*t).qbe_type);
+    let suffix = mem_mov_suffix(qt);
+    let reg = mem_scratch_reg(qt);
+    let src_off = mem_temp_offset(src);
+    let dst_off = mem_temp_offset(dst);
+
+    // load-to-scratch
+    mem_put(state, "\tmov" as *u8);
+    mem_put(state, suffix);
+    mem_put(state, " " as *u8);
+    mem_put_slot(state, src_off);
+    mem_put(state, ", " as *u8);
+    mem_put(state, reg);
+    mem_put(state, "\t\t# %t" as *u8);
+    mem_put_i64(state, src);
+    mem_put(state, "\n" as *u8);
+
+    // store-from-scratch
+    mem_put(state, "\tmov" as *u8);
+    mem_put(state, suffix);
+    mem_put(state, " " as *u8);
+    mem_put(state, reg);
+    mem_put(state, ", " as *u8);
+    mem_put_slot(state, dst_off);
+    mem_put(state, "\t\t# -> %t" as *u8);
+    mem_put_i64(state, dst);
+    mem_put(state, "\n" as *u8);
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// E3 emit_loadsub — `%t3 =w loadsbl %t1`
+// ════════════════════════════════════════════════════
+//
+// per L4 § 3.5 E3:sub-word load 带扩展语义 —
+//   loadsb → movsb (sign-extend 8)   loadub → movzb (zero-extend 8)
+//   loadsh → movsw (sign-extend 16)  loaduh → movzw (zero-extend 16)
+// 目标宽度由 tok.qbe_type 决定(w → l 后缀,l → q 后缀),即 `movsbl` / `movsbq`。
+// 扩展后仍要落回 dst 栈槽(1-to-1),所以同样是两条指令。
+fn emit_loadsub(state: *u8, tok: *u8) -> i32 {
+    if mem_args_bad(state, tok) != (0 as i32) {
+        return 1 as i32;
+    }
+    let t = tok as *ILToken;
+    if (*t).kind != ILTOK_LOADSUB() {
+        return 1 as i32;
+    }
+
+    let dst = (*t).int_val;
+    let src = mem_parse_temp((*t).text, (*t).text_len, 0 as i64);
+    if dst < (0 as i64) || src < (0 as i64) {
+        return 1 as i32;
+    }
+
+    // 从 mnemonic 认扩展方式 + 源宽度。认不出 → 报错,**不**静默默认成
+    // movsb:静默会把 zero-extend 悄悄变 sign-extend,产出能编译但算错的 .s。
+    let text = (*t).text;
+    let len = (*t).text_len;
+    let mut ext: *u8 = 0 as *u8;
+    if mem_find_sub(text, len, "loadsb" as *u8) >= (0 as i64) {
+        ext = "movsb" as *u8;
+    } else if mem_find_sub(text, len, "loadub" as *u8) >= (0 as i64) {
+        ext = "movzb" as *u8;
+    } else if mem_find_sub(text, len, "loadsh" as *u8) >= (0 as i64) {
+        ext = "movsw" as *u8;
+    } else if mem_find_sub(text, len, "loaduh" as *u8) >= (0 as i64) {
+        ext = "movzw" as *u8;
+    }
+    if ext == (0 as *u8) {
+        return 1 as i32;
+    }
+
+    // 目标宽度:'l' → q(64-bit),其余 → l(32-bit)。sub-word load 的 dst
+    // 在 QBE 里只可能是 w/l,不会是 b/h,所以这里不复用 mem_mov_suffix。
+    let qt = mem_effective_qbe_type((*t).qbe_type);
+    let mut dst_suffix: *u8 = "l" as *u8;
+    let mut dst_reg: *u8 = "%eax" as *u8;
+    if qt == QBE_L_LOCAL() {
+        dst_suffix = "q" as *u8;
+        dst_reg = "%rax" as *u8;
+    }
+
+    let src_off = mem_temp_offset(src);
+    let dst_off = mem_temp_offset(dst);
+
+    // `movsbl -40(%rbp), %eax`
+    mem_put(state, "\t" as *u8);
+    mem_put(state, ext);
+    mem_put(state, dst_suffix);
+    mem_put(state, " " as *u8);
+    mem_put_slot(state, src_off);
+    mem_put(state, ", " as *u8);
+    mem_put(state, dst_reg);
+    mem_put(state, "\t\t# %t" as *u8);
+    mem_put_i64(state, src);
+    mem_put(state, "\n" as *u8);
+
+    // 落回 dst 栈槽
+    mem_put(state, "\tmov" as *u8);
+    mem_put(state, dst_suffix);
+    mem_put(state, " " as *u8);
+    mem_put(state, dst_reg);
+    mem_put(state, ", " as *u8);
+    mem_put_slot(state, dst_off);
+    mem_put(state, "\t\t# -> %t" as *u8);
+    mem_put_i64(state, dst);
+    mem_put(state, "\n" as *u8);
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// E4 emit_load — `%t3 =w loadw %t1`
+// ════════════════════════════════════════════════════
+//
+// per L4 § 3.5 E4:全宽 load,无扩展。跟 E2 对称 —
+//   movl -32(%rbp), %eax     # %t1
+//   movl %eax, -40(%rbp)     # -> %t3
+// volatile load 走同一路径(§ 2.4:不插 barrier)。
+fn emit_load(state: *u8, tok: *u8) -> i32 {
+    if mem_args_bad(state, tok) != (0 as i32) {
+        return 1 as i32;
+    }
+    let t = tok as *ILToken;
+    if (*t).kind != ILTOK_LOAD() {
+        return 1 as i32;
+    }
+
+    let dst = (*t).int_val;
+    let src = mem_parse_temp((*t).text, (*t).text_len, 0 as i64);
+    if dst < (0 as i64) || src < (0 as i64) {
+        return 1 as i32;
+    }
+
+    let qt = mem_effective_qbe_type((*t).qbe_type);
+    let suffix = mem_mov_suffix(qt);
+    let reg = mem_scratch_reg(qt);
+    let src_off = mem_temp_offset(src);
+    let dst_off = mem_temp_offset(dst);
+
+    mem_put(state, "\tmov" as *u8);
+    mem_put(state, suffix);
+    mem_put(state, " " as *u8);
+    mem_put_slot(state, src_off);
+    mem_put(state, ", " as *u8);
+    mem_put(state, reg);
+    mem_put(state, "\t\t# %t" as *u8);
+    mem_put_i64(state, src);
+    mem_put(state, "\n" as *u8);
+
+    mem_put(state, "\tmov" as *u8);
+    mem_put(state, suffix);
+    mem_put(state, " " as *u8);
+    mem_put(state, reg);
+    mem_put(state, ", " as *u8);
+    mem_put_slot(state, dst_off);
+    mem_put(state, "\t\t# -> %t" as *u8);
+    mem_put_i64(state, dst);
+    mem_put(state, "\n" as *u8);
+    return 0 as i32;
+}
