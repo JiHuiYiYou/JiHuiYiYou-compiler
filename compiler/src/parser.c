@@ -1223,8 +1223,47 @@ void parser_init(Parser *p, Lexer *lexer, Arena *arena) {
     init_rules(p);
 }
 
+/* v3.0.0 (3d no_std): parse module-level attributes at the top of a file.
+   Currently only `#[no_std]` is meaningful (sets *is_no_std = 1). Errors on
+   `#[inline]` at module level since that's fn-only. Called from
+   parse_program BEFORE the decl loop, so `#[...]` is consumed at file top
+   only. Returns 1 if no error, 0 if error (and sets p->error_count). */
+static int parse_module_attributes(Parser *p, int *is_no_std) {
+    *is_no_std = 0;
+    while (check(p, TOKEN_HASH)) {
+        advance(p); /* consume '#' */
+        expect(p, TOKEN_LBRACKET, "[ after #");
+        Token attr = expect(p, TOKEN_IDENT, "attribute name");
+        const char *aname = tok_name(p, attr);
+        if (strcmp(aname, "no_std") == 0) {
+            *is_no_std = 1;
+        } else if (strcmp(aname, "inline") == 0) {
+            /* `#[inline]` is fn-only (per v1.3.5); module-level form is
+               meaningless and almost always a user mistake. Error early. */
+            Token tloc = peek(p);
+            fprintf(stderr, "%s:%d:%d: error: `#[inline]` is a function-level attribute, not module-level\n",
+                    tloc.loc.filename, tloc.loc.line, tloc.loc.col);
+            p->error_count++;
+        } else {
+            /* unknown attribute: parse but ignore (forward-compatible) */
+        }
+        expect(p, TOKEN_RBRACKET, "] after attribute");
+    }
+    return p->error_count == 0;
+}
+
 Node *parser_parse(Parser *p) {
     SourceLoc loc = peek(p).loc;
+
+    /* v3.0.0 (3d no_std): consume leading `#[...]` attributes (module-level
+       outer attrs) before walking decls. Currently only `#[no_std]`. */
+    int is_no_std = 0;
+    if (!parse_module_attributes(p, &is_no_std)) {
+        /* error already reported; return an empty module so downstream stages
+           see a well-formed AST and we don't crash on NULL decls. */
+        Node **empty = NULL;
+        return ast_new_module(p->arena, loc, empty, 0, is_no_std);
+    }
 
     Node **decls = NULL;
     size_t ndeccls = 0, cap = 0;
@@ -1242,5 +1281,5 @@ Node *parser_parse(Parser *p) {
         }
     }
 
-    return ast_new_module(p->arena, loc, decls, ndeccls);
+    return ast_new_module(p->arena, loc, decls, ndeccls, is_no_std);
 }

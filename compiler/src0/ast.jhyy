@@ -570,12 +570,16 @@ type NodeImportDecl = struct {
 }
 fn NODE_IMPORT_DECL_SIZE() -> i64 { return 8 as i64; }
 
-// decls(*u8 8) + ndeccls(i64 8) = 16
+// decls(*u8 8) + ndeccls(i64 8) + is_no_std(i32 4) + pad(4) = 24
+// v3.0.0 (3d no_std): added is_no_std field. 4-byte int + 4-byte tail padding
+// keeps struct aligned to 8 (matches C side NodeModule sizeof).
 type NodeModule = struct {
-    decls:  *u8,      // **Node 数组（顶层 decls）
-    ndeccls: i64,
+    decls:    *u8,    // **Node 数组（顶层 decls）
+    ndeccls:  i64,
+    is_no_std: i32,   // 1 if file has `#[no_std]` module attr
+    _pad0:    i32,    // tail padding to align struct size to 8
 }
-fn NODE_MODULE_SIZE() -> i64 { return 16 as i64; }
+fn NODE_MODULE_SIZE() -> i64 { return 24 as i64; }
 
 // ════════════════════════════════════════════════════
 // 通用 helper：初始化 Node header + 设置 variant 数据
@@ -1386,15 +1390,18 @@ fn node_const_decl_data(n: *Node) -> *NodeConstDecl {
 
 // ═══════════════════════════════════════════════════════════
 // Module 构造函数 + 访问器（3d）
+// v3.0.0 (3d no_std): added is_no_std parameter
 // ═══════════════════════════════════════════════════════════
 
 fn ast_new_module(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
-                  decls: *u8, ndeccls: i64) -> *Node {
+                  decls: *u8, ndeccls: i64, is_no_std: i32) -> *Node {
     let buf = arena_alloc(a, NODE_SIZE() + NODE_MODULE_SIZE());
     let n = ast_init_node(buf, NODE_MODULE(), loc_filename, loc_line, loc_col);
     let d = (buf as i64 + NODE_SIZE()) as *NodeModule;
     (*d).decls = decls;
     (*d).ndeccls = ndeccls;
+    (*d).is_no_std = is_no_std;
+    (*d)._pad0 = 0 as i32;
     return n;
 }
 

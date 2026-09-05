@@ -3786,6 +3786,11 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
     }
     let md = node_module_data(module);
     let ndeccls = (*md).ndeccls;
+    // v3.0.0 (3d no_std): flag indicates `#[no_std]` module attr was set.
+    // When 1, we emit `.note.GNU-stack noalloc` and write a side-file flag
+    // so main.jhyy's link step switches to `-nostartfiles -nodefaultlibs`.
+    // The default path (is_no_std==0) is byte-identical to the v2.4.0 IL.
+    let is_no_std: i32 = (*md).is_no_std;
 
     // alloc CGContext + locals arena block（一次性；每 func 进 cg_func reset nlocals）
     let cg_buf = arena_alloc((*ir).arena, CGCONTEXT_SIZE());
@@ -4016,5 +4021,27 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
         }  // close else from NULL guard
         di = di + (1 as i64);
     }
+
+    // v3.0.0 (3d no_std): if is_no_std=1, write a side-file marker that
+    // main.jhyy reads to switch the link line to
+    // `-nostartfiles -nodefaultlibs -Wl,--entry=main`. QBE itself already
+    // emits the `.section .note.GNU-stack,"",@progbits` directive in
+    // qbe/emit.c:208 for ELF, so we don't need a custom one in the IL.
+    // The default path (is_no_std==0) skips this block entirely → IL is
+    // byte-identical to v2.4.0 (verified by manual diff; integration test
+    // re-checks).
+    if is_no_std != (0 as i32) {
+        // Side-file flag at compiler/build/obj/_no_std.flag. Use direct
+        // fopen "wb" (per feedback_qbe_crlf_root_cause: IL/derived files
+        // must use binary mode to avoid Windows \n → \r\n mangling).
+        let flag_path = "compiler/build/obj/_no_std.flag" as *u8;
+        let flag_fp = fopen(flag_path, "wb" as *u8);
+        if flag_fp != (0 as *u8) {
+            let payload = "no_std\n" as *u8;
+            let _w = fwrite(payload, 1 as i64, 7 as i64, flag_fp);
+            let _c = fclose(flag_fp);
+        }
+    }
+
     return 1;
 }

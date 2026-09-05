@@ -1,0 +1,16 @@
+// v3.0.0 (3d no_std): panic_handler M0 stub.
+//
+// This is the minimum freestanding panic handler. When the no_std entry
+// point (`__start_kernel`) or user code calls panic, control transfers
+// here. Per `jhyy-lang-spec-no_std-supplement-v3.0.0.md`, panic semantics
+// are: stop the kernel (no unwind, no message in M0). A real panic message
+// printer lands in a later v3.x sprint.
+//
+// jhyy has no `!` (never) type nor explicit `()` unit return per lang-spec
+// §3 / §8.3 — void functions simply omit the `-> T` clause. The body is an
+// infinite loop — divergence is correct (function never returns). A future
+// backend can lower this to `ud2` / `hlt`.
+fn panic_handler() {
+    while true {
+    }
+}

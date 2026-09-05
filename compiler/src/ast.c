@@ -482,11 +482,12 @@ Node *ast_new_const_decl(Arena *a, SourceLoc loc, Sym *sym, Node *type_annot, No
     return n;
 }
 
-Node *ast_new_module(Arena *a, SourceLoc loc, Node **decls, size_t ndeccls) {
+Node *ast_new_module(Arena *a, SourceLoc loc, Node **decls, size_t ndeccls, int is_no_std) {
     Node *n = new_node(a, NODE_MODULE, loc, sizeof(NodeModule));
     NodeModule *d = node_module_data(n);
     d->decls = decls;
     d->ndeccls = ndeccls;
+    d->is_no_std = is_no_std;
     return n;
 }
 
