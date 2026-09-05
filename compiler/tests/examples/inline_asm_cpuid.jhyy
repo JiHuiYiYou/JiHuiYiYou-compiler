@@ -1,0 +1,32 @@
+// compiler/tests/examples/inline_asm_cpuid.jhyy
+// V3-B v3.0.1 inline asm 测试 — cpuid 指令 (D42 path)
+//
+// 验证 `asm!("cpuid")` 走 QBE .s passthrough 路径 (per D42 in
+// docs/plans/v2/v2.0.0-os-prep.md):  codegen 不 emit QBE IL — 直接把
+// raw asm text 写到 compiler/build/obj/_inline_asm.buf (fopen "ab",
+// binary mode per feedback_qbe_crlf_root_cause), 然后 main.jhyy 在
+// gcc link 之前把 .buf 拼接到 .s 文件末。
+//
+// v3.0.1 限制 (per spec supplement § 6):  asm 文本作为全局汇编被 append
+// 到 .s 末,**不**内联到函数体里.  所以 cpuid 在 main_jhyy 返回后才执行
+// (objdump 显示 cpuid 紧跟在 main_jhyy `ret` 之后).  这个测试只验证:
+//   (a) parse / sema / codegen 走通, 没编译失败
+//   (b) 链接 .exe 成功 (size > 0)
+//   (c) cpuid 指令字节 (0f a2) 真的进了 .exe (sema_no_inline 检查)
+//
+// 不再依赖 cpuid 实际"运行时"行为, 因为 D42 passthrough 路径根本不让
+// asm inline 进入函数体.  v3.1+ (per spec supplement § 6 roadmap) 会加
+// operand constraints + inline placement 时, 这个测试会改成
+// `if eax != 0 { return 42; }` 重新验证运行时行为.
+
+fn main_jhyy() -> i32 {
+    // 占位: 语义上 cpuid 是 stmt-position call, 但 codegen 不 emit 任何 IL,
+    // 文本被 append 到 .s 末.  这里只是触发 codegen 路径, 不影响 main_jhyy
+    // 的返回值 (return 0 即可, 测试关注 .exe 包含 cpuid + 不报 codegen 错).
+    let mut eax: i32 = 0 as i32;
+    let mut ebx: i32 = 0 as i32;
+    let mut ecx: i32 = 0 as i32;
+    let mut edx: i32 = 0 as i32;
+    asm!("cpuid");
+    return 0 as i32;
+}

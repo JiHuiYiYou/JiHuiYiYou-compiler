@@ -123,6 +123,12 @@ fn NODE_CONST_DECL()     -> i32 { return 49 as i32; }
 fn NODE_NULL()           -> i32 { return 50 as i32; }
 // v1.3.6: defer fncall(); — sema collects into fd->defers; codegen emits LIFO before ret
 fn NODE_DEFER()          -> i32 { return 51 as i32; }
+// V3-B v3.0.1: asm!(...) inline x86-64 asm macro per D42 (docs/plans/v2/v2.0.0-os-prep.md).
+// codegen does NOT emit QBE IL — instead appends raw asm string to a side-file
+// (compiler/build/obj/_inline_asm.buf) that main.jhyy concatenates to the .s
+// file before gcc link. v3.0.1 only supports a single string literal (no
+// operands, no templates); v3.1+ adds operand constraints.
+fn NODE_ASM_BLOCK()      -> i32 { return 52 as i32; }
 
 fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_INT()            { return "INT" as *u8; }
@@ -176,6 +182,7 @@ fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_MODULE()        { return "MODULE" as *u8; }
     if kind == NODE_NULL()          { return "NULL" as *u8; }
     if kind == NODE_DEFER()         { return "DEFER" as *u8; }
+    if kind == NODE_ASM_BLOCK()     { return "ASM_BLOCK" as *u8; }
     return "?" as *u8;
 }
 
@@ -403,6 +410,18 @@ type NodeDefer = struct {
     expr: *u8,    // *Node（must be NODE_CALL or NODE_QUALIFIED_CALL, sema validates）
 }
 fn NODE_DEFER_SIZE() -> i64 { return 8 as i64; }
+
+// V3-B v3.0.1: asm!(...) inline asm macro per D42.
+//   text(*u8 8) — arena_strdup'd string literal body (between `(` and `)`)
+//   noperands(i64 8) — operand count (v3.0.1 only supports 0; v3.1+ adds non-zero)
+//   operands(*u8 8) — **Node operand array (v3.0.1 always NULL; v3.1+ uses)
+//   total = 24 bytes
+type NodeAsmBlock = struct {
+    text:     *u8,    // *u8 arena_strdup'd (caller owns arena)
+    noperands: i64,
+    operands: *u8,    // **Node (NULL in v3.0.1)
+}
+fn NODE_ASM_BLOCK_SIZE() -> i64 { return 24 as i64; }
 
 // expr(*u8 8) = 8
 type NodeExprStmt = struct {
@@ -1075,6 +1094,23 @@ fn ast_new_defer(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32, expr
     let n = ast_init_node(buf, NODE_DEFER(), loc_filename, loc_line, loc_col);
     let d = (buf as i64 + NODE_SIZE()) as *NodeDefer;
     (*d).expr = expr as *u8;
+    return n;
+}
+
+// V3-B v3.0.1: asm!(...) inline asm macro factory. text 是 arena_strdup 过的
+// string literal body（已剥两端引号）。v3.0.1 only supports noperands=0,
+// operands=NULL; v3.1+ 扩展时会用同 signature 增量填两个字段.
+fn node_asm_block_data(n: *Node) -> *NodeAsmBlock {
+    return (n as i64 + NODE_SIZE()) as *NodeAsmBlock;
+}
+fn ast_new_asm_block(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                      text: *u8, noperands: i64, operands: *u8) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_ASM_BLOCK_SIZE());
+    let n = ast_init_node(buf, NODE_ASM_BLOCK(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeAsmBlock;
+    (*d).text = text;
+    (*d).noperands = noperands;
+    (*d).operands = operands;
     return n;
 }
 

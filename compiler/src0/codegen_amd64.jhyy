@@ -28,6 +28,12 @@
 
 import codegen_amd64_state;  // CGState / QBE_W_LOCAL / ILTOK_* / cg_offset_for_temp
 
+// V3-B v3.0.1: inline asm side-file append — same externs as codegen.jhyy
+extern fn fopen(path: *u8, mode: *u8) -> *u8;
+extern fn fwrite(buf: *u8, size: i64, count: i64, fp: *u8) -> i64;
+extern fn fclose(fp: *u8) -> i32;
+extern fn strlen(s: *u8) -> i64;
+
 // ════════════════════════════════════════════════════
 // 公开 API(per L4 § 1.2)
 // ════════════════════════════════════════════════════
@@ -57,20 +63,32 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8) -> i32 {
     return 0;
 }
 
-// codegen_amd64_emit_raw_asm — D42 escape hatch stub
+// codegen_amd64_emit_raw_asm — D42 escape hatch (V3-B v3.0.1 fill)
 //
 // per `jhyy_OS/docs/coordination.md § 3` D42:
 //   "v3.0 3a inline asm 在 v2.x 自写后端完成前走 QBE 工具链 .s 输出路径;
 //    v2.x 完成后 asm 走自写后端 'escape hatch' 路径"
 //
-// v2.5.0:仅 stub placeholder(空 body + 占位注释),V3-B v3.0.1 填充实际 inline asm emit 逻辑
-// 当前不 emit 任何东西(text 由 caller 已经写入 .s buffer,若有)
+// V3-B v3.0.1 fill: same side-file append as codegen.jhyy NODE_ASM_BLOCK case.
+// Both paths (QBE + V2-A) append raw asm text to
+// compiler/build/obj/_inline_asm.buf; main.jhyy concatenates that buffer to
+// the .s file before gcc link. This keeps the V2-A escape hatch byte-equal
+// with the QBE path. (v2.x mid ship phase will eventually inline-merge the
+// two, but for now we ship the simpler side-file pattern.)
 //
 // ship gate verify(per L4 § X.1):`grep "codegen_amd64_emit_raw_asm" compiler/src0/codegen_amd64.jhyy` ≥ 1 hit
 fn codegen_amd64_emit_raw_asm(text: *u8) -> i32 {
-    // D42 placeholder — V3-B v3.0.1 填充
-    // 占位:body 空,只 return 0;签名锁定(text: *u8) → i32,后续 V3-B 改 body 不改签名
-    let _ = text;
+    // V3-B v3.0.1: open side-file "ab" (binary mode, per
+    // feedback_qbe_crlf_root_cause), append text + newline, close.
+    let asm_buf_path = "compiler/build/obj/_inline_asm.buf" as *u8;
+    let afp = fopen(asm_buf_path, "ab" as *u8);
+    if afp != (0 as *u8) {
+        let text_len = strlen(text);
+        let _w1 = fwrite(text, 1 as i64, text_len, afp);
+        let nl = "\n" as *u8;
+        let _w2 = fwrite(nl, 1 as i64, 1 as i64, afp);
+        let _c = fclose(afp);
+    }
     return 0;
 }
 

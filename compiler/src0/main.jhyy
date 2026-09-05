@@ -862,6 +862,35 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
         free(temp_asm); free(temp_exe); return 1 as i32;
     }
 
+    // V3-B v3.0.1: inline asm macro post-QBE concat. If codegen produced any
+    // asm!() block, it appended raw asm text to compiler/build/obj/_inline_asm.buf
+    // (fopen "ab" — see feedback_qbe_crlf_root_cause). We read that buffer and
+    // append it to temp_asm (binary mode "ab" again) before gcc link, then
+    // unlink so the next compile starts clean.
+    //
+    // v3.0.1 limitation (per spec supplement § 6): asm text is appended at
+    // the END of the .s file (after the function body), so it executes as
+    // global-scope asm after main_jhyy returns. v3.1+ will place asm inline
+    // within function bodies (operand constraints + placement tracking).
+    let inline_asm_path = "compiler/build/obj/_inline_asm.buf" as *u8;
+    if jh_file_stat_ok(inline_asm_path) != (0 as i32) {
+        let ia_fp = fopen(inline_asm_path, "rb" as *u8);
+        if ia_fp != (0 as *u8) {
+            let ia_buf = malloc(65536 as i64);
+            let ia_n = fread(ia_buf, 1 as i64, 65536 as i64, ia_fp);
+            let _fc1 = fclose(ia_fp);
+            if ia_n > (0 as i64) {
+                let asm_fp = fopen(temp_asm, "ab" as *u8);
+                if asm_fp != (0 as *u8) {
+                    let _w = fwrite(ia_buf, 1 as i64, ia_n, asm_fp);
+                    let _fc2 = fclose(asm_fp);
+                }
+            }
+            free(ia_buf);
+            let _u2 = jh_unlink_file(inline_asm_path);
+        }
+    }
+
     // v1.5.6 W-040: wrap each path arg in quotes so gcc's argv parser
     // treats the full path as one token. RUNTIME_C() and HELPERS_C() resolve
     // to "<INSTALLDIR>\bin\runtime.c" / "<INSTALLDIR>\bin\jhyy_helpers.c"
