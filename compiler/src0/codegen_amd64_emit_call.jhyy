@@ -205,7 +205,9 @@ fn emit_binop_rsp_to_rax(state: *u8, qt: i32, op_name: *u8, op_off: i64) -> i32 
 
 fn emit_call(state: *u8, tok: *u8) -> i32 {
     let t = tok as *ILToken;
-    let _s = state as *StringBuilder;
+    let cg = state as *CGState;
+    let s = (*cg).out as *StringBuilder;
+    let arena = (*cg).arena as *Arena;
 
     // 字段分配约定(per L4 § 4.1 简化):
     //   tok.int_val  = ret temp id(%tD 的 D)
@@ -246,17 +248,17 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
 
     // ── Step 3: 32-byte shadow space alloc(MS x64 calling convention)─
     //   subq $32, %rsp
-    let _sa = sb_append_cstr(0 as *Arena, s, "\tsubq $32, %rsp\n" as *u8);
+    let _sa = sb_append_cstr(arena, s, "\tsubq $32, %rsp\n" as *u8);
 
     // ── Step 4: 实际 call ─
     //   call $fn_name
-    let _ca1 = sb_append_cstr(0 as *Arena, s, "\tcall $" as *u8);
-    let _ca2 = sb_append_cstr(0 as *Arena, s, fn_name);
-    let _ca3 = sb_append_cstr(0 as *Arena, s, "\n" as *u8);
+    let _ca1 = sb_append_cstr(arena, s, "\tcall $" as *u8);
+    let _ca2 = sb_append_cstr(arena, s, fn_name);
+    let _ca3 = sb_append_cstr(arena, s, "\n" as *u8);
 
     // ── Step 5: 32-byte shadow space free ─
     //   addq $32, %rsp
-    let _sf = sb_append_cstr(0 as *Arena, s, "\taddq $32, %rsp\n" as *u8);
+    let _sf = sb_append_cstr(arena, s, "\taddq $32, %rsp\n" as *u8);
 
     // ── Step 6: 返回值 %rax → 栈槽 -<ret_off>(%rbp)─
     let ret_off = local_temp_offset(ret_temp_id);
@@ -519,6 +521,7 @@ fn emit_volatile(state: *u8, tok: *u8) -> i32 {
         //   **不** emit memory barrier / 串行化指令
         let _c2 = emit_comment(state, "v2.5.0: emit 普通 load/store (no memory barrier per L4 § X.2 3c volatile 优先)" as *u8);
         let _c3 = emit_comment(state, "V2-B 3c ship 后 flip: 在 load/store 前加 'lock; addq $0, (%rsp)' 或 mfence" as *u8);
+        return 0;
     } else {
         // tok.qbe_type != QBE_VOLATILE_MARKER — 不应该走到 emit_volatile
         // 这是 parse loop 调度错误,emit warning comment + return 1(error)

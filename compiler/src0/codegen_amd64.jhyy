@@ -27,6 +27,16 @@
 // codegen.c:731 — same restriction as abi_amd64_win.jhyy).
 
 import codegen_amd64_state;  // CGState / QBE_W_LOCAL / ILTOK_* / cg_offset_for_temp
+import codegen_amd64_emit_mem;    // V2-B v2.6.0 Unit B: emit_alloc / emit_store / emit_load / emit_loadsub
+import codegen_amd64_emit_ctrl;   // V2-B v2.6.0 Unit B: emit_jmp / emit_jnz / emit_label / emit_ret / emit_func_header / emit_data_string
+import codegen_amd64_emit_call;   // V2-B v2.6.0 Unit B: emit_call / emit_phi / emit_copy / emit_binop / emit_volatile
+
+// ═══ Local externs (jh_* helpers from jhyy_helpers.c, per V2-B v2.6.0 Unit A) ═══
+// Used by read_file / write_file below.
+extern fn jh_read_file(path: *u8, out_buf: *u8, buf_cap: i64, out_len: *i64) -> i32;
+extern fn jh_write_file(path: *u8, buf: *u8, len: i64) -> i32;
+extern fn malloc(size: i64) -> *u8;
+extern fn free(p: *u8) -> i32;
 
 // ════════════════════════════════════════════════════
 // 公开 API(per L4 § 1.2)
@@ -102,10 +112,51 @@ fn codegen_amd64_emit_raw_asm(text: *u8) -> i32 {
 //     }
 
 fn parse_and_emit(state: *u8, tokens: *u8, n: i64) -> i32 {
-    // v2.5.0 skeleton:stub — return 0 占位;Phase 3b 填实现
-    let _ = state;
-    let _ = tokens;
-    let _ = n;
+    // V2-B v2.6.0 (Unit B Stub-Fill): real impl — dispatch loop over
+    // tokens[i].kind → call into imported emit_* functions.
+    // ILToken struct size = 40 bytes (per codegen_amd64_lexer.jhyy
+    // lex_il line 925 hard-coded `slots * (40 as i64)`).
+    let tok_size: i64 = 40 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let tok_p = (tokens as i64 + i * tok_size) as *u8;
+        let kind_p = tok_p as *i32;
+        let kind = *kind_p;
+        if kind == ILTOK_FUNC_HEADER() {
+            emit_func_header(state, tok_p);
+        } else if kind == ILTOK_LABEL() {
+            emit_label(state, tok_p);
+        } else if kind == ILTOK_ALLOC() {
+            emit_alloc(state, tok_p);
+        } else if kind == ILTOK_STORE() {
+            emit_store(state, tok_p);
+        } else if kind == ILTOK_LOAD() {
+            emit_load(state, tok_p);
+        } else if kind == ILTOK_LOADSUB() {
+            emit_loadsub(state, tok_p);
+        } else if kind == ILTOK_VOLATILE() {
+            emit_volatile(state, tok_p);
+        } else if kind == ILTOK_CALL() {
+            emit_call(state, tok_p);
+        } else if kind == ILTOK_PHI() {
+            emit_phi(state, tok_p);
+        } else if kind == ILTOK_COPY() {
+            emit_copy(state, tok_p);
+        } else if kind == ILTOK_BINOP() {
+            emit_binop(state, tok_p);
+        } else if kind == ILTOK_RET() {
+            emit_ret(state, tok_p);
+        } else if kind == ILTOK_JMP() {
+            emit_jmp(state, tok_p);
+        } else if kind == ILTOK_JNZ() {
+            emit_jnz(state, tok_p);
+        } else if kind == ILTOK_DATA_STRING() {
+            emit_data_string(state, tok_p);
+        } else if kind == ILTOK_EOF() {
+            return 0;
+        }
+        i = i + (1 as i64);
+    }
     return 0;
 }
 
@@ -117,17 +168,35 @@ fn parse_and_emit(state: *u8, tokens: *u8, n: i64) -> i32 {
 // QBE 行号偏移错 = Windows fopen "w" 写 .il 把 \n 转 \r\n。
 
 fn read_file(path: *u8) -> *u8 {
-    // 全文件读取,返回 *u8(arena-alloc)
-    // Phase 3b 实现:jh_fopen_rb + jh_file_size + jh_fread + arena alloc
-    let _ = path;
+    // V2-B v2.6.0 (Unit B Stub-Fill): real impl via jh_read_file (Unit A).
+    // Allocates 4 MB initial buffer; jh_read_file returns -1 on err,
+    // 1 if file larger than buf_cap (caller should grow + retry), 0 OK.
+    // For V2-B v2.6.0 simplicity, return 0 on too-small (caller detects
+    // via len check + retries with larger buf).
+    let cap: i64 = (4 as i64) * (1024 as i64) * (1024 as i64);
+    let buf = malloc(cap);
+    if buf == (0 as *u8) {
+        return 0 as *u8;
+    }
+    let actual_len: i64 = 0 as i64;
+    let rc = jh_read_file(path, buf, cap, &actual_len);
+    if rc == (0 as i32) {
+        return buf;
+    }
+    // err or too-small — free + return 0
+    free(buf);
     return 0 as *u8;
 }
 
 fn write_file(path: *u8, content: *u8, len: i64) -> i32 {
-    // 全文件写,用 "wb"(per `feedback_qbe_crlf_root_cause`)
-    // Phase 3b 实现:jh_fopen_wb + jh_fwrite + jh_fclose
-    let _ = path;
-    let _ = content;
-    let _ = len;
-    return 0;
+    // V2-B v2.6.0 (Unit B Stub-Fill): real impl via jh_write_file (Unit A).
+    // Returns 0 on success, -1 on error. jh_write_file internally uses
+    // "wb" mode (no CRLF translation, per feedback_qbe_crlf_root_cause).
+    if path == (0 as *u8) || content == (0 as *u8) {
+        return -1;
+    }
+    if len < (0 as i64) {
+        return -1;
+    }
+    return jh_write_file(path, content, len);
 }
