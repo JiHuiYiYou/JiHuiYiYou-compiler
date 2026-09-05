@@ -36,7 +36,7 @@
 | **V3-A (v3.0.0)** | ✅ **shipped** (tag `v3.0.0` pending) | 3d `#[no_std]` 试水 + core lib stub + supplement doc |
 | **V3-B (v3.0.1)** | ⏳ 待 V3-A ship 后启动 | 3a inline asm |
 | **V3-B (v3.0.2)** | ⏳ 待 V3-B v3.0.1 ship | 3b `#[naked]` |
-| **V3-B (v3.0.3)** | ⏳ 待 V3-B v3.0.2 ship | 3c volatile |
+| **V3-B (v3.0.3)** | ✅ **shipped** (V3-B Unit A2) | 3c volatile + V2-A emit_volatile fill |
 | **V3-B (v3.0.4)** | ⏳ 待 V3-B v3.0.3 ship | 3e `#[link_section]` |
 | **V3-B (v3.0.5)** | ⏳ 待 V3-B v3.0.4 ship | 3f memory barrier |
 | **V3-C (v3.1.0)** | ⏳ 待 V3-B 末 ship | 3g `&mut` + lifetime |
@@ -120,9 +120,89 @@ Unit 1 + Unit 2 merge 后,coordinator 跑 ship gate 暴露 2 个 integration gap
 |------------|------|------|------|
 | 3a | v3.0.1 | inline asm | ⏳ 待 V3-A ship |
 | 3b | v3.0.2 | `#[naked]` | ⏳ 待 V3-B v3.0.1 ship |
-| 3c | v3.0.3 | volatile | ⏳ 待 V3-B v3.0.2 ship |
+| 3c | v3.0.3 | volatile | ✅ **shipped** (V3-B Unit A2) |
 | 3e | v3.0.4 | `#[link_section]` | ⏳ 待 V3-B v3.0.3 ship |
 | 3f | v3.0.5 | memory barrier | ⏳ 待 V3-B v3.0.4 ship |
+
+---
+
+## V3-B — v3.0.3 (3c `volatile` + V2-A emit_volatile fill) — 2026-09-05
+
+**Per**: [`docs/plans/v3/batch-V3-B-plan.md`](../../plans/v3/batch-V3-B-plan.md) § 3c
+**Tag**: `v3.0.3` (V3-B Unit A2 ship, coordinator integration 后由 coordinator 打 umbrella tag)
+**重要性**: M1-required(per coordination.md § 3 D8 — M1 launch 强前置 v3.0 3a/3b/3c/3e/3f)
+**V2-A 集成**: fill `emit_volatile` stub (per `codegen_amd64_emit_call.jhyy:471`,V2-A 已 wire 占位)
+
+### Scope
+
+- **Lexer**: `volatile` keyword (`TOKEN_VOLATILE = 72`) — `lookup_keyword` len=8 分支
+- **Parser**: `parse_type` 加 `volatile` prefix 分支(per spec § 2);reject:
+  - chained `volatile volatile T`
+  - compound types(`*T` / `[T; N]` / `[*]T` / `fn(...)` / `Ident::Ident`)
+  - non-primitive ident 套 volatile (soft warn, sema 阶段强校验)
+- **AST**: `NODE_VOLATILE_TYPE = 52` + `NodeVolatileType { inner: *u8 }` struct + ctor/accessor
+- **Types**: `Type` struct 加 `is_volatile: i32` + `_pad_volatile: i32`(offset 144);`TYPE_SIZE` 152→160
+- **Sema**:
+  - `resolve_type_node`: 处理 `NODE_VOLATILE_TYPE` → alloc new `Type` (copy inner fields + `is_volatile=1`)
+  - 拒绝 chained `is_volatile` (再次兜底)
+  - 拒绝 compound inner (`KIND_POINTER` / `KIND_ARRAY` / `KIND_SLICE` / `KIND_FUNC` / `KIND_STRUCT` / `KIND_ENUM` / `KIND_ALIAS`)
+  - `infer_type`: `NODE_VOLATILE_TYPE` → resolve inner,return wrapped Type
+  - `check_func_decl`: allow volatile param (MMIO callback 模式),不 warn(避免 regress baseline 污染)
+- **Codegen** (main path, `jhyy.exe compile → qbe.exe → .s`):
+  - `cg_emit_load` / `cg_emit_store_primitive`: 检查 `type.is_volatile=1` → emit `    # volatile load` / `# volatile store` 注释
+  - 每次 `cg_expr NODE_IDENT` 已 alloc fresh temp(QBE 不能 fold 不同 temp 的 load)
+- **Codegen** (V2-A path, `codegen_amd64.jhyy` 系列):
+  - `emit_volatile` stub 填 body 为 "no regalloc + no barrier"(per spec § 3.3 + D-v3.0.3-1):
+    - no regalloc:`emit_load` / `emit_store` 已走 `movl mem, %reg` + `movl %reg, mem` direct mem op
+    - no barrier:**不**emit `mfence` / `lock; addq $0, (%rsp)` — 那是 3f 职责
+- **Test**: `compiler/tests/examples/volatile_mmio.jhyy` ship gate smoke test(EXIT: 0)— opaque `read_sensor()` / `write_log()` defeat QBE constant propagation
+- **Doc**: [`jhyy-lang-spec-volatile-supplement-v3.0.3.md`](../../abis/jhyy-lang-spec-volatile-supplement-v3.0.3.md)
+
+### 验收
+
+- [x] `make` 零 warning
+- [x] `jhyy.exe compile volatile_mmio.jhyy -o vol_test.exe` 成功
+- [x] `vol_test.exe` EXIT: 0(`a == 42 && b == 42` 验证基本语义)
+- [x] `.il` 含 `# volatile load` / `# volatile store` 注释(grep verify)
+- [x] parser 拒掉 chained `volatile volatile T`(per `volatile_mmio_neg1.jhyy` type-check 内置验证)
+- [x] parser 拒掉 `volatile MyStruct`(per spec § 6 限制)
+
+### 已知 limitation (per spec § 3.2)
+
+QBE main 路径(`qbe.exe`)**不识别** `volatile` keyword。`load.c` / `gvn.c` 做 constant propagation + register
+promotion 会消除 volatile load(对于初值是 compile-time constant 的情况)。Workaround:用 opaque function call
+提供 volatile 变量初值(如本 ship gate test 的 `read_sensor()`)。**真实 MMIO semantic 验证需要 OS-level
+kernel + 物理地址**;V2-A 路径(`codegen_amd64.jhyy`)对此有完整保证(per spec § 3.3)。
+
+### 关键决策点
+
+| # | 决策 | 落点 |
+|---|------|------|
+| **D-v3.0.3-1** | V2-A `emit_volatile` stub 填 body 为 "no regalloc + no barrier",**不**emit fence | `codegen_amd64_emit_call.jhyy` 函数体 + spec § 3.3 |
+| **D-v3.0.3-2** | Type struct 加 `is_volatile: i32` + `_pad_volatile: i32`,TYPE_SIZE 152→160 | `types.jhyy` Type struct;影响所有 Type arena alloc |
+| **D-v3.0.3-3** | `volatile` parameter allow 不 warn(spec § 6:common MMIO callback pattern) | `sema.jhyy` `check_func_decl` |
+| **D-v3.0.3-4** | QBE main path 不强制 "no regalloc" (limitation),spec 明确 document | spec § 3.2 + 6 |
+
+### 关键数字
+
+| 数字 | 值 | 来源 |
+|------|-----|------|
+| Type struct size | 152 → 160 bytes | v3.0.3 (add is_volatile + pad) |
+| 新增 TokenKind | 1 (TOKEN_VOLATILE = 72) | v3.0.3 |
+| 新增 NodeKind | 1 (NODE_VOLATILE_TYPE = 52) | v3.0.3 |
+| ship gate EXIT | 0 | `volatile_mmio.jhyy` |
+| D43 baseline | sha=`51376ce5721bccb0c81c7deabead1a6012fb76648c424238391018f1890b5761` hold | v2.4.0 ship `7fb735b` per D43 |
+
+### Out of scope (本 batch 不做)
+
+- Volatile bitfields
+- Volatile pointer 写(MMIO device register 的 deref 写) — 留 v3.x 中
+- `fence_*` 系列(cross-thread ordering)— 3f sub-sprint(v3.0.5)
+- `#![volatile]` inner attribute
+- Volatile array / slice 元素
+- ARM / RISC-V memory model
+
+---
 
 ---
 
