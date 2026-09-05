@@ -2611,12 +2611,50 @@ fn parser_init(p: *Parser, lex: *Lexer, a: *Arena) -> i32 {
     return 0;
 }
 
+// v3.0.0 (3d no_std): parse module-level outer attrs at file top.
+// Only `#[no_std]` is meaningful. Errors on `#[inline]` at module level.
+// is_no_std is an out-param (1 if file had `#[no_std]`, else 0).
+// Defined before parser_parse so it's visible (jhyy has no forward refs).
+fn parse_module_attributes(p: *Parser, is_no_std: *i32) -> i32 {
+    *is_no_std = 0 as i32;
+    let mut t = empty_token();
+    while parser_check(p, TOKEN_HASH()) != (0 as i32) {
+        parser_advance(p, &t);  // consume '#'
+        parser_expect(p, TOKEN_LBRACKET(), "[ after #" as *u8, &t);
+        parser_expect(p, TOKEN_IDENT(), "attribute name" as *u8, &t);
+        let aname = parser_tok_name(p, &t);
+        if strcmp(aname, "no_std" as *u8) == (0 as i32) {
+            *is_no_std = 1 as i32;
+        } else {
+            if strcmp(aname, "inline" as *u8) == (0 as i32) {
+                // inline is fn-only (per v1.3.5); module-level is a user mistake.
+                let mut tloc = empty_token();
+                parser_peek(p, &tloc);
+                jh_print_loc_stderr(tloc.loc_filename, tloc.loc_line, tloc.loc_col);
+                jh_fputs_stderr("error: #[inline] is a function-level attribute, not module-level\n" as *u8);
+                (*p).error_count = (*p).error_count + (1 as i32);
+            }
+            // unknown attrs: forward-compatible parse + ignore
+        }
+        parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
+    }
+    if (*p).error_count == (0 as i32) {
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
 fn parser_parse(p: *Parser) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
     let loc_lf = t.loc_filename;
     let loc_ll = t.loc_line;
     let loc_lc = t.loc_col;
+
+    // v3.0.0 (3d no_std): consume leading `#[...]` (module-level outer attrs)
+    // before walking decls. Currently only `#[no_std]`.
+    let mut is_no_std: i32 = 0 as i32;
+    let _mar = parse_module_attributes(p, &is_no_std);
 
     let mut decls: *u8 = 0 as *u8;
     let mut ndecls: i64 = 0 as i64;
@@ -2641,5 +2679,5 @@ fn parser_parse(p: *Parser) -> *Node {
         }
     }
 
-    return ast_new_module((*p).arena, loc_lf, loc_ll, loc_lc, decls, ndecls);
+    return ast_new_module((*p).arena, loc_lf, loc_ll, loc_lc, decls, ndecls, is_no_std);
 }

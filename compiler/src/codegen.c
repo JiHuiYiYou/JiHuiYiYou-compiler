@@ -2535,6 +2535,17 @@ void cg_module(IRBuf *ir, Node *module, Target t) {
             cg_func(&cg, ir, decl, inline_fns, n_inline);
         }
     }
+    /* v3.0.0 (3d no_std): if is_no_std=1, write a side-file marker that
+       the driver (link_with_gcc) reads to switch the link line to
+       `-nostartfiles -nodefaultlibs`. The default path (is_no_std=0)
+       skips this block entirely → IL is byte-identical to v2.4.0. */
+    if (md->is_no_std) {
+        FILE *fp = fopen("compiler/build/obj/_no_std.flag", "wb");
+        if (fp) {
+            (void)fwrite("no_std\n", 1, 7, fp);
+            fclose(fp);
+        }
+    }
     /* v1.4.6 W-017: free module-level CGContext arrays */
     free(cg.locals);
     free(cg.loop_starts);

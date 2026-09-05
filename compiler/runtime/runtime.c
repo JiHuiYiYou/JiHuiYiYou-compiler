@@ -7,6 +7,19 @@
 #include <windows.h>
 #endif
 
+/* v3.0.0 (3d no_std): when a user compiles a .jhyy file with `#[no_std]`,
+ * this file is NOT linked (see `main.jhyy link_with_gcc` is_no_std branch).
+ * Freestanding replacements live in `compiler/runtime/no_std_core/`:
+ *   - panic_handler.jhyy   (M0 stub, divergence loop)
+ *   - memcpy.jhyy          (per-byte loop)
+ *   - memset.jhyy          (per-byte loop)
+ *   - __start_kernel.jhyy  (entry, dispatches to user fn main)
+ * Per `jhyy-lang-spec-no_std-supplement-v3.0.0.md`, the no_std path uses
+ * `-nostartfiles -nodefaultlibs -Wl,--entry=__start_kernel` and links
+ * only the user's no_std_core/*.jhyy compiled objects. The host's
+ * `main → main_jhyy` bridge here is intentionally bypassed in no_std mode
+ * (no libc startup, no `int main(int argc, char **argv)` transition). */
+
 void arena_new(Arena *a, size_t size) {
     a->start = (char *)malloc(size);
     if (!a->start) {

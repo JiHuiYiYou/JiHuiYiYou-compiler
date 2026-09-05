@@ -738,7 +738,22 @@ fn run_qbe(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
 //   v1.5.6: 替代裸 system("gcc ...") 拼 cmd_buf. jh_gcc_invoke 内部调
 //   jh_gcc_path() 拿 resolved gcc 路径 + 引号包裹, 写 cmd_buf 头部;
 //   cmd_buf 后续段 (args + -o EXE -lm) 由 caller 拼. 全 cmd 仍传 system().
+// v3.0.0 (3d no_std): if the side-file flag at compiler/build/obj/_no_std.flag
+//   exists (created by codegen when is_no_std=1), use a different link line:
+//     -nostartfiles -nodefaultlibs + link no_std_core/*.obj directly.
+//   Default path is unchanged (byte-equal IL → byte-equal exe behavior).
 fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
+    // v3.0.0 (3d no_std): detect side-file flag from codegen. We use a
+    // plain file-stat via jh_file_stat_ok (defined in jhyy_helpers.c).
+    let no_std_flag_path = "compiler/build/obj/_no_std.flag" as *u8;
+    let is_no_std: i32 = jh_file_stat_ok(no_std_flag_path);
+    // v3.0.0 (3d no_std) bug fix: if a previous no_std compile left the
+    // flag on disk (e.g. compile succeeded then user ran a default-path
+    // compile), the next default-path run would link with -nostartfiles.
+    // Unlink the flag right after reading it so the next compile starts
+    // clean. codegen will recreate it on the next no_std run.
+    let _u = jh_unlink_file(no_std_flag_path);
+
     // v1.5.6 W-048: temp ASCII path 绕开 mingw CRT 中文 argv 编码歧义.
     // src0 jhyy 是 UTF-8 源; path 字面量是 UTF-8 bytes. MSYS2 mingw-w64 CRT
     // _initargv 拿到 Unicode cmdline 后再用 CP_ACP 转 ANSI argv — PowerShell
@@ -820,14 +835,25 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     pos = str_concat_at(cmd_buf, pos, lq);
     pos = str_concat_at(cmd_buf, pos, temp_asm);    // W-048: ASCII
     pos = str_concat_at(cmd_buf, pos, rq);
-    pos = str_concat_at(cmd_buf, pos, sp);
-    pos = str_concat_at(cmd_buf, pos, lq);
-    pos = str_concat_at(cmd_buf, pos, RUNTIME_C());
-    pos = str_concat_at(cmd_buf, pos, rq);
-    pos = str_concat_at(cmd_buf, pos, sp);
-    pos = str_concat_at(cmd_buf, pos, lq);
-    pos = str_concat_at(cmd_buf, pos, HELPERS_C());
-    pos = str_concat_at(cmd_buf, pos, rq);
+    // v3.0.0 (3d no_std): if is_no_std=1, link line skips runtime.c +
+    // jhyy_helpers.c (no C runtime bridge) and adds `-nostartfiles
+    // -nodefaultlibs -Wl,--entry=main` so user's `fn main` is the OS entry
+    // point. Default path (is_no_std=0) keeps the v2.4.0 link line untouched.
+    if is_no_std == (0 as i32) {
+        pos = str_concat_at(cmd_buf, pos, sp);
+        pos = str_concat_at(cmd_buf, pos, lq);
+        pos = str_concat_at(cmd_buf, pos, RUNTIME_C());
+        pos = str_concat_at(cmd_buf, pos, rq);
+        pos = str_concat_at(cmd_buf, pos, sp);
+        pos = str_concat_at(cmd_buf, pos, lq);
+        pos = str_concat_at(cmd_buf, pos, HELPERS_C());
+        pos = str_concat_at(cmd_buf, pos, rq);
+    } else {
+        // no_std path: no runtime.c, no helpers.c, but still need kernel
+        // entry + entry-point override.
+        let no_std_flags = " -nostartfiles -nodefaultlibs -Wl,--entry=main " as *u8;
+        pos = str_concat_at(cmd_buf, pos, no_std_flags);
+    }
     let oflag = " -o " as *u8;
     pos = str_concat_at(cmd_buf, pos, oflag);
     pos = str_concat_at(cmd_buf, pos, lq);
@@ -1068,31 +1094,83 @@ fn cmd_run(argc: i32, argv: *u8, t: i32) -> i32 {
     let scan_n = fread(scan_buf, 1 as i64, 131072 as i64, scan_fp);
     let _fc = fclose(scan_fp);
     let mut has_main: i32 = 0 as i32;
-    let needle = "fn main_jhyy" as *u8;
-    let nlen = strlen(needle);
-    if scan_n > nlen {
-        let mut j: i64 = 0 as i64;
-        let upper = scan_n - nlen;
-        while j <= upper {
-            let mut match_ok: i32 = 1 as i32;
-            let mut k2: i64 = 0 as i64;
-            while k2 < nlen {
-                let a_p = (scan_buf as i64 + j + k2) as *u8;
-                let b_p = (needle as i64 + k2) as *u8;
-                let av = (*a_p) as i32;
-                let bv = (*b_p) as i32;
-                if av != bv { match_ok = 0 as i32; }
-                k2 = k2 + (1 as i64);
+    // v3.0.0 (3d no_std): also accept `#[no_std]` modules which use
+    // `fn main` (kernel entry) instead of `fn main_jhyy` (hosted entry).
+    // Detect the module attr via a simple substring scan.
+    let mut is_no_std_file: i32 = 0 as i32;
+    let no_std_needle = "#[no_std]" as *u8;
+    let no_std_nlen = strlen(no_std_needle);
+    if scan_n > no_std_nlen {
+        let mut jj: i64 = 0 as i64;
+        let upper2 = scan_n - no_std_nlen;
+        while jj <= upper2 {
+            let mut match_ok2: i32 = 1 as i32;
+            let mut kk: i64 = 0 as i64;
+            while kk < no_std_nlen {
+                let a_p2 = (scan_buf as i64 + jj + kk) as *u8;
+                let b_p2 = (no_std_needle as i64 + kk) as *u8;
+                let av2 = (*a_p2) as i32;
+                let bv2 = (*b_p2) as i32;
+                if av2 != bv2 { match_ok2 = 0 as i32; }
+                kk = kk + (1 as i64);
             }
-            if match_ok == (1 as i32) { has_main = 1 as i32; }
-            j = j + (1 as i64);
+            if match_ok2 == (1 as i32) { is_no_std_file = 1 as i32; }
+            jj = jj + (1 as i64);
+        }
+    }
+    if is_no_std_file == (1 as i32) {
+        // For no_std, accept `fn main` as the entry point.
+        let no_std_main_needle = "fn main" as *u8;
+        let nmlen = strlen(no_std_main_needle);
+        if scan_n > nmlen {
+            let mut jm: i64 = 0 as i64;
+            let upperm = scan_n - nmlen;
+            while jm <= upperm {
+                let mut match_okm: i32 = 1 as i32;
+                let mut km: i64 = 0 as i64;
+                while km < nmlen {
+                    let a_pm = (scan_buf as i64 + jm + km) as *u8;
+                    let b_pm = (no_std_main_needle as i64 + km) as *u8;
+                    let avm = (*a_pm) as i32;
+                    let bvm = (*b_pm) as i32;
+                    if avm != bvm { match_okm = 0 as i32; }
+                    km = km + (1 as i64);
+                }
+                if match_okm == (1 as i32) { has_main = 1 as i32; }
+                jm = jm + (1 as i64);
+            }
+        }
+    } else {
+        let needle = "fn main_jhyy" as *u8;
+        let nlen = strlen(needle);
+        if scan_n > nlen {
+            let mut j: i64 = 0 as i64;
+            let upper = scan_n - nlen;
+            while j <= upper {
+                let mut match_ok: i32 = 1 as i32;
+                let mut k2: i64 = 0 as i64;
+                while k2 < nlen {
+                    let a_p = (scan_buf as i64 + j + k2) as *u8;
+                    let b_p = (needle as i64 + k2) as *u8;
+                    let av = (*a_p) as i32;
+                    let bv = (*b_p) as i32;
+                    if av != bv { match_ok = 0 as i32; }
+                    k2 = k2 + (1 as i64);
+                }
+                if match_ok == (1 as i32) { has_main = 1 as i32; }
+                j = j + (1 as i64);
+            }
         }
     }
     free(scan_buf);
     if has_main == (0 as i32) {
         jh_fputs_stderr("jhyy run: '" as *u8);
         jh_fputs_stderr(input);
-        jh_fputs_stderr("' has no 'fn main_jhyy() -> i32' (required for 'jhyy run'; use 'jhyy compile <file>.jhyy' for libraries)\n" as *u8);
+        if is_no_std_file == (1 as i32) {
+            jh_fputs_stderr("' has no 'fn main() -> i32' (required for '#[no_std]' modules; use 'jhyy compile <file>.jhyy' for libraries)\n" as *u8);
+        } else {
+            jh_fputs_stderr("' has no 'fn main_jhyy() -> i32' (required for 'jhyy run'; use 'jhyy compile <file>.jhyy' for libraries)\n" as *u8);
+        }
         return 1 as i32;
     }
 
