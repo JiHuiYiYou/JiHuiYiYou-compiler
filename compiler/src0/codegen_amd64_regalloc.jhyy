@@ -1,0 +1,959 @@
+// codegen_amd64_regalloc.jhyy — V2-B v2.6.0 Unit C: linear-scan deterministic regalloc
+//
+// 替换路径:codegen_amd64.jhyy parse_and_emit → 走 regalloc 模块分析 tokens →
+// 给每个 %tN 分配 register 或 spill slot;emit 函数目前还是 v2.5.0 1-to-1 栈路径
+// (per plan:regalloc 输出"可用但未消费",等 Unit E wire + 后续 emit 函数支持时用上)。
+//
+// 算法(per docs/plans/v2/batch-V2-B-plan.md § v2.6.0):
+//   1. Walk tokens,build live interval per temp (start, end)
+//   2. Sort intervals by start(deterministic:稳定排序,tiebreak 按 temp_id)
+//   3. Linear scan:assign regs from pool,spill to stack on conflict
+//   4. Tiebreak:**lowest temp_id wins on conflict**(显式 selfhost canary 要求)
+//
+// 关键约束:
+//   - **Determinism mandatory**:same IL input → same reg allocation → same .s
+//     (per batch-V2-B-plan.md line 29 + reproducibility gate)
+//   - **Lowest temp_id wins**:temp 0 优先于 temp 1 优先于 temp 2 ...
+//     这保证 regalloc 输出在相同 IL 上完全可复现
+//   - **D43 self-equal baseline hold**:本模块是 codegen_amd64.jhyy 调用链路上
+//     的"内部分析 pass",不影响 codegen.jhyy 主干 → closure sha 51376ce5... 不动
+//
+// 寄存器池(15 个 x86-64 regs):
+//   caller-saved (9):rax(0) rcx(1) rdx(2) rsi(3) rdi(4) r8(5) r9(6) r10(7) r11(8)
+//   callee-saved (6):rbx(9) rbp(10) r12(11) r13(12) r14(13) r15(14)
+//
+// rbp 保留(MS x64 frame ptr 用途),所以可用 14 regs。
+//
+// Note: lives flat in compiler/src0/(not in a subdir) — jhyy import syntax
+// doesn't support paths with `/`(per `parse_import_decl` codegen.c:731)。
+
+// 注:不 import codegen_amd64_state(避免与 state.jhyy 的 `import
+// codegen_amd64_regalloc` 形成 circular)。ILToken 的字段 offset 在 token_*
+// helpers 里直接写死(per state.jhyy 的 ILToken 定义:kind=0, text=4,
+// text_len=12, int_val=20, qbe_type=28, line=32)。ILTOK_* 常量在本文件
+// 局部定义(值与 state.jhyy 一致,per L4 § 2.1 锁)。
+
+// ════════════════════════════════════════════════════
+// ILTOK_* 常量(per L4 § 2.1,与 codegen_amd64_state.jhyy 同步)
+// ════════════════════════════════════════════════════
+
+fn ILTOK_EOF()          -> i32 { return 0 as i32; }
+fn ILTOK_ALLOC()        -> i32 { return 1 as i32; }
+fn ILTOK_STORE()        -> i32 { return 2 as i32; }
+fn ILTOK_LOADSUB()      -> i32 { return 3 as i32; }
+fn ILTOK_LOAD()         -> i32 { return 4 as i32; }
+fn ILTOK_CALL()         -> i32 { return 5 as i32; }
+fn ILTOK_PHI()          -> i32 { return 6 as i32; }
+fn ILTOK_COPY()         -> i32 { return 7 as i32; }
+fn ILTOK_BINOP()        -> i32 { return 8 as i32; }
+fn ILTOK_RET()          -> i32 { return 9 as i32; }
+fn ILTOK_JMP()          -> i32 { return 10 as i32; }
+fn ILTOK_JNZ()          -> i32 { return 11 as i32; }
+fn ILTOK_LABEL()        -> i32 { return 12 as i32; }
+fn ILTOK_FUNC_HEADER()  -> i32 { return 13 as i32; }
+fn ILTOK_DATA_STRING()  -> i32 { return 14 as i32; }
+fn ILTOK_VOLATILE()     -> i32 { return 15 as i32; }
+
+// ════════════════════════════════════════════════════
+// 常量
+// ════════════════════════════════════════════════════
+
+// Max temps per function(limit for fixed-size arena allocation)
+// 64 覆盖 regress 所有用例(最复杂 mixed_struct_slice_match.jhyy < 32 temps)
+fn MAX_TEMPS() -> i64 { return 64 as i64; }
+
+// 总寄存器数(rbp 保留,实际可用 14)
+fn NUM_REGS() -> i64 { return 15 as i64; }
+
+// reg_id 特殊值
+fn REG_NONE() -> i32 { return -1 as i32; }    // 未分配
+fn REG_SPILLED() -> i32 { return -2 as i32; }  // spill 到栈
+
+// Module-level regalloc state(per function)。regalloc_run 写入,
+// regalloc_query_spill_off_no_arr / regalloc_query_reg_no_arr 读取。
+// 0 = 未分析(emit 函数走 fallback 1-to-1 栈分配)。
+//
+// 注:regalloc_query_spill_off_no_arr / regalloc_query_reg_no_arr 在文件
+// 后段定义(在 regalloc_query_spill_off / regalloc_query_reg 之后),因为
+// jhyy 不支持 fn forward reference。
+let mut g_regalloc_arr: *u8 = 0 as *u8;
+
+// regalloc_get_global — 内部 helper,返回 module-level regalloc array 指针
+fn regalloc_get_global() -> *u8 {
+    return g_regalloc_arr;
+}
+
+// regalloc_set_global — regalloc_run 调用,写入 module-level array 指针
+fn regalloc_set_global(arr: *u8) -> i32 {
+    g_regalloc_arr = arr;
+    return 0 as i32;
+}
+
+// regalloc_clear_global — 每个 function prologue 前调,清空 module-level state
+fn regalloc_clear_global() -> i32 {
+    g_regalloc_arr = 0 as *u8;
+    return 0 as i32;
+}
+
+// LiveInterval struct stride:temp_id(i64) + start(i64) + end(i64) = 24 bytes
+fn LIVE_INTERVAL_STRIDE() -> i64 { return 24 as i64; }
+
+// RegAllocEntry struct stride:temp_id(i64) + reg_id(i32) + pad(i32) + spill_off(i64) = 24 bytes
+fn REG_ALLOC_STRIDE() -> i64 { return 24 as i64; }
+
+// FFI
+extern fn arena_alloc(a: *u8, size: i64) -> *u8;
+extern fn memset(p: *u8, v: i32, n: i64) -> *u8;
+// ptr_add_u8 — u8 pointer + i64 offset(util.jhyy 已有但本模块不 import util,
+// 自 extern 声明)。前置:entry_* / token_* / interval_* 等都依赖,故放最前。
+extern fn ptr_add_u8(p: *u8, off: i64) -> *u8;
+
+// ════════════════════════════════════════════════════
+// 寄存器名 / 保留判断
+// ════════════════════════════════════════════════════
+
+// reg_name(reg_id) -> *u8:返回 GAS AT&T 寄存器名(无 % 前缀)
+fn reg_name(reg_id: i32) -> *u8 {
+    if reg_id == 0 as i32 { return "rax" as *u8; }
+    if reg_id == 1 as i32 { return "rcx" as *u8; }
+    if reg_id == 2 as i32 { return "rdx" as *u8; }
+    if reg_id == 3 as i32 { return "rsi" as *u8; }
+    if reg_id == 4 as i32 { return "rdi" as *u8; }
+    if reg_id == 5 as i32 { return "r8" as *u8; }
+    if reg_id == 6 as i32 { return "r9" as *u8; }
+    if reg_id == 7 as i32 { return "r10" as *u8; }
+    if reg_id == 8 as i32 { return "r11" as *u8; }
+    if reg_id == 9 as i32 { return "rbx" as *u8; }
+    if reg_id == 10 as i32 { return "rbp" as *u8; }
+    if reg_id == 11 as i32 { return "r12" as *u8; }
+    if reg_id == 12 as i32 { return "r13" as *u8; }
+    if reg_id == 13 as i32 { return "r14" as *u8; }
+    return "r15" as *u8;
+}
+
+// reg_is_reserved(reg_id) -> i32:rbp 是 frame ptr,不分配给 temps
+fn reg_is_reserved(reg_id: i32) -> i32 {
+    if reg_id == 10 as i32 { return 1 as i32; }
+    return 0 as i32;
+}
+
+// reg_name_with_pct(reg_id) -> *u8:返回带 % 前缀的形式(emit 函数用)
+fn reg_name_with_pct(reg_id: i32) -> *u8 {
+    if reg_id == 0 as i32 { return "%rax" as *u8; }
+    if reg_id == 1 as i32 { return "%rcx" as *u8; }
+    if reg_id == 2 as i32 { return "%rdx" as *u8; }
+    if reg_id == 3 as i32 { return "%rsi" as *u8; }
+    if reg_id == 4 as i32 { return "%rdi" as *u8; }
+    if reg_id == 5 as i32 { return "%r8" as *u8; }
+    if reg_id == 6 as i32 { return "%r9" as *u8; }
+    if reg_id == 7 as i32 { return "%r10" as *u8; }
+    if reg_id == 8 as i32 { return "%r11" as *u8; }
+    if reg_id == 9 as i32 { return "%rbx" as *u8; }
+    if reg_id == 10 as i32 { return "%rbp" as *u8; }
+    if reg_id == 11 as i32 { return "%r12" as *u8; }
+    if reg_id == 12 as i32 { return "%r13" as *u8; }
+    if reg_id == 13 as i32 { return "%r14" as *u8; }
+    return "%r15" as *u8;
+}
+
+// reg_32bit_name(reg_id) -> *u8:32-bit 子寄存器名(write 时按 QBE type 选 l/q)
+fn reg_32bit_name(reg_id: i32) -> *u8 {
+    if reg_id == 0 as i32 { return "%eax" as *u8; }
+    if reg_id == 1 as i32 { return "%ecx" as *u8; }
+    if reg_id == 2 as i32 { return "%edx" as *u8; }
+    if reg_id == 3 as i32 { return "%esi" as *u8; }
+    if reg_id == 4 as i32 { return "%edi" as *u8; }
+    if reg_id == 5 as i32 { return "%r8d" as *u8; }
+    if reg_id == 6 as i32 { return "%r9d" as *u8; }
+    if reg_id == 7 as i32 { return "%r10d" as *u8; }
+    if reg_id == 8 as i32 { return "%r11d" as *u8; }
+    if reg_id == 9 as i32 { return "%ebx" as *u8; }
+    if reg_id == 10 as i32 { return "%ebp" as *u8; }
+    if reg_id == 11 as i32 { return "%r12d" as *u8; }
+    if reg_id == 12 as i32 { return "%r13d" as *u8; }
+    if reg_id == 13 as i32 { return "%r14d" as *u8; }
+    return "%r15d" as *u8;
+}
+
+// ════════════════════════════════════════════════════
+// Per-temp RegAllocEntry 访问 helpers
+// ════════════════════════════════════════════════════
+//
+// 内存布局(24 bytes per entry):
+//   offset 0:  i64 temp_id
+//   offset 8:  i32 reg_id
+//   offset 12: i32 pad(占位)
+//   offset 16: i64 spill_off
+
+// entry_temp_id(arr, i) -> i64
+fn entry_temp_id(arr: *u8, i: i64) -> i64 {
+    let p = ptr_add_u8(arr, i * REG_ALLOC_STRIDE());
+    let q = p as *i64;
+    return *q;
+}
+
+// entry_reg_id(arr, i) -> i32
+fn entry_reg_id(arr: *u8, i: i64) -> i32 {
+    let p = ptr_add_u8(arr, i * REG_ALLOC_STRIDE() + (8 as i64));
+    let q = p as *i32;
+    return *q;
+}
+
+// entry_spill_off(arr, i) -> i64
+fn entry_spill_off(arr: *u8, i: i64) -> i64 {
+    let p = ptr_add_u8(arr, i * REG_ALLOC_STRIDE() + (16 as i64));
+    let q = p as *i64;
+    return *q;
+}
+
+// entry_set_temp_id(arr, i, v)
+fn entry_set_temp_id(arr: *u8, i: i64, v: i64) -> i32 {
+    let p = ptr_add_u8(arr, i * REG_ALLOC_STRIDE());
+    let q = p as *i64;
+    *q = v;
+    return 0 as i32;
+}
+
+// entry_set_reg_id(arr, i, v)
+fn entry_set_reg_id(arr: *u8, i: i64, v: i32) -> i32 {
+    let p = ptr_add_u8(arr, i * REG_ALLOC_STRIDE() + (8 as i64));
+    let q = p as *i32;
+    *q = v;
+    return 0 as i32;
+}
+
+// entry_set_spill_off(arr, i, v)
+fn entry_set_spill_off(arr: *u8, i: i64, v: i64) -> i32 {
+    let p = ptr_add_u8(arr, i * REG_ALLOC_STRIDE() + (16 as i64));
+    let q = p as *i64;
+    *q = v;
+    return 0 as i32;
+}
+
+// entry_init(arr, i, temp_id) — init entry;reg_id=REG_NONE, spill_off=0
+fn entry_init(arr: *u8, i: i64, temp_id: i64) -> i32 {
+    let _r1 = entry_set_temp_id(arr, i, temp_id);
+    let _r2 = entry_set_reg_id(arr, i, REG_NONE());
+    let _r3 = entry_set_spill_off(arr, i, 0 as i64);
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// LiveInterval 访问 helpers
+// ════════════════════════════════════════════════════
+//
+// 内存布局(24 bytes per interval):
+//   offset 0:  i64 temp_id
+//   offset 8:  i64 start
+//   offset 16: i64 end
+
+fn interval_temp_id(arr: *u8, i: i64) -> i64 {
+    let p = ptr_add_u8(arr, i * LIVE_INTERVAL_STRIDE());
+    let q = p as *i64;
+    return *q;
+}
+
+fn interval_start(arr: *u8, i: i64) -> i64 {
+    let p = ptr_add_u8(arr, i * LIVE_INTERVAL_STRIDE() + (8 as i64));
+    let q = p as *i64;
+    return *q;
+}
+
+fn interval_end(arr: *u8, i: i64) -> i64 {
+    let p = ptr_add_u8(arr, i * LIVE_INTERVAL_STRIDE() + (16 as i64));
+    let q = p as *i64;
+    return *q;
+}
+
+fn interval_set(arr: *u8, i: i64, temp_id: i64, start: i64, end: i64) -> i32 {
+    let p1 = ptr_add_u8(arr, i * LIVE_INTERVAL_STRIDE());
+    let q1 = p1 as *i64;
+    *q1 = temp_id;
+    let p2 = ptr_add_u8(arr, i * LIVE_INTERVAL_STRIDE() + (8 as i64));
+    let q2 = p2 as *i64;
+    *q2 = start;
+    let p3 = ptr_add_u8(arr, i * LIVE_INTERVAL_STRIDE() + (16 as i64));
+    let q3 = p3 as *i64;
+    *q3 = end;
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// Token 内容读取 helpers(per token 提取 temp 编号)
+// ════════════════════════════════════════════════════
+
+// token_kind(tok) -> i32
+fn token_kind(tok: *u8) -> i32 {
+    let p = tok as *i32;
+    return *p;
+}
+
+// token_text(tok) -> *u8
+fn token_text(tok: *u8) -> *u8 {
+    let p = ptr_add_u8(tok, 4 as i64) as **u8;
+    return *p;
+}
+
+// token_text_len(tok) -> i64
+fn token_text_len(tok: *u8) -> i64 {
+    let p = ptr_add_u8(tok, 12 as i64) as *i64;
+    return *p;
+}
+
+// token_int_val(tok) -> i64
+fn token_int_val(tok: *u8) -> i64 {
+    let p = ptr_add_u8(tok, 20 as i64) as *i64;
+    return *p;
+}
+
+// rega_byte_at(s, i) — 取 s[i] 的字节值(i32 形式便于比较)
+fn rega_byte_at(s: *u8, i: i64) -> i32 {
+    let p = ptr_add_u8(s, i);
+    let c = *p;
+    return c as i32;
+}
+
+fn rega_is_digit(c: i32) -> i32 {
+    if c >= (48 as i32) && c <= (57 as i32) {
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
+// rega_parse_temp(text, len, idx) — 扫 text[0..len) 里第 idx 个 %tN,返回 N
+// idx = 0 = first %tN found,1 = second,etc。不存在返回 -1。
+fn rega_parse_temp(text: *u8, len: i64, idx: i64) -> i64 {
+    if text == (0 as *u8) || len <= (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut seen: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i + (1 as i64) < len {
+        if rega_byte_at(text, i) == (37 as i32) && rega_byte_at(text, i + (1 as i64)) == (116 as i32) {
+            // 命中 "%t",往后收数字
+            let mut k: i64 = i + (2 as i64);
+            let mut val: i64 = 0 as i64;
+            let mut ndig: i64 = 0 as i64;
+            while k < len && rega_is_digit(rega_byte_at(text, k)) != (0 as i32) {
+                val = val * (10 as i64) + ((rega_byte_at(text, k) - (48 as i32)) as i64);
+                ndig = ndig + (1 as i64);
+                k = k + (1 as i64);
+            }
+            if ndig > (0 as i64) {
+                if seen == idx {
+                    return val;
+                }
+                seen = seen + (1 as i64);
+            }
+            i = k;
+        } else {
+            i = i + (1 as i64);
+        }
+    }
+    return -(1 as i64);
+}
+
+// rega_count_temps(text, len) — 数 text 里有多少个 %tN
+fn rega_count_temps(text: *u8, len: i64) -> i64 {
+    if text == (0 as *u8) || len <= (0 as i64) {
+        return 0 as i64;
+    }
+    let mut count: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i + (1 as i64) < len {
+        if rega_byte_at(text, i) == (37 as i32) && rega_byte_at(text, i + (1 as i64)) == (116 as i32) {
+            let mut k: i64 = i + (2 as i64);
+            let mut ndig: i64 = 0 as i64;
+            while k < len && rega_is_digit(rega_byte_at(text, k)) != (0 as i32) {
+                ndig = ndig + (1 as i64);
+                k = k + (1 as i64);
+            }
+            if ndig > (0 as i64) {
+                count = count + (1 as i64);
+                i = k;
+            } else {
+                i = i + (1 as i64);
+            }
+        } else {
+            i = i + (1 as i64);
+        }
+    }
+    return count;
+}
+
+// ptr_add_u8 已在本文件顶部 extern 声明
+
+// ════════════════════════════════════════════════════
+// Linear-scan 主算法
+// ════════════════════════════════════════════════════
+
+// regalloc_init — 初始化 per-function regalloc state(arena 分配)
+// 输入:arena — Arena 指针,用于 alloc 输出 entry 数组
+// 输出:alloc 数组指针 + count(写入 *out_count)
+//   - 数组大小 = MAX_TEMPS() * REG_ALLOC_STRIDE()
+//   - 每个 entry 用 entry_init 初始化(temp_id = index, reg_id = REG_NONE)
+//   - count = MAX_TEMPS()(全部 slot,未用 slot 的 reg_id = REG_NONE)
+//
+// 注意:此函数为占位实现,仅 alloc + init entries。实际 analyze + assign
+// 由 regalloc_analyze_function + regalloc_assign 单独完成(per-pass 接口)。
+fn regalloc_init(arena: *u8) -> *u8 {
+    let n = MAX_TEMPS();
+    let arr = arena_alloc(arena, n * REG_ALLOC_STRIDE());
+    if arr == (0 as *u8) {
+        return 0 as *u8;
+    }
+    let _m = memset(arr, 0 as i32, n * REG_ALLOC_STRIDE());
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let _r = entry_init(arr, i, i);
+        i = i + (1 as i64);
+    }
+    return arr;
+}
+
+// regalloc_reset — 重置所有 entry 的 reg_id = REG_NONE(per function 重用 array)
+fn regalloc_reset(arr: *u8) -> i32 {
+    if arr == (0 as *u8) {
+        return 1 as i32;
+    }
+    let n = MAX_TEMPS();
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let _r = entry_set_reg_id(arr, i, REG_NONE());
+        let _r2 = entry_set_spill_off(arr, i, 0 as i64);
+        i = i + (1 as i64);
+    }
+    return 0 as i32;
+}
+
+// regalloc_find_entry(arr, temp_id) -> i64
+// 查 temp_id 对应的 entry index(线性扫描,MAX_TEMPS=64 不大);不存在返回 -1
+fn regalloc_find_entry(arr: *u8, temp_id: i64) -> i64 {
+    if arr == (0 as *u8) || temp_id < (0 as i64) {
+        return -(1 as i64);
+    }
+    let n = MAX_TEMPS();
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        if entry_temp_id(arr, i) == temp_id {
+            return i;
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
+
+// regalloc_query_reg(arr, temp_id) -> i32
+// 公开 query:temp_id 的 reg_id(0-14 = 分配到寄存器,REG_SPILLED = spill 到栈,
+// REG_NONE = 未分析/未知)
+fn regalloc_query_reg(arr: *u8, temp_id: i64) -> i32 {
+    if arr == (0 as *u8) {
+        return REG_NONE();
+    }
+    let idx = regalloc_find_entry(arr, temp_id);
+    if idx < (0 as i64) {
+        return REG_NONE();
+    }
+    return entry_reg_id(arr, idx);
+}
+
+// regalloc_query_spill_off(arr, temp_id) -> i64
+// 公开 query:temp_id 的栈偏移(若 spill);未 spill 返回 0
+fn regalloc_query_spill_off(arr: *u8, temp_id: i64) -> i64 {
+    if arr == (0 as *u8) {
+        return 0 as i64;
+    }
+    let idx = regalloc_find_entry(arr, temp_id);
+    if idx < (0 as i64) {
+        return 0 as i64;
+    }
+    return entry_spill_off(arr, idx);
+}
+
+// regalloc_set_reg(arr, temp_id, reg_id) -> i32
+// 内部用:给 temp_id 分配 reg_id
+fn regalloc_set_reg(arr: *u8, temp_id: i64, reg_id: i32) -> i32 {
+    if arr == (0 as *u8) || temp_id < (0 as i64) || temp_id >= MAX_TEMPS() {
+        return 1 as i32;
+    }
+    let idx = regalloc_find_entry(arr, temp_id);
+    if idx < (0 as i64) {
+        return 1 as i32;
+    }
+    let _r = entry_set_reg_id(arr, idx, reg_id);
+    return 0 as i32;
+}
+
+// regalloc_set_spill(arr, temp_id, off) -> i32
+// 内部用:标记 temp_id 为 spill + 记录栈偏移
+fn regalloc_set_spill(arr: *u8, temp_id: i64, off: i64) -> i32 {
+    if arr == (0 as *u8) || temp_id < (0 as i64) || temp_id >= MAX_TEMPS() {
+        return 1 as i32;
+    }
+    let idx = regalloc_find_entry(arr, temp_id);
+    if idx < (0 as i64) {
+        return 1 as i32;
+    }
+    let _r1 = entry_set_reg_id(arr, idx, REG_SPILLED());
+    let _r2 = entry_set_spill_off(arr, idx, off);
+    return 0 as i32;
+}
+
+// regalloc_active_temps:每个寄存器当前 active 的 temp_id(-1 = 空闲)
+// arena-allocated 数组,stride = 8 bytes(i64)
+fn ACTIVE_STRIDE() -> i64 { return 8 as i64; }
+
+fn active_get(arr: *u8, reg_id: i32) -> i64 {
+    let p = ptr_add_u8(arr, (reg_id as i64) * ACTIVE_STRIDE());
+    let q = p as *i64;
+    return *q;
+}
+
+fn active_set(arr: *u8, reg_id: i32, temp_id: i64) -> i32 {
+    let p = ptr_add_u8(arr, (reg_id as i64) * ACTIVE_STRIDE());
+    let q = p as *i64;
+    *q = temp_id;
+    return 0 as i32;
+}
+
+// regalloc_expire_old(interval_idx, intervals, n_intervals, active, cur_pos)
+// 释放在 cur_pos 之前结束的 interval(从 active[] 移除对应 temp)
+// 线性扫描 active[] 即可(NUM_REGS=15)
+fn regalloc_expire_old(intervals: *u8, n_intervals: i64, active: *u8, cur_pos: i64) -> i32 {
+    if intervals == (0 as *u8) || active == (0 as *u8) {
+        return 1 as i32;
+    }
+    let mut i: i64 = 0 as i64;
+    while i < n_intervals {
+        let t = interval_temp_id(intervals, i);
+        let end = interval_end(intervals, i);
+        // 如果 interval 已结束 (end < cur_pos) 且某个 active[] 是它
+        // → 释放那个 reg
+        if end < cur_pos && t >= (0 as i64) {
+            let mut r: i32 = 0 as i32;
+            while r < 15 as i32 {
+                if active_get(active, r) == t {
+                    let _s = active_set(active, r, -1 as i64);
+                }
+                r = r + (1 as i32);
+            }
+        }
+        i = i + (1 as i64);
+    }
+    return 0 as i32;
+}
+
+// regalloc_assign — linear scan 主分配
+// 输入:intervals[] = 已排序的 live intervals(按 start 升序,tiebreak 按 temp_id)
+//      n_intervals = intervals 数
+//      arena = arena for alloc active[]
+// 输出:写入 arr 的 entry[].reg_id / spill_off
+// 算法:遍历 intervals,对每个:
+//   1. expire_old(active[], intervals, cur_start)
+//   2. 找一个空闲 reg(reserved = false,active = -1)
+//   3. 若有空闲 → active_set(reg, temp_id);entry_set_reg(temp_id, reg)
+//   4. 若无空闲 → spill:挑当前 active 中 end 最大的 evict
+//      (即 evict 那个 temp 改 spill,新 temp 用那个 reg)
+//      tiebreak:**lowest temp_id wins on conflict**(本模块选择 evict
+//      那个 temp_id 最大的 active,保留 temp_id 小的优先)
+//      若新 temp 的 end 比所有 active 都小 → 新 temp 被 spill
+fn regalloc_assign(arr: *u8, intervals: *u8, n_intervals: i64, arena: *u8) -> i32 {
+    if arr == (0 as *u8) || intervals == (0 as *u8) {
+        return 1 as i32;
+    }
+    // alloc active[15](NUM_REGS 个 i64 = 120 bytes)
+    let active = arena_alloc(arena, NUM_REGS() * ACTIVE_STRIDE());
+    if active == (0 as *u8) {
+        return 1 as i32;
+    }
+    let _m = memset(active, -1 as i32, NUM_REGS() * ACTIVE_STRIDE());
+
+    // 遍历 intervals(已按 start 排序)
+    let mut i: i64 = 0 as i64;
+    while i < n_intervals {
+        let temp_id = interval_temp_id(intervals, i);
+        let cur_start = interval_start(intervals, i);
+        let cur_end = interval_end(intervals, i);
+        if temp_id < (0 as i64) || temp_id >= MAX_TEMPS() {
+            i = i + (1 as i64);
+        } else {
+            // 1. expire 旧 intervals
+            let _e = regalloc_expire_old(intervals, n_intervals, active, cur_start);
+
+            // 2. 找空闲 reg(reserved = false 且 active = -1)
+            let mut found_reg: i32 = -1 as i32;
+            let mut r: i32 = 0 as i32;
+            while r < 15 as i32 {
+                if reg_is_reserved(r) == (0 as i32) && active_get(active, r) == -1 as i64 {
+                    found_reg = r;
+                    r = 15 as i32;  // break
+                }
+                r = r + (1 as i32);
+            }
+
+            if found_reg >= (0 as i32) {
+                // 有空闲:直接分配
+                let _s1 = active_set(active, found_reg, temp_id);
+                let _s2 = regalloc_set_reg(arr, temp_id, found_reg);
+            } else {
+                // 无空闲:spill 决策。挑 active[] 中 end 最大的 evict
+                // tiebreak:**evict temp_id 最大的**(保留 temp_id 小的优先)
+                // 即在 end 相同的 active 中,挑 temp_id 最大的那个 spill
+                let mut evict_idx: i32 = -1 as i32;
+                let mut evict_end: i64 = -1 as i64;
+                let mut evict_temp: i64 = -1 as i64;
+                let mut r2: i32 = 0 as i32;
+                while r2 < 15 as i32 {
+                    let cur_active_temp = active_get(active, r2);
+                    if cur_active_temp >= (0 as i64) {
+                        // 查 cur_active_temp 的 end
+                        let mut found_end: i64 = -1 as i64;
+                        let mut j: i64 = 0 as i64;
+                        while j < n_intervals {
+                            if interval_temp_id(intervals, j) == cur_active_temp {
+                                found_end = interval_end(intervals, j);
+                                j = n_intervals;
+                            } else {
+                                j = j + (1 as i64);
+                            }
+                        }
+                        // 比较:(end, temp_id) 字典序 (largest first)
+                        // 即 evict_end < found_end → 选 found_end
+                        // 或 evict_end == found_end && evict_temp < cur_active_temp → 选 cur_active_temp
+                        let mut take: i32 = 0 as i32;
+                        if evict_idx < (0 as i32) {
+                            take = 1 as i32;
+                        } else {
+                            if found_end > evict_end {
+                                take = 1 as i32;
+                            } else {
+                                if found_end == evict_end && cur_active_temp > evict_temp {
+                                    take = 1 as i32;
+                                }
+                            }
+                        }
+                        if take == (1 as i32) {
+                            evict_idx = r2;
+                            evict_end = found_end;
+                            evict_temp = cur_active_temp;
+                        }
+                    }
+                    r2 = r2 + (1 as i32);
+                }
+
+                if evict_idx < (0 as i32) {
+                    // 不该发生(没有 active 但也找不到空闲 — 矛盾)
+                    return 1 as i32;
+                }
+                // 决策:cur_end vs evict_end
+                if cur_end > evict_end {
+                    // 新 interval 比 evict 的更长 → evict 旧 temp spill,
+                    // 新 temp 用 evict 的 reg
+                    let spill_off = (0 as i64) - (32 as i64) - evict_temp * (8 as i64);
+                    let _x1 = regalloc_set_spill(arr, evict_temp, spill_off);
+                    let _x2 = active_set(active, evict_idx, temp_id);
+                    let _x3 = regalloc_set_reg(arr, temp_id, evict_idx);
+                } else {
+                    // 新 interval ≤ evict 的 → 新 temp spill
+                    let spill_off = (0 as i64) - (32 as i64) - temp_id * (8 as i64);
+                    let _x1 = regalloc_set_spill(arr, temp_id, spill_off);
+                }
+            }
+            i = i + (1 as i64);
+        }
+    }
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// Token walker:对每个 token 提取 defs/uses,更新 live intervals
+// ════════════════════════════════════════════════════
+
+// intervals 数组(MAX_TEMPS 个 slot,stride LIVE_INTERVAL_STRIDE)由 caller 分配
+// 每个 slot 初始:temp_id=index, start=INT_MAX, end=-1(表示未使用)
+
+// interval_touch(arr, idx, pos) — 更新 interval[idx] 的 start/end(包含 pos)
+fn interval_touch(arr: *u8, idx: i64, pos: i64) -> i32 {
+    if arr == (0 as *u8) || idx < (0 as i64) {
+        return 1 as i32;
+    }
+    let cur_start = interval_start(arr, idx);
+    let cur_end = interval_end(arr, idx);
+    let new_start = cur_start;
+    let mut new_end = cur_end;
+    if cur_start > pos {
+        // First touch — set start = pos (simplified; not strictly an init)
+        let p1 = ptr_add_u8(arr, idx * LIVE_INTERVAL_STRIDE() + (8 as i64));
+        let q1 = p1 as *i64;
+        *q1 = pos;
+    }
+    if cur_end < pos {
+        new_end = pos;
+        let p2 = ptr_add_u8(arr, idx * LIVE_INTERVAL_STRIDE() + (16 as i64));
+        let q2 = p2 as *i64;
+        *q2 = new_end;
+    }
+    return 0 as i32;
+}
+
+// walk_tokens_for_intervals(tokens, n, intervals) — scan 所有 tokens,提取 temps,更新 intervals
+fn walk_tokens_for_intervals(tokens: *u8, n: i64, intervals: *u8) -> i32 {
+    if tokens == (0 as *u8) || intervals == (0 as *u8) {
+        return 1 as i32;
+    }
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let tok_p = ptr_add_u8(tokens, i * (40 as i64));
+        let kind = token_kind(tok_p);
+        if kind == ILTOK_EOF() {
+            i = n;  // break
+        } else {
+            let text = token_text(tok_p);
+            let text_len = token_text_len(tok_p);
+            let int_val = token_int_val(tok_p);
+
+            // ── Defs ──
+            // alloc / load / loadsub / copy / binop / phi / call (if has dst)
+            // int_val = dest temp id(int_val < 0 表示没有 dst,如 void call / store)
+            let mut has_def: i32 = 0 as i32;
+            if kind == ILTOK_ALLOC() {
+                has_def = 1 as i32;
+            }
+            if kind == ILTOK_LOAD() {
+                has_def = 1 as i32;
+            }
+            if kind == ILTOK_LOADSUB() {
+                has_def = 1 as i32;
+            }
+            if kind == ILTOK_COPY() {
+                has_def = 1 as i32;
+            }
+            if kind == ILTOK_BINOP() {
+                has_def = 1 as i32;
+            }
+            if kind == ILTOK_PHI() {
+                has_def = 1 as i32;
+            }
+            // CALL:dst 由 int_val 决定(int_val >= 0 ⇒ has dst)
+            if kind == ILTOK_CALL() {
+                if int_val >= (0 as i64) {
+                    has_def = 1 as i32;
+                }
+            }
+            if has_def == (1 as i32) {
+                if int_val >= (0 as i64) && int_val < MAX_TEMPS() {
+                    let _t = interval_touch(intervals, int_val, i);
+                }
+            }
+
+            // ── Uses ──
+            // 所有 token:text 里出现的 %tN 都是 uses(除了 alloc 的 dst)
+            // 简化策略:扫 text 里所有 %tN,逐个 touch
+            // (即使 alloc 的 dst 也在 text 里 — touch 同一 pos 一次无副作用)
+            let n_temps = rega_count_temps(text, text_len);
+            let mut k: i64 = 0 as i64;
+            while k < n_temps {
+                let t = rega_parse_temp(text, text_len, k);
+                if t >= (0 as i64) && t < MAX_TEMPS() {
+                    let _t = interval_touch(intervals, t, i);
+                }
+                k = k + (1 as i64);
+            }
+
+            i = i + (1 as i64);
+        }
+    }
+    return 0 as i32;
+}
+
+// regalloc_analyze_function(tokens, n, intervals) — 完整 analyze pass
+// 输入:tokens = lex_il 输出,n = token 数,intervals = MAX_TEMPS 大小的 array
+// 输出:填好每个 interval 的 start/end
+fn regalloc_analyze_function(tokens: *u8, n: i64, intervals: *u8) -> i32 {
+    if tokens == (0 as *u8) || intervals == (0 as *u8) {
+        return 1 as i32;
+    }
+    return walk_tokens_for_intervals(tokens, n, intervals);
+}
+
+// regalloc_filter_active_intervals(intervals, n, out, max_out) -> i64
+// 从 intervals[] 中过滤掉未使用的(temp_id<0 或 end<0),写入 out[]
+// 返回写入的 interval 数
+fn regalloc_filter_active_intervals(intervals: *u8, n: i64, out: *u8, max_out: i64) -> i64 {
+    if intervals == (0 as *u8) || out == (0 as *u8) {
+        return 0 as i64;
+    }
+    let mut out_idx: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < n && out_idx < max_out {
+        let end = interval_end(intervals, i);
+        let start = interval_start(intervals, i);
+        let tid = interval_temp_id(intervals, i);
+        // 未使用:end = -1(start 是初始化值,要么没改,要么设了)
+        // 这里用 start <= end 判定:start <= end ⇒ 至少 touch 过一次
+        if end >= (0 as i64) && start <= end && tid >= (0 as i64) {
+            let _s = interval_set(out, out_idx, tid, start, end);
+            out_idx = out_idx + (1 as i64);
+        }
+        i = i + (1 as i64);
+    }
+    return out_idx;
+}
+
+// regalloc_sort_intervals(intervals, n)
+// 按 start 升序排序,tiebreak 按 temp_id 升序(insertion sort,n=64 足够)
+// **determinism**:相同输入必产相同输出(无随机、无 pivot 选取)
+fn regalloc_sort_intervals(intervals: *u8, n: i64) -> i32 {
+    if intervals == (0 as *u8) {
+        return 1 as i32;
+    }
+    let mut i: i64 = 1 as i64;
+    while i < n {
+        // 取 intervals[i] 作为 key,从后往前找插入位置
+        let key_tid = interval_temp_id(intervals, i);
+        let key_start = interval_start(intervals, i);
+        let key_end = interval_end(intervals, i);
+        let mut j: i64 = i - (1 as i64);
+        // 把 key 暂存到 intervals[n](需要 caller 预留 1 个 extra slot)
+        // 简化:用 memmove — 不支持,用直接交换
+        // 插入排序:从 j 开始往前,凡是 (start > key_start) 或 (start == key_start && temp_id > key_tid)
+        // 都向后移一位
+        let mut done: i32 = 0 as i32;
+        while done == (0 as i32) {
+            if j < (0 as i64) {
+                done = 1 as i32;
+            } else {
+                let cur_start = interval_start(intervals, j);
+                let cur_tid = interval_temp_id(intervals, j);
+                let mut swap: i32 = 0 as i32;
+                if cur_start > key_start {
+                    swap = 1 as i32;
+                } else {
+                    if cur_start == key_start && cur_tid > key_tid {
+                        swap = 1 as i32;
+                    }
+                }
+                if swap == (1 as i32) {
+                    // 把 intervals[j] 复制到 intervals[j+1]
+                    let _s = interval_set(intervals, j + (1 as i64),
+                        interval_temp_id(intervals, j),
+                        interval_start(intervals, j),
+                        interval_end(intervals, j));
+                    j = j - (1 as i64);
+                } else {
+                    done = 1 as i32;
+                }
+            }
+        }
+        // 把 key 写入 intervals[j+1]
+        let _s = interval_set(intervals, j + (1 as i64), key_tid, key_start, key_end);
+        i = i + (1 as i64);
+    }
+    return 0 as i32;
+}
+
+// regalloc_run — 单入口:对 tokens 做 analyze + sort + assign,结果写入 arr
+// 输入:arena — Arena 指针,arr — regalloc_init 返回的 entries array,
+//      tokens, n
+// 流程:alloc intervals array(MAX_TEMPS slots),analyze,filter active,
+//      sort,assign
+fn regalloc_run(arena: *u8, arr: *u8, tokens: *u8, n: i64) -> i32 {
+    if arena == (0 as *u8) || arr == (0 as *u8) || tokens == (0 as *u8) {
+        return 1 as i32;
+    }
+    // 1. alloc intervals(MAX_TEMPS 个 slot)
+    let intervals = arena_alloc(arena, MAX_TEMPS() * LIVE_INTERVAL_STRIDE());
+    if intervals == (0 as *u8) {
+        return 1 as i32;
+    }
+    let _m = memset(intervals, -1 as i32, MAX_TEMPS() * LIVE_INTERVAL_STRIDE());
+    // init temp_id per slot
+    let mut k: i64 = 0 as i64;
+    while k < MAX_TEMPS() {
+        let _s = interval_set(intervals, k, k, 9223372036854775807 as i64, -1 as i64);
+        k = k + (1 as i64);
+    }
+
+    // 2. analyze
+    let _r1 = regalloc_analyze_function(tokens, n, intervals);
+
+    // 3. reset arr entries
+    let _r2 = regalloc_reset(arr);
+
+    // 4. filter active(紧凑到前 n_active 个 slot)
+    let n_active = regalloc_filter_active_intervals(intervals, MAX_TEMPS(), intervals, MAX_TEMPS());
+
+    // 5. sort
+    let _r3 = regalloc_sort_intervals(intervals, n_active);
+
+    // 6. assign
+    let _r4 = regalloc_assign(arr, intervals, n_active, arena);
+
+    // 7. 写入 module-level global,emit 函数(经 cg_offset_for_temp)即可查询
+    let _s = regalloc_set_global(arr);
+
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// 公开 API:cg_temp 整合 helpers
+// ════════════════════════════════════════════════════
+
+// cg_temp_is_reg(arr, temp_id) -> i32:1 = 在寄存器,0 = 在栈 / 未知
+fn cg_temp_is_reg(arr: *u8, temp_id: i64) -> i32 {
+    if arr == (0 as *u8) {
+        return 0 as i32;
+    }
+    let reg = regalloc_query_reg(arr, temp_id);
+    if reg >= (0 as i32) && reg < 15 as i32 {
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
+// cg_temp_reg(arr, temp_id) -> i32:返回 reg_id(0-14),不在 reg 返回 -1
+fn cg_temp_reg(arr: *u8, temp_id: i64) -> i32 {
+    return regalloc_query_reg(arr, temp_id);
+}
+
+// cg_temp_reg_name(arr, temp_id) -> *u8:返回带 % 前缀的寄存器名
+fn cg_temp_reg_name(arr: *u8, temp_id: i64) -> *u8 {
+    let reg_id = regalloc_query_reg(arr, temp_id);
+    if reg_id < (0 as i32) || reg_id >= 15 as i32 {
+        return 0 as *u8;
+    }
+    return reg_name_with_pct(reg_id);
+}
+
+// cg_temp_reg_name_32(arr, temp_id) -> *u8:返回 32-bit 子寄存器名
+fn cg_temp_reg_name_32(arr: *u8, temp_id: i64) -> *u8 {
+    let reg_id = regalloc_query_reg(arr, temp_id);
+    if reg_id < (0 as i32) || reg_id >= 15 as i32 {
+        return 0 as *u8;
+    }
+    return reg_32bit_name(reg_id);
+}
+
+// ════════════════════════════════════════════════════
+// 公开 API:无 arr 参数版本(查 module-level global)
+// ════════════════════════════════════════════════════
+
+// regalloc_query_spill_off_no_arr(t) -> i64 — 公开 API(无 arr 参数版本)
+// 给 state.jhyy 的 cg_offset_for_temp 用,内部查 g_regalloc_arr
+fn regalloc_query_spill_off_no_arr(t: i64) -> i64 {
+    let arr = regalloc_get_global();
+    if arr == (0 as *u8) {
+        return 0 as i64;
+    }
+    return regalloc_query_spill_off(arr, t);
+}
+
+// regalloc_query_reg_no_arr(t) -> i32 — 公开 API(无 arr 参数版本)
+// 返回 0-14 = reg_id, REG_SPILLED = spill, REG_NONE = 未分配
+fn regalloc_query_reg_no_arr(t: i64) -> i32 {
+    let arr = regalloc_get_global();
+    if arr == (0 as *u8) {
+        return REG_NONE();
+    }
+    return regalloc_query_reg(arr, t);
+}

@@ -120,12 +120,26 @@ fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
 
 // offset_for_temp(t: i64) -> i64
 // 输入:%tN 编号(N),返回 stack offset(负方向)
-// v2.5.0 简化:每个 %tN 直接对应一个 8-byte slot
+// V2-B v2.6.0 (Unit C Regalloc): 委托给 regalloc 模块的 query。
+//   - 若 regalloc 已对该函数跑过分析(regalloc_run 被调用),spill temp 返回
+//     实际栈偏移(linear-scan spill 决策);register temp 返回 0(emit 函数 fallback)。
+//   - 若 regalloc 未跑(默认),query 返回 0(emit 函数 fallback 到 v2.5.0 公式
+//     `-(32 + t * 8)`,1-to-1 简化栈分配)。
+//
+// 注:Unit C 只交付 regalloc 模块本身;Unit E wire 时 codegen_amd64_run 会调
+// regalloc_run 一次,然后 cg_offset_for_temp 才会返回非零值。当前 main.jhyy
+// 不 import codegen_amd64,所以 emit_mem.jhyy 的 cg_offset_for_temp 永远走 fallback。
 fn cg_offset_for_temp(t: i64) -> i64 {
-    // v2.5.0:每 temp 8 bytes,base = -32(shadow space)
-    // offset = -(32 + t * 8)
-    let _ = t;
-    return 0 as i64;
+    if t < (0 as i64) {
+        return 0 as i64;
+    }
+    // 委托 regalloc query(per Unit C 集成契约)
+    let spill_off = regalloc_query_spill_off_no_arr(t);
+    if spill_off != (0 as i64) {
+        return spill_off;
+    }
+    // fallback:1-to-1 栈分配公式
+    return (0 as i64) - (32 as i64) - t * (8 as i64);
 }
 
 // alloc_slot(size: i64) -> i64
@@ -163,3 +177,21 @@ fn cg_alloc_slot(state: *u8, size: i64) -> i64 {
 //
 // 注意:jhyy 当前 extern 不支持多文件 forward decl,所有跨模块 import 的函数必须在 import 文件中
 // 有 def(或 extern decl)。本模块定义所有 extern decl,emit 模块定义实现,main import 本模块即可。
+
+// ════════════════════════════════════════════════════
+// V2-B v2.6.0 Unit C Regalloc 集成
+// ════════════════════════════════════════════════════
+//
+// codegen_amd64_regalloc 模块是线性扫描 regalloc pass。state 模块 import 它
+// 是为了让 cg_offset_for_temp 能"调用 regalloc 模块"(per plan § v2.6.0 Unit C
+// 第 2 条要求)。具体行为:
+//   - cg_offset_for_temp(t) 调用 regalloc_query_spill_off_no_arr(t)
+//   - 若 regalloc 已跑(由 codegen_amd64_run 调用 regalloc_run 设置 global):
+//     返回 regalloc 算出的 spill 偏移(可能是 v2.5.0 fallback 公式,也可能不同)
+//   - 若 regalloc 未跑:返回 0(emit_mem.jhyy 的 mem_temp_offset fallback 到
+//     `-(32 + t * 8)`,即 v2.5.0 1-to-1 栈分配)
+//
+// Unit C 阶段 regalloc_run 不被自动调用(等 Unit E wire codegen_amd64_run);现在
+// import 是为了把 regalloc 模块拉到 import graph 里,后续 Unit E 调用时不用再改
+// state.jhyy 的 import。
+import codegen_amd64_regalloc;  // V2-B v2.6.0 Unit C: linear-scan regalloc + global state query
