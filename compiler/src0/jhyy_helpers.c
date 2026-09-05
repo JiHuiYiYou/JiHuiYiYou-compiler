@@ -607,3 +607,16 @@ __attribute__((used)) const char *jh_getenv(const char *name) {
     return getenv(name);
 }
 #endif
+
+/* V3-B fix (V2-A wire build break): V2-A wired run_qbe → run_backend in
+ * main.jhyy which references `extern fn codegen_amd64_run` (V2-A A5 stub
+ * in src0/codegen_amd64.jhyy). The jhyy-side stub is not imported into
+ * main.jhyy (single-file compile path: jhyy_stage0 compiles only main.jhyy,
+ * codegen_amd64.jhyy never inlined), so the C linker must resolve this
+ * symbol from jhyy_helpers.c. Returns non-zero so run_backend falls back
+ * to QBE (per L4 § 1.4 QBE_FALLBACK design). Filled in V2-B v2.6.0 when
+ * codegen_amd64.parse_and_emit stub is implemented. */
+__attribute__((used)) int codegen_amd64_run(const char *il_path, const char *asm_path) {
+    (void)il_path; (void)asm_path;
+    return -1;  /* not implemented in C side; triggers QBE fallback */
+}

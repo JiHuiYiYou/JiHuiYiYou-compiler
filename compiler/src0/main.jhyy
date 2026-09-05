@@ -755,7 +755,7 @@ fn run_qbe(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
 fn run_backend(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
     // QBE_FALLBACK env gate
     let fb_env = jh_getenv("QBE_FALLBACK" as *u8);
-    let use_qbe: i32 = 0 as i32;
+    let mut use_qbe: i32 = 0 as i32;
     if fb_env != (0 as *u8) {
         if strcmp(fb_env, "1" as *u8) == 0 {
             use_qbe = 1;
@@ -765,7 +765,7 @@ fn run_backend(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
         return run_qbe(il_path, asm_path, t);
     }
     // Target-based dispatch
-    let self_target: i32 = 0 as i32;
+    let mut self_target: i32 = 0 as i32;
     if t == TARGET_AMD64_WIN() {
         self_target = 1;
     }
@@ -773,7 +773,14 @@ fn run_backend(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
         self_target = 1;
     }
     if self_target != (0 as i32) {
-        return codegen_amd64_run(il_path, asm_path);
+        // V3-B fix (V2-A wire build break): C stub codegen_amd64_run returns -1
+        // since parse_and_emit is not yet implemented (V2-B v2.6.0 will fill).
+        // Fall back to QBE so jhyy.exe stays usable. Per L4 § 1.4 design.
+        let rc = codegen_amd64_run(il_path, asm_path);
+        if rc != (0 as i32) {
+            return run_qbe(il_path, asm_path, t);
+        }
+        return rc;
     }
     // sysv stub + unknown → QBE fallback
     return run_qbe(il_path, asm_path, t);
