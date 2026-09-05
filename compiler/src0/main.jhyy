@@ -95,6 +95,15 @@ extern fn jh_setenv(name: *u8, value: *u8) -> i32;
 // Returns *u8 (value string) or NULL (not set). Caller does NOT free.
 extern fn jh_getenv(name: *u8) -> *u8;
 
+// v2.6.0 (V2-B Unit A): jh_read_file / jh_write_file — file I/O consolidation
+// for codegen_amd64.jhyy. Caller-provided buffer (avoids **u8 ABI — jhyy
+// extern fn doesn't support **T params; existing pattern uses *i64/*f64
+// out-params for scalar results; for pointer out-params we use caller-owned
+// buffer pattern instead).
+// jh_read_file returns 0 OK / -1 err / 1 buf-too-small (caller grow + retry).
+extern fn jh_read_file(path: *u8, out_buf: *u8, buf_cap: i64, out_len: *i64) -> i32;
+extern fn jh_write_file(path: *u8, buf: *u8, len: i64) -> i32;
+
 // v2.5.0: codegen_amd64_run decl is intentionally absent. The codegen_amd64
 // module exists as scaffolding (per V2-A plan) but is not imported by
 // main.jhyy for v2.5.0 SHIP — V2-B v2.6.0 adds `import codegen_amd64` +

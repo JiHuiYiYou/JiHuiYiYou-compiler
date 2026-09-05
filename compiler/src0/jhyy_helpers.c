@@ -607,3 +607,83 @@ __attribute__((used)) const char *jh_getenv(const char *name) {
     return getenv(name);
 }
 #endif
+
+/* v2.6.0: jh_read_file — read entire file into caller-provided buffer.
+   Returns:
+     0  on success (*out_len set to file size)
+    -1  on error (NULL args, file open / read failure)
+     1  if file larger than buf_cap (caller should grow + retry)
+   Caller owns buf (pre-malloc'd by caller, may be reused across calls).
+   No CRLF translation: file opened in binary mode (CreateFileW on Windows,
+   fopen("rb") on POSIX). This matches the existing pattern in
+   compiler/src0/main.jhyy read_file (fopen "rb") and per
+   feedback_qbe_crlf_root_cause: all IL/binary-derived files must use
+   "rb"/"wb" / CreateFileW to avoid \n → \r\n conversion on Windows.
+   Used by codegen_amd64.jhyy:read_file to replace jhyy-side fopen/fseek/ftell
+   (V2-B v2.6.0 I/O consolidation). */
+#ifdef _WIN32
+__attribute__((used)) int jh_read_file(const char *path, void *out_buf, long long buf_cap, long long *out_len) {
+    if (path == NULL || out_buf == NULL || out_len == NULL) return -1;
+    wchar_t wpath[MAX_PATH];
+    if (!MultiByteToWideChar(CP_ACP, 0, path, -1, wpath, MAX_PATH)) return -1;
+    HANDLE h = CreateFileW(wpath, GENERIC_READ, FILE_SHARE_READ, NULL,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return -1;
+    LARGE_INTEGER fs;
+    if (!GetFileSizeEx(h, &fs)) { CloseHandle(h); return -1; }
+    long long sz = (long long)fs.QuadPart;
+    if (sz > buf_cap) { CloseHandle(h); return 1; }
+    DWORD got = 0;
+    BOOL ok = ReadFile(h, out_buf, (DWORD)sz, &got, NULL);
+    CloseHandle(h);
+    if (!ok || (long long)got != sz) return -1;
+    *out_len = sz;
+    return 0;
+}
+#else
+__attribute__((used)) int jh_read_file(const char *path, void *out_buf, long long buf_cap, long long *out_len) {
+    if (path == NULL || out_buf == NULL || out_len == NULL) return -1;
+    FILE *fp = fopen(path, "rb");
+    if (fp == NULL) return -1;
+    if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return -1; }
+    long long sz = (long long)ftell(fp);
+    if (sz < 0) { fclose(fp); return -1; }
+    if (fseek(fp, 0, SEEK_SET) != 0) { fclose(fp); return -1; }
+    if (sz > buf_cap) { fclose(fp); return 1; }
+    size_t got = fread(out_buf, 1, (size_t)sz, fp);
+    fclose(fp);
+    if ((long long)got != sz) return -1;
+    *out_len = sz;
+    return 0;
+}
+#endif
+
+/* v2.6.0: jh_write_file — write buf to file (binary mode, no CRLF).
+   Returns 0 on success, -1 on failure.
+   Used by codegen_amd64.jhyy:write_file to replace jhyy-side fopen/fwrite
+   (V2-B v2.6.0 I/O consolidation). */
+#ifdef _WIN32
+__attribute__((used)) int jh_write_file(const char *path, const void *buf, long long len) {
+    if (path == NULL || buf == NULL || len < 0) return -1;
+    wchar_t wpath[MAX_PATH];
+    if (!MultiByteToWideChar(CP_ACP, 0, path, -1, wpath, MAX_PATH)) return -1;
+    HANDLE h = CreateFileW(wpath, GENERIC_WRITE, 0, NULL,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return -1;
+    DWORD wrote = 0;
+    BOOL ok = WriteFile(h, buf, (DWORD)len, &wrote, NULL);
+    CloseHandle(h);
+    if (!ok || (long long)wrote != len) return -1;
+    return 0;
+}
+#else
+__attribute__((used)) int jh_write_file(const char *path, const void *buf, long long len) {
+    if (path == NULL || buf == NULL || len < 0) return -1;
+    FILE *fp = fopen(path, "wb");
+    if (fp == NULL) return -1;
+    size_t wrote = fwrite(buf, 1, (size_t)len, fp);
+    fclose(fp);
+    if ((long long)wrote != len) return -1;
+    return 0;
+}
+#endif
