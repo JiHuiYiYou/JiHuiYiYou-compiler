@@ -1,0 +1,817 @@
+// codegen_amd64_peephole.jhyy — V2-B v2.6.0 Unit D: peephole local folding
+//
+// 输入:.s 文本 buffer(GAS AT&T syntax,v2.5.0 emit 函数产出)
+// 输出:folded 后的 .s 文本(identity / redundant copy / zero-init 等折叠)
+//
+// 算法(per batch-V2-B-plan.md § v2.6.0 + § 跨 axis 约束):
+//   - **1-2 instruction window** sliding(local folding,无 global dataflow)
+//   - **不**做 instruction scheduling(超标量 / OoO)— 留给 post-M5
+//   - **不**做 loop optimization / LICM / GVN — 留给 post-M5
+//   - **不**依赖 regalloc 输出(fold instruction patterns 而非 SSA values,
+//     所以 regalloc 改写寄存器名时不会破坏 fold rule)
+//
+// 4 类 fold rules(per plan § v2.6.0):
+//   1. **`add $0, %reg` / `sub $0, %reg`** → 删除(no-op,identity 折叠)
+//   2. **`mov $0, %reg` 后跟 `xor %reg_lo, %reg_lo`** → 删 mov 留 xor
+//      (zero-init 折叠,mov 立即数 0 等价于 xor 自己)
+//   3. **`mov %regA, %regB` 后跟 `mov %regB, %regC`** → `mov %regA, %regC`
+//      (redundant copy 折叠,跳过 %regB)
+//   4. **`mov %reg, %reg`** → 删除(self-move no-op)
+//
+// 公开 API:
+//   - `peephole_fold(input, len, arena) -> *u8` — 返回 folded buffer
+//   - `peephole_count_folds(input, len) -> i64` — 统计 fold 次数(给 test 用)
+//
+// Unit D 阶段 peephole_fold 不被任何代码路径调用(等 Unit E wire
+// codegen_amd64_run 调用)。Unit D 验证只看模块编译 + regress 不退化。
+//
+// Note: lives flat in compiler/src0/(同 codegen_amd64 其他 sibling 模块)。
+
+// ════════════════════════════════════════════════════
+// FFI
+// ════════════════════════════════════════════════════
+
+extern fn malloc(size: i64) -> *u8;
+extern fn free(p: *u8) -> i32;
+extern fn arena_alloc(a: *u8, size: i64) -> *u8;
+extern fn memset(p: *u8, v: i32, n: i64) -> *u8;
+extern fn strlen(s: *u8) -> i64;
+extern fn ptr_add_u8(p: *u8, off: i64) -> *u8;
+
+// ════════════════════════════════════════════════════
+// 字符串 helpers
+// ════════════════════════════════════════════════════
+
+// pee_byte_at(s, i) — s[i] 字节值(返回 i32 便于比较)
+fn pee_byte_at(s: *u8, i: i64) -> i32 {
+    if s == (0 as *u8) { return 0 as i32; }
+    let p = ptr_add_u8(s, i);
+    let c = *p;
+    return c as i32;
+}
+
+// pee_starts_with(haystack, hlen, needle) — haystack[0..hlen) 是否以 needle 起头
+fn pee_starts_with(haystack: *u8, hlen: i64, needle: *u8) -> i32 {
+    if haystack == (0 as *u8) || needle == (0 as *u8) {
+        return 0 as i32;
+    }
+    let nlen = strlen(needle);
+    if nlen > hlen {
+        return 0 as i32;
+    }
+    let mut i: i64 = 0 as i64;
+    while i < nlen {
+        if pee_byte_at(haystack, i) != pee_byte_at(needle, i) {
+            return 0 as i32;
+        }
+        i = i + (1 as i64);
+    }
+    return 1 as i32;
+}
+
+// pee_eq(s1, s2) — strcmp == 0
+fn pee_eq(s1: *u8, s2: *u8) -> i32 {
+    if s1 == (0 as *u8) && s2 == (0 as *u8) {
+        return 1 as i32;
+    }
+    if s1 == (0 as *u8) || s2 == (0 as *u8) {
+        return 0 as i32;
+    }
+    let mut i: i64 = 0 as i64;
+    let mut done: i32 = 0 as i32;
+    while done == (0 as i32) {
+        let c1 = pee_byte_at(s1, i);
+        let c2 = pee_byte_at(s2, i);
+        if c1 != c2 {
+            return 0 as i32;
+        }
+        if c1 == 0 as i32 {
+            done = 1 as i32;
+        }
+        i = i + (1 as i64);
+    }
+    return 1 as i32;
+}
+
+// pee_find_char(s, len, c) — 在 s[0..len) 里找字符 c,返回 index;找不到 -1
+fn pee_find_char(s: *u8, len: i64, c: i32) -> i64 {
+    if s == (0 as *u8) || len <= (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut i: i64 = 0 as i64;
+    while i < len {
+        if pee_byte_at(s, i) == c {
+            return i;
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
+
+// pee_is_whitespace(c) — 是否空白(tab / space)
+fn pee_is_whitespace(c: i32) -> i32 {
+    if c == (9 as i32) || c == (32 as i32) {
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
+// pee_skip_ws(s, len, from) — 从 s[from] 起跳过空白,返回首个非空白 index
+fn pee_skip_ws(s: *u8, len: i64, from: i64) -> i64 {
+    let mut i: i64 = from;
+    while i < len {
+        if pee_is_whitespace(pee_byte_at(s, i)) == (0 as i32) {
+            return i;
+        }
+        i = i + (1 as i64);
+    }
+    return i;
+}
+
+// pee_token_end(s, len, from) — 从 s[from] 起找 token(mnemonic / operand)结束位置
+// token = [a-zA-Z0-9_.%]+
+fn pee_token_end(s: *u8, len: i64, from: i64) -> i64 {
+    let mut i: i64 = from;
+    while i < len {
+        let c = pee_byte_at(s, i);
+        let mut ok: i32 = 0 as i32;
+        if c >= (97 as i32) && c <= (122 as i32) { ok = 1 as i32; }
+        if c >= (65 as i32) && c <= (90 as i32) { ok = 1 as i32; }
+        if c >= (48 as i32) && c <= (57 as i32) { ok = 1 as i32; }
+        if c == (95 as i32) { ok = 1 as i32; }  // _
+        if c == (46 as i32) { ok = 1 as i32; }  // .
+        if c == (37 as i32) { ok = 1 as i32; }  // %
+        if c == (36 as i32) { ok = 1 as i32; }  // $
+        if ok == (0 as i32) {
+            return i;
+        }
+        i = i + (1 as i64);
+    }
+    return i;
+}
+
+// pee_slice_eq(s, start, end, lit) — s[start..end) == lit?
+fn pee_slice_eq(s: *u8, start: i64, end: i64, lit: *u8) -> i32 {
+    if s == (0 as *u8) || lit == (0 as *u8) {
+        return 0 as i32;
+    }
+    let nlen = strlen(lit);
+    if end - start != nlen {
+        return 0 as i32;
+    }
+    let mut i: i64 = 0 as i64;
+    while i < nlen {
+        if pee_byte_at(s, start + i) != pee_byte_at(lit, i) {
+            return 0 as i32;
+        }
+        i = i + (1 as i64);
+    }
+    return 1 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// 指令解析(single line → mnemonic + operands string)
+// ════════════════════════════════════════════════════
+//
+// Instruction 形态(per v2.5.0 emit_mem / emit_call):
+//   `\tmovl $42, -32(%rbp)`           (tab + mnemonic + ws + op1 + ", " + op2)
+//   `\taddl -32(%rbp), %eax`
+//   `\txorl %eax, %eax`
+//   `# comment`
+//   `\n`
+//
+// 本模块不解析 op1/op2 内部细节,只看 mnemonic + 整行内容。fold rule 主要看
+// mnemonic + 关键 token("$0", "%reg" 等)。
+
+// pee_line_kind — 返回 line 类型的 hint(0 = empty/comment, 1 = instruction)
+//   - 空行或注释(以 # 起头)→ 0
+//   - 含 mnemonic → 1
+fn pee_line_kind(s: *u8, len: i64) -> i32 {
+    if len <= (0 as i64) {
+        return 0 as i32;
+    }
+    // skip leading whitespace
+    let start = pee_skip_ws(s, len, 0 as i64);
+    if start >= len {
+        return 0 as i32;
+    }
+    let c = pee_byte_at(s, start);
+    if c == (10 as i32) {
+        return 0 as i32;
+    }
+    if c == (35 as i32) {
+        // # comment
+        return 0 as i32;
+    }
+    return 1 as i32;
+}
+
+// pee_get_mnemonic(s, len) — 提取 mnemonic(返回 [start, end) 区间)
+// mnem 从首个非空白字符起,直到 whitespace / 逗号 / 注释
+// 返回 start = mnemonic 起始,end = mnemonic 结束
+fn pee_get_mnemonic_start_end(s: *u8, len: i64) -> i64 {
+    // returns:start << 32 | end (packed in i64)
+    let start = pee_skip_ws(s, len, 0 as i64);
+    if start >= len {
+        return 0 as i64;
+    }
+    let end = pee_token_end(s, len, start);
+    let r: i64 = (start << 32 as i64) | end;
+    return r;
+}
+
+fn pee_unpack_start(packed: i64) -> i64 {
+    return packed >> 32 as i64;
+}
+
+fn pee_unpack_end(packed: i64) -> i64 {
+    // mask lower 32 bits
+    return packed & ((1 as i64) << (32 as i64)) - (1 as i64);
+}
+
+// ════════════════════════════════════════════════════
+// Fold rule: identity op(`add $0, %reg` / `sub $0, %reg` → 删除)
+// ════════════════════════════════════════════════════
+
+// pee_is_identity_op(s, len) → 1 = 是 add/sub $0, %reg,0 = 不是
+fn pee_is_identity_op(s: *u8, len: i64) -> i32 {
+    if len <= (0 as i64) || s == (0 as *u8) {
+        return 0 as i32;
+    }
+    // check mnemonic is "add" or "sub"(后跟 l/q/w/b suffix)
+    let ms = pee_unpack_start(pee_get_mnemonic_start_end(s, len));
+    let me = pee_unpack_end(pee_get_mnemonic_start_end(s, len));
+    if me - ms < 3 as i64 {
+        return 0 as i32;
+    }
+    let base_end = me - 1 as i64;  // skip size suffix (l/q/w/b)
+    if base_end - ms != 3 as i64 {
+        return 0 as i32;
+    }
+    let is_add = pee_slice_eq(s, ms, base_end, "add" as *u8);
+    let is_sub = pee_slice_eq(s, ms, base_end, "sub" as *u8);
+    if is_add == (0 as i32) && is_sub == (0 as i32) {
+        return 0 as i32;
+    }
+    // check operand starts with "$0"
+    let after_mnem = pee_skip_ws(s, len, me);
+    if pee_slice_eq(s, after_mnem, after_mnem + 2 as i64, "$0" as *u8) == (0 as i32) {
+        return 0 as i32;
+    }
+    return 1 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// Fold rule: redundant copy(`mov %a, %b` 后跟 `mov %b, %c` → `mov %a, %c`)
+// ════════════════════════════════════════════════════
+//
+// 检测:
+//   - line1:mnemonic starts with "mov",operand 形式 "%xxx, %yyy"
+//   - line2:mnemonic starts with "mov",operand 形式 "%yyy, %zzz"
+//   - line1 的 dst = line2 的 src → fold 成 `mov %xxx, %zzz`
+
+// pee_extract_mov_ops(s, len, out_src, out_dst) — 提取 mov 的 src/dst 操作数
+// 返回 0 成功(写入 out_src / out_dst),-1 失败
+// 假设 instruction 形态:`mov... <src>, <dst>`
+//   - src 是第二个 token 后第一个 , 之前的部分
+//   - dst 是 , 之后到 ws/# 之前的部分
+// 简化:用 , 分割(operand 内部不包含 ,)
+fn pee_extract_mov_ops(s: *u8, len: i64, out_src: *u8, out_dst: *u8) -> i32 {
+    if s == (0 as *u8) || out_src == (0 as *u8) || out_dst == (0 as *u8) {
+        return -(1 as i32);
+    }
+    let ms = pee_unpack_start(pee_get_mnemonic_start_end(s, len));
+    let me = pee_unpack_end(pee_get_mnemonic_start_end(s, len));
+    if me - ms < 3 as i64 {
+        return -(1 as i32);
+    }
+    // check prefix is "mov"
+    if pee_slice_eq(s, ms, ms + 3 as i64, "mov" as *u8) == (0 as i32) {
+        return -(1 as i32);
+    }
+    // find first comma after mnemonic
+    let after_mnem = pee_skip_ws(s, len, me);
+    let comma_pos = pee_find_char(s, len, 44 as i32);  // ','
+    if comma_pos < (0 as i64) || comma_pos < after_mnem {
+        return -(1 as i32);
+    }
+    // src = [after_mnem, comma_pos) trimmed
+    let src_start = pee_skip_ws(s, len, after_mnem);
+    let src_end = comma_pos;
+    // trim trailing ws from src_end
+    let mut se: i64 = src_end;
+    while se > src_start && pee_is_whitespace(pee_byte_at(s, se - 1 as i64)) == (1 as i32) {
+        se = se - 1 as i64;
+    }
+    // dst = [comma_pos+1, end-of-operand)
+    let dst_start = pee_skip_ws(s, len, comma_pos + 1 as i64);
+    // find end:next ws / comment / end of line
+    let mut dst_end = dst_start;
+    while dst_end < len {
+        let c = pee_byte_at(s, dst_end);
+        if c == (9 as i32) || c == (32 as i32) || c == (10 as i32) || c == (35 as i32) {
+            break;
+        }
+        dst_end = dst_end + 1 as i64;
+    }
+    // write to out_src / out_dst(需要 caller pre-allocate)
+    let src_len = se - src_start;
+    let dst_len = dst_end - dst_start;
+    if src_len <= (0 as i64) || dst_len <= (0 as i64) {
+        return -(1 as i32);
+    }
+    let mut i: i64 = 0 as i64;
+    while i < src_len {
+        let p = ptr_add_u8(out_src, i);
+        *p = pee_byte_at(s, src_start + i) as u8;
+        i = i + (1 as i64);
+    }
+    let p2 = ptr_add_u8(out_src, src_len);
+    *p2 = 0 as u8;
+    let mut j: i64 = 0 as i64;
+    while j < dst_len {
+        let p = ptr_add_u8(out_dst, j);
+        *p = pee_byte_at(s, dst_start + j) as u8;
+        j = j + (1 as i64);
+    }
+    let p2b = ptr_add_u8(out_dst, dst_len);
+    *p2b = 0 as u8;
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// Fold rule: zero-init(mov $0, %reg 后跟 xor %reg_lo, %reg_lo → 删 mov 留 xor)
+// ════════════════════════════════════════════════════
+
+// pee_is_mov_zero(line) — line 是否是 `movX $0, %reg`(X = l/q/w/b)
+fn pee_is_mov_zero(s: *u8, len: i64, out_reg: *u8) -> i32 {
+    if s == (0 as *u8) || len <= (0 as i64) {
+        return 0 as i32;
+    }
+    let ms = pee_unpack_start(pee_get_mnemonic_start_end(s, len));
+    let me = pee_unpack_end(pee_get_mnemonic_start_end(s, len));
+    if me - ms != 4 as i64 {
+        return 0 as i32;
+    }
+    if pee_slice_eq(s, ms, ms + 3 as i64, "mov" as *u8) == (0 as i32) {
+        return 0 as i32;
+    }
+    // check suffix (l/q/w/b)
+    let suffix = pee_byte_at(s, me - 1 as i64);
+    if suffix != (108 as i32) && suffix != (113 as i32) && suffix != (119 as i32) && suffix != (98 as i32) {
+        return 0 as i32;
+    }
+    // check operand starts with "$0"
+    let after_mnem = pee_skip_ws(s, len, me);
+    if pee_slice_eq(s, after_mnem, after_mnem + 2 as i64, "$0" as *u8) == (0 as i32) {
+        return 0 as i32;
+    }
+    // extract dst reg(out_reg = "%eax" / "%rax" 等)
+    let comma_pos = pee_find_char(s, len, 44 as i32);
+    if comma_pos < (0 as i64) {
+        return 0 as i32;
+    }
+    let dst_start = pee_skip_ws(s, len, comma_pos + 1 as i64);
+    let mut dst_end = dst_start;
+    while dst_end < len {
+        let c = pee_byte_at(s, dst_end);
+        if c == (9 as i32) || c == (32 as i32) || c == (10 as i32) || c == (35 as i32) {
+            break;
+        }
+        dst_end = dst_end + 1 as i64;
+    }
+    let dst_len = dst_end - dst_start;
+    if dst_len <= (0 as i64) {
+        return 0 as i32;
+    }
+    let mut i: i64 = 0 as i64;
+    while i < dst_len {
+        let p = ptr_add_u8(out_reg, i);
+        *p = pee_byte_at(s, dst_start + i) as u8;
+        i = i + (1 as i64);
+    }
+    let p2 = ptr_add_u8(out_reg, dst_len);
+    *p2 = 0 as u8;
+    return 1 as i32;
+}
+
+// pee_is_xor_self(line, expected_reg) — line 是否是 `xorX %reg_lo, %reg_lo`
+fn pee_is_xor_self(s: *u8, len: i64, expected_reg: *u8) -> i32 {
+    if s == (0 as *u8) || len <= (0 as i64) || expected_reg == (0 as *u8) {
+        return 0 as i32;
+    }
+    let ms = pee_unpack_start(pee_get_mnemonic_start_end(s, len));
+    let me = pee_unpack_end(pee_get_mnemonic_start_end(s, len));
+    if me - ms != 4 as i64 {
+        return 0 as i32;
+    }
+    if pee_slice_eq(s, ms, ms + 3 as i64, "xor" as *u8) == (0 as i32) {
+        return 0 as i32;
+    }
+    let suffix = pee_byte_at(s, me - 1 as i64);
+    if suffix != (108 as i32) && suffix != (113 as i32) && suffix != (119 as i32) && suffix != (98 as i32) {
+        return 0 as i32;
+    }
+    // extract two operands
+    let after_mnem = pee_skip_ws(s, len, me);
+    let comma_pos = pee_find_char(s, len, 44 as i32);
+    if comma_pos < (0 as i64) {
+        return 0 as i32;
+    }
+    let op1_start = pee_skip_ws(s, len, after_mnem);
+    let mut op1_end = comma_pos;
+    while op1_end > op1_start && pee_is_whitespace(pee_byte_at(s, op1_end - 1 as i64)) == (1 as i32) {
+        op1_end = op1_end - 1 as i64;
+    }
+    let op2_start = pee_skip_ws(s, len, comma_pos + 1 as i64);
+    let mut op2_end = op2_start;
+    while op2_end < len {
+        let c = pee_byte_at(s, op2_end);
+        if c == (9 as i32) || c == (32 as i32) || c == (10 as i32) || c == (35 as i32) {
+            break;
+        }
+        op2_end = op2_end + 1 as i64;
+    }
+    let op1_len = op1_end - op1_start;
+    let op2_len = op2_end - op2_start;
+    if op1_len != op2_len || op1_len <= (0 as i64) {
+        return 0 as i32;
+    }
+    // compare op1 == op2
+    let mut i: i64 = 0 as i64;
+    while i < op1_len {
+        if pee_byte_at(s, op1_start + i) != pee_byte_at(s, op2_start + i) {
+            return 0 as i32;
+        }
+        i = i + (1 as i64);
+    }
+    // compare op1 == expected_reg
+    let explen = strlen(expected_reg);
+    if explen != op1_len {
+        return 0 as i32;
+    }
+    let mut j: i64 = 0 as i64;
+    while j < explen {
+        if pee_byte_at(expected_reg, j) != pee_byte_at(s, op1_start + j) {
+            return 0 as i32;
+        }
+        j = j + (1 as i64);
+    }
+    return 1 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// Fold rule: self-move(`mov %reg, %reg` → 删除)
+// ════════════════════════════════════════════════════
+
+fn pee_is_self_move(s: *u8, len: i64) -> i32 {
+    if s == (0 as *u8) || len <= (0 as i64) {
+        return 0 as i32;
+    }
+    let ms = pee_unpack_start(pee_get_mnemonic_start_end(s, len));
+    let me = pee_unpack_end(pee_get_mnemonic_start_end(s, len));
+    if me - ms != 4 as i64 {
+        return 0 as i32;
+    }
+    if pee_slice_eq(s, ms, ms + 3 as i64, "mov" as *u8) == (0 as i32) {
+        return 0 as i32;
+    }
+    // extract ops
+    let after_mnem = pee_skip_ws(s, len, me);
+    let comma_pos = pee_find_char(s, len, 44 as i32);
+    if comma_pos < (0 as i64) {
+        return 0 as i32;
+    }
+    let op1_start = pee_skip_ws(s, len, after_mnem);
+    let mut op1_end = comma_pos;
+    while op1_end > op1_start && pee_is_whitespace(pee_byte_at(s, op1_end - 1 as i64)) == (1 as i32) {
+        op1_end = op1_end - 1 as i64;
+    }
+    let op2_start = pee_skip_ws(s, len, comma_pos + 1 as i64);
+    let mut op2_end = op2_start;
+    while op2_end < len {
+        let c = pee_byte_at(s, op2_end);
+        if c == (9 as i32) || c == (32 as i32) || c == (10 as i32) || c == (35 as i32) {
+            break;
+        }
+        op2_end = op2_end + 1 as i64;
+    }
+    let op1_len = op1_end - op1_start;
+    let op2_len = op2_end - op2_start;
+    if op1_len != op2_len || op1_len <= (0 as i64) {
+        return 0 as i32;
+    }
+    let mut i: i64 = 0 as i64;
+    while i < op1_len {
+        if pee_byte_at(s, op1_start + i) != pee_byte_at(s, op2_start + i) {
+            return 0 as i32;
+        }
+        i = i + (1 as i64);
+    }
+    return 1 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// 主折叠函数
+// ════════════════════════════════════════════════════
+
+// peephole_fold — main entry,fold .s buffer in-place 风格(返回新 buffer)
+// 输入:input / len / arena
+// 输出:folded buffer(arena-alloc)
+//
+// 算法:
+//   1. split input by '\n' into lines(用 array of [start, end] pairs)
+//   2. for i in 0..n_lines:
+//      - 检查 line[i] 是否 foldable(rule by rule)
+//      - 若 foldable 为 identity op / self move:mark for deletion
+//      - 若 foldable 为 mov zero + 下一行 xor self:combine(删 mov)
+//      - 若 foldable 为 mov A→B + 下一行 mov B→C:replace 第二行为 mov A→C
+//   3. concatenate non-deleted lines into output buffer
+fn peephole_fold(input: *u8, len: i64, arena: *u8) -> *u8 {
+    if input == (0 as *u8) || len <= (0 as i64) {
+        return input;
+    }
+    if arena == (0 as *u8) {
+        return input;
+    }
+
+    // alloc output buffer(初始 2x input size,fold 通常减小)
+    let out_cap = len * 2 as i64;
+    let out = arena_alloc(arena, out_cap);
+    if out == (0 as *u8) {
+        return input;
+    }
+    let _m = memset(out, 0 as i32, out_cap);
+
+    // split input into lines: walk through, find each \n
+    // 用 scratch arrays 存每行 [start, end]:
+    //   starts[i] = line i start offset in input
+    //   ends[i] = line i end offset in input (exclusive)
+    let max_lines = 4096 as i64;  // 够 cover regress 用例
+    let line_starts = arena_alloc(arena, max_lines * 8 as i64);
+    let line_ends = arena_alloc(arena, max_lines * 8 as i64);
+    let line_deleted = arena_alloc(arena, max_lines * 1 as i64);
+    let line_replaced = arena_alloc(arena, max_lines * 8 as i64);  // replaced text pointers (NULL = no replace)
+    if line_starts == (0 as *u8) || line_ends == (0 as *u8) || line_deleted == (0 as *u8) || line_replaced == (0 as *u8) {
+        return input;
+    }
+    let _m2 = memset(line_deleted, 0 as i32, max_lines);
+    let _m3 = memset(line_replaced, 0 as i32, max_lines * 8 as i64);
+
+    // walk input
+    let mut line_idx: i64 = 0 as i64;
+    let mut line_start: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i <= len {
+        let at_end: i32 = if i == len { 1 as i32 } else { 0 as i32 };
+        let is_nl: i32 = if i < len && pee_byte_at(input, i) == (10 as i32) { 1 as i32 } else { 0 as i32 };
+        if at_end == (1 as i32) || is_nl == (1 as i32) {
+            if line_idx >= max_lines {
+                i = len + 1 as i64;  // break
+            } else {
+                // store line [line_start, i)
+                let sp = ptr_add_u8(line_starts, line_idx * 8 as i64);
+                let sq = sp as *i64;
+                *sq = line_start;
+                let ep = ptr_add_u8(line_ends, line_idx * 8 as i64);
+                let eq = ep as *i64;
+                *eq = i;
+                line_idx = line_idx + (1 as i64);
+                line_start = i + 1 as i64;
+            }
+        }
+        i = i + (1 as i64);
+    }
+    let n_lines = line_idx;
+
+    // ── Apply fold rules ──
+
+    // helper: get line pointer + len
+    // (inline: line_starts[i] + (line_ends[i] - line_starts[i]))
+
+    // Rule 1: identity op → mark deleted
+    let mut li: i64 = 0 as i64;
+    while li < n_lines {
+        let ls_p = ptr_add_u8(line_starts, li * 8 as i64) as *i64;
+        let le_p = ptr_add_u8(line_ends, li * 8 as i64) as *i64;
+        let ls = *ls_p;
+        let le = *le_p;
+        let llen = le - ls;
+        if pee_is_identity_op(ptr_add_u8(input, ls), llen) == (1 as i32) {
+            let dp = ptr_add_u8(line_deleted, li);
+            *dp = 1 as u8;
+        }
+        // Rule 4: self-move → mark deleted
+        if pee_is_self_move(ptr_add_u8(input, ls), llen) == (1 as i32) {
+            let dp = ptr_add_u8(line_deleted, li);
+            *dp = 1 as u8;
+        }
+        li = li + (1 as i64);
+    }
+
+    // Rule 2: mov $0, %reg + xor %reg_lo, %reg_lo → 删 mov
+    // (xor 保留,等价 zero-init 但 byte 更短)
+    // Need scratch buffer for reg name
+    let reg_buf = arena_alloc(arena, 32 as i64);
+    if reg_buf != (0 as *u8) {
+        let _m4 = memset(reg_buf, 0 as i32, 32 as i64);
+        li = 0 as i64;
+        while li < n_lines - 1 as i64 {
+            let deleted_p = ptr_add_u8(line_deleted, li);
+            if *deleted_p == 0 as u8 {
+                let ls1_p = ptr_add_u8(line_starts, li * 8 as i64) as *i64;
+                let le1_p = ptr_add_u8(line_ends, li * 8 as i64) as *i64;
+                let ls1 = *ls1_p;
+                let le1 = *le1_p;
+                let llen1 = le1 - ls1;
+                let is_mov_zero = pee_is_mov_zero(ptr_add_u8(input, ls1), llen1, reg_buf);
+                if is_mov_zero == (1 as i32) {
+                    let ls2_p = ptr_add_u8(line_starts, (li + 1 as i64) * 8 as i64) as *i64;
+                    let le2_p = ptr_add_u8(line_ends, (li + 1 as i64) * 8 as i64) as *i64;
+                    let ls2 = *ls2_p;
+                    let le2 = *le2_p;
+                    let llen2 = le2 - ls2;
+                    let is_xor = pee_is_xor_self(ptr_add_u8(input, ls2), llen2, reg_buf);
+                    if is_xor == (1 as i32) {
+                        // mark line[li] deleted(xor 保留)
+                        let dp = ptr_add_u8(line_deleted, li);
+                        *dp = 1 as u8;
+                    }
+                }
+            }
+            li = li + (1 as i64);
+        }
+    }
+
+    // Rule 3: mov A→B + mov B→C → 替换第二行为 mov A→C
+    let src_buf = arena_alloc(arena, 32 as i64);
+    let dst_buf = arena_alloc(arena, 32 as i64);
+    let src2_buf = arena_alloc(arena, 32 as i64);
+    let dst2_buf = arena_alloc(arena, 32 as i64);
+    if src_buf != (0 as *u8) && dst_buf != (0 as *u8) && src2_buf != (0 as *u8) && dst2_buf != (0 as *u8) {
+        let _m5 = memset(src_buf, 0 as i32, 32 as i64);
+        let _m6 = memset(dst_buf, 0 as i32, 32 as i64);
+        let _m7 = memset(src2_buf, 0 as i32, 32 as i64);
+        let _m8 = memset(dst2_buf, 0 as i32, 32 as i64);
+        li = 0 as i64;
+        while li < n_lines - 1 as i64 {
+            let deleted_p = ptr_add_u8(line_deleted, li);
+            let deleted_p2 = ptr_add_u8(line_deleted, li + 1 as i64);
+            if *deleted_p == 0 as u8 && *deleted_p2 == 0 as u8 {
+                let ls1_p = ptr_add_u8(line_starts, li * 8 as i64) as *i64;
+                let le1_p = ptr_add_u8(line_ends, li * 8 as i64) as *i64;
+                let ls1 = *ls1_p;
+                let le1 = *le1_p;
+                let llen1 = le1 - ls1;
+                let extract1 = pee_extract_mov_ops(ptr_add_u8(input, ls1), llen1, src_buf, dst_buf);
+
+                if extract1 == (0 as i32) {
+                    let ls2_p = ptr_add_u8(line_starts, (li + 1 as i64) * 8 as i64) as *i64;
+                    let le2_p = ptr_add_u8(line_ends, (li + 1 as i64) * 8 as i64) as *i64;
+                    let ls2 = *ls2_p;
+                    let le2 = *le2_p;
+                    let llen2 = le2 - ls2;
+                    let extract2 = pee_extract_mov_ops(ptr_add_u8(input, ls2), llen2, src2_buf, dst2_buf);
+
+                    if extract2 == (0 as i32) {
+                        // check line1.dst == line2.src
+                        let dst_eq = pee_eq(dst_buf, src2_buf);
+                        if dst_eq == (1 as i32) {
+                            // replace line[li+1] with "mov ... src1 ... dst2"
+                            // build replacement: "mov <src1>, <dst2>\n"
+                            // 简化:用 dst2 直接复制,然后插入 src1
+                            // 我们写一个 scratch buffer with new instruction
+                            let new_buf = arena_alloc(arena, 128 as i64);
+                            if new_buf != (0 as *u8) {
+                                let _m9 = memset(new_buf, 0 as i32, 128 as i64);
+                                // write "movl " (assume 32-bit; size suffix not handled in this simple version)
+                                // 简化:用 src1 的 size suffix 推断(若 src1 含 'l' / 'q' 用之,否则 'l')
+                                let src1_len = strlen(src_buf);
+                                let dst2_len = strlen(dst2_buf);
+                                // Copy mnemonic "mov" + size suffix from line1[me-1]
+                                let ms_p = pee_unpack_start(pee_get_mnemonic_start_end(ptr_add_u8(input, ls1), llen1));
+                                let me_p = pee_unpack_end(pee_get_mnemonic_start_end(ptr_add_u8(input, ls1), llen1));
+                                let mut k: i64 = 0 as i64;
+                                while k < me_p - ms_p {
+                                    let p = ptr_add_u8(new_buf, k);
+                                    *p = pee_byte_at(input, ls1 + ms_p + k) as u8;
+                                    k = k + (1 as i64);
+                                }
+                                // add " "
+                                let sp = ptr_add_u8(new_buf, k);
+                                *sp = 32 as u8;
+                                k = k + 1 as i64;
+                                // add src1
+                                let mut kk: i64 = 0 as i64;
+                                while kk < src1_len {
+                                    let p = ptr_add_u8(new_buf, k);
+                                    *p = pee_byte_at(src_buf, kk) as u8;
+                                    k = k + (1 as i64);
+                                    kk = kk + (1 as i64);
+                                }
+                                // add ", "
+                                let p1 = ptr_add_u8(new_buf, k);
+                                *p1 = 44 as u8;
+                                let p2 = ptr_add_u8(new_buf, k + 1 as i64);
+                                *p2 = 32 as u8;
+                                k = k + 2 as i64;
+                                // add dst2
+                                kk = 0 as i64;
+                                while kk < dst2_len {
+                                    let p = ptr_add_u8(new_buf, k);
+                                    *p = pee_byte_at(dst2_buf, kk) as u8;
+                                    k = k + (1 as i64);
+                                    kk = kk + (1 as i64);
+                                }
+                                // store new_buf in line_replaced[li+1]
+                                let rp = ptr_add_u8(line_replaced, (li + 1 as i64) * 8 as i64);
+                                let rq = rp as **u8;
+                                *rq = new_buf;
+                                // also delete line[li](mov A→B 不再需要)
+                                let dp = ptr_add_u8(line_deleted, li);
+                                *dp = 1 as u8;
+                            }
+                        }
+                    }
+                }
+            }
+            li = li + (1 as i64);
+        }
+    }
+
+    // ── Concatenate output ──
+    let mut out_off: i64 = 0 as i64;
+    li = 0 as i64;
+    while li < n_lines {
+        let deleted_p = ptr_add_u8(line_deleted, li);
+        let replaced_p = ptr_add_u8(line_replaced, li * 8 as i64) as **u8;
+        if *deleted_p == 0 as u8 {
+            if *replaced_p != (0 as *u8) {
+                // write replacement
+                let rep_len = strlen(*replaced_p);
+                let mut k: i64 = 0 as i64;
+                while k < rep_len && out_off + k < out_cap {
+                    let p = ptr_add_u8(out, out_off + k);
+                    *p = pee_byte_at(*replaced_p, k) as u8;
+                    k = k + (1 as i64);
+                }
+                out_off = out_off + k;
+            } else {
+                // copy original line
+                let ls_p = ptr_add_u8(line_starts, li * 8 as i64) as *i64;
+                let le_p = ptr_add_u8(line_ends, li * 8 as i64) as *i64;
+                let ls = *ls_p;
+                let le = *le_p;
+                let llen = le - ls;
+                let mut k: i64 = 0 as i64;
+                while k < llen && out_off + k < out_cap {
+                    let p = ptr_add_u8(out, out_off + k);
+                    *p = pee_byte_at(input, ls + k) as u8;
+                    k = k + (1 as i64);
+                }
+                out_off = out_off + k;
+            }
+            // write \n
+            if out_off < out_cap {
+                let p = ptr_add_u8(out, out_off);
+                *p = 10 as u8;
+                out_off = out_off + (1 as i64);
+            }
+        }
+        li = li + (1 as i64);
+    }
+
+    // null-terminate
+    if out_off < out_cap {
+        let p = ptr_add_u8(out, out_off);
+        *p = 0 as u8;
+    }
+    return out;
+}
+
+// peephole_count_folds — 统计 fold 次数(给 unit test 用)
+// 扫描 input,模拟 fold,返回 fold count
+fn peephole_count_folds(input: *u8, len: i64) -> i64 {
+    if input == (0 as *u8) || len <= (0 as i64) {
+        return 0 as i64;
+    }
+    let mut count: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < len {
+        let line_start = i;
+        // find next \n
+        while i < len && pee_byte_at(input, i) != (10 as i32) {
+            i = i + (1 as i64);
+        }
+        let line_end = i;
+        let llen = line_end - line_start;
+        if pee_is_identity_op(ptr_add_u8(input, line_start), llen) == (1 as i32) {
+            count = count + (1 as i64);
+        }
+        if pee_is_self_move(ptr_add_u8(input, line_start), llen) == (1 as i32) {
+            count = count + (1 as i64);
+        }
+        i = i + (1 as i64);
+    }
+    return count;
+}
