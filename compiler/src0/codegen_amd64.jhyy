@@ -1,0 +1,91 @@
+// codegen_amd64.jhyy — v2.5.0 M1-A: 自写 IL → amd64 GAS `.s` 后端起步
+//
+// v2.x 中期(per v2-v3-parallel-sprint-plan.md § 5.2 / § 6.2 拆法 A)的第一个 sub-sprint。
+// windows targets only (TARGET_AMD64_WIN=0 + TARGET_AMD64_WIN_FREESTANDING=1,
+// D-GUI-12: hosted / freestanding MS x64 byte-identical);
+// amd64_sysv 走 QBE fallback 直到 v2.7.0。
+//
+// 替换路径:main.jhyy run_qbe() → run_backend() → codegen_amd64_run() (self=1)
+// 回退路径:run_backend() → run_qbe() (self=0 或 QBE_FALLBACK=1)
+//
+// 关键约束(per L4 doc `docs/plans/v2/v2.5.0详细实现方案.md`):
+//   - D42 escape hatch: codegen_amd64_emit_raw_asm stub(空 body,V3-B v3.0.1 填充)
+//   - 3c volatile token 识别(lexer 识别 + emit 普通 load/store,no memory barrier)
+//   - D43 self-equal closure 维持 sha 51376ce5...
+//   - D26 byte-equal 三件套(.il / .s / .exe)
+//
+// Note: lives flat in compiler/src0/ (not in a subdir) — jhyy import
+// syntax doesn't support paths with `/` (per `parse_import_decl`
+// codegen.c:731 — same restriction as abi_amd64_win.jhyy).
+
+// ════════════════════════════════════════════════════
+// 公开 API(per L4 § 1.2)
+// ════════════════════════════════════════════════════
+
+// codegen_amd64_init — 模块初始化(扩展点,v2.5.0 noop)
+fn codegen_amd64_init() -> i32 {
+    // v2.5.0: noop;V2-B v2.6.0 加 regalloc state init 时填充
+    return 0;
+}
+
+// codegen_amd64_run — IL → amd64 GAS .s 主入口
+//
+// 输入:il_path(已生成的 QBE IL 文件路径,per `ir.jhyy` `ir_emit_*` family)
+//      asm_path(输出 .s 文件路径)
+// 返回:0 = 成功(写了 .s 文件),非 0 = 失败
+//
+// v2.5.0 实现路径:
+//   1. read_file(il_path) → 全 .il 内容(arena-alloc)
+//   2. codegen_amd64_lexer.lex_il(buf, len) → *ILToken 序列
+//   3. parse_and_emit(buf, len, out_sb) → 逐 token dispatch 到 15 emit 函数
+//   4. write_file(asm_path, sb_get_str(out_sb), sb_len(out_sb))(per `feedback_qbe_crlf_root_cause` 用 "wb")
+//   5. return 0
+fn codegen_amd64_run(il_path: *u8, asm_path: *u8) -> i32 {
+    // v2.5.0 skeleton:stub — return 0 占位;V2-A Unit A sub-agent 扩到 ~2000 行实现
+    // 完整实现见 L4 § 4.1 + § 3.5 15 个 emit 函数
+    let _ = il_path;
+    let _ = asm_path;
+    return 0;
+}
+
+// codegen_amd64_emit_raw_asm — D42 escape hatch stub
+//
+// per `jhyy_OS/docs/coordination.md § 3` D42:
+//   "v3.0 3a inline asm 在 v2.x 自写后端完成前走 QBE 工具链 .s 输出路径;
+//    v2.x 完成后 asm 走自写后端 'escape hatch' 路径"
+//
+// v2.5.0:仅 stub placeholder(空 body + 占位注释),V3-B v3.0.1 填充实际 inline asm emit 逻辑
+// 当前不 emit 任何东西(text 由 caller 已经写入 .s buffer,若有)
+//
+// ship gate verify(per L4 § X.1):`grep "codegen_amd64_emit_raw_asm" compiler/src0/codegen_amd64.jhyy` ≥ 1 hit
+fn codegen_amd64_emit_raw_asm(text: *u8) -> i32 {
+    // D42 placeholder — V3-B v3.0.1 填充
+    // 占位:body 空,只 return 0;签名锁定(text: *u8) → i32,后续 V3-B 改 body 不改签名
+    let _ = text;
+    return 0;
+}
+
+// ════════════════════════════════════════════════════
+// 内部:15 个 emit 函数 stub(per L4 § 3.5)
+// ════════════════════════════════════════════════════
+// v2.5.0 skeleton — 全部 noop;V2-A Unit A sub-agent 填充主体
+//
+// emit_alloc / emit_store / emit_loadsub / emit_load / emit_call /
+// emit_phi / emit_copy / emit_binop / emit_ret / emit_jmp / emit_jnz /
+// emit_label / emit_func_header / emit_data_string / emit_volatile
+
+fn emit_alloc(a: i32, b: i32) -> i32       { let _ = a; let _ = b; return 0; }
+fn emit_store(a: i32, b: i32) -> i32       { let _ = a; let _ = b; return 0; }
+fn emit_loadsub(a: i32, b: i32) -> i32     { let _ = a; let _ = b; return 0; }
+fn emit_load(a: i32, b: i32) -> i32        { let _ = a; let _ = b; return 0; }
+fn emit_call(a: i32, b: i32) -> i32        { let _ = a; let _ = b; return 0; }
+fn emit_phi(a: i32, b: i32) -> i32         { let _ = a; let _ = b; return 0; }
+fn emit_copy(a: i32, b: i32) -> i32        { let _ = a; let _ = b; return 0; }
+fn emit_binop(a: i32, b: i32) -> i32       { let _ = a; let _ = b; return 0; }
+fn emit_ret(a: i32, b: i32) -> i32         { let _ = a; let _ = b; return 0; }
+fn emit_jmp(a: i32, b: i32) -> i32         { let _ = a; let _ = b; return 0; }
+fn emit_jnz(a: i32, b: i32) -> i32         { let _ = a; let _ = b; return 0; }
+fn emit_label(a: i32, b: i32) -> i32       { let _ = a; let _ = b; return 0; }
+fn emit_func_header(a: i32, b: i32) -> i32 { let _ = a; let _ = b; return 0; }
+fn emit_data_string(a: i32, b: i32) -> i32 { let _ = a; let _ = b; return 0; }
+fn emit_volatile(a: i32, b: i32) -> i32    { let _ = a; let _ = b; return 0; }
