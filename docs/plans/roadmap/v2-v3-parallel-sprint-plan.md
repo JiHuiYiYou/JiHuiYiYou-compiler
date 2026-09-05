@@ -100,8 +100,8 @@
 | 维度 | v2.x | v3.x |
 |------|------|------|
 | **主改** | codegen 后端(QBE → 自写)/ target dispatcher | lang-spec + sema + codegen 单点 emit |
-| **路径** | `compiler/src0/target/` + `compiler/src0/qbe/`(v2.0 启动) | `compiler/src0/sema.jhyy` + `compiler/src0/codegen.jhyy` 单点 |
-| **依赖** | v0 C 端 `codegen.c` + QBE 工具链 | `jhyy-lang-spec-v1.3.0.md` + `jhyy-abi-v1.0.0.md` |
+| **路径** | `compiler/src0/codegen_amd64.jhyy`(自写 IL → amd64 GAS `.s` 后端) + `compiler/src0/codegen_amd64_lexer.jhyy`(QBE IL lexer) + `compiler/src0/target_dispatch.jhyy`(`target_backend_mode()`) + `compiler/src/target/target_dispatch.{c,h}`(C-side mirror,bootstrap baseline 一致性 per v1.0 convention) | `compiler/src0/sema.jhyy` + `compiler/src0/codegen.jhyy` 单点 |
+| **依赖** | v0 C 端 `codegen.c`(bootstrap baseline mirror) + QBE 工具链(QBE_FALLBACK=1 时) | `jhyy-lang-spec-v1.3.0.md` + `jhyy-abi-v1.0.0.md` |
 
 ### 3.2 ABI 影响隔离
 
