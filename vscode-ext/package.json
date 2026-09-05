@@ -13,9 +13,9 @@
     "icon": "./icon.png",
     "main": "./out/extension.js",
     "activationEvents": [
-        "onLanguage:jhyy",
-        "onCommand:jhyy.runFile",
-        "onCommand:jhyy.compileOnly"
+        
+        
+        
     ],
     "devDependencies": {
         "@types/node": "^20.0.0",
