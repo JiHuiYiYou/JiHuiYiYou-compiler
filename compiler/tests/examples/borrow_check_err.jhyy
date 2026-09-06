@@ -1,0 +1,9 @@
+// SKIP: V3-C 3g feature — jhyy-side only (C-side bootstrap predates V3-C; chained &T not in C-side parser)
+// v3.1.0 (V3-C 3g) ship-gate test: chained `&&T` rejected at sema stage.
+// Per spec supplement v3.1.0 § 2: borrow is terminal — `&&T` is not allowed.
+fn main_jhyy() -> i32 {
+    // chained borrow must be rejected at sema; exit -1 expected
+    let x: &&i32 = 0 as &&i32;
+    return 0 as i32;
+}
+//EXPECT-ERROR: chained `&&T` not allowed

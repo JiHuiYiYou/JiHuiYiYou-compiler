@@ -142,6 +142,14 @@ fn NODE_VOLATILE_TYPE()  -> i32 { return 53 as i32; }
 //   Codegen emits raw mnem to `_fence.buf` side-file; main.jhyy concats
 //   before gcc link (same pattern as 3a inline asm). Returns unit type.
 fn NODE_BUILTIN_FENCE()  -> i32 { return 54 as i32; }
+// v3.1.0 (V3-C 3g): `&T` / `&mut T` borrow type wrapper + optional lifetime.
+//   is_mut=0 → shared borrow (`&T`)
+//   is_mut=1 → exclusive borrow (`&mut T`)
+//   lifetime=null (0) → elided/anonymous lifetime; non-null → *Node (Token
+//     holding the `'a` ident literal — sema extracts the lifetime name).
+// sema resolves inner, sets Type.kind=KIND_REF, Type.elem=inner, Type.is_mut.
+// NLL borrow check uses is_mut + lifetime_id from Sym to enforce exclusivity.
+fn NODE_REF_TYPE()       -> i32 { return 55 as i32; }
 
 fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_INT()            { return "INT" as *u8; }
@@ -368,6 +376,18 @@ type NodeVolatileType = struct {
     inner: *u8,        // *Node (must be primitive type annotation)
 }
 fn NODE_VOLATILE_TYPE_SIZE() -> i64 { return 8 as i64; }
+
+// v3.1.0 (V3-C 3g): inner(*u8 8) + is_mut(i32 4) + lifetime(*u8 8) = 24 (rounded to 24-aligned)
+// `&T` / `&mut T` borrow type wrapper. inner=*Node (resolved type annotation).
+// is_mut: 0=shared, 1=exclusive. lifetime: null=elided, non-null=*Node wrapping
+// the 'a ident token for named lifetime. Built by parse_type when peeking `&`
+// before TOKEN_STAR. Mirrors NodeVolatileType layout pattern.
+type NodeRefType = struct {
+    inner:    *u8,    // *Node (resolved type annotation, e.g. `T` in `&mut T`)
+    is_mut:   i32,    // 0 = &T (shared borrow), 1 = &mut T (exclusive borrow)
+    lifetime: *u8,    // *Node (nullable; the 'a ident node, or null for elided)
+}
+fn NODE_REF_TYPE_SIZE() -> i64 { return 24 as i64; }
 
 // v3.0.5 (3f memory barrier): kind(i64 8) = 8
 //   fence_seq_cst()  → kind=0 → mfence
@@ -1010,6 +1030,25 @@ fn ast_new_builtin_fence(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i
     let d = (buf as i64 + NODE_SIZE()) as *NodeBuiltinFence;
     (*d).kind = kind;
     return n;
+}
+
+// v3.1.0 (V3-C 3g): ast_new_ref_type / node_ref_type_data
+// `&T` / `&mut T` borrow type wrapper. parser 仅在 `&` 后跟 type 时调用;
+// 出现在 expr 位置(NODE_ADDR_OF)已存在,不重叠。lifetime 可为 null(elided)。
+// sema 走 NODE_REF_TYPE arm → resolve inner, copy Type, set KIND_REF + is_mut + elem.
+fn ast_new_ref_type(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                    inner: *Node, is_mut: i32, lifetime: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_REF_TYPE_SIZE());
+    let n = ast_init_node(buf, NODE_REF_TYPE(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeRefType;
+    (*d).inner = inner as *u8;
+    (*d).is_mut = is_mut;
+    (*d).lifetime = lifetime as *u8;
+    return n;
+}
+
+fn node_ref_type_data(n: *Node) -> *NodeRefType {
+    return (n as i64 + NODE_SIZE()) as *NodeRefType;
 }
 
 fn node_builtin_fence_data(n: *Node) -> *NodeBuiltinFence {

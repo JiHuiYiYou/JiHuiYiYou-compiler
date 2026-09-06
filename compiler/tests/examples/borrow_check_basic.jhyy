@@ -1,0 +1,22 @@
+// SKIP: V3-C 3g feature — jhyy-side only (C-side bootstrap predates V3-C; &T / &mut T type qualifier not in C-side parser)
+// v3.1.0 (V3-C 3g) ship-gate test: `&T` / `&mut T` borrow type resolution + 8-byte layout.
+// Per spec supplement v3.1.0 § 2: `&T` parses as borrow type, sizeof == 8 (single ptr).
+//
+// Note (v3.1.0 simplification): active-borrow conflict detection (NLL) is stub-only.
+// Conflicting `&mut` re-borrows are NOT detected in this sprint — full NLL is v3.x 末.
+//
+// Note: `&expr` in expression position still produces *T (POINTER) per existing
+// v1.x semantics. To produce a `&T` borrow, the type must be declared as `&T`
+// and the right-hand-side must coerce (out of scope v3.1.0). This test only
+// verifies that `&T` type ANNOTATION parses + sizeof == 8.
+fn main_jhyy() -> i32 {
+    let s_ref: i64 = sizeof(&i32);
+    let s_mut: i64 = sizeof(&mut i32);
+    if s_ref == 8 {
+        if s_mut == 8 {
+            return 42;
+        }
+    }
+    return 0 as i32;
+}
+//EXPECT:42
