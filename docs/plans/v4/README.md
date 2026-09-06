@@ -32,6 +32,9 @@ v4.x 是 v2.x + v3.x axes merge 后的主版本轴 — **串行**,不再有 v2 �
 - [`v4.10.0-plan.md`](v4.10.0-plan.md) — HKT + specialization
 - [`v4.11.0-plan.md`](v4.11.0-plan.md) — 并发 cap + 完整 memory model + 多架构 ABI
 
+### v4.12 — binary format 实装
+- [`v4.12.0-plan.md`](v4.12.0-plan.md) — `.jhyynb` native binary format 实装(DWARF emitter + section builder + `--target=jhyy-os` + `jhyy-inspect` CLI;OS 真闭环前提;per 2026-09-06 user)
+
 ## 决策锁
 
 - **v2.x ‖ v3.x 并行结束**:v4.0.0 merge 后,主版本轴串行
