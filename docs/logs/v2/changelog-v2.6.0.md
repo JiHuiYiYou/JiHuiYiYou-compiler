@@ -155,3 +155,72 @@
 - 3c volatile dependency:[`batch-V2-B-plan.md` line 18](../../plans/v2/batch-V2-B-plan.md) + [`v3.x-language-expansion.md § Sprint 3c`](../../plans/roadmap/v3.x-language-expansion.md)
 - v2.x ‖ v3.x parallel axes:[`v2-v3-parallel-sprint-plan.md § 6.2`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md)
 - Batch worktree cleanup pattern:[[feedback_batch_worktree_cleanup]]
+
+---
+
+## v2.6.1 — C-side regalloc global bridge (jh_regalloc_get / jh_regalloc_set)
+
+**Sprint:** V2-B v2.6.1
+**Ship commit:** `9fe2f94` (2026-09-06, axis-v2)
+**Scope:** Unit F patch 1 — jhyy-side codegen_amd64_regalloc.jhyy 模块级 `let mut g_regalloc_arr` 跨 fn 用, 但 jhyy codegen 在 module-level `let mut` 全局初始化上有 bug (W-017 历史), 导致 regalloc 数组全零。修复用 C runtime `jh_regalloc_get()` / `jh_regalloc_set()` bridge 把全局状态托管到 C-side heap, jhyy-side 只做指针读写。
+**净 ship 计数:** 1 真修 (C-side 2 extern helper + src0 decl) + 1 文档化 (helpers c-typedef 已 ship)
+**Files changed:**
+- `src/jhyy_helpers.c` (jh_regalloc_get/set 新增)
+- `compiler/src0/codegen_amd64_regalloc.jhyy` (let mut → extern bridge 调用)
+
+## v2.6.2 — codegen_amd64_regalloc module uses extern for global
+
+**Sprint:** V2-B v2.6.2
+**Ship commit:** `44eb090` (2026-09-06, axis-v2)
+**Scope:** Unit F patch 2 — `codegen_amd64_regalloc.jhyy` 把模块级 `let mut g_regalloc_arr` 全删, 改用 extern `jh_regalloc_get` / `jh_regalloc_set` bridge。完全消除 module-level `let mut` 触发面 (跟 W-017 / W-005 同型)。
+**净 ship 计数:** 1 文件改动 (删 module-level let mut, 加 extern call sites)
+
+## v2.6.3 — codegen_amd64_run real body (lex → regalloc → emit → peephole → write .s)
+
+**Sprint:** V2-B v2.6.3
+**Ship commit:** `b4ce9a2` (2026-09-06, axis-v2)
+**Scope:** Unit E deferred 真改 — `codegen_amd64_run` 占位 body 替成完整 orchestration: jh_read_file → arena_init → lex_il → tokens → malloc CGState + StringBuilder → cg_state_init → regalloc_init / regalloc_run → parse_and_emit (15 emit_X dispatch) → peephole_fold → jh_write_file。注释明确写 "Default backend 仍是 QBE; self path 激活需 main.jhyy run_backend wire (V2-B v2.6.4)"。
+**净 ship 计数:** 1 文件改动 (codegen_amd64.jhyy run_backend body 真改, ~140 行)
+**不动性:** standalone parse clean (make 通过), 但 inline_imports re-parse path 未验证 (W-068 seed)
+
+## v2.6.4 — wire run_backend dispatch (self path inert — inline_imports bug blocks real wire-up)
+
+**Sprint:** V2-B v2.6.4
+**Ship commit:** `c251658` (2026-09-06, axis-v2)
+**Scope:** 1) main.jhyy run_backend 重写为 `JHY_SELF_BACKEND=1` env gate 触发分支; 2) `import codegen_amd64;` 保持注释 (per W-068 trigger); 3) `extern fn codegen_amd64_run(...)` 保持注释; 4) inert `let _ = sb_env;` 消除 unused warning. QBE 路径完全不受影响 → regress 104/104 + D43 closure `51376ce5...` hold ✓.
+**Ship gate:** ✅ regress 104/104 ✓ + D43 closure sha hold ✓ + QBE_FALLBACK=1 regress 104/104 ✓ + workarounds active_count = 5 ✓
+**净 ship 计数:** 1 文件改动 (main.jhyy run_backend dispatch) + 1 workaround doc (W-068 RCA)
+**W-068 真改延迟:** W-068 source-level 4 真改推 v2.6.5 sub-sprint (per plan § Commit 4 + 5)
+
+## v2.6.5 — W-068 real wire-up (4 source-level 真改让 codegen_amd64 module 通过 inline_imports) + W-069 stage0 toolchain 拆账
+
+**Sprint:** V2-B v2.6.5
+**Ship commit:** `07c6a89` (2026-09-06, axis-v2)
+**承接:** v2.6.4 ship-time 发现 W-068 (codegen_amd64 modules 24 sema 错, ship-without-e2e-verify 元凶); v2.6.5 真改 4 处根因点 + enable 真 `import codegen_amd64;` + run_backend 真 dispatch。
+**Scope (4 真改 per W-068 RCA, commit `e18f61a`):**
+1. **codegen_amd64.jhyy:189-190 + :208** — 加 `: Arena` / `: StringBuilder` annotation 到 struct-literal。parse_type inserts unknown on miss as SYM_TYPE (`parser.jhyy:358-361`), 让 parser.jhyy:730-760 struct-literal branch 能 match。
+2. **codegen_amd64_peephole.jhyy:539, 551-762** — 22 处 `* N as i64` → `* (N as i64)` 加 parens 修 precedence (`as` 跟 `*` 优先级 ambiguity)。
+3. **codegen_amd64.jhyy:85** — `parse_and_emit` fn 定义从 line 191 前移到 line 85 caller 之前 (jhyy 不支持 forward ref, inline_imports 按源文件位置不按调用关系)。
+4. **codegen_amd64.jhyy:97-138** — parse_and_emit body 15 emit_X 调用全改 `let _ = emit_X(...)` 模式 (if/else i32/() 类型对齐)。
+5. **main.jhyy:50** — `import codegen_amd64;` 真打开 (删 v2.6.4 注释)。
+6. **main.jhyy:121** — 删 extern decl (避免 mangling 不一致导致 ld 5; jhyy emit module-prefix mangled, extern decl = C unmangled)。
+7. **main.jhyy:789-815** — run_backend 真 dispatch `codegen_amd64_run(il_path, asm_path)` + 自动降级 QBE (rc != 0 robustness)。
+**Ship gate:**
+- ✅ parse + sema 全过 (24 错全消, per W-068 RCA)
+- ✅ standalone `make` codegen_amd64.jhyy 编译 clean
+- ✅ inline_imports re-parse path 全过 (真 import 启用后 stage0 compile clean)
+- ⚠️ regress 104/104 deferred to v2.6.6 (W-069 toolchain issue 拆账 — jhyy.exe binary corrupt + ld exit 5)
+- ⚠️ D43 closure sha hold deferred to v2.6.6 (同 W-069)
+**净 ship 计数:** 3 source files 真改 (codegen_amd64.jhyy + codegen_amd64_peephole.jhyy + main.jhyy) + 1 workarounds.md doc (W-068 RESOLVED + W-069 DEFERRED)
+**W-069 拆账 (新登):** v2.6.5 真改 ship 后 surface 两类 toolchain issue — (1) `OSError [WinError 1392] 文件或目录损坏且无法读取` (jhyy.exe 文件头坏), (2) `ld exit 5` "errors listed above" (libc undefined symbols, gcc auto-link 失效)。baseline v2.6.4 inert 跑同命令不挂 → W-068 source-level fix 不是直接因。**scope v2.6.6**: clean stage0 rebuild + 排查 cmd_compile invoke_buf `-lc` 漏 + ld 5 fail echo invoke_buf (per W-045 pattern)。
+
+## References (v2.6.1 - v2.6.5)
+
+- v2.6.1 commit: `9fe2f94` (jh_regalloc_get/set C-side bridge)
+- v2.6.2 commit: `44eb090` (regalloc module uses extern)
+- v2.6.3 commit: `b4ce9a2` (codegen_amd64_run real body)
+- v2.6.4 commit: `c251658` (wire run_backend inert)
+- v2.6.5 commit: `07c6a89` (W-068 real wire-up)
+- W-068 entry: [`../../internal/workarounds.md`](../../internal/workarounds.md) (✅ RESOLVED)
+- W-069 entry: [`../../internal/workarounds.md`](../../internal/workarounds.md) (🟡 DEFERRED v2.6.6)
+- Plan doc: [`twinkly-hatching-canyon.md`](../../plans/twinkly-hatching-canyon.md) (Phase 1-4)
