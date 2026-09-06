@@ -4931,7 +4931,7 @@ W-069 不是 stage0 build pollution, 而是 **codegen NODE_CALL is_extern branch
 - ✅ `compiler/src/codegen.c`: CGFnDef struct + 3 helpers + cg_module Pass A.5 loop + NODE_CALL is_extern fallback (~80 LOC)
 - ✅ `compiler/src0/codegen.jhyy`: CGFnDef struct + 3 helpers + CGContext +2 fields + CGCONTEXT_SIZE 144 + cg_module Pass A.5 loop + NODE_CALL is_extern fallback (~80 LOC)
 - ✅ docs update (本 entry + changelog-v2.6.0.md v2.6.6 sub-section)
-- ❌ byte_equal_amd64.sh Commit 5 (`SELF_DEFERRED=0` + `JHY_SELF_BACKEND=1` + 删 deferred notice + strict + `--save-baseline`) — user 决策推到 v2.6.7
+- ❌ ~~byte_equal_amd64.sh Commit 5 (`SELF_DEFERRED=0` + `JHY_SELF_BACKEND=1` + 删 deferred notice + strict + `--save-baseline`) — user 决策推到 v2.6.7~~ → ✅ **DONE v2.6.7** (commit TBD) — SELF_DEFERRED 删 + strict default-on + `--save-baseline` / `--baseline` flag wired (gitignored baseline dir `compiler/tests/bootstrap/baseline/byte_equal_amd64/`); ship gate 5/5: 10 PASS QBE-vs-self + 10 PASS baseline match
 
 **失效条件 (post-fix):** 不再有失效条件 — 真修,不是 workaround。如果未来新增 codegen_amd64_*.jhyy 用了新的 `extern fn`,会自动通过 cg_fn_defs_register in cg_module Pass A.5 覆盖。
 

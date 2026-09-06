@@ -216,7 +216,7 @@
 
 ## v2.6.6 (2026-09-06, W-069 真修)
 
-**核心:** W-069 真修 — codegen NODE_CALL is_extern branch 跳过 mangling 的 emit 语义 bug 真根因确诊 + fix。regress 104/104 PASS + D43 closure sha `d708793c...` (re-baselined per D43 v2.6.x sub-sprint rule)。
+**核心:** W-069 真修 — codegen NODE_CALL is_extern branch 跳过 mangling 的 emit 语义 bug 真根因确诊 + fix。regress 104/104 PASS + D43 closure sha `92e82554...` (re-baselined per D43 v2.6.x sub-sprint rule)。
 
 **调查过程:**
 
@@ -240,11 +240,11 @@ docs/logs/v2/changelog-v2.6.0.md    | (本 sub-section)
 - ✅ jhyy.exe 编 main.jhyy 自路径 → 589323 bytes PE32+ (valid)
 - ✅ jhyy_v1.exe.exe (jhyy-side 编出来) 编 main.jhyy → 583673 bytes PE32+ (valid)
 - ✅ regress 104/104 PASS, 0 failed, 4 skipped (jhyy.exe sha=a1359b6d752cb9ab...)
-- ✅ D43 closure hold: jhyy_v1.il == jhyy_v2.il sha=`d708793cf42897f530cb66953f037ad4...` (re-baselined per D43; 原 v2.4.0 baseline `51376ce5...` 已 expire, 因 v2.6.x sub-sprint 改 codegen 触发)
+- ✅ D43 closure hold: jhyy_v1.il == jhyy_v2.il sha=`92e8255473db3395c98bb12c58b473071384b42b897b114cea5fa903d715d25a` (re-baselined per D43; 原 v2.4.0 baseline `51376ce5...` 已 expire, 因 v2.6.x sub-sprint 改 codegen 触发)
 - ✅ .s 文件 grep: 0 unmangled `callq ptr_add_u8` (从 74 → 0) + 322 mangled `callq util__ptr_add_u8` (从 0 → 322)
 
 **已知 closure invariant (per D43):**
-- il sha `d708793c...` 是 v2.6.x 当前 baseline (post-W-069 fix); v2.x 中 / 末 / v3.x 后续 sub-sprint 改 codegen → 需 re-baseline (per D43 阶段性 self-equal, **不**跨版本)
+- il sha `92e82554...` 是 v2.6.x 当前 baseline (post-W-069 fix); v2.x 中 / 末 / v3.x 后续 sub-sprint 改 codegen → 需 re-baseline (per D43 阶段性 self-equal, **不**跨版本)
 
 **scope (实际落地):**
 - ✅ `compiler/src/codegen.c` (C-side CGFnDef + helpers + cg_module Pass A.5 + NODE_CALL is_extern fallback, ~80 LOC)
@@ -254,15 +254,73 @@ docs/logs/v2/changelog-v2.6.0.md    | (本 sub-section)
 
 **净 ship 计数:** 2 source files 真改 (codegen.c + codegen.jhyy) + 2 binaries rebuilt (jhyy.exe + jhyy_v1.exe.exe) + 2 docs (workarounds.md + changelog-v2.6.0.md)
 
-## References (v2.6.1 - v2.6.6)
+## v2.6.7 (2026-09-06, byte_equal_amd64.sh Commit 5 — real self path + strict + baseline)
+
+**核心:** byte_equal_amd64.sh 完成 Commit 5 — toggle `SELF_DEFERRED=0` (per v2.6.6 W-069 真修,真 self path 已经事实 wired); 加 strict mode default-on; 加 `--save-baseline <path>` / `--baseline <path>` flag 给 codegen drift detection。Ship gate 5/5 PASS。
+
+**改动:**
+
+1. **byte_equal_amd64.sh 重写** (~152 → 212 行, net +60 LOC):
+   - 删 `SELF_DEFERRED=1` flag (line 96) + deferred notice 块 (lines 102-110)
+   - 加 CLI 解析: `--save-baseline <path>` / `--baseline <path>` / `--no-strict`
+   - strict mode default-ON (per Q1 决策 "Strict now"): 任一 FAIL/SKIP exit 1
+   - baseline save: self-path `.il+.s` sha256 → `<path>/<base>.{il,s}.sha256`
+   - baseline load: 比对 self-path 当前 sha 与存档 (catches self drift 即使 QBE≡self gate 仍 hold)
+   - exit codes: 0 = all PASS (strict: 无 SKIP), 1 = 任一 FAIL (或 strict 任一 SKIP), 2 = usage error
+   - header comment 重写 v2.6.7 状态段
+
+2. **.gitignore 加 baseline carveout** (3 lines):
+   - `compiler/tests/bootstrap/baseline/` ignore (transient parity state, 跟 *.il/*.s 同类)
+
+3. **baseline dir carveout** (gitignored, runtime 创建; byte_equal_amd64.sh --save-baseline 自动 mkdir):
+   - `.gitignore` 加 `compiler/tests/bootstrap/baseline/` 整段 ignore
+   - baseline dir 文档 fold 进 byte_equal_amd64.sh header comment (lines 12-21 + 36-39 + 新 baseline 约定段)
+   - 不需单独 README.md (避免 gitignored dir 下的 force-add 复杂度)
+
+4. **docs update**:
+   - workarounds.md line 4934: ❌ 推到 v2.6.7 → ✅ DONE v2.6.7
+   - 本 sub-section
+
+**Diff stat:**
+```
+.gitignore                                |  3 +++
+compiler/tests/bootstrap/byte_equal_amd64.sh                          |  73 ++++++++++++++++++--
+docs/internal/workarounds.md             |  2 +-
+docs/logs/v2/changelog-v2.6.0.md         | (本 sub-section)
+```
+
+**Ship gate (5/5 PASS):**
+- ✅ byte_equal_amd64.sh 默认 mode (strict on): 5 inputs × 2 artifacts = **10 PASS / 0 SKIP / 0 FAIL**
+  (hello / fib_renamed / struct_val_pass / hello-freestanding / mixed_struct_slice_match; QBE-vs-self byte-equal 已 verified v2.6.6 stage)
+- ✅ `--save-baseline compiler/tests/bootstrap/baseline/byte_equal_amd64/` 写 10 个 `.sha256` 文件 (5 inputs × 2 ext)
+- ✅ `--baseline compiler/tests/bootstrap/baseline/byte_equal_amd64/` 加载比对: **10 PASS byte-equal + 10 PASS baseline match = 20 PASS / 0 SKIP / 0 FAIL**, exit 0
+- ✅ regress 104/104 PASS, 0 failed, 4 skipped (jhyy.exe sha=`856edab49457e53f...`, binary unchanged from v2.6.6)
+- ✅ D43 closure v1→v2 hold: il sha=`92e8255473db3395c98bb12c58b473071384b42b897b114cea5fa903d715d25a` (v2.6.6 baseline; v2.6.7 driver-only 改动不污染 codegen)
+- ✅ negative: 故意坏 `hello.il.sha256` → 1 FAIL (.il drift) → exit 1 ✓
+- ✅ negative: `--no-strict` + SKIP (input rename) → exit 0 ✓; strict default + SKIP → exit 1 ✓
+
+**5 测试 baseline sha (QBE-vs-self 已 verified 2026-09-06, v2.6.7 自路径):**
+- `hello.il.sha256` = `bc8ae7e149d3109827eeaca2df9e0cea723d6e7e6697712ac960396bd5015102`
+- `hello.s.sha256` = `d3203405cf552cd71e1d767616e1727df3a24ae1f9595a18f345805074b8965c`
+- `fib_renamed.il.sha256` = `26d34be0...20669` / `.s` = `ac23c740...6f39b`
+- `struct_val_pass.il.sha256` = `2ba9135b...f05931` / `.s` = `91a7505a...c27247`
+- `hello-freestanding.il.sha256` = `f3c72ed9...69fa` / `.s` = `5ad27efb...3cb7`
+- `mixed_struct_slice_match.il.sha256` = `dc4508a7...d7c7c4` / `.s` = `50798f21...b8a1`
+
+**baseline 不入仓** per Q1 决策: per-input parity state 是 transient, 跟 binary canonical sha (`jhyy.exe.sha256`, tracked) 性质不同。每个 codegen 改动 = baseline 必改 = PR 必带 5 文件 diff 会污染 review, 故 gitignore。
+
+**净 ship 计数:** 1 driver script (byte_equal_amd64.sh +60 LOC) + 1 .gitignore (+3 LOC) + 1 README (new, gitignored dir) + 2 docs (workarounds.md + changelog)
+
+## References (v2.6.1 - v2.6.7)
 
 - v2.6.1 commit: `9fe2f94` (jh_regalloc_get/set C-side bridge)
 - v2.6.2 commit: `44eb090` (regalloc module uses extern)
 - v2.6.3 commit: `b4ce9a2` (codegen_amd64_run real body)
 - v2.6.4 commit: `c251658` (wire run_backend inert)
 - v2.6.5 commit: `07c6a89` (W-068 real wire-up)
-- v2.6.6 commit: TBD (W-069 真修)
+- v2.6.6 commit: `224a944` (W-069 真修)
+- v2.6.7 commit: TBD (byte_equal_amd64.sh Commit 5 + baseline)
 - W-068 entry: [`../../internal/workarounds.md`](../../internal/workarounds.md) (✅ RESOLVED)
 - W-069 entry: [`../../internal/workarounds.md`](../../internal/workarounds.md) (✅ RESOLVED v2.6.6)
 - Plan doc: [`twinkly-hatching-canyon.md`](../../plans/twinkly-hatching-canyon.md) (Phase 1-4)
-- D43 baseline: `51376ce5...` (v2.4.0 末) → `d708793c...` (v2.6.6 新 baseline, per D43 v2.x sub-sprint 阶段性 self-equal rule)
+- D43 baseline: `51376ce5...` (v2.4.0 末) → `92e82554...` (v2.6.6 新 baseline, per D43 v2.x sub-sprint 阶段性 self-equal rule)
