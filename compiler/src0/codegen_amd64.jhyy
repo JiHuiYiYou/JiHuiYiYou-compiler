@@ -27,9 +27,13 @@
 // codegen.c:731 — same restriction as abi_amd64_win.jhyy).
 
 import codegen_amd64_state;  // CGState / QBE_W_LOCAL / ILTOK_* / cg_offset_for_temp
+import codegen_amd64_lexer;    // V2-B v2.6.3: lex_il / lex_il_count
 import codegen_amd64_emit_mem;    // V2-B v2.6.0 Unit B: emit_alloc / emit_store / emit_load / emit_loadsub
 import codegen_amd64_emit_ctrl;   // V2-B v2.6.0 Unit B: emit_jmp / emit_jnz / emit_label / emit_ret / emit_func_header / emit_data_string
 import codegen_amd64_emit_call;   // V2-B v2.6.0 Unit B: emit_call / emit_phi / emit_copy / emit_binop / emit_volatile
+import codegen_amd64_peephole;    // V2-B v2.6.3: peephole_fold (local folding on emitted .s)
+import util;                      // V2-B v2.6.3: StringBuilder + sb_init / sb_buf / sb_len / ptr_add_u8
+import arena;                     // V2-B v2.6.3: Arena type + arena_alloc / arena_init
 
 // ═══ Local externs (jh_* helpers from jhyy_helpers.c, per V2-B v2.6.0 Unit A) ═══
 // Used by read_file / write_file below.
@@ -60,11 +64,84 @@ fn codegen_amd64_init() -> i32 {
 //   4. write_file(asm_path, sb_get_str(out_sb), sb_len(out_sb))(per `feedback_qbe_crlf_root_cause` 用 "wb")
 //   5. return 0
 fn codegen_amd64_run(il_path: *u8, asm_path: *u8) -> i32 {
-    // v2.5.0 skeleton:stub — return 0 占位;A1-A4 agents 完成后填实现
-    // 完整实现见 L4 § 4.1 + § 3.5 15 个 emit 函数
-    let _ = il_path;
-    let _ = asm_path;
-    return 0;
+    // v2.6.3: real impl — IL → lex → regalloc → parse_and_emit
+    //                            → peephole → write .s
+    //
+    // Per V2-B v2.6.x plan § Commit 3: full orchestration for self path.
+    // Default backend remains QBE; self path activated via JHY_SELF_BACKEND=1
+    // env var (added in v2.6.4 main.jhyy run_backend dispatch).
+    //
+    // 编排 (per plan § B.2):
+    //   1. jh_read_file(il_path) → 读 .il 到 caller-owned 4 MB buffer
+    //   2. arena_init(2MB) → lex_il() → tokens; lex_il_count() → n
+    //   3. malloc CGState + StringBuilder, cg_state_init(state, sb, arena, "")
+    //   4. regalloc_init + regalloc_run (linear-scan spill analysis)
+    //   5. parse_and_emit(state, tokens, n) → emit_* dispatch (15 IL 子集)
+    //   6. peephole_fold on emitted .s
+    //   7. jh_write_file(asm_path, folded, folded_len)
+    //   8. free + arena_free + return rc
+
+    // 1. Read .il
+    let il_cap: i64 = (4 as i64) * (1024 as i64) * (1024 as i64);
+    let il_buf = malloc(il_cap);
+    if il_buf == (0 as *u8) { return 1 as i32; }
+    let il_len: i64 = 0 as i64;
+    let read_rc = jh_read_file(il_path, il_buf, il_cap, &il_len);
+    if read_rc != (0 as i32) {
+        // 1 = buf too small; -1 = err; v2.6.x hard fail (re-try pattern = v2.7.x territory)
+        free(il_buf);
+        return 1 as i32;
+    }
+
+    // 2. Lex into tokens (arena-backed)
+    let mut arena = Arena { start: 0 as *u8, cur: 0 as *u8, end: 0 as *u8,
+                             blocks: 0 as *u8, def_size: 0 as i64 };
+    arena_init(&arena, (2 as i64) * (1024 as i64) * (1024 as i64));
+    let tokens = lex_il(il_buf, il_len, &arena);
+    if tokens == (0 as *u8) {
+        free(il_buf);
+        arena_free(&arena);
+        return 1 as i32;
+    }
+    let n = lex_il_count(tokens);
+
+    // 3. CGState + StringBuilder init (heap-alloc'd, state has stable ptr)
+    let state_buf = malloc(64 as i64);
+    if state_buf == (0 as *u8) {
+        free(il_buf);
+        arena_free(&arena);
+        return 1 as i32;
+    }
+    let mut sb = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
+    sb_init(&arena, &sb);
+    let _init_rc = cg_state_init(state_buf, &sb, &arena, "" as *u8);
+
+    // 4. Regalloc analysis (linear-scan; sets g_regalloc_arr via jh_regalloc_set)
+    let reg_arr = regalloc_init(&arena);
+    if reg_arr != (0 as *u8) {
+        let _ = regalloc_run(&arena, reg_arr, tokens, n);
+    }
+
+    // 5. Dispatch loop → emit each token → .s into sb.buf
+    let _pe_rc = parse_and_emit(state_buf, tokens, n);
+
+    // 6. Peephole fold on emitted .s (no-op if arena alloc fails)
+    let raw = sb.buf;
+    let raw_len = sb.len;
+    let folded = peephole_fold(raw, raw_len, &arena);
+    let final_buf: *u8 = if folded != (0 as *u8) { folded } else { raw };
+    // peephole_fold returns input unchanged on no-op (arena null), so final_buf
+    // might point to raw (which is arena-alloc'd, NOT null-terminated).
+    // jh_write_file takes explicit len, so no null-term needed.
+
+    // 7. Write .s (binary mode, per feedback_qbe_crlf_root_cause)
+    let wr_rc = jh_write_file(asm_path, final_buf, raw_len);
+
+    // 8. Cleanup
+    free(state_buf);
+    free(il_buf);
+    arena_free(&arena);
+    return wr_rc;
 }
 
 // codegen_amd64_emit_raw_asm — D42 escape hatch stub
