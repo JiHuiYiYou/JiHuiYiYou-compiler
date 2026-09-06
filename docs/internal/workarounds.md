@@ -65,6 +65,7 @@
 | [W-063](#w-063-短名-enum-模式匹配-somev--v-bind--codegen-传错-type--phi-t0-未定义) | ✅ RESOLVED 2026-09-01 (v1.8.3.2 jhyy-side + v1.8.3.3 C-side, probe-then-fix) | codegen `cg_match_pattern` NODE_PATTERN_ENUM 分支在 `pe->variant_sym == NULL` 时走 silent always-match fallback (emit `jnz %t2, @arm2, @next3` + `%t2 =w copy 1`), 不再 emit payload slot alias 的 `loadw`. 当 phi 引用该 slot (`%t6 =w phi @arm2 %t0`) 时 %t0 未定义 → QBE reject "invalid type for operand %t0 in phi %t6". 短名 form (`Some(v)` 无 `Option::` qualifier) 在 parser.c `parse_pattern_enum` (line 225-235) 把 `type_sym=NULL` 直接传 ast_new_pattern_enum → 触发 fallback. 长名 form (`Option::Some(v)`) `type_sym` set,不触发. 修复: jhyy-side `compiler/src0/codegen.jhyy:3439` NODE_MATCH 入口 `cg_match_pattern` 调用改传 **subject type** (`(*matched_node).type_ptr`) 而非 match result type (`(*n).type_ptr`), v1.8.3.3 patch 镜像 C-side `compiler/src/codegen.c:1541` (`Type *match_type = n->type` → `Type *match_type = d->expr->type`), 让 fallback 路径能反查 match_type->enum_type.variants 拿名字. `cg_match_pattern` 内部 l:977-1015 用 match_type 兜底解析 variant name + emit payload alias loadw. 新增 `compiler/tests/examples/payload_bind_short.jhyy` integration test (5/5 PASS per `feedback_fix_evaluation_rule`)。regress 双 gated binary (jhyy.exe + jhyy_stage0.exe) 103/103 + Stage 2 N=4 byte-equal 闭环 (v2/v3/v4/v5 .il sha=`fa1137e5...`)。 |
 | [W-064](#w-064-run_qbe-失败只打-qbe-failed--缺-stderr-捕获-qbe-真实诊断丢失) | ✅ RESOLVED 2026-09-01 (v1.8.3.2 patch) | `run_qbe` (compiler/src0/main.jhyy:657-699) QBE 失败时只 echo `cmd_buf` (`QBE failed: "..."\n`), 不读 jh_run 已 capture 的 child stderr. QBE 真实诊断 ("invalid type for operand %t0 in phi %t6" / "undefined symbol" / "type mismatch") 全丢, 用户只见 "QBE failed" 一行, 难定位是 QBE reject 哪条 IL. 修复: 镜像 `link_with_gcc` W-045 pattern — `run_qbe` 失败分支加 `let captured = jh_run_get_output(); if captured != (0 as *u8) && (*captured) != (0 as i32) { jh_fputs_stderr("QBE stderr:\n" as *u8); jh_fputs_stderr(captured); jh_fputs_stderr("\n" as *u8); }`. `jh_run` per-call reset `jh_run_outlen = 0` (jhyy_helpers.c:517-518) 保证 QBE→gcc 链顺序不污染. **link_with_gcc 已 ship W-045**, `run_qbe` 是唯一剩没接 stderr capture 的 child process site. 顺带 bump l:1091 stale version literal `v1.0.0` → `v1.8.3.2` (jhyy.exe -h 可见)。回归 103/103 + Stage 2 闭环 hold. C-side `compiler/src/main.c` 未镜像 (production 用 jhyy-side, stage0 bootstrap 不修)。 |
 | [W-065](#w-065-jhyy-run-不预检-fn-main_jhyy--库-snippet-报-undefined-reference-to-main_jhyy-对用户不友好) | ✅ RESOLVED 2026-09-01 (v1.8.3.2 patch) | `jhyy run` 接 input 后直接调 `cmd_compile` (→ QBE → gcc link) — 库 snippet (无 `fn main_jhyy`, 仅 `fn unwrap` / `fn dist_sq` 这种) link 时 gcc 报 `undefined reference to main_jhyy`, 错误晚出且 noisy. 修复: `cmd_run` 入口 (compiler/src0/main.jhyy:987) 在 `cmd_compile` 之前加 cheap byte-level scan — `fopen(input, "rb")` + `fread` 131072 bytes + fclose, 然后 byte-by-byte 搜 needle `"fn main_jhyy"`. 找到 → 继续 compile; 找不到 → `jh_fputs_stderr("jhyy run: '<file>' has no 'fn main_jhyy() -> i32' (required for 'jhyy run'; use 'jhyy compile <file>.jhyy' for libraries)\n" as *u8)` + return 1. **scope**: 只动 `cmd_run`, `cmd_compile` 保持允许库-only 编译 (compile 不需要 main_jhyy, 可产 .s/.exe 给后续 link 用)。**byte-comparison 实现**: 第一次 commit (`src0/main.jhyy:1015-1029`) 用 `*i32` cast deref 4-byte 而非 1-byte, scan 永远不 match (即使文件真有 `fn main_jhyy`)。第二次 commit 改 `*u8` cast + `as i32` promote 才正确。首次 fix 在 fresh build 后 user case (test.jhyy / test2.jhyy) 仍报 "no fn main_jhyy" 才暴露 — 不写 5/5 PASS loop 不会发现 byte-comparison bug。regress 103/103 + Stage 2 闭环 hold (v2/v3/v4/v5 .il sha=`fa1137e5...`)。**C-side `src/main.c` 未镜像** (production path 走 jhyy-side)。 |
+| [W-068](#w-068-自写后端-codegen_amd64-模块未-e2e-验证-v26x-阶段-ship-但-make-不编-import-链-触发-24-sema-错) | 🟡 DEFERRED v2.6.5 | V2-B v2.6.0 Unit C (regalloc, commit `baa2757`) / Unit D (peephole, commit `9fdf173`) / Unit E (dispatch infra) + v2.6.3 (codegen_amd64_run real body, commit `b4ce9a2`) 4 个 commit ship 了 ~2200 LOC self-backend 代码,但 `import codegen_amd64;` 在 main.jhyy 一直注释 out, **`make` 不 parse 这些 module**, ship 时 0 e2e 验证。v2.6.4 commit `c251658` 实际打开 import 测试,surface 24 个 sema 错 (codegen_amd64.jhyy:125 `parse_and_emit` forward ref + :229 if/else i32/() mismatch + peephole.jhyy:539/551-762 等 22 个 `i64 vs i32` binary op precedence 错 = `len * 2 as i64` 这种 `*` 跟 `as` 优先级 ambiguity)。`make` build path 不暴露这些因为只 parse main.jhyy + inline_imports 跳过 codegen_amd64。**scope**: 修复需 (a) 重排 codegen_amd64.jhyy `parse_and_emit` 定义到 :125 之前, (b) 改 parse_and_emit dispatch loop 让 emit_data_string 走 `_ = emit_data_string(...)` 模式 (返回 () 跟 :242 return 0 类型对齐), (c) peephole.jhyy 加括号 `len * (2 as i64)` 修 precedence — 总 ~30 行改动。预计 v2.6.5 sub-sprint 完成。**workaround (v2.6.4 commit `c251658`)**: `import codegen_amd64;` 保持注释,run_backend dispatch inert (`let _ = sb_env;`),功能等价 v2.6.0 baseline + JHY_SELF_BACKEND env gate 占位。|
 
 ---
 
@@ -4793,5 +4794,77 @@ if av != bv { match_ok = 0 as i32; }
 3. **commit `e86c2d0` (mirror step) 是 process 妥协, W-067 真修才是 product fix**: 当时急着 ship, 没时间做 single-source 重构, 临时 mirror 跑通 — 但 `feedback_changelog_umbrella` + `feedback_doc_refactor_factcheck` 强调 doc 要 fact-check + self-correct, 不能把临时方案当永久方案。**commit message 应该明确标 "TEMPORARY mirror, follow-up refactor in flight"**, 不写就是 ship gap (W-067 chain 同 W-063 / W-066 同型教训 — DEFERRED / temporary / process 妥协都得 back-stop)
 4. **GITHUB_ENV export pattern** 是 GitHub Actions 的标准 idiom, 不需要发明轮子。`Add-Content -Path $env:GITHUB_ENV` 就行, 不必用 `Out-File` (per W-022 BOM 教训)。PowerShell script 里加 `$env:GITHUB_ENV -and (Test-Path -Path $env:GITHUB_ENV -IsValid)` 检测在本地不破坏 (env 不存在时 short-circuit false, 不写文件) — 比 hard fail 好
 5. **latent bug ship 教训**: W-067 这 bug 实际一直存在 (release.yml 跟 build.ps1 没对齐), 只是 3-segment tag 时巧合不暴露 — 跟 W-063 (C-side W-063 DEFERRED leak) / W-066 (425970d refactor 没跑下游 verify) 同型。**refactor 改 versioning 规则的 commit 必须显式 grep "MSI ProductVersion / filename / VERSION / JHY_VERSION" 全链路 + 跑端到端 verify**, 否则 latent ship
+
+
+---
+
+## W-068: 自写后端 codegen_amd64 模块未 e2e 验证 — v2.6.x 阶段 ship 但 `make` 不编 import 链触发 24 sema 错
+
+**ID:** W-068
+**状态:** 🟡 DEFERRED v2.6.5
+**日期:** 2026-09-06 (introduced — v2.6.4 commit `c251658` 打开 import 测试 surface 24 错)
+**触发面:** v2.6.4 wire `run_backend` dispatch 实际 uncomment `import codegen_amd64;` 测试 inline_imports 链 → stage0 compile `main.jhyy` 报 24 个 sema 错 (codegen_amd64.jhyy + codegen_amd64_peephole.jhyy)。regress 104/104 + D43 closure `51376ce5...` hold 是 commit `c251658` 把 import 重新注释掉之后的状态 (inert)。
+
+**症状:** `jhyy_stage0 compile compiler/src0/main.jhyy -o compiler/build/bin/jhyy_v1.exe` 报:
+```
+compiler/src0/codegen_amd64.jhyy:97:27: error: expected ;, got {
+compiler/src0/codegen_amd64.jhyy:115:13: error: expected ;, got {
+compiler/src0/codegen_amd64_peephole.jhyy:539:32: error: type mismatch in binary op: i32 vs i64
+... (24 错, 22 来自 peephole.jhyy)
+```
+
+**根因:** **ship-without-e2e-verify**。v2.6.0 Unit C (regalloc `baa2757`) / Unit D (peephole `9fdf173`) / Unit E (dispatch infra `129226b`) + v2.6.3 (`codegen_amd64_run` real body `b4ce9a2`) 4 个 commit ship 了 ~2200 LOC self-backend 代码,但 `import codegen_amd64;` 在 main.jhyy 一直注释 out。`make` 只 parse main.jhyy, inline_imports 在 parse 阶段跳过这些 module → codegen_amd64*.jhyy 从未被 stage0 parse 过 → 错漏到 v2.6.4 wire-up 才 surface。
+
+**3 类错 (per `feedback_audit_single_commit_diff` 一笔一笔 fact-check):**
+1. **struct literal 多行 / 无 annotation** (codegen_amd64.jhyy:97 + :115): `let mut X = Type { ... };` (无 `: Type` annotation + 多行 field list) 在 inline_imports re-parse 路径下报 `expected ;, got {`。standalone parse (`make` 走 main.jhyy → inline_imports 跳过 codegen_amd64) 不报错。`parse_let` → `parse_expr` → struct-literal branch (`parser.jhyy:730-760`) 字段循环用 `parser_match(COMMA)` 但缺显式 newline tolerance, 在 import re-parse 的 fresh Parser state 下不可靠。**修复**: 加 `: Arena` / `: StringBuilder` annotation (独立生效) + 可选 collapse 多行 → 单行 (cosmetic)。
+2. **forward ref** (codegen_amd64.jhyy:125): `parse_and_emit(state_buf, tokens, n)` 在函数 `codegen_amd64_run` 体内被调用, 但 `parse_and_emit` 的 `fn` 定义在文件后面 (codegen_amd64.jhyy:191)。inline_imports AST-level merge 不重排 decls → sema 阶段找不到 `parse_and_emit` symbol → 24 错 cascade。**修复**: 把 `parse_and_emit` 的 `fn` 定义挪到 :125 调用点之前 (重排 decls)。
+3. **`if/else` i32/() mismatch** (codegen_amd64.jhyy:229): `if/else` 两个 branch 一个返回 `i32` (e.g. `emit_jnz(...)`) 另一个返回 `()` (void, e.g. `emit_data_string(...)` 在某 path)。inline_imports re-parse 比 standalone parse 严格, 触发 sema 类型不匹配。**修复**: `parse_and_emit` 改 `_ = emit_data_string(...)` 模式 (跟 W-003 `let _ = fncall(...)` 同 pattern, 把 void return 显式丢弃) 或加 `return 0;` 让两 branch 都返回 `i32`。
+4. **`*` vs `as` precedence** (peephole.jhyy:539, 551-554, 559, 573-576, 595-596, 622-623, 629-630, 661-662, 669-670, 727, 747, 761-762 — 22 处): `let X = arena_alloc(arena, max_lines * 8 as i64);` 表达式 `max_lines * 8 as i64` 在当前 parser 优先级下 `as` 高于 `*`, 实际 parse 成 `max_lines * (8 as i64)` 但 sema 推断 `max_lines: i32` + `8 as i64` 算出 `i64`, 然后 `*` 两边 `i32 * i64` → type mismatch。inline_imports re-parse 比 standalone 严格, 触发 sema 错。**修复**: 加括号 `max_lines * (8 as i64)` 显式让 sema 走 `i32 * i64 → i64`, 跟 ABI 一致。
+
+**workaround (v2.6.4 commit `c251658` 当前状态):**
+- `import codegen_amd64;` 在 main.jhyy:44 保持注释, 注释 block 解释 inline_imports bug 触发面
+- `extern fn codegen_amd64_run(...)` 在 main.jhyy:121 保持注释
+- `run_backend` (main.jhyy:783-815) 重写为 `JHY_SELF_BACKEND=1` env gate 触发的 inert 分支: `let _ = sb_env;` (no-op, 消 unused warning)
+- QBE 路径 (`run_qbe`) 不受影响 → regress 104/104 + D43 closure `51376ce5...` hold ✓
+
+**scope (~30 LOC, v2.6.5 sub-sprint):**
+- ✅ 改 `compiler/src0/codegen_amd64.jhyy`: `: Arena` / `: StringBuilder` annotation 加到 :97-98 + :115 (2 处); `parse_and_emit` `fn` 定义重排到 :125 调用点之前 (~70 行 def 整体挪动); :229 `if/else` 两 branch 改 `_ = emit_data_string(...)` 模式
+- ✅ 改 `compiler/src0/codegen_amd64_peephole.jhyy`: 22 处 `* 8 as i64` → `* (8 as i64)` 加括号 (1 commit sed 行末或手工 22 edit)
+- ✅ 改 `compiler/src0/main.jhyy`: 删 :44 + :121 注释, 启用真 import + extern; `run_backend` inert → 真 dispatch (3-5 LOC 替换)
+- ✅ gate: `make` + `regress 104/104` + D43 closure sha hold + `JHY_SELF_BACKEND=1 regress 104/104` (首次 e2e 验证自写后端 dispatch)
+- ✅ `byte_equal_amd64.sh` Phase 4 Commit 5: prepend `JHY_SELF_BACKEND=1` + remove `SELF_DEFERRED=1` flag + 更新 script header
+- ✅ 改 `docs/logs/v2/changelog-v2.6.x.md` v2.6.5 sub-section
+- ✅ 改 `docs/internal/workarounds.md` W-068 entry: 🟡 DEFERRED → ✅ RESOLVED
+
+**净 ship 计数:** 4 真改 (2 文件 import/sema + 1 文件 wire-up + 1 doc changelog + workarounds.md) + 1 verify script update, ~35 LOC 改动。预计 1 commit ship v2.6.5。
+
+### 失效条件
+
+workaround (`c251658` inert) 的失效条件 = 任何 commit 真打开 self path:
+- 不动 main.jhyy:44 + :121 注释 + :783-815 inert → W-068 不触发
+- 动任一处 → 必须同时完成 scope 列的 4 真改, 否则 stage0 compile fail
+
+### 引用
+
+- `compiler/src0/codegen_amd64.jhyy:97` / `:115` / `:125` / `:191` / `:229` (24 错的 4 处根因点)
+- `compiler/src0/codegen_amd64_peephole.jhyy:539` / `:551-762` (22 precedence 错)
+- `compiler/src0/main.jhyy:44` / `:121` / `:783-815` (workaround 注释 + inert dispatch)
+- `compiler/src0/parser.jhyy:730-760` (struct-literal field loop — 根因 #1 的 parser-side 入口)
+- `docs/plans/v2/batch-V2-B-plan.md` § Commit 5 (byte_equal_amd64.sh 真 path — pending v2.6.5)
+- `docs/internal/workarounds.md` 索引 line 68 (W-068 entry)
+
+### 验证
+
+1. **当前 inert 状态**: `make` clean rebuild → regress 104/104 ✓ + D43 closure sha `51376ce5...` hold ✓ + `QBE_FALLBACK=1 regress 104/104` ✓ + workarounds.md active_count = 5 (W-068 不计 active, 标 DEFERRED) ✓
+2. **v2.6.5 真修后**: `make` + `JHY_SELF_BACKEND=1 regress 104/104` 首次 e2e 自写后端 dispatch ✓ + byte_equal_amd64.sh path B 真 path (no SELF_DEFERRED) 跑通 ✓ + D43 closure 仍 hold (自写后端不替代 QBE, 跟 QBE 走 diff parity 检查) ✓
+3. **不动性**: v2.6.5 不动 ABI / spec / QBE / runtime / installer assets; 只动 codegen_amd64*.jhyy (parse-time fixes) + main.jhyy (wire-up) + 1 验证脚本 (path B 真 path) ✓
+
+### 教训
+
+1. **ship-without-e2e-verify 是 workaround chain 的元凶**: v2.6.0 Unit C/D/E + v2.6.3 4 个 commit 累计 ~2200 LOC 自写后端代码, ship 时 `import codegen_amd64;` 一直注释 out → 这些 module 从未被 stage0 parse 过 → 错漏到 wire-up sprint 才 surface。**commit-ship gate 必须包含 "all imported modules parse clean end-to-end"**, 不能靠 "main.jhyy 编译通过" 当 gate (因为 inline_imports 默认 skip)。**建议**: v2.6.6+ 加 CI 步骤 `jhyy_stage0 compile compiler/src0/main.jhyy -E` (preprocess 全 inline 展开) → 失败即错, 不允许 inert ship
+2. **inline_imports 的 lazy AST merge 是把双刃剑**: 它让 main.jhyy 不依赖 codegen_amd64 就能 compile, 加速开发; 但也让 "lazy = 错漏延迟 surface"。**future design 选项**: 加 `make verify-imports` target (jhyy-side 加 `cmd_verify_imports`), 强制 parse 所有 transitively imported module, fail-fast on sema err
+3. **scope creep on enable**: v2.6.4 想做的 = 1 行 uncomment + 1 行 dispatch 启用, 实际 surface 24 错 (3 类根因 + 4 处代码点 + 22 precedence)。**workaround 启用前先做 "scout commit"** — 单独 PR 把 inert → 真 wire, 不带其他改动, 便于单独 review + revert。比一锅端 v2.6.4 4 commit ship 更稳
+4. **3 类根因不是 codegen_amd64 独有**: struct-literal annotation requirement / forward ref reordering / `*` vs `as` precedence 是 parser 设计的 3 个 latent bug, 在 inline_imports strict path 下首次 surface。**v2.7.x candidate fix**: parser.jhyy:730-760 struct-literal field loop 加 newline tolerance + infer type from rhs shape (无须 annotation); jhyy-side 一律 forward-decl `fn` (C-style prototype); operator precedence 表显式定 `as` 跟 `*` 同级 (current 表 `as > *` 是 surprise)
+5. **per `feedback_audit_single_commit_diff`**: W-068 调查全程用 `git show <sha>` / `git diff <sha>~1 <sha>`, 不累计跨 commit diff, 避免把 v2.6.0 Unit C/D/E 的 ship-without-verify 归到 v2.6.4 commit 头上 (那是 unit ship 时的 gap, 不是 wire-up 的)
 
 
