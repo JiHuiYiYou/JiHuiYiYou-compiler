@@ -982,23 +982,25 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
             // 为安全:让控制流自然落到 if left != NULL 守卫 + Pratt loop,
             // Pratt loop 看到 TOKEN_SEMICOLON / TOKEN_RBRACE 会直接 return.
         }
-        // V3-B v3.0.5: fence_seq_cst() / fence_acquire() / fence_release()
-        // builtin ident dispatch (per spec § 2). After consuming the ident
-        // (whose text is now in prev_start/prev_length), peek for `(`. If
-        // next token is LPAREN, dispatch to parse_fence_block (defined
-        // earlier in this file — jhyy no forward decl). Capture the name
-        // into a stack buffer before consuming `(` (which overwrites
-        // prev_start/prev_length).
-        else if (*p).prev_length >= (13 as i64) {
+        else {
+            // V3-B v3.0.5: fence_seq_cst() / fence_acquire() / fence_release()
+            // builtin ident dispatch (per spec § 2). After consuming the ident
+            // (whose text is now in prev_start/prev_length), peek for `(`. If
+            // next token is LPAREN, dispatch to parse_fence_block (defined
+            // earlier in this file — jhyy no forward decl). Capture the name
+            // into a stack buffer before consuming `(` (which overwrites
+            // prev_start/prev_length).
             let mut is_fence_builtin: i32 = 0 as i32;
-            if strncmp((*p).prev_start, "fence_seq_cst" as *u8, 13 as i64) == (0 as i32) {
-                is_fence_builtin = 1 as i32;
-            }
-            if strncmp((*p).prev_start, "fence_acquire" as *u8, 13 as i64) == (0 as i32) {
-                is_fence_builtin = 1 as i32;
-            }
-            if strncmp((*p).prev_start, "fence_release" as *u8, 13 as i64) == (0 as i32) {
-                is_fence_builtin = 1 as i32;
+            if (*p).prev_length == (13 as i64) {
+                if strncmp((*p).prev_start, "fence_seq_cst" as *u8, 13 as i64) == (0 as i32) {
+                    is_fence_builtin = 1 as i32;
+                }
+                if strncmp((*p).prev_start, "fence_acquire" as *u8, 13 as i64) == (0 as i32) {
+                    is_fence_builtin = 1 as i32;
+                }
+                if strncmp((*p).prev_start, "fence_release" as *u8, 13 as i64) == (0 as i32) {
+                    is_fence_builtin = 1 as i32;
+                }
             }
             if is_fence_builtin != (0 as i32) {
                 if parser_check(p, TOKEN_LPAREN()) != (0 as i32) {
@@ -1011,8 +1013,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                                              name_buf, (*p).prev_length);
                 }
             }
-        }
-        else {
+            if is_fence_builtin == (0 as i32) {
         let mut sym = symtab_lookup((*p).current_scope, name);
         if sym == (0 as *Sym) {
             sym = symtab_insert((*p).current_scope, name, SYM_VAR(),
@@ -1118,6 +1119,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         else {
             left = ast_new_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
         }
+        } // V3-B v3.0.5: close if is_fence_builtin == 0
         } // V3-B v3.0.1: close is_asm_macro else
     }
     // ── unary prefix: - ! ~ ──
