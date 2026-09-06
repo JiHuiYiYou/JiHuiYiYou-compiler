@@ -1,0 +1,16 @@
+// V3-B 3f ship gate test: fence_seq_cst() / fence_acquire() / fence_release()
+// emit raw mnem (mfence / lfence / sfence) to .s side-file, get concat'd
+// into final .exe. Single-threaded runtime check: just verify all 3 fences
+// can be called without crashing and the exe runs to completion.
+//
+// SMP verification is at .s grep level (look for mfence/lfence/sfence mnems);
+// actual multi-core ordering validation requires OS kernel + multi-threaded
+// test harness (deferred to jhyy_OS M1 launch integration).
+
+fn main_jhyy() -> i32 {
+    fence_seq_cst();
+    fence_acquire();
+    fence_release();
+    fence_seq_cst();
+    return 0 as i32;
+}

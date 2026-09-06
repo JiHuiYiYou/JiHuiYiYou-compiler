@@ -833,6 +833,69 @@ fn parse_asm_block(p: *Parser, loc_lf: *u8, loc_ll: i32, loc_lc: i32) -> *Node {
     return ast_new_asm_block((*p).arena, loc_lf, loc_ll, loc_lc, arena_chars, 0 as i64, 0 as *u8);
 }
 
+// ════════════════════════════════════════════════════
+// V3-B v3.0.5: parse_fence_block — fence_seq_cst() / fence_acquire() /
+//   fence_release() builtin ident dispatch (per spec § 2).
+//
+// Caller 已 consume `fence_*` ident. 本函数:
+//   1. consume `(` (LPAREN) — fence_* 永远 no-arg, expect immediate `)`
+//   2. validate name → kind mapping (0=seq_cst, 1=acquire, 2=release)
+//   3. consume `)` (RPAREN)
+//   4. build NodeBuiltinFence(kind) — return *Node
+//
+// Defined BEFORE parse_expr (per V3-A/V3-B no-forward-decl constraint).
+// `name` arg carries the ident text captured BEFORE consuming `(` (since
+// `(` overwrites prev_start/prev_length, the name would be lost otherwise).
+// ════════════════════════════════════════════════════
+fn parse_fence_block(p: *Parser, loc_lf: *u8, loc_ll: i32, loc_lc: i32,
+                     name: *u8, name_len: i64) -> *Node {
+    let mut t = empty_token();
+
+    // consume `(`
+    parser_expect(p, TOKEN_LPAREN(), "( in fence_*()" as *u8, &t);
+
+    // fence_* is no-arg: must be immediate `)`. If next token is anything
+    // else (e.g. comma, ident), emit clear error.
+    if parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
+        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+        jh_fputs_stderr("error: fence_*() takes no arguments (v3.0.5)\n" as *u8);
+        (*p).error_count = (*p).error_count + (1 as i32);
+        // skip to `)` to avoid cascading errors
+        while parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
+            if parser_check(p, TOKEN_EOF()) != (0 as i32) { return 0 as *Node; }
+            parser_advance(p, &t);
+        }
+        parser_expect(p, TOKEN_RPAREN(), ") in fence_*()" as *u8, &t);
+        return 0 as *Node;
+    }
+
+    // consume `)`
+    parser_expect(p, TOKEN_RPAREN(), ") in fence_*()" as *u8, &t);
+
+    // Map name to kind. Use strncmp with explicit lengths.
+    // fence_seq_cst = 13 chars, fence_acquire = 13 chars, fence_release = 13 chars.
+    let mut kind: i64 = -(1 as i64);
+    if name_len == (13 as i64) {
+        if strncmp(name, "fence_seq_cst" as *u8, 13 as i64) == (0 as i32) {
+            kind = 0 as i64;
+        }
+        if strncmp(name, "fence_acquire" as *u8, 13 as i64) == (0 as i32) {
+            kind = 1 as i64;
+        }
+        if strncmp(name, "fence_release" as *u8, 13 as i64) == (0 as i32) {
+            kind = 2 as i64;
+        }
+    }
+    if kind == -(1 as i64) {
+        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+        jh_fputs_stderr("error: unknown fence builtin (expected fence_seq_cst/fence_acquire/fence_release)\n" as *u8);
+        (*p).error_count = (*p).error_count + (1 as i32);
+        return 0 as *Node;
+    }
+
+    return ast_new_builtin_fence((*p).arena, loc_lf, loc_ll, loc_lc, kind);
+}
+
 fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
@@ -918,7 +981,38 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
             // 但因为 asm! 永远 stmt-position, 不会有 infix 跟在后面.
             // 为安全:让控制流自然落到 if left != NULL 守卫 + Pratt loop,
             // Pratt loop 看到 TOKEN_SEMICOLON / TOKEN_RBRACE 会直接 return.
-        } else {
+        }
+        // V3-B v3.0.5: fence_seq_cst() / fence_acquire() / fence_release()
+        // builtin ident dispatch (per spec § 2). After consuming the ident
+        // (whose text is now in prev_start/prev_length), peek for `(`. If
+        // next token is LPAREN, dispatch to parse_fence_block (defined
+        // earlier in this file — jhyy no forward decl). Capture the name
+        // into a stack buffer before consuming `(` (which overwrites
+        // prev_start/prev_length).
+        else if (*p).prev_length >= (13 as i64) {
+            let mut is_fence_builtin: i32 = 0 as i32;
+            if strncmp((*p).prev_start, "fence_seq_cst" as *u8, 13 as i64) == (0 as i32) {
+                is_fence_builtin = 1 as i32;
+            }
+            if strncmp((*p).prev_start, "fence_acquire" as *u8, 13 as i64) == (0 as i32) {
+                is_fence_builtin = 1 as i32;
+            }
+            if strncmp((*p).prev_start, "fence_release" as *u8, 13 as i64) == (0 as i32) {
+                is_fence_builtin = 1 as i32;
+            }
+            if is_fence_builtin != (0 as i32) {
+                if parser_check(p, TOKEN_LPAREN()) != (0 as i32) {
+                    // Copy ident text into stack buffer BEFORE parser_expect
+                    // consumes `(` (which would clobber prev_start).
+                    let name_buf = arena_alloc((*p).arena, (*p).prev_length + (1 as i64));
+                    memcpy(name_buf, (*p).prev_start, (*p).prev_length);
+                    *(ptr_add_u8(name_buf, (*p).prev_length) as *u8) = 0 as u8;
+                    left = parse_fence_block(p, loc_lf, loc_ll, loc_lc,
+                                             name_buf, (*p).prev_length);
+                }
+            }
+        }
+        else {
         let mut sym = symtab_lookup((*p).current_scope, name);
         if sym == (0 as *Sym) {
             sym = symtab_insert((*p).current_scope, name, SYM_VAR(),

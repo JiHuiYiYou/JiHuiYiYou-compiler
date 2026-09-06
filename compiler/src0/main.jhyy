@@ -1117,6 +1117,31 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
         }
     }
 
+    // v3.0.5 (3f memory barrier): fence_*() builtin emitted raw mnem
+    // (mfence/lfence/sfence) to `compiler/build/obj/_fence.buf` side-file.
+    // Same concat pattern as inline_asm: read binary, append to temp_asm
+    // before gcc link, then unlink to keep next compile clean. Order matters:
+    // append AFTER inline_asm (fences typically come after asm blocks in
+    // user code; either order is fine since both are at global .s scope).
+    let fence_buf_path = "compiler/build/obj/_fence.buf" as *u8;
+    if jh_file_stat_ok(fence_buf_path) != (0 as i32) {
+        let fe_fp = fopen(fence_buf_path, "rb" as *u8);
+        if fe_fp != (0 as *u8) {
+            let fe_buf = malloc(4096 as i64);
+            let fe_n = fread(fe_buf, 1 as i64, 4096 as i64, fe_fp);
+            let _fc_fe1 = fclose(fe_fp);
+            if fe_n > (0 as i64) {
+                let fe_out_fp = fopen(temp_asm, "ab" as *u8);
+                if fe_out_fp != (0 as *u8) {
+                    let _fw_fe = fwrite(fe_buf, 1 as i64, fe_n, fe_out_fp);
+                    let _fc_fe2 = fclose(fe_out_fp);
+                }
+            }
+            free(fe_buf);
+            let _ufe = jh_unlink_file(fence_buf_path);
+        }
+    }
+
     // v1.5.6 W-040: wrap each path arg in quotes so gcc's argv parser
     // treats the full path as one token. RUNTIME_C() and HELPERS_C() resolve
     // to "<INSTALLDIR>\bin\runtime.c" / "<INSTALLDIR>\bin\jhyy_helpers.c"

@@ -3556,6 +3556,35 @@ let cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*matched_node).type_pt
         // Return zero IRVal (asm is stmt-position; never used as expr value).
         return zero;
     }
+    // v3.0.5 (3f memory barrier): fence_* builtin → emit raw mnem to
+    // _fence.buf side-file (separate from _inline_asm.buf for clarity).
+    //   kind 0 = seq_cst → "mfence\n"
+    //   kind 1 = acquire → "lfence\n"
+    //   kind 2 = release → "sfence\n"
+    // main.jhyy reads _fence.buf + concats to temp_asm before gcc link.
+    if kind == NODE_BUILTIN_FENCE() {
+        let fd = node_builtin_fence_data(n);
+        let mut mnem: *u8 = "sfence" as *u8;  // default fallback
+        if (*fd).kind == (0 as i64) {
+            mnem = "mfence" as *u8;
+        }
+        if (*fd).kind == (1 as i64) {
+            mnem = "lfence" as *u8;
+        }
+        if (*fd).kind == (2 as i64) {
+            mnem = "sfence" as *u8;
+        }
+        let fence_buf_path = "compiler/build/obj/_fence.buf" as *u8;
+        let ffp = fopen(fence_buf_path, "ab" as *u8);
+        if ffp != (0 as *u8) {
+            let mnem_len = strlen(mnem);
+            let _fw1 = fwrite(mnem, 1 as i64, mnem_len, ffp);
+            let nl = "\n" as *u8;
+            let _fw2 = fwrite(nl, 1 as i64, 1 as i64, ffp);
+            let _fc = fclose(ffp);
+        }
+        return zero;
+    }
 
     // ── 未实现 case：返回 zero IRVal（commit 4 补全）──
     return zero;

@@ -38,7 +38,7 @@
 | **V3-B (v3.0.2)** | ✅ **shipped** (V3-B Unit B1) | 3b `#[naked]` + side-file naked fn emit |
 | **V3-B (v3.0.3)** | ✅ **shipped** (V3-B Unit A2) | 3c volatile + V2-A emit_volatile fill |
 | **V3-B (v3.0.4)** | ✅ **shipped** (V3-B Unit B2) | 3e `#[link_section]` + QBE .s post-walk side-file |
-| **V3-B (v3.0.5)** | ⏳ 待 V3-B v3.0.4 ship | 3f memory barrier |
+| **V3-B (v3.0.5)** | ✅ **shipped** (V3-B Unit B3) | 3f memory barrier `fence_*()` + .s mnem side-file |
 | **V3-C (v3.1.0)** | ⏳ 待 V3-B 末 ship | 3g `&mut` + lifetime |
 | **V3-C (v3.1.1)** | ⏳ 待 V3-C v3.1.0 ship | 3g.5 |
 | **V3-C (v3.1.2)** | ⏳ 待 V3-C v3.1.1 ship | 3g.7 |
@@ -122,7 +122,7 @@ Unit 1 + Unit 2 merge 后,coordinator 跑 ship gate 暴露 2 个 integration gap
 | 3b | v3.0.2 | `#[naked]` | ⏳ 待 V3-B v3.0.1 ship |
 | 3c | v3.0.3 | volatile | ✅ **shipped** (V3-B Unit A2) |
 | 3e | v3.0.4 | `#[link_section]` | ✅ **shipped** (V3-B Unit B2) |
-| 3f | v3.0.5 | memory barrier | ⏳ 待 V3-B v3.0.4 ship |
+| 3f | v3.0.5 | memory barrier | ✅ **shipped** (V3-B Unit B3) |
 
 ### V3-B v3.0.1 — inline asm (D42 passthrough) — 2026-09-05 ✅ shipped
 
@@ -432,6 +432,89 @@ kernel + 物理地址**;V2-A 路径(`codegen_amd64.jhyy`)对此有完整保证(p
 - Section flag 后缀 `"ax", @progbits`(留 v3.x)
 - ARM / RISC-V section aggregation 验证(留 v3.x 末)
 - V2-A `codegen_amd64_emit_ctrl.jhyy:emit_section(name)` stub fill — V2-B v2.7.0 后续 ship
+
+---
+
+---
+
+## V3-B — v3.0.5 (3f memory barrier `fence_*()` + .s mnem side-file) — 2026-09-06
+
+**Per**: [`docs/plans/v3/iterative-imagining-thunder.md`](../../plans/v3/iterative-imagining-thunder.md) § Phase B Step 3
+**Tag**: `v3.0.5` (V3-B Unit B3 ship, coordinator integration 后由 coordinator 打 umbrella tag)
+**重要性**: M1-required(per coordination.md § 3 D8 — M1 launch 强前置 v3.0 3a/3b/3c/3e/3f)
+
+### Scope
+
+- **AST** (`compiler/src0/ast.jhyy`):
+  - `NODE_BUILTIN_FENCE = 54` enum
+  - `NodeBuiltinFence { kind: i64 }` struct (8 bytes; NODE_BUILTIN_FENCE_SIZE=8)
+  - `ast_new_builtin_fence(arena, loc, kind)` ctor + `node_builtin_fence_data(n)` accessor
+  - `node_kind_name` 加 `BUILTIN_FENCE` case
+- **Parser** (`compiler/src0/parser.jhyy`):
+  - 新 `parse_fence_block(p, loc, name, name_len)`: 校验 no-arg + strncmp name → kind (0/1/2), build NodeBuiltinFence
+  - 定义于 `parse_asm_block` 之后,`parse_expr` 之前(per jhyy no-forward-decl 约束)
+  - `parse_expr` IDENT 分支 dispatch: 检测 `prev_length == 13` + name ∈ {fence_seq_cst, fence_acquire, fence_release} + next token 是 `(` → copy name to arena buf (capture before parser_expect clobbers prev_start) → call parse_fence_block
+- **Sema** (`compiler/src0/sema.jhyy`):
+  - `infer_type` 加 NODE_BUILTIN_FENCE case → `type_void(ta)` (unit type)
+- **Codegen** (`compiler/src0/codegen.jhyy`):
+  - `cg_expr` 加 NODE_BUILTIN_FENCE case:
+    - 按 `(*fd).kind` 选 mnem: `0 → "mfence"`, `1 → "lfence"`, `2 → "sfence"`
+    - `fopen("compiler/build/obj/_fence.buf", "ab")` (binary append, per `feedback_qbe_crlf_root_cause`)
+    - 写 `<mnem>\n` (6 bytes)
+- **Link** (`compiler/src0/main.jhyy`):
+  - `link_with_gcc` 加 fence side-file read+append+unlink (顺序:inline_asm 后,fence 前):
+    - `jh_file_stat_ok(_fence.buf) != 0` → fopen "rb" → fread → fopen temp_asm "ab" → fwrite → fclose × 2
+    - `unlink(_fence.buf)` after read (keep next compile clean)
+- **Test**: `compiler/tests/examples/memory_barrier_smp.jhyy` ship gate smoke (4 fence calls + main_jhyy EXIT:0)
+- **Doc**: [`jhyy-lang-spec-memory-barrier-supplement-v3.0.5.md`](../../abis/jhyy-lang-spec-memory-barrier-supplement-v3.0.5.md)
+
+### 验收
+
+- [x] `make` 零 warning
+- [x] `jhyy.exe compile memory_barrier_smp.jhyy -o mb_test.exe` 成功
+- [x] `mb_test.exe` EXIT: 0 (4 fence calls 顺序执行, 单线程 OK)
+- [x] temp_asm dump 含 4 行 mnems 在 main_jhyy body 之后 (mfence / lfence / sfence / mfence, develop-time verify, 移除前 commit)
+- [x] parser 拒掉 `fence_seq_cst` 无括号(per parse_expr strict)
+- [x] parser 拒掉 `fence_seq_cst(x)` 带 arg(per parse_fence_block no-arg check)
+- [x] parser 拒掉 `fence_relaxed` / 未知 fence 名(per parse_fence_block name check)
+
+### 已知 limitation (per spec § 6)
+
+- **x86-64 only** — v3.0.5 emit `mfence`/`lfence`/`sfence` (x86 指令)。ARM (`dmb`/`dsb`) / RISC-V (`fence`) 留 V3-C 或 v3.x 末
+- **不支持 `fence_relaxed` / `fence_acq_rel`** — v3.0.5 only 3 个 builtin;C11 memory_order_relaxed + acq_rel 留 v3.x
+- **不支持 fence 在 fn 参数位置 / expr value** — stmt-position only,unit return type
+- **不保证 LRC / CLFLUSH 等高级 fence** — 留 OS kernel 优化
+- **MMIO / device ordering 物理验证** 留 OS M1 launch 联调
+
+### 关键决策点
+
+| # | 决策 | 落点 |
+|---|------|------|
+| **D-v3.0.5-1** | Side-file pattern(per V3-A no_std + V3-B naked + V3-B inline_asm + V3-B link_section 同款)— codegen 写 `<mnem>\n`,main.jhyy post-QBE-pass concat 到 .s | codegen.jhyy + main.jhyy |
+| **D-v3.0.5-2** | 单独 `_fence.buf` side-file(不复用 `_inline_asm.buf`)— 让 fence 路径独立 audit,不污染 3a inline asm diff | codegen.jhyy + main.jhyy |
+| **D-v3.0.5-3** | parse_fence_block 接受 name 参数(不依赖 prev_start)— parser_expect(p, LPAREN) 会 clobber prev_start, 必须 caller 在 consume 前 copy | parser.jhyy parse_fence_block + parse_expr dispatch |
+| **D-v3.0.5-4** | kind 编号 0=seq_cst, 1=acquire, 2=release(顺序按 C++ memory_order 习惯,非字母序) | ast.jhyy + codegen.jhyy |
+| **D-v3.0.5-5** | NodeBuiltinFence { kind: i64 } 而非 { kind: i32 } — 跟 NodeAsmBlock.noperands:i64 对齐(其他 enum 类字段都用 i64) | ast.jhyy |
+
+### 关键数字
+
+| 数字 | 值 | 来源 |
+|------|-----|------|
+| 新增 NodeKind | 1 (NODE_BUILTIN_FENCE = 54) | v3.0.5 |
+| 新增 NodeBuiltinFence size | 8 bytes (1 × i64) | v3.0.5 |
+| Side-file path | `compiler/build/obj/_fence.buf` | codegen.jhyy + main.jhyy |
+| Fence variants | 3 (seq_cst / acquire / release) | v3.0.5 |
+| Fence mnems | 3 (mfence / lfence / sfence) | x86 instruction set |
+| ship gate EXIT | 0 | `memory_barrier_smp.jhyy` |
+| D43 baseline (new N5) | TBD (post-selfhost) | per-selfhost_check output |
+
+### Out of scope (本 batch 不做)
+
+- ARM (`dmb` / `dsb`) / RISC-V (`fence`) memory barrier 变体 — 留 v3.x 末
+- `fence_relaxed` / `fence_acq_rel` builtin — C11 memory_order 完整 6 选 3 之外
+- Fence 在 fn 参数位置 / expr value — stmt-position only
+- LRC / CLFLUSH 等高级 CPU-specific fence — 留 OS kernel
+- V2-A `codegen_amd64_emit_ctrl.jhyy:emit_fence(kind)` stub fill — V2-B v2.7.0 后续 ship
 
 ---
 

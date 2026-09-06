@@ -594,6 +594,15 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         (*n).type_ptr = v as *u8;
         return v;
     }
+    // v3.0.5 (3f memory barrier): fence_seq_cst/acquire/release return
+    // unit type (stmt-position; never used as expr value). codegen emits
+    // raw mnem (mfence/lfence/sfence) to _fence.buf side-file from
+    // node_builtin_fence_data(n).kind.
+    if (*n).kind == NODE_BUILTIN_FENCE() {
+        let v = type_void(ta);
+        (*n).type_ptr = v as *u8;
+        return v;
+    }
     // v1.3.3: sizeof(TypeName) — compile-time const. Mirror C-side sema.c.
     // Resolve target type, compute size, fill n->type=i64 + node_int_data.
     if (*n).kind == NODE_SIZEOF() {

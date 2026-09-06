@@ -134,6 +134,14 @@ fn NODE_ASM_BLOCK()      -> i32 { return 52 as i32; }
 // Note: enum value 53 (52 taken by NODE_ASM_BLOCK in 3a; renumbered during 3a+3c
 // Phase A integration merge).
 fn NODE_VOLATILE_TYPE()  -> i32 { return 53 as i32; }
+// v3.0.5 (3f memory barrier): fence_*() builtin ident dispatch.
+//   3 variants by kind field:
+//     0 = seq_cst → emits `mfence`
+//     1 = acquire → emits `lfence`
+//     2 = release → emits `sfence`
+//   Codegen emits raw mnem to `_fence.buf` side-file; main.jhyy concats
+//   before gcc link (same pattern as 3a inline asm). Returns unit type.
+fn NODE_BUILTIN_FENCE()  -> i32 { return 54 as i32; }
 
 fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_INT()            { return "INT" as *u8; }
@@ -189,6 +197,7 @@ fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_DEFER()         { return "DEFER" as *u8; }
     if kind == NODE_ASM_BLOCK()     { return "ASM_BLOCK" as *u8; }
     if kind == NODE_VOLATILE_TYPE() { return "VOLATILE_TYPE" as *u8; }
+    if kind == NODE_BUILTIN_FENCE() { return "BUILTIN_FENCE" as *u8; }
     return "?" as *u8;
 }
 
@@ -359,6 +368,17 @@ type NodeVolatileType = struct {
     inner: *u8,        // *Node (must be primitive type annotation)
 }
 fn NODE_VOLATILE_TYPE_SIZE() -> i64 { return 8 as i64; }
+
+// v3.0.5 (3f memory barrier): kind(i64 8) = 8
+//   fence_seq_cst()  → kind=0 → mfence
+//   fence_acquire()  → kind=1 → lfence
+//   fence_release()  → kind=2 → sfence
+// codegen emits raw mnem to _fence.buf side-file; main.jhyy concats to .s
+// before gcc link. sema returns unit type (stmt-position, no expr value).
+type NodeBuiltinFence = struct {
+    kind: i64,
+}
+fn NODE_BUILTIN_FENCE_SIZE() -> i64 { return 8 as i64; }
 
 // ─── statements（3b）───
 
@@ -976,6 +996,24 @@ fn ast_new_volatile_type(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i
 
 fn node_volatile_type_data(n: *Node) -> *NodeVolatileType {
     return (n as i64 + NODE_SIZE()) as *NodeVolatileType;
+}
+
+// v3.0.5 (3f memory barrier): ast_new_builtin_fence / node_builtin_fence_data
+// `fence_seq_cst()` / `fence_acquire()` / `fence_release()` builtin ident
+// dispatch (per spec § 2). kind: 0=seq_cst, 1=acquire, 2=release.
+// parser maps ident name → kind, calls ctor. sema returns unit type.
+// codegen emits raw mnem (mfence/lfence/sfence) to _fence.buf side-file.
+fn ast_new_builtin_fence(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                         kind: i64) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_BUILTIN_FENCE_SIZE());
+    let n = ast_init_node(buf, NODE_BUILTIN_FENCE(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeBuiltinFence;
+    (*d).kind = kind;
+    return n;
+}
+
+fn node_builtin_fence_data(n: *Node) -> *NodeBuiltinFence {
+    return (n as i64 + NODE_SIZE()) as *NodeBuiltinFence;
 }
 
 // ════════════════════════════════════════════════════
