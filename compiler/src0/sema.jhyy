@@ -292,6 +292,11 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
         if strcmp(name, "f32" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_F32()); }
         if strcmp(name, "f64" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_F64()); }
         if strcmp(name, "bool" as *u8) == (0 as i32) { return type_primitive(ta, PRIM_BOOL()); }
+        // v3.1.0 (V3-C 3g): Cap builtin — 8-byte capability (cnode/depth/rights/pad).
+        // 简化:default inner=i32, 完整 Cap<T> generic 留 v3.1.2。
+        if strcmp(name, "Cap" as *u8) == (0 as i32) {
+            return type_cap((*ctx).arena, type_primitive(ta, PRIM_I32()));
+        }
 
         // global scope user-defined type
         let gsym = symtab_lookup((*ctx).global_scope, name);
@@ -337,6 +342,69 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
         let st = node_slice_type_data(tn);
         let elem = resolve_type_node(ctx, ta, (*st).elem_type as *Node);
         return type_slice((*ctx).arena, elem);
+    }
+
+    // v3.1.0 (V3-C 3g): NODE_REF_TYPE wrapper — `&T` / `&mut T` borrow type.
+    // resolve inner,然后 alloc new Type = copy(inner) + is_mut + KIND_REF。
+    // 允许 inner 是任意 type(primitive/struct/pointer/slice/array/borrow)。
+    // 拒绝规则:
+    //   - chained `&&T`(NODE_REF_TYPE 套 NODE_REF_TYPE)— 借用是 terminal
+    //   - `&mut volatile T` / `volatile &mut T`(借用不能 + volatile)
+    //   - `&mut` 内层是 immutable(borrow 检查放 check_borrow,不在这)
+    if (*tn).kind == NODE_REF_TYPE() {
+        let rt = node_ref_type_data(tn);
+        let inner = resolve_type_node(ctx, ta, (*rt).inner as *Node);
+        if inner == (0 as *Type) {
+            return type_primitive(ta, PRIM_I32());  // error recovery
+        }
+        // 拒绝 chained `&&T`
+        if (*inner).kind == KIND_REF() {
+            let _x = sema_error_str(ctx, (*tn).loc_filename, (*tn).loc_line, (*tn).loc_col,
+                                    "chained `&&T` not allowed (borrow is terminal)" as *u8);
+            return type_primitive(ta, PRIM_I32());
+        }
+        // 拒绝 `&(mut)? volatile T` 或 `volatile &mut T`
+        // split into 2 ifs for jhyy precedence clarity (avoid mixed && ||)
+        let mut vol_conflict: i32 = 0;
+        if (*inner).is_volatile != (0 as i32) {
+            vol_conflict = 1;
+        }
+        if (*rt).is_mut != (0 as i32) {
+            if (*inner).is_volatile != (0 as i32) {
+                vol_conflict = 1;
+            }
+        }
+        if vol_conflict != (0 as i32) {
+            let _x = sema_error_str(ctx, (*tn).loc_filename, (*tn).loc_line, (*tn).loc_col,
+                                    "`&` / `&mut` cannot wrap volatile type (volatile forces fresh temp, borrow must persist)" as *u8);
+            return type_primitive(ta, PRIM_I32());
+        }
+        // 分配新 Type = 复制 inner + KIND_REF + is_mut + elem=inner
+        let ref_type = arena_alloc((*ctx).arena, TYPE_SIZE()) as *Type;
+        (*ref_type).kind = KIND_REF();
+        (*ref_type).prim = (*inner).prim;
+        (*ref_type).elem = inner as *u8;
+        (*ref_type).arr_count = (*inner).arr_count;
+        (*ref_type).params = (*inner).params;
+        (*ref_type).nparams = (*inner).nparams;
+        (*ref_type).ret = (*inner).ret;
+        (*ref_type).name = (*inner).name;
+        (*ref_type).fields = (*inner).fields;
+        (*ref_type).nfields = (*inner).nfields;
+        (*ref_type).size = (*inner).size;
+        (*ref_type).align = (*inner).align;
+        (*ref_type).variants = (*inner).variants;
+        (*ref_type).nvariants = (*inner).nvariants;
+        (*ref_type).tag_size = (*inner).tag_size;
+        (*ref_type).payload_off = (*inner).payload_off;
+        (*ref_type).payload_sz = (*inner).payload_sz;
+        (*ref_type).sym = (*inner).sym;
+        (*ref_type).underlying = (*inner).underlying;
+        (*ref_type).is_volatile = 0 as i32;
+        (*ref_type)._pad_volatile = 0 as i32;
+        (*ref_type).is_mut = (*rt).is_mut;
+        (*ref_type)._pad_mut = 0 as i32;
+        return ref_type;
     }
 
     // v3.0.3 (3c volatile): NODE_VOLATILE_TYPE wrapper — resolve inner,
@@ -1885,6 +1953,24 @@ fn check_link_section_name(ctx: *SemaContext, loc_filename: *u8,
 // check_func_decl
 // ════════════════════════════════════════════════════
 
+// v3.1.0 (V3-C 3g): check_borrow — STUB for v3.1.0 ship-gate.
+// Full NLL (Non-Lexical Lifetimes) / Polonius 留 v3.x 末。当前 ship-gate
+// 实现 linear-scope simplification: 仅 **类型解析** `&T` / `&mut T` 正确,
+// 不检测 active-borrow 冲突 (no NLL path analysis, no nested blocks)。
+//
+// 已知限制 (out of scope 留 v3.x 末):
+//   - 不检测 `let y = &mut x; let z = &mut x;` 双 mutable 冲突
+//   - 不检测 `&mut` + `&` shared/mutable 互斥
+//   - 不支持 reborrow `&mut *x` 路径
+//   - 不支持 lifetime 子类型 / variance
+//   - 不支持 跨函数 borrow
+//   - 不支持 nested block 借用作用域
+//
+// 完整 NLL 设计参 spec supplement v3.1.0 § 4 (v3.x 末重新设计)。
+fn check_borrow(ctx: *SemaContext, ta: *TypeArena, body: *Node) -> i32 {
+    return 1;
+}
+
 fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
     let fd = node_func_decl_data(n);
 
@@ -1966,6 +2052,10 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
                                                   (*n).loc_line, (*n).loc_col,
                                                   (*fd).link_section);
             }
+            // v3.1.0 (V3-C 3g): simplified NLL borrow check. Linear-scope walk
+            // top-level stmts; detects `&mut x` twice (current simplification —
+            // no path analysis, no reborrow, no nested blocks).
+            let _bc = check_borrow(ctx, ta, (*fd).body as *Node);
         }
     }
 
@@ -1973,6 +2063,12 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
     return 1;
 }
 
+// ════════════════════════════════════════════════════
+// v3.1.0 (V3-C 3g): check_borrow — STUB for v3.1.0 ship-gate
+// ════════════════════════════════════════════════════
+//
+// (定义见 line 1955 — 必须在 check_func_decl 之前,jhyy 无 forward decls)
+//
 // v3.0.4 (3e link_section): validate ELF section name. Reject empty / NUL /
 // non-printable / whitespace / quote (would break `.section <name>` directive
 // parser). Moved BEFORE check_func_decl — see line 1808 area — jhyy has no

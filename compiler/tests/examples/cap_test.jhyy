@@ -1,0 +1,11 @@
+// SKIP: V3-C 3g feature — jhyy-side only (C-side bootstrap predates V3-C; Cap builtin not in C-side parser)
+// v3.1.0 (V3-C 3g) ship-gate test: Cap<T> builtin 8-byte layout (cnode/depth/rights/pad).
+// Per spec supplement v3.1.0 § 3: sizeof(Cap<T>) == 8 on all targets.
+fn main_jhyy() -> i32 {
+    let s_cap: i64 = sizeof(Cap);
+    if s_cap == 8 {
+        return 42;
+    }
+    return s_cap as i32;
+}
+//EXPECT:42

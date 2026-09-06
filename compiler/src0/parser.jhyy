@@ -316,6 +316,59 @@ fn PREC_PRIMARY()   -> i32 { return 12 as i32; }
 fn parse_type(p: *Parser) -> *Node {
     let mut t = empty_token();
 
+    // ════════════════════════════════════════════════════
+    // v3.1.0 (V3-C 3g): `&T` / `&mut T` borrow type prefix
+    // ════════════════════════════════════════════════════
+    // 规则(per spec supplement v3.1.0 § 2):
+    //   - 必须紧跟一个 type(inner 可以是 primitive/struct/ptr/slice/ref 任意)
+    //   - `&mut` 表示 exclusive borrow,`&` 表示 shared borrow
+    //   - 不支持 lifetime `'a` 标注(tokenizer 阶段无 tick)→ lifetime=null(elided)
+    //     (留 v3.x 中给 lifetime 子类型 / variance 加 tick token)
+    //   - 不支持 chained `&&` (那是 expr 位置 boolean-and,不是 borrow)
+    //
+    // Disambiguation: expr 位置 parse_expr 已 consume `&` (走 NODE_ADDR_OF 路径),
+    // 这里只在 type-annotation 上下文被调(parse_type_decl/parse_let/parse_func)→
+    // 直接 peek 一个 token 决定是否 borrow。
+    //
+    // Borrow vs error: peek 后若下一个 token 不是合法 type-start ident/*/[ ,报错
+    // (拒绝把 `&expr` 当 borrow prefix 误吞)。
+    if parser_check(p, TOKEN_AMP()) != (0 as i32) {
+        // peek next token
+        let mut next_t = empty_token();
+        parser_peek(p, &next_t);
+        // `&&` 是 boolean-and,不是 borrow → 跳过,让 default ident 路径报错
+        if next_t.kind != TOKEN_AMPAMP() {
+            let amp_lf = (*p).prev_lf;
+            let amp_ll = (*p).prev_ll;
+            let amp_lc = (*p).prev_lc;
+            parser_advance(p, &t);  // consume `&`
+
+            // optional `mut` keyword → exclusive borrow
+            let mut is_mut: i32 = 0;
+            if parser_check(p, TOKEN_MUT()) != (0 as i32) {
+                parser_advance(p, &t);  // consume `mut`
+                is_mut = 1;
+            }
+
+            // 拒绝 chained `&mut &mut T` — 借用是 terminal type
+            if parser_check(p, TOKEN_AMP()) != (0 as i32) {
+                jh_print_loc_stderr(amp_lf, amp_ll, amp_lc);
+                jh_fputs_stderr("error: chained `&` is not allowed (borrow type is terminal — use one `&` per level)\n" as *u8);
+                (*p).error_count = (*p).error_count + (1 as i32);
+                // error recovery: consume 一个 token 让 parser 继续
+                parser_advance(p, &t);
+                return ast_new_int((*p).arena, amp_lf, amp_ll, amp_lc,
+                                   0 as i64, PRIM_I32());
+            }
+
+            // inner type — 跟 volatile path 不同,borrow 允许 inner 是任意 type
+            // (primitive/struct/pointer/slice/array/borrow)→ 递归 parse_type
+            let inner = parse_type(p);
+            return ast_new_ref_type((*p).arena, amp_lf, amp_ll, amp_lc,
+                                    inner, is_mut, 0 as *Node);
+        }
+    }
+
     // *T (pointer type)
     if parser_match(p, TOKEN_STAR(), &t) != (0 as i32) {
         let inner = parse_type(p);
