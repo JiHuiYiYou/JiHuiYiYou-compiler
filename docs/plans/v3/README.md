@@ -29,7 +29,7 @@ v3.x 是语言特性扩展轴,服务于 [jhyy_OS](../../../jhyy_OS/) 的 OS-requ
 | 3m | 基本优化 pass | 常量折叠 / 死代码消除 | ⏳ **未启动**(自举后性能,3l.4 后推)|
 | 3n | 包管理器 | jhyy new / build / test | ⏳ **未启动**(M11 之后)|
 
-完整 v3 未完成工作盘点 → [`batch-V3-D-plan.md`](batch-V3-D-plan.md)。
+完整 v3 未完成工作 → 9 个 per-version plan 文件(见下方"当前内容")。
 
 完整 OS 启动链路 (`M1 → M11`) 见 [`../v2/v2.0.0-os-prep.md`](../v2/v2.0.0-os-prep.md)。
 
@@ -50,18 +50,36 @@ v3.x 是语言特性扩展轴,服务于 [jhyy_OS](../../../jhyy_OS/) 的 OS-requ
 
 ## 当前内容
 
+### 已 ship (batch plan)
 - [`batch-V3-A-plan.md`](batch-V3-A-plan.md) — V3-A v3.0.0 3d `#[no_std]` 试水 ✅ ship
 - [`batch-V3-B-plan.md`](batch-V3-B-plan.md) — V3-B v3.0.1..v3.0.5 = 3a/3b/3c/3e/3f M1-required 5 件套 ✅ ship
-- [`batch-V3-C-plan.md`](batch-V3-C-plan.md) — V3-C v3.1.0..v3.1.2 = 3g + 3g.5 + 3g.7 D27 串行(v3.1.0 ✅ ship / v3.1.1 + v3.1.2 待 ship)
-- [`batch-V3-D-plan.md`](batch-V3-D-plan.md) — V3-D v3.x 未完成工作盘点(v3.1.3 patch + 3i/3j/3l/3h + v3.x 中/末 features + M5;version-number-string format)
+- [`batch-V3-C-plan.md`](batch-V3-C-plan.md) — V3-C v3.1.0 ✅ ship(v3.1.1 / v3.1.2 per-version plan 见下)
+
+### 待 ship / 未启动 (per-version plan)
+- [`v3.1.1-plan.md`](v3.1.1-plan.md) — 3g.5 PhantomData<T> ZST codegen(D27 锁:v3.1.0 ship 后启动)
+- [`v3.1.2-plan.md`](v3.1.2-plan.md) — 3g.7 CapTable<T> + 跨函数 cap pass(D27 锁:v3.1.1 ship 后启动,M4 launch 触发前置)
+- [`v3.1.3-plan.md`](v3.1.3-plan.md) — SysV abi_amd64_sysv.jhyy Cap<T> class backport patch(V2-B v2.7.0 ship 后启动)
+- [`v3.2.0-plan.md`](v3.2.0-plan.md) — 3i generics(单态化,M8d + M11 硬前置,per D-GUI-11)
+- [`v3.2.1-plan.md`](v3.2.1-plan.md) — 3j closures(M8d + M11 硬前置,3i ship 后启动)
+- [`v3.2.2-plan.md`](v3.2.2-plan.md) — 3l.1 std lib 基础(mem / fmt / string / arena,M11 硬前置)
+- [`v3.2.3-plan.md`](v3.2.3-plan.md) — 3l.2 std lib IO(io / os,M11 硬前置)
+- [`v3.2.4-plan.md`](v3.2.4-plan.md) — 3l.3 std lib 泛型容器(vec / map,M11 硬前置)
+- [`v3.2.5-plan.md`](v3.2.5-plan.md) — 3l.4 std lib 数学(math,FFI libm,M11 硬前置,3h ship 后启动)
+
+### 抽象 feature / v3.x 中/末 / M5
+(未编 version 号的 feature 仍走 [`../roadmap/v3.x-language-expansion.md`](../roadmap/v3.x-language-expansion.md) 的设计草案 — 3h 浮点 / 3k 错误恢复 / 3m 基本优化 / 3n 包管理器 / v3.x 中/末 features / M5 删 C runtime)
 
 ## 命名约定
 
-每 sprint 一份:
-- `v3.X.Y任务清单 + 概要设计.md` — L3 任务清单 + 概要设计
-- `v3.X.Y详细实现方案.md` — L4 详细实现
+### 已 ship (batch)
+- `batch-V3-X-plan.md` — V3-A/B/C 用 batch-letter 命名(V3-A/B 全 ship 后冻结;V3-C v3.1.0 ship 后冻结,v3.1.1/v3.1.2 转 per-version)
+- 详细:`batch-V3-X-详细实现方案.md`
 
-(跟 v0/v1/v2 镜像)
+### 待 ship (per-version,2026-09-06 user 决定)
+- **`v3.X.Y-plan.md`** — 每个 minor version 一份(per user:每个小版本一个 plan 文件)
+- 不写 `batch-V3-D-plan.md`(原"未完成工作盘点"伞型 doc 拆分为 9 个 per-version)
+- L3 任务清单 + 概要设计 + 验收 + 风险 + Commit/tag 节奏 + Cross-ref 整合到一份 plan
+- 不写独立 L4 详细实现方案(per `feedback_small_plans_no_docs` 单 stage 改动不写独立 L4)
 
 ## Changelog
 
