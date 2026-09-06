@@ -555,6 +555,35 @@ V3-B 5 件套全 ship (v3.0.1 / v3.0.2 / v3.0.3 / v3.0.4 / v3.0.5),M1 launch int
 
 ---
 
+## V3-B v3.0.5-merge — CI regress gate fix (C-side parser pending_inline bridge + 5 V3-B SKIP) — 2026-09-06
+
+v3.0.5 tag push (`d742b32`) 触发 release.yml CI 跑 gated regress → jhyy_stage0.exe FAIL 99/109,2 个 root cause 暴露:
+
+1. **C-side parser 没镜像 d721cb5 pending_inline bridge** — V3-A v3.0.0 commit `4fa06e2` 加 `parse_module_attributes` 在 C-side 后,5 个 inline_* regress test 在 jhyy_stage0.exe 上 fail(C-side `#[inline]` at file-top 还是 error,jhyy-side 已 bridge)。**Fix**:mirror d721cb5 — `Parser.pending_inline: bool` 字段(parser.h)+ `parser_init` init false + `parse_module_attributes` 设 pending_inline=true(原 error)+ `parse_func` OR 进 is_inline 后清零。
+2. **5 V3-B tests 用 jhyy-side-only feature** — `inline_asm_cpuid` (asm!) / `naked_interrupt_entry` (#[naked]+asm!) / `volatile_mmio` (volatile type) / `link_section_boot` (#[link_section]) / `memory_barrier_smp` (fence_*) — C-side parser 都没实现。**Fix**:加 `// SKIP: V3-B feature — jhyy-side only (C-side bootstrap predates V3-B)` 到 5 个 file header (per regress.py v1.7.3 SKIP directive,apply 到所有 binary)。
+
+**Decision (D-v3.0.5-1)** (2026-09-06 coordinator):v3.0.5 tag force-move 到 fix commit `f990d05` (per 2026-09-06 user decide)。理由 — V3-B 5 件套是内部 sprint tag,无外部 user 依赖,force-move 比加 v3.0.5.1 patch tag 简单且 changelog footprint 小(umbrella 单节追更)。如果未来有外部 release 引用 v3.0.5,这决策需 revisit。
+
+**Verify**:
+- `make stage0` zero warnings
+- `make` (stage 1 rebuild)
+- `regress.py --all` → **2/2 gated binary PASS**:jhyy.exe 104/104 + 10 SKIP / jhyy_stage0.exe 104/104 + 10 SKIP
+- `jhyy_selfhost_check` → D43 baseline `51376ce5721b...` hold (4-stage byte-equal)
+
+**D43 影响**:零 — pending_inline 字段是 C-side `Parser` struct(parser.h),不传 jhyy-side,src0/ Stage 1 .il emit 输出不变,baseline hold。
+
+**Files changed**:
+- `compiler/src/parser.h` — `bool pending_inline` 字段 (1 line)
+- `compiler/src/parser.c` — `parser_init` init false / `parse_module_attributes` 设 true 替 error / `parse_func` OR 进 is_inline 后清零 (3 hunks)
+- `compiler/tests/examples/{inline_asm_cpuid,naked_interrupt_entry,volatile_mmio,link_section_boot,memory_barrier_smp}.jhyy` — 各加 1 行 `// SKIP:` 注释 (5 lines)
+
+**Commits** (axis-v3):
+- `5ef6d1a` fix(v3.0.5-merge): C-side parser pending_inline bridge + 5 V3-B SKIP directives
+- `f990d05` build(v3.0.5-merge): rebuild jhyy.exe + jhyy_stage0.exe post C-side parser fix
+- v3.0.5 tag force-moved to `f990d05`
+
+---
+
 ## V3-C — v3.1.0+ (`&mut` + lifetime, 3g / 3g.5 / 3g.7) — pending (等 user 启动)
 
 **Per**: [`docs/plans/v3/batch-V3-C-plan.md`](../../plans/v3/batch-V3-C-plan.md)
