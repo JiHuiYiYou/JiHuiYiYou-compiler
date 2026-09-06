@@ -536,7 +536,7 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8) -> *u8 {
     }
 
     // alloc output buffer(初始 2x input size,fold 通常减小)
-    let out_cap = len * 2 as i64;
+    let out_cap = len * (2 as i64);
     let out = arena_alloc(arena, out_cap);
     if out == (0 as *u8) {
         return input;
@@ -548,15 +548,15 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8) -> *u8 {
     //   starts[i] = line i start offset in input
     //   ends[i] = line i end offset in input (exclusive)
     let max_lines = 4096 as i64;  // 够 cover regress 用例
-    let line_starts = arena_alloc(arena, max_lines * 8 as i64);
-    let line_ends = arena_alloc(arena, max_lines * 8 as i64);
-    let line_deleted = arena_alloc(arena, max_lines * 1 as i64);
-    let line_replaced = arena_alloc(arena, max_lines * 8 as i64);  // replaced text pointers (NULL = no replace)
+    let line_starts = arena_alloc(arena, max_lines * (8 as i64));
+    let line_ends = arena_alloc(arena, max_lines * (8 as i64));
+    let line_deleted = arena_alloc(arena, max_lines * (1 as i64));
+    let line_replaced = arena_alloc(arena, max_lines * (8 as i64));  // replaced text pointers (NULL = no replace)
     if line_starts == (0 as *u8) || line_ends == (0 as *u8) || line_deleted == (0 as *u8) || line_replaced == (0 as *u8) {
         return input;
     }
     let _m2 = memset(line_deleted, 0 as i32, max_lines);
-    let _m3 = memset(line_replaced, 0 as i32, max_lines * 8 as i64);
+    let _m3 = memset(line_replaced, 0 as i32, max_lines * (8 as i64));
 
     // walk input
     let mut line_idx: i64 = 0 as i64;
@@ -570,10 +570,10 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8) -> *u8 {
                 i = len + 1 as i64;  // break
             } else {
                 // store line [line_start, i)
-                let sp = ptr_add_u8(line_starts, line_idx * 8 as i64);
+                let sp = ptr_add_u8(line_starts, line_idx * (8 as i64));
                 let sq = sp as *i64;
                 *sq = line_start;
-                let ep = ptr_add_u8(line_ends, line_idx * 8 as i64);
+                let ep = ptr_add_u8(line_ends, line_idx * (8 as i64));
                 let eq = ep as *i64;
                 *eq = i;
                 line_idx = line_idx + (1 as i64);
@@ -592,8 +592,8 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8) -> *u8 {
     // Rule 1: identity op → mark deleted
     let mut li: i64 = 0 as i64;
     while li < n_lines {
-        let ls_p = ptr_add_u8(line_starts, li * 8 as i64) as *i64;
-        let le_p = ptr_add_u8(line_ends, li * 8 as i64) as *i64;
+        let ls_p = ptr_add_u8(line_starts, li * (8 as i64)) as *i64;
+        let le_p = ptr_add_u8(line_ends, li * (8 as i64)) as *i64;
         let ls = *ls_p;
         let le = *le_p;
         let llen = le - ls;
@@ -619,15 +619,15 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8) -> *u8 {
         while li < n_lines - 1 as i64 {
             let deleted_p = ptr_add_u8(line_deleted, li);
             if *deleted_p == 0 as u8 {
-                let ls1_p = ptr_add_u8(line_starts, li * 8 as i64) as *i64;
-                let le1_p = ptr_add_u8(line_ends, li * 8 as i64) as *i64;
+                let ls1_p = ptr_add_u8(line_starts, li * (8 as i64)) as *i64;
+                let le1_p = ptr_add_u8(line_ends, li * (8 as i64)) as *i64;
                 let ls1 = *ls1_p;
                 let le1 = *le1_p;
                 let llen1 = le1 - ls1;
                 let is_mov_zero = pee_is_mov_zero(ptr_add_u8(input, ls1), llen1, reg_buf);
                 if is_mov_zero == (1 as i32) {
-                    let ls2_p = ptr_add_u8(line_starts, (li + 1 as i64) * 8 as i64) as *i64;
-                    let le2_p = ptr_add_u8(line_ends, (li + 1 as i64) * 8 as i64) as *i64;
+                    let ls2_p = ptr_add_u8(line_starts, (li + 1 as i64) * (8 as i64)) as *i64;
+                    let le2_p = ptr_add_u8(line_ends, (li + 1 as i64) * (8 as i64)) as *i64;
                     let ls2 = *ls2_p;
                     let le2 = *le2_p;
                     let llen2 = le2 - ls2;
@@ -658,16 +658,16 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8) -> *u8 {
             let deleted_p = ptr_add_u8(line_deleted, li);
             let deleted_p2 = ptr_add_u8(line_deleted, li + 1 as i64);
             if *deleted_p == 0 as u8 && *deleted_p2 == 0 as u8 {
-                let ls1_p = ptr_add_u8(line_starts, li * 8 as i64) as *i64;
-                let le1_p = ptr_add_u8(line_ends, li * 8 as i64) as *i64;
+                let ls1_p = ptr_add_u8(line_starts, li * (8 as i64)) as *i64;
+                let le1_p = ptr_add_u8(line_ends, li * (8 as i64)) as *i64;
                 let ls1 = *ls1_p;
                 let le1 = *le1_p;
                 let llen1 = le1 - ls1;
                 let extract1 = pee_extract_mov_ops(ptr_add_u8(input, ls1), llen1, src_buf, dst_buf);
 
                 if extract1 == (0 as i32) {
-                    let ls2_p = ptr_add_u8(line_starts, (li + 1 as i64) * 8 as i64) as *i64;
-                    let le2_p = ptr_add_u8(line_ends, (li + 1 as i64) * 8 as i64) as *i64;
+                    let ls2_p = ptr_add_u8(line_starts, (li + 1 as i64) * (8 as i64)) as *i64;
+                    let le2_p = ptr_add_u8(line_ends, (li + 1 as i64) * (8 as i64)) as *i64;
                     let ls2 = *ls2_p;
                     let le2 = *le2_p;
                     let llen2 = le2 - ls2;
@@ -724,7 +724,7 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8) -> *u8 {
                                     kk = kk + (1 as i64);
                                 }
                                 // store new_buf in line_replaced[li+1]
-                                let rp = ptr_add_u8(line_replaced, (li + 1 as i64) * 8 as i64);
+                                let rp = ptr_add_u8(line_replaced, (li + 1 as i64) * (8 as i64));
                                 let rq = rp as **u8;
                                 *rq = new_buf;
                                 // also delete line[li](mov A→B 不再需要)
@@ -744,7 +744,7 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8) -> *u8 {
     li = 0 as i64;
     while li < n_lines {
         let deleted_p = ptr_add_u8(line_deleted, li);
-        let replaced_p = ptr_add_u8(line_replaced, li * 8 as i64) as **u8;
+        let replaced_p = ptr_add_u8(line_replaced, li * (8 as i64)) as **u8;
         if *deleted_p == 0 as u8 {
             if *replaced_p != (0 as *u8) {
                 // write replacement
@@ -758,8 +758,8 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8) -> *u8 {
                 out_off = out_off + k;
             } else {
                 // copy original line
-                let ls_p = ptr_add_u8(line_starts, li * 8 as i64) as *i64;
-                let le_p = ptr_add_u8(line_ends, li * 8 as i64) as *i64;
+                let ls_p = ptr_add_u8(line_starts, li * (8 as i64)) as *i64;
+                let le_p = ptr_add_u8(line_ends, li * (8 as i64)) as *i64;
                 let ls = *ls_p;
                 let le = *le_p;
                 let llen = le - ls;

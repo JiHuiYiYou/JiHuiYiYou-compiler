@@ -51,6 +51,93 @@ fn codegen_amd64_init() -> i32 {
     return 0;
 }
 
+// ════════════════════════════════════════════════════
+// 内部:parse loop(dispatch token 到 15 emit 函数)
+// ════════════════════════════════════════════════════
+//
+// v2.5.0 skeleton:占位循环,完整实现留 Phase 3b(per L4 § AA)
+//
+// parse_and_emit 流程:
+//   for each token:
+//     switch (tok.kind) {
+//       case ILTOK_FUNC_HEADER: emit_func_header(state, tok); break;
+//       case ILTOK_LABEL:       emit_label(state, tok); break;
+//       case ILTOK_ALLOC:       emit_alloc(state, tok); break;
+//       case ILTOK_STORE:       emit_store(state, tok); break;
+//       case ILTOK_LOAD:        emit_load(state, tok); break;
+//       case ILTOK_LOADSUB:     emit_loadsub(state, tok); break;
+//       case ILTOK_VOLATILE:    emit_volatile(state, tok); break;
+//       case ILTOK_CALL:        emit_call(state, tok); break;
+//       case ILTOK_PHI:         emit_phi(state, tok); break;
+//       case ILTOK_COPY:        emit_copy(state, tok); break;
+//       case ILTOK_BINOP:       emit_binop(state, tok); break;
+//       case ILTOK_RET:         emit_ret(state, tok); break;
+//       case ILTOK_JMP:         emit_jmp(state, tok); break;
+//       case ILTOK_JNZ:         emit_jnz(state, tok); break;
+//       case ILTOK_DATA_STRING: emit_data_string(state, tok); break;
+//       case ILTOK_EOF:         return 0;
+//     }
+//
+// W-068 fix #3 (v2.6.5): moved to BEFORE codegen_amd64_run — jhyy 不支持 forward
+// ref, inline_imports re-parse 时 codegen_amd64_run 在 line 132 调用 parse_and_emit,
+// sema 阶段报 unknown symbol。原位置在 codegen_amd64_run 后面,parse 顺序是按源文件
+// 位置而不是按调用关系排序,所以重排 def 是唯一 fix。
+fn parse_and_emit(state: *u8, tokens: *u8, n: i64) -> i32 {
+    // V2-B v2.6.0 (Unit B Stub-Fill): real impl — dispatch loop over
+    // tokens[i].kind → call into imported emit_* functions.
+    // ILToken struct size = 40 bytes (per codegen_amd64_lexer.jhyy
+    // lex_il line 925 hard-coded `slots * (40 as i64)`).
+    //
+    // W-068 fix #4 (v2.6.5): each branch body must have same type. The original
+    // `emit_X(state, tok_p);` (i32-returning call as statement) had type i32,
+    // but the EOF branch `return 0;` had type `()`, causing "if/else branches
+    // must have same type: i32 vs ()" at sema. Fix: discard return value via
+    // `let _ = emit_X(state, tok_p);` pattern (mirrors W-003 `let _ = fncall(...)`).
+    // The EOF branch also wrapped in block with explicit return 0 for symmetry.
+    let tok_size: i64 = 40 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let tok_p = (tokens as i64 + i * tok_size) as *u8;
+        let kind_p = tok_p as *i32;
+        let kind = *kind_p;
+        if kind == ILTOK_FUNC_HEADER() {
+            let _ = emit_func_header(state, tok_p);
+        } else if kind == ILTOK_LABEL() {
+            let _ = emit_label(state, tok_p);
+        } else if kind == ILTOK_ALLOC() {
+            let _ = emit_alloc(state, tok_p);
+        } else if kind == ILTOK_STORE() {
+            let _ = emit_store(state, tok_p);
+        } else if kind == ILTOK_LOAD() {
+            let _ = emit_load(state, tok_p);
+        } else if kind == ILTOK_LOADSUB() {
+            let _ = emit_loadsub(state, tok_p);
+        } else if kind == ILTOK_VOLATILE() {
+            let _ = emit_volatile(state, tok_p);
+        } else if kind == ILTOK_CALL() {
+            let _ = emit_call(state, tok_p);
+        } else if kind == ILTOK_PHI() {
+            let _ = emit_phi(state, tok_p);
+        } else if kind == ILTOK_COPY() {
+            let _ = emit_copy(state, tok_p);
+        } else if kind == ILTOK_BINOP() {
+            let _ = emit_binop(state, tok_p);
+        } else if kind == ILTOK_RET() {
+            let _ = emit_ret(state, tok_p);
+        } else if kind == ILTOK_JMP() {
+            let _ = emit_jmp(state, tok_p);
+        } else if kind == ILTOK_JNZ() {
+            let _ = emit_jnz(state, tok_p);
+        } else if kind == ILTOK_DATA_STRING() {
+            let _ = emit_data_string(state, tok_p);
+        } else if kind == ILTOK_EOF() {
+            return 0;
+        }
+        i = i + (1 as i64);
+    }
+    return 0;
+}
+
 // codegen_amd64_run — IL → amd64 GAS .s 主入口
 //
 // 输入:il_path(已生成的 QBE IL 文件路径,per `ir.jhyy` `ir_emit_*` family)
@@ -94,8 +181,13 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8) -> i32 {
     }
 
     // 2. Lex into tokens (arena-backed)
-    let mut arena = Arena { start: 0 as *u8, cur: 0 as *u8, end: 0 as *u8,
-                             blocks: 0 as *u8, def_size: 0 as i64 };
+    // W-068 fix #1: add `: Arena` annotation. parser parse_type inserts on miss as
+    // SYM_TYPE so struct-literal branch (parser.jhyy:730) can match. Without
+    // annotation, inline_imports re-parse has `Arena` as SYM_VAR (parse_expr IDENT
+    // branch default-insert) → falls through to ast_new_ident → parse_let tries `;`
+    // against `{` → "expected ;, got {" error.
+    let mut arena: Arena = Arena { start: 0 as *u8, cur: 0 as *u8, end: 0 as *u8,
+                                   blocks: 0 as *u8, def_size: 0 as i64 };
     arena_init(&arena, (2 as i64) * (1024 as i64) * (1024 as i64));
     let tokens = lex_il(il_buf, il_len, &arena);
     if tokens == (0 as *u8) {
@@ -112,7 +204,8 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8) -> i32 {
         arena_free(&arena);
         return 1 as i32;
     }
-    let mut sb = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
+    // W-068 fix #1: add `: StringBuilder` annotation. Same rationale as Arena above.
+    let mut sb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
     sb_init(&arena, &sb);
     let _init_rc = cg_state_init(state_buf, &sb, &arena, "" as *u8);
 
@@ -161,81 +254,10 @@ fn codegen_amd64_emit_raw_asm(text: *u8) -> i32 {
     return 0;
 }
 
-// ════════════════════════════════════════════════════
-// 内部:parse loop(dispatch token 到 15 emit 函数)
-// ════════════════════════════════════════════════════
-//
-// v2.5.0 skeleton:占位循环,完整实现留 Phase 3b(per L4 § AA)
-//
-// parse_and_emit 流程:
-//   for each token:
-//     switch (tok.kind) {
-//       case ILTOK_FUNC_HEADER: emit_func_header(state, tok); break;
-//       case ILTOK_LABEL:       emit_label(state, tok); break;
-//       case ILTOK_ALLOC:       emit_alloc(state, tok); break;
-//       case ILTOK_STORE:       emit_store(state, tok); break;
-//       case ILTOK_LOAD:        emit_load(state, tok); break;
-//       case ILTOK_LOADSUB:     emit_loadsub(state, tok); break;
-//       case ILTOK_VOLATILE:    emit_volatile(state, tok); break;
-//       case ILTOK_CALL:        emit_call(state, tok); break;
-//       case ILTOK_PHI:         emit_phi(state, tok); break;
-//       case ILTOK_COPY:        emit_copy(state, tok); break;
-//       case ILTOK_BINOP:       emit_binop(state, tok); break;
-//       case ILTOK_RET:         emit_ret(state, tok); break;
-//       case ILTOK_JMP:         emit_jmp(state, tok); break;
-//       case ILTOK_JNZ:         emit_jnz(state, tok); break;
-//       case ILTOK_DATA_STRING: emit_data_string(state, tok); break;
-//       case ILTOK_EOF:         return 0;
-//     }
-
-fn parse_and_emit(state: *u8, tokens: *u8, n: i64) -> i32 {
-    // V2-B v2.6.0 (Unit B Stub-Fill): real impl — dispatch loop over
-    // tokens[i].kind → call into imported emit_* functions.
-    // ILToken struct size = 40 bytes (per codegen_amd64_lexer.jhyy
-    // lex_il line 925 hard-coded `slots * (40 as i64)`).
-    let tok_size: i64 = 40 as i64;
-    let mut i: i64 = 0 as i64;
-    while i < n {
-        let tok_p = (tokens as i64 + i * tok_size) as *u8;
-        let kind_p = tok_p as *i32;
-        let kind = *kind_p;
-        if kind == ILTOK_FUNC_HEADER() {
-            emit_func_header(state, tok_p);
-        } else if kind == ILTOK_LABEL() {
-            emit_label(state, tok_p);
-        } else if kind == ILTOK_ALLOC() {
-            emit_alloc(state, tok_p);
-        } else if kind == ILTOK_STORE() {
-            emit_store(state, tok_p);
-        } else if kind == ILTOK_LOAD() {
-            emit_load(state, tok_p);
-        } else if kind == ILTOK_LOADSUB() {
-            emit_loadsub(state, tok_p);
-        } else if kind == ILTOK_VOLATILE() {
-            emit_volatile(state, tok_p);
-        } else if kind == ILTOK_CALL() {
-            emit_call(state, tok_p);
-        } else if kind == ILTOK_PHI() {
-            emit_phi(state, tok_p);
-        } else if kind == ILTOK_COPY() {
-            emit_copy(state, tok_p);
-        } else if kind == ILTOK_BINOP() {
-            emit_binop(state, tok_p);
-        } else if kind == ILTOK_RET() {
-            emit_ret(state, tok_p);
-        } else if kind == ILTOK_JMP() {
-            emit_jmp(state, tok_p);
-        } else if kind == ILTOK_JNZ() {
-            emit_jnz(state, tok_p);
-        } else if kind == ILTOK_DATA_STRING() {
-            emit_data_string(state, tok_p);
-        } else if kind == ILTOK_EOF() {
-            return 0;
-        }
-        i = i + (1 as i64);
-    }
-    return 0;
-}
+// W-068 fix #3 (v2.6.5): parse_and_emit def moved to BEFORE codegen_amd64_run
+// (line ~85). jhyy 不支持 forward ref, inline_imports re-parse 时 parse 顺序按
+// 源文件位置不按调用关系,所以原位置 (line 197 后于 caller line 132) 触发 sema
+// unknown symbol。已删除此处的旧定义。
 
 // ════════════════════════════════════════════════════
 // 内部:文件 I/O 包装(per L4 § 4.1)
