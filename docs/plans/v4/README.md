@@ -1,12 +1,17 @@
-# v4.x — post-merge serial axis (concept only)
+# v4.x — post-merge integration axis (concept only)
 
 **状态**: ⏳ **概念阶段**(per 2026-09-06 user:"v4 现在还没出文档，但是其实有这个概念")
 
 ## 范围
 
-v4.x 是 v2.x + v3.x axes merge 后的主版本轴 — **串行**,不再有 v2 ‖ v3 并行。
+v4.x 是 v2.x + v3.x axes merge 后的主版本轴 — **integration axis**,不再有独立 v2 ‖ v3 axes。
 
 **触发**:v2-C v2.8.0 ship + v3.x 全关键路径 ship + user 决定 merge 时机 → 推 v4.0.0(merge commit + 删 axis-v2/axis-v3 worktree/branch)。
+
+**并行/串行**(per [[feedback-no-blind-serial-rule]] + 2026-09-06 user 纠正):v4.x 内部 sub-sprint **按依赖图决定并行/串行**,**不**预设"single-line serial"元规则。
+- 强依赖链(v4.3 → v4.4 Polonius + closure enhance,v4.2 → async trait)→ 串行
+- 独立 sub-sprint(v4.5 const generic ‖ v4.6 trait objects ‖ v4.7 错误恢复 ‖ v4.8 优化 ‖ v4.9 包管理)→ 可开 feature worktree 并行
+- 配对建议(LTO + PGO + -O2 = v4.13,LSP + IDE = v4.14,...)= ship 时一起验收省 D43 baseline 切换,**不是**强约束
 
 ## 当前内容(per-version plan,均 ⏳ 未启动)
 
@@ -37,7 +42,8 @@ v4.x 是 v2.x + v3.x axes merge 后的主版本轴 — **串行**,不再有 v2 �
 
 ## 决策锁
 
-- **v2.x ‖ v3.x 并行结束**:v4.0.0 merge 后,主版本轴串行
+- **v2.x ‖ v3.x 并行结束**:v4.0.0 merge 后,无独立跨轴 parallel
+- **v4.x 内部按依赖图决定并行/串行**(per [[feedback-no-blind-serial-rule]])
 - **M5 推到 v4.1.0**(per 2026-09-06 user)
 - **非 OS-required 抽象 feature 全推到 v4.x**(per 2026-09-06 决定)— v3.x 只做 OS-required
 - **跨边界冲突**走 [`../../../jhyy_OS/docs/coordination.md`](../../../jhyy_OS/docs/coordination.md) § 7 规则(同 v3.x)
@@ -50,8 +56,8 @@ v4.x 是 v2.x + v3.x axes merge 后的主版本轴 — **串行**,不再有 v2 �
 - 不写 `batch-V4-X-plan.md`(per-version 替代)
 - 不写独立 L4 详细实现方案(per `feedback_small_plans_no_docs`)
 
-### L1 长篇(未写,概念阶段)
-- `roadmap/v4.x-post-merge.md`(待启动)— 完整 v4.x 长线设计、决策锁、跨边界问题
+### L1 长篇
+- [`../roadmap/v4.x-post-merge.md`](../roadmap/v4.x-post-merge.md) — v4.x 长线设计 + 决策锁 + 跨边界问题 + 强/弱依赖图(已建)
 
 ## Changelog(占位,实际 ship 后建)
 
