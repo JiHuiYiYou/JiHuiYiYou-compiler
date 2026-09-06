@@ -566,8 +566,13 @@ static bool parse_attributes(Parser *p) {
 }
 
 static Node *parse_func(Parser *p, bool is_extern) {
-    /* v1.3.5: #[inline] may appear before `fn`. Capture before consuming fn. */
-    bool is_inline = parse_attributes(p);
+    /* v1.3.5: #[inline] may appear before `fn`. Capture before consuming fn.
+       v3.0.0-merge fix (mirror jhyy-side d721cb5): also fold file-top
+       `#[inline]` (held in pending_inline from parse_module_attributes)
+       into this fn's is_inline, then clear pending_inline so it doesn't
+       leak into subsequent fns. */
+    bool is_inline = parse_attributes(p) || p->pending_inline;
+    p->pending_inline = false;
     SourceLoc loc = peek(p).loc;
     advance(p); /* consume 'fn' */
 
@@ -1218,16 +1223,20 @@ void parser_init(Parser *p, Lexer *lexer, Arena *arena) {
     p->arena = arena;
     p->error_count = 0;
     p->scope_depth = 0;
+    p->pending_inline = false;
     p->global_scope = symtab_new(arena, NULL);
     p->current_scope = p->global_scope;
     init_rules(p);
 }
 
 /* v3.0.0 (3d no_std): parse module-level attributes at the top of a file.
-   Currently only `#[no_std]` is meaningful (sets *is_no_std = 1). Errors on
-   `#[inline]` at module level since that's fn-only. Called from
-   parse_program BEFORE the decl loop, so `#[...]` is consumed at file top
-   only. Returns 1 if no error, 0 if error (and sets p->error_count). */
+   Currently only `#[no_std]` is meaningful (sets *is_no_std = 1). As of
+   v3.0.0-merge fix (mirror jhyy-side d721cb5): `#[inline]` at file top is
+   accepted and folded into the next fn via `pending_inline` (read by
+   parse_func). This preserves backward compat for the pre-v3.0.0 style
+   `#[inline]\nfn name(){}` file-top form. Called from parse_program BEFORE
+   the decl loop, so `#[...]` is consumed at file top only. Returns 1 if no
+   error, 0 if error (and sets p->error_count). */
 static int parse_module_attributes(Parser *p, int *is_no_std) {
     *is_no_std = 0;
     while (check(p, TOKEN_HASH)) {
@@ -1238,12 +1247,10 @@ static int parse_module_attributes(Parser *p, int *is_no_std) {
         if (strcmp(aname, "no_std") == 0) {
             *is_no_std = 1;
         } else if (strcmp(aname, "inline") == 0) {
-            /* `#[inline]` is fn-only (per v1.3.5); module-level form is
-               meaningless and almost always a user mistake. Error early. */
-            Token tloc = peek(p);
-            fprintf(stderr, "%s:%d:%d: error: `#[inline]` is a function-level attribute, not module-level\n",
-                    tloc.loc.filename, tloc.loc.line, tloc.loc.col);
-            p->error_count++;
+            /* Bridge to fn-level: parse_func reads pending_inline, sets
+               is_inline on the next fn, then clears. Mirrors jhyy-side
+               Parser.pending_inline (commit d721cb5). */
+            p->pending_inline = true;
         } else {
             /* unknown attribute: parse but ignore (forward-compatible) */
         }

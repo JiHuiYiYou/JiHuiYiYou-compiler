@@ -1,5 +1,6 @@
 // compiler/tests/examples/inline_asm_cpuid.jhyy
 // V3-B v3.0.1 inline asm 测试 — cpuid 指令 (D42 path)
+// SKIP: V3-B 3a feature — jhyy-side only (C-side bootstrap predates V3-B; asm! macro not in C-side parser)
 //
 // 验证 `asm!("cpuid")` 走 QBE .s passthrough 路径 (per D42 in
 // docs/plans/v2/v2.0.0-os-prep.md):  codegen 不 emit QBE IL — 直接把

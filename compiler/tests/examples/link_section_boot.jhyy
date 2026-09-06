@@ -1,6 +1,7 @@
 // V3-B 3e ship gate test: #[link_section("name")] puts a function in a custom
 // ELF section. We don't actually boot a kernel here (no OVMF in regress), so
 // the test verifies:
+// SKIP: V3-B 3e feature — jhyy-side only (C-side bootstrap predates V3-B; #[link_section] not in C-side parser)
 //   1. link_section-annotated fn compiles
 //   2. readelf shows the symbol in the custom section
 //   3. main_jhyy returns 0 (EXIT:0)

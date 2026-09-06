@@ -1,5 +1,6 @@
 // V3-B 3c (v3.0.3) ship gate test: volatile 修饰的 primitive type 在 codegen 阶段
 // 走 "no regalloc" 路径。
+// SKIP: V3-B 3c feature — jhyy-side only (C-side bootstrap predates V3-B; volatile type qualifier not in C-side parser)
 //
 // 由于 codegen 主路径走 qbe.exe → .s,QBE 本身不识别 volatile keyword。QBE
 // 通过 load.c / gvn.c 等 pass 会做 load elimination 与 register promotion —

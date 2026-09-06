@@ -1,6 +1,7 @@
 // V3-B 3b ship gate test: #[naked] fn with asm!() body emits raw .s
 // without prologue/epilogue. We can't actually wire an IRQ handler here
 // (no kernel), so the test just verifies:
+// SKIP: V3-B 3b feature — jhyy-side only (C-side bootstrap predates V3-B; #[naked] not in C-side parser)
 //   1. naked fn compiles
 //   2. naked fn symbol is exported (.globl in .s)
 //   3. naked fn body asm!() is in the .s
