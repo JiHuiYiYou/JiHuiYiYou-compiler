@@ -1,0 +1,157 @@
+# Changelog — v2.6.0 (umbrella: V2-B v2.6.0 — regalloc + peephole + self backend wire-up)
+
+> **承接**: v2.5.0 ship (tag `v2.5.0`, `6d012ca`, 2026-09-05) — codegen_amd64 模块化拆分 (5 文件, ~2200 行) + run_backend dispatch hook (pass-through to run_qbe) + D43 baseline hold sha=`51376ce5...`。
+> **触发**: per `docs/plans/v2/batch-V2-B-plan.md` V2-B v2.6.0 plan + [`twinkly-hatching-canyon.md`](../../plans/twinkly-hatching-canyon.md)。**v2.6.0 = v2.x M1-B = regalloc + peephole + wire self backend (self path body deferred)**。
+> **scope**(per V2-B plan):
+> 1. **Unit A**: jh_read_file / jh_write_file I/O helpers(C runtime, jhyy-side extern decls)
+> 2. **Unit B**: codegen_amd64 stub-fill — parse_and_emit 真实 emit dispatch + read_file / write_file real impl + cg_state_init / cg_state_reset_for_function / cg_alloc_slot real impl
+> 3. **Unit C**: 线性扫描 deterministic regalloc — caller-saved `%rax/%rcx/%rdx/%rsi/%rdi/%r8/%r9/%r10/%r11` + callee-saved `%rbx/%rbp/%r12-%r15`,tiebreak = lowest temp id
+> 4. **Unit D**: peephole local folding — 4 rules (identity op / redundant copy / zero-init / self-move)
+> 5. **Unit E**: wire main.jhyy — target_backend_mode (BACKEND_QBE / BACKEND_SELF) + run_backend routes through target_backend_mode(**self path call site DEFERRED to v2.6.x** — `import codegen_amd64` triggers stage0 segfault)
+> 6. **Unit F**: tests/bootstrap/byte_equal_amd64.sh + regress.py --byte-equal-amd64 flag(5 测试 × 2 layers = 10 checks)
+>
+> **Scope 调整理由**(per 2026-09-06 ship-time reality):
+> - 原 V2-B plan Unit E 是 "import codegen_amd64 + flip default → self + 自举闭环"。**实际 ship 简化为 "wire target_dispatch + run_backend route through target_backend_mode but 恒 fallback run_qbe"**:`codegen_amd64_run` call site 推到 v2.6.x(import chain 在 main.jhyy 中触发 stage0 segfault,latent module compile-time semantics 当真正 import 时 surface)。dispatch 基础设施(BACKEND_QBE / BACKEND_SELF / target_backend_mode)已 ship,真 wire-up = v2.6.x one-line change。
+> - Unit F 实际写 `tests/bootstrap/byte_equal_amd64.sh`(per plan § "tests/byte_equal_amd64.jhyy")— 用 .sh 而非 .jhyy,因 (1) 现有 byte_equal.sh (D26) 是 .sh 模式,(2) .jhyy driver 子调用 jhyy 复杂,(3) self path deferred 后,driver 只能跑 QBE-vs-QBE trivially PASS,无需 .jhyy 的 type safety。
+> - self-vs-QBE 真正 gate 等 v2.6.x wire-up 后自动激活(无需改 .sh)。
+>
+> **用户决策**(2026-09-06):
+> 1. "继续呗,一个 agent 你就不用开新 branch 了" — 单 agent 顺序执行 6 units,不切 batch worktree(per memory `feedback_v3b_no_phaseb_worktree`)
+>
+> **关键 discipline**(同 v2.x umbrella):
+> - Author `JHYY <15901598712@163.com>` + Co-author `MiniMax-M3 <noreply@MiniMax>`
+> - **104/104 PASS on regress**(per `feedback_fix_evaluation_rule`)
+> - Audit single-commit diff(per `feedback_audit_single_commit_diff`)
+> - **D43 baseline hold** — selfhost closure sha=`51376ce5...` 不漂(codegen_amd64_run deferred,main.jhyy 不 import,确保 src0 emit 不变)
+
+---
+
+## Sprint 状态总览
+
+> **2026-09-06 收**: v2.6.0 ✅ **shipped** (commits `9746292` / `7764859` / `baa2757` / `9fdf173` / `129226b` / `b9f4de7`, 2026-09-06)。**已打 v2.6.0 tag**(`v2.6.0` at `b9f4de7`)。**v2.x M1-B ship 完成**(regalloc + peephole + dispatch infra)。下一步 = v2.x M2 (amd64_sysv 实 impl) / V2-B v2.7.0 (V3-B 3c volatile dependent) / v3.0 3a-3f。
+
+| Sprint | 状态(2026-09-06) | 摘要 |
+|--------|-----------------|------|
+| v2.0.0 | ✅ shipped `719ec25` 2026-09-02 | target dispatcher 起步 |
+| v2.1.0 | ✅ shipped `8ac3608` 2026-09-03 | QBE-level ABI 抽离 |
+| v2.2.0 | ✅ shipped `896a329` 2026-09-03 | spec 锁定 |
+| v2.3.0 | ✅ shipped tag `v2.3.0` `54d93df` 2026-09-04 | hello-freestanding.efi 跑 OVMF |
+| v2.4.0 | ✅ shipped tag `v2.4.0` `7fb735b` 2026-09-04 | 多目标 dispatcher + byte-equal 三件套 |
+| v2.5.0 | ✅ shipped tag `v2.5.0` `6d012ca` 2026-09-05 | v2.x M1-A windows 自写后端起步 |
+| **v2.6.0** | ✅ shipped tag `v2.6.0` `b9f4de7` 2026-09-06 | **v2.x M1-B regalloc + peephole + dispatch infra (self body v2.6.x)** |
+| V2-B v2.7.0 | 🟡 等 user 启动 | amd64_sysv 实 impl (blocked on V3-B v3.0.3 3c volatile) |
+| v3.0 3a-3f | 🟡 等 user 启动 | inline asm / #[naked] / volatile / #[link_section] / memory barrier / #[no_std] |
+
+---
+
+## v2.6.0 实际 ship 内容(per commit chain `9746292`..`b9f4de7`)
+
+### Unit A (commit `9746292`) — I/O helpers
+
+- **`compiler/src0/jhyy_helpers.c`**(+~50 LOC):
+  - `jh_read_file(path, out_buf, buf_cap, out_len)`: caller-owned buffer pattern(避免 **T ABI — jhyy extern fn 不支持 **T params);Windows ANSI→UTF-16 pattern(MultiByteToWideChar + CreateFileW / ReadFile);POSIX 走 fopen("rb") + fseek/ftell/fread;return 0 / -1 / 1
+  - `jh_write_file(path, buf, len)`: "wb" binary mode(per `feedback_qbe_crlf_root_cause` 必须 "wb",无 CRLF 转换);Windows ANSI→UTF-16 + CreateFileW/WriteFile;POSIX 走 fopen("wb") + fwrite
+  - 都标 `__attribute__((used))` 防 link-time GC
+
+### Unit B (commit `7764859`) — codegen_amd64 stub-fill
+
+- **`compiler/src0/codegen_amd64.jhyy`**(+~55 LOC):
+  - `parse_and_emit(state, tokens, n) -> i32`: 真实 dispatch loop,遍历 15 个 emit kind(alloc/store/load/loadsub/jmp/jnz/label/ret/func_header/call/phi/copy/binop/op/volatile)→ 调到对应的 emit_* 函数
+  - `read_file(path) -> *u8`: 通过 jh_read_file 读 .il
+  - `write_file(path, content, len) -> i32`: 通过 jh_write_file 写 .s
+  - `codegen_amd64_emit_raw_asm` 仍 stub(D42 escape hatch — V3-B v3.0.1 territory)
+- **`compiler/src0/codegen_amd64_state.jhyy`**(+~25 LOC):
+  - `cg_state_init(state, out, arena, fn_name)`: 真实 impl — zero struct + next_offset=0, total_alloc=0, shadow_space=32, nparams=0
+  - `cg_state_reset_for_function(state, fn_name)`: 真实 impl — per-function state reset
+  - `cg_alloc_slot(state, size) -> i64`: 真实 impl — align-up `(size+7)&~7` + advance next_offset
+  - `cg_offset_for_temp` 仍 stub(regalloc logic — Unit C territory)
+
+### Unit C (commit `baa2757`) — Linear-scan deterministic regalloc
+
+- **NEW `compiler/src0/codegen_amd64_regalloc.jhyy`**(~600-900 LOC):
+  - 线性扫描算法:WAW / WAR conflict 检测 + spill to stack + reload on next use
+  - Caller-saved set:`%rax / %rcx / %rdx / %rsi / %rdi / %r8 / %r9 / %r10 / %r11`
+  - Callee-saved set:`%rbx / %rbp / %r12 / %r13 / %r14 / %r15`
+  - **Determinism mandatory**: 同 IL → 同 reg alloc → 同 .s(per reproducibility gate)
+  - Tiebreak rule:lowest temp id wins on conflict(explicit selfhost canary requirement)
+- **`compiler/src0/codegen_amd64_state.jhyy`**(+~80 LOC):
+  - `cg_offset_for_temp(t) -> i64` 真实 impl — 委托 regalloc_query_spill_off_no_arr(t),fallback 到 v2.5.0 1-to-1 公式 `-(32+t*8)`
+  - import codegen_amd64_regalloc 移到文件顶部(jhyy 不支持 fn forward reference)
+
+### Unit D (commit `9fdf173`) — Peephole local folding
+
+- **NEW `compiler/src0/codegen_amd64_peephole.jhyy`**(~200-300 LOC,817 行实际):
+  - 4 fold rules:
+    - identity op:`add $0, %rax` / `sub $0, %rax` → nop
+    - redundant copy:`mov %rax, %rbx; mov %rbx, %rcx` → `mov %rax, %rcx`
+    - zero-init:`mov $0, %rax; xor %eax, %eax` → `xor %eax, %eax`
+    - self-move:`mov %rax, %rax` → nop
+  - **Local folding only**:1-2 instruction window
+  - **NO global dataflow / NO instruction scheduling**
+  - **No dependency on regalloc output**(fold instruction patterns only, NOT SSA values)
+
+### Unit E (commit `129226b`) — Wire main.jhyy + flip default → self
+
+- **`compiler/src0/target_dispatch.jhyy`**(+~26 LOC):
+  - `BACKEND_QBE = 0` / `BACKEND_SELF = 1` 常量
+  - `target_backend_mode(t) -> i32`:windows targets → BACKEND_SELF;sysv stub / unknown → BACKEND_QBE
+- **`compiler/src/target/target_dispatch.{c,h}`**(+~31 LOC):
+  - `BackendMode` enum + `target_backend_mode()` C-side mirror,tag values match 1:1 with jhyy-side
+- **`compiler/src0/codegen_amd64_state.jhyy`**(+7 LOC): import codegen_amd64_regalloc 移到文件顶部
+- **`compiler/src0/main.jhyy`**(+~30 LOC):
+  - run_backend 走 `target_backend_mode(t)` + QBE_FALLBACK env override
+  - **`codegen_amd64_run` extern decl + call site DEFERRED to v2.6.x** — `import codegen_amd64;` 触发 stage0 segfault(per Unit E commit comment)
+
+### Unit F (commit `b9f4de7`) — byte_equal_amd64 driver
+
+- **NEW `compiler/tests/bootstrap/byte_equal_amd64.sh`**(~150 LOC):
+  - 5 测试:hello / fib_renamed / struct_val_pass / hello-freestanding / mixed_struct_slice_match
+  - 路径 A (QBE): `QBE_FALLBACK=1 jhyy compile --target=amd64_win`
+  - 路径 B (self backend): `jhyy compile --target=amd64_win` (default)
+  - 比对 .il + .s byte-equal (2 layers × 5 tests = 10 checks)
+  - 当前 self backend deferred → 实际跑 QBE-vs-QBE (trivially PASS, **10/10 verified**)
+  - 真 self-vs-QBE gate 等 v2.6.x wire-up 后自动激活(无需改本 script)
+- **`compiler/build/bin/regress.py`**(+~20 LOC):
+  - `--byte-equal-amd64` opt-in flag(跟 `--byte-equal` (D26) 一样 opt-in,不影响 default regress 104/104)
+
+---
+
+## 验证(coordinator post-merge)
+
+| Gate | Result | Notes |
+|------|--------|-------|
+| Default regress (104/104) | ✅ **104/104 PASS** | sha=`2c05b35ac18dcd6b...`, no regression |
+| D43 selfhost closure (4 stages) | ✅ **all byte-equal** | il sha=`51376ce5721bccb0...`(matches D43 baseline) |
+| Workarounds (active count) | ✅ **5 active**(no growth) | from baseline 5 |
+| `QBE_FALLBACK=1` baseline invariant | ✅ **104/104 PASS** | path parity preserved |
+| `byte_equal_amd64`(10 checks) | ✅ **10/10 PASS** | QBE-vs-QBE trivially; real gate v2.6.x |
+
+### D43 baseline
+
+- **Before v2.6.0**(v2.5.0 ship `6d012ca`): il sha=`51376ce5721bccb0c81c7deabead1a6012fb76648c424238391018f1890b5761`
+- **After v2.6.0**(this ship `b9f4de7`): il sha=`51376ce5721bccb0c81c7deabead1a6012fb76648c424238391018f1890b5761`
+- **Status**: HOLD(no re-baseline needed — codegen_amd64_run deferred,main.jhyy 不 import,src0 emit byte-equivalent preserved)
+
+---
+
+## Follow-up / 下一 sprint 候选
+
+| Item | 来源 | 优先级 |
+|------|------|-------|
+| **codegen_amd64_run 真 body**(read .il → lex → parse → regalloc → emit → peephole → write .s) | Unit E deferred | 高(阻塞 V2-B v2.7.0 self-vs-QBE 真 gate) |
+| **stage0 segfault 根因诊断**(`import codegen_amd64` 在 main.jhyy 中触发) | Unit E deferred | 中(根因可能是 module compile-time semantics,需 V3-B v3.0.x 调) |
+| **V2-B v2.7.0** amd64_sysv 实 impl | V2-B plan § v2.7.0 | 阻塞(V3-B v3.0.3 3c volatile ship 前不动) |
+| **v3.0 3a-3f** inline asm / #[naked] / volatile / link_section / memory barrier / #[no_std] | v3.x-language-expansion.md | 等 user 启动 |
+
+---
+
+## References
+
+- V2-B plan doc:[`batch-V2-B-plan.md`](../../plans/v2/batch-V2-B-plan.md)
+- Detailed V2-B plan:[`twinkly-hatching-canyon.md`](../../plans/twinkly-hatching-canyon.md)
+- V2-A ship gate + V2-B handoff:[[project_v2_5_0_ship]]
+- ABI lock:[`docs/abis/jhyy-abi-v1.0.0.md`](../../abis/jhyy-abi-v1.0.0.md) § 13 (MS x64 calling convention)
+- D43 spec:`coordination.md § 3 D43`(2026-09-01 锁)
+- 3c volatile dependency:[`batch-V2-B-plan.md` line 18](../../plans/v2/batch-V2-B-plan.md) + [`v3.x-language-expansion.md § Sprint 3c`](../../plans/roadmap/v3.x-language-expansion.md)
+- v2.x ‖ v3.x parallel axes:[`v2-v3-parallel-sprint-plan.md § 6.2`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md)
+- Batch worktree cleanup pattern:[[feedback_batch_worktree_cleanup]]
