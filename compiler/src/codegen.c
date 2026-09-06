@@ -27,6 +27,49 @@ typedef struct {
     char        qbe_type;   /* 'w' / 'l' / 'b' / 's' / 'd' */
 } CGModGlobal;
 
+/* W-069: v2.6.6 — fn name → def module map, built in cg_module Pass A.
+   Used by NODE_CALL is_extern branch to fall back to mangle when the
+   caller module mis-declared a .jhyy fn as `extern fn` (e.g.
+   codegen_amd64_*.jhyy files). Without this, codegen emits an unmangled
+   `call $X` for those calls and the linker can't find the def (which is
+   mangle-style `<mod>__X` in some other module). */
+typedef struct {
+    char *name;       /* arena-allocated, owned */
+    const char *qbe_name;  /* "<mod>__<name>" — pre-mangled */
+} CGFnDef;
+static CGFnDef *g_fn_defs = NULL;
+static int      g_n_fn_defs = 0;
+static int      g_cap_fn_defs = 0;
+
+static void cg_fn_defs_register(const char *name, const char *qbe_name) {
+    if (g_n_fn_defs >= g_cap_fn_defs) {
+        int new_cap = g_cap_fn_defs ? g_cap_fn_defs * 2 : 64;
+        g_fn_defs = realloc(g_fn_defs, new_cap * sizeof(CGFnDef));
+        g_cap_fn_defs = new_cap;
+    }
+    g_fn_defs[g_n_fn_defs].name = strdup(name);
+    g_fn_defs[g_n_fn_defs].qbe_name = strdup(qbe_name);
+    g_n_fn_defs++;
+}
+
+static const char *cg_fn_defs_lookup(const char *name) {
+    for (int i = 0; i < g_n_fn_defs; i++) {
+        if (strcmp(g_fn_defs[i].name, name) == 0) return g_fn_defs[i].qbe_name;
+    }
+    return NULL;
+}
+
+static void cg_fn_defs_clear(void) {
+    for (int i = 0; i < g_n_fn_defs; i++) {
+        free(g_fn_defs[i].name);
+        free(g_fn_defs[i].qbe_name);
+    }
+    free(g_fn_defs);
+    g_fn_defs = NULL;
+    g_n_fn_defs = 0;
+    g_cap_fn_defs = 0;
+}
+
 /* CGContext layout MUST match jhyy-side codegen.jhyy CGCONTEXT_SIZE.
    Fields are heap-allocated (calloc) rather than inline arrays so the
    layout is portable between C-side (inline arrays OK but huge) and
@@ -882,7 +925,16 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
         char mangled[512];
         const char *fn_name;
         if (fn_sym && fn_sym->is_extern) {
-            fn_name = fn_sym->name;  /* extern: pass-through name to linker */
+            /* W-069 fallback: if the same name exists as a non-extern fn decl
+               in the merged module (e.g. arena_alloc from arena.jhyy is
+               called from codegen_amd64_*.jhyy via mis-declared `extern fn`),
+               emit the pre-mangled name so the linker can find the def. */
+            const char *real_name = cg_fn_defs_lookup(fn_sym->name);
+            if (real_name) {
+                fn_name = real_name;
+            } else {
+                fn_name = fn_sym->name;  /* true C ABI extern: pass-through */
+            }
         } else if (fn_sym && fn_sym->module) {
             snprintf(mangled, sizeof(mangled), "%s__%s", fn_sym->module, fn_sym->name);
             fn_name = mangled;
@@ -2515,6 +2567,29 @@ void cg_module(IRBuf *ir, Node *module, Target t) {
             NodeFuncDecl *fd = node_func_decl_data(decl);
             if (fd->is_inline) n_inline++;
         }
+    }
+    /* W-069: build name → pre-mangled qbe_name table for all non-extern fn
+       decls. Used by NODE_CALL is_extern branch to fix `extern fn` mis-decls
+       (where caller module wrote `extern fn X` for a .jhyy fn that actually
+       lives in another module and is mangle-emitted there). This table is
+       populated for the whole merged module after inline_imports. */
+    cg_fn_defs_clear();  /* reset from prior cg_module call */
+    for (size_t i = 0; i < md->ndeccls; i++) {
+        Node *decl = md->decls[i];
+        if (decl->kind != NODE_FUNC_DECL) continue;
+        NodeFuncDecl *fd = node_func_decl_data(decl);
+        if (!fd->sym) continue;
+        /* skip extern decls (no body, would not produce a def) */
+        if (fd->sym->is_extern) continue;
+        const char *name = fd->sym->name;
+        const char *mod = fd->sym->module;
+        char qbe_name[512];
+        if (mod && mod[0]) {
+            snprintf(qbe_name, sizeof(qbe_name), "%s__%s", mod, name);
+        } else {
+            snprintf(qbe_name, sizeof(qbe_name), "%s", name);
+        }
+        cg_fn_defs_register(name, qbe_name);
     }
     NodeFuncDecl **inline_fns = NULL;
     if (n_inline > 0) {

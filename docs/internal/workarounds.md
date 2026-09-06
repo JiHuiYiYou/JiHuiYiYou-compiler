@@ -66,7 +66,7 @@
 | [W-064](#w-064-run_qbe-失败只打-qbe-failed--缺-stderr-捕获-qbe-真实诊断丢失) | ✅ RESOLVED 2026-09-01 (v1.8.3.2 patch) | `run_qbe` (compiler/src0/main.jhyy:657-699) QBE 失败时只 echo `cmd_buf` (`QBE failed: "..."\n`), 不读 jh_run 已 capture 的 child stderr. QBE 真实诊断 ("invalid type for operand %t0 in phi %t6" / "undefined symbol" / "type mismatch") 全丢, 用户只见 "QBE failed" 一行, 难定位是 QBE reject 哪条 IL. 修复: 镜像 `link_with_gcc` W-045 pattern — `run_qbe` 失败分支加 `let captured = jh_run_get_output(); if captured != (0 as *u8) && (*captured) != (0 as i32) { jh_fputs_stderr("QBE stderr:\n" as *u8); jh_fputs_stderr(captured); jh_fputs_stderr("\n" as *u8); }`. `jh_run` per-call reset `jh_run_outlen = 0` (jhyy_helpers.c:517-518) 保证 QBE→gcc 链顺序不污染. **link_with_gcc 已 ship W-045**, `run_qbe` 是唯一剩没接 stderr capture 的 child process site. 顺带 bump l:1091 stale version literal `v1.0.0` → `v1.8.3.2` (jhyy.exe -h 可见)。回归 103/103 + Stage 2 闭环 hold. C-side `compiler/src/main.c` 未镜像 (production 用 jhyy-side, stage0 bootstrap 不修)。 |
 | [W-065](#w-065-jhyy-run-不预检-fn-main_jhyy--库-snippet-报-undefined-reference-to-main_jhyy-对用户不友好) | ✅ RESOLVED 2026-09-01 (v1.8.3.2 patch) | `jhyy run` 接 input 后直接调 `cmd_compile` (→ QBE → gcc link) — 库 snippet (无 `fn main_jhyy`, 仅 `fn unwrap` / `fn dist_sq` 这种) link 时 gcc 报 `undefined reference to main_jhyy`, 错误晚出且 noisy. 修复: `cmd_run` 入口 (compiler/src0/main.jhyy:987) 在 `cmd_compile` 之前加 cheap byte-level scan — `fopen(input, "rb")` + `fread` 131072 bytes + fclose, 然后 byte-by-byte 搜 needle `"fn main_jhyy"`. 找到 → 继续 compile; 找不到 → `jh_fputs_stderr("jhyy run: '<file>' has no 'fn main_jhyy() -> i32' (required for 'jhyy run'; use 'jhyy compile <file>.jhyy' for libraries)\n" as *u8)` + return 1. **scope**: 只动 `cmd_run`, `cmd_compile` 保持允许库-only 编译 (compile 不需要 main_jhyy, 可产 .s/.exe 给后续 link 用)。**byte-comparison 实现**: 第一次 commit (`src0/main.jhyy:1015-1029`) 用 `*i32` cast deref 4-byte 而非 1-byte, scan 永远不 match (即使文件真有 `fn main_jhyy`)。第二次 commit 改 `*u8` cast + `as i32` promote 才正确。首次 fix 在 fresh build 后 user case (test.jhyy / test2.jhyy) 仍报 "no fn main_jhyy" 才暴露 — 不写 5/5 PASS loop 不会发现 byte-comparison bug。regress 103/103 + Stage 2 闭环 hold (v2/v3/v4/v5 .il sha=`fa1137e5...`)。**C-side `src/main.c` 未镜像** (production path 走 jhyy-side)。 |
 | [W-068](#w-068-自写后端-codegen_amd64-模块未-e2e-验证-v26x-阶段-ship-但-make-不编-import-链-触发-24-sema-错) | ✅ RESOLVED (v2.6.5 commit `07c6a89`) | V2-B v2.6.0 Unit C (regalloc, commit `baa2757`) / Unit D (peephole, commit `9fdf173`) / Unit E (dispatch infra) + v2.6.3 (codegen_amd64_run real body, commit `b4ce9a2`) 4 个 commit ship 了 ~2200 LOC self-backend 代码,但 `import codegen_amd64;` 在 main.jhyy 一直注释 out, **`make` 不 parse 这些 module**, ship 时 0 e2e 验证。v2.6.4 commit `c251658` 实际打开 import 测试,surface 24 个 sema 错。**v2.6.5 commit `07c6a89` 真改 ship**: (1) codegen_amd64.jhyy:189-190 + :208 加 `: Arena` / `: StringBuilder` annotation (struct-literal branch match); (2) peephole.jhyy 22 处 `* N as i64` → `* (N as i64)` 加 parens (precedence); (3) parse_and_emit def 从 :191 前移到 :85 caller 之前 (forward ref); (4) parse_and_emit body 15 emit_X 全改 `let _ = emit_X(...)` 模式 (if/else i32/() 统一); (5) main.jhyy:50 import 真打开 + :121 删 extern decl (避免 mangling 不一致) + :789-815 run_backend 真 dispatch + 自动降级 QBE。**验证**: parse + sema 全过, 24 错全消。regress 验证 deferred v2.6.6 (separate W-069 toolchain issue 拆账)。 |
-| [W-069](#w-069-jhyyexe-编译产物-corrupt--ld-exit-5--stage0-build-pollution-v265-enable-真-import-后-surface) | 🟡 DEFERRED v2.6.6 | v2.6.5 enable 真 `import codegen_amd64;` 后 surface 两类 toolchain issue: (1) `OSError [WinError 1392] 文件或目录损坏且无法读取` — `file compiler/build/bin/jhyy.exe` 报 "data" (不是 PE32 executable), regress.py `_winapi.CreateProcess` 失败; (2) `ld exit 5` "errors listed above" — 实际 libc undefined symbols (malloc/memset/strlen/sprintf/strcmp/strncmp/isdigit), gcc auto-link 失效。baseline v2.6.4 `c251658` inert 状态跑同命令不挂 → W-068 source-level fix 不是直接因。**根因嫌疑**: stage0 cmd_compile invoke_buf 生成时漏 `-lc` (state pollution 触发) + stale .o cache。**scope (v2.6.6)**: `make clean-stage0 && make stage0` 排除 stale → 测 v2.6.5 是否仍 ld 5; 排查 cmd_compile invoke_buf 生成; ld 5 fail 改 echo invoke_buf (per W-045 pattern)。 |
+| [W-069](#w-069-jhyyexe-编译产物-corrupt--ld-exit-5--stage0-build-pollution-v265-enable-真-import-后-surface) | ✅ RESOLVED (v2.6.6 commit TBD) | v2.6.5 enable 真 `import codegen_amd64;` 后 surface 两类 toolchain issue: (1) `OSError [WinError 1392] 文件或目录损坏且无法读取`; (2) `ld exit 5` libc undefined symbols。**真根因**: codegen NODE_CALL is_extern branch 跳过 mangling,emit unmangled `callq ptr_add_u8` for `extern fn` decls in codegen_amd64_*.jhyy (caller module's sym 屏蔽真正的 util module def)。**真修**: C-side (`compiler/src/codegen.c`) + jhyy-side (`compiler/src0/codegen.jhyy`) 加 `CGFnDef` fn name → mangled name table, built in cg_module Pass A.5 from non-extern NODE_FUNC_DECL, is_extern branch 改成 lookup table fallback。**验证**: jhyy.exe 自路径编 main.jhyy → PE32+; jhyy_v1 → 编 main.jhyy → PE32+; regress 104/104 PASS;D43 closure hold (新 baseline `d708793c...`)。详细见 W-069 section。 |
 
 ---
 
@@ -4887,9 +4887,9 @@ workaround (`c251658` inert) 的失效条件 = 任何 commit 真打开 self path
 ## W-069: jhyy.exe 编译产物 corrupt / ld exit 5 — stage0 build pollution (v2.6.5 enable 真 import 后 surface)
 
 **ID:** W-069
-**状态:** 🟡 DEFERRED v2.6.6 (separate toolchain issue, 不阻塞 W-068 ship)
+**状态:** ✅ RESOLVED v2.6.6 (commit TBD — see v2.6.6 changelog)
 **日期:** 2026-09-06 (introduced — v2.6.5 commit `07c6a89` enable 真 `import codegen_amd64;` 后 surface)
-**superseder:** TBD — 需要单独 v2.6.6 toolchain 调查 sprint (stage0 build / cmd_compile state pollution)
+**superseder:** N/A — root cause fully diagnosed + fixed in v2.6.6
 
 **触发面:** 在 `import codegen_amd64;` 真打开后 (W-068 fix 完成后), `make` rebuild `jhyy.exe` 出现两类 symptom:
 1. **`OSError [WinError 1392] 文件或目录损坏且无法读取`** — regress.py subprocess.run 调 jhyy.exe 时 `_winapi.CreateProcess` 失败 (file header 损坏, `file jhyy.exe` 报 "data" 而非 "PE32 executable")
@@ -4903,34 +4903,46 @@ $ python regress.py ...
 OSError: [WinError 1392] 文件或目录损坏且无法读取
 ```
 
-**根因嫌疑 (初步, 未证实):**
-- stage0 (jhyy_stage0.exe) 编译 `main.jhyy` 时生成的 gcc command 有 state pollution (可能是 `cmd_compile` 全局变量在真 import 启用后 inflate / 改写 invoke_buf), 导致 gcc 命令行 -l<libc> 漏
-- 或者 stage0 自身 binary 在 source changes 后没干净 rebuild (stale .o cache)
-- baseline (v2.6.4 `c251658` inert 状态) 跑同命令不挂,说明 source-level W-068 fix 不是直接因
+**真根因 (v2.6.6 调查证实):**
 
-**workaround (当前 v2.6.5 ship 状态):**
-- W-068 source-level 真改 ship (`07c6a89`),保持 `import codegen_amd64;` 启用 + 真 dispatch 写好
-- regress / D43 closure 验证 **deferred to v2.6.6** (need clean stage0 rebuild 排查)
-- baseline v2.6.4 `c251658` (inert) 验证全过 → revert 到 inert 不需要 (source 真改是真改, 跟 binary corruption 是 orthogonal issue)
+W-069 不是 stage0 build pollution, 而是 **codegen NODE_CALL is_extern branch 的 emit 语义 bug**:
 
-**scope (~50 LOC, v2.6.6 sub-sprint 候选):**
-- ❌ 改 `compiler/src0/main.jhyy` `cmd_compile` 全局 state cleanup (可能 scope creep)
-- ❌ 改 `compiler/src/*.c` stage0 cmd_compile invoke_buf 生成逻辑
-- ❌ 加 `make clean-stage0` target, 强制 rebuild stage0 binary 排除 stale .o
-- ✅ 跑 clean stage0 rebuild (`rm -rf compiler/build/bin/jhyy_stage0.exe compiler/build/obj/*.o` + `make stage0`) → 测 v2.6.5 真 import 是否还触发 ld 5
-- ✅ 排查 `cmd_compile` invoke_buf 生成是否漏 `-lc` (auto-link 失效)
-- ✅ 改 workarounds.md W-069: 🟡 DEFERRED → ✅ RESOLVED
-- ✅ changelog-v2.6.x.md v2.6.6 sub-section
+1. **触发模式:** `codegen_amd64_*.jhyy` 文件 `import` 主 binary (main.jhyy) 后, 它们 declare `extern fn X` for jhyy-side fns (e.g. `extern fn ptr_add_u8` from codegen_amd64_regalloc.jhyy:117), 但这些 jhyy fns 实际定义在 `util.jhyy` module (mangled name `util__ptr_add_u8`)。
+2. **is_extern branch 错:** `codegen.c:884` 和 `codegen.jhyy:2403` 的 `if (*fs).is_extern != 0` 分支 emit 不 mangle 的 `call $name` (e.g. `callq ptr_add_u8`), 跳过了 mangling 逻辑。但 caller module 的 `extern fn` decl 在 symtab_lookup 时被 first hit (向上 search → global_scope), 屏蔽了真正的 `util__ptr_add_u8` def。
+3. **cc1 调用场景:**
+   - **stage0 编 main.jhyy**: codegen.c 走 is_extern branch → emit unmangled `callq ptr_add_u8` → ld 找 `util__ptr_add_u8` def **失败** (因为 def 是 mangled) → 74 处 undefined references → ld 5
+   - **v1.x regress test**: 走同样路径, 但 v1.x test 文件不 `import codegen_amd64`,所以 fn_defs 表只有几个非 extern fn, lookup miss → pass-through `callq ptr_add_u8` → libc linker 找不到 → ld 5 → 同症状
+4. **OSError [WinError 1392] 是个二次症状** (per Plan agent RCA): corrupt jhyy.exe 是 process exit 中途 kill 的副作用, 不是根因; 但因 `make` 在某些机器 ld 5 退出时 cleanup 没跑完 → jhyy.exe truncated → regress.py subprocess 读 → WinError 1392。
 
-**失效条件:** v2.6.5 `07c6a89` ship 后任何 commit 跑 regress 必须先 `make clean-stage0 && make stage0` 否则 baseline 数据无意义。
+**真修 (v2.6.6 commit TBD):**
+
+- **C-side (`compiler/src/codegen.c`):** 加 `CGFnDef` static globals (`g_fn_defs / g_n_fn_defs / g_cap_fn_defs`) + helpers (`cg_fn_defs_register / cg_fn_defs_lookup / cg_fn_defs_clear`)。cg_module Pass A.5 (after inline_imports merge) build fn name → mangled name table from all non-extern NODE_FUNC_DECL。`NODE_CALL` is_extern branch 改成 `cg_fn_defs_lookup(fn_sym->name)` → found: emit mangled name; not found: pass through (true C ABI extern)。
+- **jhyy-side (`compiler/src0/codegen.jhyy`):** 镜像实现。CGContext 加 2 字段 (`fn_defs: *u8`, `n_fn_defs: i64`), bump `CGCONTEXT_SIZE` 128 → 144 (jhyy-side only, C-side 用 static globals 不动 CGContext)。`CGFnDef` struct 16 bytes (name ptr + qbe_name ptr)。新增 fn: `cg_fn_defs_clear / cg_fn_defs_register / cg_fn_defs_lookup`。`cg_module` Pass A.5 加 register loop (iterate ndeccls, register all is_extern=0 NODE_FUNC_DECL with "<mod>__<name>" via StringBuilder in arena)。`NODE_CALL` is_extern branch 加 cg_fn_defs_lookup fallback。
+
+**修复验证 (v2.6.6):**
+- ✅ jhyy.exe 自路径编 main.jhyy: `jhyy.exe compile main.jhyy -o /tmp/test.exe` → 589323 bytes PE32+ (valid)
+- ✅ jhyy_v1.exe.exe (从 jhyy.exe 编出来的 main.jhyy) → 编 main.jhyy → 583673 bytes PE32+ (valid)
+- ✅ regress 104/104 PASS, 0 failed, 4 skipped (sha=a1359b6d752cb9ab...)
+- ✅ D43 closure hold (新 baseline il sha `d708793c...`, re-baselined per D43 v2.6.x sub-sprint rule)
+- ✅ .s 文件 grep 验证 0 unmangled `callq ptr_add_u8 / sb_append* / arena_alloc` (从 74 处 → 0)
+- ✅ 322 mangled `callq util__ptr_add_u8` (从 0 → 322)
+
+**scope (实际 v2.6.6 落地, ~80 LOC C-side + ~80 LOC jhyy-side):**
+- ✅ `compiler/src/codegen.c`: CGFnDef struct + 3 helpers + cg_module Pass A.5 loop + NODE_CALL is_extern fallback (~80 LOC)
+- ✅ `compiler/src0/codegen.jhyy`: CGFnDef struct + 3 helpers + CGContext +2 fields + CGCONTEXT_SIZE 144 + cg_module Pass A.5 loop + NODE_CALL is_extern fallback (~80 LOC)
+- ✅ docs update (本 entry + changelog-v2.6.0.md v2.6.6 sub-section)
+- ❌ byte_equal_amd64.sh Commit 5 (`SELF_DEFERRED=0` + `JHY_SELF_BACKEND=1` + 删 deferred notice + strict + `--save-baseline`) — user 决策推到 v2.6.7
+
+**失效条件 (post-fix):** 不再有失效条件 — 真修,不是 workaround。如果未来新增 codegen_amd64_*.jhyy 用了新的 `extern fn`,会自动通过 cg_fn_defs_register in cg_module Pass A.5 覆盖。
 
 ### 引用
 
 - v2.6.5 commit `07c6a89` (W-068 真改; W-069 surface 起点)
 - v2.6.4 commit `c251658` (inert state baseline, regress 全过)
-- `compiler/src0/main.jhyy:782-815` `run_backend` 真 dispatch (W-069 现场)
-- `compiler/build/bin/jhyy.exe` 文件头损坏 (现场)
-- `OSError [WinError 1392]` `_winapi.CreateProcess` 调用栈 (Python regress.py:208 subprocess.run)
+- v2.6.6 commit TBD (W-069 真修: codegen.c + codegen.jhyy + docs)
+- `compiler/src/codegen.c:36-71` (CGFnDef struct + helpers) + `compiler/src/codegen.c:884-898` (NODE_CALL is_extern fallback) + `compiler/src/codegen.c:2572-2593` (cg_module Pass A.5)
+- `compiler/src0/codegen.jhyy:216-345` (CGFnDef struct + helpers) + `compiler/src0/codegen.jhyy:189-191` (CGContext +2 fields) + `compiler/src0/codegen.jhyy:212` (CGCONTEXT_SIZE=144) + `compiler/src0/codegen.jhyy:2410-2421` (NODE_CALL is_extern fallback) + `compiler/src0/codegen.jhyy:4083-4120` (cg_module Pass A.5)
+- D43 baseline: `51376ce5721bccb0c81c7deabead1a6012fb76648c424238391018f1890b5761` (v2.4.0 末) → `d708793cf42897f530cb66953f037ad4...` (v2.6.6 新 baseline, re-baseline per D43)
 
 ### 验证
 

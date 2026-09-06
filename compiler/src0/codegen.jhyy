@@ -176,11 +176,18 @@ type CGContext = struct {
     // v1.4.6 W-017: module-level globals dict (Sym* → QBE data label).
     //   cg_module pass A 在遇到 NODE_LET 时 emit `data $g_x = { w 41 }` +
     //   register; cg_find_local fallthrough; cg_expr/cg_stmt 用 IRVAL_STR 形式
-    //   触发 ir_emit_load/store emit `$name` (per C-side mirror).
-    //   字段顺序 + 总 size 必须跟 C-side codegen.c CGContext byte-equal (per W-005)。
+    //   触发 ir_emit_load/store emit `$name` (per C-side mirror)。
     mod_globals:      *u8,        // *CGModGlobal 数组 (arena_alloc)
     n_mod_globals:    i32,
     cap_mod_globals:  i32,
+    // W-069 v2.6.6: fn name → pre-mangled qbe name table (mirrors C-side
+    //   g_fn_defs static globals). Built in cg_module Pass A from all
+    //   NODE_FUNC_DECL with is_extern=0. Read in cg_expr NODE_CALL is_extern
+    //   branch to fall back to mangle when caller module mis-declared a .jhyy
+    //   fn as `extern fn` (e.g. codegen_amd64_*.jhyy `extern fn ptr_add_u8`
+    //   → real def is `util__ptr_add_u8` in another module). 2*i64 = +16 bytes.
+    fn_defs:          *u8,        // *CGFnDef 数组 (arena_alloc, sized by n_fn_defs)
+    n_fn_defs:        i64,
 }
 
 // CGModGlobal layout (24 bytes): sym(0..8) + qbe_name(8..16) + qbe_type(16..20), padded to 24
@@ -188,15 +195,21 @@ fn CGMOD_GLOBAL_SIZE() -> i64 { return 24 as i64; }
 
 // CGContext size (v1.3.5: + 3*i64 for inline_fns / n_inline_fns / current_inline_sym;
 //                   v1.4.2: + 2*i32 for last_dbg_line / dbg_file_emitted;
-//                   v1.4.6 W-017: + 1*i64 (mod_globals) + 2*i32 (n_mod_globals, cap_mod_globals) = +16):
+//                   v1.4.6 W-017: + 1*i64 (mod_globals) + 2*i32 (n_mod_globals, cap_mod_globals) = +16;
+//                   v2.6.6 W-069: + 2*i64 (fn_defs, n_fn_defs) — jhyy-side only, mirrors
+//                                  C-side static g_fn_defs globals; C-side keeps CGContext
+//                                  at 128 bytes and uses module-level statics for the same
+//                                  data, so jhyy-side growing to 144 only affects jhyy-side
+//                                  arena alloc, no shared-layout invariant broken):
 //   9*i64 (ir, locals, nlocals_pad, current_ret_type, sret_slot_id, current_fn,
 //          inline_fns, n_inline_fns, current_inline_sym) = 72 +
 //   has_sret(i32) + loop_depth(i32) + last_dbg_line(i32) + dbg_file_emitted(i32)
 //   + n_mod_globals(i32) + cap_mod_globals(i32) = 24 +
 //   3*i64 (loop_starts, loop_ends, loop_continues) = 24 +
-//   1*i64 (mod_globals) = 8
-//   = 128 (was 112 before v1.4.6)
-fn CGCONTEXT_SIZE() -> i64 { return 128 as i64; }
+//   1*i64 (mod_globals) = 8 +
+//   2*i64 (fn_defs, n_fn_defs) = 16
+//   = 144 (was 128 before v2.6.6)
+fn CGCONTEXT_SIZE() -> i64 { return 144 as i64; }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // v1.4.6 W-017: CGModGlobal struct + register/lookup helpers
@@ -275,6 +288,61 @@ fn cg_mod_global_lookup(cg_raw: *u8, sym: *u8, out_buf: *u8) -> i32 {
 //   `.file N "<name>"` + `.loc N <line>` directives in .s, which gdb reads.
 //   jhyy just needs to emit dbgfile once + dbgloc before each line change.
 // ═══════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════
+// W-069 v2.6.6: CGFnDef struct + register/lookup helpers
+//   fn name → pre-mangled qbe name table. Built in cg_module Pass A from all
+//   NODE_FUNC_DECL with is_extern=0. Read in cg_expr NODE_CALL is_extern
+//   branch to fix `extern fn` mis-decls in caller modules (codegen_amd64_*.jhyy
+//   declare ptr_add_u8 etc. as `extern fn` but real def is `util__ptr_add_u8`).
+//   jhyy-side analog of C-side static g_fn_defs (codegen.c:40-42); both write
+//   the same lookup table to support the same is_extern fallback emit.
+// ═══════════════════════════════════════════════════════════════════════════
+
+type CGFnDef = struct {
+    name:     *u8,        // 0..8
+    qbe_name: *u8,        // 8..16
+}
+
+// CGFnDef entry = 16 bytes (name ptr + qbe_name ptr)
+fn FNDEF_SIZE() -> i64 { return 16 as i64; }
+
+// cg_fn_defs_clear: reset fn_defs table to empty (called at cg_module Pass A top).
+fn cg_fn_defs_clear(cg_raw: *u8) -> i32 {
+    let cg = cg_raw as *CGContext;
+    (*cg).fn_defs = 0 as *u8;
+    (*cg).n_fn_defs = 0 as i64;
+    return 1;
+}
+
+// cg_fn_defs_register: append (name, qbe_name) to cg->fn_defs. arena_alloc once at
+// Pass A start with size = n_decl_total * FNDEF_SIZE (upper bound).
+fn cg_fn_defs_register(cg_raw: *u8, name: *u8, qbe_name: *u8) -> i32 {
+    let cg = cg_raw as *CGContext;
+    let n = (*cg).n_fn_defs;
+    let slot = ptr_add_u8((*cg).fn_defs, n * FNDEF_SIZE());
+    *(slot as **u8) = name;
+    *(ptr_add_u8(slot, 8 as i64) as **u8) = qbe_name;
+    (*cg).n_fn_defs = n + (1 as i64);
+    return 1;
+}
+
+// cg_fn_defs_lookup: linear scan for name match; return qbe_name ptr or 0.
+fn cg_fn_defs_lookup(cg_raw: *u8, name: *u8) -> *u8 {
+    let cg = cg_raw as *CGContext;
+    if (*cg).fn_defs == (0 as *u8) { return 0 as *u8; }
+    let mut i: i64 = 0 as i64;
+    while i < (*cg).n_fn_defs {
+        let entry_p = ptr_add_u8((*cg).fn_defs, i * FNDEF_SIZE());
+        let entry_name = *(entry_p as **u8);
+        // strcmp
+        if strcmp(entry_name, name) == (0 as i32) {
+            return *(ptr_add_u8(entry_p, 8 as i64) as **u8);
+        }
+        i = i + (1 as i64);
+    }
+    return 0 as *u8;
+}
 
 fn cg_dbg_emit_file(ir: *IRBuf, filename: *u8) -> i32 {
     if filename == (0 as *u8) { return 0; }
@@ -2334,7 +2402,17 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             let fs = fn_sym_raw as *Sym;
             if (*fs).is_extern != 0 {
                 is_extern_call = 1;
-                fn_name = (*fs).name;
+                // W-069 v2.6.6 fallback: if same name exists as non-extern fn
+                //   decl in merged module (caller module's `extern fn X` for a
+                //   .jhyy fn X that actually lives in another module), use the
+                //   pre-mangled name from fn_defs table. Otherwise pass through
+                //   unmangled (true C ABI extern like malloc/free).
+                let real_name = cg_fn_defs_lookup(cg_raw, (*fs).name);
+                if real_name != (0 as *u8) {
+                    fn_name = real_name;
+                } else {
+                    fn_name = (*fs).name;
+                }
             } else if (*fs).module != (0 as *u8) {
                 // mangle "$mod__$name" via StringBuilder
                 let mut sb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
@@ -3995,6 +4073,49 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
                 }
             }
             di_a3 = di_a3 + (1 as i64);
+        }
+    }
+
+    // W-069 v2.6.6: build fn name → pre-mangled qbe name table. Mirrors C-side
+    //   cg_module Pass A.5 (codegen.c:2576-2593). All NODE_FUNC_DECL with
+    //   is_extern=0 register (name, "<mod>__<name>") so NODE_CALL is_extern
+    //   branch can fall back to mangle when caller module mis-declared a .jhyy
+    //   fn as `extern fn`. cg_fn_defs_clear first to support multiple cg_module
+    //   invocations per process (Stage 2 chain: jhyy_v1→v2→v3→v4 each compile
+    //   different modules). Upper bound = ndeccls (some decls may be non-fns).
+    cg_fn_defs_clear(cg_raw);
+    if ndeccls > (0 as i64) {
+        (*cg_ptr).fn_defs = arena_alloc((*ir).arena, ndeccls * FNDEF_SIZE());
+        let mut di_a5: i64 = 0 as i64;
+        while di_a5 < ndeccls {
+            let ds5 = ptr_add_u8((*md).decls, di_a5 * (8 as i64)) as **Node;
+            let dn5 = *ds5;
+            if dn5 != (0 as *Node) {
+                if (*dn5).kind == NODE_FUNC_DECL() {
+                    let fd_p5 = node_func_decl_data(dn5);
+                    if (*fd_p5).is_extern == (0 as i32) {
+                        let fd_sym5 = (*fd_p5).sym;
+                        if fd_sym5 != (0 as *u8) {
+                            let sym5 = fd_sym5 as *Sym;
+                            let name5 = (*sym5).name;
+                            let mod5 = (*sym5).module;
+                            // Build "<mod>__<name>" via StringBuilder in arena
+                            let mut sb5: StringBuilder = StringBuilder {
+                                buf: 0 as *u8, len: 0 as i64, cap: 0 as i64
+                            };
+                            sb_init((*ir).arena, &sb5);
+                            if mod5 != (0 as *u8) {
+                                sb_append_cstr((*ir).arena, &sb5, mod5);
+                                sb_append_cstr((*ir).arena, &sb5, "__" as *u8);
+                            }
+                            sb_append_cstr((*ir).arena, &sb5, name5);
+                            let qbe5 = sb_cstr((*ir).arena, &sb5);
+                            cg_fn_defs_register(cg_raw, name5, qbe5);
+                        }
+                    }
+                }
+            }
+            di_a5 = di_a5 + (1 as i64);
         }
     }
 

@@ -214,13 +214,55 @@
 **净 ship 计数:** 3 source files 真改 (codegen_amd64.jhyy + codegen_amd64_peephole.jhyy + main.jhyy) + 1 workarounds.md doc (W-068 RESOLVED + W-069 DEFERRED)
 **W-069 拆账 (新登):** v2.6.5 真改 ship 后 surface 两类 toolchain issue — (1) `OSError [WinError 1392] 文件或目录损坏且无法读取` (jhyy.exe 文件头坏), (2) `ld exit 5` "errors listed above" (libc undefined symbols, gcc auto-link 失效)。baseline v2.6.4 inert 跑同命令不挂 → W-068 source-level fix 不是直接因。**scope v2.6.6**: clean stage0 rebuild + 排查 cmd_compile invoke_buf `-lc` 漏 + ld 5 fail echo invoke_buf (per W-045 pattern)。
 
-## References (v2.6.1 - v2.6.5)
+## v2.6.6 (2026-09-06, W-069 真修)
+
+**核心:** W-069 真修 — codegen NODE_CALL is_extern branch 跳过 mangling 的 emit 语义 bug 真根因确诊 + fix。regress 104/104 PASS + D43 closure sha `d708793c...` (re-baselined per D43 v2.6.x sub-sprint rule)。
+
+**调查过程:**
+
+1. clean stage0 rebuild (`rm -f compiler/build/obj/*.o compiler/build/bin/jhyy_stage0.exe && make stage0`) → 排除 stale .o cache 嫌疑。
+2. 直接 `ld` invocation 捕 56 undefined symbols → 看清真 symbol 是 `ptr_add_u8 / sb_append_cstr / sb_append / sb_appendf_lld / arena_alloc` (jhyy-side fns) + libc (`malloc / free / memset / memcpy / strlen / sprintf / strcmp / strncmp / isdigit / isalnum / strtoll`)。
+3. codegen.c:884 debug print 验证 is_extern branch 全走 unmangled emit → codegen.c `cg_fn_defs_register / cg_fn_defs_lookup` table 在 Pass A.5 建 (after inline_imports merge), is_extern branch 改成 lookup table fallback。修后 ld 0 exit, valid PE32+。
+4. **披露 src0/codegen.jhyy 同样问题**: jhyy-side codegen (compiled in via stage0) 有同样的 NODE_CALL is_extern branch (line 2403), emit 同样的 unmangled `callq ptr_add_u8`。C-side 修了 stage0 编 main.jhyy OK,但 jhyy_v1.exe.exe (jhyy.exe 编 main.jhyy) 编 main.jhyy 还 fail。
+5. **修 jhyy-side**: 加 `CGFnDef` struct (16 bytes) + 3 helpers (`cg_fn_defs_clear / register / lookup`), CGContext 加 2 字段 (`fn_defs: *u8`, `n_fn_defs: i64`), bump `CGCONTEXT_SIZE` 128 → 144 (jhyy-side only; C-side 用 static globals 不动 CGContext)。cg_module Pass A.5 加 register loop (iterate `(*md).ndeccls`, register all `is_extern=0` NODE_FUNC_DECL with `"<mod>__<name>"` via StringBuilder in arena)。`NODE_CALL` is_extern branch 加 cg_fn_defs_lookup fallback。
+
+**Diff stat:**
+```
+compiler/src/codegen.c             | 80 ++++++++++++++++++++++++++++++++++++-
+compiler/src0/codegen.jhyy          | 79 ++++++++++++++++++++++++++++++++++++-
+compiler/build/bin/jhyy.exe         | Bin 515678 -> 589323 bytes
+compiler/build/bin/jhyy_v1.exe.exe  | Bin 510826 -> 583673 bytes (rebuilt via stage0 + jhyy.exe)
+docs/internal/workarounds.md        | (W-069 RESOLVED + detail)
+docs/logs/v2/changelog-v2.6.0.md    | (本 sub-section)
+```
+
+**Ship gate:**
+- ✅ jhyy.exe 编 main.jhyy 自路径 → 589323 bytes PE32+ (valid)
+- ✅ jhyy_v1.exe.exe (jhyy-side 编出来) 编 main.jhyy → 583673 bytes PE32+ (valid)
+- ✅ regress 104/104 PASS, 0 failed, 4 skipped (jhyy.exe sha=a1359b6d752cb9ab...)
+- ✅ D43 closure hold: jhyy_v1.il == jhyy_v2.il sha=`d708793cf42897f530cb66953f037ad4...` (re-baselined per D43; 原 v2.4.0 baseline `51376ce5...` 已 expire, 因 v2.6.x sub-sprint 改 codegen 触发)
+- ✅ .s 文件 grep: 0 unmangled `callq ptr_add_u8` (从 74 → 0) + 322 mangled `callq util__ptr_add_u8` (从 0 → 322)
+
+**已知 closure invariant (per D43):**
+- il sha `d708793c...` 是 v2.6.x 当前 baseline (post-W-069 fix); v2.x 中 / 末 / v3.x 后续 sub-sprint 改 codegen → 需 re-baseline (per D43 阶段性 self-equal, **不**跨版本)
+
+**scope (实际落地):**
+- ✅ `compiler/src/codegen.c` (C-side CGFnDef + helpers + cg_module Pass A.5 + NODE_CALL is_extern fallback, ~80 LOC)
+- ✅ `compiler/src0/codegen.jhyy` (jhyy-side mirror, ~80 LOC; CGCONTEXT_SIZE 128→144 jhyy-side only)
+- ✅ docs update (本 entry + workarounds.md W-069 RESOLVED + D43 re-baseline)
+- ❌ byte_equal_amd64.sh Commit 5 (`SELF_DEFERRED=0` + `JHY_SELF_BACKEND=1` + 删 deferred notice + strict + `--save-baseline`) — 推到 v2.6.7 (per 2026-09-06 user Q1 决策)
+
+**净 ship 计数:** 2 source files 真改 (codegen.c + codegen.jhyy) + 2 binaries rebuilt (jhyy.exe + jhyy_v1.exe.exe) + 2 docs (workarounds.md + changelog-v2.6.0.md)
+
+## References (v2.6.1 - v2.6.6)
 
 - v2.6.1 commit: `9fe2f94` (jh_regalloc_get/set C-side bridge)
 - v2.6.2 commit: `44eb090` (regalloc module uses extern)
 - v2.6.3 commit: `b4ce9a2` (codegen_amd64_run real body)
 - v2.6.4 commit: `c251658` (wire run_backend inert)
 - v2.6.5 commit: `07c6a89` (W-068 real wire-up)
+- v2.6.6 commit: TBD (W-069 真修)
 - W-068 entry: [`../../internal/workarounds.md`](../../internal/workarounds.md) (✅ RESOLVED)
-- W-069 entry: [`../../internal/workarounds.md`](../../internal/workarounds.md) (🟡 DEFERRED v2.6.6)
+- W-069 entry: [`../../internal/workarounds.md`](../../internal/workarounds.md) (✅ RESOLVED v2.6.6)
 - Plan doc: [`twinkly-hatching-canyon.md`](../../plans/twinkly-hatching-canyon.md) (Phase 1-4)
+- D43 baseline: `51376ce5...` (v2.4.0 末) → `d708793c...` (v2.6.6 新 baseline, per D43 v2.x sub-sprint 阶段性 self-equal rule)
