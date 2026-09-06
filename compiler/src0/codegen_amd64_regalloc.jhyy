@@ -73,25 +73,33 @@ fn REG_SPILLED() -> i32 { return -2 as i32; }  // spill 到栈
 // regalloc_query_spill_off_no_arr / regalloc_query_reg_no_arr 读取。
 // 0 = 未分析(emit 函数走 fallback 1-to-1 栈分配)。
 //
+// v2.6.2: 原本是 `let mut g_regalloc_arr: *u8 = 0 as *u8;` 在 module-level
+// 声明 — 但 jhyy 的 `let mut` 在 module 作用域内会触发 stage0 segfault when
+// main.jhyy imports codegen_amd64(因 sema Pass 1 不处理 NODE_LET at module
+// scope)。v2.6.1 把这个 global 移到 C-side static(jh_regalloc_get / set
+// extern bridge in jhyy_helpers.c),regalloc 模块通过 extern fn 读 / 写,
+// 不再是 jhyy-side module-level mutable state。
+//
 // 注:regalloc_query_spill_off_no_arr / regalloc_query_reg_no_arr 在文件
 // 后段定义(在 regalloc_query_spill_off / regalloc_query_reg 之后),因为
 // jhyy 不支持 fn forward reference。
-let mut g_regalloc_arr: *u8 = 0 as *u8;
+extern fn jh_regalloc_get() -> *u8;
+extern fn jh_regalloc_set(p: *u8) -> i32;
 
 // regalloc_get_global — 内部 helper,返回 module-level regalloc array 指针
 fn regalloc_get_global() -> *u8 {
-    return g_regalloc_arr;
+    return jh_regalloc_get();
 }
 
 // regalloc_set_global — regalloc_run 调用,写入 module-level array 指针
 fn regalloc_set_global(arr: *u8) -> i32 {
-    g_regalloc_arr = arr;
+    let _ = jh_regalloc_set(arr);
     return 0 as i32;
 }
 
 // regalloc_clear_global — 每个 function prologue 前调,清空 module-level state
 fn regalloc_clear_global() -> i32 {
-    g_regalloc_arr = 0 as *u8;
+    let _ = jh_regalloc_set(0 as *u8);
     return 0 as i32;
 }
 
