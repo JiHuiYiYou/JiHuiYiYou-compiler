@@ -277,4 +277,4 @@ V3-C sub-sprint 2/3 — `PhantomData<T>` 0 字节 ZST type marker,只占 type �
 feat(phantom): add PhantomData<T> ZST codegen + Cap combo (3g.5)
 ```
 
-**D43 baseline update**: N6 (`51376ce5...`) → **N7 = <commit sha>`** (single commit 包含全部 6 src0 改动 + 2 测试 + 1 spec + changelog;Stage 2 N=4 closure hold 在 `40d51000c132cd8c538e196e695d89900acd14ec7c1f5225bba6a04e75851145`)
+**D43 baseline update**: N6 (`51376ce5...`) → **N7 = `a8d55ac65315535b0d1c291b94f5b1c130a8cabc`** (single commit 包含全部 6 src0 改动 + 2 测试 + 1 spec + changelog;Stage 2 N=4 closure hold 在 `40d51000c132cd8c538e196e695d89900acd14ec7c1f5225bba6a04e75851145`;tagged `v3.1.1` on this commit)
