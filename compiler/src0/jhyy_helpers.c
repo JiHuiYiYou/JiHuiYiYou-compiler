@@ -608,6 +608,24 @@ __attribute__((used)) const char *jh_getenv(const char *name) {
 }
 #endif
 
+/* v2.6.1: jh_regalloc_get / jh_regalloc_set — regalloc module-level global
+   moved from jhyy-side `let mut g_regalloc_arr` (compiler/src0/codegen_amd64_
+   regalloc.jhyy:79) to C-side static. The jhyy-side `let mut` was the only
+   module-level mutable state in src0; when `inline_imports` in main.jhyy
+   merged the codegen_amd64 import chain, sema Pass 1 (sema.jhyy:1820-1857)
+   doesn't handle NODE_LET at module scope → stage0 segfault during compile.
+   Moving global state to C-side static sidesteps the issue and matches the
+   existing pattern for jh_setenv / jh_getenv. The static is zero-initialized
+   at process start (BSS), so regalloc_clear_global() = jh_regalloc_set(NULL). */
+static void *g_jh_regalloc_arr = (void *)0;
+__attribute__((used)) void *jh_regalloc_get(void) {
+    return g_jh_regalloc_arr;
+}
+__attribute__((used)) int jh_regalloc_set(void *arr) {
+    g_jh_regalloc_arr = arr;
+    return 0;
+}
+
 /* v2.6.0: jh_read_file — read entire file into caller-provided buffer.
    Returns:
      0  on success (*out_len set to file size)
