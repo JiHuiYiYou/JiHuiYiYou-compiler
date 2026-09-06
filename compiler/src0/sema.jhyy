@@ -297,6 +297,14 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
         if strcmp(name, "Cap" as *u8) == (0 as i32) {
             return type_cap((*ctx).arena, type_primitive(ta, PRIM_I32()));
         }
+        // v3.1.1 (V3-C 3g.5): PhantomData<T> builtin — 0-byte ZST type marker.
+        // 简化:default inner=i32, 完整 PhantomData<T> generic inner 解析留 v3.2.0 (3i generics).
+        // sema 阶段显式识别避免依赖 parser 在 symtab 插入 type_ptr (parser 路径在 fn body scope
+        // 不可靠:global_scope vs current_scope 链查找机制)。type_phantom 已存 inner 字段
+        // 留给后续 v3.2.0 monomorphize 阶段使用;v3.1.1 M0 只用 size/align 硬编码 invariant。
+        if strcmp(name, "PhantomData" as *u8) == (0 as i32) {
+            return type_phantom((*ctx).arena, type_primitive(ta, PRIM_I32()));
+        }
 
         // global scope user-defined type
         let gsym = symtab_lookup((*ctx).global_scope, name);
@@ -952,6 +960,11 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         }
 
         let callee_type = infer_type(ctx, ta, (*d).callee as *Node);
+        // v3.1.1 (V3-C 3g.5): PhantomData 不允许实例化(只能作 type-level marker)
+        if (*callee_type).kind == KIND_PHANTOM() {
+            let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                    "E0050: cannot instantiate PhantomData<T> (use as type-level marker only)" as *u8);
+        }
         // 推所有 arg 类型
         let mut i: i64 = 0 as i64;
         while i < (*d).nargs {
@@ -1300,6 +1313,14 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let mut decl_type: *Type = 0 as *Type;
         if (*d).type_annot != (0 as *u8) {
             decl_type = resolve_type_node(ctx, ta, (*d).type_annot as *Node);
+            // v3.1.1 (V3-C 3g.5): PhantomData 不允许实例化(只能作 type-level marker)
+            // 字段声明 `let _m: PhantomData<T>;`(无 init)是合法的 → 只在有 init 时报 E0050
+            if (*decl_type).kind == KIND_PHANTOM() {
+                if (*d).init != (0 as *u8) {
+                    let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                            "E0050: cannot instantiate PhantomData<T> (use as type-level marker only)" as *u8);
+                }
+            }
         }
         // float literal coerce
         if (*d).init != (0 as *u8) {
@@ -1575,6 +1596,11 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             let ts = (*d).type_sym as *Sym;
             if (*ts).type_ptr != (0 as *u8) {
                 let t = (*ts).type_ptr as *Type;
+                // v3.1.1 (V3-C 3g.5): PhantomData 不允许实例化 — struct literal 也拦
+                if (*t).kind == KIND_PHANTOM() {
+                    let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                            "E0050: cannot instantiate PhantomData<T> (use as type-level marker only)" as *u8);
+                }
                 if (*t).kind == KIND_STRUCT() {
                     st = t;
                 }

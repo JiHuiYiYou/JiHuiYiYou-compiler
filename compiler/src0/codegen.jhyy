@@ -665,6 +665,15 @@ fn cg_copy_struct(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) ->
         let foffset_ptr = ptr_add_u8(fdesc_ptr, 16 as i64) as *i64;
         let offset = *foffset_ptr;
 
+        // v3.1.1 (V3-C 3g.5): PhantomData ZST 字段不 emit 任何 IR。
+        // 理由: PhantomData size=0/align=1, struct layout 阶段 offset 不推进
+        // (sema.jhyy:2166-2193 layout 循环天然支持 0-size 字段),
+        // codegen 层无需 load/store/copy 该字段。直接 continue 避免 tmp 浪费。
+        if (*ftype).kind == KIND_PHANTOM() {
+            i = i + (1 as i64);
+            continue;
+        }
+
         // compute field addresses
         // v0.9 wip commit 2.8 (B-struct fix): 对齐 v0 codegen.c:140-148
         //   - 总是 alloc src_off/dst_off 新 tmp (即使 offset==0)

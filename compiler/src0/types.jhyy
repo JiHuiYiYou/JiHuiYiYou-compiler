@@ -313,6 +313,21 @@ fn type_cap(a: *Arena, inner: *Type) -> *Type {
     return t;
 }
 
+// v3.1.1 (V3-C 3g.5): type_phantom — 构造 `PhantomData<T>` ZST type marker.
+// 0 字节 layout (per Rust ZST 语义): size=0, align=1, 不占 struct layout slot.
+// elem 存 inner *Type 以支持 type_eq 结构等比(PhantomData<i32> ≠ PhantomData<u64>)
+// 便于 `struct Foo<T> { _marker: PhantomData<T>, val: T }` 类型参数推导。
+// M0 简化:不允许实例化(由 sema E0050 拦);只用于 type-level marker / 字段嵌入。
+fn KIND_PHANTOM()      -> i32 { return 12 as i32; }
+fn type_phantom(a: *Arena, inner: *Type) -> *Type {
+    let t = arena_alloc(a, TYPE_SIZE()) as *Type;
+    (*t).kind = KIND_PHANTOM();
+    (*t).elem = inner as *u8;
+    (*t).size = 0 as i64;   // ZST invariant — 不能依赖 inner size
+    (*t).align = 1 as i64;  // align 1 = 不影响 struct layout 对齐
+    return t;
+}
+
 // ════════════════════════════════════════════════════
 // type_size / type_align
 // ════════════════════════════════════════════════════
@@ -349,6 +364,7 @@ fn type_size(t: *Type) -> i64 {
     if k == KIND_VOID()    { return 0 as i64; }
     if k == KIND_REF()     { return 8 as i64; }   // v3.1.0: `&T` / `&mut T` = 1 ptr
     if k == KIND_CAP()     { return (*t).size; } // v3.1.0: Cap<T> = 8 (cnode/depth/rights/pad)
+    if k == KIND_PHANTOM() { return 0 as i64; }  // v3.1.1: ZST — 0 bytes, 不依赖 inner
     return 0 as i64;
 }
 
@@ -370,6 +386,7 @@ fn type_align(t: *Type) -> i64 {
     if k == KIND_VOID()      { return 1 as i64; }
     if k == KIND_REF()       { return 8 as i64; }  // v3.1.0
     if k == KIND_CAP()       { return (*t).align; } // v3.1.0
+    if k == KIND_PHANTOM()   { return 1 as i64; }   // v3.1.1: ZST align = 1 (不影响 struct 对齐)
     return 1 as i64;
 }
 
@@ -444,6 +461,11 @@ fn type_eq(a: *Type, b: *Type) -> i32 {
     if k == KIND_CAP() {
         return type_eq((*a).elem as *Type, (*b).elem as *Type);
     }
+    // v3.1.1: KIND_PHANTOM — ZST type marker。结构等比(PhantomData<i32> ≠ PhantomData<u64>)
+    // 跟 KIND_CAP 一样按 elem 区分;但 layout 不一样(0 vs 8)。
+    if k == KIND_PHANTOM() {
+        return type_eq((*a).elem as *Type, (*b).elem as *Type);
+    }
     return 0 as i32;
 }
 
@@ -491,5 +513,6 @@ fn type_to_string(t: *Type) -> *u8 {
         return "&" as *u8;
     }
     if k == KIND_CAP() { return "Cap" as *u8; }
+    if k == KIND_PHANTOM() { return "PhantomData" as *u8; } // v3.1.1
     return "?" as *u8;
 }

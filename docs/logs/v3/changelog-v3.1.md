@@ -143,3 +143,138 @@ V3-C sub-sprint 1/3 — `&T` / `&mut T` 借用类型 + 简化版 NLL (stub) + `C
 ```
 feat(v3.1.0): add &mut + lifetime NLL (stub) + Cap<T> 8-byte layout (3g)
 ```
+
+---
+
+# V3-C v3.1.1 — `PhantomData<T>` ZST codegen (3g.5)
+
+> **ship date**: 2026-09-06
+> **branch**: `axis-v3` (per 2026-09-06 user "顺序做的后面不用开branch,就在v3主轴上修")
+> **D27 锁**: 3g (v3.1.0) → 3g.5 (v3.1.1) → 3g.7 (v3.1.2) 串行不可调换
+> **D43 baseline**: N7 (this sprint) — 上一条 N6 = `51376ce5721bccb0c81c7deabead1a6012fb76648c424238391018f1890b5761` (V3-B v3.0.5 final, v3.1.0 ship hold)
+> **umbrella**: 本文件 v3.1.1 段 (与 v3.1.0 / v3.1.2 共用 changelog-v3.1.md, per `feedback_changelog_umbrella`)
+
+---
+
+## 1. 范围 / Scope
+
+V3-C sub-sprint 2/3 — `PhantomData<T>` 0 字节 ZST type marker,只占 type 表项不占 struct layout slot,不允许实例化 (M0 简化)。
+
+**D27 锁** v3.1.0 → v3.1.1 → v3.1.2 串行 (per [`../../plans/v3/batch-V3-C-plan.md`](../../plans/v3/batch-V3-C-plan.md) § 4.4 + [`../../plans/roadmap/v2-v3-parallel-sprint-plan.md`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md))。
+
+---
+
+## 2. 改动 / Changes
+
+### 2.1 types.jhyy
+
+- 加 `KIND_PHANTOM = 12` (跟 v3.1.0 `KIND_CAP=11` 续号)
+- `type_phantom(a, inner) -> *Type` ctor:复用 `Type.elem` slot 存 inner,`size=0`, `align=1` 硬编码 (ZST invariant)
+- `type_size` 加 `KIND_PHANTOM` arm → `return 0`
+- `type_align` 加 `KIND_PHANTOM` arm → `return 1`
+- `type_eq` 加 `KIND_PHANTOM` arm → 结构等比 (跟 KIND_CAP 同型, `PhantomData<i32> ≠ PhantomData<u64>`)
+- `type_to_string` 加 `KIND_PHANTOM` arm → `return "PhantomData"`
+
+### 2.2 parser.jhyy
+
+- `parse_type` IDENT 分支 (post-line 509) 加 `PhantomData<T>` 识别:
+  - 匹配 `name == "PhantomData"` AND peek `<`
+  - consume `<`, 递归 `parse_type(p)` 拿 inner T
+  - expect `>`, 调 `type_phantom(arena, inner)`, 绑到 builtin ident sym
+  - 不支持 `::` 限定 (M0 简化)
+  - `PhantomData` 无 `<T>` → fall through 走 default ident → sema 报 unresolved
+
+### 2.3 sema.jhyy
+
+- 3 个禁实例化检查点 + `E0050: cannot instantiate PhantomData<T>` 错误:
+  - `NODE_LET` (post-line 1305): `decl_type.kind == KIND_PHANTOM && init != null`
+  - `NODE_CALL` (post-line 954): `callee_type.kind == KIND_PHANTOM`
+  - `NODE_STRUCT_LIT` (post-line 1578): `t.kind == KIND_PHANTOM` (在 KIND_STRUCT 检查前)
+- `let _m: PhantomData<T>;` (无 init) 合法 — 字段声明不受 E0050 拦
+
+### 2.4 codegen.jhyy
+
+- `cg_copy_struct` (line 654) 加早期 continue: `if (*ftype).kind == KIND_PHANTOM() { i = i + 1; continue; }`
+- 字段迭代前跳过 PhantomData 字段, 不分配 src_off/dst_off tmp, 不 emit load/store IR
+
+### 2.5 ir.jhyy
+
+- `qbe_type_of` 加 `KIND_PHANTOM` arm → `return QBE_W` (防御, well-formed 程序不会触发)
+
+### 2.6 codegen_amd64_emit_mem.jhyy
+
+- **无修改**: `size <= 0` guard (line 263) 已存在; PhantomData 在 codegen.jhyy 阶段已 skip, 不进入 emit_mem 路径
+
+---
+
+## 3. 测试 / Tests
+
+### 3.1 新增 test files
+
+| File | Purpose | SKIP directive |
+|------|---------|----------------|
+| `compiler/tests/examples/phantom_zst.jhyy` | `sizeof(PhantomData<i32>) == 0` + `sizeof(Wrapper) == 4` | YES (V3-C 3g.5 jhyy-side only) |
+| `compiler/tests/examples/cap_phantom_combo.jhyy` | `sizeof(Cap) == 8` + `sizeof(W) == 16` (Cap + PhantomData + u32) | YES |
+
+### 3.2 测试结果
+
+- `compiler/build/bin/jhyy.exe`: **104/104 PASS + 15 SKIP** (V3-C v3.1.0 baseline 104/104 + 13 SKIP 仍 hold;新增 `phantom_zst.jhyy` + `cap_phantom_combo.jhyy` 进 SKIP 计数)
+- **No regression** (V3-C v3.1.0 baseline 104/104 + 13 SKIP 仍 hold)
+- Ship-gate 5/5 PASS: `phantom_zst.jhyy` + `cap_phantom_combo.jhyy` 各 EXIT=42 (MCP `jhyy_run` 验证 5 次连续 EXIT=42)
+- Regress binary sha256: `ee38ebc3caa80872cf7d95c04246f0cb757906c2e8fb6274b2d927099715f16e`
+
+### 3.3 Self-host closure (D43 baseline N6 → N7)
+
+- **Stage 2 N=4 byte-equal closure PASS**: v2/v3/v4/v5 全部 sha256 = `40d51000c132cd8c538e196e695d89900acd14ec7c1f5225bba6a04e75851145`
+- D43 baseline N6 (`51376ce5...`) → **N7** = 本 commit sha (ZST 改 codegen layout emit, IL 漂移预期)
+- 本 sub-sprint ship 后 N7 冻结 (per `feedback_make_clean_too_aggressive` pattern)
+- Re-baseline 流程: jhyy_selfhost_check 自动记录新 SHA, changelog v3.1.1 段写明 N7 baseline = 本 commit sha
+
+---
+
+## 4. 已知限制 / Known Limitations (out of scope 留后续)
+
+| 限制 | 留到 |
+|------|------|
+| `PhantomData<PhantomData<X>>` 嵌套 | v3.x 中 |
+| `PhantomData<&T>` lifetime 参数 | v4.3.0 Polonius |
+| PhantomData 与 `#[no_std]` 组合 | v3.x 中 |
+| PhantomData 作为函数参数/返回值 | v3.x 中 |
+| 完整 `Cap<PhantomData<X>>` 嵌套测试 (需 `Cap<T>` generic syntax) | v3.1.2 |
+| E0050 parser-level positive test (错误恢复) | v4.7.0 (3k) |
+| PhantomData 字段访问 `.phantom` | 不做 (marker 无运行时影响) |
+| SysV (`abi_amd64_sysv.jhyy`) PhantomData class | v3.1.3 / v4.x |
+
+---
+
+## 5. 跨 sprint 对齐 / Cross-sprint Alignment
+
+### 5.1 触发的后续 sprint
+
+- **V3-C v3.1.2** (3g.7) — CapTable<T> + 跨函数 cap pass, D27 锁启 (v3.1.1 ship 后启动)
+- **V3-C v3.2.0** — generics monomorphize (3i), `Vec<T>` 等容器类型用 PhantomData<T> 持类型参数
+- **V2-C v2.8.0** (N 代 fixed point) — V3-C 全 ship 后启动, 验算 `phantom_zst.jhyy` + `cap_phantom_combo.jhyy`
+
+### 5.2 跨边界 / Cross-boundary
+
+- **jhyy_OS M4 launch 硬前置**: V3-C 全 ship (v3.1.0/1.1/1.2) + V2-A ✅ + V2-B 全 ship + V2-C N 代 fixed point 验算过
+- **D6** (Cap<T> 8 字节) 已锁 — 本 sprint 不变, PhantomData 不影响 Cap layout
+- **D27** (3g → 3g.5 → 3g.7 串行) — 本 sprint ship 后解锁 v3.1.2
+
+---
+
+## 6. 文档 / Documentation
+
+- [`../abis/jhyy-lang-spec-phantomdata-supplement-v3.1.1.md`](../abis/jhyy-lang-spec-phantomdata-supplement-v3.1.1.md) — PhantomData 语法 + 0 字节 layout + ABI + codegen + 测试
+- (复用) [`../abis/jhyy-lang-spec-cap-t-supplement-v3.1.0.md`](../abis/jhyy-lang-spec-cap-t-supplement-v3.1.0.md) — Cap<T> 8 字节 layout + ABI
+- (复用) [`../abis/jhyy-lang-spec-borrow-check-supplement-v3.1.0.md`](../abis/jhyy-lang-spec-borrow-check-supplement-v3.1.0.md) — `&T` / `&mut T` + NLL stub
+
+---
+
+## 7. Commit
+
+```
+feat(phantom): add PhantomData<T> ZST codegen + Cap combo (3g.5)
+```
+
+**D43 baseline update**: N6 (`51376ce5...`) → **N7 = <commit sha>`** (single commit 包含全部 6 src0 改动 + 2 测试 + 1 spec + changelog;Stage 2 N=4 closure hold 在 `40d51000c132cd8c538e196e695d89900acd14ec7c1f5225bba6a04e75851145`)

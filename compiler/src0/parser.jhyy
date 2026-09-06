@@ -507,6 +507,44 @@ fn parse_type(p: *Parser) -> *Node {
     // Ident [:: Ident]*
     parser_expect(p, TOKEN_IDENT(), "type name" as *u8, &t);
     let name = parser_tok_name(p, &t);
+
+    // ════════════════════════════════════════════════════
+    // v3.1.1 (V3-C 3g.5): `PhantomData<T>` ZST type marker
+    // ════════════════════════════════════════════════════
+    // 规则(per spec supplement v3.1.1):
+    //   - `PhantomData<T>` 走 builtin ident 分支(跟 v3.1.0 Cap 路径同型)
+    //   - 必须带 `<T>`;`PhantomData` 单独出现 → 走 default ident → sema 报 unresolved
+    //   - inner T 可任意 type(primitive/struct/ptr/slice/ref/PhantomData 嵌套留 v3.x 中)
+    //   - size=0/align=1 ZST,不允许实例化(M0 简化,sema E0050 拦)
+    //
+    // 设计:在 symtab lookup 前 inline 识别 → 跳过普通 ident 路径,直接构造
+    // KIND_PHANTOM *Type + 包成 ident-style AST node(sema 阶段统一走 type_ptr 解析)
+    if strcmp(name, "PhantomData" as *u8) == (0 as i32) {
+        // peek next token: 必须是 `<`
+        let mut pd_peek = empty_token();
+        parser_peek(p, &pd_peek);
+        if pd_peek.kind == TOKEN_LT() {
+            parser_advance(p, &t);  // consume `<`
+            let pd_lf = (*p).prev_lf;
+            let pd_ll = (*p).prev_ll;
+            let pd_lc = (*p).prev_lc;
+            // 递归 parse inner T(任意合法 type)
+            let pd_inner = parse_type(p);
+            parser_expect(p, TOKEN_GT(), "> after PhantomData<" as *u8, &t);
+            // 构造 type_phantom(inner) + 把 *Type 绑到 symtype(走 sema 路径一致)
+            let pd_t = type_phantom((*p).arena, pd_inner);
+            // 注册 / 查找 PhantomData builtin ident sym(便于后续 type-name error 友好)
+            let mut pd_sym = symtab_lookup((*p).current_scope, name);
+            if pd_sym == (0 as *Sym) {
+                pd_sym = symtab_insert((*p).current_scope, name, SYM_TYPE(),
+                                       pd_t as *u8, 0 as i32, (*p).scope_depth);
+            }
+            // skip :: Ident loop — PhantomData 不允许 qualified(M0 简化)
+            return ast_new_ident((*p).arena, pd_lf, pd_ll, pd_lc, pd_sym);
+        }
+        // PhantomData 无 `<T>` → fall through 走 default ident → sema 报 unresolved type
+    }
+
     let mut sym = symtab_lookup((*p).current_scope, name);
     if sym == (0 as *Sym) {
         sym = symtab_insert((*p).current_scope, name, SYM_TYPE(),

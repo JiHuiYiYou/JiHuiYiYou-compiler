@@ -1,0 +1,25 @@
+// SKIP: V3-C 3g.5 feature — jhyy-side only (C-side bootstrap predates V3-C)
+// v3.1.1 (V3-C 3g.5) ship-gate: Cap (8B) + PhantomData<i32> (0B) 组合 layout 不破坏.
+//   Cap 不展开 inner type (v3.1.0 spec § 3 锁); PhantomData 不占 struct slot (v3.1.1 新加).
+//   W = { cap: Cap, _marker: PhantomData<i32>, other: u32 } → sizeof = 8 + 0 + 4 (tail pad 4) = 16.
+//
+// 注:完整 `Cap<PhantomData<X>>` 嵌套组合测试需 v3.1.2 引入 `Cap<T>` generic syntax 后才能写.
+//     v3.1.1 阶段 Cap 仍是非泛型 builtin, PhantomData 仅作字段 marker 嵌入.
+type W = struct {
+    cap: Cap,
+    _marker: PhantomData<i32>,
+    other: u32
+}
+
+fn main_jhyy() -> i32 {
+    let s_cap: i64 = sizeof(Cap);
+    if s_cap != 8 {
+        return 20;
+    }
+    let s_w: i64 = sizeof(W);
+    if s_w == 16 {
+        return 42;
+    }
+    return s_w as i32;
+}
+//EXPECT:42
