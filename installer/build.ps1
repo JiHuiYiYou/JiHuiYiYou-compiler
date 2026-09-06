@@ -360,7 +360,7 @@ switch ($Target) {
             -d "JHY_COMPILER_MSI_PATH=installer\build-artifacts\jhyy-compiler-$JHY_VERSION_DISPLAY.msi" `
             -d "JHY_THEME_XML_PATH=installer\wix\Theme.xml" `
             -d "JHY_LICENSE_RTF_PATH=installer\assets\license.rtf" `
-            -d "JHY_LOGO_BMP_PATH=installer\assets\icons\jhyy-icon-128.png" `
+            -d "JHY_LOGO_BMP_PATH=installer\assets\icons\jhyy-logo-128.png" `
             -d "JHY_THEME_WXL_PATH=installer\wix\Bundle.zh-CN.wxl" `
             -d "JHY_DOTNET8_RUNTIME_EXE_PATH=$dotnet8Exe" `
             -o "installer/build-artifacts/jhyy-installer-$JHY_VERSION_DISPLAY.exe"

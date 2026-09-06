@@ -40,9 +40,10 @@
     <Font Id="1" Height="-36" Weight="500" Foreground="windowtext">Segoe UI</Font>
     <Font Id="2" Height="-14" Weight="500" Foreground="graytext">Segoe UI</Font>
     <Font Id="3" Height="-12" Weight="500" Foreground="windowtext" Background="window">Segoe UI</Font>
+    <Font Id="4" Height="-36" Weight="700" Foreground="#00d4aa">Segoe UI</Font>
 
     <Window Width="600" Height="430" HexStyle="100a0000" FontId="0" Caption="#(loc.Caption)">
-        <ImageControl X="11" Y="11" Width="64" Height="64" ImageFile="../assets/icons/jhyy-icon-128.png" Visible="yes"/>
+        <ImageControl X="11" Y="11" Width="64" Height="64" ImageFile="logo.png" Visible="yes"/>
         <Label X="92" Y="18" Width="-11" Height="64" FontId="1" Visible="yes" DisablePrefix="yes">#(loc.Title)</Label>
 
         <Page Name="Help">

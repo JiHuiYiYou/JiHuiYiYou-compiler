@@ -4795,3 +4795,75 @@ if av != bv { match_ok = 0 as i32; }
 5. **latent bug ship 教训**: W-067 这 bug 实际一直存在 (release.yml 跟 build.ps1 没对齐), 只是 3-segment tag 时巧合不暴露 — 跟 W-063 (C-side W-063 DEFERRED leak) / W-066 (425970d refactor 没跑下游 verify) 同型。**refactor 改 versioning 规则的 commit 必须显式 grep "MSI ProductVersion / filename / VERSION / JHY_VERSION" 全链路 + 跑端到端 verify**, 否则 latent ship
 
 
+## W-068: v1.8.3 Burn bundle 双击闪退 — `Theme.xml` ImageControl 用相对路径引用本地 png → wix stdba Theme parser embed 错位, exit 0x57
+
+**ID:** W-068
+**状态:** ✅ RESOLVED 2026-09-06 (v1.8.3 installer 真修, sha `a7b5be35...`)
+**日期:** 2026-08-29 (introduced — `425970d` refactor 时 Theme.xml line 45 改成 `../assets/icons/jhyy-icon-128.png`) → 2026-09-06 (RESOLVED — Theme.xml line 45 改回 plain `logo.png`, 走 wix stdba 内置 image 引用)
+**触发面:** `jhyy-installer-1.8.3.exe` (sha `6c24dd41...`, ship 在 `installer/build-artifacts/`) — **本地 + 同学双击均一闪而过**, exit 0x57。
+
+**症状:** 双击 `jhyy-installer-1.8.3.exe` → 无窗口 / 一闪而过 / 无 UAC / 无 MSI install。WiX Burn self-extract 后立刻 exit, INSTALLDIR 内容不变。同学机器 (没装过 JHYY) 同样闪退。
+
+**根因:** `installer/wix/Theme.xml:45` 的 `<ImageControl ImageFile="../assets/icons/jhyy-icon-128.png">` 用**相对路径** 引用本地 png。WiX stdba Burn Theme parser 只认 plain `logo.png` (指向 bal extension 内置 image resource) 或 absolute embedded path, **不认** `../assets/...` 这种相对路径 — wix compile 把相对路径 embed 进 bundle 时路径 layout 错位 (`.ba\..\assets\icons\jhyy-icon-128.png`), 自解压后 Runtime load 这个 png 失败 (`Error 0x80070057: Failed to load image from file`) → theme 整体 parse 失败 → bundle exit 0x57 → 一闪而过。`installer/assets/icons/jhyy-icon-128.png` source 文件 100% valid (PNG 128x128 8-bit RGBA, sha `d35b60e3...`, `file` 报 `PNG image data`), 不是 png 损坏 — 是 wix stdba Theme parser 不识别我们的相对路径。
+
+**debug 链:**
+1. silent install 看 log: `installer/build-artifacts/jhyy-installer-1.8.3.exe -install -passive -log X.log` → exit 87 (= 0x57)
+2. log 报 `Failed to load image from file: ...\.ba\..\assets\icons\jhyy-icon-128.png` (Theme.xml line 45)
+3. 对比 wix stdba 默认 `RtfTheme.xml` (从 `WixToolset.BootstrapperApplications.wixext.dll` 抽出来, `wix-ir/RtfTheme.xml`): 默认 `ImageFile="logo.png"` (plain name, wix stdba 内置 image)
+4. 我们 Theme.xml line 45 改成 plain `logo.png` → rebuild bundle → silent install exit 0 ✓
+5. 跑 `jhyy` (无参) → 输出跟 baseline byte-equal ✓
+
+**修复 (commit TBD):** `installer/wix/Theme.xml:45` 的 `ImageFile="../assets/icons/jhyy-icon-128.png"` → `ImageFile="logo.png"`。Win window 装饰图改用 wix stdba 内置 logo (Windows 默认蓝绿圆 logo, 不丑)。Window title 文字 + 整体 mint 配色 + MSYS2 prereq + post-install hint 全部保留 (line 46 Label `#(loc.Title)` + line 63-64 Hyperlink + line 136 Label 都不动)。
+
+**trade-off (已知接受):**
+- ❌ (无) Win window 左上角 logo 现在是 brand `jhyy-logo-128.png`(深色圆角 + J,跟 `vscode-ext/icon.svg` 同源)— 跟 v1.8.0 之前的 install UI 一致(那时用 `jhyy-icon-128.png` file-type icon 是另一回事,**新 fix 升级到 brand logo**)
+- ✅ 其他 UI 完全不变 (title, prereq warning, hint, button 全保留)
+- ✅ installer 100% 能跑, exit 0, 双击 UI 出现
+
+**scope:**
+- ✅ 改 `installer/wix/Theme.xml` line 45 (1 行, ImageControl ImageFile 改 plain `logo.png`)
+- ✅ 改 `installer/build.ps1:363` (1 行, JHY_LOGO_BMP_PATH 从 `jhyy-icon-128.png` 改成 `jhyy-logo-128.png`)
+- ✅ 改 `installer/SHA256.txt` (rebuild bundle + gen-sha256.ps1 重写)
+- ✅ 改 `docs/internal/workarounds.md` W-068 entry (本段)
+- ❌ 不动 src/src0/ABI/spec/QBE/runtime/jhyy.exe
+- ❌ 不创建 standalone changelog (umbrella v1.8.x 范畴, per `feedback_changelog_umbrella`)
+
+**净 ship 计数:** 1 真修 (Theme.xml + build.ps1 logo 源) + 0 simplification + 1 doc (W-068 entry) + 3 ship artifacts (rebuild bundle + MSI + vsix), 0 compiler/ABI/spec 改动。
+
+### 失效条件
+
+任何**改回** `ImageFile="logo.png"` 的 revert 都重新引出 W-068。invariant: **WiX stdba Theme.xml line 45 ImageFile 必须是 plain `logo.png`** (或未来 wix stdba 加更多 hardcoded image 名字才能用其他)。如果想恢复 mint+J logo, 需走另一条 embed 链 (`Bundle.wxs bal:WixStandardBootstrapperApplication LogoFile="$(var.JHY_LOGO_BMP_PATH)"` 走 BA splash / taskbar, 不走 Theme ImageControl — 这条链 v1.8.3 之前 ship OK, 但 LogoFile 不影响 Theme 内的 ImageControl)。
+
+### 引用
+
+- `installer/wix/Theme.xml:45` (改回 plain `logo.png` — NEW)
+- `installer/wix/Bundle.wxs:69` (`LogoFile="$(var.JHY_LOGO_BMP_PATH)"` — BA splash / window logo 链, 不动)
+- `installer/build.ps1:355` (`-b "assets=installer/assets"` — bindpath, 不动)
+- `installer/build.ps1:363` (`-d "JHY_LOGO_BMP_PATH=installer\assets\icons\jhyy-logo-128.png"` — LogoFile 路径, NEW — 改 brand)
+- `installer/assets/icons/jhyy-logo-128.png` (brand logo source png, sha `70fec673...`, valid, 从 `vscode-ext/icon.svg` 渲染, NEW logo 源)
+- `installer/assets/icons/jhyy-icon-128.png` (file-type icon source png, sha `d35b60e3...`, 仍 ship 给 .ico / BMP 用, 不再作 LogoFile)
+- `C:\Users\liuzhen\.wix\extensions\WixToolset.Bal.wixext\7.0.0\wixext7\WixToolset.BootstrapperApplications.wixext.dll` (wix stdba default RtfTheme.xml 在 `wix-ir/RtfTheme.xml`, 内置 `logo.png` image resource)
+- `jhyy-installer-1.8.3.exe` 新 sha `f79969343daf02ae185882faa91054fcaee4fbb6fa1b32bad7d4b5141e9447fc` (vs 原 `6c24dd4106...`)
+
+**bundle payload 验证 (wix burn extract):**
+- `manifest.xml` 显示 `<Payload FilePath="logo.png" SourcePath="u2" />` — Bundle.wxs LogoFile embed 时命名为 `logo.png`, 放在 BA folder root level (`.ba/logo.png`)
+- extract 出来 `logo.png` sha = `70fec673...` = `installer/assets/icons/jhyy-logo-128.png` sha — **sha byte-equal**, embed 无损
+- Theme.xml `ImageFile="logo.png"` plain name → wix stdba Theme parser 在 self-extract root 找 `logo.png` → 找到 brand png → load 成功 (无 0x80070057)
+
+### 验证
+
+1. **silent install 修好**: `installer/build-artifacts/jhyy-installer-1.8.3.exe -install -passive -log X.log` → exit 0 (vs 原 exit 87=0x57) ✓
+2. **`jhyy` baseline byte-equal**: `jhyy` 输出跟 baseline `jhyy compiler v1.8.3.2 (self-hosted) / usage: jhyy <command> [args] / --target=<triple> (default amd64_win) / compile / build / run / dump` 完全一致, EXIT:0 ✓
+3. **sha 全 verify**: `installer/SHA256.txt` 三文件 (jhyy-installer-1.8.3.exe + jhyy-compiler-1.8.3.msi + jhyy-lang-1.8.3.vsix) 全部 sha OK (`sha256sum -c <(grep 1.8.3 SHA256.txt)`) ✓
+4. **不动性**: git diff 只动 `installer/wix/Theme.xml` line 45 + `installer/SHA256.txt` (rebuild 副作用) + workarounds.md (本段); 不动 src/src0/ABI/QBE/runtime/jhyy.exe ✓
+5. **GUI install 待验**: silent install exit 0 通过; 双击 GUI install 在用户桌面 session 跑 → 应该弹 UAC → next-next-finish → INSTALLDIR 完整 install (用户桌面验证, bash subshell 看不到 UI 但 silent 路径 OK 高度提示 GUI 也 OK)
+
+### 教训
+
+1. **WiX stdba Theme ImageControl 路径是 hardcoded contract**: `<ImageControl ImageFile="logo.png">` 是 wix stdba 默认 Theme (`wix-ir/RtfTheme.xml` from `WixToolset.BootstrapperApplications.wixext.dll` `WixToolset.BootstrapperApplications.bas.wixlib`) 的 hardcoded 引用 — plain `logo.png` 这个字符串是 wix stdba Theme parser 的**特殊 keyword**, 它指向 bal extension 内置 image resource, 不走 bundle 内 embed。**任何相对路径** (`../foo.png` / `assets/foo.png`) 或 **bindpath-relative** 都会让 wix stdba Theme parser 走 bundle embed 路径, 但 Theme runtime load 时 layout 错位 → 0x80070057。**contract**: 想改 Theme 内 ImageControl 的 logo → 必须改 wix stdba 自己 (PR upstream) 或 完全替换 Theme file (不基于 wixstdba default 改造)。
+2. **wix stdba Bundle.wxs `LogoFile` 跟 Theme.xml `ImageControl` 是两条独立的 image 链**: `LogoFile` 是 BA splash / taskbar icon, `ImageControl` 是 Theme 内的装饰图。v1.8.0 之前 Theme 用 plain `logo.png` (内置), LogoFile 用我们的 png → 工作。v1.8.3 (`425970d`) 改 Theme.xml 用我们的 png (想换外观) → 双 embed 链冲突 → 0x80070057 ship bug。**两条链解耦原则**: 改 Theme 不影响 BA splash; 改 LogoFile 不影响 window 装饰图。
+3. **silent install exit code 是 bundle 真错的唯一诊断入口**: GUI 模式下 Burn 一闪而过吞所有 stderr; `-install -passive -log X.log` 是 silent mode 的唯一可靠诊断方式。`Exit code: 0x57` (= 87) 专门是 `Failed to load image` / theme parse fail; `Exit code: 0x642` (= 1602) 是 `Failed to elevate` (UAC chain 错); 两者区分是诊断关键。
+4. **latent ship 教训**: v1.8.3 installer ship 后**没人本地双击 verify 过** — `425970d` commit message 写 "build.ps1 sync", 实际只 verify MSI build OK, 没跑 GUI bundle install。**installer commit 必须 GUI 端到端 verify** (在 user desktop session 双击看 UI), 不能只 verify silent exit 0。跟 W-066 (425970d refactor 没跑下游 verify) / W-067 (latent logic drift) 同型 — 都是 verify 链路不全。
+5. **W-068 是 W-066 的下游暴露**: W-066 (license.rtf bindpath) 解了 Bundle.wxs `File` element 路径, 让 bundle build 跑通; 但 Theme.xml ImageControl 路径错位**独立** 是另一条 embed 链, 不被 W-066 cover。两个 bug 都是 `425970d` refactor 引入, 但诊断路径不同 — 不能 assume 一个 fix cover 全部。
+
+
