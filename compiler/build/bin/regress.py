@@ -220,6 +220,10 @@ def main():
                     help="Run byte-equal 三件套 check (per D26, requires JHYY_V1 "
                          "+ JHYY_V2 env vars; default jhyy_v1.exe.exe + jhyy.exe). "
                          "Opt-in: does NOT affect default regress baseline (104/104).")
+    ap.add_argument("--byte-equal-amd64", action="store_true",
+                    help="Run V2-B v2.6.0 (Unit F) byte-equal-amd64 driver "
+                         "(QBE vs self backend path parity check, 5 tests). "
+                         "Opt-in: does NOT affect default regress baseline.")
     args = ap.parse_args()
 
     # Parse --tests (comma-separated → list)
@@ -238,6 +242,25 @@ def main():
         # D26 byte-equal 三件套 (opt-in; doesn't affect default regress)
         rc = test_byte_equal(tests)
         sys.exit(rc)
+
+    if args.byte_equal_amd64:
+        # V2-B v2.6.0 (Unit F) byte-equal-amd64 (opt-in; QBE-vs-self backend
+        # path parity check, 5 tests). Self backend call site is currently
+        # deferred to v2.6.x (Unit E wire), so the script runs QBE-vs-QBE
+        # (trivially PASS). Real self-vs-QBE gate auto-fires when v2.6.x
+        # wires codegen_amd64_run into main.jhyy.
+        bootstrap_dir = Path(__file__).resolve().parents[2] / "tests" / "bootstrap"
+        byte_equal_amd64_sh = bootstrap_dir / "byte_equal_amd64.sh"
+        if not byte_equal_amd64_sh.exists():
+            print(f"byte-equal-amd64: script not found at {byte_equal_amd64_sh}",
+                  file=sys.stderr)
+            sys.exit(1)
+        bash_path = shutil.which("bash") or "bash"
+        result = subprocess.run(
+            [bash_path, str(byte_equal_amd64_sh)],
+            env=os.environ.copy(),
+        )
+        sys.exit(result.returncode)
 
     if args.run_all_gated:
         # Matrix mode: gated binaries + optional informational
