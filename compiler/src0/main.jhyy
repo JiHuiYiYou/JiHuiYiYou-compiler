@@ -42,6 +42,12 @@ import codegen;
 import target_dispatch;  // v2.0.0: --target=<triple> CLI + thread through to cg_module
 import abi_amd64_win;  // v2.1.0: QBE-level ABI shaping (5 functions, mirrors compiler/src/target/abi_amd64_win.c)
 // import codegen_amd64;  // V2-B v2.6.0 Unit E: wire self-written backend — DEFER to v2.6.x (import chain triggers stage0 segfault)
+// V2-B v2.6.4: RE-ENABLED — but inline_imports parser still chokes on
+// struct literals in imported module fn bodies (e.g. `let mut arena = Arena { ... }`
+// at codegen_amd64.jhyy:97). NOT a segfault any more — now a parse error.
+// Needs separate parser/inline_imports fix. Roll back to deferred state for
+// this ship; run_backend dispatch kept (no-op since import commented).
+// import codegen_amd64;  // v2.6.4: blocked by inline_imports struct-literal bug (see above)
 
 // ═══ Local externs (ffi.jhyy 已声明 malloc/free/fopen/fread/fwrite/fclose/
 //    strlen/strcmp/system/jh_fputs_stderr/jh_fopen_wb 等；这里只补 main.jhyy
@@ -114,6 +120,11 @@ extern fn jh_write_file(path: *u8, buf: *u8, len: i64) -> i32;
 //   but always calls run_qbe() until v2.6.x wires the self path. This keeps the
 //   dispatch infrastructure in place without destabilizing the build.
 //   QBE_FALLBACK env var remains the explicit override regardless of target.
+// V2-B v2.6.4: RE-ENABLED intent — but inline_imports parser bug still blocks
+//   real wire-up (see line 44 comment). Extern decl also removed (no
+//   import, no need). Self backend stays DEFERRED; JHY_SELF_BACKEND env
+//   gate kept in run_backend (no-op when import off) for forward compat.
+// extern fn codegen_amd64_run(il_path: *u8, asm_path: *u8) -> i32;
 
 fn QBE_PATH() -> *u8 { return jh_path_qbe(); }
 fn GCC_PATH() -> *u8 { return jh_path_gcc(); }
@@ -771,20 +782,29 @@ fn run_qbe(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
 //
 // 返回值同 run_qbe: 0 = 写了 .s, 非 0 = 失败。
 fn run_backend(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
-    // 1. QBE_FALLBACK env override (per docs/plans/v2/v2.0.0-os-prep § 6)
+    // V2-B v2.6.4 (Commit 4): self backend dispatch wired-but-DEFERRED.
+    //
+    // 优先级链:
+    //   1. QBE_FALLBACK=1 (per docs/plans/v2/v2.0.0-os-prep § 6)
+    //      → run_qbe (强制 QBE 路径,绕过 self backend)
+    //   2. JHY_SELF_BACKEND=1 + target 是 BACKEND_SELF (windows targets)
+    //      → codegen_amd64_run(il_path, asm_path) (DEFERRED — see line 44 comment)
+    //      → rc != 0 自动降级 run_qbe (robustness)
+    //   3. 默认 fallback → run_qbe (保持现有行为,104/104 regress 不变)
+    //
+    // 注: 默认 backend 仍是 QBE; self path 是 opt-in。regress.py 默认
+    // 不设 JHY_SELF_BACKEND,所以 104/104 全程走 QBE (D43 closure 维持)。
+    //
+    // 现状(v2.6.4 ship-time):import codegen_amd64 仍被注释(out)
+    // (line 44),所以本 fn 的 self path 分支编译期不出现 (let _ = sb_env
+    // 把 sb_env 用掉,但 mode/codegen_amd64_run 等都不引用)。当 import
+    // 真打开时,只需把这段 inert block 替换成原 codegen_amd64_run 调用。
     let fb = jh_getenv("QBE_FALLBACK" as *u8);
     if fb != (0 as *u8) {
         return run_qbe(il_path, asm_path, t);
     }
-    // 2. target-based dispatch (V2-B v2.6.0 Unit E)
-    //    target_backend_mode(t) returns BACKEND_SELF for windows targets;
-    //    BACKEND_QBE for sysv stub / unknown. The actual codegen_amd64_run
-    //    call site is deferred to v2.6.x (import chain triggers stage0
-    //    segfault). Until then we always fall through to run_qbe — the
-    //    dispatch infrastructure (constants + target_backend_mode) is in
-    //    place, so flipping the wire is a v2.6.x one-line change.
-    let mode = target_backend_mode(t);
-    let _ = mode;  // suppress unused warning; future: `if mode == BACKEND_SELF() { ... }`
+    let sb_env = jh_getenv("JHY_SELF_BACKEND" as *u8);
+    let _ = sb_env;  // DEFERRED: import off → self path inert
     return run_qbe(il_path, asm_path, t);
 }
 
