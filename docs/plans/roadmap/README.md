@@ -12,7 +12,7 @@
 | [`v1.0-self-hosting.md`](v1.0-self-hosting.md) | **v1.x** | 未启动（启动门槛已达成）| jhyy 编译器编译自己（`.il` byte-equal 闭环）|
 | [`v2.x-qbe-rewrite.md`](v2.x-qbe-rewrite.md) | **v2.x** | 未启动（中期，待 v1.0 后）| QBE 完整重写 + 多目标 / 自研 OS 准备（amd64_sysv / 多目标 / freestanding）|
 | [`v3.x-language-expansion.md`](v3.x-language-expansion.md) | **v3.x** | 未启动（语言特性扩展）| OS-required 特性（inline asm / volatile / naked / no_std / `&mut` + lifetime）— 服务于 jhyy_OS |
-| (待建) `v4.x-post-merge.md` | **v4.x** | **概念阶段**(per 2026-09-06 user)| v2 + v3 axes merge → main axis 推 v4.0.0;后**串行** — M5 删 `src/*.c` + 语言成熟化 + UX/性能 + 高级类型 |
+| [`v4.x-post-merge.md`](v4.x-post-merge.md) | **v4.x** | **概念阶段**(per 2026-09-06 user)| v2 + v3 axes merge → main axis 推 v4.0.0;后**串行** — M5 删 `src/*.c` + 语言成熟化 + UX/性能 + 高级类型 |
 
 ## sprint 级计划（L3 / L4）
 
