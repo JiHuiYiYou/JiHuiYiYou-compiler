@@ -110,19 +110,33 @@ Unit 1 + Unit 2 merge 后,coordinator 跑 ship gate 暴露 2 个 integration gap
 
 ---
 
-## V3-B — v3.0.1 → v3.0.5 (M1-required 5 件套) — pending
+## V3-B — v3.0.1 → v3.0.5 (M1-required 5 件套) — ✅ shipped (5/5)
 
 **Per**: [`docs/plans/v3/batch-V3-B-plan.md`](../../plans/v3/batch-V3-B-plan.md)
 
-(待 V3-A ship 后由 V3-B sprint 设计 fill in — 5 sub-sprint 累计到本 umbrella 末)
+**Ship 收尾**: 2026-09-06 — V3-B 5 件套全 ship,tag `v3.0.1` / `v3.0.2` / `v3.0.3` / `v3.0.4` / `v3.0.5` (2026-09-05 ~ 09-06)。
+**M1 launch gate**: jhyy_OS M1 launch integration gate 全部解除(per D8 + coordination.md § 3)。
 
 | Sub-sprint | 版本 | 特性 | 状态 |
 |------------|------|------|------|
-| 3a | v3.0.1 | inline asm | ⏳ 待 V3-A ship |
-| 3b | v3.0.2 | `#[naked]` | ⏳ 待 V3-B v3.0.1 ship |
+| 3a | v3.0.1 | inline asm | ✅ **shipped** (V3-B Unit A1) |
+| 3b | v3.0.2 | `#[naked]` | ✅ **shipped** (V3-B Unit B1) |
 | 3c | v3.0.3 | volatile | ✅ **shipped** (V3-B Unit A2) |
 | 3e | v3.0.4 | `#[link_section]` | ✅ **shipped** (V3-B Unit B2) |
 | 3f | v3.0.5 | memory barrier | ✅ **shipped** (V3-B Unit B3) |
+
+**D43 baseline chain (per-sub-sprint re-baseline policy)**:
+
+| 节点 | 描述 | IL sha |
+|------|------|--------|
+| N0 | post-V2-A-merge (v3.0.0 ship) | `51376ce5721bccb0c81c7deabead1a6012fb76648c424238391018f1890b5761` |
+| N1 | post-3a merge (v3.0.1 ship) | `51376ce5...` hold (inline asm = side-file only,IL emit 路径不变) |
+| N2 | post-3c merge (v3.0.3 ship) | `51376ce5...` hold (volatile = direct mem load/store,no IL emit 路径变化) |
+| N3 | post-3b merge (v3.0.2 ship) | `51376ce5...` hold (`#[naked]` = side-file raw asm,IL emit 路径不变;changelog line 220/256 早期误标 `dd65e754...` — fact-check 修正,见 line 220 footnote) |
+| N4 | post-3e merge (v3.0.4 ship) | `51376ce5...` hold (`#[link_section]` = .s post-walk side-file,IL emit 路径不变) |
+| N5 | post-3f merge (v3.0.5 ship) | `51376ce5...` hold (`fence_*()` = raw mnem side-file,IL emit 路径不变) |
+
+**关键观察** — V3-B 5 件套全部走 **side-file pattern**(per V3-A `#[no_std]` + V3-B 5 件套统一风格),codegen 不 emit 任何新 QBE IR,只 emit 到 side-files(`_inline_asm.buf` / `_naked.buf` / `_section_directive.buf` / `_fence.buf`);`main.jhyy:link_with_gcc` post-QBE-pass 才 concat side-files 进 `.s`。**D43 closure baseline 全程未漂移**,closure invariant (v1↔v2↔v3↔v4 byte-equal) 在 5 sub-sprint ship 链路内稳定 hold。
 
 ### V3-B v3.0.1 — inline asm (D42 passthrough) — 2026-09-05 ✅ shipped
 
@@ -217,7 +231,9 @@ v3.0.1 用例:**定义 global 符号** / **在 entry 之前 hook** / **asm 出�
 - [x] `jhyy.exe compile naked_interrupt_entry.jhyy -o build/naked_test.exe` 成功 + `naked_test.exe` EXIT:0
 - [x] `jhyy.exe run naked_interrupt_entry.jhyy` EXIT:0 (含 asm side-file → .s concat → gcc link 完整 path)
 - [x] regress 107/107 PASS + 5 SKIP (含 volatile_mmio.jhyy v3.0.3 兼容)
-- [x] D43 baseline 重置:`51376ce5...` → `dd65e754...` (N3 re-baseline)。closure chain (v1=v2=v3=v4) byte-equal `dd65e754...` hold (per D43 per-sub-sprint re-baseline policy)
+- [x] D43 baseline hold:`51376ce5...` 不变(`#[naked]` = side-file raw asm path,IL emit 路径不变 → closure chain v1=v2=v3=v4 byte-equal `51376ce5...` hold;per D43 阶段性 self-equal hold)。
+
+> **Fact-check note (2026-09-06 coordinator 校准)**: 早期 commit body / changelog 初稿误把 N3 标为 `dd65e754...`(`5aadcac` commit body + changelog line 220/256),实际跑 `jhyy_selfhost_check` 后 v1/v2/v3/v4 全部仍产 `51376ce5...`(per `feedback_doc_refactor_factcheck` 修正)。`dd65e754...` 不是 git commit(已 `git cat-file -t` verify 失败), 应是早期 selfhost transient 误报 / 误记;实际 N3 = `51376ce5...` hold, 跟 N0/N1/N2/N4/N5 一致 — 全 5 件套全程 IL baseline 稳定。
 - [x] 无新 ACTIVE workaround:side-file `_inline_asm.buf` 跟 v3.0.1 inline asm 复用 (per `feedback_qbe_crlf_root_cause` 已记录的 `"ab"` 二进制模式)
 - [x] V3-A `no_std_hello.jhyy` EXIT:42 不退步 (`make clean && make` 后 verify)
 
@@ -253,7 +269,7 @@ v3.0.1 用例:**定义 global 符号** / **在 entry 之前 hook** / **asm 出�
 | 新增 codegen helper | 1 (emit_naked_func_header) | v3.0.2 |
 | 新增 sema check fn | 1 (check_naked_body) | v3.0.2 |
 | ship gate EXIT | 0 | `naked_interrupt_entry.jhyy` |
-| D43 baseline (N3) | sha=`dd65e7547874602e301ad93d4af66d52c4bdc743b9c92a776448f28dbc381e7f` | 本 batch 重 baseline (v2.4.0→v3.0.0 `51376ce5...` hold;v3.0.1/3 changes → 本 batch 重 baseline) |
+| D43 baseline (N3) | sha=`51376ce5721bccb0c81c7deabead1a6012fb76648c424238391018f1890b5761` (hold,不重 baseline) | 本 batch 不重 baseline (`#[naked]` = side-file path,IL emit 不变) |
 
 ### Files changed (本单元)
 
@@ -506,7 +522,7 @@ kernel + 物理地址**;V2-A 路径(`codegen_amd64.jhyy`)对此有完整保证(p
 | Fence variants | 3 (seq_cst / acquire / release) | v3.0.5 |
 | Fence mnems | 3 (mfence / lfence / sfence) | x86 instruction set |
 | ship gate EXIT | 0 | `memory_barrier_smp.jhyy` |
-| D43 baseline (new N5) | TBD (post-selfhost) | per-selfhost_check output |
+| D43 baseline (N5) | sha=`51376ce5721bccb0c81c7deabead1a6012fb76648c424238391018f1890b5761` (hold,跟 N0 一致) | `jhyy_selfhost_check` verify 4-stage byte-equal (`d742b32` build commit) |
 
 ### Out of scope (本 batch 不做)
 
@@ -520,13 +536,34 @@ kernel + 物理地址**;V2-A 路径(`codegen_amd64.jhyy`)对此有完整保证(p
 
 ---
 
+## V3-B Umbrella 收尾 (2026-09-06) — ✅ shipped (5/5)
+
+V3-B 5 件套全 ship (v3.0.1 / v3.0.2 / v3.0.3 / v3.0.4 / v3.0.5),M1 launch integration gate 全部解除。下一步 = V3-C (`&mut` + lifetime),等 user 启动。
+
+| 关键指标 | 值 | 来源 |
+|---------|-----|------|
+| 总 ship tags | 5 (`v3.0.1` → `v3.0.5`) | 2026-09-05 ~ 09-06 |
+| D43 closure baseline | `51376ce5...` (跟 N0 一致,全程 hold) | `jhyy_selfhost_check` verify |
+| Ship gate tests | 5 (`inline_asm_cpuid` / `naked_interrupt_entry` / `volatile_mmio` / `link_section_boot` / `memory_barrier_smp`) | 5/5 EXIT:0 |
+| Regress (full) | 109/109 PASS, 0 fail, 5 SKIP (libraries) | `regress.py --binary=jhyy.exe` |
+| 新增 AST nodes | 5 (NODE_ASM_BLOCK / is_naked bit in NodeFuncDecl / NODE_VOLATILE_TYPE / link_section ptr in NodeFuncDecl / NODE_BUILTIN_FENCE) | V3-B 5 件套合计 |
+| Spec supplements | 5 (1 per sub-sprint,7-section template 通用) | `docs/abis/jhyy-lang-spec-*-supplement-v3.0.X.md` × 5 |
+| Side-file paths | 4 (`_inline_asm.buf` / `_naked.buf` 复用 / `_section_directive.buf` / `_fence.buf`) | codegen.jhyy + main.jhyy |
+| 新增 ACTIVE workaround | 0 (per `feedback_document_workarounds_in_docs` — 全 ship 时 0 new W-XXX) | coordinator verify |
+| V3-A no_std 兼容 | ✅ `no_std_hello.jhyy` EXIT:42 hold | regress + 直跑 |
+| 跨轴通知 (V2-B) | 3c shipped → V2-B v2.7.0 sysv volatile backend async | per 2026-09-01 user 决定 |
+
+---
+
+## V3-C — v3.1.0+ (`&mut` + lifetime, 3g / 3g.5 / 3g.7) — pending (等 user 启动)
+
 **Per**: [`docs/plans/v3/batch-V3-C-plan.md`](../../plans/v3/batch-V3-C-plan.md)
 
-(待 V3-B ship 后由 V3-C sprint 设计 fill in — 3 sub-sprint 累计到本 umbrella 末)
+V3-B ✅ ship 后由 V3-C sprint 设计 fill in — 3 sub-sprint 累计到本 umbrella 末。
 
 | Sub-sprint | 版本 | 特性 | 状态 |
 |------------|------|------|------|
-| 3g | v3.1.0 | `&mut` + lifetime | ⏳ 待 V3-B 末 ship |
+| 3g | v3.1.0 | `&mut` + lifetime | ⏳ 待 user 启动 |
 | 3g.5 | v3.1.1 | (待 plan) | ⏳ 待 V3-C v3.1.0 ship |
 | 3g.7 | v3.1.2 | (待 plan) | ⏳ 待 V3-C v3.1.1 ship |
 
