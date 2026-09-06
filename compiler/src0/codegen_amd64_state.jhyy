@@ -21,6 +21,11 @@
 // syntax doesn't support paths with `/` (per `parse_import_decl`
 // codegen.c:731 — same restriction as abi_amd64_win.jhyy).
 
+// V2-B v2.6.0 Unit C Regalloc 集成(必须在文件顶部 — state.jhyy 的
+// cg_offset_for_temp 在 line 132 调用 regalloc_query_spill_off_no_arr;
+// jhyy 不支持 fn forward reference,import 必须先于 use site)
+import codegen_amd64_regalloc;
+
 // ════════════════════════════════════════════════════
 // QBE type constants(per ir.jhyy `QBE_W='w'=119` 等)
 // ════════════════════════════════════════════════════
@@ -194,4 +199,4 @@ fn cg_alloc_slot(state: *u8, size: i64) -> i64 {
 // Unit C 阶段 regalloc_run 不被自动调用(等 Unit E wire codegen_amd64_run);现在
 // import 是为了把 regalloc 模块拉到 import graph 里,后续 Unit E 调用时不用再改
 // state.jhyy 的 import。
-import codegen_amd64_regalloc;  // V2-B v2.6.0 Unit C: linear-scan regalloc + global state query
+// (import 已移到文件顶部 per jhyy 不支持 fn forward reference)

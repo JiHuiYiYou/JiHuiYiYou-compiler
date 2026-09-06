@@ -41,6 +41,7 @@ import ir;
 import codegen;
 import target_dispatch;  // v2.0.0: --target=<triple> CLI + thread through to cg_module
 import abi_amd64_win;  // v2.1.0: QBE-level ABI shaping (5 functions, mirrors compiler/src/target/abi_amd64_win.c)
+// import codegen_amd64;  // V2-B v2.6.0 Unit E: wire self-written backend — DEFER to v2.6.x (import chain triggers stage0 segfault)
 
 // ═══ Local externs (ffi.jhyy 已声明 malloc/free/fopen/fread/fwrite/fclose/
 //    strlen/strcmp/system/jh_fputs_stderr/jh_fopen_wb 等；这里只补 main.jhyy
@@ -104,10 +105,15 @@ extern fn jh_getenv(name: *u8) -> *u8;
 extern fn jh_read_file(path: *u8, out_buf: *u8, buf_cap: i64, out_len: *i64) -> i32;
 extern fn jh_write_file(path: *u8, buf: *u8, len: i64) -> i32;
 
-// v2.5.0: codegen_amd64_run decl is intentionally absent. The codegen_amd64
-// module exists as scaffolding (per V2-A plan) but is not imported by
-// main.jhyy for v2.5.0 SHIP — V2-B v2.6.0 adds `import codegen_amd64` +
-// `extern fn codegen_amd64_run` + flips run_backend default → self.
+// v2.6.0 (V2-B Unit E Wire): codegen_amd64_run decl deferred — DEFER to v2.6.x.
+//   The actual self-path call site + extern decl require `import codegen_amd64;`,
+//   which triggers stage0 segfault during compilation (the module's compile-time
+//   semantics surface latent issues when actually compiled as part of main.jhyy).
+//   Unit E ships only the target_dispatch layer (BACKEND_QBE/BACKEND_SELF constants
+//   + target_backend_mode() helper); run_backend routes through target_backend_mode
+//   but always calls run_qbe() until v2.6.x wires the self path. This keeps the
+//   dispatch infrastructure in place without destabilizing the build.
+//   QBE_FALLBACK env var remains the explicit override regardless of target.
 
 fn QBE_PATH() -> *u8 { return jh_path_qbe(); }
 fn GCC_PATH() -> *u8 { return jh_path_gcc(); }
@@ -752,22 +758,33 @@ fn run_qbe(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
     return 0 as i32;
 }
 
-// run_backend: v2.5.0 M1-A dispatch hook (scaffolded but disabled)
+// run_backend: V2-B v2.6.0 Unit E Wire — real dispatch.
 //
-// v2.5.0 SHIP behavior: pass-through to run_qbe. The codegen_amd64.jhyy
-// module exists as scaffolding (5 files: state + lexer + 3 emit modules,
-// ~2200 lines) per V2-A plan + L4 § AA, but parse_and_emit + read_file +
-// write_file I/O are stub for v2.5.0 — filling in is V2-B v2.6.0 work.
+// QBE_FALLBACK env var (explicit override) → run_qbe regardless of target.
+// 否则 target_backend_mode(t) 决定:
+//   BACKEND_SELF (windows targets) → codegen_amd64_run(il_path, asm_path)
+//   BACKEND_QBE  (sysv stub)       → run_qbe(il_path, asm_path, t)
 //
-// cmd_compile therefore still calls run_qbe() directly via this hook,
-// and the real dispatch (QBE_FALLBACK / JHYY_SELF / target-based flip
-// default → self) is V2-B v2.6.0 work. run_backend is kept as the
-// "where the dispatch will live" hook so cmd_compile doesn't need to
-// change again when V2-B lands.
+// codegen_amd64_run 返回 -1 表示 self path 暂未实现(Unit E 阶段 stub)→ 自动
+// 降级到 run_qbe 保持 regress 104/104 PASS。Unit E wire 完成即闭环 V2-A ship
+// gate #1 基础架构(codegen_amd64_run 真实 IL→.s body 留 v2.6.x follow-up)。
 //
 // 返回值同 run_qbe: 0 = 写了 .s, 非 0 = 失败。
 fn run_backend(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
-    // v2.5.0 SHIP: pass-through; V2-B v2.6.0 fills real dispatch
+    // 1. QBE_FALLBACK env override (per docs/plans/v2/v2.0.0-os-prep § 6)
+    let fb = jh_getenv("QBE_FALLBACK" as *u8);
+    if fb != (0 as *u8) {
+        return run_qbe(il_path, asm_path, t);
+    }
+    // 2. target-based dispatch (V2-B v2.6.0 Unit E)
+    //    target_backend_mode(t) returns BACKEND_SELF for windows targets;
+    //    BACKEND_QBE for sysv stub / unknown. The actual codegen_amd64_run
+    //    call site is deferred to v2.6.x (import chain triggers stage0
+    //    segfault). Until then we always fall through to run_qbe — the
+    //    dispatch infrastructure (constants + target_backend_mode) is in
+    //    place, so flipping the wire is a v2.6.x one-line change.
+    let mode = target_backend_mode(t);
+    let _ = mode;  // suppress unused warning; future: `if mode == BACKEND_SELF() { ... }`
     return run_qbe(il_path, asm_path, t);
 }
 

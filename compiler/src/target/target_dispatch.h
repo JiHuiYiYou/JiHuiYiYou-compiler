@@ -56,4 +56,19 @@ const char *target_status(Target t);
  */
 int jh_target_count(void);
 
+/* V2-B v2.6.0 (Unit E Wire): backend mode tag (C-side mirror of jhyy-side
+ * `BACKEND_QBE` / `BACKEND_SELF` constants in target_dispatch.jhyy).
+ * Stage 2 byte-equal closure: tag values match 1:1 with jhyy-side.
+ */
+typedef enum {
+    BACKEND_QBE  = 0,
+    BACKEND_SELF = 1,
+} BackendMode;
+
+/* Pick backend mode for target t (windows → SELF, sysv stub → QBE).
+ * C-side mirror of jhyy-side `target_backend_mode(t)`. Used by main.c
+ * run_backend dispatch before calling into jhyy-side.
+ */
+BackendMode target_backend_mode(Target t);
+
 #endif

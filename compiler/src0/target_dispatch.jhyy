@@ -31,6 +31,32 @@ fn TARGET_AMD64_WIN_FREESTANDING() -> i32 { return 1 as i32; }
 fn TARGET_AMD64_SYSV_STUB()        -> i32 { return 2 as i32; }
 
 // ════════════════════════════════════════════════════
+// V2-B v2.6.0 (Unit E Wire): backend mode constants
+//
+// BACKEND_QBE  = pass-through to QBE (v1.x / v2.0.0-v2.5.0 default)
+// BACKEND_SELF = self-written jhyy backend (codegen_amd64_run)
+//
+// windows targets → BACKEND_SELF (v2.6.0+)
+// sysv stub       → BACKEND_QBE (v2.7.0 territory)
+//
+// QBE_FALLBACK env var (read by main.jhyy before calling target_backend_mode)
+// remains the explicit override regardless of target.
+// ════════════════════════════════════════════════════
+
+fn BACKEND_QBE()  -> i32 { return 0 as i32; }
+fn BACKEND_SELF() -> i32 { return 1 as i32; }
+
+// target_backend_mode — return which backend to use for target t.
+// windows targets → BACKEND_SELF; sysv stub → BACKEND_QBE.
+// Caller (main.jhyy run_backend) checks QBE_FALLBACK env first.
+fn target_backend_mode(t: i32) -> i32 {
+    if t == TARGET_AMD64_WIN()              { return BACKEND_SELF(); }
+    if t == TARGET_AMD64_WIN_FREESTANDING() { return BACKEND_SELF(); }
+    if t == TARGET_AMD64_SYSV_STUB()        { return BACKEND_QBE(); }
+    return BACKEND_QBE();  // unknown → safe QBE fallback
+}
+
+// ════════════════════════════════════════════════════
 // jh_target_count — number of supported targets (v2.4.0 helper)
 // Used by main.jhyy to enumerate targets for --help / error messages
 // without needing array literal syntax in jhyy-side. jhyy-side returns

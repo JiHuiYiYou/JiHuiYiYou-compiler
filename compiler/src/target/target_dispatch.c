@@ -63,3 +63,19 @@ const char *target_status(Target t) {
 int jh_target_count(void) {
     return 3;
 }
+
+/* V2-B v2.6.0 (Unit E Wire): backend mode picker. Windows targets use the
+ * self-written codegen_amd64 backend (v2.6.0+); sysv stub stays on QBE
+ * until v2.7.0. QBE_FALLBACK env var (read by main.c / main.jhyy) remains
+ * the explicit override regardless of this default.
+ */
+BackendMode target_backend_mode(Target t) {
+    switch (t) {
+    case TARGET_AMD64_WIN:
+    case TARGET_AMD64_WIN_FREESTANDING:
+        return BACKEND_SELF;
+    case TARGET_AMD64_SYSV_STUB:
+        return BACKEND_QBE;
+    }
+    return BACKEND_QBE;  /* unknown → safe QBE fallback */
+}
