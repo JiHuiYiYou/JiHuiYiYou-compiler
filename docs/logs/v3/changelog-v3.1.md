@@ -286,7 +286,7 @@ feat(phantom): add PhantomData<T> ZST codegen + Cap combo (3g.5)
 > **ship date**: 2026-09-07
 > **branch**: `axis-v3` (per 2026-09-06 user "顺序做的后面不用开branch,就在v3主轴上修")
 > **D27 锁**: 3g (v3.1.0) → 3g.5 (v3.1.1) → 3g.7 (v3.1.2) 串行不可调换 — **本 sprint ship 解锁 D27 全链**
-> **D43 baseline**: N8 (this sprint) — 上一条 N7 = `a8d55ac65315535b0d1c291b94f5b1c130a8cabc` (v3.1.1 post-tag = `d57df17`;ZST baseline hold)
+> **D43 baseline**: N8 (this sprint) — 上一条 N7 = `a8d55ac65315535b0d1c291b94f5b1c130a8cabc` (v3.1.1 post-tag = `d57df17`;ZST baseline hold) **N8 = `ed8f5e8f60de9544837ac9d50b4515c609a64792`** (post-tag SHA, fill-in commit)
 > **umbrella**: 本文件 v3.1.2 段 (与 v3.1.0 / v3.1.1 共用 changelog-v3.1.md, per `feedback_changelog_umbrella`)
 
 ---
@@ -398,4 +398,4 @@ V3-C sub-sprint 3/3 — `Cap<T>` parser 泛型 arm (v3.1.0 只 hardcode bare `Ca
 feat(cap-table): add CapTable<T> + cross-function cap pass (3g.7)
 ```
 
-**D43 baseline update**: N7 (`a8d55ac65315535b0d1c291b94f5b1c130a8cabc`) → **N8 = <commit sha>`** (single commit 包含 parser arm + sema fall-through + check_cap_pass STUB + 2 SKIP test + changelog;Stage 2 N=4 closure hold 在 `f91363cda4629a432fde156476f0502d906f7b919ee6b46973b187b5274066a5`;tagged `v3.1.2` on this commit)
+**D43 baseline update**: N7 (`a8d55ac65315535b0d1c291b94f5b1c130a8cabc`) → **N8 = `ed8f5e8f60de9544837ac9d50b4515c609a64792`** (single commit `a44b00c` 包含 parser arm + sema fall-through + check_cap_pass STUB + 2 SKIP test + changelog;Stage 2 N=4 closure hold 在 `f91363cda4629a432fde156476f0502d906f7b919ee6b46973b187b5274066a5`;tagged `v3.1.2` on `a44b00c`;post-tag fill-in commit `d57df17`-style 把 N8 SHA 写回 changelog)
