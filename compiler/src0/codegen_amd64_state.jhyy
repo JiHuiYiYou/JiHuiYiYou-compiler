@@ -90,6 +90,15 @@ type CGState = struct {
     // — MS x64 frame 固定字段(per L4 § 3.4)—
     shadow_space: i64,  // 32-byte shadow space (MS x64 calling convention)
     nparams:      i64,  // 当前函数的参数个数(影响 prologue size)
+
+    // v2.7.0 Phase 2a: target tag threading through CGState.
+    //   0 = TARGET_AMD64_WIN              (default; per Win ABI path)
+    //   1 = TARGET_AMD64_WIN_FREESTANDING (per Win freestanding path)
+    //   2 = TARGET_AMD64_SYSV             (per SysV path; Phase 2b emit_call split)
+    //   3 = TARGET_AMD64_SYSV_FREESTANDING(v2.7.1 ship; placeholder)
+    // Phase 2a 仅加字段 + 默认 0 (Win),emit_call refactor 留 Phase 2b 调此字段
+    // 决定 arg-reg 序列 (Win 4 reg + 32B shadow / SysV 6 reg + 无 shadow)。
+    target_tag:   i32,
 }
 
 // CGState 初始化 helper
@@ -105,17 +114,33 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     (*s).cur_fn_name = fn_name;
     (*s).shadow_space = 32 as i64;  // MS x64 calling convention
     (*s).nparams = 0 as i64;
+    // v2.7.0 Phase 2a: target_tag 默认 0 (Win); Phase 2b 改 cg_state_init 签名 +
+    // codegen_amd64_run 传 target_tag (target 来自 main.jhyy run_backend 的 `t` 参数)。
+    (*s).target_tag = 0 as i32;
     return 0;
 }
 
 // CGState 重置(per function prologue)
 // V2-B v2.6.0 (Unit B Stub-Fill): real impl — reset per-function fields.
+// v2.7.0 Phase 2a: 保留 target_tag(per-compile,跨 function 共享)
 fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
     let s = state as *CGState;
     (*s).next_offset = 0 as i64;
     (*s).total_alloc = 0 as i64;
     (*s).cur_fn_name = fn_name;
     (*s).nparams = 0 as i64;
+    // target_tag 不重置 — per-compile constant
+    return 0;
+}
+
+// cg_state_set_target — v2.7.0 Phase 2a setter
+//
+// 显式 setter 给 codegen_amd64_run 用(Phase 2b wire 时,从 main.jhyy 传 target `t` 进
+// codegen_amd64_run,然后 codegen_amd64_run 调此 setter 写 CGState.target_tag)。
+// Phase 2a 不调此 setter(target_tag 默认 0 = Win),仅为 Phase 2b 留 setter 接口。
+fn cg_state_set_target(state: *u8, target_tag: i32) -> i32 {
+    let s = state as *CGState;
+    (*s).target_tag = target_tag;
     return 0;
 }
 

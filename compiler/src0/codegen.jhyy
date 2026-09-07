@@ -3846,7 +3846,7 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
     // v2.0.0 target dispatch (Sprint A Stage 1). Amd64Win keeps full v1.x
     // path (fall through to the unchanged body below); other targets fatal
     // at entry pointing at the version where they ship. ABI 抽离 = v2.1.0;
-    // amd64_sysv = v2.x M2. Return 0 on fatal (jhyy convention: 1=success,
+    // amd64_sysv = v2.7.0 Phase 2b. Return 0 on fatal (jhyy convention: 1=success,
     // 0=error) so build_il's if-cascade check propagates without QBE/gcc.
     if t == TARGET_AMD64_WIN_FREESTANDING() {
         // v2.1.0 Stage 2: abi_fs_emit_entry_point + abi_fs_no_crt_init are
@@ -3858,8 +3858,19 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
         let _e = abi_fs_emit_entry_point(ir, "main_jhyy" as *u8);
         let _n = abi_fs_no_crt_init();
     }
-    if t == TARGET_AMD64_SYSV_STUB() {
-        jh_fputs_stderr("amd64_sysv target: 实现留 v2.x M2\n" as *u8);
+    if t == TARGET_AMD64_SYSV() {
+        // v2.7.0 Phase 2a: TARGET_AMD64_SYSV_STUB renamed → TARGET_AMD64_SYSV
+        // (不再 stub; Phase 1 commit a9c874d 已 ship abi_amd64_sysv.jhyy module,
+        // 7 ABI fn 实 codegen path 已 wired)。但 cg_module 内 import dispatch 跟
+        // 真正 freestanding ABI 调用留 Phase 2b (per v2.7.0-plan.md § 2i) —
+        // 本 commit 仅 rename + 默认行为保持 stub-fatal,Phase 2b 调 target_abi_module(t)
+        // 引入 import + 拆 emit_call Win/SysV arg-reg。
+        jh_fputs_stderr("amd64_sysv target: codegen dispatch wired in v2.7.0 Phase 2b\n" as *u8);
+        return 0 as i32;
+    }
+    if t == TARGET_AMD64_SYSV_FREESTANDING() {
+        // v2.7.1 ship — Phase 2a 仅 placeholder,默认 stub-fatal 跟 v2.6.x 行为一致。
+        jh_fputs_stderr("amd64_sysv_freestanding target: 实现留 v2.7.1\n" as *u8);
         return 0 as i32;
     }
     let md = node_module_data(module);
