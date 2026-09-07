@@ -545,6 +545,46 @@ fn parse_type(p: *Parser) -> *Node {
         // PhantomData 无 `<T>` → fall through 走 default ident → sema 报 unresolved type
     }
 
+    // ════════════════════════════════════════════════════
+    // v3.1.2 (V3-C 3g.7): `Cap<T>` 8-byte builtin type with generic inner
+    // ════════════════════════════════════════════════════
+    // 规则(per spec supplement v3.1.0 + v3.1.2):
+    //   - `Cap<T>` 走 builtin ident 分支(跟 v3.1.1 PhantomData 路径同型)
+    //   - 必须带 `<T>`;`Cap` 单独出现 → fall through 走 default ident → sema hardcoded
+    //     path (sema.jhyy:297-299) 用 i32 作 placeholder inner
+    //   - inner T 任意合法 type;M0 layout 不依赖 inner(size=8/align=8 硬编码)
+    //   - 跟 PhantomData 不同:Cap 允许实例化(cnode_idx/depth/rights 三字段),
+    //     跨函数 pass-by-value 走 Win x64 INTEGER class(RCX/RDX/R8/R9)
+    //
+    // 设计:在 symtab lookup 前 inline 识别 → 跳过普通 ident 路径,直接构造
+    // KIND_CAP *Type + 包成 ident-style AST node(sema 阶段统一走 type_ptr 解析)
+    if strcmp(name, "Cap" as *u8) == (0 as i32) {
+        // peek next token: 必须是 `<`
+        let mut cap_peek = empty_token();
+        parser_peek(p, &cap_peek);
+        if cap_peek.kind == TOKEN_LT() {
+            parser_advance(p, &t);  // consume `<`
+            let cap_lf = (*p).prev_lf;
+            let cap_ll = (*p).prev_ll;
+            let cap_lc = (*p).prev_lc;
+            // 递归 parse inner T(任意合法 type)
+            let cap_inner = parse_type(p);
+            parser_expect(p, TOKEN_GT(), "> after Cap<" as *u8, &t);
+            // 构造 type_cap(inner) + 绑到 symtype(走 sema 路径一致)
+            let cap_t = type_cap((*p).arena, cap_inner);
+            // 注册 / 查找 Cap builtin ident sym(便于后续 type-name error 友好)
+            let mut cap_sym = symtab_lookup((*p).current_scope, name);
+            if cap_sym == (0 as *Sym) {
+                cap_sym = symtab_insert((*p).current_scope, name, SYM_TYPE(),
+                                        cap_t as *u8, 0 as i32, (*p).scope_depth);
+            }
+            // skip :: Ident loop — Cap 不允许 qualified(M0 简化)
+            return ast_new_ident((*p).arena, cap_lf, cap_ll, cap_lc, cap_sym);
+        }
+        // Cap 无 `<T>` → fall through 走 default ident → sema 走 hardcoded ident path
+        // (sema.jhyy:297-299 Cap → type_cap(PRIM_I32())) — 跟 v3.1.0 ship 行为兼容
+    }
+
     let mut sym = symtab_lookup((*p).current_scope, name);
     if sym == (0 as *Sym) {
         sym = symtab_insert((*p).current_scope, name, SYM_TYPE(),

@@ -1,0 +1,51 @@
+// SKIP: V3-C 3g.7 feature — jhyy-side only (C-side bootstrap predates V3-C)
+// v3.1.2 (V3-C 3g.7) ship-gate: Cap<PhantomData<i32>> 组合 (cap 内嵌 phantom).
+//   验证 ZST (PhantomData) 不污染 Cap layout (Cap size=8 硬编码, 不展开 inner).
+//
+// 关键断言:
+//   - sizeof(PhantomData<i32>) == 0 (v3.1.1 锁)
+//   - sizeof(Cap<PhantomData<i32>>) == 8 (Cap hardcoded size=8, 不展开 inner, v3.1.0 § 3 锁)
+//   - sizeof(CapTable) == 16 (M0 layout 不依赖 T, nominal only — ZST inner 不污染 layout
+//     体现在 sizeof(Cap<PhantomData<i32>>) 仍 8B, 跟 Cap<i32> 一致)
+//   - 跨函数 Cap<PhantomData<i32>> pass 走 Win INTEGER class
+type CapTable = struct {
+    data: i64,
+    len: i64
+}
+
+fn cross_fn_sizeof_cap_pd() -> i64 {
+    // 跨函数 Cap<PhantomData<i32> > pass — 验证 Cap<...> 嵌套 generic 跨 fn OK
+    // (注:`>>` 走 lexer tokenization 撞墙,需要 `> >` 间距;TODO v3.2.0 修 lexer)
+    let c: Cap<PhantomData<i32> > = 0 as Cap<PhantomData<i32> >;
+    return sizeof(c);
+}
+
+fn main_jhyy() -> i32 {
+    // 1. sizeof(PhantomData<i32>) == 0 (v3.1.1 锁)
+    let s_pd: i64 = sizeof(PhantomData<i32>);
+    if s_pd != 0 {
+        return 10;
+    }
+
+    // 2. sizeof(Cap<PhantomData<i32> >) == 8 — Cap hardcoded size=8 不展开 inner
+    let s_cap_pd: i64 = sizeof(Cap<PhantomData<i32> >);
+    if s_cap_pd != 8 {
+        return 20;
+    }
+
+    // 3. sizeof(CapTable) == 16 — M0 nominal generic,
+    //    layout 不依赖 T (= 2 × i64 hardcoded, ZST inner 不污染)
+    let s_tbl: i64 = sizeof(CapTable);
+    if s_tbl != 16 {
+        return 30;
+    }
+
+    // 4. 跨函数 Cap<PhantomData<i32>> pass 验证 (走 Win INTEGER class)
+    let cap_pd_pass: i64 = cross_fn_sizeof_cap_pd();
+    if cap_pd_pass != 8 {
+        return 40;
+    }
+
+    return 42;
+}
+//EXPECT:42

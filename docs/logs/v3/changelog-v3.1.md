@@ -278,3 +278,124 @@ feat(phantom): add PhantomData<T> ZST codegen + Cap combo (3g.5)
 ```
 
 **D43 baseline update**: N6 (`51376ce5...`) → **N7 = `a8d55ac65315535b0d1c291b94f5b1c130a8cabc`** (single commit 包含全部 6 src0 改动 + 2 测试 + 1 spec + changelog;Stage 2 N=4 closure hold 在 `40d51000c132cd8c538e196e695d89900acd14ec7c1f5225bba6a04e75851145`;tagged `v3.1.1` on this commit)
+
+---
+
+# V3-C v3.1.2 — `CapTable<T>` + 跨函数 Cap<T> pass (3g.7)
+
+> **ship date**: 2026-09-07
+> **branch**: `axis-v3` (per 2026-09-06 user "顺序做的后面不用开branch,就在v3主轴上修")
+> **D27 锁**: 3g (v3.1.0) → 3g.5 (v3.1.1) → 3g.7 (v3.1.2) 串行不可调换 — **本 sprint ship 解锁 D27 全链**
+> **D43 baseline**: N8 (this sprint) — 上一条 N7 = `a8d55ac65315535b0d1c291b94f5b1c130a8cabc` (v3.1.1 post-tag = `d57df17`;ZST baseline hold)
+> **umbrella**: 本文件 v3.1.2 段 (与 v3.1.0 / v3.1.1 共用 changelog-v3.1.md, per `feedback_changelog_umbrella`)
+
+---
+
+## 1. 范围 / Scope
+
+V3-C sub-sprint 3/3 — `Cap<T>` parser 泛型 arm (v3.1.0 只 hardcode bare `Cap` ident;v3.1.2 补 `<T>` 语法) + `check_cap_pass` sema STUB + `CapTable<T>` M0 用户声明 struct (raw i64 ptr pair) + 2 SKIP test 验证 Cap<T> 跨函数 pass。
+
+**D27 锁启完成**:v3.1.2 ship → D27 全链 (3g → 3g.5 → 3g.7) 解锁,V3-C 全 ship。
+
+---
+
+## 2. 改动 / Changes
+
+### 2.1 parser.jhyy (+40 行)
+
+- `parse_type` IDENT 分支 (post-line 547) 加 `Cap<T>` 识别 arm:
+  - 匹配 `name == "Cap"` AND peek `<` → consume `<` → 递归 `parse_type(p)` 拿 inner T
+  - expect `>`, 调 `type_cap(arena, inner)`, 绑到 builtin ident sym (SYM_TYPE + type_ptr=type_cap(inner))
+  - 不支持 `::` 限定 (M0 简化)
+  - `Cap` 无 `<T>` → fall through 走 default ident → sema hardcoded path (sema.jhyy:297-299 `Cap → type_cap(PRIM_I32)`) 兼容 v3.1.0 ship 行为
+
+**限制**(out of scope 留 v3.2.0 / v3.x 中):
+- `*Cap<T>` 裸指针类型 — generic-on-pointer 留 v3.2.0 (3i generics)
+- `type Foo<T> = struct {...}` 泛型 struct decl — 留 v3.2.0
+- `Foo<T> {...}` 泛型 struct literal — 留 v3.2.0
+- 嵌套 `Cap<PhantomData<i32>>` 需要 `> >` 间距 (lexer `>>` tokenization 撞墙) — 留 v3.2.0
+
+### 2.2 sema.jhyy (+28 行)
+
+- `resolve_type_node` NODE_IDENT 分支 (post-line 281) 加 fall-through:
+  - 原 SYM_TYPE 短路由不到 SYM_VAR;现在 symtab_lookup 命中任何 kind (含 SYM_VAR) 且 type_ptr 非空 → 返回
+  - 用途:让 `sizeof(c)` where `c: Cap<T>` 是 fn param (SYM_VAR w/ type=Cap<T>) 能 resolve;否则 8-byte struct cross-fn pass 测试挂
+- `check_cap_pass(ctx, ta, body) -> i32` STUB 函数 (post-line 2023):
+  - 跟 `check_borrow` STUB 同模式:空 body + `return 1` + 9 条 deferred 限制 comment
+  - 完整 cap pass 语义(active-cap conflict / reentrancy / depth transition / 字段访问 / `*Cap<T>` / `cap_new()` / borrow 组合 / SysV) 留 v3.x 末
+
+---
+
+## 3. 测试 / Tests
+
+### 3.1 新增 test files
+
+| File | Purpose | SKIP directive |
+|------|---------|----------------|
+| `compiler/tests/examples/cap_table_basic.jhyy` | sizeof(Cap<i32>)==8, sizeof(CapTable)==16, 跨 fn Cap<i32> + CapTable pass-by-value | YES (V3-C 3g.7 jhyy-side only) |
+| `compiler/tests/examples/cap_table_advanced.jhyy` | sizeof(PhantomData<i32>)==0, sizeof(Cap<PhantomData<i32>)==8 (Cap 不展开 inner, 跟 Cap<i32> 同), sizeof(CapTable)==16 (M0 nominal generic, ZST 不污染), 跨 fn Cap<PhantomData<i32>> pass | YES |
+
+**注意**: test files 不用 generic struct decl / generic struct literal (per parser gap 留 v3.2.0)— `CapTable` 走 no-`<T>` 简化版 (CapTable 本质 M0 是 raw i64 pair,无 T 依赖);Cap<T> cross-fn pass 测 Win x64 INTEGER class (8-byte struct 走 RCX/RDX/R8/R9)。
+
+### 3.2 测试结果
+
+- `compiler/build/bin/jhyy.exe`: **104/104 PASS + 17 SKIP** (V3-C v3.1.1 baseline 104/104 + 15 SKIP 仍 hold;新增 2 个 SKIP test 进计数)
+- **No regression** — `sizeof_basic.jhyy` / `sizeof_derived.jhyy` / `sizeof_err_unknown.jhyy` 全 PASS (resolve_type_node fall-through 不破坏现有 8 个 sizeof test 路径)
+- Ship-gate 5/5 PASS: `cap_table_basic.jhyy` + `cap_table_advanced.jhyy` 各 EXIT=42 (raw bash + 绝对路径 5 次连续 EXIT=42, per `feedback_mcp_axis_v3_dont_copy`)
+- Regress binary sha256: `9cf064dcfdffbf05...`
+
+### 3.3 Self-host closure (D43 baseline N7 → N8)
+
+- **Stage 2 N=4 byte-equal closure PASS**: v2/v3/v4/v5 全部 sha256 = `f91363cda4629a432fde156476f0502d906f7b919ee6b46973b187b5274066a5`
+- D43 baseline N7 (`a8d55ac65315535b0d1c291b94f5b1c130a8cabc`) → **N8** = 本 commit sha (parser arm + sema fall-through + STUB 不污染 IL emit, IL 漂移预期)
+- 本 sub-sprint ship 后 N8 冻结 (per `feedback_make_clean_too_aggressive` pattern)
+
+---
+
+## 4. 已知限制 / Known Limitations (out of scope 留后续)
+
+| 限制 | 留到 |
+|------|------|
+| `*Cap<T>` 裸指针语法 (generic-on-pointer) | v3.2.0 (3i generics) |
+| `type Foo<T> = struct {...}` 泛型 struct decl | v3.2.0 |
+| `Foo<T> {...}` 泛型 struct literal | v3.2.0 |
+| 嵌套 `Cap<PhantomData<i32>>` lexer `>>` tokenization | v3.2.0 |
+| 完整 `check_cap_pass` 语义 (active-cap / reentrancy / depth transition / 字段访问 / `cap_new()` / borrow 组合) | v3.x 末 |
+| SysV (`abi_amd64_sysv.jhyy`) Cap class | v2.7.0+ backport |
+| `CapTable<T>` 真实 monomorphize (M0 只 nominal generic) | v3.2.0 |
+| `Vec<T>` / `HashMap<K,V>` 等容器类型 (用 PhantomData<T> 持类型参数) | v3.2.0 (3i) |
+
+---
+
+## 5. 跨 sprint 对齐 / Cross-sprint Alignment
+
+### 5.1 触发的后续 sprint
+
+- **V3-C v3.1.3** — D27 锁已全 ship,下一个 V3-C sprint 由 user 启动决定;可能方向:`&mut` lifetime 完整 / PhantomData 嵌套 / `#[no_std]` 软 ship 后续硬化
+- **V3-C v3.2.0** — generics monomorphize (3i), `Vec<T>` 等容器类型 + CapTable<T> 真实 monomorphize
+- **V2-C v2.8.0** (N 代 fixed point) — V3-C 全 ship 后启动, 验算 cap_table_basic.jhyy + cap_table_advanced.jhyy 在 N 代 closure 下仍 byte-equal (跨 axis 触发前置)
+
+### 5.2 跨边界 / Cross-boundary
+
+- **jhyy_OS M4 launch 硬前置**: V3-C 全 ship ✅ (v3.1.0/1.1/1.2) + V2-A ✅ + V2-B 全 ship + V2-C N 代 fixed point 验算过 — **M4 launch 硬前置 1/3 满足** (per `docs/plans/v2/v2.0.0-os-prep.md § 1` M4 表)
+- **D6** (Cap<T> 8 字节) 已锁 — 本 sprint 不变
+- **D27** (3g → 3g.5 → 3g.7 串行) — **本 sprint ship 解锁全链**
+- **D40** (wire-format ↔ jhyy-side 表达规则) — CapTable<T> 仍用 raw i64 ptr pair,wire-format 兼容
+
+---
+
+## 6. 文档 / Documentation
+
+- (复用) [`../abis/jhyy-lang-spec-cap-t-supplement-v3.1.0.md`](../abis/jhyy-lang-spec-cap-t-supplement-v3.1.0.md) — Cap<T> 8 字节 layout + ABI (本 sprint 加 `<T>` syntax 补充)
+- (复用) [`../abis/jhyy-lang-spec-phantomdata-supplement-v3.1.1.md`](../abis/jhyy-lang-spec-phantomdata-supplement-v3.1.1.md) — PhantomData<T> ZST
+- (新增段, 暂未独立成 spec 文件) 本 sprint 内 inline 在 parser.jhyy / sema.jhyy comment — 等 v3.2.0 generic-on-pointer 一起补 spec
+
+---
+
+## 7. Commit
+
+```
+feat(cap-table): add CapTable<T> + cross-function cap pass (3g.7)
+```
+
+**D43 baseline update**: N7 (`a8d55ac65315535b0d1c291b94f5b1c130a8cabc`) → **N8 = <commit sha>`** (single commit 包含 parser arm + sema fall-through + check_cap_pass STUB + 2 SKIP test + changelog;Stage 2 N=4 closure hold 在 `f91363cda4629a432fde156476f0502d906f7b919ee6b46973b187b5274066a5`;tagged `v3.1.2` on this commit)

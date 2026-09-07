@@ -280,6 +280,14 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
             }
         }
 
+        // v3.1.2 (V3-C 3g.7): fall through — 接受 SYM_VAR / SYM_FN 的 type_ptr
+        // 让 sizeof(c) where c: Cap<T> 在 fn body 内能 resolve (c 是 SYM_VAR w/ type=Cap<T>)。
+        if looked != (0 as *Sym) {
+            if (*looked).type_ptr != (0 as *u8) {
+                return (*looked).type_ptr as *Type;
+            }
+        }
+
         // primitive types（走 TypeArena）
         if strcmp(name, "i8" as *u8)   == (0 as i32) { return type_primitive(ta, PRIM_I8()); }
         if strcmp(name, "i16" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_I16()); }
@@ -1994,6 +2002,26 @@ fn check_link_section_name(ctx: *SemaContext, loc_filename: *u8,
 //
 // 完整 NLL 设计参 spec supplement v3.1.0 § 4 (v3.x 末重新设计)。
 fn check_borrow(ctx: *SemaContext, ta: *TypeArena, body: *Node) -> i32 {
+    return 1;
+}
+
+// v3.1.2 (V3-C 3g.7): check_cap_pass — STUB for v3.1.2 ship-gate.
+// 跨函数 Cap<T> pass 完整校验(active-cap conflict / reentrancy / depth transition)
+// 留 v3.x 末。当前 ship-gate 仅做类型签名层面的 Cap<T> pass-by-value 验证
+// (走 qbe_type_of → QBE_L → Win x64 INTEGER class),不做语义级 cap ownership 分析。
+//
+// 已知限制 (out of scope 留 v3.x 末):
+//   - 不检测 active-cap conflict(同一 cnode 跨函数双写)
+//   - 不检测 reentrancy(同一函数重入 + cap 调用)
+//   - 不检测 depth transition(Cap depth 自动递增)
+//   - 不支持 `Cap<T>` 字段访问 `.cnode_idx` / `.depth` / `.rights`(per spec supplement v3.1.0 § 126)
+//   - 不支持 `*Cap<T>` 裸指针类型(per parser gap,generic-on-pointer 留 v3.2.0)
+//   - 不支持 `cap_new()` builtin ctor
+//   - 不支持 cross-fn borrow + Cap 组合(跟 check_borrow 同样 stub)
+//   - 不支持 SysV target ABI(per Windows-only 决策,v2.7.0+ 后 backport)
+//
+// 完整 cap pass 设计参 spec supplement v3.1.0 § 4 + v3.1.2 § 3 (v3.x 末重新设计)。
+fn check_cap_pass(ctx: *SemaContext, ta: *TypeArena, body: *Node) -> i32 {
     return 1;
 }
 
