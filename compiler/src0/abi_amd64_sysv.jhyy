@@ -1,0 +1,296 @@
+// abi_amd64_sysv.jhyy — v2.7.0 ship of amd64_sysv ABI module
+//
+// V2-B v2.7.0 M2 deliverable: SysV AMD64 ABI (Linux ABI Supplement, x86-64
+// psABI § 3.2.3 + § A.4) for self-written backend. Mirror of
+// `abi_amd64_win.jhyy` structure but with target=SysV semantics.
+//
+// Phase 1 scope (v2.7.0 Commit 1): drop-in byte-equal mirror of win.
+// All 5 fn bodies + 1 internal helper are identical to abi_win_*. The only
+// divergence is `abi_sysv_classify_arg` which returns SysV 3-class codes
+// (INTEGER=0 / SSE=1 / MEMORY=2) instead of QBE type letters — this is
+// the true SysV per-class classifier as required by § A.4.
+//
+// Phase 2b scope (v2.7.0 Commit 3): `codegen_amd64_emit_call.jhyy`
+// `emit_amd64_arg_regs` helper splits arg-reg per target (Win: 4 regs
+// rcx/rdx/r8/r9 + 32B shadow / SysV: 6 regs rdi/rsi/rdx/rcx/r8/r9 NO
+// shadow). SysV bodies here remain mirror until v2.7.1+ when real
+// SysV-specific IL emit lands (8-class § A.4 full classifier, vararg AL,
+// etc.).
+//
+// 3-class minimum viable: INTEGER / SSE / MEMORY. Full 8-class SysV § A.4
+// (INTEGER / SSE / SSEUP / MEMORY / NO_CLASS) is v2.7.2+ territory per
+// `docs/plans/v2/v2.7.0-plan.md` out-of-scope list.
+//
+// Note: lives flat in compiler/src0/ (not in a subdir) — jhyy import
+// syntax doesn't support paths with `/` (per `parse_import_decl`
+// codegen.c:731 — same restriction as abi_amd64_win.jhyy).
+
+import types;
+import ir;
+import ast;  // for Sym (used by emit_function_header)
+import symtab;
+import arena;
+import abi_amd64_win;  // for abi_win_classify_arg (Phase 1 mirror placeholder)
+
+// ════════════════════════════════════════════
+// v2.7.0 Commit 1: abi_sysv_classify_arg
+// ════════════════════════════════════════════
+//
+// SysV 3-class minimum viable classifier (per SysV psABI § A.4):
+//   - INTEGER (0) for scalar integer types (i8/i16/i32/i64 / pointer /
+//     slice / func / enum ≤ 8B / struct ≤ 16B via reg-pair)
+//   - SSE (1)    for f32 / f64
+//   - MEMORY (2) for structs > 16B or arrays
+//
+// This differs from abi_win_classify_arg which returns QBE type letters
+// (QBE_L for 8-byte, QBE_W for 4-byte, etc.). The SysV classifier
+// returns class codes consumed by `emit_amd64_arg_regs` in Phase 2b
+// to decide register vs stack allocation.
+//
+// 8-class full classifier (SSEUP, etc.) is punted to v2.7.2+.
+
+// SysV class codes (i32 constants)
+fn SYSV_CLASS_INTEGER() -> i32 { return 0 as i32; }
+fn SYSV_CLASS_SSE()     -> i32 { return 1 as i32; }
+fn SYSV_CLASS_MEMORY()  -> i32 { return 2 as i32; }
+
+fn abi_sysv_classify_arg(t_raw: *u8) -> i32 {
+    if t_raw == (0 as *u8) {
+        return SYSV_CLASS_INTEGER();
+    }
+    let t = t_raw as *Type;
+    let kind = (*t).kind;
+    // SSE: f32 / f64 (KIND_PRIMITIVE + prim in {PRIM_F32, PRIM_F64})
+    if kind == KIND_PRIMITIVE() {
+        if (*t).prim == PRIM_F32() {
+            return SYSV_CLASS_SSE();
+        }
+        if (*t).prim == PRIM_F64() {
+            return SYSV_CLASS_SSE();
+        }
+        return SYSV_CLASS_INTEGER();
+    }
+    // MEMORY: struct > 16 bytes (SysV § A.4)
+    if kind == KIND_STRUCT() {
+        if (*t).size > (16 as i64) {
+            return SYSV_CLASS_MEMORY();
+        }
+        // Small struct (≤16B): INTEGER class (passed in 1-2 regs)
+        return SYSV_CLASS_INTEGER();
+    }
+    if kind == KIND_ARRAY() {
+        // Arrays are passed by reference (MEMORY)
+        return SYSV_CLASS_MEMORY();
+    }
+    // INTEGER: pointer / slice / func / unknown
+    if kind == KIND_POINTER() {
+        return SYSV_CLASS_INTEGER();
+    }
+    if kind == KIND_SLICE() {
+        return SYSV_CLASS_INTEGER();
+    }
+    if kind == KIND_FUNC() {
+        return SYSV_CLASS_INTEGER();
+    }
+    if kind == KIND_ENUM() {
+        if (*t).size > (8 as i64) {
+            return SYSV_CLASS_MEMORY();
+        }
+        return SYSV_CLASS_INTEGER();
+    }
+    // Default: INTEGER (VOID / ALIAS / UNRESOLVED / unknown)
+    return SYSV_CLASS_INTEGER();
+}
+
+// ════════════════════════════════════════════
+// Stage 1c.2 mirror: abi_sysv_emit_mangled_name
+// ════════════════════════════════════════════
+//
+// SysV uses `$mod__name` style mangling (same as Win in our self backend
+// — C-side extern naming is independent of ABI). Real SysV ELF .dynsym
+// uses Z-encoding for C++ or `_` prefix for C; this is a jhyy-side
+// stub that mirrors Win for now.
+
+fn abi_sysv_emit_mangled_name(ir: *IRBuf, sym_raw: *u8) -> i32 {
+    let sym = sym_raw as *Sym;
+    if (*sym).module != (0 as *u8) {
+        ir_emit_str(ir, "$" as *u8);
+        ir_emit_str(ir, (*sym).module);
+        ir_emit_str(ir, "__" as *u8);
+        ir_emit_str(ir, (*sym).name);
+    } else {
+        ir_emit_str(ir, "$" as *u8);
+        if (*sym).name != (0 as *u8) {
+            ir_emit_str(ir, (*sym).name);
+        } else {
+            ir_emit_str(ir, "?" as *u8);
+        }
+    }
+    return 1;
+}
+
+// ════════════════════════════════════════════
+// Stage 1c.2 mirror: abi_sysv_emit_function_header
+// ════════════════════════════════════════════
+//
+// Phase 1: byte-equal mirror of abi_win_emit_function_header. QBE IL
+// `export function ... {` is target-agnostic at the IL level — the
+// actual register allocation (4 vs 6 regs) happens at QBE -t stage.
+// Phase 2b will add SysV-specific tweaks (e.g. no sret for small struct
+// return — SysV uses rax/rdx register return for ≤16B structs, not
+// hidden sret pointer).
+//
+// Note: classifier placeholder uses abi_win_classify_arg (QBE letter) for
+// Phase 1 mirror. Phase 2b will replace with abi_sysv_classify_arg + a
+// class-to-letter map (INTEGER→QBE_L/QBE_W based on size; SSE→QBE_D/QBE_S;
+// MEMORY→QBE_L stack pointer).
+
+fn abi_sysv_emit_function_header(
+    ir: *IRBuf,
+    fn_sym: *Sym,
+    ret_qt: i32,
+    is_sret: i32,
+    params: *u8,
+    nparams: i64
+) -> i32 {
+    ir_emit_str(ir, "export function " as *u8);
+    if ret_qt != (0 as i32) {
+        ir_emit_int(ir, "%c " as *u8, ret_qt);
+    }
+    abi_sysv_emit_mangled_name(ir, fn_sym as *u8);
+    ir_emit_str(ir, "(" as *u8);
+    let mut first: i32 = 1;
+    if is_sret != 0 {
+        ir_emit_str(ir, "l %ret" as *u8);
+        first = 0;
+    }
+    let mut pi: i64 = 0 as i64;
+    while pi < nparams {
+        if first == 0 {
+            ir_emit_str(ir, ", " as *u8);
+        }
+        first = 0;
+        let param_slot = ptr_add_u8(params, pi * NODE_FUNC_DECL_PARAM_SIZE()) as *NodeFuncDeclParam;
+        let p_sym_raw = (*param_slot).sym;
+        let p_sym = p_sym_raw as *Sym;
+        let mut pt: *u8 = 0 as *u8;
+        if (*p_sym).type_ptr != (0 as *u8) {
+            pt = (*p_sym).type_ptr;
+        }
+        if pt != (0 as *u8) {
+            // Phase 1: use abi_win_classify_arg (QBE letter) as mirror placeholder.
+            // Phase 2b: replace with abi_sysv_classify_arg + class→letter map.
+            let pqt = abi_win_classify_arg(pt);
+            ir_emit_int(ir, "%c " as *u8, pqt);
+            ir_emit_str(ir, "%" as *u8);
+        } else {
+            ir_emit_str(ir, "w %" as *u8);
+        }
+        ir_emit_str(ir, (*p_sym).name);
+        pi = pi + (1 as i64);
+    }
+    ir_emit_str(ir, ") {\n" as *u8);
+    let start_block = *ir_new_block(ir, "start" as *u8);
+    ir_emit_label(ir, start_block);
+    return 1;
+}
+
+// ════════════════════════════════════════════
+// Stage 1c.3 mirror: abi_sysv_emit_return
+// ════════════════════════════════════════════
+//
+// Phase 1: byte-equal mirror. SysV small struct (≤16B) return uses
+// rax/rdx register return, but QBE -t amd64_sysv handles this at the
+// backend stage, not at the IR emit stage. Phase 2b may diverge for
+// large struct return (>16B) — caller allocates memory, callee writes,
+// caller copies (same pattern as Win sret, but no hidden sret param in
+// SysV — instead the return value is written to a caller-provided
+// address passed implicitly via a calling convention metadata register).
+
+fn abi_sysv_emit_return(ir: *IRBuf, val: IRVal, is_sret: i32) -> i32 {
+    if is_sret != 0 {
+        let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+        let _r = ir_emit_ret(ir, v);
+    } else if val.qbe_type != (0 as i32) {
+        let _r = ir_emit_ret(ir, val);
+    } else {
+        let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+        let _r = ir_emit_ret(ir, v);
+    }
+    return 1;
+}
+
+// ════════════════════════════════════════════
+// Stage 1c.4 mirror: abi_sysv_emit_call_prelude
+// ════════════════════════════════════════════
+//
+// Phase 1: byte-equal mirror. Same args buffer + sret slot alloc pattern
+// as Win. Phase 2b may diverge for SysV vararg (need al register save /
+// xmm register save before call) and for SysV struct-pass-by-class
+// (INTEGER vs SSE vs MEMORY routing).
+
+fn abi_sysv_emit_call_prelude(
+    ir: *IRBuf,
+    arena: *u8,
+    n_user_args: i64,
+    is_sret: i32,
+    rsize: i32,
+    out_ret_slot: *u8
+) -> *u8 {
+    let extra: i64 = if is_sret != 0 { (1 as i64) } else { (0 as i64) };
+    let total = n_user_args + extra;
+    let mut args_arr: *u8 = 0 as *u8;
+    if total > 0 {
+        let arena_a = arena as *Arena;
+        args_arr = arena_alloc(arena_a, total * IRVAL_SIZE());
+    }
+    let mut ret_slot: IRVal = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+    if is_sret != 0 {
+        ret_slot = *ir_new_tmp(ir, QBE_L());
+        ir_emit_alloc(ir, ret_slot, rsize);
+        if total > 0 {
+            let slot0 = args_arr as *i32;
+            *slot0 = ret_slot.kind;
+            *(ptr_add_u8(args_arr, 4 as i64) as *i32) = ret_slot.id;
+            *(ptr_add_u8(args_arr, 8 as i64) as *i64) = ret_slot.ival;
+            *(ptr_add_u8(args_arr, 16 as i64) as **u8) = ret_slot.name;
+            *(ptr_add_u8(args_arr, 24 as i64) as *i32) = ret_slot.qbe_type;
+        }
+    }
+    if out_ret_slot != (0 as *u8) {
+        let kind_p = out_ret_slot as *i32;
+        let id_p = ptr_add_u8(out_ret_slot, 4 as i64) as *i32;
+        let ival_p = ptr_add_u8(out_ret_slot, 8 as i64) as *i64;
+        let name_p = ptr_add_u8(out_ret_slot, 16 as i64) as **u8;
+        let qt_p = ptr_add_u8(out_ret_slot, 24 as i64) as *i32;
+        *kind_p = ret_slot.kind;
+        *id_p = ret_slot.id;
+        *ival_p = ret_slot.ival;
+        *name_p = ret_slot.name;
+        *qt_p = ret_slot.qbe_type;
+    }
+    return args_arr;
+}
+
+// ════════════════════════════════════════════
+// Stage 1c.5 mirror: abi_sysv_emit_struct_arg_slot
+// ════════════════════════════════════════════
+//
+// Phase 1: byte-equal mirror. Per SysV psABI § A.4, structs are passed
+// by class (INTEGER/SSE/MEMORY) — small structs ≤16B go in registers
+// (1-2 INTEGER regs or 1 SSE reg), large structs go by stack pointer.
+// The actual class-based dispatch is in `emit_amd64_arg_regs` (Phase 2b)
+// — this function still allocates the stack slot for the MEMORY class.
+
+fn abi_sysv_emit_struct_arg_slot(ir: *IRBuf, struct_type_raw: *u8) -> IRVal {
+    let mut asize: i32 = 0;
+    if struct_type_raw != (0 as *u8) {
+        asize = type_size(struct_type_raw as *Type) as i32;
+    }
+    if asize < (4 as i32) {
+        asize = 4;
+    }
+    let copy_slot = *ir_new_tmp(ir, QBE_L());
+    ir_emit_alloc(ir, copy_slot, asize);
+    return copy_slot;
+}
