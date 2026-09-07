@@ -311,7 +311,26 @@ docs/logs/v2/changelog-v2.6.0.md         | (本 sub-section)
 
 **净 ship 计数:** 1 driver script (byte_equal_amd64.sh +60 LOC) + 1 .gitignore (+3 LOC) + 1 README (new, gitignored dir) + 2 docs (workarounds.md + changelog)
 
-## References (v2.6.1 - v2.6.7)
+## v2.6.8 (2026-09-06, docs hygiene — D43 closure sha refresh)
+
+**核心:** workarounds.md 修 3 处 stale `d708793c...` 引用 → `92e8255473db3395c98bb12c58b473071384b42b897b114cea5fa903d715d25a` (v2.6.6 实际 baseline)。docs-only,无 codegen / ABI / runtime 改动。
+
+**改动:**
+- `docs/internal/workarounds.md` line 69 (W-069 table summary) + line 4926 + line 4945 (W-069 entry closure invariant): stale `d708793c...` → `92e8255473db3395c98bb12c58b473071384b42b897b114cea5fa903d715d25a`
+- `docs/logs/v2/changelog-v2.6.0.md` (本 sub-section)
+
+**Diff stat:** 2 files changed, 14 insertions(+), 6 deletions(-)
+
+**Ship gate (5/5 PASS,无 codegen 改动 → 全跟 v2.6.7 持平):**
+- ✅ regress 104/104 PASS, 4 SKIP (jhyy.exe sha `856edab49457e53f...`, v2.6.7 unchanged)
+- ✅ byte_equal_amd64.sh 默认 mode: 10 PASS / 0 SKIP / 0 FAIL (QBE-vs-self, v2.6.7 baseline hold)
+- ✅ byte_equal_amd64.sh `--baseline`: 20 PASS / 0 SKIP / 0 FAIL (10 byte-equal + 10 baseline match)
+- ✅ D43 closure v1→v2 hold: il sha `92e8255473db3395c98bb12c58b473071384b42b897b114cea5fa903d715d25a` (v2.6.7 unchanged)
+- ✅ workarounds.md W-069 entry closure sha 引用 `92e82554...` (跟 changelog 一致)
+
+**净 ship 计数:** 0 source files 改,2 docs 改
+
+## References (v2.6.1 - v2.6.8)
 
 - v2.6.1 commit: `9fe2f94` (jh_regalloc_get/set C-side bridge)
 - v2.6.2 commit: `44eb090` (regalloc module uses extern)
