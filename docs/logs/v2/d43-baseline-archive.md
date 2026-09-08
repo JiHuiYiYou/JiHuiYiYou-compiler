@@ -14,7 +14,11 @@ D43 closure invariant (per [`../plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-
 | v2.7.0 末 | `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b` | **退役**(被 v2.8.0 Commit 1 re-baseline 替代)| Commit 2+3 emit_call refactor + ABI imports 微调 codegen .il emit |
 | v2.7.1 | (同 v2.7.0 末) | **HOLD 不变**| Phase 1 (runtime files) + Phase 2 (regress.py --cross wire) 不动 codegen |
 | v2.7.2 | (同 v2.7.0 末) | **HOLD 不变**| regress.py false-positive 修,driver-only patch,不动 codegen |
-| **v2.8.0** | `6a2f2277656ca991bd1c436c4e8bfe14f5d7b33b3587d778e4d8a0e00118af38` | **当前 active baseline**| Commit 1 codegen_amd64_emit_mem/ctrl/peephole 加 `target_tag: i32` 参数 + state 加 `target_is_win`/`cg_offset_for_temp_with_target`/`compute_offset_for_temp_id_with_target` → ndeccls 1031 → 1034 → IL 大小 591082 → 592311 |
+| **v2.8.0** | `6a2f2277656ca991bd1c436c4e8bfe14f5d7b33b3587d778e4d8a0e00118af38` | **退役**(被 v2.9.0 src0 revert re-baseline 替代)| Commit 1 codegen_amd64_emit_mem/ctrl/peephole 加 `target_tag: i32` 参数 + state 加 `target_is_win`/`cg_offset_for_temp_with_target`/`compute_offset_for_temp_id_with_target` → ndeccls 1031 → 1034 → IL 大小 591082 → 592311 |
+| v2.8.1 | (同 v2.8.0) | **HOLD 不变**| C-side target_dispatch mirror update,不动 codegen |
+| v2.8.2 | (同 v2.8.0) | **HOLD 不变**| W-070 真修(jhyy-side cg_module 真 emit SysV QBE IL),但 Commit 1 没动 src0/codegen.jhyy 主体 → IL 大小不变 → D43 hold |
+| v2.8.3 | (同 v2.8.0) | **HOLD 不变**| `--no-link` flag + regress.py docker gcc chain infra 补完,driver-only patch,不动 codegen |
+| **v2.9.0** | `7aebc1b62ad8b1398d42bff30bdd56b25679ccfc1fb66fc9355be0bd6a43a6a3` | **当前 active baseline**| Commit 1 src0 revert to `archive/axis-v2-pre-merge`(per 2026-09-08 user decision:v2,v3 merge first, re-branch for v2-C + v3.1.3)→ axis-v3 的 V3-C 3g + 3g.5 + 3g.7 + 3i call-site inference + V3-B 3b naked + 3c volatile 等增量从 src0 撤 → ndeccls 1034 → 1034(保持)+ codegen 主路径微调 → IL 重算 |
 
 ## Why no v2.7.1 re-baseline?
 

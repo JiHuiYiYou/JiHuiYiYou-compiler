@@ -2,7 +2,7 @@
 
 > 流水线、源文件布局、关键设计决策。
 >
-> **Last updated**: v2.7.1 (2026-09-08) — C 端(`compiler/src/*.c`)与 jhyy 端(`compiler/src0/*.jhyy`)双路径并列维护;**v2.0 阶段 (v2.0.0 → v2.4.0) 5 版本全 ship** (tags `v2.3.0` / `v2.4.0`);**v2.7.0 末 3-commit ship + v2.7.1 3-commit ship**(Linux ELF runtime `runtime/linux_elf/` NEW + regress.py `--cross {wsl,docker,auto,none}` 实 wire);D43 closure 阶段性 hold `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b` (v2.7.0 末,re-baselined per D43;v2.7.1 Phase 1+2 不动 codegen → 主动 HOLD 不变,见 [`docs/logs/v2/d43-baseline-archive.md`](../logs/v2/d43-baseline-archive.md))。
+> **Last updated**: v2.9.0 (2026-09-08) — C 端(`compiler/src/*.c`)与 jhyy 端(`compiler/src0/*.jhyy`)双路径并列维护;**v2.0 阶段 (v2.0.0 → v2.4.0) 5 版本全 ship** (tags `v2.3.0` / `v2.4.0`);**v2.7.0 末 3-commit ship + v2.7.1 3-commit ship**(Linux ELF runtime `runtime/linux_elf/` NEW + regress.py `--cross {wsl,docker,auto,none}` 实 wire);**v2.8.0 → v2.8.3 M2 ship + W-070 真修 + docker gcc chain 5/5 sysv PASS**;**v2.9.0 V2-C Part 1 ship** — src0 revert to `archive/axis-v2-pre-merge` (per 2026-09-08 user decision v2,v3 merge first, re-branch for v2-C + v3.1.3) + N≥3 selfhost fixed point 验算 harness (`fixed_point.sh` + `regress.py --fixed-point` + `tools/fixed_point_summary.py`) + cap_test.jhyy 跨代一致。D43 closure 阶段性 hold `7aebc1b62ad8b1398d42bff30bdd56b25679ccfc1fb66fc9355be0bd6a43a6a3` (v2.9.0 active baseline,re-baselined per D43;v2.8.0/v2.8.1/v2.8.2/v2.8.3 hold → 退役,v2.9.0 src0 revert 后重算,见 [`docs/logs/v2/d43-baseline-archive.md`](../logs/v2/d43-baseline-archive.md))。
 
 ## 流水线
 
