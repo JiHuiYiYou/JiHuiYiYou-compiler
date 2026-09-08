@@ -1,0 +1,33 @@
+// SKIP: v3.2.0c — generic fn + turbofish (3i fn path; dropped after C5 verification)
+// v3.2.0c (3i fn path) ship-gate test: `fn max<T>(a: T, b: T) -> T` syntax +
+// turbofish `max::<i32>(3, 5)` + monomorphize to 2 distinct concrete fns.
+//
+// Per spec supplement v3.2.0c § 2 (to be added):
+//   - Parser: peek `::` after fn ident → if next is `<`, turbofish parse
+//   - Sema: infer_type NODE_CALL on generic fn sym → mono_expand_fn_call
+//   - Codegen: cg_func skip body if ntype_params > 0 (mirror check_func_decl skip)
+//
+// Expected: 2 distinct fns in .il (max$i32 / max$f64), each called once.
+
+fn max<T>(a: T, b: T) -> T {
+    if a > b { return a; }
+    return b;
+}
+
+fn main_jhyy() -> i32 {
+    // turbofish: max<i32>(3, 5)
+    let mi: i32 = max::<i32>(3, 5);
+    if mi != 5 {
+        return 10;
+    }
+    // turbofish: max<f64>(3.0, 5.0)
+    let mf: f64 = max::<f64>(3.0, 5.0);
+    // f64 compare via cast (jhyy f64 == is exact bit-equality)
+    let mf_eq: i32 = 0;
+    if mf == 5.0 { mf_eq = 1; }
+    if mf_eq != 1 {
+        return 20;
+    }
+    return 42;
+}
+//EXPECT:42

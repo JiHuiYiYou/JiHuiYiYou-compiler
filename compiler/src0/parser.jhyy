@@ -1286,6 +1286,121 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         parser_advance(p, &t);
         let name = parser_tok_name(p, &t);
 
+        // v3.2.0c (3i fn path): turbofish arm `f::<T, U>(args)` — must be detected
+        //   BEFORE the SYM_TYPE/SYM_MODULE branches consume the IDENT. Approach:
+        //   1) peek token N+1 — if `::`, commit (advance), peek new next:
+        //      - if `<` → turbofish path (parse `<T,U>`, leave for postfix LPAREN)
+        //      - if IDENT → fall through to SYM_MODULE qualified call path
+        //        (the `::` was consumed; SYM_MODULE branch L1620 will be confused
+        //         because next token is IDENT not `::` — fallback: handle here)
+        //      - else → error
+        //   2) Note: jhyy parser is LL(1); commit on `::` is required. We rely
+        //      on the fact that `::` in IDENT position is either turbofish
+        //      (`f::<T>`) or qualified call (`mod::name`);both start with `::`.
+        //      If `::` followed by anything else → syntax error anyway.
+        //
+        //   Detection: peek next token kind. If `::`, commit + consume + peek again.
+        let mut tpeek_after_ident = empty_token();
+        parser_peek(p, &tpeek_after_ident);
+        if tpeek_after_ident.kind == TOKEN_COLONCOLON() {
+            // commit: consume `::`
+            let turbofish_lf = (*p).prev_lf;
+            let turbofish_ll = (*p).prev_ll;
+            let turbofish_lc = (*p).prev_lc;
+            parser_advance(p, &t);  // consume `::`
+            // peek new next
+            let mut tpeek_after_cc = empty_token();
+            parser_peek(p, &tpeek_after_cc);
+            if tpeek_after_cc.kind == TOKEN_LT() {
+                // turbofish: parse `<T, U>` (reuse parse_type generic inst pattern)
+                parser_advance(p, &t);  // consume `<`
+                let mut tfargs: *u8 = 0 as *u8;
+                let mut ntfargs: i64 = 0 as i64;
+                let mut tcap: i64 = 0 as i64;
+                while parser_check(p, TOKEN_GT()) == (0 as i32) {
+                    if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+                    let tfarg = parse_type(p);
+                    if ntfargs >= tcap {
+                        tcap = if tcap != (0 as i64) { tcap * (2 as i64) } else { (4 as i64) };
+                        let ntfa = arena_alloc((*p).arena, tcap * (8 as i64));
+                        if tfargs != (0 as *u8) {
+                            if ntfargs > (0 as i64) {
+                                memcpy(ntfa, tfargs, ntfargs * (8 as i64));
+                            }
+                        }
+                        tfargs = ntfa;
+                    }
+                    let tslot = (tfargs as i64 + ntfargs * (8 as i64)) as **Node;
+                    *tslot = tfarg;
+                    ntfargs = ntfargs + (1 as i64);
+                    if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
+                }
+                parser_expect(p, TOKEN_GT(), "> after turbofish args" as *u8, &t);
+                // record generic inst (跟 struct path 同走 parser_record_generic_inst)
+                parser_record_generic_inst(p, name, name, tfargs, ntfargs);
+                // resolve fn sym (sema 后续 infer_type 看到 NODE_CALL 时按 generic
+                //   fn sym 触发 mono_expand_fn_call — type_args via generic_fn_insts)
+                let mut fn_sym = symtab_lookup((*p).global_scope, name);
+                if fn_sym == (0 as *Sym) {
+                    fn_sym = symtab_insert((*p).current_scope, name, SYM_FN(),
+                                            0 as *u8, 0 as i32, 0 as i32);
+                }
+                left = ast_new_ident((*p).arena, turbofish_lf, turbofish_ll, turbofish_lc, fn_sym);
+                // 注意: left 此时是 bare ident;后续 postfix `(` 走 ast_new_call
+                //   (不带 turbofish aware — C4 step 11 patch `(*node_call_data).type_args`
+                //   from (*p).generic_fn_insts last entry)。
+            } else if tpeek_after_cc.kind == TOKEN_IDENT() {
+                // qualified call fallback: `mod::name(...)`
+                //   `::` 已 consumed;手动 parse IDENT + LPAREN args。
+                let mut fnt = empty_token();
+                parser_expect(p, TOKEN_IDENT(), "function name after '::'" as *u8, &fnt);
+                let fn_name = parser_tok_name(p, &fnt);
+                let mut fn_sym = symtab_lookup((*p).current_scope, fn_name);
+                if fn_sym == (0 as *Sym) {
+                    fn_sym = symtab_insert((*p).current_scope, fn_name, SYM_FN(),
+                                            0 as *u8, 0 as i32, 0 as i32);
+                }
+                let mut args: *u8 = 0 as *u8;
+                let mut nargs: i64 = 0 as i64;
+                let mut cap: i64 = 0 as i64;
+                parser_expect(p, TOKEN_LPAREN(), "(" as *u8, &t);
+                if parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
+                    while true {
+                        let arg = parse_expr(p, PREC_NONE());
+                        if nargs >= cap {
+                            cap = if cap != (0 as i64) { cap * (2 as i64) } else { (8 as i64) };
+                            let na = arena_alloc((*p).arena, cap * (8 as i64));
+                            if args != (0 as *u8) {
+                                if nargs > (0 as i64) { memcpy(na, args, nargs * (8 as i64)); }
+                            }
+                            args = na;
+                        }
+                        let slot = (args as i64 + nargs * (8 as i64)) as **Node;
+                        *slot = arg;
+                        nargs = nargs + (1 as i64);
+                        if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
+                    }
+                }
+                parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
+                // module ident 走 symtab_lookup(name) — 用 turbofish_lf (callee ident loc)
+                let mut mod_sym = symtab_lookup((*p).global_scope, name);
+                if mod_sym == (0 as *Sym) {
+                    mod_sym = symtab_insert((*p).current_scope, name, SYM_MODULE(),
+                                            0 as *u8, 0 as i32, 0 as i32);
+                }
+                let mod_node = ast_new_ident((*p).arena, turbofish_lf, turbofish_ll, turbofish_lc, mod_sym);
+                let fn_node = ast_new_ident((*p).arena, (*p).prev_lf, (*p).prev_ll, (*p).prev_lc, fn_sym);
+                left = ast_new_qualified_call((*p).arena, turbofish_lf, turbofish_ll, turbofish_lc, mod_node, fn_node, args, nargs);
+            } else {
+                // `::` 后既不是 `<` 也不是 IDENT → 语法错误
+                jh_print_loc_stderr(turbofish_lf, turbofish_ll, turbofish_lc);
+                jh_fputs_stderr("error: expected '<' or function name after '::'\n" as *u8);
+                (*p).error_count = (*p).error_count + (1 as i32);
+                left = ast_new_ident((*p).arena, turbofish_lf, turbofish_ll, turbofish_lc, symtab_insert((*p).current_scope, name, SYM_FN(), 0 as *u8, 0 as i32, 0 as i32));
+            }
+        }
+        // else: not `::` — fall through to SYM_TYPE / SYM_MODULE / default IDENT path
+
         // v3.2.0 (V3-C 3i generics): expr 位 generic inst arm `Name<i32, ...>`
         //   INLINED (not extracted to fn) for the same forward-ref reason as
         //   parse_type IDENT branch. 主要场景:`Vec<i32> { ... }` struct lit。
@@ -3001,6 +3116,47 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
         }
     }
 
+    // v3.2.0c (3i fn path): 可选 `<T, U, ...>` generic param list。
+    //   mirror parse_type_decl L3140-3183:peek `<` → push scope + parse 逗号分隔
+    //   ident list → 插 SYM_TYPE type_ptr=0(monomorphize sentinel)。scope pop
+    //   在 fn decl parse 完后 (`parser_pop_scope` L3113 已存在,后续 patch
+    //   加 if is_generic 守卫)。ntype_params > 0 → codegen skip body (走
+    //   mono_clone_and_subst 路径)。
+    let mut type_params: *u8 = 0 as *u8;
+    let mut ntype_params: i64 = 0 as i64;
+    let mut tcap2: i64 = 0 as i64;
+    let mut is_generic_fn: i32 = 0 as i32;
+
+    let mut gpeek_fn = empty_token();
+    parser_peek(p, &gpeek_fn);
+    if gpeek_fn.kind == TOKEN_LT() {
+        parser_push_scope(p);
+        is_generic_fn = 1 as i32;
+        parser_advance(p, &t);  // consume `<`
+        while parser_check(p, TOKEN_GT()) == (0 as i32) {
+            if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+            parser_expect(p, TOKEN_IDENT(), "type parameter name" as *u8, &t);
+            let tpname = parser_tok_name(p, &t);
+            let _tpsym = symtab_insert((*p).current_scope, tpname, SYM_TYPE(),
+                                       0 as *u8, 0 as i32, (*p).scope_depth);
+            if ntype_params >= tcap2 {
+                tcap2 = if tcap2 != (0 as i64) { tcap2 * (2 as i64) } else { (4 as i64) };
+                let nt = arena_alloc((*p).arena, tcap2 * (8 as i64));
+                if type_params != (0 as *u8) {
+                    if ntype_params > (0 as i64) {
+                        memcpy(nt, type_params, ntype_params * (8 as i64));
+                    }
+                }
+                type_params = nt;
+            }
+            let tpslot = (type_params as i64 + ntype_params * (8 as i64)) as **u8;
+            *tpslot = _tpsym as *u8;
+            ntype_params = ntype_params + (1 as i64);
+            if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
+        }
+        parser_expect(p, TOKEN_GT(), "> after type param list" as *u8, &t);
+    }
+
     parser_push_scope(p);
 
     parser_expect(p, TOKEN_LPAREN(), "(" as *u8, &t);
@@ -3112,8 +3268,15 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
 
     parser_pop_scope(p);
 
-    return ast_new_func_decl((*p).arena, loc_lf, loc_ll, loc_lc,
-                             sym, params, nparams, ret_type, body, is_extern, is_inline, is_naked_v, link_section_v);
+    // v3.2.0c (3i fn path): if generic fn (type_params scope pushed at L3007-3010),
+    //   pop it now — body parse 已完成,type-param 不再可见。
+    let fn_decl = ast_new_func_decl((*p).arena, loc_lf, loc_ll, loc_lc,
+                             sym, params, nparams, ret_type, body, is_extern, is_inline, is_naked_v, link_section_v,
+                             type_params, ntype_params);
+    if is_generic_fn != (0 as i32) {
+        parser_pop_scope(p);
+    }
+    return fn_decl;
 }
 
 // ════════════════════════════════════════════════════
