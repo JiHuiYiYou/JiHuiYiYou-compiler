@@ -90,10 +90,20 @@ type Parser = struct {
     // the section name string (heap/arena-allocated, owned) for parse_attributes
     // to fold into NodeFuncDecl.link_section for the next fn, then resets.
     pending_link_section: *u8,
+    // v3.2.0 (V3-C 3i generics): parser 累积 generic instantiations。
+    //   parse_type 见到 `Vec<i32>` / `Option<i64>` 时 append 一条
+    //   {base_name, mangled_name, [args]} 进此数组;parser_parse 末尾
+    //   把数组传给 ast_new_module。sema Pass 1.5 mono_expand_module 消费。
+    //   generic_insts: *GenericInstRecord 数组(动态扩容,翻倍策略)
+    //   ngeneric_insts: 当前 record 数
+    //   gcap:           数组 capacity
+    generic_insts:  *u8,
+    ngeneric_insts: i64,
+    gcap:           i64,
 }
 
-// Parser 字节数 = 2 * 8 (ptr) + 6 * 8 (token fields) + 2 * 8 (scope) + 2 * 4 (depth/count) + 2 pad + 1 * 4 (pending_inline) + 1 * 4 (pending_naked) + 1 * 8 (pending_link_section) = 104
-fn PARSER_SIZE() -> i64 { return 104 as i64; }
+// Parser 字节数 = 2 * 8 (ptr) + 6 * 8 (token fields) + 2 * 8 (scope) + 2 * 4 (depth/count) + 2 pad + 1 * 4 (pending_inline) + 1 * 4 (pending_naked) + 1 * 8 (pending_link_section) + 1 * 8 (generic_insts) + 2 * 8 (count + cap) = 128
+fn PARSER_SIZE() -> i64 { return 128 as i64; }
 
 // ════════════════════════════════════════════════════
 // Token helpers（caller 栈分配 Token，let mut t: Token = ...）
@@ -312,6 +322,113 @@ fn PREC_PRIMARY()   -> i32 { return 12 as i32; }
 // commit 4 移到 parse_expr 之前，parse_expr 中 sizeof/alignof/as 需要它
 // array count 不再走 parse_expr（避免 mutual recursion），改 inline int literal
 // ════════════════════════════════════════════════════
+
+// v3.2.0 (V3-C 3i generics): helpers — defined BEFORE parse_type because
+//   parse_type IDENT branch calls them inline. They do NOT call parse_type
+//   themselves, so no forward-ref cycle. (parser_parse_generic_type_args
+//   WAS removed because of parse_type ↔ parse_generic_type_args circularity;
+//   the arg-mangling + record logic is now inlined at the 2 call sites.)
+//
+//   All use only v1.x subset patterns (let mut + *u8, no generics/Cap/&mut)
+//   because parser.jhyy is parsed by C-side stage-0 too.
+
+// append (base_name, mangled_name, args) 到 (*p).generic_insts.
+//   Doubling array;no size cap.
+fn parser_record_generic_inst(p: *Parser, base_name: *u8,
+                              mangled_name: *u8,
+                              args: *u8, nargs: i64) -> i32 {
+    if (*p).ngeneric_insts >= (*p).gcap {
+        let nc = if (*p).gcap != (0 as i64) { (*p).gcap * (2 as i64) } else { (4 as i64) };
+        let ng = arena_alloc((*p).arena, nc * GENERIC_INST_RECORD_SIZE());
+        if (*p).generic_insts != (0 as *u8) {
+            if (*p).ngeneric_insts > (0 as i64) {
+                memcpy(ng, (*p).generic_insts,
+                       (*p).ngeneric_insts * GENERIC_INST_RECORD_SIZE());
+            }
+        }
+        (*p).generic_insts = ng;
+        (*p).gcap = nc;
+    }
+    let slot = ((*p).generic_insts as i64 +
+                (*p).ngeneric_insts * GENERIC_INST_RECORD_SIZE()) as *GenericInstRecord;
+    (*slot).base_name = base_name;
+    (*slot).mangled_name = mangled_name;
+    (*slot).arg_types = args;
+    (*slot).nargs = nargs;
+    (*p).ngeneric_insts = (*p).ngeneric_insts + (1 as i64);
+    return 0;
+}
+
+// growable byte buffer for mangled name. arena-allocated (no free needed).
+fn mangle_buf_grow(p: *Parser, buf: *u8, old_cap: i64, need: i64) -> *u8 {
+    let mut nc = old_cap;
+    while nc < need {
+        nc = nc * (2 as i64);
+    }
+    let nb = arena_alloc((*p).arena, nc);
+    if buf != (0 as *u8) {
+        memcpy(nb, buf, old_cap);
+    }
+    return nb;
+}
+
+// recursive AST type node → mangled suffix string.
+//   Writes into *buf_ptr (growable). Handles NODE_IDENT / NODE_UNARY(*) only
+//   for v3.2.0. Other kinds write '?'.
+//   NOTE: buf is passed as **u8 so we can reassign the caller's pointer on grow.
+fn parser_mangle_type_node(p: *Parser, node: *Node, buf_p: **u8,
+                           len: *i64, cap: *i64) {
+    let mut buf = *buf_p;
+    if node == (0 as *Node) {
+        let mut need = *len + (1 as i64);
+        if need > *cap {
+            buf = mangle_buf_grow(p, buf, *cap, need);
+            *cap = need;
+        }
+        *(ptr_add_u8(buf, *len) as *u8) = 0x3f as u8;
+        *len = *len + (1 as i64);
+        *buf_p = buf;
+        return;
+    }
+    if (*node).kind == NODE_IDENT() {
+        let id = node_ident_data(node);
+        let nm = (*id).sym as *Sym;
+        let nlen = strlen((*nm).name);
+        let mut need = *len + nlen + (1 as i64);
+        if need > *cap {
+            buf = mangle_buf_grow(p, buf, *cap, need);
+            *cap = need;
+        }
+        memcpy(ptr_add_u8(buf, *len), (*nm).name, nlen);
+        *len = *len + nlen;
+        *buf_p = buf;
+        return;
+    }
+    if (*node).kind == NODE_UNARY() {
+        let un = node_unary_data(node);
+        let mut need = *len + (2 as i64);
+        if need > *cap {
+            buf = mangle_buf_grow(p, buf, *cap, need);
+            *cap = need;
+        }
+        *(ptr_add_u8(buf, *len) as *u8) = 0x2a as u8;
+        *len = *len + (1 as i64);
+        let inner = (*un).expr as *Node;
+        *buf_p = buf;
+        parser_mangle_type_node(p, inner, buf_p, len, cap);
+        return;
+    }
+    // other kinds: '?'
+    let mut need = *len + (2 as i64);
+    if need > *cap {
+        buf = mangle_buf_grow(p, buf, *cap, need);
+        *cap = need;
+    }
+    *(ptr_add_u8(buf, *len) as *u8) = 0x3f as u8;
+    *len = *len + (1 as i64);
+    *buf_p = buf;
+    return;
+}
 
 fn parse_type(p: *Parser) -> *Node {
     let mut t = empty_token();
@@ -583,6 +700,84 @@ fn parse_type(p: *Parser) -> *Node {
         }
         // Cap 无 `<T>` → fall through 走 default ident → sema 走 hardcoded ident path
         // (sema.jhyy:297-299 Cap → type_cap(PRIM_I32())) — 跟 v3.1.0 ship 行为兼容
+    }
+
+    // v3.2.0 (V3-C 3i generics): generic type inst arm `Name<i32, bool>`
+    //   INLINED here (not extracted to fn) because parse_type ↔
+    //   parser_parse_generic_type_args is a forward-ref cycle that jhyy
+    //   can't resolve. Inline keeps the call site clean.
+    //   DISAMBIGUATION: only enter if IDENT starts with uppercase A-Z —
+    //   avoids false-positive on lowercase variables/primitives. Generic
+    //   types in jhyy use PascalCase by convention (Vec, Pair, Option).
+    let mut gnpeek = empty_token();
+    parser_peek(p, &gnpeek);
+    if gnpeek.kind == TOKEN_LT() {
+        let mut g_first = *(ptr_add_u8(name, 0 as i64)) as i32;
+        let mut g_is_upper = 0 as i32;
+        if g_first >= (65 as i32) && g_first <= (90 as i32) {
+            g_is_upper = 1 as i32;
+        }
+        if g_is_upper != (0 as i32) {
+        let mut gt = empty_token();
+        parser_advance(p, &gt);  // consume `<`
+        // build mangled name buffer
+        let mut g_args: *u8 = 0 as *u8;
+        let mut g_nargs: i64 = 0 as i64;
+        let mut g_acap: i64 = 0 as i64;
+        let mut g_mname: *u8 = 0 as *u8;
+        let mut g_mcap: i64 = 0 as i64;
+        let mut g_mlen: i64 = 0 as i64;
+        let g_bn_len = strlen(name);
+        g_mcap = 64 as i64;
+        while g_mcap < g_bn_len + (2 as i64) {
+            g_mcap = g_mcap * (2 as i64);
+        }
+        g_mname = arena_alloc((*p).arena, g_mcap);
+        memcpy(g_mname, name, g_bn_len);
+        g_mlen = g_bn_len;
+        *(ptr_add_u8(g_mname, g_mlen) as *u8) = 0 as u8;
+
+        while parser_check(p, TOKEN_GT()) == (0 as i32) {
+            if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+            let g_arg = parse_type(p);
+            // append '$' + mangle(arg)
+            let mut g_need = g_mlen + (2 as i64);
+            if g_need > g_mcap {
+                g_mname = mangle_buf_grow(p, g_mname, g_mcap, g_need);
+                g_mcap = g_need;
+            }
+            *(ptr_add_u8(g_mname, g_mlen) as *u8) = 0x24 as u8;
+            g_mlen = g_mlen + (1 as i64);
+            parser_mangle_type_node(p, g_arg, &g_mname, &g_mlen, &g_mcap);
+            *(ptr_add_u8(g_mname, g_mlen) as *u8) = 0 as u8;
+            // save arg node
+            if g_nargs >= g_acap {
+                g_acap = if g_acap != (0 as i64) { g_acap * (2 as i64) } else { (4 as i64) };
+                let g_na = arena_alloc((*p).arena, g_acap * (8 as i64));
+                if g_args != (0 as *u8) {
+                    if g_nargs > (0 as i64) {
+                        memcpy(g_na, g_args, g_nargs * (8 as i64));
+                    }
+                }
+                g_args = g_na;
+            }
+            let g_aslot = (g_args as i64 + g_nargs * (8 as i64)) as **Node;
+            *g_aslot = g_arg;
+            g_nargs = g_nargs + (1 as i64);
+            if parser_match(p, TOKEN_COMMA(), &gt) == (0 as i32) { break; }
+        }
+        parser_expect(p, TOKEN_GT(), "> after generic args" as *u8, &gt);
+
+        let mut g_msym = symtab_lookup((*p).global_scope, g_mname);
+        if g_msym == (0 as *Sym) {
+            g_msym = symtab_insert((*p).global_scope, g_mname, SYM_TYPE(),
+                                   0 as *u8, 0 as i32, 0 as i32);
+        }
+        parser_record_generic_inst(p, name, g_mname, g_args, g_nargs);
+
+        return ast_new_ident((*p).arena, t.loc_filename, t.loc_line, t.loc_col, g_msym);
+        } // v3.2.0: close inner if (g_is_upper != 0)
+        // else (g_is_upper == 0): lowercase or non-alpha → fall through to default
     }
 
     let mut sym = symtab_lookup((*p).current_scope, name);
@@ -1089,6 +1284,120 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
     else if t.kind == TOKEN_IDENT() {
         parser_advance(p, &t);
         let name = parser_tok_name(p, &t);
+
+        // v3.2.0 (V3-C 3i generics): expr 位 generic inst arm `Name<i32, ...>`
+        //   INLINED (not extracted to fn) for the same forward-ref reason as
+        //   parse_type IDENT branch. 主要场景:`Vec<i32> { ... }` struct lit。
+        //   DISAMBIGUATION: IDENT must start with uppercase A-Z. Lowercase
+        //   IDENT + `<` is the less-than operator (e.g. `n < 2`).
+        let mut gnpeek2 = empty_token();
+        parser_peek(p, &gnpeek2);
+        if gnpeek2.kind == TOKEN_LT() {
+            let mut g2_first = *(ptr_add_u8(name, 0 as i64)) as i32;
+            let mut g2_is_upper = 0 as i32;
+            if g2_first >= (65 as i32) && g2_first <= (90 as i32) {
+                g2_is_upper = 1 as i32;
+            }
+            if g2_is_upper != (0 as i32) {
+            // inline parse_generic_type_args — see comment in parse_type IDENT branch
+            let mut gt2 = empty_token();
+            parser_advance(p, &gt2);  // consume `<`
+            let mut g2_args: *u8 = 0 as *u8;
+            let mut g2_nargs: i64 = 0 as i64;
+            let mut g2_acap: i64 = 0 as i64;
+            let mut g2_mname: *u8 = 0 as *u8;
+            let mut g2_mcap: i64 = 0 as i64;
+            let mut g2_mlen: i64 = 0 as i64;
+            let g2_bn_len = strlen(name);
+            g2_mcap = 64 as i64;
+            while g2_mcap < g2_bn_len + (2 as i64) {
+                g2_mcap = g2_mcap * (2 as i64);
+            }
+            g2_mname = arena_alloc((*p).arena, g2_mcap);
+            memcpy(g2_mname, name, g2_bn_len);
+            g2_mlen = g2_bn_len;
+            *(ptr_add_u8(g2_mname, g2_mlen) as *u8) = 0 as u8;
+            while parser_check(p, TOKEN_GT()) == (0 as i32) {
+                if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+                let g2_arg = parse_type(p);
+                let mut g2_need = g2_mlen + (2 as i64);
+                if g2_need > g2_mcap {
+                    g2_mname = mangle_buf_grow(p, g2_mname, g2_mcap, g2_need);
+                    g2_mcap = g2_need;
+                }
+                *(ptr_add_u8(g2_mname, g2_mlen) as *u8) = 0x24 as u8;
+                g2_mlen = g2_mlen + (1 as i64);
+                parser_mangle_type_node(p, g2_arg, &g2_mname, &g2_mlen, &g2_mcap);
+                *(ptr_add_u8(g2_mname, g2_mlen) as *u8) = 0 as u8;
+                if g2_nargs >= g2_acap {
+                    g2_acap = if g2_acap != (0 as i64) { g2_acap * (2 as i64) } else { (4 as i64) };
+                    let g2_na = arena_alloc((*p).arena, g2_acap * (8 as i64));
+                    if g2_args != (0 as *u8) {
+                        if g2_nargs > (0 as i64) {
+                            memcpy(g2_na, g2_args, g2_nargs * (8 as i64));
+                        }
+                    }
+                    g2_args = g2_na;
+                }
+                let g2_aslot = (g2_args as i64 + g2_nargs * (8 as i64)) as **Node;
+                *g2_aslot = g2_arg;
+                g2_nargs = g2_nargs + (1 as i64);
+                if parser_match(p, TOKEN_COMMA(), &gt2) == (0 as i32) { break; }
+            }
+            parser_expect(p, TOKEN_GT(), "> after generic args" as *u8, &gt2);
+            let mut g2_msym = symtab_lookup((*p).global_scope, g2_mname);
+            if g2_msym == (0 as *Sym) {
+                g2_msym = symtab_insert((*p).global_scope, g2_mname, SYM_TYPE(),
+                                        0 as *u8, 0 as i32, 0 as i32);
+            }
+            parser_record_generic_inst(p, name, g2_mname, g2_args, g2_nargs);
+            let gsym2 = g2_msym;
+            // 直接当 struct lit 处理(type 位 `<` 不出现;在 expr 位 `<...>{`
+            //   表示 struct literal;`<...>(...)` 是 turbofish,留给 v3.2.0b)
+            if parser_check(p, TOKEN_LBRACE()) != (0 as i32) {
+                let _sloc_lf = t.loc_filename;
+                let _sloc_ll = t.loc_line;
+                let _sloc_lc = t.loc_col;
+                parser_advance(p, &t);  // consume {
+                let mut sfields: *u8 = 0 as *u8;
+                let mut snfields: i64 = 0 as i64;
+                let mut sfcap: i64 = 0 as i64;
+                while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+                    if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+                    let mut sfnt = empty_token();
+                    parser_expect(p, TOKEN_IDENT(), "field name" as *u8, &sfnt);
+                    let sfname = parser_tok_name(p, &sfnt);
+                    parser_expect(p, TOKEN_COLON(), ":" as *u8, &t);
+                    let sfval = parse_expr(p, PREC_NONE());
+                    if snfields >= sfcap {
+                        sfcap = if sfcap != (0 as i64) { sfcap * (2 as i64) } else { (8 as i64) };
+                        let snf = arena_alloc((*p).arena, sfcap * (16 as i64));
+                        if sfields != (0 as *u8) {
+                            if snfields > (0 as i64) { memcpy(snf, sfields, snfields * (16 as i64)); }
+                        }
+                        sfields = snf;
+                    }
+                    let sfd = (sfields as i64 + snfields * (16 as i64)) as *NodeFieldInit;
+                    (*sfd).name = sfname;
+                    (*sfd).value = sfval as *u8;
+                    snfields = snfields + (1 as i64);
+                    if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
+                }
+                parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
+                left = ast_new_struct_lit((*p).arena, _sloc_lf, _sloc_ll, _sloc_lc, gsym2, sfields, snfields);
+            } else {
+                // expr 位 generic inst 不是 struct lit(如 `let v = Vec<i32>;`)—
+                //   这种用法在 jhyy 里无直接语义,返回 ident 节点让 sema 处理
+                left = ast_new_ident((*p).arena, t.loc_filename, t.loc_line, t.loc_col, gsym2);
+            }
+            // 跳过 default path(避免 symtab_lookup 用 base name 重写 left)
+            let _skip_default = 1 as i32;
+            let __marker = _skip_default + 0;
+            // fall through 到 Pratt loop(下面 if left != NULL 守卫 + while infix)
+            } // v3.2.0: close inner if (g2_is_upper != 0)
+        }
+        // else (gnpeek2.kind != TOKEN_LT OR uppercase check failed): fall through
+        // to default path below — sym lookup, asm/fence dispatch, etc.
 
         // V3-B v3.0.1: asm!(...) inline asm macro. After consuming the `asm`
         // ident, peek for `!`. If next token is BANG, dispatch to
@@ -2816,6 +3125,56 @@ fn parse_type_decl(p: *Parser) -> *Node {
     parser_expect(p, TOKEN_IDENT(), "type name" as *u8, &t);
     let tname = parser_tok_name(p, &t);
 
+    // v3.2.0 (V3-C 3i generics): 可选 `<T, U, ...>` generic param list。
+    //   - peek `<` → push scope,parse 逗号分隔 ident list,每个插为 SYM_TYPE
+    //     + type_ptr=0(type-param 占位,monomorphize 阶段会被 substitute 替换)
+    //   - 非 generic decl(ntype_params==0)byte-identical to v3.1.x
+    //   - body parse 期间 type-param 在 current_scope,scope 弹在 ast_new_type_decl 之后
+    let mut type_params: *u8 = 0 as *u8;
+    let mut ntype_params: i64 = 0 as i64;
+    let mut tcap: i64 = 0 as i64;
+    let mut is_generic: i32 = 0 as i32;
+
+    let mut gpeek = empty_token();
+    parser_peek(p, &gpeek);
+    if gpeek.kind == TOKEN_LT() {
+        // 推一个 child scope,让 type-param 在 body parse 时可见
+        parser_push_scope(p);
+        is_generic = 1 as i32;
+        parser_advance(p, &t);  // consume `<`
+        while parser_check(p, TOKEN_GT()) == (0 as i32) {
+            if parser_check(p, TOKEN_EOF()) != (0 as i32) {
+                break;
+            }
+            parser_expect(p, TOKEN_IDENT(), "type parameter name" as *u8, &t);
+            let pname = parser_tok_name(p, &t);
+            // 插 SYM_TYPE + type_ptr=0(type_ptr=0 是 monomorphize sentinel,
+            //   resolve_type_node @285-289 已 gate type_ptr != 0 — bare T 在
+            //   non-generic scope 会报 E0060)
+            let _psym = symtab_insert((*p).current_scope, pname, SYM_TYPE(),
+                                      0 as *u8, 0 as i32, (*p).scope_depth);
+            // 收集 type-param sym 进 type_params 数组
+            if ntype_params >= tcap {
+                tcap = if tcap != (0 as i64) { tcap * (2 as i64) } else { (4 as i64) };
+                let nt = arena_alloc((*p).arena, tcap * (8 as i64));
+                if type_params != (0 as *u8) {
+                    if ntype_params > (0 as i64) {
+                        memcpy(nt, type_params, ntype_params * (8 as i64));
+                    }
+                }
+                type_params = nt;
+            }
+            let tpslot = (type_params as i64 + ntype_params * (8 as i64)) as **u8;
+            *tpslot = _psym as *u8;
+            ntype_params = ntype_params + (1 as i64);
+            // 吞逗号;无逗号 → 跳出等 `>`
+            if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) {
+                break;
+            }
+        }
+        parser_expect(p, TOKEN_GT(), "> after type param list" as *u8, &t);
+    }
+
     parser_expect(p, TOKEN_EQ(), "=" as *u8, &t);
 
     let mut body: *Node = 0 as *Node;
@@ -2938,7 +3297,13 @@ fn parse_type_decl(p: *Parser) -> *Node {
 
     let sym = symtab_insert((*p).global_scope, tname, SYM_TYPE(),
                             0 as *u8, 0 as i32, 0 as i32);
-    return ast_new_type_decl((*p).arena, loc_lf, loc_ll, loc_lc, sym, body);
+    let n = ast_new_type_decl((*p).arena, loc_lf, loc_ll, loc_lc, sym, body,
+                             type_params, ntype_params);
+    // 弹 generic scope(if pushed)。body parse 已完成,type-param 不再可见。
+    if is_generic != (0 as i32) {
+        parser_pop_scope(p);
+    }
+    return n;
 }
 
 fn parse_extern_decl(p: *Parser) -> *Node {
@@ -3087,6 +3452,9 @@ fn parser_init(p: *Parser, lex: *Lexer, a: *Arena) -> i32 {
     (*p).pending_inline = 0 as i32;
     (*p).pending_naked = 0 as i32;
     (*p).pending_link_section = 0 as *u8;
+    (*p).generic_insts = 0 as *u8;
+    (*p).ngeneric_insts = 0 as i64;
+    (*p).gcap = 0 as i64;
     return 0;
 }
 
@@ -3183,7 +3551,8 @@ fn parser_parse(p: *Parser) -> *Node {
         }
     }
 
-    return ast_new_module((*p).arena, loc_lf, loc_ll, loc_lc, decls, ndecls, is_no_std);
+    return ast_new_module((*p).arena, loc_lf, loc_ll, loc_lc, decls, ndecls, is_no_std,
+                          (*p).generic_insts, (*p).ngeneric_insts);
 }
 
 // (parse_asm_block 已上移到 parse_expr 之前,jhyy 无 forward decl — 物理上

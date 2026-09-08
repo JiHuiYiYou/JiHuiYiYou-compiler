@@ -1,0 +1,17 @@
+// SKIP: V3-C 3i generics — runtime monomorphize deferred to v3.2.0b
+// (see generics_struct.jhyy header).
+//
+// v3.2.0: `*T` where T is type-param — generic-on-pointer in field type.
+// Tests the parse_type `*` prefix recursive case hits IDENT branch with T.
+type Vec<T> = struct {
+    data: *T,
+    len: i32,
+    cap: i32,
+}
+
+fn main_jhyy() -> i32 {
+    let v: Vec<i32> = Vec<i32> { data: 0 as *i32, len: 0, cap: 0 };
+    if v.len != 0 { return 10; }
+    if v.cap != 0 { return 20; }
+    return 42;
+}

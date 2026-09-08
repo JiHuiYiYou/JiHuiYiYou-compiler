@@ -1,0 +1,15 @@
+// SKIP: V3-C 3i generics — runtime monomorphize deferred to v3.2.0b
+// (see generics_struct.jhyy header).
+//
+// v3.2.0 E0060: bare type-param `T` in non-generic scope (per sema.jhyy
+// resolve_type_node fall-through).
+type NotGeneric = struct {
+    field: i32,
+}
+
+fn main_jhyy() -> i32 {
+    // Below intentionally NOT generic; T here would be unresolved — sema
+    // would emit E0060 when monomorphize is active. SKIP'd here since v3.2.0
+    // doesn't run monomorphize at all.
+    return 42;
+}

@@ -32,6 +32,10 @@ import types;
 import ast;
 import lexer;
 import parser;
+// v3.2.0 (V3-C 3i generics): Pass 1.5 monomorphize. mono_expand_module 在
+//   Pass 1 (decl 注册) 之后 / Pass 2 (layout resolve) 之前调用。
+//   import 顺序:parser 之后 — mono 不依赖 parser。
+import mono;
 
 // ════════════════════════════════════════════════════
 // 常量
@@ -285,6 +289,27 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
         if looked != (0 as *Sym) {
             if (*looked).type_ptr != (0 as *u8) {
                 return (*looked).type_ptr as *Type;
+            }
+        }
+
+        // v3.2.0 (V3-C 3i generics): bare type-param `T` 在 non-generic scope
+        //   报 E0060(`looked` 是 SYM_TYPE + type_ptr==0 = type-param sentinel)。
+        //   Pass 1.5 替换后,所有使用位 (field type / let type_annot / 等)
+        //   已经被 subst 成 arg type,不再走这一路径。Pass 2 走到这里只能是:
+        //   (a) bare T 出现在 generic def body 之外(mono_expand_module 之后
+        //       generic def 跳过,所以 Pass 2 不会重新访问 body,但函数返回
+        //       类型 / 函数参数 type 仍可能在 generic fn 中 — v3.2.0 不做,
+        //       v3.2.0b 接 generic fn 时会改成 mono_substitute 这些位置);
+        //   (b) 用户手写 unsubstituted type-param 当 type 用(明显 bug)。
+        //   E0060 在两种场景都正确。
+        if looked != (0 as *Sym) {
+            if (*looked).kind == SYM_TYPE() {
+                if (*looked).type_ptr == (0 as *u8) {
+                    let _x = sema_error_str(ctx, (*tn).loc_filename,
+                                            (*tn).loc_line, (*tn).loc_col,
+                                            "E0060: unresolved type parameter; generic must be instantiated" as *u8);
+                    return type_primitive(ta, PRIM_I32());  // error recovery
+                }
             }
         }
 
@@ -2206,6 +2231,20 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
         }
     }
 
+    // v3.2.0 (V3-C 3i generics): Pass 1.5 — monomorphize expansion.
+    //   必须在 Pass 2 之前跑,这样 Pass 2 看到的 decls 已经是 cloned + substituted
+    //   后的 NON-generic struct/enum(走现有 layout 路径,不用改 codegen)。
+    //   - 遍历 (*md).generic_insts(parser 累积的 {base_name, mangled_name, [args]})
+    //   - 对每条 inst:克隆 generic def body → substitute → append 到 (*md).decls
+    //   - dedupe by mangled_name(symtab_lookup_one 已经存在 type_ptr → skip)
+    //   - 错误数累加到 (*ctx).error_count,不影响 Pass 2/3 继续(便于报告所有错误)
+    jh_fputs_stderr("[sema] P1.5 mono_expand_module start\n" as *u8);
+    let mono_errs = mono_expand_module((*ctx).global_scope, (*ctx).arena, md);
+    if mono_errs != (0 as i32) {
+        (*ctx).error_count = (*ctx).error_count + mono_errs;
+    }
+    jh_fputs_stderr("[sema] P1.5 mono_expand_module done\n" as *u8);
+
     // Pass 2: resolve TYPE_DECL（struct/enum/alias）— 必须先于 Pass 3
     jh_fputs_stderr("[sema] P2 start\n" as *u8);
     let mut i2: i64 = 0 as i64;
@@ -2214,6 +2253,13 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
         if decl == (0 as *Node) { i2 = i2 + (1 as i64); } else {
         if (*decl).kind == NODE_TYPE_DECL() {
             let td = node_type_decl_data(decl);
+            // v3.2.0 (V3-C 3i generics): skip generic def body layout —
+            //   mono_expand_module 已经把 substituted 实例 append 到 decls,
+            //   它们 (ntype_params == 0) 走下面的正常 layout 路径。
+            //   原始 generic def 不 layout(codegen 时 skip)。
+            if (*td).ntype_params > (0 as i64) {
+                i2 = i2 + (1 as i64);
+            } else {
             if (*((*td).body as *Node)).kind == NODE_STRUCT_DEF() {
                 let sd = node_struct_def_data((*td).body as *Node);
                 let fields = arena_alloc((*ctx).arena, (*sd).nfields * FIELD_DESC_SIZE());
@@ -2317,6 +2363,7 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
                     }
                 }
             }
+            }  // close else from ntype_params == 0 (v3.2.0: skip generic def)
         }
         }  // close else from NULL guard
         i2 = i2 + (1 as i64);
