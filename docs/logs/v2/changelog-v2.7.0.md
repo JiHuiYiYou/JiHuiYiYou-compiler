@@ -90,3 +90,95 @@
 - 5 sysv regress test fixtures: `compiler/tests/examples/sysv_*.jhyy` (SKIP directive 默认生效;cross-env 实 wire 留 v2.7.1)
 - SysV psABI: § 3.2.3 (argument passing) + § A.4 (eightbyte classification) — external ABI spec
 - Memory: [[feedback_changelog_umbrella]] (umbrella convention), [[feedback_plans_per_version]] (per-version plan), [[feedback_fix_evaluation_rule]] (5/5 PASS gate per phase), [[feedback_audit_single_commit_diff]] (single-commit audit), [[feedback_no_date_estimates]] (sprint 序列 + 相对顺序), [[feedback_auto_push_after_commit]] (push after commit), [[project_v2_7_0_commits_1_2]] (Commit 1+2 ship context + 非确定性 debugging 教训), [[project_v2_v3_parallel_axes]] (v2.x ‖ v3.x 异步并行)
+
+---
+
+## v2.7.1 — Linux ELF runtime + regress.py --cross 实 wire + docs
+
+**Shipped**: 2026-09-08 (3-commit chain: `8500999` Phase 1 + `911b8da` Phase 2 + Commit 3 docs)
+**Plan**: [`../../plans/v2/v2.7.1-plan.md`](../../plans/v2/v2.7.1-plan.md)
+**Scope**: 1 NEW runtime dir (3 files: crt0.S / link.ld / README.md) + 1 driver file (regress.py --cross 实 wire) + 1 doc (d43-baseline-archive.md)
+
+### Commit 1 (Phase 1): Linux ELF runtime — `runtime/linux_elf/` NEW
+
+**Commit**: `8500999`
+**Diff stat**: 4 files changed, 221 insertions(+), 0 deletions(-)
+- `.gitignore` (+3) — runtime/linux_elf/ carveout (asm + linker script + README tracked)
+- `runtime/linux_elf/crt0.S` (NEW, ~50 LOC) — `_start` entry point per SysV psABI § 3.2.2 + Linux x86_64 syscall table
+- `runtime/linux_elf/link.ld` (NEW, ~60 LOC) — linker script (elf64-x86-64, ENTRY(_start), 2 PT_LOAD)
+- `runtime/linux_elf/README.md` (NEW, ~110 LOC) — build invocations + ABI compliance + cross-compile integration
+
+**关键设计**:
+- `call main_jhyy` 而非 `call main`(jhyy main convention per W-065 cmd_run pre-check)
+- 16-byte 栈对齐 (`andq $-16, %rsp`) per SysV § 3.2.2
+- `xorq %rbp, %rbp` (no frame ptr per SysV)
+- `mov $60, %rax` + `syscall` (SYS_exit per Linux x86_64 syscall table)
+- linker script: `OUTPUT_FORMAT(elf64-x86-64)`, `ENTRY(_start)`, 2 PT_LOAD PHDR (text RX + data RW)
+
+**Phase 1 ship gate (4/4 PASS)**:
+- ✅ `gcc -c runtime/linux_elf/crt0.S` assemble no error
+- ✅ runtime files parse + tracked in git (per .gitignore carveout)
+- ✅ runtime committed + pushed to origin/axis-v2
+- ✅ `runtime/` top-level dir 首次建立(镜像 v2.4.0 `compiler/tests/examples/hello-freestanding/` UEFI 模式但独立)
+
+**D43 closure 不动**:Commit 1 是 runtime 增,不动 Win codegen path → D43 baseline `cc894329...` hold 不变。
+
+### Commit 2 (Phase 2): regress.py `--cross {wsl,docker,auto,none}` 实 wire
+
+**Commit**: `911b8da`
+**Diff stat**: 1 file changed, 217 insertions(+), 3 deletions(-)
+- `compiler/build/bin/regress.py` (+217) — `_resolve_cross_mode` + `_run_cross_env_sysv_test` + `_run_sysv_via_cross_env` 三函数 wired;`--cross` 默认 `auto`(probe wsl.exe with distro check → docker on PATH → none SKIP)
+
+**关键设计**:
+- auto probe: `wsl.exe -l -v` 检查有 distro 才返回 "wsl"(否则 fall through 到 docker 或 none)
+- wsl mode: `wsl.exe -d Ubuntu bash -c <compile+link+run>`(需要 Linux host 真跑)
+- docker mode: `docker run --rm -v <repo>:/work -w /work ubuntu:22.04 bash -c <compile+link+run>`
+- graceful SKIP: 任何 cross-env 不可用都 SKIP,exit 0,不 throw
+
+**Phase 2 ship gate (6/6 PASS)**:
+- ✅ regress --cross=none: 104/104 PASS, 9 SKIP, exit 0
+- ✅ regress --cross=auto: auto-resolved → none (no WSL distro / no docker), 104/104 PASS, 9 SKIP, exit 0
+- ✅ regress --cross=wsl: graceful SKIP ("wsl.exe on PATH but no distro installed"), 104/104 PASS, 9 SKIP, exit 0
+- ✅ regress --cross=docker: falls through → none (docker not on PATH), 104/104 PASS, 9 SKIP, exit 0
+- ✅ byte_equal_amd64.sh 默认 mode: 10 PASS / 0 SKIP / 0 FAIL (Win ABI 不动 → Phase 2 driver-only)
+- ✅ D43 closure v1→v2 sha HOLD: `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b` (v2.7.0 末 baseline;regress.py driver 改动不动 codegen → baseline 不变)
+
+### Commit 3 (Phase 3): D43 archive + docs
+
+**Commit**: (this commit)
+**Diff stat**: ~70 insertions(+), 1 deletion(-)
+- `docs/logs/v2/d43-baseline-archive.md` (NEW, ~50 LOC) — D43 baseline 历史存档 + 验证步骤
+- `docs/logs/v2/changelog-v2.7.0.md` (this append, v2.7.1 sub-section)
+- `docs/internal/architecture.md` (line 5, +1) — timestamp 更新到 v2.7.1
+
+**D43 baseline 状态**: v2.7.1 Phase 1 (runtime files) + Phase 2 (regress.py --cross wire) **不动 codegen** → D43 closure v1→v2 baseline `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b` **HOLD 不变**。archive file 记录 D43 baseline timeline + verification steps,future re-baseline 时作 audit reference。
+
+### v2.7.1 final ship gate (5/5 PASS)
+
+- ✅ Commit 1: runtime files tracked + .gitignore carveout + pushed
+- ✅ Commit 2: regress.py --cross 4 modes 全 PASS + D43 closure HOLD
+- ✅ Commit 3: docs (changelog sub-section + D43 archive + architecture.md timestamp)
+- ✅ byte_equal_amd64.sh 默认 mode: 10 PASS / 0 SKIP / 0 FAIL (Win ABI 不动 → 全 sprint hold)
+- ✅ D43 closure v1→v2 sha HOLD: `cc894329...` (无 codegen 改动)
+
+### v2.7.1 关键 trap 教训 (per feedback_mcp_jhyy_run_workspace + feedback_regress_py_abspath)
+
+- **WSL wslpath UTF-16LE**: Windows host `wsl.exe wslpath -u` 在无 distro 时返回 UTF-16LE bytes(每 ASCII char 后跟 `\x00`),Python `text=True + encoding='utf-8'` 解码会 crash "embedded null character"。**Mitigation**:`_run_cross_env_sysv_test` 第一步 probe `wsl.exe -l -v` 检查 `returncode != 0` 或 `WSL_E_*` 关键字 → SKIP 早退。
+- **MSYS2 Python + Windows subprocess 相对路径**: 必须 `os.path.abspath()` 包装(per feedback_regress_py_abspath)。`_run_cross_env_sysv_test` 用 `os.path.abspath(Path(...).resolve()...)` 取绝对路径,避免 wsl.exe 把 MSYS2 路径当 Windows 路径解析失败。
+- **5 sysv tests 仍 SKIP**: Linux ELF runtime 已 ship,但 Windows host 无 WSL distro / 无 docker → 实际跑 sysv tests 需要 user 在 Linux host (or WSL distro or docker container) 本地 verify `python regress.py --cross=wsl` (after install) 或 `--cross=docker` (after install)。Phase 3 ship gate 显式 SKIP,**不 claim PASS**。
+
+## References (v2.7.1)
+
+- v2.7.1 plan: [`../../plans/v2/v2.7.1-plan.md`](../../plans/v2/v2.7.1-plan.md)
+- v2.7.0 ship: commits `a9c874d` + `abe9111` + `c920695` (前置)
+- v2.7.1 ship: commits `8500999` (Phase 1 runtime) + `911b8da` (Phase 2 --cross wire) + Commit 3 (this)
+- D43 baseline timeline (per `d43-baseline-archive.md`):
+  - `51376ce5...` (v2.4.0 末)
+  - `92e82554...` (v2.6.6 新 baseline,re-baseline per D43)
+  - `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b` (v2.7.0 末 Commit 2+3 新 baseline)
+  - v2.7.1 hold (无 codegen 改动)
+- 5 sysv regress test fixtures: `compiler/tests/examples/sysv_*.jhyy` (cross-env wire 准备好,user 跑 WSL/Docker 实 verify)
+- Linux ELF runtime: `runtime/linux_elf/` (crt0.S + link.ld + README.md)
+- SysV psABI: § 3.2.2 (16B stack alignment) + § 3.2.3 (arg passing)
+- Linux x86_64 syscall table: SYS_exit = 60 (rax)
+- Memory: [[feedback_changelog_umbrella]], [[feedback_plans_per_version]], [[feedback_fix_evaluation_rule]], [[feedback_audit_single_commit_diff]], [[feedback_no_date_estimates]], [[feedback_auto_push_after_commit]], [[feedback_regress_py_abspath]] (MSYS2 Python + Windows subprocess 相对路径), [[feedback_mcp_jhyy_run_workspace]] (cross-env workspace trap), [[project_v2_7_0_ship]] (前 1 3-commit ship chain)

@@ -2,7 +2,7 @@
 
 > 流水线、源文件布局、关键设计决策。
 >
-> **Last updated**: v2.4.0 (2026-09-04) — C 端(`compiler/src/*.c`)与 jhyy 端(`compiler/src0/*.jhyy`)双路径并列维护;**v2.0 阶段 (v2.0.0 → v2.4.0) 5 版本全 ship** (tags `v2.3.0` / `v2.4.0`);Stage 2 N=4 byte-equal closure re-baselined (sha `51376ce5...`, per D43 阶段性 self-equal hold);multi-target dispatcher + freestanding ABI + hello-freestanding.efi E2E 5/5 PASS on OVMF。
+> **Last updated**: v2.7.1 (2026-09-08) — C 端(`compiler/src/*.c`)与 jhyy 端(`compiler/src0/*.jhyy`)双路径并列维护;**v2.0 阶段 (v2.0.0 → v2.4.0) 5 版本全 ship** (tags `v2.3.0` / `v2.4.0`);**v2.7.0 末 3-commit ship + v2.7.1 3-commit ship**(Linux ELF runtime `runtime/linux_elf/` NEW + regress.py `--cross {wsl,docker,auto,none}` 实 wire);D43 closure 阶段性 hold `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b` (v2.7.0 末,re-baselined per D43;v2.7.1 Phase 1+2 不动 codegen → 主动 HOLD 不变,见 [`docs/logs/v2/d43-baseline-archive.md`](../logs/v2/d43-baseline-archive.md))。
 
 ## 流水线
 
