@@ -457,6 +457,33 @@ def test_byte_equal(tests=None):
     return 0 if failed == 0 else 1
 
 
+def test_fixed_point(tests=None):
+    """Run N≥3 selfhost fixed-point closure 验算 (v2.9.0 V2-C Part 1).
+
+    Per D43 closure ship gate (re-baselined v2.9.0): jhyy_v1 ↔ jhyy_v2 ↔
+    jhyy_v3 must produce byte-equal .il for compiler/src0/main.jhyy.
+
+    Implementation: shell out to `compiler/tests/bootstrap/fixed_point.sh`.
+    jhyy-side N=3 is the primary ship gate; N=4/N=5 informational.
+
+    Args:
+        tests: ignored (fixed_point.sh 编 fixed target compiler/src0/main.jhyy)
+
+    Returns 0 on N=3 PASS, 1 on any FAIL (per feedback_fix_evaluation_rule).
+    """
+    bootstrap_dir = Path(__file__).resolve().parents[2] / "tests" / "bootstrap"
+    fixed_point_sh = bootstrap_dir / "fixed_point.sh"
+    if not fixed_point_sh.exists():
+        print(f"fixed-point: script not found at {fixed_point_sh}", file=sys.stderr)
+        return 1
+    bash_path = shutil.which("bash") or "bash"
+    result = subprocess.run(
+        [bash_path, str(fixed_point_sh)],
+        env=os.environ.copy(),
+    )
+    return result.returncode
+
+
 def _print_matrix_row(idx, total, binary, label, result, is_informational):
     """Print one matrix row."""
     tag = "INFORMATIONAL" if is_informational else "GATED"
@@ -509,6 +536,10 @@ def main():
                     help="Run V2-B v2.6.0 (Unit F) byte-equal-amd64 driver "
                          "(QBE vs self backend path parity check, 5 tests). "
                          "Opt-in: does NOT affect default regress baseline.")
+    ap.add_argument("--fixed-point", action="store_true",
+                    help="Run V2-C v2.9.0 N≥3 selfhost fixed-point closure 验算 "
+                         "(jhyy_v1 ↔ jhyy_v2 ↔ jhyy_v3 byte-equal .il per D43). "
+                         "Opt-in: does NOT affect default regress baseline.")
     ap.add_argument("--cross", choices=["wsl", "docker", "auto", "none"],
                     default="auto",
                     help="Cross-env mode for sysv tests (v2.7.0 Phase 2b). "
@@ -531,6 +562,11 @@ def main():
     if args.byte_equal:
         # D26 byte-equal 三件套 (opt-in; doesn't affect default regress)
         rc = test_byte_equal(tests)
+        sys.exit(rc)
+
+    if args.fixed_point:
+        # V2-C v2.9.0 N≥3 fixed-point closure (opt-in; doesn't affect default regress)
+        rc = test_fixed_point(tests)
         sys.exit(rc)
 
     if args.byte_equal_amd64:
