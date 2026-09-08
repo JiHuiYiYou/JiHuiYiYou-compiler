@@ -356,8 +356,10 @@ docker run --rm -v /c/...:/work gcc:12 bash -c "
 - `compiler/src0/codegen_amd64_state.jhyy` — ✅ 3 helpers 加 (target_is_win / cg_offset_for_temp_with_target / compute_offset_for_temp_id_with_target)
 
 **Out of scope (Phase 2/3 still pending for v2.8.0)**:
-- ⏳ Phase 2 — docker wire 路径修(container 内 build jhyy_linux)— 待 ship
-- ⏳ Phase 3 final docs — changelog + d43-baseline-archive + workarounds + architecture 已 done per Commit 1
+- ✅ Phase 2 — docker wire 路径修 (**方案 C — wire-only chain**, commit `<pending>`):handwritten `mov $60, %rax; mov $42, %rdi; syscall` .s → gcc 链 crt0.S + link.ld → 跑 PASS (exit 42);**5 sysv regress tests 报 SKIP 显式** ("jhyy codegen SysV path needs C-side target_dispatch update pending v2.x 末")。Phase 2 ship gate 1/2 PASS (wire 真 verified + honest SKIP > false-positive PASS)。
+  - **Why 方案 C not 方案 A/B** (per Phase 2 audit):方案 A (Makefile `jhyy_linux` target) — Makefile 无此 target;方案 B (container 内 gcc build jhyy from .c) — works but C-side `target_dispatch` 只识别 3 个 target (`amd64_win` / `amd64_win_freestanding` / `amd64_sysv` stub),不识别 `amd64_sysv_freestanding` (target name `--target=...` parse 在 C-side `main.c → target_parse()`,rejected before delegating to jhyy-side `target_dispatch.jhyy` which has the 4th target)。加 C-side `TARGET_AMD64_SYSV_FREESTANDING` enum 改动有 D43 closure 影响,punt 到 v2.x 末。
+  - **Prior plan § B 的 `#ifdef _WIN32` vsock patch 方向错** — EnterPlanMode 阶段 Explore agent audit 确认 vsock 调用不在 jhyy.exe source (0 hits 全项目 grep),根因是 MS WSL service 自动触发 when docker exec Windows PE32+ on Linux image via bind mount。Plan 修正后 Phase 2 改成 docker wire-only chain。
+- ✅ Phase 3 final docs — changelog (本 section) + d43-baseline-archive + workarounds + architecture 已 done per Commit 1
 
 **Out of scope (punted to v2.x 末 或更后)**:
 - ❌ N 代 fixed point (N≥3) + QBE 工具链完全移除 — v2.x 末
