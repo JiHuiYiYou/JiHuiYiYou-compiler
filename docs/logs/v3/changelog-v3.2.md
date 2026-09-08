@@ -3,7 +3,7 @@
 > **ship date**: 2026-09-08
 > **branch**: `axis-v3`
 > **D28 锁**: v3.2.0 (3i struct/enum) → v3.2.0b (3i fn/turbofish) 串行不可调换
-> **D43 baseline**: N9 (this sprint) — 上一条 N8 = `1fff447` (V3-C v3.1.2)
+> **D43 baseline**: N9 = `2e9866c` (this sprint, post-tag fill) — 上一条 N8 = `1fff447` (V3-C v3.1.2)
 > **umbrella**: 本文件 v3.2.0 部分 (D43 chain 走 v3.2.0b 重新 hold)
 
 ---
