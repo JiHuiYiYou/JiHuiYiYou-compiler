@@ -252,3 +252,79 @@ docker run --rm -v /c/...:/work gcc:12 bash -c "
 - `regress.py` `_run_cross_env_sysv_test` 修 false positive 判定 — 留 v2.7.2 patch(或合并进 v2.x 中/末 codegen ship)
 - `docs/logs/v2/d43-baseline-archive.md` 补 Docker E2E verify note (this commit)
 - Memory: 新增 `feedback_docker_msys2_pwd_bug` (见下)
+
+---
+
+## v2.7.2 — regress.py `--cross=docker` false-positive 修 (计划中,待 ship)
+
+**Plan**: [`../../plans/v2/v2.7.2-plan.md`](../../plans/v2/v2.7.2-plan.md)
+**Status**: 📋 Plan-only (设计完成,未启动 ship;1 commit 估计 ~5 LOC)
+**Prerequisite**: v2.7.1 post-ship Docker E2E verify 发现 `regress.py` `_run_cross_env_sysv_test` 2 个 bug — (a) exit=127 误报 "passed";(b) docker image 用 `ubuntu:22.04` 无 gcc
+
+**Outcome (预期)**: `--cross=docker` 实跑 5 sysv tests 能 **正确报 FAIL**(区分 "容器无 gcc" / "compile 失败" / "binary 不存在" / "真跑通")。1-commit patch,**不依赖 v2.8.0 codegen 进度**,可独立 ship。
+
+**Diff scope (预计)**:
+- `compiler/build/bin/regress.py` `_run_cross_env_sysv_test` (~5 LOC):(1) 显式 `not found` 检查 exit=127 → 报 "failed (binary not built, ...)" 而不是 "passed (exit=127)";(2) docker image `ubuntu:22.04` → `gcc:12`(预装 gcc 12.5.0,per v2.7.1 post-ship verify)
+
+**Ship gate (3/3 PASS)**:
+- ✅ `--cross=docker` 在 docker 没启:graceful SKIP,exit 0
+- ✅ `--cross=docker` 在 docker 启 + 手写 .s test 真跑 PASS exit=N
+- ✅ `--cross=docker` + jhyy codegen fail → 显式 FAIL **不** 假阳性 "passed"
+
+**D43 closure 不动**(driver-only patch → 无 codegen 改动 → baseline `cc894329...` HOLD)。
+
+**Out of scope (punted to v2.8.0)**:
+- ❌ jhyy codegen `amd64_sysv_freestanding` target 真实现
+- ❌ jhyy.exe 移除 Windows-specific WSL vsock 调用
+- ❌ 5 sysv tests 真跑通
+
+---
+
+## v2.8.0 — M2 sysv + sysv_freestanding codegen 真实现 + jhyy.exe vsock 移除 + 5 sysv tests PASS (计划中,待 ship)
+
+**Plan**: [`../../plans/v2/v2.8.0-plan.md`](../../plans/v2/v2.8.0-plan.md)
+**Status**: 📋 Plan-only (设计完成,未启动 ship;3 commits 估计 ~585 LOC across 8 files)
+**Tag scheme**: v2.x 中期 M2 (`amd64_sysv` + `amd64_sysv_freestanding` target 真能用) = `v2.8.0`,per `docs/plans/roadmap/v2-v3-parallel-sprint-plan.md` § 6.2
+**OS 链路影响**: **OS M4 launch 硬前置 2/3**(per `v2.0.0-os-prep.md` § 1:M4 需要 `amd64_sysv` + `amd64_sysv_freestanding` 真能用)
+
+**Outcome (预期)**:
+- v2.8.0 ship 后,`jhyy compile --target=amd64_sysv_freestanding foo.jhyy -o foo` 真产出 Linux ELF x86_64 汇编(无 QBE 依赖)
+- 5 sysv regress tests (`sysv_abi_test` / `sysv_struct_mixed` / `sysv_struct_pass` / `sysv_struct_ret` / `sysv_vararg_basic`) via `--cross=docker` (gcc:12 容器) 真跑 PASS
+- D43 closure 阶段性 hold `cc894329...` (Win path 不变 byte-equal) 或 re-baseline(若 emit 微调)
+
+**Scope**:
+| Phase | Commit | 内容 | LOC |
+|---|---|---|---|
+| 1 | codegen_amd64 SysV emit | `run_backend` 传 target_tag + `codegen_amd64_run` 接 target_tag + `codegen_amd64_emit_mem.jhyy` / `emit_ctrl.jhyy` / `peephole.jhyy` target_tag dispatch(Win path 保留 byte-equal,SysV path 新增真 ABI) | ~235 |
+| 2 | jhyy.exe vsock 移除 + 5 sysv tests | `compiler/src/*.c` vsock wrapper `#ifdef _WIN32` guard;regress.py 真 wire 验证 5 sysv PASS via `--cross=docker` | ~30 |
+| 3 | D43 verify + docs | 旧 baseline `cc894329...` 退役存档(or HOLD)+ workarounds.md W-069 closure invariant 改 + changelog + architecture.md D43 lock | ~30 source + ~290 docs |
+
+**Critical files**:
+- `compiler/src0/main.jhyy` `run_backend` (line 791-828) — 加 target_tag 参数
+- `compiler/src0/codegen_amd64.jhyy` `codegen_amd64_run` — 接 target_tag
+- `compiler/src0/codegen_amd64_emit_mem.jhyy` — target_tag dispatch(Win path 保留,SysV path 新增)
+- `compiler/src0/codegen_amd64_emit_ctrl.jhyy` — target_tag dispatch
+- `compiler/src0/codegen_amd64_peephole.jhyy` — target_tag 参数
+- `compiler/src/*.c` vsock wrapper — `#ifdef _WIN32` guard
+- `docs/logs/v2/d43-baseline-archive.md` — 旧 baseline 退役存档
+- `docs/logs/v2/changelog-v2.7.0.md` — append v2.8.0 sub-section (per `feedback_changelog_umbrella`)
+- `docs/internal/workarounds.md` — W-069 closure invariant 改
+- `docs/internal/architecture.md` — D43 lock section 改 baseline sha
+
+**Ship gate (5/5 PASS)**:
+- ✅ regress 默认 mode (Win target unchanged): 104/104 PASS, 9 SKIP
+- ✅ byte_equal_amd64.sh 默认 mode: 10 PASS / 0 SKIP / 0 FAIL (Win ABI byte-equal hold)
+- ✅ byte_equal_amd64.sh `--baseline`: 20 PASS (旧 baseline hold — 必须 Win IL 跟 v2.7.1 末 byte-equal;若漂移立即 catch)
+- ✅ D43 closure v1→v2 hold (假设 Win path 行为不变;若漂移 → 进 Phase 3 re-baseline)
+- ✅ `--cross=docker` 真跑 5 sysv tests **PASS**(expected exit codes per fixture)
+
+**Out of scope (punted to v2.x 末 或更后)**:
+- ❌ N 代 fixed point (N≥3) + QBE 工具链完全移除 — v2.x 末
+- ❌ 8-class SysV full classifier — v2.8.x extension 或 v2.x 末
+- ❌ `long double` (x87 80-bit) / C++ Itanium ABI / PIC / stack probing / TLS — punted
+- ❌ `codegen_amd64_emit_*.jhyy` 6 个已知 TODO (volatile barrier / float jcc / callee-saved push parity / string escape / indirect store / cg_offset_for_temp refactor) — 仍 STALE
+- ❌ W-057 (UTF-8 codepoint) + W-058 (fmod) — 仍 🟡 DEFERRED v2.x
+- ❌ V3 axis v3.0 3a-3f — v3 axis owner 责任,本 plan **不 gate**
+- ❌ CI 集成 (GitHub Actions 跑 docker) — 留未来 sprint
+- ❌ Shared library output (`ET_DYN`) / multiple .text section / TLS / thread-local storage — punted
+- ❌ M5 boot-from-scratch (删 `src/*.c`) — 推迟到 v2.x 末 + v3.x 末后 (per `v1.x-phase-4-m5-boot-from-scratch.md`)

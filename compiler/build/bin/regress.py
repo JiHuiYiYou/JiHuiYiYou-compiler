@@ -211,7 +211,7 @@ def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
             "docker", "run", "--rm",
             "-v", f"{os.path.abspath('.')}:{jhyy_repo_in_linux}",
             "-w", jhyy_repo_in_linux,
-            "ubuntu:22.04", "bash", "-c",
+            "gcc:12", "bash", "-c",
             f"{jhyy_repo_in_linux}/{abs_binary[len(os.path.abspath('.'))+1:]} "
             f"compile --target=amd64_sysv_freestanding "
             f"{jhyy_repo_in_linux}/compiler/tests/examples/{test_name} "
@@ -229,15 +229,35 @@ def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
             encoding="utf-8", errors="replace",
         )
         output = (r.stdout or "") + (r.stderr or "")
-        if r.returncode == 0 and "EXIT:" in output:
-            # parse EXIT:N from output
-            for line in reversed(output.splitlines()):
-                if line.startswith("EXIT:"):
+        # Parse EXIT:N from output first (always, even if rc != 0), so we
+        # can distinguish "compile failed" vs "binary not built" vs
+        # "ran but got exit=127 from /tmp/_cross_sysv.elf missing").
+        exit_code = None
+        for line in reversed(output.splitlines()):
+            if line.startswith("EXIT:"):
+                try:
                     exit_code = int(line[len("EXIT:"):].strip())
-                    return (True, f"passed (exit={exit_code}, cross={cross_mode})")
-            return (True, f"passed (cross={cross_mode})")
-        return (False, f"failed (exit={r.returncode}, cross={cross_mode}): "
-                       f"{output[-200:]}")
+                except ValueError:
+                    pass
+                break
+        if r.returncode != 0:
+            return (False, f"failed (cmd exit={r.returncode}, cross={cross_mode}): "
+                           f"{output[-200:]}")
+        if exit_code is None:
+            return (False, f"failed (no EXIT: marker, cross={cross_mode}): "
+                           f"{output[-200:]}")
+        # exit=127 = "command not found" in Linux (e.g. /tmp/_cross_sysv.elf
+        # not built because gcc missing in container, or compile step failed
+        # silently). Only count exit_code==127 as actually-runnable test
+        # failure if the .elf was produced; otherwise treat as infra error.
+        if exit_code == 127:
+            if "not found" in output.lower() or "no such file" in output.lower():
+                return (False, f"failed (binary not built, cross={cross_mode}): "
+                               f"check gcc in container (use gcc:12 not ubuntu:22.04) — "
+                               f"{output[-200:]}")
+            return (False, f"failed (exit=127, cross={cross_mode}): "
+                           f"{output[-200:]}")
+        return (True, f"passed (exit={exit_code}, cross={cross_mode})")
     except subprocess.TimeoutExpired:
         return (False, f"timeout ({timeout}s, cross={cross_mode})")
     except FileNotFoundError as e:
