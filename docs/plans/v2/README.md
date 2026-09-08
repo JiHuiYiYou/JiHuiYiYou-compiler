@@ -19,8 +19,8 @@
 | [`v2.6.8-plan.md`](v2.6.8-plan.md) | **sprint 计划** | v2.6.8 = docs hygiene D43 closure sha refresh（workarounds.md 2 处 stale `d708793c...` → `92e82554...`）|
 | [`v2.7.0-plan.md`](v2.7.0-plan.md) | **sprint 计划** | v2.7.0 = amd64_sysv + amd64_sysv_freestanding 真 ABI codegen path（2 ABI modules + emit_call 拆 target + 5 sysv tests SKIP）|
 | [`v2.7.1-plan.md`](v2.7.1-plan.md) | **sprint 计划** | v2.7.1 = Linux ELF runtime（crt0.S + link.ld）+ regress.py `--cross {wsl,docker,auto,none}` 实 wire + D43 HOLD |
-| [`v2.7.2-plan.md`](v2.7.2-plan.md) | **sprint 计划**（待 ship,patch）| v2.7.2 = regress.py `--cross=docker` false-positive 修（exit=127 显式检查 + docker image `ubuntu:22.04 → gcc:12`）,~5 LOC 1 commit |
-| [`v2.8.0-plan.md`](v2.8.0-plan.md) | **sprint 计划**（待 ship）| v2.8.0 = M2 sysv + sysv_freestanding codegen 真实现（codegen_amd64_emit_mem/ctrl/peephole target_tag dispatch）+ jhyy.exe 移除 WSL vsock 调用 + 5 sysv tests PASS,~585 LOC 3 commits |
+| [`v2.7.2-plan.md`](v2.7.2-plan.md) | **sprint 计划**（✅ shipped, 2026-09-08, commit `e3dac54`,patch）| v2.7.2 = regress.py `--cross=docker` false-positive 修（exit=127 显式检查 + docker image `ubuntu:22.04 → gcc:12`）,5 LOC 1 commit |
+| [`v2.8.0-plan.md`](v2.8.0-plan.md) | **sprint 计划**（✅ shipped, 2026-09-08, 2-commit chain `0dd33bb` + `84d8c61`）| v2.8.0 = M2 sysv + sysv_freestanding codegen 真实现（codegen_amd64_emit_mem/ctrl/peephole target_tag dispatch）+ D43 re-baseline `cc894329...` → `6a2f2277...` + docker wire-only chain（方案 C）+ 5 sysv tests SKIP honest（C-side TARGET_AMD64_SYSV_FREESTANDING enum pending v2.x 末）,~260 LOC 2 commits |
 | [`batch-V2-A-plan.md`](batch-V2-A-plan.md) | **sprint 计划**（batch）| V2-A batch = v2.0.0 + v2.1.0 + v2.2.0 + v2.3.0 + v2.4.0 串行 ship 链路（前 5 版本）|
 | [`batch-V2-B-plan.md`](batch-V2-B-plan.md) | **sprint 计划**（batch）| V2-B batch = v2.5.0 + v2.6.x + v2.7.0 + v2.7.1 + v2.7.2 + v2.8.0（v2.x 中期 M2 自写后端 + Linux ELF infra）|
 | [`batch-V2-C-plan.md`](batch-V2-C-plan.md) | **sprint 计划**（batch）| V2-C batch = v2.x 末 N 代 fixed point + QBE 移除（v2.x 末 sprint 计划）|
