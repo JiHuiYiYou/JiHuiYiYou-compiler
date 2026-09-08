@@ -955,6 +955,33 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     if (*n).kind == NODE_CALL() {
         let d = node_call_data(n);
 
+        // v3.2.0c (3i fn path): turbofish handling — if parser attached type_args
+        //   (e.g. `max::<i32>(3, 5)`),trigger mono_expand_fn_call:
+        //   - resolve callee to NODE_FUNC_DECL via global_scope lookup
+        //   - clone generic fn body,subst T→arg_nodes,register mangled sym
+        //   - rewrite NODE_CALL.callee to point at mangled sym
+        // call-site inference (no turbofish) not yet supported in v3.2.0c —
+        //   fallback to E0062 below if callee is still generic.
+        if (*d).ntype_args > (0 as i64) {
+            if (*d).callee != (0 as *u8) {
+                if (*((*d).callee as *Node)).kind == NODE_IDENT() {
+                    let callee_id_pre = node_ident_data((*d).callee as *Node);
+                    let callee_sym_pre = (*callee_id_pre).sym as *Sym;
+                    if (*callee_sym_pre).kind == SYM_FN() {
+                        let mangled_sym = mono_expand_fn_call(
+                            (*ctx).global_scope, (*ctx).arena,
+                            (*ctx).module as *Node,
+                            callee_sym_pre,
+                            (*d).type_args, (*d).ntype_args);
+                        if mangled_sym != (0 as *Sym) {
+                            // rewrite NODE_IDENT.sym → mangled fn sym
+                            (*callee_id_pre).sym = mangled_sym as *u8;
+                        }
+                    }
+                }
+            }
+        }
+
         // len() builtin：对 slice → NODE_FIELD.synth / 对 array → NODE_INT
         if (*d).callee != (0 as *u8) {
             if (*((*d).callee as *Node)).kind == NODE_IDENT() {
@@ -2052,6 +2079,13 @@ fn check_cap_pass(ctx: *SemaContext, ta: *TypeArena, body: *Node) -> i32 {
 
 fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
     let fd = node_func_decl_data(n);
+
+    // v3.2.0c (3i fn path): skip generic fn body — mono_expand_module 已经把
+    //   substituted 实例 (ntype_params == 0) append 到 decls,它们走正常
+    //   check_func_decl 路径。原始 generic def 不 check (codegen 时也 skip)。
+    if (*fd).ntype_params > (0 as i64) {
+        return 1 as i32;
+    }
 
     sema_push_scope(ctx);
     (*ctx).nlocals = 0 as i64;

@@ -3726,6 +3726,11 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64) -> i32 {
     if (*fd).is_extern != (0 as i32) {
         return 1;
     }
+    // v3.2.0c (3i fn path): skip generic fn body (ntype_params > 0); cloned
+    //   instances (ntype_params == 0) walk the normal emit path.
+    if (*fd).ntype_params > (0 as i64) {
+        return 1;
+    }
     let fd_sym_raw = (*fd).sym;
     if fd_sym_raw == (0 as *u8) {
         return 0;

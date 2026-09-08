@@ -924,3 +924,191 @@ fn mono_expand_module(global: *u8, arena: *Arena, md: *Node) -> i32 {
     }
     return errs;
 }
+
+// ════════════════════════════════════════════════════
+// mono_expand_fn_call — v3.2.0c (3i fn path) turbofish call site monomorphize
+// ════════════════════════════════════════════════════
+//
+// Synchronous mono on turbofish call site. Different from struct path:
+// struct path deferred to Pass 1.5 (via (*md).generic_insts); fn path can't
+// defer — sema needs callee sym to be the mangled concrete fn sym RIGHT NOW
+// (so subsequent typecheck / codegen see the right fn type).
+//
+// Inputs:
+//   - global: global scope symtab (where mangled SYM_FN is registered)
+//   - arena:  ctx arena (for cloned decl + mangled name buf)
+//   - module_node: *Node (NodeModule; decls @ offset 0)
+//   - callee_sym: SYM_FN sym of generic fn def (e.g. "max")
+//   - type_args: **Node (turbofish type args; parsed from `f::<T,U>(args)`)
+//   - ntype_args: i64
+//
+// Returns:
+//   - mangled SYM_FN sym (existing if dedupe hit, fresh if just cloned)
+//   - 0 if callee_sym isn't generic or no matching NODE_FUNC_DECL def found.
+//
+// Strategy (per plan § 2 decision #5):
+//   1. construct mangled_name = callee_sym.name + "$" + mangle(type_arg_i)
+//      (mangle: NODE_IDENT → sym.name; NODE_UNARY → "*<inner>"; else "?")
+//   2. symtab_lookup(global, mangled_name) → if hit, return existing (dedupe)
+//   3. else: symtab_insert fresh SYM_FN, find generic NODE_FUNC_DECL def in
+//      module_node.decls via mono_find_generic_def, clone via
+//      mono_clone_func_decl, overwrite sym, append to module_node.decls
+//   4. return new sym
+//
+// jhyy no forward-ref → must be defined after mono_find_generic_def +
+//   mono_clone_func_decl. Safe here (last fn in file).
+
+// mono_mangle_type_node_fn — inline copy of parser_mangle_type_node but
+//   uses arena_alloc for growth (no Parser ctx dependency).
+//   Writes to buf @ *buf_p, tracks *len / *cap.
+fn mono_mangle_type_node_fn(arena: *Arena, node: *Node, buf_p: **u8,
+                            len: *i64, cap: *i64) {
+    let mut buf = *buf_p;
+    if node == (0 as *Node) {
+        let need = *len + (1 as i64);
+        if need > *cap {
+            let nc = if *cap != (0 as i64) { *cap * (2 as i64) } else { (32 as i64) };
+            let ng = arena_alloc(arena, nc);
+            if buf != (0 as *u8) {
+                if *len > (0 as i64) {
+                    memcpy(ng, buf, *len);
+                }
+            }
+            buf = ng;
+            *cap = nc;
+        }
+        *(ptr_add_u8(buf, *len) as *u8) = 0x3f as u8;
+        *len = *len + (1 as i64);
+        *buf_p = buf;
+        return;
+    }
+    if (*node).kind == NODE_IDENT() {
+        let id = node_ident_data(node);
+        let nm = (*id).sym as *Sym;
+        let nlen = strlen((*nm).name);
+        let need = *len + nlen;
+        if need > *cap {
+            let nc = if *cap != (0 as i64) { *cap * (2 as i64) } else { (32 as i64) };
+            let ng = arena_alloc(arena, nc);
+            if buf != (0 as *u8) {
+                if *len > (0 as i64) {
+                    memcpy(ng, buf, *len);
+                }
+            }
+            buf = ng;
+            *cap = nc;
+        }
+        memcpy(ptr_add_u8(buf, *len), (*nm).name, nlen);
+        *len = *len + nlen;
+        *buf_p = buf;
+        return;
+    }
+    if (*node).kind == NODE_UNARY() {
+        let un = node_unary_data(node);
+        let need = *len + (2 as i64);
+        if need > *cap {
+            let nc = if *cap != (0 as i64) { *cap * (2 as i64) } else { (32 as i64) };
+            let ng = arena_alloc(arena, nc);
+            if buf != (0 as *u8) {
+                if *len > (0 as i64) {
+                    memcpy(ng, buf, *len);
+                }
+            }
+            buf = ng;
+            *cap = nc;
+        }
+        *(ptr_add_u8(buf, *len) as *u8) = 0x2a as u8;
+        *len = *len + (1 as i64);
+        let inner = (*un).expr as *Node;
+        *buf_p = buf;
+        mono_mangle_type_node_fn(arena, inner, buf_p, len, cap);
+        return;
+    }
+    // other kinds: '?' (one char)
+    let need = *len + (1 as i64);
+    if need > *cap {
+        let nc = if *cap != (0 as i64) { *cap * (2 as i64) } else { (32 as i64) };
+        let ng = arena_alloc(arena, nc);
+        if buf != (0 as *u8) {
+            if *len > (0 as i64) {
+                memcpy(ng, buf, *len);
+            }
+        }
+        buf = ng;
+        *cap = nc;
+    }
+    *(ptr_add_u8(buf, *len) as *u8) = 0x3f as u8;
+    *len = *len + (1 as i64);
+    *buf_p = buf;
+    return;
+}
+
+fn mono_expand_fn_call(global: *u8, arena: *Arena, module_node: *Node,
+                       callee_sym: *Sym,
+                       type_args: *u8, ntype_args: i64) -> *Sym {
+    if callee_sym == (0 as *Sym) { return 0 as *Sym; }
+    if ntype_args <= (0 as i64) { return 0 as *Sym; }
+    let base_name = (*callee_sym).name;
+
+    // construct mangled_name = base_name + "$" + mangle(type_arg) + "$" + ...
+    let mut buf: *u8 = 0 as *u8;
+    let mut len: i64 = 0 as i64;
+    let mut cap: i64 = 0 as i64;
+    let blen = strlen(base_name);
+    let need0 = blen + (ntype_args + (1 as i64)) * (8 as i64);
+    buf = arena_alloc(arena, need0);
+    cap = need0;
+    memcpy(buf, base_name, blen);
+    len = len + blen;
+    let mut ai: i64 = 0 as i64;
+    while ai < ntype_args {
+        *(ptr_add_u8(buf, len) as *u8) = 0x24 as u8;  // '$'
+        len = len + (1 as i64);
+        let arg_node = *((type_args as i64 + ai * (8 as i64)) as **Node);
+        mono_mangle_type_node_fn(arena, arg_node, &buf, &len, &cap);
+        ai = ai + (1 as i64);
+    }
+    // null terminate
+    *(ptr_add_u8(buf, len) as *u8) = 0 as u8;
+
+    // dedupe via symtab_lookup
+    let existing = symtab_lookup(global, buf);
+    if existing != (0 as *Sym) {
+        if (*existing).kind == SYM_FN() {
+            return existing;
+        }
+    }
+
+    // find generic NODE_FUNC_DECL def in module_node.decls
+    let def = mono_find_generic_def(module_node, base_name);
+    if def == (0 as *Node) {
+        return 0 as *Sym;
+    }
+    if (*def).kind != NODE_FUNC_DECL() {
+        return 0 as *Sym;
+    }
+
+    // insert fresh SYM_FN for mangled name
+    let ms = symtab_insert(global, buf, SYM_FN(),
+                           0 as *u8, 0 as i32, 0 as i32);
+
+    // clone with subst
+    // type_params of def @ offset 88
+    let def_tp_off = (def as i64 + NODE_SIZE() + (88 as i64)) as **u8;
+    let def_tp = *def_tp_off;
+    let cloned = mono_clone_func_decl(arena, def, def_tp,
+                                       type_args, ntype_args);
+    if cloned == (0 as *Node) {
+        return 0 as *Sym;
+    }
+
+    // overwrite cloned.sym → ms (NodeFuncDecl sym @ offset 16)
+    let cloned_sym_off = (cloned as i64 + NODE_SIZE() + (16 as i64)) as **u8;
+    *cloned_sym_off = ms as *u8;
+
+    // append cloned decl to module_node.decls
+    let mdd = module_node as *u8;
+    mono_decls_append(arena, mdd, cloned);
+
+    return ms;
+}
