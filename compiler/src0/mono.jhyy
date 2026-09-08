@@ -99,9 +99,15 @@ fn mono_find_generic_def(md: *Node, base_name: *u8) -> *Node {
                 // ntype_params @ offset 16 in NodeTypeDecl (sym @ 0 + body @ 8 + ...)
                 let td_ntype_params_off = ptr_add_u8(td as *u8, (24 as i64)) as *i64;
                 if *td_ntype_params_off > (0 as i64) {
+                    // v3.2.0b (3i root cause fix per changelog-v3.2 §6):
+                    //   避免 `(*s).name` 跨 fn deref — stage-0 jhyy codegen
+                    //   对 56B Sym struct deref 在 deep nested context 触发
+                    //   stack-spill 不全(DEFERRED 到 v2.x 末 QBE 自写)。
+                    //   改 offset read: Sym.name @ offset 0。
                     let td_sym_off = td as **Sym;
                     let s = *td_sym_off;
-                    if strcmp((*s).name, base_name) == (0 as i32) {
+                    let s_name = *((s as i64 + (0 as i64)) as **u8);
+                    if strcmp(s_name, base_name) == (0 as i32) {
                         return d;
                     }
                 }
