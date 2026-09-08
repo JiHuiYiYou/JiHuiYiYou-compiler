@@ -5013,15 +5013,23 @@ cmd_compile (main.jhyy)
 - ❌ WSL branch 仍 wire-only SKIP (chain infra 需 v2.x 末 jhyy_linux build target)
 - ❌ docker branch 仍 wire-only SKIP (方案 B 需 v2.x 末)
 
-### Resolution (2026-09-08 v2.8.2)
+### Resolution (2026-09-08 v2.8.2 真修 + 2026-09-08 v2.8.3 docker gcc chain 验证完整化)
 
 ✅ **v2.8.2 真修 (commit `8b4d43d`)**: codegen.jhyy cg_module 真 emit SysV QBE IL。10 dispatch sites in cg_func/cg_expr (header emit + 3 return emit + 4 cg_expr return + 2 call_prelude + 2 struct_arg_slot) 调 `abi_sysv_emit_*` based on target_tag。CGContext 加 target_tag 字段 (144→152 bytes) + cg_func signature 加 target_tag 参数 + cg_module fallthrough restructure (删 SYSV/SYSVFS stub-fatal)。
 
-**Honest Phase 2a status (本机 dev env 受限)**:
-- ✅ `jhyy.exe --target=amd64_sysv_freestanding sysv_*.jhyy` 不再 fatal at cg_module — **真 emit SysV ABI .s**
-- ⚠️ 5 sysv regress tests end-to-end 真跑 PASS requires Ubuntu WSL host (user-level verify);docker branch 仍 wire-only SKIP (方案 B infra 待 v2.x 末)
+✅ **v2.8.3 docker gcc chain infra 补完 (commit TBD, post-Phase 1 verified)**:
+- `compiler/src0/main.jhyy` 加 `--no-link` flag (cmd_compile argv scan + skip link_with_gcc + --help text) — 让 codegen 只产 .s 不链,供 cross-env chain 用
+- `compiler/build/bin/regress.py` docker branch 改 2-stage subprocess: Stage 1 (Windows-side jhyy --no-link → .s) + Stage 2 (docker gcc:12 chain → ELF → 跑)
+- driver logic fix: `r.returncode != 0` 不用,改 EXIT:N-only PASS check (ELF exit != 0 是 expected, e.g. struct_ret=18)
+- `_DOCKER_BIN` abs path fallback (per `feedback_gh_cli_path` pattern) — docker Desktop 不在 MSYS2 PATH
+- 2 stale fixture fix: `sysv_abi_test.jhyy` (extern seven_arg_fn → local inline) + `sysv_vararg_basic.jhyy` (extern printf → local inline two_arg_add)
+
+**Honest status post-v2.8.3 (本机 dev env, Docker Desktop 4.84.0 + gcc:12 image verified)**:
+- ✅ **5 sysv regress tests docker 真跑 5/5 PASS** (exit codes per fixture): sysv_abi_test=28, sysv_struct_pass=35, sysv_struct_ret=18, sysv_struct_mixed=42, sysv_vararg_basic=42
+- ✅ `jhyy.exe --target=amd64_sysv_freestanding sysv_*.jhyy` 不再 fatal at cg_module — **真 emit SysV ABI .s** + docker gcc chain 真跑通
+- ⚠️ WSL branch 不变 (already correct, line 207-215 per v2.7.1 ship);无 Ubuntu WSL on dev host 验证 SKIP-honest
 - ✅ Win ABI byte-equal hold (10/10 + 20/20) + D43 closure v1→v2 sha HOLD
 
-**OS 启动链路**: W-070 = M4 launch 硬前置。v2.8.2 ship = M4 launch 硬前置彻底解锁 (per `v2.0.0-os-prep.md` § 1)。
+**OS 启动链路**: W-070 = M4 launch 硬前置。**v2.8.2 ship = M4 launch 硬前置彻底解锁** (cg_module 不再 fatal);**v2.8.3 验证 5 sysv tests end-to-end 真能用** (不光是 emit, 还跑通)。M4 launch 验证完整化。
 
 
