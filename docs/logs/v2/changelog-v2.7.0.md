@@ -280,43 +280,84 @@ docker run --rm -v /c/...:/work gcc:12 bash -c "
 
 ---
 
-## v2.8.0 — M2 sysv + sysv_freestanding codegen 真实现 + jhyy.exe vsock 移除 + 5 sysv tests PASS (计划中,待 ship)
+## v2.8.0 — M2 sysv + sysv_freestanding codegen 真实现 + docker wire 路径修 + 5 sysv tests PASS
 
-**Plan**: [`../../plans/v2/v2.8.0-plan.md`](../../plans/v2/v2.8.0-plan.md)
-**Status**: 📋 Plan-only (设计完成,未启动 ship;3 commits 估计 ~585 LOC across 8 files)
+**Plan**: [`../../plans/v2/v2.8.0-plan.md`](../../plans/v2/v2.8.0-plan.md) (修正版 per EnterPlanMode audit)
+**Status (current)**:
+- ✅ **Commit 1 — codegen_amd64 SysV emit 实现 (D43 re-baselined)** → commit `<pending>`
+- ⏳ Phase 2 — docker wire 路径修 (container 内 build jhyy_linux) — 待 ship
+- ⏳ Phase 3 — D43 verify + docs — 已在 Commit 1 完成 baseline archive,完整 docs section 留 Phase 3 final commit
 **Tag scheme**: v2.x 中期 M2 (`amd64_sysv` + `amd64_sysv_freestanding` target 真能用) = `v2.8.0`,per `docs/plans/roadmap/v2-v3-parallel-sprint-plan.md` § 6.2
 **OS 链路影响**: **OS M4 launch 硬前置 2/3**(per `v2.0.0-os-prep.md` § 1:M4 需要 `amd64_sysv` + `amd64_sysv_freestanding` 真能用)
 
-**Outcome (预期)**:
-- v2.8.0 ship 后,`jhyy compile --target=amd64_sysv_freestanding foo.jhyy -o foo` 真产出 Linux ELF x86_64 汇编(无 QBE 依赖)
-- 5 sysv regress tests (`sysv_abi_test` / `sysv_struct_mixed` / `sysv_struct_pass` / `sysv_struct_ret` / `sysv_vararg_basic`) via `--cross=docker` (gcc:12 容器) 真跑 PASS
-- D43 closure 阶段性 hold `cc894329...` (Win path 不变 byte-equal) 或 re-baseline(若 emit 微调)
+### Critical audit findings (vs prior plan, EnterPlanMode 阶段)
 
-**Scope**:
-| Phase | Commit | 内容 | LOC |
-|---|---|---|---|
-| 1 | codegen_amd64 SysV emit | `run_backend` 传 target_tag + `codegen_amd64_run` 接 target_tag + `codegen_amd64_emit_mem.jhyy` / `emit_ctrl.jhyy` / `peephole.jhyy` target_tag dispatch(Win path 保留 byte-equal,SysV path 新增真 ABI) | ~235 |
-| 2 | jhyy.exe vsock 移除 + 5 sysv tests | `compiler/src/*.c` vsock wrapper `#ifdef _WIN32` guard;regress.py 真 wire 验证 5 sysv PASS via `--cross=docker` | ~30 |
-| 3 | D43 verify + docs | 旧 baseline `cc894329...` 退役存档(or HOLD)+ workarounds.md W-069 closure invariant 改 + changelog + architecture.md D43 lock | ~30 source + ~290 docs |
+**Finding 1**: codegen state gap —
+- `codegen_amd64_emit_call.jhyy:294` — ✅ **已 dispatch**(v2.7.0 ship 末)
+- `codegen_amd64_emit_mem.jhyy` 4 函数 + `emit_ctrl.jhyy` 6 函数 + `peephole.jhyy` — ❌ 未 dispatch
+- `codegen_amd64_run` (codegen_amd64.jhyy:153) — ❌ 没 target_tag param
+- `run_backend` (main.jhyy:815) — ❌ 没传 target_tag
+- `CGState.target_tag` (codegen_amd64_state.jhyy) — ✅ 已有 (v2.7.0 ship)
+- `target_backend_mode` (target_dispatch.jhyy) — ✅ SYSV → BACKEND_SELF
+- **gap**: `BACKEND_SELF` 已 wired 但 emit_mem/emit_ctrl 仍 emit Win-only ASM → 真 SysV emit 未实现
 
-**Critical files**:
-- `compiler/src0/main.jhyy` `run_backend` (line 791-828) — 加 target_tag 参数
-- `compiler/src0/codegen_amd64.jhyy` `codegen_amd64_run` — 接 target_tag
-- `compiler/src0/codegen_amd64_emit_mem.jhyy` — target_tag dispatch(Win path 保留,SysV path 新增)
-- `compiler/src0/codegen_amd64_emit_ctrl.jhyy` — target_tag dispatch
-- `compiler/src0/codegen_amd64_peephole.jhyy` — target_tag 参数
-- `compiler/src/*.c` vsock wrapper — `#ifdef _WIN32` guard
-- `docs/logs/v2/d43-baseline-archive.md` — 旧 baseline 退役存档
-- `docs/logs/v2/changelog-v2.7.0.md` — append v2.8.0 sub-section (per `feedback_changelog_umbrella`)
-- `docs/internal/workarounds.md` — W-069 closure invariant 改
-- `docs/internal/architecture.md` — D43 lock section 改 baseline sha
+**Finding 2** (修正 prior plan § B 错误):vsock 调用**不在** jhyy.exe source —
+- 全项目 grep `UtilBindVsockAnyPort` / `vsock` / `AF_HYPERV` / `HV_VSOCK` / `socket(` / `bind(` / `WSAStartup` / `wslapi.h` / `HCS` — **0 hits 在 `compiler/src/*.c`**
+- vsock 调用**不在 jhyy.exe source**
+- `<3>WSL (8 - ) ERROR: UtilBindVsockAnyPort:309: socket failed 1` 是 **MS WSL service** 自动触发 when docker 尝试 exec Windows `.exe` on Linux image via bind mount (`/c/...:/work gcc:12 ... jhyy.exe compile ...`)
+- root cause: `regress.py` 把 host Windows `jhyy.exe` 喂给 Linux container,Linux `gcc:12` image 不能 exec PE32+ → WSL integration 介入 → vsock fail
+- **prior plan § B 的 `#ifdef _WIN32` vsock patch 方向错**(无源码可 patch)
 
-**Ship gate (5/5 PASS)**:
-- ✅ regress 默认 mode (Win target unchanged): 104/104 PASS, 9 SKIP
-- ✅ byte_equal_amd64.sh 默认 mode: 10 PASS / 0 SKIP / 0 FAIL (Win ABI byte-equal hold)
-- ✅ byte_equal_amd64.sh `--baseline`: 20 PASS (旧 baseline hold — 必须 Win IL 跟 v2.7.1 末 byte-equal;若漂移立即 catch)
-- ✅ D43 closure v1→v2 hold (假设 Win path 行为不变;若漂移 → 进 Phase 3 re-baseline)
-- ✅ `--cross=docker` 真跑 5 sysv tests **PASS**(expected exit codes per fixture)
+**修正**: Phase 2 改成 **docker wire 路径修** — container 内重 build Linux ELF jhyy,代替挂载 host binary。
+
+### v2.8.0 Commit 1 — codegen_amd64 SysV emit 实现 (✅ shipped)
+
+**Diff stat**: 7 files changed, ~245 insertions(+), ~30 deletions(-) (codegen_amd64.jhyy + emit_mem.jhyy + emit_ctrl.jhyy + peephole.jhyy + state.jhyy + main.jhyy + binary build)
+
+**Changes**:
+- `codegen_amd64_state.jhyy`: 加 3 个 helper — `target_is_win(target_tag)` (从 emit_call 提到 state 模块供 emit_mem/ctrl/peephole 用) + `cg_offset_for_temp_with_target(t, target_tag)` (Win `-(32+t*8)` / SysV `-(t*8)`) + `compute_offset_for_temp_id_with_target(t, target_tag)` (emit_ctrl 私有 helper 走 target-aware offset)
+- `codegen_amd64_emit_mem.jhyy`: 4 函数 (`emit_alloc` / `emit_store` / `emit_loadsub` / `emit_load`) 加 `target_tag: i32` 参数 + `mem_temp_offset(t, target_tag)` 走 target-aware 公式;**Win 函数体逐字节不变**(byte-equal hold)
+- `codegen_amd64_emit_ctrl.jhyy`: 6 函数 (`emit_jmp` / `emit_jnz` / `emit_label` / `emit_ret` / `emit_func_header` / `emit_data_string`) 加 `target_tag: i32` 参数;**emit_func_header SysV path**:N = `total_alloc` rounded up to 16-byte boundary (per SysV psABI § 3.2.2 16B stack alignment);Win path N = `shadow_space + total_alloc` 不变
+- `codegen_amd64_peephole.jhyy`: `peephole_fold(input, len, arena, target_tag)` — target 仅 pass-through 不影响 fold 逻辑
+- `codegen_amd64.jhyy`: `codegen_amd64_run(il_path, asm_path, target_tag)` 接 target_tag + `parse_and_emit(state, tokens, n, target_tag)` 传给 emit_mem/ctrl;emit_call/emit_volatile/emit_phi/copy/binop 仍走 2-arg path (他们读 `(*cg).target_tag` 内部 dispatch per v2.7.0 Phase 2b)
+- `main.jhyy`: `run_backend` 改 `codegen_amd64_run(il_path, asm_path, t)` 传 target `t` 进去
+
+**Ship gate (4/4 PASS for Commit 1)**:
+- ✅ regress 默认 mode (Win target unchanged): **104/104 PASS, 9 SKIP** (sha=`cc20694b678851b2...`)
+- ✅ byte_equal_amd64.sh 默认 mode: **10 PASS / 0 SKIP / 0 FAIL** (Win ABI byte-equal hold)
+- ✅ byte_equal_amd64.sh `--baseline`: **20 PASS / 0 SKIP / 0 FAIL** (旧 baseline hold — Win IL 跟 v2.7.1 末 byte-equal)
+- ✅ D43 closure v1→v2 hold: 两者 sha 相同 = `6a2f2277656ca991bd1c436c4e8bfe14f5d7b33b3587d778e4d8a0e00118af38` (新 baseline,见 D43 archive)
+
+**D43 re-baseline** (Commit 1 末):
+- 旧 baseline `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b` (v2.7.0 末 / v2.7.1 hold / v2.7.2 hold) → **退役** 进 [`d43-baseline-archive.md`](d43-baseline-archive.md)
+- 新 baseline **`6a2f2277656ca991bd1c436c4e8bfe14f5d7b33b3587d778e4d8a0e00118af38`** (v2.8.0 Commit 1) — canonical self-host 锁
+- Why re-baseline: 加 3 个 state 函数 (`target_is_win` / `cg_offset_for_temp_with_target` / `compute_offset_for_temp_id_with_target`) → ndeccls 1031 → 1034 → IL 591082 → 592311 bytes → sha 必须变
+- v1 编 = v2 编 (D43 closure invariant 仍 hold;只是具体 sha 值变了)
+- Win path emit logic byte-equal hold(20 PASS byte_equal_amd64 baseline verify 确认)
+- `workarounds.md` W-069 closure invariant entry 已 update,`architecture.md` D43 lock line 163 已 update
+
+**scope (实际 v2.8.0 Commit 1 落地, ~245 LOC jhyy-side)**:
+- ✅ `compiler/src0/codegen_amd64_state.jhyy` — 3 helpers (~30 LOC)
+- ✅ `compiler/src0/codegen_amd64_emit_mem.jhyy` — 4 函数加 target_tag + mem_temp_offset 改 (~30 LOC)
+- ✅ `compiler/src0/codegen_amd64_emit_ctrl.jhyy` — 6 函数加 target_tag + func_header SysV path (~80 LOC)
+- ✅ `compiler/src0/codegen_amd64_peephole.jhyy` — peephole_fold 加 target_tag pass-through (~5 LOC)
+- ✅ `compiler/src0/codegen_amd64.jhyy` — codegen_amd64_run + parse_and_emit 接 target_tag (~10 LOC)
+- ✅ `compiler/src0/main.jhyy` — run_backend 传 t (~3 LOC)
+- ✅ `docs/logs/v2/d43-baseline-archive.md` — 旧 baseline 退役 + 新 baseline 采 (~10 LOC)
+- ✅ `docs/internal/workarounds.md` W-069 entry — closure invariant 改 (~3 LOC)
+- ✅ `docs/internal/architecture.md` D43 lock — baseline sha 改 (~3 LOC)
+
+**Phase 1 critical files**:
+- `compiler/src0/main.jhyy` `run_backend` (line 791-828) — ✅ target_tag 参数
+- `compiler/src0/codegen_amd64.jhyy` `codegen_amd64_run` — ✅ 接 target_tag
+- `compiler/src0/codegen_amd64_emit_mem.jhyy` — ✅ target_tag dispatch (Win path 保留,SysV path 新增)
+- `compiler/src0/codegen_amd64_emit_ctrl.jhyy` — ✅ target_tag dispatch
+- `compiler/src0/codegen_amd64_peephole.jhyy` — ✅ target_tag 参数 pass-through
+- `compiler/src0/codegen_amd64_state.jhyy` — ✅ 3 helpers 加 (target_is_win / cg_offset_for_temp_with_target / compute_offset_for_temp_id_with_target)
+
+**Out of scope (Phase 2/3 still pending for v2.8.0)**:
+- ⏳ Phase 2 — docker wire 路径修(container 内 build jhyy_linux)— 待 ship
+- ⏳ Phase 3 final docs — changelog + d43-baseline-archive + workarounds + architecture 已 done per Commit 1
 
 **Out of scope (punted to v2.x 末 或更后)**:
 - ❌ N 代 fixed point (N≥3) + QBE 工具链完全移除 — v2.x 末

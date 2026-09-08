@@ -527,13 +527,17 @@ fn pee_is_self_move(s: *u8, len: i64) -> i32 {
 //      - 若 foldable 为 mov zero + 下一行 xor self:combine(删 mov)
 //      - 若 foldable 为 mov A→B + 下一行 mov B→C:replace 第二行为 mov A→C
 //   3. concatenate non-deleted lines into output buffer
-fn peephole_fold(input: *u8, len: i64, arena: *u8) -> *u8 {
+fn peephole_fold(input: *u8, len: i64, arena: *u8, target_tag: i32) -> *u8 {
     if input == (0 as *u8) || len <= (0 as i64) {
         return input;
     }
     if arena == (0 as *u8) {
         return input;
     }
+    // target_tag v2.8.0 加 — peephole 是 local folding on emitted .s,
+    // 跨 target 同逻辑 (mov/mov 重写, xor self 等);target 仅 pass-through
+    // 不影响 fold 结果。设为 unused 抑制 lint 警告。
+    let _tt = target_tag;
 
     // alloc output buffer(初始 2x input size,fold 通常减小)
     let out_cap = len * (2 as i64);

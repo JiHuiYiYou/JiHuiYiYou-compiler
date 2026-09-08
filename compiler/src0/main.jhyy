@@ -812,7 +812,7 @@ fn run_backend(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
     if mode == BACKEND_SELF() {
         let sb_env = jh_getenv("JHY_SELF_BACKEND" as *u8);
         if sb_env != (0 as *u8) {
-            let rc = codegen_amd64_run(il_path, asm_path);
+            let rc = codegen_amd64_run(il_path, asm_path, t);
             if rc == (0 as i32) {
                 return 0 as i32;
             }

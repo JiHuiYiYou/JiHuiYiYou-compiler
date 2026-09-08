@@ -11,8 +11,10 @@ D43 closure invariant (per [`../plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-
 |---|---|---|---|
 | v2.4.0 末 | `51376ce5721bccb0c81c7deabead1a6012fb76648c424238391018f1890b5761` | **退役**(被 v2.6.6 re-baseline 替代)| hello-freestanding.efi OVMF E2E 5/5 PASS ship 后 stable |
 | v2.6.6 | `92e8255473db3395c98bb12c58b473071384b42b897b114cea5fa903d715d25a` | **退役**(被 v2.7.0 末 Commit 2+3 re-baseline 替代)| W-069 真修(NODE_CALL is_extern mangling)后 codegen 微调 |
-| v2.7.0 末 | `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b` | **当前 active baseline**(v2.7.1 hold)| Commit 2+3 emit_call refactor + ABI imports 微调 codegen .il emit |
+| v2.7.0 末 | `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b` | **退役**(被 v2.8.0 Commit 1 re-baseline 替代)| Commit 2+3 emit_call refactor + ABI imports 微调 codegen .il emit |
 | v2.7.1 | (同 v2.7.0 末) | **HOLD 不变**| Phase 1 (runtime files) + Phase 2 (regress.py --cross wire) 不动 codegen |
+| v2.7.2 | (同 v2.7.0 末) | **HOLD 不变**| regress.py false-positive 修,driver-only patch,不动 codegen |
+| **v2.8.0** | `6a2f2277656ca991bd1c436c4e8bfe14f5d7b33b3587d778e4d8a0e00118af38` | **当前 active baseline**| Commit 1 codegen_amd64_emit_mem/ctrl/peephole 加 `target_tag: i32` 参数 + state 加 `target_is_win`/`cg_offset_for_temp_with_target`/`compute_offset_for_temp_id_with_target` → ndeccls 1031 → 1034 → IL 大小 591082 → 592311 |
 
 ## Why no v2.7.1 re-baseline?
 

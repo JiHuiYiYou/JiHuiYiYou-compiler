@@ -4923,7 +4923,7 @@ W-069 不是 stage0 build pollution, 而是 **codegen NODE_CALL is_extern branch
 - ✅ jhyy.exe 自路径编 main.jhyy: `jhyy.exe compile main.jhyy -o /tmp/test.exe` → 589323 bytes PE32+ (valid)
 - ✅ jhyy_v1.exe.exe (从 jhyy.exe 编出来的 main.jhyy) → 编 main.jhyy → 583673 bytes PE32+ (valid)
 - ✅ regress 104/104 PASS, 0 failed, 4 skipped (sha=a1359b6d752cb9ab...)
-- ✅ D43 closure hold (历史: v2.6.6 `92e82554...` → v2.7.0 Commit 2+3 `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b`, re-baselined per D43 v2.x sub-sprint rule;Commit 2 target_dispatch refactor + Commit 3 emit_call refactor + ABI imports 微调 codegen .il emit)
+- ✅ D43 closure hold (历史: v2.6.6 `92e82554...` → v2.7.0 末 Commit 2+3 `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b` → v2.7.1 + v2.7.2 HOLD → **v2.8.0 Commit 1 `6a2f2277656ca991bd1c436c4e8bfe14f5d7b33b3587d778e4d8a0e00118af38`**, re-baselined per D43 v2.x sub-sprint rule;v2.8.0 codegen_amd64_emit_mem/ctrl/peephole 加 `target_tag: i32` 参数 + state 加 3 个 helper 函数 → ndeccls 1031 → 1034 → IL 591082 → 592311 bytes)
 - ✅ .s 文件 grep 验证 0 unmangled `callq ptr_add_u8 / sb_append* / arena_alloc` (从 74 处 → 0)
 - ✅ 322 mangled `callq util__ptr_add_u8` (从 0 → 322)
 

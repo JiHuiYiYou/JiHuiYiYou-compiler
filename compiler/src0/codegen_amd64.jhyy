@@ -82,7 +82,7 @@ fn codegen_amd64_init() -> i32 {
 // ref, inline_imports re-parse 时 codegen_amd64_run 在 line 132 调用 parse_and_emit,
 // sema 阶段报 unknown symbol。原位置在 codegen_amd64_run 后面,parse 顺序是按源文件
 // 位置而不是按调用关系排序,所以重排 def 是唯一 fix。
-fn parse_and_emit(state: *u8, tokens: *u8, n: i64) -> i32 {
+fn parse_and_emit(state: *u8, tokens: *u8, n: i64, target_tag: i32) -> i32 {
     // V2-B v2.6.0 (Unit B Stub-Fill): real impl — dispatch loop over
     // tokens[i].kind → call into imported emit_* functions.
     // ILToken struct size = 40 bytes (per codegen_amd64_lexer.jhyy
@@ -94,6 +94,11 @@ fn parse_and_emit(state: *u8, tokens: *u8, n: i64) -> i32 {
     // must have same type: i32 vs ()" at sema. Fix: discard return value via
     // `let _ = emit_X(state, tok_p);` pattern (mirrors W-003 `let _ = fncall(...)`).
     // The EOF branch also wrapped in block with explicit return 0 for symmetry.
+    //
+    // v2.8.0: 加 target_tag:i32 参数 (codegen_amd64_run 传 state.target_tag 进来),
+    // 每个 emit_X 调用多带 target_tag arg (emit_call/emit_volatile/emit_phi/copy/binop
+    // 仍 2-arg,他们的 target 走 (*cg).target_tag in dispatch;emit_mem/ctrl/peephole
+    // 走 explicit arg per 函数签名)。emit_call path:已 v2.7.0 ship 显式接 target_tag。
     let tok_size: i64 = 40 as i64;
     let mut i: i64 = 0 as i64;
     while i < n {
@@ -101,20 +106,22 @@ fn parse_and_emit(state: *u8, tokens: *u8, n: i64) -> i32 {
         let kind_p = tok_p as *i32;
         let kind = *kind_p;
         if kind == ILTOK_FUNC_HEADER() {
-            let _ = emit_func_header(state, tok_p);
+            let _ = emit_func_header(state, tok_p, target_tag);
         } else if kind == ILTOK_LABEL() {
-            let _ = emit_label(state, tok_p);
+            let _ = emit_label(state, tok_p, target_tag);
         } else if kind == ILTOK_ALLOC() {
-            let _ = emit_alloc(state, tok_p);
+            let _ = emit_alloc(state, tok_p, target_tag);
         } else if kind == ILTOK_STORE() {
-            let _ = emit_store(state, tok_p);
+            let _ = emit_store(state, tok_p, target_tag);
         } else if kind == ILTOK_LOAD() {
-            let _ = emit_load(state, tok_p);
+            let _ = emit_load(state, tok_p, target_tag);
         } else if kind == ILTOK_LOADSUB() {
-            let _ = emit_loadsub(state, tok_p);
+            let _ = emit_loadsub(state, tok_p, target_tag);
         } else if kind == ILTOK_VOLATILE() {
+            // emit_volatile reads (*cg).target_tag internally — pass state
             let _ = emit_volatile(state, tok_p);
         } else if kind == ILTOK_CALL() {
+            // emit_call reads (*cg).target_tag internally (v2.7.0 Phase 2b)
             let _ = emit_call(state, tok_p);
         } else if kind == ILTOK_PHI() {
             let _ = emit_phi(state, tok_p);
@@ -123,13 +130,13 @@ fn parse_and_emit(state: *u8, tokens: *u8, n: i64) -> i32 {
         } else if kind == ILTOK_BINOP() {
             let _ = emit_binop(state, tok_p);
         } else if kind == ILTOK_RET() {
-            let _ = emit_ret(state, tok_p);
+            let _ = emit_ret(state, tok_p, target_tag);
         } else if kind == ILTOK_JMP() {
-            let _ = emit_jmp(state, tok_p);
+            let _ = emit_jmp(state, tok_p, target_tag);
         } else if kind == ILTOK_JNZ() {
-            let _ = emit_jnz(state, tok_p);
+            let _ = emit_jnz(state, tok_p, target_tag);
         } else if kind == ILTOK_DATA_STRING() {
-            let _ = emit_data_string(state, tok_p);
+            let _ = emit_data_string(state, tok_p, target_tag);
         } else if kind == ILTOK_EOF() {
             return 0;
         }
@@ -150,7 +157,7 @@ fn parse_and_emit(state: *u8, tokens: *u8, n: i64) -> i32 {
 //   3. parse_and_emit(tokens, out_sb) → 逐 token dispatch 到 15 emit 函数
 //   4. write_file(asm_path, sb_get_str(out_sb), sb_len(out_sb))(per `feedback_qbe_crlf_root_cause` 用 "wb")
 //   5. return 0
-fn codegen_amd64_run(il_path: *u8, asm_path: *u8) -> i32 {
+fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32 {
     // v2.6.3: real impl — IL → lex → regalloc → parse_and_emit
     //                            → peephole → write .s
     //
@@ -208,6 +215,8 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8) -> i32 {
     let mut sb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
     sb_init(&arena, &sb);
     let _init_rc = cg_state_init(state_buf, &sb, &arena, "" as *u8);
+    // v2.8.0: 显式设 target_tag(从 main.jhyy run_backend 传 `t` 进 codegen_amd64_run)
+    let _set_tt_rc = cg_state_set_target(state_buf, target_tag);
 
     // 4. Regalloc analysis (linear-scan; sets g_regalloc_arr via jh_regalloc_set)
     let reg_arr = regalloc_init(&arena);
@@ -216,12 +225,12 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8) -> i32 {
     }
 
     // 5. Dispatch loop → emit each token → .s into sb.buf
-    let _pe_rc = parse_and_emit(state_buf, tokens, n);
+    let _pe_rc = parse_and_emit(state_buf, tokens, n, target_tag);
 
     // 6. Peephole fold on emitted .s (no-op if arena alloc fails)
     let raw = sb.buf;
     let raw_len = sb.len;
-    let folded = peephole_fold(raw, raw_len, &arena);
+    let folded = peephole_fold(raw, raw_len, &arena, target_tag);
     let final_buf: *u8 = if folded != (0 as *u8) { folded } else { raw };
     // peephole_fold returns input unchanged on no-op (arena null), so final_buf
     // might point to raw (which is arena-alloc'd, NOT null-terminated).

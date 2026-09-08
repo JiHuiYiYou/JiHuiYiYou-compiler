@@ -144,6 +144,17 @@ fn cg_state_set_target(state: *u8, target_tag: i32) -> i32 {
     return 0;
 }
 
+// target_is_win — v2.7.0 Phase 2b helper (moved here from emit_call in v2.8.0
+// so emit_mem / emit_ctrl / peephole can also dispatch on target_tag).
+//
+// 返回 1 if target_tag 是 Win path (TARGET_AMD64_WIN 或 WIN_FREESTANDING),
+// else 返回 0 (SysV path / SysV freestanding)。
+fn target_is_win(target_tag: i32) -> i32 {
+    if target_tag == (0 as i32) { return 1 as i32; }  // TARGET_AMD64_WIN
+    if target_tag == (1 as i32) { return 1 as i32; }  // TARGET_AMD64_WIN_FREESTANDING
+    return 0 as i32;  // TARGET_AMD64_SYSV (2) / SYSV_FREESTANDING (3) → SysV path
+}
+
 // ════════════════════════════════════════════════════
 // Stack offset 计算 helpers(emit 模块共用)
 // ════════════════════════════════════════════════════
@@ -168,8 +179,36 @@ fn cg_offset_for_temp(t: i64) -> i64 {
     if spill_off != (0 as i64) {
         return spill_off;
     }
-    // fallback:1-to-1 栈分配公式
+    // fallback:1-to-1 栈分配公式(Win 32-byte shadow + 8/temp)
     return (0 as i64) - (32 as i64) - t * (8 as i64);
+}
+
+// cg_offset_for_temp_with_target — v2.8.0 target-aware variant
+//
+// Win path (TARGET_AMD64_WIN / WIN_FREESTANDING): per 1-to-1 formula
+//   `-(32 + t*8)` — 32-byte shadow + 8 bytes per temp slot (matches MS x64 ABI
+//   callee reserve + QBE 1-to-1 simplified stack layout)。
+//
+// SysV path (TARGET_AMD64_SYSV / SYSV_FREESTANDING): no shadow space,
+//   `-(t*8)` — just per-temp slots。SysV ABI § 3.2.2 不要求 callee reserve
+//   shadow,但 16-byte stack alignment 仍由 func_header prologue `andq $-16, %rsp`
+//   保证 (per `runtime/linux_elf/crt0.S` + v2.8.0 SysV emit_func_header).
+//
+// 注: regalloc query 路径仍走 spill offset(由 codegen_amd64_run 内部调
+// regalloc_run 后填),不受 target 影响。
+fn cg_offset_for_temp_with_target(t: i64, target_tag: i32) -> i64 {
+    if t < (0 as i64) {
+        return 0 as i64;
+    }
+    let spill_off = regalloc_query_spill_off_no_arr(t);
+    if spill_off != (0 as i64) {
+        return spill_off;
+    }
+    if target_is_win(target_tag) == (1 as i32) {
+        return (0 as i64) - (32 as i64) - t * (8 as i64);
+    }
+    // SysV: no shadow
+    return (0 as i64) - t * (8 as i64);
 }
 
 // alloc_slot(size: i64) -> i64
