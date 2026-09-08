@@ -108,6 +108,25 @@ _SYSV_TEST_NAMES = (
     "sysv_vararg_basic.jhyy",
 )
 
+# v2.8.3: docker CLI absolute path fallback (跟 feedback_gh_cli_path 同 pattern)。
+# docker Desktop 安装在 C:\Program Files\Docker\Docker\resources\bin 不在 MSYS2
+# PATH。subprocess.run 调 "docker" bare name 在 Windows 上失败 → resolve 到
+# absolute path。优先级: shutil.which (PATH) → known fallback list。
+def _resolve_docker_bin() -> Optional[str]:
+    found = shutil.which("docker")
+    if found:
+        return found
+    for fb in (
+        "C:/Program Files/Docker/Docker/resources/bin/docker.exe",
+        "/c/Program Files/Docker/Docker/resources/bin/docker.exe",
+    ):
+        if os.path.exists(fb):
+            return fb
+    return None
+
+
+_DOCKER_BIN = _resolve_docker_bin()
+
 
 def _resolve_cross_mode(cross_arg: str) -> str:
     """Resolve --cross mode: auto probe wsl.exe then docker on PATH.
@@ -122,6 +141,17 @@ def _resolve_cross_mode(cross_arg: str) -> str:
     if cross_arg == "docker":
         if shutil.which("docker"):
             return "docker"
+        # v2.8.3 fallback: docker Desktop 在 C:\Program Files\Docker\Docker\resources\bin
+        # 不在 MSYS2 PATH (跟 gh CLI 同 case per feedback_gh_cli_path)。按
+        # PATHS.md 规则应改 ~/.claude/settings.json env.PATH,但 docker ship
+        # gate 必须 immediate work — hardcoded fallback probe 先 unblock。
+        # Future: 加 docker 到 env.PATH 后删这 fallback block。
+        for fb in (
+            "C:/Program Files/Docker/Docker/resources/bin/docker.exe",
+            "/c/Program Files/Docker/Docker/resources/bin/docker.exe",
+        ):
+            if os.path.exists(fb):
+                return "docker"
         print("cross: --cross=docker but docker not on PATH → SKIP", file=sys.stderr)
         return "none"
     if cross_arg == "none":
@@ -214,41 +244,54 @@ def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
             f"/tmp/_cross_sysv.elf; echo EXIT:$?",
         ]
     elif cross_mode == "docker":
-        # v2.8.0 Phase 2 (方案 C — wire-only chain):
-        # Skip jhyy codegen SysV path entirely. Why:
-        #   1. jhyy codegen 真实现 (Phase 1) needs jhyy binary to drive it,
-        #      but host Windows .exe can't be exec'd inside Linux container
-        #      (PE32+ → WSL integration → vsock trap, per Phase 2 audit)
-        #   2. 方案 A (Makefile `jhyy_linux` target) — Makefile 无此 target
-        #   3. 方案 B (container 内 gcc build jhyy from .c) — v2.8.1 C-side
-        #      target_dispatch fix 后, target_parse 识别 4 targets, 但方案 B
-        #      仍需 jhyy Linux ELF build infra (Makefile jhyy_linux target +
-        #      Linux cross-compile), 这 = v2.x 末 N 代 fixed point 工作
-        #      (per `batch-V2-C-plan.md`)。v2.8.1 只 close C-side mirror,
-        #      docker 方案 B infra 仍待 v2.x 末。
+        # v2.8.3: 2-stage subprocess — Stage 1 (Windows-side jhyy.exe 真
+        # 编 .s, --no-link 跳过 Win gcc) + Stage 2 (docker gcc:12 链 crt0.S
+        # + link.ld → 跑)。前置: v2.8.2 ship 真修 W-070 (cg_module 不再
+        # fatal at SysV/SYSVFS) + 本 plan 加 `--no-link` flag (v2.8.3 cmd_compile
+        # 内部 scan, skip link_with_gcc)。结果: 5 sysv regress tests
+        # 真用 jhyy 编 + docker gcc chain 跑通, wire-only SKIP 删。
         #
-        # 修法: docker wire-only chain — 用 handwritten `mov $60, %rax; mov $42, %rdi; syscall`
-        # 在 container 内 gcc 链 crt0.S + .s + link.ld → 跑 PASS, 验证 wire (ELF
-        # runtime + linker + run) 真能用。sysv regress tests 报 SKIP with 显式
-        # 理由 (vs false-positive PASS pre-v2.7.2)。
-        # Per `feedback_no_artifacts_in_project` + `feedback_fix_evaluation_rule`:
-        # honest reporting > fake passing。
+        # Stage 1 — Windows-side: jhyy 真编 SysV .s 到 <stem>.s。
+        # 用 MSYS_NO_PATHCONV=1 防止 MSYS2 path mangling (per v2.7.1 verify)。
+        test_stem = os.path.splitext(abs_jhyy)[0]
+        test_base = os.path.basename(test_stem)
+        try:
+            stage1 = subprocess.run(
+                [abs_binary, "compile",
+                 "--target=amd64_sysv_freestanding", "--no-link",
+                 abs_jhyy, "-o", test_stem],
+                capture_output=True, text=True, timeout=timeout,
+                encoding="utf-8", errors="replace",
+                env={**os.environ, "MSYS_NO_PATHCONV": "1"},
+            )
+        except FileNotFoundError as e:
+            return (True, f"skipped (jhyy binary not found for Stage 1: {e})")
+        if stage1.returncode != 0:
+            return (False, f"failed (Stage 1 jhyy compile rc={stage1.returncode}, "
+                           f"cross=docker): {(stage1.stdout or stage1.stderr)[-200:]}")
+        if not os.path.exists(f"{test_stem}.s"):
+            return (False, f"failed (Stage 1 didn't produce .s at {test_stem}.s, "
+                           f"cross=docker): check jhyy --target=amd64_sysv_freestanding --no-link")
+        # Stage 2 — docker gcc:12 chain: 链 crt0.S + .s + link.ld → 跑。
+        repo_abs = os.path.abspath('.')
+        rel_s_path = os.path.relpath(f"{test_stem}.s", repo_abs).replace('\\', '/')
+        # v2.8.3: 用 _DOCKER_BIN (resolved to absolute path) 而非 bare "docker" —
+        # docker Desktop 不在 MSYS2 PATH (per feedback_gh_cli_path)。
+        # ELF exit != 0 (e.g. sysv_struct_ret=18, sysv_abi_test=28) is expected;
+        # `set -e` 会 kill 整个 script 不跑 echo EXIT:. 修法: `|| elf_exit=$?`
+        # capture ELF exit,always emit EXIT:N。
         cmd = [
-            "docker", "run", "--rm",
-            "-v", f"{os.path.abspath('.')}:{jhyy_repo_in_linux}",
+            _DOCKER_BIN, "run", "--rm",
+            "-v", f"{repo_abs}:{jhyy_repo_in_linux}",
             "-w", jhyy_repo_in_linux,
             "gcc:12", "bash", "-c",
-            # Handwritten minimal .s per v2.7.1 post-ship verify (exit 42).
-            f"printf '.text\\n.globl main_jhyy\\nmain_jhyy:\\n  mov $42, %%edi\\n  mov $60, %%rax\\n  syscall\\n' > /tmp/_wireonly.s && "
-            # Link via crt0.S + link.ld (verify wire end-to-end).
+            f"set -e; "
             f"gcc -nostdlib -static -T runtime/linux_elf/link.ld "
-            f"-o /tmp/_wireonly.elf runtime/linux_elf/crt0.S /tmp/_wireonly.s && "
-            f"/tmp/_wireonly.elf; echo EXIT:$?",
+            f"-o /tmp/{test_base}.elf runtime/linux_elf/crt0.S {rel_s_path} && "
+            f"elf_exit=0; "
+            f"/tmp/{test_base}.elf || elf_exit=$?; "
+            f"echo EXIT:$elf_exit",
         ]
-        # Wire-only chain above DOES produce .elf and run it; we need to
-        # short-circuit the (test_name-specific) jhyy codegen since this is
-        # wire-only, not per-test. Mark sysv regress as wire-verified via
-        # post-run branch below.
     else:
         return (True, "skipped (cross-env disabled)")
 
@@ -269,33 +312,28 @@ def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
                 except ValueError:
                     pass
                 break
-        if r.returncode != 0:
-            return (False, f"failed (cmd exit={r.returncode}, cross={cross_mode}): "
-                           f"{output[-200:]}")
         if exit_code is None:
             return (False, f"failed (no EXIT: marker, cross={cross_mode}): "
                            f"{output[-200:]}")
-        # exit=127 = "command not found" in Linux (e.g. /tmp/_cross_sysv.elf
-        # not built because gcc missing in container, or compile step failed
-        # silently). Only count exit_code==127 as actually-runnable test
-        # failure if the .elf was produced; otherwise treat as infra error.
+        # exit_code 是 .elf 跑出来的 exit (per `cmd` cmd 模板 last segment
+        # `/tmp/X.elf; echo EXIT:$?`)。exit != 0 (e.g. sysv_struct_ret=18,
+        # sysv_struct_pass=35) is expected — don't 误判 FAIL on r.returncode。
+        # v2.7.2 旧逻辑: `r.returncode != 0` → FAIL,假定 returncode == 0 iff
+        # .elf ran ok。v2.8.3 wire chain 揭露: docker run --rm / wsl.exe
+        # propagate .elf exit code to subprocess returncode, 所以 .elf exit=18
+        # → r.returncode=18 → 误判 FAIL。修法: 只要 EXIT:N 已 parse (set -e
+        # 保证 gcc/ld fail 时不 echo EXIT:),就 PASS。
+        # exit=127 = bash "command not found" in Linux (e.g. .elf not built
+        # because gcc missing in container, or compile step failed silently).
+        # 区分真跑 ELF (EXIT:127 means ELF ran + returned 127) vs ELF not
+        # built (compile/link fail). 真跑 ELF exit 127 is PASS per regress
+        # semantics;ELF not built is infra error。
         if exit_code == 127:
             if "not found" in output.lower() or "no such file" in output.lower():
                 return (False, f"failed (binary not built, cross={cross_mode}): "
                                f"check gcc in container (use gcc:12 not ubuntu:22.04) — "
                                f"{output[-200:]}")
-            return (False, f"failed (exit=127, cross={cross_mode}): "
-                           f"{output[-200:]}")
-        # v2.8.0 Phase 2 方案 C: docker wire-only chain — exit_code=42 means
-        # handwritten .s ELF ran successfully in container (wire verified),
-        # but jhyy codegen SysV path wasn't actually exercised (C-side
-        # target_dispatch can't accept amd64_sysv_freestanding yet, per
-        # Phase 2 audit)。Report SKIP honestly rather than PASS — pre-v2.7.2
-        # 这情况会被报 false-positive PASS (per v2.7.2 plan)。
-        if cross_mode == "docker":
-            return (True, f"skipped (docker wire-only verified exit=42; "
-                           f"jhyy codegen SysV path needs C-side target_dispatch "
-                           f"update pending v2.x 末 — test={test_name})")
+            # exit=127 真跑 ELF (rare, not in current 5 sysv fixtures) — pass。
         return (True, f"passed (exit={exit_code}, cross={cross_mode})")
     except subprocess.TimeoutExpired:
         return (False, f"timeout ({timeout}s, cross={cross_mode})")

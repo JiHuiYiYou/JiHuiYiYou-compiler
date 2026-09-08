@@ -1054,10 +1054,17 @@ fn cmd_compile(argc: i32, argv: *u8, t: i32) -> i32 {
         return 1 as i32;
     }
 
-    /* parse argv: 找 -o flag + 第一个非 - 开头的文件。jhyy 端 argv 是 *u8
-     * （实质 **u8 cast），每个元素 8 字节。避免 bug 9 (&&/|| phi) 用 nested if。 */
+    /* parse argv: 找 -o flag + --no-link flag + 第一个非 - 开头的文件。
+     * jhyy 端 argv 是 *u8 (实质 **u8 cast),每个元素 8 字节。
+     * 避免 bug 9 (&&/|| phi) 用 nested if。
+     * v2.8.3: 加 --no-link flag — 让 codegen 只产 .s 不链 gcc。
+     * 用途: regress.py --cross=docker Stage 1 (Windows jhyy 编 .s →
+     * docker gcc chain 链 crt0.S + link.ld → 跑)。跳过 Win
+     * link_with_gcc (runtime.c + jhyy_helpers.c) 避免 SysV .s 链 Win
+     * runtime → gcc fail → cleanup 删 .s (per link_with_gcc L887/981)。 */
     let mut input: *u8 = 0 as *u8;
     let mut user_out: *u8 = 0 as *u8;
+    let mut no_link: i32 = 0 as i32;
     let mut i: i32 = 0 as i32;
     while i < argc {
         let i64_i = i as i64;
@@ -1072,8 +1079,12 @@ fn cmd_compile(argc: i32, argv: *u8, t: i32) -> i32 {
                 i = next_i;
             }
         } else {
-            if input == (0 as *u8) {
-                input = arg;
+            if strcmp(arg, "--no-link" as *u8) == (0 as i32) {
+                no_link = 1 as i32;
+            } else {
+                if input == (0 as *u8) {
+                    input = arg;
+                }
             }
         }
         i = i + (1 as i32);
@@ -1123,7 +1134,17 @@ fn cmd_compile(argc: i32, argv: *u8, t: i32) -> i32 {
         free(il_path); free(asm_path); free(exe_path);
         return 1 as i32;
     }
-    let r2 = link_with_gcc(asm_path, exe_path);
+    // v2.8.3: --no-link flag → skip gcc link, 保留 .s 给 caller。
+    // cmd_run 不传 --no-link (自己构造 arg_arr),所以 cmd_run 行为不变。
+    let mut r2: i32 = 0 as i32;
+    if no_link == (1 as i32) {
+        jh_fputs_stderr("compile: --no-link set, skipping gcc link (.s kept at " as *u8);
+        jh_fputs_stderr(asm_path);
+        jh_fputs_stderr(")\n" as *u8);
+        r2 = 0 as i32;
+    } else {
+        r2 = link_with_gcc(asm_path, exe_path);
+    }
     if user_out == (0 as *u8) { free(derived); }
     free(il_path); free(asm_path); free(exe_path);
     if r2 != (0 as i32) {
@@ -1323,6 +1344,7 @@ fn main_jhyy(argc: i32, argv: *u8) -> i32 {
         printf("\n" as *u8, 0);
         printf("flags:\n" as *u8, 0);
         printf("  --target=<triple>  select target (default amd64_win); see targets below\n" as *u8, 0);
+        printf("  --no-link          compile to .s only, skip gcc link (for cross-toolchains)\n" as *u8, 0);
         printf("  --help             show this message and exit\n" as *u8, 0);
         printf("\n" as *u8, 0);
         printf(target_help());  // multi-line target list (v2.4.0)

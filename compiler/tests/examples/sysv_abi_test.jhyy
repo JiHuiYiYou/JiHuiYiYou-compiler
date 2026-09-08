@@ -6,10 +6,15 @@
 //   stack-arg 实 wire 留 v2.7.1+。
 //
 // Status: SKIP in v2.7.0 ship gate.
+// v2.8.3: 改 extern → local fn。extern fn 无实现,v2.8.3 2-stage subprocess
+// 真 link → unresolved `seven_arg_fn` → ELF not built → exit=1 (was stale
+// in v2.7.0 wire-only era when真 link 不发生)。
 
 // SKIP: sysv target requires Linux host (WSL/Docker) — see sysv_struct_pass.jhyy header.
 
-extern fn seven_arg_fn(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32) -> i32;
+fn seven_arg_fn(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32) -> i32 {
+    a + b + c + d + e + f + g
+}
 
 fn main_jhyy() -> i32 {
     let r = seven_arg_fn(1, 2, 3, 4, 5, 6, 7);

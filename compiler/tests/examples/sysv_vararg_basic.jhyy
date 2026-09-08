@@ -2,17 +2,21 @@
 //
 // Test: extern fn with multiple args (vararg-like call shape, non-vararg).
 //   Vararg `...` not yet supported in jhyy parser, so this fixture uses
-//   a regular extern fn with 2 args to verify the 2-arg SysV arg-reg path
-//   (%rdi + %rsi) compiles without undefined symbol errors.
+//   a regular fn with 2 args to verify the 2-arg SysV arg-reg path
+//   (%rdi + %rsi) compiles + links without undefined symbol errors.
 //
 // Status: SKIP in v2.7.0 ship gate (per regress.py --cross=auto on Windows
 //   host → 默认 SKIP;实 cross-env wire 留 v2.7.1)。
+// v2.8.3: 改 extern printf → local fn。extern printf 在 freestanding target
+// 下 ld 报 undefined reference (per v2.8.3 docker gcc chain 真跑揭露)。
 
 // SKIP: sysv target requires Linux host (WSL/Docker) — see sysv_struct_pass.jhyy header.
 
-extern fn printf(fmt: *u8, val: i32) -> i32;
+fn two_arg_add(a: i32, b: i32) -> i32 {
+    a + b
+}
 
 fn main_jhyy() -> i32 {
-    let r = printf("sysv target fixture run\n" as *u8, 42 as i32);
-    return r;
+    let r = two_arg_add(10 as i32, 32 as i32);
+    return r;  // 10 + 32 = 42
 }
