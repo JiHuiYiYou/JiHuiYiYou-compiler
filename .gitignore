@@ -13,6 +13,13 @@ _*.py
 *.s
 *.il
 *.exe
+# v2.7.1 Phase 1 Linux ELF runtime carveout: freestanding assembly + linker script
+# is source code (NOT a build artifact). Linker script + entry-point asm tracked.
+!runtime/
+!runtime/linux_elf/
+!runtime/linux_elf/*.S
+!runtime/linux_elf/*.ld
+!runtime/linux_elf/*.md
 _*_test.jhyy
 _*_min.jhyy
 _*_minimal_*.jhyy
