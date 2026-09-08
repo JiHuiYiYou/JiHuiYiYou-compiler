@@ -1,0 +1,34 @@
+// v3.2.0d (3i fn path) ship-gate test: call-site + turbofish mixed dedup.
+//   Same generic fn `max<T>` invoked via:
+//     - call-site inference: `max(3, 5)` (v3.2.0d path)
+//     - turbofish explicit:  `max::<i32>(7, 2)` (v3.2.0c path)
+//   mono_expand_fn_call dedupes via symtab_lookup — both paths share the
+//   same mangled `max$i32` sym, so only ONE `max$i32` fn is emitted.
+//   Behavior verified by:
+//     - exit code 42 (correctness)
+//     - .il grep: 1 occurrence of `function ... max$i32` (dedup)
+
+fn max<T>(a: T, b: T) -> T {
+    if a > b { return a; }
+    return b;
+}
+
+fn main_jhyy() -> i32 {
+    // call-site inference path: max(3, 5) → T = i32 → max$i32
+    let a: i32 = max(3, 5);
+    if a != 5 {
+        return 10;
+    }
+    // turbofish path: max::<i32>(7, 2) → T = i32 → same max$i32 (dedup hit)
+    let b: i32 = max::<i32>(7, 2);
+    if b != 7 {
+        return 20;
+    }
+    // sanity: second call-site inference of max(1, 9) still hits same max$i32
+    let c: i32 = max(1, 9);
+    if c != 9 {
+        return 30;
+    }
+    return 42;
+}
+//EXPECT:42

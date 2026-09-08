@@ -44,6 +44,9 @@ typedef struct Parser {
     SymTable *current_scope;
     int       scope_depth;
     int       error_count;
+    bool      pending_inline; /* v3.0.0-merge fix (mirror d721cb5 jhyy-side):
+                                 `#[inline]` at file-top is accepted as module
+                                 attr, folded into next fn's is_inline. */
     ParseRule rules[128];
 } Parser;
 

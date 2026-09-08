@@ -1,0 +1,32 @@
+// v3.2.0d (3i fn path) ship-gate test: call-site type inference.
+//   `fn max<T>(a: T, b: T) -> T` syntax + `max(3, 5)` (NO turbofish) +
+//   monomorphize to 2 distinct concrete fns via call-site inference.
+//
+// Per spec supplement v3.2.0d § 2:
+//   - Parser leaves ntype_args=0 (no turbofish)
+//   - sema.jhyy inference arm: infers T from arg 0 type → T=i32 / T=f64
+//   - mono_expand_fn_call: clones + mangles → max$i32 / max$f64
+//
+// Expected: 2 distinct fns in .il (max$i32 / max$f64), each called once.
+
+fn max<T>(a: T, b: T) -> T {
+    if a > b { return a; }
+    return b;
+}
+
+fn main_jhyy() -> i32 {
+    // call-site inference: max(3, 5) → T = i32
+    let mi: i32 = max(3, 5);
+    if mi != 5 {
+        return 10;
+    }
+    // call-site inference: max(3.0, 5.0) → T = f64
+    let mf: f64 = max(3.0, 5.0);
+    let mut mf_eq: i32 = 0;
+    if mf == 5.0 { mf_eq = 1; }
+    if mf_eq != 1 {
+        return 20;
+    }
+    return 42;
+}
+//EXPECT:42

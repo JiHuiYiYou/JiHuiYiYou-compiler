@@ -1,0 +1,409 @@
+# V3-C v3.2.0 — 3i struct/enum monomorphize scaffolding (parser + AST)
+
+> **ship date**: 2026-09-08
+> **branch**: `axis-v3`
+> **D28 锁**: v3.2.0 (3i struct/enum) → v3.2.0b (3i fn/turbofish) 串行不可调换
+> **D43 baseline**: N9 = `2e9866c` (this sprint, post-tag fill) — 上一条 N8 = `1fff447` (V3-C v3.1.2)
+> **umbrella**: 本文件 v3.2.0 部分 (D43 chain 走 v3.2.0b 重新 hold)
+
+---
+
+## 1. 范围 / Scope
+
+V3-C sub-sprint 4/N — **monomorphize 基础 scaffolding**(`type Foo<T>` 语法 +
+`Foo<i32>` 引用语法 + skip `ntype_params > 0` 在 Pass 2/3)。runtime
+monomorphize 推到 **v3.2.0b**(per § 6 "Deferred")。
+
+**触发**(per `docs/plans/v2/v2.0.0-os-prep.md` § 1):
+- **M8d launch 硬前置 1/N 满足**:compositor surface/buffer/seat generic over T
+  (per D-GUI-11 锁 2026-09-01)
+- **M11 launch 硬前置解锁**:3l.3 std lib `Vec<T>`/`Map<K,V>` 依赖 3i
+- **v3.2.0b (fn + turbofish)** 启动前置
+- **V2-C v2.8.0 N 代 fixed point** 跨 axis 验算前置
+
+**scope 拆分决定**(user 2026-09-07):
+- **v3.2.0**(本 sprint)= struct/enum monomorphize scaffolding + generic-on-pointer + parser/AST 扩展
+- **v3.2.0b**(紧随本 sprint,per `feedback_v3b_no_phaseb_worktree` 不开新 worktree)=
+  generic fn `fn max<T>(...)` + turbofish `name::<T>(...)` + 调用点 T 推断 +
+  monomorphize pipeline 激活
+
+---
+
+## 2. 改动 / Changes
+
+### 2.1 ast.jhyy
+
+- `NodeTypeDecl` 16 → 32 bytes(+ `type_params: *u8` / `ntype_params: i64`)
+  - `type_params`: `**Sym` 数组,每个 type-param 是 `SYM_TYPE` + `type_ptr=0` 哨兵
+  - `ntype_params > 0` 标记 generic def;Pass 2/3 跳过 layout/codegen
+- `NodeModule` 24 → 40 bytes(+ `generic_insts: *u8` / `ngeneric_insts: i64`)
+  - `generic_insts`: `*GenericInstRecord` 数组(parser 累积)
+- `GenericInstRecord` NEW 32 bytes:`mangled_name(8) + arg_types(8) + nargs(8) + base_name(8)`
+- `ast_new_module` / `ast_new_type_decl` 用 offset 写入(避免 jhyy struct deref 在 *NodeModule/*NodeTypeDecl 上的不稳性)
+- `node_module_data` / `node_type_decl_data` accessors 不变
+
+### 2.2 parser.jhyy
+
+- `Parser` struct 104 → 128 bytes(+ `generic_insts: *u8` / `ngeneric_insts: i64` / `gcap: i64`)
+- `parser_init` zeros new fields
+- `parser_record_generic_inst(p, base, mangled, args, nargs)` NEW — append 到 `(*p).generic_insts`(doubling array;起始 cap=4)
+- `parser_mangle_type_node(p, node, buf_p, len, cap)` NEW — 递归 AST type node → mangled suffix
+- `parse_type_decl` 解析可选 `<T, U, ...>` generic param list(每个推 scope + 插 `SYM_TYPE`+`type_ptr=0` 哨兵 sym)
+- `parse_type` IDENT branch INLINE generic arm:
+  - **disambig**:IDENT 首字母必须大写(A-Z, ASCII 65-90)→ 避免跟小写变量或 `<` less-than 冲突
+  - 消费 `<`,parse 多个 type-arg(逗号分隔),mangle + record inst,return `NODE_IDENT` bound 到 mangled sym
+- `parse_expr` IDENT branch INLINE 同 generic arm(struct literal `Vec<i32> { ... }` 路径)
+- `parser_parse` 把 `(*p).generic_insts, (*p).ngeneric_insts` 传给 `ast_new_module`
+
+### 2.3 mono.jhyy NEW (~395 行,v1.x-subset dialect)
+
+- `import arena; import util; import ast; import symtab;`
+- helpers(`mono_decls_append` doubling array / `mono_find_generic_def` / `mono_subst_node` 递归 type node / `mono_clone_struct_def` / `mono_clone_enum_def` / `mono_clone_and_subst`)
+- `mono_expand_module(global, arena, md) -> i32` — Pass 1.5 hook
+  - **本 sprint ship 状态:NO-OP**(`return 0`),per § 6
+  - 完整实现 present 在文件 helpers,但 `mono_expand_module` body 只 `return 0`
+  - 原因:jhyy struct deref 在 `Sym`(56B)、嵌套 `StructFieldDecl`/`EnumVariantDecl` 上
+    不可靠 — 深路径 `(*fld).*` 触发 wrong-byte reads;offset access 在浅层 OK
+    但到 `mono_subst_node` → `strcmp((*sym).name, ...)` → 跨 arena pointer 路径
+    触发的具体 bug 待解,见 changelog § 6 "Deferred"
+- 文件最后一行有详细 ship status 注释 + deferral rationale
+
+### 2.4 sema.jhyy
+
+- `import mono;` 加在 `import parser;` 之后
+- **Pass 1.5 hook**(在 Pass 1 close 和 Pass 2 start 之间):
+  ```jhyy
+  jh_fputs_stderr("[sema] P1.5 mono_expand_module start\n");
+  let mono_errs = mono_expand_module((*ctx).global_scope, (*ctx).arena, md);
+  ...
+  ```
+  当前 no-op,但 hook + import 已就位,v3.2.0b 激活时只改 mono.jhyy body
+- Pass 2 内 NODE_TYPE_DECL 分支 skip `ntype_params > 0`(generic def 不 layout)
+- `resolve_type_node` NODE_IDENT fall-through 加 **E0060**:`unresolved type parameter; generic must be instantiated`
+  - 当 looked sym 是 `SYM_TYPE` + `type_ptr == 0`(type-param 哨兵)时触发
+  - 返回 `type_primitive(ta, PRIM_I32())` 做 error recovery
+
+### 2.5 tests/examples/
+
+**5 NEW SKIP tests**:
+- `generics_struct.jhyy` — `Pair<T>` 解析路径
+- `generics_ptr_field.jhyy` — `Vec<T> { data: *T, ... }` 泛型指针字段
+- `generics_enum.jhyy` — `Option<T> = enum { Some(T), None }`
+- `generics_multi_param.jhyy` — `Map2<K, V>` 双 type-param
+- `generics_err_unsubst.jhyy` — bare `T` in non-generic scope
+
+**CapTable tests**:**不重写**(per § 6 deferral — runtime refactor 需要 monomorphize)
+
+---
+
+## 3. 验证 / Verification
+
+### 3.1 基础回归(regress.py)
+
+```
+===== 104/104 passed, 0 failed, 22 skipped (of 126 total) =====
+compiler/build/bin/jhyy.exe: PASS — passed=104/126 failed=0 skipped=22 (sha=...)
+```
+
+- 104/104 PASS — 跟 v3.1.2 baseline 一致(无 regress)
+- 17 SKIP → 22 SKIP(+5 来自 5 个新 generics_* tests)
+- 2 CapTable SKIP 保持原状(`cap_table_basic.jhyy` / `cap_table_advanced.jhyy`)
+
+### 3.2 Self-host closure(待 v3.2.0b 跑)
+
+N9 baseline 当前 D43 hold 来自 v3.1.2 `1fff447`(per changelog-v3.1.md v3.1.2 段)。
+v3.2.0 ship 后 self-host closure 不变(mono_expand_module 是 no-op,src0 IL 不变)。
+v3.2.0b 激活 monomorphize 时,**D43 re-baseline N8 → N9b**(per D43 chain 流程)。
+
+---
+
+## 4. Out of scope(本 sprint 不做 → v3.2.0b 或后续)
+
+| 项 | 留到 | 备注 |
+|----|------|------|
+| Monomorphize pipeline runtime(激活 `mono_expand_module`) | **v3.2.0b** | 详见 § 6 — jhyy struct deref 深路径不稳,推到 fn body 路径重新评估 |
+| Generic fn `fn max<T>(...)` | **v3.2.0b** | turbofish 也一起 |
+| Turbofish `name::<T>(...)` | **v3.2.0b** | expr 位 `::<` 3-token disambiguator |
+| 调用点 T 推断 `let x = max(3, 5)` | **v3.2.0b** | 新算法独立风险面 |
+| 嵌套泛型 `Vec<Vec<T>>` | v3.x 中 | needs worklist-to-fixpoint |
+| `PhantomData<Cap<T>>` 嵌套 | v3.x 中 | 已从 v3.1.x 延 |
+| `*Cap<T>` raw ptr 完整 codegen | v3.x 中 | parser 已 support, codegen 等 v3.2.0b |
+| `CapTable<T>` 真 generic 重构 | **v3.2.0b** | 当前 5 NEW tests 已用此 pattern,但实际 instantiation 不工作 |
+| Lifetime 泛型 `<'a, T>` | v4.3.0 | per L2;lexer 无 tick token |
+| const generic | v4.5.0 | per README |
+| Specialization / HKT | v4.10.0 | per README |
+| Trait objects `dyn Trait` | v4.6.0 | per README |
+| 泛型 bounds `<T: Ord>` | v3.x 末 | sema 在 substitution 后查 |
+| 泛型 closures | v4.4.0 | per v3.2.1 plan |
+| jhyy self-source 迁 `Vec<T>` | M11 launch | 不阻本 ship |
+
+---
+
+## 5. 跨 sprint 对齐 / Cross-sprint Alignment
+
+### 5.1 触发的后续 sprint
+
+- **v3.2.0b**(V3-C 3i fn/turbofish)— v3.2.0 ship 后启动,激活 `mono_expand_module`
+  + 加 fn 路径 + turbofish + 调用点推断
+- **v3.2.1**(V3-C 3j closures)— D28 链,3i 完成后启动
+- **v3.2.4**(V3-C 3l.3 `Vec<T>`/`Map<K,V>` std lib)— 等 3i 完
+- **V2-C v2.8.0**(N 代 fixed point)— 跨 axis,3i + 3j ship 后启动
+
+### 5.2 跨边界 / Cross-boundary
+
+- **jhyy_OS M8d launch 硬前置**:**1/N 满足**(compositor 路径基本就位 — 实际 instantiation
+  待 v3.2.0b)
+- **jhyy_OS M11 launch 硬前置解锁**:parser/AST surface 已就位
+- **D28** v3.2.0 → v3.2.0b 串行锁启 → v3.2.0b → v3.2.1 → v3.2.4 全 D28 锁
+- **D-GUI-11** 锁(2026-09-01):compositor generic over T 路径,sema + parser surface ready
+
+---
+
+## 6. Deferred to v3.2.0b(本次 ship 不达项)
+
+**核心问题**:`mono_expand_module` 的完整实现(mono.jhyy)在深路径触发 jhyy
+struct deref 不稳定性。
+
+### 6.1 具体路径(实测)
+
+1. **NODE_TYPE_DECL 字段 offset access** ✓ — `node_type_decl_data(td)` 增 NODE_SIZE
+   后,offset 0/8/16/24 读 `sym/body/type_params/ntype_params` 正确
+2. **NodeModule 字段 offset access** ✓ — 同样 offset 0/8/16/20/28 正确
+3. **GenericInstRecord 字段 offset access** ✓ — offset 0/8/16/24 正确
+4. **NodeModule/GenericInstRecord 的 struct deref** ✗ — `(*mdd).ngeneric_insts`
+   读到 wrong bytes(probe 显示 offset 28 = 2,deref = 0)
+5. **NodeStructDef/NodeEnumDef 的 struct deref** 部分 ✗ — `(*sd).nfields`
+   在某些 case 读到 wrong bytes(配合 `node_struct_def_data` 加 NODE_SIZE 后)
+6. **StructFieldDecl/EnumVariantDecl 的 struct deref** ✗ — `(*fld).type_annot`
+   在嵌套 context 下读到 wrong bytes
+7. **Sym 的 struct deref** 部分 ✗ — `(*sym).name` 大多 OK,但跨 arena pointer
+   路径(`arena_alloc` 出来的 sym → 跨 fn 传 → deref)有 edge cases
+
+### 6.2 缓解策略
+
+- **本次 ship**:mono_expand_module 改为 `return 0`(no-op);其他 helper code 保留
+  在文件里、注释清楚;`sema.jhyy` 的 Pass 1.5 hook 保留但调用 no-op
+- **v3.2.0b 行动**:
+  - 加 6-8 个针对 `*sym.name` / `(*sd).nfields` / `(*fld).type_annot` 的 unit-style
+    微测试,定位 struct deref 稳的边界
+  - 如果 deep path 不稳,**`mono_subst_node` 全部用 offset access**(已经在浅层用过的
+    模式,需要扩展到所有 Sym/StructFieldDecl/EnumVariantDecl deref)
+  - 可能需要把 clone_and_subst 拆成多个小 fn,每个 fn 单独 debug deref 边界
+  - 必要时**加 `arena` 旁路 helper**:`sym_name_safe(sym) -> *u8` 走 offset 而非
+    `(*sym).name`,强制所有 caller 用 safe variant
+
+### 6.3 风险评估
+
+- **parser.surface 已经工作**(`type Foo<T>` + `Foo<i32>` 语法都 parse OK)
+- **codegen 已经跳过 generic def**(Pass 2/3 `ntype_params > 0` skip)
+- **唯一阻塞 runtime**:`mono_expand_module` body(已写好但禁用)
+- **无 regress**(104/104 PASS 验证)
+- **无 ABI 影响**(`Type` struct 不动,C-side struct layout 不变)
+
+v3.2.0b 是 v3.2.0 的直接延续,在 fn body 路径重新激活 monomorphize。同 worktree,
+per `feedback_v3b_no_phaseb_worktree`。
+
+---
+
+## v3.2.0b — 3i generics root cause fix + struct/enum activate + CapTable<T> refactor
+
+**Status**: ✅ shipped (`f4a3ded`, 2026-09-08)
+**Tag**: `v3.2.0b` (TBD — final ship commit after C4)
+**D43 baseline**: N10 = `f4a3ded` (jhyy_v2..v5 SHA `d35656a3d72c75e211d26ab1cad73af7d6cd92f22851ba2a21a444a0a1b208e4`)
+
+### Scope (per `feedback_plans_per_version` 单 plan)
+
+解决 v3.2.0 § 6 列 deferred items:
+- **Root cause fix**:`mono_find_generic_def` L102-104 `(*s).name` → offset read (C1 `6dfe6bc`, per v3.2.0 plan § 6.2 stage-0 codegen stack-spill mitigation)
+- **Activate `mono_expand_module` body**:从 no-op 改为完整 walk + clone + append,all offset access(C2 `f4a3ded`)
+- **Parser skip_default fix**:`_skip_default = 1` flag set but never checked in v3.2.0 ship;hoist + gate default IDENT branch(C2)
+- **5 SKIP→real tests**:`generics_struct` / `generics_ptr_field` / `generics_multi_param` / `generics_enum` / `generics_err_unsubst` 全 PASS EXIT=42(C2)
+- **CapTable<T> 真 generic refactor**:`type CapTable<T> = struct { data: *Cap<T>, len: i64 }`,layout 16B 保留(C3 同 commit)
+- **不扩 NodeCall / NodeFuncDecl** (deferred v3.2.0c per stage-2 拆)
+- **不动 codegen.jhyy / abi_amd64_win.jhyy / types.jhyy** (0 行,monomorphize 出的 cloned struct/enum 是 non-generic,走现有 emit)
+
+### Root cause (per v3.2.0 § 6.1 stage-0 codegen bug)
+
+不是 mono caller offset 错(388 行 mono.jhyy 真正不稳只有 1 处);是 stage-0 jhyy codegen
+对 `(*ptr).field` 在 deep nested context 下的 stack-spill 不全(QBE 内部 codegen 限制,
+DEFERRED 到 v2.x 末 QBE 自写 stage)。v3.2.0b 是 caller-side mitigation,不动 stage-0。
+
+### Verification (per `feedback_fix_evaluation_rule` 5/5 PASS EXIT=42)
+
+- **5 SKIP→real**:5/5 EXIT=42 (regress --tests 验证)
+  - `generics_struct.jhyy` — `Pair<i32>` alloc8 / `Pair<i64>` alloc16 (jhyy_get_il 验证 distinct struct)
+  - `generics_ptr_field.jhyy` — `Vec<i32>` / `Vec<i64>` field round-trip
+  - `generics_multi_param.jhyy` — `Map2<i32, i64>` / `Map2<i64, i32>` asymmetric substitution
+  - `generics_enum.jhyy` — `Option<i32>` instantiation
+  - `generics_err_unsubst.jhyy` — E0060 fall-through path
+- **2 cap_table tests**:2/2 EXIT=42
+  - `cap_table_basic.jhyy` — `sizeof(CapTable<i32>) == 16`,跨 fn CapTable<i32> pass
+  - `cap_table_advanced.jhyy` — `sizeof(CapTable<PhantomData<i32>>) == 16`,ZST 不污染
+- **Full regress**:111/111 passed, 0 failed, 15 skipped (was 109/104/17 at v3.2.0)
+- **D43 closure**:`jhyy_v2..v5` SHA `d35656a3...` byte-equal,N9 (`2e9866c`) → **N10**
+- **No codegen/types/abi diff**:`git diff compiler/src0/codegen.jhyy types.jhyy abi_amd64_win.jhyy` empty
+
+### Cross-ref
+
+- L2 设计:`docs/plans/v3/v3.2.0b-plan.md`(待 ship 后建档)
+- Spec supplement:`docs/abis/jhyy-lang-spec-generics-supplement-v3.2.0b.md`
+- 上游:v3.2.0 (`2e9866c`) § 6 deferred items → 本 sprint 全部解
+- 下游:v3.2.0c (generic fn + turbofish) · v3.2.1 (3j closures) · v3.2.4 (3l.3 Vec<T>/Map<K,V>)
+- D-GUI-11 锁 (2026-09-01):compositor generic over T 路径,v3.2.0b 兑现 M8d launch 硬前置 1/N → 完整
+- D28:`v3.2.0 → v3.2.0b → v3.2.0c → v3.2.1 → v3.2.4` 串行锁链,v3.2.0b ship 解锁 1 节点
+- D43 chain:`v3.1.2` (N8 `1fff447`) → `v3.2.0` (N9 `2e9866c`) → **v3.2.0b** (N10 `f4a3ded`)
+
+### Out of scope (deferred to v3.2.0c 或后续)
+
+- Generic fn `fn max<T>(...)` + turbofish + call-site inference → **v3.2.0c**
+- `mono_subst_block` / `mono_subst_stmt` / `mono_subst_expr` 深 body walk → v3.2.0c
+- 嵌套泛型 `Vec<Vec<T>>` (worklist-to-fixpoint) → v3.x 中
+- PhantomData 嵌套 Cap 完整 codegen 路径 → v3.x 中
+
+---
+
+## v3.2.0c — 3i fn path: turbofish syntax + monomorphize + per-clone sym isolation
+
+**Status**: ✅ shipped (TBD — final ship commit after tag)
+**Tag**: `v3.2.0c`
+**D43 baseline**: N11 = TBD (jhyy_v2..v5 byte-equal verified 2026-09-08, SHA `b87c932038055321dc4caa134b914b99598cd9ea568b641eeb4fc4bd72592ddb`)
+
+### Scope (per `feedback_plans_per_version` 单 plan)
+
+解决 v3.2.0b § "Out of scope" 列表项 1+2:
+- **`fn max<T, U>(...)` 语法 parse**:parse_func generic arm peek `<` after fn name,push_scope + collect SYM_TYPE type_ptr=0 sentinels + store on NodeFuncDecl.type_params/ntype_params(C2 `0dcbda8`)
+- **`max::<T, U>(args)` turbofish parse**:parse_expr IDENT primary branch 加 3-token lookahead (IDENT + `::` + `<`) → parser_mangle_type_node + parser_record_generic_inst → plumb type_args/ntype_args 到 NODE_CALL AST 节点(C2)
+- **`mono_clone_func_decl`**:深 clone NodeFuncDecl body + 11 个字段全 copy + body 走 mono_subst_block(C3 `ad75e99`)
+- **`mono_subst_block` / `mono_subst_stmt` / `mono_subst_expr`**:覆盖所有 stmt/expr kind (NODE_BINARY/CALL/FIELD/INDEX/CAST/UNARY/ADDR_OF/DEREF/ARRAY_LIT/SLICE_LIT/SLICE_RANGE + NODE_BLOCK/IF/WHILE/FOR/LET/RETURN/ASSIGN/EXPR_STMT/MATCH/DEFER/BREAK/CONTINUE),全 offset access pattern (per v3.2.0b mitigation)(C3)
+- **`check_func_decl` body skip**:offset access `(*fd).ntype_params` @ 88 (per v3.2.0b L102-104 经验),避免 stage-0 codegen stack-spill(C4 `fa34293`)
+- **`infer_type` NODE_CALL turbofish handling**:detects ntype_args > 0 → resolve callee IDENT.sym → if SYM_FN trigger `mono_expand_fn_call` + rewrite NODE_IDENT.sym to mangled sym (per call-site sym 替换 model)(C4)
+- **`cg_func` skip gate**:mirror check_func_decl pattern,offset access `ntype_params @ 88` → skip body emit for generic def(原始 `fn max<T>` 不 emit,cloned `max$i32` / `max$f64` 走 normal emit)(C4 + C5)
+- **`mono_expand_fn_call`**:per-call-site mangled_name symtab_lookup dedupe,clone via mono_clone_func_decl + overwrite cloned.sym to mangled sym + append to module.decls(C3)
+- **2 新 test placeholder 1 real**:generics_fn_turbofish_basic.jhyy (EXIT=42 ✅) drop SKIP + generics_fn_call_site_inference.jhyy 删除(deferred v3.2.0d — call-site inference 是 plan 范围外,见 § scope 收紧)
+- **NodeFuncDecl +16B** (type_params@80 + ntype_params@88) / **NodeCall +16B** (type_args@24 + ntype_args@32)(C1 `cdc7f5d`)
+
+### Root cause (3 处连锁 bug,C5 修)
+
+1. **shared param_sym 错位**:mono_clone_func_decl 原版 share old_p_sym → check_func_decl 跑 max$i32 + max$f64 时后者 type_ptr=f64 覆盖前者 type_ptr=i32 → abi_win_emit_function_header 读错 type_ptr → QBE `csgtw` on f64 参数 fail。
+   **Fix**:每个 cloned param 分配 fresh sym (symtab_alloc_sym + name 复用)。
+
+2. **cloned body IDENT sym 错位**:fresh sym per-clone 但 body IDENT (e.g. `a > b`) 还指向 OLD param_sym → cloned fn scope 只 register fresh sym → body IDENT lookup 报 "undefined variable"。
+   **Fix**:写 `mono_rewrite_idents_in_stmt/expr` walker (16B remap pair per param),在 mono_subst_block 返回后 in-place rewrite body IDENT sym。
+
+3. **stage-0 segfault from debug prints**:cfd_param/pi1-6k/_dbg_p* 等 30+ 临时 debug prints 触发 stage-0 jhyy codegen stack-spill bug,`make` 自己 segfault。
+   **Fix**:全删 debug prints (cfd_entry/param + p1/p2/p3/P3a trace),保留 production 路径。
+
+### Scope 收紧 (call-site inference 推到 v3.2.0d)
+
+- **删除** `generics_fn_call_site_inference.jhyy`(原 C2 placeholder,test `max(3, 5)` 无 turbofish)。
+- **v3.2.0c ship scope** = 完整 fn + turbofish + monomorphize + per-clone sym isolation。
+- **Call-site type inference** (从 arg types 推 T,无 turbofish) → **v3.2.0d** (3i fn path 阶段 3):
+  - 需要 generic fn sym 有 type_ptr (e.g. `fn(T, T) -> T` 模板类型),目前 P1 设 SYM_FN 但 type_ptr=0。
+  - 需要 infer_type NODE_CALL 在 no-turbofish 时 args 推断 T 然后 mono_expand_fn_call。
+  - 范围超出 v3.2.0c ship gate 2/2 EXIT=42 测试集。
+- D28 锁链仍 hold:`v3.2.0 → v3.2.0b → v3.2.0c → v3.2.1 (3j closures) → v3.2.4 (3l.3 Vec<T>)`。
+
+### Verification (ship gate)
+
+- **`make all`** green (stage-0 编 src0/ 无 segfault,debug prints 已清)
+- **`regress.py`**:112/112 passed, 0 failed, 15 skipped (was 111/111/15 at v3.2.0b)
+  - `generics_fn_turbofish_basic.jhyy` EXIT=42 ✅
+  - 5/5 v3.2.0b tests 不退化 (generics_struct/ptr_field/multi_param/enum/err_unsubst)
+- **`jhyy_get_il` on `generics_fn_turbofish_basic.jhyy`**:断言 `max$i32` 是 `export function w $max$i32(w %a, w %b)` (i32) + `max$f64` 是 `export function d $max$f64(d %a, d %b)` (f64) — per-clone fresh sym + body IDENT rewrite 路径生效
+- **D43 selfhost N11 byte-equal**:`jhyy_v2.exe == jhyy_v3.exe == jhyy_v4.exe == jhyy_v5.exe`,SHA `b87c932038055321dc4caa134b914b99598cd9ea568b641eeb4fc4bd72592ddb` ✅
+- **0 改动验证**:`git diff v3.2.0b..v3.2.0c -- compiler/src0/abi_amd64_win.jhyy types.jhyy ir.jhyy symtab.jhyy codegen_amd64_emit_call.jhyy` empty
+
+### Out of scope (deferred to v3.2.0d 或后续)
+
+- Call-site type inference `max(3, 5)` 推 T → **v3.2.0d**
+- 嵌套泛型 `Vec<Vec<T>>` (worklist-to-fixpoint) → v3.x 中
+- PhantomData 嵌套 Cap 完整 codegen 路径 → v3.x 中
+- 泛型 closures → v4.4.0 (per v3.2.1 plan)
+- 泛型 bounds `<T: Ord>` → v3.x 末
+- Lifetime 泛型 `<'a, T>` → v4.3.0 (lexer 无 tick token)
+- const generic → v4.5.0
+- Trait objects `dyn Trait` → v4.6.0
+
+---
+
+## v3.2.0d — 3i fn path: call-site type inference (Rust-style `max(3, 5)`)
+
+**Status**: ✅ shipped
+**Tag**: `v3.2.0d`
+**D43 baseline**: N12 = `01209313cc61b974c9603d4a78acf9703d78193c4dd186448a4e9f78a8f2b362` (v1→v4 byte-equal verified 2026-09-08)
+
+### Scope (per `feedback_plans_per_version` 单 plan)
+
+实现 v3.2.0c § "Out of scope" 列表项 1 推到本 sprint 的内容:
+- **`mono_type_to_type_node`** helper (mono.jhyy +71):`*Type → *Node` 转换,call-site inference 时把 arg 类型 (e.g. `i32` / `f64`) 转换为 mono_mangle_type_node_fn 能识别的 NODE_IDENT (prim sym) / NODE_UNARY (ptr) / NODE_IDENT (struct)。Fallback: unsupported KIND → 返 0 触发 E0062 "cannot infer type parameter"。
+- **sema.jhyy inference arm (+359)** 在 NODE_CALL turbofish `else` 分支(per v3.2.0b L102-104 mitigation,全 offset access):
+  - 检测 `callee_sym.kind == SYM_FN` + `ntype_args == 0` + `mono_find_generic_def` 命中 → 进入 inference
+  - Walk fn params,匹配 type_annot.sym (per parser.jhyy L3150,type_params 存的是 *Sym 不是 *Node) → 记录 param_slot[i] 映射表
+  - Walk call args,`infer_type(arg)` → `*Type` → `mono_type_to_type_node` → 写到 type_args[matched_slot]
+  - T agreement 检查:mangle-equality cmp (strcmp 后 0-终止,因 jhyy 无 memcmp)
+  - 调 `mono_expand_fn_call` → rewrite callee.sym = mangled_sym
+  - **Inline cloned fn type_ptr setup**(L2273 check_func_decl 定义晚于本处,jhyy 无 forward decl):手动 build KIND_FUNC type + 设 mangled.type_ptr + kind=SYM_FN + 每个 cloned param sym 的 type_ptr + kind=SYM_VAR
+  - **Inline cloned body IDENT type_ptr propagation**(`mono_propagate_idents_in_expr` / `_to_cloned_body` helpers,~140 行):walk cloned body,每个 NODE_IDENT 的 type_ptr 从 sym.type_ptr 复制 — 因为 cloned fn 是 Pass 3b 才 append 的,Pass 3a 已 finish,Pass 3b 跳过 mangled-$ → 不会 check_func_decl → body IDENT.type_ptr 不会自动 set,需要手动 propagate(否则 csgtw on f64 等 fail)。
+- **2 新 test**(drop SKIP):
+  - `generics_fn_call_site_inference.jhyy`:`max(3, 5)` + `max(3.0, 5.0)` → emit 2 distinct fns `max$i32` (w) + `max$f64` (d)
+  - `generics_fn_call_site_mixed_dedup.jhyy`:`max(3, 5)` (call-site) + `max::<i32>(7, 2)` (turbofish) + `max(1, 9)` (call-site) → emit 1 `max$i32` instance(dedup 真发生 via symtab_lookup)
+
+### Root cause (3 处连锁 bug,v3.2.0d 修)
+
+1. **`mono_type_to_type_node` KIND_PRIMITIVE 找不到 prim sym**:尝试 `symtab_lookup(global_scope, "i32")` 返 0(prim syms 是 parse_type 时 lazy 注册到 current_scope,不是 global_scope)。**Fix**:用 `type_to_string(t)` 直接拿 prim name,合成 fake Sym via arena_alloc(56) + 设 name / kind=SYM_TYPE / 其他 0。
+2. **type_params storage 类型 confusion**:parser.jhyy L3150 `*tpslot = _tpsym as *u8` 存的是 *Sym,**不是** *Node。最初 match 时 deref NODE IDENT 错位,报 "no argument for some type parameter"。**Fix**:直接 `let tp_sym2 = *((gd_tp as i64 + tj2 * 8) as **Sym); if pt_sym2 == tp_sym2 as *u8 { matched_slot = tj2; ... }`。
+3. **cloned fn 在 Pass 3b 中 check_func_decl 没跑,导致 ms.type_ptr=0 + body IDENT.type_ptr=0**:turbofish path 在 Pass 3a 已跑过 → Pass 3b 跑 call 时 ms.type_ptr 已 set。Inference path 是 call site 自己 trigger mono,Pass 3a 已 finish,Pass 3b 跳过 mangled-$ → cloned fn 没被 check 任何东西。Recursive infer_type(callee IDENT) 看 type_ptr=0 → "undefined variable"。**Fix**:inline check_func_decl 的 type_ptr setup(fn_sym + 每个 param_sym)+ walk body 设 IDENT.type_ptr(jhyy 无 forward refs,所以 inline 而不是 call)。
+
+### Verification (ship gate)
+
+- **`make all`** green(stage-0 编 src0/ 无 segfault,inline helper 编译通过)
+- **`regress.py`**:114/114 passed, 0 failed, 15 skipped (was 113/113/15 at v3.2.0c)
+  - `generics_fn_call_site_inference.jhyy` EXIT=42 ✅
+  - `generics_fn_call_site_mixed_dedup.jhyy` EXIT=42 ✅
+  - 7/7 v3.2.0b/c tests 不退化 (`generics_struct` / `generics_ptr_field` / `generics_multi_param` / `generics_enum` / `generics_err_unsubst` / `generics_fn_turbofish_basic` / `cap_table_basic` / `cap_table_advanced`)
+- **`jhyy_get_il` on `generics_fn_call_site_inference.jhyy`**:断言 `max$i32` (`function w $max$i32(w %a, w %b)`) + `max$f64` (`function d $max$f64(d %a, w %b)`) — 2 distinct fn emit
+- **`jhyy_get_il` on `generics_fn_call_site_mixed_dedup.jhyy`**:断言只有 **1 个** `max$i32` (`function w $max$i32(w %a, w %b)`) — dedup hit 真发生 via `mono_expand_fn_call` L1298 `symtab_lookup` 共享
+- **D43 selfhost N12 byte-equal**:jhyy_v1.exe.exe (C-side baseline) + jhyy_v2.exe + jhyy_v3.exe + jhyy_v4.exe all compile `src0/main.jhyy` to byte-equal `.il` SHA `01209313cc61b974c9603d4a78acf9703d78193c4dd186448a4e9f78a8f2b362` ✅ (was N11 = `b87c9320...` at v3.2.0c — re-baselined)
+- **0 改动验证**:`git diff v3.2.0c..v3.2.0d -- compiler/src0/ast.jhyy parser.jhyy symtab.jhyy codegen.jhyy types.jhyy ir.jhyy abi_amd64_win.jhyy` empty
+- **`mono.jhyy` 仅新 `mono_type_to_type_node` helper** (+71 行),v3.2.0c ship 的 750 行 fn path 0 改动
+- **`sema.jhyy` 仅 NODE_CALL turbofish `else` 分支** (+359 行,含 inline helpers),v3.2.0c turbofish `if` 分支 (L958-998) 0 改动
+
+### Out of scope (deferred to v3.2.x 后续 或 v3.x 末)
+
+- return-position T 推断 (`fn max<T>(...) -> T`, 无 arg 是 T) → v3.2.0e
+- 嵌套 generic fn (`fn outer<T>(inner: fn(T) -> T)`) → v3.x 中
+- 高阶 trait bound 推断 (`T: Ord`) → v3.x 末
+- *Cap<T> / *mut T 推断边界(跟 v3.1.x `&mut` 交互) → v3.x 中
+- *Type → *Node 转换 KIND_FUNC / KIND_ARRAY / KIND_SLICE 全支持 → v3.x 中(v3.2.0d MVP 仅 KIND_PRIMITIVE / KIND_STRUCT / KIND_POINTER)
+- Recursive inference debug log → 不做(跑通即可,不加 debug print)
+- 泛型 closures → v3.2.1 (3j, D28 锁链下一节点)
+- Vec<T> / Map<K,V> std lib → v3.2.4 (3l.3, M11 launch 硬前置)
+- jhyy self-source 迁 `Vec<T>` → M11 launch (不阻本 ship)
+
+### Commit / Tag
+
+- **Commit C1**:`feat(mono+sema): call-site type inference for generic fn calls (3i fn path complete)`(axis-v3 commit `c7cf5b4`)
+- **Commit C2** (本段):`chore(docs): append v3.2.0d changelog section + spec supplement (call-site inference)`
+- **Tag**:`v3.2.0d`
+- **Post-tag D43 N12 SHA**:`01209313cc61b974c9603d4a78acf9703d78193c4dd186448a4e9f78a8f2b362`
+
+---
+
+## 7. Cross-ref
+
+- L1 设计:`docs/plans/roadmap/v3.x-language-expansion.md § Sprint 3i`
+- L2 设计:`docs/plans/v3/v3.2.0-plan.md`(83 行)
+- 上游:`v3.1.2-plan.md` (CapTable + 跨 fn Cap<T>, N8 = `1fff447`)
+- 下游:`v3.2.0b-plan.md` · `v3.2.1-plan.md` · `v3.2.4-plan.md`
+- 跨 axis:V2-C v2.8.0 N 代 fixed point
+- D-GUI-11 lock:`jhyy_OS/docs/coordination.md § 3`;D28 + M8d/M11 launch gates:`docs/plans/v2/v2.0.0-os-prep.md § 1`
+- D43 chain:`docs/logs/v3/changelog-v3.1.md` v3.1.2 段(N8 = `1fff447`)
+
+---
+
+## 8. Commit / Tag
+
+- **Commit**:`feat(generics): add struct/enum monomorphize scaffolding (3i parser+AST; runtime defer v3.2.0b)`
+- **Tag**:`v3.2.0` (per `feedback_v3b_no_phaseb_worktree`)
+- **Post-tag SHA fill-in**:本文件 § "umbrella" 头锚 N9 = `<commit sha>`
+- **Auto-push**:per `feedback_auto_push_after_commit`

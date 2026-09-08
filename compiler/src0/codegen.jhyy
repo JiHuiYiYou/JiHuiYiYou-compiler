@@ -57,6 +57,13 @@ extern fn jh_fputs_stderr(s: *u8) -> i32;
 extern fn jh_sprintf_f64(buf: *u8, val: f64) -> i32;
 extern fn jh_sprintf_f32(buf: *u8, val: f64) -> i32;
 
+// V3-B v3.0.1: inline asm side-file append (per feedback_qbe_crlf_root_cause:
+//   IL/ASM/binary files use "ab" not "a" to avoid Windows \n→\r\n mangling).
+extern fn fopen(path: *u8, mode: *u8) -> *u8;
+extern fn fwrite(buf: *u8, size: i64, count: i64, fp: *u8) -> i64;
+extern fn fclose(fp: *u8) -> i32;
+extern fn strlen(s: *u8) -> i64;
+
 // fprintf 重定向：v0 codegen 用 fprintf(stderr, ...) 写 warning。jhyy 走
 // jh_fputs_stderr 单字符串参数风格 → caller 用 StringBuilder 拼好单字符串再传
 // 注：本 commit 不实际 emit warning（C 端 codegen 也不太 emit warning），占位
@@ -365,6 +372,18 @@ fn cg_dbg_emit_file(ir: *IRBuf, filename: *u8) -> i32 {
 
 fn cg_dbg_emit_loc(cg_raw: *u8, line: i32) -> i32 {
     let cg = cg_raw as *CGContext;
+    // v3.0.2 (3b naked): naked fns emit NO QBE IR, so `dbgloc` at top-level
+    // (no enclosing function) is invalid QBE syntax. Skip dbgloc emit when
+    // the current function is naked. The asm body still gets its source line
+    // recorded in the .s via the inline asm itself (no DWARF needed).
+    if (*cg).current_fn != (0 as *u8) {
+        // current_fn is already a *NodeFuncDecl (set in cg_func: `current_fn = fd as *u8`).
+        // Do NOT call node_func_decl_data — that would double-add NODE_SIZE().
+        let cfd = (*cg).current_fn as *NodeFuncDecl;
+        if (*cfd).is_naked != (0 as i32) {
+            return 0;
+        }
+    }
     if line == (*cg).last_dbg_line { return 0; }
     if line <= (0 as i32) { return 0; }
     let ir = (*cg).ir as *IRBuf;
@@ -585,6 +604,21 @@ fn ir_new_int(val: i64) -> IRVal {
 fn cg_emit_load(cg_raw: *u8, dst: IRVal, t_raw: *u8, addr: IRVal) -> i32 {
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
+    // v3.0.3 (3c volatile): 标记 volatile load.emit comment "volatile" 让 .il
+    //   grep 可命中,也提醒 reader 此 load 是 volatile。每次 load 已强制 fresh temp
+    //   (cg_expr NODE_IDENT 路径走 ir_new_tmp + cg_emit_load),无 regalloc reuse;
+    //   QBE IL 不识别 volatile keyword,所以仅发注释 — codegen 主路径下保证"no regalloc"
+    //   靠 cg_expr NODE_IDENT 每次新 temp 的纪律,不靠 qbe 本身。
+    let mut is_volatile_load: i32 = 0 as i32;
+    if t_raw != (0 as *u8) {
+        let vt = t_raw as *Type;
+        if (*vt).is_volatile != (0 as i32) {
+            is_volatile_load = 1 as i32;
+        }
+    }
+    if is_volatile_load != (0 as i32) {
+        ir_emit_str(ir, "    # volatile load\n" as *u8);
+    }
     if t_raw == (0 as *u8) {
         return ir_emit_load(ir, dst, QBE_W(), addr);
     }
@@ -628,6 +662,13 @@ fn cg_emit_load(cg_raw: *u8, dst: IRVal, t_raw: *u8, addr: IRVal) -> i32 {
 fn cg_emit_store_primitive(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> i32 {
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
+    // v3.0.3 (3c volatile): 标记 volatile store(per cg_emit_load 同逻辑)。
+    if t_raw != (0 as *u8) {
+        let vt = t_raw as *Type;
+        if (*vt).is_volatile != (0 as i32) {
+            ir_emit_str(ir, "    # volatile store\n" as *u8);
+        }
+    }
     if t_raw == (0 as *u8) {
         // Sprint 4.3 A fix: NULL type 时用 val.qbe_type 决定 store 宽度 — 不是 hardcoded QBE_W().
         //   修 slice/array 路径 heap corruption 根因: 写 64-bit ptr (QBE_L) 时应该用 storel,
@@ -702,6 +743,15 @@ fn cg_copy_struct(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) ->
         let ftype = *ftype_slot;
         let foffset_ptr = ptr_add_u8(fdesc_ptr, 16 as i64) as *i64;
         let offset = *foffset_ptr;
+
+        // v3.1.1 (V3-C 3g.5): PhantomData ZST 字段不 emit 任何 IR。
+        // 理由: PhantomData size=0/align=1, struct layout 阶段 offset 不推进
+        // (sema.jhyy:2166-2193 layout 循环天然支持 0-size 字段),
+        // codegen 层无需 load/store/copy 该字段。直接 continue 避免 tmp 浪费。
+        if (*ftype).kind == KIND_PHANTOM() {
+            i = i + (1 as i64);
+            continue;
+        }
 
         // compute field addresses
         // v0.9 wip commit 2.8 (B-struct fix): 对齐 v0 codegen.c:140-148
@@ -3629,6 +3679,57 @@ let cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*matched_node).type_pt
         return zero;
     }
 
+    // ── NODE_ASM_BLOCK ──
+    // V3-B v3.0.1: asm!(...) inline asm macro per D42 (docs/plans/v2/v2.0.0-os-prep.md).
+    //   codegen does NOT emit QBE IL — instead appends raw asm string to a
+    //   side-file (compiler/build/obj/_inline_asm.buf, fopen "ab" per
+    //   feedback_qbe_crlf_root_cause). main.jhyy concatenates that file to
+    //   the .s file before gcc link. v3.0.1 only supports a single string
+    //   literal — operands array always NULL.
+    if kind == NODE_ASM_BLOCK() {
+        let ad = node_asm_block_data(n);
+        let asm_buf_path = "compiler/build/obj/_inline_asm.buf" as *u8;
+        let afp = fopen(asm_buf_path, "ab" as *u8);
+        if afp != (0 as *u8) {
+            let text_len = strlen((*ad).text);
+            let _w1 = fwrite((*ad).text, 1 as i64, text_len, afp);
+            let nl = "\n" as *u8;
+            let _w2 = fwrite(nl, 1 as i64, 1 as i64, afp);
+            let _c = fclose(afp);
+        }
+        // Return zero IRVal (asm is stmt-position; never used as expr value).
+        return zero;
+    }
+    // v3.0.5 (3f memory barrier): fence_* builtin → emit raw mnem to
+    // _fence.buf side-file (separate from _inline_asm.buf for clarity).
+    //   kind 0 = seq_cst → "mfence\n"
+    //   kind 1 = acquire → "lfence\n"
+    //   kind 2 = release → "sfence\n"
+    // main.jhyy reads _fence.buf + concats to temp_asm before gcc link.
+    if kind == NODE_BUILTIN_FENCE() {
+        let fd = node_builtin_fence_data(n);
+        let mut mnem: *u8 = "sfence" as *u8;  // default fallback
+        if (*fd).kind == (0 as i64) {
+            mnem = "mfence" as *u8;
+        }
+        if (*fd).kind == (1 as i64) {
+            mnem = "lfence" as *u8;
+        }
+        if (*fd).kind == (2 as i64) {
+            mnem = "sfence" as *u8;
+        }
+        let fence_buf_path = "compiler/build/obj/_fence.buf" as *u8;
+        let ffp = fopen(fence_buf_path, "ab" as *u8);
+        if ffp != (0 as *u8) {
+            let mnem_len = strlen(mnem);
+            let _fw1 = fwrite(mnem, 1 as i64, mnem_len, ffp);
+            let nl = "\n" as *u8;
+            let _fw2 = fwrite(nl, 1 as i64, 1 as i64, ffp);
+            let _fc = fclose(ffp);
+        }
+        return zero;
+    }
+
     // ── 未实现 case：返回 zero IRVal（commit 4 补全）──
     return zero;
 }
@@ -3767,6 +3868,15 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
     //   走 abi_win_* (跟 v2.8.0 ship 行为字节相同, byte-equal hold)。SysV (2/3) →
     //   abi_sysv_* emit。
     let is_sysv = (target_tag == TARGET_AMD64_SYSV() || target_tag == TARGET_AMD64_SYSV_FREESTANDING()) as i32;
+
+    // v3.2.0c (3i fn path): skip generic fn body (ntype_params > 0); cloned
+    //   instances (ntype_params == 0) walk the normal emit path.
+    //   offset access (per v3.2.0b mitigation): ntype_params @ NodeFuncDecl offset 88.
+    let fd_off2 = fd as i64;
+    let ntp_off2 = (fd_off2 + (88 as i64)) as *i64;
+    if *ntp_off2 > (0 as i64) {
+        return 1;
+    }
     let fd_sym_raw = (*fd).sym;
     if fd_sym_raw == (0 as *u8) {
         return 0;
@@ -3805,6 +3915,16 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
         _hdr = abi_sysv_emit_function_header(ir, fd_sym, ret_qt, is_sret, (*fd).params, nparams);
     } else {
         _hdr = abi_win_emit_function_header(ir, fd_sym, ret_qt, is_sret, (*fd).params, nparams);
+
+    // v3.0.2 (3b naked): naked fns skip QBE export entirely. The asm body is
+    // emitted to the D42 side-file (_inline_asm.buf) via cg_expr NODE_ASM_BLOCK.
+    // QBE sees no declaration for the naked fn → no generated .s symbol →
+    // linker resolves `call naked_fn` (from QBE-emitted code in callers) to
+    // the `.globl naked_fn` + `naked_fn:` declared in the raw asm side-file.
+    if (*fd).is_naked != (0 as i32) {
+        let _nhdr = emit_naked_func_header(ir, fd_sym);
+    } else {
+        let _hdr = abi_win_emit_function_header(ir, fd_sym, ret_qt, is_sret, (*fd).params, nparams);
     }
 
     // reset cg (per-function)
@@ -3871,24 +3991,40 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
     }
 
     // body
+    // v3.0.2 (3b naked): body still goes through cg_expr so asm!() stmts get
+    // their text appended to the side-file via NODE_ASM_BLOCK handler.
+    // But the standard QBE epilogue (cg_body_returns check + abi_win_emit_return
+    // + closing brace) is skipped — naked fn has no QBE IR, just side-file.
     let body_val = cg_expr(cg_raw, (*fd).body as *Node);
 
-    // body_returns check
-    let body_returns: i32 = cg_body_returns((*fd).body as *Node);
+    if (*fd).is_naked == (0 as i32) {
+        // body_returns check
+        let body_returns: i32 = cg_body_returns((*fd).body as *Node);
 
-    if body_returns == 0 {
-        if is_sret != 0 {
-            // 用 IRVal literal (struct 构造) 包 sret_slot_id, 避免读
-            // (*cg).sret_slot 触发 bug 8 struct-to-buffer copy
-            let sret_addr = IRVal { kind: 0, id: (*cg).sret_slot_id as i32, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-            // Sprint 4.25 W-005 #2 真修: body_val is sentinel IRVal{id=0} when
-            // `cg_body_returns()` is syntactic-only (e.g. body is `if c { return A }
-            // else { return B }` — both arms terminate, but the if-expression
-            // still produces a value, and codegen returns the pre-return then_val
-            // which was never overwritten). Without this guard, cg_copy_struct
-            // emits `copy %t0` and QBE rejects the whole function.
-            if irval_is_undef(body_val) == 0 {
-                let _copy = cg_copy_struct(cg_raw, ret_type, sret_addr, body_val);
+        if body_returns == 0 {
+            if is_sret != 0 {
+                // 用 IRVal literal (struct 构造) 包 sret_slot_id, 避免读
+                // (*cg).sret_slot 触发 bug 8 struct-to-buffer copy
+                let sret_addr = IRVal { kind: 0, id: (*cg).sret_slot_id as i32, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+                // Sprint 4.25 W-005 #2 真修: body_val is sentinel IRVal{id=0} when
+                // `cg_body_returns()` is syntactic-only (e.g. body is `if c { return A }
+                // else { return B }` — both arms terminate, but the if-expression
+                // still produces a value, and codegen returns the pre-return then_val
+                // which was never overwritten). Without this guard, cg_copy_struct
+                // emits `copy %t0` and QBE rejects the whole function.
+                if irval_is_undef(body_val) == 0 {
+                    let _copy = cg_copy_struct(cg_raw, ret_type, sret_addr, body_val);
+                }
+                let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+                // v2.1.0 Stage 1c.3: abi_win_emit_return — sret branch → empty ret.
+                let _r = abi_win_emit_return(ir, v, 1);
+            } else if ret_qt != (0 as i32) {
+                // v2.1.0 Stage 1c.3: abi_win_emit_return — value branch.
+                let _r = abi_win_emit_return(ir, body_val, 0);
+            } else {
+                let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+                // v2.1.0 Stage 1c.3: abi_win_emit_return — void/sentinel branch.
+                let _r = abi_win_emit_return(ir, v, 0);
             }
             let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
             // v2.1.0 Stage 1c.3: abi_win_emit_return — sret branch → empty ret.
@@ -3918,10 +4054,16 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
             } else {
                 _r3 = abi_win_emit_return(ir, v, 0);
             }
-        }
-    }
 
-    ir_emit_str(ir, "}\n\n" as *u8);
+
+        }
+
+        ir_emit_str(ir, "}\n\n" as *u8);
+    }
+    // Naked fn: no QBE epilogue. The side-file raw asm body (appended by
+    // cg_expr NODE_ASM_BLOCK) ends with the asm!() statements — caller is
+    // responsible for emitting `ret` / `iret` / etc. as needed (validated by
+    // sema check_naked_body that body has asm!() stmts).
     return 1;
 }
 
@@ -3964,6 +4106,11 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
     // (no if for TARGET_AMD64_SYSV — directly fall through)
     let md = node_module_data(module);
     let ndeccls = (*md).ndeccls;
+    // v3.0.0 (3d no_std): flag indicates `#[no_std]` module attr was set.
+    // When 1, we emit `.note.GNU-stack noalloc` and write a side-file flag
+    // so main.jhyy's link step switches to `-nostartfiles -nodefaultlibs`.
+    // The default path (is_no_std==0) is byte-identical to the v2.4.0 IL.
+    let is_no_std: i32 = (*md).is_no_std;
 
     // alloc CGContext + locals arena block（一次性；每 func 进 cg_func reset nlocals）
     let cg_buf = arena_alloc((*ir).arena, CGCONTEXT_SIZE());
@@ -4224,22 +4371,71 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
     }
 
     // Pass B: 逐个 func decl dispatch → cg_func
-    jh_fputs_stderr("[cg] Pass B start\n" as *u8);
     let mut di: i64 = 0 as i64;
+    // v3.0.4 (3e link_section): open side-file `_section_directive.buf` for
+    // writing per-function section directives. main.jhyy reads this after QBE
+    // generates the .s and walks the file to insert `.section <name>` lines
+    // before each function's label. Format: `<mangled_name>|<section_name>\n`.
+    // Skipped for naked fns (they go through `_inline_asm.buf`, not QBE).
+    let mut section_fp: *u8 = 0 as *u8;
+    let section_path = "compiler/build/obj/_section_directive.buf" as *u8;
+    let section_open_fp = fopen(section_path, "wb" as *u8);
+    if section_open_fp != (0 as *u8) {
+        section_fp = section_open_fp;
+    }
     while di < ndeccls {
-        if di % (1000 as i64) == (0 as i64) {
-            jh_fputs_stderr("[cg] B i=" as *u8);
-            jh_fmt_lld_stderr("%d" as *u8, di);
-            jh_fputs_stderr("\n" as *u8);
-        }
         let d_slot = ptr_add_u8((*md).decls, di * (8 as i64)) as **Node;
         let d_node = *d_slot;
         if d_node == (0 as *Node) { di = di + (1 as i64); } else {
         if (*d_node).kind == NODE_FUNC_DECL() {
             cg_func(cg_raw, d_node, inline_fns_raw, n_inline, t);
+
+            // v3.0.4 (3e link_section): if non-naked fn has link_section,
+            // write `<mangled>|<section_name>\n` to side-file BEFORE cg_func.
+            // Naked fns skip this — they emit their own .globl + label via
+            // _inline_asm.buf and don't appear in QBE .s output.
+            let fd_node = node_func_decl_data(d_node);
+            if (*fd_node).is_naked == (0 as i32) {
+                if (*fd_node).link_section != (0 as *u8) {
+                    if section_fp != (0 as *u8) {
+                        let fn_sym = (*fd_node).sym as *Sym;
+                        let _w1 = fwrite((*fn_sym).name, 1 as i64, strlen((*fn_sym).name), section_fp);
+                        let _w2 = fwrite("|" as *u8, 1 as i64, 1 as i64, section_fp);
+                        let _w3 = fwrite((*fd_node).link_section, 1 as i64, strlen((*fd_node).link_section), section_fp);
+                        let _w4 = fwrite("\n" as *u8, 1 as i64, 1 as i64, section_fp);
+                    }
+                }
+            }
+            cg_func(cg_raw, d_node, inline_fns_raw, n_inline);
         }
         }  // close else from NULL guard
         di = di + (1 as i64);
     }
+    // Close section_directive side-file. main.jhyy unlinks after reading.
+    if section_fp != (0 as *u8) {
+        let _sc = fclose(section_fp);
+    }
+
+    // v3.0.0 (3d no_std): if is_no_std=1, write a side-file marker that
+    // main.jhyy reads to switch the link line to
+    // `-nostartfiles -nodefaultlibs -Wl,--entry=main`. QBE itself already
+    // emits the `.section .note.GNU-stack,"",@progbits` directive in
+    // qbe/emit.c:208 for ELF, so we don't need a custom one in the IL.
+    // The default path (is_no_std==0) skips this block entirely → IL is
+    // byte-identical to v2.4.0 (verified by manual diff; integration test
+    // re-checks).
+    if is_no_std != (0 as i32) {
+        // Side-file flag at compiler/build/obj/_no_std.flag. Use direct
+        // fopen "wb" (per feedback_qbe_crlf_root_cause: IL/derived files
+        // must use binary mode to avoid Windows \n → \r\n mangling).
+        let flag_path = "compiler/build/obj/_no_std.flag" as *u8;
+        let flag_fp = fopen(flag_path, "wb" as *u8);
+        if flag_fp != (0 as *u8) {
+            let payload = "no_std\n" as *u8;
+            let _w = fwrite(payload, 1 as i64, 7 as i64, flag_fp);
+            let _c = fclose(flag_fp);
+        }
+    }
+
     return 1;
 }

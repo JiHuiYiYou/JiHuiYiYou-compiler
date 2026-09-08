@@ -113,6 +113,10 @@ fn TOKEN_NULL()        -> i32 { return 69 as i32; }
 fn TOKEN_DEFER()       -> i32 { return 70 as i32; }
 // v1.3.5: # (start of #[attr] attribute prefix)
 fn TOKEN_HASH()        -> i32 { return 71 as i32; }
+// v3.0.3 (3c volatile): `volatile` type qualifier keyword. Only valid as type
+// prefix for primitive types — parser rejects compound types (struct/pointer/array)
+// per spec § 6 限制。Chained `volatile volatile T` 也 reject。
+fn TOKEN_VOLATILE()    -> i32 { return 72 as i32; }
 
 // ════════════════════════════════════════════════════
 // Token + Lexer 结构（平铺字段，无 nested struct）
@@ -191,6 +195,8 @@ fn lookup_keyword(name: *u8, len: i64) -> i32 {
     }
     if len == 8 as i64 {
         if strncmp(name, "continue" as *u8, 8 as i64) == 0 as i32 { return TOKEN_CONTINUE(); }
+        // v3.0.3 (3c volatile): volatile keyword
+        if strncmp(name, "volatile" as *u8, 8 as i64) == 0 as i32 { return TOKEN_VOLATILE(); }
     }
     return TOKEN_IDENT();
 }
@@ -920,5 +926,7 @@ fn token_kind_name(kind: i32) -> *u8 {
     if kind == TOKEN_NULL() { return "null" as *u8; }
     if kind == TOKEN_DEFER() { return "defer" as *u8; }
     if kind == TOKEN_HASH() { return "#" as *u8; }
+    // v3.0.3 (3c volatile)
+    if kind == TOKEN_VOLATILE() { return "volatile" as *u8; }
     return "?" as *u8;
 }

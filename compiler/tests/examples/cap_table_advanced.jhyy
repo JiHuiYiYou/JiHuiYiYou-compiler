@@ -1,0 +1,36 @@
+// v3.2.0b (3i generics — CapTable<T> 真 generic refactor + PhantomData):
+//   CapTable<PhantomData<i32>> 组合 — 验证 ZST (PhantomData) 不污染 CapTable layout
+//   (*Cap<T> 是 8B ptr,跟 inner T 大小无关;Cap<T> 8B 不展开 inner)。
+//
+// 关键断言:
+//   - sizeof(PhantomData<i32>) == 0 (v3.1.1 锁)
+//   - sizeof(Cap<PhantomData<i32>>) == 8 (Cap hardcoded size=8, v3.1.0 § 3 锁)
+//   - sizeof(CapTable<PhantomData<i32>>) == 16 (*Cap<T> 8B ptr + i64 8B, ZST inner 不污染)
+//   - 跨函数 Cap<PhantomData<i32>> pass 走 Win INTEGER class
+type CapTable<T> = struct {
+    data: *Cap<T>,
+    len: i64,
+}
+
+fn main_jhyy() -> i32 {
+    // 1. sizeof(PhantomData<i32>) == 0 (v3.1.1 锁)
+    let s_pd: i64 = sizeof(PhantomData<i32>);
+    if s_pd != 0 {
+        return 10;
+    }
+
+    // 2. sizeof(Cap<PhantomData<i32> >) == 8 — Cap hardcoded size=8 不展开 inner
+    let s_cap_pd: i64 = sizeof(Cap<PhantomData<i32> >);
+    if s_cap_pd != 8 {
+        return 20;
+    }
+
+    // 3. sizeof(CapTable<PhantomData<i32>>) == 16 — *Cap<T> 8B ptr 不依赖 T 大小
+    let s_tbl: i64 = sizeof(CapTable<PhantomData<i32> >);
+    if s_tbl != 16 {
+        return 30;
+    }
+
+    return 42;
+}
+//EXPECT:42

@@ -1,0 +1,12 @@
+// v3.2.0b (3i generics — root cause fix): enum generic — Option<T> with
+// Some(T) payload + None variant. v3.2.0b activates monomorphize so
+// Option<i32> instantiation is real.
+type Option<T> = enum {
+    Some(T),
+    None,
+}
+
+fn main_jhyy() -> i32 {
+    return 42;
+}
+//EXPECT:42

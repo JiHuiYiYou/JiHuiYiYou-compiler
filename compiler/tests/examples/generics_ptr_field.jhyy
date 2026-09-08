@@ -1,0 +1,19 @@
+// v3.2.0b (3i generics — root cause fix + monomorphize activate):
+//   `Vec<T>` with `*T` pointer field — generic-on-pointer instantiated to
+//   `Vec<i32>` (and `Vec<i64>` below). Field access round-trip.
+type Vec<T> = struct {
+    data: *T,
+    len: i32,
+    cap: i32,
+}
+
+fn main_jhyy() -> i32 {
+    let v1: Vec<i32> = Vec<i32> { data: 0 as *i32, len: 10, cap: 20 };
+    if v1.len != 10 { return 10; }
+    if v1.cap != 20 { return 20; }
+    let v2: Vec<i64> = Vec<i64> { data: 0 as *i64, len: 100, cap: 200 };
+    if v2.len != 100 { return 30; }
+    if v2.cap != 200 { return 40; }
+    return 42;
+}
+//EXPECT:42

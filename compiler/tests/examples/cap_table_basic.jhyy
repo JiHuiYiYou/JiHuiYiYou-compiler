@@ -1,0 +1,50 @@
+// v3.2.0b (3i generics — CapTable<T> 真 generic refactor):
+//   CapTable<T> 现在用真 generic struct (not M0 简化 CapTable = struct { data: i64, len: i64 })。
+//   Layout 16B: data: *Cap<T> (8B ptr) + len: i64 (8B) — v3.1.0 锁 Cap<T> 8B,
+//   ptr 8B, 跟 M0 layout 完全一致。
+//   跨函数 Cap<T> pass-by-value 走 Win x64 INTEGER class (RCX/RDX/R8/R9)。
+type CapTable<T> = struct {
+    data: *Cap<T>,
+    len: i64,
+}
+
+// 跨函数 Cap<T> pass-by-value 测试 (走 Win x64 INTEGER class, RCX arg)
+fn cross_fn_sum_cap(c: Cap<i32>) -> i64 {
+    let s: i64 = sizeof(c);
+    return s;
+}
+
+// 跨函数 CapTable<i32> pass-by-value — 16B struct 走 2 × QBE_L slots.
+fn cross_fn_sum_table(t: CapTable<i32>) -> i64 {
+    return t.data as i64 + t.len;
+}
+
+fn main_jhyy() -> i32 {
+    // 1. sizeof(Cap<i32>) == 8
+    let s_cap: i64 = sizeof(Cap<i32>);
+    if s_cap != 8 {
+        return 10;
+    }
+
+    // 2. sizeof(CapTable<i32>) == 16 (*Cap<T> 8B + i64 8B, 跟 M0 一致)
+    let s_tbl: i64 = sizeof(CapTable<i32>);
+    if s_tbl != 16 {
+        return 11;
+    }
+
+    // 3. 跨函数 Cap<T> pass — 编 Cap<i32> literal + cross_fn_sum_cap
+    let cap_pass: i64 = cross_fn_sum_cap(0 as Cap<i32>);
+    if cap_pass != 8 {
+        return 20;
+    }
+
+    // 4. 跨函数 CapTable<i32> pass — 编 struct literal + cross_fn_sum_table
+    let tbl: CapTable<i32> = CapTable<i32> { data: 0 as *Cap<i32>, len: 5 as i64 };
+    let tbl_sum: i64 = cross_fn_sum_table(tbl);
+    if tbl_sum != 5 {
+        return 30;
+    }
+
+    return 42;
+}
+//EXPECT:42

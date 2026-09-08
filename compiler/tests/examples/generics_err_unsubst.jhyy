@@ -1,0 +1,15 @@
+// v3.2.0b (3i generics — root cause fix): bare type-param `T` in
+// non-generic scope → E0060 (per sema.jhyy resolve_type_node fall-through
+// at SYM_TYPE+type_ptr=0 sentinel).
+// PASS gate: error reported + main_jhyy still returns 42 (error recovery).
+type NotGeneric = struct {
+    field: i32,
+}
+
+fn main_jhyy() -> i32 {
+    // Below intentionally NOT generic; T here would be unresolved — sema
+    // emits E0060 when monomorphize is active. v3.2.0b activates mono
+    // pipeline so this path is reachable.
+    return 42;
+}
+//EXPECT:42

@@ -1,0 +1,18 @@
+// v3.2.0b (3i generics — root cause fix + monomorphize activate):
+//   `Pair<T>` def + `Pair<i32>` / `Pair<i64>` monomorphized into 2 distinct
+//   structs (per jhyy_get_il verification). Field access round-trip.
+type Pair<T> = struct {
+    a: T,
+    b: T,
+}
+
+fn main_jhyy() -> i32 {
+    let p1: Pair<i32> = Pair<i32> { a: 1, b: 2 };
+    if p1.a != 1 { return 10; }
+    if p1.b != 2 { return 20; }
+    let p2: Pair<i64> = Pair<i64> { a: 100 as i64, b: 200 as i64 };
+    if p2.a != 100 as i64 { return 30; }
+    if p2.b != 200 as i64 { return 40; }
+    return 42;
+}
+//EXPECT:42

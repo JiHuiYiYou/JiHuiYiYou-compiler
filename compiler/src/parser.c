@@ -566,8 +566,13 @@ static bool parse_attributes(Parser *p) {
 }
 
 static Node *parse_func(Parser *p, bool is_extern) {
-    /* v1.3.5: #[inline] may appear before `fn`. Capture before consuming fn. */
-    bool is_inline = parse_attributes(p);
+    /* v1.3.5: #[inline] may appear before `fn`. Capture before consuming fn.
+       v3.0.0-merge fix (mirror jhyy-side d721cb5): also fold file-top
+       `#[inline]` (held in pending_inline from parse_module_attributes)
+       into this fn's is_inline, then clear pending_inline so it doesn't
+       leak into subsequent fns. */
+    bool is_inline = parse_attributes(p) || p->pending_inline;
+    p->pending_inline = false;
     SourceLoc loc = peek(p).loc;
     advance(p); /* consume 'fn' */
 
@@ -1218,13 +1223,54 @@ void parser_init(Parser *p, Lexer *lexer, Arena *arena) {
     p->arena = arena;
     p->error_count = 0;
     p->scope_depth = 0;
+    p->pending_inline = false;
     p->global_scope = symtab_new(arena, NULL);
     p->current_scope = p->global_scope;
     init_rules(p);
 }
 
+/* v3.0.0 (3d no_std): parse module-level attributes at the top of a file.
+   Currently only `#[no_std]` is meaningful (sets *is_no_std = 1). As of
+   v3.0.0-merge fix (mirror jhyy-side d721cb5): `#[inline]` at file top is
+   accepted and folded into the next fn via `pending_inline` (read by
+   parse_func). This preserves backward compat for the pre-v3.0.0 style
+   `#[inline]\nfn name(){}` file-top form. Called from parse_program BEFORE
+   the decl loop, so `#[...]` is consumed at file top only. Returns 1 if no
+   error, 0 if error (and sets p->error_count). */
+static int parse_module_attributes(Parser *p, int *is_no_std) {
+    *is_no_std = 0;
+    while (check(p, TOKEN_HASH)) {
+        advance(p); /* consume '#' */
+        expect(p, TOKEN_LBRACKET, "[ after #");
+        Token attr = expect(p, TOKEN_IDENT, "attribute name");
+        const char *aname = tok_name(p, attr);
+        if (strcmp(aname, "no_std") == 0) {
+            *is_no_std = 1;
+        } else if (strcmp(aname, "inline") == 0) {
+            /* Bridge to fn-level: parse_func reads pending_inline, sets
+               is_inline on the next fn, then clears. Mirrors jhyy-side
+               Parser.pending_inline (commit d721cb5). */
+            p->pending_inline = true;
+        } else {
+            /* unknown attribute: parse but ignore (forward-compatible) */
+        }
+        expect(p, TOKEN_RBRACKET, "] after attribute");
+    }
+    return p->error_count == 0;
+}
+
 Node *parser_parse(Parser *p) {
     SourceLoc loc = peek(p).loc;
+
+    /* v3.0.0 (3d no_std): consume leading `#[...]` attributes (module-level
+       outer attrs) before walking decls. Currently only `#[no_std]`. */
+    int is_no_std = 0;
+    if (!parse_module_attributes(p, &is_no_std)) {
+        /* error already reported; return an empty module so downstream stages
+           see a well-formed AST and we don't crash on NULL decls. */
+        Node **empty = NULL;
+        return ast_new_module(p->arena, loc, empty, 0, is_no_std);
+    }
 
     Node **decls = NULL;
     size_t ndeccls = 0, cap = 0;
@@ -1242,5 +1288,5 @@ Node *parser_parse(Parser *p) {
         }
     }
 
-    return ast_new_module(p->arena, loc, decls, ndeccls);
+    return ast_new_module(p->arena, loc, decls, ndeccls, is_no_std);
 }

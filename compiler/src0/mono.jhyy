@@ -1,0 +1,1413 @@
+// mono.jhyy — v3.2.0 (V3-C 3i generics) monomorphize pipeline
+//
+// 在 sema Pass 1 (decl 注册) 之后,Pass 2 (layout resolve) 之前运行。
+// 输入:(*md).generic_insts (parser 累积的 {base_name, mangled_name, [args]})
+//      + (*md).decls 里的 generic struct/enum defs (ntype_params > 0)
+// 输出:克隆 + substitute 后的 NON-generic decls (ntype_params == 0),
+//      append 回 (*md).decls。Pass 2 走现有 layout 路径把它们当普通 struct 处理。
+//
+// 关键设计(per docs/plans/v3/v3.2.0-plan.md § 3.1 + § Implementation order):
+//   1. **Type struct 不动**:monomorphize 用 name-based source cloning,
+//      不走 Type.args(type_args → TYPE_SIZE 变 → ABI 全 touch)。
+//   2. **AST 扩展已经做完**:NodeTypeDecl / NodeModule 已经加 type_params /
+//      ntype_params / generic_insts / ngeneric_insts 字段(在 ast.jhyy)。
+//   3. **Sym 不动**:type-param 走 SYM_TYPE + type_ptr=0 哨兵,scope chain
+//      让 parser 在 body parse 时能找到。
+//   4. **substituter** (`mono_subst_node`):深克隆 AST 子树,NODE_IDENT.sym
+//      命中 type-param → 换 arg node (来自 parser 的 arg_types 数组)。
+//      非 type-param 节点走结构拷贝。
+//   5. **确定性**(D43 closure 要求):
+//      - mangled_name 由 parser 用 type_to_string(source-order 拼),已确定
+//      - inst 数组 source-discovery-order 由 parser 累积,Pass 1.5 按此顺序处理
+//      - dedupe by mangled_name
+//   6. **v1.x-subset**:只能用 arena_alloc + offset + let mut。
+//      **不能**用 generics/Cap/&mut/PhantomData/v3.1+ feature(C 端 stage-0 不认)。
+//      src0/*.jhyy 必须 stage-0 编得过 → bootstrap chain 不能断。
+//
+// **jhyy 限制**:no forward-refs。函数必须按依赖顺序定义:helpers 在前,
+//   public API (mono_expand_module) 在最后 — 否则报 undefined variable。
+
+import arena;
+import util;
+import ast;
+import symtab;
+
+// ════════════════════════════════════════════════════
+// Internal — module.decls append (doubling array, no size cap)
+// ════════════════════════════════════════════════════
+
+// mono_decls_append — append one decl 到 (*mdd).decls。Doubling array 模式;
+//   起始 cap = 16。
+//   mdd 参数实际是 *u8(NodeModule 在 arena 的地址),通过 offset 访问字段:
+//     decls @ offset 0, ndeccls @ offset 8
+fn mono_decls_append(arena: *Arena, mdd: *u8, decl: *Node) {
+    let mdd_ndeccls_off = ptr_add_u8(mdd, (8 as i64)) as *i64;
+    let mdd_decls_off = mdd as **u8;
+    let ndeccls = *mdd_ndeccls_off;
+    let decls_ptr = *mdd_decls_off;
+    let mut cap = if ndeccls < (16 as i64) {
+        (16 as i64)
+    } else {
+        ndeccls * (2 as i64)
+    };
+    while cap < ndeccls + (1 as i64) {
+        cap = cap * (2 as i64);
+    }
+    if cap > (65536 as i64) {
+        cap = 65536 as i64;
+    }
+    if cap < ndeccls + (1 as i64) {
+        cap = ndeccls + (1 as i64);
+    }
+    let mut new_decls_ptr: *u8 = decls_ptr;
+    if decls_ptr == (0 as *u8) || cap < ndeccls + (1 as i64) {
+        let ng = arena_alloc(arena, cap * (8 as i64));
+        if decls_ptr != (0 as *u8) {
+            if ndeccls > (0 as i64) {
+                memcpy(ng, decls_ptr, ndeccls * (8 as i64));
+            }
+        }
+        *mdd_decls_off = ng;
+        new_decls_ptr = ng;
+    }
+    let slot = (new_decls_ptr as i64 +
+                ndeccls * (8 as i64)) as **Node;
+    *slot = decl;
+    *mdd_ndeccls_off = ndeccls + (1 as i64);
+    return;
+}
+
+// ════════════════════════════════════════════════════
+// Internal — generic def lookup by base_name
+// ════════════════════════════════════════════════════
+
+// mono_find_generic_def — 遍历 (*md).decls 找 ntype_params > 0 且 sym.name
+//   == base_name 的 NODE_TYPE_DECL。
+// md is *NodeModule already (caller does `node_module_data(module)` first).
+fn mono_find_generic_def(md: *Node, base_name: *u8) -> *Node {
+    let mdd = md as *u8;
+    let mdd_ndeccls_off = ptr_add_u8(mdd, (8 as i64)) as *i64;
+    let mdd_decls_off = mdd as **u8;
+    let ndeccls = *mdd_ndeccls_off;
+    let decls_ptr = *mdd_decls_off;
+    let mut i: i64 = 0 as i64;
+    while i < ndeccls {
+        let d = *((decls_ptr as i64 + i * (8 as i64)) as **Node);
+        if d != (0 as *Node) {
+            if (*d).kind == NODE_TYPE_DECL() {
+                let td = node_type_decl_data(d);
+                // ntype_params @ offset 24 in NodeTypeDecl (sym @ 0 + body @ 8 + type_params @ 16 + ntype_params @ 24)
+                let td_ntype_params_off = ptr_add_u8(td as *u8, (24 as i64)) as *i64;
+                if *td_ntype_params_off > (0 as i64) {
+                    // v3.2.0b (3i root cause fix per changelog-v3.2 §6):
+                    //   避免 `(*s).name` 跨 fn deref — stage-0 jhyy codegen
+                    //   对 56B Sym struct deref 在 deep nested context 触发
+                    //   stack-spill 不全(DEFERRED 到 v2.x 末 QBE 自写)。
+                    //   改 offset read: Sym.name @ offset 0。
+                    let td_sym_off = td as **Sym;
+                    let s = *td_sym_off;
+                    let s_name = *((s as i64 + (0 as i64)) as **u8);
+                    if strcmp(s_name, base_name) == (0 as i32) {
+                        return d;
+                    }
+                }
+            }
+            // v3.2.0c (3i fn path): NODE_FUNC_DECL 也支持 generic (fn max<T>)
+            //   ntype_params @ offset 88 in NodeFuncDecl 96B layout。
+            if (*d).kind == NODE_FUNC_DECL() {
+                let fd2 = node_func_decl_data(d);
+                // ntype_params @ offset 88 (sym @0 + params @8 + nparams @16 + ret @24 +
+                //   body @32 + is_extern @40 + is_inline @44 + defers @48 + ndefers @56 +
+                //   is_naked @64 + link_section @72 + type_params @80 + ntype_params @88)
+                let fd_ntp_off = ptr_add_u8(fd2 as *u8, (88 as i64)) as *i64;
+                if *fd_ntp_off > (0 as i64) {
+                    let fd_sym_off2 = fd2 as **Sym;
+                    let s = *fd_sym_off2;
+                    let s_name = *((s as i64 + (0 as i64)) as **u8);
+                    if strcmp(s_name, base_name) == (0 as i32) {
+                        return d;
+                    }
+                }
+            }
+        }
+        i = i + (1 as i64);
+    }
+    return 0 as *Node;
+}
+
+// ════════════════════════════════════════════════════
+// Internal — substituter (深 clone + replace NODE_IDENT type-params)
+// ════════════════════════════════════════════════════
+
+// mono_subst_node — 深克隆 type AST subtree,把 NODE_IDENT.sym 命中
+//   type_params[i] 的节点换成 arg_nodes[i]。非 type-param 节点按结构
+//   克隆。
+//
+// 支持的 node kinds (v3.2.0 scope):
+//   NODE_IDENT — 主要目标
+//   NODE_UNARY — `*T` 指针包装,inner 递归
+//   NODE_ARRAY_TYPE — `[N]T`,elem_type 递归
+//   NODE_SLICE_TYPE — `[*]T`,elem_type 递归
+//   NODE_REF_TYPE — `&T` / `&mut T`,inner 递归
+//   其他 type kinds → 浅 clone (rare)
+//
+// 字段偏移访问 (避免 struct deref):
+//   NodeUnary:    op @0(8), expr @8(8)
+//   NodeArray:   elem_type @0(8), count_expr @8(8)
+//   NodeSliceT:  elem_type @0(8)
+//   NodeRefType: inner @0(8), is_mut @8(4), pad @12(4), lifetime @16(8) → total 24
+//   NodeIdent:   sym @0(8)
+// v3.2.0c (3i fn path) bug-fix: cloned fn 的 body IDENT 需要 sym rewrite
+//   (从 old_param_sym → cloned_p_sym),否则 cloned fn 内部 scope 查不到。
+//   单独写 mono_rewrite_idents_in_node walker — 只做 IDENT sym rewrite,
+//   不 clone。mono_clone_func_decl 在调 mono_subst_block 之后调它。
+fn mono_subst_node(arena: *Arena, node: *Node,
+                   type_params: *u8, arg_nodes: *u8,
+                   nargs: i64) -> *Node {
+    if node == (0 as *Node) {
+        return 0 as *Node;
+    }
+    let nk_off = node as *i32;
+    let nk = *nk_off;
+    if nk == NODE_IDENT() {
+        let id_data = (node as i64 + NODE_SIZE()) as *u8;
+        let id_sym_off = id_data as **Sym;
+        let sym = *id_sym_off;
+        // Sym layout: name @0 (8), kind @8 (4), pad @12 (4), type_ptr @16 (8)...
+        let sym_name = *((sym as i64 + (0 as i64)) as **u8);
+        let name = sym_name;
+        let mut found: i64 = -1 as i64;
+        let mut k: i64 = 0 as i64;
+        while k < nargs {
+            let tp = *((type_params as i64 + k * (8 as i64)) as **Sym);
+            let tp_name = *((tp as i64 + (0 as i64)) as **u8);
+            if strcmp(tp_name, name) == (0 as i32) {
+                found = k;
+                break;
+            }
+            k = k + (1 as i64);
+        }
+        if found >= (0 as i64) {
+            let arg = *((arg_nodes as i64 + found * (8 as i64)) as **Node);
+            return arg;
+        }
+        let new_n = ast_new_ident(arena, (*node).loc_filename, (*node).loc_line,
+                                  (*node).loc_col, sym);
+        return new_n;
+    }
+    if nk == NODE_UNARY() {
+        let un_data = (node as i64 + NODE_SIZE()) as *u8;
+        let un_op_off = un_data as *i64;
+        let un_expr_off = ptr_add_u8(un_data, (8 as i64)) as **Node;
+        let op_val = *un_op_off;
+        let new_inner = mono_subst_node(arena, *un_expr_off,
+                                        type_params, arg_nodes, nargs);
+        return ast_new_unary(arena, (*node).loc_filename, (*node).loc_line,
+                             (*node).loc_col, op_val as i32, new_inner);
+    }
+    if nk == NODE_ARRAY_TYPE() {
+        let at_data = (node as i64 + NODE_SIZE()) as *u8;
+        let at_elem_off = at_data as **Node;
+        let at_count_off = ptr_add_u8(at_data, (8 as i64)) as **Node;
+        let new_elem = mono_subst_node(arena, *at_elem_off,
+                                       type_params, arg_nodes, nargs);
+        return ast_new_array_type(arena, (*node).loc_filename, (*node).loc_line,
+                                  (*node).loc_col, new_elem, *at_count_off);
+    }
+    if nk == NODE_SLICE_TYPE() {
+        let st_data = (node as i64 + NODE_SIZE()) as *u8;
+        let st_elem_off = st_data as **Node;
+        let new_elem = mono_subst_node(arena, *st_elem_off,
+                                       type_params, arg_nodes, nargs);
+        return ast_new_slice_type(arena, (*node).loc_filename, (*node).loc_line,
+                                  (*node).loc_col, new_elem);
+    }
+    if nk == NODE_REF_TYPE() {
+        let rt_data = (node as i64 + NODE_SIZE()) as *u8;
+        let rt_inner_off = rt_data as **Node;
+        let rt_ismut_off = ptr_add_u8(rt_data, (8 as i64)) as *i32;
+        let rt_lifetime_off = ptr_add_u8(rt_data, (16 as i64)) as **Node;
+        let new_inner = mono_subst_node(arena, *rt_inner_off,
+                                        type_params, arg_nodes, nargs);
+        let lt = *rt_lifetime_off;
+        return ast_new_ref_type(arena, (*node).loc_filename, (*node).loc_line,
+                                (*node).loc_col, new_inner, *rt_ismut_off, lt);
+    }
+    // 其他:浅 clone,只保留 kind + loc,不复制 variant data
+    let buf = arena_alloc(arena, NODE_SIZE());
+    let n = ast_init_node(buf, nk,
+                          (*node).loc_filename, (*node).loc_line, (*node).loc_col);
+    return n;
+}
+
+// ════════════════════════════════════════════════════
+// v3.2.0c (3i fn path): 深 walk fn body — block / stmt / expr
+// ════════════════════════════════════════════════════
+//
+// mono_subst_expr / mono_subst_stmt / mono_subst_block — 对 fn body 内
+//   任何 expr/stmt 节点走深 clone + subst_node(替换 NODE_IDENT type-params)。
+//
+// 跟 mono_subst_node 区别:mono_subst_node 是 type AST substituter(只处理
+//   type-related nodes)。mono_subst_expr 覆盖全部 expr node kinds,递归
+//   走 sub-children。
+//
+// 全 offset access (per v3.2.0b L102-104 mitigation)。不写 `(*n).*` 模式。
+//
+// Plan § 1.1 #7: 完整覆盖所有 stmt/expr node kind (per user 2026-09-08 决定):
+//   exprs: NODE_BINARY / NODE_CALL / NODE_QUALIFIED_CALL / NODE_FIELD /
+//          NODE_INDEX / NODE_CAST / NODE_ARRAY_LIT / NODE_SLICE_LIT /
+//          NODE_SLICE_RANGE / NODE_ADDR_OF / NODE_DEREF / NODE_UNARY /
+//          NODE_SIZEOF / NODE_ALIGNOF / NODE_IDENT / NODE_INT / NODE_FLOAT /
+//          NODE_STRING / NODE_CHAR / NODE_BOOL / NODE_NULL / literals
+//   stmts: NODE_BLOCK / NODE_IF / NODE_WHILE / NODE_FOR / NODE_LET /
+//          NODE_RETURN / NODE_BREAK / NODE_CONTINUE / NODE_DEFER /
+//          NODE_ASSIGN / NODE_EXPR_STMT / NODE_MATCH
+
+// mono_subst_expr — 深克隆 expr node,递归 subst type-param IDENT。
+//   每个分支按 node kind 单独处理。
+fn mono_subst_expr(arena: *Arena, node: *Node,
+                  type_params: *u8, arg_nodes: *u8,
+                  nargs: i64) -> *Node {
+    if node == (0 as *Node) {
+        return 0 as *Node;
+    }
+    let nk_off = node as *i32;
+    let nk = *nk_off;
+    // Literals / type nodes — delegate to mono_subst_node (它 already handles
+    //   NODE_IDENT/UNARY/ARRAY_TYPE/SLICE_TYPE/REF_TYPE)
+    if nk == NODE_IDENT() { return mono_subst_node(arena, node, type_params, arg_nodes, nargs); }
+    if nk == NODE_UNARY() { return mono_subst_node(arena, node, type_params, arg_nodes, nargs); }
+    if nk == NODE_ARRAY_TYPE() { return mono_subst_node(arena, node, type_params, arg_nodes, nargs); }
+    if nk == NODE_SLICE_TYPE() { return mono_subst_node(arena, node, type_params, arg_nodes, nargs); }
+    if nk == NODE_REF_TYPE() { return mono_subst_node(arena, node, type_params, arg_nodes, nargs); }
+
+    // NODE_BINARY: op@0(4)+pad@4(4)+left@8(8)+right@16(8) = 24
+    if nk == NODE_BINARY() {
+        let bn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let bn_op_off = bn_data as *i32;
+        let bn_left_off = ptr_add_u8(bn_data, (8 as i64)) as **Node;
+        let bn_right_off = ptr_add_u8(bn_data, (16 as i64)) as **Node;
+        let new_left = mono_subst_expr(arena, *bn_left_off, type_params, arg_nodes, nargs);
+        let new_right = mono_subst_expr(arena, *bn_right_off, type_params, arg_nodes, nargs);
+        return ast_new_binary(arena, (*node).loc_filename, (*node).loc_line,
+                              (*node).loc_col, *bn_op_off, new_left, new_right);
+    }
+    // NODE_CALL: callee@0(8)+args@8(8)+nargs@16(8)+type_args@24(8)+ntype_args@32(8) = 40
+    //   callee 通常是 NODE_IDENT sym → mono_subst_expr 替换 type-param sym
+    if nk == NODE_CALL() {
+        let cn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let cn_callee_off = cn_data as **Node;
+        let cn_args_off = ptr_add_u8(cn_data, (8 as i64)) as **u8;
+        let cn_nargs_off = ptr_add_u8(cn_data, (16 as i64)) as *i64;
+        let nargs_val = *cn_nargs_off;
+        let new_callee = mono_subst_expr(arena, *cn_callee_off, type_params, arg_nodes, nargs);
+        // 深 clone args 数组
+        let new_args_buf = arena_alloc(arena, nargs_val * (8 as i64));
+        let mut ai: i64 = 0 as i64;
+        while ai < nargs_val {
+            let old_arg = *(((*cn_args_off) as i64 + ai * (8 as i64)) as **Node);
+            let new_arg = mono_subst_expr(arena, old_arg, type_params, arg_nodes, nargs);
+            *((new_args_buf as i64 + ai * (8 as i64)) as **Node) = new_arg;
+            ai = ai + (1 as i64);
+        }
+        return ast_new_call(arena, (*node).loc_filename, (*node).loc_line,
+                            (*node).loc_col, new_callee, new_args_buf, nargs_val,
+                            0 as *u8, 0 as i64);
+    }
+    // NODE_QUALIFIED_CALL: mod@0(8)+fn@8(8)+args@16(8)+nargs@24(8)+resolved@32(8) = 40
+    if nk == NODE_QUALIFIED_CALL() {
+        let qn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let qn_mod_off = qn_data as **Node;
+        let qn_fn_off = ptr_add_u8(qn_data, (8 as i64)) as **Node;
+        let qn_args_off = ptr_add_u8(qn_data, (16 as i64)) as **u8;
+        let qn_nargs_off = ptr_add_u8(qn_data, (24 as i64)) as *i64;
+        let nargs_val = *qn_nargs_off;
+        let new_mod = mono_subst_expr(arena, *qn_mod_off, type_params, arg_nodes, nargs);
+        let new_fn = mono_subst_expr(arena, *qn_fn_off, type_params, arg_nodes, nargs);
+        let new_args_buf = arena_alloc(arena, nargs_val * (8 as i64));
+        let mut ai: i64 = 0 as i64;
+        while ai < nargs_val {
+            let old_arg = *(((*qn_args_off) as i64 + ai * (8 as i64)) as **Node);
+            let new_arg = mono_subst_expr(arena, old_arg, type_params, arg_nodes, nargs);
+            *((new_args_buf as i64 + ai * (8 as i64)) as **Node) = new_arg;
+            ai = ai + (1 as i64);
+        }
+        return ast_new_qualified_call(arena, (*node).loc_filename, (*node).loc_line,
+                                      (*node).loc_col, new_mod, new_fn, new_args_buf, nargs_val);
+    }
+    // NODE_FIELD: target@0(8)+name@8(8) = 16
+    if nk == NODE_FIELD() {
+        let fn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let fn_target_off = fn_data as **Node;
+        let fn_name_off = ptr_add_u8(fn_data, (8 as i64)) as **u8;
+        let new_target = mono_subst_expr(arena, *fn_target_off, type_params, arg_nodes, nargs);
+        return ast_new_field(arena, (*node).loc_filename, (*node).loc_line,
+                             (*node).loc_col, new_target, *fn_name_off);
+    }
+    // NODE_INDEX: target@0(8)+index@8(8) = 16
+    if nk == NODE_INDEX() {
+        let in_data = (node as i64 + NODE_SIZE()) as *u8;
+        let in_target_off = in_data as **Node;
+        let in_index_off = ptr_add_u8(in_data, (8 as i64)) as **Node;
+        let new_target = mono_subst_expr(arena, *in_target_off, type_params, arg_nodes, nargs);
+        let new_index = mono_subst_expr(arena, *in_index_off, type_params, arg_nodes, nargs);
+        return ast_new_index(arena, (*node).loc_filename, (*node).loc_line,
+                             (*node).loc_col, new_target, new_index);
+    }
+    // NODE_CAST: target@0(8)+target_type@8(8) = 16
+    if nk == NODE_CAST() {
+        let cn_data2 = (node as i64 + NODE_SIZE()) as *u8;
+        let cn_tgt_off = cn_data2 as **Node;
+        let cn_tt_off = ptr_add_u8(cn_data2, (8 as i64)) as **Node;
+        let new_tgt = mono_subst_expr(arena, *cn_tgt_off, type_params, arg_nodes, nargs);
+        let new_tt = mono_subst_expr(arena, *cn_tt_off, type_params, arg_nodes, nargs);
+        return ast_new_cast(arena, (*node).loc_filename, (*node).loc_line,
+                            (*node).loc_col, new_tgt, new_tt);
+    }
+    // NODE_ARRAY_LIT: elems@0(8)+nelems@8(8) = 16
+    if nk == NODE_ARRAY_LIT() {
+        let an_data = (node as i64 + NODE_SIZE()) as *u8;
+        let an_elems_off = an_data as **u8;
+        let an_nelems_off = ptr_add_u8(an_data, (8 as i64)) as *i64;
+        let nelems_val = *an_nelems_off;
+        let new_elems_buf = arena_alloc(arena, nelems_val * (8 as i64));
+        let mut ei: i64 = 0 as i64;
+        while ei < nelems_val {
+            let old_e = *(((*an_elems_off) as i64 + ei * (8 as i64)) as **Node);
+            let new_e = mono_subst_expr(arena, old_e, type_params, arg_nodes, nargs);
+            *((new_elems_buf as i64 + ei * (8 as i64)) as **Node) = new_e;
+            ei = ei + (1 as i64);
+        }
+        return ast_new_array_lit(arena, (*node).loc_filename, (*node).loc_line,
+                                 (*node).loc_col, new_elems_buf, nelems_val);
+    }
+    // NODE_SLICE_LIT: 同 array_lit
+    if nk == NODE_SLICE_LIT() {
+        let sn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let sn_elems_off = sn_data as **u8;
+        let sn_nelems_off = ptr_add_u8(sn_data, (8 as i64)) as *i64;
+        let nelems_val = *sn_nelems_off;
+        let new_elems_buf = arena_alloc(arena, nelems_val * (8 as i64));
+        let mut ei: i64 = 0 as i64;
+        while ei < nelems_val {
+            let old_e = *(((*sn_elems_off) as i64 + ei * (8 as i64)) as **Node);
+            let new_e = mono_subst_expr(arena, old_e, type_params, arg_nodes, nargs);
+            *((new_elems_buf as i64 + ei * (8 as i64)) as **Node) = new_e;
+            ei = ei + (1 as i64);
+        }
+        return ast_new_slice_lit(arena, (*node).loc_filename, (*node).loc_line,
+                                 (*node).loc_col, new_elems_buf, nelems_val);
+    }
+    // NODE_SLICE_RANGE: target@0(8)+start@8(8)+end@16(8) = 24
+    if nk == NODE_SLICE_RANGE() {
+        let rn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let rn_target_off = rn_data as **Node;
+        let rn_start_off = ptr_add_u8(rn_data, (8 as i64)) as **Node;
+        let rn_end_off = ptr_add_u8(rn_data, (16 as i64)) as **Node;
+        let new_target = mono_subst_expr(arena, *rn_target_off, type_params, arg_nodes, nargs);
+        let new_start = mono_subst_expr(arena, *rn_start_off, type_params, arg_nodes, nargs);
+        let new_end = mono_subst_expr(arena, *rn_end_off, type_params, arg_nodes, nargs);
+        return ast_new_slice_range(arena, (*node).loc_filename, (*node).loc_line,
+                                   (*node).loc_col, new_target, new_start, new_end);
+    }
+    // NODE_ADDR_OF: operand@0(8) = 8
+    if nk == NODE_ADDR_OF() {
+        let an_data = (node as i64 + NODE_SIZE()) as *u8;
+        let an_op_off = an_data as **Node;
+        let new_op = mono_subst_expr(arena, *an_op_off, type_params, arg_nodes, nargs);
+        return ast_new_addr_of(arena, (*node).loc_filename, (*node).loc_line,
+                               (*node).loc_col, new_op);
+    }
+    // NODE_DEREF: operand@0(8) = 8
+    if nk == NODE_DEREF() {
+        let dn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let dn_op_off = dn_data as **Node;
+        let new_op = mono_subst_expr(arena, *dn_op_off, type_params, arg_nodes, nargs);
+        return ast_new_deref(arena, (*node).loc_filename, (*node).loc_line,
+                             (*node).loc_col, new_op);
+    }
+    // Literals (no children) — 浅 clone
+    if nk == NODE_INT() {
+        let v = (*node).type_ptr;
+        // ast_new_int: arena + loc + val + prim (i32 type kind from type_ptr bit pattern)
+        let val_off = (node as i64 + NODE_SIZE()) as *i64;
+        let val = *val_off;
+        let prim_off = ptr_add_u8(node as *u8, (NODE_SIZE() + (8 as i64))) as *i32;
+        let prim = *prim_off;
+        return ast_new_int(arena, (*node).loc_filename, (*node).loc_line,
+                           (*node).loc_col, val, prim);
+    }
+    // 其他:浅 clone (返回 kind 正确但无 variant data 的占位 node — 用 caller 处理)
+    let buf = arena_alloc(arena, NODE_SIZE());
+    let n = ast_init_node(buf, nk,
+                          (*node).loc_filename, (*node).loc_line, (*node).loc_col);
+    return n;
+}
+
+// mono_subst_stmt — 深克隆 stmt node,递归 subst sub-exprs。
+fn mono_subst_stmt(arena: *Arena, node: *Node,
+                  type_params: *u8, arg_nodes: *u8,
+                  nargs: i64) -> *Node {
+    if node == (0 as *Node) {
+        return 0 as *Node;
+    }
+    let nk_off = node as *i32;
+    let nk = *nk_off;
+    // NODE_BLOCK: stmts@0(8)+nstmts@8(8) = 16
+    if nk == NODE_BLOCK() {
+        let bn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let bn_stmts_off = bn_data as **u8;
+        let bn_nstmts_off = ptr_add_u8(bn_data, (8 as i64)) as *i64;
+        let nstmts_val = *bn_nstmts_off;
+        let new_stmts_buf = arena_alloc(arena, nstmts_val * (8 as i64));
+        let mut si: i64 = 0 as i64;
+        while si < nstmts_val {
+            let old_s = *(((*bn_stmts_off) as i64 + si * (8 as i64)) as **Node);
+            let new_s = mono_subst_stmt(arena, old_s, type_params, arg_nodes, nargs);
+            *((new_stmts_buf as i64 + si * (8 as i64)) as **Node) = new_s;
+            si = si + (1 as i64);
+        }
+        return ast_new_block(arena, (*node).loc_filename, (*node).loc_line,
+                             (*node).loc_col, new_stmts_buf, nstmts_val);
+    }
+    // NODE_IF: cond@0(8)+then@8(8)+else@16(8) = 24
+    if nk == NODE_IF() {
+        let in_data = (node as i64 + NODE_SIZE()) as *u8;
+        let in_cond_off = in_data as **Node;
+        let in_then_off = ptr_add_u8(in_data, (8 as i64)) as **Node;
+        let in_else_off = ptr_add_u8(in_data, (16 as i64)) as **Node;
+        let new_cond = mono_subst_expr(arena, *in_cond_off, type_params, arg_nodes, nargs);
+        let new_then = mono_subst_stmt(arena, *in_then_off, type_params, arg_nodes, nargs);
+        let new_else = mono_subst_stmt(arena, *in_else_off, type_params, arg_nodes, nargs);
+        return ast_new_if(arena, (*node).loc_filename, (*node).loc_line,
+                          (*node).loc_col, new_cond, new_then, new_else);
+    }
+    // NODE_WHILE: cond@0(8)+body@8(8) = 16
+    if nk == NODE_WHILE() {
+        let wn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let wn_cond_off = wn_data as **Node;
+        let wn_body_off = ptr_add_u8(wn_data, (8 as i64)) as **Node;
+        let new_cond = mono_subst_expr(arena, *wn_cond_off, type_params, arg_nodes, nargs);
+        let new_body = mono_subst_stmt(arena, *wn_body_off, type_params, arg_nodes, nargs);
+        return ast_new_while(arena, (*node).loc_filename, (*node).loc_line,
+                             (*node).loc_col, new_cond, new_body);
+    }
+    // NODE_FOR: var@0(8)+iter@8(8)+body@16(8) = 24
+    if nk == NODE_FOR() {
+        let fn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let fn_var_off = fn_data as **Node;
+        let fn_iter_off = ptr_add_u8(fn_data, (8 as i64)) as **Node;
+        let fn_body_off = ptr_add_u8(fn_data, (16 as i64)) as **Node;
+        let new_var = mono_subst_expr(arena, *fn_var_off, type_params, arg_nodes, nargs);
+        let new_iter = mono_subst_expr(arena, *fn_iter_off, type_params, arg_nodes, nargs);
+        let new_body = mono_subst_stmt(arena, *fn_body_off, type_params, arg_nodes, nargs);
+        return ast_new_for(arena, (*node).loc_filename, (*node).loc_line,
+                           (*node).loc_col, new_var, new_iter, new_body);
+    }
+    // NODE_LET: is_mutable@0(4)+pad@4(4)+sym@8(8)+type_annot@16(8)+init@24(8) = 32
+    if nk == NODE_LET() {
+        let ln_data = (node as i64 + NODE_SIZE()) as *u8;
+        let ln_mut_off = ln_data as *i32;
+        let ln_sym_off = ptr_add_u8(ln_data, (8 as i64)) as **u8;
+        let ln_annot_off = ptr_add_u8(ln_data, (16 as i64)) as **Node;
+        let ln_init_off = ptr_add_u8(ln_data, (24 as i64)) as **Node;
+        let mut_val = *ln_mut_off;
+        let new_sym = *ln_sym_off;  // sym ptr preserved (type-param sym is replaced during clone body, but here sym 是 let-bound var, 保持原 sym)
+        let new_annot = mono_subst_expr(arena, *ln_annot_off, type_params, arg_nodes, nargs);
+        let new_init = mono_subst_expr(arena, *ln_init_off, type_params, arg_nodes, nargs);
+        // ast_new_let signature: arena + loc + is_mutable + sym + type_annot + init
+        return ast_new_let(arena, (*node).loc_filename, (*node).loc_line,
+                           (*node).loc_col, mut_val, new_sym as *Sym, new_annot, new_init);
+    }
+    // NODE_RETURN: expr@0(8) = 8
+    if nk == NODE_RETURN() {
+        let rn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let rn_expr_off = rn_data as **Node;
+        let new_expr = mono_subst_expr(arena, *rn_expr_off, type_params, arg_nodes, nargs);
+        return ast_new_return(arena, (*node).loc_filename, (*node).loc_line,
+                              (*node).loc_col, new_expr);
+    }
+    // NODE_ASSIGN: target@0(8)+value@8(8) = 16
+    if nk == NODE_ASSIGN() {
+        let an_data = (node as i64 + NODE_SIZE()) as *u8;
+        let an_target_off = an_data as **Node;
+        let an_value_off = ptr_add_u8(an_data, (8 as i64)) as **Node;
+        let new_target = mono_subst_expr(arena, *an_target_off, type_params, arg_nodes, nargs);
+        let new_value = mono_subst_expr(arena, *an_value_off, type_params, arg_nodes, nargs);
+        return ast_new_assign(arena, (*node).loc_filename, (*node).loc_line,
+                              (*node).loc_col, new_target, new_value);
+    }
+    // NODE_EXPR_STMT: expr@0(8) = 8
+    if nk == NODE_EXPR_STMT() {
+        let en_data = (node as i64 + NODE_SIZE()) as *u8;
+        let en_expr_off = en_data as **Node;
+        let new_expr = mono_subst_expr(arena, *en_expr_off, type_params, arg_nodes, nargs);
+        return ast_new_expr_stmt(arena, (*node).loc_filename, (*node).loc_line,
+                                 (*node).loc_col, new_expr);
+    }
+    // NODE_DEFER: expr@0(8) = 8 (v1.3.6 defer statement)
+    if nk == NODE_DEFER() {
+        let dn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let dn_expr_off = dn_data as **Node;
+        let new_expr = mono_subst_expr(arena, *dn_expr_off, type_params, arg_nodes, nargs);
+        return ast_new_defer(arena, (*node).loc_filename, (*node).loc_line,
+                             (*node).loc_col, new_expr);
+    }
+    // NODE_BREAK / NODE_CONTINUE: no fields, 浅 clone
+    if nk == NODE_BREAK() {
+        return ast_new_break(arena, (*node).loc_filename, (*node).loc_line,
+                             (*node).loc_col);
+    }
+    if nk == NODE_CONTINUE() {
+        return ast_new_continue(arena, (*node).loc_filename, (*node).loc_line,
+                                (*node).loc_col);
+    }
+    // 退化:node 不是 stmt,fall through → 用 expr substituter(返回的可能是 expr node 不该用作 stmt;但 caller 保证是 stmt)
+    return mono_subst_expr(arena, node, type_params, arg_nodes, nargs);
+}
+
+// mono_subst_block — entry point,deep clone fn body block。fn body 是 NODE_BLOCK;
+//   跟 NODE_LET 等 stmt 一样走 mono_subst_stmt(它会处理 NODE_BLOCK case)。
+//   这里保留 fn 仅为 API 清晰。
+fn mono_subst_block(arena: *Arena, node: *Node,
+                   type_params: *u8, arg_nodes: *u8,
+                   nargs: i64) -> *Node {
+    return mono_subst_stmt(arena, node, type_params, arg_nodes, nargs);
+}
+
+// ════════════════════════════════════════════════════
+// Internal — body IDENT sym rewrite (v3.2.0c 3i fn path bug-fix)
+// ════════════════════════════════════════════════════
+
+// mono_rewrite_body_idents — walk cloned body,in-place rewrite IDENT sym:
+//   old_param_sym → cloned_p_sym (per mono_clone_func_decl remap).
+//   remap 是 16B per pair (old@0, cloned@8),用 sym 指针相等查(不按 name,
+//   不同 cloned fn 的 param 可能同名 e.g. 两个 fn 都有 "a")。
+//   不 clone;直接 patch id_sym_off。
+//   只在 mono_clone_func_decl 内调一次,完成后 remap arena 释放(jhyy arena
+//   一次性,无需显式 free)。
+
+fn mono_rewrite_idents_in_expr(node: *Node, remap: *u8, nremap: i64) -> i32 {
+    if node == (0 as *Node) {
+        return 0 as i32;
+    }
+    let nk_off = node as *i32;
+    let nk = *nk_off;
+    if nk == NODE_IDENT() {
+        // Check if IDENT's sym matches any remap entry (按 sym 指针相等)
+        let id_data = (node as i64 + NODE_SIZE()) as *u8;
+        let id_sym_off = id_data as **u8;
+        let cur = *id_sym_off;
+        let mut rk: i64 = 0 as i64;
+        while rk < nremap {
+            let old_s = *((remap as i64 + rk * (16 as i64)) as **u8);
+            if old_s == cur {
+                let new_s = *((remap as i64 + rk * (16 as i64) + (8 as i64)) as **u8);
+                *id_sym_off = new_s;
+                break;
+            }
+            rk = rk + (1 as i64);
+        }
+        return 1 as i32;
+    }
+    if nk == NODE_BINARY() {
+        let bn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let l = *((bn_data as i64 + (8 as i64)) as **Node);
+        let r = *((bn_data as i64 + (16 as i64)) as **Node);
+        let _x1 = mono_rewrite_idents_in_expr(l, remap, nremap);
+        let _x2 = mono_rewrite_idents_in_expr(r, remap, nremap);
+        return 1 as i32;
+    }
+    if nk == NODE_CALL() {
+        let cn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let cn_callee = *((cn_data as i64 + (0 as i64)) as **Node);
+        let cn_args = *((cn_data as i64 + (8 as i64)) as **u8);
+        let cn_nargs = *((cn_data as i64 + (16 as i64)) as *i64);
+        let _x1 = mono_rewrite_idents_in_expr(cn_callee, remap, nremap);
+        let mut ai: i64 = 0 as i64;
+        while ai < cn_nargs {
+            let a = *((cn_args as i64 + ai * (8 as i64)) as **Node);
+            let _x2 = mono_rewrite_idents_in_expr(a, remap, nremap);
+            ai = ai + (1 as i64);
+        }
+        return 1 as i32;
+    }
+    if nk == NODE_FIELD() {
+        let fn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let tg = *((fn_data as i64 + (0 as i64)) as **Node);
+        let _x1 = mono_rewrite_idents_in_expr(tg, remap, nremap);
+        return 1 as i32;
+    }
+    if nk == NODE_INDEX() {
+        let in_data = (node as i64 + NODE_SIZE()) as *u8;
+        let tg = *((in_data as i64 + (0 as i64)) as **Node);
+        let ix = *((in_data as i64 + (8 as i64)) as **Node);
+        let _x1 = mono_rewrite_idents_in_expr(tg, remap, nremap);
+        let _x2 = mono_rewrite_idents_in_expr(ix, remap, nremap);
+        return 1 as i32;
+    }
+    if nk == NODE_CAST() {
+        let cn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let tg = *((cn_data as i64 + (0 as i64)) as **Node);
+        let _x1 = mono_rewrite_idents_in_expr(tg, remap, nremap);
+        return 1 as i32;
+    }
+    if nk == NODE_ADDR_OF() || nk == NODE_DEREF() {
+        let an_data = (node as i64 + NODE_SIZE()) as *u8;
+        let in_ = *((an_data as i64 + (0 as i64)) as **Node);
+        let _x1 = mono_rewrite_idents_in_expr(in_, remap, nremap);
+        return 1 as i32;
+    }
+    if nk == NODE_UNARY() {
+        let un_data = (node as i64 + NODE_SIZE()) as *u8;
+        let ex = *((un_data as i64 + (8 as i64)) as **Node);
+        let _x1 = mono_rewrite_idents_in_expr(ex, remap, nremap);
+        return 1 as i32;
+    }
+    // Literals / type-only nodes: no nested expr to walk.
+    return 0 as i32;
+}
+
+fn mono_rewrite_idents_in_stmt(node: *Node, remap: *u8, nremap: i64) -> i32 {
+    if node == (0 as *Node) {
+        return 0 as i32;
+    }
+    let nk_off = node as *i32;
+    let nk = *nk_off;
+    if nk == NODE_BLOCK() {
+        let bn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let bn_stmts = *((bn_data as i64 + (0 as i64)) as **u8);
+        let bn_nstmts = *((bn_data as i64 + (8 as i64)) as *i64);
+        let mut si: i64 = 0 as i64;
+        while si < bn_nstmts {
+            let s = *((bn_stmts as i64 + si * (8 as i64)) as **Node);
+            let _x = mono_rewrite_idents_in_stmt(s, remap, nremap);
+            si = si + (1 as i64);
+        }
+        return 1 as i32;
+    }
+    if nk == NODE_IF() {
+        let in_data = (node as i64 + NODE_SIZE()) as *u8;
+        let c = *((in_data as i64 + (0 as i64)) as **Node);
+        let t = *((in_data as i64 + (8 as i64)) as **Node);
+        let e = *((in_data as i64 + (16 as i64)) as **Node);
+        let _x1 = mono_rewrite_idents_in_expr(c, remap, nremap);
+        let _x2 = mono_rewrite_idents_in_stmt(t, remap, nremap);
+        let _x3 = mono_rewrite_idents_in_stmt(e, remap, nremap);
+        return 1 as i32;
+    }
+    if nk == NODE_WHILE() {
+        let wn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let c = *((wn_data as i64 + (0 as i64)) as **Node);
+        let b = *((wn_data as i64 + (8 as i64)) as **Node);
+        let _x1 = mono_rewrite_idents_in_expr(c, remap, nremap);
+        let _x2 = mono_rewrite_idents_in_stmt(b, remap, nremap);
+        return 1 as i32;
+    }
+    if nk == NODE_FOR() {
+        let fn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let v = *((fn_data as i64 + (0 as i64)) as **Node);
+        let it = *((fn_data as i64 + (8 as i64)) as **Node);
+        let b = *((fn_data as i64 + (16 as i64)) as **Node);
+        let _x1 = mono_rewrite_idents_in_stmt(v, remap, nremap);
+        let _x2 = mono_rewrite_idents_in_expr(it, remap, nremap);
+        let _x3 = mono_rewrite_idents_in_stmt(b, remap, nremap);
+        return 1 as i32;
+    }
+    if nk == NODE_LET() {
+        let ln_data = (node as i64 + NODE_SIZE()) as *u8;
+        let an = *((ln_data as i64 + (0 as i64)) as **Node);
+        let in_ = *((ln_data as i64 + (8 as i64)) as **Node);
+        let _x1 = mono_rewrite_idents_in_expr(an, remap, nremap);
+        let _x2 = mono_rewrite_idents_in_expr(in_, remap, nremap);
+        return 1 as i32;
+    }
+    if nk == NODE_RETURN() {
+        let rn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let v = *((rn_data as i64 + (0 as i64)) as **Node);
+        let _x1 = mono_rewrite_idents_in_expr(v, remap, nremap);
+        return 1 as i32;
+    }
+    if nk == NODE_ASSIGN() {
+        let an_data = (node as i64 + NODE_SIZE()) as *u8;
+        let tg = *((an_data as i64 + (0 as i64)) as **Node);
+        let vl = *((an_data as i64 + (8 as i64)) as **Node);
+        let _x1 = mono_rewrite_idents_in_expr(tg, remap, nremap);
+        let _x2 = mono_rewrite_idents_in_expr(vl, remap, nremap);
+        return 1 as i32;
+    }
+    if nk == NODE_EXPR_STMT() {
+        let en_data = (node as i64 + NODE_SIZE()) as *u8;
+        let e = *((en_data as i64 + (0 as i64)) as **Node);
+        let _x1 = mono_rewrite_idents_in_expr(e, remap, nremap);
+        return 1 as i32;
+    }
+    if nk == NODE_DEFER() {
+        let dn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let e = *((dn_data as i64 + (0 as i64)) as **Node);
+        let _x1 = mono_rewrite_idents_in_expr(e, remap, nremap);
+        return 1 as i32;
+    }
+    if nk == NODE_BREAK() || nk == NODE_CONTINUE() {
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// Internal — clone struct/enum body + apply subst_node per field/variant
+// ════════════════════════════════════════════════════
+
+// mono_clone_struct_def — 深克隆 NODE_STRUCT_DEF,each field's type_annot
+//   走 mono_subst_node
+//   NodeStructDef layout: fields @0 (8), nfields @8 (8)
+//   StructFieldDecl layout: name @0 (8), type_annot @8 (8) = 16
+fn mono_clone_struct_def(arena: *Arena, body: *Node,
+                         type_params: *u8, arg_nodes: *u8,
+                         nargs: i64) -> *Node {
+    let sd = node_struct_def_data(body);
+    let sd_u8 = sd as *u8;
+    let sd_fields_off = sd_u8 as **u8;
+    let sd_nfields_off = ptr_add_u8(sd_u8, (8 as i64)) as *i64;
+    let nfields = *sd_nfields_off;
+    let fields_ptr = *sd_fields_off;
+    let new_fields_buf = arena_alloc(arena, nfields * STRUCT_FIELD_DECL_SIZE());
+    let mut j: i64 = 0 as i64;
+    while j < nfields {
+        let fld_off = ptr_add_u8(fields_ptr, j * STRUCT_FIELD_DECL_SIZE());
+        // Read fld fields via offset access (avoid struct deref):
+        let fld_name = *((fld_off as i64 + (0 as i64)) as **u8);
+        let fld_annot = *((fld_off as i64 + (8 as i64)) as **Node);
+        let new_annot = mono_subst_node(arena, fld_annot,
+                                        type_params, arg_nodes, nargs);
+        let nf_off = ptr_add_u8(new_fields_buf,
+                                j * STRUCT_FIELD_DECL_SIZE());
+        *((nf_off as i64 + (0 as i64)) as **u8) = fld_name;
+        *((nf_off as i64 + (8 as i64)) as **u8) = new_annot as *u8;
+        j = j + (1 as i64);
+    }
+    let buf = arena_alloc(arena, NODE_SIZE() + NODE_STRUCT_DEF_SIZE());
+    let n = ast_init_node(buf, NODE_STRUCT_DEF(),
+                          (*body).loc_filename, (*body).loc_line, (*body).loc_col);
+    let nsd = (buf as i64 + NODE_SIZE()) as *u8;
+    *((nsd as i64 + (0 as i64)) as **u8) = new_fields_buf;
+    *((nsd as i64 + (8 as i64)) as *i64) = nfields;
+    return n;
+}
+
+// mono_clone_enum_def — 深克隆 NODE_ENUM_DEF,each variant's payload_type
+//   走 mono_subst_node
+//   NodeEnumDef layout: variants @0 (8), nvariants @8 (8)
+//   EnumVariantDecl layout: name @0 (8), payload_type @8 (8) = 16
+fn mono_clone_enum_def(arena: *Arena, body: *Node,
+                       type_params: *u8, arg_nodes: *u8,
+                       nargs: i64) -> *Node {
+    let ed = node_enum_def_data(body);
+    let ed_u8 = ed as *u8;
+    let ed_variants_off = ed_u8 as **u8;
+    let ed_nvariants_off = ptr_add_u8(ed_u8, (8 as i64)) as *i64;
+    let nvariants = *ed_nvariants_off;
+    let variants_ptr = *ed_variants_off;
+    let new_variants_buf = arena_alloc(arena, nvariants * ENUM_VARIANT_DECL_SIZE());
+    let mut j: i64 = 0 as i64;
+    while j < nvariants {
+        let vd_off = ptr_add_u8(variants_ptr, j * ENUM_VARIANT_DECL_SIZE());
+        let vd_name = *((vd_off as i64 + (0 as i64)) as **u8);
+        let vd_payload = *((vd_off as i64 + (8 as i64)) as **u8);
+        let mut new_payload: *u8 = 0 as *u8;
+        if vd_payload != (0 as *u8) {
+            let np = mono_subst_node(arena,
+                                     vd_payload as *Node,
+                                     type_params, arg_nodes, nargs);
+            new_payload = np as *u8;
+        }
+        let nv_off = ptr_add_u8(new_variants_buf,
+                                j * ENUM_VARIANT_DECL_SIZE());
+        *((nv_off as i64 + (0 as i64)) as **u8) = vd_name;
+        *((nv_off as i64 + (8 as i64)) as **u8) = new_payload;
+        j = j + (1 as i64);
+    }
+    let buf = arena_alloc(arena, NODE_SIZE() + NODE_ENUM_DEF_SIZE());
+    let n = ast_init_node(buf, NODE_ENUM_DEF(),
+                          (*body).loc_filename, (*body).loc_line, (*body).loc_col);
+    let ned = (buf as i64 + NODE_SIZE()) as *u8;
+    *((ned as i64 + (0 as i64)) as **u8) = new_variants_buf;
+    *((ned as i64 + (8 as i64)) as *i64) = nvariants;
+    return n;
+}
+
+// mono_clone_and_subst — 深克隆 generic def,把 type_params[i] 替换成
+//   arg_nodes[i]。返回一个 NON-generic NODE_TYPE_DECL (ntype_params=0)。
+fn mono_clone_and_subst(arena: *Arena, td: *Node,
+                        arg_nodes: *u8, nargs: i64) -> *Node {
+    let td_data = node_type_decl_data(td);
+    // NodeTypeDecl layout: sym @0 (8), body @8 (8), type_params @16 (8), ntype_params @24 (8)
+    let td_sym_off = td_data as **u8;
+    let td_body_off = ptr_add_u8(td_data as *u8, (8 as i64)) as **u8;
+    let td_type_params_off = ptr_add_u8(td_data as *u8, (16 as i64)) as **u8;
+    let td_ntype_params_off = ptr_add_u8(td_data as *u8, (24 as i64)) as *i64;
+    let type_params = *td_type_params_off;
+    let ntype_params = *td_ntype_params_off;
+
+    if nargs != ntype_params {
+        let _x = jh_fputs_stderr(
+            "[mono] arg count mismatch in clone_and_subst\n" as *u8);
+        return 0 as *Node;
+    }
+
+    let body = *td_body_off as *Node;
+    let mut new_body: *Node = 0 as *Node;
+    if (*body).kind == NODE_STRUCT_DEF() {
+        new_body = mono_clone_struct_def(arena, body,
+                                         type_params, arg_nodes, nargs);
+    } else {
+        if (*body).kind == NODE_ENUM_DEF() {
+            new_body = mono_clone_enum_def(arena, body,
+                                           type_params, arg_nodes, nargs);
+        } else {
+            new_body = body;
+        }
+    }
+    if new_body == (0 as *Node) {
+        return 0 as *Node;
+    }
+
+    let buf = arena_alloc(arena, NODE_SIZE() + NODE_TYPE_DECL_SIZE());
+    let new_n = ast_init_node(buf, NODE_TYPE_DECL(),
+                              (*td).loc_filename, (*td).loc_line, (*td).loc_col);
+    let new_td = (buf as i64 + NODE_SIZE()) as *NodeTypeDecl;
+    // copy sym ptr (caller overwrites with mangled sym).
+    // NOTE: avoid `*((*new_td) as **u8) = ...` deref-write-via-cast — triggers
+    //   stage-0 jhyy codegen stack-spill bug in deep nested context (verified
+    //   segfault 2026-09-08 v3.2.0b diagnosis). Use temp-var pattern instead.
+    let new_td_sym_off = new_td as **u8;
+    *new_td_sym_off = *td_sym_off as *u8;
+    let new_td_body_off = ptr_add_u8(new_td as *u8, (8 as i64)) as **u8;
+    *new_td_body_off = new_body as *u8;
+    let new_td_tp_off = ptr_add_u8(new_td as *u8, (16 as i64)) as **u8;
+    *new_td_tp_off = 0 as *u8;
+    let new_td_ntp_off = ptr_add_u8(new_td as *u8, (24 as i64)) as *i64;
+    *new_td_ntp_off = 0 as i64;
+    return new_n;
+}
+
+// mono_clone_func_decl — v3.2.0c (3i fn path): 深克隆 NODE_FUNC_DECL,
+//   body 走 mono_subst_block 替换 type-param IDENT。
+//   NodeFuncDecl layout (v3.2.0c): sym @0 (8), params @8 (8), nparams @16 (8),
+//     ret_type @24 (8), body @32 (8), is_extern @40 (4), is_inline @44 (4),
+//     defers @48 (8), ndefers @56 (8), is_naked @64 (4), link_section @72 (8),
+//     type_params @80 (8), ntype_params @88 (8) → total 96
+//   NodeFuncDeclParam layout: sym @0 (8), type_annot @8 (8) = 16
+//
+// Clone 策略:逐字段 copy + body 走 mono_subst_block 替换 type-param IDENT;
+//   type_params 数组 (mono 后 cloned fn 的 ntype_params = 0,所以 type_params
+//   字段为 0/NULL), params (param type 也需要 subst), ret_type, defers 全 clone。
+//   defer / link_section / is_naked / is_inline / is_extern 是非 type-dependent
+//   字段,直接 copy。
+fn mono_clone_func_decl(arena: *Arena, fd_node: *Node,
+                        type_params: *u8, arg_nodes: *u8,
+                        nargs: i64) -> *Node {
+    let fd = node_func_decl_data(fd_node);
+    if fd == (0 as *u8) {
+        return 0 as *Node;
+    }
+    // Read NodeFuncDecl fields via single i64 base + offsets (compact form
+    //   that doesn't trigger stage-0 jhyy codegen stack-spill bug).
+    //   NodeFuncDecl: sym@0(8)+params@8(8)+nparams@16(8)+ret@24(8)+body@32(8)+
+    //   is_extern@40(4)+is_inline@44(4)+defers@48(8)+ndefers@56(8)+
+    //   is_naked@64(4)+link_section@72(8)+type_params@80(8)+ntype_params@88(8) = 96B
+    let fd_i = fd as i64;
+    let fd_sym = *((fd_i + 0 as i64) as **u8);
+    let fd_params = *((fd_i + 8 as i64) as **u8);
+    let fd_nparams = *((fd_i + 16 as i64) as *i64);
+    let fd_ret = *((fd_i + 24 as i64) as **Node);
+    let fd_body = *((fd_i + 32 as i64) as **Node);
+    let fd_extern = *((fd_i + 40 as i64) as *i32);
+    let fd_inline = *((fd_i + 44 as i64) as *i32);
+    let fd_naked = *((fd_i + 64 as i64) as *i32);
+    let fd_lsec = *((fd_i + 72 as i64) as **u8);
+    // Clone params (each param's type_annot 走 mono_subst_node)
+    //   v3.2.0c bug-fix: 不能 share old_p_sym across cloned fns — check_func_decl
+    //   会对每个 cloned fn 的 param_sym.type_ptr 写入具体类型 (i32 / f64 ...),
+    //   share 会导致最后一个 cloned fn 的 type 覆盖前面所有 clones,导致
+    //   max$i32 看到的是 max$f64 的 type (f64) → abi_win_emit_function_header
+    //   读 type_ptr 错位 → QBE csgtw on f64 → fail。
+    //   修:每个 cloned fn 分配 fresh sym (复用 symtab_alloc_sym),name 复用。
+    let new_params_buf = arena_alloc(arena, fd_nparams * NODE_FUNC_DECL_PARAM_SIZE());
+    // Build param remap 同时 — for body IDENT sym rewrite (pass 2)。
+    //   remap 16B per pair (old_sym@0, cloned_sym@8)。
+    let remap_buf = if fd_nparams > (0 as i64) {
+        arena_alloc(arena, fd_nparams * (16 as i64))
+    } else {
+        0 as *u8
+    };
+    let mut pi: i64 = 0 as i64;
+    while pi < fd_nparams {
+        let opi = fd_params as i64 + pi * NODE_FUNC_DECL_PARAM_SIZE();
+        let old_p_sym = *((opi + 0 as i64) as **u8);
+        let old_p_annot = *((opi + 8 as i64) as **Node);
+        let new_p_annot = mono_subst_node(arena, old_p_annot, type_params, arg_nodes, nargs);
+        let cloned_p_sym = symtab_alloc_sym(arena, (*(old_p_sym as *Sym)).name, 0 as i32,
+                                            0 as *u8, 0 as i32, 0 as i32);
+        let npi = new_params_buf as i64 + pi * NODE_FUNC_DECL_PARAM_SIZE();
+        *((npi + 0 as i64) as **u8) = cloned_p_sym as *u8;
+        *((npi + 8 as i64) as **Node) = new_p_annot;
+        // remap entry: old_param_sym → cloned_p_sym
+        let rmi = (remap_buf as i64) + pi * (16 as i64);
+        *((rmi + 0 as i64) as **u8) = old_p_sym;
+        *((rmi + 8 as i64) as **u8) = cloned_p_sym as *u8;
+        pi = pi + (1 as i64);
+    }
+
+    let new_ret = mono_subst_node(arena, fd_ret, type_params, arg_nodes, nargs);
+    // DEEP body walk: clone body, replace T IDENTs with arg nodes
+    //   (fn body: let a: T, b: T; if a > b return a; return b;)
+    let new_body = mono_subst_block(arena, fd_body, type_params, arg_nodes, nargs);
+
+    // Pass 2: in-place rewrite body IDENT syms (old_param_sym → cloned_p_sym)
+    //   mono_subst_block 不会自动替换 non-type-param IDENT sym,所以必须
+    //   单独 walk 一次。这样 cloned fn 的 body IDENT 指向 cloned_p_sym,
+    //   check_func_decl 推 cloned_p_sym 进 cloned fn scope → body IDENT lookup 命中。
+    let _x_rew = mono_rewrite_idents_in_stmt(new_body, remap_buf, fd_nparams);
+
+    // construct cloned NODE_FUNC_DECL — Node layout:
+    //   kind@0(4)+pad@4(4)+type_ptr@8(8)+loc_filename@16(8)+
+    //   loc_line@24(4)+loc_col@28(4) = 32B
+    let fdn = fd_node as i64;
+    let fdn_lf = *((fdn + 16 as i64) as **u8);
+    let fdn_ll = *((fdn + 24 as i64) as *i32);
+    let fdn_lc = *((fdn + 28 as i64) as *i32);
+    let buf = arena_alloc(arena, NODE_SIZE() + NODE_FUNC_DECL_SIZE());
+    let n = ast_init_node(buf, NODE_FUNC_DECL(), fdn_lf, fdn_ll, fdn_lc);
+    let nfd = buf as i64 + NODE_SIZE();
+    *((nfd + 0 as i64) as **u8) = fd_sym;
+    *((nfd + 8 as i64) as **u8) = new_params_buf;
+    *((nfd + 16 as i64) as *i64) = fd_nparams;
+    *((nfd + 24 as i64) as **Node) = new_ret;
+    *((nfd + 32 as i64) as **Node) = new_body;
+    *((nfd + 40 as i64) as *i32) = fd_extern;
+    *((nfd + 44 as i64) as *i32) = fd_inline;
+    *((nfd + 48 as i64) as **u8) = 0 as *u8;
+    *((nfd + 56 as i64) as *i64) = 0 as i64;
+    *((nfd + 64 as i64) as *i32) = fd_naked;
+    *((nfd + 72 as i64) as **u8) = fd_lsec;
+    *((nfd + 80 as i64) as **u8) = 0 as *u8;
+    *((nfd + 88 as i64) as *i64) = 0 as i64;
+    return n;
+}
+
+// ════════════════════════════════════════════════════
+// Public API — Pass 1.5 hook
+// (放在最后因为它调用上面所有 helpers;jhyy 不支持 forward refs)
+// ════════════════════════════════════════════════════
+
+// mono_expand_module — Pass 1.5 hook。遍历 (*md).generic_insts,对每条 inst:
+//   1. dedupe by mangled_name → skip if already inserted in global_scope
+//   2. 用 base_name 在 (*md).decls 里找到 generic def (ntype_params > 0)
+//   3. 克隆 struct/enum body,把 type-param sym 替换成 arg nodes
+//   4. 注册 fresh SYM_TYPE for mangled_name,克隆 decl,append 到 (*md).decls
+//
+// 返回 i32 = 0 成功,非 0 错误数。
+// global: 直接传 sema 的 global_scope (*SymTable pointer as *u8)
+// md is already a *NodeModule (caller does `let md = node_module_data(module)`).
+// Don't call node_module_data again — that would add NODE_SIZE on top of an
+// already-offset pointer and read random memory.
+//
+// v3.2.0b SHIP STATUS: ACTIVE。helpers above (`mono_find_generic_def` L102-104
+//   root-cause-fixed in this sprint; `mono_subst_node` already offset; helpers
+//   `mono_decls_append` / `mono_clone_*` already offset) — body is full impl
+//   using offset access throughout. No `(*mdd).*` / `(*sym).*` / `(*sd).*` /
+//   `(*fld).*` / `(*vd).*` patterns (those trigger stage-0 jhyy codegen
+//   stack-spill bug, DEFERRED to v2.x 末 QBE 自写).
+fn mono_expand_module(global: *u8, arena: *Arena, md: *Node) -> i32 {
+    // md is *NodeModule — caller pre-computes via node_module_data(module)
+    let mdd = md as *u8;
+    // NodeModule: decls @0, ndeccls @8, generic_insts @20, ngeneric_insts @28
+    let ndeccls_off = ptr_add_u8(mdd, (8 as i64)) as *i64;
+    let ndeccls = *ndeccls_off;
+    let decls_off = mdd as **u8;
+    let decls_ptr = *decls_off;
+    // generic_insts @ offset 20, ngeneric_insts @ offset 28
+    let ngi_off = ptr_add_u8(mdd, (28 as i64)) as *i64;
+    let ngi = *ngi_off;
+    if ngi == (0 as i64) {
+        return 0 as i32;
+    }
+    let gi_off = (mdd as i64 + (20 as i64)) as **u8;
+    let gi = *gi_off;
+    let mut errs: i32 = 0 as i32;
+    let mut i: i64 = 0 as i64;
+    while i < ngi {
+        // GenericInstRecord: mangled_name@0, arg_types@8, nargs@16, base_name@24
+        let rec = ptr_add_u8(gi, i * GENERIC_INST_RECORD_SIZE());
+        let rec_mangled = *((rec as i64 + (0 as i64)) as **u8);
+        let rec_args = *((rec as i64 + (8 as i64)) as **u8);
+        let rec_nargs = *(ptr_add_u8(rec, (16 as i64)) as *i64);
+        let rec_base = *((rec as i64 + (24 as i64)) as **u8);
+
+        // v3.2.0b dedupe strategy: parser records generic_inst once per
+        //   `<...>` usage site (e.g. `Pair<i32>` as type annot + as struct
+        //   lit = 2 entries). We dedupe by walking (*md).decls and looking
+        //   for an existing NODE_TYPE_DECL or NODE_FUNC_DECL with sym == ms.
+        //   This is reliable since Pass 2 hasn't run yet at this point —
+        //   type_ptr check would be unreliable.
+        let mut ms = symtab_lookup(global, rec_mangled);
+        if ms == (0 as *Sym) {
+            ms = symtab_insert(global, rec_mangled, SYM_TYPE(),
+                               0 as *u8, 0 as i32, 0 as i32);
+        }
+        let mut already_done: i32 = 0 as i32;
+        let cur_ndeccls = *ndeccls_off;
+        let mut j2: i64 = 0 as i64;
+        while j2 < cur_ndeccls {
+            let ed = *((decls_ptr as i64 + j2 * (8 as i64)) as **Node);
+            if ed != (0 as *Node) {
+                // offset access for ed.kind: Node kind @ offset 0 (i32)
+                let ed_kind_off = ed as *i32;
+                let ed_kind = *ed_kind_off;
+                if ed_kind == NODE_TYPE_DECL() {
+                    let etd = node_type_decl_data(ed);
+                    let etd_sym_off = etd as **u8;
+                    let es = *etd_sym_off as *Sym;
+                    if es == ms {
+                        already_done = 1 as i32;
+                        break;
+                    }
+                } else {
+                    if ed_kind == NODE_FUNC_DECL() {
+                        // NodeFuncDecl 96B layout: sym@0(8)+params@8(8)+nparams@16(8)+
+                        //   ret_type@24(8)+body@32(8)+is_extern@40(4)+is_inline@44(4)+
+                        //   defers@48(8)+ndefers@56(8)+is_naked@64(4)+pad@68(4)+
+                        //   link_section@72(8)+type_params@80(8)+ntype_params@88(8)
+                        // sym @ offset 0 (relative to NodeFuncDecl base = ed+NODE_SIZE())
+                        let efd_sym_off = (ed as i64 + NODE_SIZE()) as **u8;
+                        let ef = *efd_sym_off as *Sym;
+                        if ef == ms {
+                            already_done = 1 as i32;
+                            break;
+                        }
+                    }
+                }
+            }
+            j2 = j2 + (1 as i64);
+        }
+        if already_done != (0 as i32) {
+            i = i + (1 as i64);
+        } else {
+            // find generic def by base_name
+            let gd = mono_find_generic_def(md, rec_base);
+            if gd == (0 as *Node) {
+                errs = errs + (1 as i32);
+                i = i + (1 as i64);
+            } else {
+                // clone + substitute — dispatch by decl kind
+                let mut cloned: *Node = 0 as *Node;
+                // offset access for gd.kind: Node kind @ offset 0 (i32)
+                let gd_kind_off = gd as *i32;
+                let gd_kind = *gd_kind_off;
+                if gd_kind == NODE_FUNC_DECL() {
+                    // fn path: deep clone body via mono_subst_block
+                    // type_params of gd @ offset 80 (NodeFuncDecl layout)
+                    let gd_tp_off = (gd as i64 + NODE_SIZE() + (80 as i64)) as **u8;
+                    let gd_tp = *gd_tp_off;
+                    cloned = mono_clone_func_decl(arena, gd, gd_tp,
+                                                   rec_args, rec_nargs);
+                } else {
+                    // type path (existing)
+                    cloned = mono_clone_and_subst(arena, gd, rec_args, rec_nargs);
+                }
+                if cloned == (0 as *Node) {
+                    errs = errs + (1 as i32);
+                    i = i + (1 as i64);
+                } else {
+                    // overwrite cloned decl's sym with parser_sym (ms) —
+                    // IDENT nodes in body / annotations already point to ms,
+                    // so this keeps IDENT ↔ decl linkage coherent.
+                    // offset access for cloned.kind: Node kind @ offset 0 (i32)
+                    let cloned_kind_off = cloned as *i32;
+                    let cloned_kind = *cloned_kind_off;
+                    if cloned_kind == NODE_FUNC_DECL() {
+                        // NodeFuncDecl sym @ offset 0 (relative to NodeFuncDecl base)
+                        let cloned_fd_sym_off =
+                            (cloned as i64 + NODE_SIZE()) as **u8;
+                        *cloned_fd_sym_off = ms as *u8;
+                    } else {
+                        let cloned_td = node_type_decl_data(cloned);
+                        let cloned_td_sym_off = cloned_td as **u8;
+                        *cloned_td_sym_off = ms as *u8;
+                    }
+                    // append cloned decl to (*mdd).decls
+                    mono_decls_append(arena, mdd, cloned);
+                    i = i + (1 as i64);
+                }
+            }
+        }
+    }
+    return errs;
+}
+
+// ════════════════════════════════════════════════════
+// mono_expand_fn_call — v3.2.0c (3i fn path) turbofish call site monomorphize
+// ════════════════════════════════════════════════════
+//
+// Synchronous mono on turbofish call site. Different from struct path:
+// struct path deferred to Pass 1.5 (via (*md).generic_insts); fn path can't
+// defer — sema needs callee sym to be the mangled concrete fn sym RIGHT NOW
+// (so subsequent typecheck / codegen see the right fn type).
+//
+// Inputs:
+//   - global: global scope symtab (where mangled SYM_FN is registered)
+//   - arena:  ctx arena (for cloned decl + mangled name buf)
+//   - module_node: *Node (NodeModule; decls @ offset 0)
+//   - callee_sym: SYM_FN sym of generic fn def (e.g. "max")
+//   - type_args: **Node (turbofish type args; parsed from `f::<T,U>(args)`)
+//   - ntype_args: i64
+//
+// Returns:
+//   - mangled SYM_FN sym (existing if dedupe hit, fresh if just cloned)
+//   - 0 if callee_sym isn't generic or no matching NODE_FUNC_DECL def found.
+//
+// Strategy (per plan § 2 decision #5):
+//   1. construct mangled_name = callee_sym.name + "$" + mangle(type_arg_i)
+//      (mangle: NODE_IDENT → sym.name; NODE_UNARY → "*<inner>"; else "?")
+//   2. symtab_lookup(global, mangled_name) → if hit, return existing (dedupe)
+//   3. else: symtab_insert fresh SYM_FN, find generic NODE_FUNC_DECL def in
+//      module_node.decls via mono_find_generic_def, clone via
+//      mono_clone_func_decl, overwrite sym, append to module_node.decls
+//   4. return new sym
+//
+// jhyy no forward-ref → must be defined after mono_find_generic_def +
+//   mono_clone_func_decl. Safe here (last fn in file).
+
+// mono_mangle_type_node_fn — inline copy of parser_mangle_type_node but
+//   uses arena_alloc for growth (no Parser ctx dependency).
+//   Writes to buf @ *buf_p, tracks *len / *cap.
+fn mono_mangle_type_node_fn(arena: *Arena, node: *Node, buf_p: **u8,
+                            len: *i64, cap: *i64) {
+    let mut buf = *buf_p;
+    if node == (0 as *Node) {
+        let need = *len + (1 as i64);
+        if need > *cap {
+            let nc = if *cap != (0 as i64) { *cap * (2 as i64) } else { (32 as i64) };
+            let ng = arena_alloc(arena, nc);
+            if buf != (0 as *u8) {
+                if *len > (0 as i64) {
+                    memcpy(ng, buf, *len);
+                }
+            }
+            buf = ng;
+            *cap = nc;
+        }
+        *(ptr_add_u8(buf, *len) as *u8) = 0x3f as u8;
+        *len = *len + (1 as i64);
+        *buf_p = buf;
+        return;
+    }
+    if (*node).kind == NODE_IDENT() {
+        let id = node_ident_data(node);
+        let nm = (*id).sym as *Sym;
+        let nlen = strlen((*nm).name);
+        let need = *len + nlen;
+        if need > *cap {
+            let nc = if *cap != (0 as i64) { *cap * (2 as i64) } else { (32 as i64) };
+            let ng = arena_alloc(arena, nc);
+            if buf != (0 as *u8) {
+                if *len > (0 as i64) {
+                    memcpy(ng, buf, *len);
+                }
+            }
+            buf = ng;
+            *cap = nc;
+        }
+        memcpy(ptr_add_u8(buf, *len), (*nm).name, nlen);
+        *len = *len + nlen;
+        *buf_p = buf;
+        return;
+    }
+    if (*node).kind == NODE_UNARY() {
+        let un = node_unary_data(node);
+        let need = *len + (2 as i64);
+        if need > *cap {
+            let nc = if *cap != (0 as i64) { *cap * (2 as i64) } else { (32 as i64) };
+            let ng = arena_alloc(arena, nc);
+            if buf != (0 as *u8) {
+                if *len > (0 as i64) {
+                    memcpy(ng, buf, *len);
+                }
+            }
+            buf = ng;
+            *cap = nc;
+        }
+        *(ptr_add_u8(buf, *len) as *u8) = 0x2a as u8;
+        *len = *len + (1 as i64);
+        let inner = (*un).expr as *Node;
+        *buf_p = buf;
+        mono_mangle_type_node_fn(arena, inner, buf_p, len, cap);
+        return;
+    }
+    // other kinds: '?' (one char)
+    let need = *len + (1 as i64);
+    if need > *cap {
+        let nc = if *cap != (0 as i64) { *cap * (2 as i64) } else { (32 as i64) };
+        let ng = arena_alloc(arena, nc);
+        if buf != (0 as *u8) {
+            if *len > (0 as i64) {
+                memcpy(ng, buf, *len);
+            }
+        }
+        buf = ng;
+        *cap = nc;
+    }
+    *(ptr_add_u8(buf, *len) as *u8) = 0x3f as u8;
+    *len = *len + (1 as i64);
+    *buf_p = buf;
+    return;
+}
+
+fn mono_expand_fn_call(global: *u8, arena: *Arena, module_node: *Node,
+                       callee_sym: *Sym,
+                       type_args: *u8, ntype_args: i64) -> *Sym {
+    if callee_sym == (0 as *Sym) { return 0 as *Sym; }
+    if ntype_args <= (0 as i64) { return 0 as *Sym; }
+    let base_name = (*callee_sym).name;
+
+    // construct mangled_name = base_name + "$" + mangle(type_arg) + "$" + ...
+    let mut buf: *u8 = 0 as *u8;
+    let mut len: i64 = 0 as i64;
+    let mut cap: i64 = 0 as i64;
+    let blen = strlen(base_name);
+    let need0 = blen + (ntype_args + (1 as i64)) * (8 as i64);
+    buf = arena_alloc(arena, need0);
+    cap = need0;
+    memcpy(buf, base_name, blen);
+    len = len + blen;
+    let mut ai: i64 = 0 as i64;
+    while ai < ntype_args {
+        *(ptr_add_u8(buf, len) as *u8) = 0x24 as u8;  // '$'
+        len = len + (1 as i64);
+        let arg_node = *((type_args as i64 + ai * (8 as i64)) as **Node);
+        mono_mangle_type_node_fn(arena, arg_node, &buf, &len, &cap);
+        ai = ai + (1 as i64);
+    }
+    // null terminate
+    *(ptr_add_u8(buf, len) as *u8) = 0 as u8;
+
+    // dedupe via symtab_lookup — return existing if any kind matches
+    //   (Pass 1.5 inserts SYM_TYPE; Pass 3 inserts SYM_FN; same mangled name
+    //   uniquely identifies the instance, so dedupe regardless of kind)
+    let existing = symtab_lookup(global, buf);
+    if existing != (0 as *Sym) {
+        return existing;
+    }
+
+    // find generic NODE_FUNC_DECL def in module_node.decls
+    // module_node is *Node (NODE_MODULE); convert to *NodeModule for mono_find_generic_def
+    let module_node_data = node_module_data(module_node);
+    let def = mono_find_generic_def(module_node_data as *Node, base_name);
+    if def == (0 as *Node) {
+        return 0 as *Sym;
+    }
+    // offset access for def.kind: Node kind @ offset 0 (i32)
+    let def_kind_off = def as *i32;
+    let def_kind = *def_kind_off;
+    if def_kind != NODE_FUNC_DECL() {
+        return 0 as *Sym;
+    }
+
+    // insert fresh SYM_FN for mangled name
+    let ms = symtab_insert(global, buf, SYM_FN(),
+                           0 as *u8, 0 as i32, 0 as i32);
+
+    // clone with subst
+    // type_params of def @ offset 80 (NOT 88 which is ntype_params)
+    let def_tp_off = (def as i64 + NODE_SIZE() + (80 as i64)) as **u8;
+    let def_tp = *def_tp_off;
+    let cloned = mono_clone_func_decl(arena, def, def_tp,
+                                       type_args, ntype_args);
+    if cloned == (0 as *Node) {
+        return 0 as *Sym;
+    }
+
+    // overwrite cloned.sym → ms (NodeFuncDecl sym @ offset 0, not 16)
+    let cloned_sym_off = (cloned as i64 + NODE_SIZE()) as **u8;
+    *cloned_sym_off = ms as *u8;
+
+    // append cloned decl to module_node.decls
+    // module_node is *Node; convert to *u8 of NodeModule data for mono_decls_append
+    let module_node_md = node_module_data(module_node);
+    let mdd = module_node_md as *u8;
+    mono_decls_append(arena, mdd, cloned);
+
+    return ms;
+}
+
+// mono_type_to_type_node — v3.2.0d (3i fn path): *Type → *Node conversion for
+//   call-site type inference. Constructs an equivalent type AST node that
+//   mono_mangle_type_node_fn can mangle to the same string as if the user
+//   had written the type in source (e.g. `max::<X>(3, 5)`).
+//
+//   Supports:
+//     - KIND_PRIMITIVE (i32/f64/u8/bool/u16/u32/u64/i16) → NODE_IDENT with prim sym
+//     - KIND_STRUCT → NODE_IDENT with struct sym (from t.name)
+//     - KIND_POINTER → NODE_UNARY(TOKEN_STAR, inner)
+//
+//   Returns 0 for unsupported kinds (caller falls back to E0062 "cannot
+//   infer type parameter T from arguments").
+//
+//   jhyy no forward-ref → ast_new_ident / ast_new_unary defined in ast.jhyy
+//   (already loaded by the time mono.jhyy compiles).
+fn mono_type_to_type_node(arena: *Arena, global: *u8, t: *Type) -> *Node {
+    if t == (0 as *Type) { return 0 as *Node; }
+    let t_kind = (*t).kind;
+
+    // KIND_PRIMITIVE: synthesize a SYM_TYPE sym with name = type_to_string(t).
+    //   We can't rely on symtab_lookup for prim syms because they're registered
+    //   lazily in current_scope by parse_type, not in global_scope. Synthesizing
+    //   a fresh sym in arena with a stable .rodata string as name is sufficient
+    //   for mono_mangle_type_node_fn which only reads sym.name.
+    if t_kind == KIND_PRIMITIVE() {
+        let prim_name = type_to_string(t);
+        if prim_name != (0 as *u8) {
+            // Sym layout: name@0(8) + kind@8(4) + pad(4) + type_ptr@16(8) +
+            //   is_mutable@24(4) + pad(4) + depth@32(4) + pad(4) + module@40(8) +
+            //   is_extern@48(4) + pad(4) = 56B. Build via offset access.
+            let fake_sym = arena_alloc(arena, 56 as i64);
+            *((fake_sym as i64 + (0 as i64)) as **u8) = prim_name;
+            *((fake_sym as i64 + (8 as i64)) as *i32) = SYM_TYPE();
+            *((fake_sym as i64 + (16 as i64)) as **u8) = 0 as *u8;
+            *((fake_sym as i64 + (24 as i64)) as *i32) = 0 as i32;
+            *((fake_sym as i64 + (32 as i64)) as *i32) = 0 as i32;
+            *((fake_sym as i64 + (40 as i64)) as **u8) = 0 as *u8;
+            *((fake_sym as i64 + (48 as i64)) as *i32) = 0 as i32;
+            return ast_new_ident(arena, 0 as *u8, 0 as i32, 0 as i32,
+                                 fake_sym as *Sym);
+        }
+        return 0 as *Node;
+    }
+
+    // KIND_STRUCT: t.name is the struct sym (per types.jhyy L103 `name: *u8`)
+    if t_kind == KIND_STRUCT() {
+        let struct_sym = (*t).name;
+        if struct_sym != (0 as *u8) {
+            return ast_new_ident(arena, 0 as *u8, 0 as i32, 0 as i32,
+                                 struct_sym as *Sym);
+        }
+        return 0 as *Node;
+    }
+
+    // KIND_POINTER: recurse on elem, wrap with NODE_UNARY(TOKEN_STAR)
+    if t_kind == KIND_POINTER() {
+        let inner_t = (*t).elem as *Type;
+        let inner_node = mono_type_to_type_node(arena, global, inner_t);
+        if inner_node != (0 as *Node) {
+            return ast_new_unary(arena, 0 as *u8, 0 as i32, 0 as i32,
+                                 TOKEN_STAR(), inner_node);
+        }
+        return 0 as *Node;
+    }
+
+    // Other kinds (KIND_FUNC / KIND_ARRAY / KIND_SLICE / KIND_REF / KIND_CAP /
+    //   KIND_ALIAS / KIND_ENUM / KIND_VOID / KIND_UNRESOLVED): not supported
+    //   in v3.2.0d MVP. Caller falls back to E0062.
+    return 0 as *Node;
+}

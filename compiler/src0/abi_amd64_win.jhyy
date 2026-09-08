@@ -144,6 +144,28 @@ fn abi_win_emit_function_header(
     return 1;
 }
 
+// v3.0.2 (3b naked): emit_naked_func_header — no QBE IR emitted at all.
+// The naked fn lives only in the side-file (_inline_asm.buf). main.jhyy
+// concatenates side-file to .s, so the .s has the full naked function
+// (`.globl mangled\nmangled:\n<asm body>`).
+// Body asm!() statements get appended via cg_expr NODE_ASM_BLOCK.
+// We DON'T use QBE for naked fns — QBE would emit a `ret` and conflict with
+// the side-file's raw `mangled:` label (multiple definition at link time).
+fn emit_naked_func_header(ir: *IRBuf, fn_sym: *Sym) -> i32 {
+    let buf_path = "compiler/build/obj/_inline_asm.buf" as *u8;
+    let fp = fopen(buf_path, "ab" as *u8);
+    if fp != (0 as *u8) {
+        let _w1 = fwrite(".globl " as *u8, 1 as i64, 7 as i64, fp);
+        let _w2 = fwrite((*fn_sym).name, 1 as i64, strlen((*fn_sym).name), fp);
+        let _w3 = fwrite("\n" as *u8, 1 as i64, 1 as i64, fp);
+        let _w4 = fwrite((*fn_sym).name, 1 as i64, strlen((*fn_sym).name), fp);
+        let _w5 = fwrite(":\n" as *u8, 1 as i64, 2 as i64, fp);
+        let _c = fclose(fp);
+    }
+    let _i = ir;  // unused (kept for symmetry with other emit_*_header fns)
+    return 1 as i32;
+}
+
 // ════════════════════════════════════════════
 // Stage 1c.3: abi_win_emit_return
 // ════════════════════════════════════════════

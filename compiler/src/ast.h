@@ -266,6 +266,7 @@ typedef struct {
 typedef struct {
     Node  **decls;
     size_t  ndeccls;
+    int     is_no_std;  /* v3.0.0 (3d no_std): 1 if file has `#[no_std]` module attr */
 } NodeModule;
 
 /* ── Node data accessors ── */
@@ -374,7 +375,7 @@ Node *ast_new_type_decl(struct Arena *a, SourceLoc loc, Sym *sym, Node *body);
 Node *ast_new_extern_decl(struct Arena *a, SourceLoc loc, Sym *sym);
 Node *ast_new_import_decl(struct Arena *a, SourceLoc loc, Sym *sym);
 Node *ast_new_const_decl(struct Arena *a, SourceLoc loc, Sym *sym, Node *type_annot, Node *init);
-Node *ast_new_module(struct Arena *a, SourceLoc loc, Node **decls, size_t ndeccls);
+Node *ast_new_module(struct Arena *a, SourceLoc loc, Node **decls, size_t ndeccls, int is_no_std);  /* v3.0.0 (3d no_std): added is_no_std */
 
 const char *node_kind_name(NodeKind kind);
 

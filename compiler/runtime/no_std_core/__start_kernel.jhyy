@@ -1,0 +1,19 @@
+// v3.0.0 (3d no_std): __start_kernel M0 stub.
+//
+// This is the freestanding entry point called from the linker (with
+// `-Wl,--entry=__start_kernel`). It dispatches to the user's `fn main`.
+//
+// Per `jhyy-lang-spec-no_std-supplement-v3.0.0.md`, `#[no_std]` modules
+// must define `fn main` (validated by sema). The dispatch mechanism below
+// is a placeholder — a real call needs the user's `fn main` symbol, which
+// jhyy emits with name mangling (`$main`). For V3-A soft ship, this file
+// exists primarily so the link line has a known symbol to bind to. A real
+// call mechanism lands in V3-B when user entry-point customization
+// (per spec supplement) is implemented.
+//
+// The M0 body returns 0 (i32) so the linker can resolve it even without
+// user code. Future v3.x sprints: replace this with `return $main();`.
+fn __start_kernel() -> i32 {
+    // M0 stub: return 0. Real dispatch lands in V3-B.
+    return 0 as i32;
+}

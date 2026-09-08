@@ -1,0 +1,23 @@
+// v3.0.0 (3d no_std): memcpy per-byte loop stub.
+//
+// Per `jhyy-lang-spec-no_std-supplement-v3.0.0.md`, this is the freestanding
+// implementation of byte-wise memory copy. It replaces libc memcpy when the
+// user compiles with `#[no_std]` (which suppresses the runtime.c link).
+//
+// M0 stub: byte-by-byte loop. Later v3.x sprints may swap this for an
+// SSE/AVX optimized implementation (per the V3-A plan doc § risk table).
+//
+// Signature matches the standard memcpy contract: returns the destination
+// pointer (so callers can chain). Per spec, callers must ensure `dst` and
+// `src` do not overlap (use memmove for overlap; memmove ships in v3.x mid).
+//
+// NOTE: jhyy has no `usize` primitive (lang-spec §3 only defines i8/16/32/64
+// + u8/16/32/64); use i64 explicitly. Later v3.x may add `usize` alias.
+fn memcpy(dst: *u8, src: *u8, n: i64) -> *u8 {
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        *(dst + i) = *(src + i);
+        i = i + (1 as i64);
+    }
+    return dst;
+}
