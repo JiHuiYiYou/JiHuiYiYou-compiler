@@ -2476,7 +2476,10 @@ static void cg_emit_const_data_elem(IRBuf *ir, Node *e, Type *t, int *first) {
 void cg_module(IRBuf *ir, Node *module, Target t) {
     /* v2.0.0 target dispatch: Amd64Win keeps full v1.x path (fall through to
        the unchanged body below); other targets fatal at entry pointing at the
-       version where they ship. ABI 抽离 = v2.1.0; amd64_sysv = v2.x M2. */
+       version where they ship. ABI 抽离 = v2.1.0; amd64_sysv = v2.x M2.
+       v2.8.1: STUB name → SYSV; add SYSV_FREESTANDING case (fatal with
+       pointer to jhyy-side production binary, since C-side codegen 只 emit
+       Win IL 不能真编 SysV). */
     switch (t) {
     case TARGET_AMD64_WIN:
         break;
@@ -2490,9 +2493,25 @@ void cg_module(IRBuf *ir, Node *module, Target t) {
         (void)abi_fs_emit_entry_point(ir, "main_jhyy");
         (void)abi_fs_no_crt_init();
         break;
-    case TARGET_AMD64_SYSV_STUB:
+    case TARGET_AMD64_SYSV:
+        /* v2.8.1: C-side codegen 只 emit Win IL (codegen_amd64.jhyy 是
+           jhyy-side, 这个 binary = jhyy_stage0.exe 不知道 jhyy-side 路径)。
+           SysV 真 codegen 在 jhyy-side codegen_amd64.jhyy (v2.8.0 ship)。
+           用 jhyy.exe (jhyy-stage0 编 src0/main.jhyy 产出的 production
+           binary) 而非 jhyy_stage0.exe。 */
         fprintf(stderr,
-            "amd64_sysv target: 实现留 v2.x M2\n");
+            "amd64_sysv target requires jhyy-side production binary (jhyy.exe).\n"
+            "C-side codegen (this binary = jhyy_stage0.exe) only emits Win IL;\n"
+            "SysV codegen is in jhyy-side codegen_amd64.jhyy (v2.8.0 ship).\n"
+            "Re-run with: jhyy.exe compile --target=amd64_sysv <file.jhyy>\n");
+        exit(1);
+    case TARGET_AMD64_SYSV_FREESTANDING:
+        /* v2.8.1: same as amd64_sysv case; C-side 不能 emit SysV ABI 汇编。 */
+        fprintf(stderr,
+            "amd64_sysv_freestanding target requires jhyy-side production binary (jhyy.exe).\n"
+            "C-side codegen (this binary = jhyy_stage0.exe) only emits Win IL;\n"
+            "SysV-Freestanding codegen is in jhyy-side codegen_amd64.jhyy (v2.8.0 ship).\n"
+            "Re-run with: jhyy.exe compile --target=amd64_sysv_freestanding <file.jhyy>\n");
         exit(1);
     }
 

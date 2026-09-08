@@ -4962,3 +4962,59 @@ W-069 不是 stage0 build pollution, 而是 **codegen NODE_CALL is_extern branch
 TBD — v2.6.6 单独 sprint 排障, scope 跟 fix 见上。
 
 
+## W-070: jhyy.exe --target=amd64_sysv_freestanding 在 cg_module 阶段 fatal (v2.8.1 surface)
+
+**现象 (CLI smoke test, post-v2.8.1 ship):**
+
+```bash
+jhyy.exe compile --target=amd64_sysv_freestanding foo.jhyy -o /tmp/_test
+# 实际:fatal "amd64_sysv_freestanding target: 实现留 v2.7.1"
+# 在 [4b-FAIL] cg_module fatal 阶段
+```
+
+**Root cause:** jhyy-side `compiler/src0/codegen.jhyy` `cg_module` 函数仍 v2.7.0 stub-fatal:
+
+- `compiler/src0/codegen.jhyy:3880` — `amd64_sysv target: emit_call 拆 Win/SysV 已 wire (Phase 2b); cg_module 全 dispatch 留 v2.7.1` → `return 0`
+- `compiler/src0/codegen.jhyy:3885` — `amd64_sysv_freestanding target: 实现留 v2.7.1` → `return 0`
+
+**调用链:**
+
+```
+cmd_compile (main.jhyy)
+  → cg_module (codegen.jhyy)        ← unconditional, 总是 emit QBE IL
+    → if target_tag==SYSV/SYSVFS: fatal "实现留 v2.7.1" (return 0)
+  → run_backend (main.jhyy)
+    → target_backend_mode + JHY_SELF_BACKEND env gate
+    → codegen_amd64_run (or run_qbe → QBE)
+```
+
+所以 **即使** JHY_SELF_BACKEND=1 + codegen_amd64_run 真 emit 4 targets (v2.8.0 ship), jhyy.exe 在 `cg_module` 阶段就 fatal 了 — codegen_amd64_run 不会被调到。
+
+**v2.7.0 Phase 2b 漏做的活:** v2.7.0 plan 假设 "Phase 2b 完成 emit_call 拆 Win/SysV = done";实际 cg_module 本身 (emit QBE IL 阶段) 仍 3-target stub-fatal for SYSV / SYSV_FREESTANDING。
+
+**真修 scope (v2.8.2 或 v2.x 末):**
+
+1. 修 `compiler/src0/codegen.jhyy` `cg_module`:
+   - SYSV case: 调 `abi_amd64_sysv.jhyy` 模块 emit SysV QBE IL (跟 abi_win emit 类似但用 SysV ABI)
+   - SYSV_FREESTANDING case: 调 `abi_amd64_sysv_freestanding.jhyy` 模块
+2. v2.7.0 ship 的 abi_amd64_sysv*.jhyy 7 ABI fn 是 QBE-call-time helper (emit_function_header 等),不是 cg_module-time QBE IL emitter → 需要扩 module 加 cg_module-time emit fn
+3. Regress 5 sysv tests 真跑 PASS 验证
+
+**scope 估计**: ~200 LOC jhyy-side 改动 (cg_module 真 emit + ABI module 扩写) + ~50 LOC tests 验证 + docs update。
+
+**OS 启动链路**: W-070 = M4 launch 硬前置 (per `v2.0.0-os-prep.md` § 1 M4 需要 amd64_sysv 真能用)。v2.8.1 **不** close M4 硬前置 — v2.8.2 (or v2.x 末) 才是。
+
+**Bypass (post-v2.8.1 ship):**
+
+- ✅ Win ABI 路径 (TARGET_AMD64_WIN + TARGET_AMD64_WIN_FREESTANDING) 不受影响,regress 104/104 PASS + 9 SKIP (跟 v2.8.0 持平)
+- ✅ byte_equal_amd64.sh 10/10 + --baseline 20/20 (Win ABI byte-equal hold)
+- ✅ D43 closure v1→v2 sha HOLD `6a2f2277...` (Win IL emit 完全不动)
+- ❌ 5 sysv regress tests (sysv_*.jhyy) 仍 SKIP-honest (cross-env wire-only / C-side fatal at cg_module)
+- ❌ WSL branch 仍 wire-only SKIP (chain infra 需 v2.x 末 jhyy_linux build target)
+- ❌ docker branch 仍 wire-only SKIP (方案 B 需 v2.x 末)
+
+### Resolution (2026-09-08 v2.8.1)
+
+TBD — v2.8.2 (or v2.x 末 N 代 fixed point sprint) 真修 scope 见上。
+
+

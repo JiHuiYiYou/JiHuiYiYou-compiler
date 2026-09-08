@@ -371,3 +371,68 @@ docker run --rm -v /c/...:/work gcc:12 bash -c "
 - ❌ CI 集成 (GitHub Actions 跑 docker) — 留未来 sprint
 - ❌ Shared library output (`ET_DYN`) / multiple .text section / TLS / thread-local storage — punted
 - ❌ M5 boot-from-scratch (删 `src/*.c`) — 推迟到 v2.x 末 + v3.x 末后 (per `v1.x-phase-4-m5-boot-from-scratch.md`)
+---
+
+## v2.8.1 — C-side target_dispatch mirror update (driver-only patch, 1 commit)
+
+**Scope**: 4 source files (NEW 0 + 改 target_dispatch.{c,h} + codegen.c cg_module + regress.py comments);**Honest discovery**: W-070 NEW (jhyy-side codegen.jhyy cg_module stub-fatal for SYSV/SYSVFS, v2.8.1 不 close — 留 v2.8.2 / v2.x 末)。
+
+**Why this patch exists** (per `v2.8.1-plan.md`): v2.7.0 Phase 2a plan 列入 C-side `compiler/src/target/target_dispatch.{c,h}` mirror update 跟 jhyy-side 同步 4 targets,但 v2.7.0 ship 时漏做 (per v2.8.0 plan Phase 2 audit line 217-222 "添加 C-side TARGET_AMD64_SYSV_FREESTANDING 改动有 D43 closure 影响, punt 到 v2.x 末" — 但实际 D43 closure 不受影响, 锁 =2 enum 值就保持 byte-equal, v2.8.1 才真正 ship 这补丁)。
+
+**Commit 1 (Phase 1 — driver-only source update)**:
+- `compiler/src/target/target_dispatch.h` — enum rename STUB → SYSV (preserve =2) + add 4th `TARGET_AMD64_SYSV_FREESTANDING = 3` + comment "Three → Four" + BackendMode comment 加 SYSV → BACKEND_QBE 解释
+- `compiler/src/target/target_dispatch.c` — 7 函数更新 (target_parse / target_name / target_qbe_flag / target_help / target_status / jh_target_count / target_backend_mode)
+- `compiler/src/codegen.c` `cg_module` switch — rename STUB → SYSV case + add SYSV_FREESTANDING case (fatal message 指向 jhyy-side production binary, 因为 C-side codegen 只 emit Win IL)
+- `compiler/build/bin/regress.py` — WSL branch + docker branch comments 更新 (WSL branch logic 不变, jhyy.exe 本来就是 jhyy-side; docker branch 加 "v2.8.1 C-side fix; docker 方案 B infra 仍 v2.x 末")
+
+**Phase 1 ship gate (5/5 PASS)**:
+- ✅ regress 5 main tests: 5/5 PASS (hello / struct_val_pass / fib_renamed / nested_struct_deep / big_test)
+- ✅ regress 13 non-sysv tests: 13/13 PASS (Win target unchanged)
+- ✅ byte_equal_amd64.sh 默认 mode: 10/10 PASS (Win ABI byte-equal hold)
+- ✅ byte_equal_amd64.sh `--baseline`: 20/20 PASS (旧 baseline `6a2f2277...` hold)
+- ✅ D43 closure v1→v2 sha HOLD: `jhyy_v1.exe.exe compile src0/main.jhyy` = `jhyy.exe compile src0/main.jhyy` = sha `6a2f2277656ca991bd1c436c4e8bfe14f5d7b33b3587d778e4d8a0e00118af38`
+- ✅ make 0 error (pre-existing const warning at codegen.c:65 不相关)
+
+**Honest discovery (NEW W-070)** — CLI smoke test 验证时发现:
+```
+$ jhyy.exe compile --target=amd64_sysv_freestanding foo.jhyy -o /tmp/_test
+amd64_sysv_freestanding target: 实现留 v2.7.1
+[4b-FAIL] cg_module fatal
+```
+**Root cause**: jhyy-side `compiler/src0/codegen.jhyy` `cg_module` 函数 (line 3880/3885) 仍 v2.7.0 stub-fatal for SYSV/SYSV_FREESTANDING。JHY_SELF_BACKEND=1 也救不了,因为 `cg_module` 在 `run_backend` 之前无条件调,emit QBE IL 阶段就 fatal。v2.7.0 Phase 2b (per changelog) 计划修这 stub 但 ship 时漏做 — v2.7.1 ship 只做 runtime + regress.py wire,cg_module 没修。
+
+**Implication**:
+- ❌ WSL branch 5 sysv tests **不** 由 v2.8.1 unblock (跟 v2.8.1 plan Phase 2 ship gate 第 4 条预期不一致)
+- ❌ `--target=amd64_sysv_freestanding` 在 production jhyy.exe 仍 fatal at cg_module
+- ✅ C-side jhyy_stage0.exe 路径 (driver-only 一致性) — C-side codegen 只 emit Win IL, fatal message 已更新指 jhyy-side
+- ✅ v2.8.0 ship gates 全 hold: regress / byte_equal / D43 — Win target 完全 unaffected
+- ✅ 真 fix scope = W-070 (NEW), 留 v2.8.2 / v2.x 末 N 代 fixed point 工作
+
+**W-070 真修 scope (v2.8.2 / v2.x 末)**:
+1. 修 `compiler/src0/codegen.jhyy` `cg_module`:
+   - SYSV case: 调 `abi_amd64_sysv.jhyy` 模块 emit SysV QBE IL (跟 abi_win emit 类似但用 SysV ABI)
+   - SYSV_FREESTANDING case: 调 `abi_amd64_sysv_freestanding.jhyy` 模块
+2. v2.7.0 ship 的 `abi_amd64_sysv*.jhyy` 7 ABI fn 是 QBE-call-time helper (emit_function_header 等), 不是 cg_module-time QBE IL emitter → 需要扩 module 加 cg_module-time emit fn
+3. Regress 5 sysv tests 真跑 PASS 验证 (`python regress.py --cross=wsl` 在 WSL available host)
+4. 估 ~200 LOC jhyy-side 改动 + ABI module 扩写
+
+**OS 启动链路**:
+- v2.8.1 ship = cleanup patch (consistency C-side mirror with jhyy-side);**不** blocker OS M4 launch
+- M4 launch 硬前置仍 = W-070 fix (v2.8.2 / v2.x 末);OS M4 launch 等 v2.8.x 真 unblock 5 sysv tests 后再启动
+
+**Cross-axis**:
+- V3 axis (v3.0 3a-3f / v3.1.x) 仍 v3 axis owner 责任;v2.8.1 不 gate
+
+**Tag**: `v2.8.1` (2026-09-08, 1 commit chain)
+
+**References**:
+- v2.8.1 plan: [`../../docs/plans/v2/v2.8.1-plan.md`](../../docs/plans/v2/v2.8.1-plan.md)
+- v2.8.0 ship (前置): [`v2.8.0-plan.md`](v2.8.0-plan.md) Phase 2 audit line 217-222
+- v2.7.0 plan (Phase 2a 漏做 C-side mirror): [`v2.7.0-plan.md`](v2.7.0-plan.md)
+- W-069 NODE_CALL is_extern mangling (related): `docs/internal/workarounds.md`
+- jhyy-side codegen.jhyy cg_module stub-fatal: line 3880 (SYSV) / 3885 (SYSV_FREESTANDING)
+- jhyy-side abi_amd64_sysv.jhyy (QBE-call-time helper, 7 ABI fn, v2.7.0 Phase 1 ship): `compiler/src0/abi_amd64_sysv.jhyy`
+- jhyy-side abi_amd64_sysv_freestanding.jhyy (similar): `compiler/src0/abi_amd64_sysv_freestanding.jhyy`
+- 5 sysv regress test fixtures: `compiler/tests/examples/sysv_*.jhyy`
+- D43 closure: `docs/logs/v2/d43-baseline-archive.md` (baseline `6a2f2277...` v2.8.0 末)
+- Memory: [[feedback_changelog_umbrella]], [[feedback_plans_per_version]], [[feedback_fix_evaluation_rule]], [[feedback_audit_single_commit_diff]], [[feedback_no_date_estimates]], [[feedback_auto_push_after_commit]], [[feedback_document_workarounds_in_docs]]

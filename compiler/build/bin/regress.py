@@ -197,6 +197,13 @@ def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
             return (True, f"skipped (wslpath conversion failed: {e})")
         if not wsl_jhyy or not wsl_binary or "\\" in wsl_jhyy or "\\" in wsl_binary:
             return (True, "skipped (wslpath garbled output — likely no WSL distro)")
+        # v2.8.1 WSL branch 不变 logic:`{wsl_binary}` 默认 = jhyy.exe
+        # (jhyy-side production binary, per Makefile line 46 comment)。jhyy.exe
+        # 是 jhyy-side binary (由 jhyy_stage0.exe compile src0/main.jhyy 产出),
+        # 走 jhyy-side target_parse (4 targets, v2.7.0 ship) + codegen_amd64_run
+        # (4 targets 真 emit, v2.8.0 ship) → 产 SysV ABI .s → gcc 链 crt0.S
+        # + link.ld → 跑。C-side target_dispatch fix (v2.8.1) 不影响 WSL
+        # branch (jhyy.exe 不走 C-side cg_module)。
         cmd = [
             "wsl.exe", "-d", "Ubuntu", "bash", "-c",
             f"cd {jhyy_repo_in_linux} && "
@@ -213,13 +220,12 @@ def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
         #      but host Windows .exe can't be exec'd inside Linux container
         #      (PE32+ → WSL integration → vsock trap, per Phase 2 audit)
         #   2. 方案 A (Makefile `jhyy_linux` target) — Makefile 无此 target
-        #   3. 方案 B (container 内 gcc build jhyy from .c) — works but C-side
-        #      target_dispatch 只识别 amd64_win/win_freestanding/sysv_stub (3 个),
-        #      不识别 amd64_sysv_freestanding (target name `--target=...` parse
-        #      在 C-side main.c → target_parse(), rejected before delegating to
-        #      jhyy-side target_dispatch.jhyy which has the 4th target)。添加
-        #      C-side TARGET_AMD64_SYSV_FREESTANDING 改动有 D43 closure 影响,
-        #      punt 到 v2.x 末。
+        #   3. 方案 B (container 内 gcc build jhyy from .c) — v2.8.1 C-side
+        #      target_dispatch fix 后, target_parse 识别 4 targets, 但方案 B
+        #      仍需 jhyy Linux ELF build infra (Makefile jhyy_linux target +
+        #      Linux cross-compile), 这 = v2.x 末 N 代 fixed point 工作
+        #      (per `batch-V2-C-plan.md`)。v2.8.1 只 close C-side mirror,
+        #      docker 方案 B infra 仍待 v2.x 末。
         #
         # 修法: docker wire-only chain — 用 handwritten `mov $60, %rax; mov $42, %rdi; syscall`
         # 在 container 内 gcc 链 crt0.S + .s + link.ld → 跑 PASS, 验证 wire (ELF
