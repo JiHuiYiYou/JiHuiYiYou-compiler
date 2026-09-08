@@ -838,17 +838,18 @@ fn node_binary_data(n: *Node) -> *NodeBinary {
 }
 
 fn ast_new_call(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
-                callee: *Node, args: *u8, nargs: i64) -> *Node {
+                callee: *Node, args: *u8, nargs: i64,
+                type_args: *u8, ntype_args: i64) -> *Node {
     let buf = arena_alloc(a, NODE_SIZE() + NODE_CALL_SIZE());
     let n = ast_init_node(buf, NODE_CALL(), loc_filename, loc_line, loc_col);
     let d = (buf as i64 + NODE_SIZE()) as *NodeCall;
     (*d).callee = callee as *u8;
     (*d).args = args;
     (*d).nargs = nargs;
-    // v3.2.0c (3i fn path): 默认无 turbofish;parser.jhyy parse_call turbofish
-    //   arm 会直接改 `(*d).type_args` 和 `(*d).ntype_args` 字段。
-    (*d).type_args = 0 as *u8;
-    (*d).ntype_args = 0 as i64;
+    // v3.2.0c (3i fn path): turbofish type_args from parser turbofish arm;
+    //   default 0/0 for non-turbofish calls.
+    (*d).type_args = type_args;
+    (*d).ntype_args = ntype_args;
     return n;
 }
 

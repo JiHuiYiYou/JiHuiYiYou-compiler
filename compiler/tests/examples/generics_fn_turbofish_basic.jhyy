@@ -1,4 +1,3 @@
-// SKIP: v3.2.0c — generic fn + turbofish (3i fn path; dropped after C5 verification)
 // v3.2.0c (3i fn path) ship-gate test: `fn max<T>(a: T, b: T) -> T` syntax +
 // turbofish `max::<i32>(3, 5)` + monomorphize to 2 distinct concrete fns.
 //
@@ -23,7 +22,7 @@ fn main_jhyy() -> i32 {
     // turbofish: max<f64>(3.0, 5.0)
     let mf: f64 = max::<f64>(3.0, 5.0);
     // f64 compare via cast (jhyy f64 == is exact bit-equality)
-    let mf_eq: i32 = 0;
+    let mut mf_eq: i32 = 0;
     if mf == 5.0 { mf_eq = 1; }
     if mf_eq != 1 {
         return 20;

@@ -1231,6 +1231,11 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
 
     let mut left: *Node = 0 as *Node;
     let mut skip_default: i32 = 0 as i32;
+    // v3.2.0c (3i fn path): turbofish plumbing。IDENT primary branch 命中
+    //   `Name::<T, U>` 形式时设置 pending_targs/pending_ntargs,postfix `(...)`
+    //   call wrap 时读走传给 ast_new_call type_args/ntype_args 字段。
+    let mut pending_targs: *u8 = 0 as *u8;
+    let mut pending_ntargs: i64 = 0 as i64;
 
     // ── Prefix dispatch（基于 t.kind 走 inline）──
     if t.kind == TOKEN_EOF() {
@@ -1376,6 +1381,11 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                 }
                 parser_expect(p, TOKEN_GT(), "> after turbofish args" as *u8, &t);
                 parser_record_generic_inst(p, name, tf_mname, tfargs, ntfargs);
+                // v3.2.0c (3i fn path): plumb type_args to NODE_CALL via
+                //   pending_targs/pending_ntargs。ast_new_call 在 postfix `(...)`
+                //   call wrap 路径读走 (L2062)。
+                pending_targs = tfargs;
+                pending_ntargs = ntfargs;
                 left = ast_new_ident((*p).arena, turbofish_lf, turbofish_ll, turbofish_lc, turbofish_sym);
             }
         }
@@ -2059,7 +2069,13 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                 }
             }
             parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
-            left = ast_new_call((*p).arena, loc_lf, loc_ll, loc_lc, left, args, nargs);
+            // v3.2.0c (3i fn path): turbofish type_args plumbed through from
+            //   IDENT primary branch (pending_targs/pending_ntargs)。
+            left = ast_new_call((*p).arena, loc_lf, loc_ll, loc_lc, left, args, nargs,
+                               pending_targs, pending_ntargs);
+            // 重置 (虽然本函数末尾返回,但 if-else fall through 安全起见)
+            pending_targs = 0 as *u8;
+            pending_ntargs = 0 as i64;
         }
         else if t.kind == TOKEN_DOT() {
             // field access: expr.field

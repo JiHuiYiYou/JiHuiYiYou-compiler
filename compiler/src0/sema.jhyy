@@ -962,20 +962,35 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         //   - rewrite NODE_CALL.callee to point at mangled sym
         // call-site inference (no turbofish) not yet supported in v3.2.0c —
         //   fallback to E0062 below if callee is still generic.
-        if (*d).ntype_args > (0 as i64) {
-            if (*d).callee != (0 as *u8) {
-                if (*((*d).callee as *Node)).kind == NODE_IDENT() {
-                    let callee_id_pre = node_ident_data((*d).callee as *Node);
-                    let callee_sym_pre = (*callee_id_pre).sym as *Sym;
+        //   offset access (per v3.2.0b mitigation): `(*d).ntype_args` deep
+        //   nested struct deref triggers stage-0 codegen stack-spill bug.
+        //   NodeCall ntype_args @ offset 32.
+        let d_off = d as i64;
+        let nta_off = (d_off + (32 as i64)) as *i64;
+        let nta_val = *nta_off;
+        if nta_val > (0 as i64) {
+            // callee @ offset 0 (offset access)
+            let callee_off = d_off as **u8;
+            let callee_ptr = *callee_off;
+            if callee_ptr != (0 as *u8) {
+                let callee_kind_off = callee_ptr as *i32;
+                let callee_kind = *callee_kind_off;
+                if callee_kind == NODE_IDENT() {
+                    let callee_id_pre = node_ident_data(callee_ptr as *Node);
+                    let callee_id_pre_sym_off = callee_id_pre as **u8;
+                    let callee_sym_pre = *callee_id_pre_sym_off as *Sym;
                     if (*callee_sym_pre).kind == SYM_FN() {
+                        // type_args @ offset 24 (offset access)
+                        let ta_off = (d_off + (24 as i64)) as **u8;
+                        let ta_ptr = *ta_off;
                         let mangled_sym = mono_expand_fn_call(
                             (*ctx).global_scope, (*ctx).arena,
                             (*ctx).module as *Node,
                             callee_sym_pre,
-                            (*d).type_args, (*d).ntype_args);
+                            ta_ptr, nta_val);
                         if mangled_sym != (0 as *Sym) {
                             // rewrite NODE_IDENT.sym → mangled fn sym
-                            (*callee_id_pre).sym = mangled_sym as *u8;
+                            *callee_id_pre_sym_off = mangled_sym as *u8;
                         }
                     }
                 }
@@ -2083,10 +2098,14 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
     // v3.2.0c (3i fn path): skip generic fn body — mono_expand_module 已经把
     //   substituted 实例 (ntype_params == 0) append 到 decls,它们走正常
     //   check_func_decl 路径。原始 generic def 不 check (codegen 时也 skip)。
-    if (*fd).ntype_params > (0 as i64) {
+    //   offset access (per v3.2.0b mitigation L102-104): `(*fd).ntype_params`
+    //   deep nested struct deref triggers stage-0 codegen stack-spill bug.
+    //   NodeFuncDecl ntype_params @ offset 88.
+    let fd_off = fd as i64;
+    let ntp_off = (fd_off + (88 as i64)) as *i64;
+    if *ntp_off > (0 as i64) {
         return 1 as i32;
     }
-
     sema_push_scope(ctx);
     (*ctx).nlocals = 0 as i64;
 
@@ -2205,16 +2224,8 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
     let md = node_module_data(module);
 
     // Pass 1: register decls into global scope
-    jh_fputs_stderr("[sema] P1 ndeccls=" as *u8);
-    jh_fmt_lld_stderr("%d" as *u8, (*md).ndeccls);
-    jh_fputs_stderr("\n" as *u8);
     let mut i: i64 = 0 as i64;
     while i < (*md).ndeccls {
-        if i % (1000 as i64) == (0 as i64) {
-            jh_fputs_stderr("[sema] P1 i=" as *u8);
-            jh_fmt_lld_stderr("%d" as *u8, i);
-            jh_fputs_stderr("\n" as *u8);
-        }
         let decl = *(((*md).decls as i64 + i * (8 as i64)) as **Node);
         // W-005 #2 guard: skip NULL decls from corrupted inline_imports output
         if decl == (0 as *Node) { i = i + (1 as i64); } else {
@@ -2272,15 +2283,12 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
     //   - 对每条 inst:克隆 generic def body → substitute → append 到 (*md).decls
     //   - dedupe by mangled_name(symtab_lookup_one 已经存在 type_ptr → skip)
     //   - 错误数累加到 (*ctx).error_count,不影响 Pass 2/3 继续(便于报告所有错误)
-    jh_fputs_stderr("[sema] P1.5 mono_expand_module start\n" as *u8);
     let mono_errs = mono_expand_module((*ctx).global_scope, (*ctx).arena, md);
     if mono_errs != (0 as i32) {
         (*ctx).error_count = (*ctx).error_count + mono_errs;
     }
-    jh_fputs_stderr("[sema] P1.5 mono_expand_module done\n" as *u8);
 
     // Pass 2: resolve TYPE_DECL（struct/enum/alias）— 必须先于 Pass 3
-    jh_fputs_stderr("[sema] P2 start\n" as *u8);
     let mut i2: i64 = 0 as i64;
     while i2 < (*md).ndeccls {
         let decl = *(((*md).decls as i64 + i2 * (8 as i64)) as **Node);
@@ -2404,18 +2412,64 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
     }
 
     // Pass 3: check function bodies + top-level stmts
-    jh_fputs_stderr("[sema] P3 start\n" as *u8);
+    // v3.2.0c (3i fn path): 2-pass — cloned fns (mangled sym) checked FIRST
+    //   so that the mangled SYM_FN has kind=SYM_FN + type_ptr=fn_type before
+    //   any caller (e.g. main_jhyy) hits the call site in its body and looks
+    //   up the mangled sym in global_scope. Without this, the lookup at
+    //   L765 fails because P1.5 inserted the sym as SYM_TYPE with type_ptr=0,
+    //   and check_func_decl for the cloned fn (which would upgrade it) hasn't
+    //   run yet.
+    // Pass 3a: cloned fns (NODE_FUNC_DECL with sym name containing '$')
+    let mut i3a: i64 = 0 as i64;
+    while i3a < (*md).ndeccls {
+        let decl3a = *(((*md).decls as i64 + i3a * (8 as i64)) as **Node);
+        if decl3a == (0 as *Node) {
+            // skip
+        } else {
+            if (*decl3a).kind == NODE_FUNC_DECL() {
+                // check if sym name contains '$' (mangled)
+                let fd3a = node_func_decl_data(decl3a);
+                let sym3a = (*fd3a).sym as *Sym;
+                let nm3a = (*sym3a).name;
+                let nlen3a = strlen(nm3a);
+                let mut has_dollar: i32 = 0 as i32;
+                let mut k3: i64 = 0 as i64;
+                while k3 < nlen3a {
+                    if *(ptr_add_u8(nm3a, k3) as *u8) == (0x24 as u8) {
+                        has_dollar = 1 as i32;
+                    }
+                    k3 = k3 + (1 as i64);
+                }
+                if has_dollar != (0 as i32) {
+                    let _x = check_func_decl(ctx, ta, decl3a);
+                }
+            }
+        }
+        i3a = i3a + (1 as i64);
+    }
+
+    // Pass 3b: everything else (regular fns, lets, expr stmts, const decls)
     let mut i3: i64 = 0 as i64;
     while i3 < (*md).ndeccls {
-        if i3 % (1000 as i64) == (0 as i64) {
-            jh_fputs_stderr("[sema] P3 i=" as *u8);
-            jh_fmt_lld_stderr("%d" as *u8, i3);
-            jh_fputs_stderr("\n" as *u8);
-        }
         let decl = *(((*md).decls as i64 + i3 * (8 as i64)) as **Node);
         if decl == (0 as *Node) { i3 = i3 + (1 as i64); } else {
         if (*decl).kind == NODE_FUNC_DECL() {
-            let _x = check_func_decl(ctx, ta, decl);
+            // skip if already checked in Pass 3a (mangled sym)
+            let fd_b = node_func_decl_data(decl);
+            let sym_b = (*fd_b).sym as *Sym;
+            let nm_b = (*sym_b).name;
+            let nlen_b = strlen(nm_b);
+            let mut has_dollar_b: i32 = 0 as i32;
+            let mut kb: i64 = 0 as i64;
+            while kb < nlen_b {
+                if *(ptr_add_u8(nm_b, kb) as *u8) == (0x24 as u8) {
+                    has_dollar_b = 1 as i32;
+                }
+                kb = kb + (1 as i64);
+            }
+            if has_dollar_b == (0 as i32) {
+                let _x = check_func_decl(ctx, ta, decl);
+            }
         } else {
             if (*decl).kind == NODE_TYPE_DECL() {
                 // already done in Pass 2
