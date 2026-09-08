@@ -190,6 +190,12 @@ type CGContext = struct {
     //   → real def is `util__ptr_add_u8` in another module). 2*i64 = +16 bytes.
     fn_defs:          *u8,        // *CGFnDef 数组 (arena_alloc, sized by n_fn_defs)
     n_fn_defs:        i64,
+    // v2.8.2 W-070 真修: target_tag (0=Win, 1=WinFS, 2=SysV, 3=SysVFS per
+    //   target_dispatch.jhyy 4 targets). Set in cg_module after arena_alloc
+    //   cg_buf. Read in cg_func (header + 3 return emit sites) + cg_expr
+    //   (2 call_prelude + 2 struct_arg_slot + 4 stmt-level return sites) to
+    //   dispatch abi_win_* vs abi_sysv_*. +4 bytes (padded +4 = +8 total).
+    target_tag:       i32,
 }
 
 // CGModGlobal layout (24 bytes): sym(0..8) + qbe_name(8..16) + qbe_type(16..20), padded to 24
@@ -202,16 +208,19 @@ fn CGMOD_GLOBAL_SIZE() -> i64 { return 24 as i64; }
 //                                  C-side static g_fn_defs globals; C-side keeps CGContext
 //                                  at 128 bytes and uses module-level statics for the same
 //                                  data, so jhyy-side growing to 144 only affects jhyy-side
-//                                  arena alloc, no shared-layout invariant broken):
+//                                  arena alloc, no shared-layout invariant broken;
+//                   v2.8.2 W-070: + 1*i32 (target_tag) + padding = +8 bytes — jhyy-side
+//                                  only, drives cg_func/cg_expr dispatch Win vs SysV ABI):
 //   9*i64 (ir, locals, nlocals_pad, current_ret_type, sret_slot_id, current_fn,
 //          inline_fns, n_inline_fns, current_inline_sym) = 72 +
 //   has_sret(i32) + loop_depth(i32) + last_dbg_line(i32) + dbg_file_emitted(i32)
 //   + n_mod_globals(i32) + cap_mod_globals(i32) = 24 +
 //   3*i64 (loop_starts, loop_ends, loop_continues) = 24 +
 //   1*i64 (mod_globals) = 8 +
-//   2*i64 (fn_defs, n_fn_defs) = 16
-//   = 144 (was 128 before v2.6.6)
-fn CGCONTEXT_SIZE() -> i64 { return 144 as i64; }
+//   2*i64 (fn_defs, n_fn_defs) = 16 +
+//   1*i32 (target_tag) + padding(4) = 8
+//   = 152 (was 144 before v2.8.2)
+fn CGCONTEXT_SIZE() -> i64 { return 152 as i64; }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // v1.4.6 W-017: CGModGlobal struct + register/lookup helpers
@@ -1565,7 +1574,13 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
                 // v2.1.0 Stage 1c.3: abi_win_emit_return centralises the
                 // `ret` line decision. sret branch → empty ret.
-                let _ret = abi_win_emit_return(ir, v, 1);
+                // W-070 v2.8.2: dispatch Win vs SysV.
+                let mut _ret: i32 = 0 as i32;
+                if (*cg).target_tag == TARGET_AMD64_SYSV() || (*cg).target_tag == TARGET_AMD64_SYSV_FREESTANDING() {
+                    _ret = abi_sysv_emit_return(ir, v, 1);
+                } else {
+                    _ret = abi_win_emit_return(ir, v, 1);
+                }
             } else {
                 let val = cg_expr(cg_raw, (*d).expr);
                 // v1.3.6: emit LIFO defers before `ret` (value path)
@@ -1590,7 +1605,12 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                         }
                     }
                 }
-                let _ret = abi_win_emit_return(ir, val, 0);
+                let mut _ret_v: i32 = 0 as i32;
+                if (*cg).target_tag == TARGET_AMD64_SYSV() || (*cg).target_tag == TARGET_AMD64_SYSV_FREESTANDING() {
+                    _ret_v = abi_sysv_emit_return(ir, val, 0);
+                } else {
+                    _ret_v = abi_win_emit_return(ir, val, 0);
+                }
             }
         } else {
             if (*cg).has_sret != 0 {
@@ -1617,7 +1637,12 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                         }
                     }
                 }
-                let _str = abi_win_emit_return(ir, IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 }, 1);
+                let mut _str_ret: i32 = 0 as i32;
+                if (*cg).target_tag == TARGET_AMD64_SYSV() || (*cg).target_tag == TARGET_AMD64_SYSV_FREESTANDING() {
+                    _str_ret = abi_sysv_emit_return(ir, IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 }, 1);
+                } else {
+                    _str_ret = abi_win_emit_return(ir, IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 }, 1);
+                }
             } else {
                 // v1.3.6: emit LIFO defers before `ret` (void path)
                 let fd_d = (*cg).current_fn;
@@ -1643,7 +1668,13 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 }
                 let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
                 // v2.1.0 Stage 1c.3: abi_win_emit_return — void (val undef → empty).
-                let _ret = abi_win_emit_return(ir, v, 0);
+                // W-070 v2.8.2: dispatch Win vs SysV.
+                let mut _ret_v2: i32 = 0 as i32;
+                if (*cg).target_tag == TARGET_AMD64_SYSV() || (*cg).target_tag == TARGET_AMD64_SYSV_FREESTANDING() {
+                    _ret_v2 = abi_sysv_emit_return(ir, v, 0);
+                } else {
+                    _ret_v2 = abi_win_emit_return(ir, v, 0);
+                }
             }
         }
         return zero;
@@ -2444,7 +2475,13 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             if rsize < (4 as i32) { rsize = 4; }
         }
         let ret_slot_buf: *u8 = arena_alloc((*ir).arena, IRVAL_SIZE());
-        let args_arr2: *u8 = abi_win_emit_call_prelude(ir, (*ir).arena, nargs, is_sret, rsize, ret_slot_buf);
+        let mut args_arr2: *u8 = 0 as *u8;
+        // W-070 v2.8.2: dispatch call_prelude Win vs SysV (first call site).
+        if (*cg).target_tag == TARGET_AMD64_SYSV() || (*cg).target_tag == TARGET_AMD64_SYSV_FREESTANDING() {
+            args_arr2 = abi_sysv_emit_call_prelude(ir, (*ir).arena, nargs, is_sret, rsize, ret_slot_buf);
+        } else {
+            args_arr2 = abi_win_emit_call_prelude(ir, (*ir).arena, nargs, is_sret, rsize, ret_slot_buf);
+        }
         let ret_slot: IRVal = IRVal {
             kind: *(ret_slot_buf as *i32),
             id: *(ptr_add_u8(ret_slot_buf, 4 as i64) as *i32),
@@ -2546,7 +2583,13 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             if arg_t != (0 as *u8) {
                 let at = arg_t as *Type;
                 if (*at).kind == KIND_STRUCT() {
-                    let copy_slot = abi_win_emit_struct_arg_slot(ir, arg_t);
+                    // W-070 v2.8.2: dispatch struct_arg_slot Win vs SysV.
+                    let mut copy_slot = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+                    if (*cg).target_tag == TARGET_AMD64_SYSV() || (*cg).target_tag == TARGET_AMD64_SYSV_FREESTANDING() {
+                        copy_slot = abi_sysv_emit_struct_arg_slot(ir, arg_t);
+                    } else {
+                        copy_slot = abi_win_emit_struct_arg_slot(ir, arg_t);
+                    }
                     cg_copy_struct(cg_raw, arg_t, copy_slot, arg_v);
                     arg_v = copy_slot;
                 } else {
@@ -2618,7 +2661,13 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             if rsize2 < (4 as i32) { rsize2 = 4; }
         }
         let ret_slot_buf2: *u8 = arena_alloc((*ir).arena, IRVAL_SIZE());
-        let args_arr2: *u8 = abi_win_emit_call_prelude(ir, (*ir).arena, nargs, is_sret, rsize2, ret_slot_buf2);
+        let mut args_arr2: *u8 = 0 as *u8;
+        // W-070 v2.8.2: dispatch call_prelude Win vs SysV (second call site).
+        if (*cg).target_tag == TARGET_AMD64_SYSV() || (*cg).target_tag == TARGET_AMD64_SYSV_FREESTANDING() {
+            args_arr2 = abi_sysv_emit_call_prelude(ir, (*ir).arena, nargs, is_sret, rsize2, ret_slot_buf2);
+        } else {
+            args_arr2 = abi_win_emit_call_prelude(ir, (*ir).arena, nargs, is_sret, rsize2, ret_slot_buf2);
+        }
         let ret_slot: IRVal = IRVal {
             kind: *(ret_slot_buf2 as *i32),
             id: *(ptr_add_u8(ret_slot_buf2, 4 as i64) as *i32),
@@ -2715,7 +2764,13 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             if arg_t != (0 as *u8) {
                 let at = arg_t as *Type;
                 if (*at).kind == KIND_STRUCT() {
-                    let copy_slot = abi_win_emit_struct_arg_slot(ir, arg_t);
+                    // W-070 v2.8.2: dispatch struct_arg_slot Win vs SysV.
+                    let mut copy_slot = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
+                    if (*cg).target_tag == TARGET_AMD64_SYSV() || (*cg).target_tag == TARGET_AMD64_SYSV_FREESTANDING() {
+                        copy_slot = abi_sysv_emit_struct_arg_slot(ir, arg_t);
+                    } else {
+                        copy_slot = abi_win_emit_struct_arg_slot(ir, arg_t);
+                    }
                     cg_copy_struct(cg_raw, arg_t, copy_slot, arg_v);
                     arg_v = copy_slot;
                 } else {
@@ -3696,15 +3751,22 @@ fn cg_emit_const_data_elem(ir: *IRBuf, e: *Node, t: *Type, first_ptr: *u8) -> i3
 // cg_func — emit 一整个函数定义（含 header / locals / body / ret）
 // v1.3.5: 加 inline_fns + n_inline_fns 参数 — cg_module pass A 构建的 #[inline] fn 表;
 //   call site 用 cg_find_inline_decl 查表决定是否 in-place 展开 fn body。
-fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64) -> i32 {
+// v2.8.2 W-070: 加 target_tag 参数 — 驱动 cg_func 内 4 dispatch sites
+//   (header emit + 3 return emit sites) 调 abi_win_* vs abi_sysv_*。
+fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag: i32) -> i32 {
     if n == (0 as *Node) { return 0; }
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
     let fd = node_func_decl_data(n);
     if fd == (0 as *u8) { return 0; }
     if (*fd).is_extern != (0 as i32) {
-        return 1;
+        // W-070 v2.8.2: target_tag passed-through, also threaded via CGContext.
+        return 0;
     }
+    // W-070 v2.8.2: cg_func 内统一 dispatch helper. Win path (0/1) → else branch
+    //   走 abi_win_* (跟 v2.8.0 ship 行为字节相同, byte-equal hold)。SysV (2/3) →
+    //   abi_sysv_* emit。
+    let is_sysv = (target_tag == TARGET_AMD64_SYSV() || target_tag == TARGET_AMD64_SYSV_FREESTANDING()) as i32;
     let fd_sym_raw = (*fd).sym;
     if fd_sym_raw == (0 as *u8) {
         return 0;
@@ -3735,7 +3797,15 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64) -> i32 {
     // v2.1.0 Stage 1c.2: abi_win_emit_function_header owns the QBE signature
     // line + @start label. Replaces the prior inline 50-line header block.
     let nparams = (*fd).nparams;
-    let _hdr = abi_win_emit_function_header(ir, fd_sym, ret_qt, is_sret, (*fd).params, nparams);
+    // W-070 v2.8.2: dispatch header emit Win vs SysV. Win path (is_sysv=0) 走
+    //   abi_win_emit_function_header (跟 v2.8.0 ship 行为字节相同);SysV (is_sysv=1)
+    //   走 abi_sysv_emit_function_header (v2.7.0 ship ABI module 真 emit)。
+    let mut _hdr: i32 = 0 as i32;
+    if is_sysv == 1 {
+        _hdr = abi_sysv_emit_function_header(ir, fd_sym, ret_qt, is_sret, (*fd).params, nparams);
+    } else {
+        _hdr = abi_win_emit_function_header(ir, fd_sym, ret_qt, is_sret, (*fd).params, nparams);
+    }
 
     // reset cg (per-function)
     (*cg).current_ret_type = ret_type;
@@ -3822,14 +3892,32 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64) -> i32 {
             }
             let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
             // v2.1.0 Stage 1c.3: abi_win_emit_return — sret branch → empty ret.
-            let _r = abi_win_emit_return(ir, v, 1);
+            // W-070 v2.8.2: dispatch Win vs SysV.
+            let mut _r: i32 = 0 as i32;
+            if is_sysv == 1 {
+                _r = abi_sysv_emit_return(ir, v, 1);
+            } else {
+                _r = abi_win_emit_return(ir, v, 1);
+            }
         } else if ret_qt != (0 as i32) {
             // v2.1.0 Stage 1c.3: abi_win_emit_return — value branch.
-            let _r = abi_win_emit_return(ir, body_val, 0);
+            // W-070 v2.8.2: dispatch Win vs SysV.
+            let mut _r2: i32 = 0 as i32;
+            if is_sysv == 1 {
+                _r2 = abi_sysv_emit_return(ir, body_val, 0);
+            } else {
+                _r2 = abi_win_emit_return(ir, body_val, 0);
+            }
         } else {
             let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
             // v2.1.0 Stage 1c.3: abi_win_emit_return — void/sentinel branch.
-            let _r = abi_win_emit_return(ir, v, 0);
+            // W-070 v2.8.2: dispatch Win vs SysV.
+            let mut _r3: i32 = 0 as i32;
+            if is_sysv == 1 {
+                _r3 = abi_sysv_emit_return(ir, v, 0);
+            } else {
+                _r3 = abi_win_emit_return(ir, v, 0);
+            }
         }
     }
 
@@ -3860,31 +3948,20 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
         let _e = abi_fs_emit_entry_point(ir, "main_jhyy" as *u8);
         let _n = abi_fs_no_crt_init();
     }
-    if t == TARGET_AMD64_SYSV() {
-        // v2.7.0 Phase 2b status (2026-09-07):
-        //   - abi_amd64_sysv.jhyy module 已 ship (Phase 1 commit a9c874d)
-        //     7 ABI fn (classify_arg / emit_mangled_name / emit_function_header
-        //     / emit_return / emit_call_prelude / emit_struct_arg_slot /
-        //     emit_struct_return) 实 codegen path 可调
-        //   - codegen_amd64_emit_call.jhyy:emit_call 已拆 Win/SysV arg-reg path,
-        //     gated on CGState.target_tag (v2.7.0 Phase 2a field)
-        //   - Win path (target_tag=0/1) byte-equal hold (per byte_equal_amd64.sh 10/10)
-        //   - SysV path (target_tag=2/3): emit_call emit 6 reg (rdi/rsi/rdx/rcx/r8/r9)
-        //     NO shadow,emit 跟 QBE SysV path 一致
-        //
-        // v2.7.0 ship gate:5 sysv regress tests SKIP (per `regress.py --cross=...`
-        //     探测 WSL/Docker;Windows host 默认 SKIP)。实 cross-env wire 留 v2.7.1。
-        //
-        // cg_module 此处仍 stub-fatal:calls to abi_sysv_emit_function_header 等
-        // 实 codegen path 留 v2.7.1 整体 wire(per v2.7.1-plan.md)。
-        jh_fputs_stderr("amd64_sysv target: emit_call 拆 Win/SysV 已 wire (Phase 2b); cg_module 全 dispatch 留 v2.7.1\n" as *u8);
-        return 0 as i32;
-    }
+    // W-070 v2.8.2: SYSV_FREESTANDING prefix calls (mirror WIN_FREESTANDING
+    //   pattern above). abi_fs_sysv_emit_entry_point + abi_fs_sysv_no_crt_init
+    //   当前 no-op stub (real QBE IL _start block emit 留 v2.x 末 N 代 fixed point)。
+    //   然后 fall through 到 default body (cg_func/cg_expr 内 is_sysv dispatch
+    //   自动走 abi_sysv_* path)。
     if t == TARGET_AMD64_SYSV_FREESTANDING() {
-        // v2.7.1 ship — Phase 2b 仅 placeholder,默认 stub-fatal 跟 v2.6.x 行为一致。
-        jh_fputs_stderr("amd64_sysv_freestanding target: 实现留 v2.7.1\n" as *u8);
-        return 0 as i32;
+        let _e2 = abi_fs_sysv_emit_entry_point(ir, "main_jhyy" as *u8);
+        let _n2 = abi_fs_sysv_no_crt_init();
     }
+    // W-070 v2.8.2: SYSV (hosted) 无 prefix,直接 fall through to default body。
+    //   旧 stub-fatal 已删除: cg_func/cg_expr 内 is_sysv dispatch 现在能调
+    //   abi_sysv_emit_function_header / abi_sysv_emit_return /
+    //   abi_sysv_emit_call_prelude / abi_sysv_emit_struct_arg_slot。
+    // (no if for TARGET_AMD64_SYSV — directly fall through)
     let md = node_module_data(module);
     let ndeccls = (*md).ndeccls;
 
@@ -3901,6 +3978,10 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
     //   (parser 透传 lexer 的 filename),所以直接 emit. C-side mirror 同步 (per W-018).
     (*cg_ptr).last_dbg_line = 0;
     (*cg_ptr).dbg_file_emitted = 0;
+    // W-070 v2.8.2: target_tag write-through to CGContext for cg_func/cg_expr
+    //   dispatch (cg_func reads (*cg).target_tag internally too for return sites
+    //   not taking target_tag param).
+    (*cg_ptr).target_tag = t;
     // v1.4.6 W-017: initialize mod_globals dict to empty (NULL ptr + 0 count/cap)
     (*cg_ptr).mod_globals = 0 as *u8;
     (*cg_ptr).n_mod_globals = 0;
@@ -4155,7 +4236,7 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
         let d_node = *d_slot;
         if d_node == (0 as *Node) { di = di + (1 as i64); } else {
         if (*d_node).kind == NODE_FUNC_DECL() {
-            cg_func(cg_raw, d_node, inline_fns_raw, n_inline);
+            cg_func(cg_raw, d_node, inline_fns_raw, n_inline, t);
         }
         }  // close else from NULL guard
         di = di + (1 as i64);
