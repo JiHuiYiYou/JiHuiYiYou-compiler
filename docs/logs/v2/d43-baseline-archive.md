@@ -64,3 +64,13 @@ rm -f /tmp/_v1.il /tmp/_v2.il
 - v2.6.7 baseline (HOLD): commit `c965773` (byte_equal_amd64.sh Commit 5,driver-only 改动)
 - v2.6.8 baseline (HOLD): commit `b457e6a` (docs hygiene)
 - Memory: [[feedback_changelog_umbrella]] (umbrella convention), [[feedback_audit_single_commit_diff]] (single-commit audit), [[feedback_fix_evaluation_rule]] (5/5 PASS gate)
+
+---
+
+## v2.7.1 post-ship Docker E2E verify (2026-09-08)
+
+**结果**: Phase 1 Linux ELF runtime (crt0.S + link.ld) + 手写 SysV 汇编 → Docker `gcc:12` 容器内链 + 跑 PASS ("hello from Linux ELF", exit 42)。**5 sysv regress tests 真跑仍 blocker** (jhyy codegen `amd64_sysv_freestanding` target 未真实现 + jhyy.exe 调用 Windows-specific WSL vsock API 在 Linux container 失败)。
+
+D43 closure **保持 v2.7.1 baseline `cc894329...` HOLD 不变**(本次 verify 只跑手写汇编测试,不动 jhyy codegen)。
+
+详细 verify 步骤 + Docker MSYS2 PWD bug 记: 见 [`changelog-v2.7.0.md` v2.7.1 post-ship Docker E2E verify section](changelog-v2.7.0.md)

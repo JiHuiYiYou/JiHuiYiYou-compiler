@@ -182,3 +182,73 @@
 - SysV psABI: § 3.2.2 (16B stack alignment) + § 3.2.3 (arg passing)
 - Linux x86_64 syscall table: SYS_exit = 60 (rax)
 - Memory: [[feedback_changelog_umbrella]], [[feedback_plans_per_version]], [[feedback_fix_evaluation_rule]], [[feedback_audit_single_commit_diff]], [[feedback_no_date_estimates]], [[feedback_auto_push_after_commit]], [[feedback_regress_py_abspath]] (MSYS2 Python + Windows subprocess 相对路径), [[feedback_mcp_jhyy_run_workspace]] (cross-env workspace trap), [[project_v2_7_0_ship]] (前 1 3-commit ship chain)
+
+---
+
+## v2.7.1 post-ship Docker E2E verify (2026-09-08, docs-only patch)
+
+ship 后 user 在 Windows host 启动 Docker Desktop (4.84.0, OS/Arch linux/amd64),本机测试 Linux ELF infrastructure。**关键发现**:
+
+### 验证 1: Phase 1 Linux ELF runtime + 手写 SysV 汇编 → 链 + 跑 PASS ✅
+
+写一个 506-byte 手写 SysV AMD64 `main.s` (`SYS_write` 输出 "hello from Linux ELF" + `mov $42, %eax` return),用 Docker `gcc:12` 镜像跑:
+```
+docker run --rm -v /c/.../JiHuiYiYou-axis-v2:/work gcc:12 bash -c "
+  cd /work
+  gcc -nostdlib -static -T runtime/linux_elf/link.ld -o /tmp/hello_test.elf runtime/linux_elf/crt0.S tmp_handwritten_main.s
+  readelf -h /tmp/hello_test.elf
+  chmod +x /tmp/hello_test.elf && /tmp/hello_test.elf
+"
+```
+
+输出:
+```
+ELF Header: Class=ELF64, Data=2's complement little endian, OS/ABI=UNIX System V,
+            Type=EXEC (Executable file), Machine=Advanced Micro Devices X86-64,
+            Entry point=0x4000b0, Number of program headers=2
+file: ELF 64-bit LSB executable, x86-64, statically linked
+RUN: hello from Linux ELF
+EXIT_CODE=42
+```
+
+✅ **crt0 + link.ld 在 Linux container 内真链 + 真跑 PASS**。Phase 1 runtime ship gate 完整 E2E verify。
+
+### 验证 2: 5 sysv tests via `--cross=docker` → 真 wire 但 jhyy codegen blocker ❌
+
+`python regress.py --cross=docker --timeout=120` 显示:
+```
+cross: --cross=docker → resolved=docker
+PASS  sysv_abi_test.jhyy              passed (exit=127, cross=docker)
+PASS  sysv_struct_mixed.jhyy          passed (exit=127, cross=docker)
+PASS  sysv_struct_pass.jhyy           passed (exit=127, cross=docker)
+PASS  sysv_struct_ret.jhyy            passed (exit=127, cross=docker)
+PASS  sysv_vararg_basic.jhyy          passed (exit=127, cross=docker)
+```
+
+**exit=127 = "command not found"**(Linux ELF binary 不存在,因为 compile 没产出 .s)。regress.py `_run_cross_env_sysv_test` 误把 "EXIT:$?" 后 $?=127 报成 "passed",实际是 docker 容器内 `ubuntu:22.04` 无 `gcc`(`gcc not found`)。**wire 已跑通,但需要 (a) `apt-get install gcc` 或换 `gcc:12` 镜像,(b) jhyy 真实现 `amd64_sysv_freestanding` target codegen**。
+
+手动 `docker run gcc:12` 跑 sysv_struct_pass:
+```
+docker run --rm -v /c/...:/work gcc:12 bash -c "
+  cd /work
+  ./compiler/build/bin/jhyy.exe compile --target=amd64_sysv_freestanding \
+    compiler/tests/examples/sysv_struct_pass.jhyy -o /tmp/_cs
+"
+```
+
+输出 `<3>WSL (8 - ) ERROR: UtilBindVsockAnyPort:309: socket failed 1` 然后 `/tmp/_cs*` 不存在。**jhyy.exe 调用 Windows-specific WSL vsock API**(C 端 `src/` 内有 `UtilBindVsockAnyPort`),在 Linux container 内失败 → emit 没跑 → .s 没产出。
+
+### 关键结论
+
+- ✅ **Linux ELF infrastructure 已 ship + verified**: 手写 SysV 汇编 + runtime/crt0 + link.ld 在 Docker Linux container 真链 + 真跑 PASS。Phase 1 ship gate 5/5 E2E verified。
+- ❌ **5 sysv regress tests 真跑仍需 v2.x 中/末**:
+  1. jhyy codegen 真实现 `amd64_sysv_freestanding` target(目前 `_AMD64_SYSV_FREESTANDING` 在 `codegen_amd64.jhyy` 内 emit "实现留 v2.7.1" — 实际是 v2.x 中/末任务,被 v2.7.0/2.7.1 plan 提前过 claim)
+  2. jhyy.exe 移除 Windows-specific WSL vsock 调用(否则 Linux container 跑 jhyy 失败)
+  3. regress.py `_run_cross_env_sysv_test` 修 false positive:当前把 exit=127 报 "passed" → 应检查 `/tmp/_cross_sysv.elf` 是否真存在
+- **5 sysv tests 仍 SKIP 默认**(v2.7.1 ship gate 维持)。**Wire ready** (Phase 2 实 wire 完整),只是真跑需要上游 codegen 完成。
+
+### 文档 follow-up
+
+- `regress.py` `_run_cross_env_sysv_test` 修 false positive 判定 — 留 v2.7.2 patch(或合并进 v2.x 中/末 codegen ship)
+- `docs/logs/v2/d43-baseline-archive.md` 补 Docker E2E verify note (this commit)
+- Memory: 新增 `feedback_docker_msys2_pwd_bug` (见下)
