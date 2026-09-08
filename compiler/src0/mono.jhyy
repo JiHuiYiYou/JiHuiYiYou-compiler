@@ -1340,3 +1340,74 @@ fn mono_expand_fn_call(global: *u8, arena: *Arena, module_node: *Node,
 
     return ms;
 }
+
+// mono_type_to_type_node — v3.2.0d (3i fn path): *Type → *Node conversion for
+//   call-site type inference. Constructs an equivalent type AST node that
+//   mono_mangle_type_node_fn can mangle to the same string as if the user
+//   had written the type in source (e.g. `max::<X>(3, 5)`).
+//
+//   Supports:
+//     - KIND_PRIMITIVE (i32/f64/u8/bool/u16/u32/u64/i16) → NODE_IDENT with prim sym
+//     - KIND_STRUCT → NODE_IDENT with struct sym (from t.name)
+//     - KIND_POINTER → NODE_UNARY(TOKEN_STAR, inner)
+//
+//   Returns 0 for unsupported kinds (caller falls back to E0062 "cannot
+//   infer type parameter T from arguments").
+//
+//   jhyy no forward-ref → ast_new_ident / ast_new_unary defined in ast.jhyy
+//   (already loaded by the time mono.jhyy compiles).
+fn mono_type_to_type_node(arena: *Arena, global: *u8, t: *Type) -> *Node {
+    if t == (0 as *Type) { return 0 as *Node; }
+    let t_kind = (*t).kind;
+
+    // KIND_PRIMITIVE: synthesize a SYM_TYPE sym with name = type_to_string(t).
+    //   We can't rely on symtab_lookup for prim syms because they're registered
+    //   lazily in current_scope by parse_type, not in global_scope. Synthesizing
+    //   a fresh sym in arena with a stable .rodata string as name is sufficient
+    //   for mono_mangle_type_node_fn which only reads sym.name.
+    if t_kind == KIND_PRIMITIVE() {
+        let prim_name = type_to_string(t);
+        if prim_name != (0 as *u8) {
+            // Sym layout: name@0(8) + kind@8(4) + pad(4) + type_ptr@16(8) +
+            //   is_mutable@24(4) + pad(4) + depth@32(4) + pad(4) + module@40(8) +
+            //   is_extern@48(4) + pad(4) = 56B. Build via offset access.
+            let fake_sym = arena_alloc(arena, 56 as i64);
+            *((fake_sym as i64 + (0 as i64)) as **u8) = prim_name;
+            *((fake_sym as i64 + (8 as i64)) as *i32) = SYM_TYPE();
+            *((fake_sym as i64 + (16 as i64)) as **u8) = 0 as *u8;
+            *((fake_sym as i64 + (24 as i64)) as *i32) = 0 as i32;
+            *((fake_sym as i64 + (32 as i64)) as *i32) = 0 as i32;
+            *((fake_sym as i64 + (40 as i64)) as **u8) = 0 as *u8;
+            *((fake_sym as i64 + (48 as i64)) as *i32) = 0 as i32;
+            return ast_new_ident(arena, 0 as *u8, 0 as i32, 0 as i32,
+                                 fake_sym as *Sym);
+        }
+        return 0 as *Node;
+    }
+
+    // KIND_STRUCT: t.name is the struct sym (per types.jhyy L103 `name: *u8`)
+    if t_kind == KIND_STRUCT() {
+        let struct_sym = (*t).name;
+        if struct_sym != (0 as *u8) {
+            return ast_new_ident(arena, 0 as *u8, 0 as i32, 0 as i32,
+                                 struct_sym as *Sym);
+        }
+        return 0 as *Node;
+    }
+
+    // KIND_POINTER: recurse on elem, wrap with NODE_UNARY(TOKEN_STAR)
+    if t_kind == KIND_POINTER() {
+        let inner_t = (*t).elem as *Type;
+        let inner_node = mono_type_to_type_node(arena, global, inner_t);
+        if inner_node != (0 as *Node) {
+            return ast_new_unary(arena, 0 as *u8, 0 as i32, 0 as i32,
+                                 TOKEN_STAR(), inner_node);
+        }
+        return 0 as *Node;
+    }
+
+    // Other kinds (KIND_FUNC / KIND_ARRAY / KIND_SLICE / KIND_REF / KIND_CAP /
+    //   KIND_ALIAS / KIND_ENUM / KIND_VOID / KIND_UNRESOLVED): not supported
+    //   in v3.2.0d MVP. Caller falls back to E0062.
+    return 0 as *Node;
+}

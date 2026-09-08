@@ -648,6 +648,147 @@ fn process_match_pattern(ctx: *SemaContext, pat: *Node, match_type: *Type) -> i3
 }
 
 // ════════════════════════════════════════════════════
+// v3.2.0d (3i fn path): mono_propagate_idents_to_cloned_body
+//   Walks cloned fn body, for every NODE_IDENT copies (*sym).type_ptr
+//   into (*ident).type_ptr. This is what infer_type would do for a regular
+//   NODE_IDENT in a checked fn body, but cloned fns in inference path
+//   don't get check_func_decl'd (Pass 3b skips $-mangled, Pass 3a already
+//   finished before the inference arm). Without this propagation, codegen
+//   sees IDENT.type_ptr=0 and defaults to `w` ops (csgtw etc) regardless
+//   of the substituted T — broken for f64, struct args etc.
+//
+//   Inlined here (semantic counterpart of mono_rewrite_idents_in_expr) so
+//   inference arm can call it without going through full check_func_decl
+//   (which is defined later in this file; jhyy no forward refs).
+// ════════════════════════════════════════════════════
+
+fn mono_propagate_idents_in_expr(node: *Node) -> i32 {
+    if node == (0 as *Node) { return 0 as i32; }
+    let nk_off = node as *i32;
+    let nk = *nk_off;
+    if nk == NODE_IDENT() {
+        let id_data = (node as i64 + NODE_SIZE()) as *u8;
+        let id_sym_off = id_data as **u8;
+        let cur = *id_sym_off;
+        if cur != (0 as *u8) {
+            let cur_tp = (*(cur as *Sym)).type_ptr;
+            if cur_tp != (0 as *u8) {
+                *((node as i64 + (8 as i64)) as **u8) = cur_tp;
+            }
+        }
+        return 1 as i32;
+    }
+    if nk == NODE_BINARY() {
+        let bn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let l = *((bn_data as i64 + (8 as i64)) as **Node);
+        let r = *((bn_data as i64 + (16 as i64)) as **Node);
+        let _x1 = mono_propagate_idents_in_expr(l);
+        let _x2 = mono_propagate_idents_in_expr(r);
+        return 1 as i32;
+    }
+    if nk == NODE_UNARY() {
+        let un_data = (node as i64 + NODE_SIZE()) as *u8;
+        let ex = *((un_data as i64 + (8 as i64)) as **Node);
+        let _x1 = mono_propagate_idents_in_expr(ex);
+        return 1 as i32;
+    }
+    if nk == NODE_CALL() {
+        let cn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let cn_callee = *((cn_data as i64 + (0 as i64)) as **Node);
+        let cn_args = *((cn_data as i64 + (8 as i64)) as **u8);
+        let cn_nargs = *((cn_data as i64 + (16 as i64)) as *i64);
+        let _x1 = mono_propagate_idents_in_expr(cn_callee);
+        let mut ai: i64 = 0 as i64;
+        while ai < cn_nargs {
+            let a = *((cn_args as i64 + ai * (8 as i64)) as **Node);
+            let _x2 = mono_propagate_idents_in_expr(a);
+            ai = ai + (1 as i64);
+        }
+        return 1 as i32;
+    }
+    if nk == NODE_FIELD() {
+        let fn_data = (node as i64 + NODE_SIZE()) as *u8;
+        let tg = *((fn_data as i64 + (0 as i64)) as **Node);
+        let _x1 = mono_propagate_idents_in_expr(tg);
+        return 1 as i32;
+    }
+    if nk == NODE_INDEX() {
+        let in_data = (node as i64 + NODE_SIZE()) as *u8;
+        let tg = *((in_data as i64 + (0 as i64)) as **Node);
+        let ix = *((in_data as i64 + (8 as i64)) as **Node);
+        let _x1 = mono_propagate_idents_in_expr(tg);
+        let _x2 = mono_propagate_idents_in_expr(ix);
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
+fn mono_propagate_idents_to_cloned_body(body: *Node) -> i32 {
+    if body == (0 as *Node) { return 0 as i32; }
+    let nk_off = body as *i32;
+    let nk = *nk_off;
+    if nk == NODE_BLOCK() {
+        let bn_data = (body as i64 + NODE_SIZE()) as *u8;
+        let bn_stmts = *((bn_data as i64 + (0 as i64)) as **u8);
+        let bn_nstmts = *((bn_data as i64 + (8 as i64)) as *i64);
+        let mut si: i64 = 0 as i64;
+        while si < bn_nstmts {
+            let s = *((bn_stmts as i64 + si * (8 as i64)) as **Node);
+            let _x = mono_propagate_idents_to_cloned_body(s);
+            si = si + (1 as i64);
+        }
+        return 1 as i32;
+    }
+    if nk == NODE_IF() {
+        let in_data = (body as i64 + NODE_SIZE()) as *u8;
+        let c = *((in_data as i64 + (0 as i64)) as **Node);
+        let t = *((in_data as i64 + (8 as i64)) as **Node);
+        let e = *((in_data as i64 + (16 as i64)) as **Node);
+        let _x1 = mono_propagate_idents_in_expr(c);
+        let _x2 = mono_propagate_idents_to_cloned_body(t);
+        let _x3 = mono_propagate_idents_to_cloned_body(e);
+        return 1 as i32;
+    }
+    if nk == NODE_WHILE() {
+        let wn_data = (body as i64 + NODE_SIZE()) as *u8;
+        let c = *((wn_data as i64 + (0 as i64)) as **Node);
+        let b = *((wn_data as i64 + (8 as i64)) as **Node);
+        let _x1 = mono_propagate_idents_in_expr(c);
+        let _x2 = mono_propagate_idents_to_cloned_body(b);
+        return 1 as i32;
+    }
+    if nk == NODE_LET() {
+        let ln_data = (body as i64 + NODE_SIZE()) as *u8;
+        let an = *((ln_data as i64 + (0 as i64)) as **Node);
+        let in_ = *((ln_data as i64 + (8 as i64)) as **Node);
+        let _x1 = mono_propagate_idents_in_expr(an);
+        let _x2 = mono_propagate_idents_in_expr(in_);
+        return 1 as i32;
+    }
+    if nk == NODE_RETURN() {
+        let rn_data = (body as i64 + NODE_SIZE()) as *u8;
+        let v = *((rn_data as i64 + (0 as i64)) as **Node);
+        let _x1 = mono_propagate_idents_in_expr(v);
+        return 1 as i32;
+    }
+    if nk == NODE_ASSIGN() {
+        let an_data = (body as i64 + NODE_SIZE()) as *u8;
+        let tg = *((an_data as i64 + (0 as i64)) as **Node);
+        let vl = *((an_data as i64 + (8 as i64)) as **Node);
+        let _x1 = mono_propagate_idents_in_expr(tg);
+        let _x2 = mono_propagate_idents_in_expr(vl);
+        return 1 as i32;
+    }
+    if nk == NODE_EXPR_STMT() {
+        let en_data = (body as i64 + NODE_SIZE()) as *u8;
+        let e = *((en_data as i64 + (0 as i64)) as **Node);
+        let _x1 = mono_propagate_idents_in_expr(e);
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
 // infer_type（self-recursive 大函数 — Sprint 3 commit 5 主体）
 // ════════════════════════════════════════════════════
 
@@ -991,6 +1132,224 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                         if mangled_sym != (0 as *Sym) {
                             // rewrite NODE_IDENT.sym → mangled fn sym
                             *callee_id_pre_sym_off = mangled_sym as *u8;
+                        }
+                    }
+                }
+            }
+        } else {
+            // v3.2.0d (3i fn path): call-site type inference — when no turbofish
+            //   (nta_val == 0) but callee is a generic fn (ntype_params > 0),
+            //   infer type_args from arg types. Algorithm:
+            //     1. resolve generic def via mono_find_generic_def
+            //     2. for each fn param whose type matches a type_param, record slot
+            //     3. for each call arg, infer_type → *Type → mono_type_to_type_node
+            //     4. set type_args[slot] = arg_type_node; verify agreement
+            //     5. call mono_expand_fn_call; rewrite callee sym to mangled sym
+            //   Full offset access pattern (per v3.2.0b L102-104 mitigation).
+            let callee_off2 = d_off as **u8;
+            let callee_ptr2 = *callee_off2;
+            if callee_ptr2 != (0 as *u8) {
+                let callee_kind_off2 = callee_ptr2 as *i32;
+                let callee_kind2 = *callee_kind_off2;
+                if callee_kind2 == NODE_IDENT() {
+                    let callee_id_pre2 = node_ident_data(callee_ptr2 as *Node);
+                    let callee_id_pre2_sym_off = callee_id_pre2 as **u8;
+                    let callee_sym_pre2 = *callee_id_pre2_sym_off as *Sym;
+                    if (*callee_sym_pre2).kind == SYM_FN() {
+                        let base_name2 = (*callee_sym_pre2).name;
+                        // convert (*ctx).module (*Node) → *NodeModule for mono_find_generic_def
+                        let mnd = node_module_data((*ctx).module);
+                        let generic_def = mono_find_generic_def(mnd as *Node, base_name2);
+                        if generic_def != (0 as *Node) {
+                            // read type_params + ntype_params (offsets 80 / 88)
+                            let gd_off = generic_def as i64;
+                            let gd_tp_off = (gd_off + NODE_SIZE() + (80 as i64)) as **u8;
+                            let gd_tp = *gd_tp_off;
+                            let gd_ntp_off = (gd_off + NODE_SIZE() + (88 as i64)) as *i64;
+                            let gd_ntp = *gd_ntp_off;
+                            if gd_ntp > (0 as i64) {
+                                let gfd = node_func_decl_data(generic_def);
+                                let nparams2 = (*gfd).nparams;
+                                // alloc type_args buffer (gd_ntp * 8) + slot_filled bytes
+                                let type_args_buf = arena_alloc((*ctx).arena, gd_ntp * (8 as i64));
+                                let slot_filled = arena_alloc((*ctx).arena, gd_ntp);
+                                // init: type_args[i] = 0, slot_filled[i] = 0
+                                let mut si2: i64 = 0 as i64;
+                                while si2 < gd_ntp {
+                                    let ta_slot_init = (type_args_buf as i64 + si2 * (8 as i64)) as **Node;
+                                    *ta_slot_init = 0 as *Node;
+                                    let sf_byte = (slot_filled as i64 + si2) as *u8;
+                                    *sf_byte = 0 as u8;
+                                    si2 = si2 + (1 as i64);
+                                }
+                                let mut all_ok2: i32 = 1 as i32;
+                                // walk fn params, match type_annot against type_params
+                                let mut pi2: i64 = 0 as i64;
+                                while pi2 < nparams2 {
+                                    if all_ok2 == (0 as i32) { break; }
+                                    if pi2 >= (*d).nargs { break; }
+                                    let param2 = ptr_add_u8((*gfd).params, pi2 * (16 as i64)) as *NodeFuncDeclParam;
+                                    let pt_node2 = (*param2).type_annot as *Node;
+                                    // match pt_node2 against type_params[tj] — type_params stores
+                                    //   *Sym (per parser.jhyy L3150), NOT *Node. So compare
+                                    //   param.type_annot.sym directly against type_params[i].
+                                    let mut matched_slot: i64 = -1 as i64;
+                                    if (*pt_node2).kind == NODE_IDENT() {
+                                        let pt_id2 = node_ident_data(pt_node2);
+                                        let pt_sym2 = (*pt_id2).sym;
+                                        let mut tj2: i64 = 0 as i64;
+                                        while tj2 < gd_ntp {
+                                            let tp_sym2 = *((gd_tp as i64 + tj2 * (8 as i64)) as **Sym);
+                                            if pt_sym2 == tp_sym2 as *u8 {
+                                                matched_slot = tj2;
+                                                break;
+                                            }
+                                            tj2 = tj2 + (1 as i64);
+                                        }
+                                    }
+                                    // infer this call arg's type
+                                    let arg_node2 = *(((*d).args as i64 + pi2 * (8 as i64)) as **Node);
+                                    let arg_t2 = infer_type(ctx, ta, arg_node2);
+                                    if matched_slot >= (0 as i64) {
+                                        let ta_slot2 = (type_args_buf as i64 + matched_slot * (8 as i64)) as **Node;
+                                        let sf_byte2 = (slot_filled as i64 + matched_slot) as *u8;
+                                        if *sf_byte2 == (0 as u8) {
+                                            // first time: convert + set
+                                            let new_targ2 = mono_type_to_type_node((*ctx).arena, (*ctx).global_scope, arg_t2);
+                                            if new_targ2 == (0 as *Node) {
+                                                let _x_err2 = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                                    "E0062: cannot infer type parameter from argument (unsupported type kind)" as *u8);
+                                                all_ok2 = 0 as i32;
+                                            } else {
+                                                *ta_slot2 = new_targ2;
+                                                *sf_byte2 = 1 as u8;
+                                            }
+                                        } else {
+                                            // already filled: mangle-equality check
+                                            let existing_targ2 = *ta_slot2;
+                                            let new_targ2b = mono_type_to_type_node((*ctx).arena, (*ctx).global_scope, arg_t2);
+                                            if new_targ2b == (0 as *Node) {
+                                                let _x_err2b = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                                    "E0062: cannot infer type parameter from argument (unsupported type kind)" as *u8);
+                                                all_ok2 = 0 as i32;
+                                            } else {
+                                                let mut buf_a: *u8 = 0 as *u8;
+                                                let mut len_a: i64 = 0 as i64;
+                                                let mut cap_a: i64 = 0 as i64;
+                                                mono_mangle_type_node_fn((*ctx).arena, existing_targ2, &buf_a, &len_a, &cap_a);
+                                                *(ptr_add_u8(buf_a, len_a) as *u8) = 0 as u8;
+                                                let mut buf_b: *u8 = 0 as *u8;
+                                                let mut len_b: i64 = 0 as i64;
+                                                let mut cap_b: i64 = 0 as i64;
+                                                mono_mangle_type_node_fn((*ctx).arena, new_targ2b, &buf_b, &len_b, &cap_b);
+                                                *(ptr_add_u8(buf_b, len_b) as *u8) = 0 as u8;
+                                                if strcmp(buf_a, buf_b) != (0 as i32) {
+                                                    let _x_err2d = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                                        "E0062: conflicting types for type parameter" as *u8);
+                                                    all_ok2 = 0 as i32;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    pi2 = pi2 + (1 as i64);
+                                }
+                                if all_ok2 == (1 as i32) {
+                                    // verify all slots filled
+                                    let mut all_filled2: i32 = 1 as i32;
+                                    let mut sf3: i64 = 0 as i64;
+                                    while sf3 < gd_ntp {
+                                        let sf_byte3 = (slot_filled as i64 + sf3) as *u8;
+                                        if *sf_byte3 == (0 as u8) {
+                                            all_filled2 = 0 as i32;
+                                            break;
+                                        }
+                                        sf3 = sf3 + (1 as i64);
+                                    }
+                                    if all_filled2 == (1 as i32) {
+                                        let mangled2 = mono_expand_fn_call(
+                                            (*ctx).global_scope, (*ctx).arena,
+                                            (*ctx).module as *Node,
+                                            callee_sym_pre2,
+                                            type_args_buf, gd_ntp);
+                                        if mangled2 != (0 as *Sym) {
+                                            // rewrite NODE_IDENT.sym → mangled fn sym (mirror v3.2.0c turbofish path L991-993)
+                                            *callee_id_pre2_sym_off = mangled2 as *u8;
+                                            // v3.2.0d (3i fn path): for inference path, no generic_insts was
+                                            //   pre-recorded by parser (turbofish records but `f(args)` doesn't).
+                                            //   Pass 1.5 (mono_expand_module) did nothing; Pass 3a has already
+                                            //   finished before us. The cloned fn decl we just appended via
+                                            //   mono_expand_fn_call won't be check_func_decl'd by Pass 3b either
+                                            //   (Pass 3b skips mangled-$ fns, deferring to Pass 3a). So we
+                                            //   inline the type_ptr setup here — find the cloned decl, build its
+                                            //   KIND_FUNC type from resolved param_types + ret_type, and assign
+                                            //   to mangled2.type_ptr. check_func_decl (L2273) does the same
+                                            //   thing at L2290-2294, but it's defined later in this file (jhyy no
+                                            //   forward refs), so we can't call it from inside infer_type.
+                                            let mdd2 = node_module_data((*ctx).module);
+                                            let decls2 = (*mdd2).decls;
+                                            let ndeccls2 = (*mdd2).ndeccls;
+                                            let mut fi2: i64 = 0 as i64;
+                                            let mut cloned_fd2: *u8 = 0 as *u8;
+                                            while fi2 < ndeccls2 {
+                                                let fdn2 = *((decls2 as i64 + fi2 * (8 as i64)) as **Node);
+                                                if fdn2 != (0 as *Node) {
+                                                    let fdn2_kind_off = fdn2 as *i32;
+                                                    let fdn2_kind = *fdn2_kind_off;
+                                                    if fdn2_kind == NODE_FUNC_DECL() {
+                                                        let fdn2_sym_off = (fdn2 as i64 + NODE_SIZE()) as **u8;
+                                                        let fdn2_sym = *fdn2_sym_off;
+                                                        if fdn2_sym == mangled2 as *u8 {
+                                                            cloned_fd2 = fdn2 as *u8;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                                fi2 = fi2 + (1 as i64);
+                                            }
+                                            if cloned_fd2 != (0 as *u8) {
+                                                let fd2 = node_func_decl_data(cloned_fd2 as *Node);
+                                                let nparams_c2 = (*fd2).nparams;
+                                                let pt_buf2 = arena_alloc((*ctx).arena, nparams_c2 * (8 as i64));
+                                                let mut pi_c2: i64 = 0 as i64;
+                                                while pi_c2 < nparams_c2 {
+                                                    let par2 = ptr_add_u8((*fd2).params, pi_c2 * (16 as i64)) as *NodeFuncDeclParam;
+                                                    let pt2 = resolve_type_node(ctx, ta, (*par2).type_annot as *Node);
+                                                    let pslot2 = (pt_buf2 as i64 + pi_c2 * (8 as i64)) as **Type;
+                                                    *pslot2 = pt2;
+                                                    // mirror check_func_decl L2302-2305: set cloned param sym's
+                                                    //   type_ptr + kind=SYM_VAR, so the cloned body IDENT's sym
+                                                    //   (cloned_p_sym) resolves to pt when infer_type walks the
+                                                    //   body during Pass 3b → codegen sees correct type → `csgtw`
+                                                    //   becomes `csgtd` for f64 etc.
+                                                    let par2_sym = (*par2).sym as *Sym;
+                                                    (*par2_sym).type_ptr = pt2 as *u8;
+                                                    (*par2_sym).kind = SYM_VAR();
+                                                    pi_c2 = pi_c2 + (1 as i64);
+                                                }
+                                                let mut ret2_t: *Type = 0 as *Type;
+                                                if (*fd2).ret_type != (0 as *u8) {
+                                                    ret2_t = resolve_type_node(ctx, ta, (*fd2).ret_type as *Node);
+                                                } else {
+                                                    ret2_t = type_void(ta);
+                                                }
+                                                let fn_type2 = type_func((*ctx).arena, pt_buf2, nparams_c2, ret2_t);
+                                                (*mangled2).type_ptr = fn_type2 as *u8;
+                                                (*mangled2).kind = SYM_FN();
+                                                // v3.2.0d (3i fn path): walk cloned body, set every NODE_IDENT's
+                                                //   type_ptr to its sym's type_ptr (now set above for params).
+                                                //   This mirrors what infer_type would do for NODE_IDENT in a
+                                                //   regular fn body. Without this, codegen sees IDENT.type_ptr=0
+                                                //   and defaults to `w` ops (csgtw etc) — wrong for f64 / structs.
+                                                let _x_body = mono_propagate_idents_to_cloned_body(
+                                                    (*fd2).body as *Node);
+                                            }
+                                        }
+                                    } else {
+                                        let _x_err3 = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                            "E0062: cannot infer type parameter from arguments (no argument for some type parameter)" as *u8);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
