@@ -1286,40 +1286,69 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         parser_advance(p, &t);
         let name = parser_tok_name(p, &t);
 
-        // v3.2.0c (3i fn path): turbofish arm `f::<T, U>(args)` — must be detected
-        //   BEFORE the SYM_TYPE/SYM_MODULE branches consume the IDENT. Approach:
-        //   1) peek token N+1 — if `::`, commit (advance), peek new next:
-        //      - if `<` → turbofish path (parse `<T,U>`, leave for postfix LPAREN)
-        //      - if IDENT → fall through to SYM_MODULE qualified call path
-        //        (the `::` was consumed; SYM_MODULE branch L1620 will be confused
-        //         because next token is IDENT not `::` — fallback: handle here)
-        //      - else → error
-        //   2) Note: jhyy parser is LL(1); commit on `::` is required. We rely
-        //      on the fact that `::` in IDENT position is either turbofish
-        //      (`f::<T>`) or qualified call (`mod::name`);both start with `::`.
-        //      If `::` followed by anything else → syntax error anyway.
+        // v3.2.0c (3i fn path): turbofish arm `f::<T, U>(args)` — 仅在 sym 已知
+        //   是 SYM_FN 时触发(forward-declared generic fn)。SYM_TYPE case
+        //   (`Vec::<T>` 不存在;Vec 是 type 而非 fn)、SYM_MODULE case
+        //   (`mod::fn(...)` 走原 SYM_MODULE path)、default SYM_VAR case
+        //   (普通 var ref) 不进 turbofish arm。
         //
-        //   Detection: peek next token kind. If `::`, commit + consume + peek again.
+        //   Approach:
+        //   1) symtab_lookup(name) — 看 name 是不是已注册的 SYM_FN
+        //   2) 如果是 SYM_FN + peek `::` + peek `<` → turbofish path
+        //   3) 否则 fall through 到原 SYM_TYPE/SYM_MODULE/default 逻辑
+        //
+        //   disambiguation: `f::<T>` 必须出现在已注册 SYM_FN 上下文,避免
+        //   `Option::None` (enum variant pattern) 误判 → `Option` 是 SYM_TYPE,
+        //   skip turbofish arm 走 SYM_TYPE `else if parser_check COLONCOLON` path。
         let mut tpeek_after_ident = empty_token();
         parser_peek(p, &tpeek_after_ident);
+        let mut turbofish_sym: *Sym = 0 as *Sym;
         if tpeek_after_ident.kind == TOKEN_COLONCOLON() {
+            let probe_sym = symtab_lookup((*p).global_scope, name);
+            if probe_sym != (0 as *Sym) {
+                if (*probe_sym).kind == SYM_FN() {
+                    turbofish_sym = probe_sym;
+                }
+            }
+        }
+        if turbofish_sym != (0 as *Sym) {
             // commit: consume `::`
             let turbofish_lf = (*p).prev_lf;
             let turbofish_ll = (*p).prev_ll;
             let turbofish_lc = (*p).prev_lc;
             parser_advance(p, &t);  // consume `::`
-            // peek new next
+            // parse `<T, U>`
             let mut tpeek_after_cc = empty_token();
             parser_peek(p, &tpeek_after_cc);
-            if tpeek_after_cc.kind == TOKEN_LT() {
-                // turbofish: parse `<T, U>` (reuse parse_type generic inst pattern)
+            if tpeek_after_cc.kind != TOKEN_LT() {
+                jh_print_loc_stderr(turbofish_lf, turbofish_ll, turbofish_lc);
+                jh_fputs_stderr("error: expected '<' after turbofish '::'\n" as *u8);
+                (*p).error_count = (*p).error_count + (1 as i32);
+                left = ast_new_ident((*p).arena, turbofish_lf, turbofish_ll, turbofish_lc, turbofish_sym);
+            } else {
                 parser_advance(p, &t);  // consume `<`
                 let mut tfargs: *u8 = 0 as *u8;
                 let mut ntfargs: i64 = 0 as i64;
                 let mut tcap: i64 = 0 as i64;
+                // build mangled name buffer (mirror parse_type IDENT arm L727-752)
+                //   fn turbofish: max::<i32> → mangled "max$i32"
+                let mut tf_mname: *u8 = 0 as *u8;
+                let mut tf_mcap: i64 = 0 as i64;
+                let mut tf_mlen: i64 = 0 as i64;
+                let tf_bn_len = strlen(name);
+                tf_mcap = 64 as i64;
+                while tf_mcap < tf_bn_len + (2 as i64) {
+                    tf_mcap = tf_mcap * (2 as i64);
+                }
+                tf_mname = arena_alloc((*p).arena, tf_mcap);
+                memcpy(tf_mname, name, tf_bn_len);
+                tf_mlen = tf_bn_len;
+                *(ptr_add_u8(tf_mname, tf_mlen) as *u8) = 0 as u8;
+
                 while parser_check(p, TOKEN_GT()) == (0 as i32) {
                     if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
                     let tfarg = parse_type(p);
+                    // save arg node
                     if ntfargs >= tcap {
                         tcap = if tcap != (0 as i64) { tcap * (2 as i64) } else { (4 as i64) };
                         let ntfa = arena_alloc((*p).arena, tcap * (8 as i64));
@@ -1333,73 +1362,25 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                     let tslot = (tfargs as i64 + ntfargs * (8 as i64)) as **Node;
                     *tslot = tfarg;
                     ntfargs = ntfargs + (1 as i64);
+                    // append '$' + mangle(arg) to mangled name
+                    let mut tf_need = tf_mlen + (2 as i64);
+                    if tf_need > tf_mcap {
+                        tf_mname = mangle_buf_grow(p, tf_mname, tf_mcap, tf_need);
+                        tf_mcap = tf_need;
+                    }
+                    *(ptr_add_u8(tf_mname, tf_mlen) as *u8) = 0x24 as u8;
+                    tf_mlen = tf_mlen + (1 as i64);
+                    parser_mangle_type_node(p, tfarg, &tf_mname, &tf_mlen, &tf_mcap);
+                    *(ptr_add_u8(tf_mname, tf_mlen) as *u8) = 0 as u8;
                     if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
                 }
                 parser_expect(p, TOKEN_GT(), "> after turbofish args" as *u8, &t);
-                // record generic inst (跟 struct path 同走 parser_record_generic_inst)
-                parser_record_generic_inst(p, name, name, tfargs, ntfargs);
-                // resolve fn sym (sema 后续 infer_type 看到 NODE_CALL 时按 generic
-                //   fn sym 触发 mono_expand_fn_call — type_args via generic_fn_insts)
-                let mut fn_sym = symtab_lookup((*p).global_scope, name);
-                if fn_sym == (0 as *Sym) {
-                    fn_sym = symtab_insert((*p).current_scope, name, SYM_FN(),
-                                            0 as *u8, 0 as i32, 0 as i32);
-                }
-                left = ast_new_ident((*p).arena, turbofish_lf, turbofish_ll, turbofish_lc, fn_sym);
-                // 注意: left 此时是 bare ident;后续 postfix `(` 走 ast_new_call
-                //   (不带 turbofish aware — C4 step 11 patch `(*node_call_data).type_args`
-                //   from (*p).generic_fn_insts last entry)。
-            } else if tpeek_after_cc.kind == TOKEN_IDENT() {
-                // qualified call fallback: `mod::name(...)`
-                //   `::` 已 consumed;手动 parse IDENT + LPAREN args。
-                let mut fnt = empty_token();
-                parser_expect(p, TOKEN_IDENT(), "function name after '::'" as *u8, &fnt);
-                let fn_name = parser_tok_name(p, &fnt);
-                let mut fn_sym = symtab_lookup((*p).current_scope, fn_name);
-                if fn_sym == (0 as *Sym) {
-                    fn_sym = symtab_insert((*p).current_scope, fn_name, SYM_FN(),
-                                            0 as *u8, 0 as i32, 0 as i32);
-                }
-                let mut args: *u8 = 0 as *u8;
-                let mut nargs: i64 = 0 as i64;
-                let mut cap: i64 = 0 as i64;
-                parser_expect(p, TOKEN_LPAREN(), "(" as *u8, &t);
-                if parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
-                    while true {
-                        let arg = parse_expr(p, PREC_NONE());
-                        if nargs >= cap {
-                            cap = if cap != (0 as i64) { cap * (2 as i64) } else { (8 as i64) };
-                            let na = arena_alloc((*p).arena, cap * (8 as i64));
-                            if args != (0 as *u8) {
-                                if nargs > (0 as i64) { memcpy(na, args, nargs * (8 as i64)); }
-                            }
-                            args = na;
-                        }
-                        let slot = (args as i64 + nargs * (8 as i64)) as **Node;
-                        *slot = arg;
-                        nargs = nargs + (1 as i64);
-                        if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
-                    }
-                }
-                parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
-                // module ident 走 symtab_lookup(name) — 用 turbofish_lf (callee ident loc)
-                let mut mod_sym = symtab_lookup((*p).global_scope, name);
-                if mod_sym == (0 as *Sym) {
-                    mod_sym = symtab_insert((*p).current_scope, name, SYM_MODULE(),
-                                            0 as *u8, 0 as i32, 0 as i32);
-                }
-                let mod_node = ast_new_ident((*p).arena, turbofish_lf, turbofish_ll, turbofish_lc, mod_sym);
-                let fn_node = ast_new_ident((*p).arena, (*p).prev_lf, (*p).prev_ll, (*p).prev_lc, fn_sym);
-                left = ast_new_qualified_call((*p).arena, turbofish_lf, turbofish_ll, turbofish_lc, mod_node, fn_node, args, nargs);
-            } else {
-                // `::` 后既不是 `<` 也不是 IDENT → 语法错误
-                jh_print_loc_stderr(turbofish_lf, turbofish_ll, turbofish_lc);
-                jh_fputs_stderr("error: expected '<' or function name after '::'\n" as *u8);
-                (*p).error_count = (*p).error_count + (1 as i32);
-                left = ast_new_ident((*p).arena, turbofish_lf, turbofish_ll, turbofish_lc, symtab_insert((*p).current_scope, name, SYM_FN(), 0 as *u8, 0 as i32, 0 as i32));
+                parser_record_generic_inst(p, name, tf_mname, tfargs, ntfargs);
+                left = ast_new_ident((*p).arena, turbofish_lf, turbofish_ll, turbofish_lc, turbofish_sym);
             }
         }
-        // else: not `::` — fall through to SYM_TYPE / SYM_MODULE / default IDENT path
+        // else: 不是 turbofish (sym 不是 SYM_FN 或没 `::`) — fall through 到
+        //   原 SYM_TYPE / SYM_MODULE / default IDENT path。
 
         // v3.2.0 (V3-C 3i generics): expr 位 generic inst arm `Name<i32, ...>`
         //   INLINED (not extracted to fn) for the same forward-ref reason as
