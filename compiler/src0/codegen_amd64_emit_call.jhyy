@@ -21,9 +21,14 @@
 //     - return: 0 = success,非 0 = error
 //
 // 5 个 emit 函数 + 行为概览(L4 § 3.5):
-//   emit_call    (E5): MS x64 calling convention — 前 4 args 移到
-//                      %rcx/%rdx/%r8/%r9,32-byte shadow space alloc/free,
-//                      `call $name`,返回值 `%rax` 存回栈槽
+//   emit_call    (E5): 跨 ABI 拆 target tag (v2.7.0 Phase 2b):
+//                      - Win (TARGET_AMD64_WIN / WIN_FREESTANDING):
+//                        前 4 args 移到 %rcx/%rdx/%r8/%r9,
+//                        32-byte shadow space alloc/free,`call $name`
+//                      - SysV (TARGET_AMD64_SYSV / SYSV_FREESTANDING):
+//                        前 6 args 移到 %rdi/%rsi/%rdx/%rcx/%r8/%r9,
+//                        NO shadow space alloc/free
+//                      返回值 in %rax,store 回栈槽
 //   emit_phi     (E6): **noop**(per L4 § 3.5 + § X.4) — phi 由 codegen.jhyy
 //                      上游调度,emit 之前 SSA 已 resolve 为 block-local copy。
 //                      本函数识别后 noop,留 comment
@@ -46,6 +51,10 @@
 //   - **D43 self-equal baseline**(per L4 § X.4):不改 codegen.jhyy 主干,
 //     closure sha 仍 = 51376ce5...(per § Y.5 closure invariant = .il byte-equal,
 //     非 binary byte-equal)
+//   - **v2.7.0 Phase 2b**:emit_call 拆 Win/SysV arg-reg path,gated on
+//     `(*cg).target_tag`(per codegen_amd64_state.jhyy Phase 2a field)。
+//     Win path byte-equal hold(0 arg-reg change + 32B shadow 不变);
+//     SysV path = 6 arg-reg (rdi/rsi/rdx/rcx/r8/r9),NO shadow
 //
 // 简化假设(per L4 § 4.3):
 //   - 不做 regalloc:每个 %tN 直接 spill 到栈(cg_offset_for_temp 当前是
@@ -203,6 +212,85 @@ fn emit_binop_rsp_to_rax(state: *u8, qt: i32, op_name: *u8, op_off: i64) -> i32 
 // (fn name 是 NUL-terminated cstring)。ret_temp_id 从 tok.int_val 取是
 // 一个简化约定 — Phase 3b parse loop 可调整字段语义。
 
+// target_is_win — v2.7.0 Phase 2b helper
+//
+//   返回 1 if target_tag 是 Win path (TARGET_AMD64_WIN 或 WIN_FREESTANDING),
+//   否则 0 (SysV path)。
+//   emit_call 据此选 4 reg + 32B shadow (Win) vs 6 reg + no shadow (SysV)。
+fn target_is_win(target_tag: i32) -> i32 {
+    if target_tag == (0 as i32) { return 1 as i32; }  // TARGET_AMD64_WIN
+    if target_tag == (1 as i32) { return 1 as i32; }  // TARGET_AMD64_WIN_FREESTANDING
+    return 0 as i32;  // TARGET_AMD64_SYSV (2) / SYSV_FREESTANDING (3) → SysV path
+}
+
+// emit_amd64_arg_regs — v2.7.0 Phase 2b chokepoint
+//
+//   从 stack slots 移 args 到对应物理寄存器。Win 走 4 reg
+//   (%rcx/%rdx/%r8/%r9),SysV 走 6 reg (%rdi/%rsi/%rdx/%rcx/%r8/%r9)。
+//   gate by target_tag。nargs > 寄存器数 的剩余 args 走 stack(简化:
+//   v2.7.0 假设 nargs ≤ 4 Win / ≤ 6 SysV,超过 → emit warning comment
+//   + stack 仍放原位置;callee-side 实 push 由 codegen.jhyy 上游处理)。
+//
+//   arg_i 在 -(32 + i*8)(%rbp)(v2.5.0 1-to-1 简化栈分配 per L4 § 4.3)。
+fn emit_amd64_arg_regs(state: *u8, nargs: i64, qt: i32, target_tag: i32) -> i32 {
+    let cg = state as *CGState;
+    let s = (*cg).out as *StringBuilder;
+    let arena = (*cg).arena as *Arena;
+
+    if target_is_win(target_tag) == (1 as i32) {
+        // Win path: 4 regs (rcx/rdx/r8/r9)
+        if nargs >= (1 as i64) {
+            let off1 = local_temp_offset(1 as i64);
+            let _m1 = emit_mov_temp_to_reg(state, qt, off1, "rcx" as *u8);
+        }
+        if nargs >= (2 as i64) {
+            let off2 = local_temp_offset(2 as i64);
+            let _m2 = emit_mov_temp_to_reg(state, qt, off2, "rdx" as *u8);
+        }
+        if nargs >= (3 as i64) {
+            let off3 = local_temp_offset(3 as i64);
+            let _m3 = emit_mov_temp_to_reg(state, qt, off3, "r8" as *u8);
+        }
+        if nargs >= (4 as i64) {
+            let off4 = local_temp_offset(4 as i64);
+            let _m4 = emit_mov_temp_to_reg(state, qt, off4, "r9" as *u8);
+        }
+        if nargs >= (5 as i64) {
+            let _w = sb_append_cstr(arena, s, "# WARNING: emit_call nargs>=5 on Win ABI (v2.7.0 简化,stack-arg fallback not yet wired)\n" as *u8);
+        }
+    } else {
+        // SysV path: 6 regs (rdi/rsi/rdx/rcx/r8/r9) — NO shadow
+        if nargs >= (1 as i64) {
+            let off1 = local_temp_offset(1 as i64);
+            let _m1 = emit_mov_temp_to_reg(state, qt, off1, "rdi" as *u8);
+        }
+        if nargs >= (2 as i64) {
+            let off2 = local_temp_offset(2 as i64);
+            let _m2 = emit_mov_temp_to_reg(state, qt, off2, "rsi" as *u8);
+        }
+        if nargs >= (3 as i64) {
+            let off3 = local_temp_offset(3 as i64);
+            let _m3 = emit_mov_temp_to_reg(state, qt, off3, "rdx" as *u8);
+        }
+        if nargs >= (4 as i64) {
+            let off4 = local_temp_offset(4 as i64);
+            let _m4 = emit_mov_temp_to_reg(state, qt, off4, "rcx" as *u8);
+        }
+        if nargs >= (5 as i64) {
+            let off5 = local_temp_offset(5 as i64);
+            let _m5 = emit_mov_temp_to_reg(state, qt, off5, "r8" as *u8);
+        }
+        if nargs >= (6 as i64) {
+            let off6 = local_temp_offset(6 as i64);
+            let _m6 = emit_mov_temp_to_reg(state, qt, off6, "r9" as *u8);
+        }
+        if nargs >= (7 as i64) {
+            let _w = sb_append_cstr(arena, s, "# WARNING: emit_call nargs>=7 on SysV ABI (v2.7.0 简化,stack-arg fallback not yet wired)\n" as *u8);
+        }
+    }
+    return 0;
+}
+
 fn emit_call(state: *u8, tok: *u8) -> i32 {
     let t = tok as *ILToken;
     let cg = state as *CGState;
@@ -218,37 +306,24 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     let nargs = (*t).text_len;
     let ret_qt = (*t).qbe_type;
     let fn_name = (*t).text;
+    let target_tag = (*cg).target_tag;  // v2.7.0 Phase 2a field
 
     // ── Step 1: 写注释标记(便于肉眼 diff vs QBE .s)─
-    let _c1 = emit_comment(state, "emit_call: MS x64 calling convention (per L4 § 3.5 E5)" as *u8);
-
-    // ── Step 2: 前 4 args 移到 %rcx / %rdx / %r8 / %r9(从 stack slots)─
-    //   v2.5.0 简化:arg_i 假设在 -(32 + i*8)(%rbp)
-    //   i = 1..min(nargs, 4)
-    //
-    // 注:每个 arg 的 mov 都按 ret_qt 走(MS x64 整数 args 走 rcx/rdx/r8/r9
-    // 是 quad-word,但 w vs l 决定 size suffix)。这里默认按 ret_qt 处理 —
-    // 真正的 arg qt 应该是 per-arg,Phase 3b parse loop 完善时扩展
-    if nargs >= (1 as i64) {
-        let off1 = local_temp_offset(1 as i64);
-        let _m1 = emit_mov_temp_to_reg(state, ret_qt, off1, "rcx" as *u8);
-    }
-    if nargs >= (2 as i64) {
-        let off2 = local_temp_offset(2 as i64);
-        let _m2 = emit_mov_temp_to_reg(state, ret_qt, off2, "rdx" as *u8);
-    }
-    if nargs >= (3 as i64) {
-        let off3 = local_temp_offset(3 as i64);
-        let _m3 = emit_mov_temp_to_reg(state, ret_qt, off3, "r8" as *u8);
-    }
-    if nargs >= (4 as i64) {
-        let off4 = local_temp_offset(4 as i64);
-        let _m4 = emit_mov_temp_to_reg(state, ret_qt, off4, "r9" as *u8);
+    if target_is_win(target_tag) == (1 as i32) {
+        let _c1 = emit_comment(state, "emit_call: MS x64 calling convention (per L4 § 3.5 E5)" as *u8);
+    } else {
+        let _c1 = emit_comment(state, "emit_call: SysV amd64 calling convention (per v2.7.0 Phase 2b)" as *u8);
     }
 
-    // ── Step 3: 32-byte shadow space alloc(MS x64 calling convention)─
-    //   subq $32, %rsp
-    let _sa = sb_append_cstr(arena, s, "\tsubq $32, %rsp\n" as *u8);
+    // ── Step 2: args → 物理寄存器(Win 4 reg / SysV 6 reg,gated on target_tag)─
+    let _ar = emit_amd64_arg_regs(state, nargs, ret_qt, target_tag);
+
+    // ── Step 3: shadow space alloc(仅 Win)— SysV 不需要 ─
+    //   Win: subq $32, %rsp (MS x64 calling convention)
+    //   SysV: NO shadow (per SysV psABI § 3.2.3)
+    if target_is_win(target_tag) == (1 as i32) {
+        let _sa = sb_append_cstr(arena, s, "\tsubq $32, %rsp\n" as *u8);
+    }
 
     // ── Step 4: 实际 call ─
     //   call $fn_name
@@ -256,9 +331,12 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     let _ca2 = sb_append_cstr(arena, s, fn_name);
     let _ca3 = sb_append_cstr(arena, s, "\n" as *u8);
 
-    // ── Step 5: 32-byte shadow space free ─
-    //   addq $32, %rsp
-    let _sf = sb_append_cstr(arena, s, "\taddq $32, %rsp\n" as *u8);
+    // ── Step 5: shadow space free(仅 Win)— SysV 无需 ─
+    //   Win: addq $32, %rsp
+    //   SysV: NO free
+    if target_is_win(target_tag) == (1 as i32) {
+        let _sf = sb_append_cstr(arena, s, "\taddq $32, %rsp\n" as *u8);
+    }
 
     // ── Step 6: 返回值 %rax → 栈槽 -<ret_off>(%rbp)─
     let ret_off = local_temp_offset(ret_temp_id);

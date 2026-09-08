@@ -1,0 +1,31 @@
+// sysv_struct_pass.jhyy — v2.7.0 Phase 2b sysv regress fixture
+//
+// Test: 2-eightbyte struct pass-by-value (SysV ABI 8-class classifier).
+//   Per SysV psABI § A.4:struct ≤16 bytes → INTEGER class (passed in 1-2 regs).
+//   target=amd64_sysv path abi_sysv_classify_arg returns CLASS_INTEGER
+//   → emit_call put both fields into %rdi (single 8-byte reg per SysV § 3.2.3).
+//
+// Status: SKIP in v2.7.0 ship gate (per regress.py --cross=auto;Windows host
+//   无 WSL/Docker → 默认 SKIP)。实 wire 留 v2.7.1 (per v2.7.1-plan.md § B)。
+
+// SKIP: sysv target requires Linux host (WSL/Docker) — v2.7.0 Phase 2b wires
+//   emit_call target-tag split but regress.py --cross=auto probe falls through
+//   to --cross=none on Windows host without WSL/Docker. Real cross-env wire
+//   ships in v2.7.1 (Linux ELF runtime + --cross wsl/docker sub-process).
+
+type Pair = struct {
+    a: i32,
+    b: i32,
+}
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn sum_pair(p: Pair) -> i32 {
+    p.a + p.b
+}
+
+fn main_jhyy() -> i32 {
+    let p = Pair { a: 10, b: 25 };
+    let result = sum_pair(p);
+    result  // 35
+}

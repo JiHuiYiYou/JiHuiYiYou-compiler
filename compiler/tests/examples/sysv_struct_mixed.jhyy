@@ -1,0 +1,29 @@
+// sysv_struct_mixed.jhyy — v2.7.0 Phase 2b sysv regress fixture
+//
+// Test: struct {i32, f64} → SysV 8-class classifier = INTEGER+SSE
+//   (i32 = INTEGER class 8-byte / f64 = SSE class 8-byte).
+//   target=amd64_sysv emit_call put INTEGER in %rdi + SSE in %xmm0
+//   (per SysV § 3.2.3:INTEGER → GPR regs;SSE → XMM regs).
+//
+// Status: SKIP in v2.7.0 ship gate.
+
+// SKIP: sysv target requires Linux host (WSL/Docker) — see sysv_struct_pass.jhyy header.
+
+type Mixed = struct {
+    i_field: i32,
+    d_field: f64,
+}
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn process(m: Mixed) -> i32 {
+    // SysV ABI: i_field in %rdi (INTEGER class), d_field in %xmm0 (SSE class)
+    let _ = m.d_field;
+    m.i_field + 1
+}
+
+fn main_jhyy() -> i32 {
+    let m = Mixed { i_field: 41, d_field: 3.14 };
+    let result = process(m);
+    result  // 42
+}

@@ -1,0 +1,17 @@
+// sysv_abi_test.jhyy — v2.7.0 Phase 2b sysv regress fixture
+//
+// Test: 6-reg max + 7th-on-stack. SysV 6 reg (rdi/rsi/rdx/rcx/r8/r9) +
+//   stack args overflow (>6). v2.7.0 emit_call emit 7th arg warning comment
+//   (per codegen_amd64_emit_call.jhyy emit_amd64_arg_regs SysV nargs>=7 路径),
+//   stack-arg 实 wire 留 v2.7.1+。
+//
+// Status: SKIP in v2.7.0 ship gate.
+
+// SKIP: sysv target requires Linux host (WSL/Docker) — see sysv_struct_pass.jhyy header.
+
+extern fn seven_arg_fn(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    let r = seven_arg_fn(1, 2, 3, 4, 5, 6, 7);
+    r  // 1+2+3+4+5+6+7 = 28
+}

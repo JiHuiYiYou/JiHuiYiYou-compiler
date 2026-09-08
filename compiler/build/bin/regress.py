@@ -224,6 +224,11 @@ def main():
                     help="Run V2-B v2.6.0 (Unit F) byte-equal-amd64 driver "
                          "(QBE vs self backend path parity check, 5 tests). "
                          "Opt-in: does NOT affect default regress baseline.")
+    ap.add_argument("--cross", choices=["wsl", "docker", "auto", "none"],
+                    default="auto",
+                    help="Cross-env mode for sysv tests (v2.7.0 Phase 2b). "
+                         "auto=probe wsl.exe/docker on PATH; none=SKIP. "
+                         "Real wire deferred to v2.7.1.")
     args = ap.parse_args()
 
     # Parse --tests (comma-separated → list)
