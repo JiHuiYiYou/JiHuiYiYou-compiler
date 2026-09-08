@@ -177,13 +177,6 @@ fn qbe_type_of(t_raw: *u8) -> i32 {
     if (*t).kind == KIND_SLICE()   { return QBE_L(); }
     if (*t).kind == KIND_FUNC()    { return QBE_L(); }
     if (*t).kind == KIND_VOID()    { return 0 as i32; }
-    // v3.1.0 (V3-C 3g): `&T` / `&mut T` (KIND_REF) = 8-byte ptr (same as POINTER).
-    // v3.1.0 (V3-C 3g): Cap<T> (KIND_CAP) = 8-byte struct pass-by-value (cnode/depth/rights/pad).
-    // v3.1.1 (V3-C 3g.5): PhantomData<T> (KIND_PHANTOM) = ZST, codegen 不应 emit 此 kind —
-    //                    防御 arm 仅用于安全 default,well-formed 程序不会触发。
-    if (*t).kind == KIND_REF()     { return QBE_L(); }
-    if (*t).kind == KIND_CAP()     { return QBE_L(); }
-    if (*t).kind == KIND_PHANTOM() { return QBE_W(); }
     return QBE_W();
 }
 

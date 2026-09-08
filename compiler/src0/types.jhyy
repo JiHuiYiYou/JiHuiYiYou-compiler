@@ -45,10 +45,6 @@ fn KIND_ENUM()       -> i32 { return 6 as i32; }
 fn KIND_ALIAS()      -> i32 { return 7 as i32; }
 fn KIND_VOID()       -> i32 { return 8 as i32; }
 fn KIND_UNRESOLVED() -> i32 { return 9 as i32; }
-// v3.1.0 (V3-C 3g): KIND_REF = `&T` / `&mut T` borrow type. elem = inner *Type,
-// is_mut = 1 if `&mut`, 0 if `&`. Lifetime 不入 Type (在 Sym / NodeRefType 端
-// 保留语义,sema 阶段校验子类型)。layout = 8 字节(单一指针大小)。
-fn KIND_REF()         -> i32 { return 10 as i32; }
 
 // ════════════════════════════════════════════════════
 // PrimType 常量
@@ -70,7 +66,7 @@ fn PRIM_BOOL() -> i32 { return 10 as i32; }
 // Type struct（max-size union 模式）
 // ════════════════════════════════════════════════════
 
-// 19 字段 × 8 bytes + is_volatile(i32 4) + pad_volatile(i32 4) + is_mut(i32 4) + pad_mut(i32 4) = 168 bytes
+// 19 字段 × 8 bytes = 152 bytes
 // 字段映射（按 C union variant）：
 //   KIND_PRIMITIVE: kind + prim
 //   KIND_POINTER:   kind + elem
@@ -81,46 +77,32 @@ fn PRIM_BOOL() -> i32 { return 10 as i32; }
 //   KIND_ENUM:      kind + name + variants + nvariants + tag_size + payload_off + payload_sz + size
 //   KIND_ALIAS:     kind + sym + underlying
 //   KIND_VOID:      kind
-//   KIND_REF (v3.1.0): kind + elem (= inner *Type) + is_mut
-//
-// v3.0.3 (3c volatile): 新增 is_volatile 标记。volatile 修饰的 type 在 codegen 走
-// "no regalloc + no barrier" 路径,每次 load 都用 fresh temp。compound 类型不允许
-// volatile(per spec § 6 限制),sema 阶段拒绝。
-//
-// v3.1.0 (V3-C 3g): 新增 is_mut 标记 `&mut` vs `&`。KIND_REF 走 8-byte ptr layout
-// (跟 POINTER 一致)。KIND_REF 不允许 is_volatile(借用临时可变,volatile 强制 fresh
-// temp 互斥)。sema 阶段拒绝 `&mut volatile T` / `volatile &mut T` 组合。
 //
 // 注：所有 *Type 在 jhyy 中用 *u8（struct 内前向引用问题）
 type Type = struct {
-    kind:         i32,
-    prim:         i32,
-    elem:         *u8,        // KIND_POINTER/SLICE/ARRAY: *Type; KIND_REF: inner *Type
-    arr_count:    i64,        // KIND_ARRAY
-    params:       *u8,        // KIND_FUNC: **Type（实际是 *[*]Type 数组，offset 访问）
-    nparams:      i64,        // KIND_FUNC
-    ret:          *u8,        // KIND_FUNC: *Type
-    name:         *u8,        // KIND_STRUCT/ENUM: *Sym
-    fields:       *u8,        // KIND_STRUCT: *FieldDesc
-    nfields:      i64,        // KIND_STRUCT
-    size:         i64,        // KIND_STRUCT/ENUM
-    align:        i64,        // KIND_STRUCT
-    variants:     *u8,        // KIND_ENUM: *VariantDesc
-    nvariants:    i64,        // KIND_ENUM
-    tag_size:     i64,        // KIND_ENUM
-    payload_off:  i64,        // KIND_ENUM
-    payload_sz:   i64,        // KIND_ENUM
-    sym:          *u8,        // KIND_ALIAS: *Sym
-    underlying:   *u8,        // KIND_ALIAS: *Type
-    is_volatile:  i32,        // v3.0.3: 1 if type is `volatile T`, 0 otherwise
-    _pad_volatile: i32,       // 4-byte tail pad to keep 8-byte struct alignment
-    is_mut:       i32,        // v3.1.0: 1 if `&mut T`, 0 if `&T`; only valid with KIND_REF
-    _pad_mut:     i32,        // 4-byte tail pad to keep 8-byte struct alignment
+    kind:        i32,
+    prim:        i32,
+    elem:        *u8,        // KIND_POINTER/SLICE/ARRAY: *Type
+    arr_count:   i64,        // KIND_ARRAY
+    params:      *u8,        // KIND_FUNC: **Type（实际是 *[*]Type 数组，offset 访问）
+    nparams:     i64,        // KIND_FUNC
+    ret:         *u8,        // KIND_FUNC: *Type
+    name:        *u8,        // KIND_STRUCT/ENUM: *Sym
+    fields:      *u8,        // KIND_STRUCT: *FieldDesc
+    nfields:     i64,        // KIND_STRUCT
+    size:        i64,        // KIND_STRUCT/ENUM
+    align:       i64,        // KIND_STRUCT
+    variants:    *u8,        // KIND_ENUM: *VariantDesc
+    nvariants:   i64,        // KIND_ENUM
+    tag_size:    i64,        // KIND_ENUM
+    payload_off: i64,        // KIND_ENUM
+    payload_sz:  i64,        // KIND_ENUM
+    sym:         *u8,        // KIND_ALIAS: *Sym
+    underlying:  *u8,        // KIND_ALIAS: *Type
 }
 
-// Type struct 字节数 (v3.0.3: 160 = 152 + 8 for is_volatile+pad;
-//                       v3.1.0: 168 = 160 + 8 for is_mut+pad)
-fn TYPE_SIZE() -> i64 { return 168 as i64; }
+// Type struct 字节数
+fn TYPE_SIZE() -> i64 { return 152 as i64; }
 
 // ════════════════════════════════════════════════════
 // TypeArena：11 prim + 1 void 的 lazy 缓存
@@ -283,51 +265,6 @@ fn type_alias(a: *Arena, sym: *Sym, underlying: *Type) -> *Type {
     return t;
 }
 
-// v3.1.0 (V3-C 3g): type_ref — 构造 `&T` / `&mut T` borrow type.
-// is_mut=0 → &T (shared), is_mut=1 → &mut T (exclusive).
-// elem 是 inner *Type (e.g. `T` in `&mut T`)。lifetime 不入 type,sema 校验。
-// layout = 8 bytes (单一指针大小,跟 KIND_POINTER 一致)。
-fn type_ref(a: *Arena, inner: *Type, is_mut: i32) -> *Type {
-    let t = arena_alloc(a, TYPE_SIZE()) as *Type;
-    (*t).kind = KIND_REF();
-    (*t).elem = inner as *u8;
-    (*t).is_mut = is_mut;
-    return t;
-}
-
-// v3.1.0 (V3-C 3g): type_cap — 构造 `Cap<T>` builtin capability type.
-// 8 字节 layout (per OS ABI D6 + spec supplement § 3):
-//   cnode_idx : u32 @ 0   (CSpace slot)
-//   depth     : u8  @ 4   (CDL depth)
-//   rights    : u16 @ 5   (read/write/grant)
-//   padding   : u8  @ 7   (alignment to 8)
-// 内部表示:Kind=KIND_CAP(elem=*Type),size=8,align=8。
-// pass-by-value 走 8-byte register(跟 i64/u64/f64 一致)。
-fn KIND_CAP()         -> i32 { return 11 as i32; }
-fn type_cap(a: *Arena, inner: *Type) -> *Type {
-    let t = arena_alloc(a, TYPE_SIZE()) as *Type;
-    (*t).kind = KIND_CAP();
-    (*t).elem = inner as *u8;
-    (*t).size = 8 as i64;
-    (*t).align = 8 as i64;
-    return t;
-}
-
-// v3.1.1 (V3-C 3g.5): type_phantom — 构造 `PhantomData<T>` ZST type marker.
-// 0 字节 layout (per Rust ZST 语义): size=0, align=1, 不占 struct layout slot.
-// elem 存 inner *Type 以支持 type_eq 结构等比(PhantomData<i32> ≠ PhantomData<u64>)
-// 便于 `struct Foo<T> { _marker: PhantomData<T>, val: T }` 类型参数推导。
-// M0 简化:不允许实例化(由 sema E0050 拦);只用于 type-level marker / 字段嵌入。
-fn KIND_PHANTOM()      -> i32 { return 12 as i32; }
-fn type_phantom(a: *Arena, inner: *Type) -> *Type {
-    let t = arena_alloc(a, TYPE_SIZE()) as *Type;
-    (*t).kind = KIND_PHANTOM();
-    (*t).elem = inner as *u8;
-    (*t).size = 0 as i64;   // ZST invariant — 不能依赖 inner size
-    (*t).align = 1 as i64;  // align 1 = 不影响 struct layout 对齐
-    return t;
-}
-
 // ════════════════════════════════════════════════════
 // type_size / type_align
 // ════════════════════════════════════════════════════
@@ -362,9 +299,6 @@ fn type_size(t: *Type) -> i64 {
     if k == KIND_STRUCT()  { return (*t).size; }
     if k == KIND_ENUM()    { return (*t).size; }
     if k == KIND_VOID()    { return 0 as i64; }
-    if k == KIND_REF()     { return 8 as i64; }   // v3.1.0: `&T` / `&mut T` = 1 ptr
-    if k == KIND_CAP()     { return (*t).size; } // v3.1.0: Cap<T> = 8 (cnode/depth/rights/pad)
-    if k == KIND_PHANTOM() { return 0 as i64; }  // v3.1.1: ZST — 0 bytes, 不依赖 inner
     return 0 as i64;
 }
 
@@ -384,9 +318,6 @@ fn type_align(t: *Type) -> i64 {
     if k == KIND_STRUCT()    { return (*t).align; }
     if k == KIND_ENUM()      { return 4 as i64; }  // tag alignment
     if k == KIND_VOID()      { return 1 as i64; }
-    if k == KIND_REF()       { return 8 as i64; }  // v3.1.0
-    if k == KIND_CAP()       { return (*t).align; } // v3.1.0
-    if k == KIND_PHANTOM()   { return 1 as i64; }   // v3.1.1: ZST align = 1 (不影响 struct 对齐)
     return 1 as i64;
 }
 
@@ -449,23 +380,6 @@ fn type_eq(a: *Type, b: *Type) -> i32 {
         return type_eq((*a).underlying as *Type, (*b).underlying as *Type);
     }
     if k == KIND_VOID() { return 1 as i32; }
-    // v3.1.0: KIND_REF — same inner + same is_mut → equal。
-    // 不同 is_mut 不等(&T vs &mut T 是 distinct types);shared 可以 coerce 到
-    // shared 的 sub,但不在 type_eq 里表达(留 NLL check_borrow 端)。
-    if k == KIND_REF() {
-        if (*a).is_mut != (*b).is_mut { return 0 as i32; }
-        return type_eq((*a).elem as *Type, (*b).elem as *Type);
-    }
-    // v3.1.0: KIND_CAP — nominal by elem type (Cap<i32> != Cap<i64>)。
-    // 跟 KIND_STRUCT 不同:Cap 不是 struct,只是按 elem 区分,不靠 name Sym。
-    if k == KIND_CAP() {
-        return type_eq((*a).elem as *Type, (*b).elem as *Type);
-    }
-    // v3.1.1: KIND_PHANTOM — ZST type marker。结构等比(PhantomData<i32> ≠ PhantomData<u64>)
-    // 跟 KIND_CAP 一样按 elem 区分;但 layout 不一样(0 vs 8)。
-    if k == KIND_PHANTOM() {
-        return type_eq((*a).elem as *Type, (*b).elem as *Type);
-    }
     return 0 as i32;
 }
 
@@ -506,13 +420,5 @@ fn type_to_string(t: *Type) -> *u8 {
     if k == KIND_ENUM()    { return "enum" as *u8; }
     if k == KIND_ALIAS()   { return "alias" as *u8; }
     if k == KIND_VOID()    { return "()" as *u8; }
-    // v3.1.0: KIND_REF — 暂返回 "&" 或 "&mut" 静态串;sema 错误信息阶段补
-    // 完整 inner type 拼接。
-    if k == KIND_REF() {
-        if (*t).is_mut == 1 { return "&mut" as *u8; }
-        return "&" as *u8;
-    }
-    if k == KIND_CAP() { return "Cap" as *u8; }
-    if k == KIND_PHANTOM() { return "PhantomData" as *u8; } // v3.1.1
     return "?" as *u8;
 }

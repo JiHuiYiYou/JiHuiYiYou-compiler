@@ -123,33 +123,6 @@ fn NODE_CONST_DECL()     -> i32 { return 49 as i32; }
 fn NODE_NULL()           -> i32 { return 50 as i32; }
 // v1.3.6: defer fncall(); — sema collects into fd->defers; codegen emits LIFO before ret
 fn NODE_DEFER()          -> i32 { return 51 as i32; }
-// V3-B v3.0.1: asm!(...) inline x86-64 asm macro per D42 (docs/plans/v2/v2.0.0-os-prep.md).
-// codegen does NOT emit QBE IL — instead appends raw asm string to a side-file
-// (compiler/build/obj/_inline_asm.buf) that main.jhyy concatenates to the .s
-// file before gcc link. v3.0.1 only supports a single string literal (no
-// operands, no templates); v3.1+ adds operand constraints.
-fn NODE_ASM_BLOCK()      -> i32 { return 52 as i32; }
-// v3.0.3 (3c volatile): `volatile T` type qualifier wrapper。primitive-only —
-// sema 拒绝 compound types (struct/pointer/array) 套 volatile(per spec § 6)。
-// Note: enum value 53 (52 taken by NODE_ASM_BLOCK in 3a; renumbered during 3a+3c
-// Phase A integration merge).
-fn NODE_VOLATILE_TYPE()  -> i32 { return 53 as i32; }
-// v3.0.5 (3f memory barrier): fence_*() builtin ident dispatch.
-//   3 variants by kind field:
-//     0 = seq_cst → emits `mfence`
-//     1 = acquire → emits `lfence`
-//     2 = release → emits `sfence`
-//   Codegen emits raw mnem to `_fence.buf` side-file; main.jhyy concats
-//   before gcc link (same pattern as 3a inline asm). Returns unit type.
-fn NODE_BUILTIN_FENCE()  -> i32 { return 54 as i32; }
-// v3.1.0 (V3-C 3g): `&T` / `&mut T` borrow type wrapper + optional lifetime.
-//   is_mut=0 → shared borrow (`&T`)
-//   is_mut=1 → exclusive borrow (`&mut T`)
-//   lifetime=null (0) → elided/anonymous lifetime; non-null → *Node (Token
-//     holding the `'a` ident literal — sema extracts the lifetime name).
-// sema resolves inner, sets Type.kind=KIND_REF, Type.elem=inner, Type.is_mut.
-// NLL borrow check uses is_mut + lifetime_id from Sym to enforce exclusivity.
-fn NODE_REF_TYPE()       -> i32 { return 55 as i32; }
 
 fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_INT()            { return "INT" as *u8; }
@@ -203,9 +176,6 @@ fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_MODULE()        { return "MODULE" as *u8; }
     if kind == NODE_NULL()          { return "NULL" as *u8; }
     if kind == NODE_DEFER()         { return "DEFER" as *u8; }
-    if kind == NODE_ASM_BLOCK()     { return "ASM_BLOCK" as *u8; }
-    if kind == NODE_VOLATILE_TYPE() { return "VOLATILE_TYPE" as *u8; }
-    if kind == NODE_BUILTIN_FENCE() { return "BUILTIN_FENCE" as *u8; }
     return "?" as *u8;
 }
 
@@ -271,17 +241,13 @@ type NodeBinary = struct {
 }
 fn NODE_BINARY_SIZE() -> i64 { return 24 as i64; }
 
-// callee(*u8 8) + args(*u8 8) + nargs(i64 8) + type_args(*u8 8) + ntype_args(i64 8) = 40
-// (v3.2.0c 3i fn path: type_args 是 turbofish `f::<T,U>(...)` 解析时 attach 的 **Node 数组;
-// sema infer_type NODE_CALL 时据 type_args 触发 mono_expand_fn_call。)
+// callee(*u8 8) + args(*u8 8) + nargs(i64 8) = 24
 type NodeCall = struct {
-    callee:     *u8,
-    args:       *u8,     // **Node 数组
-    nargs:      i64,
-    type_args:  *u8,     // **Node (v3.2.0c added)
-    ntype_args: i64,
+    callee: *u8,
+    args:   *u8,     // **Node 数组
+    nargs:  i64,
 }
-fn NODE_CALL_SIZE() -> i64 { return 40 as i64; }
+fn NODE_CALL_SIZE() -> i64 { return 24 as i64; }
 
 // module(*u8 8) + function(*u8 8) + args(*u8 8) + nargs(i64 8) + resolved(*u8 8) = 40
 type NodeQualifiedCall = struct {
@@ -372,38 +338,6 @@ type NodeDeref = struct {
 }
 fn NODE_DEREF_SIZE() -> i64 { return 8 as i64; }
 
-// v3.0.3 (3c volatile): inner(*u8 8) = 8
-// `volatile T` type qualifier wrapper — wraps a primitive type node.
-// sema resolves inner, copies is_volatile=1 onto the resulting Type.
-// parser rejects compound types (struct/pointer/array) chained with volatile.
-type NodeVolatileType = struct {
-    inner: *u8,        // *Node (must be primitive type annotation)
-}
-fn NODE_VOLATILE_TYPE_SIZE() -> i64 { return 8 as i64; }
-
-// v3.1.0 (V3-C 3g): inner(*u8 8) + is_mut(i32 4) + lifetime(*u8 8) = 24 (rounded to 24-aligned)
-// `&T` / `&mut T` borrow type wrapper. inner=*Node (resolved type annotation).
-// is_mut: 0=shared, 1=exclusive. lifetime: null=elided, non-null=*Node wrapping
-// the 'a ident token for named lifetime. Built by parse_type when peeking `&`
-// before TOKEN_STAR. Mirrors NodeVolatileType layout pattern.
-type NodeRefType = struct {
-    inner:    *u8,    // *Node (resolved type annotation, e.g. `T` in `&mut T`)
-    is_mut:   i32,    // 0 = &T (shared borrow), 1 = &mut T (exclusive borrow)
-    lifetime: *u8,    // *Node (nullable; the 'a ident node, or null for elided)
-}
-fn NODE_REF_TYPE_SIZE() -> i64 { return 24 as i64; }
-
-// v3.0.5 (3f memory barrier): kind(i64 8) = 8
-//   fence_seq_cst()  → kind=0 → mfence
-//   fence_acquire()  → kind=1 → lfence
-//   fence_release()  → kind=2 → sfence
-// codegen emits raw mnem to _fence.buf side-file; main.jhyy concats to .s
-// before gcc link. sema returns unit type (stmt-position, no expr value).
-type NodeBuiltinFence = struct {
-    kind: i64,
-}
-fn NODE_BUILTIN_FENCE_SIZE() -> i64 { return 8 as i64; }
-
 // ─── statements（3b）───
 
 // stmts(*u8 8) + nstmts(i64 8) = 16
@@ -469,18 +403,6 @@ type NodeDefer = struct {
     expr: *u8,    // *Node（must be NODE_CALL or NODE_QUALIFIED_CALL, sema validates）
 }
 fn NODE_DEFER_SIZE() -> i64 { return 8 as i64; }
-
-// V3-B v3.0.1: asm!(...) inline asm macro per D42.
-//   text(*u8 8) — arena_strdup'd string literal body (between `(` and `)`)
-//   noperands(i64 8) — operand count (v3.0.1 only supports 0; v3.1+ adds non-zero)
-//   operands(*u8 8) — **Node operand array (v3.0.1 always NULL; v3.1+ uses)
-//   total = 24 bytes
-type NodeAsmBlock = struct {
-    text:     *u8,    // *u8 arena_strdup'd (caller owns arena)
-    noperands: i64,
-    operands: *u8,    // **Node (NULL in v3.0.1)
-}
-fn NODE_ASM_BLOCK_SIZE() -> i64 { return 24 as i64; }
 
 // expr(*u8 8) = 8
 type NodeExprStmt = struct {
@@ -616,44 +538,25 @@ fn NODE_ENUM_DEF_SIZE() -> i64 { return 16 as i64; }
 //   (is_extern+is_inline 共占一个 8-byte slot)
 // v1.3.5: is_inline — #[inline] attribute; codegen callsite inline expansion
 // v1.3.6: defers/ndefers — defer stack (sema-fill, codegen-read LIFO)
-// v3.0.2 (3b naked): is_naked — #[naked] attribute; codegen skips QBE export + skips prologue/epilogue
-// v3.0.4 (3e link_section): link_section — #[link_section("name")] puts fn in custom ELF section
-//   link_section 8 bytes → 80 → 8-byte align → 80
 type NodeFuncDecl = struct {
-    sym:          *u8,    // *Sym
-    params:       *u8,    // *NodeFuncDeclParam 数组
-    nparams:      i64,
-    ret_type:     *u8,    // *Node（可空）
-    body:         *u8,    // *Node（extern 时 NULL）
-    is_extern:    i32,    // bool
-    is_inline:    i32,    // v1.3.5: #[inline] attribute
-    defers:       *u8,    // *Node 数组 (sema-fill, codegen-read LIFO)
-    ndefers:      i64,
-    is_naked:     i32,    // v3.0.2 (3b naked): #[naked] attribute
-    link_section: *u8,    // v3.0.4 (3e link_section): custom ELF section name (or NULL)
-    // v3.2.0c (3i fn path): type_params 是 **Sym 数组(每个 type-param 是 SYM_TYPE
-    //   +type_ptr=0 哨兵 sym);ntype_params > 0 时 = generic fn, codegen skip body。
-    //   `fn max<T, U>(...)` 解析时 fill;`fn max<T>(...)` mono 后 cloned fn 的
-    //   ntype_params = 0。append at end,不破现有字段 offset (codegen 走 node_func_decl_data()
-    //   自动 follow)。
-    type_params:   *u8,
-    ntype_params:  i64,
+    sym:      *u8,    // *Sym
+    params:   *u8,    // *NodeFuncDeclParam 数组
+    nparams:  i64,
+    ret_type: *u8,    // *Node（可空）
+    body:     *u8,    // *Node（extern 时 NULL）
+    is_extern: i32,   // bool
+    is_inline: i32,   // v1.3.5: #[inline] attribute
+    defers:   *u8,    // *Node 数组 (sema-fill, codegen-read LIFO)
+    ndefers:  i64,
 }
-fn NODE_FUNC_DECL_SIZE() -> i64 { return 96 as i64; }
+fn NODE_FUNC_DECL_SIZE() -> i64 { return 64 as i64; }
 
-// v3.2.0 (V3-C 3i generics): sym(*u8 8) + body(*u8 8) +
-//   type_params(*u8 8) + ntype_params(i64 8) = 32
-//   - type_params: **Sym 数组(每个 type-param 是 SYM_TYPE+type_ptr=0 哨兵 sym)
-//   - ntype_params > 0 表示此 decl 是 generic def,Pass 2/3 跳过 codegen;
-//     Pass 1.5 mono_expand_module 会克隆 + substitute + append 普通 decl。
-//   - ntype_params == 0 表示普通 type decl,行为与 v3.1.x 一致。
+// sym(*u8 8) + body(*u8 8) = 16
 type NodeTypeDecl = struct {
-    sym:          *u8,    // *Sym
-    body:         *u8,    // *Node（struct/enum 定义）
-    type_params:  *u8,    // **Sym 数组(NULL + ntype_params==0 表示 non-generic)
-    ntype_params: i64,    // type-param 数
+    sym:  *u8,        // *Sym
+    body: *u8,        // *Node（struct/enum 定义）
 }
-fn NODE_TYPE_DECL_SIZE() -> i64 { return 32 as i64; }
+fn NODE_TYPE_DECL_SIZE() -> i64 { return 16 as i64; }
 
 // sym(*u8 8) = 8
 type NodeExternDecl = struct {
@@ -667,38 +570,12 @@ type NodeImportDecl = struct {
 }
 fn NODE_IMPORT_DECL_SIZE() -> i64 { return 8 as i64; }
 
-// v3.2.0 (V3-C 3i generics): decls(*u8 8) + ndeccls(i64 8) +
-//   is_no_std(i32 4) + pad(4) + generic_insts(*u8 8) + ngeneric_insts(i64 8) = 40
-// v3.0.0 (3d no_std): added is_no_std field. 4-byte int + 4-byte tail padding
-// keeps struct aligned to 8 (matches C side NodeModule sizeof).
-// generic_insts: *GenericInstRecord 数组(parser 在 parse_type / parse_struct_literal
-//   见到 `Vec<i32>` 这类用法时 append 一条:mangled_name + [args])。Pass 1.5
-//   mono_expand_module 消费此表。
+// decls(*u8 8) + ndeccls(i64 8) = 16
 type NodeModule = struct {
-    decls:           *u8,    // **Node 数组（顶层 decls）
-    ndeccls:         i64,
-    is_no_std:       i32,    // 1 if file has `#[no_std]` module attr
-    generic_insts:   *u8,    // *GenericInstRecord 数组 (NULL + n==0 表示无 inst)
-    ngeneric_insts:  i64,    // generic-inst record 数
+    decls:  *u8,      // **Node 数组（顶层 decls）
+    ndeccls: i64,
 }
-// jhyy size: decls(8) + ndeccls(8) + is_no_std(4) + 4-byte tail-pad + generic_insts(8) + ngeneric_insts(8) = 36
-//   返回 40 (NODE_MODULE_SIZE 是 C-side 历史保留,实际 jhyy struct 36 字节,
-//   arena_alloc 仍按 40 分配,留 4 字节 tail-pad 保证 8-align)
-fn NODE_MODULE_SIZE() -> i64 { return 40 as i64; }
-
-// v3.2.0 (V3-C 3i generics): GenericInstRecord — parser 记录的 instantiations
-//   16 bytes: mangled_name(*u8 8) + arg_types(*u8 8)
-//   - mangled_name: parser 拼好的 unique name (e.g. "Vec$i32")
-//   - arg_types: **Node 数组(parser 解析的每个 type-arg 的 AST node 指针)
-//   - base_name 与 n_params 不存,Pass 1.5 用 mangled_name 去 symtab 反查 td_sym
-//     + node_type_decl_data 看 ntype_params(实际只需 base_name 反查)
-type GenericInstRecord = struct {
-    mangled_name: *u8,    // mangled name (c字符串)
-    arg_types:    *u8,    // **Node 数组 — parser 解析的 type-arg AST nodes
-    nargs:        i64,
-    base_name:    *u8,    // 原始 generic name (e.g. "Vec") — Pass 1.5 反查 td_sym 用
-}
-fn GENERIC_INST_RECORD_SIZE() -> i64 { return 32 as i64; }
+fn NODE_MODULE_SIZE() -> i64 { return 16 as i64; }
 
 // ════════════════════════════════════════════════════
 // 通用 helper：初始化 Node header + 设置 variant 数据
@@ -838,18 +715,13 @@ fn node_binary_data(n: *Node) -> *NodeBinary {
 }
 
 fn ast_new_call(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
-                callee: *Node, args: *u8, nargs: i64,
-                type_args: *u8, ntype_args: i64) -> *Node {
+                callee: *Node, args: *u8, nargs: i64) -> *Node {
     let buf = arena_alloc(a, NODE_SIZE() + NODE_CALL_SIZE());
     let n = ast_init_node(buf, NODE_CALL(), loc_filename, loc_line, loc_col);
     let d = (buf as i64 + NODE_SIZE()) as *NodeCall;
     (*d).callee = callee as *u8;
     (*d).args = args;
     (*d).nargs = nargs;
-    // v3.2.0c (3i fn path): turbofish type_args from parser turbofish arm;
-    //   default 0/0 for non-turbofish calls.
-    (*d).type_args = type_args;
-    (*d).ntype_args = ntype_args;
     return n;
 }
 
@@ -1046,60 +918,6 @@ fn node_deref_data(n: *Node) -> *NodeDeref {
     return (n as i64 + NODE_SIZE()) as *NodeDeref;
 }
 
-// v3.0.3 (3c volatile): ast_new_volatile_type / node_volatile_type_data
-// `volatile T` — wraps a primitive type annotation node. parser 仅在 TOKEN_VOLATILE
-// 后跟 primitive type ident 时调用;compound type 在 parser 阶段就拒掉,
-// sema 阶段做 inner.kind == NODE_IDENT 强校验兜底。
-fn ast_new_volatile_type(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
-                         inner: *Node) -> *Node {
-    let buf = arena_alloc(a, NODE_SIZE() + NODE_VOLATILE_TYPE_SIZE());
-    let n = ast_init_node(buf, NODE_VOLATILE_TYPE(), loc_filename, loc_line, loc_col);
-    let d = (buf as i64 + NODE_SIZE()) as *NodeVolatileType;
-    (*d).inner = inner as *u8;
-    return n;
-}
-
-fn node_volatile_type_data(n: *Node) -> *NodeVolatileType {
-    return (n as i64 + NODE_SIZE()) as *NodeVolatileType;
-}
-
-// v3.0.5 (3f memory barrier): ast_new_builtin_fence / node_builtin_fence_data
-// `fence_seq_cst()` / `fence_acquire()` / `fence_release()` builtin ident
-// dispatch (per spec § 2). kind: 0=seq_cst, 1=acquire, 2=release.
-// parser maps ident name → kind, calls ctor. sema returns unit type.
-// codegen emits raw mnem (mfence/lfence/sfence) to _fence.buf side-file.
-fn ast_new_builtin_fence(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
-                         kind: i64) -> *Node {
-    let buf = arena_alloc(a, NODE_SIZE() + NODE_BUILTIN_FENCE_SIZE());
-    let n = ast_init_node(buf, NODE_BUILTIN_FENCE(), loc_filename, loc_line, loc_col);
-    let d = (buf as i64 + NODE_SIZE()) as *NodeBuiltinFence;
-    (*d).kind = kind;
-    return n;
-}
-
-// v3.1.0 (V3-C 3g): ast_new_ref_type / node_ref_type_data
-// `&T` / `&mut T` borrow type wrapper. parser 仅在 `&` 后跟 type 时调用;
-// 出现在 expr 位置(NODE_ADDR_OF)已存在,不重叠。lifetime 可为 null(elided)。
-// sema 走 NODE_REF_TYPE arm → resolve inner, copy Type, set KIND_REF + is_mut + elem.
-fn ast_new_ref_type(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
-                    inner: *Node, is_mut: i32, lifetime: *Node) -> *Node {
-    let buf = arena_alloc(a, NODE_SIZE() + NODE_REF_TYPE_SIZE());
-    let n = ast_init_node(buf, NODE_REF_TYPE(), loc_filename, loc_line, loc_col);
-    let d = (buf as i64 + NODE_SIZE()) as *NodeRefType;
-    (*d).inner = inner as *u8;
-    (*d).is_mut = is_mut;
-    (*d).lifetime = lifetime as *u8;
-    return n;
-}
-
-fn node_ref_type_data(n: *Node) -> *NodeRefType {
-    return (n as i64 + NODE_SIZE()) as *NodeRefType;
-}
-
-fn node_builtin_fence_data(n: *Node) -> *NodeBuiltinFence {
-    return (n as i64 + NODE_SIZE()) as *NodeBuiltinFence;
-}
-
 // ════════════════════════════════════════════════════
 // Statement 构造函数 + 访问器（3b）
 // ════════════════════════════════════════════════════
@@ -1253,23 +1071,6 @@ fn ast_new_defer(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32, expr
     let n = ast_init_node(buf, NODE_DEFER(), loc_filename, loc_line, loc_col);
     let d = (buf as i64 + NODE_SIZE()) as *NodeDefer;
     (*d).expr = expr as *u8;
-    return n;
-}
-
-// V3-B v3.0.1: asm!(...) inline asm macro factory. text 是 arena_strdup 过的
-// string literal body（已剥两端引号）。v3.0.1 only supports noperands=0,
-// operands=NULL; v3.1+ 扩展时会用同 signature 增量填两个字段.
-fn node_asm_block_data(n: *Node) -> *NodeAsmBlock {
-    return (n as i64 + NODE_SIZE()) as *NodeAsmBlock;
-}
-fn ast_new_asm_block(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
-                      text: *u8, noperands: i64, operands: *u8) -> *Node {
-    let buf = arena_alloc(a, NODE_SIZE() + NODE_ASM_BLOCK_SIZE());
-    let n = ast_init_node(buf, NODE_ASM_BLOCK(), loc_filename, loc_line, loc_col);
-    let d = (buf as i64 + NODE_SIZE()) as *NodeAsmBlock;
-    (*d).text = text;
-    (*d).noperands = noperands;
-    (*d).operands = operands;
     return n;
 }
 
@@ -1497,9 +1298,7 @@ fn node_enum_def_data(n: *Node) -> *NodeEnumDef {
 fn ast_new_func_decl(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
                      sym: *Sym, params: *u8, nparams: i64,
                      ret_type: *Node, body: *Node, is_extern: i32,
-                     is_inline: i32, is_naked: i32,
-                     link_section: *u8,
-                     type_params: *u8, ntype_params: i64) -> *Node {
+                     is_inline: i32) -> *Node {
     let buf = arena_alloc(a, NODE_SIZE() + NODE_FUNC_DECL_SIZE());
     let n = ast_init_node(buf, NODE_FUNC_DECL(), loc_filename, loc_line, loc_col);
     let d = (buf as i64 + NODE_SIZE()) as *NodeFuncDecl;
@@ -1512,13 +1311,6 @@ fn ast_new_func_decl(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
     (*d).is_inline = is_inline;   // v1.3.5: #[inline] attribute
     (*d).defers = 0 as *u8;   // v1.3.6: defer stack starts empty (sema fills)
     (*d).ndefers = 0 as i64;
-    (*d).is_naked = is_naked;  // v3.0.2 (3b naked): #[naked] attribute
-    (*d).link_section = link_section;  // v3.0.4 (3e link_section): custom ELF section (or NULL)
-    // v3.2.0c (3i fn path): generic fn `fn max<T>(...)` 解析时 fill (parser.jhyy
-    //   parse_func L3002-3010);mono 后 cloned fn 的 ntype_params = 0(non-generic
-    //   cloned fn). 默认 0/0 保留 v3.1.x 行为(append at end, 不破现有字段 offset)。
-    (*d).type_params = type_params;
-    (*d).ntype_params = ntype_params;
     return n;
 }
 
@@ -1526,20 +1318,13 @@ fn node_func_decl_data(n: *Node) -> *NodeFuncDecl {
     return (n as i64 + NODE_SIZE()) as *NodeFuncDecl;
 }
 
-// v3.2.0 (V3-C 3i generics): type_params / ntype_params params 新增。
-//   non-generic decl 走 type_params=NULL + ntype_params=0,行为与 v3.1.x 一致。
 fn ast_new_type_decl(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
-                     sym: *Sym, body: *Node,
-                     type_params: *u8, ntype_params: i64) -> *Node {
+                     sym: *Sym, body: *Node) -> *Node {
     let buf = arena_alloc(a, NODE_SIZE() + NODE_TYPE_DECL_SIZE());
     let n = ast_init_node(buf, NODE_TYPE_DECL(), loc_filename, loc_line, loc_col);
     let d = (buf as i64 + NODE_SIZE()) as *NodeTypeDecl;
-    // v3.2.0: offset access (避开 jhyy struct deref)
-    // NodeTypeDecl layout: sym(8) + body(8) + type_params(8) + ntype_params(8)
-    *((d as *u8) as **u8) = sym as *u8;
-    *((d as i64 + (8 as i64)) as **u8) = body as *u8;
-    *((d as i64 + (16 as i64)) as **u8) = type_params;
-    *((d as i64 + (24 as i64)) as *i64) = ntype_params;
+    (*d).sym = sym as *u8;
+    (*d).body = body as *u8;
     return n;
 }
 
@@ -1601,27 +1386,15 @@ fn node_const_decl_data(n: *Node) -> *NodeConstDecl {
 
 // ═══════════════════════════════════════════════════════════
 // Module 构造函数 + 访问器（3d）
-// v3.0.0 (3d no_std): added is_no_std parameter
 // ═══════════════════════════════════════════════════════════
 
-// v3.2.0 (V3-C 3i generics): generic_insts / ngeneric_insts params 新增。
-//   parser 累积 (mangled_name, args) 进此数组,Pass 1.5 mono_expand_module 消费。
-//   非 generic 模块 走 generic_insts=NULL + ngeneric_insts=0,行为与 v3.1.x 一致。
 fn ast_new_module(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
-                  decls: *u8, ndeccls: i64, is_no_std: i32,
-                  generic_insts: *u8, ngeneric_insts: i64) -> *Node {
+                  decls: *u8, ndeccls: i64) -> *Node {
     let buf = arena_alloc(a, NODE_SIZE() + NODE_MODULE_SIZE());
     let n = ast_init_node(buf, NODE_MODULE(), loc_filename, loc_line, loc_col);
     let d = (buf as i64 + NODE_SIZE()) as *NodeModule;
-    // v3.2.0: offset access.
-    // jhyy layout (no _pad0, no auto-align for *u8 after i32):
-    //   decls(8) @0 + ndeccls(8) @8 + is_no_std(4) @16 + generic_insts(8) @20 + ngeneric_insts(8) @28
-    //   = 36 bytes (NODE_MODULE_SIZE() returns 40, includes tail-pad for 8-align)
-    *((d as *u8) as **u8) = decls;
-    *((d as i64 + (8 as i64)) as *i64) = ndeccls;
-    *((d as i64 + (16 as i64)) as *i32) = is_no_std;
-    *((d as i64 + (20 as i64)) as **u8) = generic_insts;
-    *((d as i64 + (28 as i64)) as *i64) = ngeneric_insts;
+    (*d).decls = decls;
+    (*d).ndeccls = ndeccls;
     return n;
 }
 

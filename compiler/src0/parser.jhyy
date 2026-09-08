@@ -76,34 +76,10 @@ type Parser = struct {
     current_scope: *u8,
     scope_depth:   i32,
     error_count:   i32,
-    // v3.0.0 (3d no_std): `#[inline]` at file top is still fn-level (the OLD
-    // parse_decl → parse_func → parse_attributes path). parse_module_attributes
-    // consumes it but stores the flag here so parse_attributes can fold it into
-    // is_inline for the next fn. Reset to 0 by parse_attributes after read.
-    // Field added at end → tail padding holds struct size to 8-byte alignment.
-    pending_inline: i32,
-    // v3.0.2 (3b naked): `#[naked]` attribute. Same pattern as pending_inline
-    // — parse_module_attributes stashes it (for file-top `#[naked]\nfn ...`),
-    // parse_attributes folds it into is_naked for the next fn, then resets.
-    pending_naked: i32,
-    // v3.0.4 (3e link_section): `#[link_section("name")]` attribute. Stores
-    // the section name string (heap/arena-allocated, owned) for parse_attributes
-    // to fold into NodeFuncDecl.link_section for the next fn, then resets.
-    pending_link_section: *u8,
-    // v3.2.0 (V3-C 3i generics): parser 累积 generic instantiations。
-    //   parse_type 见到 `Vec<i32>` / `Option<i64>` 时 append 一条
-    //   {base_name, mangled_name, [args]} 进此数组;parser_parse 末尾
-    //   把数组传给 ast_new_module。sema Pass 1.5 mono_expand_module 消费。
-    //   generic_insts: *GenericInstRecord 数组(动态扩容,翻倍策略)
-    //   ngeneric_insts: 当前 record 数
-    //   gcap:           数组 capacity
-    generic_insts:  *u8,
-    ngeneric_insts: i64,
-    gcap:           i64,
 }
 
-// Parser 字节数 = 2 * 8 (ptr) + 6 * 8 (token fields) + 2 * 8 (scope) + 2 * 4 (depth/count) + 2 pad + 1 * 4 (pending_inline) + 1 * 4 (pending_naked) + 1 * 8 (pending_link_section) + 1 * 8 (generic_insts) + 2 * 8 (count + cap) = 128
-fn PARSER_SIZE() -> i64 { return 128 as i64; }
+// Parser 字节数 = 2 * 8 (ptr) + 6 * 8 (token fields) + 2 * 8 (scope) + 2 * 4 (depth/count) + 2 pad = 80
+fn PARSER_SIZE() -> i64 { return 80 as i64; }
 
 // ════════════════════════════════════════════════════
 // Token helpers（caller 栈分配 Token，let mut t: Token = ...）
@@ -323,168 +299,8 @@ fn PREC_PRIMARY()   -> i32 { return 12 as i32; }
 // array count 不再走 parse_expr（避免 mutual recursion），改 inline int literal
 // ════════════════════════════════════════════════════
 
-// v3.2.0 (V3-C 3i generics): helpers — defined BEFORE parse_type because
-//   parse_type IDENT branch calls them inline. They do NOT call parse_type
-//   themselves, so no forward-ref cycle. (parser_parse_generic_type_args
-//   WAS removed because of parse_type ↔ parse_generic_type_args circularity;
-//   the arg-mangling + record logic is now inlined at the 2 call sites.)
-//
-//   All use only v1.x subset patterns (let mut + *u8, no generics/Cap/&mut)
-//   because parser.jhyy is parsed by C-side stage-0 too.
-
-// append (base_name, mangled_name, args) 到 (*p).generic_insts.
-//   Doubling array;no size cap.
-fn parser_record_generic_inst(p: *Parser, base_name: *u8,
-                              mangled_name: *u8,
-                              args: *u8, nargs: i64) -> i32 {
-    if (*p).ngeneric_insts >= (*p).gcap {
-        let nc = if (*p).gcap != (0 as i64) { (*p).gcap * (2 as i64) } else { (4 as i64) };
-        let ng = arena_alloc((*p).arena, nc * GENERIC_INST_RECORD_SIZE());
-        if (*p).generic_insts != (0 as *u8) {
-            if (*p).ngeneric_insts > (0 as i64) {
-                memcpy(ng, (*p).generic_insts,
-                       (*p).ngeneric_insts * GENERIC_INST_RECORD_SIZE());
-            }
-        }
-        (*p).generic_insts = ng;
-        (*p).gcap = nc;
-    }
-    let slot = ((*p).generic_insts as i64 +
-                (*p).ngeneric_insts * GENERIC_INST_RECORD_SIZE()) as *GenericInstRecord;
-    (*slot).base_name = base_name;
-    (*slot).mangled_name = mangled_name;
-    (*slot).arg_types = args;
-    (*slot).nargs = nargs;
-    (*p).ngeneric_insts = (*p).ngeneric_insts + (1 as i64);
-    return 0;
-}
-
-// growable byte buffer for mangled name. arena-allocated (no free needed).
-fn mangle_buf_grow(p: *Parser, buf: *u8, old_cap: i64, need: i64) -> *u8 {
-    let mut nc = old_cap;
-    while nc < need {
-        nc = nc * (2 as i64);
-    }
-    let nb = arena_alloc((*p).arena, nc);
-    if buf != (0 as *u8) {
-        memcpy(nb, buf, old_cap);
-    }
-    return nb;
-}
-
-// recursive AST type node → mangled suffix string.
-//   Writes into *buf_ptr (growable). Handles NODE_IDENT / NODE_UNARY(*) only
-//   for v3.2.0. Other kinds write '?'.
-//   NOTE: buf is passed as **u8 so we can reassign the caller's pointer on grow.
-fn parser_mangle_type_node(p: *Parser, node: *Node, buf_p: **u8,
-                           len: *i64, cap: *i64) {
-    let mut buf = *buf_p;
-    if node == (0 as *Node) {
-        let mut need = *len + (1 as i64);
-        if need > *cap {
-            buf = mangle_buf_grow(p, buf, *cap, need);
-            *cap = need;
-        }
-        *(ptr_add_u8(buf, *len) as *u8) = 0x3f as u8;
-        *len = *len + (1 as i64);
-        *buf_p = buf;
-        return;
-    }
-    if (*node).kind == NODE_IDENT() {
-        let id = node_ident_data(node);
-        let nm = (*id).sym as *Sym;
-        let nlen = strlen((*nm).name);
-        let mut need = *len + nlen + (1 as i64);
-        if need > *cap {
-            buf = mangle_buf_grow(p, buf, *cap, need);
-            *cap = need;
-        }
-        memcpy(ptr_add_u8(buf, *len), (*nm).name, nlen);
-        *len = *len + nlen;
-        *buf_p = buf;
-        return;
-    }
-    if (*node).kind == NODE_UNARY() {
-        let un = node_unary_data(node);
-        let mut need = *len + (2 as i64);
-        if need > *cap {
-            buf = mangle_buf_grow(p, buf, *cap, need);
-            *cap = need;
-        }
-        *(ptr_add_u8(buf, *len) as *u8) = 0x2a as u8;
-        *len = *len + (1 as i64);
-        let inner = (*un).expr as *Node;
-        *buf_p = buf;
-        parser_mangle_type_node(p, inner, buf_p, len, cap);
-        return;
-    }
-    // other kinds: '?'
-    let mut need = *len + (2 as i64);
-    if need > *cap {
-        buf = mangle_buf_grow(p, buf, *cap, need);
-        *cap = need;
-    }
-    *(ptr_add_u8(buf, *len) as *u8) = 0x3f as u8;
-    *len = *len + (1 as i64);
-    *buf_p = buf;
-    return;
-}
-
 fn parse_type(p: *Parser) -> *Node {
     let mut t = empty_token();
-
-    // ════════════════════════════════════════════════════
-    // v3.1.0 (V3-C 3g): `&T` / `&mut T` borrow type prefix
-    // ════════════════════════════════════════════════════
-    // 规则(per spec supplement v3.1.0 § 2):
-    //   - 必须紧跟一个 type(inner 可以是 primitive/struct/ptr/slice/ref 任意)
-    //   - `&mut` 表示 exclusive borrow,`&` 表示 shared borrow
-    //   - 不支持 lifetime `'a` 标注(tokenizer 阶段无 tick)→ lifetime=null(elided)
-    //     (留 v3.x 中给 lifetime 子类型 / variance 加 tick token)
-    //   - 不支持 chained `&&` (那是 expr 位置 boolean-and,不是 borrow)
-    //
-    // Disambiguation: expr 位置 parse_expr 已 consume `&` (走 NODE_ADDR_OF 路径),
-    // 这里只在 type-annotation 上下文被调(parse_type_decl/parse_let/parse_func)→
-    // 直接 peek 一个 token 决定是否 borrow。
-    //
-    // Borrow vs error: peek 后若下一个 token 不是合法 type-start ident/*/[ ,报错
-    // (拒绝把 `&expr` 当 borrow prefix 误吞)。
-    if parser_check(p, TOKEN_AMP()) != (0 as i32) {
-        // peek next token
-        let mut next_t = empty_token();
-        parser_peek(p, &next_t);
-        // `&&` 是 boolean-and,不是 borrow → 跳过,让 default ident 路径报错
-        if next_t.kind != TOKEN_AMPAMP() {
-            let amp_lf = (*p).prev_lf;
-            let amp_ll = (*p).prev_ll;
-            let amp_lc = (*p).prev_lc;
-            parser_advance(p, &t);  // consume `&`
-
-            // optional `mut` keyword → exclusive borrow
-            let mut is_mut: i32 = 0;
-            if parser_check(p, TOKEN_MUT()) != (0 as i32) {
-                parser_advance(p, &t);  // consume `mut`
-                is_mut = 1;
-            }
-
-            // 拒绝 chained `&mut &mut T` — 借用是 terminal type
-            if parser_check(p, TOKEN_AMP()) != (0 as i32) {
-                jh_print_loc_stderr(amp_lf, amp_ll, amp_lc);
-                jh_fputs_stderr("error: chained `&` is not allowed (borrow type is terminal — use one `&` per level)\n" as *u8);
-                (*p).error_count = (*p).error_count + (1 as i32);
-                // error recovery: consume 一个 token 让 parser 继续
-                parser_advance(p, &t);
-                return ast_new_int((*p).arena, amp_lf, amp_ll, amp_lc,
-                                   0 as i64, PRIM_I32());
-            }
-
-            // inner type — 跟 volatile path 不同,borrow 允许 inner 是任意 type
-            // (primitive/struct/pointer/slice/array/borrow)→ 递归 parse_type
-            let inner = parse_type(p);
-            return ast_new_ref_type((*p).arena, amp_lf, amp_ll, amp_lc,
-                                    inner, is_mut, 0 as *Node);
-        }
-    }
 
     // *T (pointer type)
     if parser_match(p, TOKEN_STAR(), &t) != (0 as i32) {
@@ -535,251 +351,9 @@ fn parse_type(p: *Parser) -> *Node {
                            0 as i64, PRIM_I32());
     }
 
-    // ════════════════════════════════════════════════════
-    // v3.0.3 (3c volatile): `volatile` type qualifier prefix
-    // ════════════════════════════════════════════════════
-    // 规则(per spec § 2):
-    //   - 必须紧跟 primitive type ident (i8/i16/i32/i64/u8/u16/u32/u64/f32/f64/bool)
-    //   - `volatile T` 套 compound type (struct/pointer/array/slice) → compile error
-    //   - `volatile volatile T` → compile error (chained rejected)
-    //   - `volatile` 单独出现(无后续 type) → 走 default TOKEN_IDENT 路径报 "type name"
-    //
-    // 设计:parse_type 顶层 peek → 看到 volatile 先 consume,然后 inline 解析
-    // primitive ident 作 inner。这里选择直接 inline 实现而非递归 parse_type —
-    // 避免给非 volatile 路径增加 framing,以及避免误把 *T/[*]T 套 volatile
-    // 的内层给 recursive 走通。
-    if parser_check(p, TOKEN_VOLATILE()) != (0 as i32) {
-        let mut vt = empty_token();
-        parser_peek(p, &vt);
-        let vol_lf = vt.loc_filename;
-        let vol_ll = vt.loc_line;
-        let vol_lc = vt.loc_col;
-        parser_advance(p, &t);
-
-        // ── 拒绝 chained volatile ──
-        if parser_check(p, TOKEN_VOLATILE()) != (0 as i32) {
-            let mut chained_t = empty_token();
-            parser_peek(p, &chained_t);
-            jh_print_loc_stderr(chained_t.loc_filename, chained_t.loc_line, chained_t.loc_col);
-            jh_fputs_stderr("error: chained `volatile volatile` is not allowed (volatile is primitive-only qualifier)\n" as *u8);
-            (*p).error_count = (*p).error_count + (1 as i32);
-            // error recovery:仍 consume 第二个 volatile 避免后续误报
-            parser_advance(p, &t);
-            // 继续 consume 一个 token 以走完 type annotation 边界
-            parser_advance(p, &t);
-            return ast_new_int((*p).arena, vol_lf, vol_ll, vol_lc,
-                               0 as i64, PRIM_I32());
-        }
-
-        // ── 读取 inner type(必须是 primitive ident)──
-        // peek next token;若不是 TOKEN_IDENT 立即报错(避免误把 *T/[*]T/struct 等
-        // 解析为 volatile inner)
-        let mut next_t = empty_token();
-        parser_peek(p, &next_t);
-        if next_t.kind != TOKEN_IDENT() {
-            jh_print_loc_stderr(next_t.loc_filename, next_t.loc_line, next_t.loc_col);
-            jh_fputs_stderr("error: `volatile` must be followed by a primitive type (i8/i16/i32/i64/u8/u16/u32/u64/f32/f64/bool), got " as *u8);
-            jh_fputs_stderr(token_kind_name(next_t.kind));
-            jh_fputs_stderr("\n" as *u8);
-            (*p).error_count = (*p).error_count + (1 as i32);
-            // error recovery:尝试走 default ident path 让后续 type-name error 也报
-            parser_expect(p, TOKEN_IDENT(), "primitive type after volatile" as *u8, &t);
-            return ast_new_int((*p).arena, vol_lf, vol_ll, vol_lc,
-                               0 as i64, PRIM_I32());
-        }
-
-        parser_advance(p, &t);
-        let inner_name = parser_tok_name(p, &t);
-        let mut inner_sym = symtab_lookup((*p).current_scope, inner_name);
-        if inner_sym == (0 as *Sym) {
-            inner_sym = symtab_insert((*p).current_scope, inner_name, SYM_TYPE(),
-                                       0 as *u8, 0 as i32, (*p).scope_depth);
-        }
-        let inner_node = ast_new_ident((*p).arena, t.loc_filename, t.loc_line, t.loc_col, inner_sym);
-
-        // ── 校验 inner 是 primitive。compound type ident (struct name 等) 拒掉 —
-        //    sema 阶段会再次校验,这里给清晰错误信息。──
-        let is_prim = (strcmp(inner_name, "i8" as *u8) == (0 as i32)) ||
-                      (strcmp(inner_name, "i16" as *u8) == (0 as i32)) ||
-                      (strcmp(inner_name, "i32" as *u8) == (0 as i32)) ||
-                      (strcmp(inner_name, "i64" as *u8) == (0 as i32)) ||
-                      (strcmp(inner_name, "u8" as *u8) == (0 as i32)) ||
-                      (strcmp(inner_name, "u16" as *u8) == (0 as i32)) ||
-                      (strcmp(inner_name, "u32" as *u8) == (0 as i32)) ||
-                      (strcmp(inner_name, "u64" as *u8) == (0 as i32)) ||
-                      (strcmp(inner_name, "f32" as *u8) == (0 as i32)) ||
-                      (strcmp(inner_name, "f64" as *u8) == (0 as i32)) ||
-                      (strcmp(inner_name, "bool" as *u8) == (0 as i32));
-        if is_prim == (0 as i32) {
-            jh_print_loc_stderr(vol_lf, vol_ll, vol_lc);
-            jh_fputs_stderr("error: `volatile` requires a primitive type (struct/pointer/array not allowed per spec § 6), got `" as *u8);
-            jh_fputs_stderr(inner_name);
-            jh_fputs_stderr("`\n" as *u8);
-            (*p).error_count = (*p).error_count + (1 as i32);
-        }
-
-        return ast_new_volatile_type((*p).arena, vol_lf, vol_ll, vol_lc, inner_node);
-    }
-
     // Ident [:: Ident]*
     parser_expect(p, TOKEN_IDENT(), "type name" as *u8, &t);
     let name = parser_tok_name(p, &t);
-
-    // ════════════════════════════════════════════════════
-    // v3.1.1 (V3-C 3g.5): `PhantomData<T>` ZST type marker
-    // ════════════════════════════════════════════════════
-    // 规则(per spec supplement v3.1.1):
-    //   - `PhantomData<T>` 走 builtin ident 分支(跟 v3.1.0 Cap 路径同型)
-    //   - 必须带 `<T>`;`PhantomData` 单独出现 → 走 default ident → sema 报 unresolved
-    //   - inner T 可任意 type(primitive/struct/ptr/slice/ref/PhantomData 嵌套留 v3.x 中)
-    //   - size=0/align=1 ZST,不允许实例化(M0 简化,sema E0050 拦)
-    //
-    // 设计:在 symtab lookup 前 inline 识别 → 跳过普通 ident 路径,直接构造
-    // KIND_PHANTOM *Type + 包成 ident-style AST node(sema 阶段统一走 type_ptr 解析)
-    if strcmp(name, "PhantomData" as *u8) == (0 as i32) {
-        // peek next token: 必须是 `<`
-        let mut pd_peek = empty_token();
-        parser_peek(p, &pd_peek);
-        if pd_peek.kind == TOKEN_LT() {
-            parser_advance(p, &t);  // consume `<`
-            let pd_lf = (*p).prev_lf;
-            let pd_ll = (*p).prev_ll;
-            let pd_lc = (*p).prev_lc;
-            // 递归 parse inner T(任意合法 type)
-            let pd_inner = parse_type(p);
-            parser_expect(p, TOKEN_GT(), "> after PhantomData<" as *u8, &t);
-            // 构造 type_phantom(inner) + 把 *Type 绑到 symtype(走 sema 路径一致)
-            let pd_t = type_phantom((*p).arena, pd_inner);
-            // 注册 / 查找 PhantomData builtin ident sym(便于后续 type-name error 友好)
-            let mut pd_sym = symtab_lookup((*p).current_scope, name);
-            if pd_sym == (0 as *Sym) {
-                pd_sym = symtab_insert((*p).current_scope, name, SYM_TYPE(),
-                                       pd_t as *u8, 0 as i32, (*p).scope_depth);
-            }
-            // skip :: Ident loop — PhantomData 不允许 qualified(M0 简化)
-            return ast_new_ident((*p).arena, pd_lf, pd_ll, pd_lc, pd_sym);
-        }
-        // PhantomData 无 `<T>` → fall through 走 default ident → sema 报 unresolved type
-    }
-
-    // ════════════════════════════════════════════════════
-    // v3.1.2 (V3-C 3g.7): `Cap<T>` 8-byte builtin type with generic inner
-    // ════════════════════════════════════════════════════
-    // 规则(per spec supplement v3.1.0 + v3.1.2):
-    //   - `Cap<T>` 走 builtin ident 分支(跟 v3.1.1 PhantomData 路径同型)
-    //   - 必须带 `<T>`;`Cap` 单独出现 → fall through 走 default ident → sema hardcoded
-    //     path (sema.jhyy:297-299) 用 i32 作 placeholder inner
-    //   - inner T 任意合法 type;M0 layout 不依赖 inner(size=8/align=8 硬编码)
-    //   - 跟 PhantomData 不同:Cap 允许实例化(cnode_idx/depth/rights 三字段),
-    //     跨函数 pass-by-value 走 Win x64 INTEGER class(RCX/RDX/R8/R9)
-    //
-    // 设计:在 symtab lookup 前 inline 识别 → 跳过普通 ident 路径,直接构造
-    // KIND_CAP *Type + 包成 ident-style AST node(sema 阶段统一走 type_ptr 解析)
-    if strcmp(name, "Cap" as *u8) == (0 as i32) {
-        // peek next token: 必须是 `<`
-        let mut cap_peek = empty_token();
-        parser_peek(p, &cap_peek);
-        if cap_peek.kind == TOKEN_LT() {
-            parser_advance(p, &t);  // consume `<`
-            let cap_lf = (*p).prev_lf;
-            let cap_ll = (*p).prev_ll;
-            let cap_lc = (*p).prev_lc;
-            // 递归 parse inner T(任意合法 type)
-            let cap_inner = parse_type(p);
-            parser_expect(p, TOKEN_GT(), "> after Cap<" as *u8, &t);
-            // 构造 type_cap(inner) + 绑到 symtype(走 sema 路径一致)
-            let cap_t = type_cap((*p).arena, cap_inner);
-            // 注册 / 查找 Cap builtin ident sym(便于后续 type-name error 友好)
-            let mut cap_sym = symtab_lookup((*p).current_scope, name);
-            if cap_sym == (0 as *Sym) {
-                cap_sym = symtab_insert((*p).current_scope, name, SYM_TYPE(),
-                                        cap_t as *u8, 0 as i32, (*p).scope_depth);
-            }
-            // skip :: Ident loop — Cap 不允许 qualified(M0 简化)
-            return ast_new_ident((*p).arena, cap_lf, cap_ll, cap_lc, cap_sym);
-        }
-        // Cap 无 `<T>` → fall through 走 default ident → sema 走 hardcoded ident path
-        // (sema.jhyy:297-299 Cap → type_cap(PRIM_I32())) — 跟 v3.1.0 ship 行为兼容
-    }
-
-    // v3.2.0 (V3-C 3i generics): generic type inst arm `Name<i32, bool>`
-    //   INLINED here (not extracted to fn) because parse_type ↔
-    //   parser_parse_generic_type_args is a forward-ref cycle that jhyy
-    //   can't resolve. Inline keeps the call site clean.
-    //   DISAMBIGUATION: only enter if IDENT starts with uppercase A-Z —
-    //   avoids false-positive on lowercase variables/primitives. Generic
-    //   types in jhyy use PascalCase by convention (Vec, Pair, Option).
-    let mut gnpeek = empty_token();
-    parser_peek(p, &gnpeek);
-    if gnpeek.kind == TOKEN_LT() {
-        let mut g_first = *(ptr_add_u8(name, 0 as i64)) as i32;
-        let mut g_is_upper = 0 as i32;
-        if g_first >= (65 as i32) && g_first <= (90 as i32) {
-            g_is_upper = 1 as i32;
-        }
-        if g_is_upper != (0 as i32) {
-        let mut gt = empty_token();
-        parser_advance(p, &gt);  // consume `<`
-        // build mangled name buffer
-        let mut g_args: *u8 = 0 as *u8;
-        let mut g_nargs: i64 = 0 as i64;
-        let mut g_acap: i64 = 0 as i64;
-        let mut g_mname: *u8 = 0 as *u8;
-        let mut g_mcap: i64 = 0 as i64;
-        let mut g_mlen: i64 = 0 as i64;
-        let g_bn_len = strlen(name);
-        g_mcap = 64 as i64;
-        while g_mcap < g_bn_len + (2 as i64) {
-            g_mcap = g_mcap * (2 as i64);
-        }
-        g_mname = arena_alloc((*p).arena, g_mcap);
-        memcpy(g_mname, name, g_bn_len);
-        g_mlen = g_bn_len;
-        *(ptr_add_u8(g_mname, g_mlen) as *u8) = 0 as u8;
-
-        while parser_check(p, TOKEN_GT()) == (0 as i32) {
-            if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
-            let g_arg = parse_type(p);
-            // append '$' + mangle(arg)
-            let mut g_need = g_mlen + (2 as i64);
-            if g_need > g_mcap {
-                g_mname = mangle_buf_grow(p, g_mname, g_mcap, g_need);
-                g_mcap = g_need;
-            }
-            *(ptr_add_u8(g_mname, g_mlen) as *u8) = 0x24 as u8;
-            g_mlen = g_mlen + (1 as i64);
-            parser_mangle_type_node(p, g_arg, &g_mname, &g_mlen, &g_mcap);
-            *(ptr_add_u8(g_mname, g_mlen) as *u8) = 0 as u8;
-            // save arg node
-            if g_nargs >= g_acap {
-                g_acap = if g_acap != (0 as i64) { g_acap * (2 as i64) } else { (4 as i64) };
-                let g_na = arena_alloc((*p).arena, g_acap * (8 as i64));
-                if g_args != (0 as *u8) {
-                    if g_nargs > (0 as i64) {
-                        memcpy(g_na, g_args, g_nargs * (8 as i64));
-                    }
-                }
-                g_args = g_na;
-            }
-            let g_aslot = (g_args as i64 + g_nargs * (8 as i64)) as **Node;
-            *g_aslot = g_arg;
-            g_nargs = g_nargs + (1 as i64);
-            if parser_match(p, TOKEN_COMMA(), &gt) == (0 as i32) { break; }
-        }
-        parser_expect(p, TOKEN_GT(), "> after generic args" as *u8, &gt);
-
-        let mut g_msym = symtab_lookup((*p).global_scope, g_mname);
-        if g_msym == (0 as *Sym) {
-            g_msym = symtab_insert((*p).global_scope, g_mname, SYM_TYPE(),
-                                   0 as *u8, 0 as i32, 0 as i32);
-        }
-        parser_record_generic_inst(p, name, g_mname, g_args, g_nargs);
-
-        return ast_new_ident((*p).arena, t.loc_filename, t.loc_line, t.loc_col, g_msym);
-        } // v3.2.0: close inner if (g_is_upper != 0)
-        // else (g_is_upper == 0): lowercase or non-alpha → fall through to default
-    }
-
     let mut sym = symtab_lookup((*p).current_scope, name);
     if sym == (0 as *Sym) {
         sym = symtab_insert((*p).current_scope, name, SYM_TYPE(),
@@ -1084,144 +658,6 @@ fn parse_pattern(p: *Parser) -> *Node {
 // 调 parse_expr (subj/body) 不能 forward ref, 保持原位置。OR pattern 的
 // parser_advance(p) 已修 &t 缺参 UB）。
 
-// ════════════════════════════════════════════════════
-// V3-B v3.0.1: parse_asm_block — asm!("...") inline asm macro
-//   per `docs/plans/v2/v2.0.0-os-prep.md` D42.
-//
-// Caller 已 consume `asm` ident + 验证 peek 是 `!`. 本函数:
-//   1. consume `!` (BANG token)
-//   2. consume `(` (LPAREN)
-//   3. require string literal — extract chars (between quotes), arena_strdup
-//   4. consume `)` (RPAREN) — must come RIGHT after string literal (no comma,
-//      no operands in v3.0.1)
-//   5. build NodeAsmBlock(text, 0, NULL) — v3.0.1 noperands=0 always
-//   6. return *Node
-//
-// Defined BEFORE parse_expr (line 745+ call site) — jhyy has no forward
-// decl, so the helper must physically precede the caller. parse_expr is the
-// first caller (IDENT branch in prefix dispatch).
-// ════════════════════════════════════════════════════
-fn parse_asm_block(p: *Parser, loc_lf: *u8, loc_ll: i32, loc_lc: i32) -> *Node {
-    let mut t = empty_token();
-
-    // consume `!`
-    parser_expect(p, TOKEN_BANG(), "! in asm!(...)" as *u8, &t);
-
-    // consume `(`
-    parser_expect(p, TOKEN_LPAREN(), "( in asm!(...)" as *u8, &t);
-
-    // v3.0.1: only string literal allowed as first arg.
-    if parser_check(p, TOKEN_STRING()) == (0 as i32) {
-        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
-        jh_fputs_stderr("error: asm!(...) requires a string literal as the first argument (v3.0.1)\n" as *u8);
-        (*p).error_count = (*p).error_count + (1 as i32);
-        // skip to `)` to avoid cascading errors
-        while parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
-            if parser_check(p, TOKEN_EOF()) != (0 as i32) { return 0 as *Node; }
-            parser_advance(p, &t);
-        }
-        parser_expect(p, TOKEN_RPAREN(), ") in asm!(...)" as *u8, &t);
-        return 0 as *Node;
-    }
-
-    // consume string token + extract body (between quotes, already done by
-    // lexer — start points to opening quote, length includes both quotes).
-    parser_advance(p, &t);
-    let chars = ((t.start as i64) + (1 as i64)) as *u8;
-    let len = t.length - (2 as i64);
-    if len < (0 as i64) {
-        // defensive: malformed token (length < 2), bail
-        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
-        jh_fputs_stderr("error: malformed string literal in asm!(...)\n" as *u8);
-        (*p).error_count = (*p).error_count + (1 as i32);
-        return 0 as *Node;
-    }
-    let arena_chars = arena_strdup((*p).arena, chars, len);
-
-    // v3.0.1: no operands. Require immediate `)`. If next token is `,`,
-    // emit clear error telling user v3.1 will add operand support.
-    if parser_check(p, TOKEN_COMMA()) != (0 as i32) {
-        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
-        jh_fputs_stderr("error: asm!(...) operands are not supported in v3.0.1 (single-string-literal only; v3.1 will add operand constraints)\n" as *u8);
-        (*p).error_count = (*p).error_count + (1 as i32);
-        // skip to `)` to avoid cascading errors
-        while parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
-            if parser_check(p, TOKEN_EOF()) != (0 as i32) { return 0 as *Node; }
-            parser_advance(p, &t);
-        }
-        parser_expect(p, TOKEN_RPAREN(), ") in asm!(...)" as *u8, &t);
-        return 0 as *Node;
-    }
-
-    // consume `)`
-    parser_expect(p, TOKEN_RPAREN(), ") in asm!(...)" as *u8, &t);
-
-    return ast_new_asm_block((*p).arena, loc_lf, loc_ll, loc_lc, arena_chars, 0 as i64, 0 as *u8);
-}
-
-// ════════════════════════════════════════════════════
-// V3-B v3.0.5: parse_fence_block — fence_seq_cst() / fence_acquire() /
-//   fence_release() builtin ident dispatch (per spec § 2).
-//
-// Caller 已 consume `fence_*` ident. 本函数:
-//   1. consume `(` (LPAREN) — fence_* 永远 no-arg, expect immediate `)`
-//   2. validate name → kind mapping (0=seq_cst, 1=acquire, 2=release)
-//   3. consume `)` (RPAREN)
-//   4. build NodeBuiltinFence(kind) — return *Node
-//
-// Defined BEFORE parse_expr (per V3-A/V3-B no-forward-decl constraint).
-// `name` arg carries the ident text captured BEFORE consuming `(` (since
-// `(` overwrites prev_start/prev_length, the name would be lost otherwise).
-// ════════════════════════════════════════════════════
-fn parse_fence_block(p: *Parser, loc_lf: *u8, loc_ll: i32, loc_lc: i32,
-                     name: *u8, name_len: i64) -> *Node {
-    let mut t = empty_token();
-
-    // consume `(`
-    parser_expect(p, TOKEN_LPAREN(), "( in fence_*()" as *u8, &t);
-
-    // fence_* is no-arg: must be immediate `)`. If next token is anything
-    // else (e.g. comma, ident), emit clear error.
-    if parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
-        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
-        jh_fputs_stderr("error: fence_*() takes no arguments (v3.0.5)\n" as *u8);
-        (*p).error_count = (*p).error_count + (1 as i32);
-        // skip to `)` to avoid cascading errors
-        while parser_check(p, TOKEN_RPAREN()) == (0 as i32) {
-            if parser_check(p, TOKEN_EOF()) != (0 as i32) { return 0 as *Node; }
-            parser_advance(p, &t);
-        }
-        parser_expect(p, TOKEN_RPAREN(), ") in fence_*()" as *u8, &t);
-        return 0 as *Node;
-    }
-
-    // consume `)`
-    parser_expect(p, TOKEN_RPAREN(), ") in fence_*()" as *u8, &t);
-
-    // Map name to kind. Use strncmp with explicit lengths.
-    // fence_seq_cst = 13 chars, fence_acquire = 13 chars, fence_release = 13 chars.
-    let mut kind: i64 = -(1 as i64);
-    if name_len == (13 as i64) {
-        if strncmp(name, "fence_seq_cst" as *u8, 13 as i64) == (0 as i32) {
-            kind = 0 as i64;
-        }
-        if strncmp(name, "fence_acquire" as *u8, 13 as i64) == (0 as i32) {
-            kind = 1 as i64;
-        }
-        if strncmp(name, "fence_release" as *u8, 13 as i64) == (0 as i32) {
-            kind = 2 as i64;
-        }
-    }
-    if kind == -(1 as i64) {
-        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
-        jh_fputs_stderr("error: unknown fence builtin (expected fence_seq_cst/fence_acquire/fence_release)\n" as *u8);
-        (*p).error_count = (*p).error_count + (1 as i32);
-        return 0 as *Node;
-    }
-
-    return ast_new_builtin_fence((*p).arena, loc_lf, loc_ll, loc_lc, kind);
-}
-
 fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
     let mut t = empty_token();
     parser_peek(p, &t);
@@ -1230,12 +666,6 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
     let loc_lc = t.loc_col;
 
     let mut left: *Node = 0 as *Node;
-    let mut skip_default: i32 = 0 as i32;
-    // v3.2.0c (3i fn path): turbofish plumbing。IDENT primary branch 命中
-    //   `Name::<T, U>` 形式时设置 pending_targs/pending_ntargs,postfix `(...)`
-    //   call wrap 时读走传给 ast_new_call type_args/ntype_args 字段。
-    let mut pending_targs: *u8 = 0 as *u8;
-    let mut pending_ntargs: i64 = 0 as i64;
 
     // ── Prefix dispatch（基于 t.kind 走 inline）──
     if t.kind == TOKEN_EOF() {
@@ -1290,282 +720,6 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
     else if t.kind == TOKEN_IDENT() {
         parser_advance(p, &t);
         let name = parser_tok_name(p, &t);
-
-        // v3.2.0c (3i fn path): turbofish arm `f::<T, U>(args)` — 仅在 sym 已知
-        //   是 SYM_FN 时触发(forward-declared generic fn)。SYM_TYPE case
-        //   (`Vec::<T>` 不存在;Vec 是 type 而非 fn)、SYM_MODULE case
-        //   (`mod::fn(...)` 走原 SYM_MODULE path)、default SYM_VAR case
-        //   (普通 var ref) 不进 turbofish arm。
-        //
-        //   Approach:
-        //   1) symtab_lookup(name) — 看 name 是不是已注册的 SYM_FN
-        //   2) 如果是 SYM_FN + peek `::` + peek `<` → turbofish path
-        //   3) 否则 fall through 到原 SYM_TYPE/SYM_MODULE/default 逻辑
-        //
-        //   disambiguation: `f::<T>` 必须出现在已注册 SYM_FN 上下文,避免
-        //   `Option::None` (enum variant pattern) 误判 → `Option` 是 SYM_TYPE,
-        //   skip turbofish arm 走 SYM_TYPE `else if parser_check COLONCOLON` path。
-        let mut tpeek_after_ident = empty_token();
-        parser_peek(p, &tpeek_after_ident);
-        let mut turbofish_sym: *Sym = 0 as *Sym;
-        if tpeek_after_ident.kind == TOKEN_COLONCOLON() {
-            let probe_sym = symtab_lookup((*p).global_scope, name);
-            if probe_sym != (0 as *Sym) {
-                if (*probe_sym).kind == SYM_FN() {
-                    turbofish_sym = probe_sym;
-                }
-            }
-        }
-        if turbofish_sym != (0 as *Sym) {
-            // commit: consume `::`
-            let turbofish_lf = (*p).prev_lf;
-            let turbofish_ll = (*p).prev_ll;
-            let turbofish_lc = (*p).prev_lc;
-            parser_advance(p, &t);  // consume `::`
-            // parse `<T, U>`
-            let mut tpeek_after_cc = empty_token();
-            parser_peek(p, &tpeek_after_cc);
-            if tpeek_after_cc.kind != TOKEN_LT() {
-                jh_print_loc_stderr(turbofish_lf, turbofish_ll, turbofish_lc);
-                jh_fputs_stderr("error: expected '<' after turbofish '::'\n" as *u8);
-                (*p).error_count = (*p).error_count + (1 as i32);
-                left = ast_new_ident((*p).arena, turbofish_lf, turbofish_ll, turbofish_lc, turbofish_sym);
-            } else {
-                parser_advance(p, &t);  // consume `<`
-                let mut tfargs: *u8 = 0 as *u8;
-                let mut ntfargs: i64 = 0 as i64;
-                let mut tcap: i64 = 0 as i64;
-                // build mangled name buffer (mirror parse_type IDENT arm L727-752)
-                //   fn turbofish: max::<i32> → mangled "max$i32"
-                let mut tf_mname: *u8 = 0 as *u8;
-                let mut tf_mcap: i64 = 0 as i64;
-                let mut tf_mlen: i64 = 0 as i64;
-                let tf_bn_len = strlen(name);
-                tf_mcap = 64 as i64;
-                while tf_mcap < tf_bn_len + (2 as i64) {
-                    tf_mcap = tf_mcap * (2 as i64);
-                }
-                tf_mname = arena_alloc((*p).arena, tf_mcap);
-                memcpy(tf_mname, name, tf_bn_len);
-                tf_mlen = tf_bn_len;
-                *(ptr_add_u8(tf_mname, tf_mlen) as *u8) = 0 as u8;
-
-                while parser_check(p, TOKEN_GT()) == (0 as i32) {
-                    if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
-                    let tfarg = parse_type(p);
-                    // save arg node
-                    if ntfargs >= tcap {
-                        tcap = if tcap != (0 as i64) { tcap * (2 as i64) } else { (4 as i64) };
-                        let ntfa = arena_alloc((*p).arena, tcap * (8 as i64));
-                        if tfargs != (0 as *u8) {
-                            if ntfargs > (0 as i64) {
-                                memcpy(ntfa, tfargs, ntfargs * (8 as i64));
-                            }
-                        }
-                        tfargs = ntfa;
-                    }
-                    let tslot = (tfargs as i64 + ntfargs * (8 as i64)) as **Node;
-                    *tslot = tfarg;
-                    ntfargs = ntfargs + (1 as i64);
-                    // append '$' + mangle(arg) to mangled name
-                    let mut tf_need = tf_mlen + (2 as i64);
-                    if tf_need > tf_mcap {
-                        tf_mname = mangle_buf_grow(p, tf_mname, tf_mcap, tf_need);
-                        tf_mcap = tf_need;
-                    }
-                    *(ptr_add_u8(tf_mname, tf_mlen) as *u8) = 0x24 as u8;
-                    tf_mlen = tf_mlen + (1 as i64);
-                    parser_mangle_type_node(p, tfarg, &tf_mname, &tf_mlen, &tf_mcap);
-                    *(ptr_add_u8(tf_mname, tf_mlen) as *u8) = 0 as u8;
-                    if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
-                }
-                parser_expect(p, TOKEN_GT(), "> after turbofish args" as *u8, &t);
-                parser_record_generic_inst(p, name, tf_mname, tfargs, ntfargs);
-                // v3.2.0c (3i fn path): plumb type_args to NODE_CALL via
-                //   pending_targs/pending_ntargs。ast_new_call 在 postfix `(...)`
-                //   call wrap 路径读走 (L2062)。
-                pending_targs = tfargs;
-                pending_ntargs = ntfargs;
-                left = ast_new_ident((*p).arena, turbofish_lf, turbofish_ll, turbofish_lc, turbofish_sym);
-            }
-        }
-        // else: 不是 turbofish (sym 不是 SYM_FN 或没 `::`) — fall through 到
-        //   原 SYM_TYPE / SYM_MODULE / default IDENT path。
-
-        // v3.2.0 (V3-C 3i generics): expr 位 generic inst arm `Name<i32, ...>`
-        //   INLINED (not extracted to fn) for the same forward-ref reason as
-        //   parse_type IDENT branch. 主要场景:`Vec<i32> { ... }` struct lit。
-        //   DISAMBIGUATION: IDENT must start with uppercase A-Z. Lowercase
-        //   IDENT + `<` is the less-than operator (e.g. `n < 2`).
-        let mut gnpeek2 = empty_token();
-        parser_peek(p, &gnpeek2);
-        if gnpeek2.kind == TOKEN_LT() {
-            let mut g2_first = *(ptr_add_u8(name, 0 as i64)) as i32;
-            let mut g2_is_upper = 0 as i32;
-            if g2_first >= (65 as i32) && g2_first <= (90 as i32) {
-                g2_is_upper = 1 as i32;
-            }
-            if g2_is_upper != (0 as i32) {
-            // inline parse_generic_type_args — see comment in parse_type IDENT branch
-            let mut gt2 = empty_token();
-            parser_advance(p, &gt2);  // consume `<`
-            let mut g2_args: *u8 = 0 as *u8;
-            let mut g2_nargs: i64 = 0 as i64;
-            let mut g2_acap: i64 = 0 as i64;
-            let mut g2_mname: *u8 = 0 as *u8;
-            let mut g2_mcap: i64 = 0 as i64;
-            let mut g2_mlen: i64 = 0 as i64;
-            let g2_bn_len = strlen(name);
-            g2_mcap = 64 as i64;
-            while g2_mcap < g2_bn_len + (2 as i64) {
-                g2_mcap = g2_mcap * (2 as i64);
-            }
-            g2_mname = arena_alloc((*p).arena, g2_mcap);
-            memcpy(g2_mname, name, g2_bn_len);
-            g2_mlen = g2_bn_len;
-            *(ptr_add_u8(g2_mname, g2_mlen) as *u8) = 0 as u8;
-            while parser_check(p, TOKEN_GT()) == (0 as i32) {
-                if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
-                let g2_arg = parse_type(p);
-                let mut g2_need = g2_mlen + (2 as i64);
-                if g2_need > g2_mcap {
-                    g2_mname = mangle_buf_grow(p, g2_mname, g2_mcap, g2_need);
-                    g2_mcap = g2_need;
-                }
-                *(ptr_add_u8(g2_mname, g2_mlen) as *u8) = 0x24 as u8;
-                g2_mlen = g2_mlen + (1 as i64);
-                parser_mangle_type_node(p, g2_arg, &g2_mname, &g2_mlen, &g2_mcap);
-                *(ptr_add_u8(g2_mname, g2_mlen) as *u8) = 0 as u8;
-                if g2_nargs >= g2_acap {
-                    g2_acap = if g2_acap != (0 as i64) { g2_acap * (2 as i64) } else { (4 as i64) };
-                    let g2_na = arena_alloc((*p).arena, g2_acap * (8 as i64));
-                    if g2_args != (0 as *u8) {
-                        if g2_nargs > (0 as i64) {
-                            memcpy(g2_na, g2_args, g2_nargs * (8 as i64));
-                        }
-                    }
-                    g2_args = g2_na;
-                }
-                let g2_aslot = (g2_args as i64 + g2_nargs * (8 as i64)) as **Node;
-                *g2_aslot = g2_arg;
-                g2_nargs = g2_nargs + (1 as i64);
-                if parser_match(p, TOKEN_COMMA(), &gt2) == (0 as i32) { break; }
-            }
-            parser_expect(p, TOKEN_GT(), "> after generic args" as *u8, &gt2);
-            let mut g2_msym = symtab_lookup((*p).global_scope, g2_mname);
-            if g2_msym == (0 as *Sym) {
-                g2_msym = symtab_insert((*p).global_scope, g2_mname, SYM_TYPE(),
-                                        0 as *u8, 0 as i32, 0 as i32);
-            }
-            parser_record_generic_inst(p, name, g2_mname, g2_args, g2_nargs);
-            let gsym2 = g2_msym;
-            // 直接当 struct lit 处理(type 位 `<` 不出现;在 expr 位 `<...>{`
-            //   表示 struct literal;`<...>(...)` 是 turbofish,留给 v3.2.0b)
-            if parser_check(p, TOKEN_LBRACE()) != (0 as i32) {
-                let _sloc_lf = t.loc_filename;
-                let _sloc_ll = t.loc_line;
-                let _sloc_lc = t.loc_col;
-                parser_advance(p, &t);  // consume {
-                let mut sfields: *u8 = 0 as *u8;
-                let mut snfields: i64 = 0 as i64;
-                let mut sfcap: i64 = 0 as i64;
-                while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
-                    if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
-                    let mut sfnt = empty_token();
-                    parser_expect(p, TOKEN_IDENT(), "field name" as *u8, &sfnt);
-                    let sfname = parser_tok_name(p, &sfnt);
-                    parser_expect(p, TOKEN_COLON(), ":" as *u8, &t);
-                    let sfval = parse_expr(p, PREC_NONE());
-                    if snfields >= sfcap {
-                        sfcap = if sfcap != (0 as i64) { sfcap * (2 as i64) } else { (8 as i64) };
-                        let snf = arena_alloc((*p).arena, sfcap * (16 as i64));
-                        if sfields != (0 as *u8) {
-                            if snfields > (0 as i64) { memcpy(snf, sfields, snfields * (16 as i64)); }
-                        }
-                        sfields = snf;
-                    }
-                    let sfd = (sfields as i64 + snfields * (16 as i64)) as *NodeFieldInit;
-                    (*sfd).name = sfname;
-                    (*sfd).value = sfval as *u8;
-                    snfields = snfields + (1 as i64);
-                    if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
-                }
-                parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
-                left = ast_new_struct_lit((*p).arena, _sloc_lf, _sloc_ll, _sloc_lc, gsym2, sfields, snfields);
-            } else {
-                // expr 位 generic inst 不是 struct lit(如 `let v = Vec<i32>;`)—
-                //   这种用法在 jhyy 里无直接语义,返回 ident 节点让 sema 处理
-                left = ast_new_ident((*p).arena, t.loc_filename, t.loc_line, t.loc_col, gsym2);
-            }
-            // 跳过 default path(避免 symtab_lookup 用 base name 重写 left)
-            skip_default = 1 as i32;
-            // fall through 到 Pratt loop(下面 if left != NULL 守卫 + while infix)
-            } // v3.2.0: close inner if (g2_is_upper != 0)
-        }
-        // else (gnpeek2.kind != TOKEN_LT OR uppercase check failed): fall through
-        // to default path below — sym lookup, asm/fence dispatch, etc.
-
-        // v3.2.0b fix: gate the default ident/asm/fence dispatch path with
-        //   skip_default flag, set inside the generic dispatch when it builds
-        //   a struct_lit/ident for the `<...>` usage. Otherwise the default
-        //   path overwrites `left` and breaks generic struct literals.
-        if skip_default == (0 as i32) {
-
-        // V3-B v3.0.1: asm!(...) inline asm macro. After consuming the `asm`
-        // ident, peek for `!`. If next token is BANG, dispatch to
-        // parse_asm_block (defined at end of file — jhyy has no forward
-        // decl, so we accept 2-token peek via parser_check below).
-        // strcmp "asm" — only 3 bytes so use strncmp(start, "asm", 3) == 0
-        // via t.length comparison to keep single-call check safe.
-        let mut is_asm_macro: i32 = 0 as i32;
-        if (*p).prev_length == (3 as i64) {
-            if strncmp((*p).prev_start, "asm" as *u8, 3 as i64) == (0 as i32) {
-                if parser_check(p, TOKEN_BANG()) != (0 as i32) {
-                    is_asm_macro = 1 as i32;
-                }
-            }
-        }
-        if is_asm_macro != (0 as i32) {
-            left = parse_asm_block(p, loc_lf, loc_ll, loc_lc);
-            // parse_asm_block 已经处理完 asm!(...) — left 已 set, 直接
-            // 跳过 IDENT 分支的剩余部分, 但 prefix dispatch 已 return 走
-            // 后面的 infix Pratt loop. 这里不能 return(否则漏掉 infix),
-            // 但因为 asm! 永远 stmt-position, 不会有 infix 跟在后面.
-            // 为安全:让控制流自然落到 if left != NULL 守卫 + Pratt loop,
-            // Pratt loop 看到 TOKEN_SEMICOLON / TOKEN_RBRACE 会直接 return.
-        }
-        else {
-            // V3-B v3.0.5: fence_seq_cst() / fence_acquire() / fence_release()
-            // builtin ident dispatch (per spec § 2). After consuming the ident
-            // (whose text is now in prev_start/prev_length), peek for `(`. If
-            // next token is LPAREN, dispatch to parse_fence_block (defined
-            // earlier in this file — jhyy no forward decl). Capture the name
-            // into a stack buffer before consuming `(` (which overwrites
-            // prev_start/prev_length).
-            let mut is_fence_builtin: i32 = 0 as i32;
-            if (*p).prev_length == (13 as i64) {
-                if strncmp((*p).prev_start, "fence_seq_cst" as *u8, 13 as i64) == (0 as i32) {
-                    is_fence_builtin = 1 as i32;
-                }
-                if strncmp((*p).prev_start, "fence_acquire" as *u8, 13 as i64) == (0 as i32) {
-                    is_fence_builtin = 1 as i32;
-                }
-                if strncmp((*p).prev_start, "fence_release" as *u8, 13 as i64) == (0 as i32) {
-                    is_fence_builtin = 1 as i32;
-                }
-            }
-            if is_fence_builtin != (0 as i32) {
-                if parser_check(p, TOKEN_LPAREN()) != (0 as i32) {
-                    // Copy ident text into stack buffer BEFORE parser_expect
-                    // consumes `(` (which would clobber prev_start).
-                    let name_buf = arena_alloc((*p).arena, (*p).prev_length + (1 as i64));
-                    memcpy(name_buf, (*p).prev_start, (*p).prev_length);
-                    *(ptr_add_u8(name_buf, (*p).prev_length) as *u8) = 0 as u8;
-                    left = parse_fence_block(p, loc_lf, loc_ll, loc_lc,
-                                             name_buf, (*p).prev_length);
-                }
-            }
-            if is_fence_builtin == (0 as i32) {
         let mut sym = symtab_lookup((*p).current_scope, name);
         if sym == (0 as *Sym) {
             sym = symtab_insert((*p).current_scope, name, SYM_VAR(),
@@ -1671,9 +825,6 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         else {
             left = ast_new_ident((*p).arena, loc_lf, loc_ll, loc_lc, sym);
         }
-        } // V3-B v3.0.5: close if is_fence_builtin == 0
-        } // V3-B v3.0.1: close is_asm_macro else
-        } // v3.2.0b: close `if skip_default == 0` (gates default path INSIDE IDENT branch only)
     }
     // ── unary prefix: - ! ~ ──
     else if t.kind == TOKEN_MINUS() {
@@ -2069,13 +1220,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                 }
             }
             parser_expect(p, TOKEN_RPAREN(), ")" as *u8, &t);
-            // v3.2.0c (3i fn path): turbofish type_args plumbed through from
-            //   IDENT primary branch (pending_targs/pending_ntargs)。
-            left = ast_new_call((*p).arena, loc_lf, loc_ll, loc_lc, left, args, nargs,
-                               pending_targs, pending_ntargs);
-            // 重置 (虽然本函数末尾返回,但 if-else fall through 安全起见)
-            pending_targs = 0 as *u8;
-            pending_ntargs = 0 as i64;
+            left = ast_new_call((*p).arena, loc_lf, loc_ll, loc_lc, left, args, nargs);
         }
         else if t.kind == TOKEN_DOT() {
             // field access: expr.field
@@ -3019,24 +2164,11 @@ fn parse_stmt(p: *Parser) -> *Node {
 // 顺序：在所有 sub-stmts + parse_stmt 之后定义
 // ════════════════════════════════════════════════════
 
-// v1.3.5: parse leading #[...] attributes. Currently #[inline], #[naked], and
-// #[link_section("name")] are meaningful.
+// v1.3.5: parse leading #[...] attributes. Currently only #[inline] is meaningful.
 // Returns is_inline (1 if any of the attrs is `inline`, else 0).
-// Sets is_naked out-param to 1 if `#[naked]` is present (v3.0.2).
-// Sets *link_section_out to the section name string (or NULL) for v3.0.4.
 // Forward-compatible: unknown attributes are parsed + ignored.
-fn parse_attributes(p: *Parser, is_naked_out: *i32, link_section_out: **u8) -> i32 {
-    // v3.0.0 (3d no_std): fold pending_inline (stashed by parse_module_attributes
-    // when `#[inline]` was at file top) into is_inline for this fn. Then clear
-    // it so subsequent fns don't inherit the flag by accident.
-    let mut is_inline: i32 = (*p).pending_inline;
-    (*p).pending_inline = 0 as i32;
-    // v3.0.2 (3b naked): fold pending_naked similarly.
-    *is_naked_out = (*p).pending_naked;
-    (*p).pending_naked = 0 as i32;
-    // v3.0.4 (3e link_section): fold pending_link_section similarly (owned string).
-    *link_section_out = (*p).pending_link_section;
-    (*p).pending_link_section = 0 as *u8;
+fn parse_attributes(p: *Parser) -> i32 {
+    let mut is_inline: i32 = 0 as i32;
     let mut t = empty_token();
     while (parser_check(p, TOKEN_HASH()) != (0 as i32)) {
         parser_advance(p, &t);  // consume '#'
@@ -3046,40 +2178,8 @@ fn parse_attributes(p: *Parser, is_naked_out: *i32, link_section_out: **u8) -> i
         // strcmp(aname, "inline") == 0
         if strcmp(aname, "inline" as *u8) == (0 as i32) {
             is_inline = 1 as i32;
-            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
-        } else if strcmp(aname, "naked" as *u8) == (0 as i32) {
-            // v3.0.2 (3b naked): `#[naked]` attribute — emit raw asm via D42
-            // side-file passthrough (per L4 inline asm escape hatch). sema
-            // validates body has only asm!() statements; codegen skips QBE
-            // function export + skips prologue/epilogue for naked fns.
-            *is_naked_out = 1 as i32;
-            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
-        } else if strcmp(aname, "link_section" as *u8) == (0 as i32) {
-            // v3.0.4 (3e link_section): `#[link_section("name")]` attribute —
-            // puts the function in a custom ELF section (e.g. ".text.boot" for
-            // boot code). Expect parenthesized string literal argument.
-            parser_expect(p, TOKEN_LPAREN(), "( after link_section" as *u8, &t);
-            parser_expect(p, TOKEN_STRING(), "section name string" as *u8, &t);
-            // Token includes surrounding quotes — strip them (same pattern as
-            // asm!() string literal handling).
-            let chars = ((t.start as i64) + (1 as i64)) as *u8;
-            let chars_len = t.length - (2 as i64);
-            let dup = arena_alloc((*p).arena, chars_len + (1 as i64));
-            memcpy(dup, chars, chars_len);
-            *(ptr_add_u8(dup, chars_len) as *u8) = 0 as u8;
-            *link_section_out = dup;
-            parser_expect(p, TOKEN_RPAREN(), ") after section name" as *u8, &t);
-            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
-        } else {
-            // Unknown attribute — consume the bracketed ident list. Forward-compat.
-            while parser_check(p, TOKEN_RBRACKET()) == (0 as i32) {
-                if parser_check(p, TOKEN_EOF()) != (0 as i32) {
-                    break;
-                }
-                parser_advance(p, &t);
-            }
-            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
         }
+        parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
     }
     return is_inline;
 }
@@ -3087,12 +2187,8 @@ fn parse_attributes(p: *Parser, is_naked_out: *i32, link_section_out: **u8) -> i
 fn parse_func(p: *Parser, is_extern: i32) -> *Node {
     let mut t = empty_token();
 
-    // v1.3.5: parse leading #[attr] before fn. v3.0.2 (3b naked): parse_attributes
-    // also returns is_naked via out-param. v3.0.4 (3e link_section): also
-    // returns the section name string via out-param.
-    let mut is_naked_v: i32 = 0 as i32;
-    let mut link_section_v: *u8 = 0 as *u8;
-    let is_inline = parse_attributes(p, &is_naked_v, &link_section_v);
+    // v1.3.5: parse leading #[attr] before fn
+    let is_inline = parse_attributes(p);
 
     parser_peek(p, &t);
     let loc_lf = t.loc_filename;
@@ -3111,47 +2207,6 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
         if sym != (0 as *Sym) {
             (*sym).is_extern = 1 as i32;
         }
-    }
-
-    // v3.2.0c (3i fn path): 可选 `<T, U, ...>` generic param list。
-    //   mirror parse_type_decl L3140-3183:peek `<` → push scope + parse 逗号分隔
-    //   ident list → 插 SYM_TYPE type_ptr=0(monomorphize sentinel)。scope pop
-    //   在 fn decl parse 完后 (`parser_pop_scope` L3113 已存在,后续 patch
-    //   加 if is_generic 守卫)。ntype_params > 0 → codegen skip body (走
-    //   mono_clone_and_subst 路径)。
-    let mut type_params: *u8 = 0 as *u8;
-    let mut ntype_params: i64 = 0 as i64;
-    let mut tcap2: i64 = 0 as i64;
-    let mut is_generic_fn: i32 = 0 as i32;
-
-    let mut gpeek_fn = empty_token();
-    parser_peek(p, &gpeek_fn);
-    if gpeek_fn.kind == TOKEN_LT() {
-        parser_push_scope(p);
-        is_generic_fn = 1 as i32;
-        parser_advance(p, &t);  // consume `<`
-        while parser_check(p, TOKEN_GT()) == (0 as i32) {
-            if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
-            parser_expect(p, TOKEN_IDENT(), "type parameter name" as *u8, &t);
-            let tpname = parser_tok_name(p, &t);
-            let _tpsym = symtab_insert((*p).current_scope, tpname, SYM_TYPE(),
-                                       0 as *u8, 0 as i32, (*p).scope_depth);
-            if ntype_params >= tcap2 {
-                tcap2 = if tcap2 != (0 as i64) { tcap2 * (2 as i64) } else { (4 as i64) };
-                let nt = arena_alloc((*p).arena, tcap2 * (8 as i64));
-                if type_params != (0 as *u8) {
-                    if ntype_params > (0 as i64) {
-                        memcpy(nt, type_params, ntype_params * (8 as i64));
-                    }
-                }
-                type_params = nt;
-            }
-            let tpslot = (type_params as i64 + ntype_params * (8 as i64)) as **u8;
-            *tpslot = _tpsym as *u8;
-            ntype_params = ntype_params + (1 as i64);
-            if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
-        }
-        parser_expect(p, TOKEN_GT(), "> after type param list" as *u8, &t);
     }
 
     parser_push_scope(p);
@@ -3265,15 +2320,8 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
 
     parser_pop_scope(p);
 
-    // v3.2.0c (3i fn path): if generic fn (type_params scope pushed at L3007-3010),
-    //   pop it now — body parse 已完成,type-param 不再可见。
-    let fn_decl = ast_new_func_decl((*p).arena, loc_lf, loc_ll, loc_lc,
-                             sym, params, nparams, ret_type, body, is_extern, is_inline, is_naked_v, link_section_v,
-                             type_params, ntype_params);
-    if is_generic_fn != (0 as i32) {
-        parser_pop_scope(p);
-    }
-    return fn_decl;
+    return ast_new_func_decl((*p).arena, loc_lf, loc_ll, loc_lc,
+                             sym, params, nparams, ret_type, body, is_extern, is_inline);
 }
 
 // ════════════════════════════════════════════════════
@@ -3291,56 +2339,6 @@ fn parse_type_decl(p: *Parser) -> *Node {
 
     parser_expect(p, TOKEN_IDENT(), "type name" as *u8, &t);
     let tname = parser_tok_name(p, &t);
-
-    // v3.2.0 (V3-C 3i generics): 可选 `<T, U, ...>` generic param list。
-    //   - peek `<` → push scope,parse 逗号分隔 ident list,每个插为 SYM_TYPE
-    //     + type_ptr=0(type-param 占位,monomorphize 阶段会被 substitute 替换)
-    //   - 非 generic decl(ntype_params==0)byte-identical to v3.1.x
-    //   - body parse 期间 type-param 在 current_scope,scope 弹在 ast_new_type_decl 之后
-    let mut type_params: *u8 = 0 as *u8;
-    let mut ntype_params: i64 = 0 as i64;
-    let mut tcap: i64 = 0 as i64;
-    let mut is_generic: i32 = 0 as i32;
-
-    let mut gpeek = empty_token();
-    parser_peek(p, &gpeek);
-    if gpeek.kind == TOKEN_LT() {
-        // 推一个 child scope,让 type-param 在 body parse 时可见
-        parser_push_scope(p);
-        is_generic = 1 as i32;
-        parser_advance(p, &t);  // consume `<`
-        while parser_check(p, TOKEN_GT()) == (0 as i32) {
-            if parser_check(p, TOKEN_EOF()) != (0 as i32) {
-                break;
-            }
-            parser_expect(p, TOKEN_IDENT(), "type parameter name" as *u8, &t);
-            let pname = parser_tok_name(p, &t);
-            // 插 SYM_TYPE + type_ptr=0(type_ptr=0 是 monomorphize sentinel,
-            //   resolve_type_node @285-289 已 gate type_ptr != 0 — bare T 在
-            //   non-generic scope 会报 E0060)
-            let _psym = symtab_insert((*p).current_scope, pname, SYM_TYPE(),
-                                      0 as *u8, 0 as i32, (*p).scope_depth);
-            // 收集 type-param sym 进 type_params 数组
-            if ntype_params >= tcap {
-                tcap = if tcap != (0 as i64) { tcap * (2 as i64) } else { (4 as i64) };
-                let nt = arena_alloc((*p).arena, tcap * (8 as i64));
-                if type_params != (0 as *u8) {
-                    if ntype_params > (0 as i64) {
-                        memcpy(nt, type_params, ntype_params * (8 as i64));
-                    }
-                }
-                type_params = nt;
-            }
-            let tpslot = (type_params as i64 + ntype_params * (8 as i64)) as **u8;
-            *tpslot = _psym as *u8;
-            ntype_params = ntype_params + (1 as i64);
-            // 吞逗号;无逗号 → 跳出等 `>`
-            if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) {
-                break;
-            }
-        }
-        parser_expect(p, TOKEN_GT(), "> after type param list" as *u8, &t);
-    }
 
     parser_expect(p, TOKEN_EQ(), "=" as *u8, &t);
 
@@ -3464,13 +2462,7 @@ fn parse_type_decl(p: *Parser) -> *Node {
 
     let sym = symtab_insert((*p).global_scope, tname, SYM_TYPE(),
                             0 as *u8, 0 as i32, 0 as i32);
-    let n = ast_new_type_decl((*p).arena, loc_lf, loc_ll, loc_lc, sym, body,
-                             type_params, ntype_params);
-    // 弹 generic scope(if pushed)。body parse 已完成,type-param 不再可见。
-    if is_generic != (0 as i32) {
-        parser_pop_scope(p);
-    }
-    return n;
+    return ast_new_type_decl((*p).arena, loc_lf, loc_ll, loc_lc, sym, body);
 }
 
 fn parse_extern_decl(p: *Parser) -> *Node {
@@ -3616,71 +2608,7 @@ fn parser_init(p: *Parser, lex: *Lexer, a: *Arena) -> i32 {
     (*p).prev_lc = 0 as i32;
     (*p).global_scope = symtab_new(a, 0 as *u8);
     (*p).current_scope = (*p).global_scope;
-    (*p).pending_inline = 0 as i32;
-    (*p).pending_naked = 0 as i32;
-    (*p).pending_link_section = 0 as *u8;
-    (*p).generic_insts = 0 as *u8;
-    (*p).ngeneric_insts = 0 as i64;
-    (*p).gcap = 0 as i64;
     return 0;
-}
-
-// v3.0.0 (3d no_std): parse module-level outer attrs at file top.
-// `#[no_std]` is meaningful (sets is_no_std=1). `#[inline]` at file top is
-// the OLD fn-level style (e.g. `#[inline]\nfn dbl() -> ...` at file top) —
-// we consume it here but stash the flag in (*p).pending_inline so
-// parse_attributes (called from parse_func for the next fn) folds it into
-// is_inline. Unknown attrs: forward-compatible parse + ignore.
-// is_no_std is an out-param (1 if file had `#[no_std]`, else 0).
-// v3.0.2 (3b naked): `#[naked]` at file top is stashed in pending_naked.
-// Defined before parser_parse so it's visible (jhyy has no forward refs).
-fn parse_module_attributes(p: *Parser, is_no_std: *i32) -> i32 {
-    *is_no_std = 0 as i32;
-    let mut t = empty_token();
-    while parser_check(p, TOKEN_HASH()) != (0 as i32) {
-        parser_advance(p, &t);  // consume '#'
-        parser_expect(p, TOKEN_LBRACKET(), "[ after #" as *u8, &t);
-        parser_expect(p, TOKEN_IDENT(), "attribute name" as *u8, &t);
-        let aname = parser_tok_name(p, &t);
-        if strcmp(aname, "no_std" as *u8) == (0 as i32) {
-            *is_no_std = 1 as i32;
-            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
-        } else if strcmp(aname, "inline" as *u8) == (0 as i32) {
-            // Stash for next fn; parse_attributes will fold into is_inline.
-            (*p).pending_inline = 1 as i32;
-            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
-        } else if strcmp(aname, "naked" as *u8) == (0 as i32) {
-            // v3.0.2: stash for next fn; parse_attributes will fold into is_naked.
-            (*p).pending_naked = 1 as i32;
-            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
-        } else if strcmp(aname, "link_section" as *u8) == (0 as i32) {
-            // v3.0.4 (3e link_section): parse parenthesized string arg, dup into
-            // arena, stash in pending_link_section for next fn.
-            parser_expect(p, TOKEN_LPAREN(), "( after link_section" as *u8, &t);
-            parser_expect(p, TOKEN_STRING(), "section name string" as *u8, &t);
-            let chars = ((t.start as i64) + (1 as i64)) as *u8;
-            let chars_len = t.length - (2 as i64);
-            let dup = arena_alloc((*p).arena, chars_len + (1 as i64));
-            memcpy(dup, chars, chars_len);
-            *(ptr_add_u8(dup, chars_len) as *u8) = 0 as u8;
-            (*p).pending_link_section = dup;
-            parser_expect(p, TOKEN_RPAREN(), ") after section name" as *u8, &t);
-            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
-        } else {
-            // Unknown attr: consume `]` (forward-compatible). Don't error — v3.x may add new attrs.
-            while parser_check(p, TOKEN_RBRACKET()) == (0 as i32) {
-                if parser_check(p, TOKEN_EOF()) != (0 as i32) {
-                    break;
-                }
-                parser_advance(p, &t);
-            }
-            parser_expect(p, TOKEN_RBRACKET(), "] after attribute" as *u8, &t);
-        }
-    }
-    if (*p).error_count == (0 as i32) {
-        return 1 as i32;
-    }
-    return 0 as i32;
 }
 
 fn parser_parse(p: *Parser) -> *Node {
@@ -3689,11 +2617,6 @@ fn parser_parse(p: *Parser) -> *Node {
     let loc_lf = t.loc_filename;
     let loc_ll = t.loc_line;
     let loc_lc = t.loc_col;
-
-    // v3.0.0 (3d no_std): consume leading `#[...]` (module-level outer attrs)
-    // before walking decls. Currently only `#[no_std]`.
-    let mut is_no_std: i32 = 0 as i32;
-    let _mar = parse_module_attributes(p, &is_no_std);
 
     let mut decls: *u8 = 0 as *u8;
     let mut ndecls: i64 = 0 as i64;
@@ -3718,9 +2641,5 @@ fn parser_parse(p: *Parser) -> *Node {
         }
     }
 
-    return ast_new_module((*p).arena, loc_lf, loc_ll, loc_lc, decls, ndecls, is_no_std,
-                          (*p).generic_insts, (*p).ngeneric_insts);
+    return ast_new_module((*p).arena, loc_lf, loc_ll, loc_lc, decls, ndecls);
 }
-
-// (parse_asm_block 已上移到 parse_expr 之前,jhyy 无 forward decl — 物理上
-// 必须 prepend。)

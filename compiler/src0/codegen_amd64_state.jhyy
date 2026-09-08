@@ -37,10 +37,6 @@ fn QBE_D_LOCAL() -> i32 { return 100 as i32; }  // 'd' — 64-bit double
 fn QBE_B_LOCAL() -> i32 { return 98 as i32; }   // 'b' — 8-bit byte
 fn QBE_H_LOCAL() -> i32 { return 104 as i32; }  // 'h' — 16-bit half
 fn QBE_VOLATILE_MARKER() -> i32 { return -1 as i32; }  // volatile token marker
-// v3.1.0 (V3-C 3g): borrowed var marker — 表示此 slot 是 `&T` / `&mut T` 借用。
-// 区别 volatile (-1): volatile 每次 load fresh temp; borrowed 是单 ptr 复用。
-// qbe_type 仍写 'l' (8-byte ptr),此 marker 供 codegen 阶段 metadata 区分。
-fn QBE_BORROWED_MARKER() -> i32 { return -2 as i32; }  // v3.1.0: &T / &mut T marker
 
 // ════════════════════════════════════════════════════
 // IL token kind(per L4 § 2.1,15 个 token + EOF)

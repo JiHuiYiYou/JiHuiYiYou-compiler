@@ -32,10 +32,6 @@ import types;
 import ast;
 import lexer;
 import parser;
-// v3.2.0 (V3-C 3i generics): Pass 1.5 monomorphize. mono_expand_module 在
-//   Pass 1 (decl 注册) 之后 / Pass 2 (layout resolve) 之前调用。
-//   import 顺序:parser 之后 — mono 不依赖 parser。
-import mono;
 
 // ════════════════════════════════════════════════════
 // 常量
@@ -284,35 +280,6 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
             }
         }
 
-        // v3.1.2 (V3-C 3g.7): fall through — 接受 SYM_VAR / SYM_FN 的 type_ptr
-        // 让 sizeof(c) where c: Cap<T> 在 fn body 内能 resolve (c 是 SYM_VAR w/ type=Cap<T>)。
-        if looked != (0 as *Sym) {
-            if (*looked).type_ptr != (0 as *u8) {
-                return (*looked).type_ptr as *Type;
-            }
-        }
-
-        // v3.2.0 (V3-C 3i generics): bare type-param `T` 在 non-generic scope
-        //   报 E0060(`looked` 是 SYM_TYPE + type_ptr==0 = type-param sentinel)。
-        //   Pass 1.5 替换后,所有使用位 (field type / let type_annot / 等)
-        //   已经被 subst 成 arg type,不再走这一路径。Pass 2 走到这里只能是:
-        //   (a) bare T 出现在 generic def body 之外(mono_expand_module 之后
-        //       generic def 跳过,所以 Pass 2 不会重新访问 body,但函数返回
-        //       类型 / 函数参数 type 仍可能在 generic fn 中 — v3.2.0 不做,
-        //       v3.2.0b 接 generic fn 时会改成 mono_substitute 这些位置);
-        //   (b) 用户手写 unsubstituted type-param 当 type 用(明显 bug)。
-        //   E0060 在两种场景都正确。
-        if looked != (0 as *Sym) {
-            if (*looked).kind == SYM_TYPE() {
-                if (*looked).type_ptr == (0 as *u8) {
-                    let _x = sema_error_str(ctx, (*tn).loc_filename,
-                                            (*tn).loc_line, (*tn).loc_col,
-                                            "E0060: unresolved type parameter; generic must be instantiated" as *u8);
-                    return type_primitive(ta, PRIM_I32());  // error recovery
-                }
-            }
-        }
-
         // primitive types（走 TypeArena）
         if strcmp(name, "i8" as *u8)   == (0 as i32) { return type_primitive(ta, PRIM_I8()); }
         if strcmp(name, "i16" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_I16()); }
@@ -325,19 +292,6 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
         if strcmp(name, "f32" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_F32()); }
         if strcmp(name, "f64" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_F64()); }
         if strcmp(name, "bool" as *u8) == (0 as i32) { return type_primitive(ta, PRIM_BOOL()); }
-        // v3.1.0 (V3-C 3g): Cap builtin — 8-byte capability (cnode/depth/rights/pad).
-        // 简化:default inner=i32, 完整 Cap<T> generic 留 v3.1.2。
-        if strcmp(name, "Cap" as *u8) == (0 as i32) {
-            return type_cap((*ctx).arena, type_primitive(ta, PRIM_I32()));
-        }
-        // v3.1.1 (V3-C 3g.5): PhantomData<T> builtin — 0-byte ZST type marker.
-        // 简化:default inner=i32, 完整 PhantomData<T> generic inner 解析留 v3.2.0 (3i generics).
-        // sema 阶段显式识别避免依赖 parser 在 symtab 插入 type_ptr (parser 路径在 fn body scope
-        // 不可靠:global_scope vs current_scope 链查找机制)。type_phantom 已存 inner 字段
-        // 留给后续 v3.2.0 monomorphize 阶段使用;v3.1.1 M0 只用 size/align 硬编码 invariant。
-        if strcmp(name, "PhantomData" as *u8) == (0 as i32) {
-            return type_phantom((*ctx).arena, type_primitive(ta, PRIM_I32()));
-        }
 
         // global scope user-defined type
         let gsym = symtab_lookup((*ctx).global_scope, name);
@@ -383,116 +337,6 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
         let st = node_slice_type_data(tn);
         let elem = resolve_type_node(ctx, ta, (*st).elem_type as *Node);
         return type_slice((*ctx).arena, elem);
-    }
-
-    // v3.1.0 (V3-C 3g): NODE_REF_TYPE wrapper — `&T` / `&mut T` borrow type.
-    // resolve inner,然后 alloc new Type = copy(inner) + is_mut + KIND_REF。
-    // 允许 inner 是任意 type(primitive/struct/pointer/slice/array/borrow)。
-    // 拒绝规则:
-    //   - chained `&&T`(NODE_REF_TYPE 套 NODE_REF_TYPE)— 借用是 terminal
-    //   - `&mut volatile T` / `volatile &mut T`(借用不能 + volatile)
-    //   - `&mut` 内层是 immutable(borrow 检查放 check_borrow,不在这)
-    if (*tn).kind == NODE_REF_TYPE() {
-        let rt = node_ref_type_data(tn);
-        let inner = resolve_type_node(ctx, ta, (*rt).inner as *Node);
-        if inner == (0 as *Type) {
-            return type_primitive(ta, PRIM_I32());  // error recovery
-        }
-        // 拒绝 chained `&&T`
-        if (*inner).kind == KIND_REF() {
-            let _x = sema_error_str(ctx, (*tn).loc_filename, (*tn).loc_line, (*tn).loc_col,
-                                    "chained `&&T` not allowed (borrow is terminal)" as *u8);
-            return type_primitive(ta, PRIM_I32());
-        }
-        // 拒绝 `&(mut)? volatile T` 或 `volatile &mut T`
-        // split into 2 ifs for jhyy precedence clarity (avoid mixed && ||)
-        let mut vol_conflict: i32 = 0;
-        if (*inner).is_volatile != (0 as i32) {
-            vol_conflict = 1;
-        }
-        if (*rt).is_mut != (0 as i32) {
-            if (*inner).is_volatile != (0 as i32) {
-                vol_conflict = 1;
-            }
-        }
-        if vol_conflict != (0 as i32) {
-            let _x = sema_error_str(ctx, (*tn).loc_filename, (*tn).loc_line, (*tn).loc_col,
-                                    "`&` / `&mut` cannot wrap volatile type (volatile forces fresh temp, borrow must persist)" as *u8);
-            return type_primitive(ta, PRIM_I32());
-        }
-        // 分配新 Type = 复制 inner + KIND_REF + is_mut + elem=inner
-        let ref_type = arena_alloc((*ctx).arena, TYPE_SIZE()) as *Type;
-        (*ref_type).kind = KIND_REF();
-        (*ref_type).prim = (*inner).prim;
-        (*ref_type).elem = inner as *u8;
-        (*ref_type).arr_count = (*inner).arr_count;
-        (*ref_type).params = (*inner).params;
-        (*ref_type).nparams = (*inner).nparams;
-        (*ref_type).ret = (*inner).ret;
-        (*ref_type).name = (*inner).name;
-        (*ref_type).fields = (*inner).fields;
-        (*ref_type).nfields = (*inner).nfields;
-        (*ref_type).size = (*inner).size;
-        (*ref_type).align = (*inner).align;
-        (*ref_type).variants = (*inner).variants;
-        (*ref_type).nvariants = (*inner).nvariants;
-        (*ref_type).tag_size = (*inner).tag_size;
-        (*ref_type).payload_off = (*inner).payload_off;
-        (*ref_type).payload_sz = (*inner).payload_sz;
-        (*ref_type).sym = (*inner).sym;
-        (*ref_type).underlying = (*inner).underlying;
-        (*ref_type).is_volatile = 0 as i32;
-        (*ref_type)._pad_volatile = 0 as i32;
-        (*ref_type).is_mut = (*rt).is_mut;
-        (*ref_type)._pad_mut = 0 as i32;
-        return ref_type;
-    }
-
-    // v3.0.3 (3c volatile): NODE_VOLATILE_TYPE wrapper — resolve inner,
-    // 校验 inner 是 primitive (struct/pointer/array 在 parser 阶段 soft warn,
-    // 这里做强校验兜底),然后 alloc new Type = copy(inner) + is_volatile=1。
-    if (*tn).kind == NODE_VOLATILE_TYPE() {
-        let vt = node_volatile_type_data(tn);
-        let inner = resolve_type_node(ctx, ta, (*vt).inner as *Node);
-        if inner == (0 as *Type) {
-            return type_primitive(ta, PRIM_I32());  // error recovery
-        }
-        // 拒绝 chained (TYPE 已有 is_volatile=1) — parser 已拦,这里再次兜底
-        if (*inner).is_volatile != (0 as i32) {
-            let _x = sema_error_str(ctx, (*tn).loc_filename, (*tn).loc_line, (*tn).loc_col,
-                                    "chained `volatile volatile` not allowed" as *u8);
-            return type_primitive(ta, PRIM_I32());  // error recovery
-        }
-        // 拒绝 compound types — only KIND_PRIMITIVE 接受
-        if (*inner).kind != KIND_PRIMITIVE() {
-            let _x = sema_error_str(ctx, (*tn).loc_filename, (*tn).loc_line, (*tn).loc_col,
-                                    "`volatile` only allowed on primitive types (struct/pointer/array not allowed per spec § 6)" as *u8);
-            return type_primitive(ta, PRIM_I32());  // error recovery
-        }
-        // 分配新 Type = 复制 inner 的所有字段 + is_volatile=1
-        let vt_type = arena_alloc((*ctx).arena, TYPE_SIZE()) as *Type;
-        (*vt_type).kind = (*inner).kind;
-        (*vt_type).prim = (*inner).prim;
-        (*vt_type).elem = (*inner).elem;
-        (*vt_type).arr_count = (*inner).arr_count;
-        (*vt_type).params = (*inner).params;
-        (*vt_type).nparams = (*inner).nparams;
-        (*vt_type).ret = (*inner).ret;
-        (*vt_type).name = (*inner).name;
-        (*vt_type).fields = (*inner).fields;
-        (*vt_type).nfields = (*inner).nfields;
-        (*vt_type).size = (*inner).size;
-        (*vt_type).align = (*inner).align;
-        (*vt_type).variants = (*inner).variants;
-        (*vt_type).nvariants = (*inner).nvariants;
-        (*vt_type).tag_size = (*inner).tag_size;
-        (*vt_type).payload_off = (*inner).payload_off;
-        (*vt_type).payload_sz = (*inner).payload_sz;
-        (*vt_type).sym = (*inner).sym;
-        (*vt_type).underlying = (*inner).underlying;
-        (*vt_type).is_volatile = 1 as i32;
-        (*vt_type)._pad_volatile = 0 as i32;
-        return vt_type;
     }
 
     let _x = sema_error_str(ctx, (*tn).loc_filename, (*tn).loc_line, (*tn).loc_col,
@@ -648,147 +492,6 @@ fn process_match_pattern(ctx: *SemaContext, pat: *Node, match_type: *Type) -> i3
 }
 
 // ════════════════════════════════════════════════════
-// v3.2.0d (3i fn path): mono_propagate_idents_to_cloned_body
-//   Walks cloned fn body, for every NODE_IDENT copies (*sym).type_ptr
-//   into (*ident).type_ptr. This is what infer_type would do for a regular
-//   NODE_IDENT in a checked fn body, but cloned fns in inference path
-//   don't get check_func_decl'd (Pass 3b skips $-mangled, Pass 3a already
-//   finished before the inference arm). Without this propagation, codegen
-//   sees IDENT.type_ptr=0 and defaults to `w` ops (csgtw etc) regardless
-//   of the substituted T — broken for f64, struct args etc.
-//
-//   Inlined here (semantic counterpart of mono_rewrite_idents_in_expr) so
-//   inference arm can call it without going through full check_func_decl
-//   (which is defined later in this file; jhyy no forward refs).
-// ════════════════════════════════════════════════════
-
-fn mono_propagate_idents_in_expr(node: *Node) -> i32 {
-    if node == (0 as *Node) { return 0 as i32; }
-    let nk_off = node as *i32;
-    let nk = *nk_off;
-    if nk == NODE_IDENT() {
-        let id_data = (node as i64 + NODE_SIZE()) as *u8;
-        let id_sym_off = id_data as **u8;
-        let cur = *id_sym_off;
-        if cur != (0 as *u8) {
-            let cur_tp = (*(cur as *Sym)).type_ptr;
-            if cur_tp != (0 as *u8) {
-                *((node as i64 + (8 as i64)) as **u8) = cur_tp;
-            }
-        }
-        return 1 as i32;
-    }
-    if nk == NODE_BINARY() {
-        let bn_data = (node as i64 + NODE_SIZE()) as *u8;
-        let l = *((bn_data as i64 + (8 as i64)) as **Node);
-        let r = *((bn_data as i64 + (16 as i64)) as **Node);
-        let _x1 = mono_propagate_idents_in_expr(l);
-        let _x2 = mono_propagate_idents_in_expr(r);
-        return 1 as i32;
-    }
-    if nk == NODE_UNARY() {
-        let un_data = (node as i64 + NODE_SIZE()) as *u8;
-        let ex = *((un_data as i64 + (8 as i64)) as **Node);
-        let _x1 = mono_propagate_idents_in_expr(ex);
-        return 1 as i32;
-    }
-    if nk == NODE_CALL() {
-        let cn_data = (node as i64 + NODE_SIZE()) as *u8;
-        let cn_callee = *((cn_data as i64 + (0 as i64)) as **Node);
-        let cn_args = *((cn_data as i64 + (8 as i64)) as **u8);
-        let cn_nargs = *((cn_data as i64 + (16 as i64)) as *i64);
-        let _x1 = mono_propagate_idents_in_expr(cn_callee);
-        let mut ai: i64 = 0 as i64;
-        while ai < cn_nargs {
-            let a = *((cn_args as i64 + ai * (8 as i64)) as **Node);
-            let _x2 = mono_propagate_idents_in_expr(a);
-            ai = ai + (1 as i64);
-        }
-        return 1 as i32;
-    }
-    if nk == NODE_FIELD() {
-        let fn_data = (node as i64 + NODE_SIZE()) as *u8;
-        let tg = *((fn_data as i64 + (0 as i64)) as **Node);
-        let _x1 = mono_propagate_idents_in_expr(tg);
-        return 1 as i32;
-    }
-    if nk == NODE_INDEX() {
-        let in_data = (node as i64 + NODE_SIZE()) as *u8;
-        let tg = *((in_data as i64 + (0 as i64)) as **Node);
-        let ix = *((in_data as i64 + (8 as i64)) as **Node);
-        let _x1 = mono_propagate_idents_in_expr(tg);
-        let _x2 = mono_propagate_idents_in_expr(ix);
-        return 1 as i32;
-    }
-    return 0 as i32;
-}
-
-fn mono_propagate_idents_to_cloned_body(body: *Node) -> i32 {
-    if body == (0 as *Node) { return 0 as i32; }
-    let nk_off = body as *i32;
-    let nk = *nk_off;
-    if nk == NODE_BLOCK() {
-        let bn_data = (body as i64 + NODE_SIZE()) as *u8;
-        let bn_stmts = *((bn_data as i64 + (0 as i64)) as **u8);
-        let bn_nstmts = *((bn_data as i64 + (8 as i64)) as *i64);
-        let mut si: i64 = 0 as i64;
-        while si < bn_nstmts {
-            let s = *((bn_stmts as i64 + si * (8 as i64)) as **Node);
-            let _x = mono_propagate_idents_to_cloned_body(s);
-            si = si + (1 as i64);
-        }
-        return 1 as i32;
-    }
-    if nk == NODE_IF() {
-        let in_data = (body as i64 + NODE_SIZE()) as *u8;
-        let c = *((in_data as i64 + (0 as i64)) as **Node);
-        let t = *((in_data as i64 + (8 as i64)) as **Node);
-        let e = *((in_data as i64 + (16 as i64)) as **Node);
-        let _x1 = mono_propagate_idents_in_expr(c);
-        let _x2 = mono_propagate_idents_to_cloned_body(t);
-        let _x3 = mono_propagate_idents_to_cloned_body(e);
-        return 1 as i32;
-    }
-    if nk == NODE_WHILE() {
-        let wn_data = (body as i64 + NODE_SIZE()) as *u8;
-        let c = *((wn_data as i64 + (0 as i64)) as **Node);
-        let b = *((wn_data as i64 + (8 as i64)) as **Node);
-        let _x1 = mono_propagate_idents_in_expr(c);
-        let _x2 = mono_propagate_idents_to_cloned_body(b);
-        return 1 as i32;
-    }
-    if nk == NODE_LET() {
-        let ln_data = (body as i64 + NODE_SIZE()) as *u8;
-        let an = *((ln_data as i64 + (0 as i64)) as **Node);
-        let in_ = *((ln_data as i64 + (8 as i64)) as **Node);
-        let _x1 = mono_propagate_idents_in_expr(an);
-        let _x2 = mono_propagate_idents_in_expr(in_);
-        return 1 as i32;
-    }
-    if nk == NODE_RETURN() {
-        let rn_data = (body as i64 + NODE_SIZE()) as *u8;
-        let v = *((rn_data as i64 + (0 as i64)) as **Node);
-        let _x1 = mono_propagate_idents_in_expr(v);
-        return 1 as i32;
-    }
-    if nk == NODE_ASSIGN() {
-        let an_data = (body as i64 + NODE_SIZE()) as *u8;
-        let tg = *((an_data as i64 + (0 as i64)) as **Node);
-        let vl = *((an_data as i64 + (8 as i64)) as **Node);
-        let _x1 = mono_propagate_idents_in_expr(tg);
-        let _x2 = mono_propagate_idents_in_expr(vl);
-        return 1 as i32;
-    }
-    if nk == NODE_EXPR_STMT() {
-        let en_data = (body as i64 + NODE_SIZE()) as *u8;
-        let e = *((en_data as i64 + (0 as i64)) as **Node);
-        let _x1 = mono_propagate_idents_in_expr(e);
-        return 1 as i32;
-    }
-    return 0 as i32;
-}
-
-// ════════════════════════════════════════════════════
 // infer_type（self-recursive 大函数 — Sprint 3 commit 5 主体）
 // ════════════════════════════════════════════════════
 
@@ -831,27 +534,6 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     if (*n).kind == NODE_NULL() {
         (*n).type_ptr = 0 as *u8;
         return 0 as *Type;
-    }
-    // V3-B v3.0.1: asm!(...) inline asm — type is unit () (per spec § 3 语义).
-    //   asm 块只能用于 statement-position; parser 把它放在 expr context
-    //   是为了走 cg_expr/cg_stmt 统一 emit 路径. sema 不强制 stmt-position
-    //   检查 (parser 已经 emit clear error on `let x = asm!(...)` 通过
-    //   type_void return → type mismatch 由 caller 报) — 这里只负责给
-    //   type_ptr 填 unit 即可. v3.1+ 加 operand constraints 时这里会读
-    //   node_asm_block_data(n).operands[i] 推断 operand 类型.
-    if (*n).kind == NODE_ASM_BLOCK() {
-        let v = type_void(ta);
-        (*n).type_ptr = v as *u8;
-        return v;
-    }
-    // v3.0.5 (3f memory barrier): fence_seq_cst/acquire/release return
-    // unit type (stmt-position; never used as expr value). codegen emits
-    // raw mnem (mfence/lfence/sfence) to _fence.buf side-file from
-    // node_builtin_fence_data(n).kind.
-    if (*n).kind == NODE_BUILTIN_FENCE() {
-        let v = type_void(ta);
-        (*n).type_ptr = v as *u8;
-        return v;
     }
     // v1.3.3: sizeof(TypeName) — compile-time const. Mirror C-side sema.c.
     // Resolve target type, compute size, fill n->type=i64 + node_int_data.
@@ -1096,266 +778,6 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     if (*n).kind == NODE_CALL() {
         let d = node_call_data(n);
 
-        // v3.2.0c (3i fn path): turbofish handling — if parser attached type_args
-        //   (e.g. `max::<i32>(3, 5)`),trigger mono_expand_fn_call:
-        //   - resolve callee to NODE_FUNC_DECL via global_scope lookup
-        //   - clone generic fn body,subst T→arg_nodes,register mangled sym
-        //   - rewrite NODE_CALL.callee to point at mangled sym
-        // call-site inference (no turbofish) not yet supported in v3.2.0c —
-        //   fallback to E0062 below if callee is still generic.
-        //   offset access (per v3.2.0b mitigation): `(*d).ntype_args` deep
-        //   nested struct deref triggers stage-0 codegen stack-spill bug.
-        //   NodeCall ntype_args @ offset 32.
-        let d_off = d as i64;
-        let nta_off = (d_off + (32 as i64)) as *i64;
-        let nta_val = *nta_off;
-        if nta_val > (0 as i64) {
-            // callee @ offset 0 (offset access)
-            let callee_off = d_off as **u8;
-            let callee_ptr = *callee_off;
-            if callee_ptr != (0 as *u8) {
-                let callee_kind_off = callee_ptr as *i32;
-                let callee_kind = *callee_kind_off;
-                if callee_kind == NODE_IDENT() {
-                    let callee_id_pre = node_ident_data(callee_ptr as *Node);
-                    let callee_id_pre_sym_off = callee_id_pre as **u8;
-                    let callee_sym_pre = *callee_id_pre_sym_off as *Sym;
-                    if (*callee_sym_pre).kind == SYM_FN() {
-                        // type_args @ offset 24 (offset access)
-                        let ta_off = (d_off + (24 as i64)) as **u8;
-                        let ta_ptr = *ta_off;
-                        let mangled_sym = mono_expand_fn_call(
-                            (*ctx).global_scope, (*ctx).arena,
-                            (*ctx).module as *Node,
-                            callee_sym_pre,
-                            ta_ptr, nta_val);
-                        if mangled_sym != (0 as *Sym) {
-                            // rewrite NODE_IDENT.sym → mangled fn sym
-                            *callee_id_pre_sym_off = mangled_sym as *u8;
-                        }
-                    }
-                }
-            }
-        } else {
-            // v3.2.0d (3i fn path): call-site type inference — when no turbofish
-            //   (nta_val == 0) but callee is a generic fn (ntype_params > 0),
-            //   infer type_args from arg types. Algorithm:
-            //     1. resolve generic def via mono_find_generic_def
-            //     2. for each fn param whose type matches a type_param, record slot
-            //     3. for each call arg, infer_type → *Type → mono_type_to_type_node
-            //     4. set type_args[slot] = arg_type_node; verify agreement
-            //     5. call mono_expand_fn_call; rewrite callee sym to mangled sym
-            //   Full offset access pattern (per v3.2.0b L102-104 mitigation).
-            let callee_off2 = d_off as **u8;
-            let callee_ptr2 = *callee_off2;
-            if callee_ptr2 != (0 as *u8) {
-                let callee_kind_off2 = callee_ptr2 as *i32;
-                let callee_kind2 = *callee_kind_off2;
-                if callee_kind2 == NODE_IDENT() {
-                    let callee_id_pre2 = node_ident_data(callee_ptr2 as *Node);
-                    let callee_id_pre2_sym_off = callee_id_pre2 as **u8;
-                    let callee_sym_pre2 = *callee_id_pre2_sym_off as *Sym;
-                    if (*callee_sym_pre2).kind == SYM_FN() {
-                        let base_name2 = (*callee_sym_pre2).name;
-                        // convert (*ctx).module (*Node) → *NodeModule for mono_find_generic_def
-                        let mnd = node_module_data((*ctx).module);
-                        let generic_def = mono_find_generic_def(mnd as *Node, base_name2);
-                        if generic_def != (0 as *Node) {
-                            // read type_params + ntype_params (offsets 80 / 88)
-                            let gd_off = generic_def as i64;
-                            let gd_tp_off = (gd_off + NODE_SIZE() + (80 as i64)) as **u8;
-                            let gd_tp = *gd_tp_off;
-                            let gd_ntp_off = (gd_off + NODE_SIZE() + (88 as i64)) as *i64;
-                            let gd_ntp = *gd_ntp_off;
-                            if gd_ntp > (0 as i64) {
-                                let gfd = node_func_decl_data(generic_def);
-                                let nparams2 = (*gfd).nparams;
-                                // alloc type_args buffer (gd_ntp * 8) + slot_filled bytes
-                                let type_args_buf = arena_alloc((*ctx).arena, gd_ntp * (8 as i64));
-                                let slot_filled = arena_alloc((*ctx).arena, gd_ntp);
-                                // init: type_args[i] = 0, slot_filled[i] = 0
-                                let mut si2: i64 = 0 as i64;
-                                while si2 < gd_ntp {
-                                    let ta_slot_init = (type_args_buf as i64 + si2 * (8 as i64)) as **Node;
-                                    *ta_slot_init = 0 as *Node;
-                                    let sf_byte = (slot_filled as i64 + si2) as *u8;
-                                    *sf_byte = 0 as u8;
-                                    si2 = si2 + (1 as i64);
-                                }
-                                let mut all_ok2: i32 = 1 as i32;
-                                // walk fn params, match type_annot against type_params
-                                let mut pi2: i64 = 0 as i64;
-                                while pi2 < nparams2 {
-                                    if all_ok2 == (0 as i32) { break; }
-                                    if pi2 >= (*d).nargs { break; }
-                                    let param2 = ptr_add_u8((*gfd).params, pi2 * (16 as i64)) as *NodeFuncDeclParam;
-                                    let pt_node2 = (*param2).type_annot as *Node;
-                                    // match pt_node2 against type_params[tj] — type_params stores
-                                    //   *Sym (per parser.jhyy L3150), NOT *Node. So compare
-                                    //   param.type_annot.sym directly against type_params[i].
-                                    let mut matched_slot: i64 = -1 as i64;
-                                    if (*pt_node2).kind == NODE_IDENT() {
-                                        let pt_id2 = node_ident_data(pt_node2);
-                                        let pt_sym2 = (*pt_id2).sym;
-                                        let mut tj2: i64 = 0 as i64;
-                                        while tj2 < gd_ntp {
-                                            let tp_sym2 = *((gd_tp as i64 + tj2 * (8 as i64)) as **Sym);
-                                            if pt_sym2 == tp_sym2 as *u8 {
-                                                matched_slot = tj2;
-                                                break;
-                                            }
-                                            tj2 = tj2 + (1 as i64);
-                                        }
-                                    }
-                                    // infer this call arg's type
-                                    let arg_node2 = *(((*d).args as i64 + pi2 * (8 as i64)) as **Node);
-                                    let arg_t2 = infer_type(ctx, ta, arg_node2);
-                                    if matched_slot >= (0 as i64) {
-                                        let ta_slot2 = (type_args_buf as i64 + matched_slot * (8 as i64)) as **Node;
-                                        let sf_byte2 = (slot_filled as i64 + matched_slot) as *u8;
-                                        if *sf_byte2 == (0 as u8) {
-                                            // first time: convert + set
-                                            let new_targ2 = mono_type_to_type_node((*ctx).arena, (*ctx).global_scope, arg_t2);
-                                            if new_targ2 == (0 as *Node) {
-                                                let _x_err2 = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
-                                                    "E0062: cannot infer type parameter from argument (unsupported type kind)" as *u8);
-                                                all_ok2 = 0 as i32;
-                                            } else {
-                                                *ta_slot2 = new_targ2;
-                                                *sf_byte2 = 1 as u8;
-                                            }
-                                        } else {
-                                            // already filled: mangle-equality check
-                                            let existing_targ2 = *ta_slot2;
-                                            let new_targ2b = mono_type_to_type_node((*ctx).arena, (*ctx).global_scope, arg_t2);
-                                            if new_targ2b == (0 as *Node) {
-                                                let _x_err2b = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
-                                                    "E0062: cannot infer type parameter from argument (unsupported type kind)" as *u8);
-                                                all_ok2 = 0 as i32;
-                                            } else {
-                                                let mut buf_a: *u8 = 0 as *u8;
-                                                let mut len_a: i64 = 0 as i64;
-                                                let mut cap_a: i64 = 0 as i64;
-                                                mono_mangle_type_node_fn((*ctx).arena, existing_targ2, &buf_a, &len_a, &cap_a);
-                                                *(ptr_add_u8(buf_a, len_a) as *u8) = 0 as u8;
-                                                let mut buf_b: *u8 = 0 as *u8;
-                                                let mut len_b: i64 = 0 as i64;
-                                                let mut cap_b: i64 = 0 as i64;
-                                                mono_mangle_type_node_fn((*ctx).arena, new_targ2b, &buf_b, &len_b, &cap_b);
-                                                *(ptr_add_u8(buf_b, len_b) as *u8) = 0 as u8;
-                                                if strcmp(buf_a, buf_b) != (0 as i32) {
-                                                    let _x_err2d = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
-                                                        "E0062: conflicting types for type parameter" as *u8);
-                                                    all_ok2 = 0 as i32;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    pi2 = pi2 + (1 as i64);
-                                }
-                                if all_ok2 == (1 as i32) {
-                                    // verify all slots filled
-                                    let mut all_filled2: i32 = 1 as i32;
-                                    let mut sf3: i64 = 0 as i64;
-                                    while sf3 < gd_ntp {
-                                        let sf_byte3 = (slot_filled as i64 + sf3) as *u8;
-                                        if *sf_byte3 == (0 as u8) {
-                                            all_filled2 = 0 as i32;
-                                            break;
-                                        }
-                                        sf3 = sf3 + (1 as i64);
-                                    }
-                                    if all_filled2 == (1 as i32) {
-                                        let mangled2 = mono_expand_fn_call(
-                                            (*ctx).global_scope, (*ctx).arena,
-                                            (*ctx).module as *Node,
-                                            callee_sym_pre2,
-                                            type_args_buf, gd_ntp);
-                                        if mangled2 != (0 as *Sym) {
-                                            // rewrite NODE_IDENT.sym → mangled fn sym (mirror v3.2.0c turbofish path L991-993)
-                                            *callee_id_pre2_sym_off = mangled2 as *u8;
-                                            // v3.2.0d (3i fn path): for inference path, no generic_insts was
-                                            //   pre-recorded by parser (turbofish records but `f(args)` doesn't).
-                                            //   Pass 1.5 (mono_expand_module) did nothing; Pass 3a has already
-                                            //   finished before us. The cloned fn decl we just appended via
-                                            //   mono_expand_fn_call won't be check_func_decl'd by Pass 3b either
-                                            //   (Pass 3b skips mangled-$ fns, deferring to Pass 3a). So we
-                                            //   inline the type_ptr setup here — find the cloned decl, build its
-                                            //   KIND_FUNC type from resolved param_types + ret_type, and assign
-                                            //   to mangled2.type_ptr. check_func_decl (L2273) does the same
-                                            //   thing at L2290-2294, but it's defined later in this file (jhyy no
-                                            //   forward refs), so we can't call it from inside infer_type.
-                                            let mdd2 = node_module_data((*ctx).module);
-                                            let decls2 = (*mdd2).decls;
-                                            let ndeccls2 = (*mdd2).ndeccls;
-                                            let mut fi2: i64 = 0 as i64;
-                                            let mut cloned_fd2: *u8 = 0 as *u8;
-                                            while fi2 < ndeccls2 {
-                                                let fdn2 = *((decls2 as i64 + fi2 * (8 as i64)) as **Node);
-                                                if fdn2 != (0 as *Node) {
-                                                    let fdn2_kind_off = fdn2 as *i32;
-                                                    let fdn2_kind = *fdn2_kind_off;
-                                                    if fdn2_kind == NODE_FUNC_DECL() {
-                                                        let fdn2_sym_off = (fdn2 as i64 + NODE_SIZE()) as **u8;
-                                                        let fdn2_sym = *fdn2_sym_off;
-                                                        if fdn2_sym == mangled2 as *u8 {
-                                                            cloned_fd2 = fdn2 as *u8;
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-                                                fi2 = fi2 + (1 as i64);
-                                            }
-                                            if cloned_fd2 != (0 as *u8) {
-                                                let fd2 = node_func_decl_data(cloned_fd2 as *Node);
-                                                let nparams_c2 = (*fd2).nparams;
-                                                let pt_buf2 = arena_alloc((*ctx).arena, nparams_c2 * (8 as i64));
-                                                let mut pi_c2: i64 = 0 as i64;
-                                                while pi_c2 < nparams_c2 {
-                                                    let par2 = ptr_add_u8((*fd2).params, pi_c2 * (16 as i64)) as *NodeFuncDeclParam;
-                                                    let pt2 = resolve_type_node(ctx, ta, (*par2).type_annot as *Node);
-                                                    let pslot2 = (pt_buf2 as i64 + pi_c2 * (8 as i64)) as **Type;
-                                                    *pslot2 = pt2;
-                                                    // mirror check_func_decl L2302-2305: set cloned param sym's
-                                                    //   type_ptr + kind=SYM_VAR, so the cloned body IDENT's sym
-                                                    //   (cloned_p_sym) resolves to pt when infer_type walks the
-                                                    //   body during Pass 3b → codegen sees correct type → `csgtw`
-                                                    //   becomes `csgtd` for f64 etc.
-                                                    let par2_sym = (*par2).sym as *Sym;
-                                                    (*par2_sym).type_ptr = pt2 as *u8;
-                                                    (*par2_sym).kind = SYM_VAR();
-                                                    pi_c2 = pi_c2 + (1 as i64);
-                                                }
-                                                let mut ret2_t: *Type = 0 as *Type;
-                                                if (*fd2).ret_type != (0 as *u8) {
-                                                    ret2_t = resolve_type_node(ctx, ta, (*fd2).ret_type as *Node);
-                                                } else {
-                                                    ret2_t = type_void(ta);
-                                                }
-                                                let fn_type2 = type_func((*ctx).arena, pt_buf2, nparams_c2, ret2_t);
-                                                (*mangled2).type_ptr = fn_type2 as *u8;
-                                                (*mangled2).kind = SYM_FN();
-                                                // v3.2.0d (3i fn path): walk cloned body, set every NODE_IDENT's
-                                                //   type_ptr to its sym's type_ptr (now set above for params).
-                                                //   This mirrors what infer_type would do for NODE_IDENT in a
-                                                //   regular fn body. Without this, codegen sees IDENT.type_ptr=0
-                                                //   and defaults to `w` ops (csgtw etc) — wrong for f64 / structs.
-                                                let _x_body = mono_propagate_idents_to_cloned_body(
-                                                    (*fd2).body as *Node);
-                                            }
-                                        }
-                                    } else {
-                                        let _x_err3 = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
-                                            "E0062: cannot infer type parameter from arguments (no argument for some type parameter)" as *u8);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         // len() builtin：对 slice → NODE_FIELD.synth / 对 array → NODE_INT
         if (*d).callee != (0 as *u8) {
             if (*((*d).callee as *Node)).kind == NODE_IDENT() {
@@ -1394,11 +816,6 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         }
 
         let callee_type = infer_type(ctx, ta, (*d).callee as *Node);
-        // v3.1.1 (V3-C 3g.5): PhantomData 不允许实例化(只能作 type-level marker)
-        if (*callee_type).kind == KIND_PHANTOM() {
-            let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
-                                    "E0050: cannot instantiate PhantomData<T> (use as type-level marker only)" as *u8);
-        }
         // 推所有 arg 类型
         let mut i: i64 = 0 as i64;
         while i < (*d).nargs {
@@ -1747,14 +1164,6 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let mut decl_type: *Type = 0 as *Type;
         if (*d).type_annot != (0 as *u8) {
             decl_type = resolve_type_node(ctx, ta, (*d).type_annot as *Node);
-            // v3.1.1 (V3-C 3g.5): PhantomData 不允许实例化(只能作 type-level marker)
-            // 字段声明 `let _m: PhantomData<T>;`(无 init)是合法的 → 只在有 init 时报 E0050
-            if (*decl_type).kind == KIND_PHANTOM() {
-                if (*d).init != (0 as *u8) {
-                    let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
-                                            "E0050: cannot instantiate PhantomData<T> (use as type-level marker only)" as *u8);
-                }
-            }
         }
         // float literal coerce
         if (*d).init != (0 as *u8) {
@@ -2030,11 +1439,6 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             let ts = (*d).type_sym as *Sym;
             if (*ts).type_ptr != (0 as *u8) {
                 let t = (*ts).type_ptr as *Type;
-                // v3.1.1 (V3-C 3g.5): PhantomData 不允许实例化 — struct literal 也拦
-                if (*t).kind == KIND_PHANTOM() {
-                    let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
-                                            "E0050: cannot instantiate PhantomData<T> (use as type-level marker only)" as *u8);
-                }
                 if (*t).kind == KIND_STRUCT() {
                     st = t;
                 }
@@ -2322,15 +1726,6 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         return ret_t;
     }
 
-    // v3.0.3 (3c volatile): NODE_VOLATILE_TYPE — 应在 type annotation 阶段已被
-    // resolve_type_node 处理掉,但表达式路径里若出现(罕见)fallback 处理。
-    if (*n).kind == NODE_VOLATILE_TYPE() {
-        let vt = node_volatile_type_data(n);
-        let t = resolve_type_node(ctx, ta, (*vt).inner as *Node);
-        (*n).type_ptr = t as *u8;
-        return t;
-    }
-
     // default: skip for now
     let v = type_void(ta);
     (*n).type_ptr = v as *u8;
@@ -2338,133 +1733,12 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
 }
 
 // ════════════════════════════════════════════════════
-// check_naked_body (v3.0.2 / 3b)
-//   Defined BEFORE check_func_decl (jhyy has no forward decl).
-//   Naked fn body must be a NODE_BLOCK whose every stmt is an asm!(...) call.
-//   Local vars / control flow forbidden — naked is raw-asm escape hatch.
-fn check_naked_body(ctx: *SemaContext, body: *Node) -> i32 {
-    if body == (0 as *Node) { return 0 as i32; }
-    if (*body).kind != NODE_BLOCK() {
-        let _e = sema_error_str(ctx, (*body).loc_filename, (*body).loc_line, (*body).loc_col,
-                                "naked function body must be a block { ... }" as *u8);
-        return 0 as i32;
-    }
-    let bd = node_block_data(body);
-    let stmts = (*bd).stmts;
-    let nstmts = (*bd).nstmts;
-    let mut i: i64 = 0 as i64;
-    while i < nstmts {
-        let elem_addr = ptr_add_u8(stmts, i * (8 as i64));
-        let stmt = (*((elem_addr as i64) as **Node)) as *Node;
-        let sk = (*stmt).kind;
-        if sk == NODE_ASM_BLOCK() {
-            // parser quirk: bare asm!() as a stmt (not wrapped in EXPR_STMT)
-            i = i + (1 as i64);
-            continue;
-        }
-        if sk == NODE_EXPR_STMT() {
-            let esd = node_expr_stmt_data(stmt);
-            let inner = (*esd).expr as *Node;
-            if inner != (0 as *Node) {
-                if (*inner).kind == NODE_ASM_BLOCK() {
-                    i = i + (1 as i64);
-                    continue;
-                }
-            }
-        }
-        let _e = sema_error_str(ctx, (*stmt).loc_filename, (*stmt).loc_line, (*stmt).loc_col,
-                                "naked function body may only contain asm!(...) statements" as *u8);
-        i = i + (1 as i64);
-    }
-    return 1 as i32;
-}
-
-// v3.0.4 (3e link_section): validate ELF section name. Reject empty / NUL /
-// non-printable / whitespace / quote (would break `.section <name>` directive
-// parser). Defined BEFORE check_func_decl — jhyy has no forward decls.
-fn check_link_section_name(ctx: *SemaContext, loc_filename: *u8,
-                            loc_line: i32, loc_col: i32, name: *u8) -> i32 {
-    if name == (0 as *u8) { return 0 as i32; }
-    let nlen = strlen(name);
-    if nlen == (0 as i64) {
-        let _e = sema_error_str(ctx, loc_filename, loc_line, loc_col,
-                                "link_section name is empty" as *u8);
-        return 0 as i32;
-    }
-    let mut k: i64 = 0 as i64;
-    while k < nlen {
-        let c = *(ptr_add_u8(name, k) as *u8) as i32;
-        // printable ASCII range 0x21..0x7E (excludes space, tab, NL, CR, NUL, DEL)
-        if c < (33 as i32) {
-            let _e = sema_error_str(ctx, loc_filename, loc_line, loc_col,
-                                    "link_section name contains non-printable byte" as *u8);
-            return 0 as i32;
-        }
-        if c > (126 as i32) {
-            let _e = sema_error_str(ctx, loc_filename, loc_line, loc_col,
-                                    "link_section name contains non-ASCII byte" as *u8);
-            return 0 as i32;
-        }
-        k = k + (1 as i64);
-    }
-    return 1 as i32;
-}
-
 // check_func_decl
 // ════════════════════════════════════════════════════
-
-// v3.1.0 (V3-C 3g): check_borrow — STUB for v3.1.0 ship-gate.
-// Full NLL (Non-Lexical Lifetimes) / Polonius 留 v3.x 末。当前 ship-gate
-// 实现 linear-scope simplification: 仅 **类型解析** `&T` / `&mut T` 正确,
-// 不检测 active-borrow 冲突 (no NLL path analysis, no nested blocks)。
-//
-// 已知限制 (out of scope 留 v3.x 末):
-//   - 不检测 `let y = &mut x; let z = &mut x;` 双 mutable 冲突
-//   - 不检测 `&mut` + `&` shared/mutable 互斥
-//   - 不支持 reborrow `&mut *x` 路径
-//   - 不支持 lifetime 子类型 / variance
-//   - 不支持 跨函数 borrow
-//   - 不支持 nested block 借用作用域
-//
-// 完整 NLL 设计参 spec supplement v3.1.0 § 4 (v3.x 末重新设计)。
-fn check_borrow(ctx: *SemaContext, ta: *TypeArena, body: *Node) -> i32 {
-    return 1;
-}
-
-// v3.1.2 (V3-C 3g.7): check_cap_pass — STUB for v3.1.2 ship-gate.
-// 跨函数 Cap<T> pass 完整校验(active-cap conflict / reentrancy / depth transition)
-// 留 v3.x 末。当前 ship-gate 仅做类型签名层面的 Cap<T> pass-by-value 验证
-// (走 qbe_type_of → QBE_L → Win x64 INTEGER class),不做语义级 cap ownership 分析。
-//
-// 已知限制 (out of scope 留 v3.x 末):
-//   - 不检测 active-cap conflict(同一 cnode 跨函数双写)
-//   - 不检测 reentrancy(同一函数重入 + cap 调用)
-//   - 不检测 depth transition(Cap depth 自动递增)
-//   - 不支持 `Cap<T>` 字段访问 `.cnode_idx` / `.depth` / `.rights`(per spec supplement v3.1.0 § 126)
-//   - 不支持 `*Cap<T>` 裸指针类型(per parser gap,generic-on-pointer 留 v3.2.0)
-//   - 不支持 `cap_new()` builtin ctor
-//   - 不支持 cross-fn borrow + Cap 组合(跟 check_borrow 同样 stub)
-//   - 不支持 SysV target ABI(per Windows-only 决策,v2.7.0+ 后 backport)
-//
-// 完整 cap pass 设计参 spec supplement v3.1.0 § 4 + v3.1.2 § 3 (v3.x 末重新设计)。
-fn check_cap_pass(ctx: *SemaContext, ta: *TypeArena, body: *Node) -> i32 {
-    return 1;
-}
 
 fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
     let fd = node_func_decl_data(n);
 
-    // v3.2.0c (3i fn path): skip generic fn body — mono_expand_module 已经把
-    //   substituted 实例 (ntype_params == 0) append 到 decls,它们走正常
-    //   check_func_decl 路径。原始 generic def 不 check (codegen 时也 skip)。
-    //   offset access (per v3.2.0b mitigation L102-104): `(*fd).ntype_params`
-    //   deep nested struct deref triggers stage-0 codegen stack-spill bug.
-    //   NodeFuncDecl ntype_params @ offset 88.
-    let fd_off = fd as i64;
-    let ntp_off = (fd_off + (88 as i64)) as *i64;
-    if *ntp_off > (0 as i64) {
-        return 1 as i32;
-    }
     sema_push_scope(ctx);
     (*ctx).nlocals = 0 as i64;
 
@@ -2484,8 +1758,6 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
         (*param_sym).kind = SYM_VAR();
         let _x1 = symtab_insert((*ctx).current_scope, (*param_sym).name, SYM_VAR(),
                                 pt as *u8, 0 as i32, (*ctx).scope_depth);
-        // v3.0.3 (3c volatile): volatile param 是常见 MMIO callback 模式(per spec § 3
-        //   examples)。允许 — 不 warn(codegen 已正确处理;warn 会污染 regress baseline)。
         i = i + (1 as i64);
     }
 
@@ -2527,53 +1799,12 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
                     (*fn_sym).type_ptr = new_fn_type as *u8;
                 }
             }
-            // v3.0.2 (3b naked): validate that naked fn body has only asm!() expr stmts.
-            // Naked fns skip QBE export + skip prologue/epilogue, so any control flow
-            // or local var would break. We walk body stmts + reject non-asm.
-            if (*fd).is_naked != (0 as i32) {
-                let _nk = check_naked_body(ctx, (*fd).body as *Node);
-            }
-            // v3.0.4 (3e link_section): validate that the section name is non-empty
-            // and contains only ASCII printable chars (no whitespace, no quote,
-            // no NUL). The name is emitted verbatim to a `.section <name>` directive
-            // in the .s side-file, so unprintable bytes would corrupt the assembler
-            // input. Multiple fns per section is allowed (linker merges).
-            if (*fd).link_section != (0 as *u8) {
-                let _ls = check_link_section_name(ctx, (*n).loc_filename,
-                                                  (*n).loc_line, (*n).loc_col,
-                                                  (*fd).link_section);
-            }
-            // v3.1.0 (V3-C 3g): simplified NLL borrow check. Linear-scope walk
-            // top-level stmts; detects `&mut x` twice (current simplification —
-            // no path analysis, no reborrow, no nested blocks).
-            let _bc = check_borrow(ctx, ta, (*fd).body as *Node);
         }
     }
 
     sema_pop_scope(ctx);
     return 1;
 }
-
-// ════════════════════════════════════════════════════
-// v3.1.0 (V3-C 3g): check_borrow — STUB for v3.1.0 ship-gate
-// ════════════════════════════════════════════════════
-//
-// (定义见 line 1955 — 必须在 check_func_decl 之前,jhyy 无 forward decls)
-//
-// v3.0.4 (3e link_section): validate ELF section name. Reject empty / NUL /
-// non-printable / whitespace / quote (would break `.section <name>` directive
-// parser). Moved BEFORE check_func_decl — see line 1808 area — jhyy has no
-// forward decls.
-
-// v3.0.2 (3b naked): validate naked fn body. Body must be a NODE_BLOCK whose
-// every stmt is either:
-//   - NODE_EXPR_STMT wrapping NODE_ASM_BLOCK, OR
-//   - NODE_ASM_BLOCK directly (parser-level single-stmt body).
-// Local vars (NODE_LET), control flow (NODE_IF, NODE_WHILE, NODE_RETURN, etc.)
-// are forbidden — naked fns are pure raw-asm escape hatches per L4 inline asm.
-// Reports sema errors via sema_error_str.
-// (Definition moved BEFORE check_func_decl — see line 1808 area — jhyy has no
-// forward decls.)
 
 // ════════════════════════════════════════════════════
 // check_module（3-pass）
@@ -2583,8 +1814,16 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
     let md = node_module_data(module);
 
     // Pass 1: register decls into global scope
+    jh_fputs_stderr("[sema] P1 ndeccls=" as *u8);
+    jh_fmt_lld_stderr("%d" as *u8, (*md).ndeccls);
+    jh_fputs_stderr("\n" as *u8);
     let mut i: i64 = 0 as i64;
     while i < (*md).ndeccls {
+        if i % (1000 as i64) == (0 as i64) {
+            jh_fputs_stderr("[sema] P1 i=" as *u8);
+            jh_fmt_lld_stderr("%d" as *u8, i);
+            jh_fputs_stderr("\n" as *u8);
+        }
         let decl = *(((*md).decls as i64 + i * (8 as i64)) as **Node);
         // W-005 #2 guard: skip NULL decls from corrupted inline_imports output
         if decl == (0 as *Node) { i = i + (1 as i64); } else {
@@ -2617,50 +1856,14 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
         }  // close else from NULL guard
     }
 
-    // v3.0.0 (3d no_std): if `#[no_std]` is set, require `fn main` to exist
-    // (kernel/freestanding entry point). `fn main_jhyy` is NOT required (no
-    // runtime bridge). User-defined `fn main` will be called from
-    // `__start_kernel` in compiler/runtime/no_std_core/__start_kernel.jhyy.
-    // Placed after Pass 1 so `main` is already in global scope.
-    if (*md).is_no_std != (0 as i32) {
-        let main_sym = symtab_lookup((*ctx).global_scope, "main" as *u8);
-        if main_sym == (0 as *Sym) {
-            jh_fputs_stderr("error: #[no_std] module must define `fn main()` as the entry point\n" as *u8);
-            (*ctx).error_count = (*ctx).error_count + (1 as i32);
-        } else {
-            if (*main_sym).kind != SYM_FN() {
-                jh_fputs_stderr("error: #[no_std] module's `main` must be a function\n" as *u8);
-                (*ctx).error_count = (*ctx).error_count + (1 as i32);
-            }
-        }
-    }
-
-    // v3.2.0 (V3-C 3i generics): Pass 1.5 — monomorphize expansion.
-    //   必须在 Pass 2 之前跑,这样 Pass 2 看到的 decls 已经是 cloned + substituted
-    //   后的 NON-generic struct/enum(走现有 layout 路径,不用改 codegen)。
-    //   - 遍历 (*md).generic_insts(parser 累积的 {base_name, mangled_name, [args]})
-    //   - 对每条 inst:克隆 generic def body → substitute → append 到 (*md).decls
-    //   - dedupe by mangled_name(symtab_lookup_one 已经存在 type_ptr → skip)
-    //   - 错误数累加到 (*ctx).error_count,不影响 Pass 2/3 继续(便于报告所有错误)
-    let mono_errs = mono_expand_module((*ctx).global_scope, (*ctx).arena, md);
-    if mono_errs != (0 as i32) {
-        (*ctx).error_count = (*ctx).error_count + mono_errs;
-    }
-
     // Pass 2: resolve TYPE_DECL（struct/enum/alias）— 必须先于 Pass 3
+    jh_fputs_stderr("[sema] P2 start\n" as *u8);
     let mut i2: i64 = 0 as i64;
     while i2 < (*md).ndeccls {
         let decl = *(((*md).decls as i64 + i2 * (8 as i64)) as **Node);
         if decl == (0 as *Node) { i2 = i2 + (1 as i64); } else {
         if (*decl).kind == NODE_TYPE_DECL() {
             let td = node_type_decl_data(decl);
-            // v3.2.0 (V3-C 3i generics): skip generic def body layout —
-            //   mono_expand_module 已经把 substituted 实例 append 到 decls,
-            //   它们 (ntype_params == 0) 走下面的正常 layout 路径。
-            //   原始 generic def 不 layout(codegen 时 skip)。
-            if (*td).ntype_params > (0 as i64) {
-                i2 = i2 + (1 as i64);
-            } else {
             if (*((*td).body as *Node)).kind == NODE_STRUCT_DEF() {
                 let sd = node_struct_def_data((*td).body as *Node);
                 let fields = arena_alloc((*ctx).arena, (*sd).nfields * FIELD_DESC_SIZE());
@@ -2764,71 +1967,24 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
                     }
                 }
             }
-            }  // close else from ntype_params == 0 (v3.2.0: skip generic def)
         }
         }  // close else from NULL guard
         i2 = i2 + (1 as i64);
     }
 
     // Pass 3: check function bodies + top-level stmts
-    // v3.2.0c (3i fn path): 2-pass — cloned fns (mangled sym) checked FIRST
-    //   so that the mangled SYM_FN has kind=SYM_FN + type_ptr=fn_type before
-    //   any caller (e.g. main_jhyy) hits the call site in its body and looks
-    //   up the mangled sym in global_scope. Without this, the lookup at
-    //   L765 fails because P1.5 inserted the sym as SYM_TYPE with type_ptr=0,
-    //   and check_func_decl for the cloned fn (which would upgrade it) hasn't
-    //   run yet.
-    // Pass 3a: cloned fns (NODE_FUNC_DECL with sym name containing '$')
-    let mut i3a: i64 = 0 as i64;
-    while i3a < (*md).ndeccls {
-        let decl3a = *(((*md).decls as i64 + i3a * (8 as i64)) as **Node);
-        if decl3a == (0 as *Node) {
-            // skip
-        } else {
-            if (*decl3a).kind == NODE_FUNC_DECL() {
-                // check if sym name contains '$' (mangled)
-                let fd3a = node_func_decl_data(decl3a);
-                let sym3a = (*fd3a).sym as *Sym;
-                let nm3a = (*sym3a).name;
-                let nlen3a = strlen(nm3a);
-                let mut has_dollar: i32 = 0 as i32;
-                let mut k3: i64 = 0 as i64;
-                while k3 < nlen3a {
-                    if *(ptr_add_u8(nm3a, k3) as *u8) == (0x24 as u8) {
-                        has_dollar = 1 as i32;
-                    }
-                    k3 = k3 + (1 as i64);
-                }
-                if has_dollar != (0 as i32) {
-                    let _x = check_func_decl(ctx, ta, decl3a);
-                }
-            }
-        }
-        i3a = i3a + (1 as i64);
-    }
-
-    // Pass 3b: everything else (regular fns, lets, expr stmts, const decls)
+    jh_fputs_stderr("[sema] P3 start\n" as *u8);
     let mut i3: i64 = 0 as i64;
     while i3 < (*md).ndeccls {
+        if i3 % (1000 as i64) == (0 as i64) {
+            jh_fputs_stderr("[sema] P3 i=" as *u8);
+            jh_fmt_lld_stderr("%d" as *u8, i3);
+            jh_fputs_stderr("\n" as *u8);
+        }
         let decl = *(((*md).decls as i64 + i3 * (8 as i64)) as **Node);
         if decl == (0 as *Node) { i3 = i3 + (1 as i64); } else {
         if (*decl).kind == NODE_FUNC_DECL() {
-            // skip if already checked in Pass 3a (mangled sym)
-            let fd_b = node_func_decl_data(decl);
-            let sym_b = (*fd_b).sym as *Sym;
-            let nm_b = (*sym_b).name;
-            let nlen_b = strlen(nm_b);
-            let mut has_dollar_b: i32 = 0 as i32;
-            let mut kb: i64 = 0 as i64;
-            while kb < nlen_b {
-                if *(ptr_add_u8(nm_b, kb) as *u8) == (0x24 as u8) {
-                    has_dollar_b = 1 as i32;
-                }
-                kb = kb + (1 as i64);
-            }
-            if has_dollar_b == (0 as i32) {
-                let _x = check_func_decl(ctx, ta, decl);
-            }
+            let _x = check_func_decl(ctx, ta, decl);
         } else {
             if (*decl).kind == NODE_TYPE_DECL() {
                 // already done in Pass 2
