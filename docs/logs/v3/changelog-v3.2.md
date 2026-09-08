@@ -205,6 +205,63 @@ per `feedback_v3b_no_phaseb_worktree`。
 
 ---
 
+## v3.2.0b — 3i generics root cause fix + struct/enum activate + CapTable<T> refactor
+
+**Status**: ✅ shipped (`f4a3ded`, 2026-09-08)
+**Tag**: `v3.2.0b` (TBD — final ship commit after C4)
+**D43 baseline**: N10 = `f4a3ded` (jhyy_v2..v5 SHA `d35656a3d72c75e211d26ab1cad73af7d6cd92f22851ba2a21a444a0a1b208e4`)
+
+### Scope (per `feedback_plans_per_version` 单 plan)
+
+解决 v3.2.0 § 6 列 deferred items:
+- **Root cause fix**:`mono_find_generic_def` L102-104 `(*s).name` → offset read (C1 `6dfe6bc`, per v3.2.0 plan § 6.2 stage-0 codegen stack-spill mitigation)
+- **Activate `mono_expand_module` body**:从 no-op 改为完整 walk + clone + append,all offset access(C2 `f4a3ded`)
+- **Parser skip_default fix**:`_skip_default = 1` flag set but never checked in v3.2.0 ship;hoist + gate default IDENT branch(C2)
+- **5 SKIP→real tests**:`generics_struct` / `generics_ptr_field` / `generics_multi_param` / `generics_enum` / `generics_err_unsubst` 全 PASS EXIT=42(C2)
+- **CapTable<T> 真 generic refactor**:`type CapTable<T> = struct { data: *Cap<T>, len: i64 }`,layout 16B 保留(C3 同 commit)
+- **不扩 NodeCall / NodeFuncDecl** (deferred v3.2.0c per stage-2 拆)
+- **不动 codegen.jhyy / abi_amd64_win.jhyy / types.jhyy** (0 行,monomorphize 出的 cloned struct/enum 是 non-generic,走现有 emit)
+
+### Root cause (per v3.2.0 § 6.1 stage-0 codegen bug)
+
+不是 mono caller offset 错(388 行 mono.jhyy 真正不稳只有 1 处);是 stage-0 jhyy codegen
+对 `(*ptr).field` 在 deep nested context 下的 stack-spill 不全(QBE 内部 codegen 限制,
+DEFERRED 到 v2.x 末 QBE 自写 stage)。v3.2.0b 是 caller-side mitigation,不动 stage-0。
+
+### Verification (per `feedback_fix_evaluation_rule` 5/5 PASS EXIT=42)
+
+- **5 SKIP→real**:5/5 EXIT=42 (regress --tests 验证)
+  - `generics_struct.jhyy` — `Pair<i32>` alloc8 / `Pair<i64>` alloc16 (jhyy_get_il 验证 distinct struct)
+  - `generics_ptr_field.jhyy` — `Vec<i32>` / `Vec<i64>` field round-trip
+  - `generics_multi_param.jhyy` — `Map2<i32, i64>` / `Map2<i64, i32>` asymmetric substitution
+  - `generics_enum.jhyy` — `Option<i32>` instantiation
+  - `generics_err_unsubst.jhyy` — E0060 fall-through path
+- **2 cap_table tests**:2/2 EXIT=42
+  - `cap_table_basic.jhyy` — `sizeof(CapTable<i32>) == 16`,跨 fn CapTable<i32> pass
+  - `cap_table_advanced.jhyy` — `sizeof(CapTable<PhantomData<i32>>) == 16`,ZST 不污染
+- **Full regress**:111/111 passed, 0 failed, 15 skipped (was 109/104/17 at v3.2.0)
+- **D43 closure**:`jhyy_v2..v5` SHA `d35656a3...` byte-equal,N9 (`2e9866c`) → **N10**
+- **No codegen/types/abi diff**:`git diff compiler/src0/codegen.jhyy types.jhyy abi_amd64_win.jhyy` empty
+
+### Cross-ref
+
+- L2 设计:`docs/plans/v3/v3.2.0b-plan.md`(待 ship 后建档)
+- Spec supplement:`docs/abis/jhyy-lang-spec-generics-supplement-v3.2.0b.md`
+- 上游:v3.2.0 (`2e9866c`) § 6 deferred items → 本 sprint 全部解
+- 下游:v3.2.0c (generic fn + turbofish) · v3.2.1 (3j closures) · v3.2.4 (3l.3 Vec<T>/Map<K,V>)
+- D-GUI-11 锁 (2026-09-01):compositor generic over T 路径,v3.2.0b 兑现 M8d launch 硬前置 1/N → 完整
+- D28:`v3.2.0 → v3.2.0b → v3.2.0c → v3.2.1 → v3.2.4` 串行锁链,v3.2.0b ship 解锁 1 节点
+- D43 chain:`v3.1.2` (N8 `1fff447`) → `v3.2.0` (N9 `2e9866c`) → **v3.2.0b** (N10 `f4a3ded`)
+
+### Out of scope (deferred to v3.2.0c 或后续)
+
+- Generic fn `fn max<T>(...)` + turbofish + call-site inference → **v3.2.0c**
+- `mono_subst_block` / `mono_subst_stmt` / `mono_subst_expr` 深 body walk → v3.2.0c
+- 嵌套泛型 `Vec<Vec<T>>` (worklist-to-fixpoint) → v3.x 中
+- PhantomData 嵌套 Cap 完整 codegen 路径 → v3.x 中
+
+---
+
 ## 7. Cross-ref
 
 - L1 设计:`docs/plans/roadmap/v3.x-language-expansion.md § Sprint 3i`
