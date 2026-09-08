@@ -3,25 +3,35 @@
 
 /* v2.0.0 target dispatcher (Sprint A Stage 1).
  *
- * Three targets are recognized at parse time:
- *   - TARGET_AMD64_WIN              : x86_64-w64-mingw32 (default; v1.x 兼容)
- *   - TARGET_AMD64_WIN_FREESTANDING : x86_64-w64-none (UEFI; ships v2.1.0)
- *   - TARGET_AMD64_SYSV_STUB        : x86_64-linux-none (ships v2.x M2)
+ * Four targets are recognized at parse time:
+ *   - TARGET_AMD64_WIN                : x86_64-w64-mingw32 (default; v1.x 兼容)
+ *   - TARGET_AMD64_WIN_FREESTANDING   : x86_64-w64-none (UEFI; ships v2.1.0)
+ *   - TARGET_AMD64_SYSV               : x86_64-linux-none (ships v2.7.0)
+ *   - TARGET_AMD64_SYSV_FREESTANDING  : x86_64-linux-none-freestanding (ships v2.7.0)
  *
- * In v2.0.0 only TARGET_AMD64_WIN reaches codegen. The other two fatal at
- * cg_module entry pointing at the version where they ship. ABI 抽离 in v2.1.0;
- * real freestanding .efi + OVMF demo in v2.3.0.
+ * v2.8.1: STUB name removed (was TARGET_AMD64_SYSV_STUB → TARGET_AMD64_SYSV);
+ * enum value `=2` preserved (byte-equal invariant with jhyy-side
+ * TARGET_AMD64_SYSV() which returns `2 as i32`). TARGET_AMD64_SYSV_FREESTANDING
+ * = 3 NEW (matches jhyy-side).
+ *
+ * In v2.0.0 only TARGET_AMD64_WIN reaches C-side codegen. The others fatal at
+ * cg_module entry pointing at the version where they ship (or, post-v2.8.1,
+ * pointing at jhyy-side production binary for SysV/SysVFreestanding). ABI 抽离
+ * in v2.1.0; real freestanding .efi + OVMF demo in v2.3.0; real SysV codegen
+ * in v2.8.0 (jhyy-side only).
  *
  * Stage 2 byte-equal closure: tag values are matched 1:1 with jhyy-side
  * constants in compiler/src0/target/target_dispatch.jhyy (Amd64Win=0,
- * Amd64WinFreestanding=1, Amd64SysvStub=2). The closure invariant is .il
- * byte-equal (not binary byte-equal), so this enum is consumed only as a
- * function parameter — no shared memory layout with jhyy-side.
+ * Amd64WinFreestanding=1, Amd64Sysv=2, Amd64SysvFreestanding=3). The closure
+ * invariant is .il byte-equal (not binary byte-equal), so this enum is
+ * consumed only as a function parameter — no shared memory layout with
+ * jhyy-side.
  */
 typedef enum {
-    TARGET_AMD64_WIN              = 0,
-    TARGET_AMD64_WIN_FREESTANDING = 1,
-    TARGET_AMD64_SYSV_STUB        = 2,
+    TARGET_AMD64_WIN                 = 0,
+    TARGET_AMD64_WIN_FREESTANDING    = 1,
+    TARGET_AMD64_SYSV                = 2,
+    TARGET_AMD64_SYSV_FREESTANDING   = 3,
 } Target;
 
 Target target_parse(const char *s);
@@ -34,8 +44,15 @@ const char *target_name(Target t);
  *
  * v2.1.0: TARGET_AMD64_WIN and TARGET_AMD64_WIN_FREESTANDING both map to
  * `"amd64_win"` since the MS x64 calling convention is byte-identical
- * (D-GUI-12). TARGET_AMD64_SYSV_STUB still returns `"amd64_sysv"` so
- * users get the error from QBE if it slips past cg_module dispatch.
+ * (D-GUI-12). TARGET_AMD64_SYSV and TARGET_AMD64_SYSV_FREESTANDING both
+ * return `"amd64_sysv"`. v2.8.1: STUB name → SYSV (rename only, behavior
+ * unchanged).
+ *
+ * Note: C-side main.c still spawns QBE for the SysV targets if user runs
+ * `jhyy_stage0.exe --target=amd64_sysv ...`; this is wrong (QBE doesn't
+ * exist anymore for SysV path) — cg_module dispatch in codegen.c fatal
+ * before QBE invocation (post-v2.8.1 patch). Use `jhyy.exe` (jhyy-side
+ * production) for SysV/SysVFreestanding codegen.
  */
 const char *target_qbe_flag(Target t);
 
@@ -55,5 +72,23 @@ const char *target_status(Target t);
  * the count.
  */
 int jh_target_count(void);
+
+/* V2-B v2.6.0 (Unit E Wire): backend mode tag (C-side mirror of jhyy-side
+ * `BACKEND_QBE` / `BACKEND_SELF` constants in target_dispatch.jhyy).
+ * Stage 2 byte-equal closure: tag values match 1:1 with jhyy-side.
+ */
+typedef enum {
+    BACKEND_QBE  = 0,
+    BACKEND_SELF = 1,
+} BackendMode;
+
+/* Pick backend mode for target t.
+ * v2.8.1: C-side codegen (compiler/src/codegen.c) 只 emit Win IL, 所以
+ * SYSV + SYSV_FREESTANDING 都 → BACKEND_QBE (legacy/default 兜底,跟 v2.6.0
+ * 行为一致)。Win + WinFreestanding → BACKEND_SELF (jhyy-side 实际处理;
+ * C-side 用 BACKEND_SELF 表达 "no QBE spawn needed if 走 jhyy-side path")。
+ * 真 SysV/SysVFS codegen 在 jhyy-side codegen_amd64.jhyy (v2.8.0 ship)。
+ */
+BackendMode target_backend_mode(Target t);
 
 #endif

@@ -100,8 +100,8 @@
 | 维度 | v2.x | v3.x |
 |------|------|------|
 | **主改** | codegen 后端(QBE → 自写)/ target dispatcher | lang-spec + sema + codegen 单点 emit |
-| **路径** | `compiler/src0/target/` + `compiler/src0/qbe/`(v2.0 启动) | `compiler/src0/sema.jhyy` + `compiler/src0/codegen.jhyy` 单点 |
-| **依赖** | v0 C 端 `codegen.c` + QBE 工具链 | `jhyy-lang-spec-v1.3.0.md` + `jhyy-abi-v1.0.0.md` |
+| **路径** | `compiler/src0/codegen_amd64.jhyy`(自写 IL → amd64 GAS `.s` 后端) + `compiler/src0/codegen_amd64_lexer.jhyy`(QBE IL lexer) + `compiler/src0/target_dispatch.jhyy`(`target_backend_mode()`) + `compiler/src/target/target_dispatch.{c,h}`(C-side mirror,bootstrap baseline 一致性 per v1.0 convention) | `compiler/src0/sema.jhyy` + `compiler/src0/codegen.jhyy` 单点 |
+| **依赖** | v0 C 端 `codegen.c`(bootstrap baseline mirror) + QBE 工具链(QBE_FALLBACK=1 时) | `jhyy-lang-spec-v1.3.0.md` + `jhyy-abi-v1.0.0.md` |
 
 ### 3.2 ABI 影响隔离
 
@@ -387,10 +387,11 @@ python compiler/build/bin/regress.py --all --include-informational      # jhyy_v
 
 后续 wave(v2.6.0/v2.7.0/v2.8.0 + v3.0.1..v3.1.2)在第一波 ship 后,user 决定是否继续开 batch。
 
-### § 6.8 Worktree 约定
+### § 6.8 Worktree 约定(per `feedback_no_subagents_for_compiler_work`)
 
 - **sub-sprint 设计 / 实施在 axis branch 上**(不用 worktree 也行,branch checkout 即足够)
 - **如果开 worktree**(如多 sub-sprint 同时筹备设计 doc),worktree 路径必须**显式指定项目内路径**(e.g. `git worktree add ../JiHuiYiYou-axis-v2-wt axis-v2`),不放在 `$TEMP` 等临时目录
+- **不使用 sub-agent + worktree 自动施工**(v0.6 三个并行 worktree agent 被叫停的教训);手动 worktree OK
 - **禁止** `git worktree add` 到 worktree 外的路径(branch 引用会乱)
 
 ### § 6.9 Sprint Doc 命名 + 提交规则

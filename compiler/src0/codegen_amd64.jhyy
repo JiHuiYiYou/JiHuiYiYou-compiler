@@ -1,0 +1,310 @@
+// codegen_amd64.jhyy — v2.5.0 M1-A: 自写 IL → amd64 GAS `.s` 后端起步 (main entry)
+//
+// v2.x 中期(per v2-v3-parallel-sprint-plan.md § 5.2 / § 6.2 拆法 A)的第一个 sub-sprint。
+// windows targets only (TARGET_AMD64_WIN=0 + TARGET_AMD64_WIN_FREESTANDING=1,
+// D-GUI-12: hosted / freestanding MS x64 byte-identical);
+// amd64_sysv 走 QBE fallback 直到 v2.7.0。
+//
+// 替换路径:main.jhyy run_qbe() → run_backend() → codegen_amd64_run() (self=1)
+// 回退路径:run_backend() → run_qbe() (self=0 或 QBE_FALLBACK=1)
+//
+// 模块拆分(per L4 doc § 4.1 + § AA):
+//   codegen_amd64_state.jhyy        — shared state + QBE type constants (本模块 import)
+//   codegen_amd64_lexer.jhyy        — QBE IL lexer (A1 agent)
+//   codegen_amd64_emit_mem.jhyy     — alloc/store/load/loadsub (A2 agent)
+//   codegen_amd64_emit_ctrl.jhyy    — jmp/jnz/label/ret/func_header/data_string (A3 agent)
+//   codegen_amd64_emit_call.jhyy    — call/phi/copy/binop/volatile (A4 agent)
+//   codegen_amd64.jhyy (本文件)     — main entry:state init + parse loop + file I/O + D42 stub
+//
+// 关键约束(per L4 doc):
+//   - D42 escape hatch:codegen_amd64_emit_raw_asm stub(空 body,V3-B v3.0.1 填充)
+//   - 3c volatile token:lexer(A1)识别,emit_volatile(A4)emit 普通 load/store,no barrier
+//   - D43 self-equal closure 维持 sha 51376ce5...
+//   - D26 byte-equal 三件套:.il / .s / .exe byte-equal
+//
+// Note: lives flat in compiler/src0/ (not in a subdir) — jhyy import
+// syntax doesn't support paths with `/` (per `parse_import_decl`
+// codegen.c:731 — same restriction as abi_amd64_win.jhyy).
+
+import codegen_amd64_state;  // CGState / QBE_W_LOCAL / ILTOK_* / cg_offset_for_temp
+import codegen_amd64_lexer;    // V2-B v2.6.3: lex_il / lex_il_count
+import codegen_amd64_emit_mem;    // V2-B v2.6.0 Unit B: emit_alloc / emit_store / emit_load / emit_loadsub
+import codegen_amd64_emit_ctrl;   // V2-B v2.6.0 Unit B: emit_jmp / emit_jnz / emit_label / emit_ret / emit_func_header / emit_data_string
+import codegen_amd64_emit_call;   // V2-B v2.6.0 Unit B: emit_call / emit_phi / emit_copy / emit_binop / emit_volatile
+import codegen_amd64_peephole;    // V2-B v2.6.3: peephole_fold (local folding on emitted .s)
+import util;                      // V2-B v2.6.3: StringBuilder + sb_init / sb_buf / sb_len / ptr_add_u8
+import arena;                     // V2-B v2.6.3: Arena type + arena_alloc / arena_init
+
+// ═══ Local externs (jh_* helpers from jhyy_helpers.c, per V2-B v2.6.0 Unit A) ═══
+// Used by read_file / write_file below.
+extern fn jh_read_file(path: *u8, out_buf: *u8, buf_cap: i64, out_len: *i64) -> i32;
+extern fn jh_write_file(path: *u8, buf: *u8, len: i64) -> i32;
+extern fn malloc(size: i64) -> *u8;
+extern fn free(p: *u8) -> i32;
+
+// ════════════════════════════════════════════════════
+// 公开 API(per L4 § 1.2)
+// ════════════════════════════════════════════════════
+
+// codegen_amd64_init — 模块初始化(扩展点,v2.5.0 noop)
+fn codegen_amd64_init() -> i32 {
+    return 0;
+}
+
+// ════════════════════════════════════════════════════
+// 内部:parse loop(dispatch token 到 15 emit 函数)
+// ════════════════════════════════════════════════════
+//
+// v2.5.0 skeleton:占位循环,完整实现留 Phase 3b(per L4 § AA)
+//
+// parse_and_emit 流程:
+//   for each token:
+//     switch (tok.kind) {
+//       case ILTOK_FUNC_HEADER: emit_func_header(state, tok); break;
+//       case ILTOK_LABEL:       emit_label(state, tok); break;
+//       case ILTOK_ALLOC:       emit_alloc(state, tok); break;
+//       case ILTOK_STORE:       emit_store(state, tok); break;
+//       case ILTOK_LOAD:        emit_load(state, tok); break;
+//       case ILTOK_LOADSUB:     emit_loadsub(state, tok); break;
+//       case ILTOK_VOLATILE:    emit_volatile(state, tok); break;
+//       case ILTOK_CALL:        emit_call(state, tok); break;
+//       case ILTOK_PHI:         emit_phi(state, tok); break;
+//       case ILTOK_COPY:        emit_copy(state, tok); break;
+//       case ILTOK_BINOP:       emit_binop(state, tok); break;
+//       case ILTOK_RET:         emit_ret(state, tok); break;
+//       case ILTOK_JMP:         emit_jmp(state, tok); break;
+//       case ILTOK_JNZ:         emit_jnz(state, tok); break;
+//       case ILTOK_DATA_STRING: emit_data_string(state, tok); break;
+//       case ILTOK_EOF:         return 0;
+//     }
+//
+// W-068 fix #3 (v2.6.5): moved to BEFORE codegen_amd64_run — jhyy 不支持 forward
+// ref, inline_imports re-parse 时 codegen_amd64_run 在 line 132 调用 parse_and_emit,
+// sema 阶段报 unknown symbol。原位置在 codegen_amd64_run 后面,parse 顺序是按源文件
+// 位置而不是按调用关系排序,所以重排 def 是唯一 fix。
+fn parse_and_emit(state: *u8, tokens: *u8, n: i64, target_tag: i32) -> i32 {
+    // V2-B v2.6.0 (Unit B Stub-Fill): real impl — dispatch loop over
+    // tokens[i].kind → call into imported emit_* functions.
+    // ILToken struct size = 40 bytes (per codegen_amd64_lexer.jhyy
+    // lex_il line 925 hard-coded `slots * (40 as i64)`).
+    //
+    // W-068 fix #4 (v2.6.5): each branch body must have same type. The original
+    // `emit_X(state, tok_p);` (i32-returning call as statement) had type i32,
+    // but the EOF branch `return 0;` had type `()`, causing "if/else branches
+    // must have same type: i32 vs ()" at sema. Fix: discard return value via
+    // `let _ = emit_X(state, tok_p);` pattern (mirrors W-003 `let _ = fncall(...)`).
+    // The EOF branch also wrapped in block with explicit return 0 for symmetry.
+    //
+    // v2.8.0: 加 target_tag:i32 参数 (codegen_amd64_run 传 state.target_tag 进来),
+    // 每个 emit_X 调用多带 target_tag arg (emit_call/emit_volatile/emit_phi/copy/binop
+    // 仍 2-arg,他们的 target 走 (*cg).target_tag in dispatch;emit_mem/ctrl/peephole
+    // 走 explicit arg per 函数签名)。emit_call path:已 v2.7.0 ship 显式接 target_tag。
+    let tok_size: i64 = 40 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let tok_p = (tokens as i64 + i * tok_size) as *u8;
+        let kind_p = tok_p as *i32;
+        let kind = *kind_p;
+        if kind == ILTOK_FUNC_HEADER() {
+            let _ = emit_func_header(state, tok_p, target_tag);
+        } else if kind == ILTOK_LABEL() {
+            let _ = emit_label(state, tok_p, target_tag);
+        } else if kind == ILTOK_ALLOC() {
+            let _ = emit_alloc(state, tok_p, target_tag);
+        } else if kind == ILTOK_STORE() {
+            let _ = emit_store(state, tok_p, target_tag);
+        } else if kind == ILTOK_LOAD() {
+            let _ = emit_load(state, tok_p, target_tag);
+        } else if kind == ILTOK_LOADSUB() {
+            let _ = emit_loadsub(state, tok_p, target_tag);
+        } else if kind == ILTOK_VOLATILE() {
+            // emit_volatile reads (*cg).target_tag internally — pass state
+            let _ = emit_volatile(state, tok_p);
+        } else if kind == ILTOK_CALL() {
+            // emit_call reads (*cg).target_tag internally (v2.7.0 Phase 2b)
+            let _ = emit_call(state, tok_p);
+        } else if kind == ILTOK_PHI() {
+            let _ = emit_phi(state, tok_p);
+        } else if kind == ILTOK_COPY() {
+            let _ = emit_copy(state, tok_p);
+        } else if kind == ILTOK_BINOP() {
+            let _ = emit_binop(state, tok_p);
+        } else if kind == ILTOK_RET() {
+            let _ = emit_ret(state, tok_p, target_tag);
+        } else if kind == ILTOK_JMP() {
+            let _ = emit_jmp(state, tok_p, target_tag);
+        } else if kind == ILTOK_JNZ() {
+            let _ = emit_jnz(state, tok_p, target_tag);
+        } else if kind == ILTOK_DATA_STRING() {
+            let _ = emit_data_string(state, tok_p, target_tag);
+        } else if kind == ILTOK_EOF() {
+            return 0;
+        }
+        i = i + (1 as i64);
+    }
+    return 0;
+}
+
+// codegen_amd64_run — IL → amd64 GAS .s 主入口
+//
+// 输入:il_path(已生成的 QBE IL 文件路径,per `ir.jhyy` `ir_emit_*` family)
+//      asm_path(输出 .s 文件路径)
+// 返回:0 = 成功(写了 .s 文件),非 0 = 失败
+//
+// v2.5.0 实现路径:
+//   1. read_file(il_path) → 全 .il 内容(arena-alloc)
+//   2. lex_il(buf, len) → *ILToken 序列(由 codegen_amd64_lexer.jhyy 实现)
+//   3. parse_and_emit(tokens, out_sb) → 逐 token dispatch 到 15 emit 函数
+//   4. write_file(asm_path, sb_get_str(out_sb), sb_len(out_sb))(per `feedback_qbe_crlf_root_cause` 用 "wb")
+//   5. return 0
+fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32 {
+    // v2.6.3: real impl — IL → lex → regalloc → parse_and_emit
+    //                            → peephole → write .s
+    //
+    // Per V2-B v2.6.x plan § Commit 3: full orchestration for self path.
+    // Default backend remains QBE; self path activated via JHY_SELF_BACKEND=1
+    // env var (added in v2.6.4 main.jhyy run_backend dispatch).
+    //
+    // 编排 (per plan § B.2):
+    //   1. jh_read_file(il_path) → 读 .il 到 caller-owned 4 MB buffer
+    //   2. arena_init(2MB) → lex_il() → tokens; lex_il_count() → n
+    //   3. malloc CGState + StringBuilder, cg_state_init(state, sb, arena, "")
+    //   4. regalloc_init + regalloc_run (linear-scan spill analysis)
+    //   5. parse_and_emit(state, tokens, n) → emit_* dispatch (15 IL 子集)
+    //   6. peephole_fold on emitted .s
+    //   7. jh_write_file(asm_path, folded, folded_len)
+    //   8. free + arena_free + return rc
+
+    // 1. Read .il
+    let il_cap: i64 = (4 as i64) * (1024 as i64) * (1024 as i64);
+    let il_buf = malloc(il_cap);
+    if il_buf == (0 as *u8) { return 1 as i32; }
+    let il_len: i64 = 0 as i64;
+    let read_rc = jh_read_file(il_path, il_buf, il_cap, &il_len);
+    if read_rc != (0 as i32) {
+        // 1 = buf too small; -1 = err; v2.6.x hard fail (re-try pattern = v2.7.x territory)
+        free(il_buf);
+        return 1 as i32;
+    }
+
+    // 2. Lex into tokens (arena-backed)
+    // W-068 fix #1: add `: Arena` annotation. parser parse_type inserts on miss as
+    // SYM_TYPE so struct-literal branch (parser.jhyy:730) can match. Without
+    // annotation, inline_imports re-parse has `Arena` as SYM_VAR (parse_expr IDENT
+    // branch default-insert) → falls through to ast_new_ident → parse_let tries `;`
+    // against `{` → "expected ;, got {" error.
+    let mut arena: Arena = Arena { start: 0 as *u8, cur: 0 as *u8, end: 0 as *u8,
+                                   blocks: 0 as *u8, def_size: 0 as i64 };
+    arena_init(&arena, (2 as i64) * (1024 as i64) * (1024 as i64));
+    let tokens = lex_il(il_buf, il_len, &arena);
+    if tokens == (0 as *u8) {
+        free(il_buf);
+        arena_free(&arena);
+        return 1 as i32;
+    }
+    let n = lex_il_count(tokens);
+
+    // 3. CGState + StringBuilder init (heap-alloc'd, state has stable ptr)
+    let state_buf = malloc(64 as i64);
+    if state_buf == (0 as *u8) {
+        free(il_buf);
+        arena_free(&arena);
+        return 1 as i32;
+    }
+    // W-068 fix #1: add `: StringBuilder` annotation. Same rationale as Arena above.
+    let mut sb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
+    sb_init(&arena, &sb);
+    let _init_rc = cg_state_init(state_buf, &sb, &arena, "" as *u8);
+    // v2.8.0: 显式设 target_tag(从 main.jhyy run_backend 传 `t` 进 codegen_amd64_run)
+    let _set_tt_rc = cg_state_set_target(state_buf, target_tag);
+
+    // 4. Regalloc analysis (linear-scan; sets g_regalloc_arr via jh_regalloc_set)
+    let reg_arr = regalloc_init(&arena);
+    if reg_arr != (0 as *u8) {
+        let _ = regalloc_run(&arena, reg_arr, tokens, n);
+    }
+
+    // 5. Dispatch loop → emit each token → .s into sb.buf
+    let _pe_rc = parse_and_emit(state_buf, tokens, n, target_tag);
+
+    // 6. Peephole fold on emitted .s (no-op if arena alloc fails)
+    let raw = sb.buf;
+    let raw_len = sb.len;
+    let folded = peephole_fold(raw, raw_len, &arena, target_tag);
+    let final_buf: *u8 = if folded != (0 as *u8) { folded } else { raw };
+    // peephole_fold returns input unchanged on no-op (arena null), so final_buf
+    // might point to raw (which is arena-alloc'd, NOT null-terminated).
+    // jh_write_file takes explicit len, so no null-term needed.
+
+    // 7. Write .s (binary mode, per feedback_qbe_crlf_root_cause)
+    let wr_rc = jh_write_file(asm_path, final_buf, raw_len);
+
+    // 8. Cleanup
+    free(state_buf);
+    free(il_buf);
+    arena_free(&arena);
+    return wr_rc;
+}
+
+// codegen_amd64_emit_raw_asm — D42 escape hatch stub
+//
+// per `jhyy_OS/docs/coordination.md § 3` D42:
+//   "v3.0 3a inline asm 在 v2.x 自写后端完成前走 QBE 工具链 .s 输出路径;
+//    v2.x 完成后 asm 走自写后端 'escape hatch' 路径"
+//
+// v2.5.0:仅 stub placeholder(空 body + 占位注释),V3-B v3.0.1 填充实际 inline asm emit 逻辑
+// 当前不 emit 任何东西(text 由 caller 已经写入 .s buffer,若有)
+//
+// ship gate verify(per L4 § X.1):`grep "codegen_amd64_emit_raw_asm" compiler/src0/codegen_amd64.jhyy` ≥ 1 hit
+fn codegen_amd64_emit_raw_asm(text: *u8) -> i32 {
+    // D42 placeholder — V3-B v3.0.1 填充
+    // 占位:body 空,只 return 0;签名锁定(text: *u8) → i32,后续 V3-B 改 body 不改签名
+    let _ = text;
+    return 0;
+}
+
+// W-068 fix #3 (v2.6.5): parse_and_emit def moved to BEFORE codegen_amd64_run
+// (line ~85). jhyy 不支持 forward ref, inline_imports re-parse 时 parse 顺序按
+// 源文件位置不按调用关系,所以原位置 (line 197 后于 caller line 132) 触发 sema
+// unknown symbol。已删除此处的旧定义。
+
+// ════════════════════════════════════════════════════
+// 内部:文件 I/O 包装(per L4 § 4.1)
+// ════════════════════════════════════════════════════
+//
+// 所有 IL/二进制派生文件必须 "wb"(per memory `feedback_qbe_crlf_root_cause`):
+// QBE 行号偏移错 = Windows fopen "w" 写 .il 把 \n 转 \r\n。
+
+fn read_file(path: *u8) -> *u8 {
+    // V2-B v2.6.0 (Unit B Stub-Fill): real impl via jh_read_file (Unit A).
+    // Allocates 4 MB initial buffer; jh_read_file returns -1 on err,
+    // 1 if file larger than buf_cap (caller should grow + retry), 0 OK.
+    // For V2-B v2.6.0 simplicity, return 0 on too-small (caller detects
+    // via len check + retries with larger buf).
+    let cap: i64 = (4 as i64) * (1024 as i64) * (1024 as i64);
+    let buf = malloc(cap);
+    if buf == (0 as *u8) {
+        return 0 as *u8;
+    }
+    let actual_len: i64 = 0 as i64;
+    let rc = jh_read_file(path, buf, cap, &actual_len);
+    if rc == (0 as i32) {
+        return buf;
+    }
+    // err or too-small — free + return 0
+    free(buf);
+    return 0 as *u8;
+}
+
+fn write_file(path: *u8, content: *u8, len: i64) -> i32 {
+    // V2-B v2.6.0 (Unit B Stub-Fill): real impl via jh_write_file (Unit A).
+    // Returns 0 on success, -1 on error. jh_write_file internally uses
+    // "wb" mode (no CRLF translation, per feedback_qbe_crlf_root_cause).
+    if path == (0 as *u8) || content == (0 as *u8) {
+        return -1;
+    }
+    if len < (0 as i64) {
+        return -1;
+    }
+    return jh_write_file(path, content, len);
+}

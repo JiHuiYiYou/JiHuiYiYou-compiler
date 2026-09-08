@@ -27,6 +27,49 @@ typedef struct {
     char        qbe_type;   /* 'w' / 'l' / 'b' / 's' / 'd' */
 } CGModGlobal;
 
+/* W-069: v2.6.6 — fn name → def module map, built in cg_module Pass A.
+   Used by NODE_CALL is_extern branch to fall back to mangle when the
+   caller module mis-declared a .jhyy fn as `extern fn` (e.g.
+   codegen_amd64_*.jhyy files). Without this, codegen emits an unmangled
+   `call $X` for those calls and the linker can't find the def (which is
+   mangle-style `<mod>__X` in some other module). */
+typedef struct {
+    char *name;       /* arena-allocated, owned */
+    const char *qbe_name;  /* "<mod>__<name>" — pre-mangled */
+} CGFnDef;
+static CGFnDef *g_fn_defs = NULL;
+static int      g_n_fn_defs = 0;
+static int      g_cap_fn_defs = 0;
+
+static void cg_fn_defs_register(const char *name, const char *qbe_name) {
+    if (g_n_fn_defs >= g_cap_fn_defs) {
+        int new_cap = g_cap_fn_defs ? g_cap_fn_defs * 2 : 64;
+        g_fn_defs = realloc(g_fn_defs, new_cap * sizeof(CGFnDef));
+        g_cap_fn_defs = new_cap;
+    }
+    g_fn_defs[g_n_fn_defs].name = strdup(name);
+    g_fn_defs[g_n_fn_defs].qbe_name = strdup(qbe_name);
+    g_n_fn_defs++;
+}
+
+static const char *cg_fn_defs_lookup(const char *name) {
+    for (int i = 0; i < g_n_fn_defs; i++) {
+        if (strcmp(g_fn_defs[i].name, name) == 0) return g_fn_defs[i].qbe_name;
+    }
+    return NULL;
+}
+
+static void cg_fn_defs_clear(void) {
+    for (int i = 0; i < g_n_fn_defs; i++) {
+        free(g_fn_defs[i].name);
+        free(g_fn_defs[i].qbe_name);
+    }
+    free(g_fn_defs);
+    g_fn_defs = NULL;
+    g_n_fn_defs = 0;
+    g_cap_fn_defs = 0;
+}
+
 /* CGContext layout MUST match jhyy-side codegen.jhyy CGCONTEXT_SIZE.
    Fields are heap-allocated (calloc) rather than inline arrays so the
    layout is portable between C-side (inline arrays OK but huge) and
@@ -882,7 +925,16 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
         char mangled[512];
         const char *fn_name;
         if (fn_sym && fn_sym->is_extern) {
-            fn_name = fn_sym->name;  /* extern: pass-through name to linker */
+            /* W-069 fallback: if the same name exists as a non-extern fn decl
+               in the merged module (e.g. arena_alloc from arena.jhyy is
+               called from codegen_amd64_*.jhyy via mis-declared `extern fn`),
+               emit the pre-mangled name so the linker can find the def. */
+            const char *real_name = cg_fn_defs_lookup(fn_sym->name);
+            if (real_name) {
+                fn_name = real_name;
+            } else {
+                fn_name = fn_sym->name;  /* true C ABI extern: pass-through */
+            }
         } else if (fn_sym && fn_sym->module) {
             snprintf(mangled, sizeof(mangled), "%s__%s", fn_sym->module, fn_sym->name);
             fn_name = mangled;
@@ -2424,7 +2476,10 @@ static void cg_emit_const_data_elem(IRBuf *ir, Node *e, Type *t, int *first) {
 void cg_module(IRBuf *ir, Node *module, Target t) {
     /* v2.0.0 target dispatch: Amd64Win keeps full v1.x path (fall through to
        the unchanged body below); other targets fatal at entry pointing at the
-       version where they ship. ABI 抽离 = v2.1.0; amd64_sysv = v2.x M2. */
+       version where they ship. ABI 抽离 = v2.1.0; amd64_sysv = v2.x M2.
+       v2.8.1: STUB name → SYSV; add SYSV_FREESTANDING case (fatal with
+       pointer to jhyy-side production binary, since C-side codegen 只 emit
+       Win IL 不能真编 SysV). */
     switch (t) {
     case TARGET_AMD64_WIN:
         break;
@@ -2438,9 +2493,25 @@ void cg_module(IRBuf *ir, Node *module, Target t) {
         (void)abi_fs_emit_entry_point(ir, "main_jhyy");
         (void)abi_fs_no_crt_init();
         break;
-    case TARGET_AMD64_SYSV_STUB:
+    case TARGET_AMD64_SYSV:
+        /* v2.8.1: C-side codegen 只 emit Win IL (codegen_amd64.jhyy 是
+           jhyy-side, 这个 binary = jhyy_stage0.exe 不知道 jhyy-side 路径)。
+           SysV 真 codegen 在 jhyy-side codegen_amd64.jhyy (v2.8.0 ship)。
+           用 jhyy.exe (jhyy-stage0 编 src0/main.jhyy 产出的 production
+           binary) 而非 jhyy_stage0.exe。 */
         fprintf(stderr,
-            "amd64_sysv target: 实现留 v2.x M2\n");
+            "amd64_sysv target requires jhyy-side production binary (jhyy.exe).\n"
+            "C-side codegen (this binary = jhyy_stage0.exe) only emits Win IL;\n"
+            "SysV codegen is in jhyy-side codegen_amd64.jhyy (v2.8.0 ship).\n"
+            "Re-run with: jhyy.exe compile --target=amd64_sysv <file.jhyy>\n");
+        exit(1);
+    case TARGET_AMD64_SYSV_FREESTANDING:
+        /* v2.8.1: same as amd64_sysv case; C-side 不能 emit SysV ABI 汇编。 */
+        fprintf(stderr,
+            "amd64_sysv_freestanding target requires jhyy-side production binary (jhyy.exe).\n"
+            "C-side codegen (this binary = jhyy_stage0.exe) only emits Win IL;\n"
+            "SysV-Freestanding codegen is in jhyy-side codegen_amd64.jhyy (v2.8.0 ship).\n"
+            "Re-run with: jhyy.exe compile --target=amd64_sysv_freestanding <file.jhyy>\n");
         exit(1);
     }
 
@@ -2515,6 +2586,29 @@ void cg_module(IRBuf *ir, Node *module, Target t) {
             NodeFuncDecl *fd = node_func_decl_data(decl);
             if (fd->is_inline) n_inline++;
         }
+    }
+    /* W-069: build name → pre-mangled qbe_name table for all non-extern fn
+       decls. Used by NODE_CALL is_extern branch to fix `extern fn` mis-decls
+       (where caller module wrote `extern fn X` for a .jhyy fn that actually
+       lives in another module and is mangle-emitted there). This table is
+       populated for the whole merged module after inline_imports. */
+    cg_fn_defs_clear();  /* reset from prior cg_module call */
+    for (size_t i = 0; i < md->ndeccls; i++) {
+        Node *decl = md->decls[i];
+        if (decl->kind != NODE_FUNC_DECL) continue;
+        NodeFuncDecl *fd = node_func_decl_data(decl);
+        if (!fd->sym) continue;
+        /* skip extern decls (no body, would not produce a def) */
+        if (fd->sym->is_extern) continue;
+        const char *name = fd->sym->name;
+        const char *mod = fd->sym->module;
+        char qbe_name[512];
+        if (mod && mod[0]) {
+            snprintf(qbe_name, sizeof(qbe_name), "%s__%s", mod, name);
+        } else {
+            snprintf(qbe_name, sizeof(qbe_name), "%s", name);
+        }
+        cg_fn_defs_register(name, qbe_name);
     }
     NodeFuncDecl **inline_fns = NULL;
     if (n_inline > 0) {

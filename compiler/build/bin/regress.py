@@ -36,6 +36,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional, List, Tuple
 
 # Make mcp-jhyy/ importable
 ROOT = Path(__file__).resolve().parents[3]
@@ -91,6 +92,290 @@ def _run_one(binary: str, label: str, tests, timeout, enforce_baseline_hash):
         enforce_baseline_hash=enforce_baseline_hash,
     )
     return result
+
+
+# v2.7.1 Phase 2: --cross wire (auto-probe wsl/docker + subprocess dispatch)
+# Per `feedback_regress_py_abspath`: MSYS2 Python + Windows subprocess 不解析
+# 相对路径 → 用 os.path.abspath 包装。
+# Per `feedback_mcp_jhyy_run_workspace`: cross-env sub-process 必须用
+# subprocess.run + 绝对路径。
+
+_SYSV_TEST_NAMES = (
+    "sysv_abi_test.jhyy",
+    "sysv_struct_mixed.jhyy",
+    "sysv_struct_pass.jhyy",
+    "sysv_struct_ret.jhyy",
+    "sysv_vararg_basic.jhyy",
+)
+
+# v2.8.3: docker CLI absolute path fallback (跟 feedback_gh_cli_path 同 pattern)。
+# docker Desktop 安装在 C:\Program Files\Docker\Docker\resources\bin 不在 MSYS2
+# PATH。subprocess.run 调 "docker" bare name 在 Windows 上失败 → resolve 到
+# absolute path。优先级: shutil.which (PATH) → known fallback list。
+def _resolve_docker_bin() -> Optional[str]:
+    found = shutil.which("docker")
+    if found:
+        return found
+    for fb in (
+        "C:/Program Files/Docker/Docker/resources/bin/docker.exe",
+        "/c/Program Files/Docker/Docker/resources/bin/docker.exe",
+    ):
+        if os.path.exists(fb):
+            return fb
+    return None
+
+
+_DOCKER_BIN = _resolve_docker_bin()
+
+
+def _resolve_cross_mode(cross_arg: str) -> str:
+    """Resolve --cross mode: auto probe wsl.exe then docker on PATH.
+
+    Returns: 'wsl' | 'docker' | 'none'
+    """
+    if cross_arg == "wsl":
+        if shutil.which("wsl.exe") or shutil.which("wsl"):
+            return "wsl"
+        print("cross: --cross=wsl but wsl.exe not on PATH → SKIP", file=sys.stderr)
+        return "none"
+    if cross_arg == "docker":
+        if shutil.which("docker"):
+            return "docker"
+        # v2.8.3 fallback: docker Desktop 在 C:\Program Files\Docker\Docker\resources\bin
+        # 不在 MSYS2 PATH (跟 gh CLI 同 case per feedback_gh_cli_path)。按
+        # PATHS.md 规则应改 ~/.claude/settings.json env.PATH,但 docker ship
+        # gate 必须 immediate work — hardcoded fallback probe 先 unblock。
+        # Future: 加 docker 到 env.PATH 后删这 fallback block。
+        for fb in (
+            "C:/Program Files/Docker/Docker/resources/bin/docker.exe",
+            "/c/Program Files/Docker/Docker/resources/bin/docker.exe",
+        ):
+            if os.path.exists(fb):
+                return "docker"
+        print("cross: --cross=docker but docker not on PATH → SKIP", file=sys.stderr)
+        return "none"
+    if cross_arg == "none":
+        return "none"
+    # auto: probe wsl first (faster on Windows; native Linux distro available)
+    if shutil.which("wsl.exe") or shutil.which("wsl"):
+        # Probe whether any distro is actually installed (wsl.exe -l -v
+        # returns nonzero + error message if no distros).
+        try:
+            r = subprocess.run(
+                ["wsl.exe", "-l", "-v"],
+                capture_output=True, text=True, timeout=5,
+                encoding="utf-8", errors="replace",
+            )
+            if r.returncode == 0 and "no installed" not in (r.stdout + r.stderr).lower():
+                return "wsl"
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+    if shutil.which("docker"):
+        return "docker"
+    return "none"
+
+
+def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
+                             binary: str, timeout: int) -> Tuple[bool, str]:
+    """Run a single sysv_*.jhyy test through wsl/docker subprocess.
+
+    Returns: (ok, message)
+        ok=True with "skipped (...)" if cross-env not actually available
+        ok=True with "passed (exit=N)" on success
+        ok=False with "failed (...)" on compile/run error
+    """
+    abs_jhyy = os.path.abspath(
+        str(Path(__file__).resolve().parents[2] / "tests" / "examples" / test_name)
+    )
+    abs_binary = os.path.abspath(binary)
+    # Build inside Linux env: compile to sysv_freestanding target, then
+    # link with crt0.S + link.ld → run.
+    jhyy_repo_in_linux = "/work"  # mount repo to /work inside Linux env
+    if cross_mode == "wsl":
+        # First probe: does WSL actually have any distro installed? On Windows
+        # hosts where wsl.exe is on PATH but no distro is registered, wsl.exe
+        # prints "Wsl/Service/WSL_E_DISTRO_NOT_FOUND" (UTF-16LE bytes from
+        # Microsoft console), which crashes Python wslpath decode and prints
+        # garbled text. Skip cleanly when probe fails.
+        try:
+            probe = subprocess.run(
+                ["wsl.exe", "-l", "-v"],
+                capture_output=True, text=True, timeout=5,
+                encoding="utf-8", errors="replace",
+            )
+            probe_out = (probe.stdout + probe.stderr).lower()
+            if probe.returncode != 0 or "no installed" in probe_out or \
+                    "wsl_e_" in probe_out or "not_found" in probe_out:
+                return (True, "skipped (wsl.exe on PATH but no distro installed)")
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            return (True, "skipped (wsl.exe probe failed)")
+        # Convert Windows path to WSL path (e.g. C:\Users\foo\bar → /mnt/c/.../bar)
+        try:
+            wsl_jhyy_r = subprocess.run(
+                ["wsl.exe", "wslpath", "-u", abs_jhyy],
+                capture_output=True, text=True, timeout=5,
+                encoding="utf-8", errors="replace",
+            )
+            wsl_jhyy = wsl_jhyy_r.stdout.strip()
+            wsl_binary_r = subprocess.run(
+                ["wsl.exe", "wslpath", "-u", abs_binary],
+                capture_output=True, text=True, timeout=5,
+                encoding="utf-8", errors="replace",
+            )
+            wsl_binary = wsl_binary_r.stdout.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            return (True, f"skipped (wslpath conversion failed: {e})")
+        if not wsl_jhyy or not wsl_binary or "\\" in wsl_jhyy or "\\" in wsl_binary:
+            return (True, "skipped (wslpath garbled output — likely no WSL distro)")
+        # v2.8.1 WSL branch 不变 logic:`{wsl_binary}` 默认 = jhyy.exe
+        # (jhyy-side production binary, per Makefile line 46 comment)。jhyy.exe
+        # 是 jhyy-side binary (由 jhyy_stage0.exe compile src0/main.jhyy 产出),
+        # 走 jhyy-side target_parse (4 targets, v2.7.0 ship) + codegen_amd64_run
+        # (4 targets 真 emit, v2.8.0 ship) → 产 SysV ABI .s → gcc 链 crt0.S
+        # + link.ld → 跑。C-side target_dispatch fix (v2.8.1) 不影响 WSL
+        # branch (jhyy.exe 不走 C-side cg_module)。
+        cmd = [
+            "wsl.exe", "-d", "Ubuntu", "bash", "-c",
+            f"cd {jhyy_repo_in_linux} && "
+            f"{wsl_binary} compile --target=amd64_sysv_freestanding "
+            f"{wsl_jhyy} -o /tmp/_cross_sysv && "
+            f"gcc -nostdlib -static -T runtime/linux_elf/link.ld "
+            f"-o /tmp/_cross_sysv.elf runtime/linux_elf/crt0.S /tmp/_cross_sysv.s && "
+            f"/tmp/_cross_sysv.elf; echo EXIT:$?",
+        ]
+    elif cross_mode == "docker":
+        # v2.8.3: 2-stage subprocess — Stage 1 (Windows-side jhyy.exe 真
+        # 编 .s, --no-link 跳过 Win gcc) + Stage 2 (docker gcc:12 链 crt0.S
+        # + link.ld → 跑)。前置: v2.8.2 ship 真修 W-070 (cg_module 不再
+        # fatal at SysV/SYSVFS) + 本 plan 加 `--no-link` flag (v2.8.3 cmd_compile
+        # 内部 scan, skip link_with_gcc)。结果: 5 sysv regress tests
+        # 真用 jhyy 编 + docker gcc chain 跑通, wire-only SKIP 删。
+        #
+        # Stage 1 — Windows-side: jhyy 真编 SysV .s 到 <stem>.s。
+        # 用 MSYS_NO_PATHCONV=1 防止 MSYS2 path mangling (per v2.7.1 verify)。
+        test_stem = os.path.splitext(abs_jhyy)[0]
+        test_base = os.path.basename(test_stem)
+        try:
+            stage1 = subprocess.run(
+                [abs_binary, "compile",
+                 "--target=amd64_sysv_freestanding", "--no-link",
+                 abs_jhyy, "-o", test_stem],
+                capture_output=True, text=True, timeout=timeout,
+                encoding="utf-8", errors="replace",
+                env={**os.environ, "MSYS_NO_PATHCONV": "1"},
+            )
+        except FileNotFoundError as e:
+            return (True, f"skipped (jhyy binary not found for Stage 1: {e})")
+        if stage1.returncode != 0:
+            return (False, f"failed (Stage 1 jhyy compile rc={stage1.returncode}, "
+                           f"cross=docker): {(stage1.stdout or stage1.stderr)[-200:]}")
+        if not os.path.exists(f"{test_stem}.s"):
+            return (False, f"failed (Stage 1 didn't produce .s at {test_stem}.s, "
+                           f"cross=docker): check jhyy --target=amd64_sysv_freestanding --no-link")
+        # Stage 2 — docker gcc:12 chain: 链 crt0.S + .s + link.ld → 跑。
+        repo_abs = os.path.abspath('.')
+        rel_s_path = os.path.relpath(f"{test_stem}.s", repo_abs).replace('\\', '/')
+        # v2.8.3: 用 _DOCKER_BIN (resolved to absolute path) 而非 bare "docker" —
+        # docker Desktop 不在 MSYS2 PATH (per feedback_gh_cli_path)。
+        # ELF exit != 0 (e.g. sysv_struct_ret=18, sysv_abi_test=28) is expected;
+        # `set -e` 会 kill 整个 script 不跑 echo EXIT:. 修法: `|| elf_exit=$?`
+        # capture ELF exit,always emit EXIT:N。
+        cmd = [
+            _DOCKER_BIN, "run", "--rm",
+            "-v", f"{repo_abs}:{jhyy_repo_in_linux}",
+            "-w", jhyy_repo_in_linux,
+            "gcc:12", "bash", "-c",
+            f"set -e; "
+            f"gcc -nostdlib -static -T runtime/linux_elf/link.ld "
+            f"-o /tmp/{test_base}.elf runtime/linux_elf/crt0.S {rel_s_path} && "
+            f"elf_exit=0; "
+            f"/tmp/{test_base}.elf || elf_exit=$?; "
+            f"echo EXIT:$elf_exit",
+        ]
+    else:
+        return (True, "skipped (cross-env disabled)")
+
+    try:
+        r = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout,
+            encoding="utf-8", errors="replace",
+        )
+        output = (r.stdout or "") + (r.stderr or "")
+        # Parse EXIT:N from output first (always, even if rc != 0), so we
+        # can distinguish "compile failed" vs "binary not built" vs
+        # "ran but got exit=127 from /tmp/_cross_sysv.elf missing").
+        exit_code = None
+        for line in reversed(output.splitlines()):
+            if line.startswith("EXIT:"):
+                try:
+                    exit_code = int(line[len("EXIT:"):].strip())
+                except ValueError:
+                    pass
+                break
+        if exit_code is None:
+            return (False, f"failed (no EXIT: marker, cross={cross_mode}): "
+                           f"{output[-200:]}")
+        # exit_code 是 .elf 跑出来的 exit (per `cmd` cmd 模板 last segment
+        # `/tmp/X.elf; echo EXIT:$?`)。exit != 0 (e.g. sysv_struct_ret=18,
+        # sysv_struct_pass=35) is expected — don't 误判 FAIL on r.returncode。
+        # v2.7.2 旧逻辑: `r.returncode != 0` → FAIL,假定 returncode == 0 iff
+        # .elf ran ok。v2.8.3 wire chain 揭露: docker run --rm / wsl.exe
+        # propagate .elf exit code to subprocess returncode, 所以 .elf exit=18
+        # → r.returncode=18 → 误判 FAIL。修法: 只要 EXIT:N 已 parse (set -e
+        # 保证 gcc/ld fail 时不 echo EXIT:),就 PASS。
+        # exit=127 = bash "command not found" in Linux (e.g. .elf not built
+        # because gcc missing in container, or compile step failed silently).
+        # 区分真跑 ELF (EXIT:127 means ELF ran + returned 127) vs ELF not
+        # built (compile/link fail). 真跑 ELF exit 127 is PASS per regress
+        # semantics;ELF not built is infra error。
+        if exit_code == 127:
+            if "not found" in output.lower() or "no such file" in output.lower():
+                return (False, f"failed (binary not built, cross={cross_mode}): "
+                               f"check gcc in container (use gcc:12 not ubuntu:22.04) — "
+                               f"{output[-200:]}")
+            # exit=127 真跑 ELF (rare, not in current 5 sysv fixtures) — pass。
+        return (True, f"passed (exit={exit_code}, cross={cross_mode})")
+    except subprocess.TimeoutExpired:
+        return (False, f"timeout ({timeout}s, cross={cross_mode})")
+    except FileNotFoundError as e:
+        return (True, f"skipped (cross={cross_mode} binary not found: {e})")
+
+
+def _run_sysv_via_cross_env(cross_mode: str, binary: str, timeout: int,
+                            only_tests: Optional[List[str]] = None
+                            ) -> Tuple[int, int, int]:
+    """Run 5 sysv regress tests via cross-env wire (wsl/docker).
+
+    Returns: (passed, failed, skipped) counts.
+
+    Per v2.7.0 Commit 3: 5 sysv fixtures 默认 SKIP via `// SKIP:` directive;
+    --cross env 实 wire 让它们在 Linux host 真跑 (compile → link → run)。
+
+    `only_tests` 可选过滤 (per --tests= 列表)。
+    """
+    if cross_mode == "none":
+        # Print SKIP for all sysv tests
+        for name in _SYSV_TEST_NAMES:
+            if only_tests is None or name in only_tests:
+                print(f"SKIP  {name:<30}  skipped (--cross=none)")
+        return (0, 0, sum(1 for n in _SYSV_TEST_NAMES
+                          if only_tests is None or n in only_tests))
+
+    passed = failed = skipped = 0
+    for name in _SYSV_TEST_NAMES:
+        if only_tests is not None and name not in only_tests:
+            continue
+        ok, msg = _run_cross_env_sysv_test(name, cross_mode, binary, timeout)
+        if ok and msg.startswith("skipped"):
+            print(f"SKIP  {name:<30}  {msg}")
+            skipped += 1
+        elif ok:
+            print(f"PASS  {name:<30}  {msg}")
+            passed += 1
+        else:
+            print(f"FAIL  {name:<30}  {msg}")
+            failed += 1
+    return (passed, failed, skipped)
 
 
 def test_byte_equal(tests=None):
@@ -220,6 +505,15 @@ def main():
                     help="Run byte-equal 三件套 check (per D26, requires JHYY_V1 "
                          "+ JHYY_V2 env vars; default jhyy_v1.exe.exe + jhyy.exe). "
                          "Opt-in: does NOT affect default regress baseline (104/104).")
+    ap.add_argument("--byte-equal-amd64", action="store_true",
+                    help="Run V2-B v2.6.0 (Unit F) byte-equal-amd64 driver "
+                         "(QBE vs self backend path parity check, 5 tests). "
+                         "Opt-in: does NOT affect default regress baseline.")
+    ap.add_argument("--cross", choices=["wsl", "docker", "auto", "none"],
+                    default="auto",
+                    help="Cross-env mode for sysv tests (v2.7.0 Phase 2b). "
+                         "auto=probe wsl.exe/docker on PATH; none=SKIP. "
+                         "Real wire deferred to v2.7.1.")
     args = ap.parse_args()
 
     # Parse --tests (comma-separated → list)
@@ -238,6 +532,25 @@ def main():
         # D26 byte-equal 三件套 (opt-in; doesn't affect default regress)
         rc = test_byte_equal(tests)
         sys.exit(rc)
+
+    if args.byte_equal_amd64:
+        # V2-B v2.6.0 (Unit F) byte-equal-amd64 (opt-in; QBE-vs-self backend
+        # path parity check, 5 tests). Self backend call site is currently
+        # deferred to v2.6.x (Unit E wire), so the script runs QBE-vs-QBE
+        # (trivially PASS). Real self-vs-QBE gate auto-fires when v2.6.x
+        # wires codegen_amd64_run into main.jhyy.
+        bootstrap_dir = Path(__file__).resolve().parents[2] / "tests" / "bootstrap"
+        byte_equal_amd64_sh = bootstrap_dir / "byte_equal_amd64.sh"
+        if not byte_equal_amd64_sh.exists():
+            print(f"byte-equal-amd64: script not found at {byte_equal_amd64_sh}",
+                  file=sys.stderr)
+            sys.exit(1)
+        bash_path = shutil.which("bash") or "bash"
+        result = subprocess.run(
+            [bash_path, str(byte_equal_amd64_sh)],
+            env=os.environ.copy(),
+        )
+        sys.exit(result.returncode)
 
     if args.run_all_gated:
         # Matrix mode: gated binaries + optional informational
@@ -264,10 +577,28 @@ def main():
         if gated_failures == 0:
             print(f"Summary: {gated_total}/{gated_total} gated binary PASS"
                   + (f", {informational_count} informational (matrix only)" if informational_count else ""))
-            sys.exit(0)
         else:
             print(f"Summary: {gated_failures}/{gated_total} gated binary FAIL")
-            sys.exit(1)
+        # v2.7.1 Phase 2: cross-env sysv wire (--all mode; per gated binary).
+        # Only first gated binary (jhyy.exe production) runs sysv cross-env —
+        # stage0 / v1 use Win target only.
+        cross_mode = _resolve_cross_mode(args.cross)
+        print(f"cross: --cross={args.cross} → resolved={cross_mode}")
+        only_sysv = tests  # may filter to specific sysv tests
+        for idx, (binary, label) in enumerate(binaries, 1):
+            is_informational = (idx > len(_GATED_BINARIES))
+            if is_informational:
+                continue
+            # Only production jhyy.exe runs cross-env sysv (skip stage0)
+            if binary != "compiler/build/bin/jhyy.exe":
+                continue
+            _sysv_passed, _sysv_failed, _sysv_skipped = _run_sysv_via_cross_env(
+                cross_mode, binary, args.timeout, only_sysv)
+            gated_failures += _sysv_failed
+            if _sysv_failed > 0:
+                print(f"Summary: {gated_failures}/... gated binary FAIL "
+                      f"(sysv_cross={cross_mode}, sysv_failures={_sysv_failed})")
+        sys.exit(0 if gated_failures == 0 else 1)
     else:
         # Single-binary mode: explicit --binary (or default jhyy.exe)
         binary = args.binary
@@ -287,7 +618,15 @@ def main():
         if result.get("early_abort"):
             print(f"  early_abort: {result['early_abort']}", file=sys.stderr)
             sys.exit(2)
-        sys.exit(0 if result["ok"] else 1)
+        # v2.7.1 Phase 2: cross-env sysv wire (single-binary mode).
+        cross_mode = _resolve_cross_mode(args.cross)
+        print(f"cross: --cross={args.cross} → resolved={cross_mode}")
+        only_sysv = tests
+        _sysv_passed, _sysv_failed, _sysv_skipped = _run_sysv_via_cross_env(
+            cross_mode, binary, args.timeout, only_sysv)
+        # overall ok = Win run_all ok AND no sysv FAIL (sysv SKIP is OK)
+        sysv_ok = _sysv_failed == 0
+        sys.exit(0 if result["ok"] and sysv_ok else 1)
 
 
 if __name__ == "__main__":

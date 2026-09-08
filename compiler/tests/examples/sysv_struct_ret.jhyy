@@ -1,0 +1,23 @@
+// sysv_struct_ret.jhyy — v2.7.0 Phase 2b sysv regress fixture
+//
+// Test: small struct return (≤16 bytes) → SysV returns in %rax/%rdx (per
+//   psABI § 3.2.3:INTEGER class eightbytes → regs, NOT memory).
+//   target=amd64_sysv path codegen should NOT use sret pointer (unlike Win).
+//
+// Status: SKIP in v2.7.0 ship gate.
+
+// SKIP: sysv target requires Linux host (WSL/Docker) — see sysv_struct_pass.jhyy header.
+
+type Small = struct {
+    a: i32,
+    b: i32,
+}
+
+fn mk_small(a: i32, b: i32) -> Small {
+    Small { a: a, b: b }
+}
+
+fn main_jhyy() -> i32 {
+    let s = mk_small(7, 11);
+    s.a + s.b  // 18
+}

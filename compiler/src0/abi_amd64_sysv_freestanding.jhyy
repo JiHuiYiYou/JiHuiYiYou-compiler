@@ -1,0 +1,89 @@
+// abi_amd64_sysv_freestanding.jhyy — v2.7.0 ship of amd64_sysv freestanding
+//
+// V2-B v2.7.0 M2 deliverable: SysV freestanding (no libc, no CRT) ABI module.
+// Linux ELF executable via `runtime/linux_elf/crt0.S` + `runtime/linux_elf/link.ld`
+// (per `docs/plans/v2/v2.7.1-plan.md` Phase 1).
+//
+// Like `abi_amd64_win_freestanding.jhyy`, this is a thin delegate wrapper
+// over `abi_amd64_sysv.jhyy`. The 3 signature-shaping functions
+// (function_header / return / call_prelude) just forward to their
+// abi_sysv_* counterparts since SysV hosted and SysV freestanding share
+// the same calling convention (unlike MS x64 hosted vs freestanding
+// which differ via EFIAPI calling convention metadata).
+//
+// The 2 freestanding-specific hooks (emit_entry_point / no_crt_init)
+// are stubs in v2.7.0; real Linux ELF crt0 wiring ships in v2.7.1 Phase 1
+// (per `docs/plans/v2/v2.7.1-plan.md` § runtime/linux_elf/).
+//
+// Note: lives flat in compiler/src0/ (not in a subdir) — jhyy import
+// syntax doesn't support paths with `/` (per `parse_import_decl`
+// codegen.c:731 — same restriction as abi_amd64_win_freestanding.jhyy).
+
+import abi_amd64_sysv;  // for abi_sysv_emit_function_header / _return / _call_prelude
+
+// ════════════════════════════════════════════
+// v2.7.0 Commit 1: abi_fs_sysv_emit_function_header
+// ════════════════════════════════════════════
+//
+// Delegate to abi_sysv_emit_function_header (SysV hosted vs freestanding
+// share calling convention — no EFIAPI-like metadata prefix needed).
+fn abi_fs_sysv_emit_function_header(
+    ir: *IRBuf,
+    fn_sym: *Sym,
+    ret_type: *u8,
+    is_sret: i32,
+    params: *u8,
+    nparams: i64
+) -> i32 {
+    let _r = abi_sysv_emit_function_header(ir, fn_sym, ret_type as *Type, is_sret, params, nparams);
+    return 1;
+}
+
+// ════════════════════════════════════════════
+// v2.7.0 Commit 1: abi_fs_sysv_emit_return
+// ════════════════════════════════════════════
+fn abi_fs_sysv_emit_return(ir: *IRBuf, val: IRVal, is_sret: i32) -> i32 {
+    let _r = abi_sysv_emit_return(ir, val, is_sret);
+    return 1;
+}
+
+// ════════════════════════════════════════════
+// v2.7.0 Commit 1: abi_fs_sysv_emit_call_prelude
+// ════════════════════════════════════════════
+fn abi_fs_sysv_emit_call_prelude(
+    ir: *IRBuf,
+    arena: *u8,
+    n_user_args: i64,
+    is_sret: i32,
+    rsize: i32,
+    out_ret_slot: *u8
+) -> *u8 {
+    return abi_sysv_emit_call_prelude(ir, arena, n_user_args, is_sret, rsize, out_ret_slot);
+}
+
+// ════════════════════════════════════════════
+// v2.7.0 Commit 1: abi_fs_sysv_emit_entry_point
+// ════════════════════════════════════════════
+//
+// v2.7.0: stub. The Linux ELF entry point is `runtime/linux_elf/crt0.S`
+// which calls `main_jhyy` (jhyy convention per W-065 cmd_run pre-check).
+// v2.7.1 wires the actual emit (QBE IL for `_start` block).
+//
+// v2.7.0 no-op: just acknowledge the entry name.
+fn abi_fs_sysv_emit_entry_point(ir: *IRBuf, entry_name: *u8) -> i32 {
+    let _ir = ir;
+    let _en = entry_name;
+    return 1;
+}
+
+// ════════════════════════════════════════════
+// v2.7.0 Commit 1: abi_fs_sysv_no_crt_init
+// ════════════════════════════════════════════
+//
+// v2.7.0: returns 1 (no CRT init). Linux ELF with `crt0.S` + `link.ld`
+// produces truly freestanding executables — no glibc startup, no
+// __libc_start_main. Caller passes --no-crt-init=1 to suppress any
+// ucrt-like shim.
+fn abi_fs_sysv_no_crt_init() -> i32 {
+    return 1;
+}

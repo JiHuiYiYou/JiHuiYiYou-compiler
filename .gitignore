@@ -13,6 +13,13 @@ _*.py
 *.s
 *.il
 *.exe
+# v2.7.1 Phase 1 Linux ELF runtime carveout: freestanding assembly + linker script
+# is source code (NOT a build artifact). Linker script + entry-point asm tracked.
+!runtime/
+!runtime/linux_elf/
+!runtime/linux_elf/*.S
+!runtime/linux_elf/*.ld
+!runtime/linux_elf/*.md
 _*_test.jhyy
 _*_min.jhyy
 _*_minimal_*.jhyy
@@ -122,3 +129,6 @@ qbe/doc/
 # package-lock.json 例外: track 用于 build 复现
 vscode-ext/node_modules/
 vscode-ext/out/
+# v2.6.7 byte_equal_amd64.sh baseline — per-input .il/.s sha256 parity state
+# transient build artifact, 不入仓 (跟 *.il / *.s 同类)
+compiler/tests/bootstrap/baseline/

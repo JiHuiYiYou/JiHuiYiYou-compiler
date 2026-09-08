@@ -15,6 +15,18 @@
 | [`v2.2.0任务清单 + 概要设计.md`](v2.2.0任务清单 + 概要设计.md) | **sprint 计划** | v2.2.0 = Sprint A Stage 3: spec 锁定（abi § 13 + lang-spec § 17-20 + build.md）|
 | [`v2.3.0任务清单 + 概要设计.md`](v2.3.0任务清单 + 概要设计.md) | **sprint 计划** | v2.3.0 = Sprint B: hello-freestanding.efi 跑 OVMF（EFI struct + lld-link + QEMU 启动 + printk）|
 | [`v2.4.0任务清单 + 概要设计.md`](v2.4.0任务清单 + 概要设计.md) | **sprint 计划** | v2.4.0 = Sprint C: 多目标 dispatcher + byte-equal 三件套（cross-jhyy-version 验证）|
+| [`v2.5.0详细实现方案.md`](v2.5.0详细实现方案.md) | **sprint 计划**（详细实现） | v2.5.0 = codegen_amd64.jhyy skeleton 起步（self backend wired）|
+| [`v2.6.8-plan.md`](v2.6.8-plan.md) | **sprint 计划** | v2.6.8 = docs hygiene D43 closure sha refresh（workarounds.md 2 处 stale `d708793c...` → `92e82554...`）|
+| [`v2.7.0-plan.md`](v2.7.0-plan.md) | **sprint 计划** | v2.7.0 = amd64_sysv + amd64_sysv_freestanding 真 ABI codegen path（2 ABI modules + emit_call 拆 target + 5 sysv tests SKIP）|
+| [`v2.7.1-plan.md`](v2.7.1-plan.md) | **sprint 计划** | v2.7.1 = Linux ELF runtime（crt0.S + link.ld）+ regress.py `--cross {wsl,docker,auto,none}` 实 wire + D43 HOLD |
+| [`v2.7.2-plan.md`](v2.7.2-plan.md) | **sprint 计划**（✅ shipped, 2026-09-08, commit `e3dac54`,patch）| v2.7.2 = regress.py `--cross=docker` false-positive 修（exit=127 显式检查 + docker image `ubuntu:22.04 → gcc:12`）,5 LOC 1 commit |
+| [`v2.8.0-plan.md`](v2.8.0-plan.md) | **sprint 计划**（✅ shipped, 2026-09-08, 2-commit chain `0dd33bb` + `84d8c61`）| v2.8.0 = M2 sysv + sysv_freestanding codegen 真实现（codegen_amd64_emit_mem/ctrl/peephole target_tag dispatch）+ D43 re-baseline `cc894329...` → `6a2f2277...` + docker wire-only chain（方案 C）+ 5 sysv tests SKIP honest（C-side TARGET_AMD64_SYSV_FREESTANDING enum pending v2.x 末）,~260 LOC 2 commits |
+| [`v2.8.1-plan.md`](v2.8.1-plan.md) | **sprint 计划**（✅ shipped, 2026-09-08, commit `2d37492`, tag `v2.8.1`）| v2.8.1 = C-side target_dispatch.{c,h} mirror update（4 targets, rename STUB → SYSV preserve =2）+ C-side cg_module SYSV/SYSVFS cases + regress.py comments。~50 LOC 1 commit。**Honest discovery**: jhyy-side codegen.jhyy cg_module 仍 v2.7.0 stub-fatal for SYSV/SYSVFS → W-070 NEW, 留 v2.8.2 / v2.x 末 (M4 launch 硬前置) |
+| [`v2.8.2-plan.md`](v2.8.2-plan.md) | **sprint 计划**（✅ Phase 1 ship, 2026-09-08, commit `8b4d43d`）| v2.8.2 = W-070 真修：jhyy-side codegen.jhyy cg_module 真 emit SysV QBE IL。10 dispatch sites in cg_func/cg_expr + CGContext target_tag field (144→152 bytes) + cg_module fallthrough restructure。~120 LOC 1 commit。**M4 launch 硬前置彻底解锁**。5 sysv tests end-to-end 真跑 PASS requires Ubuntu WSL host (user-level verify) |
+| [`v2.8.3-plan.md`](v2.8.3-plan.md) | **sprint 计划**（✅ Phase 1 ship, 2026-09-08, 2-commit chain, this plan 验证 5/5 sysv PASS gate + scope creep fix）| v2.8.3 = docker gcc chain infra 补完: `--no-link` flag (cmd_compile + --help) + regress.py docker branch 2-stage subprocess rewrite (Stage 1: Windows-side jhyy --no-link → .s; Stage 2: docker gcc:12 chain → ELF → 跑) + driver logic fix (r.returncode 不再用, EXIT:N-only PASS check) + 2 stale fixture fix (sysv_abi_test / sysv_vararg_basic extern → local inline fn) + scope creep: _DOCKER_BIN abs path fallback (per feedback_gh_cli_path pattern)。~75 LOC source + 125 LOC docs, 2 commits。**M4 launch 验证完整化 (5/5 sysv PASS via docker)** |
+| [`batch-V2-A-plan.md`](batch-V2-A-plan.md) | **sprint 计划**（batch）| V2-A batch = v2.0.0 + v2.1.0 + v2.2.0 + v2.3.0 + v2.4.0 串行 ship 链路（前 5 版本）|
+| [`batch-V2-B-plan.md`](batch-V2-B-plan.md) | **sprint 计划**（batch）| V2-B batch = v2.5.0 + v2.6.x + v2.7.0 + v2.7.1 + v2.7.2 + v2.8.0（v2.x 中期 M2 自写后端 + Linux ELF infra）|
+| [`batch-V2-C-plan.md`](batch-V2-C-plan.md) | **sprint 计划**（batch）| V2-C batch = v2.x 末 N 代 fixed point + QBE 移除（v2.x 末 sprint 计划）|
 
 ## 版本轴关系（关键）
 
