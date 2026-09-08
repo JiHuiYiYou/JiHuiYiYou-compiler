@@ -5013,8 +5013,15 @@ cmd_compile (main.jhyy)
 - ❌ WSL branch 仍 wire-only SKIP (chain infra 需 v2.x 末 jhyy_linux build target)
 - ❌ docker branch 仍 wire-only SKIP (方案 B 需 v2.x 末)
 
-### Resolution (2026-09-08 v2.8.1)
+### Resolution (2026-09-08 v2.8.2)
 
-TBD — v2.8.2 (or v2.x 末 N 代 fixed point sprint) 真修 scope 见上。
+✅ **v2.8.2 真修 (commit `8b4d43d`)**: codegen.jhyy cg_module 真 emit SysV QBE IL。10 dispatch sites in cg_func/cg_expr (header emit + 3 return emit + 4 cg_expr return + 2 call_prelude + 2 struct_arg_slot) 调 `abi_sysv_emit_*` based on target_tag。CGContext 加 target_tag 字段 (144→152 bytes) + cg_func signature 加 target_tag 参数 + cg_module fallthrough restructure (删 SYSV/SYSVFS stub-fatal)。
+
+**Honest Phase 2a status (本机 dev env 受限)**:
+- ✅ `jhyy.exe --target=amd64_sysv_freestanding sysv_*.jhyy` 不再 fatal at cg_module — **真 emit SysV ABI .s**
+- ⚠️ 5 sysv regress tests end-to-end 真跑 PASS requires Ubuntu WSL host (user-level verify);docker branch 仍 wire-only SKIP (方案 B infra 待 v2.x 末)
+- ✅ Win ABI byte-equal hold (10/10 + 20/20) + D43 closure v1→v2 sha HOLD
+
+**OS 启动链路**: W-070 = M4 launch 硬前置。v2.8.2 ship = M4 launch 硬前置彻底解锁 (per `v2.0.0-os-prep.md` § 1)。
 
 

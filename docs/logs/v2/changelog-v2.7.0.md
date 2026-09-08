@@ -436,3 +436,86 @@ amd64_sysv_freestanding target: 实现留 v2.7.1
 - 5 sysv regress test fixtures: `compiler/tests/examples/sysv_*.jhyy`
 - D43 closure: `docs/logs/v2/d43-baseline-archive.md` (baseline `6a2f2277...` v2.8.0 末)
 - Memory: [[feedback_changelog_umbrella]], [[feedback_plans_per_version]], [[feedback_fix_evaluation_rule]], [[feedback_audit_single_commit_diff]], [[feedback_no_date_estimates]], [[feedback_auto_push_after_commit]], [[feedback_document_workarounds_in_docs]]
+
+---
+
+## v2.8.2 — W-070 真修: jhyy-side codegen.jhyy cg_module 真 emit SysV QBE IL (M4 launch 硬前置彻底解锁)
+
+**Shipped**: TBD (Phase 1 commit `8b4d43d`, 2026-09-08)
+**Plan**: [`../../plans/v2/v2.8.2-plan.md`](../../plans/v2/v2.8.2-plan.md)
+
+### Context (修正 v2.8.1 plan 假设)
+
+v2.8.1 plan 假设 cg_module 默认 body 是 ABI-agnostic + 删 stub-fatal → fall through 就够了。**真因** (post-exploration): codegen.jhyy 在 **10 个 call site 硬编码 `abi_win_emit_*`**,SysV ABI module (v2.7.0 ship) 的 7 ABI fn **0 call sites**。
+
+v2.7.0 Phase 2b "emit_call 拆 Win/SysV 已 wire" + v2.8.0 codegen_amd64_emit_*.jhyy target_tag dispatch 都只动了 codegen_amd64_run (.il → .s) 阶段,**没动 cg_module (.jhyy → .il) 阶段**。
+
+CGContext (codegen.jhyy L146-193) 144 bytes, **没有 target_tag 字段**;cg_func signature 也没 target_tag 参数。所以 v2.8.2 真修 scope 比 plan 估计的更大:10 dispatch sites + CGContext field + cg_func signature。
+
+### Scope (~120 LOC jhyy-side, 1 commit)
+
+**A. CGContext struct (codegen.jhyy L146-193)**
+- `+ target_tag: i32` 字段 (jhyy-side only, +4 bytes + padding = +8 total)
+- `CGCONTEXT_SIZE()` 144 → 152
+
+**B. cg_func signature + 4 dispatch sites**
+- `fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag: i32) -> i32`
+- `let is_sysv = (target_tag == TARGET_AMD64_SYSV() || target_tag == TARGET_AMD64_SYSV_FREESTANDING()) as i32;`
+- Header emit (L3738): `if is_sysv == 1 { abi_sysv_emit_function_header } else { abi_win_emit_function_header }`
+- 3 return emit sites (L3854/3863/3873): 同 pattern
+
+**C. cg_expr 6 dispatch sites**
+- 4 return sites (L1577/1602/1629/1655): read `(*cg).target_tag` dispatch
+- 2 call_prelude sites (L2478/2652): `if sysv { abi_sysv_emit_call_prelude } else { abi_win }`
+- 2 struct_arg_slot sites (L2586/2748): 同 pattern
+
+**D. cg_module fallthrough restructure (L3941-3970)**
+- 删除 `TARGET_AMD64_SYSV` stub-fatal (L3863-3887)
+- 删除 `TARGET_AMD64_SYSV_FREESTANDING` stub-fatal
+- 加 `SYSV_FREESTANDING` prefix calls (`abi_fs_sysv_emit_entry_point` + `abi_fs_sysv_no_crt_init` — 当前 no-op stub, mirror WIN_FREESTANDING pattern)
+- SYSV (hosted) 直接 fall through to default body
+- `(*cg_ptr).target_tag = t` (CGContext field init)
+- cg_func call site (L4235): `cg_func(cg_raw, d_node, inline_fns_raw, n_inline, t)`
+
+### Phase 1 ship gate verified (✅)
+
+- ✅ regress 5 main tests: 5/5 PASS (Win target 不变)
+- ✅ byte_equal_amd64.sh 默认: 10/10 PASS (Win ABI IL byte-equal hold)
+- ✅ byte_equal_amd64.sh --baseline: 20/20 PASS (旧 baseline hold)
+- ✅ D43 closure (byte_equal.sh hello.jhyy): .il + .s + .exe 3/3 PASS (v1编 == v2编 sha)
+
+### 5 sysv tests end-to-end 真跑 — honest status
+
+**Phase 2a ship gate 状态 (post-Commit 1):**
+
+- ✅ `jhyy.exe --target=amd64_sysv_freestanding sysv_*.jhyy` 不再 fatal at cg_module — **真 emit SysV ABI .s** (Phase 1 commit 已 ship, this is the **核心 W-070 fix**)
+- ⚠️ 5 sysv tests WSL 真跑 PASS **requires Ubuntu WSL host 或 docker gcc chain**;当前 dev host 无 Ubuntu WSL (only docker-desktop stopped, no gcc), docker branch 仍 wire-only SKIP (方案 B infra 待 v2.x 末)
+- ⚠️ Manual docker gcc verify: jhyy 真 emit SysV .s → docker gcc -nostdlib -static → 跑 (chain 走通需要 user 在有 Ubuntu WSL 的 host 跑;本机 dev env 受限)
+
+**结论**: v2.8.2 ship gate 满足 **核心 W-070 真修** (cg_module 不再 stub-fatal, 10 dispatch sites wired). End-to-end PASS verification 是 user-level gate (需要 WSL Ubuntu host), W-070 真修本身已 commit ship 完毕。
+
+### OS 启动链路 — M4 launch 硬前置彻底解锁
+
+Per `v2.0.0-os-prep.md` § 1, M4 launch 需要 amd64_sysv 真能用 (= cg_module 不再 stub-fatal)。**v2.8.2 ship = M4 launch blocker 彻底解锁**。
+
+v2.x 末 N 代 fixed point + QBE 移除 仍是独立工作 (per `batch-V2-C-plan.md`),不 gate M4 launch。
+
+### Out of scope (punted)
+
+- ❌ Real `abi_fs_sysv_emit_entry_point` QBE IL `_start` block emit — 当前 no-op stub (v2.7.1 ship `crt0.S` 链外置 够用)
+- ❌ N 代 fixed point + QBE 移除 — v2.x 末
+- ❌ 8-class SysV full classifier — 仍 3-class minimum viable
+- ❌ docker 方案 B (container 内 build jhyy_linux from .c) — v2.x 末
+
+### W-070 真修 (resolution)
+
+W-070 entry (`docs/internal/workarounds.md`) status: 真修 in v2.8.2. Replaces TBD resolution.
+
+### References
+
+- Commit 1: `8b4d43d` (W-070 真修 + Phase 1 ship gate verified)
+- v2.8.2 plan: [`../../plans/v2/v2.8.2-plan.md`](../../plans/v2/v2.8.2-plan.md)
+- v2.8.0 ship (前置): codegen_amd64_emit_*.jhyy target_tag dispatch (mem/ctrl/peephole)
+- v2.7.0 ship (前置): abi_amd64_sysv.jhyy 7 ABI fn (no call sites until v2.8.2)
+- v2.7.1 ship (前置): Linux ELF runtime `crt0.S` + `link.ld`
+- v2.8.1 ship (前置): C-side target_dispatch mirror update + W-070 NEW filed
