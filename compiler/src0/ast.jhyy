@@ -271,13 +271,17 @@ type NodeBinary = struct {
 }
 fn NODE_BINARY_SIZE() -> i64 { return 24 as i64; }
 
-// callee(*u8 8) + args(*u8 8) + nargs(i64 8) = 24
+// callee(*u8 8) + args(*u8 8) + nargs(i64 8) + type_args(*u8 8) + ntype_args(i64 8) = 40
+// (v3.2.0c 3i fn path: type_args 是 turbofish `f::<T,U>(...)` 解析时 attach 的 **Node 数组;
+// sema infer_type NODE_CALL 时据 type_args 触发 mono_expand_fn_call。)
 type NodeCall = struct {
-    callee: *u8,
-    args:   *u8,     // **Node 数组
-    nargs:  i64,
+    callee:     *u8,
+    args:       *u8,     // **Node 数组
+    nargs:      i64,
+    type_args:  *u8,     // **Node (v3.2.0c added)
+    ntype_args: i64,
 }
-fn NODE_CALL_SIZE() -> i64 { return 24 as i64; }
+fn NODE_CALL_SIZE() -> i64 { return 40 as i64; }
 
 // module(*u8 8) + function(*u8 8) + args(*u8 8) + nargs(i64 8) + resolved(*u8 8) = 40
 type NodeQualifiedCall = struct {
@@ -627,8 +631,15 @@ type NodeFuncDecl = struct {
     ndefers:      i64,
     is_naked:     i32,    // v3.0.2 (3b naked): #[naked] attribute
     link_section: *u8,    // v3.0.4 (3e link_section): custom ELF section name (or NULL)
+    // v3.2.0c (3i fn path): type_params 是 **Sym 数组(每个 type-param 是 SYM_TYPE
+    //   +type_ptr=0 哨兵 sym);ntype_params > 0 时 = generic fn, codegen skip body。
+    //   `fn max<T, U>(...)` 解析时 fill;`fn max<T>(...)` mono 后 cloned fn 的
+    //   ntype_params = 0。append at end,不破现有字段 offset (codegen 走 node_func_decl_data()
+    //   自动 follow)。
+    type_params:   *u8,
+    ntype_params:  i64,
 }
-fn NODE_FUNC_DECL_SIZE() -> i64 { return 80 as i64; }
+fn NODE_FUNC_DECL_SIZE() -> i64 { return 96 as i64; }
 
 // v3.2.0 (V3-C 3i generics): sym(*u8 8) + body(*u8 8) +
 //   type_params(*u8 8) + ntype_params(i64 8) = 32
@@ -834,6 +845,10 @@ fn ast_new_call(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
     (*d).callee = callee as *u8;
     (*d).args = args;
     (*d).nargs = nargs;
+    // v3.2.0c (3i fn path): 默认无 turbofish;parser.jhyy parse_call turbofish
+    //   arm 会直接改 `(*d).type_args` 和 `(*d).ntype_args` 字段。
+    (*d).type_args = 0 as *u8;
+    (*d).ntype_args = 0 as i64;
     return n;
 }
 
