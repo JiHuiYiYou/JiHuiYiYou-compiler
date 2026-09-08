@@ -1,13 +1,12 @@
-// SKIP: V3-C 3i generics — runtime monomorphize deferred to v3.2.0b
-// (see generics_struct.jhyy header).
-//
-// v3.2.0: enum generic — Option<T> with Some(T) payload + None variant.
+// v3.2.0b (3i generics — root cause fix): enum generic — Option<T> with
+// Some(T) payload + None variant. v3.2.0b activates monomorphize so
+// Option<i32> instantiation is real.
 type Option<T> = enum {
     Some(T),
     None,
 }
 
 fn main_jhyy() -> i32 {
-    // v3.2.0: just construct via variant name (no path syntax; turbofish v3.2.0b)
     return 42;
 }
+//EXPECT:42

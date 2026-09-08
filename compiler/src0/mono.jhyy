@@ -148,29 +148,18 @@ fn mono_subst_node(arena: *Arena, node: *Node,
     }
     let nk_off = node as *i32;
     let nk = *nk_off;
-    let _q = jh_fmt_lld_stderr("[mono] subst_node kind=%d\n" as *u8, nk as i64);
     if nk == NODE_IDENT() {
-        let _qa = jh_fputs_stderr("[mono] subst: enter NODE_IDENT\n" as *u8);
         let id_data = (node as i64 + NODE_SIZE()) as *u8;
         let id_sym_off = id_data as **Sym;
         let sym = *id_sym_off;
-        let _qb = jh_fmt_lld_stderr("[mono] subst: sym=%d\n" as *u8, sym as i64);
         // Sym layout: name @0 (8), kind @8 (4), pad @12 (4), type_ptr @16 (8)...
         let sym_name = *((sym as i64 + (0 as i64)) as **u8);
         let name = sym_name;
-        let _qc = jh_fputs_stderr("[mono] subst: name=" as *u8);
-        let _qd = jh_fputs_stderr(name);
-        let _qe = jh_fputs_stderr("\n" as *u8);
         let mut found: i64 = -1 as i64;
         let mut k: i64 = 0 as i64;
         while k < nargs {
-            let _qf = jh_fmt_lld_stderr("[mono] subst: k=%d\n" as *u8, k);
             let tp = *((type_params as i64 + k * (8 as i64)) as **Sym);
-            let _qg = jh_fmt_lld_stderr("[mono] subst: tp=%d\n" as *u8, tp as i64);
             let tp_name = *((tp as i64 + (0 as i64)) as **u8);
-            let _qh = jh_fputs_stderr("[mono] subst: tp_name=" as *u8);
-            let _qi = jh_fputs_stderr(tp_name);
-            let _qj = jh_fputs_stderr("\n" as *u8);
             if strcmp(tp_name, name) == (0 as i32) {
                 found = k;
                 break;
@@ -181,8 +170,9 @@ fn mono_subst_node(arena: *Arena, node: *Node,
             let arg = *((arg_nodes as i64 + found * (8 as i64)) as **Node);
             return arg;
         }
-        return ast_new_ident(arena, (*node).loc_filename, (*node).loc_line,
-                             (*node).loc_col, sym);
+        let new_n = ast_new_ident(arena, (*node).loc_filename, (*node).loc_line,
+                                  (*node).loc_col, sym);
+        return new_n;
     }
     if nk == NODE_UNARY() {
         let un_data = (node as i64 + NODE_SIZE()) as *u8;
@@ -351,8 +341,12 @@ fn mono_clone_and_subst(arena: *Arena, td: *Node,
     let new_n = ast_init_node(buf, NODE_TYPE_DECL(),
                               (*td).loc_filename, (*td).loc_line, (*td).loc_col);
     let new_td = (buf as i64 + NODE_SIZE()) as *NodeTypeDecl;
-    // copy sym ptr (caller overwrites with mangled sym)
-    *((*new_td) as **u8) = *td_sym_off;
+    // copy sym ptr (caller overwrites with mangled sym).
+    // NOTE: avoid `*((*new_td) as **u8) = ...` deref-write-via-cast — triggers
+    //   stage-0 jhyy codegen stack-spill bug in deep nested context (verified
+    //   segfault 2026-09-08 v3.2.0b diagnosis). Use temp-var pattern instead.
+    let new_td_sym_off = new_td as **u8;
+    *new_td_sym_off = *td_sym_off as *u8;
     let new_td_body_off = ptr_add_u8(new_td as *u8, (8 as i64)) as **u8;
     *new_td_body_off = new_body as *u8;
     let new_td_tp_off = ptr_add_u8(new_td as *u8, (16 as i64)) as **u8;
@@ -379,16 +373,94 @@ fn mono_clone_and_subst(arena: *Arena, td: *Node,
 // Don't call node_module_data again — that would add NODE_SIZE on top of an
 // already-offset pointer and read random memory.
 //
-// v3.2.0 SHIP STATUS: full implementation present in helpers above (mono_subst_node,
-//   mono_clone_struct_def, mono_clone_enum_def, mono_clone_and_subst, etc.) but
-//   DISABLED at runtime — too deep into jhyy struct deref edge cases (Sym 56B,
-//   nested StructFieldDecl/EnumVariantDecl). Deferred to v3.2.0b (fn + turbofish)
-//   which will land the same scaffolding on more testable ground (function body).
-//   Parser still records generic_insts and inserts mangled sym — sema Pass 2
-//   just sees empty generic_insts and skip-decl the defs via ntype_params > 0.
-//   User-facing effect: `type Pair<T> = struct {...}` + `let p: Pair<i32>` parses,
-//   but type resolution returns "unknown type" for `Pair<i32>`. Documented in
-//   changelog v3.2.0 "Deferred to v3.2.0b" section.
+// v3.2.0b SHIP STATUS: ACTIVE。helpers above (`mono_find_generic_def` L102-104
+//   root-cause-fixed in this sprint; `mono_subst_node` already offset; helpers
+//   `mono_decls_append` / `mono_clone_*` already offset) — body is full impl
+//   using offset access throughout. No `(*mdd).*` / `(*sym).*` / `(*sd).*` /
+//   `(*fld).*` / `(*vd).*` patterns (those trigger stage-0 jhyy codegen
+//   stack-spill bug, DEFERRED to v2.x 末 QBE 自写).
 fn mono_expand_module(global: *u8, arena: *Arena, md: *Node) -> i32 {
-    return 0 as i32;
+    // md is *NodeModule — caller pre-computes via node_module_data(module)
+    let mdd = md as *u8;
+    // NodeModule: decls @0, ndeccls @8, generic_insts @20, ngeneric_insts @28
+    let ndeccls_off = ptr_add_u8(mdd, (8 as i64)) as *i64;
+    let ndeccls = *ndeccls_off;
+    let decls_off = mdd as **u8;
+    let decls_ptr = *decls_off;
+    // generic_insts @ offset 20, ngeneric_insts @ offset 28
+    let ngi_off = ptr_add_u8(mdd, (28 as i64)) as *i64;
+    let ngi = *ngi_off;
+    if ngi == (0 as i64) {
+        return 0 as i32;
+    }
+    let gi_off = (mdd as i64 + (20 as i64)) as **u8;
+    let gi = *gi_off;
+    let mut errs: i32 = 0 as i32;
+    let mut i: i64 = 0 as i64;
+    while i < ngi {
+        // GenericInstRecord: mangled_name@0, arg_types@8, nargs@16, base_name@24
+        let rec = ptr_add_u8(gi, i * GENERIC_INST_RECORD_SIZE());
+        let rec_mangled = *((rec as i64 + (0 as i64)) as **u8);
+        let rec_args = *((rec as i64 + (8 as i64)) as **u8);
+        let rec_nargs = *(ptr_add_u8(rec, (16 as i64)) as *i64);
+        let rec_base = *((rec as i64 + (24 as i64)) as **u8);
+
+        // v3.2.0b dedupe strategy: parser records generic_inst once per
+        //   `<...>` usage site (e.g. `Pair<i32>` as type annot + as struct
+        //   lit = 2 entries). We dedupe by walking (*md).decls and looking
+        //   for an existing NODE_TYPE_DECL with sym == ms (parser_sym).
+        //   This is reliable since Pass 2 hasn't run yet at this point —
+        //   type_ptr check would be unreliable.
+        let mut ms = symtab_lookup(global, rec_mangled);
+        if ms == (0 as *Sym) {
+            ms = symtab_insert(global, rec_mangled, SYM_TYPE(),
+                               0 as *u8, 0 as i32, 0 as i32);
+        }
+        let mut already_done: i32 = 0 as i32;
+        let cur_ndeccls = *ndeccls_off;
+        let mut j2: i64 = 0 as i64;
+        while j2 < cur_ndeccls {
+            let ed = *((decls_ptr as i64 + j2 * (8 as i64)) as **Node);
+            if ed != (0 as *Node) {
+                if (*ed).kind == NODE_TYPE_DECL() {
+                    let etd = node_type_decl_data(ed);
+                    let etd_sym_off = etd as **u8;
+                    let es = *etd_sym_off as *Sym;
+                    if es == ms {
+                        already_done = 1 as i32;
+                        break;
+                    }
+                }
+            }
+            j2 = j2 + (1 as i64);
+        }
+        if already_done != (0 as i32) {
+            i = i + (1 as i64);
+        } else {
+            // find generic def by base_name
+            let gd = mono_find_generic_def(md, rec_base);
+            if gd == (0 as *Node) {
+                errs = errs + (1 as i32);
+                i = i + (1 as i64);
+            } else {
+                // clone + substitute
+                let cloned = mono_clone_and_subst(arena, gd, rec_args, rec_nargs);
+                if cloned == (0 as *Node) {
+                    errs = errs + (1 as i32);
+                    i = i + (1 as i64);
+                } else {
+                    // overwrite cloned decl's sym with parser_sym (ms) —
+                    // IDENT nodes in body / annotations already point to ms,
+                    // so this keeps IDENT ↔ decl linkage coherent.
+                    let cloned_td = node_type_decl_data(cloned);
+                    let cloned_td_sym_off = cloned_td as **u8;
+                    *cloned_td_sym_off = ms as *u8;
+                    // append cloned decl to (*mdd).decls
+                    mono_decls_append(arena, mdd, cloned);
+                    i = i + (1 as i64);
+                }
+            }
+        }
+    }
+    return errs;
 }

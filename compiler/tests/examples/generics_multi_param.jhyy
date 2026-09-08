@@ -1,14 +1,18 @@
-// SKIP: V3-C 3i generics — runtime monomorphize deferred to v3.2.0b
-// (see generics_struct.jhyy header).
-//
-// v3.2.0: multi type-param — Map2<K, V> with two distinct params.
-// Tests that substitution handles asymmetric ordering (T1 vs T2).
+// v3.2.0b (3i generics — root cause fix + monomorphize activate):
+//   Multi type-param `Map2<K, V>` — asymmetric substitution: K and V map
+//   to different concrete types in the same instantiation.
 type Map2<K, V> = struct {
     key: K,
     val: V,
 }
 
 fn main_jhyy() -> i32 {
-    let m: Map2<i32, i64> = Map2<i32, i64> { key: 1, val: 2 as i64 };
+    let m1: Map2<i32, i64> = Map2<i32, i64> { key: 1, val: 2 as i64 };
+    if m1.key != 1 { return 10; }
+    if m1.val != 2 as i64 { return 20; }
+    let m2: Map2<i64, i32> = Map2<i64, i32> { key: 100 as i64, val: 200 };
+    if m2.key != 100 as i64 { return 30; }
+    if m2.val != 200 { return 40; }
     return 42;
 }
+//EXPECT:42

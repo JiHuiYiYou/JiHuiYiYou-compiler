@@ -1,22 +1,18 @@
-// SKIP: V3-C 3i generics — runtime monomorphize deferred to v3.2.0b (jhyy-side
-// struct deref edge cases on Sym 56B / StructFieldDecl nesting, see
-// docs/logs/v3/changelog-v3.2.md "Deferred to v3.2.0b" section).
-//
-// v3.2.0 (V3-C 3i): `<T>` generic param syntax + `Pair<i32>` inst syntax
-// PARSE correctly (parser.jhyy inline generic arm + ast.jhyy NodeTypeDecl
-// +32B / NodeModule +16B); generic defs skip codegen in Pass 2/3.
-//
-// When v3.2.0b lands (3i fn + turbofish + monomorphize pipeline activate),
-// remove SKIP and replace with:
-//   EXPECT:42 + assertions on sizeof(Pair<i32>) != sizeof(Pair<i64>)
+// v3.2.0b (3i generics — root cause fix + monomorphize activate):
+//   `Pair<T>` def + `Pair<i32>` / `Pair<i64>` monomorphized into 2 distinct
+//   structs (per jhyy_get_il verification). Field access round-trip.
 type Pair<T> = struct {
-    a: i32,
-    b: i32,
+    a: T,
+    b: T,
 }
 
 fn main_jhyy() -> i32 {
-    let p: Pair<i32> = Pair<i32> { a: 1, b: 2 };
-    if p.a != 1 { return 10; }
-    if p.b != 2 { return 20; }
+    let p1: Pair<i32> = Pair<i32> { a: 1, b: 2 };
+    if p1.a != 1 { return 10; }
+    if p1.b != 2 { return 20; }
+    let p2: Pair<i64> = Pair<i64> { a: 100 as i64, b: 200 as i64 };
+    if p2.a != 100 as i64 { return 30; }
+    if p2.b != 200 as i64 { return 40; }
     return 42;
 }
+//EXPECT:42

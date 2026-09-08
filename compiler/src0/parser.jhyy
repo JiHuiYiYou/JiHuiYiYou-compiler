@@ -1230,6 +1230,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
     let loc_lc = t.loc_col;
 
     let mut left: *Node = 0 as *Node;
+    let mut skip_default: i32 = 0 as i32;
 
     // ── Prefix dispatch（基于 t.kind 走 inline）──
     if t.kind == TOKEN_EOF() {
@@ -1391,13 +1392,18 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                 left = ast_new_ident((*p).arena, t.loc_filename, t.loc_line, t.loc_col, gsym2);
             }
             // 跳过 default path(避免 symtab_lookup 用 base name 重写 left)
-            let _skip_default = 1 as i32;
-            let __marker = _skip_default + 0;
+            skip_default = 1 as i32;
             // fall through 到 Pratt loop(下面 if left != NULL 守卫 + while infix)
             } // v3.2.0: close inner if (g2_is_upper != 0)
         }
         // else (gnpeek2.kind != TOKEN_LT OR uppercase check failed): fall through
         // to default path below — sym lookup, asm/fence dispatch, etc.
+
+        // v3.2.0b fix: gate the default ident/asm/fence dispatch path with
+        //   skip_default flag, set inside the generic dispatch when it builds
+        //   a struct_lit/ident for the `<...>` usage. Otherwise the default
+        //   path overwrites `left` and breaks generic struct literals.
+        if skip_default == (0 as i32) {
 
         // V3-B v3.0.1: asm!(...) inline asm macro. After consuming the `asm`
         // ident, peek for `!`. If next token is BANG, dispatch to
@@ -1561,6 +1567,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         }
         } // V3-B v3.0.5: close if is_fence_builtin == 0
         } // V3-B v3.0.1: close is_asm_macro else
+        } // v3.2.0b: close `if skip_default == 0` (gates default path INSIDE IDENT branch only)
     }
     // ── unary prefix: - ! ~ ──
     else if t.kind == TOKEN_MINUS() {

@@ -1,31 +1,22 @@
-// SKIP: V3-C 3g.7 feature — jhyy-side only (C-side bootstrap predates V3-C)
-// v3.1.2 (V3-C 3g.7) ship-gate: CapTable<T> + 跨函数 Cap<T> pass.
-//   CapTable<M0> 16B layout: data: i64 (raw machine ptr) + len: i64 = 16B.
-//   跨函数 Cap<T> pass-by-value 走 Win x64 INTEGER class (RCX/RDX/R8/R9).
-//
-// 关键断言:
-//   - sizeof(Cap<i32>) == 8 (8-byte struct pass-by-value, v3.1.0 锁)
-//   - sizeof(CapTable) == 16 (2 × i64 = 16B, M0 简化 layout — 不用 generic struct decl,
-//     per parser gap "type Foo<T> = struct {...}" 不支持;留 v3.2.0 3i generics)
-//   - cross_fn_sum_cap 接受 Cap<i32> by value + 返回 i64 (跨函数 Cap<T> pass 验证)
-//   - cross_fn_sum_table 接受 CapTable by value (16B struct, 2 × QBE_L slots)
-type CapTable = struct {
-    data: i64,
-    len: i64
+// v3.2.0b (3i generics — CapTable<T> 真 generic refactor):
+//   CapTable<T> 现在用真 generic struct (not M0 简化 CapTable = struct { data: i64, len: i64 })。
+//   Layout 16B: data: *Cap<T> (8B ptr) + len: i64 (8B) — v3.1.0 锁 Cap<T> 8B,
+//   ptr 8B, 跟 M0 layout 完全一致。
+//   跨函数 Cap<T> pass-by-value 走 Win x64 INTEGER class (RCX/RDX/R8/R9)。
+type CapTable<T> = struct {
+    data: *Cap<T>,
+    len: i64,
 }
 
 // 跨函数 Cap<T> pass-by-value 测试 (走 Win x64 INTEGER class, RCX arg)
 fn cross_fn_sum_cap(c: Cap<i32>) -> i64 {
-    // M0 简化: Cap<T> 不暴露 .cnode_idx/.depth/.rights 字段访问 (per spec v3.1.0 § 126)
-    // 用 sizeof + 类型 cast 间接验证 Cap<T> 跨 fn 正确传参 — sizeof 在 compile-time
-    // 已把 c 视为 8B, codegen 走 QBE_L → INTEGER class.
     let s: i64 = sizeof(c);
     return s;
 }
 
-// 跨函数 CapTable pass-by-value — 16B struct 走 2 × QBE_L slots.
-fn cross_fn_sum_table(t: CapTable) -> i64 {
-    return t.data + t.len;
+// 跨函数 CapTable<i32> pass-by-value — 16B struct 走 2 × QBE_L slots.
+fn cross_fn_sum_table(t: CapTable<i32>) -> i64 {
+    return t.data as i64 + t.len;
 }
 
 fn main_jhyy() -> i32 {
@@ -35,8 +26,8 @@ fn main_jhyy() -> i32 {
         return 10;
     }
 
-    // 2. sizeof(CapTable) == 16 (M0 简化 layout)
-    let s_tbl: i64 = sizeof(CapTable);
+    // 2. sizeof(CapTable<i32>) == 16 (*Cap<T> 8B + i64 8B, 跟 M0 一致)
+    let s_tbl: i64 = sizeof(CapTable<i32>);
     if s_tbl != 16 {
         return 11;
     }
@@ -47,10 +38,10 @@ fn main_jhyy() -> i32 {
         return 20;
     }
 
-    // 4. 跨函数 CapTable pass — 编 struct literal + cross_fn_sum_table
-    let tbl: CapTable = CapTable { data: 100 as i64, len: 5 as i64 };
+    // 4. 跨函数 CapTable<i32> pass — 编 struct literal + cross_fn_sum_table
+    let tbl: CapTable<i32> = CapTable<i32> { data: 0 as *Cap<i32>, len: 5 as i64 };
     let tbl_sum: i64 = cross_fn_sum_table(tbl);
-    if tbl_sum != 105 {
+    if tbl_sum != 5 {
         return 30;
     }
 
