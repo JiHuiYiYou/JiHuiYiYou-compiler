@@ -326,6 +326,69 @@ DEFERRED 到 v2.x 末 QBE 自写 stage)。v3.2.0b 是 caller-side mitigation,不
 
 ---
 
+## v3.2.0d — 3i fn path: call-site type inference (Rust-style `max(3, 5)`)
+
+**Status**: ✅ shipped
+**Tag**: `v3.2.0d`
+**D43 baseline**: N12 = `01209313cc61b974c9603d4a78acf9703d78193c4dd186448a4e9f78a8f2b362` (v1→v4 byte-equal verified 2026-09-08)
+
+### Scope (per `feedback_plans_per_version` 单 plan)
+
+实现 v3.2.0c § "Out of scope" 列表项 1 推到本 sprint 的内容:
+- **`mono_type_to_type_node`** helper (mono.jhyy +71):`*Type → *Node` 转换,call-site inference 时把 arg 类型 (e.g. `i32` / `f64`) 转换为 mono_mangle_type_node_fn 能识别的 NODE_IDENT (prim sym) / NODE_UNARY (ptr) / NODE_IDENT (struct)。Fallback: unsupported KIND → 返 0 触发 E0062 "cannot infer type parameter"。
+- **sema.jhyy inference arm (+359)** 在 NODE_CALL turbofish `else` 分支(per v3.2.0b L102-104 mitigation,全 offset access):
+  - 检测 `callee_sym.kind == SYM_FN` + `ntype_args == 0` + `mono_find_generic_def` 命中 → 进入 inference
+  - Walk fn params,匹配 type_annot.sym (per parser.jhyy L3150,type_params 存的是 *Sym 不是 *Node) → 记录 param_slot[i] 映射表
+  - Walk call args,`infer_type(arg)` → `*Type` → `mono_type_to_type_node` → 写到 type_args[matched_slot]
+  - T agreement 检查:mangle-equality cmp (strcmp 后 0-终止,因 jhyy 无 memcmp)
+  - 调 `mono_expand_fn_call` → rewrite callee.sym = mangled_sym
+  - **Inline cloned fn type_ptr setup**(L2273 check_func_decl 定义晚于本处,jhyy 无 forward decl):手动 build KIND_FUNC type + 设 mangled.type_ptr + kind=SYM_FN + 每个 cloned param sym 的 type_ptr + kind=SYM_VAR
+  - **Inline cloned body IDENT type_ptr propagation**(`mono_propagate_idents_in_expr` / `_to_cloned_body` helpers,~140 行):walk cloned body,每个 NODE_IDENT 的 type_ptr 从 sym.type_ptr 复制 — 因为 cloned fn 是 Pass 3b 才 append 的,Pass 3a 已 finish,Pass 3b 跳过 mangled-$ → 不会 check_func_decl → body IDENT.type_ptr 不会自动 set,需要手动 propagate(否则 csgtw on f64 等 fail)。
+- **2 新 test**(drop SKIP):
+  - `generics_fn_call_site_inference.jhyy`:`max(3, 5)` + `max(3.0, 5.0)` → emit 2 distinct fns `max$i32` (w) + `max$f64` (d)
+  - `generics_fn_call_site_mixed_dedup.jhyy`:`max(3, 5)` (call-site) + `max::<i32>(7, 2)` (turbofish) + `max(1, 9)` (call-site) → emit 1 `max$i32` instance(dedup 真发生 via symtab_lookup)
+
+### Root cause (3 处连锁 bug,v3.2.0d 修)
+
+1. **`mono_type_to_type_node` KIND_PRIMITIVE 找不到 prim sym**:尝试 `symtab_lookup(global_scope, "i32")` 返 0(prim syms 是 parse_type 时 lazy 注册到 current_scope,不是 global_scope)。**Fix**:用 `type_to_string(t)` 直接拿 prim name,合成 fake Sym via arena_alloc(56) + 设 name / kind=SYM_TYPE / 其他 0。
+2. **type_params storage 类型 confusion**:parser.jhyy L3150 `*tpslot = _tpsym as *u8` 存的是 *Sym,**不是** *Node。最初 match 时 deref NODE IDENT 错位,报 "no argument for some type parameter"。**Fix**:直接 `let tp_sym2 = *((gd_tp as i64 + tj2 * 8) as **Sym); if pt_sym2 == tp_sym2 as *u8 { matched_slot = tj2; ... }`。
+3. **cloned fn 在 Pass 3b 中 check_func_decl 没跑,导致 ms.type_ptr=0 + body IDENT.type_ptr=0**:turbofish path 在 Pass 3a 已跑过 → Pass 3b 跑 call 时 ms.type_ptr 已 set。Inference path 是 call site 自己 trigger mono,Pass 3a 已 finish,Pass 3b 跳过 mangled-$ → cloned fn 没被 check 任何东西。Recursive infer_type(callee IDENT) 看 type_ptr=0 → "undefined variable"。**Fix**:inline check_func_decl 的 type_ptr setup(fn_sym + 每个 param_sym)+ walk body 设 IDENT.type_ptr(jhyy 无 forward refs,所以 inline 而不是 call)。
+
+### Verification (ship gate)
+
+- **`make all`** green(stage-0 编 src0/ 无 segfault,inline helper 编译通过)
+- **`regress.py`**:114/114 passed, 0 failed, 15 skipped (was 113/113/15 at v3.2.0c)
+  - `generics_fn_call_site_inference.jhyy` EXIT=42 ✅
+  - `generics_fn_call_site_mixed_dedup.jhyy` EXIT=42 ✅
+  - 7/7 v3.2.0b/c tests 不退化 (`generics_struct` / `generics_ptr_field` / `generics_multi_param` / `generics_enum` / `generics_err_unsubst` / `generics_fn_turbofish_basic` / `cap_table_basic` / `cap_table_advanced`)
+- **`jhyy_get_il` on `generics_fn_call_site_inference.jhyy`**:断言 `max$i32` (`function w $max$i32(w %a, w %b)`) + `max$f64` (`function d $max$f64(d %a, w %b)`) — 2 distinct fn emit
+- **`jhyy_get_il` on `generics_fn_call_site_mixed_dedup.jhyy`**:断言只有 **1 个** `max$i32` (`function w $max$i32(w %a, w %b)`) — dedup hit 真发生 via `mono_expand_fn_call` L1298 `symtab_lookup` 共享
+- **D43 selfhost N12 byte-equal**:jhyy_v1.exe.exe (C-side baseline) + jhyy_v2.exe + jhyy_v3.exe + jhyy_v4.exe all compile `src0/main.jhyy` to byte-equal `.il` SHA `01209313cc61b974c9603d4a78acf9703d78193c4dd186448a4e9f78a8f2b362` ✅ (was N11 = `b87c9320...` at v3.2.0c — re-baselined)
+- **0 改动验证**:`git diff v3.2.0c..v3.2.0d -- compiler/src0/ast.jhyy parser.jhyy symtab.jhyy codegen.jhyy types.jhyy ir.jhyy abi_amd64_win.jhyy` empty
+- **`mono.jhyy` 仅新 `mono_type_to_type_node` helper** (+71 行),v3.2.0c ship 的 750 行 fn path 0 改动
+- **`sema.jhyy` 仅 NODE_CALL turbofish `else` 分支** (+359 行,含 inline helpers),v3.2.0c turbofish `if` 分支 (L958-998) 0 改动
+
+### Out of scope (deferred to v3.2.x 后续 或 v3.x 末)
+
+- return-position T 推断 (`fn max<T>(...) -> T`, 无 arg 是 T) → v3.2.0e
+- 嵌套 generic fn (`fn outer<T>(inner: fn(T) -> T)`) → v3.x 中
+- 高阶 trait bound 推断 (`T: Ord`) → v3.x 末
+- *Cap<T> / *mut T 推断边界(跟 v3.1.x `&mut` 交互) → v3.x 中
+- *Type → *Node 转换 KIND_FUNC / KIND_ARRAY / KIND_SLICE 全支持 → v3.x 中(v3.2.0d MVP 仅 KIND_PRIMITIVE / KIND_STRUCT / KIND_POINTER)
+- Recursive inference debug log → 不做(跑通即可,不加 debug print)
+- 泛型 closures → v3.2.1 (3j, D28 锁链下一节点)
+- Vec<T> / Map<K,V> std lib → v3.2.4 (3l.3, M11 launch 硬前置)
+- jhyy self-source 迁 `Vec<T>` → M11 launch (不阻本 ship)
+
+### Commit / Tag
+
+- **Commit C1**:`feat(mono+sema): call-site type inference for generic fn calls (3i fn path complete)`(axis-v3 commit `c7cf5b4`)
+- **Commit C2** (本段):`chore(docs): append v3.2.0d changelog section + spec supplement (call-site inference)`
+- **Tag**:`v3.2.0d`
+- **Post-tag D43 N12 SHA**:`01209313cc61b974c9603d4a78acf9703d78193c4dd186448a4e9f78a8f2b362`
+
+---
+
 ## 7. Cross-ref
 
 - L1 设计:`docs/plans/roadmap/v3.x-language-expansion.md § Sprint 3i`
