@@ -5159,12 +5159,16 @@ cmd_compile (main.jhyy)
 - 防御: `feedback_jhyy_brace_nesting_trap` 精神 — 嵌套 parse_expr IDENT branch 加 dispatch wrap 时, 现有 `} // close X` 注释在 wrap 后指向会变, 需 manual balance 验证
 
 
-## W-072: codegen_amd64_run end-to-end 0-byte .s — v2.6.5 真改覆盖 sema 但未覆盖 codegen 路径 (2026-09-09 surface)
+## W-073: codegen_amd64_run end-to-end 0-byte .s — v2.6.5 真改覆盖 sema 但未覆盖 codegen 路径 (2026-09-09 surface)
 
-**ID:** W-072
-**状态:** 🟡 **DEFERRED** — 2026-09-09 user 决定让 v3-axis owner 先修(v3 早发现 + 已在修,v2 axis 撤回 QBE 移除改动避免撞车);v2.10.0 QBE 移除等 v3 fix ship 后 rebase 续 ship
-**日期:** 2026-09-09 (introduced by v2.10.0 attempt — `run_qbe → stub` + `run_backend → codegen_amd64_run 唯一` 把"dead code in production"路径强制激活,真 bug surface)
-**superseder:** 待 v3-axis owner 真修 ship 后填入 commit sha
+**ID:** W-073
+**状态:** ✅ **RESOLVED** 2026-09-09 (v3.1.4 commit `31e9d95` W-068 真修 v2 — dedup codegen_amd64.jhyy + NULL guard + merge artifact 修;真 v2.10.0 path 上 codegen_amd64_run 真 emit 5/5 PASS regress)
+**日期:** 2026-09-09 (introduced by v2.10.0 attempt — `run_qbe → stub` + `run_backend → codegen_amd64_run 唯一` 把"dead code in production"路径强制激活,真 bug surface;RESOLVED via axis-v2 rebase onto origin/axis-v3 把 v3.1.4 fix 接入)
+**superseder:** v3.1.4 commit `31e9d95` (W-068 真修 v2 chain)
+
+> **注:** 原标 W-072(v2 axis 2026-09-09 文档化时),但 v3-axis 同日 09:17 已用 W-072 标了"0f9c923 merge artifact + codegen_amd64.jhyy 重复 fn def" bug (在 9e67c52 changelog commit 同步加 workarounds.md W-072)。两个 bug 实为同根 (codegen_amd64 inline_imports struct-literal fragility 的不同 surface);v3 fix 同时 resolve 两个。**v2 entry 重编号 W-073 避免冲突**, cross-ref W-072(同根 + 同时 RESOLVED)。
+
+> **注:** 不是用户偏好 entry,只是协调序号。
 
 **触发面:** v2.10.0 (V2-C Part 2+3) QBE 移除改动 — `compiler/src0/main.jhyy` `run_qbe` 改 stub (立即 stderr 报错 + return 1) + `run_backend` 改唯一调 `codegen_amd64_run(il_path, asm_path, t)`,**强制 codegen_amd64_run 成为 jhyy.exe 唯一 backend 路径**。但 codegen_amd64_run 在 v2.6.5 RE-ENABLED 之后从未在 production path 真正跑过(per main.jhyy:125 注释 — "run_backend routes through target_backend_mode but always calls run_qbe() until v2.6.x wires the self path",v2.6.5 修的是 import/sema 层面,codegen 路径仍 inert)。
 
@@ -5224,31 +5228,38 @@ $ ls -la /tmp/hello_test.s
 
 **v2.6.5 4 真改未覆盖面(W-068 链)**:
 - v2.6.5 修了 (1) struct-literal `: Arena`/`: StringBuilder` annotation (2) `parse_and_emit` forward ref reorder (3) `let _ = emit_X(...)` 模式统一 (4) `* (8 as i64)` precedence parens 22 处
-- **没改**: parse_and_emit dispatch loop 本身是否能 emit 任何东西(即 emit_X 函数体的内层指令——call sb_append, deref state.sb 的正确性,emit_func_header 是否真写 GAS prologue, etc.)。v2.6.5 解决 "能 parse + sema 通过",本 W-072 是 "parse 过 + sema 过 + 跑通 codegen dispatch loop 但 emit 函数体内层 silent-no-op"。
+- **没改**: parse_and_emit dispatch loop 本身是否能 emit 任何东西(即 emit_X 函数体的内层指令——call sb_append, deref state.sb 的正确性,emit_func_header 是否真写 GAS prologue, etc.)。v2.6.5 解决 "能 parse + sema 通过",本 W-073 是 "parse 过 + sema 过 + 跑通 codegen dispatch loop 但 emit 函数体内层 silent-no-op"。
 
-**可能的子根因(待 v3-axis owner 真查)**:
-- emit_func_header (codegen_amd64_emit_ctrl.jhyy) 的 body 可能依赖某个 mangled symbol,inline_imports 后 link 找不到 → silent fail
-- parse_and_emit 的 state_buf 解引用可能在 inline_imports 后 struct layout 偏移错位(类似 W-005 CGContext 128B invariant)
-- `sb` 跟 `state.sb` 在 inline_imports 后指向不同的 StringBuilder (state.sb 是 malloc 内部 field,sb 是 stack local,可能 ptr-of-ptr-of-stack 失效)
-- `n = lex_il_count(tokens)` 可能返回 0(lex_il token 数组里 EOF 在 index 0 处,scan 立刻停)
+**根因(实际,后由 v3.1.4 W-068 真修 v2 验证):**
+v3.1.4 commit `31e9d95` GDB-verified 找到 3 类 root cause (W-072 同根):
+1. `codegen_amd64.jhyy` L74 + L315 重复 `fn codegen_amd64_run` + `fn codegen_amd64_emit_raw_asm` def → symtab_insert 同 depth 重复返 NULL → parse_func / sema deref NULL → 触发 segfault 或 silent emit_no_op
+2. `main.jhyy` L839-856 dead code 含 2-arg `codegen_amd64_run(il_path, asm_path)` call → 跟 3-arg v2.6.3 signature 冲突
+3. `codegen.jhyy` 0f9c923 merge artifact 4 处 (Pass B 双 `cg_func` 调 / body_returns 双 ret / header emit if 缺 `}` / `emit_volatile` L619 unreachable 重复 `let _c2`)
+→ "silent emit no-op" 的实际机制 = codegen_amd64.jhyy duplicate fn def 让 inline_imports 后第二次 def 链接失败,QBE IL generation 跑通但 codegen_amd64_run 走的 emit_X 函数体符号未定义,silent return 0,sb.buf 不被 sb_append,final_buf = 0 字节
 
-**workaround (current — 2026-09-09 user 决定 v3-axis 修,v2 axis 撤回):**
+**workaround (已解决,记录于 2026-09-09 撤回时):**
 - axis-v2 worktree 已 revert 到 v2.9.0 baseline:`git checkout HEAD -- compiler/src0/main.jhyy compiler/src0/target_dispatch.jhyy compiler/build/bin/jhyy.exe compiler/build/bin/jhyy.exe.sha256`
 - v2.10.0 source 改动存 stash:`stash` 含 main.jhyy (-111 LOC run_qbe stub) + target_dispatch.jhyy (unknown target → fatal)
 - v2.10.0 patch 备份:`/tmp/v2.10.0-source-changes.patch` (238 lines)
 - jhyy.exe 当前 = v2.9.0 build,QBE 路径仍 active,regress 5/5 PASS 不受影响
 
-**v3-axis owner fix 后,v2 axis 续 ship v2.10.0 流程:**
-1. v3 fix commit ship 到 main(commit sha 入 W-072 "superseder" 字段)
-2. axis-v2 merge main → `git pull origin main` 或 `git merge main`
-3. `git stash pop`(恢复 v2.10.0 source 改动)
-4. `make`(rebuild jhyy.exe 拿 v2.10.0 + v3 fix)
-5. regress 5/5 PASS(验证 codegen_amd64_run 真 work,不再 0-byte)
-6. regress 5 sysv PASS(docker gcc chain 不受影响)
-7. byte_equal_amd64 10/10 + 20/20 + D43 closure sha HOLD
-8. ship v2.10.0(umbrella changelog + tag v2.10.0)
+**真修 (v3.1.4 commit `31e9d95` — ship 2026-09-09, 已 rebase 进 axis-v2 through rebase onto origin/axis-v3):**
+1. `codegen_amd64.jhyy` L74 dedup (删 2-arg `codegen_amd64_run` stub + L315 dedup `codegen_amd64_emit_raw_asm` stub → V3-B v3.0.1 fill body)
+2. `main.jhyy` L839-856 dead code 删 (移除 2-arg BACKEND_SELF branch)
+3. `codegen.jhyy` 0f9c923 merge artifact 4 处全修 (Pass B 双 cg_func / body_returns 双 ret / header emit if 缺 } / emit_volatile unreachable 重复 let)
+4. 附带 `parser.c` + `sema.c` 4 处 NULL guard defensive (parse_func sym NULL → fprintf + return NULL / parse_let sym NULL → still return node / sema.c:1281 check_module Pass 1 NODE_FUNC_DECL sym NULL → sema_error + continue / sema.c:841 infer_type NODE_LET sym NULL → skip + return type_void)
+→ axis-v2 rebase onto origin/axis-v3 接入后,regress 5/5 PASS + 5 sysv docker 5/5 PASS + codegen_amd64_run 真 emit 有效 .s。**v2.10.0 QBE 移除 + codegen_amd64_run 唯一路径 现在 ship-ready**(见 task #86)。
 
-**OS 启动链路:** W-072 = M5 deferral 第二前置(codegen_amd64_run 真能用 → v2.10.0 QBE 移除 ship → M5 启动条件 `v2.x 末 + v3.x 末` 一半达成)。M5 本身仍独立 sprint(per `v1.x-phase-4-m5-boot-from-scratch.md`)。
+**v2 axis 续 ship v2.10.0 流程 (post-rebase, v3 fix 已接入):**
+1. ✅ v3 fix commit ship 到 main(31e9d95 — 已通过 rebase 接入 axis-v2)
+2. `git stash pop`(恢复 v2.10.0 source 改动)
+3. `make`(rebuild jhyy.exe 拿 v2.10.0 + v3 fix)
+4. regress 5/5 PASS(验证 codegen_amd64_run 真 work,不再 0-byte)
+5. regress 5 sysv PASS(docker gcc chain 不受影响)
+6. byte_equal_amd64 10/10 + 20/20 + D43 closure sha HOLD
+7. ship v2.10.0(umbrella changelog + tag v2.10.0)
+
+**OS 启动链路:** W-073 = M5 deferral 第二前置(codegen_amd64_run 真能用 → v2.10.0 QBE 移除 ship → M5 启动条件 `v2.x 末 + v3.x 末` 一半达成)。M5 本身仍独立 sprint(per `v1.x-phase-4-m5-boot-from-scratch.md`)。
 
 **撞车风险(已 avoid — 2026-09-09 user 决定):**
 - v3-axis 跟 v2-axis 同修 codegen_amd64.jhyy 会重复劳动 + patch 冲突
