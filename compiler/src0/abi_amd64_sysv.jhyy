@@ -98,6 +98,20 @@ fn abi_sysv_classify_arg(t_raw: *u8) -> i32 {
         }
         return SYSV_CLASS_INTEGER();
     }
+    // v3.1.4: KIND_CAP — Cap<T> is 8-byte opaque builtin (size = 8).
+    //   SysV § A.2: any 8-byte aggregate = INTEGER class (RDI/RSI).
+    //   Per v3.1.0 spec § 3 — Cap<T> pass-by-value on SysV uses 1 reg slot.
+    //   (Carry-over from v3.1.3, formally added in v3.1.4 ship.)
+    if kind == KIND_CAP() {
+        return SYSV_CLASS_INTEGER();
+    }
+    // v3.1.4: KIND_PHANTOM — PhantomData<T> is ZST (size = 0). SysV ZSTs
+    //   are ignored at the call boundary (no register consumed) but we
+    //   defend with INTEGER fallback so any future layout drift doesn't
+    //   miss the arg entirely. Per v3.1.1 spec.
+    if kind == KIND_PHANTOM() {
+        return SYSV_CLASS_INTEGER();
+    }
     // Default: INTEGER (VOID / ALIAS / UNRESOLVED / unknown)
     return SYSV_CLASS_INTEGER();
 }
