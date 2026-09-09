@@ -491,7 +491,12 @@ feat(cap-table): add CapTable<T> + cross-function cap pass (3g.7)
   - `export function w $cross_fn_pd(w %p)` — `w` (4B PhantomData ZST INTEGER fallback ✅)
   - `export function w $main_jhyy()` — single def, 无 spurious `ret`
 - **5/5 旧 sysv tests 不退化** via `--target=amd64_sysv` (QBE compile 验证; gcc link 在 Windows native 因 calling convention 差异预期 fail,Docker E2E 走 OS M4 跨测)
+- **`cap_test_sysv.jhyy` 1/1 EXIT=42 via `--target=amd64_sysv_freestanding` + docker gcc:12 chain** ✅ — v3.1.4 ship 时 deferred (Docker 未跑), v3.1.4.1 patch 提前 closed (本地 Docker 启动 `gcc:12` image,Stage 1 `jhyy.exe compile --target=amd64_sysv_freestanding --no-link` → Stage 2 `docker run --rm -v $PWD:/work gcc:12 gcc -nostdlib -static -T runtime/linux_elf/link.ld crt0.S .s` → ELF `EXIT:42`)
 - **Regress binary sha256**: 见 C3 commit
+
+### 3.1.1 v3.1.4.1 patch follow-up (G1 deferred → early close)
+
+v3.1.4 ship 时 § 5 G1 验证项 (`cap_test_sysv.jhyy` 走 `--target=amd64_sysv`) 标 deferred (Docker daemon 未启)。本地 Docker Desktop 启后(per `feedback_docker_local`), 立即验证 v3.1.4 ship 内容仍通过 — SysV Cap<T> 8B INTEGER class + PhantomData<T> ZST INTEGER fallback 实 ELF 跑通 EXIT:42。本 patch 仅文档更新(无 src0/ 或 C-side 改动), jhyy.exe SHA 不变 (D43 N13 保持)。
 
 ### 3.2 Self-host closure (D43 baseline N12 → N13)
 
@@ -508,7 +513,7 @@ feat(cap-table): add CapTable<T> + cross-function cap pass (3g.7)
 | C-side `NodeFuncDecl` 加 `is_naked` / `type_params` 字段 (Agent 1 推测 layout drift, GDB 验证 false positive) | v3.x 末 N 代 fixed point |
 | Multi-line struct literal in imported module body parser fix | v3.x 末 |
 | `abi_sysv_emit_function_header` L183 placeholder 替换 | V2-B v2.10.x Phase 2b |
-| SysV Cap/PhantomData gcc link E2E (Docker gcc:12 chain) | OS M4 跨测 (per `v2.0.0-os-prep.md § 1` M4) |
+| SysV Cap/PhantomData gcc link E2E (Docker gcc:12 chain) | ✅ closed v3.1.4.1 patch (deferred → early close; `cap_test_sysv.jhyy` 1/1 EXIT:42 via `gcc:12`) |
 | PhantomData sysv codegen 深度验证 (call site / sret 嵌套) | v3.1.5 |
 | Vec<T> / HashMap<K,V> sysv std lib (用 PhantomData<T> 持类型参数) | v3.2.4 |
 
@@ -521,7 +526,7 @@ feat(cap-table): add CapTable<T> + cross-function cap pass (3g.7)
 - **v3.1.5**: PhantomData sysv codegen 深度验证 + docs cleanup
 - **v3.2.x** (3i generics monomorphize) — `Vec<T>` 等容器类型 + `CapTable<T>` 真实 monomorphize
 - **V2-C v2.10.x** (N 代 fixed point) — `abi_sysv_emit_function_header` L183 placeholder 替换
-- **OS M4 launch** (jhyy_OS) — V3-C 全 ship ✅ + V2-A ✅ + V2-B 全 ship + V2-C N 代 fixed point 验算过 — M4 launch 硬前置 2/3 满足
+- **OS M4 launch** (jhyy_OS) — V3-C 全 ship ✅ + V2-A ✅ + V2-B 全 ship + V2-C N 代 fixed point 验算过 — M4 launch 硬前置 3/3 满足 (v3.1.4.1 patch 关 G1)
 
 ### 5.2 跨边界 / Cross-boundary
 

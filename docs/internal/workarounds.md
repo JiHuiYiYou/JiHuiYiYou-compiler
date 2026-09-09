@@ -5150,6 +5150,8 @@ cmd_compile (main.jhyy)
 
 **superseder:** v3.1.4 ship (axis-v3 direct commit, per 2026-09-09 user 决定)。Stage 2 N=4 byte-equal closure hold, D43 baseline N12 → N13 re-baselined (post-tag fill-in 后)。
 
+**v3.1.4.1 patch follow-up (G1 deferred → early close, 2026-09-09):** v3.1.4 ship 时 plan § 5 G1 验证项 (`cap_test_sysv.jhyy` 走 `--target=amd64_sysv_freestanding` + docker gcc:12 chain) 标 deferred (本地 Docker daemon 未启)。Patch 启动本地 Docker Desktop (per `feedback_docker_local`, daemon ~30-60s 后 ready), 真跑 jhyy.exe Stage 1 (`--target=amd64_sysv_freestanding --no-link` → `cap_test_sysv.s`) + docker `gcc:12` Stage 2 (`gcc -nostdlib -static -T runtime/linux_elf/link.ld crt0.S cap_test_sysv.s → cap_test_sysv.elf`) → ELF `EXIT:42`。验证 v3.1.4 ship 内容(7 文件改动 + 4 NULL guard + Cap/PhantomData SysV INTEGER class)在 docker gcc:12 chain 实链下不退化。**结论**: v3.1.4 ship 内容 docker E2E PASS, 无需额外 src0/ 改动; v3.1.4.1 patch 仅文档更新 (changelog v3.1.4 § 3.1/§ 4/§ 5.1 + 本段 + ABI spec § 14.1.1 verification)。
+
 **引用:**
 - changelog: `docs/logs/v3/changelog-v3.1.md` v3.1.4 段 (per `feedback_changelog_umbrella`)
 - plan: `C:\Users\liuzhen\.claude\plans\dynamic-dreaming-spark.md` (v3.1.4 plan)

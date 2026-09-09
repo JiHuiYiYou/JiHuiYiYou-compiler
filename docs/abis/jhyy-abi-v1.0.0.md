@@ -917,6 +917,7 @@ Per v3.1.4, `abi_sysv_classify_arg` (compiler/src0/abi_amd64_sysv.jhyy) 加 2 ar
 - `cap_test_sysv.jhyy` (compiler/tests/examples/cap_test_sysv.jhyy, 38 行) `jhyy run --target=amd64_sysv` 1/1 EXIT=42 (Win target sanity)
 - IL dump 验证: `export function l $cross_fn_cap(l %c)` (l = 8B Cap INTEGER class ✅), `export function w $cross_fn_pd(w %p)` (w = 4B PhantomData ZST INTEGER fallback ✅)
 - 5 旧 sysv tests 不退化 (`sysv_abi_test` / `sysv_struct_*` / `sysv_vararg_basic` QBE compile 不退化;Docker gcc:12 chain 验证 deferred OS M4 launch)
+- **v3.1.4.1 patch follow-up**: G1 deferred gap closed — `cap_test_sysv.jhyy` 1/1 EXIT=42 via `--target=amd64_sysv_freestanding` + 本地 docker `gcc:12` chain (Stage 1 jhyy.exe 编 `.s` + Stage 2 docker `gcc -nostdlib -static -T runtime/linux_elf/link.ld crt0.S .s` → ELF)。Pattern 见 `compiler/build/bin/regress.py` `_run_cross_env_sysv_test` docker branch (v3.1.4 ship 时未实跑, v3.1.4.1 patch 验证后 PASS)
 
 ### 14.2 Cap<T> Wire Format(`Cap<T>` runtime layout)
 
