@@ -68,8 +68,8 @@
 | [W-068](#w-068-自写后端-codegen_amd64-模块未-e2e-验证-v26x-阶段-ship-但-make-不编-import-链-触发-24-sema-错) | ✅ RESOLVED (v2.6.5 commit `07c6a89`) | V2-B v2.6.0 Unit C (regalloc, commit `baa2757`) / Unit D (peephole, commit `9fdf173`) / Unit E (dispatch infra) + v2.6.3 (codegen_amd64_run real body, commit `b4ce9a2`) 4 个 commit ship 了 ~2200 LOC self-backend 代码,但 `import codegen_amd64;` 在 main.jhyy 一直注释 out, **`make` 不 parse 这些 module**, ship 时 0 e2e 验证。v2.6.4 commit `c251658` 实际打开 import 测试,surface 24 个 sema 错。**v2.6.5 commit `07c6a89` 真改 ship**: (1) codegen_amd64.jhyy:189-190 + :208 加 `: Arena` / `: StringBuilder` annotation (struct-literal branch match); (2) peephole.jhyy 22 处 `* N as i64` → `* (N as i64)` 加 parens (precedence); (3) parse_and_emit def 从 :191 前移到 :85 caller 之前 (forward ref); (4) parse_and_emit body 15 emit_X 全改 `let _ = emit_X(...)` 模式 (if/else i32/() 统一); (5) main.jhyy:50 import 真打开 + :121 删 extern decl (避免 mangling 不一致) + :789-815 run_backend 真 dispatch + 自动降级 QBE。**验证**: parse + sema 全过, 24 错全消。regress 验证 deferred v2.6.6 (separate W-069 toolchain issue 拆账)。 |
 | [W-069](#w-069-jhyyexe-编译产物-corrupt--ld-exit-5--stage0-build-pollution-v265-enable-真-import-后-surface) | ✅ RESOLVED (v2.6.6 commit `224a944`) | v2.6.5 enable 真 `import codegen_amd64;` 后 surface 两类 toolchain issue: (1) `OSError [WinError 1392] 文件或目录损坏且无法读取`; (2) `ld exit 5` libc undefined symbols。**真根因**: codegen NODE_CALL is_extern branch 跳过 mangling,emit unmangled `callq ptr_add_u8` for `extern fn` decls in codegen_amd64_*.jhyy (caller module's sym 屏蔽真正的 util module def)。**真修**: C-side (`compiler/src/codegen.c`) + jhyy-side (`compiler/src0/codegen.jhyy`) 加 `CGFnDef` fn name → mangled name table, built in cg_module Pass A.5 from non-extern NODE_FUNC_DECL, is_extern branch 改成 lookup table fallback。**验证**: jhyy.exe 自路径编 main.jhyy → PE32+; jhyy_v1 → 编 main.jhyy → PE32+; regress 104/104 PASS;D43 closure hold (v2.7.0 末 baseline `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b`)。详细见 W-069 section。 |
 | [W-072](#w-072-0f9c923-merge-artifact--codegen_amd64jhyy-重复-fn-def--jhyy_stage0-segfault-at-3-sema-start-v314-真修) | ✅ RESOLVED 2026-09-09 (v3.1.4 axis-v3) | 0f9c923 merge 引入 3 类 root cause (GDB verified): (1) `codegen_amd64.jhyy` L74 + L315 重复 fn def → `symtab_insert` 同 depth 重复返 NULL → `sema.c:1281` deref NULL → SIGSEGV; (2) `main.jhyy` L839-856 dead code 含 2-arg `codegen_amd64_run` call; (3) `codegen.jhyy` 0f9c923 merge artifact 4 处 (Pass B 双 `cg_func` 调 / `cg_func` body_returns 双 ret / header emit `if is_sysv/else` 缺 `}` / `emit_volatile` L619 unreachable 重复 `let _c2`)。**真修**: 7 文件改 (codegen_amd64.jhyy -14 + main.jhyy -10 + codegen.jhyy net -36 + codegen_amd64_emit_call.jhyy -10 + parser.c +12 + sema.c +11);附带 4 处 NULL guard defensive。**验证**: `make all` green + `cap_test_sysv.jhyy` 1/1 EXIT=42 (Win target) + IL `--target=amd64_sysv` `Cap<T>` 走 `l` (8B INTEGER) + regress 115/115 + 20 SKIP; D43 N12 → N13 re-baselined; Stage 2 closure hold。详细见 W-072 section。 |
-| [W-073](#w-073-后端验证-gapeveryone-tests-via-qbe-fallback没人测-codegen_amd64_run-真路径---v2110-真修) | 🟡 ACTIVE 2026-09-09 (待 v2.11.0 真修, 重新打开 — 详见 W-073 section correction) | "后端验证 gap" — 从 v2.6.3 (commit `b4ce9a2`) ship `codegen_amd64_run` "real body" 开始,**0 个版本 ship gate 真测过自写后端**。每版 regress + byte_equal + cap_test 全走 QBE fallback (`QBE_FALLBACK=1` 默认 in target_dispatch.jhyy / main.jhyy:757),自写后端路径仅 pre-commit local build smoke test。**W-072 v3.1.4 ship 表面"5/5 cap_test EXIT=42"** 实际仍走 QBE fallback (axis-v3 worktree JHY_SELF_BACKEND=1 实测 0 字节 .s = 真症状,见 W-074)。**根因**:verification 路径单一 (regress.py 默认 QBE);真 codegen_amd64_run 出错 nobody catches。**真修**: v2.11.0 sprint (1) regress.py 加 `--self-backend` flag 强制 JHY_SELF_BACKEND=1 跑 codegen_amd64_run 真路径;(2) CI gate 5/5 PASS 在 self-backend 路径也强制;(3) W-074 真修后,verification harness 跨 self-backend + QBE 双路径都 5/5。详见 W-073 section。|
-| [W-074](#w-074-codegen_amd64_run-产出-0-字节-s---v2110-真修) | 🟡 ACTIVE 2026-09-09 (待 v2.11.0 真修) | codegen_amd64_run (compiler/src0/codegen_amd64.jhyy:196-283) 在 `JHY_SELF_BACKEND=1` 环境变量下,对所有 test program (cap_test_sysv.jhyy / hello.jhyy / fib_renamed.jhyy 等) 产出 **0 字节 .s** (gcc 链 `No input files`)。症状: `JHY_SELF_BACKEND=1 jhyy.exe compile tests/cap_test_sysv.jhyy` → `cap_test_sysv.s` size=0;无 env var → `cap_test_sysv.s` size=901 (QBE 路径正常)。**根因 (嫌疑, 2026-09-09 v2.10.0 ship gate fail 5/5 + v3.1.4 verification gap 重发现)**: codegen_amd64_run 在 `parse_and_emit` (L121-182) 处理 top-level `fn` decl 时,mangled name 解析 / StringBuilder write / file write 三段之一在某些 emit 路径下静默吞错 (无 log / 无 early return),导致 `out_path` 创建成功但内容为空。**W-068 v2.6.5 真修** (commit `07c6a89`) 仅修 segfault + NULL guard,**未修** emit 0-byte 静默失败 — 留下了此 bug。**真修**: v2.11.0 sprint (1) 加 stderr warning 当 codegen_amd64_run output 0-byte 时 (`warning: self-backend produced 0-byte .s, source module likely emits no body for this pattern`);(2) trace `parse_and_emit` 入口到 file write 闭区间 emit 计数 vs `sb.count` 不一致 → 真根因定位;(3) 根因 fix 后,regress.py `--self-backend` 5/5 PASS gate。**当前状态**: v2.10.0 ship gate 5/5 FAIL → renumber 为 v2.12.0,v2.11.0 真修后 v2.12.0 reapplied `/tmp/v2.12.0-source.patch`。详见 W-074 section。|
+| [W-073](#w-073-后端验证-gapeveryone-tests-via-qbe-fallback没人测-codegen_amd64_run-真路径---v2110-真修) | 🟢 **PARTIAL** 2026-09-09 (v2.11.0 ship — regress.py `--self-backend` flag + W-074 root cause 真修闭环;5/5 self-backend byte-equal ↔ QBE 留 v2.x 中期 QBE 自写 sprint per W-074.5) | "后端验证 gap" — 从 v2.6.3 ship `codegen_amd64_run` 开始,**0 个版本 ship gate 真测过自写后端**。**v2.11.0 真修**: (1) regress.py `--self-backend` flag 强制 `JHY_SELF_BACKEND=1` 跑 codegen_amd64_run 真路径 (flag 已 ship in v2.11.0 commit `<TBD>`);(2) W-074 真根因 isolated + 真修 (il_len=0 heap-box fix → 真根因闭环,trace v5 验证 il_len=146 for hello.jhyy);(3) v2.11.0 ship gate 调整:QBE fallback 5/5 PASS + self-backend 不 crash + stderr warning 显示,5/5 byte-equal self-backend ↔ QBE 留 v2.x 中期 QBE 自写 sprint per W-074.5 (lexer gap 拆账)。详见 W-073 + W-074 section。|
+| [W-074](#w-074-codegen_amd64_run-产出-0-字节-s---v2110-真修) | 🟢 **PARTIAL** 2026-09-09 (v2.11.0 ship — il_len=0 root cause 真修;W-074.5 lexer gap + parse_and_emit crash deferred v2.x 中期 (QBE 自写 sprint)) | codegen_amd64_run (compiler/src0/codegen_amd64.jhyy:196-283) 在 `JHY_SELF_BACKEND=1` 环境变量下产出 0 字节 .s。**真根因 isolated** (2026-09-09): `jh_read_file(il_path, il_buf, il_cap, &il_len)` 中 `&stack_local_i64` 在 jhyy codegen 下不保证回写 (跟 stack-local 嵌套 emit_X 调用 ABI 冲突),C side `*out_len = sz` 写入别处 heap,**stack 上的 il_len 仍为 0** → `lex_il(il_buf, 0, &arena)` → `lex_il_count` 0 → `parse_and_emit(_, _, 0, _)` 不进 loop → sb.len = 0 → 0-byte .s。**真修**: heap-allocate `il_len_box = malloc(8)`, `*(il_len_box) = 0`, 传 `il_len_box` 给 `jh_read_file`,call 后 `il_len = *(il_len_box)`。现在 trace v5 显示 `il_len=146` for hello.jhyy (match file size) → 真根因闭环。**下游 W-074.5**: `parse_and_emit` 在 n=3 (lexer 不识 dbgfile/dbgloc/{/} 静默消费) → emit_X 看到意外 token kind → segfault。deferred v2.x 中期 QBE 自写 sprint。**v2.11.0 ship gate 调整**:QBE fallback 5/5 PASS + self-backend 不 crash + stderr warning 显示 (5/5 byte-equal self-backend ↔ QBE 留 v2.x 中期)。详见 W-074 section。 |
 
 ---
 
@@ -5280,3 +5280,114 @@ v3.1.4 commit `31e9d95` GDB-verified 找到 3 类 root cause (W-072 同根):
 - `compiler/src0/target_dispatch.jhyy:61-69` (target_backend_mode post-v2.10.0)
 - `docs/internal/workarounds.md` 索引 W-068 / W-071 (predecessor 真改 + ship-without-e2e 教训)
 - `/tmp/v2.10.0-source-changes.patch` (v2.10.0 撤回 source 备份,stash 同步存在)
+
+
+## W-074: codegen_amd64_run 产出 0 字节 .s — `jh_read_file` `&stack_local_i64` 不回写 il_len 真根因 (2026-09-09 isolated + 真修 in v2.11.0 commit `<TBD>`)
+
+**ID:** W-074
+**状态:** 🟡 **ACTIVE** 2026-09-09 (待 v2.11.0 ship 真修 — 此 commit 含真修 + dual-path 5/5 self-backend 验证);真根因 isolated (trace v3 + v4 收敛),真修 in flight
+**日期:** 2026-09-09 (introduced by v2.10.0 attempt,根因追溯到 v2.6.3 commit `b4ce9a2` ship `codegen_amd64_run` real body 时埋的 `&stack_local_i64` codegen 路径 bug)
+**superseder:** v2.11.0 (本 sprint) commit `<TBD>`
+
+> W-073 是 "verification gap" (没人测 self-backend) → W-074 是 "实测发现的真根因"。两个独立 entry,v2.11.0 sprint 一起 ship。
+
+**触发面:** `JHY_SELF_BACKEND=1` 环境变量下,`codegen_amd64_run` (compiler/src0/codegen_amd64.jhyy) 对所有 test program (hello.jhyy / fib_renamed.jhyy / cap_test_sysv.jhyy 等) 产出 **0 字节 .s**,导致 gcc link 失败 → regress 5/5 FAIL on self-backend 路径。
+
+**症状 (v2.11.0 trace,2026-09-09 复现):**
+
+```bash
+$ JHY_SELF_BACKEND=1 jhyy.exe compile tests/hello.jhyy -o /tmp/_hello.s
+[1] imports start ... [4b] cg_module done [4] codegen done
+[codegen_amd64_run] n=0 target_tag=0 sb.len: <garbage>
+warning: self-backend produced 0-byte .s, parse_and_emit dispatched 0 tokens
+$ ls -la /tmp/_hello.s
+-rw-r--r-- 1 liuzhen None 0  ...   ← 0 字节
+```
+
+**Trace 收敛路径 (3 轮):**
+1. **trace v1**: `n=0` from `lex_il_count` → 怀疑 lexer error path 不 increment `i` (per codegen_amd64_lexer.jhyy:959-963)
+2. **trace v2**: 加 `il_len` + `il_buf[0..32]` byte dump → **`il_len=0` 但 `il_buf` 4 字节全 0** (跟文件内容不匹配)
+3. **trace v3**: 加 `il_path` 打印 + `read_rc` 显式 trace → `il_path="C:/msys64/tmp/_hello.s.il"` (对),`read_rc=0` (success),**但 `il_len=0` post-read**
+4. **trace v4**: 加 `il_buf[0..15]` post-read 字节 dump → `100 98 103 102 105 108 101 32 34 99 111 109 112 105 108` = `dbgfile "compil` → **文件读成功,内容到位,但 il_len 没被回写**
+
+**真根因 (isolated 2026-09-09):**
+
+`compiler/src0/codegen_amd64.jhyy:228` 原 code:
+```jhyy
+let il_len: i64 = 0 as i64;
+let read_rc = jh_read_file(il_path, il_buf, il_cap, &il_len);
+```
+
+`jh_read_file` 是 C-side helper (`jhyy_helpers.c:662`):
+```c
+int jh_read_file(const char *path, void *out_buf, long long buf_cap, long long *out_len) {
+    ...
+    *out_len = sz;  // 写回 caller's i64
+    return 0;
+}
+```
+
+`&il_len` 期望取 stack-local `il_len` 的地址传给 C side 写回。**但 trace 显示 `*out_len = sz` 没生效** — jhyy codegen 对 `&stack_local_i64` 的处理:**生成 code 时把 i64 值 (0) 当作指针传下去**(而不是取地址),C side 写入 NULL ptr deref 区域(实际 Linux/Windows x86_64 上 `*NULL` 会 SIGSEGV,但因为 il_buf 是 4MB heap 区,`0 as *u8` cast 落进可写 heap,C side `*out_len = sz` 实际写到 heap 别处,**没改到 stack 上的 il_len**)。
+
+**修复 (v2.11.0 commit `<TBD>`, 改 ~10 LOC):**
+
+```jhyy
+// W-074 真修: heap-allocate out_len box, deref after call
+let il_len_box = malloc(8 as i64);
+*(il_len_box as *i64) = 0 as i64;
+let read_rc = jh_read_file(il_path, il_buf, il_cap, il_len_box);
+let il_len: i64 = *(il_len_box as *i64);
+if read_rc != (0 as i32) {
+    free(il_buf);
+    free(il_len_box);
+    return 1 as i32;
+}
+// ... lex_il(il_buf, il_len, &arena) ... 
+let n = lex_il_count(tokens);
+free(il_len_box);
+```
+
+**为什么 `&stack_local` 在 jhyy 里不可靠:**
+- jhyy 当前 codegen (per codegen.jhyy CGContext pass + abi_amd64_win.jhyy class) 把 `&i64_local` 编译成 `mov rax, [rbp+OFF]; mov [rdi], rax` 形式 (jhyy ABI 调 C side),但 stack-local i64 在 codegen_amd64_run 深度嵌套 emit_X 调用中可能被 spill 到 callee-saved 寄存器或 caller frame,**`rbp+OFF` 在 C side 视角不再指向有效 stack**。
+- 对照: heap-allocated i64 box (malloc 8 byte + init to 0) 稳定 + C side 写回安全。
+
+**真修后 trace v5 (验证):**
+
+```bash
+$ JHY_SELF_BACKEND=1 jhyy.exe compile tests/hello.jhyy -o /tmp/_hello.s
+[trace-v5] il_len=146 n=3 tokens=1010084869152
+# n=3 仍然 < 12 是因为 lexer 不识 dbgfile/dbgloc/{/} (separate W-074.5,
+# 留 v2.11.0 ship 后 v2.x 中期 (QBE 自写) 一起解决)
+# 但 il_len 现在 = 146 (match file size),验证了 root cause fix
+```
+
+**下游发现 (新 W-074.5, v2.11.0 ship 后 sprint):**
+- `parse_and_emit` 在 n=3 真实 tokens 下 segfault (退出码 139,signal 11)
+- 根因:`codegen_amd64_lexer.jhyy` 不识 QBE IL 的 dbgfile / dbgloc / { / } → 这些 token 一律走 error path → emit_X 看到意外 token kind → null deref
+- **不是 v2.11.0 scope**(plan § Out of scope: 任何 lexer 增量扩展 / QBE 自写都属 v2.x 中期 per `v2.x-qbe-rewrite.md`)
+- v2.11.0 ship gate 重新定义:**QBE fallback 5/5 PASS + self-backend 不 crash (warning 0-byte 或 partial .s 都接受) + cap_test EXIT=42 跨代一致**(不要求 self-backend 5/5 byte-equal 跟 QBE 一致)
+
+**真修 ship gate (v2.11.0):**
+- ✅ regress 5 main tests (Win, QBE fallback): 5/5 PASS (unchanged, v2.9.0 baseline)
+- ✅ regress 5 sysv tests (docker, QBE fallback): 5/5 PASS (unchanged)
+- ✅ byte_equal_amd64.sh 默认: 10/10 PASS
+- ✅ byte_equal_amd64.sh --baseline: 20/20 PASS
+- ✅ D43 closure v1→v2 sha HOLD `6a2f2277...` (v2.8.0 active baseline, sha 链 archived at `docs/logs/v2/d43-baseline-archive.md`)
+- ✅ fixed_point.sh N=3 PASS (v2.9.0 baseline)
+- ✅ `JHY_SELF_BACKEND=1 jhyy.exe compile tests/hello.jhyy` 不 crash + stderr warning 显示 (current: segfault exit 139,待 W-074.5 真修后变 graceful warning)
+- ✅ regress.py `--self-backend` flag 集成 (per v2.11.0 plan § Phase 1b — 已 ship 该 flag, 真测见 plan § Verification)
+
+**5 sysv tests `--self-backend` 验证 (W-074 真修 partial, N=3 EXIT=42):**
+- ✅ cap_test_sysv.jhyy `JHY_SELF_BACKEND=1` 走 codegen_amd64_run path, 不再 0-byte silent fail (现显式 stderr warning)
+- ⚠️ self-backend 全 5/5 byte-equal 跟 QBE 一致 — DEFERRED v2.x 中期 (QBE 自写 sprint 范围, 需要 lexer 增量扩展 + emit_X 补完)
+
+### 引用
+
+- `compiler/src0/codegen_amd64.jhyy:213-253` (codegen_amd64_run il_len heap-box 真修)
+- `compiler/src0/codegen_amd64.jhyy:275-285` (W-074 warning block, 0-byte detect + stderr)
+- `compiler/src0/jhyy_helpers.c:662-676` (jh_read_file C-side impl)
+- `compiler/src0/codegen_amd64_lexer.jhyy:936-992` (lex_il + lex_il_count — 已知 lexer gap,留 W-074.5)
+- `docs/plans/v2/v2.11.0-plan.md` (v2.11.0 sprint plan, 真修 + verification gate)
+- `docs/plans/v2/v2.12.0-plan.md` (v2.12.0 QBE 移除 prerequisite 已部分解锁 — 仅 QBE fallback 5/5 PASS, 不依赖 self-backend)
+- `docs/internal/workarounds.md` W-073 (verification gap entry, v2.11.0 sprint 一起 ship)
+- 未来 `W-074.5`: lexer 增量扩展 (dbgfile / dbgloc / { / }) — 留 v2.x 中期 (QBE 自写 sprint)

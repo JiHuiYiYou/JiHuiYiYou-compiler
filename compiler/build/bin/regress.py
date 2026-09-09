@@ -540,6 +540,13 @@ def main():
                     help="Run V2-C v2.9.0 N≥3 selfhost fixed-point closure 验算 "
                          "(jhyy_v1 ↔ jhyy_v2 ↔ jhyy_v3 byte-equal .il per D43). "
                          "Opt-in: does NOT affect default regress baseline.")
+    ap.add_argument("--self-backend", action="store_true",
+                    help="V2-C v2.11.0: force JHY_SELF_BACKEND=1 + unset QBE_FALLBACK "
+                         "to test self-written codegen_amd64_run path (bypasses QBE "
+                         "fallback). Per W-073 verification gap closure: codegen_amd64_run "
+                         "has been inert since v2.6.3 ship; this flag exercises the "
+                         "real backend path as ship gate. Opt-in: does NOT affect "
+                         "default regress baseline.")
     ap.add_argument("--cross", choices=["wsl", "docker", "auto", "none"],
                     default="auto",
                     help="Cross-env mode for sysv tests (v2.7.0 Phase 2b). "
@@ -568,6 +575,14 @@ def main():
         # V2-C v2.9.0 N≥3 fixed-point closure (opt-in; doesn't affect default regress)
         rc = test_fixed_point(tests)
         sys.exit(rc)
+
+    if args.self_backend:
+        # V2-C v2.11.0 W-073 closure: force self-written codegen_amd64_run path.
+        # Mutate os.environ so subprocess.run inherits via _build_subprocess_env().
+        os.environ["JHY_SELF_BACKEND"] = "1"
+        os.environ.pop("QBE_FALLBACK", None)
+        print(f"[--self-backend] JHY_SELF_BACKEND=1 set, QBE_FALLBACK unset", file=sys.stderr)
+        # Falls through to default regress run — env vars drive jhyy-side dispatch.
 
     if args.byte_equal_amd64:
         # V2-B v2.6.0 (Unit F) byte-equal-amd64 (opt-in; QBE-vs-self backend

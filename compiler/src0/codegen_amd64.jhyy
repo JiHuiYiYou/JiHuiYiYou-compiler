@@ -41,6 +41,7 @@ extern fn jh_read_file(path: *u8, out_buf: *u8, buf_cap: i64, out_len: *i64) -> 
 extern fn jh_write_file(path: *u8, buf: *u8, len: i64) -> i32;
 extern fn malloc(size: i64) -> *u8;
 extern fn free(p: *u8) -> i32;
+extern fn sprintf_lld(buf: *u8, fmt: *u8, val: i64) -> i32;
 
 // V3-B v3.0.1: inline asm side-file append — same externs as codegen.jhyy
 extern fn fopen(path: *u8, mode: *u8) -> *u8;
@@ -215,11 +216,20 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32 {
     let il_cap: i64 = (4 as i64) * (1024 as i64) * (1024 as i64);
     let il_buf = malloc(il_cap);
     if il_buf == (0 as *u8) { return 1 as i32; }
-    let il_len: i64 = 0 as i64;
-    let read_rc = jh_read_file(il_path, il_buf, il_cap, &il_len);
+    // W-074 fix: heap-allocate out_len to bypass &stack-local codegen bug.
+    // Previous: `let il_len: i64 = 0; jh_read_file(... &il_len)` — C side wrote
+    // through the address but jhyy's `&local_i64` doesn't reliably write back to
+    // the caller's stack slot (the post-read `il_len` trace showed 0 despite
+    // read_rc=0 and il_buf filled correctly). Using heap-allocated i64 + manual
+    // deref works.
+    let il_len_box = malloc(8 as i64);
+    *(il_len_box as *i64) = 0 as i64;
+    let read_rc = jh_read_file(il_path, il_buf, il_cap, il_len_box);
+    let il_len: i64 = *(il_len_box as *i64);
     if read_rc != (0 as i32) {
         // 1 = buf too small; -1 = err; v2.6.x hard fail (re-try pattern = v2.7.x territory)
         free(il_buf);
+        free(il_len_box);
         return 1 as i32;
     }
 
@@ -235,10 +245,12 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32 {
     let tokens = lex_il(il_buf, il_len, &arena);
     if tokens == (0 as *u8) {
         free(il_buf);
+        free(il_len_box);
         arena_free(&arena);
         return 1 as i32;
     }
     let n = lex_il_count(tokens);
+    free(il_len_box);
 
     // 3. CGState + StringBuilder init (heap-alloc'd, state has stable ptr)
     let state_buf = malloc(64 as i64);
@@ -262,6 +274,16 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32 {
 
     // 5. Dispatch loop → emit each token → .s into sb.buf
     let _pe_rc = parse_and_emit(state_buf, tokens, n, target_tag);
+    // W-074 v2.11.0: warn on 0-byte output. Run-time silent fail if n>0 + sb.len=0.
+    if sb.len == (0 as i64) && n > (0 as i64) {
+        let trace_tmp_cap: i64 = 64 as i64;
+        let trace_tmp = malloc(trace_tmp_cap);
+        if trace_tmp != (0 as *u8) {
+            let _r = sprintf_lld(trace_tmp, "warning: self-backend produced 0-byte .s, n=%lld tokens dispatched\n" as *u8, n);
+            let _w = jh_fputs_stderr(trace_tmp);
+            let _f = free(trace_tmp);
+        }
+    }
 
     // 6. Peephole fold on emitted .s (no-op if arena alloc fails)
     let raw = sb.buf;
