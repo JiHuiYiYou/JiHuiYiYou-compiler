@@ -838,6 +838,13 @@ static Type *infer_type(SemaContext *ctx, Node *n) {
                            type_to_string(decl_type), type_to_string(init_type));
         }
 
+        /* v3.1.4 W-068 真修 v2: symtab NULL guard — sym==NULL means parse_let
+           hit duplicate var name. Skip sema work to avoid SIGSEGV; the
+           parse error has already been reported. */
+        if (d->sym == NULL) {
+            n->type = type_void();
+            return n->type;
+        }
         d->sym->type = decl_type;
         d->sym->kind = SYM_VAR;
         if (ctx->nlocals < SEMA_MAX_LOCALS) {
@@ -1278,6 +1285,13 @@ static void check_module(SemaContext *ctx, Node *module) {
         switch (decl->kind) {
         case NODE_FUNC_DECL: {
             NodeFuncDecl *fd = node_func_decl_data(decl);
+            /* v3.1.4 W-068 真修 v2: symtab NULL guard (belt-and-suspenders —
+               parser.c:583 should have caught this, but if sym was NULL
+               we must not SIGSEGV on `fd->sym->kind = SYM_FN`). */
+            if (fd->sym == NULL) {
+                sema_error(ctx, decl->loc, "duplicate function declaration (symtab_insert returned NULL)");
+                continue;
+            }
             fd->sym->kind = SYM_FN;
             symtab_insert_sym(ctx->global_scope, fd->sym);
             break;

@@ -334,6 +334,15 @@ static Node *parse_let(Parser *p) {
     expect(p, TOKEN_SEMICOLON, ";");
 
     Sym *sym = symtab_insert(p->current_scope, vname, SYM_VAR, NULL, is_mut, p->scope_depth);
+    /* v3.1.4 W-068 真修 v2: symtab NULL guard — same as parse_func, prevent
+       SIGSEGV at sema.c:841 `d->sym->type = decl_type`. */
+    if (!sym) {
+        fprintf(stderr, "%s:%d:%d: error: duplicate variable name '%s' in scope\n",
+                loc.filename, loc.line, loc.col, vname);
+        p->error_count++;
+        /* still return a node so sema can continue; sym=NULL will be caught
+           by the sema belt-and-suspenders guard in check_module. */
+    }
     return ast_new_let(p->arena, loc, is_mut, sym, type_annot, init);
 }
 
@@ -581,6 +590,15 @@ static Node *parse_func(Parser *p, bool is_extern) {
 
     /* Register function in global scope BEFORE parsing body so recursive calls work */
     Sym *sym = symtab_insert(p->global_scope, fname, SYM_FN, NULL, false, 0);
+    /* v3.1.4 W-068 真修 v2: symtab NULL guard — duplicate fn def at same depth
+       returns NULL (symtab.c:82-84); report parse error early so downstream
+       sema doesn't SIGSEGV on `fd->sym->kind = SYM_FN` at sema.c:1281. */
+    if (!sym) {
+        fprintf(stderr, "%s:%d:%d: error: duplicate function name '%s' at same scope depth\n",
+                loc.filename, loc.line, loc.col, fname);
+        p->error_count++;
+        return NULL;
+    }
     if (is_extern && sym) sym->is_extern = true;
 
     push_scope(p);
