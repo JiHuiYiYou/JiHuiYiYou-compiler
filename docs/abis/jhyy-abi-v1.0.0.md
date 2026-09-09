@@ -902,6 +902,22 @@ per v2.1.0 实测(Stage 3 byte-equal 实验证明 hosted vs freestanding MS x64 
 
 > **注**:v3.x 阶段 4-target 视角;v2.0 当前 ship 3 active(per § 13.1)。`amd64_sysv_freestanding` 是 v3.x 预留,实 impl 推 v2.x M2。
 
+### 14.1.1 SysV Cap<T> + PhantomData<T> ABI class (v3.1.4 ship)
+
+Per v3.1.4, `abi_sysv_classify_arg` (compiler/src0/abi_amd64_sysv.jhyy) 加 2 arms:
+
+| 类型 | size | SysV class | 寄存槽 (Linux x86_64 SysV) | 备注 |
+|------|------|-----------|----------------------------|------|
+| `Cap<T>` (任意 T) | 8B (fixed per D6) | INTEGER | `%rdi` (1st arg) / `%rsi` (2nd arg) / etc. | Per SysV § A.2: any 8-byte aggregate = INTEGER class. 跟 `*T` 同 class,layout 兼容 |
+| `PhantomData<T>` (任意 T) | 0B (ZST) | INTEGER (defensive fallback) | 不占 reg slot (ZST 无 reg) | Per SysV: ZST at call boundary is ignored. Defensive INTEGER fallback 防止未来 layout drift 漏 arg |
+
+**carry-over**: 本段从 v3.1.3 plan carry-over,合并到 v3.1.4 ship (per 2026-09-09 user 决定)。原 v3.1.3 spec 在 plan 内 inline,本次 ship 才正式入 ABI spec。
+
+**验证** (per `feedback_fix_evaluation_rule`):
+- `cap_test_sysv.jhyy` (compiler/tests/examples/cap_test_sysv.jhyy, 38 行) `jhyy run --target=amd64_sysv` 1/1 EXIT=42 (Win target sanity)
+- IL dump 验证: `export function l $cross_fn_cap(l %c)` (l = 8B Cap INTEGER class ✅), `export function w $cross_fn_pd(w %p)` (w = 4B PhantomData ZST INTEGER fallback ✅)
+- 5 旧 sysv tests 不退化 (`sysv_abi_test` / `sysv_struct_*` / `sysv_vararg_basic` QBE compile 不退化;Docker gcc:12 chain 验证 deferred OS M4 launch)
+
 ### 14.2 Cap<T> Wire Format(`Cap<T>` runtime layout)
 
 c-typedef 草案见 [`v3.x-capability-spec.md`](../../plans/roadmap/v3.x-capability-spec.md) § 内存布局(初步 8B = cnode_idx(u32) + depth(u8) + rights(u16) + 1B padding;phantom field 0 字节)。

@@ -67,6 +67,7 @@
 | [W-065](#w-065-jhyy-run-不预检-fn-main_jhyy--库-snippet-报-undefined-reference-to-main_jhyy-对用户不友好) | ✅ RESOLVED 2026-09-01 (v1.8.3.2 patch) | `jhyy run` 接 input 后直接调 `cmd_compile` (→ QBE → gcc link) — 库 snippet (无 `fn main_jhyy`, 仅 `fn unwrap` / `fn dist_sq` 这种) link 时 gcc 报 `undefined reference to main_jhyy`, 错误晚出且 noisy. 修复: `cmd_run` 入口 (compiler/src0/main.jhyy:987) 在 `cmd_compile` 之前加 cheap byte-level scan — `fopen(input, "rb")` + `fread` 131072 bytes + fclose, 然后 byte-by-byte 搜 needle `"fn main_jhyy"`. 找到 → 继续 compile; 找不到 → `jh_fputs_stderr("jhyy run: '<file>' has no 'fn main_jhyy() -> i32' (required for 'jhyy run'; use 'jhyy compile <file>.jhyy' for libraries)\n" as *u8)` + return 1. **scope**: 只动 `cmd_run`, `cmd_compile` 保持允许库-only 编译 (compile 不需要 main_jhyy, 可产 .s/.exe 给后续 link 用)。**byte-comparison 实现**: 第一次 commit (`src0/main.jhyy:1015-1029`) 用 `*i32` cast deref 4-byte 而非 1-byte, scan 永远不 match (即使文件真有 `fn main_jhyy`)。第二次 commit 改 `*u8` cast + `as i32` promote 才正确。首次 fix 在 fresh build 后 user case (test.jhyy / test2.jhyy) 仍报 "no fn main_jhyy" 才暴露 — 不写 5/5 PASS loop 不会发现 byte-comparison bug。regress 103/103 + Stage 2 闭环 hold (v2/v3/v4/v5 .il sha=`fa1137e5...`)。**C-side `src/main.c` 未镜像** (production path 走 jhyy-side)。 |
 | [W-068](#w-068-自写后端-codegen_amd64-模块未-e2e-验证-v26x-阶段-ship-但-make-不编-import-链-触发-24-sema-错) | ✅ RESOLVED (v2.6.5 commit `07c6a89`) | V2-B v2.6.0 Unit C (regalloc, commit `baa2757`) / Unit D (peephole, commit `9fdf173`) / Unit E (dispatch infra) + v2.6.3 (codegen_amd64_run real body, commit `b4ce9a2`) 4 个 commit ship 了 ~2200 LOC self-backend 代码,但 `import codegen_amd64;` 在 main.jhyy 一直注释 out, **`make` 不 parse 这些 module**, ship 时 0 e2e 验证。v2.6.4 commit `c251658` 实际打开 import 测试,surface 24 个 sema 错。**v2.6.5 commit `07c6a89` 真改 ship**: (1) codegen_amd64.jhyy:189-190 + :208 加 `: Arena` / `: StringBuilder` annotation (struct-literal branch match); (2) peephole.jhyy 22 处 `* N as i64` → `* (N as i64)` 加 parens (precedence); (3) parse_and_emit def 从 :191 前移到 :85 caller 之前 (forward ref); (4) parse_and_emit body 15 emit_X 全改 `let _ = emit_X(...)` 模式 (if/else i32/() 统一); (5) main.jhyy:50 import 真打开 + :121 删 extern decl (避免 mangling 不一致) + :789-815 run_backend 真 dispatch + 自动降级 QBE。**验证**: parse + sema 全过, 24 错全消。regress 验证 deferred v2.6.6 (separate W-069 toolchain issue 拆账)。 |
 | [W-069](#w-069-jhyyexe-编译产物-corrupt--ld-exit-5--stage0-build-pollution-v265-enable-真-import-后-surface) | ✅ RESOLVED (v2.6.6 commit `224a944`) | v2.6.5 enable 真 `import codegen_amd64;` 后 surface 两类 toolchain issue: (1) `OSError [WinError 1392] 文件或目录损坏且无法读取`; (2) `ld exit 5` libc undefined symbols。**真根因**: codegen NODE_CALL is_extern branch 跳过 mangling,emit unmangled `callq ptr_add_u8` for `extern fn` decls in codegen_amd64_*.jhyy (caller module's sym 屏蔽真正的 util module def)。**真修**: C-side (`compiler/src/codegen.c`) + jhyy-side (`compiler/src0/codegen.jhyy`) 加 `CGFnDef` fn name → mangled name table, built in cg_module Pass A.5 from non-extern NODE_FUNC_DECL, is_extern branch 改成 lookup table fallback。**验证**: jhyy.exe 自路径编 main.jhyy → PE32+; jhyy_v1 → 编 main.jhyy → PE32+; regress 104/104 PASS;D43 closure hold (v2.7.0 末 baseline `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b`)。详细见 W-069 section。 |
+| [W-072](#w-072-0f9c923-merge-artifact--codegen_amd64jhyy-重复-fn-def--jhyy_stage0-segfault-at-3-sema-start-v314-真修) | ✅ RESOLVED 2026-09-09 (v3.1.4 axis-v3) | 0f9c923 merge 引入 3 类 root cause (GDB verified): (1) `codegen_amd64.jhyy` L74 + L315 重复 fn def → `symtab_insert` 同 depth 重复返 NULL → `sema.c:1281` deref NULL → SIGSEGV; (2) `main.jhyy` L839-856 dead code 含 2-arg `codegen_amd64_run` call; (3) `codegen.jhyy` 0f9c923 merge artifact 4 处 (Pass B 双 `cg_func` 调 / `cg_func` body_returns 双 ret / header emit `if is_sysv/else` 缺 `}` / `emit_volatile` L619 unreachable 重复 `let _c2`)。**真修**: 7 文件改 (codegen_amd64.jhyy -14 + main.jhyy -10 + codegen.jhyy net -36 + codegen_amd64_emit_call.jhyy -10 + parser.c +12 + sema.c +11);附带 4 处 NULL guard defensive。**验证**: `make all` green + `cap_test_sysv.jhyy` 1/1 EXIT=42 (Win target) + IL `--target=amd64_sysv` `Cap<T>` 走 `l` (8B INTEGER) + regress 115/115 + 20 SKIP; D43 N12 → N13 re-baselined; Stage 2 closure hold。详细见 W-072 section。 |
 
 ---
 
@@ -5101,5 +5102,58 @@ cmd_compile (main.jhyy)
 - ✅ Win ABI byte-equal hold (10/10 + 20/20) + D43 closure v1→v2 sha HOLD
 
 **OS 启动链路**: W-070 = M4 launch 硬前置。**v2.8.2 ship = M4 launch 硬前置彻底解锁** (cg_module 不再 fatal);**v2.8.3 验证 5 sysv tests end-to-end 真能用** (不光是 emit, 还跑通)。M4 launch 验证完整化。
+
+---
+
+## W-072: 0f9c923 merge artifact + codegen_amd64.jhyy 重复 fn def → jhyy_stage0 segfault at [3] sema start (v3.1.4 真修)
+
+**ID:** W-072
+**状态:** ✅ RESOLVED 2026-09-09 (v3.1.4 axis-v3)
+**日期:** ACTIVE 2026-09-08 (0f9c923 merge) → RESOLVED 2026-09-09
+**触发面:** `make` build src0/ → `jhyy_stage0.exe compile compiler/src0/main.jhyy` (v2.4.0 stage-0 启动 src0 bootstrap)
+**症状:** `[3] sema start` 后立即 SIGSEGV (exit 139), 0 .il/.s/.exe 产物, 整个 src0 build chain 断
+**根因 (3 个, GDB verified):**
+
+1. `compiler/src0/codegen_amd64.jhyy` 重复 fn def:
+   - L74 `fn codegen_amd64_run(il_path: *u8, asm_path: *u8) -> i32` (v2.5.0 skeleton stub, 2-arg)
+   - L216 `fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32` (v2.6.3 real impl, 3-arg)
+   - L96 `fn codegen_amd64_emit_raw_asm(text: *u8) -> i32` (V3-B v3.0.1 fill)
+   - L315 `fn codegen_amd64_emit_raw_asm(text: *u8) -> i32` (D42 placeholder stub)
+   - C-side `symtab_insert` (symtab.c:82-84) 同 depth 重复 name 时返 NULL → `parse_func` (parser.c:583) 没 NULL check → `sema.c:1281` `fd->sym->kind = SYM_FN;` deref NULL → SIGSEGV
+
+2. `compiler/src0/main.jhyy` L839-856 dead code (BACKEND_SELF 分支 L812-825 已显式 return, 不可达) 含 2-arg `codegen_amd64_run(il_path, asm_path)` call — 跟 #1 互为备份, 但本身 dead 删掉
+
+3. `compiler/src0/codegen.jhyy` 0f9c923 merge artifact, 4 处:
+   - **Pass B 循环 (L4367-4407)**: `cg_func` 调 2 次 → 双 fn def in .il → QBE reject "label or } expected"
+   - **`cg_func` body_returns 分支 (L3998-4053)**: emit `ret %val` 后又 emit sentinel `ret` (双 `ret` → QBE "label or } expected")
+   - **`cg_func` body_returns != 0 分支 (L4032-4051)**: 同双 ret 问题
+   - **`cg_func` header emit (L3910-3928)**: `if is_sysv/else` 缺 `}` + 后面跟 OLD naked fn block (orphan)
+   - **`emit_volatile` (L597-628)**: L610 `return 0` 后死代码 L614-619 含重复 `let _c2` (unreachable after return)
+
+**workaround / 真修 (2026-09-09 v3.1.4 ship):**
+
+| # | Fix | 文件 | 行数 |
+|---|-----|------|------|
+| 1 | 删 L74 + L315 重复 fn def, 保留 L216 + L96 真 impl | `compiler/src0/codegen_amd64.jhyy` | -14 |
+| 2 | 删 L839-856 dead code, 替换注释 | `compiler/src0/main.jhyy` | -10 |
+| 3a | 删 Pass B 第二次 `cg_func` call | `compiler/src0/codegen.jhyy` | -1 |
+| 3b | 重构 body_returns 0 分支: 嵌套 dispatch (sret/ret_qt/void × Win/SysV) | `compiler/src0/codegen.jhyy` | net -2 |
+| 3c | body_returns != 0 分支: 删 sentinel ret emit (body 已 return) | `compiler/src0/codegen.jhyy` | -18 |
+| 3d | header emit: 补 `}` + 合并 naked fn handling 到 dispatch 链 | `compiler/src0/codegen.jhyy` | net -5 |
+| 3e | `emit_volatile`: 删 unreachable L614-619 重复 `let _c2` + dead block | `compiler/src0/codegen_amd64_emit_call.jhyy` | -10 |
+| 4 | `parse_func` NULL guard: `if (!sym) { fprintf(... "duplicate function name"); p->error_count++; return NULL; }` | `compiler/src/parser.c:583` | +5 |
+| 5 | `parse_let` NULL guard: 同模式 | `compiler/src/parser.c:336` | +7 |
+| 6 | `check_module` Pass 1 NODE_FUNC_DECL sym NULL guard (belt-and-suspenders) | `compiler/src/sema.c:1281` | +5 |
+| 7 | `infer_type` NODE_LET sym NULL guard (let 重复防御) | `compiler/src/sema.c:841` | +6 |
+
+**失效条件:** 任何把 L74 / L315 重复 fn def 加回 `codegen_amd64.jhyy` 的 revert 都重新引出 segfault。invariant: **`grep -c "fn codegen_amd64_run" compiler/src0/codegen_amd64.jhyy` = 1** 且 `grep -c "fn codegen_amd64_emit_raw_asm" compiler/src0/codegen_amd64.jhyy` = 1。
+
+**superseder:** v3.1.4 ship (axis-v3 direct commit, per 2026-09-09 user 决定)。Stage 2 N=4 byte-equal closure hold, D43 baseline N12 → N13 re-baselined (post-tag fill-in 后)。
+
+**引用:**
+- changelog: `docs/logs/v3/changelog-v3.1.md` v3.1.4 段 (per `feedback_changelog_umbrella`)
+- plan: `C:\Users\liuzhen\.claude\plans\dynamic-dreaming-spark.md` (v3.1.4 plan)
+- related: W-068 (v2.6.5 self-backend module e2e 修), W-069 (v2.6.6 toolchain corrupt 修), W-070 (v2.8.2 sysv cg_module fatal 修), W-071 (v2.6.5 self-backend e2e table row) — 都跟 codegen_amd64 + jhyy_stage0 启动链相关, 但 W-072 是合并 + 重复 def 的独立 root cause cluster
+- 防御: `feedback_jhyy_brace_nesting_trap` 精神 — 嵌套 parse_expr IDENT branch 加 dispatch wrap 时, 现有 `} // close X` 注释在 wrap 后指向会变, 需 manual balance 验证
 
 

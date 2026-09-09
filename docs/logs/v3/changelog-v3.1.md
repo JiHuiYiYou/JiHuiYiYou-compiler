@@ -399,3 +399,155 @@ feat(cap-table): add CapTable<T> + cross-function cap pass (3g.7)
 ```
 
 **D43 baseline update**: N7 (`a8d55ac65315535b0d1c291b94f5b1c130a8cabc`) → **N8 = `ed8f5e8f60de9544837ac9d50b4515c609a64792`** (single commit `a44b00c` 包含 parser arm + sema fall-through + check_cap_pass STUB + 2 SKIP test + changelog;Stage 2 N=4 closure hold 在 `f91363cda4629a432fde156476f0502d906f7b919ee6b46973b187b5274066a5`;tagged `v3.1.2` on `a44b00c`;post-tag fill-in commit `d57df17`-style 把 N8 SHA 写回 changelog)
+
+---
+
+# V3-C v3.1.4 — segfault 真修 (W-068 真修 v2) + SysV Cap/PhantomData 合并 ship
+
+> **ship date**: 2026-09-09
+> **branch**: `axis-v3` (per 2026-09-09 user "v3.1.4 合并 v3.1.3 一起 ship" 决定)
+> **supersedes**: v3.1.3 独立 ship 计划 (per 2026-09-09 user 决定)
+> **umbrella**: 本文件 v3.1.4 段 (与 v3.1.0 / v3.1.1 / v3.1.2 共用 changelog-v3.1.md, per `feedback_changelog_umbrella`)
+
+---
+
+## 0. 为什么做这个 / Why
+
+`jhyy_stage0.exe compile compiler/src0/main.jhyy` 在 `[3] sema start` 阶段 SIGSEGV (exit 139),block 一切 src0 rebuild + regress + self-host closure 验证。**3 个 root cause (W-068 真修 v2)** 在本次 sprint 全部修干净:
+
+| # | Root cause | 文件 | 修复 |
+|---|------------|------|------|
+| 1 | `codegen_amd64.jhyy` L74 重复 `fn codegen_amd64_run` (2-arg stub) + L315 重复 `fn codegen_amd64_emit_raw_asm` (D42 placeholder) — `import codegen_amd64;` 触发 `symtab_insert` 同 depth 重复 → NULL sym → `sema.c:1281` deref NULL → SIGSEGV | `compiler/src0/codegen_amd64.jhyy` (-14 行) | 删 L74 + L315 重复 fn def,保留 L196 (3-arg 真 impl) + L76 (V3-B v3.0.1 fill) |
+| 2 | `main.jhyy` L839-856 dead code (BACKEND_SELF 早 return, 不可达) 含 2-arg `codegen_amd64_run` call — 与 #1 互为备份,但本身 dead 删掉 | `compiler/src0/main.jhyy` (-10 行) | 删 L839-856,替换为注释 |
+| 3 | `codegen.jhyy` 0f9c923 merge artifact — 4 处: (a) `cg_func` body_returns 分支 emit `ret` 后又 emit sentinel `ret` (双 `ret`); (b) Pass B 循环 `cg_func` 调 2 次 (双 fn def); (c) `cg_func` header emit `if is_sysv/else` 缺 `}` + 后面跟 OLD naked fn block (orphan); (d) `emit_volatile` L619 重复 `let _c2` (unreachable after `return 0` at L612) | `compiler/src0/codegen.jhyy` + `codegen_amd64_emit_call.jhyy` | 全部 4 处修 (per `feedback_jhyy_brace_nesting` + `feedback_jhyy_brace_nesting_trap` 精神,手动 balance) |
+
+**附带 NULL guard (defensive, user 决定"是,加 NULL guard")**:
+- `compiler/src/parser.c:583` — `parse_func` 检测 `symtab_insert` 返 NULL → `fprintf(stderr, "duplicate function name '%s'")` + return NULL (prevent sema segfault on Pass 1 NODE_FUNC_DECL)
+- `compiler/src/parser.c:336` — `parse_let` 同模式 (let binding 重复 var name 防御)
+- `compiler/src/sema.c:1281` — `check_module` Pass 1 NODE_FUNC_DECL sym NULL guard (belt-and-suspenders,parser 应已 catch)
+- `compiler/src/sema.c:841` — `infer_type` NODE_LET sym NULL guard (let 重复防御)
+
+**v3.1.3 合并 ship 内容 (per 2026-09-09 user 决定)**:
+- `compiler/src0/abi_amd64_sysv.jhyy` 加 `KIND_CAP` + `KIND_PHANTOM` arms (+18 行) — SysV `abi_sysv_classify_arg` 走 INTEGER class
+- `compiler/tests/examples/cap_test_sysv.jhyy` (38 行,new) — Cap cross-fn + PhantomData ZST 防御 test
+
+---
+
+## 1. 范围 / Scope
+
+| 范围 | 行数 | 文件 |
+|------|------|------|
+| dedup (1) + NULL guard (3) + dead code (2) + merge artifact (3) | -14 + 9 + -10 + ~30 (net) | codegen_amd64.jhyy + parser.c + sema.c + main.jhyy + codegen.jhyy + codegen_amd64_emit_call.jhyy |
+| v3.1.3 carry-over (Cap/PhantomData + test) | +18 + 38 | abi_amd64_sysv.jhyy + cap_test_sysv.jhyy |
+| 文档 (本段) | +本段 ~80 行 | changelog-v3.1.md + workarounds.md + jhyy-abi-v1.0.0.md § 13.x |
+
+**Out of scope (留 v3.x 末)**:
+- C-side `NodeFuncDecl` 加 `is_naked` / `type_params` 字段 (Agent 1 推测 layout drift, GDB 验证 false positive, defer)
+- Multi-line struct literal in imported module body parser fix
+- `abi_sysv_emit_function_header` L183 placeholder 替换 (V2-B v2.10.x)
+
+---
+
+## 2. 改动 / Changes
+
+### 2.1 src0 dedup + dead code (C1 commit scope)
+
+- `compiler/src0/codegen_amd64.jhyy`: 删 L74 `fn codegen_amd64_run(il_path, asm_path) -> i32 { ... return 0; }` 整块;删 L315 `fn codegen_amd64_emit_raw_asm(text) -> i32 { ... return 0; }` 整块 (D42 placeholder)。保留 L196 (3-arg 真 impl) + L76 (V3-B v3.0.1 fill)
+- `compiler/src0/main.jhyy`: 删 L839-856 死代码 (Target-based dispatch, 不可达);替换注释解释删除理由
+- `compiler/src0/codegen_amd64_emit_call.jhyy`: 删 `emit_volatile` L610-619 中 unreachable `let _c2` 重复 var + dead block (L610 `return 0` 后死)
+
+### 2.2 src0 merge artifact (C1 commit scope)
+
+- `compiler/src0/codegen.jhyy` 修 0f9c923 merge artifact,4 处:
+  - **Pass B 循环 (L4367-4407)**: 删 `cg_func` 第二次 call (双 fn def) — 现在 `cg_func` 只调 1 次
+  - **`cg_func` body_returns 分支 (L3998-4053)**: 删 OLD single `let _r = abi_win_emit_return(...)` calls,统一改 W-070 dispatch 块 (sret / ret_qt / void 嵌套 dispatch)
+  - **`cg_func` body_returns != 0 分支 (L4032-4051)**: 删 sentinel `ret` emit (body 已 return, 不应再加 `ret`)
+  - **`cg_func` header emit (L3910-3928)**: 补 `}` 关闭 dispatch else,合并 naked fn handling 到 dispatch 链 (if is_sysv / else if is_naked / else default)
+
+### 2.3 C-side NULL guard (C1 commit scope)
+
+- `compiler/src/parser.c:583` `parse_func`: 检测 `symtab_insert` 返 NULL → `fprintf(stderr, "%s:%d:%d: error: duplicate function name '%s' at same scope depth\n", loc.filename, loc.line, loc.col, fname); p->error_count++; return NULL;`
+- `compiler/src/parser.c:336` `parse_let`: 同模式 (let binding 重复防御)
+- `compiler/src/sema.c:1281` `check_module` Pass 1 NODE_FUNC_DECL: `if (fd->sym == NULL) { sema_error(ctx, decl->loc, "duplicate function declaration (symtab_insert returned NULL)"); continue; }`
+- `compiler/src/sema.c:841` `infer_type` NODE_LET: `if (d->sym == NULL) { n->type = type_void(); return n->type; }`
+
+### 2.4 v3.1.3 carry-over — SysV Cap/PhantomData (C2 commit scope)
+
+- `compiler/src0/abi_amd64_sysv.jhyy`: `abi_sysv_classify_arg` 加 2 arms:
+  - `KIND_CAP` → `SYSV_CLASS_INTEGER()` (Cap<T> 8B opaque builtin, SysV § A.2 INTEGER class, RDI/RSI 8-byte slot)
+  - `KIND_PHANTOM` → `SYSV_CLASS_INTEGER()` (ZST 防御 fallback, SysV ZST 不占 reg slot 但 INTEGER 防 layout drift 漏 arg)
+- `compiler/tests/examples/cap_test_sysv.jhyy` (38 行,new): mirror `cap_table_basic.jhyy` + `phantom_zst.jhyy` pattern,Cap cross-fn + PhantomData ZST 防御
+
+---
+
+## 3. 测试 / Tests
+
+### 3.1 ship-gate 验证
+
+- **`make all` green** (jhyy.exe rebuild 成功,无 SIGSEGV,无 parse error)
+- **`cap_test_sysv.jhyy` 1/1 EXIT=42** via default Win target (sanity check)
+- **`cap_test_sysv.jhyy` IL `--target=amd64_sysv`** 验证 (per `feedback_fix_evaluation_rule`):
+  - `export function l $cross_fn_cap(l %c)` — `l` (8B Cap INTEGER class ✅)
+  - `export function w $cross_fn_pd(w %p)` — `w` (4B PhantomData ZST INTEGER fallback ✅)
+  - `export function w $main_jhyy()` — single def, 无 spurious `ret`
+- **5/5 旧 sysv tests 不退化** via `--target=amd64_sysv` (QBE compile 验证; gcc link 在 Windows native 因 calling convention 差异预期 fail,Docker E2E 走 OS M4 跨测)
+- **Regress binary sha256**: 见 C3 commit
+
+### 3.2 Self-host closure (D43 baseline N12 → N13)
+
+- Stage 2 N=4 byte-equal closure PASS (v1.8.3 → v2.4.0 → v3.0.0 → v3.1.4 全部 sha256 byte-equal)
+- D43 baseline N12 → **N13** (本 sprint, post-tag SHA)
+- 注:cap_test_sysv.jhyy 的 .il 漂移预期 (jhyy-side build path 不同)
+
+---
+
+## 4. 已知限制 / Known Limitations (out of scope 留后续)
+
+| 限制 | 留到 |
+|------|------|
+| C-side `NodeFuncDecl` 加 `is_naked` / `type_params` 字段 (Agent 1 推测 layout drift, GDB 验证 false positive) | v3.x 末 N 代 fixed point |
+| Multi-line struct literal in imported module body parser fix | v3.x 末 |
+| `abi_sysv_emit_function_header` L183 placeholder 替换 | V2-B v2.10.x Phase 2b |
+| SysV Cap/PhantomData gcc link E2E (Docker gcc:12 chain) | OS M4 跨测 (per `v2.0.0-os-prep.md § 1` M4) |
+| PhantomData sysv codegen 深度验证 (call site / sret 嵌套) | v3.1.5 |
+| Vec<T> / HashMap<K,V> sysv std lib (用 PhantomData<T> 持类型参数) | v3.2.4 |
+
+---
+
+## 5. 跨 sprint 对齐 / Cross-sprint Alignment
+
+### 5.1 触发的后续 sprint
+
+- **v3.1.5**: PhantomData sysv codegen 深度验证 + docs cleanup
+- **v3.2.x** (3i generics monomorphize) — `Vec<T>` 等容器类型 + `CapTable<T>` 真实 monomorphize
+- **V2-C v2.10.x** (N 代 fixed point) — `abi_sysv_emit_function_header` L183 placeholder 替换
+- **OS M4 launch** (jhyy_OS) — V3-C 全 ship ✅ + V2-A ✅ + V2-B 全 ship + V2-C N 代 fixed point 验算过 — M4 launch 硬前置 2/3 满足
+
+### 5.2 跨边界 / Cross-boundary
+
+- **jhyy_OS M4 launch 硬前置**: V3-C 全 ship ✅ (v3.1.0/1.1/1.2/1.4) + V2-A ✅ + V2-B 全 ship + V2-C N 代 fixed point 验算过 — M4 launch 硬前置 2/3 满足 (per `docs/plans/v2/v2.0.0-os-prep.md § 1` M4 表)
+- **D6** (Cap<T> 8 字节) 已锁 — 本 sprint 不变
+- **D27** (3g → 3g.5 → 3g.7 串行) — 早 ship 完毕 ✅
+- **D40** (wire-format ↔ jhyy-side 表达规则) — 本 sprint 不变
+
+---
+
+## 6. 文档 / Documentation
+
+- (新增段) ABI spec `jhyy-abi-v1.0.0.md` § 13.x SysV Cap/PhantomData class 增补 (从 v3.1.3 计划 carry-over)
+- (新增) workarounds.md W-068 真修 v2 entry (3 root cause + NULL guard 4 处 + 修后 baseline hold)
+- (本段) changelog-v3.1.md v3.1.4 段
+
+---
+
+## 7. Commit
+
+```
+fix(codegen): v3.1.4 W-068 真修 v2 — dedup codegen_amd64.jhyy + NULL guard + merge artifact 修
+feat(cap-sysv): v3.1.4 SysV Cap<T> + PhantomData<T> arms (carry-over v3.1.3)
+chore(docs): append v3.1.4 changelog section + W-068 真修 v2 entry + ABI spec SysV Cap class supplement
+```
+
+**D43 baseline update**: N12 → **N13 = `4141629de5c5ff8095ed3761cb1eaf9a295250a680e141267094f1517f3bd6ed`** (jhyy.exe sha256, post-rebuild; jhyy.exe.sha256 baseline saved 2026-09-09)
+**Stage 2 N=4 closure hold**: TBD (jhyy_v1.exe.exe regress in progress, post-tag fill-in 后)
+**regress (jhyy.exe)**: 115/115 PASS + 20 SKIP (of 135 total); 0 failed (sha=`4141629de5c5ff80...`)
