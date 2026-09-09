@@ -5159,3 +5159,111 @@ cmd_compile (main.jhyy)
 - 防御: `feedback_jhyy_brace_nesting_trap` 精神 — 嵌套 parse_expr IDENT branch 加 dispatch wrap 时, 现有 `} // close X` 注释在 wrap 后指向会变, 需 manual balance 验证
 
 
+## W-072: codegen_amd64_run end-to-end 0-byte .s — v2.6.5 真改覆盖 sema 但未覆盖 codegen 路径 (2026-09-09 surface)
+
+**ID:** W-072
+**状态:** 🟡 **DEFERRED** — 2026-09-09 user 决定让 v3-axis owner 先修(v3 早发现 + 已在修,v2 axis 撤回 QBE 移除改动避免撞车);v2.10.0 QBE 移除等 v3 fix ship 后 rebase 续 ship
+**日期:** 2026-09-09 (introduced by v2.10.0 attempt — `run_qbe → stub` + `run_backend → codegen_amd64_run 唯一` 把"dead code in production"路径强制激活,真 bug surface)
+**superseder:** 待 v3-axis owner 真修 ship 后填入 commit sha
+
+**触发面:** v2.10.0 (V2-C Part 2+3) QBE 移除改动 — `compiler/src0/main.jhyy` `run_qbe` 改 stub (立即 stderr 报错 + return 1) + `run_backend` 改唯一调 `codegen_amd64_run(il_path, asm_path, t)`,**强制 codegen_amd64_run 成为 jhyy.exe 唯一 backend 路径**。但 codegen_amd64_run 在 v2.6.5 RE-ENABLED 之后从未在 production path 真正跑过(per main.jhyy:125 注释 — "run_backend routes through target_backend_mode but always calls run_qbe() until v2.6.x wires the self path",v2.6.5 修的是 import/sema 层面,codegen 路径仍 inert)。
+
+**症状 (v2.10.0 试 ship 时 regress 5/5 FAIL):**
+
+```bash
+$ python compiler/build/bin/regress.py --tests=hello.jhyy,...
+[1] imports start
+[2] imports done
+[3] sema start
+[sema] P1 ndeccls=2
+[sema] P2 start
+[sema] P3 start
+[sema] P3 i=0
+[4] post-sema
+[4a] ir_init done
+[cg] Pass B start
+[cg] B i=0
+[4b] cg_module done
+[4] codegen done
+gcc link failed: "...gcc.exe" -g0 ... "C:\...\Temp\jha00006cb5.s" ... -o "C:\...\Temp\jhe00006cb6.exe" -lm
+gcc stderr:
+collect2.exe: error: ld returned 1 exit status
+FAIL  hello.jhyy  expected=42 got=-1  compile failed
+
+===== 0/5 passed, 5 failed =====
+```
+
+manual 复现:
+```bash
+$ rm -f /tmp/hello_test.s
+$ ./compiler/build/bin/jhyy.exe compile compiler/tests/examples/hello.jhyy -o /tmp/hello_test
+... (上面 [cg] Pass B ... [4b] cg_module done ... [4] codegen done 路径完整)
+gcc link failed: ...
+$ ls -la /tmp/hello_test.s
+-rw-r--r-- 1 liuzhen None  0 Sep  9 08:21 /tmp/hello_test.s   ← 0 字节!
+```
+
+**对比 v2.9.0 jhyy.exe baseline(per `git stash` 撤回 v2.10.0 改动后 rebuild)**:
+- /tmp/hello_test.exe (Sep 8 build, v2.9.0 baseline + QBE path) → `exit=42` ✅ 输出正确
+- /tmp/hello_test.s (Sep 9 build, v2.10.0 + codegen_amd64_run path) → `0 字节` ❌
+
+**根因(初步诊断,v3-axis owner 真修时参考):**
+
+`codegen_amd64_run` 函数体看似跑完([4b] cg_module done + [4] codegen done 都打),但 sb.len = 0 → final_buf 是 0 字节 arena alloc(从未被 sb_append 写过)→ 写到 .s 是 0 字节 → gcc ld exit 1。
+
+涉及链路(codegen_amd64.jhyy:160-247):
+1. `read_file(il_path)` → il_buf OK(下游 [4a] ir_init done 已确认 .il 生成正确)
+2. `arena_init(&arena, 2MB)` → OK
+3. `lex_il(il_buf, il_len, &arena)` → tokens 非 0(否则 lex_il 阶段会报)
+4. `lex_il_count(tokens)` → n 待 verify(如果 n=0 则 parse_and_emit loop 不跑 → sb 不变)
+5. `cg_state_init(state_buf, &sb, &arena, "")` → sb.buf = arena-alloc 256B, sb.len = 0, sb.cap = 256
+6. `parse_and_emit(state_buf, tokens, n, target_tag)` → 15-分支 dispatch loop, 调 emit_X(state, tok_p, target_tag)
+7. emit_X 应该 sb_append(state.sb, ...) → 但 sb.len 仍 0
+8. `peephole_fold(sb.buf, sb.len=0, &arena, target_tag)` → 0 字节
+9. `jh_write_file(asm_path, final_buf, raw_len=0)` → 0 字节 .s
+
+**v2.6.5 4 真改未覆盖面(W-068 链)**:
+- v2.6.5 修了 (1) struct-literal `: Arena`/`: StringBuilder` annotation (2) `parse_and_emit` forward ref reorder (3) `let _ = emit_X(...)` 模式统一 (4) `* (8 as i64)` precedence parens 22 处
+- **没改**: parse_and_emit dispatch loop 本身是否能 emit 任何东西(即 emit_X 函数体的内层指令——call sb_append, deref state.sb 的正确性,emit_func_header 是否真写 GAS prologue, etc.)。v2.6.5 解决 "能 parse + sema 通过",本 W-072 是 "parse 过 + sema 过 + 跑通 codegen dispatch loop 但 emit 函数体内层 silent-no-op"。
+
+**可能的子根因(待 v3-axis owner 真查)**:
+- emit_func_header (codegen_amd64_emit_ctrl.jhyy) 的 body 可能依赖某个 mangled symbol,inline_imports 后 link 找不到 → silent fail
+- parse_and_emit 的 state_buf 解引用可能在 inline_imports 后 struct layout 偏移错位(类似 W-005 CGContext 128B invariant)
+- `sb` 跟 `state.sb` 在 inline_imports 后指向不同的 StringBuilder (state.sb 是 malloc 内部 field,sb 是 stack local,可能 ptr-of-ptr-of-stack 失效)
+- `n = lex_il_count(tokens)` 可能返回 0(lex_il token 数组里 EOF 在 index 0 处,scan 立刻停)
+
+**workaround (current — 2026-09-09 user 决定 v3-axis 修,v2 axis 撤回):**
+- axis-v2 worktree 已 revert 到 v2.9.0 baseline:`git checkout HEAD -- compiler/src0/main.jhyy compiler/src0/target_dispatch.jhyy compiler/build/bin/jhyy.exe compiler/build/bin/jhyy.exe.sha256`
+- v2.10.0 source 改动存 stash:`stash` 含 main.jhyy (-111 LOC run_qbe stub) + target_dispatch.jhyy (unknown target → fatal)
+- v2.10.0 patch 备份:`/tmp/v2.10.0-source-changes.patch` (238 lines)
+- jhyy.exe 当前 = v2.9.0 build,QBE 路径仍 active,regress 5/5 PASS 不受影响
+
+**v3-axis owner fix 后,v2 axis 续 ship v2.10.0 流程:**
+1. v3 fix commit ship 到 main(commit sha 入 W-072 "superseder" 字段)
+2. axis-v2 merge main → `git pull origin main` 或 `git merge main`
+3. `git stash pop`(恢复 v2.10.0 source 改动)
+4. `make`(rebuild jhyy.exe 拿 v2.10.0 + v3 fix)
+5. regress 5/5 PASS(验证 codegen_amd64_run 真 work,不再 0-byte)
+6. regress 5 sysv PASS(docker gcc chain 不受影响)
+7. byte_equal_amd64 10/10 + 20/20 + D43 closure sha HOLD
+8. ship v2.10.0(umbrella changelog + tag v2.10.0)
+
+**OS 启动链路:** W-072 = M5 deferral 第二前置(codegen_amd64_run 真能用 → v2.10.0 QBE 移除 ship → M5 启动条件 `v2.x 末 + v3.x 末` 一半达成)。M5 本身仍独立 sprint(per `v1.x-phase-4-m5-boot-from-scratch.md`)。
+
+**撞车风险(已 avoid — 2026-09-09 user 决定):**
+- v3-axis 跟 v2-axis 同修 codegen_amd64.jhyy 会重复劳动 + patch 冲突
+- 协调 pattern:codegen_amd64 是 Compiler(v2)责任,但 v3 早发现 + 已在修 → user 决定 v3 owner 优先;v2 axis 撤回不撞
+- 文档化到此,避免 v2 axis owner 重复挖同一坑
+
+### 引用
+
+- `compiler/src0/codegen_amd64.jhyy:160-247` (codegen_amd64_run 函数体)
+- `compiler/src0/codegen_amd64.jhyy:85-146` (parse_and_emit dispatch loop)
+- `compiler/src0/codegen_amd64_emit_ctrl.jhyy:42` (`extern fn sb_append` decl)
+- `compiler/src0/util.jhyy:61-102` (sb_init / sb_grow / sb_append)
+- `compiler/src0/main.jhyy:44-50` + `:118-127` (inline_imports struct-literal bug warning + v2.10.0 QBE 移除注释)
+- `compiler/src0/main.jhyy:712-777` (run_qbe stub post-v2.10.0)
+- `compiler/src0/main.jhyy:791-828` (run_backend post-v2.10.0)
+- `compiler/src0/target_dispatch.jhyy:61-69` (target_backend_mode post-v2.10.0)
+- `docs/internal/workarounds.md` 索引 W-068 / W-071 (predecessor 真改 + ship-without-e2e 教训)
+- `/tmp/v2.10.0-source-changes.patch` (v2.10.0 撤回 source 备份,stash 同步存在)
