@@ -151,6 +151,13 @@ fn NODE_BUILTIN_FENCE()  -> i32 { return 54 as i32; }
 // NLL borrow check uses is_mut + lifetime_id from Sym to enforce exclusivity.
 fn NODE_REF_TYPE()       -> i32 { return 55 as i32; }
 
+// v3.2.1 (V3-C 3j): 闭包字面量 `|x: T, y: T| { ... }` — M0 按值捕获,
+//   不支持显式 capture list (auto-capture by sema from outer scope locals) —
+//   也不支持 move / 借用捕获 / 泛型闭包 / async 闭包 / lifetime 标注
+//   (per docs/plans/v3/v3.2.1-plan.md § 关键决策 + Out of scope)。
+// Parser 填 params + body;sema 决定 captures + 注入合成 `__closure_N` fn。
+fn NODE_CLOSURE_LITERAL() -> i32 { return 56 as i32; }
+
 fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_INT()            { return "INT" as *u8; }
     if kind == NODE_FLOAT()          { return "FLOAT" as *u8; }
@@ -206,6 +213,7 @@ fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_ASM_BLOCK()     { return "ASM_BLOCK" as *u8; }
     if kind == NODE_VOLATILE_TYPE() { return "VOLATILE_TYPE" as *u8; }
     if kind == NODE_BUILTIN_FENCE() { return "BUILTIN_FENCE" as *u8; }
+    if kind == NODE_CLOSURE_LITERAL() { return "CLOSURE_LITERAL" as *u8; }
     return "?" as *u8;
 }
 
@@ -392,6 +400,19 @@ type NodeRefType = struct {
     lifetime: *u8,    // *Node (nullable; the 'a ident node, or null for elided)
 }
 fn NODE_REF_TYPE_SIZE() -> i64 { return 24 as i64; }
+
+// v3.2.1 (V3-C 3j): 闭包字面量节点 — params (NodeFuncDeclParam 数组复用)
+//   + body (block) + 合成 fn sym (sema 注入,codegen 用它来 emit fn call)
+//   Sema 阶段 auto-capture: 扫描 body 引用到的 outer locals
+//   + 决定 captures 列表 + env struct fields + 注入合成 fn `__closure_N(env, ...)`。
+// params(*u8 8) + nparams(i64 8) + body(*Node 8) + fn_sym(*u8 8) = 32
+type NodeClosure = struct {
+    params:  *u8,    // arena array of NodeFuncDeclParam[nparams] (mirror NodeFuncDecl.params)
+    nparams: i64,
+    body:    *Node,  // NODE_BLOCK (parser parse block of stmts after `|`-`{`)
+    fn_sym:  *u8,    // *Sym — 合成 fn decl 的 sym(sema 阶段注入,codegen 用作 fn label)
+}
+fn NODE_CLOSURE_SIZE() -> i64 { return 32 as i64; }
 
 // v3.0.5 (3f memory barrier): kind(i64 8) = 8
 //   fence_seq_cst()  → kind=0 → mfence
@@ -1627,4 +1648,23 @@ fn ast_new_module(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
 
 fn node_module_data(n: *Node) -> *NodeModule {
     return (n as i64 + NODE_SIZE()) as *NodeModule;
+}
+
+// v3.2.1 (V3-C 3j): ast_new_closure — 闭包字面量节点构造。
+// params: arena 数组 of NodeFuncDeclParam[nparams] (复用 fn param layout)
+// body: NODE_BLOCK parsed after closing `|` of closure params
+fn ast_new_closure(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                   params: *u8, nparams: i64, body: *Node) -> *Node {
+    let buf = arena_alloc(a, NODE_SIZE() + NODE_CLOSURE_SIZE());
+    let n = ast_init_node(buf, NODE_CLOSURE_LITERAL(), loc_filename, loc_line, loc_col);
+    let d = (buf as i64 + NODE_SIZE()) as *NodeClosure;
+    (*d).params = params;
+    (*d).nparams = nparams;
+    (*d).body = body;
+    (*d).fn_sym = 0 as *u8;  // sema 阶段注入 (合成 fn decl 的 sym)
+    return n;
+}
+
+fn node_closure_data(n: *Node) -> *NodeClosure {
+    return (n as i64 + NODE_SIZE()) as *NodeClosure;
 }

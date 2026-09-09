@@ -1,0 +1,7 @@
+// v3.2.1 (V3-C 3j): closures_multi_capture — closure with multiple params (M0 no outer-capture)
+fn main_jhyy() -> i32 {
+    let add = |a: i32, b: i32| { a + b };
+    let r: i32 = add(3, 4);
+    return r;
+}
+//EXPECT:7

@@ -1245,7 +1245,110 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         return 0 as *Node;
     }
 
-    if t.kind == TOKEN_INT() {
+    // v3.2.1 (V3-C 3j): TOKEN_PIPE 前缀 = 闭包 `|x: T| { ... }`。
+    //   TOKEN_PIPE 在 infix 位置 (左值后) 仍走原 bitor (parse_expr infix
+    //   dispatch L1984); prefix 位置唯一 closure 解释。
+    //   jhyy 无 forward reference — 必须在 parse_expr 内联完整 closure dispatch
+    //   (既要在 parse_expr 之前/同 fn 内,又要 body parse 走 parse_expr self-rec)。
+    //   Body 仅支持表达式 (parse_expr self-rec;if-expr 同模式支持嵌套)。
+    //   不支持 closure body 内 let/return/match (留 v3.x 中)。
+    if t.kind == TOKEN_PIPE() {
+        parser_advance(p, &t);  // consume 起始 `|`
+
+        // ── Param list: `| ident : type (, ident : type)* |` ──
+        let mut params: *u8 = 0 as *u8;
+        let mut nparams: i64 = 0 as i64;
+        let mut pcap: i64 = 0 as i64;
+
+        parser_push_scope(p);
+        while parser_check(p, TOKEN_PIPE()) == (0 as i32) {
+            if parser_check(p, TOKEN_EOF()) != (0 as i32) {
+                jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+                jh_fputs_stderr("error: unexpected end of file in closure parameters\n" as *u8);
+                (*p).error_count = (*p).error_count + (1 as i32);
+                parser_pop_scope(p);
+                return 0 as *Node;
+            }
+
+            parser_expect(p, TOKEN_IDENT(), "closure parameter name" as *u8, &t);
+            let pname = parser_tok_name(p, &t);
+
+            parser_expect(p, TOKEN_COLON(), ":" as *u8, &t);
+            let ptype = parse_type(p);
+
+            let psym = symtab_insert((*p).current_scope, pname, SYM_VAR(),
+                                     0 as *u8, 0 as i32, (*p).scope_depth);
+
+            if nparams >= pcap {
+                pcap = if pcap != (0 as i64) { pcap * (2 as i64) } else { (4 as i64) };
+                let np = arena_alloc((*p).arena, pcap * NODE_FUNC_DECL_PARAM_SIZE());
+                if params != (0 as *u8) {
+                    if nparams > (0 as i64) {
+                        memcpy(np, params, nparams * NODE_FUNC_DECL_PARAM_SIZE());
+                    }
+                }
+                params = np;
+            }
+            let pd = (params as i64 + nparams * NODE_FUNC_DECL_PARAM_SIZE()) as *NodeFuncDeclParam;
+            (*pd).sym = psym as *u8;
+            (*pd).type_annot = ptype as *u8;
+            nparams = nparams + (1 as i64);
+
+            if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) {
+                break;
+            }
+        }
+        parser_expect(p, TOKEN_PIPE(), "|" as *u8, &t);
+
+        // ── Body: `{ expr; expr; ... }` 用 parse_expr self-rec ──
+        parser_expect(p, TOKEN_LBRACE(), "{ in closure body" as *u8, &t);
+
+        let mut stmts: *u8 = 0 as *u8;
+        let mut nstmts: i64 = 0 as i64;
+        let mut cap: i64 = 0 as i64;
+
+        while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+            if parser_check(p, TOKEN_EOF()) != (0 as i32) {
+                jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+                jh_fputs_stderr("error: unexpected end of file in closure body\n" as *u8);
+                (*p).error_count = (*p).error_count + (1 as i32);
+                parser_pop_scope(p);
+                return 0 as *Node;
+            }
+            let ex = parse_expr(p, PREC_NONE());
+            if ex != (0 as *Node) {
+                let stmt = ast_new_expr_stmt((*p).arena, ex, (*ex).loc_line, (*ex).loc_col, ex);
+                if nstmts >= cap {
+                    cap = if cap != (0 as i64) { cap * (2 as i64) } else { (4 as i64) };
+                    let ns = arena_alloc((*p).arena, cap * (8 as i64));
+                    if stmts != (0 as *u8) {
+                        if nstmts > (0 as i64) { memcpy(ns, stmts, nstmts * (8 as i64)); }
+                    }
+                    stmts = ns;
+                }
+                let slot = (stmts as i64 + nstmts * (8 as i64)) as **Node;
+                *slot = stmt;
+                nstmts = nstmts + (1 as i64);
+                // 可选 `;`(单行 stmt-style)— 没就靠下一轮 RBRACE 终止
+                if parser_check(p, TOKEN_SEMICOLON()) != (0 as i32) {
+                    parser_advance(p, &t);
+                }
+            } else {
+                // parse_expr NULL → 跳过到 RBRACE 防 cascade
+                while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
+                    if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
+                    parser_advance(p, &t);
+                }
+                break;
+            }
+        }
+        parser_expect(p, TOKEN_RBRACE(), "}" as *u8, &t);
+        parser_pop_scope(p);
+
+        let body = ast_new_block((*p).arena, loc_lf, loc_ll, loc_lc, stmts, nstmts);
+        left = ast_new_closure((*p).arena, loc_lf, loc_ll, loc_lc, params, nparams, body);
+    }
+    else if t.kind == TOKEN_INT() {
         parser_advance(p, &t);
         let val = strtoll(t.start, 0 as *u8, 0 as i32);
         let prim = jh_int_suffix_prim(t.start, t.length);
@@ -3013,6 +3116,13 @@ fn parse_stmt(p: *Parser) -> *Node {
     if parser_check(p, TOKEN_DEFER())    != (0 as i32) { return parse_defer(p); }
     return parse_expr_stmt(p);
 }
+
+// (parse_closure_expr REMOVED in v3.2.1 — see parse_expr L1248 TOKEN_PIPE branch
+// for the inline dispatch with self-recursion body parse pattern, mirroring
+// if-as-expression at L1775. jhyy 没有 forward reference,所以 parse_closure_expr
+// 既要在 parse_expr 之前定义(被 dispatch 调用)又要调 parse_stmt/parse_let 等
+// 之后定义的 fn,不可能满足。全内联到 parse_expr 是唯一解,body 仅支持表达式
+// (let/return/match 在 closure body 内不支持 — 留 v3.x 中)。)
 
 // ════════════════════════════════════════════════════
 // parse_func: inlined block body (fn body 可含 if/while/for/match/let/...)

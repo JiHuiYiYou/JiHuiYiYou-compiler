@@ -44,7 +44,8 @@ fn SYM_MODULE()  -> i32 { return 5 as i32; }
 // ════════════════════════════════════════════════════
 
 // jhyy size: name(8) + kind(i32 4 + pad 4) + type_ptr(8) + is_mutable(i32 4 + pad 4) +
-//            depth(i32 4 + pad 4) + module(8) + is_extern(i32 4 + pad 4) = 56
+//            depth(i32 4 + pad 4) + module(8) + is_extern(i32 4 + pad 4) +
+//            aux_sym(8) = 64   // v3.2.1 (3j): closure-bound SYM_VAR back-pointer
 // 注：jhyy `type` 是 reserved keyword（type Foo = struct），C 字段 `type *type` 改 `type_ptr`
 type Sym = struct {
     name:       *u8,
@@ -54,10 +55,11 @@ type Sym = struct {
     depth:      i32,
     module:     *u8,         // NULL = main（jhyy 用 0 as *u8）
     is_extern:  i32,         // 0/1（C bool 替换）
+    aux_sym:    *u8,         // v3.2.1 (3j): closure-bound SYM_VAR → 合成 fn sym;其他 = 0
 }
 
-// Sym 字节数 = 8 (name) + 8 (kind+pad) + 8 (type) + 8 (is_mut+pad) + 8 (depth+pad) + 8 (module) + 8 (is_extern+pad) = 56
-fn SYM_SIZE() -> i64 { return 56 as i64; }
+// Sym 字节数 = 8*7 (name + kind+pad + type + is_mut+pad + depth+pad + module + is_extern+pad) + 8 (aux_sym) = 64
+fn SYM_SIZE() -> i64 { return 64 as i64; }
 
 // ════════════════════════════════════════════════════
 // SymTable
@@ -130,6 +132,7 @@ fn symtab_alloc_sym(a: *Arena, name: *u8, kind: i32, type_ptr: *u8,
     (*sym).depth = depth;
     (*sym).module = 0 as *u8;       // NULL = main
     (*sym).is_extern = 0 as i32;    // false
+    (*sym).aux_sym = 0 as *u8;      // v3.2.1 (3j): default no back-pointer
     return sym;
 }
 

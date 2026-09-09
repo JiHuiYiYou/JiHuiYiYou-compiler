@@ -1092,6 +1092,121 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         return t;
     }
 
+    // v3.2.1 (V3-C 3j): closure literal — auto-capture analysis + closure type.
+    //   MVP design:
+    //   - 闭包 = 匿名 struct { fn_ptr: *u8, env_ptr: *u8 }(16 bytes;fn_ptr 是
+    //     QBE function 标签 env 通过闭包字面量处栈 alloc + 初始化)
+    //   - 闭包 type 不导出具体 field layout(只是 opaque 16-byte struct pointer)
+    //   - codegen 负责:
+    //     a) 扫描 body 找 free vars,生成 env struct layout + stack alloc
+    //     b) 合成 fn `__closure_N(env_ptr, params...) -> ret` 并 append 到
+    //        module decls(由 cg_module 后续 pass emit)
+    //     c) 返回 closure 值 { fn_ptr=__closure_N label, env_ptr=&env }
+    //   - NODE_CALL 检测 callee 是 closure 时:取出 fn_ptr + env_ptr,emit
+    //     间接 call(or 直接 call 已知 fn_name)
+    if (*n).kind == NODE_CLOSURE_LITERAL() {
+        let cd = node_closure_data(n);
+
+        // 1) resolve param types + push params as locals (跟 fn path 类似)
+        sema_push_scope(ctx);
+        (*ctx).nlocals = 0 as i64;
+        let mut pi: i64 = 0 as i64;
+        while pi < (*cd).nparams {
+            let param = ptr_add_u8((*cd).params, pi * (16 as i64)) as *NodeFuncDeclParam;
+            let pt = resolve_type_node(ctx, ta, (*param).type_annot as *Node);
+            let param_sym = (*param).sym as *Sym;
+            (*param_sym).type_ptr = pt as *u8;
+            (*param_sym).kind = SYM_VAR();
+            let _x = symtab_insert((*ctx).current_scope, (*param_sym).name, SYM_VAR(),
+                                   pt as *u8, 0 as i32, (*ctx).scope_depth);
+            pi = pi + (1 as i64);
+        }
+
+        // 2) walk body stmts — type-check each (M0: body 仅用 params + literals,
+        //    不引用 outer vars)
+        let blk = (*cd).body as *Node;
+        let mut body_ret_type: *Type = type_void(ta);
+        if blk != (0 as *Node) {
+            let bd = node_block_data(blk);
+            let mut bi: i64 = 0 as i64;
+            while bi < (*bd).nstmts {
+                let s = *(((*bd).stmts as i64 + bi * (8 as i64)) as **Node);
+                if s != (0 as *Node) {
+                    let t = infer_type(ctx, ta, s);
+                    // 记录最后 expr stmt 的 type 作为 fn 返回类型
+                    if (*s).kind == NODE_EXPR_STMT() {
+                        body_ret_type = t;
+                    }
+                }
+                bi = bi + (1 as i64);
+            }
+        }
+
+        sema_pop_scope(ctx);
+
+        // 3) 构造合成 fn 类型 (params...) -> ret
+        let param_types_buf = arena_alloc((*ctx).arena, (*cd).nparams * (8 as i64));
+        let mut pti: i64 = 0 as i64;
+        while pti < (*cd).nparams {
+            let param2 = ptr_add_u8((*cd).params, pti * (16 as i64)) as *NodeFuncDeclParam;
+            let pt2 = (*((*param2).type_annot as *Node)).type_ptr as *Type;
+            let pt_slot = ptr_add_u8(param_types_buf, pti * (8 as i64)) as **Type;
+            *pt_slot = pt2;
+            pti = pti + (1 as i64);
+        }
+        let fn_t = type_func((*ctx).arena, param_types_buf, (*cd).nparams, body_ret_type);
+
+        // 4) 构造合成 fn sym `__closure_<N>` — N 用 closure 节点地址 hash
+        let mut counter_buf: *u8 = arena_alloc((*ctx).arena, 32 as i64);
+        let name0 = "__closure_" as *u8;
+        let mut ci: i64 = 0 as i64;
+        while ci < 10 as i64 {
+            let cs = ptr_add_u8(counter_buf, ci) as *u8;
+            *cs = *(ptr_add_u8(name0, ci) as *u8);
+            ci = ci + (1 as i64);
+        }
+        let name_addr = n as i64;
+        let digit1 = (name_addr % (10 as i64)) + (0x30 as i64);
+        let digit2 = ((name_addr / (10 as i64)) % (10 as i64)) + (0x30 as i64);
+        let digit3 = ((name_addr / (100 as i64)) % (10 as i64)) + (0x30 as i64);
+        let digit4 = ((name_addr / (1000 as i64)) % (10 as i64)) + (0x30 as i64);
+        let digit5 = ((name_addr / (10000 as i64)) % (10 as i64)) + (0x30 as i64);
+        *(ptr_add_u8(counter_buf, 10 as i64) as *u8) = digit1 as u8;
+        *(ptr_add_u8(counter_buf, 11 as i64) as *u8) = digit2 as u8;
+        *(ptr_add_u8(counter_buf, 12 as i64) as *u8) = digit3 as u8;
+        *(ptr_add_u8(counter_buf, 13 as i64) as *u8) = digit4 as u8;
+        *(ptr_add_u8(counter_buf, 14 as i64) as *u8) = digit5 as u8;
+        *(ptr_add_u8(counter_buf, 15 as i64) as *u8) = 0 as u8;
+
+        let fn_sym = symtab_insert((*ctx).global_scope, counter_buf, SYM_FN(),
+                                   fn_t as *u8, 0 as i32, 0 as i32);
+        // store fn sym into closure node
+        (*cd).fn_sym = fn_sym as *u8;
+
+        // 5) v3.2.1 (3j): append 合成 NODE_FUNC_DECL to module.decls — cg_module Pass B
+        //   visits decls 走 cg_func 自动 emit 合成 fn body 为 top-level QBE function.
+        //   ret_type = null: cg_func reads return type from fn_sym.type_ptr (= fn_t.ret)
+        //   params/nparams/body 复用 closure 原 AST nodes(零拷贝)。
+        let fn_decl = ast_new_func_decl(
+            (*ctx).arena,
+            (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+            fn_sym as *Sym,
+            (*cd).params, (*cd).nparams,
+            0 as *Node,                       // ret_type = null (cg_func uses sym.type_ptr)
+            (*cd).body as *Node,
+            0 as i32, 0 as i32, 0 as i32,     // is_extern, is_inline, is_naked = 0
+            0 as *u8,                         // link_section = null
+            0 as *u8,                         // type_params = null
+            0 as i64                          // ntype_params = 0
+        );
+        let mnd2 = node_module_data((*ctx).module);
+        mono_decls_append((*ctx).arena, mnd2 as *u8, fn_decl);
+
+        // 6) closure type = synthesized fn type (KIND_FUNC)
+        (*n).type_ptr = fn_t as *u8;
+        return fn_t;
+    }
+
     // ── call ──
     if (*n).kind == NODE_CALL() {
         let d = node_call_data(n);
@@ -1814,6 +1929,15 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let sym = (*d).sym as *Sym;
         (*sym).type_ptr = decl_type as *u8;
         (*sym).kind = SYM_VAR();
+        // v3.2.1 (3j MVP): let-bound closure -> wire aux_sym to 合成 fn_sym
+        //   codegen NODE_CALL 看到 SYM_VAR + KIND_FUNC + aux_sym != 0 → call $aux_sym_name
+        if (*d).init != (0 as *u8) {
+            let init_node = (*d).init as *Node;
+            if (*init_node).kind == NODE_CLOSURE_LITERAL() {
+                let init_cd = node_closure_data(init_node);
+                (*sym).aux_sym = (*init_cd).fn_sym;
+            }
+        }
         if (*ctx).nlocals < SEMA_MAX_LOCALS() {
             sema_local_set((*ctx).locals, (*ctx).nlocals, sym, decl_type);
             (*ctx).nlocals = (*ctx).nlocals + (1 as i64);

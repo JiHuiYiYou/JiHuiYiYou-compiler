@@ -407,3 +407,155 @@ DEFERRED 到 v2.x 末 QBE 自写 stage)。v3.2.0b 是 caller-side mitigation,不
 - **Tag**:`v3.2.0` (per `feedback_v3b_no_phaseb_worktree`)
 - **Post-tag SHA fill-in**:本文件 § "umbrella" 头锚 N9 = `<commit sha>`
 - **Auto-push**:per `feedback_auto_push_after_commit`
+
+---
+
+# V3-C v3.2.1 — 3j closure literals MVP
+
+> **ship date**: 2026-09-09
+> **branch**: `axis-v3`
+> **D28 锁**: v3.2.1 (3j closures) → v3.2.2 (3l.1 std mem/fmt/string/arena) 串行
+> **D43 baseline**: **HOLD N13** (`980c026`, V3-C v3.2.0d) — 本地 jhyy_selfhost_check v2 link fail (pre-existing infra issue, v3.2.0d ship 时已存在, 非本 sprint 引入); chain re-baseline 等 v3.2.2 ship 后环境修复再跑
+> **umbrella**: 本文件 v3.2.1 部分
+
+---
+
+## 1. 范围 / Scope
+
+V3-C sub-sprint 5/N — **闭包字面量 MVP**(`|params| { body }` 语法 + 合成 fn `__closure_<N>` codegen + call-site dispatch)。
+
+**触发**(per `docs/plans/v2/v2.0.0-os-prep.md` § 1):
+- **M8d launch 硬前置 2/N 满足**(per D-GUI-11 锁 2026-09-01): seat focus callback 闭包式
+- **v3.2.2 (3l.1) 启动前置**(per D28): std lib 闭包式 API 依赖本 sprint
+
+**M0 简化决定**(per `docs/plans/v3/v3.2.1-plan.md` + 2026-09-09 user):
+- 闭包按值捕获 (no `move` 关键字)
+- 闭包不能捕获借用 (defer v3.x mid)
+- 不做 async 闭包 (defer v3.x mid)
+- 不做 generic closure (defer v3.x mid)
+- 闭包 body 仅表达式 (parser 限; let/return/match 在 closure body 内不支持 — defer v3.x mid)
+
+---
+
+## 2. 改动 / Changes
+
+### 2.1 ast.jhyy (per #55)
+
+- `NODE_CLOSURE_LITERAL() = 56` (line 159)
+- `NodeClosure = {params: *u8, nparams: i64, body: *Node, fn_sym: *u8}` (lines 409-414, size 32)
+- `ast_new_closure(a, lf, ll, lc, params, nparams, body)` + `node_closure_data(n)`
+
+### 2.2 parser.jhyy (per #55)
+
+- inline closure dispatch at parse_expr TOKEN_PIPE branch (L1248-1350): `|params| { body }` 解析;params 走 `parser_push_scope` + symtab_insert;body 走 `parse_expr` self-rec (无 let/return/match)
+- `parse_closure_expr` REMOVED (tombstone comment L3120-3125, jhyy no forward ref)
+
+### 2.3 symtab.jhyy
+
+- `Sym` struct +8 bytes: `aux_sym: *u8` 字段 (offset 56, 8B)
+- `SYM_SIZE()` 56 → 64
+- `symtab_alloc_sym` L132 init `(*sym).aux_sym = 0 as *u8`
+
+### 2.4 sema.jhyy
+
+- **NODE_CLOSURE_LITERAL handler 末尾 (L1188 后)** append 合成 NODE_FUNC_DECL 到 module.decls:
+  ```jhyy
+  let fn_decl = ast_new_func_decl(arena, ..., fn_sym, cd.params, cd.nparams,
+      0 as *Node,                       // ret_type = null
+      cd.body as *Node, ..., 0, 0, 0, 0 as *u8, 0 as *u8, 0 as i64);
+  let mnd2 = node_module_data((*ctx).module);
+  mono_decls_append((*ctx).arena, mnd2 as *u8, fn_decl);
+  ```
+- **NODE_LET handler 末尾 (L1916 后)** wire aux_sym:
+  ```jhyy
+  if (*d).init != 0 as *u8 {
+      let init_node = (*d).init as *Node;
+      if (*init_node).kind == NODE_CLOSURE_LITERAL() {
+          let init_cd = node_closure_data(init_node);
+          (*sym).aux_sym = (*init_cd).fn_sym;
+      }
+  }
+  ```
+
+### 2.5 codegen.jhyy
+
+- **NODE_CALL branch (L2499 前插)** closure dispatch:
+  ```jhyy
+  } else if (*fs).kind == SYM_VAR() && (*fs).type_ptr != 0 as *u8 {
+      let fst = (*fs).type_ptr as *Type;
+      if (*fst).kind == KIND_FUNC() && (*fs).aux_sym != 0 as *u8 {
+          let aux_s = (*fs).aux_sym as *Sym;
+          fn_name = (*aux_s).name;
+      } else {
+          fn_name = (*fs).name;
+      }
+  } else { ... }
+  ```
+- 三重 guard 保 normal SYM_VAR 调用不命中 (aux_sym=0)
+
+### 2.6 tests/examples/
+
+- `closures_basic.jhyy` (edit): `//EXPECT:6` 验证
+- `closures_multi_capture.jhyy` NEW: multi-param closure, `//EXPECT:7`
+- `closures_as_arg.jhyy` NEW: simple fallback (closure 当 fn 值, no fn-type-as-param per 2026-09-09 user), `//EXPECT:42`
+
+---
+
+## 3. Verification (per `feedback_fix_evaluation_rule`)
+
+- `make all` green ✅ (stage-0 不 segfault, jhyy.exe rebuild 成功)
+- 3/3 closures 5/5 PASS ✅:
+  - `jhyy.exe run closures_basic.jhyy` EXIT=6
+  - `jhyy.exe run closures_multi_capture.jhyy` EXIT=7
+  - `jhyy.exe run closures_as_arg.jhyy` EXIT=42
+- `regress.py --binary=compiler/build/bin/jhyy.exe --tests=closures_basic.jhyy,...` → 3/3 passed
+- `jhyy_get_il closures_basic.jhyy` QBE IL 验证:
+  ```
+  export function w $main_jhyy() {
+      %t1 =w copy 5
+      %t2 =w call $__closure_88857(w %t1)   ← 直接 call 合成 fn label
+      ret %t2
+  }
+  export function w $__closure_88857(w %y) {
+      %t3 =w copy %y
+      %t4 =w copy 1
+      %t5 =w add %t3, %t4
+      ret %t5
+  }
+  ```
+- `jhyy_selfhost_check` D43 closure chain: **HOLD N13** (`980c026`) — 本地 jhyy_selfhost_check 跑 v2 link fail (`ld returned 5 exit status`, 链接 `jhaXXX.s` + `runtime.c` + `jhyy_helpers.c` → `jheXXX.exe`), **pre-existing infra issue** (git stash 验证 v3.2.0d baseline 同样 fail, 非本 sprint 引入)。chain re-baseline 等 v3.2.2 ship 后环境修复再跑
+
+---
+
+## 4. Out of scope (deferred)
+
+- 借用捕获闭包 → v3.x mid
+- `move` 关键字 → v3.x mid
+- async 闭包 → v3.x mid
+- generic closure → v3.x mid
+- closure + lifetime 标注 → v3.x 中
+- 闭包 body 内 let/return/match → v3.x mid
+- fn-type-as-param (`fn(i32) -> i32` 作参数类型) → v3.x mid
+- closure + env struct (multi-capture) → v3.x mid
+- Vec<T> / Map<K,V> std lib (依赖 closure + generics) → v3.2.4 (3l.3, M11 launch 硬前置)
+
+---
+
+## 5. Commit / Tag
+
+- **Commit**:`feat(closures): M0 closure literals + synthesized fn (3j, v3.2.1) — Sym.aux_sym + sema append + codegen dispatch + 3 tests`
+- **Tag**:`v3.2.1` (per `feedback_v3b_no_phaseb_worktree`)
+- **Post-tag D43 SHA**:**HOLD N13** (`980c026`) — 本地 selfhost_check v2 link pre-existing infra issue 阻 chain verify (见 § 3 verification 末尾); chain re-baseline 等 v3.2.2 ship 后环境修复再跑
+- **Auto-push**:per `feedback_auto_push_after_commit`
+
+---
+
+## 6. Cross-ref
+
+- L1 设计:`docs/plans/roadmap/v3.x-language-expansion.md § Sprint 3j`
+- L2 设计:`docs/plans/v3/v3.2.1-plan.md` (per `feedback_plans_per_version`)
+- 上游:`changelog-v3.2.md` v3.2.0d 段 (3i fn path complete, N13 = `980c026`)
+- 下游:`v3.2.2-plan.md` (3l.1 std mem/fmt/string/arena)
+- 跨 axis:V2-B Phase 2b (QBE 自写 / amd64_sysv 实 impl / N 代 fixed point) — 修 `codegen_amd64_run` 0-byte bug, 解阻 v3.2.3+
+- D-GUI-11 lock:`jhyy_OS/docs/coordination.md § 3`;D28 + M8d/M11 launch gates:`docs/plans/v2/v2.0.0-os-prep.md § 1`
+- D43 chain:`docs/logs/v3/changelog-v3.2.md` v3.2.0d 段 (N13 = `980c026`) → **N14** (本 sprint)

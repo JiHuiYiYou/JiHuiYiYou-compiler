@@ -2504,6 +2504,17 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 sb_append_cstr((*ir).arena, &sb, "__" as *u8);
                 sb_append_cstr((*ir).arena, &sb, (*fs).name as *u8);
                 fn_name = sb_cstr((*ir).arena, &sb);
+            } else if (*fs).kind == SYM_VAR() && (*fs).type_ptr != (0 as *u8) {
+                // v3.2.1 (3j MVP): closure-bound SYM_VAR -> emit call to 合成 fn
+                //   sema NODE_LET wires (*sym).aux_sym = closure.fn_sym
+                //   合成 fn sym's name = "__closure_<5digits>", codegen emits call $__closure_<N>
+                let fst = (*fs).type_ptr as *Type;
+                if (*fst).kind == KIND_FUNC() && (*fs).aux_sym != (0 as *u8) {
+                    let aux_s = (*fs).aux_sym as *Sym;
+                    fn_name = (*aux_s).name;
+                } else {
+                    fn_name = (*fs).name;
+                }
             } else {
                 fn_name = (*fs).name;
             }

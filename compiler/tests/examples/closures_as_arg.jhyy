@@ -1,0 +1,8 @@
+// v3.2.1 (V3-C 3j): closures_as_arg — closure as fn value (M0 simple fallback;
+//   fn-type-as-parameter pushed to v3.x mid per 2026-09-09 user decision)
+fn main_jhyy() -> i32 {
+    let doubler = |n: i32| { n * 2 };
+    let r: i32 = doubler(21);
+    return r;
+}
+//EXPECT:42
