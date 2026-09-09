@@ -416,6 +416,7 @@ DEFERRED 到 v2.x 末 QBE 自写 stage)。v3.2.0b 是 caller-side mitigation,不
 > **branch**: `axis-v3`
 > **D28 锁**: v3.2.1 (3j closures) → v3.2.2 (3l.1 std mem/fmt/string/arena) 串行
 > **D43 baseline**: **HOLD N13** (`980c026`, V3-C v3.2.0d) — 本地 jhyy_selfhost_check v2 link fail (pre-existing infra issue, v3.2.0d ship 时已存在, 非本 sprint 引入); chain re-baseline 等 v3.2.2 ship 后环境修复再跑
+> **Post-commit SHA**:`7b2d886` (axis-v3 HEAD = tag `v3.2.1`)
 > **umbrella**: 本文件 v3.2.1 部分
 
 ---
@@ -546,6 +547,7 @@ V3-C sub-sprint 5/N — **闭包字面量 MVP**(`|params| { body }` 语法 + 合
 - **Commit**:`feat(closures): M0 closure literals + synthesized fn (3j, v3.2.1) — Sym.aux_sym + sema append + codegen dispatch + 3 tests`
 - **Tag**:`v3.2.1` (per `feedback_v3b_no_phaseb_worktree`)
 - **Post-tag D43 SHA**:**HOLD N13** (`980c026`) — 本地 selfhost_check v2 link pre-existing infra issue 阻 chain verify (见 § 3 verification 末尾); chain re-baseline 等 v3.2.2 ship 后环境修复再跑
+- **Post-commit SHA fill-in**:`7b2d886` (axis-v3 HEAD = tag `v3.2.1`)
 - **Auto-push**:per `feedback_auto_push_after_commit`
 
 ---
