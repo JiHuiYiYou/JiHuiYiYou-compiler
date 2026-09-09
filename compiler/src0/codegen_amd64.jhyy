@@ -59,27 +59,7 @@ fn codegen_amd64_init() -> i32 {
 
 
 
-// codegen_amd64_run — IL → amd64 GAS .s 主入口
-//
-// 输入:il_path(已生成的 QBE IL 文件路径,per `ir.jhyy` `ir_emit_*` family)
-//      asm_path(输出 .s 文件路径)
-// 返回:0 = 成功(写了 .s 文件),非 0 = 失败
-//
-// v2.5.0 实现路径:
-//   1. read_file(il_path) → 全 .il 内容(arena-alloc)
-//   2. lex_il(buf, len) → *ILToken 序列(由 codegen_amd64_lexer.jhyy 实现)
-//   3. parse_and_emit(tokens, out_sb) → 逐 token dispatch 到 15 emit 函数
-//   4. write_file(asm_path, sb_get_str(out_sb), sb_len(out_sb))(per `feedback_qbe_crlf_root_cause` 用 "wb")
-//   5. return 0
-fn codegen_amd64_run(il_path: *u8, asm_path: *u8) -> i32 {
-    // v2.5.0 skeleton:stub — return 0 占位;A1-A4 agents 完成后填实现
-    // 完整实现见 L4 § 4.1 + § 3.5 15 个 emit 函数
-    let _ = il_path;
-    let _ = asm_path;
-    return 0;
-}
-
-// codegen_amd64_emit_raw_asm — D42 escape hatch (V3-B v3.0.1 fill)
+// codegen_amd64_run — IL → amd64 GAS .s 主入口 (3-arg, v2.6.3 + v2.8.0 wire)
 //
 // per `jhyy_OS/docs/coordination.md § 3` D42:
 //   "v3.0 3a inline asm 在 v2.x 自写后端完成前走 QBE 工具链 .s 输出路径;
@@ -300,23 +280,6 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32 {
     free(il_buf);
     arena_free(&arena);
     return wr_rc;
-}
-
-// codegen_amd64_emit_raw_asm — D42 escape hatch stub
-//
-// per `jhyy_OS/docs/coordination.md § 3` D42:
-//   "v3.0 3a inline asm 在 v2.x 自写后端完成前走 QBE 工具链 .s 输出路径;
-//    v2.x 完成后 asm 走自写后端 'escape hatch' 路径"
-//
-// v2.5.0:仅 stub placeholder(空 body + 占位注释),V3-B v3.0.1 填充实际 inline asm emit 逻辑
-// 当前不 emit 任何东西(text 由 caller 已经写入 .s buffer,若有)
-//
-// ship gate verify(per L4 § X.1):`grep "codegen_amd64_emit_raw_asm" compiler/src0/codegen_amd64.jhyy` ≥ 1 hit
-fn codegen_amd64_emit_raw_asm(text: *u8) -> i32 {
-    // D42 placeholder — V3-B v3.0.1 填充
-    // 占位:body 空,只 return 0;签名锁定(text: *u8) → i32,后续 V3-B 改 body 不改签名
-    let _ = text;
-    return 0;
 }
 
 // W-068 fix #3 (v2.6.5): parse_and_emit def moved to BEFORE codegen_amd64_run

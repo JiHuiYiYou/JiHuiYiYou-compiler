@@ -836,25 +836,10 @@ fn run_backend(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
     if use_qbe != (0 as i32) {
         return run_qbe(il_path, asm_path, t);
     }
-    // Target-based dispatch
-    let mut self_target: i32 = 0 as i32;
-    if t == TARGET_AMD64_WIN() {
-        self_target = 1;
-    }
-    if t == TARGET_AMD64_WIN_FREESTANDING() {
-        self_target = 1;
-    }
-    if self_target != (0 as i32) {
-        // V3-B fix (V2-A wire build break): C stub codegen_amd64_run returns -1
-        // since parse_and_emit is not yet implemented (V2-B v2.6.0 will fill).
-        // Fall back to QBE so jhyy.exe stays usable. Per L4 § 1.4 design.
-        let rc = codegen_amd64_run(il_path, asm_path);
-        if rc != (0 as i32) {
-            return run_qbe(il_path, asm_path, t);
-        }
-        return rc;
-    }
     // sysv stub + unknown → QBE fallback
+    // v3.1.4 W-068 真修 v2: 原 L839-856 Target-based dispatch 块删除(dead code)
+    //   — BACKEND_SELF 分支(L812-825)已显式 return,此 block 不可达
+    //   — 含 2-arg `codegen_amd64_run(il_path, asm_path)` 调用, stub 已在 codegen_amd64.jhyy dedup 删除
     return run_qbe(il_path, asm_path, t);
 }
 

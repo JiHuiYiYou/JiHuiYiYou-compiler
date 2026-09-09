@@ -3910,21 +3910,15 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
     // W-070 v2.8.2: dispatch header emit Win vs SysV. Win path (is_sysv=0) 走
     //   abi_win_emit_function_header (跟 v2.8.0 ship 行为字节相同);SysV (is_sysv=1)
     //   走 abi_sysv_emit_function_header (v2.7.0 ship ABI module 真 emit)。
+    // v3.0.2 (3b naked): naked fns skip QBE export entirely (用 emit_naked_func_header
+    //   emit `.globl + label`, body 走 cg_expr NODE_ASM_BLOCK 进 D42 side-file)。
     let mut _hdr: i32 = 0 as i32;
     if is_sysv == 1 {
         _hdr = abi_sysv_emit_function_header(ir, fd_sym, ret_qt, is_sret, (*fd).params, nparams);
+    } else if (*fd).is_naked != (0 as i32) {
+        _hdr = emit_naked_func_header(ir, fd_sym);
     } else {
         _hdr = abi_win_emit_function_header(ir, fd_sym, ret_qt, is_sret, (*fd).params, nparams);
-
-    // v3.0.2 (3b naked): naked fns skip QBE export entirely. The asm body is
-    // emitted to the D42 side-file (_inline_asm.buf) via cg_expr NODE_ASM_BLOCK.
-    // QBE sees no declaration for the naked fn → no generated .s symbol →
-    // linker resolves `call naked_fn` (from QBE-emitted code in callers) to
-    // the `.globl naked_fn` + `naked_fn:` declared in the raw asm side-file.
-    if (*fd).is_naked != (0 as i32) {
-        let _nhdr = emit_naked_func_header(ir, fd_sym);
-    } else {
-        let _hdr = abi_win_emit_function_header(ir, fd_sym, ret_qt, is_sret, (*fd).params, nparams);
     }
 
     // reset cg (per-function)
@@ -4015,47 +4009,40 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
                 if irval_is_undef(body_val) == 0 {
                     let _copy = cg_copy_struct(cg_raw, ret_type, sret_addr, body_val);
                 }
-                let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-                // v2.1.0 Stage 1c.3: abi_win_emit_return — sret branch → empty ret.
-                let _r = abi_win_emit_return(ir, v, 1);
-            } else if ret_qt != (0 as i32) {
-                // v2.1.0 Stage 1c.3: abi_win_emit_return — value branch.
-                let _r = abi_win_emit_return(ir, body_val, 0);
-            } else {
-                let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-                // v2.1.0 Stage 1c.3: abi_win_emit_return — void/sentinel branch.
-                let _r = abi_win_emit_return(ir, v, 0);
             }
-            let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-            // v2.1.0 Stage 1c.3: abi_win_emit_return — sret branch → empty ret.
+            // v3.1.4 W-068 真修 v2 (codegen merge artifact): emit ONE fallback ret
+            //   (sentinel), already dispatching Win vs SysV. OLD logic emitted
+            //   sret/value/void branch ABOVE then a second sentinel ret BELOW,
+            //   causing QBE "label or } expected" error (double ret).
             // W-070 v2.8.2: dispatch Win vs SysV.
+            let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
             let mut _r: i32 = 0 as i32;
             if is_sysv == 1 {
-                _r = abi_sysv_emit_return(ir, v, 1);
+                if is_sret != 0 {
+                    _r = abi_sysv_emit_return(ir, v, 1);
+                } else if ret_qt != (0 as i32) {
+                    _r = abi_sysv_emit_return(ir, body_val, 0);
+                } else {
+                    _r = abi_sysv_emit_return(ir, v, 0);
+                }
             } else {
-                _r = abi_win_emit_return(ir, v, 1);
+                if is_sret != 0 {
+                    _r = abi_win_emit_return(ir, v, 1);
+                } else if ret_qt != (0 as i32) {
+                    _r = abi_win_emit_return(ir, body_val, 0);
+                } else {
+                    _r = abi_win_emit_return(ir, v, 0);
+                }
             }
         } else if ret_qt != (0 as i32) {
-            // v2.1.0 Stage 1c.3: abi_win_emit_return — value branch.
-            // W-070 v2.8.2: dispatch Win vs SysV.
-            let mut _r2: i32 = 0 as i32;
-            if is_sysv == 1 {
-                _r2 = abi_sysv_emit_return(ir, body_val, 0);
-            } else {
-                _r2 = abi_win_emit_return(ir, body_val, 0);
-            }
+            // v3.1.4 W-068 真修 v2 (codegen merge artifact): body already returned,
+            //   so the actual `ret %val` was emitted by cg_expr NODE_RETURN.
+            //   Do NOT emit another sentinel ret here — that produces duplicate `ret`
+            //   and QBE rejects with "label or } expected".
+            //   Original pre-W-070 logic: just close the function. Kept empty.
         } else {
-            let v = IRVal { kind: 0, id: 0, ival: 0 as i64, name: 0 as *u8, qbe_type: 0 };
-            // v2.1.0 Stage 1c.3: abi_win_emit_return — void/sentinel branch.
-            // W-070 v2.8.2: dispatch Win vs SysV.
-            let mut _r3: i32 = 0 as i32;
-            if is_sysv == 1 {
-                _r3 = abi_sysv_emit_return(ir, v, 0);
-            } else {
-                _r3 = abi_win_emit_return(ir, v, 0);
-            }
-
-
+            // v3.1.4 W-068 真修 v2: same — body already returned (void).
+            //   Original pre-W-070 logic: just close the function. Kept empty.
         }
 
         ir_emit_str(ir, "}\n\n" as *u8);
@@ -4388,8 +4375,6 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
         let d_node = *d_slot;
         if d_node == (0 as *Node) { di = di + (1 as i64); } else {
         if (*d_node).kind == NODE_FUNC_DECL() {
-            cg_func(cg_raw, d_node, inline_fns_raw, n_inline, t);
-
             // v3.0.4 (3e link_section): if non-naked fn has link_section,
             // write `<mangled>|<section_name>\n` to side-file BEFORE cg_func.
             // Naked fns skip this — they emit their own .globl + label via
@@ -4406,7 +4391,7 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
                     }
                 }
             }
-            cg_func(cg_raw, d_node, inline_fns_raw, n_inline);
+            cg_func(cg_raw, d_node, inline_fns_raw, n_inline, t);
         }
         }  // close else from NULL guard
         di = di + (1 as i64);
