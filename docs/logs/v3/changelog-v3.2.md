@@ -657,8 +657,8 @@ V3-C sub-sprint 5/N — **闭包字面量 MVP**(`|params| { body }` 语法 + 合
 
 - **Commit**:`feat(stdlib): M0 std lib mem/fmt/string/arena (3l.1, v3.2.2) — 4 modules + 19 tests + W-073..W-078`
 - **Tag**:`v3.2.2`
-- **Post-commit SHA fill-in**:本 commit 的 SHA 在 commit 后回填
-- **Auto-push**:per `feedback_auto_push_after_commit`
+- **Post-commit SHA**:`c5607edd5b42fc89748f5e443b281e94c54f5fbb` (commit = `c5607ed`, full SHA filled 2026-09-09)
+- **Auto-push**:per `feedback_auto_push_after_commit` (commit + tag pushed to `JiHuiYiYou-compiler` remote)
 
 ## 6. Cross-ref
 
