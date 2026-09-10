@@ -174,6 +174,10 @@ fn parse_and_emit(state: *u8, tokens: *u8, n: i64, target_tag: i32) -> i32 {
             let _ = emit_jnz(state, tok_p, target_tag);
         } else if kind == ILTOK_DATA_STRING() {
             let _ = emit_data_string(state, tok_p, target_tag);
+        } else if kind == ILTOK_DIRECTIVE() {
+            // v2.11.1 (W-074.5 真修): dbgfile / dbgloc / { / } — 不 emit .s body,仅让 parse_and_emit 不卡 cursor
+            let _x: i32 = 0 as i32;
+            let _ = _x;
         } else if kind == ILTOK_EOF() {
             return 0;
         }

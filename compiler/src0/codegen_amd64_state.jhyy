@@ -62,6 +62,7 @@ fn ILTOK_LABEL()        -> i32 { return 12 as i32; }
 fn ILTOK_FUNC_HEADER()  -> i32 { return 13 as i32; }
 fn ILTOK_DATA_STRING()  -> i32 { return 14 as i32; }
 fn ILTOK_VOLATILE()     -> i32 { return 15 as i32; }
+fn ILTOK_DIRECTIVE()    -> i32 { return 16 as i32; }  // v2.11.1: dbgfile/dbgloc/{ / } 哨兵 (W-074.5 真修)
 
 // ════════════════════════════════════════════════════
 // IL token struct(由 lexer.jhyy 构造,parse loop 消费)

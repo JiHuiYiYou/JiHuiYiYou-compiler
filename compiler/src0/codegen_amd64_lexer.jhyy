@@ -189,6 +189,39 @@ fn lex_scan_ident_rest(s: *LexState) -> i64 {
     return n;
 }
 
+// lex_parse_temp_id_from_ident(start, len) — 从 ident text 提取 temp id N
+//   期望 ident 形式: 't' + digits (e.g. "t1", "t42")
+//   start = ident 起始 (已经 consume 后)
+//   len = ident 长度
+//   返回 N。如果 ident 不是 "tN" 形式 (e.g. 是其他 ident), 返回 0。
+//
+// v2.11.1 (W-074.5 真修延伸-3 配套 helper)。
+fn lex_parse_temp_id_from_ident(start: *u8, len: i64) -> i64 {
+    if start == (0 as *u8) || len < (2 as i64) {
+        return 0 as i64;
+    }
+    let first = *start;
+    if first != (116 as i32) {  // 't'
+        return 0 as i64;
+    }
+    let mut val: i64 = 0 as i64;
+    let mut i: i64 = 1 as i64;
+    while i < len {
+        let c = *(ptr_add_u8(start, i)) as i32;
+        if c < (48 as i32) || c > (57 as i32) {
+            return 0 as i64;
+        }
+        val = val * (10 as i64) + ((c - (48 as i32)) as i64);
+        i = i + (1 as i64);
+    }
+    return val;
+}
+
+// lex_scan_decimal_int(s) — scan decimal integer starting at cursor, return value
+//   cursor advances past digits. If first char is not digit, returns 0.
+//   注:lex_scan_decimal_int 已在 line 153 定义 (per codegen_amd64_alloc.jhyy 同 pattern),
+//   这里不重复定义。
+
 // ════════════════════════════════════════════════════
 // Token fill helper(写入 *ILToken 字段)
 // ════════════════════════════════════════════════════
@@ -380,16 +413,41 @@ fn next_token_load(s: *LexState, arena: *u8, t: *u8, qt_byte: i32) -> i32 {
 
 // ── 6. call ──
 // 形态:`<dst> =<qt> call $<name>(<args>)` 或 `call $<name>(...)`。
-// main dispatcher 已 peek `call` 5 字符后 consume。
+// main dispatcher 已 consume 'c' (1 char);helper consume "all" 3 chars + 整段
+// `$<name>(<args>)` body — 否则 lexer 返 CALL 后 cursor 留在 `$name(...)`,下一
+// 次 next_token 看到 `$` 不识别走 unknown-skip(per debug trace 2026-09-10
+// 验证),多 func IL 全部 silent fail。
 fn next_token_call(s: *LexState, arena: *u8, t: *u8) -> i32 {
-    // consume "call"
+    // consume "all"
     let mut i: i64 = 0 as i64;
-    while i < (4 as i64) {
+    while i < (3 as i64) {
         let _x = lex_next_byte(s);
         i = i + (1 as i64);
     }
     let _s = lex_skip_ws_and_comments(s);
-    // 现在看到 '$<name>('。emit (A4) 自己二次 scan name + args,lexer 只标 kind。
+    // consume '$<name>'
+    if lex_peek_byte(s) == (36 as i32) {
+        let _d = lex_next_byte(s);
+        let _x = lex_scan_ident_rest(s);
+    }
+    let _s2 = lex_skip_ws_and_comments(s);
+    // consume '(args)' — 支持 nested parens
+    if lex_peek_byte(s) == (40 as i32) {
+        let _lp = lex_next_byte(s);
+        let mut depth: i64 = 1 as i64;
+        let mut pdone = 0 as i32;
+        while pdone == (0 as i32) {
+            let pc = lex_peek_byte(s);
+            if pc == (0 as i32) { pdone = 1 as i32; }
+            else if pc == (40 as i32) { let _pc1 = lex_next_byte(s); depth = depth + (1 as i64); }
+            else if pc == (41 as i32) {
+                let _pc2 = lex_next_byte(s);
+                depth = depth - (1 as i64);
+                if depth <= (0 as i64) { pdone = 1 as i32; }
+            } else { let _pc3 = lex_next_byte(s); }
+        }
+    }
+    let _s3 = lex_skip_ws_and_comments(s);
     lex_init_token(t, ILTOK_CALL(), (*s).line);
     return 0 as i32;
 }
@@ -404,7 +462,16 @@ fn next_token_phi(s: *LexState, arena: *u8, t: *u8) -> i32 {
 }
 
 // ── 8. copy ──
+// 形态:`%tN =qt copy <src>`。dispatcher '%' 分支已 consume `%tN =qt` 并填 dst_id 到
+// text_len + qbe_type。本 helper consume "copy" + parse <src>。
+//   - <src> 是 IMM(整数字面量,如 "42"):store imm value in int_val, text = NULL
+//   - <src> 是 TEMP(`%tM`):存 M 到 int_val, text 留 NULL(emit 函数读 int_val 不读 text)
+//
+// v2.11.1 (W-074.5 真修延伸-4):原 next_token_copy 只 consume "copy" 后 lex_init_token
+// 默认值,emit_copy 读 int_val (=0 默认) → src_int = 0 → emit `mov $0` 永远写 0。
+// 真修:parse IMM 或 TEMP,存 int_val。
 fn next_token_copy(s: *LexState, arena: *u8, t: *u8) -> i32 {
+    let _x = arena;
     let mut i: i64 = 0 as i64;
     while i < (4 as i64) {
         let _x = lex_next_byte(s);
@@ -412,6 +479,26 @@ fn next_token_copy(s: *LexState, arena: *u8, t: *u8) -> i32 {
     }
     let _s = lex_skip_ws_and_comments(s);
     lex_init_token(t, ILTOK_COPY(), (*s).line);
+    // peek src: IMM (digit) vs TEMP ('%')
+    let src_peek = lex_peek_byte(s);
+    if src_peek >= (48 as i32) && src_peek <= (57 as i32) {
+        // IMM: parse decimal
+        let imm = lex_scan_decimal_int(s);
+        let tp_iv = ptr_add_u8(t, 24 as i64) as *i64;
+        *tp_iv = imm;
+        let tp_text = ptr_add_u8(t, 8 as i64) as **u8;
+        *tp_text = 0 as *u8;
+    } else if src_peek == (37 as i32) {
+        // TEMP: '%' 后续扫描 ident, 提取 N
+        let _y = lex_next_byte(s);
+        let id_start = (*s).cur;
+        let id_len = lex_scan_ident_rest(s);
+        let src_id = lex_parse_temp_id_from_ident(id_start, id_len);
+        let tp_iv = ptr_add_u8(t, 24 as i64) as *i64;
+        *tp_iv = src_id;
+        let tp_text = ptr_add_u8(t, 8 as i64) as **u8;
+        *tp_text = 0 as *u8;
+    }
     return 0 as i32;
 }
 
@@ -553,16 +640,18 @@ fn next_token_label(s: *LexState, arena: *u8, t: *u8) -> i32 {
 }
 
 // ── 14. func_header ──
-// 形态:`export function [<qt>] $<name>(...) {`。dispatcher 已 consume "export"。
+// 形态:`export function [<qt>] $<name>(...) {`(dispatcher 已 consume "export")。
+// v2.11.1 (W-074.5):QBE IL output 实测 emit `export function w $name(...)` bare qt
+// 不带 brackets;既支持 `[w]` 也支持 bare `w`。
 fn next_token_func_header(s: *LexState, arena: *u8, t: *u8) -> i32 {
     // consume "export" (already done by dispatcher)
     let _s = lex_skip_ws_and_comments(s);
     // "function"
     if lex_match_kw(s, "function" as *u8, 8 as i64) == 0 { return -1 as i32; }
     let _s2 = lex_skip_ws_and_comments(s);
-    // 先 init token,再 optional [qt] 覆盖 qbe_type
+    // 先 init token,再 optional qt 覆盖 qbe_type
     lex_init_token(t, ILTOK_FUNC_HEADER(), (*s).line);
-    // optional [qt]
+    // optional qt:[w] 格式 或 bare w/l/s/d/b/h 字符(QBE IL always bare form per codegen.jhyy)
     if lex_peek_byte(s) == (91 as i32) {  // '['
         let _x = lex_next_byte(s);
         let qt_byte = lex_next_byte(s);
@@ -570,6 +659,16 @@ fn next_token_func_header(s: *LexState, arena: *u8, t: *u8) -> i32 {
         *tp_qt = lex_qbe_type_from_byte(qt_byte);
         let _c = lex_next_byte(s);  // ']'
         let _s3 = lex_skip_ws_and_comments(s);
+    } else {
+        // bare qt letter (QBE IL output `export function w $name(...)`)
+        let qt_byte = lex_peek_byte(s);
+        if qt_byte == (119 as i32) || qt_byte == (108 as i32) || qt_byte == (115 as i32)
+            || qt_byte == (100 as i32) || qt_byte == (98 as i32) || qt_byte == (104 as i32) {
+            let tp_qt = ptr_add_u8(t, 32 as i64) as *i32;
+            *tp_qt = lex_qbe_type_from_byte(qt_byte);
+            let _x = lex_next_byte(s);
+            let _s3 = lex_skip_ws_and_comments(s);
+        }
     }
     // '$<name>'
     if lex_peek_byte(s) != (36 as i32) { return -1 as i32; }  // '$'
@@ -582,11 +681,40 @@ fn next_token_func_header(s: *LexState, arena: *u8, t: *u8) -> i32 {
         let tp_textlen = ptr_add_u8(t, 16 as i64) as *i64;
         *tp_textlen = name_len;
     }
+    // v2.11.1 W-074.5 真修延伸-6:consume `(args) {` 部分 — QBE IL 函数头格式
+    // `export function <qt> $<name>(<args>) {<body>}`,lexer 拿到 FUNC_HEADER 后必须
+    // 跳过 `<args>` + `{`,否则 dispatcher 看到 `(`/`,` 走 unknown-skip 卡死。
+    // 形式:`(` ws arg ws (`,` ws arg)* ws `)` ws `{`(直接调 next_token 一次会 lex `{` 为 DIRECTIVE)
+    let _sa = lex_skip_ws_and_comments(s);
+    if lex_peek_byte(s) == (40 as i32) {  // '('
+        let _lp = lex_next_byte(s);
+        // 扫描到匹配的 ')' — 支持嵌套括号
+        let mut depth: i64 = 1 as i64;
+        let mut pdone = 0 as i32;
+        while pdone == (0 as i32) {
+            let pc = lex_peek_byte(s);
+            if pc == (0 as i32) { pdone = 1 as i32; }
+            else if pc == (40 as i32) { let _pc1 = lex_next_byte(s); depth = depth + (1 as i64); }
+            else if pc == (41 as i32) {
+                let _pc2 = lex_next_byte(s);
+                depth = depth - (1 as i64);
+                if depth <= (0 as i64) { pdone = 1 as i32; }
+            } else { let _pc3 = lex_next_byte(s); }
+        }
+    }
+    let _sb = lex_skip_ws_and_comments(s);
+    // `{` 由 main dispatcher 走 next_token 一次 lex 为 DIRECTIVE — 不在此处 consume
+    // (保持 lex_il 看到 `{` 还能记一次 DIRECTIVE token,parse_and_emit 不卡)
     return 0 as i32;
 }
 
 // ── 15. data_string ──
 // 形态:`data $<name> = { b "..." }`。dispatcher 已 consume "data"。
+// v2.11.1 (W-074.5 真修延伸-5):必须 consume 整个 ` = { b "..." , b 0 }` body,
+// 否则 dispatcher 拿 `=` / `{` / `b` / `"` 等字符走 unknown-char-skip 循环,
+// parse_and_emit 看到 EOF 后只剩 3 tokens,emit 函数从未被调,产生 0 字节 .s。
+// 内存布局:emit_data_string 读 (*t).text (name) + (text + text_len + 1) (content)。
+// 所以 text 缓冲 = "name\0content\0"。
 fn next_token_data_string(s: *LexState, arena: *u8, t: *u8) -> i32 {
     // consume "data"
     let mut i: i64 = 0 as i64;
@@ -600,13 +728,62 @@ fn next_token_data_string(s: *LexState, arena: *u8, t: *u8) -> i32 {
     let _x = lex_next_byte(s);
     let name_start = (*s).cur;
     let name_len = lex_scan_ident_rest(s);
-    lex_init_token(t, ILTOK_DATA_STRING(), (*s).line);
-    if name_len > (0 as i64) {
-        let tp_text = ptr_add_u8(t, 8 as i64) as **u8;
-        *tp_text = lex_dup_text(arena, name_start, name_len);
-        let tp_textlen = ptr_add_u8(t, 16 as i64) as *i64;
-        *tp_textlen = name_len;
+    // ── consume ` = { b "<content>"` ──
+    let _s2 = lex_skip_ws_and_comments(s);
+    if lex_peek_byte(s) != (61 as i32) { return -1 as i32; }  // '='
+    let _eq = lex_next_byte(s);
+    let _s3 = lex_skip_ws_and_comments(s);
+    if lex_peek_byte(s) != (123 as i32) { return -1 as i32; }  // '{'
+    let _br = lex_next_byte(s);
+    let _s4 = lex_skip_ws_and_comments(s);
+    if lex_peek_byte(s) != (98 as i32) { return -1 as i32; }  // 'b' (byte type indicator)
+    let _bt = lex_next_byte(s);
+    let _s5 = lex_skip_ws_and_comments(s);
+    if lex_peek_byte(s) != (34 as i32) { return -1 as i32; }  // '"'
+    let _q1 = lex_next_byte(s);
+    let content_start = (*s).cur;
+    // scan content until matching '"' or EOF
+    let mut content_len: i64 = 0 as i64;
+    let mut cdone = 0 as i32;
+    while cdone == (0 as i32) {
+        let cc = lex_peek_byte(s);
+        if cc == (34 as i32) || cc == (0 as i32) { cdone = 1 as i32; }
+        else {
+            let _cn = lex_next_byte(s);
+            content_len = content_len + (1 as i64);
+        }
     }
+    // consume closing '"'
+    if lex_peek_byte(s) == (34 as i32) { let _q2 = lex_next_byte(s); }
+    // skip 直到 '}' (吞掉 `, b 0`)
+    let mut bdone = 0 as i32;
+    while bdone == (0 as i32) {
+        let cc2 = lex_peek_byte(s);
+        if cc2 == (125 as i32) || cc2 == (0 as i32) { bdone = 1 as i32; }
+        else { let _bn = lex_next_byte(s); }
+    }
+    if lex_peek_byte(s) == (125 as i32) { let _cl = lex_next_byte(s); }
+    // ── build text buffer: name\0content\0 ──
+    let total: i64 = name_len + (1 as i64) + content_len + (1 as i64);
+    let text_buf = arena_alloc(arena, total);
+    if text_buf == (0 as *u8) { return -1 as i32; }
+    if name_len > (0 as i64) {
+        let _m1 = memcpy(text_buf, name_start, name_len);
+    }
+    let sep_ptr = ptr_add_u8(text_buf, name_len);
+    let _m2 = memset(sep_ptr, 0 as i32, 1 as i64);
+    if content_len > (0 as i64) {
+        let content_dst = ptr_add_u8(text_buf, name_len + (1 as i64));
+        let _m3 = memcpy(content_dst, content_start, content_len);
+    }
+    let term_ptr = ptr_add_u8(text_buf, name_len + (1 as i64) + content_len);
+    let _m4 = memset(term_ptr, 0 as i32, 1 as i64);
+    // ── write token fields ──
+    lex_init_token(t, ILTOK_DATA_STRING(), (*s).line);
+    let tp_text = ptr_add_u8(t, 8 as i64) as **u8;
+    *tp_text = text_buf;
+    let tp_textlen = ptr_add_u8(t, 16 as i64) as *i64;
+    *tp_textlen = name_len;
     return 0 as i32;
 }
 
@@ -650,9 +827,12 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
     // ── '%' → assignment LHS (e.g. "%t1 =w add ...")。
     // QBE IL 中每条具名 instruction 都以 `%tN =qt op` 起。dispatcher 不细化
     // LHS,直接 consume '%' + ident + 空白 + '=' + qt,然后回到主循环 dispatch op。
+    // v2.11.1 (W-074.5 真修延伸-3):emit_copy / emit_binop / emit_call / emit_phi 等
+    // 读 tok.text_len 当 dst temp id,必须从 ident "tN" 解析 N 后存 text_len。
     if c0 == (37 as i32) {  // '%'
         let _x = lex_next_byte(s);
-        let _n = lex_scan_ident_rest(s);
+        let ident_start = (*s).cur;
+        let ident_len = lex_scan_ident_rest(s);
         let _s2 = lex_skip_ws_and_comments(s);
         // peek '='
         if lex_peek_byte(s) == (61 as i32) {
@@ -670,13 +850,19 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
             let saved_cur = (*s).cur;
             let saved_line = (*s).line;
             let rc = next_token(s, arena, t);
-            // overwrite qbe_type
+            // overwrite qbe_type + fill text_len (= dst temp id)
             if rc == (0 as i32) {
                 let cur_kind_addr = t as *i32;
                 let cur_kind = *cur_kind_addr;
                 if cur_kind != ILTOK_EOF() {
                     let tp_qt = ptr_add_u8(t, 32 as i64) as *i32;
                     *tp_qt = qt_val;
+                    // v2.11.1: parse dst temp id from ident "tN" → N, store in text_len.
+                    // ident format: starts with 't' (QBE convention), followed by digits.
+                    // If ident doesn't start with 't' or has no digits, dst_id = 0 (fallback).
+                    let dst_id = lex_parse_temp_id_from_ident(ident_start, ident_len);
+                    let tp_tl = ptr_add_u8(t, 16 as i64) as *i64;
+                    *tp_tl = dst_id;
                 }
             }
             return rc;
@@ -698,7 +884,7 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         return next_token_func_header(s, arena, t);
     }
 
-    // ── 'd' → 'data' (data_string) or 'div' (binop) ──
+    // ── 'd' → 'data' (data_string) / 'div' (binop) / 'dbgfile' / 'dbgloc' (DIRECTIVE) ──
     if c0 == (100 as i32) {
         let n1 = lex_peek_byte_at(s, 1 as i64);
         let n2 = lex_peek_byte_at(s, 2 as i64);
@@ -711,6 +897,52 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         if n1 == (105 as i32) && n2 == (118 as i32) {
             let _x = lex_next_byte(s);  // 'd'
             return next_token_binop(s, arena, t, 100 as i32);
+        }
+        // v2.11.1 (W-074.5): "dbgfile" (7 chars) / "dbgloc" (6 chars) → ILTOK_DIRECTIVE
+        // QBE IL output `dbgfile "path"` 和 `dbgloc N "file:line"` always at line head;
+        // consume 关键字 + skip rest-of-line 让 parse_and_emit 下一个 token 直接是 export/data。
+        // dbgfile prefix: d,b,g,f (n3='f'=102). dbgloc prefix: d,b,g,l (n3='l'=108).
+        if n1 == (98 as i32) && n2 == (103 as i32) && n3 == (102 as i32) {
+            // "dbgfile" — d,b,g,f,i,l,e (idx 0..6); need n4='i' n5='l' n6='e'
+            let n4 = lex_peek_byte_at(s, 4 as i64);
+            let n5 = lex_peek_byte_at(s, 5 as i64);
+            let n6 = lex_peek_byte_at(s, 6 as i64);
+            if n4 == (105 as i32) && n5 == (108 as i32) && n6 == (101 as i32) {
+                let mut j: i64 = 0 as i64;
+                while j < (7 as i64) {
+                    let _x = lex_next_byte(s);
+                    j = j + (1 as i64);
+                }
+                // skip 到行尾(\n 或 文件尾),不 consume \n 让 lex_skip_ws_and_comments 处理
+                let mut done_skip = 0 as i32;
+                while done_skip == (0 as i32) {
+                    let cc = lex_peek_byte(s);
+                    if cc == (10 as i32) || cc == (0 as i32) { done_skip = 1 as i32; }
+                    else { let _x2 = lex_next_byte(s); }
+                }
+                lex_init_token(t, ILTOK_DIRECTIVE(), (*s).line);
+                return 0 as i32;
+            }
+        }
+        if n1 == (98 as i32) && n2 == (103 as i32) && n3 == (108 as i32) {
+            // "dbgloc" — d,b,g,l,o,c (idx 0..5); need n4='o'=111 n5='c'=99
+            let n4 = lex_peek_byte_at(s, 4 as i64);
+            let n5 = lex_peek_byte_at(s, 5 as i64);
+            if n4 == (111 as i32) && n5 == (99 as i32) {
+                let mut j: i64 = 0 as i64;
+                while j < (6 as i64) {
+                    let _x = lex_next_byte(s);
+                    j = j + (1 as i64);
+                }
+                let mut done_skip = 0 as i32;
+                while done_skip == (0 as i32) {
+                    let cc = lex_peek_byte(s);
+                    if cc == (10 as i32) || cc == (0 as i32) { done_skip = 1 as i32; }
+                    else { let _x2 = lex_next_byte(s); }
+                }
+                lex_init_token(t, ILTOK_DIRECTIVE(), (*s).line);
+                return 0 as i32;
+            }
         }
         return -1 as i32;
     }
@@ -738,7 +970,7 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         return -1 as i32;
     }
 
-    // ── 'c' → 'call' / 'copy' ──
+    // ── 'c' → 'call' / 'copy' / compare ops (csltw, cslew, csgtw, csgew, ceqw, cnew, cultw, culew, cugtw, cugew) ──
     if c0 == (99 as i32) {
         let n1 = lex_peek_byte_at(s, 1 as i64);
         if n1 == (97 as i32) && lex_peek_byte_at(s, 2 as i64) == (108 as i32)
@@ -752,6 +984,52 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
             // "copy"
             let _x = lex_next_byte(s);
             return next_token_copy(s, arena, t);
+        }
+        // v2.11.1 (W-074.5 真修延伸-7):QBE IL compare ops cXXX<suffix> 5-char keyword
+        // starting with 'c'. QBE integer compare prefixes: 's' (signed) / 'u' (unsigned) /
+        // 'e' (eq). Long/single/double variants 同 pattern with suffix 'l'/'s'/'d'.
+        // Examples: csltw, cslew, csgtw, csgew, ceqw, cnew, cultw, culew, cugtw, cugew.
+        // Boundary: 5th char (idx 4) must be a QBE type suffix 'w'/'l'/'s'/'d'.
+        if n1 == (115 as i32) || n1 == (117 as i32) || n1 == (101 as i32) {
+            let n2 = lex_peek_byte_at(s, 2 as i64);
+            let n3 = lex_peek_byte_at(s, 3 as i64);
+            let n4 = lex_peek_byte_at(s, 4 as i64);
+            // QBE compare op: c + (s|u|e) + (lt|gt|le|ge|eq|ne) + (w|l|s|d)
+            // 简化:5th char 必须是 type suffix
+            if n4 == (119 as i32) || n4 == (108 as i32)
+                || n4 == (115 as i32) || n4 == (100 as i32) {
+                // consume 5 chars total (dispatcher 不 consume,这里全 consume)
+                let mut j: i64 = 0 as i64;
+                while j < (5 as i64) {
+                    let _x = lex_next_byte(s);
+                    j = j + (1 as i64);
+                }
+                let _s = lex_skip_ws_and_comments(s);
+                lex_init_token(t, ILTOK_BINOP(), (*s).line);
+                // text = "csltw" / "cslew" / "ceqw" / "cnew" / "cultw" / ... (5 chars)
+                let mut op_str: *u8 = "csltw" as *u8;
+                if n1 == (117 as i32) {
+                    if n2 == (108 as i32) { op_str = "cultw" as *u8; }
+                    else if n2 == (101 as i32) { op_str = "cueqw" as *u8; }
+                    else if n2 == (110 as i32) { op_str = "cunew" as *u8; }
+                    else if n2 == (103 as i32) && n3 == (116 as i32) { op_str = "cugtw" as *u8; }
+                    else if n2 == (103 as i32) && n3 == (101 as i32) { op_str = "cugew" as *u8; }
+                    else if n2 == (108 as i32) && n3 == (101 as i32) { op_str = "culew" as *u8; }
+                } else if n1 == (101 as i32) {
+                    if n2 == (113 as i32) { op_str = "ceqw" as *u8; }
+                    else if n2 == (110 as i32) { op_str = "cnew" as *u8; }
+                } else {
+                    if n2 == (108 as i32) && n3 == (116 as i32) { op_str = "csltw" as *u8; }
+                    else if n2 == (108 as i32) && n3 == (101 as i32) { op_str = "cslew" as *u8; }
+                    else if n2 == (103 as i32) && n3 == (116 as i32) { op_str = "csgtw" as *u8; }
+                    else if n2 == (103 as i32) && n3 == (101 as i32) { op_str = "csgew" as *u8; }
+                }
+                let tp_text = ptr_add_u8(t, 8 as i64) as **u8;
+                *tp_text = lex_dup_text(arena, op_str, 5 as i64);
+                let tp_textlen = ptr_add_u8(t, 16 as i64) as *i64;
+                *tp_textlen = 5 as i64;
+                return 0 as i32;
+            }
         }
         return -1 as i32;
     }
@@ -913,6 +1191,19 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
             return -1 as i32;
         }
         return -1 as i32;
+    }
+
+    // ── '{' / '}' → ILTOK_DIRECTIVE ── (v2.11.1 W-074.5 真修)
+    // QBE IL output 用 {} 包函数体 + data body;不 emit .s body,只是 lexer 哨兵让 parse_and_emit 不卡 cursor。
+    if c0 == (123 as i32) {  // '{'
+        let _x = lex_next_byte(s);
+        lex_init_token(t, ILTOK_DIRECTIVE(), (*s).line);
+        return 0 as i32;
+    }
+    if c0 == (125 as i32) {  // '}'
+        let _x = lex_next_byte(s);
+        lex_init_token(t, ILTOK_DIRECTIVE(), (*s).line);
+        return 0 as i32;
     }
 
     // unknown char — caller 决定如何处理

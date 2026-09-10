@@ -85,8 +85,12 @@ extern fn sprintf_lld(buf: *u8, fmt: *u8, val: i64) -> i32;
 // 每个 helper 走 (out, ...) 签名避免反复解 *u8 cast。
 
 // emit_comment — 写 "# <text>\n" 注释(QBE 风格)
+// v2.11.1 (W-074.5 真修延伸):state 是 *CGState 不是 *StringBuilder — 原 cast 错让
+// sb.buf/len/cap 读 CGState 的头 24 字节作为 out/arena/next_offset,len 被填 arena
+// pointer → sb_grow while 循环倍增 cap 到 INT_MAX 范围 → hang。修:用 (*cg).out 拿 sb。
 fn emit_comment(state: *u8, text: *u8) -> i32 {
-    let s = state as *StringBuilder;
+    let cg = state as *CGState;
+    let s = (*cg).out;
     let _r1 = sb_append_cstr(0 as *Arena, s, "# " as *u8);
     let _r2 = sb_append_cstr(0 as *Arena, s, text);
     return sb_append_cstr(0 as *Arena, s, "\n" as *u8);
@@ -118,72 +122,93 @@ fn local_temp_offset(t: i64) -> i64 {
     return 0 as i64 - (32 as i64 + t * (8 as i64));
 }
 
-// emit_mov_temp_to_offset — mov<size> -<src_off>(%rbp), -<dst_off>(%rbp)
+// emit_mov_temp_to_offset — mov<size> <src_off>(%rbp), <dst_off>(%rbp)
 //   temp-to-temp 1-to-1 栈复制(per L4 § 3.5 E7 简化版)
+// v2.11.1 (W-074.5 真修延伸):state 是 *CGState 不是 *StringBuilder; 原 cast 错 + 0 as *Arena 让
+// sb_appendf_lld 调用 arena_alloc(NULL,...) 崩溃。修:用 (*cg).out + (*cg).arena。
+// v2.11.1 (W-074.5 真修延伸-2):dst_off/src_off 已含符号(负偏移),不要再 prepend "-"。
 fn emit_mov_temp_to_offset(state: *u8, qt: i32, src_off: i64, dst_off: i64) -> i32 {
-    let s = state as *StringBuilder;
-    let _r1 = sb_append_cstr(0 as *Arena, s, "\tmov" as *u8);
-    let _r2 = sb_append_cstr(0 as *Arena, s, size_suffix_for_qt(qt));
-    let _r3 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-    let _r4 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src_off);
-    let _r5 = sb_append_cstr(0 as *Arena, s, "(%rbp), -" as *u8);
-    let _r6 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, dst_off);
-    let _r7 = sb_append_cstr(0 as *Arena, s, "(%rbp)\n" as *u8);
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
+    let _r2 = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+    let _r3 = sb_append_cstr(arena, s, " " as *u8);
+    let _r4 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+    let _r5 = sb_append_cstr(arena, s, "(%rbp), " as *u8);
+    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
     return 0;
 }
 
-// emit_mov_imm_to_offset — mov<size> $IMM, -<dst_off>(%rbp)
+// emit_mov_imm_to_offset — mov<size> $IMM, <dst_off>(%rbp)
 //   立即数 copy 到栈槽(per L4 § 3.5 E7)
+// v2.11.1 (W-074.5 真修延伸):同上 — 用 (*cg).out + (*cg).arena。
+// v2.11.1 (W-074.5 真修延伸-2):dst_off 已含符号,不再 prepend "-"。
 fn emit_mov_imm_to_offset(state: *u8, qt: i32, imm: i64, dst_off: i64) -> i32 {
-    let s = state as *StringBuilder;
-    let _r1 = sb_append_cstr(0 as *Arena, s, "\tmov" as *u8);
-    let _r2 = sb_append_cstr(0 as *Arena, s, size_suffix_for_qt(qt));
-    let _r3 = sb_append_cstr(0 as *Arena, s, " $" as *u8);
-    let _r4 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, imm);
-    let _r5 = sb_append_cstr(0 as *Arena, s, ", -" as *u8);
-    let _r6 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, dst_off);
-    let _r7 = sb_append_cstr(0 as *Arena, s, "(%rbp)\n" as *u8);
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
+    let _r2 = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+    let _r3 = sb_append_cstr(arena, s, " $" as *u8);
+    let _r4 = sb_appendf_lld(arena, s, "%lld" as *u8, imm);
+    let _r5 = sb_append_cstr(arena, s, ", " as *u8);
+    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
     return 0;
 }
 
-// emit_mov_temp_to_reg — mov<size> -<src_off>(%rbp), %r<reg_idx>
+// emit_mov_temp_to_reg — mov<size> <src_off>(%rbp), %<reg_name>
 //   temp → 物理寄存器(用于 binop 中转 %rax 或 call args 移到 %rcx 等)
+// v2.11.1 (W-074.5 真修延伸):同上。
+// v2.11.1 (W-074.5 真修延伸-2):src_off 已含符号。
 fn emit_mov_temp_to_reg(state: *u8, qt: i32, src_off: i64, reg_name: *u8) -> i32 {
-    let s = state as *StringBuilder;
-    let _r1 = sb_append_cstr(0 as *Arena, s, "\tmov" as *u8);
-    let _r2 = sb_append_cstr(0 as *Arena, s, size_suffix_for_qt(qt));
-    let _r3 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-    let _r4 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src_off);
-    let _r5 = sb_append_cstr(0 as *Arena, s, "(%rbp), %" as *u8);
-    let _r6 = sb_append_cstr(0 as *Arena, s, reg_name);
-    let _r7 = sb_append_cstr(0 as *Arena, s, "\n" as *u8);
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
+    let _r2 = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+    let _r3 = sb_append_cstr(arena, s, " " as *u8);
+    let _r4 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+    let _r5 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+    let _r6 = sb_append_cstr(arena, s, reg_name);
+    let _r7 = sb_append_cstr(arena, s, "\n" as *u8);
     return 0;
 }
 
-// emit_mov_reg_to_temp — mov<size> %r<reg_idx>, -<dst_off>(%rbp)
+// emit_mov_reg_to_temp — mov<size> %<reg_name>, <dst_off>(%rbp)
 //   物理寄存器 → temp 栈槽(用于 call 返回值存回栈)
+// v2.11.1 (W-074.5 真修延伸):同上。
+// v2.11.1 (W-074.5 真修延伸-2):dst_off 已含符号。
 fn emit_mov_reg_to_temp(state: *u8, qt: i32, reg_name: *u8, dst_off: i64) -> i32 {
-    let s = state as *StringBuilder;
-    let _r1 = sb_append_cstr(0 as *Arena, s, "\tmov" as *u8);
-    let _r2 = sb_append_cstr(0 as *Arena, s, size_suffix_for_qt(qt));
-    let _r3 = sb_append_cstr(0 as *Arena, s, " %" as *u8);
-    let _r4 = sb_append_cstr(0 as *Arena, s, reg_name);
-    let _r5 = sb_append_cstr(0 as *Arena, s, ", -" as *u8);
-    let _r6 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, dst_off);
-    let _r7 = sb_append_cstr(0 as *Arena, s, "(%rbp)\n" as *u8);
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
+    let _r2 = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+    let _r3 = sb_append_cstr(arena, s, " %" as *u8);
+    let _r4 = sb_append_cstr(arena, s, reg_name);
+    let _r5 = sb_append_cstr(arena, s, ", " as *u8);
+    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
     return 0;
 }
 
-// emit_binop_rsp_to_rax — binop<size> -<op_off>(%rbp), %rax
+// emit_binop_rsp_to_rax — binop<size> <op_off>(%rbp), %rax
 //   %rax = %rax op op2(用于 add/sub/mul/div/mod via %rax 中转,per L4 § 3.5 E8)
+// v2.11.1 (W-074.5 真修延伸):同上。
+// v2.11.1 (W-074.5 真修延伸-2):op_off 已含符号。
 fn emit_binop_rsp_to_rax(state: *u8, qt: i32, op_name: *u8, op_off: i64) -> i32 {
-    let s = state as *StringBuilder;
-    let _r1 = sb_append_cstr(0 as *Arena, s, "\t" as *u8);
-    let _r2 = sb_append_cstr(0 as *Arena, s, op_name);
-    let _r3 = sb_append_cstr(0 as *Arena, s, size_suffix_for_qt(qt));
-    let _r4 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-    let _r5 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, op_off);
-    let _r6 = sb_append_cstr(0 as *Arena, s, "(%rbp), %rax\n" as *u8);
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "\t" as *u8);
+    let _r2 = sb_append_cstr(arena, s, op_name);
+    let _r3 = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+    let _r4 = sb_append_cstr(arena, s, " " as *u8);
+    let _r5 = sb_appendf_lld(arena, s, "%lld" as *u8, op_off);
+    let _r6 = sb_append_cstr(arena, s, "(%rbp), %rax\n" as *u8);
     return 0;
 }
 
