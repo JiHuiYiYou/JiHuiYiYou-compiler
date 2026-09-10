@@ -1,0 +1,30 @@
+// std_fmt_str.jhyy — v3.2.2 (3l.1) std::fmt fmt_str test.
+//EXPECT:0  (fmt_str 把 5 字节写进 buf, 第一个字节 = 'h')
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+fn strlen_local(s: *u8) -> i64 {
+    let mut n: i64 = 0 as i64;
+    while *(ptr_add(s, n) as *i32) != (0 as i32) {
+        n = n + (1 as i64);
+    }
+    return n;
+}
+fn fmt_str(buf: *u8, src: *u8) -> *u8 {
+    let n = strlen_local(src);
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        *(ptr_add(buf, i) as *i32) = *(ptr_add(src, i) as *i32);
+        i = i + (1 as i64);
+    }
+    *(ptr_add(buf, n) as *i32) = 0 as i32;
+    return buf;
+}
+fn main_jhyy() -> i32 {
+    let storage: [i32; 8] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let out = fmt_str(storage as *u8, "hello" as *u8);
+    let c: i32 = *(out as *i32) & (0xff as i32);
+    if c != (0x68 as i32) { return 1; }   // 'h'
+    return 0;
+}

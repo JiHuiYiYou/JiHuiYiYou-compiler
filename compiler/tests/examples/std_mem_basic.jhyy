@@ -1,0 +1,75 @@
+// std_mem_basic.jhyy — v3.2.2 (3l.1) std::mem basic test.
+// M0 简化:测试文件 inline 复制 std/mem.jhyy 顶层 fn (reference impl + 验证)
+// 验证:mem_set (12 bytes → 0x42) + mem_find_byte (找 0x00 应返 index 12)
+//EXPECT:0
+
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+
+fn mem_set(dst: *u8, val: i32, n: i64) -> *u8 {
+    if n < (0 as i64) {
+        return 0 as *u8;
+    }
+    let b: i32 = val & (0xff as i32);
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        *(ptr_add(dst, i) as *i32) = b;
+        i = i + (1 as i64);
+    }
+    return dst;
+}
+
+fn mem_zero(dst: *u8, n: i64) -> *u8 {
+    return mem_set(dst, 0 as i32, n);
+}
+
+fn mem_compare(a: *u8, b: *u8, n: i64) -> i32 {
+    if n < (0 as i64) {
+        return 0 as i32;
+    }
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let av: i32 = *(ptr_add(a, i) as *i32) & (0xff as i32);
+        let bv: i32 = *(ptr_add(b, i) as *i32) & (0xff as i32);
+        if av != bv {
+            if av < bv {
+                return 0 - (1 as i32);
+            }
+            return 1;
+        }
+        i = i + (1 as i64);
+    }
+    return 0 as i32;
+}
+
+fn mem_find_byte(p: *u8, n: i64, val: i32) -> i64 {
+    if n < (0 as i64) {
+        return 0 as i64 - (1 as i64);
+    }
+    let b: i32 = val & (0xff as i32);
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let v: i32 = *(ptr_add(p, i) as *i32) & (0xff as i32);
+        if v == b {
+            return i;
+        }
+        i = i + (1 as i64);
+    }
+    return 0 as i64 - (1 as i64);
+}
+
+fn main_jhyy() -> i32 {
+    let buf: [i32; 8] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                         0 as i32, 0 as i32, 0 as i32, 0 as i32];
+
+    // mem_set: 把 buf[0..12] 设成 0x42 (覆盖前 3 个 i32 slot, 第 4 slot 部分覆盖)
+    mem_set(buf as *u8, 0x42 as i32, 12 as i64);
+
+    // mem_find_byte: 找 0x00 (mem_set 未覆盖到的 byte); index 12 是第一个 0
+    let idx = mem_find_byte(buf as *u8, 32 as i64, 0 as i32);
+    if idx == (12 as i64) {
+        return 0;
+    }
+    return 1;
+}

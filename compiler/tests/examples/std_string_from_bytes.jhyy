@@ -1,0 +1,23 @@
+// std_string_from_bytes.jhyy — v3.2.2 (3l.1) std::string str_from_bytes test.
+//EXPECT:3  (str_from_bytes(b"foo", 3) len = 3)
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+fn str_from_bytes(a: *u8, s: *u8, n: i64) -> *u8 {
+    let buf = ptr_add(a, 16 as i64);
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        *(ptr_add(buf, i) as *i32) = *(ptr_add(s, i) as *i32);
+        i = i + (1 as i64);
+    }
+    *(a as *i64) = buf as i64;
+    *(ptr_add(a, 8 as i64) as *i64) = n;
+    return a;
+}
+fn str_len(s: *u8) -> i64 { return *(ptr_add(s, 8 as i64) as *i64); }
+fn main_jhyy() -> i32 {
+    let storage: [i32; 8] = [0x666f6f as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32];   // "foo\0"
+    let s = str_from_bytes(storage as *u8, "foo" as *u8, 3 as i64);
+    return str_len(s) as i32;
+}

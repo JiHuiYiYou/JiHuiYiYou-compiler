@@ -1,0 +1,56 @@
+// std_fmt_i64.jhyy — v3.2.2 (3l.1) std::fmt fmt_i64 test.
+//EXPECT:0  (fmt_i64(42) 写 2 字节 "42", 第一个字节 = '4' = 0x34)
+// 注: array index 必须 i64 (jhyy codegen array[i32] 有 w/l type mismatch bug,
+//   per v3.x mid 待修). src0/std/fmt.jhyy 也用 i64 index.
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+fn digit_char(d: i32) -> i32 {
+    return 0x30 as i32 + d;
+}
+fn fmt_i64(buf: *u8, v: i64) -> *u8 {
+    if v == (0 as i64) {
+        *(buf as *i32) = 0x30 as i32;
+        *(ptr_add(buf, 1 as i64) as *i32) = 0 as i32;
+        return buf;
+    }
+    let mut neg: i64 = 0 as i64;
+    let mut x: i64 = v;
+    if x < (0 as i64) {
+        *(buf as *i32) = 0x2D as i32;
+        x = 0 as i64 - x;
+        neg = 1 as i64;
+    }
+    let mut tmp: [i32; 24] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let mut n: i64 = 0 as i64;
+    while x > (0 as i64) {
+        let d: i32 = (x % (10 as i64)) as i32;
+        tmp[n] = digit_char(d);
+        x = x / (10 as i64);
+        n = n + (1 as i64);
+    }
+    let mut k: i64 = 0 as i64;
+    while k < n {
+        let src_idx: i64 = n - k - 1 as i64;
+        let dst_idx: i64 = neg + k;
+        *(ptr_add(buf, dst_idx) as *i32) = tmp[src_idx];
+        k = k + (1 as i64);
+    }
+    *(ptr_add(buf, neg + n) as *i32) = 0 as i32;
+    return buf;
+}
+fn main_jhyy() -> i32 {
+    let storage: [i32; 16] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                               0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                               0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                               0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let out = fmt_i64(storage as *u8, 42 as i64);
+    let c: i32 = *(out as *i32) & (0xff as i32);
+    if c != (0x34 as i32) { return 1; }   // '4'
+    return 0;
+}

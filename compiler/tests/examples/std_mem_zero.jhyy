@@ -1,0 +1,25 @@
+// std_mem_zero.jhyy — v3.2.2 (3l.1) std::mem mem_zero test.
+//EXPECT:0
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+fn mem_set(dst: *u8, val: i32, n: i64) -> *u8 {
+    let b: i32 = val & (0xff as i32);
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        *(ptr_add(dst, i) as *i32) = b;
+        i = i + (1 as i64);
+    }
+    return dst;
+}
+fn mem_zero(dst: *u8, n: i64) -> *u8 {
+    return mem_set(dst, 0 as i32, n);
+}
+fn main_jhyy() -> i32 {
+    let buf: [i32; 4] = [0xff as i32, 0xff as i32, 0xff as i32, 0xff as i32];
+    mem_zero(buf as *u8, 4 as i64);
+    if buf[0] != 0 {
+        return 1;
+    }
+    return 0;
+}

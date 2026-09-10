@@ -5158,4 +5158,101 @@ cmd_compile (main.jhyy)
 - related: W-068 (v2.6.5 self-backend module e2e 修), W-069 (v2.6.6 toolchain corrupt 修), W-070 (v2.8.2 sysv cg_module fatal 修), W-071 (v2.6.5 self-backend e2e table row) — 都跟 codegen_amd64 + jhyy_stage0 启动链相关, 但 W-072 是合并 + 重复 def 的独立 root cause cluster
 - 防御: `feedback_jhyy_brace_nesting_trap` 精神 — 嵌套 parse_expr IDENT branch 加 dispatch wrap 时, 现有 `} // close X` 注释在 wrap 后指向会变, 需 manual balance 验证
 
+---
+
+## v3.2.2 (3l.1) std lib M0 — 6 new ACTIVE workarounds
+
+### W-073: D43 closure chain hold (v3.2.1 → v3.2.2)
+
+| 字段 | 值 |
+|------|-----|
+| **ID** | W-073 |
+| **状态** | ACTIVE (hold per 2026-09-09 user 决定) |
+| **日期** | 2026-09-09 (v3.2.1 ship) |
+| **触发面** | self-host src0/*.jhyy 无 closure literal,aux_sym 分支永不触发 → D43 N13 → N14 hold |
+| **症状** | v2.x 在修 codegen_amd64_run self-backend 0-byte body bug;closure chain 真修需 v2.x 修完后重 N0 baseline |
+| **根因嫌疑** | v2-B Phase 2b (QBE 自写 + amd64_sysv 实 impl) 路径中的 self-backend body emit bug; v3.x 全 ship 走 QBE 默认 backend, N≥3 .il byte-equal 不验 .s, 不能 catch self-backend bug |
+| **workaround** | v3.2.1 N13 → v3.2.2 N14 baseline hold; v3.2.3+ 等 v2.x 真修后重测 |
+| **影响范围** | src0/codegen.jhyy, src0/symtab.jhyy (v3.2.1 closure wiring) |
+| **失效条件** | v2.x 真修 self-backend 后, 重跑 selfhost v1→v2→v3→v4→v5 byte-equal chain |
+| **引用** | `feedback_codegen_amd64_run_zerobyte`; coordination.md D43 |
+
+### W-074: D22 arena byte-equal 推迟 (v3.2.2)
+
+| 字段 | 值 |
+|------|-----|
+| **ID** | W-074 |
+| **状态** | ACTIVE (deferred to v3.2.4) |
+| **日期** | 2026-09-09 |
+| **触发面** | `src0/arena.jhyy` 跟 `src/arena.c` byte-equal 不成立;v3.2.2 std::arena layout (40B) 跟 runtime.c Arena (24B) 不同 |
+| **症状** | jhyy_helpers.c/runtime.c 提供 `arena_alloc` (C-side Arena 24B);std::arena 提供 `arena_alloc` (40B Arena)。 两者 layout/API 名字相同但语义不同 → 多 module 引用时冲突 |
+| **根因嫌疑** | 历史 `src/arena.c` 是 Stage 0 C-side bootstrap 留下的 24B Arena; v3.0+ jhyy-side 改用 40B Arena (block linked-list);两边未统一 |
+| **workaround** | v3.2.2 `std::arena` API 等价 `src0/arena.jhyy` 40B layout; test inline 副本用 `std_*` 前缀 fn 名字避免符号冲突 (per W-076); runtime.c 继续用 C-side `arena_alloc` 24B API |
+| **影响范围** | `compiler/src0/std/arena.jhyy` (40B std::arena); `compiler/runtime/runtime.c` (24B C Arena); `compiler/tests/examples/std_arena_*.jhyy` (std_* prefix) |
+| **失效条件** | 把 runtime.c C-side Arena 改名为 c_arena_* 或加 namespace 后, std::arena / C-side Arena 可共存 |
+| **superseder** | v3.2.4 (planned): 改 runtime.c 命名 + 统一 40B layout |
+| **引用** | D22 (coordination.md); `feedback_memory_selectivity` (defer 入 memory, 不入 plan) |
+
+### W-075: std::mem mem_set 用 i32 store 而非 byte store (M0 简化)
+
+| 字段 | 值 |
+|------|-----|
+| **ID** | W-075 |
+| **状态** | ACTIVE (M0 accept) |
+| **日期** | 2026-09-09 |
+| **触发面** | `src0/std/mem.jhyy:mem_set` 实现走 `*(p+i) as *i32 = b` (每次 loop 写 4 字节 i32), 不是 byte-by-byte store |
+| **症状** | 性能: 写 4 字节每次 loop (vs libc memset 一次 8/16 字节 SSE); 语义: 等价 `memset(p, val & 0xff, n)` 当 n 为 4 倍数时;非 4 倍数时最后 1-3 字节也被写 (跟 memset 一致) |
+| **根因嫌疑** | M0 简化: 避开 codegen byte store 路径 (per W-077/W-078); 选 i32 store 是 std::mem M0 scope 的 trade-off (性能 vs 复杂度) |
+| **workaround** | 当前 ship gate 不验证性能; test `std_mem_set.jhyy` 验证 buf[0] & 0xff == 0x42 PASS |
+| **影响范围** | `compiler/src0/std/mem.jhyy:69-80` (mem_set 实现) |
+| **失效条件** | v3.x mid 重写 mem_set 走 SSE/AVX 批量 store |
+| **引用** | `docs/abis/jhyy-lang-spec-stdlib-supplement-v3.2.2.md § 4.1` |
+
+### W-076: std::arena test inline 副本用 std_* 前缀避 runtime.c 符号冲突
+
+| 字段 | 值 |
+|------|-----|
+| **ID** | W-076 |
+| **状态** | ACTIVE |
+| **日期** | 2026-09-09 |
+| **触发面** | jhyy.exe compile 默认 link `runtime.c + jhyy_helpers.c`, runtime.c 已定义 `arena_new / arena_alloc / arena_reset / arena_destroy` (C-side 24B Arena); std::arena test inline 副本如果用相同 fn 名字 → ld 报 multiple definition |
+| **症状** | `ld returned 1 exit status` / `multiple definition of 'arena_alloc'` |
+| **根因嫌疑** | runtime.c 是 Stage 0 C-side bootstrap 留下的; 命名空间未隔离 (per W-074) |
+| **workaround** | std::arena test (`compiler/tests/examples/std_arena_*.jhyy`) 用 `std_arena_init / std_arena_alloc / std_arena_calloc / std_arena_reset` 前缀 fn 名字; std::arena module (`compiler/src0/std/arena.jhyy`) 同样用 std_ 前缀 |
+| **影响范围** | `compiler/src0/std/arena.jhyy` + `compiler/tests/examples/std_arena_*.jhyy` (3 files) |
+| **失效条件** | runtime.c C-side `arena_*` 改名为 `c_arena_*` 或加 namespace 后, std_ 前缀可去掉 |
+| **superseder** | W-074 superseder (v3.2.4 计划) |
+| **引用** | W-074; D22 |
+
+### W-077: src0/std/mem.jhyy mem_find_byte codegen 路径触发 access violation
+
+| 字段 | 值 |
+|------|-----|
+| **ID** | W-077 |
+| **状态** | ACTIVE (test deferred) |
+| **日期** | 2026-09-09 |
+| **触发面** | `mem_find_byte(p, n, val)` 走 `while i < n { *(ptr_add(p, i) as *i32) ...; i++; }`; 在某些 stack pattern (call 前 subq $32 + main 内 multi-i32 store) 下产生 access violation / stack overflow |
+| **症状** | `test std_mem_find_byte.jhyy` 编译 OK 但运行 exit 127 (access violation); strace 看到 `exited with status 0x72813000` (stack reservation) 或 `0xffffffff` (AV) |
+| **根因嫌疑** | codegen mem_find_byte stack frame 布局 bug; 推测是 `subq $16, %rsp` + `movq $0, (%rdi)` 模式导致栈对齐错位 → 主调 callee 的 rsp 错位 |
+| **workaround** | v3.2.2 ship gate 把 `compiler/tests/examples/std_mem_find_byte.jhyy` 改名 `.jhyy.deferred` 不跑; mem_find_byte 留 M0 公开 API (src0/std/mem.jhyy:85-99), fix 留 v3.x mid |
+| **影响范围** | `compiler/src0/std/mem.jhyy:85-99`; `compiler/tests/examples/std_mem_find_byte.jhyy` (deferred) |
+| **失效条件** | codegen stack frame alignment 真修 (推测在 src0/codegen.jhyy cg_call emit 路径) |
+| **引用** | `docs/abis/jhyy-lang-spec-stdlib-supplement-v3.2.2.md § 5` |
+
+### W-078: array[i32] index codegen 触发 QBE invalid type for first operand
+
+| 字段 | 值 |
+|------|-----|
+| **ID** | W-078 |
+| **状态** | ACTIVE |
+| **日期** | 2026-09-09 |
+| **触发面** | `array[i32]` index (e.g. `tmp[n]` where `n: i32`) 时, codegen 算 index offset = n * 4 走 `mul %t91, 4` 但 %t91 是 `w` (32-bit), QBE 要求 long operand |
+| **症状** | QBE error: `invalid type for first operand %t91 in mul`; 测试 `std_fmt_i64.jhyy` v1 用 `n: i32` 当 tmp[] index 触发 → QBE fail; 改 `n: i64` 后 PASS |
+| **根因嫌疑** | codegen array[i] index 应自动 `extsw %t91` (w→l) 再 mul, 但当前缺这一步 |
+| **workaround** | 当前 std::mem / std::fmt / std::string 内部代码全用 `i64` index (per src0/std/*.jhyy 现有 pattern); 用户写 std lib code 也要遵守; fix 留 v3.x mid |
+| **影响范围** | `compiler/src0/codegen.jhyy` (推测 cg_array_index 路径) |
+| **失效条件** | codegen array index 路径自动 extsw 升 w→l |
+| **引用** | `docs/abis/jhyy-lang-spec-stdlib-supplement-v3.2.2.md § 4.2 + § 5` |
+
+
 

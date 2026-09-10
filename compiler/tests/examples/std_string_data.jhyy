@@ -1,0 +1,33 @@
+// std_string_data.jhyy — v3.2.2 (3l.1) std::string str_data test.
+//EXPECT:65  (str_from_cstr("Aa"), str_data 取首个字节 = 'A' = 65)
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+fn strlen_local(s: *u8) -> i64 {
+    let mut n: i64 = 0 as i64;
+    while *(ptr_add(s, n) as *i32) != (0 as i32) {
+        n = n + (1 as i64);
+    }
+    return n;
+}
+fn str_from_cstr(a: *u8, s: *u8) -> *u8 {
+    let n = strlen_local(s);
+    let buf = ptr_add(a, 16 as i64);
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        *(ptr_add(buf, i) as *i32) = *(ptr_add(s, i) as *i32);
+        i = i + (1 as i64);
+    }
+    *(a as *i64) = buf as i64;
+    *(ptr_add(a, 8 as i64) as *i64) = n;
+    return a;
+}
+fn str_len(s: *u8) -> i64 { return *(ptr_add(s, 8 as i64) as *i64); }
+fn str_data(s: *u8) -> *u8 { return *(s as **u8); }
+fn main_jhyy() -> i32 {
+    let storage: [i32; 8] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let s = str_from_cstr(storage as *u8, "Aa" as *u8);
+    let d = str_data(s);
+    return (*(d as *i32) & (0xff as i32));
+}

@@ -1,0 +1,186 @@
+// fmt.jhyy — v3.2.2 (3l.1) std lib 起步:自实现格式化基础。
+//
+// M0 简化(per `docs/plans/v3/v3.2.2-plan.md`):
+//   - 不依赖 closure / generic / 借用
+//   - 自实现 4 个基础 fmt fn(i32/i64/string/hex),不走 libc printf 变参
+//     (变参 ABI 复杂 + std lib 不依赖 libc runtime)
+//   - 复杂 fmt(浮点/width/precision)留 v3.x 中末
+//   - 不 import 跨文件模块(避免 mangle 复杂度);所有 byte 循环本地实现
+//
+// API:
+//   fmt_i32(out_buf, val)        -> 写入 i32 十进制到 out_buf (null-terminated);返回写入字节数 (不含 \0)
+//   fmt_i64(out_buf, val)        -> 写入 i64 十进制;返回字节数
+//   fmt_str(out_buf, s)          -> 复制 cstr 到 out_buf;返回字节数
+//   fmt_hex_u32(out_buf, val, upper) -> 写入 u32 十六进制;返回字节数
+//
+// 注:buffer 必须 ≥ 32 字节(i32/i64 最多 11/20 位 + sign + \0;hex u32 10 位 + \0)。
+
+// ════════════════════════════════════════════════════
+// ptr_add — 本地指针算术 helper (jhyy 不支持 *u8 + i64)
+// ════════════════════════════════════════════════════
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+
+// ════════════════════════════════════════════════════
+// digit / hex table
+// ════════════════════════════════════════════════════
+fn digit_char(d: i32) -> i32 {
+    if d == (0 as i32) { return 48 as i32; }
+    if d == (1 as i32) { return 49 as i32; }
+    if d == (2 as i32) { return 50 as i32; }
+    if d == (3 as i32) { return 51 as i32; }
+    if d == (4 as i32) { return 52 as i32; }
+    if d == (5 as i32) { return 53 as i32; }
+    if d == (6 as i32) { return 54 as i32; }
+    if d == (7 as i32) { return 55 as i32; }
+    if d == (8 as i32) { return 56 as i32; }
+    return 57 as i32;
+}
+
+fn hex_char(d: i32, upper: i32) -> i32 {
+    if d < (10 as i32) {
+        return digit_char(d);
+    }
+    if upper != (0 as i32) {
+        if d == (10 as i32) { return 65 as i32; }
+        if d == (11 as i32) { return 66 as i32; }
+        if d == (12 as i32) { return 67 as i32; }
+        if d == (13 as i32) { return 68 as i32; }
+        if d == (14 as i32) { return 69 as i32; }
+        return 70 as i32;
+    }
+    if d == (10 as i32) { return 97 as i32; }
+    if d == (11 as i32) { return 98 as i32; }
+    if d == (12 as i32) { return 99 as i32; }
+    if d == (13 as i32) { return 100 as i32; }
+    if d == (14 as i32) { return 101 as i32; }
+    return 102 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// fmt_i32 — 写入 i32 十进制到 out_buf
+// 返回写入字节数 (不含 \0)
+// ════════════════════════════════════════════════════
+fn fmt_i32(out_buf: *u8, val: i32) -> i64 {
+    let mut rev: [i32; 16] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let mut n: i64 = 0 as i64;
+    let mut v: i32 = val;
+    if v == (0 as i32) {
+        rev[0] = 48 as i32;
+        n = 1 as i64;
+    } else {
+        let negative: i32 = if v < (0 as i32) { 1 as i32 } else { 0 as i32 };
+        if negative != (0 as i32) {
+            v = 0 as i32 - v;
+        }
+        while v > (0 as i32) {
+            let d: i32 = v - (v / (10 as i32)) * (10 as i32);
+            rev[n] = digit_char(d);
+            n = n + (1 as i64);
+            v = v / (10 as i32);
+        }
+        if negative != (0 as i32) {
+            rev[n] = 45 as i32;
+            n = n + (1 as i64);
+        }
+    }
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let dst = ptr_add(out_buf, i);
+        *(dst as *i32) = rev[n - (1 as i64) - i];
+        i = i + (1 as i64);
+    }
+    *(ptr_add(out_buf, n) as *i32) = 0 as i32;
+    return n;
+}
+
+// ════════════════════════════════════════════════════
+// fmt_i64 — 写入 i64 十进制
+// 返回写入字节数 (不含 \0)
+// ════════════════════════════════════════════════════
+fn fmt_i64(out_buf: *u8, val: i64) -> i64 {
+    let mut rev: [i32; 24] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let mut n: i64 = 0 as i64;
+    let mut v: i64 = val;
+    if v == (0 as i64) {
+        rev[0] = 48 as i32;
+        n = 1 as i64;
+    } else {
+        let negative: i32 = if v < (0 as i64) { 1 as i32 } else { 0 as i32 };
+        if negative != (0 as i32) {
+            v = 0 as i64 - v;
+        }
+        while v > (0 as i64) {
+            let d: i64 = v - (v / (10 as i64)) * (10 as i64);
+            rev[n] = digit_char(d as i32);
+            n = n + (1 as i64);
+            v = v / (10 as i64);
+        }
+        if negative != (0 as i32) {
+            rev[n] = 45 as i32;
+            n = n + (1 as i64);
+        }
+    }
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let dst = ptr_add(out_buf, i);
+        *(dst as *i32) = rev[n - (1 as i64) - i];
+        i = i + (1 as i64);
+    }
+    *(ptr_add(out_buf, n) as *i32) = 0 as i32;
+    return n;
+}
+
+// ════════════════════════════════════════════════════
+// fmt_str — 复制 cstr 到 out_buf;返回字节数
+// ════════════════════════════════════════════════════
+fn fmt_str(out_buf: *u8, s: *u8) -> i64 {
+    let mut i: i64 = 0 as i64;
+    while *(ptr_add(s, i) as *i32) != (0 as i32) {
+        *(ptr_add(out_buf, i) as *i32) = *(ptr_add(s, i) as *i32);
+        i = i + (1 as i64);
+    }
+    *(ptr_add(out_buf, i) as *i32) = 0 as i32;
+    return i;
+}
+
+// ════════════════════════════════════════════════════
+// fmt_hex_u32 — 写入 u32 十六进制到 out_buf
+// upper: 0 = 'a'..'f', 1 = 'A'..'F'
+// 返回写入字节数 (不含 \0, 不带 "0x" 前缀)
+// ════════════════════════════════════════════════════
+fn fmt_hex_u32(out_buf: *u8, val: i32, upper: i32) -> i64 {
+    if val == (0 as i32) {
+        *(out_buf as *i32) = 48 as i32;
+        *(ptr_add(out_buf, 1 as i64) as *i32) = 0 as i32;
+        return 1 as i64;
+    }
+    let mut rev: [i32; 12] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let mut n: i64 = 0 as i64;
+    let mut v: i32 = val;
+    while v > (0 as i32) {
+        let d: i32 = v - (v / (16 as i32)) * (16 as i32);
+        rev[n] = hex_char(d, upper);
+        n = n + (1 as i64);
+        v = v / (16 as i32);
+    }
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let dst = ptr_add(out_buf, i);
+        *(dst as *i32) = rev[n - (1 as i64) - i];
+        i = i + (1 as i64);
+    }
+    *(ptr_add(out_buf, n) as *i32) = 0 as i32;
+    return n;
+}

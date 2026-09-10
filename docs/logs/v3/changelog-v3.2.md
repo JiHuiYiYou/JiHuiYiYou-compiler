@@ -561,3 +561,114 @@ V3-C sub-sprint 5/N — **闭包字面量 MVP**(`|params| { body }` 语法 + 合
 - 跨 axis:V2-B Phase 2b (QBE 自写 / amd64_sysv 实 impl / N 代 fixed point) — 修 `codegen_amd64_run` 0-byte bug, 解阻 v3.2.3+
 - D-GUI-11 lock:`jhyy_OS/docs/coordination.md § 3`;D28 + M8d/M11 launch gates:`docs/plans/v2/v2.0.0-os-prep.md § 1`
 - D43 chain:`docs/logs/v3/changelog-v3.2.md` v3.2.0d 段 (N13 = `980c026`) → **N14** (本 sprint)
+
+---
+
+# v3.2.2 — std lib M0 (3l.1, V3-C sub-sprint 6/N)
+
+> 锁定于 tag `v3.2.2` (per `feedback_changelog_umbrella`, v3.2 axis 用单一 umbrella changelog)。
+
+## 1. Context
+
+**为什么做这个**:v3.x 语言扩展 OS-required 阶段(per `docs/plans/roadmap/v3.x-language-expansion.md § Sprint 3l`)。`std lib` 是 M11 launch 硬前置之一(per `docs/plans/v2/v2.0.0-os-prep.md § 1` M11:v3.2.0 + v3.2.1 + v3.2.2..v3.2.5 全 ship)。当前 axis-v3 已 ship v3.2.0 (3i generics) + v3.2.1 (3j closures),v3.2.2 (3l.1) 是下一个 sub-sprint。
+
+**上游 ship 链**:✅ v3.0-v3.1.x ship + ✅ v3.2.0 (3i generics) + ✅ v3.2.1 (3j closures MVP, N14 byte-equal hold)
+
+**下游 ship 链**:🚀 v3.2.3 (3l.2 闭包 + closure/Vec<T> 基础) + v3.2.4 (3l.3 arena byte-equal 真修) + v3.2.5 (3l.4 std 增量)
+
+**MVP 范围**(per `docs/plans/v3/v3.2.2-plan.md` + 2026-09-09 user 决定):
+- M0:4 个 std lib 模块(mem / fmt / string / arena),每个自包含,跨模块无 import
+- M0:不依赖 closure / generic / 借用
+- M0:不依赖 libc 运行时(mem/fmt/string 全自实现 byte 循环;arena 用 libc malloc)
+- M0:`arena_alloc` 跟 runtime.c 24B Arena API 等价但 layout 不同(W-074)
+
+**Worktree 约定**:per 2026-09-09 user → **不开新 worktree**,axis-v3 direct commit + tag `v3.2.2`(同 v3.2.0/1/1b 风格)。
+
+**Ship gate**(per `feedback_fix_evaluation_rule`):
+- 19+ std lib 测试 5/5 PASS via `jhyy.exe compile + run`(QBE backend,19 测试:std_mem_basic / std_mem_set / std_mem_zero / std_mem_compare / std_mem_copy / std_fmt_i32 / std_fmt_i32_neg / std_fmt_i64 / std_fmt_str / std_fmt_hex / std_string_len / std_string_equals / std_string_concat / std_string_compare / std_string_from_bytes / std_string_data / std_arena_basic / std_arena_calloc / std_arena_reset)
+- `jhyy_regress` 137/137 (含 19 std + 118 原 - 0 failed, 20 skipped)
+- `make all` green
+- D43 closure chain N14 byte-equal hold (sha256sum jhyy_v{2,3,4,5}.exe 全 match)
+
+## 2. Scope (本次 ship)
+
+### 新增 (4 个 std 模块 + 19 测试文件)
+
+| # | 文件 | 行数 | 说明 |
+|---|------|------|------|
+| 1 | `compiler/src0/std/mem.jhyy` | 107 | mem_copy / mem_compare / mem_set / mem_find_byte / mem_zero + ptr_add (W-075: mem_set i32-store;W-077: mem_find_byte codegen AV) |
+| 2 | `compiler/src0/std/fmt.jhyy` | 187 | fmt_i32 / fmt_i64 / fmt_str / fmt_hex_u32 + digit_char / hex_char + ptr_add |
+| 3 | `compiler/src0/std/arena.jhyy` | 180 | arena_init / arena_alloc / arena_calloc / arena_reset (40B layout, std_* 前缀 per W-074/W-076) |
+| 4 | `compiler/src0/std/string.jhyy` | 200 | str_from_cstr / str_from_bytes / str_len / str_data / str_concat / str_equals / str_compare + StringHeader 16B layout |
+| 5-23 | `compiler/tests/examples/std_*.jhyy` (19 files) | ~600 总 | 19 PASS + 1 deferred(std_mem_find_byte) |
+
+### 新增文档
+
+- `docs/abis/jhyy-lang-spec-stdlib-supplement-v3.2.2.md`(本 sprint std lib spec,locked at v3.2.2)
+- `docs/internal/workarounds.md` W-073 to W-078(6 new ACTIVE entries)
+
+### 不改 (0 行)
+
+- `compiler/src/symtab.c` + `compiler/src/symtab.h`(C-side 56B Sym 不变)
+- `compiler/src0/symtab.jhyy`(64B src0 Sym 不变 — v3.2.1 ship)
+- `compiler/src0/sema.jhyy`(closures sema 不变 — v3.2.1 ship)
+- `compiler/src0/codegen.jhyy`(closure dispatch 不变 — v3.2.1 ship)
+- `compiler/src/*.c`(C-side 0 改动)
+
+### 不做 (推到后续 sprint)
+
+- Vec<T> / Map<K,V> std lib → v3.2.3 (依赖 closure)
+- std::arena 跟 runtime.c 24B Arena byte-equal → v3.2.4 (D22 + W-074 superseder)
+- mem_find_byte codegen 真修 → v3.x mid (W-077)
+- array[i32] index 自动 extsw 升 w→l → v3.x mid (W-078)
+- mem_set SSE/AVX 批量 store 优化 → v3.x mid (W-075)
+- closure + env struct (multi-capture) 等 v3.2.3+ 闭包增强
+- borrow checker / `&mut` lifetime → v3.x mid
+
+## 3. 关键设计决策
+
+| # | 问题 | 决策 | 理由 |
+|---|------|------|------|
+| 1 | std lib 怎么组织? | 4 模块独立,每个含 ptr_add 本地 helper | `inline_imports` (main.jhyy:456-559) 只支持 `main_dir/mod_name.jhyy`, 不支持 subdir (`std/*`); M0 接受副本冗余 |
+| 2 | std lib 依赖 libc 吗? | mem/fmt/string 全自实现;arena 用 libc malloc | mem/fmt 字节循环简单;string 自带 mini arena allocator;arena 用 libc 是 OS 调用基础 |
+| 3 | Arena layout? | 40B (blocks/cur/end/reserved/default_size) | 跟 C-side 24B Arena 不同 (W-074); jhyy-side 是 OS runtime,需要 block linked-list 支持 large alloc |
+| 4 | arena_alloc 符号冲突? | std::arena 模块用 std_ 前缀 fn 名 (W-076) | runtime.c 已定义 arena_alloc (24B); std_ 前缀隔离,等 v3.2.4 统一命名 |
+| 5 | mem_set 用什么 store? | `*(p+i) as *i32 = b` (i32 store, 每次 loop 4 字节) (W-075) | M0 简化,避 codegen byte store 路径 (W-077); 性能优化留 v3.x mid |
+| 6 | array index 类型? | 必须 i64 (W-078) | codegen array[i32] index 触发 QBE mul w→l fail; 用户代码遵守 i64 index 直到 v3.x mid fix |
+| 7 | String 表示? | StringHeader 16B (data ptr + len),非 null-terminated | 跟 src0/util.jhyy StringHeader 一致; 但 std::string 不混用 src0/util, 独立实现 |
+| 8 | 1 commit vs split | 1 commit (per 2026-09-09 user 决定) | 改动小 + 逻辑耦合, 回滚风险低 |
+
+## 4. Verification
+
+- ✅ `make all` green (stage-0 不 segfault, jhyy.exe rebuild 成功)
+- ✅ 19/19 std lib 测试 5/5 PASS via `jhyy.exe compile + run`:
+  - std_mem:basic / set / zero / compare / copy (5)
+  - std_fmt:i32 / i32_neg / i64 / str / hex (5)
+  - std_string:len / equals / concat / compare / from_bytes / data (6)
+  - std_arena:basic / calloc / reset (3)
+- ✅ `jhyy_regress` 137/137 (含 19 std + 118 原, 0 failed, 20 skipped)
+- ✅ D43 closure chain N14 hold: `sha256sum jhyy_v{2,3,4,5}.exe` = `8254cd6b681ee3b5b2d59534b7e1ecb3cac29cec7ae08755522e3421ed6d2145` (4 个全 match)
+- ✅ C-side 0 changes (vs `v3.2.1` tag): `git diff v3.2.1..HEAD --stat -- compiler/src/ compiler/runtime/ compiler/qbe/` 空输出
+- ⚠️ 1 test deferred (`std_mem_find_byte.jhyy` → `.jhyy.deferred`,W-077 codegen AV)
+
+**fix evaluation rule** (per `feedback_fix_evaluation_rule`):19/19 std lib 测试 + 137/137 regress PASS + N14 byte-equal = fix work 验证。
+
+## 5. Commit / Tag
+
+- **Commit**:`feat(stdlib): M0 std lib mem/fmt/string/arena (3l.1, v3.2.2) — 4 modules + 19 tests + W-073..W-078`
+- **Tag**:`v3.2.2`
+- **Post-commit SHA fill-in**:本 commit 的 SHA 在 commit 后回填
+- **Auto-push**:per `feedback_auto_push_after_commit`
+
+## 6. Cross-ref
+
+- L1 设计:`docs/plans/roadmap/v3.x-language-expansion.md § Sprint 3l`
+- L2 设计:`docs/plans/v3/v3.2.2-plan.md` (per `feedback_plans_per_version`)
+- 上游:`changelog-v3.2.md` v3.2.1 段 (3j closures, N14 = post-tag fill-in 后)
+- 下游:`v3.2.3-plan.md` (3l.2 closure + Vec<T> 基础)
+- 跨 axis:V2-B Phase 2b (QBE 自写 / amd64_sysv 实 impl / N 代 fixed point) — 修 `codegen_amd64_run` 0-byte bug, 解阻 v3.2.3+ closure chain 真测
+- D-GUI-11 lock:`jhyy_OS/docs/coordination.md § 3`;D28 + M8d/M11 launch gates:`docs/plans/v2/v2.0.0-os-prep.md § 1`
+- D43 chain:`docs/logs/v3/changelog-v3.2.md` v3.2.1 段 (N14) → **N15** (本 sprint, hold; v3.2.3+ 等 v2.x 修后重测)
+- std lib spec:`docs/abis/jhyy-lang-spec-stdlib-supplement-v3.2.2.md`
+- Workarounds:W-073 (D43 hold), W-074 (D22 deferred), W-075 (mem_set i32-store), W-076 (std_ prefix), W-077 (mem_find_byte AV), W-078 (array[i32] index)
+

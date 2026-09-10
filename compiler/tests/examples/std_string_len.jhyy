@@ -1,0 +1,38 @@
+// std_string_len.jhyy — v3.2.2 (3l.1) std::string str_from_cstr + str_len test.
+//EXPECT:5  (str_from_cstr("hello") → len 5)
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+fn strlen_local(s: *u8) -> i64 {
+    let mut n: i64 = 0 as i64;
+    while *(ptr_add(s, n) as *i32) != (0 as i32) {
+        n = n + (1 as i64);
+    }
+    return n;
+}
+fn str_from_cstr(a: *u8, s: *u8) -> *u8 {
+    let n = strlen_local(s);
+    // M0 simplified: write directly to a 64B buf (assume caller pre-allocated)
+    let buf = ptr_add(a, 16 as i64);
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        *(ptr_add(buf, i) as *i32) = *(ptr_add(s, i) as *i32);
+        i = i + (1 as i64);
+    }
+    *(ptr_add(buf, n) as *i32) = 0 as i32;
+    *(a as *i64) = buf as i64;
+    *(ptr_add(a, 8 as i64) as *i64) = n;
+    return a;
+}
+fn str_len(s: *u8) -> i64 {
+    return *(ptr_add(s, 8 as i64) as *i64);
+}
+fn main_jhyy() -> i32 {
+    let storage: [i32; 16] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let s = str_from_cstr(storage as *u8, "hello" as *u8);
+    let n = str_len(s);
+    return n as i32;
+}
