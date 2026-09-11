@@ -257,7 +257,10 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32 {
     free(il_len_box);
 
     // 3. CGState + StringBuilder init (heap-alloc'd, state has stable ptr)
-    let state_buf = malloc(64 as i64);
+    // v2.11.2 (W-074.6 R4): CGState 加了 cur_fn_name + frame_max_temp 字段后,
+    // 当前 struct 8 字段 × 8 字节 = 64 字节 (align 64 字节边界),bump 到 128
+    // 留 64 字节余量防 heap overwrite。
+    let state_buf = malloc(160 as i64);
     if state_buf == (0 as *u8) {
         free(il_buf);
         arena_free(&arena);
@@ -270,11 +273,26 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32 {
     // v2.8.0: 显式设 target_tag(从 main.jhyy run_backend 传 `t` 进 codegen_amd64_run)
     let _set_tt_rc = cg_state_set_target(state_buf, target_tag);
 
+    // v2.11.2 (W-074.6 T3-a):global max temp pre-scan → 填 state.frame_max_temp。
+    // emit_func_header 用 frame_max_temp 算 frame_size = 32 + (max+1)*8。
+    // 单 pass O(n × text_len),可接受(<1ms for n<10000)。
+    let g_max = cg_compute_global_max_temp(tokens, 40 as i64, n);
+    let _fms = cg_state_set_frame_max_temp(state_buf, g_max);
+
     // 4. Regalloc analysis (linear-scan; sets g_regalloc_arr via jh_regalloc_set)
-    let reg_arr = regalloc_init(&arena);
-    if reg_arr != (0 as *u8) {
-        let _ = regalloc_run(&arena, reg_arr, tokens, n);
-    }
+    // v2.11.2 (W-074.6 T3-b):regalloc_run SKIP — 走 cg_offset_for_temp_with_target
+    // 公式 fallback (v2.5.0 1-to-1 简化)。原因:regalloc_run 在 self path
+    // 还没 wire 完整,产出的 spill offset 跟 emit_mem/ctrl/call 不对齐会
+    // 静默错槽。skip 后所有 offset 走 identical `-(32 + t*8)` 公式 → 3 个
+    // 不一致 fn 路径全消除。v2.11.3 EXIT exact 重新 wire。
+    // 关键:skip 后必 regalloc_clear_global() 清 C-side static 指针,
+    // 否则 cg_offset_for_temp_with_target 会读 stale global → ret_off
+    // garbage (如 377464288912 = 0x57FC8C58870 某个 free'd chunk 残留)。
+    let _clear_rc = regalloc_clear_global();
+    // let reg_arr = regalloc_init(&arena);
+    // if reg_arr != (0 as *u8) {
+    //     let _ = regalloc_run(&arena, reg_arr, tokens, n);
+    // }
 
     // 5. Dispatch loop → emit each token → .s into sb.buf
     let _pe_rc = parse_and_emit(state_buf, tokens, n, target_tag);
@@ -292,14 +310,21 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32 {
     // 6. Peephole fold on emitted .s (no-op if arena alloc fails)
     let raw = sb.buf;
     let raw_len = sb.len;
-    let folded = peephole_fold(raw, raw_len, &arena, target_tag);
-    let final_buf: *u8 = if folded != (0 as *u8) { folded } else { raw };
-    // peephole_fold returns input unchanged on no-op (arena null), so final_buf
-    // might point to raw (which is arena-alloc'd, NOT null-terminated).
-    // jh_write_file takes explicit len, so no null-term needed.
+    // v2.11.2 (T2-d) 使用 peephole_fold_with_len 取 fold 后的真实长度,
+    // 避免 raw_len (pre-fold) 写成 fold-后-shorter 区间残余 padding 到 .s。
+    let folded_len_box = malloc(8 as i64);
+    *(folded_len_box as *i64) = raw_len;
+    let mut final_buf: *u8 = peephole_fold_with_len(raw, raw_len, arena, target_tag, folded_len_box);
+    let mut final_len: i64 = *(folded_len_box as *i64);
+    if final_buf == (0 as *u8) {
+        final_buf = raw;
+        final_len = raw_len;
+    }
+    free(folded_len_box);
 
     // 7. Write .s (binary mode, per feedback_qbe_crlf_root_cause)
-    let wr_rc = jh_write_file(asm_path, final_buf, raw_len);
+    // v2.11.2 (T2-d):用 final_len 写而非 raw_len,避免 fold 后 shorter → 写脏数据。
+    let wr_rc = jh_write_file(asm_path, final_buf, final_len);
 
     // 8. Cleanup
     free(state_buf);

@@ -25,6 +25,8 @@
 // cg_offset_for_temp 在 line 132 调用 regalloc_query_spill_off_no_arr;
 // jhyy 不支持 fn forward reference,import 必须先于 use site)
 import codegen_amd64_regalloc;
+// v2.11.2 (W-074.6 T1-a): cg_byte_at / cg_streq_n / cg_find_sub 用 ptr_add_u8
+import util;
 
 // ════════════════════════════════════════════════════
 // QBE type constants(per ir.jhyy `QBE_W='w'=119` 等)
@@ -96,6 +98,13 @@ type CGState = struct {
     shadow_space: i64,  // 32-byte shadow space (MS x64 calling convention)
     nparams:      i64,  // 当前函数的参数个数(影响 prologue size)
 
+    // v2.11.2 (T4-d 真修延伸):cur_call_text / cur_call_text_len —
+    // emit_call 在调 emit_amd64_arg_regs 前把 call 指令原文 slice 存这里,
+    // emit_amd64_arg_regs 解析每个 arg 的 (qt, temp_id)。之前 emit_amd64_arg_regs
+    // hardcode %t1..%t6, 错槽静默 wrong value(per W-074.6 T4-d)。
+    cur_call_text:     *u8,    // call 指令原文 slice (lexer set, NO null-term)
+    cur_call_text_len: i64,    // slice 长度
+
     // v2.7.0 Phase 2a: target tag threading through CGState.
     //   0 = TARGET_AMD64_WIN              (default; per Win ABI path)
     //   1 = TARGET_AMD64_WIN_FREESTANDING (per Win freestanding path)
@@ -104,6 +113,11 @@ type CGState = struct {
     // Phase 2a 仅加字段 + 默认 0 (Win),emit_call refactor 留 Phase 2b 调此字段
     // 决定 arg-reg 序列 (Win 4 reg + 32B shadow / SysV 6 reg + 无 shadow)。
     target_tag:   i32,
+
+    // v2.11.2 (W-074.6 T3-a): global max temp id seen across whole module。
+    // Per-function pre-scan table 留 v2.11.3;v2.11.2 用 global-max fallback
+    // (every function uses same frame size,浪费 stack 但 correctness 闭环)。
+    frame_max_temp: i64,
 }
 
 // CGState 初始化 helper
@@ -122,18 +136,25 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     // v2.7.0 Phase 2a: target_tag 默认 0 (Win); Phase 2b 改 cg_state_init 签名 +
     // codegen_amd64_run 传 target_tag (target 来自 main.jhyy run_backend 的 `t` 参数)。
     (*s).target_tag = 0 as i32;
+    // v2.11.2 (W-074.6 T3-a): frame_max_temp init to -1 (no temps seen yet)
+    (*s).frame_max_temp = -(1 as i64);
     return 0;
 }
 
 // CGState 重置(per function prologue)
 // V2-B v2.6.0 (Unit B Stub-Fill): real impl — reset per-function fields.
 // v2.7.0 Phase 2a: 保留 target_tag(per-compile,跨 function 共享)
+// v2.11.2 (W-074.6 T3-a): 由 emit_func_header 调(per plan agent §5,关闭
+//   emit_func_header:361-363 TODO "cur_fn_name 由 caller 负责")。
 fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
     let s = state as *CGState;
     (*s).next_offset = 0 as i64;
     (*s).total_alloc = 0 as i64;
     (*s).cur_fn_name = fn_name;
     (*s).nparams = 0 as i64;
+    (*s).cur_call_text = 0 as *u8;
+    (*s).cur_call_text_len = 0 as i64;
+    // frame_max_temp 不重置 — global max across module(per v2.11.2 fallback)
     // target_tag 不重置 — per-compile constant
     return 0;
 }
@@ -146,6 +167,17 @@ fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
 fn cg_state_set_target(state: *u8, target_tag: i32) -> i32 {
     let s = state as *CGState;
     (*s).target_tag = target_tag;
+    return 0;
+}
+
+// cg_state_set_frame_max_temp — v2.11.2 (T3-a) setter
+//
+// 显式 setter 给 codegen_amd64_run 在 cg_compute_global_max_temp 后调,
+// 把 module-global max temp id 写进 state.frame_max_temp。
+// emit_func_header 在 prologue 读 frame_max_temp 算 subq $N, %rsp 字节数。
+fn cg_state_set_frame_max_temp(state: *u8, frame_max_temp: i64) -> i32 {
+    let s = state as *CGState;
+    (*s).frame_max_temp = frame_max_temp;
     return 0;
 }
 
@@ -212,7 +244,6 @@ fn cg_offset_for_temp_with_target(t: i64, target_tag: i32) -> i64 {
     if target_is_win(target_tag) == (1 as i32) {
         return (0 as i64) - (32 as i64) - t * (8 as i64);
     }
-    // SysV: no shadow
     return (0 as i64) - t * (8 as i64);
 }
 
@@ -227,6 +258,166 @@ fn cg_alloc_slot(state: *u8, size: i64) -> i64 {
     (*s).next_offset = off;
     (*s).total_alloc = (*s).total_alloc + aligned;
     return off;
+}
+
+// ════════════════════════════════════════════════════
+// v2.11.2 (W-074.6 T1-a): shared parse helpers for emit functions
+// ════════════════════════════════════════════════════
+//
+// After W-074.5 (v2.11.1) 真修 + W-074.6 T1-a 真修,ILToken 的 text/text_len 字段
+// 装整条 QBE IL 指令原文(per _emit_mem.jhyy:25-40 documented contract)。emit_*
+// 函数需要 scanner 在 tok.text 内 parse operands (temp ids / labels / int literals)。
+//
+// emit_mem 自带 mem_* 私有 scanner (mem_parse_temp / mem_parse_int_from 等);
+// v2.11.2 把这些 scanner lift 到 state 模块,emit_ctrl + emit_call 复用。
+//
+// emit_mem 保留自己的 mem_* 副本 — dedupe 留后续 sprint 清理。
+
+// cg_byte_at(s: *u8, i: i64) -> i32 — 取 s[i] 字节值 as i32 (供 is_digit / scan 用)
+fn cg_byte_at(s: *u8, i: i64) -> i32 {
+    let p = ptr_add_u8(s, i);
+    let c = *p;
+    return c as i32;
+}
+
+// cg_is_digit(c: i32) -> i32 — 1 if c 是 '0'-'9',else 0
+fn cg_is_digit(c: i32) -> i32 {
+    if c >= (48 as i32) && c <= (57 as i32) {
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
+// cg_parse_temp(text: *u8, len: i64, idx: i64) -> i64
+// 扫 text[0..len] 里第 idx 个(0-based)`%tN`,返回 N;不存在返回 -1。
+// `%` 后必须紧跟 't' 才算 temp — 避开 `%rbp` 之类(防御性写)。
+// 注:跟 _emit_mem.jhyy:96 mem_parse_temp 同样的 scan 规则,只是共用 cg_ 前缀。
+fn cg_parse_temp(text: *u8, len: i64, idx: i64) -> i64 {
+    if text == (0 as *u8) || len <= (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut seen: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i + (1 as i64) < len {
+        if cg_byte_at(text, i) == (37 as i32) && cg_byte_at(text, i + (1 as i64)) == (116 as i32) {
+            // 命中 "%t",往后收数字
+            let mut k: i64 = i + (2 as i64);
+            let mut val: i64 = 0 as i64;
+            let mut ndig: i64 = 0 as i64;
+            while k < len && cg_is_digit(cg_byte_at(text, k)) != (0 as i32) {
+                val = val * (10 as i64) + ((cg_byte_at(text, k) - (48 as i32)) as i64);
+                ndig = ndig + (1 as i64);
+                k = k + (1 as i64);
+            }
+            if ndig > (0 as i64) {
+                if seen == idx {
+                    return val;
+                }
+                seen = seen + (1 as i64);
+            }
+            i = k;
+        } else {
+            i = i + (1 as i64);
+        }
+    }
+    return -(1 as i64);
+}
+
+// cg_parse_int_from(text: *u8, len: i64, from: i64) -> i64
+// 扫 text[from..len] 里第一个十进制整数;返回值,没有返回 -1。
+// (跟 mem_parse_int_from 同样的 scan 规则 — 共享 helper。)
+fn cg_parse_int_from(text: *u8, len: i64, from: i64) -> i64 {
+    if text == (0 as *u8) || from < (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut i: i64 = from;
+    while i < len {
+        if cg_is_digit(cg_byte_at(text, i)) != (0 as i32) {
+            let mut val: i64 = 0 as i64;
+            while i < len && cg_is_digit(cg_byte_at(text, i)) != (0 as i32) {
+                val = val * (10 as i64) + ((cg_byte_at(text, i) - (48 as i32)) as i64);
+                i = i + (1 as i64);
+            }
+            return val;
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
+
+// cg_streq_n(a: *u8, b: *u8, n: i64) -> i32
+// N 字节定长比较 (跟 memcmp 不同:不强求 NUL 终止,严格 N 截断)。
+// 返 1 if a[0..n) == b[0..n),else 0。任一为 NULL → 0。
+fn cg_streq_n(a: *u8, b: *u8, n: i64) -> i32 {
+    if a == (0 as *u8) || b == (0 as *u8) {
+        return 0 as i32;
+    }
+    if n <= (0 as i64) {
+        return 1 as i32;
+    }
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        if cg_byte_at(a, i) != cg_byte_at(b, i) {
+            return 0 as i32;
+        }
+        i = i + (1 as i64);
+    }
+    return 1 as i32;
+}
+
+// cg_find_at(text: *u8, len: i64, from: i64) -> i64
+// 扫 text[from..len] 第一个 '@' 的 offset;没有返 -1。
+// emit_jnz / emit_jmp 用来定位 label (e.g. "@then1" → offset of '@')。
+fn cg_find_at(text: *u8, len: i64, from: i64) -> i64 {
+    if text == (0 as *u8) || from < (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut i: i64 = from;
+    while i < len {
+        if cg_byte_at(text, i) == (64 as i32) {  // '@' = 64
+            return i;
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
+
+// cg_find_dollar(text: *u8, len: i64, from: i64) -> i64
+// 扫 text[from..len] 第一个 '$' 的 offset;没有返 -1。
+// emit_call 用:解析 "$name" callee name (e.g. "$fib")。
+fn cg_find_dollar(text: *u8, len: i64, from: i64) -> i64 {
+    if text == (0 as *u8) || from < (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut i: i64 = from;
+    while i < len {
+        if cg_byte_at(text, i) == (36 as i32) {  // '$' = 36
+            return i;
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
+
+// cg_find_sub(text: *u8, len: i64, pat: *u8, pat_len: i64) -> i64
+// 在 text[0..len) 中找 pat[0..pat_len) 首次出现的下标,找不到返 -1。
+// 注:跟 _emit_mem.jhyy:66 mem_find_sub 区别 — mem_find_sub 要求 pat NUL-终止 +
+// strlen(pat),cg_find_sub 显式接 pat_len,允许任意 byte slice。
+fn cg_find_sub(text: *u8, len: i64, pat: *u8, pat_len: i64) -> i64 {
+    if text == (0 as *u8) || pat == (0 as *u8) {
+        return -(1 as i64);
+    }
+    if pat_len <= (0 as i64) || pat_len > len {
+        return -(1 as i64);
+    }
+    let mut i: i64 = 0 as i64;
+    while i + pat_len <= len {
+        if cg_streq_n(ptr_add_u8(text, i), pat, pat_len) != (0 as i32) {
+            return i;
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
 }
 
 // ════════════════════════════════════════════════════
@@ -269,3 +460,65 @@ fn cg_alloc_slot(state: *u8, size: i64) -> i64 {
 // import 是为了把 regalloc 模块拉到 import graph 里,后续 Unit E 调用时不用再改
 // state.jhyy 的 import。
 // (import 已移到文件顶部 per jhyy 不支持 fn forward reference)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v2.11.2 (W-074.6 T3-a) global-max frame variant helpers
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 全 module 扫一次,找最大的 %tN,用做 frame size = 32 + (max_temp+1)*8。
+// Per-function pre-scan table 留 v2.11.3 EXIT exact (~60 LOC)。
+//
+// cg_token_max_temp_id(tok_p, tok_size, idx) -> i64
+//   读 token[idx],从 text 字段扫所有 %tN 取 max。tok_size=40 (per lex_il)。
+//   text=0 (declaration tokens) → 返 -1。
+//   没有 %tN → 返 -1。
+fn cg_token_max_temp_id(tok_p: *u8, tok_size: i64, idx: i64) -> i64 {
+    if tok_p == (0 as *u8) { return -(1 as i64); }
+    let tok_start = (tok_p as i64 + idx * tok_size) as *u8;
+    let t = tok_start as *ILToken;
+    let text = (*t).text;
+    let text_len = (*t).text_len;
+    if text == (0 as *u8) || text_len <= (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut max_id: i64 = -(1 as i64);
+    let mut i: i64 = 0 as i64;
+    while i < text_len {
+        let c = cg_byte_at(text, i);
+        if c == (37 as i32) && i + (1 as i64) < text_len {
+            let c2 = cg_byte_at(text, i + (1 as i64));
+            if c2 == (116 as i32) {  // 't'
+                let mut k: i64 = i + (2 as i64);
+                let mut val: i64 = 0 as i64;
+                let mut ndig: i64 = 0 as i64;
+                while k < text_len && cg_is_digit(cg_byte_at(text, k)) != (0 as i32) {
+                    val = val * (10 as i64) + ((cg_byte_at(text, k) - (48 as i32)) as i64);
+                    ndig = ndig + (1 as i64);
+                    k = k + (1 as i64);
+                }
+                if ndig > (0 as i64) {
+                    if val > max_id { max_id = val; }
+                }
+                i = k;
+            } else {
+                i = i + (1 as i64);
+            }
+        } else {
+            i = i + (1 as i64);
+        }
+    }
+    return max_id;
+}
+
+// cg_compute_global_max_temp(tok_p, tok_size, n) -> i64
+//   单 pass 扫整个 token 数组,返最大 %tN。找不到返 0 (safe 0 offset = 32 字节)。
+fn cg_compute_global_max_temp(tok_p: *u8, tok_size: i64, n: i64) -> i64 {
+    let mut gmax: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let t_max = cg_token_max_temp_id(tok_p, tok_size, i);
+        if t_max > gmax { gmax = t_max; }
+        i = i + (1 as i64);
+    }
+    return gmax;
+}

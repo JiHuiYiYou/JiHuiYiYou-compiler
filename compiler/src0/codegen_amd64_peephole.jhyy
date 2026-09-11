@@ -648,11 +648,18 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8, target_tag: i32) -> *u8 {
     }
 
     // Rule 3: mov A→B + mov B→C → 替换第二行为 mov A→C
+    // v2.11.2 (T2-c 三阶段):DISABLED — fold 在 src/dst size suffix 不同
+    // 时产生非法 x86 (e.g. movq %rcx, %eax — 64→32 位 size mismatch,
+    // GAS 拒绝 "operand type mismatch")。emit_copy 路径 emit movq +
+    // emit_load 路径 emit movl 同 slot 是合法 IR 但 size 不同,gate 没
+    // 防住这一 case。v2.11.3 重做 Rule 3 (要求 line1.size == line2.size +
+    // line1.dst == line2.src 同时 dst2 register,加 tab 前缀)。本 sprint
+    // 关掉 fold — perf 退化但保证正确。
     let src_buf = arena_alloc(arena, 32 as i64);
     let dst_buf = arena_alloc(arena, 32 as i64);
     let src2_buf = arena_alloc(arena, 32 as i64);
     let dst2_buf = arena_alloc(arena, 32 as i64);
-    if src_buf != (0 as *u8) && dst_buf != (0 as *u8) && src2_buf != (0 as *u8) && dst2_buf != (0 as *u8) {
+    if src_buf != (0 as *u8) && dst_buf != (0 as *u8) && src2_buf != (0 as *u8) && dst2_buf != (0 as *u8) && (0 as i32) == (1 as i32) {
         let _m5 = memset(src_buf, 0 as i32, 32 as i64);
         let _m6 = memset(dst_buf, 0 as i32, 32 as i64);
         let _m7 = memset(src2_buf, 0 as i32, 32 as i64);
@@ -680,7 +687,30 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8, target_tag: i32) -> *u8 {
                     if extract2 == (0 as i32) {
                         // check line1.dst == line2.src
                         let dst_eq = pee_eq(dst_buf, src2_buf);
-                        if dst_eq == (1 as i32) {
+                        // v2.11.2 (T2-c) Rule 3 register-dst gate:
+                        // 仅当 dst2 是 register (字节 '%' 开头) 才 fold —
+                        // 否则会 emit `mov mem, mem`(x86 非法)。
+                        // 例如 emit_load 输出:
+                        //   movl -32(%rbp), %eax
+                        //   movl %eax, -40(%rbp)
+                        // line1.dst="%eax"(reg) = line2.src="%eax"(reg) 命中;
+                        // dst2="-40(%rbp)" 不是 register → 跳过 fold,
+                        // 留两行 mov mem,reg + mov reg,mem(正确)。
+                        let dst2_first = pee_byte_at(dst2_buf, 0);
+                        let is_reg_dst = dst2_first == (37 as i32);  // '%'
+                        // v2.11.2 (T2-c 二阶段):self-fold 检测 — src1 == dst2
+                        // (e.g. movl %eax, -X(%rbp) + movl -X(%rbp), %eax →
+                        // movl %eax, %eax) 是 no-op,直接删两行,别 emit
+                        // 缺 tab 的 "movl %eax, %eax" garbage。
+                        let src1_first = pee_byte_at(src_buf, 0);
+                        let src1_eq_dst2 = pee_eq(src_buf, dst2_buf);
+                        if dst_eq == (1 as i32) && is_reg_dst == (1 as i32) && src1_eq_dst2 == (1 as i32) {
+                            // self-fold:删 line[li] + line[li+1]
+                            let dp1 = ptr_add_u8(line_deleted, li);
+                            *dp1 = 1 as u8;
+                            let dp2 = ptr_add_u8(line_deleted, li + 1 as i64);
+                            *dp2 = 1 as u8;
+                        } else if dst_eq == (1 as i32) && is_reg_dst == (1 as i32) {
                             // replace line[li+1] with "mov ... src1 ... dst2"
                             // build replacement: "mov <src1>, <dst2>\n"
                             // 简化:用 dst2 直接复制,然后插入 src1
@@ -688,19 +718,31 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8, target_tag: i32) -> *u8 {
                             let new_buf = arena_alloc(arena, 128 as i64);
                             if new_buf != (0 as *u8) {
                                 let _m9 = memset(new_buf, 0 as i32, 128 as i64);
+                                // v2.11.2 (T2-c 二阶段 fix):prepend '\t' 到 new_buf
+                                // 否则 fold 输出 "movq %rcx, %eax" 无 tab → GAS
+                                // assembler 仍接受(裸 op 无 tab 合法)但跟 .s 其余行
+                                // 不一致,peephole 后续 pass 也难对位。补 '\t' 跟原始
+                                // line 同 prefix。
+                                let tab_p = ptr_add_u8(new_buf, 0 as i64);
+                                *tab_p = 9 as u8;
                                 // write "movl " (assume 32-bit; size suffix not handled in this simple version)
                                 // 简化:用 src1 的 size suffix 推断(若 src1 含 'l' / 'q' 用之,否则 'l')
                                 let src1_len = strlen(src_buf);
                                 let dst2_len = strlen(dst2_buf);
                                 // Copy mnemonic "mov" + size suffix from line1[me-1]
+                                // (offset 1 起,因为 new_buf[0] = '\t')
                                 let ms_p = pee_unpack_start(pee_get_mnemonic_start_end(ptr_add_u8(input, ls1), llen1));
                                 let me_p = pee_unpack_end(pee_get_mnemonic_start_end(ptr_add_u8(input, ls1), llen1));
                                 let mut k: i64 = 0 as i64;
                                 while k < me_p - ms_p {
-                                    let p = ptr_add_u8(new_buf, k);
+                                    let p = ptr_add_u8(new_buf, 1 as i64 + k);
                                     *p = pee_byte_at(input, ls1 + ms_p + k) as u8;
                                     k = k + (1 as i64);
                                 }
+                                // v2.11.2 (T2-c 二阶段):k 现在 = mnemonic length,
+                                // 但 new_buf 实际位置 1+(mnemonic length) 才空。
+                                // 调整 k +1 跳过 '\t' 前缀,后续 space/src/dst 写对位。
+                                k = k + 1 as i64;
                                 // add " "
                                 let sp = ptr_add_u8(new_buf, k);
                                 *sp = 32 as u8;
@@ -791,6 +833,46 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8, target_tag: i32) -> *u8 {
         *p = 0 as u8;
     }
     return out;
+}
+
+// peephole_fold_with_len — v2.11.2 (T2-d) variant,返 output length via out_len。
+// 用这个替代 peephole_fold(codegen_amd64_run 用):fix "写 .s 时用 raw_len
+// 而非 folded_len" bug。folded result 通常 shorter than raw → 用 raw_len 写
+// 会把 arena-alloc'd 末尾 NUL padding / 已删 line 残余 写到 .s 文件,虽不
+// 致命但 diff QBE-vs-self .s 不 byte-equal。
+fn peephole_fold_with_len(input: *u8, len: i64, arena: *u8, target_tag: i32, out_len: *i64) -> *u8 {
+    if input == (0 as *u8) || len <= (0 as i64) {
+        if out_len != (0 as *i64) { *(out_len as *i64) = len; }
+        return input;
+    }
+    if arena == (0 as *u8) {
+        if out_len != (0 as *i64) { *(out_len as *i64) = len; }
+        return input;
+    }
+    // 注:v2.11.2 不重 fold 实现(避免双重维护),先 call peephole_fold 再
+    // 推 length。peephole_fold 末尾 null-terminate,所以 strlen(folded) + 1
+    // = out_len。但 strlen 在 arena-alloc buf 上不安全(fold 后可能有 NUL
+    // 在 fold 之外)。更安全:用 peephole_count_folds 之类的 round-trip 计 fold
+    // 长度差。这里走 strlen 简化:fold 输出应该 NUL 在 out_off,中间没 NUL。
+    let folded = peephole_fold(input, len, arena, target_tag);
+    if folded == input {
+        // 没 fold 或 fold 失败 → 原长
+        if out_len != (0 as *i64) { *(out_len as *i64) = len; }
+        return folded;
+    }
+    // fold 成功 → strlen(folded) (peek 直到 NUL)。
+    if out_len != (0 as *i64) {
+        let mut n: i64 = 0 as i64;
+        let mut cap_n: i64 = len;  // safety bound
+        while n < cap_n {
+            let p = ptr_add_u8(folded, n);
+            let c = *p;
+            if c == (0 as u8) { break; }
+            n = n + (1 as i64);
+        }
+        *(out_len as *i64) = n;
+    }
+    return folded;
 }
 
 // peephole_count_folds — 统计 fold 次数(给 unit test 用)

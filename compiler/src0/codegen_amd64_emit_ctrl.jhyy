@@ -89,28 +89,40 @@ fn compute_offset_for_temp_id_with_target(t: i64, target_tag: i32) -> i64 {
 //
 // Per L4 § 3.5 E10:QBE output:`jmp .L_label_name`(或 `jmp <label>`)
 // 本 emit:`jmp .L<label>`(QBE 风格 `.L` 前缀)
-// label 来源:tok.text(QBE IL token 的 label name,例 `b3` / `start`)
-// 输出形式:`\tjmp .L<b3>\n`(QBE 用 tab 缩进,L4 § 3.1 match 策略)
 //
-// 为何 QBE 风格 `.L` 前缀:QBE amd64 emit 默认 emit `bb%d` 数字 block label;
-// 我们走 named label(`@start` / `@b1` 等,QBE IL token 中的 block name),
-// 但仍用 `.L` prefix 跟 QBE 风格一致(per L4 § 3.2 .s 文件结构)。
-
+// v2.11.2 (T1-a):从 tok.text (e.g. "mp @loop1") parse label via cg_find_at。
+// 旧 emit 用 sb_append(text, text_len) — 会把 "mp " prefix 也 emit 出去。
 fn emit_jmp(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let cg = state as *CGState;
     let t = tok as *ILToken;
-    // 防御性:kind 必须 = ILTOK_JMP,否则 lexer 错了直接 return non-zero
     if (*t).kind != ILTOK_JMP() {
         jh_fputs_stderr("emit_jmp: ILToken kind != ILTOK_JMP\n" as *u8);
         return 1;
     }
     let sb = (*cg).out;
     let arena = (*cg).arena;
-    // \tjmp .L<label>\n
+    let text = (*t).text;
+    let text_len = (*t).text_len;
+    // parse @label via cg_find_at
+    let label_off = cg_find_at(text, text_len, 0 as i64);
+    if label_off < (0 as i64) {
+        jh_fputs_stderr("emit_jmp: no @label\n" as *u8);
+        return 1 as i32;
+    }
+    let name_off = label_off + (1 as i64);
+    let mut name_len: i64 = 0 as i64;
+    let mut scan = name_off;
+    while scan < text_len {
+        let c = *(ptr_add_u8(text, scan)) as i32;
+        if c == (32 as i32) || c == (9 as i32) || c == (10 as i32) {
+            break;
+        }
+        name_len = name_len + (1 as i64);
+        scan = scan + (1 as i64);
+    }
     sb_append_cstr(arena, sb, "\tjmp .L" as *u8);
-    sb_append(arena, sb, (*t).text, (*t).text_len);
+    let _a = sb_append(arena, sb, ptr_add_u8(text, name_off), name_len);
     sb_append_cstr(arena, sb, "\n" as *u8);
-    // target_tag 参数 v2.8.0 加,jmp target-agnostic — 仅为签名统一
     let _tt = target_tag;
     return 0;
 }
@@ -121,28 +133,15 @@ fn emit_jmp(state: *u8, tok: *u8, target_tag: i32) -> i32 {
 //
 // Per L4 § 3.5 E11:QBE output:`testl -X(%rbp), -X(%rbp); jne .L_then; jmp .L_else`
 // 本 emit(1-to-1 简化):用 `testq` 或 `testl` per qbe_type(l/w)
-//   - l (QBE_L_LOCAL=108): testq %cond_offset, %cond_offset  (64-bit)
-//   - w (QBE_W_LOCAL=119): testl %cond_offset, %cond_offset  (32-bit)
-//   - s/d 浮点本 emit 不接 — v2.5.0 不做浮点(per L4 § 0 BB)
-//     浮点 jnz 在 V2-B v2.6.0 / v2.x 末 才加
-//   - 其他 / QBE_VOLATILE_MARKER (-1): 默认走 w 路径(保守)
 //
-// `%cond` 来源:tok.text 是 `%t1` 之类(带 % 前缀),但 cg_offset_for_temp
-// 期望纯数字 N。本 emit 用 tok.int_val(QBE IL numeric literal 部分)直接传
-// offset_for_temp。
+// v2.11.2 (T1-d):从 tok.text (e.g. "nz %t3, @then1, @else2") parse:
+//   - cond_id = cg_parse_temp(text, 0)         → first %tN id
+//   - then_off = cg_find_at(text, 0)           → offset of first '@'
+//   - else_off = cg_find_at(text, then_off+1)  → offset of second '@'
+//   - then_name = text[then_off+1 .. first_ws_after_@]
+//   - else_name = text[else_off+1 .. first_ws_after_@]
 //
-// jnz 的两个 label 来源:tok.text_len / tok.int_val 不够装两 label,
-// 本 emit 假设 lexer 把 `then` 塞进 tok.text,`else` 塞进 arena 跟 text 拼接的
-// 临时 buf(parser.jhyy 风格)。A1 lexer 实际接口由 A1 ship 后定。
-// v2.5.0 实现路径(本 emit):
-//   - tok.text = `@then`(label name, lexer 已剥 @ 前缀)
-//   - tok.text2(新字段)/tok.int_val 装 else label string pointer
-//
-// 简化:A1 lexer ship 后,本 emit 期望 tok.text=`then_label`,
-// 而 else label 暂用 tok.int_val 装 pointer(per D-GUI-12 byte-identical
-// hosted/freestanding MS x64,无需多 target 区分)。
-// NOTE:lexer 字段假设待 A1 落地确认,本 commit 标 [ASSUMED-LAYOUT]。
-
+// T2-a:literal "-" 删掉;offset 本身是负值,sb_appendf_lld %lld 已含 '-'。
 fn emit_jnz(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let cg = state as *CGState;
     let t = tok as *ILToken;
@@ -152,46 +151,77 @@ fn emit_jnz(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     }
     let sb = (*cg).out;
     let arena = (*cg).arena;
+    let text = (*t).text;
+    let text_len = (*t).text_len;
 
-    // 1) testq / testl per qbe_type
-    //    注:`%cond` 的 stack offset 由 compute_offset_for_temp_id(cond_id) 算
-    //    v2.5.0 简化:每 temp 8-byte slot,offset = -(32 + id*8)
-    //    v2.8.0: target-aware offset — Win 32-byte shadow,SysV no shadow。
-    let cond_id = (*t).int_val;
-    let neg_off = compute_offset_for_temp_id_with_target(cond_id, target_tag);
+    // parse cond (%tN) — first %tN in text
+    let cond_id = cg_parse_temp(text, text_len, 0 as i64);
+    if cond_id < (0 as i64) {
+        jh_fputs_stderr("emit_jnz: no cond temp\n" as *u8);
+        return 1 as i32;
+    }
+    let neg_off = cg_offset_for_temp_with_target(cond_id, target_tag);
 
-    // testq / testl 选择
+    // parse @then label (first '@' after cond)
+    let then_off = cg_find_at(text, text_len, 0 as i64);
+    if then_off < (0 as i64) {
+        jh_fputs_stderr("emit_jnz: no then label\n" as *u8);
+        return 1 as i32;
+    }
+    let then_name_off = then_off + (1 as i64);  // skip '@'
+
+    // parse @else label (next '@' after then_name)
+    let else_off = cg_find_at(text, text_len, then_name_off);
+    if else_off < (0 as i64) {
+        jh_fputs_stderr("emit_jnz: no else label\n" as *u8);
+        return 1 as i32;
+    }
+    let else_name_off = else_off + (1 as i64);
+
+    // scan label name lengths (until ',' / ')' / ' ' / EOL)
+    let mut then_name_len: i64 = 0 as i64;
+    let mut then_scan = then_name_off;
+    while then_scan < text_len {
+        let c = *(ptr_add_u8(text, then_scan)) as i32;
+        if c == (44 as i32) || c == (32 as i32) || c == (9 as i32) {
+            break;  // ',' or whitespace ends label name
+        }
+        then_name_len = then_name_len + (1 as i64);
+        then_scan = then_scan + (1 as i64);
+    }
+    let mut else_name_len: i64 = 0 as i64;
+    let mut else_scan = else_name_off;
+    while else_scan < text_len {
+        let c = *(ptr_add_u8(text, else_scan)) as i32;
+        if c == (44 as i32) || c == (32 as i32) || c == (9 as i32) {
+            break;
+        }
+        else_name_len = else_name_len + (1 as i64);
+        else_scan = else_scan + (1 as i64);
+    }
+
+    // 1) cmp<sz> $0, mem(%rbp) — GAS 拒绝 test mem, mem → 改用 cmp $0, mem(mem/imm 合法)。
+    //   T2-a:drop literal "-",use neg_off %lld (already signed)。
     let qbe_type = (*t).qbe_type;
     if qbe_type == QBE_L_LOCAL() {
-        // testq %cond_offset, %cond_offset → emit "testq -X(%rbp), -X(%rbp)"
-        sb_append_cstr(arena, sb, "\ttestq -" as *u8);
-        sb_appendf_lld(arena, sb, "%lld" as *u8, neg_off);
-        sb_append_cstr(arena, sb, "(%rbp), -" as *u8);
+        sb_append_cstr(arena, sb, "\tcmpq $0, " as *u8);
         sb_appendf_lld(arena, sb, "%lld" as *u8, neg_off);
         sb_append_cstr(arena, sb, "(%rbp)\n" as *u8);
     } else {
-        // w / b / h / volatile-marker 走 testl (32-bit 默认)
-        sb_append_cstr(arena, sb, "\ttestl -" as *u8);
-        sb_appendf_lld(arena, sb, "%lld" as *u8, neg_off);
-        sb_append_cstr(arena, sb, "(%rbp), -" as *u8);
+        // w / b / h / volatile-marker / 0 走 cmpl (32-bit 默认)
+        sb_append_cstr(arena, sb, "\tcmpl $0, " as *u8);
         sb_appendf_lld(arena, sb, "%lld" as *u8, neg_off);
         sb_append_cstr(arena, sb, "(%rbp)\n" as *u8);
     }
 
     // 2) jne .L<then>
     sb_append_cstr(arena, sb, "\tjne .L" as *u8);
-    sb_append(arena, sb, (*t).text, (*t).text_len);
+    let _a1 = sb_append(arena, sb, ptr_add_u8(text, then_name_off), then_name_len);
     sb_append_cstr(arena, sb, "\n" as *u8);
 
     // 3) jmp .L<else>
-    //    [ASSUMED-LAYOUT] else label 暂从 (text+text_len+1) 读取 — A1 lexer 落地后由
-    //    coordinator 决定是否改成 ILToken 的 else_text 字段。本 commit 假设
-    //    lexer 把 `then\0else\0` 拼成一个 buffer,text_len 截止于 then label,
-    //    else label 在 (text + text_len + 1) 开始的 cstr。
-    let else_ptr = ptr_add_u8((*t).text, (*t).text_len + (1 as i64));
-    let else_len = strlen(else_ptr);
     sb_append_cstr(arena, sb, "\tjmp .L" as *u8);
-    sb_append(arena, sb, else_ptr, else_len);
+    let _a2 = sb_append(arena, sb, ptr_add_u8(text, else_name_off), else_name_len);
     sb_append_cstr(arena, sb, "\n" as *u8);
     return 0;
 }
@@ -224,27 +254,20 @@ fn emit_label(state: *u8, tok: *u8, target_tag: i32) -> i32 {
 }
 
 // ════════════════════════════════════════════════════
-// E9 emit_ret — `ret %val` 或 `ret` → mov 到 %rax + epilogue
+// E9 emit_ret — `ret %val` 或 `ret 0` 或 `ret` → mov 到 %rax + epilogue
 // ════════════════════════════════════════════════════
 //
 // Per L4 § 3.5 E9:QBE output(MS x64):
 //   - movl -X(%rbp), %eax(return value 到 %rax)
 //   - function epilogue: movq %rbp, %rsp; popq %rbp; ret
 //
-// 本 emit(per L4 § 0 任务要求):
-//   - ret %val → 先 mov 返回值到 %rax(qbe_type 决定 movq vs movl),
-//                再 epilogue(movq %rbp, %rsp; popq %rbp; ret)
-//   - ret(无值) → 直接 epilogue
+// v2.11.2 (T2-b):从 tok.text (e.g. "ret %t5" / "ret 0" / "ret") parse val:
+//   - 跳过 "ret" prefix + 空白
+//   - peek '%' → TEMP val,parse %tN via cg_parse_temp
+//   - peek digit → IMM val,parse int via cg_parse_int_from
+//   - empty (just "ret") → void ret,直接 epilogue
 //
-// qbe_type 区分:
-//   - l (QBE_L_LOCAL=108): movq -X(%rbp), %rax  (64-bit return)
-//   - w (QBE_W_LOCAL=119): movl -X(%rbp), %eax  (32-bit return,默认)
-//   - 0 (void): 不 mov,直接 epilogue
-//
-// val id 来源:tok.int_val 是 val temp id(N),offset = cg_offset_for_temp(N)
-// 注:MS x64 ABI 函数返回值放在 %rax (l/w)。struct sret 在 A4 emit_call 路径
-// 处理(per `abi_amd64_win.jhyy` abi_win_emit_return is_sret 路径),本 emit 不接 sret。
-
+// T2-a:literal "-" 删掉;offset 本身是负值,sb_appendf_lld %lld 已含 '-'。
 fn emit_ret(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let cg = state as *CGState;
     let t = tok as *ILToken;
@@ -254,31 +277,76 @@ fn emit_ret(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     }
     let sb = (*cg).out;
     let arena = (*cg).arena;
+    let text = (*t).text;
+    let text_len = (*t).text_len;
 
-    // void ret — qbe_type == 0 表示无返回值(per `abi_amd64_win.jhyy:170-174`
-    // abi_win_emit_return val.qbe_type==0 走 empty ret 路径)
-    let qbe_type = (*t).qbe_type;
-    if qbe_type != (0 as i32) {
-        // 1) mov 返回值到 %rax
-        let val_id = (*t).int_val;
-        let neg_off = compute_offset_for_temp_id_with_target(val_id, target_tag);
-        if qbe_type == QBE_L_LOCAL() {
-            sb_append_cstr(arena, sb, "\tmovq -" as *u8);
-            sb_appendf_lld(arena, sb, "%lld" as *u8, neg_off);
-            sb_append_cstr(arena, sb, "(%rbp), %rax\n" as *u8);
-        } else {
-            // w / b / h 默认走 32-bit
-            sb_append_cstr(arena, sb, "\tmovl -" as *u8);
-            sb_appendf_lld(arena, sb, "%lld" as *u8, neg_off);
-            sb_append_cstr(arena, sb, "(%rbp), %eax\n" as *u8);
+    // 1) parse val (if any) from "ret [val]"
+    //    text 必以 "ret" 开头(dispatcher lex_match_kw 已确认)
+    let mut val_kind: i32 = 0 as i32;  // 0=void, 1=temp, 2=imm
+    let mut val_id: i64 = 0 as i64;
+    let mut imm_val: i64 = 0 as i64;
+    if text_len > (3 as i64) {
+        // skip "ret" + ws
+        let mut scan: i64 = 3 as i64;
+        while scan < text_len {
+            let c = *(ptr_add_u8(text, scan)) as i32;
+            if c != (32 as i32) && c != (9 as i32) {
+                break;
+            }
+            scan = scan + (1 as i64);
+        }
+        if scan < text_len {
+            let c0 = *(ptr_add_u8(text, scan)) as i32;
+            if c0 == (37 as i32) {
+                // TEMP: %tN — cg_parse_temp 的 idx 是 0-based "第几个 %tN"
+                // (不是 byte offset),所以传 0 找第 1 个 %tN。
+                // 之前 v2.11.2 (T2-b) 误传 scan 4 → 找第 5 个 %tN,fallback
+                // val_id=0 → emit `mov -32(%rbp), %eax` 读 %t0 slot 错位。
+                val_kind = 1 as i32;
+                val_id = cg_parse_temp(text, text_len, 0 as i64);
+                if val_id < (0 as i64) { val_id = 0 as i64; }
+            } else if c0 >= (48 as i32) && c0 <= (57 as i32) {
+                // IMM: decimal
+                val_kind = 2 as i32;
+                imm_val = cg_parse_int_from(text, text_len, scan);
+            }
+            // else:unknown suffix — treat as void (defensive)
         }
     }
 
-    // 2) function epilogue (per L4 § 3.4 + MS x64 ABI)
-    //    QBE amd64 winabi emit(`qbe/amd64/emit.c:836-853`) 用 `leave` 简化 epilogue
-    //    (movq %rbp, %rsp; popq %rbp),但 L4 § 3.4 显式锁 3 行形式(便于 match QBE output)
-    //    注:Win path byte-equal hold (3 行 .s 顺序不变);SysV 同样 3 行 .s —
-    //    SysV epilogue 不需要 16B 恢复(caller's rsp 状态),`leave` + `ret` 等价。
+    // 2) mov val → %rax/%eax per qbe_type
+    let qbe_type = (*t).qbe_type;
+    if val_kind != (0 as i32) {
+        let neg_off: i64 = if val_kind == (1 as i32) {
+            cg_offset_for_temp_with_target(val_id, target_tag)
+        } else {
+            0 as i64  // imm_val mov form: "$N" 直接 emit,不走 slot offset
+        };
+        if qbe_type == QBE_L_LOCAL() {
+            sb_append_cstr(arena, sb, "\tmovq " as *u8);
+            if val_kind == (1 as i32) {
+                sb_appendf_lld(arena, sb, "%lld" as *u8, neg_off);
+                sb_append_cstr(arena, sb, "(%rbp), %rax\n" as *u8);
+            } else {
+                sb_append_cstr(arena, sb, "$" as *u8);
+                sb_appendf_lld(arena, sb, "%lld" as *u8, imm_val);
+                sb_append_cstr(arena, sb, ", %rax\n" as *u8);
+            }
+        } else {
+            // w / b / h 默认走 32-bit
+            sb_append_cstr(arena, sb, "\tmovl " as *u8);
+            if val_kind == (1 as i32) {
+                sb_appendf_lld(arena, sb, "%lld" as *u8, neg_off);
+                sb_append_cstr(arena, sb, "(%rbp), %eax\n" as *u8);
+            } else {
+                sb_append_cstr(arena, sb, "$" as *u8);
+                sb_appendf_lld(arena, sb, "%lld" as *u8, imm_val);
+                sb_append_cstr(arena, sb, ", %eax\n" as *u8);
+            }
+        }
+    }
+
+    // 3) function epilogue (per L4 § 3.4 + MS x64 ABI)
     sb_append_cstr(arena, sb, "\tmovq %rbp, %rsp\n" as *u8);
     sb_append_cstr(arena, sb, "\tpopq %rbp\n" as *u8);
     sb_append_cstr(arena, sb, "\tret\n" as *u8);
@@ -294,25 +362,13 @@ fn emit_ret(state: *u8, tok: *u8, target_tag: i32) -> i32 {
 //   - <name>:
 //   - pushq %rbp
 //   - movq %rsp, %rbp
-//   - subq $N, %rsp  (N = total_alloc + 32 shadow)
-//   - callee-saved save(per QBE isel)— 本 emit 简化:不显式 push
+//   - subq $N, %rsp  (N = shadow_space + frame_size,frame_size per v2.11.2 global-max)
 //
-// 本 emit(per L4 § 0 + § 3.4):
-//   .globl <name>
-//   <name>:
-//   pushq %rbp
-//   movq %rsp, %rbp
-//   subq $N, %rsp
-//
-// name 来源:tok.text(function name,lexer 已剥 $ 前缀)
-// N 计算:32 (shadow space) + state.total_alloc (per codegen_amd64_state.jhyy:118
-// alloc_slot 累加)。state.nparams 当前不参与(MS x64 arg layout 由 caller 负责,
-// callee 只需 subq $N 留 shadow + locals)。
-//
-// 不显式 push callee-saved regs(per L4 § 3.5 E13 注释:"v2.5.0 简化,不显式 push
-// callee-saved — 1-to-1 简化已经覆盖 frame")。QBE 输出实际会 push callee-saved,
-// 这是 byte-equal 风险点(per L4 § Y1):fallback 路径 QBE_FALLBACK=1 保 baseline。
-
+// v2.11.2 (T3-a):frame size 用 (*cg).frame_max_temp(per-module max temp id 跨函数复用);
+//   per-function pre-scan table 留 v2.11.3 EXIT exact sprint。
+// v2.11.2 (T3-a):调 cg_state_reset_for_function 重置 next_offset/total_alloc/nparams
+//   per function;frame_max_temp 不重置(per-module constant)。
+// v2.11.2 (T3-b):emit_jnz 不再用 compute_offset_for_temp_id_with_target,统一 cg_offset_for_temp_with_target。
 fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let cg = state as *CGState;
     let t = tok as *ILToken;
@@ -322,6 +378,10 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     }
     let sb = (*cg).out;
     let arena = (*cg).arena;
+
+    // v2.11.2 (T3-a):reset per-function alloc state at function entry。
+    // frame_max_temp 不重置 (per-module constant)。
+    let _reset_rc = cg_state_reset_for_function(state, (*t).text);
 
     // 1) .globl <name>\n
     sb_append_cstr(arena, sb, ".globl " as *u8);
@@ -339,28 +399,25 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     sb_append_cstr(arena, sb, "\tmovq %rsp, %rbp\n" as *u8);
 
     // 5) subq $N, %rsp\n
-    //    Win:  N = shadow_space (32) + total_alloc (MS x64 calling convention)
-    //    SysV: N = total_alloc (no shadow; SysV psABI § 3.2.2 不要求 callee reserve)
-    //    SysV 16-byte stack alignment: `total_alloc` 由 cg_alloc_slot 累加对齐到 8,
-    //    `subq $N` 后 %rsp = %rbp - N,需 N % 16 == 0 才能维持 16B 对齐
-    //    (crt0 已 align %rsp to 16B on entry; pushq %rbp 后 %rsp 8B aligned → %rbp 8B aligned;
-    //    subq N 使 %rsp = %rbp - N,所以 %rsp 16B 对齐 iff N % 16 == 0 iff total_alloc % 16 == 0)。
-    //    v2.8.0:total_alloc 始终 align 到 16 字节 (Win 已有 shadow_space=32=2*16 凑齐;
-    //    SysV 把 total_alloc 向上对齐到 16 即可)。这里在 emit 时向上对齐 N。
-    let mut n: i64 = (*cg).total_alloc;
-    if target_is_win(target_tag) == (1 as i32) {
-        n = (*cg).shadow_space + (*cg).total_alloc;
+    //    v2.11.2 (T3-a):N = shadow_space + (frame_max_temp + 1) * 8。
+    //    全 module 用同一 frame size (global-max fallback),每个 function alloc 上限 = max_temp+1 temps。
+    let frame_max: i64 = (*cg).frame_max_temp;
+    let frame_size: i64 = if frame_max < (0 as i64) {
+        0 as i64
     } else {
-        // SysV: round total_alloc up to 16-byte boundary for stack alignment
-        n = (n + (15 as i64)) & ((0 as i64) - (16 as i64));
+        (frame_max + (1 as i64)) * TEMP_SLOT_BYTES()
+    };
+    let mut n: i64 = 0 as i64;
+    if target_is_win(target_tag) == (1 as i32) {
+        n = (*cg).shadow_space + frame_size;
+    } else {
+        // SysV: round frame_size up to 16-byte boundary for stack alignment
+        n = (frame_size + (15 as i64)) & ((0 as i64) - (16 as i64));
     }
     sb_append_cstr(arena, sb, "\tsubq $" as *u8);
     sb_appendf_lld(arena, sb, "%lld" as *u8, n);
     sb_append_cstr(arena, sb, ", %rsp\n" as *u8);
 
-    // 6) 记录 cur_fn_name + reset per-function alloc state
-    //    注:函数名存到 state.cur_fn_name 由 caller(parse loop in A5 main)负责,
-    //    本 emit 只 emit 头 + prologue。
     return 0;
 }
 

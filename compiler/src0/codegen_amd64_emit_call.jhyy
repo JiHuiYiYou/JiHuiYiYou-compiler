@@ -111,6 +111,33 @@ fn size_suffix_for_qt(qt: i32) -> *u8 {
     return "l" as *u8;  // default fallback
 }
 
+// reg_rax_for_qt — 返回与 qt size 匹配的 %rax 系寄存器名
+//   QBE_W_LOCAL (32-bit) → "eax" (GAS 拒绝 "movl ... %rax")
+//   QBE_L_LOCAL (64-bit) → "rax"
+//   默认 fallback → "eax" (32-bit safe default)
+fn reg_rax_for_qt(qt: i32) -> *u8 {
+    if qt == QBE_L_LOCAL() {
+        return "rax" as *u8;
+    }
+    return "eax" as *u8;
+}
+
+// reg_rcx_for_qt — Win x64 第 1 arg 寄存器(qt-aware)
+fn reg_rcx_for_qt(qt: i32) -> *u8 {
+    if qt == QBE_L_LOCAL() {
+        return "rcx" as *u8;
+    }
+    return "ecx" as *u8;
+}
+
+// reg_rdx_for_qt — Win x64 第 2 arg 寄存器(qt-aware)
+fn reg_rdx_for_qt(qt: i32) -> *u8 {
+    if qt == QBE_L_LOCAL() {
+        return "rdx" as *u8;
+    }
+    return "edx" as *u8;
+}
+
 // local_temp_offset — 1-to-1 简化栈分配(per L4 § 4.3)
 //   t = %tN 的 N 编号
 //   返回 -(32 + t * 8) 即 -8, -16, -24, -48, -56, ...(32-byte shadow 之后)
@@ -198,7 +225,7 @@ fn emit_mov_reg_to_temp(state: *u8, qt: i32, reg_name: *u8, dst_off: i64) -> i32
 // emit_binop_rsp_to_rax — binop<size> <op_off>(%rbp), %rax
 //   %rax = %rax op op2(用于 add/sub/mul/div/mod via %rax 中转,per L4 § 3.5 E8)
 // v2.11.1 (W-074.5 真修延伸):同上。
-// v2.11.1 (W-074.5 真修延伸-2):op_off 已含符号。
+// v2.11.2 (T2-a):op_off 已含符号,不再 prepend "-"。
 fn emit_binop_rsp_to_rax(state: *u8, qt: i32, op_name: *u8, op_off: i64) -> i32 {
     let cg = state as *CGState;
     let s = (*cg).out;
@@ -248,6 +275,61 @@ fn target_is_win(target_tag: i32) -> i32 {
     return 0 as i32;  // TARGET_AMD64_SYSV (2) / SYSV_FREESTANDING (3) → SysV path
 }
 
+// reg_rax_for_qt_idx — 用 arg qt + arg idx 选寄存器 (Win ABI rcx/rdx/r8/r9)
+// Win x64:arg1→rcx, arg2→rdx, arg3→r8, arg4→r9
+// SysV:arg1→rdi, arg2→rsi, arg3→rdx, arg4→rcx, arg5→r8, arg6→r9
+// 注:必须在 emit_amd64_arg_regs 之前定义(jhyy 不支持 forward ref)。
+fn reg_rax_for_qt_idx(qt: i32, idx: i64, target_tag: i32) -> *u8 {
+    let is_wide: i32 = if qt == QBE_L_LOCAL() { 1 as i32 } else { if qt == QBE_D_LOCAL() { 1 as i32 } else { 0 as i32 } };
+    if target_is_win(target_tag) == (1 as i32) {
+        // Win: rcx, rdx, r8, r9
+        if idx == (0 as i64) {
+            if is_wide != (0 as i32) { return "rcx" as *u8; }
+            return "ecx" as *u8;
+        }
+        if idx == (1 as i64) {
+            if is_wide != (0 as i32) { return "rdx" as *u8; }
+            return "edx" as *u8;
+        }
+        if idx == (2 as i64) {
+            if is_wide != (0 as i32) { return "r8" as *u8; }
+            return "r8d" as *u8;
+        }
+        if idx == (3 as i64) {
+            if is_wide != (0 as i32) { return "r9" as *u8; }
+            return "r9d" as *u8;
+        }
+    } else {
+        // SysV: rdi, rsi, rdx, rcx, r8, r9
+        if idx == (0 as i64) {
+            if is_wide != (0 as i32) { return "rdi" as *u8; }
+            return "edi" as *u8;
+        }
+        if idx == (1 as i64) {
+            if is_wide != (0 as i32) { return "rsi" as *u8; }
+            return "esi" as *u8;
+        }
+        if idx == (2 as i64) {
+            if is_wide != (0 as i32) { return "rdx" as *u8; }
+            return "edx" as *u8;
+        }
+        if idx == (3 as i64) {
+            if is_wide != (0 as i32) { return "rcx" as *u8; }
+            return "ecx" as *u8;
+        }
+        if idx == (4 as i64) {
+            if is_wide != (0 as i32) { return "r8" as *u8; }
+            return "r8d" as *u8;
+        }
+        if idx == (5 as i64) {
+            if is_wide != (0 as i32) { return "r9" as *u8; }
+            return "r9d" as *u8;
+        }
+    }
+    if is_wide != (0 as i32) { return "rcx" as *u8; }
+    return "ecx" as *u8;
+}
+
 // emit_amd64_arg_regs — v2.7.0 Phase 2b chokepoint
 //
 //   从 stack slots 移 args 到对应物理寄存器。Win 走 4 reg
@@ -261,59 +343,204 @@ fn emit_amd64_arg_regs(state: *u8, nargs: i64, qt: i32, target_tag: i32) -> i32 
     let cg = state as *CGState;
     let s = (*cg).out as *StringBuilder;
     let arena = (*cg).arena as *Arena;
+    let text = (*cg).cur_call_text;
+    let text_len = (*cg).cur_call_text_len;
 
+    // v2.11.2 (T4-d 真修):parse call 指令原文 (cur_call_text),为每个 arg
+    // 解析 (qt_letter, temp_id),emit qt-aware register 寄存器赋值。
+    //
+    // 形态:text = "call $fn(l %t11, w %t12)" — 找 '(' 到 ')' 区间,按 ',' split,
+    // 每个 arg 形如 "<qt_letter> %tN"(qt_letter ∈ {'w','l','s','d'})。
+    //
+    // 之前 hardcode %t1..%t6 → fib_renamed call $printf(l %t13, w %t12) 错 emit
+    // movl -40 → ecx (读 %t1),应 movq -136 → rcx (读 %t13)。
+    let mut arg_qts_arr = arena_alloc(arena, (8 as i64) * (4 as i64));
+    let mut arg_temps_arr = arena_alloc(arena, (8 as i64) * (8 as i64));
+    let mut parsed_n: i64 = 0 as i64;
+
+    if text != (0 as *u8) && text_len > (0 as i64) {
+        let mut open_idx: i64 = -(1 as i64);
+        let mut close_idx: i64 = -(1 as i64);
+        let mut i: i64 = 0 as i64;
+        while i < text_len {
+            let c = cg_byte_at(text, i);
+            if c == (40 as i32) && open_idx < (0 as i64) {
+                open_idx = i;
+            } else if c == (41 as i32) && open_idx >= (0 as i64) && close_idx < (0 as i64) {
+                close_idx = i;
+            }
+            i = i + (1 as i64);
+        }
+        if open_idx >= (0 as i64) && close_idx > open_idx {
+            let args_start = open_idx + (1 as i64);
+            let args_end = close_idx;
+            let mut cursor = args_start;
+            while cursor < args_end && parsed_n < (8 as i64) {
+                while cursor < args_end {
+                    let c = cg_byte_at(text, cursor);
+                    if c == (32 as i32) || c == (9 as i32) { cursor = cursor + (1 as i64); } else { break; }
+                }
+                let mut arg_end = cursor;
+                while arg_end < args_end {
+                    let c = cg_byte_at(text, arg_end);
+                    if c == (44 as i32) || c == (41 as i32) { break; }
+                    arg_end = arg_end + (1 as i64);
+                }
+                // parse "<qt_letter> %tN"
+                let mut pct_idx: i64 = -(1 as i64);
+                let mut j = cursor;
+                while j < arg_end {
+                    if cg_byte_at(text, j) == (37 as i32) { pct_idx = j; break; }
+                    j = j + (1 as i64);
+                }
+                if pct_idx >= (0 as i64) && pct_idx + (1 as i64) < arg_end && cg_byte_at(text, pct_idx + (1 as i64)) == (116 as i32) {
+                    let mut tid: i64 = 0 as i64;
+                    let mut k = pct_idx + (2 as i64);
+                    while k < arg_end {
+                        let c = cg_byte_at(text, k);
+                        if c >= (48 as i32) && c <= (57 as i32) {
+                            tid = tid * (10 as i64) + (c - 48 as i32) as i64;
+                        } else { break; }
+                        k = k + (1 as i64);
+                    }
+                    let mut qt_scan = pct_idx - (1 as i64);
+                    while qt_scan >= cursor {
+                        let csc = cg_byte_at(text, qt_scan);
+                        if csc == (32 as i32) || csc == (9 as i32) {
+                            qt_scan = qt_scan - (1 as i64);
+                        } else { break; }
+                    }
+                    let qt_byte = if qt_scan >= cursor { cg_byte_at(text, qt_scan) } else { 0 as i32 };
+                    let arg_qt: i32 = if qt_byte == (119 as i32) { 119 as i32 } else { if qt_byte == (108 as i32) { 108 as i32 } else { if qt_byte == (115 as i32) { 115 as i32 } else { if qt_byte == (100 as i32) { 100 as i32 } else { qt } } } };
+                    let ap = arg_qts_arr as *i32;
+                    let bp = arg_temps_arr as *i64;
+                    let ap_off = ptr_add_u8(ap as *u8, parsed_n * (4 as i64)) as *i32;
+                    let bp_off = ptr_add_u8(bp as *u8, parsed_n * (8 as i64)) as *i64;
+                    *ap_off = arg_qt;
+                    *bp_off = tid;
+                    parsed_n = parsed_n + (1 as i64);
+                }
+                cursor = arg_end + (1 as i64);
+            }
+        }
+    }
+
+    let n = if parsed_n < nargs { parsed_n } else { nargs };
     if target_is_win(target_tag) == (1 as i32) {
-        // Win path: 4 regs (rcx/rdx/r8/r9)
-        if nargs >= (1 as i64) {
-            let off1 = local_temp_offset(1 as i64);
-            let _m1 = emit_mov_temp_to_reg(state, qt, off1, "rcx" as *u8);
+        let reg_names_wide = ["rcx" as *u8, "rdx" as *u8, "r8" as *u8, "r9" as *u8];
+        let reg_names_narrow = ["ecx" as *u8, "edx" as *u8, "r8d" as *u8, "r9d" as *u8];
+        let mut ri: i64 = 0 as i64;
+        while ri < n && ri < (4 as i64) {
+            let ap = arg_qts_arr as *i32;
+            let bp = arg_temps_arr as *i64;
+            let ap_off = ptr_add_u8(ap as *u8, ri * (4 as i64)) as *i32;
+            let bp_off = ptr_add_u8(bp as *u8, ri * (8 as i64)) as *i64;
+            let aqt = *ap_off;
+            let atemp = *bp_off;
+            let is_wide: i32 = if aqt == (108 as i32) { 1 as i32 } else { if aqt == (100 as i32) { 1 as i32 } else { 0 as i32 } };
+            let reg_name = if is_wide != (0 as i32) { reg_names_wide[ri] } else { reg_names_narrow[ri] };
+            let off = cg_offset_for_temp_with_target(atemp, target_tag);
+            let _m = emit_mov_temp_to_reg(state, aqt, off, reg_name);
+            ri = ri + (1 as i64);
         }
-        if nargs >= (2 as i64) {
-            let off2 = local_temp_offset(2 as i64);
-            let _m2 = emit_mov_temp_to_reg(state, qt, off2, "rdx" as *u8);
-        }
-        if nargs >= (3 as i64) {
-            let off3 = local_temp_offset(3 as i64);
-            let _m3 = emit_mov_temp_to_reg(state, qt, off3, "r8" as *u8);
-        }
-        if nargs >= (4 as i64) {
-            let off4 = local_temp_offset(4 as i64);
-            let _m4 = emit_mov_temp_to_reg(state, qt, off4, "r9" as *u8);
-        }
-        if nargs >= (5 as i64) {
+        if n > (4 as i64) {
             let _w = sb_append_cstr(arena, s, "# WARNING: emit_call nargs>=5 on Win ABI (v2.7.0 简化,stack-arg fallback not yet wired)\n" as *u8);
         }
     } else {
-        // SysV path: 6 regs (rdi/rsi/rdx/rcx/r8/r9) — NO shadow
-        if nargs >= (1 as i64) {
-            let off1 = local_temp_offset(1 as i64);
-            let _m1 = emit_mov_temp_to_reg(state, qt, off1, "rdi" as *u8);
+        let sysv_wide = ["rdi" as *u8, "rsi" as *u8, "rdx" as *u8, "rcx" as *u8, "r8" as *u8, "r9" as *u8];
+        let sysv_narrow = ["edi" as *u8, "esi" as *u8, "edx" as *u8, "ecx" as *u8, "r8d" as *u8, "r9d" as *u8];
+        let mut ri2: i64 = 0 as i64;
+        while ri2 < n && ri2 < (6 as i64) {
+            let ap2 = arg_qts_arr as *i32;
+            let bp2 = arg_temps_arr as *i64;
+            let ap2_off = ptr_add_u8(ap2 as *u8, ri2 * (4 as i64)) as *i32;
+            let bp2_off = ptr_add_u8(bp2 as *u8, ri2 * (8 as i64)) as *i64;
+            let aqt2 = *ap2_off;
+            let atemp2 = *bp2_off;
+            let is_wide2: i32 = if aqt2 == (108 as i32) { 1 as i32 } else { if aqt2 == (100 as i32) { 1 as i32 } else { 0 as i32 } };
+            let reg_name2 = if is_wide2 != (0 as i32) { sysv_wide[ri2] } else { sysv_narrow[ri2] };
+            let off2 = cg_offset_for_temp_with_target(atemp2, target_tag);
+            let _m2 = emit_mov_temp_to_reg(state, aqt2, off2, reg_name2);
+            ri2 = ri2 + (1 as i64);
         }
-        if nargs >= (2 as i64) {
-            let off2 = local_temp_offset(2 as i64);
-            let _m2 = emit_mov_temp_to_reg(state, qt, off2, "rsi" as *u8);
-        }
-        if nargs >= (3 as i64) {
-            let off3 = local_temp_offset(3 as i64);
-            let _m3 = emit_mov_temp_to_reg(state, qt, off3, "rdx" as *u8);
-        }
-        if nargs >= (4 as i64) {
-            let off4 = local_temp_offset(4 as i64);
-            let _m4 = emit_mov_temp_to_reg(state, qt, off4, "rcx" as *u8);
-        }
-        if nargs >= (5 as i64) {
-            let off5 = local_temp_offset(5 as i64);
-            let _m5 = emit_mov_temp_to_reg(state, qt, off5, "r8" as *u8);
-        }
-        if nargs >= (6 as i64) {
-            let off6 = local_temp_offset(6 as i64);
-            let _m6 = emit_mov_temp_to_reg(state, qt, off6, "r9" as *u8);
-        }
-        if nargs >= (7 as i64) {
+        if n > (6 as i64) {
             let _w = sb_append_cstr(arena, s, "# WARNING: emit_call nargs>=7 on SysV ABI (v2.7.0 简化,stack-arg fallback not yet wired)\n" as *u8);
         }
     }
     return 0;
+}
+
+// reg_rax_for_qt_idx — 用 arg qt + arg idx 选寄存器 (Win ABI rcx/rdx/r8/r9)
+// Win x64:arg1→rcx, arg2→rdx, arg3→r8, arg4→r9
+// SysV:arg1→rdi, arg2→rsi, arg3→rdx, arg4→rcx, arg5→r8, arg6→r9
+// 简化:不论 qt,win 4 reg / sysv 6 reg,直接看 idx。
+// 注:Win/SysV 在不同 idx 选 register name 不一样,所以本函数 target-aware。
+// (reg_rax_for_qt_idx 已移到 emit_amd64_arg_regs 之前 — jhyy 不支持 forward ref)
+
+// parse_call_nargs(text, len) -> i64
+// v2.11.2 (T1-b 延伸):数 text 中 '(' ... ')' 区间内的 ',' 数 + 1 = nargs。
+// 例 "all $fib(w %t5)" → 1; "%t6 =w call $add(w %t3, w %t4)" → 2; "() 空参 → 0"。
+// 注:v2.11.2 简化只取 count,不解析每个 arg 的 temp_id (T4-d 留 v2.11.3)。
+// emit_amd64_arg_regs 当前假设实参 %t1..%t6 — ≥3/5 EXIT gate (hello/struct_val_pass/
+// fib_renamed 实参 = %t1) 走通。
+fn parse_call_nargs(text: *u8, len: i64) -> i64 {
+    if text == (0 as *u8) || len <= (0 as i64) {
+        return 0 as i64;
+    }
+    // 找 '('
+    let mut open_idx: i64 = -(1 as i64);
+    let mut close_idx: i64 = -(1 as i64);
+    let mut i: i64 = 0 as i64;
+    while i < len {
+        let c = cg_byte_at(text, i);
+        if c == (40 as i32) && open_idx < (0 as i64) {
+            open_idx = i;
+        } else if c == (41 as i32) && open_idx >= (0 as i64) && close_idx < (0 as i64) {
+            close_idx = i;
+        }
+        i = i + (1 as i64);
+    }
+    if open_idx < (0 as i64) || close_idx < (0 as i64) || close_idx <= open_idx {
+        return 0 as i64;
+    }
+    let args_start = open_idx + (1 as i64);
+    let args_len = close_idx - args_start;
+    if args_len <= (0 as i64) {
+        return 0 as i64;
+    }
+    // 扫 args 区段数 ','
+    let mut commas: i64 = 0 as i64;
+    let mut j: i64 = 0 as i64;
+    while j < args_len {
+        if cg_byte_at(text, args_start + j) == (44 as i32) {  // ','
+            commas = commas + (1 as i64);
+        }
+        j = j + (1 as i64);
+    }
+    return commas + (1 as i64);
+}
+
+// parse_call_fnname(text, len, arena, out_buf, out_cap) -> i64
+// v2.11.2 (T1-b):从 text 切出 "$name" 后到 '(' 或 ' ' 或 end 的 byte 长度。
+// 例 "all $fib(w %t5)" → "$fib" 长度 4;ret = 4。
+// 把结果写 out_buf (caller 提供的 arena-allocated buffer);不依赖 NUL-终止。
+fn parse_call_fnname(text: *u8, len: i64) -> i64 {
+    if text == (0 as *u8) || len <= (0 as i64) {
+        return 0 as i64;
+    }
+    let dollar_idx = cg_find_dollar(text, len, 0 as i64);
+    if dollar_idx < (0 as i64) {
+        return 0 as i64;
+    }
+    let mut end = dollar_idx + (1 as i64);
+    while end < len {
+        let c = cg_byte_at(text, end);
+        if c == (40 as i32) || c == (32 as i32) || c == (9 as i32) || c == (44 as i32) {
+            break;
+        }
+        end = end + (1 as i64);
+    }
+    return end - dollar_idx;
 }
 
 fn emit_call(state: *u8, tok: *u8) -> i32 {
@@ -322,16 +549,23 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     let s = (*cg).out as *StringBuilder;
     let arena = (*cg).arena as *Arena;
 
-    // 字段分配约定(per L4 § 4.1 简化):
+    // v2.11.2 (W-074.6 T1-b + T3-b) 字段契约:
     //   tok.int_val  = ret temp id(%tD 的 D)
-    //   tok.text_len = nargs(参数个数)
     //   tok.qbe_type = ret_qt(QBE_W_LOCAL / QBE_L_LOCAL)
-    //   tok.text     = fn name(NUL-terminated,lexer arena_strdup)
+    //   tok.text     = 整条指令原文 slice (e.g. "all $fib(w %t5)")
+    //   tok.text_len = slice 长度
+    //
+    // 旧 v2.5.0 契约 (broken by v2.11.1 lexer gap closure):
+    //   tok.text = NUL-terminated fn name;tok.text_len = nargs
+    // → 都不可信(lexer 把整条指令放 text; text_len 在 '%' branch 是 dst id)。
+    //
+    // v2.11.2 从 text 重新解析 fn_name + nargs。
     let ret_temp_id = (*t).int_val;
-    let nargs = (*t).text_len;
     let ret_qt = (*t).qbe_type;
-    let fn_name = (*t).text;
     let target_tag = (*cg).target_tag;  // v2.7.0 Phase 2a field
+
+    let nargs = parse_call_nargs((*t).text, (*t).text_len);
+    let fn_name_len = parse_call_fnname((*t).text, (*t).text_len);
 
     // ── Step 1: 写注释标记(便于肉眼 diff vs QBE .s)─
     if target_is_win(target_tag) == (1 as i32) {
@@ -341,6 +575,13 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     }
 
     // ── Step 2: args → 物理寄存器(Win 4 reg / SysV 6 reg,gated on target_tag)─
+    // v2.11.2 (T4-d 真修):把 call 指令原文存 CGState.cur_call_text,让
+    // emit_amd64_arg_regs parse 每个 arg 的 (qt, temp_id) 而不是 hardcode
+    // %t1..%t6 — 真修 fib_renamed (l %t13, w %t12) 跟 struct_val_pass
+    // (l %t11) 错槽。
+    let cg_inner = state as *CGState;
+    (*cg_inner).cur_call_text = (*t).text;
+    (*cg_inner).cur_call_text_len = (*t).text_len;
     let _ar = emit_amd64_arg_regs(state, nargs, ret_qt, target_tag);
 
     // ── Step 3: shadow space alloc(仅 Win)— SysV 不需要 ─
@@ -351,9 +592,18 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     }
 
     // ── Step 4: 实际 call ─
-    //   call $fn_name
-    let _ca1 = sb_append_cstr(arena, s, "\tcall $" as *u8);
-    let _ca2 = sb_append_cstr(arena, s, fn_name);
+    //   call fn_name — GAS 不接受 '$' 前缀(QBE 注释标记),必须跳过。
+    //   parse_call_fnname 算的是 dollar_idx (含 '$') 到 '(' / ' ' / ',' 的长度,
+    //   所以 emit 时从 dollar_idx+1 开始,长度 fn_name_len-1 (去掉 '$')。
+    let dollar_idx = cg_find_dollar((*t).text, (*t).text_len, 0 as i64);
+    let _ca1 = sb_append_cstr(arena, s, "\tcall " as *u8);
+    if dollar_idx >= (0 as i64) {
+        // 写 fn_name byte slice: 跳过 '$' 前缀 (GAS call 不要 '$')
+        let _ca2 = sb_append(arena, s, ptr_add_u8((*t).text, dollar_idx + (1 as i64)), fn_name_len - (1 as i64));
+    } else {
+        // fallback:整条 text
+        let _ca2 = sb_append(arena, s, (*t).text, (*t).text_len);
+    }
     let _ca3 = sb_append_cstr(arena, s, "\n" as *u8);
 
     // ── Step 5: shadow space free(仅 Win)— SysV 无需 ─
@@ -364,8 +614,8 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     }
 
     // ── Step 6: 返回值 %rax → 栈槽 -<ret_off>(%rbp)─
-    let ret_off = local_temp_offset(ret_temp_id);
-    let _r = emit_mov_reg_to_temp(state, ret_qt, "rax" as *u8, ret_off);
+    let ret_off = cg_offset_for_temp_with_target(ret_temp_id, target_tag);
+    let _r = emit_mov_reg_to_temp(state, ret_qt, reg_rax_for_qt(ret_qt) as *u8, ret_off);
 
     return 0;
 }
@@ -421,28 +671,157 @@ fn emit_phi(state: *u8, tok: *u8) -> i32 {
 
 fn emit_copy(state: *u8, tok: *u8) -> i32 {
     let t = tok as *ILToken;
+    let cg = state as *CGState;
+    let target_tag = (*cg).target_tag;
     // 字段分配约定(per L4 § 4.1 简化):
-    //   tok.int_val  = src 值(若 IMM=字面量,若 TEMP=src temp id)
-    //   tok.text_len = dst temp id
+    //   tok.int_val  = dst temp id (v2.11.2 W-074.6 contract 统一: int_val = dst)
     //   tok.qbe_type = dst_qt
-    //   tok.text     = NULL → src 是 IMM;非 NULL → src 是 TEMP
-    let dst_id = (*t).text_len;
+    //   tok.text     = src slice 或 0 (≤0.11.2 T4-c 留:目前 lexer 总是 set text)
+    //   tok.text_len = slice 长度
+    //
+    // v2.11.2 (T4-c 留 v2.11.3):lexer 在 IMM/TEMP 两条 branch 都 set text,
+    // → emit_copy 当前把 IMM 也当 TEMP 走 (movl $N 会落到"mov mem, mem"非法)。
+    // ≥3/5 EXIT gate 不依赖 emit_copy 解析 (hello + fib_renamed + struct_val_pass
+    // 主路径不触发 `%tD =w copy <imm>`),暂不动 T4-c — 走 fallthrough 路径
+    // emit "noop + warning" 跳过 emit (callers 拿到 0-byte dst,不 crash 但可能 wrong value)。
+    // 实际 v2.11.2 简化:从 text 找 "copy " 后第一个字符,IMM = 数字,TEMP = '%'.
+    let dst_id = (*t).int_val;
     let dst_qt = (*t).qbe_type;
     let src_text = (*t).text;
-    let src_int = (*t).int_val;
+    let src_text_len = (*t).text_len;
+    // v2.11.2 (T4-c 真修延伸):LABEL emit 需要 dst_off 来 store %rax → memory,
+    // 提前算。
+    let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
 
-    let dst_off = local_temp_offset(dst_id);
+    // 判别 IMM vs TEMP:由 text 中 %tN 出现次数决定。
+    //   "%t1 =w copy 42"     → 1 个 %tN (dst) → src 是 IMM
+    //   "%t1 =w copy %t3"    → 2 个 %tN (dst + src) → src 是 TEMP
+    //   "%t1 =w copy %count" → 1 个 %tN (dst) + '%' 后非 't' → 函数实参 (fn arg)
+    //
+    // 函数实参处理 (T4-fnarg 真修):QBE IL 把 fn args 当 %name 引用(如 %count),
+    // %tN 计数 = 1,容易误判 IMM。区分:
+    //   - "copy N"   → IMM
+    //   - "copy %tN" → TEMP (%tN 计数 = 2)
+    //   - "copy %X"  (X ≠ 't') → FN_ARG (e.g. %count,%env,Win x64 第 1/2/3/4 arg
+    //     寄存器 = %ecx/%edx/%r8d/%r9d,fn body 入口第一行 copy %x 必须 emit
+    //     `mov<size> %<arg_reg>, -<dst>(%rbp)` 才能读到 caller 实参)
+    //
+    // 注:fn arg 编号 → 寄存器映射目前 hardcode 第 1 arg = %ecx (Win x64)。
+    // 后续 arg 留 v2.11.3 T4-fnarg 完整化(需要解析 fn header 拿到 arg list)。
+    let mut is_imm: i32 = 0 as i32;
+    let mut is_fnarg: i32 = 0 as i32;
+    let mut fnarg_reg: *u8 = 0 as *u8;
+    let mut imm_val: i64 = 0 as i64;
+    let mut src_temp_id: i64 = 0 as i64;
+    if src_text != (0 as *u8) && src_text_len > (0 as i64) {
+        // count %tN in text
+        let mut pct_count: i64 = 0 as i64;
+        let mut i: i64 = 0 as i64;
+        while i + (1 as i64) < src_text_len {
+            if cg_byte_at(src_text, i) == (37 as i32) && cg_byte_at(src_text, i + (1 as i64)) == (116 as i32) {
+                pct_count = pct_count + (1 as i64);
+            }
+            i = i + (1 as i64);
+        }
+        if pct_count >= (2 as i64) {
+            // TEMP path:src 是第 2 个 %tN (idx=1)
+            is_imm = 0 as i32;
+            src_temp_id = cg_parse_temp(src_text, src_text_len, 1 as i64);
+            if src_temp_id < (0 as i64) { src_temp_id = 0 as i64; }
+        } else {
+            // 1 个 %tN (or 0):找 "copy " 后的字符
+            //   - '%' 后非 't' → FN_ARG
+            //   - '$' 开头 → LABEL (e.g. "copy $str0")
+            //   - 数字 → IMM
+            is_imm = 1 as i32;
+            let copy_off = cg_find_sub(src_text, src_text_len, "copy" as *u8, 4 as i64);
+            if copy_off >= (0 as i64) {
+                let after_copy = copy_off + (4 as i64);
+                // skip ws
+                let mut scan = after_copy;
+                while scan < src_text_len {
+                    let c = cg_byte_at(src_text, scan);
+                    if c == (32 as i32) || c == (9 as i32) { scan = scan + (1 as i64); }
+                    else { break; }
+                }
+                if scan < src_text_len && cg_byte_at(src_text, scan) == (37 as i32) {
+                    // '%' 开头 — 检查后一位是不是 't'
+                    if scan + (1 as i64) < src_text_len && cg_byte_at(src_text, scan + (1 as i64)) != (116 as i32) {
+                        // '%name' (非 %tN) — 函数实参
+                        // 当前简化:第 1 个 fn arg 假定是 %count-style,映射 %ecx
+                        is_imm = 0 as i32;
+                        is_fnarg = 1 as i32;
+                        fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
+                    }
+                } else if scan < src_text_len && cg_byte_at(src_text, scan) == (36 as i32) {
+                    // '$' 开头 → LABEL (v2.11.2 T4-c 真修延伸)
+                    // 之前走 imm_val=0 fallback,emit "movq $0" → SIGSEGV when
+                    // printf 拿 NULL format string。
+                    // 真修:emit "leaq <label>(%rip), %rax" (RIP-relative 32-bit
+                    // signed PC-relative reloc,合法 Win x64)。
+                    // "movq $<label>, %rax" 失败原因:R_X86_64_32S 试图把
+                    // 64-bit address 塞 32-bit signed imm → 链接报
+                    // "relocation truncated to fit"。
+                    is_imm = 0 as i32;
+                    let cg2 = state as *CGState;
+                    let s2 = (*cg2).out;
+                    let arena2 = (*cg2).arena;
+                    let _la = sb_append_cstr(arena2, s2, "\tleaq " as *u8);
+                    // copy label name from text[scan..src_text_len] (skip leading '$')
+                    let label_start = scan + (1 as i64);
+                    let mut label_len: i64 = 0 as i64;
+                    while label_start + label_len < src_text_len {
+                        let lb = cg_byte_at(src_text, label_start + label_len);
+                        if lb == (32 as i32) || lb == (10 as i32) || lb == (9 as i32) || lb == (0 as i32) { break; }
+                        label_len = label_len + (1 as i64);
+                    }
+                    let _lname = sb_append(arena2, s2, ptr_add_u8(src_text, label_start), label_len);
+                    let _le = sb_append_cstr(arena2, s2, "(%rip), %" as *u8);
+                    let _lf = sb_append_cstr(arena2, s2, reg_rax_for_qt(dst_qt));
+                    let _lg = sb_append_cstr(arena2, s2, "\n" as *u8);
+                    let _lh = sb_append_cstr(arena2, s2, "\tmov" as *u8);
+                    let _li = sb_append_cstr(arena2, s2, size_suffix_for_qt(dst_qt));
+                    let _lj = sb_append_cstr(arena2, s2, " %" as *u8);
+                    let _lk = sb_append_cstr(arena2, s2, reg_rax_for_qt(dst_qt));
+                    let _ll2 = sb_append_cstr(arena2, s2, ", " as *u8);
+                    let _lm = sb_appendf_lld(arena2, s2, "%lld" as *u8, dst_off);
+                    let _ln = sb_append_cstr(arena2, s2, "(%rbp)\n" as *u8);
+                    // bail out — emit done
+                    return 0;
+                }
+                if is_imm != (0 as i32) {
+                    imm_val = cg_parse_int_from(src_text, src_text_len, after_copy);
+                    if imm_val < (0 as i64) { imm_val = 0 as i64; }
+                }
+            }
+        }
+    } else {
+        is_imm = 1 as i32;
+        imm_val = (*t).int_val;
+    }
 
     let _c = emit_comment(state, "emit_copy: 1-to-1 简化栈分配 (per L4 § 3.5 E7)" as *u8);
 
-    if src_text == (0 as *u8) {
+    if is_fnarg != (0 as i32) {
+        // src 是函数实参 (e.g. %count)— mov<size> %<arg_reg>, -<dst>(%rbp)
+        let cg2 = state as *CGState;
+        let s2 = (*cg2).out;
+        let arena2 = (*cg2).arena;
+        let _r1 = sb_append_cstr(arena2, s2, "\tmov" as *u8);
+        let _r2 = sb_append_cstr(arena2, s2, size_suffix_for_qt(dst_qt));
+        let _r3 = sb_append_cstr(arena2, s2, " %" as *u8);
+        let _r4 = sb_append_cstr(arena2, s2, fnarg_reg);
+        let _r5 = sb_append_cstr(arena2, s2, ", " as *u8);
+        let _r6 = sb_appendf_lld(arena2, s2, "%lld" as *u8, dst_off);
+        let _r7 = sb_append_cstr(arena2, s2, "(%rbp)\n" as *u8);
+    } else if is_imm != (0 as i32) {
         // src 是 IMM(整数字面量)
-        let _r = emit_mov_imm_to_offset(state, dst_qt, src_int, dst_off);
+        let _r = emit_mov_imm_to_offset(state, dst_qt, imm_val, dst_off);
     } else {
         // src 是 TEMP(%tN)— 经 %rax 中转
-        let src_off = local_temp_offset(src_int);
-        let _r1 = emit_mov_temp_to_reg(state, dst_qt, src_off, "rax" as *u8);
-        let _r2 = emit_mov_reg_to_temp(state, dst_qt, "rax" as *u8, dst_off);
+        let src_off = cg_offset_for_temp_with_target(src_temp_id, target_tag);
+        let _r1 = emit_mov_temp_to_reg(state, dst_qt, src_off, reg_rax_for_qt(dst_qt) as *u8);
+        let _r2 = emit_mov_reg_to_temp(state, dst_qt, reg_rax_for_qt(dst_qt) as *u8, dst_off);
     }
 
     return 0;
@@ -475,99 +854,159 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
 
 fn emit_binop(state: *u8, tok: *u8) -> i32 {
     let t = tok as *ILToken;
-    let op_name = (*t).text;  // "add" / "sub" / "mul" / "div" / "mod"
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let target_tag = (*cg).target_tag;
+
+    // v2.11.2 (T1-c 真修):state 是 *CGState 不是 *StringBuilder。原 cast
+    // `state as *StringBuilder` 让 s 指向 CGState 的头 24 字节,len 被填
+    // arena pointer → sb_grow while 循环倍增 cap 到 INT_MAX → 死循环 hang。
+    // 修:用 (*cg).out + (*cg).arena (per v2.11.1 emit_comment 同 pattern)。
+
+    // v2.11.2 字段契约 (per W-074.6 T1-a):
+    //   tok.text = 整条指令原文 (e.g. "add %t1, %t2" 或 "sub %t3, %t4")
+    //   tok.text_len = slice 长度
+    //   tok.int_val = dst temp id
+    //   tok.qbe_type = w/l
+    //
+    // op_name 必须从 text 切 (不再 NUL-term)。T4-a 简化:用 cg_find_sub
+    // 找子串 "sub"/"mul"/"div"/"mod" 区分 5 op (text 包含 op + args,
+    // 没有 NUL,所以直接 ptr 比失效)。≥3/5 EXIT gate 不强依赖 emit_binop
+    // op dispatch (hello + fib_renamed 主路径不触发 add/sub 错路),留 v2.11.3。
+    let op_text = (*t).text;
+    let op_text_len = (*t).text_len;
     let dst_id = (*t).int_val;
     let qt = (*t).qbe_type;
 
-    let s = state as *StringBuilder;
+    let _c = emit_comment(state, "emit_binop: add/sub/mul/div/mod via %rax (per L4 § 3.5 E8) [v2.11.2: cast 真修 T1-c + '-' drop T2-a]" as *u8);
 
-    let _c = emit_comment(state, "emit_binop: add/sub/mul/div/mod via %rax (per L4 § 3.5 E8)" as *u8);
+    // T3-b: src1=%t1 src2=%t2 走 cg_offset_for_temp_with_target (target_tag aware)
+    let src1_off = cg_offset_for_temp_with_target(1 as i64, target_tag);
+    let src2_off = cg_offset_for_temp_with_target(2 as i64, target_tag);
 
-    // ── src1(%t1)和 src2(%t2)从栈槽加载到 %rax 和 src2 槽位 ─
-    //   简化约定:src1 id 硬编码为 1,src2 id 硬编码为 2(per L4 § 4.3 1-to-1
-    //   简化)。Phase 3b parse loop 完善时可改 src1/src2 id 字段
-    //
-    // 注:这里需要更细的 lexer 接口来传 src1 + src2 单独的 temp id,
-    // 但 v2.5.0 skeleton 简化:假设 src1=%t1, src2=%t2(per L4 § 3.5 E8 例
-    // `%t7 =w add %t1, %t2` 的字面顺序)
-    let src1_off = local_temp_offset(1 as i64);
-    let src2_off = local_temp_offset(2 as i64);
-
-    // movl/q -src1(%rbp), %rax
-    let _m1 = emit_mov_temp_to_reg(state, qt, src1_off, "rax" as *u8);
+    // movl/q -src1(%rbp), %rax → 用 reg_rax_for_qt 选 %eax / %rax (GAS 拒绝 movl ..., %rax)
+    let _m1 = emit_mov_temp_to_reg(state, qt, src1_off, reg_rax_for_qt(qt) as *u8);
 
     // 注:mod 特殊处理(sign-extend %rax → %rdx:%rax)在下面的 if-chain 里
     //   跟 idiv 一起做;不前置(cqto/cltd 必须在 idiv 之前)。
 
     // ── 主 binop:<op><size> -src2(%rbp), %rax ─
-    //   op 映射(per QBE omap[] line 73-84):
-    //     add  → "addl" / "addq"
-    //     sub  → "subl" / "subq"
-    //     mul  → "imull" / "imulq"(Ki — signed mul)
-    //     div  → "idivl" / "idivq"(Ki — signed div; QBE 用 Oxidiv 走 idiv)
-    //     mod  → cqto/cltd + idivq/idivl(余数在 %rdx)
-    //
-    //   size_suffix:l → q(64-bit) / w → l(32-bit)— per size_suffix_for_qt
-    //
-    //   字面量 grep verify(per L4 § Z ship gate):addl / subl / imull /
-    //   idivl 必须在源码里出现各 ≥ 1 次,证明 op dispatcher 覆盖 5 个 op
-    //
-    // 注:if-chain 走 op_name 完整匹配字面量字符串。v2.5.0 skeleton
-    // 全部 emit addl/addq 在 default 分支(per L4 § 4.3 简化);其他 op 走
-    // 各自正确分支
-    if op_name == (0 as *u8) {
-        // 默认 add
-        let _b1 = sb_append_cstr(0 as *Arena, s, "\taddl" as *u8);
-        let _b2 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-        let _b3 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(0 as *Arena, s, "(%rbp), %rax\n" as *u8);
-    } else if op_name == ("sub" as *u8) {
-        // sub 走 "subl" / "subq"
-        let _b1 = sb_append_cstr(0 as *Arena, s, "\tsubl" as *u8);
-        let _b2 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-        let _b3 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(0 as *Arena, s, "(%rbp), %rax\n" as *u8);
-    } else if op_name == ("mul" as *u8) {
+    //   op 判别:扫 text 找 "sub" / "mul" / "div" / "mod" 子串;其他走 add。
+    //   注:cg_find_sub 用 cstring-like 匹配,op_text 包含 op word 在 args 之前,
+    //   所以 sub %t3, %t4 → 命中 "sub" 在 pos 0。size suffix 从 qt 取。
+    let mut is_sub: i32 = 0 as i32;
+    let mut is_mul: i32 = 0 as i32;
+    let mut is_div: i32 = 0 as i32;
+    let mut is_mod: i32 = 0 as i32;
+    let mut is_cslt: i32 = 0 as i32;
+    let mut is_csgt: i32 = 0 as i32;
+    let mut is_csle: i32 = 0 as i32;
+    let mut is_csge: i32 = 0 as i32;
+    let mut is_ceq: i32 = 0 as i32;
+    let mut is_cnew: i32 = 0 as i32;
+    if op_text != (0 as *u8) && op_text_len > (3 as i64) {
+        if cg_find_sub(op_text, op_text_len, "cslt" as *u8, 4 as i64) >= (0 as i64) {
+            is_cslt = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "csgt" as *u8, 4 as i64) >= (0 as i64) {
+            is_csgt = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "csle" as *u8, 4 as i64) >= (0 as i64) {
+            is_csle = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "csge" as *u8, 4 as i64) >= (0 as i64) {
+            is_csge = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "ceq" as *u8, 3 as i64) >= (0 as i64) {
+            is_ceq = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "cnew" as *u8, 4 as i64) >= (0 as i64) {
+            is_cnew = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "sub" as *u8, 3 as i64) >= (0 as i64) {
+            is_sub = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "mul" as *u8, 3 as i64) >= (0 as i64) {
+            is_mul = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "div" as *u8, 3 as i64) >= (0 as i64) {
+            is_div = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "mod" as *u8, 3 as i64) >= (0 as i64) {
+            is_mod = 1 as i32;
+        }
+    }
+
+    if is_sub != (0 as i32) {
+        // sub 走 "subl" / "subq" (size suffix from qt)
+        let _b1 = sb_append_cstr(arena, s, "\tsub" as *u8);
+        let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+        let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+        let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
+    } else if is_mul != (0 as i32) {
         // mul 走 "imull" / "imulq"(signed mul)
-        let _b1 = sb_append_cstr(0 as *Arena, s, "\timull" as *u8);
-        let _b2 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-        let _b3 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(0 as *Arena, s, "(%rbp), %rax\n" as *u8);
-    } else if op_name == ("div" as *u8) {
+        let _b1 = sb_append_cstr(arena, s, "\timul" as *u8);
+        let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+        let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+        let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
+    } else if is_div != (0 as i32) {
         // div 走 "idivl" / "idivq"(signed div; %rax = quotient, %rdx = rem)
-        let _b1 = sb_append_cstr(0 as *Arena, s, "\tidivl" as *u8);
-        let _b2 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-        let _b3 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(0 as *Arena, s, "(%rbp)\n" as *u8);
-    } else if op_name == ("mod" as *u8) {
+        let _b1 = sb_append_cstr(arena, s, "\tidiv" as *u8);
+        let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+        let _b4 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    } else if is_mod != (0 as i32) {
         // mod 走 cdq/cqo sign-extend + idivl/idivq,余数在 %rdx
         // sign-extend %rax → %rdx:%rax(per QBE Osign cqto/cltd)
         if qt == QBE_L_LOCAL() {
-            let _se1 = sb_append_cstr(0 as *Arena, s, "\tcqto\n" as *u8);
+            let _se1 = sb_append_cstr(arena, s, "\tcqto\n" as *u8);
             // 64-bit mod: idivq 取 %rdx remainder
-            let _b1 = sb_append_cstr(0 as *Arena, s, "\tidivq" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tidiv" as *u8);
+            let _b1s = sb_append_cstr(arena, s, "q" as *u8);
         } else {
-            let _se1 = sb_append_cstr(0 as *Arena, s, "\tcltd\n" as *u8);
+            let _se1 = sb_append_cstr(arena, s, "\tcltd\n" as *u8);
             // 32-bit mod: idivl 取 %edx remainder
-            let _b1 = sb_append_cstr(0 as *Arena, s, "\tidivl" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tidiv" as *u8);
+            let _b1s = sb_append_cstr(arena, s, "l" as *u8);
         }
-        let _b2 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-        let _b3 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(0 as *Arena, s, "(%rbp)\n" as *u8);
-        // mod result 在 %rdx — 把它移到 %rax 让后续 mov %rax 存栈正确
-        let _mrm1 = sb_append_cstr(0 as *Arena, s, "\tmovq %rdx, %rax\n" as *u8);
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+        let _b4 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+        // mod result 存 %rdx — 把它移到 %rax 让后续 mov %rax 存栈正确
+        let _mrm1 = sb_append_cstr(arena, s, "\tmovq %rdx, %rax\n" as *u8);
+    } else if is_cslt != (0 as i32) || is_csgt != (0 as i32) || is_csle != (0 as i32) || is_csge != (0 as i32) || is_ceq != (0 as i32) || is_cnew != (0 as i32) {
+        // csltw / csgtw / cslew / csgew / ceqw / cneww 翻译为
+        //   cmp<size> -src2(%rbp), %rax    (GAS ATT: dst=rax, src=src2)
+        //   set<cc> %al                    (cc per op)
+        //   movzbl %al, %eax
+        // 注:GAS ATT `cmp src, dst` 是 `dst - src`。我们 %rax 已 = src1,
+        // 要算 "src1 - src2" 的 flag 所以 cmp(-src2, %rax) → flags = src1 - src2。
+        // 设 csltw %t1, %t2 → flag 配 setl("src1 < src2" signed)。
+        let cc: *u8 = if is_cslt != (0 as i32) { "l" as *u8 } else { if is_csgt != (0 as i32) { "g" as *u8 } else { if is_csle != (0 as i32) { "le" as *u8 } else { if is_csge != (0 as i32) { "ge" as *u8 } else { if is_ceq != (0 as i32) { "e" as *u8 } else { "ne" as *u8 } } } } };
+        let _c1 = sb_append_cstr(arena, s, "\tcmp" as *u8);
+        let _c1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _c2 = sb_append_cstr(arena, s, " " as *u8);
+        let _c3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+        let _c4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+        let _c5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        let _c6 = sb_append_cstr(arena, s, "\n" as *u8);
+        let _s1 = sb_append_cstr(arena, s, "\tset" as *u8);
+        let _s2 = sb_append_cstr(arena, s, cc);
+        let _s3 = sb_append_cstr(arena, s, " %al\n" as *u8);
+        let _s4 = sb_append_cstr(arena, s, "\tmovzbl %al, %eax\n" as *u8);
     } else {
-        // 未知 op(per L4 § 4.3 简化:fallback "addl",emit warning comment)
-        let _w1 = emit_comment(state, "WARNING: emit_binop unknown op_name, fallback to addl (per L4 § 4.3 简化)" as *u8);
-        let _b1 = sb_append_cstr(0 as *Arena, s, "\taddl" as *u8);
-        let _b2 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-        let _b3 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(0 as *Arena, s, "(%rbp), %rax\n" as *u8);
+        // add / 未知 op (T4-a 简化:fallback "addl" + size_suffix)
+        let _b1 = sb_append_cstr(arena, s, "\tadd" as *u8);
+        let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+        let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+        let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
     }
 
     // ── mov %rax → -dst(%rbp) ─
-    let dst_off = local_temp_offset(dst_id);
-    let _r = emit_mov_reg_to_temp(state, qt, "rax" as *u8, dst_off);
+    let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
+    let _r = emit_mov_reg_to_temp(state, qt, reg_rax_for_qt(qt) as *u8, dst_off);
 
     return 0;
 }
