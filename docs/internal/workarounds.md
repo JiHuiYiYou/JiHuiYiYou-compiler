@@ -5162,7 +5162,7 @@ cmd_compile (main.jhyy)
 
 ## v3.2.2 (3l.1) std lib M0 — 6 new ACTIVE workarounds
 
-### W-073: D43 closure chain hold (v3.2.1 → v3.2.2)
+### W-073: D43 closure chain hold (v3.2.1 → v3.2.2) + v3.2.3+ on hold wait v2.x 中末
 
 | 字段 | 值 |
 |------|-----|
@@ -5176,6 +5176,8 @@ cmd_compile (main.jhyy)
 | **影响范围** | src0/codegen.jhyy, src0/symtab.jhyy (v3.2.1 closure wiring) |
 | **失效条件** | v2.x 真修 self-backend 后, 重跑 selfhost v1→v2→v3→v4→v5 byte-equal chain |
 | **引用** | `feedback_codegen_amd64_run_zerobyte`; coordination.md D43 |
+
+**2026-09-09 update — v3.2.3+ 整条线 hold wait v2.x 中末**:user 决定 v3.2.3 (3l.2 closure + Vec<T> 基础) 等 v2.x 中末 ship (QBE 自写 + amd64_sysv 实 impl + N 代 fixed point + codegen_amd64_run 真修) 后再启动。 原因:v3.2.3 启动会触发 N15 closure chain 真测,如果 self-backend 还在坏 → 链断 → v3.x ship 链路污染 → 连锁返工。 D43 closure chain + std::arena byte-equal (W-074) 同步推迟。 v3.x 当前 ship 链路停在 v3.2.2 (3l.1 std lib M0, tag `c5607ed` / `v3.2.2` shipped 2026-09-09)。
 
 ### W-074: D22 arena byte-equal 推迟 (v3.2.2)
 
