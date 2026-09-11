@@ -122,6 +122,10 @@ fn emit_jmp(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     }
     sb_append_cstr(arena, sb, "\tjmp .L" as *u8);
     let _a = sb_append(arena, sb, ptr_add_u8(text, name_off), name_len);
+    // v2.11.3 (W-074.7 T4-h 真修):append "_fn<cur_fn_idx>" 后缀跟 emit_label def 拼
+    // 的 .L name byte-equal。不加 → fib_renamed 等多 fn tests jmp @merge3 → link error
+    // (jmp 目标 .Lmerge3 但 def 是 .Lmerge3_fn1)。
+    let _sfx = sb_appendf_lld(arena, sb, "_fn%lld" as *u8, cg_state_cur_fn_idx(state));
     sb_append_cstr(arena, sb, "\n" as *u8);
     let _tt = target_tag;
     return 0;
@@ -214,14 +218,20 @@ fn emit_jnz(state: *u8, tok: *u8, target_tag: i32) -> i32 {
         sb_append_cstr(arena, sb, "(%rbp)\n" as *u8);
     }
 
-    // 2) jne .L<then>
+    // 2) jne .L<then>_fn<N>
+    // v2.11.3 (W-074.7 T4-h 真修):append "_fn<cur_fn_idx>" 后缀避免多 fn 共享
+    // `@then1` label 静默重定义 (per Plan agent T4-h)。big_test 多 fn 都 emit
+    // `jnz @then1` 时,无后缀则所有 fn 的 .Lthen1 全指向同一 label → wrong jumps
+    // across functions → wrong EXIT。
     sb_append_cstr(arena, sb, "\tjne .L" as *u8);
     let _a1 = sb_append(arena, sb, ptr_add_u8(text, then_name_off), then_name_len);
+    let _sfx_j = sb_appendf_lld(arena, sb, "_fn%lld" as *u8, cg_state_cur_fn_idx(state));
     sb_append_cstr(arena, sb, "\n" as *u8);
 
-    // 3) jmp .L<else>
+    // 3) jmp .L<else>_fn<N>
     sb_append_cstr(arena, sb, "\tjmp .L" as *u8);
     let _a2 = sb_append(arena, sb, ptr_add_u8(text, else_name_off), else_name_len);
+    let _sfx_e = sb_appendf_lld(arena, sb, "_fn%lld" as *u8, cg_state_cur_fn_idx(state));
     sb_append_cstr(arena, sb, "\n" as *u8);
     return 0;
 }
@@ -244,9 +254,12 @@ fn emit_label(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     }
     let sb = (*cg).out;
     let arena = (*cg).arena;
-    // .L<text>:\n
+    // v2.11.3 (W-074.7 T4-h 真修):.L<text>_fn<N>:\n — mirror emit_jnz 的
+    // "_fn<N>" 后缀,保证 jnz 的 target 跟 label definition 拼出的 .L name
+    // byte-equal,链接器能 resolve。
     sb_append_cstr(arena, sb, ".L" as *u8);
     sb_append(arena, sb, (*t).text, (*t).text_len);
+    let _sfx = sb_appendf_lld(arena, sb, "_fn%lld" as *u8, cg_state_cur_fn_idx(state));
     sb_append_cstr(arena, sb, ":\n" as *u8);
     // target_tag v2.8.0 加,label target-agnostic — 仅为签名统一
     let _tt = target_tag;
@@ -417,6 +430,14 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     sb_append_cstr(arena, sb, "\tsubq $" as *u8);
     sb_appendf_lld(arena, sb, "%lld" as *u8, n);
     sb_append_cstr(arena, sb, ", %rsp\n" as *u8);
+
+    // v2.11.3 (W-074.7 T4-h 真修): bump cur_fn_idx per-function 序号。
+    // emit_jnz + emit_label 读它 append "_fn<N>" 后缀避免多 fn 共享
+    // `@then`/`@else` 静默重定义 (per feedback_codegen_amd64_multifn)。
+    // T4-c (多 arg FN_ARG 映射) scope DOWN:lexer 不路由 fn args 到 CGState,
+    // emit_copy 仍 hardcode arg-0 = %rcx。CGState.cur_fn_header_text/len
+    // 字段保留以备 v2.11.4 真修 lexer args dup 后启用。
+    let _fnbump = cg_state_bump_fn_idx(state);
 
     return 0;
 }

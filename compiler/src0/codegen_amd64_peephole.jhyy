@@ -652,9 +652,10 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8, target_tag: i32) -> *u8 {
     // 时产生非法 x86 (e.g. movq %rcx, %eax — 64→32 位 size mismatch,
     // GAS 拒绝 "operand type mismatch")。emit_copy 路径 emit movq +
     // emit_load 路径 emit movl 同 slot 是合法 IR 但 size 不同,gate 没
-    // 防住这一 case。v2.11.3 重做 Rule 3 (要求 line1.size == line2.size +
-    // line1.dst == line2.src 同时 dst2 register,加 tab 前缀)。本 sprint
-    // 关掉 fold — perf 退化但保证正确。
+    // 防住这一 case。v2.11.3 (W-074.7 T4-g):verify step 显示 fold 仍产
+    // 坏 .s (sign-ext vs zero-ext on narrowing store/load 语义不同),
+    // 退回 disabled — perf 退化但保证正确。Defer to v2.11.4 重做 Rule 3
+    // (加 line1.size == line2.size check, sign-ext 标记)。
     let src_buf = arena_alloc(arena, 32 as i64);
     let dst_buf = arena_alloc(arena, 32 as i64);
     let src2_buf = arena_alloc(arena, 32 as i64);

@@ -118,6 +118,23 @@ type CGState = struct {
     // Per-function pre-scan table 留 v2.11.3;v2.11.2 用 global-max fallback
     // (every function uses same frame size,浪费 stack 但 correctness 闭环)。
     frame_max_temp: i64,
+
+    // v2.11.3 (W-074.7 T4-c SCOPE DOWN):defensive fields 保留以备 v2.11.4 真修。
+    // emit_func_header 末尾 cg_state_set_fn_header 调用已移除 — 字段不再写。
+    // 当前 emit_copy FN_ARG 路径仍 hardcode arg-1 = %rcx (Win) / %edi (SysV),
+    // 跟 v2.11.2 baseline 行为一致。v2.11.4 真修需要 lexer 把 fn args dup 到
+    // arena (currently lexer 只 dup name 不 dup args per codegen_amd64_lexer.jhyy
+    // next_token_func_header),然后 emit_func_header 把 args 喂 cg_find_arg_idx。
+    cur_fn_header_text: *u8,
+    cur_fn_header_len:  i64,
+    cur_fn_arg_count:   i64,   // 当前 function 的 arg 数量;emit_func_header 写
+
+    // v2.11.3 (W-074.7 T4-h 真修):per-module fn 序号,emit_jnz + emit_jmp +
+    // emit_label 在 `.L<name>` 后 append `_fn<N>` 后缀,避开 big_test 等多 fn 共享
+    // `@then1` / `@loop_body` 静默 label 重定义 → wrong jumps。0-based,
+    // cg_state_init init to 0,cg_state_bump_fn_idx 在 emit_func_header 末尾
+    // 调 — reset_for_function **不** reset (跨 fn 累加保证唯一)。
+    cur_fn_idx: i64,
 }
 
 // CGState 初始化 helper
@@ -138,6 +155,11 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     (*s).target_tag = 0 as i32;
     // v2.11.2 (W-074.6 T3-a): frame_max_temp init to -1 (no temps seen yet)
     (*s).frame_max_temp = -(1 as i64);
+    // v2.11.3 (W-074.7 T4-h 真修): cur_fn_idx 必须 init 为 0 — 不 init 会读到
+    // arena 上残留字节 (e.g. "main.jhyy.exe\0" → 0x65002e00650063 ≈ 28429170222891107),
+    // emit_jnz/emit_label 拼出 ".L<name>_fn28429170222891107" → GAS linker 不识别
+    // 巨大 label offset → fib_renamed/big_test link 失败 (regression vs v2.11.2)。
+    (*s).cur_fn_idx = 0 as i64;
     return 0;
 }
 
@@ -154,6 +176,16 @@ fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
     (*s).nparams = 0 as i64;
     (*s).cur_call_text = 0 as *u8;
     (*s).cur_call_text_len = 0 as i64;
+    // v2.11.3 (W-074.7 T4-c 真修):reset FN_ARG scan context。emit_func_header
+    // 末尾调 cg_state_set_fn_header 覆盖这两个;此处只是 init defensive 0。
+    (*s).cur_fn_header_text = 0 as *u8;
+    (*s).cur_fn_header_len  = 0 as i64;
+    (*s).cur_fn_arg_count   = 0 as i64;
+    // cur_fn_idx NOT reset — it grows across functions within a module
+    // (per-module accumulator, inited to 0 in cg_state_init)。reset 让它归 0 会让
+    // 每 fn 都从 _fn0 开始,反而破坏 T4-h 的跨 fn 唯一性设计 (fn 0 跟 fn 1 都
+    // emit ".Lthen1_fn0" → GAS 仍报 label 重定义)。
+    // cur_fn_idx 由 emit_func_header 末尾 bump (per-function 序号跨 module 累加)
     // frame_max_temp 不重置 — global max across module(per v2.11.2 fallback)
     // target_tag 不重置 — per-compile constant
     return 0;
@@ -521,4 +553,108 @@ fn cg_compute_global_max_temp(tok_p: *u8, tok_size: i64, n: i64) -> i64 {
         i = i + (1 as i64);
     }
     return gmax;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// v2.11.3 (W-074.7 T4-c + T4-h 真修) FN_ARG scan context + arg index finder
+// ═════════════════════════════════════════════════════════════════════════
+//
+// QBE IL fn header 形如:
+//   "function $fib(w %n)"                  → 1 arg, %n 在 args 列表 idx=0 → %rcx
+//   "function $sum_point(l %point)"        → 1 arg, %point idx=0
+//   "function $read_deep(l %outer, l %k)"  → 2 args
+// emit_func_header 在 prologue 调 cg_state_set_fn_header 把这串 + 长度存
+// CGState,emit_copy FN_ARG 路径用 cg_find_arg_idx 找 %name 位置映射寄存器。
+//
+// 注:QBE IL args 列表每个 arg 形如 "{w|l|s|d} %name" — 字母是 qt,空格分隔。
+// 我们 scan 整个 text 找第 N 个 '%name' 出现位置;忽略 dest(=,前)中的 '%tN'。
+//
+// Simplification (v2.11.3): 我们不严格区分 args 段 vs body 段;只数 '%' 出
+// 现次数,把第 1..arg_count 个 '%' 当作 args(QBE IL 保证 args 全在 body 前
+// 的 '(args {...})' 段,lex_finish_instr 已把整条函数头 slice 化,args 段
+// 是唯一含 '%name' 的前缀)。body 段的 '%tN' 是 dest temp (int_val 字段),
+// 不在 args list 中 — emit_copy 时通过 cg_parse_temp 第二个返回值得
+// (idx=1 src temp) 区分,不会跟 args 重叠。
+
+// cg_state_set_fn_header — v2.11.3 setter
+//
+// 由 emit_func_header 末尾调,把当前 function header 原文 slice + 长度 +
+// arg_count 存 CGState。arg_count 从 text 中数 ',' 推断 (QBE IL args 段
+// 逗号分隔,即使没有嵌套括号;每个 arg 一段 {qt} %name)。
+fn cg_state_set_fn_header(state: *u8, header_text: *u8, header_len: i64) -> i32 {
+    let s = state as *CGState;
+    (*s).cur_fn_header_text = header_text;
+    (*s).cur_fn_header_len  = header_len;
+    // count args:数 '%' 出现次数(每个 arg 一个 '%name')
+    let mut cnt: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i + (1 as i64) < header_len {
+        if cg_byte_at(header_text, i) == (37 as i32) {  // '%'
+            cnt = cnt + (1 as i64);
+        }
+        i = i + (1 as i64);
+    }
+    (*s).cur_fn_arg_count = cnt;
+    return 0;
+}
+
+// cg_find_arg_idx(header_text, header_len, name_bytes, name_len) -> i64
+//
+// 在 fn header 中数到第 1 个匹配 '%<name_bytes>' 的出现位置 (0-based)。
+// 返 0..arg_count-1 表示 arg idx;返 -1 表示未找到 (用 caller fallback %rcx)。
+//
+// 注:QBE IL '%name' 用 % 后跟 ASCII identifier 字符 (字母数字下划线)。
+// 我们不强制是字母 — 直接 N 字节比较 name,匹配即接受 (防御 %name 中含
+// 数字也 ok)。
+fn cg_find_arg_idx(header_text: *u8, header_len: i64,
+                   name_bytes: *u8, name_len: i64) -> i64 {
+    if header_text == (0 as *u8) || name_bytes == (0 as *u8) {
+        return -(1 as i64);
+    }
+    if header_len <= (0 as i64) || name_len <= (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut seen: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i + (1 as i64) < header_len {
+        if cg_byte_at(header_text, i) == (37 as i32) {  // '%'
+            // match name_bytes after '%'
+            let mut j: i64 = 0 as i64;
+            let mut match_ok: i32 = 1 as i32;
+            while j < name_len {
+                if i + (1 as i64) + j >= header_len {
+                    match_ok = 0 as i32;
+                    break;
+                }
+                if cg_byte_at(header_text, i + (1 as i64) + j) != cg_byte_at(name_bytes, j) {
+                    match_ok = 0 as i32;
+                    break;
+                }
+                j = j + (1 as i64);
+            }
+            if match_ok == (1 as i32) {
+                return seen;
+            }
+            seen = seen + (1 as i64);
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
+
+// cg_state_bump_fn_idx — v2.11.3 (W-074.7 T4-h 真修)
+//
+// emit_func_header 末尾调,bump cur_fn_idx per-function 序号。emit_jnz /
+// emit_label 读此值 append "_fn<N>" 后缀到 .L<name>。
+fn cg_state_bump_fn_idx(state: *u8) -> i64 {
+    let s = state as *CGState;
+    let cur = (*s).cur_fn_idx;
+    (*s).cur_fn_idx = cur + (1 as i64);
+    return cur;
+}
+
+// cg_state_cur_fn_idx — getter for emit_jnz / emit_label
+fn cg_state_cur_fn_idx(state: *u8) -> i64 {
+    let s = state as *CGState;
+    return (*s).cur_fn_idx;
 }

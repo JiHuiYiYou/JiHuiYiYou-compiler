@@ -748,7 +748,14 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                     // '%' 开头 — 检查后一位是不是 't'
                     if scan + (1 as i64) < src_text_len && cg_byte_at(src_text, scan + (1 as i64)) != (116 as i32) {
                         // '%name' (非 %tN) — 函数实参
-                        // 当前简化:第 1 个 fn arg 假定是 %count-style,映射 %ecx
+                        // v2.11.3 (W-074.7) SCOPE DOWN: 仍 hardcode 第 1 arg = %rcx (Win x64)。
+                        // 多 arg 真修 (T4-c full) 需要 lexer 把 fn header args 路由到
+                        // CGState.cur_fn_header_text — 当前 lexer (codegen_amd64_lexer.jhyy)
+                        // 只 dup name 不 dup args,故 cg_find_arg_idx 永远 return -1。
+                        // v2.11.3 ship 4/5 EXIT exact (hello=42 / fib_renamed=40 /
+                        // struct_val_pass=35 / nested_struct_deep=22),big_test 多 arg 留
+                        // v2.11.4 (T4-c full + lexer args dup + reg_rax_for_qt_idx real call).
+                        // Per [[feedback_codegen_amd64_multifn]] scope DOWN 阈值 (< 200 LOC)。
                         is_imm = 0 as i32;
                         is_fnarg = 1 as i32;
                         fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
@@ -881,9 +888,18 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
 
     let _c = emit_comment(state, "emit_binop: add/sub/mul/div/mod via %rax (per L4 § 3.5 E8) [v2.11.2: cast 真修 T1-c + '-' drop T2-a]" as *u8);
 
-    // T3-b: src1=%t1 src2=%t2 走 cg_offset_for_temp_with_target (target_tag aware)
-    let src1_off = cg_offset_for_temp_with_target(1 as i64, target_tag);
-    let src2_off = cg_offset_for_temp_with_target(2 as i64, target_tag);
+    // v2.11.3 (W-074.7 T4-b SCOPE DOWN):真修 (parse src1/src2 from op_text) deferred
+    // to v2.11.4 — 需要处理 QBE IL binop 的 literal imm operand (e.g. "sub %t1, 1" 用
+    // 字面 1,不是 %tN)。本 sprint 仍 hardcode src1=%t1, src2=%t2 (= cg_offset_for_temp
+    // (1) + (2)),跟 v2.11.2 一致。fib_renamed 这种 sub 操作 QBE IL "sub %t1, 1" / "sub
+    // %t1, 2" src2 是数字不是 temp — 真修后 src2 不应 fallback 2,而是直读 imm 值。
+    // 注:cscope DOWN 不引 EXIT regression (preserves v2.11.2 3/5 EXIT match:
+    // hello=42 / fib_renamed=40 / struct_val_pass=35)。Per
+    // [[feedback_codegen_amd64_multifn]] scope DOWN 阈值 (< 200 LOC)。
+    let src1_id: i64 = 1 as i64;
+    let src2_id: i64 = 2 as i64;
+    let src1_off = cg_offset_for_temp_with_target(src1_id, target_tag);
+    let src2_off = cg_offset_for_temp_with_target(src2_id, target_tag);
 
     // movl/q -src1(%rbp), %rax → 用 reg_rax_for_qt 选 %eax / %rax (GAS 拒绝 movl ..., %rax)
     let _m1 = emit_mov_temp_to_reg(state, qt, src1_off, reg_rax_for_qt(qt) as *u8);
