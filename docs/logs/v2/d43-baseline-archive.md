@@ -18,7 +18,10 @@ D43 closure invariant (per [`../plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-
 | v2.8.1 | (同 v2.8.0) | **HOLD 不变**| C-side target_dispatch mirror update,不动 codegen |
 | v2.8.2 | (同 v2.8.0) | **HOLD 不变**| W-070 真修(jhyy-side cg_module 真 emit SysV QBE IL),但 Commit 1 没动 src0/codegen.jhyy 主体 → IL 大小不变 → D43 hold |
 | v2.8.3 | (同 v2.8.0) | **HOLD 不变**| `--no-link` flag + regress.py docker gcc chain infra 补完,driver-only patch,不动 codegen |
-| **v2.9.0** | `7aebc1b62ad8b1398d42bff30bdd56b25679ccfc1fb66fc9355be0bd6a43a6a3` | **当前 active baseline**| Commit 1 src0 revert to `archive/axis-v2-pre-merge`(per 2026-09-08 user decision:v2,v3 merge first, re-branch for v2-C + v3.1.3)→ axis-v3 的 V3-C 3g + 3g.5 + 3g.7 + 3i call-site inference + V3-B 3b naked + 3c volatile 等增量从 src0 撤 → ndeccls 1034 → 1034(保持)+ codegen 主路径微调 → IL 重算 |
+| **v2.9.0** | `7aebc1b62ad8b1398d42bff30bdd56b25679ccfc1fb66fc9355be0bd6a43a6a3` | **退役**(被 v2.11.0 + v2.11.1 + v2.11.2 cumulative re-baseline 替代)| Commit 1 src0 revert to `archive/axis-v2-pre-merge`(per 2026-09-08 user decision:v2,v3 merge first, re-branch for v2-C + v3.1.3)→ axis-v3 的 V3-C 3g + 3g.5 + 3g.7 + 3i call-site inference + V3-B 3b naked + 3c volatile 等增量从 src0 撤 → ndeccls 1034 → 1034(保持)+ codegen 主路径微调 → IL 重算 |
+| v2.11.0 | (同 v2.9.0) | **HOLD 不变**| W-074 il_len=0 真修 (heap-allocate `il_len_box`) + regress.py `--self-backend` flag,不动 codegen 主路径 IL emit |
+| v2.11.1 | (同 v2.9.0) | **HOLD 不变**| W-074.5 lexer gap closure + 7 真修延伸 (dbgfile/dbgloc/{/} + ILTOK_DIRECTIVE + parse_and_emit noop + csltw lexer + next_token_call args consume + struct offset 真修 + emit cast 真修),driver-side patch,不动 codegen 主路径 IL emit |
+| **v2.11.2** | `86a0103c34f1bc68e2a1e421cbbf88d72e8b2e31482b4c3dfe7c9101af9d0c0e` | **当前 active baseline**| W-074.6 multi-func self-backend crash/hang closure + IL field contract (int_val = dst temp id 统一) + 2 个新 lexer helpers (`lex_finish_instr` + `lex_consume_to_eol`) + shared parse helpers (5 个 cg_* in state.jhyy) + 7 个 codegen_amd64_*.jhyy 子模块 (lexer/state/emit_ctrl/emit_call/emit_mem/peephole/codegen_amd64) 微调 → ndeccls + IL emit 微量偏移 → IL 重算 |
 
 ## Why no v2.7.1 re-baseline?
 
@@ -48,7 +51,7 @@ cd C:/Users/liuzhen/Desktop/coding/JiHuiYiYou-axis-v2
 
 # 2. sha256sum 双 .il
 sha256sum /tmp/_v1.il /tmp/_v2.il
-# 期望: 两者 sha 相同 == 当前 baseline (v2.7.1 = cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b)
+# 期望: 两者 sha 相同 == 当前 baseline (v2.11.2 = 86a0103c34f1bc68e2a1e421cbbf88d72e8b2e31482b4c3dfe7c9101af9d0c0e)
 
 # 3. cleanup
 rm -f /tmp/_v1.il /tmp/_v2.il

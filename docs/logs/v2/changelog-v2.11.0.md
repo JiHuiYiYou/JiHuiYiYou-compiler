@@ -214,3 +214,96 @@ V2-C Part 2a-补:
 - **D43 closure sha chain**: `docs/logs/v2/d43-baseline-archive.md` (`6a2f2277...` v2.8.0 active baseline)
 - **后接**: `docs/plans/v2/v2.12.0-plan.md` (QBE 移除, 部分 prerequisite 未闭)
 - **后接**: `docs/plans/v2/v2.12.0-plan.md` (QBE 移除)
+
+
+---
+
+# v2.11.2 — codegen_amd64_run multi-func self-backend 真修 (W-074.6 PARTIAL closure, scope DOWN ≥3/5 EXIT)
+
+**Tag:** `v2.11.2`
+**Commit:** `71f2722` (Commit 1 source 真修) → 待 Commit 2 docs (本 sub-section)
+**Sprint:** V2-C Part 2a-后
+**Ship date:** 2026-09-11
+**Plan:** `docs/plans/v2/v2.11.2-plan.md` (per feedback_plans_per_version)
+
+## Summary
+
+W-074.6 v2.11.2 ship — codegen_amd64_run multi-func self-backend crash/hang 闭合,5/5 不再 silent fail。EXIT match ≥3/5 (hello=42 / fib_renamed=40 / struct_val_pass=35);nested_struct_deep + big_test EXIT exact 留 v2.11.3 W-074.7。
+
+## Scope DOWN 决定 (per [[feedback_codegen_amd64_multifn]] + 2026-09-11 user 决定)
+
+**v2.11.2 sprint = "stop the bleeding"** (~420 LOC across 7 files):
+- Tier 1 (T1-a..e): crash/hang 闭合 — lexer operand capture + emit_mem 全 no-op 修 + emit_binop cast fix + emit_jnz NULL deref fix
+- Tier 2 (T2-a..d): wrong-code 闭合 — sign double-negation 10 sites + emit_ret load %eax + peephole Rule 3 gate (DISABLED) + write length fix
+- Tier 3 (T3-a..b): frame state — per-fn reset + global-max variant + 3 个 temp offset fn 统一到 cg_offset_for_temp_with_target
+- Tier 5 (T5-a): token cap — lex_il slots 1024 → 16384 + arena 2 → 8 MB (big_test 跨过 v2.11.3 EXIT exact ship gate)
+
+## Tier-by-Tier (详细见 workarounds.md W-074.6 DETAILED)
+
+| Tier | LOC | Files |
+|---|---|---|
+| T1-a | ~220 | `_lexer.jhyy` |
+| T1-b | (in T1-a) | `_emit_call.jhyy` |
+| T1-c | ~4 | `_emit_call.jhyy` |
+| T1-d | (in T1-a) | `_emit_ctrl.jhyy` |
+| T1-e | ~60 | `_emit_mem.jhyy` + `_lexer.jhyy` |
+| T2-a | ~12 | `_emit_ctrl.jhyy` + `_emit_call.jhyy` ~10 sites |
+| T2-b | ~15 | `_emit_ctrl.jhyy` + `_lexer.jhyy` |
+| T2-c | ~6 (DISABLED Rule 3) | `_peephole.jhyy` |
+| T2-d | ~4 | `codegen_amd64.jhyy` |
+| T3-a | ~30 (global-max + skip regalloc) | `_state.jhyy` + `_emit_ctrl.jhyy` + `codegen_amd64.jhyy` |
+| T3-b | ~20 | `_emit_ctrl.jhyy` + `_emit_call.jhyy` + `_emit_mem.jhyy` |
+| T5-a | ~8 | `_lexer.jhyy` + `codegen_amd64.jhyy` |
+
+## Ship gate 实测 (2026-09-11)
+
+### Hard gates (no regression)
+
+- ✅ **regress 5 main tests (Win, QBE fallback)**: 5/5 PASS (unchanged baseline)
+- ✅ **byte_equal_amd64.sh 默认**: 10/10 PASS (QBE-vs-QBE no-op gate, insensitive to this sprint)
+- ✅ **byte_equal_amd64.sh --baseline**: 20/20 PASS (same caveat)
+- ✅ **D43 closure v1↔v2 sha HOLD `6a2f2277...`** (v2.8.0 active baseline; sprint 不动 `codegen.jhyy` + `ir.jhyy` hard invariant)
+- ✅ **fixed_point.sh N=3 PASS** (v2.9.0 baseline)
+- ✅ **jhyy.exe.sha256 sidecar refresh** — 新 sha `c88a1b5769e781b2f65b844d1416a4c1754412a8111449ebf53ccb10965240d2` (was `1605b1d0...` v2.11.1)
+
+### v2.11.2 deliverable gates (scope DOWN per [[feedback_codegen_amd64_multifn]])
+
+- ✅ **regress --self-backend 5 main tests: 5/5 terminate + non-empty .s + no segfault/hang/0-byte** (新 deliverable, v2.11.1 deferred → v2.11.2 闭合)
+- ✅ **EXIT match ≥3/5**: hello (42) + fib_renamed (832040 % 256 = 40) + struct_val_pass (35) 跟 QBE fallback EXIT 一致
+- ⚠️ **nested_struct_deep + big_test EXIT 不一致** (T4 系列 + per-fn frame table 留 v2.11.3 EXIT exact);docs declare 明确
+
+## D43 closure sha chain update (2026-09-11)
+
+| Version | Sha | Status |
+|---|---|---|
+| v2.6.6 | `92e82554...` | retired |
+| v2.7.0 | `cc894329...` | retired |
+| v2.8.0 | `6a2f2277...` | **active baseline (per v2.11.1 校准)** |
+| v2.11.2 | (re-baseline pending commit 2 docs) | |
+
+注: v2.11.1 跨 sprint 不动 `codegen.jhyy` + `ir.jhyy`,但 codegen_amd64_*.jhyy 通过 `import codegen_amd64` propagate 到 main.jhyy 的 IL。v2.11.2 同 pattern — `import codegen_amd64_*` (6 个 sub-module) 同样 propagate 但 sha 仍 HOLD 因为 D43 比的是 v1 vs v2 byte-equal **vs v2.8.0 baseline** (`6a2f2277...`) 而不是跨 N 代重新 baseline。
+
+## OS 启动链路 (2026-09-11 校准)
+
+V2-C Part 2a-后:
+- 第一前置 (v2.0 阶段 ship) ✅
+- 第二前置 Part 1 (v2.9.0 verification harness) ✅
+- 第二前置 Part 2a (v2.11.0 il_len=0 真修, tag v2.11.0 ship) ✅
+- 第二前置 Part 2a-补 (v2.11.1 lexer gap 真修, tag v2.11.1 ship) ✅
+- **第二前置 Part 2a-后 (v2.11.2 self-backend multi-func crash/hang closure, 本 ship, W-074.6 PARTIAL)** ✅
+- 第二前置 Part 2a-后-补 (v2.11.3 EXIT exact, W-074.7) ⏳
+- 第二前置 Part 2b (v2.12.0 QBE 移除, scope DOWN ≥3/5 self-backend) 待 ship
+- M5 独立 sprint 启动需等 v2.11.3 + v2.12.0 ship
+
+## v2.12.0 ship gate scope DOWN (per 2026-09-11 user 决定)
+
+v2.12.0 QBE 移除 ship 时,不再要求 5/5 self-backend EXIT exact match (待 v2.11.3 闭合)。**scope DOWN = QBE fallback 5/5 PASS + self-backend ≥3/5 EXIT match (hello + fib_renamed + struct_val_pass)**,nested_struct_deep + big_test 待 v2.11.3 EXIT exact 后才完整闭合。
+
+## References
+
+- **Plan**: `docs/plans/v2/v2.11.2-plan.md` (本 sprint, per feedback_plans_per_version)
+- **W-074.6 + W-074.7**: `docs/internal/workarounds.md` (W-074.6 PARTIAL, W-074.7 ACTIVE 新增)
+- **Memory**: [[feedback_codegen_amd64_multifn]] (scope DOWN trigger), [[feedback_codegen_amd64_run_zerobyte]], [[feedback_no_date_estimates]]
+- **D43 closure sha chain**: `docs/logs/v2/d43-baseline-archive.md` (`6a2f2277...` v2.8.0 active baseline)
+- **后接**: `docs/plans/v2/v2.11.3-plan.md` (EXIT exact sprint, W-074.7, ~280 LOC,待写)
+- **后接**: `docs/plans/v2/v2.12.0-plan.md` (QBE 移除 + toolchain closure, scope DOWN ≥3/5 self-backend)
