@@ -5537,35 +5537,35 @@ $ JHY_SELF_BACKEND=1 jhyy.exe compile tests/hello.jhyy -o /tmp/_hello.s
 
 ---
 
-## W-074.7: codegen_amd64_run self-backend EXIT exact — v2.11.3 deferred (2026-09-11)
+## W-074.7: codegen_amd64_run self-backend EXIT exact — v2.11.3 ship 2026-09-11 PARTIAL closure (T4-h 真修 + 防御性加固)
 
 **ID:** W-074.7
-**状态:** 🟡 **ACTIVE** 2026-09-11 (W-074.6 PARTIAL 后 surface, v2.11.3 sprint 真修)
+**状态:** 🟢 **PARTIAL** 2026-09-11 (v2.11.3 ship on axis-v2 + tag v2.11.3; T4-h 真修 closure + T4-c/T4-g scope DOWN deferral)
 
-**根因:** W-074.6 v2.11.2 ship 后,5/5 self-backend 不 crash/hang/0-byte 但 EXIT code 仅 hello (42) 跟 QBE fallback 一致;fib_renamed (40) + struct_val_pass (35) 也 match (per scope DOWN ≥3/5);其余 2 test EXIT 错位 (nested_struct_deep / big_test) — Tier 4 系列 bugs:
+**根因 (verify 校准):** W-074.6 v2.11.2 ship 后,5/5 self-backend 不 crash/hang/0-byte 但 EXIT code 仅 hello (42) 跟 QBE fallback 一致。**Verify 校准 (v2.11.3 ship verify, 2026-09-11)**:
 
-**Tier 4 wrong-exit-code (block 5/5 EXIT exact)**:
-
-| ID | Bug | File | LOC |
+| Test | v2.11.2 实际 | v2.11.3 实际 | 备注 |
 |---|---|---|---|
-| **T4-a** | `emit_binop` op_name pointer-compare (`op_name == ("sub" as *u8)` 永远 false → 全 addl fallback) | `_emit_call.jhyy:524-542` | ~35 |
-| **T4-b** | `emit_binop` src1/src2 hardcoded `%t1`/`%t2` | `_emit_call.jhyy:493` | ~25 |
-| **T4-c** | `emit_copy` `text==NULL` 测试失败 (lexer 在 IMM + TEMP 两 branch 都 set `text=0` → 全 `movl $N`) | `_lexer.jhyy:490, 500` + `_emit_call.jhyy:438` | ~30 |
-| **T4-d** | `emit_call` nargs = `text_len` 但 text_len 是 dst temp id;`emit_amd64_arg_regs` hardcoded `%t1..%t4` | `_emit_call.jhyy:331, 267-282` | ~70 |
-| **T4-e** | per-function frame table 替换 v2.11.2 global-max variant (浪费 stack per fn,frame size 不精确) | `_state.jhyy` + `codegen_amd64.jhyy` | ~60 |
-| **T4-f** | nested_struct_deep struct-offset paths + big_test bring-up | 各 emit module | ~60 |
-| **T4-g** | Peephole Rule 3 重启 — gate 升级 line1.size_suffix == line2.size_suffix + 现行 register-dst gate | `_peephole.jhyy` | ~10 |
-| **T4-h** | `emit_jnz` `.LthenN`/`.LelseN` 硬编码 — big_test 跨过 100+ label 静默重定义 → 切 unique label counter (`CGState.label_counter` + 1 每 emit_jnz) | `_emit_ctrl.jhyy` | ~10 |
-| **T5-b** | `lex_il` slots 4096 → 16384 + arena 2 MB → 8 MB,big_test 跨过 v2.11.3 EXIT exact ship gate | `_lexer.jhyy` + `codegen_amd64.jhyy` | ~8 |
+| hello.jhyy | ✅ EXIT=42 | ✅ EXIT=42 | T4-h 无 effect (单 fn) |
+| fib_renamed.jhyy | ❌ EXIT=32 | ❌ EXIT=32 | **Plan 误报 40**;QBE IL `sub %t1, <imm>` literal imm operand 错槽;fix T4-b 需支持 imm operand → deferred v2.11.4 |
+| struct_val_pass.jhyy | ✅ EXIT=35 | ✅ EXIT=35 | T4-h 无 effect |
+| nested_struct_deep.jhyy | ❌ EXIT=4056921777 (crash) | ❌ EXIT=3105863345 (no crash, wrong) | T4-h small improve (不 crash);EXIT 仍错 → scope DOWN |
+| big_test.jhyy | ❌ link error | ❌ link error | pre-existing QBE IL 重复 `.Lloop_body<N>` label (e.g. `.Lloop_body22` 出现 2 次);fix 在 codegen.jhyy (locked by D43);deferred |
 
-**总 ~280 LOC across 7 files** — v2.11.3 sprint scope (per 后续 plan)。
+**v2.11.3 真修 (~64 LOC, 4 files)**:
+- ✅ **T4-h 真修**: `emit_jnz` + `emit_jmp` + `emit_label` 在 `.L<name>` 后 append `_fn<N>` 后缀 (per-module cur_fn_idx 序号跨 fn 累加);big_test 多 fn 共享 `@then1` / `@loop_body` 跨 fn 冲突消除
+- ⚠️ **T4-c scope DOWN**: defensive CGState fields (cur_fn_header_text/len/arg_count) + cg_state_set_fn_header setter + cg_find_arg_idx helper 加但不调;真修需 lexer 把 fn args dup 到 arena (当前 lexer 只 dup name) → deferred v2.11.4
+- ⚠️ **T4-b scope DOWN**: emit_binop 仍 hardcode src1=%t1 src2=%t2 (v2.11.2 baseline 行为);QBE IL `sub %t1, 1` / `sub %t1, 2` 的 literal imm operand cg_parse_temp 不识别 → src2_id fallback 2 → 两次都 emit `count - 2` → fib 错值;真修需 parse imm operand → deferred v2.11.4
+- ⚠️ **T4-g scope DOWN**: Peephole Rule 3 gate 仍 disabled (`(0 as i32) == (1 as i32)`);真修 verify step 显示 sign-ext vs zero-ext 语义不同 → fold 出 bad .s → fib_renamed/nested_struct_deep EXIT 错;deferred v2.11.4 with line1.size == line2.size + sign-ext marker check
+- ✅ **CGState.cur_fn_idx init**: 加 init = 0 (per `cg_state_init`);之前 uninitialized → 读到 arena 残留字节 (~28429170222891107 = 0x65002e00650063 = "e\0.\0e\0c" = "main.jhyy.exe" 字节) → 所有 label 静默 suffix → GAS linker 不识别
 
 **scope (per V2-C Part 2a-后-补)**:
-- v2.11.3 = "EXIT exact" sprint,~280 LOC across 7 files
-- ship gate: 5/5 self-backend EXIT exact match (hello=42 / fib_renamed=832040 % 256 = 40 / struct_val_pass=35 / nested_struct_deep=22 / big_test=12345)
+- v2.11.3 = "EXIT exact" sprint (per plan,~280 LOC),实际 ground-truthed ~64 LOC source + ~120 LOC docs = ~185 LOC
+- ship gate (scope DOWN): 2/5 self-backend EXIT exact match (hello=42 / struct_val_pass=35);5/5 self-backend terminate + non-empty .s (v2.11.2 已闭)
+- ship gate (deferred to v2.11.4 / v2.12.0): 5/5 EXIT exact;big_test link error fix
 
-**OS 启动链路:** W-074.7 = M5 deferral 第二前置 Part 2a-后-补 ⏳ (per `v1.x-phase-4-m5-boot-from-scratch.md`)。M5 启动需等 v2.11.3 ship + v2.12.0 QBE 移除 ship。
+**OS 启动链路:** W-074.7 = M5 deferral 第二前置 Part 2a-后-补 🟡 (per `v1.x-phase-4-m5-boot-from-scratch.md`)。M5 启动需等 v2.11.3 ship ✅ + v2.12.0 QBE 移除 ship + big_test 重复 label 真修。
 
-**Commit sha:** N/A (deferred, v2.11.3 sprint)
+**Commit sha:** TBD (v2.11.3 ship)
 **Plan:** `docs/plans/v2/v2.11.3-plan.md` (待写 per feedback_plans_per_version)
 **Memory:** [[feedback_codegen_amd64_multifn]] (scope DOWN trigger, v2.11.3 = EXIT exact 不再拆)

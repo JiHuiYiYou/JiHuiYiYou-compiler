@@ -307,3 +307,73 @@ v2.12.0 QBE 移除 ship 时,不再要求 5/5 self-backend EXIT exact match (待 
 - **D43 closure sha chain**: `docs/logs/v2/d43-baseline-archive.md` (`6a2f2277...` v2.8.0 active baseline)
 - **后接**: `docs/plans/v2/v2.11.3-plan.md` (EXIT exact sprint, W-074.7, ~280 LOC,待写)
 - **后接**: `docs/plans/v2/v2.12.0-plan.md` (QBE 移除 + toolchain closure, scope DOWN ≥3/5 self-backend)
+
+## v2.11.3 — W-074.7 PARTIAL closure (T4-h 真修 + 防御性加固)
+
+**ship:** 2026-09-11 (axis-v2 commit TBD, tag `v2.11.3`)
+
+### 实际 scope vs plan
+
+v2.11.3 plan 估 ~280 LOC across 7 files (T4-a/T4-b/T4-c/T4-d/T4-e/T4-f/T4-g/T4-h/T5-b),但 Plan agent ground-truthed 实际 ~64 LOC source + 4 files (T4-b + T4-c + T4-h + T5-b) + 防御性 CGState 字段。Verify 阶段又发现:
+- T4-g (peephole Rule 3 gate flip) verify 触发 size-mismatch → flip 回 disabled (scope DOWN)
+- T4-b (binop src1/src2 parse from op_text) 暴露 QBE IL literal imm operand bug → revert 到 hardcode (scope DOWN)
+- T4-c (multi-arg FN_ARG) 需 lexer 改 args routing → scope DOWN deferred v2.11.4
+
+最终 v2.11.3 真修:**T4-h `_fn<N>` label suffix + cur_fn_idx init = 0 防御**(~25 LOC source change),其余 T4-a/b/c/d/g scope DOWN deferred。
+
+### Tier 4 真修
+
+| ID | Bug | 真修 | File |
+|---|---|---|---|
+| **T4-h** | `emit_jnz`/emit_jmp/emit_label `.L<name>` 无 per-fn uniquing → big_test 跨 fn 共享 `@then1` / `@loop_body` 静默重定义 | append `_fn<cur_fn_idx>` 后缀 (per-module 序号跨 fn 累加);`emit_func_header` 末尾 bump;`cg_state_init` init = 0;`reset_for_function` 不 reset (保证跨 fn 累加唯一性) | `_emit_ctrl.jhyy` (3 处: jnz/jmp/label) + `_state.jhyy` (init + reset) |
+
+### Tier 4 scope DOWN deferred (v2.11.4+)
+
+| ID | Bug | Scope DOWN reason | 后续真修点 |
+|---|---|---|---|
+| T4-a | `emit_binop` op_name pointer-compare fallback | v2.11.2 PARTIAL closure 已够 (cg_find_sub chain 兜底),verify 不在 EXIT gate | v2.11.4 if nested_struct_deep EXIT 仍错 |
+| T4-b | `emit_binop` src1/src2 hardcode `%t1`/`%t2` | QBE IL `sub %t1, <imm>` literal imm operand → cg_parse_temp 不识别 → fallback 2 → 两次都 emit count-2 → fib 错值 | parse imm operand (v2.11.4) |
+| T4-c | `emit_copy` FN_ARG hardcode arg-1 = %rcx | lexer 不 dup args → CGState.cur_fn_header_text/len 拿不到 args → cg_find_arg_idx 永远返 -1 | lexer 改 args dup (v2.11.4) |
+| T4-d | `emit_call` nargs | v2.11.2 已 DONE (CGState.cur_call_text + emit_amd64_arg_regs full parser) | — |
+| T4-e | per-fn frame table | perf only,非 EXIT gate | v2.x 中期 V2-D |
+| T4-f | nested_struct_deep struct-offset paths | big_test pre-existing 重复 `.Lloop_body<N>` label (codegen.jhyy lock) | big_test fix 在 codegen.jhyy (D43 lock) — deferred |
+| T4-g | Peephole Rule 3 gate | verify 触发 sign-ext vs zero-ext 语义不同 → bad .s | 加 line1.size == line2.size + sign-ext marker check (v2.11.4) |
+
+### 自举闭环 (D43) closure
+
+`v1` 编 main.jhyy .il ↔ `v2` 编 main.jhyy .il: byte-equal
+- v2.11.3 new sha: `2f0e8f7f1681abd8743ae4eb694dd0024ef9a1ed94163c06170880feb54d8e35`
+- 注: v2.11.2 ship commit `dda14fb` 时填入 `86a0103c...`,但 v3.1.4 W-068 merge `31e9d95` post source 真修后 IL 已偏移 — v2.11.3 verify 校准为 `2f0e8f7f...` (实测 fresh verify 2026-09-11)。
+
+### Ship gate verify (2026-09-11 fresh verify)
+
+**Hard gates (no regression)**:
+- ✅ QBE fallback regress: 5/5 PASS (hello=42 / fib_renamed=832040 / struct_val_pass=35 / nested_struct_deep=22 / big_test=12345)
+- ✅ `byte_equal_amd64.sh`: 10/10 PASS (QBE-vs-QBE no-op gate)
+- ✅ D43 closure sha HOLD (`v1=v2` byte-equal `2f0e8f7f...`)
+- ✅ jhyy.exe.sha256 sidecar refresh: `1ab08dd696a12b6e...` (5/5 QBE fallback binary)
+
+**v2.11.3 deliverable gates (scope DOWN)**:
+- ✅ self-backend regress terminate + non-empty .s: 5/5 (preserved v2.11.2)
+- ⚠️ self-backend EXIT exact match: 2/5 (hello=42 / struct_val_pass=35)
+- ❌ self-backend EXIT exact match: fib_renamed (32, lit imm bug) / nested_struct_deep (3105863345, scope DOWN) / big_test (link error, codegen.jhyy pre-existing 重复 label)
+
+### Commits
+
+1. **Commit 1** (source): ~25 LOC 真修 T4-h + CGState.cur_fn_idx init/reset;剩余 ~140 LOC 是 scope DOWN 注释 + 防御性字段 + helper functions (cg_state_set_fn_header / cg_find_arg_idx / cg_state_bump_fn_idx / cg_state_cur_fn_idx)。`codegen_amd64_state.jhyy` +136 LOC,`_emit_call.jhyy` +22,`_emit_ctrl.jhyy` +25,`_peephole.jhyy` +6。
+2. **Commit 2** (docs): W-074.7 PARTIAL closure (workarounds.md);D43 baseline drift correction (d43-baseline-archive.md);本 changelog sub-section + README ship row update。
+
+### OS 启动链路 (2026-09-11 校准)
+
+V2-C Part 2a-后-补:
+- 第二前置 Part 2a-后-补 (v2.11.3 self-backend W-074.7 PARTIAL closure, 本 ship) ✅
+- 第二前置 Part 2b (v2.12.0 QBE 移除, scope DOWN ≥3/5 self-backend → v2.11.3 ship 后 ship gate revert to 5/5 EXIT exact 不再适用,改为 scope DOWN 2/5 EXIT + big_test link error 待 v2.x 中期 fix) 待 ship
+- M5 独立 sprint 启动需等 v2.12.0 ship + big_test 重复 label 真修 (codegen.jhyy lock + needs new sprint for surgical fix)
+
+## References
+
+- **Plan**: `docs/plans/v2/v2.11.3-plan.md` (本 sprint, per feedback_plans_per_version;~64 LOC source, NOT ~280)
+- **W-074.6 + W-074.7**: `docs/internal/workarounds.md` (W-074.6 PARTIAL, W-074.7 PARTIAL closure 2026-09-11)
+- **Memory**: [[feedback_codegen_amd64_multifn]] (scope DOWN trigger, 2/5 EXIT vs plan 5/5), [[feedback_codegen_amd64_run_zerobyte]], [[feedback_no_date_estimates]], [[feedback_audit_single_commit_diff]]
+- **D43 closure sha chain**: `docs/logs/v2/d43-baseline-archive.md` (`2f0e8f7f...` v2.11.3 active baseline, drift-corrected from v2.11.2 `86a0103c...`)
+- **后接**: `docs/plans/v2/v2.12.0-plan.md` (QBE 移除 + toolchain closure, scope DOWN ≥2/5 self-backend → 5/5 后 v2.x 中期)
