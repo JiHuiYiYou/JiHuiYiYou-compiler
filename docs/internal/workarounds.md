@@ -5591,6 +5591,24 @@ $ JHY_SELF_BACKEND=1 jhyy.exe compile tests/hello.jhyy -o /tmp/_hello.s
 
 **OS 启动链路:** W-074.7 = M5 deferral 第二前置 Part 2a-后-补 🟡 (per `v1.x-phase-4-m5-boot-from-scratch.md`)。M5 启动需等 v2.11.3 ship ✅ + v2.11.4 ship ✅ + v2.11.5 ship ✅ + **v2.11.6 ship ✅ (5/5 link 真修 closure)** + v2.11.7 emit_store pointer 真修 + v2.11.8+ big_test runtime 闭环 + v2.12.0 QBE 移除.
 
-**Commit sha:** v2.11.3 ship `2fdfc12` + v2.11.4 ship `2057239` (T4-b 真修) + v2.11.5 ship `6857366` (alloc-tracking 真修) + **v2.11.6 ship `1e2ae1d` (W-074.7.5 peephole cap + W-074.7.6 block-name uniquify 5/5 link 真修 closure)**
-**Plan:** `docs/plans/v2/v2.11.3-plan.md` + `docs/plans/v2/v2.11.4-plan.md` + `docs/plans/v2/v2.11.5-plan.md` + **`docs/plans/v2/v2.11.6-plan.md`** (per feedback_plans_per_version)
-**Memory:** [[feedback_codegen_amd64_multifn]] (scope DOWN trigger, v2.11.3 = EXIT exact 不再拆); [[feedback_codegen_amd64_run_zerobyte]] (N≥3 .il byte-equal 不验 .s, self-backend bug 不能 catch — **v2.11.6 显式证伪 generalization: peephole cap bug 也不能 catch**, .il byte-equal 不验 .s 完整性); [[feedback_fix_evaluation_rule]] (诚实记录 actual EXIT match, 不强宣 closure — v2.11.6 真宣 5/5 link 真修 ✅ 但 EXIT match 3/5 跟 baseline 持平)
+**v2.11.7 调研 (2026-09-12, axis-v2 commit `<pending>`, tag `v2.11.7`)**:
+- ⚠️ **scope UP CGState refactor 实施后 regress**: 原 plan 假设真根因是 "emit_store 把 alloc-result pointer 当 stack slot VALUE 处理", scope UP 改 CGState 加 `temp_is_alloc_pointer` 256-entry bitmap (parallel to temp_slot_for_id) + cg_record_alloc_pointer setter + cg_is_alloc_pointer query + emit_alloc flag + emit_load/emit_store/emit_copy TEMP/emit_call arg load 全 dispatch alloc-result pointer (`leaq -<src>(%rbp), %rax; mov<size> %rax, -<dst>(%rbp)`). 实施 ~190 LOC, **regress 53/115 → 40/115 (13 测试 regress)**, QBE fallback 仍 115/115 PASS
+- ⚠️ **调研发现真根因比原 plan 深**: 4 emit path 真修只对 alloc-result pointer 有效, **derived address (`add %t6, 0` 的 result temp 装的是 runtime 计算的 address, 不是 stack slot) 才是真根因**. emit_store 当前 emit 形态 (e.g. `struct_val_pass.jhyy` 的 `storew %t7, %t8` 其中 `%t8 = add %t6, 0`):
+  ```asm
+  movq -8(%rbp), %rax           # load 8-byte pointer from %t6's slot
+  addq $4, %rax                 # add 4 (偏移 = struct.y)
+  movq %rax, -96(%rbp)          # store pointer to %t8's slot  (derived-address)
+  movl -88(%rbp), %eax          # load 4-byte value (10)
+  movl %eax, -96(%rbp)          # OVERWRITES pointer with 10  (❌ 错! 应写到 %t8 装 的地址)
+  ```
+  QBE `storew val, derived_addr` 真语义是 "store val at the address held in derived_addr" — codegen 当前 emit 是 "store val to derived_addr's slot" — 错!
+- ⚠️ **W-074.7.7 emit_store pointer semantics — INVALID closure (v2.11.7 调研结论)**: 原 plan 基于错误根因模型 (alloc-result pointer 单一种), 真根因是所有 derived address. scope UP CGState bitmap 实施后 regress, 全部 revert. **本 sprint 实际不 ship 任何 source change, 只 ship 调研产出 doc**
+- 🆕 **W-074.7.8 derived-address tracking — NEW (v2.11.7a 待 ship)**: bitmap 扩到 flag 任何 temp holding derived address (e.g. `add %t6, 0` / `sub %t6, 0` / `add %t6, imm` 后的 result temp 装的是 runtime 计算的 address, 不是 stack slot); emit_load/emit_store/emit_copy/emit_call arg load 改 full dispatch (slot vs derived-address lea-indirect). emit_binop 需 add/sub 产生 derived-address 时 flag result. 估 ~250-350 LOC, 真修真根因, 5/5 EXIT exact 概率高. 风险: 改动大, 可能引入新 regress; 建议先调研 emit_binop 跟 derived-address result flag 设计, 再实施
+- ✅ **scope DOWN 决策 (per 2026-09-12 user 决定)**: defer 真修 v2.11.7, 启动 v2.11.7a 调研 full derived-address tracking. 本 v2.11.7 = "调研完成, scope DOWN defer 真修" ship (不 ship 任何 source change, only docs)
+- ✅ **fix_evaluation_rule 诚实记录**: per [[feedback_fix_evaluation_rule]], v2.11.7 实际 EXIT match = 3/5 (跟 v2.11.6 baseline 持平 — **没新修, 因为调研发现真根因更深, scope UP 不充分**). **不强宣 "4/5 EXIT exact closure"** — v2.11.7 是 scope DOWN defer, 真修留 v2.11.7a
+
+**OS 启动链路:** W-074.7 = M5 deferral 第二前置 Part 2a-后-补 🟡 (per `v1.x-phase-4-m5-boot-from-scratch.md`)。M5 启动需等 v2.11.3 ship ✅ + v2.11.4 ship ✅ + v2.11.5 ship ✅ + **v2.11.6 ship ✅ (5/5 link 真修 closure)** + v2.11.7 ship ✅ (调研 + scope DOWN defer) + v2.11.7a derived-address tracking 真修 (待 ship) + v2.11.8+ big_test runtime 闭环 (待 ship) + v2.12.0 QBE 移除 (待 ship).
+
+**Commit sha:** v2.11.3 ship `2fdfc12` + v2.11.4 ship `2057239` (T4-b 真修) + v2.11.5 ship `6857366` (alloc-tracking 真修) + **v2.11.6 ship `1e2ae1d` (W-074.7.5 peephole cap + W-074.7.6 block-name uniquify 5/5 link 真修 closure)** + **v2.11.7 ship `<pending>` (调研 + scope DOWN defer; 0 source change, ~120 LOC docs = W-074.7.7 INVALID closure + W-074.7.8 NEW entry)**
+**Plan:** `docs/plans/v2/v2.11.3-plan.md` + `docs/plans/v2/v2.11.4-plan.md` + `docs/plans/v2/v2.11.5-plan.md` + **`docs/plans/v2/v2.11.6-plan.md`** + **`docs/plans/v2/v2.11.7-plan.md`** (per feedback_plans_per_version; **v2.11.7 = 调研 + scope DOWN defer, 真修留 v2.11.7a**)
+**Memory:** [[feedback_codegen_amd64_multifn]] (scope DOWN trigger, v2.11.3 = EXIT exact 不再拆, **v2.11.7 = 调研失败 scope DOWN defer v2.11.7a**); [[feedback_codegen_amd64_run_zerobyte]] (N≥3 .il byte-equal 不验 .s, self-backend bug 不能 catch — v2.11.6 显式证伪 generalization: peephole cap bug 也不能 catch, .il byte-equal 不验 .s 完整性); [[feedback_fix_evaluation_rule]] (诚实记录 actual EXIT match, 不强宣 closure — v2.11.6 真宣 5/5 link 真修 ✅ 但 EXIT match 3/5 跟 baseline 持平; **v2.11.7 真宣 0 source change, scope UP 调研失败, scope DOWN defer v2.11.7a**)

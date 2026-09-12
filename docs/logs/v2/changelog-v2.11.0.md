@@ -582,3 +582,67 @@ V2-C Part 2a-后-补-补-补 (续):
 - **Plan**: `docs/plans/v2/v2.11.6-plan.md` (本 sprint, per feedback_plans_per_version; ~158 LOC source 真修 + ~80 LOC docs)
 - **W-074.7**: `docs/internal/workarounds.md` (v2.11.6 W-074.7.5 peephole cap + W-074.7.6 block-name uniquify 真修; **5/5 link 真达成** ✅; EXIT exact 仍 deferred v2.11.7+)
 - **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 actual EXIT match); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger); [[feedback_codegen_amd64_run_zerobyte]] (N≥3 .il byte-equal 不验 .s, peephole cap bug 不能 catch — **big_test N=3 .il byte-equal 但 .s 截断**, 显式证伪 memory)
+
+## v2.11.7 — 2026-09-12 scope DOWN defer (axis-v2 commit `<pending>`, tag `v2.11.7`)
+
+**Context**: v2.11.6 ship 后 EXIT match 3/5 (hello / fib_renamed / struct_val_pass=6 not match 35), nested_struct_deep=35 not match 22, big_test runtime STATUS_INTEGER_OVERFLOW 0xC0000095。原 plan 调研认为真根因是 "emit_store 把 alloc-result pointer 当 stack slot VALUE 处理", scope UP CGState 大改 (新 bitmap `temp_is_alloc_pointer` 256-entry + emit_load/emit_store/emit_copy/emit_call arg load 全 dispatch alloc-result pointer) 估 ~130-160 LOC, target 4/5 EXIT exact 闭环 (defer big_test runtime)。
+
+**调研发现真根因比预期更深 (2026-09-12)**:
+
+scope UP CGState refactor 实施后, self-backend regress 40/115 PASS (vs v2.11.6 baseline 53/115 — 实际 baseline 数字, **不是 104/115**;104/115 是 QBE fallback 数字, self-backend v2.11.6 是 53/115)。**13 测试 regress** (QBE 仍 115/115 PASS 完好)。
+
+通过分析 self-backend emit `.s` (e.g. `struct_val_pass.jhyy`), 发现 emit_store 当前 emit:
+
+```asm
+movq -8(%rbp), %rax           # load 8-byte pointer from %t6's slot
+addq $4, %rax                 # add 4 (偏移 = struct.y)
+movq %rax, -96(%rbp)          # store pointer to %t8's slot
+movl -88(%rbp), %eax          # load 4-byte value (10)
+movl %eax, -96(%rbp)          # OVERWRITES pointer with 10
+```
+
+QBE IL 原始序列: `%t8 =l add %t6, 0; storew %t7, %t8` — 含义是 "store %t7's value (10) **at the address held in %t8**"。但 codegen 当前 emit 是 "store value to %t8's slot" — 错!
+
+**真根因不只是 alloc-result pointer** — 是 **所有 derived address** (e.g. `add %t6, 0` 的 `%t8` 是 runtime 计算的地址, 不是 stack slot)。Codegen 的 1-to-1 栈分配假设在 `storew val, derived_addr` 跟 `loadw derived_addr` 形态上根本不成立 — derived address 需要 `movl %eax, (%raddr)` 间接写, 不能走 `movl %eax, -<slot>(%rbp)` slot 写。
+
+v2.5.0 L4 § 3.5 E2 注释把整个 emit_store/emit_load 当 "1-to-1 栈栈搬运" 简化, 隐式假设 dst 跟 src 都是 stack slot — **这个假设只对 alloc-result + binop 结果 + ret + phi 等少数 case 成立, 对所有 `add ptr, offset` 后的 address 跟 `loadw addr` 形态都破**。
+
+**scope UP 失败原因**: 4 emit path 真修 (emit_load/emit_store/emit_copy/emit_call arg load) 都假设 src/dst 必是 stack slot — 修 alloc-result pointer (lea 取 ADDRESS 然后写到 dst slot) 反而比原 bug 更错 (因为 dst 在 `storew val, derived_addr` 形态下不是 slot, 是 derived address)。我修 emit_store 时 emit `leaq -<src>(%rbp), %rax; mov<size> %rax, -<dst>(%rbp)` (load src ADDRESS 然后写到 dst slot) — 但原 emit 是 "load src VALUE 然后写到 dst slot", 我的 fix 改成 "load src ADDRESS 然后写到 dst slot" — **对 alloc-result src 是改进了 (取到真 ADDRESS), 对非 alloc-result src 退化了 (取到 garbage ADDRESS 写到 dst slot)**; 对 derived-address dst 完全没修 (dst 是 derived address, 不是 slot, 写到 dst slot 后下一条 `storew val, derived_addr` 还是覆写)。
+
+**scope 决策 (per 2026-09-12 user 决定)**:
+- 调研发现真根因比原 plan 深, scope UP CGState 改动不充分 (只 flag alloc-result, 不 flag derived-address)
+- user 决定 scope DOWN — **defer 真修 v2.11.7, 启动 v2.11.7a 调研 full derived-address tracking** (bitmap 不只 flag alloc-result, 也 flag 任何 `add ptr, offset` / `sub ptr, offset` 后的 result temp)
+- 本 v2.11.7 = "调研完成, scope DOWN defer 真修" ship (不 ship 任何 source change, only docs)
+
+**硬门 PASS (调研后回滚, source back to v2.11.6 baseline)**:
+- ✅ **QBE fallback 115/115 PASS** (target binary 完全不动)
+- ✅ **self-backend 5/5 link 保留** (v2.11.6 closure 不 regress)
+- ✅ **self-backend EXIT match 3/5** (跟 v2.11.6 baseline 持平, 因为 source 没动)
+- ✅ **D43 closure v1↔v2 .il sha HOLD**
+- ✅ **byte_equal_amd64 10/10 PASS**
+- ✅ **fixed_point N≥3 PASS** (N=4 + N=5 informational)
+- ✅ **jhyy.exe.sha256 不变** (source 没改, 跟 v2.11.6 ship 时一致)
+
+**fix_evaluation_rule 诚实记录 (per [[feedback_fix_evaluation_rule]])**:
+- v2.11.7 实际 EXIT match = 3/5 (跟 v2.11.6 baseline 持平 — **没新修, 因为调研发现真根因更深, scope UP 不充分**)
+- **不强宣 "4/5 EXIT exact closure"** — v2.11.7 是 scope DOWN defer, 真修留 v2.11.7a (full derived-address tracking)
+- 调研增量: ~190 LOC CGState 大改 (新 bitmap + record/query helpers + 4 emit path dispatch) — 实施后 regress, 全部 revert;留下的产出是"真根因诊断 doc" (本 sub-section + workarounds.md W-074.7.7 INVALID 跟 W-074.7.8 NEW 标注)
+
+**W-074.7 演化 (per workarounds.md)**:
+- ⚠️ **W-074.7.7 emit_store pointer semantics — INVALID closure** (本 sprint 调研结论: 4 emit path 真修只对 alloc-result pointer 有效, **derived address 才是真根因**, 不是 alloc-result pointer 单一种). 原 plan 基于错误根因模型, 实施后 regress, revert.
+- 🆕 **W-074.7.8 derived-address tracking — NEW (v2.11.7a 待 ship)**: bitmap 扩到 flag 任何 temp holding derived address (e.g. `add %t6, 0` 的 result temp 装的是 runtime 计算的 address, 不是 stack slot); emit_load/emit_store/emit_copy/emit_call arg load 改 full dispatch (slot vs derived-address lea-indirect). 估 ~250-350 LOC, 真修真根因, 5/5 EXIT exact 概率高. 风险: 改动大, 可能引入新 regress; 建议先调研 emit_binop 跟 derived-address result flag 设计, 再实施.
+
+**OS 启动链路 (2026-09-12 校准)**:
+
+V2-C Part 2a-后-补-补-补-补 (续):
+- ✅ 第二前置 Part 2a-后-补-补-补 (v2.11.6 peephole cap + block-name uniquify 5/5 link) ship
+- ✅ 第二前置 Part 2a-后-补-补-补-补 (v2.11.7 调研 + scope DOWN defer) **本 ship**
+- 待 ship: 第二前置 Part 2a-后-补-补-补-补-补 (v2.11.7a derived-address tracking 真修, scope ~250-350 LOC) — nested_struct_deep + struct_val_pass EXIT exact 闭环
+- 待 ship: 第二前置 Part 2a-后-补-补-补-补-补-补 (v2.11.8+ big_test runtime STATUS_INTEGER_OVERFLOW 根因 = separate deeper bug, scope 待 v2.11.7a ship 后调研)
+- 待 ship: 第二前置 Part 2b (v2.12.0 QBE 移除);M5 独立 sprint 需等 v2.12.0 ship + 5/5 EXIT exact + big_test runtime 闭环
+
+## References (v2.11.7)
+
+- **Plan**: `docs/plans/v2/v2.11.7-plan.md` (本 sprint, per feedback_plans_per_version; **~0 LOC source change, ~190 LOC source 调研产出 + revert, ~120 LOC docs = ~310 LOC docs**)
+- **W-074.7**: `docs/internal/workarounds.md` (v2.11.7 W-074.7.7 **INVALID closure** (scope UP 调研错根因) + W-074.7.8 **NEW** (derived-address tracking, v2.11.7a 待 ship))
+- **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 actual EXIT match 跟调研发现, 不强宣 scope UP 成功); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger — scope UP 调研失败, scope DOWN 启动 v2.11.7a); [[feedback_codegen_amd64_run_zerobyte]] (N≥3 .il byte-equal 不验 .s, 但本 sprint 通过直接读 .s 比 gdb 取证 — emit_store 实际 emit 暴露真根因)
