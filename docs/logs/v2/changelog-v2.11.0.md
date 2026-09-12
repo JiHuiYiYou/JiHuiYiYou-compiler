@@ -436,3 +436,69 @@ V2-C Part 2a-后-补-补:
 - **Plan**: `docs/plans/v2/v2.11.4-plan.md` (本 sprint, per feedback_plans_per_version;~30 LOC source 真修)
 - **W-074.7**: `docs/internal/workarounds.md` (v2.11.4 fib_renamed CLOSED, nested_struct_deep + struct_val_pass + big_test 仍待 v2.x 中期)
 - **Memory**: [[feedback_codegen_amd64_multifn]] (scope DOWN trigger), [[feedback_codegen_amd64_run_zerobyte]] (N≥3 .il byte-equal 不验 .s, T4-b src1/src2 parse bug 不能 catch — 只能 EXIT match 验)
+
+## v2.11.5 — 2026-09-12 ship (axis-v2 commit `6857366`, tag `v2.11.5`)
+
+**Context**: v2.11.4 ship 后 (2/5 self-backend EXIT match: hello / fib_renamed=40), 还有 3 个 pre-existing bugs 阻塞 4/5 EXIT exact:
+- nested_struct_deep NTSTATUS_0xDE09A8E7 runtime crash (target 22)
+- struct_val_pass EXIT=1928236902 garbage (target 35)
+- big_test link error (.Lloop_body<N> 重复 label, D43 lock)
+
+v2.11.5 scope: 切到 alloc-tracking 真修 (替代之前 T4-c multi-arg 真修 — 调研后发现 multi-arg 早已通过 emit_amd64_arg_regs 闭环, T4-c 是 no-op)。目标: 消除 crash + 修 garbage, 但 EXIT exact 仍待 v2.11.6 emit_store pointer semantics 真修。
+
+**Verify 实测 (2026-09-12)**:
+
+| Test | v2.11.4 实际 | v2.11.5 实际 | 备注 |
+|---|---|---|---|
+| hello.jhyy | ✅ EXIT=42 | ✅ EXIT=42 | alloc-tracking 无 effect (无 alloc) |
+| fib_renamed.jhyy | ✅ EXIT=40 | ✅ EXIT=832040 | alloc-tracking: EXIT 从 40 (mod 256 巧合) → 832040 (真值, 公式 fallback `-168(%rbp)` 巧合 mod 256 = 40, 现在 `recorded slot = -16(%rbp)` 真值) |
+| struct_val_pass.jhyy | ❌ EXIT=1928236902 (garbage) | ❌ EXIT=6 (still wrong) | alloc-tracking: 修 garbage, 但 6 ≠ 35 EXPECT. **emit_store pointer gap**: alloc-result 当 stack slot VALUE 处理 |
+| nested_struct_deep.jhyy | ❌ NTSTATUS_0xDE09A8E7 (crash) | ❌ EXIT=35 (still wrong) | alloc-tracking: 消除 crash, 但 35 ≠ 22 EXPECT. **emit_store pointer gap** 同 |
+| big_test.jhyy | ❌ link error | ❌ link error | pre-existing `.Lloop_body<N>` 重复 label, D43 lock; deferred v2.x 中期 |
+
+**真修 (Commit 1, ~111 LOC source, 3 files)**:
+
+1. `compiler/src0/codegen_amd64_state.jhyy` (+89 LOC):
+   - CGState 新增 `temp_slot_for_id: *u8` field
+   - `cg_max_temp_slots() -> i64` const = 256 (5x regress max safety margin)
+   - extern fn `jh_cgstate_get_temp_slots() -> *u8` + `jh_cgstate_set_temp_slots(p: *u8) -> i32` (jhyy-side declarations; 跟 regalloc jh_regalloc_get/set 同 pattern)
+   - `cg_state_set_temp_slots(state: *u8) -> i32` 桥接 (extern wire)
+   - `cg_record_temp_slot(state: *u8, temp_id: i64, slot: i64) -> i32` setter (bounds-check + ptr_add_u8 + store)
+   - `cg_state_init` arena alloc 256-entry i64 array + memset 0 + wire extern (BEFORE init 之前的 forward-ref issue 修了 — 把 helpers 挪到 cg_state_init 之前)
+   - `cg_state_reset_for_function` zero slot array per-fn
+   - `cg_offset_for_temp` + `cg_offset_for_temp_with_target` 加 recorded-slot lookup (先查 slot, miss 走 formula fallback `-(32+t*8)`)
+
+2. `compiler/src0/codegen_amd64_emit_mem.jhyy` (+5 LOC):
+   - `emit_alloc` 在 `cg_alloc_slot` 后调 `cg_record_temp_slot(state, dst, off)` 记录 %tN → slot
+
+3. `compiler/src0/jhyy_helpers.c` (+17 LOC):
+   - C-side static `g_jh_cgstate_temp_slots` + `jh_cgstate_get_temp_slots()` + `jh_cgstate_set_temp_slots()` (跟 regalloc extern bridge pattern 一致)
+
+**硬门 PASS (Commit 1 后实测)**:
+
+- ✅ **QBE fallback regress 5/5 PASS** (`hello=42 / fib_renamed=832040 / struct_val_pass=35 / nested_struct_deep=22 / big_test=12345` — target binary 完全不动 EXIT, alloc-tracking 只影响 self-backend)
+- ✅ **D43 closure v1↔v2 .il sha HOLD** (`ca56423f1528610898c676b4a6cb3bcc181b35aa6d7a505c0996b48b0d8a4c1b` byte-equal — alloc-tracking 不影响 .il emit 路径)
+- ✅ **byte_equal_amd64 10/10 PASS** (.il + .s 都 byte-equal)
+- ✅ **fixed_point N=3/N=4/N=5 PASS** (7a1043c0a4d63ccc908ad472a17a37c651f514ca61b5f6564aaea2f3bfa61735)
+- ✅ **jhyy.exe.sha256 refresh** `8028bfa36eb60d5740a51ddcea1cfddd61b774622126dfa1099743a3ffcfeb0a` (drift from v2.11.4 `1da38aff...`)
+
+**Commit chain (2 commits per v2.x convention)**:
+
+1. **Commit 1** (source + binary): `6857366` fix(codegen) — 上述 3 source files + jhyy.exe rebuild + sha256 refresh
+2. **Commit 2** (docs, 本 sub-section): workarounds.md W-074.7 PARTIAL closure v2.11.5 注释; changelog v2.11.5 sub-section; README v2.11.5 ship row; v2.11.5-plan.md (per feedback_plans_per_version)
+
+**fix_evaluation_rule 诚实记录**: per [[feedback_fix_evaluation_rule]], v2.11.5 实际 self-backend EXIT match = 2/5 (hello=42 / fib_renamed=832040), 跟 v2.11.4 baseline 持平. **不强宣 “4/5 EXIT closure”** — v2.11.5 是 PARTIAL (撞 crash + garbage 修复, EXIT exact 仍 deferred v2.11.6 emit_store pointer semantics 真修).
+
+**OS 启动链路 (2026-09-12 校准)**:
+
+V2-C Part 2a-后-补-补 (续):
+- ✅ 第二前置 Part 2a-后-补-补 (v2.11.4 T4-b fib_renamed 真修) ship
+- ✅ 第二前置 Part 2a-后-补-补 (v2.11.5 alloc-tracking crash 修复) **本 ship**
+- 待 ship: 第二前置 Part 2a-后-补-补 (v2.11.6 emit_store pointer semantics 真修, scope +50-100 LOC)
+- 待 ship: 第二前置 Part 2b (v2.12.0 QBE 移除);M5 独立 sprint 需等 v2.12.0 ship + big_test 重复 label 真修 (codegen.jhyy lock)
+
+## References (v2.11.5)
+
+- **Plan**: `docs/plans/v2/v2.11.5-plan.md` (本 sprint, per feedback_plans_per_version;~111 LOC source 真修 + ~80 LOC docs)
+- **W-074.7**: `docs/internal/workarounds.md` (v2.11.5 alloc-tracking PARTIAL closure — crash 修复, EXIT exact 仍 deferred)
+- **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 actual EXIT match); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger); [[feedback_codegen_amd64_run_zerobyte]] (N≥3 .il byte-equal 不验 .s, alloc-tracking bug 不能 catch)
