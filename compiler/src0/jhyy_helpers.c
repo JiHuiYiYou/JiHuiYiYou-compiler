@@ -626,6 +626,23 @@ __attribute__((used)) int jh_regalloc_set(void *arr) {
     return 0;
 }
 
+/* v2.11.5 (W-074.7 alloc-tracking 真修): jh_cgstate_get_temp_slots /
+   jh_cgstate_set_temp_slots — 跟 regalloc 同 pattern,C-side static 装当前 CGState
+   的 temp_slot_for_id (256-entry i64 array,per-fn alloc slot 表)。
+   emit_alloc 写入 alloc'd %tN 的 slot,cg_offset_for_temp[t] 查表(否则 fall through
+   formula)。BSS-zero init, set NULL = 关闭 alloc-tracking。Pointer-only: 实际数据
+   在 jhyy arena alloc (per-compile lifetime),C-side 只装指针。
+   修 nested_struct_deep + struct_val_pass pre-existing bug: alloc'd %tN 之前
+   走 formula `-(32 + t*8)` 跟 alloc 真分配的 slot 不一致 → read garbage。 */
+static void *g_jh_cgstate_temp_slots = (void *)0;
+__attribute__((used)) void *jh_cgstate_get_temp_slots(void) {
+    return g_jh_cgstate_temp_slots;
+}
+__attribute__((used)) int jh_cgstate_set_temp_slots(void *arr) {
+    g_jh_cgstate_temp_slots = arr;
+    return 0;
+}
+
 /* v2.6.0: jh_read_file — read entire file into caller-provided buffer.
    Returns:
      0  on success (*out_len set to file size)

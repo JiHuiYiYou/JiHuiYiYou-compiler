@@ -284,6 +284,11 @@ fn emit_alloc(state: *u8, tok: *u8, target_tag: i32) -> i32 {
         off = (*s).next_offset;
     }
 
+    // v2.11.5 (W-074.7 alloc-tracking 真修):记录 %tN → slot 让 cg_offset_for_temp
+    // 后续读 alloc'd %tN 返回正确 offset (vs formula fallback `-(32+t*8)`)。
+    // 修 nested_struct_deep + struct_val_pass pre-existing bug。
+    let _rec = cg_record_temp_slot(state, dst, off);
+
     // `\t# alloc 16 (aligned 16) -> %t1 (offset -48(%rbp))`
     mem_put(state, "\t# alloc " as *u8);
     mem_put_i64(state, size);
