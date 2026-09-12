@@ -245,7 +245,7 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32 {
     // against `{` → "expected ;, got {" error.
     let mut arena: Arena = Arena { start: 0 as *u8, cur: 0 as *u8, end: 0 as *u8,
                                    blocks: 0 as *u8, def_size: 0 as i64 };
-    arena_init(&arena, (2 as i64) * (1024 as i64) * (1024 as i64));
+    arena_init(&arena, (8 as i64) * (1024 as i64) * (1024 as i64));
     let tokens = lex_il(il_buf, il_len, &arena);
     if tokens == (0 as *u8) {
         free(il_buf);

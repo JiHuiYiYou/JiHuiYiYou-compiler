@@ -551,7 +551,14 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8, target_tag: i32) -> *u8 {
     // 用 scratch arrays 存每行 [start, end]:
     //   starts[i] = line i start offset in input
     //   ends[i] = line i end offset in input (exclusive)
-    let max_lines = 4096 as i64;  // 够 cover regress 用例
+    // v2.11.6 (W-074.7.5 真修):max_lines 4096 → 65536 (64K lines)。
+    // 根因:big_test.jhyy emit .s 有 4090 行,cap 4096 时刚好 pass 但 fold 后
+    // 第 4091 行起被 drop (line_idx >= max_lines → break) → folded buf 在
+    // t_bit_and body 中部 truncate → main_jhyy (FH #118) 永不写出 → link
+    // fail "ld returned 1" (no main_jhyy entry)。65K lines × 8 bytes × 4
+    // arrays = 2 MB,arena 2 MB def_size 会 cap → bump arena def_size 配套
+    // (codegen_amd64_run line 248)。
+    let max_lines = 65536 as i64;
     let line_starts = arena_alloc(arena, max_lines * (8 as i64));
     let line_ends = arena_alloc(arena, max_lines * (8 as i64));
     let line_deleted = arena_alloc(arena, max_lines * (1 as i64));

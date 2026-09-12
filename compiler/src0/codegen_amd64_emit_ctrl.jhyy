@@ -125,6 +125,11 @@ fn emit_jmp(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     // v2.11.3 (W-074.7 T4-h 真修):append "_fn<cur_fn_idx>" 后缀跟 emit_label def 拼
     // 的 .L name byte-equal。不加 → fib_renamed 等多 fn tests jmp @merge3 → link error
     // (jmp 目标 .Lmerge3 但 def 是 .Lmerge3_fn1)。
+    // v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN):lookup block name
+    // suffix 跟 emit_label def 拼的 .L name byte-equal (同 fn 多次同名 label 各
+    // 自 unique)。Back-edge 命中 (loop_body 已 def);forward edge miss → 0 default。
+    let b_count_j = cg_lookup_block_name(state, ptr_add_u8(text, name_off), name_len);
+    let _sfx_b = sb_appendf_lld(arena, sb, "_b%lld" as *u8, b_count_j);
     let _sfx = sb_appendf_lld(arena, sb, "_fn%lld" as *u8, cg_state_cur_fn_idx(state));
     sb_append_cstr(arena, sb, "\n" as *u8);
     let _tt = target_tag;
@@ -223,14 +228,20 @@ fn emit_jnz(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     // `@then1` label 静默重定义 (per Plan agent T4-h)。big_test 多 fn 都 emit
     // `jnz @then1` 时,无后缀则所有 fn 的 .Lthen1 全指向同一 label → wrong jumps
     // across functions → wrong EXIT。
+    // v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN):lookup each
+    // block name suffix 跟 emit_label def byte-equal。
     sb_append_cstr(arena, sb, "\tjne .L" as *u8);
     let _a1 = sb_append(arena, sb, ptr_add_u8(text, then_name_off), then_name_len);
+    let b_count_t = cg_lookup_block_name(state, ptr_add_u8(text, then_name_off), then_name_len);
+    let _sfx_bt = sb_appendf_lld(arena, sb, "_b%lld" as *u8, b_count_t);
     let _sfx_j = sb_appendf_lld(arena, sb, "_fn%lld" as *u8, cg_state_cur_fn_idx(state));
     sb_append_cstr(arena, sb, "\n" as *u8);
 
     // 3) jmp .L<else>_fn<N>
     sb_append_cstr(arena, sb, "\tjmp .L" as *u8);
     let _a2 = sb_append(arena, sb, ptr_add_u8(text, else_name_off), else_name_len);
+    let b_count_e = cg_lookup_block_name(state, ptr_add_u8(text, else_name_off), else_name_len);
+    let _sfx_be = sb_appendf_lld(arena, sb, "_b%lld" as *u8, b_count_e);
     let _sfx_e = sb_appendf_lld(arena, sb, "_fn%lld" as *u8, cg_state_cur_fn_idx(state));
     sb_append_cstr(arena, sb, "\n" as *u8);
     return 0;
@@ -257,8 +268,18 @@ fn emit_label(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     // v2.11.3 (W-074.7 T4-h 真修):.L<text>_fn<N>:\n — mirror emit_jnz 的
     // "_fn<N>" 后缀,保证 jnz 的 target 跟 label definition 拼出的 .L name
     // byte-equal,链接器能 resolve。
+    // v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN): append "_b<count>"
+    // suffix 在 _fn<N> 之前,让同 fn 多次同名 label (e.g. `@loop_body` 在嵌套
+    // loop 出现 4 次) 各自 unique → GAS 不再 link error。cg_record_block_name
+    // 返回该 name 在当前 fn 的 next suffix (0 for first def, 1 for second, ...)。
+    let mut b_count: i64 = cg_record_block_name(state, (*t).text, (*t).text_len);
+    if b_count < (0 as i64) {
+        // table full or other err — fall back to _b0 (preserves v2.11.5 behavior)
+        b_count = 0 as i64;
+    }
     sb_append_cstr(arena, sb, ".L" as *u8);
     sb_append(arena, sb, (*t).text, (*t).text_len);
+    let _sfx_b = sb_appendf_lld(arena, sb, "_b%lld" as *u8, b_count);
     let _sfx = sb_appendf_lld(arena, sb, "_fn%lld" as *u8, cg_state_cur_fn_idx(state));
     sb_append_cstr(arena, sb, ":\n" as *u8);
     // target_tag v2.8.0 加,label target-agnostic — 仅为签名统一

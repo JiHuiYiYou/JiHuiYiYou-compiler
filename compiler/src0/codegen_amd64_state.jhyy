@@ -144,6 +144,15 @@ type CGState = struct {
     // 在 cg_state_init。reset_for_function 把 slot 数组 zero (per-fn 隔离)。
     // MAX_TEMP_SLOTS=256 留 5x safety margin over regress max (nested_struct_deep 51)。
     temp_slot_for_id: *u8,
+
+    // v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN):per-fn block-name
+    // uniquify table。emit_label 在 `.L<name>_fn<N>` 后 append `_b<count>` suffix,
+    // emit_jmp/jnz 用相同 lookup 保证 target 跟 def byte-equal。修 big_test 嵌套
+    // loop 共享 `@loop_body` / `@loop_end` 等 label 静默重定义 → GAS link error。
+    // 256 entries × 32 bytes = 8KB per compile,negligible。arena alloc + memset 0
+    // 在 cg_state_init。reset_for_function 把 table zero (per-fn 隔离,同 fn 内
+    // 多次同名 label 才 uniquify;跨 fn label 由 _fn<N> suffix 区分)。
+    block_name_uniq: *u8,
 }
 
 // v2.11.5 (W-074.7 alloc-tracking 真修): extern bridge 装当前 CGState 的
@@ -217,6 +226,16 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     (*s).temp_slot_for_id = slots_ptr;
     // v2.11.5 helper wire C-side static (forward ref-safe helper call):
     let _wr = cg_state_set_temp_slots(state);
+    // v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN):alloc block-name
+    // uniquify table 256-entry (8KB) zero-init。emit_label 在每 fn 头调
+    // cg_record_block_name 写 entry;emit_jmp/emit_jnz 调 cg_lookup_block_name
+    // 拿 suffix。reset_for_function 把 table zero (per-fn 隔离,跟 alloc-tracking
+    // 同 pattern)。
+    // 注:cannot call cg_max_block_names (defined later) → inline literal 256。
+    let bnu_bytes = (256 as i64) * (32 as i64);
+    let bnu_ptr = arena_alloc(arena, bnu_bytes);
+    let _zero_bnu = memset(bnu_ptr, 0 as i32, bnu_bytes);
+    (*s).block_name_uniq = bnu_ptr;
     return 0;
 }
 
@@ -245,6 +264,12 @@ fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
     if (*s).temp_slot_for_id != (0 as *u8) {
         let slots_bytes2 = (256 as i64) * (8 as i64);
         let _zr = memset((*s).temp_slot_for_id, 0 as i32, slots_bytes2);
+    }
+    // v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN):zero block-name
+    // uniquify table per-fn。同 alloc-tracking 逻辑,per-fn 隔离。
+    if (*s).block_name_uniq != (0 as *u8) {
+        let bnu_bytes2 = (256 as i64) * (32 as i64);
+        let _zr_bnu = memset((*s).block_name_uniq, 0 as i32, bnu_bytes2);
     }
     // cur_fn_idx NOT reset — it grows across functions within a module
     // (per-module accumulator, inited to 0 in cg_state_init)。reset 让它归 0 会让
@@ -399,6 +424,107 @@ fn cg_byte_at(s: *u8, i: i64) -> i32 {
     let p = ptr_add_u8(s, i);
     let c = *p;
     return c as i32;
+}
+
+// v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN): block-name uniquify
+// table entry。每 entry = (name_hash, name_len, count)。name_hash + name_len
+// 用于 name 比对(避免 hash collision 错配)。放在 cg_byte_at 之后因为 record/lookup
+// helpers 调 cg_byte_at 取 hash,jhyy 不支持 forward ref。
+type BlockNameEntry = struct {
+    name_hash: i64,    // name 字符串 hash (sum * 31 + byte, 简化 FNV-like)
+    name_len:  i64,    // name 字符串长度
+    count:     i64,    // next suffix to emit (0 = first def → _b0, 1 = second → _b1, ...)
+}
+
+// MAX_BLOCK_NAMES — block-name uniquify table 大小。256 = 4x big_test 实测 (~60 unique
+// block names) safety margin。Out-of-bounds → linear search 跳过;emit_label 在
+// table full 时 fall through 默认 `_b<count>` (preserves baseline behavior, 退化
+// 静默重复但 link error 仍 report — 安全 net)。
+fn cg_max_block_names() -> i64 {
+    return 256 as i64;
+}
+
+// cg_record_block_name — v2.11.6 setter,emit_label 调,记录该 block name 在
+// 当前 fn 的 def 序号 (返回 next suffix to emit)。第一次 def → 0,第二次 → 1, etc。
+// Linear search 256-entry table;未找到空 slot → return -1 (emit_label fallback
+// 用 `_b<0>`,preserves v2.11.5 behavior,table full 时 link error 仍会出)。
+fn cg_record_block_name(state: *u8, name: *u8, name_len: i64) -> i64 {
+    if state == (0 as *u8) || name == (0 as *u8) || name_len <= (0 as i64) {
+        return -(1 as i64);
+    }
+    let s = state as *CGState;
+    if (*s).block_name_uniq == (0 as *u8) {
+        return -(1 as i64);
+    }
+    // hash name (FNV-like: h = h * 31 + byte)
+    let mut h: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < name_len {
+        let c = cg_byte_at(name, i) as i64;
+        h = h * (31 as i64) + c;
+        i = i + (1 as i64);
+    }
+    // linear search existing entry
+    let table = (*s).block_name_uniq;
+    let max_n = cg_max_block_names();
+    let mut j: i64 = 0 as i64;
+    while j < max_n {
+        let e = ptr_add_u8(table, j * (32 as i64)) as *BlockNameEntry;
+        if (*e).name_hash == h && (*e).name_len == name_len {
+            // found: increment + return next count
+            (*e).count = (*e).count + (1 as i64);
+            return (*e).count;
+        }
+        j = j + (1 as i64);
+    }
+    // not found: find empty slot (name_hash == 0 → empty)
+    let mut k: i64 = 0 as i64;
+    while k < max_n {
+        let e = ptr_add_u8(table, k * (32 as i64)) as *BlockNameEntry;
+        if (*e).name_hash == (0 as i64) {
+            (*e).name_hash = h;
+            (*e).name_len = name_len;
+            (*e).count = 0 as i64;
+            return 0 as i64;
+        }
+        k = k + (1 as i64);
+    }
+    // table full
+    return -(1 as i64);
+}
+
+// cg_lookup_block_name — v2.11.6 lookup,emit_jmp/emit_jnz 调,返回该 block name
+// 在当前 fn 的 "last assigned suffix"。Loop back-edge (jmp 在 def 后) 命中;
+// forward edge (jmp 在 def 前) miss → return 0 default _b0 (assumes first def,
+// 对 nested loops 大多正确;后续 false 跳转留 v2.11.7+ 真修)。
+fn cg_lookup_block_name(state: *u8, name: *u8, name_len: i64) -> i64 {
+    if state == (0 as *u8) || name == (0 as *u8) || name_len <= (0 as i64) {
+        return 0 as i64;
+    }
+    let s = state as *CGState;
+    if (*s).block_name_uniq == (0 as *u8) {
+        return 0 as i64;
+    }
+    // hash name
+    let mut h: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < name_len {
+        let c = cg_byte_at(name, i) as i64;
+        h = h * (31 as i64) + c;
+        i = i + (1 as i64);
+    }
+    // linear search
+    let table = (*s).block_name_uniq;
+    let max_n = cg_max_block_names();
+    let mut j: i64 = 0 as i64;
+    while j < max_n {
+        let e = ptr_add_u8(table, j * (32 as i64)) as *BlockNameEntry;
+        if (*e).name_hash == h && (*e).name_len == name_len {
+            return (*e).count;
+        }
+        j = j + (1 as i64);
+    }
+    return 0 as i64;
 }
 
 // cg_is_digit(c: i32) -> i32 — 1 if c 是 '0'-'9',else 0
