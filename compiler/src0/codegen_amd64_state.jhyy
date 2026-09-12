@@ -377,6 +377,23 @@ fn cg_parse_int_from(text: *u8, len: i64, from: i64) -> i64 {
     return -(1 as i64);
 }
 
+// cg_find_byte(text: *u8, len: i64, c: i32, from: i64) -> i64
+// 扫 text[from..len] 里第一个 byte 等于 c,返回 offset (相对 text 起);不存在返 -1。
+// v2.11.4 (W-074.7 T4-b 真修):emit_binop src1/src2 parse 找 `,` 分隔符。
+fn cg_find_byte(text: *u8, len: i64, c: i32, from: i64) -> i64 {
+    if text == (0 as *u8) || from < (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut i: i64 = from;
+    while i < len {
+        if cg_byte_at(text, i) == c {
+            return i;
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
+
 // cg_streq_n(a: *u8, b: *u8, n: i64) -> i32
 // N 字节定长比较 (跟 memcmp 不同:不强求 NUL 终止,严格 N 截断)。
 // 返 1 if a[0..n) == b[0..n),else 0。任一为 NULL → 0。

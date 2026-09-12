@@ -896,8 +896,48 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
     // 注:cscope DOWN 不引 EXIT regression (preserves v2.11.2 3/5 EXIT match:
     // hello=42 / fib_renamed=40 / struct_val_pass=35)。Per
     // [[feedback_codegen_amd64_multifn]] scope DOWN 阈值 (< 200 LOC)。
-    let src1_id: i64 = 1 as i64;
-    let src2_id: i64 = 2 as i64;
+    // v2.11.4 (W-074.7 T4-b 真修): parse src2 from op_text。
+    // QBE IL binop 形式 (per ir.jhyy:_bin_tmp/_bin_int):
+    //   "%tD =qt op %tA, %tB" (src1 temp + src2 temp)
+    //   "%tD =qt op %tA, V"   (src1 temp + src2 imm literal,e.g. "sub %t1, 1")
+    // v2.11.3 baseline 错槽 (hardcode src2=%t2) 让 fib 的 "sub %t1, 1/2" 退化
+    // 成 "sub %t1, %t2" (=2) → fib(30)=32 而非 832040。
+    // 真修:找 op_text 里 `,` 分隔符,parse src2 (%tN 或 digit literal)。
+    let mut src2_is_imm: i32 = 0 as i32;
+    let mut src2_imm_val: i64 = 0 as i64;
+    let mut src2_id_parsed: i64 = -(1 as i64);
+    let mut src1_id_parsed: i64 = -(1 as i64);
+    let mut _comma_off: i64 = -(1 as i64);
+    if op_text != (0 as *u8) && op_text_len > (0 as i64) {
+        // v2.11.4 (W-074.7 T4-b 真修): src1 = op_text 里第 1 个 %tN (idx=0)。
+        src1_id_parsed = cg_parse_temp(op_text, op_text_len, 0 as i64);
+        _comma_off = cg_find_byte(op_text, op_text_len, 44 as i32, 0 as i64);
+        if _comma_off >= (0 as i64) {
+            let mut _si: i64 = _comma_off + (1 as i64);
+            while _si < op_text_len {
+                let _sc: i32 = cg_byte_at(op_text, _si);
+                if _sc == (32 as i32) || _sc == (9 as i32) {
+                    _si = _si + (1 as i64);
+                } else { break; }
+            }
+            if _si < op_text_len {
+                let _fc: i32 = cg_byte_at(op_text, _si);
+                if _fc == (37 as i32) {
+                    // "%tN" → op_text 是 "sub %tA, %tB",无 LHS prefix。
+                    // idx=1 = 第 2 个 %tN = src2。
+                    let _parsed: i64 = cg_parse_temp(op_text, op_text_len, 1 as i64);
+                    if _parsed >= (0 as i64) { src2_id_parsed = _parsed; }
+                } else {
+                    if cg_is_digit(_fc) != (0 as i32) {
+                        src2_is_imm = 1 as i32;
+                        src2_imm_val = cg_parse_int_from(op_text, op_text_len, _si);
+                    }
+                }
+            }
+        }
+    }
+    let src1_id: i64 = if src1_id_parsed >= (0 as i64) { src1_id_parsed } else { 1 as i64 };
+    let src2_id: i64 = if src2_id_parsed >= (0 as i64) { src2_id_parsed } else { 2 as i64 };
     let src1_off = cg_offset_for_temp_with_target(src1_id, target_tag);
     let src2_off = cg_offset_for_temp_with_target(src2_id, target_tag);
 
@@ -950,26 +990,46 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         let _b1 = sb_append_cstr(arena, s, "\tsub" as *u8);
         let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
         let _b2 = sb_append_cstr(arena, s, " " as *u8);
-        let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
-        let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        }
         let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
     } else if is_mul != (0 as i32) {
         // mul 走 "imull" / "imulq"(signed mul)
         let _b1 = sb_append_cstr(arena, s, "\timul" as *u8);
         let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
         let _b2 = sb_append_cstr(arena, s, " " as *u8);
-        let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
-        let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        }
         let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
     } else if is_div != (0 as i32) {
         // div 走 "idivl" / "idivq"(signed div; %rax = quotient, %rdx = rem)
         let _b1 = sb_append_cstr(arena, s, "\tidiv" as *u8);
         let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
         let _b2 = sb_append_cstr(arena, s, " " as *u8);
-        let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b3n = sb_append_cstr(arena, s, "\n" as *u8);
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+        }
     } else if is_mod != (0 as i32) {
         // mod 走 cdq/cqo sign-extend + idivl/idivq,余数在 %rdx
         // sign-extend %rax → %rdx:%rax(per QBE Osign cqto/cltd)
@@ -985,8 +1045,14 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
             let _b1s = sb_append_cstr(arena, s, "l" as *u8);
         }
         let _b2 = sb_append_cstr(arena, s, " " as *u8);
-        let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b3n = sb_append_cstr(arena, s, "\n" as *u8);
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+        }
         // mod result 存 %rdx — 把它移到 %rax 让后续 mov %rax 存栈正确
         let _mrm1 = sb_append_cstr(arena, s, "\tmovq %rdx, %rax\n" as *u8);
     } else if is_cslt != (0 as i32) || is_csgt != (0 as i32) || is_csle != (0 as i32) || is_csge != (0 as i32) || is_ceq != (0 as i32) || is_cnew != (0 as i32) {
@@ -1001,9 +1067,16 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         let _c1 = sb_append_cstr(arena, s, "\tcmp" as *u8);
         let _c1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
         let _c2 = sb_append_cstr(arena, s, " " as *u8);
-        let _c3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
-        let _c4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
-        let _c5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        if src2_is_imm != (0 as i32) {
+            let _c3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _c3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _c4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _c5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        } else {
+            let _c3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _c4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+            let _c5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        }
         let _c6 = sb_append_cstr(arena, s, "\n" as *u8);
         let _s1 = sb_append_cstr(arena, s, "\tset" as *u8);
         let _s2 = sb_append_cstr(arena, s, cc);
@@ -1014,9 +1087,16 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         let _b1 = sb_append_cstr(arena, s, "\tadd" as *u8);
         let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
         let _b2 = sb_append_cstr(arena, s, " " as *u8);
-        let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
-        let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        }
         let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
     }
 
