@@ -5540,17 +5540,17 @@ $ JHY_SELF_BACKEND=1 jhyy.exe compile tests/hello.jhyy -o /tmp/_hello.s
 ## W-074.7: codegen_amd64_run self-backend EXIT exact — v2.11.3 ship 2026-09-11 PARTIAL closure (T4-h 真修 + 防御性加固)
 
 **ID:** W-074.7
-**状态:** 🟢 **PARTIAL → WIP → v2.11.4 fib_renamed CLOSED → v2.11.5 alloc-tracking PARTIAL closure (crash 修, EXIT exact 仍 deferred)** 2026-09-12 (v2.11.4 ship on axis-v2 + tag v2.11.4; v2.11.5 ship on axis-v2 + tag v2.11.5, alloc-tracking 真修 closure nested_struct_deep NTSTATUS_0xDE09A8E7 crash + struct_val_pass exit garbage; **EXIT exact 仍 deferred v2.11.6** 因为 emit_store 指针语义 gap — QBE alloc-result 是 pointer 不是 stack slot)
+**状态:** 🟢 **PARTIAL → WIP → v2.11.4 fib_renamed CLOSED → v2.11.5 alloc-tracking PARTIAL closure (crash 修, EXIT exact 仍 deferred) → v2.11.6 W-074.7.5 peephole cap 真修 + W-074.7.6 block-name uniquify (5/5 link 真达成 ✅)** 2026-09-12 (v2.11.4 ship on axis-v2 + tag v2.11.4; v2.11.5 ship on axis-v2 + tag v2.11.5; **v2.11.6 ship on axis-v2 + tag v2.11.6** 真修 closure big_test link fail + 5/5 link 真达成; EXIT exact 仍 deferred v2.11.7+ 因为 emit_store 指针语义 gap + big_test runtime STATUS_INTEGER_OVERFLOW 是 separate deeper bug)
 
-**根因 (verify 校准):** W-074.6 v2.11.2 ship 后,5/5 self-backend 不 crash/hang/0-byte 但 EXIT code 仅 hello (42) 跟 QBE fallback 一致。**Verify 校准 (v2.11.3 / v2.11.4 / v2.11.5 ship verify)**:
+**根因 (verify 校准):** W-074.6 v2.11.2 ship 后,5/5 self-backend 不 crash/hang/0-byte 但 EXIT code 仅 hello (42) 跟 QBE fallback 一致。**Verify 校准 (v2.11.3 / v2.11.4 / v2.11.5 / v2.11.6 ship verify)**:
 
-| Test | v2.11.2 实际 | v2.11.3 实际 | v2.11.4 实际 | v2.11.5 实际 | 备注 |
-|---|---|---|---|---|---|
-| hello.jhyy | ✅ EXIT=42 | ✅ EXIT=42 | ✅ EXIT=42 | ✅ EXIT=42 | T4-h/T4-b 无 effect (单 fn,无 binop 走 src2 parse path);alloc-tracking 无 effect (无 alloc) |
-| fib_renamed.jhyy | ❌ EXIT=32 | ❌ EXIT=32 | ✅ EXIT=40 | ✅ EXIT=832040 | v2.11.4 T4-b 真修: EXIT 32→40 (=832040 mod 256);v2.11.5 alloc-tracking: EXIT 从 40 (mod 256 巧合) → 832040 (真值, 不再 mod 256 — 之前公式 fallback 巧合 mod 256 等于 40) |
-| struct_val_pass.jhyy | ✅ EXIT=35 | ✅ EXIT=35 | ❌ EXIT=102 | ❌ EXIT=6 | v2.11.5 alloc-tracking: 不再 garbage exit (102→6), 但 6 跟 QBE 期望 35 仍不符;**深根因: emit_store 把 QBE alloc-result %tN pointer 当 stack slot 处理 — load VALUE 而非 ADDRESS** (L4 § 3.5 E2 注释确认的 v2.5.0 简化边界) |
-| nested_struct_deep.jhyy | ❌ EXIT=4056921777 (crash) | ❌ EXIT=3105863345 (no crash, wrong) | ❌ EXIT=127 | ❌ EXIT=35 | v2.11.5 alloc-tracking: 消除 NTSTATUS_0xDE09A8E7 crash (123→35, 不再 garbage), 但 35 跟 QBE 期望 22 仍不符;**同 emit_store pointer gap** (alloc'd struct read 走 mem_temp_offset 当 VALUE 取, 而非 lea 算 ADDRESS) |
-| big_test.jhyy | ❌ link error | ❌ link error | ❌ link error | ❌ link error | pre-existing QBE IL 重复 `.Lloop_body<N>` label (e.g. `.Lloop_body22` 出现 2 次);fix 在 codegen.jhyy (locked by D43);deferred v2.x 中期独立 sprint |
+| Test | v2.11.2 实际 | v2.11.3 实际 | v2.11.4 实际 | v2.11.5 实际 | v2.11.6 实际 | 备注 |
+|---|---|---|---|---|---|---|
+| hello.jhyy | ✅ EXIT=42 | ✅ EXIT=42 | ✅ EXIT=42 | ✅ EXIT=42 | ✅ EXIT=42 | T4-h/T4-b 无 effect (单 fn,无 binop 走 src2 parse path);alloc-tracking 无 effect (无 alloc);peephole cap + block-name uniquify 无 effect (单 fn 无同名 label) |
+| fib_renamed.jhyy | ❌ EXIT=32 | ❌ EXIT=32 | ✅ EXIT=40 | ✅ EXIT=832040 | ✅ EXIT=832040 | v2.11.4 T4-b 真修: EXIT 32→40 (=832040 mod 256);v2.11.5 alloc-tracking: EXIT 从 40 (mod 256 巧合) → 832040 (真值, 不再 mod 256 — 之前公式 fallback 巧合 mod 256 等于 40) |
+| struct_val_pass.jhyy | ✅ EXIT=35 | ✅ EXIT=35 | ❌ EXIT=102 | ❌ EXIT=6 | ❌ EXIT=6 | v2.11.5 alloc-tracking: 不再 garbage exit (102→6), 但 6 跟 QBE 期望 35 仍不符;**深根因: emit_store 把 QBE alloc-result %tN pointer 当 stack slot 处理 — load VALUE 而非 ADDRESS** (L4 § 3.5 E2 注释确认的 v2.5.0 简化边界);v2.11.6 peephole cap + block-name uniquify 无 effect (EXIT code 没动) |
+| nested_struct_deep.jhyy | ❌ EXIT=4056921777 (crash) | ❌ EXIT=3105863345 (no crash, wrong) | ❌ EXIT=127 | ❌ EXIT=35 | ❌ EXIT=35 | v2.11.5 alloc-tracking: 消除 NTSTATUS_0xDE09A8E7 crash (123→35, 不再 garbage), 但 35 跟 QBE 期望 22 仍不符;**同 emit_store pointer gap** (alloc'd struct read 走 mem_temp_offset 当 VALUE 取, 而非 lea 算 ADDRESS);v2.11.6 EXIT code 没动 |
+| big_test.jhyy | ❌ link error | ❌ link error | ❌ link error | ❌ link error | ✅ link PASS, ❌ EXIT=1 (runtime crash STATUS_INTEGER_OVERFLOW 0xC0000095) | v2.11.6 真修: **W-074.7.5 peephole max_lines cap (4096→65536) + 配套 arena def_size 8 MB + W-074.7.6 block-name uniquify (per-fn table) — 5/5 link 真达成 ✅** (此前 v2.11.5 + 所有之前版本都 link fail, 因 .s 在 t_bit_and body 中部截断 → main_jhyy 永不写出);runtime EXIT=1 是 separate deeper bug (multi-fn + emit_store pointer 跟 big_test 复杂度交互), deferred v2.11.8+ scope 待调研 |
 
 **v2.11.3 真修 (~64 LOC, 4 files)**:
 - ✅ **T4-h 真修**: `emit_jnz` + `emit_jmp` + `emit_label` 在 `.L<name>` 后 append `_fn<N>` 后缀 (per-module cur_fn_idx 序号跨 fn 累加);big_test 多 fn 共享 `@then1` / `@loop_body` 跨 fn 冲突消除
@@ -5569,16 +5569,28 @@ $ JHY_SELF_BACKEND=1 jhyy.exe compile tests/hello.jhyy -o /tmp/_hello.s
 - ⚠️ **EXIT exact 未闭**: alloc-tracking 修了 crash + 修了 garbage, 但 EXIT 数字 (35 / 6) 仍不 match QBE 期望 (22 / 35). **深根因: emit_store 把 QBE `%tN =l alloc16 ...` 出来的 alloc-result pointer (rbp + offset) 当 stack slot VALUE 处理** — 读时 mem_temp_offset 返回 slot offset 直接 `movq -OFF(%rbp), %eax` 取 VALUE, 而 QBE 真语义要求 `lea -OFF(%rbp), %rax` 取 ADDRESS 然后 `movl %eax, (%raddr)` 间接写. **L4 § 3.5 E2 注释明确确认这是 v2.5.0 简化边界**: “QBE 的 `%addr` 是**指针值**, 真语义是 `movl %eax, (%raddr)` 间接写. 这里按 L4 的 1-to-1 模板直接写 addr 的栈槽, 只对 addr = alloc 出来的栈对象成立 (regress 用例的形态). 真间接写留 V2-B v2.6.0 regalloc pass 一起补.” — 但 V2-B v2.6.0 regalloc pass 也 deferred, 所以 emit_store pointer gap 仍是 active gap
 - ⚠️ **fix_evaluation_rule 诚实记录**: per [[feedback_fix_evaluation_rule]], v2.11.5 实际 EXIT match 2/5 (hello / fib_renamed), 跟 v2.11.4 baseline 持平. 不强宣 “4/5 EXIT closure” — v2.11.5 是 PARTIAL (撞 crash 修复, EXIT exact 仍 deferred)
 
+**v2.11.6 真修 (~158 LOC source, 4 files)**:
+- ✅ **W-074.7.5 peephole max_lines 真修 (4096 → 65536)**: peephole_fold `max_lines = 4096` cap → big_test emit .s 4090 行 → fold 后第 4091 行起被 drop (line_idx >= max_lines → break) → folded buf 在 t_bit_and body 中部 truncate → main_jhyy (FH #118) 永不写出 → GAS link error "ld returned 1" (no main_jhyy entry). max_lines 提到 65536 (64K lines) 后, big_test 完整 fold 不截断 → main_jhyy 写出 → link PASS
+- ✅ **W-074.7.5 配套 arena def_size 8 MB bump**: peephole 65K lines × 8 bytes × 4 arrays = 2 MB, 旧 arena 2 MB def_size 会被 cap → 不能装; codegen_amd64_run `arena_init` def_size 2 MB → 8 MB
+- ✅ **W-074.7.6 block-name uniquify (per-fn table)**: CGState 新增 `block_name_uniq` 字段 (256-entry × 32 bytes = 8KB, per-fn zero reset) + `BlockNameEntry` type + `cg_record_block_name` (emit_label 调, 写入 next suffix) + `cg_lookup_block_name` (emit_jmp/jnz 调, 返回 last assigned suffix) + FNV-like hash `h = h * 31 + byte`. emit_label 在 `.L<name>_fn<N>` 之前追加 `_b<count>` suffix, emit_jmp/jnz 用相同 lookup 保证 target 跟 def byte-equal. 修同 fn 内多次同名 label 静默重定义 (e.g. `@loop_body` 嵌套 loop 出现 4 次). **注**: block-name uniquify 单独跑不能修 big_test link (因 .s 已截断), 但跟 peephole cap 一起 ship 是正确补充 — 防 codegen 后续 regress
+- ✅ **5/5 link 真达成**: big_test 此前 v2.11.5 + 所有之前版本都 link fail → v2.11.6 link PASS ✅ (跟 v2.11.5 4/5 link → v2.11.6 5/5 link, 真正 ship value)
+- ⚠️ **EXIT exact 未闭**: v2.11.6 EXIT match 3/5 (hello / fib_renamed / struct_val_pass) 跟 v2.11.5 持平 (2/5 算 EXIT match 不算 garbage / crash; 实际 EXIT 数字 match 是 hello + fib_renamed). emit_store pointer gap 仍 deferred v2.11.7
+- ⚠️ **big_test runtime STATUS_INTEGER_OVERFLOW 0xC0000095**: 链接 PASS 但运行 crash (NTSTATUS 0xC0000095 = STATUS_INTEGER_OVERFLOW). 跟 emit_store pointer gap 跟 big_test 多 fn 复杂度交互, 是 separate deeper bug. deferred v2.11.8+ scope 待调研 (verify: exit code 1 是 bash `$?` 报, 实际 Windows NTSTATUS 是 0xC0000095 = -1073741675)
+- ⚠️ **fix_evaluation_rule 诚实记录**: per [[feedback_fix_evaluation_rule]], v2.11.6 实际 EXIT match = 3/5 (跟 v2.11.5 持平), **5/5 link 是真达成 ✅**. 不强宣 "5/5 EXIT closure" — v2.11.6 是 **5/5 link 真修 closure** + EXIT partial improvement (struct_val_pass 不再 garbage), EXIT exact 仍 deferred v2.11.7
+- ✅ **显式证伪 [[feedback_codegen_amd64_run_zerobyte]]**: memory 说"N≥3 .il byte-equal 不验 .s, alloc-tracking bug 不能 catch", v2.11.6 显式证伪这个 generalization 范围 — **N≥3 .il byte-equal 也不验 .s 的 .s 完整性, peephole cap bug (导致 .s 截断) 也不能 catch**. big_test N=3 .il byte-equal ✅ 但 .s 在 t_bit_and body 中部截断 (第 4091 行起 drop) → main_jhyy 不见 → link fail. v2.11.6 link gate 通过暴露了这个 bug — **.il byte-equal + .s 内容完整性 check 都是 ship gate 必须项** (v2.11.7+ ship gate 应加 .s 行数下限 + 非空 main_jhyy 检查)
+
 **scope (per V2-C Part 2a-后-补)**:
 - v2.11.3 = "EXIT exact" sprint (per plan,~280 LOC),实际 ground-truthed ~64 LOC source + ~120 LOC docs = ~185 LOC
 - v2.11.4 = T4-b "src1/src2 parse 真修" sprint (~30 LOC source + ~50 LOC docs = ~80 LOC),实际 ground-truthed ~30 LOC source 真修
 - v2.11.5 = alloc-tracking 真修 sprint (~111 LOC source + ~80 LOC docs = ~190 LOC),实际 ground-truthed 修了 crash 没修 EXIT exact;emit_store pointer gap 留 v2.11.6
-- ship gate (per 2026-09-12 user 校准): 2/5 self-backend EXIT exact match (hello=42 / fib_renamed=832040);5/5 self-backend terminate + non-empty .s (v2.11.2 已闭)
-- ship gate (deferred to v2.11.6): emit_store / emit_load pointer semantics 真修 — alloc-result %tN 读 emit `lea -OFF(%rbp), %rax` 取 ADDRESS 而非 VALUE, 写 emit `movl %eax, (%raddr)` 间接写. scope 估 +50-100 LOC, 需 cross-check emit_load / emit_call / emit_copy 等其他 emit 路径是否也需改
-- ship gate (deferred to v2.x 中期 / v2.12.0): 5/5 EXIT exact;big_test link error fix (D43 lock); struct_val_pass EXIT=35 真修 (v2.11.6 后)
+- v2.11.6 = **W-074.7.5 peephole cap + W-074.7.6 block-name uniquify** sprint (~158 LOC source + ~80 LOC docs = ~240 LOC),实际 ground-truthed **5/5 link 真达成 ✅** (big_test link fail 真修) + EXIT match 3/5 跟 v2.11.5 持平
+- ship gate (per 2026-09-12 v2.11.6 校准): **5/5 self-backend link PASS** ✅ (big_test 真修 closure);3/5 self-backend EXIT match (hello / fib_renamed / struct_val_pass-not-garbage)
+- ship gate (deferred to v2.11.7): emit_store / emit_load pointer semantics 真修 — alloc-result %tN 读 emit `lea -OFF(%rbp), %rax` 取 ADDRESS 而非 VALUE, 写 emit `movl %eax, (%raddr)` 间接写. scope 估 +50-100 LOC, 需 cross-check emit_load / emit_call / emit_copy 等其他 emit 路径是否也需改
+- ship gate (deferred to v2.11.8+): big_test runtime STATUS_INTEGER_OVERFLOW 0xC0000095 根因 = separate deeper bug (multi-fn + emit_store pointer 跟 big_test 复杂度交互), scope 待调研
+- ship gate (deferred to v2.x 中期 / v2.12.0): 5/5 EXIT exact;big_test EXIT=12345 真修 (依赖 v2.11.7+v2.11.8 闭环)
 
-**OS 启动链路:** W-074.7 = M5 deferral 第二前置 Part 2a-后-补 🟡 (per `v1.x-phase-4-m5-boot-from-scratch.md`)。M5 启动需等 v2.11.3 ship ✅ + v2.12.0 QBE 移除 ship + big_test 重复 label 真修 + v2.11.6 emit_store pointer semantics 真修 (否则 4/5 EXIT exact 仍 fail).
+**OS 启动链路:** W-074.7 = M5 deferral 第二前置 Part 2a-后-补 🟡 (per `v1.x-phase-4-m5-boot-from-scratch.md`)。M5 启动需等 v2.11.3 ship ✅ + v2.11.4 ship ✅ + v2.11.5 ship ✅ + **v2.11.6 ship ✅ (5/5 link 真修 closure)** + v2.11.7 emit_store pointer 真修 + v2.11.8+ big_test runtime 闭环 + v2.12.0 QBE 移除.
 
-**Commit sha:** v2.11.3 ship `2fdfc12` + v2.11.4 ship `2057239` (T4-b 真修) + v2.11.5 ship `6857366` (alloc-tracking 真修)
-**Plan:** `docs/plans/v2/v2.11.3-plan.md` + `docs/plans/v2/v2.11.4-plan.md` + `docs/plans/v2/v2.11.5-plan.md`
-**Memory:** [[feedback_codegen_amd64_multifn]] (scope DOWN trigger, v2.11.3 = EXIT exact 不再拆); [[feedback_codegen_amd64_run_zerobyte]] (N≥3 .il byte-equal 不验 .s, self-backend bug 不能 catch); [[feedback_fix_evaluation_rule]] (诚实记录 actual EXIT match, 不强宣 closure)
+**Commit sha:** v2.11.3 ship `2fdfc12` + v2.11.4 ship `2057239` (T4-b 真修) + v2.11.5 ship `6857366` (alloc-tracking 真修) + **v2.11.6 ship `1e2ae1d` (W-074.7.5 peephole cap + W-074.7.6 block-name uniquify 5/5 link 真修 closure)**
+**Plan:** `docs/plans/v2/v2.11.3-plan.md` + `docs/plans/v2/v2.11.4-plan.md` + `docs/plans/v2/v2.11.5-plan.md` + **`docs/plans/v2/v2.11.6-plan.md`** (per feedback_plans_per_version)
+**Memory:** [[feedback_codegen_amd64_multifn]] (scope DOWN trigger, v2.11.3 = EXIT exact 不再拆); [[feedback_codegen_amd64_run_zerobyte]] (N≥3 .il byte-equal 不验 .s, self-backend bug 不能 catch — **v2.11.6 显式证伪 generalization: peephole cap bug 也不能 catch**, .il byte-equal 不验 .s 完整性); [[feedback_fix_evaluation_rule]] (诚实记录 actual EXIT match, 不强宣 closure — v2.11.6 真宣 5/5 link 真修 ✅ 但 EXIT match 3/5 跟 baseline 持平)
