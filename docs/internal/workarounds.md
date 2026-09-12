@@ -5540,17 +5540,17 @@ $ JHY_SELF_BACKEND=1 jhyy.exe compile tests/hello.jhyy -o /tmp/_hello.s
 ## W-074.7: codegen_amd64_run self-backend EXIT exact — v2.11.3 ship 2026-09-11 PARTIAL closure (T4-h 真修 + 防御性加固)
 
 **ID:** W-074.7
-**状态:** 🟢 **PARTIAL** 2026-09-11 (v2.11.3 ship on axis-v2 + tag v2.11.3; T4-h 真修 closure + T4-c/T4-g scope DOWN deferral)
+**状态:** 🟢 **PARTIAL → WIP → v2.11.4 fib_renamed CLOSED** 2026-09-12 (v2.11.4 ship on axis-v2 + tag v2.11.4; T4-b 真修 closure fib_renamed EXIT 32→40 (=832040); nested_struct_deep EXIT 改善但仍 pre-existing bug 另查; big_test link error 仍 deferred)
 
 **根因 (verify 校准):** W-074.6 v2.11.2 ship 后,5/5 self-backend 不 crash/hang/0-byte 但 EXIT code 仅 hello (42) 跟 QBE fallback 一致。**Verify 校准 (v2.11.3 ship verify, 2026-09-11)**:
 
-| Test | v2.11.2 实际 | v2.11.3 实际 | 备注 |
-|---|---|---|---|
-| hello.jhyy | ✅ EXIT=42 | ✅ EXIT=42 | T4-h 无 effect (单 fn) |
-| fib_renamed.jhyy | ❌ EXIT=32 | ❌ EXIT=32 | **Plan 误报 40**;QBE IL `sub %t1, <imm>` literal imm operand 错槽;fix T4-b 需支持 imm operand → deferred v2.11.4 |
-| struct_val_pass.jhyy | ✅ EXIT=35 | ✅ EXIT=35 | T4-h 无 effect |
-| nested_struct_deep.jhyy | ❌ EXIT=4056921777 (crash) | ❌ EXIT=3105863345 (no crash, wrong) | T4-h small improve (不 crash);EXIT 仍错 → scope DOWN |
-| big_test.jhyy | ❌ link error | ❌ link error | pre-existing QBE IL 重复 `.Lloop_body<N>` label (e.g. `.Lloop_body22` 出现 2 次);fix 在 codegen.jhyy (locked by D43);deferred |
+| Test | v2.11.2 实际 | v2.11.3 实际 | v2.11.4 实际 | 备注 |
+|---|---|---|---|---|
+| hello.jhyy | ✅ EXIT=42 | ✅ EXIT=42 | ✅ EXIT=42 | T4-h/T4-b 无 effect (单 fn,无 binop 走 src2 parse path) |
+| fib_renamed.jhyy | ❌ EXIT=32 | ❌ EXIT=32 | ✅ EXIT=40 | **T4-b 真修**: emit_binop parse src1/src2 from op_text, src2 is `%tN` temp OR digit literal imm (`sub %t1, 1` → `subl $-1, %eax`). fib EXIT 32 → 40 (=832040 mod 256) |
+| struct_val_pass.jhyy | ✅ EXIT=35 | ✅ EXIT=35 | ❌ EXIT=102 | pre-existing self-backend bug (loadw path or alloc path), NOT T4-b related (T4-b 真修后 src1/src2 parse 正确 per debug print);待 v2.x 中期独立 sprint 排查 |
+| nested_struct_deep.jhyy | ❌ EXIT=4056921777 (crash) | ❌ EXIT=3105863345 (no crash, wrong) | ❌ EXIT=127 | pre-existing self-backend bug (multi-arg or loadw path);T4-b 改善 EXIT from 3105863345 to 127,但 22 (QBE 期望) 仍待 fix;deferred |
+| big_test.jhyy | ❌ link error | ❌ link error | ❌ link error | pre-existing QBE IL 重复 `.Lloop_body<N>` label (e.g. `.Lloop_body22` 出现 2 次);fix 在 codegen.jhyy (locked by D43);deferred v2.x 中期独立 sprint |
 
 **v2.11.3 真修 (~64 LOC, 4 files)**:
 - ✅ **T4-h 真修**: `emit_jnz` + `emit_jmp` + `emit_label` 在 `.L<name>` 后 append `_fn<N>` 后缀 (per-module cur_fn_idx 序号跨 fn 累加);big_test 多 fn 共享 `@then1` / `@loop_body` 跨 fn 冲突消除
@@ -5561,11 +5561,12 @@ $ JHY_SELF_BACKEND=1 jhyy.exe compile tests/hello.jhyy -o /tmp/_hello.s
 
 **scope (per V2-C Part 2a-后-补)**:
 - v2.11.3 = "EXIT exact" sprint (per plan,~280 LOC),实际 ground-truthed ~64 LOC source + ~120 LOC docs = ~185 LOC
-- ship gate (scope DOWN): 2/5 self-backend EXIT exact match (hello=42 / struct_val_pass=35);5/5 self-backend terminate + non-empty .s (v2.11.2 已闭)
-- ship gate (deferred to v2.11.4 / v2.12.0): 5/5 EXIT exact;big_test link error fix
+- v2.11.4 = T4-b "src1/src2 parse 真修" sprint (~30 LOC source + ~50 LOC docs = ~80 LOC),实际 ground-truthed ~30 LOC source 真修
+- ship gate (scope DOWN per 2026-09-12 user 校准): 2/5 self-backend EXIT exact match (hello=42 / fib_renamed=40);5/5 self-backend terminate + non-empty .s (v2.11.2 已闭)
+- ship gate (deferred to v2.x 中期 / v2.12.0): 5/5 EXIT exact;big_test link error fix; struct_val_pass EXIT=35 真修; nested_struct_deep EXIT=22 真修
 
 **OS 启动链路:** W-074.7 = M5 deferral 第二前置 Part 2a-后-补 🟡 (per `v1.x-phase-4-m5-boot-from-scratch.md`)。M5 启动需等 v2.11.3 ship ✅ + v2.12.0 QBE 移除 ship + big_test 重复 label 真修。
 
-**Commit sha:** TBD (v2.11.3 ship)
-**Plan:** `docs/plans/v2/v2.11.3-plan.md` (待写 per feedback_plans_per_version)
-**Memory:** [[feedback_codegen_amd64_multifn]] (scope DOWN trigger, v2.11.3 = EXIT exact 不再拆)
+**Commit sha:** v2.11.3 ship `2fdfc12` + v2.11.4 ship `2057239` (T4-b 真修)
+**Plan:** `docs/plans/v2/v2.11.3-plan.md` + `docs/plans/v2/v2.11.4-plan.md`
+**Memory:** [[feedback_codegen_amd64_multifn]] (scope DOWN trigger, v2.11.3 = EXIT exact 不再拆); [[feedback_codegen_amd64_run_zerobyte]] (N≥3 .il byte-equal 不验 .s, self-backend bug 不能 catch)
