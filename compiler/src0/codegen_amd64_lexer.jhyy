@@ -1208,15 +1208,34 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         // starting with 'c'. QBE integer compare prefixes: 's' (signed) / 'u' (unsigned) /
         // 'e' (eq). Long/single/double variants 同 pattern with suffix 'l'/'s'/'d'.
         // Examples: csltw, cslew, csgtw, csgew, ceqw, cnew, cultw, culew, cugtw, cugew.
-        // Boundary: 5th char (idx 4) must be a QBE type suffix 'w'/'l'/'s'/'d'.
-        if n1 == (115 as i32) || n1 == (117 as i32) || n1 == (101 as i32) {
+        // v2.11.11 (T4-g 真修): 加上 'n' (110) 给 cnew prefix + stage 2 同时接受 n3 (4-char
+        // ceqw/cnew type suffix) OR n4 (5-char csltw/cultw type suffix). 之前 stage 1 漏 'n'
+        // → cnew reject → lex_il silent skip → big_test 65 个 4-char compare op (11 ceqw +
+        // 54 cnew) 全部 vanish → gcd Euclid loop cond check missing → b 累积到 0 →
+        // idivl SIGFPE (EXIT=127)。
+        if n1 == (115 as i32) || n1 == (117 as i32) || n1 == (101 as i32)
+            || n1 == (110 as i32) {  // 'n' for cnew (4-char)
             let n2 = lex_peek_byte_at(s, 2 as i64);
             let n3 = lex_peek_byte_at(s, 3 as i64);
             let n4 = lex_peek_byte_at(s, 4 as i64);
-            // QBE compare op: c + (s|u|e) + (lt|gt|le|ge|eq|ne) + (w|l|s|d)
-            // 简化:5th char 必须是 type suffix
+            // v2.11.11 (T4-g 真修 + codegen workaround): accept type suffix at idx 3
+            // (4-char ceqw/cnew) OR idx 4 (5-char csltw/cultw/...). 之前只查 n4 →
+            // 4-char op (ceqw n3='w', n4=' ') 直接 reject → silent skip。
+            // 注意:不能用 `(n3 OR ...) || (n4 OR ...)` 嵌套 OR — codegen short-circuit OR
+            // workaround (codegen.jhyy:2060-2101) 有 bug: right_node 含 nested OR 时,eval_b
+            // cur_block 会被 nested OR 推到 inner merge, phi predecessor 仍指向 @sc_eval_start
+            // → QBE "predecessors not matched in phi"。改 2 个独立 if 设 flag + 最终 if check
+            // (flat 4-OR,eval single block,跟 v2.11.10 n4 check 同样 pattern)。
+            let mut has_type_suffix: i32 = 0 as i32;
+            if n3 == (119 as i32) || n3 == (108 as i32)
+                || n3 == (115 as i32) || n3 == (100 as i32) {
+                has_type_suffix = 1 as i32;
+            }
             if n4 == (119 as i32) || n4 == (108 as i32)
                 || n4 == (115 as i32) || n4 == (100 as i32) {
+                has_type_suffix = 1 as i32;
+            }
+            if has_type_suffix == (1 as i32) {
                 // consume 5 chars total (dispatcher 不 consume,这里全 consume)
                 let mut j: i64 = 0 as i64;
                 while j < (5 as i64) {
@@ -1237,6 +1256,10 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                 } else if n1 == (101 as i32) {
                     if n2 == (113 as i32) { op_str = "ceqw" as *u8; }
                     else if n2 == (110 as i32) { op_str = "cnew" as *u8; }
+                } else if n1 == (110 as i32) {
+                    // v2.11.11 (T4-g 真修): cnew branch。op_str 是 dead store (emit_binop 用
+                    // cg_find_sub 二次 scan tok.text 拿 op name),但为 consistency 加上。
+                    if n2 == (101 as i32) { op_str = "cnew" as *u8; }
                 } else {
                     if n2 == (108 as i32) && n3 == (116 as i32) { op_str = "csltw" as *u8; }
                     else if n2 == (108 as i32) && n3 == (101 as i32) { op_str = "cslew" as *u8; }
