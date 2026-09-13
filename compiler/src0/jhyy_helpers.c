@@ -643,6 +643,40 @@ __attribute__((used)) int jh_cgstate_set_temp_slots(void *arr) {
     return 0;
 }
 
+/* v2.11.8 (W-074.7.8 derived-address tracking 真修): jh_cgstate_get_holds_address /
+   jh_cgstate_set_holds_address — same pattern as temp_slots above; C-side static
+   holds 256-entry u8 bitmap (parallel to temp_slot_for_id i64 array, but 1 byte/entry)。
+   emit_alloc / emit_binop (add/sub on address-holder src1) / emit_copy (TEMP→TEMP of
+   address-holder) 写 flag; emit_load/store/loadsub 读 flag 决定 indirect
+   (mov<size> (%r8), %reg) vs slot (mov<size> -<off>(%rbp), %reg) dispatch。
+   BSS-zero init; query goes through (*s).temp_holds_address in state.jhyy (hot path);
+   setter is forward-ref-safe no-op kept for API consistency with temp_slots. */
+static void *g_jh_cgstate_holds_address = (void *)0;
+__attribute__((used)) void *jh_cgstate_get_holds_address(void) {
+    return g_jh_cgstate_holds_address;
+}
+__attribute__((used)) int jh_cgstate_set_holds_address(void *bitmap) {
+    /* unused — state.jhyy reads (*s).temp_holds_address directly via jh_cgstate_get_holds_address */
+    g_jh_cgstate_holds_address = bitmap;
+    return 0;
+}
+
+/* v2.11.8 (W-074.7.8 derived-address tracking 真修): jh_cgstate_set_holds_flag /
+   jh_cgstate_get_holds_flag — byte-level access into the 256-entry u8 bitmap。
+   cg_record_temp_holds_address / cg_is_address_holder (state.jhyy) 调这两个,
+   因为 jhyy 没有 u8 direct deref 语法 (*(u8*)p = 1 不支持),走 C-bridge。 */
+__attribute__((used)) int jh_cgstate_set_holds_flag(void *bitmap, long long idx) {
+    if (bitmap == NULL) return -1;
+    if (idx < 0 || idx >= 256) return -1;
+    ((unsigned char *)bitmap)[idx] = 1;
+    return 0;
+}
+__attribute__((used)) int jh_cgstate_get_holds_flag(void *bitmap, long long idx) {
+    if (bitmap == NULL) return 0;
+    if (idx < 0 || idx >= 256) return 0;
+    return ((unsigned char *)bitmap)[idx] != 0 ? 1 : 0;
+}
+
 /* v2.6.0: jh_read_file — read entire file into caller-provided buffer.
    Returns:
      0  on success (*out_len set to file size)

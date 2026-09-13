@@ -153,6 +153,18 @@ type CGState = struct {
     // 在 cg_state_init。reset_for_function 把 table zero (per-fn 隔离,同 fn 内
     // 多次同名 label 才 uniquify;跨 fn label 由 _fn<N> suffix 区分)。
     block_name_uniq: *u8,
+
+    // v2.11.8 (W-074.7.8 derived-address tracking 真修 — FULL scope):bitmap 标
+    // 任何 temp holding derived address (alloc-result, binop add/sub pointer-arith
+    // 结果, copy of address-holder)。emit_load/store/loadsub 看 flag 决定 indirect
+    // (mov<size> (%r8), %reg) vs slot (mov<size> -<off>(%rbp), %reg)。
+    // 256 entries × 1 byte = 256 bytes per compile, negligible。emit_alloc /
+    // emit_binop / emit_copy 写 flag; reset_for_function per-fn zero。
+    // v2.11.7 attempt (commit reverted 11a7666) flag-named `temp_is_alloc_pointer`
+    // 跟当前 `temp_holds_address` 是不同概念: 前者只 flag alloc-result (1 种
+    // address-holder), 后者 flag 任何 derived address (真根因 = `add ptr, off`
+    // 产生的 runtime address, 不只 alloc-result)。
+    temp_holds_address: *u8,
 }
 
 // v2.11.5 (W-074.7 alloc-tracking 真修): extern bridge 装当前 CGState 的
@@ -161,6 +173,15 @@ type CGState = struct {
 // per codegen_amd64_regalloc.jhyy:76-87 注释。
 extern fn jh_cgstate_get_temp_slots() -> *u8;
 extern fn jh_cgstate_set_temp_slots(p: *u8) -> i32;
+
+// v2.11.8 (W-074.7.8 derived-address tracking 真修): same pattern for
+// temp_holds_address bitmap。query 走 (*s).temp_holds_address 直接读 (hot path),
+// setter 是 forward-ref-safe no-op (跟 jh_cgstate_set_temp_slots 同 pattern)。
+extern fn jh_cgstate_get_holds_address() -> *u8;
+extern fn jh_cgstate_set_holds_address(p: *u8) -> i32;
+// v2.11.8: byte-level access into 256-entry u8 bitmap (jhyy 没有 u8 direct deref)。
+extern fn jh_cgstate_set_holds_flag(bitmap: *u8, idx: i64) -> i32;
+extern fn jh_cgstate_get_holds_flag(bitmap: *u8, idx: i64) -> i32;
 
 // MAX_TEMP_SLOTS — alloc-tracking 数组大小。256 = 5x regress max (51) safety
 // margin。Out-of-bounds temp_id 走 formula fallback (graceful degradation)。
@@ -191,6 +212,49 @@ fn cg_record_temp_slot(state: *u8, temp_id: i64, slot: i64) -> i32 {
     let p = ptr_add_u8((*s).temp_slot_for_id, temp_id * (8 as i64)) as *i64;
     *p = slot;
     return 0 as i32;
+}
+
+// MAX_TEMP_HOLDS_ADDR — derived-address bitmap 大小。跟 MAX_TEMP_SLOTS 同 256
+// (parallel bitmap, same temp_id range)。256 = 5x regress max safety margin。
+fn cg_max_temp_holds_address() -> i64 {
+    return 256 as i64;
+}
+
+// cg_state_set_holds_address — v2.11.8 setter,CGState 装 temp_holds_address 时
+// 调,跟 cg_state_set_temp_slots 同 pattern (forward-ref-safe no-op)。
+fn cg_state_set_holds_address(state: *u8) -> i32 {
+    let s = state as *CGState;
+    let _ = jh_cgstate_set_holds_address((*s).temp_holds_address);
+    return 0 as i32;
+}
+
+// cg_record_temp_holds_address — v2.11.8 setter,flag temp_id 是 address-holder
+// (持有 derived address, 不是 VALUE)。emit_alloc / emit_binop (add/sub) / emit_copy
+// 调。bounds check: t < 256, 否则 no-op。
+fn cg_record_temp_holds_address(state: *u8, temp_id: i64) -> i32 {
+    if temp_id < (0 as i64) || temp_id >= cg_max_temp_holds_address() {
+        return 0 as i32;
+    }
+    let s = state as *CGState;
+    if (*s).temp_holds_address == (0 as *u8) {
+        return 0 as i32;
+    }
+    let _r = jh_cgstate_set_holds_flag((*s).temp_holds_address, temp_id);
+    return 0 as i32;
+}
+
+// cg_is_address_holder — v2.11.8 query,emit_load/store/loadsub 调决定 indirect
+// vs slot dispatch。1 = address-holder, 0 = value-temp (default; out-of-bounds 也 0)。
+fn cg_is_address_holder(state: *u8, temp_id: i64) -> i32 {
+    if temp_id < (0 as i64) || temp_id >= cg_max_temp_holds_address() {
+        return 0 as i32;
+    }
+    let s = state as *CGState;
+    if (*s).temp_holds_address == (0 as *u8) {
+        return 0 as i32;
+    }
+    let r = jh_cgstate_get_holds_flag((*s).temp_holds_address, temp_id);
+    return r;
 }
 
 // CGState 初始化 helper
@@ -236,6 +300,19 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     let bnu_ptr = arena_alloc(arena, bnu_bytes);
     let _zero_bnu = memset(bnu_ptr, 0 as i32, bnu_bytes);
     (*s).block_name_uniq = bnu_ptr;
+    // v2.11.8 (W-074.7.8 derived-address tracking 真修):alloc temp_holds_address
+    // 256-entry u8 bitmap (256 bytes) zero-init。emit_alloc / emit_binop (add/sub
+    // on address-holder src1) / emit_copy (TEMP→TEMP of address-holder) 写 flag;
+    // emit_load/store/loadsub 读 flag 决定 indirect (mov<size> (%r8), %reg) vs
+    // slot (mov<size> -<off>(%rbp), %reg)。reset_for_function per-fn zero。
+    // 256 entries × 1 byte = 256 bytes per compile, negligible in arena。
+    let ha_bytes = 256 as i64;
+    let ha_ptr = arena_alloc(arena, ha_bytes);
+    let _zero_ha = memset(ha_ptr, 0 as i32, ha_bytes);
+    (*s).temp_holds_address = ha_ptr;
+    // wire C-side static (跟 cg_state_set_temp_slots 同 pattern; setter 是
+    // forward-ref-safe no-op, query 走 (*s).temp_holds_address 直接读)
+    let _wr_ha = cg_state_set_holds_address(state);
     return 0;
 }
 
@@ -270,6 +347,15 @@ fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
     if (*s).block_name_uniq != (0 as *u8) {
         let bnu_bytes2 = (256 as i64) * (32 as i64);
         let _zr_bnu = memset((*s).block_name_uniq, 0 as i32, bnu_bytes2);
+    }
+    // v2.11.8 (W-074.7.8 derived-address tracking 真修):zero temp_holds_address
+    // bitmap per-fn。fn A 的 t17 是 alloc-result address-holder, fn B 的 t17
+    // 可能是 value-temp — 跨 fn flag 不 inherit。memset 0 让 emit_load/store/loadsub
+    // 在新 fn 头 fall through default slot path,直到 emit_alloc / emit_binop / emit_copy
+    // 重新写 flag。
+    if (*s).temp_holds_address != (0 as *u8) {
+        let ha_bytes2 = 256 as i64;
+        let _zr_ha = memset((*s).temp_holds_address, 0 as i32, ha_bytes2);
     }
     // cur_fn_idx NOT reset — it grows across functions within a module
     // (per-module accumulator, inited to 0 in cg_state_init)。reset 让它归 0 会让

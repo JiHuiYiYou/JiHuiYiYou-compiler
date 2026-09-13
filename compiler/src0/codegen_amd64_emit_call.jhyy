@@ -759,6 +759,15 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                         is_imm = 0 as i32;
                         is_fnarg = 1 as i32;
                         fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
+                    } else {
+                        // v2.11.8 (W-074.7.8 真修延伸):'%t' 开头 → TEMP。
+                        // 之前 IMM 检测 pct_count=1 (text 只含 "copy %tN" 不含 dst)
+                        // 会落 IMM 分支,cg_parse_int_from 解析 "%tN" 取数字 N 当 IMM
+                        // emit `movq $N, -<dst>(%rbp)`,地址变常量 → struct assign 全错。
+                        // 真修:见 '%t' 必是 TEMP,set is_imm=0 + parse src_temp_id。
+                        is_imm = 0 as i32;
+                        src_temp_id = cg_parse_temp(src_text, src_text_len, 0 as i64);
+                        if src_temp_id < (0 as i64) { src_temp_id = 0 as i64; }
                     }
                 } else if scan < src_text_len && cg_byte_at(src_text, scan) == (36 as i32) {
                     // '$' 开头 → LABEL (v2.11.2 T4-c 真修延伸)
@@ -821,6 +830,16 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
         let _r5 = sb_append_cstr(arena2, s2, ", " as *u8);
         let _r6 = sb_appendf_lld(arena2, s2, "%lld" as *u8, dst_off);
         let _r7 = sb_append_cstr(arena2, s2, "(%rbp)\n" as *u8);
+        // v2.11.8 (W-074.7.8 derived-address tracking 真修延伸-4):FNARG path
+        // 也需要 flag propagate。QBE IL 把 fn args 当 `%name` 引用,l-typed fnarg
+        // 是 8-byte pointer (e.g. sum_point 的 %p = struct param pointer)。
+        // mov<size> %<arg_reg>, -<dst>(%rbp) 已正确产生 8-byte value copy;
+        // flag propagate 让后续 emit_load/store 知道 dst 是 address-holder,
+        // 触发 indirect dispatch (Phase E),修复 struct_val_pass EXIT=4 → 35。
+        // w-typed fnarg (i32) 是 value,不 flag (跟 TEMP path 一致)。
+        if dst_qt == QBE_L_LOCAL() {
+            let _fna = cg_record_temp_holds_address(state, dst_id);
+        }
     } else if is_imm != (0 as i32) {
         // src 是 IMM(整数字面量)
         let _r = emit_mov_imm_to_offset(state, dst_qt, imm_val, dst_off);
@@ -829,6 +848,14 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
         let src_off = cg_offset_for_temp_with_target(src_temp_id, target_tag);
         let _r1 = emit_mov_temp_to_reg(state, dst_qt, src_off, reg_rax_for_qt(dst_qt) as *u8);
         let _r2 = emit_mov_reg_to_temp(state, dst_qt, reg_rax_for_qt(dst_qt) as *u8, dst_off);
+        // v2.11.8 (W-074.7.8 derived-address tracking 真修):TEMP copy 时如果 src
+        // 是 address-holder,dst 也必须是 address-holder(QBE 语义下 copy 拷贝的是
+        // value 包括 address VALUE)。emit_mov_temp_to_reg 已正确产生 8-byte pointer
+        // copy for QBE_L_LOCAL;flag propagate 让后续 emit_load/store 知道 dst 是
+        // address-holder,触发 indirect dispatch (Phase E)。
+        if cg_is_address_holder(state, src_temp_id) != (0 as i32) {
+            let _cp = cg_record_temp_holds_address(state, dst_id);
+        }
     }
 
     return 0;
@@ -983,6 +1010,27 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         } else if cg_find_sub(op_text, op_text_len, "mod" as *u8, 3 as i64) >= (0 as i64) {
             is_mod = 1 as i32;
         }
+    }
+
+    // v2.11.8 (W-074.7.8 derived-address tracking 真修):
+    // propagate address-holder flag when binop produces a derived address.
+    // add/sub on a pointer-typed result (qt == QBE_L_LOCAL) where src1 is
+    // address-holder → dst is also address-holder (e.g. add %t6, 4 → t14).
+    // mul/div/mod/cmp never yield a derived address (always arithmetic on
+    // values);skip flag propagate in those cases.
+    let mut is_add_or_sub: i32 = 0 as i32;
+    if is_sub != (0 as i32) {
+        is_add_or_sub = 1 as i32;
+    }
+    // add 走 fallback (本 if-chain 后面),这里跟 sub 一起 flag;
+    // 实际只有 is_sub=1 时该 flag 路径走,add 走 else 分支后单独处理。
+    // 注:add path 的代码是 `else { ... addq src2, %rax ... }` (无 explicit is_add);
+    // 这里假设所有未识别的 op = add(QBE 5 个 op:add/sub/mul/div/mod + cmp 系,
+    // 不属上述任何 sub/mul/div/mod/csXX 9 个分支的就是 add)。
+    if qt == QBE_L_LOCAL() && cg_is_address_holder(state, src1_id) != (0 as i32) {
+        // derived-address case:add/sub on QBE_L_LOCAL operand 当 src1 address-holder
+        // 时,dst 装 runtime derived address (= src1 + imm/temp offset)。
+        let _ad = cg_record_temp_holds_address(state, dst_id);
     }
 
     if is_sub != (0 as i32) {
