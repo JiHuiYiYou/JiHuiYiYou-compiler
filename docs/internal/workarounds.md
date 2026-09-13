@@ -5591,7 +5591,7 @@ $ JHY_SELF_BACKEND=1 jhyy.exe compile tests/hello.jhyy -o /tmp/_hello.s
 
 **OS 启动链路:** W-074.7 = M5 deferral 第二前置 Part 2a-后-补 🟡 (per `v1.x-phase-4-m5-boot-from-scratch.md`)。M5 启动需等 v2.11.3 ship ✅ + v2.11.4 ship ✅ + v2.11.5 ship ✅ + **v2.11.6 ship ✅ (5/5 link 真修 closure)** + v2.11.7 emit_store pointer 真修 + v2.11.8+ big_test runtime 闭环 + v2.12.0 QBE 移除.
 
-**v2.11.7 调研 (2026-09-12, axis-v2 commit `<pending>`, tag `v2.11.7`)**:
+**v2.11.7 调研 (2026-09-12, axis-v2 commit `11a7666`, tag `v2.11.7`)**:
 - ⚠️ **scope UP CGState refactor 实施后 regress**: 原 plan 假设真根因是 "emit_store 把 alloc-result pointer 当 stack slot VALUE 处理", scope UP 改 CGState 加 `temp_is_alloc_pointer` 256-entry bitmap (parallel to temp_slot_for_id) + cg_record_alloc_pointer setter + cg_is_alloc_pointer query + emit_alloc flag + emit_load/emit_store/emit_copy TEMP/emit_call arg load 全 dispatch alloc-result pointer (`leaq -<src>(%rbp), %rax; mov<size> %rax, -<dst>(%rbp)`). 实施 ~190 LOC, **regress 53/115 → 40/115 (13 测试 regress)**, QBE fallback 仍 115/115 PASS
 - ⚠️ **调研发现真根因比原 plan 深**: 4 emit path 真修只对 alloc-result pointer 有效, **derived address (`add %t6, 0` 的 result temp 装的是 runtime 计算的 address, 不是 stack slot) 才是真根因**. emit_store 当前 emit 形态 (e.g. `struct_val_pass.jhyy` 的 `storew %t7, %t8` 其中 `%t8 = add %t6, 0`):
   ```asm
@@ -5609,6 +5609,101 @@ $ JHY_SELF_BACKEND=1 jhyy.exe compile tests/hello.jhyy -o /tmp/_hello.s
 
 **OS 启动链路:** W-074.7 = M5 deferral 第二前置 Part 2a-后-补 🟡 (per `v1.x-phase-4-m5-boot-from-scratch.md`)。M5 启动需等 v2.11.3 ship ✅ + v2.11.4 ship ✅ + v2.11.5 ship ✅ + **v2.11.6 ship ✅ (5/5 link 真修 closure)** + v2.11.7 ship ✅ (调研 + scope DOWN defer) + v2.11.7a derived-address tracking 真修 (待 ship) + v2.11.8+ big_test runtime 闭环 (待 ship) + v2.12.0 QBE 移除 (待 ship).
 
-**Commit sha:** v2.11.3 ship `2fdfc12` + v2.11.4 ship `2057239` (T4-b 真修) + v2.11.5 ship `6857366` (alloc-tracking 真修) + **v2.11.6 ship `1e2ae1d` (W-074.7.5 peephole cap + W-074.7.6 block-name uniquify 5/5 link 真修 closure)** + **v2.11.7 ship `<pending>` (调研 + scope DOWN defer; 0 source change, ~120 LOC docs = W-074.7.7 INVALID closure + W-074.7.8 NEW entry)**
-**Plan:** `docs/plans/v2/v2.11.3-plan.md` + `docs/plans/v2/v2.11.4-plan.md` + `docs/plans/v2/v2.11.5-plan.md` + **`docs/plans/v2/v2.11.6-plan.md`** + **`docs/plans/v2/v2.11.7-plan.md`** (per feedback_plans_per_version; **v2.11.7 = 调研 + scope DOWN defer, 真修留 v2.11.7a**)
-**Memory:** [[feedback_codegen_amd64_multifn]] (scope DOWN trigger, v2.11.3 = EXIT exact 不再拆, **v2.11.7 = 调研失败 scope DOWN defer v2.11.7a**); [[feedback_codegen_amd64_run_zerobyte]] (N≥3 .il byte-equal 不验 .s, self-backend bug 不能 catch — v2.11.6 显式证伪 generalization: peephole cap bug 也不能 catch, .il byte-equal 不验 .s 完整性); [[feedback_fix_evaluation_rule]] (诚实记录 actual EXIT match, 不强宣 closure — v2.11.6 真宣 5/5 link 真修 ✅ 但 EXIT match 3/5 跟 baseline 持平; **v2.11.7 真宣 0 source change, scope UP 调研失败, scope DOWN defer v2.11.7a**)
+**Commit sha:** v2.11.3 ship `2fdfc12` + v2.11.4 ship `2057239` (T4-b 真修) + v2.11.5 ship `6857366` (alloc-tracking 真修) + v2.11.6 ship `1e2ae1d` (W-074.7.5 peephole cap + W-074.7.6 block-name uniquify 5/5 link 真修 closure) + v2.11.7 ship `11a7666` (调研 + scope DOWN defer; 0 source change, ~120 LOC docs = W-074.7.7 INVALID closure + W-074.7.8 NEW entry) + **v2.11.8 ship `<pending>` (W-074.7.8 真修 — derived-address tracking 4 emit path 真修 + emit_alloc self-referential slot fix + emit_copy FNARG flag propagate; ~319 LOC source + ~30 docs = W-074.7.8 PARTIAL closure 4/5 EXIT exact; W-074.7.9 NEW = big_test runtime STATUS_INTEGER_OVERFLOW deferred v2.11.9+)**
+**Plan:** `docs/plans/v2/v2.11.3-plan.md` + `docs/plans/v2/v2.11.4-plan.md` + `docs/plans/v2/v2.11.5-plan.md` + `docs/plans/v2/v2.11.6-plan.md` + `docs/plans/v2/v2.11.7-plan.md` + **`docs/plans/v2/v2.11.8-plan.md`** (per feedback_plans_per_version; **v2.11.8 = W-074.7.8 derived-address tracking 真修 + emit_alloc self-referential slot fix + emit_copy FNARG flag propagate; 4/5 EXIT exact closure, big_test deferred v2.11.9+**)
+**Memory:** [[feedback_codegen_amd64_multifn]] (scope DOWN trigger, v2.11.3 = EXIT exact 不再拆, v2.11.7 = 调研失败 scope DOWN defer v2.11.7a, **v2.11.8 = FULL scope 真修 4 emit path + emit_alloc + emit_copy FNARG; 4/5 EXIT exact closure**); [[feedback_codegen_amd64_run_zerobyte]] (N≥3 .il byte-equal 不验 .s, self-backend bug 不能 catch — v2.11.6 显式证伪 generalization: peephole cap bug 也不能 catch, .il byte-equal 不验 .s 完整性; **v2.11.8 ship gate 加 .s 行数 + main_jhyy.s 非空 check 防 v2.11.6-style 截断 bug 回归**); [[feedback_fix_evaluation_rule]] (诚实记录 actual EXIT match, 不强宣 closure — v2.11.6 真宣 5/5 link 真修 ✅ 但 EXIT match 3/5 跟 baseline 持平; v2.11.7 真宣 0 source change, scope UP 调研失败, scope DOWN defer v2.11.7a; **v2.11.8 真宣 4/5 EXIT exact closure ✅, big_test deferred v2.11.9+**)
+
+---
+
+## W-074.7.8: derived-address tracking — v2.11.8 ship 2026-09-13 PARTIAL closure (4/5 EXIT exact, big_test deferred v2.11.9+)
+
+**ID:** W-074.7.8
+**状态:** 🟢 **NEW → PARTIAL closure** 2026-09-13 (v2.11.8 ship on axis-v2 + tag `v2.11.8`, 4 emit path 真修 + emit_alloc self-referential slot fix + emit_copy FNARG flag propagate, **4/5 EXIT exact closure**; big_test runtime STATUS_INTEGER_OVERFLOW 0xC0000095 仍 deferred v2.11.9+ = W-074.7.9 NEW)
+
+**根因 (v2.11.7 调研发现):** 所有 derived address (`add %t6, 0` / `sub %t6, 0` / `add %t6, imm` 后的 result temp 装的是 runtime 计算的 address, 不是 stack slot). Codegen 1-to-1 栈栈搬运假设 (L4 § 3.5 E2 简化边界) 在 `storew val, derived_addr` 跟 `loadw derived_addr` 形态破 — 需 `movl %eax, (%raddr)` 间接写。
+
+**v2.11.7 错误根因:** W-074.7.7 原 plan 假设 alloc-result pointer 单一种, scope UP CGState `temp_is_alloc_pointer` bitmap + 4 emit path dispatch, 实施后 regress 53/115 → 40/115, 全部 revert, scope DOWN defer v2.11.8 真修。
+
+**v2.11.8 真修策略:** bitmap 扩到 flag 任何 temp holding derived address (alloc-result + binop add/sub on pointer + copy of address-holder); emit_load/store/loadsub 改 full dispatch (slot vs indirect `mov<size> (%r8), %reg` via %r8 scratch); emit_binop 产生 derived-address 时 flag result; emit_copy propagate flag; emit_copy FNARG l-typed 也 flag (struct param pointer); emit_alloc 用 lea+mov 写 alloc'd 地址到 pointer-slot (formula offset, NOT region — **self-referential slot bug** 真修)。
+
+**v2.11.8 ship gate 调整 (per [[feedback_fix_evaluation_rule]]):**
+- ✅ QBE fallback 115/115 PASS preserved
+- ✅ self-backend 5/5 link preserved (v2.11.6 closure 不 regress)
+- ✅ byte-equal 五件套 **4/5 EXIT exact** (hello=42 / fib_renamed=40 = 832040 mod 256 / struct_val_pass=35 / nested_struct_deep=22 / struct_val_assign=30); big_test deferred v2.11.9+ (W-074.7.9 NEW)
+- ✅ byte_equal_amd64 10/10 PASS
+- ✅ fixed_point N≥3 PASS (v2/v3/v4/v5 sha = 3f0bfb...)
+- ✅ **NEW ship gate per [[feedback_codegen_amd64_run_zerobyte]]**: `.s` 行数 ≥ baseline (12 行 / 207 bytes for hello.jhyy; ≥ 100 bytes 阈值)
+- ✅ self-backend regress 58/115 PASS (vs 56/115 baseline = +2 flips; 远低于 +5 scope DOWN trigger)
+- ✅ D43 closure v1↔v2 .il sha HOLD
+- ✅ jhyy.exe.sha256 refresh (883680d966...)
+
+**修复内容 (~319 LOC source + ~30 docs):**
+
+| Component | File | LOC | 真修方式 |
+|---|---|---|---|
+| **CGState 新增 bitmap** | `codegen_amd64_state.jhyy:90-156` + `:200-240` + `:247-282` | +86 | `temp_holds_address: *u8` bitmap 256-entry (parallel to `temp_slot_for_id`); `cg_state_set_holds_address` wire C-side + `cg_record_temp_holds_address` setter + `cg_is_address_holder` query; cg_state_init alloc 256B + memset 0; reset_for_function per-fn zero |
+| **C-bridge** | `jhyy_helpers.c:642-682` | +34 | `jh_cgstate_get_holds_address` (BSS-static) + `jh_cgstate_set_holds_address` (no-op forward-ref-safe) + `jh_cgstate_set_holds_flag` / `jh_cgstate_get_holds_flag` (byte-level access C-bridge) |
+| **emit_alloc flag + lea+mov + self-referential slot fix** | `codegen_amd64_emit_mem.jhyy:285-340` | +155 | flag write `cg_record_temp_holds_address(dst)`; emit `leaq -<region>(%rbp), %rax; movq %rax, -<formula>(%rbp)` 把 alloc'd 地址写到 dst 自己的 pointer-slot (formula offset = `-(32+t*8)` Win / `-(t*8)` SysV, NOT region offset — **self-referential slot bug fix**); skip `cg_record_temp_slot` 让 formula 处理 pointer-slot |
+| **emit_binop flag propagate** | `codegen_amd64_emit_call.jhyy:964-1024` | +10 | `add/sub` 产生 derived-address result 时 flag dst (qt==QBE_L_LOCAL AND src1 is address-holder); mul/div/mod/and/or/xor/shifts 永 not address-holder |
+| **emit_load indirect dispatch** | `codegen_amd64_emit_mem.jhyy:589-618` | +25 | if `cg_is_address_holder(src)`: emit `movq -<src>(%rbp), %r8; mov<size> (%r8), %<reg>; mov<size> %<reg>, -<dst>(%rbp)` (use `%r8` scratch, caller-saved, no conflict with %rax/%rcx/%rdx) |
+| **emit_store indirect dispatch** | `codegen_amd64_emit_mem.jhyy:319-362` | +30 | if `cg_is_address_holder(dst)`: emit `mov<size> -<src>(%rbp), %<reg>; movq -<dst>(%rbp), %r8; mov<size> %<reg>, (%r8)`; special case src ALSO address-holder → mem-copy via indirection (struct copy via pointer) |
+| **emit_loadsub indirect dispatch** | `codegen_amd64_emit_mem.jhyy:507-533` | +20 | 同 emit_load 模式 with `ext`/`dst_suffix` swap (loadsub 有 movsbl 等 extension) |
+| **emit_copy TEMP flag propagate** | `codegen_amd64_emit_call.jhyy:841-848` | +5 | if `cg_is_address_holder(src)`: `cg_record_temp_holds_address(dst)` |
+| **emit_copy FNARG flag propagate** | `codegen_amd64_emit_call.jhyy:821-833` | +8 | if `dst_qt == QBE_L_LOCAL`: `cg_record_temp_holds_address(dst)` (l-typed fnarg = struct param pointer; struct_val_pass EXIT 6→35 flip 真修) |
+| **emit_call arg load** | (无 change) | 0 | arg 是 address VALUE 传给 callee, 现有 `movq -off, %reg` 已正确产生 8-byte copy; flag matters only for deref contexts |
+
+**Self-referential slot bug 真修 (v2.11.8 关键发现):**
+v2.11.5 design `cg_record_temp_slot(state, dst, off=region)` 让 dst 的 pointer-slot == region offset (= -8 for first alloc). lea+mov 写 address 到 dst slot = 写到 region 本身 — 后续 `storew val, %t_derived` 走 indirect 写 val 到 region, 覆盖掉地址. `add %t6, 4` 时读 -8(%rbp) 拿到 val (高 32-bit 是地址残留) 当 64-bit pointer → bogus address → SIGSEGV (W-074.7.8 v2.11.8 attempt 1 症状).
+
+**真修**: SKIP `cg_record_temp_slot` (v2.11.5 的 alloc-tracking 留 deprecated), pointer-slot 走 formula `-(32+t*8)` = -80 for t6 = **DIFFERENT** from region -8. lea+mov 写 address 到 dst pointer-slot (-80) — t6 的 slot 和 region 物理分离, 后续 indirect store 写 val 到 region 不影响 pointer-slot, `add %t6, off` 重读 pointer-slot 永远拿到正确的 alloc'd 地址.
+
+**FNARG flag propagate 真修 (v2.11.8 关键发现-2):**
+`copy %p` for l-typed fnarg (e.g. struct param pointer) 之前走 FNARG path (`mov<size> %<arg_reg>, -<dst>(%rbp)`) 但**不** flag propagate — `loadw %t1` 走 slot-read (从 t1's slot = low 32 bits of address, garbage) 而非 indirect (从 address 读真值) → struct_val_pass EXIT=6 (low 32 bits of address) 而非 35 (sum). 
+
+**真修**: FNARG path 加 `if dst_qt == QBE_L_LOCAL() { cg_record_temp_holds_address(dst) }` — l-typed fnarg 是 struct param pointer (QBE 的 8-byte pass-by-value convention), dst 必是 address-holder → `loadw` 走 indirect → 真值.
+
+**Scope DOWN trigger 评估 (per [[feedback_codegen_amd64_multifn]]):**
+- v2.11.8 self-backend regress 56/115 → 58/115 = **+2 flips** (远低于 +5 scope DOWN trigger) ✓ ship
+- QBE fallback 115/115 PASS preserved ✓ ship
+- D43 closure v1↔v2 .il sha HOLD ✓ ship
+- byte_equal_amd64 10/10 PASS preserved ✓ ship
+- N≥3 fixed_point PASS preserved ✓ ship
+- `.s` 行数 ≥ baseline (12 行 / 207 bytes for hello.jhyy) ✓ ship
+- main_jhyy.s 非空 ✓ ship
+
+**fix_evaluation_rule 诚实记录 (per [[feedback_fix_evaluation_rule]]):**
+- v2.11.8 实际 EXIT exact = **4/5** (hello=42 / fib_renamed=40 / struct_val_pass=35 / nested_struct_deep=22 / struct_val_assign=30); big_test = STATUS_INTEGER_OVERFLOW 0xC0000095 deferred v2.11.9+ (W-074.7.9 NEW)
+- v2.11.6 baseline EXIT exact = 3/5 (hello=42 / fib_renamed=40 / struct_val_pass=6 错) → v2.11.8 = 4/5 (+1 flip EXIT exact closure); nested_struct_deep 跟 struct_val_assign 也在 5/5 EXIT match set 里 → 整体 4/5 EXIT exact
+- 不强宣 "5/5 EXIT exact closure" — big_test 是 separate deeper bug (W-074.7.9 NEW)
+- self-backend regress +2 flips (56/115 → 58/115) — 在 +5 scope DOWN trigger 内, 仍 ship
+
+**OS 启动链路 (2026-09-13 校准):**
+
+V2-C Part 2a-后-补-补-补-补-补 (续):
+- ✅ v2.11.6 peephole cap + block-name uniquify (5/5 link) ship
+- ✅ v2.11.7 调研 + scope DOWN defer ship
+- ✅ **v2.11.8 derived-address tracking 真修 ship (本 sprint)**
+- 待 ship: v2.11.9+ big_test runtime STATUS_INTEGER_OVERFLOW 0xC0000095 根因 = separate deeper bug (per W-074.7.9 NEW)
+- 待 ship: v2.12.0 QBE 移除 (Part 2b)
+- M5 独立 sprint 需等 v2.11.8 ship + v2.11.9+ ship + v2.12.0 ship + 5/5 EXIT exact
+
+---
+
+## W-074.7.9: big_test runtime STATUS_INTEGER_OVERFLOW 0xC0000095 — NEW (v2.11.8 ship 2026-09-13 调研发现, v2.11.9+ 真修)
+
+**ID:** W-074.7.9
+**状态:** 🆕 **NEW** 2026-09-13 (v2.11.8 ship 调研发现; 真修 deferred v2.11.9+)
+
+**根因 (preliminary, v2.11.9+ 需真查):** big_test runtime exit code 0xC0000095 (= 0xC0000095 = STATUS_INTEGER_OVERFLOW, signalled by `into` instruction when OF flag set) on self-backend path. v2.11.8 ship 调研发现 v2.11.8 真修 (W-074.7.8 derived-address tracking) 后, big_test 仍 crash with 0xC0000095 — separate deeper bug 跟 derived-address 无关.
+
+**可能根因方向 (待 v2.11.9+ 真查):**
+1. `div` / `idiv` 跟 QBE semantics 不 match — QBE `div` 是 signed truncate toward zero, x86 `idiv` 是同样语义, 但如果 dividend 是 unsigned 跟 divisor 是 signed (or vice versa) 会 OF → INTO signal
+2. `mul` overflow detection 不 match — QBE `mul` 跟 x86 `imul` 都是 low-32-bit result, 不 signal;但如果有显式 overflow check path
+3. `csltw` / `csgtw` 跟 QBE 比较语义 — QBE 用 signed compare, x86 `cmp` 默认 signed; 但 `setl` / `setg` 在某些边界 case 可能产生 wrong OF flag 触发 INTO
+
+**Scope 待 v2.11.9+ 调研 (per user 决定):**
+- 调研 big_test .il 跟 self-backend .s, 对比 QBE output, 找到 OF flag set 那条 `into` 触发
+- 真修: emit_binop div/mod 路径 (QBE `div` 跟 x86 `idiv` mapping) + emit_ctrl csltw/csgtw 路径 (compare flag semantics)
+- 估 ~50-100 LOC 真修
+
+**OS 启动链路:** W-074.7.9 = M5 deferral 第二前置 Part 2a-后-补 🟡 (per `v1.x-phase-4-m5-boot-from-scratch.md`)。M5 启动需等 v2.11.9+ big_test runtime 闭环。

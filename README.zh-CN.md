@@ -66,6 +66,9 @@ jhyy_v4.exe     → src0/main.jhyy → jhyy_v5.il   ← 与 v2.il 字节相同
 > [!NOTE]
 > **v1.8.3 是 v1.x 终结**。C 端编译器(`compiler/src/*.c`)在 v1.x 仍是生产路径;`compiler/src0/*.jhyy`(jhyy 端翻译稿)已产出 byte-equal。v2.0 会切生产路径到 `jhyy_v1.exe.exe`,并启动 QBE 重写 + 多目标 / OS 准备(见 [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md))。
 
+> [!NOTE]
+> **v2.11.8 ship 2026-09-13 on axis-v2 + tag `v2.11.8`**:W-074.7.8 derived-address tracking **4/5 EXIT exact 闭环**(hello=42 / fib_renamed=40 / struct_val_pass=35 / nested_struct_deep=22 / struct_val_assign=30;big_test runtime STATUS_INTEGER_OVERFLOW 推迟 v2.11.9+ = W-074.7.9 NEW)。~319 LOC 源码 + ~30 docs 真修 — bitmap 标任何 temp holding derived address + emit_load/store/loadsub indirect dispatch + emit_alloc self-referential slot 修 + emit_copy FNARG flag propagate。QBE fallback 115/115 PASS preserved;self-backend regress +2 flips (56→58, 远低于 +5 scope DOWN trigger);D43 closure v1↔v2 .il sha HOLD。详见 [`docs/logs/v2/changelog-v2.11.0.md`](docs/logs/v2/changelog-v2.11.0.md) § v2.11.8 + [`docs/plans/v2/v2.11.8-plan.md`](docs/plans/v2/v2.11.8-plan.md)。
+
 ---
 
 ## 这是什么

@@ -4,6 +4,34 @@
 
 ## 最新 release
 
+### v2.11.8 — 2026-09-13 — **axis-v2 W-074.7.8 真修 — 4/5 EXIT exact closure** (axis-v2 only; main 待 merge)
+
+**Tag**: `v2.11.8` (axis-v2 branch)
+**Status**: W-074.7.8 derived-address tracking **PARTIAL closure** (4/5 EXIT exact); big_test runtime STATUS_INTEGER_OVERFLOW 0xC0000095 deferred v2.11.9+ (W-074.7.9 NEW)
+
+**Highlights**:
+
+- **Derived-address tracking 真修** — bitmap flag 任何 temp holding derived address (alloc-result + binop add/sub on pointer + copy of address-holder); emit_load/store/loadsub 改 full dispatch (slot vs indirect `mov<size> (%r8), %reg` via %r8 scratch); emit_binop 产生 derived-address 时 flag result; emit_copy propagate flag (TEMP + FNARG paths)
+- **Self-referential slot bug 真修** — v2.11.5 design 让 pointer-slot == region offset, lea+mov 自我覆盖;真修 SKIP `cg_record_temp_slot`, pointer-slot 走 formula `-(32+t*8)` Win (formula 跟 region 物理分离)
+- **FNARG flag propagate** — l-typed fnarg (struct param pointer) 走 FNARG path 不 flag propagate → struct_val_pass EXIT 6→35 flip 真修
+- **byte-equal 五件套 4/5 EXIT exact closure**:
+  - hello=42 ✅ (跟 baseline 一致)
+  - fib_renamed=40 (= 832040 mod 256, 跟 baseline 一致) ✅
+  - struct_val_pass=35 (从 v2.11.6 EXIT=6 → v2.11.8 EXIT=35, 真修 closure) ✅
+  - nested_struct_deep=22 (从 v2.11.6 EXIT=35 → v2.11.8 EXIT=22, 真修 closure) ✅
+  - struct_val_assign=30 ✅ (跟 baseline 一致)
+  - big_test = STATUS_INTEGER_OVERFLOW 0xC0000095 ⚠️ (separate deeper bug, **deferred v2.11.9+ W-074.7.9 NEW**)
+- **QBE fallback 115/115 PASS preserved** + **self-backend 5/5 link preserved** (v2.11.6 closure 不 regress)
+- **self-backend regress +2 flips** (56/115 → 58/115, 远低于 +5 scope DOWN trigger per [[feedback_codegen_amd64_multifn]])
+- **D43 closure v1↔v2 .il sha HOLD** (v2/v3/v4/v5 sha = `3f0bfb...` 一致) + **byte_equal_amd64 10/10 PASS preserved** + **fixed_point N≥3 PASS preserved**
+- **NEW ship gate per [[feedback_codegen_amd64_run_zerobyte]]**: `main_jhyy.s` = 12 行 / 207 bytes (≥ 100 bytes 阈值, ≥ baseline, no truncation)
+- **jhyy.exe.sha256 refresh**: `883680d966cc79a9bf4e7df851e2441fb8bd9fbfe1a0924cc9adaa38c1dca13a`
+
+**完整 changelog**: [`docs/logs/v2/changelog-v2.11.0.md`](docs/logs/v2/changelog-v2.11.0.md) § v2.11.8
+**Plan**: [`docs/plans/v2/v2.11.8-plan.md`](docs/plans/v2/v2.11.8-plan.md)
+
+---
+
 ### v2.0 阶段 — 2026-09-04 — **v2.0 阶段全 ship ✅**
 
 **Tags**: `v2.3.0` (commit `54d93df`) + `v2.4.0` (commit `7fb735b`); 阶段内 v2.0.0 / v2.1.0 / v2.2.0 未打 tag (per 2026-09-01 user 决定:阶段首批 ship 即可打 tag)

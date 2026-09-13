@@ -288,6 +288,9 @@ Full index: [`docs/internal/workarounds.md`](docs/internal/workarounds.md).
 > [!NOTE]
 > **v1.8.3 is v1.x final.** The C-side compiler (`compiler/src/*.c`) remains the production path during v1.x; `compiler/src0/*.jhyy` (the jhyy-side translated source) already produces byte-equal output. v2.0.0 阶段 (v2.0.0 → v2.4.0) shipped 2026-09-04 — multi-target dispatcher + freestanding ABI + hello-freestanding.efi E2E 5/5 PASS on OVMF (see [`docs/logs/v2/changelog-v2.{0..4}.0.md`](docs/logs/v2/changelog-v2.4.0.md) + [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md)).
 
+> [!NOTE]
+> **v2.11.8 ship 2026-09-13 on axis-v2 + tag `v2.11.8`**: W-074.7.8 derived-address tracking **4/5 EXIT exact closure** (hello=42 / fib_renamed=40 / struct_val_pass=35 / nested_struct_deep=22 / struct_val_assign=30; big_test runtime STATUS_INTEGER_OVERFLOW deferred v2.11.9+ = W-074.7.9 NEW). ~319 LOC source + ~30 docs 真修 — bitmap flag any temp holding derived address + emit_load/store/loadsub indirect dispatch + emit_alloc self-referential slot fix + emit_copy FNARG flag propagate. QBE fallback 115/115 PASS preserved; self-backend regress +2 flips (56→58, 远低于 +5 scope DOWN trigger); D43 closure v1↔v2 .il sha HOLD. 详见 [`docs/logs/v2/changelog-v2.11.0.md`](docs/logs/v2/changelog-v2.11.0.md) § v2.11.8 + [`docs/plans/v2/v2.11.8-plan.md`](docs/plans/v2/v2.11.8-plan.md)。
+
 ---
 
 ## Verification status
