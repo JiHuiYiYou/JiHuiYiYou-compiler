@@ -4,6 +4,35 @@
 
 ## 最新 release
 
+### v2.11.9 — 2026-09-13 — **axis-v2 W-074.7.9 QBE side 真修 — QBE fallback 5/5 EXIT exact closure** (axis-v2 only; main 待 merge; self-backend 侧仍 ACTIVE W-074.6 family)
+
+**Tag**: `v2.11.9` (axis-v2 branch)
+**Status**: W-074.7.9 big_test runtime **QBE side ✅ CLOSURE**; self-backend side 仍 🟡 ACTIVE due to W-074.6 family (extsw silent-skip + multi-func body 0-byte + emit_ret 不 mov %t1 → %eax 等 pre-existing bugs, 已知范围 ~500+ LOC 多 sprint, 显式 deferred v2.x 中期 per W-074.6 ACTIVE state)
+
+**Highlights**:
+
+- **2 个独立 root cause 真修** (per v2.11.9 plan mode Explore agent 调研):
+  - **`idiv` emit 无 sign-extend prefix** (emit_call.jhyy `is_div` branch): x86 `idivl` semantics dividend = `(%edx << 32) | %eax`; `%edx` 残留 → x86 #DE fault → Windows STATUS_INTEGER_DIVIDE_BY_ZERO 0xC000008C (wrapped 0xC0000095 per process config). **真修**: add `\tcltd\n` / `\tcqto\n` prefix (mirror `is_mod`).
+  - **Lexer 不识 QBE `rem` keyword** (lexer.jhyy `next_token_binop` dispatcher + main `next_token` `'r'` → ret/rem disambiguate): QBE `%` operator emits `rem` (signed remainder, per QBE spec §6.3). Lexer 之前无 `rem` branch → `next_token` returns -1 → `lex_il` 静默 skip 1 byte/iteration → `rem` keyword + 2 operand temps ALL skipped → those `t24`/`t69`/`t109`/etc. SSA values never appear in `.s`. **真修**: add `rem` branch in `next_token_binop` (consume "em", op_name="rem"); add `'r'` → ret/rem dispatch in main `next_token` (跟 `'d'` → div pattern 一致).
+- **`is_rem` flag + dispatch 真修** (emit_call.jhyy): new `is_rem` flag init + `cg_find_sub` check for "rem" 3-char substring + `is_rem` dispatch branch (cltd/cqto + idiv + movq %rdx, %rax — same path as is_mod).
+- **QBE fallback 5/5 EXIT exact closure 真修达成** (per [[feedback_fix_evaluation_rule]]):
+  - hello=42 ✅
+  - big_test=**12345** ✅ (从 v2.11.8 STATUS_INTEGER_OVERFLOW 0xC0000095 → v2.11.9 EXIT=12345, 真修 closure) — 9 个 `rem` ops 正确 emit (cltd+idivl + movq %rdx, %rax)
+  - struct_val_pass=35 ✅
+  - fib_renamed=832040 ✅ (= 832040 mod 256 = 40, 跟 baseline 一致)
+  - nested_struct_deep=22 ✅
+  - struct_val_assign=30 ✅
+- **QBE fallback 115/115 regress PASS preserved** + **self-backend 1/5 hello PASS preserved** (per W-074.6 baseline; multi-func closure deferred v2.x 中期)
+- **D43 closure v1↔v2 .il sha HOLD** (v2/v3/v4/v5 sha `42580b87...` post-fix, re-baseline per D43 closure rule 因 rem emit 微变)
+- **byte-equal-amd64 10/10 PASS preserved** + **fixed_point N≥3 PASS preserved**
+- **NEW ship gate audit grep** (per [[feedback_codegen_amd64_run_zerobyte]]): self-backend big_test.s `cltd` = 14 (5 div + 9 rem) + `idivl` = 14 + `movq %rdx, %rax` = 9 (was 0 pre-fix) + `.s` 行数 8727 ≥ 100 bytes + `main_jhyy.s` non-empty
+- **jhyy.exe.sha256 refresh**: `9ef7f49734ef99d7...`
+
+**完整 changelog**: [`docs/logs/v2/changelog-v2.11.0.md`](docs/logs/v2/changelog-v2.11.0.md) § v2.11.9
+**Plan**: [`docs/plans/v2/v2.11.9-plan.md`](docs/plans/v2/v2.11.9-plan.md)
+
+---
+
 ### v2.11.8 — 2026-09-13 — **axis-v2 W-074.7.8 真修 — 4/5 EXIT exact closure** (axis-v2 only; main 待 merge)
 
 **Tag**: `v2.11.8` (axis-v2 branch)

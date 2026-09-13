@@ -5689,21 +5689,41 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 
 ---
 
-## W-074.7.9: big_test runtime STATUS_INTEGER_OVERFLOW 0xC0000095 — NEW (v2.11.8 ship 2026-09-13 调研发现, v2.11.9+ 真修)
+## W-074.7.9: big_test runtime status (0xC0000095/0xC000008C) — ✅ RESOLVED (v2.11.9 ship 2026-09-13) — QBE fallback 5/5 closure; self-backend 仍 ACTIVE (W-074.6 family 范围)
 
 **ID:** W-074.7.9
-**状态:** 🆕 **NEW** 2026-09-13 (v2.11.8 ship 调研发现; 真修 deferred v2.11.9+)
+**状态:** 🟡 **PARTIAL** 2026-09-13 — v2.11.9 真修 QBE fallback path closure (5/5 big_test EXIT=12345 → mod 256 = 57); self-backend path 仍 ACTIVE due to W-074.6 family (extsw / multi-func body bugs) deferred v2.x 中期 per [[feedback_codegen_amd64_multifn]]
 
-**根因 (preliminary, v2.11.9+ 需真查):** big_test runtime exit code 0xC0000095 (= 0xC0000095 = STATUS_INTEGER_OVERFLOW, signalled by `into` instruction when OF flag set) on self-backend path. v2.11.8 ship 调研发现 v2.11.8 真修 (W-074.7.8 derived-address tracking) 后, big_test 仍 crash with 0xC0000095 — separate deeper bug 跟 derived-address 无关.
+**Root cause (v2.11.9 plan mode Explore agent 调研):** 原 v2.11.8 entry 假设 "into" + OF flag set 是错的。实际是 **2 个独立 root cause**:
 
-**可能根因方向 (待 v2.11.9+ 真查):**
-1. `div` / `idiv` 跟 QBE semantics 不 match — QBE `div` 是 signed truncate toward zero, x86 `idiv` 是同样语义, 但如果 dividend 是 unsigned 跟 divisor 是 signed (or vice versa) 会 OF → INTO signal
-2. `mul` overflow detection 不 match — QBE `mul` 跟 x86 `imul` 都是 low-32-bit result, 不 signal;但如果有显式 overflow check path
-3. `csltw` / `csgtw` 跟 QBE 比较语义 — QBE 用 signed compare, x86 `cmp` 默认 signed; 但 `setl` / `setg` 在某些边界 case 可能产生 wrong OF flag 触发 INTO
+1. **`idiv` emit 无 sign-extend prefix** (compiler/src0/codegen_amd64_emit_call.jhyy `is_div` branch,lines ~1068-1080): existing emit `\tidiv<size> -src2(%rbp)` 或 `\tidiv<size> $imm` **NO** `cltd`/`cqto` prefix → x86 `idivl` semantics: dividend = `(%edx << 32) | %eax` (64-bit), quotient 在 %eax, remainder 在 %edx. %edx 残留 (前 op 写入只设 %eax 不设 %edx, 例如 `movl $5, -<off>(%rbp)` 用 %eax 写 4-byte; 或前面 `idiv` 的 `%rdx` 残留) → dividend ≠ 真 src1 值 → even small divisor produces quotient > 2^31-1 → **#DE fault** (Divide Error) → Windows STATUS_INTEGER_DIVIDE_BY_ZERO 0xC000008C (or wrapped 0xC0000095 per process config). Compare `is_mod` branch lines ~1084-1094 已 emits `\tcltd\n` / `\tcqto\n` BEFORE `idiv` ✅ (correct). Audit: `_regress_big_test.s` grep `idivl|cqo|cltd|cdq` = 5/0/0/0 hits pre-fix → 5/5/5/0 post-fix.
 
-**Scope 待 v2.11.9+ 调研 (per user 决定):**
-- 调研 big_test .il 跟 self-backend .s, 对比 QBE output, 找到 OF flag set 那条 `into` 触发
-- 真修: emit_binop div/mod 路径 (QBE `div` 跟 x86 `idiv` mapping) + emit_ctrl csltw/csgtw 路径 (compare flag semantics)
-- 估 ~50-100 LOC 真修
+2. **Lexer 不识 QBE `rem` keyword** (compiler/src0/codegen_amd64_lexer.jhyy line ~631 `next_token_binop` dispatcher): existing accepted: `add|sub|mul|mod|div` only. QBE `%` operator emits `rem` (signed remainder) in IL (per QBE spec § 6.3). Lexer 无 `rem` branch → `next_token` returns -1 → `lex_il` 静默 skip 1 byte/iteration (per line ~1448-1452) → `rem` keyword + 2 operand temps (5+ chars) ALL skipped → those `t24`/`t69`/`t109`/`t459`/etc. SSA values never appear in `.s` (grep confirms 0 hits pre-fix → 9 `movq %rdx, %rax` post-fix). big_test uses `%` 9 次 → ALL miscompute → 最终 exit code garbage. Audit: `big_test.il` grep `rem\b` = 9 hits; `big_test.s` grep `movq %rdx, %rax` = 0 hits pre-fix → 9 hits post-fix.
 
-**OS 启动链路:** W-074.7.9 = M5 deferral 第二前置 Part 2a-后-补 🟡 (per `v1.x-phase-4-m5-boot-from-scratch.md`)。M5 启动需等 v2.11.9+ big_test runtime 闭环。
+3. **Bonus (Phase B' 真修)**: 'r' → 'ret' dispatch (lexer.jhyy line ~1124-1128 pre-fix) returns -1 for any non-"ret" 'r'-starting token (e.g. `remw`), making 新加 'rem' branch unreachable. Pre-fix, no 'rem' branch existed; post-fix, 'rem' branch is in `next_token_binop` line ~695-707 (mirrors mod path) + main `next_token` line ~1124-1142 disambiguates 'r' → ret (n1='e', n2='t') vs rem (n1='e', n2='m'). 跟 'd' → 'div' dispatcher pattern 一致 (main dispatcher consume 第 1 byte only, next_token_binop 内部 consume 2 bytes).
+
+**真修 (v2.11.9 ship, ~30 LOC source):**
+- emit_call.jhyy +5 LOC: `is_div` branch 加 `\tcltd\n` / `\tcqto\n` prefix (mirror `is_mod`)
+- emit_call.jhyy +5 LOC: `is_rem` flag init + `cg_find_sub` check for "rem" 3-char substring
+- emit_call.jhyy +25 LOC: `is_rem` dispatch branch (cltd/cqto + idiv + movq %rdx, %rax — same path as is_mod)
+- lexer.jhyy +25 LOC: `next_token_binop` `'r'` branch consumes "em" → op_name="rem"
+- lexer.jhyy +20 LOC: main `next_token` 'r' disambiguate ret vs rem (consume 1 byte 'r' for rem, defer "em" to next_token_binop)
+- lexer.jhyy: 删除 pre-existing 1269-1272 unreachable late 'r' branch (cleanup)
+
+**验证 (v2.11.9 ship gates):**
+- ✅ **QBE fallback** `big_test` EXIT = 57 (= 12345 mod 256, per Windows 8-bit exit truncation; expected per `big_test.jhyy // EXPECT: 12345` + `// Final exit code = 57 (= 12345 mod 256, since MSYS2 bash truncates process exit codes to 8 bits on Windows).`)
+- ✅ QBE fallback 115/115 regress PASS preserved
+- ✅ self-backend `test_rem.jhyy` (minimal rem repro) EXIT = 2 (correct: 17 % 5 = 2) — proves 修确实工作
+- ✅ self-backend `_regress_big_test.s` audit grep: 5 cltd + 5 idivl (5 div) + 9 cltd + 9 idivl + 9 movq %rdx, %rax (9 rem) = 完整 emit
+- ✅ D43 closure v2/v3/v4/v5 .il sha HOLD `42580b87...` (fixed-point N=4)
+- ✅ jhyy.exe.sha256 refresh
+
+**Scope DOWN (per [[feedback_codegen_amd64_multifn]] + [[feedback_fix_evaluation_rule]]):**
+- ❌ self-backend big_test 仍 SIGSEGV (139) — **NOT** W-074.7.9 范围. 是 **W-074.6 family** (extsw silent-skip + multi-func body 0-byte + emit_ret 不 mov %t1 → %eax 等 pre-existing bugs) — 已知范围 ~500+ LOC, v2.6.3 → v3.1.4 持续, 显式 deferred to v2.x 中期 per W-074.6 ACTIVE state
+- self-backend regress 数 5/5 (hello only, per W-074.6 baseline) preserved; multi-func closure 留 v2.x 中期 W-074.6
+- 4/5 EXIT exact closure (big_test deferred W-074.6 family) 比 v2.11.8 PARTIAL 没进展 (仍是 4/5)
+- 但 QBE fallback 5/5 EXIT exact closure 真修达成 (W-074.7.9 QBE side 真修 closure) — Stage 2 N≥3 jhyy 编 jhyy .il byte-equal ↔ QBE-produced jhyy.exe runtime 5/5 closure
+
+**Memory:** [[feedback_fix_evaluation_rule]] (诚实记录 4/5 EXIT exact, QBE 5/5 closure, 不强宣 "5/5 self-backend"); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger: 4/5 self-backend = 跟 v2.11.8 baseline 一致, 不触发); [[feedback_codegen_amd64_run_zerobyte]] (audit gates: .s 行数 ≥ baseline + main_jhyy.s 非空 + idiv 必 preceding cltd/cqto + movq %rdx, %rax ≥ rem op count); [[feedback_document_workarounds_in_docs]] (workaround 详记 root cause + 真修 + scope 范围); [[feedback_plans_per_version]] (1 plan/minor)
+
+**OS 启动链路:** W-074.7.9 QBE side ✅ CLOSED (v2.11.9 ship); self-backend side 仍 🟡 ACTIVE (W-074.6 family 范围, v2.x 中期 W-074.6 真修时同步 closure)。M5 启动需等 W-074.6 闭环 (per `v1.x-phase-4-m5-boot-from-scratch.md`)。

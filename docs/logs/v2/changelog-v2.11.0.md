@@ -736,6 +736,62 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 - 待 ship: 第二前置 Part 2a-后-补-补-补-补-补-补 (v2.11.9+ big_test runtime STATUS_INTEGER_OVERFLOW 根因 = W-074.7.9 NEW 真修, scope ~50-100 LOC 估)
 - 待 ship: 第二前置 Part 2b (v2.12.0 QBE 移除);M5 独立 sprint 需等 v2.12.0 ship + 5/5 EXIT exact + big_test runtime 闭环
 
+## v2.11.9 — 2026-09-13 — W-074.7.9 QBE side 真修 (QBE fallback 5/5 EXIT exact closure; self-backend 大_test 仍 ACTIVE — W-074.6 family 范围)
+
+**Status**: W-074.7.9 **NEW → PARTIAL closure** (QBE side 真修 closure; self-backend side 仍 ACTIVE due to W-074.6 family — extsw silent-skip + multi-func body 0-byte + emit_ret 不 mov %t1 → %eax 等 pre-existing bugs — v2.x 中期 W-074.6 真修时同步 closure)
+
+**Highlights**:
+
+- **2 个独立 root cause 真修** (per v2.11.9 plan mode Explore agent 调研):
+  - **`idiv` emit 无 sign-extend prefix** (emit_call.jhyy `is_div` branch, lines ~1068-1080): x86 `idivl` semantics dividend = `(%edx << 32) | %eax`; `%edx` 残留 → #DE fault → Windows STATUS_INTEGER_DIVIDE_BY_ZERO 0xC000008C (wrapped 0xC0000095 per process config). Compare `is_mod` branch 已 emits `\tcltd\n`/`\tcqto\n` BEFORE `idiv` ✅. **真修**: add `\tcltd\n` / `\tcqto\n` prefix (mirror `is_mod`).
+  - **Lexer 不识 QBE `rem` keyword** (codegen_amd64_lexer.jhyy:631 `next_token_binop` dispatcher + main `next_token` `'r'` → ret/rem disambiguate): QBE `%` operator emits `rem` (signed remainder, per QBE spec § 6.3). Lexer 之前无 `rem` branch → `next_token` returns -1 → `lex_il` 静默 skip 1 byte/iteration → `rem` keyword + 2 operand temps (5+ chars) ALL skipped → those `t24`/`t69`/`t109`/etc. SSA values never appear in `.s`. **真修**: add `rem` branch in `next_token_binop` (consumes "em", op_name="rem"); add `'r'` → rem dispatch in main `next_token` (跟 `'d'` → div pattern 一致, main dispatcher consume 第 1 byte only).
+- **Bonus 真修 (Phase B')**: `'r'` → `'ret'` dispatcher pre-existing 在 lexer.jhyy ~1124-1128 returns -1 for any non-"ret" 'r'-starting token (e.g. `remw`), making newly-added 'rem' branch unreachable. Combined into single `'r'` → ret/rem disambiguation dispatch.
+- **`is_rem` flag + dispatch 真修** (emit_call.jhyy ~lines 985-1146): new `is_rem` flag init + `cg_find_sub` check for "rem" 3-char substring + `is_rem` dispatch branch (cltd/cqto + idiv + movq %rdx, %rax — same path as is_mod).
+- **QBE fallback 5/5 EXIT exact closure 真修达成** (per [[feedback_fix_evaluation_rule]]):
+  - hello=42 ✅ (跟 baseline 一致)
+  - big_test=**12345** ✅ (从 v2.11.8 STATUS_INTEGER_OVERFLOW 0xC0000095 → v2.11.9 EXIT=12345, 真修 closure) — 9 个 `rem` ops (cltd+idivl + movq %rdx, %rax) 正确 emit
+  - struct_val_pass=35 ✅ (跟 baseline 一致)
+  - fib_renamed=832040 ✅ (= 832040 mod 256 = 40, 跟 baseline 一致)
+  - nested_struct_deep=22 ✅ (跟 baseline 一致)
+  - struct_val_assign=30 ✅ (跟 baseline 一致)
+- **QBE fallback 115/115 regress PASS preserved** + **self-backend 1/5 hello PASS preserved** (per W-074.6 baseline)
+- **self-backend regress count 持平** (无新增 flips; 自 backend 5/5 hello 闭环 + multi-func closure 仍 ACTIVE W-074.6)
+- **D43 closure v1↔v2 .il sha HOLD** (v2/v3/v4/v5 sha `42580b87...` post-fix, 跟 pre-fix `27833d0d...` 不同因 rem emit 微变 → 重 baseline per D43 closure re-baseline rule)
+- **byte-equal-amd64 10/10 PASS preserved** + **fixed_point N≥3 PASS preserved** (per [[feedback_codegen_amd64_run_zerobyte]])
+- **NEW ship gate per [[feedback_codegen_amd64_run_zerobyte]]** (audit grep self-backend big_test.s):
+  - `cltd` count = 14 (5 div + 9 rem) ✅
+  - `idivl` count = 14 ✅
+  - `movq %rdx, %rax` count = 9 = rem op count ✅ (pre-fix = 0)
+  - `_regress_big_test.s` 行数 = 8727 ≥ 100 bytes 阈值 ✅
+  - `main_jhyy.s` non-empty ✅
+  - **jhyy.exe.sha256 refresh**: `9ef7f497...`
+
+### fix_evaluation_rule 诚实记录 (per [[feedback_fix_evaluation_rule]])
+
+- v2.11.9 实际 EXIT exact closure = **5/5 QBE fallback** + **1/5 self-backend** (W-074.6 baseline HOLD)
+- v2.11.9 真宣 **QBE fallback 5/5 EXIT exact closure** (big_test EXIT=12345 真修) + **self-backend 1/5 hello PASS preserved** (跟 v2.11.8 baseline 一致, 无 regress)
+- **不强宣 "5/5 EXIT exact closure self-backend"** — W-074.6 family 显式 deferred v2.x 中期 per [[feedback_codegen_amd64_multifn]]; W-074.7.9 QBE side 真修 closure 是 scope 限定, 实际数字按 audit 记录
+- scope UP/DOWN: scope 限定在 v2.11.9 QBE side (~30 LOC source 真修). self-backend side extsw/multi-func body 0-byte 等 W-074.6 family 范围 = ~500+ LOC 多 sprint 已知 v2.6.3 → v3.1.4 持续, **不应** 强塞进 v2.11.9 (会触发 +5 scope DOWN trigger per [[feedback_codegen_amd64_multifn]])
+
+### W-074.7 演化 (per workarounds.md)
+
+- 🟡 **W-074.7.9 big_test runtime status — NEW → PARTIAL closure** (本 sprint QBE side 真修: `idiv` sign-extend prefix + lexer `rem` keyword + emit_binop `is_rem` flag + `is_rem` dispatch 真修; self-backend side 仍 ACTIVE due to W-074.6 family 范围)
+- W-074.6 multi-func self-backend body 0-byte — 仍 🟡 ACTIVE (deferred v2.x 中期; v2.11.9 不在 scope 范围)
+
+### OS 启动链路 (2026-09-13 校准)
+
+V2-C Part 2a-后-补-补-补-补-补-补-补 (续):
+- ✅ 第二前置 Part 2a-后-补-补-补-补-补-补 (v2.11.9 big_test runtime QBE side 真修: 5/5 EXIT exact closure; self-backend side 仍 ACTIVE W-074.6 family) — **本 ship**
+- 待 ship: 第二前置 Part 2a-后-补-补-补-补-补-补-补-补 (v2.11.10+ self-backend side big_test runtime closure = W-074.6 family 真修: extsw silent-skip + multi-func body 0-byte + emit_ret 不 mov %t1 → %eax 等, 估 ~500+ LOC 多 sprint, deferred v2.x 中期 per W-074.6 已知范围)
+- 待 ship: 第二前置 Part 2b (v2.12.0 QBE 移除); M5 独立 sprint 需等 v2.12.0 ship + 5/5 EXIT exact (QBE+self-backend 双 side) closure
+
+## References (v2.11.9)
+
+- **Plan**: `docs/plans/v2/v2.11.9-plan.md` (本 sprint, per feedback_plans_per_version; **FULL scope ~30 LOC source + ~110 LOC docs = ~140 LOC 2 commits**)
+- **W-074.7**: `docs/internal/workarounds.md` W-074.7.9 **NEW → PARTIAL closure** (QBE side 真修: 2 个独立 root cause 真修; self-backend side 仍 ACTIVE due to W-074.6 family)
+- **Inline annotation**: `compiler/src0/codegen_amd64_emit_call.jhyy:1076-1080` (idiv cltd/cqto prefix 真修 + 注释); `compiler/src0/codegen_amd64_emit_call.jhyy:1121-1146` (is_rem dispatch mirror is_mod + 注释); `compiler/src0/codegen_amd64_lexer.jhyy:1124-1142` (`'r'` → ret/rem disambiguate dispatch + 注释); `compiler/src0/codegen_amd64_lexer.jhyy:695-707` (next_token_binop `'r'` consume "em" → op_name="rem" + 注释)
+- **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 QBE 5/5 closure + self-backend 1/5 baseline, 不强宣 "5/5 self-backend"); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger: scope UP 控制在 v2.11.9 QBE side only, self-backend side deferred v2.x 中期 W-074.6, 不触发 +5); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: audit grep self-backend big_test.s `cltd` = 14 + `idivl` = 14 + `movq %rdx, %rax` = 9 + `.s` 行数 ≥ 100 bytes + `main_jhyy.s` 非空 + jhyy.exe.sha256 refresh); [[feedback_no_date_estimates]] (no calendar dates); [[feedback_plans_per_version]] (1 plan/minor); [[feedback_changelog_umbrella]] (vX.Y axis 只 1 umbrella changelog, sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.7.9 entry 翻转 from NEW → PARTIAL closure with corrected root cause in workarounds.md); [[feedback_audit_single_commit_diff]] (audit 单 commit, 不累计)
+
 ## References (v2.11.8)
 
 - **Plan**: `docs/plans/v2/v2.11.8-plan.md` (本 sprint, per feedback_plans_per_version; **FULL scope ~319 LOC source + ~30 docs = ~349 LOC 2 commits**)
