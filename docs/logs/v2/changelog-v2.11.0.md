@@ -855,3 +855,86 @@ V2-C Part 2a-后-补-补-补-补-补-补-补-补 (续):
 - **Self-referential slot bug 文档**: `compiler/src0/codegen_amd64_emit_mem.jhyy:285-340` (emit_alloc flag + lea+mov + 公式 slot 注释)
 - **FNARG flag propagate 文档**: `compiler/src0/codegen_amd64_emit_call.jhyy:821-833` (FNARG path 注释)
 - **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 4/5 EXIT exact closure + big_test deferred; 不强宣 5/5); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger: +2 flips 远低于 +5, ship); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: .s 行数 + main_jhyy.s 非空 check 验证 hello.jhyy = 12 行 / 207 bytes); [[feedback_no_date_estimates]] (no calendar dates); [[feedback_plans_per_version]] (1 plan/minor); [[feedback_changelog_umbrella]] (vX.Y axis 只 1 umbrella changelog, sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.7.8 entry + W-074.7.9 NEW in workarounds.md); [[feedback_audit_single_commit_diff]] (audit 单 commit, 不累计)
+
+## v2.11.11 — 2026-09-13 — W-074.6 T4-g lexer cnew/ceqw silent-skip 真修 (5/6 self-backend closure maintained; 6/6 NOT achieved — stack-slot-reuse sub-bug 暴露, deferred v2.11.11a+)
+
+**Tag**: `v2.11.11` (axis-v2 branch)
+**Status**: W-074.6 T4-g lexer 真修 **PARTIAL closure** (lexer 部分 CLOSED,big_test gcd SIGFPE 真修); 5/6 self-backend EXIT exact closure maintained (跟 v2.11.10 baseline 持平但 different bug 真修); big_test runtime 不再 hang at gcd,**新 stack-slot-reuse sub-bug 在 t_bit_pack 暴露** (W-074.6 family 范围内, deferred v2.11.11a+ 真修).
+
+### Scope honesty (per [[feedback_fix_evaluation_rule]])
+
+**6/6 self-backend closure NOT achieved in v2.11.11** (跟 v2.11.10 baseline 持平 5/6 closure)。v2.11.11 plan 文档 "6/6 100% 可达" 预测 wrong: T4-g lexer 真修后, big_test 通过 t_sign 后 hang 在 t_bit_pack (新 stack-slot-reuse sub-bug 暴露, W-074.6 family pre-existing bug NOT in v2.11.11 plan scope)。5/6 self-backend 测试 EXIT exact closure 维持 (hello=42 / struct_val_pass=35 / fib_renamed=40 / nested_struct_deep=22 / struct_val_assign=30)。
+
+**T4-g 真修 verified**: 
+- lexer stage 1 guard 加 `n1 == (110 as i32)` ('n' for cnew prefix) → cnew 不再 stage 1 reject
+- lexer stage 2 guard flag pattern refactor (2 独立 if 设 flag + 最终 if check) 接受 type suffix at idx 3 (4-char ceqw/cnew) OR idx 4 (5-char csltw/cultw/...)
+- op_str table 加 `n1 == 110 ('n') → "cnew"` branch consistency (dead store,但为 future use)
+- big_test.il 65 个 4-char compare op 正确 emit (11 ceqw → 11 sete + 54 cnew → 54 setne in big_test_run.s)
+- gcd Euclid loop cond check 正确 emit (cmpl + setne + cmpl $0 + jne/jmp) → **不再 SIGFPE in gcd+158** (跟 v2.11.10 不同)
+- Stage 2 N=4 jhyy 编 jhyy closure (jhyy_v2/v3/v4/v5 byte-equal) PASS
+
+**Codegen nested-OR workaround bug 取证 (NEW finding)**: v2.11.11 首次尝试 stage 2 guard 改成 `(n3 OR n3 OR n3 OR n3) || (n4 OR n4 OR n4 OR n4)` 嵌套 OR → 触发 `compiler/src0/codegen.jhyy:2060-2101` short-circuit OR workaround bug: right_node 含 nested OR 时, `cg_expr` 调用 right_node 后 `cur_block` 被 nested OR 推到 inner merge,但 phi predecessor 仍用 stale start → QBE "predecessors not matched in phi" → selfhost build break。**refactor 绕开**: flag pattern (2 独立 if + flag + 最终 if check) 替代 nested OR, eval single block。
+
+**NEW sub-bug 暴露 (per [[feedback_fix_evaluation_rule]] honest record)**: big_test 通过 gcd 后,**调用 t_bit_pack 函数 hang** (5min+ timeout). 取证 bit_pack emit `(a & 0xFF) | ((b & 0xFF) << 8) | ((c & 0xFF) << 16) | ((d & 0xFF) << 24)` 时,所有 shift amounts (8, 16, 24) 跟 0xFF masks 写**同一个** -32(%rbp) slot (stack-slot-reuse bug in emit_binop shift op 路径)。QBE 后端不受影响 (QBE 走自己 allocator, EXIT=57 PASS 维持)。**per user 2026-09-13 决定 ("仅 T4-g 真修 (推荐)") scope DOWN 接受** — 5/6 closure maintained (跟 v2.11.10 baseline 持平但 different bug 真修); 6/6 closure 留 v2.11.11a+ 真修 stack-slot-reuse (~30-50 LOC 估)。
+
+### 改动 (2 commits, per v2.11.9/10 convention)
+
+**Commit 1 — fix(codegen):** v2.11.11 W-074.6 T4-g lexer cnew/ceqw silent-skip 真修 (5/6 self-backend closure maintained; 6/6 deferred v2.11.11a+ stack-slot-reuse sub-bug)
+- `compiler/src0/codegen_amd64_lexer.jhyy` ~5 LOC:
+  - stage 1 guard 加 `n1 == (110 as i32)` 接受 cnew prefix (~1 LOC)
+  - stage 2 guard refactor flag pattern (2 独立 if 设 `has_type_suffix` flag + 最终 if check),避免 nested OR 触发 codegen short-circuit OR workaround bug (~4 LOC)
+  - op_str table 加 `n1 == 110 ('n') → "cnew"` branch consistency (~1 LOC, dead store 但保持代码对称)
+
+**Commit 2 — chore(docs):** v2.11.11 sub-section + W-074.6 T4-g closure PARTIAL + per-version plan + README/CHANGELOG
+- `docs/internal/workarounds.md` (~30 LOC): 新增 "W-074.6 T4-g closure: lexer cnew/ceqw silent-skip — ⚠️ PARTIAL (v2.11.11 ship)" entry, 详记 root cause (lexer stage 1 漏 'n' + stage 2 只查 n4 + flag pattern 绕 codegen nested-OR workaround bug + 暴露 stack-slot-reuse sub-bug) + 真修 + 验证 (5/6 EXIT exact closure maintained + Stage 2 N=4 PASS + .s audit 65 setXX emits) + Scope DOWN (6/6 deferred v2.11.11a+)
+- `docs/logs/v2/changelog-v2.11.0.md` (本 sub-section, ~80 LOC)
+- `docs/plans/v2/v2.11.11-plan.md` (per-version plan NEW, ~250 LOC per feedback_plans_per_version)
+- `docs/plans/v2/README.md` v2.11.11 ship row add (+1 row)
+- `README.md` + `README.zh-CN.md` v2.11.11 ship row add (+2 rows)
+- `CHANGELOG.md` v2.11.11 release row add (+1 row)
+
+### Ship gates (实测 2026-09-13 fresh verify)
+
+**Hard gates (no regression)**:
+- ✅ QBE fallback regress: 5/5 PASS (hello=42 / fib_renamed=832040 / struct_val_pass=35 / nested_struct_deep=22 / big_test=12345)
+- ✅ byte_equal_amd64.sh 默认: 10/10 PASS
+- ✅ byte_equal_amd64.sh --baseline: 20/20 PASS
+- ✅ D43 closure v1↔v2 sha HOLD (`a4f32837b6bdd9b6f8e00ae8161ab3de581cc4f535a32f7a237d7c770d4537c3` post-fix; v2.11.10 baseline `7772b50` different 因 lexer 微变)
+- ✅ fixed_point.sh N=3 PASS (v2.9.0 baseline, 不变)
+- ✅ cap_test.jhyy `JHY_SELF_BACKEND=1` exit ≠ 0 (deferred W-074.6 family)
+
+**v2.11.11 deliverable gates (scope DOWN per user 决定)**:
+- ✅ self-backend regress terminate + non-empty .s: 5/5 + big_test (preserved v2.11.10)
+- ⚠️ self-backend EXIT exact match: 5/6 maintained (hello=42 / struct_val_pass=35 / fib_renamed=40 / nested_struct_deep=22 / struct_val_assign=30);big_test NOT 57 hang at t_bit_pack (5min+ timeout)
+- ✅ T4-g 真修 verified: setXX breakdown 11 sete + 54 setne = 65 missing compares emit + jne .Lloop_body + jmp .Lloop_end emits 出现在 big_test_run.s; gcd Euclid loop cond check 正确 emit (cmpl + setne + cmpl $0 + jne/jmp) → 不再 SIGFPE in gcd+158
+- ✅ T3-a closure preserved: gcd frame = 600 bytes (75 temps × 8), main_jhyy frame = 15488 bytes (legitimately large for root fn, NOT T3-a regression)
+- ✅ Self-backend regress: **71/115 PASS** (vs v2.11.10 baseline 58/115, **+13 tests 通过** T4-g fix 暴露之前 crash 在 gcd 的 tests); FLIP count = 13 PASS improvements (非 scope DOWN trigger per [[feedback_codegen_amd64_multifn]], trigger 定义为 regress 不改善)
+- ✅ jhyy.exe.sha256 refresh
+
+**NEW ship gate audit per [[feedback_codegen_amd64_run_zerobyte]]**:
+- `set(ne|e)\b` count in big_test_run.s: ≥ 65 (T4-g 真修 verified)
+- `jne .Lloop_body` count: > 100 (loop body entry jnz now emits)
+- `jmp .Lloop_end` count: > 100 (loop end jmp now emits)
+- `subq $15488` in big_test_run.s: 0 次 (T3-a closure preserved)
+- `main_jhyy.s` non-empty ✅
+
+### OS 启动链路 (2026-09-13 校准)
+
+V2-C Part 2a-后-补-补-补-补-补-补-补-补 (续):
+- ✅ v2.11.6 peephole cap + block-name uniquify (5/5 link) ship
+- ✅ v2.11.7 调研 + scope DOWN defer ship
+- ✅ v2.11.8 derived-address tracking (4/5 EXIT exact closure) ship
+- ✅ v2.11.9 idiv sign-extend + rem lexer gap 真修 (QBE side 5/5 closure) ship
+- ✅ v2.11.10 T3-a per-fn frame size + T4-c multi-arg FN_ARG 真修 (5/6 self-backend closure) ship
+- ✅ **v2.11.11 T4-g lexer cnew/ceqw silent-skip 真修 (5/6 self-backend closure maintained; 6/6 deferred v2.11.11a+ stack-slot-reuse sub-bug) — 本 ship**
+- 待 ship: v2.11.11a+ W-074.6 stack-slot-reuse sub-bug 真修 (~30-50 LOC 估, emit_binop shift op 路径) — 6/6 self-backend closure 闭环
+- 待 ship: v2.12.0 QBE 移除 (Part 2b)
+- 待 ship: v2.x 中期 W-074.6 family 其余 sub-bug (extsw silent-skip + emit_ret 不 mov %t1 → %eax 等, ~290+ LOC 估,累计 ~500+ LOC per v2.11.9 ship record)
+- M5 独立 sprint 需等 v2.12.0 ship + 6/6 EXIT exact closure (本 sprint 仍 5/6,留 v2.11.11a+)
+
+## References (v2.11.11)
+
+- **Plan**: `docs/plans/v2/v2.11.11-plan.md` (本 sprint, per feedback_plans_per_version; **~5 LOC source + ~200 docs = ~205 LOC 2 commits**; partial closure per user pre-confirmed scope DOWN "仅 T4-g 真修 (推荐)")
+- **W-074.6 T4-g closure**: `docs/internal/workarounds.md` W-074.6 T4-g closure **NEW → ⚠️ PARTIAL** entry (5/6 self-backend EXIT exact + T4-g lexer 真修 verified + codegen nested-OR workaround bug 取证 + stack-slot-reuse sub-bug 暴露 deferred v2.11.11a+)
+- **Inline annotation**: `compiler/src0/codegen_amd64_lexer.jhyy:1212` (stage 1 加 n1=='n' OR); `:1218-1234` (stage 2 flag pattern refactor); `:1248` (op_str n1='n' branch consistency); `:1478-1482` (lex_il silent skip on `rc < 0`); `compiler/src0/codegen_amd64_emit_call.jhyy:1166-1192` (cmpl+setcc+movzbl dispatch already correct); `compiler/src0/codegen_amd64_emit_ctrl.jhyy:215-246` (test+jne+jmp dispatch already correct); `compiler/src0/codegen.jhyy:2060-2101` (short-circuit OR workaround bug 取证)
+- **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 5/6 closure maintained, 不强宣 "6/6 self-backend"); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger: self-backend regress +13 PASS 整体改善, 不触发); [[feedback_codegen_amd64_run_zerobyte]] (audit gates: ≥ 65 setXX emits + jne Lloop_body emits + jmp Lloop_end emits + `subq $15488` = 0 + main_jhyy.s 非空); [[feedback_no_date_estimates]] (no calendar dates); [[feedback_plans_per_version]] (1 plan/minor); [[feedback_changelog_umbrella]] (vX.Y axis 只 1 umbrella changelog, sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.6 T4-g closure entry NEW); [[feedback_audit_single_commit_diff]] (audit 单 commit, 不累计); [[feedback_auto_push_after_commit]] (commit 成功直接 push); [[feedback_ssh_key_same_shell]] (push 前 same-shell SSH add)

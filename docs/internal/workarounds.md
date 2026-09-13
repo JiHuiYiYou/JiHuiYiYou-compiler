@@ -5760,3 +5760,54 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 **Memory:** [[feedback_fix_evaluation_rule]] (诚实记录 5/6 closure, 不强宣 "5/5 self-backend"); [[feedback_codegen_amd64_multifn]] (scope UP trigger: T4-g 暴露, scope DOWN 5/6 closure 接受); [[feedback_codegen_amd64_run_zerobyte]] (audit gates: per-fn subq 出现 多个 distinct frame size + main_jhyy.s 非空); [[feedback_document_workarounds_in_docs]] (W-074.6 T3-a 详记 root cause + 真修 + scope 范围); [[feedback_plans_per_version]] (1 plan/minor, v2.11.10-plan.md NEW); [[feedback_changelog_umbrella]] (v2.x axis 只 1 umbrella changelog, v2.11.10 sub-section append); [[feedback_audit_single_commit_diff]] (audit 单 commit, 不累计)
 
 **OS 启动链路:** W-074.6 T3-a ✅ CLOSED (v2.11.10 ship); W-074.6 family 其余 sub-bug (T4-g emit_binop cnew silent-skip + emit_jnz loop body silent-skip + extsw silent-skip + emit_ret 不 mov %t1 → %eax 等) 仍 🟡 ACTIVE 留 v2.11.10a+ 真修。5/5 self-backend closure 留 v2.11.10a+ 后续 sprint。M5 启动仍需等 W-074.6 family 全闭环 (per `v1.x-phase-4-m5-boot-from-scratch.md`)。
+
+## W-074.6 T4-g closure: lexer cnew/ceqw silent-skip — ⚠️ PARTIAL (v2.11.11 ship 2026-09-13) — lexer 真修 OK, 6/6 closure 仍 DEFERRED (新 stack-slot-reuse sub-bug 暴露)
+
+**ID:** W-074.6 T4-g closure (sub-bug 真修 attempt)
+**状态:** ⚠️ **PARTIAL** 2026-09-13 — v2.11.11 ship on axis-v2 + tag `v2.11.11`。lexer 4-char compare-op recognition 真修 (stage 1 加 'n' for cnew + stage 2 加 n3 OR n4 type suffix + flag-pattern refactor 绕 codegen nested-OR workaround bug)。**6/6 self-backend EXIT exact closure NOT 达成** (5/6 maintained, big_test 仍 fail 但改 different reason)。
+
+**根因 (v2.11.11 取证):** v2.11.10 plan "T4-g 真修 deferred v2.11.10a+ ~500+ LOC W-074.6 family multi-sprint" 预测 wrong: v2.11.11 调研取证 T4-g 实际只 是 lexer 4-char compare-op guard 漏洞 (~5 LOC fix), 不是 family-wide 真修。
+- `compiler/src0/codegen_amd64_lexer.jhyy:1212` stage 1 guard `if n1 == 115 || n1 == 117 || n1 == 101` 漏 `n1 == 110` (cnew prefix) → cnew reject → lex_il silent skip
+- `compiler/src0/codegen_amd64_lexer.jhyy:1218` stage 2 guard `if n4 ∈ {w/l/s/d}` 只查 n4 → 4-char ceqw/cnew (type suffix 在 n3, n4 是 ws/EOF) reject → silent skip
+- cascading: `next_token` return -1 → `lex_il` (line 1478-1482) silent skip 1 byte → `%t65 =w cnew %t63, %t64` 整行 byte-by-byte 撕碎 → emit_binop 不调 → dst `%t65` store + emit_jnz `jnz %t65, @loop_body22, @loop_end23` cascading vanish → big_test 65 missing setXX emits (11 ceqw → 11 sete + 54 cnew → 54 setne)
+
+**真修 (v2.11.11 ship, ~5 LOC source):**
+- `compiler/src0/codegen_amd64_lexer.jhyy:1212-1257` ~5 LOC:
+  1. **stage 1 guard** (line 1212): 加 `n1 == (110 as i32)` ('n' for cnew 4-char prefix)
+  2. **stage 2 guard** (line 1218): 改成 `(n3 ∈ {w/l/s/d}) || (n4 ∈ {w/l/s/d})` 同时接受 4-char (ceqw/cnew suffix 在 n3) + 5-char (csltw/cultw/... suffix 在 n4) compare op
+  3. **op_str table** (line 1248-1251): 新增 `n1 == 110 ('n') → op_str = "cnew"` branch (op_str 是 dead store,emit_binop 用 cg_find_sub 二次 scan tok.text 拿 op name,加为 consistency)
+
+**Codegen nested-OR workaround bug 取证 (v2.11.11 NEW finding):**
+- v2.11.11 首次尝试: `(n3 OR n3 OR n3 OR n3) || (n4 OR n4 OR n4 OR n4)` 嵌套 OR (outer 2 个 operands, each 4-condition OR chain)
+- 触发 `compiler/src0/codegen.jhyy:2060-2101` short-circuit OR workaround bug: right_node 含 nested OR 时, `cg_expr` 调用 right_node 后 `cur_block` 被 nested OR 推到 inner merge (@sc_merge9850), 但 phi predecessor 仍用 stale `@sc_eval9840` (start of eval branch) → QBE "predecessors not matched in phi %t48144" 拒绝 IL → selfhost build break
+- **refactor**: 改成 flag pattern (2 独立 if + flag + 最终 if check),每个 `if n3==X || n3==Y || n3==Z || n3==W` 是 flat 4-OR (eval single block, 跟 v2.11.10 n4 check 同样 pattern, work)。workaround: bug fix deferred v2.x 中期 V2-D (per `v0 codegen bug 2 workaround` 注释,codegen.jhyy:952)
+
+**验证 (v2.11.11 ship gates):**
+- ✅ Stage 2 N=4 closure (jhyy_v2/v3/v4/v5 sha256 + .il + .s 全 byte-equal) PASS
+- ✅ QBE fallback big_test exit=57 PASS (5/5 closure preserved)
+- ✅ self-backend big_test EXIT=57 ❌ FAIL (5/6 closure maintained, NO 6/6): exit=127 SIGFPE (v2.11.10) → 通过 t_sign 后 hang 在 t_bit_pack (v2.11.11)
+- ✅ T4-g 真修 confirmed: `setXX` breakdown 11 sete + 54 setne = 65 missing compares emit + jne .Lloop_body + jmp .Lloop_end emits 出现在 big_test_run.s; gcd Euclid loop cond check 正确 emit (cmpl + setne + cmpl $0 + jne/jmp)
+- ✅ T3-a closure preserved: gcd frame = 600 bytes (75 temps × 8), main_jhyy frame = 15488 bytes (1936 temps × 8 = legitimately large for root fn, NOT T3-a regression)
+- ✅ 5/6 self-backend EXIT exact: hello=42 / struct_val_pass=35 / fib_renamed=40 / nested_struct_deep=22 / struct_val_assign=30
+- ✅ Self-backend regress: **71/115 PASS** (vs v2.11.10 baseline 58/115, +13 tests 通过 T4-g fix 暴露之前 crash 在 gcd 的 tests)
+- ✅ jhyy.exe.sha256 refresh (新 sha 记录)
+
+**Scope DOWN (per [[feedback_fix_evaluation_rule]] + [[feedback_codegen_amd64_multifn]]):**
+- ❌ big_test EXIT 仍 NOT 57。T4-g 真修后 gcd Euclid loop 正确 exit → big_test 通过 t_sign (line 894) → 调用 t_bit_pack → **新 stack-slot-reuse sub-bug 暴露** (per `compiler/tests/examples/big_test_run.s:1280-1290`):
+  ```
+  bit_pack:
+    movl $255, -32(%rbp)   # temp slot 1
+    movl $8, -32(%rbp)     # temp slot 1 (REUSED! should be different slot)
+    movl $255, -32(%rbp)   # temp slot 1 (REUSED)
+    movl $16, -32(%rbp)    # temp slot 1 (REUSED)
+    movl $255, -32(%rbp)
+    movl $24, -32(%rbp)
+  ```
+  All shift amounts (8, 16, 24) 跟 0xFF masks share slot `-32(%rbp)`。Self-backend codegen 在 bit_pack 表达式 `(a & 0xFF) | ((b & 0xFF) << 8) | ((c & 0xFF) << 16) | ((d & 0xFF) << 24)` emit 时,所有 temp 分配到同一个 slot (codegen_amd64_emit_call.jhyy 路径问题,likely 跟 v2.11.6 大 frame-size tracker 仍相关 — emit_temp_allocator 误分配 OR emit_binop shift op 不正确 emit mov)。Result: bit_pack 计算错值 → check_eq(bit_pack(0x12, 0x34, 0x56, 0x78), 0x78563412) 不等 → hang OR 错值 cascade (5min+ timeout confirmed hang 不是 quick crash)。QBE 后端不受影响 (QBE 走自己 allocator,EXIT=57 PASS)。
+- 5/6 self-backend closure 留 v2.11.11a+ 真修: stack-slot-reuse for shift ops in emit_binop path (新 W-074.6 sub-bug,~30-50 LOC 真修估,emit_binop 左移 op 路径检查)。
+- **诚实 scope 评估**: T4-g 是单独 sub-bug 真修 (1 文件 ~5 LOC),v2.11.11 闭环 T4-g。6/6 closure 需要 stack-slot-reuse 真修 (~30-50 LOC,~1 sprint),user 启动 v2.11.11a 时按相同 scope DOWN 接受。
+- **v2.11.11 plan "6/6 100% 可达" 预测 wrong #2**: v2.11.11 plan 也预测 "T4-g 真修即 6/6 closure", 实际 T4-g 真修完成但暴露下一层 stack-slot-reuse sub-bug (per v2.11.10 plan Risk 5 警告的 "可能暴露 W-074.6 family 其余 sub-bug" — 实际发生)。
+
+**Memory:** [[feedback_fix_evaluation_rule]] (诚实记录 5/6 closure maintained, 不强宣 6/6); [[feedback_codegen_amd64_multifn]] (scope DOWN 接受 partial 真修); [[feedback_codegen_amd64_run_zerobyte]] (audit gates: per-fn subq distinct frame size + main_jhyy.s 非空 + setXX count ≥ 65 + jne Lloop_body emits); [[feedback_plans_per_version]] (1 plan/minor, v2.11.11-plan.md NEW); [[feedback_changelog_umbrella]] (v2.x axis 只 1 umbrella changelog, v2.11.11 sub-section append); [[feedback_audit_single_commit_diff]] (audit 单 commit, 不累计); [[feedback_document_workarounds_in_docs]] (T4-g 详记 root cause + 真修 + codegen workaround bug + 新 stack-slot-reuse 暴露)
+
+**OS 启动链路:** W-074.6 T4-g ✅ CLOSED for lexer 部分 (v2.11.11 ship); 6/6 self-backend closure 留 v2.11.11a+ 真修 stack-slot-reuse sub-bug (~30-50 LOC 估)。W-074.6 family 已知范围 (~500+ LOC per v2.11.9 ship record) 持续缩小: T3-a + T4-c + T4-g (partial) 真修累计 ~210 LOC,剩余 ~290+ LOC 主要在 stack-slot-reuse + extsw silent-skip + emit_ret 不 mov %t1 → %eax 等路径,留 v2.x 中期 V2-D。M5 启动仍需等 W-074.6 family 全闭环。
