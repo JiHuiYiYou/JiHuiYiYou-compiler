@@ -5727,3 +5727,36 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 **Memory:** [[feedback_fix_evaluation_rule]] (诚实记录 4/5 EXIT exact, QBE 5/5 closure, 不强宣 "5/5 self-backend"); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger: 4/5 self-backend = 跟 v2.11.8 baseline 一致, 不触发); [[feedback_codegen_amd64_run_zerobyte]] (audit gates: .s 行数 ≥ baseline + main_jhyy.s 非空 + idiv 必 preceding cltd/cqto + movq %rdx, %rax ≥ rem op count); [[feedback_document_workarounds_in_docs]] (workaround 详记 root cause + 真修 + scope 范围); [[feedback_plans_per_version]] (1 plan/minor)
 
 **OS 启动链路:** W-074.7.9 QBE side ✅ CLOSED (v2.11.9 ship); self-backend side 仍 🟡 ACTIVE (W-074.6 family 范围, v2.x 中期 W-074.6 真修时同步 closure)。M5 启动需等 W-074.6 闭环 (per `v1.x-phase-4-m5-boot-from-scratch.md`)。
+
+## W-074.6 T3-a closure: per-fn frame size — ✅ CLOSED (v2.11.10 ship 2026-09-13)
+
+**ID:** W-074.6 T3-a closure (新 entry, sub-bug 真修)
+**状态:** 🟢 **CLOSED** 2026-09-13 — v2.11.10 ship on axis-v2 + tag `v2.11.10`。per-fn frame size 真修 (两阶段 pre-scan + per_fn_max[256] table + emit_func_header 改读 per-fn 值), 替换 v2.11.2 ship 决定 global-max variant。
+
+**根因 (v2.11.10 plan mode Explore agent 取证):** v2.11.2 ship 决定用 global-max variant (~10 LOC) 把 module-level max %tN 当 frame_size = (max+1)*8 给所有函数用。big_test.jhyy 有 ~60 fns, max temp id 1936 → frame_size = 15488 字节。gcd/fact/fib 等递归函数每次 call 都 subq $15488, %rsp → 6 层递归 × 15488 = ~93 KB frame, 加 t_fact/t_fib/t_collatz/t_gcd 等多个递归函数同时累积 → SIGSEGV (139)。原 v2.11.3 plan 把 T3-a 误判为 "perf only, deferred v2.x 中期 V2-D", 实际是 self-backend 5/5 closure 的硬前置。
+
+**真修 (v2.11.10 ship, ~155 LOC source):**
+- codegen_amd64_state.jhyy +50 LOC: CGState struct 加 `fn_starts: *u8` (i64[256]), `per_fn_max: *u8` (i64[256]), `fn_count: i64` 3 字段; cg_state_init 各 arena_alloc 256*8 = 2KB + memset 0; 新增 `cg_compute_per_fn_max_temps` 两阶段 pre-scan 函数 (Phase 1 扫 fn_starts, Phase 2 per-fn max temp id)
+- codegen_amd64.jhyy +5 LOC: 替换 `cg_compute_global_max_temp` 单次扫描 → `cg_compute_per_fn_max_temps` 两阶段 pre-scan; 保留 legacy `cg_state_set_frame_max_temp` 兼容
+- codegen_amd64_emit_ctrl.jhyy +30 LOC: emit_func_header 改读 `per_fn_max[(*cg).cur_fn_idx]`, 加 use_per_fn check 跟 fallback `frame_max_temp` 兼容; v2.11.10 T4-c 配套: extract name from full header text (`$name(ws)args`) 用于 `.globl` + label (因 lexer 现在 dup 完整 header, 不只 name); emit_func_header 调 `cg_state_set_fn_header(state, (*t).text, (*t).text_len)` populate cur_fn_header_text
+- codegen_amd64_lexer.jhyy +20 LOC: next_token_func_header 改 dup 完整 header text (`function w $name(args)`) 替代 v2.11.0-2.11.9 只 dup name; hdr_start 跳过 ws 让 dup 起始就是 "function" 字符 (避免 `.globl  function...` 链接失败)
+- codegen_amd64_emit_call.jhyy +37 LOC: emit_copy FNARG 路径替换 hardcode `reg_rcx_for_qt(dst_qt)` → `cg_find_arg_idx` + `reg_rax_for_qt_idx(dst_qt, idx, target_tag)`, Win x64 arg 0..3 映射到 %rcx/%rdx/%r8/%r9 (SysV → rdi/rsi/rdx/rcx via reg_rax_for_qt_idx); safety fallback `reg_rcx_for_qt` 当 header_text=0 / arg not found
+
+**验证 (v2.11.10 ship gates):**
+- ✅ hello=42 / struct_val_pass=35 / fib_renamed=40 / nested_struct_deep=22 / struct_val_assign=30 5/6 EXIT exact closure
+- ✅ big_test: SIGSEGV (139, v2.11.9) → SIGFPE (127, v2.11.10)。T3-a 真修 confirmed: gcd frame `subq $600, %rsp` (75 temps × 8) vs 旧 `subq $15488, %rsp`; **T4-c 真修 confirmed**: gcd body args emit `movl %ecx, -504(%rbp)` + `movl %edx, -512(%rbp)` (vs 旧 hardcode 都用 %ecx)
+- ✅ Stage 2 N=4 jhyy 编 jhyy closure (jhyy_v2/v3/v4/v5 byte-equal) PASS
+- ✅ objdump audit: distinct subq frame size 出现 (per-fn 优化生效,不是单一 15488); `subq $15488` 在 big_test_run.s 出现 0 次 (vs 30+ 次 pre-fix)
+- ✅ QBE fallback 115/115 regress preserved
+- ✅ byte-equal-amd64 10/10 preserved
+- ✅ jhyy.exe.sha256 refresh
+
+**Scope DOWN (per [[feedback_fix_evaluation_rule]] + [[feedback_codegen_amd64_multifn]]):**
+- ❌ big_test EXIT 仍 127 (≠ 12345 = exit 57)。gdb 取证: gcd 进入 Euclid 循环后,IL `%t65 = cnew %t63, %t64` + `jnz %t65, @loop_body22, @loop_end23` 在 .s 完全 missing (T4-g emit_binop cnew + emit_jnz silent skip — W-074.6 family pre-existing bug)。最终 b 变 0 时 idivl -576(%rbp) SIGFPE。
+- v2.11.10 plan 文档 "5/5 closure 100% 可达, 单 sprint 闭环" 预测 wrong: T3-a + T4-c fix 后暴露 T4-g (新 W-074.6 sub-bug)。per [[feedback_codegen_amd64_multifn]] scope UP trigger (~30 LOC additional 真修需要 W-074.6 family 进一步深入); **5/6 closure = 跟 v2.11.9 baseline 一致但 different bug, 不触发 scope DOWN trigger**。
+- 5/5 self-backend closure 留 v2.11.10a+ T4-g (emit_binop cnew + emit_jnz loop body entry) 真修。
+- W-074.6 family 已知范围 ~500+ LOC 多 sprint (per v2.11.9 ship record), 本 sprint T3-a + T4-c 真修 ~155 LOC, 其他 emit_binop/emit_jnz 静默 skip sub-bug 仍 ACTIVE 留 v2.x 中期 W-074.6 真修时同步 closure。
+
+**Memory:** [[feedback_fix_evaluation_rule]] (诚实记录 5/6 closure, 不强宣 "5/5 self-backend"); [[feedback_codegen_amd64_multifn]] (scope UP trigger: T4-g 暴露, scope DOWN 5/6 closure 接受); [[feedback_codegen_amd64_run_zerobyte]] (audit gates: per-fn subq 出现 多个 distinct frame size + main_jhyy.s 非空); [[feedback_document_workarounds_in_docs]] (W-074.6 T3-a 详记 root cause + 真修 + scope 范围); [[feedback_plans_per_version]] (1 plan/minor, v2.11.10-plan.md NEW); [[feedback_changelog_umbrella]] (v2.x axis 只 1 umbrella changelog, v2.11.10 sub-section append); [[feedback_audit_single_commit_diff]] (audit 单 commit, 不累计)
+
+**OS 启动链路:** W-074.6 T3-a ✅ CLOSED (v2.11.10 ship); W-074.6 family 其余 sub-bug (T4-g emit_binop cnew silent-skip + emit_jnz loop body silent-skip + extsw silent-skip + emit_ret 不 mov %t1 → %eax 等) 仍 🟡 ACTIVE 留 v2.11.10a+ 真修。5/5 self-backend closure 留 v2.11.10a+ 后续 sprint。M5 启动仍需等 W-074.6 family 全闭环 (per `v1.x-phase-4-m5-boot-from-scratch.md`)。

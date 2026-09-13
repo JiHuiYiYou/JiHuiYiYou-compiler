@@ -33,6 +33,33 @@
 
 ---
 
+### v2.11.10 — 2026-09-13 — **axis-v2 W-074.6 T3-a per-fn frame size + T4-c multi-arg FN_ARG 真修 — 5/6 self-backend EXIT exact closure** (axis-v2 only; main 待 merge; **5/5 self-backend NOT achieved — T4-g emit_binop cnew + emit_jnz silent-skip exposed**)
+
+**Tag**: `v2.11.10` (axis-v2 branch)
+**Status**: W-074.6 T3-a per-fn frame size **✅ CLOSURE** + W-074.6 T4-c multi-arg FN_ARG 真修 (scope UP 配套);self-backend 5/6 EXIT exact closure (跟 v2.11.9 baseline 一致但 different bug 真修);5/5 self-backend closure deferred v2.11.10a+ (T4-g emit_binop cnew + emit_jnz loop body entry silent-skip, pre-existing W-074.6 family bug)
+
+**Highlights**:
+
+- **T3-a per-fn frame size 真修** — 两阶段 pre-scan (`cg_compute_per_fn_max_temps` Phase 1 扫 fn_starts, Phase 2 per-fn max temp id) + CGState 加 fn_starts/per_fn_max/fn_count 3 字段 + emit_func_header 改读 `per_fn_max[cur_fn_idx]` 替换 v2.11.2 global-max variant (1 个 fn = 15488 bytes frame → 递归函数 SIGSEGV 真修)
+  - big_test_run.s per-fn `subq $N, %rsp` 出现 多个 distinct frame sizes (gcd $600 / t_gcd $5920 / etc)
+  - `subq $15488` 出现 0 次 (vs 30+ pre-fix)
+  - gcd `subq $600, %rsp` vs 旧 `subq $15488, %rsp` (75 temps × 8 = 600 vs 1936 temps × 8 = 15488)
+- **T4-c multi-arg FN_ARG 真修** (scope UP 配套 T3-a):
+  - lexer `next_token_func_header` 改 dup 完整 header text (`function w $name(args)`) 替代 v2.11.0-2.11.9 只 dup name;hdr_start 跳过 ws 让 dup 起始就是 "function" 字符 (避免 `.globl  function...` 链接失败)
+  - emit_func_header 加 `cg_state_set_fn_header` populate cur_fn_header_text + extract name from full header for `.globl` + label
+  - emit_copy FNARG 路径替换 hardcode `reg_rcx_for_qt(dst_qt)` → `cg_find_arg_idx` + `reg_rax_for_qt_idx(dst_qt, idx, target_tag)`,Win x64 arg 0..3 = %rcx/%rdx/%r8/%r9 (SysV → rdi/rsi/rdx/rcx via target_tag)
+  - big_test gcd body emit `movl %ecx, -504(%rbp)` (arg 0 = %a) + `movl %edx, -512(%rbp)` (arg 1 = %b) vs 旧硬编码 `movl %ecx` 都用第 1 arg
+- **诚实记录 per [[feedback_fix_evaluation_rule]]**:**5/6 self-backend EXIT exact closure** ✅ (hello=42 / struct_val_pass=35 / fib_renamed=40 / nested_struct_deep=22 / struct_val_assign=30), 跟 v2.11.9 baseline 一致但 different bug 真修
+- **5/5 self-backend closure NOT achieved** — gdb 取证 big_test 在 T3-a+T4-c 真修后 SIGFPE at `gcd+158 idivl -576(%rbp)` (T4-g:emit_binop cnew silent-skip + emit_jnz loop body entry silent-skip — pre-existing W-074.6 family bug, NOT in v2.11.10 plan scope)。v2.11.10 plan 文档 "5/5 100% 可达" 预测 wrong — per [[feedback_codegen_amd64_multifn]] scope UP trigger:T4-g 暴露后 scope DOWN 5/6 闭环 接受 (跟 v2.11.9 baseline 一致不触发 +5 FLIP trigger)。**T4-g 真修 deferred v2.11.10a+ (~30-50 LOC 估)**
+- **Stage 2 N=4 jhyy 编 jhyy 闭环 (v2/v3/v4/v5 byte-equal) PASS** + **QBE fallback 115/115 PASS preserved** + **byte-equal-amd64 10/10 preserved** + **fixed-point N≥3 PASS preserved**
+- **D43 closure v1↔v2 .il sha HOLD** (re-baseline 因 emit 微变;new sha record in build artifacts)
+- **jhyy.exe.sha256 refresh**
+
+**完整 changelog**: [`docs/logs/v2/changelog-v2.11.0.md`](docs/logs/v2/changelog-v2.11.0.md) § v2.11.10
+**Plan**: [`docs/plans/v2/v2.11.10-plan.md`](docs/plans/v2/v2.11.10-plan.md)
+
+---
+
 ### v2.11.8 — 2026-09-13 — **axis-v2 W-074.7.8 真修 — 4/5 EXIT exact closure** (axis-v2 only; main 待 merge)
 
 **Tag**: `v2.11.8` (axis-v2 branch)
