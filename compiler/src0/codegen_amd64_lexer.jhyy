@@ -692,6 +692,19 @@ fn next_token_binop(s: *LexState, arena: *u8, t: *u8, op_byte: i32) -> i32 {
             i = i + (1 as i64);
         }
         op_name = "div" as *u8;
+    } else if op_byte == (114 as i32) {
+        // v2.11.9 (W-074.7.9): "rem" — consume "em" (QBE '%' operator = signed remainder).
+        // Same x86 path as mod (cltd/cqto + idiv + movq %rdx, %rax); differ from mod
+        // only in IL keyword, so op_name = "rem" routes through emit_binop is_rem branch.
+        let n1 = lex_peek_byte_at(s, 0 as i64);
+        let n2 = lex_peek_byte_at(s, 1 as i64);
+        if n1 != (101 as i32) || n2 != (109 as i32) { return -1 as i32; }
+        let mut i: i64 = 0 as i64;
+        while i < (2 as i64) {
+            let _x = lex_next_byte(s);
+            i = i + (1 as i64);
+        }
+        op_name = "rem" as *u8;
     } else {
         // V2-B v2.6.0 (Unit B Stub-Fill): refactor — set sentinel (was
         // `return -1`), uniform type across chain branches. Check after.
@@ -1108,10 +1121,27 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         return -1 as i32;
     }
 
-    // ── 'r' → 'ret' ──
+    // ── 'r' → 'ret' / 'rem' ──
+    // v2.11.9 (W-074.7.9): 'rem' 必须在 'r' dispatch 内部 disambiguate —
+    // 否则 'r' → 'ret' fallback 对 'remw' 等返回 -1 → lex_il 静默 skip →
+    // rem-result SSA values 永远 missing from .s。QBE rem = signed remainder
+    // (same x86 path as mod: cltd/cqto + idiv + movq %rdx)。
+    // 注:跟 'd' → 'div' dispatcher 同样的 pattern — main dispatcher 只 consume
+    // 第 1 个 byte ('r'),next_token_binop 内部 consume "em"。
     if c0 == (114 as i32) {
-        if lex_match_kw(s, "ret" as *u8, 3 as i64) == 0 { return -1 as i32; }
-        return next_token_ret(s, arena, t);
+        let n1r: i32 = lex_peek_byte_at(s, 1 as i64);
+        let n2r: i32 = lex_peek_byte_at(s, 2 as i64);
+        if n1r == (101 as i32) && n2r == (116 as i32) {
+            // "ret"
+            if lex_match_kw(s, "ret" as *u8, 3 as i64) == 0 { return -1 as i32; }
+            return next_token_ret(s, arena, t);
+        }
+        if n1r == (101 as i32) && n2r == (109 as i32) {
+            // "rem" — consume 'r' only, next_token_binop consumes "em"
+            let _xr = lex_next_byte(s);
+            return next_token_binop(s, arena, t, 114 as i32);
+        }
+        return -1 as i32;
     }
 
     // ── 'j' → 'jmp' / 'jnz' ──

@@ -982,6 +982,9 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
     let mut is_mul: i32 = 0 as i32;
     let mut is_div: i32 = 0 as i32;
     let mut is_mod: i32 = 0 as i32;
+    // v2.11.9 (W-074.7.9): QBE '%' operator emits 'rem' IL op (per QBE spec §6.3);
+    // need a dedicated is_rem flag mirroring is_mod (same x86 path: cltd/cqto + idiv + movq %rdx).
+    let mut is_rem: i32 = 0 as i32;
     let mut is_cslt: i32 = 0 as i32;
     let mut is_csgt: i32 = 0 as i32;
     let mut is_csle: i32 = 0 as i32;
@@ -1009,6 +1012,11 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
             is_div = 1 as i32;
         } else if cg_find_sub(op_text, op_text_len, "mod" as *u8, 3 as i64) >= (0 as i64) {
             is_mod = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "rem" as *u8, 3 as i64) >= (0 as i64) {
+            // v2.11.9 (W-074.7.9): 'rem' 必须 check BEFORE 'add' fallback
+            // (因为 'rem' 跟 'add' 都不冲突, 但 order matters for cg_find_sub
+            // 命中第一 match)。QBE '%' → 'rem' (signed remainder).
+            is_rem = 1 as i32;
         }
     }
 
@@ -1066,9 +1074,16 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         }
         let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
     } else if is_div != (0 as i32) {
-        // div 走 "idivl" / "idivq"(signed div; %rax = quotient, %rdx = rem)
-        let _b1 = sb_append_cstr(arena, s, "\tidiv" as *u8);
-        let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        // v2.11.9 (W-074.7.9): idiv 必须有 sign-extend prefix (cltd/cqto) — x86
+        // idivl semantics dividend = (%edx << 32) | %eax; %edx 残留会触发 #DE
+        // fault. QBE div 语义只读 %rax quotient (%rdx remainder 丢弃 — safe).
+        if qt == QBE_L_LOCAL() {
+            let _se1 = sb_append_cstr(arena, s, "\tcqto\n" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tidivq" as *u8);
+        } else {
+            let _se1 = sb_append_cstr(arena, s, "\tcltd\n" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tidivl" as *u8);
+        }
         let _b2 = sb_append_cstr(arena, s, " " as *u8);
         if src2_is_imm != (0 as i32) {
             let _b3i = sb_append_cstr(arena, s, "$" as *u8);
@@ -1103,6 +1118,32 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         }
         // mod result 存 %rdx — 把它移到 %rax 让后续 mov %rax 存栈正确
         let _mrm1 = sb_append_cstr(arena, s, "\tmovq %rdx, %rax\n" as *u8);
+    } else if is_rem != (0 as i32) {
+        // v2.11.9 (W-074.7.9): rem = signed remainder (QBE % operator). Same x86
+        // path as mod — cltd/cqto + idiv + movq %rdx → %rax.
+        // QBE emits 'rem' (not 'mod') for jhyy '%' operator (per QBE IL spec §6.3).
+        // Without this branch, rem-result SSA values were silently skipped by lexer
+        // (lexer didn't recognize 'rem' keyword → next_token -1 → lex_il skip).
+        if qt == QBE_L_LOCAL() {
+            let _se1 = sb_append_cstr(arena, s, "\tcqto\n" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tidiv" as *u8);
+            let _b1s = sb_append_cstr(arena, s, "q" as *u8);
+        } else {
+            let _se1 = sb_append_cstr(arena, s, "\tcltd\n" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tidiv" as *u8);
+            let _b1s = sb_append_cstr(arena, s, "l" as *u8);
+        }
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b3n = sb_append_cstr(arena, s, "\n" as *u8);
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+        }
+        // rem result 存 %rdx — 把它移到 %rax 让后续 mov %rax 存栈正确
+        let _mrm2 = sb_append_cstr(arena, s, "\tmovq %rdx, %rax\n" as *u8);
     } else if is_cslt != (0 as i32) || is_csgt != (0 as i32) || is_csle != (0 as i32) || is_csge != (0 as i32) || is_ceq != (0 as i32) || is_cnew != (0 as i32) {
         // csltw / csgtw / cslew / csgew / ceqw / cneww 翻译为
         //   cmp<size> -src2(%rbp), %rax    (GAS ATT: dst=rax, src=src2)
