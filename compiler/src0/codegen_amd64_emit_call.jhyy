@@ -748,17 +748,36 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                     // '%' 开头 — 检查后一位是不是 't'
                     if scan + (1 as i64) < src_text_len && cg_byte_at(src_text, scan + (1 as i64)) != (116 as i32) {
                         // '%name' (非 %tN) — 函数实参
-                        // v2.11.3 (W-074.7) SCOPE DOWN: 仍 hardcode 第 1 arg = %rcx (Win x64)。
-                        // 多 arg 真修 (T4-c full) 需要 lexer 把 fn header args 路由到
-                        // CGState.cur_fn_header_text — 当前 lexer (codegen_amd64_lexer.jhyy)
-                        // 只 dup name 不 dup args,故 cg_find_arg_idx 永远 return -1。
-                        // v2.11.3 ship 4/5 EXIT exact (hello=42 / fib_renamed=40 /
-                        // struct_val_pass=35 / nested_struct_deep=22),big_test 多 arg 留
-                        // v2.11.4 (T4-c full + lexer args dup + reg_rax_for_qt_idx real call).
-                        // Per [[feedback_codegen_amd64_multifn]] scope DOWN 阈值 (< 200 LOC)。
+                        // v2.11.10 (W-074.6 T4-c 真修):emit_func_header 已调
+                        // cg_state_set_fn_header 把完整 header text 存到
+                        // CGState.cur_fn_header_text。提取 %name (after '%') →
+                        // cg_find_arg_idx 找 index → reg_rax_for_qt_idx 映射到
+                        // %rcx/%rdx/%r8/%r9 (Win x64, SysV 用 rdi/rsi/rdx/rcx)。
+                        // 修 big_test `gcd(a, b)` 双 arg (v2.11.3 留 hardcode %rcx,
+                        // → 2nd arg 永远是 0 → SIGFPE division by zero)。
+                        // Safety fallback (header_text==0 / arg not found):v2.11.3
+                        // 行为 (硬 %rcx),防止真修破坏单 arg 测试。
                         is_imm = 0 as i32;
                         is_fnarg = 1 as i32;
-                        fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
+                        let name_start = scan + (1 as i64);
+                        let mut name_end = name_start;
+                        while name_end < src_text_len {
+                            let nc = cg_byte_at(src_text, name_end);
+                            if nc == (32 as i32) || nc == (9 as i32) || nc == (44 as i32) { break; }
+                            name_end = name_end + (1 as i64);
+                        }
+                        let name_len = name_end - name_start;
+                        let arg_idx = if (*cg).cur_fn_header_text != (0 as *u8) && name_len > (0 as i64) {
+                            cg_find_arg_idx((*cg).cur_fn_header_text, (*cg).cur_fn_header_len,
+                                            ptr_add_u8(src_text, name_start), name_len)
+                        } else {
+                            -(1 as i64)
+                        };
+                        if arg_idx >= (0 as i64) && arg_idx <= (3 as i64) {
+                            fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                        } else {
+                            fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
+                        }
                     } else {
                         // v2.11.8 (W-074.7.8 真修延伸):'%t' 开头 → TEMP。
                         // 之前 IMM 检测 pct_count=1 (text 只含 "copy %tN" 不含 dst)

@@ -416,14 +416,39 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     // v2.11.2 (T3-a):reset per-function alloc state at function entry。
     // frame_max_temp 不重置 (per-module constant)。
     let _reset_rc = cg_state_reset_for_function(state, (*t).text);
+    // v2.11.10 (W-074.6 T4-c 真修):populate cur_fn_header_text 给 emit_copy
+    // FN_ARG 路径查 arg index。lexer 的 (*t).text 存的是完整 function header
+    // (e.g. "function w $gcd(w %a, w %b)"),cg_find_arg_idx 在 text 内
+    // 找 %name 出现位置 → index 0/1/2/3 映射到 %rcx/%rdx/%r8/%r9 (Win x64)。
+    // 之前 v2.11.3 ship 留 _fnbump 设 cur_fn_idx 但漏设 cur_fn_header_text
+    // → emit_copy FNARG 永远 hardcode %rcx → gcd/2arg 测试 SIGFPE。
+    let _fnhdr = cg_state_set_fn_header(state, (*t).text, (*t).text_len);
+
+    // v2.11.10:从 header text 提取裸 name (= '$' 后到 '(' 前) 用于 .globl + label。
+    // header = "function w $gcd(w %a, w %b)", 提取 "gcd"。emit_func_header 用
+    // (*t).text 当 .globl arg + label 之前 v2.11.0-2.11.9 lexer 只 dup name,
+    // v2.11.10 改 dup 完整 header (供 cg_find_arg_idx 用), 这里回退到只取 name。
+    let mut name_off: i64 = 0 as i64;
+    while name_off < (*t).text_len {
+        if cg_byte_at((*t).text, name_off) == (36 as i32) { break; }  // '$'
+        name_off = name_off + (1 as i64);
+    }
+    if name_off < (*t).text_len { name_off = name_off + (1 as i64); }  // skip '$'
+    let mut name_end: i64 = name_off;
+    while name_end < (*t).text_len {
+        let nb = cg_byte_at((*t).text, name_end);
+        if nb == (40 as i32) || nb == (32 as i32) || nb == (9 as i32) { break; }  // '(' or ws
+        name_end = name_end + (1 as i64);
+    }
+    let name_len = name_end - name_off;
 
     // 1) .globl <name>\n
     sb_append_cstr(arena, sb, ".globl " as *u8);
-    sb_append(arena, sb, (*t).text, (*t).text_len);
+    sb_append(arena, sb, ptr_add_u8((*t).text, name_off), name_len);
     sb_append_cstr(arena, sb, "\n" as *u8);
 
     // 2) <name>:\n
-    sb_append(arena, sb, (*t).text, (*t).text_len);
+    sb_append(arena, sb, ptr_add_u8((*t).text, name_off), name_len);
     sb_append_cstr(arena, sb, ":\n" as *u8);
 
     // 3) pushq %rbp\n
@@ -433,9 +458,28 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     sb_append_cstr(arena, sb, "\tmovq %rsp, %rbp\n" as *u8);
 
     // 5) subq $N, %rsp\n
-    //    v2.11.2 (T3-a):N = shadow_space + (frame_max_temp + 1) * 8。
-    //    全 module 用同一 frame size (global-max fallback),每个 function alloc 上限 = max_temp+1 temps。
-    let frame_max: i64 = (*cg).frame_max_temp;
+    //    v2.11.10 (W-074.6 T3-a closure):从 per_fn_max 读本 fn 的 max temp,
+    //    替换 v2.11.2 global frame_max_temp (跨 fn 共用 → 递归函数 SIGSEGV)。
+    //    每个 fn 独立 frame size,递归 fn fact/fib/gcd 只用 5-10 temps → frame
+    //    size = 88 字节 vs 老 15488 字节。fn_count == 0 (pre-scan 没跑) 走
+    //    safety fallback frame_max_temp (legacy 兼容)。
+    //    选 per_fn_max 路径:fn_count>0 + per_fn_max alloc + cur_fn_idx in-range。
+    let use_per_fn: i32 = if (*cg).fn_count > (0 as i64) && (*cg).per_fn_max != (0 as *u8) && (*cg).cur_fn_idx >= (0 as i64) && (*cg).cur_fn_idx < (*cg).fn_count {
+        1 as i32
+    } else {
+        0 as i32
+    };
+    // pre-compute per_fn max (let 在 if 外)
+    let mut pfm_val: i64 = 0 as i64;
+    if use_per_fn != (0 as i32) {
+        let pfm_p = ptr_add_u8((*cg).per_fn_max, (*cg).cur_fn_idx * (8 as i64)) as *i64;
+        pfm_val = *pfm_p;
+    }
+    let frame_max: i64 = if use_per_fn != (0 as i32) {
+        pfm_val
+    } else {
+        (*cg).frame_max_temp
+    };
     let frame_size: i64 = if frame_max < (0 as i64) {
         0 as i64
     } else {

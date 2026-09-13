@@ -810,8 +810,25 @@ fn next_token_label(s: *LexState, arena: *u8, t: *u8) -> i32 {
 // v2.11.1 (W-074.5):QBE IL output 实测 emit `export function w $name(...)` bare qt
 // 不带 brackets;既支持 `[w]` 也支持 bare `w`。
 fn next_token_func_header(s: *LexState, arena: *u8, t: *u8) -> i32 {
+    // v2.11.10 (W-074.6 T4-c 真修):capture header start (after "export" consume
+    // by dispatcher) — 最终 emit_func_header 调 cg_state_set_fn_header 存完整
+    // header text (e.g. "function w $gcd(w %a, w %b)") 给 emit_copy FN_ARG 路径
+    // 查 arg index。LexState.cur 在 dispatcher consume "export" 后是 "function" 前。
+    let mut hdr_start: *u8 = (*s).cur;
     // consume "export" (already done by dispatcher)
     let _s = lex_skip_ws_and_comments(s);
+    if hdr_start == (*s).cur {
+        hdr_start = (*s).cur;
+    }
+    // v2.11.10 (T4-c 真修):hdr_start 仍指向 "function" 前可能含 ws。
+    // 推进 hdr_start 跳过 ws/comments,让 dup 出的 text 起始就是 "function"。
+    // emit_func_header 用这串当 .globl 行 + label 名,首字符必须非 ws。
+    while hdr_start < (*s).cur {
+        let hb = *hdr_start;
+        if hb == (32 as i32) || hb == (9 as i32) || hb == (10 as i32) || hb == (13 as i32) {
+            hdr_start = hdr_start + (1 as i64);
+        } else { break; }
+    }
     // "function"
     if lex_match_kw(s, "function" as *u8, 8 as i64) == 0 { return -1 as i32; }
     let _s2 = lex_skip_ws_and_comments(s);
@@ -871,6 +888,17 @@ fn next_token_func_header(s: *LexState, arena: *u8, t: *u8) -> i32 {
     let _sb = lex_skip_ws_and_comments(s);
     // `{` 由 main dispatcher 走 next_token 一次 lex 为 DIRECTIVE — 不在此处 consume
     // (保持 lex_il 看到 `{` 还能记一次 DIRECTIVE token,parse_and_emit 不卡)
+    // v2.11.10 (W-074.6 T4-c 真修):dup 完整 header text [hdr_start, hdr_end) —
+    // 包含 "function w $name(...)"。emit_func_header 调 cg_state_set_fn_header 存
+    // 给 emit_copy FN_ARG 路径 cg_find_arg_idx 找 %name 出现位置 → arg index。
+    let hdr_end = (*s).cur;
+    let hdr_len = hdr_end - hdr_start;
+    if hdr_len > (0 as i64) {
+        let tp_text = ptr_add_u8(t, 8 as i64) as **u8;
+        *tp_text = lex_dup_text(arena, hdr_start, hdr_len);
+        let tp_textlen = ptr_add_u8(t, 16 as i64) as *i64;
+        *tp_textlen = hdr_len;
+    }
     return 0 as i32;
 }
 
