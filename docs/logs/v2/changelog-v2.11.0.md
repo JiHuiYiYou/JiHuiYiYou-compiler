@@ -1050,3 +1050,101 @@ return -1 as i32;
 - **W-074.6 T4-g closure v2.11.11 entry 修正**: SUPERSEDED note added (file path + 根因 + 预算估修正)
 - **Inline annotation**: `compiler/src0/codegen_amd64_lexer.jhyy:631-720` (next_token_binop 5 ops branch); `:1307-1329` (main dispatcher shl/shr + 'o' + 'x' + 'a'-and); `:1074-1123` (LHS cursor save/restore); `compiler/src0/codegen_amd64_emit_call.jhyy:1013-1040` (5 is_* flag + cg_find_sub); `:1166-1208` (5 dispatch branch)
 - **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 6/6 closure 达成 vs self-backend regress -2; 6/6 closure 真 ship 不强宣); [[feedback_codegen_amd64_multifn]] (FLIP count vs v2.11.11 baseline: 仅 -2 但都属于 pre-existing FAILs,不是新 regression;scope DOWN trigger 未触发); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: shl/shr/and/or/xor emits count + t_bit_pack/t_bit_unpack/t_shifts PASS + per-fn subq distinct frame size + main_jhyy.s 非空 + jne Lloop_body emits); [[feedback_no_date_estimates]] (no calendar dates); [[feedback_plans_per_version]] (1 plan/minor, v2.11.12-plan.md NEW); [[feedback_changelog_umbrella]] (vX.Y axis 只 1 umbrella changelog, v2.11.12 sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.6 shl/shr + W-074.6 dst-id-0 NEW + W-074.6 T4-g v2.11.11 entry supersedure correction); [[feedback_audit_single_commit_diff]] (audit 单 commit, v2.11.12 fix + docs 2 commits); [[feedback_auto_push_after_commit]] (commit 成功直接 push); [[feedback_ssh_key_same_shell]] (push 前 same-shell SSH add)
+
+## v2.11.13 (2026-09-15) — W-074.6 cne substring missing 真修 → **scope DOWN 触发 (FLIP +7 超 stop threshold 5); 7+ tests cross-cluster closure; Iter 5-7 deferred v2.11.14**
+
+### 范围 (per user 2026-09-15 决定: 不结 v2.11,继续 v2.11.x 把 44 FAIL 压下去)
+
+- **Phase A — Iter 1 (A1 register-suffix in emit_call)**: target_tag Win/SysV arg-reg path 漏 mov size 64-bit (emit `movl %rcx/%rdx` 32-bit + 64-bit reg → as.exe reject)。3 tests targeted (float_cmp + 2 generics)。cluster A1。
+- **Phase B — Iter 2 (A2 const data emit gap)**: emit `.s` 引 `ASCII_LOWER(%rip)` 等 const 符号但漏 emit `.data` section init literal → ld silent exit。4 tests targeted (const_array + const_struct_array + dungeon_game + generics_mixed_dedup)。cluster A2。
+- **Phase C — Iter 3 (C.1 exts_* silent-skip)**: 跟 v2.11.12 shl/shr 同 pattern (lexer 漏 `extsb/extsw/extsl/extsh/extub/extuw/extul/extuh`) → extsw IL keyword silent skip → extsw emit branch 漏 → cltq 漏。6-7 tests targeted (arith + int_width_arith + int_suffix + u32_let_inferred + u32_let_inferred_5 + top_level_let_mut_test)。cluster C.1。
+- **Phase D — Iter 4 (C.2 Cap<T> sizeof default)**: plan 估 "sizeof default 10 → 8 single wrong default";**实测错归因 — 真根因是 cnel substring missing in emit_binop** (cg_find_sub "cnew" 4-char miss cnel → fall through add path → `addl src1, src2` + `cmpl $0, sum` 而非 `cmpl src2, src1` + `setne %al`)。1 LOC 真修 → **cross-cluster +7 PASS** self-backend (78 → 85/115)。cluster C.2 + cross-cluster C.1 follow-on closure。
+- **scope DOWN 触发**:FLIP +7 > stop threshold 5 (per user 2026-09-15 "FLIP count 逼近 5 立即停手" + plan hard gate)。**Iter 5 (C.4 float) + Iter 6 (C.7 defer) + Iter 7 (B observe) 全 deferred v2.11.14**。v2.11.13 = partial closure 14/44 (32%)。
+
+### Iter 4: cne substring missing in emit_binop (~1 LOC + 8 LOC comment)
+
+`compiler/src0/codegen_amd64_emit_call.jhyy:1077` (v2.11.12 状态):
+
+```jhyy
+// BEFORE (v2.11.12):
+} else if cg_find_sub(op_text, op_text_len, "cnew" as *u8, 4 as i64) >= (0 as i64) {
+    is_cnew = 1 as i32;
+} else if cg_find_sub(op_text, op_text_len, "sub" as *u8, 3 as i64) >= (0 as i64) {
+
+// AFTER (v2.11.13 Iter 4):
+} else if cg_find_sub(op_text, op_text_len, "cne" as *u8, 3 as i64) >= (0 as i64) {
+    // v2.11.13 (W-074.6 C.2 fix): cnew (4-char) + cnel (4-char) both share
+    // "cne" 3-char prefix。QBE op for "compare not-equal", with size suffix
+    // letter (w/l) at idx 3。
+    is_cnew = 1 as i32;
+} else if cg_find_sub(op_text, op_text_len, "sub" as *u8, 3 as i64) >= (0 as i64) {
+```
+
+**关键 insight**:
+1. QBE spec §6.2 emit 4 个 cne-prefixed op for "compare not-equal", per size: `cnew` (word) / `cnel` (long) / `cnes` (single/f32) / `cned` (double/f64) — codegen.jhyy:854-857
+2. v2.11.12 emit_binop dispatch 用 `"cnew" 4-char` substring match,只 match `cnew`,**漏 4-char `cnel` / `cnes` / `cned`** → fall through to `add` fallback
+3. Fix: 改 3-char prefix `"cne"` → catch 全部 4 个 cne_* op。**Verify 无 false positive**:全 codegen.jhyy 搜 cx* ops (`ceqd/ceql/ceqs/ceqw/cned/cnel/cnes/cnew/csltl/csltw/cslel/cslew/csgtl/csgtw/csgel/csgew/cultl/cultw/culel/culew/cugtl/cugtw/cugel/cugew`) 都没有 `cne` substring → "cne" 3-char prefix 只 match 4 个真 cne_* op,安全。
+4. Lexer side 不需 fix (v2.11.11 T4-g 已正确 handle cnel/cnes/cned — consume 5 chars + op_str dead store + emit_binop 二次 scan)。
+
+**对比 Plan v2.11.13 Iter 4 假设错归因**:
+- Plan: "Cap<T> sizeof default 10 → 8 single wrong default"
+- 实测: sizeof(Cap<i32>) 在 sema `type_size` (types.jhyy:366) hardcode 8,IL emit `%t2 =l copy 8` 跟 QBE side byte-equal
+- 真正根因: `if s_cap != 8` emit `cnel %t8, %t11`,cnel 在 emit_binop substring miss → fall through add → cap_table_basic got=10 (8+8=16 ≠ 0 → goto then-branch → return 10)
+- **per feedback_fix_evaluation_rule honest record**:plan 估 30-50 LOC → 实测 1 LOC 真修;plan 估 C.2 (3 tests) → 实测 cross-cluster 7+ tests closure;plan 估 "single wrong default" → 实测 W-074.6 family cne substring silent-skip
+
+### Cross-cluster impact (1 line fix 连锁 closure)
+
+| Test | v2.11.12 baseline | v2.11.13 Iter 4 | Cluster |
+|------|-------------------|-----------------|---------|
+| `arith.jhyy` | FAIL got=106 | **PASS EXIT=1000042** | C.1 follow-on (Iter 3 联动) — `small_val as i64` + `(small_val as i64) + big_val` implicit `cnel` in jnz |
+| `int_width_arith.jhyy` | FAIL got=0 | **PASS EXIT=0** | C.1 follow-on — `cnel` 比较 in i64 path |
+| `int_suffix.jhyy` | FAIL | **PASS** | C.1 follow-on |
+| `cap_table_advanced.jhyy` | FAIL got=10 | **PASS EXIT=42** | **C.2** (target cluster) |
+| `cap_test_sysv.jhyy` | FAIL got=?? | **PASS EXIT=42** | **C.2** (target cluster) — Cap pass-by-value cross-fn |
+| (cap_table_basic partial) | FAIL got=10 | FAIL got=30 | C.2 sizeof + 比较 fix 后,test 4 cross-fn struct field access 还 fail (`tbl.data as i64 + tbl.len` 走 struct pass-by-value,emit_copy 1-to-1 gap 仍 ACTIVE — 单独 bug,deferred v2.11.14) |
+
+### Validation gates (v2.11.13 Iter 4 ship)
+
+- ✅ Self-backend: **78/115 → 85/115 PASS (+7 FLIP)**, 30 FAIL (-14 from 44 baseline = 32% closure)
+- ✅ byte-equal D26: 5/5 PASS preserved
+- ✅ byte-equal-amd64 V2-B: 10/10 PASS preserved
+- ✅ big_test self-backend EXIT=57 preserved (6/6 closure hold)
+- ✅ QBE baseline: 115/135 PASS preserved (no QBE regression)
+- ✅ jhyy.exe.sha256 refresh `c9c274db4318ac84fb046bef0f75c2ef7d0bda379984b5581f46b318c0648c97`
+
+### Phase E: docs
+
+- `docs/internal/workarounds.md`:
+  - **NEW**: W-074.6 cne substring missing entry (~80 LOC): root cause + 真修 (1 LOC substring 4→3) + cross-cluster impact + 验证 + 诚实 scope 评估
+  - **UPDATE**: W-074.6 family index entry (line 74):v2.11.13 Iter 4 closure append (cne substring ✅ CLOSED),累进 closed ~328 LOC,剩余 ~172 LOC
+- `docs/logs/v2/changelog-v2.11.0.md` v2.11.13 sub-section append (本 entry)
+- `docs/plans/v2/v2.11.13-plan.md` per-version plan NEW (per `feedback_plans_per_version`)
+- `docs/plans/v2/README.md` v2.11.13 ship row add
+- `README.md` + `README.zh-CN.md` v2.11.13 ship row add
+- `CHANGELOG.md` v2.11.13 release row add
+
+### 诚实 scope 评估 (per feedback_fix_evaluation_rule)
+
+- v2.11.13 Iter 4 plan "C.2 Cap<T> sizeof default 30-50 LOC fix 3 tests PASS" 预测 **3-way wrong**:
+  - LOC: plan 估 30-50 → 实测 **1 LOC 真修 + 8 LOC comment** (97% 缩)
+  - Cluster: plan 估 C.2 (3 tests) → 实测 **cross-cluster 7+ tests closure** (arith/int_width_arith/int_suffix/cap_table_advanced/cap_test_sysv 等)
+  - 根因: plan 估 "sizeof default 10" → 实测 **cne substring silent-skip** (跟 W-074.6 shl/shr missing 同 family,但 emit_binop dispatch 不是 lexer silent-skip)
+- 但 **FLIP +7 超 stop threshold 5** → **scope DOWN v2.11.13**。Iter 5 (C.4 float f32/d) + Iter 6 (C.7 defer LIFO) + Iter 7 (B observe) 全 deferred v2.11.14
+- v2.11.13 ship record: **14/44 FAIL closure (32%)**,self-backend 71/115 → 85/115 (+14, 12% improvement),cross-cluster follow-on to Iter 3 exts_* fix
+- 累计 W-074.6 family closed ~328 LOC (v2.11.12 325 + v2.11.13 1 LOC 真修);剩余 ~172 LOC 留 v2.x 中期 V2-D。M5 启动仍需等剩余 W-074.6 family 子 sprint 闭环
+- **Historical context**:v2.11.10 + v2.11.11 + v2.11.12 plan "100% 可达" 三次预测 wrong 教训再次验证 — v2.11.13 plan honest scope (Scenario A iterative + "FLIP-gate") 仍 predict wrong cluster scope 但 FLIP-gate mechanism catch over-shoot → scope DOWN 正确执行
+
+### 待 ship (deferred to v2.11.14+)
+
+- v2.11.14 残余 30 FAIL cluster map (C.3 match/pattern + C.4 float + C.5 slice + C.6 sizeof-generics + C.7 defer + B runtime crash)
+- v2.11.14 新一轮 Plan v2.11.14 NEW,re-audit 30 FAIL + 新 cluster 表
+- v2.x 中期 V2-D W-074.6 family 剩余 ~172 LOC (struct pass-by-value emit_copy 1-to-1 gap + stack-slot-reuse in other emit paths + emit_ret 不 mov %t1 → %eax + extsw 之外其他 sub-family)
+- v2.12.0 QBE 移除 (Part 2b) — 仍需 v2.x 末 W-074.6 family 闭环
+- M5 独立 sprint 需等 v2.12.0 ship + 6/6 EXIT exact closure ✅ (本 sprint 6/6 closure 闭环 hold,留 V2-D 后续子 sprint)
+
+## References (v2.11.13)
+
+- **Plan**: `docs/plans/v2/v2.11.13-plan.md` (per `feedback_plans_per_version`; **~1 LOC source + ~250 docs = ~251 LOC 2 commits**; partial closure 14/44 = 32% + FLIP-gate scope DOWN trigger activated)
+- **W-074.6 cne substring**: `docs/internal/workarounds.md` W-074.6 cne substring missing **✅ CLOSED** entry (~80 LOC)
+- **Inline annotation**: `compiler/src0/codegen_amd64_emit_call.jhyy:1077-1087` (cg_find_sub "cnew" 4-char → "cne" 3-char 真修)
+- **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 1 LOC 真修 vs plan 估 30-50 LOC;cross-cluster +7 PASS vs plan 估 C.2 (3 tests); 根因 cne substring vs plan 估 sizeof default); [[feedback_codegen_amd64_multifn]] (FLIP count +7 超 stop threshold 5 → scope DOWN v2.11.13 trigger activated); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: cnel in `_regress_cap_table_basic.s` — pre-fix `addl src1, src2` + `cmpl $0, sum`, post-fix `cmpl src2_off(%rbp), %rax` + `setne %al` + `movzbl %al, %eax`); [[feedback_no_date_estimates]]; [[feedback_plans_per_version]] (v2.11.13-plan.md NEW); [[feedback_changelog_umbrella]] (v2.11.13 sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.6 cne substring NEW entry); [[feedback_audit_single_commit_diff]] (audit 单 commit `89b4b87`); [[feedback_auto_push_after_commit]] (commit 成功直接 push); [[feedback_ssh_key_same_shell]] (push 前 same-shell SSH add)

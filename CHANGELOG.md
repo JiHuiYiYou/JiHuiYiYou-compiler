@@ -126,6 +126,44 @@
 
 ---
 
+### v2.11.13 — 2026-09-15 — **axis-v2 W-074.6 cne substring missing 真修 — partial closure 14/44 (32%); FLIP-gate scope DOWN 触发 (Iter 5-7 deferred v2.11.14)** (axis-v2 only; main 待 merge)
+
+**Tag**: `v2.11.13` (axis-v2 branch)
+**Status**: W-074.6 cne substring missing **✅ CLOSED** (1 LOC 真修, cross-cluster +7 PASS self-backend); **scope DOWN 触发** (FLIP +7 超 stop threshold 5, per user 2026-09-15 "FLIP count 逼近 5 立即停手" + plan hard gate).
+
+**Highlights**:
+
+- **W-074.6 cne substring missing in emit_binop 真修** (1 LOC + 8 LOC comment, axis-v2 commit `89b4b87`):
+  - `compiler/src0/codegen_amd64_emit_call.jhyy:1077` (v2.11.12 状态) `cg_find_sub(op_text, op_text_len, "cnew" as *u8, 4 as i64)` 改为 `"cne" 3-char` → catch 全部 4 个 cne_* QBE op (cnew/cnel/cnes/cned — compare-not-equal per size suffix letter w/l/s/d)
+  - **Plan v2.11.13 Iter 4 估 "Cap<T> sizeof default 30-50 LOC" 严重错归因** — 实测 sizeof 在 sema `type_size` (types.jhyy:366) hardcode 8, IL emit `%t2 =l copy 8` 跟 QBE byte-equal; 真根因是 `if s_cap != 8` emit `cnel %t8, %t11`, cnel 在 emit_binop dispatch substring miss → fall through `add` path → `addl src1, src2` + `cmpl $0, sum` 而非 `cmpl src2, src1` + `setne %al` → cap_table_basic got=10 (8+8=16 ≠ 0 → then-branch → return 10)
+  - Verify 无 false positive: 全 codegen.jhyy 搜 cx* ops (`ceqd/ceql/ceqs/ceqw/cned/cnel/cnes/cnew/csltl/csltw/cslel/cslew/csgtl/csgtw/csgel/csgew/cultl/cultw/culel/culew/cugtl/cugtw/cugel/cugew`) 都没有 `cne` substring → "cne" 3-char prefix 只 match 4 个真 cne_* op, 安全
+  - 跟 v2.11.12 真修的 shl/shr missing + dst_id=0 同 family pattern (W-074.6 silent-skip 在 emit_binop dispatch), 但 cne substring 是 emit_binop dispatch layer, 不是 lexer silent-skip
+- **Cross-cluster impact** (1 LOC fix 连锁 closure, plan 没预期):
+  | Test | v2.11.12 baseline | v2.11.13 Iter 4 | Cluster |
+  |------|-------------------|-----------------|---------|
+  | `arith.jhyy` | FAIL got=106 | **PASS EXIT=1000042** | C.1 follow-on (Iter 3 联动) |
+  | `int_width_arith.jhyy` | FAIL got=0 | **PASS EXIT=0** | C.1 follow-on |
+  | `int_suffix.jhyy` | FAIL | **PASS** | C.1 follow-on |
+  | `cap_table_advanced.jhyy` | FAIL got=10 | **PASS EXIT=42** | **C.2** (target cluster) |
+  | `cap_test_sysv.jhyy` | FAIL got=?? | **PASS EXIT=42** | **C.2** (target cluster) — Cap pass-by-value cross-fn |
+  | (cap_table_basic partial) | FAIL got=10 | FAIL got=30 | C.2 sizeof + 比较 fix 后, test 4 cross-fn struct field access 还 fail (`tbl.data as i64 + tbl.len` 走 struct pass-by-value, emit_copy 1-to-1 gap 仍 ACTIVE — 单独 bug, deferred v2.11.14) |
+- **诚实记录 per [[feedback_fix_evaluation_rule]]**: **partial closure 14/44 (32%)** (跟 v2.11.10 + v2.11.11 + v2.11.12 plan "100% / 6/6 / full closure" 三次 wrong 教训形成对比 — v2.11.13 plan honest scope (Scenario A iterative + "FLIP-gate") 仍 predict wrong cluster scope 但 FLIP-gate mechanism catch over-shoot → scope DOWN 正确执行):
+  - **Plan 估 3-way wrong**: LOC 30-50 → 实测 **1 LOC 真修** (97% 缩); Cluster C.2 (3 tests) → 实测 **cross-cluster 7+ tests closure**; 根因 sizeof default → 实测 **cne substring silent-skip**
+  - self-backend **78/115 → 85/115 PASS** (+7 FLIP, total +14 from v2.11.11 baseline 71/115); 30 FAIL (-14 from 44 baseline = 32% closure)
+  - **FLIP +7 触发 stop threshold 5 → scope DOWN v2.11.13** (per user 2026-09-15 "FLIP count 逼近 5 立即停手" + plan hard gate "FLIP count ≥ 4 → 停手 ship 当前 progress")
+  - Iter 5 (C.4 float f32/d) + Iter 6 (C.7 defer LIFO) + Iter 7 (B observe) 全 deferred v2.11.14
+- **NEW ship gate audit** (per [[feedback_codegen_amd64_run_zerobyte]]):
+  - cnel in `_regress_cap_table_basic.s` pre-fix `addl src1, src2` + `cmpl $0, sum`, post-fix `cmpl src2_off(%rbp), %rax` + `setne %al` + `movzbl %al, %eax`
+  - **big_test self-backend EXIT=57 preserved** (6/6 closure hold, no regression on v2.11.12 ship)
+- **Stage 2 N=5 jhyy 编 jhyy closure PASS** + **QBE fallback 115/135 PASS preserved** + **byte-equal-amd64 10/10 preserved** + **fixed-point N=3,4,5 .il byte-equal preserved**
+- **jhyy.exe.sha256 refresh** (`c9c274db4318ac84fb046bef0f75c2ef7d0bda379984b5581f46b318c0648c97`)
+- **累计 W-074.6 family closed ~328 LOC** (v2.11.12 325 + v2.11.13 1 LOC 真修); 剩余 ~172 LOC (struct pass-by-value emit_copy 1-to-1 gap + stack-slot-reuse in other emit paths + emit_ret 不 mov %t1 → %eax + extsw 之外其他 sub-family) 留 v2.x 中期 V2-D
+
+**完整 changelog**: [`docs/logs/v2/changelog-v2.11.0.md`](docs/logs/v2/changelog-v2.11.0.md) § v2.11.13
+**Plan**: [`docs/plans/v2/v2.11.13-plan.md`](docs/plans/v2/v2.11.13-plan.md)
+
+---
+
 ### v2.11.8 — 2026-09-13 — **axis-v2 W-074.7.8 真修 — 4/5 EXIT exact closure** (axis-v2 only; main 待 merge)
 
 **Tag**: `v2.11.8` (axis-v2 branch)
