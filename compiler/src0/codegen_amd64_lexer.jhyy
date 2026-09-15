@@ -648,16 +648,86 @@ fn next_token_binop(s: *LexState, arena: *u8, t: *u8, op_byte: i32) -> i32 {
         }
         op_name = "add" as *u8;
     } else if op_byte == (115 as i32) {
-        // "sub" — consume "ub"
+        // v2.11.13 (W-074.6 exts_* family): op_byte='s' 是 ambiguously used by
+        // both "sub" (binary sub) and "exts*" (sign-extend family). dispatch 已
+        // consume 'e'/'s', cursor 在 'ub'/'xt' 等。Disambiguate by peek prefix:
+        //   "ub" → sub (existing)
+        //   "xts" + size letter → extsb/extsw/extsl/extsh
+        //   "xtu" + size letter → extub/extuw/extul/extuh  (注:dispatcher 不会来这
+        //     因为 'e' branch 走 dispatch,只 's'/'u' 是 exts/extu;但保险起见
+        //     handle 全 ext family 在 next_token_binop 里)
+        //
+        // 注:exts/extu 在 dispatcher 'e' branch 已经 detect,call next_token_binop
+        // with op_byte='s'/'u'。'u' (op_byte=117) 走下面 extu branch(刚加)。
+        // 此 branch 只 handle sub + exts (since op_byte=115='s')。
         let n1 = lex_peek_byte_at(s, 0 as i64);
         let n2 = lex_peek_byte_at(s, 1 as i64);
-        if n1 != (117 as i32) || n2 != (98 as i32) { return -1 as i32; }
+        // exts path: cursor starts with 'x' (after dispatcher consumed 'e')
+        if n1 == (120 as i32) {
+            // exts_* — "xts" + size letter (b/w/l/h)
+            let n3 = lex_peek_byte_at(s, 2 as i64);
+            // early-return guard: must be "xts"
+            if n2 != (116 as i32) || n3 != (115 as i32) {
+                return -1 as i32;
+            }
+            // consume "xts" (3 bytes)
+            let mut i: i64 = 0 as i64;
+            while i < (3 as i64) {
+                let _x = lex_next_byte(s);
+                i = i + (1 as i64);
+            }
+            // peek byte 3 = size letter — early-return guard
+            let sz = lex_peek_byte_at(s, 0 as i64);
+            if sz != (98 as i32) && sz != (119 as i32) && sz != (108 as i32) && sz != (104 as i32) {
+                return -1 as i32;
+            }
+            // map size letter to op_name (uniform () type across branches)
+            if sz == (98 as i32) { op_name = "extsb" as *u8; }
+            else if sz == (119 as i32) { op_name = "extsw" as *u8; }
+            else if sz == (108 as i32) { op_name = "extsl" as *u8; }
+            else { op_name = "extsh" as *u8; }  // 'h'
+            let _x = lex_next_byte(s);  // consume size letter
+        } else {
+            // sub path: must be "ub" (else fall through to dispatcher's -1)
+            if n1 != (117 as i32) || n2 != (98 as i32) {
+                return -1 as i32;
+            }
+            let mut i: i64 = 0 as i64;
+            while i < (2 as i64) {
+                let _x = lex_next_byte(s);
+                i = i + (1 as i64);
+            }
+            op_name = "sub" as *u8;
+        }
+    } else if op_byte == (117 as i32) {
+        // v2.11.13 (W-074.6 extu_* family): op_byte='u' is for extu_* only
+        // (zero-extend). 'u' is NOT used as first letter of any other QBE op
+        // (and/or/xor/sub all use other letters). Dispatcher 'e' branch 已
+        // detect "extu*", consume 'e', call here with op_byte='u'。Cursor 在 'x'。
+        let n1 = lex_peek_byte_at(s, 0 as i64);
+        let n2 = lex_peek_byte_at(s, 1 as i64);
+        let n3 = lex_peek_byte_at(s, 2 as i64);
+        // early-return guard: must be "xtu"
+        if n1 != (120 as i32) || n2 != (116 as i32) || n3 != (117 as i32) {
+            return -1 as i32;
+        }
+        // consume "xtu" (3 bytes)
         let mut i: i64 = 0 as i64;
-        while i < (2 as i64) {
+        while i < (3 as i64) {
             let _x = lex_next_byte(s);
             i = i + (1 as i64);
         }
-        op_name = "sub" as *u8;
+        // peek byte 3 = size letter — early-return guard
+        let sz = lex_peek_byte_at(s, 0 as i64);
+        if sz != (98 as i32) && sz != (119 as i32) && sz != (108 as i32) && sz != (104 as i32) {
+            return -1 as i32;
+        }
+        // map size letter to op_name
+        if sz == (98 as i32) { op_name = "extub" as *u8; }
+        else if sz == (119 as i32) { op_name = "extuw" as *u8; }
+        else if sz == (108 as i32) { op_name = "extul" as *u8; }
+        else { op_name = "extuh" as *u8; }
+        let _x = lex_next_byte(s);  // consume size letter
     } else if op_byte == (109 as i32) {
         // "mul" 或 "mod" — consume "ul" or "od" (dispatcher 只 consume 'm' 了 1 char)
         // V2-B v2.6.0 (Unit B Stub-Fill): refactor — early-return guards for
@@ -750,6 +820,7 @@ fn next_token_binop(s: *LexState, arena: *u8, t: *u8, op_byte: i32) -> i32 {
         let _x = lex_next_byte(s);  // consume 'l' or 'r'
         op_name = if n1 == (108 as i32) { "shl" as *u8 } else { "shr" as *u8 };
     } else {
+        // V2-B v2.6.0 (Unit B Stub-Fill): refactor — set sentinel (was
         // V2-B v2.6.0 (Unit B Stub-Fill): refactor — set sentinel (was
         // `return -1`), uniform type across chain branches. Check after.
         op_name = 0 as *u8;
@@ -1255,8 +1326,34 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
     // 当前 lexer dispatcher 对 '$' 不特别处理:留给 `call` / `data` / `func_header`
     // helper 内部自己 scan(它们的 dispatcher 路径已对应 `$` 起头)。
 
-    // ── 'e' → 'export' (func_header) ──
+    // ── 'e' → 'export' (func_header) / 'exts*' (ext family: extsb/extsw/extsl/extsh/extub/extuw/extuh) ──
     if c0 == (101 as i32) {
+        // v2.11.13 C.1 fix: exts_* family (sign/zero extend) — required for i32→i64
+        //   cast (`x as i64` → `extsw`/`extsl` in IL)。之前 silent skip → cast 未 emit →
+        //   garbage read (per C.1 cluster arith/int_width_arith/int_suffix/u32_let_* root cause)。
+        //
+        // Byte layout of "extsw" / "extuw" / "extsb" / "extub" / "extsl" / "extsh" / "extuh":
+        //   offset 0 = 'e' (c0, this byte)
+        //   offset 1 = 'x'
+        //   offset 2 = 't'
+        //   offset 3 = 's' (115) or 'u' (117) — sign vs zero extend
+        //   offset 4 = 'b'/'w'/'l'/'h' (source size letter)
+        let n1e = lex_peek_byte_at(s, 1 as i64);
+        let n2e = lex_peek_byte_at(s, 2 as i64);
+        let n3e = lex_peek_byte_at(s, 3 as i64);
+        let n4e = lex_peek_byte_at(s, 4 as i64);
+        if n1e == (120 as i32) && n2e == (116 as i32) {  // 'x' + 't'
+            if n3e == (115 as i32) || n3e == (117 as i32) {  // 's' or 'u'
+                if n4e == (98 as i32) || n4e == (119 as i32)  // 'b' or 'w'
+                    || n4e == (108 as i32) || n4e == (104 as i32) {  // 'l' or 'h'
+                    // dispatcher pattern: c0 = peek_byte (not consumed)。Consume 'e' here,
+                    // 然后 next_token_binop 处理剩 "xts*" 4 chars + size letter (cursor 1→5)。
+                    let _e_consume = lex_next_byte(s);  // consume 'e'
+                    return next_token_binop(s, arena, t, n3e);  // n3e = 's' (115) or 'u' (117)
+                }
+            }
+        }
+        // not exts_* → check export
         if lex_match_kw(s, "export" as *u8, 6 as i64) == 0 { return -1 as i32; }
         return next_token_func_header(s, arena, t);
     }

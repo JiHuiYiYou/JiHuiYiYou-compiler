@@ -1035,8 +1035,36 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
     let mut is_xor: i32 = 0 as i32;
     let mut is_shl: i32 = 0 as i32;
     let mut is_shr: i32 = 0 as i32;
-    if op_text != (0 as *u8) && op_text_len > (3 as i64) {
-        if cg_find_sub(op_text, op_text_len, "cslt" as *u8, 4 as i64) >= (0 as i64) {
+    // v2.11.13 (W-074.6 C.1 fix): exts_* / extu_* family (sign/zero extend).
+    // QBE spec §6.1: extsb/extub/extsh/extuh/extsw/extuw/extsl — unary ops,
+    // required for `x as i64` cast (i32→i64 → extsw) and `x as i32` from u8/i8.
+    //   extsb/extub: byte → word/long (movsbl/movzbl to %eax)
+    //   extsh/extuh: half-word → word/long (movswl/movzwl to %eax)
+    //   extsw/extuw: word → long (movl to %eax; cltq for sign-ext to %rax)
+    //   extsl: long → long (no-op on amd64, movq)
+    // 必须 check BEFORE add fallback — 'extsb' 含 'sub' substring,如果不先 check
+    // 会误判为 sub。
+    let mut is_exts: i32 = 0 as i32;  // 1 = exts* (sign-extend), 0 = extu* (zero-extend) OR not ext
+    let mut is_extu: i32 = 0 as i32;
+    let mut ext_src_size: i32 = 0 as i32;  // 'b' (98) / 'w' (119) / 'l' (108) / 'h' (104) — source size letter
+    if op_text != (0 as *u8) && op_text_len > (4 as i64) {
+        if cg_find_sub(op_text, op_text_len, "extsb" as *u8, 5 as i64) >= (0 as i64) {
+            is_exts = 1 as i32; ext_src_size = 98 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "extsw" as *u8, 5 as i64) >= (0 as i64) {
+            is_exts = 1 as i32; ext_src_size = 119 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "extsl" as *u8, 5 as i64) >= (0 as i64) {
+            is_exts = 1 as i32; ext_src_size = 108 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "extsh" as *u8, 5 as i64) >= (0 as i64) {
+            is_exts = 1 as i32; ext_src_size = 104 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "extub" as *u8, 5 as i64) >= (0 as i64) {
+            is_extu = 1 as i32; ext_src_size = 98 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "extuw" as *u8, 5 as i64) >= (0 as i64) {
+            is_extu = 1 as i32; ext_src_size = 119 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "extul" as *u8, 5 as i64) >= (0 as i64) {
+            is_extu = 1 as i32; ext_src_size = 108 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "extuh" as *u8, 5 as i64) >= (0 as i64) {
+            is_extu = 1 as i32; ext_src_size = 104 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "cslt" as *u8, 4 as i64) >= (0 as i64) {
             is_cslt = 1 as i32;
         } else if cg_find_sub(op_text, op_text_len, "csgt" as *u8, 4 as i64) >= (0 as i64) {
             is_csgt = 1 as i32;
@@ -1328,6 +1356,57 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         let _s2 = sb_append_cstr(arena, s, cc);
         let _s3 = sb_append_cstr(arena, s, " %al\n" as *u8);
         let _s4 = sb_append_cstr(arena, s, "\tmovzbl %al, %eax\n" as *u8);
+    } else if is_exts != (0 as i32) || is_extu != (0 as i32) {
+        // v2.11.13 (W-074.6 C.1 fix): exts_* / extu_* family emit。
+        // QBE ext family = sign/zero extend byte/half/word to dst qt。Unary op,
+        // emit src1 load (用 movsbl/movzbl/movswl/movzwl/movl/movq per src_size),
+        // + optional cltq for 64-bit sign-extend (exts_* only)。
+        //
+        //   extsb: byte  → sign-extend to 32-bit (%eax), +cltq if l dst
+        //   extub: byte  → zero-extend to 32-bit (movzbl; upper %rax auto-zero), if l dst done
+        //   extsh: half  → sign-extend to 32-bit (%eax), +cltq if l dst
+        //   extuh: half  → zero-extend to 32-bit (movzwl; upper %rax auto-zero), if l dst done
+        //   extsw: word  → load 32-bit (movl to %eax); sign-extend to %rax if l dst via cltq
+        //   extuw: word  → load 32-bit (movl to %eax); upper %rax auto-zero (no cltq needed)
+        //   extsl: long  → load 64-bit (movq to %rax); no-op
+        //   extul: long  → same as extsl (zero-ext of long = no-op)
+        //
+        // 注意:必须先于 add fallback branch check (在 is_exts/is_extu 已有),因为 'extsb'
+        // 含 'sub' substring;前面的 if chain 顺序保证 exts_* 优先。
+        //
+        // Source load instruction (per ext_src_size):
+        //   'b' (98): movsbl / movzbl — sign/zero extend 8-bit src to 32-bit in %eax
+        //   'h' (104): movswl / movzwl — sign/zero extend 16-bit src to 32-bit in %eax
+        //   'w' (119): movl — load 32-bit src to %eax (sign bit preserved if sign-ext, upper 32 zero if zero-ext)
+        //   'l' (108): movq — load 64-bit src to %rax (always 64-bit regardless of sign/zero)
+        let mut load_instr: *u8 = "movl" as *u8;
+        if is_exts != (0 as i32) {
+            if ext_src_size == 98 as i32 { load_instr = "movsbl" as *u8; }       // extsb
+            else if ext_src_size == 104 as i32 { load_instr = "movswl" as *u8; } // extsh
+            else if ext_src_size == 108 as i32 { load_instr = "movq" as *u8; }   // extsl (no-op on amd64)
+            // ext_src_size == 119 ('w'): load_instr stays "movl" (extsw)
+        } else {
+            // is_extu: zero-extend
+            if ext_src_size == 98 as i32 { load_instr = "movzbl" as *u8; }       // extub
+            else if ext_src_size == 104 as i32 { load_instr = "movzwl" as *u8; } // extuh
+            else if ext_src_size == 108 as i32 { load_instr = "movq" as *u8; }   // extul (no-op on amd64)
+            // ext_src_size == 119 ('w'): load_instr stays "movl" (extuw; upper %rax auto-zero)
+        }
+        // Emit source load: "\t<load_instr> <src1_off>(%rbp), %eax\n"
+        // 注:即使是 extsl/extul (load 64-bit),x86 GAS 语法 src=mem dst=%rax 必须 AT&T
+        // 顺序 `movq src, %rax`,dst %rax 自动 64-bit;store later 也走 %rax。
+        let _x1 = sb_append_cstr(arena, s, "\t" as *u8);
+        let _x2 = sb_append_cstr(arena, s, load_instr);
+        let _x3 = sb_append_cstr(arena, s, " " as *u8);
+        let _x4 = sb_appendf_lld(arena, s, "%lld" as *u8, src1_off);
+        let _x5 = sb_append_cstr(arena, s, "(%rbp), %eax\n" as *u8);
+        // cltq (sign-extend %eax → %rax) for exts_* + l dst (sign extension needed)
+        // 注:exts + src_size='w' (extsw) 也需要 cltq 把 %eax sign-ext 到 %rax。
+        // exts + src_size='l' (extsl) 不需 (已经 movq → %rax)。
+        // extu 不需 cltq (movl/movzbl/movzwl to %eax 自动 zero-extends upper 32 of %rax)。
+        if is_exts != (0 as i32) && qt == QBE_L_LOCAL() && ext_src_size != 108 as i32 {
+            let _c = sb_append_cstr(arena, s, "\tcltq\n" as *u8);
+        }
     } else {
         // add / 未知 op (T4-a 简化:fallback "addl" + size_suffix)
         let _b1 = sb_append_cstr(arena, s, "\tadd" as *u8);
