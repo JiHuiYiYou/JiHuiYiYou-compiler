@@ -1010,6 +1010,14 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
     let mut is_csge: i32 = 0 as i32;
     let mut is_ceq: i32 = 0 as i32;
     let mut is_cnew: i32 = 0 as i32;
+    // v2.11.12 (W-074.6 + W-074.7 5-op 真修): and / or / xor / shl / shr emit
+    // (per QBE IL spec — all 5 are valid IL ops used by jhyy codegen for big_test
+    // bit_pack and other tests; previous v2.11.x had lexer silently skip them all).
+    let mut is_and: i32 = 0 as i32;
+    let mut is_or: i32 = 0 as i32;
+    let mut is_xor: i32 = 0 as i32;
+    let mut is_shl: i32 = 0 as i32;
+    let mut is_shr: i32 = 0 as i32;
     if op_text != (0 as *u8) && op_text_len > (3 as i64) {
         if cg_find_sub(op_text, op_text_len, "cslt" as *u8, 4 as i64) >= (0 as i64) {
             is_cslt = 1 as i32;
@@ -1036,6 +1044,27 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
             // (因为 'rem' 跟 'add' 都不冲突, 但 order matters for cg_find_sub
             // 命中第一 match)。QBE '%' → 'rem' (signed remainder).
             is_rem = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "and" as *u8, 3 as i64) >= (0 as i64) {
+            // v2.11.12: 'and' (QBE integer bitwise AND) — x86 "andl" / "andq"。
+            // 注意 'and' 必须 check 在 'add' 之前 — cg_find_sub 是 first match,
+            // 'and' 含 'a' 但 'add' 子串在 pos 0 (op name + args: "and %tA, %tB"
+            // 中 'and' 在 pos 0,'add' 不会 match — 但要保险)。
+            is_and = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "or" as *u8, 2 as i64) >= (0 as i64) {
+            // v2.11.12: 'or' (QBE integer bitwise OR) — x86 "orl" / "orq"。
+            // 注意 'or' 必须 check 在 'xor' 之前 (xor 包含 or substring)。
+            is_or = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "xor" as *u8, 3 as i64) >= (0 as i64) {
+            // v2.11.12: 'xor' (QBE integer bitwise XOR) — x86 "xorl" / "xorq"。
+            is_xor = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "shl" as *u8, 3 as i64) >= (0 as i64) {
+            // v2.11.12: 'shl' (QBE unsigned shift left) — x86 "shll" / "shlq"。
+            // x86 shl = sal (same opcode); 用 shll/shlq 配 QBE convention。
+            is_shl = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "shr" as *u8, 3 as i64) >= (0 as i64) {
+            // v2.11.12: 'shr' (QBE unsigned shift right, per QBE spec §6.3) —
+            // x86 "shrl" / "shrq" (zero-fill, matches QBE unsigned semantic)。
+            is_shr = 1 as i32;
         }
     }
 
@@ -1163,6 +1192,98 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         }
         // rem result 存 %rdx — 把它移到 %rax 让后续 mov %rax 存栈正确
         let _mrm2 = sb_append_cstr(arena, s, "\tmovq %rdx, %rax\n" as *u8);
+    } else if is_and != (0 as i32) {
+        // v2.11.12 (W-074.6 + W-074.7 5-op 真修): and 走 "andl" / "andq"。
+        // QBE AND 没有 sign issue,直接 andl/andq。
+        let _b1 = sb_append_cstr(arena, s, "\tand" as *u8);
+        let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        }
+        let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
+    } else if is_or != (0 as i32) {
+        // v2.11.12: or 走 "orl" / "orq"。
+        let _b1 = sb_append_cstr(arena, s, "\tor" as *u8);
+        let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        }
+        let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
+    } else if is_xor != (0 as i32) {
+        // v2.11.12: xor 走 "xorl" / "xorq"。
+        let _b1 = sb_append_cstr(arena, s, "\txor" as *u8);
+        let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        }
+        let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
+    } else if is_shl != (0 as i32) || is_shr != (0 as i32) {
+        // v2.11.12: shl / shr 走 "shll"/"shlq"/"shrl"/"shrq"。
+        // x86 shift by imm → "shll $N, %<reg>"; shift by reg → "movl src2(%rbp), %ecx"
+        //   然后 "shll %cl, %<reg>"。per v2.11.12 ship gate: 32/64-bit shift (QBE_W/L)。
+        // QBE shr = unsigned shift right (per QBE spec §6.3); match x86 shrl (zero-fill)。
+        // shift result never address-holder (per v2.11.8 workarounds doc),所以 emit_mov_reg_to_temp
+        // 走 formula `-(32 + t*8)` 正确。
+        let mut shift_op: *u8 = if is_shl != (0 as i32) { "shll" as *u8 } else { "shrl" as *u8 };
+        if qt == QBE_L_LOCAL() {
+            // 64-bit: shlq / shrq
+            shift_op = if is_shl != (0 as i32) { "shlq" as *u8 } else { "shrq" as *u8 };
+        }
+        let mut load_op: *u8 = "movl" as *u8;
+        if qt == QBE_L_LOCAL() {
+            load_op = "movq" as *u8;
+        }
+        if src2_is_imm != (0 as i32) {
+            // shift by imm: "\t<shift_op> $N, %<reg>\n"
+            let _b1 = sb_append_cstr(arena, s, "\t" as *u8);
+            let _b1op = sb_append_cstr(arena, s, shift_op);
+            let _b2 = sb_append_cstr(arena, s, " $" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+            let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
+        } else {
+            // shift by reg (variable shift): 两步
+            //   (1) "\t<load_op> <src2_off>(%rbp), %ecx\n"  — load src2 into shift-amount reg
+            //   (2) "\t<shift_op> %cl, %<reg>\n"            — actual shift (cl = low 8 of ecx)
+            // 注:x86 shift amount reg 总是 %cl (low 8 bits of %ecx), 即使 64-bit shift
+            // 仍用 %cl (per Intel SDM vol 2)。 32-bit shift 配 movl; 64-bit shift 配 movq
+            // (但 Intel SDM vol 2: 64-bit shift amount 自动 mask 0x3F, 不需 extra)。
+            let _l1 = sb_append_cstr(arena, s, "\t" as *u8);
+            let _l1op = sb_append_cstr(arena, s, load_op);
+            let _l2 = sb_append_cstr(arena, s, " " as *u8);
+            let _l3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _l4 = sb_append_cstr(arena, s, "(%rbp), %ecx\n" as *u8);
+            let _s1 = sb_append_cstr(arena, s, "\t" as *u8);
+            let _s1op = sb_append_cstr(arena, s, shift_op);
+            let _s2 = sb_append_cstr(arena, s, " %cl, %" as *u8);
+            let _s3 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+            let _s4 = sb_append_cstr(arena, s, "\n" as *u8);
+        }
     } else if is_cslt != (0 as i32) || is_csgt != (0 as i32) || is_csle != (0 as i32) || is_csge != (0 as i32) || is_ceq != (0 as i32) || is_cnew != (0 as i32) {
         // csltw / csgtw / cslew / csgew / ceqw / cneww 翻译为
         //   cmp<size> -src2(%rbp), %rax    (GAS ATT: dst=rax, src=src2)

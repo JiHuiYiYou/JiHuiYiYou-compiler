@@ -705,6 +705,47 @@ fn next_token_binop(s: *LexState, arena: *u8, t: *u8, op_byte: i32) -> i32 {
             i = i + (1 as i64);
         }
         op_name = "rem" as *u8;
+    } else if op_byte == (110 as i32) {
+        // v2.11.12 (W-074.6 + W-074.7 5-op 真修): "and" — main dispatcher consume 'a',
+        // 进入时 cursor at 'n' (i.e. 'a' consumed by main + this fn called with
+        // op_byte='n' = 110). Consume "nd" (2 bytes)。emit_binop 走 is_and 分支。
+        let n1 = lex_peek_byte_at(s, 0 as i64);
+        let n2 = lex_peek_byte_at(s, 1 as i64);
+        if n1 != (110 as i32) || n2 != (100 as i32) { return -1 as i32; }
+        let mut i: i64 = 0 as i64;
+        while i < (2 as i64) {
+            let _x = lex_next_byte(s);
+            i = i + (1 as i64);
+        }
+        op_name = "and" as *u8;
+    } else if op_byte == (111 as i32) {
+        // v2.11.12: "or" — main dispatcher consume 'o', cursor at 'r'. Consume "r" (1 byte)。
+        let n1 = lex_peek_byte_at(s, 0 as i64);
+        if n1 != (114 as i32) { return -1 as i32; }
+        let mut i: i64 = 0 as i64;
+        while i < (1 as i64) {
+            let _x = lex_next_byte(s);
+            i = i + (1 as i64);
+        }
+        op_name = "or" as *u8;
+    } else if op_byte == (120 as i32) {
+        // v2.11.12: "xor" — main dispatcher consume 'x', cursor at 'or'. Consume "or" (2 bytes)。
+        let n1 = lex_peek_byte_at(s, 0 as i64);
+        let n2 = lex_peek_byte_at(s, 1 as i64);
+        if n1 != (111 as i32) || n2 != (114 as i32) { return -1 as i32; }
+        let mut i: i64 = 0 as i64;
+        while i < (2 as i64) {
+            let _x = lex_next_byte(s);
+            i = i + (1 as i64);
+        }
+        op_name = "xor" as *u8;
+    } else if op_byte == (104 as i32) {
+        // v2.11.12: "shl" / "shr" — main dispatcher 's' branch consume 's' + 'h' = 2 bytes,
+        // 进入时 cursor at 'l' or 'r'。Peek 1 byte disambiguate。
+        let n1 = lex_peek_byte_at(s, 0 as i64);
+        if n1 != (108 as i32) && n1 != (114 as i32) { return -1 as i32; }
+        let _x = lex_next_byte(s);  // consume 'l' or 'r'
+        op_name = if n1 == (108 as i32) { "shl" as *u8 } else { "shr" as *u8 };
     } else {
         // V2-B v2.6.0 (Unit B Stub-Fill): refactor — set sentinel (was
         // `return -1`), uniform type across chain branches. Check after.
@@ -1030,6 +1071,14 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
     // 读 tok.text_len 当 dst temp id,必须从 ident "tN" 解析 N 后存 text_len。
     // v2.11.2 (W-074.6 T1-a):dst temp id 改存 int_val(text_len 留给 instruction slice 长度)。
     if c0 == (37 as i32) {  // '%'
+        // v2.11.12 (W-074.6 + W-074.7 Bug B 真修): save cursor at entry。
+        // 之前 consume '%' + ident + ws 后才 check '=',如果 '=' 不在 (e.g. 'and'
+        // op args "%tA, %tB" 的 '%tA' 走 '%' branch,但没有 '=' follow)
+        // cursor 跳过 '%tN =w' LHS 头 → lex_il byte-skip 后续裸 op (e.g. 'copy 255')
+        // 直接被 'c' branch 处理 → int_val 留 0 (next_token_copy 默认) → emit dst_off =
+        // cg_offset_for_temp_with_target(0) = -32 (Win) or 0 (SysV) → t180+ collapse。
+        // 真修:save cur at entry; on '=' missing, restore cur + return -1 (no consume)。
+        let saved_cur_lhs = (*s).cur;
         let _x = lex_next_byte(s);
         let ident_start = (*s).cur;
         let ident_len = lex_scan_ident_rest(s);
@@ -1069,6 +1118,9 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
             }
             return rc;
         }
+        // v2.11.12 Bug B 真修:rollback cursor so '%' 字节 不被消费。 lex_il byte-skip
+        // 后续会从 '%' 重新开始,不会被 lost 在 LHS 失败的 branch 里。
+        (*s).cur = saved_cur_lhs;
         return -1 as i32;
     }
 
@@ -1287,10 +1339,11 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         return next_token_phi(s, arena, t);
     }
 
-    // ── 'a' → 'add' (binop) or 'alloc' (alloc) ──
+    // ── 'a' → 'add' (binop) / 'alloc' (alloc) / 'and' (binop) ──
     if c0 == (97 as i32) {
         let n1 = lex_peek_byte_at(s, 1 as i64);
-        if n1 == (100 as i32) && lex_peek_byte_at(s, 2 as i64) == (100 as i32) {
+        let n2 = lex_peek_byte_at(s, 2 as i64);
+        if n1 == (100 as i32) && n2 == (100 as i32) {
             // "add"
             let _x = lex_next_byte(s);
             return next_token_binop(s, arena, t, 97 as i32);
@@ -1300,20 +1353,38 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
             if lex_match_kw(s, "alloc" as *u8, 5 as i64) == 0 { return -1 as i32; }
             return next_token_alloc(s, arena, t);
         }
+        // v2.11.12 (W-074.6 + W-074.7 5-op 真修): "and" — n1='n' (110), n2='d' (100)。
+        // 之前 missing → 13 个 and op 全部 silent skip → bit_pack cascade 崩。
+        if n1 == (110 as i32) && n2 == (100 as i32) {
+            let _x = lex_next_byte(s);  // consume 'a'
+            return next_token_binop(s, arena, t, 110 as i32);  // 'n' as op_byte
+        }
         return -1 as i32;
     }
 
-    // ── 's' → 'sub' (binop) or 'store*' ──
+    // ── 's' → 'sub' (binop) / 'shl' / 'shr' (binop) / 'store*' ──
     if c0 == (115 as i32) {
         let n1 = lex_peek_byte_at(s, 1 as i64);
-        if n1 == (117 as i32) && lex_peek_byte_at(s, 2 as i64) == (98 as i32) {
+        let n2 = lex_peek_byte_at(s, 2 as i64);
+        // v2.11.12 (W-074.6 + W-074.7 5-op 真修): "shl" / "shr" — 必须 check BEFORE sub
+        // (因为 's' 主分支的 n1='u'/'t' 不冲突, 但 order matters for fast reject;
+        // shl/shr 是 's' -> 'h' -> 'l'/'r',sub 是 's' -> 'u' -> 'b')。
+        if n1 == (104 as i32) {
+            // 'h' — peek n2 to disambiguate l vs r
+            if n2 == (108 as i32) || n2 == (114 as i32) {
+                // consume 's' + 'h' = 2 bytes
+                let _x1 = lex_next_byte(s);  // 's'
+                let _x2 = lex_next_byte(s);  // 'h'
+                return next_token_binop(s, arena, t, 104 as i32);  // 'h' as op_byte
+            }
+        }
+        if n1 == (117 as i32) && n2 == (98 as i32) {
             // "sub"
             let _x = lex_next_byte(s);
             return next_token_binop(s, arena, t, 115 as i32);
         }
         // "storew" / "storel" / "stores" / "stored"
         if n1 == (116 as i32) {
-            let n2 = lex_peek_byte_at(s, 2 as i64);
             let n3 = lex_peek_byte_at(s, 3 as i64);
             let n4 = lex_peek_byte_at(s, 4 as i64);
             let n5 = lex_peek_byte_at(s, 5 as i64);
@@ -1324,6 +1395,30 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                     return next_token_store(s, arena, t, n5);
                 }
             }
+        }
+        return -1 as i32;
+    }
+
+    // ── 'o' → 'or' (binop) ──
+    // v2.11.12 (W-074.6 + W-074.7 5-op 真修): "or" — main 之前无 'o' 分支 →
+    // 5 个 or op 全部 silent skip (match_range + dungeon_game + or_exhaust + others)。
+    if c0 == (111 as i32) {
+        let n1 = lex_peek_byte_at(s, 1 as i64);
+        if n1 == (114 as i32) {  // 'r'
+            let _x = lex_next_byte(s);  // consume 'o'
+            return next_token_binop(s, arena, t, 111 as i32);  // 'o' as op_byte
+        }
+        return -1 as i32;
+    }
+
+    // ── 'x' → 'xor' (binop) ──
+    // v2.11.12: "xor" — main 之前无 'x' 分支 → 1 个 xor op silent skip (big_test only)。
+    if c0 == (120 as i32) {
+        let n1 = lex_peek_byte_at(s, 1 as i64);
+        let n2 = lex_peek_byte_at(s, 2 as i64);
+        if n1 == (111 as i32) && n2 == (114 as i32) {  // 'o' + 'r'
+            let _x = lex_next_byte(s);  // consume 'x'
+            return next_token_binop(s, arena, t, 120 as i32);  // 'x' as op_byte
         }
         return -1 as i32;
     }
