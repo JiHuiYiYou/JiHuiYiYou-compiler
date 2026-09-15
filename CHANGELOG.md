@@ -164,6 +164,42 @@
 
 ---
 
+### v2.11.14 — 2026-09-15 — **axis-v2 W-074.7 phi merge gap 真修 attempt → hard STOP #3 (match.jhyy regress) → 0/31 closure (0%); Iter 1 source revert; Iter 2/3/4 全 deferred v2.11.15** (axis-v2 only; main 待 merge)
+
+**Tag**: `v2.11.14` (axis-v2 branch)
+**Status**: W-074.7 phi merge gap **⏸ DEFERRED** (4 sub-bugs 真修 attempt → revert per hard STOP #3); **0/31 cluster closure (0%)**, baseline 84/115 PASS 持平.
+
+**Highlights**:
+
+- **W-074.7 phi merge gap 真修 attempt + revert** (axis-v2 source revert per hard STOP #3):
+  - 设计: CGState struct 加 4 fields (`phi_resolutions: *u8` + `phi_count: i64` + `cur_block_name: *u8` + `cur_block_name_len: i64`),64 entries × 80 bytes = 5KB arena alloc;`cg_record_phi_resolution` + `cg_lookup_phi_resolution` 双向 API;`cg_state_set_cur_block_name` + `cg_state_cur_block_name` getter;emit_phi 改写从 documented noop → real parse loop;emit_jmp 加 lookup block 在 `jmp .L<name>` 前 emit `mov src_slot → dest_slot` if hit;malloc state_buf 160 → 256 (CGState struct 加 4 fields 后总 24 × 8 ≈ 192 bytes)
+  - **Plan v2.11.14 Iter 1 估 "C.3 12 tests target ~100-150 LOC FLIP +11-12 clean / +6-8 likely / +0-3 worst" 4-way wrong 预测**:
+    - LOC partial correct (实测 ~120 LOC source attempt)
+    - Cluster wrong (实测 0/12 PASS)
+    - 根因 partially correct (实测 4 sub-bugs 复合 — A: emit_jmp lookup `(arm_name, merge_label)` key 但 dest_id alignment 错 → match.jhyy runtime crash `NTSTATUS_0xCEFD0000`; B: OR pattern `_|_` 不 emit 各成员独立 arm block 走 default `enum_default`; C: payload pattern `Some(v) => v` 的 `v` slot uninit; D: enum_match_arm_tag_check 缺 emit `cmpl $tag_value, discriminator`)
+    - FLIP est wrong (+11-12 → -1, hard STOP #3 trigger)
+  - **二次 sub-bug (compile-time crash)**: malloc state_buf 160 → 必须 256 (CGState struct 加 4 fields 后总 24 × 8 ≈ 192 bytes, 160 不够 → emit_call/emit_ctrl 写未映射内存 → process crash on first emit, 首 build 报 "5/115 passed, 110 failed")
+  - **hard STOP #3 (currently-PASSing test regression)** triggered per plan hard gate "match.jhyy 在 C.3 fix 后 FAIL → revert + redesign" → source revert 干净 `git checkout HEAD -- 4 files`
+- **诚实记录 per [[feedback_fix_evaluation_rule]]** (跟 v2.11.10 + v2.11.11 + v2.11.12 + v2.11.13 plan 4 次 wrong 预测形成对比 — v2.11.14 plan honest scope 第 5 次 partial wrong):
+  - 0/31 closure (0%); self-backend **84/115 PASS = baseline 持平** (no new cluster closure)
+  - match.jhyy pre-fix + post-revert **PASS** 维持 (silent win from v2.11.13 Iter 4 cne substring preserved)
+  - baseline gate 全 preserved (byte-equal D26 5/5, byte-equal-amd64 10/10, big_test self-backend EXIT=57, QBE fallback 115/135)
+  - **hard STOP #3** triggered per user 2026-09-15 "FLIP count 逼近 5 立即停手" directive → scope DOWN v2.11.14 (1 docs commit only, source revert 干净)
+  - Iter 2 (C.5 slice copy 16B vs 8B) + Iter 3 (C.4 float XMM emit gap) + Iter 4 (A1-XMM return register) 全 deferred v2.11.15
+- **NEW ship gate audit** (per [[feedback_codegen_amd64_run_zerobyte]]):
+  - source revert 干净 baseline maintained
+  - match.jhyy PASS 恢复 (regress baseline gate)
+  - self-backend regress 84/115 (= baseline 持平, no new cluster closure)
+  - **big_test self-backend EXIT=57 preserved** (6/6 closure hold, no regression on v2.11.13 ship)
+- **Stage 2 N=5 jhyy 编 jhyy closure PASS** + **QBE fallback 115/135 PASS preserved** + **byte-equal-amd64 10/10 preserved** + **fixed-point N=3,4,5 .il byte-equal preserved**
+- **jhyy.exe.sha256 refresh** (`774ec8347b4ce629c3f8447755ffdc1789dd7e593df358a72eb32c23f012ac09`)
+- **累计 W-074.6 family closed ~328 LOC + W-074.7 family NEW ⏸ DEFERRED** (4 sub-bugs ~55-100 LOC); 剩余 ~227-272 LOC 留 v2.11.15 + v2.x 中期 V2-D
+
+**完整 changelog**: [`docs/logs/v2/changelog-v2.11.0.md`](docs/logs/v2/changelog-v2.11.0.md) § v2.11.14
+**Plan**: [`docs/plans/v2/v2.11.14-plan.md`](docs/plans/v2/v2.11.14-plan.md)
+
+---
+
 ### v2.11.8 — 2026-09-13 — **axis-v2 W-074.7.8 真修 — 4/5 EXIT exact closure** (axis-v2 only; main 待 merge)
 
 **Tag**: `v2.11.8` (axis-v2 branch)

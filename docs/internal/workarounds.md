@@ -5983,3 +5983,56 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 **Memory:** [[feedback_fix_evaluation_rule]] (诚实记录 cross-cluster impact;plan 估 30-50 LOC → 实测 1 LOC 真修;plan 估 C.2 (3 tests) → 实测 7+ tests closure); [[feedback_codegen_amd64_multifn]] (FLIP count +7 超 stop threshold 5,scope DOWN trigger activated); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: cnel in _regress_cap_table_basic.s — pre-fix `addl src1, src2` + `cmpl $0, sum`, post-fix `cmpl src2_off(%rbp), %rax` + `setne %al` + `movzbl %al, %eax`); [[feedback_plans_per_version]] (v2.11.13-plan.md NEW); [[feedback_changelog_umbrella]] (v2.11.13 sub-section append); [[feedback_audit_single_commit_diff]] (audit 单 commit `89b4b87`); [[feedback_document_workarounds_in_docs]] (本 W-074.6 cne substring entry NEW); [[feedback_auto_push_after_commit]]; [[feedback_ssh_key_same_shell]]
 
 **OS 启动链路:** W-074.6 cne substring ✅ CLOSED (v2.11.13 Iter 4 ship); W-074.6 family 累计 closed ~328 LOC;剩余 ~172 LOC 留 v2.x 中期 V2-D。v2.11.13 scope DOWN — Iter 5-7 deferred v2.11.14 (per FLIP-gate stop trigger);下一 sprint v2.11.14 重新 audit 残余 30 FAIL 分类 + cluster map。
+
+---
+
+## W-074.7 phi resolution emit_phi noop + match/OR/payload merge slot gap — ⏸ DEFERRED (v2.11.14 revert 2026-09-15, hard STOP #3 match.jhyy regress) — 待 v2.11.15 redesign
+
+**ID:** W-074.7 phi merge gap (Bug D, NEW in v2.11.14 audit)
+
+**状态:** ⏸ **DEFERRED** 2026-09-15 — v2.11.14 Iter 1 attempt (axis-v2 commits reverted) hit hard STOP #3 (currently-PASSing test regression):**match.jhyy regressed → runtime crash `NTSTATUS_0xCEFD0000`**。Plan-design fix (CGState.phi_resolutions table + emit_phi 解析 + emit_jmp lookup) 整体思路 correct,但 emit_jmp lookup 在 non-phi path (e.g. 简单 `jmp @loop_body` for loop back-edge) 误命中 → emit 多余 `mov src_slot → dest_slot` 写错槽 → match.jhyy runtime crash。**Source 全部 revert 干净 (git checkout HEAD -- 4 files)**,jhyy.exe 重建后 baseline 84/115 PASS 维持,v2.11.14 ship 0/31 closure。**31 FAIL 全 deferred v2.11.15** (per C.3 12 + C.5 4+1 + C.4 4 + A1-XMM 2 + 残余 9 = 31 audit cluster map,跟 v2.11.14 plan 一致)。
+
+**根因 (实证 /tmp/regress_iter1_full.log diff vs /tmp/regress_v2_11_14_baseline.log):**
+- pre-fix match.jhyy:**PASS** (silent win from v2.11.13 Iter 4 cne substring 真修)
+- post-fix match.jhyy:**FAIL** `runtime crash: NTSTATUS_0xCEFD0000 (0xCEFD0000)` — match pattern `Some(v) => v` 等 simple payload-bind 路径 emit_jmp lookup 误命中,emit 多余 `mov` 写未初始化 stack slot → 后续 read garbage → Windows NTSTATUS 异常
+- 其他 C.3 测试 (char_pattern / enum_match_arm_tag_check / or_exhaust / payload_bind_basic 等):**仍 FAIL** (got 值变化,但 exit code 仍是 garbage)— phi resolution logic 命中路径对 OR pattern 不全,sub-bug 未根治
+
+**修复尝试 (v2.11.14 Iter 1, 已 revert):**
+1. CGState 加 4 字段:`phi_resolutions: *u8` (5KB arena alloc, 64 entries × 80 bytes) + `phi_count: i64` + `cur_block_name: *u8` + `cur_block_name_len: i64`
+2. `cg_record_phi_resolution(state, arm_name, arm_name_len, merge_label, merge_label_len, src_id, dest_id, qbe_type)` — 解析 `%t12 =w phi @arm2 %t4, @arm4 %t10, @arm6 %t11` 后调,每个 `@arm_N %tN` pair 写一条 entry
+3. `cg_lookup_phi_resolution(state, arm_name, arm_name_len, merge_label, merge_label_len, out_src, out_dest, out_qt)` — emit_jmp 在 `jmp .L<merge>` 前查表,命中 emit `mov<size> -<src_off>(%rbp), %rax; mov<size> %rax, -<dest_off>(%rbp)` 把 arm 自己的 slot 值搬到 phi 出口 slot
+4. `cg_state_set_cur_block_name(state, name, name_len)` — emit_label 在 append label 后调,记当前 block name
+5. `cg_state_cur_block_name(state, out_name, out_len)` — emit_phi 跑时读 merge_label (= phi 所在 block),emit_jmp 跑时读 arm_label
+6. emit_phi 改写:从 documented noop → real parse loop 扫 `@arm_N %tN` patterns
+7. emit_jmp 加 lookup block,在 sb_append `jmp .L<name>` 前 emit copy if hit
+8. cg_state_init: alloc phi_resolutions + memset 0 + init cur_block_name = 0
+9. cg_state_reset_for_function: per-fn zero phi_resolutions + reset cur_block_name
+10. malloc state_buf:160 → 256 (CGState struct 加 4 字段后总 24 fields × 8 bytes ≈ 192 bytes,160 不够 → emit_call / emit_ctrl 写未映射内存 → process crash on first emit;首 build 报 "5/115 passed, 110 failed" 即此 bug)
+
+**Sub-bug 失败归因 (v2.11.15 redesign 时修复):**
+- **Sub-bug A (硬 STOP #3 trigger)**:emit_jmp lookup 用 `(current_block_name, jmp_target_label)` 作 key,但**non-phi path** 也调 emit_jmp (loop back-edge `jmp @loop_body`、non-merge fall-through 等),这些 path emit_jmp lookup miss → no-op 正确;但 match.jhyy 的 `jmp .Lmerge1` 在 `@arm2` (match arm) 内部,emit_phi 写的 merge_label 跟 arm_name 在 jmp 跑时**顺序不一致** — emit_phi 跑时 cur_block_name 是"merge1"(phi 所在 block),但 emit_jmp 跑时 cur_block_name 是"arm2"(jmp 所在 block),lookup 用 `(arm2, merge1)` key 应该命中 — 但**match.jhyy 的 arm 跳转语义跟 C.3 测试不一样**:match.jhyy 是 simple payload-bind `Some(v) => v`,arm 内部 emit `jmp @merge1`,lookup 应该命中写 `mov src_slot → dest_slot`;但实际写错 dest slot (v 的 stack slot uninit)。**根因:emit_jmp lookup 命中的 dest_id 跟 arm emit 的 dest_id 不一致** (e.g. arm emit 写 %tN 到 -X(%rbp),lookup 写的 dest_id 是 %tM ≠ %tN)。Fix 方向:lookup 用 `(arm_name, merge_label, src_id)` 精确 key 而非 `(arm_name, merge_label)`,或在 emit_copy 路径里按 emit 顺序 pop dest_id 跟 lookup 对齐。
+- **Sub-bug B (OR pattern not handled)**:OR pattern `_|_` (e.g. `Shape::Rect | Shape::Circle`) 走 default `enum_default` branch,emit 不 emit OR 各成员的 arm block — phi 表不会为 OR 写 entry,phi lookup miss → no-op → wrong exit。Fix 方向:codegen.jhyy upstream (cg_match_pattern) 拆 OR 成独立 arm block,而不是 default。
+- **Sub-bug C (payload slot uninit)**:payload pattern `Some(v) => v` 的 `v` stack slot 在 arm emit 时 uninit (arm 写自己的 payload_slot 不写 v's slot),需要 emit `mov payload_slot → v_slot` before jmp。Fix 方向:emit_arm 末尾加 `mov payload_slot, v_slot` instruction,或 phi resolution 把 dest_id 指向 v_slot 而非 dest_id。
+- **Sub-bug D (tag_check missing for variants without wildcard)**:enum_match_arm_tag_check got=0 (expect 200) — tag check 缺 emit for variants 不到 wildcard 的情况。Fix 方向:cg_match_pattern emit 每个 variant 的 `cmpl $tag_value, discriminator → %t_match` + `jnz @next_arm, @arm_N` (已部分存在,可能缺 arm-N 不带 wildcard 的 emit path)。
+
+**验证 (v2.11.14 ship 状态 — partial closure, deferred 全 31):**
+- Self-backend:84/115 PASS (= v2.11.13 baseline 85/115 - 1 from random) — **跟 baseline 持平,无新 cluster closure**
+- byte-equal D26:5/5 PASS preserved (per feedback_audit_single_commit_diff: source revert 后 binary 重建,baseline gate maintained)
+- byte-equal-amd64 V2-B:10/10 PASS preserved
+- big_test self-backend EXIT=57 preserved (6/6 closure hold)
+- QBE baseline:115/135 PASS preserved (no QBE regression — fix 全 in self-backend path)
+- jhyy.exe.sha256 refresh `774ec8347b4ce629c3f8447755ffdc1789dd7e593df358a72eb32c23f012ac09`
+- match.jhyy pre-fix + post-revert:**PASS** 维持 (baseline 84/115 stable)
+
+**诚实 scope 评估 (per [[feedback_fix_evaluation_rule]] + [[feedback_codegen_amd64_multifn]]):**
+- v2.11.14 Iter 1 plan 估 "C.3 12 tests target, ~100-150 LOC, FLIP ~+11-12 clean / +6-8 likely / +0-3 worst" 预测**严重 wrong**:
+  - LOC 估 partial correct:actual code 写 ~120 LOC (CGState struct 4 fields + cg_record_phi_resolution + cg_lookup_phi_resolution + cg_state_set_cur_block_name + cg_state_cur_block_name + emit_phi rewrite + emit_jmp lookup + cg_state_init/reset_for_function + malloc bump 160→256)
+  - Cluster 估 wrong:实测 0/12 PASS + 1 regress (match.jhyy silent win lost) — 净 FLIP = -1 (硬 STOP #3 trigger)
+  - 根因归因 partially correct:plan 估 "emit_phi noop + .Lmerge 读 third never-written slot" → 实测 "emit_jmp lookup 在 simple payload-bind path 误命中 + OR pattern 不 emit arm + payload slot uninit + tag_check missing" 4 sub-bugs 复合,**单个 fix 不够**
+- **Plan v2.11.14 "Iter 1 → STOP early if FLIP trigger" 状态**:Iter 1 hit hard STOP #3 (currently-PASSing test regression match.jhyy runtime crash),per plan "If STOP condition hit early → Ship 当前 PASS count + 1 docs commit documenting deferred items",v2.11.14 ship **0/31 closure**,Iter 2/3/4 (C.5 + C.4 + A1-XMM) 全部 deferred v2.11.15
+- **W-074.7 sub-bugs 估**:Sub-bug A (lookup key alignment) ~10-20 LOC 真修;Sub-bug B (OR pattern) ~30-50 LOC 真修 (要改 codegen.jhyy upstream);Sub-bug C (payload slot uninit) ~5-10 LOC 真修;Sub-bug D (tag_check missing) ~10-20 LOC 真修;合计 ~55-100 LOC 真修,**v2.11.15 redesign 4 sub-bugs 全 ship 才能完全 close C.3 cluster 12 tests** (含 min_enum NEW)
+- **W-074.6 family 累计 closed 仍 ~328 LOC** (v2.11.14 revert 后维持 v2.11.13 进度,无新 closure);剩余 ~172 LOC + **W-074.7 family 4 sub-bugs ~55-100 LOC** 留 v2.11.15 + v2.x 中期 V2-D。M5 启动仍需等 W-074.6 family + W-074.7 family 全闭环
+
+**Memory:** [[feedback_fix_evaluation_rule]] (诚实记录 C.3 12 tests 估 → 0 PASS + 1 regress 实测, plan 估 partial wrong); [[feedback_codegen_amd64_multifn]] (FLIP count -1 触发 hard STOP #3 — match.jhyy currently-PASSing test regression > STOP threshold); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: malloc state_buf 160→256 必须 ≥ CGState struct 实际字节数,否则 emit_call/emit_ctrl 写未映射内存 → process crash); [[feedback_plans_per_version]] (v2.11.14-plan.md 已 ship per plan, 但实际 closure 0/31 → plan 在下个 sprint v2.11.15 redesign 时重用 audit cluster map); [[feedback_changelog_umbrella]] (v2.11.14 sub-section append — 记录 "0/31 closure, deferred 全 31 v2.11.15"); [[feedback_audit_single_commit_diff]] (audit revert 单 commit: `git checkout HEAD -- 4 files` + 重建 jhyy.exe + sha256 refresh); [[feedback_document_workarounds_in_docs]] (本 W-074.7 phi merge gap entry NEW,详记 root cause + 4 sub-bugs + 验证); [[feedback_auto_push_after_commit]]; [[feedback_ssh_key_same_shell]]
+
+**OS 启动链路:** W-074.7 phi merge gap ⏸ DEFERRED (v2.11.14 revert hard STOP #3); W-074.6 family + W-074.7 family 累计 closed ~328 LOC,待 ship ~227-272 LOC;v2.11.15 重新 audit + redesign C.3 cluster 4 sub-bugs + Iter 2/3/4 (C.5 + C.4 + A1-XMM) 全 deferred 接力。M5 启动仍需等 W-074.6 + W-074.7 family 全闭环。

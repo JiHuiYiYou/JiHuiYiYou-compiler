@@ -1142,6 +1142,44 @@ return -1 as i32;
 - v2.12.0 QBE 移除 (Part 2b) — 仍需 v2.x 末 W-074.6 family 闭环
 - M5 独立 sprint 需等 v2.12.0 ship + 6/6 EXIT exact closure ✅ (本 sprint 6/6 closure 闭环 hold,留 V2-D 后续子 sprint)
 
+## v2.11.14 — 2026-09-15 — **0/31 closure, hard STOP #3 (match.jhyy regress), deferred 全 31 to v2.11.15**
+
+**ship gate** (per `feedback_fix_evaluation_rule` 5/5 PASS rule + plan v2.11.14 hard STOP conditions):
+- Self-backend regress: **84/115 PASS = baseline 持平** (no new cluster closure; match.jhyy runtime crash regress 触发后 source 全 revert + binary 重建 sha256 refresh)
+- byte-equal D26: **5/5 PASS preserved** (revert 后 baseline gate maintained)
+- byte-equal-amd64 V2-B: **10/10 PASS preserved**
+- big_test self-backend: **EXIT=57 preserved** (6/6 closure hold)
+- QBE baseline: **115/135 PASS preserved** (no QBE regression — fix 全 in self-backend path)
+- jhyy.exe.sha256: `774ec8347b4ce629c3f8447755ffdc1789dd7e593df358a72eb32c23f012ac09`
+
+**v2.11.14 实际 outcome (1 docs commit):**
+- **0/31 FAIL closure** (per v2.11.14 audit cluster map: C.3 12 + C.5 4+1 + C.4 4 + A1-XMM 2 + 残余 9 = 31)
+- **Iter 1 (C.3 phi merge gap) attempt**:plan 估 ~100-150 LOC + FLIP +11-12 clean / +6-8 likely / +0-3 worst (match.jhyy regress)
+  - 实测 outcome: **0/12 PASS + 1 regress (match.jhyy runtime crash `NTSTATUS_0xCEFD0000`)** → hard STOP #3 triggered → source revert + binary rebuild
+  - 根因 4 sub-bugs 复合 (vs plan 单 root cause):
+    - **Sub-bug A**: emit_jmp lookup 用 `(arm_name, merge_label)` key 但 dest_id alignment 错 (lookup 命中的 dest_id ≠ arm emit 的 dest_id → 写错 stack slot)
+    - **Sub-bug B**: OR pattern `_|_` 不 emit 各成员独立 arm block,走 default `enum_default` → phi 表不写 entry → lookup miss → wrong exit
+    - **Sub-bug C**: payload pattern `Some(v) => v` 的 `v` stack slot 在 arm emit 时 uninit (payload_slot 不搬到 v_slot) → read garbage
+    - **Sub-bug D**: enum_match_arm_tag_check 缺 emit `cmpl $tag_value, discriminator` for variants 不到 wildcard 的情况
+  - 二次 sub-bug:malloc state_buf 160 → 必须 256 (CGState struct 加 4 fields 后总 24 × 8 ≈ 192 bytes,160 不够 → emit_call/emit_ctrl 写未映射内存 → process crash on first emit,首 build 报 "5/115 passed, 110 failed")
+- **Iter 2/3/4 全未启动** (per hard STOP #3 → "If STOP condition hit early → Ship 当前 PASS count + 1 docs commit" 立即执行)
+
+**v2.11.14 ship record**: 0/31 cluster closure, 1 NEW W-074.7 entry (Bug D), source 全 revert 干净 (git checkout HEAD -- 4 files), baseline 84/115 持平
+
+**待 ship (deferred to v2.11.15)**:
+- W-074.7 4 sub-bugs 真修 (~55-100 LOC): Sub-bug A (lookup key alignment) + Sub-bug B (OR pattern → 改 codegen.jhyy upstream) + Sub-bug C (payload slot uninit) + Sub-bug D (tag_check missing for variants)
+- Iter 2 (C.5 slice copy 16B vs 8B) ~30-50 LOC
+- Iter 3 (C.4 float XMM emit gap) ~50-80 LOC
+- Iter 4 (A1-XMM return register) ~15-25 LOC
+- 合计 v2.11.15 估 ~150-260 LOC 真修 + ~250-300 docs = ~400-560 LOC 2-4 commits
+
+## References (v2.11.14)
+
+- **Plan**: `docs/plans/v2/v2.11.14-plan.md` (per `feedback_plans_per_version`; **~120 LOC source attempt + ~150 LOC revert + ~250 docs = ~520 LOC 1 docs commit**; partial closure 0/31 = 0% + hard STOP #3 trigger activated)
+- **W-074.7 phi merge gap**: `docs/internal/workarounds.md` W-074.7 phi resolution emit_phi noop + match/OR/payload merge slot gap **⏸ DEFERRED** entry (~80 LOC)
+- **Inline annotation**: revert 干净 — `compiler/src0/codegen_amd64_state.jhyy`, `codegen_amd64_emit_call.jhyy`, `codegen_amd64_emit_ctrl.jhyy`, `codegen_amd64.jhyy` 全部 git checkout HEAD -- 还原 baseline
+- **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 C.3 12 tests 估 → 0 PASS + 1 regress 实测, plan 估 partial wrong); [[feedback_codegen_amd64_multifn]] (FLIP count -1 触发 hard STOP #3 — match.jhyy currently-PASSing test regression > STOP threshold); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: malloc state_buf 160→256 必须 ≥ CGState struct 实际字节数,否则 emit_call/emit_ctrl 写未映射内存 → process crash); [[feedback_plans_per_version]] (v2.11.14-plan.md 已 ship per plan, 但实际 closure 0/31 → plan 在下个 sprint v2.11.15 redesign 时重用 audit cluster map); [[feedback_changelog_umbrella]] (v2.11.14 sub-section append — 记录 "0/31 closure, deferred 全 31 v2.11.15"); [[feedback_audit_single_commit_diff]] (audit revert 单 commit: `git checkout HEAD -- 4 files` + 重建 jhyy.exe + sha256 refresh); [[feedback_document_workarounds_in_docs]] (本 W-074.7 phi merge gap entry NEW,详记 root cause + 4 sub-bugs + 验证); [[feedback_auto_push_after_commit]]; [[feedback_ssh_key_same_shell]]
+
 ## References (v2.11.13)
 
 - **Plan**: `docs/plans/v2/v2.11.13-plan.md` (per `feedback_plans_per_version`; **~1 LOC source + ~250 docs = ~251 LOC 2 commits**; partial closure 14/44 = 32% + FLIP-gate scope DOWN trigger activated)
