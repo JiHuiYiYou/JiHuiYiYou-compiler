@@ -97,9 +97,11 @@ fn emit_comment(state: *u8, text: *u8) -> i32 {
 }
 
 // size_suffix_for_qt — 把 QBE type letter 转 AT&T size suffix
-//   'w' → "l" (32-bit)
-//   'l' → "q" (64-bit)
-//   其他(浮点本 sprint 不做):返回 ""
+//   'w' → "l" (32-bit int)
+//   'l' → "q" (64-bit int / pointer)
+//   'd' → "q" (f64 = 8 bytes; v2.11.13 A1 fix — f64 emit gap)
+//   's' → "l" (f32 = 4 bytes; v2.11.13 A1 fix — f32 emit gap)
+//   fallback → "l"
 fn size_suffix_for_qt(qt: i32) -> *u8 {
     if qt == QBE_W_LOCAL() {
         return "l" as *u8;
@@ -107,16 +109,25 @@ fn size_suffix_for_qt(qt: i32) -> *u8 {
     if qt == QBE_L_LOCAL() {
         return "q" as *u8;
     }
-    // 's'/'d' 浮点本 sprint 不实现(per L4 § 0 scope)
+    if qt == QBE_D_LOCAL() {
+        return "q" as *u8;
+    }
+    if qt == QBE_S_LOCAL() {
+        return "l" as *u8;
+    }
     return "l" as *u8;  // default fallback
 }
 
 // reg_rax_for_qt — 返回与 qt size 匹配的 %rax 系寄存器名
 //   QBE_W_LOCAL (32-bit) → "eax" (GAS 拒绝 "movl ... %rax")
 //   QBE_L_LOCAL (64-bit) → "rax"
+//   QBE_D_LOCAL (f64)    → "rax" (v2.11.13 A1 fix: f64 = 8B needs 64-bit reg)
 //   默认 fallback → "eax" (32-bit safe default)
 fn reg_rax_for_qt(qt: i32) -> *u8 {
     if qt == QBE_L_LOCAL() {
+        return "rax" as *u8;
+    }
+    if qt == QBE_D_LOCAL() {
         return "rax" as *u8;
     }
     return "eax" as *u8;
@@ -127,12 +138,18 @@ fn reg_rcx_for_qt(qt: i32) -> *u8 {
     if qt == QBE_L_LOCAL() {
         return "rcx" as *u8;
     }
+    if qt == QBE_D_LOCAL() {
+        return "rcx" as *u8;
+    }
     return "ecx" as *u8;
 }
 
 // reg_rdx_for_qt — Win x64 第 2 arg 寄存器(qt-aware)
 fn reg_rdx_for_qt(qt: i32) -> *u8 {
     if qt == QBE_L_LOCAL() {
+        return "rdx" as *u8;
+    }
+    if qt == QBE_D_LOCAL() {
         return "rdx" as *u8;
     }
     return "edx" as *u8;

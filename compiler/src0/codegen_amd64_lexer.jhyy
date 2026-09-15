@@ -201,6 +201,9 @@ fn lex_scan_ident_rest(s: *LexState) -> i64 {
         if c >= (48 as i32) && c <= (57 as i32) { ok = 1 as i32; }   // 0-9
         if c == (95 as i32) { ok = 1 as i32; }  // '_'
         if c == (46 as i32) { ok = 1 as i32; }  // '.'
+        // v2.11.13 A1-deep fix: include '$' so generic mono-expand names like
+        //   $max$i32 / $max$f64 are captured as one ident (not split at first '$').
+        if c == (36 as i32) { ok = 1 as i32; }  // '$'
         if ok == (1 as i32) {
             let _x = lex_next_byte(s);
             n = n + (1 as i64);
