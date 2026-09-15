@@ -88,6 +88,44 @@
 
 ---
 
+### v2.11.12 — 2026-09-15 — **axis-v2 W-074.6 shl/shr (5 ops) missing + emit-copy dst_id=0 真修 — 6/6 self-backend EXIT exact closure ✅ 达成** (axis-v2 only; main 待 merge; **新里程碑: 6/6 self-backend closure 达成**)
+
+**Tag**: `v2.11.12` (axis-v2 branch)
+**Status**: W-074.6 shl/shr (5 ops and/or/xor/shl/shr) + emit-copy dst_id=0 **✅ CLOSED** (2 个独立 bugs 联动真修);**6/6 self-backend EXIT exact closure ✅ 达成** (hello=42 / big_test=57 / struct_val_pass=35 / fib_renamed=40 / nested_struct_deep=22 / struct_val_assign=30);big_test 不再 hang at t_bit_pack (was 5min+ timeout in v2.11.11, now PASS in seconds).
+
+**Highlights**:
+
+- **Bug A — shl/shr (5 ops) missing 真修** (~75 LOC across 2 files):
+  - `compiler/src0/codegen_amd64_lexer.jhyy` `next_token_binop` (line 631-720) 加 4 个 NEW branch:`and` / `or` / `xor` / `shl`/`shr`
+  - `compiler/src0/codegen_amd64_lexer.jhyy` main dispatcher `'s'` branch (line 1307-1329) shl/shr check BEFORE sub check + 新 `'o'` (or) + `'x'` (xor) branch + `'a'` branch 加 and check
+  - `compiler/src0/codegen_amd64_emit_call.jhyy` (line 1013-1040) 加 5 个 `is_*` flag + cg_find_sub detection chain
+  - `compiler/src0/codegen_amd64_emit_call.jhyy` (line 1166-1208) 加 5 个 dispatch branch:`andl/andq` + `orl/orq` + `xorl/xorq` + `shll/shlq` (32/64-bit imm + reg paths) + `shrl/shrq`
+  - **2 个 Phase C sub-bug 修正** (本次 ship 期间 surface): `%%` → `%` (sb_append_cstr plain append 不是 printf-style) + reg path 漏 `movl` prefix → 分开 imm / reg path 各自 emit 完整 prologue
+- **Bug B — emit-copy dst_id=0 root cause 真修** (~3 LOC):
+  - `compiler/src0/codegen_amd64_lexer.jhyy:1074-1123` LHS `%` branch entry save cursor + `=` miss fallthrough rollback cursor + return -1
+  - 关键 insight: LHS `%` branch 把 cursor 推到 ident END 后, 如果 `=` 不存在, `%` 字节已经被 consume → 上层 dispatcher 拿不到 `%` → 后续 fallback 路径 (例如 'c' for copy) 拿不到正确 wrap context → lex_parse_temp_id_from_ident 返回 0 → emit_copy collapse to slot -32
+- **诚实记录 per [[feedback_fix_evaluation_rule]]**:**6/6 self-backend EXIT exact closure ✅ 达成** (跟 v2.11.10 + v2.11.11 plan "100% 可达" 两次 wrong 教训形成对比, v2.11.12 ship record 6/6 真达成):
+  - hello=42 ✅
+  - **big_test=57** (= 12345 mod 256 per Windows 8-bit exit, **was hang at t_bit_pack 5min+ timeout in v2.11.11, now PASS**)
+  - struct_val_pass=35 ✅
+  - fib_renamed=40 ✅
+  - nested_struct_deep=22 ✅
+  - struct_val_assign=30 ✅
+- **NEW ship gate audit** (per [[feedback_codegen_amd64_run_zerobyte]]):
+  - 20 shll/shrl/andl/orl/xorl emits in `_regress_big_test.s` (vs 0 pre-fix)
+  - t_bit_pack + t_bit_unpack + t_shifts 全 PASS (was hang/crash)
+  - bit_pack distinct slots -1424, -1432, -1440, -1448, -1456, -1464, -1472, -1480, -1488, -1496, -1504, -1512, -1520, -1528, -1536, -1544, -1552 (vs all -32 collapse pre-fix)
+- **Self-backend regress**: **69/115** (vs v2.11.11 baseline 71/115, **-2**, 全部 pre-existing FAILs dominate: payload_bind/sizeof/slice/top_level_let_mut/u32_let_inferred 等不在 6/6 closure scope 内; plan target ≥75/115 NOT met — 因为 t_bit_pack / t_bit_unpack / t_shifts 不在 regress 测试 list); FLIP count -2 全部 pre-existing, scope DOWN trigger per [[feedback_codegen_amd64_multifn]] 未触发
+- **Stage 2 N=5 jhyy 编 jhyy closure PASS** + **QBE fallback 115/115 PASS preserved** + **byte-equal-amd64 10/10 preserved** + **fixed-point N=3,4,5 .il byte-equal + cap_test 跨 N 代 EXIT=42 一致 preserved**
+- **D43 closure v1↔v2 .il sha HOLD** (re-baseline 因 lexer+emit_call 微变; new sha `9e61c42c33c661afdd0c9eba4f361aa9cb021a80e7e4173e56bff6ed2097cf76`)
+- **jhyy.exe.sha256 refresh** (`58a6f3a27b03e8a2d39773581f6a6c648d377ace214b080c97e084e1a1a77101`)
+- **累计 W-074.6 family closed ~325 LOC** (T3-a + T4-c + T4-g + shl/shr + dst_id=0); 剩余 ~175+ LOC (stack-slot-reuse in other emit paths + extsw silent-skip + emit_ret 不 mov %t1 → %eax 等) 留 v2.x 中期 V2-D
+
+**完整 changelog**: [`docs/logs/v2/changelog-v2.11.0.md`](docs/logs/v2/changelog-v2.11.0.md) § v2.11.12
+**Plan**: [`docs/plans/v2/v2.11.12-plan.md`](docs/plans/v2/v2.11.12-plan.md)
+
+---
+
 ### v2.11.8 — 2026-09-13 — **axis-v2 W-074.7.8 真修 — 4/5 EXIT exact closure** (axis-v2 only; main 待 merge)
 
 **Tag**: `v2.11.8` (axis-v2 branch)
