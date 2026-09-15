@@ -442,6 +442,12 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     }
     let name_len = name_end - name_off;
 
+    // 0) v2.11.13 A2 (cont.):emit .text directive — mingw gcc requires .text
+    //    to come FIRST in .s (else ld error 1). After data blocks emit .text
+    //    switch-back, ensure each fn lands in code section.
+    sb_append_cstr(arena, sb, ".text\n" as *u8);
+    sb_append_cstr(arena, sb, ".balign 16\n" as *u8);
+
     // 1) .globl <name>\n
     sb_append_cstr(arena, sb, ".globl " as *u8);
     sb_append(arena, sb, ptr_add_u8((*t).text, name_off), name_len);
@@ -508,7 +514,9 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
 }
 
 // ════════════════════════════════════════════════════
-// E14 emit_data_string — `data $name = { b "..." }` → .globl + label + .ascii + .byte 0
+// E14 emit_data_string — `data $name = { b "..." }` 或 `data $name = { b N, ... }` →
+//   string form: .globl + label + .ascii "<text>" + .byte 0
+//   byte list form (v2.11.13 A2 fix): .globl + label + .byte N, N, ..., N
 // ════════════════════════════════════════════════════
 //
 // Per L4 § 3.5 E14:QBE output:
@@ -533,6 +541,12 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
 // QBE IL emit 也不做 escape,raw form 直通)。QBE .s 输出用 GAS `.ascii` 接 raw bytes,
 // 但 content 含 `"` 字符会破汇编 — v2.5.0 不接含特殊字符的字符串(regress 104/104
 // 测试用例都是 ASCII alpha,无 escape 需求)。后续 V2-B 加 escape。
+//
+// v2.11.13 A2 fix: byte list form `data $name = { b 97, b 98, ... }`
+//   lexer (next_token_data_string) 检测到 digit-after-'b' → 收集 raw byte 列表到
+//   content buffer,设 ILToken offset 36 处的 int_val 字段 (=1) 作为 byte-list flag。
+//   emit_data_string 读 flag:1 → emit `.byte N, N, ...` (no .ascii + no .byte 0 trailing);
+//   flag:0 → string form (per legacy)。
 
 fn emit_data_string(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let cg = state as *CGState;
@@ -544,14 +558,51 @@ fn emit_data_string(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let sb = (*cg).out;
     let arena = (*cg).arena;
 
-    // 1) .globl <name>\n
+    // 1) .data\n.balign 8\n — v2.11.13 A2 fix: GAS defaults to .text; need explicit .data
+    sb_append_cstr(arena, sb, ".data\n" as *u8);
+    sb_append_cstr(arena, sb, ".balign 8\n" as *u8);
+
+    // 2) .globl <name>\n
     sb_append_cstr(arena, sb, ".globl " as *u8);
     sb_append(arena, sb, (*t).text, (*t).text_len);
     sb_append_cstr(arena, sb, "\n" as *u8);
 
-    // 2) <name>:\n
+    // 3) <name>:\n
     sb_append(arena, sb, (*t).text, (*t).text_len);
     sb_append_cstr(arena, sb, ":\n" as *u8);
+
+    // v2.11.13 A2: detect byte-list form via qbe_type field (=1)
+    let bl_p = ptr_add_u8(tok, (32 as i64)) as *i32;
+    let is_byte_list = *bl_p;
+    // v2.11.13 A2 cont.: elem_width from int_val high 32 bits (offset 28)
+    let ew_p = ptr_add_u8(tok, (28 as i64)) as *i32;
+    let elem_width = *ew_p;
+    let _ewu = elem_width;  // suppress unused warning
+
+    if is_byte_list == (1 as i32) {
+        // Byte list form: raw text like "97, 98, 99, ..., 122" → emit ".byte 97, 98, ..."
+        // v2.11.13 A2 cont.: elem_width 1/4/8 → emit .byte / .long / .quad.
+        let content_ptr = ptr_add_u8((*t).text, (*t).text_len + (1 as i64));
+        let content_len = strlen(content_ptr);
+        let _ewu2 = elem_width;
+        let mnemonic: *u8 = if elem_width == (1 as i32) {
+            ".byte " as *u8
+        } else if elem_width == (4 as i32) {
+            ".long " as *u8
+        } else {
+            ".quad " as *u8
+        };
+        sb_append_cstr(arena, sb, "\t" as *u8);
+        sb_append_cstr(arena, sb, mnemonic);
+        sb_append(arena, sb, content_ptr, content_len);
+        sb_append_cstr(arena, sb, "\n" as *u8);
+        // v2.11.13 A2 (cont.):switch back to .text section so subsequent fn emit
+        //   lands in code section, not data. GAS defaults stay in last section.
+        sb_append_cstr(arena, sb, ".text\n" as *u8);
+        // target_tag v2.8.0 加,data string target-agnostic — 仅为签名统一
+        let _tt = target_tag;
+        return 0;
+    }
 
     // 3) .ascii "<content>"\n — content 在 (text + text_len + 1)
     //    [ASSUMED-LAYOUT] 跟 emit_jnz else label 同样假设 — lexer 拼 name\0content。
@@ -563,6 +614,9 @@ fn emit_data_string(state: *u8, tok: *u8, target_tag: i32) -> i32 {
 
     // 4) .byte 0\n — null terminator(per L4 § 3.5 E14 + ir.jhyy:797 emit `b 0`)
     sb_append_cstr(arena, sb, "\t.byte 0\n" as *u8);
+    // v2.11.13 A2 (cont.):switch back to .text section so subsequent fn emit
+    //   lands in code section, not data. GAS defaults stay in last section.
+    sb_append_cstr(arena, sb, ".text\n" as *u8);
     // target_tag v2.8.0 加,data string target-agnostic — 仅为签名统一
     let _tt = target_tag;
     return 0;

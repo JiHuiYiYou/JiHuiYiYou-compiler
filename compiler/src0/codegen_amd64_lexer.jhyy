@@ -966,7 +966,7 @@ fn next_token_data_string(s: *LexState, arena: *u8, t: *u8) -> i32 {
     let _x = lex_next_byte(s);
     let name_start = (*s).cur;
     let name_len = lex_scan_ident_rest(s);
-    // ── consume ` = { b "<content>"` ──
+    // ── consume ` = { b "<content>"` 或 ` = { b N, b N, ... }` ──
     let _s2 = lex_skip_ws_and_comments(s);
     if lex_peek_byte(s) != (61 as i32) { return -1 as i32; }  // '='
     let _eq = lex_next_byte(s);
@@ -974,33 +974,146 @@ fn next_token_data_string(s: *LexState, arena: *u8, t: *u8) -> i32 {
     if lex_peek_byte(s) != (123 as i32) { return -1 as i32; }  // '{'
     let _br = lex_next_byte(s);
     let _s4 = lex_skip_ws_and_comments(s);
-    if lex_peek_byte(s) != (98 as i32) { return -1 as i32; }  // 'b' (byte type indicator)
-    let _bt = lex_next_byte(s);
-    let _s5 = lex_skip_ws_and_comments(s);
-    if lex_peek_byte(s) != (34 as i32) { return -1 as i32; }  // '"'
-    let _q1 = lex_next_byte(s);
-    let content_start = (*s).cur;
-    // scan content until matching '"' or EOF
+    // v2.11.13 A2 fix: support byte list form `b 97, b 98, ...` AND word/long
+    //   list forms `w 1, l 2, s 1.0, d 2.0`. Detect type letter (b/w/l/s/d)
+    //   after '{' + ws; consume it + trailing ws; next char: digit → list form.
+    let mut content_start: *u8 = 0 as *u8;
     let mut content_len: i64 = 0 as i64;
-    let mut cdone = 0 as i32;
-    while cdone == (0 as i32) {
-        let cc = lex_peek_byte(s);
-        if cc == (34 as i32) || cc == (0 as i32) { cdone = 1 as i32; }
-        else {
-            let _cn = lex_next_byte(s);
-            content_len = content_len + (1 as i64);
+    let mut is_byte_list = 0 as i32;
+    let mut byte_list_buf: *u8 = 0 as *u8;
+    let mut byte_list_len: i64 = 0 as i64;
+    let mut byte_list_cap: i64 = 0 as i64;
+    let mut elem_width: i32 = 1 as i32;
+    let pc = lex_peek_byte(s);
+    // Helper: peek non-ws
+    if pc == (98 as i32) {
+        // 'b' (98) — byte type, expected digit follows
+        elem_width = 1 as i32;
+        let _bn = lex_next_byte(s);
+        let mut wd = 0 as i32;
+        while wd == (0 as i32) {
+            let wc = lex_peek_byte(s);
+            if wc == (32 as i32) || wc == (9 as i32) { let _wcn = lex_next_byte(s); }
+            else { wd = 1 as i32; }
+        }
+    } else if pc == (119 as i32) || pc == (115 as i32) {
+        // 'w' (119) / 's' (115) — word (4 bytes) / single-float (4 bytes)
+        elem_width = 4 as i32;
+        let _bn = lex_next_byte(s);
+        let mut wd = 0 as i32;
+        while wd == (0 as i32) {
+            let wc = lex_peek_byte(s);
+            if wc == (32 as i32) || wc == (9 as i32) { let _wcn = lex_next_byte(s); }
+            else { wd = 1 as i32; }
+        }
+    } else if pc == (108 as i32) || pc == (100 as i32) {
+        // 'l' (108) / 'd' (100) — long (8 bytes) / double-float (8 bytes)
+        elem_width = 8 as i32;
+        let _bn = lex_next_byte(s);
+        let mut wd = 0 as i32;
+        while wd == (0 as i32) {
+            let wc = lex_peek_byte(s);
+            if wc == (32 as i32) || wc == (9 as i32) { let _wcn = lex_next_byte(s); }
+            else { wd = 1 as i32; }
         }
     }
-    // consume closing '"'
-    if lex_peek_byte(s) == (34 as i32) { let _q2 = lex_next_byte(s); }
-    // skip 直到 '}' (吞掉 `, b 0`)
-    let mut bdone = 0 as i32;
-    while bdone == (0 as i32) {
-        let cc2 = lex_peek_byte(s);
-        if cc2 == (125 as i32) || cc2 == (0 as i32) { bdone = 1 as i32; }
-        else { let _bn = lex_next_byte(s); }
+    let pc2 = lex_peek_byte(s);
+    if pc2 >= (48 as i32) && pc2 <= (57 as i32) {
+        // byte list form: collect digits/commas/ws into fresh arena buf,
+        //   skip "b "/"w " etc. prefixes. Output form: "97, 98, 99, ..."
+        is_byte_list = 1 as i32;
+        byte_list_cap = (256 as i64);
+        byte_list_buf = arena_alloc(arena, byte_list_cap);
+        let mut bdone = 0 as i32;
+        let mut bdepth: i64 = 0 as i64;
+        let mut first = 1 as i32;
+        while bdone == (0 as i32) {
+            let cc2 = lex_peek_byte(s);
+            if cc2 == (0 as i32) { bdone = 1 as i32; }
+            else if cc2 == (123 as i32) {
+                let _bo = lex_next_byte(s);
+                bdepth = bdepth + (1 as i64);
+            }
+            else if cc2 == (125 as i32) {
+                if bdepth == (0 as i64) { bdone = 1 as i32; }
+                else {
+                    let _bc = lex_next_byte(s);
+                    bdepth = bdepth - (1 as i64);
+                }
+            }
+            else if cc2 == (98 as i32) || cc2 == (119 as i32) || cc2 == (115 as i32)
+                || cc2 == (108 as i32) || cc2 == (100 as i32) {
+                // type prefix letter (b/w/s/l/d) → consume it + following ws
+                let _bn = lex_next_byte(s);
+                let mut wd = 0 as i32;
+                while wd == (0 as i32) {
+                    let wc = lex_peek_byte(s);
+                    if wc == (32 as i32) || wc == (9 as i32) { let _wcn = lex_next_byte(s); }
+                    else { wd = 1 as i32; }
+                }
+            }
+            else if cc2 >= (48 as i32) && cc2 <= (57 as i32) {
+                // digit run → copy verbatim to byte_list_buf, append ", " if not first
+                if first == (0 as i32) {
+                    if byte_list_len + 2 as i64 > byte_list_cap {
+                        byte_list_cap = byte_list_cap * (2 as i64);
+                    }
+                    let sep_dst = ptr_add_u8(byte_list_buf, byte_list_len);
+                    let _m_s = memcpy(sep_dst, ", " as *u8, 2 as i64);
+                    byte_list_len = byte_list_len + (2 as i64);
+                }
+                first = 0 as i32;
+                let mut digit_start = (*s).cur;
+                let mut digit_len: i64 = 0 as i64;
+                while digit_len < (16 as i64) {
+                    let dc = lex_peek_byte(s);
+                    if dc >= (48 as i32) && dc <= (57 as i32) {
+                        let _dn = lex_next_byte(s);
+                        digit_len = digit_len + (1 as i64);
+                    } else { break; }
+                }
+                if byte_list_len + digit_len > byte_list_cap {
+                    byte_list_cap = byte_list_cap * (2 as i64);
+                }
+                let dst = ptr_add_u8(byte_list_buf, byte_list_len);
+                let _md = memcpy(dst, digit_start, digit_len);
+                byte_list_len = byte_list_len + digit_len;
+                let _ds = digit_start;
+            }
+            else if cc2 == (44 as i32) || cc2 == (32 as i32) || cc2 == (9 as i32)
+                || cc2 == (10 as i32) || cc2 == (13 as i32) {
+                let _bn = lex_next_byte(s);
+            }
+            else {
+                let _bn = lex_next_byte(s);
+            }
+        }
+        if lex_peek_byte(s) == (125 as i32) { let _cl = lex_next_byte(s); }
+        content_start = byte_list_buf;
+        content_len = byte_list_len;
+    } else {
+        // string form `b "..."` (legacy path; elem_width stays 1)
+        if lex_peek_byte(s) != (34 as i32) { return -1 as i32; }  // '"'
+        let _q1 = lex_next_byte(s);
+        content_start = (*s).cur;
+        let mut cdone = 0 as i32;
+        while cdone == (0 as i32) {
+            let cc = lex_peek_byte(s);
+            if cc == (34 as i32) || cc == (0 as i32) { cdone = 1 as i32; }
+            else {
+                let _cn = lex_next_byte(s);
+                content_len = content_len + (1 as i64);
+            }
+        }
+        if lex_peek_byte(s) == (34 as i32) { let _q2 = lex_next_byte(s); }
+        let mut bdone = 0 as i32;
+        while bdone == (0 as i32) {
+            let cc2 = lex_peek_byte(s);
+            if cc2 == (125 as i32) || cc2 == (0 as i32) { bdone = 1 as i32; }
+            else { let _bn = lex_next_byte(s); }
+        }
+        if lex_peek_byte(s) == (125 as i32) { let _cl = lex_next_byte(s); }
     }
-    if lex_peek_byte(s) == (125 as i32) { let _cl = lex_next_byte(s); }
     // ── build text buffer: name\0content\0 ──
     let total: i64 = name_len + (1 as i64) + content_len + (1 as i64);
     let text_buf = arena_alloc(arena, total);
@@ -1022,6 +1135,13 @@ fn next_token_data_string(s: *LexState, arena: *u8, t: *u8) -> i32 {
     *tp_text = text_buf;
     let tp_textlen = ptr_add_u8(t, 16 as i64) as *i64;
     *tp_textlen = name_len;
+    // v2.11.13 A2: encode byte-list flag in qbe_type (offset 32 = i32),
+//   elem_width (1/4/8) in int_val high 32 bits (offset 24-31 = i64, cast to *i32 at offset 28).
+//   Note: this corrupts int_val low 32 bits but DATA_STRING token doesn't use int_val.
+    let tp_bl = ptr_add_u8(t, 32 as i64) as *i32;
+    *tp_bl = is_byte_list;
+    let tp_ew = ptr_add_u8(t, 28 as i64) as *i32;
+    *tp_ew = elem_width;
     return 0 as i32;
 }
 
