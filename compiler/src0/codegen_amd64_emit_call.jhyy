@@ -1074,7 +1074,15 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
             is_csge = 1 as i32;
         } else if cg_find_sub(op_text, op_text_len, "ceq" as *u8, 3 as i64) >= (0 as i64) {
             is_ceq = 1 as i32;
-        } else if cg_find_sub(op_text, op_text_len, "cnew" as *u8, 4 as i64) >= (0 as i64) {
+        } else if cg_find_sub(op_text, op_text_len, "cne" as *u8, 3 as i64) >= (0 as i64) {
+            // v2.11.13 (W-074.6 C.2 fix): cnew (4-char) + cnel (4-char) both share
+            // "cne" 3-char prefix。QBE op for "compare not-equal", with size suffix
+            // letter (w/l) at idx 3。Check BEFORE 'sub' fallback — 'cne' 不含 'sub',
+            // 但 order matters per cg_find_sub first-match semantics。
+            // Before: "cnew" 4-char substring missed "cnel" → fell through to add
+            // path → emit `addl src1, src2` + `cmpl $0, sum` instead of `cmpl` 比较
+            // → any `cnel %t1, %t2` in codegen (e.g. cap_table_basic line 25 `if s_cap != 8`)
+            // produced wrong exit (= 8+8=16 ≠ 0 → goto then-branch → return 10)。
             is_cnew = 1 as i32;
         } else if cg_find_sub(op_text, op_text_len, "sub" as *u8, 3 as i64) >= (0 as i64) {
             is_sub = 1 as i32;
