@@ -14,7 +14,10 @@ D43 closure invariant (per [`../plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-
 | v2.7.0 末 | `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b` | **退役**(被 v2.8.0 Commit 1 re-baseline 替代)| Commit 2+3 emit_call refactor + ABI imports 微调 codegen .il emit |
 | v2.7.1 | (同 v2.7.0 末) | **HOLD 不变**| Phase 1 (runtime files) + Phase 2 (regress.py --cross wire) 不动 codegen |
 | v2.7.2 | (同 v2.7.0 末) | **HOLD 不变**| regress.py false-positive 修,driver-only patch,不动 codegen |
-| **v2.8.0** | `6a2f2277656ca991bd1c436c4e8bfe14f5d7b33b3587d778e4d8a0e00118af38` | **当前 active baseline**| Commit 1 codegen_amd64_emit_mem/ctrl/peephole 加 `target_tag: i32` 参数 + state 加 `target_is_win`/`cg_offset_for_temp_with_target`/`compute_offset_for_temp_id_with_target` → ndeccls 1031 → 1034 → IL 大小 591082 → 592311 |
+| v2.8.0 | `6a2f2277656ca991bd1c436c4e8bfe14f5d7b33b3587d778e4d8a0e00118af38` | **退役**(被 v2.11.18 re-baseline 替代)| Commit 1 codegen_amd64_emit_mem/ctrl/peephole 加 `target_tag: i32` 参数 + state 加 `target_is_win`/`cg_offset_for_temp_with_target`/`compute_offset_for_temp_id_with_target` → ndeccls 1031 → 1034 → IL 大小 591082 → 592311 |
+| v2.8.1-v2.8.3 | (同 v2.8.0) | **HOLD 不变**| 不动 codegen (target_dispatch / codegen_amd64_emit_call / regress.py driver-only 改动) |
+| v2.9.0-v2.11.17 | (同 v2.8.0) | **HOLD 不变**| 不动 codegen (codegen_amd64.jhyy 真 impl iter per W-074.5/6/7 series, D43 verify per v2.11.x sub-sprint rule; codegen.jhyy 不动 → IL 不变) |
+| **v2.11.18** | `3f96814870a3afb0d9b59e6d212165ffddeaada5ff4d8b29eda83126c0253cf8` | **当前 active baseline**| codegen.jhyy cg_emit_phi → move-pair lowering (ir_emit_copy_tmp + 新 helper). NODE_IF + NODE_MATCH 前驱块末尾 emit copy, merge 直接 return result, QBE ssa() pass 自动构造 SSA. 11 phi 测试 PASS (5/5 ship gate, grep "phi " = 0 全 5). 总 IL 大小变化 (ndecls 不变, IL 略增 copy 指令, QBE copy() pass 后期消除). |
 
 ## Why no v2.7.1 re-baseline?
 
