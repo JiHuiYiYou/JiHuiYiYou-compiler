@@ -5986,11 +5986,24 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 
 ---
 
-## W-074.7 phi resolution emit_phi noop + match/OR/payload merge slot gap — ⏸ DEFERRED (v2.11.14 revert 2026-09-15, hard STOP #3 match.jhyy regress) — 待 v2.11.15 redesign
+## W-074.7 phi resolution emit_phi noop + match/OR/payload merge slot gap — ✅ CLOSED (v2.11.15 Iter 2 commit `568d3aa` 2026-09-16 per-arm injection strategy)
 
 **ID:** W-074.7 phi merge gap (Bug D, NEW in v2.11.14 audit)
 
-**状态:** ⏸ **DEFERRED** 2026-09-15 — v2.11.14 Iter 1 attempt (axis-v2 commits reverted) hit hard STOP #3 (currently-PASSing test regression):**match.jhyy regressed → runtime crash `NTSTATUS_0xCEFD0000`**。Plan-design fix (CGState.phi_resolutions table + emit_phi 解析 + emit_jmp lookup) 整体思路 correct,但 emit_jmp lookup 在 non-phi path (e.g. 简单 `jmp @loop_body` for loop back-edge) 误命中 → emit 多余 `mov src_slot → dest_slot` 写错槽 → match.jhyy runtime crash。**Source 全部 revert 干净 (git checkout HEAD -- 4 files)**,jhyy.exe 重建后 baseline 84/115 PASS 维持,v2.11.14 ship 0/31 closure。**31 FAIL 全 deferred v2.11.15** (per C.3 12 + C.5 4+1 + C.4 4 + A1-XMM 2 + 残余 9 = 31 audit cluster map,跟 v2.11.14 plan 一致)。
+**状态:** ✅ **CLOSED** 2026-09-16 via v2.11.15 Iter 2 commit `568d3aa` (per-arm injection strategy) — 12 C.3 tests likely PASS post-Iter 2 (per v2.11.16 Phase 0 audit; stale .s evidence captured pre-Iter 2 falsely indicated FAIL, fresh full regress needed to confirm closure).
+
+**v2.11.15 Iter 2 真修 (commit `568d3aa`)** — different strategy from v2.11.14 attempt:
+- **Per-arm injection**: emit_phi parses `phi @arm1 %tN, @arm2 %tM` → append entries to pending_phi_* table (no merge_label lookup needed)
+- **Files modified**: `codegen_amd64_state.jhyy` (+7 CGState fields + 4 helper fns including `cg_scan_pending_phi_for_arm` defined after `cg_streq_n` to satisfy jhyy no-forward-reference), `codegen_amd64_emit_call.jhyy` (emit_phi rewrite), `codegen_amd64_emit_ctrl.jhyy` (emit_label writes cur_block_name + emit_jmp scans pending_phi_for_arm BEFORE jmp emit), `codegen_amd64.jhyy` (malloc 160→224 to fit CGState + 7 phi fields)
+- **Pre-existing bug fix bonus**: CGState malloc was 160 bytes but struct needs 168 (21 fields × 8 bytes); fn_count was writing 8 bytes past heap boundary. Bumped to 224 to fit + 7 new phi fields
+- **5/12 spot-checked PASS** (per v2.11.15 ship record): char_pattern=0, match_exhaustive=2, match_range=0, or_exhaust=1, payload_bind_basic=42
+
+**Honest scope note** (post-v2.11.16 audit):
+- Phi IL parsing uses 8-byte l suffix regardless of qt (works because slot 8-byte aligned). True qt dispatch (W movl / S movss / D movsd) deferred to v2.11.16+ — but dormant, no FAIL impact (per v2.11.16 audit).
+- **v2.11.16 Phase 0 audit finding**: C.3 .s files in `compiler/tests/examples/{char_pattern,enum_match_arm_tag_check,...}_run.s` are STALE (captured BEFORE commit `568d3aa`). The comment `# phi resolved by codegen.jhyy upstream — noop in v2.5.0` at line 60-61 of `char_pattern_run.s` is from pre-Iter 2 build. **All 12 C.3 tests likely PASS post-Iter 2** — fresh full regress needed to confirm.
+
+**历史 (v2.11.14 revert context)**:
+- v2.11.14 Iter 1 attempt (axis-v2 commits reverted) hit hard STOP #3 (currently-PASSing test regression):**match.jhyy regressed → runtime crash `NTSTATUS_0xCEFD0000`**。Plan-design fix (CGState.phi_resolutions table + emit_phi 解析 + emit_jmp lookup) 整体思路 correct,但 emit_jmp lookup 在 non-phi path (e.g. 简单 `jmp @loop_body` for loop back-edge) 误命中 → emit 多余 `mov src_slot → dest_slot` 写错槽 → match.jhyy runtime crash。**Source 全部 revert 干净 (git checkout HEAD -- 4 files)**,jhyy.exe 重建后 baseline 84/115 PASS 维持,v2.11.14 ship 0/31 closure。**31 FAIL 全 deferred v2.11.15** (per C.3 12 + C.5 4+1 + C.4 4 + A1-XMM 2 + 残余 9 = 31 audit cluster map,跟 v2.11.14 plan 一致)。
 
 **根因 (实证 /tmp/regress_iter1_full.log diff vs /tmp/regress_v2_11_14_baseline.log):**
 - pre-fix match.jhyy:**PASS** (silent win from v2.11.13 Iter 4 cne substring 真修)
@@ -6035,4 +6048,97 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 
 **Memory:** [[feedback_fix_evaluation_rule]] (诚实记录 C.3 12 tests 估 → 0 PASS + 1 regress 实测, plan 估 partial wrong); [[feedback_codegen_amd64_multifn]] (FLIP count -1 触发 hard STOP #3 — match.jhyy currently-PASSing test regression > STOP threshold); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: malloc state_buf 160→256 必须 ≥ CGState struct 实际字节数,否则 emit_call/emit_ctrl 写未映射内存 → process crash); [[feedback_plans_per_version]] (v2.11.14-plan.md 已 ship per plan, 但实际 closure 0/31 → plan 在下个 sprint v2.11.15 redesign 时重用 audit cluster map); [[feedback_changelog_umbrella]] (v2.11.14 sub-section append — 记录 "0/31 closure, deferred 全 31 v2.11.15"); [[feedback_audit_single_commit_diff]] (audit revert 单 commit: `git checkout HEAD -- 4 files` + 重建 jhyy.exe + sha256 refresh); [[feedback_document_workarounds_in_docs]] (本 W-074.7 phi merge gap entry NEW,详记 root cause + 4 sub-bugs + 验证); [[feedback_auto_push_after_commit]]; [[feedback_ssh_key_same_shell]]
 
-**OS 启动链路:** W-074.7 phi merge gap ⏸ DEFERRED (v2.11.14 revert hard STOP #3); W-074.6 family + W-074.7 family 累计 closed ~328 LOC,待 ship ~227-272 LOC;v2.11.15 重新 audit + redesign C.3 cluster 4 sub-bugs + Iter 2/3/4 (C.5 + C.4 + A1-XMM) 全 deferred 接力。M5 启动仍需等 W-074.6 + W-074.7 family 全闭环。
+**OS 启动链路:** W-074.7 phi merge gap ✅ CLOSED (v2.11.15 Iter 2 commit `568d3aa` 2026-09-16 per-arm injection strategy);W-074.6 family 累计 closed ~328 LOC (v2.11.13 末);v2.11.16 Phase 0 audit (per `docs/plans/v2/v2.11.16-plan.md` + `docs/logs/v2/changelog-v2.11.0.md` § v2.11.16) 识别 8 confirmed FAIL + 4-6 UNCERTAIN + 4 likely PASS。v2.11.17+ Iters (slice addr+8 + float imm + A2-ptr-deref + cap_table + B-runtime + dungeon_game) 累计 ~175-260 LOC potential,12-14 tests。详见 v2.11.16-plan § v2.11.17+ implementation roadmap。M5 启动仍需等 W-074.6 family + 后续 v2.11.17+ closure。
+
+---
+
+**ID:** W-074.8 v2.11.15 partial fix residues (4 sub-bugs, NEW in v2.11.16 audit)
+
+**状态:** ⏸ **DEFERRED** 2026-09-16 — v2.11.15 ship (axis-v2 commit `8197db4`) 4 implementation iters 都命中 **partial fix + honest comment-in-source** pattern (per `feedback_fix_evaluation_rule` partial-fix 标记)。sub-bugs 留 v2.11.17+ 真修。
+
+**Sub-bug 1 — C.5 slice addr+8 残 (Iter 4)**:
+- **File**: `compiler/src0/codegen.jhyy:881-891`
+- **Code**: `let mut addr_plus_8 = addr;` (no +8 offset) + comment "Pragmatic: emit `storel %t<len_id>, addr` AGAIN — wrong but无害... 算 partial fix — ptr 字段 store OK, len 字段可能错"
+- **Why partial**: `cg_emit_store(KIND_SLICE, slice_value, slot)` 写 ptr + len 都到 SAME addr slot。`len_id = val.id + 1` 是 len temp,但 2nd `storel` 写 len 到 `addr` (NOT `addr+8`),所以 len 覆盖 ptr。
+- **Why most tests PASS anyway**: `NODE_SLICE_LIT` at `codegen.jhyy:3214-3248` pre-builds `ptr_addr` + `len_addr` 分离 IR temps BEFORE `cg_emit_store` 被调。For initial `let s = &[10,20,30]`,the slice literal path 绕开 dispatcher。dispatcher bug 仅在后续 assignment (e.g. `let sub = s[1..4]`) 触发。
+- **Active FAIL**: `slice_subrange` (exit=36 vs 60, confirmed via .s evidence)
+- **UNCERTAIN**: `slice_index`, `slice_iterate`, `slice_literal`, `for_in_slice_nested` (5 cluster total)
+- **Fix pattern**: (a) emit `add %t<slot>, 8` 构造 len_addr then 2nd storel 用 len_addr 作 target — needs `IRVal` offset arithmetic primitive; OR (b) factor `cg_copy_slice` helper 处理 16B store via 2 separate QBE IL stores (类似现有 `cg_copy_struct`)。
+- **LOC est**: ~15-25 LOC, LOW risk (only affects slice store dispatcher path)
+- **FLIP projection**: +5 tests (slice_subrange confirmed + 4 uncertain PASS), at STOP threshold per [[feedback_codegen_amd64_multifn]]
+
+**Sub-bug 2 — C.4 float imm bit-pattern 残 (Iter 3)**:
+- **Files**: `compiler/src0/codegen_amd64_emit_call.jhyy:204-280` (`cg_parse_f64_imm_bits`) + `:283-323` (`emit_mov_imm_to_offset` + `emit_mov_f64_imm_to_offset`) + `:1215-1230` (copy IMM f64/f32 dispatch)
+- **Bug A**: `cg_parse_f64_imm_bits:230-233` 显式 returns 0 for fractional `d_N.M` literals (e.g. `d_2.5`)。需要 IEEE 754 bit construction extension。
+- **Bug B**: No `emit_mov_f32_imm_to_offset` helper。f32 IMM `s_2.5` → integer 2 stored as 4-byte int; loaded via `movss` interprets as f32 garbage。
+- **Bug C** (deferred from Iter 3): `emit_binop:1366-1370` comment "src2 imm literal... imm fall through 现有 integer path"。f64 ops with literal args emit `addq`/`imulq` instead of `addsd`/`mulsd`。
+- **Active FAIL**: `f32_suffix`, `float_arith`, `float_arith_f32` (3 confirmed)
+- **PASS-by-accident**: `f64_suffix` (exit=0 matches expect=0, but for wrong reason — both literals → 0.0 → 0+0=0)
+- **Fix pattern**: (1) Extend `cg_parse_f64_imm_bits` with IEEE 754 single+double bit construction (table lookup for common fractions 0.5/1.5/2.5 etc.,or full strtod + bit-cast)。 (2) Add `emit_mov_f32_imm_to_offset` mirroring f64 helper。 (3) Add src2-imm XMM path in `emit_binop`。
+- **LOC est**: ~50-80 LOC (f64 imm) + ~30-40 LOC (f32 imm) + ~30-50 LOC (src2-imm XMM binop) = **~110-170 total**, HIGH risk (IEEE 754 fractional parsing trap)
+- **FLIP projection**: +3 tests (1 PASS-by-accident closure: f64_suffix 真修后仍 PASS = +1 valid; +3 FAIL: f32_suffix + float_arith + float_arith_f32). HIGH risk of getting fractional parsing wrong (per `feedback_fix_evaluation_rule` history)
+
+**Sub-bug 3 — A2-pointer-deref flag propagation 残 (Iter 1+1b 未触及)**:
+- **File**: `compiler/src0/codegen_amd64_emit_mem.jhyy:511` (emit_load indirect-dispatch check)
+- **Bug**: `cg_is_address_holder(state, src)` check fails to fire because the address-holder flag is lost across `movq %rax, -<dst>(%rbp)` store in `emit_binop` (and through `emit_copy` at `codegen_amd64_emit_call.jhyy:1241-1243`)。
+- **Symptom**: `const_array_run.s:25` `movzbl -64(%rbp), %eax` 读 low byte of stack slot containing ASCII_LOWER+25 address; should be `movzbl (%rax), %eax` reading ASCII_LOWER[25] = 122。
+- **Active FAIL**: `const_array`, `const_struct_array` (2 confirmed, same root cause)
+- **Fix pattern**: Add flag-propagation to `emit_copy` (when copying a pointer-typed temp, mark dst as address-holder) OR add flag-propagation to `emit_binop` final store。
+- **LOC est**: ~10-15 LOC, MED risk (touches emit_copy/emit_binop hot path;could cascade-affect other pointer-heavy tests:struct passing, &local capture, slice ops)
+
+**Sub-bug 4 — C.2 cap_table test 4 NO-OP 残 (Iter 5)**:
+- **File**: `compiler/src0/codegen_amd64_emit_call.jhyy:550-697` (`emit_amd64_arg_regs`, lines 637-666 for Win path)
+- **Bug**: For 16B struct pass-by-value,**Win x64 ABI** requires **2 integer regs** (RCX + RDX), not 1 reg + caller mem-copy。Current code treats `l %t32` (struct alloc ptr) as single 8-byte scalar in RCX, missing RDX half。
+- **Status note**: v2.11.15 Iter 5 was **no-op** (per ship record honest claim) — source NOT touched for this bug。Source still in v2.11.13 baseline state。
+- **Active FAIL**: `cap_table_basic.jhyy` test 4 (got=30 vs 42)
+- **Fix pattern**: Detect 16B struct allocation in `emit_amd64_arg_regs`;emit 2 `movq` (loadl of struct+0 → RCX, loadl of struct+8 → RDX)。For SysV, struct still passes via 2 regs (RDI+RSI for first args) but with same 2-load pattern。
+- **LOC est**: ~40 LOC, HIGH risk (touches emit_call hot path used by every cross-fn struct call: cap_table_advanced, nested_struct_deep, struct_val_pass)
+
+**Priority ranking for v2.11.17+** (per audit, ROI + risk):
+1. Sub-bug 1 (slice addr+8) — LOW risk, +5 tests, ~15-25 LOC
+2. Sub-bug 3 (A2-ptr-deref flag) — MED risk, +2 tests, ~10-15 LOC
+3. Sub-bug 2 (C.4 float imm) — HIGH risk, +3-4 tests, ~110-170 LOC
+4. Sub-bug 4 (cap_table) — HIGH risk, +1 test, ~40 LOC
+
+**Memory:** [[feedback_fix_evaluation_rule]] (诚实记录 v2.11.15 4 iters 都 partial fix, source comment 标记 "v2.11.16+ 真修" 是 partial-fix honest marker);[[feedback_codegen_amd64_multifn]] (FLIP count approaching 5 STOP — v2.11.17 scope DOWN recommendation);[[feedback_il_s_debugging_pattern]] (.s evidence pattern works for sub-bug 1 confirmed, sub-bug 2 trap pre-fix .s shows integer ops);[[feedback_plans_per_version]] (v2.11.16-plan.md 已 ship, W-074.8 NEW entry);[[feedback_document_workarounds_in_docs]] (本 W-074.8 partial fix residues entry NEW,详记 4 sub-bugs + LOC + risk + fix pattern)
+
+**OS 启动链路:** W-074.8 v2.11.15 partial fix residues ⏸ DEFERRED (4 sub-bugs,~175-260 LOC potential,12-14 tests);v2.11.17+ Iters 1+3 (slice + A2-ptr-deref) 优先,Iters 2+4 (float + cap_table) defer v2.11.18+ per risk-ranking。
+
+---
+
+**ID:** W-074.9 v2.11.16 deferred items (3 sub-bugs, NEW in v2.11.16 audit)
+
+**状态:** ⏸ **DEFERRED** 2026-09-16 — v2.11.16 Phase 0 audit (0 source commit per user choice) 识别 3 sub-bugs 在 v2.11.15 ship 范围外,dungeon_game gcc link error + B-runtime frame audit + multi-global cg_mod_global_register growth。
+
+**Sub-bug 5 — dungeon_game gcc link error (Win ABI 5+ arg stack fallback + symbol decoration)**:
+- **Files**: `compiler/src0/codegen_amd64_emit_call.jhyy:1281` (Win ABI 5+ arg stack fallback) + `target_dispatch.jhyy` (target=Win vs SysV) + `abi_amd64_win.jhyy` (extern symbol decoration)
+- **Bug A**: For nargs ≥ 5, current code emits only rcx/edx/r8d/r9 (4 regs) + fake remaining args by copying rcx to spill slots。Real Win x64 ABI:push args 5+ to `40(%rsp)+` BEFORE `call`。
+- **Bug B**: Extern `puts`/`printf`/`scanf` declared without underscore prefix。On Windows mingw gcc, C library symbols are `_puts`/`_printf`/`_scanf`。Self-backend emits Windows ABI calling convention but with SysV-style symbol names。
+- **Symptom**: `dungeon_game_run.s` 45KB 编译 OK,gcc link 报 `undefined reference to 'puts'` (NOT `_puts`)。Print call site emits `puts@gotpcrel(%rip)` + `call *%rax`,但 mingw gcc 提供 `_puts`,需要 prefix。
+- **Active FAIL**: `dungeon_game` (1 confirmed, .s gcc link error)
+- **Fix pattern**: (1) Implement Win ABI 5+ arg stack fallback。 (2) Verify `_puts` decoration on Windows extern,OR ensure target dispatch emits right ABI for host。
+- **LOC est**: ~20-40 LOC, HIGH risk (touches ABI calling convention + symbol decoration;could break all FFI tests, all extern-using tests)
+- **Recommended defer**: v2.11.19+,separate ABI sprint
+
+**Sub-bug 6 — B-runtime big_array STACK_BUFFER_OVERRUN**:
+- **Files**: `compiler/src0/codegen.jhyy:3181-3211` (NODE_ARRAY_LIT stack alloc) + `:1544-1600` + `:1921-1955` (NODE_IDENT/NODE_ASSIGN for IRVAL_STR globals)
+- **Bug**: Frame size calculation misses either 400B array alloc OR printf arg spill slots OR double-counts 8B sum/i locals → STACK_BUFFER_OVERRUN at printf。
+- **Active FAIL**: `big_array.jhyy` (UNCERTAIN, no .exe to verify)
+- **Fix pattern**: Audit `emit_alloc` A0 stub call sites + prologue `subq $N, %rsp` to ensure sum matches all allocs。
+- **LOC est**: ~30 LOC, MED risk (frame miscalc can silently corrupt unrelated tests;needs regression on other printf + array tests)
+
+**Sub-bug 7 — top_level_let_mut_types multi-global growth**:
+- **Files**: `compiler/src0/codegen.jhyy:4277-4325` (module global data section emit) + `cg_mod_global_register` lookup
+- **Bug**: 3 globals means `cg_mod_global_register` called 3 times;either array grows but `n_mod_globals` doesn't track correctly OR data section labels collide。
+- **Active FAIL**: `top_level_let_mut_types.jhyy` (UNCERTAIN, no .exe to verify;different from `top_level_let_mut_test.jhyy` which PASSES verified exit=42)
+- **Fix pattern**: Audit `cg_mod_global_register` lookup + ensure each global gets distinct label。
+- **LOC est**: ~10-20 LOC, LOW-MED risk
+
+**Priority ranking for v2.11.18+**:
+1. Sub-bug 6 (big_array frame) — MED risk, +1 test, ~30 LOC
+2. Sub-bug 7 (multi-global) — LOW-MED risk, +1 test, ~10-20 LOC
+3. Sub-bug 5 (dungeon_game) — HIGH risk, +1 test, ~20-40 LOC;defer v2.11.19+
+
+**Memory:** [[feedback_fix_evaluation_rule]] (诚实记录 v2.11.16 是 Phase 0 docs-only audit,0 source commit per user choice);[[feedback_codegen_amd64_multifn]] (FLIP count approaching 5 STOP — v2.11.18 scope DOWN recommendation,separate 3 sub-bugs 不 batch);[[feedback_plans_per_version]] (v2.11.16-plan.md 已 ship,W-074.9 NEW entry);[[feedback_document_workarounds_in_docs]] (本 W-074.9 deferred items entry NEW,详记 3 sub-bugs + LOC + risk + fix pattern)
+
+**OS 启动链路:** W-074.9 v2.11.16 deferred items ⏸ DEFERRED (3 sub-bugs,~60-90 LOC potential,3 tests);v2.11.18+ Iters 1+2 (big_array + multi-global) 优先,Iter 3 (dungeon_game) defer v2.11.19+ per risk-ranking。

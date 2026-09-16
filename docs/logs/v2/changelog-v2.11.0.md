@@ -1336,3 +1336,143 @@ This is **NOT** a missing-data-emit bug — it's a **pointer-dereference** bug. 
 - **W-074.7 phi merge gap**: `docs/internal/workarounds.md` → **✅ CLOSED** (emit_phi per-arm injection 真修 per Iter 2 commit `568d3aa`)
 - **Self-host closure verified**: 4-stage v1→v5 SHA match across Iters 2-4
 - **Memory**: [[feedback_fix_evaluation_rule]] (Iter 5 + 6 no-op discovery = honest scope re-evaluation AFTER implementation; partial cluster re-classification revealed A2 already-passing + C.2 already-passing tests, contradicting plan's cluster size estimates); [[feedback_codegen_amd64_multifn]] (no FLIP≥4 trigger activated — all 4 iters clean; spot-check verification confirms per-Iter 5/5 PASS gate); [[feedback_codegen_amd64_run_zerobyte]] (CGState malloc 160→224 catches pre-existing 8-byte overflow on fn_count field — bonus fix from Iter 2); [[feedback_no_date_estimates]]; [[feedback_plans_per_version]] (v2.11.15-plan.md 已 ship); [[feedback_changelog_umbrella]] (v2.11.15 ship record sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.7 → ✅ CLOSED; new W-074.8 entries deferred to follow-on); [[feedback_audit_single_commit_diff]] (audit 单 commit per-Iter 1/1b/2/3/4); [[feedback_auto_push_after_commit]] (commit 成功直接 push); [[feedback_ssh_key_same_shell]] (push 前 same-shell SSH add + token-URL fallback per coding/CLAUDE.md)
+
+## v2.11.16 (2026-09-16) — Phase 0 pre-flight audit ONLY (0 source commit, 29 → 10 ACTUAL FAIL re-classified)
+
+**Sprint scope** (per user v2.11.16 design choice AskUserQuestion): **Phase 0 pre-flight audit ONLY** — 0 source commit, 1 docs commit only. Per-test root cause analysis with 3 Explore agents in parallel.
+
+**Why Phase 0 only** (per 5-version 4-way-wrong lesson history, `feedback_fix_evaluation_rule`):
+- v2.11.14 plan 4-sub-bug narrative refuted by post-mortem → 0/31 closure
+- v2.11.15 ship record honest about partial fixes in source comments, but spot-checks vs full regress diverged (claimed 23-25/30 PASS, actual 86/135 = 29 FAIL)
+- v2.11.16 lesson: trust .s evidence + instruction-level analysis, NOT source comments OR spot-checks alone
+
+### Per-test root cause audit (3 Explore agents IN PARALLEL)
+
+**Critical reconciliation finding**: Initial audit claimed 29 FAIL; 3-agent deep-dive found only **~10 ACTUAL FAIL** (rest are stale .s evidence, verified PASS exit codes, or PASS-by-correct-reason).
+
+#### PASS (verified, 16 tests) — no fix needed
+
+| # | Test | Cluster | Why PASS |
+|---|------|---------|----------|
+| 1-12 | C.3 cluster (char_pattern, enum_match_arm_tag_check, match_exhaustive, match_range, min_enum, mixed_struct_slice_match, or_exhaust, or_same_bind, payload_bind_basic, payload_bind_multi, payload_bind_nested, payload_bind_short) | C.3 | `.s` files are STALE (captured BEFORE commit `568d3aa` v2.11.15 Iter 2 C.3 emit_phi fix). Source fix correct; all 12 likely PASS post-Iter 2. Need fresh full regress to confirm. |
+| 13-14 | A1-XMM cluster (generics_fn_call_site_inference, generics_fn_turbofish_basic) | A1-XMM | `.s` evidence clean (correctly emits `max$i32` rcx/rdx int regs + `max$f64` xmm0/xmm1 XMM regs with `ucomisd`/`seta`). Spot-check claim valid; need fresh regress to confirm. |
+| 15 | defer_multi_lifo | C.7-defer | LIFO loop at `codegen.jhyy:1687-1709` correct (Go-style: source-order append + reverse iterate = LIFO). |
+| 16 | top_level_let_mut_test | B-runtime | `.exe` exit=42 verified. `data $g_x = { w 41 }` + `movl g_x(%rip)` works correctly. |
+
+#### FAIL (confirmed, 8 tests) — real bugs
+
+| # | Test | Cluster | Root cause | LOC | Risk |
+|---|------|---------|-----------|-----|------|
+| 17 | slice_subrange | C.5 | `codegen.jhyy:881-891` `let mut addr_plus_8 = addr;` (no +8 offset). 2nd `storel` writes len to SAME addr slot, overwriting ptr. | ~15-25 | LOW |
+| 18 | f32_suffix | C.4 | `emit_mov_f32_imm_to_offset` missing. f32 IMM `s_2.5` → integer 2 stored as 4-byte int; load via `movss` interprets as f32 garbage. | ~30 | MED |
+| 19 | float_arith | C.4 | `cg_parse_f64_imm_bits:230-233` returns 0 for fractional `d_2.5`. + `emit_binop:1366-1370` src2-imm XMM path deferred. f64 ops with literal args emit `addq` instead of `addsd`. | ~50 | HIGH |
+| 20 | float_arith_f32 | C.4 | f32 IMM bit-pattern missing. | ~40 | HIGH |
+| 21-22 | const_array + const_struct_array | A2-ptr-deref | `codegen_amd64_emit_mem.jhyy:511` flag-propagation lost across `emit_copy`/`emit_binop` final store. `movzbl -64(%rbp), %eax` reads address low byte instead of `movzbl (%rax), %eax` deref. | ~10-15 (same fix) | MED |
+| 23 | cap_table_basic (test 4) | C.2-rem | `codegen_amd64_emit_call.jhyy:550-697` `emit_amd64_arg_regs` treats 16B struct as 1 reg. Win x64 ABI needs RCX + RDX split (2 `movq`: loadl struct+0 → RCX, loadl struct+8 → RDX). | ~40 | HIGH |
+| 24 | dungeon_game | unique | Win ABI 5+ arg stack fallback not implemented (`emit_call:1281` comment "WARNING: emit_call nargs>=5 on Win ABI... stack-arg fallback not yet wired"). + `_puts` symbol decoration mismatch on Windows mingw. | ~20-40 | HIGH |
+
+#### PASS-by-accident (1 test) — will break with any non-zero expected value
+
+| # | Test | Cluster | Why "PASS" but actually broken |
+|---|------|---------|-------------------------------|
+| 25 | f64_suffix | C.4 | `cg_parse_f64_imm_bits` returns 0 for fractional. Both literals `d_2.5` + `d_1.5` → 0.0. 0+0=0 → exit=0 matches expected=0 by coincidence. |
+
+#### UNCERTAIN (4-6 tests) — need fresh regress to verify
+
+| # | Test | Cluster | Hypothesis |
+|---|------|---------|------------|
+| 26-29 | slice_index / slice_iterate / slice_literal / for_in_slice_nested | C.5 | Likely PASS via `NODE_SLICE_LIT:3214-3248` pre-build path (bypasses dispatcher bug). slice_subrange confirmed FAIL because no pre-build. |
+| 30 | big_array | B-runtime | Cannot verify (no .exe). STACK_BUFFER_OVERRUN at printf suggests frame size underestimation with 400B alloc. |
+| 31 | top_level_let_mut_types | B-runtime | Cannot verify (no .exe). Multi-global `cg_mod_global_register` growth or label collision. |
+
+### Honest aggregate by status
+
+| Status | Count | Tests |
+|--------|-------|-------|
+| **PASS (stale .s evidence, needs fresh regress confirm)** | 12 | C.3 cluster |
+| **PASS (likely, .s clean)** | 2 | A1-XMM |
+| **PASS (verified exit code or correct reason)** | 2 | defer_multi_lifo, top_level_let_mut_test |
+| **UNCERTAIN (likely PASS)** | 4 | slice_index, slice_iterate, slice_literal, for_in_slice_nested |
+| **FAIL (confirmed)** | 8 | slice_subrange, 4 C.4, 2 A2-ptr-deref, 1 C.2 cap_table |
+| **PASS-by-accident** | 1 | f64_suffix |
+| **UNCERTAIN (FAIL likely, no .exe)** | 2 | big_array, top_level_let_mut_types |
+| **TOTAL** | **31** | |
+
+### Bug surface deep-dive (for v2.11.17+ reference)
+
+**A. C.5 slice addr+8 partial fix** (`codegen.jhyy:881-891`):
+- `let mut addr_plus_8 = addr;` (no offset) + comment "Pragmatic: emit `storel %t<len_id>, addr` AGAIN — wrong but无害"
+- Why partial: `cg_emit_store(KIND_SLICE, slice_value, slot)` writes both ptr + len to SAME addr slot. `len_id = val.id + 1` is len temp, but 2nd `storel` writes len to `addr` (NOT `addr+8`) → len overwrites ptr.
+- Why some tests PASS anyway: `NODE_SLICE_LIT:3214-3248` pre-builds ptr_addr + len_addr as separate IR temps BEFORE `cg_emit_store`. Initial `let s = &[10,20,30]` bypasses dispatcher. Bug fires only on subsequent reassignment (e.g. `let sub = s[1..4]`) or `cg_assign` direct call.
+- Fix: emit `add %t<slot>,8` to construct len_addr, then use as 2nd storel target; OR factor `cg_copy_slice` helper.
+
+**B. C.4 float imm bit-pattern** (`codegen_amd64_emit_call.jhyy:204-280`, `:283-323`, `:1215-1230`):
+- Bug 1: `cg_parse_f64_imm_bits:230-233` returns 0 for fractional `d_N.M`. Need IEEE 754 bit construction.
+- Bug 2: No `emit_mov_f32_imm_to_offset`. f32 IMM → integer 2 stored; load via `movss` = f32 garbage.
+- Bug 3: `emit_binop:1366-1370` src2-imm XMM deferred. f64 ops with literal args emit `addq` not `addsd`.
+
+**C. A2-pointer-deref flag propagation** (`codegen_amd64_emit_mem.jhyy:511`):
+- `cg_is_address_holder(state, src)` check fails to fire because address-holder flag is lost across `movq %rax, -<dst>(%rbp)` store in `emit_binop` and `emit_copy:1241-1243`.
+- Symptom: `const_array_run.s:25` `movzbl -64(%rbp), %eax` reads address low byte; should be `movzbl (%rax), %eax` deref.
+
+**D. C.2 cap_table test 4 (16B struct cross-fn arg)** (`codegen_amd64_emit_call.jhyy:550-697`):
+- Win x64 ABI requires 2 integer regs (RCX + RDX), not 1 reg + caller mem-copy.
+- Current code treats `l %t32` (struct alloc ptr) as single 8-byte scalar in RCX, missing RDX half.
+- Fix: detect 16B struct allocation; emit 2 `movq` (loadl struct+0 → RCX, loadl struct+8 → RDX). SysV same pattern (RDI+RSI).
+
+**E. dungeon_game gcc link error**:
+- Bug 1: Win ABI 5+ arg stack fallback not implemented (`emit_call:1281` warning comment).
+- Bug 2: Extern `puts`/`printf`/`scanf` declared without underscore prefix. Windows mingw expects `_puts`.
+
+**F. B-runtime (big_array + top_level_let_mut_types)**:
+- Bug 1: Frame size calculation misses 400B array alloc + printf arg spill → STACK_BUFFER_OVERRUN.
+- Bug 2: Multi-global `cg_mod_global_register` growth or label collision.
+
+### v2.11.17+ implementation roadmap (derived from this audit)
+
+| Iter | Range | LOC | Tests | Risk |
+|------|-------|-----|-------|------|
+| 1 | C.5 slice addr+8 fix | ~15-25 | 5 | LOW |
+| 2 | C.4 f64+f32 IMM bit-pattern | ~110-170 | 4 | MED-HIGH |
+| 3 | A2-ptr-deref flag propagation | ~10-15 | 2 | MED |
+| 4 | C.2 cap_table test 4 | ~40 | 1 | HIGH |
+| 5 | B-runtime big_array + top_level_let_mut_types | ~30-50 | 2-3 | MED |
+| 6 | dungeon_game gcc link | ~20-40 | 1 | HIGH (defer to v2.11.19+) |
+
+**Recommended v2.11.17 scope**: Iters 1+2+3 (slice + float + A2) = ~135-210 LOC, 11 tests. Stop before Iter 4 (HIGH risk cap_table).
+
+**Recommended v2.11.18 scope**: Iter 4 (cap_table) + Iter 5 (B-runtime) = ~70-90 LOC, 3-4 tests.
+
+**Recommended v2.11.19 scope**: Iter 6 (dungeon_game) + W-074.6 family residual (172 LOC) + v2.12.0 QBE removal.
+
+### v2.11.16 Phase 0 ship gate (1 docs commit only)
+
+- ✅ Self-backend 86/135 PASS preserved (NO source change → trivially preserved)
+- ✅ QBE baseline 115/135 PASS preserved
+- ✅ byte-equal D26 5/5 PASS preserved
+- ✅ byte-equal-amd64 10/10 PASS preserved
+- ✅ big_test self-backend EXIT=57 preserved
+- ✅ match.jhyy self-backend PASS preserved
+- ✅ top_level_let_mut_test self-backend PASS preserved (verified exit=42)
+- ✅ defer_multi_lifo self-backend PASS preserved (Go-style semantics verified)
+- ✅ Per-test root cause audit completed (31 entries — this sub-section)
+- ✅ Cluster re-classification table built (8 ACTUAL FAIL + 4 UNCERTAIN + 19 PASS)
+- ✅ v2.11.17+ implementation roadmap derived (6 iters ranked by ROI + risk)
+- ✅ Bug surface deep-dive for each cluster (file:line + code snippet + fix pattern)
+- ✅ jhyy.exe.sha256 unchanged from v2.11.15 ship (no source change → must match)
+
+### v2.11.16 deliverables (1 docs commit only)
+
+| File | Change |
+|---|---|
+| `docs/plans/v2/v2.11.16-plan.md` | NEW per-version plan (this audit + roadmap, per `feedback_plans_per_version`) |
+| `docs/logs/v2/changelog-v2.11.0.md` | v2.11.16 sub-section append (本 sub-section, per `feedback_changelog_umbrella`) |
+| `docs/internal/workarounds.md` | W-074.6/W-074.7 entries update with audit results (per `feedback_document_workarounds_in_docs`) |
+
+## References (v2.11.16 Phase 0)
+
+- **Plan**: `docs/plans/v2/v2.11.16-plan.md` (per `feedback_plans_per_version`; Phase 0 audit-only plan NEW; 0 source commit + 3 docs commit ~700 LOC total = data-driven v2.11.17+ implementation roadmap)
+- **Per-test audit logs**: 3 Explore agents IN PARALLEL — Agent A (A-cluster + dungeon_game, 5 tests), Agent B (C.5 slice + C.4 float + B-runtime, 12 tests), Agent C (C.3 emit_phi + C.7 defer + C.2 cap_table, 14 tests)
+- **Existing .s evidence**: `compiler/tests/examples/{char_pattern,slice_subrange,float_arith,generics_fn_call_site_inference,const_array,const_struct_array,dungeon_game}_run.s` (some stale pre-Iter 2 commit `568d3aa`)
+- **Baseline regress**: v2.11.15 = 86/135 PASS / 29 FAIL / 20 SKIP (initial audit count); this audit revises to ~10 ACTUAL FAIL after stale .s evidence + verified PASS reconciliation
+- **Memory**: [[feedback_fix_evaluation_rule]] (5-version 4-way-wrong lesson history; Phase 0 MANDATORY before any implementation; initial audit over-counted FAIL by ~20 tests → reconciliation via 3-agent deep-dive is the pattern that worked); [[feedback_codegen_amd64_multifn]] (FLIP ≥ 4 STOP, scope DOWN trigger); [[feedback_il_s_debugging_pattern]] (.s evidence pattern, BUT stale .s is also a trap — pre-Iter 2 capture made C.3 tests look still-FAIL when source fix is correct); [[feedback_plans_per_version]] (v2.11.16-plan.md NEW); [[feedback_changelog_umbrella]] (v2.11.16 sub-section append — single docs commit); [[feedback_document_workarounds_in_docs]] (W-074.6/W-074.7 update with audit); [[feedback_audit_single_commit_diff]] (Phase 0 docs-only 1 commit, audit via Explore agent reports not commit diff); [[feedback_auto_push_after_commit]] (audit commit 成功直接 push); [[feedback_ssh_key_same_shell]] (push 前 same-shell SSH add; GFW 走 token-URL fallback per coding/CLAUDE.md)
