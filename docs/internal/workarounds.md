@@ -67,6 +67,7 @@
 | [W-065](#w-065-jhyy-run-不预检-fn-main_jhyy--库-snippet-报-undefined-reference-to-main_jhyy-对用户不友好) | ✅ RESOLVED 2026-09-01 (v1.8.3.2 patch) | `jhyy run` 接 input 后直接调 `cmd_compile` (→ QBE → gcc link) — 库 snippet (无 `fn main_jhyy`, 仅 `fn unwrap` / `fn dist_sq` 这种) link 时 gcc 报 `undefined reference to main_jhyy`, 错误晚出且 noisy. 修复: `cmd_run` 入口 (compiler/src0/main.jhyy:987) 在 `cmd_compile` 之前加 cheap byte-level scan — `fopen(input, "rb")` + `fread` 131072 bytes + fclose, 然后 byte-by-byte 搜 needle `"fn main_jhyy"`. 找到 → 继续 compile; 找不到 → `jh_fputs_stderr("jhyy run: '<file>' has no 'fn main_jhyy() -> i32' (required for 'jhyy run'; use 'jhyy compile <file>.jhyy' for libraries)\n" as *u8)` + return 1. **scope**: 只动 `cmd_run`, `cmd_compile` 保持允许库-only 编译 (compile 不需要 main_jhyy, 可产 .s/.exe 给后续 link 用)。**byte-comparison 实现**: 第一次 commit (`src0/main.jhyy:1015-1029`) 用 `*i32` cast deref 4-byte 而非 1-byte, scan 永远不 match (即使文件真有 `fn main_jhyy`)。第二次 commit 改 `*u8` cast + `as i32` promote 才正确。首次 fix 在 fresh build 后 user case (test.jhyy / test2.jhyy) 仍报 "no fn main_jhyy" 才暴露 — 不写 5/5 PASS loop 不会发现 byte-comparison bug。regress 103/103 + Stage 2 闭环 hold (v2/v3/v4/v5 .il sha=`fa1137e5...`)。**C-side `src/main.c` 未镜像** (production path 走 jhyy-side)。 |
 | [W-068](#w-068-自写后端-codegen_amd64-模块未-e2e-验证-v26x-阶段-ship-但-make-不编-import-链-触发-24-sema-错) | ✅ RESOLVED (v2.6.5 commit `07c6a89`) | V2-B v2.6.0 Unit C (regalloc, commit `baa2757`) / Unit D (peephole, commit `9fdf173`) / Unit E (dispatch infra) + v2.6.3 (codegen_amd64_run real body, commit `b4ce9a2`) 4 个 commit ship 了 ~2200 LOC self-backend 代码,但 `import codegen_amd64;` 在 main.jhyy 一直注释 out, **`make` 不 parse 这些 module**, ship 时 0 e2e 验证。v2.6.4 commit `c251658` 实际打开 import 测试,surface 24 个 sema 错。**v2.6.5 commit `07c6a89` 真改 ship**: (1) codegen_amd64.jhyy:189-190 + :208 加 `: Arena` / `: StringBuilder` annotation (struct-literal branch match); (2) peephole.jhyy 22 处 `* N as i64` → `* (N as i64)` 加 parens (precedence); (3) parse_and_emit def 从 :191 前移到 :85 caller 之前 (forward ref); (4) parse_and_emit body 15 emit_X 全改 `let _ = emit_X(...)` 模式 (if/else i32/() 统一); (5) main.jhyy:50 import 真打开 + :121 删 extern decl (避免 mangling 不一致) + :789-815 run_backend 真 dispatch + 自动降级 QBE。**验证**: parse + sema 全过, 24 错全消。regress 验证 deferred v2.6.6 (separate W-069 toolchain issue 拆账)。 |
 | [W-069](#w-069-jhyyexe-编译产物-corrupt--ld-exit-5--stage0-build-pollution-v265-enable-真-import-后-surface) | ✅ RESOLVED (v2.6.6 commit `224a944`) | v2.6.5 enable 真 `import codegen_amd64;` 后 surface 两类 toolchain issue: (1) `OSError [WinError 1392] 文件或目录损坏且无法读取`; (2) `ld exit 5` libc undefined symbols。**真根因**: codegen NODE_CALL is_extern branch 跳过 mangling,emit unmangled `callq ptr_add_u8` for `extern fn` decls in codegen_amd64_*.jhyy (caller module's sym 屏蔽真正的 util module def)。**真修**: C-side (`compiler/src/codegen.c`) + jhyy-side (`compiler/src0/codegen.jhyy`) 加 `CGFnDef` fn name → mangled name table, built in cg_module Pass A.5 from non-extern NODE_FUNC_DECL, is_extern branch 改成 lookup table fallback。**验证**: jhyy.exe 自路径编 main.jhyy → PE32+; jhyy_v1 → 编 main.jhyy → PE32+; regress 104/104 PASS;D43 closure hold (v2.7.0 末 baseline `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b`)。详细见 W-069 section。 |
+| [W-072](#w-072-0f9c923-merge-axis-v3--main-引入-5-处-codegen-merge-artifact--jhyy_stage0exe-compile-mainjhyy-sigsegv-exit-139-gdb-verified) | ✅ RESOLVED 2026-09-16 (v2.11.18 commit `1c31b80` cherry-pick from axis-v2 `31e9d95`) | `0f9c923` merge axis-v3 → main (2026-09-08) 引入 5 处 codegen merge artifact (重复 fn def / 双调 cg_func / 双 ret emit / 缺 `}` + naked orphan / unreachable `let _c2`) + 4 NULL guards (parser.c:583/336 + sema.c:1281/841) — `jhyy_stage0.exe compile main.jhyy` 静默 SIGSEGV exit 139。修复: cherry-pick axis-v2 `31e9d95` (GDB-verified) → main `1c31b80` 解锁 v2.11.18 phi 修复 chain。**注**: W-068 是 installer Theme.xml (v1.8.3),W-072 是 codegen merge artifact,数字撞但问题不同。 |
 
 ---
 
@@ -5101,5 +5102,91 @@ cmd_compile (main.jhyy)
 - ✅ Win ABI byte-equal hold (10/10 + 20/20) + D43 closure v1→v2 sha HOLD
 
 **OS 启动链路**: W-070 = M4 launch 硬前置。**v2.8.2 ship = M4 launch 硬前置彻底解锁** (cg_module 不再 fatal);**v2.8.3 验证 5 sysv tests end-to-end 真能用** (不光是 emit, 还跑通)。M4 launch 验证完整化。
+
+## W-072: 0f9c923 merge axis-v3 → main 引入 5 处 codegen merge artifact — `jhyy_stage0.exe compile main.jhyy` SIGSEGV exit 139 (GDB-verified)
+
+**ID:** W-072
+**状态:** ✅ RESOLVED 2026-09-16 (v2.11.18 commit `1c31b80` cherry-pick from axis-v2 commit `31e9d95`)
+**日期:** 2026-09-08 (introduced — `0f9c923` merge axis-v3 → main) → 2026-09-16 (RESOLVED — cherry-pick W-068 真修 v2 + v2.11.18 phi fix 解锁 build)
+**触发面:** `jhyy_stage0.exe compile compiler/src0/main.jhyy` → **exit 139 (SIGSEGV)** 静默崩, 无 parse / sema / codegen 错误输出, stderr 空。GitHub Actions CI 跟本地 `make` 都堵在这步,所有 v2.11.x 后续 sprint 卡住。
+
+**症状:** `make` 报 `Segmentation fault` 后跟 `*** [Makefile:81: compiler/build/bin/jhyy.exe] Segmentation fault`, stage0 rebuild 成功, 但 stage0 编 src0/main.jhyy 直接 SIGSEGV。换 codegen.jhyy 单测 (`./jhyy.exe compile codegen.jhyy`) 跟 main.jhyy 单测 (parse-only) 都正常 — 只有 main.jhyy 全 compile chain 触发。**GDB stack trace** (per axis-v2 W-068 fix 验证) 指向 `sema.c:1281 check_module Pass 1 NODE_FUNC_DECL` 段错误 (`fd->sym->kind` deref NULL)。
+
+**根因 (5 处 codegen merge artifact + 4 NULL guard):**
+
+1. **codegen_amd64.jhyy L74 + L315 重复 fn def** (主根因): `codegen_amd64_run(il_path: *u8, asm_path: *u8)` 2-arg stub (axis-v2 commit `568d3aa` 前) 跟 `codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32)` 3-arg impl (v2.6.3+ axis-v2 ship) 在 `0f9c923` merge 后并存;同样 `codegen_amd64_emit_raw_asm` 也 L96 + L315 重复。symtab_insert 同 depth 重复返 NULL → parse_func (parser.c:583) 没 NULL check → sema.c:1281 `fd->sym->kind = SYM_FN` deref NULL → SIGSEGV。
+2. **codegen.jhyy cg_module Pass B 循环双调 cg_func**: `0f9c923` merge 把 v3.0.4 (3e link_section) 的 side-file write + `cg_func()` 顺序错位 — 上面调一次 cg_func (写 side-file), 下面又调一次 cg_func (QBE emit), 同一 fn 出 2 份 QBE IL → QBE "label or } expected" reject。
+3. **codegen.jhyy cg_func body_returns 分支双 ret emit**: merge 把 v2.1.0 sret/value/void 三个 emit 分支跟上 v2.8.2 W-070 SysV/Win dispatch 共存, 两条 ret emit 链都跑 → 双 ret (QBE "label or } expected")。
+4. **codegen.jhyy cg_func header emit SysV/Win if-else 缺 `}`** (主 surface): `0f9c923` 把 v3.0.2 (3b naked fn) 的 `if (*fd).is_naked != 0 { emit_naked_func_header() } else { abi_win_emit_function_header() }` block 嵌进 v2.8.2 W-070 SysV dispatch 的 else 分支体内, 但 **W-070 else 缺 `}`** — 整个函数从 if-else 失去配对, parser 一直在 expression mode 一直跑到 cg_func 结束 → 27+ parse errors (semantic chain 上无影响, 错位掩盖 SIGSEGV 真根因)。
+5. **codegen_amd64_emit_call.jhyy emit_volatile L612-619 unreachable 重复 let _c2**: merge 把 v2.5.0 skeleton "Step 3 (3c ship 前)" 跟上 v3.0.3 (3c ship) 行为都纳入, L612 return 0 后再 let _c2 永远 unreachable → 跟 W-068 整体 fix 一并修。
+
+**4 处 defensive NULL guards 附帶加** (per axis-v2 commit `31e9d95`):
+- `compiler/src/parser.c:583 parse_func` — symtab_insert NULL → fprintf + return NULL (vs 原 deref NULL → SIGSEGV)
+- `compiler/src/parser.c:336 parse_let` — symtab_insert NULL → fprintf + still return node (sema 兜底)
+- `compiler/src/sema.c:1281 check_module NODE_FUNC_DECL` — fd->sym NULL → sema_error + continue
+- `compiler/src/sema.c:841 infer_type NODE_LET` — d->sym NULL → skip + return type_void
+
+**修复 (commit `1c31b80` cherry-pick from `31e9d95`):**
+
+```bash
+# Cherry-pick from axis-v2 (axis-v2 user 2026-09-09 GDB-verified 真修):
+git cherry-pick 31e9d95
+# → [main 1c31b80] fix(codegen): v3.1.4 W-068 真修 v2 — dedup codegen_amd64.jhyy + NULL guard + merge artifact 修
+# 6 files changed, 69 insertions(+), 109 deletions(-)
+#   - compiler/src/parser.c                      | 18 +++++++   (NULL guards)
+#   - compiler/src/sema.c                        | 14 ++++++   (NULL guards)
+#   - compiler/src0/codegen.jhyy                 | 77 +++++++++++++------------------ (4 merge artifacts)
+#   - compiler/src0/codegen_amd64.jhyy           | 39 +--------------   (dedup L74/L315)
+#   - compiler/src0/codegen_amd64_emit_call.jhyy |  9 +---          (emit_volatile L612)
+#   - compiler/src0/main.jhyy                    | 21 ++------       (dead code 2-arg codegen_amd64_run call)
+```
+
+**验证 (per `feedback_fix_evaluation_rule` 5/5 PASS):**
+
+1. ✅ `make` build 成功: `gcc ... -o compiler/build/bin/jhyy_stage0.exe` OK + `jhyy_stage0.exe compile main.jhyy -o jhyy.exe` OK (无 SIGSEGV)
+2. ✅ jhyy.exe (v1) 编 main.jhyy → jhyy_v2.exe → v3 → v4 → v5 全 byte-equal (D43 closure sha `3f968148...` re-baseline per v2.11.18 phi fix)
+3. ✅ regress.py 114/114 PASS (full suite, 0 fail, 20 skipped = WSL/V3-B)
+4. ✅ byte_equal_amd64.sh 10/10 PASS (self vs QBE parity)
+5. ✅ Phase A v2.11.18 phi 修復 5/5 PASS (后续 sprint 的硬前置解锁)
+
+**scope:**
+- ✅ 改 6 个文件 (3 src/ C-side NULL guards + 3 src0/ jhyy-side merge artifact 修)
+- ✅ 改 `docs/logs/v2/changelog-v2.11.0.md` v2.11.18 prerequisite section
+- ✅ 改 `docs/logs/v2/d43-baseline-archive.md` re-baseline row
+- ✅ 改 `docs/internal/workarounds.md` W-072 entry (本段)
+- ❌ 不动 ABI / spec / QBE / runtime / installer
+- ❌ 不创建 standalone changelog (umbrella v2.11.x 范畴, per `feedback_changelog_umbrella`)
+
+**净 ship 计数:** 1 cherry-pick (W-068 真修 v2 from axis-v2 `31e9d95`) + 1 v2.11.18 phi 修復 (主目的) + 1 docs commit + 6 src/src0 file 真改 + 4 NULL guard 防未来类似 SIGSEGV → 0 W-072 active.
+
+### 失效条件
+
+任何** restore `0f9c923` merge 引入 5 处 artifact 中任一处** 都重新引出 W-072:
+- ❌ `codegen_amd64.jhyy` 加回 L74 2-arg codegen_amd64_run stub → SIGSEGV
+- ❌ `codegen.jhyy cg_module` Pass B 循环恢复双调 cg_func → QBE "label or } expected"
+- ❌ `codegen.jhyy cg_func` body_returns 分支恢复双 ret emit → QBE reject
+- ❌ `codegen.jhyy cg_func` header emit W-070 else 缺 `}` + naked fn block orphan → 27 parse errors cascade
+- ❌ `codegen_amd64_emit_call.jhyy emit_volatile` L612-619 unreachable 重复 let _c2 → no-op noise
+- ❌ `parser.c:583 parse_func` 删 NULL guard → 重复 fn def 必 SIGSEGV (回归 W-072 #1)
+
+**invariant**: 5 处 merge artifact 全修, 4 NULL guard 全加, 不再单独改 codegen_amd64.jhyy L74 2-arg stub (per `feedback_no_artifacts_in_project` + `feedback_plans_per_version`, 不留 stale 引用)。Symptom: `jhyy_stage0.exe compile main.jhyy` 必须 exit 0, 不 exit 139。
+
+### 引用
+
+- **Cherry-pick source**: `axis-v2` branch commit `31e9d95` (axis-v2 user 2026-09-09 GDB-verified)
+- **Cherry-pick target**: main commit `1c31b80` (2026-09-16)
+- **v2.11.18 phi 修復** (W-072 解锁后): commit `780da2e`
+- **v2.11.18 docs** (D43 re-baseline + W-072 引用): commit `3b28225`
+- **Stash recovery path**: `stash@{0}` 在 main (per `feedback_stash_drop_destructive`) 含 phi work-in-progress, `git stash pop` 后 cherry-pick resolve conflict
+- **相关**: W-068 (installer Theme.xml, **不同问题同名**, RESOLVED v1.8.3); W-069 (jhyy.exe corrupt, RESOLVED v2.6.6); W-070 (sysv_freestanding fatal, RESOLVED v2.8.2); W-071 (codegen_amd64 unverified, RESOLVED v2.6.5)
+- **Merge commit doc**: `0f9c923` "merge axis-v3 → main (per 2026-09-08 user decision)" — merge resolution 是 additive "keep BOTH HEAD + axis-v3" on 5 text files (codegen.jhyy / codegen_amd64.jhyy / codegen_amd64_emit_call.jhyy / jhyy_helpers.c / main.jhyy), 但没 verify build post-merge → 5 处 artifact 漏
+
+### 教训
+
+1. **merge 后必须 build verify**: `0f9c923` merge commit message 列 5 个文件 additive resolution, 但**没跑** `make` 后 verify → 5 处 merge artifact 漏 8 天 (Sep 8 → Sep 16)。**任何 merge commit 必须 ship 后立刻 `make` + `regress.py` + D43 closure verify**, 不能只读 diff。跟 W-066 (425970d refactor 没跑下游 verify) / W-067 (latent logic drift) / W-068 (1.8.3 installer 没跑 GUI verify) 同型 — 都是 verify 链路不全的 latent ship。
+2. **NULL deref 是 codegen SIGSEGV 的常见 surface**: 4 处 NULL guard 加在 parser.c:583 / parser.c:336 / sema.c:1281 / sema.c:841 是防御 belt-and-suspenders — symtab_insert 重复返 NULL 是 root, 但 NULL guard 把 SIGSEGV 降级为 parse error, 未来类似 bug 直接报"duplicate fn name"而非静默 SIGSEGV。**invariant**: 任何 `symtab_insert` 后 `if (!sym)` 必须有 fprintf + return / continue, 不能裸 deref。
+3. **symptom cascade 掩盖 root cause**: W-072 #4 (cg_func header 缺 `}`) 触发 27 个 parse errors, 掩盖 #1 (重复 fn def) 的 SIGSEGV 真根因。**RCA-first 训**: 多 cluster fail (parse error + SIGSEGV 共存) 必须分清哪个是 symptom 哪个是 root, 不能看到 parse error 就 revert parser。Per `feedback_rca_first_root_cause`: 多 cluster fail 先 1 iter RCA 找根因; 单 cluster > 30% 通常 = 1 个根因 + 下游症状; 架构 vs bug 要区分。
+4. **cherry-pick axis-v2 → main 是 v2.x 跟 axis-v3 异步并行的清理工具**: v2.11.18 sprint 顺手把 axis-v2 commit `31e9d95` (已经 ship + GDB-verified 的真修) cherry-pick 过来, 避免重新诊断已修问题。**invariant**: axis-v2 / axis-v3 任何已 ship + GDB-verified 的 fix 都应 cherry-pick 回 main 不重做, per D43 closure 阶段性 hold 跟 cross-branch knowledge transfer。
+5. **W-072 跟 v2.11.18 是 ship 双胞胎**: 没有 W-072 cherry-pick, v2.11.18 phi fix 改不动 (`jhyy_stage0.exe compile main.jhyy` 必 SIGSEGV before parse even starts)。**任何 codegen 改动 sprint 必须先 verify `make` clean build, 不只是 `jhyy.exe compile <one file>` 单测**。单测 PASS 不代表 main.jhyy PASS。
 
 
