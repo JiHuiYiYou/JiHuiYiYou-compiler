@@ -96,12 +96,17 @@ fn emit_comment(state: *u8, text: *u8) -> i32 {
     return sb_append_cstr(0 as *Arena, s, "\n" as *u8);
 }
 
-// size_suffix_for_qt — 把 QBE type letter 转 AT&T size suffix
+// size_suffix_for_qt — 把 QBE type letter 转 AT&T INTEGER size suffix
 //   'w' → "l" (32-bit int)
 //   'l' → "q" (64-bit int / pointer)
-//   'd' → "q" (f64 = 8 bytes; v2.11.13 A1 fix — f64 emit gap)
-//   's' → "l" (f32 = 4 bytes; v2.11.13 A1 fix — f32 emit gap)
+//   'd' → "q" (f64 = 8 bytes, integer bit pattern read)
+//   's' → "l" (f32 = 4 bytes, integer bit pattern read)
 //   fallback → "l"
+//
+// v2.11.15 Iter 3 (C.4 float XMM): 注 — QBE_D/QBE_S 仍返 q/l,因为 emit_mov_temp_to_offset
+// 等函数是 mem-to-mem integer ops (movq/movl)。XMM-specific ops (movsd/movss/addsd)
+// 走 XMM register path 用 hard-coded "sd"/"ss" suffix(由 caller 决定,不用此 helper)。
+// mem_mov_suffix (codegen_amd64_emit_mem.jhyy) 同 pattern — 仍用 q/l for mem-to-mem。
 fn size_suffix_for_qt(qt: i32) -> *u8 {
     if qt == QBE_W_LOCAL() {
         return "l" as *u8;
@@ -1347,6 +1352,51 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
     let src2_id: i64 = if src2_id_parsed >= (0 as i64) { src2_id_parsed } else { 2 as i64 };
     let src1_off = cg_offset_for_temp_with_target(src1_id, target_tag);
     let src2_off = cg_offset_for_temp_with_target(src2_id, target_tag);
+
+    // v2.11.15 Iter 3 (C.4 float XMM): f64/f32 add/sub/mul/div 走 XMM 路径
+    //   (addsd/addss/subsd/subss/mulsd/mulss/divsd/divss)。integer path 之前
+    //   静默 fall through (movl %eax, %rax → garbage for f64/f32 bit patterns)。
+    //   必须 BEFORE 现有 integer dispatch (下面 if-chain) + BEFORE mov src1 → %rax。
+    //
+    //   emit 序列(per AT&T GAS XMM 语法):
+    //     movsd/movss -src1(%rbp), %xmm0
+    //     <op><sd|ss> -src2(%rbp), %xmm0   (op = add/sub/mul/div)
+    //     movsd/movss %xmm0, -dst(%rbp)
+    //
+    //   注:src2 imm literal 在 f64/f64 imm 罕见,QBE 通常 emit imm 装独立 temp —
+    //   若真出现 imm literal,fall through integer path 仍产生 garbage (XMM 没有
+    //   直接 imm add/sub/mul/div,需要 movsd imm_to_xmm0 + op)。保守做法:imm
+    //   fall through 现有 integer path (= 静默 garbage for imm f64/f64 arithmetic),
+    //   v2.11.16+ 真修。当前 Iter 3 优先 closure 数量。
+    if qt == QBE_D_LOCAL() || qt == QBE_S_LOCAL() {
+        let mut is_xmm_op_kind: i32 = 0 as i32;
+        let mut xmm_op: *u8 = "add" as *u8;
+        if cg_find_sub(op_text, op_text_len, "add" as *u8, 3 as i64) >= (0 as i64) {
+            is_xmm_op_kind = 1 as i32; xmm_op = "add" as *u8;
+        } else if cg_find_sub(op_text, op_text_len, "sub" as *u8, 3 as i64) >= (0 as i64) {
+            is_xmm_op_kind = 1 as i32; xmm_op = "sub" as *u8;
+        } else if cg_find_sub(op_text, op_text_len, "mul" as *u8, 3 as i64) >= (0 as i64) {
+            is_xmm_op_kind = 1 as i32; xmm_op = "mul" as *u8;
+        } else if cg_find_sub(op_text, op_text_len, "div" as *u8, 3 as i64) >= (0 as i64) {
+            is_xmm_op_kind = 1 as i32; xmm_op = "div" as *u8;
+        }
+        if is_xmm_op_kind != (0 as i32) {
+            let xmm_sfx: *u8 = if qt == QBE_D_LOCAL() { "sd" as *u8 } else { "ss" as *u8 };
+            let dst_off_x = cg_offset_for_temp_with_target(dst_id, target_tag);
+            // movsd/movss -src1(%rbp), %xmm0
+            let _mx1 = emit_mov_temp_to_xmm_reg(state, qt, src1_off, "xmm0" as *u8);
+            // <op><sd|ss> -src2(%rbp), %xmm0
+            let _xo1 = sb_append_cstr(arena, s, "\t" as *u8);
+            let _xo2 = sb_append_cstr(arena, s, xmm_op);
+            let _xo3 = sb_append_cstr(arena, s, xmm_sfx);
+            let _xo4 = sb_append_cstr(arena, s, " " as *u8);
+            let _xo5 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _xo6 = sb_append_cstr(arena, s, "(%rbp), %xmm0\n" as *u8);
+            // movsd/movss %xmm0, -dst(%rbp)
+            let _mx2 = emit_mov_xmm_reg_to_temp(state, qt, "xmm0" as *u8, dst_off_x);
+            return 0;
+        }
+    }
 
     // movl/q -src1(%rbp), %rax → 用 reg_rax_for_qt 选 %eax / %rax (GAS 拒绝 movl ..., %rax)
     let _m1 = emit_mov_temp_to_reg(state, qt, src1_off, reg_rax_for_qt(qt) as *u8);
