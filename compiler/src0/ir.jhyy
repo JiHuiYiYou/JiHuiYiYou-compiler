@@ -520,6 +520,23 @@ fn ir_emit_copy(ir: *IRBuf, dst: IRVal, val: i64) -> i32 {
     return 1;
 }
 
+// v2.11.18 phi 修復: emit copy from src IRVal to dst IRVal (not literal).
+// 用於 move-pair phi lowering: 前驅塊末尾寫 "    %tD =qt copy %tS"。
+// 类型宽度: 优先 dst.qbe_type, fallback src.qbe_type, 最后 QBE_W() (per user feedback)。
+fn ir_emit_copy_tmp(ir: *IRBuf, dst: IRVal, src: IRVal) -> i32 {
+    let mut real_qt: i32 = dst.qbe_type;
+    if real_qt == (0 as i32) { real_qt = src.qbe_type; }
+    if real_qt == (0 as i32) { real_qt = QBE_W(); }
+    ir_emit_str(ir, "    %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, dst.id);
+    ir_emit_str(ir, " =" as *u8);
+    ir_emit_int(ir, "%c" as *u8, real_qt);
+    ir_emit_str(ir, " copy %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, src.id);
+    ir_emit_str(ir, "\n" as *u8);
+    return 1;
+}
+
 // ir_emit_call / call_void：args 数组 + n
 fn ir_emit_call(ir: *IRBuf, dst: IRVal, fn_name: *u8, args_raw: *u8, n: i32) -> i32 {
     let qt = dst.qbe_type;
