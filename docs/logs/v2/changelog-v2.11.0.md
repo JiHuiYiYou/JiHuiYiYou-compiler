@@ -1476,3 +1476,74 @@ This is **NOT** a missing-data-emit bug — it's a **pointer-dereference** bug. 
 - **Existing .s evidence**: `compiler/tests/examples/{char_pattern,slice_subrange,float_arith,generics_fn_call_site_inference,const_array,const_struct_array,dungeon_game}_run.s` (some stale pre-Iter 2 commit `568d3aa`)
 - **Baseline regress**: v2.11.15 = 86/135 PASS / 29 FAIL / 20 SKIP (initial audit count); this audit revises to ~10 ACTUAL FAIL after stale .s evidence + verified PASS reconciliation
 - **Memory**: [[feedback_fix_evaluation_rule]] (5-version 4-way-wrong lesson history; Phase 0 MANDATORY before any implementation; initial audit over-counted FAIL by ~20 tests → reconciliation via 3-agent deep-dive is the pattern that worked); [[feedback_codegen_amd64_multifn]] (FLIP ≥ 4 STOP, scope DOWN trigger); [[feedback_il_s_debugging_pattern]] (.s evidence pattern, BUT stale .s is also a trap — pre-Iter 2 capture made C.3 tests look still-FAIL when source fix is correct); [[feedback_plans_per_version]] (v2.11.16-plan.md NEW); [[feedback_changelog_umbrella]] (v2.11.16 sub-section append — single docs commit); [[feedback_document_workarounds_in_docs]] (W-074.6/W-074.7 update with audit); [[feedback_audit_single_commit_diff]] (Phase 0 docs-only 1 commit, audit via Explore agent reports not commit diff); [[feedback_auto_push_after_commit]] (audit commit 成功直接 push); [[feedback_ssh_key_same_shell]] (push 前 same-shell SSH add; GFW 走 token-URL fallback per coding/CLAUDE.md)
+
+---
+
+## v2.11.16 audit correction (post-ship 2026-09-16)
+
+**Phase 0 ship 后 user 要求实测 regress.py --self-backend**(自研 amd64 backend ship gate 触发器,同 135 tests 口径,expected exit code 从 `.jhyy` 源码 `// EXPECT:` 注释读),暴露 Phase 0 audit 多处估算错误。Honest correction committed separately。
+
+### Real self-backend baseline (实测)
+
+```
+$ python regress.py --self-backend --no-baseline-check --timeout=120
+===== 87 PASS / 28 FAIL / 20 SKIP (of 135 total) =====
+```
+
+| Backend | PASS | FAIL | SKIP | Pass rate |
+|---------|------|------|------|-----------|
+| QBE (默认 jhyy.exe) | 115 | 0 | 20 | 100% |
+| **自研 amd64 (--self-backend)** | **87** | **28** | **20** | **75.8%** |
+| 差异 | -28 | +28 | 0 | -24.2% |
+
+### Audit vs 实测 对账
+
+| Audit 估 | 实际 | 误差 |
+|---------|------|------|
+| Baseline 86/29/20 | 87/28/20 | -1 PASS / -1 FAIL(基本一致) |
+| 19 PASS(12 C.3 stale + 2 A1-XMM + 2 verified + 1 by-accident) | **3 PASS** | **-16 估错** |
+| 8 confirmed FAIL | 8 confirmed FAIL | ✓ |
+| 4 UNCERTAIN likely PASS | **0/4 PASS** | **-4 估错** |
+| 2 UNCERTAIN FAIL likely (no .exe) | 2/2 FAIL | ✓ |
+
+**Audit accuracy = 13/31 = 42%**(cluster 分类对,per-test 估错 18/31)
+
+### 28 FAIL 真实 cluster map (v2.11.17 起点)
+
+| Cluster | Tests | Count |
+|---------|-------|-------|
+| **C.3 emit_phi** | char_pattern, enum_match_arm_tag_check, match_exhaustive, match_range, mixed_struct_slice_match, or_exhaust, or_same_bind, payload_bind_basic, payload_bind_multi, payload_bind_nested, payload_bind_short | **11** |
+| **C.5 slice addr+8** | slice_subrange, slice_index, slice_iterate, slice_literal, for_in_slice_nested | **5** |
+| **C.4 float imm** | f32_suffix, f64_suffix, float_arith, float_arith_f32 | **4** |
+| **B-runtime** | big_array, top_level_let_mut_test, top_level_let_mut_types | **3** |
+| **A2-ptr-deref** | const_array, const_struct_array | **2** |
+| **C.2 cap_table** | cap_table_basic test 4 | **1** |
+| **unique** | dungeon_game, defer_multi_lifo | **2** |
+
+### W-074.7 status correction
+
+- audit 估 "✅ CLOSED via v2.11.15 Iter 2 commit `568d3aa`"
+- **真实**:11/12 C.3 tests still FAIL post-Iter 2;只有 min_enum PASS
+- Iter 2 fix 改了 `codegen_amd64_emit_ctrl.jhyy` emit_phi 真实现,但**只 closed 1/12 = min_enum**,其他 11 个仍 FAIL
+- Iter 2 fix **未** 根治 phi merge gap,需要 v2.11.17+ 重设计(emit_phi + 上游 cg_match_pattern OR pattern 拆独立 arm block + payload slot uninit 复合 bug)
+
+### v2.11.16 ship 真实评估
+
+- Phase 0 docs-only ship record 写的 "23-25/30 spot-check PASS" + "86/135 baseline 维持" 实际 = **0 net closure**(没改任何 source)
+- Audit 数字 baseline 86/135 接近真实 87/135(差 1);31 entries per-test 估错 18/31(58%)
+- v2.11.16 真实价值 = 提供 audit 数据基础设施(31 entries 表格 + cluster map + W-074.x entries 框架),虽 per-test 估错但 cluster 分类和 fix pattern 推断大体正确
+- W-074.8 / W-074.9 entries 描述的具体 bug surface(file:line + code snippet)在 self-backend 实测下大部分对应到 28 FAIL,fix pattern 推断对
+
+### Memory lessons (新增)
+
+- [[feedback_fix_evaluation_rule]] 加:spot-check / audit estimate / .s evidence **都不等于 full regress 实测**;**always run `regress.py --self-backend`** (同 135 tests 口径) 才能 claim baseline
+- audit 估 cluster map 可能对(28 FAIL cluster 分类对),per-test 估 PASS/FAIL 可能错(42% 准确率),原因:.s 证据 / 源注释 partial-fix 标记 / 旁路路径推断都可能误导
+- v2.11.x ship gate 一直是 `regress.py --self-backend` spot-check 5-30 tests(不是全 135),ship record 写的 spot-check PASS 不能 claim 全量 baseline
+
+### v2.11.17 重设计起点
+
+按 ROI + LOC 排序(per FLIP ≥ 4 STOP 阈值):
+1. **Iter 1**: C.5 slice addr+8 真修(~15-25 LOC, +5 tests, LOW risk)— 明确 win
+2. **Iter 2**: A2-ptr-deref flag propagation(~10-15 LOC, +2 tests, MED risk)
+3. **Iter 3**: B-runtime frame audit(~30-50 LOC, +3 tests, MED risk)
+4. 累计 +10 FLIP → STOP 临界 → defer float/cap_table/C.3/unique to v2.11.18+

@@ -5990,13 +5990,19 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 
 **ID:** W-074.7 phi merge gap (Bug D, NEW in v2.11.14 audit)
 
-**状态:** ✅ **CLOSED** 2026-09-16 via v2.11.15 Iter 2 commit `568d3aa` (per-arm injection strategy) — 12 C.3 tests likely PASS post-Iter 2 (per v2.11.16 Phase 0 audit; stale .s evidence captured pre-Iter 2 falsely indicated FAIL, fresh full regress needed to confirm closure).
+**状态:** ⏸ **DEFERRED** (audit correction 2026-09-16) — v2.11.15 Iter 2 commit `568d3aa` per-arm injection strategy 改了 `codegen_amd64_emit_ctrl.jhyy` emit_phi 真实现 + CGState 224 bytes + 7 helper fns,**spot-check 5/12 PASS**(char_pattern=0/match_exhaustive=2/match_range=0/or_exhaust=1/payload_bind_basic=42)。**但 self-backend full regress 验证:11/12 C.3 tests 仍 FAIL**(只有 min_enum 真 PASS)。Iter 2 fix 闭合了 min_enum 一例,**未根治 phi merge gap**,需要 v2.11.17+ 重设计(emit_phi + 上游 `cg_match_pattern` OR pattern 拆独立 arm block + payload slot uninit 复合 bug)。
 
-**v2.11.15 Iter 2 真修 (commit `568d3aa`)** — different strategy from v2.11.14 attempt:
+**v2.11.15 Iter 2 实际改动 (commit `568d3aa`)** — different strategy from v2.11.14 attempt:
 - **Per-arm injection**: emit_phi parses `phi @arm1 %tN, @arm2 %tM` → append entries to pending_phi_* table (no merge_label lookup needed)
 - **Files modified**: `codegen_amd64_state.jhyy` (+7 CGState fields + 4 helper fns including `cg_scan_pending_phi_for_arm` defined after `cg_streq_n` to satisfy jhyy no-forward-reference), `codegen_amd64_emit_call.jhyy` (emit_phi rewrite), `codegen_amd64_emit_ctrl.jhyy` (emit_label writes cur_block_name + emit_jmp scans pending_phi_for_arm BEFORE jmp emit), `codegen_amd64.jhyy` (malloc 160→224 to fit CGState + 7 phi fields)
 - **Pre-existing bug fix bonus**: CGState malloc was 160 bytes but struct needs 168 (21 fields × 8 bytes); fn_count was writing 8 bytes past heap boundary. Bumped to 224 to fit + 7 new phi fields
-- **5/12 spot-checked PASS** (per v2.11.15 ship record): char_pattern=0, match_exhaustive=2, match_range=0, or_exhaust=1, payload_bind_basic=42
+- **Spot-check 5/12 PASS** (per v2.11.15 ship record): char_pattern=0, match_exhaustive=2, match_range=0, or_exhaust=1, payload_bind_basic=42
+- **Self-backend full regress 2026-09-16**:5/12 同样测试全 FAIL(char_pattern=6, match_exhaustive=garbage, match_range=12, or_exhaust=crash, payload_bind_basic=102)— spot-check 数字跟 full regress 数字不一致原因:**spot-check 5 个 tests 的 .s 文件 是 pre-Iter 2 capture**(stale .s 写错 .s 文本但 EXIT 实际由其他 stale .s 影响;rebuild + fresh regress 触发实际真 codegen),后续 full regress 用 fresh build 跑出真值
+
+**Audit correction note**:
+- v2.11.16 Phase 0 audit ship 时估 "✅ CLOSED" 基于 5/12 spot-check PASS + stale .s 推断"likely PASS post-Iter 2"
+- 2026-09-16 user 要求 `regress.py --self-backend` 跑全 135 tests(同 QBE baseline 口径),发现 spot-check 不可靠、stale .s 推断错误
+- **真正 closure 路径**:v2.11.17+ 重设计 emit_phi 跟 codegen.jhyy upstream OR pattern + payload slot uninit 复合 bug,**不是** Iter 2 单独的 per-arm injection
 
 **Honest scope note** (post-v2.11.16 audit):
 - Phi IL parsing uses 8-byte l suffix regardless of qt (works because slot 8-byte aligned). True qt dispatch (W movl / S movss / D movsd) deferred to v2.11.16+ — but dormant, no FAIL impact (per v2.11.16 audit).
