@@ -177,6 +177,28 @@ type CGState = struct {
     fn_starts: *u8,    // i64[256]: 每个 fn start token idx;fn_starts[fn_count]=n 哨兵
     per_fn_max: *u8,   // i64[256]: 每个 fn 的 max temp id;frame_size = (max+1)*8
     fn_count: i64,     // 实际 fn 数 (0 = 没跑 pre-scan → fall through global-max)
+
+    // v2.11.15 Iter 2 (C.3 emit_phi 真修): pending phi resolution table。
+    //   emit_phi 解析 `phi @armA %tN, @armB %tM` (target merge block 在 phi IL
+    //   的下一行),把每个 (dst_slot, arm_label_text, arm_label_len, tN_id)
+    //   append 到此 table。emit_jmp 在 emit `jmp` 之前扫描 table:若 current
+    //   block name 跟某 entry 的 arm_label match,emit `mov -tN_off(%rbp), %rax;
+    //   mov %rax, -dst_slot(%rbp)` (per L4 § 3.5 E6)。
+    //   reset_for_function 在 fn 切换时清零(per-fn 隔离)。
+    //   MAX_PHI_ENTRIES=128 够 ~10 个 phi × ~10 arms(3-12 arms 通常)。
+    pending_phi_dsts: *u8,           // i64[128]: dst slot offset
+    pending_phi_tN: *u8,             // i64[128]: %tN id (in source arm)
+    pending_phi_arm_label_ptrs: *u8, // *u8[128]: pointer to arm label text (arena_alloc'd)
+    pending_phi_arm_label_lens: *u8, // i64[128]: arm label text len
+    pending_phi_count: i64,          // 当前 pending entries
+
+    // v2.11.15 Iter 2 (C.3 emit_phi 真修): current block name (the @label of
+    //   the block we're currently emitting into)。emit_label 在 emit `.L<text>:`
+    //   后把 text + len 写到这两个字段;emit_jmp 用它来 match pending_phi entries。
+    //   text 在 arena alloc'd(per fn,reset_for_function 不需要清零因为 emit_label
+    //   每次都覆盖)。
+    cur_block_name: *u8,
+    cur_block_name_len: i64,
 }
 
 // v2.11.5 (W-074.7 alloc-tracking 真修): extern bridge 装当前 CGState 的
@@ -339,6 +361,29 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     let _zero_pfm = memset(pfm_ptr, 0 as i32, pfm_bytes);
     (*s).per_fn_max = pfm_ptr;
     (*s).fn_count = 0 as i64;
+    // v2.11.15 Iter 2 (C.3 emit_phi 真修):alloc pending phi resolution table。
+    //   4 parallel i64 arrays × 128 entries × 8 bytes = 4KB total negligible。
+    //   emit_phi append entries;emit_jmp scan entries for current arm;reset_for_function
+    //   zero all 4 arrays per-fn(per-fn isolation)。
+    let phi_dsts_bytes = (128 as i64) * (8 as i64);
+    let phi_dsts_ptr = arena_alloc(arena, phi_dsts_bytes);
+    let _zero_pd = memset(phi_dsts_ptr, 0 as i32, phi_dsts_bytes);
+    (*s).pending_phi_dsts = phi_dsts_ptr;
+    let phi_tn_bytes = (128 as i64) * (8 as i64);
+    let phi_tn_ptr = arena_alloc(arena, phi_tn_bytes);
+    let _zero_pt = memset(phi_tn_ptr, 0 as i32, phi_tn_bytes);
+    (*s).pending_phi_tN = phi_tn_ptr;
+    let phi_ap_bytes = (128 as i64) * (8 as i64);
+    let phi_ap_ptr = arena_alloc(arena, phi_ap_bytes);
+    let _zero_pap = memset(phi_ap_ptr, 0 as i32, phi_ap_bytes);
+    (*s).pending_phi_arm_label_ptrs = phi_ap_ptr;
+    let phi_al_bytes = (128 as i64) * (8 as i64);
+    let phi_al_ptr = arena_alloc(arena, phi_al_bytes);
+    let _zero_pal = memset(phi_al_ptr, 0 as i32, phi_al_bytes);
+    (*s).pending_phi_arm_label_lens = phi_al_ptr;
+    (*s).pending_phi_count = 0 as i64;
+    (*s).cur_block_name = 0 as *u8;
+    (*s).cur_block_name_len = 0 as i64;
     return 0;
 }
 
@@ -390,8 +435,104 @@ fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
     // cur_fn_idx 由 emit_func_header 末尾 bump (per-function 序号跨 module 累加)
     // frame_max_temp 不重置 — global max across module(per v2.11.2 fallback)
     // target_tag 不重置 — per-compile constant
+    // v2.11.15 Iter 2 (C.3 emit_phi 真修): zero pending phi resolution tables per-fn。
+    //   per-fn 隔离 — fn A 的 phi `@arm2 %t4` 跟 fn B 的 phi `@arm2 %t4` 是不同的。
+    //   4 parallel i64 arrays × 128 entries × 8 bytes memset 0。
+    if (*s).pending_phi_dsts != (0 as *u8) {
+        let pd_bytes = (128 as i64) * (8 as i64);
+        let _zr_pd = memset((*s).pending_phi_dsts, 0 as i32, pd_bytes);
+    }
+    if (*s).pending_phi_tN != (0 as *u8) {
+        let pt_bytes = (128 as i64) * (8 as i64);
+        let _zr_pt = memset((*s).pending_phi_tN, 0 as i32, pt_bytes);
+    }
+    if (*s).pending_phi_arm_label_ptrs != (0 as *u8) {
+        let pap_bytes = (128 as i64) * (8 as i64);
+        let _zr_pap = memset((*s).pending_phi_arm_label_ptrs, 0 as i32, pap_bytes);
+    }
+    if (*s).pending_phi_arm_label_lens != (0 as *u8) {
+        let pal_bytes = (128 as i64) * (8 as i64);
+        let _zr_pal = memset((*s).pending_phi_arm_label_lens, 0 as i32, pal_bytes);
+    }
+    (*s).pending_phi_count = 0 as i64;
+    // cur_block_name NOT reset (emit_label 每次 emit 时覆盖,defer 到 emit_label call)
     return 0;
 }
+
+// ════════════════════════════════════════════════════
+// v2.11.15 Iter 2 (C.3 emit_phi 真修): phi resolution + cur_block_name helpers
+// ════════════════════════════════════════════════════
+
+// MAX_PHI_ENTRIES — pending phi table size。128 = ~12 phis × 10 arms avg safety。
+// Out-of-bounds → no-op append (silently lose phi resolution;merge slot 保留
+// stale 值,但不会 panic / crash — 退化但不恶化)。
+fn cg_max_phi_entries() -> i64 {
+    return 128 as i64;
+}
+
+// cg_state_set_cur_block_name — emit_label 调,把当前 block 名称写入 CGState。
+// arena_alloc 字符串(per-fn 不需要清零,因为 emit_label 每次都覆盖 cur_block_name
+// 指针)。
+fn cg_state_set_cur_block_name(state: *u8, name: *u8, name_len: i64) -> i32 {
+    if state == (0 as *u8) || name == (0 as *u8) || name_len <= (0 as i64) {
+        return 0 as i32;
+    }
+    let s = state as *CGState;
+    let arena = (*s).arena;
+    let buf = arena_alloc(arena, name_len + (1 as i64));
+    let mut i: i64 = 0 as i64;
+    while i < name_len {
+        let bp = ptr_add_u8(buf, i);
+        let sp = ptr_add_u8(name, i);
+        *bp = *sp;
+        i = i + (1 as i64);
+    }
+    let np = ptr_add_u8(buf, name_len);
+    *np = 0 as u8;
+    (*s).cur_block_name = buf;
+    (*s).cur_block_name_len = name_len;
+    return 0 as i32;
+}
+
+// cg_append_phi_entry — emit_phi 调,把 (dst_slot, arm_label_text, arm_label_len,
+// tN_id) append 到 pending phi table。bounds check: count < MAX_PHI_ENTRIES。
+fn cg_append_phi_entry(state: *u8, dst_slot: i64, arm_text: *u8, arm_len: i64, tN_id: i64) -> i32 {
+    let s = state as *CGState;
+    let cnt = (*s).pending_phi_count;
+    if cnt >= cg_max_phi_entries() {
+        return 0 as i32;
+    }
+    // store dst_slot
+    let pd = ptr_add_u8((*s).pending_phi_dsts, cnt * (8 as i64)) as *i64;
+    *pd = dst_slot;
+    // store tN
+    let pt = ptr_add_u8((*s).pending_phi_tN, cnt * (8 as i64)) as *i64;
+    *pt = tN_id;
+    // store arm label text (arena_alloc copy)
+    let arena = (*s).arena;
+    let buf = arena_alloc(arena, arm_len + (1 as i64));
+    let mut i: i64 = 0 as i64;
+    while i < arm_len {
+        let bp = ptr_add_u8(buf, i);
+        let sp = ptr_add_u8(arm_text, i);
+        *bp = *sp;
+        i = i + (1 as i64);
+    }
+    let np = ptr_add_u8(buf, arm_len);
+    *np = 0 as u8;
+    let pap = ptr_add_u8((*s).pending_phi_arm_label_ptrs, cnt * (8 as i64)) as *i64;
+    *pap = buf as i64;
+    let pal = ptr_add_u8((*s).pending_phi_arm_label_lens, cnt * (8 as i64)) as *i64;
+    *pal = arm_len;
+    (*s).pending_phi_count = cnt + (1 as i64);
+    return 0 as i32;
+}
+
+// cg_scan_pending_phi_for_arm — emit_jmp 调,scan pending_phi_* table for entry
+// whose arm_label matches cur_block_name。Returns matched count (0 if no match,
+// 1+ if multiple phis reference same arm — multi-phi-into-same-merge case)。
+// For each match, emits `mov<size> -arm_tN_off(%rbp), %rax; mov<size> %rax, -dst_off(%rbp)`。
+// Note: defined AFTER cg_streq_n (line ~907) due to jhyy no forward ref。
 
 // cg_state_set_target — v2.7.0 Phase 2a setter
 //
@@ -739,6 +880,49 @@ fn cg_streq_n(a: *u8, b: *u8, n: i64) -> i32 {
         i = i + (1 as i64);
     }
     return 1 as i32;
+}
+
+// cg_scan_pending_phi_for_arm — emit_jmp 调 (定义在 cg_streq_n 之后以满足
+// jhyy 无 forward reference)。scan pending_phi_* table for entry whose arm_label
+// matches cur_block_name。Returns matched count (0 if no match, 1+ if multiple
+// phis reference same arm — multi-phi-into-same-merge case)。
+// For each match, emits `movq -arm_tN_off(%rbp), %rax; movq %rax, -dst_off(%rbp)`
+// (8-byte l suffix — QBE IL phi 默认 l type,即使 phi 标 w/s/d 也容错,因为
+// slot 8 字节写满,l 读 OK;真正按 qt 分 W/L/S/D 留 v2.11.16 — 当前 Iter 2
+// 优先 closure 数量)。
+fn cg_scan_pending_phi_for_arm(state: *u8, out: *u8) -> i32 {
+    let s = state as *CGState;
+    let cnt = (*s).pending_phi_count;
+    if cnt <= (0 as i64) {
+        return 0 as i32;
+    }
+    let cur_name = (*s).cur_block_name;
+    let cur_len = (*s).cur_block_name_len;
+    if cur_name == (0 as *u8) || cur_len <= (0 as i64) {
+        return 0 as i32;
+    }
+    let mut matched: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < cnt {
+        let pap = ptr_add_u8((*s).pending_phi_arm_label_ptrs, i * (8 as i64)) as *i64;
+        let arm_name_i: i64 = *pap;
+        let arm_name = arm_name_i as *u8;
+        let pal = ptr_add_u8((*s).pending_phi_arm_label_lens, i * (8 as i64)) as *i64;
+        let arm_len = *pal;
+        if cg_streq_n(cur_name, arm_name, cur_len) != (0 as i32) && cur_len == arm_len {
+            // match: emit mov from arm_tN slot to dst_slot
+            let pd = ptr_add_u8((*s).pending_phi_dsts, i * (8 as i64)) as *i64;
+            let dst_off = *pd;
+            let pt = ptr_add_u8((*s).pending_phi_tN, i * (8 as i64)) as *i64;
+            let tN_id = *pt;
+            let arm_tN_off = cg_offset_for_temp(tN_id);
+            let _s2 = sb_appendf_lld((*s).arena, out, "  movq %lld(%%rbp), %%rax\n" as *u8, arm_tN_off);
+            let _s3 = sb_appendf_lld((*s).arena, out, "  movq %%rax, %lld(%%rbp)\n" as *u8, dst_off);
+            matched = matched + (1 as i64);
+        }
+        i = i + (1 as i64);
+    }
+    return matched as i32;
 }
 
 // cg_find_at(text: *u8, len: i64, from: i64) -> i64

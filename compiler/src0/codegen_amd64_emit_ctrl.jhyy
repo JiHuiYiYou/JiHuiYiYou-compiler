@@ -132,6 +132,13 @@ fn emit_jmp(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let _sfx_b = sb_appendf_lld(arena, sb, "_b%lld" as *u8, b_count_j);
     let _sfx = sb_appendf_lld(arena, sb, "_fn%lld" as *u8, cg_state_cur_fn_idx(state));
     sb_append_cstr(arena, sb, "\n" as *u8);
+    // v2.11.15 Iter 2 (C.3 emit_phi 真修): emit phi resolution copies BEFORE the jmp
+    //   if current block is a phi arm。scan pending_phi_* table for entries whose
+    //   arm_label matches cur_block_name (set by emit_label) → emit
+    //   `mov<size> -arm_tN(%rbp), %rax; mov<size> %rax, -dst(%rbp)` to copy arm's
+    //   value into phi destination slot. Multiple entries may match (e.g. two phis
+    //   both reference same merge block arm) → all get copies。
+    let _scan = cg_scan_pending_phi_for_arm(state, sb);
     let _tt = target_tag;
     return 0;
 }
@@ -282,6 +289,10 @@ fn emit_label(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let _sfx_b = sb_appendf_lld(arena, sb, "_b%lld" as *u8, b_count);
     let _sfx = sb_appendf_lld(arena, sb, "_fn%lld" as *u8, cg_state_cur_fn_idx(state));
     sb_append_cstr(arena, sb, ":\n" as *u8);
+    // v2.11.15 Iter 2 (C.3 emit_phi 真修): write cur_block_name so emit_jmp in
+    //   this block can match pending_phi entries。emit_jmp 在 jmp @X 前扫描
+    //   table,若当前 block name == phi arm label,emit copy 到 phi dst slot。
+    let _set_bn = cg_state_set_cur_block_name(state, (*t).text, (*t).text_len);
     // target_tag v2.8.0 加,label target-agnostic — 仅为签名统一
     let _tt = target_tag;
     return 0;

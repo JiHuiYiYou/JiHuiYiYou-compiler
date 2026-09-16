@@ -257,10 +257,11 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32 {
     free(il_len_box);
 
     // 3. CGState + StringBuilder init (heap-alloc'd, state has stable ptr)
-    // v2.11.2 (W-074.6 R4): CGState 加了 cur_fn_name + frame_max_temp 字段后,
-    // 当前 struct 8 字段 × 8 字节 = 64 字节 (align 64 字节边界),bump 到 128
-    // 留 64 字节余量防 heap overwrite。
-    let state_buf = malloc(160 as i64);
+    // v2.11.15 (Iter 2 C.3 emit_phi 真修): CGState 字段 21 → 28 (+7 phi-related),
+    //   28 × 8 = 224 字节 malloc 上调。pre-existing 160 malloc 跟 168 字节 struct
+    //   已 8 字节 overflow (fn_count 写到 heap 边界外,触发 v2.11.14 OS pre-existing
+    //   bug per `feedback_codegen_amd64_run_zerobyte` 同 pattern)。
+    let state_buf = malloc(224 as i64);
     if state_buf == (0 as *u8) {
         free(il_buf);
         arena_free(&arena);
