@@ -42,6 +42,14 @@ import arena;
 import ffi;
 import util;  // V2-B v2.6.0 Unit B: ptr_add_u8 (used at lex_advance + lex helpers)
 
+// v2.11.19 (B3 真修): dispatcher hard-error 默认分支用 sprintf_lld + jh_fputs_stderr +
+// malloc/free 写 stderr 错误消息。这些 C helpers 已 ship 在 jhyy_helpers.c (per codegen.jhyy:56
+// `extern fn jh_fputs_stderr` pattern),无需新增 C 代码,只 import 即可。
+extern fn malloc(size: i64) -> *u8;
+extern fn free(p: *u8) -> i32;
+extern fn sprintf_lld(buf: *u8, fmt: *u8, val: i64) -> i32;
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+
 // ════════════════════════════════════════════════════
 // Lexer state(per-token local cursor,not 嵌套 struct)
 // ════════════════════════════════════════════════════
@@ -1358,7 +1366,7 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         return next_token_func_header(s, arena, t);
     }
 
-    // ── 'd' → 'data' (data_string) / 'div' (binop) / 'dbgfile' / 'dbgloc' (DIRECTIVE) ──
+    // ── 'd' → 'data' (data_string) / 'div' (binop) / 'dbgfile' / 'dbgloc' (DIRECTIVE) / 'dtosi' / 'dtosl' ──
     if c0 == (100 as i32) {
         let n1 = lex_peek_byte_at(s, 1 as i64);
         let n2 = lex_peek_byte_at(s, 2 as i64);
@@ -1371,6 +1379,29 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         if n1 == (105 as i32) && n2 == (118 as i32) {
             let _x = lex_next_byte(s);  // 'd'
             return next_token_binop(s, arena, t, 100 as i32);
+        }
+        // v2.11.19: 'dtosi' / 'dtosl' (f64 → i32/i64 via cvttsd2si)。直接 dispatch 到
+        //   ILTOK_DTOSI (单 enum,dst 宽度由 tok.qbe_type 决定),不走 next_token_binop
+        //   (因为 conversion op 是 unary src,不是 binary src1+src2,emit_binop 不适用)。
+        //   Phase 1 仅 tokenize;parse_and_emit dispatch 在 Phase 2 commit 加。
+        // 注:必须 BEFORE dbgfile/dbgloc check (虽然 prefix 不冲突 — dtosi vs dbg 头两位
+        //   'd','t' vs 'd','b' — 但 order matters for fast reject)。
+        if n1 == (116 as i32) && n2 == (111 as i32) && n3 == (115 as i32) {  // 't','o','s'
+            let n4 = lex_peek_byte_at(s, 4 as i64);
+            if n4 == (105 as i32) || n4 == (108 as i32) {  // 'i' 或 'l'
+                // consume 'dtosi'/'dtosl' 5 chars
+                let mut k: i64 = 0 as i64;
+                while k < (5 as i64) {
+                    let _x = lex_next_byte(s);
+                    k = k + (1 as i64);
+                }
+                let _s = lex_skip_ws(s);  // 不跨 '\n'
+                lex_init_token(t, ILTOK_DTOSI(), (*s).line);
+                // v2.11.2 contract: text = 整条 slice,cg_parse_temp 二次 scan 取 src
+                let _fin = lex_finish_instr(s, arena, t);
+                let _arena = arena;
+                return 0 as i32;
+            }
         }
         // v2.11.1 (W-074.5): "dbgfile" (7 chars) / "dbgloc" (6 chars) → ILTOK_DIRECTIVE
         // QBE IL output `dbgfile "path"` 和 `dbgloc N "file:line"` always at line head;
@@ -1589,10 +1620,40 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         return -1 as i32;
     }
 
-    // ── 's' → 'sub' (binop) / 'shl' / 'shr' (binop) / 'store*' ──
+    // ── 't' → 'truncd' (f64 → f32 conversion, v2.11.19) ──
+    //   't' 主分支在 v2.11.19 之前无内容 (QBE IL ops 以 't' 开头的仅 truncd) — 现
+    //   Phase 1 加 'truncd' 识别 (consume 6 chars 'truncd' + finish instr + init ILTOK_TRUNCD)。
+    //   注:'truncd' 的 't','r','u','n','c','d' = 116,114,117,110,99,100 — lexer
+    //   peek all 6 byte。
+    //   必须 BEFORE 'v'/'l'/'{' branches (虽然 prefix 不冲突,但 order matters)。
+    if c0 == (116 as i32) {
+        let t1 = lex_peek_byte_at(s, 1 as i64);  // 'r'
+        let t2 = lex_peek_byte_at(s, 2 as i64);  // 'u'
+        let t3 = lex_peek_byte_at(s, 3 as i64);  // 'n'
+        let t4 = lex_peek_byte_at(s, 4 as i64);  // 'c'
+        let t5 = lex_peek_byte_at(s, 5 as i64);  // 'd'
+        if t1 == (114 as i32) && t2 == (117 as i32) && t3 == (110 as i32)
+            && t4 == (99 as i32) && t5 == (100 as i32) {
+            // consume 'truncd' 6 chars
+            let mut k: i64 = 0 as i64;
+            while k < (6 as i64) {
+                let _x = lex_next_byte(s);
+                k = k + (1 as i64);
+            }
+            let _s = lex_skip_ws(s);
+            lex_init_token(t, ILTOK_TRUNCD(), (*s).line);
+            let _fin = lex_finish_instr(s, arena, t);
+            let _arena = arena;
+            return 0 as i32;
+        }
+        // not truncd → fall through to default hard-error
+        return -1 as i32;
+    }
+    // ── 's' → 'sub' (binop) / 'shl' / 'shr' (binop) / 'store*' / 'stosi' / 'stosl' / 'sltof' / 'swtof' / 'ultof' / 'uwtof' ──
     if c0 == (115 as i32) {
         let n1 = lex_peek_byte_at(s, 1 as i64);
         let n2 = lex_peek_byte_at(s, 2 as i64);
+        let n3 = lex_peek_byte_at(s, 3 as i64);
         // v2.11.12 (W-074.6 + W-074.7 5-op 真修): "shl" / "shr" — 必须 check BEFORE sub
         // (因为 's' 主分支的 n1='u'/'t' 不冲突, 但 order matters for fast reject;
         // shl/shr 是 's' -> 'h' -> 'l'/'r',sub 是 's' -> 'u' -> 'b')。
@@ -1609,6 +1670,90 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
             // "sub"
             let _x = lex_next_byte(s);
             return next_token_binop(s, arena, t, 115 as i32);
+        }
+        // v2.11.19: 'stosi' / 'stosl' / 'sltof' / 'swtof' / 'ultof' / 'uwtof'
+        //   (f32→i32/i64 via cvttss2si; i32/i64/u32/u64→f64 via cvtsi2sd family)
+        //   跟 dtosi/dtosl 同 pattern — unary src + 单 ILTOK enum,dst 宽度由 tok.qbe_type 决定。
+        //   6 个 op 都 start 's'/'u', prefix 'st'/'sl'/'sw'/'ul'/'uw'。
+        //   必须 BEFORE "store*" check (n1='t'='t',storew 等同前缀 'sto' 冲突 — 但具体
+        //   store* 是 "storew/storel/stores/stored" 5 chars,我们的 'stosi'/'stosl' 也 5 chars;
+        //   n3='o'/'t' 区分 'stos*' vs 'stori*' 即 'tosi' vs 'tori')。
+        // 注:Phase 1 仅 tokenize;Phase 2 commit 加 parse_and_emit dispatch + emit_conv_* 实现。
+        // ── 'stosi' / 'stosl' (n1='t'=116, n2='o'=111, n3='s'=115, n4='i'/'l') ──
+        if n1 == (116 as i32) && n2 == (111 as i32) && n3 == (115 as i32) {
+            let n4s = lex_peek_byte_at(s, 4 as i64);
+            if n4s == (105 as i32) || n4s == (108 as i32) {  // 'i' 或 'l'
+                let mut k: i64 = 0 as i64;
+                while k < (5 as i64) {
+                    let _x = lex_next_byte(s);
+                    k = k + (1 as i64);
+                }
+                let _s = lex_skip_ws(s);
+                lex_init_token(t, ILTOK_STOSI(), (*s).line);
+                let _fin = lex_finish_instr(s, arena, t);
+                let _arena = arena;
+                return 0 as i32;
+            }
+        }
+        // ── 'sltof' / 'swtof' / 'ultof' / 'uwtof' (5 chars 全部 'l'/'w'/i32='u' prefix) ──
+        // 必须 BEFORE "store*" check,因为 'sltof' 也 start 's','l' 不冲突 'store' 的 't',
+        // 但 'ultof'/'uwtof' start 'u',下面 'u' branch 不存在 — 但 lexer 'u' 主分支缺,
+        // 所以 'ultof'/'uwtof' 走单独的 's' prefix detection 是对的。
+        // 'sltof' = s,l,t,o,f (n1='l'=108)
+        if n1 == (108 as i32) {
+            let n3s = lex_peek_byte_at(s, 3 as i64);
+            let n4s = lex_peek_byte_at(s, 4 as i64);
+            if n2 == (116 as i32) && n3s == (111 as i32) && n4s == (102 as i32) {  // 't','o','f'
+                let mut k: i64 = 0 as i64;
+                while k < (5 as i64) {
+                    let _x = lex_next_byte(s);
+                    k = k + (1 as i64);
+                }
+                let _s = lex_skip_ws(s);
+                lex_init_token(t, ILTOK_SLTOF(), (*s).line);
+                let _fin = lex_finish_instr(s, arena, t);
+                let _arena = arena;
+                return 0 as i32;
+            }
+        }
+        // 'swtof' = s,w,t,o,f (n1='w'=119)
+        if n1 == (119 as i32) {
+            let n3s = lex_peek_byte_at(s, 3 as i64);
+            let n4s = lex_peek_byte_at(s, 4 as i64);
+            if n2 == (116 as i32) && n3s == (111 as i32) && n4s == (102 as i32) {  // 't','o','f'
+                let mut k: i64 = 0 as i64;
+                while k < (5 as i64) {
+                    let _x = lex_next_byte(s);
+                    k = k + (1 as i64);
+                }
+                let _s = lex_skip_ws(s);
+                lex_init_token(t, ILTOK_SWTOF(), (*s).line);
+                let _fin = lex_finish_instr(s, arena, t);
+                let _arena = arena;
+                return 0 as i32;
+            }
+        }
+        // 'ultof' / 'uwtof' = u,l/t/w,t,o,f (n1='u'=117)
+        if n1 == (117 as i32) {
+            let n2s = lex_peek_byte_at(s, 2 as i64);
+            let n3s = lex_peek_byte_at(s, 3 as i64);
+            let n4s = lex_peek_byte_at(s, 4 as i64);
+            if n2s == (116 as i32) && n3s == (111 as i32) && n4s == (102 as i32) {
+                let n1s = lex_peek_byte_at(s, 1 as i64);
+                // 'ultof' = u,l,t,o,f  → ILTOK_ULTOF
+                // 'uwtof' = u,w,t,o,f  → ILTOK_UWTOF
+                let tok_kind: i32 = if n1s == (108 as i32) { ILTOK_ULTOF() } else { ILTOK_UWTOF() };
+                let mut k: i64 = 0 as i64;
+                while k < (5 as i64) {
+                    let _x = lex_next_byte(s);
+                    k = k + (1 as i64);
+                }
+                let _s = lex_skip_ws(s);
+                lex_init_token(t, tok_kind, (*s).line);
+                let _fin = lex_finish_instr(s, arena, t);
+                let _arena = arena;
+                return 0 as i32;
+            }
         }
         // "storew" / "storel" / "stores" / "stored"
         if n1 == (116 as i32) {
@@ -1775,7 +1920,27 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         return 0 as i32;
     }
 
-    // unknown char — caller 决定如何处理
+    // v2.11.19 (B3 真修): dispatcher 默认 hard-error 分支 — 任何未识别的 op
+    // 字面在 lexer 阶段就报错,不静默 skip(per [[feedback_codegen_amd64_multifn]]
+    // "silent fail 防御" + 计划 v2.11.19 § Phase 1c)。早期 fallback "return -1" 让
+    // caller lex_il byte-skip → 静默 produce garbage .s,这是 v2.11.15 前 C.4 float
+    // 4/28 FAIL 的根因之一。新行为:不识别的 op → emit stderr error message + return -1
+    // (caller byte-skip,但 stderr 已被记录 — verify 脚本可见)。
+    //
+    // 注:有些合法 IL 操作已经被 'e'/'a'/'c'/'s'/'l'/'v' 主分支覆盖(per lexer
+    // dispatcher 设计);此 default 分支只 catch 完全未实现的 op 字面 + 不应出现
+    // 的 char(例如 IL 文件中间有 binary garbage)。
+    //
+    // B3 优先级:hard-error 必须先于 Phase 1 op 添加 — 否则就算本次 ship 加了
+    // dtosi/stosi/truncd 等,下次有人加新 op(如 f3x)又走 silent skip,根因没
+    // 闭环。
+    let err_buf_cap: i64 = 128 as i64;
+    let err_buf = malloc(err_buf_cap);
+    if err_buf != (0 as *u8) {
+        let _fmt_msg = sprintf_lld(err_buf, "codegen_amd64_lexer: unknown QBE IL mnemonic at byte offset %lld\n" as *u8, (*s).cur - (*s).buf);
+        let _w = jh_fputs_stderr(err_buf);
+        let _f = free(err_buf);
+    }
     return -1 as i32;
 }
 

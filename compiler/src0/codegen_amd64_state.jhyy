@@ -65,6 +65,19 @@ fn ILTOK_FUNC_HEADER()  -> i32 { return 13 as i32; }
 fn ILTOK_DATA_STRING()  -> i32 { return 14 as i32; }
 fn ILTOK_VOLATILE()     -> i32 { return 15 as i32; }
 fn ILTOK_DIRECTIVE()    -> i32 { return 16 as i32; }  // v2.11.1: dbgfile/dbgloc/{ / } 哨兵 (W-074.5 真修)
+// v2.11.19: QBE float/i32 conversion op family (per codegen.jhyy:1012-1038 emit pattern)。
+//   dtosi/dtosl/stosi/stosl/truncd/exts (f32→f64)/sltof/swtof/ultof/uwtof
+//   8 个 enum,dtosi/stosi 涵盖 dtosl/stosl (dst 宽度由 tok.qbe_type 决定)。
+//   exts with src=W/H/B 走原整数 ext 路径(emit_binop 已有的 extsw/extuw/extsh/extsb 路径),
+//   exts with src=S 走 emit_conv_exts_f32_to_f64 新增浮点路径(cvttss2si/cvtss2sd 等)。
+fn ILTOK_DTOSI()        -> i32 { return 50 as i32; }  // f64 → i32/i64 (cvttsd2si)
+fn ILTOK_STOSI()        -> i32 { return 51 as i32; }  // f32 → i32/i64 (cvttss2si)
+fn ILTOK_TRUNCD()       -> i32 { return 52 as i32; }  // f64 → f32 (cvtsd2ss)
+fn ILTOK_EXTS()         -> i32 { return 53 as i32; }  // src=S 走 f32→f64 (cvtss2sd); src=W/H/B 整数 ext
+fn ILTOK_SLTOF()        -> i32 { return 54 as i32; }  // i64 → f64 (cvtsi2sd, signed)
+fn ILTOK_SWTOF()        -> i32 { return 55 as i32; }  // i32 → f64 (cvtsi2sd, sign-ext 32→64)
+fn ILTOK_ULTOF()        -> i32 { return 56 as i32; }  // u64 → f64 (half trick 7 insn)
+fn ILTOK_UWTOF()        -> i32 { return 57 as i32; }  // u32 → f64 (movl %eax, %eax zero-ext + cvtsi2sd)
 
 // ════════════════════════════════════════════════════
 // IL token struct(由 lexer.jhyy 构造,parse loop 消费)
