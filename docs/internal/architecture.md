@@ -2,7 +2,7 @@
 
 > 流水线、源文件布局、关键设计决策。
 >
-> **Last updated**: v2.7.1 (2026-09-08) — C 端(`compiler/src/*.c`)与 jhyy 端(`compiler/src0/*.jhyy`)双路径并列维护;**v2.0 阶段 (v2.0.0 → v2.4.0) 5 版本全 ship** (tags `v2.3.0` / `v2.4.0`);**v2.7.0 末 3-commit ship + v2.7.1 3-commit ship**(Linux ELF runtime `runtime/linux_elf/` NEW + regress.py `--cross {wsl,docker,auto,none}` 实 wire);D43 closure 阶段性 hold `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b` (v2.7.0 末,re-baselined per D43;v2.7.1 Phase 1+2 不动 codegen → 主动 HOLD 不变,见 [`docs/logs/v2/d43-baseline-archive.md`](../logs/v2/d43-baseline-archive.md))。
+> **Last updated**: v2.11.18 (2026-09-16) — v2.11.x 系列 (v2.11.18 phi 修復 + v2.11.19 float QBE_FALLBACK + v2.11.20 B-runtime 診斷 planned);**C 端(`compiler/src/*.c`)freeze 决策** (2026-09-16): 自 v2.5.0 self-backend 引入后基本冻在 v2.4.0 baseline,只有 build-bootstrap 必前置才 cherry-pick / 改 (W-068 / W-072 例);新 codegen feature 全走 jhyy 端 (`compiler/src0/*.jhyy`);D43 closure 改为 **jhyy-side internal** (v1.exe → v2.exe → v3.exe → v4.exe → v5.exe .il byte-equal),不再要求 C-side mirror;终态 M5 (v1.x 末 Phase 4) 一次性 `rm src/*.c` + untrack QBE + 删 runtime.c。Last minor update tag: v2.4.0 (2026-09-04);D43 baseline 当前 `3f968148...` (v2.11.18 active, per [`docs/logs/v2/d43-baseline-archive.md`](../logs/v2/d43-baseline-archive.md) v2.11.18 row)。
 
 ## 流水线
 

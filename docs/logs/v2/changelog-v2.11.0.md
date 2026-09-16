@@ -68,18 +68,25 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 - ✅ **nested_if EXIT=244** (= 500 mod 256, 期望 500 per `// EXPECT: 500` 注释)
 - ✅ **5/5 phi 测试 stdout 含正确值** (bug2_if_phi: `result = 300`; bug3_void_if: `result = 100`; bug3_void_exact: `x = 100`; control_flow: `sum = 23`; nested_if EXIT 244 = 500)
 
-### Phase B (C-side mirror, ~70 LOC) **DEFERRED to v2.11.21**
+### Phase B (C-side mirror, ~70 LOC) **CANCELLED 2026-09-16 (C-side freeze, user decision)**
 
-**Why defer**:
-1. D43 closure 是 **jhyy-side self-equal**, 不需要 C-side mirror
+**Why cancel (per user 2026-09-16)**:
+1. D43 closure 是 **jhyy-side self-equal** (v1.exe → v2.exe → v3.exe → v4.exe → v5.exe .il byte-equal), 不需要 C-side mirror
 2. `byte_equal_amd64.sh` 是 **self vs QBE parity**, 不是 **C-side vs jhyy-side parity**, 不需要 C-side mirror
 3. Phase A 已 ship ALL 计划 ship gates (5/5 PASS + regress + D43 + byte-equal)
 4. C-side mirror 改 `compiler/src/codegen.c` + `compiler/src/ir.c`, 引入新风险 (untested code) 而不带来新 gate
 5. Per user "怕推块了老 revert" + "进度最大化" → 最小风险方案
 
-**Phase B scope** (留 v2.11.21):
-- `compiler/src/ir.c`: 新增 `ir_emit_copy_val` helper (parallel to jhyy-side `ir_emit_copy_tmp`)
-- `compiler/src/codegen.c`: 4 处 phi emit site (if-expr + match inline + &&/|| 短路) 改 move-pair
+**C-side freeze policy (compiler-internal decision, 2026-09-16)**:
+- C-side (`compiler/src/*.c`) 自 v2.5.0 self-backend 引入后基本冻在 v2.4.0 baseline;只有 build-bootstrap 必前置 (jhyy_stage0.exe SIGSEGV 之类) 才 cherry-pick / 改 (W-068 / W-072 例)
+- 新 codegen feature (v2.x 中/末 / v3.x 全线 / QBE 自写 / N 代 fixed point) 全走 jhyy-side (`compiler/src0/*.jhyy`)
+- D43 closure 强约束改为 **jhyy-side internal**, 不再要求 C-side 镜像
+- 唯一 C-side 入口: `gcc src/*.c -o jhyy_stage0.exe` rebuild — 仅当 src0/main.jhyy 跟 jhyy_stage0.exe 不兼容时才动
+- 终态: M5 (v1.x 末 Phase 4, per `docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md`) 一次性 `rm src/*.c` + untrack QBE + 删 runtime.c, 0 C 依赖闭环
+
+**Phase B scope** (CANCELLED, 仅留 scope 留底):
+- `compiler/src/ir.c`: 新增 `ir_emit_copy_val` helper (parallel to jhyy-side `ir_emit_copy_tmp`) — 不实施
+- `compiler/src/codegen.c`: 4 处 phi emit site (if-expr + match inline + &&/|| 短路) 改 move-pair — 不实施
 
 ### Prerequisite commit: 1c31b80 (W-068 真修 v2 cherry-pick from axis-v2 commit 31e9d95)
 
@@ -133,7 +140,7 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 | v2.11.18 phi 修復 | ✅ shipped 2026-09-16 | jhyy-side move-pair lowering | ~80 (src0/) + 6 文件 prerequisite | done |
 | v2.11.19 float QBE_FALLBACK | 📋 planned | run_backend dispatch 加 float detection | ~2-5 | next sprint |
 | v2.11.20 B-runtime 診斷+修 | 📋 planned | 1 iter 诊断 + 1 iter 修复 | ~30-50 | after v2.11.19 |
-| v2.11.21 C-side mirror (Phase B) | 📋 planned | codegen.c + ir.c phi → move-pair | ~70 (src/) | after v2.11.18 ship verify |
+| v2.11.21 C-side mirror (Phase B) | ❌ cancelled 2026-09-16 (C-side freeze) | 不实施 — C-side 冻在 v2.4.0 baseline, M5 一次性删 | 0 | n/a |
 
 ## 关键数字表 (v2.11.18 ship)
 
@@ -142,7 +149,7 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 | jhyy.exe sha | `98c8272...` (v1.8.3 ship, frozen) | new sha (v2.11.18) |
 | D43 baseline sha | `6a2f2277...` (v2.8.0 末) | `3f968148...` (v2.11.18 active) |
 | regress.py pass rate | 114/114 (QBE path) | 114/114 (QBE path) — **不变**, 但 self-backend cluster C.3 phi 11/28 → 0 |
-| regress.py stage0 pass rate | 105/134 (9 cap_table/generics 失败 — V3-B C-side 限制) | 105/134 — **不变** (C-side mirror deferred v2.11.21) |
+| regress.py stage0 pass rate | 105/134 (9 cap_table/generics 失败 — V3-B C-side 限制) | 105/134 — **不变** (C-side mirror CANCELLED 2026-09-16; phi-cluster 11 测试仍 fail 在 stage0 因为 src/codegen.c 不再同步, accept C-side frozen) |
 | self-host closure chain | v1→v2→v3→v4 byte-equal (v1.8.3 N=4) | v1→v2→v3→v4→v5 byte-equal (v2.11.18 N=4 hold) |
 | byte_equal_amd64.sh | 10/10 PASS (QBE vs self parity) | 10/10 PASS — **不变** |
 | IL phi count (5 phi-cluster 测试) | 11+ 个 phi 节点 each | **0** — phi 全部消除 |
