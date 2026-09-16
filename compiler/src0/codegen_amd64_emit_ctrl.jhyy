@@ -350,13 +350,26 @@ fn emit_ret(state: *u8, tok: *u8, target_tag: i32) -> i32 {
 
     // 2) mov val → %rax/%eax per qbe_type
     let qbe_type = (*t).qbe_type;
+    // v2.11.15 Iter 1b (A1-XMM cluster closure): ILTOK_RET lexer hardcode
+    // qbe_type='w' (per `lex_ret` codegen_amd64_lexer.jhyy) — ret value 的实际
+    // 类型要从 function header 拿。Header 形如 `function d $name(args) {`,
+    // 第 9 byte (after "function ") 是 return qt letter。Fall back to 'w' if
+    // header 不可用 (保守:emit_ret 之前 v2.11.14 行为)。
+    let mut real_qt: i32 = qbe_type;
+    if (*cg).cur_fn_header_text != (0 as *u8) && (*cg).cur_fn_header_len >= (9 as i64) {
+        let rt_byte = cg_byte_at((*cg).cur_fn_header_text, 9 as i64);
+        if rt_byte == (100 as i32) { real_qt = QBE_D_LOCAL(); }   // 'd'
+        else if rt_byte == (115 as i32) { real_qt = QBE_S_LOCAL(); }  // 's'
+        else if rt_byte == (108 as i32) { real_qt = QBE_L_LOCAL(); }  // 'l'
+        else if rt_byte == (119 as i32) { real_qt = QBE_W_LOCAL(); }  // 'w'
+    }
     if val_kind != (0 as i32) {
         let neg_off: i64 = if val_kind == (1 as i32) {
             cg_offset_for_temp_with_target(val_id, target_tag)
         } else {
             0 as i64  // imm_val mov form: "$N" 直接 emit,不走 slot offset
         };
-        if qbe_type == QBE_L_LOCAL() {
+        if real_qt == QBE_L_LOCAL() {
             sb_append_cstr(arena, sb, "\tmovq " as *u8);
             if val_kind == (1 as i32) {
                 sb_appendf_lld(arena, sb, "%lld" as *u8, neg_off);
@@ -366,6 +379,15 @@ fn emit_ret(state: *u8, tok: *u8, target_tag: i32) -> i32 {
                 sb_appendf_lld(arena, sb, "%lld" as *u8, imm_val);
                 sb_append_cstr(arena, sb, ", %rax\n" as *u8);
             }
+        } else if real_qt == QBE_D_LOCAL() || real_qt == QBE_S_LOCAL() {
+            // v2.11.15 Iter 1b (A1-XMM cluster closure): f64/f32 ret in %xmm0,
+            // NOT %rax. emit_ret 之前走 integer 32-bit path (`movl ... %eax`)
+            // → f64 bits 错位 → max$f64 返回 wrong value → main_jhyy 的
+            // `mf == 5.0` 返回 wrong → EXIT=20 (A1 cluster FAIL 根因)。
+            sb_append_cstr(arena, sb, "\tmov" as *u8);
+            sb_append_cstr(arena, sb, if real_qt == QBE_D_LOCAL() { "sd " as *u8 } else { "ss " as *u8 });
+            sb_appendf_lld(arena, sb, "%lld" as *u8, neg_off);
+            sb_append_cstr(arena, sb, "(%rbp), %xmm0\n" as *u8);
         } else {
             // w / b / h 默认走 32-bit
             sb_append_cstr(arena, sb, "\tmovl " as *u8);

@@ -1486,7 +1486,7 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         // 54 cnew) 全部 vanish → gcd Euclid loop cond check missing → b 累积到 0 →
         // idivl SIGFPE (EXIT=127)。
         if n1 == (115 as i32) || n1 == (117 as i32) || n1 == (101 as i32)
-            || n1 == (110 as i32) {  // 'n' for cnew (4-char)
+            || n1 == (110 as i32) || n1 == (103 as i32) {  // 'n' for cnew (4-char); 'g' for cgtd/cltd/cled/cged (QBE f64/f32 compare w/o 's' prefix)
             let n2 = lex_peek_byte_at(s, 2 as i64);
             let n3 = lex_peek_byte_at(s, 3 as i64);
             let n4 = lex_peek_byte_at(s, 4 as i64);
@@ -1532,6 +1532,13 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                     // v2.11.11 (T4-g 真修): cnew branch。op_str 是 dead store (emit_binop 用
                     // cg_find_sub 二次 scan tok.text 拿 op name),但为 consistency 加上。
                     if n2 == (101 as i32) { op_str = "cnew" as *u8; }
+                } else if n1 == (103 as i32) {
+                    // v2.11.15 Iter 1b (A1-XMM): QBE f64/f32 compare without 's' prefix
+                    // (cgtd/cltd/cled/cged — QBE float 没用 signed/unsigned 区别)。
+                    if n2 == (103 as i32) && n3 == (116 as i32) { op_str = "cgtd" as *u8; }
+                    else if n2 == (103 as i32) && n3 == (101 as i32) { op_str = "cged" as *u8; }
+                    else if n2 == (108 as i32) && n3 == (116 as i32) { op_str = "cltd" as *u8; }
+                    else if n2 == (108 as i32) && n3 == (101 as i32) { op_str = "cled" as *u8; }
                 } else {
                     if n2 == (108 as i32) && n3 == (116 as i32) { op_str = "csltw" as *u8; }
                     else if n2 == (108 as i32) && n3 == (101 as i32) { op_str = "cslew" as *u8; }
