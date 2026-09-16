@@ -1185,4 +1185,89 @@ return -1 as i32;
 - **Plan**: `docs/plans/v2/v2.11.13-plan.md` (per `feedback_plans_per_version`; **~1 LOC source + ~250 docs = ~251 LOC 2 commits**; partial closure 14/44 = 32% + FLIP-gate scope DOWN trigger activated)
 - **W-074.6 cne substring**: `docs/internal/workarounds.md` W-074.6 cne substring missing **✅ CLOSED** entry (~80 LOC)
 - **Inline annotation**: `compiler/src0/codegen_amd64_emit_call.jhyy:1077-1087` (cg_find_sub "cnew" 4-char → "cne" 3-char 真修)
-- **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 1 LOC 真修 vs plan 估 30-50 LOC;cross-cluster +7 PASS vs plan 估 C.2 (3 tests); 根因 cne substring vs plan 估 sizeof default); [[feedback_codegen_amd64_multifn]] (FLIP count +7 超 stop threshold 5 → scope DOWN v2.11.13 trigger activated); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: cnel in `_regress_cap_table_basic.s` — pre-fix `addl src1, src2` + `cmpl $0, sum`, post-fix `cmpl src2_off(%rbp), %rax` + `setne %al` + `movzbl %al, %eax`); [[feedback_no_date_estimates]]; [[feedback_plans_per_version]] (v2.11.13-plan.md NEW); [[feedback_changelog_umbrella]] (v2.11.13 sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.6 cne substring NEW entry); [[feedback_audit_single_commit_diff]] (audit 单 commit `89b4b87`); [[feedback_auto_push_after_commit]] (commit 成功直接 push); [[feedback_ssh_key_same_shell]] (push 前 same-shell SSH add)
+- **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 1 LOC 真修 vs plan 估 30-50 LOC;cross-cluster +7 PASS vs plan 估 C.2 (3 tests); 根因 cne substring vs plan 估 sizeof default); [[feedback_codegen_amd64_multifn]] (FLIP count +7 超 stop threshold 5 → scope DOWN v2.11.13 trigger activated); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: cnel in `_regress_cap_table_basic.s` — pre-fix `addl src1, src2` + `cmpl $0, sum`, post-fix `cmpl src2_off(%rbp), %rax` + `setne %al` + `movzbl %al, %eax`); [[feedback_no_date_estimates]]; [[feedback_plans_per_version]] (v2.11.13-plan.md NEW); [[feedback_changelog_umbrella]] (v2.11.13 sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.6 cne substring NEW entry); [[feedback_audit_single_commit_diff]] (audit 单 commit `89b4b87`); [[feedback_auto_push_after_commit]] (commit 成功直接 push); [[feedback_ssh_key_same_shell]]
+
+## v2.11.15 (2026-09-16) — Phase 0 pre-flight verification: 31 FAIL cluster map + .s evidence + **A2 cluster root cause REFUTED**
+
+**Phase 0 scope** (1 docs commit only — no source change):
+- **Goal**: Per v2.11.14 lesson (4 sub-bug narrative 5-way wrong), Phase 0 MANDATORY pre-flight verification before any v2.11.15 implementation commit
+- **Methodology**: Run actual `regress --self-backend` on axis-v2 + capture `.s` evidence for each FAIL test (per `feedback_il_s_debugging_pattern`) + validate Agent 2 audit claims
+
+**Baseline regress run** (post-v2.11.14 ship `4d47c7e` jhyy.exe):
+- Self-backend: **84/115 PASS / 31 FAIL / 25 SKIP** (= baseline 持平)
+- QBE baseline: 115/135 PASS preserved
+- byte-equal D26: 5/5 PASS preserved
+- byte-equal-amd64 V2-B: 10/10 PASS preserved
+- big_test self-backend: EXIT=57 preserved (6/6 closure hold)
+- match.jhyy pre-fix: PASS preserved (silent win from v2.11.13 Iter 4 cne substring)
+- jhyy.exe.sha256: `774ec8347b4ce629c3f8447755ffdc1789dd7e593df358a72eb32c23f012ac09` (= baseline 持平)
+
+**31 FAIL cluster map** (verified — Agent 2 audit 30 + min_enum missed):
+
+| Cluster | N | Tests | Bug surface (verified via .s) |
+|---------|---|-------|-------------------------------|
+| **C.3 emit_phi noop** | 12 | char_pattern / enum_match_arm_tag_check / match_exhaustive / match_range / **min_enum** / mixed_struct_slice_match / or_exhaust / or_same_bind / payload_bind_basic / payload_bind_multi / payload_bind_nested / payload_bind_short | `compiler/tests/examples/char_pattern_run.s` line 60-61: `.Lmerge1_b0_fn1: # phi resolved by codegen.jhyy upstream — noop in v2.5.0` — comment-only noop, 0 lines of `mov<size>` from arm temp slot to merge slot |
+| **C.5 slice copy** | 5 | slice_index / slice_iterate / slice_literal / slice_subrange / for_in_slice_nested | `compiler/tests/examples/slice_subrange_run.s`: single `movq -40(%rbp), %rax; movq %rax, -56(%rbp)` for 16B slice header (only ptr 8B copied, len uninit) |
+| **C.4 float XMM** | 4 | f32_suffix / f64_suffix / float_arith / float_arith_f32 | `compiler/tests/examples/float_arith_run.s`: only integer ops (`addq`/`imulq`) for what should be float; `grep -E "addsd\|addss\|mulsd\|mulss"` → 0 hits in codegen_amd64_emit_*.jhyy |
+| **A1-XMM return reg** | 2 | generics_fn_call_site_inference / generics_fn_turbofish_basic | `compiler/tests/examples/generics_fn_call_site_inference_run.s`: `call max$f64` followed by `movq %rax, -104(%rbp)` — reads garbage from `%rax` instead of f64 from `%xmm0` (SysV ABI) |
+| **🔴 A2-pointer-deref (NEW cluster, root cause REFUTED)** | 2 | const_array / const_struct_array | **const data IS emitted correctly** (`.data ASCII_LOWER: .byte 97-122` + `.data PALETTE: .long 1-9` both in .s); **actual bug** = address-holder locals: self-backend reads stack slot as if it were pointee data (`movl -72(%rbp), %eax` reads low 32 bits of address instead of `movl (%rax), %eax` reading PALETTE[2].b) |
+| dungeon_game (separate TBD) | 1 | dungeon_game | gcc link fails with `ld returned 5 exit status` — different from Agent 2's "undefined reference to $name" claim; .s produces OK (45KB) |
+| **C.2-remainder** | 1 | cap_table_basic (test 4) | TBD — 16B struct cross-fn arg in Win x64 shadow space |
+| **C.7-defer** | 1 | defer_multi_lifo | TBD |
+| **B-runtime / globals** | 3 | big_array / top_level_let_mut_test / top_level_let_mut_types | TBD |
+| **TOTAL** | **31** | | |
+
+**🔴 Phase 0 critical finding — A2 cluster root cause REFUTED**:
+
+Agent 2 audit claimed A2 cluster (3 tests: const_array / const_struct_array / dungeon_game) is caused by **missing `ILTOK_DATA_PRIM` token kind in lexer** (`.data` section silently dropped → link error with "undefined reference to $name").
+
+**Phase 0 .s evidence REFUTES this**:
+- `const_array_run.s` (887B) HAS `.data ASCII_LOWER: .byte 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122` — const data emitted correctly
+- `const_struct_array_run.s` (838B) HAS `.data PALETTE: .long 1, 2, 3, 4, 5, 6, 7, 8, 9` — const data emitted correctly
+- `dungeon_game_run.s` (45532B) produces OK; gcc link fails with `ld returned 5 exit status` (NOT "undefined reference" — different error)
+
+**Real root cause for const_array + const_struct_array** = **A2-pointer-deref cluster** (NEW, NOT in Agent 2 audit):
+- `const_struct_array_run.s: movl -72(%rbp), %eax` reads 4 bytes of stack slot containing ADDRESS (= low 32 bits of PALETTE+24+8 address), should be `movl (%rax), %eax` reading PALETTE[2].b (= 9)
+- `const_array_run.s: movzbl -64(%rbp), %eax` reads 1 byte of stack slot containing ADDRESS (= low byte of ASCII_LOWER+25 address), should be `movzbl (%rax), %eax` reading ASCII_LOWER[25] (= 122 = 'z')
+
+This is **NOT** a missing-data-emit bug — it's a **pointer-dereference** bug. The "address-holder" comment pattern (`%t11 (address-holder)` in .s) suggests the self-backend treats pointer-typed locals as if they were the pointee data.
+
+**Implication for v2.11.15 scope**: Iter 5 changed from "A2 ILTOK_DATA_PRIM lexer" (per Agent 2 audit) to **"A2-pointer-deref self-backend emit"** — different file, different fix pattern.
+
+**CGState struct 实际 size** (verified): 8 fields × 8 bytes = **64 bytes**, `malloc(64 as i64)` is correct. v2.11.14 plan's "160 → 256" claim was wrong.
+
+**v2.11.15 Phase 0 ship record** (1 docs commit):
+- ✅ 31 FAIL baseline verified (verbatim from regress log)
+- ✅ 7 representative `.s` files captured (char_pattern + slice_subrange + float_arith + generics_fn_call_site_inference + const_array + const_struct_array + dungeon_game)
+- ✅ A2 cluster root cause REFUTED + re-classified to A2-pointer-deref
+- ✅ CGState size verified (64 bytes, NOT 160/256)
+- ✅ All baseline gates preserved (QBE / byte-equal / big_test / match.jhyy / sha256)
+
+**v2.11.15 next (Phase 1-6 implementation, 6 iters per user choice)**:
+1. Iter 1: A1-XMM (~15-25 LOC) — 2 tests target
+2. Iter 2: C.3 emit_phi 真修 (~80-120 LOC) — 12 tests target (CRITICAL: match.jhyy must not regress)
+3. Iter 3: C.4 float XMM (~50-80 LOC) — 4 tests target
+4. Iter 4: C.5 slice copy (~30-50 LOC) — 5 tests target (CRITICAL: byte-equal D26 must hold)
+5. Iter 5: **A2-pointer-deref** (~40-60 LOC, REVISED from Agent 2's A2 audit) — 2 tests target
+6. Iter 6: C.2 cap_table test 4 (~20-40 LOC) — 1 test target
+
+**Deferred to v2.11.16+** (NOT in v2.11.15 scope per user choice):
+- B-runtime / globals: 3 tests (big_array + top_level_let_mut_*)
+- C.7 defer LIFO: 1 test (defer_multi_lifo)
+- dungeon_game separate: 1 test (gcc link error TBD)
+- Total: 5 tests deferred
+
+**Hard STOP conditions** (per user 2026-09-15 standing directive "FLIP count 逼近 5 立即停手"):
+- FLIP ≥ 4 → 停手 ship + deferred v2.11.16
+- New regress > 5 → revert + scope DOWN
+- match.jhyy / QBE baseline / byte-equal D26 / byte-equal-amd64 / big_test EXIT=57 regress → 立即 revert 该 cluster
+
+**Target**: 27/31 closure (87%) best / 19-22/31 (61-71%) likely / 12-16/31 (39-52%) worst per 5-version 4-way-wrong lesson history.
+
+## References (v2.11.15 Phase 0)
+
+- **Plan**: `docs/plans/v2/v2.11.15-plan.md` (per `feedback_plans_per_version`; **Phase 0 + 6 iters Systemic plan NEW**; total ~245-410 source LOC + ~400 docs = ~645-810 LOC estimated across 6 implementation commits)
+- **W-074.7 phi merge gap**: `docs/internal/workarounds.md` W-074.7 phi resolution emit_phi noop + match/OR/payload merge slot gap **⏸ DEFERRED** (from v2.11.14; v2.11.15 Iter 2 re-targets as **single root cause** = `emit_phi` noop, NOT v2.11.14 plan's 4 sub-bugs)
+- **`.s` evidence files**: `compiler/tests/examples/{char_pattern,slice_subrange,float_arith,generics_fn_call_site_inference,const_array,const_struct_array,dungeon_game}_run.s` (all post-v2.11.14 baseline jhyy.exe `774ec8347b4ce629...`)
+- **Baseline regress log**: `/tmp/regress_v2_11_15_baseline.log` (84 PASS / 31 FAIL / 25 SKIP)
+- **Memory**: [[feedback_fix_evaluation_rule]] (5-version 4-way-wrong lesson; Phase 0 .s evidence first → avoids v2.11.14 fabricated narrative); [[feedback_codegen_amd64_multifn]] (FLIP ≥ 4 STOP); [[feedback_codegen_amd64_run_zerobyte]] (CGState 64 bytes verified, NOT 160/256); [[feedback_il_s_debugging_pattern]] (Phase 0 .s evidence pattern); [[feedback_plans_per_version]] (v2.11.15-plan.md NEW); [[feedback_changelog_umbrella]] (v2.11.15 sub-section append); [[feedback_document_workarounds_in_docs]] (no new W entry Phase 0; per-Iter entries to come); [[feedback_audit_single_commit_diff]] (Phase 0 docs-only 1 commit, no source change); [[feedback_auto_push_after_commit]] (Phase 0 commit 成功直接 push); [[feedback_ssh_key_same_shell]] (push 前 same-shell SSH add) (push 前 same-shell SSH add)
