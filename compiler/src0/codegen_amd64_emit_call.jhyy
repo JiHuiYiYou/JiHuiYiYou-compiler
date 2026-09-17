@@ -1179,8 +1179,10 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                     return 0;
                 }
                 if is_imm != (0 as i32) {
+                    // v2.11.20 RC-4: 不 clamp — cg_parse_int_from 错误 sentinel = -1
+                    // 跟合法 `-1` 冲突,无法区分;直接 trust caller 提供 valid IL
+                    // (per QBE 契约 copy imm 全 integer literal 语法合法)。
                     imm_val = cg_parse_int_from(src_text, src_text_len, after_copy);
-                    if imm_val < (0 as i64) { imm_val = 0 as i64; }
                 }
             }
         }
