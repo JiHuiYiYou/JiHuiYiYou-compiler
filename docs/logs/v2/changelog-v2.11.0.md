@@ -1824,6 +1824,52 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 
 ---
 
+## v2.11.22 — big_array + for_in_slice_nested surgical fix attempt ❌ DEFERRED to v2.12.x (no ship)
+
+**Scope attempted**: per 2026-09-17 user 决定 ("现在不是才过了117个测试吗？还有俩呢，不着急进v2.12"), tried surgical src0 fixes for the 2 DEFERRED sub-bugs (W-074.13 sub-bug 1 big_array + sub-bug 4 for_in_slice_nested) before pushing them to v2.12.x full audit。**无 LOC cap** (per 2026-09-17 user 决定 "无 cap,真 fix 范围按需要")。
+
+**Outcome**: ❌ **BOTH sub-bugs still SEGV** after Phase 1 + Phase 2 attempts (1 commit each attempted, all reverted before commit per `feedback_audit_single_commit_diff`)。**regress holds at 117/139** — NO +2 gain。v2.11.22 sprint closed **without ship tag** (no src0 changes per DEFER policy)。
+
+**Root cause discovery (vs v2.11.21 RCA claim)**:
+
+| Sub-bug | v2.11.21 RCA claim | v2.11.22 actual root cause | LOC delta |
+|---|---|---|---|
+| big_array (Phase 1) | `emit_alloc` record pointer-slot below region (~10-30) | **slot-vs-region overlap in `emit_alloc`**: t2 = alloc16 16, region AND slot share same stack memory (rbp-0x30 for both)。Subsequent indirect stores to "address t2+N" write to slot, corrupting t2's pointer value → SEGV | v2.11.21 RCA incomplete — needs 2-pass slot alloc or per-alloc slot pre-alloc (>100 LOC + cross-cutting) |
+| for_in_slice_nested (Phase 2) | REVERT v2.11.20 RC-1 + retighten (~5 net) | **Same slot-vs-region overlap as big_array**。The v2.11.20 RC-1 load propagation was actually CORRECT — propagation tracked "this is a derived address" so emit_load does indirect dispatch。The 6th test (for_in_slice_nested) exposes downstream issue (slot corruption cascade) exposed by deeper nesting, not load-propagation direction bug | v2.11.21 RCA 根因 claim ("load propagation wrong direction") 偏了 — actually the propagation direction is right, the bug is separate architectural slot alloc issue |
+
+**v2.11.22 attempts (all REVERTED before commit)**:
+- Phase 1 Edit 1a: `emit_alloc` record pointer-slot at `region_offset - 8` → t1 fixed but derived temps (t21 = t1 + 200) still collide with region
+- Phase 1 Edit 1b: `emit_binop` call `cg_alloc_slot(8)` for derived-address slot → REVERTED (broke test_array, formula t2 = -48 collided with cg_alloc_slot t3 = -48)
+- Phase 2 Edit 2a: REMOVE v2.11.20 RC-1 load propagation block at emit_mem.jhyy:704-710 → applied but for_in_slice_nested still SEGV
+- Phase 2 Edit 2b: extend `is_add_or_sub` to fire for `add` op → applied
+- Phase 2 Edit 2c: tighten L1681 to `is_add_or_sub != 0 && cg_is_address_holder(src1) != 0` → applied but for_in_slice_nested still SEGV (slot-vs-region overlap exposed)
+- Phase 2 Edit 2c (simplified): drop `cg_is_address_holder(src1)` gate, fire on any add/sub on QBE_L_LOCAL → ALL `t4 = add t2, 0` patterns now SEGV (slot-vs-region overlap is the root blocker)
+
+**gdb backtrace pinpointing slot-vs-region overlap**:
+- for_in_slice_nested: `storew 1, %t4` where `t4 = add t2, 0`, t2 = alloc16 16 region
+- Indirect dispatch: `movq -40(%rbp), %r8; movl %eax, (%r8)` where %r8 = t2's slot value = region address
+- But region and slot share memory (rbp-0x30 for both t2) → write 1 to *r8 = write 1 to t2's slot
+- t2's slot value (0x5ffda0 stack address) overwritten → t2 becomes 1
+- t6 = t2 + 4 = 5 → `storew 2, *5` SEGV (5 is not valid address)
+
+**Final decision (per `feedback_rca_first_root_cause` + `feedback_memory_selectivity`)**:
+- Both sub-bugs (W-074.13 sub-bug 1 big_array + sub-bug 4 for_in_slice_nested) DEFER to v2.12.x
+- v2.11.22 sprint closed **without ship tag** (no src0 changes)
+- D43 closure baseline `e6b6f1fa...` HOLDS (no src0 changes since v2.11.21-fix)
+- regress holds at 117/139 PASS
+- v2.12.x plan: full audit per user 2026-09-17 决定 ("到时候都修完了以后每个test都看一下，不抽测")
+
+**Workarounds**:
+- W-074.13 sub-bug 1 (big_array): 🔴 DEFERRED to v2.12.x (v2.11.22 attempt REVERTED; needs slot-vs-region architectural fix > 100 LOC)
+- W-074.13 sub-bug 4 (for_in_slice_nested): 🔴 DEFERRED to v2.12.x (v2.11.22 attempt REVERTED; same architectural blocker as sub-bug 1)
+- 0 net source ACTIVE workaround count change (2 DEFERRED stays ACTIVE)
+
+**Plan**: [`../../plans/v2/v2.11.22-plan.md`](../../plans/v2/v2.11.22-plan.md) (NEW — DEFER outcome documented)
+
+---
+
+---
+
 ## Sprint 状态总览 (v2.11.x)
 
 | Sprint | Status | Scope | LOC | ETA |
@@ -1833,6 +1879,7 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 | v2.11.20 flag propagate + W-017 + match range | ✅ shipped 2026-09-17 (+11 fix; 4 defer v2.11.21) | RC-1 emit_load/LABEL flag + W-017 module-level let mut + RC-4 match range | ~80 (src0/) + docs | done |
 | v2.11.21-RCA (RCA-only sprint) | ✅ shipped 2026-09-17 | docs-only RCA of 4 deferred tests + silent-fail audit (5 sub-agent parallel) | 0 LOC (docs only) | done |
 | v2.11.21-fix (post-RCA fixes) | ✅ shipped 2026-09-17 | 2 src0 surgical fixes (cap_table_basic + dungeon_game 真修 1 LOC each) + 2 DEFERRED (for_in_slice_nested + big_array,推 v2.12.x full audit) | 2 src0 + ~80 docs | done |
+| v2.11.22 (deferred 真修 attempt) | ❌ DEFERRED to v2.12.x (no ship) | attempt surgical src0 fixes for big_array + for_in_slice_nested → both still SEGV (slot-vs-region overlap architectural blocker) | 0 src0 + ~60 docs (plan + workarounds + changelog) | DEFERRED |
 | v2.11.x+ (v2.x 中期) | 📋 planned | codegen_amd64 真 XMM regalloc / 2-pass slot alloc / 真 amd64_sysv 实 impl | TBD | later |
 
 ## 关键数字表 (v2.11.20 ship)

@@ -6488,6 +6488,59 @@ When `t42 = loadl t41` runs (where `t41 = data_ptr + i*16` is a real runtime add
 
 **net ACTIVE workaround count**: 5 → **5 HOLD** (W-074.13 sub-bug 2 (cap_table_basic) + sub-bug 3 (dungeon_game) CLOSED, sub-bug 1 (big_array) + sub-bug 4 (for_in_slice_nested) DEFERRED to v2.12.x — net ACTIVE count 仍 5 because parent W-074.13 stays ACTIVE)
 
+---
+
+## v2.11.22 sprint closure (2026-09-17) — DEFER outcome, NO ship
+
+**Scope attempted**: per 2026-09-17 user 决定 ("现在不是才过了117个测试吗？还有俩呢，不着急进v2.12"), tried surgical fixes for the 2 DEFERRED sub-bugs (W-074.13 sub-bug 1 big_array + sub-bug 4 for_in_slice_nested) before pushing them to v2.12.x。
+
+**Outcome**: ❌ **BOTH sub-bugs still SEGV** after Phase 1 + Phase 2 attempts (1 commit each attempted, all reverted before commit per `feedback_audit_single_commit_diff`)。regress holds at 117/139 — NO +2 gain。
+
+### Phase 1 attempt (big_array) — REVERTED
+
+**Attempted fix**: `emit_alloc` (codegen_amd64_emit_mem.jhyy:299-349) — record pointer-slot at `region_offset - 8` (below region, not equal to region like v2.11.5 broken design)。
+
+**Result**: big_array STILL SEGV. Root cause deeper — derived temps (`t21 = t1 + 200`) still go through formula `-(32+t*8) = -200` which collides with `arr[50] region address -400 + 4*50 = -200`。
+
+**Extended attempt (Edit 1b)**: emit_binop derived-address — call `cg_alloc_slot(8)` to allocate dedicated slot below deepest region + `cg_record_temp_slot(state, dst_id, slot)`。
+- REVERTED — `cg_alloc_slot(8)` advanced `next_offset` into formula territory → broke `test_array` (formula t2 = -48 collided with `cg_alloc_slot` t3 = -48)。
+
+**Real root cause (NEW, beyond v2.11.21 RCA)**: **slot-vs-region overlap** in `emit_alloc` — for `t2 = alloc16 16`, t2's region AND t2's slot share the same stack memory (e.g. rbp-0x30 for both region and slot)。Subsequent indirect stores to "address t2+N" write to the slot, corrupting t2's pointer value → downstream SEGV when re-reading t2。
+
+**Architectural fix scope**: 2-pass slot allocation OR per-alloc slot pre-allocation — both > 100 LOC + cross-cutting impact on `mem_temp_offset` / `cg_offset_for_temp_with_target` / `emit_alloc` / frame size calc. **Exceeds "surgical fix" scope** per `feedback_rca_first_root_cause` + `feedback_memory_selectivity`。
+
+### Phase 2 attempt (for_in_slice_nested) — REVERTED
+
+**Attempted fix** (per v2.11.22 plan):
+1. Edit 2a: REMOVE v2.11.20 RC-1 load propagation block at emit_mem.jhyy:704-710
+2. Edit 2b: extend `is_add_or_sub` to fire for `add` op (currently sub-only)
+3. Edit 2c: tighten L1681 to `is_add_or_sub != 0 && cg_is_address_holder(src1) != 0`
+
+**Result**: for_in_slice_nested STILL SEGV at first indirect store of `storew 1, %t4` where `t4 = add t2, 0`。gdb backtrace: t2's slot value (0x5ffda0 stack address) was overwritten by the indirect store → t2 became 1 → t6 = t2 + 4 = 5 → `storew 2, *5` SEGV。
+
+**Simplified Edit 2c (drop `cg_is_address_holder(src1)` gate, fire on any add/sub on QBE_L_LOCAL)**: STILL SEGV — more broadly, all `t4 = add t2, 0` patterns now SEGV (slot-vs-region overlap exposed by every store-into-derived-address)。
+
+**Real root cause (same as Phase 1)**: slot-vs-region overlap。The v2.11.20 RC-1 load propagation was actually CORRECT for the 5/6 slice tests (slice_index / slice_iterate / slice_literal / slice_subrange / mixed_struct_slice_match) — propagation was tracking "this is a derived address" so emit_load does indirect dispatch。The 6th test (for_in_slice_nested) exposes a downstream issue exposed by deeper nesting (slot corruption cascade), not a load-propagation direction bug。
+
+**Why v2.11.21 RCA was wrong**: v2.11.21 RCA claimed "v2.11.20 RC-1 load propagation wrong direction" — actually the propagation direction was right, the downstream `emit_binop` propagation rule was correct, the bug is a separate architectural issue with slot allocation that the v2.11.22 plan's fix sketches couldn't reach。
+
+### Final decision (per `feedback_rca_first_root_cause`)
+
+- Both sub-bugs (W-074.13 sub-bug 1 big_array + sub-bug 4 for_in_slice_nested) DEFER to v2.12.x
+- v2.11.22 sprint closed **without ship tag** (no src0 changes)
+- D43 closure baseline f61f467e HOLDS (no src0 changes since v2.11.21-fix)
+- regress holds at 117/139 PASS
+- v2.12.x plan: full audit per user 2026-09-17 决定 ("到时候都修完了以后每个test都看一下，不抽测")
+
+### Updated workaround status
+
+| Sub-bug | Status | Reason |
+|---|---|---|
+| W-074.13 sub-bug 1 (big_array) | 🔴 DEFERRED to v2.12.x | v2.11.22 attempt REVERTED; needs slot-vs-region architectural fix (~100+ LOC) |
+| W-074.13 sub-bug 4 (for_in_slice_nested) | 🔴 DEFERRED to v2.12.x | v2.11.22 attempt REVERTED; same architectural blocker as sub-bug 1 |
+
+**net ACTIVE workaround count**: 5 → **5 HOLD** (W-074.13 sub-bug 1 + sub-bug 4 still DEFERRED, v2.11.22 sprint closed without changes)
+
 **superseder (final):** v2.11.21-fix commit chain (5 commits: `4beab82` Phase 1 + `e410d79` Phase 2 docs-defer + `98ca31f` Phase 3 docs-defer + `1985bd5` Phase 4 + `7422850` Phase 5 docs+ship)
 
 **D43 closure HOLD on `e6b6f1fa...`** (v2.11.21-fix ACTUAL measured: jhyy_v2/v3/v4/v5 → 1 unique sha)。v2.11.19/20/21-RCA 之前所有 docs claimed `a8a28cb6...` 或 `f61f467e...` 是错的 — measurement 才是 ground truth per `feedback_audit_single_commit_diff`。
