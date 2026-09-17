@@ -1662,7 +1662,7 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 - v2.11.19 self-backend: **107/146 PASS** (+7: 4 新 fixture + 1 cross-cluster impulse + 2 pre-existing skip 取消-recover) — `byte_equal_amd64.sh` 7/7 PASS
 - 5 FAIL 全 pre-existing B-runtime cluster (W-074.6 family): `big_array` / `cap_table_basic` / `const_array` / `const_struct_array` / `top_level_let_mut_*` — 推 v2.11.20 / v3.x
 
-**D43 closure**: HOLD (active baseline `7bf9c1d4...` 未变)
+**D43 closure**: v2.11.18 baseline `7bf9c1d4...` 退役 (src0 改 → closure break),re-baseline 到 `a8a28cb6...` (v2/v3/v4/v5 1 unique sha);jhyy.il (v1 path) string interning 顺序差异 (pre-existing closure quirk) 单独 sha `301fa509...`,不影响 closure stability。详见 `d43-baseline-archive.md` v2.11.19 row。
 
 **5/5 PASS gate** per `feedback_fix_evaluation_rule`:
 - V.1 — 6 旧 float 测试 self-backend PASS (float_test / float_arith / float_arith_f32 / float_cmp / f32_suffix / f64_suffix)
