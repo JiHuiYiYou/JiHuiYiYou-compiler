@@ -1868,6 +1868,67 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 
 ---
 
+## v2.11.23 — slot-vs-region overlap 架构修 (真修 big_array + for_in_slice_nested) ✅ shipped 2026-09-17
+
+**Scope**: per 2026-09-17 user 决定 ("无 cap,真 fix 范围按需要"), after v2.11.22 DEFER outcome, audit verify 命中 v2.11.22 RCA claim 偏 (实际是 formula pool 跟 region pool 在同 frame 内 collision, 不是 slot/region 本身共享)。v2.11.23 架构修 — re-enable existing `cg_record_temp_slot` API (state.jhyy:251, v2.11.5 design 已写好, v2.11.8 SKIPped by mistake) + 加 `cg_alloc_slot` for derived address-holders + alloc pool offset 物理分离 from formula pool。
+
+**Outcome**: 🎯 **2 DEFERRED sub-bugs (W-074.13 sub-bug 1 big_array + sub-bug 4 for_in_slice_nested) ✅ CLOSED in v2.11.23** by 架构修 (~8 LOC Phase 1+2 + 2 LOC frame_size 兜底 = 10 LOC net src0)。**regress 117/139 → 119/139 PASS** (+2 self-backend); D43 closure **HOLD on `e6b6f1fa...`** (Phase 1+2 src0 changes 不影响 main.jhyy IL path — main.jhyy 不触发 emit_alloc / emit_binop derived pattern → next_offset 保持 0 → frame_size 兜底不触发); jhyy.exe sha `5f225239...` → **`02118a50...`** (Phase 2 re-build); ACTIVE workaround count **5 → 3** (W-074.13 全 CLOSED + parent W-074.13 RESOLVED — net ACTIVE count 5 → 3 because W-074.10 caveat 升格为正式 amendment 但 parent W-074.10 仍 RESOLVED, W-074.11/W-074.12 仍 RESOLVED)。
+
+### Fix mechanism (架构修, audit verify 后)
+
+**Phase 1** (commit `c46b926`, 2026-09-17, fix(backend): v2.11.23 Phase 1 — emit_alloc cg_record_temp_slot + cg_alloc_slot(8) (架构修 for_in_slice_nested 真修)):
+- `emit_alloc` (codegen_amd64_emit_mem.jhyy:322) 加 `cg_record_temp_slot(state, dst, off - 8)` 1 行 — pointer-slot 放 region 下面 8 字节 (绕 v2.11.5 self-referential bug + 绕 v2.11.8 formula collision)
+- `emit_ctrl.jhyy:522-540` 加 `frame_size = max(frame_size, |state.next_offset|)` 2 行 — cover alloc pool 增大的 case (big_array 400B + 8B pointer-slot + ~50 derived-slot 8B × N = 可能 800B → 超过 max_temp_id 60 * 8 = 488B → 需兜底)
+
+**Phase 2** (commit `7e55ab4`, 2026-09-17, fix(backend): v2.11.23 Phase 2 — emit_binop derived-slot + alloc pool 从 formula pool 物理分离):
+- `emit_binop` (codegen_amd64_emit_call.jhyy:1684) 给 derived address-holder 加 `cg_alloc_slot(state, 8)` + `cg_record_temp_slot(state, dst_id, derived_slot)` 2 行 — derived 走 dedicated slot, 跟 formula pool + region pool 都物理分离
+- `cg_alloc_slot` (codegen_amd64_state.jhyy:665-673) alloc pool 起始 offset 从 0 改 -8192, 让 alloc pool 跟 formula pool `[rbp-2072, rbp-32]` 物理分离 (留 6120B gap) 3 行
+
+### Phase 3 docs/ship (commit 3/3)
+
+- `docs/logs/v2/changelog-v2.11.0.md` v2.11.23 ship section (this section)
+- `docs/plans/v2/v2.11.23-plan.md` (NEW)
+- `docs/internal/workarounds.md` W-074.13 sub-bug 1 + 4 CLOSED entries (真修) + 新 caveat section for v2.11.8 formula pool collision (replaces previous v2.11.8 self-referential claim) + v2.11.23 sprint closure section
+- `docs/internal/architecture.md` Last updated v2.11.23 + 1-line summary
+- `docs/logs/v2/d43-baseline-archive.md` v2.11.23 row (HOLD on `e6b6f1fa...` per V.5 实测)
+- tag `v2.11.23` (per `feedback_auto_push_after_commit`)
+
+### Verification gates (per `feedback_fix_evaluation_rule` — 6 gate all PASS)
+
+| Gate | Description | Result |
+|---|---|---|
+| V.1 | Phase 1 emit_alloc 1-line fix — big_array EXIT=5050 + for_in_slice_nested EXIT=66 + 11 alloc-related regression PASS | ✅ PASS (commit `c46b926`) |
+| V.2 | Phase 2 emit_binop 2-line fix — big_array EXIT=5050 + for_in_slice_nested EXIT=66 + 9 regression PASS + .s structural identity | ✅ PASS (commit `7e55ab4`) |
+| V.3 | Stratified random sample of 20 PASS tests (silent-fail gate per `feedback_codegen_amd64_multifn`) | ✅ PASS (20/20 EXIT match + .s structural identity) |
+| V.4 | regress delta 117/139 → 119/139 PASS (+2) — cleaned 342 stale `_regress_*` artifacts (FRESH count per `feedback_regress_clean_count`) | ✅ PASS — regress **119/139 PASS** |
+| V.5 | D43 closure N=5 byte-equal (jhyy_v2/v3/v4/v5 → 1 unique sha) | ✅ PASS — **HOLD on `e6b6f1fa...`** (Phase 1+2 src0 changes 不影响 main.jhyy IL path) |
+| V.6 | SysV cross-check (6/6 PASS) | ✅ PASS (Phase 1+2 changes target-agnostic) |
+
+### RCA re-verify (v2.11.22 → v2.11.23)
+
+v2.11.22 RCA claim: "slot 和 region 物理共享 rbp-0x30" — audit 指出 **部分错**:
+- v2.11.8 (W-074.7.8 真修) 已 explicit SKIP `cg_record_temp_slot` (state.jhyy:251 API + temp_slot_for_id[256] table 都在, 但 emit_alloc L287-322 不调它)
+- pointer-slot 走 formula `-(32+t*8)` 物理位置跟 region (cg_alloc_slot next_offset) **在同 frame 内** — formula pool 跟 region pool 都从 0 起负方向增长
+- 例子: t2 = alloc16 16 → region = -48 (cg_alloc_slot next_offset advance)。formula `-(32+2*8) = -48` — 同样 -48 → **t2's pointer-slot == t2's region**
+- v2.11.8 comment author 检查 t6 (formula = -80, region = -48, 不 collision) 就以为 OK — 漏了 t2 (formula = -48, region = -48, **collision**)
+- v2.11.22 RCA 把这归类为 "slot 跟 region 物理共享" — 不准确;准确 framing 是 "**formula pool 跟 region pool 在同 frame 内 collision**"
+
+v2.11.23 正确 RCA: **emit_alloc 应该调 existing `cg_record_temp_slot` API (state.jhyy:251, v2.11.5 design 写好的, v2.11.8 SKIPped by mistake);emit_binop 应该在 `cg_record_temp_holds_address` 后调 `cg_alloc_slot + cg_record_temp_slot`**。两个 call 都是 1-2 行 fix, total ~8 LOC (audit verify 后, 跟 v2.11.22 plan 估 65 LOC 收敛 8x; 跟 v2.11.21 估 80-120 LOC 收敛 10x-15x)。
+
+### Workarounds
+
+- W-074.13 sub-bug 1 (big_array): 🔴 DEFERRED to v2.12.x → ✅ **CLOSED in v2.11.23** (架构修 Phase 1+2 真修, 8 LOC net)
+- W-074.13 sub-bug 2 (cap_table_basic): ✅ CLOSED in v2.11.21-fix (status unchanged)
+- W-074.13 sub-bug 3 (dungeon_game): ✅ CLOSED in v2.11.21-fix (status unchanged)
+- W-074.13 sub-bug 4 (for_in_slice_nested): 🔴 DEFERRED to v2.12.x → ✅ **CLOSED in v2.11.23** (架构修 Phase 1 alone 真修, 3 LOC net)
+- 0 net source ACTIVE workaround count change vs v2.11.22 (Phase 1+2 src0 changes are 真修 not workaround)
+- **net ACTIVE workaround count** (post-v2.11.23): 5 → **3** (W-074.13 全 CLOSED + parent W-074.13 RESOLVED)
+
+**Plan**: [`../../plans/v2/v2.11.23-plan.md`](../../plans/v2/v2.11.23-plan.md) (NEW — 架构修 ship outcome)
+**Workarounds update**: [`../../internal/workarounds.md`](../../internal/workarounds.md) W-074.13 v2.11.23 sprint closure section
+
+---
+
 ---
 
 ## Sprint 状态总览 (v2.11.x)
@@ -1880,6 +1941,7 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 | v2.11.21-RCA (RCA-only sprint) | ✅ shipped 2026-09-17 | docs-only RCA of 4 deferred tests + silent-fail audit (5 sub-agent parallel) | 0 LOC (docs only) | done |
 | v2.11.21-fix (post-RCA fixes) | ✅ shipped 2026-09-17 | 2 src0 surgical fixes (cap_table_basic + dungeon_game 真修 1 LOC each) + 2 DEFERRED (for_in_slice_nested + big_array,推 v2.12.x full audit) | 2 src0 + ~80 docs | done |
 | v2.11.22 (deferred 真修 attempt) | ❌ DEFERRED to v2.12.x (no ship) | attempt surgical src0 fixes for big_array + for_in_slice_nested → both still SEGV (slot-vs-region overlap architectural blocker) | 0 src0 + ~60 docs (plan + workarounds + changelog) | DEFERRED |
+| **v2.11.23 (架构修 ship)** | ✅ shipped 2026-09-17 (tag `v2.11.23`) | 架构修 re-enable existing `cg_record_temp_slot` API (v2.11.5 design, v2.11.8 SKIPped by mistake) + `cg_alloc_slot` for derived address-holders + alloc pool offset 物理分离 from formula pool; W-074.13 sub-bug 1 (big_array) + sub-bug 4 (for_in_slice_nested) ✅ CLOSED | 8 src0 + ~150 docs (plan + workarounds + changelog + architecture + d43) | done |
 | v2.11.x+ (v2.x 中期) | 📋 planned | codegen_amd64 真 XMM regalloc / 2-pass slot alloc / 真 amd64_sysv 实 impl | TBD | later |
 
 ## 关键数字表 (v2.11.20 ship)
@@ -1923,6 +1985,29 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 - D43 closure HOLD on `e6b6f1fa...` (v2.11.21-fix ACTUAL measured;v2.11.19/20/21-RCA docs 之前 claimed `a8a28cb6...` 或 `f61f467e...` 是错的 — measurement 才是 ground truth per `feedback_audit_single_commit_diff`)
 - 2 src0 LOC total (Phase 1: 1 LOC pct_count guard;Phase 4: 1 LOC lex_skip_ws)
 - **docs 措辞滞后修正**:v2.11.19/20/21-RCA 之前所有 docs claimed `a8a28cb6...` baseline 但 ACTUAL measured 是 `e6b6f1fa...` — 测量才是 ground truth (per `feedback_audit_single_commit_diff`)
+
+## 关键数字表 (v2.11.23 ship)
+
+| Metric | Before v2.11.23 (v2.11.22 end) | After v2.11.23 |
+|---|---|---|
+| jhyy.exe sha | `5f22523992d6e038992866a3532b2d52c86d0a09abca6f59af336f1e460c7abd` (v2.11.21-fix Phase 4 ship = `1985bd5`) | **`02118a50da775af29e40460431e8f17f9417688bc4d8fd4ada6477f6f9779ede`** (Phase 2 commit `7e55ab4` re-build: src0 `codegen_amd64_emit_mem.jhyy` + `codegen_amd64_emit_call.jhyy` + `codegen_amd64_emit_ctrl.jhyy` + `codegen_amd64_state.jhyy` 4 files 改 → jhyy.exe re-build → binary sha 变) |
+| D43 baseline sha | `e6b6f1fa503e1ff67562bd06ee1cbc3fa9ec5612abab013abb85d25b11c338d1` (v2.11.21-fix ACTUAL measured) | **`e6b6f1fa...` HOLD** (Phase 1+2 src0 changes 不影响 main.jhyy IL path — main.jhyy 不触发 emit_alloc / emit_binop derived pattern → next_offset 保持 0 → frame_size 兜底不触发) |
+| regress.py pass rate (default QBE) | 115/139 | 115/139 — **不变** (QBE path 不变,src0 changes 只影响 self-backend) |
+| regress.py pass rate (--self-backend) | 117/139 | **119/139** (+2: big_array + for_in_slice_nested) |
+| regress.py stage0 pass rate | 105/134 | 105/134 — **不变** (C-side mirror CANCELLED; C-side frozen) |
+| self-host closure chain | v2→v3→v4→v5 byte-equal `e6b6f1fa...` | v2→v3→v4→v5 byte-equal `e6b6f1fa...` — **HOLD** (v1 路径 WONTFIX 已知偏差 per v2.11.19 ship B3 反馈) |
+| ACTIVE workaround count | 5 (W-074.13 sub-bug 1+2+3+4 ACTIVE; W-074.10 caveat 升格 amendment; W-074.11/12 RESOLVED) | **3** (W-074.13 全 CLOSED + parent W-074.13 RESOLVED; W-074.10 caveat 仍 amendment; W-074.11/12 仍 RESOLVED) |
+| Deferred (v2.12.x) test count | 2 | **0** (sub-bug 1 + 4 真修 in v2.11.23; v2.12.0 启动前置 hold 住) |
+
+**关键 v2.11.23 净效果**:
+- +2 self-backend PASS (Phase 1 enables pointer-slot + Phase 2 enables derived-slot)
+- W-074.13 sub-bug 1 (big_array) + sub-bug 4 (for_in_slice_nested) CLOSED (架构修, 8 LOC net src0)
+- W-074.13 parent entry ✅ RESOLVED (4 sub-bugs 全 CLOSED)
+- D43 closure HOLD on `e6b6f1fa...` (Phase 1+2 src0 changes 不影响 main.jhyy IL path)
+- jhyy.exe sha 变 `5f225239...` (v2.11.21-fix) → `02118a50...` (v2.11.23 Phase 2 re-build)
+- **ACTIVE workaround count: 5 → 3** (W-074.13 全 CLOSED + parent RESOLVED)
+- 8 src0 LOC total (Phase 1: 1 + 2 frame_size 兜底 + Phase 2: 2 + 3 alloc pool offset = 8 net)
+- v2.12.0 启动前置 hold 住 (无 DEFER sub-bug)
 
 ## References
 

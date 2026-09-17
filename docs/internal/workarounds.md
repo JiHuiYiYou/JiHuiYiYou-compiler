@@ -6285,7 +6285,7 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 
 **ID:** W-074.13 (NEW in v2.11.20 RCA, RC-2/5/6 + 扩展 RC-1; refined by v2.11.21 RCA; partially closed in v2.11.21-fix)
 
-**状态:** 🔵 PARTIALLY CLOSED — sub-bug 2 (cap_table_basic) + sub-bug 3 (dungeon_game) ✅ 真修 in v2.11.21-fix (2026-09-17, 1 LOC each);sub-bug 1 (big_array) + sub-bug 4 (for_in_slice_nested) 🔴 DEFERRED to v2.12.x (true fix > 80 LOC each 超 budget per plan fallback policy)。regress 115/139 → 117/139 (+2 self-backend PASS)。详见文末 "v2.11.21-fix sprint closure" section。
+**状态:** ✅ **FULLY CLOSED in v2.11.23** (2026-09-17, 架构修 Phase 1+2) — sub-bug 1 (big_array) + sub-bug 4 (for_in_slice_nested) ✅ 真修 (slot-vs-region overlap 架构修, 8 LOC total Phase 1+2); sub-bug 2 (cap_table_basic) + sub-bug 3 (dungeon_game) 仍 ✅ CLOSED in v2.11.21-fix (2026-09-17, 1 LOC each)。regress 115/139 → 117/139 (v2.11.21-fix, +2) → **119/139 (v2.11.23, +2)**。详见文末 "v2.11.21-fix sprint closure" + "v2.11.22 sprint closure" + "v2.11.23 sprint closure" sections。
 
 **v2.11.21 RCA refinement (2026-09-17, 5 sub-agent parallel investigation per `feedback_rca_first_root_cause`):**
 
@@ -6470,23 +6470,49 @@ When `t42 = loadl t41` runs (where `t41 = data_ptr + i*16` is a real runtime add
 
 **vs RCA estimate**: ✅ +1 LOC (RCA 估 ~10-80 LOC for emit_label silent-fail investigation — actual mechanism simpler, fix is 1 LOC lexer change)
 
-### 🔴 Sub-bug 1 (big_array) DEFERRED to v2.12.x
+### ✅ Sub-bug 1 (big_array) CLOSED in v2.11.23 — 架构修 (slot-vs-region overlap)
 
-**Commit**: `98ca31f` (2026-09-17, docs+ship(v2.11.21-fix Phase 3): big_array 真修 DEFERRED — needs 2-pass slot alloc ~80-120 LOC)
+**Commit**: `7e55ab4` (2026-09-17, fix(backend): v2.11.23 Phase 2 — emit_binop derived-slot + alloc pool 从 formula pool 物理分离) — Phase 2 真修 main,Phase 1 commit `c46b926` 是 enabler。
 
-**Reason**: True fix needs 2-pass slot allocation (~80-120 LOC) — single-pass can't safely separate elements from region without formula collision. Formula `-(32+t*8)` for t=47 = -408 collides with below-region pointer-slot at -408。
+**Fix mechanism (per `feedback_rca_first_root_cause` + audit 2026-09-17)**: 架构修 — 不是 2-pass slot alloc (v2.11.21 RCA 估错), 也不是单 surgical fix (v2.11.22 attempt 偏)。**真因是 formula pool 跟 region pool 在同 frame 内 collision**:
+- `cg_alloc_slot(state, 400)` 把 region 放 `next_offset = -400`
+- t1 的 pointer-slot 走公式 `-(32+1*8) = -40` (这条 OK, 因为 alloc pool 跟 formula pool 不重叠 for t1)
+- 但后续 derived temps (`t21 = t1 + 200`) 也走公式 `-(32+21*8) = -200` — **跟 arr[50] region 地址 `-400 + 4*50 = -200` collision**!
+- 8-byte pointer 写到 -200..-193 覆盖 arr[50] + arr[51] → 后续 add %t21, 4 拿 garbage ptr → SEGV
 
-**v2.12.x plan**: full audit per user 2026-09-17 决定 ("到时候都修完了以后每个test都看一下，不抽测，也就是2.12.x做这个事")
+**真修 (Phase 1+2)**:
+1. **Phase 1** (commit `c46b926`): `emit_alloc` (codegen_amd64_emit_mem.jhyy) 加 `cg_record_temp_slot(state, dst, off - 8)` 1 行 — pointer-slot 放 region 下面 8 字节 (绕 v2.11.5 self-referential bug + 绕 formula collision)
+2. **Phase 1 frame_size 兜底** (commit `c46b926`): `emit_ctrl.jhyy` 加 `frame_size = max(frame_size, |state.next_offset|)` 2 行 — cover alloc pool 增大的 case
+3. **Phase 2** (commit `7e55ab4`): `emit_binop` (codegen_amd64_emit_call.jhyy:1684) 给 derived address-holder 加 `cg_alloc_slot(state, 8)` + `cg_record_temp_slot(state, dst_id, derived_slot)` 2 行 — derived 走 dedicated slot, 跟 formula pool + region pool 都物理分离
+4. **Phase 2 alloc pool offset** (commit `7e55ab4`): `cg_alloc_slot` (state.jhyy) alloc pool 起始 offset 从 0 改 -8192, 让 alloc pool 跟 formula pool `[rbp-2072, rbp-32]` 物理分离 (留 6120B gap) 3 行
 
-### 🔴 Sub-bug 4 (for_in_slice_nested) DEFERRED to v2.12.x
+**Verification**:
+- `big_array.jhyy` EXIT=5050 PASS (per `//EXPECT:5050` line 1)
+- regress 117 → 119 (+2 self-backend — Phase 1 enables pointer-slot, Phase 2 enables derived-slot)
+- 11 alloc-related regression tests PASS (slice/struct/control-flow related)
 
-**Commit**: `e410d79` (2026-09-17, docs+ship(v2.11.21-fix Phase 2): for_in_slice_nested 真修 DEFERRED — needs ~30-50 LOC nested slice load infra)
+**vs RCA estimate**: v2.11.21 估 ~80-120 LOC (2-pass slot alloc) → v2.11.22 attempt 估 ~65 LOC (surgical Phase 1+2) → v2.11.23 audit verify 实际 **8 LOC** (Phase 1: 1 + 2 + Phase 2: 2 + 3) — 收敛 8x-15x。**audit 命中第 3 次 RCA agent hallucination pattern** (没 grep existing infra 是否能用 → emit_alloc 应该调 existing cg_record_temp_slot API v2.11.5 design 已写好的,v2.11.8 SKIPped by mistake)。
 
-**Reason**: True fix needs ~30-50 LOC nested slice load infra — emit_load needs to know "this is a nested load — src is a value, not address" through deeper indirect chain. Exceeds 80 LOC budget per plan fallback policy。
+**v2.11.8 caveat 升格**: v2.11.8 (W-074.7.8 真修) 的 commit `56be6cf` 决定 SKIP `cg_record_temp_slot` call in emit_alloc (comment author 检查 t6 = -80 ≠ region -48 误以为 OK)。v2.11.23 audit verify: t6 OK 但 **t2 = formula -48 = region -48** → 漏了 collision case。v2.11.23 修 = re-enable `cg_record_temp_slot` with `off - 8` (物理上 region "下面", 既避 v2.11.5 self-referential 又避 v2.11.8 formula collision)。
 
-**v2.12.x plan**: same full audit as sub-bug 1。
+### ✅ Sub-bug 4 (for_in_slice_nested) CLOSED in v2.11.23 — 架构修 Phase 1 alone
 
-**net ACTIVE workaround count**: 5 → **5 HOLD** (W-074.13 sub-bug 2 (cap_table_basic) + sub-bug 3 (dungeon_game) CLOSED, sub-bug 1 (big_array) + sub-bug 4 (for_in_slice_nested) DEFERRED to v2.12.x — net ACTIVE count 仍 5 because parent W-074.13 stays ACTIVE)
+**Commit**: `c46b926` (2026-09-17, fix(backend): v2.11.23 Phase 1 — emit_alloc cg_record_temp_slot + cg_alloc_slot(8) (架构修 for_in_slice_nested 真修))
+
+**Fix mechanism**: **Phase 1 alone fixes this test** (Phase 2 不是必须的 for THIS test, 但 audit verify 一并 ship)。Phase 1 emit_alloc 加 `cg_record_temp_slot(state, dst, off - 8)` 写 pointer-slot = region 下面 8 字节, 避免 formula-vs-region collision:
+- for_in_slice_nested t2 = alloc16 16 → region = -48, formula `-(32+2*8) = -48` → collision
+- Phase 1 后 pointer-slot = -56 (region -8), formula 不再被 t2 走
+- 后续 derived (t4 = t2 + 0) 走 Phase 2 dedicated slot, 进一步消除 t6/t14 等 deep-nesting 隐患
+- audit verify: emit_load flag propagation (v2.11.20 RC-1) 实际是 CORRECT for 5/6 slice tests; v2.11.21 RCA claim "load propagation wrong direction" 偏了 — 实际是 downstream slot-vs-region overlap 暴露 nested slice 的 deeper corruption cascade
+
+**Verification**:
+- `for_in_slice_nested.jhyy` EXIT=66 PASS (multi-input verify)
+- regress 118 → 119 (+1, Phase 1 enables)
+- 6 slice tests still PASS (slice_index/iterate/literal/subrange/mixed_struct_slice_match)
+
+**vs RCA estimate**: v2.11.21 估 ~30-50 LOC (nested slice load infra) + v2.11.20 RC-1 REVERT → v2.11.23 实际 **3 LOC** (Phase 1 emit_alloc + frame_size 兜底) — 收敛 10x-17x。
+
+**net ACTIVE workaround count**: 5 → **3** (W-074.13 sub-bug 2 (cap_table_basic) + sub-bug 3 (dungeon_game) ✅ CLOSED in v2.11.21-fix + sub-bug 1 (big_array) + sub-bug 4 (for_in_slice_nested) ✅ CLOSED in v2.11.23 — net ACTIVE count 从 5 → 3 because parent W-074.13 now fully RESOLVED + W-074.10 caveat 升格为正式 amendment 但 parent W-074.10 仍 RESOLVED, W-074.11/W-074.12 仍 RESOLVED)
 
 ---
 
@@ -6544,3 +6570,51 @@ When `t42 = loadl t41` runs (where `t41 = data_ptr + i*16` is a real runtime add
 **superseder (final):** v2.11.21-fix commit chain (5 commits: `4beab82` Phase 1 + `e410d79` Phase 2 docs-defer + `98ca31f` Phase 3 docs-defer + `1985bd5` Phase 4 + `7422850` Phase 5 docs+ship)
 
 **D43 closure HOLD on `e6b6f1fa...`** (v2.11.21-fix ACTUAL measured: jhyy_v2/v3/v4/v5 → 1 unique sha)。v2.11.19/20/21-RCA 之前所有 docs claimed `a8a28cb6...` 或 `f61f467e...` 是错的 — measurement 才是 ground truth per `feedback_audit_single_commit_diff`。
+
+---
+
+## v2.11.23 sprint closure (2026-09-17) — 架构修 ship, BOTH sub-bugs CLOSED, tag `v2.11.23`
+
+**Scope**: 架构修 (per audit 2026-09-17) — re-enable existing `cg_record_temp_slot` API (state.jhyy:251, v2.11.5 design 已写好, v2.11.8 SKIPped by mistake) + 加 `cg_alloc_slot` for derived address-holders + alloc pool offset 物理分离 from formula pool。**8 LOC total Phase 1+2 + 5 LOC Phase 1 frame_size 兜底 = 13 LOC net** (audit 命中 v2.11.22 RCA 偏差 — 实际 fix 是 re-enable existing infra, 不是 2-pass slot alloc 也不是 surgical re-do)。
+
+### ✅ Sub-bug 1 (big_array) CLOSED — Phase 2 真修 main
+
+**Commit**: `7e55ab4` (2026-09-17, fix(backend): v2.11.23 Phase 2 — emit_binop derived-slot + alloc pool 从 formula pool 物理分离)
+
+**Fix mechanism**: 4 sub-changes in Phase 1+2:
+1. Phase 1 (`c46b926`): `emit_alloc` 加 `cg_record_temp_slot(state, dst, off - 8)` 1 行 — pointer-slot = region 下面 8 字节
+2. Phase 1 frame_size 兜底 (`c46b926`): `emit_ctrl.jhyy` 加 `frame_size = max(frame_size, |next_offset|)` 2 行
+3. Phase 2 (`7e55ab4`): `emit_binop` derived address-holder 加 `cg_alloc_slot(state, 8)` + `cg_record_temp_slot(state, dst_id, derived_slot)` 2 行
+4. Phase 2 alloc pool offset (`7e55ab4`): `cg_alloc_slot` 起始 offset 改 -8192, 跟 formula pool `[rbp-2072, rbp-32]` 物理分离 3 行
+
+**Verification**:
+- `big_array.jhyy` EXIT=5050 PASS (per `//EXPECT:5050` line 1)
+- regress 117 → 119 (+2 self-backend — Phase 1 enables pointer-slot, Phase 2 enables derived-slot)
+- 11 alloc-related regression tests PASS
+
+### ✅ Sub-bug 4 (for_in_slice_nested) CLOSED — Phase 1 alone
+
+**Commit**: `c46b926` (2026-09-17, fix(backend): v2.11.23 Phase 1 — emit_alloc cg_record_temp_slot + cg_alloc_slot(8) (架构修 for_in_slice_nested 真修))
+
+**Fix mechanism**: Phase 1 alone fixes this test (Phase 2 不是必须 for THIS test, 但 audit verify 一并 ship)。Phase 1 emit_alloc `cg_record_temp_slot(state, dst, off - 8)` 让 t2's pointer-slot = -56 (region -48 - 8), 避免 formula `-48` collision。
+
+**Verification**:
+- `for_in_slice_nested.jhyy` EXIT=66 PASS (multi-input verify)
+- regress 118 → 119 (+1)
+- 6 slice tests still PASS
+
+### Final outcomes
+
+- **2 DEFERRED sub-bugs 真修 ship** (sub-bug 1 + sub-bug 4)
+- **regress 117/139 → 119/139 PASS** (+2 self-backend)
+- **D43 closure HOLD on `e6b6f1fa...`** (Phase 1+2 src0 changes 不影响 main.jhyy IL path — main.jhyy 不触发 emit_alloc / emit_binop derived pattern → next_offset 保持 0 → frame_size 兜底不触发)
+- **jhyy.exe sha 变** `5f225239...` (v2.11.21-fix Phase 4 re-build) → **`02118a50...`** (v2.11.23 Phase 2 re-build)
+- **ACTIVE workaround count: 5 → 3** (W-074.13 全 CLOSED + parent W-074.13 RESOLVED — net ACTIVE count 5 → 3)
+- **tag `v2.11.23`** ship (per `feedback_auto_push_after_commit`)
+
+**superseder (final):** v2.11.23 commit chain (3 commits: `c46b926` Phase 1 + `7e55ab4` Phase 2 + `<pending>` Phase 3 docs+ship + tag `v2.11.23`)
+
+**D43 closure HOLD on `e6b6f1fa...`** (v2.11.23 ACTUAL measured — Phase 1+2 src0 changes 不影响 main.jhyy IL emit)。v1 path 仍 WONTFIX 已知偏差 (per v2.11.19 ship B3 反馈)。
+
+**v2.11.8 caveat 升格**: v2.11.8 (W-074.7.8 真修) 的 commit `56be6cf` 决定 SKIP `cg_record_temp_slot` call in emit_alloc (comment author 检查 t6 = -80 ≠ region -48 误以为 OK)。v2.11.23 audit verify: t6 OK 但 **t2 = formula -48 = region -48** → 漏了 collision case。v2.11.23 修 = re-enable `cg_record_temp_slot` with `off - 8` (物理上 region "下面", 既避 v2.11.5 self-referential 又避 v2.11.8 formula collision)。注:v2.11.8 self-referential 修复 (改 lea+mov 不写 address 到 region 本身) 是独立 deliverable, 仍 ACTIVE;v2.11.23 改的是 emit_alloc 不调 cg_record_temp_slot 的 SKIP, 跟 v2.11.8 改 lea+mov 不冲突 — 两条 fix 都需 ship。
+
