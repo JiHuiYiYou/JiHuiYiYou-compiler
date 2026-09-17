@@ -1164,6 +1164,17 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                     let _ll2 = sb_append_cstr(arena2, s2, ", " as *u8);
                     let _lm = sb_appendf_lld(arena2, s2, "%lld" as *u8, dst_off);
                     let _ln = sb_append_cstr(arena2, s2, "(%rbp)\n" as *u8);
+                    // v2.11.20 RC-1 Phase 2: LABEL path 也需要 flag propagate —
+                    // dst 装的是 global data symbol 地址 (= rip-relative leaq
+                    // result)。后续 add dst, imm; loadw <result> 需要 indirect
+                    // dispatch 才能正确读到 data segment 内存。
+                    // 守卫:仅 dst_qt == QBE_L_LOCAL 才 flag (per codegen_amd64.jhyy
+                    // "copy $X" 全 QBE_L);i32/f32 不可能走 LABEL path,无需额外检查。
+                    // Cover const_array / const_struct_array + slice 5 中跟
+                    // const 数据 交互 部分 + mixed_struct_slice_match。
+                    if dst_qt == QBE_L_LOCAL() {
+                        let _lfp = cg_record_temp_holds_address(state, dst_id);
+                    }
                     // bail out — emit done
                     return 0;
                 }

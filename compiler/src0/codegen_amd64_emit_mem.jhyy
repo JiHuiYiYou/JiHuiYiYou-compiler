@@ -390,31 +390,20 @@ fn emit_store(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     // 不是实际 value。本应该是 indirect store:load src → %<reg>,load dst → %r8
     // (= pointer),然后 store [r8] (= %<reg>)。Phase E 第二段:emit_store indirect dispatch。
     if cg_is_address_holder(state, dst) != (0 as i32) {
-        // 特殊:src 也 address-holder → mem-copy via indirection
-        if cg_is_address_holder(state, src) != (0 as i32) {
-            mem_put(state, "\tmovq " as *u8);
-            mem_put_slot(state, src_off);
-            mem_put(state, ", %rsi\t\t# %t" as *u8);
-            mem_put_i64(state, src);
-            mem_put(state, " (address-holder src)\n" as *u8);
-            mem_put(state, "\tmovq " as *u8);
-            mem_put_slot(state, dst_off);
-            mem_put(state, ", %r8\t\t# %t" as *u8);
-            mem_put_i64(state, dst);
-            mem_put(state, " (address-holder dst)\n" as *u8);
-            mem_put(state, "\tmov" as *u8);
-            mem_put(state, suffix);
-            mem_put(state, " (%rsi), " as *u8);
-            mem_put(state, reg);
-            mem_put(state, "\n" as *u8);
-            mem_put(state, "\tmov" as *u8);
-            mem_put(state, suffix);
-            mem_put(state, " " as *u8);
-            mem_put(state, reg);
-            mem_put(state, ", (%r8)\n" as *u8);
-            return 0 as i32;
-        }
-        // normal: src 是 value-temp,dst address-holder
+        // v2.11.20 RC-7: removed "both address-holder" special case (was at
+        // line 393-416 prior). Original code emitted mem-copy via deref of
+        // both src and dst (`mov<size> (%rsi), <reg>; mov<size> <reg>, (%r8)`)
+        // which is correct for struct-to-struct copy but WRONG for
+        // `storel <alloc>, <add %struct, off>` where the dst is a derived
+        // offset into a struct (e.g. `storel %t1, %t13` = `*%t13 = %t1` where
+        // %t13 = slice.ptr field). The flag on dst propagates from the
+        // struct via emit_binop add, but the value to store is the slot value
+        // of src (= the pointer itself), NOT the memory at *src.
+        // Treat all "dst is address-holder" cases uniformly: emit
+        // `movq <src_slot>, <reg>; movq <dst_slot>, %r8; mov<size> <reg>, (%r8)`,
+        // which correctly handles both struct-copy and pointer-into-struct.
+        // Cover slice 5 + const 2 + mixed_struct_slice_match + top_level_let_mut_*
+        // + defer_multi_lifo (per RCA RC-1 / RC-3 / RC-7 复合).
         mem_put(state, "\tmov" as *u8);
         mem_put(state, suffix);
         mem_put(state, " " as *u8);
@@ -617,6 +606,13 @@ fn emit_load(state: *u8, tok: *u8, target_tag: i32) -> i32 {
         mem_put(state, " (%r8), " as *u8);
         mem_put(state, reg);
         mem_put(state, "\n" as *u8);
+        // v2.11.20 RC-1: propagate address-holder flag to dst when src is
+        // address-holder AND result type is pointer (QBE_L_LOCAL). 后续
+        // add/load 可用 indirect dispatch。Cover slice_index / for_in_slice_nested /
+        // mixed_struct_slice_match 等。
+        if (*t).qbe_type == QBE_L_LOCAL() {
+            let _lp = cg_record_temp_holds_address(state, dst);
+        }
         mem_put(state, "\tmov" as *u8);
         mem_put(state, suffix);
         mem_put(state, " " as *u8);
