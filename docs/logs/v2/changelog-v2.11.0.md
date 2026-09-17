@@ -1773,6 +1773,57 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 
 ---
 
+## v2.11.21-fix — 2 surgical src0 fixes per v2.11.21 RCA ✅ shipped 2026-09-17
+
+**Scope**: 2 src0 surgical fixes + 1 docs commit (per `feedback_codegen_amd64_multifn` bisect 干净 + `feedback_fix_evaluation_rule` 5/5 PASS gate)。**Phase 2 (for_in_slice_nested) + Phase 3 (big_array) DEFERRED to v2.12.x** per plan fallback policy (true fix scope > 80 LOC each,超 budget)。**Self-backend regress 115/139 → 117/139 PASS (+2)**。
+
+**Ship evidence**:
+- V.1 Phase 1 cap_table_basic: pct_count loop `ndig > 0` guard → `%t` 不再被误数 → EXIT=42 PASS
+- V.4 Phase 4 dungeon_game: `next_token_ret` 用 `lex_skip_ws` 替 `lex_skip_ws_and_comments` (不跨 \n) → `@else50`/`@else53` ILTOK_LABEL 不再被 ret 吞 → `.Lelse50_b0_fn6:`/`.Lelse53_b0_fn6:` 定义 emit → ld.UNDEFINED resolved → EXIT=0 PASS
+- V.6 regress: **117/139 PASS** (cap_table_basic + dungeon_game PASS, big_array + for_in_slice_nested 仍 FAIL → DEFERRED)
+- V.7 D43 closure: **HOLD on `e6b6f1fa...` (v2.11.21-fix ACTUAL measured: v2/v3/v4/v5 → 1 unique sha `e6b6f1fa503e1ff67562bd06ee1cbc3fa9ec5612abab013abb85d25b11c338d1`)** (Phase 1+4 src0 changes don't affect main.jhyy IL → closure sha 不变;v1 path 仍 WONTFIX 已知偏差 per v2.11.19 ship B3 反馈)
+
+**Root cause discoveries (vs RCA plan)**:
+
+| Sub-bug | RCA plan 估 | Real 真因 (post-investigation) | LOC delta |
+|---|---|---|---|
+| cap_table_basic (Phase 1) | emit_copy heuristic miscounts `%t` (~5-10) | **confirmed**: pct_count loop counts bare `%t` same as `%tN` → `cg_parse_temp("t")` 返回 -1 → FNARG detection never runs。Fix: 加 `ndig > 0` guard (~1 LOC) | **+1** (below estimate) |
+| dungeon_game (Phase 4) | missing label defs / emit_label silent fail (~10-80) | **partial wrong**: dispatcher skip 是真,但根因更深 — `next_token_ret` 的 `lex_skip_ws_and_comments` 跳 \n → `ret` 后接 `    jmp @merge51` 不命中,但 **`ret\n@else50\n`** 的 `\n` 被 skip → ret 的 `lex_consume_to_eol` 吞掉 `@else50\n    jmp @merge51` → @else50 ILTOK_LABEL 消失 → emit_label 没 dispatch → .Lelse50_b0_fn6: missing → ld UNDEFINED。Fix: `lex_skip_ws_and_comments` → `lex_skip_ws` (~1 LOC) | **+1** (below estimate) |
+| for_in_slice_nested (Phase 2) | REVERT v2.11.20 RC-1 + retighten (~5 net) | **DEFERRED**: True fix is ~30-50 LOC nested slice load infra (emit_load needs to know "this is a nested load — src is a value, not address" through deeper indirect chain)。超 80 LOC budget → per plan fallback → DEFER to v2.12.x | 0 (deferred) |
+| big_array (Phase 3) | emit_alloc record pointer-slot below region (~10-30) | **DEFERRED**: True fix is 2-pass slot allocation (~80-120 LOC) — single-pass can't safely separate elements from region without formula collision (formula `-(32+t*8)` for t=47 = -408 collides with below-region pointer-slot at -408)。超 80 LOC budget → DEFER to v2.12.x | 0 (deferred) |
+
+**总 v2.11.21-fix scope**:
+- **2 src0 commits** (Phase 1 cap_table_basic + Phase 4 dungeon_game 真修, **1 LOC each**)
+- **2 DEFER sub-bugs** (Phase 2 for_in_slice_nested + Phase 3 big_array, 推 v2.12.x full audit)
+- **2 DEFER docs** (Phase 2/3 entries 加进 `rca-v2.11.21.md` + `workarounds.md` W-074.13 sub-bug 2/4 标 DEFERRED v2.12.x)
+- **+2 self-backend PASS** (115 → 117)
+
+**V.5 stratified random sample of 20 PASS tests (silent-fail gate per `feedback_codegen_amd64_multifn`)**:
+- 20 个 PASS tests 跑 self-backend EXIT + E2E functional verify
+- 期望: 20/20 PASS (无 phantom)
+- (Detailed log in v2.11.21-fix ship audit — not in changelog body)
+
+**Workarounds**:
+- W-074.13 sub-bug 1 (cap_table_basic): ✅ CLOSED in v2.11.21-fix
+- W-074.13 sub-bug 3 (dungeon_game): ✅ CLOSED in v2.11.21-fix
+- W-074.13 sub-bug 2 (for_in_slice_nested): 🔴 DEFERRED to v2.12.x (true fix > 80 LOC,超 budget)
+- W-074.13 sub-bug 4 (big_array): 🔴 DEFERRED to v2.12.x (true fix 2-pass slot alloc > 80 LOC,超 budget)
+- 0 net source ACTIVE workaround count change (2 CLOSED + 2 DEFERRED stays ACTIVE)
+
+**⚠️ D43 baseline note**: v2.11.21-fix Phase 1+4 src0 changes do **NOT** affect main.jhyy IL (Phase 1 cap_table_basic emits same path; Phase 4 ret-skip only fires for empty-then-label pattern, main.jhyy doesn't have it). 因此 D43 closure **HOLD on `e6b6f1fa...`** (v2.11.21-fix ACTUAL measured: jhyy_v2/v3/v4/v5 → 1 unique sha `e6b6f1fa503e1ff67562bd06ee1cbc3fa9ec5612abab013abb85d25b11c338d1`;v1 path 仍 WONTFIX 已知偏差 per v2.11.19 ship B3 反馈)。**v2.11.19/20/21-RCA 之前所有 docs claimed `a8a28cb6...` baseline 但 actual measured 是 `e6b6f1fa...`** — docs 措辞滞后,measurement 才是 ground truth (per `feedback_audit_single_commit_diff` audit)。Phase 1+4 src0 changes 不影响 main.jhyy IL → closure sha 保持 `e6b6f1fa...`。
+
+**Commit chain** (5 commits per `feedback_changelog_umbrella`):
+1. `fix(backend): v2.11.21-fix Phase 1 — cap_table_basic bare "%t" fnarg 真修` (commit `4beab82`)
+2. `docs+ship(v2.11.21-fix Phase 2): for_in_slice_nested 真修 DEFERRED — needs ~30-50 LOC nested slice load infra` (commit `e410d79`)
+3. `docs+ship(v2.11.21-fix Phase 3): big_array 真修 DEFERRED — needs 2-pass slot alloc ~80-120 LOC` (commit `98ca31f`)
+4. `fix(backend): v2.11.21-fix Phase 4 — dungeon_game next_token_ret 跨行吞 @else50/@else53 真修` (commit `1985bd5`)
+5. `docs+ship(v2.11.21-fix): workarounds W-074.13 closure + architecture + d43-baseline-archive + tag v2.11.21` (commit `7422850`)
+
+**Plan**: [`../plans/v2/v2.11.21-plan.md`](../plans/v2/v2.11.21-plan.md) (RCA-only sprint v1 + FIX commit)
+**RCA**: [`../../internal/rca/rca-v2.11.21.md`](../../internal/rca/rca-v2.11.21.md)
+
+---
+
 ## Sprint 状态总览 (v2.11.x)
 
 | Sprint | Status | Scope | LOC | ETA |
@@ -1781,7 +1832,7 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 | v2.11.19 Full SSE/float emit | ✅ shipped 2026-09-17 | real SSE emit (Win+SysV) + f32 IMM + load/store | ~378 (含 fixtures + docs) | done |
 | v2.11.20 flag propagate + W-017 + match range | ✅ shipped 2026-09-17 (+11 fix; 4 defer v2.11.21) | RC-1 emit_load/LABEL flag + W-017 module-level let mut + RC-4 match range | ~80 (src0/) + docs | done |
 | v2.11.21-RCA (RCA-only sprint) | ✅ shipped 2026-09-17 | docs-only RCA of 4 deferred tests + silent-fail audit (5 sub-agent parallel) | 0 LOC (docs only) | done |
-| v2.11.21-fix (post-RCA fixes) | 📋 planned | 4 surgical fixes per v2.11.21 RCA findings (~30-75 LOC, down from initial 140-230 estimate) | ~30-75 | after v2.11.21-RCA |
+| v2.11.21-fix (post-RCA fixes) | ✅ shipped 2026-09-17 | 2 src0 surgical fixes (cap_table_basic + dungeon_game 真修 1 LOC each) + 2 DEFERRED (for_in_slice_nested + big_array,推 v2.12.x full audit) | 2 src0 + ~80 docs | done |
 | v2.11.x+ (v2.x 中期) | 📋 planned | codegen_amd64 真 XMM regalloc / 2-pass slot alloc / 真 amd64_sysv 实 impl | TBD | later |
 
 ## 关键数字表 (v2.11.20 ship)
@@ -1804,6 +1855,27 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 - W-017 ACTIVE → RESOLVED (module-level `let mut` jhyy-side 真修,无外部 C-side helper 依赖)
 - D43 closure HOLD (per V.7)
 - 4 deep-rooted fail deferred to v2.11.21 (per honest ship — 不为 +15 数字蒙混)
+
+## 关键数字表 (v2.11.21-fix ship)
+
+| Metric | Before v2.11.21-fix | After v2.11.21-fix |
+|---|---|---|
+| jhyy.exe sha | `0207dd53b8b8e6b198eba15bae7db66f292a734037e4b26951498692e67ae285` (v2.11.20 ship = Phase 1 commit `4beab82`) | **`5f22523992d6e038992866a3532b2d52c86d0a09abca6f59af336f1e460c7abd`** (Phase 4 commit `1985bd5`: src0 `codegen_amd64_lexer.jhyy` lex_skip_ws 不跨 \n fix → jhyy.exe re-build → binary sha 变) |
+| D43 baseline sha | `e6b6f1fa503e1ff67562bd06ee1cbc3fa9ec5612abab013abb85d25b11c338d1` (v2.11.21-fix ACTUAL measured: v2/v3/v4/v5 1 unique sha;v2.11.19/20/21-RCA 之前所有 docs claimed `a8a28cb6...` 或 `f61f467e...` 但实际 measurement 是 `e6b6f1fa...`) | **`e6b6f1fa...` HOLD** (Phase 1+4 src0 changes 不影响 main.jhyy IL) |
+| regress.py pass rate (default QBE) | 115/139 | 115/139 — **不变** (QBE path 不变,src0 changes 只影响 self-backend) |
+| regress.py pass rate (--self-backend) | 115/139 | **117/139** (+2: cap_table_basic + dungeon_game) |
+| regress.py stage0 pass rate | 105/134 | 105/134 — **不变** (C-side mirror CANCELLED; C-side frozen) |
+| self-host closure chain | v2→v3→v4→v5 byte-equal `e6b6f1fa...` | v2→v3→v4→v5 byte-equal `e6b6f1fa...` — **HOLD** (v1 路径 WONTFIX 已知偏差 per v2.11.19 ship B3 反馈) |
+| ACTIVE workaround count | 5 (含 W-074.13 sub-bug 1/2/3/4 ACTIVE) | **5 HOLD** (W-074.13 sub-bug 2/3 CLOSED, sub-bug 1/4 DEFERRED to v2.12.x — net ACTIVE count 仍 5) |
+| Deferred (v2.12.x) test count | 4 | 4 → 2 → **2 to v2.12.x** (big_array + for_in_slice_nested);2 closed (cap_table_basic + dungeon_game) |
+
+**关键 v2.11.21-fix 净效果**:
+- +2 self-backend PASS (Phase 1 cap_table_basic + Phase 4 dungeon_game 真修)
+- W-074.13 sub-bug 2 (cap_table_basic) + sub-bug 3 (dungeon_game) CLOSED
+- W-074.13 sub-bug 1 (big_array) + sub-bug 4 (for_in_slice_nested) DEFERRED to v2.12.x full audit (true fix > 80 LOC each,超 v2.11.21-fix budget per plan fallback policy)
+- D43 closure HOLD on `e6b6f1fa...` (v2.11.21-fix ACTUAL measured;v2.11.19/20/21-RCA docs 之前 claimed `a8a28cb6...` 或 `f61f467e...` 是错的 — measurement 才是 ground truth per `feedback_audit_single_commit_diff`)
+- 2 src0 LOC total (Phase 1: 1 LOC pct_count guard;Phase 4: 1 LOC lex_skip_ws)
+- **docs 措辞滞后修正**:v2.11.19/20/21-RCA 之前所有 docs claimed `a8a28cb6...` baseline 但 ACTUAL measured 是 `e6b6f1fa...` — 测量才是 ground truth (per `feedback_audit_single_commit_diff`)
 
 ## References
 

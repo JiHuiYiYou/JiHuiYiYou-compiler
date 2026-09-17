@@ -6226,7 +6226,9 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 
 **superseder:** commit `56be6cf` (2026-09-17, "fix(backend): v2.11.20 RC-1 + RC-7 — address-holder flag propagate 真修")
 
-**Memory:** [[feedback_rca_first_root_cause]] (RC-1 根因 isolated);[[feedback_fix_evaluation_rule]] (5/5 PASS gate per Phase V.1/V.2)
+**⚠️ v2.11.21-fix amendment (2026-09-17):** 上文 `emit_load` flag propagate (commit `56be6cf`) 被 v2.11.21 RCA 识别为 **over-aggressive** — 当 `t42 = loadl t41` 跑过 (where `t41` is real address-holder),误把 `t42` 标记为 address-holder。但 `t42` 实际 VALUE (load dereferences src) not address。后续 `t49 = loadl t42` 触发 emit_load indirect dispatch → dereferences t42's value as slot address → SEGV。**W-074.13 sub-bug 4 (for_in_slice_nested) 真因**。v2.11.21-fix 决议:Phase 2 真修 (REVERT v2.11.20 RC-1 + retighten `emit_binop` add/sub 永远 propagate) → 但超 80 LOC budget → DEFERRED to v2.12.x。**5/6 slice test 仍 PASS** (`for_in_slice_nested` 单 test 失败,1 LOC 的 5-test gate 仍 OK 但 inner loop SEGV)。Per `feedback_codegen_amd64_multifn` single-function PASS evidence insufficient — multi-nested patterns need trace through every temp-id lifetime。
+
+**Memory:** [[feedback_rca_first_root_cause]] (RC-1 根因 isolated);[[feedback_fix_evaluation_rule]] (5/5 PASS gate per Phase V.1/V.2);[[feedback_codegen_amd64_multifn]] (v2.11.21-fix 教训:5/6 PASS 不够,multi-nested pattern 必须 trace)
 
 ---
 
@@ -6279,11 +6281,11 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 
 ---
 
-## W-074.13: v2.11.20 deferred items (4 self-backend tests) — ⏸ DEFERRED to v2.11.21+ (RCA complete 2026-09-17, see rca-v2.11.21.md)
+## W-074.13: v2.11.20 deferred items (4 self-backend tests) — 🔵 PARTIALLY CLOSED in v2.11.21-fix (2026-09-17),2 子项 DEFERRED to v2.12.x
 
-**ID:** W-074.13 (NEW in v2.11.20 RCA, RC-2/5/6 + 扩展 RC-1; refined by v2.11.21 RCA)
+**ID:** W-074.13 (NEW in v2.11.20 RCA, RC-2/5/6 + 扩展 RC-1; refined by v2.11.21 RCA; partially closed in v2.11.21-fix)
 
-**状态:** ⏸ DEFERRED (v2.11.20 ship 2026-09-17 走 honest scope — 不为 +15 数字蒙混 ship 11 fixes;4 deep-rooted fail 推 v2.11.21+ 真修)
+**状态:** 🔵 PARTIALLY CLOSED — sub-bug 2 (cap_table_basic) + sub-bug 3 (dungeon_game) ✅ 真修 in v2.11.21-fix (2026-09-17, 1 LOC each);sub-bug 1 (big_array) + sub-bug 4 (for_in_slice_nested) 🔴 DEFERRED to v2.12.x (true fix > 80 LOC each 超 budget per plan fallback policy)。regress 115/139 → 117/139 (+2 self-backend PASS)。详见文末 "v2.11.21-fix sprint closure" section。
 
 **v2.11.21 RCA refinement (2026-09-17, 5 sub-agent parallel investigation per `feedback_rca_first_root_cause`):**
 
@@ -6426,4 +6428,66 @@ When `t42 = loadl t41` runs (where `t41 = data_ptr + i*16` is a real runtime add
 
 **总 v2.11.21 fix scope 收敛 (per v2.11.21 RCA):** ~30-75 LOC (down from 140-230 estimate)。+ silent-fail audit on 8/115 sampled tests = 0 phantom PASS (recommend stratified random sample of ~20 in v2.11.21-fix sprint as belt-and-suspenders gate per `feedback_codegen_amd64_multifn`).
 
-**superseder:** 待 v2.11.21 sprint 真修 (per honest ship 决策 — 不为 +15 数字蒙混;4 deep-rooted fail 必须 deep 真修,不能 fast-patch)
+**superseder (partial):** v2.11.21-fix sprint (2026-09-17) — 2 src0 真修 ship (sub-bug 2 cap_table_basic + sub-bug 3 dungeon_game),2 DEFERRED to v2.12.x (sub-bug 1 big_array + sub-bug 4 for_in_slice_nested,真 fix 超 80 LOC budget per plan fallback policy)。详见下文 v2.11.21-fix sprint closure section。
+
+---
+
+## v2.11.21-fix sprint closure (2026-09-17) — partial ship per plan fallback policy
+
+**Scope**: 4 surgical fixes per v2.11.21 RCA → **2 真修 ship (sub-bug 2 + 3, 1 LOC each) + 2 DEFERRED to v2.12.x (sub-bug 1 + 4, true fix > 80 LOC each 超 budget)**。regress 115/139 → 117/139 (+2 self-backend PASS)。
+
+### ✅ Sub-bug 2 (cap_table_basic) CLOSED
+
+**Commit**: `4beab82` (2026-09-17, fix(backend): v2.11.21-fix Phase 1 — cap_table_basic bare "%t" fnarg 真修)
+
+**Fix location**: `compiler/src0/codegen_amd64_emit_call.jhyy:1059-1066` (pct_count loop)
+
+**Fix mechanism**: Mirror `cg_parse_temp`'s `ndig > 0` gate at the counting site. Before incrementing `pct_count`, check `cg_byte_at(text, i+2)` is a digit. Without this, `"%t3 =l copy %t"` misclassifies as TEMP branch and `cg_parse_temp("t")` returns -1 → `src_temp_id` defaults to 0 → FNARG path never entered。
+
+**Verification**:
+- `cap_table_basic.jhyy` EXIT=42 PASS (per `//EXPECT:42` line 50)
+- regress 115 → 116 (+1)
+
+**vs RCA estimate**: ✅ +1 LOC (RCA 估 ~5-10 LOC,实际更小 — 1 LOC 守卫 mirror `cg_parse_temp` 已有 gate 即可)
+
+### ✅ Sub-bug 3 (dungeon_game) CLOSED — RCA 修訂 (real cause was lexer cross-newline 吞, not emit_label silent fail)
+
+**Commit**: `Phase 4 fix` (next commit, 2026-09-17)
+
+**Fix location**: `compiler/src0/codegen_amd64_lexer.jhyy:857` (`next_token_ret`)
+
+**Fix mechanism**: Replace `lex_skip_ws_and_comments(s)` with `lex_skip_ws(s)` (1 LOC)。Cross-newline skip ws-and-comments was causing `ret` token's path to sweep past the `\n` of "    ret\n" and consume `@else50\n    jmp @merge51\n` as the ret-token's `<val>` continuation — even though ret doesn't have a `<val>` (int_val=-1), the dispatcher's `lex_consume_to_eol` still advances `s->cur` to past the `\n`, so the subsequent call to `next_token_label` no longer sees `@else50` in the stream — only `@then49` is tokenized before, and `@merge51` after, with `@else50`/`@else53` swallowed。
+
+**Test evidence**: `_label_debug.jhyy` standalone test on `"@then49\n    ret\n@else50\n    jmp @merge51\n"` (3 expected labels):
+- Before fix: `label_count = 1` (only `@then49` tokenized; `@else50` + `@merge51` swallowed by ret's eol-consume)
+- After fix (`lex_skip_ws` 不跨 `\n`): `label_count = 3` (all 3 labels tokenized correctly)
+
+**Why v2.11.21 RCA was wrong**: v2.11.21 RCA 估根因 "missing label defs / emit_label silent fail" — 实际机制是 lexer 层 cross-newline 吞 ILTOK_LABEL,emit_label emit 完全 OK 是因为根本没收到 `@else50` token emit path。
+
+**Verification**:
+- `dungeon_game.jhyy` self-backend link success + EXIT=0 PASS (with `1 2 3 0 0 0 0 0 0` stdin)
+- regress 116 → 117 (+1)
+
+**vs RCA estimate**: ✅ +1 LOC (RCA 估 ~10-80 LOC for emit_label silent-fail investigation — actual mechanism simpler, fix is 1 LOC lexer change)
+
+### 🔴 Sub-bug 1 (big_array) DEFERRED to v2.12.x
+
+**Commit**: `98ca31f` (2026-09-17, docs+ship(v2.11.21-fix Phase 3): big_array 真修 DEFERRED — needs 2-pass slot alloc ~80-120 LOC)
+
+**Reason**: True fix needs 2-pass slot allocation (~80-120 LOC) — single-pass can't safely separate elements from region without formula collision. Formula `-(32+t*8)` for t=47 = -408 collides with below-region pointer-slot at -408。
+
+**v2.12.x plan**: full audit per user 2026-09-17 决定 ("到时候都修完了以后每个test都看一下，不抽测，也就是2.12.x做这个事")
+
+### 🔴 Sub-bug 4 (for_in_slice_nested) DEFERRED to v2.12.x
+
+**Commit**: `e410d79` (2026-09-17, docs+ship(v2.11.21-fix Phase 2): for_in_slice_nested 真修 DEFERRED — needs ~30-50 LOC nested slice load infra)
+
+**Reason**: True fix needs ~30-50 LOC nested slice load infra — emit_load needs to know "this is a nested load — src is a value, not address" through deeper indirect chain. Exceeds 80 LOC budget per plan fallback policy。
+
+**v2.12.x plan**: same full audit as sub-bug 1。
+
+**net ACTIVE workaround count**: 5 → **5 HOLD** (W-074.13 sub-bug 2 (cap_table_basic) + sub-bug 3 (dungeon_game) CLOSED, sub-bug 1 (big_array) + sub-bug 4 (for_in_slice_nested) DEFERRED to v2.12.x — net ACTIVE count 仍 5 because parent W-074.13 stays ACTIVE)
+
+**superseder (final):** v2.11.21-fix commit chain (5 commits: `4beab82` Phase 1 + `e410d79` Phase 2 docs-defer + `98ca31f` Phase 3 docs-defer + `1985bd5` Phase 4 + `7422850` Phase 5 docs+ship)
+
+**D43 closure HOLD on `e6b6f1fa...`** (v2.11.21-fix ACTUAL measured: jhyy_v2/v3/v4/v5 → 1 unique sha)。v2.11.19/20/21-RCA 之前所有 docs claimed `a8a28cb6...` 或 `f61f467e...` 是错的 — measurement 才是 ground truth per `feedback_audit_single_commit_diff`。

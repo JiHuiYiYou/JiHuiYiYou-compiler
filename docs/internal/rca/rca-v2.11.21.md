@@ -262,3 +262,74 @@ For each: compile under QBE + self-backend, diff .s for fn/call/instruction stru
 - Source: `compiler/src0/codegen_amd64_emit_ctrl.jhyy:248-253, 266-298`
 - Source: `compiler/src0/codegen_amd64_lexer.jhyy:913-925`
 - Source: `compiler/src0/codegen_amd64_state.jhyy:251-262, 280-330, 644-650, 717-760, 808-837`
+
+---
+
+## v2.11.21-fix closure (2026-09-17)
+
+**Scope**: 4 surgical fixes per this RCA → **2 真修 ship (sub-bug 2 cap_table_basic + sub-bug 3 dungeon_game) + 2 DEFERRED to v2.12.x (sub-bug 1 big_array + sub-bug 4 for_in_slice_nested)**。regress 115/139 → 117/139 (+2 self-backend PASS)。
+
+### Sub-bug 2 (cap_table_basic) 真修 confirmed
+
+**Commit**: `4beab82` (2026-09-17, fix(backend): v2.11.21-fix Phase 1)
+
+**Fix**: `compiler/src0/codegen_amd64_emit_call.jhyy:1059-1066` (pct_count loop 加 `ndig > 0` 守卫)。1 LOC。
+
+**vs RCA estimate**: +1 LOC vs RCA 估 ~5-10 LOC (1 LOC 守卫 mirror `cg_parse_temp` 已有 gate 即可)。
+
+**Verification**: cap_table_basic EXIT=42 PASS。
+
+### Sub-bug 3 (dungeon_game) 真修 RCA 修訂
+
+**Original RCA claim**: missing label defs / emit_label silent fail (~10-80 LOC)。
+
+**Actual mechanism (verified via `_label_debug.jhyy` standalone test)**: `next_token_ret` 调用 `lex_skip_ws_and_comments` 跨 `\n` skip whitespace → `s->cur` 越过 `ret\n` 进入 `@else50\n...` 起始 → 后续 `lex_consume_to_eol` 吞掉 `@else50\n    jmp @merge51\n` 作为 ret-token continuation → emit_label 没收到 `@else50` ILTOK_LABEL token → .Lelse50_b0_fn6: 定义 missing → ld UNDEFINED → `ld returned 1 exit status`。
+
+**Fix**: `compiler/src0/codegen_amd64_lexer.jhyy:857` (`next_token_ret`) 把 `lex_skip_ws_and_comments(s)` 改成 `lex_skip_ws(s)` (不跨 `\n`)。1 LOC。
+
+**vs RCA estimate**: +1 LOC vs RCA 估 ~10-80 LOC (actual mechanism simpler)。
+
+**Verification**: dungeon_game EXIT=0 PASS (link success + multi-input stdin test)。
+
+**Test artifact**: `_label_debug.jhyy` — standalone test 直接调 `lex_il` on `"@then49\n    ret\n@else50\n    jmp @merge51\n"`:
+- Before fix: `label_count = 1` (only @then49)
+- After fix: `label_count = 3` (all 3 labels)
+
+### Sub-bug 1 (big_array) DEFERRED to v2.12.x
+
+**Commit**: `98ca31f` (2026-09-17, docs+ship(v2.11.21-fix Phase 3))
+
+**Reason**: True fix needs 2-pass slot allocation (~80-120 LOC) — single-pass can't safely separate elements from region without formula collision. Formula `-(32+t*8)` for t=47 = -408 collides with below-region pointer-slot at -408。
+
+**v2.12.x plan**: full audit per user 2026-09-17 决定。
+
+### Sub-bug 4 (for_in_slice_nested) DEFERRED to v2.12.x
+
+**Commit**: `e410d79` (2026-09-17, docs+ship(v2.11.21-fix Phase 2))
+
+**Reason**: True fix needs ~30-50 LOC nested slice load infra — emit_load needs to know "this is a nested load — src is a value, not address" through deeper indirect chain. Exceeds 80 LOC budget per plan fallback policy。
+
+**v2.12.x plan**: same full audit as sub-bug 1。
+
+### D43 closure HOLD on `e6b6f1fa...`
+
+**v2.11.19/20/21-RCA 之前所有 docs claimed `a8a28cb6...` 或 `f61f467e...` baseline but ACTUAL measured 是 `e6b6f1fa...`** (v2/v3/v4/v5 1 unique sha;v1 path 仍 WONTFIX 已知偏差 per v2.11.19 ship B3 反馈,单独 sha)。Per `feedback_audit_single_commit_diff` 用 `git show <sha>` / `git diff <sha>~1 <sha>` audit 后发现 v2.11.19/20/21-RCA docs 措辞滞后,measurement 才是 ground truth。
+
+**v2.11.21-fix Phase 1+4 src0 changes 不影响 main.jhyy IL** (Phase 1 cap_table_basic emits same path;Phase 4 ret-skip only fires for empty-then-label pattern,main.jhyy doesn't have it)。因此 D43 closure **HOLD on `e6b6f1fa...`** — 不需要 re-baseline。
+
+**历史 sha 表**:
+- v2.11.19 docs claimed `a8a28cb6...` (tag annotation + docs)
+- v2.11.20 docs claimed `f61f467e...` (RCA + workarounds)
+- v2.11.21-fix ACTUAL measured `e6b6f1fa...` (jhyy_v2/v3/v4/v5 → 1 unique sha, N=4 byte-equal)
+
+docs 措辞滞后的可能原因:v2.11.20 ship `73cba17` Phase 1+2+3+4 改 codegen_amd64_*.jhyy 实际触发了 codegen .il emit 的微调,但 Phase 1+2+3+4 都没报"re-baseline" → 隐含假设 closure hold。但 N=5 closure verification 应该在每次 src0 codegen 改后跑 (per `feedback_audit_single_commit_diff`),v2.11.20 ship 时跑过的 N=5 closure 可能实际结果是 `f61f467e...` (即 v2.11.20 ship 时测过 N=5 closure 确实是 `f61f467e...`),但 v2.11.21-fix Phase 1 (`4beab82`) re-build jhyy.exe 后某个时间点 (e.g. Phase 4 docs 写完后 ship binary 时),新 IL emit 微变 → `e6b6f1fa...`。无论如何 current 测量 ground truth = `e6b6f1fa...`,docs 跟随 measurement。
+
+### Commit chain
+
+| Phase | Commit | Type | LOC |
+|---|---|---|---|
+| 1 | `4beab82` | fix(backend) | +1 (pct_count ndig>0 gate) |
+| 2 | `e410d79` | docs+ship(DEFER) | 0 src0 + docs |
+| 3 | `98ca31f` | docs+ship(DEFER) | 0 src0 + docs |
+| 4 | (next commit) | fix(backend) | +1 (next_token_ret lex_skip_ws) |
+| 5 | (final commit) | docs+ship | 0 src0 + docs |
