@@ -72,6 +72,10 @@
 | [W-074](#w-074-codegen_amd64_run-产出-0-字节-s---v2110-真修) | 🟢 **PARTIAL** 2026-09-10 (v2.11.0 ship — il_len=0 root cause 真修;v2.11.1 ship — W-074.5 lexer gap closure 闭环;W-074.6 self-backend multi-func deferred v2.x 中期) | codegen_amd64_run (compiler/src0/codegen_amd64.jhyy:196-283) 在 `JHY_SELF_BACKEND=1` 环境变量下产出 0 字节 .s。**真根因 isolated** (2026-09-09): `jh_read_file(il_path, il_buf, il_cap, &il_len)` 中 `&stack_local_i64` 在 jhyy codegen 下不保证回写 (跟 stack-local 嵌套 emit_X 调用 ABI 冲突),C side `*out_len = sz` 写入别处 heap,**stack 上的 il_len 仍为 0** → `lex_il(il_buf, 0, &arena)` → `lex_il_count` 0 → `parse_and_emit(_, _, 0, _)` 不进 loop → sb.len = 0 → 0-byte .s。**真修** (v2.11.0 ship, commit 25dfb00): heap-allocate `il_len_box = malloc(8)`, `*(il_len_box) = 0`, 传 `il_len_box` 给 `jh_read_file`,call 后 `il_len = *(il_len_box)`。现在 trace v5 显示 `il_len=146` for hello.jhyy (match file size) → 真根因闭环。**下游 W-074.5** (v2.11.1 ship 2026-09-10 真修): `parse_and_emit` 在 n=3 (lexer 不识 dbgfile/dbgloc/{/} 静默消费) → emit_X 看到意外 token kind → segfault。真修: lexer 4 子问题 + ILTOK_DIRECTIVE + parse_and_emit noop + csltw + call args + struct offset + emit cast (~390 LOC)。**下游 W-074.6** (v2.x 中期 deferred): self-backend multi-func body 0-byte (emit_ret 不 load %t1 → %eax + emit_copy 误 cast + 等 pre-existing bugs,per [[feedback_codegen_amd64_run_zerobyte]])。**v2.11.0 + v2.11.1 ship gate 调整**:QBE fallback 5/5 PASS + self-backend 1/5 hello PASS,multi-func self-backend PASS 留 v2.x 中期 W-074.6。详见 W-074 + W-074.5 + W-074.6 sections。 |
 | [W-074.5](#w-0745-codegen_amd64_run-lexer-gap-dbgfiledbgloc--v2111-ship-2026-09-10-真修-closure) | 🟢 **RESOLVED** 2026-09-10 (v2.11.1 ship on axis-v2) | lexer dispatcher 不识 QBE IL 输出必带的 4 个关键字/字符:`dbgfile` / `dbgloc` / `{` / `}` → 走 L959-963 error-skip 循环 → emit 函数从未被调 → parse_and_emit 看到 EOF 提前 → `sb.len` 仅含 prologue 几行 → emit_call/emit_ret 看到 EOF → deref uninit slot → SIGSEGV (exit 139) 或 0-byte .s。**真修 (4 commit, ~390 LOC)**:(1) state.jhyy +1 LOC `ILTOK_DIRECTIVE()=16`;(2) lexer.jhyy +280 LOC: 'd' branch 扩 dbgfile/dbgloc + '{'/'}' single-char dispatch + '%' branch parse dst temp id (延伸-3) + next_token_copy parse src IMM/TEMP (延伸-4) + next_token_func_header consume (args) (延伸-6) + 'c' branch csltw/cslew/.../cugew compare ops (延伸-7) + next_token_data_string consume 整段 body (延伸-5) + next_token_call consume 整段 args (延伸-8);(3) codegen_amd64.jhyy +4 LOC parse_and_emit DIRECTIVE noop;(4) regalloc.jhyy +11 LOC struct offset 真修 (4→8 / 12→16 / 20→24);(5) emit_call.jhyy +115 LOC emit_comment/emit_mov_temp_to_offset 误 cast 真修。**验证**:5/5 QBE fallback PASS (baseline HOLD) + 1/5 self-backend hello PASS + D43 closure HOLD `6a2f2277...` + jhyy.exe.sha256 refresh `1605b1d0...`。详见 W-074.5 section。 |
 | [W-074.6](#w-0746-codegen_amd64_run-multi-func-self-backend-body-0-byte--v2x-中期-deferred-2026-09-10) | 🟢 **PARTIAL** 2026-09-17 (v2.11.19 ship — Phase 1-5 SSE/float emit (Win+SysV) 5 sub-commit 真修:lexer 8 conv op + dispatcher hard-error + emit_sse.jhyy 新建 + f32 IMM 真解 + f64 lookup table 高 32-bit 真修 + FNARG XMM bug + emit_load/store 浮点路径;4 新 fixture 全 PASS;regress 100/115 → **104/139 PASS** (+4 from 4 新 fixture)) | W-074.5 lexer gap closure 后,hello.jhyy self-backend 能 compile 但 exit 1 (不是 42);multi-func tests (fib_renamed / struct_val_pass / nested_struct_deep / big_test) self-backend silent fail (无 .s 输出或 hang)。**多个 pre-existing emit 函数体 bugs** 综合 (v2.6.3 → v3.1.4 持续):emit_ret 不 mov %t1 → %eax + emit_copy 1-to-1 简化栈分配 但不写回 mov + emit_call target_tag 分支不全 + emit_binop silent-skip (cslt/cnew/cnew silent-skip 4-char compare op family) + extsw silent-skip + 等等。**v2.11.10 (T3-a + T4-c)** ship 真修 ~155 LOC (per-fn frame state reset + multi-arg FN_ARG 真修) → 5/6 self-backend EXIT exact closure (big_test SIGFPE)。**v2.11.11 (T4-g)** ship 真修 ~5 LOC (lexer 4-char compare-op guard) → 5/6 maintained (big_test hang at t_bit_pack)。**v2.11.12** ship 真修 ~115 LOC (5 ops and/or/xor/shl/shr lexer+emit_binop + emit_copy dst_id=0 LHS cursor save/restore) → **6/6 self-backend EXIT exact closure ✅ 达成** (big_test EXIT=57, t_bit_pack/t_bit_unpack/t_shifts 全 PASS, 之前 hang at t_bit_pack 5min+ timeout)。**v2.11.13 (Iter 4)** ship 真修 1 LOC (emit_binop "cnew" 4-char → "cne" 3-char substring) → **cross-cluster +7 PASS** self-backend (arith/int_width_arith/int_suffix/C.2 cap_table_advanced/cap_test_sysv 等 closure); **FLIP +7 触发 stop threshold 5 → scope DOWN v2.11.13** (Iter 5 C.4 float / Iter 6 C.7 defer / Iter 7 B observe 全 deferred v2.11.14)。**v2.11.19 (Phase 1-5)** ship 5 sub-commit SSE/float emit 真修 (Win+SysV 双 ABI, 单 xmm0 scratch stack-slot model) + 4 新 fixture (conv_test/float_load_store/float_arg_xmm/float_unsigned) + sysv_float_cross.sh 新建 (docker gcc:12 cross test);**累计 W-074.6 family closed ~700 LOC**:T3-a + T4-c + T4-g + shl/shr + dst_id=0 + cne substring + Phase 1-4 SSE 真修 + cg_parse_f64_imm_bits 真修。**剩余**:XMM regalloc / stack-arg fallback nargs≥5 / B-runtime cluster (15 FAIL pre-existing:big_array/cap_table_basic/const_array/const_struct_array/defer_multi_lifo/...) — 推 v2.11.20 / v3.x。**M5 启动仍需等剩余 W-074.6 family 子 sprint 闭环** (per `v1.x-phase-4-m5-boot-from-scratch.md`)。详见 W-074.6 + W-074.6 T4-g closure + W-074.6 shl/shr + W-074.6 dst-id-0 + W-074.6 cne substring + W-074.6 v2.11.19 SSE sections。 |
+| [W-074.10](#w-07410-emit_load--emit_copy-label-address-holder-flag-propagate--closed-v21120-ship-2026-09-17-rc-1--rc-7-真修-7-self-backend-tests) | ✅ **CLOSED** 2026-09-17 (v2.11.20 ship on axis-v2, Phase 1+2 commit `56be6cf`) | self-backend emit_load 已有 indirect dispatch 但 emit 完后**不** propagate flag 给 dst;emit_copy LABEL path `return 0;` 跳过 FNARG/TEMP path 的 flag propagate。后续 add+load 看不到 flag → 走 slot read 路径 → wrong value。修复 (~10 LOC):emit_load 函数末尾加 flag propagate (守卫 qbe_type==QBE_L && src 是 address-holder);emit_copy LABEL 分支 `return 0;` 前加 flag propagate (守卫 dst_qt==QBE_L)。**+7 self-backend tests** (slice 5 + const 2)。详见 W-074.10 section。 |
+| [W-074.11](#w-07411-self-backend-emit_loadstore-label-path-missing--closed-v21120-ship-2026-09-17-rc-3-w-017-真修-3-self-backend-tests) | ✅ **CLOSED** 2026-09-17 (v2.11.20 ship on axis-v2, Phase 3 commit `970f2ca`) | v1.4.6 W-017 真修走 QBE path 发 `loadw/storew $g_x`,但 self-backend emit_load/emit_store 只认 `%tN` (mem_parse_temp 返 -1)。遇到 `loadw $g_x` silent fail → global 永远 = init value + garbage tail。修复 (~40 LOC):emit_load/emit_store 各加 $label branch,scan text 找 `'$'` + ident chars,emit RIP-relative mov 双段。**+3 self-backend tests** (top_level_let_mut_test/types/defer_multi_lifo)。详见 W-074.11 section。 |
+| [W-074.12](#w-07412-match-range-cmpclamp-bug--closed-v21120-ship-2026-09-17-rc-4-真修-1-self-backend-test) | ✅ **CLOSED** 2026-09-17 (v2.11.20 ship on axis-v2, Phase 4 commit `0831459`) | match range pattern (e.g. `-3..-1`) 2 bug:(a) 负号被吞 lex 出 `3` 而非 `-3`;(b) clamp i64 比较 mod 2^32 wraparound,负 high bound `-1` wrap `0xFFFFFFFF`。修复 (~30 LOC):低/高边界 parse text 保留负号 sign-aware + sign-aware clamp。**+1 self-backend test** (match_range=0)。详见 W-074.12 section。 |
+| [W-074.13](#w-07413-v21120-deferred-items-4-self-backend-tests--deferred-to-v21121) | ⏸ **DEFERRED** to v2.11.21+ (v2.11.20 ship 走 honest scope) | 4 deep-rooted self-backend fail 推 v2.11.21+:**big_array** (slot alloc conflict — cg_alloc_slot + cg_offset_for_temp_with_target 物理 overlap,需 2-pass slot alloc 重设计);**cap_table_basic** (emit_load silent fail — fnarg ID 在 cg_is_address_holder 查询 gap);**dungeon_game** (multi-file import link path silent fail — W-074.6 PARTIAL 主项子集);**for_in_slice_nested** (nested slice iterate SEGV — emit_slice_iter_body 双层 for 路径需深入)。**总估 v2.11.21 ~140-230 LOC + 1 真架构改**。详见 W-074.13 section。 |
 
 ---
 
@@ -6184,3 +6188,165 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 **Memory:** [[feedback_fix_evaluation_rule]] (诚实记录 v2.11.16 是 Phase 0 docs-only audit,0 source commit per user choice);[[feedback_codegen_amd64_multifn]] (FLIP count approaching 5 STOP — v2.11.18 scope DOWN recommendation,separate 3 sub-bugs 不 batch);[[feedback_plans_per_version]] (v2.11.16-plan.md 已 ship,W-074.9 NEW entry);[[feedback_document_workarounds_in_docs]] (本 W-074.9 deferred items entry NEW,详记 3 sub-bugs + LOC + risk + fix pattern)
 
 **OS 启动链路:** W-074.9 v2.11.16 deferred items ⏸ DEFERRED (3 sub-bugs,~60-90 LOC potential,3 tests);v2.11.18+ Iters 1+2 (big_array + multi-global) 优先,Iter 3 (dungeon_game) defer v2.11.19+ per risk-ranking。
+
+---
+
+## W-074.10: emit_load + emit_copy LABEL address-holder flag propagate — ✅ CLOSED (v2.11.20 ship 2026-09-17, RC-1 + RC-7 真修, +7 self-backend tests)
+
+**ID:** W-074.10 (NEW in v2.11.20 RCA, RC-1 + RC-7)
+
+**状态:** ✅ CLOSED 2026-09-17 (v2.11.20 ship on axis-v2, Phase 1+2 commit `56be6cf`)
+
+**症状:** self-backend emit_load 已有 indirect dispatch (line ~689 `if cg_is_address_holder(state, src) != (0 as i32)`),但 emit 完后**不**对 dst 调用 `cg_record_temp_holds_address`。后续 `add dst, imm; loadw <result>` 看不到 flag → 走 slot read 路径 → wrong value。emit_copy LABEL path 同理:emit `leaq <label>(%rip), %rax; mov<size> %rax, -dst(%rbp)` 后 `return 0;` **完全跳过** FNARG/TEMP path 的 flag propagate。
+
+**修复 (Phase 1+2 commit `56be6cf`):**
+1. `emit_load` 函数末尾加 flag propagate (守卫: `qbe_type == QBE_L_LOCAL && src 是 address-holder`):
+   ```jhyy
+   if (*t).qbe_type == QBE_L_LOCAL() && cg_is_address_holder(state, src) != (0 as i32) {
+       let _lp = cg_record_temp_holds_address(state, dst);
+   }
+   ```
+2. `emit_copy` LABEL 分支 `return 0;` 之前加 flag propagate (守卫: `dst_qt == QBE_L_LOCAL`):
+   ```jhyy
+   if dst_qt == QBE_L_LOCAL() {
+       let _la = cg_record_temp_holds_address(state, dst_id);
+   }
+   ```
+
+**测试覆盖 (+7 self-backend tests):**
+- slice_index.jhyy (EXIT=80) — slice 索引 `arr[i]` 走 loadl+add+loadl 三段,emit_load flag propagate 修复链式 address-holder
+- slice_iterate.jhyy (EXIT=60) — `for x in slice` slice elem 间接 dispatch
+- slice_literal.jhyy (EXIT=60)
+- slice_subrange.jhyy (EXIT=60)
+- mixed_struct_slice_match.jhyy (EXIT=131) — 嵌套 struct + slice + match 综合 dispatch
+- const_array.jhyy (EXIT=122) — emit_copy LABEL path `copy $arr` flag propagate
+- const_struct_array.jhyy (EXIT=9) — 同上
+
+**反向测试 (R7):** ptr_arith_subscript (i32 数组索引) `grep -c '(%r8)' .s = 0` — 守卫双条件生效,i32 load 不 flag 走直接路径,无 indirect dispatch 误标。
+
+**superseder:** commit `56be6cf` (2026-09-17, "fix(backend): v2.11.20 RC-1 + RC-7 — address-holder flag propagate 真修")
+
+**Memory:** [[feedback_rca_first_root_cause]] (RC-1 根因 isolated);[[feedback_fix_evaluation_rule]] (5/5 PASS gate per Phase V.1/V.2)
+
+---
+
+## W-074.11: self-backend emit_load/store $label path missing — ✅ CLOSED (v2.11.20 ship 2026-09-17, RC-3 W-017 真修, +3 self-backend tests)
+
+**ID:** W-074.11 (NEW in v2.11.20 RCA, RC-3 W-017 sub-bug for self-backend)
+
+**状态:** ✅ CLOSED 2026-09-17 (v2.11.20 ship on axis-v2, Phase 3 commit `970f2ca`)
+
+**症状:** v1.4.6 W-017 真修 (commit `f20e36d`) 走 QBE path 发 `loadw/storew $g_x`,QBE 编译期 handle `.data` 段引用。但 v1.4.6 后 v2 axis 走 self-backend (v2.6.3 起),emit_load/emit_store 只认 `%tN` 格式 (mem_parse_temp 返 -1 if format ≠ `%t<digit>`)。遇到 `loadw $g_x` 或 `storew <v>, $g_x` 时 mem_parse_temp 返 -1 → emit_* 返 1 (silent fail per W-074.6 PARTIAL) → codegen.jhyy emit data 段 + use site 但 read/write 路径全部 silent skip → global 永远 = init value + garbage tail。
+
+**修复 (Phase 3 commit `970f2ca`):** emit_load (line ~580) + emit_store (line ~380) 各加 `$label` branch:
+1. scan text 找 `'$'` + 后续 ident chars
+2. emit `mov<size> <label>(%rip), %<reg>; mov<size> %<reg>, -<dst_off>(%rbp)` (load path)
+3. emit `mov<size> -<src_off>(%rbp), %<reg>; mov<size> %<reg>, <label>(%rip)` (store path)
+
+(RIP-relative LEA/store 位置无关,Win/SysV 双 ABI 通用,无需 target-specific emit。)
+
+**测试覆盖 (+3 self-backend tests):**
+- top_level_let_mut_test.jhyy (EXIT=42) — `let mut g_x: i32 = 41; g_x = g_x + 1; exit(g_x)` load+store 双路径
+- top_level_let_mut_types.jhyy (EXIT=17) — i64 global
+- defer_multi_lifo.jhyy (EXIT=0) — module-level `let mut g_counter` + defer write-back 走 emit_store $label path
+
+**superseder:** commit `970f2ca` (2026-09-17, "fix(backend): v2.11.20 W-017 真修 — module-level let mut emit path (emit_load/store $label)")
+
+**Memory:** [[feedback_rca_first_root_cause]] (RC-3 根因 isolated);[[feedback_fix_evaluation_rule]] (5/5 PASS gate per Phase V.3)
+
+---
+
+## W-074.12: match range cmp+clamp bug — ✅ CLOSED (v2.11.20 ship 2026-09-17, RC-4 真修, +1 self-backend test)
+
+**ID:** W-074.12 (NEW in v2.11.20 RCA, RC-4)
+
+**状态:** ✅ CLOSED 2026-09-17 (v2.11.20 ship on axis-v2, Phase 4 commit `0831459`)
+
+**症状:** self-backend match range pattern (e.g. `1..10` / `-3..-1`) codegen 2 bug:
+- (a) **负数 IMM 解析 bug**:`-3` lex 出 token 后负号被吞掉,parse 出 `3` 而非 `-3`,clamp 范围错
+- (b) **clamp bug**:低边界和高边界用 i64 比较时 mod 2^32 wraparound,负数 high bound (e.g. `-1`) 被 wrap 成 `0xFFFFFFFF` → cmp `value < -1` 总是 false → branch dispatch 错
+
+**修复 (Phase 4 commit `0831459`):**
+1. emit_ctrl.jhyy match range dispatch: 低/高边界 parse text 保留负号 sign-aware
+2. clamp: sign-aware 比较,不 mod 2^32
+
+**测试覆盖 (+1 self-backend test):**
+- match_range.jhyy (EXIT=0) — 多 match range pattern 含负数 (`-3..-1`) + 正数 (`1..10`) 综合
+
+**superseder:** commit `0831459` (2026-09-17, "fix(backend): v2.11.20 RC-4 真修 — negative IMM parse + clamp fix (match_range)")
+
+**Memory:** [[feedback_rca_first_root_cause]] (RC-4 根因 isolated);[[feedback_fix_evaluation_rule]] (5/5 PASS gate per Phase V.4)
+
+---
+
+## W-074.13: v2.11.20 deferred items (4 self-backend tests) — ⏸ DEFERRED to v2.11.21+
+
+**ID:** W-074.13 (NEW in v2.11.20 RCA, RC-2/5/6 + 扩展 RC-1)
+
+**状态:** ⏸ DEFERRED (v2.11.20 ship 2026-09-17 走 honest scope — 不为 +15 数字蒙混 ship 11 fixes;4 deep-rooted fail 推 v2.11.21+ 真修)
+
+**4 deferred items:**
+
+### Sub-bug 1: big_array slot allocation conflict (RC-2)
+
+**症状:** big_array.jhyy 跑 self-backend SEGV at element 93 init (exit 0xC0000005 ACCESS_VIOLATION)。
+
+**根因:** `cg_alloc_slot` 跟 `cg_offset_for_temp_with_target` 不协调:
+- `cg_alloc_slot` (codegen_amd64_emit_mem.jhyy:256-) 把 400B 数组 region 放 `rbp-400` 到 `rbp-4`
+- `cg_offset_for_temp_with_target` (codegen_amd64_state.jhyy:626+) 把 t1 8-byte pointer-slot 放 `-(32 + 1*8) = -40` (Win path)
+- 物理 overlap: t1 占 `rbp-40` 到 `rbp-32`,arr[91] = `rbp-36`,arr[92] = `rbp-32`
+- 写 arr[91] 写 t1 高 4 byte → 当 element 93 读 t1 as 8-byte pointer: `arr_base | (garbage << 32)` → SEGV
+
+**真修所需:** 2-pass slot allocation。Pass 1: 收集所有 alloc + temp size。Pass 2: 分配不重叠 region + temp slot。
+
+**LOC est:** ~80-120 LOC (重设计 cg_alloc_slot + cg_offset_for_temp_with_target 协调层)
+
+**OS 启动链路:** 不阻塞 M1 (g_boot_loader);不阻塞 M4 (kernel entry);不阻塞 M11 (userspace)。仅 1 test deferred,v2.11.21 真修。
+
+---
+
+### Sub-bug 2: cap_table_basic emit_load silent fail (RC-5)
+
+**症状:** cap_table_basic.jhyy self-backend EXIT=30 (expected 42)。cross_fn_sum_table 函数 `t4 = loadl t3` 走 emit_load,emit_load silent-fail 返 1 → main loop fall through → emit as copy → wrong value (永远 = t3 value 本身,不是 t3 deref 的内容)。
+
+**根因:** emit_load 对 `loadl %t3` where t3 is function arg 的间接 dispatch 路径里 `cg_is_address_holder(state, t3)` 返 0。FNARG path 在 codegen_amd64_emit_call.jhyy:1230-1265 确实 propagate flag 给 t3,但 `cg_is_address_holder` 查询机制在 fnarg ID 范围 (-3/-4/-5/-6) 有 lookup gap,永远返 0。需深入 cg_state.jhyy address-holder bitmap + FNARG ID 协调。
+
+**真修所需:** 修 cg_state.jhyy 的 cg_is_address_holder 让 fnarg ID (-3/-4/-5/-6) 也走 bitmap 查询。
+
+**LOC est:** ~10-20 LOC
+
+**OS 启动链路:** 不阻塞 M1-M11。cap_table_basic = V3-C 3i generics 残 codegen 测试,v3.0 启动后才相关。
+
+---
+
+### Sub-bug 3: dungeon_game multi-file import link (RC-6)
+
+**症状:** dungeon_game.jhyy self-backend EXIT=1 (gcc link failed: ld returned 1 exit status)。stderr 显示 jhyy.exe gcc driver 跑 link 失败。
+
+**根因:** dungeon_game 是 multi-file example (主文件 + 子 module),self-backend 路径 `link_with_gcc` 调 gcc driver 时 multi-file 子函数 `main_jhyy` 在 .s 里 not visible per linker。可能 emit_call multi-fn path 或 main.jhyy file-level dispatch 对 `jhyy_helpers.c` 之外的子 file emit 不走 codegen 路径 (W-074.6 PARTIAL 主项 silent-fail 的子集)。
+
+**真修所需:** 深入 link_with_gcc path + multi-file jhyy emit 协调。W-074.6 PARTIAL 主项真修的子集。
+
+**LOC est:** ~30-50 LOC
+
+**OS 启动链路:** 不阻塞 M1-M11。dungeon_game = example/test,非 OS 关键路径。
+
+---
+
+### Sub-bug 4: for_in_slice_nested nested slice iterate SEGV (扩展 RC-1)
+
+**症状:** for_in_slice_nested.jhyy self-backend EXIT=139 (SIGSEGV)。`for x in slice_of_slices { for y in x { ... } }` 二层 slice iterate SEGV。
+
+**根因:** RC-1 fix (W-074.10) 修了 5 个 slice test + 1 mixed_struct_slice_match,但 nested slice iterate 是更深层 indirect dispatch chain (slice elem 是 slice → elem load → elem 的 elem iterate) 仍 SEGV。需要深入 cg_record_temp_holds_address 的 bitmap propagation 跨 slice iterate 双层 for 的暂存 handling。
+
+**真修所需:** RC-1 follow-up。emit_slice_iter_body + emit_load/store 跨双层 for 路径需深入 review。
+
+**LOC est:** ~20-40 LOC
+
+**OS 启动链路:** 不阻塞 M1-M11。for_in_slice_nested = example test,非 OS 关键路径。
+
+---
+
+**总 v2.11.21 估:** ~140-230 LOC + 1 真架构改 (2-pass slot alloc for big_array)
+
+**superseder:** 待 v2.11.21 sprint 真修 (per honest ship 决策 — 不为 +15 数字蒙混;4 deep-rooted fail 必须 deep 真修,不能 fast-patch)

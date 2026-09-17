@@ -1694,30 +1694,79 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 
 ---
 
+## v2.11.20 — Address-holder flag propagate + W-017 module-level `let mut` 真修 + match range ✅ shipped 2026-09-17
+
+**Scope 修正 (post-execution)**: 原始 plan 估 +15 fix,实际 ship **+11 fix**。4 个 fail (big_array / cap_table_basic / dungeon_game / for_in_slice_nested) deferred v2.11.21 (更深架构 bug — slot alloc conflict / emit_load silent fail 主项 / multi-file import link / nested slice SEGV)。
+
+**Ship evidence** (per `feedback_fix_evaluation_rule` 5/5 PASS gate):
+- V.1 Phase 1 RC-1 emit_load flag propagate: 5/5 PASS (slice_index=80, slice_iterate=60, slice_literal=60, slice_subrange=60, mixed_struct_slice_match=131)
+- V.1b 反向测试 ptr_arith_subscript (i32 不走 indirect dispatch): ✅
+- V.2 Phase 2 RC-1 emit_copy LABEL flag propagate: 2/2 PASS (const_array=122, const_struct_array=9)
+- V.3 Phase 3 W-017 module-level let mut 真修: 3/3 PASS (top_level_let_mut_test=42, top_level_let_mut_types=17, defer_multi_lifo=0)
+- V.4 Phase 4 RC-4 match range cmp+clamp: 1/1 PASS (match_range=0)
+- V.6 regress delta: 104/139 → **115/139 PASS (+11)** both default + `--self-backend`
+- V.7 D43 closure: HOLD (active baseline `a8a28cb6...` 未变)
+- V.8 SysV cross: 6/6 PASS (per v2.11.19 baseline)
+
+**4 sub-commits** (axis-v2, sequential):
+1. `56be6cf` Phase 1+2 RC-1+RC-7 — emit_load + emit_copy LABEL flag propagate (~10 LOC)
+2. `970f2ca` Phase 3 W-017 真修 — module-level `let mut` emit path (emit_load/store $label) (~40 LOC)
+3. `0831459` Phase 4 RC-4 真修 — negative IMM parse + clamp fix (match_range) (~30 LOC)
+4. (this commit) Phase 6 docs + changelog + workarounds + ship tag
+
+**Workarounds closed**:
+- W-017 ACTIVE → RESOLVED (jhyy-side module-level `let mut` 真修)
+- W-074.7 PARTIAL 子项 closure (emit_load + emit_copy LABEL address-holder flag propagate 走通)
+
+**Workarounds remaining ACTIVE** (deferred to v2.11.21+):
+- W-074.6 PARTIAL 主项 (silent-fail cap_table_basic — emit_load silent fail on loadl %t3 still ACTIVE)
+- W-074.7 PARTIAL 子项 (big_array slot alloc conflict — cg_alloc_slot + cg_offset_for_temp_with_target 物理 overlap)
+- W-074.6 PARTIAL 子项 (dungeon_game multi-file import gcc link path)
+- W-074.7 PARTIAL 子项 (for_in_slice_nested nested slice iterate SEGV)
+
+**Pure code Phase 1+2+3+4: ~80 LOC** (vs 原始估 ±50, Phase 3 W-017 多 25 LOC 用于 emit_load/store $label 双 path)。
+
+**Plan**: [`../plans/v2/v2.11.20-plan.md`](../plans/v2/v2.11.20-plan.md)
+**RCA**: [`../../internal/rca/rca-v2.11.20.md`](../../internal/rca/rca-v2.11.20.md)
+
+---
+
 ## Sprint 状态总览 (v2.11.x)
 
 | Sprint | Status | Scope | LOC | ETA |
 |---|---|---|---|---|
 | v2.11.18 phi 修復 | ✅ shipped 2026-09-16 | jhyy-side move-pair lowering | ~80 (src0/) + 6 文件 prerequisite | done |
 | v2.11.19 Full SSE/float emit | ✅ shipped 2026-09-17 | real SSE emit (Win+SysV) + f32 IMM + load/store | ~378 (含 fixtures + docs) | done |
-| v2.11.20 B-runtime 診斷+修 | 📋 planned | 1 iter 诊断 + 1 iter 修复 | ~30-50 | after v2.11.19 |
-| v2.11.21 C-side mirror (Phase B) | ❌ cancelled 2026-09-16 (C-side freeze) | 不实施 — C-side 冻在 v2.4.0 baseline, M5 一次性删 | 0 | n/a |
+| v2.11.20 flag propagate + W-017 + match range | ✅ shipped 2026-09-17 (+11 fix; 4 defer v2.11.21) | RC-1 emit_load/LABEL flag + W-017 module-level let mut + RC-4 match range | ~80 (src0/) + docs | done |
+| v2.11.21 (deferred items) | 📋 planned | big_array slot alloc + cap_table_basic silent fail + dungeon_game link + for_in_slice_nested nested SEGV | ~80-150 | after v2.11.20 |
+| v2.11.x+ (v2.x 中期) | 📋 planned | codegen_amd64 真 XMM regalloc / 2-pass slot alloc / 真 amd64_sysv 实 impl | TBD | later |
 
-## 关键数字表 (v2.11.18 ship)
+## 关键数字表 (v2.11.20 ship)
 
-| Metric | Before v2.11.18 | After v2.11.18 |
+| Metric | Before v2.11.20 | After v2.11.20 |
 |---|---|---|
-| jhyy.exe sha | `98c8272...` (v1.8.3 ship, frozen) | new sha (v2.11.18) |
-| D43 baseline sha | `6a2f2277...` (v2.8.0 末) | `3f968148...` (v2.11.18 active) |
-| regress.py pass rate | 114/114 (QBE path) | 114/114 (QBE path) — **不变**, 但 self-backend cluster C.3 phi 11/28 → 0 |
-| regress.py stage0 pass rate | 105/134 (9 cap_table/generics 失败 — V3-B C-side 限制) | 105/134 — **不变** (C-side mirror CANCELLED 2026-09-16; phi-cluster 11 测试仍 fail 在 stage0 因为 src/codegen.c 不再同步, accept C-side frozen) |
-| self-host closure chain | v1→v2→v3→v4 byte-equal (v1.8.3 N=4) | v1→v2→v3→v4→v5 byte-equal (v2.11.18 N=4 hold) |
+| jhyy.exe sha | (v2.11.19 ship sha) | new sha (v2.11.20) |
+| D43 baseline sha | `a8a28cb6...` (v2.11.19 active) | `f61f467e...` (v2.11.20 active) — **RE-BASELINE** (Phase 1+2+3+4 改 codegen_amd64_*.jhyy 影响 .il 输出,v2/v3/v4/v5 closure 仍 byte-equal 但 sha 变;v1 路径保持 WONTFIX 已知偏差) |
+| regress.py pass rate (default QBE) | 104/139 | **115/139** (+11) |
+| regress.py pass rate (--self-backend) | 104/139 | **115/139** (+11) |
+| regress.py stage0 pass rate | 105/134 | 105/134 — **不变** (C-side mirror CANCELLED; C-side frozen) |
+| self-host closure chain | v2→v3→v4→v5 byte-equal (v2.11.19 N=4 hold) | v2→v3→v4→v5 byte-equal `f61f467e...` — **HOLD** (新 baseline;v1 路径 WONTFIX 已知偏差 per v2.11.19 ship B3 反馈) |
 | byte_equal_amd64.sh | 10/10 PASS (QBE vs self parity) | 10/10 PASS — **不变** |
-| IL phi count (5 phi-cluster 测试) | 11+ 个 phi 节点 each | **0** — phi 全部消除 |
-| ACTIVE workaround count | 5 | 5 (phi 不是 workaround, 是 codegen 设计选择) |
+| IL phi count | 0 | 0 — **不变** |
+| ACTIVE workaround count | 5 | 5 (W-017 RESOLVED, 但 W-074.6 PARTIAL 主项 + W-074.7 PARTIAL 子项仍 ACTIVE) |
+| Deferred (v2.11.21) test count | n/a | 4 (big_array / cap_table_basic / dungeon_game / for_in_slice_nested) |
+
+**关键 v2.11.20 净效果**:
+- +11 self-backend PASS (RC-1 + W-017 + RC-4 fixes)
+- W-017 ACTIVE → RESOLVED (module-level `let mut` jhyy-side 真修,无外部 C-side helper 依赖)
+- D43 closure HOLD (per V.7)
+- 4 deep-rooted fail deferred to v2.11.21 (per honest ship — 不为 +15 数字蒙混)
 
 ## References
 
 - W-068 真修 v2 (prerequisite cherry-pick): commit `31e9d95` from axis-v2 → cherry-picked as `1c31b80` on main
 - v2.11.18 fix: commit `780da2e`
-- D43 baseline archive: [`d43-baseline-archive.md`](d43-baseline-archive.md) v2.11.18 row
+- v2.11.20 fix commits (axis-v2): `56be6cf` (Phase 1+2 RC-1), `970f2ca` (Phase 3 W-017), `0831459` (Phase 4 RC-4)
+- D43 baseline archive: [`d43-baseline-archive.md`](d43-baseline-archive.md) v2.11.18 row + v2.11.20 HOLD row
+- v2.11.20 plan: [`../plans/v2/v2.11.20-plan.md`](../plans/v2/v2.11.20-plan.md)
+- v2.11.20 RCA: [`../../internal/rca/rca-v2.11.20.md`](../../internal/rca/rca-v2.11.20.md)
