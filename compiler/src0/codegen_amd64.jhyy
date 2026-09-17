@@ -189,15 +189,14 @@ fn parse_and_emit(state: *u8, tokens: *u8, n: i64, target_tag: i32) -> i32 {
             // v2.11.19: f64 → f32 via cvtsd2ss
             let _ = emit_conv_truncd(state, tok_p, target_tag);
         } else if kind == ILTOK_EXTS() {
-            // v2.11.19: exts with src=qbe_type=S 走 f32→f64 via cvtss2sd
-            //   (exts with src=W/H/B 整数 ext — emit_binop 已有的整数 ext 路径
-            //   通过 ILTOK_BINOP 走,不在本 dispatch)
-            let t_p = tok_p as *ILToken;
-            if (*t_p).qbe_type == QBE_S_LOCAL() {
-                let _ = emit_conv_exts_f32_to_f64(state, tok_p, target_tag);
-            }
-            // 否则 (src=W/H/B) 不应通过 ILTOK_EXTS 到达 — 整数 ext 走 ILTOK_BINOP。
-            // 兜底 noop (sema 应已 reject 整数 ext 用 ILTOK_EXTS,但本路径有防御)
+            // v2.11.19: plain `exts` token 是 S→D float sign-extend (QBE IL spec
+            //   §3.2 用 plain exts 区分 integer extsb/extsw/extsh/extsl)。整数 ext
+            //   走 ILTOK_BINOP (per next_token_binop 'e' branch → extsb/extsw/extsl/
+            //   extsh)。所以 ILTOK_EXTS 100% 是 S→D — 无条件 emit cvtss2sd。
+            // 注:v2.11.19 Phase 5 修正 — 之前条件 `qbe_type == QBE_S_LOCAL()` 检查
+            //   DST type,但 exts DST 永远 =d (走 cg_coerce S→D),条件永远 false
+            //   → noop → 实测 dtosi 拿 0。
+            let _ = emit_conv_exts_f32_to_f64(state, tok_p, target_tag);
         } else if kind == ILTOK_SLTOF() {
             // v2.11.19: i64 (signed) → f64 via cvtsi2sd
             let _ = emit_conv_sltof(state, tok_p, target_tag);

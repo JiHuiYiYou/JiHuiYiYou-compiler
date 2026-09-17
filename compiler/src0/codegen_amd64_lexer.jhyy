@@ -1361,6 +1361,33 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                 }
             }
         }
+        // v2.11.19 (B4 真修): plain `exts` (无 size letter b/w/l/h) = float sign-extend,
+        //   S→D conversion (f32→f64 via cvtss2sd)。QBE IL spec §3.2 用 plain `exts`
+        //   区分 integer extsb/extsw/extsh/extsl。emit_conv_exts_f32_to_f64 看
+        //   tok.qbe_type 决定 emit cvtss2sd 还是 noop。
+        //   原 'e' branch 只认 exts_* (size letter 必有),plain `exts` 静默 skip →
+        //   cg_coerce S→D call-site coerce 全静默丢 → float→f64 call 永远走
+        //   QBE_FALLBACK 真值(原 baseline 96/115 缺真测)。
+        // Phase 1 fix:加 plain `exts` recognition,emit ILTOK_EXTS。
+        if n1e == (120 as i32) && n2e == (116 as i32) && n3e == (115 as i32) {
+            let n4e_plain = lex_peek_byte_at(s, 4 as i64);
+            // n4e 不是 size letter (b/w/l/h) → 不是 exts_*,是 plain exts
+            if n4e_plain != (98 as i32) && n4e_plain != (119 as i32)
+                && n4e_plain != (108 as i32) && n4e_plain != (104 as i32) {
+                // consume "exts" 4 chars
+                let mut k: i64 = 0 as i64;
+                while k < (4 as i64) {
+                    let _x = lex_next_byte(s);
+                    k = k + (1 as i64);
+                }
+                let _s = lex_skip_ws(s);
+                let _eol = lex_consume_to_eol(s);
+                lex_init_token(t, ILTOK_EXTS(), (*s).line);
+                let _fin = lex_finish_instr(s, arena, t);
+                let _arena = arena;
+                return 0 as i32;
+            }
+        }
         // not exts_* → check export
         if lex_match_kw(s, "export" as *u8, 6 as i64) == 0 { return -1 as i32; }
         return next_token_func_header(s, arena, t);

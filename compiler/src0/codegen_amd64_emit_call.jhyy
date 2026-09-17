@@ -268,7 +268,7 @@ fn cg_parse_f64_imm_bits(text: *u8, len: i64, from: i64) -> i64 {
     //   5.0  = 0x40140000 → exp=1025, mantissa=0.25 (bit 50 = 0x00040000)
     //   10.0 = 0x40240000 → exp=1026, mantissa=0.125 (bit 49 = 0x00020000)
     if int_part == 1 as i64 {
-        let _hi = ((1071644672 as i64) << (32 as i64)) | (0 as i64);  // 0x3FF00000
+        let _hi = ((1072693248 as i64) << (32 as i64)) | (0 as i64);  // 0x3FF00000
         return _hi;  // 1.0
     }
     if int_part == 2 as i64 {
@@ -276,19 +276,19 @@ fn cg_parse_f64_imm_bits(text: *u8, len: i64, from: i64) -> i64 {
         return _hi;  // 2.0
     }
     if int_part == 3 as i64 {
-        let _hi = ((1073807360 as i64) << (32 as i64)) | (0 as i64);  // 0x40080000
+        let _hi = ((1074266112 as i64) << (32 as i64)) | (0 as i64);  // 0x40080000
         return _hi;  // 3.0
     }
     if int_part == 4 as i64 {
-        let _hi = ((1075838976 as i64) << (32 as i64)) | (0 as i64);  // 0x40100000
+        let _hi = ((1074790400 as i64) << (32 as i64)) | (0 as i64);  // 0x40100000
         return _hi;  // 4.0
     }
     if int_part == 5 as i64 {
-        let _hi = ((1075904512 as i64) << (32 as i64)) | (0 as i64);  // 0x40140000
+        let _hi = ((1075052544 as i64) << (32 as i64)) | (0 as i64);  // 0x40140000
         return _hi;  // 5.0
     }
     if int_part == 10 as i64 {
-        let _hi = ((1077936128 as i64) << (32 as i64)) | (0 as i64);  // 0x40240000
+        let _hi = ((1076101120 as i64) << (32 as i64)) | (0 as i64);  // 0x40240000
         return _hi;  // 10.0
     }
     return 0 as i64;  // out of table — garbage

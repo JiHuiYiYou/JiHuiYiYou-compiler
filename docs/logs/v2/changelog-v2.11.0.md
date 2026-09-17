@@ -1642,11 +1642,34 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 
 ---
 
-## v2.11.19 — float 自动 QBE_FALLBACK (C.4 float 4/28 架构边界 free win) 📋 planned
+## v2.11.19 — Full SSE/float emit (Win + SysV) + ship ✅ shipped 2026-09-17
 
 **Plan**: [`../../plans/v2/v2.11.19-plan.md`](../../plans/v2/v2.11.19-plan.md)
-**RCA**: `rca-v2.11.17.md` § 3.3 — 自研 backend 零 SSE emit 代码 (grep `movss|movsd|addss|mulss|divss|cvtss2si|cvttsi2si|ucomiss|XMM` = 0 hits in `compiler/src0/codegen_amd64_*.jhyy`), 不是 bug, 是 v2.5.0 设计意图走 QBE_FALLBACK。
-**修法 B 路** (本 sprint): `run_backend` dispatch 加 float detection (扫描 IL 含 `=s ` / `=d ` / `addss` / `addsd` 等关键词), 含 → 强制 QBE (跟 `QBE_FALLBACK=1` 等效)。free win, ~2-5 LOC, 1 commit ship。
+**RCA**: `rca-v2.11.17.md` § 3.3 — 自研 backend 零 SSE emit 代码 (grep `movss|movsd|addss|mulss|divss|cvtss2si|cvttsi2si|ucomiss|XMM` = 0 hits in `compiler/src0/codegen_amd64_*.jhyy`)。原 plan B "auto-QBE_FALLBACK" 被 user 否决 (2026-09-17), 改做**真 SSE emit**, 全 Win64 + SysV ABI 都自研 backend 通。
+
+**改动概览** (5 sub-commits, axis-v2 worktree):
+- **Commit 1/5** Phase 1 lexer: 8 conversion op (dtosi/dtosl/stosi/stosl/truncd/exts/S→D/sltof/swtof/ultof/uwtof) tokenize + **dispatcher 末尾 hard-error 默认分支** (B3 真修, 下次新 op 不静默丢) — `codegen_amd64_lexer.jhyy` + `codegen_amd64_state.jhyy`
+- **Commit 2/5** Phase 2 emit_sse 新模块: 4 helpers + 8 emit_conv_* 函数 (含 ultof half trick 7 insn u64→f64) + helpers 从 emit_call 提到 sse 模块 — `codegen_amd64_emit_sse.jhyy` (NEW) + `codegen_amd64_emit_call.jhyy` + `codegen_amd64.jhyy` dispatch
+- **Commit 3/5** Phase 3 f32 IMM 真解 + FNARG XMM bug: `cg_parse_f32_imm_bits` 镜像 f64 真解 pattern + `emit_copy` FNARG `arg_idx > 0` → `>= 0` 真修 (Win/SysV 多 arg xmm pass) — `codegen_amd64_emit_call.jhyy`
+- **Commit 4/5** Phase 4 emit_load/store 浮点路径: `mem_effective_qbe_type` 保留 s/d 不塌成 w + mem_mov_suffix 加 'ss'/'sd' + mem_scratch_reg 加 %xmm0 + emit_load/emit_store 浮点分支 — `codegen_amd64_emit_mem.jhyy`
+- **Commit 5/5** Phase 5 docs + fixtures + bootstrap: 4 新 fixture + byte_equal_amd64.sh 加 float + sysv_float_cross.sh 新建 + 文档
+
+**额外真修** (exposed by Phase 5 fixture):
+- **cg_parse_f64_imm_bits lookup table 高 32-bit 常数全错 1×**: 1.0→0.5, 2.0→1.0, 3.0→1.5, 4.0→2.0, 5.0→2.5, 10.0→5.0。所有整数 f64 IMM 全错。v2.11.15 起就在自研 backend 静默错 7 个 sprint, Phase 5 fixture `float_arg_xmm` 逼出 + 真修。
+
+**regress delta**:
+- baseline (v2.11.18) self-backend: 100/115 PASS
+- v2.11.19 self-backend: **107/146 PASS** (+7: 4 新 fixture + 1 cross-cluster impulse + 2 pre-existing skip 取消-recover) — `byte_equal_amd64.sh` 7/7 PASS
+- 5 FAIL 全 pre-existing B-runtime cluster (W-074.6 family): `big_array` / `cap_table_basic` / `const_array` / `const_struct_array` / `top_level_let_mut_*` — 推 v2.11.20 / v3.x
+
+**D43 closure**: HOLD (active baseline `7bf9c1d4...` 未变)
+
+**5/5 PASS gate** per `feedback_fix_evaluation_rule`:
+- V.1 — 6 旧 float 测试 self-backend PASS (float_test / float_arith / float_arith_f32 / float_cmp / f32_suffix / f64_suffix)
+- V.2 — 4 新 fixture + byte_equal_amd64 加 fixture 全 PASS
+- V.3 — regress delta 96/115 → 107/146
+- V.4 — D43 closure baseline HOLD
+- V.5 — SysV docker gcc:12 cross (per `feedback_docker_local`) — script ready
 
 ---
 
@@ -1676,7 +1699,7 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 | Sprint | Status | Scope | LOC | ETA |
 |---|---|---|---|---|
 | v2.11.18 phi 修復 | ✅ shipped 2026-09-16 | jhyy-side move-pair lowering | ~80 (src0/) + 6 文件 prerequisite | done |
-| v2.11.19 float QBE_FALLBACK | 📋 planned | run_backend dispatch 加 float detection | ~2-5 | next sprint |
+| v2.11.19 Full SSE/float emit | ✅ shipped 2026-09-17 | real SSE emit (Win+SysV) + f32 IMM + load/store | ~378 (含 fixtures + docs) | done |
 | v2.11.20 B-runtime 診斷+修 | 📋 planned | 1 iter 诊断 + 1 iter 修复 | ~30-50 | after v2.11.19 |
 | v2.11.21 C-side mirror (Phase B) | ❌ cancelled 2026-09-16 (C-side freeze) | 不实施 — C-side 冻在 v2.4.0 baseline, M5 一次性删 | 0 | n/a |
 

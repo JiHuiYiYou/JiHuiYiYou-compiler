@@ -1,0 +1,49 @@
+// float_load_store.jhyy — v2.11.19 Phase 5 验证 emit_load/emit_store 浮点路径
+//
+// Phase 4 修 mem_effective_qbe_type 让 QBE_S/QBE_D pass-through,f64 load/store
+// 走 xmm0 + movss/movsd(不再塌成 QBE_W → 8 byte load 只 mov 4 byte)。
+//
+// 覆盖:
+//   §1 标量 load/store:f64 写,再 load 读回,验证整数位
+//   §2 f64 数组 store + load
+//   §3 f32 数组 store + load
+//
+// EXIT:每个 sub-test 加分,期望 EXIT=7
+//
+// 注:本 fixture 不在 f64 array 前放 i32 let(避免 pre-existing B-runtime stack
+// slot collision BUG,W-074.6 OUT-OF-SCOPE)。v2.11.20 修 stack layout。
+
+fn main_jhyy() -> i32 {
+    // §1:标量 load/store (Phase 4 emit_load / emit_store 浮点路径)
+    let mut s1: f64 = 0.0;
+    s1 = 3.14;
+    let s1_back: f64 = s1;
+    let s1_i: i32 = s1_back as i32;
+    let score1: i32 = if s1_i == 3 { 1 } else { 0 };
+
+    // §2:f64 数组 store + load
+    let arr: [f64; 4] = [1.5, 2.5, 3.5, 4.5];
+    let a0: f64 = arr[0];
+    let a1: f64 = arr[1];
+    let a2: f64 = arr[2];
+    let a3: f64 = arr[3];
+    let a0i: i32 = a0 as i32;
+    let a1i: i32 = a1 as i32;
+    let a2i: i32 = a2 as i32;
+    let a3i: i32 = a3 as i32;
+    let score2: i32 = if a0i == 1 { 1 } else { 0 }
+                     + if a1i == 2 { 1 } else { 0 }
+                     + if a2i == 3 { 1 } else { 0 }
+                     + if a3i == 4 { 1 } else { 0 };
+
+    // §3:f32 数组初始化 + 读写
+    let arr32: [f32; 3] = [1.5f32, 2.5f32, 3.5f32];
+    let b0: f32 = arr32[0];
+    let b1: f32 = arr32[1];
+    let b0i: i32 = b0 as i32;
+    let b1i: i32 = b1 as i32;
+    let score3: i32 = if b0i == 1 { 1 } else { 0 }
+                     + if b1i == 2 { 1 } else { 0 };
+
+    return score1 + score2 + score3;
+}
