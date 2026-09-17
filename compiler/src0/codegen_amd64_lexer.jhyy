@@ -1384,6 +1384,8 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         //   ILTOK_DTOSI (单 enum,dst 宽度由 tok.qbe_type 决定),不走 next_token_binop
         //   (因为 conversion op 是 unary src,不是 binary src1+src2,emit_binop 不适用)。
         //   Phase 1 仅 tokenize;parse_and_emit dispatch 在 Phase 2 commit 加。
+        //   v2.11.19 Iter 2 fix (B3): 必须 lex_consume_to_eol 后再 lex_finish_instr,
+        //   否则 tok.text 只有 "dtosi" 不含 src %t5,emit_conv_dtosi 调 cg_parse_temp 拿不到 src。
         // 注:必须 BEFORE dbgfile/dbgloc check (虽然 prefix 不冲突 — dtosi vs dbg 头两位
         //   'd','t' vs 'd','b' — 但 order matters for fast reject)。
         if n1 == (116 as i32) && n2 == (111 as i32) && n3 == (115 as i32) {  // 't','o','s'
@@ -1396,6 +1398,8 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                     k = k + (1 as i64);
                 }
                 let _s = lex_skip_ws(s);  // 不跨 '\n'
+                // consume 到行尾 (含 src %t5),跟 next_token_binop 同样的 pattern
+                let _eol = lex_consume_to_eol(s);
                 lex_init_token(t, ILTOK_DTOSI(), (*s).line);
                 // v2.11.2 contract: text = 整条 slice,cg_parse_temp 二次 scan 取 src
                 let _fin = lex_finish_instr(s, arena, t);
@@ -1641,6 +1645,8 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                 k = k + (1 as i64);
             }
             let _s = lex_skip_ws(s);
+            // consume 到行尾 (含 src %t5),跟 next_token_binop 同样的 pattern
+            let _eol = lex_consume_to_eol(s);
             lex_init_token(t, ILTOK_TRUNCD(), (*s).line);
             let _fin = lex_finish_instr(s, arena, t);
             let _arena = arena;
@@ -1689,6 +1695,8 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                     k = k + (1 as i64);
                 }
                 let _s = lex_skip_ws(s);
+                // consume 到行尾 (含 src %t5)
+                let _eol = lex_consume_to_eol(s);
                 lex_init_token(t, ILTOK_STOSI(), (*s).line);
                 let _fin = lex_finish_instr(s, arena, t);
                 let _arena = arena;
@@ -1710,6 +1718,8 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                     k = k + (1 as i64);
                 }
                 let _s = lex_skip_ws(s);
+                // consume 到行尾 (含 src %t5)
+                let _eol = lex_consume_to_eol(s);
                 lex_init_token(t, ILTOK_SLTOF(), (*s).line);
                 let _fin = lex_finish_instr(s, arena, t);
                 let _arena = arena;
@@ -1727,6 +1737,8 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                     k = k + (1 as i64);
                 }
                 let _s = lex_skip_ws(s);
+                // consume 到行尾 (含 src %t5)
+                let _eol = lex_consume_to_eol(s);
                 lex_init_token(t, ILTOK_SWTOF(), (*s).line);
                 let _fin = lex_finish_instr(s, arena, t);
                 let _arena = arena;
@@ -1749,6 +1761,8 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                     k = k + (1 as i64);
                 }
                 let _s = lex_skip_ws(s);
+                // consume 到行尾 (含 src %t5)
+                let _eol = lex_consume_to_eol(s);
                 lex_init_token(t, tok_kind, (*s).line);
                 let _fin = lex_finish_instr(s, arena, t);
                 let _arena = arena;

@@ -68,6 +68,7 @@
 
 import codegen_amd64_state;  // CGState / QBE_W_LOCAL / QBE_L_LOCAL / ILTOK_*
                              // ILToken / cg_offset_for_temp / cg_alloc_slot
+import codegen_amd64_emit_sse;  // v2.11.19 Phase 2b: 4 SSE helpers (sse_xmm_mov_suffix_for_qt / sse_xmm_reg_for_arg_idx / sse_emit_mov_xmm_reg_to_temp / sse_emit_mov_temp_to_xmm_reg)
 import util;  // sb_init / sb_append_cstr / sb_appendf / StringBuilder
 
 // ════════════════════════════════════════════
@@ -418,70 +419,15 @@ fn target_is_win(target_tag: i32) -> i32 {
 //   - integer ret/arg (QBE_W/QBE_L) 仍走 %rax/%eax + movl/movq (existing)
 // ════════════════════════════════════════════
 
-// xmm_mov_suffix_for_qt — QBE_S/QBE_D 专用 mov suffix (SSE scalar)
-//   QBE_S_LOCAL (f32) → "ss"  (single-precision scalar)
-//   QBE_D_LOCAL (f64) → "sd"  (double-precision scalar)
-//   fallback         → "sd"  (safe default)
-fn xmm_mov_suffix_for_qt(qt: i32) -> *u8 {
-    if qt == QBE_S_LOCAL() {
-        return "ss" as *u8;
-    }
-    return "sd" as *u8;  // QBE_D + fallback
-}
+// xmm_mov_suffix_for_qt 已迁到 codegen_amd64_emit_sse.jhyy (sse_xmm_mov_suffix_for_qt)
+// xmm_reg_for_arg_idx 已迁到 codegen_amd64_emit_sse.jhyy (sse_xmm_reg_for_arg_idx)
+// emit_mov_xmm_reg_to_temp / emit_mov_temp_to_xmm_reg 已迁到 codegen_amd64_emit_sse.jhyy
+//   (sse_emit_mov_xmm_reg_to_temp / sse_emit_mov_temp_to_xmm_reg)。
+// v2.11.19 (Phase 2b 迁移):emit_call / emit_mem / 未来 emit_sse 都 import sse module,共用 helper。
 
-// xmm_reg_for_arg_idx — arg idx (0-7) 选 xmm reg name
-// SysV + Win x64 都用 %xmm0..%xmm7 传 f32/f64 arg (System V 限定 8 个,
-// Win x64 限定 4 个,但都用相同寄存器名 — 实际 <4 是兼容的)
-// 注:jhyy 当前 1-to-1 简化栈分配(idx 直对应 arg slot,不重新编号);
-// 跨 SysV/Win 同一 xmm idx 对应不同 arg(per v2.7.0 Phase 2b),但
-// xmm 路径下 SysV arg1=xmm0,Win arg1=xmm0 — arg 0 都 = xmm0,
-// arg 1 都 = xmm1,etc — **巧合一致**(SysV/Win f64 arg pass 顺序相同;
-// integer arg pass 顺序不同 → 那部分继续用 reg_rax_for_qt_idx)。
-fn xmm_reg_for_arg_idx(idx: i64) -> *u8 {
-    if idx == (0 as i64) { return "xmm0" as *u8; }
-    if idx == (1 as i64) { return "xmm1" as *u8; }
-    if idx == (2 as i64) { return "xmm2" as *u8; }
-    if idx == (3 as i64) { return "xmm3" as *u8; }
-    if idx == (4 as i64) { return "xmm4" as *u8; }
-    if idx == (5 as i64) { return "xmm5" as *u8; }
-    if idx == (6 as i64) { return "xmm6" as *u8; }
-    if idx == (7 as i64) { return "xmm7" as *u8; }
-    return "xmm0" as *u8;
-}
-
-// emit_mov_xmm_reg_to_temp — movss/movsd %xmmN, -<dst_off>(%rbp)
-//   v2.11.15 Iter 1:f32/f64 return 路径用本 helper 把 %xmm0 存回栈槽。
-//   AT&T 语法:`movsd %xmm0, -<off>(%rbp)`(destination 在 comma 后)。
-fn emit_mov_xmm_reg_to_temp(state: *u8, qt: i32, reg_name: *u8, dst_off: i64) -> i32 {
-    let cg = state as *CGState;
-    let s = (*cg).out;
-    let arena = (*cg).arena;
-    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
-    let _r2 = sb_append_cstr(arena, s, xmm_mov_suffix_for_qt(qt));
-    let _r3 = sb_append_cstr(arena, s, " %" as *u8);
-    let _r4 = sb_append_cstr(arena, s, reg_name);
-    let _r5 = sb_append_cstr(arena, s, ", " as *u8);
-    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
-    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
-    return 0;
-}
-
-// emit_mov_temp_to_xmm_reg — movss/movsd -<src_off>(%rbp), %xmmN
-//   v2.11.15 Iter 1:f32/f64 arg 路径用本 helper 把栈槽搬到 xmm reg。
-//   AT&T 语法:`movsd -<off>(%rbp), %xmm0`(source 在 comma 前)。
-fn emit_mov_temp_to_xmm_reg(state: *u8, qt: i32, src_off: i64, reg_name: *u8) -> i32 {
-    let cg = state as *CGState;
-    let s = (*cg).out;
-    let arena = (*cg).arena;
-    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
-    let _r2 = sb_append_cstr(arena, s, xmm_mov_suffix_for_qt(qt));
-    let _r3 = sb_append_cstr(arena, s, " " as *u8);
-    let _r4 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
-    let _r5 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
-    let _r6 = sb_append_cstr(arena, s, reg_name);
-    let _r7 = sb_append_cstr(arena, s, "\n" as *u8);
-    return 0;
-}
+// xmm_mov_suffix_for_qt / xmm_reg_for_arg_idx / emit_mov_xmm_reg_to_temp / emit_mov_temp_to_xmm_reg
+// 已迁到 codegen_amd64_emit_sse.jhyy (Phase 2b 迁移)。
+// emit_call 内部 caller 改用 sse_* 前缀。
 
 // reg_rax_for_qt_idx — 用 arg qt + arg idx 选寄存器 (Win ABI rcx/rdx/r8/r9)
 // Win x64:arg1→rcx, arg2→rdx, arg3→r8, arg4→r9
@@ -650,9 +596,9 @@ fn emit_amd64_arg_regs(state: *u8, nargs: i64, qt: i32, target_tag: i32) -> i32 
             // NOT integer regs)。修复 f64 arg 仍走 %rcx → caller 端
             // %xmm0 读到 garbage。
             if aqt == QBE_S_LOCAL() || aqt == QBE_D_LOCAL() {
-                let xmm_reg = xmm_reg_for_arg_idx(ri);
+                let xmm_reg = sse_xmm_reg_for_arg_idx(ri);
                 let off = cg_offset_for_temp_with_target(atemp, target_tag);
-                let _m = emit_mov_temp_to_xmm_reg(state, aqt, off, xmm_reg);
+                let _m = sse_emit_mov_temp_to_xmm_reg(state, aqt, off, xmm_reg);
             } else {
                 let is_wide: i32 = if aqt == (108 as i32) { 1 as i32 } else { 0 as i32 };
                 let reg_name = if is_wide != (0 as i32) { reg_names_wide[ri] } else { reg_names_narrow[ri] };
@@ -678,9 +624,9 @@ fn emit_amd64_arg_regs(state: *u8, nargs: i64, qt: i32, target_tag: i32) -> i32 
             // v2.11.15 Iter 1 A1-XMM 真修:SysV ABI f32/f64 arg 走
             // %xmm0..%xmm5(前 6 个 xmm reg,per System V psABI)。
             if aqt2 == QBE_S_LOCAL() || aqt2 == QBE_D_LOCAL() {
-                let xmm_reg2 = xmm_reg_for_arg_idx(ri2);
+                let xmm_reg2 = sse_xmm_reg_for_arg_idx(ri2);
                 let off2 = cg_offset_for_temp_with_target(atemp2, target_tag);
-                let _m2 = emit_mov_temp_to_xmm_reg(state, aqt2, off2, xmm_reg2);
+                let _m2 = sse_emit_mov_temp_to_xmm_reg(state, aqt2, off2, xmm_reg2);
             } else {
                 let is_wide2: i32 = if aqt2 == (108 as i32) { 1 as i32 } else { 0 as i32 };
                 let reg_name2 = if is_wide2 != (0 as i32) { sysv_wide[ri2] } else { sysv_narrow[ri2] };
@@ -846,7 +792,7 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     //   %xmm0(SysV/Win 一致)→ 读 %rax 是 garbage。修:QBE_D/QBE_S 走 xmm0。
     let ret_off = cg_offset_for_temp_with_target(ret_temp_id, target_tag);
     if ret_qt == QBE_S_LOCAL() || ret_qt == QBE_D_LOCAL() {
-        let _r = emit_mov_xmm_reg_to_temp(state, ret_qt, "xmm0" as *u8, ret_off);
+        let _r = sse_emit_mov_xmm_reg_to_temp(state, ret_qt, "xmm0" as *u8, ret_off);
     } else {
         let _r = emit_mov_reg_to_temp(state, ret_qt, reg_rax_for_qt(ret_qt) as *u8, ret_off);
     }
@@ -1185,7 +1131,7 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
             } else {
                 arg_xmm_idx = 0 as i64;
             }
-            let xmm_for_arg = xmm_reg_for_arg_idx(arg_xmm_idx);
+            let xmm_for_arg = sse_xmm_reg_for_arg_idx(arg_xmm_idx);
             let _r1 = sb_append_cstr(arena2, s2, "\tmov" as *u8);
             let _r2 = sb_append_cstr(arena2, s2, if dst_qt == QBE_D_LOCAL() { "sd" as *u8 } else { "ss" as *u8 });
             let _r3 = sb_append_cstr(arena2, s2, " %" as *u8);
@@ -1384,7 +1330,7 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
             let xmm_sfx: *u8 = if qt == QBE_D_LOCAL() { "sd" as *u8 } else { "ss" as *u8 };
             let dst_off_x = cg_offset_for_temp_with_target(dst_id, target_tag);
             // movsd/movss -src1(%rbp), %xmm0
-            let _mx1 = emit_mov_temp_to_xmm_reg(state, qt, src1_off, "xmm0" as *u8);
+            let _mx1 = sse_emit_mov_temp_to_xmm_reg(state, qt, src1_off, "xmm0" as *u8);
             // <op><sd|ss> -src2(%rbp), %xmm0
             let _xo1 = sb_append_cstr(arena, s, "\t" as *u8);
             let _xo2 = sb_append_cstr(arena, s, xmm_op);
@@ -1393,7 +1339,7 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
             let _xo5 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
             let _xo6 = sb_append_cstr(arena, s, "(%rbp), %xmm0\n" as *u8);
             // movsd/movss %xmm0, -dst(%rbp)
-            let _mx2 = emit_mov_xmm_reg_to_temp(state, qt, "xmm0" as *u8, dst_off_x);
+            let _mx2 = sse_emit_mov_xmm_reg_to_temp(state, qt, "xmm0" as *u8, dst_off_x);
             return 0;
         }
     }
@@ -1808,7 +1754,7 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         // ucomisd 不设 SF/OF (只 CF/PF/ZF per unordered spec)→ setg 永远 1 for any
         // non-NaN op1 — 错的!改 seta/setb/setae/setbe。
         let cc: *u8 = if is_cslt != (0 as i32) { "b" as *u8 } else { if is_csgt != (0 as i32) { "a" as *u8 } else { if is_csle != (0 as i32) { "be" as *u8 } else { if is_csge != (0 as i32) { "ae" as *u8 } else { if is_ceq != (0 as i32) { "e" as *u8 } else { "ne" as *u8 } } } } };
-        let _f1 = emit_mov_temp_to_xmm_reg(state, qt, src1_off, "xmm0" as *u8);
+        let _f1 = sse_emit_mov_temp_to_xmm_reg(state, qt, src1_off, "xmm0" as *u8);
         let _u1 = sb_append_cstr(arena, s, "	ucomisd " as *u8);
         let _u3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
         let _u4 = sb_append_cstr(arena, s, "(%rbp), %xmm0\n" as *u8);
@@ -1821,7 +1767,7 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         // (ucomiss + set<cc> %al + movzbl %al, %eax) — 同 f64 branch 但 ucomiss。
         // 同上 ucomisd 真修: 用 unsigned compare seta/setb/setae/setbe。
         let cc: *u8 = if is_cslt != (0 as i32) { "b" as *u8 } else { if is_csgt != (0 as i32) { "a" as *u8 } else { if is_csle != (0 as i32) { "be" as *u8 } else { if is_csge != (0 as i32) { "ae" as *u8 } else { if is_ceq != (0 as i32) { "e" as *u8 } else { "ne" as *u8 } } } } };
-        let _f1 = emit_mov_temp_to_xmm_reg(state, qt, src1_off, "xmm0" as *u8);
+        let _f1 = sse_emit_mov_temp_to_xmm_reg(state, qt, src1_off, "xmm0" as *u8);
         let _u1 = sb_append_cstr(arena, s, "	ucomiss " as *u8);
         let _u3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
         let _u4 = sb_append_cstr(arena, s, "(%rbp), %xmm0\n" as *u8);

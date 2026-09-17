@@ -1,0 +1,338 @@
+// codegen_amd64_emit_sse.jhyy — v2.11.19: SSE2/float emit module
+//
+// Module-split 设计(per v2.11.19 plan § Phase 2a):
+//   本模块归口 4 SSE helpers + 8 conversion emit 函数,既被 emit_call.jhyy
+//   (XMM arg pass) 又被 emit_mem.jhyy (Phase 4 浮点 load/store) import。
+//
+// 替换路径(per v2.11.19 plan):
+//   早期(per v2.11.15 Iter 1/1b/3):4 SSE helpers 散在 emit_call.jhyy:425-484,
+//     emit_call 内部用,emit_mem / emit_sse 不共享。
+//   v2.11.19:4 helpers 提到本模块 (sse_ 前缀),emit_call call sites 加 sse_ 前缀;
+//     新增 8 emit_conv_* 函数 (dtosi/dtosl/stosi/stosl/truncd/exts-f32-to-f64/
+//     sltof/swtof/ultof/uwtof),parse_and_emit dispatch 加 8 case。
+//
+// 关键约束:
+//   - emit_call.jhyy / emit_mem.jhyy 都 import 本模块,无环(emit_sse 不 import
+//     emit_call / emit_mem,只 import state + util + externs)
+//   - emit_binop.jhyy 已有的整数 ext (extsb/extsh/extub/extuh/extsw/extuw) 路径
+//     不动 — 本模块 exts only fires on src=S (f32→f64 via cvtss2sd);整数 ext
+//     仍走原 emit_binop 路径。
+//   - ultof half trick 7-insn (per v2.11.19 plan § Phase 2a):movq src,%rax +
+//     movq %rax,%rcx + shrq $1,%rcx + movq %rax,%rdx + shrq $63,%rdx +
+//     addq %rdx,%rcx + cvtsi2sd %rcx,%xmm0 + addsd %xmm0,%xmm0 +
+//     movsd %xmm0,-dst(%rbp)。u64 全量程正确(否则 ≥ 2⁶³ 静默错)。
+//
+// Note: lives flat in compiler/src0/ — jhyy import syntax doesn't support
+// paths with `/` (per `parse_import_decl` codegen.c:731).
+
+import codegen_amd64_state;  // CGState / QBE_W_LOCAL / QBE_L_LOCAL / ILTOK_*
+                             // ILToken / cg_offset_for_temp_with_target
+import util;  // sb_append_cstr / sb_appendf_lld / StringBuilder
+
+// ════════════════════════════════════════════════════
+// FFI(util.jhyy 已声明 strlen/sprintf_lld/memcpy/memset)
+// ════════════════════════════════════════════════════
+
+extern fn sprintf_lld(buf: *u8, fmt: *u8, val: i64) -> i32;
+
+// ════════════════════════════════════════════════════
+// SSE helpers(从 emit_call.jhyy:425-484 提取)
+// ════════════════════════════════════════════════════
+
+// sse_xmm_mov_suffix_for_qt — QBE_S/QBE_D 专用 mov suffix (SSE scalar)
+//   QBE_S (f32) → "ss";QBE_D (f64) → "sd"。
+//   用于 movss/movsd 指令。整数 mov 用 "l"/"w"/"b"/"h" 走 mem_mov_suffix。
+fn sse_xmm_mov_suffix_for_qt(qt: i32) -> *u8 {
+    if qt == QBE_S_LOCAL() {
+        return "ss" as *u8;
+    }
+    return "sd" as *u8;  // QBE_D + fallback
+}
+
+// sse_xmm_reg_for_arg_idx — arg idx (0-7) 选 xmm reg name
+// SysV + Win x64 都用 %xmm0..%xmm7 传 f32/f64 arg (System V 限定 8 个,
+// Win x64 限定 4 个,但都用相同寄存器名 — 实际 <4 是兼容的)
+fn sse_xmm_reg_for_arg_idx(idx: i64) -> *u8 {
+    if idx == (0 as i64) { return "xmm0" as *u8; }
+    if idx == (1 as i64) { return "xmm1" as *u8; }
+    if idx == (2 as i64) { return "xmm2" as *u8; }
+    if idx == (3 as i64) { return "xmm3" as *u8; }
+    if idx == (4 as i64) { return "xmm4" as *u8; }
+    if idx == (5 as i64) { return "xmm5" as *u8; }
+    if idx == (6 as i64) { return "xmm6" as *u8; }
+    if idx == (7 as i64) { return "xmm7" as *u8; }
+    return "xmm0" as *u8;
+}
+
+// sse_emit_mov_xmm_reg_to_temp — movss/movsd %xmmN, -<dst_off>(%rbp)
+//   v2.11.15 Iter 1:f32/f64 return 路径用本 helper 把 %xmm0 存回栈槽。
+//   AT&T 语法:`movsd %xmm0, -<off>(%rbp)`(destination 在 comma 后)。
+fn sse_emit_mov_xmm_reg_to_temp(state: *u8, qt: i32, reg_name: *u8, dst_off: i64) -> i32 {
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
+    let _r2 = sb_append_cstr(arena, s, sse_xmm_mov_suffix_for_qt(qt));
+    let _r3 = sb_append_cstr(arena, s, " %" as *u8);
+    let _r4 = sb_append_cstr(arena, s, reg_name);
+    let _r5 = sb_append_cstr(arena, s, ", " as *u8);
+    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    return 0;
+}
+
+// sse_emit_mov_temp_to_xmm_reg — movss/movsd -<src_off>(%rbp), %xmmN
+//   v2.11.15 Iter 1:f32/f64 arg 路径用本 helper 把栈槽搬到 xmm reg。
+//   AT&T 语法:`movsd -<off>(%rbp), %xmm0`(source 在 comma 前)。
+fn sse_emit_mov_temp_to_xmm_reg(state: *u8, qt: i32, src_off: i64, reg_name: *u8) -> i32 {
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
+    let _r2 = sb_append_cstr(arena, s, sse_xmm_mov_suffix_for_qt(qt));
+    let _r3 = sb_append_cstr(arena, s, " " as *u8);
+    let _r4 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+    let _r5 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+    let _r6 = sb_append_cstr(arena, s, reg_name);
+    let _r7 = sb_append_cstr(arena, s, "\n" as *u8);
+    return 0;
+}
+
+// ════════════════════════════════════════════════════
+// Conversion emit 函数(8 个 — per v2.11.19 plan § Phase 2a)
+// ════════════════════════════════════════════════════
+
+// emit_conv_dtosi — f64 → i32 (dst=w) / i64 (dst=l) via cvttsd2si
+//   dst 宽度由 tok.qbe_type 决定 (W → %eax + movl,L → %rax + movq)。
+//   注:cvttsd2si 满 i32/i64 量程时返 INT_MIN(MIN_VALUE),per SSE2 spec。
+fn emit_conv_dtosi(state: *u8, tok: *u8, target_tag: i32) -> i32 {
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let t = tok as *ILToken;
+    // 注:QBE IL `%t6 =w dtosi %t5` 走 lexer '%' branch → tok.int_val = dst temp id (6),
+    // tok.qbe_type = qt byte ('w' 或 'l'),tok.text = "dtosi %t5"。src1 走 cg_parse_temp。
+    let dst_id = (*t).int_val;
+    let src_id = cg_parse_temp((*t).text, (*t).text_len, 0 as i64);
+    // 用 dst_id 的 qbe_type 决定 dst 宽度 (per lexer '%' branch 的 qt_val 设的)
+    let is_wide: i32 = if (*t).qbe_type == QBE_L_LOCAL() { 1 as i32 } else { 0 as i32 };
+    let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
+    let src_off = cg_offset_for_temp_with_target(src_id, target_tag);
+    let dst_reg: *u8 = if is_wide != (0 as i32) { "rax" as *u8 } else { "eax" as *u8 };
+    let dst_qt: i32 = if is_wide != (0 as i32) { QBE_L_LOCAL() } else { QBE_W_LOCAL() };
+    let _r1 = sb_append_cstr(arena, s, "\tcvttsd2si " as *u8);
+    let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+    let _r3 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+    let _r4 = sb_append_cstr(arena, s, dst_reg);
+    let _r5 = sb_append_cstr(arena, s, "\n" as *u8);
+    // store back to dst slot
+    let _r6 = sb_append_cstr(arena, s, "\tmov" as *u8);
+    let _r7 = sb_append_cstr(arena, s, if is_wide != (0 as i32) { "q" as *u8 } else { "l" as *u8 });
+    let _r8 = sb_append_cstr(arena, s, " %" as *u8);
+    let _r9 = sb_append_cstr(arena, s, dst_reg);
+    let _r10 = sb_append_cstr(arena, s, ", " as *u8);
+    let _r11 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r12 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    let _qt_unused = dst_qt;
+    return 0;
+}
+
+// emit_conv_stosi — f32 → i32 (dst=w) / i64 (dst=l) via cvttss2si
+//   mirror of emit_conv_dtosi with 'cvttss2si' + 'movss' stack load。
+//   注:必须先 movss stack → %xmm0 (cvtss2si 不能直接吃 stack slot)。
+fn emit_conv_stosi(state: *u8, tok: *u8, target_tag: i32) -> i32 {
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let t = tok as *ILToken;
+    // 注:QBE IL `%tN =<qt> stosi %tM` 走 lexer '%' branch → tok.int_val = dst temp id,
+    //   tok.qbe_type = qt byte,tok.text = "stosi %tM"。src1 走 cg_parse_temp。
+    let dst_id = (*t).int_val;
+    let src_id = cg_parse_temp((*t).text, (*t).text_len, 0 as i64);
+    let is_wide: i32 = if (*t).qbe_type == QBE_L_LOCAL() { 1 as i32 } else { 0 as i32 };
+    let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
+    let src_off = cg_offset_for_temp_with_target(src_id, target_tag);
+    let dst_reg: *u8 = if is_wide != (0 as i32) { "rax" as *u8 } else { "eax" as *u8 };
+    // load f32 stack → %xmm0 (cvtss2si 需要 xmm src)
+    let _r1 = sb_append_cstr(arena, s, "\tmovss " as *u8);
+    let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+    let _r3 = sb_append_cstr(arena, s, "(%rbp), %xmm0\n" as *u8);
+    let _r4 = sb_append_cstr(arena, s, "\tcvttss2si %xmm0, %" as *u8);
+    let _r5 = sb_append_cstr(arena, s, dst_reg);
+    let _r6 = sb_append_cstr(arena, s, "\n" as *u8);
+    let _r7 = sb_append_cstr(arena, s, "\tmov" as *u8);
+    let _r8 = sb_append_cstr(arena, s, if is_wide != (0 as i32) { "q" as *u8 } else { "l" as *u8 });
+    let _r9 = sb_append_cstr(arena, s, " %" as *u8);
+    let _r10 = sb_append_cstr(arena, s, dst_reg);
+    let _r11 = sb_append_cstr(arena, s, ", " as *u8);
+    let _r12 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r13 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    return 0;
+}
+
+// emit_conv_truncd — f64 → f32 via cvtsd2ss
+//   1. movsd stack → %xmm0
+//   2. cvtsd2ss %xmm0, %xmm0 (in-place truncation)
+//   3. movss %xmm0 → stack slot
+fn emit_conv_truncd(state: *u8, tok: *u8, target_tag: i32) -> i32 {
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let t = tok as *ILToken;
+    // 注:QBE IL `%tN =<qt> <conv_op> %tM` 走 lexer %' branch → tok.int_val = dst temp id (N),
+    //   tok.qbe_type = qt byte,tok.text = "<conv_op> %tM"。src1 走 cg_parse_temp。
+    let dst_id = (*t).int_val;
+    let src_id = cg_parse_temp((*t).text, (*t).text_len, 0 as i64);
+    let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
+    let src_off = cg_offset_for_temp_with_target(src_id, target_tag);
+    let _r1 = sb_append_cstr(arena, s, "\tmovsd " as *u8);
+    let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+    let _r3 = sb_append_cstr(arena, s, "(%rbp), %xmm0\n" as *u8);
+    let _r4 = sb_append_cstr(arena, s, "\tcvtsd2ss %xmm0, %xmm0\n" as *u8);
+    let _r5 = sb_append_cstr(arena, s, "\tmovss %xmm0, " as *u8);
+    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    return 0;
+}
+
+// emit_conv_exts_f32_to_f64 — f32 → f64 via cvtss2sd
+//   注:仅 src.qbe_type == QBE_S 时走本路径 — 整数 ext (extsb/extsh/extub/extuh/
+//   extsw/extuw) 走 emit_binop 路径,不在本模块。
+//   1. movss stack → %xmm0
+//   2. cvtss2sd %xmm0, %xmm0
+//   3. movsd %xmm0 → stack slot
+fn emit_conv_exts_f32_to_f64(state: *u8, tok: *u8, target_tag: i32) -> i32 {
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let t = tok as *ILToken;
+    // 注:QBE IL `%tN =<qt> <conv_op> %tM` 走 lexer %' branch → tok.int_val = dst temp id (N),
+    //   tok.qbe_type = qt byte,tok.text = "<conv_op> %tM"。src1 走 cg_parse_temp。
+    let dst_id = (*t).int_val;
+    let src_id = cg_parse_temp((*t).text, (*t).text_len, 0 as i64);
+    let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
+    let src_off = cg_offset_for_temp_with_target(src_id, target_tag);
+    let _r1 = sb_append_cstr(arena, s, "\tmovss " as *u8);
+    let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+    let _r3 = sb_append_cstr(arena, s, "(%rbp), %xmm0\n" as *u8);
+    let _r4 = sb_append_cstr(arena, s, "\tcvtss2sd %xmm0, %xmm0\n" as *u8);
+    let _r5 = sb_append_cstr(arena, s, "\tmovsd %xmm0, " as *u8);
+    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    return 0;
+}
+
+// emit_conv_sltof — i64 (signed) → f64 via cvtsi2sd
+//   1. movq stack → %rax (signed load)
+//   2. cvtsi2sd %rax, %xmm0
+//   3. movsd %xmm0 → stack slot
+fn emit_conv_sltof(state: *u8, tok: *u8, target_tag: i32) -> i32 {
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let t = tok as *ILToken;
+    // 注:QBE IL `%tN =<qt> <conv_op> %tM` 走 lexer %' branch → tok.int_val = dst temp id (N),
+    //   tok.qbe_type = qt byte,tok.text = "<conv_op> %tM"。src1 走 cg_parse_temp。
+    let dst_id = (*t).int_val;
+    let src_id = cg_parse_temp((*t).text, (*t).text_len, 0 as i64);
+    let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
+    let src_off = cg_offset_for_temp_with_target(src_id, target_tag);
+    let _r1 = sb_append_cstr(arena, s, "\tmovq " as *u8);
+    let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+    let _r3 = sb_append_cstr(arena, s, "(%rbp), %rax\n" as *u8);
+    let _r4 = sb_append_cstr(arena, s, "\tcvtsi2sd %rax, %xmm0\n" as *u8);
+    let _r5 = sb_append_cstr(arena, s, "\tmovsd %xmm0, " as *u8);
+    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    return 0;
+}
+
+// emit_conv_swtof — i32 (signed) → f64 via cvtsi2sd
+//   1. movl stack → %eax (32-bit load sign-extends to %rax by GAS)
+//   2. cvtsi2sd %rax, %xmm0 (cvtsi2sd 用 %rax — 自动 sign-ext 32→64)
+//   3. movsd %xmm0 → stack slot
+fn emit_conv_swtof(state: *u8, tok: *u8, target_tag: i32) -> i32 {
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let t = tok as *ILToken;
+    // 注:QBE IL `%tN =<qt> <conv_op> %tM` 走 lexer %' branch → tok.int_val = dst temp id (N),
+    //   tok.qbe_type = qt byte,tok.text = "<conv_op> %tM"。src1 走 cg_parse_temp。
+    let dst_id = (*t).int_val;
+    let src_id = cg_parse_temp((*t).text, (*t).text_len, 0 as i64);
+    let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
+    let src_off = cg_offset_for_temp_with_target(src_id, target_tag);
+    let _r1 = sb_append_cstr(arena, s, "\tmovl " as *u8);
+    let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+    let _r3 = sb_append_cstr(arena, s, "(%rbp), %eax\n" as *u8);
+    let _r4 = sb_append_cstr(arena, s, "\tcvtsi2sd %rax, %xmm0\n" as *u8);
+    let _r5 = sb_append_cstr(arena, s, "\tmovsd %xmm0, " as *u8);
+    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    return 0;
+}
+
+// emit_conv_ultof — u64 (unsigned) → f64 via half trick 7 insn
+//   half trick:把 u64 拆为 (x>>1) + (x>>63),cvtsi2sd 后 *2 即得正确 f64。
+//   此序列是 SSE2 唯一不溢出的 u64→f64 方法;QBE 本身用此实现。
+//   注:不能简化为 "movq + cvtsi2sd" — 值 ≥ 2⁶³ 时 cvtsi2sd 把 u64 当 i64,
+//       结果错(负数 → 负 f64)。
+//   insn 序列:
+//     movq -src(%rbp), %rax
+//     movq %rax, %rcx; shrq $1, %rcx        ; rcx = x >> 1
+//     movq %rax, %rdx; shrq $63, %rdx       ; rdx = x >> 63 (0 or 1)
+//     addq %rdx, %rcx                       ; rcx = (x>>1) + (x>>63)
+//     cvtsi2sd %rcx, %xmm0
+//     addsd %xmm0, %xmm0                    ; *2
+//     movsd %xmm0, -dst(%rbp)
+fn emit_conv_ultof(state: *u8, tok: *u8, target_tag: i32) -> i32 {
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let t = tok as *ILToken;
+    // 注:QBE IL `%tN =<qt> <conv_op> %tM` 走 lexer %' branch → tok.int_val = dst temp id (N),
+    //   tok.qbe_type = qt byte,tok.text = "<conv_op> %tM"。src1 走 cg_parse_temp。
+    let dst_id = (*t).int_val;
+    let src_id = cg_parse_temp((*t).text, (*t).text_len, 0 as i64);
+    let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
+    let src_off = cg_offset_for_temp_with_target(src_id, target_tag);
+    let _r1 = sb_append_cstr(arena, s, "\tmovq " as *u8);
+    let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+    let _r3 = sb_append_cstr(arena, s, "(%rbp), %rax\n" as *u8);
+    let _r4 = sb_append_cstr(arena, s, "\tmovq %rax, %rcx\n\tshrq $1, %rcx\n" as *u8);
+    let _r5 = sb_append_cstr(arena, s, "\tmovq %rax, %rdx\n\tshrq $63, %rdx\n\taddq %rdx, %rcx\n" as *u8);
+    let _r6 = sb_append_cstr(arena, s, "\tcvtsi2sd %rcx, %xmm0\n\taddsd %xmm0, %xmm0\n" as *u8);
+    let _r7 = sb_append_cstr(arena, s, "\tmovsd %xmm0, " as *u8);
+    let _r8 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r9 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    return 0;
+}
+
+// emit_conv_uwtof — u32 (unsigned) → f64 via movl %eax,%eax zero-ext + cvtsi2sd
+//   1. movl stack → %eax (32-bit load 零扩展 — GAS movl 自动 zero-ext 到 %rax)
+//   2. movl %eax, %eax (explicit zero-ext,防御 movabs 等意外 trunc)
+//   3. cvtsi2sd %rax, %xmm0
+//   4. movsd %xmm0 → stack slot
+//   注:必须用 "movl %eax, %eax" 而非 "mov %eax, %eax" — 前者 32-bit write zero-ext
+//       到 %rax,后者在某些 GAS 版本会触发 64-bit 操作 ambiguity。
+fn emit_conv_uwtof(state: *u8, tok: *u8, target_tag: i32) -> i32 {
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let t = tok as *ILToken;
+    // 注:QBE IL `%tN =<qt> <conv_op> %tM` 走 lexer %' branch → tok.int_val = dst temp id (N),
+    //   tok.qbe_type = qt byte,tok.text = "<conv_op> %tM"。src1 走 cg_parse_temp。
+    let dst_id = (*t).int_val;
+    let src_id = cg_parse_temp((*t).text, (*t).text_len, 0 as i64);
+    let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
+    let src_off = cg_offset_for_temp_with_target(src_id, target_tag);
+    let _r1 = sb_append_cstr(arena, s, "\tmovl " as *u8);
+    let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+    let _r3 = sb_append_cstr(arena, s, "(%rbp), %eax\n" as *u8);
+    let _r4 = sb_append_cstr(arena, s, "\tmovl %eax, %eax\n" as *u8);
+    let _r5 = sb_append_cstr(arena, s, "\tcvtsi2sd %rax, %xmm0\n" as *u8);
+    let _r6 = sb_append_cstr(arena, s, "\tmovsd %xmm0, " as *u8);
+    let _r7 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r8 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    return 0;
+}

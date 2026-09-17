@@ -31,6 +31,7 @@ import codegen_amd64_lexer;    // V2-B v2.6.3: lex_il / lex_il_count
 import codegen_amd64_emit_mem;    // V2-B v2.6.0 Unit B: emit_alloc / emit_store / emit_load / emit_loadsub
 import codegen_amd64_emit_ctrl;   // V2-B v2.6.0 Unit B: emit_jmp / emit_jnz / emit_label / emit_ret / emit_func_header / emit_data_string
 import codegen_amd64_emit_call;   // V2-B v2.6.0 Unit B: emit_call / emit_phi / emit_copy / emit_binop / emit_volatile
+import codegen_amd64_emit_sse;    // v2.11.19: 8 emit_conv_* (dtosi/stosi/truncd/exts/f32-f64/sltof/swtof/ultof/uwtof) + SSE helpers
 import codegen_amd64_peephole;    // V2-B v2.6.3: peephole_fold (local folding on emitted .s)
 import util;                      // V2-B v2.6.3: StringBuilder + sb_init / sb_buf / sb_len / ptr_add_u8
 import arena;                     // V2-B v2.6.3: Arena type + arena_alloc / arena_init
@@ -178,6 +179,37 @@ fn parse_and_emit(state: *u8, tokens: *u8, n: i64, target_tag: i32) -> i32 {
             // v2.11.1 (W-074.5 真修): dbgfile / dbgloc / { / } — 不 emit .s body,仅让 parse_and_emit 不卡 cursor
             let _x: i32 = 0 as i32;
             let _ = _x;
+        } else if kind == ILTOK_DTOSI() {
+            // v2.11.19: f64 → i32/i64 via cvttsd2si (dst width 由 tok.qbe_type 决定)
+            let _ = emit_conv_dtosi(state, tok_p, target_tag);
+        } else if kind == ILTOK_STOSI() {
+            // v2.11.19: f32 → i32/i64 via cvttss2si (dst width 由 tok.qbe_type 决定)
+            let _ = emit_conv_stosi(state, tok_p, target_tag);
+        } else if kind == ILTOK_TRUNCD() {
+            // v2.11.19: f64 → f32 via cvtsd2ss
+            let _ = emit_conv_truncd(state, tok_p, target_tag);
+        } else if kind == ILTOK_EXTS() {
+            // v2.11.19: exts with src=qbe_type=S 走 f32→f64 via cvtss2sd
+            //   (exts with src=W/H/B 整数 ext — emit_binop 已有的整数 ext 路径
+            //   通过 ILTOK_BINOP 走,不在本 dispatch)
+            let t_p = tok_p as *ILToken;
+            if (*t_p).qbe_type == QBE_S_LOCAL() {
+                let _ = emit_conv_exts_f32_to_f64(state, tok_p, target_tag);
+            }
+            // 否则 (src=W/H/B) 不应通过 ILTOK_EXTS 到达 — 整数 ext 走 ILTOK_BINOP。
+            // 兜底 noop (sema 应已 reject 整数 ext 用 ILTOK_EXTS,但本路径有防御)
+        } else if kind == ILTOK_SLTOF() {
+            // v2.11.19: i64 (signed) → f64 via cvtsi2sd
+            let _ = emit_conv_sltof(state, tok_p, target_tag);
+        } else if kind == ILTOK_SWTOF() {
+            // v2.11.19: i32 (signed) → f64 via cvtsi2sd (sign-ext 32→64)
+            let _ = emit_conv_swtof(state, tok_p, target_tag);
+        } else if kind == ILTOK_ULTOF() {
+            // v2.11.19: u64 (unsigned) → f64 via half trick 7 insn
+            let _ = emit_conv_ultof(state, tok_p, target_tag);
+        } else if kind == ILTOK_UWTOF() {
+            // v2.11.19: u32 (unsigned) → f64 via "movl %eax,%eax" zero-ext + cvtsi2sd
+            let _ = emit_conv_uwtof(state, tok_p, target_tag);
         } else if kind == ILTOK_EOF() {
             return 0;
         }
