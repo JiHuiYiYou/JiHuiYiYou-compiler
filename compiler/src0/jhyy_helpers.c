@@ -70,6 +70,38 @@ int jh_f64_atof(const char *s, long long len, void *dst) {
     return 0;
 }
 
+/* v2.11.19 Phase 3a: 把 f64 字面量文本转 IEEE 754 bit pattern (i64)。
+   jhyy-side cg_parse_f64_imm_bits 用此走 fractional (N.M) 分支 — 自己解析
+   i64 literal 表只 cover integer-valued d_N (0/1/2/3/4/5/10),d_1.5/d_2.5/d_3.14
+   等 fractional 全 fallback 0 → 自-backend 的算术结果错 (QBE constant-folding 闭环)。
+   C 端 atof → 强转 bits,jhyy-side 拿 i64 bit pattern → emit movabsq $bits, %rax +
+   movq %rax, -<off>(%rbp)。
+   注:Win64 ABI f64 return 用 XMM0,jhyy extern 不能直接接 f64 — 用 store 模式:
+   本函数把解析后的 bits 写到 caller 提供的 8-byte buffer,jhyy-side 读 i64 出来。
+   abi/i386 SysV 同 pattern (XMM0 return) — jhyy-side 拿 8-byte heap buf,本函数写回。 */
+long long jh_double_to_bits(const char *s, long long len, void *out_buf) {
+    char buf[128];
+    long long n = len < 127 ? len : 127;
+    for (long long i = 0; i < n; i++) buf[i] = s[i];
+    buf[n] = '\0';
+    double d = atof(buf);
+    *(long long *)out_buf = *(long long *)&d;
+    return 0;
+}
+
+/* v2.11.19 Phase 3a: 把 f32 字面量文本转 IEEE 754 single-precision bit pattern (i32)。
+   jhyy-side cg_f32_imm_bits 用此走 true impl (替代 v2.11.15 Iter 1b stub "返 imm_val")。
+   store 模式同 jh_double_to_bits:caller 提供 4-byte buf,本函数写回 i32 bits。 */
+int jh_float_to_bits(const char *s, long long len, void *out_buf) {
+    char buf[128];
+    long long n = len < 127 ? len : 127;
+    for (long long i = 0; i < n; i++) buf[i] = s[i];
+    buf[n] = '\0';
+    float f = (float)atof(buf);
+    *(int *)out_buf = *(int *)&f;
+    return 0;
+}
+
 /* v1.7.1 patch A1 — W-042 Tier 3: post-link .exe stat check.
    链接成功 (jh_run 返回 0) 后, stat exe_path 验文件存在且 size > 0.
    抓 gcc "succeeded" 但 produce 0 字节 / missing 文件的 silent corruption case.
