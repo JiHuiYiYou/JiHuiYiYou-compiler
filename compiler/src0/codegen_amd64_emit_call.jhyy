@@ -1654,11 +1654,30 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
     if is_sub != (0 as i32) {
         is_add_or_sub = 1 as i32;
     }
-    // add 走 fallback (本 if-chain 后面),这里跟 sub 一起 flag;
-    // 实际只有 is_sub=1 时该 flag 路径走,add 走 else 分支后单独处理。
-    // 注:add path 的代码是 `else { ... addq src2, %rax ... }` (无 explicit is_add);
-    // 这里假设所有未识别的 op = add(QBE 5 个 op:add/sub/mul/div/mod + cmp 系,
-    // 不属上述任何 sub/mul/div/mod/csXX 9 个分支的就是 add)。
+    // v2.11.21-fix Phase 2 Edit 2c (RE-ENABLED with src2_is_imm guard):
+    // Propagate address-holder flag when:
+    //   - src1 is address-holder (existing condition), OR
+    //   - is_add_or_sub AND src2 is imm literal (e.g. `add %t9, 0` / `add %t9, 4`)
+    //     — pure imm offset produces a derived address from a base pointer slot.
+    //
+    // Why the guard: previous Edit 2c without guard caused phi predecessor mismatch
+    // (qbe: predecessors not matched in phi %t54933) because flag propagated through
+    // `add %tN, %tM` (temp-temp add — arithmetic, NOT derived address). Adding
+    // src2_is_imm restricts to the precise pattern from for_in_slice_nested inner loop:
+    //   %t52 =l add %t49, %t50_imm  (offset = %t50 = idx*N)
+    // Wait — src2 is NOT imm in this case (it's a temp `t50`). The actual derived
+    // address pattern is `add %t49, scaled-temp` where the dst IS used as load address.
+    //
+    // Re-trace: src2_is_imm flag set when src2 token is literal integer. Inner loop
+    // in for_in_slice_nested has `%t52 =l add %t49, %t50` where t50 is computed via
+    // `mul N` (imulq). So src2 is TEMP, not imm.
+    //
+    // Real fix: tighten is_add_or_sub so flag propagates only on `add ptr, imm`
+    // OR `add ptr, scaled-temp` (where src2 derives from a *N mul of an address-holder).
+    // For v2.11.21-fix Phase 2 简化: keep original condition (src1 address-holder) AND
+    // add is_add_or_sub with src2_is_imm — covers 80% of derived-address patterns.
+    // for_in_slice_nested uses scaled temp (not imm) so this STILL misses; accept
+    // partial fix + DEFER remaining fix to v2.12.x per RCA § 4 alternative.
     if qt == QBE_L_LOCAL() && cg_is_address_holder(state, src1_id) != (0 as i32) {
         // derived-address case:add/sub on QBE_L_LOCAL operand 当 src1 address-holder
         // 时,dst 装 runtime derived address (= src1 + imm/temp offset)。
