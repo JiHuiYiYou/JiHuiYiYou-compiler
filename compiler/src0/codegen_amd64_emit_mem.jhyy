@@ -147,6 +147,9 @@ fn mem_parse_int_from(text: *u8, len: i64, from: i64) -> i64 {
 
 // volatile token 归一:QBE_VOLATILE_MARKER 没带宽度信息,退回 'w'(per § 2.4,
 // emit 成普通 load/store,不插 barrier;3c ship 后才 flip 行为)。
+// v2.11.19 Phase 4: QBE_S/QBE_D 浮点类型保留原 type letter (v2.5.0 之前塌成 QBE_W,
+// 导致 f64 load 只 mov 4 byte — 截断丢精度)。现在 pass-through 让 callers 自决
+// 走 xmm0 scratch + movss/movsd。
 fn mem_effective_qbe_type(qt: i32) -> i32 {
     if qt == QBE_VOLATILE_MARKER() {
         return QBE_W_LOCAL();
@@ -154,24 +157,33 @@ fn mem_effective_qbe_type(qt: i32) -> i32 {
     if qt == QBE_L_LOCAL() || qt == QBE_B_LOCAL() || qt == QBE_H_LOCAL() {
         return qt;
     }
-    // 'w' / 's' / 未知一律按 32-bit word 处理(v2.5.0 不碰浮点栈搬运)
+    // v2.11.19 Phase 4: 浮点 type pass-through (QBE_S=f32, QBE_D=f64)
+    if qt == QBE_S_LOCAL() || qt == QBE_D_LOCAL() {
+        return qt;
+    }
+    // 'w' / 未知一律按 32-bit word 处理
     return QBE_W_LOCAL();
 }
 
 // GAS mov 后缀:w→l(32) / l→q(64) / b→b(8) / h→w(16),per qbe/amd64/emit.c 表。
+// v2.11.19 Phase 4: 加 s→ss / d→sd (SSE mov 后缀,for xmm scratch)。
 fn mem_mov_suffix(qt: i32) -> *u8 {
     if qt == QBE_L_LOCAL() { return "q" as *u8; }
     if qt == QBE_B_LOCAL() { return "b" as *u8; }
     if qt == QBE_H_LOCAL() { return "w" as *u8; }
+    if qt == QBE_S_LOCAL() { return "ss" as *u8; }
+    if qt == QBE_D_LOCAL() { return "sd" as *u8; }
     return "l" as *u8;
 }
 
 // scratch 寄存器:x86 没有 mem→mem mov,栈到栈必须过一次寄存器。
 // %rax 是 MS x64 的 volatile/返回寄存器,跨指令不需要保存 → 拿来当中转最省。
+// v2.11.19 Phase 4: 加 QBE_S/QBE_D → %xmm0 (SSE scratch,float load/store)。
 fn mem_scratch_reg(qt: i32) -> *u8 {
     if qt == QBE_L_LOCAL() { return "%rax" as *u8; }
     if qt == QBE_B_LOCAL() { return "%al" as *u8; }
     if qt == QBE_H_LOCAL() { return "%ax" as *u8; }
+    if qt == QBE_S_LOCAL() || qt == QBE_D_LOCAL() { return "%xmm0" as *u8; }
     return "%eax" as *u8;
 }
 
