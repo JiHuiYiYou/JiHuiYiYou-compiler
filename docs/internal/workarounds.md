@@ -72,7 +72,7 @@
 | [W-074](#w-074-codegen_amd64_run-产出-0-字节-s---v2110-真修) | 🟢 **PARTIAL** 2026-09-10 (v2.11.0 ship — il_len=0 root cause 真修;v2.11.1 ship — W-074.5 lexer gap closure 闭环;W-074.6 self-backend multi-func deferred v2.x 中期) | codegen_amd64_run (compiler/src0/codegen_amd64.jhyy:196-283) 在 `JHY_SELF_BACKEND=1` 环境变量下产出 0 字节 .s。**真根因 isolated** (2026-09-09): `jh_read_file(il_path, il_buf, il_cap, &il_len)` 中 `&stack_local_i64` 在 jhyy codegen 下不保证回写 (跟 stack-local 嵌套 emit_X 调用 ABI 冲突),C side `*out_len = sz` 写入别处 heap,**stack 上的 il_len 仍为 0** → `lex_il(il_buf, 0, &arena)` → `lex_il_count` 0 → `parse_and_emit(_, _, 0, _)` 不进 loop → sb.len = 0 → 0-byte .s。**真修** (v2.11.0 ship, commit 25dfb00): heap-allocate `il_len_box = malloc(8)`, `*(il_len_box) = 0`, 传 `il_len_box` 给 `jh_read_file`,call 后 `il_len = *(il_len_box)`。现在 trace v5 显示 `il_len=146` for hello.jhyy (match file size) → 真根因闭环。**下游 W-074.5** (v2.11.1 ship 2026-09-10 真修): `parse_and_emit` 在 n=3 (lexer 不识 dbgfile/dbgloc/{/} 静默消费) → emit_X 看到意外 token kind → segfault。真修: lexer 4 子问题 + ILTOK_DIRECTIVE + parse_and_emit noop + csltw + call args + struct offset + emit cast (~390 LOC)。**下游 W-074.6** (v2.x 中期 deferred): self-backend multi-func body 0-byte (emit_ret 不 load %t1 → %eax + emit_copy 误 cast + 等 pre-existing bugs,per [[feedback_codegen_amd64_run_zerobyte]])。**v2.11.0 + v2.11.1 ship gate 调整**:QBE fallback 5/5 PASS + self-backend 1/5 hello PASS,multi-func self-backend PASS 留 v2.x 中期 W-074.6。详见 W-074 + W-074.5 + W-074.6 sections。 |
 | [W-074.5](#w-0745-codegen_amd64_run-lexer-gap-dbgfiledbgloc--v2111-ship-2026-09-10-真修-closure) | 🟢 **RESOLVED** 2026-09-10 (v2.11.1 ship on axis-v2) | lexer dispatcher 不识 QBE IL 输出必带的 4 个关键字/字符:`dbgfile` / `dbgloc` / `{` / `}` → 走 L959-963 error-skip 循环 → emit 函数从未被调 → parse_and_emit 看到 EOF 提前 → `sb.len` 仅含 prologue 几行 → emit_call/emit_ret 看到 EOF → deref uninit slot → SIGSEGV (exit 139) 或 0-byte .s。**真修 (4 commit, ~390 LOC)**:(1) state.jhyy +1 LOC `ILTOK_DIRECTIVE()=16`;(2) lexer.jhyy +280 LOC: 'd' branch 扩 dbgfile/dbgloc + '{'/'}' single-char dispatch + '%' branch parse dst temp id (延伸-3) + next_token_copy parse src IMM/TEMP (延伸-4) + next_token_func_header consume (args) (延伸-6) + 'c' branch csltw/cslew/.../cugew compare ops (延伸-7) + next_token_data_string consume 整段 body (延伸-5) + next_token_call consume 整段 args (延伸-8);(3) codegen_amd64.jhyy +4 LOC parse_and_emit DIRECTIVE noop;(4) regalloc.jhyy +11 LOC struct offset 真修 (4→8 / 12→16 / 20→24);(5) emit_call.jhyy +115 LOC emit_comment/emit_mov_temp_to_offset 误 cast 真修。**验证**:5/5 QBE fallback PASS (baseline HOLD) + 1/5 self-backend hello PASS + D43 closure HOLD `6a2f2277...` + jhyy.exe.sha256 refresh `1605b1d0...`。详见 W-074.5 section。 |
 | [W-074.6](#w-0746-codegen_amd64_run-multi-func-self-backend-body-0-byte--v2x-中期-deferred-2026-09-10) | 🟢 **PARTIAL** 2026-09-17 (v2.11.19 ship — Phase 1-5 SSE/float emit (Win+SysV) 5 sub-commit 真修:lexer 8 conv op + dispatcher hard-error + emit_sse.jhyy 新建 + f32 IMM 真解 + f64 lookup table 高 32-bit 真修 + FNARG XMM bug + emit_load/store 浮点路径;4 新 fixture 全 PASS;regress 100/115 → **104/139 PASS** (+4 from 4 新 fixture)) | W-074.5 lexer gap closure 后,hello.jhyy self-backend 能 compile 但 exit 1 (不是 42);multi-func tests (fib_renamed / struct_val_pass / nested_struct_deep / big_test) self-backend silent fail (无 .s 输出或 hang)。**多个 pre-existing emit 函数体 bugs** 综合 (v2.6.3 → v3.1.4 持续):emit_ret 不 mov %t1 → %eax + emit_copy 1-to-1 简化栈分配 但不写回 mov + emit_call target_tag 分支不全 + emit_binop silent-skip (cslt/cnew/cnew silent-skip 4-char compare op family) + extsw silent-skip + 等等。**v2.11.10 (T3-a + T4-c)** ship 真修 ~155 LOC (per-fn frame state reset + multi-arg FN_ARG 真修) → 5/6 self-backend EXIT exact closure (big_test SIGFPE)。**v2.11.11 (T4-g)** ship 真修 ~5 LOC (lexer 4-char compare-op guard) → 5/6 maintained (big_test hang at t_bit_pack)。**v2.11.12** ship 真修 ~115 LOC (5 ops and/or/xor/shl/shr lexer+emit_binop + emit_copy dst_id=0 LHS cursor save/restore) → **6/6 self-backend EXIT exact closure ✅ 达成** (big_test EXIT=57, t_bit_pack/t_bit_unpack/t_shifts 全 PASS, 之前 hang at t_bit_pack 5min+ timeout)。**v2.11.13 (Iter 4)** ship 真修 1 LOC (emit_binop "cnew" 4-char → "cne" 3-char substring) → **cross-cluster +7 PASS** self-backend (arith/int_width_arith/int_suffix/C.2 cap_table_advanced/cap_test_sysv 等 closure); **FLIP +7 触发 stop threshold 5 → scope DOWN v2.11.13** (Iter 5 C.4 float / Iter 6 C.7 defer / Iter 7 B observe 全 deferred v2.11.14)。**v2.11.19 (Phase 1-5)** ship 5 sub-commit SSE/float emit 真修 (Win+SysV 双 ABI, 单 xmm0 scratch stack-slot model) + 4 新 fixture (conv_test/float_load_store/float_arg_xmm/float_unsigned) + sysv_float_cross.sh 新建 (docker gcc:12 cross test);**累计 W-074.6 family closed ~700 LOC**:T3-a + T4-c + T4-g + shl/shr + dst_id=0 + cne substring + Phase 1-4 SSE 真修 + cg_parse_f64_imm_bits 真修。**剩余**:XMM regalloc / stack-arg fallback nargs≥5 / B-runtime cluster (15 FAIL pre-existing:big_array/cap_table_basic/const_array/const_struct_array/defer_multi_lifo/...) — 推 v2.11.20 / v3.x。**M5 启动仍需等剩余 W-074.6 family 子 sprint 闭环** (per `v1.x-phase-4-m5-boot-from-scratch.md`)。详见 W-074.6 + W-074.6 T4-g closure + W-074.6 shl/shr + W-074.6 dst-id-0 + W-074.6 cne substring + W-074.6 v2.11.19 SSE sections。 |
-| [W-074.10](#w-07410-emit_load--emit_copy-label-address-holder-flag-propagate--closed-v21120-ship-2026-09-17-rc-1--rc-7-真修-7-self-backend-tests) | ✅ **CLOSED** 2026-09-17 (v2.11.20 ship on axis-v2, Phase 1+2 commit `56be6cf`) | self-backend emit_load 已有 indirect dispatch 但 emit 完后**不** propagate flag 给 dst;emit_copy LABEL path `return 0;` 跳过 FNARG/TEMP path 的 flag propagate。后续 add+load 看不到 flag → 走 slot read 路径 → wrong value。修复 (~10 LOC):emit_load 函数末尾加 flag propagate (守卫 qbe_type==QBE_L && src 是 address-holder);emit_copy LABEL 分支 `return 0;` 前加 flag propagate (守卫 dst_qt==QBE_L)。**+7 self-backend tests** (slice 5 + const 2)。详见 W-074.10 section。 |
+| [W-074.10](#w-07410-emit_load--emit_copy-label-address-holder-flag-propagate--closed-v21120-ship-2026-09-17-rc-1--rc-7-真修-7-self-backend-tests) | ✅ **CLOSED** 2026-09-17 (v2.11.20 ship on axis-v2, Phase 1+2 commit `56be6cf`) | self-backend emit_load 已有 indirect dispatch 但 emit 完后**不** propagate flag 给 dst;emit_copy LABEL path `return 0;` 跳过 FNARG/TEMP path 的 flag propagate。后续 add+load 看不到 flag → 走 slot read 路径 → wrong value。修复 (~10 LOC):emit_load 函数末尾加 flag propagate (守卫 qbe_type==QBE_L && src 是 address-holder);emit_copy LABEL 分支 `return 0;` 前加 flag propagate (守卫 dst_qt==QBE_L)。**+7 self-backend tests** (slice 5 + const 2)。**v2.11.21 RCA caveat (W-074.13 sub-bug 4)**: emit_load load-propagation 部分在 nested slice iterate (for_in_slice_nested) 实际是 over-aggressive — load 返 value 不 address,不应 propagate。v2.11.21 fix 删除 emit_load load-propagation block + 收紧 emit_binop 让 add/sub on L_LOCAL 永远 propagate。详见 W-074.10 + W-074.13 section。 |
 | [W-074.11](#w-07411-self-backend-emit_loadstore-label-path-missing--closed-v21120-ship-2026-09-17-rc-3-w-017-真修-3-self-backend-tests) | ✅ **CLOSED** 2026-09-17 (v2.11.20 ship on axis-v2, Phase 3 commit `970f2ca`) | v1.4.6 W-017 真修走 QBE path 发 `loadw/storew $g_x`,但 self-backend emit_load/emit_store 只认 `%tN` (mem_parse_temp 返 -1)。遇到 `loadw $g_x` silent fail → global 永远 = init value + garbage tail。修复 (~40 LOC):emit_load/emit_store 各加 $label branch,scan text 找 `'$'` + ident chars,emit RIP-relative mov 双段。**+3 self-backend tests** (top_level_let_mut_test/types/defer_multi_lifo)。详见 W-074.11 section。 |
 | [W-074.12](#w-07412-match-range-cmpclamp-bug--closed-v21120-ship-2026-09-17-rc-4-真修-1-self-backend-test) | ✅ **CLOSED** 2026-09-17 (v2.11.20 ship on axis-v2, Phase 4 commit `0831459`) | match range pattern (e.g. `-3..-1`) 2 bug:(a) 负号被吞 lex 出 `3` 而非 `-3`;(b) clamp i64 比较 mod 2^32 wraparound,负 high bound `-1` wrap `0xFFFFFFFF`。修复 (~30 LOC):低/高边界 parse text 保留负号 sign-aware + sign-aware clamp。**+1 self-backend test** (match_range=0)。详见 W-074.12 section。 |
 | [W-074.13](#w-07413-v21120-deferred-items-4-self-backend-tests--deferred-to-v21121) | ⏸ **DEFERRED** to v2.11.21+ (v2.11.20 ship 走 honest scope) | 4 deep-rooted self-backend fail 推 v2.11.21+:**big_array** (slot alloc conflict — cg_alloc_slot + cg_offset_for_temp_with_target 物理 overlap,需 2-pass slot alloc 重设计);**cap_table_basic** (emit_load silent fail — fnarg ID 在 cg_is_address_holder 查询 gap);**dungeon_game** (multi-file import link path silent fail — W-074.6 PARTIAL 主项子集);**for_in_slice_nested** (nested slice iterate SEGV — emit_slice_iter_body 双层 for 路径需深入)。**总估 v2.11.21 ~140-230 LOC + 1 真架构改**。详见 W-074.13 section。 |
@@ -6279,74 +6279,151 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 
 ---
 
-## W-074.13: v2.11.20 deferred items (4 self-backend tests) — ⏸ DEFERRED to v2.11.21+
+## W-074.13: v2.11.20 deferred items (4 self-backend tests) — ⏸ DEFERRED to v2.11.21+ (RCA complete 2026-09-17, see rca-v2.11.21.md)
 
-**ID:** W-074.13 (NEW in v2.11.20 RCA, RC-2/5/6 + 扩展 RC-1)
+**ID:** W-074.13 (NEW in v2.11.20 RCA, RC-2/5/6 + 扩展 RC-1; refined by v2.11.21 RCA)
 
 **状态:** ⏸ DEFERRED (v2.11.20 ship 2026-09-17 走 honest scope — 不为 +15 数字蒙混 ship 11 fixes;4 deep-rooted fail 推 v2.11.21+ 真修)
 
-**4 deferred items:**
+**v2.11.21 RCA refinement (2026-09-17, 5 sub-agent parallel investigation per `feedback_rca_first_root_cause`):**
+
+| Sub-bug | v2.11.20 RCA claim | v2.11.21 actual root cause | LOC est delta |
+|---|---|---|---|
+| 1: big_array | 2-pass slot alloc (~80-120) | emit_alloc record pointer-slot below region (~10-30) | **-90** |
+| 2: cap_table_basic | fnarg ID lookup gap (~10-20) | emit_copy heuristic miscounts `%t` (~5-10) | **-5** |
+| 3: dungeon_game | multi-file import link (~30-50) | missing label defs, lexer skip or emit_label silent fail (~10-80) | **-20** |
+| 4: for_in_slice_nested | deeper indirect dispatch chain (~20-40) | **v2.11.20 RC-1 fix over-aggressive — load propagation wrong direction** (~5 net) | **regression identified** |
+
+**总 v2.11.21 fix scope 收敛:** ~30-75 LOC (down from 140-230 estimate)。
+
+**4 deferred items (RCA-refined root causes):**
 
 ### Sub-bug 1: big_array slot allocation conflict (RC-2)
 
 **症状:** big_array.jhyy 跑 self-backend SEGV at element 93 init (exit 0xC0000005 ACCESS_VIOLATION)。
 
-**根因:** `cg_alloc_slot` 跟 `cg_offset_for_temp_with_target` 不协调:
-- `cg_alloc_slot` (codegen_amd64_emit_mem.jhyy:256-) 把 400B 数组 region 放 `rbp-400` 到 `rbp-4`
-- `cg_offset_for_temp_with_target` (codegen_amd64_state.jhyy:626+) 把 t1 8-byte pointer-slot 放 `-(32 + 1*8) = -40` (Win path)
-- 物理 overlap: t1 占 `rbp-40` 到 `rbp-32`,arr[91] = `rbp-36`,arr[92] = `rbp-32`
-- 写 arr[91] 写 t1 高 4 byte → 当 element 93 读 t1 as 8-byte pointer: `arr_base | (garbage << 32)` → SEGV
+**v2.11.21 RCA 根因 (CONFIRMED v2.11.20 hypothesis, simpler fix):** `emit_alloc` (codegen_amd64_emit_mem.jhyy:284-297) calls `cg_alloc_slot(state, 400)` to advance `next_offset` downward for region (places at rbp-400..rbp-1), but then computes pointer-slot via `cg_offset_for_temp_with_target(dst, win)` which returns hardcoded `-(32+dst*8) = -40` for dst=1 — NO coordination between region placement and pointer-slot placement.
 
-**真修所需:** 2-pass slot allocation。Pass 1: 收集所有 alloc + temp size。Pass 2: 分配不重叠 region + temp slot。
+**Evidence from .s** (`/tmp/_rca_big_array.s`):
+- Line 16-17: `leaq -400(%rbp), %rax; movq %rax, -40(%rbp)  # → %t1`
+- For copy 91: `addq $360, %rax; movl $91, (%r8)` → writes arr[90] at -40(%rbp), **overwriting t1's low 4 bytes**
+- Subsequent binop reads t1 from -40(%rbp) → garbage → bogus address → SEGV
 
-**LOC est:** ~80-120 LOC (重设计 cg_alloc_slot + cg_offset_for_temp_with_target 协调层)
+**真修所需 (~10-30 LOC, NOT 2-pass):** In `emit_alloc` after `cg_alloc_slot` returns `slot`, set pointer-slot **directly below region**:
+```jhyy
+let slot = cg_alloc_slot(state, aligned);
+let pointer_slot_off = slot - 8;  // 8-byte pointer slot just below region
+let _rec = cg_record_temp_slot(state, dst, pointer_slot_off);
+(*s).next_offset = (*s).next_offset - 8;
+(*s).total_alloc = (*s).total_alloc + 8;
+let off = slot;
+```
+`mem_temp_offset` already queries `temp_slot_for_id[dst]` first (state.jhyy:644-650) and returns recorded `pointer_slot_off`. The `cg_record_temp_slot` infrastructure already exists (state.jhyy:251-262) — v2.11.8 derived-address tracking fix made emit_alloc skip calling it; fix re-enables with different value (below region, not equal to region).
 
-**OS 启动链路:** 不阻塞 M1 (g_boot_loader);不阻塞 M4 (kernel entry);不阻塞 M11 (userspace)。仅 1 test deferred,v2.11.21 真修。
+**Cross-test relevance:** Only big_array impacted. cap_table_basic (16B struct), dungeon_game (link fail), for_in_slice_nested (load propagation bug) are unrelated.
+
+**OS 启动链路:** 不阻塞 M1-M11。仅 1 test deferred。
 
 ---
 
-### Sub-bug 2: cap_table_basic emit_load silent fail (RC-5)
+### Sub-bug 2: cap_table_basic emit_copy FNARG misclassification (RC-5) — v2.11.20 RCA REFUTED
 
-**症状:** cap_table_basic.jhyy self-backend EXIT=30 (expected 42)。cross_fn_sum_table 函数 `t4 = loadl t3` 走 emit_load,emit_load silent-fail 返 1 → main loop fall through → emit as copy → wrong value (永远 = t3 value 本身,不是 t3 deref 的内容)。
+**症状:** cap_table_basic.jhyy self-backend EXIT=30 (expected 42)。cross_fn_sum_table 函数 `t4 = loadl t3` 走 emit_load,emit_load silent-fail 返 1 → main loop fall through → emit as copy → wrong value。
 
-**根因:** emit_load 对 `loadl %t3` where t3 is function arg 的间接 dispatch 路径里 `cg_is_address_holder(state, t3)` 返 0。FNARG path 在 codegen_amd64_emit_call.jhyy:1230-1265 确实 propagate flag 给 t3,但 `cg_is_address_holder` 查询机制在 fnarg ID 范围 (-3/-4/-5/-6) 有 lookup gap,永远返 0。需深入 cg_state.jhyy address-holder bitmap + FNARG ID 协调。
+**v2.11.21 RCA 根因 (REFUTED v2.11.20 fnarg ID lookup gap hypothesis):** `emit_copy` TEMP-vs-FNARG **detection heuristic** at codegen_amd64_emit_call.jhyy:1057-1071 miscounts bare `%t` (fn arg) as a temp:
+- `pct_count` counting loop increments for ANY `%t` prefix (regardless of digits)
+- For IL `%t3 =l copy %t`, pct_count = 2 → misclassified as TEMP copy
+- TEMP branch calls `cg_parse_temp(..., idx=1)` which requires DIGITS after `t` (state.jhyy:825 `if ndig > 0`)
+- For `%t` (no digits), returns -1 → falls back to `src_temp_id = 0` (t0's garbage)
+- FNARG detection branch (lines 1089-1123) never entered because `pct_count >= 2`
 
-**真修所需:** 修 cg_state.jhyy 的 cg_is_address_holder 让 fnarg ID (-3/-4/-5/-6) 也走 bitmap 查询。
+The flag propagation IS correct when called; the issue is `emit_copy` never reaches the FNARG path that calls `cg_record_temp_holds_address` (line 1238). So t3 stays unflagged → emit_load falls back to slot read → t4 = t3 (pointer value, not deref) → wrong EXIT.
 
-**LOC est:** ~10-20 LOC
+**Evidence from .s** (`/tmp/_rca_cap_table.s` cross_fn_sum_table):
+```asm
+cross_fn_sum_table:
+  movq -32(%rbp), %rax      # EMIT_COPY: src_off = -32 = t0 slot (WRONG)
+  movq %rax, -56(%rbp)      # → t3 slot. Should be "movq %rcx, -56(%rbp)" (FNARG path)
+  movq -56(%rbp), %rax      # EMIT_LOAD %t3 — direct slot read (no indirect dispatch)
+  movq %rax, -64(%rbp)      # → t4 = t3's value (pointer), NOT *t3
+```
+
+**真修所需 (~5-10 LOC):** Two options:
+1. Replace `pct_count` loop with `cg_count_valid_temps(text, len)` helper that uses same `ndig > 0` check as cg_parse_temp
+2. **Recommended (smaller, defensive)**: In TEMP branch (line 1067-1071), validate `src_temp_id` returned by cg_parse_temp — if -1, fall through to FNARG detection instead of defaulting to 0
+
+**Cross-test relevance:** Only triggers when fn arg name starts with `t` (e.g. `%t`, `%table`, `%target`, `%temp`). Rare edge case; only cap_table_basic in regress uses `%t` as fn arg.
 
 **OS 启动链路:** 不阻塞 M1-M11。cap_table_basic = V3-C 3i generics 残 codegen 测试,v3.0 启动后才相关。
 
 ---
 
-### Sub-bug 3: dungeon_game multi-file import link (RC-6)
+### Sub-bug 3: dungeon_game missing label definitions (RC-6) — v2.11.20 RCA REFUTED
 
 **症状:** dungeon_game.jhyy self-backend EXIT=1 (gcc link failed: ld returned 1 exit status)。stderr 显示 jhyy.exe gcc driver 跑 link 失败。
 
-**根因:** dungeon_game 是 multi-file example (主文件 + 子 module),self-backend 路径 `link_with_gcc` 调 gcc driver 时 multi-file 子函数 `main_jhyy` 在 .s 里 not visible per linker。可能 emit_call multi-fn path 或 main.jhyy file-level dispatch 对 `jhyy_helpers.c` 之外的子 file emit 不走 codegen 路径 (W-074.6 PARTIAL 主项 silent-fail 的子集)。
+**v2.11.21 RCA 根因 (REFUTED v2.11.20 multi-file import hypothesis — dungeon_game is **single-file**, grep `import` = 0 lines):** Self-backend emits `jmp .Lelse50_b0_fn6` and `jmp .Lelse53_b0_fn6` but **never emits the corresponding `.Lelse50:` / `.Lelse53:` label definitions**:
+```
+$ nm -u _rca_dg_self.o
+                 U .Lelse50_b0_fn6
+                 U .Lelse53_b0_fn6
+                 U printf / puts / scanf   (these 3 are C runtime — OK)
+```
+QBE baseline has only 3 C runtime undefineds. Self adds 2 missing labels → `ld returned 5 exit status`.
 
-**真修所需:** 深入 link_with_gcc path + multi-file jhyy emit 协调。W-074.6 PARTIAL 主项真修的子集。
+**Control flow pattern triggering it:** `then`-branch is `ret`-only, so `@else50`/`@else53` are unreachable in practice, but IL still tokenizes them as labels. Pattern:
+```
+@then49 → ret → @else50 → jmp @merge51 → @merge51 → jmp @merge45 → @else44 → jmp @merge45 → @merge45
+```
+`.s` has `.Lthen49 → Lmerge51 → .Lelse44 → Lmerge45` — **`.Lelse50` and `.Lelse53` are completely missing**.
 
-**LOC est:** ~30-50 LOC
+**Suspect causes:** Either `next_token_label` is being skipped past these labels, or `emit_label` silently fails. Most likely given W-074.6/W-074.7 bug history: arena-allocated `(*t).text` reuse bug where two consecutive label tokens share same `text` pointer, and `emit_label` for first one happens correctly while second one's `text` pointer got reallocated for different token before emit. Could also be `cg_record_block_name` table-full failure silently falling back to `b_count = 0` for different name slot.
+
+**真修所需 (~10-30 trivial / 30-80 if lexer arena reuse):**
+- Add assertion in `emit_label` after writing the def: emit `# EMIT_LABEL <name>\n` comment marker and verify post-emit that label name appears in `sb`
+- Bisection: insert `jh_fputs_stderr("token kind=%d\n", tok.kind)` debug in `parse_and_emit` to confirm whether `ILTOK_LABEL` for `@else50`/`@else53` ever reach dispatch
+- Investigate `lex_skip_ws_and_comments` between `next_token_ret` and next `next_token_label` call for a bug that consumes past `\n` into `@else50` line
+
+**Cross-test relevance:** **None**. This specific control flow pattern (ret-only-then + forward-jmp + immediate-merge) is unique to dungeon_game's `$battle` `if state == 0` block in entire regress.
 
 **OS 启动链路:** 不阻塞 M1-M11。dungeon_game = example/test,非 OS 关键路径。
 
 ---
 
-### Sub-bug 4: for_in_slice_nested nested slice iterate SEGV (扩展 RC-1)
+### Sub-bug 4: for_in_slice_nested nested slice iterate SEGV (扩展 RC-1) — ⚠️ v2.11.20 RC-1 REGRESSION IDENTIFIED
 
 **症状:** for_in_slice_nested.jhyy self-backend EXIT=139 (SIGSEGV)。`for x in slice_of_slices { for y in x { ... } }` 二层 slice iterate SEGV。
 
-**根因:** RC-1 fix (W-074.10) 修了 5 个 slice test + 1 mixed_struct_slice_match,但 nested slice iterate 是更深层 indirect dispatch chain (slice elem 是 slice → elem load → elem 的 elem iterate) 仍 SEGV。需要深入 cg_record_temp_holds_address 的 bitmap propagation 跨 slice iterate 双层 for 的暂存 handling。
+**v2.11.21 RCA 根因 (REFUTED v2.11.20 deeper indirect dispatch chain hypothesis):** **v2.11.20 RC-1 fix was over-aggressive — load flag propagation wrong direction**.
 
-**真修所需:** RC-1 follow-up。emit_slice_iter_body + emit_load/store 跨双层 for 路径需深入 review。
+`emit_load` (codegen_amd64_emit_mem.jhyy:704-710, v2.11.20 RC-1 Phase 1 block):
+```jhyy
+if (*t).qbe_type == QBE_L_LOCAL() {
+    let _lp = cg_record_temp_holds_address(state, dst);
+}
+```
+When `t42 = loadl t41` runs (where `t41 = data_ptr + i*16` is a real runtime address-holder), this marks `t42` as address-holder. But `t42`'s slot stores the **value** loaded from `*t41` (the row's `data_ptr` VALUE) — NOT a stack-slot address. Then `t49 = loadl t42` in the inner loop emits indirect dispatch (`movq -368(%rbp), %r8; movq (%r8), %rax` at `/tmp/_rca_fisn.s:229-230`), dereferencing the row's `data_ptr` as a slot address → SEGV.
 
-**LOC est:** ~20-40 LOC
+**Semantic distinction:** `load` dereferences its src (read memory); result is a VALUE not an address. Only `alloc` and `add/sub on pointer` produce slot/runtime addresses. RC-1's load-propagation collapses these cases.
+
+**真修所需 (~5 LOC net, REVERT v2.11.20 RC-1 Phase 1 + retighten):**
+- **Edit 1**: Remove load propagation block (lines 704-710) in `codegen_amd64_emit_mem.jhyy`. The indirect-dispatch logic itself (lines 692-720) stays — needed when src is alloc-result (so `load t_alloc` correctly reads slot contents). Just don't mark dst.
+- **Edit 2**: Tighten `emit_binop` propagation at `codegen_amd64_emit_call.jhyy:1615`:
+  ```jhyy
+  if qt == QBE_L_LOCAL() && (is_add_or_sub != (0 as i32) || cg_is_address_holder(state, src1_id) != (0 as i32)) {
+  ```
+  Always propagate for `add/sub` on L_LOCAL regardless of src1 flag (QBE IL semantics: `add/sub` on `QBE_L_LOCAL` operands yields derived address regardless of bitmap).
+
+**Bonus benefit:** Also fixes `for_in_slice_byte_equal` + partial benefit to `mixed_struct_slice_match` (RC-1 already fixed outer level).
+
+**Cross-test regression risk:** Verify `slice_index/iterate/literal/subrange` still PASS after Edit 1+2 (manual trace confirms they do — `add ptr, off` pattern works under Edit 2's always-propagate).
 
 **OS 启动链路:** 不阻塞 M1-M11。for_in_slice_nested = example test,非 OS 关键路径。
 
+**⚠️ REGRESSION IDENTIFIED:** v2.11.20 RC-1 fix passed 5/6 slice tests by happy accident but introduced SEGV in the 6th test (`for_in_slice_nested`). Per `feedback_codegen_amd64_multifn`, single-function PASS evidence insufficient — multi-nested patterns require trace through every temp-id lifetime. **v2.11.20 changelog + W-074.10 description needs amendment** (claim "emit_load flag propagate 真修" was over-aggressive; correct semantics is "load does NOT propagate, but add/sub on L_LOCAL always propagate").
+
 ---
 
-**总 v2.11.21 估:** ~140-230 LOC + 1 真架构改 (2-pass slot alloc for big_array)
+**总 v2.11.21 fix scope 收敛 (per v2.11.21 RCA):** ~30-75 LOC (down from 140-230 estimate)。+ silent-fail audit on 8/115 sampled tests = 0 phantom PASS (recommend stratified random sample of ~20 in v2.11.21-fix sprint as belt-and-suspenders gate per `feedback_codegen_amd64_multifn`).
 
 **superseder:** 待 v2.11.21 sprint 真修 (per honest ship 决策 — 不为 +15 数字蒙混;4 deep-rooted fail 必须 deep 真修,不能 fast-patch)

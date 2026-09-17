@@ -1731,6 +1731,48 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 
 ---
 
+## v2.11.21-RCA — RCA-only sprint (4 deferred tests root cause + silent-fail audit) ✅ shipped 2026-09-17
+
+**Scope**: docs-only sprint (per `feedback_rca_first_root_cause`)。5 parallel sub-agent RCA: 4 个 deep-rooted self-backend fail (big_array / cap_table_basic / dungeon_game / for_in_slice_nested) + 1 silent-fail audit on 8/115 PASS tests。**0 source LOC changes**。
+
+**Ship evidence**:
+- V.1 RCA Phase 1 (4 parallel): 4 root causes confirmed with file:line citations + concrete fix sketches
+- V.2 silent-fail audit (1 sub-agent, 8/115 sampled): **0 phantom PASS** (all sampled structurally correct)
+- V.3 docs synthesis: `rca-v2.11.21.md` created (~280 lines) + W-074.13 description refined + W-074.10 caveat added
+
+**RCA results summary**:
+
+| Sub-bug | v2.11.20 RCA | v2.11.21 RCA | LOC delta |
+|---|---|---|---|
+| big_array | 2-pass slot alloc (~80-120) | emit_alloc record pointer-slot below region (~10-30) | **-90** |
+| cap_table_basic | fnarg ID lookup gap (~10-20) | emit_copy heuristic miscounts `%t` (~5-10) | **-5** |
+| dungeon_game | multi-file import link (~30-50) | missing label defs (lexer skip / emit_label silent fail) (~10-80) | **-20** |
+| for_in_slice_nested | deeper indirect dispatch chain (~20-40) | **v2.11.20 RC-1 fix over-aggressive** (~5 net revert + retighten) | **regression identified** |
+
+**Silent-fail audit** (8/115 sampled: slice_literal/subrange/mixed_struct_slice_match/const_array/top_level_let_mut_test/match_range/nested_struct_deep/big_test): **0 phantom PASS**。W-074.10/11/12 fixes confirmed working structurally。Recommend stratified random sample of ~20 in v2.11.21-fix sprint as belt-and-suspenders gate per `feedback_codegen_amd64_multifn`。
+
+**⚠️ Critical finding — v2.11.20 RC-1 fix regression**: v2.11.20 RC-1 fix (commit `56be6cf`) passed 5/6 slice tests (slice_index/iterate/literal/subrange/mixed_struct_slice_match) by happy accident but introduced SEGV in 6th test (`for_in_slice_nested`). emit_load flag propagate marks dst as address-holder after load, but load's result is a VALUE (data at *ptr), not an address. Re-load (`loadl t42` reading data_ptr VALUE from slot) → indirect dispatch dereferences VALUE as slot address → SEGV.
+
+**Fix sketch for v2.11.21-fix sprint**: REMOVE load propagation block + tighten binop propagation (always propagate for `add/sub` on L_LOCAL regardless of src1 flag)。
+
+**总 v2.11.21-fix scope (per v2.11.21 RCA)**: **~30-75 LOC** (down from initial 140-230 estimate)。4 sub-commits sequential per `feedback_codegen_amd64_multifn` bisect 干净:
+1. cap_table_basic fix (emit_copy heuristic validation) — ~5-10 LOC, lowest risk
+2. for_in_slice_nested fix (REVERT + retighten emit_load + emit_binop) — ~5 LOC net, includes regression fix for v2.11.20
+3. big_array fix (emit_alloc record pointer-slot below region) — ~10-30 LOC, moderate risk
+4. dungeon_game fix (label emit debug + targeted fix) — ~10-80 LOC, depends on Phase 1 outcome
+
+**Workarounds**:
+- W-074.13 description refined: 4 sub-bugs with concrete fix sketches + LOC estimates (down from v2.11.20 范围估)
+- W-074.10 caveat added: RC-1 fix over-aggressive for nested case → for_in_slice_nested SEGV identified as regression
+- 0 source ACTIVE workaround count change (RCA-only sprint, no code changes)
+
+**Pure docs sprint — 0 source LOC changes.** v2.11.21-fix sprint follows with concrete patches。
+
+**Plan**: [`../plans/v2/v2.11.21-plan.md`](../plans/v2/v2.11.21-plan.md)
+**RCA**: [`../../internal/rca/rca-v2.11.21.md`](../../internal/rca/rca-v2.11.21.md)
+
+---
+
 ## Sprint 状态总览 (v2.11.x)
 
 | Sprint | Status | Scope | LOC | ETA |
@@ -1738,7 +1780,8 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 | v2.11.18 phi 修復 | ✅ shipped 2026-09-16 | jhyy-side move-pair lowering | ~80 (src0/) + 6 文件 prerequisite | done |
 | v2.11.19 Full SSE/float emit | ✅ shipped 2026-09-17 | real SSE emit (Win+SysV) + f32 IMM + load/store | ~378 (含 fixtures + docs) | done |
 | v2.11.20 flag propagate + W-017 + match range | ✅ shipped 2026-09-17 (+11 fix; 4 defer v2.11.21) | RC-1 emit_load/LABEL flag + W-017 module-level let mut + RC-4 match range | ~80 (src0/) + docs | done |
-| v2.11.21 (deferred items) | 📋 planned | big_array slot alloc + cap_table_basic silent fail + dungeon_game link + for_in_slice_nested nested SEGV | ~80-150 | after v2.11.20 |
+| v2.11.21-RCA (RCA-only sprint) | ✅ shipped 2026-09-17 | docs-only RCA of 4 deferred tests + silent-fail audit (5 sub-agent parallel) | 0 LOC (docs only) | done |
+| v2.11.21-fix (post-RCA fixes) | 📋 planned | 4 surgical fixes per v2.11.21 RCA findings (~30-75 LOC, down from initial 140-230 estimate) | ~30-75 | after v2.11.21-RCA |
 | v2.11.x+ (v2.x 中期) | 📋 planned | codegen_amd64 真 XMM regalloc / 2-pass slot alloc / 真 amd64_sysv 实 impl | TBD | later |
 
 ## 关键数字表 (v2.11.20 ship)
