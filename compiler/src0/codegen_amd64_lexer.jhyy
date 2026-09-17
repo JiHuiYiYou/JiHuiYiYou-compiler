@@ -854,7 +854,15 @@ fn next_token_binop(s: *LexState, arena: *u8, t: *u8, op_byte: i32) -> i32 {
 fn next_token_ret(s: *LexState, arena: *u8, t: *u8) -> i32 {
     let _x = arena;
     // peek 下一字符决定 ret vs ret <val>
-    let _s = lex_skip_ws_and_comments(s);
+    // v2.11.21-fix Phase 4 真修:用 lex_skip_ws(不跨 \n)代替 lex_skip_ws_and_comments。
+    // 原 lex_skip_ws_and_comments 跳 \n + 下行 ws → 若 ret 是 then-branch 最后 stmt
+    // (e.g. `    ret\n@else50\n    jmp @merge51`),ret 的 lex_consume_to_eol 会
+    // 吞掉 `@else50\n    jmp @merge51` → @else50 这个 ILTOK_LABEL token 消失 →
+    // emit_label 没被 dispatch → .Lelse50_b0_fn6: 定义 missing → jmp .Lelse50_b0_fn6
+    // 链接器 unresolved external → ld returned 1。
+    // dungeon_game 是 W-074.13 sub-bug 3 的真因(documented in rca-v2.11.21.md § 3
+    // 候选 1 dispatcher skip → 实际是 next_token_ret 跨行吞)。
+    let _s = lex_skip_ws(s);
     lex_init_token(t, ILTOK_RET(), (*s).line);
     // v2.11.2:ret 没 dst → int_val = -1。
     let tp_iv = ptr_add_u8(t, 24 as i64) as *i64;

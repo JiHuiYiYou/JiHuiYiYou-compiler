@@ -91082,37 +91082,37 @@ export function w $codegen_amd64_lexer__next_token_ret(l %s, l %arena, l %t) {
     %t47729 =l copy %t
     dbgloc 854
     dbgloc 855
-    dbgloc 857
-    %t47730 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t47727)
-    dbgloc 858
+    dbgloc 865
+    %t47730 =w call $codegen_amd64_lexer__lex_skip_ws(l %t47727)
+    dbgloc 866
     %t47731 =w call $codegen_amd64_regalloc__ILTOK_RET()
     %t47732 =l add %t47727, 24
     %t47733 =w loadw %t47732
     %t47734 =w call $codegen_amd64_lexer__lex_init_token(l %t47729, w %t47731, w %t47733)
-    dbgloc 860
+    dbgloc 868
     %t47735 =w copy 24
     %t47736 =l extsw %t47735
     %t47737 =l call $util__ptr_add_u8(l %t47729, l %t47736)
     %t47738 =l copy %t47737
-    dbgloc 861
+    dbgloc 869
     %t47739 =w copy 1
     %t47740 =l extsw %t47739
     %t47742 =l copy 0
     %t47741 =l sub %t47742, %t47740
     storel %t47741, %t47738
-    dbgloc 863
+    dbgloc 871
     %t47743 =w copy 32
     %t47744 =l extsw %t47743
     %t47745 =l call $util__ptr_add_u8(l %t47729, l %t47744)
     %t47746 =l copy %t47745
-    dbgloc 864
+    dbgloc 872
     %t47747 =w call $codegen_amd64_state__QBE_W_LOCAL()
     storew %t47747, %t47746
-    dbgloc 866
+    dbgloc 874
     %t47748 =w call $codegen_amd64_lexer__lex_consume_to_eol(l %t47727)
-    dbgloc 867
+    dbgloc 875
     %t47749 =w call $codegen_amd64_lexer__lex_finish_instr(l %t47727, l %t47728, l %t47729)
-    dbgloc 868
+    dbgloc 876
     %t47750 =w copy 0
     ret %t47750
 }
@@ -91122,25 +91122,25 @@ export function w $codegen_amd64_lexer__next_token_jmp(l %s, l %arena, l %t) {
     %t47751 =l copy %s
     %t47752 =l copy %arena
     %t47753 =l copy %t
-    dbgloc 874
-    dbgloc 875
-    dbgloc 876
+    dbgloc 882
+    dbgloc 883
+    dbgloc 884
     %t47754 =w copy 0
     %t47755 =l extsw %t47754
     %t47756 =l alloc8 8
     storel %t47755, %t47756
     jmp @loop9727
 @loop9727
-    dbgloc 877
+    dbgloc 885
     %t47757 =l loadl %t47756
     %t47758 =w copy 2
     %t47759 =l extsw %t47758
     %t47760 =w csltl %t47757, %t47759
     jnz %t47760, @body9728, @exit9729
 @body9728
-    dbgloc 878
+    dbgloc 886
     %t47761 =w call $codegen_amd64_lexer__lex_next_byte(l %t47751)
-    dbgloc 879
+    dbgloc 887
     %t47762 =l loadl %t47756
     %t47763 =w copy 1
     %t47764 =l extsw %t47763
@@ -91148,29 +91148,29 @@ export function w $codegen_amd64_lexer__next_token_jmp(l %s, l %arena, l %t) {
     storel %t47765, %t47756
     jmp @loop9727
 @exit9729
-    dbgloc 881
+    dbgloc 889
     %t47766 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t47751)
-    dbgloc 882
+    dbgloc 890
     %t47767 =w call $codegen_amd64_regalloc__ILTOK_JMP()
     %t47768 =l add %t47751, 24
     %t47769 =w loadw %t47768
     %t47770 =w call $codegen_amd64_lexer__lex_init_token(l %t47753, w %t47767, w %t47769)
-    dbgloc 884
+    dbgloc 892
     %t47771 =w copy 24
     %t47772 =l extsw %t47771
     %t47773 =l call $util__ptr_add_u8(l %t47753, l %t47772)
     %t47774 =l copy %t47773
-    dbgloc 885
+    dbgloc 893
     %t47775 =w copy 1
     %t47776 =l extsw %t47775
     %t47778 =l copy 0
     %t47777 =l sub %t47778, %t47776
     storel %t47777, %t47774
-    dbgloc 887
+    dbgloc 895
     %t47779 =w call $codegen_amd64_lexer__lex_consume_to_eol(l %t47751)
-    dbgloc 888
+    dbgloc 896
     %t47780 =w call $codegen_amd64_lexer__lex_finish_instr(l %t47751, l %t47752, l %t47753)
-    dbgloc 889
+    dbgloc 897
     %t47781 =w copy 0
     ret %t47781
 }
@@ -91180,25 +91180,25 @@ export function w $codegen_amd64_lexer__next_token_jnz(l %s, l %arena, l %t) {
     %t47782 =l copy %s
     %t47783 =l copy %arena
     %t47784 =l copy %t
-    dbgloc 895
-    dbgloc 896
-    dbgloc 897
+    dbgloc 903
+    dbgloc 904
+    dbgloc 905
     %t47785 =w copy 0
     %t47786 =l extsw %t47785
     %t47787 =l alloc8 8
     storel %t47786, %t47787
     jmp @loop9731
 @loop9731
-    dbgloc 898
+    dbgloc 906
     %t47788 =l loadl %t47787
     %t47789 =w copy 2
     %t47790 =l extsw %t47789
     %t47791 =w csltl %t47788, %t47790
     jnz %t47791, @body9732, @exit9733
 @body9732
-    dbgloc 899
+    dbgloc 907
     %t47792 =w call $codegen_amd64_lexer__lex_next_byte(l %t47782)
-    dbgloc 900
+    dbgloc 908
     %t47793 =l loadl %t47787
     %t47794 =w copy 1
     %t47795 =l extsw %t47794
@@ -91206,29 +91206,29 @@ export function w $codegen_amd64_lexer__next_token_jnz(l %s, l %arena, l %t) {
     storel %t47796, %t47787
     jmp @loop9731
 @exit9733
-    dbgloc 902
+    dbgloc 910
     %t47797 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t47782)
-    dbgloc 903
+    dbgloc 911
     %t47798 =w call $codegen_amd64_regalloc__ILTOK_JNZ()
     %t47799 =l add %t47782, 24
     %t47800 =w loadw %t47799
     %t47801 =w call $codegen_amd64_lexer__lex_init_token(l %t47784, w %t47798, w %t47800)
-    dbgloc 905
+    dbgloc 913
     %t47802 =w copy 24
     %t47803 =l extsw %t47802
     %t47804 =l call $util__ptr_add_u8(l %t47784, l %t47803)
     %t47805 =l copy %t47804
-    dbgloc 906
+    dbgloc 914
     %t47806 =w copy 1
     %t47807 =l extsw %t47806
     %t47809 =l copy 0
     %t47808 =l sub %t47809, %t47807
     storel %t47808, %t47805
-    dbgloc 908
+    dbgloc 916
     %t47810 =w call $codegen_amd64_lexer__lex_consume_to_eol(l %t47782)
-    dbgloc 909
+    dbgloc 917
     %t47811 =w call $codegen_amd64_lexer__lex_finish_instr(l %t47782, l %t47783, l %t47784)
-    dbgloc 910
+    dbgloc 918
     %t47812 =w copy 0
     ret %t47812
 }
@@ -91238,48 +91238,48 @@ export function w $codegen_amd64_lexer__next_token_label(l %s, l %arena, l %t) {
     %t47813 =l copy %s
     %t47814 =l copy %arena
     %t47815 =l copy %t
-    dbgloc 915
-    dbgloc 916
+    dbgloc 923
+    dbgloc 924
     %t47816 =l add %t47813, 16
     %t47817 =l loadl %t47816
-    dbgloc 917
+    dbgloc 925
     %t47818 =l call $codegen_amd64_lexer__lex_scan_ident_rest(l %t47813)
-    dbgloc 919
+    dbgloc 927
     %t47819 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t47813)
-    dbgloc 920
+    dbgloc 928
     %t47820 =w copy 58
     %t47821 =w call $codegen_amd64_lexer__lex_match_byte(l %t47813, w %t47820)
-    dbgloc 921
+    dbgloc 929
     %t47822 =w call $codegen_amd64_regalloc__ILTOK_LABEL()
     %t47823 =l add %t47813, 24
     %t47824 =w loadw %t47823
     %t47825 =w call $codegen_amd64_lexer__lex_init_token(l %t47815, w %t47822, w %t47824)
-    dbgloc 922
+    dbgloc 930
     %t47826 =w copy 0
     %t47827 =l extsw %t47826
     %t47828 =w csgtl %t47818, %t47827
     jnz %t47828, @then9735, @else9736
 @then9735
-    dbgloc 923
+    dbgloc 931
     %t47829 =w copy 8
     %t47830 =l extsw %t47829
     %t47831 =l call $util__ptr_add_u8(l %t47815, l %t47830)
     %t47832 =l copy %t47831
-    dbgloc 924
+    dbgloc 932
     %t47833 =l call $codegen_amd64_lexer__lex_dup_text(l %t47814, l %t47817, l %t47818)
     storel %t47833, %t47832
-    dbgloc 925
+    dbgloc 933
     %t47834 =w copy 16
     %t47835 =l extsw %t47834
     %t47836 =l call $util__ptr_add_u8(l %t47815, l %t47835)
     %t47837 =l copy %t47836
-    dbgloc 926
+    dbgloc 934
     storel %t47818, %t47837
     jmp @merge9737
 @else9736
     jmp @merge9737
 @merge9737
-    dbgloc 928
+    dbgloc 936
     %t47838 =w copy 0
     ret %t47838
 }
@@ -91289,22 +91289,22 @@ export function w $codegen_amd64_lexer__next_token_func_header(l %s, l %arena, l
     %t47839 =l copy %s
     %t47840 =l copy %arena
     %t47841 =l copy %t
-    dbgloc 935
-    dbgloc 940
+    dbgloc 943
+    dbgloc 948
     %t47842 =l add %t47839, 16
     %t47843 =l loadl %t47842
     %t47844 =l alloc8 8
     storel %t47843, %t47844
-    dbgloc 942
+    dbgloc 950
     %t47845 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t47839)
-    dbgloc 943
+    dbgloc 951
     %t47846 =l loadl %t47844
     %t47847 =l add %t47839, 16
     %t47848 =l loadl %t47847
     %t47849 =w ceql %t47846, %t47848
     jnz %t47849, @then9739, @else9740
 @then9739
-    dbgloc 944
+    dbgloc 952
     %t47850 =l add %t47839, 16
     %t47851 =l loadl %t47850
     storel %t47851, %t47844
@@ -91314,17 +91314,17 @@ export function w $codegen_amd64_lexer__next_token_func_header(l %s, l %arena, l
 @merge9741
     jmp @loop9742
 @loop9742
-    dbgloc 949
+    dbgloc 957
     %t47852 =l loadl %t47844
     %t47853 =l add %t47839, 16
     %t47854 =l loadl %t47853
     %t47855 =w csltl %t47852, %t47854
     jnz %t47855, @body9743, @exit9744
 @body9743
-    dbgloc 950
+    dbgloc 958
     %t47856 =l loadl %t47844
     %t47857 =w loadub %t47856
-    dbgloc 951
+    dbgloc 959
     %t47858 =w copy 32
     %t47859 =w ceqw %t47857, %t47858
     jnz %t47859, @sc_true9747, @sc_eval9745
@@ -91362,7 +91362,7 @@ export function w $codegen_amd64_lexer__next_token_func_header(l %s, l %arena, l
     %t47870 =w phi @sc_true9753 %t47871, @sc_eval9751 %t47874
     jnz %t47870, @then9754, @else9755
 @then9754
-    dbgloc 952
+    dbgloc 960
     %t47875 =l loadl %t47844
     %t47876 =w copy 1
     %t47877 =l extsw %t47876
@@ -91372,12 +91372,12 @@ export function w $codegen_amd64_lexer__next_token_func_header(l %s, l %arena, l
     storel %t47881, %t47844
     jmp @merge9756
 @else9755
-    dbgloc 953
+    dbgloc 961
     jmp @exit9744
 @merge9756
     jmp @loop9742
 @exit9744
-    dbgloc 956
+    dbgloc 964
     %t47882 =l copy $str1150
     %t47883 =w copy 8
     %t47884 =l extsw %t47883
@@ -91393,43 +91393,43 @@ export function w $codegen_amd64_lexer__next_token_func_header(l %s, l %arena, l
 @else9758
     jmp @merge9759
 @merge9759
-    dbgloc 957
+    dbgloc 965
     %t47891 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t47839)
-    dbgloc 959
+    dbgloc 967
     %t47892 =w call $codegen_amd64_regalloc__ILTOK_FUNC_HEADER()
     %t47893 =l add %t47839, 24
     %t47894 =w loadw %t47893
     %t47895 =w call $codegen_amd64_lexer__lex_init_token(l %t47841, w %t47892, w %t47894)
-    dbgloc 961
+    dbgloc 969
     %t47896 =w call $codegen_amd64_lexer__lex_peek_byte(l %t47839)
     %t47897 =w copy 91
     %t47898 =w ceqw %t47896, %t47897
     jnz %t47898, @then9760, @else9761
 @then9760
-    dbgloc 962
+    dbgloc 970
     %t47899 =w call $codegen_amd64_lexer__lex_next_byte(l %t47839)
-    dbgloc 963
+    dbgloc 971
     %t47900 =w call $codegen_amd64_lexer__lex_next_byte(l %t47839)
-    dbgloc 964
+    dbgloc 972
     %t47901 =w copy 32
     %t47902 =l extsw %t47901
     %t47903 =l call $util__ptr_add_u8(l %t47841, l %t47902)
     %t47904 =l copy %t47903
-    dbgloc 965
+    dbgloc 973
     %t47905 =w call $codegen_amd64_lexer__lex_qbe_type_from_byte(w %t47900)
     storew %t47905, %t47904
-    dbgloc 966
+    dbgloc 974
     %t47906 =w call $codegen_amd64_lexer__lex_next_byte(l %t47839)
-    dbgloc 967
+    dbgloc 975
     %t47907 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t47839)
     jmp @merge9762
 @else9761
-    dbgloc 968
-    dbgloc 970
+    dbgloc 976
+    dbgloc 978
     %t47908 =w call $codegen_amd64_lexer__lex_peek_byte(l %t47839)
-    dbgloc 971
-    dbgloc 972
-    dbgloc 971
+    dbgloc 979
+    dbgloc 980
+    dbgloc 979
     %t47909 =w copy 119
     %t47910 =w ceqw %t47908, %t47909
     jnz %t47910, @sc_true9765, @sc_eval9763
@@ -91459,7 +91459,7 @@ export function w $codegen_amd64_lexer__next_token_func_header(l %s, l %arena, l
     %t47922 =w copy 1
     jmp @sc_merge9770
 @sc_eval9769
-    dbgloc 972
+    dbgloc 980
     %t47923 =w copy 100
     %t47924 =w ceqw %t47908, %t47923
     %t47925 =w cnew %t47924, 0
@@ -91490,17 +91490,17 @@ export function w $codegen_amd64_lexer__next_token_func_header(l %s, l %arena, l
     %t47931 =w phi @sc_true9777 %t47932, @sc_eval9775 %t47935
     jnz %t47931, @then9778, @else9779
 @then9778
-    dbgloc 973
+    dbgloc 981
     %t47936 =w copy 32
     %t47937 =l extsw %t47936
     %t47938 =l call $util__ptr_add_u8(l %t47841, l %t47937)
     %t47939 =l copy %t47938
-    dbgloc 974
+    dbgloc 982
     %t47940 =w call $codegen_amd64_lexer__lex_qbe_type_from_byte(w %t47908)
     storew %t47940, %t47939
-    dbgloc 975
+    dbgloc 983
     %t47941 =w call $codegen_amd64_lexer__lex_next_byte(l %t47839)
-    dbgloc 976
+    dbgloc 984
     %t47942 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t47839)
     jmp @merge9780
 @else9779
@@ -91508,7 +91508,7 @@ export function w $codegen_amd64_lexer__next_token_func_header(l %s, l %arena, l
 @merge9780
     jmp @merge9762
 @merge9762
-    dbgloc 980
+    dbgloc 988
     %t47943 =w call $codegen_amd64_lexer__lex_peek_byte(l %t47839)
     %t47944 =w copy 36
     %t47945 =w cnew %t47943, %t47944
@@ -91521,68 +91521,68 @@ export function w $codegen_amd64_lexer__next_token_func_header(l %s, l %arena, l
 @else9782
     jmp @merge9783
 @merge9783
-    dbgloc 981
+    dbgloc 989
     %t47949 =w call $codegen_amd64_lexer__lex_next_byte(l %t47839)
-    dbgloc 982
+    dbgloc 990
     %t47950 =l add %t47839, 16
     %t47951 =l loadl %t47950
-    dbgloc 983
+    dbgloc 991
     %t47952 =l call $codegen_amd64_lexer__lex_scan_ident_rest(l %t47839)
-    dbgloc 984
+    dbgloc 992
     %t47953 =w copy 0
     %t47954 =l extsw %t47953
     %t47955 =w csgtl %t47952, %t47954
     jnz %t47955, @then9784, @else9785
 @then9784
-    dbgloc 985
+    dbgloc 993
     %t47956 =w copy 8
     %t47957 =l extsw %t47956
     %t47958 =l call $util__ptr_add_u8(l %t47841, l %t47957)
     %t47959 =l copy %t47958
-    dbgloc 986
+    dbgloc 994
     %t47960 =l call $codegen_amd64_lexer__lex_dup_text(l %t47840, l %t47951, l %t47952)
     storel %t47960, %t47959
-    dbgloc 987
+    dbgloc 995
     %t47961 =w copy 16
     %t47962 =l extsw %t47961
     %t47963 =l call $util__ptr_add_u8(l %t47841, l %t47962)
     %t47964 =l copy %t47963
-    dbgloc 988
+    dbgloc 996
     storel %t47952, %t47964
     jmp @merge9786
 @else9785
     jmp @merge9786
 @merge9786
-    dbgloc 994
+    dbgloc 1002
     %t47965 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t47839)
-    dbgloc 995
+    dbgloc 1003
     %t47966 =w call $codegen_amd64_lexer__lex_peek_byte(l %t47839)
     %t47967 =w copy 40
     %t47968 =w ceqw %t47966, %t47967
     jnz %t47968, @then9787, @else9788
 @then9787
-    dbgloc 996
+    dbgloc 1004
     %t47969 =w call $codegen_amd64_lexer__lex_next_byte(l %t47839)
-    dbgloc 998
+    dbgloc 1006
     %t47970 =w copy 1
     %t47971 =l extsw %t47970
     %t47972 =l alloc8 8
     storel %t47971, %t47972
-    dbgloc 999
+    dbgloc 1007
     %t47973 =w copy 0
     %t47974 =l alloc4 4
     storew %t47973, %t47974
     jmp @loop9790
 @loop9790
-    dbgloc 1000
+    dbgloc 1008
     %t47975 =w loadw %t47974
     %t47976 =w copy 0
     %t47977 =w ceqw %t47975, %t47976
     jnz %t47977, @body9791, @exit9792
 @body9791
-    dbgloc 1001
+    dbgloc 1009
     %t47978 =w call $codegen_amd64_lexer__lex_peek_byte(l %t47839)
-    dbgloc 1002
+    dbgloc 1010
     %t47979 =w copy 0
     %t47980 =w ceqw %t47978, %t47979
     jnz %t47980, @then9793, @else9794
@@ -91591,7 +91591,7 @@ export function w $codegen_amd64_lexer__next_token_func_header(l %s, l %arena, l
     storew %t47981, %t47974
     jmp @merge9795
 @else9794
-    dbgloc 1003
+    dbgloc 1011
     %t47982 =w copy 40
     %t47983 =w ceqw %t47978, %t47982
     jnz %t47983, @then9796, @else9797
@@ -91604,20 +91604,20 @@ export function w $codegen_amd64_lexer__next_token_func_header(l %s, l %arena, l
     storel %t47988, %t47972
     jmp @merge9798
 @else9797
-    dbgloc 1004
+    dbgloc 1012
     %t47989 =w copy 41
     %t47990 =w ceqw %t47978, %t47989
     jnz %t47990, @then9799, @else9800
 @then9799
-    dbgloc 1005
+    dbgloc 1013
     %t47991 =w call $codegen_amd64_lexer__lex_next_byte(l %t47839)
-    dbgloc 1006
+    dbgloc 1014
     %t47992 =l loadl %t47972
     %t47993 =w copy 1
     %t47994 =l extsw %t47993
     %t47995 =l sub %t47992, %t47994
     storel %t47995, %t47972
-    dbgloc 1007
+    dbgloc 1015
     %t47996 =l loadl %t47972
     %t47997 =w copy 0
     %t47998 =l extsw %t47997
@@ -91632,7 +91632,7 @@ export function w $codegen_amd64_lexer__next_token_func_header(l %s, l %arena, l
 @merge9804
     jmp @merge9801
 @else9800
-    dbgloc 1008
+    dbgloc 1016
     %t48001 =w call $codegen_amd64_lexer__lex_next_byte(l %t47839)
     jmp @merge9801
 @merge9801
@@ -91646,43 +91646,43 @@ export function w $codegen_amd64_lexer__next_token_func_header(l %s, l %arena, l
 @else9788
     jmp @merge9789
 @merge9789
-    dbgloc 1011
+    dbgloc 1019
     %t48002 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t47839)
-    dbgloc 1017
+    dbgloc 1025
     %t48003 =l add %t47839, 16
     %t48004 =l loadl %t48003
-    dbgloc 1018
+    dbgloc 1026
     %t48005 =l loadl %t47844
     %t48006 =l sub %t48004, %t48005
     %t48007 =l copy 1
     %t48008 =l div %t48006, %t48007
-    dbgloc 1019
+    dbgloc 1027
     %t48009 =w copy 0
     %t48010 =l extsw %t48009
     %t48011 =w csgtl %t48008, %t48010
     jnz %t48011, @then9805, @else9806
 @then9805
-    dbgloc 1020
+    dbgloc 1028
     %t48012 =w copy 8
     %t48013 =l extsw %t48012
     %t48014 =l call $util__ptr_add_u8(l %t47841, l %t48013)
     %t48015 =l copy %t48014
-    dbgloc 1021
+    dbgloc 1029
     %t48016 =l loadl %t47844
     %t48017 =l call $codegen_amd64_lexer__lex_dup_text(l %t47840, l %t48016, l %t48008)
     storel %t48017, %t48015
-    dbgloc 1022
+    dbgloc 1030
     %t48018 =w copy 16
     %t48019 =l extsw %t48018
     %t48020 =l call $util__ptr_add_u8(l %t47841, l %t48019)
     %t48021 =l copy %t48020
-    dbgloc 1023
+    dbgloc 1031
     storel %t48008, %t48021
     jmp @merge9807
 @else9806
     jmp @merge9807
 @merge9807
-    dbgloc 1025
+    dbgloc 1033
     %t48022 =w copy 0
     ret %t48022
 }
@@ -91692,24 +91692,24 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48023 =l copy %s
     %t48024 =l copy %arena
     %t48025 =l copy %t
-    dbgloc 1035
-    dbgloc 1037
+    dbgloc 1043
+    dbgloc 1045
     %t48026 =w copy 0
     %t48027 =l extsw %t48026
     %t48028 =l alloc8 8
     storel %t48027, %t48028
     jmp @loop9809
 @loop9809
-    dbgloc 1038
+    dbgloc 1046
     %t48029 =l loadl %t48028
     %t48030 =w copy 4
     %t48031 =l extsw %t48030
     %t48032 =w csltl %t48029, %t48031
     jnz %t48032, @body9810, @exit9811
 @body9810
-    dbgloc 1039
+    dbgloc 1047
     %t48033 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
-    dbgloc 1040
+    dbgloc 1048
     %t48034 =l loadl %t48028
     %t48035 =w copy 1
     %t48036 =l extsw %t48035
@@ -91717,9 +91717,9 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     storel %t48037, %t48028
     jmp @loop9809
 @exit9811
-    dbgloc 1042
+    dbgloc 1050
     %t48038 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t48023)
-    dbgloc 1044
+    dbgloc 1052
     %t48039 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
     %t48040 =w copy 36
     %t48041 =w cnew %t48039, %t48040
@@ -91732,16 +91732,16 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @else9813
     jmp @merge9814
 @merge9814
-    dbgloc 1045
+    dbgloc 1053
     %t48045 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
-    dbgloc 1046
+    dbgloc 1054
     %t48046 =l add %t48023, 16
     %t48047 =l loadl %t48046
-    dbgloc 1047
+    dbgloc 1055
     %t48048 =l call $codegen_amd64_lexer__lex_scan_ident_rest(l %t48023)
-    dbgloc 1049
+    dbgloc 1057
     %t48049 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t48023)
-    dbgloc 1050
+    dbgloc 1058
     %t48050 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
     %t48051 =w copy 61
     %t48052 =w cnew %t48050, %t48051
@@ -91754,11 +91754,11 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @else9816
     jmp @merge9817
 @merge9817
-    dbgloc 1051
+    dbgloc 1059
     %t48056 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
-    dbgloc 1052
+    dbgloc 1060
     %t48057 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t48023)
-    dbgloc 1053
+    dbgloc 1061
     %t48058 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
     %t48059 =w copy 123
     %t48060 =w cnew %t48058, %t48059
@@ -91771,70 +91771,70 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @else9819
     jmp @merge9820
 @merge9820
-    dbgloc 1054
+    dbgloc 1062
     %t48064 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
-    dbgloc 1055
+    dbgloc 1063
     %t48065 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t48023)
-    dbgloc 1059
+    dbgloc 1067
     %t48066 =w copy 0
     %t48067 =l extsw %t48066
     %t48068 =l alloc8 8
     storel %t48067, %t48068
-    dbgloc 1060
+    dbgloc 1068
     %t48069 =w copy 0
     %t48070 =l extsw %t48069
     %t48071 =l alloc8 8
     storel %t48070, %t48071
-    dbgloc 1061
+    dbgloc 1069
     %t48072 =w copy 0
     %t48073 =l alloc4 4
     storew %t48072, %t48073
-    dbgloc 1062
+    dbgloc 1070
     %t48074 =w copy 0
     %t48075 =l extsw %t48074
     %t48076 =l alloc8 8
     storel %t48075, %t48076
-    dbgloc 1063
+    dbgloc 1071
     %t48077 =w copy 0
     %t48078 =l extsw %t48077
     %t48079 =l alloc8 8
     storel %t48078, %t48079
-    dbgloc 1064
+    dbgloc 1072
     %t48080 =w copy 0
     %t48081 =l extsw %t48080
     %t48082 =l alloc8 8
     storel %t48081, %t48082
-    dbgloc 1065
+    dbgloc 1073
     %t48083 =w copy 1
     %t48084 =l alloc4 4
     storew %t48083, %t48084
-    dbgloc 1066
+    dbgloc 1074
     %t48085 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
-    dbgloc 1068
+    dbgloc 1076
     %t48086 =w copy 98
     %t48087 =w ceqw %t48085, %t48086
     jnz %t48087, @then9821, @else9822
 @then9821
-    dbgloc 1070
+    dbgloc 1078
     %t48088 =w copy 1
     storew %t48088, %t48084
-    dbgloc 1071
+    dbgloc 1079
     %t48089 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
-    dbgloc 1072
+    dbgloc 1080
     %t48090 =w copy 0
     %t48091 =l alloc4 4
     storew %t48090, %t48091
     jmp @loop9824
 @loop9824
-    dbgloc 1073
+    dbgloc 1081
     %t48092 =w loadw %t48091
     %t48093 =w copy 0
     %t48094 =w ceqw %t48092, %t48093
     jnz %t48094, @body9825, @exit9826
 @body9825
-    dbgloc 1074
+    dbgloc 1082
     %t48095 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
-    dbgloc 1075
+    dbgloc 1083
     %t48096 =w copy 32
     %t48097 =w ceqw %t48095, %t48096
     jnz %t48097, @sc_true9829, @sc_eval9827
@@ -91853,7 +91853,7 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48103 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
     jmp @merge9832
 @else9831
-    dbgloc 1076
+    dbgloc 1084
     %t48104 =w copy 1
     storew %t48104, %t48091
     jmp @merge9832
@@ -91862,7 +91862,7 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @exit9826
     jmp @merge9823
 @else9822
-    dbgloc 1078
+    dbgloc 1086
     %t48105 =w copy 119
     %t48106 =w ceqw %t48085, %t48105
     jnz %t48106, @sc_true9835, @sc_eval9833
@@ -91878,26 +91878,26 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48107 =w phi @sc_true9835 %t48108, @sc_eval9833 %t48111
     jnz %t48107, @then9836, @else9837
 @then9836
-    dbgloc 1080
+    dbgloc 1088
     %t48112 =w copy 4
     storew %t48112, %t48084
-    dbgloc 1081
+    dbgloc 1089
     %t48113 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
-    dbgloc 1082
+    dbgloc 1090
     %t48114 =w copy 0
     %t48115 =l alloc4 4
     storew %t48114, %t48115
     jmp @loop9839
 @loop9839
-    dbgloc 1083
+    dbgloc 1091
     %t48116 =w loadw %t48115
     %t48117 =w copy 0
     %t48118 =w ceqw %t48116, %t48117
     jnz %t48118, @body9840, @exit9841
 @body9840
-    dbgloc 1084
+    dbgloc 1092
     %t48119 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
-    dbgloc 1085
+    dbgloc 1093
     %t48120 =w copy 32
     %t48121 =w ceqw %t48119, %t48120
     jnz %t48121, @sc_true9844, @sc_eval9842
@@ -91916,7 +91916,7 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48127 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
     jmp @merge9847
 @else9846
-    dbgloc 1086
+    dbgloc 1094
     %t48128 =w copy 1
     storew %t48128, %t48115
     jmp @merge9847
@@ -91925,7 +91925,7 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @exit9841
     jmp @merge9838
 @else9837
-    dbgloc 1088
+    dbgloc 1096
     %t48129 =w copy 108
     %t48130 =w ceqw %t48085, %t48129
     jnz %t48130, @sc_true9850, @sc_eval9848
@@ -91941,26 +91941,26 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48131 =w phi @sc_true9850 %t48132, @sc_eval9848 %t48135
     jnz %t48131, @then9851, @else9852
 @then9851
-    dbgloc 1090
+    dbgloc 1098
     %t48136 =w copy 8
     storew %t48136, %t48084
-    dbgloc 1091
+    dbgloc 1099
     %t48137 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
-    dbgloc 1092
+    dbgloc 1100
     %t48138 =w copy 0
     %t48139 =l alloc4 4
     storew %t48138, %t48139
     jmp @loop9854
 @loop9854
-    dbgloc 1093
+    dbgloc 1101
     %t48140 =w loadw %t48139
     %t48141 =w copy 0
     %t48142 =w ceqw %t48140, %t48141
     jnz %t48142, @body9855, @exit9856
 @body9855
-    dbgloc 1094
+    dbgloc 1102
     %t48143 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
-    dbgloc 1095
+    dbgloc 1103
     %t48144 =w copy 32
     %t48145 =w ceqw %t48143, %t48144
     jnz %t48145, @sc_true9859, @sc_eval9857
@@ -91979,7 +91979,7 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48151 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
     jmp @merge9862
 @else9861
-    dbgloc 1096
+    dbgloc 1104
     %t48152 =w copy 1
     storew %t48152, %t48139
     jmp @merge9862
@@ -91994,9 +91994,9 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @merge9838
     jmp @merge9823
 @merge9823
-    dbgloc 1099
+    dbgloc 1107
     %t48153 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
-    dbgloc 1100
+    dbgloc 1108
     %t48154 =w copy 48
     %t48155 =w csgew %t48153, %t48154
     jnz %t48155, @sc_eval9863, @sc_false9865
@@ -92012,41 +92012,41 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48156 =w phi @sc_false9865 %t48157, @sc_eval9863 %t48160
     jnz %t48156, @then9866, @else9867
 @then9866
-    dbgloc 1103
+    dbgloc 1111
     %t48161 =w copy 1
     storew %t48161, %t48073
-    dbgloc 1104
+    dbgloc 1112
     %t48162 =w copy 256
     %t48163 =l extsw %t48162
     storel %t48163, %t48082
-    dbgloc 1105
+    dbgloc 1113
     %t48164 =l loadl %t48082
     %t48165 =l call $arena__arena_alloc(l %t48024, l %t48164)
     storel %t48165, %t48076
-    dbgloc 1106
+    dbgloc 1114
     %t48166 =w copy 0
     %t48167 =l alloc4 4
     storew %t48166, %t48167
-    dbgloc 1107
+    dbgloc 1115
     %t48168 =w copy 0
     %t48169 =l extsw %t48168
     %t48170 =l alloc8 8
     storel %t48169, %t48170
-    dbgloc 1108
+    dbgloc 1116
     %t48171 =w copy 1
     %t48172 =l alloc4 4
     storew %t48171, %t48172
     jmp @loop9869
 @loop9869
-    dbgloc 1109
+    dbgloc 1117
     %t48173 =w loadw %t48167
     %t48174 =w copy 0
     %t48175 =w ceqw %t48173, %t48174
     jnz %t48175, @body9870, @exit9871
 @body9870
-    dbgloc 1110
+    dbgloc 1118
     %t48176 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
-    dbgloc 1111
+    dbgloc 1119
     %t48177 =w copy 0
     %t48178 =w ceqw %t48176, %t48177
     jnz %t48178, @then9872, @else9873
@@ -92055,14 +92055,14 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     storew %t48179, %t48167
     jmp @merge9874
 @else9873
-    dbgloc 1112
+    dbgloc 1120
     %t48180 =w copy 123
     %t48181 =w ceqw %t48176, %t48180
     jnz %t48181, @then9875, @else9876
 @then9875
-    dbgloc 1113
+    dbgloc 1121
     %t48182 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
-    dbgloc 1114
+    dbgloc 1122
     %t48183 =l loadl %t48170
     %t48184 =w copy 1
     %t48185 =l extsw %t48184
@@ -92070,12 +92070,12 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     storel %t48186, %t48170
     jmp @merge9877
 @else9876
-    dbgloc 1116
+    dbgloc 1124
     %t48187 =w copy 125
     %t48188 =w ceqw %t48176, %t48187
     jnz %t48188, @then9878, @else9879
 @then9878
-    dbgloc 1117
+    dbgloc 1125
     %t48189 =l loadl %t48170
     %t48190 =w copy 0
     %t48191 =l extsw %t48190
@@ -92086,10 +92086,10 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     storew %t48193, %t48167
     jmp @merge9883
 @else9882
-    dbgloc 1118
-    dbgloc 1119
+    dbgloc 1126
+    dbgloc 1127
     %t48194 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
-    dbgloc 1120
+    dbgloc 1128
     %t48195 =l loadl %t48170
     %t48196 =w copy 1
     %t48197 =l extsw %t48196
@@ -92099,9 +92099,9 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @merge9883
     jmp @merge9880
 @else9879
-    dbgloc 1123
-    dbgloc 1124
-    dbgloc 1123
+    dbgloc 1131
+    dbgloc 1132
+    dbgloc 1131
     %t48199 =w copy 98
     %t48200 =w ceqw %t48176, %t48199
     jnz %t48200, @sc_true9886, @sc_eval9884
@@ -92131,7 +92131,7 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48212 =w copy 1
     jmp @sc_merge9891
 @sc_eval9890
-    dbgloc 1124
+    dbgloc 1132
     %t48213 =w copy 108
     %t48214 =w ceqw %t48176, %t48213
     %t48215 =w cnew %t48214, 0
@@ -92151,23 +92151,23 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48216 =w phi @sc_true9895 %t48217, @sc_eval9893 %t48220
     jnz %t48216, @then9896, @else9897
 @then9896
-    dbgloc 1126
+    dbgloc 1134
     %t48221 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
-    dbgloc 1127
+    dbgloc 1135
     %t48222 =w copy 0
     %t48223 =l alloc4 4
     storew %t48222, %t48223
     jmp @loop9899
 @loop9899
-    dbgloc 1128
+    dbgloc 1136
     %t48224 =w loadw %t48223
     %t48225 =w copy 0
     %t48226 =w ceqw %t48224, %t48225
     jnz %t48226, @body9900, @exit9901
 @body9900
-    dbgloc 1129
+    dbgloc 1137
     %t48227 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
-    dbgloc 1130
+    dbgloc 1138
     %t48228 =w copy 32
     %t48229 =w ceqw %t48227, %t48228
     jnz %t48229, @sc_true9904, @sc_eval9902
@@ -92186,7 +92186,7 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48235 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
     jmp @merge9907
 @else9906
-    dbgloc 1131
+    dbgloc 1139
     %t48236 =w copy 1
     storew %t48236, %t48223
     jmp @merge9907
@@ -92195,7 +92195,7 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @exit9901
     jmp @merge9898
 @else9897
-    dbgloc 1134
+    dbgloc 1142
     %t48237 =w copy 48
     %t48238 =w csgew %t48176, %t48237
     jnz %t48238, @sc_eval9908, @sc_false9910
@@ -92211,13 +92211,13 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48239 =w phi @sc_false9910 %t48240, @sc_eval9908 %t48243
     jnz %t48239, @then9911, @else9912
 @then9911
-    dbgloc 1136
+    dbgloc 1144
     %t48244 =w loadw %t48172
     %t48245 =w copy 0
     %t48246 =w ceqw %t48244, %t48245
     jnz %t48246, @then9914, @else9915
 @then9914
-    dbgloc 1137
+    dbgloc 1145
     %t48247 =l loadl %t48079
     %t48248 =w copy 2
     %t48249 =l extsw %t48248
@@ -92226,7 +92226,7 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48252 =w csgtl %t48250, %t48251
     jnz %t48252, @then9917, @else9918
 @then9917
-    dbgloc 1138
+    dbgloc 1146
     %t48253 =l loadl %t48082
     %t48254 =w copy 2
     %t48255 =l extsw %t48254
@@ -92236,16 +92236,16 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @else9918
     jmp @merge9919
 @merge9919
-    dbgloc 1140
+    dbgloc 1148
     %t48257 =l loadl %t48076
     %t48258 =l loadl %t48079
     %t48259 =l call $util__ptr_add_u8(l %t48257, l %t48258)
-    dbgloc 1141
+    dbgloc 1149
     %t48260 =l copy $str1151
     %t48261 =w copy 2
     %t48262 =l extsw %t48261
     %t48263 =l call $memcpy(l %t48259, l %t48260, l %t48262)
-    dbgloc 1142
+    dbgloc 1150
     %t48264 =l loadl %t48079
     %t48265 =w copy 2
     %t48266 =l extsw %t48265
@@ -92255,31 +92255,31 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @else9915
     jmp @merge9916
 @merge9916
-    dbgloc 1144
+    dbgloc 1152
     %t48268 =w copy 0
     storew %t48268, %t48172
-    dbgloc 1145
+    dbgloc 1153
     %t48269 =l add %t48023, 16
     %t48270 =l loadl %t48269
     %t48271 =l alloc8 8
     storel %t48270, %t48271
-    dbgloc 1146
+    dbgloc 1154
     %t48272 =w copy 0
     %t48273 =l extsw %t48272
     %t48274 =l alloc8 8
     storel %t48273, %t48274
     jmp @loop9920
 @loop9920
-    dbgloc 1147
+    dbgloc 1155
     %t48275 =l loadl %t48274
     %t48276 =w copy 16
     %t48277 =l extsw %t48276
     %t48278 =w csltl %t48275, %t48277
     jnz %t48278, @body9921, @exit9922
 @body9921
-    dbgloc 1148
+    dbgloc 1156
     %t48279 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
-    dbgloc 1149
+    dbgloc 1157
     %t48280 =w copy 48
     %t48281 =w csgew %t48279, %t48280
     jnz %t48281, @sc_eval9923, @sc_false9925
@@ -92295,9 +92295,9 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48282 =w phi @sc_false9925 %t48283, @sc_eval9923 %t48286
     jnz %t48282, @then9926, @else9927
 @then9926
-    dbgloc 1150
+    dbgloc 1158
     %t48287 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
-    dbgloc 1151
+    dbgloc 1159
     %t48288 =l loadl %t48274
     %t48289 =w copy 1
     %t48290 =l extsw %t48289
@@ -92305,12 +92305,12 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     storel %t48291, %t48274
     jmp @merge9928
 @else9927
-    dbgloc 1152
+    dbgloc 1160
     jmp @exit9922
 @merge9928
     jmp @loop9920
 @exit9922
-    dbgloc 1154
+    dbgloc 1162
     %t48292 =l loadl %t48079
     %t48293 =l loadl %t48274
     %t48294 =l add %t48292, %t48293
@@ -92318,7 +92318,7 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48296 =w csgtl %t48294, %t48295
     jnz %t48296, @then9929, @else9930
 @then9929
-    dbgloc 1155
+    dbgloc 1163
     %t48297 =l loadl %t48082
     %t48298 =w copy 2
     %t48299 =l extsw %t48298
@@ -92328,26 +92328,26 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @else9930
     jmp @merge9931
 @merge9931
-    dbgloc 1157
+    dbgloc 1165
     %t48301 =l loadl %t48076
     %t48302 =l loadl %t48079
     %t48303 =l call $util__ptr_add_u8(l %t48301, l %t48302)
-    dbgloc 1158
+    dbgloc 1166
     %t48304 =l loadl %t48271
     %t48305 =l loadl %t48274
     %t48306 =l call $memcpy(l %t48303, l %t48304, l %t48305)
-    dbgloc 1159
+    dbgloc 1167
     %t48307 =l loadl %t48079
     %t48308 =l loadl %t48274
     %t48309 =l add %t48307, %t48308
     storel %t48309, %t48079
-    dbgloc 1160
+    dbgloc 1168
     %t48310 =l loadl %t48271
     jmp @merge9913
 @else9912
-    dbgloc 1162
-    dbgloc 1163
-    dbgloc 1162
+    dbgloc 1170
+    dbgloc 1171
+    dbgloc 1170
     %t48311 =w copy 44
     %t48312 =w ceqw %t48176, %t48311
     jnz %t48312, @sc_true9934, @sc_eval9932
@@ -92377,7 +92377,7 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48324 =w copy 1
     jmp @sc_merge9939
 @sc_eval9938
-    dbgloc 1163
+    dbgloc 1171
     %t48325 =w copy 10
     %t48326 =w ceqw %t48176, %t48325
     %t48327 =w cnew %t48326, 0
@@ -92397,12 +92397,12 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48328 =w phi @sc_true9943 %t48329, @sc_eval9941 %t48332
     jnz %t48328, @then9944, @else9945
 @then9944
-    dbgloc 1164
+    dbgloc 1172
     %t48333 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
     jmp @merge9946
 @else9945
-    dbgloc 1166
-    dbgloc 1167
+    dbgloc 1174
+    dbgloc 1175
     %t48334 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
     jmp @merge9946
 @merge9946
@@ -92418,7 +92418,7 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @merge9874
     jmp @loop9869
 @exit9871
-    dbgloc 1170
+    dbgloc 1178
     %t48335 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
     %t48336 =w copy 125
     %t48337 =w ceqw %t48335, %t48336
@@ -92429,16 +92429,16 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @else9948
     jmp @merge9949
 @merge9949
-    dbgloc 1171
+    dbgloc 1179
     %t48339 =l loadl %t48076
     storel %t48339, %t48068
-    dbgloc 1172
+    dbgloc 1180
     %t48340 =l loadl %t48079
     storel %t48340, %t48071
     jmp @merge9868
 @else9867
-    dbgloc 1173
-    dbgloc 1175
+    dbgloc 1181
+    dbgloc 1183
     %t48341 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
     %t48342 =w copy 34
     %t48343 =w cnew %t48341, %t48342
@@ -92451,27 +92451,27 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @else9951
     jmp @merge9952
 @merge9952
-    dbgloc 1176
+    dbgloc 1184
     %t48347 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
-    dbgloc 1177
+    dbgloc 1185
     %t48348 =l add %t48023, 16
     %t48349 =l loadl %t48348
     storel %t48349, %t48068
-    dbgloc 1178
+    dbgloc 1186
     %t48350 =w copy 0
     %t48351 =l alloc4 4
     storew %t48350, %t48351
     jmp @loop9953
 @loop9953
-    dbgloc 1179
+    dbgloc 1187
     %t48352 =w loadw %t48351
     %t48353 =w copy 0
     %t48354 =w ceqw %t48352, %t48353
     jnz %t48354, @body9954, @exit9955
 @body9954
-    dbgloc 1180
+    dbgloc 1188
     %t48355 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
-    dbgloc 1181
+    dbgloc 1189
     %t48356 =w copy 34
     %t48357 =w ceqw %t48355, %t48356
     jnz %t48357, @sc_true9958, @sc_eval9956
@@ -92491,10 +92491,10 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     storew %t48363, %t48351
     jmp @merge9961
 @else9960
-    dbgloc 1182
-    dbgloc 1183
+    dbgloc 1190
+    dbgloc 1191
     %t48364 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
-    dbgloc 1184
+    dbgloc 1192
     %t48365 =l loadl %t48071
     %t48366 =w copy 1
     %t48367 =l extsw %t48366
@@ -92504,7 +92504,7 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @merge9961
     jmp @loop9953
 @exit9955
-    dbgloc 1187
+    dbgloc 1195
     %t48369 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
     %t48370 =w copy 34
     %t48371 =w ceqw %t48369, %t48370
@@ -92515,21 +92515,21 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @else9963
     jmp @merge9964
 @merge9964
-    dbgloc 1188
+    dbgloc 1196
     %t48373 =w copy 0
     %t48374 =l alloc4 4
     storew %t48373, %t48374
     jmp @loop9965
 @loop9965
-    dbgloc 1189
+    dbgloc 1197
     %t48375 =w loadw %t48374
     %t48376 =w copy 0
     %t48377 =w ceqw %t48375, %t48376
     jnz %t48377, @body9966, @exit9967
 @body9966
-    dbgloc 1190
+    dbgloc 1198
     %t48378 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
-    dbgloc 1191
+    dbgloc 1199
     %t48379 =w copy 125
     %t48380 =w ceqw %t48378, %t48379
     jnz %t48380, @sc_true9970, @sc_eval9968
@@ -92549,13 +92549,13 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     storew %t48386, %t48374
     jmp @merge9973
 @else9972
-    dbgloc 1192
+    dbgloc 1200
     %t48387 =w call $codegen_amd64_lexer__lex_next_byte(l %t48023)
     jmp @merge9973
 @merge9973
     jmp @loop9965
 @exit9967
-    dbgloc 1194
+    dbgloc 1202
     %t48388 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48023)
     %t48389 =w copy 125
     %t48390 =w ceqw %t48388, %t48389
@@ -92568,7 +92568,7 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @merge9976
     jmp @merge9868
 @merge9868
-    dbgloc 1197
+    dbgloc 1205
     %t48392 =w copy 1
     %t48393 =l extsw %t48392
     %t48394 =l add %t48048, %t48393
@@ -92577,9 +92577,9 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
     %t48397 =w copy 1
     %t48398 =l extsw %t48397
     %t48399 =l add %t48396, %t48398
-    dbgloc 1198
+    dbgloc 1206
     %t48400 =l call $arena__arena_alloc(l %t48024, l %t48399)
-    dbgloc 1199
+    dbgloc 1207
     %t48401 =w copy 0
     %t48402 =l extsw %t48401
     %t48403 =w ceql %t48400, %t48402
@@ -92592,38 +92592,38 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @else9978
     jmp @merge9979
 @merge9979
-    dbgloc 1200
+    dbgloc 1208
     %t48407 =w copy 0
     %t48408 =l extsw %t48407
     %t48409 =w csgtl %t48048, %t48408
     jnz %t48409, @then9980, @else9981
 @then9980
-    dbgloc 1201
+    dbgloc 1209
     %t48410 =l call $memcpy(l %t48400, l %t48047, l %t48048)
     jmp @merge9982
 @else9981
     jmp @merge9982
 @merge9982
-    dbgloc 1203
+    dbgloc 1211
     %t48411 =l call $util__ptr_add_u8(l %t48400, l %t48048)
-    dbgloc 1204
+    dbgloc 1212
     %t48412 =w copy 0
     %t48413 =w copy 1
     %t48414 =l extsw %t48413
     %t48415 =l call $memset(l %t48411, w %t48412, l %t48414)
-    dbgloc 1205
+    dbgloc 1213
     %t48416 =l loadl %t48071
     %t48417 =w copy 0
     %t48418 =l extsw %t48417
     %t48419 =w csgtl %t48416, %t48418
     jnz %t48419, @then9983, @else9984
 @then9983
-    dbgloc 1206
+    dbgloc 1214
     %t48420 =w copy 1
     %t48421 =l extsw %t48420
     %t48422 =l add %t48048, %t48421
     %t48423 =l call $util__ptr_add_u8(l %t48400, l %t48422)
-    dbgloc 1207
+    dbgloc 1215
     %t48424 =l loadl %t48068
     %t48425 =l loadl %t48071
     %t48426 =l call $memcpy(l %t48423, l %t48424, l %t48425)
@@ -92631,54 +92631,54 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 @else9984
     jmp @merge9985
 @merge9985
-    dbgloc 1209
+    dbgloc 1217
     %t48427 =w copy 1
     %t48428 =l extsw %t48427
     %t48429 =l add %t48048, %t48428
     %t48430 =l loadl %t48071
     %t48431 =l add %t48429, %t48430
     %t48432 =l call $util__ptr_add_u8(l %t48400, l %t48431)
-    dbgloc 1210
+    dbgloc 1218
     %t48433 =w copy 0
     %t48434 =w copy 1
     %t48435 =l extsw %t48434
     %t48436 =l call $memset(l %t48432, w %t48433, l %t48435)
-    dbgloc 1212
+    dbgloc 1220
     %t48437 =w call $codegen_amd64_regalloc__ILTOK_DATA_STRING()
     %t48438 =l add %t48023, 24
     %t48439 =w loadw %t48438
     %t48440 =w call $codegen_amd64_lexer__lex_init_token(l %t48025, w %t48437, w %t48439)
-    dbgloc 1213
+    dbgloc 1221
     %t48441 =w copy 8
     %t48442 =l extsw %t48441
     %t48443 =l call $util__ptr_add_u8(l %t48025, l %t48442)
     %t48444 =l copy %t48443
-    dbgloc 1214
+    dbgloc 1222
     storel %t48400, %t48444
-    dbgloc 1215
+    dbgloc 1223
     %t48445 =w copy 16
     %t48446 =l extsw %t48445
     %t48447 =l call $util__ptr_add_u8(l %t48025, l %t48446)
     %t48448 =l copy %t48447
-    dbgloc 1216
+    dbgloc 1224
     storel %t48048, %t48448
-    dbgloc 1220
+    dbgloc 1228
     %t48449 =w copy 32
     %t48450 =l extsw %t48449
     %t48451 =l call $util__ptr_add_u8(l %t48025, l %t48450)
     %t48452 =l copy %t48451
-    dbgloc 1221
+    dbgloc 1229
     %t48453 =w loadw %t48073
     storew %t48453, %t48452
-    dbgloc 1222
+    dbgloc 1230
     %t48454 =w copy 28
     %t48455 =l extsw %t48454
     %t48456 =l call $util__ptr_add_u8(l %t48025, l %t48455)
     %t48457 =l copy %t48456
-    dbgloc 1223
+    dbgloc 1231
     %t48458 =w loadw %t48084
     storew %t48458, %t48457
-    dbgloc 1224
+    dbgloc 1232
     %t48459 =w copy 0
     ret %t48459
 }
@@ -92686,8 +92686,8 @@ export function w $codegen_amd64_lexer__next_token_data_string(l %s, l %arena, l
 export function w $codegen_amd64_lexer__lex_match_volatile(l %s) {
 @start9986
     %t48460 =l copy %s
-    dbgloc 1233
-    dbgloc 1234
+    dbgloc 1241
+    dbgloc 1242
     %t48461 =l copy $str1152
     %t48462 =w copy 8
     %t48463 =l extsw %t48462
@@ -92696,13 +92696,13 @@ export function w $codegen_amd64_lexer__lex_match_volatile(l %s) {
     %t48466 =w ceqw %t48464, %t48465
     jnz %t48466, @then9987, @else9988
 @then9987
-    dbgloc 1235
+    dbgloc 1243
     %t48467 =w copy 0
     ret %t48467
 @else9988
     jmp @merge9989
 @merge9989
-    dbgloc 1237
+    dbgloc 1245
     %t48468 =w copy 1
     ret %t48468
 }
@@ -92712,10 +92712,10 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48469 =l copy %s
     %t48470 =l copy %arena
     %t48471 =l copy %t
-    dbgloc 1248
-    dbgloc 1250
+    dbgloc 1256
+    dbgloc 1258
     %t48472 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t48469)
-    dbgloc 1253
+    dbgloc 1261
     %t48473 =l add %t48469, 16
     %t48474 =l loadl %t48473
     %t48475 =l add %t48469, 8
@@ -92723,104 +92723,104 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48477 =w csgel %t48474, %t48476
     jnz %t48477, @then9991, @else9992
 @then9991
-    dbgloc 1254
+    dbgloc 1262
     %t48478 =w call $codegen_amd64_lexer__next_token_eof(l %t48469, l %t48471)
     ret %t48478
 @else9992
     jmp @merge9993
 @merge9993
-    dbgloc 1256
+    dbgloc 1264
     %t48479 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48469)
-    dbgloc 1261
+    dbgloc 1269
     %t48480 =l add %t48469, 16
     %t48481 =l loadl %t48480
     %t48482 =l add %t48469, 40
     storel %t48481, %t48482
-    dbgloc 1264
+    dbgloc 1272
     %t48483 =w copy 64
     %t48484 =w ceqw %t48479, %t48483
     jnz %t48484, @then9994, @else9995
 @then9994
-    dbgloc 1265
+    dbgloc 1273
     %t48485 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1266
+    dbgloc 1274
     %t48486 =w call $codegen_amd64_lexer__next_token_label(l %t48469, l %t48470, l %t48471)
     ret %t48486
 @else9995
     jmp @merge9996
 @merge9996
-    dbgloc 1275
+    dbgloc 1283
     %t48487 =w copy 37
     %t48488 =w ceqw %t48479, %t48487
     jnz %t48488, @then9997, @else9998
 @then9997
-    dbgloc 1283
+    dbgloc 1291
     %t48489 =l add %t48469, 16
     %t48490 =l loadl %t48489
-    dbgloc 1284
+    dbgloc 1292
     %t48491 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1285
+    dbgloc 1293
     %t48492 =l add %t48469, 16
     %t48493 =l loadl %t48492
-    dbgloc 1286
+    dbgloc 1294
     %t48494 =l call $codegen_amd64_lexer__lex_scan_ident_rest(l %t48469)
-    dbgloc 1287
+    dbgloc 1295
     %t48495 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t48469)
-    dbgloc 1289
+    dbgloc 1297
     %t48496 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48469)
     %t48497 =w copy 61
     %t48498 =w ceqw %t48496, %t48497
     jnz %t48498, @then10000, @else10001
 @then10000
-    dbgloc 1290
+    dbgloc 1298
     %t48499 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1291
+    dbgloc 1299
     %t48500 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t48469)
-    dbgloc 1293
-    %t48501 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48469)
-    dbgloc 1294
-    %t48502 =w call $codegen_amd64_lexer__lex_qbe_type_from_byte(w %t48501)
-    dbgloc 1295
-    %t48503 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1296
-    %t48504 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t48469)
     dbgloc 1301
+    %t48501 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48469)
+    dbgloc 1302
+    %t48502 =w call $codegen_amd64_lexer__lex_qbe_type_from_byte(w %t48501)
+    dbgloc 1303
+    %t48503 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
+    dbgloc 1304
+    %t48504 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t48469)
+    dbgloc 1309
     %t48505 =l add %t48469, 16
     %t48506 =l loadl %t48505
-    dbgloc 1302
+    dbgloc 1310
     %t48507 =l add %t48469, 24
     %t48508 =w loadw %t48507
-    dbgloc 1303
+    dbgloc 1311
     %t48509 =w call $codegen_amd64_lexer__next_token(l %t48469, l %t48470, l %t48471)
-    dbgloc 1305
+    dbgloc 1313
     %t48510 =w copy 0
     %t48511 =w ceqw %t48509, %t48510
     jnz %t48511, @then10003, @else10004
 @then10003
-    dbgloc 1306
+    dbgloc 1314
     %t48512 =l copy %t48471
-    dbgloc 1307
+    dbgloc 1315
     %t48513 =w loadw %t48512
-    dbgloc 1308
+    dbgloc 1316
     %t48514 =w call $codegen_amd64_regalloc__ILTOK_EOF()
     %t48515 =w cnew %t48513, %t48514
     jnz %t48515, @then10006, @else10007
 @then10006
-    dbgloc 1309
+    dbgloc 1317
     %t48516 =w copy 32
     %t48517 =l extsw %t48516
     %t48518 =l call $util__ptr_add_u8(l %t48471, l %t48517)
     %t48519 =l copy %t48518
-    dbgloc 1310
+    dbgloc 1318
     storew %t48502, %t48519
-    dbgloc 1316
+    dbgloc 1324
     %t48520 =l call $codegen_amd64_lexer__lex_parse_temp_id_from_ident(l %t48493, l %t48494)
-    dbgloc 1317
+    dbgloc 1325
     %t48521 =w copy 24
     %t48522 =l extsw %t48521
     %t48523 =l call $util__ptr_add_u8(l %t48471, l %t48522)
     %t48524 =l copy %t48523
-    dbgloc 1318
+    dbgloc 1326
     storel %t48520, %t48524
     jmp @merge10008
 @else10007
@@ -92830,15 +92830,15 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10004
     jmp @merge10005
 @merge10005
-    dbgloc 1321
+    dbgloc 1329
     ret %t48509
 @else10001
     jmp @merge10002
 @merge10002
-    dbgloc 1325
+    dbgloc 1333
     %t48525 =l add %t48469, 16
     storel %t48490, %t48525
-    dbgloc 1326
+    dbgloc 1334
     %t48526 =w copy 1
     %t48528 =w copy 0
     %t48527 =w sub %t48528, %t48526
@@ -92846,28 +92846,28 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else9998
     jmp @merge9999
 @merge9999
-    dbgloc 1338
+    dbgloc 1346
     %t48529 =w copy 101
     %t48530 =w ceqw %t48479, %t48529
     jnz %t48530, @then10009, @else10010
 @then10009
-    dbgloc 1349
+    dbgloc 1357
     %t48531 =w copy 1
     %t48532 =l extsw %t48531
     %t48533 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48532)
-    dbgloc 1350
+    dbgloc 1358
     %t48534 =w copy 2
     %t48535 =l extsw %t48534
     %t48536 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48535)
-    dbgloc 1351
+    dbgloc 1359
     %t48537 =w copy 3
     %t48538 =l extsw %t48537
     %t48539 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48538)
-    dbgloc 1352
+    dbgloc 1360
     %t48540 =w copy 4
     %t48541 =l extsw %t48540
     %t48542 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48541)
-    dbgloc 1353
+    dbgloc 1361
     %t48543 =w copy 120
     %t48544 =w ceqw %t48533, %t48543
     jnz %t48544, @sc_eval10012, @sc_false10014
@@ -92883,7 +92883,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48545 =w phi @sc_false10014 %t48546, @sc_eval10012 %t48549
     jnz %t48545, @then10015, @else10016
 @then10015
-    dbgloc 1354
+    dbgloc 1362
     %t48550 =w copy 115
     %t48551 =w ceqw %t48539, %t48550
     jnz %t48551, @sc_true10020, @sc_eval10018
@@ -92899,9 +92899,9 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48552 =w phi @sc_true10020 %t48553, @sc_eval10018 %t48556
     jnz %t48552, @then10021, @else10022
 @then10021
-    dbgloc 1355
-    dbgloc 1356
-    dbgloc 1355
+    dbgloc 1363
+    dbgloc 1364
+    dbgloc 1363
     %t48557 =w copy 98
     %t48558 =w ceqw %t48542, %t48557
     jnz %t48558, @sc_true10026, @sc_eval10024
@@ -92920,7 +92920,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48565 =w copy 1
     jmp @sc_merge10028
 @sc_eval10027
-    dbgloc 1356
+    dbgloc 1364
     %t48566 =w copy 108
     %t48567 =w ceqw %t48542, %t48566
     %t48568 =w cnew %t48567, 0
@@ -92940,9 +92940,9 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48569 =w phi @sc_true10032 %t48570, @sc_eval10030 %t48573
     jnz %t48569, @then10033, @else10034
 @then10033
-    dbgloc 1359
+    dbgloc 1367
     %t48574 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1360
+    dbgloc 1368
     %t48575 =w call $codegen_amd64_lexer__next_token_binop(l %t48469, l %t48470, l %t48471, w %t48539)
     ret %t48575
 @else10034
@@ -92956,7 +92956,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10016
     jmp @merge10017
 @merge10017
-    dbgloc 1372
+    dbgloc 1380
     %t48576 =w copy 120
     %t48577 =w ceqw %t48533, %t48576
     jnz %t48577, @sc_eval10036, @sc_false10038
@@ -92983,13 +92983,13 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48583 =w phi @sc_false10041 %t48584, @sc_eval10039 %t48587
     jnz %t48583, @then10042, @else10043
 @then10042
-    dbgloc 1373
+    dbgloc 1381
     %t48588 =w copy 4
     %t48589 =l extsw %t48588
     %t48590 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48589)
-    dbgloc 1375
-    dbgloc 1376
-    dbgloc 1375
+    dbgloc 1383
+    dbgloc 1384
+    dbgloc 1383
     %t48591 =w copy 98
     %t48592 =w cnew %t48590, %t48591
     jnz %t48592, @sc_eval10045, @sc_false10047
@@ -93008,7 +93008,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48599 =w copy 0
     jmp @sc_merge10049
 @sc_eval10048
-    dbgloc 1376
+    dbgloc 1384
     %t48600 =w copy 108
     %t48601 =w cnew %t48590, %t48600
     %t48602 =w cnew %t48601, 0
@@ -93028,23 +93028,23 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48603 =w phi @sc_false10053 %t48604, @sc_eval10051 %t48607
     jnz %t48603, @then10054, @else10055
 @then10054
-    dbgloc 1378
+    dbgloc 1386
     %t48608 =w copy 0
     %t48609 =l extsw %t48608
     %t48610 =l alloc8 8
     storel %t48609, %t48610
     jmp @loop10057
 @loop10057
-    dbgloc 1379
+    dbgloc 1387
     %t48611 =l loadl %t48610
     %t48612 =w copy 4
     %t48613 =l extsw %t48612
     %t48614 =w csltl %t48611, %t48613
     jnz %t48614, @body10058, @exit10059
 @body10058
-    dbgloc 1380
+    dbgloc 1388
     %t48615 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1381
+    dbgloc 1389
     %t48616 =l loadl %t48610
     %t48617 =w copy 1
     %t48618 =l extsw %t48617
@@ -93052,19 +93052,19 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t48619, %t48610
     jmp @loop10057
 @exit10059
-    dbgloc 1383
+    dbgloc 1391
     %t48620 =w call $codegen_amd64_lexer__lex_skip_ws(l %t48469)
-    dbgloc 1384
+    dbgloc 1392
     %t48621 =w call $codegen_amd64_lexer__lex_consume_to_eol(l %t48469)
-    dbgloc 1385
+    dbgloc 1393
     %t48622 =w call $codegen_amd64_state__ILTOK_EXTS()
     %t48623 =l add %t48469, 24
     %t48624 =w loadw %t48623
     %t48625 =w call $codegen_amd64_lexer__lex_init_token(l %t48471, w %t48622, w %t48624)
-    dbgloc 1386
+    dbgloc 1394
     %t48626 =w call $codegen_amd64_lexer__lex_finish_instr(l %t48469, l %t48470, l %t48471)
-    dbgloc 1387
-    dbgloc 1388
+    dbgloc 1395
+    dbgloc 1396
     %t48627 =w copy 0
     ret %t48627
 @else10055
@@ -93074,7 +93074,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10043
     jmp @merge10044
 @merge10044
-    dbgloc 1392
+    dbgloc 1400
     %t48628 =l copy $str1153
     %t48629 =w copy 6
     %t48630 =l extsw %t48629
@@ -93090,30 +93090,30 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10061
     jmp @merge10062
 @merge10062
-    dbgloc 1393
+    dbgloc 1401
     %t48637 =w call $codegen_amd64_lexer__next_token_func_header(l %t48469, l %t48470, l %t48471)
     ret %t48637
 @else10010
     jmp @merge10011
 @merge10011
-    dbgloc 1397
+    dbgloc 1405
     %t48638 =w copy 100
     %t48639 =w ceqw %t48479, %t48638
     jnz %t48639, @then10063, @else10064
 @then10063
-    dbgloc 1398
+    dbgloc 1406
     %t48640 =w copy 1
     %t48641 =l extsw %t48640
     %t48642 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48641)
-    dbgloc 1399
+    dbgloc 1407
     %t48643 =w copy 2
     %t48644 =l extsw %t48643
     %t48645 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48644)
-    dbgloc 1400
+    dbgloc 1408
     %t48646 =w copy 3
     %t48647 =l extsw %t48646
     %t48648 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48647)
-    dbgloc 1402
+    dbgloc 1410
     %t48649 =w copy 97
     %t48650 =w ceqw %t48642, %t48649
     jnz %t48650, @sc_eval10066, @sc_false10068
@@ -93140,13 +93140,13 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48656 =w phi @sc_false10071 %t48657, @sc_eval10069 %t48660
     jnz %t48656, @then10072, @else10073
 @then10072
-    dbgloc 1403
+    dbgloc 1411
     %t48661 =w call $codegen_amd64_lexer__next_token_data_string(l %t48469, l %t48470, l %t48471)
     ret %t48661
 @else10073
     jmp @merge10074
 @merge10074
-    dbgloc 1406
+    dbgloc 1414
     %t48662 =w copy 105
     %t48663 =w ceqw %t48642, %t48662
     jnz %t48663, @sc_eval10075, @sc_false10077
@@ -93162,16 +93162,16 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48664 =w phi @sc_false10077 %t48665, @sc_eval10075 %t48668
     jnz %t48664, @then10078, @else10079
 @then10078
-    dbgloc 1407
+    dbgloc 1415
     %t48669 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1408
+    dbgloc 1416
     %t48670 =w copy 100
     %t48671 =w call $codegen_amd64_lexer__next_token_binop(l %t48469, l %t48470, l %t48471, w %t48670)
     ret %t48671
 @else10079
     jmp @merge10080
 @merge10080
-    dbgloc 1418
+    dbgloc 1426
     %t48672 =w copy 116
     %t48673 =w ceqw %t48642, %t48672
     jnz %t48673, @sc_eval10081, @sc_false10083
@@ -93198,11 +93198,11 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48679 =w phi @sc_false10086 %t48680, @sc_eval10084 %t48683
     jnz %t48679, @then10087, @else10088
 @then10087
-    dbgloc 1419
+    dbgloc 1427
     %t48684 =w copy 4
     %t48685 =l extsw %t48684
     %t48686 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48685)
-    dbgloc 1420
+    dbgloc 1428
     %t48687 =w copy 105
     %t48688 =w ceqw %t48686, %t48687
     jnz %t48688, @sc_true10092, @sc_eval10090
@@ -93218,23 +93218,23 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48689 =w phi @sc_true10092 %t48690, @sc_eval10090 %t48693
     jnz %t48689, @then10093, @else10094
 @then10093
-    dbgloc 1422
+    dbgloc 1430
     %t48694 =w copy 0
     %t48695 =l extsw %t48694
     %t48696 =l alloc8 8
     storel %t48695, %t48696
     jmp @loop10096
 @loop10096
-    dbgloc 1423
+    dbgloc 1431
     %t48697 =l loadl %t48696
     %t48698 =w copy 5
     %t48699 =l extsw %t48698
     %t48700 =w csltl %t48697, %t48699
     jnz %t48700, @body10097, @exit10098
 @body10097
-    dbgloc 1424
+    dbgloc 1432
     %t48701 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1425
+    dbgloc 1433
     %t48702 =l loadl %t48696
     %t48703 =w copy 1
     %t48704 =l extsw %t48703
@@ -93242,19 +93242,19 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t48705, %t48696
     jmp @loop10096
 @exit10098
-    dbgloc 1427
+    dbgloc 1435
     %t48706 =w call $codegen_amd64_lexer__lex_skip_ws(l %t48469)
-    dbgloc 1429
+    dbgloc 1437
     %t48707 =w call $codegen_amd64_lexer__lex_consume_to_eol(l %t48469)
-    dbgloc 1430
+    dbgloc 1438
     %t48708 =w call $codegen_amd64_state__ILTOK_DTOSI()
     %t48709 =l add %t48469, 24
     %t48710 =w loadw %t48709
     %t48711 =w call $codegen_amd64_lexer__lex_init_token(l %t48471, w %t48708, w %t48710)
-    dbgloc 1432
+    dbgloc 1440
     %t48712 =w call $codegen_amd64_lexer__lex_finish_instr(l %t48469, l %t48470, l %t48471)
-    dbgloc 1433
-    dbgloc 1434
+    dbgloc 1441
+    dbgloc 1442
     %t48713 =w copy 0
     ret %t48713
 @else10094
@@ -93264,7 +93264,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10088
     jmp @merge10089
 @merge10089
-    dbgloc 1441
+    dbgloc 1449
     %t48714 =w copy 98
     %t48715 =w ceqw %t48642, %t48714
     jnz %t48715, @sc_eval10099, @sc_false10101
@@ -93291,19 +93291,19 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48721 =w phi @sc_false10104 %t48722, @sc_eval10102 %t48725
     jnz %t48721, @then10105, @else10106
 @then10105
-    dbgloc 1443
+    dbgloc 1451
     %t48726 =w copy 4
     %t48727 =l extsw %t48726
     %t48728 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48727)
-    dbgloc 1444
+    dbgloc 1452
     %t48729 =w copy 5
     %t48730 =l extsw %t48729
     %t48731 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48730)
-    dbgloc 1445
+    dbgloc 1453
     %t48732 =w copy 6
     %t48733 =l extsw %t48732
     %t48734 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48733)
-    dbgloc 1446
+    dbgloc 1454
     %t48735 =w copy 105
     %t48736 =w ceqw %t48728, %t48735
     jnz %t48736, @sc_eval10108, @sc_false10110
@@ -93330,23 +93330,23 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48742 =w phi @sc_false10113 %t48743, @sc_eval10111 %t48746
     jnz %t48742, @then10114, @else10115
 @then10114
-    dbgloc 1447
+    dbgloc 1455
     %t48747 =w copy 0
     %t48748 =l extsw %t48747
     %t48749 =l alloc8 8
     storel %t48748, %t48749
     jmp @loop10117
 @loop10117
-    dbgloc 1448
+    dbgloc 1456
     %t48750 =l loadl %t48749
     %t48751 =w copy 7
     %t48752 =l extsw %t48751
     %t48753 =w csltl %t48750, %t48752
     jnz %t48753, @body10118, @exit10119
 @body10118
-    dbgloc 1449
+    dbgloc 1457
     %t48754 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1450
+    dbgloc 1458
     %t48755 =l loadl %t48749
     %t48756 =w copy 1
     %t48757 =l extsw %t48756
@@ -93354,21 +93354,21 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t48758, %t48749
     jmp @loop10117
 @exit10119
-    dbgloc 1453
+    dbgloc 1461
     %t48759 =w copy 0
     %t48760 =l alloc4 4
     storew %t48759, %t48760
     jmp @loop10120
 @loop10120
-    dbgloc 1454
+    dbgloc 1462
     %t48761 =w loadw %t48760
     %t48762 =w copy 0
     %t48763 =w ceqw %t48761, %t48762
     jnz %t48763, @body10121, @exit10122
 @body10121
-    dbgloc 1455
+    dbgloc 1463
     %t48764 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48469)
-    dbgloc 1456
+    dbgloc 1464
     %t48765 =w copy 10
     %t48766 =w ceqw %t48764, %t48765
     jnz %t48766, @sc_true10125, @sc_eval10123
@@ -93388,18 +93388,18 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storew %t48772, %t48760
     jmp @merge10128
 @else10127
-    dbgloc 1457
+    dbgloc 1465
     %t48773 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
     jmp @merge10128
 @merge10128
     jmp @loop10120
 @exit10122
-    dbgloc 1459
+    dbgloc 1467
     %t48774 =w call $codegen_amd64_state__ILTOK_DIRECTIVE()
     %t48775 =l add %t48469, 24
     %t48776 =w loadw %t48775
     %t48777 =w call $codegen_amd64_lexer__lex_init_token(l %t48471, w %t48774, w %t48776)
-    dbgloc 1460
+    dbgloc 1468
     %t48778 =w copy 0
     ret %t48778
 @else10115
@@ -93409,7 +93409,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10106
     jmp @merge10107
 @merge10107
-    dbgloc 1463
+    dbgloc 1471
     %t48779 =w copy 98
     %t48780 =w ceqw %t48642, %t48779
     jnz %t48780, @sc_eval10129, @sc_false10131
@@ -93436,15 +93436,15 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48786 =w phi @sc_false10134 %t48787, @sc_eval10132 %t48790
     jnz %t48786, @then10135, @else10136
 @then10135
-    dbgloc 1465
+    dbgloc 1473
     %t48791 =w copy 4
     %t48792 =l extsw %t48791
     %t48793 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48792)
-    dbgloc 1466
+    dbgloc 1474
     %t48794 =w copy 5
     %t48795 =l extsw %t48794
     %t48796 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48795)
-    dbgloc 1467
+    dbgloc 1475
     %t48797 =w copy 111
     %t48798 =w ceqw %t48793, %t48797
     jnz %t48798, @sc_eval10138, @sc_false10140
@@ -93460,23 +93460,23 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48799 =w phi @sc_false10140 %t48800, @sc_eval10138 %t48803
     jnz %t48799, @then10141, @else10142
 @then10141
-    dbgloc 1468
+    dbgloc 1476
     %t48804 =w copy 0
     %t48805 =l extsw %t48804
     %t48806 =l alloc8 8
     storel %t48805, %t48806
     jmp @loop10144
 @loop10144
-    dbgloc 1469
+    dbgloc 1477
     %t48807 =l loadl %t48806
     %t48808 =w copy 6
     %t48809 =l extsw %t48808
     %t48810 =w csltl %t48807, %t48809
     jnz %t48810, @body10145, @exit10146
 @body10145
-    dbgloc 1470
+    dbgloc 1478
     %t48811 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1471
+    dbgloc 1479
     %t48812 =l loadl %t48806
     %t48813 =w copy 1
     %t48814 =l extsw %t48813
@@ -93484,21 +93484,21 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t48815, %t48806
     jmp @loop10144
 @exit10146
-    dbgloc 1473
+    dbgloc 1481
     %t48816 =w copy 0
     %t48817 =l alloc4 4
     storew %t48816, %t48817
     jmp @loop10147
 @loop10147
-    dbgloc 1474
+    dbgloc 1482
     %t48818 =w loadw %t48817
     %t48819 =w copy 0
     %t48820 =w ceqw %t48818, %t48819
     jnz %t48820, @body10148, @exit10149
 @body10148
-    dbgloc 1475
+    dbgloc 1483
     %t48821 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48469)
-    dbgloc 1476
+    dbgloc 1484
     %t48822 =w copy 10
     %t48823 =w ceqw %t48821, %t48822
     jnz %t48823, @sc_true10152, @sc_eval10150
@@ -93518,18 +93518,18 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storew %t48829, %t48817
     jmp @merge10155
 @else10154
-    dbgloc 1477
+    dbgloc 1485
     %t48830 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
     jmp @merge10155
 @merge10155
     jmp @loop10147
 @exit10149
-    dbgloc 1479
+    dbgloc 1487
     %t48831 =w call $codegen_amd64_state__ILTOK_DIRECTIVE()
     %t48832 =l add %t48469, 24
     %t48833 =w loadw %t48832
     %t48834 =w call $codegen_amd64_lexer__lex_init_token(l %t48471, w %t48831, w %t48833)
-    dbgloc 1480
+    dbgloc 1488
     %t48835 =w copy 0
     ret %t48835
 @else10142
@@ -93539,7 +93539,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10136
     jmp @merge10137
 @merge10137
-    dbgloc 1483
+    dbgloc 1491
     %t48836 =w copy 1
     %t48838 =w copy 0
     %t48837 =w sub %t48838, %t48836
@@ -93547,20 +93547,20 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10064
     jmp @merge10065
 @merge10065
-    dbgloc 1493
+    dbgloc 1501
     %t48839 =w copy 114
     %t48840 =w ceqw %t48479, %t48839
     jnz %t48840, @then10156, @else10157
 @then10156
-    dbgloc 1494
+    dbgloc 1502
     %t48841 =w copy 1
     %t48842 =l extsw %t48841
     %t48843 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48842)
-    dbgloc 1495
+    dbgloc 1503
     %t48844 =w copy 2
     %t48845 =l extsw %t48844
     %t48846 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48845)
-    dbgloc 1496
+    dbgloc 1504
     %t48847 =w copy 101
     %t48848 =w ceqw %t48843, %t48847
     jnz %t48848, @sc_eval10159, @sc_false10161
@@ -93576,7 +93576,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48849 =w phi @sc_false10161 %t48850, @sc_eval10159 %t48853
     jnz %t48849, @then10162, @else10163
 @then10162
-    dbgloc 1498
+    dbgloc 1506
     %t48854 =l copy $str1154
     %t48855 =w copy 3
     %t48856 =l extsw %t48855
@@ -93592,13 +93592,13 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10166
     jmp @merge10167
 @merge10167
-    dbgloc 1499
+    dbgloc 1507
     %t48863 =w call $codegen_amd64_lexer__next_token_ret(l %t48469, l %t48470, l %t48471)
     ret %t48863
 @else10163
     jmp @merge10164
 @merge10164
-    dbgloc 1501
+    dbgloc 1509
     %t48864 =w copy 101
     %t48865 =w ceqw %t48843, %t48864
     jnz %t48865, @sc_eval10168, @sc_false10170
@@ -93614,16 +93614,16 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48866 =w phi @sc_false10170 %t48867, @sc_eval10168 %t48870
     jnz %t48866, @then10171, @else10172
 @then10171
-    dbgloc 1503
+    dbgloc 1511
     %t48871 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1504
+    dbgloc 1512
     %t48872 =w copy 114
     %t48873 =w call $codegen_amd64_lexer__next_token_binop(l %t48469, l %t48470, l %t48471, w %t48872)
     ret %t48873
 @else10172
     jmp @merge10173
 @merge10173
-    dbgloc 1506
+    dbgloc 1514
     %t48874 =w copy 1
     %t48876 =w copy 0
     %t48875 =w sub %t48876, %t48874
@@ -93631,20 +93631,20 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10157
     jmp @merge10158
 @merge10158
-    dbgloc 1510
+    dbgloc 1518
     %t48877 =w copy 106
     %t48878 =w ceqw %t48479, %t48877
     jnz %t48878, @then10174, @else10175
 @then10174
-    dbgloc 1511
+    dbgloc 1519
     %t48879 =w copy 1
     %t48880 =l extsw %t48879
     %t48881 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48880)
-    dbgloc 1512
+    dbgloc 1520
     %t48882 =w copy 2
     %t48883 =l extsw %t48882
     %t48884 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48883)
-    dbgloc 1513
+    dbgloc 1521
     %t48885 =w copy 109
     %t48886 =w ceqw %t48881, %t48885
     jnz %t48886, @sc_eval10177, @sc_false10179
@@ -93660,15 +93660,15 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48887 =w phi @sc_false10179 %t48888, @sc_eval10177 %t48891
     jnz %t48887, @then10180, @else10181
 @then10180
-    dbgloc 1515
+    dbgloc 1523
     %t48892 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1516
+    dbgloc 1524
     %t48893 =w call $codegen_amd64_lexer__next_token_jmp(l %t48469, l %t48470, l %t48471)
     ret %t48893
 @else10181
     jmp @merge10182
 @merge10182
-    dbgloc 1518
+    dbgloc 1526
     %t48894 =w copy 110
     %t48895 =w ceqw %t48881, %t48894
     jnz %t48895, @sc_eval10183, @sc_false10185
@@ -93684,15 +93684,15 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48896 =w phi @sc_false10185 %t48897, @sc_eval10183 %t48900
     jnz %t48896, @then10186, @else10187
 @then10186
-    dbgloc 1520
+    dbgloc 1528
     %t48901 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1521
+    dbgloc 1529
     %t48902 =w call $codegen_amd64_lexer__next_token_jnz(l %t48469, l %t48470, l %t48471)
     ret %t48902
 @else10187
     jmp @merge10188
 @merge10188
-    dbgloc 1523
+    dbgloc 1531
     %t48903 =w copy 1
     %t48905 =w copy 0
     %t48904 =w sub %t48905, %t48903
@@ -93700,18 +93700,18 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10175
     jmp @merge10176
 @merge10176
-    dbgloc 1527
+    dbgloc 1535
     %t48906 =w copy 99
     %t48907 =w ceqw %t48479, %t48906
     jnz %t48907, @then10189, @else10190
 @then10189
-    dbgloc 1528
+    dbgloc 1536
     %t48908 =w copy 1
     %t48909 =l extsw %t48908
     %t48910 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48909)
-    dbgloc 1529
-    dbgloc 1530
-    dbgloc 1529
+    dbgloc 1537
+    dbgloc 1538
+    dbgloc 1537
     %t48911 =w copy 97
     %t48912 =w ceqw %t48910, %t48911
     jnz %t48912, @sc_eval10192, @sc_false10194
@@ -93733,7 +93733,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48922 =w copy 0
     jmp @sc_merge10196
 @sc_eval10195
-    dbgloc 1530
+    dbgloc 1538
     %t48923 =w copy 3
     %t48924 =l extsw %t48923
     %t48925 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48924)
@@ -93745,17 +93745,17 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48921 =w phi @sc_false10197 %t48922, @sc_eval10195 %t48928
     jnz %t48921, @then10198, @else10199
 @then10198
-    dbgloc 1532
+    dbgloc 1540
     %t48929 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1533
+    dbgloc 1541
     %t48930 =w call $codegen_amd64_lexer__next_token_call(l %t48469, l %t48470, l %t48471)
     ret %t48930
 @else10199
     jmp @merge10200
 @merge10200
-    dbgloc 1535
-    dbgloc 1536
-    dbgloc 1535
+    dbgloc 1543
+    dbgloc 1544
+    dbgloc 1543
     %t48931 =w copy 111
     %t48932 =w ceqw %t48910, %t48931
     jnz %t48932, @sc_eval10201, @sc_false10203
@@ -93777,7 +93777,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48942 =w copy 0
     jmp @sc_merge10205
 @sc_eval10204
-    dbgloc 1536
+    dbgloc 1544
     %t48943 =w copy 3
     %t48944 =l extsw %t48943
     %t48945 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48944)
@@ -93789,17 +93789,17 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48941 =w phi @sc_false10206 %t48942, @sc_eval10204 %t48948
     jnz %t48941, @then10207, @else10208
 @then10207
-    dbgloc 1538
+    dbgloc 1546
     %t48949 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1539
+    dbgloc 1547
     %t48950 =w call $codegen_amd64_lexer__next_token_copy(l %t48469, l %t48470, l %t48471)
     ret %t48950
 @else10208
     jmp @merge10209
 @merge10209
-    dbgloc 1550
-    dbgloc 1551
-    dbgloc 1550
+    dbgloc 1558
+    dbgloc 1559
+    dbgloc 1558
     %t48951 =w copy 115
     %t48952 =w ceqw %t48910, %t48951
     jnz %t48952, @sc_true10212, @sc_eval10210
@@ -93829,7 +93829,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48964 =w copy 1
     jmp @sc_merge10217
 @sc_eval10216
-    dbgloc 1551
+    dbgloc 1559
     %t48965 =w copy 110
     %t48966 =w ceqw %t48910, %t48965
     %t48967 =w cnew %t48966, 0
@@ -93849,25 +93849,25 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48968 =w phi @sc_true10221 %t48969, @sc_eval10219 %t48972
     jnz %t48968, @then10222, @else10223
 @then10222
-    dbgloc 1552
+    dbgloc 1560
     %t48973 =w copy 2
     %t48974 =l extsw %t48973
     %t48975 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48974)
-    dbgloc 1553
+    dbgloc 1561
     %t48976 =w copy 3
     %t48977 =l extsw %t48976
     %t48978 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48977)
-    dbgloc 1554
+    dbgloc 1562
     %t48979 =w copy 4
     %t48980 =l extsw %t48979
     %t48981 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t48980)
-    dbgloc 1563
+    dbgloc 1571
     %t48982 =w copy 0
     %t48983 =l alloc4 4
     storew %t48982, %t48983
-    dbgloc 1564
-    dbgloc 1565
-    dbgloc 1564
+    dbgloc 1572
+    dbgloc 1573
+    dbgloc 1572
     %t48984 =w copy 119
     %t48985 =w ceqw %t48978, %t48984
     jnz %t48985, @sc_true10227, @sc_eval10225
@@ -93886,7 +93886,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48992 =w copy 1
     jmp @sc_merge10229
 @sc_eval10228
-    dbgloc 1565
+    dbgloc 1573
     %t48993 =w copy 115
     %t48994 =w ceqw %t48978, %t48993
     %t48995 =w cnew %t48994, 0
@@ -93906,16 +93906,16 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t48996 =w phi @sc_true10233 %t48997, @sc_eval10231 %t49000
     jnz %t48996, @then10234, @else10235
 @then10234
-    dbgloc 1566
+    dbgloc 1574
     %t49001 =w copy 1
     storew %t49001, %t48983
     jmp @merge10236
 @else10235
     jmp @merge10236
 @merge10236
-    dbgloc 1568
-    dbgloc 1569
-    dbgloc 1568
+    dbgloc 1576
+    dbgloc 1577
+    dbgloc 1576
     %t49002 =w copy 119
     %t49003 =w ceqw %t48981, %t49002
     jnz %t49003, @sc_true10239, @sc_eval10237
@@ -93934,7 +93934,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49010 =w copy 1
     jmp @sc_merge10241
 @sc_eval10240
-    dbgloc 1569
+    dbgloc 1577
     %t49011 =w copy 115
     %t49012 =w ceqw %t48981, %t49011
     %t49013 =w cnew %t49012, 0
@@ -93954,36 +93954,36 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49014 =w phi @sc_true10245 %t49015, @sc_eval10243 %t49018
     jnz %t49014, @then10246, @else10247
 @then10246
-    dbgloc 1570
+    dbgloc 1578
     %t49019 =w copy 1
     storew %t49019, %t48983
     jmp @merge10248
 @else10247
     jmp @merge10248
 @merge10248
-    dbgloc 1572
+    dbgloc 1580
     %t49020 =w loadw %t48983
     %t49021 =w copy 1
     %t49022 =w ceqw %t49020, %t49021
     jnz %t49022, @then10249, @else10250
 @then10249
-    dbgloc 1574
+    dbgloc 1582
     %t49023 =w copy 0
     %t49024 =l extsw %t49023
     %t49025 =l alloc8 8
     storel %t49024, %t49025
     jmp @loop10252
 @loop10252
-    dbgloc 1575
+    dbgloc 1583
     %t49026 =l loadl %t49025
     %t49027 =w copy 5
     %t49028 =l extsw %t49027
     %t49029 =w csltl %t49026, %t49028
     jnz %t49029, @body10253, @exit10254
 @body10253
-    dbgloc 1576
+    dbgloc 1584
     %t49030 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1577
+    dbgloc 1585
     %t49031 =l loadl %t49025
     %t49032 =w copy 1
     %t49033 =l extsw %t49032
@@ -93991,23 +93991,23 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49034, %t49025
     jmp @loop10252
 @exit10254
-    dbgloc 1579
+    dbgloc 1587
     %t49035 =w call $codegen_amd64_lexer__lex_skip_ws(l %t48469)
-    dbgloc 1580
+    dbgloc 1588
     %t49036 =w call $codegen_amd64_regalloc__ILTOK_BINOP()
     %t49037 =l add %t48469, 24
     %t49038 =w loadw %t49037
     %t49039 =w call $codegen_amd64_lexer__lex_init_token(l %t48471, w %t49036, w %t49038)
-    dbgloc 1582
+    dbgloc 1590
     %t49040 =l copy $str1155
     %t49041 =l alloc8 8
     storel %t49040, %t49041
-    dbgloc 1583
+    dbgloc 1591
     %t49042 =w copy 117
     %t49043 =w ceqw %t48910, %t49042
     jnz %t49043, @then10255, @else10256
 @then10255
-    dbgloc 1584
+    dbgloc 1592
     %t49044 =w copy 108
     %t49045 =w ceqw %t48975, %t49044
     jnz %t49045, @then10258, @else10259
@@ -94016,7 +94016,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49046, %t49041
     jmp @merge10260
 @else10259
-    dbgloc 1585
+    dbgloc 1593
     %t49047 =w copy 101
     %t49048 =w ceqw %t48975, %t49047
     jnz %t49048, @then10261, @else10262
@@ -94025,7 +94025,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49049, %t49041
     jmp @merge10263
 @else10262
-    dbgloc 1586
+    dbgloc 1594
     %t49050 =w copy 110
     %t49051 =w ceqw %t48975, %t49050
     jnz %t49051, @then10264, @else10265
@@ -94034,7 +94034,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49052, %t49041
     jmp @merge10266
 @else10265
-    dbgloc 1587
+    dbgloc 1595
     %t49053 =w copy 103
     %t49054 =w ceqw %t48975, %t49053
     jnz %t49054, @sc_eval10267, @sc_false10269
@@ -94054,7 +94054,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49060, %t49041
     jmp @merge10272
 @else10271
-    dbgloc 1588
+    dbgloc 1596
     %t49061 =w copy 103
     %t49062 =w ceqw %t48975, %t49061
     jnz %t49062, @sc_eval10273, @sc_false10275
@@ -94074,7 +94074,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49068, %t49041
     jmp @merge10278
 @else10277
-    dbgloc 1589
+    dbgloc 1597
     %t49069 =w copy 108
     %t49070 =w ceqw %t48975, %t49069
     jnz %t49070, @sc_eval10279, @sc_false10281
@@ -94108,12 +94108,12 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @merge10260
     jmp @merge10257
 @else10256
-    dbgloc 1590
+    dbgloc 1598
     %t49077 =w copy 101
     %t49078 =w ceqw %t48910, %t49077
     jnz %t49078, @then10285, @else10286
 @then10285
-    dbgloc 1591
+    dbgloc 1599
     %t49079 =w copy 113
     %t49080 =w ceqw %t48975, %t49079
     jnz %t49080, @then10288, @else10289
@@ -94122,7 +94122,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49081, %t49041
     jmp @merge10290
 @else10289
-    dbgloc 1592
+    dbgloc 1600
     %t49082 =w copy 110
     %t49083 =w ceqw %t48975, %t49082
     jnz %t49083, @then10291, @else10292
@@ -94137,12 +94137,12 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @merge10290
     jmp @merge10287
 @else10286
-    dbgloc 1593
+    dbgloc 1601
     %t49085 =w copy 110
     %t49086 =w ceqw %t48910, %t49085
     jnz %t49086, @then10294, @else10295
 @then10294
-    dbgloc 1596
+    dbgloc 1604
     %t49087 =w copy 101
     %t49088 =w ceqw %t48975, %t49087
     jnz %t49088, @then10297, @else10298
@@ -94155,12 +94155,12 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @merge10299
     jmp @merge10296
 @else10295
-    dbgloc 1597
+    dbgloc 1605
     %t49090 =w copy 103
     %t49091 =w ceqw %t48910, %t49090
     jnz %t49091, @then10300, @else10301
 @then10300
-    dbgloc 1600
+    dbgloc 1608
     %t49092 =w copy 103
     %t49093 =w ceqw %t48975, %t49092
     jnz %t49093, @sc_eval10303, @sc_false10305
@@ -94180,7 +94180,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49099, %t49041
     jmp @merge10308
 @else10307
-    dbgloc 1601
+    dbgloc 1609
     %t49100 =w copy 103
     %t49101 =w ceqw %t48975, %t49100
     jnz %t49101, @sc_eval10309, @sc_false10311
@@ -94200,7 +94200,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49107, %t49041
     jmp @merge10314
 @else10313
-    dbgloc 1602
+    dbgloc 1610
     %t49108 =w copy 108
     %t49109 =w ceqw %t48975, %t49108
     jnz %t49109, @sc_eval10315, @sc_false10317
@@ -94220,7 +94220,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49115, %t49041
     jmp @merge10320
 @else10319
-    dbgloc 1603
+    dbgloc 1611
     %t49116 =w copy 108
     %t49117 =w ceqw %t48975, %t49116
     jnz %t49117, @sc_eval10321, @sc_false10323
@@ -94250,8 +94250,8 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @merge10308
     jmp @merge10302
 @else10301
-    dbgloc 1604
-    dbgloc 1605
+    dbgloc 1612
+    dbgloc 1613
     %t49124 =w copy 108
     %t49125 =w ceqw %t48975, %t49124
     jnz %t49125, @sc_eval10327, @sc_false10329
@@ -94271,7 +94271,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49131, %t49041
     jmp @merge10332
 @else10331
-    dbgloc 1606
+    dbgloc 1614
     %t49132 =w copy 108
     %t49133 =w ceqw %t48975, %t49132
     jnz %t49133, @sc_eval10333, @sc_false10335
@@ -94291,7 +94291,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49139, %t49041
     jmp @merge10338
 @else10337
-    dbgloc 1607
+    dbgloc 1615
     %t49140 =w copy 103
     %t49141 =w ceqw %t48975, %t49140
     jnz %t49141, @sc_eval10339, @sc_false10341
@@ -94311,7 +94311,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49147, %t49041
     jmp @merge10344
 @else10343
-    dbgloc 1608
+    dbgloc 1616
     %t49148 =w copy 103
     %t49149 =w ceqw %t48975, %t49148
     jnz %t49149, @sc_eval10345, @sc_false10347
@@ -94347,14 +94347,14 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @merge10287
     jmp @merge10257
 @merge10257
-    dbgloc 1615
+    dbgloc 1623
     %t49156 =w call $codegen_amd64_lexer__lex_consume_to_eol(l %t48469)
-    dbgloc 1616
+    dbgloc 1624
     %t49157 =w call $codegen_amd64_lexer__lex_finish_instr(l %t48469, l %t48470, l %t48471)
-    dbgloc 1617
+    dbgloc 1625
     %t49158 =l loadl %t49041
-    dbgloc 1618
-    dbgloc 1619
+    dbgloc 1626
+    dbgloc 1627
     %t49159 =w copy 0
     ret %t49159
 @else10250
@@ -94364,7 +94364,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10223
     jmp @merge10224
 @merge10224
-    dbgloc 1622
+    dbgloc 1630
     %t49160 =w copy 1
     %t49162 =w copy 0
     %t49161 =w sub %t49162, %t49160
@@ -94372,12 +94372,12 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10190
     jmp @merge10191
 @merge10191
-    dbgloc 1626
+    dbgloc 1634
     %t49163 =w copy 112
     %t49164 =w ceqw %t48479, %t49163
     jnz %t49164, @then10351, @else10352
 @then10351
-    dbgloc 1627
+    dbgloc 1635
     %t49165 =l copy $str1173
     %t49166 =w copy 3
     %t49167 =l extsw %t49166
@@ -94393,26 +94393,26 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10355
     jmp @merge10356
 @merge10356
-    dbgloc 1628
+    dbgloc 1636
     %t49174 =w call $codegen_amd64_lexer__next_token_phi(l %t48469, l %t48470, l %t48471)
     ret %t49174
 @else10352
     jmp @merge10353
 @merge10353
-    dbgloc 1632
+    dbgloc 1640
     %t49175 =w copy 97
     %t49176 =w ceqw %t48479, %t49175
     jnz %t49176, @then10357, @else10358
 @then10357
-    dbgloc 1633
+    dbgloc 1641
     %t49177 =w copy 1
     %t49178 =l extsw %t49177
     %t49179 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49178)
-    dbgloc 1634
+    dbgloc 1642
     %t49180 =w copy 2
     %t49181 =l extsw %t49180
     %t49182 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49181)
-    dbgloc 1635
+    dbgloc 1643
     %t49183 =w copy 100
     %t49184 =w ceqw %t49179, %t49183
     jnz %t49184, @sc_eval10360, @sc_false10362
@@ -94428,21 +94428,21 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49185 =w phi @sc_false10362 %t49186, @sc_eval10360 %t49189
     jnz %t49185, @then10363, @else10364
 @then10363
-    dbgloc 1637
+    dbgloc 1645
     %t49190 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1638
+    dbgloc 1646
     %t49191 =w copy 97
     %t49192 =w call $codegen_amd64_lexer__next_token_binop(l %t48469, l %t48470, l %t48471, w %t49191)
     ret %t49192
 @else10364
     jmp @merge10365
 @merge10365
-    dbgloc 1640
+    dbgloc 1648
     %t49193 =w copy 108
     %t49194 =w ceqw %t49179, %t49193
     jnz %t49194, @then10366, @else10367
 @then10366
-    dbgloc 1642
+    dbgloc 1650
     %t49195 =l copy $str1174
     %t49196 =w copy 5
     %t49197 =l extsw %t49196
@@ -94458,13 +94458,13 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10370
     jmp @merge10371
 @merge10371
-    dbgloc 1643
+    dbgloc 1651
     %t49204 =w call $codegen_amd64_lexer__next_token_alloc(l %t48469, l %t48470, l %t48471)
     ret %t49204
 @else10367
     jmp @merge10368
 @merge10368
-    dbgloc 1647
+    dbgloc 1655
     %t49205 =w copy 110
     %t49206 =w ceqw %t49179, %t49205
     jnz %t49206, @sc_eval10372, @sc_false10374
@@ -94480,16 +94480,16 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49207 =w phi @sc_false10374 %t49208, @sc_eval10372 %t49211
     jnz %t49207, @then10375, @else10376
 @then10375
-    dbgloc 1648
+    dbgloc 1656
     %t49212 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1649
+    dbgloc 1657
     %t49213 =w copy 110
     %t49214 =w call $codegen_amd64_lexer__next_token_binop(l %t48469, l %t48470, l %t48471, w %t49213)
     ret %t49214
 @else10376
     jmp @merge10377
 @merge10377
-    dbgloc 1651
+    dbgloc 1659
     %t49215 =w copy 1
     %t49217 =w copy 0
     %t49216 =w sub %t49217, %t49215
@@ -94497,34 +94497,34 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10358
     jmp @merge10359
 @merge10359
-    dbgloc 1660
+    dbgloc 1668
     %t49218 =w copy 116
     %t49219 =w ceqw %t48479, %t49218
     jnz %t49219, @then10378, @else10379
 @then10378
-    dbgloc 1661
+    dbgloc 1669
     %t49220 =w copy 1
     %t49221 =l extsw %t49220
     %t49222 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49221)
-    dbgloc 1662
+    dbgloc 1670
     %t49223 =w copy 2
     %t49224 =l extsw %t49223
     %t49225 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49224)
-    dbgloc 1663
+    dbgloc 1671
     %t49226 =w copy 3
     %t49227 =l extsw %t49226
     %t49228 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49227)
-    dbgloc 1664
+    dbgloc 1672
     %t49229 =w copy 4
     %t49230 =l extsw %t49229
     %t49231 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49230)
-    dbgloc 1665
+    dbgloc 1673
     %t49232 =w copy 5
     %t49233 =l extsw %t49232
     %t49234 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49233)
-    dbgloc 1666
-    dbgloc 1667
-    dbgloc 1666
+    dbgloc 1674
+    dbgloc 1675
+    dbgloc 1674
     %t49235 =w copy 114
     %t49236 =w ceqw %t49222, %t49235
     jnz %t49236, @sc_eval10381, @sc_false10383
@@ -94554,7 +94554,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49248 =w copy 0
     jmp @sc_merge10388
 @sc_eval10387
-    dbgloc 1667
+    dbgloc 1675
     %t49249 =w copy 99
     %t49250 =w ceqw %t49231, %t49249
     %t49251 =w cnew %t49250, 0
@@ -94574,23 +94574,23 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49252 =w phi @sc_false10392 %t49253, @sc_eval10390 %t49256
     jnz %t49252, @then10393, @else10394
 @then10393
-    dbgloc 1669
+    dbgloc 1677
     %t49257 =w copy 0
     %t49258 =l extsw %t49257
     %t49259 =l alloc8 8
     storel %t49258, %t49259
     jmp @loop10396
 @loop10396
-    dbgloc 1670
+    dbgloc 1678
     %t49260 =l loadl %t49259
     %t49261 =w copy 6
     %t49262 =l extsw %t49261
     %t49263 =w csltl %t49260, %t49262
     jnz %t49263, @body10397, @exit10398
 @body10397
-    dbgloc 1671
+    dbgloc 1679
     %t49264 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1672
+    dbgloc 1680
     %t49265 =l loadl %t49259
     %t49266 =w copy 1
     %t49267 =l extsw %t49266
@@ -94598,25 +94598,25 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49268, %t49259
     jmp @loop10396
 @exit10398
-    dbgloc 1674
+    dbgloc 1682
     %t49269 =w call $codegen_amd64_lexer__lex_skip_ws(l %t48469)
-    dbgloc 1676
+    dbgloc 1684
     %t49270 =w call $codegen_amd64_lexer__lex_consume_to_eol(l %t48469)
-    dbgloc 1677
+    dbgloc 1685
     %t49271 =w call $codegen_amd64_state__ILTOK_TRUNCD()
     %t49272 =l add %t48469, 24
     %t49273 =w loadw %t49272
     %t49274 =w call $codegen_amd64_lexer__lex_init_token(l %t48471, w %t49271, w %t49273)
-    dbgloc 1678
+    dbgloc 1686
     %t49275 =w call $codegen_amd64_lexer__lex_finish_instr(l %t48469, l %t48470, l %t48471)
-    dbgloc 1679
-    dbgloc 1680
+    dbgloc 1687
+    dbgloc 1688
     %t49276 =w copy 0
     ret %t49276
 @else10394
     jmp @merge10395
 @merge10395
-    dbgloc 1683
+    dbgloc 1691
     %t49277 =w copy 1
     %t49279 =w copy 0
     %t49278 =w sub %t49279, %t49277
@@ -94624,29 +94624,29 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10379
     jmp @merge10380
 @merge10380
-    dbgloc 1686
+    dbgloc 1694
     %t49280 =w copy 115
     %t49281 =w ceqw %t48479, %t49280
     jnz %t49281, @then10399, @else10400
 @then10399
-    dbgloc 1687
+    dbgloc 1695
     %t49282 =w copy 1
     %t49283 =l extsw %t49282
     %t49284 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49283)
-    dbgloc 1688
+    dbgloc 1696
     %t49285 =w copy 2
     %t49286 =l extsw %t49285
     %t49287 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49286)
-    dbgloc 1689
+    dbgloc 1697
     %t49288 =w copy 3
     %t49289 =l extsw %t49288
     %t49290 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49289)
-    dbgloc 1693
+    dbgloc 1701
     %t49291 =w copy 104
     %t49292 =w ceqw %t49284, %t49291
     jnz %t49292, @then10402, @else10403
 @then10402
-    dbgloc 1695
+    dbgloc 1703
     %t49293 =w copy 108
     %t49294 =w ceqw %t49287, %t49293
     jnz %t49294, @sc_true10407, @sc_eval10405
@@ -94662,11 +94662,11 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49295 =w phi @sc_true10407 %t49296, @sc_eval10405 %t49299
     jnz %t49295, @then10408, @else10409
 @then10408
-    dbgloc 1697
+    dbgloc 1705
     %t49300 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1698
+    dbgloc 1706
     %t49301 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1699
+    dbgloc 1707
     %t49302 =w copy 104
     %t49303 =w call $codegen_amd64_lexer__next_token_binop(l %t48469, l %t48470, l %t48471, w %t49302)
     ret %t49303
@@ -94677,7 +94677,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10403
     jmp @merge10404
 @merge10404
-    dbgloc 1702
+    dbgloc 1710
     %t49304 =w copy 117
     %t49305 =w ceqw %t49284, %t49304
     jnz %t49305, @sc_eval10411, @sc_false10413
@@ -94693,16 +94693,16 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49306 =w phi @sc_false10413 %t49307, @sc_eval10411 %t49310
     jnz %t49306, @then10414, @else10415
 @then10414
-    dbgloc 1704
+    dbgloc 1712
     %t49311 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1705
+    dbgloc 1713
     %t49312 =w copy 115
     %t49313 =w call $codegen_amd64_lexer__next_token_binop(l %t48469, l %t48470, l %t48471, w %t49312)
     ret %t49313
 @else10415
     jmp @merge10416
 @merge10416
-    dbgloc 1716
+    dbgloc 1724
     %t49314 =w copy 116
     %t49315 =w ceqw %t49284, %t49314
     jnz %t49315, @sc_eval10417, @sc_false10419
@@ -94729,11 +94729,11 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49321 =w phi @sc_false10422 %t49322, @sc_eval10420 %t49325
     jnz %t49321, @then10423, @else10424
 @then10423
-    dbgloc 1717
+    dbgloc 1725
     %t49326 =w copy 4
     %t49327 =l extsw %t49326
     %t49328 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49327)
-    dbgloc 1718
+    dbgloc 1726
     %t49329 =w copy 105
     %t49330 =w ceqw %t49328, %t49329
     jnz %t49330, @sc_true10428, @sc_eval10426
@@ -94749,23 +94749,23 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49331 =w phi @sc_true10428 %t49332, @sc_eval10426 %t49335
     jnz %t49331, @then10429, @else10430
 @then10429
-    dbgloc 1719
+    dbgloc 1727
     %t49336 =w copy 0
     %t49337 =l extsw %t49336
     %t49338 =l alloc8 8
     storel %t49337, %t49338
     jmp @loop10432
 @loop10432
-    dbgloc 1720
+    dbgloc 1728
     %t49339 =l loadl %t49338
     %t49340 =w copy 5
     %t49341 =l extsw %t49340
     %t49342 =w csltl %t49339, %t49341
     jnz %t49342, @body10433, @exit10434
 @body10433
-    dbgloc 1721
+    dbgloc 1729
     %t49343 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1722
+    dbgloc 1730
     %t49344 =l loadl %t49338
     %t49345 =w copy 1
     %t49346 =l extsw %t49345
@@ -94773,19 +94773,19 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49347, %t49338
     jmp @loop10432
 @exit10434
-    dbgloc 1724
+    dbgloc 1732
     %t49348 =w call $codegen_amd64_lexer__lex_skip_ws(l %t48469)
-    dbgloc 1726
+    dbgloc 1734
     %t49349 =w call $codegen_amd64_lexer__lex_consume_to_eol(l %t48469)
-    dbgloc 1727
+    dbgloc 1735
     %t49350 =w call $codegen_amd64_state__ILTOK_STOSI()
     %t49351 =l add %t48469, 24
     %t49352 =w loadw %t49351
     %t49353 =w call $codegen_amd64_lexer__lex_init_token(l %t48471, w %t49350, w %t49352)
-    dbgloc 1728
+    dbgloc 1736
     %t49354 =w call $codegen_amd64_lexer__lex_finish_instr(l %t48469, l %t48470, l %t48471)
-    dbgloc 1729
-    dbgloc 1730
+    dbgloc 1737
+    dbgloc 1738
     %t49355 =w copy 0
     ret %t49355
 @else10430
@@ -94795,20 +94795,20 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10424
     jmp @merge10425
 @merge10425
-    dbgloc 1738
+    dbgloc 1746
     %t49356 =w copy 108
     %t49357 =w ceqw %t49284, %t49356
     jnz %t49357, @then10435, @else10436
 @then10435
-    dbgloc 1739
+    dbgloc 1747
     %t49358 =w copy 3
     %t49359 =l extsw %t49358
     %t49360 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49359)
-    dbgloc 1740
+    dbgloc 1748
     %t49361 =w copy 4
     %t49362 =l extsw %t49361
     %t49363 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49362)
-    dbgloc 1741
+    dbgloc 1749
     %t49364 =w copy 116
     %t49365 =w ceqw %t49287, %t49364
     jnz %t49365, @sc_eval10438, @sc_false10440
@@ -94835,23 +94835,23 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49371 =w phi @sc_false10443 %t49372, @sc_eval10441 %t49375
     jnz %t49371, @then10444, @else10445
 @then10444
-    dbgloc 1742
+    dbgloc 1750
     %t49376 =w copy 0
     %t49377 =l extsw %t49376
     %t49378 =l alloc8 8
     storel %t49377, %t49378
     jmp @loop10447
 @loop10447
-    dbgloc 1743
+    dbgloc 1751
     %t49379 =l loadl %t49378
     %t49380 =w copy 5
     %t49381 =l extsw %t49380
     %t49382 =w csltl %t49379, %t49381
     jnz %t49382, @body10448, @exit10449
 @body10448
-    dbgloc 1744
+    dbgloc 1752
     %t49383 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1745
+    dbgloc 1753
     %t49384 =l loadl %t49378
     %t49385 =w copy 1
     %t49386 =l extsw %t49385
@@ -94859,19 +94859,19 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49387, %t49378
     jmp @loop10447
 @exit10449
-    dbgloc 1747
+    dbgloc 1755
     %t49388 =w call $codegen_amd64_lexer__lex_skip_ws(l %t48469)
-    dbgloc 1749
+    dbgloc 1757
     %t49389 =w call $codegen_amd64_lexer__lex_consume_to_eol(l %t48469)
-    dbgloc 1750
+    dbgloc 1758
     %t49390 =w call $codegen_amd64_state__ILTOK_SLTOF()
     %t49391 =l add %t48469, 24
     %t49392 =w loadw %t49391
     %t49393 =w call $codegen_amd64_lexer__lex_init_token(l %t48471, w %t49390, w %t49392)
-    dbgloc 1751
+    dbgloc 1759
     %t49394 =w call $codegen_amd64_lexer__lex_finish_instr(l %t48469, l %t48470, l %t48471)
-    dbgloc 1752
-    dbgloc 1753
+    dbgloc 1760
+    dbgloc 1761
     %t49395 =w copy 0
     ret %t49395
 @else10445
@@ -94881,20 +94881,20 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10436
     jmp @merge10437
 @merge10437
-    dbgloc 1757
+    dbgloc 1765
     %t49396 =w copy 119
     %t49397 =w ceqw %t49284, %t49396
     jnz %t49397, @then10450, @else10451
 @then10450
-    dbgloc 1758
+    dbgloc 1766
     %t49398 =w copy 3
     %t49399 =l extsw %t49398
     %t49400 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49399)
-    dbgloc 1759
+    dbgloc 1767
     %t49401 =w copy 4
     %t49402 =l extsw %t49401
     %t49403 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49402)
-    dbgloc 1760
+    dbgloc 1768
     %t49404 =w copy 116
     %t49405 =w ceqw %t49287, %t49404
     jnz %t49405, @sc_eval10453, @sc_false10455
@@ -94921,23 +94921,23 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49411 =w phi @sc_false10458 %t49412, @sc_eval10456 %t49415
     jnz %t49411, @then10459, @else10460
 @then10459
-    dbgloc 1761
+    dbgloc 1769
     %t49416 =w copy 0
     %t49417 =l extsw %t49416
     %t49418 =l alloc8 8
     storel %t49417, %t49418
     jmp @loop10462
 @loop10462
-    dbgloc 1762
+    dbgloc 1770
     %t49419 =l loadl %t49418
     %t49420 =w copy 5
     %t49421 =l extsw %t49420
     %t49422 =w csltl %t49419, %t49421
     jnz %t49422, @body10463, @exit10464
 @body10463
-    dbgloc 1763
+    dbgloc 1771
     %t49423 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1764
+    dbgloc 1772
     %t49424 =l loadl %t49418
     %t49425 =w copy 1
     %t49426 =l extsw %t49425
@@ -94945,19 +94945,19 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49427, %t49418
     jmp @loop10462
 @exit10464
-    dbgloc 1766
+    dbgloc 1774
     %t49428 =w call $codegen_amd64_lexer__lex_skip_ws(l %t48469)
-    dbgloc 1768
+    dbgloc 1776
     %t49429 =w call $codegen_amd64_lexer__lex_consume_to_eol(l %t48469)
-    dbgloc 1769
+    dbgloc 1777
     %t49430 =w call $codegen_amd64_state__ILTOK_SWTOF()
     %t49431 =l add %t48469, 24
     %t49432 =w loadw %t49431
     %t49433 =w call $codegen_amd64_lexer__lex_init_token(l %t48471, w %t49430, w %t49432)
-    dbgloc 1770
+    dbgloc 1778
     %t49434 =w call $codegen_amd64_lexer__lex_finish_instr(l %t48469, l %t48470, l %t48471)
-    dbgloc 1771
-    dbgloc 1772
+    dbgloc 1779
+    dbgloc 1780
     %t49435 =w copy 0
     ret %t49435
 @else10460
@@ -94967,24 +94967,24 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10451
     jmp @merge10452
 @merge10452
-    dbgloc 1776
+    dbgloc 1784
     %t49436 =w copy 117
     %t49437 =w ceqw %t49284, %t49436
     jnz %t49437, @then10465, @else10466
 @then10465
-    dbgloc 1777
+    dbgloc 1785
     %t49438 =w copy 2
     %t49439 =l extsw %t49438
     %t49440 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49439)
-    dbgloc 1778
+    dbgloc 1786
     %t49441 =w copy 3
     %t49442 =l extsw %t49441
     %t49443 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49442)
-    dbgloc 1779
+    dbgloc 1787
     %t49444 =w copy 4
     %t49445 =l extsw %t49444
     %t49446 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49445)
-    dbgloc 1780
+    dbgloc 1788
     %t49447 =w copy 116
     %t49448 =w ceqw %t49440, %t49447
     jnz %t49448, @sc_eval10468, @sc_false10470
@@ -95011,11 +95011,11 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49454 =w phi @sc_false10473 %t49455, @sc_eval10471 %t49458
     jnz %t49454, @then10474, @else10475
 @then10474
-    dbgloc 1781
+    dbgloc 1789
     %t49459 =w copy 1
     %t49460 =l extsw %t49459
     %t49461 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49460)
-    dbgloc 1784
+    dbgloc 1792
     %t49462 =w copy 108
     %t49463 =w ceqw %t49461, %t49462
     jnz %t49463, @then10477, @else10478
@@ -95027,23 +95027,23 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     jmp @merge10479
 @merge10479
     %t49466 =w phi @then10477 %t49464, @else10478 %t49465
-    dbgloc 1785
+    dbgloc 1793
     %t49467 =w copy 0
     %t49468 =l extsw %t49467
     %t49469 =l alloc8 8
     storel %t49468, %t49469
     jmp @loop10480
 @loop10480
-    dbgloc 1786
+    dbgloc 1794
     %t49470 =l loadl %t49469
     %t49471 =w copy 5
     %t49472 =l extsw %t49471
     %t49473 =w csltl %t49470, %t49472
     jnz %t49473, @body10481, @exit10482
 @body10481
-    dbgloc 1787
+    dbgloc 1795
     %t49474 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1788
+    dbgloc 1796
     %t49475 =l loadl %t49469
     %t49476 =w copy 1
     %t49477 =l extsw %t49476
@@ -95051,18 +95051,18 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49478, %t49469
     jmp @loop10480
 @exit10482
-    dbgloc 1790
+    dbgloc 1798
     %t49479 =w call $codegen_amd64_lexer__lex_skip_ws(l %t48469)
-    dbgloc 1792
+    dbgloc 1800
     %t49480 =w call $codegen_amd64_lexer__lex_consume_to_eol(l %t48469)
-    dbgloc 1793
+    dbgloc 1801
     %t49481 =l add %t48469, 24
     %t49482 =w loadw %t49481
     %t49483 =w call $codegen_amd64_lexer__lex_init_token(l %t48471, w %t49466, w %t49482)
-    dbgloc 1794
+    dbgloc 1802
     %t49484 =w call $codegen_amd64_lexer__lex_finish_instr(l %t48469, l %t48470, l %t48471)
-    dbgloc 1795
-    dbgloc 1796
+    dbgloc 1803
+    dbgloc 1804
     %t49485 =w copy 0
     ret %t49485
 @else10475
@@ -95072,24 +95072,24 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10466
     jmp @merge10467
 @merge10467
-    dbgloc 1800
+    dbgloc 1808
     %t49486 =w copy 116
     %t49487 =w ceqw %t49284, %t49486
     jnz %t49487, @then10483, @else10484
 @then10483
-    dbgloc 1801
+    dbgloc 1809
     %t49488 =w copy 3
     %t49489 =l extsw %t49488
     %t49490 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49489)
-    dbgloc 1802
+    dbgloc 1810
     %t49491 =w copy 4
     %t49492 =l extsw %t49491
     %t49493 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49492)
-    dbgloc 1803
+    dbgloc 1811
     %t49494 =w copy 5
     %t49495 =l extsw %t49494
     %t49496 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49495)
-    dbgloc 1804
+    dbgloc 1812
     %t49497 =w copy 111
     %t49498 =w ceqw %t49287, %t49497
     jnz %t49498, @sc_eval10486, @sc_false10488
@@ -95116,9 +95116,9 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49504 =w phi @sc_false10491 %t49505, @sc_eval10489 %t49508
     jnz %t49504, @then10492, @else10493
 @then10492
-    dbgloc 1805
-    dbgloc 1806
-    dbgloc 1805
+    dbgloc 1813
+    dbgloc 1814
+    dbgloc 1813
     %t49509 =w copy 119
     %t49510 =w ceqw %t49496, %t49509
     jnz %t49510, @sc_true10497, @sc_eval10495
@@ -95137,7 +95137,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49517 =w copy 1
     jmp @sc_merge10499
 @sc_eval10498
-    dbgloc 1806
+    dbgloc 1814
     %t49518 =w copy 115
     %t49519 =w ceqw %t49496, %t49518
     %t49520 =w cnew %t49519, 0
@@ -95157,9 +95157,9 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49521 =w phi @sc_true10503 %t49522, @sc_eval10501 %t49525
     jnz %t49521, @then10504, @else10505
 @then10504
-    dbgloc 1807
+    dbgloc 1815
     %t49526 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1808
+    dbgloc 1816
     %t49527 =w call $codegen_amd64_lexer__next_token_store(l %t48469, l %t48470, l %t48471, w %t49496)
     ret %t49527
 @else10505
@@ -95173,7 +95173,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10484
     jmp @merge10485
 @merge10485
-    dbgloc 1812
+    dbgloc 1820
     %t49528 =w copy 1
     %t49530 =w copy 0
     %t49529 =w sub %t49530, %t49528
@@ -95181,30 +95181,30 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10400
     jmp @merge10401
 @merge10401
-    dbgloc 1818
+    dbgloc 1826
     %t49531 =w copy 111
     %t49532 =w ceqw %t48479, %t49531
     jnz %t49532, @then10507, @else10508
 @then10507
-    dbgloc 1819
+    dbgloc 1827
     %t49533 =w copy 1
     %t49534 =l extsw %t49533
     %t49535 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49534)
-    dbgloc 1820
+    dbgloc 1828
     %t49536 =w copy 114
     %t49537 =w ceqw %t49535, %t49536
     jnz %t49537, @then10510, @else10511
 @then10510
-    dbgloc 1821
+    dbgloc 1829
     %t49538 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1822
+    dbgloc 1830
     %t49539 =w copy 111
     %t49540 =w call $codegen_amd64_lexer__next_token_binop(l %t48469, l %t48470, l %t48471, w %t49539)
     ret %t49540
 @else10511
     jmp @merge10512
 @merge10512
-    dbgloc 1824
+    dbgloc 1832
     %t49541 =w copy 1
     %t49543 =w copy 0
     %t49542 =w sub %t49543, %t49541
@@ -95212,20 +95212,20 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10508
     jmp @merge10509
 @merge10509
-    dbgloc 1829
+    dbgloc 1837
     %t49544 =w copy 120
     %t49545 =w ceqw %t48479, %t49544
     jnz %t49545, @then10513, @else10514
 @then10513
-    dbgloc 1830
+    dbgloc 1838
     %t49546 =w copy 1
     %t49547 =l extsw %t49546
     %t49548 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49547)
-    dbgloc 1831
+    dbgloc 1839
     %t49549 =w copy 2
     %t49550 =l extsw %t49549
     %t49551 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49550)
-    dbgloc 1832
+    dbgloc 1840
     %t49552 =w copy 111
     %t49553 =w ceqw %t49548, %t49552
     jnz %t49553, @sc_eval10516, @sc_false10518
@@ -95241,16 +95241,16 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49554 =w phi @sc_false10518 %t49555, @sc_eval10516 %t49558
     jnz %t49554, @then10519, @else10520
 @then10519
-    dbgloc 1833
+    dbgloc 1841
     %t49559 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1834
+    dbgloc 1842
     %t49560 =w copy 120
     %t49561 =w call $codegen_amd64_lexer__next_token_binop(l %t48469, l %t48470, l %t48471, w %t49560)
     ret %t49561
 @else10520
     jmp @merge10521
 @merge10521
-    dbgloc 1836
+    dbgloc 1844
     %t49562 =w copy 1
     %t49564 =w copy 0
     %t49563 =w sub %t49564, %t49562
@@ -95258,26 +95258,26 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10514
     jmp @merge10515
 @merge10515
-    dbgloc 1840
+    dbgloc 1848
     %t49565 =w copy 109
     %t49566 =w ceqw %t48479, %t49565
     jnz %t49566, @then10522, @else10523
 @then10522
-    dbgloc 1841
+    dbgloc 1849
     %t49567 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1842
+    dbgloc 1850
     %t49568 =w copy 109
     %t49569 =w call $codegen_amd64_lexer__next_token_binop(l %t48469, l %t48470, l %t48471, w %t49568)
     ret %t49569
 @else10523
     jmp @merge10524
 @merge10524
-    dbgloc 1846
+    dbgloc 1854
     %t49570 =w copy 108
     %t49571 =w ceqw %t48479, %t49570
     jnz %t49571, @then10525, @else10526
 @then10525
-    dbgloc 1848
+    dbgloc 1856
     %t49572 =l copy $str1175
     %t49573 =w copy 4
     %t49574 =l extsw %t49573
@@ -95293,9 +95293,9 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10529
     jmp @merge10530
 @merge10530
-    dbgloc 1849
+    dbgloc 1857
     %t49581 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48469)
-    dbgloc 1852
+    dbgloc 1860
     %t49582 =w copy 115
     %t49583 =w ceqw %t49581, %t49582
     jnz %t49583, @sc_true10533, @sc_eval10531
@@ -95311,11 +95311,11 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49584 =w phi @sc_true10533 %t49585, @sc_eval10531 %t49588
     jnz %t49584, @then10534, @else10535
 @then10534
-    dbgloc 1855
+    dbgloc 1863
     %t49589 =w copy 1
     %t49590 =l extsw %t49589
     %t49591 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49590)
-    dbgloc 1856
+    dbgloc 1864
     %t49592 =w copy 98
     %t49593 =w ceqw %t49591, %t49592
     jnz %t49593, @sc_true10539, @sc_eval10537
@@ -95331,7 +95331,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49594 =w phi @sc_true10539 %t49595, @sc_eval10537 %t49598
     jnz %t49594, @then10540, @else10541
 @then10540
-    dbgloc 1858
+    dbgloc 1866
     %t49599 =w call $codegen_amd64_lexer__next_token_loadsub(l %t48469, l %t48470, l %t48471)
     ret %t49599
 @else10541
@@ -95341,9 +95341,9 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10535
     jmp @merge10536
 @merge10536
-    dbgloc 1861
-    dbgloc 1862
-    dbgloc 1861
+    dbgloc 1869
+    dbgloc 1870
+    dbgloc 1869
     %t49600 =w copy 119
     %t49601 =w ceqw %t49581, %t49600
     jnz %t49601, @sc_true10545, @sc_eval10543
@@ -95362,7 +95362,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49608 =w copy 1
     jmp @sc_merge10547
 @sc_eval10546
-    dbgloc 1862
+    dbgloc 1870
     %t49609 =w copy 115
     %t49610 =w ceqw %t49581, %t49609
     %t49611 =w cnew %t49610, 0
@@ -95382,13 +95382,13 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49612 =w phi @sc_true10551 %t49613, @sc_eval10549 %t49616
     jnz %t49612, @then10552, @else10553
 @then10552
-    dbgloc 1863
+    dbgloc 1871
     %t49617 =w call $codegen_amd64_lexer__next_token_load(l %t48469, l %t48470, l %t48471, w %t49581)
     ret %t49617
 @else10553
     jmp @merge10554
 @merge10554
-    dbgloc 1865
+    dbgloc 1873
     %t49618 =w copy 1
     %t49620 =w copy 0
     %t49619 =w sub %t49620, %t49618
@@ -95396,12 +95396,12 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10526
     jmp @merge10527
 @merge10527
-    dbgloc 1869
+    dbgloc 1877
     %t49621 =w copy 118
     %t49622 =w ceqw %t48479, %t49621
     jnz %t49622, @then10555, @else10556
 @then10555
-    dbgloc 1870
+    dbgloc 1878
     %t49623 =l copy $str1176
     %t49624 =w copy 8
     %t49625 =l extsw %t49624
@@ -95417,36 +95417,36 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10559
     jmp @merge10560
 @merge10560
-    dbgloc 1871
+    dbgloc 1879
     %t49632 =w call $codegen_amd64_lexer__lex_skip_ws_and_comments(l %t48469)
-    dbgloc 1874
+    dbgloc 1882
     %t49633 =w call $codegen_amd64_lexer__lex_peek_byte(l %t48469)
-    dbgloc 1875
+    dbgloc 1883
     %t49634 =w copy 108
     %t49635 =w ceqw %t49633, %t49634
     jnz %t49635, @then10561, @else10562
 @then10561
-    dbgloc 1878
+    dbgloc 1886
     %t49636 =w copy 1
     %t49637 =l extsw %t49636
     %t49638 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49637)
-    dbgloc 1879
+    dbgloc 1887
     %t49639 =w copy 2
     %t49640 =l extsw %t49639
     %t49641 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49640)
-    dbgloc 1880
+    dbgloc 1888
     %t49642 =w copy 3
     %t49643 =l extsw %t49642
     %t49644 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49643)
-    dbgloc 1881
+    dbgloc 1889
     %t49645 =w copy 4
     %t49646 =l extsw %t49645
     %t49647 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49646)
-    dbgloc 1882
+    dbgloc 1890
     %t49648 =w copy 5
     %t49649 =l extsw %t49648
     %t49650 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49649)
-    dbgloc 1884
+    dbgloc 1892
     %t49651 =w copy 111
     %t49652 =w ceqw %t49638, %t49651
     jnz %t49652, @sc_eval10564, @sc_false10566
@@ -95473,7 +95473,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49658 =w phi @sc_false10569 %t49659, @sc_eval10567 %t49662
     jnz %t49658, @then10570, @else10571
 @then10570
-    dbgloc 1885
+    dbgloc 1893
     %t49663 =w copy 115
     %t49664 =w ceqw %t49647, %t49663
     jnz %t49664, @sc_true10575, @sc_eval10573
@@ -95489,7 +95489,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49665 =w phi @sc_true10575 %t49666, @sc_eval10573 %t49669
     jnz %t49665, @then10576, @else10577
 @then10576
-    dbgloc 1886
+    dbgloc 1894
     %t49670 =w copy 98
     %t49671 =w ceqw %t49650, %t49670
     jnz %t49671, @sc_true10581, @sc_eval10579
@@ -95505,23 +95505,23 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49672 =w phi @sc_true10581 %t49673, @sc_eval10579 %t49676
     jnz %t49672, @then10582, @else10583
 @then10582
-    dbgloc 1888
+    dbgloc 1896
     %t49677 =w copy 0
     %t49678 =l extsw %t49677
     %t49679 =l alloc8 8
     storel %t49678, %t49679
     jmp @loop10585
 @loop10585
-    dbgloc 1889
+    dbgloc 1897
     %t49680 =l loadl %t49679
     %t49681 =w copy 6
     %t49682 =l extsw %t49681
     %t49683 =w csltl %t49680, %t49682
     jnz %t49683, @body10586, @exit10587
 @body10586
-    dbgloc 1890
+    dbgloc 1898
     %t49684 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1891
+    dbgloc 1899
     %t49685 =l loadl %t49679
     %t49686 =w copy 1
     %t49687 =l extsw %t49686
@@ -95529,21 +95529,21 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49688, %t49679
     jmp @loop10585
 @exit10587
-    dbgloc 1893
-    dbgloc 1894
+    dbgloc 1901
+    dbgloc 1902
     %t49689 =w call $codegen_amd64_regalloc__ILTOK_LOADSUB()
     %t49690 =l add %t48469, 24
     %t49691 =w loadw %t49690
     %t49692 =w call $codegen_amd64_lexer__lex_init_token(l %t48471, w %t49689, w %t49691)
-    dbgloc 1895
+    dbgloc 1903
     %t49693 =w copy 32
     %t49694 =l extsw %t49693
     %t49695 =l call $util__ptr_add_u8(l %t48471, l %t49694)
     %t49696 =l copy %t49695
-    dbgloc 1896
+    dbgloc 1904
     %t49697 =w call $codegen_amd64_state__QBE_VOLATILE_MARKER()
     storew %t49697, %t49696
-    dbgloc 1897
+    dbgloc 1905
     %t49698 =w copy 0
     ret %t49698
 @else10583
@@ -95557,7 +95557,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10571
     jmp @merge10572
 @merge10572
-    dbgloc 1902
+    dbgloc 1910
     %t49699 =w copy 111
     %t49700 =w ceqw %t49638, %t49699
     jnz %t49700, @sc_eval10588, @sc_false10590
@@ -95584,9 +95584,9 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49706 =w phi @sc_false10593 %t49707, @sc_eval10591 %t49710
     jnz %t49706, @then10594, @else10595
 @then10594
-    dbgloc 1903
-    dbgloc 1904
-    dbgloc 1903
+    dbgloc 1911
+    dbgloc 1912
+    dbgloc 1911
     %t49711 =w copy 119
     %t49712 =w ceqw %t49647, %t49711
     jnz %t49712, @sc_true10599, @sc_eval10597
@@ -95605,7 +95605,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49719 =w copy 1
     jmp @sc_merge10601
 @sc_eval10600
-    dbgloc 1904
+    dbgloc 1912
     %t49720 =w copy 115
     %t49721 =w ceqw %t49647, %t49720
     %t49722 =w cnew %t49721, 0
@@ -95625,23 +95625,23 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49723 =w phi @sc_true10605 %t49724, @sc_eval10603 %t49727
     jnz %t49723, @then10606, @else10607
 @then10606
-    dbgloc 1906
+    dbgloc 1914
     %t49728 =w copy 0
     %t49729 =l extsw %t49728
     %t49730 =l alloc8 8
     storel %t49729, %t49730
     jmp @loop10609
 @loop10609
-    dbgloc 1907
+    dbgloc 1915
     %t49731 =l loadl %t49730
     %t49732 =w copy 4
     %t49733 =l extsw %t49732
     %t49734 =w csltl %t49731, %t49733
     jnz %t49734, @body10610, @exit10611
 @body10610
-    dbgloc 1908
+    dbgloc 1916
     %t49735 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1909
+    dbgloc 1917
     %t49736 =l loadl %t49730
     %t49737 =w copy 1
     %t49738 =l extsw %t49737
@@ -95649,23 +95649,23 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49739, %t49730
     jmp @loop10609
 @exit10611
-    dbgloc 1911
+    dbgloc 1919
     %t49740 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1912
+    dbgloc 1920
     %t49741 =w call $codegen_amd64_regalloc__ILTOK_LOAD()
     %t49742 =l add %t48469, 24
     %t49743 =w loadw %t49742
     %t49744 =w call $codegen_amd64_lexer__lex_init_token(l %t48471, w %t49741, w %t49743)
-    dbgloc 1913
+    dbgloc 1921
     %t49745 =w copy 32
     %t49746 =l extsw %t49745
     %t49747 =l call $util__ptr_add_u8(l %t48471, l %t49746)
     %t49748 =l copy %t49747
-    dbgloc 1914
+    dbgloc 1922
     %t49749 =w call $codegen_amd64_state__QBE_VOLATILE_MARKER()
     storew %t49749, %t49748
-    dbgloc 1915
-    dbgloc 1916
+    dbgloc 1923
+    dbgloc 1924
     %t49750 =w copy 0
     ret %t49750
 @else10607
@@ -95675,7 +95675,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10595
     jmp @merge10596
 @merge10596
-    dbgloc 1919
+    dbgloc 1927
     %t49751 =w copy 1
     %t49753 =w copy 0
     %t49752 =w sub %t49753, %t49751
@@ -95683,34 +95683,34 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10562
     jmp @merge10563
 @merge10563
-    dbgloc 1921
+    dbgloc 1929
     %t49754 =w copy 115
     %t49755 =w ceqw %t49633, %t49754
     jnz %t49755, @then10612, @else10613
 @then10612
-    dbgloc 1923
+    dbgloc 1931
     %t49756 =w copy 1
     %t49757 =l extsw %t49756
     %t49758 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49757)
-    dbgloc 1924
+    dbgloc 1932
     %t49759 =w copy 2
     %t49760 =l extsw %t49759
     %t49761 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49760)
-    dbgloc 1925
+    dbgloc 1933
     %t49762 =w copy 3
     %t49763 =l extsw %t49762
     %t49764 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49763)
-    dbgloc 1926
+    dbgloc 1934
     %t49765 =w copy 4
     %t49766 =l extsw %t49765
     %t49767 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49766)
-    dbgloc 1927
+    dbgloc 1935
     %t49768 =w copy 5
     %t49769 =l extsw %t49768
     %t49770 =w call $codegen_amd64_lexer__lex_peek_byte_at(l %t48469, l %t49769)
-    dbgloc 1928
-    dbgloc 1929
-    dbgloc 1928
+    dbgloc 1936
+    dbgloc 1937
+    dbgloc 1936
     %t49771 =w copy 116
     %t49772 =w ceqw %t49758, %t49771
     jnz %t49772, @sc_eval10615, @sc_false10617
@@ -95740,7 +95740,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49784 =w copy 0
     jmp @sc_merge10622
 @sc_eval10621
-    dbgloc 1929
+    dbgloc 1937
     %t49785 =w copy 101
     %t49786 =w ceqw %t49767, %t49785
     %t49787 =w cnew %t49786, 0
@@ -95749,9 +95749,9 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49783 =w phi @sc_false10623 %t49784, @sc_eval10621 %t49787
     jnz %t49783, @then10624, @else10625
 @then10624
-    dbgloc 1930
-    dbgloc 1931
-    dbgloc 1930
+    dbgloc 1938
+    dbgloc 1939
+    dbgloc 1938
     %t49788 =w copy 119
     %t49789 =w ceqw %t49770, %t49788
     jnz %t49789, @sc_true10629, @sc_eval10627
@@ -95770,7 +95770,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49796 =w copy 1
     jmp @sc_merge10631
 @sc_eval10630
-    dbgloc 1931
+    dbgloc 1939
     %t49797 =w copy 115
     %t49798 =w ceqw %t49770, %t49797
     %t49799 =w cnew %t49798, 0
@@ -95790,23 +95790,23 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49800 =w phi @sc_true10635 %t49801, @sc_eval10633 %t49804
     jnz %t49800, @then10636, @else10637
 @then10636
-    dbgloc 1933
+    dbgloc 1941
     %t49805 =w copy 0
     %t49806 =l extsw %t49805
     %t49807 =l alloc8 8
     storel %t49806, %t49807
     jmp @loop10639
 @loop10639
-    dbgloc 1934
+    dbgloc 1942
     %t49808 =l loadl %t49807
     %t49809 =w copy 5
     %t49810 =l extsw %t49809
     %t49811 =w csltl %t49808, %t49810
     jnz %t49811, @body10640, @exit10641
 @body10640
-    dbgloc 1935
+    dbgloc 1943
     %t49812 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1936
+    dbgloc 1944
     %t49813 =l loadl %t49807
     %t49814 =w copy 1
     %t49815 =l extsw %t49814
@@ -95814,23 +95814,23 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     storel %t49816, %t49807
     jmp @loop10639
 @exit10641
-    dbgloc 1938
+    dbgloc 1946
     %t49817 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1939
+    dbgloc 1947
     %t49818 =w call $codegen_amd64_regalloc__ILTOK_STORE()
     %t49819 =l add %t48469, 24
     %t49820 =w loadw %t49819
     %t49821 =w call $codegen_amd64_lexer__lex_init_token(l %t48471, w %t49818, w %t49820)
-    dbgloc 1940
+    dbgloc 1948
     %t49822 =w copy 32
     %t49823 =l extsw %t49822
     %t49824 =l call $util__ptr_add_u8(l %t48471, l %t49823)
     %t49825 =l copy %t49824
-    dbgloc 1941
+    dbgloc 1949
     %t49826 =w call $codegen_amd64_state__QBE_VOLATILE_MARKER()
     storew %t49826, %t49825
-    dbgloc 1942
-    dbgloc 1943
+    dbgloc 1950
+    dbgloc 1951
     %t49827 =w copy 0
     ret %t49827
 @else10637
@@ -95840,7 +95840,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10625
     jmp @merge10626
 @merge10626
-    dbgloc 1946
+    dbgloc 1954
     %t49828 =w copy 1
     %t49830 =w copy 0
     %t49829 =w sub %t49830, %t49828
@@ -95848,7 +95848,7 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10613
     jmp @merge10614
 @merge10614
-    dbgloc 1948
+    dbgloc 1956
     %t49831 =w copy 1
     %t49833 =w copy 0
     %t49832 =w sub %t49833, %t49831
@@ -95856,54 +95856,54 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
 @else10556
     jmp @merge10557
 @merge10557
-    dbgloc 1953
+    dbgloc 1961
     %t49834 =w copy 123
     %t49835 =w ceqw %t48479, %t49834
     jnz %t49835, @then10642, @else10643
 @then10642
-    dbgloc 1954
+    dbgloc 1962
     %t49836 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1955
+    dbgloc 1963
     %t49837 =w call $codegen_amd64_state__ILTOK_DIRECTIVE()
     %t49838 =l add %t48469, 24
     %t49839 =w loadw %t49838
     %t49840 =w call $codegen_amd64_lexer__lex_init_token(l %t48471, w %t49837, w %t49839)
-    dbgloc 1956
+    dbgloc 1964
     %t49841 =w copy 0
     ret %t49841
 @else10643
     jmp @merge10644
 @merge10644
-    dbgloc 1958
+    dbgloc 1966
     %t49842 =w copy 125
     %t49843 =w ceqw %t48479, %t49842
     jnz %t49843, @then10645, @else10646
 @then10645
-    dbgloc 1959
+    dbgloc 1967
     %t49844 =w call $codegen_amd64_lexer__lex_next_byte(l %t48469)
-    dbgloc 1960
+    dbgloc 1968
     %t49845 =w call $codegen_amd64_state__ILTOK_DIRECTIVE()
     %t49846 =l add %t48469, 24
     %t49847 =w loadw %t49846
     %t49848 =w call $codegen_amd64_lexer__lex_init_token(l %t48471, w %t49845, w %t49847)
-    dbgloc 1961
+    dbgloc 1969
     %t49849 =w copy 0
     ret %t49849
 @else10646
     jmp @merge10647
 @merge10647
-    dbgloc 1978
+    dbgloc 1986
     %t49850 =w copy 128
     %t49851 =l extsw %t49850
-    dbgloc 1979
+    dbgloc 1987
     %t49852 =l call $malloc(l %t49851)
-    dbgloc 1980
+    dbgloc 1988
     %t49853 =w copy 0
     %t49854 =l extsw %t49853
     %t49855 =w cnel %t49852, %t49854
     jnz %t49855, @then10648, @else10649
 @then10648
-    dbgloc 1981
+    dbgloc 1989
     %t49856 =l copy $str1177
     %t49857 =l add %t48469, 16
     %t49858 =l loadl %t49857
@@ -95912,15 +95912,15 @@ export function w $codegen_amd64_lexer__next_token(l %s, l %arena, l %t) {
     %t49861 =l copy 1
     %t49862 =l div %t49860, %t49861
     %t49863 =w call $sprintf_lld(l %t49852, l %t49856, l %t49862)
-    dbgloc 1982
+    dbgloc 1990
     %t49864 =w call $jh_fputs_stderr(l %t49852)
-    dbgloc 1983
+    dbgloc 1991
     %t49865 =w call $free(l %t49852)
     jmp @merge10650
 @else10649
     jmp @merge10650
 @merge10650
-    dbgloc 1985
+    dbgloc 1993
     %t49866 =w copy 1
     %t49868 =w copy 0
     %t49867 =w sub %t49868, %t49866
@@ -95932,78 +95932,78 @@ export function l $codegen_amd64_lexer__lex_il(l %buf, l %len, l %arena) {
     %t49869 =l copy %buf
     %t49870 =l copy %len
     %t49871 =l copy %arena
-    dbgloc 2002
-    dbgloc 2005
+    dbgloc 2010
+    dbgloc 2013
     %t49872 =w copy 16384
     %t49873 =l extsw %t49872
-    dbgloc 2006
+    dbgloc 2014
     %t49874 =w copy 40
     %t49875 =l extsw %t49874
     %t49876 =l mul %t49873, %t49875
     %t49877 =l call $arena__arena_alloc(l %t49871, l %t49876)
-    dbgloc 2007
+    dbgloc 2015
     %t49878 =w copy 0
     %t49879 =l extsw %t49878
     %t49880 =w ceql %t49877, %t49879
     jnz %t49880, @then10652, @else10653
 @then10652
-    dbgloc 2008
+    dbgloc 2016
     %t49881 =w copy 0
     %t49882 =l extsw %t49881
     ret %t49882
 @else10653
     jmp @merge10654
 @merge10654
-    dbgloc 2013
+    dbgloc 2021
     %t49883 =w copy 64
     %t49884 =l extsw %t49883
     %t49885 =l call $malloc(l %t49884)
-    dbgloc 2014
+    dbgloc 2022
     %t49886 =w copy 0
     %t49887 =w copy 64
     %t49888 =l extsw %t49887
     %t49889 =l call $memset(l %t49885, w %t49886, l %t49888)
-    dbgloc 2015
+    dbgloc 2023
     %t49890 =l copy %t49885
-    dbgloc 2016
+    dbgloc 2024
     storel %t49869, %t49890
-    dbgloc 2017
+    dbgloc 2025
     %t49891 =l call $util__ptr_add_u8(l %t49869, l %t49870)
     %t49892 =l add %t49890, 8
     storel %t49891, %t49892
-    dbgloc 2018
+    dbgloc 2026
     %t49893 =l add %t49890, 16
     storel %t49869, %t49893
-    dbgloc 2019
+    dbgloc 2027
     %t49894 =w copy 1
     %t49895 =l add %t49890, 24
     storew %t49894, %t49895
-    dbgloc 2020
+    dbgloc 2028
     %t49896 =w copy 0
     %t49897 =l extsw %t49896
     %t49898 =l add %t49890, 32
     storel %t49897, %t49898
-    dbgloc 2021
+    dbgloc 2029
     %t49899 =l add %t49890, 40
     storel %t49869, %t49899
-    dbgloc 2022
+    dbgloc 2030
     %t49900 =w copy 0
     %t49901 =l extsw %t49900
     %t49902 =l alloc8 8
     storel %t49901, %t49902
-    dbgloc 2023
+    dbgloc 2031
     %t49903 =w copy 0
     %t49904 =l alloc4 4
     storew %t49903, %t49904
     jmp @loop10655
 @loop10655
-    dbgloc 2024
+    dbgloc 2032
     %t49905 =w loadw %t49904
     %t49906 =w copy 0
     %t49907 =w ceqw %t49905, %t49906
     jnz %t49907, @body10656, @exit10657
 @body10656
-    dbgloc 2025
+    dbgloc 2033
     %t49908 =l loadl %t49902
     %t49909 =w csgel %t49908, %t49873
     jnz %t49909, @then10658, @else10659
@@ -96012,23 +96012,23 @@ export function l $codegen_amd64_lexer__lex_il(l %buf, l %len, l %arena) {
     storew %t49910, %t49904
     jmp @merge10660
 @else10659
-    dbgloc 2026
-    dbgloc 2027
+    dbgloc 2034
+    dbgloc 2035
     %t49911 =l loadl %t49902
     %t49912 =w copy 40
     %t49913 =l extsw %t49912
     %t49914 =l mul %t49911, %t49913
     %t49915 =l call $util__ptr_add_u8(l %t49877, l %t49914)
-    dbgloc 2028
+    dbgloc 2036
     %t49916 =w call $codegen_amd64_lexer__next_token(l %t49890, l %t49871, l %t49915)
-    dbgloc 2029
+    dbgloc 2037
     %t49917 =w copy 0
     %t49918 =w csltw %t49916, %t49917
     jnz %t49918, @then10661, @else10662
 @then10661
-    dbgloc 2031
+    dbgloc 2039
     %t49919 =w call $codegen_amd64_lexer__lex_peek_byte(l %t49890)
-    dbgloc 2032
+    dbgloc 2040
     %t49920 =w copy 0
     %t49921 =w ceqw %t49919, %t49920
     jnz %t49921, @then10664, @else10665
@@ -96037,18 +96037,18 @@ export function l $codegen_amd64_lexer__lex_il(l %buf, l %len, l %arena) {
     storew %t49922, %t49904
     jmp @merge10666
 @else10665
-    dbgloc 2033
+    dbgloc 2041
     %t49923 =w call $codegen_amd64_lexer__lex_next_byte(l %t49890)
     jmp @merge10666
 @merge10666
     jmp @merge10663
 @else10662
-    dbgloc 2034
-    dbgloc 2035
+    dbgloc 2042
+    dbgloc 2043
     %t49924 =l copy %t49915
-    dbgloc 2036
+    dbgloc 2044
     %t49925 =w loadw %t49924
-    dbgloc 2037
+    dbgloc 2045
     %t49926 =w call $codegen_amd64_regalloc__ILTOK_EOF()
     %t49927 =w ceqw %t49925, %t49926
     jnz %t49927, @then10667, @else10668
@@ -96059,7 +96059,7 @@ export function l $codegen_amd64_lexer__lex_il(l %buf, l %len, l %arena) {
 @else10668
     jmp @merge10669
 @merge10669
-    dbgloc 2038
+    dbgloc 2046
     %t49929 =l loadl %t49902
     %t49930 =w copy 1
     %t49931 =l extsw %t49930
@@ -96071,17 +96071,17 @@ export function l $codegen_amd64_lexer__lex_il(l %buf, l %len, l %arena) {
 @merge10660
     jmp @loop10655
 @exit10657
-    dbgloc 2042
+    dbgloc 2050
     %t49933 =w call $free(l %t49885)
-    dbgloc 2043
+    dbgloc 2051
     ret %t49877
 }
 
 export function l $codegen_amd64_lexer__lex_il_count(l %arr) {
 @start10670
     %t49934 =l copy %arr
-    dbgloc 2048
-    dbgloc 2049
+    dbgloc 2056
+    dbgloc 2057
     %t49935 =w copy 0
     %t49936 =l extsw %t49935
     %t49937 =w ceql %t49934, %t49936
@@ -96093,24 +96093,24 @@ export function l $codegen_amd64_lexer__lex_il_count(l %arr) {
 @else10672
     jmp @merge10673
 @merge10673
-    dbgloc 2050
+    dbgloc 2058
     %t49940 =w copy 0
     %t49941 =l extsw %t49940
     %t49942 =l alloc8 8
     storel %t49941, %t49942
-    dbgloc 2051
+    dbgloc 2059
     %t49943 =w copy 0
     %t49944 =l alloc4 4
     storew %t49943, %t49944
     jmp @loop10674
 @loop10674
-    dbgloc 2052
+    dbgloc 2060
     %t49945 =w loadw %t49944
     %t49946 =w copy 0
     %t49947 =w ceqw %t49945, %t49946
     jnz %t49947, @body10675, @exit10676
 @body10675
-    dbgloc 2053
+    dbgloc 2061
     %t49948 =l loadl %t49942
     %t49949 =w copy 16384
     %t49950 =l extsw %t49949
@@ -96121,18 +96121,18 @@ export function l $codegen_amd64_lexer__lex_il_count(l %arr) {
     storew %t49952, %t49944
     jmp @merge10679
 @else10678
-    dbgloc 2054
-    dbgloc 2055
+    dbgloc 2062
+    dbgloc 2063
     %t49953 =l loadl %t49942
     %t49954 =w copy 40
     %t49955 =l extsw %t49954
     %t49956 =l mul %t49953, %t49955
     %t49957 =l call $util__ptr_add_u8(l %t49934, l %t49956)
-    dbgloc 2056
+    dbgloc 2064
     %t49958 =l copy %t49957
-    dbgloc 2057
+    dbgloc 2065
     %t49959 =w loadw %t49958
-    dbgloc 2058
+    dbgloc 2066
     %t49960 =w call $codegen_amd64_regalloc__ILTOK_EOF()
     %t49961 =w ceqw %t49959, %t49960
     jnz %t49961, @then10680, @else10681
@@ -96141,7 +96141,7 @@ export function l $codegen_amd64_lexer__lex_il_count(l %arr) {
     storew %t49962, %t49944
     jmp @merge10682
 @else10681
-    dbgloc 2059
+    dbgloc 2067
     %t49963 =l loadl %t49942
     %t49964 =w copy 1
     %t49965 =l extsw %t49964
@@ -96153,15 +96153,15 @@ export function l $codegen_amd64_lexer__lex_il_count(l %arr) {
 @merge10679
     jmp @loop10674
 @exit10676
-    dbgloc 2062
+    dbgloc 2070
     %t49967 =l loadl %t49942
     ret %t49967
 }
 
 export function w $codegen_amd64_lexer__main_jhyy() {
 @start10683
-    dbgloc 2068
-    dbgloc 2069
+    dbgloc 2076
+    dbgloc 2077
     %t49968 =w copy 0
     ret %t49968
 }
