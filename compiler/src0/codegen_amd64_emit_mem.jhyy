@@ -375,7 +375,7 @@ fn emit_store(state: *u8, tok: *u8, target_tag: i32) -> i32 {
 
     let src = mem_parse_temp((*t).text, (*t).text_len, 0 as i64);
     let dst = mem_parse_temp((*t).text, (*t).text_len, 1 as i64);
-    if src < (0 as i64) || dst < (0 as i64) {
+    if src < (0 as i64) {
         return 1 as i32;  // 常量源(`storew 42, %t1`)v2.5.0 不在 scope
     }
 
@@ -383,6 +383,50 @@ fn emit_store(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let suffix = mem_mov_suffix(qt);
     let reg = mem_scratch_reg(qt);
     let src_off = mem_temp_offset(src, target_tag);
+
+    // v2.11.20 W-017 真修 Phase 3: emit_store $label path — `storew <val>, $g_x`。
+    // 跟 emit_load label branch 对称:scan text 找 '$',emit:
+    //   mov<suffix> <src_off>(%rbp), %<reg>
+    //   mov<suffix> %<reg>, <label>(%rip)
+    // Cover top_level_let_mut_test + types + defer_multi_lifo (W-017 ACTIVE 3 fail)。
+    if dst < (0 as i64) {
+        let mut label_start: i64 = -(1 as i64);
+        let mut label_len: i64 = 0 as i64;
+        let mut si: i64 = 0 as i64;
+        while si < (*t).text_len {
+            if mem_byte_at((*t).text, si) == (36 as i32) {  // '$'
+                label_start = si + (1 as i64);
+                while label_start + label_len < (*t).text_len {
+                    let lb = mem_byte_at((*t).text, label_start + label_len);
+                    if lb == (32 as i32) || lb == (10 as i32) || lb == (9 as i32) || lb == (0 as i32) { break; }
+                    label_len = label_len + (1 as i64);
+                }
+                break;
+            }
+            si = si + (1 as i64);
+        }
+        if label_start >= (0 as i64) && label_len > (0 as i64) {
+            mem_put(state, "\tmov" as *u8);
+            mem_put(state, suffix);
+            mem_put(state, " " as *u8);
+            mem_put_slot(state, src_off);
+            mem_put(state, ", " as *u8);
+            mem_put(state, reg);
+            mem_put(state, "\t\t# %t" as *u8);
+            mem_put_i64(state, src);
+            mem_put(state, "\n" as *u8);
+            mem_put(state, "\tmov" as *u8);
+            mem_put(state, suffix);
+            mem_put(state, " " as *u8);
+            mem_put(state, reg);
+            mem_put(state, ", " as *u8);
+            let _a = sb_append(mem_arena(state), mem_sb(state), ptr_add_u8((*t).text, label_start), label_len);
+            let _b = sb_append_cstr(mem_arena(state), mem_sb(state), "(%rip)\t\t# store $label\n" as *u8);
+            return 0 as i32;
+        }
+        return 1 as i32;
+    }
+
     let dst_off = mem_temp_offset(dst, target_tag);
 
     // v2.11.8 (W-074.7.8 derived-address tracking 真修):
@@ -577,15 +621,67 @@ fn emit_load(state: *u8, tok: *u8, target_tag: i32) -> i32 {
 
     let dst = (*t).int_val;
     let src = mem_parse_temp((*t).text, (*t).text_len, 0 as i64);
-    if dst < (0 as i64) || src < (0 as i64) {
+    if dst < (0 as i64) {
         return 1 as i32;
     }
 
     let qt = mem_effective_qbe_type((*t).qbe_type);
     let suffix = mem_mov_suffix(qt);
     let reg = mem_scratch_reg(qt);
-    let src_off = mem_temp_offset(src, target_tag);
     let dst_off = mem_temp_offset(dst, target_tag);
+
+    // v2.11.20 W-017 真修 Phase 3: emit_load $label path — loadw $g_x / loadl $g_x / ...
+    // 之前 mem_parse_temp 只认 %tN,遇到 $g_x 返回 -1 → emit_load 返 1 (silent
+    // fail per W-074.6 PARTIAL);W-017 ACTIVE 期间 jhyy-side 不 implement,只剩
+    // codegen.jhyy emit data 段但读路径 missing。
+    // 现在 scan text 找 '$' (跳过 op 名 + ws),emit:
+    //   mov<suffix> <label>(%rip), %<reg>
+    //   mov<suffix> %<reg>, <dst_off>(%rbp)
+    // 兼容 W-017 = codegen.jhyy emit `data $g_x = { w 41 }` + `loadw $g_x` use site。
+    let cg_e = state as *CGState;
+    if src < (0 as i64) {
+        // scan text for '$'
+        let mut label_start: i64 = -(1 as i64);
+        let mut label_len: i64 = 0 as i64;
+        let mut si: i64 = 0 as i64;
+        while si < (*t).text_len {
+            if mem_byte_at((*t).text, si) == (36 as i32) {  // '$'
+                label_start = si + (1 as i64);
+                // scan ident chars
+                while label_start + label_len < (*t).text_len {
+                    let lb = mem_byte_at((*t).text, label_start + label_len);
+                    if lb == (32 as i32) || lb == (10 as i32) || lb == (9 as i32) || lb == (0 as i32) { break; }
+                    label_len = label_len + (1 as i64);
+                }
+                break;
+            }
+            si = si + (1 as i64);
+        }
+        if label_start >= (0 as i64) && label_len > (0 as i64) {
+            mem_put(state, "\tmov" as *u8);
+            mem_put(state, suffix);
+            mem_put(state, " " as *u8);
+            let _a = sb_append(mem_arena(state), mem_sb(state), ptr_add_u8((*t).text, label_start), label_len);
+            let _b = sb_append_cstr(mem_arena(state), mem_sb(state), "(%rip), " as *u8);
+            mem_put(state, reg);
+            mem_put(state, "\t\t# load $label\n" as *u8);
+            mem_put(state, "\tmov" as *u8);
+            mem_put(state, suffix);
+            mem_put(state, " " as *u8);
+            mem_put(state, reg);
+            mem_put(state, ", " as *u8);
+            mem_put_slot(state, dst_off);
+            mem_put(state, "\t\t# -> %t" as *u8);
+            mem_put_i64(state, dst);
+            mem_put(state, "\n" as *u8);
+            return 0 as i32;
+        }
+        // 未识别 format — fall through (still silent fail for this instr, 但不再
+        // 误 return 1 把后续 emits 全污染;其实这个 fall-through 不该发生,留给后续 debug)
+        return 1 as i32;
+    }
+
+    let src_off = mem_temp_offset(src, target_tag);
 
     // v2.11.8 (W-074.7.8 derived-address tracking 真修):
     // src 是 address-holder 时,slot read 拿到的是 stack slot 存的 address VALUE,
@@ -593,7 +689,6 @@ fn emit_load(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     // 然后 read [r8] (= actual value)。Phase E 第一段:emit_load indirect dispatch。
     // %r8 是 caller-saved scratch (per Win x64 ABI,跟 %rax/%rcx/%rdx/%rdi/%rsi 同组,
     // 但 %r8 不是 codegen_amd64 通用 scratch,emit_load/store 自己用,不会跟 call clobber 冲突)。
-    let cg_e = state as *CGState;
     if cg_is_address_holder(state, src) != (0 as i32) {
         // movq -<src_off>(%rbp), %r8 ; mov<size> (%r8), %<reg> ; mov<size> %<reg>, -<dst_off>(%rbp)
         mem_put(state, "\tmovq " as *u8);
