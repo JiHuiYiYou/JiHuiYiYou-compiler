@@ -1682,6 +1682,23 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         // derived-address case:add/sub on QBE_L_LOCAL operand 当 src1 address-holder
         // 时,dst 装 runtime derived address (= src1 + imm/temp offset)。
         let _ad = cg_record_temp_holds_address(state, dst_id);
+        // v2.11.23 Phase 2 (W-074.13 sub-bug 1 big_array 真修 — 架构修 #2):
+        // derived address-holder 必须用 dedicated slot (cg_alloc_slot(8) advance),
+        // 不能走 formula `-(32+dst_id*8)` — formula pool 跟 t1's pointer-slot
+        // (Phase 1 走 cg_alloc_slot(8) advance 到 -408) 物理 collision in big_array:
+        // t47 = add %t1, 88 → formula -408 = t1's pointer-slot → store %rax,-408
+        // overwrite t1's slot → 后续 add %t1, N 读 t1 拿 garbage → bogus address
+        // → SEGV。
+        //
+        // Fix: derived 跟 alloc-pointer-slot 同 pattern (cg_alloc_slot(8) advance
+        // next_offset) → dedicated 8B region 物理独立于 formula pool + alloc-pointer-slot
+        // pool。cg_record_temp_slot override tier-1 lookup → dst_off = dedicated slot
+        // (not formula -408)。
+        //
+        // Why cg_alloc_slot (not next_offset manual): 跟 Phase 1 pattern 对齐,
+        // 自动跟其他 alloc-slot 物理分离 (advance 方向 = 负方向单调递减)。
+        let derived_slot_off = cg_alloc_slot(state, 8 as i64);
+        let _rec = cg_record_temp_slot(state, dst_id, derived_slot_off);
     }
 
     if is_sub != (0 as i32) {

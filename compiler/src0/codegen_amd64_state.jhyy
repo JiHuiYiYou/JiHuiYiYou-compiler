@@ -662,10 +662,21 @@ fn cg_offset_for_temp_with_target(t: i64, target_tag: i32) -> i64 {
 // alloc_slot(size: i64) -> i64
 // 输入:allocN size,返回对齐后的 slot offset(负方向,栈向下增长)
 // V2-B v2.6.0 (Unit B Stub-Fill): real impl — align-up + advance offset.
+//
+// v2.11.23 Phase 2 (W-074.13 sub-bug 1+4 真修 — alloc pool 从 formula pool 物理分离):
+// alloc pool 起始 offset = -8192 (公式 `-(32+t*8)` 在 t=255 = -2072), 留 8192-2072 = 6120 字节
+// gap 给 formula pool + 任何后续 alloc 不 collision。alloc pool 自身 advance 8 字节/8B slot
+// 或 aligned(alloc_size)。 Worst case:per-fn alloc ~50KB → -8192 - 50KB = -58800, 远在
+// 32KB MSYS2 mingw 栈范围(2MB default)内,no overflow risk。
 fn cg_alloc_slot(state: *u8, size: i64) -> i64 {
     // align-up to 8-byte boundary: (size + 7) & ~7
     let aligned = (size + (7 as i64)) & ((0 as i64) - (8 as i64));
     let s = state as *CGState;
+    // v2.11.23 Phase 2:alloc pool 起始 offset — formula pool 占用 [rbp-2072, rbp-32],
+    // alloc pool 必须从 rbp-8192 起向下增长 才不 collision
+    if (*s).next_offset == (0 as i64) {
+        (*s).next_offset = (0 as i64) - (8192 as i64);
+    }
     let off = (*s).next_offset - aligned;
     (*s).next_offset = off;
     (*s).total_alloc = (*s).total_alloc + aligned;
