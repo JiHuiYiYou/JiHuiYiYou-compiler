@@ -1064,12 +1064,24 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
             }
             i = i + (1 as i64);
         }
+        // v2.11.21-fix Phase 1 Option 2 (per docs/internal/rca/rca-v2.11.21.md § 2):
+        // Validate TEMP branch: if cg_parse_temp(idx=1) fails, the "%t" prefix
+        // counted by pct_count loop is NOT a real %tN — it's a bare "%t" (e.g. fn
+        // arg name). cap_table_basic cross_fn_sum_table has "%t3 =l copy %t" where
+        // `%t` is the fn arg name; pct_count=2 misclassifies as TEMP. Fall through
+        // to "1 个 %tN" else branch (which handles FNARG/IMM/LABEL) instead of
+        // clamping src_temp_id=0 (silent fail, bogus address copy).
+        let mut temp_branch_ok: i32 = 0 as i32;
         if pct_count >= (2 as i64) {
-            // TEMP path:src 是第 2 个 %tN (idx=1)
             is_imm = 0 as i32;
             src_temp_id = cg_parse_temp(src_text, src_text_len, 1 as i64);
-            if src_temp_id < (0 as i64) { src_temp_id = 0 as i64; }
-        } else {
+            if src_temp_id >= (0 as i64) {
+                temp_branch_ok = 1 as i32;
+            } else {
+                src_temp_id = -(1 as i64);  // sentinel: not a TEMP
+            }
+        }
+        if temp_branch_ok == (0 as i32) {
             // 1 个 %tN (or 0):找 "copy " 后的字符
             //   - '%' 后非 't' → FN_ARG
             //   - '$' 开头 → LABEL (e.g. "copy $str0")
@@ -1090,6 +1102,7 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                     // '%' 开头 — 检查后一位是不是 't'
                     if scan + (1 as i64) < src_text_len && cg_byte_at(src_text, scan + (1 as i64)) != (116 as i32) {
                         // '%name' (非 %tN) — 函数实参
+                        // v2.11.10 (W-074.6 T4-c 真修):emit_func_header 已调
                         // v2.11.10 (W-074.6 T4-c 真修):emit_func_header 已调
                         // cg_state_set_fn_header 把完整 header text 存到
                         // CGState.cur_fn_header_text。提取 %name (after '%') →
@@ -1122,14 +1135,48 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                             fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
                         }
                     } else {
-                        // v2.11.8 (W-074.7.8 真修延伸):'%t' 开头 → TEMP。
-                        // 之前 IMM 检测 pct_count=1 (text 只含 "copy %tN" 不含 dst)
-                        // 会落 IMM 分支,cg_parse_int_from 解析 "%tN" 取数字 N 当 IMM
-                        // emit `movq $N, -<dst>(%rbp)`,地址变常量 → struct assign 全错。
-                        // 真修:见 '%t' 必是 TEMP,set is_imm=0 + parse src_temp_id。
-                        is_imm = 0 as i32;
-                        src_temp_id = cg_parse_temp(src_text, src_text_len, 0 as i64);
-                        if src_temp_id < (0 as i64) { src_temp_id = 0 as i64; }
+                        // '%t' 开头 — 进一步判别:
+                        //   - scan+2 < len && byte_at(scan+2) 是 digit → "%tN" → TEMP (idx=0)
+                        //   - 否则 → bare "%t" → 函数实参 (per rca-v2.11.21.md § 2)
+                        // bare "%t" case: cap_table_basic cross_fn_sum_table 第一 arg `%t`,
+                        // %t3 =l copy %t 中 %t 是 fn arg 名(8B pointer, RCX 寄存器)。
+                        // 走 TEMP idx=0 会拿 first %tN (=%t3) 而非 fn arg → wrong value。
+                        let mut is_bare_t_fnarg: i32 = 0 as i32;
+                        if scan + (2 as i64) >= src_text_len {
+                            is_bare_t_fnarg = 1 as i32;
+                        } else {
+                            let t3 = cg_byte_at(src_text, scan + (2 as i64));
+                            if t3 < (48 as i32) || t3 > (57 as i32) {
+                                is_bare_t_fnarg = 1 as i32;
+                            }
+                        }
+                        if is_bare_t_fnarg != (0 as i32) {
+                            // bare "%t" → FNARG path (name = "t", 1 char)
+                            is_imm = 0 as i32;
+                            is_fnarg = 1 as i32;
+                            let name_start = scan + (1 as i64);
+                            // name = single char 't' (1 byte); name_len = 1
+                            if (*cg).cur_fn_header_text != (0 as *u8) {
+                                arg_idx = cg_find_arg_idx((*cg).cur_fn_header_text, (*cg).cur_fn_header_len,
+                                                ptr_add_u8(src_text, name_start), 1 as i64);
+                            } else {
+                                arg_idx = -(1 as i64);
+                            }
+                            if arg_idx >= (0 as i64) && arg_idx <= (3 as i64) {
+                                fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                            } else {
+                                fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
+                            }
+                        } else {
+                            // v2.11.8 (W-074.7.8 真修延伸):'%tN' → TEMP。
+                            // 之前 IMM 检测 pct_count=1 (text 只含 "copy %tN" 不含 dst)
+                            // 会落 IMM 分支,cg_parse_int_from 解析 "%tN" 取数字 N 当 IMM
+                            // emit `movq $N, -<dst>(%rbp)`,地址变常量 → struct assign 全错。
+                            // 真修:见 '%tN' 必是 TEMP,set is_imm=0 + parse src_temp_id。
+                            is_imm = 0 as i32;
+                            src_temp_id = cg_parse_temp(src_text, src_text_len, 0 as i64);
+                            if src_temp_id < (0 as i64) { src_temp_id = 0 as i64; }
+                        }
                     }
                 } else if scan < src_text_len && cg_byte_at(src_text, scan) == (36 as i32) {
                     // '$' 开头 → LABEL (v2.11.2 T4-c 真修延伸)
