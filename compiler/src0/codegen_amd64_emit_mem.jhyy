@@ -317,9 +317,28 @@ fn emit_alloc(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     // 修 nested_struct_deep + struct_val_pass + struct_val_assign pre-existing bug
     // + sigsegv on t6 二次 add %t6, 4 (this fix)。
     //
-    // flag write 让 emit_load/store/loadsub 知道这个 temp 是 address-holder;
-    // emit_binop (Phase D) / emit_copy (Phase F) 也 propagate flag 给 derived/copied。
+    // v2.11.23 Phase 1 ARCH FIX (corrected): re-enable cg_record_temp_slot with
+    // cg_alloc_slot(8) so the pointer-slot is in a dedicated 8B region BELOW the
+    // current next_offset — physical separate from BOTH formula pool
+    // (-(32+t*8) Win / -(t*8) SysV) AND region pool (cg_alloc_slot advance)。
+    //
+    // Why off-8 first try didn't work (v2.11.23 Phase 1 initial): off-8 lands in
+    // formula pool (t3 formula = -56 == t2 off-8 = -56 collision)。storew t3 →
+    // t3's formula slot (-56) overwritten → t2's pointer-slot corrupted → bogus
+    // address → SEGV。
+    //
+    // Why cg_alloc_slot(8) works: dedicated pool always advances next_offset to
+    // the deepest negative position not yet used by either formula or region
+    // pool. Pointer-slot 物理在 region "下面" (更负) + 跟后续 alloc's region
+    // 不会 collision (后续 alloc 走 cg_alloc_slot(aligned) 跟 pointer-slot
+    // 8B 不重叠)。No self-referential risk (pointer-slot 不 = region off itself)。
+    //
+    // frame_size impact: each alloc gets 8B extra → for_in_slice_nested 5 allocs
+    // = 40B extra. Should fit in current frame_size formula `(max_temp_id+1)*8`
+    // since per_fn_max grows with alloc count anyway. (per v2.11.23 audit verify。)
     let _had = cg_record_temp_holds_address(state, dst);
+    let pointer_slot_off = cg_alloc_slot(state, 8 as i64);
+    let _rec = cg_record_temp_slot(state, dst, pointer_slot_off);
 
     // Emit: leaq -<region_off>(%rbp), %rax; movq %rax, -<pointer_slot>(%rbp)
     // pointer_slot = cg_offset_for_temp_with_target(dst, target_tag) = formula
