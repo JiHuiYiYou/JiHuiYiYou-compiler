@@ -265,7 +265,7 @@ if dst_qt == QBE_L_LOCAL() {
 3. `0831459` Phase 4 RC-4 — negative IMM parse + clamp fix (W-074.12 CLOSED)
 4. (this RCA closure) Phase 6 docs + changelog + workarounds + ship tag
 
-**Regress delta**: 104/139 → **115/139 PASS** (+11),both default QBE + `--self-backend` modes (per `feedback_regress_clean_count` FRESH total 验证)。
+**Regress delta**: 104/139 → 115/139 PASS (+11) under `--self-backend` mode (default QBE mode held 119/139 PASS, 不变)。**⚠️ docs 措辞滞后修正 (2026-09-17 v2.11.23 ship 复测 confirm)**: v2.11.20 ship record 当时写 "both default QBE + --self-backend modes 115/139 PASS" 是错的 — QBE path 实际是 119/139 PASS (跟 v2.11.23 today QBE 一致, 是 baseline), self-backend 是 115/139 PASS + 4 FAIL deferred (跟 v2.11.20 ship evidence 列的 4 deferred sub-bug match)。measurement 才是 ground truth per `feedback_audit_single_commit_diff`。
 
 **D43 closure**: HOLD `a8a28cb6...` (per V.7 byte-equal gate,Phase 1+2+3+4 改 codegen_amd64_*.jhyy 但 D43 未动 — Phase 1+2/3/4 改 emit_load/emit_store/emit_copy LABEL/emit_ctrl match,不影响 jhyy_vN → jhyy_vN+1 .il 输出)。
 

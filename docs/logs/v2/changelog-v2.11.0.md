@@ -1704,7 +1704,7 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 - V.2 Phase 2 RC-1 emit_copy LABEL flag propagate: 2/2 PASS (const_array=122, const_struct_array=9)
 - V.3 Phase 3 W-017 module-level let mut 真修: 3/3 PASS (top_level_let_mut_test=42, top_level_let_mut_types=17, defer_multi_lifo=0)
 - V.4 Phase 4 RC-4 match range cmp+clamp: 1/1 PASS (match_range=0)
-- V.6 regress delta: 104/139 → **115/139 PASS (+11)** both default + `--self-backend`
+- V.6 regress delta: default (QBE) 119/139 PASS / --self-backend 115/139 PASS (+4 FAIL deferred: big_array + cap_table_basic + dungeon_game + for_in_slice_nested → 推 v2.11.21) — **⚠️ docs 措辞滞后修正**: v2.11.20 ship record 当时写 "both 115/139 PASS" 是错的, QBE path 实际 119/139 PASS (跟 v2.11.23 today 一样是 QBE baseline), self-backend 是 115/139 PASS + 4 FAIL deferred (跟 v2.11.20 ship evidence 列的 4 deferred sub-bug match)。2026-09-17 v2.11.23 ship 时 v2.11.20 worktree 复测 confirm (regress.py default 119/119 passed/0 failed/20 skipped + --self-backend 115/119 passed/4 failed/20 skipped, 4 FAIL 全是 deferred sub-bug), measurement 才是 ground truth per `feedback_audit_single_commit_diff`
 - V.7 D43 closure: HOLD (active baseline `a8a28cb6...` 未变)
 - V.8 SysV cross: 6/6 PASS (per v2.11.19 baseline)
 
@@ -1870,6 +1870,8 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 
 ## v2.11.23 — slot-vs-region overlap 架构修 (真修 big_array + for_in_slice_nested) ✅ shipped 2026-09-17
 
+**🎯 首次 self-backend 跟 QBE path 0 FAIL parity**: v2.11.23 ship 后 self-backend regress = QBE regress = **119/139 PASS, 0 FAIL, 20 SKIP** (20 SKIP 全是真实 skip: 5 sysv tests 需 WSL/Linux host + 5 V3-B feature tests + 5 V3-C feature tests + 5 library file tests)。**v2.11.20 ship record 当时写 "both default + --self-backend = 115/139 PASS" 是错的 (2026-09-17 v2.11.23 worktree 复测 confirm: v2.11.20 QBE path = 119/139 PASS not 115/139, self-backend = 115/139 PASS + 4 FAIL deferred)** — QBE 跟 self-backend 数字从来不等,只 active 测试集一样 (119 个不 skip 的测试两边都跑)。v2.11.23 真把 self-backend 从 4 FAIL (v2.11.20) → 2 FAIL (v2.11.21-fix ship) → **0 FAIL (v2.11.23 ship)**, 是**首次 self-backend 0 FAIL parity with QBE**。详见 v2.11.20 行 "⚠️ docs 措辞滞后修正" 段。
+
 **Scope**: per 2026-09-17 user 决定 ("无 cap,真 fix 范围按需要"), after v2.11.22 DEFER outcome, audit verify 命中 v2.11.22 RCA claim 偏 (实际是 formula pool 跟 region pool 在同 frame 内 collision, 不是 slot/region 本身共享)。v2.11.23 架构修 — re-enable existing `cg_record_temp_slot` API (state.jhyy:251, v2.11.5 design 已写好, v2.11.8 SKIPped by mistake) + 加 `cg_alloc_slot` for derived address-holders + alloc pool offset 物理分离 from formula pool。
 
 **Outcome**: 🎯 **2 DEFERRED sub-bugs (W-074.13 sub-bug 1 big_array + sub-bug 4 for_in_slice_nested) ✅ CLOSED in v2.11.23** by 架构修 (~8 LOC Phase 1+2 + 2 LOC frame_size 兜底 = 10 LOC net src0)。**regress 117/139 → 119/139 PASS** (+2 self-backend); D43 closure **HOLD on `e6b6f1fa...`** (Phase 1+2 src0 changes 不影响 main.jhyy IL path — main.jhyy 不触发 emit_alloc / emit_binop derived pattern → next_offset 保持 0 → frame_size 兜底不触发); jhyy.exe sha `5f225239...` → **`02118a50...`** (Phase 2 re-build); ACTIVE workaround count **5 → 3** (W-074.13 全 CLOSED + parent W-074.13 RESOLVED — net ACTIVE count 5 → 3 because W-074.10 caveat 升格为正式 amendment 但 parent W-074.10 仍 RESOLVED, W-074.11/W-074.12 仍 RESOLVED)。
@@ -1950,8 +1952,9 @@ v2.11.23 正确 RCA: **emit_alloc 应该调 existing `cg_record_temp_slot` API (
 |---|---|---|
 | jhyy.exe sha | (v2.11.19 ship sha) | new sha (v2.11.20) |
 | D43 baseline sha | `a8a28cb6...` (v2.11.19 active) | `f61f467e...` (v2.11.20 active) — **RE-BASELINE** (Phase 1+2+3+4 改 codegen_amd64_*.jhyy 影响 .il 输出,v2/v3/v4/v5 closure 仍 byte-equal 但 sha 变;v1 路径保持 WONTFIX 已知偏差) |
-| regress.py pass rate (default QBE) | 104/139 | **115/139** (+11) |
-| regress.py pass rate (--self-backend) | 104/139 | **115/139** (+11) |
+| regress.py pass rate (default QBE) | 119/139 (ship 时实测 baseline, 跟 v2.11.23 today QBE 一致) | **119/139** — **HOLD** (QBE path 不变,src0 changes 只影响 self-backend) |
+| regress.py pass rate (--self-backend) | 115/139 (ship 时实测 baseline) | **115/139** (+11 from 104/139 baseline; +4 FAIL deferred to v2.11.21 — 实际是 115 PASS + 4 FAIL = 119 active, 跟 QBE 119 PASS 数字 active set 一致) |
+| regress.py pass rate (--self-backend, FAIL 视角) | 4 FAIL (big_array + cap_table_basic + dungeon_game + for_in_slice_nested) | **4 FAIL HOLD** (推 v2.11.21+ 真修;v2.11.21-fix ship 后减到 2 FAIL;v2.11.23 ship 后 **0 FAIL** — 首次 self-backend 0 FAIL parity with QBE) |
 | regress.py stage0 pass rate | 105/134 | 105/134 — **不变** (C-side mirror CANCELLED; C-side frozen) |
 | self-host closure chain | v2→v3→v4→v5 byte-equal (v2.11.19 N=4 hold) | v2→v3→v4→v5 byte-equal `f61f467e...` — **HOLD** (新 baseline;v1 路径 WONTFIX 已知偏差 per v2.11.19 ship B3 反馈) |
 | byte_equal_amd64.sh | 10/10 PASS (QBE vs self parity) | 10/10 PASS — **不变** |
