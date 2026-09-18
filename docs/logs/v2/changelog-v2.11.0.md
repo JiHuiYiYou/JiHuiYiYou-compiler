@@ -7,6 +7,19 @@
 
 ---
 
+## 🎯 Milestone indexes (standalone celebration docs)
+
+Per [`feedback_changelog_umbrella`](../../../JiHuiYiYou/memory/feedback_changelog_umbrella.md) 例外条款 ("sprint 涉及重大 pivot"), 以下 vX.Y.Z ship 单独开了 milestone celebration doc (umbrella 顶部索引, **不**重复内容):
+
+| Sprint | Standalone milestone doc | Milestone |
+|--------|--------------------------|-----------|
+| **v2.11.23** | [`changelog-v2.11.23.md`](changelog-v2.11.23.md) | 🏆 **首次 self-backend 0 FAIL parity with QBE path** (架构修 + 4 DEFERRED sub-bug 全真修;regress 119/119 PASS / 0 FAIL / 20 SKIP;ACTIVE workaround 5 → 3) |
+| (v1.0.0 时代, v1 pattern 不在本 umbrella 范围) | [`../v1/changelog-v1.0.0.md`](../v1/changelog-v1.0.0.md) | 🏆 Stage 2 N=3 byte-equal 闭环 (自举闭合) |
+
+后续 vX.Y.Z sprint 满足 "重大 pivot" 例外时同样在 umbrella 顶部索引。
+
+---
+
 ## v2.11.0 — V2-C Part 2a: codegen_amd64_run 真修 (W-073 + W-074 closure)
 
 2-commit ship chain per V2-C (per `docs/plans/v2/v2.11.0-plan.md` § Phase 1+2):
