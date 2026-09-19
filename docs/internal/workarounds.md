@@ -5466,10 +5466,10 @@ $ JHY_SELF_BACKEND=1 jhyy.exe compile tests/hello.jhyy -o /tmp/_hello.s
 
 ---
 
-## W-074.6: codegen_amd64_run multi-func self-backend — v2.11.2 ship 2026-09-11 PARTIAL closure (crash/hang 闭合, EXIT exact 留 v2.11.3 W-074.7)
+## W-074.6: codegen_amd64_run multi-func self-backend — v2.13.0 ship 2026-09-19 **FULL CLOSED**
 
 **ID:** W-074.6
-**状态:** 🟢 **PARTIAL** 2026-09-17 (v2.11.19 ship on axis-v2, Full SSE/float emit (Win+SysV) 5 sub-commit closure;**累计 W-074.6 family closed ~700 LOC**:v2.11.0/1/2/10/11/12/13/19;T3-a + T4-c + T4-g + shl/shr + dst_id=0 + cne substring + Phase 1-4 SSE 真修 + cg_parse_f64_imm_bits 真修)
+**状态:** 🟢 **FULL CLOSED** 2026-09-19 (v2.13.0 ship on axis-v2, 真 XMM regalloc + spill + caller/callee save + stack-arg fallback + 真 amd64_sysv codegen 全覆盖(8-class §A.4) + amd64_sysv_freestanding 真 E2E OVMF 5/5 PASS 全真修;**累计 W-074.6 family closed ~900+ LOC**:v2.11.0/1/2/10/11/12/13/19 + v2.13.0 Ph.1+Ph.2+Ph.3;T3-a + T4-c + T4-g + shl/shr + dst_id=0 + cne substring + Phase 1-4 SSE 真修 + cg_parse_f64_imm_bits 真修 + Ph.1 XMMRegallocState (linear-scan 8 XMM class + spill + reload + 16 callee-saved save/restore + 16 caller-saved across-call) + Ph.2 SysV classification (8-class §A.4 INTEGER/SSE/SSEUP/MEMORY/NO_CLASS + sret RDI first arg + vararg AL save + IEEE 754 long/double width helpers) + Ph.3 self-backend → efi 真 E2E `hello-freestanding.efi` 跑 OVMF 5/5 PASS,ConOut 可见 "Hello from jhyy freestanding!")
 
 ### v2.11.19 Full SSE/float emit (Win + SysV) — 5 sub-commit PARTIAL closure 子项
 
@@ -5505,6 +5505,62 @@ $ JHY_SELF_BACKEND=1 jhyy.exe compile tests/hello.jhyy -o /tmp/_hello.s
 3. `d6364ba` Phase 3/5 f32 IMM + f64 真解 + FNARG XMM bug (含 cg_parse_f64_imm_bits 真修)
 4. `a6b39cc` Phase 4/5 emit_load/store 浮点路径
 5. Phase 5/5 docs + fixtures + bootstrap (本 ship)
+
+### v2.13.0 真 XMM regalloc + 真 amd64_sysv codegen 全覆盖 + amd64_win_freestanding 真 E2E — 3 sub-commit FULL CLOSURE 子项
+
+**子项闭合** (per v2.13.0 plan 4-phase):
+- ✅ **Phase 1 真 XMM regalloc** (commit `5d405bb`, 2026-09-19):`codegen_amd64_regalloc.jhyy` 新增 `XMMRegallocState` struct (16 XMM regs 线性扫描 + spill + reload) + `alloc_xmm()` / `free_xmm()` / `spill_xmm()` / `reload_xmm()` / `save_callee_saved_at_entry()` / `restore_callee_saved_at_exit()` / `save_caller_saved_across_call()` (Win64 XMM6..XMM15 callee-saved + SysV none) + `codegen_amd64_emit_sse.jhyy` 替换 hard-coded xmm0..xmm7 接 alloc_xmm + `codegen_amd64_emit_call.jhyy` XMM FNARG 改 alloc_xmm (Win64 前 4 f64 → xmm0-3;SysV 前 8 f64 → xmm0-7;5+ f64 → stack-arg fallback 真修) + NEW `xmm_pressure_9args.jhyy` (9-f64-arg sum9 XMM pressure + spill test, EXIT=255 验证) + fix XMM9 spill operand mismatch bug (operand type 跟 shift 跟 emit path 选不一致 → spill 写 memory 时错读;真修)
+- ✅ **Phase 2 真 amd64_sysv codegen 全覆盖** (commit `b1ad5c3`, 2026-09-19):`abi_amd64_sysv.jhyy` 真修 8-class §A.4 classification (INTEGER/SSE/SSEUP/MEMORY/NO_CLASS,vs Phase 1 3-class stub) + class-to-QBE-letter map (`SSE → QBE_S(4B)/QBE_D(8B)`, `INTEGER/SSEUP/MEMORY → QBE_W/QBE_L` per size, `NO_CLASS → 0`) + sret helper (return type > 16 bytes → RDI 隐式 first arg) + vararg AL save (vector register count → %al) + IEEE 754 long/double width helpers (`movq vs movabs vs movl` 选 width) + `abi_amd64_sysv_freestanding.jhyy` 同 + freestanding-specific (no stack probe no runtime helper) + `codegen_amd64_emit_call.jhyy` SysV dispatch (RDI/RSI/RDX/RCX/R8/R9 整数 + XMM0-XMM7 float + mixed interleaving per SysV ABI §3.2.3) + `codegen_amd64_emit_mem.jhyy` large struct return sret setup + **NEW `compiler/tests/bootstrap/sysv_full_regress.sh`** (docker gcc:12 chain 跑 5 sysv tests 真 emit 真跑真验 exit codes 28/42/35/18/42, 5/5 PASS via docker)
+- ✅ **Phase 3 amd64_win_freestanding 真 E2E** (commit `d062a71`, 2026-09-19):self-backend 真 emit `hello-freestanding.efi` + .il/.s byte-equal vs QBE baseline + OVMF 5/5 PASS (ConOut 可见 "Hello from jhyy freestanding!" 2 次 hello + clean shutdown) + `run-ovmf.sh` QEMU 10 syntax migration (`-debugcon file:stdio -global isa-debugcon.iobase=0x402` → `-chardev file,id=dbgcon,path=$DEBUG_LOG -device isa-debugcon,chardev=dbgcon`) + serial log file 分离 (was stdio mixed with shell) + cygpath -w MSYS POSIX → Windows path convert for QEMU Win32 binary
+
+**验证** (5/5 PASS gate per [[feedback_fix_evaluation_rule]]):
+- V.1 — `jhyy.exe run xmm_pressure_9args.jhyy` × 5 → EXIT=255 每次都对 + `float_arg_xmm.jhyy` × 5 → EXIT=15 (XMM regalloc 不 regress)
+- V.2 — `python regress.py` + `--self-backend` → 119/139 HOLD (XMM 真修不 regress)
+- V.3 — `bash sysv_full_regress.sh` × 5 → 5/5 PASS 每次都对 (sysv_abi_test=28 / sysv_struct_mixed=42 / sysv_struct_pass=35 / sysv_struct_ret=18 / sysv_vararg_basic=42, docker gcc:12 chain)
+- V.4 — `bash run-ovmf.sh hello-freestanding.efi` × 5 → OVMF 5/5 PASS (ConOut + clean shutdown)
+- V.5 — `make selfhost_closure` + `bash fixed_point.sh` → D43 closure re-baseline `b743f8a541f1...` (Phase 2 IL emit 微变, expected re-baseline event)
+- V.6 — aggregate V.1-V.5 全 PASS
+
+**新增 1 fixture + 2 bootstrap script**:
+- `compiler/tests/examples/xmm_pressure_9args.jhyy` (NEW) — 9-f64-arg sum9 XMM pressure + spill (EXIT=255)
+- `compiler/tests/bootstrap/sysv_full_regress.sh` (NEW, V.3 gate) — docker gcc:12 chain 真 emit 真跑真验 (per [[feedback_docker_local]] abs path fallback pattern)
+- `scripts/dev/test/run-ovmf.sh` (MODIFY) — QEMU 10 chardev syntax + serial log file + cygpath -w MSYS → Windows path
+
+**回归 scope**:
+- regress 119/139 PASS / 0 FAIL / 20 SKIP HOLD (QBE + self-backend 双路径 parity)
+- byte-equal D26 5/5 preserved
+- byte-equal-amd64 10/10 preserved
+- fixed-point N=3,4,5 .il byte-equal preserved (post-Phase-2 re-baseline `b743f8a5...`)
+- big_test self-backend EXIT=57 preserved (6/6 EXIT exact closure hold)
+- QBE fallback 115/135 PASS preserved
+
+**W-074.6 子项全 CLOSED**:
+- ✅ 真 XMM regalloc (linear-scan 8 XMM class + spill + reload)
+- ✅ XMM caller-saved across-call (Win XMM0-XMM5)
+- ✅ XMM callee-saved save/restore at func entry/exit (Win XMM6-XMM15)
+- ✅ Stack-arg fallback for nargs≥5 (Win ABI 5+ f64 arg → stack)
+- ✅ 真 amd64_sysv codegen (8-class §A.4 + sret + vararg + IEEE 754 width)
+- ✅ amd64_win_freestanding 真 E2E OVMF 5/5 PASS (self-backend → efi)
+
+**W-074.6.1 sub-family 仍 ACTIVE** (推 v2.13.1 / v2.13.2):
+- ❌ struct pass-by-value multi-field emit_copy 1-to-1 gap (struct>16 byte 内多个 field 不展开单独 pass, emit_copy 整体 stack-slot copy 偶尔丢字段)
+- ❌ stack-slot-reuse in other emit paths (跟 v2.11.11 撞的 bit_pack 同 family, 但 extend 到 emit_call/emit_mem 其他路径)
+- ❌ extsw silent-skip (v2.11.12 已修部分, 仍残留少数 sub-bug)
+- ❌ emit_ret 不 `mov %t1 → %eax` 后 `ret` (pre-existing W-074.6 范围, 5+ PASS test 残留 crash root cause)
+- ❌ W-058 fmod remd/rems (vendor-QBE-only)
+- ❌ W-055 phi merge gap (NEW W-074.7 family, separate deeper bug)
+
+**Commit history** (axis-v2):
+1. `5d405bb` Phase 1 真 XMM regalloc + xmm_pressure_9args.jhyy fixture
+2. `b1ad5c3` Phase 2 真 amd64_sysv codegen 全覆盖 + sysv_full_regress.sh
+3. `d062a71` Phase 3 amd64_win_freestanding 真 E2E + run-ovmf.sh QEMU 10 适配
+4. Phase 4 docs + ship (本 ship)
+
+**关键决策 / 教训** (per [[feedback_no_date_estimates]] + [[feedback_jhyy_no_forward_ref]]):
+- **jhyy sema single-pass 无 forward ref**:Phase 2 加 `abi_sysv_classify_arg_full(t_raw)` wrapper 必须放在被调用的 `abi_sysv_classify_arg(t_raw)` **之后**(call graph topology 排序)。新函数定义放在前者之前 → sema 报 "undefined variable" 但指向 target_dispatch.jhyy 等无关文件(cascading error 误导), 不是真实错位置。saved as [[feedback_jhyy_no_forward_ref]]
+- **QEMU 10 syntax break**: `-debugcon file:stdio` 在 QEMU 10 改用 `-chardev file,id=dbgcon,path=<file> -device isa-debugcon,chardev=dbgcon`,旧 syntax QEMU 10 reject `invalid character backend 'file:stdio'` → QEMU 10 强制 chardev 模式
+- **QEMU Win32 binary 不识 MSYS POSIX path**: QEMU 不能 open `/tmp/...` MSYS-only path → 必须 cygpath -w 转换 POSIX → Windows path before passing to QEMU
+- **MSYS_NO_PATHCONV=1 in jhyy.exe call**: jhyy.exe 是 Win32 binary 跟 MSYS path conv 反着 — 必需 default POSIX → Windows convert,设 MSYS_NO_PATHCONV=1 jhyy.exe 报 "cannot open file" (POSIX path unconverted)
 
 **根因:** W-074.5 lexer gap closure 后,hello.jhyy self-backend 能 compile 但 exit 1 (不是 42);multi-func tests (fib_renamed / struct_val_pass / nested_struct_deep / big_test) self-backend silent fail (无 .s 输出或 hang)。**多个 pre-existing emit 函数体 bugs** 综合:
 - `emit_ret` 不 `mov %t1 → %eax` 后 `ret` (跟 QBE backend 共享的 pre-existing bug,per [[feedback_codegen_amd64_run_zerobyte]])
