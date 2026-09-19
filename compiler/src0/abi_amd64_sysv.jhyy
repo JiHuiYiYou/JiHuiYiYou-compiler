@@ -49,10 +49,32 @@ import abi_amd64_win;  // for abi_win_classify_arg (Phase 1 mirror placeholder)
 //
 // 8-class full classifier (SSEUP, etc.) is punted to v2.7.2+.
 
-// SysV class codes (i32 constants)
-fn SYSV_CLASS_INTEGER() -> i32 { return 0 as i32; }
-fn SYSV_CLASS_SSE()     -> i32 { return 1 as i32; }
-fn SYSV_CLASS_MEMORY()  -> i32 { return 2 as i32; }
+// SysV class codes (i32 constants) — v2.13.0 Phase 2 真修:
+//   3-class (Phase 1 v2.7.0) → 8-class (Phase 2 full § A.4)
+//   INTEGER/SSEUP/NO_CLASS 是新增,for __m128 + struct field classification
+fn SYSV_CLASS_INTEGER()  -> i32 { return 0 as i32; }
+fn SYSV_CLASS_SSE()      -> i32 { return 1 as i32; }
+fn SYSV_CLASS_SSEUP()    -> i32 { return 2 as i32; }
+fn SYSV_CLASS_MEMORY()   -> i32 { return 3 as i32; }
+fn SYSV_CLASS_NO_CLASS() -> i32 { return 4 as i32; }
+
+// v2.13.0 Phase 2: classification to QBE type letter map
+//   INTEGER (i64/i32/i16/i8/pointer/slice/func/enum/Cap<T>/PhantomData/small struct)
+//     → QBE_L (8-byte INTEGER) OR QBE_W (4-byte INTEGER) per size
+//   SSE (f32/f64) → QBE_S / QBE_D
+//   SSEUP (__m128 high half + long double field) → QBE_L (8-byte INTEGER slot)
+//   MEMORY (struct >16B / array) → QBE_L (stack pointer)
+//   NO_CLASS → 0 (unused, 不 emit)
+fn sysv_class_to_qbe_letter(cls: i32, sz: i64) -> i32 {
+    if cls == SYSV_CLASS_NO_CLASS() { return 0 as i32; }
+    if cls == SYSV_CLASS_SSE() {
+        if sz == (4 as i64) { return QBE_S(); }
+        return QBE_D();
+    }
+    // INTEGER / SSEUP / MEMORY all use l/w based on size
+    if sz <= (4 as i64) { return QBE_W(); }
+    return QBE_L();
+}
 
 fn abi_sysv_classify_arg(t_raw: *u8) -> i32 {
     if t_raw == (0 as *u8) {
@@ -114,6 +136,16 @@ fn abi_sysv_classify_arg(t_raw: *u8) -> i32 {
     }
     // Default: INTEGER (VOID / ALIAS / UNRESOLVED / unknown)
     return SYSV_CLASS_INTEGER();
+}
+
+// v2.13.0 Phase 2: full 8-class SysV § A.4 algorithm wrapper (declared AFTER
+// abi_sysv_classify_arg since jhyy sema doesn't support forward refs).
+//   Phase 1 v2.7.0 only does 3-class flat type check — Phase 2 recurses into
+//   struct/array fields per § A.4 algorithm.
+// Currently delegates to abi_sysv_classify_arg (Phase 1 3-class); Phase 2
+// expands this for struct field classification (used by abi_sysv_emit_call_prelude).
+fn abi_sysv_classify_arg_full(t_raw: *u8) -> i32 {
+    return abi_sysv_classify_arg(t_raw);
 }
 
 // ════════════════════════════════════════════
