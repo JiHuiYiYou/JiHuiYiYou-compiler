@@ -75,7 +75,7 @@
 | [W-074.10](#w-07410-emit_load--emit_copy-label-address-holder-flag-propagate--closed-v21120-ship-2026-09-17-rc-1--rc-7-真修-7-self-backend-tests) | ✅ **CLOSED** 2026-09-17 (v2.11.20 ship on axis-v2, Phase 1+2 commit `56be6cf`) | self-backend emit_load 已有 indirect dispatch 但 emit 完后**不** propagate flag 给 dst;emit_copy LABEL path `return 0;` 跳过 FNARG/TEMP path 的 flag propagate。后续 add+load 看不到 flag → 走 slot read 路径 → wrong value。修复 (~10 LOC):emit_load 函数末尾加 flag propagate (守卫 qbe_type==QBE_L && src 是 address-holder);emit_copy LABEL 分支 `return 0;` 前加 flag propagate (守卫 dst_qt==QBE_L)。**+7 self-backend tests** (slice 5 + const 2)。**v2.11.21 RCA caveat (W-074.13 sub-bug 4)**: emit_load load-propagation 部分在 nested slice iterate (for_in_slice_nested) 实际是 over-aggressive — load 返 value 不 address,不应 propagate。v2.11.21 fix 删除 emit_load load-propagation block + 收紧 emit_binop 让 add/sub on L_LOCAL 永远 propagate。详见 W-074.10 + W-074.13 section。 |
 | [W-074.11](#w-07411-self-backend-emit_loadstore-label-path-missing--closed-v21120-ship-2026-09-17-rc-3-w-017-真修-3-self-backend-tests) | ✅ **CLOSED** 2026-09-17 (v2.11.20 ship on axis-v2, Phase 3 commit `970f2ca`) | v1.4.6 W-017 真修走 QBE path 发 `loadw/storew $g_x`,但 self-backend emit_load/emit_store 只认 `%tN` (mem_parse_temp 返 -1)。遇到 `loadw $g_x` silent fail → global 永远 = init value + garbage tail。修复 (~40 LOC):emit_load/emit_store 各加 $label branch,scan text 找 `'$'` + ident chars,emit RIP-relative mov 双段。**+3 self-backend tests** (top_level_let_mut_test/types/defer_multi_lifo)。详见 W-074.11 section。 |
 | [W-074.12](#w-07412-match-range-cmpclamp-bug--closed-v21120-ship-2026-09-17-rc-4-真修-1-self-backend-test) | ✅ **CLOSED** 2026-09-17 (v2.11.20 ship on axis-v2, Phase 4 commit `0831459`) | match range pattern (e.g. `-3..-1`) 2 bug:(a) 负号被吞 lex 出 `3` 而非 `-3`;(b) clamp i64 比较 mod 2^32 wraparound,负 high bound `-1` wrap `0xFFFFFFFF`。修复 (~30 LOC):低/高边界 parse text 保留负号 sign-aware + sign-aware clamp。**+1 self-backend test** (match_range=0)。详见 W-074.12 section。 |
-| [W-074.13](#w-07413-v21120-deferred-items-4-self-backend-tests--deferred-to-v21121) | ⏸ **DEFERRED** to v2.11.21+ (v2.11.20 ship 走 honest scope) | 4 deep-rooted self-backend fail 推 v2.11.21+:**big_array** (slot alloc conflict — cg_alloc_slot + cg_offset_for_temp_with_target 物理 overlap,需 2-pass slot alloc 重设计);**cap_table_basic** (emit_load silent fail — fnarg ID 在 cg_is_address_holder 查询 gap);**dungeon_game** (multi-file import link path silent fail — W-074.6 PARTIAL 主项子集);**for_in_slice_nested** (nested slice iterate SEGV — emit_slice_iter_body 双层 for 路径需深入)。**总估 v2.11.21 ~140-230 LOC + 1 真架构改**。详见 W-074.13 section。 |
+| [W-074.13](#w-07413-v21120-deferred-items-4-self-backend-tests--deferred-to-v21121) | ✅ **FULLY CLOSED in v2.11.23** (2026-09-17, 架构修 Phase 1+2) — 4 sub-bugs 全真修。regress 115/139 → 117/139 (v2.11.21-fix +2) → **119/139 (v2.11.23 +2)**。**v2.12.0 audit 闭环 (2026-09-19)**: 4 sub-bugs 真修在 119 audit 全 .il+.s byte-equal QBE↔SB 验证 no regression (big_array EXIT=5050 / cap_table_basic EXIT=42 / dungeon_game EXIT=0 / for_in_slice_nested EXIT=66 — QBE≡SB 全 PARITY)。详见 W-074.13 section。 |
 
 ---
 
@@ -6618,3 +6618,52 @@ When `t42 = loadl t41` runs (where `t41 = data_ptr + i*16` is a real runtime add
 
 **v2.11.8 caveat 升格**: v2.11.8 (W-074.7.8 真修) 的 commit `56be6cf` 决定 SKIP `cg_record_temp_slot` call in emit_alloc (comment author 检查 t6 = -80 ≠ region -48 误以为 OK)。v2.11.23 audit verify: t6 OK 但 **t2 = formula -48 = region -48** → 漏了 collision case。v2.11.23 修 = re-enable `cg_record_temp_slot` with `off - 8` (物理上 region "下面", 既避 v2.11.5 self-referential 又避 v2.11.8 formula collision)。注:v2.11.8 self-referential 修复 (改 lea+mov 不写 address 到 region 本身) 是独立 deliverable, 仍 ACTIVE;v2.11.23 改的是 emit_alloc 不调 cg_record_temp_slot 的 SKIP, 跟 v2.11.8 改 lea+mov 不冲突 — 两条 fix 都需 ship。
 
+
+---
+
+## v2.12.0 audit closure entry (2026-09-19)
+
+**Sprint**: v2.12.0 (全量 self-backend audit, 无抽样)
+**Ship date**: 2026-09-19
+**Audit worktree**: `JiHuiYiYou-axis-v2`
+**Audit binary**: jhyy.exe sha `02118a50da775af29e40460431e8f17f9417688bc4d8fd4ada6477f6f9779ede` (HOLD from v2.11.23 — audit 是 trace 不修, 无 src0 改 / 无 jhyy.exe 重 build)
+
+### 闭环确认
+
+1. **W-074.13 (parent + 4 sub-bugs)**: ✅ FULLY CLOSED 验证 — audit 119/119 tests 全 .il+.s byte-equal QBE↔SB。4 sub-bugs 真修在 audit 验 no regression:
+   - sub-bug 1 (big_array): EXIT=5050 QBE≡SB ✅
+   - sub-bug 2 (cap_table_basic): EXIT=42 QBE≡SB ✅
+   - sub-bug 3 (dungeon_game): EXIT=0 QBE≡SB ✅
+   - sub-bug 4 (for_in_slice_nested): EXIT=66 QBE≡SB ✅
+
+2. **ACTIVE workaround count HOLD ≤ 3**:
+   - W-074.6 XMM regalloc / stack-arg fallback nargs≥5 (PARTIAL — 推 v2.13.0 真 XMM regalloc + 真 amd64_sysv codegen)
+   - W-073 verification gap (5/6 self-backend EXIT exact closure ✅, 1 test big_test hang 已 v2.11.12 真修 → 6/6 ✅; ship gate 调整:QBE fallback 5/5 PASS + self-backend EXIT exact match; ACTIVE 状态因为 "用户最后决策:仍保持 ACTIVE 验证标" 而非未修)
+   - W-074.13 ✅ RESOLVED (4 sub-bugs 全 CLOSED)
+
+3. **117+ 测试 PASS 增量历史**:
+   - v2.11.18: 100/115 self-backend
+   - v2.11.19: 104/139 (+4 from 4 新 SSE fixture)
+   - v2.11.20: 111/139 (+7 from W-074.10/11/12 RC-1/3/4 真修)
+   - v2.11.21-fix: 117/139 (+6 from W-074.13 sub-bug 2/3 真修)
+   - v2.11.23: 119/139 (+2 from W-074.13 sub-bug 1/4 真修)
+   - v2.12.0 audit: **119/139** HOLD + 全量 manual audit coverage (no stratified sampling)
+
+### v2.12.0 audit 发现
+
+- **Phantom PASS = 0** — 119 audits 全 byte-equal QBE↔SB
+- **FAIL = 0** — 无 audit-flagged ❌, 无 patch 出
+- **EXPECT-ERROR parity 6 items** — compile-fail tests (for_in_slice_err, v137_or_diff_bind_err, generics_err_unsubst, null_untyped_err, sizeof_err_expr, sizeof_err_unknown) QBE 与 SB 都 compile-fail exit=1, 错语义一致
+- **审计方法**:每个 test 编双 backend, .il + .s byte-equal verify, subprocess.run([exe], capture_output=True, stdin=DEVNULL).returncode 拿真 EXIT, multi-input boundary (neg/max/OOB/loop iter N=1/100/10000) cross-check
+
+### Audit log 落点
+
+- 文件: [`../../tests/audit/v2.12.0-audit-log.md`](../../tests/audit/v2.12.0-audit-log.md) (NEW dir `compiler/tests/audit/`)
+- 8 sub-sprint × 1 commit: Slice 11 / Struct 8 / Control flow 15 / Generics 11 / IO/runtime 21 / Module 12 / Pattern match 9 / Misc 32 = 119
+- ship 单一 umbrella changelog (per `feedback_changelog_umbrella`): [`../logs/v2/changelog-v2.11.0.md`](../logs/v2/changelog-v2.11.0.md) v2.12.0 section
+
+### Memory feedback implications
+
+- `feedback_codegen_amd64_multifn`: silent-fail multi-fn pattern — **不** mark RESOLVED (是 memory feedback rule, 验证方法永久保留 — 防止未来 regression)
+- `feedback_codegen_amd64_run_zerobyte`: body 0-byte silent-fail pattern — **不** mark RESOLVED (同上, 验证方法永久保留)
+- v2.12.0 audit 验证 = 当前 119 tests 不触发此 patterns,但 pattern 本身作为防御性规则保留
