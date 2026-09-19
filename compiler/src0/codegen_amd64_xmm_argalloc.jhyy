@@ -1,0 +1,259 @@
+// codegen_amd64_xmm_argalloc.jhyy — v2.13.0 Phase 1: per-call XMM arg allocator
+//
+// 替换 sse_xmm_reg_for_arg_idx hard-coded idx (xmm0..xmm7 静态 mapping) →
+// per-call bitmap + ABI-aware max (Win 4 / SysV 8) + stack-arg fallback。
+//
+// Per-call state 存在 CGState(per-function codegen state,见
+// codegen_amd64_state.jhyy):
+//   xmm_arg_count    — 当前 call 已用 XMM arg reg 数
+//   int_arg_count    — 当前 call 已用 int arg reg 数
+//   stack_arg_offset — 当前 call 已用 stack-arg 字节偏移 (8 字节对齐)
+//
+// emit_amd64_arg_regs 入口调 xmm_arg_reset 清零;每个 arg:
+//   - QBE_S/QBE_D (f32/f64) → xmm_arg_alloc → 返 xmm reg idx
+//     (0-7 SysV / 0-3 Win) 或 -1 (XMM pool 满,caller 走 stack-arg fallback)
+//   - 否则 (i8/u8..i64/u64/pointer) → int_arg_alloc → 返 GPR idx
+//     (0-5 SysV / 0-3 Win) 或 -1 (GPR pool 满)
+//
+// Stack-arg fallback 走 SysV/Win 都相同的 "arg area in caller frame" 模型:
+//   - SysV: 6 integer regs + 8 XMM regs 满 → stack args 在 %rsp+0, +8, +16 ...
+//     (callee 视角: caller push 后, callee frame prologue 看到的是 [rsp+0..] 即
+//      [rbp+16..] 跳过 return addr)
+//   - Win64: 4 integer regs + 4 XMM regs 满 → 32-byte shadow + stack args
+//     (callee 视角: [rsp+32+0..] 即 [rbp+40+0..], 但我们 caller-side emit 时
+//      已经预留了 32-byte shadow,caller 把 stack arg 写到 [rsp+32+N])
+// Phase 1 简化:emit "mov<size> -<off>(%rbp), %r10; mov<size> %r10, <stack_off>(%rsp)"
+// (用 %r10 当 scratch,因为 Win/SysV 都把它列为 caller-saved = 可任意用)
+//
+// Target tag 常量(per codegen_amd64_state.jhyy CGState.target_tag):
+//   0 = TARGET_AMD64_WIN
+//   1 = TARGET_AMD64_WIN_FREESTANDING
+//   2 = TARGET_AMD64_SYSV
+//   3 = TARGET_AMD64_SYSV_FREESTANDING
+
+import codegen_amd64_state;  // CGState + QBE_*_LOCAL
+import util;                 // sb_append_cstr / sb_append_int
+
+// ════════════════════════════════════════════════════
+// Target ABI 检测 + max arg reg 数常量
+// ════════════════════════════════════════════════════
+
+fn target_is_sysv(tt: i32) -> i32 {
+    if tt == (2 as i32) { return 1 as i32; }
+    if tt == (3 as i32) { return 1 as i32; }
+    return 0 as i32;
+}
+
+fn target_is_win(tt: i32) -> i32 {
+    if tt == (0 as i32) { return 1 as i32; }
+    if tt == (1 as i32) { return 1 as i32; }
+    return 0 as i32;
+}
+
+// XMM arg reg 上限(per ABI)
+// SysV: xmm0..xmm7 (8 regs)
+// Win:  xmm0..xmm3 (4 regs;Win x64 用同一组 xmm 给 f32/f64 arg)
+fn xmm_arg_max(tt: i32) -> i32 {
+    if target_is_sysv(tt) == (1 as i32) {
+        return 8 as i32;
+    }
+    return 4 as i32;
+}
+
+// Int arg reg 上限(per ABI)
+// SysV: rdi, rsi, rdx, rcx, r8, r9 (6 regs)
+// Win:  rcx, rdx, r8, r9 (4 regs)
+fn int_arg_max(tt: i32) -> i32 {
+    if target_is_sysv(tt) == (1 as i32) {
+        return 6 as i32;
+    }
+    return 4 as i32;
+}
+
+// QBE 类型 helper(本地 inline — 不依赖 codegen_amd64_state 避免 forward ref)
+fn qbe_is_float(qt: i32) -> i32 {
+    if qt == (115 as i32) { return 1 as i32; }  // QBE_S
+    if qt == (100 as i32) { return 1 as i32; }  // QBE_D
+    return 0 as i32;
+}
+
+fn qbe_is_wide(qt: i32) -> i32 {
+    if qt == (108 as i32) { return 1 as i32; }  // QBE_L
+    if qt == (100 as i32) { return 1 as i32; }  // QBE_D
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// Per-call state reset
+// ════════════════════════════════════════════════════
+
+// xmm_arg_reset — 清空 CGState 的 per-call arg allocation 计数
+// emit_amd64_arg_regs 入口调;后续每个 call emit 前再调一次
+fn xmm_arg_reset(state: *u8) -> i32 {
+    let cg = state as *CGState;
+    (*cg).xmm_arg_count = 0 as i32;
+    (*cg).int_arg_count = 0 as i32;
+    // stack_arg_offset 是 caller frame 内的字节偏移(从 0 起)。
+    // Win: 32-byte shadow 占前 32 字节,所以 stack args 从 offset=32 起。
+    // SysV: 无 shadow,从 offset=0 起。
+    let tt = (*cg).target_tag;
+    if target_is_win(tt) == (1 as i32) {
+        (*cg).stack_arg_offset = 32 as i64;
+    } else {
+        (*cg).stack_arg_offset = 0 as i64;
+    }
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// Per-call arg allocation
+// ════════════════════════════════════════════════════
+
+// xmm_arg_alloc — 分配 XMM arg reg (Win 0-3 / SysV 0-7)
+// 返回:0..7 = xmm reg idx, -1 = XMM pool 满 (caller 走 stack-arg)
+fn xmm_arg_alloc(state: *u8, qt: i32) -> i32 {
+    if qbe_is_float(qt) == (0 as i32) {
+        return -1 as i32;
+    }
+    let cg = state as *CGState;
+    let tt = (*cg).target_tag;
+    let max = xmm_arg_max(tt);
+    if (*cg).xmm_arg_count >= max {
+        return -1 as i32;
+    }
+    let idx = (*cg).xmm_arg_count;
+    (*cg).xmm_arg_count = idx + (1 as i32);
+    return idx;
+}
+
+// int_arg_alloc — 分配 int arg reg (Win 0-3 / SysV 0-5)
+// 返回:0..5 = int reg idx, -1 = GPR pool 满
+fn int_arg_alloc(state: *u8, qt: i32) -> i32 {
+    if qbe_is_float(qt) != (0 as i32) {
+        return -1 as i32;
+    }
+    let cg = state as *CGState;
+    let tt = (*cg).target_tag;
+    let max = int_arg_max(tt);
+    if (*cg).int_arg_count >= max {
+        return -1 as i32;
+    }
+    let idx = (*cg).int_arg_count;
+    (*cg).int_arg_count = idx + (1 as i32);
+    return idx;
+}
+
+// ════════════════════════════════════════════════════
+// Reg name lookup(per idx + ABI)
+// ════════════════════════════════════════════════════
+
+// xmm_reg_name(idx) — SysV/Win 都用 xmm0..xmm7(idx 0-7);idx > 7 fallback
+fn xmm_reg_name(idx: i32) -> *u8 {
+    if idx == (0 as i32) { return "xmm0" as *u8; }
+    if idx == (1 as i32) { return "xmm1" as *u8; }
+    if idx == (2 as i32) { return "xmm2" as *u8; }
+    if idx == (3 as i32) { return "xmm3" as *u8; }
+    if idx == (4 as i32) { return "xmm4" as *u8; }
+    if idx == (5 as i32) { return "xmm5" as *u8; }
+    if idx == (6 as i32) { return "xmm6" as *u8; }
+    if idx == (7 as i32) { return "xmm7" as *u8; }
+    return "xmm0" as *u8;  // fallback (shouldn't hit)
+}
+
+// int_reg_name_sysv(idx) — SysV: rdi, rsi, rdx, rcx, r8, r9
+fn int_reg_name_sysv(idx: i32) -> *u8 {
+    if idx == (0 as i32) { return "rdi" as *u8; }
+    if idx == (1 as i32) { return "rsi" as *u8; }
+    if idx == (2 as i32) { return "rdx" as *u8; }
+    if idx == (3 as i32) { return "rcx" as *u8; }
+    if idx == (4 as i32) { return "r8"  as *u8; }
+    if idx == (5 as i32) { return "r9"  as *u8; }
+    return "rdi" as *u8;
+}
+
+// int_reg_name_sysv_narrow(idx) — SysV: edi, esi, edx, ecx, r8d, r9d (32-bit)
+fn int_reg_name_sysv_narrow(idx: i32) -> *u8 {
+    if idx == (0 as i32) { return "edi" as *u8; }
+    if idx == (1 as i32) { return "esi" as *u8; }
+    if idx == (2 as i32) { return "edx" as *u8; }
+    if idx == (3 as i32) { return "ecx" as *u8; }
+    if idx == (4 as i32) { return "r8d" as *u8; }
+    if idx == (5 as i32) { return "r9d" as *u8; }
+    return "edi" as *u8;
+}
+
+// int_reg_name_win(idx) — Win: rcx, rdx, r8, r9
+fn int_reg_name_win(idx: i32) -> *u8 {
+    if idx == (0 as i32) { return "rcx" as *u8; }
+    if idx == (1 as i32) { return "rdx" as *u8; }
+    if idx == (2 as i32) { return "r8"  as *u8; }
+    if idx == (3 as i32) { return "r9"  as *u8; }
+    return "rcx" as *u8;
+}
+
+// int_reg_name_win_narrow(idx) — Win: ecx, edx, r8d, r9d (32-bit)
+fn int_reg_name_win_narrow(idx: i32) -> *u8 {
+    if idx == (0 as i32) { return "ecx" as *u8; }
+    if idx == (1 as i32) { return "edx" as *u8; }
+    if idx == (2 as i32) { return "r8d" as *u8; }
+    if idx == (3 as i32) { return "r9d" as *u8; }
+    return "ecx" as *u8;
+}
+
+// ════════════════════════════════════════════════════
+// Stack-arg emit
+// ════════════════════════════════════════════════════
+
+// emit_stack_arg_push — 把 temp 写到 stack-arg slot,callee 帧基地址看
+// 用 %r10 做 scratch (Win/SysV 都把它列为 caller-saved = 可任意用)。
+// 自增 stack_arg_offset(8-byte aligned)。
+//
+// emit 序列(以 f64 为例):
+//   movsd <src_off>(%rbp), %xmm15
+//   movsd %xmm15, <stack_off>(%rsp)
+// 其中 stack_off 是 caller frame 内的字节偏移(Win: 32+ ; SysV: 0+)
+// 第 1 个 stack arg = 0/32,第 2 个 = 8/40,第 3 个 = 16/48,...
+// 注:src_off 已经带符号(负数表示 caller 栈帧里);直接 emit,不要 prepend "-"。
+fn emit_stack_arg_push(state: *u8, qt: i32, src_off: i64) -> i32 {
+    let cg = state as *CGState;
+    let arena = (*cg).arena;
+    let s = (*cg).out;
+    let stack_off = (*cg).stack_arg_offset;
+    let is_float = qbe_is_float(qt);
+    let is_wide = qbe_is_wide(qt);
+    if is_float != (0 as i32) {
+        // f32 → movss, f64 → movsd
+        let suffix = if qt == (115 as i32) { "ss" as *u8 } else { "sd" as *u8 };
+        let _a = sb_append_cstr(arena, s, "\tmov" as *u8);
+        let _b = sb_append_cstr(arena, s, suffix);
+        let _c = sb_append_cstr(arena, s, " " as *u8);
+        let _d = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+        let _e = sb_append_cstr(arena, s, "(%rbp), %xmm15\n" as *u8);
+        let _f = sb_append_cstr(arena, s, "\tmov" as *u8);
+        let _g = sb_append_cstr(arena, s, suffix);
+        let _h = sb_append_cstr(arena, s, " %xmm15, " as *u8);
+        let _i = sb_appendf_lld(arena, s, "%lld" as *u8, stack_off);
+        let _j = sb_append_cstr(arena, s, "(%rsp)\n" as *u8);
+    } else if is_wide != (0 as i32) {
+        // i64/u64/pointer → movq
+        let _a = sb_append_cstr(arena, s, "\tmovq " as *u8);
+        let _b = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+        let _c = sb_append_cstr(arena, s, "(%rbp), %r10\n" as *u8);
+        let _d = sb_append_cstr(arena, s, "\tmovq %r10, " as *u8);
+        let _e = sb_appendf_lld(arena, s, "%lld" as *u8, stack_off);
+        let _f = sb_append_cstr(arena, s, "(%rsp)\n" as *u8);
+    } else {
+        // i32/u32 → movl
+        let _a = sb_append_cstr(arena, s, "\tmovl " as *u8);
+        let _b = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+        let _c = sb_append_cstr(arena, s, "(%rbp), %r10d\n" as *u8);
+        let _d = sb_append_cstr(arena, s, "\tmovl %r10d, " as *u8);
+        let _e = sb_appendf_lld(arena, s, "%lld" as *u8, stack_off);
+        let _f = sb_append_cstr(arena, s, "(%rsp)\n" as *u8);
+    }
+    // 自增 stack-arg offset (8 字节对齐;f64 在 SysV 实际要求 16 字节对齐但
+    // 我们 caller 一次性 +8,caller 自己负责 16 字节对齐,callee 期望的 16
+    // 字节对齐由 caller 在 call 之前 sub rsp 实现 — 留 v2.14.0)
+    (*cg).stack_arg_offset = stack_off + (8 as i64);
+    return 0 as i32;
+}

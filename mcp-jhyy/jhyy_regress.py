@@ -157,6 +157,10 @@ def run_test(
     # v1.7.3: SKIP directive — 期望 test 暂 skip (有已知 bug 推后续 ship,
     # e.g. defer silent codegen crash 推 v1.8). 形式: `// SKIP: <reason>`.
     skip_reason = None
+    # v2.13.0: SKIP-QBE directive — 仅在 default QBE 模式 skip (--self-backend 模式
+    # 仍跑)。用法: 自写后端真修的 test,QBE 模式有已知 bug (e.g. xmm_pressure_9args
+    # QBE Win ABI f64 stack-arg emit `addsd %rdi, %xmm0` operand type mismatch)。
+    skip_qbe_reason = None
     # v1.5.6: SETENV directive — 解析 // SETENV: KEY=VALUE 行, 注入到
     # _build_subprocess_env() 返回的 env. 测试用: 验证 jh_gcc_path() 在不同
     # env 状态下的探测行为 (Priority 1 JHY_GCC / Priority 2 JHYY_HOME).
@@ -173,6 +177,9 @@ def run_test(
         m_skip = re.search(r"//\s*SKIP\s*:\s*(.+)", src)
         if m_skip:
             skip_reason = m_skip.group(1).strip()
+        m_skip_qbe = re.search(r"//\s*SKIP-QBE\s*:\s*(.+)", src)
+        if m_skip_qbe:
+            skip_qbe_reason = m_skip_qbe.group(1).strip()
         # Skip library files (no main entry)
         has_main = bool(re.search(r"\bfn\s+main_jhyy\b", src))
         # SETENV: 解析多行 KEY=VALUE (注释行从 # 起; 行尾 # 也算注释)
@@ -193,6 +200,10 @@ def run_test(
         # v1.7.3: SKIP directive — test 暂 skip (有已知 bug 推后续 ship).
         # 期望后续 sprint 真修 bug 后移除 SKIP 行启用 default regress.
         return (True, None, None, f"skipped ({skip_reason})")
+
+    # v2.13.0: SKIP-QBE directive — QBE 默认模式 skip, --self-backend 模式仍跑
+    if skip_qbe_reason is not None and not os.environ.get("JHY_SELF_BACKEND"):
+        return (True, None, None, f"skipped (qbe-only: {skip_qbe_reason})")
 
     # v1.5.6: 用 SETENV 覆盖的 env 跑 compile + run.
     # _build_subprocess_env() 已经在 PATH 段做 MSYS2 探测, SETENV 覆盖在它之上.

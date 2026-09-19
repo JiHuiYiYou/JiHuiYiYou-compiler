@@ -534,6 +534,17 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8, target_tag: i32) -> *u8 {
     if arena == (0 as *u8) {
         return input;
     }
+    // v2.13.0 (W-074.6.1 partial closure): peephole_concat_loop silent-crash on
+    // large inputs (dungeon_game 47152 bytes / 1754 lines; big_test > 900 lines).
+    // Per V.13 RCA: trace stops at "concat start", never reaches "concat end" /
+    // jh_write_file — peephole 返回 inconsistent fold 触发后续 self-backend
+    // 静默 skip .s write。RCA pending (jhyy codegen 对 1.5K+ line concat loop
+    // 有 silent exit,具体 root cause 待 Phase 2+ 真修)。Workaround: skip fold
+    // for len > 4096 (emit raw .s 直传)。Phase 1 ship gate verified:dungeon_game
+    // + big_test --self-backend regress pass after skip。
+    if len > (4096 as i64) {
+        return input;
+    }
     // target_tag v2.8.0 加 — peephole 是 local folding on emitted .s,
     // 跨 target 同逻辑 (mov/mov 重写, xor self 等);target 仅 pass-through
     // 不影响 fold 结果。设为 unused 抑制 lint 警告。
@@ -663,135 +674,10 @@ fn peephole_fold(input: *u8, len: i64, arena: *u8, target_tag: i32) -> *u8 {
     // 坏 .s (sign-ext vs zero-ext on narrowing store/load 语义不同),
     // 退回 disabled — perf 退化但保证正确。Defer to v2.11.4 重做 Rule 3
     // (加 line1.size == line2.size check, sign-ext 标记)。
-    let src_buf = arena_alloc(arena, 32 as i64);
-    let dst_buf = arena_alloc(arena, 32 as i64);
-    let src2_buf = arena_alloc(arena, 32 as i64);
-    let dst2_buf = arena_alloc(arena, 32 as i64);
-    if src_buf != (0 as *u8) && dst_buf != (0 as *u8) && src2_buf != (0 as *u8) && dst2_buf != (0 as *u8) && (0 as i32) == (1 as i32) {
-        let _m5 = memset(src_buf, 0 as i32, 32 as i64);
-        let _m6 = memset(dst_buf, 0 as i32, 32 as i64);
-        let _m7 = memset(src2_buf, 0 as i32, 32 as i64);
-        let _m8 = memset(dst2_buf, 0 as i32, 32 as i64);
-        li = 0 as i64;
-        while li < n_lines - 1 as i64 {
-            let deleted_p = ptr_add_u8(line_deleted, li);
-            let deleted_p2 = ptr_add_u8(line_deleted, li + 1 as i64);
-            if *deleted_p == 0 as u8 && *deleted_p2 == 0 as u8 {
-                let ls1_p = ptr_add_u8(line_starts, li * (8 as i64)) as *i64;
-                let le1_p = ptr_add_u8(line_ends, li * (8 as i64)) as *i64;
-                let ls1 = *ls1_p;
-                let le1 = *le1_p;
-                let llen1 = le1 - ls1;
-                let extract1 = pee_extract_mov_ops(ptr_add_u8(input, ls1), llen1, src_buf, dst_buf);
-
-                if extract1 == (0 as i32) {
-                    let ls2_p = ptr_add_u8(line_starts, (li + 1 as i64) * (8 as i64)) as *i64;
-                    let le2_p = ptr_add_u8(line_ends, (li + 1 as i64) * (8 as i64)) as *i64;
-                    let ls2 = *ls2_p;
-                    let le2 = *le2_p;
-                    let llen2 = le2 - ls2;
-                    let extract2 = pee_extract_mov_ops(ptr_add_u8(input, ls2), llen2, src2_buf, dst2_buf);
-
-                    if extract2 == (0 as i32) {
-                        // check line1.dst == line2.src
-                        let dst_eq = pee_eq(dst_buf, src2_buf);
-                        // v2.11.2 (T2-c) Rule 3 register-dst gate:
-                        // 仅当 dst2 是 register (字节 '%' 开头) 才 fold —
-                        // 否则会 emit `mov mem, mem`(x86 非法)。
-                        // 例如 emit_load 输出:
-                        //   movl -32(%rbp), %eax
-                        //   movl %eax, -40(%rbp)
-                        // line1.dst="%eax"(reg) = line2.src="%eax"(reg) 命中;
-                        // dst2="-40(%rbp)" 不是 register → 跳过 fold,
-                        // 留两行 mov mem,reg + mov reg,mem(正确)。
-                        let dst2_first = pee_byte_at(dst2_buf, 0);
-                        let is_reg_dst = dst2_first == (37 as i32);  // '%'
-                        // v2.11.2 (T2-c 二阶段):self-fold 检测 — src1 == dst2
-                        // (e.g. movl %eax, -X(%rbp) + movl -X(%rbp), %eax →
-                        // movl %eax, %eax) 是 no-op,直接删两行,别 emit
-                        // 缺 tab 的 "movl %eax, %eax" garbage。
-                        let src1_first = pee_byte_at(src_buf, 0);
-                        let src1_eq_dst2 = pee_eq(src_buf, dst2_buf);
-                        if dst_eq == (1 as i32) && is_reg_dst == (1 as i32) && src1_eq_dst2 == (1 as i32) {
-                            // self-fold:删 line[li] + line[li+1]
-                            let dp1 = ptr_add_u8(line_deleted, li);
-                            *dp1 = 1 as u8;
-                            let dp2 = ptr_add_u8(line_deleted, li + 1 as i64);
-                            *dp2 = 1 as u8;
-                        } else if dst_eq == (1 as i32) && is_reg_dst == (1 as i32) {
-                            // replace line[li+1] with "mov ... src1 ... dst2"
-                            // build replacement: "mov <src1>, <dst2>\n"
-                            // 简化:用 dst2 直接复制,然后插入 src1
-                            // 我们写一个 scratch buffer with new instruction
-                            let new_buf = arena_alloc(arena, 128 as i64);
-                            if new_buf != (0 as *u8) {
-                                let _m9 = memset(new_buf, 0 as i32, 128 as i64);
-                                // v2.11.2 (T2-c 二阶段 fix):prepend '\t' 到 new_buf
-                                // 否则 fold 输出 "movq %rcx, %eax" 无 tab → GAS
-                                // assembler 仍接受(裸 op 无 tab 合法)但跟 .s 其余行
-                                // 不一致,peephole 后续 pass 也难对位。补 '\t' 跟原始
-                                // line 同 prefix。
-                                let tab_p = ptr_add_u8(new_buf, 0 as i64);
-                                *tab_p = 9 as u8;
-                                // write "movl " (assume 32-bit; size suffix not handled in this simple version)
-                                // 简化:用 src1 的 size suffix 推断(若 src1 含 'l' / 'q' 用之,否则 'l')
-                                let src1_len = strlen(src_buf);
-                                let dst2_len = strlen(dst2_buf);
-                                // Copy mnemonic "mov" + size suffix from line1[me-1]
-                                // (offset 1 起,因为 new_buf[0] = '\t')
-                                let ms_p = pee_unpack_start(pee_get_mnemonic_start_end(ptr_add_u8(input, ls1), llen1));
-                                let me_p = pee_unpack_end(pee_get_mnemonic_start_end(ptr_add_u8(input, ls1), llen1));
-                                let mut k: i64 = 0 as i64;
-                                while k < me_p - ms_p {
-                                    let p = ptr_add_u8(new_buf, 1 as i64 + k);
-                                    *p = pee_byte_at(input, ls1 + ms_p + k) as u8;
-                                    k = k + (1 as i64);
-                                }
-                                // v2.11.2 (T2-c 二阶段):k 现在 = mnemonic length,
-                                // 但 new_buf 实际位置 1+(mnemonic length) 才空。
-                                // 调整 k +1 跳过 '\t' 前缀,后续 space/src/dst 写对位。
-                                k = k + 1 as i64;
-                                // add " "
-                                let sp = ptr_add_u8(new_buf, k);
-                                *sp = 32 as u8;
-                                k = k + 1 as i64;
-                                // add src1
-                                let mut kk: i64 = 0 as i64;
-                                while kk < src1_len {
-                                    let p = ptr_add_u8(new_buf, k);
-                                    *p = pee_byte_at(src_buf, kk) as u8;
-                                    k = k + (1 as i64);
-                                    kk = kk + (1 as i64);
-                                }
-                                // add ", "
-                                let p1 = ptr_add_u8(new_buf, k);
-                                *p1 = 44 as u8;
-                                let p2 = ptr_add_u8(new_buf, k + 1 as i64);
-                                *p2 = 32 as u8;
-                                k = k + 2 as i64;
-                                // add dst2
-                                kk = 0 as i64;
-                                while kk < dst2_len {
-                                    let p = ptr_add_u8(new_buf, k);
-                                    *p = pee_byte_at(dst2_buf, kk) as u8;
-                                    k = k + (1 as i64);
-                                    kk = kk + (1 as i64);
-                                }
-                                // store new_buf in line_replaced[li+1]
-                                let rp = ptr_add_u8(line_replaced, (li + 1 as i64) * (8 as i64));
-                                let rq = rp as **u8;
-                                *rq = new_buf;
-                                // also delete line[li](mov A→B 不再需要)
-                                let dp = ptr_add_u8(line_deleted, li);
-                                *dp = 1 as u8;
-                            }
-                        }
-                    }
-                }
-            }
-            li = li + (1 as i64);
-        }
-    }
+    // v2.13.0 (W-074.6 RCA):jhyy 不识别常量 false gate (per `(0 as i32) == (1 as i32)`),
+    // 仍执行 body → li 写到 n_lines 栈槽 → n_lines/corrupt cap_o → 整个 fold 失效。
+    // 修复:完全删除 Rule 3 disabled block(不是 gate,是真删除)。Defer to v2.13.x
+    // 重做 Rule 3 with size-aware check(回到 v2.11.4 plan)。
 
     // ── Concatenate output ──
     let mut out_off: i64 = 0 as i64;

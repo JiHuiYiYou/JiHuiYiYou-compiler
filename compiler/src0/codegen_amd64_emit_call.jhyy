@@ -69,6 +69,7 @@
 import codegen_amd64_state;  // CGState / QBE_W_LOCAL / QBE_L_LOCAL / ILTOK_*
                              // ILToken / cg_offset_for_temp / cg_alloc_slot
 import codegen_amd64_emit_sse;  // v2.11.19 Phase 2b: 4 SSE helpers (sse_xmm_mov_suffix_for_qt / sse_xmm_reg_for_arg_idx / sse_emit_mov_xmm_reg_to_temp / sse_emit_mov_temp_to_xmm_reg)
+import codegen_amd64_xmm_argalloc;  // v2.13.0 Phase 1: per-call XMM/int arg allocator + stack-arg fallback (xmm_arg_reset / xmm_arg_alloc / int_arg_alloc / xmm_reg_name / int_reg_name_* / emit_stack_arg_push)
 import util;  // sb_init / sb_append_cstr / sb_appendf / StringBuilder
 
 // ════════════════════════════════════════════
@@ -257,6 +258,12 @@ fn cg_parse_f64_imm_bits(text: *u8, len: i64, from: i64) -> i64 {
     // v2.11.15 Iter 1b fix: 不能直接写大 i64 literal (e.g. 4607182418800017408),
     //   jhyy codegen 把它 emit 成 `w copy N` (i32 literal, 截断为 0),然后 extsw
     //   拿 0。必须 construct bit pattern from shift: (high32 << 32) | low32。
+    //
+    // v2.13.0 Phase 1 真修: 之前 table miss (e.g. d_6/d_7/d_8/d_9) → return 0,
+    //   导致 sum9(1..9) 实际算 1+2+3+4+5+0+0+0+0=15 → EXIT≠255。fallback
+    //   走 jh_double_to_bits (atof) on integer part — table miss 都正确。
+    //   保留 table 的 fast-path 对 0.0/1.0/2.0/3.0/4.0/5.0/10.0 (regress
+    //   测得 fastest path;Iter 3 C.4 已 verify)。
     if int_part == 0 as i64 {
         return 0 as i64;  // 0.0 = 0x0000000000000000
     }
@@ -291,7 +298,20 @@ fn cg_parse_f64_imm_bits(text: *u8, len: i64, from: i64) -> i64 {
         let _hi = ((1076101120 as i64) << (32 as i64)) | (0 as i64);  // 0x40240000
         return _hi;  // 10.0
     }
-    return 0 as i64;  // out of table — garbage
+    // v2.13.0 Phase 1 真修: integer-valued N 不在 table (e.g. 6/7/8/9/11/...)
+    //   → fallback to jh_double_to_bits (atof + IEEE 754 bits) for correct emission。
+    //   之前 return 0 (garbage) → regress V.1 sum9 EXIT≠255 FAIL。
+    let int_end_p = i;
+    let int_len = int_end_p - int_start;
+    let out_buf = malloc(8 as i64);
+    if out_buf == (0 as *u8) {
+        return 0 as i64;
+    }
+    let int_start_p = ptr_add_u8(text, int_start);
+    let _rc = jh_double_to_bits(int_start_p, int_len, out_buf);
+    let bits2: i64 = *(out_buf as *i64);
+    let _f = free(out_buf);
+    return bits2;
 }
 
 // cg_f32_imm_bits — 把 QBE IL f32 IMM (e.g. `s_2.5`) 解析为 IEEE 754 single bits (i32)。
@@ -574,8 +594,10 @@ fn emit_amd64_arg_regs(state: *u8, nargs: i64, qt: i32, target_tag: i32) -> i32 
     //
     // 之前 hardcode %t1..%t6 → fib_renamed call $printf(l %t13, w %t12) 错 emit
     // movl -40 → ecx (读 %t1),应 movq -136 → rcx (读 %t13)。
-    let mut arg_qts_arr = arena_alloc(arena, (8 as i64) * (4 as i64));
-    let mut arg_temps_arr = arena_alloc(arena, (8 as i64) * (8 as i64));
+    // v2.13.0 Phase 1: bump parse cap from 8 → 16 (前 N=4 sum9 测试要 9 args,
+    //   V.1 gate 1 NEW fixture + 5/5 PASS per feedback_fix_evaluation_rule)
+    let mut arg_qts_arr = arena_alloc(arena, (16 as i64) * (4 as i64));
+    let mut arg_temps_arr = arena_alloc(arena, (16 as i64) * (8 as i64));
     let mut parsed_n: i64 = 0 as i64;
 
     if text != (0 as *u8) && text_len > (0 as i64) {
@@ -595,7 +617,7 @@ fn emit_amd64_arg_regs(state: *u8, nargs: i64, qt: i32, target_tag: i32) -> i32 
             let args_start = open_idx + (1 as i64);
             let args_end = close_idx;
             let mut cursor = args_start;
-            while cursor < args_end && parsed_n < (8 as i64) {
+            while cursor < args_end && parsed_n < (16 as i64) {
                 while cursor < args_end {
                     let c = cg_byte_at(text, cursor);
                     if c == (32 as i32) || c == (9 as i32) { cursor = cursor + (1 as i64); } else { break; }
@@ -646,64 +668,50 @@ fn emit_amd64_arg_regs(state: *u8, nargs: i64, qt: i32, target_tag: i32) -> i32 
     }
 
     let n = if parsed_n < nargs { parsed_n } else { nargs };
-    if target_is_win(target_tag) == (1 as i32) {
-        let reg_names_wide = ["rcx" as *u8, "rdx" as *u8, "r8" as *u8, "r9" as *u8];
-        let reg_names_narrow = ["ecx" as *u8, "edx" as *u8, "r8d" as *u8, "r9d" as *u8];
-        let mut ri: i64 = 0 as i64;
-        while ri < n && ri < (4 as i64) {
-            let ap = arg_qts_arr as *i32;
-            let bp = arg_temps_arr as *i64;
-            let ap_off = ptr_add_u8(ap as *u8, ri * (4 as i64)) as *i32;
-            let bp_off = ptr_add_u8(bp as *u8, ri * (8 as i64)) as *i64;
-            let aqt = *ap_off;
-            let atemp = *bp_off;
-            // v2.11.15 Iter 1 A1-XMM 真修:QBE_S (f32) / QBE_D (f64)
-            // 走 XMM 寄存器(Win x64 ABI 也是 f32/f64 用 xmm0..xmm3
-            // NOT integer regs)。修复 f64 arg 仍走 %rcx → caller 端
-            // %xmm0 读到 garbage。
-            if aqt == QBE_S_LOCAL() || aqt == QBE_D_LOCAL() {
-                let xmm_reg = sse_xmm_reg_for_arg_idx(ri);
-                let off = cg_offset_for_temp_with_target(atemp, target_tag);
+    // v2.13.0 Phase 1 真 XMM regalloc:重置 per-call XMM/int arg 计数
+    // (替换 v2.11.15 的 hard-coded `sse_xmm_reg_for_arg_idx(ri)` 静态 mapping
+    //  — 原 SysV XMM pool = 6 是 bug,实际 SysV 是 8 个 XMM arg reg)
+    let _rs = xmm_arg_reset(state);
+    let mut ri: i64 = 0 as i64;
+    while ri < n {
+        let ap = arg_qts_arr as *i32;
+        let bp = arg_temps_arr as *i64;
+        let ap_off = ptr_add_u8(ap as *u8, ri * (4 as i64)) as *i32;
+        let bp_off = ptr_add_u8(bp as *u8, ri * (8 as i64)) as *i64;
+        let aqt = *ap_off;
+        let atemp = *bp_off;
+        let off = cg_offset_for_temp_with_target(atemp, target_tag);
+        let is_float: i32 = if aqt == QBE_S_LOCAL() || aqt == QBE_D_LOCAL() { 1 as i32 } else { 0 as i32 };
+        if is_float != (0 as i32) {
+            // XMM path:f32/f64 → xmm_arg_alloc(state, aqt) → 返 xmm reg idx
+            // 或 -1(XMM pool 满 → emit_stack_arg_push fallback)
+            let xmm_idx = xmm_arg_alloc(state, aqt);
+            if xmm_idx >= (0 as i32) {
+                let xmm_reg = xmm_reg_name(xmm_idx);
                 let _m = sse_emit_mov_temp_to_xmm_reg(state, aqt, off, xmm_reg);
             } else {
+                // XMM pool exhausted (Win: 5+ f64 arg / SysV: 9+ f64 arg)
+                // stack-arg fallback
+                let _p = emit_stack_arg_push(state, aqt, off);
+            }
+        } else {
+            // int path:i8/u8..i64/u64/pointer → int_arg_alloc(state, aqt)
+            let int_idx = int_arg_alloc(state, aqt);
+            if int_idx >= (0 as i32) {
+                // 选 reg name by ABI + idx + qt width
                 let is_wide: i32 = if aqt == (108 as i32) { 1 as i32 } else { 0 as i32 };
-                let reg_name = if is_wide != (0 as i32) { reg_names_wide[ri] } else { reg_names_narrow[ri] };
-                let off = cg_offset_for_temp_with_target(atemp, target_tag);
+                let reg_name: *u8 = if target_is_win(target_tag) == (1 as i32) {
+                    if is_wide != (0 as i32) { int_reg_name_win(int_idx) } else { int_reg_name_win_narrow(int_idx) }
+                } else {
+                    if is_wide != (0 as i32) { int_reg_name_sysv(int_idx) } else { int_reg_name_sysv_narrow(int_idx) }
+                };
                 let _m = emit_mov_temp_to_reg(state, aqt, off, reg_name);
-            }
-            ri = ri + (1 as i64);
-        }
-        if n > (4 as i64) {
-            let _w = sb_append_cstr(arena, s, "# WARNING: emit_call nargs>=5 on Win ABI (v2.7.0 简化,stack-arg fallback not yet wired)\n" as *u8);
-        }
-    } else {
-        let sysv_wide = ["rdi" as *u8, "rsi" as *u8, "rdx" as *u8, "rcx" as *u8, "r8" as *u8, "r9" as *u8];
-        let sysv_narrow = ["edi" as *u8, "esi" as *u8, "edx" as *u8, "ecx" as *u8, "r8d" as *u8, "r9d" as *u8];
-        let mut ri2: i64 = 0 as i64;
-        while ri2 < n && ri2 < (6 as i64) {
-            let ap2 = arg_qts_arr as *i32;
-            let bp2 = arg_temps_arr as *i64;
-            let ap2_off = ptr_add_u8(ap2 as *u8, ri2 * (4 as i64)) as *i32;
-            let bp2_off = ptr_add_u8(bp2 as *u8, ri2 * (8 as i64)) as *i64;
-            let aqt2 = *ap2_off;
-            let atemp2 = *bp2_off;
-            // v2.11.15 Iter 1 A1-XMM 真修:SysV ABI f32/f64 arg 走
-            // %xmm0..%xmm5(前 6 个 xmm reg,per System V psABI)。
-            if aqt2 == QBE_S_LOCAL() || aqt2 == QBE_D_LOCAL() {
-                let xmm_reg2 = sse_xmm_reg_for_arg_idx(ri2);
-                let off2 = cg_offset_for_temp_with_target(atemp2, target_tag);
-                let _m2 = sse_emit_mov_temp_to_xmm_reg(state, aqt2, off2, xmm_reg2);
             } else {
-                let is_wide2: i32 = if aqt2 == (108 as i32) { 1 as i32 } else { 0 as i32 };
-                let reg_name2 = if is_wide2 != (0 as i32) { sysv_wide[ri2] } else { sysv_narrow[ri2] };
-                let off2 = cg_offset_for_temp_with_target(atemp2, target_tag);
-                let _m2 = emit_mov_temp_to_reg(state, aqt2, off2, reg_name2);
+                // int pool exhausted (Win: 5+ int arg / SysV: 7+ int arg)
+                let _p = emit_stack_arg_push(state, aqt, off);
             }
-            ri2 = ri2 + (1 as i64);
         }
-        if n > (6 as i64) {
-            let _w = sb_append_cstr(arena, s, "# WARNING: emit_call nargs>=7 on SysV ABI (v2.7.0 简化,stack-arg fallback not yet wired)\n" as *u8);
-        }
+        ri = ri + (1 as i64);
     }
     return 0;
 }
@@ -812,7 +820,20 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
         let _c1 = emit_comment(state, "emit_call: SysV amd64 calling convention (per v2.7.0 Phase 2b)" as *u8);
     }
 
-    // ── Step 2: args → 物理寄存器(Win 4 reg / SysV 6 reg,gated on target_tag)─
+    // ── Step 2: shadow space alloc(仅 Win)BEFORE arg writes ─
+    //   Win: subq $32, %rsp BEFORE writing stack args,so caller writes
+    //   [rsp+32..] = callee's [rbp+40..] = correct 5th arg location.
+    //   SysV: no shadow, stack args written at [rsp+0..] = [rbp+16..].
+    // v2.13.0 Phase 1:原顺序 emit_args → subq → call 是错的 — emit_args
+    //   把 stack args 写到 [rsp+32..] (在 subq 前),然后 subq 把 rsp 减 32,
+    //   call + pushq %rbp 后 callee 读 [rbp+40..] 看到的内存地址是
+    //   caller 写的位置 + 32 偏移 → 5th arg 读到 shadow 槽,值错。
+    //   修:subq 提前到 emit_args 之前。
+    if target_is_win(target_tag) == (1 as i32) {
+        let _sa = sb_append_cstr(arena, s, "\tsubq $32, %rsp\n" as *u8);
+    }
+
+    // ── Step 3: args → 物理寄存器 + stack-arg writes ─
     // v2.11.2 (T4-d 真修):把 call 指令原文存 CGState.cur_call_text,让
     // emit_amd64_arg_regs parse 每个 arg 的 (qt, temp_id) 而不是 hardcode
     // %t1..%t6 — 真修 fib_renamed (l %t13, w %t12) 跟 struct_val_pass
@@ -821,13 +842,6 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     (*cg_inner).cur_call_text = (*t).text;
     (*cg_inner).cur_call_text_len = (*t).text_len;
     let _ar = emit_amd64_arg_regs(state, nargs, ret_qt, target_tag);
-
-    // ── Step 3: shadow space alloc(仅 Win)— SysV 不需要 ─
-    //   Win: subq $32, %rsp (MS x64 calling convention)
-    //   SysV: NO shadow (per SysV psABI § 3.2.3)
-    if target_is_win(target_tag) == (1 as i32) {
-        let _sa = sb_append_cstr(arena, s, "\tsubq $32, %rsp\n" as *u8);
-    }
 
     // ── Step 4: 实际 call ─
     //   call fn_name — GAS 不接受 '$' 前缀(QBE 注释标记),必须跳过。
@@ -1257,14 +1271,53 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
             } else {
                 arg_xmm_idx = 0 as i64;
             }
-            let xmm_for_arg = sse_xmm_reg_for_arg_idx(arg_xmm_idx);
-            let _r1 = sb_append_cstr(arena2, s2, "\tmov" as *u8);
-            let _r2 = sb_append_cstr(arena2, s2, if dst_qt == QBE_D_LOCAL() { "sd" as *u8 } else { "ss" as *u8 });
-            let _r3 = sb_append_cstr(arena2, s2, " %" as *u8);
-            let _r4 = sb_append_cstr(arena2, s2, xmm_for_arg);
-            let _r5 = sb_append_cstr(arena2, s2, ", " as *u8);
-            let _r6 = sb_appendf_lld(arena2, s2, "%lld" as *u8, dst_off);
-            let _r7 = sb_append_cstr(arena2, s2, "(%rbp)\n" as *u8);
+            // v2.13.0 Phase 1: stack-arg fallback for f64 args beyond XMM pool.
+            // Win: args 0-3 → xmm0..xmm3; args 4+ → caller stack at [rsp+32+0..]
+            //      = callee [rbp+16+0..] (skip retaddr)
+            // SysV: args 0-7 → xmm0..xmm7; args 8+ → caller stack at [rsp+0..]
+            //       = callee [rbp+16+0..]
+            let xmm_max: i64 = if target_is_win(target_tag) == (1 as i32) {
+                4 as i64
+            } else {
+                8 as i64
+            };
+            if arg_xmm_idx >= xmm_max {
+                // stack-arg read:必须走 %xmm15 中转(GAS 不支持 movsd mem,mem)
+                //   movsd <stack_off>(%rbp), %xmm15
+                //   movsd %xmm15, -<dst_off>(%rbp)
+                // v2.13.0 Phase 1: Win 5th arg = rbp+48 (跳过 saved rbp + retaddr + 32B shadow),
+                //                  SysV 5th arg = rbp+16 (跳过 saved rbp + retaddr only)。
+                // Derivation (Win): caller subq $32, write [rsp+32] = old_rsp;
+                //   call: rsp = old_rsp - 40; pushq %rbp: rsp = old_rsp - 48, rbp = old_rsp - 48;
+                //   so 5th arg = old_rsp = rbp + 48.
+                let stack_idx = arg_xmm_idx - xmm_max;
+                let stack_off_base: i64 = if target_is_win(target_tag) == (1 as i32) {
+                    48 as i64
+                } else {
+                    16 as i64
+                };
+                let stack_off = stack_off_base + stack_idx * (8 as i64);
+                let suffix = if dst_qt == QBE_D_LOCAL() { "sd" as *u8 } else { "ss" as *u8 };
+                let _r1 = sb_append_cstr(arena2, s2, "\tmov" as *u8);
+                let _r2 = sb_append_cstr(arena2, s2, suffix);
+                let _r3 = sb_append_cstr(arena2, s2, " " as *u8);
+                let _r4 = sb_appendf_lld(arena2, s2, "%lld" as *u8, stack_off);
+                let _r5 = sb_append_cstr(arena2, s2, "(%rbp), %xmm15\n" as *u8);
+                let _r6 = sb_append_cstr(arena2, s2, "\tmov" as *u8);
+                let _r7 = sb_append_cstr(arena2, s2, suffix);
+                let _r8 = sb_append_cstr(arena2, s2, " %xmm15, " as *u8);
+                let _r9 = sb_appendf_lld(arena2, s2, "%lld" as *u8, dst_off);
+                let _rA = sb_append_cstr(arena2, s2, "(%rbp)\n" as *u8);
+            } else {
+                let xmm_for_arg = sse_xmm_reg_for_arg_idx(arg_xmm_idx);
+                let _r1 = sb_append_cstr(arena2, s2, "\tmov" as *u8);
+                let _r2 = sb_append_cstr(arena2, s2, if dst_qt == QBE_D_LOCAL() { "sd" as *u8 } else { "ss" as *u8 });
+                let _r3 = sb_append_cstr(arena2, s2, " %" as *u8);
+                let _r4 = sb_append_cstr(arena2, s2, xmm_for_arg);
+                let _r5 = sb_append_cstr(arena2, s2, ", " as *u8);
+                let _r6 = sb_appendf_lld(arena2, s2, "%lld" as *u8, dst_off);
+                let _r7 = sb_append_cstr(arena2, s2, "(%rbp)\n" as *u8);
+            }
         } else {
             let _r1 = sb_append_cstr(arena2, s2, "\tmov" as *u8);
             let _r2 = sb_append_cstr(arena2, s2, size_suffix_for_qt(dst_qt));

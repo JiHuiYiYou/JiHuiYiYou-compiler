@@ -292,7 +292,9 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32 {
     //   28 × 8 = 224 字节 malloc 上调。pre-existing 160 malloc 跟 168 字节 struct
     //   已 8 字节 overflow (fn_count 写到 heap 边界外,触发 v2.11.14 OS pre-existing
     //   bug per `feedback_codegen_amd64_run_zerobyte` 同 pattern)。
-    let state_buf = malloc(224 as i64);
+    // v2.13.0 (W-074.6 RCA):CGState struct 在 Phase 1 加 fields 后变 ~248+
+    // 字节,224 不够 → fn_count 写到堆外 → 0-byte body。改 512 留 slack。
+    let state_buf = malloc(512 as i64);
     if state_buf == (0 as *u8) {
         free(il_buf);
         arena_free(&arena);
