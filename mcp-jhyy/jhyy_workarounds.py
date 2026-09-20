@@ -23,6 +23,25 @@ _STATUS_RE = re.compile(
 )
 
 
+def _msys_to_windows(msys_path: str) -> Path:
+    """Convert MSYS2-style path (/c/Users/...) to Windows Path (C:\\Users\\...).
+
+    `git worktree list --porcelain` 在 MSYS2 bash 输出 /c/... 格式;
+    Python `Path('/c/...').resolve()` 把它当 relative path 处理 →
+    prepended current drive → `C:\\c\\Users\\...` (BAD, 文件不存在).
+
+    转换规则 (per MSYS2 path translation):
+    - `/x/...` (x = drive letter) → `X:/...` → resolve → `X:\\...`
+    - 其他 (UNC, /tmp, relative) → 原样
+    """
+    p = msys_path.strip()
+    if len(p) >= 3 and p[0] == "/" and p[2] == "/":
+        drive = p[1]
+        if drive.isalpha():
+            p = f"{drive.upper()}:{p[2:]}"
+    return Path(p)
+
+
 def _detect_root() -> Path:
     """Detect JHYY root, prefer active worktree over script location.
 
@@ -46,11 +65,15 @@ def _detect_root() -> Path:
     # Tier 1: env override (explicit user choice)
     env_override = os.environ.get("JHYY_MCP_WORKTREE", "").strip()
     if env_override:
-        override_path = Path(env_override).resolve()
+        # v2.13.6.2: env var may be MSYS2 style (/c/...) or Windows (C:/...).
+        override_path = _msys_to_windows(env_override).resolve()
         if (override_path / "docs/internal/workarounds.md").exists():
             return override_path
 
-    # Tier 2: cwd's git toplevel
+    # Tier 2: cwd's git toplevel, ONLY if cwd branch is non-main (default Claude
+    # Code session cwd=main ⇒ 跳过 Tier 2, 让 Tier 3 选 most-recent non-main
+    # worktree). v2.13.6.2 修复: 旧版 cwd=main 时 Tier 2 抢先返回 main,
+    # 跳过 Tier 3 选 axis-vN, 导致 MCP 永远显示 stale main workarounds.
     try:
         cwd = Path(os.getcwd())
         toplevel_str = subprocess.check_output(
@@ -59,8 +82,20 @@ def _detect_root() -> Path:
             stderr=subprocess.DEVNULL,
             text=True,
         ).strip()
-        cwd_toplevel = Path(toplevel_str).resolve()
-        if cwd_toplevel != script_root and (cwd_toplevel / "docs/internal/workarounds.md").exists():
+        # v2.13.6.2: defensive MSYS2 → Windows conversion (normal case already
+        # Windows-style, but `MSYS_NO_PATHCONV=1` + git.exe may 输出 /c/...).
+        cwd_toplevel = _msys_to_windows(toplevel_str).resolve()
+        cwd_branch = ""
+        try:
+            cwd_branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=str(cwd_toplevel),
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+            cwd_branch = ""
+        if cwd_branch != "main" and cwd_toplevel != script_root and (cwd_toplevel / "docs/internal/workarounds.md").exists():
             return cwd_toplevel
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):
         cwd_toplevel = None
@@ -79,7 +114,7 @@ def _detect_root() -> Path:
         cur_path = None
         cur_branch = None
         for line in wt_list.splitlines():
-            if line.startswith("WORKTREE "):
+            if line.startswith("worktree "):
                 if cur_path:
                     worktrees.append((cur_path, cur_branch))
                 cur_path = line[9:].strip()
@@ -92,7 +127,11 @@ def _detect_root() -> Path:
 
         candidates = []
         for wt_path_str, branch in worktrees:
-            wt_path = Path(wt_path_str).resolve()
+            # v2.13.6.2 mini: `git worktree list --porcelain` 在 MSYS2 bash 输出
+            # /c/... 格式; `Path('/c/...').resolve()` 当 relative 处理 →
+            # CWD prepended → C:\c\... (BAD, 文件不存在). 用 _msys_to_windows 转
+            # `/c/...` → `C:/...` 再 resolve → C:\Works (CORRECT).
+            wt_path = _msys_to_windows(wt_path_str).resolve()
             wd = wt_path / "docs/internal/workarounds.md"
             if not wd.exists():
                 continue
