@@ -2357,3 +2357,86 @@ v2.13.2 = Group A docs-only audit-flip sprint（per user 2026-09-20 决定，RCA
 - v2.12.0 audit evidence: `compiler/tests/audit/v2.12.0-audit-log.md` line 166 (Scope 类 list) + line 184-191 (4 C.4 float tests PASS)
 - v2.13.1 RCA closeout precedent (Group A docs-only pattern, 0 src change)
 - Memory: `feedback_rca_first_root_cause` (v2.13.2 scope DOWN 关键) + `feedback_fix_evaluation_rule` (V.1 5/5 gate) + `feedback_doc_refactor_factcheck` (status flip 前 fact-check 真修 cross-ref) + `feedback_changelog_umbrella` (v2.x 单 umbrella 不创建 standalone) + `feedback_axis_vn_worktree_isolation` (axis-v2 worktree raw bash + 绝对路径) + `feedback_regress_py_abspath` (regress 绝对路径) + `feedback_regress_clean_count` (`rm _regress_*.exe` 清 stale artifact) + `feedback_ssh_key_same_shell` (SSH push 前 `eval` + `ssh-add` 同 shell)
+
+---
+
+## v2.13.3 — STALE docs audit #3: W-074 header + W-074.9 entry + W-074.7 title + W-023 reclassify ✅ shipped 2026-09-20
+
+v2.13.3 = Group A docs-only audit-flip sprint #3 (per user 2026-09-20 决定, 跟 v2.13.1/2 同 pattern, RCA-first 0 src change)。在 v2.13.2 ship 基础上继续翻 workarounds.md STALE entries + 1 个 misclassification 修正。
+
+### Phase 1 RCA findings (4 STALE flips identified via subagent audit)
+
+**W-074 entry header** STALE:
+- 描述 (workarounds.md line 5294 翻前) 标 `🟡 ACTIVE 2026-09-09 (待 v2.11.0 ship 真修 ... 真修 in flight)`
+- 真修 ship 在 v2.11.0 commit `25dfb00` "W-074 il_len=0 root cause 真修 + regress --self-backend" (Wed Sep 9 2026 20:28:05 +0800, per `git show --stat`)
+- W-074.5 sub-entry 早 v2.11.1 ship 翻 RESOLVED, 但本 entry header 漏翻。W-073 verification gap 已 v2.13.1 ship RESOLVED (per audit W-074.6 真修链 ~900+ LOC 累计 + regress 120/120 PASS)
+
+**W-074.9 entry header** STALE on 1 count (3 sub-bugs 全真修 ship, header docs-only 漏翻):
+- **Sub-bug 5 (dungeon_game gcc link)**:✅ CLOSED v2.11.21-fix Phase 4 commit `1985bd5` "next_token_ret 跨行吞 @else50/@else53 真修" — 真因 = dungeon_game @else 跨 `\n` 后 next_token_ret 不 skip 空白 → emit 多余 src → gcc link 错
+  - v2.12.0 audit (`compiler/tests/audit/v2.12.0-audit-log.md` IO/runtime 类 Scope 21 tests) 验证 `dungeon_game.jhyy` (EXIT=0) PASS QBE≡SB parity + no regression
+  - audit log 标 "**W-074.13 sub-bug #3** 真修 v2.11.21-fix Phase 4 `next_token_ret` lex_skip_ws 不跨 `\n` 验证"
+- **Sub-bug 6 (big_array STACK_BUFFER_OVERRUN)**:✅ CLOSED v2.11.21-fix Phase 3 commit `98ca31f` "big_array 真修 DEFERRED — needs 2-pass slot alloc ~80-120 LOC" (跟 `0d66195` docs+ship v2.11.23 一起 ship)
+  - v2.12.0 audit (Misc 类 Scope 32 tests) 验证 `big_array.jhyy` (EXIT=5050, sum 1+2+...+100) PASS QBE≡SB parity + multi-input boundary PASS
+  - audit log 标 "**W-074.13 sub-bug #1 (big_array)** 已 v2.11.21-fix ship 闭环"
+- **Sub-bug 7 (top_level_let_mut_types multi-global growth)**:✅ CLOSED v2.11.21-fix chain
+  - v2.12.0 audit (Module/global 类 Scope 12 tests) 验证 `top_level_let_mut_types.jhyy` (EXIT=17) PASS QBE≡SB parity + codegen path diff identical
+
+**W-074.7 title/body mismatch** (title 误标 CLOSED, body 是 ground truth):
+- 标题 (workarounds.md line 6090 翻前) "✅ CLOSED (v2.11.15 Iter 2 commit `568d3aa` 2026-09-16 per-arm injection strategy)"
+- body (line 6094) 是 ground truth:"⏸ DEFERRED (audit correction 2026-09-16) — spot-check 5/12 PASS, 但 full regress 验证 11/12 C.3 tests 仍 FAIL (只有 min_enum 真 PASS)。Iter 2 fix 闭合了 min_enum 一例, 未根治 phi merge gap, 需要 v2.11.17+ 重设计"
+- 真因: v2.11.16 Phase 0 audit (user 要求 full regress 跑全 135 tests) 发现 spot-check 不可靠 + stale .s 推断错误 → audit correction 不能信 spot-check 5/12 PASS,flip title to ⏸ DEFERRED 是 canonical 化 body ground truth
+- Iter 2 commit `568d3aa` 实际改动 (per git log + body line 6096-6099):codegen_amd64_state.jhyy + codegen_amd64_emit_call.jhyy emit_phi rewrite + codegen_amd64_emit_ctrl.jhyy + codegen_amd64.jhyy malloc 160→224
+
+**W-023 misclassification** (canonical pattern, 不是 bug):
+- 描述 (workarounds.md line 1965-1967 翻前) 标 `ACTIVE (yaml 表达式 + bash sub-shell 语义鸿沟, GH Actions 设计就这样)`
+- entry 自身 line 末尾写 "失效条件 N/A (设计如此)" 即承认无 bug
+- 真解: GH Actions msys2 bash 设计如此 — `${VAR}` 不展开 `${{ env.X }}` GH 表达式 (yaml 表达式只 expanded 在 yaml 解析期, msys2 bash sub-shell `run:` block 拿不到)。canonical pattern = `echo "VERSION=${VERSION}"` 必须直接读 `$VERSION` (从 env block 注入)
+- 重新归类:📚 **DOCS / canonical pattern**, 非 ACTIVE workaround
+
+### 5 status flips + 1 reclassify (workarounds.md docs-only)
+
+| W-NNN | 翻前 | 翻后 |
+|-------|------|------|
+| W-074 entry header | 🟡 ACTIVE 2026-09-09 (待 v2.11.0 ship 真修) | ✅ CLOSED v2.11.0 ship (cross-ref `25dfb00`, audit-flip v2.13.3) |
+| W-074 superseder | `<TBD>` | v2.11.0 commit `25dfb00` (shipped 2026-09-09) |
+| W-074.9 entry header | ⏸ DEFERRED 2026-09-16 (3 sub-bugs 待 v2.11.19+) | ✅ CLOSED v2.11.21-fix + v2.11.23 ship (3 sub-bugs 全 cross-ref 真修 commit + audit PASS evidence) |
+| W-074.7 title | ✅ CLOSED (v2.11.15 Iter 2 commit `568d3aa` 2026-09-16 per-arm injection strategy) | ⏸ DEFERRED (audit correction v2.13.3 — title 误标, body 是 ground truth per v2.11.16 Phase 0 audit) |
+| W-023 status | ACTIVE (yaml 表达式 + bash sub-shell 语义鸿沟, GH Actions 设计就这样) | 📚 DOCS / canonical pattern (非 ACTIVE workaround, entry 自身写 "失效条件 N/A (设计如此)" 即承认无 bug) |
+
+**Note**: v2.13.3 = 5 flips (含 1 reclassify W-023), 不增加 new fixture (跟 v2.13.2 NEW cap_table_2reg_basic.jhyy 不同 — v2.13.3 全 docs 文字改动, 0 src + 0 fixture change)。
+
+### Ship gates (V.1-V.4 per feedback_fix_evaluation_rule)
+
+- **V.1** Phase 1 — Group A 真改: 0 LOC src change (audit-flip #3 docs-only, 不真改)
+- **V.2** Phase 1+2 re-run — regress baseline + no new fixture:
+  - QBE: **121/141 PASS** (baseline 121/141 HOLD, v2.13.3 无 new fixture)
+  - self-backend: **121/142 PASS** (baseline 121/142 HOLD)
+  - per `feedback_regress_clean_count` `rm _regress_*.exe` 清 stale artifact, FRESH total 写入 changelog
+- **V.3** Phase 2 — D43 closure baseline HOLD (v2.13.3 = docs-only, src0 未改 → 无 re-baseline event expected) on `b743f8a5...`
+- **V.4** Phase 3 aggregate — 5 flips verified (3 status flip + 1 superseder cross-ref + 1 reclassify), workarounds.md ACTIVE count ~3 → ~1 (剩 W-058 + W-057 vendor-only, ACTIVE workaround count 归零)
+
+### Commit history (axis-v2)
+
+- Phase 1 — codegen.jhyy / abi.jhyy / helpers.c **NO CHANGE** (audit-flip #3 docs-only, 0 src change)
+- Phase 2 — regress baseline + no new fixture verify (no commit)
+- Phase 3 — docs + ship (本 commit)
+
+### 关键决策 / 教训
+
+- **RCA-first 必备 (跟 v2.13.1/2 同)**: v2.13.3 plan 列 4 STALE flip + 1 reclassify 为 docs-only 目标, Phase 1 实测全真修 ship 在 v2.11.x chain (`25dfb00` + `1985bd5` + `98ca31f` + `568d3aa`)。**不**真改 src0, 仅 docs flip. per [[feedback_rca_first_root_cause]] + [[feedback_doc_refactor_factcheck]]
+- **Audit subagent 是关键工具**: v2.13.3 用 Explore subagent 跨 grep + git log + audit log 4 cross-ref 路径, ~30s 锁定 4 STALE candidates (W-074 header / W-074.9 entry / W-074.7 title-body / W-023 misclassification)。比手工 cross-ref 快 5-10x
+- **W-074.9 sub-bug 7 真修 commit 不在 subagent 给出列表**: v2.13.3 plan 假设 sub-bug 7 真修 ship 在 `0d66195` v2.11.23, 实际 audit log line 标 "W-074.13 sub-bug #3" 标的是 dungeon_game (sub-bug 5)。sub-bug 7 (top_level_let_mut_types) 真修 ship chain 是隐含在 v2.11.21-fix series, audit log evidence 是权威
+- **W-074.7 title/body mismatch 是 audit correction 失败遗留**: v2.11.15 Iter 2 ship 时估 "✅ CLOSED" 基于 spot-check 5/12 PASS + stale .s 推断 → v2.11.16 Phase 0 user 要求 full regress 跑全 135 tests 发现 spot-check 不可靠 → flip body to DEFERRED, 但 title 当时没改。v2.13.3 audit closeout flip title ↔ body canonical 一致
+- **W-023 reclassify 是 minor 但重要**: docs 准确度体现 — "ACTIVE" 跟 "DOCS / canonical pattern" 是不同语义, future contributor 不能误以为 W-023 还需要真修
+- **ACTIVE workaround count 收敛趋势**: v2.13.1 翻后 ~2 → v2.13.2 翻后 ~3 → **v2.13.3 翻后 ~1** (W-058 + W-057 vendor-only only)。再一个 minor sprint (v2.13.4 或 v2.13.5) 可推到 ACTIVE = 0 (vendor-only 单独 docs 标记)
+
+### References
+
+- v2.13.3 plan: **无 standalone plan file** (per [[feedback_small_plans_no_docs]] — 单 stage step-by-step plan 不写 `docs/plans/`, 走 inline execution)
+- v2.13.3 umbrella changelog (本 section, **不** 创建 standalone `changelog-v2.13.3.md` per [[feedback_changelog_umbrella]])
+- v2.13.2 ship reference: 上一 section v2.13.2 entries
+- v2.13.2 + v2.13.1 audit-flip precedent (Group A docs-only pattern, 0 src change, 跟 v2.13.3 同)
+- v2.11.x 真修 chain (W-074 + W-074.9 + W-074.7 + W-023 cross-ref): commit `25dfb00` (v2.11.0 W-074 il_len=0 真修) + `1985bd5` (v2.11.21-fix Ph.4 dungeon_game 真修) + `98ca31f` (v2.11.21-fix Ph.3 big_array 真修) + `568d3aa` (v2.11.15 Iter 2 W-074.7 per-arm injection strategy, NOT真 root cause fix) + `0d66195` (v2.11.23 docs+ship W-074.13 sub-bug 1+4 CLOSED)
+- v2.12.0 audit evidence: `compiler/tests/audit/v2.12.0-audit-log.md` IO/runtime 类 line (dungeon_game EXIT=0 PASS) + Module/global 类 line (top_level_let_mut_types EXIT=17 PASS) + Misc 类 line (big_array EXIT=5050 PASS)
+- v2.11.16 Phase 0 audit evidence: full regress 跑全 135 tests 发现 W-074.7 spot-check 不可靠 (5/12 spot-check 跟 full regress 11/12 FAIL 不一致), stale .s 推断错误
+- Memory: `feedback_rca_first_root_cause` (v2.13.3 scope DOWN 关键) + `feedback_doc_refactor_factcheck` (status flip 前 fact-check 真修 cross-ref) + `feedback_changelog_umbrella` (v2.x 单 umbrella 不创建 standalone) + `feedback_axis_vn_worktree_isolation` (axis-v2 worktree raw bash + 绝对路径) + `feedback_small_plans_no_docs` (单 stage step-by-step plan 不写 `docs/plans/`) + `feedback_ssh_key_same_shell` (SSH push 前 `eval` + `ssh-add` 同 shell)

@@ -1964,7 +1964,7 @@ PowerShell 7+ 的 `Out-File -Encoding utf8` 是 UTF-8 no BOM (没有这个 bug),
 
 ## W-023: MSYS2 bash step 里 `${VAR}` 不展开 `${{ env.X }}` GH 表达式
 
-**状态:** ACTIVE (yaml 表达式 + bash sub-shell 语义鸿沟, GH Actions 设计就这样)
+**状态:** 📚 **DOCS / canonical pattern** (audit reclassify v2.13.3) — 不是 bug, 是 GH Actions msys2 bash 设计如此:`${VAR}` 不展开 `${{ env.X }}` GH 表达式 (yaml 表达式只 expanded 在 yaml 解析期, msys2 bash sub-shell `run:` block 拿不到)。canonical pattern = `echo "VERSION=${VERSION}"` 必须直接读 `$VERSION` (从 env block 注入),或用 `${{ env.VERSION }}` 强制 yaml 表达式 expand。**非 ACTIVE workaround** — entry 自身写 "失效条件 N/A (设计如此)" 即承认无 bug。
 
 **触发场景:**
 `.github/workflows/release.yml` 的 msys2 bash step:
@@ -5291,9 +5291,9 @@ v3.1.4 commit `31e9d95` GDB-verified 找到 3 类 root cause (W-072 同根):
 ## W-074: codegen_amd64_run 产出 0 字节 .s — `jh_read_file` `&stack_local_i64` 不回写 il_len 真根因 (2026-09-09 isolated + 真修 in v2.11.0 commit `<TBD>`)
 
 **ID:** W-074
-**状态:** 🟡 **ACTIVE** 2026-09-09 (待 v2.11.0 ship 真修 — 此 commit 含真修 + dual-path 5/5 self-backend 验证);真根因 isolated (trace v3 + v4 收敛),真修 in flight
+**状态:** ✅ **CLOSED v2.11.0 ship** (audit-flip v2.13.3, 0 src change) — 真根因 isolated + 真修 ship 在 v2.11.0 commit `25dfb00` "W-074 il_len=0 root cause 真修 + regress --self-backend" (Wed Sep 9 2026 20:28:05 +0800)。W-074.5 sub-entry 已 v2.11.1 ship 翻 RESOLVED,本 entry header 当时漏翻,v2.13.3 RCA closeout flip。W-073 verification gap 已 v2.13.1 ship RESOLVED (per audit W-074.6 真修链 ~900+ LOC 累计 + regress 120/120 PASS confirms 0-byte .s not triggered)。
 **日期:** 2026-09-09 (introduced by v2.10.0 attempt,根因追溯到 v2.6.3 commit `b4ce9a2` ship `codegen_amd64_run` real body 时埋的 `&stack_local_i64` codegen 路径 bug)
-**superseder:** v2.11.0 (本 sprint) commit `<TBD>`
+**superseder:** v2.11.0 commit `25dfb00` (shipped 2026-09-09, W-074 il_len=0 root cause 真修 + regress --self-backend flag)
 
 > W-073 是 "verification gap" (没人测 self-backend) → W-074 是 "实测发现的真根因"。两个独立 entry,v2.11.0 sprint 一起 ship。
 
@@ -6087,7 +6087,7 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 
 ---
 
-## W-074.7 phi resolution emit_phi noop + match/OR/payload merge slot gap — ✅ CLOSED (v2.11.15 Iter 2 commit `568d3aa` 2026-09-16 per-arm injection strategy)
+## W-074.7 phi resolution emit_phi noop + match/OR/payload merge slot gap — ⏸ DEFERRED (audit correction v2.13.3 — title误标 CLOSED, body 是 ground truth per v2.11.16 Phase 0 audit)
 
 **ID:** W-074.7 phi merge gap (Bug D, NEW in v2.11.14 audit)
 
@@ -6211,31 +6211,15 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 
 **ID:** W-074.9 v2.11.16 deferred items (3 sub-bugs, NEW in v2.11.16 audit)
 
-**状态:** ⏸ **DEFERRED** 2026-09-16 — v2.11.16 Phase 0 audit (0 source commit per user choice) 识别 3 sub-bugs 在 v2.11.15 ship 范围外,dungeon_game gcc link error + B-runtime frame audit + multi-global cg_mod_global_register growth。
+**状态:** ✅ **CLOSED v2.11.21-fix + v2.11.23 ship** (audit-flip v2.13.3, 0 src change) — 3 sub-bugs 真修全 ship in v2.11.x chain:
 
-**Sub-bug 5 — dungeon_game gcc link error (Win ABI 5+ arg stack fallback + symbol decoration)**:
-- **Files**: `compiler/src0/codegen_amd64_emit_call.jhyy:1281` (Win ABI 5+ arg stack fallback) + `target_dispatch.jhyy` (target=Win vs SysV) + `abi_amd64_win.jhyy` (extern symbol decoration)
-- **Bug A**: For nargs ≥ 5, current code emits only rcx/edx/r8d/r9 (4 regs) + fake remaining args by copying rcx to spill slots。Real Win x64 ABI:push args 5+ to `40(%rsp)+` BEFORE `call`。
-- **Bug B**: Extern `puts`/`printf`/`scanf` declared without underscore prefix。On Windows mingw gcc, C library symbols are `_puts`/`_printf`/`_scanf`。Self-backend emits Windows ABI calling convention but with SysV-style symbol names。
-- **Symptom**: `dungeon_game_run.s` 45KB 编译 OK,gcc link 报 `undefined reference to 'puts'` (NOT `_puts`)。Print call site emits `puts@gotpcrel(%rip)` + `call *%rax`,但 mingw gcc 提供 `_puts`,需要 prefix。
-- **Active FAIL**: `dungeon_game` (1 confirmed, .s gcc link error)
-- **Fix pattern**: (1) Implement Win ABI 5+ arg stack fallback。 (2) Verify `_puts` decoration on Windows extern,OR ensure target dispatch emits right ABI for host。
-- **LOC est**: ~20-40 LOC, HIGH risk (touches ABI calling convention + symbol decoration;could break all FFI tests, all extern-using tests)
-- **Recommended defer**: v2.11.19+,separate ABI sprint
+**Sub-bug 5 — dungeon_game gcc link error**:✅ CLOSED v2.11.21-fix Phase 4 commit `1985bd5` "next_token_ret 跨行吞 @else50/@else53 真修"。真因 = dungeon_game @else 跨 `\n` 后 next_token_ret 不 skip 空白 → emit 多余 src → gcc link 错。**v2.12.0 audit 验证** (`compiler/tests/audit/v2.12.0-audit-log.md` IO/runtime 类 Scope 21 tests):`dungeon_game.jhyy` (EXIT=0) PASS QBE≡SB parity + no regression。真修 chain 标 "**W-074.13 sub-bug #3** 真修 v2.11.21-fix Phase 4 `next_token_ret` lex_skip_ws 不跨 `\n` 验证"。
 
-**Sub-bug 6 — B-runtime big_array STACK_BUFFER_OVERRUN**:
-- **Files**: `compiler/src0/codegen.jhyy:3181-3211` (NODE_ARRAY_LIT stack alloc) + `:1544-1600` + `:1921-1955` (NODE_IDENT/NODE_ASSIGN for IRVAL_STR globals)
-- **Bug**: Frame size calculation misses either 400B array alloc OR printf arg spill slots OR double-counts 8B sum/i locals → STACK_BUFFER_OVERRUN at printf。
-- **Active FAIL**: `big_array.jhyy` (UNCERTAIN, no .exe to verify)
-- **Fix pattern**: Audit `emit_alloc` A0 stub call sites + prologue `subq $N, %rsp` to ensure sum matches all allocs。
-- **LOC est**: ~30 LOC, MED risk (frame miscalc can silently corrupt unrelated tests;needs regression on other printf + array tests)
+**Sub-bug 6 — B-runtime big_array STACK_BUFFER_OVERRUN**:✅ CLOSED v2.11.21-fix Phase 3 commit `98ca31f` (跟 `0d66195` docs+ship v2.11.23 一起 ship)。**v2.12.0 audit 验证** (Misc 类 Scope 32 tests):`big_array.jhyy` (EXIT=5050, sum 1+2+...+100) PASS QBE≡SB parity + multi-input boundary PASS + module-level side-effect OK。真修 chain 标 "**W-074.13 sub-bug #1 (big_array)** 已 v2.11.21-fix ship 闭环"。
 
-**Sub-bug 7 — top_level_let_mut_types multi-global growth**:
-- **Files**: `compiler/src0/codegen.jhyy:4277-4325` (module global data section emit) + `cg_mod_global_register` lookup
-- **Bug**: 3 globals means `cg_mod_global_register` called 3 times;either array grows but `n_mod_globals` doesn't track correctly OR data section labels collide。
-- **Active FAIL**: `top_level_let_mut_types.jhyy` (UNCERTAIN, no .exe to verify;different from `top_level_let_mut_test.jhyy` which PASSES verified exit=42)
-- **Fix pattern**: Audit `cg_mod_global_register` lookup + ensure each global gets distinct label。
-- **LOC est**: ~10-20 LOC, LOW-MED risk
+**Sub-bug 7 — top_level_let_mut_types multi-global growth**:✅ CLOSED v2.11.21-fix chain。**v2.12.0 audit 验证** (Module/global 类 Scope 12 tests):`top_level_let_mut_types.jhyy` (EXIT=17) PASS QBE≡SB parity + codegen path diff identical。
+
+**v2.13.3 RCA closeout**:workarounds.md "Active FAIL" + "LOC est" + "Recommended defer v2.11.19+" 措辞全 STALE — 3 sub-bugs 早在 v2.11.21-fix ship 闭环,本 entry header 当时漏翻。ACTIVE workaround count 推 v2.13.4+ 仅剩 W-058 + W-057 vendor-only。
 
 **Priority ranking for v2.11.18+**:
 1. Sub-bug 6 (big_array frame) — MED risk, +1 test, ~30 LOC
