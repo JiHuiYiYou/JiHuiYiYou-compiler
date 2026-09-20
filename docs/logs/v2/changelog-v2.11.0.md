@@ -2281,3 +2281,79 @@ per user 2026-09-19 "不要有outofscope,不要Defer,这些都安排在v2.13.x�
 - v2.13.0 ship reference: 上一 section v2.13.0 entries
 - v2.11.x 真修 chain (W-074.6 family): commits `6192834` (v2.11.8) + `c93247c` (v2.11.10) + `6c7f81c` (v2.11.13) + `6795f75` (v2.11.15) + `8ffccce` (v2.11.9 idiv) + `56be6cf` (v2.11.20 address-holder) + v2.13.0 4 commits `5d405bb`/`b1ad5c3`/`d062a71`
 - Memory: `feedback_rca_first_root_cause` (v2.13.1 scope DOWN 关键) + `feedback_fix_evaluation_rule` (5/5 gate) + `feedback_doc_refactor_factcheck` (status flip 前 fact-check) + `feedback_changelog_umbrella` (v2.x 单 umbrella) + `feedback_axis_vn_worktree_isolation` (axis-v2 worktree raw bash) + `feedback_regress_py_abspath` (regress 绝对路径)
+
+---
+
+## v2.13.2 — W-074.8 sub-bug 2+4 audit-flip + cap_table_2reg_basic.jhyy fixture ✅ shipped 2026-09-20
+
+v2.13.2 = Group A docs-only audit-flip sprint（per user 2026-09-20 决定，RCA-first, 0 src change, 跟 v2.13.1 同 pattern）。在 v2.13.1 ship 基础上收 W-074.8 family 尾 (sub-bug 2 + 4)。
+
+### Phase 1 RCA findings (workarounds.md STALE descriptions)
+
+**Sub-bug 2 (C.4 float imm)** STALE:
+- 描述 (workarounds.md line 6177-6186 翻前) 标 `⏸ DEFERRED` + "Active FAIL: f32_suffix, float_arith, float_arith_f32"
+- 真修复 ship 在 v2.11.19 Phase 3 commit `d6364ba` (2026-09-17, "f32 IMM 真解 + f64 fractional 真解 + FNARG XMM bug"):
+  - `compiler/src0/jhyy_helpers.c` 加 `jh_double_to_bits` + `jh_float_to_bits` (atof → IEEE 754 bit pattern)
+  - `cg_parse_f64_imm_bits` fractional 分支真解 (consume frac digits → `jh_double_to_bits` → emit `movabsq` + `movq` 真确位)
+  - `cg_f32_imm_bits` v2.11.15 Iter 1b stub 替换为真解 (走 `jh_float_to_bits`)
+  - `emit_copy` IMM 分支 QBE_S_LOCAL 真接 `cg_f32_imm_bits`
+  - `emit_copy` FNARG XMM `arg_idx > 0` bug 改 `>= 0` (multi-arg fn 都走 xmmN 不只 xmm0)
+- v2.12.0 audit (`compiler/tests/audit/v2.12.0-audit-log.md` line 184-191) 验证 4/4 C.4 float tests PASS QBE≡SB parity:
+  - `float_arith.jhyy` EXIT=6 ✓
+  - `float_arith_f32.jhyy` EXIT=4 ✓
+  - `f32_suffix.jhyy` EXIT=0 ✓
+  - `f64_suffix.jhyy` EXIT=0 ✓
+- Bug C (src2-imm XMM binop at `emit_binop:1497-1501`) 标 theoretical-only — QBE 不 emit float IMM in binop position (QBE materializes literals to temp first before binop),无 test 触发
+
+**Sub-bug 4 (cap_table 16B 2-reg)** STALE on 2 counts:
+- **STALE #1 (真因错诊)**: cap_table_basic test 4 (got=30 vs 42) 真因**不是** "16B struct 2-register missing"。真因是 `emit_copy` `pct_count` heuristic miscounts bare `%t` (fn arg name = single letter `t`) → mis-routed as TEMP copy → `cg_parse_temp` returns -1 → `src_temp_id = 0` (t0 garbage) → FNARG path never entered → flag propagation skipped → t4 = t3 (pointer value, not deref)
+- 真修复 ship 在 v2.11.21-fix Phase 1 commit `4beab82` (2026-09-17, "cap_table_basic bare '%t' fnarg 真修") 1 LOC fix (per `rca-v2.11.21.md` § 2 Option 2)
+- v2.12.0 audit (`compiler/tests/audit/v2.12.0-audit-log.md` line 166 Scope 类 + line 184-191) 验证 cap_table_basic EXIT=42 PASS QBE≡SB parity
+- **STALE #2 (SysV § A.4 分类误判)**: CapTable<i32> = struct { data: *Cap<i32> 8B, len: i64 8B } = 16B struct。两 eightbytes 都是 INTEGER class (8B pointer + 8B i64)。Per SysV § A.4 merge rules: INTEGER+INTEGER → INTEGER class = **1 register pass**, NOT 2-register。Workarounds.md "16B → 2 regs" claim 跟 SysV § A.4 算法不符
+
+### 2 status flips + entry header flip (workarounds.md docs-only)
+
+| Sub-bug | 翻前 | 翻后 |
+|---------|------|------|
+| W-074.8 entry header | ⏸ DEFERRED 2026-09-16 (4 implementation iters 都 partial fix) | ✅ FULLY CLOSED v2.13.2 (4 sub-bugs 全 audit-flip: sub-bug 1+3 v2.13.1 commit `7d8578c` / sub-bug 2+4 v2.13.2 commit TBD) |
+| W-074.8 sub-bug 2 (C.4 float imm) | ⏸ DEFERRED + "Active FAIL: f32_suffix, float_arith, float_arith_f32" | ✅ CLOSED v2.13.2 (cross-ref `d6364ba` v2.11.19 Phase 3 + v2.12.0 audit line 184-191) |
+| W-074.8 sub-bug 4 (cap_table 16B 2-reg) | ⏸ DEFERRED + "Active FAIL: cap_table_basic.jhyy test 4 (got=30 vs 42)" | ✅ CLOSED v2.13.2 (cross-ref `4beab82` v2.11.21-fix Phase 1 + SysV § A.4 INTEGER+INTEGER class → 1 reg pass) |
+| W-074.8 OS 启动链路 | ⏸ DEFERRED (4 sub-bugs, ~175-260 LOC potential, 12-14 tests) | ✅ FULLY CLOSED v2.13.2 (4 sub-bugs 全 audit-flip, 0 src change total);ACTIVE workaround count 推 v2.13.3+ 仅 ~5 (W-074.9 3 sub-bugs + W-058 + W-057 vendor-only) |
+
+### New fixture
+
+- `compiler/tests/examples/cap_table_2reg_basic.jhyy` (NEW, +15 LOC, EXPECT=42) — sanity-check CapTable<i32> 16B struct cross-fn pass-by-value (`CapTable<i32> { data: 0 as *Cap<i32>, len: 42 as i64 }` → 跨 fn pass → 验证 emit_amd64_arg_regs 1-reg handling 是 CORRECT per SysV § A.4 INTEGER+INTEGER class)。baseline 5/5 EXIT=42 PASS QBE (V.1 gate)
+
+### Ship gates (V.1-V.4 per feedback_fix_evaluation_rule)
+
+- **V.1** Phase 1 — Group A 真改: 0 LOC src change (audit-flip, 不真改), NEW fixture `cap_table_2reg_basic.jhyy` × 5 → EXIT=42 每次都对 ✓
+- **V.2** Phase 1+2 re-run — regress baseline + new fixture:
+  - QBE: **121/141 PASS** (baseline 120/140 + new fixture +1 = 121/141) ✓
+  - self-backend: **121/142 PASS** (baseline 120/141 + new fixture +1 = 121/142) ✓
+  - per `feedback_regress_clean_count` `rm _regress_*.exe` 清 stale artifact, FRESH total 写入 changelog
+- **V.3** Phase 2 — D43 closure baseline HOLD (v2.13.2 = docs-only, src0 未改 → 无 re-baseline event expected) on `b743f8a5...`
+- **V.4** Phase 3 aggregate — 3 status flips verified (entry header + sub-bug 2 + sub-bug 4 + OS 启动链路), workarounds.md ACTIVE count ~5 → ~3 (W-074.9 3 + W-058 + W-057 vendor-only)
+
+### Commit history (axis-v2)
+
+- Phase 1 — codegen.jhyy / abi.jhyy / helpers.c **NO CHANGE** (audit-flip docs-only, 0 src change)
+- Phase 2 — regress baseline + new fixture verify (no commit)
+- Phase 3 — docs + ship (本 commit)
+
+### 关键决策 / 教训
+
+- **RCA-first 必备 (跟 v2.13.1 同)**: v2.13.2 plan 列 W-074.8 sub-bug 2 + 4 为 docs-only audit-flip 目标, Phase 1 实测发现都是 STALE description (workarounds.md 措辞滞后) + 真修复已在 v2.11.x ship (`d6364ba` + `4beab82`)。**不**真改 src0, 仅 docs flip. per [[feedback_rca_first_root_cause]] + [[feedback_doc_refactor_factcheck]]
+- **Sub-bug 4 STALE on 2 counts** 是 v2.13.2 重要发现: 不仅是 "描述 stale", 还错诊 (16B → 2-reg) + SysV § A.4 分类误判。Workarounds.md 写错了 2 次,真因是 `emit_copy` `pct_count` heuristic + SysV ABI classification 理解错。1 LOC fix (`4beab82`) 验证真修完成
+- **NEW fixture 价值**: `cap_table_2reg_basic.jhyy` 显式建 16B struct cross-fn pass E2E 验, baseline EXIT=42 PASS; 加 fixture 帮 regress 从 120/140 → 121/141 (coverage +1)
+- **W-074.8 family FULLY CLOSED**: sub-bug 1+3 v2.13.1 / sub-bug 2+4 v2.13.2 (4 sub-bugs 全 audit-flip, 0 src change total)。ACTIVE workaround count 7 → ~3 (剩 W-074.9 3 + W-058 + W-057 vendor-only)。v2.13.3+ 推 W-074.9 (3 sub-bugs: dungeon_game gcc link + B-runtime big_array + top_level_let_mut_types)
+- **Bug C src2-imm XMM 仍 theoretical**: QBE materializes literals to temp first before binop → 无 test 触发。如果未来 codegen 自写 (v2.15) 直接 emit x86-64 不经 QBE, 可能需要独立 sprint 处理 XMM imm in binop 路径
+
+### References
+
+- v2.13.2 plan: [`docs/plans/v2/v2.13.2-plan.md`](../../plans/v2/v2.13.2-plan.md) (RCA findings + 4 步 Phase 2+3 序列, plan file 已 ship 前存在)
+- v2.13.2 umbrella changelog (本 section, **不** 创建 standalone `changelog-v2.13.2.md` per [[feedback_changelog_umbrella]])
+- v2.13.1 ship reference: 上一 section v2.13.1 entries
+- v2.11.x 真修 chain (W-074.8 sub-bug 2 + 4): commit `d6364ba` (v2.11.19 Phase 3) + commit `4beab82` (v2.11.21-fix Phase 1)
+- v2.12.0 audit evidence: `compiler/tests/audit/v2.12.0-audit-log.md` line 166 (Scope 类 list) + line 184-191 (4 C.4 float tests PASS)
+- v2.13.1 RCA closeout precedent (Group A docs-only pattern, 0 src change)
+- Memory: `feedback_rca_first_root_cause` (v2.13.2 scope DOWN 关键) + `feedback_fix_evaluation_rule` (V.1 5/5 gate) + `feedback_doc_refactor_factcheck` (status flip 前 fact-check 真修 cross-ref) + `feedback_changelog_umbrella` (v2.x 单 umbrella 不创建 standalone) + `feedback_axis_vn_worktree_isolation` (axis-v2 worktree raw bash + 绝对路径) + `feedback_regress_py_abspath` (regress 绝对路径) + `feedback_regress_clean_count` (`rm _regress_*.exe` 清 stale artifact) + `feedback_ssh_key_same_shell` (SSH push 前 `eval` + `ssh-add` 同 shell)

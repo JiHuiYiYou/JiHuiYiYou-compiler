@@ -6161,7 +6161,7 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 
 **ID:** W-074.8 v2.11.15 partial fix residues (4 sub-bugs, NEW in v2.11.16 audit)
 
-**状态:** ⏸ **DEFERRED** 2026-09-16 — v2.11.15 ship (axis-v2 commit `8197db4`) 4 implementation iters 都命中 **partial fix + honest comment-in-source** pattern (per `feedback_fix_evaluation_rule` partial-fix 标记)。sub-bugs 留 v2.11.17+ 真修。
+**状态:** ✅ **FULLY CLOSED in v2.13.2** (audit RCA closeout, 0 src change per user 2026-09-20 决定) — 4 sub-bugs 全 audit-flip: sub-bug 1+3 v2.13.1 ship commit `7d8578c` (audit-false-positive, baseline 已 ship 真修) / sub-bug 2+4 v2.13.2 ship commit TBD (audit-flip docs-only, 0 src change, 真修复 ship 在 v2.11.19 Phase 3 `d6364ba` + v2.11.21-fix Phase 1 `4beab82`)。v2.12.0 audit 验证 4/4 float + cap_table_basic EXIT=42 PASS QBE≡SB parity。NEW fixture `compiler/tests/examples/cap_table_2reg_basic.jhyy` (15 LOC, EXPECT=42) sanity-check 16B struct cross-fn pass。ACTIVE workaround count → 推 v2.13.3+ 仅 ~3 (W-074.9 3 sub-bugs + W-058 + W-057 vendor-only)。
 
 **Sub-bug 1 — C.5 slice addr+8 残 (Iter 4)**:
 - **File**: `compiler/src0/codegen.jhyy:881-891`
@@ -6174,16 +6174,12 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 - **LOC est**: ~15-25 LOC, LOW risk (only affects slice store dispatcher path)
 - **FLIP projection**: +5 tests (slice_subrange confirmed + 4 uncertain PASS), at STOP threshold per [[feedback_codegen_amd64_multifn]]
 
-**Sub-bug 2 — C.4 float imm bit-pattern 残 (Iter 3)**:
-- **Files**: `compiler/src0/codegen_amd64_emit_call.jhyy:204-280` (`cg_parse_f64_imm_bits`) + `:283-323` (`emit_mov_imm_to_offset` + `emit_mov_f64_imm_to_offset`) + `:1215-1230` (copy IMM f64/f32 dispatch)
-- **Bug A**: `cg_parse_f64_imm_bits:230-233` 显式 returns 0 for fractional `d_N.M` literals (e.g. `d_2.5`)。需要 IEEE 754 bit construction extension。
-- **Bug B**: No `emit_mov_f32_imm_to_offset` helper。f32 IMM `s_2.5` → integer 2 stored as 4-byte int; loaded via `movss` interprets as f32 garbage。
-- **Bug C** (deferred from Iter 3): `emit_binop:1366-1370` comment "src2 imm literal... imm fall through 现有 integer path"。f64 ops with literal args emit `addq`/`imulq` instead of `addsd`/`mulsd`。
-- **Active FAIL**: `f32_suffix`, `float_arith`, `float_arith_f32` (3 confirmed)
-- **PASS-by-accident**: `f64_suffix` (exit=0 matches expect=0, but for wrong reason — both literals → 0.0 → 0+0=0)
-- **Fix pattern**: (1) Extend `cg_parse_f64_imm_bits` with IEEE 754 single+double bit construction (table lookup for common fractions 0.5/1.5/2.5 etc.,or full strtod + bit-cast)。 (2) Add `emit_mov_f32_imm_to_offset` mirroring f64 helper。 (3) Add src2-imm XMM path in `emit_binop`。
-- **LOC est**: ~50-80 LOC (f64 imm) + ~30-40 LOC (f32 imm) + ~30-50 LOC (src2-imm XMM binop) = **~110-170 total**, HIGH risk (IEEE 754 fractional parsing trap)
-- **FLIP projection**: +3 tests (1 PASS-by-accident closure: f64_suffix 真修后仍 PASS = +1 valid; +3 FAIL: f32_suffix + float_arith + float_arith_f32). HIGH risk of getting fractional parsing wrong (per `feedback_fix_evaluation_rule` history)
+**Sub-bug 2 — C.4 float imm bit-pattern 残 (Iter 3)** ✅ CLOSED v2.13.2 (audit-flip, 0 src change):
+- **状态:** ✅ CLOSED v2.13.2 (audit-flip) — 真修复 ship 在 v2.11.19 Phase 3 commit `d6364ba` (2026-09-17, "f32 IMM 真解 + f64 fractional 真解 + FNARG XMM bug")
+- **真修详情** (per `d6364ba` commit body):(1) `jhyy_helpers.c` 加 `jh_double_to_bits` + `jh_float_to_bits` (atof → IEEE 754 bit pattern);(2) `cg_parse_f64_imm_bits` fractional 分支真解 (consume frac digits → `jh_double_to_bits` → emit `movabsq` + `movq` 真确位);(3) `cg_f32_imm_bits` v2.11.15 Iter 1b stub 替换为真解 (走 `jh_float_to_bits`);(4) `emit_copy` IMM 分支 QBE_S_LOCAL 真接 `cg_f32_imm_bits`;(5) `emit_copy` FNARG XMM `arg_idx > 0` bug 改 `>= 0` (multi-arg fn 都走 xmmN 不只 xmm0)。
+- **v2.12.0 audit 验证** (`compiler/tests/audit/v2.12.0-audit-log.md` line 184-191):4/4 C.4 float tests PASS QBE≡SB parity — `float_arith.jhyy` (EXIT=6 ✓) / `float_arith_f32.jhyy` (EXIT=4 ✓) / `f32_suffix.jhyy` (EXIT=0 ✓) / `f64_suffix.jhyy` (EXIT=0 ✓)。
+- **Bug C src2-imm XMM** (deferred from Iter 3, `emit_binop:1497-1501` comment) 标 **theoretical-only** — QBE 不 emit float IMM in binop position (QBE materializes literals to temp first before binop),无 test 触发。v2.12.0 audit 期间未发现任何触发 case。
+- **Files referenced** (per audit #6): `compiler/src0/codegen_amd64_emit_call.jhyy:236-256` (`cg_parse_f64_imm_bits` fractional 真解) + `:317-368` (`cg_f32_imm_bits` 真解) + `:399-410` (`emit_mov_f64_imm_to_offset`) + `:1215-1230` (copy IMM f64/f32 dispatch)。
 
 **Sub-bug 3 — A2-pointer-deref flag propagation 残 (Iter 1+1b 未触及)**:
 - **File**: `compiler/src0/codegen_amd64_emit_mem.jhyy:511` (emit_load indirect-dispatch check)
@@ -6193,13 +6189,13 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 - **Fix pattern**: Add flag-propagation to `emit_copy` (when copying a pointer-typed temp, mark dst as address-holder) OR add flag-propagation to `emit_binop` final store。
 - **LOC est**: ~10-15 LOC, MED risk (touches emit_copy/emit_binop hot path;could cascade-affect other pointer-heavy tests:struct passing, &local capture, slice ops)
 
-**Sub-bug 4 — C.2 cap_table test 4 NO-OP 残 (Iter 5)**:
-- **File**: `compiler/src0/codegen_amd64_emit_call.jhyy:550-697` (`emit_amd64_arg_regs`, lines 637-666 for Win path)
-- **Bug**: For 16B struct pass-by-value,**Win x64 ABI** requires **2 integer regs** (RCX + RDX), not 1 reg + caller mem-copy。Current code treats `l %t32` (struct alloc ptr) as single 8-byte scalar in RCX, missing RDX half。
-- **Status note**: v2.11.15 Iter 5 was **no-op** (per ship record honest claim) — source NOT touched for this bug。Source still in v2.11.13 baseline state。
-- **Active FAIL**: `cap_table_basic.jhyy` test 4 (got=30 vs 42)
-- **Fix pattern**: Detect 16B struct allocation in `emit_amd64_arg_regs`;emit 2 `movq` (loadl of struct+0 → RCX, loadl of struct+8 → RDX)。For SysV, struct still passes via 2 regs (RDI+RSI for first args) but with same 2-load pattern。
-- **LOC est**: ~40 LOC, HIGH risk (touches emit_call hot path used by every cross-fn struct call: cap_table_advanced, nested_struct_deep, struct_val_pass)
+**Sub-bug 4 — C.2 cap_table test 4 NO-OP 残 (Iter 5)** ✅ CLOSED v2.13.2 (audit-flip, 0 src change, STALE on 2 counts):
+- **状态:** ✅ CLOSED v2.13.2 (audit-flip) — STALE description on 2 counts (workarounds.md 真因错诊 + SysV § A.4 分类误判)
+- **STALE count #1 (真因错诊)**: cap_table_basic test 4 (got=30 vs 42) 真因**不是** "16B struct 2-register missing"。真因是 `emit_copy` `pct_count` heuristic miscounts bare `%t` (fn arg name = single letter `t`) → mis-routed as TEMP copy → `cg_parse_temp` returns -1 → `src_temp_id = 0` (t0 garbage) → FNARG path never entered → flag propagation skipped → t4 = t3 (pointer value, not deref)。真修复 ship 在 v2.11.21-fix Phase 1 commit `4beab82` (2026-09-17, "cap_table_basic bare '%t' fnarg 真修") 1 LOC fix (per `rca-v2.11.21.md` § 2 Option 2)。
+- **STALE count #2 (SysV § A.4 分类误判)**: CapTable<i32> = struct { data: *Cap<i32> 8B, len: i64 8B } = 16B struct。两 eightbytes 都是 INTEGER class (8B pointer + 8B i64)。Per SysV § A.4 merge rules:INTEGER+INTEGER → INTEGER class = **1 register pass**,NOT 2-register。`emit_amd64_arg_regs` 当前 1-reg handling 是 CORRECT per SysV ABI + Win x64 calling convention。Workarounds.md "16B → 2 regs" claim 跟 SysV § A.4 算法不符 (仅 SSE+SSEUP 或混合 SSE/INTEGER 8+4-byte 才触发 2-register pattern)。
+- **v2.12.0 audit 验证** (`compiler/tests/audit/v2.12.0-audit-log.md` Generics 类 Scope line 166):cap_table_basic EXIT=42 PASS QBE≡SB parity + `W-074.13 sub-bug #2 fix 验证, emit_load silent fail on fnarg ID 已 v2.11.21-fix Phase 1 闭环`。
+- **NEW fixture** `compiler/tests/examples/cap_table_2reg_basic.jhyy` (15 LOC, EXPECT=42) sanity-check 16B struct cross-fn pass (CapTable<i32> INTEGER+INTEGER class, 1 reg pass per SysV § A.4)。baseline 5/5 EXIT=42 PASS QBE (per V.1 gate)。
+- **Files referenced** (per audit #6): `compiler/src0/codegen_amd64_emit_call.jhyy:1073-1089` (`pct_count` heuristic + bare `%t` detection fall-through to FNARG path 真修点 per `4beab82`)。
 
 **Priority ranking for v2.11.17+** (per audit, ROI + risk):
 1. Sub-bug 1 (slice addr+8) — LOW risk, +5 tests, ~15-25 LOC
@@ -6209,7 +6205,7 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 
 **Memory:** [[feedback_fix_evaluation_rule]] (诚实记录 v2.11.15 4 iters 都 partial fix, source comment 标记 "v2.11.16+ 真修" 是 partial-fix honest marker);[[feedback_codegen_amd64_multifn]] (FLIP count approaching 5 STOP — v2.11.17 scope DOWN recommendation);[[feedback_il_s_debugging_pattern]] (.s evidence pattern works for sub-bug 1 confirmed, sub-bug 2 trap pre-fix .s shows integer ops);[[feedback_plans_per_version]] (v2.11.16-plan.md 已 ship, W-074.8 NEW entry);[[feedback_document_workarounds_in_docs]] (本 W-074.8 partial fix residues entry NEW,详记 4 sub-bugs + LOC + risk + fix pattern)
 
-**OS 启动链路:** W-074.8 v2.11.15 partial fix residues ⏸ DEFERRED (4 sub-bugs,~175-260 LOC potential,12-14 tests);v2.11.17+ Iters 1+3 (slice + A2-ptr-deref) 优先,Iters 2+4 (float + cap_table) defer v2.11.18+ per risk-ranking。
+**OS 启动链路:** W-074.8 v2.11.15 partial fix residues ✅ FULLY CLOSED v2.13.2 (4 sub-bugs 全 audit-flip: sub-bug 1+3 v2.13.1 / sub-bug 2+4 v2.13.2, 0 src change total);ACTIVE workaround count 推 v2.13.3+ 仅 ~3 (W-074.9 3 sub-bugs + W-058 + W-057 vendor-only)。
 
 ---
 
