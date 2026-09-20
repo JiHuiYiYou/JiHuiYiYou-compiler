@@ -42,6 +42,30 @@ def _msys_to_windows(msys_path: str) -> Path:
     return Path(p)
 
 
+def _git_path() -> Optional[str]:
+    """Resolve `git` to absolute Windows path.
+
+    v2.13.6.2 mini: MCP subprocess inherits MSYS2 PATH from Claude Code (e.g.
+    `/c/Users/.../bin`), Windows CreateProcess + shutil.which 都无法解析 MSYS2
+    PATH → 返 None / `FileNotFoundError [WinError 2]`.
+
+    解法: scan known Windows git install locations, return first hit. 比 PATH
+    转换简单可靠 (PATH 转 win 后还要处理 MSYS2 root mapping for /mingw64/bin,
+    /usr/bin 等非 /x/ 前缀路径, 复杂度高).
+    """
+    candidates = [
+        r"C:\msys64\usr\bin\git.exe",
+        r"C:\msys64\mingw64\bin\git.exe",
+        r"C:\Program Files\Git\bin\git.exe",
+        r"C:\Program Files\Git\cmd\git.exe",
+        r"C:\Program Files (x86)\Git\bin\git.exe",
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
 def _detect_root() -> Path:
     """Detect JHYY root, prefer active worktree over script location.
 
@@ -51,24 +75,45 @@ def _detect_root() -> Path:
     workarounds.md.
 
     3-tier heuristic:
-    1. env override `JHYY_MCP_WORKTREE` 显式指定 (escape hatch)
-    2. cwd 的 git toplevel (若 ≠ script_root 且 docs/internal/workarounds.md 存在)
+    1. env override `JHYY_MCP_WORKTREE` 显式指定 (escape hatch, 永远走 — 不 cache)
+    2. cwd 的 git toplevel (ONLY if cwd branch != main; default Claude Code
+       session cwd=main ⇒ 跳过 Tier 2, 让 Tier 3 选 most-recent non-main)
     3. scan git worktree list, pick non-main branch with most-recent commit
        (handles "user session cwd=main 但 active dev 在 axis-v2" case)
     4. fallback = script parents[1] (旧行为)
 
+    60s cache (v2.13.6.2): 防 MCP subprocess 重复调 search() 时 2nd git
+    subprocess 偶尔 hang >15s (Windows Defender / console overhead). User
+    session 内 worktree 切换频率 (< 1/min) 不受 cache 影响.
+
     Returns:
         JHYY_ROOT (env override / cwd worktree / most-recent non-main / script-derives fallback)
     """
-    script_root = Path(__file__).resolve().parents[1]
-
-    # Tier 1: env override (explicit user choice)
+    # Tier 1 (env override) 永远走 — user 显式指定每次立即生效.
     env_override = os.environ.get("JHYY_MCP_WORKTREE", "").strip()
     if env_override:
-        # v2.13.6.2: env var may be MSYS2 style (/c/...) or Windows (C:/...).
         override_path = _msys_to_windows(env_override).resolve()
         if (override_path / "docs/internal/workarounds.md").exists():
             return override_path
+
+    # Cache for Tier 2/3/4 results.
+    import time as _time
+    now = _time.time()
+    if _detect_root_cache["value"] is not None and (now - _detect_root_cache["time"]) < _DETECT_CACHE_TTL:
+        return _detect_root_cache["value"]
+
+    result = _detect_root_impl()
+    _detect_root_cache["value"] = result
+    _detect_root_cache["time"] = now
+    return result
+
+
+def _detect_root_impl() -> Path:
+    """Internal: 实际 _detect_root 逻辑 (Tier 2/3/4)."""
+    script_root = Path(__file__).resolve().parents[1]
+    git_abs = _git_path()
+    # subprocess timeout (sec) — 防 git 在某个 worktree 里 hang (e.g. lock, GC)
+    _timeout = 15
 
     # Tier 2: cwd's git toplevel, ONLY if cwd branch is non-main (default Claude
     # Code session cwd=main ⇒ 跳过 Tier 2, 让 Tier 3 选 most-recent non-main
@@ -77,10 +122,11 @@ def _detect_root() -> Path:
     try:
         cwd = Path(os.getcwd())
         toplevel_str = subprocess.check_output(
-            ["git", "rev-parse", "--show-toplevel"],
+            [git_abs, "rev-parse", "--show-toplevel"] if git_abs else ["git", "rev-parse", "--show-toplevel"],
             cwd=str(cwd),
             stderr=subprocess.DEVNULL,
             text=True,
+            timeout=_timeout,
         ).strip()
         # v2.13.6.2: defensive MSYS2 → Windows conversion (normal case already
         # Windows-style, but `MSYS_NO_PATHCONV=1` + git.exe may 输出 /c/...).
@@ -88,16 +134,17 @@ def _detect_root() -> Path:
         cwd_branch = ""
         try:
             cwd_branch = subprocess.check_output(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                [git_abs, "rev-parse", "--abbrev-ref", "HEAD"] if git_abs else ["git", "rev-parse", "--abbrev-ref", "HEAD"],
                 cwd=str(cwd_toplevel),
                 stderr=subprocess.DEVNULL,
                 text=True,
+                timeout=_timeout,
             ).strip()
         except (subprocess.CalledProcessError, FileNotFoundError, OSError):
             cwd_branch = ""
         if cwd_branch != "main" and cwd_toplevel != script_root and (cwd_toplevel / "docs/internal/workarounds.md").exists():
             return cwd_toplevel
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError, subprocess.TimeoutExpired):
         cwd_toplevel = None
 
     # Tier 3: scan worktrees, prefer non-main branch with most-recent commit
@@ -105,10 +152,11 @@ def _detect_root() -> Path:
     try:
         cwd = cwd_toplevel or Path(os.getcwd())
         wt_list = subprocess.check_output(
-            ["git", "worktree", "list", "--porcelain"],
+            [git_abs, "worktree", "list", "--porcelain"] if git_abs else ["git", "worktree", "list", "--porcelain"],
             cwd=str(cwd),
             stderr=subprocess.DEVNULL,
             text=True,
+            timeout=_timeout,
         )
         worktrees = []
         cur_path = None
@@ -137,13 +185,14 @@ def _detect_root() -> Path:
                 continue
             try:
                 commit_time_str = subprocess.check_output(
-                    ["git", "log", "-1", "--format=%ct"],
+                    [git_abs, "log", "-1", "--format=%ct"] if git_abs else ["git", "log", "-1", "--format=%ct"],
                     cwd=str(wt_path),
                     stderr=subprocess.DEVNULL,
                     text=True,
+                    timeout=_timeout,
                 ).strip()
                 commit_time = int(commit_time_str)
-            except (subprocess.CalledProcessError, FileNotFoundError, OSError, ValueError):
+            except (subprocess.CalledProcessError, FileNotFoundError, OSError, ValueError, subprocess.TimeoutExpired):
                 continue
             # Sort key: (not_main=0/main=1, -commit_time)
             # Prefer non-main branch, then most recent commit
@@ -153,7 +202,7 @@ def _detect_root() -> Path:
         if candidates:
             candidates.sort()
             return candidates[0][2]
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError, subprocess.TimeoutExpired):
         pass
 
     # Tier 4: fallback
@@ -168,6 +217,13 @@ def _default_path() -> Path:
 
 
 # Backward-compat: 外部代码可能 import JHYY_ROOT / DEFAULT_PATH
+# v2.13.6.2 mini: cache 60s 防 MCP subprocess 重复调 workarounds 时 git
+# subprocess hang on 2nd call (Windows Defender / console overhead 偶尔
+# 让 2nd `git worktree list` 超时). cache 60s 足够 — user session 内 worktree
+# 切换频率低.
+_detect_root_cache: dict = {"value": None, "time": 0.0}
+_DETECT_CACHE_TTL = 60.0
+
 JHYY_ROOT = _detect_root()
 DEFAULT_PATH = JHYY_ROOT / "docs/internal/workarounds.md"
 
