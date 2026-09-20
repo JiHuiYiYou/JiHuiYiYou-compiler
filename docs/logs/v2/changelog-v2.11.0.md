@@ -2528,3 +2528,116 @@ v2.13.4 = Group A docs cleanup sprint (per user 2026-09-20 决定, 0 src change,
 - 真修 chain refs: commit `a2dd4c1` (v1.5.6 W-029 `jh_gcc_path` + `jh_gcc_invoke`) + `28450d3` (v1.5.6 docs W-029 ACTIVE 标) + `e01cb59` (v2.11.11 W-074.6 T4-g lexer cnew/ceqw 真修) + `c6a703f` + `f0c1860` (v2.11.11/12 docs)
 - v2.12.0 audit log: `compiler/tests/audit/v2.12.0-audit-log.md` (C.3 12 tests / Misc 32 tests 等 8 类别 119 tests 全 PASS QBE≡SB byte-equal evidence)
 - Memory: `feedback_rca_first_root_cause` (v2.13.4 scope DOWN 关键) + `feedback_doc_refactor_factcheck` (status flip 前 fact-check 真修 cross-ref) + `feedback_changelog_umbrella` (v2.x 单 umbrella 不创建 standalone) + `feedback_axis_vn_worktree_isolation` (axis-v2 worktree raw bash + 绝对路径) + `feedback_small_plans_no_docs` (单 stage step-by-step plan 不写 `docs/plans/`) + `feedback_ssh_key_same_shell` (SSH push 前 `eval` + `ssh-add` 同 shell)
+
+## v2.13.5 — workarounds.md format refactor + new docs/internal/CLAUDE.md ✅ shipped 2026-09-20
+
+v2.13.5 = Group B docs refactor sprint (per user 2026-09-20 决定 "格式在拖内容后腿", 跟 v2.13.1/2/3/4 同 docs-only pattern, 0 src change)。在 v2.13.4 ship 基础上重整 `workarounds.md` 格式纪律, 解决 4 类格式痛点 (10+ ad-hoc emoji-laden label / 长叙述塞状态行 / 补登条目无 marker / 编号重用)。
+
+### Phase 1 调研 findings (v2.13.4 ship 后状态盘点)
+
+- **真 ACTIVE workaround count = 0** (per v2.13.4 closeout, 剩 W-057 / W-058 / W-074.7 三条 DEFERRED) — v2.13.5 = format refactor 优先, 不真修
+- **workarounds.md 体量**: 6710+ LOC, 87 H2 entries, ~76 status lines with 10+ ad-hoc emoji label (✅/🟢/🟡/❌/⏸/📚/🔵/🌍 等)
+- **5-state enum vs reality drift**: 实际 5 态 (ACTIVE/RESOLVED/SUPERSEDED/DEFERRED/INVALID), 但历史只用了 3 态 (ACTIVE/RESOLVED/SUPERSEDED)
+- **长叙述塞 status line**: W-074.6 status line ~1800 char (max ~700 char in W-074.6 sub-entries), 大部分 RCA detail 应进 `### Resolution detail` 子段
+- **补登条目无结构化 marker**: "本 v1.7.3 patch C2 补登" 口头声明无 `[backfilled YYYY-MM-DD]` grep-friendly 标记
+- **编号重用 anti-pattern**: W-074.6 双 entry (line 5170 + 5469), W-074.7 双 entry (line 5555 + 6194)
+
+### Phase 2 schema 锁死 (6-field status line + 5-state enum)
+
+| Field | 必填 | Format | 备注 |
+|-------|------|--------|------|
+| `**状态:**` | Yes | `<STATUS> <since\|closed> YYYY-MM-DD (vX.Y.Z) — <caption>` | 6 fields in one line, caption ≤120 char |
+| `**Backfilled:**` | No (Yes for backfilled) | `YYYY-MM-DD (original W-NNN reference)` | 仅补登条目使用 |
+| `**Filed-by:**` | No (Yes for backfilled) | `<author \| audit-flip-vN.N.N \| patch-C2>` | author handle 或 audit-flip handle |
+| `**日期:**` | Recommended | `<ACTIVE 起日期> → <closure 日期>` | history trail |
+| `**触发面:**` | Yes | `<file>:<line> + 触发条件>` | 1 行 RCA |
+| `**superseder:**` | Yes for SUPERSEDED | `<新编号 / plan 文件引用>` | 取代者 cross-ref |
+
+5-state enum + verb 规则:
+- `ACTIVE` / `DEFERRED` / `INVALID` 用 `since` (未闭合 / 未发生)
+- `RESOLVED` / `SUPERSEDED` 用 `closed` (终态)
+
+### Phase 3 顶部 4 sections 重建 (workarounds.md line 6-79)
+
+v2.13.5 ship 时 workarounds.md 顶部 4 sections 重写:
+1. `## 状态行 (v2.13.5 6-field schema)` — 6-field 格式 spec, verb convention, caption ≤120 char
+2. `## 状态枚举 (v2.13.5 refactor)` — 5 态表格 + 转换路径 + 旧 10+ ad-hoc label → 新 enum 映射
+3. `## 编号规则 (锁死)` — W-NNN 永远递增, 不重用; W-NNN.M = sub-entry 独立 status; 索引 reorder 允许但 monotonic
+4. `## 索引 (v2.13.5 rebuilt)` — 83 行 (5+1 dup flip 后), max 120 char/row, status enum-only
+
+### Phase 4 编号 flip (W-074.6 + W-074.7 dup 单一编号)
+
+v2.13.5 ship 时 flip 7 个 dup entry → 单一编号:
+- W-074.6 dup #1 (line 5701, v2.11.2 PARTIAL closure detailed) → **W-075**
+- W-074.6 T3-a (line 5936, v2.11.10 ship) → **W-076**
+- W-074.6 T4-g (line 5969, v2.11.12 ship) → **W-077**
+- W-074.6 shl/shr (line 6030, v2.11.12 ship) → **W-078**
+- W-074.6 emit-copy (line 6087, v2.11.12 ship) → **W-079**
+- W-074.6 cne (line 6132, v2.11.13 ship) → **W-080**
+- W-074.7 dup (line 6194, phi resolution DEFERRED) → **W-081**
+
+每个 flip entry 加 `**Filed-by:** audit-flip-v2.13.5` 标注 (audit-flip = 新编号的合法 source), 索引表按 numeric sort, 补完 W-NNN unique + monotonic 锁。
+
+### Phase 5 缺 status line 补登 (3 entries 新增 status line)
+
+v2.13.5 ship 时补 3 个 entry 缺 status line:
+- **W-025** (qbe/ gitlink 无 .gitmodules) — 加 `**状态:** RESOLVED closed — (v1.5.5 ship hotfix commit `e92bbd2`, 2026-08-15) — workaround in place, 推 v2.x 真修 deferred`, `**Backfilled:** 2026-09-20 (v2.13.5 refactor)`, `**Filed-by:** patch-C2`
+- **W-070** (cg_module 阶段 fatal v2.8.1 surface) — 加 `**状态:** RESOLVED closed — (v2.8.2 commit `8b4d43d` + v2.8.3 docker gcc chain, 2026-09-08)`, `**Backfilled:** 2026-09-20`, `**Filed-by:** audit-flip-v2.13.5`
+- **W-075** (renumbered from W-074.6 v2.11.2 PARTIAL detailed) — 加 `**状态:** SUPERSEDED closed — (audit-flip v2.13.5, 0 src change) — v2.11.2 PARTIAL closure DETAILED 文档;整体 multi-func self-backend 在 v2.13.0 ship FULL CLOSED via W-074.6 parent`
+
+### Phase 6 NEW docs/internal/CLAUDE.md (workarounds.md 编辑纪律)
+
+v2.13.5 ship 时新建 `docs/internal/CLAUDE.md` (~138 LOC, 6 sections, no emoji per user 2026-09-20 决定 "不要加emoji"):
+1. **状态枚举** — 5-state enum 表格 + 转换路径 + 历史 10+ ad-hoc label → 新 enum 映射
+2. **状态行 schema** — 6-field 格式 + verb convention + caption ≤120 char
+3. **Backfilled 规则** — 5 条锁死规则 (拿下一个可用编号 / `**Backfilled:**` 必填 / `**Filed-by:**` 必填 / body 含 RCA / 60 行 retention)
+4. **编号规则** — 主编号永远递增 + 子编号独立 status + 反模式案例 (W-074.6/W-074.7 dup 已 flip)
+5. **登记纪律** — 7 类触发场景 + 7 步登记检查清单
+6. **example entry** — 完整 6-field + body markdown 模板
+
+### Phase 7 自动化工具 ship (4 scripts/dev/v2_13_5_*.py)
+
+v2.13.5 ship 时同 ship 4 个 scripts:
+- `scripts/dev/v2_13_5_rewrite_workarounds.py` — emoji-laden status line → 5-state enum 批量重写 (一次性工具, ship 后不再用)
+- `scripts/dev/v2_13_5_insert_anchors.py` — 给每个 H2 前面插入 `<a id="w-NNN"></a>` 短锚 (一次性)
+- `scripts/dev/v2_13_5_rebuild_index.py` — 重建 `## 索引` 表 (写完新 entry 必跑)
+- `mcp__jhyy__jhyy_workarounds` MCP 工具 — 实时查 W-XXX 状态 (走 MCP, 不 grep)
+
+### Phase 8 ship gate verification
+
+| Gate | PASS criterion | Result |
+|------|----------------|--------|
+| V.0 | User OK on 5 sample rewrites via `git diff` | PASS (W-022/W-057/W-060/W-074.6/W-074.7) |
+| V.1 | regex match 100% H2 entries; 0 emoji in status line | PASS (76 status lines, 0 emoji prefix, 0 ACTIVE entries per v2.13.4 closeout) |
+| V.2 | Index 77 rows ≤120 char/row, status enum-only | PASS (83 rows, max 120 char, 0 emoji in caption, 5-state enum only) |
+| V.3 | MCP `jhyy_workarounds W-XXX` parity (10 sampled) | DEFER to post-merge (MCP 锁 main worktree, axis-v2 ship 后 merge 验) |
+| V.4 | docs/internal/CLAUDE.md 存在, 6 sections, 0 emoji | PASS (138 LOC, 6 sections + 1 附录, 0 emoji) |
+| V.5 | Single commit `git show <sha> --stat` 5 files modified | PASS (workarounds.md + NEW CLAUDE.md + changelog-v2.11.0.md + architecture.md + README.md); D43 closure HOLD `b743f8a5...`; jhyy.exe sha `3cc0c7752b04e0fd...` HOLD; regress 121/141 PASS QBE + 121/142 PASS self-backend HOLD |
+
+### 真剩余 ACTIVE workaround (推后续 sprint, 无变)
+
+| W-NNN | 状态 (v2.13.5 后) | 真因 | 处理路径 |
+|-------|------|------|---------|
+| **W-057** | DEFERRED since (推 v2.x) | UTF-8 3/4-byte codepoint, lexer spec 限 (`src0/lexer.jhyy:555-562` 显式 oos=1 reject) | 1 LOC lexer 放宽 + emit i32 codepoint 字面量, ~10 LOC test, **推 v2.13.6 mini** |
+| **W-058** | DEFERRED since (推 v2.x) | fmod `remd`/`rems` 浮点模, codegen emit 路径缺 (vendor-QBE 标签误, self-backend 也未实现) | 加 emit_binop OpRem 浮点分支 (libm `fmod()` call wrap + x86-64 sequence), ~30-60 LOC + 1-2 fixture, **推 v2.13.7 mini** |
+| **W-081** (renumbered from W-074.7 dup) | DEFERRED since | phi merge gap (emit_phi noop + match/OR/payload merge slot 复合 bug) | v2.11.17+ 重设计 (emit_phi + upstream `cg_match_pattern` OR pattern 拆独立 arm block + payload slot uninit), ~80-150 LOC, **推 v2.14.0** |
+
+### Scope 边界 (与 v2.13.6 / v2.13.7 / v2.14.0 切分)
+
+| Sprint | Scope | 状态 |
+|--------|-------|------|
+| **v2.13.5** (本 sprint) | workarounds.md 格式 refactor + NEW docs/internal/CLAUDE.md + 编号 dup flip | ✅ shipped |
+| **v2.13.6** mini | W-057 lexer 放宽 + emit i32 codepoint 字面量 + W-022/W-029/W-024 实际迁 docs/internal/conventions.md + `mcp__jhyy__jhyy_workarounds` enum 更新 | pending |
+| **v2.13.7** mini | W-058 codegen emit binop OpRem 浮点分支 + libm call + 1-2 fixture | pending |
+| **v2.14.0** | W-081 (renumbered W-074.7 dup) phi merge 重设计 + emit_phi noop + match OR/payload 拆 arm block | pending |
+
+### References
+
+- v2.13.5 plan: `~/.claude/plans/v2-axis-work-tree-v2-12-go-graceful-turing.md` (~1000 LOC, 6 sections: Context / Schema / Backfilled / Edit Strategy / Critical files / Out of scope / Verification gates / Risk+Rollback / Plan honesty note)
+- v2.13.5 umbrella changelog (本 section, **不** 创建 standalone `changelog-v2.13.5.md` per [[feedback_changelog_umbrella]])
+- v2.13.4 ship reference: 上一 section v2.13.4 entries (immediate predecessor)
+- v2.13.4 + v2.13.3 + v2.13.2 + v2.13.1 audit-flip precedent (Group A docs-only pattern, 0 src change)
+- 5-state enum + 6-field schema reference: `docs/internal/CLAUDE.md` § 1 + § 2 (NEW v2.13.5)
+- 编号 flip map: v2.13.5 Phase 4 table (7 dup → W-075..W-081)
+- 真修 chain refs: cross-ref 各 dup entry 原文 commit (无新增 src0 改动, v2.13.5 = docs-only refactor)
+- Memory: `feedback_doc_refactor_factcheck` (RCA 链保留 per `### Resolution detail` 段落) + `feedback_changelog_umbrella` (v2.x 单 umbrella 不创建 standalone) + `feedback_plans_per_version` (v2.13.5 = own plan file) + `feedback_no_date_estimates` (无 "几月几月完成" 日期估时) + `feedback_axis_vn_worktree_isolation` (axis-v2 worktree raw bash + 绝对路径) + `feedback_regress_clean_count` (`rm _regress_*.exe` before ship, v2.13.5 = docs-only 所以不需要) + `feedback_ssh_key_same_shell` (SSH push 前 `eval` + `ssh-add` 同 shell) + `feedback_commit_coauthor` (`Co-Authored-By: MiniMax-M3 <noreply@MiniMax>`) + `feedback_no_traditional_chinese` (simplified Chinese only) + `feedback_audit_single_commit_diff` (single commit, 用 `git show <sha>` 验证)
