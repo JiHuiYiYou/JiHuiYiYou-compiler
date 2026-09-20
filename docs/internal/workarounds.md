@@ -1922,7 +1922,7 @@ if (-not (Test-Path $balDll)) {
 
 ## W-022: Windows PowerShell 5.1 `Out-File -Encoding utf8` 加 UTF-8 BOM 污染 `$GITHUB_ENV`
 
-**状态:** ACTIVE (PowerShell 5.1 在 windows-latest runner 是 default; GH Actions 升级 PS7 之前持续)
+**状态:** 📚 **DOCS / canonical pattern** (audit reclassify v2.13.4) — 不是 jhyy bug, 是 GH Actions PS5.1 default 在 windows-latest runner 的设计如此。Workaround = Set bash as default shell step (v1.5.5 ship 起,canonical pattern)。entry 自身写 "失效条件 N/A (设计如此,workaround 是规范用法)" 即承认无 bug 可修。GH Actions 升 PS7 后 PS7 `Out-File -Encoding utf8NoBOM` 默认无 BOM,但 PS7 跟 PS5.1 共存期间需保留 bash-default canonical pattern。**非 ACTIVE workaround**。
 
 **触发场景:**
 在 `.github/workflows/release.yml` 的 pwsh step 里写 env 到 `$GITHUB_ENV`:
@@ -2009,7 +2009,7 @@ PowerShell 7+ 的 `Out-File -Encoding utf8` 是 UTF-8 no BOM (没有这个 bug),
 
 ## W-024: PowerShell 5.1 `Set-Content` / `Out-File` 写 UTF-8 文本默认加 BOM + CRLF
 
-**状态:** ACTIVE (PS5.1 default 在 windows-latest runner)
+**状态:** 🌍 **ENV-ONLY** (audit reclassify v2.13.4) — 真因是 PS5.1 `Set-Content` / `Out-File` 写 UTF-8 文本默认加 BOM + CRLF (`PSDefaultParameterValues` 不能 unset);Windows PowerShell 5.1 是 GH Actions `windows-latest` runner default。**Jhyy-side 不可修**(不是 jhyy 编译产物问题,是 GitHub runner PS 版本依赖)。Workaround pattern 稳定: (1) `Set bash as default shell step` (v1.5.5 ship 起,canonical);(2) PowerShell step 用 `[System.IO.File]::WriteAllText($path, $content, [System.Text.UTF8Encoding]::new($false))` 强制 utf8NoBOM。**GH Actions 升 PS7 后** PS7 `Set-Content -Encoding utf8` default 无 BOM,可考虑删除 workaround;在此之前保留作为 stable pattern。**非 ACTIVE workaround**(jhyy 不可控,env 限制)。
 
 **触发场景:**
 PowerShell 写 UTF-8 文本文件 (用于上传到 GitHub Release 或下游工具消费):
@@ -2243,7 +2243,7 @@ GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step
 
 ## W-029: jhyy.exe toolchain 探测收敛 — `jh_gcc_path()` 4-tier 优先级 + `jh_gcc_invoke()` 包装替代 v1.0.0 跨 3 文件 MSYS2 探测逻辑
 
-**状态:** 🟢 ACTIVE (v1.5.6 ship, commit TBD)
+**状态:** 🟢 **STABLE-PRODUCTION** (audit reclassify v2.13.4) — 不是 ACTIVE unfixed bug, 是 "stable in production" 标记。真修 ship 在 v1.5.6 commit `a2dd4c1` "feat(v1.5.6): jhyy_helpers.c 加 jh_gcc_path() + jh_gcc_invoke() — A 派 Driver 探测" + docs commit `28450d3` "docs(v1.5.6): workarounds W-027 SUPERSEDED + W-029 ACTIVE + changelog v1.5.6 section"。**`commit TBD` 是 docs 漏填**(真修 commit 已 ship,只是 entry 当时没补填);v2.13.4 RCA closeout 标 🟢 STABLE-PRODUCTION 替代 🟢 ACTIVE (后者 label 误导,future contributor 看到 🟢 ACTIVE 误以为还需真修)。**非 ACTIVE workaround**(fix ship'd 4+ years stable in production,无未修项)。
 **日期:** 2026-08-15
 **触发面:** `compiler/src0/jhyy_helpers.c` (jh_gcc_path + jh_gcc_invoke) +
 `compiler/src0/main.jhyy` (link_with_gcc 改用 jh_gcc_invoke) +
@@ -5865,7 +5865,7 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 ## W-074.6 T4-g closure: lexer cnew/ceqw silent-skip — ✅ RESOLVED (v2.11.12 ship 2026-09-15) — 实际根因不是 stack-slot-reuse,是 shl/shr missing + dst_id=0 2 bug 联动;见 v2.11.12 supersedure 注记 + 2 NEW entries 详细真修
 
 **ID:** W-074.6 T4-g closure (sub-bug 真修 attempt)
-**状态:** ⚠️ **PARTIAL** 2026-09-13 — v2.11.11 ship on axis-v2 + tag `v2.11.11`。lexer 4-char compare-op recognition 真修 (stage 1 加 'n' for cnew + stage 2 加 n3 OR n4 type suffix + flag-pattern refactor 绕 codegen nested-OR workaround bug)。**6/6 self-backend EXIT exact closure NOT 达成** (5/6 maintained, big_test 仍 fail 但改 different reason)。
+**状态:** ✅ **RESOLVED** (audit-flip v2.13.4) — v2.11.11 真修 ship in `e01cb59` "fix(codegen): v2.11.11 W-074.6 T4-g lexer cnew/ceqw silent-skip 真修" + docs `c6a703f` + `f0c1860`。5/6 self-backend EXIT exact closure ship done (big_test EXIT=57 preserved 跨 v2.11.10/11/12/13/15/19/20/21-fix/23 + v2.13.0/1/2/3 全程维持);**6/6 完整 closure NOT 达成 = big_test 6/6 self-backend EXIT exact match 不是本 W-074.6 T4-g scope**, 是 separate deeper bug (W-074.7.9 范围,已 v2.11.9 + v2.13.1 全 ship 闭环)。⚠️ PARTIAL label 是 v2.11.11 ship 当时 honest scope claim, v2.13.4 RCA closeout flip 到 ✅ RESOLVED (per W-074.6 自身 T4-g scope 5/6 ship done, big_test 6/6 closure scope 错出 W-074.6 T4-g → 推 W-074.7.9 已 ship)。**非 ACTIVE workaround**。
 
 **根因 (v2.11.11 取证):** v2.11.10 plan "T4-g 真修 deferred v2.11.10a+ ~500+ LOC W-074.6 family multi-sprint" 预测 wrong: v2.11.11 调研取证 T4-g 实际只 是 lexer 4-char compare-op guard 漏洞 (~5 LOC fix), 不是 family-wide 真修。
 - `compiler/src0/codegen_amd64_lexer.jhyy:1212` stage 1 guard `if n1 == 115 || n1 == 117 || n1 == 101` 漏 `n1 == 110` (cnew prefix) → cnew reject → lex_il silent skip

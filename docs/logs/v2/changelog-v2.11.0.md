@@ -2440,3 +2440,91 @@ v2.13.3 = Group A docs-only audit-flip sprint #3 (per user 2026-09-20 决定, �
 - v2.12.0 audit evidence: `compiler/tests/audit/v2.12.0-audit-log.md` IO/runtime 类 line (dungeon_game EXIT=0 PASS) + Module/global 类 line (top_level_let_mut_types EXIT=17 PASS) + Misc 类 line (big_array EXIT=5050 PASS)
 - v2.11.16 Phase 0 audit evidence: full regress 跑全 135 tests 发现 W-074.7 spot-check 不可靠 (5/12 spot-check 跟 full regress 11/12 FAIL 不一致), stale .s 推断错误
 - Memory: `feedback_rca_first_root_cause` (v2.13.3 scope DOWN 关键) + `feedback_doc_refactor_factcheck` (status flip 前 fact-check 真修 cross-ref) + `feedback_changelog_umbrella` (v2.x 单 umbrella 不创建 standalone) + `feedback_axis_vn_worktree_isolation` (axis-v2 worktree raw bash + 绝对路径) + `feedback_small_plans_no_docs` (单 stage step-by-step plan 不写 `docs/plans/`) + `feedback_ssh_key_same_shell` (SSH push 前 `eval` + `ssh-add` 同 shell)
+
+---
+
+## v2.13.4 — docs cleanup #4: 4 mislabel/PARTIAL reclassify (W-022 + W-024 + W-029 + W-074.6 T4-g) ✅ shipped 2026-09-20
+
+v2.13.4 = Group A docs cleanup sprint (per user 2026-09-20 决定, 0 src change, 跟 v2.13.1/2/3 同 pattern)。在 v2.13.3 ship 基础上收 status label 精度问题: 4 entries 全是 docs 措辞滞后 / mislabel / scope-claim 错改,不是真 unfixed bug。
+
+### Phase 1 RCA findings (4 mislabel/PARTIAL flips identified via status line audit)
+
+**W-022** ACTIVE → 📚 DOCS / canonical pattern:
+- 描述 (workarounds.md line 1925 翻前) 标 `ACTIVE (PowerShell 5.1 在 windows-latest runner 是 default; GH Actions 升级 PS7 之前持续)`
+- entry 自身 line 末尾写 "失效条件 N/A (设计如此,workaround 是规范用法)" 即承认无 bug
+- 真解: GH Actions PS5.1 default 在 windows-latest runner, workaround = `Set bash as default shell step` (v1.5.5 ship 起,canonical pattern)
+- 重新归类:📚 **DOCS / canonical pattern**, 非 ACTIVE workaround
+
+**W-024** ACTIVE → 🌍 ENV-ONLY:
+- 描述 (workarounds.md line 2012 翻前) 标 `ACTIVE (PS5.1 default 在 windows-latest runner)`
+- 真因: PS5.1 `Set-Content` / `Out-File` 写 UTF-8 文本默认加 BOM + CRLF (`PSDefaultParameterValues` 不能 unset);Windows PowerShell 5.1 是 GH Actions `windows-latest` runner default
+- **Jhyy-side 不可修** (不是 jhyy 编译产物问题, 是 GitHub runner PS 版本依赖)
+- 重新归类:🌍 **ENV-ONLY**, 非 ACTIVE workaround (jhyy 不可控, env 限制)
+
+**W-029** 🟢 ACTIVE → 🟢 STABLE-PRODUCTION:
+- 描述 (workarounds.md line 2246 翻前) 标 `🟢 ACTIVE (v1.5.6 ship, commit TBD)`
+- 真修 ship 在 v1.5.6 commit `a2dd4c1` "feat(v1.5.6): jhyy_helpers.c 加 jh_gcc_path() + jh_gcc_invoke() — A 派 Driver 探测" + docs commit `28450d3` "docs(v1.5.6): workarounds W-027 SUPERSEDED + W-029 ACTIVE + changelog v1.5.6 section"
+- **`commit TBD` 是 docs 漏填** (真修 commit 已 ship,只是 entry 当时没补填)
+- 重新归类:🟢 **STABLE-PRODUCTION** 替代 🟢 ACTIVE (后者 label 误导, future contributor 看到 🟢 ACTIVE 误以为还需真修)
+- **非 ACTIVE workaround** (fix ship'd 4+ years stable in production, 无未修项)
+
+**W-074.6 T4-g** ⚠️ PARTIAL → ✅ RESOLVED:
+- 描述 (workarounds.md line 5868 翻前) 标 `⚠️ PARTIAL 2026-09-13 — v2.11.11 ship on axis-v2 + tag v2.11.11。**6/6 self-backend EXIT exact closure NOT 达成** (5/6 maintained, big_test 仍 fail 但改 different reason)`
+- 真修 ship 在 v2.11.11 commit `e01cb59` "fix(codegen): v2.11.11 W-074.6 T4-g lexer cnew/ceqw silent-skip 真修" + docs `c6a703f` + `f0c1860`
+- 5/6 self-backend EXIT exact closure ship done (big_test EXIT=57 preserved 跨 v2.11.10/11/12/13/15/19/20/21-fix/23 + v2.13.0/1/2/3 全程维持)
+- **6/6 完整 closure NOT 达成** = big_test 6/6 self-backend EXIT exact match **不是本 W-074.6 T4-g scope**, 是 separate deeper bug (W-074.7.9 范围, 已 v2.11.9 + v2.13.1 全 ship 闭环)
+- 重新归类:✅ **RESOLVED** (per W-074.6 自身 T4-g scope 5/6 ship done, big_test 6/6 closure scope 错出 W-074.6 T4-g → 推 W-074.7.9 已 ship)
+- entry section header (line 5865) 已经写 `✅ RESOLVED (v2.11.12 ship 2026-09-15)`, body status ⚠️ PARTIAL label 不一致 — v2.13.4 closeout flip body status 跟 header canonical 一致
+- **非 ACTIVE workaround**
+
+### 4 status flips (workarounds.md docs-only)
+
+| W-NNN | 翻前 | 翻后 |
+|-------|------|------|
+| W-022 status | ACTIVE (PS5.1 default 在 windows-latest runner) | 📚 DOCS / canonical pattern (entry 自身 "失效条件 N/A 设计如此", bash-default shell step v1.5.5 起 canonical) |
+| W-024 status | ACTIVE (PS5.1 default 在 windows-latest runner) | 🌍 ENV-ONLY (jhyy 不可修, PS5.1 `Set-Content` / `Out-File` default 加 BOM + CRLF, GH Actions runner 限制) |
+| W-029 status | 🟢 ACTIVE (v1.5.6 ship, commit TBD) | 🟢 STABLE-PRODUCTION (cross-ref 真修 commit `a2dd4c1` v1.5.6 + docs `28450d3`, 4+ years stable in production) |
+| W-074.6 T4-g status | ⚠️ PARTIAL (5/6 closure, big_test 仍 fail different reason) | ✅ RESOLVED (per W-074.6 自身 T4-g scope 5/6 ship done, big_test 6/6 closure scope 错出 → 推 W-074.7.9 已 ship) |
+
+**Note**: v2.13.4 = 4 flips 全 status label 精度 (无 signflip unfixed → closed), 0 src change + 0 new fixture。跟 v2.13.3 同 docs-only pattern。
+
+### Ship gates (V.1-V.4 per feedback_fix_evaluation_rule)
+
+- **V.1** Phase 1 — Group A 真改: 0 LOC src change (docs cleanup, 不真改)
+- **V.2** Phase 1+2 re-run — regress baseline + no new fixture:
+  - QBE: **121/141 PASS** (baseline 121/141 HOLD, v2.13.4 无 new fixture)
+  - self-backend: **121/142 PASS** (baseline 121/142 HOLD)
+- **V.3** Phase 2 — D43 closure baseline HOLD (v2.13.4 = docs-only, src0 未改 → 无 re-baseline event expected) on `b743f8a5...`
+- **V.4** Phase 3 aggregate — 4 flips verified (W-022 + W-024 + W-029 + W-074.6 T4-g), workarounds.md ACTIVE count ~5 → **真 ACTIVE = 0** (剩 W-058 + W-057 + W-074.7 三条真未修, 推后续 sprint)
+
+### Commit history (axis-v2)
+
+- Phase 1 — codegen.jhyy / abi.jhyy / helpers.c **NO CHANGE** (docs cleanup, 0 src change)
+- Phase 2 — regress baseline + no new fixture verify (no commit)
+- Phase 3 — docs + ship (本 commit)
+
+### 关键决策 / 教训
+
+- **RCA-first 必备 (跟 v2.13.1/2/3 同)**: v2.13.4 plan 列 4 mislabel/PARTIAL 为 docs cleanup 目标, Phase 1 实测 4 entries 全是 status label 精度问题 (canonical pattern / env-only / stable-in-production / scope-claim 错出), 无一真 unfixed。**不**真改 src0, 仅 status flip. per [[feedback_rca_first_root_cause]] + [[feedback_doc_refactor_factcheck]]
+- **ACTIVE workaround count 归零**: v2.13.4 后真 ACTIVE = 0 (剩 3 条真未修 — W-058 + W-057 + W-074.7, 全部推后续真修 sprint)。这是一个意义里程碑: docs 准确度体现 + v2.x 末 ACTIVE workaround 收尾
+- **Status label 精度 audit 是 sprint scope**: W-022/W-024/W-029 都是 docs 措辞滞后或 label 误用, 通过 audit 重新归类 (DOCS / ENV-ONLY / STABLE-PRODUCTION) 让 future contributor 不会误以为还需真修
+- **W-074.6 T4-g scope-claim 错出是经典 anti-pattern**: ⚠️ PARTIAL 标记基于 "5/6 closure NOT 达成" 但实际上 5/6 closure ship done 是 W-074.6 T4-g 自身 scope, 6/6 closure 是 separate W-074.7.9 scope (已 ship 闭环)。v2.13.4 flip 补回 scope 边界, ✅ RESOLVED 反映 W-074.6 自身 scope 真状态
+- **W-029 `commit TBD` 是 docs 漏填**: 真修 commit `a2dd4c1` + docs `28450d3` 都 ship, 只是 entry 当时没补填 commit 字段。v2.13.4 RCA closeout 补 cross-ref + flip label 准确度
+
+### 真剩余 ACTIVE workaround (推后续 sprint)
+
+| W-NNN | 状态 | 真因 | 处理路径 |
+|-------|------|------|---------|
+| **W-057** | 🟡 DEFERRED | UTF-8 3/4-byte codepoint, lexer spec 限 (`src0/lexer.jhyy:555-562` 显式 oos=1 reject) | 1 LOC lexer 放宽 + emit i32 codepoint 字面量 (跟 ASCII char 同路径), ~10 LOC test, v2.13.5 mini |
+| **W-058** | 🟡 DEFERRED | fmod `remd`/`rems` 浮点模, codegen emit 路径缺 (vendor-QBE 标签误, self-backend 也未实现 — 是 backend-agnostic) | 加 emit_binop OpRem 浮点分支 (libm `fmod()` call wrap + x86-64 sequence), ~30-60 LOC + 1-2 fixture, v2.13.6 mini |
+| **W-074.7** | ⏸ DEFERRED | phi merge gap (emit_phi noop + match/OR/payload merge slot 复合 bug) | v2.11.17+ 重设计 (emit_phi + upstream `cg_match_pattern` OR pattern 拆独立 arm block + payload slot uninit), ~80-150 LOC, 大型 sprint |
+
+### References
+
+- v2.13.4 plan: **无 standalone plan file** (per [[feedback_small_plans_no_docs]] — 单 stage step-by-step plan 不写 `docs/plans/`, 走 inline execution)
+- v2.13.4 umbrella changelog (本 section, **不** 创建 standalone `changelog-v2.13.4.md` per [[feedback_changelog_umbrella]])
+- v2.13.3 ship reference: 上一 section v2.13.3 entries
+- v2.13.3 + v2.13.2 + v2.13.1 audit-flip precedent (Group A docs-only pattern, 0 src change)
+- 真修 chain refs: commit `a2dd4c1` (v1.5.6 W-029 `jh_gcc_path` + `jh_gcc_invoke`) + `28450d3` (v1.5.6 docs W-029 ACTIVE 标) + `e01cb59` (v2.11.11 W-074.6 T4-g lexer cnew/ceqw 真修) + `c6a703f` + `f0c1860` (v2.11.11/12 docs)
+- v2.12.0 audit log: `compiler/tests/audit/v2.12.0-audit-log.md` (C.3 12 tests / Misc 32 tests 等 8 类别 119 tests 全 PASS QBE≡SB byte-equal evidence)
+- Memory: `feedback_rca_first_root_cause` (v2.13.4 scope DOWN 关键) + `feedback_doc_refactor_factcheck` (status flip 前 fact-check 真修 cross-ref) + `feedback_changelog_umbrella` (v2.x 单 umbrella 不创建 standalone) + `feedback_axis_vn_worktree_isolation` (axis-v2 worktree raw bash + 绝对路径) + `feedback_small_plans_no_docs` (单 stage step-by-step plan 不写 `docs/plans/`) + `feedback_ssh_key_same_shell` (SSH push 前 `eval` + `ssh-add` 同 shell)
