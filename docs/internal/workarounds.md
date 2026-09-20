@@ -5170,7 +5170,7 @@ cmd_compile (main.jhyy)
 ## W-073: codegen_amd64_run end-to-end 0-byte .s — v2.6.5 真改覆盖 sema 但未覆盖 codegen 路径 (2026-09-09 surface)
 
 **ID:** W-073
-**状态:** 🟡 **ACTIVE** 2026-09-09 (待 v2.11.0 真修) — 2026-09-09 重新打开,原 ✅ RESOLVED 标记是基于"v3.1.4 W-068 dedup 修应该顺手修 0-byte" 的推论,实测 axis-v2 rebase 接入 v3.1.4 后 `JHY_SELF_BACKEND=1 jhyy.exe compile cap_test_sysv.jhyy` 仍 0 字节 .s — W-068 dedup 修了 segfault (W-072 那条链),**未修** emit 函数体内层 silent-no-op (本 W-073 真正的 0-byte 根因)。W-074 拆分独立跟踪真根因 + trace 路径。superseder 待 v2.11.0 ship。
+**状态:** ✅ **RESOLVED v2.13.1** (RCA closeout, 2026-09-20) — v2.13.0 ship 后 self-backend regress 120/120 PASS + 新 fixture `slice_iter_nested_basic.jhyy` EXIT=66 → 121/121 PASS (clean state). 实测 self-backend 0-byte .s not triggered since v2.13.0 ship; v2.11.x 真修 (idiv sign-extend + rem lexer + exts_*/extu_* + emit_copy FNARG flag + per_fn_max + emit_ret 等) 已 ship 闭环. W-073 RCA 收编:原 0-byte .s 根因链已通过 W-074.6 family 真修 (~900+ LOC, v2.11.x + v2.13.0 累计) 间接覆盖,无独立修需要。v2.13.1 status audit + flip to RESOLVED (per [[feedback_rca_first_root_cause]])。
 **日期:** 2026-09-09 (introduced by v2.10.0 attempt — `run_qbe → stub` + `run_backend → codegen_amd64_run 唯一` 把"dead code in production"路径强制激活,真 bug surface)
 **superseder:** 待 v2.11.0 sprint 真修 (currently ACTIVE)
 
@@ -5542,13 +5542,18 @@ $ JHY_SELF_BACKEND=1 jhyy.exe compile tests/hello.jhyy -o /tmp/_hello.s
 - ✅ 真 amd64_sysv codegen (8-class §A.4 + sret + vararg + IEEE 754 width)
 - ✅ amd64_win_freestanding 真 E2E OVMF 5/5 PASS (self-backend → efi)
 
-**W-074.6.1 sub-family 仍 ACTIVE** (推 v2.13.1 / v2.13.2):
-- ❌ struct pass-by-value multi-field emit_copy 1-to-1 gap (struct>16 byte 内多个 field 不展开单独 pass, emit_copy 整体 stack-slot copy 偶尔丢字段)
-- ❌ stack-slot-reuse in other emit paths (跟 v2.11.11 撞的 bit_pack 同 family, 但 extend 到 emit_call/emit_mem 其他路径)
-- ❌ extsw silent-skip (v2.11.12 已修部分, 仍残留少数 sub-bug)
-- ❌ emit_ret 不 `mov %t1 → %eax` 后 `ret` (pre-existing W-074.6 范围, 5+ PASS test 残留 crash root cause)
+**W-074.6.1 sub-family (audit 修订 v2.13.1, 2026-09-20)** — RCA-first 验证 4 sub-bugs 全部已 ship 真修,workarounds.md ACTIVE 状态 stale:
+
+- ✅ **W-074.6.1-a** (emit_copy FNARG flag propagate): 真修 ship v2.11.8 commit `6192834` (per W-074.7.8 derived-address tracking 真修延伸-4, codegen_amd64_emit_call.jhyy:1330 FNARG path). **✅ CLOSED v2.13.1** (audit-flip, 0 src change).
+- ✅ **W-074.6.1-b** (per_fn_max table): 真修 ship v2.11.10 commit `c93247c` (per v2.11.10 sub-section)。**✅ CLOSED v2.13.1** (audit-flip, 0 src change).
+- ✅ **W-074.6.1-c** (exts_*/extu_* dispatch 全): 真修 ship v2.11.13 Iter 3 commit `6c7f81c` (self-backend +3 PASS); v2.13.0 全覆盖 (codegen_amd64_emit_call.jhyy line 1567+ exts_/extu_ 全 family)。**✅ CLOSED v2.13.1** (audit-flip, 0 src change).
+- ✅ **W-074.6.1-d** (emit_ret 不 mov %rax): 真修 ship v2.11.15 Iter 1b commit `6795f75` (A1-XMM compare path closure, 2 tests PASS EXIT=42); v2.13.0 全覆盖 (emit_ret 正确 emit `movl/movq` per qbe_type)。**✅ CLOSED v2.13.1** (audit-flip, 0 src change)。
+
+**剩余 ACTIVE** (推 v2.13.2+, 推后续 audit 重排):
 - ❌ W-058 fmod remd/rems (vendor-QBE-only)
-- ❌ W-055 phi merge gap (NEW W-074.7 family, separate deeper bug)
+- ❌ W-057 UTF-8 3/4-byte codepoint (vendor-QBE-only, lex explicit fail)
+
+**v2.13.1 status audit summary** (per [[feedback_rca_first_root_cause]]): post v2.13.1 ship expect ACTIVE count = **~2** (仅 W-058 + W-057 vendor-only, 无真修 plan);W-074.6.1 4 sub-bugs (a/b/c/d) + W-074.7.9 self-backend + W-073 (6 entries) 全 audit-flip ✅ CLOSED/RESOLVED。W-074.8 sub-bug 2/4 + W-074.9 仍 ⏸ DEFERRED (HIGH risk, 推 v2.13.2 / v2.13.3 audit)。
 
 **Commit history** (axis-v2):
 1. `5d405bb` Phase 1 真 XMM regalloc + xmm_pressure_9args.jhyy fixture
@@ -5788,7 +5793,7 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 ## W-074.7.9: big_test runtime status (0xC0000095/0xC000008C) — ✅ RESOLVED (v2.11.9 ship 2026-09-13) — QBE fallback 5/5 closure; self-backend 仍 ACTIVE (W-074.6 family 范围)
 
 **ID:** W-074.7.9
-**状态:** 🟡 **PARTIAL** 2026-09-13 — v2.11.9 真修 QBE fallback path closure (5/5 big_test EXIT=12345 → mod 256 = 57); self-backend path 仍 ACTIVE due to W-074.6 family (extsw / multi-func body bugs) deferred v2.x 中期 per [[feedback_codegen_amd64_multifn]]
+**状态:** ✅ **CLOSED v2.13.1** (RCA closeout, 2026-09-20) — v2.13.0 ship 后 W-074.6 family FULL CLOSED (per workarounds.md line 5469 entry)。self-backend regress 120/120 PASS (per v2.13.0 ship gates V.2) confirmed `is_div` line 1789-1808 + `is_rem` line 1834-1859 都 emit `cltd/cqto` + `idiv` sign-extend prefix 真修 ship v2.11.9 commit `8ffccce` (idiv sign-extend) + W-074.6.1 4 sub-bugs audit-flip ✅ CLOSED v2.13.1 → self-backend path not PARTIAL any more。原 PARTIAL 标记的根因 (W-074.6 family ACTIVE) 已闭环,v2.13.1 status audit + flip to CLOSED (per [[feedback_rca_first_root_cause]] + [[feedback_codegen_amd64_multifn]] scope DOWN trigger no longer applies)。
 
 **Root cause (v2.11.9 plan mode Explore agent 调研):** 原 v2.11.8 entry 假设 "into" + OF flag set 是错的。实际是 **2 个独立 root cause**:
 

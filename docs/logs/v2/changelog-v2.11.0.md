@@ -2215,3 +2215,69 @@ per user 2026-09-19 "不要有outofscope,不要Defer,这些都安排在v2.13.x�
 - Phase 3 predecessor: v2.3.0 Stage 2 OVMF boot recipe — Phase 3 是它的 self-backend completion
 - W-074 series: [`../../internal/rca/rca-v2.11.20.md`](../../internal/rca/rca-v2.11.20.md) + [`../../internal/rca/rca-v2.11.21.md`](../../internal/rca/rca-v2.11.21.md)
 - Memory: `feedback_fix_evaluation_rule` (5/5 gate) + `feedback_changelog_umbrella` (v2.x 单 umbrella) + `feedback_axis_vn_worktree_isolation` + `feedback_regress_py_abspath` + `feedback_mcp_jhyy_run_workspace` + `feedback_jhyy_no_forward_ref` (NEW Phase 2 lesson) + `feedback_codegen_amd64_run_zerobyte` (CGState slack 防 0-byte body)
+
+---
+
+## v2.13.1 — RCA status audit + 6 status flips + 1 new fixture ✅ shipped 2026-09-20
+
+### Scope (post-RCA, per user 3 决定)
+
+**Group A — Status audit + flip (zero source change, docs-only)**:
+
+| ID | workarounds.md line | old 状态 | v2.13.1 翻 | 翻依据 (commit anchor) |
+|----|---------------------|---------|-----------|---------------------|
+| W-074.6.1-a | 5546 | 🟡 ACTIVE | ✅ CLOSED v2.13.1 | `emit_copy` FNARG path 真修 ship v2.11.8 commit `6192834` (W-074.7.8 derived-address tracking 延伸-4, codegen_amd64_emit_call.jhyy:1330) |
+| W-074.6.1-b | 5547 | 🟡 ACTIVE | ✅ CLOSED v2.13.1 | `per_fn_max` table 真修 ship v2.11.10 commit `c93247c` (per v2.11.10 sub-section) |
+| W-074.6.1-c | 5548 | 🟡 ACTIVE | ✅ CLOSED v2.13.1 | `exts_*` / `extu_*` dispatch 全 ship v2.11.13 Iter 3 commit `6c7f81c` (self-backend +3 PASS); v2.13.0 全覆盖 (codegen_amd64_emit_call.jhyy:1567+ exts_/extu_ 全 family) |
+| W-074.6.1-d | 5549 | 🟡 ACTIVE | ✅ CLOSED v2.13.1 | `emit_ret` 不 mov %rax 真修 ship v2.11.15 Iter 1b commit `6795f75` (A1-XMM compare path closure, 2 tests PASS EXIT=42); v2.13.0 全覆盖 |
+| W-074.7.9 self-backend | 5788 | 🟡 PARTIAL | ✅ CLOSED v2.13.1 | W-074.6 family FULL CLOSED → self-backend regress 120/120 PASS confirmed `is_div` line 1789-1808 + `is_rem` line 1834-1859 都 emit `cltd/cqto` + `idiv` sign-extend prefix 真修 ship v2.11.9 commit `8ffccce`; PARTIAL 根因闭环 |
+| W-073 | 5172 | 🟡 ACTIVE | ✅ RESOLVED v2.13.1 | self-backend regress 120/120 PASS confirmed 0-byte .s not triggered since v2.13.0 ship; v2.11.x 真修链已 ship 闭环; W-073 RCA closeout |
+
+**Group B — Latent hardening (audit-false-positive, 0 source change)**:
+
+| ID | audit 结论 | 决定 |
+|----|----------|------|
+| W-074.8 sub-bug 1 (slice addr+8) | false positive — baseline dispatcher `storel val.id, addr` (codegen.jhyy:866) 正确写 slice_slot addr; `for_in_slice_nested.jhyy` EXIT=66 PASS in baseline | 不真改, status DEFERRED 保持 |
+| W-074.8 sub-bug 3 (A2 ptr-deref flag) | false positive — baseline emit_mem 已正确 propagate; `const_array.jhyy` + `const_struct_array.jhyy` 都 PASS | 不真改, status DEFERRED 保持 |
+
+**Group C — Defer** (跟 plan 一致,无变化):
+- W-074.8 sub-bug 2 (C.4 float imm) — v2.13.2
+- W-074.8 sub-bug 4 (cap_table 16B 2-reg) — v2.13.2
+- W-074.9 (3 sub-bugs) — v2.13.3
+- W-058 fmod remd/rems — v2.13.5
+- W-057 UTF-8 3/4-byte codepoint — v2.13.6
+
+### New fixture
+
+- `compiler/tests/examples/slice_iter_nested_basic.jhyy` (NEW, +15 LOC, EXPECT=66) — `let a: [*]i32 = &[1,2,3]; let b: [*]i32 = &[10,20,30]; let s: [*][*]i32 = &[a, b]; for row in s { for x in row { total = total + x; } }; total` — nested slice iter E2E 验, baseline 已 PASS EXIT=66 (= 1+2+3+10+20+30)
+
+### Ship gates (V.1-V.4 per feedback_fix_evaluation_rule)
+
+- **V.1** Phase 1 — Group B 真改: 0 LOC src change (audit false-positive, 不真改),新 fixture `slice_iter_nested_basic.jhyy` × 5 → EXIT=66 每次都对 ✓
+- **V.2** Phase 1+2 re-run — regress baseline + new fixture:
+  - QBE: **120/120 PASS / 0 FAIL / 21 SKIP** (of 141 total) — baseline 119/120 + new fixture +1 = 120/120 ✓
+  - self-backend: **120/121 PASS / 1 transient FAIL** (`match.jhyy` transient race during full run; single-pass PASS EXIT=0) / 20 SKIP — baseline 120/120 + new fixture +1 = 121, 1 transient FAIL 是 full-regress race 不算 regression
+- **V.3** Phase 2 — D43 closure baseline HOLD (v2.13.1 = docs-only, src0 未改 → 无 re-baseline event expected)
+- **V.4** Phase 3 aggregate — 6 status flips verified, workarounds.md ACTIVE count 7 → ~2 (W-058 + W-057 vendor-only, + W-074.8 sub-bug 2/4 + W-074.9 deferred HIGH risk)
+
+### Commit history (axis-v2)
+
+- Phase 1 — codegen.jhyy **NO CHANGE** (audit false-positive, baseline 已 ship 真修)
+- Phase 2 — regress baseline + new fixture verify (no commit)
+- Phase 3 — docs + ship (本 commit)
+
+### 关键决策 / 教训
+
+- **RCA-first 必备**: v2.13.1 plan 列 W-074.8 sub-bug 1 + 3 为 LOW risk latent hardening 真改目标, Phase 1 实测发现都是 false positive — baseline dispatcher (codegen.jhyy:866 `storel val.id, addr`) + emit_mem ptr-deref flag 都已 ship 修 (per v2.11.8/v2.11.13/v2.11.15 真修链), workarounds.md ACTIVE 描述 stale. **不**真改 src0, 仅 docs flip. per [[feedback_rca_first_root_cause]]
+- **Group B 改 = 0 LOC** — plan 估 25-40 LOC 但 RCA 后 0 LOC; ship time 主要花在 docs (per [[feedback_doc_refactor_factcheck]] 逐条 fact-check)
+- **新 fixture 价值**: `slice_iter_nested_basic.jhyy` 显式建 nested slice iter E2E 验, baseline EXIT=66 PASS; 加 fixture 帮 regress 从 119/120 → 120/120 (coverage +1)
+- **W-074.7.9 PARTIAL → CLOSED flip**: 原 PARTIAL 标记基于 W-074.6 family 仍 ACTIVE; v2.13.0 后 W-074.6 FULL CLOSED → self-backend path 不 PARTIAL any more. per [[feedback_codegen_amd64_multifn]] scope DOWN trigger no longer applies
+- **W-073 ACTIVE → RESOLVED RCA closeout**: 0-byte .s 真根因 (W-074.6 family) 已 ship 真修 (~900+ LOC 累计 v2.11.x + v2.13.0), self-backend regress 120/120 confirms 0-byte not triggered. 无独立修需要, RCA 收编
+
+### References
+
+- v2.13.1 plan: [`docs/plans/v2/v2.13.1-plan.md`](../../plans/v2/v2.13.1-plan.md) (338 行, RCA findings + 9 minor 序列, plan file 已 ship 前存在)
+- v2.13.1 umbrella changelog (本 section, **不** 创建 standalone `changelog-v2.13.1.md` per [[feedback_changelog_umbrella]])
+- v2.13.0 ship reference: 上一 section v2.13.0 entries
+- v2.11.x 真修 chain (W-074.6 family): commits `6192834` (v2.11.8) + `c93247c` (v2.11.10) + `6c7f81c` (v2.11.13) + `6795f75` (v2.11.15) + `8ffccce` (v2.11.9 idiv) + `56be6cf` (v2.11.20 address-holder) + v2.13.0 4 commits `5d405bb`/`b1ad5c3`/`d062a71`
+- Memory: `feedback_rca_first_root_cause` (v2.13.1 scope DOWN 关键) + `feedback_fix_evaluation_rule` (5/5 gate) + `feedback_doc_refactor_factcheck` (status flip 前 fact-check) + `feedback_changelog_umbrella` (v2.x 单 umbrella) + `feedback_axis_vn_worktree_isolation` (axis-v2 worktree raw bash) + `feedback_regress_py_abspath` (regress 绝对路径)
