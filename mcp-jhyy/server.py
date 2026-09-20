@@ -387,17 +387,24 @@ def jhyy_workarounds(query: str, status: Optional[str] = None) -> dict:
     USE THIS WHEN investigating a known bug pattern or checking if a workaround is ACTIVE.
     Triggers: "is W-005 still active", "what's the workaround for X",
               "search workarounds", "find workaround for let mut",
-              "W-005 现在状态", "let mut 触发面有 workaround 吗".
+              "W-005 现在状态", "let mut 触发面有 workaround 吗", "还有几条 ACTIVE".
 
     Args:
         query: 搜索词 (substring, 大小写不敏感). 可为 W-XXX ID (e.g. "W-005") 或触发模式
                (e.g. "let mut", "sentinel", "inline_imports", "MAX_LOCALS")
-        status: 可选过滤 "ACTIVE" / "RESOLVED" / "SUPERSEDED" (substring match)
+        status: 可选过滤 5-state enum: "ACTIVE" / "RESOLVED" / "SUPERSEDED" / "DEFERRED" / "INVALID".
+                v2.13.6 mini 起严格 token match (不再是 substring), 避免误分类.
 
     Returns:
         {ok, query, status_filter, matches: [{id, status, date, trigger, symptom,
          root_cause, workaround, scope, superseder}],
-         active_count, resolved_count, superseded_count, total}
+         active_count, resolved_count, superseded_count,
+         deferred_count, invalid_count, unknown_count,
+         total}
+
+    v2.13.6 mini: default path = cwd git worktree 的 docs/internal/workarounds.md
+    (worktree-aware, 解决 axis-vN isolation 问题 per feedback_axis_vn_worktree_isolation).
+    Fallback to script parents[1] (旧 main-bound 行为).
 
     比 Read workarounds.md + grep 好: 自动处理中英字段混用, 按 alias 表解析,
     返回结构化结果, 不用正则手撕 markdown.

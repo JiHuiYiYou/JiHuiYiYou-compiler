@@ -10,12 +10,56 @@ Public API:
 """
 import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Optional
 
-# JHYY_ROOT derived from script location (works on any machine; per
-# v1.5.5 release.yml CI fix). mcp-jhyy/ → parents[1] = project root.
-JHYY_ROOT = Path(__file__).resolve().parents[1]
+# v2.13.6 mini: 5-state enum + 严格 token match (fix v2.13.5 refactor 的
+# 旧 3 态 substring match + W-051 误分类问题). 详见 v2.13.6-plan.md.
+_STATUS_WORDS = ("ACTIVE", "RESOLVED", "SUPERSEDED", "DEFERRED", "INVALID")
+_STATUS_RE = re.compile(
+    r"[^\w]*?(?P<status>ACTIVE|RESOLVED|SUPERSEDED|DEFERRED|INVALID)\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_root() -> Path:
+    """Detect JHYY root, prefer cwd 的 git worktree over script location.
+
+    v2.13.6 mini: 解决 axis-vN worktree isolation (per
+    feedback_axis_vn_worktree_isolation). .claude.json 硬编码 main worktree
+    path 启动 MCP server, 但用户 cwd 在 axis-v2 时要读 axis-v2 的
+    workarounds.md. 默认 fallback = script parents[1] (旧行为).
+
+    Returns:
+        JHYY_ROOT (axis-v2 / main / 其他 worktree / script-derives fallback)
+    """
+    script_root = Path(__file__).resolve().parents[1]
+    try:
+        cwd = Path(os.getcwd())
+        toplevel_str = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(cwd),
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        toplevel = Path(toplevel_str).resolve()
+        if toplevel != script_root and (toplevel / "docs/internal/workarounds.md").exists():
+            return toplevel
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        pass
+    return script_root
+
+
+# Called every search() (NOT module-level cache) — 让用户在 session 内
+# cd 到其他 worktree 后 MCP 立即跟随, 不需 restart.
+def _default_path() -> Path:
+    """返回当前 cwd git worktree 的 workarounds.md (fallback to script-derived)."""
+    return _detect_root() / "docs/internal/workarounds.md"
+
+
+# Backward-compat: 外部代码可能 import JHYY_ROOT / DEFAULT_PATH
+JHYY_ROOT = _detect_root()
 DEFAULT_PATH = JHYY_ROOT / "docs/internal/workarounds.md"
 
 # 字段 alias 表: canonical_field → [alias1, alias2, ...]
@@ -128,13 +172,34 @@ def parse_workarounds(path: Optional[Path] = None) -> list[dict]:
     return entries
 
 
+def _parse_status(status_str: str) -> str:
+    """从 status 字段提取 canonical 5-state enum.
+
+    Handles:
+    - Post-v2.13.5 format: 'ACTIVE since 2026-08-15 (v1.5.6) — caption...'
+    - Pre-v2.13.5 emoji-prefix: '✅ RESOLVED 2026-08-28 ...' / '🟡 DEFERRED v2.x'
+    - Inline state: 'ACTIVE (dormant)' / 'RESOLVED' / 'SUPERSEDED by W-029'
+
+    Returns:
+        "ACTIVE" / "RESOLVED" / "SUPERSEDED" / "DEFERRED" / "INVALID" / "UNKNOWN"
+    """
+    if not status_str:
+        return "UNKNOWN"
+    first_line = status_str.splitlines()[0].strip()
+    m = _STATUS_RE.search(first_line)
+    return m.group("status").upper() if m else "UNKNOWN"
+
+
 def search(query: str, status: Optional[str] = None, path: Optional[Path] = None) -> dict:
     """搜索 workarounds.md.
 
     Args:
         query: 搜索词 (substring, 大小写不敏感). 可为 W-XXX ID 或 触发模式 (let mut / sentinel / ...)
-        status: 可选过滤 "ACTIVE" / "RESOLVED" / "SUPERSEDED"
-        path: 可选 workarounds.md 路径
+        status: 可选过滤 5-state enum: "ACTIVE" / "RESOLVED" / "SUPERSEDED" / "DEFERRED" / "INVALID"
+                v2.13.6 mini 起严格 token match (不再是 substring), 避免 W-051 RESOLVED
+                但 body 写 "强标 ACTIVE 不解决任何 active 问题" 的误分类.
+        path: 可选 workarounds.md 路径 (默认 = cwd git worktree 的 docs/internal/workarounds.md,
+              v2.13.6 mini worktree 探测; fallback to script parents[1])
 
     Returns:
         {
@@ -150,10 +215,13 @@ def search(query: str, status: Optional[str] = None, path: Optional[Path] = None
             "active_count": int,
             "resolved_count": int,
             "superseded_count": int,
+            "deferred_count": int,
+            "invalid_count": int,
+            "unknown_count": int,
             "total": int,
         }
     """
-    p = Path(path) if path else DEFAULT_PATH
+    p = Path(path) if path else _default_path()
     if not p.exists():
         return {"ok": False, "error": f"workarounds.md not found: {p}"}
 
@@ -161,8 +229,9 @@ def search(query: str, status: Optional[str] = None, path: Optional[Path] = None
     q_lower = query.lower()
     matches = []
     for entry in all_entries:
-        # status filter (substring match — entries often have "ACTIVE (dormant)" etc)
-        if status and status.upper() not in entry.get("status", "").upper():
+        entry_status = _parse_status(entry.get("status", ""))
+        # status filter — strict 5-state token match (v2.13.6 mini; 旧 substring 误分类)
+        if status and entry_status != status.upper():
             continue
         # query match: check ID + trigger + symptom + workaround + root_cause
         haystacks = [
@@ -187,18 +256,24 @@ def search(query: str, status: Optional[str] = None, path: Optional[Path] = None
                 "superseder": entry.get("superseder", "")[:200],
             })
 
-    active_count = sum(1 for e in all_entries if "ACTIVE" in e.get("status", "").upper())
-    resolved_count = sum(1 for e in all_entries if "RESOLVED" in e.get("status", "").upper())
-    superseded_count = sum(1 for e in all_entries if "SUPERSEDED" in e.get("status", "").upper())
+    # 5-state counts
+    counts = {s: 0 for s in _STATUS_WORDS}
+    counts["UNKNOWN"] = 0
+    for e in all_entries:
+        s = _parse_status(e.get("status", ""))
+        counts[s if s in counts else "UNKNOWN"] += 1
 
     return {
         "ok": True,
         "query": query,
         "status_filter": status,
         "matches": matches,
-        "active_count": active_count,
-        "resolved_count": resolved_count,
-        "superseded_count": superseded_count,
+        "active_count": counts["ACTIVE"],
+        "resolved_count": counts["RESOLVED"],
+        "superseded_count": counts["SUPERSEDED"],
+        "deferred_count": counts["DEFERRED"],
+        "invalid_count": counts["INVALID"],
+        "unknown_count": counts["UNKNOWN"],
         "total": len(all_entries),
     }
 
