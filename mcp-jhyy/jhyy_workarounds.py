@@ -24,17 +24,33 @@ _STATUS_RE = re.compile(
 
 
 def _detect_root() -> Path:
-    """Detect JHYY root, prefer cwd 的 git worktree over script location.
+    """Detect JHYY root, prefer active worktree over script location.
 
     v2.13.6 mini: 解决 axis-vN worktree isolation (per
     feedback_axis_vn_worktree_isolation). .claude.json 硬编码 main worktree
-    path 启动 MCP server, 但用户 cwd 在 axis-v2 时要读 axis-v2 的
-    workarounds.md. 默认 fallback = script parents[1] (旧行为).
+    path 启动 MCP server, 但用户 active dev 在 axis-v2 时要读 axis-v2 的
+    workarounds.md.
+
+    3-tier heuristic:
+    1. env override `JHYY_MCP_WORKTREE` 显式指定 (escape hatch)
+    2. cwd 的 git toplevel (若 ≠ script_root 且 docs/internal/workarounds.md 存在)
+    3. scan git worktree list, pick non-main branch with most-recent commit
+       (handles "user session cwd=main 但 active dev 在 axis-v2" case)
+    4. fallback = script parents[1] (旧行为)
 
     Returns:
-        JHYY_ROOT (axis-v2 / main / 其他 worktree / script-derives fallback)
+        JHYY_ROOT (env override / cwd worktree / most-recent non-main / script-derives fallback)
     """
     script_root = Path(__file__).resolve().parents[1]
+
+    # Tier 1: env override (explicit user choice)
+    env_override = os.environ.get("JHYY_MCP_WORKTREE", "").strip()
+    if env_override:
+        override_path = Path(env_override).resolve()
+        if (override_path / "docs/internal/workarounds.md").exists():
+            return override_path
+
+    # Tier 2: cwd's git toplevel
     try:
         cwd = Path(os.getcwd())
         toplevel_str = subprocess.check_output(
@@ -43,11 +59,65 @@ def _detect_root() -> Path:
             stderr=subprocess.DEVNULL,
             text=True,
         ).strip()
-        toplevel = Path(toplevel_str).resolve()
-        if toplevel != script_root and (toplevel / "docs/internal/workarounds.md").exists():
-            return toplevel
+        cwd_toplevel = Path(toplevel_str).resolve()
+        if cwd_toplevel != script_root and (cwd_toplevel / "docs/internal/workarounds.md").exists():
+            return cwd_toplevel
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        cwd_toplevel = None
+
+    # Tier 3: scan worktrees, prefer non-main branch with most-recent commit
+    # (handles "user cwd=main but active dev in axis-v2")
+    try:
+        cwd = cwd_toplevel or Path(os.getcwd())
+        wt_list = subprocess.check_output(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=str(cwd),
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        worktrees = []
+        cur_path = None
+        cur_branch = None
+        for line in wt_list.splitlines():
+            if line.startswith("WORKTREE "):
+                if cur_path:
+                    worktrees.append((cur_path, cur_branch))
+                cur_path = line[9:].strip()
+                cur_branch = None
+            elif line.startswith("branch "):
+                # "branch refs/heads/axis-v2" or "branch refs/heads/main"
+                cur_branch = line[7:].strip().removeprefix("refs/heads/")
+        if cur_path:
+            worktrees.append((cur_path, cur_branch))
+
+        candidates = []
+        for wt_path_str, branch in worktrees:
+            wt_path = Path(wt_path_str).resolve()
+            wd = wt_path / "docs/internal/workarounds.md"
+            if not wd.exists():
+                continue
+            try:
+                commit_time_str = subprocess.check_output(
+                    ["git", "log", "-1", "--format=%ct"],
+                    cwd=str(wt_path),
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                ).strip()
+                commit_time = int(commit_time_str)
+            except (subprocess.CalledProcessError, FileNotFoundError, OSError, ValueError):
+                continue
+            # Sort key: (not_main=0/main=1, -commit_time)
+            # Prefer non-main branch, then most recent commit
+            is_main = 1 if branch == "main" else 0
+            candidates.append((is_main, -commit_time, wt_path))
+
+        if candidates:
+            candidates.sort()
+            return candidates[0][2]
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):
         pass
+
+    # Tier 4: fallback
     return script_root
 
 
