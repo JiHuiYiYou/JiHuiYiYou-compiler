@@ -43,9 +43,11 @@ async def test_workarounds_search_trigger_pattern(mcp_client):
 
 @pytest.mark.asyncio
 async def test_workarounds_status_filter_active(mcp_client):
-    """status='ACTIVE' → 只返 ACTIVE (substring 匹配).
+    """status='ACTIVE' → 只返 ACTIVE (v2.13.6 mini 严格 token match).
 
-    Sprint 4.7: workarounds.md 有 ACTIVE / ACTIVE (dormant) / RESOLVED / SUPERSEDED 多种 status.
+    Pre-v2.13.6: substring match (W-051 RESOLVED 但 body 写 '强标 ACTIVE 不解决任何 active 问题'
+    的 entry 会被误分类到 ACTIVE filter).
+    Post-v2.13.6: 严格 first-token match against 5-state enum.
     """
     result = await mcp_client.call_tool(
         "jhyy_workarounds",
@@ -53,10 +55,24 @@ async def test_workarounds_status_filter_active(mcp_client):
     )
     data = result.data
     assert data["ok"] is True
-    # 所有 matches status 应含 ACTIVE (substring 匹配)
     for m in data["matches"]:
-        assert "ACTIVE" in m["status"].upper(), (
-            f"Match {m['id']} status={m['status']!r} should contain ACTIVE"
+        assert m["status"].upper().startswith("ACTIVE"), (
+            f"Match {m['id']} status={m['status']!r} should start with ACTIVE"
+        )
+
+
+@pytest.mark.asyncio
+async def test_workarounds_status_filter_deferred(mcp_client):
+    """status='DEFERRED' → 只返 DEFERRED (v2.13.6 mini 5 态新增)."""
+    result = await mcp_client.call_tool(
+        "jhyy_workarounds",
+        {"query": "W-", "status": "DEFERRED"},
+    )
+    data = result.data
+    assert data["ok"] is True
+    for m in data["matches"]:
+        assert m["status"].upper().startswith("DEFERRED"), (
+            f"Match {m['id']} status={m['status']!r} should start with DEFERRED"
         )
 
 

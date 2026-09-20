@@ -2641,3 +2641,92 @@ v2.13.5 ship 时同 ship 4 个 scripts:
 - 编号 flip map: v2.13.5 Phase 4 table (7 dup → W-075..W-081)
 - 真修 chain refs: cross-ref 各 dup entry 原文 commit (无新增 src0 改动, v2.13.5 = docs-only refactor)
 - Memory: `feedback_doc_refactor_factcheck` (RCA 链保留 per `### Resolution detail` 段落) + `feedback_changelog_umbrella` (v2.x 单 umbrella 不创建 standalone) + `feedback_plans_per_version` (v2.13.5 = own plan file) + `feedback_no_date_estimates` (无 "几月几月完成" 日期估时) + `feedback_axis_vn_worktree_isolation` (axis-v2 worktree raw bash + 绝对路径) + `feedback_regress_clean_count` (`rm _regress_*.exe` before ship, v2.13.5 = docs-only 所以不需要) + `feedback_ssh_key_same_shell` (SSH push 前 `eval` + `ssh-add` 同 shell) + `feedback_commit_coauthor` (`Co-Authored-By: MiniMax-M3 <noreply@MiniMax>`) + `feedback_no_traditional_chinese` (simplified Chinese only) + `feedback_audit_single_commit_diff` (single commit, 用 `git show <sha>` 验证)
+
+## v2.13.6 — MCP 5-state enum + worktree-aware default path ✅ shipped 2026-09-20
+
+v2.13.6 = MCP server tooling fix mini sprint (per v2.13.5 plan "MCP enum 更新 → v2.13.6 (MCP server 独立 effort)" + "W-022/W-029/W-024 实际迁 docs/internal/conventions.md → v2.13.6 (scope-fit)" 中 MCP 部分)。v2.13.5 refactor 后 `mcp__jhyy__jhyy_workarounds` 解析器仍用旧 3 态 substring match + 锁 main worktree path, 导致 2 类问题:
+
+1. **W-051 误分类**: entry 实际 RESOLVED 但 body 写 "强标 ACTIVE 不解决任何 active 问题",substring match 把它同时塞进 ACTIVE filter 和 DEFERRED filter
+2. **DEFERRED / INVALID 完全不被识别**: 新 5 态的两个状态 0 计数,user 查 "active、defer还有哪几条" 拿到 MCP 错答 (4 ACTIVE / 0 DEFERRED,真答 0 ACTIVE / 2 DEFERRED)
+3. **worktree isolation 缺失**: MCP server 从 main worktree path 启动 (per `.claude.json`),用户 cwd 在 axis-v2 时 MCP 读 main 的 stale data。axis-v2 v2.13.5 ship 后 MCP 仍显示 09-16 数据 (total=69,真 total=78)
+
+User 反馈 (2026-09-20): "先看下mcp,你是没改还是改完了服务没生效" → 定位到 MCP 完全没改 (per v2.13.5 plan out-of-scope)。
+
+### Fix A — 5-state enum + 严格 token match (~60 LOC 改)
+
+`mcp-jhyy/jhyy_workarounds.py` 加 `_STATUS_RE = re.compile(r"[^\w]*?(?P<status>ACTIVE|RESOLVED|SUPERSEDED|DEFERRED|INVALID)\b", re.IGNORECASE)` + `_parse_status(status_str)` 函数。
+
+支持 4 类格式 token 提取:
+- Post-v2.13.5: `ACTIVE since 2026-08-15 (v1.5.6) — caption`
+- Pre-v2.13.5 emoji-prefix: `✅ RESOLVED ...` / `🟡 DEFERRED v2.x` / `⏸ DEFERRED v2.x` / `❌ INVALID`
+- Inline: `ACTIVE (dormant)` / `ACTIVE (PowerShell 5.1...)` / `RESOLVED`
+- Empty: `''` → `'UNKNOWN'` (4 entries: W-001 / W-002 / W-006 / W-025)
+
+`status` filter 改严格 first-token match (不再 substring),免 W-051 类误分类。返回新增 `deferred_count` / `invalid_count` / `unknown_count` 字段。
+
+### Fix B — worktree-aware default path (~30 LOC 改)
+
+`mcp-jhyy/jhyy_workarounds.py` 加 `_detect_root()` 函数:
+
+1. 默认 = `Path(__file__).resolve().parents[1]` (旧行为,script-derived)
+2. Override: 若 `os.getcwd()` 是 git worktree 且其 `git rev-parse --show-toplevel` ≠ script root 且 `toplevel/docs/internal/workarounds.md` 存在 → 用 cwd 的 toplevel
+3. Fallback: non-git dir / git error → script root
+
+`_default_path()` 在 `search()` 内每次调用 (= runtime-effective,不需 MCP restart,用户 cd 立即跟随)。
+
+### Fix C — server.py + test 更新 (~30 LOC 改)
+
+- `mcp-jhyy/server.py` `jhyy_workarounds` tool docstring 更新 5-state + worktree 说明
+- `mcp-jhyy/tests/test_workarounds.py` 加 `test_workarounds_status_filter_deferred` 用例 + `test_workarounds_status_filter_active` 注释更新 (substring → strict token match)
+
+### V.0-V.8 gate verification
+
+| Gate | PASS criterion | Result |
+|------|----------------|--------|
+| V.0 | `_parse_status` 9 个 sample (含 ✅/🟢/🟡/⏸/❌ emoji) 全对 | PASS |
+| V.1 | `search("W-051", status="ACTIVE")` matches=0 (旧 bug 修复) | PASS |
+| V.2 | `search("W-051", status="RESOLVED")` matches=1 | PASS |
+| V.3 | `search("W-")` 全 counts: active=0, deferred=2 (W-057+W-058), unknown=4 | PASS |
+| V.4 | `search("W-074.7")` matches=0 (renumbered to W-081) | PASS |
+| V.5 | `_detect_root()` 在 axis-v2 cwd → axis-v2 path | PASS |
+| V.6 | 单 commit `git show <sha> --stat`: 6 files modified | PASS (3 mcp-jhyy + plan + changelog + README) |
+| V.7 | main mirror commit `git show <sha> --stat`: 3 files modified (mcp-jhyy only) | PASS |
+| V.8 | tag v2.13.6 push 成功 | PASS (HTTPS-with-token HTTP/1.1 forced, per GFW workaround) |
+
+### 真剩余 ACTIVE workaround (推后续 sprint, v2.13.6 ship 后无变)
+
+| W-NNN | 状态 (v2.13.6 后) | 真因 | 处理路径 |
+|-------|------|------|---------|
+| **W-057** | DEFERRED since (推 v2.x) | UTF-8 3/4-byte codepoint, lexer spec 限 (`src0/lexer.jhyy:555-562` 显式 oos=1 reject) | 1 LOC lexer 放宽 + emit i32 codepoint 字面量, ~10 LOC test, **推 v2.13.7 mini** (next, after v2.13.6 ship) |
+| **W-058** | DEFERRED since (推 v2.x) | fmod `remd`/`rems` 浮点模, codegen emit 路径缺 (vendor-QBE 标签误, self-backend 也未实现) | 加 emit_binop OpRem 浮点分支 (libm `fmod()` call wrap + x86-64 sequence), ~30-60 LOC + 1-2 fixture, **推 v2.13.8 mini** |
+| **W-081** (renumbered from W-074.7 dup) | RESOLVED 架构修 Phase 1+2 (sub-bug 1 + 4 真修 ship 2026-09-17);sub-bug 2 (phi merge) + sub-bug 3 仍 open (DEFERRED) | phi merge gap + emit_phi noop + match/OR/payload merge slot 复合 bug | v2.11.17+ 重设计 (emit_phi + upstream `cg_match_pattern` OR pattern 拆独立 arm block + payload slot uninit), ~80-150 LOC, **推 v2.14.0** |
+
+**注**: v2.13.6 ship 后 MCP 报告真 ACTIVE=0 (vs 之前 MCP 错答 4)。W-022/W-023/W-024/W-029 已 SUPERSEDED 在 audit-flip v2.13.3/4 series,不是 v2.13.6 改的。
+
+### 4 UNKNOWN entries (data quality,推 v2.13.7 mini)
+
+W-001 / W-002 / W-006 / W-025 empty status field — v2.13.5 refactor 时漏补登,需 v2.13.7 mini 跑 `scripts/dev/v2_13_5_rebuild_index.py` + 人工补 status line + `**Backfilled:**` + `**Filed-by:**` 6-field schema。
+
+### Scope 边界 (与 v2.13.7 / v2.14.0 切分)
+
+| Sprint | Scope | 状态 |
+|--------|-------|------|
+| **v2.13.6** (本 sprint) | MCP 5-state enum + worktree-aware default path + main mirror commit | ✅ shipped |
+| **v2.13.7** mini | W-057 lexer 放宽真修 (~10 LOC) + 4 UNKNOWN entries 补登 status line | pending |
+| **v2.13.8** mini | W-058 codegen emit binop OpRem 浮点分支 + libm call + 1-2 fixture | pending |
+| **v2.14.0** | W-081 sub-bug 2 (phi merge) + sub-bug 3 重设计 + emit_phi noop + match OR/payload 拆 arm block | pending |
+
+### MCP restart note (user action required)
+
+Fix A (5-state enum) 是 module-level change,Python import 时 cache,需 `/restart Claude Code` 让 MCP server 重新 import `mcp-jhyy/jhyy_workarounds.py` 加载新代码。Fix B (worktree detect) 是函数级调用,runtime-effective,restart 后立即生效。
+
+### References
+
+- v2.13.6 plan: `JiHuiYiYou-axis-v2/docs/plans/v2/v2.13.6-plan.md`
+- v2.13.6 ship commit: axis-v2 single commit (本 section)
+- v2.13.6 mirror commit: main worktree single commit (3 mcp-jhyy files only, per `0cadfba` precedent)
+- v2.13.5 ship reference: 上一 section v2.13.5 entries (immediate predecessor)
+- MCP tool source: `mcp-jhyy/jhyy_workarounds.py` (axis-v2 + main mirror)
+- MCP tool source: `mcp-jhyy/server.py` `jhyy_workarounds` tool (axis-v2 + main mirror)
+- MCP test: `mcp-jhyy/tests/test_workarounds.py` (axis-v2 + main mirror)
+- Memory: `feedback_plans_per_version` (v2.13.6 = own plan file) + `feedback_changelog_umbrella` (本 section 在 umbrella 内, 不创建 standalone) + `feedback_axis_vn_worktree_isolation` (Fix B 核心) + `feedback_ssh_key_same_shell` (HTTPS-with-token HTTP/1.1 forced push, per GFW workaround) + `feedback_commit_coauthor` + `feedback_no_traditional_chinese` + `feedback_audit_single_commit_diff` (单 commit per worktree) + `feedback_no_artifacts_in_project` (plan/changelog 进仓, 临时调试脚本不进)
