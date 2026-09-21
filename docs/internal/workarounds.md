@@ -4001,11 +4001,11 @@ spec §9.5 4 形式全 ship:
 ## W-057: UTF-8 3-byte / 4-byte codepoint 显式 lex reject (推 v2.x)
 
 **ID:** W-057
-**状态:** DEFERRED since 2026-08-28 (v1.7.3) — UTF-8 3/4-byte codepoint lex reject (推 v2.13.6 mini 真修)
+**状态:** ✅ RESOLVED 2026-09-21 (v2.13.7 真修 ship) — char literal 全 codepoint 范围 (U+0000-U+10FFFF per RFC 3629) ship; lexer 放宽 + parser decode 扩
 **Backfilled:** 2026-08-28 (本 v1.7.3 patch C2 补登, vendor QBE 2026-08-15 build 引入)
 **Filed-by:** patch-C2
 **日期:** 2026-08-28 (v1.7.3 patch 排查发现 spec/test/workarounds 缺归档)
-**superseder:** 推 v2.x (vendor QBE 升级主线 + 自研 backend)
+**superseder:** 推 v2.x (vendor QBE 升级主线 + 自研 backend) → v2.13.7 真修 (lexer 放宽 + parser decode 扩 3/4-byte UTF-8)
 **触发面:** spec §4.4 字符字面量族中, 3-byte (U+0800-U+FFFF, e.g. `'你'` U+4F60) + 4-byte (U+10000+, e.g. `'🎉'` U+1F389) UTF-8 codepoint 在 v1.7.0 Stage 3 显式 lex reject.
 
 | 输入 | 期望 (per spec §4.4 字符字面量族) | v1.7.0 实际 |
@@ -4036,11 +4036,19 @@ parse errors
 - lib 路径: src0/util.jhyy / src0/lexer.jhyy 字符串字面量都用 1-byte ASCII, 不依赖 3/4-byte
 
 **引用:**
-- spec `docs/abis/jhyy-lang-spec-v1.3.0.md` § 4.4 (Char literals — 权威, B2 v1.7.3 patch 加 BMP-only 限制)
+- spec `docs/abis/jhyy-lang-spec-v1.3.0.md` § 4.4 (Char literals — 权威, v2.13.7 revision 3/4-byte ship)
 - W-052 (本 sprint scope 上游 — char family escape 但漏 3/4-byte codepoint)
 - W-053 (本 sprint scope 上游 — escape 族 + hex escape 已 ship 但 3/4-byte 留 Stage 3 reject)
 - W-056 (本 sprint scope 上游 — Stage 3 多字节 UTF-8 partial ship, 限定 2-byte BMP, 3/4-byte 推 v2.x)
 - `docs/logs/v1/changelog-v1.7.0.md` line 131 (Stage 1-5 不覆盖段)
+
+**真修 closure (v2.13.7):**
+- **Lexer 放宽** (`src0/lexer.jhyy:537-575`): 删 `oos=1` reject 分支, lead byte 分支从 2 类 (ASCII + 2-byte) 扩到 4 类 (ASCII + 2/3/4-byte), `extra` 计数 0/1/2/3; nested if 模式保留 (avoid phi predecessors 错配)
+- **Parser decode 扩** (`src0/parser.jhyy:228-282`): `decode_char_literal` 加 3-byte (5-byte token: open + lead + 2 cont + close) + 4-byte (6-byte token: open + lead + 3 cont + close) UTF-8 decode 分支; codepoint 计算 per RFC 3629 bitmask formula
+- **codegen 不动**: parser 把 char codepoint → `ast_new_int(PRIM_I32)`, codegen 收 NODE_INT 走 `ir_emit_copy` 路径 (`%t =w copy 0xCODE`) 已 cover 3/4-byte 大数 (e.g. `'🎉'` 0x1F389 = 127881 < 2^31, QBE `w` 类能容)
+- **2 新 tests** ship: `compiler/tests/examples/char_literal_3byte.jhyy` (CJK `'你'` exit 0) + `char_literal_4byte.jhyy` (emoji `'🎉'` exit 0)
+- **回归 baseline HOLD**: 现有 `char_literal.jhyy` (11 个 literal: escape + 2-byte BMP) 不 regress, `regress.py` baseline ≥ 115/135 HOLD gate 强制
+- **Ship plan**: `JiHuiYiYou-axis-v2/docs/plans/v2/v2.13.7-plan.md` (143 LOC)
 
 ---
 
