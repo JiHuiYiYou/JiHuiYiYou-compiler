@@ -126,7 +126,7 @@
 | [W-055](#w-055) | RESOLVED | spec §9.5 指针算术 `p + 1` 整节未实现 |
 | [W-056](#w-056) | RESOLVED | 多字节 UTF-8 char literal + char type `u8 → i32`... |
 | [W-057](#w-057) | DEFERRED | UTF-8 3-byte / 4-byte codepoint 显式 lex reject (推... |
-| [W-058](#w-058) | DEFERRED | vendor QBE (2026-08-15 build) 不支持 `remd` / `rems`... |
+| [W-058](#w-058) | RESOLVED | vendor QBE (2026-08-15 build) 不支持 `remd` / `rems`... [v2.13.8 codegen.jhyy fold user-space formula (trunc)] |
 | [W-059](#w-059) | RESOLVED | defer codegen path silent crash (v1.3.6 ship 后 0... |
 | [W-060](#w-060) | INVALID | enum variant payload ABI mismatch (Mixed::I(1234)... |
 | [W-061](#w-061) | INVALID | nested struct field offset bug (Outer { tag,... |
@@ -4056,42 +4056,76 @@ parse errors
 ## W-058: vendor QBE (2026-08-15 build) 不支持 `remd` / `rems` 浮点取模 (推 v2.x)
 
 **ID:** W-058
-**状态:** DEFERRED since — v2.x
-**日期:** 2026-08-28 (v1.7.3 patch 排查发现 spec/test/workarounds 缺归档)
-**superseder:** 推 v2.x (vendor QBE 升级主线 + 自研 backend)
+**状态:** ✅ RESOLVED — v2.13.8 (commit `pending`, ship pending)
+**日期:** 2026-08-28 (v1.7.3 patch 排查发现 spec/test/workarounds 缺归档) → 2026-09-21 (v2.13.8 sprint 真修 closure)
+**superseder:** N/A (RESOLVED)
 **触发面:** spec 附录 B P3 fmod row "浮点取模 `%=` / `a % b` reject" (i32/i64 整数模 ship, 浮点模不 ship).
 
-| 输入 | 期望 (per spec 附录 B P3) | v1.7.2 实际 |
+| 输入 | 期望 (per spec 附录 B P3 v2.13.8 revision) | v2.13.8 实际 |
 |------|--------------------------|-------------|
 | `i32 % i32` (整数模) | i32 余数 | ✅ OK (codegen emit `rem` / `div`) |
 | `i64 % i64` | i64 余数 | ✅ OK (codegen emit `rem` / `div`) |
-| `f64 % f64` (浮点模) | f64 IEEE 754 remainder | ❌ **vendor QBE reject** "invalid instruction: remd" |
-| `f64 %= f64` (compound) | f64 复合赋值 | ❌ **同上** (跟 `%=` sema 通过但 codegen emit `remd` reject) |
+| `f64 % f64` (浮点模) | f64 IEEE 754 fmod (trunc toward 0) | ✅ OK (codegen fold user-space formula `a - trunc(a/b) * b`, 5 IL insns) |
+| `f32 % f32` (浮点模) | f32 IEEE 754 fmod (trunc toward 0) | ✅ OK (codegen fold 同 f64 公式, `div`+`stosi`+`swtof`+`mul`+`sub` polymorphic ops) |
+| `f64 %= f64` (compound) | f64 复合赋值 | ✅ OK (parser `%=` desugar 到 binop `a = a % b`, 走 fold) |
 
-**症状:**
+**真修 path (v2.13.8 sprint, per `docs/plans/v2/v2.13.8-plan.md`):**
+- codegen.jhyy TOKEN_PERCENT + (QBE_D or QBE_S) 早期 return, emit 5 IL insns:
+  - `t1   =d/s div left, right`         (a / b; polymorphic op 靠 `=d`/`=s` 类型后缀)
+  - `tn   =w dtosi/stosi t1`            (trunc toward 0, per IEEE 754 cvttsd2si; 嵌 type suffix 在 opcode name)
+  - `tnf  =d/s swtof tn`                (signed i32 → f64/f32; 嵌 type suffix)
+  - `tm   =d/s mul tnf, right`          (n * b; polymorphic)
+  - `result =d/s sub left, tm`          (a - n*b; polymorphic)
+- 不 emit `remd`/`rems` token,vendor QBE 不 reject
+- trunc semantics 跟 QBE upstream `remd`/`rems` spec + C `fmod()` 严格一致(per QBE RV64 emit.c `cvt.w.s ..., rtz` 等价 trunc toward 0)
+- BOTH backend 受益:default QBE 走 fold,self-backend opt-in (`JHY_SELF_BACKEND=1`) 同样走 fold 不见 `rem` token(self-backend codegen_amd64_emit_call.jhyy:1834 `is_rem` branch 当前仅 handle 整数,silent fall through;W-058 fix 让其 不再收 `rem` token,自研 backend 不需额外修)
+
+**症状 (resolved):**
 ```
 test.jhyy:3:9: error: invalid instruction 'remd' (vendor QBE 2026-08-15 build 不支持)
 codegen errors
 ```
+不再出现 — codegen 不再 emit `remd`/`rems`。
 
-**根因:** vendor QBE (`qbe/qbe.exe` 2026-08-15 build, per `docs/logs/v1/changelog-v1.7.2.md` A1 ship 时 fact-check fail) 不实现 `remd` (f64 remainder) 和 `rems` (f32 remainder) 指令。其他 backend (e.g. gcc) 编译期折叠到 `fmod()` library call, 但 vendor QBE 不能 fold, 拒绝指令。
+**根因 (历史,resolved):** vendor QBE (`qbe/qbe.exe` 2026-08-15 build, per `docs/logs/v1/changelog-v1.7.2.md` A1 ship 时 fact-check fail) 不实现 `remd` (f64 remainder) 和 `rems` (f32 remainder) 指令。其他 backend (e.g. gcc) 编译期折叠到 `fmod()` library call, 但 vendor QBE 不能 fold, 拒绝指令。
 
-**workaround (v1.7.2 期间):** v1.7.2 patch A1 ship 时 fact-check 发现 vendor QBE 不支持 `remd`/`rems`, 标 LIMIT 不修, 推 v2.x 真修 (vendor QBE 升级主线或自研 backend)。spec 附录 B P3 fmod row "推 v2.x" 段保留 v2.x 真修描述, 缺独立 W-NNN 归档 (本 v1.7.3 patch 补登)。
+**workaround (v1.7.2 期间,historical):** v1.7.2 patch A1 ship 时 fact-check 发现 vendor QBE 不支持 `remd`/`rems`, 标 LIMIT 不修, 推 v2.x 真修 (vendor QBE 升级主线或自研 backend)。spec 附录 B P3 fmod row "推 v2.x" 段保留 v2.x 真修描述, 缺独立 W-NNN 归档 (本 v1.7.3 patch 补登)。
 
-**实现路径 (推 v2.x):**
-1. **vendor QBE 升级** — 拉 QBE 上游主线 (2026-Q3 或更新), 看是否新增 `remd`/`rems` 支持 (可能性高, QBE 上游对 SIMD + math 指令支持在持续推进)
-2. **自研 backend** — v2.x 末 QBE 重写后, codegen emit `remd`/`rems` 指令 (或 fold 到 `fmod()` library call, 跟 gcc 行为对齐)
-3. **fmod library helper** — 临时方案: codegen 把 `a % b` (f64) 折成 `(a - (a / b).floor() * b)` user-space formula, runtime 调用 `floor()` builtin (qbe 提供 `floord`) + 减法 + 乘法
+**实现路径选择 (resolved v2.13.8):**
+- ✅ 选 path 3 (fmod library helper) — 临时方案, codegen 把 `a % b` (f64) 折成 user-space formula
+- ❌ path 1 (vendor QBE 升级) — 推后续 v2.13.10+ mini, 看 vendor QBE 主线是否加 `remd`/`rems`;若加则 fold IL 跟 native IL 产生结果 byte-equal(零迁移成本)
+- ❌ path 2 (自研 backend 完全替代) — v2.16.0 plan 走 (`run_qbe` empty stub + `QBE_FALLBACK` silent ignore + delete `qbe.exe` + flip default backend);W-058 fold fix 不需 重做 (codegen.jhyy 层已 fold,任一 backend 都 work)
 
-**影响范围:**
-- user-space test: 仅 fmod 测试 (尚未 ship), 不影响 regress
-- OS-required (jhyy_OS): MMIO buffer scan 用到 `addr % page_size` 是整数模 (i64 % i64), 不依赖浮点模
-- math lib: jhyy 暂无 `<math.h>` 风格 lib, 用户写 fmod 一般用 lib call (`extern fn fmod(...)`), 不走 `%` 路径
+**Fold op 选择 trunc (per user 2026-09-21 决定):**
+- `trunc` (toward 0) 跨 spec 一致:QBE upstream `remd`/`rems` + C `fmod()` + POSIX `fmod()` 全 match
+- 不需 spec LIMIT 段 (semantics 直接 match 标准库)
+- 将来 vendor QBE 加 `remd`/`rems` 支持后,fold IL 跟 native IL 产生结果 byte-equal(零迁移成本)
+- 对比 `floor` (toward -∞): 跟 Python `%` 一致但 跟 C/QBE 不同 → spec LIMIT + 将来 迁移成本高
+
+**验证表 (4 cases, 跨 spec 一致):**
+| 输入 | fold trunc 结果 | C `fmod` | QBE `remd` | 一致? |
+|------|----------------|---------|-----------|------|
+| `7.0 % 2.0` | 1.0 | 1.0 | 1.0 | ✅ |
+| `-7.5 % 2.0` | -1.5 | -1.5 | -1.5 | ✅ |
+| `7.5 % -2.0` | 1.5 | 1.5 | 1.5 | ✅ |
+| `0.0 % 5.0` | 0.0 | 0.0 | 0.0 | ✅ |
+
+**影响范围 (residual):**
+- user-space test: ✅ 3 new tests ship (`compiler/tests/examples/fmod_basic.jhyy` EXIT=1, `fmod_negative.jhyy` EXIT=99 (用 `+100` 避开 Win NTSTATUS 误判 0xFFFFFFFF) 区分 trunc vs floor, `fmod_f32.jhyy` EXIT=1)
+- OS-required (jhyy_OS): MMIO buffer scan 用到 `addr % page_size` 是整数模 (i64 % i64), 不依赖浮点模 — 不变
+- math lib: jhyy 暂无 `<math.h>` 风格 lib, 用户写 fmod 一般用 lib call (`extern fn fmod(...)`), 不走 `%` 路径 — 不变
+- 极值 LIMIT: fold 走 `dtosi`/`stosi` (i32 dest), 若 `a/b` 超出 i32 范围 (~2.1e9) 结果 undefined (per QBE spec);典型 fmod 用例 不触发, OS 不触发;`<math.h>` lib 真值 待 v3.x OS-required sprint
 
 **引用:**
-- spec `docs/abis/jhyy-lang-spec-v1.3.0.md` 附录 B P3 (fmod row, C4 v1.7.3 patch 加 cross-ref W-058)
+- spec `docs/abis/jhyy-lang-spec-v1.3.0.md` 附录 B P3 v2.13.8 revision (trunc 段)
 - `docs/logs/v1/changelog-v1.7.2.md` A1 (v1.7.2 patch A1 ship 时 fact-check fail, 标 LIMIT 推 v2.x)
+- `docs/logs/v1/changelog-v1.7.3.md` C2 (v1.7.3 patch C2 补登 W-058 entry)
+- `docs/plans/v2/v2.13.8-plan.md` (本 sprint plan, axis-v2 working tree)
+- `docs/plans/roadmap/v2.x-qbe-rewrite.md` (v2.x 中/末 QBE 自写 / amd64_sysv 实 impl 大图)
+- `docs/plans/v2/v2.15.0-plan.md` (QBE 自写, jhyy-side codegen 不重做 W-058 fix)
+- `docs/plans/v2/v2.16.0-plan.md` (QBE 工具链完全移除, flip default backend, W-058 fix 仍 work)
 - vendor QBE build `qbe/qbe.exe` 2026-08-15 (per `docs/internal/architecture.md` QBE IL 速查段)
+- codegen.jhyy:2267-2308 (W-058 fold fix early-return)
 
 ---
 

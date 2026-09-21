@@ -1,0 +1,15 @@
+// EXPECT: 1
+// v2.13.8 (W-058 RESOLVED): float fmod f32 path test
+//
+// f32 (`f32` 类型) 走 codegen fold 5-instruction formula (div + stosi +
+// swtof + mul + sub)。 f32 结果 swtof 走 `=s` 目标 → 产生 f32 (per QBE
+// RV64 emit.c: Oswtof Ka fcvt.%k.w — %k 跟 dest 类型 letter, =s → fcvt.s.w)。
+//
+// 7.0_f32 % 2.0_f32 = 1.0_f32 → cast 1 → exit(1)。
+
+fn main_jhyy() -> i32 {
+    let a: f32 = 7.0;
+    let b: f32 = 2.0;
+    let r: f32 = a % b;
+    r as i32
+}
