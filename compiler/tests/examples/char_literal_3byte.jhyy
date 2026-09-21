@@ -1,0 +1,24 @@
+// EXPECT: 0
+// v2.13.7 (W-057 RESOLVED): UTF-8 3-byte CJK char literal (`'你'`, U+4F60)
+//
+// Per spec §4.4 v2.13.7 revision: char literal full BMP+ codepoint range
+// (U+0000-U+10FFFF per RFC 3629) now ships via lexer 放宽 + decode_char_literal
+// 加 3/4-byte UTF-8 decode 分支. codegen 路径不变 — parser 把 char codepoint
+// → ast_new_int(PRIM_I32), 走 NODE_INT emit.
+//
+// v1.7.0 Stage 3 显式 lex reject (workarounds.md W-057 DEFERRED since 2026-08-28).
+// v2.13.7 真修: 3-byte `你` (U+4F60 = 20320), UTF-8 bytes: E4 BD A0.
+
+fn main_jhyy() -> i32 {
+    let mut err: i32 = 0;
+
+    // ── 3-byte CJK codepoint ──
+    let c_ni: i32 = '你';   // U+4F60 = 20320, UTF-8: E4 BD A0
+    if c_ni != 0x4F60 { err = err + 1; }
+
+    // Verify cast + comparison work
+    let c_ni2: i32 = '你';
+    if c_ni2 - c_ni != 0 { err = err + 1; }
+
+    err
+}

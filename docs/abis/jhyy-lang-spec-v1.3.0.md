@@ -281,8 +281,13 @@ let latin = 'é';   // 2-byte BMP, U+00E9
 | `\"` | 双引号 |
 | `\xHH` | 十六进制字节 |
 
-**限制 (v1.7.0 Stage 3 ship):** 仅 ASCII + 2-byte BMP (U+0000-U+007F + U+0080-U+07FF) codepoint ship。
-3-byte (U+0800-U+FFFF, e.g. `'你'` = U+4F60) / 4-byte (U+10000+, e.g. `'🎉'` = U+1F389) UTF-8 codepoint 显式 lex reject (per `docs/logs/v1/changelog-v1.7.0.md` Stage 3 段 + `workarounds.md` W-056 RESOLVED 2026-08-27 + W-057 🟡 DEFERRED v2.x 真修)。v2.x 自研 backend codepoint folding 后开放 3/4-byte codepoint ship。
+**限制 (v2.13.7 revision):** 字符字面量全 codepoint 范围 ship (U+0000-U+10FFFF, per RFC 3629):
+- ASCII: 1-byte (U+0000-U+007F), e.g. `'A'` `'0'` `'\n'`
+- 2-byte BMP: U+0080-U+07FF, e.g. `'é'` = U+00E9
+- 3-byte CJK / 扩展 BMP: U+0800-U+FFFF, e.g. `'你'` = U+4F60 (UTF-8: E4 BD A0)
+- 4-byte emoji / 辅助平面: U+10000-U+10FFFF, e.g. `'🎉'` = U+1F389 (UTF-8: F0 9F 8E 89)
+
+历史: v1.7.0 Stage 3 ship 时仅 ASCII + 2-byte BMP (U+0000-U+07FF), 3/4-byte 显式 lex reject (per `docs/logs/v1/changelog-v1.7.0.md` Stage 3 段 + `workarounds.md` W-056 RESOLVED 2026-08-27 + W-057 🟡 DEFERRED v2.x 真修)。v2.13.7 真修 W-057: lexer 放宽 + parser `decode_char_literal` 加 3/4-byte UTF-8 decode 分支。codegen 路径不变 — parser 把 char codepoint → `ast_new_int(PRIM_I32)`, 走 `NODE_INT` emit, 已 work。QBE backend (`%t =w copy 0xCODE`) 跟 self-backend (per `cg_parse_f64_imm_bits` 模式复用) 都覆盖。
 
 ### 4.5 字符串字面量
 
