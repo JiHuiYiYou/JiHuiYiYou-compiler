@@ -2264,6 +2264,52 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             }
         }
 
+        // W-058 真修 (v2.13.8): vendor QBE 不支持 remd/rems 浮点取模
+        //   fold a % b = a - trunc(a/b) * b  (trunc toward 0; match QBE remd spec + C fmod)
+        //   5 IL insns: div + dtosi/stosi + swtof + mul + sub
+        //   跳过 op = "rem" dispatch (下方 line 2272) 直接 early-return
+        //   避免 `&&`/`||` 嵌套 short-circuit (W-081 sub-bug 触发 phi merge gap);
+        //     用 nested plain `if` (无 short-circuit), 每个 if-else 在 QBE IL 走常规 branch
+        if d_op == TOKEN_PERCENT() {
+            let mut is_fmod_qt: i32 = 0;
+            if op_qt == QBE_D() { is_fmod_qt = 1; }
+            if op_qt == QBE_S() { is_fmod_qt = 1; }
+            if is_fmod_qt != 0 {
+                let is_f32: i32 = if op_qt == QBE_S() { 1 } else { 0 };
+                // QBE IL 多态 arith op (div/mul/sub) 靠 `=d`/`=s` 类型后缀, 不嵌 type suffix 进 opcode name
+                //   只有 type-conversion ops (stosi/dtosi/swtof/...) 把 type 后缀编入 name
+                let div_op: *u8 = "div" as *u8;
+                let conv_op: *u8 = if is_f32 != 0 { "stosi" as *u8 } else { "dtosi" as *u8 };
+                let tof_op: *u8 = "swtof" as *u8;
+                let mul_op: *u8 = "mul" as *u8;
+                let sub_op: *u8 = "sub" as *u8;
+                let t1 = *ir_new_tmp(ir, op_qt);
+                let tn = *ir_new_tmp(ir, QBE_W());
+                let tnf = *ir_new_tmp(ir, op_qt);
+                let tm = *ir_new_tmp(ir, op_qt);
+                ir_emit_binary(ir, t1, div_op, left, right);
+                ir_emit_str(ir, "    %t" as *u8);
+                ir_emit_int(ir, "%d" as *u8, tn.id);
+                ir_emit_str(ir, " =w " as *u8);
+                ir_emit_str(ir, conv_op);
+                ir_emit_str(ir, " %t" as *u8);
+                ir_emit_int(ir, "%d" as *u8, t1.id);
+                ir_emit_str(ir, "\n" as *u8);
+                ir_emit_str(ir, "    %t" as *u8);
+                ir_emit_int(ir, "%d" as *u8, tnf.id);
+                ir_emit_str(ir, " =" as *u8);
+                ir_emit_int(ir, "%c" as *u8, op_qt);
+                ir_emit_str(ir, " " as *u8);
+                ir_emit_str(ir, tof_op);
+                ir_emit_str(ir, " %t" as *u8);
+                ir_emit_int(ir, "%d" as *u8, tn.id);
+                ir_emit_str(ir, "\n" as *u8);
+                ir_emit_binary(ir, tm, mul_op, tnf, right);
+                ir_emit_binary(ir, result, sub_op, left, tm);
+                return result;
+            }
+        }
+
         let mut op: *u8 = "add" as *u8;
         if d_op == TOKEN_PLUS()    { op = "add" as *u8; }
         else if d_op == TOKEN_MINUS() { op = "sub" as *u8; }

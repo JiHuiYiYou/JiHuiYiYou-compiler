@@ -1405,7 +1405,7 @@ type ErrChain = struct {
 |---|--------|------|---------|
 | ~~**P2**~~ | ~~类型已定义，codegen 缺失~~ | ~~切片 `[*]T` — 编译器接受 `[*]i32` 但 codegen 无实现~~ | **v0.6.0 sprint 6A 已实现**：按 struct pass-by-value sret 处理 |
 | **P2** | 不完整 | 浮点比较 (`==`/`<`/...) 部分场景未完全类型化（用 QBE 默认指令） | 大多数场景工作，极端 NaN/Inf 行为未规约（v0.5 sprint 5A 修了大部分） |
-| **P3** | 缺失 | 浮点 fmod (`%`) — 整数 `%` 工作，浮点 `%` 拒绝 | 自举可绕过（用整数 mod）。**v1.7.2 patch A1 fact-check**: vendor QBE (2026-08-15 build) 不支持 `remd`/`rems` 浮点 mod 指令, 推 v2.x 真修, 详见 `docs/internal/workarounds.md` W-058 🟡 DEFERRED v2.x |
+| **P3** | 临时方案 (v2.13.8+) | 浮点 fmod (`%`) — 整数 `%` 工作,浮点 `%` codegen 不 emit `remd`/`rems`(vendor QBE 不支持),改 emit user-space formula `a - trunc(a/b) * b`(trunc toward 0; 5 IL insns: polymorphic `div` + `dtosi`/`stosi` + `swtof` + polymorphic `mul` + polymorphic `sub`)。Semantics 跟 QBE upstream `remd`/`rems` spec + C `fmod()` 严格一致(trunc toward 0)。BOTH backend 受益: default QBE 走 fold 5-instruction formula, self-backend opt-in (`JHY_SELF_BACKEND=1`) 同样走 fold 不见 `rem` token。详见 `docs/internal/workarounds.md` W-058 ✅ RESOLVED v2.13.8。**v1.7.2 patch A1 fact-check**: vendor QBE (2026-08-15 build) 不支持 `remd`/`rems`, 推 v2.x 真修; v2.13.8 sprint (commit `pending`) codegen.jhyy 改 fold。**v2.16.0 之后**: vendor QBE 移除, fold fix 仍 work (codegen.jhyy 层, 先于 backend 选择)。 |
 | **P3** | 缺失 | struct / enum 跨 FFI 边界（Windows x64 ABI 不兼容） | 需 C ABI 兼容 struct 传递（v0.6 候选） |
 | **P3** | 缺失 | 变参函数 (`printf` 的 `...`) — JHYY 侧需手动展开为多个 extern | 自举可手写 wrapper |
 | **P3** | 缺失 | 函数回调（把 JHYY 函数指针传给 C 调用） | v1.x 考虑 |
