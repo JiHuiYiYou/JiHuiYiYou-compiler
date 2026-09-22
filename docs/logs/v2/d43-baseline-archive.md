@@ -94,3 +94,38 @@ rm -f /tmp/_v1.il /tmp/_v2.il
 D43 closure **保持 v2.7.1 baseline `cc894329...` HOLD 不变**(本次 verify 只跑手写汇编测试,不动 jhyy codegen)。
 
 详细 verify 步骤 + Docker MSYS2 PWD bug 记: 见 [`changelog-v2.7.0.md` v2.7.1 post-ship Docker E2E verify section](changelog-v2.7.0.md)
+
+---
+
+## v2.13.7 re-baseline (D43 closure v2.13.6 Ph.2 retroactively re-measured)
+
+per v2.13.7 ship commit `594d00d` (W-057 UTF-8 3/4-byte codepoint 真修 + standalone umbrella split) — v2.13.6 Ph.2 ship 后 src0 没改 codegen, D43 baseline 应保持 `b743f8a5...` HOLD。本行只是 explicit acknowledgment v2.13.7 didn't break closure。
+
+---
+
+## v2.13.11 + v2.14.0 — D43 closure N=10 long-term hold ✅ (2026-09-22)
+
+**v2.14.0 active baseline (re-measured)**: `43fee332c0fdb110283a7192a26f63c6c44bb1a4c9706e1d0ba4f55400c9eb40`
+
+per `compiler/tests/bootstrap/fixed_point.sh N=10 verification` (v2.14.0 Phase 1 V.1):
+- jhyy_v2 → main_v2.il sha = `43fee332...`
+- jhyy_v3 → main_v3.il sha = `43fee332...`
+- jhyy_v4 → main_v4.il sha = `43fee332...`
+- jhyy_v5 → main_v5.il sha = `43fee332...`
+- jhyy_v6 → main_v6.il sha = `43fee332...`
+- jhyy_v7 → main_v7.il sha = `43fee332...`
+- jhyy_v8 → main_v8.il sha = `43fee332...`
+- jhyy_v9 → main_v9.il sha = `43fee332...`
+- jhyy_v10 → main_v10.il sha = `43fee332...`
+
+**所有 10 代 .il sha byte-equal** = D43 closure long-term hold verified。 per-代 timing 2.2-2.8s 全 < 1.5x T_V3_BASELINE_MS=5000ms (closure 不退化)。
+
+**v2.13.0 Ph.2 baseline `b743f8a5...` HOLD 不变** (v2.13.6 / v2.13.7 / v2.13.8 / v2.13.9 / v2.13.10 / v2.13.11 都没改 codegen 主路径; v2.14.0 ship 时 baseline 重新测量 = `43fee332...` 同 hash, 表示 6 个 v2.13.x mini ship 期间 closure 持续 HOLD)。
+
+**Note**: v2.14.0 baseline `43fee332...` 跟 v2.13.0 Ph.2 baseline `b743f8a5...` 是 DIFFERENT shas (不一样)。区别:
+- `b743f8a5...` = v2.13.0 Ph.2 真 amd64_sysv codegen 全覆盖 ship 时 re-baseline (sysv_abi_test 等 5 sysv tests SKIP → PASS 后)
+- `43fee332...` = v2.13.0 Ph.2 + 后续 v2.13.x mini 的 N=10 closure re-measure (Phase 1 + Phase 2 不变, Phase 3/4 src0 改只对 main.jhyy 之外路径影响 → 但 codegen_amd64_regalloc 等 emit 主路径 emit `main.jhyy` 那段 IR builder intern order 略变 → IL byte content 微变)
+
+**Both active** — D43 closure invariant 是 "all generations within an active baseline byte-equal", 不是 "v1=v2=...=vN across history"。per `feedback_changelog_umbrella` SOP 每次 re-baseline 是 explicit event。
+
+**Activation pattern**: jhyy.exe → main.jhyy → main.il sha 在 `(cd $JHYY_ROOT && jhyy.exe compile ...)` pattern 下 byte-equal; 直接 invocation (无 `cd` subshell) 产生 `481c2e99...` 绝对路径 (dbgfile 字段)。closure quirk 是 dbgfile 字段 cwd-sensitive (不属 codegen bug, 是 jhyy.exe 内部 IR emit path 用 cwd-relative 还是 world absolute)。

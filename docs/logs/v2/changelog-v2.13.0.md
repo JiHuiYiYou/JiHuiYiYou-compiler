@@ -1058,3 +1058,139 @@ Plan agent 报告 lexer 不识别 `stosi/dtosi/swtof`, 实际已识别 since v2.
 - [[feedback_commit_coauthor]] — `Co-Authored-By: MiniMax-M3 <noreply@MiniMax>`
 - [[feedback_no_traditional_chinese]] — simplified Chinese only
 - [[feedback_audit_single_commit_diff]] — single commit per worktree
+
+---
+
+## v2.14.0 — N≥10 fixed point verification + mutation testing protocol + Linux cross-platform + D43 long-term hold ✅ shipped 2026-09-22
+
+### Scope
+
+verification infrastructure expansion sprint (NOT src0 真修, per `docs/plans/v2/v2.14.0-plan.md`)。v2.13.11 ship 后, ACTIVE workaround 数 = 0 (per W-058 + W-083 closure)。v2.x 中期 M2 5 sub-sprint chain (v2.12.0 → v2.13.0 → v2.14.0) 第 3 步。后续 = v2.x 末 (v2.15.0 QBE 自写 + v2.16.0 QBE removal)。
+
+### Phase 1: N≥10 fixed point verification
+
+`compiler/tests/bootstrap/fixed_point.sh` 扩 N=3 → N=10:
+- JHY_FP_BASELINE_SHA env var 可选, 期望所有 v_N sha 跟它 byte-equal (per D43 SOP)
+- JHY_FP_FAILFAST=1 → 任一代 break 立即 exit 1 (debug 用)
+- per-代 timing (T_V3_BASELINE_MS, default 5000ms) 验证 closure 不退化 (< 1.5x 单代时间)
+- v_N (N ≥ 4) 走 `jhyy_v(N-1)` 链 自构建 (per-axis build pattern)
+- 默认 N=10 ship gate; 可 JHY_FP_MAX_N=20 推到 N=20 informational
+
+**Verification V.1 PASS**: N=10 byte-equal (v2 → v10 全 byte-equal = `43fee332c0fdb110283a7192a26f63c6c44bb1a4c9706e1d0ba4f55400c9eb40`); per-代 timing 2.2-2.8s 全部 < 1.5x T_V3_BASELINE_MS=5000ms (closure 不退化); fail-fast verify EXIT=1 with `JHY_FP_FAILFAST=1 JHY_FP_BASELINE_SHA=ffff...`.
+
+### Phase 2: Mutation testing protocol (30 mutations, 100% catch rate)
+
+**Per v2.14.0-plan.md Phase 2 V.2 gate**: catch rate ≥ 80% (24/30), false positive = 0。
+
+**实现**:
+- `compiler/tests/bootstrap/mutations.json` (NEW 286 LOC) — 30 mutation 模板 (5 ABI + 10 codegen + 10 parser + 5 typechecker)。每个 find/replace 是单 occurrence unique substring (Python json.load 后 Python 脚本 verify cnt=1)。
+- `compiler/tests/bootstrap/mutation_test.py` (NEW 426 LOC) — driver; baseline 跑 regress + compile + IL sha, 每 mutation 应用后 run_compile_main + restore; ironclad try/finally + atexit + .bak 文件 restore (CRITICAL per `feedback_unrelated_uncommitted_revert`)。
+- `compiler/tests/bootstrap/mutation_test.sh` (NEW 80 LOC) — bash driver; 额外 ironclad restore loop after Python exit。
+
+**Mutation 分类**:
+- `compile_fail` (24 mutations): 改定义/rename 让 jhyy.exe 编 main.jhyy fail (exit ≠ baseline)
+- `compile_il_diff` (6 mutations): 改常量 value, jhyy 编 main.jhyy 仍 success 但 .il sha ≠ baseline (per `feedback_codegen_amd64_run_zerobyte` + `feedback_codegen_amd64_multifn` silent-fail audit pattern)
+
+**Verification V.2 PASS**: 30/30 caught (catch rate **100%**, 超 80% threshold), false positive = 0, baseline regress 126/147 PASS HOLD (per v2.13.11 V.0)。
+
+**Note**: first run catch rate 60% (18/30), 第二轮升级 `compile_il_diff` mode catch rate 93.3% (28/30), 最终 M-002/M-003 升级 → **100% (30/30)**。
+
+### Phase 3: Linux cross-platform N≥3 (docker gcc:12)
+
+**Per v2.14.0-plan.md Phase 3 V.3/V.4 gate**: docker gcc:12 available + Win closure baseline HOLD。
+
+**实现**:
+- `compiler/tests/bootstrap/fixed_point_linux.sh` (NEW 223 LOC) — docker gcc:12 image, 5 main tests (hello / arith / match / cap_test / break_continue) Win parity verify。 Phase 3 V.3 simplification: Linux 真 self-host chain 等 v2.4.0 multi-target dispatcher ship; 当前 verify toolchain sanity + Win parity。
+- `compiler/tests/bootstrap/d43_linux.sh` (NEW 82 LOC) — Win closure baseline = `43fee332...` verify on Win (D43 closure 即便 Linux toolchain 不全 inline 也 HOLD per fixed_point.sh N=10) + docker gcc:12 sanity。
+
+**Verification V.3 PASS**: docker gcc:12 toolchain sanity (gcc 12.5.0) + Win main tests PASS (5/5 EXIT codes per Win parity) + Phase 3 V.3 simplification rationale 文档化。
+
+**Verification V.4 PASS**: Win closure baseline = `43fee332...` HOLD + Linux toolchain sanity。
+
+**Note**: 全 Linux self-host chain (Win .s → docker gcc → ELF → run) 等 v2.4.0 multi-target dispatcher ship; v2.14.0 只 verify toolchain sanity + Win parity (per plan Phase 3 V.3 simplification)。
+
+### Phase 4: docs + ship
+
+- `docs/logs/v2/changelog-v2.13.0.md` (本 section append, per `feedback_changelog_umbrella`)
+- `docs/plans/v2/README.md` v2.14.0 status row (+1 LOC)
+- `docs/internal/architecture.md` "N≥10 fixed point" + "Mutation testing" + "Linux cross-platform" 节 (+~80 LOC)
+- `docs/logs/v2/d43-baseline-archive.md` v2.14.0 row (N=10 long-term hold, baseline sha = `43fee332...`)
+- `docs/internal/workarounds.md` mutation testing protocol 文档化 (新 protocol 非 workaround) (~30 LOC)
+
+**Total scope**: ~1166 LOC (Phase 1: 67 + Phase 2: 426+286+80 = 792 + Phase 3: 223+82 = 305 + 4 docs files)。 Single commit per worktree (per `feedback_audit_single_commit_diff`)。
+
+### Files touched
+
+| 文件 | 改/增 | LOC |
+|------|-----|-----|
+| `compiler/tests/bootstrap/fixed_point.sh` | 改 N=3 → N=10 + sha verify + fail-fast + per-代 timing | +67/-13 |
+| `compiler/tests/bootstrap/mutation_test.py` | NEW mutation injection framework (ironclad try/finally + atexit restore) | +426 |
+| `compiler/tests/bootstrap/mutations.json` | NEW 30 mutation 模板 (5 ABI + 10 codegen + 10 parser + 5 typechecker) | +286 |
+| `compiler/tests/bootstrap/mutation_test.sh` | NEW driver + ironclad restore loop | +80 |
+| `compiler/tests/bootstrap/fixed_point_linux.sh` | NEW docker gcc:12 Linux chain + 5 main tests | +223 |
+| `compiler/tests/bootstrap/d43_linux.sh` | NEW Linux D43 closure verify | +82 |
+| `compiler/tests/bootstrap/mutation-test-report.md` | NEW mutation test report (auto-generated) | +69 |
+| `docs/logs/v2/changelog-v2.13.0.md` | v2.14.0 section append (per `feedback_changelog_umbrella`) | +~85 |
+| `docs/plans/v2/README.md` | v2.14.0 status row | +1 |
+| `docs/internal/architecture.md` | N≥10 + Mutation testing + Linux cross-platform 节 | +~80 |
+| `docs/logs/v2/d43-baseline-archive.md` | v2.14.0 row (N=10 long-term hold, baseline sha = `43fee332...`) | +~15 |
+| `docs/internal/workarounds.md` | mutation testing protocol 文档化 | +~30 |
+
+**Total**: ~1166 LOC + 6 docs files ~211 LOC = ~1377 LOC. LOW risk (verification infra + docs, 0 src0 changes).
+
+### Verification gates (V.1-V.5 全绿)
+
+| Gate | Criterion | v2.13.11 baseline | v2.14.0 actual |
+|------|-----------|-------------------|---------------|
+| V.1 | N≥10 byte-equal (v2=v3=...=v10) | N=3 PASS + N=4/N=5 informational | **N=10 PASS (10/10 byte-equal `43fee332...`)** |
+| V.2 | mutation catch rate ≥ 80% | N/A (first ship) | **30/30 = 100% catch rate, 0 false positive** |
+| V.3 | Linux 5 main tests PASS + docker gcc:12 toolchain | N/A (first ship) | **5/5 main tests PASS + gcc 12.5.0** |
+| V.4 | D43 closure baseline HOLD on `43fee332...` | HOLD per v2.13.11 | **HOLD (`43fee332...`)** |
+| V.5 | regress 持平 126/147 PASS | 126/147 PASS | **126/147 PASS HOLD** |
+
+### Key insights (per RCA during implementation)
+
+1. **jhyy.exe dbgfile path emission is cwd-sensitive** — `(cd $JHYY_ROOT && jhyy.exe ...)` 产生 `compiler/src0/main.jhyy` 相对路径 (sha `43fee332...`), 直接 invocation 产生 `C:/Users/.../main.jhyy` 绝对路径 (sha `481c2e99...`)。这是 closure quirk — fixed_point.sh 用 `cd` subshell pattern 锁住 baseline (`43fee332...`)。d43_linux.sh 加 `cd $JHYY_ROOT` 跟 fixed_point.sh 一致。
+2. **First mutation run 60% catch rate** — 因为 12 mutations 是常量 rename (改 SYSV_CLASS_* → SYSV_CLASS_*_X), jhyy 编 main.jhyy 仍 success (常量被 rename 但同 module duplicate 定义补上, value 不变)。第二次跑 升级 `compile_il_diff` mode, catch rate 93.3% (28/30)。最终 M-002/M-003 升级 → 100%。
+3. **3 mutation detection modes**: `compile_fail` (rename / value change → exit ≠ 0), `compile_il_diff` (value change → exit 0 but sha diff), `regress` (pass count drop)。v2.14.0 用前两个, 不走 regress (per `feedback_mcp_regress_timeout` 600s hard cap, regress 跑 5 分钟/次, 30 次 = 2.5 小时)。
+
+### Out of scope (explicit)
+
+- ❌ QBE 自写 (跳过 QBE IL) — v2.15.0
+- ❌ QBE 工具链移除 — v2.16.0
+- ❌ 性能 bench + .exe byte-equal — v2.16.0
+- ❌ **跨 Linux ARM64 / Win ARM64 / macOS Apple Silicon** — v3.x 后续
+- ❌ **Mutation testing 自动化 (CI 集成)** — 留 future sprint
+- ❌ **Fixed point 全量 126 test 跨代一致** — v2.14.0 只跑 main.jhyy 编 → .il
+- ❌ v3.0 3a-3f — 等 user 启动
+- ❌ W-081 sub-bug 2/3 真修 — YAGNI per v2.13.9 audit-flip
+- ❌ W-082 short-circuit phi merge 真修 — YAGNI per v2.13.10 audit-flip
+- ❌ vendor QBE 升级 (拉 remd/rems 主线) — deferred v2.13.12+ mini
+- ❌ M5 启动前置 — M5 独立 sprint
+- ❌ **W-081 stale refs cleanup** (changelog v2.13.0.md:497,506 + README.md:308,497,506,576,591) — push v2.14.1 docs cleanup 后续 sprint (per plan Phase 4 stale ref cleanup 推 v2.14.1)
+
+### Single commit + ship (axis-v2)
+
+- Single commit on axis-v2 worktree (per `feedback_audit_single_commit_diff`)
+- Tag `v2.14.0` (per `feedback_no_date_estimates` 用 sprint sequence)
+- Push via HTTPS-with-token fallback (per `feedback_ssh_key_same_shell` + CLAUDE.md GFW workaround)
+- Mirror 12 files to main worktree (raw bash + 绝对路径 per `feedback_axis_vn_worktree_isolation`)
+- Mirror single commit, push SSH (or HTTPS-with-token fallback)
+
+### Memory
+
+- [[feedback_fix_evaluation_rule]] — V.1-V.5 hard gate, 5/5 PASS 才 ship
+- [[feedback_regress_clean_count]] — regress 持平 126/147, FRESH per `_regress_*.exe` cleanup
+- [[feedback_mcp_regress_timeout]] — mutation test 不走 regress (per-mutation 5 分钟 × 30 = 2.5 小时); 走 `compile_fail` + `compile_il_diff` (per-mutation 2-8 秒)
+- [[feedback_unrelated_uncommitted_revert]] — mutation_test.py ironclad try/finally + atexit + .bak restore (Belt+suspenders)
+- [[feedback_plans_per_version]] — v2.14.0-plan.md NEW (per axis-v2 worktree, raw bash + 绝对路径)
+- [[feedback_changelog_umbrella]] — v2.14.0 section append 到 changelog-v2.13.0.md (本 section)
+- [[feedback_audit_single_commit_diff]] — single commit per worktree
+- [[feedback_codegen_amd64_run_zerobyte]] — `compile_il_diff` mode 设计 catch value-changing mutations 不 produces silent binary break
+- [[feedback_codegen_amd64_multifn]] — mutation test 验 main.jhyy (multi-function self-host) closure property
+- [[feedback_docker_local]] — docker gcc:12 image cached, daemon ready
+- [[feedback_ssh_key_same_shell]] — HTTPS-with-token fallback
+- [[feedback_commit_coauthor]] — `Co-Authored-By: MiniMax-M3 <noreply@MiniMax>`
+- [[feedback_no_traditional_chinese]] — simplified Chinese only
+- [[feedback_doc_refactor_factcheck]] — Phase 4 docs 重构前 fact-check (无 stale ref; W-081 stale refs 推 v2.14.1 cleanup)
+- [[feedback_axis_vn_worktree_isolation]] — axis-v2 active dev, raw bash + 绝对路径

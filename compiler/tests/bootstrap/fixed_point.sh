@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fixed_point.sh — N≥3 selfhost closure 验算 (v2.9.0 V2-C Part 1)
+# fixed_point.sh — N≥10 selfhost closure 验算 (v2.9.0 V2-C Part 1 + v2.14.0 N=10 升级)
 #
 # 用法: fixed_point.sh
 #
@@ -7,21 +7,31 @@
 #   .il 跨代 byte-equal (per D43 closure ship gate)
 #   cap_test.jhyy 跨代 exit code = 42 (per V3-C v3.1.0 ship, 8-byte Cap<T>)
 #
-# N=3 是 primary ship gate (per D43); N=4/5 informational only.
+# N=3 是 primary ship gate (per D43); N=4/5 informational; N=6-N=10 informational
+# for v2.14.0 ship (per docs/plans/v2/v2.14.0-plan.md Phase 1).
 #
-# v1↔v2 closure 复用 byte_equal.sh (per D26); v2↔v3, v3↔v4, v4↔v5 由本 script
+# v1↔v2 closure 复用 byte_equal.sh (per D26); v2↔v3, v3↔v4, ... 由本 script
 # 直接 diff. .s / .exe byte-equal 不强制 (v2.6.0 起 peephole + regalloc 改 .s,
 # IL closure 仍是 ground truth per D43).
+#
+# v2.14.0 升级:
+#   - JHY_FP_MAX_N default 5 → 10
+#   - JHY_FP_BASELINE_SHA: 可选环境变量, 期望所有 v_N sha 跟它 byte-equal (per
+#     docs/logs/v2/d43-baseline-archive.md 当前 active baseline)
+#   - JHY_FP_FAILFAST=0 默认; 设 1 → 任一代 break 立即 exit 1 (而非 INFO)
+#   - per-代 timing 验证 closure 不退化 (10 代 < 1.5x 单代时间)
 #
 # 环境变量:
 #   JHYY_V1      = jhyy v1 frozen binary (default: compiler/build/bin/jhyy_v1.exe.exe)
 #   JHYY_V2      = jhyy v2 binary         (default: compiler/build/bin/jhyy.exe)
 #   JHYY_INPUT   = 编的目标 .jhyy         (default: compiler/src0/main.jhyy)
 #   JHY_FP_BUILD_DIR = 临时 build dir     (default: /tmp/jhyy_fp)
-#   JHY_FP_MAX_N     = 最大迭代次数      (default: 5)
+#   JHY_FP_MAX_N     = 最大迭代次数      (default: 10)
+#   JHY_FP_BASELINE_SHA = 期望所有 v_N sha (default: 空, 走 SHA_V3 reference)
+#   JHY_FP_FAILFAST  = 1 → fail-fast (default 0, INFO 不 fail)
 #
 # 退出码:
-#   0  = N=3 PASS + cap_test 跨代一致
+#   0  = N=3 PASS + cap_test 跨代一致 (per D43 primary ship gate)
 #   1  = FAIL 或 setup 错 (binary 找不到等)
 
 set -uo pipefail
@@ -35,7 +45,9 @@ JHYY_V1="${JHYY_V1:-$JHYY_ROOT/compiler/build/bin/jhyy_v1.exe.exe}"
 JHYY_V2="${JHYY_V2:-$JHYY_ROOT/compiler/build/bin/jhyy.exe}"
 JHYY_INPUT="${JHYY_INPUT:-$JHYY_ROOT/compiler/src0/main.jhyy}"
 JHY_FP_BUILD_DIR="${JHY_FP_BUILD_DIR:-/tmp/jhyy_fp}"
-JHY_FP_MAX_N="${JHY_FP_MAX_N:-5}"
+JHY_FP_MAX_N="${JHY_FP_MAX_N:-10}"
+JHY_FP_BASELINE_SHA="${JHY_FP_BASELINE_SHA:-}"
+JHY_FP_FAILFAST="${JHY_FP_FAILFAST:-0}"
 
 CAP_TEST="$JHYY_ROOT/compiler/tests/examples/cap_test.jhyy"
 CAP_TEST_EXPECT=42
@@ -81,12 +93,14 @@ INFO=0
 # 简化: 直接用 `jhyy.exe compile` (含 link) 出 v3.exe — 链接依赖 runtime.c,
 # 主流程一致.
 
-echo "=== fixed-point N≥3 selfhost closure 验算 ==="
+echo "=== fixed-point N≥$JHY_FP_MAX_N selfhost closure 验算 ==="
 echo "  JHYY_V1   = $JHYY_V1"
 echo "  JHYY_V2   = $JHYY_V2"
 echo "  JHYY_INPUT = $JHYY_INPUT"
 echo "  BUILD_DIR = $JHY_FP_BUILD_DIR"
 echo "  MAX_N     = $JHY_FP_MAX_N"
+echo "  BASELINE_SHA = ${JHY_FP_BASELINE_SHA:-(none, 走 SHA_V3 reference)}"
+echo "  FAILFAST     = $JHY_FP_FAILFAST"
 echo
 
 # Build v3.exe from v2 (jhyy.exe) compiling main.jhyy
@@ -175,13 +189,21 @@ fi
 echo
 
 # ════════════════════════════════════════════════════════════════════════════
-# [2/N] IL closure N=4 / N=5 (informational, NOT ship gate)
+# [2/N] IL closure N=4 .. N=$JHY_FP_MAX_N (informational; v2.14.0 N=10 ship)
+#
+# per-代 timing 验证 closure 不退化 (per v2.14.0-plan.md Phase 1 V.1):
+#   单代 wall time baseline = T_V3_BASELINE_MS (default 5000ms; 可外部设置)
+#   后续代 wall time < 1.5x T_V3_BASELINE_MS → closure 不退化 (closure property)
+#   超 1.5x → ⚠️ WARN (不 fail, 但 ship gate 关注)
+# baseline sha verify (per v2.14.0-plan.md Phase 1):
+#   如果 JHY_FP_BASELINE_SHA 设了,每个 v_N sha 必须等于它 (否则 FAIL,
+#   JHY_FP_FAILFAST=1 → 立即 exit 1)
 # ════════════════════════════════════════════════════════════════════════════
 
-for N in 4 5; do
-    if [[ $N -gt $JHY_FP_MAX_N ]]; then
-        break
-    fi
+# T_V3_BASELINE_MS 可由 caller 设置 (基于 T_v3 emit 实测 wall time); 默认 5000ms
+T_V3_BASELINE_MS="${T_V3_BASELINE_MS:-5000}"
+
+for N in $(seq 4 "$JHY_FP_MAX_N"); do
     PREV_N=$((N - 1))
     PREV_BIN="$JHYY_ROOT/compiler/build/bin/jhyy_v${PREV_N}_fp.exe.exe"
     PREV_IL="$JHY_FP_BUILD_DIR/main_v${PREV_N}.il"
@@ -196,17 +218,28 @@ for N in 4 5; do
     if ! (cd "$JHYY_ROOT" && "$PREV_BIN" compile "$JHYY_INPUT" -o "$NEXT_BIN_BASE" > /dev/null 2>&1); then
         echo "  ⚠️  SKIP (v$PREV_N failed to compile src0/main.jhyy → v$N.exe)"
         INFO=$((INFO + 1))
+        if [[ "$JHY_FP_FAILFAST" == "1" ]]; then
+            echo "  ❌ FAILFAST (JHY_FP_FAILFAST=1, exit 1)" >&2
+            exit 1
+        fi
         continue
     fi
     if [[ ! -f "$NEXT_BIN" ]]; then
         echo "  ⚠️  SKIP (v$N binary not at $NEXT_BIN)"
         INFO=$((INFO + 1))
+        if [[ "$JHY_FP_FAILFAST" == "1" ]]; then
+            echo "  ❌ FAILFAST (JHY_FP_FAILFAST=1, exit 1)" >&2
+            exit 1
+        fi
         continue
     fi
     cp "$NEXT_BIN" "$NEXT_BIN_INROOT"
 
-    # emit .il using v_N.exe (用 --no-link 跳过链接更快)
+    # emit .il using v_N.exe (用 --no-link 跳过链接更快) + timing
+    T_START=$(date +%s%3N 2>/dev/null || date +%s)
     (cd "$JHYY_ROOT" && "$NEXT_BIN_INROOT" compile --target=amd64_win --no-link "$JHYY_INPUT" -o "$JHY_FP_BUILD_DIR/_v${N}_main" > /dev/null 2>&1) || true
+    T_END=$(date +%s%3N 2>/dev/null || date +%s)
+    T_N_MS=$((T_END - T_START))
     if [[ -f "$JHY_FP_BUILD_DIR/_v${N}_main.il" ]]; then
         cp "$JHY_FP_BUILD_DIR/_v${N}_main.il" "$NEXT_IL"
     fi
@@ -215,8 +248,29 @@ for N in 4 5; do
     PREV_SHA="$(sha256sum "$PREV_IL" 2>/dev/null | awk '{print $1}' || echo MISSING)"
     echo "  v$PREV_N=$PREV_SHA"
     echo "  v$N=$NEXT_SHA"
+    echo "  v$N emit time: ${T_N_MS}ms (baseline T_v3=${T_V3_BASELINE_MS}ms)"
 
+    # Per-代 timing 验证: 不退化
+    if [[ $T_N_MS -gt $((T_V3_BASELINE_MS * 3 / 2)) ]]; then
+        echo "  ⚠️  WARN (v$N emit time ${T_N_MS}ms > 1.5x baseline ${T_V3_BASELINE_MS}ms — closure 退化风险)"
+    fi
+
+    SHA_OK=0
     if [[ "$NEXT_SHA" == "$PREV_SHA" && "$NEXT_SHA" != "MISSING" ]]; then
+        SHA_OK=1
+    fi
+    # Optional baseline sha verify (per v2.14.0-plan.md Phase 1)
+    if [[ -n "$JHY_FP_BASELINE_SHA" && "$NEXT_SHA" != "$JHY_FP_BASELINE_SHA" && "$NEXT_SHA" != "MISSING" ]]; then
+        echo "  ❌ FAIL (v$N sha ≠ JHY_FP_BASELINE_SHA, expected $JHY_FP_BASELINE_SHA)"
+        SHA_OK=0
+        if [[ "$JHY_FP_FAILFAST" == "1" ]]; then
+            diff "$PREV_IL" "$NEXT_IL" | head -30 >&2
+            echo "  ❌ FAILFAST (JHY_FP_FAILFAST=1, exit 1)" >&2
+            exit 1
+        fi
+    fi
+
+    if [[ $SHA_OK -eq 1 ]]; then
         echo "  ✅ PASS (N=$N .il byte-equal)"
         PASS=$((PASS + 1))
     else

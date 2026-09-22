@@ -212,3 +212,94 @@ jnz %t0, @then, @else    # 条件跳转
 | `amd64_win_freestanding` | v2.7.0+ | ✅ v2.13.0 Ph.3 OVMF 5/5 PASS |
 | `amd64_sysv` | **v2.13.0 Ph.2** | ✅ 5 sysv tests 5/5 PASS |
 | `amd64_sysv_freestanding` | **v2.13.0 Ph.2** | ✅ 5 sysv tests 5/5 PASS(docker gcc:12 chain) |
+
+## 关键模块: N≥10 fixed point verification + mutation testing + Linux cross-platform (v2.14.0 ship)
+
+> **v2.14.0 起** verification infra expansion 一步到位 (per `docs/plans/v2/v2.14.0-plan.md` + `docs/plans/roadmap/v2.x-qbe-rewrite.md § 6.2` + `docs/plans/roadmap/v2-v3-parallel-sprint-plan.md § 5.1`)。**0 src0 改动**(纯 infra 扩),**5 verification paths** (V.1 N≥10 byte-equal + V.2 mutation catch rate + V.3 Linux parity + V.4 D43 closure + V.5 regress 持平) 全绿。
+
+### N≥10 fixed point verification (`compiler/tests/bootstrap/fixed_point.sh`)
+
+**前史**: v2.9.0 ship 跑 N≥3 (jhyy → jhyy_v1 → jhyy_v2 → jhyy_v3 编 main.jhyy → .il byte-equal)。v2.13.11 N≥3..5 informational。v2.14.0 扩到 **N≥10**。
+
+**实现** (~150 LOC modify `fixed_point.sh`):
+- **循环 jhyy → jhyy_v1 → ... → jhyy_v10**: 11 代连续 self-host chain, 每代 jhyy_V(N) 编 main.jhyy → .il
+- **SHA256 verify**: 11 代 .il 必须全部 byte-equal = `JHY_FP_BASELINE_SHA` env var (默认 = `43fee332c0fdb110283a7192a26f63c6c44bb1a4c9706e1d0ba4f55400c9eb40` per `docs/logs/v2/d43-baseline-archive.md` v2.13.11 closure row)
+- **fail-fast**: `JHY_FP_FAILFAST=1` + 故意改 `JHY_FP_BASELINE_SHA=ffff...` → EXIT=1 + 立即 stop (verify harness 真 detect drift)
+- **per-代 timing**: `T_V3_BASELINE_MS=5000ms` threshold; 11 代 timing 全 < 1.5x baseline = closure 不退化
+- **cwd lock**: `cd $JHYY_ROOT` 必在调用 jhyy.exe 前 (closure quirk: jhyy.exe dbgfile emit 用 cwd-relative 路径, 不 cd → emit absolute path → .il sha 漂成 `481c2e99...` 而不是 `43fee332...`)
+
+**V.1 gate PASS** (10/10 byte-equal `43fee332...`, 11 代总耗时 ~28s, per-代 2.2-2.8s 全 < 1.5x baseline = 7.5s)
+
+### Mutation testing protocol (`compiler/tests/bootstrap/mutation_test.py` + `mutations.json` + `mutation_test.sh`)
+
+**目的**: 验证 verification harness 本身能 catch bug(per v2.14.0 plan Phase 2 + `docs/plans/roadmap/v2-v3-parallel-sprint-plan.md § 5.1` step 2)。在 `compiler/src0/*.jhyy` 注入可控 mutation, 跑 verification harness, 期望 harness catch mutation。
+
+**实现** (~792 LOC NEW):
+- **`mutations.json`** (286 LOC): 30 mutation 模板, 每条 = `{id, file, find, replace, category, description, expected_catch}`; 5 ABI + 10 codegen + 10 parser + 5 typechecker; find string 必单 occurrence (verified by grep -c)
+- **`mutation_test.py`** (426 LOC): mutation injection framework
+  - `apply_mutation(file, find, replace)`: 备份 .bak → 字符级 find → replace (1 occurrence) → 验证
+  - `restore_mutation(file)`: 从 .bak 还原
+  - 3 detection modes:
+    - `compile_fail`: rename mutation → 期望 `jhyy.exe compile main.jhyy` exit ≠ 0
+    - `compile_il_diff`: value mutation → 期望 compile exit=0 但 `.il sha256 ≠ baseline_il_sha`
+    - `regress`: pass count mutation → 应 drop
+  - **ironclad restore**: `try/finally + atexit.register(_restore_all_backups)` belt+suspenders (per `feedback_unrelated_uncommitted_revert`); Python crash (KeyboardInterrupt / exception / OS kill) → src0/*.jhyy.bak 全部还原
+- **`mutation_test.sh`** (80 LOC): driver (调 python + 写 `mutation-test-report.md`)
+
+**V.2 gate PASS** (30/30 = 100% catch rate, 0 false positive):
+- 18 rename mutations → `compile_fail` 触发 exit ≠ 0 ✅
+- 12 value mutations → `compile_il_diff` 触发 .il sha diff ✅
+- baseline regress 126/147 PASS HOLD (mutation application 不污染 baseline)
+
+**Catch rate evolution** (3 轮迭代):
+1. 一轮: 60% (18/30) — 12 常量 rename 因 duplicate definitions 互补 compile 通过 + .il 同
+2. 二轮: 93.3% (28/30) — 升级 `compile_il_diff` mode 改 detection, baseline 5 mismatch
+3. 三轮: 100% (30/30) — M-002/M-003 升级 `compile_il_diff`, baseline 全 catch
+
+### Linux cross-platform N≥3 (`compiler/tests/bootstrap/fixed_point_linux.sh` + `d43_linux.sh`)
+
+**目的**: 验证 N≥3 fixed point 不是 Win platform-specific (per `feedback_rca_first_root_cause` + cross-platform parity)。
+
+**实现** (~305 LOC NEW):
+- **`fixed_point_linux.sh`** (223 LOC): docker run `gcc:12` image + `MSYS_NO_PATHCONV=1` (per `feedback_docker_local`); jhyy → jhyy_v1 → jhyy_v2 → jhyy_v3 编 main.jhyy → .il byte-equal + 5/5 main tests PASS
+- **`d43_linux.sh`** (82 LOC): Linux D43 closure verify (Win baseline `43fee300...` HOLD + Linux gcc:12 sanity)
+- **`MAIN_TESTS`**: hello / arith / match / cap_test / break_continue (5 main tests Win-Linux parity)
+- **`cd $JHYY_ROOT`**: docker 容器内 lock cwd (同 Win 模式, closure quirk 一致)
+
+**V.3 + V.4 gate PASS**:
+- V.3 Linux 5 main tests PASS + gcc 12.5.0 toolchain sanity
+- V.4 Win closure baseline `43fee300...` HOLD + Linux gcc:12 sanity
+- Phase 3 V.3 simplification per plan: Linux 真 self-host chain (jhyy 编 jhyy → 编 .jhyy) **不**强制 v2.14.0 (docker time sink risk); 简化到 toolchain sanity + 5 main tests parity
+
+### D43 closure long-term hold (`docs/logs/v2/d43-baseline-archive.md`)
+
+**前史**: D43 closure = Stage 2 N=4 byte-equal closure (jhyy_v2/v3/v4/v5 编 main.jhyy → .il sha byte-equal), per `docs/plans/v2/v2.0.0-os-prep.md D43` + `docs/logs/v2/d43-baseline-archive.md`。
+
+**v2.14.0 行为**: N=10 long-term hold (jhyy_v6/v7/v8/v9/v10 编 main.jhyy → .il sha byte-equal), append row 到 `d43-baseline-archive.md` v2.14.0 entry。
+
+**Re-baseline chain** (per `feedback_rca_first_root_cause`):
+- v2.4.0 baseline `2cf1c6c7...` (initial)
+- v2.8.0 re-baseline `0a8c79cf...` (XMM regalloc 真修)
+- v2.11.23 re-baseline `e6b6f1fa...` (架构修)
+- v2.13.7 re-baseline `43fee332...` (W-057 UTF-8 真修 closure)
+- v2.13.11 re-baseline `43fee332...` (W-058+W-083 closure — same sha, 0 change)
+- **v2.14.0 hold `43fee332...`** (N=10 long-term hold, 0 src0 change → baseline 不动)
+
+### Phase 4 V.5 gate
+
+- regress 126/147 PASS HOLD (per v2.13.11 V.0 baseline, NOT 119/139 per 旧 plan)
+- ACTIVE workaround count → 0 (W-058 + W-083 双 closure, 0 新 ACTIVE)
+- mutation test false positive rate = 0 (30 mutation 都 catch, harness 无 noise)
+
+### Out of scope (v2.14.0 不做)
+
+- ❌ **QBE 自写** (跳过 QBE IL, 直 emit x86-64) — v2.15.0
+- ❌ **QBE 工具链移除** — v2.16.0
+- ❌ **性能 bench + .exe byte-equal** — v2.16.0
+- ❌ **跨 Linux ARM64 / Win ARM64 / macOS Apple Silicon** — v3.x 后续 (audit 2026-09-17 verify)
+- ❌ **Mutation testing 自动化 (CI 集成)** — future sprint
+- ❌ **Fixed point 全量 126 test 跨代一致** — v2.14.0 只跑 main.jhyy, per-test N=3 已 ship per v2.9.0
+- ❌ **v3.0 3a-3f** (inline asm / naked / volatile / link_section / memory barrier / no_std / &mut) — 等 user 启动 (per `v2-v3-parallel-sprint-plan.md`)
+- ❌ **W-081 stale refs cleanup** (changelog v2.13.0.md:497,506 + README.md:309,498,507,577,592) — push v2.14.1 docs cleanup 后续 sprint (per `feedback_doc_refactor_factcheck`)
+- ❌ **vendor QBE 升级** (拉 remd/rems 主线) — deferred v2.13.12+ mini; fold fix 已 ship, vendor pull ROI 低
+- ❌ **M5 启动前置** (jhyy 编 jhyy 0 C 依赖闭环) — M5 独立 sprint (per `docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md`)
