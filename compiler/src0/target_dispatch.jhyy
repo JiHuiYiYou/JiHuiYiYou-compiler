@@ -25,6 +25,8 @@
 // TARGET_AMD64_SYSV_FREESTANDING=3 (placeholder, v2.7.1 ship); update
 // target_backend_mode SYSV → BACKEND_SELF (不再 QBE fallback); add
 // target_abi_module(t) chokepoint for cg_module dispatch.
+// v2.16.0: parity confirmed with C-side target_dispatch.c (all 4 targets →
+// BACKEND_SELF; QBE removed).
 
 extern fn strcmp(a: *u8, b: *u8) -> i32;
 extern fn jh_fputs_stderr(s: *u8) -> i32;

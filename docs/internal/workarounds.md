@@ -7267,3 +7267,59 @@ When `t42 = loadl t41` runs (where `t41 = data_ptr + i*16` is a real runtime add
 - `compiler/src0/main.jhyy:113-119` `jh_write_il_enabled()` env gate helper
 - `compiler/src0/main.jhyy:692-757` `build_il` in-mem dispatch (priority chain: in-mem self > write .il)
 - `compiler/src0/main.jhyy:1483-1500` `compile()` skip run_backend when build_il returns 2
+
+---
+
+## W-085: codegen small-frame `fn(*T, i32, i32)` 第 3 i32 参数 save 寄存器错位 — 🟡 ACTIVE (v2.16.0 ship 2026-09-22)
+
+**ID:** W-085 (NEW in v2.16.0 bench.sh work)
+
+**状态:** 🟡 ACTIVE — (2026-09-22, v2.16.0 ship) — codegen bug discovered during bench.sh nqueens work。fix deferred to v3.x (per v2.16.0 scope discipline — QBE 移除 + bench + byte-equal,not codegen 真修)。**Workaround in place**:bench.sh nqueens uses reordered signature `(i32, i32, *T)`。bench.sh ratio 跑出 nq 0.965x / ack 1.000x / fib 1.531x — nqueens 0.965x 证明 workaround 生效。
+
+**触发面:** 任何 jhyy 函数签名 = `fn(*T, i32, i32)` **AND** 本地栈 frame ≤ ~136 字节 (small frame threshold)。具体:`compiler/src0/codegen.jhyy` 中 `emit_call` 第 3 个 i32 参数的 save 寄存器选择逻辑有 frame-size threshold:frame < threshold (136B) → 用 `%ecx` (low 32 of %rcx,即第 1 个 pointer arg 的低 32 位) 覆盖 `%r8d`;frame ≥ threshold (264B+) → 正确用 `%r8d`。
+
+**症状:** 函数内第 3 个 i32 参数读出来是 garbage (low 32 bits of pointer arg,例如 `0x03100000` 之类的地址低 32 位)。printf debug 显示 "c=278910736" 而非传入的 `c` 值。Codegen 输出对比:
+
+```asm
+# BAD (small frame 136B) — fn(*i32, i32, i32):
+movq %rcx, -40(%rbp)        # slot 0: cols → RCX (correct)
+movl %edx, -48(%rbp)        # slot 1: row → RDX (correct)
+movl %ecx, -56(%rbp)        # slot 2: c → %ecx (BUG: should be %r8d)
+
+# GOOD (large frame 264B) — same signature fn(*i32, i32, i32):
+movq %rcx, -128(%rbp)       # slot 0: cols → RCX (correct)
+movl %edx, -136(%rbp)       # slot 1: row → RDX (correct)
+movl %r8d, -144(%rbp)       # slot 2: c → R8D (correct)
+
+# GOOD (fn(i32, i32, i32)) — all i32 args:
+movl %ecx, -40(%rbp)        # slot 0: a → RCX low 32 (correct)
+movl %edx, -48(%rbp)        # slot 1: b → RDX (correct)
+movl %r8d, -56(%rbp)        # slot 2: c → R8D (correct)
+```
+
+**为什么 regress 126/147 PASS:** regress 测试集 109 个 jhyy 测试 + 21 skipped + 17 native tests 中,只有 bench.sh 的 nqueens 触发了 `(ptr, i32, i32)` 小 frame pattern。其他测试要么是 `(i32, i32, i32)` (c 用 R8D 正确)、要么是 `(*T, i32)` (2 个 arg 不触发第 3 slot)、要么是 large frame (默认 register 选择正确)。
+
+**Workaround pattern (适用 bench.sh + 任何 jhyy 用户代码):**
+1. **首选**: reorder fn signature 让 i32 在前 — `fn ok(row: i32, c: i32, cols: *i32)` 而不是 `fn ok(cols: *i32, row: i32, c: i32)`。MS x64 ABI 顺序 RCX/RDX/R8/R9 在 reorder 后是 i32/i32/ptr,3rd slot 仍是 R8 但 ptr 走 R8 全 64 位,bug pattern 不触发。
+2. **次选**: 增加 fn 本地栈 frame size (e.g. 加 `let _pad: [i32; 32] = [0; 32];` 占位) 让 frame 跨过 threshold,codegen 走 large-frame 正确路径。
+
+**v3.x fix 计划:**
+- `compiler/src0/codegen.jhyy` 中 `emit_call` slot-to-register 选择逻辑审查 + 修复。Frame-size threshold 应该是 "by-type" (i32 → R8D, ptr → R8 全 64) 而不是 "by-frame-size"。
+- 加 regress test case 显式 trigger `(ptr, i32, i32)` small frame 模式 (e.g. `fn set3(p: *i32, a: i32, b: i32) { p[0] = a; p[1] = b; }` + main read 验证 a/b 没被污染)。
+
+**文件清单:**
+| File | LOC | Action |
+|------|-----|--------|
+| `compiler/tests/bootstrap/bench.sh` | +20 / -15 | MOD (nqueens signature reorder + workaround comment in header) |
+| `docs/internal/workarounds.md` | +60 | W-085 entry (本 entry) |
+| `docs/logs/v2/changelog-v2.13.0.md` | ~+5 | MOD (v2.16.0 section append: W-085 ACTIVE + 1 disclosure) |
+
+**superseder:** 不适用 — 待 v3.x 真修后建 W-085 RESOLVED entry。
+
+**superseded-by relation:** 无 — 这是新发现的 codegen bug,没有前置 workaround 兜底(只是 v2.16.0 bench.sh 用户代码层面 reorder)。
+
+**引用:**
+- `compiler/src0/codegen.jhyy` (emit_call slot-to-register 选择 — 待 v3.x 修)
+- `compiler/tests/bootstrap/bench.sh:23-25` (W-085 workaround comment header)
+- `compiler/tests/bootstrap/bench.sh:nq.jhyy heredoc` (reordered signature 实际代码)
+- bench.sh output nq ratio 0.965x (workaround 验证)

@@ -2,15 +2,14 @@
 <!--
   installer/wix/compiler/jhyy-compiler.wxs : JHYY compiler MSI definition (v1.5.2)
 
-  Sprint v1.5.2 — 装 jhyy.exe + qbe.exe 到 C:\Program Files\JHYY\bin\,
+  Sprint v1.5.2 — 装 jhyy.exe 到 C:\Program Files\JHYY\bin\, v2.16.0 QBE 完全移除,
   写系统 PATH (HKLM, 要 admin), 检测 MSYS2 + gcc 没就 warn
   (不自动装, 自动装推到 v1.5.3 Burn bundle per `力度 1 检测+引导` 决策).
 
   Layout:
     C:\Program Files\JHYY\
     ├── bin\
-    │   ├── jhyy.exe    (jhyy-side production binary, per v1.4.0 flip)
-    │   └── qbe.exe     (vendored)
+    │   └── jhyy.exe    (jhyy-side production binary, per v1.4.0 flip + v2.16.0 self-backend sole production path)
     └── common\
         └── license.rtf (双语)
 
@@ -331,11 +330,11 @@
 
   <Fragment>
     <!--
-      Files in bin\ : jhyy.exe + qbe.exe (production binaries) + runtime.c
+      Files in bin\ : jhyy.exe (sole production binary, v2.16.0 QBE removed) + runtime.c
       + jhyy_helpers.c (v1.5.6 W-043) + runtime.h (v1.5.6 W-044).
       The C sources are needed because installer-layout jhyy.exe uses
       jh_paths_init layout (a) which builds "<bindir>\runtime.c" +
-      "<bindir>\jhyy_helpers.c" paths from sibling qbe.exe. runtime.h
+      "<bindir>\jhyy_helpers.c" paths from sibling layout (b) or hard-coded location. runtime.h
       is needed because runtime.c line 1 does #include "runtime.h"
       and gcc resolves it from runtime.c's dir. Regress uses
       source-tree layout (b), which is why these only manifest in
@@ -359,12 +358,7 @@
               Checksum="yes" />
       </Component>
 
-      <Component Id="QbeExe" Bitness="always64" Guid="096E27A7-65E2-465C-BA58-399A02C0F000">
-        <File Id="QbeExeFile"
-              Source="!(bindpath.bin)\qbe.exe"
-              KeyPath="yes"
-              Checksum="yes" />
-      </Component>
+      <!-- v2.16.0: QbeExe Component REMOVED (QBE backend removed; self-backend sole production path) -->
 
       <!--
         install-configure-env.ps1 (v1.5.7-rc1): sets MSYS2_PATH_TYPE=inherit
@@ -414,8 +408,8 @@
       <!--
         RuntimeC (v1.5.6 W-043): ships compiler/runtime/runtime.c to
         INSTALLDIR\bin\ so installer-layout jhyy.exe link can find it.
-        jhyy_helpers.c:184-198 (layout a) builds "<bindir>\runtime.c" path
-        from sibling qbe.exe; without this file, gcc link fails because
+        jhyy_helpers.c (layout a) builds "<bindir>\runtime.c" path
+        from sibling bindpath layout; without this file, gcc link fails because
         the path appears on the cmdline but the file is absent on disk.
       -->
       <Component Id="RuntimeC" Bitness="always64" Guid="B4A71F8C-9D32-4E6A-B5C8-7F1E3A92D104">
@@ -614,7 +608,7 @@
     <!--
       LicenseFile: 64-bit Bitness for consistency with other Components
       (ICE80: Package cannot mix 32-bit and 64-bit Components). jhyy.exe +
-      qbe.exe are 64-bit, so all other Components in this MSI must also
+      qbe.exe are 64-bit (REMOVED in v2.16.0), so all other Components in this MSI must also
       be 64-bit.
     -->
     <Component Id="LicenseFile" Directory="CommonDir" Bitness="always64" Guid="A4874A53-15B4-4010-8AF5-E6D47BD328CB">

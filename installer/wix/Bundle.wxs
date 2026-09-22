@@ -21,8 +21,7 @@
     - 装完 compiler MSI 后, finish dialog 提示: "装 MSYS2 后用 jhyy 编 .jhyy"
 
   Layout:
-    C:\Program Files\JHYY\bin\jhyy.exe   (compiler MSI 装)
-    C:\Program Files\JHYY\bin\qbe.exe    (compiler MSI 装)
+    C:\Program Files\JHYY\bin\jhyy.exe   (compiler MSI 装; v2.16.0 QBE removed)
     C:\Program Files\dotnet\             (.NET 8 runtime, Bundle 装)
     %USERPROFILE%\AppData\Local\Programs\MSYS2\  (用户自己装, Burn 不管)
 

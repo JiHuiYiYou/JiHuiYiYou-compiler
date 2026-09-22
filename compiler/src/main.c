@@ -533,15 +533,21 @@ static int compile(const char **inputs, int ninputs, const char *output) {
        path — it has its own jh_gcc_invoke + jh_run (CreateProcessA) flow
        that builds the gcc command jhyy-side. The D26 reproducibility recipe
        (`-g0 -Wl,--build-id=none` + SOURCE_DATE_EPOCH) is applied there.
-       This C-side path is only used by jhyy_stage0.exe (Stage 0 bootstrap),
-       which doesn't need byte-equal reproducibility — it's a build-time tool. */
+       v2.16.0: this C-side path is what jhyy_stage0.exe uses to bootstrap
+       jhyy.exe (Stage 0 → jhyy-side). Apply D26 recipe here too + add
+       -Wl,--no-insert-timestamp to suppress the PE-COFF timestamp that ld
+       embeds despite SOURCE_DATE_EPOCH. Without these, jhyy.exe rebuilds
+       differ by 1-4 bytes in the PE header (TimeDateStamp at PE+0x88). */
     char exe_path[1024];
     snprintf(exe_path, sizeof(exe_path), "%s.exe", output);
     path_to_win(exe_path);
+    /* v2.16.0 D26: SOURCE_DATE_EPOCH in current process → child gcc sees it.
+       putenv is in stdlib.h; sentinel 1234567890 = Unix epoch 2009-02-13 23:31:30. */
+    _putenv("SOURCE_DATE_EPOCH=1234567890");
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wformat-truncation"
     snprintf(cmd, sizeof(cmd),
-             "gcc %s %s %s/compiler/runtime/runtime.c %s/compiler/src0/jhyy_helpers.c -o %s -lm",
+             "gcc -g0 -Wl,--build-id=none -Wl,--no-insert-timestamp %s %s %s/compiler/runtime/runtime.c %s/compiler/src0/jhyy_helpers.c -o %s -lm",
              asm_path, ico_res_path, g_project_root, g_project_root, exe_path);
     #pragma GCC diagnostic pop
     if (system(cmd) != 0) {
