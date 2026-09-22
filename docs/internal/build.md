@@ -167,6 +167,8 @@ python compiler/build/bin/regress.py
 
 无 `main_jhyy` 的库文件（`mylib.jhyy`、`ns_dup_*.jhyy`）自动 SKIP，不计入 passed/failed。
 
+**v2.15.0** — 默认 backend 走 in-mem self path (`JHY_WRITE_IL=0` 不写盘),regress 数提升至 126/147 PASS (per W-074.14 closure)。env var `JHY_WRITE_IL=1` 给 QBE / debug 路径强制走 file I/O round-trip。详见 `docs/internal/architecture.md` §"In-Mem Pipeline"。
+
 ---
 
 ## 单元测试
@@ -329,3 +331,72 @@ if not errorlevel 1 (
 - ✅ MSI 1.29 MB (跟 v1.8.2 持平, `<Binary>` reference 不重复 ship)
 - ✅ Bundle 29.99 MB (MSI + .NET 8 + Burn overhead)
 - ✅ `regress` 102/102 + 4 SKIP (v1.8.2 baseline 持平, v1.8.3 不改 codegen)
+
+---
+
+## v2.13.0 — 真 XMM regalloc + 真 amd64_sysv codegen 全覆盖 + amd64_sysv_freestanding 真 E2E
+
+> **Last updated**: v2.13.0 (2026-09-19) — 🎯 自写后端**真 E2E** (XMM regalloc + SysV codegen + efi 真 boot)。3 个新增验证 recipe:
+
+### 1. XMM regalloc pressure test (`xmm_pressure_9args.jhyy`)
+
+测试 Win XMM0-XMM5 caller-saved + XMM6-XMM15 callee-saved save/restore + 5+ f64 arg stack-arg fallback 真修:
+
+```bash
+./compiler/build/bin/jhyy.exe run compiler/tests/examples/xmm_pressure_9args.jhyy 2>&1 | tail -5
+# 期望: EXIT=255 (9 f64 arg sum = 255)
+```
+
+跑 5 次 (per `feedback_fix_evaluation_rule`) → EXIT=255 每次都对。
+
+### 2. 真 amd64_sysv codegen 全覆盖 (`sysv_full_regress.sh`)
+
+跑 5 sysv tests (`sysv_abi_test` / `sysv_struct_mixed` / `sysv_struct_pass` / `sysv_struct_ret` / `sysv_vararg_basic`) 走 self-backend 真 emit → docker gcc:12 chain crt0.S + link.ld → ELF → 跑真验 exit codes:
+
+```bash
+bash compiler/tests/bootstrap/sysv_full_regress.sh 2>&1 | tail -20
+# 期望: 5/5 PASS 每次都对 (sysv_abi_test=28 / sysv_struct_mixed=42 / sysv_struct_pass=35 / sysv_struct_ret=18 / sysv_vararg_basic=42)
+```
+
+**关键陷阱** (per `feedback_docker_local`):
+- **不要 `MSYS_NO_PATHCONV=1` 套 jhyy.exe 调用** — jhyy.exe 是 Win32 binary 不识 POSIX path, MSYS 默认 convert POSIX → Windows 才能 open file
+- **Stage 1 (jhyy compile) 用 default path conv**, **Stage 2 (docker chain) 用 `MSYS_NO_PATHCONV=1`** — docker mount volume 需要 POSIX path
+
+### 3. amd64_win_freestanding 真 E2E (`run-ovmf.sh`)
+
+**QEMU 10 chardev syntax 迁移** (vs QEMU 8 `-debugcon file:stdio -global isa-debugcon.iobase=0x402`):
+
+```bash
+SERIAL_LOG=/tmp/_ovmf_serial.log
+DEBUG_LOG=/tmp/_ovmf_dbg.log
+
+# QEMU (Win32 binary) 不能 open MSYS POSIX path → cygpath -w convert
+SERIAL_LOG_WIN=$(cygpath -w "$SERIAL_LOG")
+DEBUG_LOG_WIN=$(cygpath -w "$DEBUG_LOG")
+
+bash scripts/dev/test/run-ovmf.sh compiler/tests/examples/hello-freestanding/hello-freestanding.efi 2>&1 | tail -30
+# 期望: OVMF QEMU E2E 5/5 PASS (ConOut 可见 "Hello from jhyy freestanding!" + clean shutdown)
+```
+
+**QEMU 10 vs QEMU 8 syntax diff**:
+- `-debugcon file:stdio` → `-chardev "file,id=dbgcon,path=$DEBUG_LOG_WIN" -device isa-debugcon,chardev=dbgcon`
+- `-global isa-debugcon.iobase=0x402` (deprecated, now via -device)
+- `-serial "file:$SERIAL_LOG_WIN"` (was `stdio` or `file:<path>` mixed syntax)
+
+**Stray QEMU process 释放 file handle** (per `feedback_il_s_debugging_pattern`):
+```bash
+powershell -Command "Get-Process qemu-system-x86_64 | Stop-Process -Force"
+```
+
+### SysV classification helpers (8-class §A.4)
+
+`abi_amd64_sysv.jhyy` 真修 SysV ABI §A.4 8-class classification:
+- `INTEGER` (8/16/32/64-bit 整数 + 指针)
+- `SSE` (单精度/双精度 float, 走 XMM 寄存器)
+- `SSEUP` (SSE 上半部分, 16-byte float 第二 8 字节)
+- `MEMORY` (>16-byte struct, 走 stack memory)
+- `NO_CLASS` (空 placeholder)
+
+Class-to-QBE-letter map: `SSE → QBE_S(4B)/QBE_D(8B)`, `INTEGER/SSEUP/MEMORY → QBE_W/QBE_L` per size, `NO_CLASS → 0`。
+
+**关键教训** (per `feedback_jhyy_no_forward_ref`): jhyy sema 是 single-pass,function 定义必须 precede 所有 uses,不支持 forward reference。新加 wrapper 函数 `abi_sysv_classify_arg_full` 调 `abi_sysv_classify_arg`,wrapper 必须放在后者**之后**(call graph topology 排序)。否则 sema 报 "undefined variable" 但指向无关文件(cascading error 误导)。

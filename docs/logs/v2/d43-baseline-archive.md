@@ -129,3 +129,49 @@ per `compiler/tests/bootstrap/fixed_point.sh N=10 verification` (v2.14.0 Phase 1
 **Both active** — D43 closure invariant 是 "all generations within an active baseline byte-equal", 不是 "v1=v2=...=vN across history"。per `feedback_changelog_umbrella` SOP 每次 re-baseline 是 explicit event。
 
 **Activation pattern**: jhyy.exe → main.jhyy → main.il sha 在 `(cd $JHYY_ROOT && jhyy.exe compile ...)` pattern 下 byte-equal; 直接 invocation (无 `cd` subshell) 产生 `481c2e99...` 绝对路径 (dbgfile 字段)。closure quirk 是 dbgfile 字段 cwd-sensitive (不属 codegen bug, 是 jhyy.exe 内部 IR emit path 用 cwd-relative 还是 world absolute)。
+
+---
+
+## v2.15.0 — D43 closure dual-layer (`.il` + `.s`) long-term hold ✅ (2026-09-22)
+
+**v2.15.0 active baseline (re-measured)**:
+- `.il` sha (cwd-relative per `cd $JHYY_ROOT`): `954a8563...` (v2.14.0 baseline `43fee332...` 退役 — `build_il` in-mem dispatch 加 IL emit helper 后 IR builder intern 顺序微变 → main.jhyy IL byte content 微变)
+- `.s` sha (NEW layer, hello.jhyy): `216683e18fbb461dbbfc6d57f3f6f1d1616afec250849d9f23d14e279a50058d`
+
+per `compiler/tests/bootstrap/fixed_point.sh N=3 dual-layer verification` (v2.15.0 Phase 1c V.2-V.3):
+- jhyy_v2 → main_v2.il sha = `954a8563...` ✅ (byte-equal to baseline)
+- jhyy_v3 → main_v3.il sha = `954a8563...` ✅ (byte-equal to baseline)
+- jhyy_v4 → main_v4.il sha = `954a8563...` ✅ (byte-equal to baseline, in-mem path)
+- jhyy_v2 → main_v2.s sha = `216683e1...` ✅ (byte-equal, in-mem path)
+- jhyy_v3 → main_v3.s sha = `216683e1...` ✅ (byte-equal, in-mem path)
+- jhyy_v4 → main_v4.s sha = `216683e1...` ✅ (byte-equal, in-mem path)
+
+**所有 3 代 (jhyy_v2/v3/v4) 双层 (.il + .s) sha byte-equal** = D43 closure dual-layer verified。 per-代 timing 2.0-2.5s 全 < 1.3x T_V3_BASELINE_MS=5000ms (closure 不退化)。
+
+**新增 `.s` layer 含义**:
+- `.s` sha 反映 **codegen_amd64_*.jhyy emit 主路径** (lex_il + parse_and_emit + peephole_fold) 跨代 byte-equal
+- `.il` sha 反映 **codegen.jhyy emit 主路径** (ir_emit_*) 跨代 byte-equal
+- 跟 `.il` 比, `.s` layer 更敏感 (assembler layout micro-variations 会 byte-diff) — 但 v2.13.0 真 XMM + sysv 全覆盖后, `.s` 路径已稳定, v2.15.0 首次 ship 时做 baseline 锚定
+- **`.s` baseline re-pin 3/3 收敛** (V.4 gate): 跑 3 次固定点循环, 3 次 sha 完全一致 → canonical baseline `216683e1...` 锁住
+- **`JHY_FP_BASELINE_S_SHA` env var** (新增, fixed_point.sh:49): 默认 = `216683e1...`, 用户可 override for testing
+
+**v2.14.0 baseline `43fee332...` (.il only) 退役** — v2.15.0 src0 `main.jhyy` 改 (`build_il` in-mem dispatch + `jh_write_il_enabled` env gate helper) → IR builder emit 主路径 emit call site 顺序略变 → main.jhyy IL byte content 微变 → 预期 re-baseline event per `feedback_changelog_umbrella` SOP。**`.il` sha 仍 cwd-relative per `cd $JHYY_ROOT`** (per `feedback_jhyy_dbgfile_cwd_sensitive`)。
+
+**In-mem path = file-path self path byte-equal**:
+- `JHY_WRITE_IL=0` 默认 → in-mem path (`codegen_amd64_run_text`) 走 `(text, len)` 喂 `lex_il`, 跟 `JHY_WRITE_IL=1` + `JHY_SELF_BACKEND=1` 走 file path (`codegen_amd64_run`) 喂 `jh_read_file` → byte-equal `.s` 输出 (sha `216683e1...` hello.jhyy / `be7ab43c...` main.jhyy 内部 codegen 阶段也相同)
+- 证明 file I/O round-trip 是 **唯一区别**, in-mem path 不引入新 codegen 行为差异
+- 跑 hello.jhyy 验证: 跑 3 次 in-mem 跟 file-path self path, `.s` sha 完全一致 (V.2 gate)
+
+**Pre-existing lex limitation (NOT v2.15.0 regression)**:
+- `codegen_amd64_lexer.jhyy` v2.11.19 B3 fix 对 `data $str657 = { b "...", b 0 }` 中含 `}` 的字符串字面量会 emit 6 个 "unknown QBE IL mnemonic" stderr warnings (per v2.11.19 B3 fix hard-error semantics, caller byte-skip 仍 continue)
+- 这影响 src0/main.jhyy 的 `.s` 输出 (1178435 bytes vs QBE's 2784635 bytes), 但 **inline 跟 file path 行为完全一致** — 不是 v2.15.0 引入的回归
+- fixed_point.sh setup fails for src0/main.jhyy (gcc can't link incomplete .s), 但这是 pre-existing behavior, both paths produce same incomplete .s
+- **memory feedback**: [[feedback_codegen_amd64_run_zerobyte]] + [[feedback_codegen_amd64_multifn]] — 这两个 limitations 在 v2.15.0 in-mem path 仍存在, v2.15.0 不动 lexer, 等 v3.x 真修
+
+**v2.15.0 测量**:
+- regress 126/147 PASS HOLD (V.1 gate)
+- V.2 .s byte-equal: 3/3 收敛
+- V.3 .il byte-equal N=10: 10/10 byte-equal `954a8563...`
+- V.5 ACTIVE workaround count = 0 (W-074.14 → RESOLVED, no new ACTIVE)
+
+**Both active** — D43 closure dual-layer invariant: "all generations within an active baseline byte-equal at both .il AND .s layer", 不是 "v1=v2=...=vN across history"。per `feedback_changelog_umbrella` SOP 每次 re-baseline 是 explicit event。

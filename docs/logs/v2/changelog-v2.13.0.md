@@ -1054,6 +1054,112 @@ Plan agent 报告 lexer 不识别 `stosi/dtosi/swtof`, 实际已识别 since v2.
 - [[feedback_changelog_umbrella]] — v2.13.11 section append 到 changelog-v2.13.0.md (本 section)
 - [[feedback_doc_refactor_factcheck]] — W-058 entry line 4082 stale text fix (v2.13.10 plan line 36 错 fix 假说)
 - [[feedback_axis_vn_worktree_isolation]] — axis-v2 active dev, raw bash + 绝对路径
+
+---
+
+## v2.15.0 — In-memory self-backend pipeline (skip `.il` file I/O) + `.s` byte-equal D43 closure
+
+**Sprint**: v2.15.0 (In-memory self-backend pipeline + W-074.14 closure + `.s` byte-equal D43 dual-layer)
+**Ship date**: 2026-09-22
+**Audit worktree**: `JiHuiYiYou-axis-v2`
+**Audit binary**: jhyy.exe sha (refresh — in-mem path 走相同 `lex_il`/`parse_and_emit`/`peephole_fold_with_len`/`jh_write_file`, emit logic 0 改)
+
+### Context
+
+v2.14.0 ship 后 ACTIVE workaround count = 0; v2.x 中期 4 sub-sprint chain 第 4 步 (per `docs/plans/roadmap/v2-v3-parallel-sprint-plan.md § 5.1` step 4)。**Strategy B+** (per user 2026-09-22 decide, NOT 原 plan "QBE 自写"): 跳过 `.il` 文件 I/O round-trip, IL 文本保留在 `IRBuf.sb` 内存, 自写后端直接吃 `(text, len)` 喂给 `codegen_amd64_run_text`。
+
+### Plan agent gap discovery (per `feedback_doc_refactor_factcheck`)
+
+原 plan (`docs/plans/v2/v2.15.0-plan.md` 2026-09-17 写) 描述 "QBE 自写 (跳过 QBE IL, 直 emit x86-64)" + 新建 `compiler/src0/qbe/amd64_codegen.jhyy` + `qbe_il.jhyy` + Makefile 删 `qbe/qbe.exe` → 跟 code reality 不符:
+- self-backend **已存在并 ship 跑通** (`compiler/src0/codegen_amd64_*.jhyy` 平铺 9 个文件 + `codegen_amd64_run` 在 `codegen_amd64.jhyy:232`),since v2.6.5 wire + v2.11.23 0 FAIL parity + v2.13.0 真 XMM + 真 sysv 全覆盖
+- 新写 x86-64 codegen 是 **重复造轮子** (YAGNI scope creep)
+
+user 2026-09-22 decide → Strategy B+ (skip file I/O, NOT skip QBE IL), plan REWRITE 反映 code reality。
+
+### Phase 1 src0 in-mem entry (~156 LOC net)
+
+| File | Action | LOC | 描述 |
+|---|---|---|---|
+| `compiler/src0/codegen_amd64_inmem.jhyy` | **NEW** | +131 | `codegen_amd64_run_text(text, len, asm_path, target_tag) -> i32` — 7 步编排, 复用现有 `lex_il` / `cg_compute_per_fn_max_temps` / `regalloc_clear_global` / `parse_and_emit` (24-way dispatch) / `peephole_fold_with_len` / `jh_write_file` |
+| `compiler/src0/main.jhyy` | MOD | +25 / -8 | L54-56 `import codegen_amd64_inmem` + L113-119 `jh_write_il_enabled()` env gate (default 0 = skip `.il` write) + L692-757 `build_il` in-mem dispatch (priority chain: in-mem self > write `.il`) + L1483-1500 `compile()` skip `run_backend` when `build_il` returns 2 |
+| `compiler/src0/codegen_amd64.jhyy` 等 9 个文件 | NO CHANGE | 0 | 0 修改现有 9 个 `codegen_amd64_*.jhyy` 文件 (复用所有内部 module) |
+
+**W-068 fix #4 unit-type alignment**: L729 if/else 分支都加显式 assignment — else 分支加 `let _e = jh_fputs_stderr(...)` + `did_inmem = 0` 让 if/else 单元类型对齐 (避免 sema `if/else branches must have same type: () vs i32` 错)。
+
+### Phase 1c scripts `.s` byte-equal layer (~55 LOC net)
+
+| File | Action | LOC | 描述 |
+|---|---|---|---|
+| `compiler/tests/bootstrap/fixed_point.sh` | MOD | +40 / -5 | L17-21 doc header v2.15.0 升级 + L49 `JHY_FP_BASELINE_S_SHA` env var + L107 echo + L141-142 `S_V1/S_V2/S_V3` paths + L192-219 `[1.5/3] .s closure N=3` primary gate + L246-265 N=4..N loop `.s` byte-equal + warn 1.5x → 1.3x |
+| `compiler/tests/bootstrap/byte_equal.sh` | MOD | +12 / -3 | L1-15 header docs v2.15.0 升级 — `.s` from INFO-only → primary closure gate (per Strategy B+) |
+
+### Phase 2 docs + ship (~290 LOC across 8 files)
+
+| File | Action | LOC | 描述 |
+|---|---|---|---|
+| `docs/internal/build.md` | MOD | +3 / -0 | regress section v2.15.0 in-mem path 注释 |
+| `docs/internal/architecture.md` | MOD | +60 / -8 | §"In-Mem Pipeline" 段 (codegen_amd64_inmem.jhyy 角色 + env gate contract + W-074.14 关系 + closure + verification) |
+| `docs/internal/workarounds.md` | MOD | +52 / -0 | W-074.14 NEW entry + index line (~163) |
+| `docs/plans/v2/v2.15.0-plan.md` | REWRITE | ~120 / ~120 | 删 "QBE 自写" 章 + 加 Real Implementation 段 |
+| `README.md` | MOD | +1 | v2.15.0 row |
+| `docs/logs/v2/changelog-v2.13.0.md` | MOD | +50 | v2.15.0 section append (本 section, per `feedback_changelog_umbrella`) |
+| `docs/logs/v2/d43-baseline-archive.md` | MOD | +10 | v2.15.0 row (新 `.s` baseline `216683e1...` pin) |
+| `docs/plans/v2/README.md` | MOD | +2 | v2.15.0 status row |
+
+### Verification gates (V.1-V.6 全绿)
+
+| Gate | Criterion | v2.14.0 baseline | v2.15.0 actual |
+|------|-----------|------------------|------------------|
+| V.1 | regress 126/147 PASS HOLD (默认 in-mem path) | 126/147 PASS | 126/147 PASS ✅ |
+| V.2 | in-mem `.s` byte-equal to `JHY_WRITE_IL=1` self path | N/A (not applicable) | `216683e18fbb461dbbfc6d57f3f6f1d1616afec250849d9f23d14e279a50058d` byte-equal ✅ |
+| V.3 | V2↔V3 `.il` + `.s` byte-equal (closure holds) | `.il` `43fee332...` HOLD | `.il` `954a8563...` byte-equal + `.s` `216683e1...` byte-equal ✅ |
+| V.4 | `.s` baseline re-pin 3/3 收敛 | N/A (NEW) | 3/3 deterministic `216683e1...` ✅ |
+| V.5 | ACTIVE workaround count = 0 | 0 | 0 (W-074.14 → RESOLVED, no new ACTIVE) ✅ |
+| V.6 | single commit per worktree | 1 commit | 1 commit ✅ |
+
+### Key insights (per RCA during implementation)
+
+1. **in-mem path = byte-equal with file path**: `codegen_amd64_run_text` 跟 `codegen_amd64_run` 跑 hello.jhyy + main.jhyy 都产生 byte-equal `.s` (sha `216683e1...` hello / sha `be7ab43c...` main 内部 codegen 阶段也相同) — 证明 file I/O round-trip 是 in-mem 路径 **唯一区别**, 不引入新 codegen 行为差异
+2. **Pre-existing lex limitation (NOT v2.15.0 regression)**: `codegen_amd64_lexer.jhyy` 对 `data $str657 = { b "...", b 0 }` 中含 `}` 的字符串字面量会 emit 6 个 "unknown QBE IL mnemonic" stderr warnings (per v2.11.19 B3 fix hard-error semantics, 但 caller byte-skip 仍 continue). 这影响 src0/main.jhyy 的 `.s` 输出(1178435 bytes vs QBE's 2784635 bytes),但 **inline 跟 file path 行为完全一致** — 不是 v2.15.0 引入的回归
+3. **W-068 fix #4 unit-type alignment cascade**: 在 `build_il` in-mem dispatch 里, if/else 分支必须各自有显式 assignment 才避免 sema `if/else branches must have same type: () vs i32` 错. 这跟 v2.6.5 W-068 真改 #4 同样的 cascade pattern
+
+### Out of scope (explicit)
+
+- ❌ **完整 IR struct 化** (IRBlock / IRInstr 抽 struct + 改 390 个 `ir_emit_*` call site) — v3.x D44 / Strategy A
+- ❌ **QBE 工具链完全移除** (删 `qbe/qbe.exe` + Makefile `$(QBE)` 清 + `run_qbe` 留空 stub) — v2.16.0
+- ❌ **perf bench (≤ 1.1x C 版 QBE 生成代码)** — v2.16.0
+- ❌ **`.exe` byte-equal 兜底 recipe** (`gcc -g0` + `strip` + `SOURCE_DATE_EPOCH` + `-Wl,--build-id=none`) — v2.16.0
+- ❌ **跨 Linux ARM64 / Win ARM64 / macOS Apple Silicon** — v3.x
+- ❌ **Mutation testing CI 集成** — future sprint
+- ❌ **Fixed point 全量 126 test 跨代一致** — v2.15.0 只 `.s` byte-equal, per-test N=3 已 ship per v2.9.0
+- ❌ **v3.0 3a-3f** (inline asm / naked / volatile / link_section / memory barrier / no_std / `&mut` + lifetime) — 等 user 启动 (per `v2-v3-parallel-sprint-plan.md`)
+- ❌ **M5 启动前置** (jhyy 编 jhyy 0 C 依赖闭环) — M5 独立 sprint (per `v1.x-phase-4-m5-boot-from-scratch.md`)
+- ❌ **vendor QBE 升级** (拉 remd/rems 主线) — deferred YAGNI per v2.13.12+ mini
+
+### Single commit + ship (axis-v2)
+
+- 1 commit, 12 files touched (per `feedback_audit_single_commit_diff`): 2 src0 (codegen_amd64_inmem.jhyy NEW + main.jhyy MOD) + 2 scripts (fixed_point.sh + byte_equal.sh) + 7 docs (build/architecture/workarounds/plans/changelog/d43-baseline-archive/plans-v2-README) + 1 README
+- Tag `v2.15.0` (per `feedback_no_date_estimates` 用 sprint sequence)
+- main mirror commit 同步 8 files (per `0cadfba` precedent; exclude `jhyy.exe` + `jhyy.il` binaries + `~/.claude/plans/` + `compiler/tests/bootstrap/mutation-test-report.md` auto-gen)
+
+### Memory
+
+- [[feedback_plans_per_version]] — v2.15.0-plan.md REWRITE (per axis-v2 worktree, raw bash + 绝对路径)
+- [[feedback_changelog_umbrella]] — v2.15.0 section append 到 changelog-v2.13.0.md (本 section)
+- [[feedback_audit_single_commit_diff]] — single commit per worktree
+- [[feedback_fix_evaluation_rule]] — V.1-V.6 全绿 5/5 PASS HOLD; regress + .il byte-equal baseline 不漂
+- [[feedback_no_date_estimates]] — sprint sequence (v2.14.0 → v2.15.0), no date estimates
+- [[feedback_auto_push_after_commit]] — commit 完直接 push, tag push 走 GFW HTTPS-with-token fallback (per SSH user)
+- [[feedback_rca_first_root_cause]] — Plan agent gap discovery (原 plan "QBE 自写" → 跟 code reality 不符 → Strategy B+ REWRITE)
+- [[feedback_doc_refactor_factcheck]] — v2.15.0 plan REWRITE 反映 code reality (删 QBE 自写章 + 加 Real Implementation 段)
+- [[feedback_regress_clean_count]] — rm stale `_regress_*.exe` 清 stale artifact
+- [[feedback_mutation_testing_iteration]] — V.4 3/3 收敛同 mutation testing catch rate iteration pattern
+- [[feedback_jhyy_dbgfile_cwd_sensitive]] — `cd $JHYY_ROOT` lock, baseline `954a8563...` (cwd-relative) vs `481c2e99...` (cwd-absolute) drift avoidance
+- [[feedback_axis_vn_worktree_isolation]] — axis-v2 active dev, raw bash + 绝对路径
+- [[feedback_ssh_key_same_shell]] — `git push` 前 `eval "$(ssh-agent -s)" && ssh-add /c/Users/liuzhen/.ssh/id_ed25519` 在同一 Bash 调用
+- [[feedback_commit_coauthor]] — `Co-Authored-By: MiniMax-M3 <noreply@MiniMax>`
+- [[feedback_no_traditional_chinese]] — simplified Chinese only
+- [[feedback_codegen_amd64_run_zerobyte]] — pre-existing `data {...}` string literal lex limitation 影响 src0/main.jhyy `.s` 大小 (1178435 vs QBE 2784635 bytes), 但 in-mem 跟 file path 完全一致, 不是 v2.15.0 regression
 - [[feedback_ssh_key_same_shell]] — HTTPS-with-token fallback
 - [[feedback_commit_coauthor]] — `Co-Authored-By: MiniMax-M3 <noreply@MiniMax>`
 - [[feedback_no_traditional_chinese]] — simplified Chinese only
@@ -1194,3 +1300,109 @@ verification infrastructure expansion sprint (NOT src0 真修, per `docs/plans/v
 - [[feedback_no_traditional_chinese]] — simplified Chinese only
 - [[feedback_doc_refactor_factcheck]] — Phase 4 docs 重构前 fact-check (无 stale ref; W-081 stale refs 推 v2.14.1 cleanup)
 - [[feedback_axis_vn_worktree_isolation]] — axis-v2 active dev, raw bash + 绝对路径
+
+---
+
+## v2.15.0 — In-memory self-backend pipeline (skip `.il` file I/O) + `.s` byte-equal D43 closure
+
+**Sprint**: v2.15.0 (In-memory self-backend pipeline + W-074.14 closure + `.s` byte-equal D43 dual-layer)
+**Ship date**: 2026-09-22
+**Audit worktree**: `JiHuiYiYou-axis-v2`
+**Audit binary**: jhyy.exe sha (refresh — in-mem path 走相同 `lex_il`/`parse_and_emit`/`peephole_fold_with_len`/`jh_write_file`, emit logic 0 改)
+
+### Context
+
+v2.14.0 ship 后 ACTIVE workaround count = 0; v2.x 中期 4 sub-sprint chain 第 4 步 (per `docs/plans/roadmap/v2-v3-parallel-sprint-plan.md § 5.1` step 4)。**Strategy B+** (per user 2026-09-22 decide, NOT 原 plan "QBE 自写"): 跳过 `.il` 文件 I/O round-trip, IL 文本保留在 `IRBuf.sb` 内存, 自写后端直接吃 `(text, len)` 喂给 `codegen_amd64_run_text`。
+
+### Plan agent gap discovery (per `feedback_doc_refactor_factcheck`)
+
+原 plan (`docs/plans/v2/v2.15.0-plan.md` 2026-09-17 写) 描述 "QBE 自写 (跳过 QBE IL, 直 emit x86-64)" + 新建 `compiler/src0/qbe/amd64_codegen.jhyy` + `qbe_il.jhyy` + Makefile 删 `qbe/qbe.exe` → 跟 code reality 不符:
+- self-backend **已存在并 ship 跑通** (`compiler/src0/codegen_amd64_*.jhyy` 平铺 9 个文件 + `codegen_amd64_run` 在 `codegen_amd64.jhyy:232`),since v2.6.5 wire + v2.11.23 0 FAIL parity + v2.13.0 真 XMM + 真 sysv 全覆盖
+- 新写 x86-64 codegen 是 **重复造轮子** (YAGNI scope creep)
+
+user 2026-09-22 decide → Strategy B+ (skip file I/O, NOT skip QBE IL), plan REWRITE 反映 code reality。
+
+### Phase 1 src0 in-mem entry (~156 LOC net)
+
+| File | Action | LOC | 描述 |
+|---|---|---|---|
+| `compiler/src0/codegen_amd64_inmem.jhyy` | **NEW** | +131 | `codegen_amd64_run_text(text, len, asm_path, target_tag) -> i32` — 7 步编排, 复用现有 `lex_il` / `cg_compute_per_fn_max_temps` / `regalloc_clear_global` / `parse_and_emit` (24-way dispatch) / `peephole_fold_with_len` / `jh_write_file` |
+| `compiler/src0/main.jhyy` | MOD | +25 / -8 | L54-56 `import codegen_amd64_inmem` + L113-119 `jh_write_il_enabled()` env gate (default 0 = skip `.il` write) + L692-757 `build_il` in-mem dispatch (priority chain: in-mem self > write `.il`) + L1483-1500 `compile()` skip `run_backend` when `build_il` returns 2 |
+| `compiler/src0/codegen_amd64.jhyy` 等 9 个文件 | NO CHANGE | 0 | 0 修改现有 9 个 `codegen_amd64_*.jhyy` 文件 (复用所有内部 module) |
+
+**W-068 fix #4 unit-type alignment**: L729 if/else 分支都加显式 assignment — else 分支加 `let _e = jh_fputs_stderr(...)` + `did_inmem = 0` 让 if/else 单元类型对齐 (避免 sema `if/else branches must have same type: () vs i32` 错)。
+
+### Phase 1c scripts `.s` byte-equal layer (~55 LOC net)
+
+| File | Action | LOC | 描述 |
+|---|---|---|---|
+| `compiler/tests/bootstrap/fixed_point.sh` | MOD | +40 / -5 | L17-21 doc header v2.15.0 升级 + L49 `JHY_FP_BASELINE_S_SHA` env var + L107 echo + L141-142 `S_V1/S_V2/S_V3` paths + L192-219 `[1.5/3] .s closure N=3` primary gate + L246-265 N=4..N loop `.s` byte-equal + warn 1.5x → 1.3x |
+| `compiler/tests/bootstrap/byte_equal.sh` | MOD | +12 / -3 | L1-15 header docs v2.15.0 升级 — `.s` from INFO-only → primary closure gate (per Strategy B+) |
+
+### Phase 2 docs + ship (~290 LOC across 8 files)
+
+| File | Action | LOC | 描述 |
+|---|---|---|---|
+| `docs/internal/build.md` | MOD | +3 / -0 | regress section v2.15.0 in-mem path 注释 |
+| `docs/internal/architecture.md` | MOD | +60 / -8 | §"In-Mem Pipeline" 段 (codegen_amd64_inmem.jhyy 角色 + env gate contract + W-074.14 关系 + closure + verification) |
+| `docs/internal/workarounds.md` | MOD | +52 / -0 | W-074.14 NEW entry + index line (~163) |
+| `docs/plans/v2/v2.15.0-plan.md` | REWRITE | ~120 / ~120 | 删 "QBE 自写" 章 + 加 Real Implementation 段 |
+| `README.md` | MOD | +1 | v2.15.0 row |
+| `docs/logs/v2/changelog-v2.13.0.md` | MOD | +50 | v2.15.0 section append (本 section, per `feedback_changelog_umbrella`) |
+| `docs/logs/v2/d43-baseline-archive.md` | MOD | +10 | v2.15.0 row (新 `.s` baseline `216683e1...` pin) |
+| `docs/plans/v2/README.md` | MOD | +2 | v2.15.0 status row |
+
+### Verification gates (V.1-V.6 全绿)
+
+| Gate | Criterion | v2.14.0 baseline | v2.15.0 actual |
+|------|-----------|------------------|------------------|
+| V.1 | regress 126/147 PASS HOLD (默认 in-mem path) | 126/147 PASS | 126/147 PASS ✅ |
+| V.2 | in-mem `.s` byte-equal to `JHY_WRITE_IL=1` self path | N/A (not applicable) | `216683e18fbb461dbbfc6d57f3f6f1d1616afec250849d9f23d14e279a50058d` byte-equal ✅ |
+| V.3 | V2↔V3 `.il` + `.s` byte-equal (closure holds) | `.il` `43fee332...` HOLD | `.il` `954a8563...` byte-equal + `.s` `216683e1...` byte-equal ✅ |
+| V.4 | `.s` baseline re-pin 3/3 收敛 | N/A (NEW) | 3/3 deterministic `216683e1...` ✅ |
+| V.5 | ACTIVE workaround count = 0 | 0 | 0 (W-074.14 → RESOLVED, no new ACTIVE) ✅ |
+| V.6 | single commit per worktree | 1 commit | 1 commit ✅ |
+
+### Key insights (per RCA during implementation)
+
+1. **in-mem path = byte-equal with file path**: `codegen_amd64_run_text` 跟 `codegen_amd64_run` 跑 hello.jhyy + main.jhyy 都产生 byte-equal `.s` (sha `216683e1...` hello / sha `be7ab43c...` main 内部 codegen 阶段也相同) — 证明 file I/O round-trip 是 in-mem 路径 **唯一区别**, 不引入新 codegen 行为差异
+2. **Pre-existing lex limitation (NOT v2.15.0 regression)**: `codegen_amd64_lexer.jhyy` 对 `data $str657 = { b "...", b 0 }` 中含 `}` 的字符串字面量会 emit 6 个 "unknown QBE IL mnemonic" stderr warnings (per v2.11.19 B3 fix hard-error semantics, 但 caller byte-skip 仍 continue). 这影响 src0/main.jhyy 的 `.s` 输出(1178435 bytes vs QBE's 2784635 bytes),但 **inline 跟 file path 行为完全一致** — 不是 v2.15.0 引入的回归
+3. **W-068 fix #4 unit-type alignment cascade**: 在 `build_il` in-mem dispatch 里, if/else 分支必须各自有显式 assignment 才避免 sema `if/else branches must have same type: () vs i32` 错. 这跟 v2.6.5 W-068 真改 #4 同样的 cascade pattern
+
+### Out of scope (explicit)
+
+- ❌ **完整 IR struct 化** (IRBlock / IRInstr 抽 struct + 改 390 个 `ir_emit_*` call site) — v3.x D44 / Strategy A
+- ❌ **QBE 工具链完全移除** (删 `qbe/qbe.exe` + Makefile `$(QBE)` 清 + `run_qbe` 留空 stub) — v2.16.0
+- ❌ **perf bench (≤ 1.1x C 版 QBE 生成代码)** — v2.16.0
+- ❌ **`.exe` byte-equal 兜底 recipe** (`gcc -g0` + `strip` + `SOURCE_DATE_EPOCH` + `-Wl,--build-id=none`) — v2.16.0
+- ❌ **跨 Linux ARM64 / Win ARM64 / macOS Apple Silicon** — v3.x
+- ❌ **Mutation testing CI 集成** — future sprint
+- ❌ **Fixed point 全量 126 test 跨代一致** — v2.15.0 只 `.s` byte-equal, per-test N=3 已 ship per v2.9.0
+- ❌ **v3.0 3a-3f** (inline asm / naked / volatile / link_section / memory barrier / no_std / `&mut` + lifetime) — 等 user 启动 (per `v2-v3-parallel-sprint-plan.md`)
+- ❌ **M5 启动前置** (jhyy 编 jhyy 0 C 依赖闭环) — M5 独立 sprint (per `v1.x-phase-4-m5-boot-from-scratch.md`)
+- ❌ **vendor QBE 升级** (拉 remd/rems 主线) — deferred YAGNI per v2.13.12+ mini
+
+### Single commit + ship (axis-v2)
+
+- 1 commit, 12 files touched (per `feedback_audit_single_commit_diff`): 2 src0 (codegen_amd64_inmem.jhyy NEW + main.jhyy MOD) + 2 scripts (fixed_point.sh + byte_equal.sh) + 7 docs (build/architecture/workarounds/plans/changelog/d43-baseline-archive/plans-v2-README) + 1 README
+- Tag `v2.15.0` (per `feedback_no_date_estimates` 用 sprint sequence)
+- main mirror commit 同步 8 files (per `0cadfba` precedent; exclude `jhyy.exe` + `jhyy.il` binaries + `~/.claude/plans/` + `compiler/tests/bootstrap/mutation-test-report.md` auto-gen)
+
+### Memory
+
+- [[feedback_plans_per_version]] — v2.15.0-plan.md REWRITE (per axis-v2 worktree, raw bash + 绝对路径)
+- [[feedback_changelog_umbrella]] — v2.15.0 section append 到 changelog-v2.13.0.md (本 section)
+- [[feedback_audit_single_commit_diff]] — single commit per worktree
+- [[feedback_fix_evaluation_rule]] — V.1-V.6 全绿 5/5 PASS HOLD; regress + .il byte-equal baseline 不漂
+- [[feedback_no_date_estimates]] — sprint sequence (v2.14.0 → v2.15.0), no date estimates
+- [[feedback_auto_push_after_commit]] — commit 完直接 push, tag push 走 GFW HTTPS-with-token fallback (per SSH user)
+- [[feedback_rca_first_root_cause]] — Plan agent gap discovery (原 plan "QBE 自写" → 跟 code reality 不符 → Strategy B+ REWRITE)
+- [[feedback_doc_refactor_factcheck]] — v2.15.0 plan REWRITE 反映 code reality (删 QBE 自写章 + 加 Real Implementation 段)
+- [[feedback_regress_clean_count]] — rm stale `_regress_*.exe` 清 stale artifact
+- [[feedback_mutation_testing_iteration]] — V.4 3/3 收敛同 mutation testing catch rate iteration pattern
+- [[feedback_jhyy_dbgfile_cwd_sensitive]] — `cd $JHYY_ROOT` lock, baseline `954a8563...` (cwd-relative) vs `481c2e99...` (cwd-absolute) drift avoidance
+- [[feedback_axis_vn_worktree_isolation]] — axis-v2 active dev, raw bash + 绝对路径
+- [[feedback_ssh_key_same_shell]] — `git push` 前 `eval "$(ssh-agent -s)" && ssh-add /c/Users/liuzhen/.ssh/id_ed25519` 在同一 Bash 调用
+- [[feedback_commit_coauthor]] — `Co-Authored-By: MiniMax-M3 <noreply@MiniMax>`
+- [[feedback_no_traditional_chinese]] — simplified Chinese only
+- [[feedback_codegen_amd64_run_zerobyte]] — pre-existing `data {...}` string literal lex limitation 影响 src0/main.jhyy `.s` 大小 (1178435 vs QBE 2784635 bytes), 但 in-mem 跟 file path 完全一致, 不是 v2.15.0 regression

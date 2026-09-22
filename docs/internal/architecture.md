@@ -293,7 +293,7 @@ jnz %t0, @then, @else    # 条件跳转
 
 ### Out of scope (v2.14.0 不做)
 
-- ❌ **QBE 自写** (跳过 QBE IL, 直 emit x86-64) — v2.15.0
+- ❌ **QBE 自写** (跳过 QBE IL, 直 emit x86-64) — v2.15.0 ✅ SHIPPED (per Strategy B+: 跳过 file I/O, IL 文本仍 in-memory 自写, NOT "跳过 QBE IL 直 emit")
 - ❌ **QBE 工具链移除** — v2.16.0
 - ❌ **性能 bench + .exe byte-equal** — v2.16.0
 - ❌ **跨 Linux ARM64 / Win ARM64 / macOS Apple Silicon** — v3.x 后续 (audit 2026-09-17 verify)
@@ -303,3 +303,40 @@ jnz %t0, @then, @else    # 条件跳转
 - ❌ **W-081 stale refs cleanup** (changelog v2.13.0.md:497,506 + README.md:309,498,507,577,592) — push v2.14.1 docs cleanup 后续 sprint (per `feedback_doc_refactor_factcheck`)
 - ❌ **vendor QBE 升级** (拉 remd/rems 主线) — deferred v2.13.12+ mini; fold fix 已 ship, vendor pull ROI 低
 - ❌ **M5 启动前置** (jhyy 编 jhyy 0 C 依赖闭环) — M5 独立 sprint (per `docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md`)
+
+---
+
+## 关键模块: In-memory self-backend pipeline (v2.15.0 ship)
+
+**Goal**: 消除 v2.6.3 → v2.14.0 期间 self-backend 必经的 `.il` 文件 I/O round-trip。front-end `codegen.jhyy` 仍 emit QBE IL 文本到 `IRBuf.sb` (`*StringBuilder`),但默认 (`JHY_WRITE_IL` 未设) **不写盘**。`main.jhyy run_backend` 把 `(*ir.sb).buf/.len` 直接喂给新模块 `codegen_amd64_run_text`,内部仍走 `lex_il` → `regalloc_clear_global` → `parse_and_emit` → `peephole_fold_with_len` → `jh_write_file(.s)` 7 步编排(原 `codegen_amd64_run` 8 步,**省掉 step 1 `jh_read_file`**)。
+
+### 关键模块边界
+
+| 模块 | 角色 | 关键 API |
+|---|---|---|
+| `compiler/src0/codegen.jhyy` (~390 `ir_emit_*` call sites) | front-end QBE IL emit | `(*ir).sb` StringBuilder 累积 IL 文本 |
+| `compiler/src0/codegen_amd64_inmem.jhyy` (**NEW**, 131 LOC) | in-mem self-backend 入口 | `codegen_amd64_run_text(text: *u8, len: i64, asm_path: *u8, target_tag: i32) -> i32` |
+| `compiler/src0/codegen_amd64.jhyy:232-374` | 老的 file-path self-backend 入口(保留作 `JHY_WRITE_IL=1` + `QBE_FALLBACK=1` debug 路径) | `codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32` |
+| `compiler/src0/codegen_amd64_lexer.jhyy` | IL → `ILToken[]`(40 B struct, `codegen_amd64_state.jhyy:86`) | `lex_il(text, len, arena) -> *u8`, `lex_il_count(tokens) -> i64` |
+| `compiler/src0/main.jhyy` | dispatch | `jh_write_il_enabled() -> i32` (env gate helper), `build_il` in-mem dispatch (priority chain: in-mem self > write `.il`), `compile()` skip `run_backend` when `build_il` returns 2 |
+
+### Env gate contract
+
+- `JHY_WRITE_IL` (default 0, set 1 to force write `.il`):
+  - `0` + `BACKEND_SELF` target → 走 `codegen_amd64_run_text` (in-mem path, 跳过 `.il` 写盘)
+  - `0` + other targets → 走老 `run_qbe` 路径(写 `.il` 到 disk,QBE spawn 翻译)
+  - `1` + 任何 target → 写 `.il` + 走 `run_backend` (QBE / self 都支持)
+- `JHY_SELF_BACKEND=1` (legacy opt-in, 仍支持): 强制走 self-backend(file-path 老入口),保留作 back-compat / debug
+- `QBE_FALLBACK=1` (legacy): 强制走 `run_qbe`,跳过 self-backend
+
+### W-074.14 关系
+
+- W-074.4 family 的 `&stack_local_i64` heap-boxed 兜底 (per `feedback_unrelated_uncommitted_revert` cross-ref) 依赖 `jh_read_file` 把 `.il` 文件读回 + caller 把 `i64 il_len` 写到一个 stack local 位置。
+- `codegen_amd64_run_text` 直接吃 caller 给的 `(text, len)`,根本上不需要 `jh_read_file` + heap-boxed 兜底。W-074.4 仍标 RESOLVED in main index 但实际不再被代码引用(2026-09-22 起 `codegen_amd64_run_text` 是 default self-backend 入口)。
+
+### Closure + verification
+
+- **regress 126/147 PASS** (default in-mem path, 含 v2.13.0 真 XMM + 真 sysv 全覆盖)
+- **`.s` byte-equal**: in-mem path `.s` 跟 `JHY_WRITE_IL=1` self path `.s` byte-equal(sha `216683e1...` for hello.jhyy, 3/3 收敛)
+- **V2↔V3 closure**: `.il` + `.s` 双层 byte-equal for hello.jhyy (D43 dual-layer closure)
+- **`.s` baseline re-pin**: v2.15.0 baseline `216683e1...` (NEW, 跟 v2.14.0 `.il` baseline `43fee332...` 平行 hold per `docs/logs/v2/d43-baseline-archive.md`)
