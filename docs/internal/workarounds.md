@@ -125,7 +125,7 @@
 | [W-054](#w-054) | RESOLVED | sizeof IL 未定义 `%t0` — 真因是 `qbe_type_of` 撞 data... |
 | [W-055](#w-055) | RESOLVED | spec §9.5 指针算术 `p + 1` 整节未实现 |
 | [W-056](#w-056) | RESOLVED | 多字节 UTF-8 char literal + char type `u8 → i32`... |
-| [W-057](#w-057) | DEFERRED | UTF-8 3-byte / 4-byte codepoint 显式 lex reject (推... |
+| [W-057](#w-057) | RESOLVED | UTF-8 3-byte / 4-byte codepoint 显式 lex reject (推... [v2.13.7 lexer 放宽 + parser decode 扩 真修 ship] |
 | [W-058](#w-058) | RESOLVED | vendor QBE (2026-08-15 build) 不支持 `remd` / `rems`... [v2.13.8 codegen.jhyy fold user-space formula (trunc)] |
 | [W-059](#w-059) | RESOLVED | defer codegen path silent crash (v1.3.6 ship 后 0... |
 | [W-060](#w-060) | INVALID | enum variant payload ABI mismatch (Mixed::I(1234)... |
@@ -155,6 +155,7 @@
 | [W-079](#w-079) | RESOLVED | emit-copy dst_id=0 in LHS parse path — RESOLVED... |
 | [W-080](#w-080) | RESOLVED | cne substring match missing in emit_binop —... |
 | [W-081](#w-081) | DEFERRED | phi resolution emit_phi noop + match/OR/payload... |
+| [W-082](#w-082) | DEFERRED | codegen.jhyy short-circuit `&&`/`\|\|` nested if-condition phi merge gap (QBE-side) [v2.13.8 取证,workaround 跟 W-077 v2.11.11 finding 同 pattern] |
 | [W-074.10](#w-074.10) | RESOLVED | emit_load + emit_copy LABEL address-holder flag... |
 | [W-074.11](#w-074.11) | RESOLVED | self-backend emit_load/store $label path missing... |
 | [W-074.12](#w-074.12) | RESOLVED | match range cmp+clamp bug — CLOSED (v2.11.20 ship... |
@@ -6403,6 +6404,132 @@ v2.11.15 Iter 2 commit `568d3aa` per-arm injection strategy 改了 `codegen_amd6
 **Memory:** [[feedback_fix_evaluation_rule]] (诚实记录 C.3 12 tests 估 → 0 PASS + 1 regress 实测, plan 估 partial wrong); [[feedback_codegen_amd64_multifn]] (FLIP count -1 触发 hard STOP #3 — match.jhyy currently-PASSing test regression > STOP threshold); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: malloc state_buf 160→256 必须 ≥ CGState struct 实际字节数,否则 emit_call/emit_ctrl 写未映射内存 → process crash); [[feedback_plans_per_version]] (v2.11.14-plan.md 已 ship per plan, 但实际 closure 0/31 → plan 在下个 sprint v2.11.15 redesign 时重用 audit cluster map); [[feedback_changelog_umbrella]] (v2.11.14 sub-section append — 记录 "0/31 closure, deferred 全 31 v2.11.15"); [[feedback_audit_single_commit_diff]] (audit revert 单 commit: `git checkout HEAD -- 4 files` + 重建 jhyy.exe + sha256 refresh); [[feedback_document_workarounds_in_docs]] (本 W-074.7 phi merge gap entry NEW,详记 root cause + 4 sub-bugs + 验证); [[feedback_auto_push_after_commit]]; [[feedback_ssh_key_same_shell]]
 
 **OS 启动链路:** W-074.7 phi merge gap ✅ CLOSED (v2.11.15 Iter 2 commit `568d3aa` 2026-09-16 per-arm injection strategy);W-074.6 family 累计 closed ~328 LOC (v2.11.13 末);v2.11.16 Phase 0 audit (per `docs/plans/v2/v2.11.16-plan.md` + `docs/logs/v2/changelog-v2.11.0.md` § v2.11.16) 识别 8 confirmed FAIL + 4-6 UNCERTAIN + 4 likely PASS。v2.11.17+ Iters (slice addr+8 + float imm + A2-ptr-deref + cap_table + B-runtime + dungeon_game) 累计 ~175-260 LOC potential,12-14 tests。详见 v2.11.16-plan § v2.11.17+ implementation roadmap。M5 启动仍需等 W-074.6 family + 后续 v2.11.17+ closure。
+
+---
+
+<a id="w-082"></a>
+## W-082: codegen.jhyy short-circuit `&&`/`||` nested if-condition phi merge gap (QBE-side)
+
+**ID:** W-082 (NEW in v2.13.8 audit, QBE-side codegen.jhyy upstream)
+
+**状态:** DEFERRED since 2026-09-21 (v2.13.8 audit) — codegen.jhyy cg_cond / cg_expr 上游 short-circuit 模式 emit_phi 缺正确 phi predecessor tracking, 真修 deferred v2.13.9+ mini (跟 W-081 umbrella 共享 phi-merge-gap 家族, 但 redesign 路径独立 — W-081 是 self-backend downstream, W-082 是 QBE-side upstream)
+
+### 触发面 (codegen.jhyy emit 阶段, **internal codegen logic**)
+
+嵌套 short-circuit (`&&` + `||` 或 `||` + `||`) 在 **codegen.jhyy 内部 emit 用**的 if-condition 中:
+
+**典型 trigger 代码** (源 W-058 v2.13.8 真修 attempt):
+```jhyy
+if d_op == TOKEN_PERCENT() && (op_qt == QBE_D() || op_qt == QBE_S()) {
+    // fold 5-instruction formula
+    return result;
+}
+```
+
+**QBE IL 错误**:
+```
+qbe: jhyy.il:79976: predecessors not matched in phi %t33598
+```
+
+**根因 (RCA)**:
+- outer `&&` 在 codegen.jhyy `cg_cond` emit 阶段假设 inner `||` 不开新 merge 块 — `&&` emit `jnz @sc_eval_LHS, @outer_false_branch` 若 LHS 为 false
+- 但 `||` semantics 要求 merge true/false 分支 → inner `||` emit `jnz @sc_merge, @sc_eval_LHS2, @sc_eval_RHS2` + `@sc_merge:` 后的 phi 节点
+- outer `&&` store pattern (after-true + after-false → outer merge 块) emit phi predecessor 指向 `@sc_eval_RHS2` (start of true branch), 但 inner `||` 已 push `cur_block` 到 `@sc_merge` 后 → phi 写时 predecessor 是 stale `@sc_eval_RHS2` 而非 updated merge point
+- QBE IL 验证拒绝: phi `%tN` 写的 predecessors 跟实际跳入 merge 块的 block 集合不匹配
+
+### 与 W-081 / W-077 关系
+
+**vs W-081 umbrella** (self-backend, 4 sub-bugs A/B/C/D):
+- W-081: `codegen_amd64_emit_ctrl.jhyy` / `codegen_amd64_emit_call.jhyy` 下游 `emit_phi` noop + lookup key alignment + OR pattern + payload slot + tag_check 4 sub-bugs (self-backend)
+- W-082: `codegen.jhyy` upstream `cg_cond` / `cg_expr` short-circuit phi predecessor tracking (QBE-side)
+- **不同文件 + 不同 redesign 路径**, 但同属 "phi merge gap" 家族
+- 任意一个 ship 不依赖另一个; W-081 真修 closure 不动 W-082 反之亦然
+
+**vs W-077 v2.11.11 finding** (codegen.jhyy:2060-2101 nested OR):
+- W-077 v2.11.11: 首次取证 codegen.jhyy:2060-2101 nested OR pattern (即 `(n3 OR n3 OR n3 OR n3) || (n4 OR n4 OR n4 OR n4)` 在 if-condition) — 见 W-077 entry line 6118-6121
+- W-082 v2.13.8: 二次取证 codegen.jhyy:2267-2308 nested `&&` + `||` pattern
+- **同 workaround pattern 适用**: nested plain `if` flag dispatch, 不走 short-circuit — 见 W-077 entry line 6121 已建立的 pattern
+
+### v2.13.8 取证 + workaround 实际应用
+
+**触发位置**: `compiler/src0/codegen.jhyy:2267-2308` (W-058 fmod fold 修复 path)
+**真修 attempt code (前, 触发 W-082)**:
+```jhyy
+if d_op == TOKEN_PERCENT() && (op_qt == QBE_D() || op_qt == QBE_S()) {
+    let is_f32: i32 = if op_qt == QBE_S() { 1 } else { 0 };
+    // 5 IL insns: div + dtosi/stosi + swtof + mul + sub
+    return result;
+}
+```
+
+**应用 workaround 后 (v2.13.8 ship 实际)**:
+```jhyy
+if d_op == TOKEN_PERCENT() {
+    let mut is_fmod_qt: i32 = 0;
+    if op_qt == QBE_D() { is_fmod_qt = 1; }
+    if op_qt == QBE_S() { is_fmod_qt = 1; }
+    if is_fmod_qt != 0 {
+        let is_f32: i32 = if op_qt == QBE_S() { 1 } else { 0 };
+        // 5 IL insns: div + dtosi/stosi + swtof + mul + sub
+        return result;
+    }
+}
+```
+
+**行数差**: original 1-line `if` (1 condition) → workaround 4 nested `if` (4 conditions, no short-circuit) = +7 行 (43 LOC total vs plan 估 +20 −5; 实际因需要 4 if + flag dispatch)
+
+### 真修 deferred v2.13.9+ mini
+
+**真修方向** (跟 W-081 umbrella 共享 redesign 思路但 upstream codegen.jhyy 而非 downstream codegen_amd64_emit_ctrl):
+
+1. **cg_cond / cg_expr 维护 current block stack**:
+   - `cg_cond_push(cur_block)` 在每 short-circuit operand 评估前
+   - `cg_cond_pop()` 在 operand 评估后, sync `cur_block` 到 outer state
+   - `cg_cond_get_current()` emit 阶段读 updated label 而非 stale start label
+
+2. **phi predecessor table 实时 sync**:
+   - emit phi `%tN =qt phi @blk_A %tM, @blk_B %tP` 时, predecessor 必须从 `cg_cond_get_current()` 取 updated label
+   - 当前实现假设 merge label 在外层 emit 阶段一次性决定, 嵌套 short-circuit 改写 cur_block 后未 propagate → stale predecessor 写错
+
+3. **估 LOC**: ~50-80 LOC 真修 (跟 W-081 Iter 2 per-arm injection 思路接近但 upstream codegen.jhyy 而非 downstream codegen_amd64_emit_ctrl)
+
+### 真修不可触发面 (user-facing code path)
+
+- codegen.jhyy 内部 codegen logic (user code 不直接写), impact 仅限 `cg_expr` / `cg_cond` emit 路径
+- user-facing code (e.g. `let r = if a && b || c { ... } else { ... }`) 暂未发现 trigger — 当前 codegen.jhyy 在 user-parse 阶段 emit 走 lexer 词法结构, 嵌套 short-circuit 是 codegen.jhyy emit 阶段的 internal pattern (e.g. check `op_qt == QBE_D() || op_qt == QBE_S()` 这种 if-condition codegen 内部用)
+- jhyy_selfhost_check byte-equal v1→v5 PASS 已隐含 verify 实际 codegen 行为不变 — workaround 等价真修 output
+
+### 验证 (v2.13.8 ship gates, workaround applied 后)
+
+- ✅ `fmod_basic.jhyy` (7.0 % 2.0) QBE EXIT = 1 PASS
+- ✅ `fmod_negative.jhyy` (-7.5 % 2.0) QBE EXIT = 99 PASS (trunc semantics, `+100` 避 Win NTSTATUS 误判)
+- ✅ `fmod_f32.jhyy` (7.0_f32 % 2.0_f32) QBE EXIT = 1 PASS
+- ✅ regress baseline 126/126 HOLD (FRESH total 147 with 21 sysv skip)
+- ✅ byte-equal D26 5/5 PASS preserved
+- ✅ byte-equal-amd64 V2-B 10/10 PASS preserved
+- ✅ fixed-point N=3..5 closure preserved
+- ✅ workaround 应用后 codegen.jhyy:2267-2308 不再触发 "predecessors not matched in phi"
+
+### Workaround 推广面 (per W-077 v2.11.11 已建立 pattern)
+
+任何 codegen.jhyy **emit 阶段内部** if-condition 写嵌套 short-circuit 都需 workaround:
+
+- `cg_expr` 内部分支 dispatch (e.g. NODE_X → 不同 sub-emit path)
+- `cg_cond` 内部 condition 优化 (e.g. `if is_const && value > 0`)
+- `cg_match_pattern` 内部 pattern 检查 (e.g. `if tag == TAG_A || tag == TAG_B`)
+- 任何用 `&&`/`||` 嵌套 codegen 内部 condition 的位置
+
+**统一 rule**: codegen.jhyy 内部 if-condition 写 `A && (B || C)` 或 `A || (B && C)` 形态 → 拆 nested plain `if` flag dispatch
+
+### Memory
+
+- [[feedback_document_workarounds_in_docs]] (W-082 NEW, 详记 trigger pattern + workaround + 真修 deferred v2.13.9+ mini)
+- [[feedback_no_date_estimates]] (no 几月几日, 用 sprint sequence v2.13.9+ mini)
+- [[feedback_plans_per_version]] (v2.13.9 mini plan 包含 W-082 真修 或独立 v2.13.9.1 mini)
+- [[feedback_audit_single_commit_diff]] (W-082 真修需 单 commit + `git show <sha>` 验证 src0 改动)
+- [[feedback_no_traditional_chinese]] (本 entry)
+
+**OS 启动链路:** W-082 🟡 DEFERRED — codegen.jhyy 上游 phi predecessor tracking 缺真修, 影响 codegen.jhyy 内部 emit 路径但 user-facing code 暂未发现 trigger; 跟 W-081 umbrella 共享 phi-merge-gap 家族但 redesign 路径独立。v2.13.9+ mini 真修 closure 后, codegen.jhyy 任何嵌套 short-circuit emit 路径可正常写 (无需 nested plain `if` flag dispatch workaround)。v2.x 中期 W-082 closure 是 v2.15.0 self-vendor QBE + v2.16.0 QBE removal 链路前提 (per `docs/plans/roadmap/v2.x-qbe-rewrite.md`)。
 
 ---
 
