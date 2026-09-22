@@ -977,3 +977,84 @@ v1.7.2 patch A1 ship 时 (per `docs/logs/v1/changelog-v1.7.2.md` A1) fact-check 
 - W-074.8 audit-flip precedent: `docs/internal/workarounds.md:6409-6411` (per user 2026-09-20 决定)
 - Standalone umbrella: `docs/logs/v2/changelog-v2.13.0.md` (本 section 在内, 跟 `changelog-v2.11.0.md` 拆开 per v2.13.7 ship-time split)
 - Memory: `feedback_fix_evaluation_rule` (诚实记录 actual rate: convention grep V.3 exit 0 PASS) + `feedback_plans_per_version` (v2.13.10 = own plan file) + `feedback_audit_single_commit_diff` (单 commit per worktree, codegen.jhyy diff 只 comment) + `feedback_axis_vn_worktree_isolation` (axis-v2 active dev) + `feedback_ssh_key_same_shell` (HTTPS-with-token fallback) + `feedback_commit_coauthor` + `feedback_no_traditional_chinese` + `feedback_changelog_umbrella` (本 section 在 standalone umbrella 内) + `feedback_doc_refactor_factcheck` (W-082 status fact-check pre-plan) + `feedback_document_workarounds_in_docs` (W-082 entry status flip + 索引行 flip + codegen.jhyy comment 补强) + `feedback_rca_first_root_cause` (Phase 1 re-RCA 验证 user-facing 不触发)
+
+---
+
+## v2.13.11 — self-backend `emit_conv_swtof` 2 bugs 真修 (W-083 NEW, W-058 self-backend path closure) ✅ shipped 2026-09-22
+
+### Scope
+
+mini sprint 跟随 v2.13.10 ship (commit `e0d453f`, W-082 audit-flip docs-only)。v2.13.10 plan line 36 错 fix 假说 (改 `codegen_amd64_emit_call.jhyy:1834 is_rem` branch) — line 1834 不存在, 实际 file 624 行; W-082 真修其实从 `emit_conv_swtof` 入手是错的诊断。RCA (per `feedback_rca_first_root_cause` + Read 工具验证) 后发现真根因: `compiler/src0/codegen_amd64_emit_sse.jhyy emit_conv_swtof` (v2.11.19 ship) 2 个独立 bug。
+
+### Bug 1: f32 swtof mis-emit (`emit_conv_swtof` hardcode `cvtsi2sd + movsd`)
+
+函数不查 `tok.qbe_type`, 全部 emit 64-bit f64 序列。Fold IL `t6 =s swtof %t5` (qt=`=s` f32) 应 emit `cvtsi2ss + movss`, 实际 emit f64 序列。下游 `t7 =s mul %t6, %t2` = `mulss` 拿 f64 bits 解释 = garbage, `fmod_f32.jhyy` exit=7 而非 1。
+
+**Fix**: `let is_f32: i32 = if (*t).qbe_type == QBE_S_LOCAL() { 1 as i32 } else { 0 as i32 };` + `let cvt_suffix: *u8 = if is_f32 != (0 as i32) { "ss" as *u8 } else { "sd" as *u8 };`, 全部 `cvtsi2sd`/`movsd`/`cvtsi2ss`/`movss` 拼接用 `cvt_suffix` 替代 hardcode。
+
+### Bug 2: 缺 `cltq` (`movl ... %eax → cvtsi2sd %rax` 之间无 sign-extension)
+
+`cvtsi2sd` 用 64-bit `%rax`; `movl` 写 `%eax` 只清低 32-bit, upper 32-bit 是上一次 `%rax` 操作的 stale bits。负数 i32 → `%rax` 高位全 1 → cvtsi2sd 解释为 huge negative → fold 路径走错 → `fmod_negative.jhyy` exit=100 而非 99。
+
+**Fix**: 在 `movl ... %eax` 后 emit `\tcltq\n` (32→64 sign-extend, 清零 upper 32-bit 至 sign-bit)。
+
+### Plan agent 误诊 "lexer gap"
+
+Plan agent 报告 lexer 不识别 `stosi/dtosi/swtof`, 实际已识别 since v2.11.19 (codegen_amd64_lexer.jhyy line 1418-1791, 8 函数 ~370 LOC) + parse_and_emit dispatch (codegen_amd64.jhyy line 123+); emit_conv_swtof 是唯一缺口。RCA 必须先 Read 工具验证, 不能想当然。
+
+### Out of scope (explicit)
+
+- W-082 short-circuit `&&`/`||` phi merge 真修 — YAGNI per v2.13.10 audit-flip
+- vendor QBE 升级 (拉 remd/rems 主线) — deferred v2.13.12+
+- M5 启动前置 — M5 独立 sprint
+- QBE 自写 + QBE removal — v2.x 末
+- emit_binop_sse 新 helper — emit_conv_swtof ~10 LOC 已足够 fix W-058 self-backend path; YAGNI per mini scope
+
+### Files touched
+
+| 文件 | 改/增 | LOC |
+|------|-----|-----|
+| `compiler/src0/codegen_amd64_emit_sse.jhyy` | 改 `emit_conv_swtof` 函数体 (is_f32 + cvt_suffix + cltq) | ~10 |
+| `docs/internal/workarounds.md` | W-083 NEW entry + W-058 entry line 4082 fix + 索引行 + W-058 status 行 | ~100 |
+| `docs/plans/v2/v2.13.11-plan.md` | NEW | ~250 |
+| `docs/logs/v2/changelog-v2.13.0.md` | v2.13.11 section append (本 section) | ~50 |
+| `README.md` | v2.13.11 row | +1 |
+
+**Total**: ~10 LOC src0 + ~400 LOC docs = ~410 LOC. LOW risk.
+
+### Verification gates (V.0-V.8 全绿)
+
+| Gate | Criterion | v2.13.10 baseline | v2.13.11 actual |
+|------|-----------|-----------|---------|
+| V.0 | regress default QBE baseline ≥ 126/147 PASS HOLD (FRESH per `feedback_regress_clean_count`) | 126/147 PASS | 126/147 PASS (preserved) |
+| V.1 | regress self-backend ≥ 127/127 PASS | 124/127 (3 fmod fail) | **127/127 PASS (+3 flip)** |
+| V.2 | fmod_f32.jhyy self-backend EXIT=1 | exit=7 | **exit=1** |
+| V.3 | fmod_negative.jhyy self-backend EXIT=99 | exit=100 | **exit=99** |
+| V.4 | fmod_basic.jhyy self-backend EXIT=1 | exit=1 (巧合) | exit=1 (preserved) |
+| V.5 | byte-equal D26 5/5 PASS | 5/5 PASS | 5/5 PASS (preserved) |
+| V.6 | byte-equal-amd64 10/10 PASS | 10/10 PASS | 10/10 PASS (preserved) |
+| V.7 | big_test self-backend EXIT=12345 preserved | exit=12345 | exit=12345 (preserved) |
+| V.8 | fixed-point N=3 v2=v3 byte-equal PASS | N=3 PASS | N=3 PASS + N=4/N=5 informational |
+
+### Single commit + ship (axis-v2)
+
+- Single commit on axis-v2 worktree (per `feedback_audit_single_commit_diff`)
+- Tag `v2.13.11` (per `feedback_no_date_estimates` 用 sprint sequence)
+- Push via HTTPS-with-token fallback (per `feedback_ssh_key_same_shell` + CLAUDE.md GFW workaround)
+- Mirror 5 files to main worktree (raw bash + 绝对路径 per `feedback_axis_vn_worktree_isolation`)
+- Mirror single commit, push SSH (or HTTPS-with-token fallback)
+
+### Memory
+
+- [[feedback_fix_evaluation_rule]] — V.1-V.4 hard gate, 5/5 PASS 才 ship
+- [[feedback_codegen_amd64_multifn]] — 3 fmod tests 全部 FLIP, big_test preserved → ship OK
+- [[feedback_rca_first_root_cause]] — v2.13.10 plan claim "self-backend 不需额外修" 是 false assumption, RCA 后发现 2 个独立 bug
+- [[feedback_plans_per_version]] — v2.13.11-plan.md NEW
+- [[feedback_document_workarounds_in_docs]] — W-083 NEW entry + W-058 entry line 4082 fix
+- [[feedback_changelog_umbrella]] — v2.13.11 section append 到 changelog-v2.13.0.md (本 section)
+- [[feedback_doc_refactor_factcheck]] — W-058 entry line 4082 stale text fix (v2.13.10 plan line 36 错 fix 假说)
+- [[feedback_axis_vn_worktree_isolation]] — axis-v2 active dev, raw bash + 绝对路径
+- [[feedback_ssh_key_same_shell]] — HTTPS-with-token fallback
+- [[feedback_commit_coauthor]] — `Co-Authored-By: MiniMax-M3 <noreply@MiniMax>`
+- [[feedback_no_traditional_chinese]] — simplified Chinese only
+- [[feedback_audit_single_commit_diff]] — single commit per worktree

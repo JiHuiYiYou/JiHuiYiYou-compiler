@@ -247,10 +247,16 @@ fn emit_conv_sltof(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     return 0;
 }
 
-// emit_conv_swtof — i32 (signed) → f64 via cvtsi2sd
+// emit_conv_swtof — i32 (signed) → f32 / f64 via cvtsi2ss / cvtsi2sd
 //   1. movl stack → %eax (32-bit load sign-extends to %rax by GAS)
-//   2. cvtsi2sd %rax, %xmm0 (cvtsi2sd 用 %rax — 自动 sign-ext 32→64)
-//   3. movsd %xmm0 → stack slot
+//   2. cvtsi2ss / cvtsi2sd %rax, %xmm0 (cvtsi2* 用 %rax — 自动 sign-ext 32→64)
+//   3. movss / movsd %xmm0 → stack slot
+//
+// v2.13.11 (W-083 真修):dst qt 由 tok.qbe_type 决定 (=s 走 cvtsi2ss + movss,
+// =d 走 cvtsi2sd + movsd)。v2.11.19 之前 hardcode =d → f32 swtof silently emit
+// f64 序列 → mulss / addss / subss 拿 f64 解释 = garbage, fmod_f32 (跟 fmod_negative
+// 类似 fold) exit=7/100 而非 1/99。W-058 fold fix 不需改 (QBE IL 仍 emit =s
+// swtof),此函数只需按 qt 走对指令。
 fn emit_conv_swtof(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let cg = state as *CGState;
     let s = (*cg).out;
@@ -262,13 +268,25 @@ fn emit_conv_swtof(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let src_id = cg_parse_temp((*t).text, (*t).text_len, 0 as i64);
     let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
     let src_off = cg_offset_for_temp_with_target(src_id, target_tag);
+    // W-083 v2.13.11: 选 cvtsi2ss vs cvtsi2sd / movss vs movsd by dst qt
+    let is_f32: i32 = if (*t).qbe_type == QBE_S_LOCAL() { 1 as i32 } else { 0 as i32 };
+    let cvt_suffix: *u8 = if is_f32 != (0 as i32) { "ss" as *u8 } else { "sd" as *u8 };
     let _r1 = sb_append_cstr(arena, s, "\tmovl " as *u8);
     let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
     let _r3 = sb_append_cstr(arena, s, "(%rbp), %eax\n" as *u8);
-    let _r4 = sb_append_cstr(arena, s, "\tcvtsi2sd %rax, %xmm0\n" as *u8);
-    let _r5 = sb_append_cstr(arena, s, "\tmovsd %xmm0, " as *u8);
-    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
-    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    // W-083 v2.13.11: cltq (sign-extend %eax → %rax) 在 movl 之後, cvtsi2ss/sd 之前 —
+    //   32-bit movl 不動 %rax upper bits, cvtsi2* 用 %rax 全 64-bit; 不 sign-ext
+    //   会让负 i32 (e.g. -3) 解释成 huge u32 (e.g. 0xFFFFFFFD) → cvtsi2sd = +4.29e9
+    //   garbage. 之前 v2.11.19 ship 时漏 cltq → fmod_negative exit=100 (期望 99)
+    let _cltq = sb_append_cstr(arena, s, "\tcltq\n" as *u8);
+    let _r4 = sb_append_cstr(arena, s, "\tcvtsi2" as *u8);
+    let _r5 = sb_append_cstr(arena, s, cvt_suffix);
+    let _r6 = sb_append_cstr(arena, s, " %rax, %xmm0\n" as *u8);
+    let _r7 = sb_append_cstr(arena, s, "\tmov" as *u8);
+    let _r8 = sb_append_cstr(arena, s, cvt_suffix);
+    let _r9 = sb_append_cstr(arena, s, " %xmm0, " as *u8);
+    let _r10 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r11 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
     return 0;
 }
 
