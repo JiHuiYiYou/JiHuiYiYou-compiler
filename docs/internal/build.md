@@ -167,6 +167,8 @@ python compiler/build/bin/regress.py
 
 无 `main_jhyy` 的库文件（`mylib.jhyy`、`ns_dup_*.jhyy`）自动 SKIP，不计入 passed/failed。
 
+**v2.15.0** — 默认 backend 走 in-mem self path (`JHY_WRITE_IL=0` 不写盘),regress 数提升至 126/147 PASS (per W-074.14 closure)。env var `JHY_WRITE_IL=1` 给 QBE / debug 路径强制走 file I/O round-trip。详见 `docs/internal/architecture.md` §"In-Mem Pipeline"。
+
 ---
 
 ## 单元测试

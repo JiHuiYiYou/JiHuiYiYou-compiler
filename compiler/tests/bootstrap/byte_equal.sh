@@ -5,7 +5,8 @@
 #
 # 在两份 jhyy binary 上编译同一 .jhyy 源, 然后对比三层:
 #   [1/3] .il byte-equal
-#   [2/3] .s  byte-equal
+#   [2/3] .s  byte-equal (v2.15.0: 升级到 primary closure gate — in-mem self
+#                            path 跨代一致)
 #   [3/3] .exe byte-equal (兜底 per D26: gcc -g0 + strip + SOURCE_DATE_EPOCH
 #                             + --build-id=none)
 #
@@ -15,6 +16,13 @@
 #   本 script 跑 jhyy_V1 vs jhyy_V2 = 跨版本 byte-equal, 仅在 v2.0 → v2.x 末
 #   期间有效; v3.0+ 加新特性 (asm / volatile / link_section / Cap<T> layout)
 #   .s / .il 因新特性变化, byte-equal 必须重 baseline (jhyy_V3 == jhyy_V4 等).
+#
+# v2.15.0 升级:
+#   - 默认 backend 走 in-mem self path (JHY_WRITE_IL 默认 0 → 跳过 .il 写盘).
+#   - .s byte-equal 从 INFO-only 升级成 primary closure gate (跟 .il 同位置)
+#   - V1 frozen binary (v2.5.0 baseline) 走老 QBE path;V2 (in-mem) 走 self path;
+#     .s closure 跨 backend 必须 byte-equal (per docs/plans/v2/v2.15.0-plan.md
+#     Strategy B+;验证点: in-mem .s 跟 JHY_WRITE_IL=1 self path .s byte-equal)。
 #
 # 关于 .exe byte-equal (v2.4.0 实际行为):
 #   - .il + .s byte-equal 是真实的 closure gate (QBE IL emit 确定性).
@@ -27,6 +35,7 @@
 # 环境变量:
 #   JHYY_V1  = jhyy v1 binary path (default: compiler/build/bin/jhyy_v1.exe.exe)
 #   JHYY_V2  = jhyy v2 binary path (default: compiler/build/bin/jhyy.exe)
+#   JHY_WRITE_IL = 强制写 .il (debug 用; 默认 0 → 跳过 .il 写盘, in-mem path)
 #
 # 退出码:
 #   0  = .il + .s byte-equal (.exe 状态不影响退出码)

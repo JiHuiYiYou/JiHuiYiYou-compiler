@@ -1889,140 +1889,147 @@ data $str1887 = { b "ab", b 0 }
 data $str1888 = { b "\n", b 0 }
 data $str1889 = { b "", b 0 }
 data $str1890 = { b "warning: self-backend produced 0-byte .s, n=%lld tokens dispatched\n", b 0 }
-data $str1891 = { b "rb", b 0 }
-data $str1892 = { b "cannot open file\n", b 0 }
-data $str1893 = { b "error: circular import '", b 0 }
-data $str1894 = { b "'\n", b 0 }
-data $str1895 = { b "error: cannot open import '", b 0 }
-data $str1896 = { b "'\n", b 0 }
-data $str1897 = { b "parse errors in import '", b 0 }
-data $str1898 = { b "'\n", b 0 }
-data $str1899 = { b "/", b 0 }
-data $str1900 = { b ".jhyy", b 0 }
-data $str1901 = { b "/", b 0 }
-data $str1902 = { b ".jhyy", b 0 }
-data $str1903 = { b "parse errors\n", b 0 }
-data $str1904 = { b "[1] imports start\n", b 0 }
-data $str1905 = { b "[2] imports done\n", b 0 }
-data $str1906 = { b "import resolution failed\n", b 0 }
-data $str1907 = { b "[3] sema start\n", b 0 }
-data $str1908 = { b "semantic errors\n", b 0 }
-data $str1909 = { b "[4] post-sema\n", b 0 }
-data $str1910 = { b "[4a] ir_init done\n", b 0 }
-data $str1911 = { b "[4b-FAIL] cg_module fatal\n", b 0 }
-data $str1912 = { b "[4b] cg_module done\n", b 0 }
-data $str1913 = { b "[4] codegen done\n", b 0 }
-data $str1914 = { b ".il", b 0 }
-data $str1915 = { b "cannot write il\n", b 0 }
-data $str1916 = { b "\"", b 0 }
-data $str1917 = { b "\"", b 0 }
-data $str1918 = { b " -t ", b 0 }
-data $str1919 = { b " -o ", b 0 }
-data $str1920 = { b " ", b 0 }
-data $str1921 = { b "QBE failed: ", b 0 }
-data $str1922 = { b "\n", b 0 }
-data $str1923 = { b "QBE stderr:\n", b 0 }
-data $str1924 = { b "\n", b 0 }
-data $str1925 = { b "QBE_FALLBACK", b 0 }
-data $str1926 = { b "JHY_SELF_BACKEND", b 0 }
-data $str1927 = { b "run_backend: self path failed, fallback to QBE\n", b 0 }
-data $str1928 = { b "QBE_FALLBACK", b 0 }
-data $str1929 = { b "1", b 0 }
-data $str1930 = { b "compiler/build/obj/_section_directive.buf", b 0 }
-data $str1931 = { b "rb", b 0 }
-data $str1932 = { b "rb", b 0 }
-data $str1933 = { b ".globl ", b 0 }
-data $str1934 = { b ".section ", b 0 }
-data $str1935 = { b "wb", b 0 }
-data $str1936 = { b "apply_link_section_directives: cannot reopen temp_asm for write\n", b 0 }
-data $str1937 = { b "compiler/build/obj/_no_std.flag", b 0 }
-data $str1938 = { b "a", b 0 }
-data $str1939 = { b "e", b 0 }
-data $str1940 = { b "W-048: cannot create temp path\n", b 0 }
-data $str1941 = { b ".s", b 0 }
-data $str1942 = { b ".exe", b 0 }
-data $str1943 = { b "W-048: copy asm failed\n", b 0 }
-data $str1944 = { b "compiler/build/obj/_inline_asm.buf", b 0 }
-data $str1945 = { b "rb", b 0 }
-data $str1946 = { b "ab", b 0 }
-data $str1947 = { b "compiler/build/obj/_fence.buf", b 0 }
-data $str1948 = { b "rb", b 0 }
-data $str1949 = { b "ab", b 0 }
-data $str1950 = { b "\"", b 0 }
-data $str1951 = { b "\"", b 0 }
-data $str1952 = { b " ", b 0 }
-data $str1953 = { b " -g0 -Wl,--build-id=none ", b 0 }
-data $str1954 = { b " -nostartfiles -nodefaultlibs -Wl,--entry=main_jhyy ", b 0 }
-data $str1955 = { b " -o ", b 0 }
-data $str1956 = { b " -lm", b 0 }
-data $str1957 = { b "SOURCE_DATE_EPOCH", b 0 }
-data $str1958 = { b "1234567890", b 0 }
-data $str1959 = { b "gcc link failed: ", b 0 }
-data $str1960 = { b "\n", b 0 }
-data $str1961 = { b "gcc stderr:\n", b 0 }
-data $str1962 = { b "\n", b 0 }
-data $str1963 = { b "W-048: rename temp exe failed (kept at ", b 0 }
-data $str1964 = { b ")\n", b 0 }
-data $str1965 = { b "W-042 Tier 3: gcc exit 0 but exe missing/empty at ", b 0 }
-data $str1966 = { b "\n", b 0 }
-data $str1967 = { b "usage: jhyy build <file.jhyy> [-o output]\n", b 0 }
-data $str1968 = { b "usage: jhyy compile <file.jhyy> [-o output]\n", b 0 }
-data $str1969 = { b "-o", b 0 }
-data $str1970 = { b "--no-link", b 0 }
-data $str1971 = { b "compile: no input file\n", b 0 }
-data $str1972 = { b ".il", b 0 }
-data $str1973 = { b ".s", b 0 }
-data $str1974 = { b ".exe", b 0 }
-data $str1975 = { b "compile: --no-link set, skipping gcc link (.s kept at ", b 0 }
-data $str1976 = { b ")\n", b 0 }
-data $str1977 = { b "usage: jhyy run <file.jhyy>\n", b 0 }
-data $str1978 = { b "rb", b 0 }
-data $str1979 = { b "jhyy run: cannot open ", b 0 }
-data $str1980 = { b "\n", b 0 }
-data $str1981 = { b "#[no_std]", b 0 }
-data $str1982 = { b "fn main", b 0 }
-data $str1983 = { b "fn main_jhyy", b 0 }
-data $str1984 = { b "jhyy run: '", b 0 }
-data $str1985 = { b "' has no 'fn main() -> i32' (required for '#[no_std]' modules; use 'jhyy compile <file>.jhyy' for libraries)\n", b 0 }
-data $str1986 = { b "' has no 'fn main_jhyy() -> i32' (required for 'jhyy run'; use 'jhyy compile <file>.jhyy' for libraries)\n", b 0 }
-data $str1987 = { b "_run", b 0 }
-data $str1988 = { b "-o", b 0 }
-data $str1989 = { b "jhyy: cannot resolve absolute path for input\n", b 0 }
-data $str1990 = { b "_run.exe", b 0 }
-data $str1991 = { b "\"", b 0 }
-data $str1992 = { b "\"", b 0 }
-data $str1993 = { b "cmd_dump not yet implemented (sprint 5 commit 2c)\n", b 0 }
-data $str1994 = { b "jhyy: cannot derive project root from argv[0]\n", b 0 }
-data $str1995 = { b "jhyy compiler v1.8.3.2 (self-hosted)\n", b 0 }
-data $str1996 = { b "usage: jhyy <command> [args]\n", b 0 }
-data $str1997 = { b "  --target=<triple> (default amd64_win)\n", b 0 }
-data $str1998 = { b "  compile <file.jhyy> [-o output]\n", b 0 }
-data $str1999 = { b "  build   <file.jhyy> [-o output]\n", b 0 }
-data $str2000 = { b "  run     <file.jhyy>\n", b 0 }
-data $str2001 = { b "  dump    <file.jhyy>\n", b 0 }
-data $str2002 = { b "--help", b 0 }
-data $str2003 = { b "jhyy compiler v2.5.0 (self-hosted, v2.0 series)\n", b 0 }
-data $str2004 = { b "\n", b 0 }
-data $str2005 = { b "usage: jhyy [--target=<triple>] [--help] <command> [args]\n", b 0 }
-data $str2006 = { b "\n", b 0 }
-data $str2007 = { b "commands:\n", b 0 }
-data $str2008 = { b "  compile <file.jhyy> [-o output]   compile to .obj (link with .exe on Windows)\n", b 0 }
-data $str2009 = { b "  build   <file.jhyy> [-o output]   compile + link to .exe\n", b 0 }
-data $str2010 = { b "  run     <file.jhyy>              compile + link + execute\n", b 0 }
-data $str2011 = { b "  dump    <file.jhyy>              print parsed AST / typed IR for debugging\n", b 0 }
-data $str2012 = { b "\n", b 0 }
-data $str2013 = { b "flags:\n", b 0 }
-data $str2014 = { b "  --target=<triple>  select target (default amd64_win); see targets below\n", b 0 }
-data $str2015 = { b "  --no-link          compile to .s only, skip gcc link (for cross-toolchains)\n", b 0 }
-data $str2016 = { b "  --help             show this message and exit\n", b 0 }
-data $str2017 = { b "\n", b 0 }
-data $str2018 = { b "--target=", b 0 }
-data $str2019 = { b "--target=", b 0 }
-data $str2020 = { b "compile", b 0 }
-data $str2021 = { b "build", b 0 }
-data $str2022 = { b "run", b 0 }
-data $str2023 = { b "dump", b 0 }
-data $str2024 = { b "unknown command\n", b 0 }
+data $str1891 = { b "", b 0 }
+data $str1892 = { b "warning: in-mem self-backend produced 0-byte .s, n=%lld tokens dispatched\n", b 0 }
+data $str1893 = { b "JHY_WRITE_IL", b 0 }
+data $str1894 = { b "1", b 0 }
+data $str1895 = { b "true", b 0 }
+data $str1896 = { b "rb", b 0 }
+data $str1897 = { b "cannot open file\n", b 0 }
+data $str1898 = { b "error: circular import '", b 0 }
+data $str1899 = { b "'\n", b 0 }
+data $str1900 = { b "error: cannot open import '", b 0 }
+data $str1901 = { b "'\n", b 0 }
+data $str1902 = { b "parse errors in import '", b 0 }
+data $str1903 = { b "'\n", b 0 }
+data $str1904 = { b "/", b 0 }
+data $str1905 = { b ".jhyy", b 0 }
+data $str1906 = { b "/", b 0 }
+data $str1907 = { b ".jhyy", b 0 }
+data $str1908 = { b "parse errors\n", b 0 }
+data $str1909 = { b "[1] imports start\n", b 0 }
+data $str1910 = { b "[2] imports done\n", b 0 }
+data $str1911 = { b "import resolution failed\n", b 0 }
+data $str1912 = { b "[3] sema start\n", b 0 }
+data $str1913 = { b "semantic errors\n", b 0 }
+data $str1914 = { b "[4] post-sema\n", b 0 }
+data $str1915 = { b "[4a] ir_init done\n", b 0 }
+data $str1916 = { b "[4b-FAIL] cg_module fatal\n", b 0 }
+data $str1917 = { b "[4b] cg_module done\n", b 0 }
+data $str1918 = { b "[4] codegen done\n", b 0 }
+data $str1919 = { b ".il", b 0 }
+data $str1920 = { b ".s", b 0 }
+data $str1921 = { b "build_il: in-mem self-backend failed, fallback to .il write\n", b 0 }
+data $str1922 = { b "cannot write il\n", b 0 }
+data $str1923 = { b "\"", b 0 }
+data $str1924 = { b "\"", b 0 }
+data $str1925 = { b " -t ", b 0 }
+data $str1926 = { b " -o ", b 0 }
+data $str1927 = { b " ", b 0 }
+data $str1928 = { b "QBE failed: ", b 0 }
+data $str1929 = { b "\n", b 0 }
+data $str1930 = { b "QBE stderr:\n", b 0 }
+data $str1931 = { b "\n", b 0 }
+data $str1932 = { b "QBE_FALLBACK", b 0 }
+data $str1933 = { b "JHY_SELF_BACKEND", b 0 }
+data $str1934 = { b "run_backend: self path failed, fallback to QBE\n", b 0 }
+data $str1935 = { b "QBE_FALLBACK", b 0 }
+data $str1936 = { b "1", b 0 }
+data $str1937 = { b "compiler/build/obj/_section_directive.buf", b 0 }
+data $str1938 = { b "rb", b 0 }
+data $str1939 = { b "rb", b 0 }
+data $str1940 = { b ".globl ", b 0 }
+data $str1941 = { b ".section ", b 0 }
+data $str1942 = { b "wb", b 0 }
+data $str1943 = { b "apply_link_section_directives: cannot reopen temp_asm for write\n", b 0 }
+data $str1944 = { b "compiler/build/obj/_no_std.flag", b 0 }
+data $str1945 = { b "a", b 0 }
+data $str1946 = { b "e", b 0 }
+data $str1947 = { b "W-048: cannot create temp path\n", b 0 }
+data $str1948 = { b ".s", b 0 }
+data $str1949 = { b ".exe", b 0 }
+data $str1950 = { b "W-048: copy asm failed\n", b 0 }
+data $str1951 = { b "compiler/build/obj/_inline_asm.buf", b 0 }
+data $str1952 = { b "rb", b 0 }
+data $str1953 = { b "ab", b 0 }
+data $str1954 = { b "compiler/build/obj/_fence.buf", b 0 }
+data $str1955 = { b "rb", b 0 }
+data $str1956 = { b "ab", b 0 }
+data $str1957 = { b "\"", b 0 }
+data $str1958 = { b "\"", b 0 }
+data $str1959 = { b " ", b 0 }
+data $str1960 = { b " -g0 -Wl,--build-id=none ", b 0 }
+data $str1961 = { b " -nostartfiles -nodefaultlibs -Wl,--entry=main_jhyy ", b 0 }
+data $str1962 = { b " -o ", b 0 }
+data $str1963 = { b " -lm", b 0 }
+data $str1964 = { b "SOURCE_DATE_EPOCH", b 0 }
+data $str1965 = { b "1234567890", b 0 }
+data $str1966 = { b "gcc link failed: ", b 0 }
+data $str1967 = { b "\n", b 0 }
+data $str1968 = { b "gcc stderr:\n", b 0 }
+data $str1969 = { b "\n", b 0 }
+data $str1970 = { b "W-048: rename temp exe failed (kept at ", b 0 }
+data $str1971 = { b ")\n", b 0 }
+data $str1972 = { b "W-042 Tier 3: gcc exit 0 but exe missing/empty at ", b 0 }
+data $str1973 = { b "\n", b 0 }
+data $str1974 = { b "usage: jhyy build <file.jhyy> [-o output]\n", b 0 }
+data $str1975 = { b "usage: jhyy compile <file.jhyy> [-o output]\n", b 0 }
+data $str1976 = { b "-o", b 0 }
+data $str1977 = { b "--no-link", b 0 }
+data $str1978 = { b "compile: no input file\n", b 0 }
+data $str1979 = { b ".il", b 0 }
+data $str1980 = { b ".s", b 0 }
+data $str1981 = { b ".exe", b 0 }
+data $str1982 = { b "compile: --no-link set, skipping gcc link (.s kept at ", b 0 }
+data $str1983 = { b ")\n", b 0 }
+data $str1984 = { b "usage: jhyy run <file.jhyy>\n", b 0 }
+data $str1985 = { b "rb", b 0 }
+data $str1986 = { b "jhyy run: cannot open ", b 0 }
+data $str1987 = { b "\n", b 0 }
+data $str1988 = { b "#[no_std]", b 0 }
+data $str1989 = { b "fn main", b 0 }
+data $str1990 = { b "fn main_jhyy", b 0 }
+data $str1991 = { b "jhyy run: '", b 0 }
+data $str1992 = { b "' has no 'fn main() -> i32' (required for '#[no_std]' modules; use 'jhyy compile <file>.jhyy' for libraries)\n", b 0 }
+data $str1993 = { b "' has no 'fn main_jhyy() -> i32' (required for 'jhyy run'; use 'jhyy compile <file>.jhyy' for libraries)\n", b 0 }
+data $str1994 = { b "_run", b 0 }
+data $str1995 = { b "-o", b 0 }
+data $str1996 = { b "jhyy: cannot resolve absolute path for input\n", b 0 }
+data $str1997 = { b "_run.exe", b 0 }
+data $str1998 = { b "\"", b 0 }
+data $str1999 = { b "\"", b 0 }
+data $str2000 = { b "cmd_dump not yet implemented (sprint 5 commit 2c)\n", b 0 }
+data $str2001 = { b "jhyy: cannot derive project root from argv[0]\n", b 0 }
+data $str2002 = { b "jhyy compiler v1.8.3.2 (self-hosted)\n", b 0 }
+data $str2003 = { b "usage: jhyy <command> [args]\n", b 0 }
+data $str2004 = { b "  --target=<triple> (default amd64_win)\n", b 0 }
+data $str2005 = { b "  compile <file.jhyy> [-o output]\n", b 0 }
+data $str2006 = { b "  build   <file.jhyy> [-o output]\n", b 0 }
+data $str2007 = { b "  run     <file.jhyy>\n", b 0 }
+data $str2008 = { b "  dump    <file.jhyy>\n", b 0 }
+data $str2009 = { b "--help", b 0 }
+data $str2010 = { b "jhyy compiler v2.5.0 (self-hosted, v2.0 series)\n", b 0 }
+data $str2011 = { b "\n", b 0 }
+data $str2012 = { b "usage: jhyy [--target=<triple>] [--help] <command> [args]\n", b 0 }
+data $str2013 = { b "\n", b 0 }
+data $str2014 = { b "commands:\n", b 0 }
+data $str2015 = { b "  compile <file.jhyy> [-o output]   compile to .obj (link with .exe on Windows)\n", b 0 }
+data $str2016 = { b "  build   <file.jhyy> [-o output]   compile + link to .exe\n", b 0 }
+data $str2017 = { b "  run     <file.jhyy>              compile + link + execute\n", b 0 }
+data $str2018 = { b "  dump    <file.jhyy>              print parsed AST / typed IR for debugging\n", b 0 }
+data $str2019 = { b "\n", b 0 }
+data $str2020 = { b "flags:\n", b 0 }
+data $str2021 = { b "  --target=<triple>  select target (default amd64_win); see targets below\n", b 0 }
+data $str2022 = { b "  --no-link          compile to .s only, skip gcc link (for cross-toolchains)\n", b 0 }
+data $str2023 = { b "  --help             show this message and exit\n", b 0 }
+data $str2024 = { b "\n", b 0 }
+data $str2025 = { b "--target=", b 0 }
+data $str2026 = { b "--target=", b 0 }
+data $str2027 = { b "compile", b 0 }
+data $str2028 = { b "build", b 0 }
+data $str2029 = { b "run", b 0 }
+data $str2030 = { b "dump", b 0 }
+data $str2031 = { b "unknown command\n", b 0 }
 dbgfile "compiler/src0/main.jhyy"
 export function l $arena__ARENA_DEFAULT_SIZE() {
 @start0
@@ -112875,5294 +112882,5685 @@ export function w $codegen_amd64__write_file(l %path, l %content, l %len) {
     ret %t57903
 }
 
-export function w $SEEK_END_VAL() {
+export function w $codegen_amd64_inmem__codegen_amd64_run_text(l %text, l %len, l %asm_path, w %target_tag) {
 @start13231
-    dbgloc 74
-    %t57904 =w copy 2
-    ret %t57904
-}
-
-export function l $QBE_PATH() {
-@start13232
-    dbgloc 136
-    %t57905 =l call $jh_path_qbe()
-    ret %t57905
-}
-
-export function l $GCC_PATH() {
-@start13233
-    dbgloc 137
-    %t57906 =l call $jh_path_gcc()
-    ret %t57906
-}
-
-export function l $RUNTIME_C() {
-@start13234
-    dbgloc 138
-    %t57907 =l call $jh_path_runtime()
-    ret %t57907
-}
-
-export function l $HELPERS_C() {
-@start13235
-    dbgloc 139
-    %t57908 =l call $jh_path_helpers()
-    ret %t57908
-}
-
-export function w $path_to_win(l %p) {
-@start13236
-    %t57909 =l copy %p
-    dbgloc 145
-    dbgloc 146
-    %t57910 =l call $strlen(l %t57909)
-    dbgloc 147
-    %t57911 =w copy 0
-    %t57912 =l extsw %t57911
-    %t57913 =l alloc8 8
-    storel %t57912, %t57913
-    jmp @loop13237
-@loop13237
-    dbgloc 148
-    %t57914 =l loadl %t57913
-    %t57915 =w csltl %t57914, %t57910
-    jnz %t57915, @body13238, @exit13239
-@body13238
-    dbgloc 149
-    %t57916 =l copy %t57909
-    %t57917 =l loadl %t57913
-    %t57918 =l add %t57916, %t57917
-    %t57919 =l copy %t57918
-    dbgloc 150
-    %t57920 =l copy %t57919
-    dbgloc 151
-    %t57921 =w loadw %t57920
-    %t57922 =w copy 47
-    %t57923 =w ceqw %t57921, %t57922
-    jnz %t57923, @then13240, @else13241
-@then13240
-    dbgloc 152
-    %t57924 =w copy 92
-    storew %t57924, %t57920
-    jmp @merge13242
-@else13241
-    jmp @merge13242
-@merge13242
-    dbgloc 154
-    %t57925 =l loadl %t57913
-    %t57926 =w copy 1
-    %t57927 =l extsw %t57926
-    %t57928 =l add %t57925, %t57927
-    storel %t57928, %t57913
-    jmp @loop13237
-@exit13239
-    dbgloc 156
-    %t57929 =w copy 0
-    ret %t57929
-}
-
-export function l $read_file(l %path) {
-@start13243
-    %t57930 =l copy %path
-    dbgloc 160
-    dbgloc 161
-    %t57931 =l copy $str1891
-    %t57932 =l call $fopen(l %t57930, l %t57931)
-    dbgloc 162
-    %t57933 =w copy 0
+    %t57904 =l copy %text
+    %t57905 =l copy %len
+    %t57906 =l copy %asm_path
+    %t57907 =w copy %target_tag
+    dbgloc 59
+    dbgloc 62
+    %t57908 =w copy 0
+    %t57909 =l extsw %t57908
+    %t57910 =w cslel %t57905, %t57909
+    jnz %t57910, @then13232, @else13233
+@then13232
+    dbgloc 63
+    %t57911 =w copy 1
+    ret %t57911
+@else13233
+    jmp @merge13234
+@merge13234
+    dbgloc 67
+    %t57912 =l alloc16 48
+    %t57913 =w copy 0
+    %t57914 =l extsw %t57913
+    %t57915 =l add %t57912, 0
+    storel %t57914, %t57915
+    %t57916 =w copy 0
+    %t57917 =l extsw %t57916
+    %t57918 =l add %t57912, 8
+    storel %t57917, %t57918
+    %t57919 =w copy 0
+    %t57920 =l extsw %t57919
+    %t57921 =l add %t57912, 16
+    storel %t57920, %t57921
+    dbgloc 68
+    %t57922 =w copy 0
+    %t57923 =l extsw %t57922
+    %t57924 =l add %t57912, 24
+    storel %t57923, %t57924
+    %t57925 =w copy 0
+    %t57926 =l extsw %t57925
+    %t57927 =l add %t57912, 32
+    storel %t57926, %t57927
+    dbgloc 69
+    %t57928 =w copy 8
+    %t57929 =l extsw %t57928
+    %t57930 =w copy 1024
+    %t57931 =l extsw %t57930
+    %t57932 =l mul %t57929, %t57931
+    %t57933 =w copy 1024
     %t57934 =l extsw %t57933
-    %t57935 =w ceql %t57932, %t57934
-    jnz %t57935, @then13244, @else13245
-@then13244
-    dbgloc 163
-    %t57936 =l copy $str1892
-    %t57937 =w call $jh_fputs_stderr(l %t57936)
-    dbgloc 164
+    %t57935 =l mul %t57932, %t57934
+    %t57936 =w call $arena__arena_init(l %t57912, l %t57935)
+    dbgloc 70
+    %t57937 =l call $codegen_amd64_lexer__lex_il(l %t57904, l %t57905, l %t57912)
+    dbgloc 71
     %t57938 =w copy 0
     %t57939 =l extsw %t57938
-    ret %t57939
-@else13245
-    jmp @merge13246
-@merge13246
-    dbgloc 166
-    %t57940 =w copy 0
-    %t57941 =l extsw %t57940
-    %t57942 =w call $SEEK_END_VAL()
-    %t57943 =w call $fseek(l %t57932, l %t57941, w %t57942)
-    dbgloc 167
-    %t57944 =l call $ftell(l %t57932)
-    dbgloc 168
-    %t57945 =w copy 0
-    %t57946 =l extsw %t57945
+    %t57940 =w ceql %t57937, %t57939
+    jnz %t57940, @then13235, @else13236
+@then13235
+    dbgloc 72
+    %t57941 =w call $arena__arena_free(l %t57912)
+    dbgloc 73
+    %t57942 =w copy 1
+    ret %t57942
+@else13236
+    jmp @merge13237
+@merge13237
+    dbgloc 75
+    %t57943 =l call $codegen_amd64_lexer__lex_il_count(l %t57937)
+    dbgloc 79
+    %t57944 =w copy 512
+    %t57945 =l extsw %t57944
+    %t57946 =l call $malloc(l %t57945)
+    dbgloc 80
     %t57947 =w copy 0
-    %t57948 =w call $fseek(l %t57932, l %t57946, w %t57947)
-    dbgloc 171
-    %t57949 =w copy 4
-    %t57950 =l extsw %t57949
-    %t57951 =l add %t57944, %t57950
-    %t57952 =l call $malloc(l %t57951)
-    dbgloc 172
+    %t57948 =l extsw %t57947
+    %t57949 =w ceql %t57946, %t57948
+    jnz %t57949, @then13238, @else13239
+@then13238
+    dbgloc 81
+    %t57950 =w call $arena__arena_free(l %t57912)
+    dbgloc 82
+    %t57951 =w copy 1
+    ret %t57951
+@else13239
+    jmp @merge13240
+@merge13240
+    dbgloc 84
+    %t57952 =l alloc16 32
     %t57953 =w copy 0
     %t57954 =l extsw %t57953
-    %t57955 =w ceql %t57952, %t57954
-    jnz %t57955, @then13247, @else13248
+    %t57955 =l add %t57952, 0
+    storel %t57954, %t57955
+    %t57956 =w copy 0
+    %t57957 =l extsw %t57956
+    %t57958 =l add %t57952, 8
+    storel %t57957, %t57958
+    %t57959 =w copy 0
+    %t57960 =l extsw %t57959
+    %t57961 =l add %t57952, 16
+    storel %t57960, %t57961
+    dbgloc 85
+    %t57962 =w call $util__sb_init(l %t57912, l %t57952)
+    dbgloc 86
+    %t57963 =l copy $str1891
+    %t57964 =w call $codegen_amd64_state__cg_state_init(l %t57946, l %t57952, l %t57912, l %t57963)
+    dbgloc 87
+    %t57965 =w call $codegen_amd64_state__cg_state_set_target(l %t57946, w %t57907)
+    dbgloc 90
+    %t57966 =w copy 40
+    %t57967 =l extsw %t57966
+    %t57968 =w call $codegen_amd64_state__cg_compute_per_fn_max_temps(l %t57946, l %t57937, l %t57967, l %t57943)
+    dbgloc 91
+    %t57969 =w copy 40
+    %t57970 =l extsw %t57969
+    %t57971 =l call $codegen_amd64_state__cg_compute_global_max_temp(l %t57937, l %t57970, l %t57943)
+    dbgloc 92
+    %t57972 =w call $codegen_amd64_state__cg_state_set_frame_max_temp(l %t57946, l %t57971)
+    dbgloc 96
+    %t57973 =w call $codegen_amd64_regalloc__regalloc_clear_global()
+    dbgloc 99
+    %t57974 =w call $codegen_amd64__parse_and_emit(l %t57946, l %t57937, l %t57943, w %t57907)
+    dbgloc 101
+    %t57975 =l add %t57952, 8
+    %t57976 =l loadl %t57975
+    %t57977 =w copy 0
+    %t57978 =l extsw %t57977
+    %t57979 =w ceql %t57976, %t57978
+    jnz %t57979, @sc_eval13241, @sc_false13243
+@sc_false13243
+    %t57981 =w copy 0
+    jmp @sc_merge13242
+@sc_eval13241
+    %t57982 =w copy 0
+    %t57983 =l extsw %t57982
+    %t57984 =w csgtl %t57943, %t57983
+    %t57985 =w cnew %t57984, 0
+    jmp @sc_merge13242
+@sc_merge13242
+    %t57980 =w phi @sc_false13243 %t57981, @sc_eval13241 %t57985
+    jnz %t57980, @then13244, @else13245
+@then13244
+    dbgloc 102
+    %t57986 =w copy 96
+    %t57987 =l extsw %t57986
+    dbgloc 103
+    %t57988 =l call $malloc(l %t57987)
+    dbgloc 104
+    %t57989 =w copy 0
+    %t57990 =l extsw %t57989
+    %t57991 =w cnel %t57988, %t57990
+    jnz %t57991, @then13247, @else13248
 @then13247
-    dbgloc 173
-    %t57956 =w call $fclose(l %t57932)
-    dbgloc 174
-    %t57957 =w copy 0
-    %t57958 =l extsw %t57957
-    ret %t57958
+    dbgloc 105
+    %t57992 =l copy $str1892
+    %t57993 =w call $sprintf_lld(l %t57988, l %t57992, l %t57943)
+    dbgloc 106
+    %t57994 =w call $jh_fputs_stderr(l %t57988)
+    dbgloc 107
+    %t57995 =w call $free(l %t57988)
+    jmp @merge13249
 @else13248
     jmp @merge13249
 @merge13249
+    jmp @merge13246
+@else13245
+    jmp @merge13246
+@merge13246
+    dbgloc 112
+    %t57996 =l loadl %t57952
+    dbgloc 113
+    %t57997 =l add %t57952, 8
+    %t57998 =l loadl %t57997
+    dbgloc 114
+    %t57999 =w copy 8
+    %t58000 =l extsw %t57999
+    %t58001 =l call $malloc(l %t58000)
+    dbgloc 115
+    %t58002 =l copy %t58001
+    storel %t57998, %t58002
+    dbgloc 116
+    %t58003 =l alloc16 48
+    %t58004 =l copy %t57912
+    %t58005 =l copy %t58003
+    %t58006 =l loadl %t58004
+    storel %t58006, %t58005
+    %t58007 =l add %t57912, 8
+    %t58008 =l add %t58003, 8
+    %t58009 =l loadl %t58007
+    storel %t58009, %t58008
+    %t58010 =l add %t57912, 16
+    %t58011 =l add %t58003, 16
+    %t58012 =l loadl %t58010
+    storel %t58012, %t58011
+    %t58013 =l add %t57912, 24
+    %t58014 =l add %t58003, 24
+    %t58015 =l loadl %t58013
+    storel %t58015, %t58014
+    %t58016 =l add %t57912, 32
+    %t58017 =l add %t58003, 32
+    %t58018 =l loadl %t58016
+    storel %t58018, %t58017
+    %t58019 =l call $codegen_amd64_peephole__peephole_fold_with_len(l %t57996, l %t57998, l %t58003, w %t57907, l %t58001)
+    %t58020 =l alloc8 8
+    storel %t58019, %t58020
+    dbgloc 117
+    %t58021 =l copy %t58001
+    %t58022 =l loadl %t58021
+    %t58023 =l alloc8 8
+    storel %t58022, %t58023
+    dbgloc 118
+    %t58024 =l loadl %t58020
+    %t58025 =w copy 0
+    %t58026 =l extsw %t58025
+    %t58027 =w ceql %t58024, %t58026
+    jnz %t58027, @then13250, @else13251
+@then13250
+    dbgloc 119
+    storel %t57996, %t58020
+    dbgloc 120
+    storel %t57998, %t58023
+    jmp @merge13252
+@else13251
+    jmp @merge13252
+@merge13252
+    dbgloc 122
+    %t58028 =w call $free(l %t58001)
+    dbgloc 125
+    %t58029 =l loadl %t58020
+    %t58030 =l loadl %t58023
+    %t58031 =w call $jh_write_file(l %t57906, l %t58029, l %t58030)
+    dbgloc 128
+    %t58032 =w call $free(l %t57946)
+    dbgloc 129
+    %t58033 =w call $arena__arena_free(l %t57912)
+    dbgloc 130
+    ret %t58031
+}
+
+export function w $SEEK_END_VAL() {
+@start13253
+    dbgloc 76
+    %t58034 =w copy 2
+    ret %t58034
+}
+
+export function w $jh_write_il_enabled() {
+@start13254
+    dbgloc 113
+    dbgloc 114
+    %t58035 =l copy $str1893
+    %t58036 =l call $jh_getenv(l %t58035)
+    dbgloc 115
+    %t58037 =w copy 0
+    %t58038 =l extsw %t58037
+    %t58039 =w ceql %t58036, %t58038
+    jnz %t58039, @then13255, @else13256
+@then13255
+    %t58040 =w copy 0
+    ret %t58040
+@else13256
+    jmp @merge13257
+@merge13257
+    dbgloc 116
+    %t58041 =l copy $str1894
+    %t58042 =w call $strcmp(l %t58036, l %t58041)
+    %t58043 =w copy 0
+    %t58044 =w ceqw %t58042, %t58043
+    jnz %t58044, @then13258, @else13259
+@then13258
+    %t58045 =w copy 1
+    ret %t58045
+@else13259
+    jmp @merge13260
+@merge13260
+    dbgloc 117
+    %t58046 =l copy $str1895
+    %t58047 =w call $strcmp(l %t58036, l %t58046)
+    %t58048 =w copy 0
+    %t58049 =w ceqw %t58047, %t58048
+    jnz %t58049, @then13261, @else13262
+@then13261
+    %t58050 =w copy 1
+    ret %t58050
+@else13262
+    jmp @merge13263
+@merge13263
+    dbgloc 118
+    %t58051 =w copy 0
+    ret %t58051
+}
+
+export function l $QBE_PATH() {
+@start13264
+    dbgloc 148
+    %t58052 =l call $jh_path_qbe()
+    ret %t58052
+}
+
+export function l $GCC_PATH() {
+@start13265
+    dbgloc 149
+    %t58053 =l call $jh_path_gcc()
+    ret %t58053
+}
+
+export function l $RUNTIME_C() {
+@start13266
+    dbgloc 150
+    %t58054 =l call $jh_path_runtime()
+    ret %t58054
+}
+
+export function l $HELPERS_C() {
+@start13267
+    dbgloc 151
+    %t58055 =l call $jh_path_helpers()
+    ret %t58055
+}
+
+export function w $path_to_win(l %p) {
+@start13268
+    %t58056 =l copy %p
+    dbgloc 157
+    dbgloc 158
+    %t58057 =l call $strlen(l %t58056)
+    dbgloc 159
+    %t58058 =w copy 0
+    %t58059 =l extsw %t58058
+    %t58060 =l alloc8 8
+    storel %t58059, %t58060
+    jmp @loop13269
+@loop13269
+    dbgloc 160
+    %t58061 =l loadl %t58060
+    %t58062 =w csltl %t58061, %t58057
+    jnz %t58062, @body13270, @exit13271
+@body13270
+    dbgloc 161
+    %t58063 =l copy %t58056
+    %t58064 =l loadl %t58060
+    %t58065 =l add %t58063, %t58064
+    %t58066 =l copy %t58065
+    dbgloc 162
+    %t58067 =l copy %t58066
+    dbgloc 163
+    %t58068 =w loadw %t58067
+    %t58069 =w copy 47
+    %t58070 =w ceqw %t58068, %t58069
+    jnz %t58070, @then13272, @else13273
+@then13272
+    dbgloc 164
+    %t58071 =w copy 92
+    storew %t58071, %t58067
+    jmp @merge13274
+@else13273
+    jmp @merge13274
+@merge13274
+    dbgloc 166
+    %t58072 =l loadl %t58060
+    %t58073 =w copy 1
+    %t58074 =l extsw %t58073
+    %t58075 =l add %t58072, %t58074
+    storel %t58075, %t58060
+    jmp @loop13269
+@exit13271
+    dbgloc 168
+    %t58076 =w copy 0
+    ret %t58076
+}
+
+export function l $read_file(l %path) {
+@start13275
+    %t58077 =l copy %path
+    dbgloc 172
+    dbgloc 173
+    %t58078 =l copy $str1896
+    %t58079 =l call $fopen(l %t58077, l %t58078)
+    dbgloc 174
+    %t58080 =w copy 0
+    %t58081 =l extsw %t58080
+    %t58082 =w ceql %t58079, %t58081
+    jnz %t58082, @then13276, @else13277
+@then13276
+    dbgloc 175
+    %t58083 =l copy $str1897
+    %t58084 =w call $jh_fputs_stderr(l %t58083)
     dbgloc 176
-    %t57959 =w copy 1
-    %t57960 =l extsw %t57959
-    %t57961 =l call $fread(l %t57952, l %t57960, l %t57944, l %t57932)
+    %t58085 =w copy 0
+    %t58086 =l extsw %t58085
+    ret %t58086
+@else13277
+    jmp @merge13278
+@merge13278
     dbgloc 178
-    %t57962 =l copy %t57952
-    %t57963 =l add %t57962, %t57944
-    %t57964 =l copy %t57963
+    %t58087 =w copy 0
+    %t58088 =l extsw %t58087
+    %t58089 =w call $SEEK_END_VAL()
+    %t58090 =w call $fseek(l %t58079, l %t58088, w %t58089)
     dbgloc 179
-    %t57965 =l copy %t57964
+    %t58091 =l call $ftell(l %t58079)
     dbgloc 180
-    %t57966 =w copy 0
-    storew %t57966, %t57965
-    dbgloc 181
-    %t57967 =w call $fclose(l %t57932)
-    dbgloc 182
-    ret %t57952
+    %t58092 =w copy 0
+    %t58093 =l extsw %t58092
+    %t58094 =w copy 0
+    %t58095 =w call $fseek(l %t58079, l %t58093, w %t58094)
+    dbgloc 183
+    %t58096 =w copy 4
+    %t58097 =l extsw %t58096
+    %t58098 =l add %t58091, %t58097
+    %t58099 =l call $malloc(l %t58098)
+    dbgloc 184
+    %t58100 =w copy 0
+    %t58101 =l extsw %t58100
+    %t58102 =w ceql %t58099, %t58101
+    jnz %t58102, @then13279, @else13280
+@then13279
+    dbgloc 185
+    %t58103 =w call $fclose(l %t58079)
+    dbgloc 186
+    %t58104 =w copy 0
+    %t58105 =l extsw %t58104
+    ret %t58105
+@else13280
+    jmp @merge13281
+@merge13281
+    dbgloc 188
+    %t58106 =w copy 1
+    %t58107 =l extsw %t58106
+    %t58108 =l call $fread(l %t58099, l %t58107, l %t58091, l %t58079)
+    dbgloc 190
+    %t58109 =l copy %t58099
+    %t58110 =l add %t58109, %t58091
+    %t58111 =l copy %t58110
+    dbgloc 191
+    %t58112 =l copy %t58111
+    dbgloc 192
+    %t58113 =w copy 0
+    storew %t58113, %t58112
+    dbgloc 193
+    %t58114 =w call $fclose(l %t58079)
+    dbgloc 194
+    ret %t58099
 }
 
 export function w $store_byte_i32(l %p, w %val) {
-@start13250
-    %t57968 =l copy %p
-    %t57969 =w copy %val
-    dbgloc 186
-    dbgloc 187
-    %t57970 =l copy %t57968
-    dbgloc 188
-    storew %t57969, %t57970
-    dbgloc 189
-    %t57971 =w copy 0
-    ret %t57971
+@start13282
+    %t58115 =l copy %p
+    %t58116 =w copy %val
+    dbgloc 198
+    dbgloc 199
+    %t58117 =l copy %t58115
+    dbgloc 200
+    storew %t58116, %t58117
+    dbgloc 201
+    %t58118 =w copy 0
+    ret %t58118
 }
 
 export function w $load_byte_i32(l %p) {
-@start13251
-    %t57972 =l copy %p
-    dbgloc 193
-    dbgloc 194
-    %t57973 =l copy %t57972
-    dbgloc 195
-    %t57974 =w loadw %t57973
-    ret %t57974
+@start13283
+    %t58119 =l copy %p
+    dbgloc 205
+    dbgloc 206
+    %t58120 =l copy %t58119
+    dbgloc 207
+    %t58121 =w loadw %t58120
+    ret %t58121
 }
 
 export function l $str_copy(l %dst, l %src) {
-@start13252
-    %t57975 =l copy %dst
-    %t57976 =l copy %src
-    dbgloc 199
-    dbgloc 200
-    %t57977 =l call $strlen(l %t57976)
-    dbgloc 201
-    %t57978 =w copy 0
-    %t57979 =l extsw %t57978
-    %t57980 =l alloc8 8
-    storel %t57979, %t57980
-    jmp @loop13253
-@loop13253
-    dbgloc 202
-    %t57981 =l loadl %t57980
-    %t57982 =w csltl %t57981, %t57977
-    jnz %t57982, @body13254, @exit13255
-@body13254
-    dbgloc 203
-    %t57983 =l copy %t57976
-    %t57984 =l loadl %t57980
-    %t57985 =l add %t57983, %t57984
-    %t57986 =l copy %t57985
-    dbgloc 204
-    %t57987 =l copy %t57975
-    %t57988 =l loadl %t57980
-    %t57989 =l add %t57987, %t57988
-    %t57990 =l copy %t57989
-    dbgloc 205
-    %t57991 =l copy %t57986
-    dbgloc 206
-    %t57992 =l copy %t57990
-    dbgloc 207
-    %t57993 =w loadw %t57991
-    storew %t57993, %t57992
-    dbgloc 208
-    %t57994 =l loadl %t57980
-    %t57995 =w copy 1
-    %t57996 =l extsw %t57995
-    %t57997 =l add %t57994, %t57996
-    storel %t57997, %t57980
-    jmp @loop13253
-@exit13255
-    dbgloc 210
-    ret %t57977
+@start13284
+    %t58122 =l copy %dst
+    %t58123 =l copy %src
+    dbgloc 211
+    dbgloc 212
+    %t58124 =l call $strlen(l %t58123)
+    dbgloc 213
+    %t58125 =w copy 0
+    %t58126 =l extsw %t58125
+    %t58127 =l alloc8 8
+    storel %t58126, %t58127
+    jmp @loop13285
+@loop13285
+    dbgloc 214
+    %t58128 =l loadl %t58127
+    %t58129 =w csltl %t58128, %t58124
+    jnz %t58129, @body13286, @exit13287
+@body13286
+    dbgloc 215
+    %t58130 =l copy %t58123
+    %t58131 =l loadl %t58127
+    %t58132 =l add %t58130, %t58131
+    %t58133 =l copy %t58132
+    dbgloc 216
+    %t58134 =l copy %t58122
+    %t58135 =l loadl %t58127
+    %t58136 =l add %t58134, %t58135
+    %t58137 =l copy %t58136
+    dbgloc 217
+    %t58138 =l copy %t58133
+    dbgloc 218
+    %t58139 =l copy %t58137
+    dbgloc 219
+    %t58140 =w loadw %t58138
+    storew %t58140, %t58139
+    dbgloc 220
+    %t58141 =l loadl %t58127
+    %t58142 =w copy 1
+    %t58143 =l extsw %t58142
+    %t58144 =l add %t58141, %t58143
+    storel %t58144, %t58127
+    jmp @loop13285
+@exit13287
+    dbgloc 222
+    ret %t58124
 }
 
 export function l $str_concat_at(l %dst, l %off, l %src) {
-@start13256
-    %t57998 =l copy %dst
-    %t57999 =l copy %off
-    %t58000 =l copy %src
-    dbgloc 214
-    dbgloc 215
-    %t58001 =l call $strlen(l %t58000)
-    dbgloc 216
-    %t58002 =w copy 0
-    %t58003 =l extsw %t58002
-    %t58004 =l alloc8 8
-    storel %t58003, %t58004
-    jmp @loop13257
-@loop13257
-    dbgloc 217
-    %t58005 =l loadl %t58004
-    %t58006 =w csltl %t58005, %t58001
-    jnz %t58006, @body13258, @exit13259
-@body13258
-    dbgloc 218
-    %t58007 =l copy %t58000
-    %t58008 =l loadl %t58004
-    %t58009 =l add %t58007, %t58008
-    %t58010 =l copy %t58009
-    dbgloc 219
-    %t58011 =l copy %t57998
-    %t58012 =l add %t58011, %t57999
-    %t58013 =l loadl %t58004
-    %t58014 =l add %t58012, %t58013
-    %t58015 =l copy %t58014
-    dbgloc 220
-    %t58016 =l copy %t58010
-    dbgloc 221
-    %t58017 =l copy %t58015
-    dbgloc 222
-    %t58018 =w loadw %t58016
-    storew %t58018, %t58017
-    dbgloc 223
-    %t58019 =l loadl %t58004
-    %t58020 =w copy 1
-    %t58021 =l extsw %t58020
-    %t58022 =l add %t58019, %t58021
-    storel %t58022, %t58004
-    jmp @loop13257
-@exit13259
-    dbgloc 225
-    %t58023 =l add %t57999, %t58001
-    ret %t58023
+@start13288
+    %t58145 =l copy %dst
+    %t58146 =l copy %off
+    %t58147 =l copy %src
+    dbgloc 226
+    dbgloc 227
+    %t58148 =l call $strlen(l %t58147)
+    dbgloc 228
+    %t58149 =w copy 0
+    %t58150 =l extsw %t58149
+    %t58151 =l alloc8 8
+    storel %t58150, %t58151
+    jmp @loop13289
+@loop13289
+    dbgloc 229
+    %t58152 =l loadl %t58151
+    %t58153 =w csltl %t58152, %t58148
+    jnz %t58153, @body13290, @exit13291
+@body13290
+    dbgloc 230
+    %t58154 =l copy %t58147
+    %t58155 =l loadl %t58151
+    %t58156 =l add %t58154, %t58155
+    %t58157 =l copy %t58156
+    dbgloc 231
+    %t58158 =l copy %t58145
+    %t58159 =l add %t58158, %t58146
+    %t58160 =l loadl %t58151
+    %t58161 =l add %t58159, %t58160
+    %t58162 =l copy %t58161
+    dbgloc 232
+    %t58163 =l copy %t58157
+    dbgloc 233
+    %t58164 =l copy %t58162
+    dbgloc 234
+    %t58165 =w loadw %t58163
+    storew %t58165, %t58164
+    dbgloc 235
+    %t58166 =l loadl %t58151
+    %t58167 =w copy 1
+    %t58168 =l extsw %t58167
+    %t58169 =l add %t58166, %t58168
+    storel %t58169, %t58151
+    jmp @loop13289
+@exit13291
+    dbgloc 237
+    %t58170 =l add %t58146, %t58148
+    ret %t58170
 }
 
 export function w $in_progress_match(l %in_progress, l %nin_progress, l %path) {
-@start13260
-    %t58024 =l copy %in_progress
-    %t58025 =l copy %nin_progress
-    %t58026 =l copy %path
-    dbgloc 239
-    dbgloc 240
-    %t58027 =w copy 0
-    %t58028 =l extsw %t58027
-    %t58029 =l alloc8 8
-    storel %t58028, %t58029
-    jmp @loop13261
-@loop13261
-    dbgloc 241
-    %t58030 =l loadl %t58029
-    %t58031 =w csltl %t58030, %t58025
-    jnz %t58031, @body13262, @exit13263
-@body13262
-    dbgloc 242
-    %t58032 =l copy %t58024
-    %t58033 =l loadl %t58029
-    %t58034 =w copy 512
-    %t58035 =l extsw %t58034
-    %t58036 =l mul %t58033, %t58035
-    %t58037 =l add %t58032, %t58036
-    %t58038 =l copy %t58037
-    dbgloc 243
-    %t58039 =l loadl %t58038
-    %t58040 =w call $strcmp(l %t58039, l %t58026)
-    %t58041 =w copy 0
-    %t58042 =w ceqw %t58040, %t58041
-    jnz %t58042, @then13264, @else13265
-@then13264
-    dbgloc 244
-    %t58043 =w copy 1
-    ret %t58043
-@else13265
-    jmp @merge13266
-@merge13266
-    dbgloc 246
-    %t58044 =l loadl %t58029
-    %t58045 =w copy 1
-    %t58046 =l extsw %t58045
-    %t58047 =l add %t58044, %t58046
-    storel %t58047, %t58029
-    jmp @loop13261
-@exit13263
-    dbgloc 248
-    %t58048 =w copy 0
-    ret %t58048
+@start13292
+    %t58171 =l copy %in_progress
+    %t58172 =l copy %nin_progress
+    %t58173 =l copy %path
+    dbgloc 251
+    dbgloc 252
+    %t58174 =w copy 0
+    %t58175 =l extsw %t58174
+    %t58176 =l alloc8 8
+    storel %t58175, %t58176
+    jmp @loop13293
+@loop13293
+    dbgloc 253
+    %t58177 =l loadl %t58176
+    %t58178 =w csltl %t58177, %t58172
+    jnz %t58178, @body13294, @exit13295
+@body13294
+    dbgloc 254
+    %t58179 =l copy %t58171
+    %t58180 =l loadl %t58176
+    %t58181 =w copy 512
+    %t58182 =l extsw %t58181
+    %t58183 =l mul %t58180, %t58182
+    %t58184 =l add %t58179, %t58183
+    %t58185 =l copy %t58184
+    dbgloc 255
+    %t58186 =l loadl %t58185
+    %t58187 =w call $strcmp(l %t58186, l %t58173)
+    %t58188 =w copy 0
+    %t58189 =w ceqw %t58187, %t58188
+    jnz %t58189, @then13296, @else13297
+@then13296
+    dbgloc 256
+    %t58190 =w copy 1
+    ret %t58190
+@else13297
+    jmp @merge13298
+@merge13298
+    dbgloc 258
+    %t58191 =l loadl %t58176
+    %t58192 =w copy 1
+    %t58193 =l extsw %t58192
+    %t58194 =l add %t58191, %t58193
+    storel %t58194, %t58176
+    jmp @loop13293
+@exit13295
+    dbgloc 260
+    %t58195 =w copy 0
+    ret %t58195
 }
 
 export function w $completed_match(l %completed, l %ncompleted, l %path) {
-@start13267
-    %t58049 =l copy %completed
-    %t58050 =l copy %ncompleted
-    %t58051 =l copy %path
-    dbgloc 252
-    dbgloc 253
-    %t58052 =w copy 0
-    %t58053 =l extsw %t58052
-    %t58054 =l alloc8 8
-    storel %t58053, %t58054
-    jmp @loop13268
-@loop13268
-    dbgloc 254
-    %t58055 =l loadl %t58054
-    %t58056 =w csltl %t58055, %t58050
-    jnz %t58056, @body13269, @exit13270
-@body13269
-    dbgloc 255
-    %t58057 =l copy %t58049
-    %t58058 =l loadl %t58054
-    %t58059 =w copy 512
-    %t58060 =l extsw %t58059
-    %t58061 =l mul %t58058, %t58060
-    %t58062 =l add %t58057, %t58061
-    %t58063 =l copy %t58062
-    dbgloc 256
-    %t58064 =l loadl %t58063
-    %t58065 =w call $strcmp(l %t58064, l %t58051)
-    %t58066 =w copy 0
-    %t58067 =w ceqw %t58065, %t58066
-    jnz %t58067, @then13271, @else13272
-@then13271
-    dbgloc 257
-    %t58068 =w copy 1
-    ret %t58068
-@else13272
-    jmp @merge13273
-@merge13273
-    dbgloc 259
-    %t58069 =l loadl %t58054
-    %t58070 =w copy 1
-    %t58071 =l extsw %t58070
-    %t58072 =l add %t58069, %t58071
-    storel %t58072, %t58054
-    jmp @loop13268
-@exit13270
-    dbgloc 261
-    %t58073 =w copy 0
-    ret %t58073
-}
-
-export function w $dir_from_path(l %path, l %dir_buf) {
-@start13274
-    %t58074 =l copy %path
-    %t58075 =l copy %dir_buf
+@start13299
+    %t58196 =l copy %completed
+    %t58197 =l copy %ncompleted
+    %t58198 =l copy %path
+    dbgloc 264
+    dbgloc 265
+    %t58199 =w copy 0
+    %t58200 =l extsw %t58199
+    %t58201 =l alloc8 8
+    storel %t58200, %t58201
+    jmp @loop13300
+@loop13300
+    dbgloc 266
+    %t58202 =l loadl %t58201
+    %t58203 =w csltl %t58202, %t58197
+    jnz %t58203, @body13301, @exit13302
+@body13301
     dbgloc 267
+    %t58204 =l copy %t58196
+    %t58205 =l loadl %t58201
+    %t58206 =w copy 512
+    %t58207 =l extsw %t58206
+    %t58208 =l mul %t58205, %t58207
+    %t58209 =l add %t58204, %t58208
+    %t58210 =l copy %t58209
     dbgloc 268
-    %t58076 =l call $strlen(l %t58074)
-    dbgloc 269
-    %t58077 =w copy 1
-    %t58078 =l extsw %t58077
-    %t58080 =l copy 0
-    %t58079 =l sub %t58080, %t58078
-    %t58081 =l alloc8 8
-    storel %t58079, %t58081
-    dbgloc 270
-    %t58082 =w copy 0
-    %t58083 =l extsw %t58082
-    %t58084 =l alloc8 8
-    storel %t58083, %t58084
-    jmp @loop13275
-@loop13275
-    dbgloc 271
-    %t58085 =l loadl %t58084
-    %t58086 =w csltl %t58085, %t58076
-    jnz %t58086, @body13276, @exit13277
-@body13276
-    dbgloc 274
-    %t58087 =l copy %t58074
-    %t58088 =l loadl %t58084
-    %t58089 =l add %t58087, %t58088
-    %t58090 =l copy %t58089
-    dbgloc 275
-    %t58091 =w loadub %t58090
-    dbgloc 276
-    %t58092 =w copy %t58091
-    dbgloc 277
-    %t58093 =w copy 47
-    %t58094 =w ceqw %t58092, %t58093
-    jnz %t58094, @sc_true13280, @sc_eval13278
-@sc_true13280
-    %t58096 =w copy 1
-    jmp @sc_merge13279
-@sc_eval13278
-    %t58097 =w copy 92
-    %t58098 =w ceqw %t58092, %t58097
-    %t58099 =w cnew %t58098, 0
-    jmp @sc_merge13279
-@sc_merge13279
-    %t58095 =w phi @sc_true13280 %t58096, @sc_eval13278 %t58099
-    jnz %t58095, @then13281, @else13282
-@then13281
-    dbgloc 278
-    %t58100 =l loadl %t58084
-    storel %t58100, %t58081
-    jmp @merge13283
-@else13282
-    jmp @merge13283
-@merge13283
-    dbgloc 280
-    %t58101 =l loadl %t58084
-    %t58102 =w copy 1
-    %t58103 =l extsw %t58102
-    %t58104 =l add %t58101, %t58103
-    storel %t58104, %t58084
-    jmp @loop13275
-@exit13277
-    dbgloc 282
-    %t58105 =l loadl %t58081
-    %t58106 =w copy 0
-    %t58107 =l extsw %t58106
-    %t58108 =w csltl %t58105, %t58107
-    jnz %t58108, @then13284, @else13285
-@then13284
-    dbgloc 284
-    %t58109 =w copy 46
-    %t58110 =w call $store_byte_i32(l %t58075, w %t58109)
-    dbgloc 285
-    %t58111 =l copy %t58075
-    %t58112 =w copy 1
-    %t58113 =l extsw %t58112
-    %t58114 =l add %t58111, %t58113
-    %t58115 =l copy %t58114
-    %t58116 =w copy 0
-    %t58117 =w call $store_byte_i32(l %t58115, w %t58116)
-    dbgloc 286
-    %t58118 =w copy 1
-    ret %t58118
-@else13285
-    jmp @merge13286
-@merge13286
-    dbgloc 288
-    %t58119 =w copy 0
-    %t58120 =l extsw %t58119
-    %t58121 =l alloc8 8
-    storel %t58120, %t58121
-    jmp @loop13287
-@loop13287
-    dbgloc 289
-    %t58122 =l loadl %t58121
-    %t58123 =l loadl %t58081
-    %t58124 =w csltl %t58122, %t58123
-    jnz %t58124, @body13288, @exit13289
-@body13288
-    dbgloc 290
-    %t58125 =l copy %t58074
-    %t58126 =l loadl %t58121
-    %t58127 =l add %t58125, %t58126
-    %t58128 =l copy %t58127
-    dbgloc 291
-    %t58129 =l copy %t58075
-    %t58130 =l loadl %t58121
-    %t58131 =l add %t58129, %t58130
-    %t58132 =l copy %t58131
-    dbgloc 292
-    %t58133 =l copy %t58128
-    dbgloc 293
-    %t58134 =l copy %t58132
-    dbgloc 294
-    %t58135 =w loadw %t58133
-    storew %t58135, %t58134
-    dbgloc 295
-    %t58136 =l loadl %t58121
-    %t58137 =w copy 1
-    %t58138 =l extsw %t58137
-    %t58139 =l add %t58136, %t58138
-    storel %t58139, %t58121
-    jmp @loop13287
-@exit13289
-    dbgloc 297
-    %t58140 =l copy %t58075
-    %t58141 =l loadl %t58081
-    %t58142 =l add %t58140, %t58141
-    %t58143 =l copy %t58142
-    dbgloc 298
-    %t58144 =w copy 0
-    %t58145 =w call $store_byte_i32(l %t58143, w %t58144)
-    dbgloc 299
-    %t58146 =w copy 0
-    ret %t58146
-}
-
-export function w $resolve_one_import_v1(l %mod_path, l %mod_name, l %arena, l %out_decls, l %out_count, l %out_cap, l %in_progress, l %nin_progress, l %completed, l %ncompleted, l %main_loc_filename) {
-@start13290
-    %t58147 =l copy %mod_path
-    %t58148 =l copy %mod_name
-    %t58149 =l copy %arena
-    %t58150 =l copy %out_decls
-    %t58151 =l copy %out_count
-    %t58152 =l copy %out_cap
-    %t58153 =l copy %in_progress
-    %t58154 =l copy %nin_progress
-    %t58155 =l copy %completed
-    %t58156 =l copy %ncompleted
-    %t58157 =l copy %main_loc_filename
-    dbgloc 310
-    dbgloc 312
-    %t58158 =l loadl %t58156
-    %t58159 =w call $completed_match(l %t58155, l %t58158, l %t58147)
-    %t58160 =w copy 0
-    %t58161 =w cnew %t58159, %t58160
-    jnz %t58161, @then13291, @else13292
-@then13291
-    dbgloc 313
-    %t58162 =w copy 0
-    ret %t58162
-@else13292
-    jmp @merge13293
-@merge13293
-    dbgloc 316
-    %t58163 =l loadl %t58154
-    %t58164 =w call $in_progress_match(l %t58153, l %t58163, l %t58147)
-    %t58165 =w copy 0
-    %t58166 =w cnew %t58164, %t58165
-    jnz %t58166, @then13294, @else13295
-@then13294
-    dbgloc 317
-    %t58167 =l copy $str1893
-    %t58168 =w call $jh_fputs_stderr(l %t58167)
-    dbgloc 318
-    %t58169 =w call $jh_fputs_stderr(l %t58147)
-    dbgloc 319
-    %t58170 =l copy $str1894
-    %t58171 =w call $jh_fputs_stderr(l %t58170)
-    dbgloc 320
-    %t58172 =w copy 1
-    ret %t58172
-@else13295
-    jmp @merge13296
-@merge13296
-    dbgloc 324
-    %t58173 =l call $read_file(l %t58147)
-    dbgloc 325
-    %t58174 =w copy 0
-    %t58175 =l extsw %t58174
-    %t58176 =w ceql %t58173, %t58175
-    jnz %t58176, @then13297, @else13298
-@then13297
-    dbgloc 326
-    %t58177 =l copy $str1895
-    %t58178 =w call $jh_fputs_stderr(l %t58177)
-    dbgloc 327
-    %t58179 =w call $jh_fputs_stderr(l %t58147)
-    dbgloc 328
-    %t58180 =l copy $str1896
-    %t58181 =w call $jh_fputs_stderr(l %t58180)
-    dbgloc 329
-    %t58182 =w copy 1
-    ret %t58182
-@else13298
-    jmp @merge13299
-@merge13299
-    dbgloc 333
-    %t58183 =w copy 128
-    %t58184 =l extsw %t58183
-    %t58185 =l call $malloc(l %t58184)
-    %t58186 =w copy 0
-    %t58187 =w copy 128
-    %t58188 =l extsw %t58187
-    %t58189 =l call $memset(l %t58185, w %t58186, l %t58188)
-    dbgloc 334
-    %t58190 =l copy %t58185
-    dbgloc 335
-    %t58191 =w copy 128
-    %t58192 =l extsw %t58191
-    %t58193 =l call $malloc(l %t58192)
-    %t58194 =w copy 0
-    %t58195 =w copy 128
-    %t58196 =l extsw %t58195
-    %t58197 =l call $memset(l %t58193, w %t58194, l %t58196)
-    dbgloc 336
-    %t58198 =l copy %t58193
-    dbgloc 337
-    %t58199 =w call $lexer__lexer_init(l %t58190, l %t58173, l %t58147)
-    dbgloc 338
-    %t58200 =w call $parser__parser_init(l %t58198, l %t58190, l %t58149)
-    dbgloc 339
-    %t58201 =l call $parser__parser_parse(l %t58198)
-    dbgloc 341
-    %t58202 =l add %t58198, 76
-    %t58203 =w loadw %t58202
-    %t58204 =w copy 0
-    %t58205 =w csgtw %t58203, %t58204
-    jnz %t58205, @then13300, @else13301
-@then13300
-    dbgloc 342
-    %t58206 =l copy $str1897
-    %t58207 =w call $jh_fputs_stderr(l %t58206)
-    dbgloc 343
-    %t58208 =w call $jh_fputs_stderr(l %t58147)
-    dbgloc 344
-    %t58209 =l copy $str1898
-    %t58210 =w call $jh_fputs_stderr(l %t58209)
-    dbgloc 345
-    %t58211 =w call $free(l %t58173)
-    %t58212 =w call $free(l %t58185)
-    %t58213 =w call $free(l %t58193)
-    dbgloc 346
-    %t58214 =w copy 1
-    ret %t58214
-@else13301
-    jmp @merge13302
-@merge13302
-    dbgloc 349
-    %t58215 =w copy 0
-    %t58216 =l alloc4 4
-    storew %t58215, %t58216
-    dbgloc 350
-    %t58217 =l call $ast__node_module_data(l %t58201)
-    dbgloc 356
-    %t58218 =l loadl %t58154
-    %t58219 =w copy 64
-    %t58220 =l extsw %t58219
-    %t58221 =w csltl %t58218, %t58220
-    jnz %t58221, @then13303, @else13304
+    %t58211 =l loadl %t58210
+    %t58212 =w call $strcmp(l %t58211, l %t58198)
+    %t58213 =w copy 0
+    %t58214 =w ceqw %t58212, %t58213
+    jnz %t58214, @then13303, @else13304
 @then13303
-    dbgloc 357
-    %t58222 =w copy 512
-    %t58223 =l extsw %t58222
-    %t58224 =l call $malloc(l %t58223)
-    dbgloc 358
-    %t58225 =w copy 0
-    %t58226 =l extsw %t58225
-    %t58227 =l alloc8 8
-    storel %t58226, %t58227
-    dbgloc 359
-    %t58228 =l loadl %t58227
-    %t58229 =l call $str_concat_at(l %t58224, l %t58228, l %t58147)
-    storel %t58229, %t58227
-    dbgloc 360
-    %t58230 =l copy %t58224
-    %t58231 =l loadl %t58227
-    %t58232 =l add %t58230, %t58231
-    %t58233 =l copy %t58232
-    dbgloc 361
-    %t58234 =w copy 0
-    %t58235 =w call $store_byte_i32(l %t58233, w %t58234)
-    dbgloc 363
-    %t58236 =l copy %t58153
-    %t58237 =l loadl %t58154
-    %t58238 =w copy 512
-    %t58239 =l extsw %t58238
-    %t58240 =l mul %t58237, %t58239
-    %t58241 =l add %t58236, %t58240
-    %t58242 =l copy %t58241
-    dbgloc 364
-    storel %t58224, %t58242
-    dbgloc 365
-    %t58243 =l loadl %t58154
-    %t58244 =w copy 1
-    %t58245 =l extsw %t58244
-    %t58246 =l add %t58243, %t58245
-    storel %t58246, %t58154
-    jmp @merge13305
+    dbgloc 269
+    %t58215 =w copy 1
+    ret %t58215
 @else13304
     jmp @merge13305
 @merge13305
-    dbgloc 368
-    %t58247 =w copy 0
-    %t58248 =l extsw %t58247
-    %t58249 =l alloc8 8
-    storel %t58248, %t58249
-    jmp @loop13306
-@loop13306
-    dbgloc 369
-    %t58250 =l loadl %t58249
-    %t58251 =l add %t58217, 8
-    %t58252 =l loadl %t58251
-    %t58253 =w csltl %t58250, %t58252
-    jnz %t58253, @body13307, @exit13308
-@body13307
-    dbgloc 370
-    %t58254 =l loadl %t58217
-    %t58255 =l copy %t58254
-    %t58256 =l loadl %t58249
-    %t58257 =w copy 8
-    %t58258 =l extsw %t58257
-    %t58259 =l mul %t58256, %t58258
-    %t58260 =l add %t58255, %t58259
-    %t58261 =l copy %t58260
-    %t58262 =l loadl %t58261
-    dbgloc 371
-    %t58263 =w loadw %t58262
-    %t58264 =w call $ast__NODE_IMPORT_DECL()
-    %t58265 =w ceqw %t58263, %t58264
-    jnz %t58265, @then13309, @else13310
-@then13309
-    dbgloc 373
-    %t58266 =l call $ast__node_import_decl_data(l %t58262)
-    dbgloc 374
-    %t58267 =l loadl %t58266
-    %t58268 =l copy %t58267
+    dbgloc 271
+    %t58216 =l loadl %t58201
+    %t58217 =w copy 1
+    %t58218 =l extsw %t58217
+    %t58219 =l add %t58216, %t58218
+    storel %t58219, %t58201
+    jmp @loop13300
+@exit13302
+    dbgloc 273
+    %t58220 =w copy 0
+    ret %t58220
+}
+
+export function w $dir_from_path(l %path, l %dir_buf) {
+@start13306
+    %t58221 =l copy %path
+    %t58222 =l copy %dir_buf
+    dbgloc 279
+    dbgloc 280
+    %t58223 =l call $strlen(l %t58221)
+    dbgloc 281
+    %t58224 =w copy 1
+    %t58225 =l extsw %t58224
+    %t58227 =l copy 0
+    %t58226 =l sub %t58227, %t58225
+    %t58228 =l alloc8 8
+    storel %t58226, %t58228
+    dbgloc 282
+    %t58229 =w copy 0
+    %t58230 =l extsw %t58229
+    %t58231 =l alloc8 8
+    storel %t58230, %t58231
+    jmp @loop13307
+@loop13307
+    dbgloc 283
+    %t58232 =l loadl %t58231
+    %t58233 =w csltl %t58232, %t58223
+    jnz %t58233, @body13308, @exit13309
+@body13308
+    dbgloc 286
+    %t58234 =l copy %t58221
+    %t58235 =l loadl %t58231
+    %t58236 =l add %t58234, %t58235
+    %t58237 =l copy %t58236
+    dbgloc 287
+    %t58238 =w loadub %t58237
+    dbgloc 288
+    %t58239 =w copy %t58238
+    dbgloc 289
+    %t58240 =w copy 47
+    %t58241 =w ceqw %t58239, %t58240
+    jnz %t58241, @sc_true13312, @sc_eval13310
+@sc_true13312
+    %t58243 =w copy 1
+    jmp @sc_merge13311
+@sc_eval13310
+    %t58244 =w copy 92
+    %t58245 =w ceqw %t58239, %t58244
+    %t58246 =w cnew %t58245, 0
+    jmp @sc_merge13311
+@sc_merge13311
+    %t58242 =w phi @sc_true13312 %t58243, @sc_eval13310 %t58246
+    jnz %t58242, @then13313, @else13314
+@then13313
+    dbgloc 290
+    %t58247 =l loadl %t58231
+    storel %t58247, %t58228
+    jmp @merge13315
+@else13314
+    jmp @merge13315
+@merge13315
+    dbgloc 292
+    %t58248 =l loadl %t58231
+    %t58249 =w copy 1
+    %t58250 =l extsw %t58249
+    %t58251 =l add %t58248, %t58250
+    storel %t58251, %t58231
+    jmp @loop13307
+@exit13309
+    dbgloc 294
+    %t58252 =l loadl %t58228
+    %t58253 =w copy 0
+    %t58254 =l extsw %t58253
+    %t58255 =w csltl %t58252, %t58254
+    jnz %t58255, @then13316, @else13317
+@then13316
+    dbgloc 296
+    %t58256 =w copy 46
+    %t58257 =w call $store_byte_i32(l %t58222, w %t58256)
+    dbgloc 297
+    %t58258 =l copy %t58222
+    %t58259 =w copy 1
+    %t58260 =l extsw %t58259
+    %t58261 =l add %t58258, %t58260
+    %t58262 =l copy %t58261
+    %t58263 =w copy 0
+    %t58264 =w call $store_byte_i32(l %t58262, w %t58263)
+    dbgloc 298
+    %t58265 =w copy 1
+    ret %t58265
+@else13317
+    jmp @merge13318
+@merge13318
+    dbgloc 300
+    %t58266 =w copy 0
+    %t58267 =l extsw %t58266
+    %t58268 =l alloc8 8
+    storel %t58267, %t58268
+    jmp @loop13319
+@loop13319
+    dbgloc 301
     %t58269 =l loadl %t58268
-    dbgloc 375
-    %t58270 =w copy 512
-    %t58271 =l extsw %t58270
-    %t58272 =l call $malloc(l %t58271)
-    dbgloc 376
-    %t58273 =w call $dir_from_path(l %t58147, l %t58272)
-    dbgloc 377
-    %t58274 =w copy 1024
-    %t58275 =l extsw %t58274
-    %t58276 =l call $malloc(l %t58275)
-    dbgloc 378
-    %t58277 =w copy 0
-    %t58278 =l extsw %t58277
-    %t58279 =l alloc8 8
-    storel %t58278, %t58279
-    dbgloc 379
-    %t58280 =l loadl %t58279
-    %t58281 =l call $str_concat_at(l %t58276, l %t58280, l %t58272)
-    storel %t58281, %t58279
-    dbgloc 380
-    %t58282 =l loadl %t58279
-    %t58283 =l copy $str1899
-    %t58284 =l call $str_concat_at(l %t58276, l %t58282, l %t58283)
-    storel %t58284, %t58279
-    dbgloc 381
-    %t58285 =l loadl %t58279
-    %t58286 =l call $str_concat_at(l %t58276, l %t58285, l %t58269)
-    storel %t58286, %t58279
-    dbgloc 382
-    %t58287 =l loadl %t58279
-    %t58288 =l copy $str1900
-    %t58289 =l call $str_concat_at(l %t58276, l %t58287, l %t58288)
-    storel %t58289, %t58279
-    dbgloc 383
-    %t58290 =l copy %t58276
-    %t58291 =l loadl %t58279
-    %t58292 =l add %t58290, %t58291
-    %t58293 =l copy %t58292
-    dbgloc 384
-    %t58294 =w copy 0
-    %t58295 =w call $store_byte_i32(l %t58293, w %t58294)
-    dbgloc 385
-    dbgloc 386
-    dbgloc 387
-    dbgloc 388
-    dbgloc 389
-    %t58296 =w call $resolve_one_import_v1(l %t58276, l %t58269, l %t58149, l %t58150, l %t58151, l %t58152, l %t58153, l %t58154, l %t58155, l %t58156, l %t58147)
-    dbgloc 390
-    %t58297 =w loadw %t58216
-    %t58298 =w add %t58297, %t58296
-    storew %t58298, %t58216
-    dbgloc 391
-    %t58299 =w call $free(l %t58276)
-    %t58300 =w call $free(l %t58272)
-    jmp @merge13311
-@else13310
-    dbgloc 392
-    dbgloc 393
-    %t58301 =w copy 0
-    %t58302 =l extsw %t58301
-    %t58303 =w ceql %t58262, %t58302
-    jnz %t58303, @then13312, @else13313
-@then13312
-    %t58304 =l loadl %t58249
-    %t58305 =w copy 1
-    %t58306 =l extsw %t58305
-    %t58307 =l add %t58304, %t58306
-    storel %t58307, %t58249
-    jmp @merge13314
-@else13313
-    dbgloc 394
-    %t58308 =w copy 0
-    %t58309 =l extsw %t58308
-    %t58310 =l alloc8 8
-    storel %t58309, %t58310
-    dbgloc 395
-    %t58311 =w loadw %t58262
-    %t58312 =w call $ast__NODE_FUNC_DECL()
-    %t58313 =w ceqw %t58311, %t58312
-    jnz %t58313, @then13315, @else13316
-@then13315
-    %t58314 =l call $ast__node_func_decl_data(l %t58262)
-    %t58315 =l loadl %t58314
-    storel %t58315, %t58310
-    jmp @merge13317
-@else13316
-    jmp @merge13317
-@merge13317
-    dbgloc 396
-    %t58316 =l loadl %t58310
-    %t58317 =w copy 0
-    %t58318 =l extsw %t58317
-    %t58319 =w cnel %t58316, %t58318
-    jnz %t58319, @then13318, @else13319
-@then13318
-    %t58320 =l loadl %t58310
-    %t58321 =l copy %t58320
-    %t58322 =l add %t58321, 32
-    storel %t58148, %t58322
-    jmp @merge13320
-@else13319
-    jmp @merge13320
-@merge13320
-    dbgloc 397
-    %t58323 =l loadl %t58151
-    %t58324 =l loadl %t58152
-    %t58325 =w csgel %t58323, %t58324
-    jnz %t58325, @then13321, @else13322
-@then13321
-    dbgloc 398
-    %t58326 =l loadl %t58152
-    %t58327 =w copy 2
-    %t58328 =l extsw %t58327
-    %t58329 =l mul %t58326, %t58328
-    %t58330 =l alloc8 8
-    storel %t58329, %t58330
-    %t58331 =l loadl %t58330
-    %t58332 =w copy 8
-    %t58333 =l extsw %t58332
-    %t58334 =w csltl %t58331, %t58333
-    jnz %t58334, @then13324, @else13325
-@then13324
-    %t58335 =w copy 8
-    %t58336 =l extsw %t58335
-    storel %t58336, %t58330
-    jmp @merge13326
-@else13325
-    jmp @merge13326
-@merge13326
-    dbgloc 399
-    %t58337 =l loadl %t58330
-    %t58338 =w copy 8
+    %t58270 =l loadl %t58228
+    %t58271 =w csltl %t58269, %t58270
+    jnz %t58271, @body13320, @exit13321
+@body13320
+    dbgloc 302
+    %t58272 =l copy %t58221
+    %t58273 =l loadl %t58268
+    %t58274 =l add %t58272, %t58273
+    %t58275 =l copy %t58274
+    dbgloc 303
+    %t58276 =l copy %t58222
+    %t58277 =l loadl %t58268
+    %t58278 =l add %t58276, %t58277
+    %t58279 =l copy %t58278
+    dbgloc 304
+    %t58280 =l copy %t58275
+    dbgloc 305
+    %t58281 =l copy %t58279
+    dbgloc 306
+    %t58282 =w loadw %t58280
+    storew %t58282, %t58281
+    dbgloc 307
+    %t58283 =l loadl %t58268
+    %t58284 =w copy 1
+    %t58285 =l extsw %t58284
+    %t58286 =l add %t58283, %t58285
+    storel %t58286, %t58268
+    jmp @loop13319
+@exit13321
+    dbgloc 309
+    %t58287 =l copy %t58222
+    %t58288 =l loadl %t58228
+    %t58289 =l add %t58287, %t58288
+    %t58290 =l copy %t58289
+    dbgloc 310
+    %t58291 =w copy 0
+    %t58292 =w call $store_byte_i32(l %t58290, w %t58291)
+    dbgloc 311
+    %t58293 =w copy 0
+    ret %t58293
+}
+
+export function w $resolve_one_import_v1(l %mod_path, l %mod_name, l %arena, l %out_decls, l %out_count, l %out_cap, l %in_progress, l %nin_progress, l %completed, l %ncompleted, l %main_loc_filename) {
+@start13322
+    %t58294 =l copy %mod_path
+    %t58295 =l copy %mod_name
+    %t58296 =l copy %arena
+    %t58297 =l copy %out_decls
+    %t58298 =l copy %out_count
+    %t58299 =l copy %out_cap
+    %t58300 =l copy %in_progress
+    %t58301 =l copy %nin_progress
+    %t58302 =l copy %completed
+    %t58303 =l copy %ncompleted
+    %t58304 =l copy %main_loc_filename
+    dbgloc 322
+    dbgloc 324
+    %t58305 =l loadl %t58303
+    %t58306 =w call $completed_match(l %t58302, l %t58305, l %t58294)
+    %t58307 =w copy 0
+    %t58308 =w cnew %t58306, %t58307
+    jnz %t58308, @then13323, @else13324
+@then13323
+    dbgloc 325
+    %t58309 =w copy 0
+    ret %t58309
+@else13324
+    jmp @merge13325
+@merge13325
+    dbgloc 328
+    %t58310 =l loadl %t58301
+    %t58311 =w call $in_progress_match(l %t58300, l %t58310, l %t58294)
+    %t58312 =w copy 0
+    %t58313 =w cnew %t58311, %t58312
+    jnz %t58313, @then13326, @else13327
+@then13326
+    dbgloc 329
+    %t58314 =l copy $str1898
+    %t58315 =w call $jh_fputs_stderr(l %t58314)
+    dbgloc 330
+    %t58316 =w call $jh_fputs_stderr(l %t58294)
+    dbgloc 331
+    %t58317 =l copy $str1899
+    %t58318 =w call $jh_fputs_stderr(l %t58317)
+    dbgloc 332
+    %t58319 =w copy 1
+    ret %t58319
+@else13327
+    jmp @merge13328
+@merge13328
+    dbgloc 336
+    %t58320 =l call $read_file(l %t58294)
+    dbgloc 337
+    %t58321 =w copy 0
+    %t58322 =l extsw %t58321
+    %t58323 =w ceql %t58320, %t58322
+    jnz %t58323, @then13329, @else13330
+@then13329
+    dbgloc 338
+    %t58324 =l copy $str1900
+    %t58325 =w call $jh_fputs_stderr(l %t58324)
+    dbgloc 339
+    %t58326 =w call $jh_fputs_stderr(l %t58294)
+    dbgloc 340
+    %t58327 =l copy $str1901
+    %t58328 =w call $jh_fputs_stderr(l %t58327)
+    dbgloc 341
+    %t58329 =w copy 1
+    ret %t58329
+@else13330
+    jmp @merge13331
+@merge13331
+    dbgloc 345
+    %t58330 =w copy 128
+    %t58331 =l extsw %t58330
+    %t58332 =l call $malloc(l %t58331)
+    %t58333 =w copy 0
+    %t58334 =w copy 128
+    %t58335 =l extsw %t58334
+    %t58336 =l call $memset(l %t58332, w %t58333, l %t58335)
+    dbgloc 346
+    %t58337 =l copy %t58332
+    dbgloc 347
+    %t58338 =w copy 128
     %t58339 =l extsw %t58338
-    %t58340 =l mul %t58337, %t58339
-    %t58341 =l call $arena__arena_alloc(l %t58149, l %t58340)
-    dbgloc 400
-    %t58342 =w copy 0
+    %t58340 =l call $malloc(l %t58339)
+    %t58341 =w copy 0
+    %t58342 =w copy 128
     %t58343 =l extsw %t58342
-    %t58344 =l alloc8 8
-    storel %t58343, %t58344
-    dbgloc 402
-    %t58345 =l loadl %t58152
-    %t58346 =l alloc8 8
-    storel %t58345, %t58346
-    %t58347 =l loadl %t58151
-    %t58348 =l loadl %t58346
-    %t58349 =w csltl %t58347, %t58348
-    jnz %t58349, @then13327, @else13328
-@then13327
-    %t58350 =l loadl %t58151
-    storel %t58350, %t58346
-    jmp @merge13329
-@else13328
-    jmp @merge13329
-@merge13329
-    jmp @loop13330
-@loop13330
-    dbgloc 403
-    %t58351 =l loadl %t58344
-    %t58352 =l loadl %t58346
-    %t58353 =w csltl %t58351, %t58352
-    jnz %t58353, @body13331, @exit13332
-@body13331
-    %t58354 =l loadl %t58150
-    %t58355 =l copy %t58354
-    %t58356 =l loadl %t58344
-    %t58357 =w copy 8
-    %t58358 =l extsw %t58357
-    %t58359 =l mul %t58356, %t58358
-    %t58360 =l add %t58355, %t58359
-    %t58361 =l copy %t58360
-    %t58362 =l loadl %t58361
-    %t58363 =l copy %t58341
-    %t58364 =l loadl %t58344
-    %t58365 =w copy 8
-    %t58366 =l extsw %t58365
-    %t58367 =l mul %t58364, %t58366
-    %t58368 =l add %t58363, %t58367
-    %t58369 =l copy %t58368
-    storel %t58362, %t58369
-    %t58370 =l loadl %t58344
-    %t58371 =w copy 1
-    %t58372 =l extsw %t58371
-    %t58373 =l add %t58370, %t58372
-    storel %t58373, %t58344
-    jmp @loop13330
-@exit13332
-    dbgloc 404
-    storel %t58341, %t58150
-    %t58374 =l loadl %t58330
-    storel %t58374, %t58152
-    jmp @merge13323
-@else13322
-    jmp @merge13323
-@merge13323
-    dbgloc 406
-    %t58375 =l loadl %t58151
-    %t58376 =l loadl %t58152
-    %t58377 =w csltl %t58375, %t58376
-    jnz %t58377, @then13333, @else13334
-@then13333
-    dbgloc 407
-    %t58378 =l loadl %t58150
-    %t58379 =l copy %t58378
-    %t58380 =l loadl %t58151
-    %t58381 =w copy 8
-    %t58382 =l extsw %t58381
-    %t58383 =l mul %t58380, %t58382
-    %t58384 =l add %t58379, %t58383
-    %t58385 =l copy %t58384
-    storel %t58262, %t58385
-    dbgloc 408
-    %t58386 =l loadl %t58151
-    %t58387 =w copy 1
-    %t58388 =l extsw %t58387
-    %t58389 =l add %t58386, %t58388
-    storel %t58389, %t58151
-    jmp @merge13335
-@else13334
-    jmp @merge13335
-@merge13335
-    jmp @merge13314
-@merge13314
-    jmp @merge13311
-@merge13311
-    dbgloc 412
-    %t58390 =l loadl %t58249
+    %t58344 =l call $memset(l %t58340, w %t58341, l %t58343)
+    dbgloc 348
+    %t58345 =l copy %t58340
+    dbgloc 349
+    %t58346 =w call $lexer__lexer_init(l %t58337, l %t58320, l %t58294)
+    dbgloc 350
+    %t58347 =w call $parser__parser_init(l %t58345, l %t58337, l %t58296)
+    dbgloc 351
+    %t58348 =l call $parser__parser_parse(l %t58345)
+    dbgloc 353
+    %t58349 =l add %t58345, 76
+    %t58350 =w loadw %t58349
+    %t58351 =w copy 0
+    %t58352 =w csgtw %t58350, %t58351
+    jnz %t58352, @then13332, @else13333
+@then13332
+    dbgloc 354
+    %t58353 =l copy $str1902
+    %t58354 =w call $jh_fputs_stderr(l %t58353)
+    dbgloc 355
+    %t58355 =w call $jh_fputs_stderr(l %t58294)
+    dbgloc 356
+    %t58356 =l copy $str1903
+    %t58357 =w call $jh_fputs_stderr(l %t58356)
+    dbgloc 357
+    %t58358 =w call $free(l %t58320)
+    %t58359 =w call $free(l %t58332)
+    %t58360 =w call $free(l %t58340)
+    dbgloc 358
+    %t58361 =w copy 1
+    ret %t58361
+@else13333
+    jmp @merge13334
+@merge13334
+    dbgloc 361
+    %t58362 =w copy 0
+    %t58363 =l alloc4 4
+    storew %t58362, %t58363
+    dbgloc 362
+    %t58364 =l call $ast__node_module_data(l %t58348)
+    dbgloc 368
+    %t58365 =l loadl %t58301
+    %t58366 =w copy 64
+    %t58367 =l extsw %t58366
+    %t58368 =w csltl %t58365, %t58367
+    jnz %t58368, @then13335, @else13336
+@then13335
+    dbgloc 369
+    %t58369 =w copy 512
+    %t58370 =l extsw %t58369
+    %t58371 =l call $malloc(l %t58370)
+    dbgloc 370
+    %t58372 =w copy 0
+    %t58373 =l extsw %t58372
+    %t58374 =l alloc8 8
+    storel %t58373, %t58374
+    dbgloc 371
+    %t58375 =l loadl %t58374
+    %t58376 =l call $str_concat_at(l %t58371, l %t58375, l %t58294)
+    storel %t58376, %t58374
+    dbgloc 372
+    %t58377 =l copy %t58371
+    %t58378 =l loadl %t58374
+    %t58379 =l add %t58377, %t58378
+    %t58380 =l copy %t58379
+    dbgloc 373
+    %t58381 =w copy 0
+    %t58382 =w call $store_byte_i32(l %t58380, w %t58381)
+    dbgloc 375
+    %t58383 =l copy %t58300
+    %t58384 =l loadl %t58301
+    %t58385 =w copy 512
+    %t58386 =l extsw %t58385
+    %t58387 =l mul %t58384, %t58386
+    %t58388 =l add %t58383, %t58387
+    %t58389 =l copy %t58388
+    dbgloc 376
+    storel %t58371, %t58389
+    dbgloc 377
+    %t58390 =l loadl %t58301
     %t58391 =w copy 1
     %t58392 =l extsw %t58391
     %t58393 =l add %t58390, %t58392
-    storel %t58393, %t58249
-    jmp @loop13306
-@exit13308
-    dbgloc 417
+    storel %t58393, %t58301
+    jmp @merge13337
+@else13336
+    jmp @merge13337
+@merge13337
+    dbgloc 380
     %t58394 =w copy 0
     %t58395 =l extsw %t58394
     %t58396 =l alloc8 8
     storel %t58395, %t58396
-    dbgloc 418
-    %t58397 =w copy 0
-    %t58398 =l alloc4 4
-    storew %t58397, %t58398
-    jmp @loop13336
-@loop13336
-    dbgloc 419
-    %t58399 =l loadl %t58396
-    %t58400 =l loadl %t58154
-    %t58401 =w csltl %t58399, %t58400
-    jnz %t58401, @body13337, @exit13338
-@body13337
-    dbgloc 420
-    %t58402 =l copy %t58153
+    jmp @loop13338
+@loop13338
+    dbgloc 381
+    %t58397 =l loadl %t58396
+    %t58398 =l add %t58364, 8
+    %t58399 =l loadl %t58398
+    %t58400 =w csltl %t58397, %t58399
+    jnz %t58400, @body13339, @exit13340
+@body13339
+    dbgloc 382
+    %t58401 =l loadl %t58364
+    %t58402 =l copy %t58401
     %t58403 =l loadl %t58396
-    %t58404 =w copy 512
+    %t58404 =w copy 8
     %t58405 =l extsw %t58404
     %t58406 =l mul %t58403, %t58405
     %t58407 =l add %t58402, %t58406
     %t58408 =l copy %t58407
-    dbgloc 421
     %t58409 =l loadl %t58408
-    %t58410 =w call $strcmp(l %t58409, l %t58147)
-    %t58411 =w copy 0
+    dbgloc 383
+    %t58410 =w loadw %t58409
+    %t58411 =w call $ast__NODE_IMPORT_DECL()
     %t58412 =w ceqw %t58410, %t58411
-    jnz %t58412, @then13339, @else13340
-@then13339
-    dbgloc 423
-    %t58413 =l loadl %t58396
-    %t58414 =l alloc8 8
-    storel %t58413, %t58414
-    jmp @loop13342
-@loop13342
-    dbgloc 424
-    %t58415 =l loadl %t58414
-    %t58416 =l loadl %t58154
-    %t58417 =w copy 1
+    jnz %t58412, @then13341, @else13342
+@then13341
+    dbgloc 385
+    %t58413 =l call $ast__node_import_decl_data(l %t58409)
+    dbgloc 386
+    %t58414 =l loadl %t58413
+    %t58415 =l copy %t58414
+    %t58416 =l loadl %t58415
+    dbgloc 387
+    %t58417 =w copy 512
     %t58418 =l extsw %t58417
-    %t58419 =l sub %t58416, %t58418
-    %t58420 =w csltl %t58415, %t58419
-    jnz %t58420, @body13343, @exit13344
-@body13343
-    dbgloc 425
-    %t58421 =l copy %t58153
-    %t58422 =l loadl %t58414
-    %t58423 =w copy 1
-    %t58424 =l extsw %t58423
-    %t58425 =l add %t58422, %t58424
-    %t58426 =w copy 512
-    %t58427 =l extsw %t58426
-    %t58428 =l mul %t58425, %t58427
-    %t58429 =l add %t58421, %t58428
-    %t58430 =l copy %t58429
-    dbgloc 426
-    %t58431 =l copy %t58153
-    %t58432 =l loadl %t58414
-    %t58433 =w copy 512
-    %t58434 =l extsw %t58433
-    %t58435 =l mul %t58432, %t58434
-    %t58436 =l add %t58431, %t58435
-    %t58437 =l copy %t58436
-    dbgloc 427
-    %t58438 =l loadl %t58430
-    storel %t58438, %t58437
-    dbgloc 428
-    %t58439 =l loadl %t58414
-    %t58440 =w copy 1
-    %t58441 =l extsw %t58440
-    %t58442 =l add %t58439, %t58441
-    storel %t58442, %t58414
-    jmp @loop13342
-@exit13344
-    dbgloc 430
-    %t58443 =l loadl %t58154
-    %t58444 =w copy 1
-    %t58445 =l extsw %t58444
-    %t58446 =l sub %t58443, %t58445
-    storel %t58446, %t58154
-    dbgloc 431
-    %t58447 =w copy 1
-    storew %t58447, %t58398
-    jmp @merge13341
-@else13340
-    jmp @merge13341
-@merge13341
-    dbgloc 433
-    %t58448 =l loadl %t58396
-    %t58449 =w copy 1
-    %t58450 =l extsw %t58449
-    %t58451 =l add %t58448, %t58450
-    storel %t58451, %t58396
-    jmp @loop13336
-@exit13338
-    dbgloc 437
-    %t58452 =l loadl %t58156
-    %t58453 =w copy 64
-    %t58454 =l extsw %t58453
-    %t58455 =w csltl %t58452, %t58454
-    jnz %t58455, @then13345, @else13346
-@then13345
-    dbgloc 438
-    %t58456 =w copy 512
-    %t58457 =l extsw %t58456
-    %t58458 =l call $malloc(l %t58457)
-    dbgloc 439
-    %t58459 =w copy 0
-    %t58460 =l extsw %t58459
-    %t58461 =l alloc8 8
-    storel %t58460, %t58461
-    dbgloc 440
+    %t58419 =l call $malloc(l %t58418)
+    dbgloc 388
+    %t58420 =w call $dir_from_path(l %t58294, l %t58419)
+    dbgloc 389
+    %t58421 =w copy 1024
+    %t58422 =l extsw %t58421
+    %t58423 =l call $malloc(l %t58422)
+    dbgloc 390
+    %t58424 =w copy 0
+    %t58425 =l extsw %t58424
+    %t58426 =l alloc8 8
+    storel %t58425, %t58426
+    dbgloc 391
+    %t58427 =l loadl %t58426
+    %t58428 =l call $str_concat_at(l %t58423, l %t58427, l %t58419)
+    storel %t58428, %t58426
+    dbgloc 392
+    %t58429 =l loadl %t58426
+    %t58430 =l copy $str1904
+    %t58431 =l call $str_concat_at(l %t58423, l %t58429, l %t58430)
+    storel %t58431, %t58426
+    dbgloc 393
+    %t58432 =l loadl %t58426
+    %t58433 =l call $str_concat_at(l %t58423, l %t58432, l %t58416)
+    storel %t58433, %t58426
+    dbgloc 394
+    %t58434 =l loadl %t58426
+    %t58435 =l copy $str1905
+    %t58436 =l call $str_concat_at(l %t58423, l %t58434, l %t58435)
+    storel %t58436, %t58426
+    dbgloc 395
+    %t58437 =l copy %t58423
+    %t58438 =l loadl %t58426
+    %t58439 =l add %t58437, %t58438
+    %t58440 =l copy %t58439
+    dbgloc 396
+    %t58441 =w copy 0
+    %t58442 =w call $store_byte_i32(l %t58440, w %t58441)
+    dbgloc 397
+    dbgloc 398
+    dbgloc 399
+    dbgloc 400
+    dbgloc 401
+    %t58443 =w call $resolve_one_import_v1(l %t58423, l %t58416, l %t58296, l %t58297, l %t58298, l %t58299, l %t58300, l %t58301, l %t58302, l %t58303, l %t58294)
+    dbgloc 402
+    %t58444 =w loadw %t58363
+    %t58445 =w add %t58444, %t58443
+    storew %t58445, %t58363
+    dbgloc 403
+    %t58446 =w call $free(l %t58423)
+    %t58447 =w call $free(l %t58419)
+    jmp @merge13343
+@else13342
+    dbgloc 404
+    dbgloc 405
+    %t58448 =w copy 0
+    %t58449 =l extsw %t58448
+    %t58450 =w ceql %t58409, %t58449
+    jnz %t58450, @then13344, @else13345
+@then13344
+    %t58451 =l loadl %t58396
+    %t58452 =w copy 1
+    %t58453 =l extsw %t58452
+    %t58454 =l add %t58451, %t58453
+    storel %t58454, %t58396
+    jmp @merge13346
+@else13345
+    dbgloc 406
+    %t58455 =w copy 0
+    %t58456 =l extsw %t58455
+    %t58457 =l alloc8 8
+    storel %t58456, %t58457
+    dbgloc 407
+    %t58458 =w loadw %t58409
+    %t58459 =w call $ast__NODE_FUNC_DECL()
+    %t58460 =w ceqw %t58458, %t58459
+    jnz %t58460, @then13347, @else13348
+@then13347
+    %t58461 =l call $ast__node_func_decl_data(l %t58409)
     %t58462 =l loadl %t58461
-    %t58463 =l call $str_concat_at(l %t58458, l %t58462, l %t58147)
-    storel %t58463, %t58461
-    dbgloc 441
-    %t58464 =l copy %t58458
-    %t58465 =l loadl %t58461
-    %t58466 =l add %t58464, %t58465
-    %t58467 =l copy %t58466
-    dbgloc 442
-    %t58468 =w copy 0
-    %t58469 =w call $store_byte_i32(l %t58467, w %t58468)
-    dbgloc 443
-    %t58470 =l copy %t58155
-    %t58471 =l loadl %t58156
-    %t58472 =w copy 512
-    %t58473 =l extsw %t58472
-    %t58474 =l mul %t58471, %t58473
-    %t58475 =l add %t58470, %t58474
-    %t58476 =l copy %t58475
-    dbgloc 444
-    storel %t58458, %t58476
-    dbgloc 445
-    %t58477 =l loadl %t58156
-    %t58478 =w copy 1
-    %t58479 =l extsw %t58478
-    %t58480 =l add %t58477, %t58479
-    storel %t58480, %t58156
-    jmp @merge13347
-@else13346
-    jmp @merge13347
-@merge13347
-    dbgloc 448
-    %t58481 =w call $free(l %t58173)
-    %t58482 =w call $free(l %t58185)
-    %t58483 =w call $free(l %t58193)
-    dbgloc 449
-    %t58484 =w loadw %t58216
-    ret %t58484
-}
-
-export function w $inline_imports(l %module, l %main_path, l %arena) {
-@start13348
-    %t58485 =l copy %module
-    %t58486 =l copy %main_path
-    %t58487 =l copy %arena
-    dbgloc 456
-    dbgloc 457
-    %t58488 =l call $ast__node_module_data(l %t58485)
-    dbgloc 460
+    storel %t58462, %t58457
+    jmp @merge13349
+@else13348
+    jmp @merge13349
+@merge13349
+    dbgloc 408
+    %t58463 =l loadl %t58457
+    %t58464 =w copy 0
+    %t58465 =l extsw %t58464
+    %t58466 =w cnel %t58463, %t58465
+    jnz %t58466, @then13350, @else13351
+@then13350
+    %t58467 =l loadl %t58457
+    %t58468 =l copy %t58467
+    %t58469 =l add %t58468, 32
+    storel %t58295, %t58469
+    jmp @merge13352
+@else13351
+    jmp @merge13352
+@merge13352
+    dbgloc 409
+    %t58470 =l loadl %t58298
+    %t58471 =l loadl %t58299
+    %t58472 =w csgel %t58470, %t58471
+    jnz %t58472, @then13353, @else13354
+@then13353
+    dbgloc 410
+    %t58473 =l loadl %t58299
+    %t58474 =w copy 2
+    %t58475 =l extsw %t58474
+    %t58476 =l mul %t58473, %t58475
+    %t58477 =l alloc8 8
+    storel %t58476, %t58477
+    %t58478 =l loadl %t58477
+    %t58479 =w copy 8
+    %t58480 =l extsw %t58479
+    %t58481 =w csltl %t58478, %t58480
+    jnz %t58481, @then13356, @else13357
+@then13356
+    %t58482 =w copy 8
+    %t58483 =l extsw %t58482
+    storel %t58483, %t58477
+    jmp @merge13358
+@else13357
+    jmp @merge13358
+@merge13358
+    dbgloc 411
+    %t58484 =l loadl %t58477
+    %t58485 =w copy 8
+    %t58486 =l extsw %t58485
+    %t58487 =l mul %t58484, %t58486
+    %t58488 =l call $arena__arena_alloc(l %t58296, l %t58487)
+    dbgloc 412
     %t58489 =w copy 0
     %t58490 =l extsw %t58489
     %t58491 =l alloc8 8
     storel %t58490, %t58491
-    dbgloc 461
-    %t58492 =w copy 0
-    %t58493 =l extsw %t58492
-    %t58494 =l alloc8 8
-    storel %t58493, %t58494
-    jmp @loop13349
-@loop13349
-    dbgloc 462
-    %t58495 =l loadl %t58494
-    %t58496 =l add %t58488, 8
-    %t58497 =l loadl %t58496
-    %t58498 =w csltl %t58495, %t58497
-    jnz %t58498, @body13350, @exit13351
-@body13350
-    dbgloc 463
-    %t58499 =l loadl %t58488
-    %t58500 =l copy %t58499
-    %t58501 =l loadl %t58494
-    %t58502 =w copy 8
-    %t58503 =l extsw %t58502
-    %t58504 =l mul %t58501, %t58503
-    %t58505 =l add %t58500, %t58504
-    %t58506 =l copy %t58505
-    %t58507 =l loadl %t58506
-    dbgloc 464
-    %t58508 =w loadw %t58507
-    %t58509 =w call $ast__NODE_IMPORT_DECL()
-    %t58510 =w ceqw %t58508, %t58509
-    jnz %t58510, @then13352, @else13353
-@then13352
-    dbgloc 465
+    dbgloc 414
+    %t58492 =l loadl %t58299
+    %t58493 =l alloc8 8
+    storel %t58492, %t58493
+    %t58494 =l loadl %t58298
+    %t58495 =l loadl %t58493
+    %t58496 =w csltl %t58494, %t58495
+    jnz %t58496, @then13359, @else13360
+@then13359
+    %t58497 =l loadl %t58298
+    storel %t58497, %t58493
+    jmp @merge13361
+@else13360
+    jmp @merge13361
+@merge13361
+    jmp @loop13362
+@loop13362
+    dbgloc 415
+    %t58498 =l loadl %t58491
+    %t58499 =l loadl %t58493
+    %t58500 =w csltl %t58498, %t58499
+    jnz %t58500, @body13363, @exit13364
+@body13363
+    %t58501 =l loadl %t58297
+    %t58502 =l copy %t58501
+    %t58503 =l loadl %t58491
+    %t58504 =w copy 8
+    %t58505 =l extsw %t58504
+    %t58506 =l mul %t58503, %t58505
+    %t58507 =l add %t58502, %t58506
+    %t58508 =l copy %t58507
+    %t58509 =l loadl %t58508
+    %t58510 =l copy %t58488
     %t58511 =l loadl %t58491
-    %t58512 =w copy 1
+    %t58512 =w copy 8
     %t58513 =l extsw %t58512
-    %t58514 =l add %t58511, %t58513
-    storel %t58514, %t58491
-    jmp @merge13354
-@else13353
-    jmp @merge13354
-@merge13354
-    dbgloc 467
-    %t58515 =l loadl %t58494
-    %t58516 =w copy 1
-    %t58517 =l extsw %t58516
-    %t58518 =l add %t58515, %t58517
-    storel %t58518, %t58494
-    jmp @loop13349
-@exit13351
-    dbgloc 469
-    %t58519 =l loadl %t58491
-    %t58520 =w copy 0
-    %t58521 =l extsw %t58520
-    %t58522 =w ceql %t58519, %t58521
-    jnz %t58522, @then13355, @else13356
-@then13355
-    dbgloc 470
-    %t58523 =w copy 0
-    ret %t58523
-@else13356
-    jmp @merge13357
-@merge13357
-    dbgloc 474
-    %t58524 =w copy 512
-    %t58525 =l extsw %t58524
-    %t58526 =l call $malloc(l %t58525)
-    dbgloc 475
-    %t58527 =w call $dir_from_path(l %t58486, l %t58526)
-    dbgloc 478
-    %t58528 =w copy 64
+    %t58514 =l mul %t58511, %t58513
+    %t58515 =l add %t58510, %t58514
+    %t58516 =l copy %t58515
+    storel %t58509, %t58516
+    %t58517 =l loadl %t58491
+    %t58518 =w copy 1
+    %t58519 =l extsw %t58518
+    %t58520 =l add %t58517, %t58519
+    storel %t58520, %t58491
+    jmp @loop13362
+@exit13364
+    dbgloc 416
+    storel %t58488, %t58297
+    %t58521 =l loadl %t58477
+    storel %t58521, %t58299
+    jmp @merge13355
+@else13354
+    jmp @merge13355
+@merge13355
+    dbgloc 418
+    %t58522 =l loadl %t58298
+    %t58523 =l loadl %t58299
+    %t58524 =w csltl %t58522, %t58523
+    jnz %t58524, @then13365, @else13366
+@then13365
+    dbgloc 419
+    %t58525 =l loadl %t58297
+    %t58526 =l copy %t58525
+    %t58527 =l loadl %t58298
+    %t58528 =w copy 8
     %t58529 =l extsw %t58528
-    %t58530 =w copy 512
-    %t58531 =l extsw %t58530
-    %t58532 =l mul %t58529, %t58531
-    %t58533 =l call $malloc(l %t58532)
-    dbgloc 479
-    %t58534 =w copy 64
+    %t58530 =l mul %t58527, %t58529
+    %t58531 =l add %t58526, %t58530
+    %t58532 =l copy %t58531
+    storel %t58409, %t58532
+    dbgloc 420
+    %t58533 =l loadl %t58298
+    %t58534 =w copy 1
     %t58535 =l extsw %t58534
-    %t58536 =w copy 512
-    %t58537 =l extsw %t58536
-    %t58538 =l mul %t58535, %t58537
-    %t58539 =l call $malloc(l %t58538)
-    dbgloc 480
-    %t58540 =w copy 0
-    %t58541 =l extsw %t58540
-    %t58542 =l alloc8 8
-    storel %t58541, %t58542
-    dbgloc 481
-    %t58543 =w copy 0
-    %t58544 =l extsw %t58543
-    %t58545 =l alloc8 8
-    storel %t58544, %t58545
-    dbgloc 484
-    %t58546 =l add %t58488, 8
-    %t58547 =l loadl %t58546
-    %t58548 =w copy 8
-    %t58549 =l extsw %t58548
-    %t58550 =l mul %t58547, %t58549
-    %t58551 =l call $arena__arena_alloc(l %t58487, l %t58550)
-    dbgloc 485
-    %t58552 =w copy 0
-    %t58553 =l extsw %t58552
-    %t58554 =l alloc8 8
-    storel %t58553, %t58554
-    dbgloc 486
-    %t58555 =w copy 0
-    %t58556 =l extsw %t58555
-    %t58557 =l alloc8 8
-    storel %t58556, %t58557
-    jmp @loop13358
-@loop13358
-    dbgloc 487
-    %t58558 =l loadl %t58557
-    %t58559 =l add %t58488, 8
-    %t58560 =l loadl %t58559
-    %t58561 =w csltl %t58558, %t58560
-    jnz %t58561, @body13359, @exit13360
-@body13359
-    dbgloc 488
-    %t58562 =l loadl %t58488
-    %t58563 =l copy %t58562
-    %t58564 =l loadl %t58557
-    %t58565 =w copy 8
-    %t58566 =l extsw %t58565
-    %t58567 =l mul %t58564, %t58566
-    %t58568 =l add %t58563, %t58567
-    %t58569 =l copy %t58568
-    %t58570 =l loadl %t58569
-    dbgloc 489
-    %t58571 =w loadw %t58570
-    %t58572 =w call $ast__NODE_IMPORT_DECL()
-    %t58573 =w cnew %t58571, %t58572
-    jnz %t58573, @then13361, @else13362
-@then13361
-    dbgloc 490
-    %t58574 =l copy %t58551
-    %t58575 =l loadl %t58554
-    %t58576 =w copy 8
-    %t58577 =l extsw %t58576
-    %t58578 =l mul %t58575, %t58577
-    %t58579 =l add %t58574, %t58578
-    %t58580 =l copy %t58579
-    dbgloc 491
-    storel %t58570, %t58580
-    dbgloc 492
-    %t58581 =l loadl %t58554
-    %t58582 =w copy 1
-    %t58583 =l extsw %t58582
-    %t58584 =l add %t58581, %t58583
-    storel %t58584, %t58554
-    jmp @merge13363
-@else13362
-    jmp @merge13363
-@merge13363
-    dbgloc 494
-    %t58585 =l loadl %t58557
-    %t58586 =w copy 1
-    %t58587 =l extsw %t58586
-    %t58588 =l add %t58585, %t58587
-    storel %t58588, %t58557
-    jmp @loop13358
-@exit13360
-    dbgloc 498
-    %t58589 =w copy 65536
-    %t58590 =l extsw %t58589
-    dbgloc 499
-    %t58591 =w copy 8
+    %t58536 =l add %t58533, %t58535
+    storel %t58536, %t58298
+    jmp @merge13367
+@else13366
+    jmp @merge13367
+@merge13367
+    jmp @merge13346
+@merge13346
+    jmp @merge13343
+@merge13343
+    dbgloc 424
+    %t58537 =l loadl %t58396
+    %t58538 =w copy 1
+    %t58539 =l extsw %t58538
+    %t58540 =l add %t58537, %t58539
+    storel %t58540, %t58396
+    jmp @loop13338
+@exit13340
+    dbgloc 429
+    %t58541 =w copy 0
+    %t58542 =l extsw %t58541
+    %t58543 =l alloc8 8
+    storel %t58542, %t58543
+    dbgloc 430
+    %t58544 =w copy 0
+    %t58545 =l alloc4 4
+    storew %t58544, %t58545
+    jmp @loop13368
+@loop13368
+    dbgloc 431
+    %t58546 =l loadl %t58543
+    %t58547 =l loadl %t58301
+    %t58548 =w csltl %t58546, %t58547
+    jnz %t58548, @body13369, @exit13370
+@body13369
+    dbgloc 432
+    %t58549 =l copy %t58300
+    %t58550 =l loadl %t58543
+    %t58551 =w copy 512
+    %t58552 =l extsw %t58551
+    %t58553 =l mul %t58550, %t58552
+    %t58554 =l add %t58549, %t58553
+    %t58555 =l copy %t58554
+    dbgloc 433
+    %t58556 =l loadl %t58555
+    %t58557 =w call $strcmp(l %t58556, l %t58294)
+    %t58558 =w copy 0
+    %t58559 =w ceqw %t58557, %t58558
+    jnz %t58559, @then13371, @else13372
+@then13371
+    dbgloc 435
+    %t58560 =l loadl %t58543
+    %t58561 =l alloc8 8
+    storel %t58560, %t58561
+    jmp @loop13374
+@loop13374
+    dbgloc 436
+    %t58562 =l loadl %t58561
+    %t58563 =l loadl %t58301
+    %t58564 =w copy 1
+    %t58565 =l extsw %t58564
+    %t58566 =l sub %t58563, %t58565
+    %t58567 =w csltl %t58562, %t58566
+    jnz %t58567, @body13375, @exit13376
+@body13375
+    dbgloc 437
+    %t58568 =l copy %t58300
+    %t58569 =l loadl %t58561
+    %t58570 =w copy 1
+    %t58571 =l extsw %t58570
+    %t58572 =l add %t58569, %t58571
+    %t58573 =w copy 512
+    %t58574 =l extsw %t58573
+    %t58575 =l mul %t58572, %t58574
+    %t58576 =l add %t58568, %t58575
+    %t58577 =l copy %t58576
+    dbgloc 438
+    %t58578 =l copy %t58300
+    %t58579 =l loadl %t58561
+    %t58580 =w copy 512
+    %t58581 =l extsw %t58580
+    %t58582 =l mul %t58579, %t58581
+    %t58583 =l add %t58578, %t58582
+    %t58584 =l copy %t58583
+    dbgloc 439
+    %t58585 =l loadl %t58577
+    storel %t58585, %t58584
+    dbgloc 440
+    %t58586 =l loadl %t58561
+    %t58587 =w copy 1
+    %t58588 =l extsw %t58587
+    %t58589 =l add %t58586, %t58588
+    storel %t58589, %t58561
+    jmp @loop13374
+@exit13376
+    dbgloc 442
+    %t58590 =l loadl %t58301
+    %t58591 =w copy 1
     %t58592 =l extsw %t58591
-    %t58593 =l mul %t58590, %t58592
-    %t58594 =l call $arena__arena_alloc(l %t58487, l %t58593)
-    dbgloc 500
-    %t58595 =w copy 0
-    %t58596 =l extsw %t58595
-    %t58597 =l alloc8 8
-    storel %t58596, %t58597
-    dbgloc 503
-    %t58598 =w copy 0
-    %t58599 =l alloc4 4
-    storew %t58598, %t58599
-    dbgloc 504
-    %t58600 =w copy 0
+    %t58593 =l sub %t58590, %t58592
+    storel %t58593, %t58301
+    dbgloc 443
+    %t58594 =w copy 1
+    storew %t58594, %t58545
+    jmp @merge13373
+@else13372
+    jmp @merge13373
+@merge13373
+    dbgloc 445
+    %t58595 =l loadl %t58543
+    %t58596 =w copy 1
+    %t58597 =l extsw %t58596
+    %t58598 =l add %t58595, %t58597
+    storel %t58598, %t58543
+    jmp @loop13368
+@exit13370
+    dbgloc 449
+    %t58599 =l loadl %t58303
+    %t58600 =w copy 64
     %t58601 =l extsw %t58600
-    %t58602 =l alloc8 8
-    storel %t58601, %t58602
-    jmp @loop13364
-@loop13364
-    dbgloc 505
-    %t58603 =l loadl %t58602
-    %t58604 =l add %t58488, 8
-    %t58605 =l loadl %t58604
-    %t58606 =w csltl %t58603, %t58605
-    jnz %t58606, @body13365, @exit13366
-@body13365
-    dbgloc 506
-    %t58607 =l loadl %t58488
-    %t58608 =l copy %t58607
-    %t58609 =l loadl %t58602
-    %t58610 =w copy 8
-    %t58611 =l extsw %t58610
-    %t58612 =l mul %t58609, %t58611
-    %t58613 =l add %t58608, %t58612
+    %t58602 =w csltl %t58599, %t58601
+    jnz %t58602, @then13377, @else13378
+@then13377
+    dbgloc 450
+    %t58603 =w copy 512
+    %t58604 =l extsw %t58603
+    %t58605 =l call $malloc(l %t58604)
+    dbgloc 451
+    %t58606 =w copy 0
+    %t58607 =l extsw %t58606
+    %t58608 =l alloc8 8
+    storel %t58607, %t58608
+    dbgloc 452
+    %t58609 =l loadl %t58608
+    %t58610 =l call $str_concat_at(l %t58605, l %t58609, l %t58294)
+    storel %t58610, %t58608
+    dbgloc 453
+    %t58611 =l copy %t58605
+    %t58612 =l loadl %t58608
+    %t58613 =l add %t58611, %t58612
     %t58614 =l copy %t58613
-    %t58615 =l loadl %t58614
-    dbgloc 507
-    %t58616 =w loadw %t58615
-    %t58617 =w call $ast__NODE_IMPORT_DECL()
-    %t58618 =w cnew %t58616, %t58617
-    jnz %t58618, @then13367, @else13368
-@then13367
-    dbgloc 508
-    %t58619 =l loadl %t58602
-    %t58620 =w copy 1
-    %t58621 =l extsw %t58620
-    %t58622 =l add %t58619, %t58621
-    storel %t58622, %t58602
-    jmp @merge13369
-@else13368
-    dbgloc 510
-    dbgloc 511
-    %t58623 =l call $ast__node_import_decl_data(l %t58615)
-    dbgloc 513
-    %t58624 =l loadl %t58623
-    %t58625 =l copy %t58624
-    dbgloc 514
-    %t58626 =l loadl %t58625
-    dbgloc 516
-    %t58627 =w copy 1024
-    %t58628 =l extsw %t58627
-    %t58629 =l call $malloc(l %t58628)
-    dbgloc 517
-    %t58630 =w copy 0
-    %t58631 =l extsw %t58630
-    %t58632 =l alloc8 8
-    storel %t58631, %t58632
-    dbgloc 518
-    %t58633 =l loadl %t58632
-    %t58634 =l call $str_concat_at(l %t58629, l %t58633, l %t58526)
-    storel %t58634, %t58632
-    dbgloc 519
-    %t58635 =l copy $str1901
-    dbgloc 520
-    %t58636 =l loadl %t58632
-    %t58637 =l call $str_concat_at(l %t58629, l %t58636, l %t58635)
-    storel %t58637, %t58632
-    dbgloc 521
-    %t58638 =l loadl %t58632
-    %t58639 =l call $str_concat_at(l %t58629, l %t58638, l %t58626)
-    storel %t58639, %t58632
-    dbgloc 522
-    %t58640 =l copy $str1902
-    dbgloc 523
-    %t58641 =l loadl %t58632
-    %t58642 =l call $str_concat_at(l %t58629, l %t58641, l %t58640)
-    storel %t58642, %t58632
-    dbgloc 524
-    %t58643 =l copy %t58629
-    %t58644 =l loadl %t58632
-    %t58645 =l add %t58643, %t58644
-    %t58646 =l copy %t58645
-    dbgloc 525
-    %t58647 =w copy 0
-    %t58648 =w call $store_byte_i32(l %t58646, w %t58647)
-    dbgloc 526
-    %t58649 =w loadw %t58599
-    dbgloc 527
-    %t58650 =l alloc8 8
-    storel %t58594, %t58650
-    %t58651 =l copy %t58650
-    %t58652 =l alloc8 8
-    storel %t58590, %t58652
-    dbgloc 528
-    dbgloc 529
-    dbgloc 530
-    %t58653 =w call $resolve_one_import_v1(l %t58629, l %t58626, l %t58487, l %t58651, l %t58597, l %t58652, l %t58533, l %t58542, l %t58539, l %t58545, l %t58486)
-    %t58654 =w add %t58649, %t58653
-    storew %t58654, %t58599
-    dbgloc 532
-    %t58655 =l loadl %t58602
-    %t58656 =w copy 1
-    %t58657 =l extsw %t58656
-    %t58658 =l add %t58655, %t58657
-    storel %t58658, %t58602
-    jmp @merge13369
-@merge13369
-    jmp @loop13364
-@exit13366
-    dbgloc 536
-    %t58659 =w loadw %t58599
-    %t58660 =w copy 0
-    %t58661 =w csgtw %t58659, %t58660
-    jnz %t58661, @then13370, @else13371
-@then13370
-    dbgloc 537
-    %t58662 =w call $free(l %t58533)
-    dbgloc 538
-    %t58663 =w call $free(l %t58539)
-    dbgloc 539
-    %t58664 =w call $free(l %t58526)
-    dbgloc 540
-    %t58665 =w loadw %t58599
-    ret %t58665
-@else13371
-    jmp @merge13372
-@merge13372
-    dbgloc 544
-    %t58666 =w copy 0
-    %t58667 =l extsw %t58666
-    %t58668 =l alloc8 8
-    storel %t58667, %t58668
-    jmp @loop13373
-@loop13373
-    dbgloc 545
-    %t58669 =l loadl %t58668
-    %t58670 =l loadl %t58554
-    %t58671 =w csltl %t58669, %t58670
-    jnz %t58671, @sc_eval13376, @sc_false13378
-@sc_false13378
-    %t58673 =w copy 0
-    jmp @sc_merge13377
-@sc_eval13376
-    %t58674 =l loadl %t58597
-    %t58675 =w csltl %t58674, %t58590
-    %t58676 =w cnew %t58675, 0
-    jmp @sc_merge13377
-@sc_merge13377
-    %t58672 =w phi @sc_false13378 %t58673, @sc_eval13376 %t58676
-    jnz %t58672, @body13374, @exit13375
-@body13374
-    dbgloc 546
-    %t58677 =l copy %t58594
-    %t58678 =l loadl %t58597
-    %t58679 =w copy 8
-    %t58680 =l extsw %t58679
-    %t58681 =l mul %t58678, %t58680
-    %t58682 =l add %t58677, %t58681
-    %t58683 =l copy %t58682
-    dbgloc 547
-    %t58684 =l copy %t58551
-    %t58685 =l loadl %t58668
-    %t58686 =w copy 8
-    %t58687 =l extsw %t58686
-    %t58688 =l mul %t58685, %t58687
-    %t58689 =l add %t58684, %t58688
-    %t58690 =l copy %t58689
-    %t58691 =l loadl %t58690
-    storel %t58691, %t58683
-    dbgloc 548
-    %t58692 =l loadl %t58597
-    %t58693 =w copy 1
-    %t58694 =l extsw %t58693
-    %t58695 =l add %t58692, %t58694
-    storel %t58695, %t58597
-    dbgloc 549
-    %t58696 =l loadl %t58668
-    %t58697 =w copy 1
-    %t58698 =l extsw %t58697
-    %t58699 =l add %t58696, %t58698
-    storel %t58699, %t58668
-    jmp @loop13373
-@exit13375
-    dbgloc 553
-    storel %t58594, %t58488
-    dbgloc 554
-    %t58700 =l loadl %t58597
-    %t58701 =l add %t58488, 8
+    dbgloc 454
+    %t58615 =w copy 0
+    %t58616 =w call $store_byte_i32(l %t58614, w %t58615)
+    dbgloc 455
+    %t58617 =l copy %t58302
+    %t58618 =l loadl %t58303
+    %t58619 =w copy 512
+    %t58620 =l extsw %t58619
+    %t58621 =l mul %t58618, %t58620
+    %t58622 =l add %t58617, %t58621
+    %t58623 =l copy %t58622
+    dbgloc 456
+    storel %t58605, %t58623
+    dbgloc 457
+    %t58624 =l loadl %t58303
+    %t58625 =w copy 1
+    %t58626 =l extsw %t58625
+    %t58627 =l add %t58624, %t58626
+    storel %t58627, %t58303
+    jmp @merge13379
+@else13378
+    jmp @merge13379
+@merge13379
+    dbgloc 460
+    %t58628 =w call $free(l %t58320)
+    %t58629 =w call $free(l %t58332)
+    %t58630 =w call $free(l %t58340)
+    dbgloc 461
+    %t58631 =w loadw %t58363
+    ret %t58631
+}
+
+export function w $inline_imports(l %module, l %main_path, l %arena) {
+@start13380
+    %t58632 =l copy %module
+    %t58633 =l copy %main_path
+    %t58634 =l copy %arena
+    dbgloc 468
+    dbgloc 469
+    %t58635 =l call $ast__node_module_data(l %t58632)
+    dbgloc 472
+    %t58636 =w copy 0
+    %t58637 =l extsw %t58636
+    %t58638 =l alloc8 8
+    storel %t58637, %t58638
+    dbgloc 473
+    %t58639 =w copy 0
+    %t58640 =l extsw %t58639
+    %t58641 =l alloc8 8
+    storel %t58640, %t58641
+    jmp @loop13381
+@loop13381
+    dbgloc 474
+    %t58642 =l loadl %t58641
+    %t58643 =l add %t58635, 8
+    %t58644 =l loadl %t58643
+    %t58645 =w csltl %t58642, %t58644
+    jnz %t58645, @body13382, @exit13383
+@body13382
+    dbgloc 475
+    %t58646 =l loadl %t58635
+    %t58647 =l copy %t58646
+    %t58648 =l loadl %t58641
+    %t58649 =w copy 8
+    %t58650 =l extsw %t58649
+    %t58651 =l mul %t58648, %t58650
+    %t58652 =l add %t58647, %t58651
+    %t58653 =l copy %t58652
+    %t58654 =l loadl %t58653
+    dbgloc 476
+    %t58655 =w loadw %t58654
+    %t58656 =w call $ast__NODE_IMPORT_DECL()
+    %t58657 =w ceqw %t58655, %t58656
+    jnz %t58657, @then13384, @else13385
+@then13384
+    dbgloc 477
+    %t58658 =l loadl %t58638
+    %t58659 =w copy 1
+    %t58660 =l extsw %t58659
+    %t58661 =l add %t58658, %t58660
+    storel %t58661, %t58638
+    jmp @merge13386
+@else13385
+    jmp @merge13386
+@merge13386
+    dbgloc 479
+    %t58662 =l loadl %t58641
+    %t58663 =w copy 1
+    %t58664 =l extsw %t58663
+    %t58665 =l add %t58662, %t58664
+    storel %t58665, %t58641
+    jmp @loop13381
+@exit13383
+    dbgloc 481
+    %t58666 =l loadl %t58638
+    %t58667 =w copy 0
+    %t58668 =l extsw %t58667
+    %t58669 =w ceql %t58666, %t58668
+    jnz %t58669, @then13387, @else13388
+@then13387
+    dbgloc 482
+    %t58670 =w copy 0
+    ret %t58670
+@else13388
+    jmp @merge13389
+@merge13389
+    dbgloc 486
+    %t58671 =w copy 512
+    %t58672 =l extsw %t58671
+    %t58673 =l call $malloc(l %t58672)
+    dbgloc 487
+    %t58674 =w call $dir_from_path(l %t58633, l %t58673)
+    dbgloc 490
+    %t58675 =w copy 64
+    %t58676 =l extsw %t58675
+    %t58677 =w copy 512
+    %t58678 =l extsw %t58677
+    %t58679 =l mul %t58676, %t58678
+    %t58680 =l call $malloc(l %t58679)
+    dbgloc 491
+    %t58681 =w copy 64
+    %t58682 =l extsw %t58681
+    %t58683 =w copy 512
+    %t58684 =l extsw %t58683
+    %t58685 =l mul %t58682, %t58684
+    %t58686 =l call $malloc(l %t58685)
+    dbgloc 492
+    %t58687 =w copy 0
+    %t58688 =l extsw %t58687
+    %t58689 =l alloc8 8
+    storel %t58688, %t58689
+    dbgloc 493
+    %t58690 =w copy 0
+    %t58691 =l extsw %t58690
+    %t58692 =l alloc8 8
+    storel %t58691, %t58692
+    dbgloc 496
+    %t58693 =l add %t58635, 8
+    %t58694 =l loadl %t58693
+    %t58695 =w copy 8
+    %t58696 =l extsw %t58695
+    %t58697 =l mul %t58694, %t58696
+    %t58698 =l call $arena__arena_alloc(l %t58634, l %t58697)
+    dbgloc 497
+    %t58699 =w copy 0
+    %t58700 =l extsw %t58699
+    %t58701 =l alloc8 8
     storel %t58700, %t58701
-    dbgloc 556
-    %t58702 =w call $free(l %t58533)
-    dbgloc 557
-    %t58703 =w call $free(l %t58539)
-    dbgloc 558
-    %t58704 =w call $free(l %t58526)
-    dbgloc 559
-    %t58705 =w copy 0
-    ret %t58705
-}
-
-export function w $build_il(l %input, l %output, w %t) {
-@start13379
-    %t58706 =l copy %input
-    %t58707 =l copy %output
-    %t58708 =w copy %t
-    dbgloc 565
-    dbgloc 566
-    %t58709 =l call $read_file(l %t58706)
-    dbgloc 567
-    %t58710 =w copy 0
-    %t58711 =l extsw %t58710
-    %t58712 =w ceql %t58709, %t58711
-    jnz %t58712, @then13380, @else13381
-@then13380
-    dbgloc 568
-    %t58713 =w copy 1
-    ret %t58713
-@else13381
-    jmp @merge13382
-@merge13382
-    dbgloc 572
-    %t58714 =l alloc16 48
-    dbgloc 573
-    %t58715 =w copy 0
-    %t58716 =l extsw %t58715
-    %t58717 =l add %t58714, 0
-    storel %t58716, %t58717
-    dbgloc 574
-    %t58718 =w copy 0
-    %t58719 =l extsw %t58718
-    %t58720 =l add %t58714, 8
-    storel %t58719, %t58720
-    dbgloc 575
-    %t58721 =w copy 0
-    %t58722 =l extsw %t58721
-    %t58723 =l add %t58714, 16
-    storel %t58722, %t58723
-    dbgloc 576
-    %t58724 =w copy 0
-    %t58725 =l extsw %t58724
-    %t58726 =l add %t58714, 24
-    storel %t58725, %t58726
-    dbgloc 577
-    %t58727 =w copy 0
-    %t58728 =l extsw %t58727
-    %t58729 =l add %t58714, 32
-    storel %t58728, %t58729
-    dbgloc 579
-    %t58730 =w copy 32
-    %t58731 =l extsw %t58730
-    %t58732 =w copy 1024
-    %t58733 =l extsw %t58732
-    %t58734 =l mul %t58731, %t58733
-    %t58735 =w copy 1024
-    %t58736 =l extsw %t58735
-    %t58737 =l mul %t58734, %t58736
-    %t58738 =w call $arena__arena_init(l %t58714, l %t58737)
-    dbgloc 582
-    %t58739 =l alloc16 112
-    dbgloc 583
-    %t58740 =w copy 0
-    %t58741 =l extsw %t58740
-    %t58742 =l add %t58739, 0
-    storel %t58741, %t58742
-    dbgloc 584
-    %t58743 =w copy 0
-    %t58744 =l add %t58739, 8
-    storew %t58743, %t58744
-    dbgloc 585
+    dbgloc 498
+    %t58702 =w copy 0
+    %t58703 =l extsw %t58702
+    %t58704 =l alloc8 8
+    storel %t58703, %t58704
+    jmp @loop13390
+@loop13390
+    dbgloc 499
+    %t58705 =l loadl %t58704
+    %t58706 =l add %t58635, 8
+    %t58707 =l loadl %t58706
+    %t58708 =w csltl %t58705, %t58707
+    jnz %t58708, @body13391, @exit13392
+@body13391
+    dbgloc 500
+    %t58709 =l loadl %t58635
+    %t58710 =l copy %t58709
+    %t58711 =l loadl %t58704
+    %t58712 =w copy 8
+    %t58713 =l extsw %t58712
+    %t58714 =l mul %t58711, %t58713
+    %t58715 =l add %t58710, %t58714
+    %t58716 =l copy %t58715
+    %t58717 =l loadl %t58716
+    dbgloc 501
+    %t58718 =w loadw %t58717
+    %t58719 =w call $ast__NODE_IMPORT_DECL()
+    %t58720 =w cnew %t58718, %t58719
+    jnz %t58720, @then13393, @else13394
+@then13393
+    dbgloc 502
+    %t58721 =l copy %t58698
+    %t58722 =l loadl %t58701
+    %t58723 =w copy 8
+    %t58724 =l extsw %t58723
+    %t58725 =l mul %t58722, %t58724
+    %t58726 =l add %t58721, %t58725
+    %t58727 =l copy %t58726
+    dbgloc 503
+    storel %t58717, %t58727
+    dbgloc 504
+    %t58728 =l loadl %t58701
+    %t58729 =w copy 1
+    %t58730 =l extsw %t58729
+    %t58731 =l add %t58728, %t58730
+    storel %t58731, %t58701
+    jmp @merge13395
+@else13394
+    jmp @merge13395
+@merge13395
+    dbgloc 506
+    %t58732 =l loadl %t58704
+    %t58733 =w copy 1
+    %t58734 =l extsw %t58733
+    %t58735 =l add %t58732, %t58734
+    storel %t58735, %t58704
+    jmp @loop13390
+@exit13392
+    dbgloc 510
+    %t58736 =w copy 65536
+    %t58737 =l extsw %t58736
+    dbgloc 511
+    %t58738 =w copy 8
+    %t58739 =l extsw %t58738
+    %t58740 =l mul %t58737, %t58739
+    %t58741 =l call $arena__arena_alloc(l %t58634, l %t58740)
+    dbgloc 512
+    %t58742 =w copy 0
+    %t58743 =l extsw %t58742
+    %t58744 =l alloc8 8
+    storel %t58743, %t58744
+    dbgloc 515
     %t58745 =w copy 0
-    %t58746 =l extsw %t58745
-    %t58747 =l add %t58739, 16
-    storel %t58746, %t58747
-    %t58748 =w copy 0
-    %t58749 =l extsw %t58748
-    %t58750 =l add %t58739, 24
-    storel %t58749, %t58750
-    %t58751 =w copy 0
-    %t58752 =l extsw %t58751
-    %t58753 =l add %t58739, 32
-    storel %t58752, %t58753
-    %t58754 =w copy 0
-    %t58755 =l extsw %t58754
-    %t58756 =l add %t58739, 40
-    storel %t58755, %t58756
-    dbgloc 586
-    %t58757 =w copy 0
+    %t58746 =l alloc4 4
+    storew %t58745, %t58746
+    dbgloc 516
+    %t58747 =w copy 0
+    %t58748 =l extsw %t58747
+    %t58749 =l alloc8 8
+    storel %t58748, %t58749
+    jmp @loop13396
+@loop13396
+    dbgloc 517
+    %t58750 =l loadl %t58749
+    %t58751 =l add %t58635, 8
+    %t58752 =l loadl %t58751
+    %t58753 =w csltl %t58750, %t58752
+    jnz %t58753, @body13397, @exit13398
+@body13397
+    dbgloc 518
+    %t58754 =l loadl %t58635
+    %t58755 =l copy %t58754
+    %t58756 =l loadl %t58749
+    %t58757 =w copy 8
     %t58758 =l extsw %t58757
-    %t58759 =l add %t58739, 48
-    storel %t58758, %t58759
-    %t58760 =w copy 0
-    %t58761 =l extsw %t58760
-    %t58762 =l add %t58739, 56
-    storel %t58761, %t58762
-    %t58763 =w copy 0
-    %t58764 =l extsw %t58763
-    %t58765 =l add %t58739, 64
-    storel %t58764, %t58765
-    %t58766 =w copy 0
-    %t58767 =l extsw %t58766
-    %t58768 =l add %t58739, 72
-    storel %t58767, %t58768
-    dbgloc 587
-    %t58769 =w copy 0
-    %t58770 =l extsw %t58769
-    %t58771 =l add %t58739, 80
-    storel %t58770, %t58771
-    %t58772 =w copy 0
-    %t58773 =l extsw %t58772
-    %t58774 =l add %t58739, 88
-    storel %t58773, %t58774
-    %t58775 =w copy 0
-    %t58776 =l extsw %t58775
-    %t58777 =l add %t58739, 96
-    storel %t58776, %t58777
-    %t58778 =w copy 0
-    %t58779 =l extsw %t58778
-    %t58780 =l add %t58739, 104
-    storel %t58779, %t58780
-    dbgloc 589
-    storel %t58714, %t58739
-    dbgloc 590
-    %t58781 =w call $types__types_init_arena(l %t58739)
-    dbgloc 593
-    %t58782 =l alloc16 80
-    dbgloc 594
-    %t58783 =w copy 0
-    %t58784 =l extsw %t58783
-    %t58785 =l add %t58782, 0
-    storel %t58784, %t58785
-    dbgloc 595
-    %t58786 =w copy 0
-    %t58787 =l extsw %t58786
-    %t58788 =l add %t58782, 8
-    storel %t58787, %t58788
-    dbgloc 596
-    %t58789 =w copy 0
-    %t58790 =l extsw %t58789
-    %t58791 =l add %t58782, 16
-    storel %t58790, %t58791
-    dbgloc 597
-    %t58792 =w copy 0
-    %t58793 =l add %t58782, 24
-    storew %t58792, %t58793
-    dbgloc 598
-    %t58794 =w copy 0
-    %t58795 =l add %t58782, 28
-    storew %t58794, %t58795
-    dbgloc 599
-    %t58796 =w copy 0
-    %t58797 =l add %t58782, 32
-    storew %t58796, %t58797
-    dbgloc 600
-    %t58798 =w copy 0
-    %t58799 =l extsw %t58798
-    %t58800 =l add %t58782, 40
-    storel %t58799, %t58800
-    dbgloc 601
-    %t58801 =w copy 0
-    %t58802 =l extsw %t58801
-    %t58803 =l add %t58782, 48
-    storel %t58802, %t58803
-    dbgloc 602
-    %t58804 =w copy 0
-    %t58805 =l extsw %t58804
-    %t58806 =l add %t58782, 56
-    storel %t58805, %t58806
-    dbgloc 603
-    %t58807 =w copy 0
-    %t58808 =l add %t58782, 64
-    storew %t58807, %t58808
-    dbgloc 604
-    %t58809 =w copy 0
-    %t58810 =l add %t58782, 68
-    storew %t58809, %t58810
-    dbgloc 605
-    %t58811 =w copy 0
-    %t58812 =l add %t58782, 72
-    storew %t58811, %t58812
-    dbgloc 606
-    %t58813 =w copy 0
-    %t58814 =l add %t58782, 76
-    storew %t58813, %t58814
-    dbgloc 608
-    %t58815 =w call $lexer__lexer_init(l %t58782, l %t58709, l %t58706)
-    dbgloc 611
-    %t58816 =l alloc16 128
-    dbgloc 612
-    %t58817 =w copy 0
-    %t58818 =l extsw %t58817
-    %t58819 =l add %t58816, 0
-    storel %t58818, %t58819
-    dbgloc 613
-    %t58820 =w copy 0
-    %t58821 =l extsw %t58820
-    %t58822 =l add %t58816, 8
-    storel %t58821, %t58822
-    dbgloc 614
-    %t58823 =w copy 0
-    %t58824 =l add %t58816, 16
-    storew %t58823, %t58824
-    dbgloc 615
-    %t58825 =w copy 0
-    %t58826 =l extsw %t58825
-    %t58827 =l add %t58816, 24
-    storel %t58826, %t58827
-    dbgloc 616
-    %t58828 =w copy 0
-    %t58829 =l extsw %t58828
-    %t58830 =l add %t58816, 32
-    storel %t58829, %t58830
-    dbgloc 617
-    %t58831 =w copy 0
-    %t58832 =l extsw %t58831
-    %t58833 =l add %t58816, 40
-    storel %t58832, %t58833
-    dbgloc 618
-    %t58834 =w copy 0
-    %t58835 =l add %t58816, 48
-    storew %t58834, %t58835
-    dbgloc 619
-    %t58836 =w copy 0
-    %t58837 =l add %t58816, 52
-    storew %t58836, %t58837
-    dbgloc 620
-    %t58838 =w copy 0
-    %t58839 =l extsw %t58838
-    %t58840 =l add %t58816, 56
-    storel %t58839, %t58840
-    dbgloc 621
-    %t58841 =w copy 0
-    %t58842 =l extsw %t58841
-    %t58843 =l add %t58816, 64
-    storel %t58842, %t58843
-    dbgloc 622
-    %t58844 =w copy 0
-    %t58845 =l add %t58816, 72
-    storew %t58844, %t58845
-    dbgloc 623
-    %t58846 =w copy 0
-    %t58847 =l add %t58816, 76
-    storew %t58846, %t58847
-    dbgloc 625
-    %t58848 =w call $parser__parser_init(l %t58816, l %t58782, l %t58714)
-    dbgloc 627
-    %t58849 =l call $parser__parser_parse(l %t58816)
-    dbgloc 628
-    %t58850 =l add %t58816, 76
-    %t58851 =w loadw %t58850
-    %t58852 =w copy 0
-    %t58853 =w csgtw %t58851, %t58852
-    jnz %t58853, @then13383, @else13384
-@then13383
-    dbgloc 629
-    %t58854 =l copy $str1903
-    %t58855 =w call $jh_fputs_stderr(l %t58854)
-    dbgloc 630
-    %t58856 =w call $free(l %t58709)
-    dbgloc 631
-    %t58857 =w copy 1
-    ret %t58857
-@else13384
-    jmp @merge13385
-@merge13385
-    dbgloc 635
-    %t58858 =l copy $str1904
-    %t58859 =w call $jh_fputs_stderr(l %t58858)
-    dbgloc 636
-    %t58860 =w call $inline_imports(l %t58849, l %t58706, l %t58714)
-    dbgloc 637
-    %t58861 =l copy $str1905
-    %t58862 =w call $jh_fputs_stderr(l %t58861)
-    dbgloc 638
-    %t58863 =w copy 0
-    %t58864 =w csgtw %t58860, %t58863
-    jnz %t58864, @then13386, @else13387
-@then13386
-    dbgloc 639
-    %t58865 =l copy $str1906
-    %t58866 =w call $jh_fputs_stderr(l %t58865)
-    dbgloc 640
-    %t58867 =w call $free(l %t58709)
-    dbgloc 641
-    %t58868 =w copy 1
-    ret %t58868
-@else13387
-    jmp @merge13388
-@merge13388
-    dbgloc 645
-    %t58869 =l copy $str1907
-    %t58870 =w call $jh_fputs_stderr(l %t58869)
-    dbgloc 646
-    %t58871 =l alloc16 80
-    dbgloc 647
-    %t58872 =w copy 0
-    %t58873 =l extsw %t58872
-    %t58874 =l add %t58871, 0
-    storel %t58873, %t58874
-    dbgloc 648
-    %t58875 =w copy 0
-    %t58876 =l extsw %t58875
-    %t58877 =l add %t58871, 8
-    storel %t58876, %t58877
-    dbgloc 649
-    %t58878 =w copy 0
-    %t58879 =l extsw %t58878
-    %t58880 =l add %t58871, 16
-    storel %t58879, %t58880
-    dbgloc 650
-    %t58881 =w copy 0
-    %t58882 =l extsw %t58881
-    %t58883 =l add %t58871, 24
-    storel %t58882, %t58883
-    dbgloc 651
-    %t58884 =w copy 0
-    %t58885 =l extsw %t58884
-    %t58886 =l add %t58871, 32
-    storel %t58885, %t58886
-    dbgloc 652
-    %t58887 =w copy 0
-    %t58888 =l extsw %t58887
-    %t58889 =l add %t58871, 40
-    storel %t58888, %t58889
-    dbgloc 653
-    %t58890 =w copy 0
-    %t58891 =l add %t58871, 48
-    storew %t58890, %t58891
-    dbgloc 654
-    %t58892 =w copy 0
-    %t58893 =l add %t58871, 52
-    storew %t58892, %t58893
-    dbgloc 655
-    %t58894 =w copy 0
-    %t58895 =l extsw %t58894
-    %t58896 =l add %t58871, 56
-    storel %t58895, %t58896
-    dbgloc 656
-    %t58897 =w copy 0
-    %t58898 =l add %t58871, 64
-    storew %t58897, %t58898
-    dbgloc 658
-    %t58899 =w call $sema__sema_init(l %t58871, l %t58714, l %t58739)
-    dbgloc 659
-    %t58900 =w call $sema__sema_check(l %t58871, l %t58739, l %t58849)
-    %t58901 =w copy 0
-    %t58902 =w csgtw %t58900, %t58901
-    jnz %t58902, @then13389, @else13390
-@then13389
-    dbgloc 660
-    %t58903 =l copy $str1908
-    %t58904 =w call $jh_fputs_stderr(l %t58903)
-    dbgloc 661
-    %t58905 =w call $free(l %t58709)
-    dbgloc 662
-    %t58906 =w copy 1
-    ret %t58906
-@else13390
-    jmp @merge13391
-@merge13391
-    dbgloc 666
-    %t58907 =l copy $str1909
-    %t58908 =w call $jh_fputs_stderr(l %t58907)
-    dbgloc 668
-    %t58909 =w copy 128
-    %t58910 =l extsw %t58909
-    %t58911 =l call $malloc(l %t58910)
-    %t58912 =l copy %t58911
-    dbgloc 669
-    %t58913 =w call $ir__ir_init(l %t58912, l %t58714)
-    dbgloc 670
-    %t58914 =l copy $str1910
-    %t58915 =w call $jh_fputs_stderr(l %t58914)
-    dbgloc 674
-    %t58916 =w call $codegen__cg_module(l %t58912, l %t58849, w %t58708)
-    %t58917 =w copy 0
-    %t58918 =w ceqw %t58916, %t58917
-    jnz %t58918, @then13392, @else13393
-@then13392
-    dbgloc 675
-    %t58919 =l copy $str1911
-    %t58920 =w call $jh_fputs_stderr(l %t58919)
-    dbgloc 676
-    %t58921 =w copy 1
-    ret %t58921
-@else13393
-    jmp @merge13394
-@merge13394
-    dbgloc 678
-    %t58922 =l copy $str1912
-    %t58923 =w call $jh_fputs_stderr(l %t58922)
-    dbgloc 679
-    %t58924 =w call $ir__ir_flush_data(l %t58912)
-    dbgloc 680
-    %t58925 =l copy $str1913
-    %t58926 =w call $jh_fputs_stderr(l %t58925)
-    dbgloc 683
-    %t58927 =w copy 1024
-    %t58928 =l extsw %t58927
-    %t58929 =l call $malloc(l %t58928)
-    dbgloc 684
-    dbgloc 685
-    %t58930 =l call $strlen(l %t58707)
-    dbgloc 686
-    %t58931 =l call $str_copy(l %t58929, l %t58707)
-    dbgloc 687
-    %t58932 =l copy $str1914
-    dbgloc 688
-    %t58933 =l call $str_concat_at(l %t58929, l %t58930, l %t58932)
-    dbgloc 689
-    %t58934 =l copy %t58929
-    %t58935 =l add %t58934, %t58933
-    %t58936 =l copy %t58935
-    dbgloc 690
-    %t58937 =w copy 0
-    %t58938 =w call $store_byte_i32(l %t58936, w %t58937)
-    dbgloc 692
-    %t58939 =l call $jh_fopen_wb(l %t58929)
-    dbgloc 693
-    %t58940 =w copy 0
-    %t58941 =l extsw %t58940
-    %t58942 =w ceql %t58939, %t58941
-    jnz %t58942, @then13395, @else13396
-@then13395
-    dbgloc 694
-    %t58943 =l copy $str1915
-    %t58944 =w call $jh_fputs_stderr(l %t58943)
-    dbgloc 695
-    %t58945 =w call $free(l %t58709)
-    dbgloc 696
-    %t58946 =w call $free(l %t58929)
-    dbgloc 697
-    %t58947 =w copy 1
-    ret %t58947
-@else13396
-    jmp @merge13397
-@merge13397
-    dbgloc 700
-    %t58948 =l add %t58912, 8
-    %t58949 =l loadl %t58948
-    dbgloc 701
-    %t58950 =l loadl %t58949
-    dbgloc 702
-    %t58951 =l add %t58949, 8
-    %t58952 =l loadl %t58951
-    dbgloc 703
-    %t58953 =w copy 1
-    %t58954 =l extsw %t58953
-    %t58955 =l call $fwrite(l %t58950, l %t58954, l %t58952, l %t58939)
-    dbgloc 704
-    %t58956 =w call $fclose(l %t58939)
-    dbgloc 706
-    %t58957 =w call $free(l %t58929)
-    dbgloc 707
-    %t58958 =w call $free(l %t58709)
-    dbgloc 708
-    %t58959 =w call $arena__arena_free(l %t58714)
-    dbgloc 709
-    %t58960 =w copy 0
-    ret %t58960
-}
-
-export function w $run_qbe(l %il_path, l %asm_path, w %t) {
-@start13398
-    %t58961 =l copy %il_path
-    %t58962 =l copy %asm_path
-    %t58963 =w copy %t
-    dbgloc 713
-    dbgloc 714
-    %t58964 =w copy 16384
-    %t58965 =l extsw %t58964
-    %t58966 =l call $malloc(l %t58965)
-    dbgloc 715
-    %t58967 =w copy 0
-    %t58968 =l extsw %t58967
-    %t58969 =l alloc8 8
-    storel %t58968, %t58969
-    dbgloc 716
-    %t58970 =l call $QBE_PATH()
-    dbgloc 721
-    %t58971 =l copy $str1916
-    dbgloc 722
-    %t58972 =l loadl %t58969
-    %t58973 =l call $str_concat_at(l %t58966, l %t58972, l %t58971)
-    storel %t58973, %t58969
-    dbgloc 723
-    %t58974 =l loadl %t58969
-    %t58975 =l call $str_concat_at(l %t58966, l %t58974, l %t58970)
-    storel %t58975, %t58969
-    dbgloc 724
-    %t58976 =l copy $str1917
-    dbgloc 725
-    %t58977 =l loadl %t58969
-    %t58978 =l call $str_concat_at(l %t58966, l %t58977, l %t58976)
-    storel %t58978, %t58969
-    dbgloc 732
-    %t58979 =l copy $str1918
-    dbgloc 733
-    %t58980 =l loadl %t58969
-    %t58981 =l call $str_concat_at(l %t58966, l %t58980, l %t58979)
-    storel %t58981, %t58969
-    dbgloc 734
-    %t58982 =l loadl %t58969
-    %t58983 =l call $target_dispatch__target_qbe_flag(w %t58963)
-    %t58984 =l call $str_concat_at(l %t58966, l %t58982, l %t58983)
-    storel %t58984, %t58969
-    dbgloc 735
-    %t58985 =l copy $str1919
-    dbgloc 736
-    %t58986 =l loadl %t58969
-    %t58987 =l call $str_concat_at(l %t58966, l %t58986, l %t58985)
-    storel %t58987, %t58969
-    dbgloc 737
-    %t58988 =l loadl %t58969
-    %t58989 =l call $str_concat_at(l %t58966, l %t58988, l %t58962)
-    storel %t58989, %t58969
-    dbgloc 738
-    %t58990 =l copy $str1920
-    dbgloc 739
-    %t58991 =l loadl %t58969
-    %t58992 =l call $str_concat_at(l %t58966, l %t58991, l %t58990)
-    storel %t58992, %t58969
-    dbgloc 740
-    %t58993 =l loadl %t58969
-    %t58994 =l call $str_concat_at(l %t58966, l %t58993, l %t58961)
-    storel %t58994, %t58969
-    dbgloc 741
-    %t58995 =l copy %t58966
-    %t58996 =l loadl %t58969
-    %t58997 =l add %t58995, %t58996
-    %t58998 =l copy %t58997
-    dbgloc 742
-    %t58999 =w copy 0
-    %t59000 =w call $store_byte_i32(l %t58998, w %t58999)
-    dbgloc 744
-    %t59001 =w call $path_to_win(l %t58961)
-    dbgloc 745
-    %t59002 =w call $path_to_win(l %t58962)
-    dbgloc 752
-    %t59003 =w call $jh_run(l %t58966)
-    dbgloc 753
-    %t59004 =l call $jh_run_get_output()
-    dbgloc 754
-    %t59005 =w copy 0
-    %t59006 =w cnew %t59003, %t59005
-    jnz %t59006, @then13399, @else13400
+    %t58759 =l mul %t58756, %t58758
+    %t58760 =l add %t58755, %t58759
+    %t58761 =l copy %t58760
+    %t58762 =l loadl %t58761
+    dbgloc 519
+    %t58763 =w loadw %t58762
+    %t58764 =w call $ast__NODE_IMPORT_DECL()
+    %t58765 =w cnew %t58763, %t58764
+    jnz %t58765, @then13399, @else13400
 @then13399
-    dbgloc 757
-    %t59007 =l copy $str1921
-    %t59008 =w call $jh_fputs_stderr(l %t59007)
-    dbgloc 758
-    %t59009 =w call $jh_fputs_stderr(l %t58966)
-    dbgloc 759
-    %t59010 =l copy $str1922
-    %t59011 =w call $jh_fputs_stderr(l %t59010)
-    dbgloc 764
-    %t59012 =w copy 0
-    %t59013 =l extsw %t59012
-    %t59014 =w cnel %t59004, %t59013
-    jnz %t59014, @then13402, @else13403
+    dbgloc 520
+    %t58766 =l loadl %t58749
+    %t58767 =w copy 1
+    %t58768 =l extsw %t58767
+    %t58769 =l add %t58766, %t58768
+    storel %t58769, %t58749
+    jmp @merge13401
+@else13400
+    dbgloc 522
+    dbgloc 523
+    %t58770 =l call $ast__node_import_decl_data(l %t58762)
+    dbgloc 525
+    %t58771 =l loadl %t58770
+    %t58772 =l copy %t58771
+    dbgloc 526
+    %t58773 =l loadl %t58772
+    dbgloc 528
+    %t58774 =w copy 1024
+    %t58775 =l extsw %t58774
+    %t58776 =l call $malloc(l %t58775)
+    dbgloc 529
+    %t58777 =w copy 0
+    %t58778 =l extsw %t58777
+    %t58779 =l alloc8 8
+    storel %t58778, %t58779
+    dbgloc 530
+    %t58780 =l loadl %t58779
+    %t58781 =l call $str_concat_at(l %t58776, l %t58780, l %t58673)
+    storel %t58781, %t58779
+    dbgloc 531
+    %t58782 =l copy $str1906
+    dbgloc 532
+    %t58783 =l loadl %t58779
+    %t58784 =l call $str_concat_at(l %t58776, l %t58783, l %t58782)
+    storel %t58784, %t58779
+    dbgloc 533
+    %t58785 =l loadl %t58779
+    %t58786 =l call $str_concat_at(l %t58776, l %t58785, l %t58773)
+    storel %t58786, %t58779
+    dbgloc 534
+    %t58787 =l copy $str1907
+    dbgloc 535
+    %t58788 =l loadl %t58779
+    %t58789 =l call $str_concat_at(l %t58776, l %t58788, l %t58787)
+    storel %t58789, %t58779
+    dbgloc 536
+    %t58790 =l copy %t58776
+    %t58791 =l loadl %t58779
+    %t58792 =l add %t58790, %t58791
+    %t58793 =l copy %t58792
+    dbgloc 537
+    %t58794 =w copy 0
+    %t58795 =w call $store_byte_i32(l %t58793, w %t58794)
+    dbgloc 538
+    %t58796 =w loadw %t58746
+    dbgloc 539
+    %t58797 =l alloc8 8
+    storel %t58741, %t58797
+    %t58798 =l copy %t58797
+    %t58799 =l alloc8 8
+    storel %t58737, %t58799
+    dbgloc 540
+    dbgloc 541
+    dbgloc 542
+    %t58800 =w call $resolve_one_import_v1(l %t58776, l %t58773, l %t58634, l %t58798, l %t58744, l %t58799, l %t58680, l %t58689, l %t58686, l %t58692, l %t58633)
+    %t58801 =w add %t58796, %t58800
+    storew %t58801, %t58746
+    dbgloc 544
+    %t58802 =l loadl %t58749
+    %t58803 =w copy 1
+    %t58804 =l extsw %t58803
+    %t58805 =l add %t58802, %t58804
+    storel %t58805, %t58749
+    jmp @merge13401
+@merge13401
+    jmp @loop13396
+@exit13398
+    dbgloc 548
+    %t58806 =w loadw %t58746
+    %t58807 =w copy 0
+    %t58808 =w csgtw %t58806, %t58807
+    jnz %t58808, @then13402, @else13403
 @then13402
-    dbgloc 765
-    %t59015 =w loadub %t59004
-    dbgloc 766
-    %t59016 =w copy 0
-    %t59017 =w cnew %t59015, %t59016
-    jnz %t59017, @then13405, @else13406
-@then13405
-    dbgloc 767
-    %t59018 =l copy $str1923
-    %t59019 =w call $jh_fputs_stderr(l %t59018)
-    dbgloc 768
-    %t59020 =w call $jh_fputs_stderr(l %t59004)
-    dbgloc 769
-    %t59021 =l copy $str1924
-    %t59022 =w call $jh_fputs_stderr(l %t59021)
-    jmp @merge13407
-@else13406
-    jmp @merge13407
-@merge13407
-    jmp @merge13404
+    dbgloc 549
+    %t58809 =w call $free(l %t58680)
+    dbgloc 550
+    %t58810 =w call $free(l %t58686)
+    dbgloc 551
+    %t58811 =w call $free(l %t58673)
+    dbgloc 552
+    %t58812 =w loadw %t58746
+    ret %t58812
 @else13403
     jmp @merge13404
 @merge13404
-    dbgloc 772
-    %t59023 =w call $free(l %t58966)
-    dbgloc 773
-    %t59024 =w copy 1
-    ret %t59024
-@else13400
-    jmp @merge13401
-@merge13401
-    dbgloc 775
-    %t59025 =w call $free(l %t58966)
-    dbgloc 776
-    %t59026 =w copy 0
-    ret %t59026
+    dbgloc 556
+    %t58813 =w copy 0
+    %t58814 =l extsw %t58813
+    %t58815 =l alloc8 8
+    storel %t58814, %t58815
+    jmp @loop13405
+@loop13405
+    dbgloc 557
+    %t58816 =l loadl %t58815
+    %t58817 =l loadl %t58701
+    %t58818 =w csltl %t58816, %t58817
+    jnz %t58818, @sc_eval13408, @sc_false13410
+@sc_false13410
+    %t58820 =w copy 0
+    jmp @sc_merge13409
+@sc_eval13408
+    %t58821 =l loadl %t58744
+    %t58822 =w csltl %t58821, %t58737
+    %t58823 =w cnew %t58822, 0
+    jmp @sc_merge13409
+@sc_merge13409
+    %t58819 =w phi @sc_false13410 %t58820, @sc_eval13408 %t58823
+    jnz %t58819, @body13406, @exit13407
+@body13406
+    dbgloc 558
+    %t58824 =l copy %t58741
+    %t58825 =l loadl %t58744
+    %t58826 =w copy 8
+    %t58827 =l extsw %t58826
+    %t58828 =l mul %t58825, %t58827
+    %t58829 =l add %t58824, %t58828
+    %t58830 =l copy %t58829
+    dbgloc 559
+    %t58831 =l copy %t58698
+    %t58832 =l loadl %t58815
+    %t58833 =w copy 8
+    %t58834 =l extsw %t58833
+    %t58835 =l mul %t58832, %t58834
+    %t58836 =l add %t58831, %t58835
+    %t58837 =l copy %t58836
+    %t58838 =l loadl %t58837
+    storel %t58838, %t58830
+    dbgloc 560
+    %t58839 =l loadl %t58744
+    %t58840 =w copy 1
+    %t58841 =l extsw %t58840
+    %t58842 =l add %t58839, %t58841
+    storel %t58842, %t58744
+    dbgloc 561
+    %t58843 =l loadl %t58815
+    %t58844 =w copy 1
+    %t58845 =l extsw %t58844
+    %t58846 =l add %t58843, %t58845
+    storel %t58846, %t58815
+    jmp @loop13405
+@exit13407
+    dbgloc 565
+    storel %t58741, %t58635
+    dbgloc 566
+    %t58847 =l loadl %t58744
+    %t58848 =l add %t58635, 8
+    storel %t58847, %t58848
+    dbgloc 568
+    %t58849 =w call $free(l %t58680)
+    dbgloc 569
+    %t58850 =w call $free(l %t58686)
+    dbgloc 570
+    %t58851 =w call $free(l %t58673)
+    dbgloc 571
+    %t58852 =w copy 0
+    ret %t58852
 }
 
-export function w $run_backend(l %il_path, l %asm_path, w %t) {
-@start13408
-    %t59027 =l copy %il_path
-    %t59028 =l copy %asm_path
-    %t59029 =w copy %t
-    dbgloc 791
-    dbgloc 807
-    %t59030 =l copy $str1925
-    %t59031 =l call $jh_getenv(l %t59030)
-    dbgloc 808
-    %t59032 =w copy 0
-    %t59033 =l extsw %t59032
-    %t59034 =w cnel %t59031, %t59033
-    jnz %t59034, @then13409, @else13410
-@then13409
-    dbgloc 809
-    %t59035 =w call $run_qbe(l %t59027, l %t59028, w %t59029)
-    ret %t59035
-@else13410
-    jmp @merge13411
-@merge13411
-    dbgloc 811
-    %t59036 =w call $target_dispatch__target_backend_mode(w %t59029)
-    dbgloc 812
-    %t59037 =w call $target_dispatch__BACKEND_SELF()
-    %t59038 =w ceqw %t59036, %t59037
-    jnz %t59038, @then13412, @else13413
+export function w $build_il(l %input, l %output, w %t) {
+@start13411
+    %t58853 =l copy %input
+    %t58854 =l copy %output
+    %t58855 =w copy %t
+    dbgloc 577
+    dbgloc 578
+    %t58856 =l call $read_file(l %t58853)
+    dbgloc 579
+    %t58857 =w copy 0
+    %t58858 =l extsw %t58857
+    %t58859 =w ceql %t58856, %t58858
+    jnz %t58859, @then13412, @else13413
 @then13412
-    dbgloc 813
-    %t59039 =l copy $str1926
-    %t59040 =l call $jh_getenv(l %t59039)
-    dbgloc 814
-    %t59041 =w copy 0
-    %t59042 =l extsw %t59041
-    %t59043 =w cnel %t59040, %t59042
-    jnz %t59043, @then13415, @else13416
-@then13415
-    dbgloc 815
-    %t59044 =w call $codegen_amd64__codegen_amd64_run(l %t59027, l %t59028, w %t59029)
-    dbgloc 816
-    %t59045 =w copy 0
-    %t59046 =w ceqw %t59044, %t59045
-    jnz %t59046, @then13418, @else13419
-@then13418
-    dbgloc 817
-    %t59047 =w copy 0
-    ret %t59047
-@else13419
-    jmp @merge13420
-@merge13420
-    dbgloc 820
-    %t59048 =l copy $str1927
-    %t59049 =w call $jh_fputs_stderr(l %t59048)
-    dbgloc 821
-    %t59050 =w call $run_qbe(l %t59027, l %t59028, w %t59029)
-    ret %t59050
-@else13416
-    jmp @merge13417
-@merge13417
-    dbgloc 824
-    %t59051 =w call $run_qbe(l %t59027, l %t59028, w %t59029)
-    ret %t59051
+    dbgloc 580
+    %t58860 =w copy 1
+    ret %t58860
 @else13413
     jmp @merge13414
 @merge13414
-    dbgloc 829
-    %t59052 =l copy $str1928
-    %t59053 =l call $jh_getenv(l %t59052)
-    dbgloc 830
-    %t59054 =w copy 0
-    %t59055 =l alloc4 4
-    storew %t59054, %t59055
-    dbgloc 831
-    %t59056 =w copy 0
-    %t59057 =l extsw %t59056
-    %t59058 =w cnel %t59053, %t59057
-    jnz %t59058, @then13421, @else13422
+    dbgloc 584
+    %t58861 =l alloc16 48
+    dbgloc 585
+    %t58862 =w copy 0
+    %t58863 =l extsw %t58862
+    %t58864 =l add %t58861, 0
+    storel %t58863, %t58864
+    dbgloc 586
+    %t58865 =w copy 0
+    %t58866 =l extsw %t58865
+    %t58867 =l add %t58861, 8
+    storel %t58866, %t58867
+    dbgloc 587
+    %t58868 =w copy 0
+    %t58869 =l extsw %t58868
+    %t58870 =l add %t58861, 16
+    storel %t58869, %t58870
+    dbgloc 588
+    %t58871 =w copy 0
+    %t58872 =l extsw %t58871
+    %t58873 =l add %t58861, 24
+    storel %t58872, %t58873
+    dbgloc 589
+    %t58874 =w copy 0
+    %t58875 =l extsw %t58874
+    %t58876 =l add %t58861, 32
+    storel %t58875, %t58876
+    dbgloc 591
+    %t58877 =w copy 32
+    %t58878 =l extsw %t58877
+    %t58879 =w copy 1024
+    %t58880 =l extsw %t58879
+    %t58881 =l mul %t58878, %t58880
+    %t58882 =w copy 1024
+    %t58883 =l extsw %t58882
+    %t58884 =l mul %t58881, %t58883
+    %t58885 =w call $arena__arena_init(l %t58861, l %t58884)
+    dbgloc 594
+    %t58886 =l alloc16 112
+    dbgloc 595
+    %t58887 =w copy 0
+    %t58888 =l extsw %t58887
+    %t58889 =l add %t58886, 0
+    storel %t58888, %t58889
+    dbgloc 596
+    %t58890 =w copy 0
+    %t58891 =l add %t58886, 8
+    storew %t58890, %t58891
+    dbgloc 597
+    %t58892 =w copy 0
+    %t58893 =l extsw %t58892
+    %t58894 =l add %t58886, 16
+    storel %t58893, %t58894
+    %t58895 =w copy 0
+    %t58896 =l extsw %t58895
+    %t58897 =l add %t58886, 24
+    storel %t58896, %t58897
+    %t58898 =w copy 0
+    %t58899 =l extsw %t58898
+    %t58900 =l add %t58886, 32
+    storel %t58899, %t58900
+    %t58901 =w copy 0
+    %t58902 =l extsw %t58901
+    %t58903 =l add %t58886, 40
+    storel %t58902, %t58903
+    dbgloc 598
+    %t58904 =w copy 0
+    %t58905 =l extsw %t58904
+    %t58906 =l add %t58886, 48
+    storel %t58905, %t58906
+    %t58907 =w copy 0
+    %t58908 =l extsw %t58907
+    %t58909 =l add %t58886, 56
+    storel %t58908, %t58909
+    %t58910 =w copy 0
+    %t58911 =l extsw %t58910
+    %t58912 =l add %t58886, 64
+    storel %t58911, %t58912
+    %t58913 =w copy 0
+    %t58914 =l extsw %t58913
+    %t58915 =l add %t58886, 72
+    storel %t58914, %t58915
+    dbgloc 599
+    %t58916 =w copy 0
+    %t58917 =l extsw %t58916
+    %t58918 =l add %t58886, 80
+    storel %t58917, %t58918
+    %t58919 =w copy 0
+    %t58920 =l extsw %t58919
+    %t58921 =l add %t58886, 88
+    storel %t58920, %t58921
+    %t58922 =w copy 0
+    %t58923 =l extsw %t58922
+    %t58924 =l add %t58886, 96
+    storel %t58923, %t58924
+    %t58925 =w copy 0
+    %t58926 =l extsw %t58925
+    %t58927 =l add %t58886, 104
+    storel %t58926, %t58927
+    dbgloc 601
+    storel %t58861, %t58886
+    dbgloc 602
+    %t58928 =w call $types__types_init_arena(l %t58886)
+    dbgloc 605
+    %t58929 =l alloc16 80
+    dbgloc 606
+    %t58930 =w copy 0
+    %t58931 =l extsw %t58930
+    %t58932 =l add %t58929, 0
+    storel %t58931, %t58932
+    dbgloc 607
+    %t58933 =w copy 0
+    %t58934 =l extsw %t58933
+    %t58935 =l add %t58929, 8
+    storel %t58934, %t58935
+    dbgloc 608
+    %t58936 =w copy 0
+    %t58937 =l extsw %t58936
+    %t58938 =l add %t58929, 16
+    storel %t58937, %t58938
+    dbgloc 609
+    %t58939 =w copy 0
+    %t58940 =l add %t58929, 24
+    storew %t58939, %t58940
+    dbgloc 610
+    %t58941 =w copy 0
+    %t58942 =l add %t58929, 28
+    storew %t58941, %t58942
+    dbgloc 611
+    %t58943 =w copy 0
+    %t58944 =l add %t58929, 32
+    storew %t58943, %t58944
+    dbgloc 612
+    %t58945 =w copy 0
+    %t58946 =l extsw %t58945
+    %t58947 =l add %t58929, 40
+    storel %t58946, %t58947
+    dbgloc 613
+    %t58948 =w copy 0
+    %t58949 =l extsw %t58948
+    %t58950 =l add %t58929, 48
+    storel %t58949, %t58950
+    dbgloc 614
+    %t58951 =w copy 0
+    %t58952 =l extsw %t58951
+    %t58953 =l add %t58929, 56
+    storel %t58952, %t58953
+    dbgloc 615
+    %t58954 =w copy 0
+    %t58955 =l add %t58929, 64
+    storew %t58954, %t58955
+    dbgloc 616
+    %t58956 =w copy 0
+    %t58957 =l add %t58929, 68
+    storew %t58956, %t58957
+    dbgloc 617
+    %t58958 =w copy 0
+    %t58959 =l add %t58929, 72
+    storew %t58958, %t58959
+    dbgloc 618
+    %t58960 =w copy 0
+    %t58961 =l add %t58929, 76
+    storew %t58960, %t58961
+    dbgloc 620
+    %t58962 =w call $lexer__lexer_init(l %t58929, l %t58856, l %t58853)
+    dbgloc 623
+    %t58963 =l alloc16 128
+    dbgloc 624
+    %t58964 =w copy 0
+    %t58965 =l extsw %t58964
+    %t58966 =l add %t58963, 0
+    storel %t58965, %t58966
+    dbgloc 625
+    %t58967 =w copy 0
+    %t58968 =l extsw %t58967
+    %t58969 =l add %t58963, 8
+    storel %t58968, %t58969
+    dbgloc 626
+    %t58970 =w copy 0
+    %t58971 =l add %t58963, 16
+    storew %t58970, %t58971
+    dbgloc 627
+    %t58972 =w copy 0
+    %t58973 =l extsw %t58972
+    %t58974 =l add %t58963, 24
+    storel %t58973, %t58974
+    dbgloc 628
+    %t58975 =w copy 0
+    %t58976 =l extsw %t58975
+    %t58977 =l add %t58963, 32
+    storel %t58976, %t58977
+    dbgloc 629
+    %t58978 =w copy 0
+    %t58979 =l extsw %t58978
+    %t58980 =l add %t58963, 40
+    storel %t58979, %t58980
+    dbgloc 630
+    %t58981 =w copy 0
+    %t58982 =l add %t58963, 48
+    storew %t58981, %t58982
+    dbgloc 631
+    %t58983 =w copy 0
+    %t58984 =l add %t58963, 52
+    storew %t58983, %t58984
+    dbgloc 632
+    %t58985 =w copy 0
+    %t58986 =l extsw %t58985
+    %t58987 =l add %t58963, 56
+    storel %t58986, %t58987
+    dbgloc 633
+    %t58988 =w copy 0
+    %t58989 =l extsw %t58988
+    %t58990 =l add %t58963, 64
+    storel %t58989, %t58990
+    dbgloc 634
+    %t58991 =w copy 0
+    %t58992 =l add %t58963, 72
+    storew %t58991, %t58992
+    dbgloc 635
+    %t58993 =w copy 0
+    %t58994 =l add %t58963, 76
+    storew %t58993, %t58994
+    dbgloc 637
+    %t58995 =w call $parser__parser_init(l %t58963, l %t58929, l %t58861)
+    dbgloc 639
+    %t58996 =l call $parser__parser_parse(l %t58963)
+    dbgloc 640
+    %t58997 =l add %t58963, 76
+    %t58998 =w loadw %t58997
+    %t58999 =w copy 0
+    %t59000 =w csgtw %t58998, %t58999
+    jnz %t59000, @then13415, @else13416
+@then13415
+    dbgloc 641
+    %t59001 =l copy $str1908
+    %t59002 =w call $jh_fputs_stderr(l %t59001)
+    dbgloc 642
+    %t59003 =w call $free(l %t58856)
+    dbgloc 643
+    %t59004 =w copy 1
+    ret %t59004
+@else13416
+    jmp @merge13417
+@merge13417
+    dbgloc 647
+    %t59005 =l copy $str1909
+    %t59006 =w call $jh_fputs_stderr(l %t59005)
+    dbgloc 648
+    %t59007 =w call $inline_imports(l %t58996, l %t58853, l %t58861)
+    dbgloc 649
+    %t59008 =l copy $str1910
+    %t59009 =w call $jh_fputs_stderr(l %t59008)
+    dbgloc 650
+    %t59010 =w copy 0
+    %t59011 =w csgtw %t59007, %t59010
+    jnz %t59011, @then13418, @else13419
+@then13418
+    dbgloc 651
+    %t59012 =l copy $str1911
+    %t59013 =w call $jh_fputs_stderr(l %t59012)
+    dbgloc 652
+    %t59014 =w call $free(l %t58856)
+    dbgloc 653
+    %t59015 =w copy 1
+    ret %t59015
+@else13419
+    jmp @merge13420
+@merge13420
+    dbgloc 657
+    %t59016 =l copy $str1912
+    %t59017 =w call $jh_fputs_stderr(l %t59016)
+    dbgloc 658
+    %t59018 =l alloc16 80
+    dbgloc 659
+    %t59019 =w copy 0
+    %t59020 =l extsw %t59019
+    %t59021 =l add %t59018, 0
+    storel %t59020, %t59021
+    dbgloc 660
+    %t59022 =w copy 0
+    %t59023 =l extsw %t59022
+    %t59024 =l add %t59018, 8
+    storel %t59023, %t59024
+    dbgloc 661
+    %t59025 =w copy 0
+    %t59026 =l extsw %t59025
+    %t59027 =l add %t59018, 16
+    storel %t59026, %t59027
+    dbgloc 662
+    %t59028 =w copy 0
+    %t59029 =l extsw %t59028
+    %t59030 =l add %t59018, 24
+    storel %t59029, %t59030
+    dbgloc 663
+    %t59031 =w copy 0
+    %t59032 =l extsw %t59031
+    %t59033 =l add %t59018, 32
+    storel %t59032, %t59033
+    dbgloc 664
+    %t59034 =w copy 0
+    %t59035 =l extsw %t59034
+    %t59036 =l add %t59018, 40
+    storel %t59035, %t59036
+    dbgloc 665
+    %t59037 =w copy 0
+    %t59038 =l add %t59018, 48
+    storew %t59037, %t59038
+    dbgloc 666
+    %t59039 =w copy 0
+    %t59040 =l add %t59018, 52
+    storew %t59039, %t59040
+    dbgloc 667
+    %t59041 =w copy 0
+    %t59042 =l extsw %t59041
+    %t59043 =l add %t59018, 56
+    storel %t59042, %t59043
+    dbgloc 668
+    %t59044 =w copy 0
+    %t59045 =l add %t59018, 64
+    storew %t59044, %t59045
+    dbgloc 670
+    %t59046 =w call $sema__sema_init(l %t59018, l %t58861, l %t58886)
+    dbgloc 671
+    %t59047 =w call $sema__sema_check(l %t59018, l %t58886, l %t58996)
+    %t59048 =w copy 0
+    %t59049 =w csgtw %t59047, %t59048
+    jnz %t59049, @then13421, @else13422
 @then13421
-    dbgloc 832
-    %t59059 =l copy $str1929
-    %t59060 =w call $strcmp(l %t59053, l %t59059)
-    %t59061 =w copy 0
-    %t59062 =w ceqw %t59060, %t59061
-    jnz %t59062, @then13424, @else13425
-@then13424
-    dbgloc 833
-    %t59063 =w copy 1
-    storew %t59063, %t59055
-    jmp @merge13426
-@else13425
-    jmp @merge13426
-@merge13426
-    jmp @merge13423
+    dbgloc 672
+    %t59050 =l copy $str1913
+    %t59051 =w call $jh_fputs_stderr(l %t59050)
+    dbgloc 673
+    %t59052 =w call $free(l %t58856)
+    dbgloc 674
+    %t59053 =w copy 1
+    ret %t59053
 @else13422
     jmp @merge13423
 @merge13423
-    dbgloc 836
-    %t59064 =w loadw %t59055
-    %t59065 =w copy 0
-    %t59066 =w cnew %t59064, %t59065
-    jnz %t59066, @then13427, @else13428
+    dbgloc 678
+    %t59054 =l copy $str1914
+    %t59055 =w call $jh_fputs_stderr(l %t59054)
+    dbgloc 680
+    %t59056 =w copy 128
+    %t59057 =l extsw %t59056
+    %t59058 =l call $malloc(l %t59057)
+    %t59059 =l copy %t59058
+    dbgloc 681
+    %t59060 =w call $ir__ir_init(l %t59059, l %t58861)
+    dbgloc 682
+    %t59061 =l copy $str1915
+    %t59062 =w call $jh_fputs_stderr(l %t59061)
+    dbgloc 686
+    %t59063 =w call $codegen__cg_module(l %t59059, l %t58996, w %t58855)
+    %t59064 =w copy 0
+    %t59065 =w ceqw %t59063, %t59064
+    jnz %t59065, @then13424, @else13425
+@then13424
+    dbgloc 687
+    %t59066 =l copy $str1916
+    %t59067 =w call $jh_fputs_stderr(l %t59066)
+    dbgloc 688
+    %t59068 =w copy 1
+    ret %t59068
+@else13425
+    jmp @merge13426
+@merge13426
+    dbgloc 690
+    %t59069 =l copy $str1917
+    %t59070 =w call $jh_fputs_stderr(l %t59069)
+    dbgloc 691
+    %t59071 =w call $ir__ir_flush_data(l %t59059)
+    dbgloc 692
+    %t59072 =l copy $str1918
+    %t59073 =w call $jh_fputs_stderr(l %t59072)
+    dbgloc 699
+    %t59074 =w copy 0
+    %t59075 =l alloc4 4
+    storew %t59074, %t59075
+    dbgloc 700
+    %t59076 =w copy 1024
+    %t59077 =l extsw %t59076
+    %t59078 =l call $malloc(l %t59077)
+    dbgloc 701
+    dbgloc 702
+    %t59079 =l call $strlen(l %t58854)
+    dbgloc 703
+    %t59080 =l call $str_copy(l %t59078, l %t58854)
+    dbgloc 704
+    %t59081 =l copy $str1919
+    dbgloc 705
+    %t59082 =l call $str_concat_at(l %t59078, l %t59079, l %t59081)
+    dbgloc 706
+    %t59083 =l copy %t59078
+    %t59084 =l add %t59083, %t59082
+    %t59085 =l copy %t59084
+    dbgloc 707
+    %t59086 =w copy 0
+    %t59087 =w call $store_byte_i32(l %t59085, w %t59086)
+    dbgloc 710
+    %t59088 =w copy 1024
+    %t59089 =l extsw %t59088
+    %t59090 =l call $malloc(l %t59089)
+    dbgloc 711
+    dbgloc 712
+    %t59091 =l call $str_copy(l %t59090, l %t58854)
+    dbgloc 713
+    %t59092 =l copy $str1920
+    %t59093 =l call $str_concat_at(l %t59090, l %t59079, l %t59092)
+    dbgloc 714
+    %t59094 =l copy %t59090
+    %t59095 =l add %t59094, %t59093
+    %t59096 =l copy %t59095
+    dbgloc 715
+    %t59097 =w copy 0
+    %t59098 =w call $store_byte_i32(l %t59096, w %t59097)
+    dbgloc 717
+    %t59099 =l add %t59059, 8
+    %t59100 =l loadl %t59099
+    dbgloc 718
+    %t59101 =l loadl %t59100
+    dbgloc 719
+    %t59102 =l add %t59100, 8
+    %t59103 =l loadl %t59102
+    dbgloc 722
+    %t59104 =w call $jh_write_il_enabled()
+    dbgloc 723
+    %t59105 =w copy 0
+    %t59106 =l alloc4 4
+    storew %t59105, %t59106
+    dbgloc 724
+    %t59107 =w copy 0
+    %t59108 =w ceqw %t59104, %t59107
+    jnz %t59108, @then13427, @else13428
 @then13427
-    dbgloc 837
-    %t59067 =w call $run_qbe(l %t59027, l %t59028, w %t59029)
-    ret %t59067
+    dbgloc 725
+    %t59109 =w call $target_dispatch__target_backend_mode(w %t58855)
+    dbgloc 726
+    %t59110 =w call $target_dispatch__BACKEND_SELF()
+    %t59111 =w ceqw %t59109, %t59110
+    jnz %t59111, @then13430, @else13431
+@then13430
+    dbgloc 728
+    %t59112 =w call $codegen_amd64_inmem__codegen_amd64_run_text(l %t59101, l %t59103, l %t59090, w %t58855)
+    dbgloc 729
+    %t59113 =w copy 0
+    %t59114 =w ceqw %t59112, %t59113
+    jnz %t59114, @then13433, @else13434
+@then13433
+    dbgloc 730
+    %t59115 =w copy 2
+    storew %t59115, %t59075
+    dbgloc 731
+    %t59116 =w copy 1
+    storew %t59116, %t59106
+    jmp @merge13435
+@else13434
+    dbgloc 732
+    dbgloc 733
+    %t59117 =l copy $str1921
+    %t59118 =w call $jh_fputs_stderr(l %t59117)
+    dbgloc 734
+    %t59119 =w copy 0
+    storew %t59119, %t59106
+    jmp @merge13435
+@merge13435
+    jmp @merge13432
+@else13431
+    jmp @merge13432
+@merge13432
+    jmp @merge13429
 @else13428
     jmp @merge13429
 @merge13429
-    dbgloc 843
-    %t59068 =w call $run_qbe(l %t59027, l %t59028, w %t59029)
-    ret %t59068
+    dbgloc 739
+    %t59120 =w loadw %t59106
+    %t59121 =w copy 0
+    %t59122 =w ceqw %t59120, %t59121
+    jnz %t59122, @then13436, @else13437
+@then13436
+    dbgloc 741
+    %t59123 =l call $jh_fopen_wb(l %t59078)
+    dbgloc 742
+    %t59124 =w copy 0
+    %t59125 =l extsw %t59124
+    %t59126 =w ceql %t59123, %t59125
+    jnz %t59126, @then13439, @else13440
+@then13439
+    dbgloc 743
+    %t59127 =l copy $str1922
+    %t59128 =w call $jh_fputs_stderr(l %t59127)
+    dbgloc 744
+    %t59129 =w call $free(l %t58856)
+    dbgloc 745
+    %t59130 =w call $free(l %t59078)
+    dbgloc 746
+    %t59131 =w call $free(l %t59090)
+    dbgloc 747
+    %t59132 =w copy 1
+    ret %t59132
+@else13440
+    jmp @merge13441
+@merge13441
+    dbgloc 749
+    %t59133 =w copy 1
+    %t59134 =l extsw %t59133
+    %t59135 =l call $fwrite(l %t59101, l %t59134, l %t59103, l %t59123)
+    dbgloc 750
+    %t59136 =w call $fclose(l %t59123)
+    jmp @merge13438
+@else13437
+    jmp @merge13438
+@merge13438
+    dbgloc 753
+    %t59137 =w call $free(l %t59078)
+    dbgloc 754
+    %t59138 =w call $free(l %t59090)
+    dbgloc 755
+    %t59139 =w call $free(l %t58856)
+    dbgloc 756
+    %t59140 =w call $arena__arena_free(l %t58861)
+    dbgloc 757
+    %t59141 =w loadw %t59075
+    ret %t59141
 }
 
-export function w $apply_link_section_directives(l %temp_asm) {
-@start13430
-    %t59069 =l copy %temp_asm
-    dbgloc 859
-    dbgloc 860
-    %t59070 =l copy $str1930
-    dbgloc 861
-    %t59071 =w call $jh_file_stat_ok(l %t59070)
-    %t59072 =w copy 0
-    %t59073 =w ceqw %t59071, %t59072
-    jnz %t59073, @then13431, @else13432
-@then13431
-    dbgloc 862
-    %t59074 =w copy 0
-    ret %t59074
-@else13432
-    jmp @merge13433
-@merge13433
-    dbgloc 865
-    %t59075 =l copy $str1931
-    %t59076 =l call $fopen(l %t59070, l %t59075)
-    dbgloc 866
-    %t59077 =w copy 0
-    %t59078 =l extsw %t59077
-    %t59079 =w ceql %t59076, %t59078
-    jnz %t59079, @then13434, @else13435
-@then13434
-    %t59080 =w copy 0
-    ret %t59080
-@else13435
-    jmp @merge13436
-@merge13436
-    dbgloc 867
-    %t59081 =w copy 8192
-    %t59082 =l extsw %t59081
-    %t59083 =l call $malloc(l %t59082)
-    dbgloc 868
-    %t59084 =w copy 1
-    %t59085 =l extsw %t59084
-    %t59086 =w copy 8191
-    %t59087 =l extsw %t59086
-    %t59088 =l call $fread(l %t59083, l %t59085, l %t59087, l %t59076)
-    dbgloc 869
-    %t59089 =w call $fclose(l %t59076)
-    dbgloc 870
-    %t59090 =w copy 0
-    %t59091 =w copy %t59090
-    %t59092 =l call $util__ptr_add_u8(l %t59083, l %t59088)
-    storeb %t59091, %t59092
-    dbgloc 871
-    %t59093 =w call $jh_unlink_file(l %t59070)
-    dbgloc 874
-    %t59094 =w copy 32
-    %t59095 =l extsw %t59094
-    %t59096 =w copy 128
-    %t59097 =l extsw %t59096
-    %t59098 =l mul %t59095, %t59097
-    %t59099 =l call $malloc(l %t59098)
-    dbgloc 875
-    %t59100 =w copy 32
-    %t59101 =l extsw %t59100
-    %t59102 =w copy 128
-    %t59103 =l extsw %t59102
-    %t59104 =l mul %t59101, %t59103
-    %t59105 =l call $malloc(l %t59104)
-    dbgloc 876
-    %t59106 =w copy 0
-    %t59107 =w copy 32
-    %t59108 =l extsw %t59107
-    %t59109 =w copy 128
-    %t59110 =l extsw %t59109
-    %t59111 =l mul %t59108, %t59110
-    %t59112 =l call $memset(l %t59099, w %t59106, l %t59111)
-    dbgloc 877
-    %t59113 =w copy 0
-    %t59114 =w copy 32
-    %t59115 =l extsw %t59114
-    %t59116 =w copy 128
-    %t59117 =l extsw %t59116
-    %t59118 =l mul %t59115, %t59117
-    %t59119 =l call $memset(l %t59105, w %t59113, l %t59118)
-    dbgloc 878
-    %t59120 =w copy 0
-    %t59121 =l extsw %t59120
-    %t59122 =l alloc8 8
-    storel %t59121, %t59122
-    dbgloc 879
-    %t59123 =w copy 0
-    %t59124 =l extsw %t59123
-    %t59125 =l alloc8 8
-    storel %t59124, %t59125
-    jmp @loop13437
-@loop13437
-    dbgloc 880
-    %t59126 =l loadl %t59125
-    %t59127 =w csltl %t59126, %t59088
-    jnz %t59127, @body13438, @exit13439
-@body13438
-    dbgloc 881
-    %t59128 =l loadl %t59122
-    %t59129 =w copy 32
-    %t59130 =l extsw %t59129
-    %t59131 =w csgel %t59128, %t59130
-    jnz %t59131, @then13440, @else13441
-@then13440
-    jmp @exit13439
-@else13441
-    jmp @merge13442
-@merge13442
-    dbgloc 882
-    %t59132 =l loadl %t59125
-    %t59133 =l alloc8 8
-    storel %t59132, %t59133
-    jmp @loop13443
-@loop13443
-    dbgloc 883
-    %t59134 =l loadl %t59133
-    %t59135 =w csltl %t59134, %t59088
-    jnz %t59135, @body13444, @exit13445
-@body13444
-    dbgloc 884
-    %t59136 =l loadl %t59133
-    %t59137 =l call $util__ptr_add_u8(l %t59083, l %t59136)
-    %t59138 =w loadub %t59137
-    %t59139 =w copy 124
-    %t59140 =w copy %t59139
-    %t59141 =w ceqw %t59138, %t59140
-    jnz %t59141, @then13446, @else13447
+export function w $run_qbe(l %il_path, l %asm_path, w %t) {
+@start13442
+    %t59142 =l copy %il_path
+    %t59143 =l copy %asm_path
+    %t59144 =w copy %t
+    dbgloc 761
+    dbgloc 762
+    %t59145 =w copy 16384
+    %t59146 =l extsw %t59145
+    %t59147 =l call $malloc(l %t59146)
+    dbgloc 763
+    %t59148 =w copy 0
+    %t59149 =l extsw %t59148
+    %t59150 =l alloc8 8
+    storel %t59149, %t59150
+    dbgloc 764
+    %t59151 =l call $QBE_PATH()
+    dbgloc 769
+    %t59152 =l copy $str1923
+    dbgloc 770
+    %t59153 =l loadl %t59150
+    %t59154 =l call $str_concat_at(l %t59147, l %t59153, l %t59152)
+    storel %t59154, %t59150
+    dbgloc 771
+    %t59155 =l loadl %t59150
+    %t59156 =l call $str_concat_at(l %t59147, l %t59155, l %t59151)
+    storel %t59156, %t59150
+    dbgloc 772
+    %t59157 =l copy $str1924
+    dbgloc 773
+    %t59158 =l loadl %t59150
+    %t59159 =l call $str_concat_at(l %t59147, l %t59158, l %t59157)
+    storel %t59159, %t59150
+    dbgloc 780
+    %t59160 =l copy $str1925
+    dbgloc 781
+    %t59161 =l loadl %t59150
+    %t59162 =l call $str_concat_at(l %t59147, l %t59161, l %t59160)
+    storel %t59162, %t59150
+    dbgloc 782
+    %t59163 =l loadl %t59150
+    %t59164 =l call $target_dispatch__target_qbe_flag(w %t59144)
+    %t59165 =l call $str_concat_at(l %t59147, l %t59163, l %t59164)
+    storel %t59165, %t59150
+    dbgloc 783
+    %t59166 =l copy $str1926
+    dbgloc 784
+    %t59167 =l loadl %t59150
+    %t59168 =l call $str_concat_at(l %t59147, l %t59167, l %t59166)
+    storel %t59168, %t59150
+    dbgloc 785
+    %t59169 =l loadl %t59150
+    %t59170 =l call $str_concat_at(l %t59147, l %t59169, l %t59143)
+    storel %t59170, %t59150
+    dbgloc 786
+    %t59171 =l copy $str1927
+    dbgloc 787
+    %t59172 =l loadl %t59150
+    %t59173 =l call $str_concat_at(l %t59147, l %t59172, l %t59171)
+    storel %t59173, %t59150
+    dbgloc 788
+    %t59174 =l loadl %t59150
+    %t59175 =l call $str_concat_at(l %t59147, l %t59174, l %t59142)
+    storel %t59175, %t59150
+    dbgloc 789
+    %t59176 =l copy %t59147
+    %t59177 =l loadl %t59150
+    %t59178 =l add %t59176, %t59177
+    %t59179 =l copy %t59178
+    dbgloc 790
+    %t59180 =w copy 0
+    %t59181 =w call $store_byte_i32(l %t59179, w %t59180)
+    dbgloc 792
+    %t59182 =w call $path_to_win(l %t59142)
+    dbgloc 793
+    %t59183 =w call $path_to_win(l %t59143)
+    dbgloc 800
+    %t59184 =w call $jh_run(l %t59147)
+    dbgloc 801
+    %t59185 =l call $jh_run_get_output()
+    dbgloc 802
+    %t59186 =w copy 0
+    %t59187 =w cnew %t59184, %t59186
+    jnz %t59187, @then13443, @else13444
+@then13443
+    dbgloc 805
+    %t59188 =l copy $str1928
+    %t59189 =w call $jh_fputs_stderr(l %t59188)
+    dbgloc 806
+    %t59190 =w call $jh_fputs_stderr(l %t59147)
+    dbgloc 807
+    %t59191 =l copy $str1929
+    %t59192 =w call $jh_fputs_stderr(l %t59191)
+    dbgloc 812
+    %t59193 =w copy 0
+    %t59194 =l extsw %t59193
+    %t59195 =w cnel %t59185, %t59194
+    jnz %t59195, @then13446, @else13447
 @then13446
-    jmp @exit13445
-@else13447
-    jmp @merge13448
-@merge13448
-    dbgloc 885
-    %t59142 =l loadl %t59133
-    %t59143 =w copy 1
-    %t59144 =l extsw %t59143
-    %t59145 =l add %t59142, %t59144
-    storel %t59145, %t59133
-    jmp @loop13443
-@exit13445
-    dbgloc 887
-    %t59146 =l loadl %t59133
-    %t59147 =w csgel %t59146, %t59088
-    jnz %t59147, @then13449, @else13450
+    dbgloc 813
+    %t59196 =w loadub %t59185
+    dbgloc 814
+    %t59197 =w copy 0
+    %t59198 =w cnew %t59196, %t59197
+    jnz %t59198, @then13449, @else13450
 @then13449
-    jmp @exit13439
+    dbgloc 815
+    %t59199 =l copy $str1930
+    %t59200 =w call $jh_fputs_stderr(l %t59199)
+    dbgloc 816
+    %t59201 =w call $jh_fputs_stderr(l %t59185)
+    dbgloc 817
+    %t59202 =l copy $str1931
+    %t59203 =w call $jh_fputs_stderr(l %t59202)
+    jmp @merge13451
 @else13450
     jmp @merge13451
 @merge13451
-    dbgloc 888
-    %t59148 =l loadl %t59133
-    %t59149 =l loadl %t59125
-    %t59150 =l sub %t59148, %t59149
-    dbgloc 889
-    %t59151 =l loadl %t59133
-    %t59152 =w copy 1
-    %t59153 =l extsw %t59152
-    %t59154 =l add %t59151, %t59153
-    %t59155 =l alloc8 8
-    storel %t59154, %t59155
-    jmp @loop13452
-@loop13452
-    dbgloc 890
-    %t59156 =l loadl %t59155
-    %t59157 =w csltl %t59156, %t59088
-    jnz %t59157, @body13453, @exit13454
-@body13453
+    jmp @merge13448
+@else13447
+    jmp @merge13448
+@merge13448
+    dbgloc 820
+    %t59204 =w call $free(l %t59147)
+    dbgloc 821
+    %t59205 =w copy 1
+    ret %t59205
+@else13444
+    jmp @merge13445
+@merge13445
+    dbgloc 823
+    %t59206 =w call $free(l %t59147)
+    dbgloc 824
+    %t59207 =w copy 0
+    ret %t59207
+}
+
+export function w $run_backend(l %il_path, l %asm_path, w %t) {
+@start13452
+    %t59208 =l copy %il_path
+    %t59209 =l copy %asm_path
+    %t59210 =w copy %t
+    dbgloc 839
+    dbgloc 855
+    %t59211 =l copy $str1932
+    %t59212 =l call $jh_getenv(l %t59211)
+    dbgloc 856
+    %t59213 =w copy 0
+    %t59214 =l extsw %t59213
+    %t59215 =w cnel %t59212, %t59214
+    jnz %t59215, @then13453, @else13454
+@then13453
+    dbgloc 857
+    %t59216 =w call $run_qbe(l %t59208, l %t59209, w %t59210)
+    ret %t59216
+@else13454
+    jmp @merge13455
+@merge13455
+    dbgloc 859
+    %t59217 =w call $target_dispatch__target_backend_mode(w %t59210)
+    dbgloc 860
+    %t59218 =w call $target_dispatch__BACKEND_SELF()
+    %t59219 =w ceqw %t59217, %t59218
+    jnz %t59219, @then13456, @else13457
+@then13456
+    dbgloc 861
+    %t59220 =l copy $str1933
+    %t59221 =l call $jh_getenv(l %t59220)
+    dbgloc 862
+    %t59222 =w copy 0
+    %t59223 =l extsw %t59222
+    %t59224 =w cnel %t59221, %t59223
+    jnz %t59224, @then13459, @else13460
+@then13459
+    dbgloc 863
+    %t59225 =w call $codegen_amd64__codegen_amd64_run(l %t59208, l %t59209, w %t59210)
+    dbgloc 864
+    %t59226 =w copy 0
+    %t59227 =w ceqw %t59225, %t59226
+    jnz %t59227, @then13462, @else13463
+@then13462
+    dbgloc 865
+    %t59228 =w copy 0
+    ret %t59228
+@else13463
+    jmp @merge13464
+@merge13464
+    dbgloc 868
+    %t59229 =l copy $str1934
+    %t59230 =w call $jh_fputs_stderr(l %t59229)
+    dbgloc 869
+    %t59231 =w call $run_qbe(l %t59208, l %t59209, w %t59210)
+    ret %t59231
+@else13460
+    jmp @merge13461
+@merge13461
+    dbgloc 872
+    %t59232 =w call $run_qbe(l %t59208, l %t59209, w %t59210)
+    ret %t59232
+@else13457
+    jmp @merge13458
+@merge13458
+    dbgloc 877
+    %t59233 =l copy $str1935
+    %t59234 =l call $jh_getenv(l %t59233)
+    dbgloc 878
+    %t59235 =w copy 0
+    %t59236 =l alloc4 4
+    storew %t59235, %t59236
+    dbgloc 879
+    %t59237 =w copy 0
+    %t59238 =l extsw %t59237
+    %t59239 =w cnel %t59234, %t59238
+    jnz %t59239, @then13465, @else13466
+@then13465
+    dbgloc 880
+    %t59240 =l copy $str1936
+    %t59241 =w call $strcmp(l %t59234, l %t59240)
+    %t59242 =w copy 0
+    %t59243 =w ceqw %t59241, %t59242
+    jnz %t59243, @then13468, @else13469
+@then13468
+    dbgloc 881
+    %t59244 =w copy 1
+    storew %t59244, %t59236
+    jmp @merge13470
+@else13469
+    jmp @merge13470
+@merge13470
+    jmp @merge13467
+@else13466
+    jmp @merge13467
+@merge13467
+    dbgloc 884
+    %t59245 =w loadw %t59236
+    %t59246 =w copy 0
+    %t59247 =w cnew %t59245, %t59246
+    jnz %t59247, @then13471, @else13472
+@then13471
+    dbgloc 885
+    %t59248 =w call $run_qbe(l %t59208, l %t59209, w %t59210)
+    ret %t59248
+@else13472
+    jmp @merge13473
+@merge13473
     dbgloc 891
-    %t59158 =l loadl %t59155
-    %t59159 =l call $util__ptr_add_u8(l %t59083, l %t59158)
-    %t59160 =w loadub %t59159
-    %t59161 =w copy 10
-    %t59162 =w copy %t59161
-    %t59163 =w ceqw %t59160, %t59162
-    jnz %t59163, @then13455, @else13456
-@then13455
-    jmp @exit13454
-@else13456
-    jmp @merge13457
-@merge13457
-    dbgloc 892
-    %t59164 =l loadl %t59155
-    %t59165 =w copy 1
-    %t59166 =l extsw %t59165
-    %t59167 =l add %t59164, %t59166
-    storel %t59167, %t59155
-    jmp @loop13452
-@exit13454
-    dbgloc 894
-    %t59168 =l loadl %t59155
-    %t59169 =l loadl %t59133
-    %t59170 =w copy 1
-    %t59171 =l extsw %t59170
-    %t59172 =l add %t59169, %t59171
-    %t59173 =l sub %t59168, %t59172
-    dbgloc 895
-    %t59174 =w copy 128
-    %t59175 =l extsw %t59174
-    %t59176 =w csltl %t59150, %t59175
-    jnz %t59176, @then13458, @else13459
-@then13458
-    dbgloc 896
-    %t59177 =l loadl %t59122
-    %t59178 =w copy 128
-    %t59179 =l extsw %t59178
-    %t59180 =l mul %t59177, %t59179
-    %t59181 =l call $util__ptr_add_u8(l %t59099, l %t59180)
-    dbgloc 897
-    %t59182 =l loadl %t59125
-    %t59183 =l call $util__ptr_add_u8(l %t59083, l %t59182)
-    %t59184 =l call $memcpy(l %t59181, l %t59183, l %t59150)
-    dbgloc 898
-    %t59185 =w copy 0
-    %t59186 =w copy %t59185
-    %t59187 =l call $util__ptr_add_u8(l %t59181, l %t59150)
-    storeb %t59186, %t59187
-    jmp @merge13460
-@else13459
-    jmp @merge13460
-@merge13460
-    dbgloc 900
-    %t59188 =w copy 128
-    %t59189 =l extsw %t59188
-    %t59190 =w csltl %t59173, %t59189
-    jnz %t59190, @then13461, @else13462
-@then13461
-    dbgloc 901
-    %t59191 =l loadl %t59122
-    %t59192 =w copy 128
-    %t59193 =l extsw %t59192
-    %t59194 =l mul %t59191, %t59193
-    %t59195 =l call $util__ptr_add_u8(l %t59105, l %t59194)
-    dbgloc 902
-    %t59196 =l loadl %t59133
-    %t59197 =w copy 1
-    %t59198 =l extsw %t59197
-    %t59199 =l add %t59196, %t59198
-    %t59200 =l call $util__ptr_add_u8(l %t59083, l %t59199)
-    %t59201 =l call $memcpy(l %t59195, l %t59200, l %t59173)
-    dbgloc 903
-    %t59202 =w copy 0
-    %t59203 =w copy %t59202
-    %t59204 =l call $util__ptr_add_u8(l %t59195, l %t59173)
-    storeb %t59203, %t59204
-    jmp @merge13463
-@else13462
-    jmp @merge13463
-@merge13463
-    dbgloc 905
-    %t59205 =l loadl %t59122
-    %t59206 =w copy 1
-    %t59207 =l extsw %t59206
-    %t59208 =l add %t59205, %t59207
-    storel %t59208, %t59122
-    dbgloc 906
-    %t59209 =l loadl %t59155
-    %t59210 =w copy 1
-    %t59211 =l extsw %t59210
-    %t59212 =l add %t59209, %t59211
-    storel %t59212, %t59125
-    jmp @loop13437
-@exit13439
+    %t59249 =w call $run_qbe(l %t59208, l %t59209, w %t59210)
+    ret %t59249
+}
+
+export function w $apply_link_section_directives(l %temp_asm) {
+@start13474
+    %t59250 =l copy %temp_asm
+    dbgloc 907
+    dbgloc 908
+    %t59251 =l copy $str1937
     dbgloc 909
-    %t59213 =l loadl %t59122
-    %t59214 =w copy 0
-    %t59215 =l extsw %t59214
-    %t59216 =w ceql %t59213, %t59215
-    jnz %t59216, @then13464, @else13465
-@then13464
+    %t59252 =w call $jh_file_stat_ok(l %t59251)
+    %t59253 =w copy 0
+    %t59254 =w ceqw %t59252, %t59253
+    jnz %t59254, @then13475, @else13476
+@then13475
     dbgloc 910
-    %t59217 =w call $free(l %t59083)
-    %t59218 =w call $free(l %t59099)
-    %t59219 =w call $free(l %t59105)
-    dbgloc 911
-    %t59220 =w copy 0
-    ret %t59220
-@else13465
-    jmp @merge13466
-@merge13466
+    %t59255 =w copy 0
+    ret %t59255
+@else13476
+    jmp @merge13477
+@merge13477
+    dbgloc 913
+    %t59256 =l copy $str1938
+    %t59257 =l call $fopen(l %t59251, l %t59256)
+    dbgloc 914
+    %t59258 =w copy 0
+    %t59259 =l extsw %t59258
+    %t59260 =w ceql %t59257, %t59259
+    jnz %t59260, @then13478, @else13479
+@then13478
+    %t59261 =w copy 0
+    ret %t59261
+@else13479
+    jmp @merge13480
+@merge13480
     dbgloc 915
-    %t59221 =l copy $str1932
-    %t59222 =l call $fopen(l %t59069, l %t59221)
+    %t59262 =w copy 8192
+    %t59263 =l extsw %t59262
+    %t59264 =l call $malloc(l %t59263)
     dbgloc 916
-    %t59223 =w copy 0
-    %t59224 =l extsw %t59223
-    %t59225 =w ceql %t59222, %t59224
-    jnz %t59225, @then13467, @else13468
-@then13467
+    %t59265 =w copy 1
+    %t59266 =l extsw %t59265
+    %t59267 =w copy 8191
+    %t59268 =l extsw %t59267
+    %t59269 =l call $fread(l %t59264, l %t59266, l %t59268, l %t59257)
     dbgloc 917
-    %t59226 =w call $free(l %t59083)
-    %t59227 =w call $free(l %t59099)
-    %t59228 =w call $free(l %t59105)
+    %t59270 =w call $fclose(l %t59257)
     dbgloc 918
-    %t59229 =w copy 0
-    ret %t59229
-@else13468
-    jmp @merge13469
-@merge13469
-    dbgloc 920
-    %t59230 =w copy 1024
-    %t59231 =l extsw %t59230
-    %t59232 =w copy 1024
-    %t59233 =l extsw %t59232
-    %t59234 =l mul %t59231, %t59233
-    %t59235 =l call $malloc(l %t59234)
-    dbgloc 921
-    %t59236 =w copy 1
-    %t59237 =l extsw %t59236
-    %t59238 =w copy 1024
-    %t59239 =l extsw %t59238
-    %t59240 =w copy 1024
-    %t59241 =l extsw %t59240
-    %t59242 =l mul %t59239, %t59241
-    %t59243 =w copy 1
-    %t59244 =l extsw %t59243
-    %t59245 =l sub %t59242, %t59244
-    %t59246 =l call $fread(l %t59235, l %t59237, l %t59245, l %t59222)
+    %t59271 =w copy 0
+    %t59272 =w copy %t59271
+    %t59273 =l call $util__ptr_add_u8(l %t59264, l %t59269)
+    storeb %t59272, %t59273
+    dbgloc 919
+    %t59274 =w call $jh_unlink_file(l %t59251)
     dbgloc 922
-    %t59247 =w call $fclose(l %t59222)
+    %t59275 =w copy 32
+    %t59276 =l extsw %t59275
+    %t59277 =w copy 128
+    %t59278 =l extsw %t59277
+    %t59279 =l mul %t59276, %t59278
+    %t59280 =l call $malloc(l %t59279)
     dbgloc 923
-    %t59248 =w copy 0
-    %t59249 =w copy %t59248
-    %t59250 =l call $util__ptr_add_u8(l %t59235, l %t59246)
-    storeb %t59249, %t59250
-    dbgloc 928
-    %t59251 =w copy 2
-    %t59252 =l extsw %t59251
-    %t59253 =w copy 1024
-    %t59254 =l extsw %t59253
-    %t59255 =l mul %t59252, %t59254
-    %t59256 =w copy 1024
-    %t59257 =l extsw %t59256
-    %t59258 =l mul %t59255, %t59257
-    %t59259 =l call $malloc(l %t59258)
-    dbgloc 929
-    %t59260 =w copy 0
-    %t59261 =l extsw %t59260
-    %t59262 =l alloc8 8
-    storel %t59261, %t59262
-    dbgloc 930
-    %t59263 =w copy 0
-    %t59264 =l extsw %t59263
-    %t59265 =l alloc8 8
-    storel %t59264, %t59265
-    dbgloc 931
-    %t59266 =w copy 1
-    %t59267 =l extsw %t59266
-    %t59269 =l copy 0
-    %t59268 =l sub %t59269, %t59267
-    %t59270 =l alloc8 8
-    storel %t59268, %t59270
-    dbgloc 932
-    %t59271 =w copy 1
-    %t59272 =l extsw %t59271
-    %t59274 =l copy 0
-    %t59273 =l sub %t59274, %t59272
-    %t59275 =l alloc8 8
-    storel %t59273, %t59275
-    jmp @loop13470
-@loop13470
-    dbgloc 934
-    %t59276 =l loadl %t59265
-    %t59277 =w csltl %t59276, %t59246
-    jnz %t59277, @body13471, @exit13472
-@body13471
-    dbgloc 935
-    %t59278 =l loadl %t59265
-    %t59279 =l alloc8 8
-    storel %t59278, %t59279
-    jmp @loop13473
-@loop13473
-    dbgloc 936
-    %t59280 =l loadl %t59279
-    %t59281 =w csltl %t59280, %t59246
-    jnz %t59281, @body13474, @exit13475
-@body13474
-    dbgloc 937
-    %t59282 =l loadl %t59279
-    %t59283 =l call $util__ptr_add_u8(l %t59235, l %t59282)
-    %t59284 =w loadub %t59283
-    %t59285 =w copy 10
-    %t59286 =w copy %t59285
-    %t59287 =w ceqw %t59284, %t59286
-    jnz %t59287, @then13476, @else13477
-@then13476
-    jmp @exit13475
-@else13477
-    jmp @merge13478
-@merge13478
-    dbgloc 938
-    %t59288 =l loadl %t59279
-    %t59289 =w copy 1
-    %t59290 =l extsw %t59289
-    %t59291 =l add %t59288, %t59290
-    storel %t59291, %t59279
-    jmp @loop13473
-@exit13475
-    dbgloc 943
-    %t59292 =l loadl %t59279
-    %t59293 =l loadl %t59265
-    %t59294 =l sub %t59292, %t59293
-    %t59295 =w copy 1
+    %t59281 =w copy 32
+    %t59282 =l extsw %t59281
+    %t59283 =w copy 128
+    %t59284 =l extsw %t59283
+    %t59285 =l mul %t59282, %t59284
+    %t59286 =l call $malloc(l %t59285)
+    dbgloc 924
+    %t59287 =w copy 0
+    %t59288 =w copy 32
+    %t59289 =l extsw %t59288
+    %t59290 =w copy 128
+    %t59291 =l extsw %t59290
+    %t59292 =l mul %t59289, %t59291
+    %t59293 =l call $memset(l %t59280, w %t59287, l %t59292)
+    dbgloc 925
+    %t59294 =w copy 0
+    %t59295 =w copy 32
     %t59296 =l extsw %t59295
-    %t59297 =l add %t59294, %t59296
-    dbgloc 947
-    %t59298 =w copy 0
-    %t59299 =l alloc4 4
-    storew %t59298, %t59299
-    dbgloc 948
-    %t59300 =w copy 8
-    %t59301 =l extsw %t59300
-    %t59302 =w csgel %t59297, %t59301
-    jnz %t59302, @then13479, @else13480
-@then13479
-    dbgloc 949
-    %t59303 =l loadl %t59265
-    %t59304 =l call $util__ptr_add_u8(l %t59235, l %t59303)
-    %t59305 =w loadub %t59304
-    %t59306 =w copy 46
-    %t59307 =w copy %t59306
-    %t59308 =w ceqw %t59305, %t59307
-    jnz %t59308, @then13482, @else13483
-@then13482
-    dbgloc 950
-    %t59309 =l loadl %t59265
-    %t59310 =w copy 1
+    %t59297 =w copy 128
+    %t59298 =l extsw %t59297
+    %t59299 =l mul %t59296, %t59298
+    %t59300 =l call $memset(l %t59286, w %t59294, l %t59299)
+    dbgloc 926
+    %t59301 =w copy 0
+    %t59302 =l extsw %t59301
+    %t59303 =l alloc8 8
+    storel %t59302, %t59303
+    dbgloc 927
+    %t59304 =w copy 0
+    %t59305 =l extsw %t59304
+    %t59306 =l alloc8 8
+    storel %t59305, %t59306
+    jmp @loop13481
+@loop13481
+    dbgloc 928
+    %t59307 =l loadl %t59306
+    %t59308 =w csltl %t59307, %t59269
+    jnz %t59308, @body13482, @exit13483
+@body13482
+    dbgloc 929
+    %t59309 =l loadl %t59303
+    %t59310 =w copy 32
     %t59311 =l extsw %t59310
-    %t59312 =l add %t59309, %t59311
-    %t59313 =l call $util__ptr_add_u8(l %t59235, l %t59312)
-    %t59314 =w loadub %t59313
-    %t59315 =w copy 103
-    %t59316 =w copy %t59315
-    %t59317 =w ceqw %t59314, %t59316
-    jnz %t59317, @then13485, @else13486
-@then13485
-    dbgloc 952
-    %t59318 =w copy 1
-    %t59319 =l alloc4 4
-    storew %t59318, %t59319
-    dbgloc 953
-    %t59320 =w copy 0
-    %t59321 =l extsw %t59320
-    %t59322 =l alloc8 8
-    storel %t59321, %t59322
-    jmp @loop13488
-@loop13488
-    dbgloc 954
-    %t59323 =l loadl %t59322
-    %t59324 =w copy 7
+    %t59312 =w csgel %t59309, %t59311
+    jnz %t59312, @then13484, @else13485
+@then13484
+    jmp @exit13483
+@else13485
+    jmp @merge13486
+@merge13486
+    dbgloc 930
+    %t59313 =l loadl %t59306
+    %t59314 =l alloc8 8
+    storel %t59313, %t59314
+    jmp @loop13487
+@loop13487
+    dbgloc 931
+    %t59315 =l loadl %t59314
+    %t59316 =w csltl %t59315, %t59269
+    jnz %t59316, @body13488, @exit13489
+@body13488
+    dbgloc 932
+    %t59317 =l loadl %t59314
+    %t59318 =l call $util__ptr_add_u8(l %t59264, l %t59317)
+    %t59319 =w loadub %t59318
+    %t59320 =w copy 124
+    %t59321 =w copy %t59320
+    %t59322 =w ceqw %t59319, %t59321
+    jnz %t59322, @then13490, @else13491
+@then13490
+    jmp @exit13489
+@else13491
+    jmp @merge13492
+@merge13492
+    dbgloc 933
+    %t59323 =l loadl %t59314
+    %t59324 =w copy 1
     %t59325 =l extsw %t59324
-    %t59326 =w csltl %t59323, %t59325
-    jnz %t59326, @body13489, @exit13490
-@body13489
-    dbgloc 955
-    %t59327 =l copy $str1933
-    %t59328 =l loadl %t59322
-    %t59329 =l call $util__ptr_add_u8(l %t59327, l %t59328)
-    %t59330 =w loadub %t59329
-    %t59331 =w copy %t59330
-    dbgloc 956
-    %t59332 =l loadl %t59265
-    %t59333 =l loadl %t59322
-    %t59334 =l add %t59332, %t59333
-    %t59335 =l call $util__ptr_add_u8(l %t59235, l %t59334)
-    %t59336 =w loadub %t59335
-    %t59337 =w copy %t59336
-    dbgloc 957
-    %t59338 =w cnew %t59331, %t59337
-    jnz %t59338, @then13491, @else13492
-@then13491
-    %t59339 =w copy 0
-    storew %t59339, %t59319
-    jmp @merge13493
-@else13492
-    jmp @merge13493
-@merge13493
-    dbgloc 958
-    %t59340 =l loadl %t59322
-    %t59341 =w copy 1
-    %t59342 =l extsw %t59341
-    %t59343 =l add %t59340, %t59342
-    storel %t59343, %t59322
-    jmp @loop13488
-@exit13490
-    dbgloc 960
-    %t59344 =w loadw %t59319
-    %t59345 =w copy 0
-    %t59346 =w cnew %t59344, %t59345
-    jnz %t59346, @then13494, @else13495
-@then13494
-    dbgloc 964
-    %t59347 =l loadl %t59265
-    %t59348 =l add %t59347, %t59297
-    %t59349 =w copy 1
-    %t59350 =l extsw %t59349
-    %t59351 =l sub %t59348, %t59350
-    %t59352 =l call $util__ptr_add_u8(l %t59235, l %t59351)
-    %t59353 =w loadub %t59352
-    %t59354 =w copy 10
-    %t59355 =w copy %t59354
-    %t59356 =w ceqw %t59353, %t59355
-    jnz %t59356, @then13497, @else13498
-@then13497
-    dbgloc 965
-    %t59357 =w copy 1
-    storew %t59357, %t59299
-    jmp @merge13499
-@else13498
-    jmp @merge13499
-@merge13499
-    jmp @merge13496
-@else13495
-    jmp @merge13496
-@merge13496
-    jmp @merge13487
-@else13486
-    jmp @merge13487
-@merge13487
-    jmp @merge13484
-@else13483
-    jmp @merge13484
-@merge13484
-    jmp @merge13481
-@else13480
-    jmp @merge13481
-@merge13481
-    dbgloc 972
-    %t59358 =w copy 0
-    %t59359 =l alloc4 4
-    storew %t59358, %t59359
-    dbgloc 973
-    %t59360 =w loadw %t59299
-    %t59361 =w copy 0
-    %t59362 =w cnew %t59360, %t59361
-    jnz %t59362, @then13500, @else13501
-@then13500
-    dbgloc 975
-    %t59363 =l loadl %t59265
-    %t59364 =w copy 7
-    %t59365 =l extsw %t59364
-    %t59366 =l add %t59363, %t59365
-    %t59367 =l call $util__ptr_add_u8(l %t59235, l %t59366)
-    %t59368 =l alloc8 8
-    storel %t59367, %t59368
-    dbgloc 978
-    %t59369 =w copy 2
+    %t59326 =l add %t59323, %t59325
+    storel %t59326, %t59314
+    jmp @loop13487
+@exit13489
+    dbgloc 935
+    %t59327 =l loadl %t59314
+    %t59328 =w csgel %t59327, %t59269
+    jnz %t59328, @then13493, @else13494
+@then13493
+    jmp @exit13483
+@else13494
+    jmp @merge13495
+@merge13495
+    dbgloc 936
+    %t59329 =l loadl %t59314
+    %t59330 =l loadl %t59306
+    %t59331 =l sub %t59329, %t59330
+    dbgloc 937
+    %t59332 =l loadl %t59314
+    %t59333 =w copy 1
+    %t59334 =l extsw %t59333
+    %t59335 =l add %t59332, %t59334
+    %t59336 =l alloc8 8
+    storel %t59335, %t59336
+    jmp @loop13496
+@loop13496
+    dbgloc 938
+    %t59337 =l loadl %t59336
+    %t59338 =w csltl %t59337, %t59269
+    jnz %t59338, @body13497, @exit13498
+@body13497
+    dbgloc 939
+    %t59339 =l loadl %t59336
+    %t59340 =l call $util__ptr_add_u8(l %t59264, l %t59339)
+    %t59341 =w loadub %t59340
+    %t59342 =w copy 10
+    %t59343 =w copy %t59342
+    %t59344 =w ceqw %t59341, %t59343
+    jnz %t59344, @then13499, @else13500
+@then13499
+    jmp @exit13498
+@else13500
+    jmp @merge13501
+@merge13501
+    dbgloc 940
+    %t59345 =l loadl %t59336
+    %t59346 =w copy 1
+    %t59347 =l extsw %t59346
+    %t59348 =l add %t59345, %t59347
+    storel %t59348, %t59336
+    jmp @loop13496
+@exit13498
+    dbgloc 942
+    %t59349 =l loadl %t59336
+    %t59350 =l loadl %t59314
+    %t59351 =w copy 1
+    %t59352 =l extsw %t59351
+    %t59353 =l add %t59350, %t59352
+    %t59354 =l sub %t59349, %t59353
+    dbgloc 943
+    %t59355 =w copy 128
+    %t59356 =l extsw %t59355
+    %t59357 =w csltl %t59331, %t59356
+    jnz %t59357, @then13502, @else13503
+@then13502
+    dbgloc 944
+    %t59358 =l loadl %t59303
+    %t59359 =w copy 128
+    %t59360 =l extsw %t59359
+    %t59361 =l mul %t59358, %t59360
+    %t59362 =l call $util__ptr_add_u8(l %t59280, l %t59361)
+    dbgloc 945
+    %t59363 =l loadl %t59306
+    %t59364 =l call $util__ptr_add_u8(l %t59264, l %t59363)
+    %t59365 =l call $memcpy(l %t59362, l %t59364, l %t59331)
+    dbgloc 946
+    %t59366 =w copy 0
+    %t59367 =w copy %t59366
+    %t59368 =l call $util__ptr_add_u8(l %t59362, l %t59331)
+    storeb %t59367, %t59368
+    jmp @merge13504
+@else13503
+    jmp @merge13504
+@merge13504
+    dbgloc 948
+    %t59369 =w copy 128
     %t59370 =l extsw %t59369
-    %t59371 =w csgel %t59297, %t59370
-    jnz %t59371, @then13503, @else13504
-@then13503
-    dbgloc 979
-    %t59372 =l loadl %t59265
-    %t59373 =l add %t59372, %t59297
-    %t59374 =w copy 2
-    %t59375 =l extsw %t59374
-    %t59376 =l sub %t59373, %t59375
-    %t59377 =l call $util__ptr_add_u8(l %t59235, l %t59376)
-    %t59378 =w loadub %t59377
-    %t59379 =w copy 13
-    %t59380 =w copy %t59379
-    %t59381 =w ceqw %t59378, %t59380
-    jnz %t59381, @then13506, @else13507
-@then13506
-    dbgloc 980
-    %t59382 =w copy 2
-    %t59383 =l extsw %t59382
-    jmp @merge13508
-@else13507
-    dbgloc 981
-    dbgloc 982
-    %t59384 =w copy 1
-    %t59385 =l extsw %t59384
-    jmp @merge13508
-@merge13508
-    %t59386 =l phi @then13506 %t59383, @else13507 %t59385
-    jmp @merge13505
-@else13504
-    dbgloc 984
-    dbgloc 985
+    %t59371 =w csltl %t59354, %t59370
+    jnz %t59371, @then13505, @else13506
+@then13505
+    dbgloc 949
+    %t59372 =l loadl %t59303
+    %t59373 =w copy 128
+    %t59374 =l extsw %t59373
+    %t59375 =l mul %t59372, %t59374
+    %t59376 =l call $util__ptr_add_u8(l %t59286, l %t59375)
+    dbgloc 950
+    %t59377 =l loadl %t59314
+    %t59378 =w copy 1
+    %t59379 =l extsw %t59378
+    %t59380 =l add %t59377, %t59379
+    %t59381 =l call $util__ptr_add_u8(l %t59264, l %t59380)
+    %t59382 =l call $memcpy(l %t59376, l %t59381, l %t59354)
+    dbgloc 951
+    %t59383 =w copy 0
+    %t59384 =w copy %t59383
+    %t59385 =l call $util__ptr_add_u8(l %t59376, l %t59354)
+    storeb %t59384, %t59385
+    jmp @merge13507
+@else13506
+    jmp @merge13507
+@merge13507
+    dbgloc 953
+    %t59386 =l loadl %t59303
     %t59387 =w copy 1
     %t59388 =l extsw %t59387
-    jmp @merge13505
-@merge13505
-    %t59389 =l phi @merge13508 %t59386, @else13504 %t59388
-    dbgloc 987
-    %t59390 =w copy 7
-    %t59391 =l extsw %t59390
-    %t59392 =l sub %t59297, %t59391
-    %t59393 =l sub %t59392, %t59389
-    dbgloc 988
-    %t59394 =w copy 0
-    %t59395 =l extsw %t59394
-    %t59396 =l alloc8 8
-    storel %t59395, %t59396
-    jmp @loop13509
-@loop13509
-    dbgloc 989
-    %t59397 =l loadl %t59396
-    %t59398 =l loadl %t59122
-    %t59399 =w csltl %t59397, %t59398
-    jnz %t59399, @body13510, @exit13511
-@body13510
-    dbgloc 990
-    %t59400 =l loadl %t59396
-    %t59401 =w copy 128
-    %t59402 =l extsw %t59401
-    %t59403 =l mul %t59400, %t59402
-    %t59404 =l call $util__ptr_add_u8(l %t59099, l %t59403)
-    dbgloc 991
-    %t59405 =l loadl %t59396
-    %t59406 =w copy 128
-    %t59407 =l extsw %t59406
-    %t59408 =l mul %t59405, %t59407
-    %t59409 =l call $util__ptr_add_u8(l %t59105, l %t59408)
-    dbgloc 992
-    %t59410 =l call $strlen(l %t59404)
-    dbgloc 993
-    %t59411 =w ceql %t59410, %t59393
-    jnz %t59411, @then13512, @else13513
-@then13512
-    dbgloc 994
-    %t59412 =w copy 1
-    %t59413 =l alloc4 4
-    storew %t59412, %t59413
-    dbgloc 995
-    %t59414 =w copy 0
-    %t59415 =l extsw %t59414
-    %t59416 =l alloc8 8
-    storel %t59415, %t59416
-    jmp @loop13515
-@loop13515
-    dbgloc 996
-    %t59417 =l loadl %t59416
-    %t59418 =w csltl %t59417, %t59410
-    jnz %t59418, @body13516, @exit13517
-@body13516
-    dbgloc 997
-    %t59419 =l loadl %t59368
-    %t59420 =l loadl %t59416
-    %t59421 =l call $util__ptr_add_u8(l %t59419, l %t59420)
-    %t59422 =w loadub %t59421
-    %t59423 =w copy %t59422
-    dbgloc 998
-    %t59424 =l loadl %t59416
-    %t59425 =l call $util__ptr_add_u8(l %t59404, l %t59424)
-    %t59426 =w loadub %t59425
-    %t59427 =w copy %t59426
-    dbgloc 999
-    %t59428 =w cnew %t59423, %t59427
-    jnz %t59428, @then13518, @else13519
-@then13518
+    %t59389 =l add %t59386, %t59388
+    storel %t59389, %t59303
+    dbgloc 954
+    %t59390 =l loadl %t59336
+    %t59391 =w copy 1
+    %t59392 =l extsw %t59391
+    %t59393 =l add %t59390, %t59392
+    storel %t59393, %t59306
+    jmp @loop13481
+@exit13483
+    dbgloc 957
+    %t59394 =l loadl %t59303
+    %t59395 =w copy 0
+    %t59396 =l extsw %t59395
+    %t59397 =w ceql %t59394, %t59396
+    jnz %t59397, @then13508, @else13509
+@then13508
+    dbgloc 958
+    %t59398 =w call $free(l %t59264)
+    %t59399 =w call $free(l %t59280)
+    %t59400 =w call $free(l %t59286)
+    dbgloc 959
+    %t59401 =w copy 0
+    ret %t59401
+@else13509
+    jmp @merge13510
+@merge13510
+    dbgloc 963
+    %t59402 =l copy $str1939
+    %t59403 =l call $fopen(l %t59250, l %t59402)
+    dbgloc 964
+    %t59404 =w copy 0
+    %t59405 =l extsw %t59404
+    %t59406 =w ceql %t59403, %t59405
+    jnz %t59406, @then13511, @else13512
+@then13511
+    dbgloc 965
+    %t59407 =w call $free(l %t59264)
+    %t59408 =w call $free(l %t59280)
+    %t59409 =w call $free(l %t59286)
+    dbgloc 966
+    %t59410 =w copy 0
+    ret %t59410
+@else13512
+    jmp @merge13513
+@merge13513
+    dbgloc 968
+    %t59411 =w copy 1024
+    %t59412 =l extsw %t59411
+    %t59413 =w copy 1024
+    %t59414 =l extsw %t59413
+    %t59415 =l mul %t59412, %t59414
+    %t59416 =l call $malloc(l %t59415)
+    dbgloc 969
+    %t59417 =w copy 1
+    %t59418 =l extsw %t59417
+    %t59419 =w copy 1024
+    %t59420 =l extsw %t59419
+    %t59421 =w copy 1024
+    %t59422 =l extsw %t59421
+    %t59423 =l mul %t59420, %t59422
+    %t59424 =w copy 1
+    %t59425 =l extsw %t59424
+    %t59426 =l sub %t59423, %t59425
+    %t59427 =l call $fread(l %t59416, l %t59418, l %t59426, l %t59403)
+    dbgloc 970
+    %t59428 =w call $fclose(l %t59403)
+    dbgloc 971
     %t59429 =w copy 0
-    storew %t59429, %t59413
-    jmp @merge13520
-@else13519
-    jmp @merge13520
-@merge13520
-    dbgloc 1000
-    %t59430 =l loadl %t59416
-    %t59431 =w copy 1
-    %t59432 =l extsw %t59431
-    %t59433 =l add %t59430, %t59432
-    storel %t59433, %t59416
-    jmp @loop13515
-@exit13517
-    dbgloc 1002
-    %t59434 =w loadw %t59413
-    %t59435 =w copy 0
-    %t59436 =w cnew %t59434, %t59435
-    jnz %t59436, @then13521, @else13522
-@then13521
-    dbgloc 1005
-    %t59437 =l copy $str1934
-    dbgloc 1006
-    %t59438 =l call $strlen(l %t59437)
-    dbgloc 1007
-    %t59439 =l call $strlen(l %t59409)
-    dbgloc 1008
-    %t59440 =l loadl %t59262
-    %t59441 =l call $util__ptr_add_u8(l %t59259, l %t59440)
-    %t59442 =l call $memcpy(l %t59441, l %t59437, l %t59438)
-    dbgloc 1009
-    %t59443 =l loadl %t59262
-    %t59444 =l add %t59443, %t59438
-    storel %t59444, %t59262
-    dbgloc 1010
-    %t59445 =l loadl %t59262
-    %t59446 =l call $util__ptr_add_u8(l %t59259, l %t59445)
-    %t59447 =l call $memcpy(l %t59446, l %t59409, l %t59439)
-    dbgloc 1011
-    %t59448 =l loadl %t59262
-    %t59449 =l add %t59448, %t59439
-    storel %t59449, %t59262
-    dbgloc 1012
-    %t59450 =w copy 10
-    %t59451 =w copy %t59450
-    %t59452 =l loadl %t59262
-    %t59453 =l call $util__ptr_add_u8(l %t59259, l %t59452)
-    storeb %t59451, %t59453
-    dbgloc 1013
-    %t59454 =l loadl %t59262
-    %t59455 =w copy 1
-    %t59456 =l extsw %t59455
-    %t59457 =l add %t59454, %t59456
-    storel %t59457, %t59262
-    dbgloc 1015
-    %t59458 =l loadl %t59270
-    %t59459 =w copy 1
-    %t59460 =l extsw %t59459
-    %t59462 =l copy 0
-    %t59461 =l sub %t59462, %t59460
-    %t59463 =w cnel %t59458, %t59461
-    jnz %t59463, @then13524, @else13525
-@then13524
-    dbgloc 1016
-    %t59464 =l loadl %t59265
-    %t59465 =l loadl %t59270
-    %t59466 =l sub %t59464, %t59465
-    dbgloc 1017
-    %t59467 =l loadl %t59262
-    %t59468 =l call $util__ptr_add_u8(l %t59259, l %t59467)
-    %t59469 =l loadl %t59270
-    %t59470 =l call $util__ptr_add_u8(l %t59235, l %t59469)
-    %t59471 =l call $memcpy(l %t59468, l %t59470, l %t59466)
-    dbgloc 1018
-    %t59472 =l loadl %t59262
-    %t59473 =l add %t59472, %t59466
-    storel %t59473, %t59262
-    jmp @merge13526
-@else13525
-    jmp @merge13526
-@merge13526
-    dbgloc 1021
-    %t59474 =l loadl %t59262
-    %t59475 =l call $util__ptr_add_u8(l %t59259, l %t59474)
-    %t59476 =l loadl %t59265
-    %t59477 =l call $util__ptr_add_u8(l %t59235, l %t59476)
-    %t59478 =l call $memcpy(l %t59475, l %t59477, l %t59297)
-    dbgloc 1022
-    %t59479 =l loadl %t59262
-    %t59480 =l add %t59479, %t59297
-    storel %t59480, %t59262
-    dbgloc 1024
-    %t59481 =w copy 1
+    %t59430 =w copy %t59429
+    %t59431 =l call $util__ptr_add_u8(l %t59416, l %t59427)
+    storeb %t59430, %t59431
+    dbgloc 976
+    %t59432 =w copy 2
+    %t59433 =l extsw %t59432
+    %t59434 =w copy 1024
+    %t59435 =l extsw %t59434
+    %t59436 =l mul %t59433, %t59435
+    %t59437 =w copy 1024
+    %t59438 =l extsw %t59437
+    %t59439 =l mul %t59436, %t59438
+    %t59440 =l call $malloc(l %t59439)
+    dbgloc 977
+    %t59441 =w copy 0
+    %t59442 =l extsw %t59441
+    %t59443 =l alloc8 8
+    storel %t59442, %t59443
+    dbgloc 978
+    %t59444 =w copy 0
+    %t59445 =l extsw %t59444
+    %t59446 =l alloc8 8
+    storel %t59445, %t59446
+    dbgloc 979
+    %t59447 =w copy 1
+    %t59448 =l extsw %t59447
+    %t59450 =l copy 0
+    %t59449 =l sub %t59450, %t59448
+    %t59451 =l alloc8 8
+    storel %t59449, %t59451
+    dbgloc 980
+    %t59452 =w copy 1
+    %t59453 =l extsw %t59452
+    %t59455 =l copy 0
+    %t59454 =l sub %t59455, %t59453
+    %t59456 =l alloc8 8
+    storel %t59454, %t59456
+    jmp @loop13514
+@loop13514
+    dbgloc 982
+    %t59457 =l loadl %t59446
+    %t59458 =w csltl %t59457, %t59427
+    jnz %t59458, @body13515, @exit13516
+@body13515
+    dbgloc 983
+    %t59459 =l loadl %t59446
+    %t59460 =l alloc8 8
+    storel %t59459, %t59460
+    jmp @loop13517
+@loop13517
+    dbgloc 984
+    %t59461 =l loadl %t59460
+    %t59462 =w csltl %t59461, %t59427
+    jnz %t59462, @body13518, @exit13519
+@body13518
+    dbgloc 985
+    %t59463 =l loadl %t59460
+    %t59464 =l call $util__ptr_add_u8(l %t59416, l %t59463)
+    %t59465 =w loadub %t59464
+    %t59466 =w copy 10
+    %t59467 =w copy %t59466
+    %t59468 =w ceqw %t59465, %t59467
+    jnz %t59468, @then13520, @else13521
+@then13520
+    jmp @exit13519
+@else13521
+    jmp @merge13522
+@merge13522
+    dbgloc 986
+    %t59469 =l loadl %t59460
+    %t59470 =w copy 1
+    %t59471 =l extsw %t59470
+    %t59472 =l add %t59469, %t59471
+    storel %t59472, %t59460
+    jmp @loop13517
+@exit13519
+    dbgloc 991
+    %t59473 =l loadl %t59460
+    %t59474 =l loadl %t59446
+    %t59475 =l sub %t59473, %t59474
+    %t59476 =w copy 1
+    %t59477 =l extsw %t59476
+    %t59478 =l add %t59475, %t59477
+    dbgloc 995
+    %t59479 =w copy 0
+    %t59480 =l alloc4 4
+    storew %t59479, %t59480
+    dbgloc 996
+    %t59481 =w copy 8
     %t59482 =l extsw %t59481
-    %t59484 =l copy 0
-    %t59483 =l sub %t59484, %t59482
-    storel %t59483, %t59275
-    dbgloc 1025
-    %t59485 =w copy 1
-    %t59486 =l extsw %t59485
-    %t59488 =l copy 0
-    %t59487 =l sub %t59488, %t59486
-    storel %t59487, %t59270
-    dbgloc 1026
-    %t59489 =w copy 1
-    storew %t59489, %t59359
-    jmp @merge13523
-@else13522
-    jmp @merge13523
-@merge13523
-    jmp @merge13514
-@else13513
-    jmp @merge13514
-@merge13514
-    dbgloc 1029
-    %t59490 =l loadl %t59396
+    %t59483 =w csgel %t59478, %t59482
+    jnz %t59483, @then13523, @else13524
+@then13523
+    dbgloc 997
+    %t59484 =l loadl %t59446
+    %t59485 =l call $util__ptr_add_u8(l %t59416, l %t59484)
+    %t59486 =w loadub %t59485
+    %t59487 =w copy 46
+    %t59488 =w copy %t59487
+    %t59489 =w ceqw %t59486, %t59488
+    jnz %t59489, @then13526, @else13527
+@then13526
+    dbgloc 998
+    %t59490 =l loadl %t59446
     %t59491 =w copy 1
     %t59492 =l extsw %t59491
     %t59493 =l add %t59490, %t59492
-    storel %t59493, %t59396
-    jmp @loop13509
-@exit13511
-    jmp @merge13502
-@else13501
-    jmp @merge13502
-@merge13502
+    %t59494 =l call $util__ptr_add_u8(l %t59416, l %t59493)
+    %t59495 =w loadub %t59494
+    %t59496 =w copy 103
+    %t59497 =w copy %t59496
+    %t59498 =w ceqw %t59495, %t59497
+    jnz %t59498, @then13529, @else13530
+@then13529
+    dbgloc 1000
+    %t59499 =w copy 1
+    %t59500 =l alloc4 4
+    storew %t59499, %t59500
+    dbgloc 1001
+    %t59501 =w copy 0
+    %t59502 =l extsw %t59501
+    %t59503 =l alloc8 8
+    storel %t59502, %t59503
+    jmp @loop13532
+@loop13532
+    dbgloc 1002
+    %t59504 =l loadl %t59503
+    %t59505 =w copy 7
+    %t59506 =l extsw %t59505
+    %t59507 =w csltl %t59504, %t59506
+    jnz %t59507, @body13533, @exit13534
+@body13533
+    dbgloc 1003
+    %t59508 =l copy $str1940
+    %t59509 =l loadl %t59503
+    %t59510 =l call $util__ptr_add_u8(l %t59508, l %t59509)
+    %t59511 =w loadub %t59510
+    %t59512 =w copy %t59511
+    dbgloc 1004
+    %t59513 =l loadl %t59446
+    %t59514 =l loadl %t59503
+    %t59515 =l add %t59513, %t59514
+    %t59516 =l call $util__ptr_add_u8(l %t59416, l %t59515)
+    %t59517 =w loadub %t59516
+    %t59518 =w copy %t59517
+    dbgloc 1005
+    %t59519 =w cnew %t59512, %t59518
+    jnz %t59519, @then13535, @else13536
+@then13535
+    %t59520 =w copy 0
+    storew %t59520, %t59500
+    jmp @merge13537
+@else13536
+    jmp @merge13537
+@merge13537
+    dbgloc 1006
+    %t59521 =l loadl %t59503
+    %t59522 =w copy 1
+    %t59523 =l extsw %t59522
+    %t59524 =l add %t59521, %t59523
+    storel %t59524, %t59503
+    jmp @loop13532
+@exit13534
+    dbgloc 1008
+    %t59525 =w loadw %t59500
+    %t59526 =w copy 0
+    %t59527 =w cnew %t59525, %t59526
+    jnz %t59527, @then13538, @else13539
+@then13538
+    dbgloc 1012
+    %t59528 =l loadl %t59446
+    %t59529 =l add %t59528, %t59478
+    %t59530 =w copy 1
+    %t59531 =l extsw %t59530
+    %t59532 =l sub %t59529, %t59531
+    %t59533 =l call $util__ptr_add_u8(l %t59416, l %t59532)
+    %t59534 =w loadub %t59533
+    %t59535 =w copy 10
+    %t59536 =w copy %t59535
+    %t59537 =w ceqw %t59534, %t59536
+    jnz %t59537, @then13541, @else13542
+@then13541
+    dbgloc 1013
+    %t59538 =w copy 1
+    storew %t59538, %t59480
+    jmp @merge13543
+@else13542
+    jmp @merge13543
+@merge13543
+    jmp @merge13540
+@else13539
+    jmp @merge13540
+@merge13540
+    jmp @merge13531
+@else13530
+    jmp @merge13531
+@merge13531
+    jmp @merge13528
+@else13527
+    jmp @merge13528
+@merge13528
+    jmp @merge13525
+@else13524
+    jmp @merge13525
+@merge13525
+    dbgloc 1020
+    %t59539 =w copy 0
+    %t59540 =l alloc4 4
+    storew %t59539, %t59540
+    dbgloc 1021
+    %t59541 =w loadw %t59480
+    %t59542 =w copy 0
+    %t59543 =w cnew %t59541, %t59542
+    jnz %t59543, @then13544, @else13545
+@then13544
+    dbgloc 1023
+    %t59544 =l loadl %t59446
+    %t59545 =w copy 7
+    %t59546 =l extsw %t59545
+    %t59547 =l add %t59544, %t59546
+    %t59548 =l call $util__ptr_add_u8(l %t59416, l %t59547)
+    %t59549 =l alloc8 8
+    storel %t59548, %t59549
+    dbgloc 1026
+    %t59550 =w copy 2
+    %t59551 =l extsw %t59550
+    %t59552 =w csgel %t59478, %t59551
+    jnz %t59552, @then13547, @else13548
+@then13547
+    dbgloc 1027
+    %t59553 =l loadl %t59446
+    %t59554 =l add %t59553, %t59478
+    %t59555 =w copy 2
+    %t59556 =l extsw %t59555
+    %t59557 =l sub %t59554, %t59556
+    %t59558 =l call $util__ptr_add_u8(l %t59416, l %t59557)
+    %t59559 =w loadub %t59558
+    %t59560 =w copy 13
+    %t59561 =w copy %t59560
+    %t59562 =w ceqw %t59559, %t59561
+    jnz %t59562, @then13550, @else13551
+@then13550
+    dbgloc 1028
+    %t59563 =w copy 2
+    %t59564 =l extsw %t59563
+    jmp @merge13552
+@else13551
+    dbgloc 1029
+    dbgloc 1030
+    %t59565 =w copy 1
+    %t59566 =l extsw %t59565
+    jmp @merge13552
+@merge13552
+    %t59567 =l phi @then13550 %t59564, @else13551 %t59566
+    jmp @merge13549
+@else13548
+    dbgloc 1032
     dbgloc 1033
-    %t59494 =w loadw %t59359
-    %t59495 =w copy 0
-    %t59496 =w ceqw %t59494, %t59495
-    jnz %t59496, @then13527, @else13528
-@then13527
+    %t59568 =w copy 1
+    %t59569 =l extsw %t59568
+    jmp @merge13549
+@merge13549
+    %t59570 =l phi @merge13552 %t59567, @else13548 %t59569
     dbgloc 1035
-    %t59497 =l loadl %t59275
-    %t59498 =w copy 1
-    %t59499 =l extsw %t59498
-    %t59501 =l copy 0
-    %t59500 =l sub %t59501, %t59499
-    %t59502 =w cnel %t59497, %t59500
-    jnz %t59502, @then13530, @else13531
-@then13530
+    %t59571 =w copy 7
+    %t59572 =l extsw %t59571
+    %t59573 =l sub %t59478, %t59572
+    %t59574 =l sub %t59573, %t59570
     dbgloc 1036
-    %t59503 =l loadl %t59270
-    %t59504 =l loadl %t59275
-    %t59505 =l sub %t59503, %t59504
+    %t59575 =w copy 0
+    %t59576 =l extsw %t59575
+    %t59577 =l alloc8 8
+    storel %t59576, %t59577
+    jmp @loop13553
+@loop13553
     dbgloc 1037
-    %t59506 =l loadl %t59262
-    %t59507 =l call $util__ptr_add_u8(l %t59259, l %t59506)
-    %t59508 =l loadl %t59275
-    %t59509 =l call $util__ptr_add_u8(l %t59235, l %t59508)
-    %t59510 =l call $memcpy(l %t59507, l %t59509, l %t59505)
+    %t59578 =l loadl %t59577
+    %t59579 =l loadl %t59303
+    %t59580 =w csltl %t59578, %t59579
+    jnz %t59580, @body13554, @exit13555
+@body13554
     dbgloc 1038
-    %t59511 =l loadl %t59262
-    %t59512 =l add %t59511, %t59505
-    storel %t59512, %t59262
-    jmp @merge13532
-@else13531
-    jmp @merge13532
-@merge13532
+    %t59581 =l loadl %t59577
+    %t59582 =w copy 128
+    %t59583 =l extsw %t59582
+    %t59584 =l mul %t59581, %t59583
+    %t59585 =l call $util__ptr_add_u8(l %t59280, l %t59584)
+    dbgloc 1039
+    %t59586 =l loadl %t59577
+    %t59587 =w copy 128
+    %t59588 =l extsw %t59587
+    %t59589 =l mul %t59586, %t59588
+    %t59590 =l call $util__ptr_add_u8(l %t59286, l %t59589)
     dbgloc 1040
-    %t59513 =l loadl %t59270
-    storel %t59513, %t59275
+    %t59591 =l call $strlen(l %t59585)
     dbgloc 1041
-    %t59514 =l loadl %t59265
-    storel %t59514, %t59270
-    jmp @merge13529
-@else13528
-    jmp @merge13529
-@merge13529
+    %t59592 =w ceql %t59591, %t59574
+    jnz %t59592, @then13556, @else13557
+@then13556
+    dbgloc 1042
+    %t59593 =w copy 1
+    %t59594 =l alloc4 4
+    storew %t59593, %t59594
+    dbgloc 1043
+    %t59595 =w copy 0
+    %t59596 =l extsw %t59595
+    %t59597 =l alloc8 8
+    storel %t59596, %t59597
+    jmp @loop13559
+@loop13559
     dbgloc 1044
-    %t59515 =l loadl %t59279
-    %t59516 =w copy 1
-    %t59517 =l extsw %t59516
-    %t59518 =l add %t59515, %t59517
-    storel %t59518, %t59265
-    jmp @loop13470
-@exit13472
+    %t59598 =l loadl %t59597
+    %t59599 =w csltl %t59598, %t59591
+    jnz %t59599, @body13560, @exit13561
+@body13560
+    dbgloc 1045
+    %t59600 =l loadl %t59549
+    %t59601 =l loadl %t59597
+    %t59602 =l call $util__ptr_add_u8(l %t59600, l %t59601)
+    %t59603 =w loadub %t59602
+    %t59604 =w copy %t59603
+    dbgloc 1046
+    %t59605 =l loadl %t59597
+    %t59606 =l call $util__ptr_add_u8(l %t59585, l %t59605)
+    %t59607 =w loadub %t59606
+    %t59608 =w copy %t59607
     dbgloc 1047
-    %t59519 =l loadl %t59275
-    %t59520 =w copy 1
-    %t59521 =l extsw %t59520
-    %t59523 =l copy 0
-    %t59522 =l sub %t59523, %t59521
-    %t59524 =w cnel %t59519, %t59522
-    jnz %t59524, @then13533, @else13534
-@then13533
+    %t59609 =w cnew %t59604, %t59608
+    jnz %t59609, @then13562, @else13563
+@then13562
+    %t59610 =w copy 0
+    storew %t59610, %t59594
+    jmp @merge13564
+@else13563
+    jmp @merge13564
+@merge13564
     dbgloc 1048
-    %t59525 =l loadl %t59270
-    %t59526 =l loadl %t59275
-    %t59527 =l sub %t59525, %t59526
-    dbgloc 1049
-    %t59528 =l loadl %t59262
-    %t59529 =l call $util__ptr_add_u8(l %t59259, l %t59528)
-    %t59530 =l loadl %t59275
-    %t59531 =l call $util__ptr_add_u8(l %t59235, l %t59530)
-    %t59532 =l call $memcpy(l %t59529, l %t59531, l %t59527)
+    %t59611 =l loadl %t59597
+    %t59612 =w copy 1
+    %t59613 =l extsw %t59612
+    %t59614 =l add %t59611, %t59613
+    storel %t59614, %t59597
+    jmp @loop13559
+@exit13561
     dbgloc 1050
-    %t59533 =l loadl %t59262
-    %t59534 =l add %t59533, %t59527
-    storel %t59534, %t59262
-    jmp @merge13535
-@else13534
-    jmp @merge13535
-@merge13535
-    dbgloc 1052
-    %t59535 =l loadl %t59270
-    %t59536 =w copy 1
-    %t59537 =l extsw %t59536
-    %t59539 =l copy 0
-    %t59538 =l sub %t59539, %t59537
-    %t59540 =w cnel %t59535, %t59538
-    jnz %t59540, @then13536, @else13537
-@then13536
+    %t59615 =w loadw %t59594
+    %t59616 =w copy 0
+    %t59617 =w cnew %t59615, %t59616
+    jnz %t59617, @then13565, @else13566
+@then13565
     dbgloc 1053
-    %t59541 =l loadl %t59270
-    %t59542 =l sub %t59246, %t59541
+    %t59618 =l copy $str1941
     dbgloc 1054
-    %t59543 =l loadl %t59262
-    %t59544 =l call $util__ptr_add_u8(l %t59259, l %t59543)
-    %t59545 =l loadl %t59270
-    %t59546 =l call $util__ptr_add_u8(l %t59235, l %t59545)
-    %t59547 =l call $memcpy(l %t59544, l %t59546, l %t59542)
+    %t59619 =l call $strlen(l %t59618)
     dbgloc 1055
-    %t59548 =l loadl %t59262
-    %t59549 =l add %t59548, %t59542
-    storel %t59549, %t59262
-    jmp @merge13538
-@else13537
-    jmp @merge13538
-@merge13538
+    %t59620 =l call $strlen(l %t59590)
+    dbgloc 1056
+    %t59621 =l loadl %t59443
+    %t59622 =l call $util__ptr_add_u8(l %t59440, l %t59621)
+    %t59623 =l call $memcpy(l %t59622, l %t59618, l %t59619)
+    dbgloc 1057
+    %t59624 =l loadl %t59443
+    %t59625 =l add %t59624, %t59619
+    storel %t59625, %t59443
+    dbgloc 1058
+    %t59626 =l loadl %t59443
+    %t59627 =l call $util__ptr_add_u8(l %t59440, l %t59626)
+    %t59628 =l call $memcpy(l %t59627, l %t59590, l %t59620)
     dbgloc 1059
-    %t59550 =l loadl %t59262
-    %t59551 =w copy 0
-    %t59552 =l extsw %t59551
-    %t59553 =w csgtl %t59550, %t59552
-    jnz %t59553, @then13539, @else13540
-@then13539
+    %t59629 =l loadl %t59443
+    %t59630 =l add %t59629, %t59620
+    storel %t59630, %t59443
     dbgloc 1060
-    %t59554 =l copy $str1935
-    %t59555 =l call $fopen(l %t59069, l %t59554)
+    %t59631 =w copy 10
+    %t59632 =w copy %t59631
+    %t59633 =l loadl %t59443
+    %t59634 =l call $util__ptr_add_u8(l %t59440, l %t59633)
+    storeb %t59632, %t59634
     dbgloc 1061
-    %t59556 =w copy 0
-    %t59557 =l extsw %t59556
-    %t59558 =w cnel %t59555, %t59557
-    jnz %t59558, @then13542, @else13543
-@then13542
-    dbgloc 1062
-    %t59559 =w copy 1
-    %t59560 =l extsw %t59559
-    %t59561 =l loadl %t59262
-    %t59562 =l call $fwrite(l %t59259, l %t59560, l %t59561, l %t59555)
+    %t59635 =l loadl %t59443
+    %t59636 =w copy 1
+    %t59637 =l extsw %t59636
+    %t59638 =l add %t59635, %t59637
+    storel %t59638, %t59443
     dbgloc 1063
-    %t59563 =w call $fclose(l %t59555)
-    jmp @merge13544
-@else13543
+    %t59639 =l loadl %t59451
+    %t59640 =w copy 1
+    %t59641 =l extsw %t59640
+    %t59643 =l copy 0
+    %t59642 =l sub %t59643, %t59641
+    %t59644 =w cnel %t59639, %t59642
+    jnz %t59644, @then13568, @else13569
+@then13568
     dbgloc 1064
+    %t59645 =l loadl %t59446
+    %t59646 =l loadl %t59451
+    %t59647 =l sub %t59645, %t59646
     dbgloc 1065
-    %t59564 =l copy $str1936
-    %t59565 =w call $jh_fputs_stderr(l %t59564)
-    jmp @merge13544
-@merge13544
-    jmp @merge13541
-@else13540
-    jmp @merge13541
-@merge13541
+    %t59648 =l loadl %t59443
+    %t59649 =l call $util__ptr_add_u8(l %t59440, l %t59648)
+    %t59650 =l loadl %t59451
+    %t59651 =l call $util__ptr_add_u8(l %t59416, l %t59650)
+    %t59652 =l call $memcpy(l %t59649, l %t59651, l %t59647)
+    dbgloc 1066
+    %t59653 =l loadl %t59443
+    %t59654 =l add %t59653, %t59647
+    storel %t59654, %t59443
+    jmp @merge13570
+@else13569
+    jmp @merge13570
+@merge13570
     dbgloc 1069
-    %t59566 =w call $free(l %t59083)
-    %t59567 =w call $free(l %t59099)
-    %t59568 =w call $free(l %t59105)
+    %t59655 =l loadl %t59443
+    %t59656 =l call $util__ptr_add_u8(l %t59440, l %t59655)
+    %t59657 =l loadl %t59446
+    %t59658 =l call $util__ptr_add_u8(l %t59416, l %t59657)
+    %t59659 =l call $memcpy(l %t59656, l %t59658, l %t59478)
     dbgloc 1070
-    %t59569 =w call $free(l %t59235)
-    %t59570 =w call $free(l %t59259)
-    dbgloc 1071
-    %t59571 =w copy 1
-    ret %t59571
+    %t59660 =l loadl %t59443
+    %t59661 =l add %t59660, %t59478
+    storel %t59661, %t59443
+    dbgloc 1072
+    %t59662 =w copy 1
+    %t59663 =l extsw %t59662
+    %t59665 =l copy 0
+    %t59664 =l sub %t59665, %t59663
+    storel %t59664, %t59456
+    dbgloc 1073
+    %t59666 =w copy 1
+    %t59667 =l extsw %t59666
+    %t59669 =l copy 0
+    %t59668 =l sub %t59669, %t59667
+    storel %t59668, %t59451
+    dbgloc 1074
+    %t59670 =w copy 1
+    storew %t59670, %t59540
+    jmp @merge13567
+@else13566
+    jmp @merge13567
+@merge13567
+    jmp @merge13558
+@else13557
+    jmp @merge13558
+@merge13558
+    dbgloc 1077
+    %t59671 =l loadl %t59577
+    %t59672 =w copy 1
+    %t59673 =l extsw %t59672
+    %t59674 =l add %t59671, %t59673
+    storel %t59674, %t59577
+    jmp @loop13553
+@exit13555
+    jmp @merge13546
+@else13545
+    jmp @merge13546
+@merge13546
+    dbgloc 1081
+    %t59675 =w loadw %t59540
+    %t59676 =w copy 0
+    %t59677 =w ceqw %t59675, %t59676
+    jnz %t59677, @then13571, @else13572
+@then13571
+    dbgloc 1083
+    %t59678 =l loadl %t59456
+    %t59679 =w copy 1
+    %t59680 =l extsw %t59679
+    %t59682 =l copy 0
+    %t59681 =l sub %t59682, %t59680
+    %t59683 =w cnel %t59678, %t59681
+    jnz %t59683, @then13574, @else13575
+@then13574
+    dbgloc 1084
+    %t59684 =l loadl %t59451
+    %t59685 =l loadl %t59456
+    %t59686 =l sub %t59684, %t59685
+    dbgloc 1085
+    %t59687 =l loadl %t59443
+    %t59688 =l call $util__ptr_add_u8(l %t59440, l %t59687)
+    %t59689 =l loadl %t59456
+    %t59690 =l call $util__ptr_add_u8(l %t59416, l %t59689)
+    %t59691 =l call $memcpy(l %t59688, l %t59690, l %t59686)
+    dbgloc 1086
+    %t59692 =l loadl %t59443
+    %t59693 =l add %t59692, %t59686
+    storel %t59693, %t59443
+    jmp @merge13576
+@else13575
+    jmp @merge13576
+@merge13576
+    dbgloc 1088
+    %t59694 =l loadl %t59451
+    storel %t59694, %t59456
+    dbgloc 1089
+    %t59695 =l loadl %t59446
+    storel %t59695, %t59451
+    jmp @merge13573
+@else13572
+    jmp @merge13573
+@merge13573
+    dbgloc 1092
+    %t59696 =l loadl %t59460
+    %t59697 =w copy 1
+    %t59698 =l extsw %t59697
+    %t59699 =l add %t59696, %t59698
+    storel %t59699, %t59446
+    jmp @loop13514
+@exit13516
+    dbgloc 1095
+    %t59700 =l loadl %t59456
+    %t59701 =w copy 1
+    %t59702 =l extsw %t59701
+    %t59704 =l copy 0
+    %t59703 =l sub %t59704, %t59702
+    %t59705 =w cnel %t59700, %t59703
+    jnz %t59705, @then13577, @else13578
+@then13577
+    dbgloc 1096
+    %t59706 =l loadl %t59451
+    %t59707 =l loadl %t59456
+    %t59708 =l sub %t59706, %t59707
+    dbgloc 1097
+    %t59709 =l loadl %t59443
+    %t59710 =l call $util__ptr_add_u8(l %t59440, l %t59709)
+    %t59711 =l loadl %t59456
+    %t59712 =l call $util__ptr_add_u8(l %t59416, l %t59711)
+    %t59713 =l call $memcpy(l %t59710, l %t59712, l %t59708)
+    dbgloc 1098
+    %t59714 =l loadl %t59443
+    %t59715 =l add %t59714, %t59708
+    storel %t59715, %t59443
+    jmp @merge13579
+@else13578
+    jmp @merge13579
+@merge13579
+    dbgloc 1100
+    %t59716 =l loadl %t59451
+    %t59717 =w copy 1
+    %t59718 =l extsw %t59717
+    %t59720 =l copy 0
+    %t59719 =l sub %t59720, %t59718
+    %t59721 =w cnel %t59716, %t59719
+    jnz %t59721, @then13580, @else13581
+@then13580
+    dbgloc 1101
+    %t59722 =l loadl %t59451
+    %t59723 =l sub %t59427, %t59722
+    dbgloc 1102
+    %t59724 =l loadl %t59443
+    %t59725 =l call $util__ptr_add_u8(l %t59440, l %t59724)
+    %t59726 =l loadl %t59451
+    %t59727 =l call $util__ptr_add_u8(l %t59416, l %t59726)
+    %t59728 =l call $memcpy(l %t59725, l %t59727, l %t59723)
+    dbgloc 1103
+    %t59729 =l loadl %t59443
+    %t59730 =l add %t59729, %t59723
+    storel %t59730, %t59443
+    jmp @merge13582
+@else13581
+    jmp @merge13582
+@merge13582
+    dbgloc 1107
+    %t59731 =l loadl %t59443
+    %t59732 =w copy 0
+    %t59733 =l extsw %t59732
+    %t59734 =w csgtl %t59731, %t59733
+    jnz %t59734, @then13583, @else13584
+@then13583
+    dbgloc 1108
+    %t59735 =l copy $str1942
+    %t59736 =l call $fopen(l %t59250, l %t59735)
+    dbgloc 1109
+    %t59737 =w copy 0
+    %t59738 =l extsw %t59737
+    %t59739 =w cnel %t59736, %t59738
+    jnz %t59739, @then13586, @else13587
+@then13586
+    dbgloc 1110
+    %t59740 =w copy 1
+    %t59741 =l extsw %t59740
+    %t59742 =l loadl %t59443
+    %t59743 =l call $fwrite(l %t59440, l %t59741, l %t59742, l %t59736)
+    dbgloc 1111
+    %t59744 =w call $fclose(l %t59736)
+    jmp @merge13588
+@else13587
+    dbgloc 1112
+    dbgloc 1113
+    %t59745 =l copy $str1943
+    %t59746 =w call $jh_fputs_stderr(l %t59745)
+    jmp @merge13588
+@merge13588
+    jmp @merge13585
+@else13584
+    jmp @merge13585
+@merge13585
+    dbgloc 1117
+    %t59747 =w call $free(l %t59264)
+    %t59748 =w call $free(l %t59280)
+    %t59749 =w call $free(l %t59286)
+    dbgloc 1118
+    %t59750 =w call $free(l %t59416)
+    %t59751 =w call $free(l %t59440)
+    dbgloc 1119
+    %t59752 =w copy 1
+    ret %t59752
 }
 
 export function w $link_with_gcc(l %asm_path, l %exe_path) {
-@start13545
-    %t59572 =l copy %asm_path
-    %t59573 =l copy %exe_path
-    dbgloc 1074
-    dbgloc 1077
-    %t59574 =l copy $str1937
-    dbgloc 1078
-    %t59575 =w call $jh_file_stat_ok(l %t59574)
-    dbgloc 1084
-    %t59576 =w call $jh_unlink_file(l %t59574)
-    dbgloc 1091
-    %t59577 =w copy 1024
-    %t59578 =l extsw %t59577
-    %t59579 =l call $malloc(l %t59578)
-    dbgloc 1092
-    %t59580 =w copy 1024
-    %t59581 =l extsw %t59580
-    %t59582 =l call $malloc(l %t59581)
-    dbgloc 1093
-    %t59583 =l copy $str1938
-    %t59584 =w copy 1024
-    %t59585 =w call $jh_mktemp_ascii(l %t59583, l %t59579, w %t59584)
-    dbgloc 1094
-    %t59586 =l copy $str1939
-    %t59587 =w copy 1024
-    %t59588 =w call $jh_mktemp_ascii(l %t59586, l %t59582, w %t59587)
-    dbgloc 1095
-    %t59589 =w copy 0
-    %t59590 =w cnew %t59585, %t59589
-    jnz %t59590, @sc_true13548, @sc_eval13546
-@sc_true13548
-    %t59592 =w copy 1
-    jmp @sc_merge13547
-@sc_eval13546
-    %t59593 =w copy 0
-    %t59594 =w cnew %t59588, %t59593
-    %t59595 =w cnew %t59594, 0
-    jmp @sc_merge13547
-@sc_merge13547
-    %t59591 =w phi @sc_true13548 %t59592, @sc_eval13546 %t59595
-    jnz %t59591, @then13549, @else13550
-@then13549
-    dbgloc 1096
-    %t59596 =l copy $str1940
-    %t59597 =w call $jh_fputs_stderr(l %t59596)
-    dbgloc 1097
-    %t59598 =w call $free(l %t59579)
-    %t59599 =w call $free(l %t59582)
-    %t59600 =w copy 1
-    ret %t59600
-@else13550
-    jmp @merge13551
-@merge13551
-    dbgloc 1103
-    %t59601 =l copy $str1941
-    dbgloc 1104
-    %t59602 =l call $strlen(l %t59579)
-    dbgloc 1105
-    %t59603 =l call $strlen(l %t59601)
-    dbgloc 1106
-    %t59604 =w copy 4
-    %t59605 =l extsw %t59604
-    %t59606 =l sub %t59602, %t59605
-    dbgloc 1107
-    %t59607 =l copy %t59579
-    %t59608 =l add %t59607, %t59606
-    %t59609 =l copy %t59608
-    dbgloc 1108
-    %t59610 =w copy 0
-    %t59611 =l extsw %t59610
-    %t59612 =l alloc8 8
-    storel %t59611, %t59612
-    jmp @loop13552
-@loop13552
-    dbgloc 1109
-    %t59613 =l loadl %t59612
-    %t59614 =w csltl %t59613, %t59603
-    jnz %t59614, @body13553, @exit13554
-@body13553
-    dbgloc 1110
-    %t59615 =l copy %t59601
-    %t59616 =l loadl %t59612
-    %t59617 =l add %t59615, %t59616
-    %t59618 =l copy %t59617
-    dbgloc 1111
-    %t59619 =l copy %t59609
-    %t59620 =l loadl %t59612
-    %t59621 =l add %t59619, %t59620
-    %t59622 =l copy %t59621
-    dbgloc 1112
-    %t59623 =w loadw %t59618
-    storew %t59623, %t59622
-    dbgloc 1113
-    %t59624 =l loadl %t59612
-    %t59625 =w copy 1
-    %t59626 =l extsw %t59625
-    %t59627 =l add %t59624, %t59626
-    storel %t59627, %t59612
-    jmp @loop13552
-@exit13554
-    dbgloc 1116
-    %t59628 =l copy %t59579
-    %t59629 =l add %t59628, %t59606
-    %t59630 =l add %t59629, %t59603
-    %t59631 =l copy %t59630
-    dbgloc 1117
-    %t59632 =w copy 0
-    %t59633 =w call $store_byte_i32(l %t59631, w %t59632)
-    dbgloc 1119
-    %t59634 =l copy $str1942
-    dbgloc 1120
-    %t59635 =l call $strlen(l %t59582)
-    dbgloc 1121
-    %t59636 =l call $strlen(l %t59634)
+@start13589
+    %t59753 =l copy %asm_path
+    %t59754 =l copy %exe_path
     dbgloc 1122
-    %t59637 =w copy 4
-    %t59638 =l extsw %t59637
-    %t59639 =l sub %t59635, %t59638
-    dbgloc 1123
-    %t59640 =l copy %t59582
-    %t59641 =l add %t59640, %t59639
-    %t59642 =l copy %t59641
-    dbgloc 1124
-    %t59643 =w copy 0
-    %t59644 =l extsw %t59643
-    storel %t59644, %t59612
-    jmp @loop13555
-@loop13555
     dbgloc 1125
-    %t59645 =l loadl %t59612
-    %t59646 =w csltl %t59645, %t59636
-    jnz %t59646, @body13556, @exit13557
-@body13556
+    %t59755 =l copy $str1944
     dbgloc 1126
-    %t59647 =l copy %t59634
-    %t59648 =l loadl %t59612
-    %t59649 =l add %t59647, %t59648
-    %t59650 =l copy %t59649
-    dbgloc 1127
-    %t59651 =l copy %t59642
-    %t59652 =l loadl %t59612
-    %t59653 =l add %t59651, %t59652
-    %t59654 =l copy %t59653
-    dbgloc 1128
-    %t59655 =w loadw %t59650
-    storew %t59655, %t59654
-    dbgloc 1129
-    %t59656 =l loadl %t59612
-    %t59657 =w copy 1
-    %t59658 =l extsw %t59657
-    %t59659 =l add %t59656, %t59658
-    storel %t59659, %t59612
-    jmp @loop13555
-@exit13557
+    %t59756 =w call $jh_file_stat_ok(l %t59755)
     dbgloc 1132
-    %t59660 =l copy %t59582
-    %t59661 =l add %t59660, %t59639
-    %t59662 =l add %t59661, %t59636
-    %t59663 =l copy %t59662
-    dbgloc 1133
-    %t59664 =w copy 0
-    %t59665 =w call $store_byte_i32(l %t59663, w %t59664)
-    dbgloc 1135
-    %t59666 =w call $jh_file_copy(l %t59572, l %t59579)
-    dbgloc 1136
-    %t59667 =w copy 0
-    %t59668 =w cnew %t59666, %t59667
-    jnz %t59668, @then13558, @else13559
-@then13558
-    dbgloc 1137
-    %t59669 =l copy $str1943
-    %t59670 =w call $jh_fputs_stderr(l %t59669)
-    dbgloc 1138
-    %t59671 =w call $jh_unlink_file(l %t59579)
+    %t59757 =w call $jh_unlink_file(l %t59755)
     dbgloc 1139
-    %t59672 =w call $free(l %t59579)
-    %t59673 =w call $free(l %t59582)
-    %t59674 =w copy 1
-    ret %t59674
-@else13559
-    jmp @merge13560
-@merge13560
-    dbgloc 1146
-    %t59675 =w call $apply_link_section_directives(l %t59579)
+    %t59758 =w copy 1024
+    %t59759 =l extsw %t59758
+    %t59760 =l call $malloc(l %t59759)
+    dbgloc 1140
+    %t59761 =w copy 1024
+    %t59762 =l extsw %t59761
+    %t59763 =l call $malloc(l %t59762)
+    dbgloc 1141
+    %t59764 =l copy $str1945
+    %t59765 =w copy 1024
+    %t59766 =w call $jh_mktemp_ascii(l %t59764, l %t59760, w %t59765)
+    dbgloc 1142
+    %t59767 =l copy $str1946
+    %t59768 =w copy 1024
+    %t59769 =w call $jh_mktemp_ascii(l %t59767, l %t59763, w %t59768)
+    dbgloc 1143
+    %t59770 =w copy 0
+    %t59771 =w cnew %t59766, %t59770
+    jnz %t59771, @sc_true13592, @sc_eval13590
+@sc_true13592
+    %t59773 =w copy 1
+    jmp @sc_merge13591
+@sc_eval13590
+    %t59774 =w copy 0
+    %t59775 =w cnew %t59769, %t59774
+    %t59776 =w cnew %t59775, 0
+    jmp @sc_merge13591
+@sc_merge13591
+    %t59772 =w phi @sc_true13592 %t59773, @sc_eval13590 %t59776
+    jnz %t59772, @then13593, @else13594
+@then13593
+    dbgloc 1144
+    %t59777 =l copy $str1947
+    %t59778 =w call $jh_fputs_stderr(l %t59777)
+    dbgloc 1145
+    %t59779 =w call $free(l %t59760)
+    %t59780 =w call $free(l %t59763)
+    %t59781 =w copy 1
+    ret %t59781
+@else13594
+    jmp @merge13595
+@merge13595
+    dbgloc 1151
+    %t59782 =l copy $str1948
+    dbgloc 1152
+    %t59783 =l call $strlen(l %t59760)
+    dbgloc 1153
+    %t59784 =l call $strlen(l %t59782)
+    dbgloc 1154
+    %t59785 =w copy 4
+    %t59786 =l extsw %t59785
+    %t59787 =l sub %t59783, %t59786
+    dbgloc 1155
+    %t59788 =l copy %t59760
+    %t59789 =l add %t59788, %t59787
+    %t59790 =l copy %t59789
+    dbgloc 1156
+    %t59791 =w copy 0
+    %t59792 =l extsw %t59791
+    %t59793 =l alloc8 8
+    storel %t59792, %t59793
+    jmp @loop13596
+@loop13596
+    dbgloc 1157
+    %t59794 =l loadl %t59793
+    %t59795 =w csltl %t59794, %t59784
+    jnz %t59795, @body13597, @exit13598
+@body13597
     dbgloc 1158
-    %t59676 =l copy $str1944
+    %t59796 =l copy %t59782
+    %t59797 =l loadl %t59793
+    %t59798 =l add %t59796, %t59797
+    %t59799 =l copy %t59798
     dbgloc 1159
-    %t59677 =w call $jh_file_stat_ok(l %t59676)
-    %t59678 =w copy 0
-    %t59679 =w cnew %t59677, %t59678
-    jnz %t59679, @then13561, @else13562
-@then13561
+    %t59800 =l copy %t59790
+    %t59801 =l loadl %t59793
+    %t59802 =l add %t59800, %t59801
+    %t59803 =l copy %t59802
     dbgloc 1160
-    %t59680 =l copy $str1945
-    %t59681 =l call $fopen(l %t59676, l %t59680)
+    %t59804 =w loadw %t59799
+    storew %t59804, %t59803
     dbgloc 1161
-    %t59682 =w copy 0
-    %t59683 =l extsw %t59682
-    %t59684 =w cnel %t59681, %t59683
-    jnz %t59684, @then13564, @else13565
-@then13564
-    dbgloc 1162
-    %t59685 =w copy 65536
-    %t59686 =l extsw %t59685
-    %t59687 =l call $malloc(l %t59686)
-    dbgloc 1163
-    %t59688 =w copy 1
-    %t59689 =l extsw %t59688
-    %t59690 =w copy 65536
-    %t59691 =l extsw %t59690
-    %t59692 =l call $fread(l %t59687, l %t59689, l %t59691, l %t59681)
+    %t59805 =l loadl %t59793
+    %t59806 =w copy 1
+    %t59807 =l extsw %t59806
+    %t59808 =l add %t59805, %t59807
+    storel %t59808, %t59793
+    jmp @loop13596
+@exit13598
     dbgloc 1164
-    %t59693 =w call $fclose(l %t59681)
+    %t59809 =l copy %t59760
+    %t59810 =l add %t59809, %t59787
+    %t59811 =l add %t59810, %t59784
+    %t59812 =l copy %t59811
     dbgloc 1165
-    %t59694 =w copy 0
-    %t59695 =l extsw %t59694
-    %t59696 =w csgtl %t59692, %t59695
-    jnz %t59696, @then13567, @else13568
-@then13567
-    dbgloc 1166
-    %t59697 =l copy $str1946
-    %t59698 =l call $fopen(l %t59579, l %t59697)
+    %t59813 =w copy 0
+    %t59814 =w call $store_byte_i32(l %t59812, w %t59813)
     dbgloc 1167
-    %t59699 =w copy 0
-    %t59700 =l extsw %t59699
-    %t59701 =w cnel %t59698, %t59700
-    jnz %t59701, @then13570, @else13571
-@then13570
+    %t59815 =l copy $str1949
     dbgloc 1168
-    %t59702 =w copy 1
-    %t59703 =l extsw %t59702
-    %t59704 =l call $fwrite(l %t59687, l %t59703, l %t59692, l %t59698)
+    %t59816 =l call $strlen(l %t59763)
     dbgloc 1169
-    %t59705 =w call $fclose(l %t59698)
-    jmp @merge13572
-@else13571
-    jmp @merge13572
-@merge13572
-    jmp @merge13569
-@else13568
-    jmp @merge13569
-@merge13569
-    dbgloc 1172
-    %t59706 =w call $free(l %t59687)
-    dbgloc 1173
-    %t59707 =w call $jh_unlink_file(l %t59676)
-    jmp @merge13566
-@else13565
-    jmp @merge13566
-@merge13566
-    jmp @merge13563
-@else13562
-    jmp @merge13563
-@merge13563
-    dbgloc 1183
-    %t59708 =l copy $str1947
-    dbgloc 1184
-    %t59709 =w call $jh_file_stat_ok(l %t59708)
-    %t59710 =w copy 0
-    %t59711 =w cnew %t59709, %t59710
-    jnz %t59711, @then13573, @else13574
-@then13573
-    dbgloc 1185
-    %t59712 =l copy $str1948
-    %t59713 =l call $fopen(l %t59708, l %t59712)
-    dbgloc 1186
-    %t59714 =w copy 0
-    %t59715 =l extsw %t59714
-    %t59716 =w cnel %t59713, %t59715
-    jnz %t59716, @then13576, @else13577
-@then13576
-    dbgloc 1187
-    %t59717 =w copy 4096
-    %t59718 =l extsw %t59717
-    %t59719 =l call $malloc(l %t59718)
-    dbgloc 1188
-    %t59720 =w copy 1
-    %t59721 =l extsw %t59720
-    %t59722 =w copy 4096
-    %t59723 =l extsw %t59722
-    %t59724 =l call $fread(l %t59719, l %t59721, l %t59723, l %t59713)
-    dbgloc 1189
-    %t59725 =w call $fclose(l %t59713)
-    dbgloc 1190
-    %t59726 =w copy 0
-    %t59727 =l extsw %t59726
-    %t59728 =w csgtl %t59724, %t59727
-    jnz %t59728, @then13579, @else13580
-@then13579
-    dbgloc 1191
-    %t59729 =l copy $str1949
-    %t59730 =l call $fopen(l %t59579, l %t59729)
-    dbgloc 1192
-    %t59731 =w copy 0
-    %t59732 =l extsw %t59731
-    %t59733 =w cnel %t59730, %t59732
-    jnz %t59733, @then13582, @else13583
-@then13582
-    dbgloc 1193
-    %t59734 =w copy 1
-    %t59735 =l extsw %t59734
-    %t59736 =l call $fwrite(l %t59719, l %t59735, l %t59724, l %t59730)
-    dbgloc 1194
-    %t59737 =w call $fclose(l %t59730)
-    jmp @merge13584
-@else13583
-    jmp @merge13584
-@merge13584
-    jmp @merge13581
-@else13580
-    jmp @merge13581
-@merge13581
-    dbgloc 1197
-    %t59738 =w call $free(l %t59719)
-    dbgloc 1198
-    %t59739 =w call $jh_unlink_file(l %t59708)
-    jmp @merge13578
-@else13577
-    jmp @merge13578
-@merge13578
-    jmp @merge13575
-@else13574
-    jmp @merge13575
-@merge13575
-    dbgloc 1212
-    %t59740 =l copy $str1950
-    dbgloc 1213
-    %t59741 =l copy $str1951
-    dbgloc 1214
-    %t59742 =w copy 16384
-    %t59743 =l extsw %t59742
-    %t59744 =l call $malloc(l %t59743)
-    dbgloc 1215
-    %t59745 =w copy 0
-    %t59746 =l extsw %t59745
-    %t59747 =l alloc8 8
-    storel %t59746, %t59747
-    dbgloc 1216
-    %t59748 =l copy $str1952
-    dbgloc 1222
-    %t59749 =l copy $str1953
-    dbgloc 1223
-    %t59750 =l loadl %t59747
-    %t59751 =l call $str_concat_at(l %t59744, l %t59750, l %t59749)
-    storel %t59751, %t59747
-    dbgloc 1224
-    %t59752 =l loadl %t59747
-    %t59753 =l call $str_concat_at(l %t59744, l %t59752, l %t59740)
-    storel %t59753, %t59747
-    dbgloc 1225
-    %t59754 =l loadl %t59747
-    %t59755 =l call $str_concat_at(l %t59744, l %t59754, l %t59579)
-    storel %t59755, %t59747
-    dbgloc 1226
-    %t59756 =l loadl %t59747
-    %t59757 =l call $str_concat_at(l %t59744, l %t59756, l %t59741)
-    storel %t59757, %t59747
-    dbgloc 1233
-    %t59758 =w copy 0
-    %t59759 =w ceqw %t59575, %t59758
-    jnz %t59759, @then13585, @else13586
-@then13585
-    dbgloc 1234
-    %t59760 =l loadl %t59747
-    %t59761 =l call $str_concat_at(l %t59744, l %t59760, l %t59748)
-    storel %t59761, %t59747
-    dbgloc 1235
-    %t59762 =l loadl %t59747
-    %t59763 =l call $str_concat_at(l %t59744, l %t59762, l %t59740)
-    storel %t59763, %t59747
-    dbgloc 1236
-    %t59764 =l loadl %t59747
-    %t59765 =l call $RUNTIME_C()
-    %t59766 =l call $str_concat_at(l %t59744, l %t59764, l %t59765)
-    storel %t59766, %t59747
-    dbgloc 1237
-    %t59767 =l loadl %t59747
-    %t59768 =l call $str_concat_at(l %t59744, l %t59767, l %t59741)
-    storel %t59768, %t59747
-    dbgloc 1238
-    %t59769 =l loadl %t59747
-    %t59770 =l call $str_concat_at(l %t59744, l %t59769, l %t59748)
-    storel %t59770, %t59747
-    dbgloc 1239
-    %t59771 =l loadl %t59747
-    %t59772 =l call $str_concat_at(l %t59744, l %t59771, l %t59740)
-    storel %t59772, %t59747
-    dbgloc 1240
-    %t59773 =l loadl %t59747
-    %t59774 =l call $HELPERS_C()
-    %t59775 =l call $str_concat_at(l %t59744, l %t59773, l %t59774)
-    storel %t59775, %t59747
-    dbgloc 1241
-    %t59776 =l loadl %t59747
-    %t59777 =l call $str_concat_at(l %t59744, l %t59776, l %t59741)
-    storel %t59777, %t59747
-    jmp @merge13587
-@else13586
-    dbgloc 1242
-    dbgloc 1245
-    %t59778 =l copy $str1954
-    dbgloc 1246
-    %t59779 =l loadl %t59747
-    %t59780 =l call $str_concat_at(l %t59744, l %t59779, l %t59778)
-    storel %t59780, %t59747
-    jmp @merge13587
-@merge13587
-    dbgloc 1248
-    %t59781 =l copy $str1955
-    dbgloc 1249
-    %t59782 =l loadl %t59747
-    %t59783 =l call $str_concat_at(l %t59744, l %t59782, l %t59781)
-    storel %t59783, %t59747
-    dbgloc 1250
-    %t59784 =l loadl %t59747
-    %t59785 =l call $str_concat_at(l %t59744, l %t59784, l %t59740)
-    storel %t59785, %t59747
-    dbgloc 1251
-    %t59786 =l loadl %t59747
-    %t59787 =l call $str_concat_at(l %t59744, l %t59786, l %t59582)
-    storel %t59787, %t59747
-    dbgloc 1252
-    %t59788 =l loadl %t59747
-    %t59789 =l call $str_concat_at(l %t59744, l %t59788, l %t59741)
-    storel %t59789, %t59747
-    dbgloc 1253
-    %t59790 =l copy $str1956
-    dbgloc 1254
-    %t59791 =l loadl %t59747
-    %t59792 =l call $str_concat_at(l %t59744, l %t59791, l %t59790)
-    storel %t59792, %t59747
-    dbgloc 1255
-    %t59793 =l copy %t59744
-    %t59794 =l loadl %t59747
-    %t59795 =l add %t59793, %t59794
-    %t59796 =l copy %t59795
-    dbgloc 1256
-    %t59797 =w copy 0
-    %t59798 =w call $store_byte_i32(l %t59796, w %t59797)
-    dbgloc 1267
-    %t59799 =l copy $str1957
-    %t59800 =l copy $str1958
-    %t59801 =w call $jh_setenv(l %t59799, l %t59800)
-    dbgloc 1269
-    %t59802 =w call $path_to_win(l %t59573)
-    dbgloc 1276
-    %t59803 =w copy 16384
-    %t59804 =l extsw %t59803
-    %t59805 =l call $malloc(l %t59804)
-    dbgloc 1277
-    dbgloc 1278
-    %t59806 =w copy 16384
-    %t59807 =w call $jh_gcc_invoke(l %t59805, w %t59806, l %t59744)
-    dbgloc 1279
-    %t59808 =w call $path_to_win(l %t59573)
-    dbgloc 1280
-    %t59809 =w call $jh_run(l %t59805)
-    dbgloc 1281
-    %t59810 =l call $jh_run_get_output()
-    dbgloc 1282
-    %t59811 =w copy 0
-    %t59812 =w cnew %t59809, %t59811
-    jnz %t59812, @then13588, @else13589
-@then13588
-    dbgloc 1287
-    %t59813 =l copy $str1959
-    %t59814 =w call $jh_fputs_stderr(l %t59813)
-    dbgloc 1288
-    %t59815 =w call $jh_fputs_stderr(l %t59805)
-    dbgloc 1289
-    %t59816 =l copy $str1960
-    %t59817 =w call $jh_fputs_stderr(l %t59816)
-    dbgloc 1295
-    %t59818 =w copy 0
+    %t59817 =l call $strlen(l %t59815)
+    dbgloc 1170
+    %t59818 =w copy 4
     %t59819 =l extsw %t59818
-    %t59820 =w cnel %t59810, %t59819
-    jnz %t59820, @then13591, @else13592
-@then13591
-    dbgloc 1296
-    %t59821 =w loadub %t59810
-    dbgloc 1297
-    %t59822 =w copy 0
-    %t59823 =w cnew %t59821, %t59822
-    jnz %t59823, @then13594, @else13595
-@then13594
-    dbgloc 1298
-    %t59824 =l copy $str1961
-    %t59825 =w call $jh_fputs_stderr(l %t59824)
-    dbgloc 1299
-    %t59826 =w call $jh_fputs_stderr(l %t59810)
-    dbgloc 1300
-    %t59827 =l copy $str1962
-    %t59828 =w call $jh_fputs_stderr(l %t59827)
-    jmp @merge13596
-@else13595
-    jmp @merge13596
-@merge13596
-    jmp @merge13593
-@else13592
-    jmp @merge13593
-@merge13593
-    dbgloc 1303
-    %t59829 =w call $free(l %t59805)
-    dbgloc 1304
-    %t59830 =w call $free(l %t59744)
-    dbgloc 1305
-    %t59831 =w call $jh_unlink_file(l %t59579)
-    dbgloc 1306
-    %t59832 =w call $free(l %t59579)
-    %t59833 =w call $free(l %t59582)
-    dbgloc 1307
-    %t59834 =w copy 1
-    ret %t59834
-@else13589
-    jmp @merge13590
-@merge13590
-    dbgloc 1310
-    %t59835 =w call $jh_rename_file(l %t59582, l %t59573)
-    dbgloc 1311
-    %t59836 =w copy 0
-    %t59837 =w cnew %t59835, %t59836
-    jnz %t59837, @then13597, @else13598
-@then13597
-    dbgloc 1312
-    %t59838 =l copy $str1963
-    %t59839 =w call $jh_fputs_stderr(l %t59838)
-    dbgloc 1313
-    %t59840 =w call $jh_fputs_stderr(l %t59582)
-    dbgloc 1314
-    %t59841 =l copy $str1964
-    %t59842 =w call $jh_fputs_stderr(l %t59841)
-    dbgloc 1315
-    %t59843 =w call $free(l %t59805)
-    dbgloc 1316
-    %t59844 =w call $free(l %t59744)
-    dbgloc 1317
-    %t59845 =w call $jh_unlink_file(l %t59579)
-    dbgloc 1318
-    %t59846 =w call $free(l %t59579)
-    %t59847 =w call $free(l %t59582)
-    dbgloc 1319
-    %t59848 =w copy 1
-    ret %t59848
-@else13598
-    jmp @merge13599
-@merge13599
-    dbgloc 1324
-    %t59849 =w call $jh_file_stat_ok(l %t59573)
-    %t59850 =w copy 0
-    %t59851 =w ceqw %t59849, %t59850
-    jnz %t59851, @then13600, @else13601
-@then13600
-    dbgloc 1325
-    %t59852 =l copy $str1965
-    %t59853 =w call $jh_fputs_stderr(l %t59852)
-    dbgloc 1326
-    %t59854 =w call $jh_fputs_stderr(l %t59573)
-    dbgloc 1327
-    %t59855 =l copy $str1966
-    %t59856 =w call $jh_fputs_stderr(l %t59855)
-    dbgloc 1328
-    %t59857 =w call $free(l %t59805)
-    dbgloc 1329
-    %t59858 =w call $free(l %t59744)
-    dbgloc 1330
-    %t59859 =w call $jh_unlink_file(l %t59579)
-    dbgloc 1331
-    %t59860 =w call $free(l %t59579)
-    %t59861 =w call $free(l %t59582)
-    dbgloc 1332
-    %t59862 =w copy 1
-    ret %t59862
-@else13601
-    jmp @merge13602
-@merge13602
-    dbgloc 1334
-    %t59863 =w call $free(l %t59805)
-    dbgloc 1335
-    %t59864 =w call $free(l %t59744)
-    dbgloc 1336
-    %t59865 =w call $jh_unlink_file(l %t59579)
-    dbgloc 1337
-    %t59866 =w call $free(l %t59579)
-    %t59867 =w call $free(l %t59582)
-    dbgloc 1338
-    %t59868 =w copy 0
-    ret %t59868
-}
-
-export function w $derive_output_name(l %input, l %out_buf) {
-@start13603
-    %t59869 =l copy %input
-    %t59870 =l copy %out_buf
-    dbgloc 1342
-    dbgloc 1343
-    %t59871 =l call $strlen(l %t59869)
-    dbgloc 1344
-    %t59872 =l call $str_copy(l %t59870, l %t59869)
-    dbgloc 1345
-    %t59873 =l copy %t59870
-    %t59874 =l add %t59873, %t59871
-    %t59875 =l copy %t59874
-    dbgloc 1346
-    %t59876 =w copy 0
-    %t59877 =w call $store_byte_i32(l %t59875, w %t59876)
-    dbgloc 1347
-    %t59878 =w copy 46
-    %t59879 =l call $strrchr(l %t59870, w %t59878)
-    dbgloc 1348
+    %t59820 =l sub %t59816, %t59819
+    dbgloc 1171
+    %t59821 =l copy %t59763
+    %t59822 =l add %t59821, %t59820
+    %t59823 =l copy %t59822
+    dbgloc 1172
+    %t59824 =w copy 0
+    %t59825 =l extsw %t59824
+    storel %t59825, %t59793
+    jmp @loop13599
+@loop13599
+    dbgloc 1173
+    %t59826 =l loadl %t59793
+    %t59827 =w csltl %t59826, %t59817
+    jnz %t59827, @body13600, @exit13601
+@body13600
+    dbgloc 1174
+    %t59828 =l copy %t59815
+    %t59829 =l loadl %t59793
+    %t59830 =l add %t59828, %t59829
+    %t59831 =l copy %t59830
+    dbgloc 1175
+    %t59832 =l copy %t59823
+    %t59833 =l loadl %t59793
+    %t59834 =l add %t59832, %t59833
+    %t59835 =l copy %t59834
+    dbgloc 1176
+    %t59836 =w loadw %t59831
+    storew %t59836, %t59835
+    dbgloc 1177
+    %t59837 =l loadl %t59793
+    %t59838 =w copy 1
+    %t59839 =l extsw %t59838
+    %t59840 =l add %t59837, %t59839
+    storel %t59840, %t59793
+    jmp @loop13599
+@exit13601
+    dbgloc 1180
+    %t59841 =l copy %t59763
+    %t59842 =l add %t59841, %t59820
+    %t59843 =l add %t59842, %t59817
+    %t59844 =l copy %t59843
+    dbgloc 1181
+    %t59845 =w copy 0
+    %t59846 =w call $store_byte_i32(l %t59844, w %t59845)
+    dbgloc 1183
+    %t59847 =w call $jh_file_copy(l %t59753, l %t59760)
+    dbgloc 1184
+    %t59848 =w copy 0
+    %t59849 =w cnew %t59847, %t59848
+    jnz %t59849, @then13602, @else13603
+@then13602
+    dbgloc 1185
+    %t59850 =l copy $str1950
+    %t59851 =w call $jh_fputs_stderr(l %t59850)
+    dbgloc 1186
+    %t59852 =w call $jh_unlink_file(l %t59760)
+    dbgloc 1187
+    %t59853 =w call $free(l %t59760)
+    %t59854 =w call $free(l %t59763)
+    %t59855 =w copy 1
+    ret %t59855
+@else13603
+    jmp @merge13604
+@merge13604
+    dbgloc 1194
+    %t59856 =w call $apply_link_section_directives(l %t59760)
+    dbgloc 1206
+    %t59857 =l copy $str1951
+    dbgloc 1207
+    %t59858 =w call $jh_file_stat_ok(l %t59857)
+    %t59859 =w copy 0
+    %t59860 =w cnew %t59858, %t59859
+    jnz %t59860, @then13605, @else13606
+@then13605
+    dbgloc 1208
+    %t59861 =l copy $str1952
+    %t59862 =l call $fopen(l %t59857, l %t59861)
+    dbgloc 1209
+    %t59863 =w copy 0
+    %t59864 =l extsw %t59863
+    %t59865 =w cnel %t59862, %t59864
+    jnz %t59865, @then13608, @else13609
+@then13608
+    dbgloc 1210
+    %t59866 =w copy 65536
+    %t59867 =l extsw %t59866
+    %t59868 =l call $malloc(l %t59867)
+    dbgloc 1211
+    %t59869 =w copy 1
+    %t59870 =l extsw %t59869
+    %t59871 =w copy 65536
+    %t59872 =l extsw %t59871
+    %t59873 =l call $fread(l %t59868, l %t59870, l %t59872, l %t59862)
+    dbgloc 1212
+    %t59874 =w call $fclose(l %t59862)
+    dbgloc 1213
+    %t59875 =w copy 0
+    %t59876 =l extsw %t59875
+    %t59877 =w csgtl %t59873, %t59876
+    jnz %t59877, @then13611, @else13612
+@then13611
+    dbgloc 1214
+    %t59878 =l copy $str1953
+    %t59879 =l call $fopen(l %t59760, l %t59878)
+    dbgloc 1215
     %t59880 =w copy 0
     %t59881 =l extsw %t59880
     %t59882 =w cnel %t59879, %t59881
-    jnz %t59882, @then13604, @else13605
-@then13604
-    dbgloc 1349
-    %t59883 =w copy 0
-    %t59884 =w call $store_byte_i32(l %t59879, w %t59883)
-    jmp @merge13606
-@else13605
-    jmp @merge13606
-@merge13606
-    dbgloc 1351
-    %t59885 =w copy 0
-    ret %t59885
-}
-
-export function w $cmd_build(w %argc, l %argv, w %t) {
-@start13607
-    %t59886 =w copy %argc
-    %t59887 =l copy %argv
-    %t59888 =w copy %t
-    dbgloc 1356
-    dbgloc 1357
-    %t59889 =w copy 1
-    %t59890 =w csltw %t59886, %t59889
-    jnz %t59890, @then13608, @else13609
-@then13608
-    dbgloc 1358
-    %t59891 =l copy $str1967
-    %t59892 =w call $jh_fputs_stderr(l %t59891)
-    dbgloc 1359
-    %t59893 =w copy 1
-    ret %t59893
+    jnz %t59882, @then13614, @else13615
+@then13614
+    dbgloc 1216
+    %t59883 =w copy 1
+    %t59884 =l extsw %t59883
+    %t59885 =l call $fwrite(l %t59868, l %t59884, l %t59873, l %t59879)
+    dbgloc 1217
+    %t59886 =w call $fclose(l %t59879)
+    jmp @merge13616
+@else13615
+    jmp @merge13616
+@merge13616
+    jmp @merge13613
+@else13612
+    jmp @merge13613
+@merge13613
+    dbgloc 1220
+    %t59887 =w call $free(l %t59868)
+    dbgloc 1221
+    %t59888 =w call $jh_unlink_file(l %t59857)
+    jmp @merge13610
 @else13609
     jmp @merge13610
 @merge13610
+    jmp @merge13607
+@else13606
+    jmp @merge13607
+@merge13607
+    dbgloc 1231
+    %t59889 =l copy $str1954
+    dbgloc 1232
+    %t59890 =w call $jh_file_stat_ok(l %t59889)
+    %t59891 =w copy 0
+    %t59892 =w cnew %t59890, %t59891
+    jnz %t59892, @then13617, @else13618
+@then13617
+    dbgloc 1233
+    %t59893 =l copy $str1955
+    %t59894 =l call $fopen(l %t59889, l %t59893)
+    dbgloc 1234
+    %t59895 =w copy 0
+    %t59896 =l extsw %t59895
+    %t59897 =w cnel %t59894, %t59896
+    jnz %t59897, @then13620, @else13621
+@then13620
+    dbgloc 1235
+    %t59898 =w copy 4096
+    %t59899 =l extsw %t59898
+    %t59900 =l call $malloc(l %t59899)
+    dbgloc 1236
+    %t59901 =w copy 1
+    %t59902 =l extsw %t59901
+    %t59903 =w copy 4096
+    %t59904 =l extsw %t59903
+    %t59905 =l call $fread(l %t59900, l %t59902, l %t59904, l %t59894)
+    dbgloc 1237
+    %t59906 =w call $fclose(l %t59894)
+    dbgloc 1238
+    %t59907 =w copy 0
+    %t59908 =l extsw %t59907
+    %t59909 =w csgtl %t59905, %t59908
+    jnz %t59909, @then13623, @else13624
+@then13623
+    dbgloc 1239
+    %t59910 =l copy $str1956
+    %t59911 =l call $fopen(l %t59760, l %t59910)
+    dbgloc 1240
+    %t59912 =w copy 0
+    %t59913 =l extsw %t59912
+    %t59914 =w cnel %t59911, %t59913
+    jnz %t59914, @then13626, @else13627
+@then13626
+    dbgloc 1241
+    %t59915 =w copy 1
+    %t59916 =l extsw %t59915
+    %t59917 =l call $fwrite(l %t59900, l %t59916, l %t59905, l %t59911)
+    dbgloc 1242
+    %t59918 =w call $fclose(l %t59911)
+    jmp @merge13628
+@else13627
+    jmp @merge13628
+@merge13628
+    jmp @merge13625
+@else13624
+    jmp @merge13625
+@merge13625
+    dbgloc 1245
+    %t59919 =w call $free(l %t59900)
+    dbgloc 1246
+    %t59920 =w call $jh_unlink_file(l %t59889)
+    jmp @merge13622
+@else13621
+    jmp @merge13622
+@merge13622
+    jmp @merge13619
+@else13618
+    jmp @merge13619
+@merge13619
+    dbgloc 1260
+    %t59921 =l copy $str1957
+    dbgloc 1261
+    %t59922 =l copy $str1958
+    dbgloc 1262
+    %t59923 =w copy 16384
+    %t59924 =l extsw %t59923
+    %t59925 =l call $malloc(l %t59924)
+    dbgloc 1263
+    %t59926 =w copy 0
+    %t59927 =l extsw %t59926
+    %t59928 =l alloc8 8
+    storel %t59927, %t59928
+    dbgloc 1264
+    %t59929 =l copy $str1959
+    dbgloc 1270
+    %t59930 =l copy $str1960
+    dbgloc 1271
+    %t59931 =l loadl %t59928
+    %t59932 =l call $str_concat_at(l %t59925, l %t59931, l %t59930)
+    storel %t59932, %t59928
+    dbgloc 1272
+    %t59933 =l loadl %t59928
+    %t59934 =l call $str_concat_at(l %t59925, l %t59933, l %t59921)
+    storel %t59934, %t59928
+    dbgloc 1273
+    %t59935 =l loadl %t59928
+    %t59936 =l call $str_concat_at(l %t59925, l %t59935, l %t59760)
+    storel %t59936, %t59928
+    dbgloc 1274
+    %t59937 =l loadl %t59928
+    %t59938 =l call $str_concat_at(l %t59925, l %t59937, l %t59922)
+    storel %t59938, %t59928
+    dbgloc 1281
+    %t59939 =w copy 0
+    %t59940 =w ceqw %t59756, %t59939
+    jnz %t59940, @then13629, @else13630
+@then13629
+    dbgloc 1282
+    %t59941 =l loadl %t59928
+    %t59942 =l call $str_concat_at(l %t59925, l %t59941, l %t59929)
+    storel %t59942, %t59928
+    dbgloc 1283
+    %t59943 =l loadl %t59928
+    %t59944 =l call $str_concat_at(l %t59925, l %t59943, l %t59921)
+    storel %t59944, %t59928
+    dbgloc 1284
+    %t59945 =l loadl %t59928
+    %t59946 =l call $RUNTIME_C()
+    %t59947 =l call $str_concat_at(l %t59925, l %t59945, l %t59946)
+    storel %t59947, %t59928
+    dbgloc 1285
+    %t59948 =l loadl %t59928
+    %t59949 =l call $str_concat_at(l %t59925, l %t59948, l %t59922)
+    storel %t59949, %t59928
+    dbgloc 1286
+    %t59950 =l loadl %t59928
+    %t59951 =l call $str_concat_at(l %t59925, l %t59950, l %t59929)
+    storel %t59951, %t59928
+    dbgloc 1287
+    %t59952 =l loadl %t59928
+    %t59953 =l call $str_concat_at(l %t59925, l %t59952, l %t59921)
+    storel %t59953, %t59928
+    dbgloc 1288
+    %t59954 =l loadl %t59928
+    %t59955 =l call $HELPERS_C()
+    %t59956 =l call $str_concat_at(l %t59925, l %t59954, l %t59955)
+    storel %t59956, %t59928
+    dbgloc 1289
+    %t59957 =l loadl %t59928
+    %t59958 =l call $str_concat_at(l %t59925, l %t59957, l %t59922)
+    storel %t59958, %t59928
+    jmp @merge13631
+@else13630
+    dbgloc 1290
+    dbgloc 1293
+    %t59959 =l copy $str1961
+    dbgloc 1294
+    %t59960 =l loadl %t59928
+    %t59961 =l call $str_concat_at(l %t59925, l %t59960, l %t59959)
+    storel %t59961, %t59928
+    jmp @merge13631
+@merge13631
+    dbgloc 1296
+    %t59962 =l copy $str1962
+    dbgloc 1297
+    %t59963 =l loadl %t59928
+    %t59964 =l call $str_concat_at(l %t59925, l %t59963, l %t59962)
+    storel %t59964, %t59928
+    dbgloc 1298
+    %t59965 =l loadl %t59928
+    %t59966 =l call $str_concat_at(l %t59925, l %t59965, l %t59921)
+    storel %t59966, %t59928
+    dbgloc 1299
+    %t59967 =l loadl %t59928
+    %t59968 =l call $str_concat_at(l %t59925, l %t59967, l %t59763)
+    storel %t59968, %t59928
+    dbgloc 1300
+    %t59969 =l loadl %t59928
+    %t59970 =l call $str_concat_at(l %t59925, l %t59969, l %t59922)
+    storel %t59970, %t59928
+    dbgloc 1301
+    %t59971 =l copy $str1963
+    dbgloc 1302
+    %t59972 =l loadl %t59928
+    %t59973 =l call $str_concat_at(l %t59925, l %t59972, l %t59971)
+    storel %t59973, %t59928
+    dbgloc 1303
+    %t59974 =l copy %t59925
+    %t59975 =l loadl %t59928
+    %t59976 =l add %t59974, %t59975
+    %t59977 =l copy %t59976
+    dbgloc 1304
+    %t59978 =w copy 0
+    %t59979 =w call $store_byte_i32(l %t59977, w %t59978)
+    dbgloc 1315
+    %t59980 =l copy $str1964
+    %t59981 =l copy $str1965
+    %t59982 =w call $jh_setenv(l %t59980, l %t59981)
+    dbgloc 1317
+    %t59983 =w call $path_to_win(l %t59754)
+    dbgloc 1324
+    %t59984 =w copy 16384
+    %t59985 =l extsw %t59984
+    %t59986 =l call $malloc(l %t59985)
+    dbgloc 1325
+    dbgloc 1326
+    %t59987 =w copy 16384
+    %t59988 =w call $jh_gcc_invoke(l %t59986, w %t59987, l %t59925)
+    dbgloc 1327
+    %t59989 =w call $path_to_win(l %t59754)
+    dbgloc 1328
+    %t59990 =w call $jh_run(l %t59986)
+    dbgloc 1329
+    %t59991 =l call $jh_run_get_output()
+    dbgloc 1330
+    %t59992 =w copy 0
+    %t59993 =w cnew %t59990, %t59992
+    jnz %t59993, @then13632, @else13633
+@then13632
+    dbgloc 1335
+    %t59994 =l copy $str1966
+    %t59995 =w call $jh_fputs_stderr(l %t59994)
+    dbgloc 1336
+    %t59996 =w call $jh_fputs_stderr(l %t59986)
+    dbgloc 1337
+    %t59997 =l copy $str1967
+    %t59998 =w call $jh_fputs_stderr(l %t59997)
+    dbgloc 1343
+    %t59999 =w copy 0
+    %t60000 =l extsw %t59999
+    %t60001 =w cnel %t59991, %t60000
+    jnz %t60001, @then13635, @else13636
+@then13635
+    dbgloc 1344
+    %t60002 =w loadub %t59991
+    dbgloc 1345
+    %t60003 =w copy 0
+    %t60004 =w cnew %t60002, %t60003
+    jnz %t60004, @then13638, @else13639
+@then13638
+    dbgloc 1346
+    %t60005 =l copy $str1968
+    %t60006 =w call $jh_fputs_stderr(l %t60005)
+    dbgloc 1347
+    %t60007 =w call $jh_fputs_stderr(l %t59991)
+    dbgloc 1348
+    %t60008 =l copy $str1969
+    %t60009 =w call $jh_fputs_stderr(l %t60008)
+    jmp @merge13640
+@else13639
+    jmp @merge13640
+@merge13640
+    jmp @merge13637
+@else13636
+    jmp @merge13637
+@merge13637
+    dbgloc 1351
+    %t60010 =w call $free(l %t59986)
+    dbgloc 1352
+    %t60011 =w call $free(l %t59925)
+    dbgloc 1353
+    %t60012 =w call $jh_unlink_file(l %t59760)
+    dbgloc 1354
+    %t60013 =w call $free(l %t59760)
+    %t60014 =w call $free(l %t59763)
+    dbgloc 1355
+    %t60015 =w copy 1
+    ret %t60015
+@else13633
+    jmp @merge13634
+@merge13634
+    dbgloc 1358
+    %t60016 =w call $jh_rename_file(l %t59763, l %t59754)
+    dbgloc 1359
+    %t60017 =w copy 0
+    %t60018 =w cnew %t60016, %t60017
+    jnz %t60018, @then13641, @else13642
+@then13641
+    dbgloc 1360
+    %t60019 =l copy $str1970
+    %t60020 =w call $jh_fputs_stderr(l %t60019)
+    dbgloc 1361
+    %t60021 =w call $jh_fputs_stderr(l %t59763)
     dbgloc 1362
-    %t59894 =l copy %t59887
+    %t60022 =l copy $str1971
+    %t60023 =w call $jh_fputs_stderr(l %t60022)
     dbgloc 1363
-    %t59895 =l loadl %t59894
+    %t60024 =w call $free(l %t59986)
     dbgloc 1364
-    %t59896 =w copy 1024
-    %t59897 =l extsw %t59896
-    %t59898 =l call $malloc(l %t59897)
+    %t60025 =w call $free(l %t59925)
     dbgloc 1365
-    %t59899 =w call $derive_output_name(l %t59895, l %t59898)
+    %t60026 =w call $jh_unlink_file(l %t59760)
     dbgloc 1366
-    %t59900 =w call $build_il(l %t59895, l %t59898, w %t59888)
+    %t60027 =w call $free(l %t59760)
+    %t60028 =w call $free(l %t59763)
     dbgloc 1367
-    %t59901 =w call $free(l %t59898)
-    dbgloc 1368
-    ret %t59900
+    %t60029 =w copy 1
+    ret %t60029
+@else13642
+    jmp @merge13643
+@merge13643
+    dbgloc 1372
+    %t60030 =w call $jh_file_stat_ok(l %t59754)
+    %t60031 =w copy 0
+    %t60032 =w ceqw %t60030, %t60031
+    jnz %t60032, @then13644, @else13645
+@then13644
+    dbgloc 1373
+    %t60033 =l copy $str1972
+    %t60034 =w call $jh_fputs_stderr(l %t60033)
+    dbgloc 1374
+    %t60035 =w call $jh_fputs_stderr(l %t59754)
+    dbgloc 1375
+    %t60036 =l copy $str1973
+    %t60037 =w call $jh_fputs_stderr(l %t60036)
+    dbgloc 1376
+    %t60038 =w call $free(l %t59986)
+    dbgloc 1377
+    %t60039 =w call $free(l %t59925)
+    dbgloc 1378
+    %t60040 =w call $jh_unlink_file(l %t59760)
+    dbgloc 1379
+    %t60041 =w call $free(l %t59760)
+    %t60042 =w call $free(l %t59763)
+    dbgloc 1380
+    %t60043 =w copy 1
+    ret %t60043
+@else13645
+    jmp @merge13646
+@merge13646
+    dbgloc 1382
+    %t60044 =w call $free(l %t59986)
+    dbgloc 1383
+    %t60045 =w call $free(l %t59925)
+    dbgloc 1384
+    %t60046 =w call $jh_unlink_file(l %t59760)
+    dbgloc 1385
+    %t60047 =w call $free(l %t59760)
+    %t60048 =w call $free(l %t59763)
+    dbgloc 1386
+    %t60049 =w copy 0
+    ret %t60049
+}
+
+export function w $derive_output_name(l %input, l %out_buf) {
+@start13647
+    %t60050 =l copy %input
+    %t60051 =l copy %out_buf
+    dbgloc 1390
+    dbgloc 1391
+    %t60052 =l call $strlen(l %t60050)
+    dbgloc 1392
+    %t60053 =l call $str_copy(l %t60051, l %t60050)
+    dbgloc 1393
+    %t60054 =l copy %t60051
+    %t60055 =l add %t60054, %t60052
+    %t60056 =l copy %t60055
+    dbgloc 1394
+    %t60057 =w copy 0
+    %t60058 =w call $store_byte_i32(l %t60056, w %t60057)
+    dbgloc 1395
+    %t60059 =w copy 46
+    %t60060 =l call $strrchr(l %t60051, w %t60059)
+    dbgloc 1396
+    %t60061 =w copy 0
+    %t60062 =l extsw %t60061
+    %t60063 =w cnel %t60060, %t60062
+    jnz %t60063, @then13648, @else13649
+@then13648
+    dbgloc 1397
+    %t60064 =w copy 0
+    %t60065 =w call $store_byte_i32(l %t60060, w %t60064)
+    jmp @merge13650
+@else13649
+    jmp @merge13650
+@merge13650
+    dbgloc 1399
+    %t60066 =w copy 0
+    ret %t60066
+}
+
+export function w $cmd_build(w %argc, l %argv, w %t) {
+@start13651
+    %t60067 =w copy %argc
+    %t60068 =l copy %argv
+    %t60069 =w copy %t
+    dbgloc 1404
+    dbgloc 1405
+    %t60070 =w copy 1
+    %t60071 =w csltw %t60067, %t60070
+    jnz %t60071, @then13652, @else13653
+@then13652
+    dbgloc 1406
+    %t60072 =l copy $str1974
+    %t60073 =w call $jh_fputs_stderr(l %t60072)
+    dbgloc 1407
+    %t60074 =w copy 1
+    ret %t60074
+@else13653
+    jmp @merge13654
+@merge13654
+    dbgloc 1410
+    %t60075 =l copy %t60068
+    dbgloc 1411
+    %t60076 =l loadl %t60075
+    dbgloc 1412
+    %t60077 =w copy 1024
+    %t60078 =l extsw %t60077
+    %t60079 =l call $malloc(l %t60078)
+    dbgloc 1413
+    %t60080 =w call $derive_output_name(l %t60076, l %t60079)
+    dbgloc 1414
+    %t60081 =w call $build_il(l %t60076, l %t60079, w %t60069)
+    dbgloc 1415
+    %t60082 =w call $free(l %t60079)
+    dbgloc 1416
+    ret %t60081
 }
 
 export function w $cmd_compile(w %argc, l %argv, w %t) {
-@start13611
-    %t59902 =w copy %argc
-    %t59903 =l copy %argv
-    %t59904 =w copy %t
-    dbgloc 1375
-    dbgloc 1376
-    %t59905 =w copy 1
-    %t59906 =w csltw %t59902, %t59905
-    jnz %t59906, @then13612, @else13613
-@then13612
-    dbgloc 1377
-    %t59907 =l copy $str1968
-    %t59908 =w call $jh_fputs_stderr(l %t59907)
-    dbgloc 1378
-    %t59909 =w copy 1
-    ret %t59909
-@else13613
-    jmp @merge13614
-@merge13614
-    dbgloc 1389
-    %t59910 =w copy 0
-    %t59911 =l extsw %t59910
-    %t59912 =l alloc8 8
-    storel %t59911, %t59912
-    dbgloc 1390
-    %t59913 =w copy 0
-    %t59914 =l extsw %t59913
-    %t59915 =l alloc8 8
-    storel %t59914, %t59915
-    dbgloc 1391
-    %t59916 =w copy 0
-    %t59917 =l alloc4 4
-    storew %t59916, %t59917
-    dbgloc 1392
-    %t59918 =w copy 0
-    %t59919 =l alloc4 4
-    storew %t59918, %t59919
-    jmp @loop13615
-@loop13615
-    dbgloc 1393
-    %t59920 =w loadw %t59919
-    %t59921 =w csltw %t59920, %t59902
-    jnz %t59921, @body13616, @exit13617
-@body13616
-    dbgloc 1394
-    %t59922 =w loadw %t59919
-    %t59923 =l extsw %t59922
-    dbgloc 1395
-    %t59924 =w copy 8
-    %t59925 =l extsw %t59924
-    %t59926 =l mul %t59923, %t59925
-    %t59927 =l call $util__ptr_add_u8(l %t59903, l %t59926)
-    %t59928 =l copy %t59927
-    dbgloc 1396
-    %t59929 =l loadl %t59928
-    dbgloc 1397
-    %t59930 =l copy $str1969
-    %t59931 =w call $strcmp(l %t59929, l %t59930)
-    %t59932 =w copy 0
-    %t59933 =w ceqw %t59931, %t59932
-    jnz %t59933, @then13618, @else13619
-@then13618
-    dbgloc 1398
-    %t59934 =w loadw %t59919
-    %t59935 =w copy 1
-    %t59936 =w add %t59934, %t59935
-    dbgloc 1399
-    %t59937 =w csltw %t59936, %t59902
-    jnz %t59937, @then13621, @else13622
-@then13621
-    dbgloc 1400
-    %t59938 =l extsw %t59936
-    dbgloc 1401
-    %t59939 =w copy 8
-    %t59940 =l extsw %t59939
-    %t59941 =l mul %t59938, %t59940
-    %t59942 =l call $util__ptr_add_u8(l %t59903, l %t59941)
-    %t59943 =l copy %t59942
-    dbgloc 1402
-    %t59944 =l loadl %t59943
-    storel %t59944, %t59915
-    dbgloc 1403
-    storew %t59936, %t59919
-    jmp @merge13623
-@else13622
-    jmp @merge13623
-@merge13623
-    jmp @merge13620
-@else13619
-    dbgloc 1405
-    dbgloc 1406
-    %t59945 =l copy $str1970
-    %t59946 =w call $strcmp(l %t59929, l %t59945)
-    %t59947 =w copy 0
-    %t59948 =w ceqw %t59946, %t59947
-    jnz %t59948, @then13624, @else13625
-@then13624
-    dbgloc 1407
-    %t59949 =w copy 1
-    storew %t59949, %t59917
-    jmp @merge13626
-@else13625
-    dbgloc 1408
-    dbgloc 1409
-    %t59950 =l loadl %t59912
-    %t59951 =w copy 0
-    %t59952 =l extsw %t59951
-    %t59953 =w ceql %t59950, %t59952
-    jnz %t59953, @then13627, @else13628
-@then13627
-    dbgloc 1410
-    storel %t59929, %t59912
-    jmp @merge13629
-@else13628
-    jmp @merge13629
-@merge13629
-    jmp @merge13626
-@merge13626
-    jmp @merge13620
-@merge13620
-    dbgloc 1414
-    %t59954 =w loadw %t59919
-    %t59955 =w copy 1
-    %t59956 =w add %t59954, %t59955
-    storew %t59956, %t59919
-    jmp @loop13615
-@exit13617
-    dbgloc 1416
-    %t59957 =l loadl %t59912
-    dbgloc 1417
-    %t59958 =l loadl %t59915
-    dbgloc 1419
-    %t59959 =l loadl %t59912
-    %t59960 =w copy 0
-    %t59961 =l extsw %t59960
-    %t59962 =w ceql %t59959, %t59961
-    jnz %t59962, @then13630, @else13631
-@then13630
-    dbgloc 1420
-    %t59963 =l copy $str1971
-    %t59964 =w call $jh_fputs_stderr(l %t59963)
-    dbgloc 1421
-    %t59965 =w copy 1
-    ret %t59965
-@else13631
-    jmp @merge13632
-@merge13632
+@start13655
+    %t60083 =w copy %argc
+    %t60084 =l copy %argv
+    %t60085 =w copy %t
+    dbgloc 1423
+    dbgloc 1424
+    %t60086 =w copy 1
+    %t60087 =w csltw %t60083, %t60086
+    jnz %t60087, @then13656, @else13657
+@then13656
     dbgloc 1425
-    %t59966 =w copy 1024
-    %t59967 =l extsw %t59966
-    %t59968 =l call $malloc(l %t59967)
+    %t60088 =l copy $str1975
+    %t60089 =w call $jh_fputs_stderr(l %t60088)
     dbgloc 1426
-    %t59969 =l loadl %t59912
-    %t59970 =w call $derive_output_name(l %t59969, l %t59968)
-    dbgloc 1427
-    %t59971 =l alloc8 8
-    storel %t59968, %t59971
-    dbgloc 1428
-    %t59972 =l loadl %t59915
-    %t59973 =w copy 0
-    %t59974 =l extsw %t59973
-    %t59975 =w cnel %t59972, %t59974
-    jnz %t59975, @then13633, @else13634
-@then13633
-    dbgloc 1429
-    %t59976 =w call $free(l %t59968)
-    dbgloc 1430
-    %t59977 =l loadl %t59915
-    storel %t59977, %t59971
-    jmp @merge13635
-@else13634
-    jmp @merge13635
-@merge13635
-    dbgloc 1433
-    %t59978 =l loadl %t59912
-    %t59979 =l loadl %t59971
-    %t59980 =w call $build_il(l %t59978, l %t59979, w %t59904)
-    %t59981 =w copy 0
-    %t59982 =w cnew %t59980, %t59981
-    jnz %t59982, @then13636, @else13637
-@then13636
-    dbgloc 1434
-    %t59983 =l loadl %t59915
-    %t59984 =w copy 0
-    %t59985 =l extsw %t59984
-    %t59986 =w ceql %t59983, %t59985
-    jnz %t59986, @then13639, @else13640
-@then13639
-    %t59987 =w call $free(l %t59968)
-    jmp @merge13641
-@else13640
-    jmp @merge13641
-@merge13641
-    dbgloc 1435
-    %t59988 =w copy 1
-    ret %t59988
-@else13637
-    jmp @merge13638
-@merge13638
+    %t60090 =w copy 1
+    ret %t60090
+@else13657
+    jmp @merge13658
+@merge13658
+    dbgloc 1437
+    %t60091 =w copy 0
+    %t60092 =l extsw %t60091
+    %t60093 =l alloc8 8
+    storel %t60092, %t60093
     dbgloc 1438
-    %t59989 =w copy 1024
-    %t59990 =l extsw %t59989
-    %t59991 =l call $malloc(l %t59990)
+    %t60094 =w copy 0
+    %t60095 =l extsw %t60094
+    %t60096 =l alloc8 8
+    storel %t60095, %t60096
     dbgloc 1439
-    %t59992 =w copy 1024
-    %t59993 =l extsw %t59992
-    %t59994 =l call $malloc(l %t59993)
+    %t60097 =w copy 0
+    %t60098 =l alloc4 4
+    storew %t60097, %t60098
     dbgloc 1440
-    %t59995 =w copy 1024
-    %t59996 =l extsw %t59995
-    %t59997 =l call $malloc(l %t59996)
+    %t60099 =w copy 0
+    %t60100 =l alloc4 4
+    storew %t60099, %t60100
+    jmp @loop13659
+@loop13659
     dbgloc 1441
-    %t59998 =l loadl %t59971
-    %t59999 =l call $strlen(l %t59998)
+    %t60101 =w loadw %t60100
+    %t60102 =w csltw %t60101, %t60083
+    jnz %t60102, @body13660, @exit13661
+@body13660
     dbgloc 1442
-    %t60000 =l loadl %t59971
-    %t60001 =l call $str_copy(l %t59991, l %t60000)
+    %t60103 =w loadw %t60100
+    %t60104 =l extsw %t60103
     dbgloc 1443
-    %t60002 =l copy $str1972
-    %t60003 =l call $str_concat_at(l %t59991, l %t59999, l %t60002)
+    %t60105 =w copy 8
+    %t60106 =l extsw %t60105
+    %t60107 =l mul %t60104, %t60106
+    %t60108 =l call $util__ptr_add_u8(l %t60084, l %t60107)
+    %t60109 =l copy %t60108
     dbgloc 1444
-    %t60004 =l copy %t59991
-    %t60005 =l add %t60004, %t60003
-    %t60006 =l copy %t60005
+    %t60110 =l loadl %t60109
     dbgloc 1445
-    %t60007 =w copy 0
-    %t60008 =w call $store_byte_i32(l %t60006, w %t60007)
+    %t60111 =l copy $str1976
+    %t60112 =w call $strcmp(l %t60110, l %t60111)
+    %t60113 =w copy 0
+    %t60114 =w ceqw %t60112, %t60113
+    jnz %t60114, @then13662, @else13663
+@then13662
     dbgloc 1446
-    %t60009 =l loadl %t59971
-    %t60010 =l call $str_copy(l %t59994, l %t60009)
+    %t60115 =w loadw %t60100
+    %t60116 =w copy 1
+    %t60117 =w add %t60115, %t60116
     dbgloc 1447
-    %t60011 =l copy $str1973
-    %t60012 =l call $str_concat_at(l %t59994, l %t59999, l %t60011)
+    %t60118 =w csltw %t60117, %t60083
+    jnz %t60118, @then13665, @else13666
+@then13665
     dbgloc 1448
-    %t60013 =l copy %t59994
-    %t60014 =l add %t60013, %t60012
-    %t60015 =l copy %t60014
+    %t60119 =l extsw %t60117
     dbgloc 1449
-    %t60016 =w copy 0
-    %t60017 =w call $store_byte_i32(l %t60015, w %t60016)
+    %t60120 =w copy 8
+    %t60121 =l extsw %t60120
+    %t60122 =l mul %t60119, %t60121
+    %t60123 =l call $util__ptr_add_u8(l %t60084, l %t60122)
+    %t60124 =l copy %t60123
     dbgloc 1450
-    %t60018 =l loadl %t59971
-    %t60019 =l call $str_copy(l %t59997, l %t60018)
+    %t60125 =l loadl %t60124
+    storel %t60125, %t60096
     dbgloc 1451
-    %t60020 =l copy $str1974
-    %t60021 =l call $str_concat_at(l %t59997, l %t59999, l %t60020)
-    dbgloc 1452
-    %t60022 =l copy %t59997
-    %t60023 =l add %t60022, %t60021
-    %t60024 =l copy %t60023
+    storew %t60117, %t60100
+    jmp @merge13667
+@else13666
+    jmp @merge13667
+@merge13667
+    jmp @merge13664
+@else13663
     dbgloc 1453
-    %t60025 =w copy 0
-    %t60026 =w call $store_byte_i32(l %t60024, w %t60025)
+    dbgloc 1454
+    %t60126 =l copy $str1977
+    %t60127 =w call $strcmp(l %t60110, l %t60126)
+    %t60128 =w copy 0
+    %t60129 =w ceqw %t60127, %t60128
+    jnz %t60129, @then13668, @else13669
+@then13668
     dbgloc 1455
-    %t60027 =w call $run_backend(l %t59991, l %t59994, w %t59904)
+    %t60130 =w copy 1
+    storew %t60130, %t60098
+    jmp @merge13670
+@else13669
     dbgloc 1456
-    %t60028 =w copy 0
-    %t60029 =w cnew %t60027, %t60028
-    jnz %t60029, @then13642, @else13643
-@then13642
     dbgloc 1457
-    %t60030 =l loadl %t59915
-    %t60031 =w copy 0
-    %t60032 =l extsw %t60031
-    %t60033 =w ceql %t60030, %t60032
-    jnz %t60033, @then13645, @else13646
-@then13645
-    %t60034 =w call $free(l %t59968)
-    jmp @merge13647
-@else13646
-    jmp @merge13647
-@merge13647
+    %t60131 =l loadl %t60093
+    %t60132 =w copy 0
+    %t60133 =l extsw %t60132
+    %t60134 =w ceql %t60131, %t60133
+    jnz %t60134, @then13671, @else13672
+@then13671
     dbgloc 1458
-    %t60035 =w call $free(l %t59991)
-    %t60036 =w call $free(l %t59994)
-    %t60037 =w call $free(l %t59997)
-    dbgloc 1459
-    %t60038 =w copy 1
-    ret %t60038
-@else13643
-    jmp @merge13644
-@merge13644
-    dbgloc 1463
-    %t60039 =w copy 0
-    %t60040 =l alloc4 4
-    storew %t60039, %t60040
+    storel %t60110, %t60093
+    jmp @merge13673
+@else13672
+    jmp @merge13673
+@merge13673
+    jmp @merge13670
+@merge13670
+    jmp @merge13664
+@merge13664
+    dbgloc 1462
+    %t60135 =w loadw %t60100
+    %t60136 =w copy 1
+    %t60137 =w add %t60135, %t60136
+    storew %t60137, %t60100
+    jmp @loop13659
+@exit13661
     dbgloc 1464
-    %t60041 =w loadw %t59917
-    %t60042 =w copy 1
-    %t60043 =w ceqw %t60041, %t60042
-    jnz %t60043, @then13648, @else13649
-@then13648
+    %t60138 =l loadl %t60093
     dbgloc 1465
-    %t60044 =l copy $str1975
-    %t60045 =w call $jh_fputs_stderr(l %t60044)
-    dbgloc 1466
-    %t60046 =w call $jh_fputs_stderr(l %t59994)
+    %t60139 =l loadl %t60096
     dbgloc 1467
-    %t60047 =l copy $str1976
-    %t60048 =w call $jh_fputs_stderr(l %t60047)
+    %t60140 =l loadl %t60093
+    %t60141 =w copy 0
+    %t60142 =l extsw %t60141
+    %t60143 =w ceql %t60140, %t60142
+    jnz %t60143, @then13674, @else13675
+@then13674
     dbgloc 1468
-    %t60049 =w copy 0
-    storew %t60049, %t60040
-    jmp @merge13650
-@else13649
+    %t60144 =l copy $str1978
+    %t60145 =w call $jh_fputs_stderr(l %t60144)
     dbgloc 1469
-    dbgloc 1470
-    %t60050 =w call $link_with_gcc(l %t59994, l %t59997)
-    storew %t60050, %t60040
-    jmp @merge13650
-@merge13650
-    dbgloc 1472
-    %t60051 =l loadl %t59915
-    %t60052 =w copy 0
-    %t60053 =l extsw %t60052
-    %t60054 =w ceql %t60051, %t60053
-    jnz %t60054, @then13651, @else13652
-@then13651
-    %t60055 =w call $free(l %t59968)
-    jmp @merge13653
-@else13652
-    jmp @merge13653
-@merge13653
+    %t60146 =w copy 1
+    ret %t60146
+@else13675
+    jmp @merge13676
+@merge13676
     dbgloc 1473
-    %t60056 =w call $free(l %t59991)
-    %t60057 =w call $free(l %t59994)
-    %t60058 =w call $free(l %t59997)
+    %t60147 =w copy 1024
+    %t60148 =l extsw %t60147
+    %t60149 =l call $malloc(l %t60148)
     dbgloc 1474
-    %t60059 =w loadw %t60040
-    %t60060 =w copy 0
-    %t60061 =w cnew %t60059, %t60060
-    jnz %t60061, @then13654, @else13655
-@then13654
+    %t60150 =l loadl %t60093
+    %t60151 =w call $derive_output_name(l %t60150, l %t60149)
     dbgloc 1475
-    %t60062 =w copy 1
-    ret %t60062
-@else13655
-    jmp @merge13656
-@merge13656
+    %t60152 =l alloc8 8
+    storel %t60149, %t60152
+    dbgloc 1476
+    %t60153 =l loadl %t60096
+    %t60154 =w copy 0
+    %t60155 =l extsw %t60154
+    %t60156 =w cnel %t60153, %t60155
+    jnz %t60156, @then13677, @else13678
+@then13677
     dbgloc 1477
-    %t60063 =w copy 0
-    ret %t60063
+    %t60157 =w call $free(l %t60149)
+    dbgloc 1478
+    %t60158 =l loadl %t60096
+    storel %t60158, %t60152
+    jmp @merge13679
+@else13678
+    jmp @merge13679
+@merge13679
+    dbgloc 1484
+    %t60159 =l loadl %t60093
+    %t60160 =l loadl %t60152
+    %t60161 =w call $build_il(l %t60159, l %t60160, w %t60085)
+    dbgloc 1485
+    %t60162 =w copy 1
+    %t60163 =w ceqw %t60161, %t60162
+    jnz %t60163, @then13680, @else13681
+@then13680
+    dbgloc 1486
+    %t60164 =l loadl %t60096
+    %t60165 =w copy 0
+    %t60166 =l extsw %t60165
+    %t60167 =w ceql %t60164, %t60166
+    jnz %t60167, @then13683, @else13684
+@then13683
+    %t60168 =w call $free(l %t60149)
+    jmp @merge13685
+@else13684
+    jmp @merge13685
+@merge13685
+    dbgloc 1487
+    %t60169 =w copy 1
+    ret %t60169
+@else13681
+    jmp @merge13682
+@merge13682
+    dbgloc 1490
+    %t60170 =w copy 1024
+    %t60171 =l extsw %t60170
+    %t60172 =l call $malloc(l %t60171)
+    dbgloc 1491
+    %t60173 =w copy 1024
+    %t60174 =l extsw %t60173
+    %t60175 =l call $malloc(l %t60174)
+    dbgloc 1492
+    %t60176 =w copy 1024
+    %t60177 =l extsw %t60176
+    %t60178 =l call $malloc(l %t60177)
+    dbgloc 1493
+    %t60179 =l loadl %t60152
+    %t60180 =l call $strlen(l %t60179)
+    dbgloc 1494
+    %t60181 =l loadl %t60152
+    %t60182 =l call $str_copy(l %t60172, l %t60181)
+    dbgloc 1495
+    %t60183 =l copy $str1979
+    %t60184 =l call $str_concat_at(l %t60172, l %t60180, l %t60183)
+    dbgloc 1496
+    %t60185 =l copy %t60172
+    %t60186 =l add %t60185, %t60184
+    %t60187 =l copy %t60186
+    dbgloc 1497
+    %t60188 =w copy 0
+    %t60189 =w call $store_byte_i32(l %t60187, w %t60188)
+    dbgloc 1498
+    %t60190 =l loadl %t60152
+    %t60191 =l call $str_copy(l %t60175, l %t60190)
+    dbgloc 1499
+    %t60192 =l copy $str1980
+    %t60193 =l call $str_concat_at(l %t60175, l %t60180, l %t60192)
+    dbgloc 1500
+    %t60194 =l copy %t60175
+    %t60195 =l add %t60194, %t60193
+    %t60196 =l copy %t60195
+    dbgloc 1501
+    %t60197 =w copy 0
+    %t60198 =w call $store_byte_i32(l %t60196, w %t60197)
+    dbgloc 1502
+    %t60199 =l loadl %t60152
+    %t60200 =l call $str_copy(l %t60178, l %t60199)
+    dbgloc 1503
+    %t60201 =l copy $str1981
+    %t60202 =l call $str_concat_at(l %t60178, l %t60180, l %t60201)
+    dbgloc 1504
+    %t60203 =l copy %t60178
+    %t60204 =l add %t60203, %t60202
+    %t60205 =l copy %t60204
+    dbgloc 1505
+    %t60206 =w copy 0
+    %t60207 =w call $store_byte_i32(l %t60205, w %t60206)
+    dbgloc 1507
+    %t60208 =w copy 0
+    %t60209 =l alloc4 4
+    storew %t60208, %t60209
+    dbgloc 1508
+    %t60210 =w copy 2
+    %t60211 =w ceqw %t60161, %t60210
+    jnz %t60211, @then13686, @else13687
+@then13686
+    dbgloc 1510
+    %t60212 =w copy 0
+    storew %t60212, %t60209
+    jmp @merge13688
+@else13687
+    dbgloc 1511
+    dbgloc 1512
+    %t60213 =w call $run_backend(l %t60172, l %t60175, w %t60085)
+    storew %t60213, %t60209
+    dbgloc 1513
+    %t60214 =w loadw %t60209
+    %t60215 =w copy 0
+    %t60216 =w cnew %t60214, %t60215
+    jnz %t60216, @then13689, @else13690
+@then13689
+    dbgloc 1514
+    %t60217 =l loadl %t60096
+    %t60218 =w copy 0
+    %t60219 =l extsw %t60218
+    %t60220 =w ceql %t60217, %t60219
+    jnz %t60220, @then13692, @else13693
+@then13692
+    %t60221 =w call $free(l %t60149)
+    jmp @merge13694
+@else13693
+    jmp @merge13694
+@merge13694
+    dbgloc 1515
+    %t60222 =w call $free(l %t60172)
+    %t60223 =w call $free(l %t60175)
+    %t60224 =w call $free(l %t60178)
+    dbgloc 1516
+    %t60225 =w copy 1
+    ret %t60225
+@else13690
+    jmp @merge13691
+@merge13691
+    jmp @merge13688
+@merge13688
+    dbgloc 1521
+    %t60226 =w copy 0
+    %t60227 =l alloc4 4
+    storew %t60226, %t60227
+    dbgloc 1522
+    %t60228 =w loadw %t60098
+    %t60229 =w copy 1
+    %t60230 =w ceqw %t60228, %t60229
+    jnz %t60230, @then13695, @else13696
+@then13695
+    dbgloc 1523
+    %t60231 =l copy $str1982
+    %t60232 =w call $jh_fputs_stderr(l %t60231)
+    dbgloc 1524
+    %t60233 =w call $jh_fputs_stderr(l %t60175)
+    dbgloc 1525
+    %t60234 =l copy $str1983
+    %t60235 =w call $jh_fputs_stderr(l %t60234)
+    dbgloc 1526
+    %t60236 =w copy 0
+    storew %t60236, %t60227
+    jmp @merge13697
+@else13696
+    dbgloc 1527
+    dbgloc 1528
+    %t60237 =w call $link_with_gcc(l %t60175, l %t60178)
+    storew %t60237, %t60227
+    jmp @merge13697
+@merge13697
+    dbgloc 1530
+    %t60238 =l loadl %t60096
+    %t60239 =w copy 0
+    %t60240 =l extsw %t60239
+    %t60241 =w ceql %t60238, %t60240
+    jnz %t60241, @then13698, @else13699
+@then13698
+    %t60242 =w call $free(l %t60149)
+    jmp @merge13700
+@else13699
+    jmp @merge13700
+@merge13700
+    dbgloc 1531
+    %t60243 =w call $free(l %t60172)
+    %t60244 =w call $free(l %t60175)
+    %t60245 =w call $free(l %t60178)
+    dbgloc 1532
+    %t60246 =w loadw %t60227
+    %t60247 =w copy 0
+    %t60248 =w cnew %t60246, %t60247
+    jnz %t60248, @then13701, @else13702
+@then13701
+    dbgloc 1533
+    %t60249 =w copy 1
+    ret %t60249
+@else13702
+    jmp @merge13703
+@merge13703
+    dbgloc 1535
+    %t60250 =w copy 0
+    ret %t60250
 }
 
 export function w $cmd_run(w %argc, l %argv, w %t) {
-@start13657
-    %t60064 =w copy %argc
-    %t60065 =l copy %argv
-    %t60066 =w copy %t
-    dbgloc 1482
-    dbgloc 1483
-    %t60067 =w copy 1
-    %t60068 =w csltw %t60064, %t60067
-    jnz %t60068, @then13658, @else13659
-@then13658
-    dbgloc 1484
-    %t60069 =l copy $str1977
-    %t60070 =w call $jh_fputs_stderr(l %t60069)
-    dbgloc 1485
-    %t60071 =w copy 1
-    ret %t60071
-@else13659
-    jmp @merge13660
-@merge13660
-    dbgloc 1487
-    %t60072 =l copy %t60065
-    dbgloc 1488
-    %t60073 =l loadl %t60072
-    dbgloc 1498
-    %t60074 =l copy $str1978
-    %t60075 =l call $fopen(l %t60073, l %t60074)
-    dbgloc 1499
-    %t60076 =w copy 0
-    %t60077 =l extsw %t60076
-    %t60078 =w ceql %t60075, %t60077
-    jnz %t60078, @then13661, @else13662
-@then13661
-    dbgloc 1500
-    %t60079 =l copy $str1979
-    %t60080 =w call $jh_fputs_stderr(l %t60079)
-    dbgloc 1501
-    %t60081 =w call $jh_fputs_stderr(l %t60073)
-    dbgloc 1502
-    %t60082 =l copy $str1980
-    %t60083 =w call $jh_fputs_stderr(l %t60082)
-    dbgloc 1503
-    %t60084 =w copy 1
-    ret %t60084
-@else13662
-    jmp @merge13663
-@merge13663
-    dbgloc 1505
-    %t60085 =w copy 131072
-    %t60086 =l extsw %t60085
-    %t60087 =l call $malloc(l %t60086)
-    dbgloc 1506
-    %t60088 =w copy 1
-    %t60089 =l extsw %t60088
-    %t60090 =w copy 131072
-    %t60091 =l extsw %t60090
-    %t60092 =l call $fread(l %t60087, l %t60089, l %t60091, l %t60075)
-    dbgloc 1507
-    %t60093 =w call $fclose(l %t60075)
-    dbgloc 1508
-    %t60094 =w copy 0
-    %t60095 =l alloc4 4
-    storew %t60094, %t60095
-    dbgloc 1512
-    %t60096 =w copy 0
-    %t60097 =l alloc4 4
-    storew %t60096, %t60097
-    dbgloc 1513
-    %t60098 =l copy $str1981
-    dbgloc 1514
-    %t60099 =l call $strlen(l %t60098)
-    dbgloc 1515
-    %t60100 =w csgtl %t60092, %t60099
-    jnz %t60100, @then13664, @else13665
-@then13664
-    dbgloc 1516
-    %t60101 =w copy 0
-    %t60102 =l extsw %t60101
-    %t60103 =l alloc8 8
-    storel %t60102, %t60103
-    dbgloc 1517
-    %t60104 =l sub %t60092, %t60099
-    jmp @loop13667
-@loop13667
-    dbgloc 1518
-    %t60105 =l loadl %t60103
-    %t60106 =w cslel %t60105, %t60104
-    jnz %t60106, @body13668, @exit13669
-@body13668
-    dbgloc 1519
-    %t60107 =w copy 1
-    %t60108 =l alloc4 4
-    storew %t60107, %t60108
-    dbgloc 1520
-    %t60109 =w copy 0
-    %t60110 =l extsw %t60109
-    %t60111 =l alloc8 8
-    storel %t60110, %t60111
-    jmp @loop13670
-@loop13670
-    dbgloc 1521
-    %t60112 =l loadl %t60111
-    %t60113 =w csltl %t60112, %t60099
-    jnz %t60113, @body13671, @exit13672
-@body13671
-    dbgloc 1522
-    %t60114 =l copy %t60087
-    %t60115 =l loadl %t60103
-    %t60116 =l add %t60114, %t60115
-    %t60117 =l loadl %t60111
-    %t60118 =l add %t60116, %t60117
-    %t60119 =l copy %t60118
-    dbgloc 1523
-    %t60120 =l copy %t60098
-    %t60121 =l loadl %t60111
-    %t60122 =l add %t60120, %t60121
-    %t60123 =l copy %t60122
-    dbgloc 1524
-    %t60124 =w loadub %t60119
-    %t60125 =w copy %t60124
-    dbgloc 1525
-    %t60126 =w loadub %t60123
-    %t60127 =w copy %t60126
-    dbgloc 1526
-    %t60128 =w cnew %t60125, %t60127
-    jnz %t60128, @then13673, @else13674
-@then13673
-    %t60129 =w copy 0
-    storew %t60129, %t60108
-    jmp @merge13675
-@else13674
-    jmp @merge13675
-@merge13675
-    dbgloc 1527
-    %t60130 =l loadl %t60111
-    %t60131 =w copy 1
-    %t60132 =l extsw %t60131
-    %t60133 =l add %t60130, %t60132
-    storel %t60133, %t60111
-    jmp @loop13670
-@exit13672
-    dbgloc 1529
-    %t60134 =w loadw %t60108
-    %t60135 =w copy 1
-    %t60136 =w ceqw %t60134, %t60135
-    jnz %t60136, @then13676, @else13677
-@then13676
-    %t60137 =w copy 1
-    storew %t60137, %t60097
-    jmp @merge13678
-@else13677
-    jmp @merge13678
-@merge13678
-    dbgloc 1530
-    %t60138 =l loadl %t60103
-    %t60139 =w copy 1
-    %t60140 =l extsw %t60139
-    %t60141 =l add %t60138, %t60140
-    storel %t60141, %t60103
-    jmp @loop13667
-@exit13669
-    jmp @merge13666
-@else13665
-    jmp @merge13666
-@merge13666
-    dbgloc 1533
-    %t60142 =w loadw %t60097
-    %t60143 =w copy 1
-    %t60144 =w ceqw %t60142, %t60143
-    jnz %t60144, @then13679, @else13680
-@then13679
-    dbgloc 1535
-    %t60145 =l copy $str1982
-    dbgloc 1536
-    %t60146 =l call $strlen(l %t60145)
-    dbgloc 1537
-    %t60147 =w csgtl %t60092, %t60146
-    jnz %t60147, @then13682, @else13683
-@then13682
-    dbgloc 1538
-    %t60148 =w copy 0
-    %t60149 =l extsw %t60148
-    %t60150 =l alloc8 8
-    storel %t60149, %t60150
-    dbgloc 1539
-    %t60151 =l sub %t60092, %t60146
-    jmp @loop13685
-@loop13685
+@start13704
+    %t60251 =w copy %argc
+    %t60252 =l copy %argv
+    %t60253 =w copy %t
     dbgloc 1540
-    %t60152 =l loadl %t60150
-    %t60153 =w cslel %t60152, %t60151
-    jnz %t60153, @body13686, @exit13687
-@body13686
     dbgloc 1541
-    %t60154 =w copy 1
-    %t60155 =l alloc4 4
-    storew %t60154, %t60155
+    %t60254 =w copy 1
+    %t60255 =w csltw %t60251, %t60254
+    jnz %t60255, @then13705, @else13706
+@then13705
     dbgloc 1542
-    %t60156 =w copy 0
-    %t60157 =l extsw %t60156
-    %t60158 =l alloc8 8
-    storel %t60157, %t60158
-    jmp @loop13688
-@loop13688
+    %t60256 =l copy $str1984
+    %t60257 =w call $jh_fputs_stderr(l %t60256)
     dbgloc 1543
-    %t60159 =l loadl %t60158
-    %t60160 =w csltl %t60159, %t60146
-    jnz %t60160, @body13689, @exit13690
-@body13689
-    dbgloc 1544
-    %t60161 =l copy %t60087
-    %t60162 =l loadl %t60150
-    %t60163 =l add %t60161, %t60162
-    %t60164 =l loadl %t60158
-    %t60165 =l add %t60163, %t60164
-    %t60166 =l copy %t60165
+    %t60258 =w copy 1
+    ret %t60258
+@else13706
+    jmp @merge13707
+@merge13707
     dbgloc 1545
-    %t60167 =l copy %t60145
-    %t60168 =l loadl %t60158
-    %t60169 =l add %t60167, %t60168
-    %t60170 =l copy %t60169
+    %t60259 =l copy %t60252
     dbgloc 1546
-    %t60171 =w loadub %t60166
-    %t60172 =w copy %t60171
-    dbgloc 1547
-    %t60173 =w loadub %t60170
-    %t60174 =w copy %t60173
-    dbgloc 1548
-    %t60175 =w cnew %t60172, %t60174
-    jnz %t60175, @then13691, @else13692
-@then13691
-    %t60176 =w copy 0
-    storew %t60176, %t60155
-    jmp @merge13693
-@else13692
-    jmp @merge13693
-@merge13693
-    dbgloc 1549
-    %t60177 =l loadl %t60158
-    %t60178 =w copy 1
-    %t60179 =l extsw %t60178
-    %t60180 =l add %t60177, %t60179
-    storel %t60180, %t60158
-    jmp @loop13688
-@exit13690
-    dbgloc 1551
-    %t60181 =w loadw %t60155
-    %t60182 =w copy 1
-    %t60183 =w ceqw %t60181, %t60182
-    jnz %t60183, @then13694, @else13695
-@then13694
-    %t60184 =w copy 1
-    storew %t60184, %t60095
-    jmp @merge13696
-@else13695
-    jmp @merge13696
-@merge13696
-    dbgloc 1552
-    %t60185 =l loadl %t60150
-    %t60186 =w copy 1
-    %t60187 =l extsw %t60186
-    %t60188 =l add %t60185, %t60187
-    storel %t60188, %t60150
-    jmp @loop13685
-@exit13687
-    jmp @merge13684
-@else13683
-    jmp @merge13684
-@merge13684
-    jmp @merge13681
-@else13680
-    dbgloc 1555
+    %t60260 =l loadl %t60259
     dbgloc 1556
-    %t60189 =l copy $str1983
+    %t60261 =l copy $str1985
+    %t60262 =l call $fopen(l %t60260, l %t60261)
     dbgloc 1557
-    %t60190 =l call $strlen(l %t60189)
+    %t60263 =w copy 0
+    %t60264 =l extsw %t60263
+    %t60265 =w ceql %t60262, %t60264
+    jnz %t60265, @then13708, @else13709
+@then13708
     dbgloc 1558
-    %t60191 =w csgtl %t60092, %t60190
-    jnz %t60191, @then13697, @else13698
-@then13697
+    %t60266 =l copy $str1986
+    %t60267 =w call $jh_fputs_stderr(l %t60266)
     dbgloc 1559
-    %t60192 =w copy 0
-    %t60193 =l extsw %t60192
-    %t60194 =l alloc8 8
-    storel %t60193, %t60194
+    %t60268 =w call $jh_fputs_stderr(l %t60260)
     dbgloc 1560
-    %t60195 =l sub %t60092, %t60190
-    jmp @loop13700
-@loop13700
+    %t60269 =l copy $str1987
+    %t60270 =w call $jh_fputs_stderr(l %t60269)
     dbgloc 1561
-    %t60196 =l loadl %t60194
-    %t60197 =w cslel %t60196, %t60195
-    jnz %t60197, @body13701, @exit13702
-@body13701
-    dbgloc 1562
-    %t60198 =w copy 1
-    %t60199 =l alloc4 4
-    storew %t60198, %t60199
+    %t60271 =w copy 1
+    ret %t60271
+@else13709
+    jmp @merge13710
+@merge13710
     dbgloc 1563
-    %t60200 =w copy 0
-    %t60201 =l extsw %t60200
-    %t60202 =l alloc8 8
-    storel %t60201, %t60202
-    jmp @loop13703
-@loop13703
+    %t60272 =w copy 131072
+    %t60273 =l extsw %t60272
+    %t60274 =l call $malloc(l %t60273)
     dbgloc 1564
-    %t60203 =l loadl %t60202
-    %t60204 =w csltl %t60203, %t60190
-    jnz %t60204, @body13704, @exit13705
-@body13704
-    dbgloc 1565
-    %t60205 =l copy %t60087
-    %t60206 =l loadl %t60194
-    %t60207 =l add %t60205, %t60206
-    %t60208 =l loadl %t60202
-    %t60209 =l add %t60207, %t60208
-    %t60210 =l copy %t60209
-    dbgloc 1566
-    %t60211 =l copy %t60189
-    %t60212 =l loadl %t60202
-    %t60213 =l add %t60211, %t60212
-    %t60214 =l copy %t60213
-    dbgloc 1567
-    %t60215 =w loadub %t60210
-    %t60216 =w copy %t60215
-    dbgloc 1568
-    %t60217 =w loadub %t60214
-    %t60218 =w copy %t60217
-    dbgloc 1569
-    %t60219 =w cnew %t60216, %t60218
-    jnz %t60219, @then13706, @else13707
-@then13706
-    %t60220 =w copy 0
-    storew %t60220, %t60199
-    jmp @merge13708
-@else13707
-    jmp @merge13708
-@merge13708
-    dbgloc 1570
-    %t60221 =l loadl %t60202
-    %t60222 =w copy 1
-    %t60223 =l extsw %t60222
-    %t60224 =l add %t60221, %t60223
-    storel %t60224, %t60202
-    jmp @loop13703
-@exit13705
-    dbgloc 1572
-    %t60225 =w loadw %t60199
-    %t60226 =w copy 1
-    %t60227 =w ceqw %t60225, %t60226
-    jnz %t60227, @then13709, @else13710
-@then13709
-    %t60228 =w copy 1
-    storew %t60228, %t60095
-    jmp @merge13711
-@else13710
-    jmp @merge13711
-@merge13711
-    dbgloc 1573
-    %t60229 =l loadl %t60194
-    %t60230 =w copy 1
-    %t60231 =l extsw %t60230
-    %t60232 =l add %t60229, %t60231
-    storel %t60232, %t60194
-    jmp @loop13700
-@exit13702
-    jmp @merge13699
-@else13698
-    jmp @merge13699
-@merge13699
-    jmp @merge13681
-@merge13681
-    dbgloc 1577
-    %t60233 =w call $free(l %t60087)
-    dbgloc 1578
-    %t60234 =w loadw %t60095
-    %t60235 =w copy 0
-    %t60236 =w ceqw %t60234, %t60235
-    jnz %t60236, @then13712, @else13713
-@then13712
-    dbgloc 1579
-    %t60237 =l copy $str1984
-    %t60238 =w call $jh_fputs_stderr(l %t60237)
-    dbgloc 1580
-    %t60239 =w call $jh_fputs_stderr(l %t60073)
-    dbgloc 1581
-    %t60240 =w loadw %t60097
-    %t60241 =w copy 1
-    %t60242 =w ceqw %t60240, %t60241
-    jnz %t60242, @then13715, @else13716
-@then13715
-    dbgloc 1582
-    %t60243 =l copy $str1985
-    %t60244 =w call $jh_fputs_stderr(l %t60243)
-    jmp @merge13717
-@else13716
-    dbgloc 1583
-    dbgloc 1584
-    %t60245 =l copy $str1986
-    %t60246 =w call $jh_fputs_stderr(l %t60245)
-    jmp @merge13717
-@merge13717
-    %t60247 =w phi @then13715 %t60244, @else13716 %t60246
-    dbgloc 1586
-    %t60248 =w copy 1
-    ret %t60248
-@else13713
-    jmp @merge13714
-@merge13714
-    dbgloc 1590
-    %t60249 =w copy 1024
-    %t60250 =l extsw %t60249
-    %t60251 =l call $malloc(l %t60250)
-    dbgloc 1591
-    %t60252 =l call $str_copy(l %t60251, l %t60073)
-    dbgloc 1592
-    %t60253 =w copy 46
-    %t60254 =l call $strrchr(l %t60251, w %t60253)
-    dbgloc 1593
-    %t60255 =w copy 0
-    %t60256 =l extsw %t60255
-    %t60257 =w cnel %t60254, %t60256
-    jnz %t60257, @then13718, @else13719
-@then13718
-    dbgloc 1594
-    %t60258 =w copy 0
-    %t60259 =w call $store_byte_i32(l %t60254, w %t60258)
-    jmp @merge13720
-@else13719
-    jmp @merge13720
-@merge13720
-    dbgloc 1596
-    %t60260 =l call $strlen(l %t60251)
-    dbgloc 1597
-    %t60261 =l copy $str1987
-    %t60262 =l call $str_concat_at(l %t60251, l %t60260, l %t60261)
-    dbgloc 1598
-    %t60263 =l copy %t60251
-    %t60264 =l add %t60263, %t60262
-    %t60265 =l copy %t60264
-    dbgloc 1599
-    %t60266 =w copy 0
-    %t60267 =w call $store_byte_i32(l %t60265, w %t60266)
-    dbgloc 1604
-    %t60268 =w copy 3
-    %t60269 =l extsw %t60268
-    %t60270 =w copy 8
-    %t60271 =l extsw %t60270
-    %t60272 =l mul %t60269, %t60271
-    %t60273 =l call $malloc(l %t60272)
-    dbgloc 1605
-    %t60274 =l copy %t60273
-    dbgloc 1606
-    storel %t60073, %t60274
-    dbgloc 1607
-    %t60275 =w copy 8
+    %t60275 =w copy 1
     %t60276 =l extsw %t60275
-    %t60277 =l call $util__ptr_add_u8(l %t60273, l %t60276)
-    %t60278 =l copy %t60277
-    dbgloc 1608
-    %t60279 =l copy $str1988
-    storel %t60279, %t60278
-    dbgloc 1609
-    %t60280 =w copy 16
-    %t60281 =l extsw %t60280
-    %t60282 =l call $util__ptr_add_u8(l %t60273, l %t60281)
-    %t60283 =l copy %t60282
-    dbgloc 1610
-    storel %t60251, %t60283
-    dbgloc 1612
-    %t60284 =w copy 3
-    %t60285 =w call $cmd_compile(w %t60284, l %t60273, w %t60066)
-    dbgloc 1613
-    %t60286 =w call $free(l %t60273)
-    dbgloc 1614
-    %t60287 =w copy 0
-    %t60288 =w cnew %t60285, %t60287
-    jnz %t60288, @then13721, @else13722
-@then13721
-    dbgloc 1615
-    %t60289 =w call $free(l %t60251)
-    dbgloc 1616
-    ret %t60285
-@else13722
-    jmp @merge13723
-@merge13723
-    dbgloc 1625
-    %t60290 =w copy 1024
-    %t60291 =l extsw %t60290
-    %t60292 =l call $malloc(l %t60291)
-    dbgloc 1626
-    %t60293 =w copy 1024
-    %t60294 =w call $jh_fullpath(l %t60292, l %t60073, w %t60293)
-    dbgloc 1627
-    %t60295 =w copy 0
-    %t60296 =w cnew %t60294, %t60295
-    jnz %t60296, @then13724, @else13725
-@then13724
-    dbgloc 1628
-    %t60297 =l copy $str1989
-    %t60298 =w call $jh_fputs_stderr(l %t60297)
-    dbgloc 1629
-    %t60299 =w call $free(l %t60292)
-    dbgloc 1630
-    %t60300 =w call $free(l %t60251)
-    dbgloc 1631
-    %t60301 =w copy 1
-    ret %t60301
-@else13725
-    jmp @merge13726
-@merge13726
-    dbgloc 1634
-    %t60302 =w copy 1024
-    %t60303 =l extsw %t60302
-    %t60304 =l call $malloc(l %t60303)
-    dbgloc 1635
-    %t60305 =l call $str_copy(l %t60304, l %t60292)
-    dbgloc 1636
-    %t60306 =w copy 46
-    %t60307 =l call $strrchr(l %t60304, w %t60306)
-    dbgloc 1637
-    %t60308 =w copy 0
-    %t60309 =l extsw %t60308
-    %t60310 =w cnel %t60307, %t60309
-    jnz %t60310, @then13727, @else13728
-@then13727
-    dbgloc 1638
-    %t60311 =w copy 0
-    %t60312 =w call $store_byte_i32(l %t60307, w %t60311)
-    jmp @merge13729
-@else13728
-    jmp @merge13729
-@merge13729
-    dbgloc 1640
-    %t60313 =l call $strlen(l %t60304)
-    dbgloc 1641
-    %t60314 =l copy $str1990
-    %t60315 =l call $str_concat_at(l %t60304, l %t60313, l %t60314)
-    dbgloc 1642
-    %t60316 =l copy %t60304
-    %t60317 =l add %t60316, %t60315
-    %t60318 =l copy %t60317
-    dbgloc 1643
-    %t60319 =w copy 0
-    %t60320 =w call $store_byte_i32(l %t60318, w %t60319)
-    dbgloc 1648
-    %t60321 =w copy 1024
-    %t60322 =l extsw %t60321
-    %t60323 =l call $malloc(l %t60322)
-    dbgloc 1649
-    %t60324 =w copy 0
-    %t60325 =l extsw %t60324
-    %t60326 =l copy $str1991
-    %t60327 =l call $str_concat_at(l %t60323, l %t60325, l %t60326)
-    dbgloc 1650
-    %t60328 =l call $strlen(l %t60323)
-    dbgloc 1651
-    %t60329 =l call $str_concat_at(l %t60323, l %t60328, l %t60304)
-    dbgloc 1652
-    %t60330 =l call $strlen(l %t60323)
-    dbgloc 1653
-    %t60331 =l copy $str1992
-    %t60332 =l call $str_concat_at(l %t60323, l %t60330, l %t60331)
-    dbgloc 1656
-    %t60333 =w call $jh_run(l %t60323)
-    dbgloc 1657
-    %t60334 =w call $free(l %t60323)
-    dbgloc 1658
-    %t60335 =w call $free(l %t60304)
-    dbgloc 1659
-    %t60336 =w call $free(l %t60292)
-    dbgloc 1660
-    %t60337 =w call $free(l %t60251)
-    dbgloc 1661
-    ret %t60333
-}
-
-export function w $cmd_dump(w %argc, l %argv, w %t) {
-@start13730
-    %t60338 =w copy %argc
-    %t60339 =l copy %argv
-    %t60340 =w copy %t
-    dbgloc 1666
-    dbgloc 1667
-    %t60341 =l copy $str1993
-    %t60342 =w call $jh_fputs_stderr(l %t60341)
-    dbgloc 1668
-    %t60343 =w copy 1
-    ret %t60343
-}
-
-export function w $main_jhyy(w %argc, l %argv) {
-@start13731
-    %t60344 =w copy %argc
-    %t60345 =l copy %argv
-    dbgloc 1673
-    dbgloc 1675
-    %t60346 =w copy 1
-    %t60347 =w csgew %t60344, %t60346
-    jnz %t60347, @then13732, @else13733
-@then13732
-    dbgloc 1676
-    %t60348 =l copy %t60345
-    dbgloc 1677
-    %t60349 =l loadl %t60348
-    dbgloc 1678
-    %t60350 =w call $jh_paths_init(l %t60349)
-    dbgloc 1679
-    %t60351 =w copy 0
-    %t60352 =w cnew %t60350, %t60351
-    jnz %t60352, @then13735, @else13736
-@then13735
-    dbgloc 1680
-    %t60353 =l copy $str1994
-    %t60354 =w call $jh_fputs_stderr(l %t60353)
-    dbgloc 1681
-    %t60355 =w copy 1
-    ret %t60355
-@else13736
-    jmp @merge13737
-@merge13737
-    jmp @merge13734
-@else13733
-    jmp @merge13734
-@merge13734
-    dbgloc 1685
-    %t60356 =w copy 2
-    %t60357 =w csltw %t60344, %t60356
-    jnz %t60357, @then13738, @else13739
+    %t60277 =w copy 131072
+    %t60278 =l extsw %t60277
+    %t60279 =l call $fread(l %t60274, l %t60276, l %t60278, l %t60262)
+    dbgloc 1565
+    %t60280 =w call $fclose(l %t60262)
+    dbgloc 1566
+    %t60281 =w copy 0
+    %t60282 =l alloc4 4
+    storew %t60281, %t60282
+    dbgloc 1570
+    %t60283 =w copy 0
+    %t60284 =l alloc4 4
+    storew %t60283, %t60284
+    dbgloc 1571
+    %t60285 =l copy $str1988
+    dbgloc 1572
+    %t60286 =l call $strlen(l %t60285)
+    dbgloc 1573
+    %t60287 =w csgtl %t60279, %t60286
+    jnz %t60287, @then13711, @else13712
+@then13711
+    dbgloc 1574
+    %t60288 =w copy 0
+    %t60289 =l extsw %t60288
+    %t60290 =l alloc8 8
+    storel %t60289, %t60290
+    dbgloc 1575
+    %t60291 =l sub %t60279, %t60286
+    jmp @loop13714
+@loop13714
+    dbgloc 1576
+    %t60292 =l loadl %t60290
+    %t60293 =w cslel %t60292, %t60291
+    jnz %t60293, @body13715, @exit13716
+@body13715
+    dbgloc 1577
+    %t60294 =w copy 1
+    %t60295 =l alloc4 4
+    storew %t60294, %t60295
+    dbgloc 1578
+    %t60296 =w copy 0
+    %t60297 =l extsw %t60296
+    %t60298 =l alloc8 8
+    storel %t60297, %t60298
+    jmp @loop13717
+@loop13717
+    dbgloc 1579
+    %t60299 =l loadl %t60298
+    %t60300 =w csltl %t60299, %t60286
+    jnz %t60300, @body13718, @exit13719
+@body13718
+    dbgloc 1580
+    %t60301 =l copy %t60274
+    %t60302 =l loadl %t60290
+    %t60303 =l add %t60301, %t60302
+    %t60304 =l loadl %t60298
+    %t60305 =l add %t60303, %t60304
+    %t60306 =l copy %t60305
+    dbgloc 1581
+    %t60307 =l copy %t60285
+    %t60308 =l loadl %t60298
+    %t60309 =l add %t60307, %t60308
+    %t60310 =l copy %t60309
+    dbgloc 1582
+    %t60311 =w loadub %t60306
+    %t60312 =w copy %t60311
+    dbgloc 1583
+    %t60313 =w loadub %t60310
+    %t60314 =w copy %t60313
+    dbgloc 1584
+    %t60315 =w cnew %t60312, %t60314
+    jnz %t60315, @then13720, @else13721
+@then13720
+    %t60316 =w copy 0
+    storew %t60316, %t60295
+    jmp @merge13722
+@else13721
+    jmp @merge13722
+@merge13722
+    dbgloc 1585
+    %t60317 =l loadl %t60298
+    %t60318 =w copy 1
+    %t60319 =l extsw %t60318
+    %t60320 =l add %t60317, %t60319
+    storel %t60320, %t60298
+    jmp @loop13717
+@exit13719
+    dbgloc 1587
+    %t60321 =w loadw %t60295
+    %t60322 =w copy 1
+    %t60323 =w ceqw %t60321, %t60322
+    jnz %t60323, @then13723, @else13724
+@then13723
+    %t60324 =w copy 1
+    storew %t60324, %t60284
+    jmp @merge13725
+@else13724
+    jmp @merge13725
+@merge13725
+    dbgloc 1588
+    %t60325 =l loadl %t60290
+    %t60326 =w copy 1
+    %t60327 =l extsw %t60326
+    %t60328 =l add %t60325, %t60327
+    storel %t60328, %t60290
+    jmp @loop13714
+@exit13716
+    jmp @merge13713
+@else13712
+    jmp @merge13713
+@merge13713
+    dbgloc 1591
+    %t60329 =w loadw %t60284
+    %t60330 =w copy 1
+    %t60331 =w ceqw %t60329, %t60330
+    jnz %t60331, @then13726, @else13727
+@then13726
+    dbgloc 1593
+    %t60332 =l copy $str1989
+    dbgloc 1594
+    %t60333 =l call $strlen(l %t60332)
+    dbgloc 1595
+    %t60334 =w csgtl %t60279, %t60333
+    jnz %t60334, @then13729, @else13730
+@then13729
+    dbgloc 1596
+    %t60335 =w copy 0
+    %t60336 =l extsw %t60335
+    %t60337 =l alloc8 8
+    storel %t60336, %t60337
+    dbgloc 1597
+    %t60338 =l sub %t60279, %t60333
+    jmp @loop13732
+@loop13732
+    dbgloc 1598
+    %t60339 =l loadl %t60337
+    %t60340 =w cslel %t60339, %t60338
+    jnz %t60340, @body13733, @exit13734
+@body13733
+    dbgloc 1599
+    %t60341 =w copy 1
+    %t60342 =l alloc4 4
+    storew %t60341, %t60342
+    dbgloc 1600
+    %t60343 =w copy 0
+    %t60344 =l extsw %t60343
+    %t60345 =l alloc8 8
+    storel %t60344, %t60345
+    jmp @loop13735
+@loop13735
+    dbgloc 1601
+    %t60346 =l loadl %t60345
+    %t60347 =w csltl %t60346, %t60333
+    jnz %t60347, @body13736, @exit13737
+@body13736
+    dbgloc 1602
+    %t60348 =l copy %t60274
+    %t60349 =l loadl %t60337
+    %t60350 =l add %t60348, %t60349
+    %t60351 =l loadl %t60345
+    %t60352 =l add %t60350, %t60351
+    %t60353 =l copy %t60352
+    dbgloc 1603
+    %t60354 =l copy %t60332
+    %t60355 =l loadl %t60345
+    %t60356 =l add %t60354, %t60355
+    %t60357 =l copy %t60356
+    dbgloc 1604
+    %t60358 =w loadub %t60353
+    %t60359 =w copy %t60358
+    dbgloc 1605
+    %t60360 =w loadub %t60357
+    %t60361 =w copy %t60360
+    dbgloc 1606
+    %t60362 =w cnew %t60359, %t60361
+    jnz %t60362, @then13738, @else13739
 @then13738
-    dbgloc 1686
-    %t60358 =l copy $str1995
-    %t60359 =w copy 0
-    %t60360 =w call $printf(l %t60358, w %t60359)
-    dbgloc 1687
-    %t60361 =l copy $str1996
-    %t60362 =w copy 0
-    %t60363 =w call $printf(l %t60361, w %t60362)
-    dbgloc 1688
-    %t60364 =l copy $str1997
-    %t60365 =w copy 0
-    %t60366 =w call $printf(l %t60364, w %t60365)
-    dbgloc 1689
-    %t60367 =l copy $str1998
-    %t60368 =w copy 0
-    %t60369 =w call $printf(l %t60367, w %t60368)
-    dbgloc 1690
-    %t60370 =l copy $str1999
-    %t60371 =w copy 0
-    %t60372 =w call $printf(l %t60370, w %t60371)
-    dbgloc 1691
-    %t60373 =l copy $str2000
-    %t60374 =w copy 0
-    %t60375 =w call $printf(l %t60373, w %t60374)
-    dbgloc 1692
-    %t60376 =l copy $str2001
-    %t60377 =w copy 0
-    %t60378 =w call $printf(l %t60376, w %t60377)
-    dbgloc 1693
-    %t60379 =w copy 0
-    ret %t60379
+    %t60363 =w copy 0
+    storew %t60363, %t60342
+    jmp @merge13740
 @else13739
     jmp @merge13740
 @merge13740
-    dbgloc 1699
-    %t60380 =w copy 0
-    %t60381 =l alloc4 4
-    storew %t60380, %t60381
-    dbgloc 1700
-    %t60382 =w copy 1
-    %t60383 =l alloc4 4
-    storew %t60382, %t60383
-    jmp @loop13741
-@loop13741
-    dbgloc 1701
-    %t60384 =w loadw %t60383
-    %t60385 =w csltw %t60384, %t60344
-    jnz %t60385, @body13742, @exit13743
-@body13742
-    dbgloc 1702
-    %t60386 =w loadw %t60383
-    %t60387 =l extsw %t60386
-    dbgloc 1703
-    %t60388 =w copy 8
-    %t60389 =l extsw %t60388
-    %t60390 =l mul %t60387, %t60389
-    %t60391 =l call $util__ptr_add_u8(l %t60345, l %t60390)
-    %t60392 =l copy %t60391
-    dbgloc 1704
-    %t60393 =l loadl %t60392
-    dbgloc 1705
-    %t60394 =l copy $str2002
-    %t60395 =w call $strcmp(l %t60393, l %t60394)
-    %t60396 =w copy 0
-    %t60397 =w ceqw %t60395, %t60396
-    jnz %t60397, @then13744, @else13745
+    dbgloc 1607
+    %t60364 =l loadl %t60345
+    %t60365 =w copy 1
+    %t60366 =l extsw %t60365
+    %t60367 =l add %t60364, %t60366
+    storel %t60367, %t60345
+    jmp @loop13735
+@exit13737
+    dbgloc 1609
+    %t60368 =w loadw %t60342
+    %t60369 =w copy 1
+    %t60370 =w ceqw %t60368, %t60369
+    jnz %t60370, @then13741, @else13742
+@then13741
+    %t60371 =w copy 1
+    storew %t60371, %t60282
+    jmp @merge13743
+@else13742
+    jmp @merge13743
+@merge13743
+    dbgloc 1610
+    %t60372 =l loadl %t60337
+    %t60373 =w copy 1
+    %t60374 =l extsw %t60373
+    %t60375 =l add %t60372, %t60374
+    storel %t60375, %t60337
+    jmp @loop13732
+@exit13734
+    jmp @merge13731
+@else13730
+    jmp @merge13731
+@merge13731
+    jmp @merge13728
+@else13727
+    dbgloc 1613
+    dbgloc 1614
+    %t60376 =l copy $str1990
+    dbgloc 1615
+    %t60377 =l call $strlen(l %t60376)
+    dbgloc 1616
+    %t60378 =w csgtl %t60279, %t60377
+    jnz %t60378, @then13744, @else13745
 @then13744
-    dbgloc 1706
-    %t60398 =w copy 1
-    storew %t60398, %t60381
-    jmp @merge13746
-@else13745
-    jmp @merge13746
-@merge13746
-    dbgloc 1708
-    %t60399 =w loadw %t60383
-    %t60400 =w copy 1
-    %t60401 =w add %t60399, %t60400
-    storew %t60401, %t60383
-    jmp @loop13741
-@exit13743
-    dbgloc 1710
-    %t60402 =w loadw %t60381
-    %t60403 =w copy 1
-    %t60404 =w ceqw %t60402, %t60403
-    jnz %t60404, @then13747, @else13748
-@then13747
-    dbgloc 1711
-    %t60405 =l copy $str2003
-    %t60406 =w copy 0
-    %t60407 =w call $printf(l %t60405, w %t60406)
-    dbgloc 1712
-    %t60408 =l copy $str2004
-    %t60409 =w copy 0
-    %t60410 =w call $printf(l %t60408, w %t60409)
-    dbgloc 1713
-    %t60411 =l copy $str2005
-    %t60412 =w copy 0
-    %t60413 =w call $printf(l %t60411, w %t60412)
-    dbgloc 1714
-    %t60414 =l copy $str2006
-    %t60415 =w copy 0
-    %t60416 =w call $printf(l %t60414, w %t60415)
-    dbgloc 1715
-    %t60417 =l copy $str2007
-    %t60418 =w copy 0
-    %t60419 =w call $printf(l %t60417, w %t60418)
-    dbgloc 1716
-    %t60420 =l copy $str2008
-    %t60421 =w copy 0
-    %t60422 =w call $printf(l %t60420, w %t60421)
-    dbgloc 1717
-    %t60423 =l copy $str2009
-    %t60424 =w copy 0
-    %t60425 =w call $printf(l %t60423, w %t60424)
-    dbgloc 1718
-    %t60426 =l copy $str2010
-    %t60427 =w copy 0
-    %t60428 =w call $printf(l %t60426, w %t60427)
-    dbgloc 1719
-    %t60429 =l copy $str2011
-    %t60430 =w copy 0
-    %t60431 =w call $printf(l %t60429, w %t60430)
-    dbgloc 1720
-    %t60432 =l copy $str2012
-    %t60433 =w copy 0
-    %t60434 =w call $printf(l %t60432, w %t60433)
-    dbgloc 1721
-    %t60435 =l copy $str2013
-    %t60436 =w copy 0
-    %t60437 =w call $printf(l %t60435, w %t60436)
-    dbgloc 1722
-    %t60438 =l copy $str2014
-    %t60439 =w copy 0
-    %t60440 =w call $printf(l %t60438, w %t60439)
-    dbgloc 1723
-    %t60441 =l copy $str2015
-    %t60442 =w copy 0
-    %t60443 =w call $printf(l %t60441, w %t60442)
-    dbgloc 1724
-    %t60444 =l copy $str2016
-    %t60445 =w copy 0
-    %t60446 =w call $printf(l %t60444, w %t60445)
-    dbgloc 1725
-    %t60447 =l copy $str2017
-    %t60448 =w copy 0
-    %t60449 =w call $printf(l %t60447, w %t60448)
-    dbgloc 1726
-    %t60450 =l call $target_dispatch__target_help()
-    %t60451 =w call $printf(l %t60450)
-    dbgloc 1727
-    %t60452 =w copy 0
-    ret %t60452
-@else13748
-    jmp @merge13749
-@merge13749
-    dbgloc 1731
-    %t60453 =l copy %t60345
-    dbgloc 1732
-    %t60454 =l copy %t60345
-    %t60455 =w copy 8
-    %t60456 =l extsw %t60455
-    %t60457 =l add %t60454, %t60456
-    %t60458 =l copy %t60457
-    dbgloc 1733
-    %t60459 =l copy %t60458
-    dbgloc 1734
-    %t60460 =l loadl %t60459
-    dbgloc 1739
-    %t60461 =w call $target_dispatch__target_default()
-    %t60462 =l alloc4 4
-    storew %t60461, %t60462
-    dbgloc 1740
-    %t60463 =w copy 1
-    %t60464 =l alloc4 4
-    storew %t60463, %t60464
+    dbgloc 1617
+    %t60379 =w copy 0
+    %t60380 =l extsw %t60379
+    %t60381 =l alloc8 8
+    storel %t60380, %t60381
+    dbgloc 1618
+    %t60382 =l sub %t60279, %t60377
+    jmp @loop13747
+@loop13747
+    dbgloc 1619
+    %t60383 =l loadl %t60381
+    %t60384 =w cslel %t60383, %t60382
+    jnz %t60384, @body13748, @exit13749
+@body13748
+    dbgloc 1620
+    %t60385 =w copy 1
+    %t60386 =l alloc4 4
+    storew %t60385, %t60386
+    dbgloc 1621
+    %t60387 =w copy 0
+    %t60388 =l extsw %t60387
+    %t60389 =l alloc8 8
+    storel %t60388, %t60389
     jmp @loop13750
 @loop13750
-    dbgloc 1741
-    %t60465 =w loadw %t60464
-    %t60466 =w csltw %t60465, %t60344
-    jnz %t60466, @body13751, @exit13752
+    dbgloc 1622
+    %t60390 =l loadl %t60389
+    %t60391 =w csltl %t60390, %t60377
+    jnz %t60391, @body13751, @exit13752
 @body13751
-    dbgloc 1742
-    %t60467 =w loadw %t60464
-    %t60468 =l extsw %t60467
-    dbgloc 1743
-    %t60469 =w copy 8
-    %t60470 =l extsw %t60469
-    %t60471 =l mul %t60468, %t60470
-    %t60472 =l call $util__ptr_add_u8(l %t60345, l %t60471)
-    %t60473 =l copy %t60472
-    dbgloc 1744
-    %t60474 =l loadl %t60473
-    dbgloc 1746
-    %t60475 =l copy $str2018
-    dbgloc 1747
-    %t60476 =w copy 1
-    %t60477 =l alloc4 4
-    storew %t60476, %t60477
-    dbgloc 1748
-    %t60478 =w copy 0
-    %t60479 =l alloc4 4
-    storew %t60478, %t60479
-    jmp @loop13753
-@loop13753
-    dbgloc 1749
-    %t60480 =w loadw %t60479
-    %t60481 =w copy 9
-    %t60482 =w csltw %t60480, %t60481
-    jnz %t60482, @body13754, @exit13755
-@body13754
-    dbgloc 1750
-    %t60483 =l copy %t60474
-    %t60484 =w loadw %t60479
-    %t60485 =l extsw %t60484
-    %t60486 =l add %t60483, %t60485
-    %t60487 =l copy %t60486
-    dbgloc 1751
-    %t60488 =l copy %t60475
-    %t60489 =w loadw %t60479
-    %t60490 =l extsw %t60489
-    %t60491 =l add %t60488, %t60490
-    %t60492 =l copy %t60491
-    dbgloc 1752
-    %t60493 =w loadub %t60487
-    %t60494 =w copy %t60493
-    dbgloc 1753
-    %t60495 =w loadub %t60492
-    %t60496 =w copy %t60495
-    dbgloc 1754
-    %t60497 =w cnew %t60494, %t60496
-    jnz %t60497, @then13756, @else13757
+    dbgloc 1623
+    %t60392 =l copy %t60274
+    %t60393 =l loadl %t60381
+    %t60394 =l add %t60392, %t60393
+    %t60395 =l loadl %t60389
+    %t60396 =l add %t60394, %t60395
+    %t60397 =l copy %t60396
+    dbgloc 1624
+    %t60398 =l copy %t60376
+    %t60399 =l loadl %t60389
+    %t60400 =l add %t60398, %t60399
+    %t60401 =l copy %t60400
+    dbgloc 1625
+    %t60402 =w loadub %t60397
+    %t60403 =w copy %t60402
+    dbgloc 1626
+    %t60404 =w loadub %t60401
+    %t60405 =w copy %t60404
+    dbgloc 1627
+    %t60406 =w cnew %t60403, %t60405
+    jnz %t60406, @then13753, @else13754
+@then13753
+    %t60407 =w copy 0
+    storew %t60407, %t60386
+    jmp @merge13755
+@else13754
+    jmp @merge13755
+@merge13755
+    dbgloc 1628
+    %t60408 =l loadl %t60389
+    %t60409 =w copy 1
+    %t60410 =l extsw %t60409
+    %t60411 =l add %t60408, %t60410
+    storel %t60411, %t60389
+    jmp @loop13750
+@exit13752
+    dbgloc 1630
+    %t60412 =w loadw %t60386
+    %t60413 =w copy 1
+    %t60414 =w ceqw %t60412, %t60413
+    jnz %t60414, @then13756, @else13757
 @then13756
-    %t60498 =w copy 0
-    storew %t60498, %t60477
+    %t60415 =w copy 1
+    storew %t60415, %t60282
     jmp @merge13758
 @else13757
     jmp @merge13758
 @merge13758
-    dbgloc 1755
-    %t60499 =w loadw %t60479
-    %t60500 =w copy 1
-    %t60501 =w add %t60499, %t60500
-    storew %t60501, %t60479
-    jmp @loop13753
-@exit13755
-    dbgloc 1757
-    %t60502 =w loadw %t60477
-    %t60503 =w copy 1
-    %t60504 =w ceqw %t60502, %t60503
-    jnz %t60504, @then13759, @else13760
+    dbgloc 1631
+    %t60416 =l loadl %t60381
+    %t60417 =w copy 1
+    %t60418 =l extsw %t60417
+    %t60419 =l add %t60416, %t60418
+    storel %t60419, %t60381
+    jmp @loop13747
+@exit13749
+    jmp @merge13746
+@else13745
+    jmp @merge13746
+@merge13746
+    jmp @merge13728
+@merge13728
+    dbgloc 1635
+    %t60420 =w call $free(l %t60274)
+    dbgloc 1636
+    %t60421 =w loadw %t60282
+    %t60422 =w copy 0
+    %t60423 =w ceqw %t60421, %t60422
+    jnz %t60423, @then13759, @else13760
 @then13759
-    dbgloc 1758
-    %t60505 =l copy %t60474
-    %t60506 =w copy 9
-    %t60507 =l extsw %t60506
-    %t60508 =l add %t60505, %t60507
-    %t60509 =l copy %t60508
-    dbgloc 1759
-    %t60510 =w call $target_dispatch__target_parse(l %t60509)
-    dbgloc 1760
-    %t60511 =w copy 0
-    %t60512 =w csltw %t60510, %t60511
-    jnz %t60512, @then13762, @else13763
+    dbgloc 1637
+    %t60424 =l copy $str1991
+    %t60425 =w call $jh_fputs_stderr(l %t60424)
+    dbgloc 1638
+    %t60426 =w call $jh_fputs_stderr(l %t60260)
+    dbgloc 1639
+    %t60427 =w loadw %t60284
+    %t60428 =w copy 1
+    %t60429 =w ceqw %t60427, %t60428
+    jnz %t60429, @then13762, @else13763
 @then13762
-    dbgloc 1762
-    %t60513 =w copy 1
-    ret %t60513
+    dbgloc 1640
+    %t60430 =l copy $str1992
+    %t60431 =w call $jh_fputs_stderr(l %t60430)
+    jmp @merge13764
 @else13763
+    dbgloc 1641
+    dbgloc 1642
+    %t60432 =l copy $str1993
+    %t60433 =w call $jh_fputs_stderr(l %t60432)
     jmp @merge13764
 @merge13764
-    dbgloc 1764
-    storew %t60510, %t60462
-    jmp @merge13761
+    %t60434 =w phi @then13762 %t60431, @else13763 %t60433
+    dbgloc 1644
+    %t60435 =w copy 1
+    ret %t60435
 @else13760
     jmp @merge13761
 @merge13761
-    dbgloc 1766
-    %t60514 =w loadw %t60464
-    %t60515 =w copy 1
-    %t60516 =w add %t60514, %t60515
-    storew %t60516, %t60464
-    jmp @loop13750
-@exit13752
-    dbgloc 1772
-    %t60517 =w copy 1
-    %t60518 =l alloc4 4
-    storew %t60517, %t60518
-    dbgloc 1773
-    %t60519 =w copy 1
-    %t60520 =l alloc4 4
-    storew %t60519, %t60520
-    jmp @loop13765
-@loop13765
-    dbgloc 1774
-    %t60521 =w loadw %t60520
-    %t60522 =w csltw %t60521, %t60344
-    jnz %t60522, @body13766, @exit13767
-@body13766
-    dbgloc 1775
-    %t60523 =w loadw %t60520
-    %t60524 =l extsw %t60523
-    dbgloc 1776
-    %t60525 =w copy 8
-    %t60526 =l extsw %t60525
-    %t60527 =l mul %t60524, %t60526
-    %t60528 =l call $util__ptr_add_u8(l %t60345, l %t60527)
-    %t60529 =l copy %t60528
-    dbgloc 1777
-    %t60530 =l loadl %t60529
-    dbgloc 1778
-    %t60531 =l copy $str2019
-    dbgloc 1779
-    %t60532 =w copy 1
-    %t60533 =l alloc4 4
-    storew %t60532, %t60533
-    dbgloc 1780
-    %t60534 =w copy 0
-    %t60535 =l alloc4 4
-    storew %t60534, %t60535
-    jmp @loop13768
-@loop13768
-    dbgloc 1781
-    %t60536 =w loadw %t60535
-    %t60537 =w copy 9
-    %t60538 =w csltw %t60536, %t60537
-    jnz %t60538, @body13769, @exit13770
-@body13769
-    dbgloc 1782
-    %t60539 =l copy %t60530
-    %t60540 =w loadw %t60535
-    %t60541 =l extsw %t60540
-    %t60542 =l add %t60539, %t60541
-    %t60543 =l copy %t60542
-    dbgloc 1783
-    %t60544 =l copy %t60531
-    %t60545 =w loadw %t60535
-    %t60546 =l extsw %t60545
-    %t60547 =l add %t60544, %t60546
-    %t60548 =l copy %t60547
-    dbgloc 1784
-    %t60549 =w loadub %t60543
-    %t60550 =w copy %t60549
-    dbgloc 1785
-    %t60551 =w loadub %t60548
-    %t60552 =w copy %t60551
-    dbgloc 1786
-    %t60553 =w cnew %t60550, %t60552
-    jnz %t60553, @then13771, @else13772
+    dbgloc 1648
+    %t60436 =w copy 1024
+    %t60437 =l extsw %t60436
+    %t60438 =l call $malloc(l %t60437)
+    dbgloc 1649
+    %t60439 =l call $str_copy(l %t60438, l %t60260)
+    dbgloc 1650
+    %t60440 =w copy 46
+    %t60441 =l call $strrchr(l %t60438, w %t60440)
+    dbgloc 1651
+    %t60442 =w copy 0
+    %t60443 =l extsw %t60442
+    %t60444 =w cnel %t60441, %t60443
+    jnz %t60444, @then13765, @else13766
+@then13765
+    dbgloc 1652
+    %t60445 =w copy 0
+    %t60446 =w call $store_byte_i32(l %t60441, w %t60445)
+    jmp @merge13767
+@else13766
+    jmp @merge13767
+@merge13767
+    dbgloc 1654
+    %t60447 =l call $strlen(l %t60438)
+    dbgloc 1655
+    %t60448 =l copy $str1994
+    %t60449 =l call $str_concat_at(l %t60438, l %t60447, l %t60448)
+    dbgloc 1656
+    %t60450 =l copy %t60438
+    %t60451 =l add %t60450, %t60449
+    %t60452 =l copy %t60451
+    dbgloc 1657
+    %t60453 =w copy 0
+    %t60454 =w call $store_byte_i32(l %t60452, w %t60453)
+    dbgloc 1662
+    %t60455 =w copy 3
+    %t60456 =l extsw %t60455
+    %t60457 =w copy 8
+    %t60458 =l extsw %t60457
+    %t60459 =l mul %t60456, %t60458
+    %t60460 =l call $malloc(l %t60459)
+    dbgloc 1663
+    %t60461 =l copy %t60460
+    dbgloc 1664
+    storel %t60260, %t60461
+    dbgloc 1665
+    %t60462 =w copy 8
+    %t60463 =l extsw %t60462
+    %t60464 =l call $util__ptr_add_u8(l %t60460, l %t60463)
+    %t60465 =l copy %t60464
+    dbgloc 1666
+    %t60466 =l copy $str1995
+    storel %t60466, %t60465
+    dbgloc 1667
+    %t60467 =w copy 16
+    %t60468 =l extsw %t60467
+    %t60469 =l call $util__ptr_add_u8(l %t60460, l %t60468)
+    %t60470 =l copy %t60469
+    dbgloc 1668
+    storel %t60438, %t60470
+    dbgloc 1670
+    %t60471 =w copy 3
+    %t60472 =w call $cmd_compile(w %t60471, l %t60460, w %t60253)
+    dbgloc 1671
+    %t60473 =w call $free(l %t60460)
+    dbgloc 1672
+    %t60474 =w copy 0
+    %t60475 =w cnew %t60472, %t60474
+    jnz %t60475, @then13768, @else13769
+@then13768
+    dbgloc 1673
+    %t60476 =w call $free(l %t60438)
+    dbgloc 1674
+    ret %t60472
+@else13769
+    jmp @merge13770
+@merge13770
+    dbgloc 1683
+    %t60477 =w copy 1024
+    %t60478 =l extsw %t60477
+    %t60479 =l call $malloc(l %t60478)
+    dbgloc 1684
+    %t60480 =w copy 1024
+    %t60481 =w call $jh_fullpath(l %t60479, l %t60260, w %t60480)
+    dbgloc 1685
+    %t60482 =w copy 0
+    %t60483 =w cnew %t60481, %t60482
+    jnz %t60483, @then13771, @else13772
 @then13771
-    %t60554 =w copy 0
-    storew %t60554, %t60533
-    jmp @merge13773
+    dbgloc 1686
+    %t60484 =l copy $str1996
+    %t60485 =w call $jh_fputs_stderr(l %t60484)
+    dbgloc 1687
+    %t60486 =w call $free(l %t60479)
+    dbgloc 1688
+    %t60487 =w call $free(l %t60438)
+    dbgloc 1689
+    %t60488 =w copy 1
+    ret %t60488
 @else13772
     jmp @merge13773
 @merge13773
-    dbgloc 1787
-    %t60555 =w loadw %t60535
-    %t60556 =w copy 1
-    %t60557 =w add %t60555, %t60556
-    storew %t60557, %t60535
-    jmp @loop13768
-@exit13770
-    dbgloc 1789
-    %t60558 =w loadw %t60533
-    %t60559 =w copy 0
-    %t60560 =w ceqw %t60558, %t60559
-    jnz %t60560, @then13774, @else13775
+    dbgloc 1692
+    %t60489 =w copy 1024
+    %t60490 =l extsw %t60489
+    %t60491 =l call $malloc(l %t60490)
+    dbgloc 1693
+    %t60492 =l call $str_copy(l %t60491, l %t60479)
+    dbgloc 1694
+    %t60493 =w copy 46
+    %t60494 =l call $strrchr(l %t60491, w %t60493)
+    dbgloc 1695
+    %t60495 =w copy 0
+    %t60496 =l extsw %t60495
+    %t60497 =w cnel %t60494, %t60496
+    jnz %t60497, @then13774, @else13775
 @then13774
-    dbgloc 1790
-    %t60561 =w loadw %t60518
-    %t60562 =w loadw %t60520
-    %t60563 =w cnew %t60561, %t60562
-    jnz %t60563, @then13777, @else13778
-@then13777
-    dbgloc 1791
-    %t60564 =w loadw %t60518
-    %t60565 =l extsw %t60564
-    dbgloc 1792
-    %t60566 =w copy 8
-    %t60567 =l extsw %t60566
-    %t60568 =l mul %t60565, %t60567
-    %t60569 =l call $util__ptr_add_u8(l %t60345, l %t60568)
-    %t60570 =l copy %t60569
-    dbgloc 1793
-    storel %t60530, %t60570
-    jmp @merge13779
-@else13778
-    jmp @merge13779
-@merge13779
-    dbgloc 1795
-    %t60571 =w loadw %t60518
-    %t60572 =w copy 1
-    %t60573 =w add %t60571, %t60572
-    storew %t60573, %t60518
+    dbgloc 1696
+    %t60498 =w copy 0
+    %t60499 =w call $store_byte_i32(l %t60494, w %t60498)
     jmp @merge13776
 @else13775
     jmp @merge13776
 @merge13776
+    dbgloc 1698
+    %t60500 =l call $strlen(l %t60491)
+    dbgloc 1699
+    %t60501 =l copy $str1997
+    %t60502 =l call $str_concat_at(l %t60491, l %t60500, l %t60501)
+    dbgloc 1700
+    %t60503 =l copy %t60491
+    %t60504 =l add %t60503, %t60502
+    %t60505 =l copy %t60504
+    dbgloc 1701
+    %t60506 =w copy 0
+    %t60507 =w call $store_byte_i32(l %t60505, w %t60506)
+    dbgloc 1706
+    %t60508 =w copy 1024
+    %t60509 =l extsw %t60508
+    %t60510 =l call $malloc(l %t60509)
+    dbgloc 1707
+    %t60511 =w copy 0
+    %t60512 =l extsw %t60511
+    %t60513 =l copy $str1998
+    %t60514 =l call $str_concat_at(l %t60510, l %t60512, l %t60513)
+    dbgloc 1708
+    %t60515 =l call $strlen(l %t60510)
+    dbgloc 1709
+    %t60516 =l call $str_concat_at(l %t60510, l %t60515, l %t60491)
+    dbgloc 1710
+    %t60517 =l call $strlen(l %t60510)
+    dbgloc 1711
+    %t60518 =l copy $str1999
+    %t60519 =l call $str_concat_at(l %t60510, l %t60517, l %t60518)
+    dbgloc 1714
+    %t60520 =w call $jh_run(l %t60510)
+    dbgloc 1715
+    %t60521 =w call $free(l %t60510)
+    dbgloc 1716
+    %t60522 =w call $free(l %t60491)
+    dbgloc 1717
+    %t60523 =w call $free(l %t60479)
+    dbgloc 1718
+    %t60524 =w call $free(l %t60438)
+    dbgloc 1719
+    ret %t60520
+}
+
+export function w $cmd_dump(w %argc, l %argv, w %t) {
+@start13777
+    %t60525 =w copy %argc
+    %t60526 =l copy %argv
+    %t60527 =w copy %t
+    dbgloc 1724
+    dbgloc 1725
+    %t60528 =l copy $str2000
+    %t60529 =w call $jh_fputs_stderr(l %t60528)
+    dbgloc 1726
+    %t60530 =w copy 1
+    ret %t60530
+}
+
+export function w $main_jhyy(w %argc, l %argv) {
+@start13778
+    %t60531 =w copy %argc
+    %t60532 =l copy %argv
+    dbgloc 1731
+    dbgloc 1733
+    %t60533 =w copy 1
+    %t60534 =w csgew %t60531, %t60533
+    jnz %t60534, @then13779, @else13780
+@then13779
+    dbgloc 1734
+    %t60535 =l copy %t60532
+    dbgloc 1735
+    %t60536 =l loadl %t60535
+    dbgloc 1736
+    %t60537 =w call $jh_paths_init(l %t60536)
+    dbgloc 1737
+    %t60538 =w copy 0
+    %t60539 =w cnew %t60537, %t60538
+    jnz %t60539, @then13782, @else13783
+@then13782
+    dbgloc 1738
+    %t60540 =l copy $str2001
+    %t60541 =w call $jh_fputs_stderr(l %t60540)
+    dbgloc 1739
+    %t60542 =w copy 1
+    ret %t60542
+@else13783
+    jmp @merge13784
+@merge13784
+    jmp @merge13781
+@else13780
+    jmp @merge13781
+@merge13781
+    dbgloc 1743
+    %t60543 =w copy 2
+    %t60544 =w csltw %t60531, %t60543
+    jnz %t60544, @then13785, @else13786
+@then13785
+    dbgloc 1744
+    %t60545 =l copy $str2002
+    %t60546 =w copy 0
+    %t60547 =w call $printf(l %t60545, w %t60546)
+    dbgloc 1745
+    %t60548 =l copy $str2003
+    %t60549 =w copy 0
+    %t60550 =w call $printf(l %t60548, w %t60549)
+    dbgloc 1746
+    %t60551 =l copy $str2004
+    %t60552 =w copy 0
+    %t60553 =w call $printf(l %t60551, w %t60552)
+    dbgloc 1747
+    %t60554 =l copy $str2005
+    %t60555 =w copy 0
+    %t60556 =w call $printf(l %t60554, w %t60555)
+    dbgloc 1748
+    %t60557 =l copy $str2006
+    %t60558 =w copy 0
+    %t60559 =w call $printf(l %t60557, w %t60558)
+    dbgloc 1749
+    %t60560 =l copy $str2007
+    %t60561 =w copy 0
+    %t60562 =w call $printf(l %t60560, w %t60561)
+    dbgloc 1750
+    %t60563 =l copy $str2008
+    %t60564 =w copy 0
+    %t60565 =w call $printf(l %t60563, w %t60564)
+    dbgloc 1751
+    %t60566 =w copy 0
+    ret %t60566
+@else13786
+    jmp @merge13787
+@merge13787
+    dbgloc 1757
+    %t60567 =w copy 0
+    %t60568 =l alloc4 4
+    storew %t60567, %t60568
+    dbgloc 1758
+    %t60569 =w copy 1
+    %t60570 =l alloc4 4
+    storew %t60569, %t60570
+    jmp @loop13788
+@loop13788
+    dbgloc 1759
+    %t60571 =w loadw %t60570
+    %t60572 =w csltw %t60571, %t60531
+    jnz %t60572, @body13789, @exit13790
+@body13789
+    dbgloc 1760
+    %t60573 =w loadw %t60570
+    %t60574 =l extsw %t60573
+    dbgloc 1761
+    %t60575 =w copy 8
+    %t60576 =l extsw %t60575
+    %t60577 =l mul %t60574, %t60576
+    %t60578 =l call $util__ptr_add_u8(l %t60532, l %t60577)
+    %t60579 =l copy %t60578
+    dbgloc 1762
+    %t60580 =l loadl %t60579
+    dbgloc 1763
+    %t60581 =l copy $str2009
+    %t60582 =w call $strcmp(l %t60580, l %t60581)
+    %t60583 =w copy 0
+    %t60584 =w ceqw %t60582, %t60583
+    jnz %t60584, @then13791, @else13792
+@then13791
+    dbgloc 1764
+    %t60585 =w copy 1
+    storew %t60585, %t60568
+    jmp @merge13793
+@else13792
+    jmp @merge13793
+@merge13793
+    dbgloc 1766
+    %t60586 =w loadw %t60570
+    %t60587 =w copy 1
+    %t60588 =w add %t60586, %t60587
+    storew %t60588, %t60570
+    jmp @loop13788
+@exit13790
+    dbgloc 1768
+    %t60589 =w loadw %t60568
+    %t60590 =w copy 1
+    %t60591 =w ceqw %t60589, %t60590
+    jnz %t60591, @then13794, @else13795
+@then13794
+    dbgloc 1769
+    %t60592 =l copy $str2010
+    %t60593 =w copy 0
+    %t60594 =w call $printf(l %t60592, w %t60593)
+    dbgloc 1770
+    %t60595 =l copy $str2011
+    %t60596 =w copy 0
+    %t60597 =w call $printf(l %t60595, w %t60596)
+    dbgloc 1771
+    %t60598 =l copy $str2012
+    %t60599 =w copy 0
+    %t60600 =w call $printf(l %t60598, w %t60599)
+    dbgloc 1772
+    %t60601 =l copy $str2013
+    %t60602 =w copy 0
+    %t60603 =w call $printf(l %t60601, w %t60602)
+    dbgloc 1773
+    %t60604 =l copy $str2014
+    %t60605 =w copy 0
+    %t60606 =w call $printf(l %t60604, w %t60605)
+    dbgloc 1774
+    %t60607 =l copy $str2015
+    %t60608 =w copy 0
+    %t60609 =w call $printf(l %t60607, w %t60608)
+    dbgloc 1775
+    %t60610 =l copy $str2016
+    %t60611 =w copy 0
+    %t60612 =w call $printf(l %t60610, w %t60611)
+    dbgloc 1776
+    %t60613 =l copy $str2017
+    %t60614 =w copy 0
+    %t60615 =w call $printf(l %t60613, w %t60614)
+    dbgloc 1777
+    %t60616 =l copy $str2018
+    %t60617 =w copy 0
+    %t60618 =w call $printf(l %t60616, w %t60617)
+    dbgloc 1778
+    %t60619 =l copy $str2019
+    %t60620 =w copy 0
+    %t60621 =w call $printf(l %t60619, w %t60620)
+    dbgloc 1779
+    %t60622 =l copy $str2020
+    %t60623 =w copy 0
+    %t60624 =w call $printf(l %t60622, w %t60623)
+    dbgloc 1780
+    %t60625 =l copy $str2021
+    %t60626 =w copy 0
+    %t60627 =w call $printf(l %t60625, w %t60626)
+    dbgloc 1781
+    %t60628 =l copy $str2022
+    %t60629 =w copy 0
+    %t60630 =w call $printf(l %t60628, w %t60629)
+    dbgloc 1782
+    %t60631 =l copy $str2023
+    %t60632 =w copy 0
+    %t60633 =w call $printf(l %t60631, w %t60632)
+    dbgloc 1783
+    %t60634 =l copy $str2024
+    %t60635 =w copy 0
+    %t60636 =w call $printf(l %t60634, w %t60635)
+    dbgloc 1784
+    %t60637 =l call $target_dispatch__target_help()
+    %t60638 =w call $printf(l %t60637)
+    dbgloc 1785
+    %t60639 =w copy 0
+    ret %t60639
+@else13795
+    jmp @merge13796
+@merge13796
+    dbgloc 1789
+    %t60640 =l copy %t60532
+    dbgloc 1790
+    %t60641 =l copy %t60532
+    %t60642 =w copy 8
+    %t60643 =l extsw %t60642
+    %t60644 =l add %t60641, %t60643
+    %t60645 =l copy %t60644
+    dbgloc 1791
+    %t60646 =l copy %t60645
+    dbgloc 1792
+    %t60647 =l loadl %t60646
     dbgloc 1797
-    %t60574 =w loadw %t60520
-    %t60575 =w copy 1
-    %t60576 =w add %t60574, %t60575
-    storew %t60576, %t60520
-    jmp @loop13765
-@exit13767
+    %t60648 =w call $target_dispatch__target_default()
+    %t60649 =l alloc4 4
+    storew %t60648, %t60649
+    dbgloc 1798
+    %t60650 =w copy 1
+    %t60651 =l alloc4 4
+    storew %t60650, %t60651
+    jmp @loop13797
+@loop13797
+    dbgloc 1799
+    %t60652 =w loadw %t60651
+    %t60653 =w csltw %t60652, %t60531
+    jnz %t60653, @body13798, @exit13799
+@body13798
     dbgloc 1800
-    %t60577 =l copy %t60345
+    %t60654 =w loadw %t60651
+    %t60655 =l extsw %t60654
     dbgloc 1801
-    %t60578 =l copy %t60345
-    %t60579 =w copy 8
-    %t60580 =l extsw %t60579
-    %t60581 =l add %t60578, %t60580
-    %t60582 =l copy %t60581
+    %t60656 =w copy 8
+    %t60657 =l extsw %t60656
+    %t60658 =l mul %t60655, %t60657
+    %t60659 =l call $util__ptr_add_u8(l %t60532, l %t60658)
+    %t60660 =l copy %t60659
     dbgloc 1802
-    %t60583 =l copy %t60582
-    dbgloc 1803
-    %t60584 =l loadl %t60583
+    %t60661 =l loadl %t60660
     dbgloc 1804
-    %t60585 =w loadw %t60518
-    %t60586 =w copy 2
-    %t60587 =w sub %t60585, %t60586
+    %t60662 =l copy $str2025
     dbgloc 1805
-    %t60588 =l copy %t60345
-    %t60589 =w copy 16
-    %t60590 =l extsw %t60589
-    %t60591 =l add %t60588, %t60590
-    %t60592 =l copy %t60591
+    %t60663 =w copy 1
+    %t60664 =l alloc4 4
+    storew %t60663, %t60664
     dbgloc 1806
+    %t60665 =w copy 0
+    %t60666 =l alloc4 4
+    storew %t60665, %t60666
+    jmp @loop13800
+@loop13800
+    dbgloc 1807
+    %t60667 =w loadw %t60666
+    %t60668 =w copy 9
+    %t60669 =w csltw %t60667, %t60668
+    jnz %t60669, @body13801, @exit13802
+@body13801
     dbgloc 1808
-    %t60593 =l copy $str2020
-    %t60594 =w call $strcmp(l %t60584, l %t60593)
-    %t60595 =w copy 0
-    %t60596 =w ceqw %t60594, %t60595
-    jnz %t60596, @then13780, @else13781
-@then13780
+    %t60670 =l copy %t60661
+    %t60671 =w loadw %t60666
+    %t60672 =l extsw %t60671
+    %t60673 =l add %t60670, %t60672
+    %t60674 =l copy %t60673
     dbgloc 1809
-    %t60597 =w loadw %t60462
-    %t60598 =w call $cmd_compile(w %t60587, l %t60592, w %t60597)
-    ret %t60598
-@else13781
-    jmp @merge13782
-@merge13782
+    %t60675 =l copy %t60662
+    %t60676 =w loadw %t60666
+    %t60677 =l extsw %t60676
+    %t60678 =l add %t60675, %t60677
+    %t60679 =l copy %t60678
+    dbgloc 1810
+    %t60680 =w loadub %t60674
+    %t60681 =w copy %t60680
     dbgloc 1811
-    %t60599 =l copy $str2021
-    %t60600 =w call $strcmp(l %t60584, l %t60599)
-    %t60601 =w copy 0
-    %t60602 =w ceqw %t60600, %t60601
-    jnz %t60602, @then13783, @else13784
-@then13783
+    %t60682 =w loadub %t60679
+    %t60683 =w copy %t60682
     dbgloc 1812
-    %t60603 =w loadw %t60462
-    %t60604 =w call $cmd_build(w %t60587, l %t60592, w %t60603)
-    ret %t60604
-@else13784
-    jmp @merge13785
-@merge13785
-    dbgloc 1814
-    %t60605 =l copy $str2022
-    %t60606 =w call $strcmp(l %t60584, l %t60605)
-    %t60607 =w copy 0
-    %t60608 =w ceqw %t60606, %t60607
-    jnz %t60608, @then13786, @else13787
-@then13786
+    %t60684 =w cnew %t60681, %t60683
+    jnz %t60684, @then13803, @else13804
+@then13803
+    %t60685 =w copy 0
+    storew %t60685, %t60664
+    jmp @merge13805
+@else13804
+    jmp @merge13805
+@merge13805
+    dbgloc 1813
+    %t60686 =w loadw %t60666
+    %t60687 =w copy 1
+    %t60688 =w add %t60686, %t60687
+    storew %t60688, %t60666
+    jmp @loop13800
+@exit13802
     dbgloc 1815
-    %t60609 =w loadw %t60462
-    %t60610 =w call $cmd_run(w %t60587, l %t60592, w %t60609)
-    ret %t60610
-@else13787
-    jmp @merge13788
-@merge13788
+    %t60689 =w loadw %t60664
+    %t60690 =w copy 1
+    %t60691 =w ceqw %t60689, %t60690
+    jnz %t60691, @then13806, @else13807
+@then13806
+    dbgloc 1816
+    %t60692 =l copy %t60661
+    %t60693 =w copy 9
+    %t60694 =l extsw %t60693
+    %t60695 =l add %t60692, %t60694
+    %t60696 =l copy %t60695
     dbgloc 1817
-    %t60611 =l copy $str2023
-    %t60612 =w call $strcmp(l %t60584, l %t60611)
-    %t60613 =w copy 0
-    %t60614 =w ceqw %t60612, %t60613
-    jnz %t60614, @then13789, @else13790
-@then13789
+    %t60697 =w call $target_dispatch__target_parse(l %t60696)
     dbgloc 1818
-    %t60615 =w loadw %t60462
-    %t60616 =w call $cmd_dump(w %t60587, l %t60592, w %t60615)
-    ret %t60616
-@else13790
-    jmp @merge13791
-@merge13791
+    %t60698 =w copy 0
+    %t60699 =w csltw %t60697, %t60698
+    jnz %t60699, @then13809, @else13810
+@then13809
     dbgloc 1820
-    %t60617 =l copy $str2024
-    %t60618 =w call $jh_fputs_stderr(l %t60617)
-    dbgloc 1821
-    %t60619 =w copy 1
-    ret %t60619
+    %t60700 =w copy 1
+    ret %t60700
+@else13810
+    jmp @merge13811
+@merge13811
+    dbgloc 1822
+    storew %t60697, %t60649
+    jmp @merge13808
+@else13807
+    jmp @merge13808
+@merge13808
+    dbgloc 1824
+    %t60701 =w loadw %t60651
+    %t60702 =w copy 1
+    %t60703 =w add %t60701, %t60702
+    storew %t60703, %t60651
+    jmp @loop13797
+@exit13799
+    dbgloc 1830
+    %t60704 =w copy 1
+    %t60705 =l alloc4 4
+    storew %t60704, %t60705
+    dbgloc 1831
+    %t60706 =w copy 1
+    %t60707 =l alloc4 4
+    storew %t60706, %t60707
+    jmp @loop13812
+@loop13812
+    dbgloc 1832
+    %t60708 =w loadw %t60707
+    %t60709 =w csltw %t60708, %t60531
+    jnz %t60709, @body13813, @exit13814
+@body13813
+    dbgloc 1833
+    %t60710 =w loadw %t60707
+    %t60711 =l extsw %t60710
+    dbgloc 1834
+    %t60712 =w copy 8
+    %t60713 =l extsw %t60712
+    %t60714 =l mul %t60711, %t60713
+    %t60715 =l call $util__ptr_add_u8(l %t60532, l %t60714)
+    %t60716 =l copy %t60715
+    dbgloc 1835
+    %t60717 =l loadl %t60716
+    dbgloc 1836
+    %t60718 =l copy $str2026
+    dbgloc 1837
+    %t60719 =w copy 1
+    %t60720 =l alloc4 4
+    storew %t60719, %t60720
+    dbgloc 1838
+    %t60721 =w copy 0
+    %t60722 =l alloc4 4
+    storew %t60721, %t60722
+    jmp @loop13815
+@loop13815
+    dbgloc 1839
+    %t60723 =w loadw %t60722
+    %t60724 =w copy 9
+    %t60725 =w csltw %t60723, %t60724
+    jnz %t60725, @body13816, @exit13817
+@body13816
+    dbgloc 1840
+    %t60726 =l copy %t60717
+    %t60727 =w loadw %t60722
+    %t60728 =l extsw %t60727
+    %t60729 =l add %t60726, %t60728
+    %t60730 =l copy %t60729
+    dbgloc 1841
+    %t60731 =l copy %t60718
+    %t60732 =w loadw %t60722
+    %t60733 =l extsw %t60732
+    %t60734 =l add %t60731, %t60733
+    %t60735 =l copy %t60734
+    dbgloc 1842
+    %t60736 =w loadub %t60730
+    %t60737 =w copy %t60736
+    dbgloc 1843
+    %t60738 =w loadub %t60735
+    %t60739 =w copy %t60738
+    dbgloc 1844
+    %t60740 =w cnew %t60737, %t60739
+    jnz %t60740, @then13818, @else13819
+@then13818
+    %t60741 =w copy 0
+    storew %t60741, %t60720
+    jmp @merge13820
+@else13819
+    jmp @merge13820
+@merge13820
+    dbgloc 1845
+    %t60742 =w loadw %t60722
+    %t60743 =w copy 1
+    %t60744 =w add %t60742, %t60743
+    storew %t60744, %t60722
+    jmp @loop13815
+@exit13817
+    dbgloc 1847
+    %t60745 =w loadw %t60720
+    %t60746 =w copy 0
+    %t60747 =w ceqw %t60745, %t60746
+    jnz %t60747, @then13821, @else13822
+@then13821
+    dbgloc 1848
+    %t60748 =w loadw %t60705
+    %t60749 =w loadw %t60707
+    %t60750 =w cnew %t60748, %t60749
+    jnz %t60750, @then13824, @else13825
+@then13824
+    dbgloc 1849
+    %t60751 =w loadw %t60705
+    %t60752 =l extsw %t60751
+    dbgloc 1850
+    %t60753 =w copy 8
+    %t60754 =l extsw %t60753
+    %t60755 =l mul %t60752, %t60754
+    %t60756 =l call $util__ptr_add_u8(l %t60532, l %t60755)
+    %t60757 =l copy %t60756
+    dbgloc 1851
+    storel %t60717, %t60757
+    jmp @merge13826
+@else13825
+    jmp @merge13826
+@merge13826
+    dbgloc 1853
+    %t60758 =w loadw %t60705
+    %t60759 =w copy 1
+    %t60760 =w add %t60758, %t60759
+    storew %t60760, %t60705
+    jmp @merge13823
+@else13822
+    jmp @merge13823
+@merge13823
+    dbgloc 1855
+    %t60761 =w loadw %t60707
+    %t60762 =w copy 1
+    %t60763 =w add %t60761, %t60762
+    storew %t60763, %t60707
+    jmp @loop13812
+@exit13814
+    dbgloc 1858
+    %t60764 =l copy %t60532
+    dbgloc 1859
+    %t60765 =l copy %t60532
+    %t60766 =w copy 8
+    %t60767 =l extsw %t60766
+    %t60768 =l add %t60765, %t60767
+    %t60769 =l copy %t60768
+    dbgloc 1860
+    %t60770 =l copy %t60769
+    dbgloc 1861
+    %t60771 =l loadl %t60770
+    dbgloc 1862
+    %t60772 =w loadw %t60705
+    %t60773 =w copy 2
+    %t60774 =w sub %t60772, %t60773
+    dbgloc 1863
+    %t60775 =l copy %t60532
+    %t60776 =w copy 16
+    %t60777 =l extsw %t60776
+    %t60778 =l add %t60775, %t60777
+    %t60779 =l copy %t60778
+    dbgloc 1864
+    dbgloc 1866
+    %t60780 =l copy $str2027
+    %t60781 =w call $strcmp(l %t60771, l %t60780)
+    %t60782 =w copy 0
+    %t60783 =w ceqw %t60781, %t60782
+    jnz %t60783, @then13827, @else13828
+@then13827
+    dbgloc 1867
+    %t60784 =w loadw %t60649
+    %t60785 =w call $cmd_compile(w %t60774, l %t60779, w %t60784)
+    ret %t60785
+@else13828
+    jmp @merge13829
+@merge13829
+    dbgloc 1869
+    %t60786 =l copy $str2028
+    %t60787 =w call $strcmp(l %t60771, l %t60786)
+    %t60788 =w copy 0
+    %t60789 =w ceqw %t60787, %t60788
+    jnz %t60789, @then13830, @else13831
+@then13830
+    dbgloc 1870
+    %t60790 =w loadw %t60649
+    %t60791 =w call $cmd_build(w %t60774, l %t60779, w %t60790)
+    ret %t60791
+@else13831
+    jmp @merge13832
+@merge13832
+    dbgloc 1872
+    %t60792 =l copy $str2029
+    %t60793 =w call $strcmp(l %t60771, l %t60792)
+    %t60794 =w copy 0
+    %t60795 =w ceqw %t60793, %t60794
+    jnz %t60795, @then13833, @else13834
+@then13833
+    dbgloc 1873
+    %t60796 =w loadw %t60649
+    %t60797 =w call $cmd_run(w %t60774, l %t60779, w %t60796)
+    ret %t60797
+@else13834
+    jmp @merge13835
+@merge13835
+    dbgloc 1875
+    %t60798 =l copy $str2030
+    %t60799 =w call $strcmp(l %t60771, l %t60798)
+    %t60800 =w copy 0
+    %t60801 =w ceqw %t60799, %t60800
+    jnz %t60801, @then13836, @else13837
+@then13836
+    dbgloc 1876
+    %t60802 =w loadw %t60649
+    %t60803 =w call $cmd_dump(w %t60774, l %t60779, w %t60802)
+    ret %t60803
+@else13837
+    jmp @merge13838
+@merge13838
+    dbgloc 1878
+    %t60804 =l copy $str2031
+    %t60805 =w call $jh_fputs_stderr(l %t60804)
+    dbgloc 1879
+    %t60806 =w copy 1
+    ret %t60806
 }
 

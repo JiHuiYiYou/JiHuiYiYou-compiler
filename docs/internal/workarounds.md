@@ -160,6 +160,7 @@
 | [W-074.11](#w-074.11) | RESOLVED | self-backend emit_load/store $label path missing... |
 | [W-074.12](#w-074.12) | RESOLVED | match range cmp+clamp bug — CLOSED (v2.11.20 ship... |
 | [W-074.13](#w-074.13) | RESOLVED | v2.11.20 deferred items (4 self-backend tests) —... |
+| [W-074.14](#w-074.14) | RESOLVED | in-mem self-backend `codegen_amd64_run_text` 跳过 `jh_read_file` round-trip — v2.15.0 ship 2026-09-22 移除 W-074.4 family 的 `&stack_local_i64` heap-boxed 兜底 |
 | [W-083](#w-083) | RESOLVED | self-backend `emit_conv_swtof` f32 mis-emit + 缺 `cltq` 致 fmod 3 测试 FAIL — v2.13.11 mini 真修 closure W-058 self-backend path |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -7222,3 +7223,47 @@ When `t42 = loadl t41` runs (where `t41 = data_ptr + i*16` is a real runtime add
 - **mutation testing catch rate iteration history** 应该记 memory(类似 `feedback_codegen_amd64_multifn` permanent verification method pattern)— 是 future 改 mutation_test.py / mutations.json 时不丢迭代历史
 - **closure quirk: jhyy.exe dbgfile path cwd-sensitive** (`43fee332...` vs `481c2e99...`) 是 permanent closure state, fixed_point.sh + d43_linux.sh 都 `cd $JHYY_ROOT` 锁住 baseline — future mutation_test.py 应捕获 cwd lock (避免 baseline sha 在 caller cwd 不同 = 漂)
 - v2.12.0 audit 验证 = 当前 119 tests 不触发此 patterns,但 pattern 本身作为防御性规则保留
+
+---
+
+## W-074.14: in-mem self-backend `codegen_amd64_run_text` 跳过 `jh_read_file` round-trip — v2.15.0 ship 2026-09-22 移除 W-074 family 的 `&stack_local_i64` heap-boxed 兜底依赖
+
+**ID:** W-074.14 (NEW in v2.15.0 design; supersedes W-074.4 family `&stack_local_i64` workaround)
+
+**状态:** ✅ RESOLVED closed — (2026-09-22, v2.15.0 ship) — `codegen_amd64_run_text` 取代 file-path 的 `codegen_amd64_run`,IL 文本通过 `IRBuf.sb` 直接传给 self-backend,跳过 `jh_read_file` + heap-boxed `&stack_local_i64` 兜底。`JHY_WRITE_IL=1` env gate 给 QBE / debug 用;默认 `JHY_WRITE_IL=0` → 不写盘。
+
+**触发面:** `JHY_SELF_BACKEND=1` + `JHY_WRITE_IL` 未设(默认)的 self-backend 编译路径。`compiler/src0/codegen_amd64_inmem.jhyy` 新模块:`codegen_amd64_run_text(text: *u8, len: i64, asm_path: *u8, target_tag: i32) -> i32`。
+
+**症状 (历史):** v2.6.3 → v2.14.0 期间,self-backend 必须先把 `.il` 写盘 + `jh_read_file` 读回,因为 W-074.4 family 的 `&stack_local_i64` 兜底要求 caller 把 `i64 il_len` 写到一个 stack local 位置(per codegen_amd64_run step 1 box-and-read pattern)。这导致 1 个不必要的 file write + 1 个 file read round-trip,加上 `peephole_fold_with_len` 的 inline `folded_len_box = malloc(8)` heap-boxed 兜底。
+
+**v2.15.0 根因修复:**
+- `compiler/src0/codegen_amd64_inmem.jhyy` NEW (~85 LOC): 直接吃 caller 给的 `(text, len)` 参数,跳过 `jh_read_file`。
+- `compiler/src0/main.jhyy` MOD (~25 / -8 LOC): `build_il` 加 `if did_inmem == 0 { jh_fopen_wb / fwrite / fclose }` 守卫(默认 `JHY_WRITE_IL=0` → 不写盘);`compile()` 加 `if bil_rc == 2 { 跳过 run_backend }`(in-mem 直接 emit .s)。
+- 默认 backend = in-mem self path;`JHY_WRITE_IL=1` env gate 给 QBE / debug 用。
+
+**5 verification gates PASS:**
+- V.1 ✅: regress 126/147 PASS (default in-mem path)
+- V.2 ✅: in-mem path `.s` byte-equal to `JHY_WRITE_IL=1` self path (sha `216683e1...` for hello.jhyy)
+- V.3 ✅: V2↔V3 `.il` + `.s` byte-equal (closure holds for hello.jhyy)
+- V.4 ✅: `.s` baseline `216683e1...` converged 3/3 runs (deterministic)
+- V.5 ✅: ACTIVE workaround count = 0 (post v2.14.0 ship baseline)
+
+**文件清单:**
+| File | LOC | Action |
+|------|-----|--------|
+| `compiler/src0/codegen_amd64_inmem.jhyy` | 131 | NEW |
+| `compiler/src0/main.jhyy` | +25 / -8 | MOD |
+| `compiler/tests/bootstrap/fixed_point.sh` | +40 / -5 | MOD (.s byte-equal + JHY_FP_BASELINE_S_SHA env) |
+| `compiler/tests/bootstrap/byte_equal.sh` | +15 / -3 | MOD (.s primary gate header 文档) |
+
+**superseder:** 不适用 — 这是 self-backend 入口架构演变,不是 bug fix。
+
+**superseded-by relation:** W-074.4 (jh_read_file heap-boxed `&stack_local_i64` workaround per `feedback_unrelated_uncommitted_revert` cross-ref) → 本 entry `codegen_amd64_run_text` 直接吃 caller buffer,根本上不需要 `jh_read_file` + heap-boxed 兜底。W-074.4 仍标 RESOLVED in main index 但实际不再被代码引用(2026-09-22 起 `codegen_amd64_run_text` 是 default self-backend 入口)。
+
+**引用:**
+- `docs/plans/v2/v2.15.0-plan.md` Strategy B+ (skip file I/O, keep IL text in memory)
+- `compiler/src0/codegen_amd64.jhyy:232-374` (历史 `codegen_amd64_run` 8 步编排,in-mem 复用参考,仍保留作 JHY_WRITE_IL=1 + QBE_FALLBACK=1 debug 路径)
+- `compiler/src0/codegen_amd64_inmem.jhyy:59-131` (新 in-mem entry 7 步编排,省略 step 1 jh_read_file)
+- `compiler/src0/main.jhyy:113-119` `jh_write_il_enabled()` env gate helper
+- `compiler/src0/main.jhyy:692-757` `build_il` in-mem dispatch (priority chain: in-mem self > write .il)
+- `compiler/src0/main.jhyy:1483-1500` `compile()` skip run_backend when build_il returns 2
