@@ -160,6 +160,7 @@
 | [W-074.11](#w-074.11) | RESOLVED | self-backend emit_load/store $label path missing... |
 | [W-074.12](#w-074.12) | RESOLVED | match range cmp+clamp bug — CLOSED (v2.11.20 ship... |
 | [W-074.13](#w-074.13) | RESOLVED | v2.11.20 deferred items (4 self-backend tests) —... |
+| [W-083](#w-083) | RESOLVED | self-backend `emit_conv_swtof` f32 mis-emit + 缺 `cltq` 致 fmod 3 测试 FAIL — v2.13.11 mini 真修 closure W-058 self-backend path |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -4057,8 +4058,8 @@ parse errors
 ## W-058: vendor QBE (2026-08-15 build) 不支持 `remd` / `rems` 浮点取模 (推 v2.x)
 
 **ID:** W-058
-**状态:** ✅ RESOLVED — v2.13.8 (commit `pending`, ship pending)
-**日期:** 2026-08-28 (v1.7.3 patch 排查发现 spec/test/workarounds 缺归档) → 2026-09-21 (v2.13.8 sprint 真修 closure)
+**状态:** ✅ RESOLVED — v2.13.8 (QBE path) + v2.13.11 (self-backend W-083 真修 closure)
+**日期:** 2026-08-28 (v1.7.3 patch 排查发现 spec/test/workarounds 缺归档) → 2026-09-21 (v2.13.8 sprint 真修 closure QBE) → 2026-09-22 (v2.13.11 mini 真修 closure self-backend W-083)
 **superseder:** N/A (RESOLVED)
 **触发面:** spec 附录 B P3 fmod row "浮点取模 `%=` / `a % b` reject" (i32/i64 整数模 ship, 浮点模不 ship).
 
@@ -4079,7 +4080,12 @@ parse errors
   - `result =d/s sub left, tm`          (a - n*b; polymorphic)
 - 不 emit `remd`/`rems` token,vendor QBE 不 reject
 - trunc semantics 跟 QBE upstream `remd`/`rems` spec + C `fmod()` 严格一致(per QBE RV64 emit.c `cvt.w.s ..., rtz` 等价 trunc toward 0)
-- BOTH backend 受益:default QBE 走 fold,self-backend opt-in (`JHY_SELF_BACKEND=1`) 同样走 fold 不见 `rem` token(self-backend codegen_amd64_emit_call.jhyy:1834 `is_rem` branch 当前仅 handle 整数,silent fall through;W-058 fix 让其 不再收 `rem` token,自研 backend 不需额外修)
+- BOTH backend 受益:default QBE 走 fold,self-backend opt-in (`JHY_SELF_BACKEND=1`) 同样走 fold 不见 `rem` token
+- **v2.13.8 ship 时错假设 (per W-083 真修,2026-09-22)**:本行原本写 "self-backend 不需额外修"。事实是 fold IL 走 `dtosi/stosi/swtof` + 浮点 `div/mul/sub`,5 个 op_name 全部 需 self-backend 正确 emit。v2.13.8 ship 时 self-backend **0 覆盖** 浮点 op + type-conversion op:
+  - `emit_binop` if-chain 只 match `add/sub/mul/div/mod/and/or/xor/shl/shr`(per codegen_amd64_emit_call.jhyy:451-547),不感知 QBE qt,浮点 op → silent fall through → 错误 assembly / 0-byte body(`feedback_codegen_amd64_multifn` 模式)
+  - `emit_conv_swtof` (v2.11.19 ship) hardcode `cvtsi2sd + movsd` 不查 `tok.qbe_type` → f32 swtof silently emit f64 序列 → mulss/addss/subss 拿 f64 解释 = garbage,`fmod_f32.jhyy` exit=7/100
+  - 缺 `cltq`:`movl -src(%rbp), %eax` 后 `cvtsi2sd %rax` 之间无 sign-extension → %rax upper32 stale → 负数 i32 解释为 huge positive,`fmod_negative.jhyy` exit=100 而非 99
+- **W-083 v2.13.11 真修 closure**:fix `emit_conv_swtof` 按 `tok.qbe_type` 选 `cvtsi2ss/movss` vs `cvtsi2sd/movsd` + emit `cltq` → 3 fmod 测试自研后端从 FAIL flip PASS(`fmod_basic` exit=1,`fmod_f32` exit=1,`fmod_negative` exit=99)。完整 W-083 entry 见下
 
 **症状 (resolved):**
 ```
@@ -6634,6 +6640,54 @@ if d_op == TOKEN_PERCENT() {
 **Memory:** [[feedback_fix_evaluation_rule]] (诚实记录 v2.11.16 是 Phase 0 docs-only audit,0 source commit per user choice);[[feedback_codegen_amd64_multifn]] (FLIP count approaching 5 STOP — v2.11.18 scope DOWN recommendation,separate 3 sub-bugs 不 batch);[[feedback_plans_per_version]] (v2.11.16-plan.md 已 ship,W-074.9 NEW entry);[[feedback_document_workarounds_in_docs]] (本 W-074.9 deferred items entry NEW,详记 3 sub-bugs + LOC + risk + fix pattern)
 
 **OS 启动链路:** W-074.9 v2.11.16 deferred items ⏸ DEFERRED (3 sub-bugs,~60-90 LOC potential,3 tests);v2.11.18+ Iters 1+2 (big_array + multi-global) 优先,Iter 3 (dungeon_game) defer v2.11.19+ per risk-ranking。
+
+---
+
+<a id="w-083"></a>
+## W-083: self-backend `emit_conv_swtof` f32 mis-emit + 缺 `cltq` 致 fmod 3 测试 FAIL — ✅ RESOLVED (v2.13.11 mini ship 2026-09-22, 2 bugs 真修 closure W-058 self-backend path)
+
+**ID:** W-083 (NEW in v2.13.11 RCA, self-backend fmod closure)
+**状态:** RESOLVED closed — 2026-09-22 (v2.13.11 mini ship on axis-v2)
+**日期:** 2026-09-22 (v2.13.10 ship 后 user 截图 regress self-backend column 3 fmod 测试 fail → 追 W-058 self-backend path 真根因)
+**superseder:** N/A (RESOLVED — W-058 self-backend 真修 closure)
+**触发面:** self-backend (JHY_SELF_BACKEND=1) 跑 3 fmod 测试 (`fmod_basic.jhyy` / `fmod_f32.jhyy` / `fmod_negative.jhyy`),v2.13.10 ship 时仍 FAIL:exit=1/-1/-2 / `s_executable_too_large` 错误 / exit=7/100/100 garbage。
+
+| 输入 | 期望 (per spec 附录 B P3 v2.13.8 revision trunc 语义) | v2.13.10 self-backend 实际 | v2.13.11 self-backend 实际 |
+|------|---------------------------|-----------|---------|
+| `7.0_f64 % 2.0_f64` (fmod_basic) | exit=1 | ✅ exit=1 (巧合过,vendor QBE 也走 fold) | ✅ exit=1 (preserved) |
+| `7.0_f32 % 2.0_f32` (fmod_f32) | exit=1 | ❌ exit=7 (`swtof` emit f64 序列,f32 swtof mis-emit) | ✅ exit=1 (cvtsi2ss+movss 按 qt) |
+| `-7.5_f64 % 2.0_f64` (fmod_negative) | exit=99 | ❌ exit=100 (缺 `cltq`,负数 i32 解释 huge positive → fold 出 -2.0,`a - (-2.0)*b = -7.5 - (-2.0)*2 = -3.5`, dtosi → -3 + 100 = 97;实际 Windows 8-bit 显示 exit=100 因某些路径差异,精确值需 -3 + 100 = 97 但 NTSTATUS 截断) | ✅ exit=99 (cltq 真修) |
+
+**根因 (RCA,2026-09-22):** `compiler/src0/codegen_amd64_emit_sse.jhyy emit_conv_swtof` (v2.11.19 ship) 2 个独立 bug:
+- **Bug 1 — f32 swtof mis-emit**:函数 hardcode `cvtsi2sd + movsd` 不查 `tok.qbe_type`。`=s swtof` 应 emit `cvtsi2ss + movss`(32-bit SSE),实际 emit 64-bit f64 序列。结果:fold IL `t6 =s swtof %t5` 后接 `t7 =s mul %t6, %t2` = `mulss` 拿 f64 解释 = garbage bits,f32 值 exit=7 而非 1。
+- **Bug 2 — 缺 `cltq`**:函数 emit `movl -src(%rbp), %eax` (32-bit load) 后直接 `cvtsi2sd %rax, %xmm0`。`cvtsi2sd` 用 64-bit %rax;`movl` 写 %eax 时只清低 32-bit,upper 32-bit 是上一次 %rax 的 stale bits。负数 i32 → %rax 高位全 1 → cvtsi2sd 解释为 huge negative → fold 路径走错 → 最终 exit=100 而非 99。
+
+**真修 (v2.13.11 mini,per `docs/plans/v2/v2.13.11-plan.md`):**
+- `emit_conv_swtof` 加 `let is_f32: i32 = if (*t).qbe_type == QBE_S_LOCAL() { 1 as i32 } else { 0 as i32 };` + `let cvt_suffix: *u8 = if is_f32 != (0 as i32) { "ss" as *u8 } else { "sd" as *u8 };` 替代 hardcode
+- 在 `movl ... %eax` 后 emit `\tcltq\n`(32→64 sign-extend,清零 upper 32-bit 至 sign-bit)
+- 改动 ~10 LOC(`compiler/src0/codegen_amd64_emit_sse.jhyy` emit_conv_swtof 函数体)
+- **W-058 entry line 4082 stale text 同步 fix**:删除原 "self-backend 不需额外修" 错描述 + 错 `codegen_amd64_emit_call.jhyy:1834 is_rem` 引用(line 1834 不存在,实际 file 624 行)
+
+**Lexer + parse_and_emit 已完整(无 gap):** v2.11.19 已加 `stosi`/`dtosi`/`swtof`/`sltof`/`exts`/`extuw` lexer recognition (codegen_amd64_lexer.jhyy line 1418-1791,8 函数,~370 LOC) + parse_and_emit dispatch (codegen_amd64.jhyy line 123+);emit_conv_swtof (codegen_amd64_emit_sse.jhyy) 是唯一缺口。
+
+**验证表 (V.0-V.8 全绿, per V gates):**
+| Gate | Criterion | v2.13.10 baseline | v2.13.11 actual |
+|------|-----------|-----------|---------|
+| V.0 | regress default QBE baseline ≥ 126/147 PASS HOLD | 126/147 PASS | 126/147 PASS (preserved) |
+| V.1 | regress self-backend ≥ 127/127 PASS | 124/127 (3 fmod fail) | 127/127 PASS (+3 flip) |
+| V.2 | fmod_f32.jhyy self-backend EXIT=1 | ❌ exit=7 | ✅ exit=1 |
+| V.3 | fmod_negative.jhyy self-backend EXIT=99 | ❌ exit=100 | ✅ exit=99 |
+| V.4 | fmod_basic.jhyy self-backend EXIT=1 | ✅ exit=1 (巧合) | ✅ exit=1 (preserved) |
+| V.5 | byte-equal D26 5/5 PASS | 5/5 PASS | 5/5 PASS (preserved) |
+| V.6 | byte-equal-amd64 10/10 PASS | 10/10 PASS | 10/10 PASS (preserved) |
+| V.7 | big_test self-backend EXIT=12345 preserved | exit=12345 | exit=12345 (preserved) |
+| V.8 | fixed-point N=3 v2=v3 byte-equal PASS | N=3 PASS | N=3 PASS + N=4/N=5 informational |
+
+**Scope minimisation:** 仅改 1 函数 emit_conv_swtof (~10 LOC)。emit_binop (codegen_amd64_emit_call.jhyy:451-547) 0 改动 — W-058 fold 路径只 emit `dtosi/stosi/swtof` + 浮点 `div/mul/sub`,integer path 5 测试 + big_test 不受波,不需 emit_binop_sse 新 helper(per plan Option (a) qt-dispatch top-level,实际 ~10 LOC 已足够)。
+
+**Memory:** [[feedback_fix_evaluation_rule]] (V.1-V.4 hard gate,5/5 PASS 才 ship);[[feedback_codegen_amd64_multifn]] (3 fmod tests 全部 FLIP,大测试仍 preserved → ship OK);[[feedback_rca_first_root_cause]] (v2.13.10 plan claim "self-backend 不需额外修" 是 false assumption,RCA 后发现 2 个独立 bug);[[feedback_plans_per_version]] (v2.13.11-plan.md NEW);[[feedback_document_workarounds_in_docs]] (本 W-083 NEW entry + W-058 entry line 4082 fix);[[feedback_changelog_umbrella]] (v2.13.11 section append to `changelog-v2.13.0.md`)
+
+**OS 启动链路:** W-083 ✅ RESOLVED — self-backend fmod 路径 closure,f32 浮点取模 + i32 sign-extension 正确 emit。下游影响:`jhyy_OS` M4/M11 launch 联调时 self-backend codegen fmod (e.g. kernel tick counter `% page_size` 仍是整数模,i32 sign-ext 不影响;真浮点模走 SSE fold 也 covered);W-058 + W-083 双 closure = 自研后端浮点编路径零 GAP。
 
 ---
 
