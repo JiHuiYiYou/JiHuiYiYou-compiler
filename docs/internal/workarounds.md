@@ -7170,4 +7170,55 @@ When `t42 = loadl t41` runs (where `t41 = data_ptr + i*16` is a real runtime add
 
 - `feedback_codegen_amd64_multifn`: silent-fail multi-fn pattern — **不** mark RESOLVED (是 memory feedback rule, 验证方法永久保留 — 防止未来 regression)
 - `feedback_codegen_amd64_run_zerobyte`: body 0-byte silent-fail pattern — **不** mark RESOLVED (同上, 验证方法永久保留)
+
+## Mutation testing protocol — v2.14.0 ship meta-rule (NOT a workaround, 是 verification infra)
+
+**Sprint**: v2.14.0 (N≥10 fixed point + mutation testing protocol + Linux cross-platform + D43 long-term hold)
+**Ship date**: 2026-09-22
+**Audit worktree**: `JiHuiYiYou-axis-v2`
+**Audit binary**: jhyy.exe sha `3cc0c775...` (HOLD from v2.13.11 — 0 src0 change, audit 是 verification infra expansion)
+
+> **这不是 W-XXX workaround entry** — 是 v2.14.0 ship 的 verification meta-rule 文档化(per `feedback_document_workarounds_in_docs` "superset of workarounds = all special-case / protocol / meta-rule 文档化" 扩展语义)。新 protocol 文档化在 workarounds.md 是为了: (1) 集中 meta-rule / verification convention / cross-process protocol; (2) 防止 future regression of verification infra (per `feedback_codegen_amd64_multifn` 不 mark RESOLVED 但**永久保留验证方法** same pattern); (3) 让 future sprint author 知道 mutation_test.py + mutations.json + mutation_test.sh 是 permanent infra(不是 throwaway)。
+
+### Protocol 设计原则
+
+1. **目的**: 验证 verification harness 本身能 catch bug — 在 `compiler/src0/*.jhyy` 注入可控 mutation, 跑 verification harness, 期望 harness catch mutation
+2. **30 mutation 模板** (`compiler/tests/bootstrap/mutations.json`): 5 ABI + 10 codegen + 10 parser + 5 typechecker
+3. **3 detection modes**:
+   - `compile_fail`: rename mutation → 期望 `jhyy.exe compile main.jhyy` exit ≠ 0
+   - `compile_il_diff`: value mutation → 期望 compile exit=0 但 `.il sha256 ≠ baseline_il_sha`
+   - `regress`: pass count mutation → 应 drop
+4. **find string 必须单 occurrence**: `apply_mutation()` 验证 `content.count(find) == 1`, 否则 `setup_fail`(不进 catch/missed 统计)
+5. **ironclad restore-on-exit**: `try/finally + atexit.register(_restore_all_backups)` belt+suspenders (per `feedback_unrelated_uncommitted_revert`); Python crash (KeyboardInterrupt / exception / OS kill) → src0/*.jhyy.bak 全部还原; `.bak` 文件 atexit 自动删
+6. **baseline 必须先跑**: 跑 baseline regress + baseline compile + baseline .il sha, mutation catch 用 baseline 衡量 — 不只是 mutation-after-baseline 单一 reference
+7. **false positive = 0 是 hard gate**: mutation application 成功 + harness 跑通 但 catch 失败 = harness blind spot, 必须标 ⚠️ + 写盲点分析
+
+### Catch rate 阈值
+
+- **门槛**: ≥ 80% (24/30) — per `docs/plans/v2/v2.14.0-plan.md` Phase 2 + `docs/plans/roadmap/v2-v3-parallel-sprint-plan.md § 5.1` step 2
+- **v2.14.0 actual**: 100% (30/30) — 3 轮迭代 (60% → 93.3% → 100%)
+- **catch < 80%**: harness 有 blind spot, 不 ship mutation_test.py 是 ship artifact,但 V.2 FAIL + 写盲点分析 + 推 v2.14.1 补 harness
+
+### 文件清单
+
+| File | LOC | Status |
+|------|-----|--------|
+| `compiler/tests/bootstrap/mutations.json` | 286 | NEW |
+| `compiler/tests/bootstrap/mutation_test.py` | 426 | NEW |
+| `compiler/tests/bootstrap/mutation_test.sh` | 80 | NEW |
+| `compiler/tests/bootstrap/mutation-test-report.md` | auto-gen | NEW (per-run report) |
+
+### 与 feedback 的对齐
+
+- `feedback_unrelated_uncommitted_revert`: ironclad restore via try/finally + atexit + .bak 文件(per `feedback_unrelated_uncommitted_revert` "discard 前必 diff 看, 优先 stash" 扩展语义)
+- `feedback_mcp_regress_timeout`: mutation_test.py 不走 MCP regress, 走原始 `Bash(python mutation_test.py)` 后 `run_in_background: true` (per `feedback_mcp_regress_timeout` 600s cap)
+- `feedback_audit_single_commit_diff`: mutation_test.py + mutations.json + mutation_test.sh + fixed_point.sh modify + fixed_point_linux.sh + d43_linux.sh = 1-2 commits per worktree per `feedback_audit_single_commit_diff`
+- `feedback_no_date_estimates`: docs 用 sprint 序列 + 相对顺序, 不写日期估时
+- `feedback_plans_per_version`: v2.14.0 = own plan file `docs/plans/v2/v2.14.0-plan.md`, 不写 batch-V2 umbrella
+- `feedback_rca_first_root_cause`: catch rate 60% → 100% 3 轮迭代 = 每轮 RCA 找 root cause (duplicate definitions → 加 compile_il_diff mode → 升级 M-002/M-003)
+
+### Memory feedback implications
+
+- **mutation testing catch rate iteration history** 应该记 memory(类似 `feedback_codegen_amd64_multifn` permanent verification method pattern)— 是 future 改 mutation_test.py / mutations.json 时不丢迭代历史
+- **closure quirk: jhyy.exe dbgfile path cwd-sensitive** (`43fee332...` vs `481c2e99...`) 是 permanent closure state, fixed_point.sh + d43_linux.sh 都 `cd $JHYY_ROOT` 锁住 baseline — future mutation_test.py 应捕获 cwd lock (避免 baseline sha 在 caller cwd 不同 = 漂)
 - v2.12.0 audit 验证 = 当前 119 tests 不触发此 patterns,但 pattern 本身作为防御性规则保留
