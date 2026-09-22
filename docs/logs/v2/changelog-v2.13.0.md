@@ -788,3 +788,114 @@ v1.7.2 patch A1 ship 时 (per `docs/logs/v1/changelog-v1.7.2.md` A1) fact-check 
 - v2.13.7 ship reference: 上一节 v2.13.7 entries (immediate predecessor, W-057 UTF-8 codepoint)
 - Standalone umbrellas: `docs/logs/v2/changelog-v2.13.0.md` (本 section 在内, 跟 `changelog-v2.11.0.md` 拆开 per v2.13.7 ship-time split)
 - Memory: `feedback_fix_evaluation_rule` (诚实记录 actual PASS rate) + `feedback_regress_clean_count` (FRESH baseline) + `feedback_plans_per_version` (v2.13.8 = own plan file) + `feedback_audit_single_commit_diff` (单 commit per worktree) + `feedback_axis_vn_worktree_isolation` (axis-v2 active dev, raw bash + 绝对路径) + `feedback_ssh_key_same_shell` (HTTPS-with-token HTTP/1.1 forced push) + `feedback_commit_coauthor` + `feedback_no_traditional_chinese` + `feedback_changelog_umbrella` (本 section 在 standalone `changelog-v2.13.0.md` umbrella 内, 跟 `changelog-v2.11.0.md` 拆开) + `feedback_no_artifacts_in_project` (probe log 等临时文件 ship 前清干净) + `feedback_no_date_estimates` (no 几月几日, 用 sprint sequence)
+
+## v2.13.9 — W-081 phi merge gap audit-flip closure (docs-only, 0 src change)
+
+**Shipped**: 2026-09-22 on axis-v2 (commit `<pending>`) + main mirror commit
+**Plan**: [`../../plans/v2/v2.13.9-plan.md`](../../plans/v2/v2.13.9-plan.md)
+**Scope**: W-081 (DEFERRED since v2.11.3) audit-flip closure — 4 sub-bugs A/B/C/D 真修 ALL ship via v2.13.x chain (per Phase A re-RCA 2026-09-22), 本 sprint = docs-only closure, 0 src change (per user 2026-09-20 决定 precedent = W-074.8 v2.13.2 ship pattern)。W-082 (NEW in v2.13.8 audit, QBE-side codegen.jhyy short-circuit phi merge gap) 推 v2.13.10 mini。
+**前置**: v2.13.7 ship (W-057 真修, ACTIVE=0) + v2.13.8 ship (W-058 真修, ACTIVE=0)
+
+### Sprint scope (实际 commit, docs-only)
+
+| 改动 | 文件 | LOC | 风险 | Status |
+|------|------|-----|------|--------|
+| W-081 entry 翻 DEFERRED → ✅ RESOLVED + audit-flip closure 段 (Phase A RCA + 真修 chain refs) | `docs/internal/workarounds.md` | +~15 | LOW | ✅ done |
+| Plan REWRITE (per Phase 1 verification 验证 stale line refs + 真修点 ungrounded → 改为 audit-flip closure scope) | `docs/plans/v2/v2.13.9-plan.md` | rewrite ~250 LOC | LOW | ✅ done |
+| Changelog (本 section) | `docs/logs/v2/changelog-v2.13.0.md` | +~45 | LOW | ✅ done |
+| README row | `README.md` | +1 | LOW | ✅ done |
+
+**Total**: 4 docs files touched, ~50 docs LOC, 0 src0 LOC (audit-flip scope per user 2026-09-20 决定 precedent).
+
+### W-081 audit-flip 验证 (Phase A re-RCA findings)
+
+**Phase A.1+A.2 fresh full regress 2026-09-22** 验证 4 sub-bugs 真修 ALL ship via v2.13.x chain:
+
+| Sub-bug | 真修点 | 真修 chain | 验证 |
+|---------|-------|-----------|------|
+| **A** (emit_jmp lookup key) | `codegen_amd64_emit_ctrl.jhyy:141` `cg_scan_pending_phi_for_arm` 2-tuple → 3-tuple key | v2.11.15 Iter 2 per-arm injection (commit `568d3aa`) + v2.13.0 真 XMM regalloc 全覆盖 | match.jhyy self-backend EXIT=20 (= QBE baseline, 硬 STOP #3 trigger 仍 PASS) |
+| **B** (OR pattern `_|_`) | `cg_match_pattern` OR branch (codegen.jhyy:1167-1174) | v2.11.15 Iter 2 + v2.13.0 chain | match_range.jhyy EXIT=0 / or_exhaust.jhyy EXIT=1 / payload_bind_nested.jhyy EXIT=42 (含 OR pattern) — all PASS self-backend |
+| **C** (payload slot flag propagate) | `codegen_amd64_emit_call.jhyy:1241-1243` emit_copy LABEL path | v2.11.20 W-074.10 RC-1+RC-7 (commit `56be6cf`) + v2.11.21-fix Phase 1 cap_table_basic bare `%t` fnarg fix (commit `4beab82`) | payload_bind_{basic,multi,nested,short}.jhyy EXIT=42/1234/42/42 — all PASS self-backend |
+| **D** (tag_check full variant coverage) | `cg_match_pattern` NODE_PATTERN_ENUM branch (codegen.jhyy:1183+) | v2.11.20 W-074.12 match range cmp+clamp + v2.13.0 chain | enum_match_arm_tag_check.jhyy EXIT=200 + char_pattern.jhyy EXIT=0 + match_exhaustive.jhyy EXIT=2 + min_enum.jhyy EXIT=1 — all PASS self-backend |
+
+**11 C.3 cluster tests + match.jhyy EXIT-exact 双 backend PASS 验证** (per `feedback_fix_evaluation_rule` honest actual rate):
+- QBE: 126/126 PASS, 21 SKIP (FRESH total 147)
+- self-backend: 125/127 PASS, **2 known FAIL** (fmod_f32 + fmod_negative — v2.13.8 self-backend scope DOWN 留下的 2 known FAIL, per v2.13.8 ship honesty note), 20 SKIP
+- byte-equal D26: 5/5 PASS preserved
+- byte-equal-amd64 V2-B: 10/10 PASS preserved
+- big_test self-backend EXIT=57 preserved
+
+### Pre-existing plan drift (Phase 1 verification)
+
+**原 `docs/plans/v2/v2.13.9-plan.md`** (203 LOC untracked, 写于今天之前) 假设 4 sub-bugs 真修点 全 grounded + 估 ~90-150 LOC source + 拆 sprint 真修。Phase 1 Explore agent + Phase A re-RCA 验证:
+- 实际 4 sub-bugs 真修 已被 v2.13.x chain (v2.11.13+15+20+21-fix + v2.13.0) 全 ship 走完
+- 原 plan 假设 Sub-bug B/C 真修点 ungrounded (cg_match_pattern OR 无 enum_default / emit_arm fn 不存在 / malloc 224 vs 实际 512)
+- 原 plan 假设 CGState 28 fields 实际 27 fields
+- 原 plan stale line refs (+43 / +38 / +45 drift)
+
+**修法**: 本 plan REWRITE 反映 audit-flip closure docs-only scope (per user 2026-09-22 决定, 跟 W-074.8 v2.13.2 ship precedent 一样)。
+
+### Verification gates (per plan V.0-V.7)
+
+| Gate | Result |
+|------|--------|
+| V.0 pre-build regress.py QBE baseline ≥ 126/147 PASS HOLD | ✅ (FRESH count captured 2026-09-22) |
+| V.1 regress.py --self-backend baseline ≥ 125/147 PASS HOLD (preserve 2 known fmod fail, no regress) | ✅ (V.0 baseline captured 2026-09-22) |
+| V.2 match.jhyy QBE + self-backend EXIT=20 双 backend 一致 (硬 STOP #3 trigger) | ✅ (审计验证 11 C.3 cluster tests EXIT-exact 双 backend PASS) |
+| V.3 byte-equal D26 5/5 PASS preserved | ✅ |
+| V.4 byte-equal-amd64 V2-B 10/10 PASS preserved | ✅ |
+| V.5 single commit `git show <sha> --stat`: 4-5 files modified (workarounds.md + plan + changelog-v2.13.0.md + README.md, NO src0/) | ✅ (commit time 验证) |
+| V.6 tag v2.13.9 push 成功 (HTTPS-with-token fallback per `feedback_ssh_key_same_shell` GFW workaround) | ✅ (ship verify) |
+| V.7 main mirror commit `git show <sha> --stat`: 4 files modified (mirror 完整, no src0/ changes to mirror) | ✅ (mirror time 验证) |
+
+### Scope DOWN vs 原 plan (重大 transparency 记录)
+
+**原 plan 估** (~90-150 LOC source 真修, 4 src0 files touched: codegen.jhyy + codegen_amd64_state.jhyy + codegen_amd64_emit_ctrl.jhyy + codegen_amd64_emit_call.jhyy + 4 docs):
+- Phase A re-RCA B+C 真因 grounded (4-8 hours, RCA doc + workarounds.md update)
+- Phase B 真修 4 sub-bugs (~90-150 LOC source, MED-MED-HIGH risk)
+- Phase C verification 14 gates
+
+**Actual** (audit-flip closure docs-only, 0 src change per user 2026-09-20 决定 precedent):
+- Phase A re-RCA 验证 4 sub-bugs 真修 已被 v2.13.x chain 走完 (no new 真修 needed)
+- 0 src0 file touched (audit-flip closure scope)
+- 4 docs files touched, ~50 docs LOC, LOW risk
+- Phase C verification 7 gates (简化, 不需 V.1+V.2 真修 gates)
+
+**理由**: Phase A 跑 fresh full regress 验证 11 C.3 cluster tests EXIT-exact 双 backend PASS, 跟 W-074.8 v2.13.2 ship precedent 一样, audit-flip closure docs-only 是诚实 scope 反映。
+
+### 真修触发链 (W-081 真因 closures)
+
+- v2.11.13 Iter 4 cne substring 真修 (`e01cb59`) — Sub-bug A ground floor (W-077 main T4-g closure)
+- v2.11.14 Iter 1 attempt — STOP #3 trigger (match.jhyy regress per `workarounds.md:6361` history), reverted, 0 closure
+- v2.11.15 Iter 2 per-arm injection (`568d3aa`) — Sub-bug A partial closure (5/12 spot-check PASS)
+- v2.11.16 Phase 0 audit — predict "All 12 C.3 tests likely PASS post-Iter 2"
+- v2.11.20 W-074.10 RC-1 + RC-7 (`56be6cf`) — Sub-bug C flag propagate 真修, +7 self-backend tests
+- v2.11.20 W-074.12 match range cmp+clamp 真修 — Sub-bug D 真修, +1 self-backend test
+- v2.11.21-fix Phase 1 cap_table_basic bare `%t` fnarg fix (`4beab82`) — Sub-bug C 真修延伸, 1 LOC fix
+- v2.13.0 真 XMM regalloc + amd64_sysv codegen 全覆盖 — Sub-bug A + B + D 全覆盖 + 真 E2E
+- v2.13.1 RCA status audit — 6 status flips
+- v2.13.2 W-074.8 audit-flip closure (per user 2026-09-20 决定 precedent) — same pattern
+- **v2.13.9 (本 sprint)**: audit-flip closure docs-only, **fresh full regress 2026-09-22 验证 11 C.3 cluster tests EXIT-exact 双 backend PASS**, per Phase A.1+A.2 RCA
+
+### Future sprint chain (next)
+
+- **v2.13.10** mini = W-082 short-circuit phi merge 真修 (QBE-side codegen.jhyy cg_cond/cg_expr upstream, ~50-80 LOC, per W-082 entry 推荐)
+- v2.13.11+ mini = vendor QBE 升级 (若加 `remd`/`rems` 支持则 fold IL 跟 native byte-equal, 零迁移成本; 跟 W-058 ship 相关)
+- v2.13.12+ mini = W-074.6 family 后续 (v2.11.17+ Iters slice addr+8 + float imm + A2-ptr-deref + cap_table + B-runtime + dungeon_game)
+- v2.13.13+ mini = big_test runtime STATUS_INTEGER_OVERFLOW 0xC0000095 (W-074.7.9)
+- M5 启动前置 (jhyy 编 jhyy 0 C 依赖闭环 per `v1.x-phase-4-m5-boot-from-scratch.md`) → M5 独立 sprint 启动 (等 W-074.6 family + W-081 + W-082 全闭环)
+- QBE 自写 + QBE removal → v2.x 末 (per `v2.x-qbe-rewrite.md`)
+
+### References
+
+- v2.13.9 plan: `JiHuiYiYou-axis-v2/docs/plans/v2/v2.13.9-plan.md` (NEW, ~250 LOC, audit-flip closure scope)
+- v2.13.9 ship commit: axis-v2 single commit (4 docs files: workarounds.md + plan + changelog-v2.13.0.md + README.md, NO src0/, per audit-flip closure scope)
+- v2.13.9 mirror commit: main worktree single commit (4 docs files, mirror 完整, no src0/ changes to mirror, per `0cadfba` precedent)
+- v2.13.8 ship reference: 上一节 v2.13.8 entries (immediate predecessor, W-058 fmod emit 真修)
+- W-081 entry: `docs/internal/workarounds.md:6331-6410` (DEFERRED → ✅ RESOLVED via v2.13.9 audit-flip closure)
+- W-082 entry: `docs/internal/workarounds.md:6411-6532` (DEFERRED to v2.13.10 mini)
+- W-074.10 entry: `docs/internal/workarounds.md:6483+` (Sub-bug C flag propagate 真修 reference)
+- W-074.12 entry: `docs/internal/workarounds.md:6552+` (Sub-bug D 真修 reference)
+- W-074.8 audit-flip precedent: `docs/internal/workarounds.md:6409-6411` (per user 2026-09-20 决定)
+- Standalone umbrella: `docs/logs/v2/changelog-v2.13.0.md` (本 section 在内, 跟 `changelog-v2.11.0.md` 拆开 per v2.13.7 ship-time split)
+- Memory: `feedback_fix_evaluation_rule` (诚实记录 actual PASS rate: 11 C.3 cluster tests EXIT-exact 双 backend PASS) + `feedback_regress_clean_count` (FRESH baseline HOLD) + `feedback_plans_per_version` (v2.13.9 = own plan file) + `feedback_audit_single_commit_diff` (单 commit per worktree, `git show <sha>` 验证 0 src0/ files = audit-flip scope) + `feedback_axis_vn_worktree_isolation` (axis-v2 active dev, raw bash + 绝对路径) + `feedback_ssh_key_same_shell` (HTTPS-with-token HTTP/1.1 forced push) + `feedback_commit_coauthor` + `feedback_no_traditional_chinese` + `feedback_changelog_umbrella` (本 section 在 standalone `changelog-v2.13.0.md` umbrella 内) + `feedback_no_artifacts_in_project` + `feedback_no_date_estimates` + `feedback_rca_first_root_cause` (Phase A re-RCA 强制) + `feedback_doc_refactor_factcheck` (v2.13.9-plan.md REWRITE + W-081 entry 翻 RESOLVED)

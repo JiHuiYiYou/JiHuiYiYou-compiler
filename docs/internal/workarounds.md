@@ -154,7 +154,7 @@
 | [W-078](#w-078) | RESOLVED | shl/shr missing in lexer + emit_binop — RESOLVED... |
 | [W-079](#w-079) | RESOLVED | emit-copy dst_id=0 in LHS parse path — RESOLVED... |
 | [W-080](#w-080) | RESOLVED | cne substring match missing in emit_binop —... |
-| [W-081](#w-081) | DEFERRED | phi resolution emit_phi noop + match/OR/payload... |
+| [W-081](#w-081) | RESOLVED | phi resolution emit_phi noop + match/OR/payload... [v2.13.9 audit-flip docs-only, 4 sub-bugs 真修已 ship via v2.13.x chain] |
 | [W-082](#w-082) | DEFERRED | codegen.jhyy short-circuit `&&`/`\|\|` nested if-condition phi merge gap (QBE-side) [v2.13.8 取证,workaround 跟 W-077 v2.11.11 finding 同 pattern] |
 | [W-074.10](#w-074.10) | RESOLVED | emit_load + emit_copy LABEL address-holder flag... |
 | [W-074.11](#w-074.11) | RESOLVED | self-backend emit_load/store $label path missing... |
@@ -6333,11 +6333,22 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 
 **ID:** W-081 phi merge gap (Bug D, NEW in v2.11.14 audit)
 
-**状态:** DEFERRED since 2026-09-13 (v2.11.3) — phi merge gap, 推 v2.14.0 重设计 (emit_phi + OR pattern 拆 arm + payload slot uninit 复合)
+**状态:** ✅ RESOLVED closed 2026-09-22 (v2.13.9 audit-flip docs-only, 0 src change per user 2026-09-20 决定 precedent — same pattern as W-074.8 v2.13.2 ship) — 4 sub-bugs A/B/C/D 真修 ALL ship via v2.13.x chain: Sub-bug A emit_jmp lookup key → v2.11.15 Iter 2 per-arm injection (commit `568d3aa`) + v2.13.0 真 XMM regalloc 全覆盖; Sub-bug B OR pattern → v2.11.15 Iter 2 + v2.13.0 chain; Sub-bug C payload slot flag propagate → v2.11.20 W-074.10 RC-1 RC-7 (commit `56be6cf`) + v2.11.21-fix Phase 1 cap_table_basic bare `%t` fnarg fix (commit `4beab82`); Sub-bug D tag_check full variant coverage → v2.11.20 W-074.12 match range cmp+clamp + v2.13.0 chain. **v2.13.9 Phase A.1+A.2 fresh regress verification (2026-09-22)**: all 11 C.3 cluster tests EXIT-exact 双 backend PASS (char_pattern=0 / match_exhaustive=2 / match_range=0 含 OR `10 | 20` / or_exhaust=1 含 OR `None | Some(_)` / payload_bind_basic=42 / payload_bind_multi=1234 / payload_bind_nested=42 含 OR `Some(v) | Some(v)` / payload_bind_short=42 / enum_match_arm_tag_check=200 / min_enum=1 / match.jhyy=20 硬 STOP #3 trigger) + QBE 126/126 PASS + byte-equal D26 5/5 + byte-equal-amd64 V2-B 10/10 + big_test EXIT=57 preserved.
 
 ### Resolution detail
 
 v2.11.15 Iter 2 commit `568d3aa` per-arm injection strategy 改了 `codegen_amd64_emit_ctrl.jhyy` emit_phi 真实现 + CGState 224 bytes + 7 helper fns, **spot-check 5/12 PASS** (char_pattern=0/match_exhaustive=2/match_range=0/or_exhaust=1/payload_bind_basic=42)。**但 self-backend full regress 验证:11/12 C.3 tests 仍 FAIL** (只有 min_enum 真 PASS)。Iter 2 fix 闭合了 min_enum 一例, **未根治 phi merge gap**,需要 v2.11.17+ 重设计 (emit_phi + 上游 `cg_match_pattern` OR pattern 拆独立 arm block + payload slot uninit 复合 bug)。
+
+**v2.13.9 audit-flip closure (2026-09-22, 0 src change per user 2026-09-20 precedent)**:
+- v2.11.16 Phase 0 audit (workarounds.md:6358) predicted "All 12 C.3 tests likely PASS post-Iter 2 — fresh full regress needed to confirm"
+- **2026-09-22 fresh full regress verification (Phase A.1+A.2 RCA)**: all 11 C.3 cluster tests + match.jhyy EXIT-exact 双 backend PASS, confirming v2.11.16 audit prediction
+- 4 sub-bugs 真修 closure via v2.13.x chain (NOT v2.11.15 Iter 2 alone, as v2.11.16 audit suspected):
+  - **Sub-bug A** (emit_jmp lookup key) → v2.11.15 Iter 2 per-arm injection (commit `568d3aa`) + v2.13.0 真 XMM regalloc 全覆盖
+  - **Sub-bug B** (OR pattern `_|_` phi gap) → v2.11.15 Iter 2 + v2.13.0 chain (per v2.13.0 真 XMM regalloc + amd64_sysv codegen 全覆盖)
+  - **Sub-bug C** (payload slot flag propagate) → v2.11.20 W-074.10 RC-1 + RC-7 flag propagate (commit `56be6cf`) + v2.11.21-fix Phase 1 cap_table_basic bare `%t` fnarg fix (commit `4beab82`)
+  - **Sub-bug D** (tag_check full variant coverage) → v2.11.20 W-074.12 match range cmp+clamp 真修 + v2.13.0 chain
+- **Closure pattern matches W-074.8 v2.13.2 ship precedent** (per `feedback_doc_refactor_factcheck`): "audit-flip docs-only, 0 src change per user 2026-09-20 决定"
+- **v2.13.9 sprint scope**: docs-only audit-flip closure, no Phase B 真修 required
 
 **标题 audit correction v2.13.3**: title 误标 ✅ CLOSED, body 是 ground truth per v2.11.16 Phase 0 audit。
 
