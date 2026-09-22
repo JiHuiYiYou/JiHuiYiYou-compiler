@@ -155,7 +155,7 @@
 | [W-079](#w-079) | RESOLVED | emit-copy dst_id=0 in LHS parse path — RESOLVED... |
 | [W-080](#w-080) | RESOLVED | cne substring match missing in emit_binop —... |
 | [W-081](#w-081) | RESOLVED | phi resolution emit_phi noop + match/OR/payload... [v2.13.9 audit-flip docs-only, 4 sub-bugs 真修已 ship via v2.13.x chain] |
-| [W-082](#w-082) | DEFERRED | codegen.jhyy short-circuit `&&`/`\|\|` nested if-condition phi merge gap (QBE-side) [v2.13.8 取证,workaround 跟 W-077 v2.11.11 finding 同 pattern] |
+| [W-082](#w-082) | audit-flip + convention enforced | codegen.jhyy short-circuit `&&`/`\|\|` nested if-condition phi merge gap (QBE-side) [v2.13.10 audit-flip docs-only,真修 deferred YAGNI — user-facing 不触发 per cg_expr store/load 模式,convention 守住 via grep regression script] |
 | [W-074.10](#w-074.10) | RESOLVED | emit_load + emit_copy LABEL address-holder flag... |
 | [W-074.11](#w-074.11) | RESOLVED | self-backend emit_load/store $label path missing... |
 | [W-074.12](#w-074.12) | RESOLVED | match range cmp+clamp bug — CLOSED (v2.11.20 ship... |
@@ -6423,7 +6423,27 @@ v2.11.15 Iter 2 commit `568d3aa` per-arm injection strategy 改了 `codegen_amd6
 
 **ID:** W-082 (NEW in v2.13.8 audit, QBE-side codegen.jhyy upstream)
 
-**状态:** DEFERRED since 2026-09-21 (v2.13.8 audit) — codegen.jhyy cg_cond / cg_expr 上游 short-circuit 模式 emit_phi 缺正确 phi predecessor tracking, 真修 deferred v2.13.9+ mini (跟 W-081 umbrella 共享 phi-merge-gap 家族, 但 redesign 路径独立 — W-081 是 self-backend downstream, W-082 是 QBE-side upstream)
+**状态:** audit-flip + convention enforced per v2.13.10 mini (closed 2026-09-22) — 真修 deferred (YAGNI per user 2026-09-22 决定,跟 v2.13.9 W-081 audit-flip docs-only 同 pattern)
+
+**v2.13.10 audit-flip closure (2026-09-22)**: W-082 走 audit-flip docs-only + convention enforcement, **0 src0 真改**。理由:
+1. **user-facing `&&`/`||` 不触发 W-082** — `cg_expr` 在 line 2112-2153 处理 `TOKEN_AMPAMP`/`TOKEN_PIPEPIPE` 走 **store/load 模式** (`ir_emit_alloc result_slot` + `cg_emit_store_primitive` per branch + `cg_emit_load` 在 `merge_b`),**0 phi emit**
+2. **W-082 trigger 只在 codegen.jhyy 内部** (compiler source 自己) if-condition 写 `A && (B || C)` 形态 (e.g. W-058 v2.13.8 作者写 `if d_op == TOKEN_PERCENT() && (op_qt == QBE_D() || op_qt == QBE_S())` 时触发)
+3. **workaround 已落地** — codegen.jhyy:2267-2308 (W-058 v2.13.8 ship) 改用 nested plain `if` flag dispatch (per W-077 v2.11.11 已建立的 convention)
+4. **convention 守住** via NEW `scripts/dev/v2_13_10_codegen_cond_no_nested_sc.py` (grep `if .*&&.*\|\||if .*\|\|.*&&` in codegen.jhyy, exit 0 = convention HOLD, exit 1 = violation),baseline = 0 hit post-W-058 ship
+5. **2 codegen.jhyy comment 补强** (line 1003-1005 + 2103-2110,纯 comment 不动 emit logic) 关联 W-082 reference
+6. **Option A 真修** (block stack + phi predecessor real-time sync, ~50-80 LOC source) 触及 phi infra = W-082 RCA 描述的 stale 区域, HIGH risk 可能 break selfhost closure (`v1→v2→v3 byte-equal` 需要 N=3..5 全跑), ROI 差 (user-facing 0 触发) → **YAGNI**
+
+**future 真修路径** (若 convention 失效 + 真修需求出现):
+- cg_cond / cg_expr 维护 current block stack (`cg_cond_push`/`pop`/`get_current`)
+- phi predecessor table 实时 sync
+- ~50-80 LOC 真修,但优先走 audit + 5-line mechanical edit 跟 W-058 同 pattern,不再累真修 sprint
+
+**v2.13.10 ship 实际** (5 docs/infra files touched):
+- `docs/internal/workarounds.md` W-082 entry status 翻 DEFERRED → audit-flip + convention enforced (本段)
+- `docs/internal/workarounds.md` line 158 W-082 索引行同步 flip
+- `compiler/srcrcodegen.jhyy` line 1003-1005 + 2103-2110 comment 补强 (+6 LOC, 纯 comment)
+- `scripts/dev/v2_13_10_codegen_cond_no_nested_sc.py` NEW (~50 LOC, convention enforcement regression script)
+- `docs/plans/v2/v2.13.10-plan.md` NEW + `docs/logs/v2/changelog-v2.13.0.md` v2.13.10 section append + `README.md` v2.13.10 row
 
 ### 触发面 (codegen.jhyy emit 阶段, **internal codegen logic**)
 

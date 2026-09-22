@@ -899,3 +899,81 @@ v1.7.2 patch A1 ship 时 (per `docs/logs/v1/changelog-v1.7.2.md` A1) fact-check 
 - W-074.8 audit-flip precedent: `docs/internal/workarounds.md:6409-6411` (per user 2026-09-20 决定)
 - Standalone umbrella: `docs/logs/v2/changelog-v2.13.0.md` (本 section 在内, 跟 `changelog-v2.11.0.md` 拆开 per v2.13.7 ship-time split)
 - Memory: `feedback_fix_evaluation_rule` (诚实记录 actual PASS rate: 11 C.3 cluster tests EXIT-exact 双 backend PASS) + `feedback_regress_clean_count` (FRESH baseline HOLD) + `feedback_plans_per_version` (v2.13.9 = own plan file) + `feedback_audit_single_commit_diff` (单 commit per worktree, `git show <sha>` 验证 0 src0/ files = audit-flip scope) + `feedback_axis_vn_worktree_isolation` (axis-v2 active dev, raw bash + 绝对路径) + `feedback_ssh_key_same_shell` (HTTPS-with-token HTTP/1.1 forced push) + `feedback_commit_coauthor` + `feedback_no_traditional_chinese` + `feedback_changelog_umbrella` (本 section 在 standalone `changelog-v2.13.0.md` umbrella 内) + `feedback_no_artifacts_in_project` + `feedback_no_date_estimates` + `feedback_rca_first_root_cause` (Phase A re-RCA 强制) + `feedback_doc_refactor_factcheck` (v2.13.9-plan.md REWRITE + W-081 entry 翻 RESOLVED)
+
+## v2.13.10 — W-082 audit-flip docs-only + convention enforcement (跟 v2.13.9 W-081 pattern)
+
+**Shipped**: 2026-09-22 on axis-v2 (commit `<pending>`) + main mirror commit
+**Plan**: [`../../plans/v2/v2.13.10-plan.md`](../../plans/v2/v2.13.10-plan.md)
+**Scope**: W-082 (DEFERRED since 2026-09-21 v2.13.8 audit, QBE-side codegen.jhyy short-circuit `&&`/`||` nested if-condition phi merge gap) audit-flip docs-only + convention enforcement, 0 src0 真改 (跟 v2.13.9 W-081 audit-flip docs-only 同 pattern per user 2026-09-20 决定 precedent)。self-backend fmod_f32 + fmod_negative 真修 → v2.13.11 mini (per user 2026-09-22 决定)。
+**前置**: v2.13.9 ship (W-081 audit-flip, ACTIVE=0 + DEFERRED count 1)
+
+### Sprint scope (实际 commit, docs-only + convention enforcement)
+
+| 改动 | 文件 | LOC | 风险 | Status |
+|------|------|-----|------|--------|
+| W-082 entry 翻 DEFERRED → audit-flip + convention enforced + closure 段 (6 段理由 + future 真修路径 + ship 实际 file 列表) | `docs/internal/workarounds.md` | +~25 | LOW | ✅ done |
+| W-082 索引行 (line 158) 同步 flip "DEFERRED" → "audit-flip + convention enforced" + caption 加 v2.13.10 reference | `docs/internal/workarounds.md` | +1 −1 | LOW | ✅ done |
+| codegen.jhyy line 1003-1005 + 2103-2110 comment 补强 (加 W-082 reference, 纯 comment 不动 emit logic) | `compiler/src0/codegen.jhyy` | +6 −0 | LOW | ✅ done |
+| Convention enforcement regression script NEW (grep `if .*&&.*\|\||if .*\|\|.*&&` in codegen.jhyy, exit 0/1/2 = pass/violate/missing-file) | `scripts/dev/v2_13_10_codegen_cond_no_nested_sc.py` (NEW) | +~50 | LOW | ✅ done |
+| Plan (NEW) | `docs/plans/v2/v2.13.10-plan.md` (NEW, ~250 LOC) | +250 | LOW | ✅ done |
+| Changelog (本 section) | `docs/logs/v2/changelog-v2.13.0.md` | +~30 | LOW | ✅ done |
+| README row | `README.md` | +1 | LOW | ✅ done |
+
+**Total**: ~30-45 LOC actual + ~250 plan + ~50 script = ~330 LOC, LOW risk.
+
+### W-082 audit-flip 验证 (Phase 1 verification findings)
+
+**Phase 1 verification 关键发现** (per Plan agent analysis 2026-09-22):
+1. **user-facing `&&`/`||` 不会触发 W-082** — `cg_expr` 在 line 2112-2153 处理 `TOKEN_AMPAMP`/`TOKEN_PIPEPIPE` 走 **store/load 模式** (`ir_emit_alloc result_slot` + `cg_emit_store_primitive` per branch + `cg_emit_load` 在 `merge_b`), **0 phi emit**
+2. **W-082 trigger 只在 codegen.jhyy 内部** (compiler source 自己) if-condition 写 `A && (B || C)` 形态才会触发 QBE IL "predecessors not matched in phi" 错误 (e.g. W-058 v2.13.8 作者写 `if d_op == TOKEN_PERCENT() && (op_qt == QBE_D() || op_qt == QBE_S())` 时触发)
+3. **workaround 已落地** — codegen.jhyy:2267-2308 (W-058 v2.13.8 ship) 改用 nested plain `if` flag dispatch (per W-077 v2.11.11 已建立的 convention)
+4. **line 1003-1005 + 2103-2110 comments** 显式记录 "v0 codegen bug 2 workaround: 避免 &&/|| 嵌套 short-circuit" — convention 已文档化
+
+**V.3 convention grep baseline HOLD**: `python scripts/dev/v2_13_10_codegen_cond_no_nested_sc.py` exit 0 (post-W-058 v2.13.8 ship baseline = 0 hit, convention 已守住)。
+
+**诚实记录 per [[feedback_fix_evaluation_rule]]**: audit-flip closure 本身**不需 regress 验证** (纯 docs + comment 补强, 不动 codegen emit 主路径);**convention grep V.3 exit 0 PASS** 是本 sprint 主要 verification。
+
+### Scope DOWN vs 原 W-082 entry 估
+
+**W-082 entry 估** (~50-80 LOC 真修, Option A block stack + phi predecessor real-time sync):
+- 触及 phi infra = W-082 RCA 描述的 stale 区域
+- HIGH risk: 可能 break selfhost closure (`v1→v2→v3 byte-equal` 需要 N=3..5 全跑)
+- ROI 差: bug 只在 codegen-internal source 写嵌套 short-circuit 时触发, user-facing 0 触发
+
+**Actual** (audit-flip docs-only + convention enforcement, 0 src0 真改 per user 2026-09-22 决定):
+- 跟 v2.13.9 W-081 audit-flip docs-only 同 pattern
+- 跟 W-074.8 v2.13.2 ship precedent 一致 (per user 2026-09-20 决定)
+- convention 通过 grep regression script 守住, future author 写嵌套 short-circuit 会 fail CI
+
+### Pre-existing plan drift check (per `feedback_doc_refactor_factcheck`)
+
+**v2.13.9 plan line 36-38 + 121-123 + 882-885 估的**:
+- vendor QBE 升级 (拉 2026-Q3 主线看 remd/rems) → **不在 backlog** (vendor QBE 升级是 OS 启动链路 follow-up, 非 W-082 依赖)
+- W-074.6 family 后续 → **已 RESOLVED** per workarounds.md:147 (v2.13.0 ship FULL CLOSED)
+- W-074.7.9 big_test runtime STATUS_INTEGER_OVERFLOW → **已 RESOLVED** per workarounds.md:151 (v2.11.9 ship + v2.13.1 audit-flip)
+
+**真实 backlog** (post v2.13.10 ship):
+- ✅ W-057 RESOLVED (v2.13.7)
+- ✅ W-058 RESOLVED (v2.13.8)
+- ✅ W-081 RESOLVED (v2.13.9 audit-flip)
+- ✅ W-082 audit-flip + convention enforced (v2.13.10)
+- ⏸ **self-backend fmod_f32 + fmod_negative 真修** → v2.13.11 mini
+
+### Future sprint chain (next)
+
+- **v2.13.11** mini = self-backend fmod_f32 + fmod_negative 真修 (codegen_amd64_emit_call.jhyy:1834 `is_rem` branch 加浮点分支 libm `fmod()` call wrap + x86-64 sequence, ~30-60 LOC, per user 2026-09-22 决定)
+- 后续 vendor QBE 升级 / M5 启动前置 / QBE 自写 + QBE removal 仍推后续 sprint (不在 backlog 直接依赖 W-082 closure)
+
+### References
+
+- v2.13.10 plan: `JiHuiYiYou-axis-v2/docs/plans/v2/v2.13.10-plan.md` (NEW, ~250 LOC, audit-flip closure scope)
+- v2.13.10 ship commit: axis-v2 single commit (5 docs/infra files + 1 codegen.jhyy comment 补强, NO src0 logic 改)
+- v2.13.10 mirror commit: main worktree single commit (5 docs/infra files mirror + codegen.jhyy comment 补强 mirror)
+- v2.13.9 ship reference: 上一节 v2.13.9 entries (immediate predecessor, W-081 audit-flip docs-only — same pattern)
+- W-082 entry: `docs/internal/workarounds.md:6421-6556` (DEFERRED → audit-flip + convention enforced via v2.13.10)
+- W-082 索引行: `docs/internal/workarounds.md:158` (同步 flip)
+- codegen.jhyy comment 补强: `compiler/src0/codegen.jhyy:1003-1005` + `:2111-2113` (纯 comment 不动 emit logic)
+- Convention enforcement regression script: `scripts/dev/v2_13_10_codegen_cond_no_nested_sc.py` (NEW, ~50 LOC)
+- W-074.8 audit-flip precedent: `docs/internal/workarounds.md:6409-6411` (per user 2026-09-20 决定)
+- Standalone umbrella: `docs/logs/v2/changelog-v2.13.0.md` (本 section 在内, 跟 `changelog-v2.11.0.md` 拆开 per v2.13.7 ship-time split)
+- Memory: `feedback_fix_evaluation_rule` (诚实记录 actual rate: convention grep V.3 exit 0 PASS) + `feedback_plans_per_version` (v2.13.10 = own plan file) + `feedback_audit_single_commit_diff` (单 commit per worktree, codegen.jhyy diff 只 comment) + `feedback_axis_vn_worktree_isolation` (axis-v2 active dev) + `feedback_ssh_key_same_shell` (HTTPS-with-token fallback) + `feedback_commit_coauthor` + `feedback_no_traditional_chinese` + `feedback_changelog_umbrella` (本 section 在 standalone umbrella 内) + `feedback_doc_refactor_factcheck` (W-082 status fact-check pre-plan) + `feedback_document_workarounds_in_docs` (W-082 entry status flip + 索引行 flip + codegen.jhyy comment 补强) + `feedback_rca_first_root_cause` (Phase 1 re-RCA 验证 user-facing 不触发)
