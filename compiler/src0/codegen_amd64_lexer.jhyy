@@ -623,6 +623,51 @@ fn lex_match_volatile(s: *LexState) -> i32 {
     return 1 as i32;
 }
 
+// ── 17. conversion op (W-083 真修 v3.0.6/Ph.3) ──
+// dispatcher 已 consume 首字母 (d/s/u/e/t) + 已校验剩余字符匹配。
+// 这里 consume 剩余 op_len bytes + consume src operand (%t<N>) + emit ILTOK_CONV token。
+//
+// op_name 全部硬编码字面量,长度 3-6:
+//   3 chars: exts / extu
+//   4 chars: stosi/stosl/stoui/stoul/swtof/sltof/uwtof/ultof/extsw/extuw/extsh/extuh/extsb/extub
+//           dtosi/dtosl/dtoui/dtoul
+//   5 chars: truncd / truncs
+//
+// emit_conv (in codegen_amd64_emit_call.jhyy) 看 tok.text 字面 op name dispatch
+// 到对应 SSE cvt* / movss / movsd 指令 family。src temp id 存 tok.text_len
+// (offset 16, ILToken 字段复用 — conv 不需要 text 长度,dst_id 由 '%' LHS
+// handler 写在 tok.int_val)。
+fn next_token_conv(s: *LexState, arena: *u8, t: *u8, op_name: *u8, op_len: i64) -> i32 {
+    // consume 剩余 op chars
+    let mut i: i64 = 0 as i64;
+    while i < op_len {
+        let _x = lex_next_byte(s);
+        i = i + (1 as i64);
+    }
+    let _s = lex_skip_ws_and_comments(s);
+    // consume src operand: '%' + 't' + digits
+    // 必须 '%t<N>' 形态(QBE IL temp ref)。若不是 '%' 开头 → 返 -1 (error)。
+    let src_pct = lex_peek_byte(s);
+    if src_pct != (37 as i32) {
+        return -1 as i32;
+    }
+    let _x1 = lex_next_byte(s);  // consume '%'
+    let src_t = lex_peek_byte(s);
+    if src_t != (116 as i32) {
+        return -1 as i32;
+    }
+    let _x2 = lex_next_byte(s);  // consume 't'
+    let src_id = lex_scan_decimal_int(s);
+    let _s3 = lex_skip_ws_and_comments(s);
+    lex_init_token(t, ILTOK_CONV(), (*s).line);
+    let tp_text = ptr_add_u8(t, 8 as i64) as **u8;
+    *tp_text = lex_dup_text(arena, op_name, op_len);
+    // src_id 存 tok.text_len (offset 16, ILToken 字段复用)
+    let tp_textlen = ptr_add_u8(t, 16 as i64) as *i64;
+    *tp_textlen = src_id;
+    return 0;
+}
+
 // ════════════════════════════════════════════════════
 // Main dispatcher:next_token
 // ════════════════════════════════════════════════════
@@ -698,7 +743,7 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         return next_token_func_header(s, arena, t);
     }
 
-    // ── 'd' → 'data' (data_string) or 'div' (binop) ──
+    // ── 'd' → 'data' (data_string) or 'div' (binop) or 'dto*' conv ──
     if c0 == (100 as i32) {
         let n1 = lex_peek_byte_at(s, 1 as i64);
         let n2 = lex_peek_byte_at(s, 2 as i64);
@@ -711,6 +756,40 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         if n1 == (105 as i32) && n2 == (118 as i32) {
             let _x = lex_next_byte(s);  // 'd'
             return next_token_binop(s, arena, t, 100 as i32);
+        }
+        // W-083 真修 (v3.0.6/Ph.3): d→float conversion ops.
+        //   dtosi (d t o s i) — double → signed i32 (cvttsd2si %xmm → %eax)
+        //   dtosl (d t o s l) — double → signed i64 (cvttsd2si %xmm → %rax)
+        //   dtoui (d t u i)   — double → unsigned i32
+        //   dtoul (d t u l)   — double → unsigned i64
+        // nested plain `if` 无 `&&`/`||` short-circuit (per feedback_jhyy_brace_nesting)
+        if n1 == (116 as i32) {  // 't'
+            if n2 == (111 as i32) {  // 'o' → dto*
+                let n3c = lex_peek_byte_at(s, 3 as i64);
+                let n4c = lex_peek_byte_at(s, 4 as i64);
+                // "dtosi": n3='s'(115), n4='i'(105)
+                if n3c == (115 as i32) {
+                    if n4c == (105 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "dtosi" as *u8, 4 as i64);
+                    }
+                    if n4c == (108 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "dtosl" as *u8, 4 as i64);
+                    }
+                }
+                // "dtoui"/"dtoul": n3='u'(117)
+                if n3c == (117 as i32) {
+                    if n4c == (105 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "dtoui" as *u8, 4 as i64);
+                    }
+                    if n4c == (108 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "dtoul" as *u8, 4 as i64);
+                    }
+                }
+            }
         }
         return -1 as i32;
     }
@@ -778,7 +857,7 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         return -1 as i32;
     }
 
-    // ── 's' → 'sub' (binop) or 'store*' ──
+    // ── 's' → 'sub' (binop) or 'store*' or 'sto*/sw*/sl*' conv ──
     if c0 == (115 as i32) {
         let n1 = lex_peek_byte_at(s, 1 as i64);
         if n1 == (117 as i32) && lex_peek_byte_at(s, 2 as i64) == (98 as i32) {
@@ -797,6 +876,65 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                     || n5 == (115 as i32) || n5 == (100 as i32) {
                     let _x = lex_next_byte(s);  // 's'
                     return next_token_store(s, arena, t, n5);
+                }
+            }
+            // W-083 真修 (v3.0.6/Ph.3): s→float conversion ops (n1='t', n2='o', n3='s'/'u')
+            //   stosi (s t o s i) — single → signed i32 (cvttss2si %xmm → %eax)
+            //   stosl (s t o s l) — single → signed i64
+            //   stoui (s t u i)   — single → unsigned i32
+            //   stoul (s t u l)   — single → unsigned i64
+            // n1='t' + n2='o' + n3='s'/'u' — must check n3 BEFORE
+            // store* path (which checks n3='r')
+            if n2 == (111 as i32) {
+                let n3c = lex_peek_byte_at(s, 3 as i64);
+                let n4c = lex_peek_byte_at(s, 4 as i64);
+                if n3c == (115 as i32) {  // 's' → stos*
+                    if n4c == (105 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "stosi" as *u8, 4 as i64);
+                    }
+                    if n4c == (108 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "stosl" as *u8, 4 as i64);
+                    }
+                }
+                if n3c == (117 as i32) {  // 'u' → stou*
+                    if n4c == (105 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "stoui" as *u8, 4 as i64);
+                    }
+                    if n4c == (108 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "stoul" as *u8, 4 as i64);
+                    }
+                }
+            }
+        }
+        // W-083 真修: "swtof" (s w t o f) — signed word → double (cvtsi2sd)
+        if n1 == (119 as i32) {
+            let n2 = lex_peek_byte_at(s, 2 as i64);
+            let n3 = lex_peek_byte_at(s, 3 as i64);
+            let n4 = lex_peek_byte_at(s, 4 as i64);
+            if n2 == (116 as i32) {
+                if n3 == (111 as i32) {
+                    if n4 == (102 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "swtof" as *u8, 4 as i64);
+                    }
+                }
+            }
+        }
+        // W-083 真修: "sltof" (s l t o f) — signed long → double
+        if n1 == (108 as i32) {
+            let n2 = lex_peek_byte_at(s, 2 as i64);
+            let n3 = lex_peek_byte_at(s, 3 as i64);
+            let n4 = lex_peek_byte_at(s, 4 as i64);
+            if n2 == (116 as i32) {
+                if n3 == (111 as i32) {
+                    if n4 == (102 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "sltof" as *u8, 4 as i64);
+                    }
                 }
             }
         }
@@ -916,6 +1054,128 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
     }
 
     // unknown char — caller 决定如何处理
+
+    // W-083 真修 (v3.0.6/Ph.3): 'u' → 'uwtof' / 'ultof'
+    //   uwtof (u w t o f) — unsigned word → single (cvtsi2ss)
+    //   ultof (u l t o f) — unsigned long → single
+    // V3 codegen.jhyy cg_conv_to line 957-998 用 'uwtof'/'ultof' (unsigned) 给
+    // w→s / l→s 转换 (per QBE ultof spec, sign bit is ignored)。
+    if c0 == (117 as i32) {
+        let n1 = lex_peek_byte_at(s, 1 as i64);
+        let n2 = lex_peek_byte_at(s, 2 as i64);
+        let n3 = lex_peek_byte_at(s, 3 as i64);
+        let n4 = lex_peek_byte_at(s, 4 as i64);
+        // "uwtof" / "ultof": n2='t', n3='o', n4='f'
+        if n2 == (116 as i32) {
+            if n3 == (111 as i32) {
+                if n4 == (102 as i32) {
+                    if n1 == (119 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "uwtof" as *u8, 4 as i64);
+                    }
+                    if n1 == (108 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "ultof" as *u8, 4 as i64);
+                    }
+                }
+            }
+        }
+        return -1 as i32;
+    }
+
+    // W-083 真修 (v3.0.6/Ph.3): 'e' → 'ext*' family
+    //   exts (e x t s)      — sign-extend sub-word (b/h/w → w)
+    //   extu (e x t u)      — zero-extend sub-word
+    //   extsw (e x t s w)   — signed word → long (cltq)
+    //   extuw (e x t u w)   — unsigned word → long (zero-extend via mov)
+    //   extsh (e x t s h)   — signed hword → word
+    //   extuh (e x t u h)   — unsigned hword → word
+    //   extsb (e x t s b)   — signed byte → word
+    //   extub (e x t u b)   — unsigned byte → word
+    if c0 == (101 as i32) {
+        let n1 = lex_peek_byte_at(s, 1 as i64);
+        let n2 = lex_peek_byte_at(s, 2 as i64);
+        if n1 == (120 as i32) {  // 'x'
+            if n2 == (116 as i32) {  // 't' → ext*
+                let n3 = lex_peek_byte_at(s, 3 as i64);
+                // 4 chars total: exts / extu
+                if n3 == (115 as i32) {
+                    let _x = lex_next_byte(s);
+                    return next_token_conv(s, arena, t, "exts" as *u8, 3 as i64);
+                }
+                if n3 == (117 as i32) {
+                    let _x = lex_next_byte(s);
+                    return next_token_conv(s, arena, t, "extu" as *u8, 3 as i64);
+                }
+                // 5 chars total: exts*/extu* (sw/uw/sh/uh/sb/ub)
+                let n4 = lex_peek_byte_at(s, 4 as i64);
+                if n3 == (115 as i32) {
+                    if n4 == (119 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "extsw" as *u8, 4 as i64);
+                    }
+                    if n4 == (104 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "extsh" as *u8, 4 as i64);
+                    }
+                    if n4 == (98 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "extsb" as *u8, 4 as i64);
+                    }
+                }
+                if n3 == (117 as i32) {
+                    if n4 == (119 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "extuw" as *u8, 4 as i64);
+                    }
+                    if n4 == (104 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "extuh" as *u8, 4 as i64);
+                    }
+                    if n4 == (98 as i32) {
+                        let _x = lex_next_byte(s);
+                        return next_token_conv(s, arena, t, "extub" as *u8, 4 as i64);
+                    }
+                }
+            }
+        }
+        return -1 as i32;
+    }
+
+    // W-083 真修 (v3.0.6/Ph.3): 't' → 'truncd' / 'truncs'
+    //   truncd (t r u n c d) — double → single (cvtpd2ps)
+    //   truncs (t r u n c s) — single precision narrow (QBE: single → half; V3 不 emit)
+    if c0 == (116 as i32) {
+        let n1 = lex_peek_byte_at(s, 1 as i64);
+        let n2 = lex_peek_byte_at(s, 2 as i64);
+        let n3 = lex_peek_byte_at(s, 3 as i64);
+        let n4 = lex_peek_byte_at(s, 4 as i64);
+        let n5 = lex_peek_byte_at(s, 5 as i64);
+        // "trunc" prefix (5 chars): t r u n c
+        if n1 == (114 as i32) {
+            if n2 == (117 as i32) {
+                if n3 == (110 as i32) {
+                    if n4 == (99 as i32) {
+                        // consume "trunc" 5 chars
+                        let mut i: i64 = 0 as i64;
+                        while i < (5 as i64) {
+                            let _x = lex_next_byte(s);
+                            i = i + (1 as i64);
+                        }
+                        if n5 == (100 as i32) {
+                            return next_token_conv(s, arena, t, "truncd" as *u8, 5 as i64);
+                        }
+                        if n5 == (115 as i32) {
+                            return next_token_conv(s, arena, t, "truncs" as *u8, 5 as i64);
+                        }
+                        // not d/s — undo the consume? 简化:不返错 (fallthrough -1)
+                    }
+                }
+            }
+        }
+        return -1 as i32;
+    }
+
     return -1 as i32;
 }
 

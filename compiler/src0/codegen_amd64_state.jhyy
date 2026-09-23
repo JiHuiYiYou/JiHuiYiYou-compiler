@@ -63,6 +63,17 @@ fn ILTOK_FUNC_HEADER()  -> i32 { return 13 as i32; }
 fn ILTOK_DATA_STRING()  -> i32 { return 14 as i32; }
 fn ILTOK_VOLATILE()     -> i32 { return 15 as i32; }
 
+// W-083 真修 (v3.0.6/Ph.3): QBE conversion ops (dtosi/stosi/swtof/exts/extu/extsw/extuw/truncd/...)
+// 走 ILTOK_CONV token + 新 emit_conv dispatcher (in codegen_amd64_emit_call.jhyy)。
+// 区别 ILTOK_BINOP:conversion 单源 + 单目的 (SSE cvt* 指令家族),binop 是双源算术 (add/sub/mul/div/mod)。
+// QBE IL spec 完整 conversion op family:
+//   int → float:swtof/sltof/uwtof/ultof (signed/unsigned word/long → single/double)
+//   float → int:dtosi/dtoui/dtosl/dtoul/stosi/stoui/stosl/stoul (single/double → signed/unsigned w/l)
+//   float widen:exts (s → d via cvtss2sd)
+//   float narrow:truncd (d → s via cvtpd2ps)
+//   int extend:exts/extu/extsh/extuh/extsb/extub/extsw/extuw (sub-word → word/long)
+fn ILTOK_CONV()         -> i32 { return 16 as i32; }
+
 // ════════════════════════════════════════════════════
 // IL token struct(由 lexer.jhyy 构造,parse loop 消费)
 // ════════════════════════════════════════════════════

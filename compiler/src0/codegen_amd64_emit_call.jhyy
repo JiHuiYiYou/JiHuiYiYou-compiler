@@ -93,9 +93,15 @@ fn emit_comment(state: *u8, text: *u8) -> i32 {
 }
 
 // size_suffix_for_qt — 把 QBE type letter 转 AT&T size suffix
-//   'w' → "l" (32-bit)
-//   'l' → "q" (64-bit)
-//   其他(浮点本 sprint 不做):返回 ""
+//   'w' → "l" (32-bit movl/addl/...)
+//   'l' → "q" (64-bit movq/addq/...)
+//   's' → "ss" (single-precision float — movss/addss/cvtss2si/cvttss2si)
+//   'd' → "sd" (double-precision float — movsd/addsd/cvtsd2si/cvttsd2si)
+//
+// W-083 真修 (v3.0.6/Ph.3): extend 给浮点 's'/'d' (原本 fallback 返 "l" 是错的)。
+// emit_conv (本文件后段) 用 'ss'/'sd' 后缀 emit movss/movsd/cvt*ss2si/cvt*sd2si
+// 指令 family。caller 用法:`sb_append_cstr(s, "mov"); sb_append_cstr(s, size_suffix_for_qt(qt));` →
+// `movl`/`movq`/`movss`/`movsd`。
 fn size_suffix_for_qt(qt: i32) -> *u8 {
     if qt == QBE_W_LOCAL() {
         return "l" as *u8;
@@ -103,8 +109,13 @@ fn size_suffix_for_qt(qt: i32) -> *u8 {
     if qt == QBE_L_LOCAL() {
         return "q" as *u8;
     }
-    // 's'/'d' 浮点本 sprint 不实现(per L4 § 0 scope)
-    return "l" as *u8;  // default fallback
+    if qt == QBE_S() {
+        return "ss" as *u8;
+    }
+    if qt == QBE_D() {
+        return "sd" as *u8;
+    }
+    return "l" as *u8;  // default fallback (shouldn't reach)
 }
 
 // local_temp_offset — 1-to-1 简化栈分配(per L4 § 4.3)
@@ -544,6 +555,246 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
     let dst_off = local_temp_offset(dst_id);
     let _r = emit_mov_reg_to_temp(state, qt, "rax" as *u8, dst_off);
 
+    return 0;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// W-083 真修 (v3.0.6/Ph.3): XMM scratch helpers + emit_conv (QBE conversion ops)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// QBE IL conversion ops (per QBE spec + V3 codegen.jhyy cg_conv_to line 957-998):
+//   int → float: swtof/sltof/uwtof/ultof
+//   float → int: dtosi/dtoui/dtosl/dtoul/stosi/stoui/stosl/stoul
+//   float widen: exts (s → d via cvtss2sd)
+//   float narrow: truncd (d → s via cvtpd2ps)
+//   int extend: exts/extu/extsw/extuw/extsh/extuh/extsb/extub
+//
+// x86-64 指令 family (per Intel SDM + AT&T syntax):
+//   movss/movsd    — float/double 4/8-byte move
+//   cvtsi2ss/cvtsi2sd — int → float (single/double)
+//   cvttss2si/cvttsd2si — float → int (truncate toward 0)
+//   cvtss2sd/cvtsd2ss — float precision widen/narrow
+//   cltq           — %eax → %rax (sign-extend w→l)
+//
+// 注: V3 self-backend 暂无 XMM register allocation,所有 cvt* 用 %xmm0 作 scratch
+// (per V3 modular split 简化约定 — emit_mem/emit_call 各 module 用自己的 scratch)。
+// Caller 需保证 emit_conv 不嵌套在另一 emit_conv 内 (无 %xmm0 抢占保护)。
+
+// emit_mov_temp_to_xmm — movss/movsd -<src_off>(%rbp), %xmmN
+//   temp 栈槽 → XMM 寄存器 (load float for cvt source)
+fn emit_mov_temp_to_xmm(state: *u8, qt: i32, src_off: i64, xmm_idx: i32) -> i32 {
+    let s = state as *StringBuilder;
+    let _r1 = sb_append_cstr(0 as *Arena, s, "\tmov" as *u8);
+    let _r2 = sb_append_cstr(0 as *Arena, s, size_suffix_for_qt(qt));
+    let _r3 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
+    let _r4 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src_off);
+    let _r5 = sb_append_cstr(0 as *Arena, s, "(%rbp), %xmm" as *u8);
+    let _r6 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, xmm_idx as i64);
+    let _r7 = sb_append_cstr(0 as *Arena, s, "\n" as *u8);
+    return 0;
+}
+
+// emit_mov_xmm_to_temp — movss/movsd %xmmN, -<dst_off>(%rbp)
+//   XMM 寄存器 → temp 栈槽 (store float after cvt result)
+fn emit_mov_xmm_to_temp(state: *u8, qt: i32, xmm_idx: i32, dst_off: i64) -> i32 {
+    let s = state as *StringBuilder;
+    let _r1 = sb_append_cstr(0 as *Arena, s, "\tmov" as *u8);
+    let _r2 = sb_append_cstr(0 as *Arena, s, size_suffix_for_qt(qt));
+    let _r3 = sb_append_cstr(0 as *Arena, s, " %xmm" as *u8);
+    let _r4 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, xmm_idx as i64);
+    let _r5 = sb_append_cstr(0 as *Arena, s, ", -" as *u8);
+    let _r6 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, dst_off);
+    let _r7 = sb_append_cstr(0 as *Arena, s, "(%rbp)\n" as *u8);
+    return 0;
+}
+
+// emit_mov_temp_to_int — movl/movq -<src_off>(%rbp), %eax/%rax
+//   temp 栈槽 → GPR (load int for cvt source); 复用 emit_mov_temp_to_reg 但本函数
+//   显式目的 + 注释 (x86-64 cvtsi2ss/cvtsi2sd 源是 GPR, 不是 XMM)
+fn emit_mov_temp_to_int(state: *u8, qt: i32, src_off: i64, reg_name: *u8) -> i32 {
+    return emit_mov_temp_to_reg(state, qt, src_off, reg_name);
+}
+
+// emit_mov_int_to_temp — movl/movq %eax/%rax, -<dst_off>(%rbp)
+//   GPR → temp 栈槽 (store int after cvt result)
+fn emit_mov_int_to_temp(state: *u8, qt: i32, reg_name: *u8, dst_off: i64) -> i32 {
+    return emit_mov_reg_to_temp(state, qt, reg_name, dst_off);
+}
+
+// emit_conv — QBE conversion op dispatch
+//
+// tok.text   = op name ("dtosi"/"swtof"/"extsw"/...)
+// tok.text_len = src temp id (per next_token_conv: 存 src_id 而非 text_len)
+// tok.int_val = dst temp id (per '%' LHS handler fix)
+// tok.qbe_type = dst QBE type (w/l/s/d)
+//
+// x86-64 转换指令 mapping (per QBE spec + Intel SDM):
+//   dtosi/dtoui:   movsd src,%xmm0; cvttsd2si %xmm0,%eax;        movl %eax,dst
+//   dtosl/dtoul:   movsd src,%xmm0; cvttsd2si %xmm0,%rax;        movq %rax,dst
+//   stosi/stoui:   movss src,%xmm0; cvttss2si %xmm0,%eax;        movl %eax,dst
+//   stosl/stoul:   movss src,%xmm0; cvttss2si %xmm0,%rax;        movq %rax,dst
+//   swtof:         movl src,%eax;      cvtsi2sd %eax,%xmm0;      movsd %xmm0,dst
+//   sltof:         movq src,%rax;      cvtsi2sd %rax,%xmm0;      movsd %xmm0,dst
+//   uwtof:         movl src,%eax;      cvtsi2ss %eax,%xmm0;      movss %xmm0,dst
+//   ultof:         movq src,%rax;      cvtsi2ss %rax,%xmm0;      movss %xmm0,dst
+//   exts (s→d):    movss src,%xmm0;    cvtss2sd %xmm0,%xmm0;     movsd %xmm0,dst
+//   truncd (d→s):  movsd src,%xmm0;    cvtpd2ps %xmm0,%xmm0;     movss %xmm0,dst
+//   extsw (w→l):   movl src,%eax;      cltq;                     movq %rax,dst
+//   extuw (w→l):   movl src,%eax;      movq %rax,dst             (movl 清高 32 位)
+//   exts/extu/extsh/extuh/extsb/extub:4-byte 或 sub-word extend per QBE spec
+//     简化 (v3.0.6 scope): 不实现 sub-word (codegen.jhyy 不用 exts/extu 作为
+//     sub-word extend — 用 loadsb/loadub/loadsh/loaduh), 仅 fallback warning。
+//
+// V3 codegen.jhyy cg_conv_to (line 957-998) emit 13 distinct conv ops:
+//   dtosi/dtosl/truncd/stosi/stosl/exts (s→d)/sltof/swtof/ultof/uwtof/extsw/extuw
+//   + copy (l→w narrow) → emit_copy path。
+//   dtoui/dtoul/stoui/stoul/extu/extsh/extuh/extsb/extub 当前 V3 codegen 不 emit
+//   (但 lexer 识别以便 QBE 完整 spec 兼容)。
+fn emit_conv(state: *u8, tok: *u8) -> i32 {
+    let t = tok as *ILToken;
+    let op_name = (*t).text;
+    let src_id = (*t).text_len;
+    let dst_id = (*t).int_val;
+    let dst_qt = (*t).qbe_type;
+
+    let s = state as *StringBuilder;
+
+    let _c = emit_comment(state, "emit_conv: QBE conversion op via %xmm0 scratch + GPR %eax/%rax (per L4 § 3.5 E16)" as *u8);
+
+    let src_off = local_temp_offset(src_id);
+    let dst_off = local_temp_offset(dst_id);
+
+    // ════════════════════════════════════════════════════
+    // float → int 转换 (dtosi/dtoui/dtosl/dtoul/stosi/stoui/stosl/stoul)
+    // ════════════════════════════════════════════════════
+    // dtosi / dtoui: d → w (32-bit)
+    if op_name == ("dtosi" as *u8) {
+        let _a = emit_mov_temp_to_xmm(state, QBE_D(), src_off, 0 as i32);
+        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttsd2si %xmm0, %eax\n" as *u8);
+        let _c = emit_mov_int_to_temp(state, QBE_W(), "eax" as *u8, dst_off);
+        return 0;
+    }
+    if op_name == ("dtosl" as *u8) {
+        let _a = emit_mov_temp_to_xmm(state, QBE_D(), src_off, 0 as i32);
+        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttsd2si %xmm0, %rax\n" as *u8);
+        let _c = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
+        return 0;
+    }
+    if op_name == ("dtoui" as *u8) {
+        // dtoui: V3 不 emit,但保留路径(cvttsd2si 已 truncate,signed/unsigned 在 i32 范围)
+        let _a = emit_mov_temp_to_xmm(state, QBE_D(), src_off, 0 as i32);
+        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttsd2si %xmm0, %eax\n" as *u8);
+        let _c = emit_mov_int_to_temp(state, QBE_W(), "eax" as *u8, dst_off);
+        return 0;
+    }
+    if op_name == ("dtoul" as *u8) {
+        let _a = emit_mov_temp_to_xmm(state, QBE_D(), src_off, 0 as i32);
+        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttsd2si %xmm0, %rax\n" as *u8);
+        let _c = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
+        return 0;
+    }
+    if op_name == ("stosi" as *u8) {
+        let _a = emit_mov_temp_to_xmm(state, QBE_S(), src_off, 0 as i32);
+        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttss2si %xmm0, %eax\n" as *u8);
+        let _c = emit_mov_int_to_temp(state, QBE_W(), "eax" as *u8, dst_off);
+        return 0;
+    }
+    if op_name == ("stosl" as *u8) {
+        let _a = emit_mov_temp_to_xmm(state, QBE_S(), src_off, 0 as i32);
+        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttss2si %xmm0, %rax\n" as *u8);
+        let _c = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
+        return 0;
+    }
+    if op_name == ("stoui" as *u8) {
+        let _a = emit_mov_temp_to_xmm(state, QBE_S(), src_off, 0 as i32);
+        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttss2si %xmm0, %eax\n" as *u8);
+        let _c = emit_mov_int_to_temp(state, QBE_W(), "eax" as *u8, dst_off);
+        return 0;
+    }
+    if op_name == ("stoul" as *u8) {
+        let _a = emit_mov_temp_to_xmm(state, QBE_S(), src_off, 0 as i32);
+        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttss2si %xmm0, %rax\n" as *u8);
+        let _c = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
+        return 0;
+    }
+
+    // ════════════════════════════════════════════════════
+    // int → float 转换 (swtof/sltof/uwtof/ultof)
+    // ════════════════════════════════════════════════════
+    if op_name == ("swtof" as *u8) {
+        let _a = emit_mov_temp_to_int(state, QBE_W(), src_off, "eax" as *u8);
+        let _b = sb_append_cstr(0 as *Arena, s, "\tcvtsi2sd %eax, %xmm0\n" as *u8);
+        let _c = emit_mov_xmm_to_temp(state, QBE_D(), 0 as i32, dst_off);
+        return 0;
+    }
+    if op_name == ("sltof" as *u8) {
+        let _a = emit_mov_temp_to_int(state, QBE_L(), src_off, "rax" as *u8);
+        let _b = sb_append_cstr(0 as *Arena, s, "\tcvtsi2sd %rax, %xmm0\n" as *u8);
+        let _c = emit_mov_xmm_to_temp(state, QBE_D(), 0 as i32, dst_off);
+        return 0;
+    }
+    if op_name == ("uwtof" as *u8) {
+        let _a = emit_mov_temp_to_int(state, QBE_W(), src_off, "eax" as *u8);
+        let _b = sb_append_cstr(0 as *Arena, s, "\tcvtsi2ss %eax, %xmm0\n" as *u8);
+        let _c = emit_mov_xmm_to_temp(state, QBE_S(), 0 as i32, dst_off);
+        return 0;
+    }
+    if op_name == ("ultof" as *u8) {
+        let _a = emit_mov_temp_to_int(state, QBE_L(), src_off, "rax" as *u8);
+        let _b = sb_append_cstr(0 as *Arena, s, "\tcvtsi2ss %rax, %xmm0\n" as *u8);
+        let _c = emit_mov_xmm_to_temp(state, QBE_S(), 0 as i32, dst_off);
+        return 0;
+    }
+
+    // ════════════════════════════════════════════════════
+    // float widen / narrow (exts s→d / truncd d→s)
+    // ════════════════════════════════════════════════════
+    if op_name == ("exts" as *u8) {
+        // exts 在 QBE IL 是 overloaded: int sub-word extend (b/h → w) 跟 float widen (s→d)
+        // V3 codegen.jhyy 仅 emit "exts" 用于 s→d float widen (cg_conv_to line 973)。
+        // 若要支持 int sub-word extend,需检查 src_qt — V3 当前 emit 路径不需要。
+        // 简化 (v3.0.6 scope): 按 s→d 路径 emit,假设 caller 不调用 exts 作 int extend。
+        let src_qt = QBE_S();  // exts 用作 s→d float widen, V3 emit src 总是 s
+        let _a = emit_mov_temp_to_xmm(state, src_qt, src_off, 0 as i32);
+        let _b = sb_append_cstr(0 as *Arena, s, "\tcvtss2sd %xmm0, %xmm0\n" as *u8);
+        let _c = emit_mov_xmm_to_temp(state, QBE_D(), 0 as i32, dst_off);
+        return 0;
+    }
+    if op_name == ("truncd" as *u8) {
+        let _a = emit_mov_temp_to_xmm(state, QBE_D(), src_off, 0 as i32);
+        let _b = sb_append_cstr(0 as *Arena, s, "\tcvtpd2ps %xmm0, %xmm0\n" as *u8);
+        let _c = emit_mov_xmm_to_temp(state, QBE_S(), 0 as i32, dst_off);
+        return 0;
+    }
+
+    // ════════════════════════════════════════════════════
+    // int extend (extsw w→l signed / extuw w→l unsigned)
+    // V3 codegen.jhyy cg_conv_to line 990 emit "extsw" (signed), line 941
+    // emit "extuw" (unsigned)。extu/extsh/extuh/extsb/extub V3 不 emit。
+    // ════════════════════════════════════════════════════
+    if op_name == ("extsw" as *u8) {
+        // w → l signed: movl src,%eax (32-bit load zero-extends to rax), cltq (sign-extend)
+        let _a = emit_mov_temp_to_int(state, QBE_W(), src_off, "eax" as *u8);
+        let _b = sb_append_cstr(0 as *Arena, s, "\tcltq\n" as *u8);
+        let _c = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
+        return 0;
+    }
+    if op_name == ("extuw" as *u8) {
+        // w → l unsigned: movl src,%eax (clear upper 32 of rax), movq %rax,dst
+        let _a = emit_mov_temp_to_int(state, QBE_W(), src_off, "eax" as *u8);
+        let _b = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
+        return 0;
+    }
+
+    // ════════════════════════════════════════════════════
+    // 未实现 ops (extu/extsh/extuh/extsb/extub/truncs):
+    //   V3 codegen 不 emit,留 fallback warning 给未来真修时补。
+    // ════════════════════════════════════════════════════
+    let _w = emit_comment(state, "WARNING: emit_conv op not implemented in V3 self-backend (V3 codegen.jhyy 不 emit 此 op)" as *u8);
+    let _b = sb_append_cstr(0 as *Arena, s, "\tnop\n" as *u8);
+
+    // 注: 不写 dst (avoid 读 stale slot)。caller 假设此 op 不出现 in V3 IL。
+    let _x = dst_qt;  // suppress unused warning
     return 0;
 }
 

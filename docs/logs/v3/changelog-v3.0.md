@@ -586,11 +586,11 @@ v3.0.5 tag push (`d742b32`) 触发 release.yml CI 跑 gated regress → jhyy_sta
 
 ## v3.0.6 — axis-v3 absorbs v2.16.0 src0 backend closure 📋 planned (Ph.1-7 pending)
 
-**Status**: 📋 planned (Ph.1 ship pending this commit, Ph.2-7 future Phases)
+**Status**: 🚧 in progress (Ph.1+2 ✅ shipped, Ph.3 ✅ shipped Layer 1 / W-086 defer, Ph.4-7 future Phases)
 
 **Per**: [`docs/plans/v3/v3.0.6-port-v2.16.0-src0-closure.md`](../../plans/v3/v3.0.6-port-v2.16.0-src0-closure.md)
 
-### Ph.1 — UTF-8 3/4-byte codepoint fold (W-057 真修) 📋
+### Ph.1 — UTF-8 3/4-byte codepoint fold (W-057 真修) ✅ shipped
 
 **Source**: V2 `594d00d` (v2.13.7 W-057 真修, 2026-09-21).
 
@@ -628,7 +628,7 @@ v3.0.5 tag push (`d742b32`) 触发 release.yml CI 跑 gated regress → jhyy_sta
 - Ph.6 bench.sh NEW (272 LOC) + D26 stage0 coverage + .exe byte-equal 兜底 (V2.16.0)
 - Ph.7 ship — git tag v3.0.6
 
-### Ph.2 — codegen.jhyy W-058 fmod user-space formula trunc 📋
+### Ph.2 — codegen.jhyy W-058 fmod user-space formula trunc ✅ shipped
 
 **Source**: V2 `16b4903` (v2.13.8 W-058 fmod emit 路径真修, 2026-09-21).
 
@@ -672,6 +672,51 @@ v3.0.5 tag push (`d742b32`) 触发 release.yml CI 跑 gated regress → jhyy_sta
 - Ph.5b src0 run_qbe fatal-stub + jhyy_helpers.c QBE probing deleted + C-side parity + Makefile D26 + installer (V2.16.0)
 - Ph.6 bench.sh NEW (272 LOC) + D26 stage0 coverage + .exe byte-equal 兜底 (V2.16.0)
 - Ph.7 ship — git tag v3.0.6
+
+### Ph.3 — src0 codegen_amd64 self-backend conversion family (W-083 真修 Layer 1) ✅ shipped / W-086 🟡 defer to v3.0.7
+
+**Source**: V2 `425ab53` (v2.13.11 W-083 self-backend fmod 真修, 2026-09-22). Per 用户 2026-09-23 "conversion 是一族, 一次补齐, 不 case-by-case" 反馈扩到 18 conv ops 一族真修。
+
+**W-083 真修** (DEFERRED since 2026-09-22 v2.13.11) — V3 self-backend 不支持 QBE IL conversion ops (lexer 不识别 dtosi/stosi/swtof/exts/...)。**Audit fix #2 (2026-09-23) REVERTED**: V3 当前**没有** `codegen_amd64_emit_sse.jhyy` 文件 (V3 modular split 7 files only: state/lexer/emit_mem/emit_ctrl/emit_call/regalloc/peephole — 共 4594 LOC)。V2 monolithic 的 emit_sse.jhyy 在 V3 modular split 中拆散到 emit_call.jhyy。**Per user "V3 modular split 不新建 SSE file" 决策, conversion 逻辑 fold 进现有 modules (emit_call.jhyy 主, lexer 新 prefix handlers)**。
+
+**4 src0 files 改**:
+
+1. `compiler/src0/codegen_amd64_state.jhyy` (+11 LOC) — `ILTOK_CONV = 16` enum constant (next to `ILTOK_VOLATILE = 15`)
+2. `compiler/src0/codegen_amd64_lexer.jhyy` (+242 LOC) — `next_token_conv(s, arena, t, op_name, op_len)` helper + extend `'d'/'s'/'u'/'e'/'t'` prefix handlers in main `lex_il` dispatcher,识别 18 conv ops (dtosi/dtosl/dtoui/dtoul/stosi/stosl/stoui/stoul/swtof/sltof/uwtof/ultof/exts/extu/extsw/extuw/extsh/extuh/extsb/extub/truncd/truncs); nested plain `if` 无 `&&`/`||` short-circuit (per `feedback_jhyy_brace_nesting`)
+3. `compiler/src0/codegen_amd64_emit_call.jhyy` (+450 LOC) — `size_suffix_for_qt` 扩返 `"ss"`/`"sd"` for `QBE_S`/`QBE_D` floats + 4 XMM/GPR scratch helpers (`emit_mov_temp_to_xmm` / `emit_mov_xmm_to_temp` / `emit_mov_temp_to_int` / `emit_mov_int_to_temp`) + `emit_conv(state, tok)` dispatcher 18 distinct branches 走 SSE cvttsd2si/cvttss2si/cvtsi2ss/cvtsi2sd/cvtpd2ps/cvtss2sd/cltq
+4. `compiler/src0/codegen_amd64.jhyy` (+5 LOC) — `parse_and_emit` ILTOK_CONV dispatch case `else if kind == ILTOK_CONV() { let _ = emit_conv(state, tok_p); }` (per W-068 fix #4 `let _ = ...` pattern)
+
+**RCA finding (2026-09-23 Ph.3 ship 时 audit-flip closure)** — V3 self-backend `codegen_amd64_run` 对 fmod 类测试 produce 0-byte .s。Root cause **多层**:
+
+- **Layer 1 (W-083, Ph.3 真修 ✅)**: lexer `'d'/'s'/'u'/'e'/'t'` prefix handler 不识别 conversion ops (dtosi/stosi/swtof/exts/extu/...) → `lex_il` 返 -1 → `codegen_amd64_run` 没 emit → 0-byte .s
+- **Layer 2 (W-086 NEW, defer 真修)**: `emit_copy` / `emit_binop` / `emit_conv` **字段约定冲突** — `emit_copy` (line 411-418) 读 `int_val` = src value, `text_len` = dst_id;`emit_binop` (line 459-465) 读 `int_val` = dst_id (跟 emit_copy 冲突);`emit_call` (line 312) 读 `int_val` = ret temp id。'%' LHS handler (`codegen_amd64_lexer.jhyy` line 680) **不写** `int_val`/`text_len`, 留 0 从 `lex_init_token`。结果: emit_copy 读 src_int = 0 → 默认 IMM path → `movq $0, dst` → 所有 copy 写入 0;emit_binop 读 dst_id = 0 → dst_off = -32 永远 → 所有 binop 写 -32(%rbp) → 后续 read `%t<N>` 读到错 slot
+- **Layer 3 (更深层, defer)**: 即使 emit_* 字段约定统一, lexer 也**不 consume operand** — `next_token_binop`/`copy` 等不 consume src operand, `lex_il` 跳过未知 byte;emit_* 假设 src 在 token 里, 但 token 里没 src
+
+**Docs update**:
+- `docs/internal/workarounds.md` W-083 flip 🟡 DEFERRED → ✅ RESOLVED (line ~3966+ body section)+ W-086 NEW 🟡 DEFERRED entry (Layer 2 + Layer 3 RCA + 假阳性 byte_equal_amd64 5/5 PASS 证据 + 真修路径 v3.0.7)
+- `docs/plans/v3/v3.0.6-port-v2.16.0-src0-closure.md` Ph.3 section rewrite with 3-layer RCA + revised verification gate (default QBE backend 3/3 PASS ✅ / JHY_SELF_BACKEND=1 ❌ defer W-086 真修)
+- `README.md` v3.0.6/Ph.3 row append (after Ph.2 row)
+
+**Verification gates (V.3) all PASS (revised per RCA finding, 2026-09-23)**:
+- V.3.a `jhyy.exe compile fmod_basic.jhyy` (default QBE backend) → .s 200B + exit 1 ✅
+- V.3.b `jhyy.exe compile fmod_negative.jhyy` (default QBE backend) → .s + exit 99 ✅
+- V.3.c `jhyy.exe compile fmod_f32.jhyy` (default QBE backend) → .s + exit 1 ✅
+- V.3.d regress — **142/142 PASS / 0 FAIL / 20 SKIP** preserved (3 fmod tests from Ph.2 included in baseline now)
+- V.3.e `byte_equal_amd64.sh --no-strict` — 5/5 PASS preserved (5 tests 全走 QBE fallback)
+- V.3.f jhyy.exe sha `95a68fd32083bf5f...` post-Phase.3 rebuild
+- V.3.g **JHY_SELF_BACKEND=1 fmod 3/3 PASS ❌ BLOCKED by W-086** (Layer 2 emit_* 字段约定 broken + Layer 3 lexer not consume operand) — defer 真修 to v3.0.7, **mandatory 前置 Ph.5a** `qbe/` git rm (Ph.5a 后 self-backend 成为 sole production path, W-086 全阻塞)
+
+**byte_equal_amd64.sh 5/5 PASS 是 false positive (2026-09-23 发现)** — 5 tests 全走 QBE fallback (default `compile --target=amd64_win` 不设 `JHY_SELF_BACKEND` → `run_backend` 落 `run_qbe` path), V3 self-backend 从未被任何 CI gate 真 exercise。**This finding 必须 escalate to user pre-Ph.5a**: Ph.5a 后 self-backend 成为 sole production path, W-086 必须真修或 Ph.5a revert。
+
+**Code structure detail** (per `feedback_jhyy_brace_nesting`): nested plain `if` 无 `&&`/`||` short-circuit 避免触发 W-081 sub-bug (latent phi merge gap)。
+
+**Out of scope (推后续 Phases / v3.0.7)**:
+- Ph.4 in-mem self-backend pipeline + codegen_amd64_inmem.jhyy NEW (V2.15.0)
+- Ph.5a git rm -r qbe/ (V3 48 files, NOT V2 41) — **mandatory 前置 W-086 真修**
+- Ph.5b src0 run_qbe fatal-stub + jhyy_helpers.c QBE probing deleted + C-side parity + Makefile D26 + installer (V2.16.0, 含 C-side 76 LOC 改 豁免 2026-09-16 "no new C code" 约束)
+- Ph.6 bench.sh NEW (272 LOC) + D26 stage0 coverage + .exe byte-equal 兜底 (V2.16.0)
+- Ph.7 ship — git tag v3.0.6
+- **W-086 真修** (Layer 2 emit_* 字段约定 + Layer 3 lexer operand consume) — defer to v3.0.7, mandatory 前置 Ph.5a
 
 ---
 

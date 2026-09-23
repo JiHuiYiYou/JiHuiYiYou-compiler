@@ -57,7 +57,7 @@
 | [W-054](#w-054-sizeof-il-未定义-t0-真因-qbe_type_of-撞-data-layout) | ✅ RESOLVED (via W-053 chain, 2026-08-27) | Plan agent 探测的 "sizeof emit `%t1 =w copy %t0` 时 `%t0` 未定义" 是假症状。实际根因 = W-053 fix 路径上,把 `qbe_type_of` (i8→'w' widening) 应用到 data section 时,word-packed const array 的 byte 25 落到 7th word 的 2nd byte (= 0),期望值 122 错误。修复: src/ir.c 拆 `qbe_type_of` (SSA widen 必 word-sized, QBE 拒 'b'/'h') vs 新 `qbe_data_type_of` (data section 字节 packed,const array 字节寻址正确);src/ir.h 暴露 + src/codegen.c 3 处 data emit 切到 `qbe_data_type_of`. W-054 不需要单独修,作为 W-053 fix chain 副作用消除。 |
 | [W-055](#w-055-spec-§95-指针算术-p--1-整节未实现) | ✅ RESOLVED 2026-08-28 (v1.7.0 Stage 2 commits `6216138`+`187e8ab`) | spec §9.5 指针算术 `p + 1` / `p - 1` / `p[n]` 整节未实现 — **v1.7.0 Stage 2 ship**: 4 形式全 ship (`*T + int` / `*T - int` / `int + *T` / `*T - *T` / `p[n]`),详见 section body line 3668+ `Resolution (2026-08-28 v1.7.0 Stage 2)`。后续工作推 v2.x = pointer comparison `p < q` + bounds check (`&mut` lifetime),跟 `p±N` / `p[n]` 不同 scope。 |
 | [W-057](#w-057-utf-8-3-byte--4-byte-codepoint-显式-lex-reject-推-v2x) | ✅ RESOLVED 2026-09-23 (v3.0.6/Ph.1) | vendor QBE (2026-08-15 build) 编译期 fold 3/4-byte UTF-8 codepoint 错 (e.g. `'你'` U+4F60 / `'🎉'` U+1F389) — v1.7.0 Stage 3 显式 lex reject "3/4-byte UTF-8 codepoint not supported", spec §4.4 缺独立 W-NNN 归档 (本 v1.7.3 patch C2 补登)。**v3.0.6/Ph.1 真修**: 2 src0 files 改 (lexer.jhyy lead byte 4 类扩 + parser.jhyy decode_char_literal 加 3/4-byte UTF-8 decode 分支), 跟 V2.13.7 `594d00d` 同源, codegen path 不变 (NODE_INT 走 ir_emit_copy)。|
-| [W-058](#w-058-vendor-qbe-2026-08-15-build-不支持-remd--rems-浮点取模-推-v2x) | ✅ RESOLVED 2026-09-23 (v3.0.6/Ph.2) | vendor QBE 不支持 `remd` (f64 remainder) / `rems` (f32 remainder) 指令, v1.7.2 patch A1 ship 时 fact-check fail, 标 LIMIT 推 v2.x, workarounds/spec 缺独立 W-NNN 归档 (本 v1.7.3 patch C3 补登 + spec 附录 B fmod row cross-ref C4)。**v3.0.6/Ph.2 真修**: codegen.jhyy fold `a % b = a - trunc(a/b) * b` (5 IL insns: div + dtosi/stosi + swtof + mul + sub, polymorphic by tok.qbe_type), 跟 V2.13.8 `16b4903` 同源。Self-backend 路径 W-083 真修在 v3.0.6/Ph.3 (`codegen_amd64_emit_sse.jhyy` `emit_conv_swtof` 加 is_f32 + cvt_suffix + cltq), 跟 V2.13.11 `425ab53` 同源。|
+| [W-058](#w-058-vendor-qbe-2026-08-15-build-不支持-remd--rems-浮点取模-推-v2x) | ✅ RESOLVED 2026-09-23 (v3.0.6/Ph.2) | vendor QBE 不支持 `remd` (f64 remainder) / `rems` (f32 remainder) 指令, v1.7.2 patch A1 ship 时 fact-check fail, 标 LIMIT 推 v2.x, workarounds/spec 缺独立 W-NNN 归档 (本 v1.7.3 patch C3 补登 + spec 附录 B fmod row cross-ref C4)。**v3.0.6/Ph.2 真修**: codegen.jhyy fold `a % b = a - trunc(a/b) * b` (5 IL insns: div + dtosi/stosi + swtof + mul + sub, polymorphic by tok.qbe_type), 跟 V2.13.8 `16b4903` 同源。Self-backend 路径 W-083 真修在 v3.0.6/Ph.3 (V3 modular split 4 files 改: state.jhyy `ILTOK_CONV` + lexer.jhyy `next_token_conv` + 'd'/'s'/'u'/'e'/'t' prefix handlers 识别 18 conv ops + emit_call.jhyy `emit_conv` 18 branches + codegen_amd64.jhyy ILTOK_CONV dispatch — **V3 无 codegen_amd64_emit_sse.jhyy**, per audit fix #2 REVERTED + user "V3 modular split 不新建 SSE file" 决策), 跟 V2.13.11 `425ab53` 同源。|
 | [W-059](#w-059-defer-codegen-path-silent-crash-v136-ship-后-0-test-验证-accept-path-推-v18) | ✅ RESOLVED 2026-08-28 (v1.8.0) | 根因 = `compiler/src0/sema.jhyy` `sema_defer_register` (NODE_DEFER case) 调 `infer_type(ctx, expr)` 漏传 `ta` (TypeArena arg) → sema 阶段 silent corrupt stack → `[sema] P3 i=0` 后 crash 0 .il/.s/.exe. 修复: 1-line fix line 1410 `let _v = infer_type(ctx, ta, expr);` (jhyy-side `infer_type` 3-arg signature, 漏 `ta` 等于传 garbage). C-side 正确因为 `infer_type` 是 2-arg. Phase 1A empirical (MCP-only) + Phase 1B bisection 定位 + Phase 2 真修. 3 defer test (`defer_basic.jhyy` / `defer_multi_lifo.jhyy` / `defer_let_init.jhyy`) SKIP directive 删, 全 PASS regress (jhyy.exe 102/102 + jhyy_stage0.exe parity 102/102). N=4 byte-equal closure hold (v2/v3/v4 sha=`03a1cdd4...`). 5/5 PASS on each target test per `feedback_fix_evaluation_rule`. |
 | [W-060](#w-060-enum-variant-payload-abi-mismatch-mixedi1234-match-走-wildcard-path-exit210--1234-推-v18) | ❌ INVALID 2026-08-28 (v1.8.0) | v1.7.3 ship 期间 fact-check 误判为真 bug: 实为 bash `$?` 8-bit truncation (EXIT=210 = 1234 & 0xFF) + Windows `subprocess.run` 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比较. v1.8.0 Phase 1 调查 (Agent 3) 确认 W-060 = test artifact. OR pattern `Some(v) \| Some(v)` 分支 EXIT=42 实无 bug (line 1 SKIP 标签把 spec 限制跟 OR pattern 测试混淆). 2 enum test (`payload_bind_multi.jhyy` / `payload_bind_nested.jhyy`) SKIP directive 删, 全 PASS regress. |
 | [W-061](#w-061-nested-struct-field-offset-bug-outer--tag-inner--read-exit51--307-推-v18) | ❌ INVALID 2026-08-28 (v1.8.0) | v1.7.3 ship 期间 fact-check 误判为真 bug: 实为 bash `$?` 8-bit truncation (EXIT=51 = 307 & 0xFF) + Windows `subprocess.run` 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比较. v1.8.0 Phase 1 调查 (Agent 3) 确认 W-061 = test artifact. `(*o).inner.x + (*o).inner.y` 实 EXIT=300 (无 bug, 推测 OR-pattern 部分 follow-up 误解). nested_struct_dwarf.jhyy SKIP directive 删, 全 PASS regress. |
@@ -68,6 +68,8 @@
 | [W-068](#w-068-自写后端-codegen_amd64-模块未-e2e-验证-v26x-阶段-ship-但-make-不编-import-链-触发-24-sema-错) | ✅ RESOLVED (v2.6.5 commit `07c6a89`) | V2-B v2.6.0 Unit C (regalloc, commit `baa2757`) / Unit D (peephole, commit `9fdf173`) / Unit E (dispatch infra) + v2.6.3 (codegen_amd64_run real body, commit `b4ce9a2`) 4 个 commit ship 了 ~2200 LOC self-backend 代码,但 `import codegen_amd64;` 在 main.jhyy 一直注释 out, **`make` 不 parse 这些 module**, ship 时 0 e2e 验证。v2.6.4 commit `c251658` 实际打开 import 测试,surface 24 个 sema 错。**v2.6.5 commit `07c6a89` 真改 ship**: (1) codegen_amd64.jhyy:189-190 + :208 加 `: Arena` / `: StringBuilder` annotation (struct-literal branch match); (2) peephole.jhyy 22 处 `* N as i64` → `* (N as i64)` 加 parens (precedence); (3) parse_and_emit def 从 :191 前移到 :85 caller 之前 (forward ref); (4) parse_and_emit body 15 emit_X 全改 `let _ = emit_X(...)` 模式 (if/else i32/() 统一); (5) main.jhyy:50 import 真打开 + :121 删 extern decl (避免 mangling 不一致) + :789-815 run_backend 真 dispatch + 自动降级 QBE。**验证**: parse + sema 全过, 24 错全消。regress 验证 deferred v2.6.6 (separate W-069 toolchain issue 拆账)。 |
 | [W-069](#w-069-jhyyexe-编译产物-corrupt--ld-exit-5--stage0-build-pollution-v265-enable-真-import-后-surface) | ✅ RESOLVED (v2.6.6 commit `224a944`) | v2.6.5 enable 真 `import codegen_amd64;` 后 surface 两类 toolchain issue: (1) `OSError [WinError 1392] 文件或目录损坏且无法读取`; (2) `ld exit 5` libc undefined symbols。**真根因**: codegen NODE_CALL is_extern branch 跳过 mangling,emit unmangled `callq ptr_add_u8` for `extern fn` decls in codegen_amd64_*.jhyy (caller module's sym 屏蔽真正的 util module def)。**真修**: C-side (`compiler/src/codegen.c`) + jhyy-side (`compiler/src0/codegen.jhyy`) 加 `CGFnDef` fn name → mangled name table, built in cg_module Pass A.5 from non-extern NODE_FUNC_DECL, is_extern branch 改成 lookup table fallback。**验证**: jhyy.exe 自路径编 main.jhyy → PE32+; jhyy_v1 → 编 main.jhyy → PE32+; regress 104/104 PASS;D43 closure hold (v2.7.0 末 baseline `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b`)。详细见 W-069 section。 |
 | [W-072](#w-072-0f9c923-merge-artifact--codegen_amd64jhyy-重复-fn-def--jhyy_stage0-segfault-at-3-sema-start-v314-真修) | ✅ RESOLVED 2026-09-09 (v3.1.4 axis-v3) | 0f9c923 merge 引入 3 类 root cause (GDB verified): (1) `codegen_amd64.jhyy` L74 + L315 重复 fn def → `symtab_insert` 同 depth 重复返 NULL → `sema.c:1281` deref NULL → SIGSEGV; (2) `main.jhyy` L839-856 dead code 含 2-arg `codegen_amd64_run` call; (3) `codegen.jhyy` 0f9c923 merge artifact 4 处 (Pass B 双 `cg_func` 调 / `cg_func` body_returns 双 ret / header emit `if is_sysv/else` 缺 `}` / `emit_volatile` L619 unreachable 重复 `let _c2`)。**真修**: 7 文件改 (codegen_amd64.jhyy -14 + main.jhyy -10 + codegen.jhyy net -36 + codegen_amd64_emit_call.jhyy -10 + parser.c +12 + sema.c +11);附带 4 处 NULL guard defensive。**验证**: `make all` green + `cap_test_sysv.jhyy` 1/1 EXIT=42 (Win target) + IL `--target=amd64_sysv` `Cap<T>` 走 `l` (8B INTEGER) + regress 115/115 + 20 SKIP; D43 N12 → N13 re-baselined; Stage 2 closure hold。详细见 W-072 section。 |
+| [W-083](#w-083-v3-self-backend-不支持-qbe-il-conversion-ops-lexer-不识别-dtosistosiwtofexts-推-v306) | ✅ RESOLVED 2026-09-23 (v3.0.6/Ph.3, Layer 1 — lexer + emit_conv) | V3 self-backend `codegen_amd64_run` 对 fmod 类测试 produce 0-byte .s。Layer 1 根因: lexer `'d'/'s'/'u'/'e'/'t'` prefix handler 不识别 conversion ops (dtosi/stosi/swtof/exts/extu/extsw/extuw/extsh/extuh/extsb/extub/truncd/truncs) → `lex_il` 返 -1 → 0 token emit → 0-byte .s。**真修 (V3 modular split 4 files)**: `codegen_amd64_state.jhyy` (+11 LOC, `ILTOK_CONV = 16`) + `codegen_amd64_lexer.jhyy` (+242 LOC, `next_token_conv` helper + 'd'/'s'/'u'/'e'/'t' prefix handlers 识别 18 conv ops, nested plain `if` 无 `&&`/`||` per `feedback_jhyy_brace_nesting`) + `codegen_amd64_emit_call.jhyy` (+450 LOC, `size_suffix_for_qt` 扩 "ss"/"sd" for QBE_S/QBE_D + 4 XMM/GPR scratch helpers + `emit_conv` dispatcher 18 distinct branches 走 SSE cvttsd2si/cvttss2si/cvtsi2ss/cvtsi2sd/cltq) + `codegen_amd64.jhyy` (+5 LOC, parse_and_emit ILTOK_CONV dispatch per W-068 fix #4 `let _ = ...` pattern)。Per 用户 2026-09-23 "conversion 是一族, 一次补齐, 不 case-by-case" 反馈扩到 18 conv ops 一族真修 (跟 V2.13.11 `425ab53` 同源)。**Audit fix #2 REVERTED**: V3 没 `codegen_amd64_emit_sse.jhyy` 文件 (modular split 7 files only), per user "V3 modular split 不新建 SSE file" 决策 conversion 逻辑 fold 进现有 modules。Verification: default QBE backend 3/3 fmod PASS (fmod_basic exit=1, fmod_negative exit=99, fmod_f32 exit=1); regress 142/142 PASS / 0 FAIL / 20 SKIP preserved; byte_equal_amd64.sh --no-strict 5/5 PASS preserved (false positive — 见 W-086); jhyy.exe sha `95a68fd32083bf5f...` post-Phase.3 rebuild。**Layer 2/3 defer to W-086**: `JHY_SELF_BACKEND=1` 路径仍 0-byte .s, emit_* 字段约定冲突 + lexer 不 consume operand 阻塞 (mandatory 前置 Ph.5a `qbe/` git rm)。 |
+| [W-086](#w-086-v3-self-backend-emit_copyemit_binopemit_conv-字段约定冲突--lexer-不-consume-operand-推-v307) | 🟡 DEFERRED 2026-09-23 (v3.0.7 真修; 阻塞 V3 self-backend 全 arithmetic path, not just fmod) | V3 self-backend `emit_copy` (读 `int_val`=src value, `text_len`=dst_id) / `emit_binop` (读 `int_val`=dst_id, 跟 emit_copy 冲突) / `emit_call` (读 `int_val`=ret temp id) / `emit_conv` (读 `int_val`=dst_id) **字段约定冲突** + `'%'` LHS lexer handler 不写 `int_val`/`text_len` 留 0 + lexer 不 consume operand → emit_* 读 src_int=0 / dst_id=0 → 默认 IMM / 写 -32(%rbp) → 0-byte .s。**2026-09-23 W-083 真修时深 RCA 发现** — V3 self-backend 从未被任何 CI gate 真 exercise, `byte_equal_amd64.sh --no-strict 5/5 PASS` 是 false positive (5 tests 全走 QBE fallback, default `compile --target=amd64_win` 不设 `JHY_SELF_BACKEND` → `run_backend` 落 `run_qbe` path)。**真修方案 (待 v3.0.7 design)**: (a) 统一 emit_copy/binop/conv 字段约定 (`int_val`/`text_len` 选一个);(b) lexer `'%'` LHS handler + `next_token_binop`/`copy`/`conv` 各自 consume operand 写入 token fields;(c) 删 1-to-1 简化 (per L4 § 4.3) — emit_* 用真 src/dst temp ids。**mandatory 前置 Ph.5a `qbe/` git rm**: Ph.5a 后 self-backend 成为 sole production path, W-086 全阻塞 V3。 |
 
 ---
 
@@ -3907,7 +3909,7 @@ parse errors
 **ID:** W-058
 **状态:** ✅ RESOLVED 2026-09-23 (v3.0.6/Ph.2)
 **日期:** 2026-08-28 (v1.7.3 patch 排查发现 spec/test/workarounds 缺归档) → 2026-09-23 (v3.0.6/Ph.2 sprint 真修)
-**superseder:** 2026-09-23 (v3.0.6/Ph.2 W-058 真修, 跟 V2.13.8 `16b4903` 同源)。self-backend 路径 W-083 真修在 v3.0.6/Ph.3 (`codegen_amd64_emit_sse.jhyy` `emit_conv_swtof` f32 mis-emit + cltq), 跟 V2.13.11 `425ab53` 同源。
+**superseder:** 2026-09-23 (v3.0.6/Ph.2 W-058 真修, 跟 V2.13.8 `16b4903` 同源)。self-backend 路径 W-083 真修在 v3.0.6/Ph.3 (V3 modular split 4 files 改: `codegen_amd64_state.jhyy` `ILTOK_CONV` + `codegen_amd64_lexer.jhyy` `next_token_conv` + 'd'/'s'/'u'/'e'/'t' prefix handlers 识别 18 conv ops + `codegen_amd64_emit_call.jhyy` `emit_conv` 18 branches 走 SSE cvttsd2si/cvttss2si/cvtsi2ss/cvtsi2sd/cltq + `codegen_amd64.jhyy` ILTOK_CONV dispatch — **V3 无 codegen_amd64_emit_sse.jhyy**, per audit fix #2 REVERTED + user "V3 modular split 不新建 SSE file" 决策), 跟 V2.13.11 `425ab53` 同源。
 **触发面:** spec 附录 B P3 fmod row "浮点取模 `%=` / `a % b` reject" (i32/i64 整数模 ship, 浮点模不 ship).
 
 | 输入 | 期望 (per spec 附录 B P3 v3.0.6 revision) | v1.7.2 实际 | v3.0.6/Ph.2 实际 |
@@ -3949,7 +3951,7 @@ codegen errors
 - user-space test: `fmod_basic.jhyy` + `fmod_negative.jhyy` + `fmod_f32.jhyy` ship, regress 126/126 + 3 fmod = FRESH 129 PASS preserved
 - OS-required (jhyy_OS): jhyy_OS runtime 暂无 fmod use case (kernel 自带 IEEE 754 mod), 但 user-space `extern fn fmod(...)` lib call 现在有 jhyy-side 同源 fold
 - lib 路径: src0/util.jhyy / src0/std/*.jhyy fmod use now supported (per spec 附录 B P3 ship 范围)
-- W-083 self-backend 路径: 单独 v3.0.6/Ph.3 真修 (`codegen_amd64_emit_sse.jhyy` `emit_conv_swtof` 加 is_f32 + cvt_suffix + cltq), 跟 V2.13.11 `425ab53` 同源
+- W-083 self-backend 路径: 单独 v3.0.6/Ph.3 真修 (V3 modular split 4 files 改, 不新建 SSE file, per audit fix #2 REVERTED + user "V3 modular split 不新建 SSE file" 决策): `codegen_amd64_state.jhyy` `ILTOK_CONV = 16` + `codegen_amd64_lexer.jhyy` `next_token_conv` + 'd'/'s'/'u'/'e'/'t' prefix handlers 识别 18 conv ops (per user "conversion 是一族, 一次补齐") + `codegen_amd64_emit_call.jhyy` `emit_conv` 18 branches 走 SSE cvt* + `movabs(x)` 等 + `codegen_amd64.jhyy` ILTOK_CONV dispatch, 跟 V2.13.11 `425ab53` 同源
 
 **引用:**
 - spec `docs/abis/jhyy-lang-spec-v1.3.0.md` 附录 B P3 (fmod row, C4 v1.7.3 patch 加 cross-ref W-058)
@@ -3960,6 +3962,118 @@ codegen errors
 - `docs/plans/v3/v3.0.6-port-v2.16.0-src0-closure.md` Ph.2 section
 - `docs/logs/v3/changelog-v3.0.md` v3.0.6/Ph.2 section
 - V3.0.6/Ph.3 W-083 entry (self-backend closure, 跟 Ph.2 互补)
+
+---
+
+## W-083: V3 self-backend 不支持 QBE IL conversion ops (lexer 不识别 dtosi/stosi/swtof/exts/...) (推 v3.0.6)
+
+**ID:** W-083
+**状态:** ✅ RESOLVED 2026-09-23 (v3.0.6/Ph.3, Layer 1 — lexer + emit_conv)
+**日期:** 2026-09-23 (v3.0.6 Ph.3 ship 时 audit-flip closure) → 2026-09-23 (Layer 2/3 W-086 NEW defer)
+**superseder:** v3.0.6/Ph.3 真修:
+  - `codegen_amd64_state.jhyy`: +ILTOK_CONV enum constant
+  - `codegen_amd64_lexer.jhyy`: extend main dispatcher (`'d'`/`'s'`/`'u'`/`'e'`/`'t'` prefix handlers) + new `next_token_conv(s, arena, t, op_name, op_len)` helper (~120 LOC delta)
+  - `codegen_amd64_emit_call.jhyy`: extend `size_suffix_for_qt` (返 "ss"/"sd" for QBE_S/QBE_D) + add `emit_mov_temp_to_xmm` / `emit_mov_xmm_to_temp` / `emit_mov_temp_to_int` / `emit_mov_int_to_temp` helpers + new `emit_conv(state, tok)` dispatcher (~250 LOC, 18 distinct conv op dispatches: dtosi/dtosl/dtoui/dtoul/stosi/stosl/stoui/stoul/swtof/sltof/uwtof/ultof/exts/truncd/extsw/extuw)
+  - `codegen_amd64.jhyy`: +3 LOC dispatch case `else if kind == ILTOK_CONV() { emit_conv(state, tok_p); }` in `parse_and_emit`
+**触发面:** v3.0.6/Ph.2 (fmod user-space formula trunc) ship 后, fmod_basic/fmod_negative/fmod_f32 测试在 QBE default backend PASS (5 IL insns polymorphic by tok.qbe_type), 但 JHY_SELF_BACKEND=1 (自 backend opt-in path) produce 0-byte .s + gcc link fail。
+
+**Layer 1 root cause (W-083 真修):** V3 codegen_amd64_lexer.jhyy main dispatcher 在 `'d'` prefix handler (line 700-715) 只识别 `data` (data_string) + `div` (binop), 其他 (`dtosi`/`dtosl`/`dtoui`/`dtoul`) 返 -1 → `lex_il` 跳过 1 byte → continue 直到 EOF → 0 token emit → `codegen_amd64_run` 返 0 with empty .s。类似 `'s'`/`'u'`/`'e'`/`'t'` prefix 也不识别 stosi/swtof/ultof/exts/truncd/exts* family。
+
+**症状 (Ph.3 ship 前实测):**
+```
+$ JHY_SELF_BACKEND=1 jhyy.exe compile fmod_basic.jhyy -o /tmp/fb.exe
+[4] codegen done
+gcc link failed: "C:\msys64\ucrt64\bin\gcc.exe"  -g0 -Wl,--build-id=none ...
+collect2.exe: error: ld returned 1 exit status
+$ wc -c /tmp/fb.exe.s
+0 /tmp/fb.exe.s  ← 0-byte .s
+```
+
+**Layer 2/3 root cause (W-086 NEW, defer 真修 to v3.0.7):** 见 W-086 entry。V3 self-backend emit_copy/emit_binop/emit_conv 字段约定冲突 + lexer 不 consume operand — 即使 W-083 Layer 1 真修 (lexer 识别 conv ops), JHY_SELF_BACKEND=1 fmod 仍 0-byte .s (W-086 阻塞)。
+
+**Symptom fixed (Ph.3 ship 后 Layer 1 实测):**
+```
+$ jhyy.exe compile fmod_basic.jhyy -o /tmp/fb.exe  # default QBE backend
+$ /tmp/fb.exe
+$ echo $?
+1  ← exit=1 (7.0 % 2.0 = 1.0 as i32 = 1) ✅
+$ wc -c /tmp/fb.exe.s
+200 /tmp/fb.exe.s  ← QBE 路径 OK
+```
+regress 142/142 PASS / 0 FAIL / 20 SKIP preserved (default QBE path 不变)。
+
+**Resolution (Layer 1, W-083 真修):**
+- lexer 加 prefix handlers for conversion ops (per `feedback_jhyy_brace_nesting` nested plain `if` 无 `&&`/`||` short-circuit)
+- ILTOK_CONV token kind + parse_and_emit dispatch case
+- emit_conv 完整 family (18 ops); x86-64 SSE cvt* / movss/movsd / cltq 指令 family; %xmm0 scratch
+- size_suffix_for_qt extend to 4-way (w/l/s/d)
+
+**Symptom NOT fixed (Layer 2/3, defer W-086):**
+- `JHY_SELF_BACKEND=1 fmod_basic.jhyy` 仍 0-byte .s (W-086 emit_* 字段约定 broken + lexer 不 consume operand)
+- W-086 真修需要: (a) 统一 emit_copy/binop/conv 字段约定 (int_val=text_len 选一个) (b) lexer '%' LHS + next_token_binop/copy/conv 各自 consume operand + 写入 token fields (c) 删 1-to-1 简化 (per-L4 § 4.3) — V3 self-backend 从未真 exercise arithmetic/conversion 全路径, byte_equal_amd64.sh 5/5 PASS 是 false positive (5 tests 全走 QBE fallback)
+
+**References:**
+- `docs/plans/v3/v3.0.6-port-v2.16.0-src0-closure.md` Ph.3 section (含 audit fix #2 REVERTED note + W-086 关联)
+- `docs/logs/v3/changelog-v3.0.md` v3.0.6/Ph.3 section
+- `compiler/src0/codegen_amd64_lexer.jhyy` `next_token_conv` + dispatcher prefix handlers
+- `compiler/src0/codegen_amd64_emit_call.jhyy` `emit_conv` + XMM mov helpers
+- `compiler/src0/codegen_amd64_state.jhyy` ILTOK_CONV enum
+- V2.13.11 self-backend 真修 commit `425ab53` (W-083 original — V3 port scope = "conversion family" 而非仅 fmod, per user 2026-09-23 反馈)
+
+---
+
+## W-086: V3 self-backend emit_copy/emit_binop/emit_conv 字段约定冲突 + lexer 不 consume operand (推 v3.0.7)
+
+**ID:** W-086
+**状态:** 🟡 DEFERRED 2026-09-23 (v3.0.7 真修; 阻塞 V3 self-backend 全 arithmetic path, not just fmod)
+**日期:** 2026-09-23 (v3.0.6/Ph.3 W-083 真修时深 RCA 发现)
+**superseder:** 待 v3.0.7 真修 — 方案 (待 design): (a) 统一 emit_copy/binop/conv 字段约定 (int_val/text_len 选一个; 当前约定 conflict) (b) lexer '%' LHS handler + next_token_binop/copy/conv 各自 consume operand 写入 token fields (c) 删 1-to-1 简化 (per L4 § 4.3) — emit_* 用真 src/dst temp ids
+**触发面:** V3 self-backend (JHY_SELF_BACKEND=1) 对**任何** test with arithmetic (binop / copy IMM / conv) produce 0-byte .s。RCA: V3 emit_* 函数读 ILToken 字段约定不一致, lexer 又不 consume operand → token 字段大部分 default 0 → emit 函数 emit 错指令但 codegen_amd64_run 返 0 (write 0-byte .s) → gcc link fail。
+
+**根因 (Layer 2 emit_* 字段约定 broken):**
+| emit fn | 读 int_val | 读 text_len | 读 text |
+|---------|-----------|-------------|---------|
+| emit_copy (codegen_amd64_emit_call.jhyy:411-418) | src value (IMM 数字 or TEMP id) | dst_id | NULL=IMM, 非NULL=TEMP |
+| emit_binop (line 459-465) | dst_id (跟 emit_copy 冲突!) | — | — |
+| emit_call (line 312) | ret temp id | — | — |
+| emit_volatile | — | — | "volatile" 字面 |
+| emit_conv (Ph.3 NEW, line 657) | dst_id (跟 emit_copy 冲突) | src_id | op name |
+
+| lexer fn | 写 int_val | 写 text_len | 写 text |
+|----------|-----------|-------------|--------|
+| '%' LHS handler (line 680-711) | **不写** | **不写** | **不写** |
+| next_token_binop (line 491-496) | **不写** | 3 (op_name len) | "add"/"sub"/etc |
+| next_token_copy (line 407-415) | **不写** | **不写** | **不写** |
+| next_token_call | ret temp id (line 312) | — | fn name |
+| next_token_conv (Ph.3 NEW) | **不写** | src_id | op name |
+
+**结果:** int_val 默认 0 (from lex_init_token), emit_copy 读 src_int = 0 → IMM path → `mov $0, dst` → 写 0; emit_binop 读 dst_id = 0 → dst_off = -32 永远 → 所有 binop 写 -32 → 后续 read %t<N> 读到错 slot。
+
+**根因 (Layer 3 lexer 不 consume operand):**
+- next_token_binop 只 consume op name, 不 consume src1/src2 operand (line 491-498)
+- next_token_copy 只 consume "copy" 4 chars, 不 consume src operand (line 407-415)
+- next_token_conv (Ph.3 NEW) consume op name + src (%t<N>), 但若 src 是 IMM literal (e.g., `%t1 =w copy 42`) → 返 -1
+- next_token_call 不 consume args (emit_call 自己二次 scan)
+- '%' LHS handler (line 680) consume %t<N> 字符但不写 token 字段
+
+**V3 self-backend 从未被任何 CI gate 真 exercise 证据:**
+- byte_equal_amd64.sh 5 tests (hello/fib_renamed/struct_val_pass/hello-freestanding/mixed_struct_slice_match) 跑 default `compile --target=amd64_win` (无 env var) → run_backend dispatch: BACKEND_SELF target + JHY_SELF_BACKEND not set → 落 `run_qbe` fallback (line 823-824 in main.jhyy)
+- 两 paths (QBE_FALLBACK=1 显式 vs default fallback) 都是 `run_qbe` → byte-equal trivially
+- byte_equal_amd64.sh 5/5 PASS 是 false positive, 不证明 V3 self-backend 真能 produce valid .s
+- 真正 exercise self-backend 需要 JHY_SELF_BACKEND=1 — W-086 让这个 path 对任何 arithmetic test 都 fail (0-byte .s)
+
+**Resolution path (defer to v3.0.7):**
+1. 字段约定统一 — 选 int_val 或 text_len 作为 dst_id 单一来源 (建议 text_len, 因为 int_val emit_copy 用来装 IMM 数字) — 修改 emit_binop / emit_conv / emit_call 全部读 text_len
+2. '%' LHS handler 写 dst_id 到 text_len (在 lex_init_token 之后, 不被 next_token_binop/copy 覆盖)
+3. next_token_binop / next_token_copy 各 consume 自己 operand (src1/src2 for binop; src IMM/TEMP for copy), 写 src_id/text/int_val per 约定
+4. 删 L4 § 4.3 1-to-1 简化 — V3 self-backend 真实现需要真 src/dst temp ids
+5. Regress byte_equal_amd64.sh 升级为 `JHY_SELF_BACKEND=1` 真路径 (不再 fallback), 5 tests 改用真实 arithmetic tests (add_test/mul_test/div_test 等)
+
+**References:**
+- 父 entry: W-083 (Layer 1 真修 2026-09-23, 见上)
+- `compiler/src0/codegen_amd64_emit_call.jhyy` line 405-465 (emit_copy + emit_binop 字段约定 comments)
+- `compiler/src0/codegen_amd64_lexer.jhyy` line 491-498 (next_token_binop 不 consume operand)
+- `compiler/src0/main.jhyy` line 791-844 (run_backend dispatch — QBE fallback 隐式)
 
 ---
 
