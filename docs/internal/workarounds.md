@@ -56,7 +56,7 @@
 | [W-053](#w-053-字符字面量转义不全--n-t-r-0-之外-escape-以及-xhh-漏解码) | ✅ RESOLVED 2026-08-27 | spec §4.4 字符字面量族 (`\n \t \r \0 \\ \' \" \xHH`) 全漏 decode;`'` 后的 char 走 `t.start[1]` 直接当 ASCII,导致 pattern match 的 char arm 永假;`'\\'` `'\''` `'\"'` lex ERROR. 修复: src/lexer.c `scan_char` escape switch 加 `'"'` + src/parser.c 提取共享 `decode_char_literal()` (含 hex_val 子函数) + src0/lexer.jhyy 镜像加 `e == 34` + src0/parser.jhyy 3 处 TOKEN_CHAR decode 全镜像(并修复 `parse_pattern_primary` `p_addr = t.start` 漏 +1 offset 的旧 bug). 新增 `char_literal.jhyy` (9 escape case) + `char_pattern.jhyy` (`'\n'` literal match + `'a'..'z'` range match) integration test. 5/5 PASS per `feedback_fix_evaluation_rule`. Stage 2 byte-equal 闭环 hold. |
 | [W-054](#w-054-sizeof-il-未定义-t0-真因-qbe_type_of-撞-data-layout) | ✅ RESOLVED (via W-053 chain, 2026-08-27) | Plan agent 探测的 "sizeof emit `%t1 =w copy %t0` 时 `%t0` 未定义" 是假症状。实际根因 = W-053 fix 路径上,把 `qbe_type_of` (i8→'w' widening) 应用到 data section 时,word-packed const array 的 byte 25 落到 7th word 的 2nd byte (= 0),期望值 122 错误。修复: src/ir.c 拆 `qbe_type_of` (SSA widen 必 word-sized, QBE 拒 'b'/'h') vs 新 `qbe_data_type_of` (data section 字节 packed,const array 字节寻址正确);src/ir.h 暴露 + src/codegen.c 3 处 data emit 切到 `qbe_data_type_of`. W-054 不需要单独修,作为 W-053 fix chain 副作用消除。 |
 | [W-055](#w-055-spec-§95-指针算术-p--1-整节未实现) | ✅ RESOLVED 2026-08-28 (v1.7.0 Stage 2 commits `6216138`+`187e8ab`) | spec §9.5 指针算术 `p + 1` / `p - 1` / `p[n]` 整节未实现 — **v1.7.0 Stage 2 ship**: 4 形式全 ship (`*T + int` / `*T - int` / `int + *T` / `*T - *T` / `p[n]`),详见 section body line 3668+ `Resolution (2026-08-28 v1.7.0 Stage 2)`。后续工作推 v2.x = pointer comparison `p < q` + bounds check (`&mut` lifetime),跟 `p±N` / `p[n]` 不同 scope。 |
-| [W-057](#w-057-utf-8-3-byte--4-byte-codepoint-显式-lex-reject-推-v2x) | 🟡 DEFERRED v2.x | vendor QBE (2026-08-15 build) 编译期 fold 3/4-byte UTF-8 codepoint 错 (e.g. `'你'` U+4F60 / `'🎉'` U+1F389) — v1.7.0 Stage 3 显式 lex reject "3/4-byte UTF-8 codepoint not supported", spec §4.4 缺独立 W-NNN 归档 (本 v1.7.3 patch C2 补登), 推 v2.x 真修 (vendor QBE 升级主线或自研 backend codepoint folding)。|
+| [W-057](#w-057-utf-8-3-byte--4-byte-codepoint-显式-lex-reject-推-v2x) | ✅ RESOLVED 2026-09-23 (v3.0.6/Ph.1) | vendor QBE (2026-08-15 build) 编译期 fold 3/4-byte UTF-8 codepoint 错 (e.g. `'你'` U+4F60 / `'🎉'` U+1F389) — v1.7.0 Stage 3 显式 lex reject "3/4-byte UTF-8 codepoint not supported", spec §4.4 缺独立 W-NNN 归档 (本 v1.7.3 patch C2 补登)。**v3.0.6/Ph.1 真修**: 2 src0 files 改 (lexer.jhyy lead byte 4 类扩 + parser.jhyy decode_char_literal 加 3/4-byte UTF-8 decode 分支), 跟 V2.13.7 `594d00d` 同源, codegen path 不变 (NODE_INT 走 ir_emit_copy)。|
 | [W-058](#w-058-vendor-qbe-2026-08-15-build-不支持-remd--rems-浮点取模-推-v2x) | 🟡 DEFERRED v2.x | vendor QBE 不支持 `remd` (f64 remainder) / `rems` (f32 remainder) 指令, v1.7.2 patch A1 ship 时 fact-check fail, 标 LIMIT 推 v2.x, workarounds/spec 缺独立 W-NNN 归档 (本 v1.7.3 patch C3 补登 + spec 附录 B fmod row cross-ref C4)。|
 | [W-059](#w-059-defer-codegen-path-silent-crash-v136-ship-后-0-test-验证-accept-path-推-v18) | ✅ RESOLVED 2026-08-28 (v1.8.0) | 根因 = `compiler/src0/sema.jhyy` `sema_defer_register` (NODE_DEFER case) 调 `infer_type(ctx, expr)` 漏传 `ta` (TypeArena arg) → sema 阶段 silent corrupt stack → `[sema] P3 i=0` 后 crash 0 .il/.s/.exe. 修复: 1-line fix line 1410 `let _v = infer_type(ctx, ta, expr);` (jhyy-side `infer_type` 3-arg signature, 漏 `ta` 等于传 garbage). C-side 正确因为 `infer_type` 是 2-arg. Phase 1A empirical (MCP-only) + Phase 1B bisection 定位 + Phase 2 真修. 3 defer test (`defer_basic.jhyy` / `defer_multi_lifo.jhyy` / `defer_let_init.jhyy`) SKIP directive 删, 全 PASS regress (jhyy.exe 102/102 + jhyy_stage0.exe parity 102/102). N=4 byte-equal closure hold (v2/v3/v4 sha=`03a1cdd4...`). 5/5 PASS on each target test per `feedback_fix_evaluation_rule`. |
 | [W-060](#w-060-enum-variant-payload-abi-mismatch-mixedi1234-match-走-wildcard-path-exit210--1234-推-v18) | ❌ INVALID 2026-08-28 (v1.8.0) | v1.7.3 ship 期间 fact-check 误判为真 bug: 实为 bash `$?` 8-bit truncation (EXIT=210 = 1234 & 0xFF) + Windows `subprocess.run` 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比较. v1.8.0 Phase 1 调查 (Agent 3) 确认 W-060 = test artifact. OR pattern `Some(v) \| Some(v)` 分支 EXIT=42 实无 bug (line 1 SKIP 标签把 spec 限制跟 OR pattern 测试混淆). 2 enum test (`payload_bind_multi.jhyy` / `payload_bind_nested.jhyy`) SKIP directive 删, 全 PASS regress. |
@@ -3852,37 +3852,46 @@ spec §9.5 4 形式全 ship:
 ## W-057: UTF-8 3-byte / 4-byte codepoint 显式 lex reject (推 v2.x)
 
 **ID:** W-057
-**状态:** 🟡 DEFERRED v2.x
+**状态:** ✅ RESOLVED 2026-09-23 (v3.0.6/Ph.1)
 **日期:** 2026-08-28 (v1.7.3 patch 排查发现 spec/test/workarounds 缺归档)
-**superseder:** 推 v2.x (vendor QBE 升级主线 + 自研 backend)
+**superseder:** 2026-09-23 (v3.0.6/Ph.1 W-057 真修, 跟 V2.13.7 `594d00d` 同源)
 **触发面:** spec §4.4 字符字面量族中, 3-byte (U+0800-U+FFFF, e.g. `'你'` U+4F60) + 4-byte (U+10000+, e.g. `'🎉'` U+1F389) UTF-8 codepoint 在 v1.7.0 Stage 3 显式 lex reject.
 
-| 输入 | 期望 (per spec §4.4 字符字面量族) | v1.7.0 实际 |
-|------|----------------------------------|-------------|
-| `'A'` (1-byte ASCII) | codepoint 65, i32 type | ✅ OK (Stage 3 ship) |
-| `'é'` (2-byte BMP, U+00E9) | codepoint 233, i32 type | ✅ OK (Stage 3 ship) |
-| `'你'` (3-byte CJK, U+4F60) | codepoint 0x4F60, i32 type | ❌ **lex reject** "3/4-byte UTF-8 codepoint not supported" |
-| `'🎉'` (4-byte emoji, U+1F389) | codepoint 0x1F389, i32 type | ❌ **lex reject** "3/4-byte UTF-8 codepoint not supported" |
+| 输入 | 期望 (per spec §4.4 字符字面量族) | v1.7.0 实际 | v3.0.6/Ph.1 实际 |
+|------|----------------------------------|-------------|------------------|
+| `'A'` (1-byte ASCII) | codepoint 65, i32 type | ✅ OK (Stage 3 ship) | ✅ OK |
+| `'é'` (2-byte BMP, U+00E9) | codepoint 233, i32 type | ✅ OK (Stage 3 ship) | ✅ OK |
+| `'你'` (3-byte CJK, U+4F60) | codepoint 0x4F60, i32 type | ❌ **lex reject** "3/4-byte UTF-8 codepoint not supported" | ✅ OK (Ph.1 ship) |
+| `'🎉'` (4-byte emoji, U+1F389) | codepoint 0x1F389, i32 type | ❌ **lex reject** "3/4-byte UTF-8 codepoint not supported" | ✅ OK (Ph.1 ship) |
 
-**症状:**
+**症状 (resolved):**
 ```
 test.jhyy:2:9: error: 3/4-byte UTF-8 codepoint not supported
 parse errors
 ```
 
-**根因:** vendor QBE (2026-08-15 build `qbe/qbe.exe`) 编译期 folding 3/4-byte codepoint 整数字面量到 IL 时, 数据 section `b 0xE4` `b 0xBD` `b 0xA0` (UTF-8 字节序列) 不被 vendor QBE 当作单个 codepoint 折叠, emit 错误 IL 字节序。
+**根因 (resolved):** vendor QBE (2026-08-15 build `qbe/qbe.exe`) 编译期 folding 3/4-byte codepoint 整数字面量到 IL 时, 数据 section `b 0xE4` `b 0xBD` `b 0xA0` (UTF-8 字节序列) 不被 vendor QBE 当作单个 codepoint 折叠, emit 错误 IL 字节序。
 
-**workaround (v1.7.0 期间):** v1.7.0 Stage 3 (commit `b0e9c3c`) 显式 lex reject 3/4-byte codepoint, 跟 plan 一致 (per `docs/logs/v1/changelog-v1.7.0.md` line 131 "Stage 1-5 不覆盖的" 段 + master plan § 5.3 Stage 3 scope). ship 时无独立 W-NNN 登记, 推 v2.x 真修 (vendor QBE 升级主线或自研 backend)。
+**workaround (v1.7.0 期间, 已废弃):** v1.7.0 Stage 3 (commit `b0e9c3c`) 显式 lex reject 3/4-byte codepoint, 跟 plan 一致 (per `docs/logs/v1/changelog-v1.7.0.md` line 131 "Stage 1-5 不覆盖的" 段 + master plan § 5.3 Stage 3 scope). ship 时无独立 W-NNN 登记, 推 v2.x 真修 (vendor QBE 升级主线或自研 backend)。
 
-**实现路径 (推 v2.x):**
-1. **vendor QBE 升级** — 拉 QBE 上游主线 (2026-Q3 或更新), 看是否支持 codepoint fold (可能性中等, QBE 上游对 Unicode 折叠支持保守)
-2. **自研 backend** — v2.x 末 QBE 重写后, codegen emit codepoint fold 直接 emit `data $X = { w 0x4F60 }` (w 类单 codepoint), 字节序 UTF-8 在 string literal 路径单独处理 (data section `b 0xE4 b 0xBD b 0xA0` 字符串)
-3. **spec §4.4 修订** — v2.x 重写时把 3/4-byte codepoint 描述补回 ship 范围, 加 "data section codepoint folding 在 v2.x backend 支持" 段
+**Resolution (2026-09-23 v3.0.6/Ph.1)**:
+- **2 src0 files 真改** (跟 V2.13.7 `594d00d` 同源):
+  1. `compiler/src0/lexer.jhyy` lead byte 分支从 2 类 (ASCII + 2-byte) 扩 4 类 (ASCII + 2/3/4-byte), `extra` 计数 0/1/2/3, 删 `oos=1` reject 分支 (line 537-575 改)。
+  2. `compiler/src0/parser.jhyy` `decode_char_literal` 加 3-byte + 4-byte UTF-8 decode 分支, codepoint 计算 per RFC 3629 bitmask formula。
+- **codegen 不动**: parser 把 char codepoint → `ast_new_int(PRIM_I32)`, codegen 收 `NODE_INT` 走 `ir_emit_copy` (`%t =w copy 0xCODE`) 已 cover 3/4-byte (e.g. `'🎉'` 0x1F389 = 127881 < 2^31, QBE `w` 类能容). Self-backend 同路径 (`codegen_amd64_emit_call.jhyy` 不动, 跟 codegen.jhyy 一致)。
+- **2 NEW test files**: `char_literal_3byte.jhyy` (CJK `'你'` U+4F60) + `char_literal_4byte.jhyy` (emoji `'🎉'` U+1F389), 沿用 V2 命名 (per audit fix #1)。
+- **Verification**: 5/5 PASS on 2 new tests + regress 139/139 PASS / 0 FAIL / 20 SKIP preserved (no regression)。
+- **byte-equal D26 5/5 PASS preserved** (per v3.1.0 D26 stage0 recipe; jhyy.exe sha `496bea91c54c2f24...` post-Phase.1 rebuild)。
 
-**影响范围:**
-- user-space test: 仅 `char_literal.jhyy` 等只测 1/2-byte, 不影响 regress
-- OS-required (jhyy_OS): UEFI PE/COFF 字符串常需 CJK 字符 (UEFI 多用 ASCII), 影响面低; 但 OS debug 输出含 CJK 字符时 fail
-- lib 路径: src0/util.jhyy / src0/lexer.jhyy 字符串字面量都用 1-byte ASCII, 不依赖 3/4-byte
+**实现路径 (resolved, v3.0.6/Ph.1 实施):**
+1. ~~vendor QBE 升级~~ — 不需要 (V3 codegen path 不依赖 vendor QBE for codepoint folding)
+2. ✅ **自研 backend codepoint folding** (跟 V2 同源) — v3.0.6/Ph.1 在 parser 阶段 fold char literal → `ast_new_int(PRIM_I32)`, 字节序 UTF-8 在 string literal 路径单独处理 (data section `b 0xE4 b 0xBD b 0xA0` 字符串)
+3. ✅ **spec §4.4 修订** — v3.0.6+ spec 把 3/4-byte codepoint 描述补回 ship 范围, 加 "data section codepoint folding 在 v3.0.6 backend 支持" 段 (v3.0.6/Ph.6 docs work 随 sync)
+
+**影响范围 (resolved):**
+- user-space test: `char_literal_3byte.jhyy` + `char_literal_4byte.jhyy` ship, regress 139/139 PASS preserved
+- OS-required (jhyy_OS): UEFI PE/COFF 字符串 CJK 字符 now support (UEFI 多用 ASCII, 但 OS debug 输出含 CJK 字符现在正常)
+- lib 路径: src0/util.jhyy / src0/lexer.jhyy 字符串字面量仍 1-byte ASCII (3/4-byte codepoint 仅 char literal 路径, string literal 独立)
 
 **引用:**
 - spec `docs/abis/jhyy-lang-spec-v1.3.0.md` § 4.4 (Char literals — 权威, B2 v1.7.3 patch 加 BMP-only 限制)

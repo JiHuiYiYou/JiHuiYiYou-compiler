@@ -225,7 +225,8 @@ fn decode_char_literal(start: *u8, length: i32) -> i32 {
     let w1 = *((a1) as *i32);
     let c1 = (w1 >> (r1 * (8 as i32))) & (255 as i32);
 
-    // non-escape: UTF-8 ASCII or 2-byte BMP (3/4-byte rejected by lexer)
+    // non-escape: UTF-8 ASCII / 2-byte BMP / 3-byte CJK / 4-byte emoji
+    // (v3.0.6 W-057 RESOLVED: 3/4-byte now ships per spec §4.4 revision)
     if c1 != (92 as i32) {
         if (c1 & (128 as i32)) == (0 as i32) {
             // ASCII: total len = 3 (open + 1 byte + close)
@@ -244,7 +245,44 @@ fn decode_char_literal(start: *u8, length: i32) -> i32 {
             // codepoint = (lead & 0x1F) << 6 | (cont & 0x3F)
             return ((c1 & (31 as i32)) << 6) | (c2 & (63 as i32));
         }
-        // 3/4-byte OOS — lexer should have rejected
+        if (c1 & (240 as i32)) == (224 as i32) {
+            // 3-byte (U+0800-U+FFFF): total len = 5 (open + lead + 2 cont + close)
+            if length != 5 { return 0 as i32; }
+            let p2 = (start as i64) + (2 as i64);
+            let a2 = p2 & (~(3 as i64));
+            let r2 = (p2 - a2) as i32;
+            let w2 = *((a2) as *i32);
+            let c2 = (w2 >> (r2 * (8 as i32))) & (255 as i32);
+            let p3 = (start as i64) + (3 as i64);
+            let a3 = p3 & (~(3 as i64));
+            let r3 = (p3 - a3) as i32;
+            let w3 = *((a3) as *i32);
+            let c3 = (w3 >> (r3 * (8 as i32))) & (255 as i32);
+            // codepoint = (lead & 0x0F) << 12 | (c2 & 0x3F) << 6 | (c3 & 0x3F)
+            return ((c1 & (15 as i32)) << 12) | ((c2 & (63 as i32)) << 6) | (c3 & (63 as i32));
+        }
+        if (c1 & (248 as i32)) == (240 as i32) {
+            // 4-byte (U+10000-U+10FFFF): total len = 6 (open + lead + 3 cont + close)
+            if length != 6 { return 0 as i32; }
+            let p2 = (start as i64) + (2 as i64);
+            let a2 = p2 & (~(3 as i64));
+            let r2 = (p2 - a2) as i32;
+            let w2 = *((a2) as *i32);
+            let c2 = (w2 >> (r2 * (8 as i32))) & (255 as i32);
+            let p3 = (start as i64) + (3 as i64);
+            let a3 = p3 & (~(3 as i64));
+            let r3 = (p3 - a3) as i32;
+            let w3 = *((a3) as *i32);
+            let c3 = (w3 >> (r3 * (8 as i32))) & (255 as i32);
+            let p4 = (start as i64) + (4 as i64);
+            let a4 = p4 & (~(3 as i64));
+            let r4 = (p4 - a4) as i32;
+            let w4 = *((a4) as *i32);
+            let c4 = (w4 >> (r4 * (8 as i32))) & (255 as i32);
+            // codepoint = (lead & 0x07) << 18 | (c2 & 0x3F) << 12 | (c3 & 0x3F) << 6 | (c4 & 0x3F)
+            return ((c1 & (7 as i32)) << 18) | ((c2 & (63 as i32)) << 12) | ((c3 & (63 as i32)) << 6) | (c4 & (63 as i32));
+        }
+        // lead byte out of valid UTF-8 range
         return 0 as i32;
     }
 

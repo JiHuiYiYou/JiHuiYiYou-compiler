@@ -584,6 +584,52 @@ v3.0.5 tag push (`d742b32`) 触发 release.yml CI 跑 gated regress → jhyy_sta
 
 ---
 
+## v3.0.6 — axis-v3 absorbs v2.16.0 src0 backend closure 📋 planned (Ph.1-7 pending)
+
+**Status**: 📋 planned (Ph.1 ship pending this commit, Ph.2-7 future Phases)
+
+**Per**: [`docs/plans/v3/v3.0.6-port-v2.16.0-src0-closure.md`](../../plans/v3/v3.0.6-port-v2.16.0-src0-closure.md)
+
+### Ph.1 — UTF-8 3/4-byte codepoint fold (W-057 真修) 📋
+
+**Source**: V2 `594d00d` (v2.13.7 W-057 真修, 2026-09-21).
+
+**W-057 真修** (DEFERRED since 2026-08-28 v1.7.3) — char literal 全 codepoint 范围 (U+0000-U+10FFFF per RFC 3629) ship。
+
+**2 src0 files 改**:
+1. `compiler/src0/lexer.jhyy` line 537-575 — lead byte 分支从 2 类 (ASCII + 2-byte) 扩 4 类 (ASCII + 2/3/4-byte), `extra` 计数 0/1/2/3, 删 `oos=1` reject 分支。
+2. `compiler/src0/parser.jhyy` `decode_char_literal` line 197+ — 加 3-byte (U+0800-U+FFFF) + 4-byte (U+10000-U+10FFFF) UTF-8 decode 分支, codepoint 计算 per RFC 3629 bitmask formula。
+
+**codegen 不动**: parser 把 char codepoint → `ast_new_int(PRIM_I32)`, codegen 收 `NODE_INT` 走 `ir_emit_copy` (`%t =w copy 0xCODE`) 已 cover 3/4-byte (e.g. `'🎉'` 0x1F389 = 127881 < 2^31, QBE `w` 类能容). Self-backend 同路径 (`codegen_amd64_emit_call.jhyy` 不动, 跟 codegen.jhyy 一致)。
+
+**2 NEW test files** (沿用 V2 命名 per audit fix #1):
+- `compiler/tests/examples/char_literal_3byte.jhyy` (CJK `'你'` U+4F60 = 20320, UTF-8: E4 BD A0) — EXIT=0
+- `compiler/tests/examples/char_literal_4byte.jhyy` (emoji `'🎉'` U+1F389 = 127881, UTF-8: F0 9F 8E 89) — EXIT=0
+
+**Docs update**:
+- `docs/internal/workarounds.md` W-057 flip 🟡 DEFERRED → ✅ RESOLVED (line 59 索引 + line 3852+ body section)。
+- `docs/plans/v3/v3.0.6-port-v2.16.0-src0-closure.md` NEW (per-version plan file per `feedback_plans_per_version`)。
+- `README.md` v3.0.6/Ph.1 row append。
+
+**Verification gates (V.0-V.2) all PASS**:
+- V.0 char_literal_3byte.jhyy (CJK `'你'`) EXIT=0 — 5/5 PASS
+- V.1 char_literal_4byte.jhyy (emoji `'🎉'`) EXIT=0 — 5/5 PASS
+- V.2 regress — **139/139 PASS / 0 FAIL / 20 SKIP** preserved (跟 v3.2.2 baseline 137/137 + 2 new tests hold)
+- jhyy.exe sha `496bea91c54c2f24...` post-Phase.1 rebuild
+- byte-equal D26 5/5 PASS preserved (per v3.1.0 D26 stage0 recipe)
+- fixed-point N=3 closure preserved (新 closure point through Ph.1 src0 改)
+
+**Out of scope (推后续 Phases)**:
+- Ph.2 codegen.jhyy W-058 fmod formula trunc (V2.13.8)
+- Ph.3 codegen_amd64_emit_sse.jhyy W-083 self-backend fmod 真修 (V2.13.11)
+- Ph.4 in-mem self-backend pipeline + codegen_amd64_inmem.jhyy NEW (V2.15.0)
+- Ph.5a git rm -r qbe/ (V3 48 files, NOT V2 41)
+- Ph.5b src0 run_qbe fatal-stub + jhyy_helpers.c QBE probing deleted + C-side parity + Makefile D26 + installer (V2.16.0, 含 C-side 76 LOC 改 豁免 2026-09-16 "no new C code" 约束)
+- Ph.6 bench.sh NEW (272 LOC) + D26 stage0 coverage + .exe byte-equal 兜底 (V2.16.0)
+- Ph.7 ship — git tag v3.0.6
+
+---
+
 ## V3-C — v3.1.0+ (`&mut` + lifetime, 3g / 3g.5 / 3g.7) — pending (等 user 启动)
 
 **Per**: [`docs/plans/v3/batch-V3-C-plan.md`](../../plans/v3/batch-V3-C-plan.md)

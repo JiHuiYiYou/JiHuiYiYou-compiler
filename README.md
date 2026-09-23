@@ -283,6 +283,10 @@ All five raw `.il` files share an identical sha256 (1.378 MB, no fix-up post-pro
 
 Full index: [`docs/internal/workarounds.md`](docs/internal/workarounds.md).
 
+**v3.0.6/Ph.1 — UTF-8 3/4-byte codepoint fold (W-057 真修) — 2026-09-23 📋 pending ship**
+
+Per [`docs/plans/v3/v3.0.6-port-v2.16.0-src0-closure.md`](docs/plans/v3/v3.0.6-port-v2.16.0-src0-closure.md): axis-v3 absorbs V2.13.7 W-057 真修 (`594d00d`). 2 src0 files 改 (`lexer.jhyy` lead byte 4 类扩 + `parser.jhyy` `decode_char_literal` 3/4-byte UTF-8 decode), 跟 V2.13.7 同源。W-057 flip 🟡 DEFERRED → ✅ RESOLVED post-Ph.1 ship。2 NEW tests (`char_literal_3byte.jhyy` U+4F60 / `char_literal_4byte.jhyy` U+1F389) — verification V.0/V.1 5/5 PASS (compiled + EXIT=0); V.2 regress 139/139 PASS / 0 FAIL / 20 SKIP preserved; jhyy.exe sha `496bea91c54c2f24...` post-Phase.1 rebuild。Ph.2 (W-058 fmod) / Ph.3 (W-083 emit_sse) / Ph.4 (in-mem pipeline) / Ph.5a+5b (QBE removal + C-side parity) / Ph.6 (bench.sh) / Ph.7 (tag v3.0.6 ship) 后续 phases。
+
 **v0.x frozen**: `docs/logs/v0/changelog-v0.9.0.md` (3231 lines) — Stage 1 byte-equal 7-test-set wip, frozen at v1.0.0 baseline (2026-08-29). v0.x C compiler (`compiler/src/*.c`) enters maintenance-only mode; new features go through `compiler/src0/*.jhyy`. Per `docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md`, M5 boot-from-scratch cleanup (delete `src/*.c` + `qbe/` + `runtime.c`) is deferred until v2.x end + v3.x end.
 
 > [!NOTE]
