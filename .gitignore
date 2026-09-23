@@ -132,3 +132,6 @@ vscode-ext/out/
 # v2.6.7 byte_equal_amd64.sh baseline — per-input .il/.s sha256 parity state
 # transient build artifact, 不入仓 (跟 *.il / *.s 同类)
 compiler/tests/bootstrap/baseline/
+# v3.0.6/Gate-0 byte_equal_selfbackend.sh baseline: 跟 byte_equal_amd64.sh
+# 同 transient parity state (QBE 路径输出 sha, 是 self-backend 真修后的
+# "绿"目标), 不入仓. 跟 jhyy.exe.sha256 同 pattern: refresh after QBE 路径变化.
