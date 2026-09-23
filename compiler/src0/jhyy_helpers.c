@@ -718,3 +718,95 @@ __attribute__((used)) int codegen_amd64_run(const char *il_path, const char *asm
     (void)il_path; (void)asm_path;
     return -1;  /* not implemented in C side; triggers QBE fallback */
 }
+
+/* === v3.0.7/Commit 1: 8 helpers ported from V2 v2.16.0 === */
+/* v3.0.7 (W-074.7 真修 merge): jh_double_to_bits / jh_float_to_bits / jh_cgstate_*
+   helpers are referenced by merged src0 backend code (V2 v2.11.x ~ v2.13.x 真修
+   chain) but V3 had only ~44 helpers. Adding the 8 missing ones to allow
+   Commit 1 build (without these, ld returns 5 — 8 unresolved jh_* symbols).
+
+   Per user 2026-09-23 decision: C-side 76 LOC 改豁免 (sweeping C-side 改动跟
+   V2 0b4cde5 同源). This is part of the "absorb V2 src0 backend closure" effort.
+
+   These 8 helpers are byte-for-byte ports of V2 v2.16.0 implementations
+   (sourced via `git show v2.16.0:compiler/src0/jhyy_helpers.c`). */
+
+/* v2.11.5 (W-074.7 alloc-tracking 真修): jh_cgstate_get_temp_slots /
+   jh_cgstate_set_temp_slots — 跟 regalloc 同 pattern,C-side static 装当前 CGState
+   的 temp_slot_for_id (256-entry i64 array,per-fn alloc slot 表)。
+   emit_alloc 写入 alloc'd %tN 的 slot,cg_offset_for_temp[t] 查表(否则 fall through
+   formula)。BSS-zero init, set NULL = 关闭 alloc-tracking。Pointer-only: 实际数据
+   在 jhyy arena alloc (per-compile lifetime),C-side 只装指针。
+   修 nested_struct_deep + struct_val_pass pre-existing bug: alloc'd %tN 之前
+   走 formula `-(32 + t*8)` 跟 alloc 真分配的 slot 不一致 → read garbage。 */
+static void *g_jh_cgstate_temp_slots = (void *)0;
+__attribute__((used)) void *jh_cgstate_get_temp_slots(void) {
+    return g_jh_cgstate_temp_slots;
+}
+__attribute__((used)) int jh_cgstate_set_temp_slots(void *arr) {
+    g_jh_cgstate_temp_slots = arr;
+    return 0;
+}
+
+/* v2.11.8 (W-074.7.8 derived-address tracking 真修): jh_cgstate_get_holds_address /
+   jh_cgstate_set_holds_address — same pattern as temp_slots above; C-side static
+   holds 256-entry u8 bitmap (parallel to temp_slot_for_id i64 array, but 1 byte/entry)。
+   emit_alloc / emit_binop (add/sub on address-holder src1) / emit_copy (TEMP→TEMP of
+   address-holder) 写 flag; emit_load/store/loadsub 读 flag 决定 indirect
+   (mov<size> (%r8), %reg) vs slot (mov<size> -<off>(%rbp), %reg) dispatch。
+   BSS-zero init; query goes through (*s).temp_holds_address in state.jhyy (hot path);
+   setter is forward-ref-safe no-op kept for API consistency with temp_slots。 */
+static void *g_jh_cgstate_holds_address = (void *)0;
+__attribute__((used)) void *jh_cgstate_get_holds_address(void) {
+    return g_jh_cgstate_holds_address;
+}
+__attribute__((used)) int jh_cgstate_set_holds_address(void *bitmap) {
+    /* unused — state.jhyy reads (*s).temp_holds_address directly via jh_cgstate_get_holds_address */
+    g_jh_cgstate_holds_address = bitmap;
+    return 0;
+}
+
+/* v2.11.8 (W-074.7.8 derived-address tracking 真修): jh_cgstate_set_holds_flag /
+   jh_cgstate_get_holds_flag — byte-level access into the 256-entry u8 bitmap。
+   cg_record_temp_holds_address / cg_is_address_holder (state.jhyy) 调这两个,
+   因为 jhyy 没有 u8 direct deref 语法 (*(u8*)p = 1 不支持),走 C-bridge。 */
+__attribute__((used)) int jh_cgstate_set_holds_flag(void *bitmap, long long idx) {
+    if (bitmap == NULL) return -1;
+    if (idx < 0 || idx >= 256) return -1;
+    ((unsigned char *)bitmap)[idx] = 1;
+    return 0;
+}
+__attribute__((used)) int jh_cgstate_get_holds_flag(void *bitmap, long long idx) {
+    if (bitmap == NULL) return 0;
+    if (idx < 0 || idx >= 256) return 0;
+    return ((unsigned char *)bitmap)[idx] != 0 ? 1 : 0;
+}
+
+/* v2.11.19 Phase 3a: 把 f64 字面量文本转 IEEE 754 double-precision bit pattern (i64)。
+   jhyy-side cg_f64_imm_bits 用此走 true impl (替代 v2.11.15 Iter 1b stub "返 imm_val")。
+   本函数把解析后的 bits 写到 caller 提供的 8-byte buffer,jhyy-side 读 i64 出来。
+   abi/i386 SysV 同 pattern (XMM0 return) — jhyy-side 拿 8-byte heap buf,本函数写回。 */
+long long jh_double_to_bits(const char *s, long long len, void *out_buf) {
+    char buf[128];
+    long long n = len < 127 ? len : 127;
+    for (long long i = 0; i < n; i++) buf[i] = s[i];
+    buf[n] = '\0';
+    double d = atof(buf);
+    *(long long *)out_buf = *(long long *)&d;
+    return 0;
+}
+
+/* v2.11.19 Phase 3a: 把 f32 字面量文本转 IEEE 754 single-precision bit pattern (i32)。
+   jhyy-side cg_f32_imm_bits 用此走 true impl (替代 v2.11.15 Iter 1b stub "返 imm_val")。
+   store 模式同 jh_double_to_bits:caller 提供 4-byte buf,本函数写回 i32 bits。 */
+int jh_float_to_bits(const char *s, long long len, void *out_buf) {
+    char buf[128];
+    long long n = len < 127 ? len : 127;
+    for (long long i = 0; i < n; i++) buf[i] = s[i];
+    buf[n] = '\0';
+    float f = (float)atof(buf);
+    *(int *)out_buf = *(int *)&f;
+    return 0;
+}
+/* === end v3.0.7/Commit 1 added helpers === */
+

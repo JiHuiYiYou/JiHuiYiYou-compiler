@@ -762,7 +762,58 @@ v3.0.5 tag push (`d742b32`) 触发 release.yml CI 跑 gated regress → jhyy_sta
 
 ---
 
-## V3-C — v3.1.0+ (`&mut` + lifetime, 3g / 3g.5 / 3g.7) — pending (等 user 启动)
+## v3.0.7 — V3 self-backend 真 closure (W-083 + W-086 wholesale 真修 + Gate-0 灯转绿) — 2026-09-23 ✅ shipped
+
+**Status**: ✅ **shipped** (Commits 0/1/2 入仓 + Gate-0 灯转绿 + W-083/W-086 ✅ RESOLVED)
+**Per**: per-version plan [`docs/plans/v3/v3.0.7-...` (per `feedback_plans_per_version`, 跟 v3.0.6 同 per-version 模式; per `feedback_small_plans_no_docs` 若 sprint ≤ 1 stage 可走 plan mode 不单建 docs/plans 文件)]
+**Trigger**: v3.0.6/Ph.3 ship 时 audit-flip 把 W-083 退回 ⏳ RESOLVED-pending-verification + W-086 NEW 🟡 DEFERRED (Layer 2/3 字段约定冲突 + lexer 不 consume operand);用户 2026-09-23 反馈三选项 (1) 维持 🟡 DEFERRED / (2) 文档修辞 / (3) 真执行路径 → 选 **(4) 选项 4 + strict sha 锁** + **wholesale 跟 V2 v2.16.0 emit_conv 2-op form 重写**。
+
+### Scope (3 commits in axis-v3)
+
+1. **Commit 0** `infra(v3.0.7/Commit 0): V2 self-backend golden .s 入库 (Gate-0 [2/4] 对照基线)` — `d51155e`
+   - 3 V2 v2.16.0 self-backend 实际产出 .s 入仓到 `compiler/tests/bootstrap/baseline_v2_self/` (fmod_basic.s / fmod_negative.s / fmod_f32.s)
+   - 造 Gate-0 红灯: V3 self-backend 0-byte .s → Gate-0 3/3 FAIL
+   - 关联: W-086 NEW defer 入 workarounds.md
+2. **Commit 1** `fix+infra(v3.0.7/Commit 1): V3 self-backend W-083/W-086 wholesale 真修 (merge-file 8 codegen_amd64_*.jhyy + strcmp + state cast + cltq + 2-op form)` — pending ship
+   - **`git merge-file` wholesale**: V3/V2 共同祖先 `516821924613eba26cb5153bc8882814a783effe`, 8 codegen_amd64_*.jhyy (state/lexer/emit_call/emit_ctrl/emit_mem/regalloc/peephole + main) merge, **保留 V3 modular split 命名**
+   - **strcmp migration**: 16 处 `op_name == ("X" as *u8)` → `strcmp(op_name, ("X" as *u8)) == (0 as i32)` (jhyy `==` on `*u8` 是 pointer compare NOT string compare, hang)
+   - **state cast fix**: emit_mov_temp_to_xmm/emit_mov_xmm_to_temp/emit_comment 加 `let cg = state as *CGState; let s = (*cg).out; let arena = (*cg).arena;` (state 是 `*CGState` NOT `*StringBuilder`, 直接 cast → sb.buf/len/cap 读 garbage → sb_grow while 循环 doubles cap 到 INT_MAX → hang)
+   - **cltq sign-extension**: `emit_conv_swtof` 加 `cltq` 在 `movl %eax, -N(%rbp)` 之後 `cvtsi2sd %rax, %xmm0` 之前 (per V2 W-083 v2.13.11 真修, fmod_negative EXIT=99 expected vs EXIT=100 sym flag)
+   - **2-op form rewrite**: dtosi/dtosl/dtoui/dtoul/exts 改 `cvttsd2si -N(%rbp), %eax/rax` + `movl/movq %eax/rax, -M(%rbp)`, 替代 3-op `movsd -N(%rbp), %xmm0` + `cvttsd2si %xmm0, %eax`, 跟 V2 v2.16.0 golden byte-equal
+   - **ILTOK_CONV value fix**: `ILTOK_CONV = 80` (NOT 16, 避免跟 `ILTOK_DIRECTIVE` 撞)
+   - **op_len fix**: lexer 14 5-char conv ops call sites (dtosi/dtosl/dtoui/dtoul/stosi/stosl/stoui/stoul/swtof/sltof/uwtof/ultof/extsw/extsh/extsb/extuw/extuh/extub) op_len 4 → 5
+   - **emit_conv comment drop**: 删 `emit_comment` call 在 `emit_conv` body 入口 (V3 跟 V2 .s diff 仅 2 行额外 `# emit_conv: ...` 注释, 删后 strict sha PASS)
+3. **Commit 2** `fix+changelog(v3.0.7/Commit 2): W-083/W-086 status flip + per-version docs + ship` — pending: v3.0.7 tag push
+
+### Verification gate (per `feedback_fix_evaluation_rule` 5/5 PASS on target tests + `feedback_regress_clean_count` rm _regress_*.exe)
+
+- **Gate-0 (per W-086 真修验收)**: `bash compiler/tests/bootstrap/byte_equal_selfbackend.sh` → **3/3 strict sha PASS + 3/3 exit code PASS = 6/6/0 PASS / SKIP / FAIL** (EXIT=0)
+  - fmod_basic: V3 self-backend sha=`25eccf0ad9e291f1...` byte-equal to V2 v2.16.0 self-backend golden sha=`25eccf0ad9e291f1...`
+  - fmod_negative: V3 self-backend sha=`8b1d6f333eb19191...` byte-equal to V2 v2.16.0 self-backend golden sha=`8b1d6f333eb19191...`
+  - fmod_f32: V3 self-backend sha=`e6346d245ed4b6ed...` byte-equal to V2 v2.16.0 self-backend golden sha=`e6346d245ed4b6ed...`
+- **regress 142/142 PASS / 0 FAIL / 20 SKIP** preserved (default QBE path + JHY_SELF_BACKEND=1 self-backend path 双绿); `_regress_*.exe` 清 stale 后 FRESH total 162 (per `feedback_regress_clean_count`)
+- **jhyy.exe sha** `bc98c633ca924f1f...` post-Commit 1+2 rebuild
+- **W-086 + W-083 status flip**: 🟡 DEFERRED / ⏳ RESOLVED-pending-verification → ✅ RESOLVED 2026-09-23 (workarounds.md 索引行 + body section 同步更新)
+
+### Why this sprint existed (vs. W-083 alone, post-v3.0.6/Ph.3)
+
+per 用户 2026-09-23 三选项决策 (1/4): "选项 4 + strict sha 锁. 6-8 个函数的代价, 换来的是一个对操作数敏感、真实可信、且在 Ph.5a 之后能独自守门的 Gate-0"。原 v3.0.6/Ph.3 W-083 ship 时 3 个 gate (default QBE 3/3 fmod + regress 142/142 + byte_equal_amd64 5/5) 全是 **假阳性** (3 gates 全不跑 self-backend, default `compile --target=amd64_win` 不设 `JHY_SELF_BACKEND` → `run_backend` 落 `run_qbe` path per `main.jhyy:803` 注释)。W-086 是 RCA 发现的更深层 Layer 2 (emit_* 字段约定冲突) + Layer 3 (lexer 不 consume operand) 问题, 单修 W-083 不够。v3.0.7 = 真把 self-backend 拉通, 唯一真 execution 路径 (`JHY_SELF_BACKEND=1`) 真能 produce valid .s + 真过 Gate-0 strict sha + 真过 exit code。
+
+### Out of scope (推后续 v3.0.8 / v3.0.6 Ph.5a+ Ph.5b)
+
+- ❌ v3.0.6/Ph.4 in-mem self-backend pipeline (`codegen_amd64_inmem.jhyy` NEW) — 必须排在 Gate-0 灯转绿之后 (in-mem 后无 .s 可比, Gate-0 失效)
+- ❌ v3.0.6/Ph.5a `qbe/` git rm + Ph.5b src0 clean code + C-side parity + Makefile + installer — W-086 真修后 unblock, 但不是 v3.0.7 scope
+- ❌ v3.0.6/Ph.6 bench.sh NEW + D26 stage0 coverage
+- ❌ v3.0.6/Ph.7 ship + tag (separately ship per `feedback_audit_single_commit_diff`)
+
+### References
+
+- workarounds.md: W-086 ✅ RESOLVED entry + W-083 ✅ RESOLVED entry (索引行 + body section 同步)
+- Gate-0 script: `compiler/tests/bootstrap/byte_equal_selfbackend.sh` (244 LOC, [2/4] adaptive sha strategy + 4 gate 总 — `.s non-empty` + `strict sha` + `gcc link` + `exit code`)
+- V2 golden: `compiler/tests/bootstrap/baseline_v2_self/v2_self_*.s` (3 .s 入仓)
+- V3 merge base: `516821924613eba26cb5153bc8882814a783effe`
+- 父 entry: v3.0.6/Ph.3 W-083 Layer 1 code-only 真修 (2026-09-23) + W-086 Layer 2/3 RCA (NEW defer to v3.0.7)
+- 用户 2026-09-23 反馈三选项确认: "选项 4 + strict sha 锁" + "先 commit 3+4 (emit_conv 2-op rewrite) 再做 emit_sse 落地"
 
 **Per**: [`docs/plans/v3/batch-V3-C-plan.md`](../../plans/v3/batch-V3-C-plan.md)
 

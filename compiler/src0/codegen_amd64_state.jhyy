@@ -25,6 +25,8 @@
 // cg_offset_for_temp 在 line 132 调用 regalloc_query_spill_off_no_arr;
 // jhyy 不支持 fn forward reference,import 必须先于 use site)
 import codegen_amd64_regalloc;
+// v2.11.2 (W-074.6 T1-a): cg_byte_at / cg_streq_n / cg_find_sub 用 ptr_add_u8
+import util;
 
 // ════════════════════════════════════════════════════
 // QBE type constants(per ir.jhyy `QBE_W='w'=119` 等)
@@ -62,6 +64,20 @@ fn ILTOK_LABEL()        -> i32 { return 12 as i32; }
 fn ILTOK_FUNC_HEADER()  -> i32 { return 13 as i32; }
 fn ILTOK_DATA_STRING()  -> i32 { return 14 as i32; }
 fn ILTOK_VOLATILE()     -> i32 { return 15 as i32; }
+fn ILTOK_DIRECTIVE()    -> i32 { return 16 as i32; }  // v2.11.1: dbgfile/dbgloc/{ / } 哨兵 (W-074.5 真修)
+// v2.11.19: QBE float/i32 conversion op family (per codegen.jhyy:1012-1038 emit pattern)。
+//   dtosi/dtosl/stosi/stosl/truncd/exts (f32→f64)/sltof/swtof/ultof/uwtof
+//   8 个 enum,dtosi/stosi 涵盖 dtosl/stosl (dst 宽度由 tok.qbe_type 决定)。
+//   exts with src=W/H/B 走原整数 ext 路径(emit_binop 已有的 extsw/extuw/extsh/extsb 路径),
+//   exts with src=S 走 emit_conv_exts_f32_to_f64 新增浮点路径(cvttss2si/cvtss2sd 等)。
+fn ILTOK_DTOSI()        -> i32 { return 50 as i32; }  // f64 → i32/i64 (cvttsd2si)
+fn ILTOK_STOSI()        -> i32 { return 51 as i32; }  // f32 → i32/i64 (cvttss2si)
+fn ILTOK_TRUNCD()       -> i32 { return 52 as i32; }  // f64 → f32 (cvtsd2ss)
+fn ILTOK_EXTS()         -> i32 { return 53 as i32; }  // src=S 走 f32→f64 (cvtss2sd); src=W/H/B 整数 ext
+fn ILTOK_SLTOF()        -> i32 { return 54 as i32; }  // i64 → f64 (cvtsi2sd, signed)
+fn ILTOK_SWTOF()        -> i32 { return 55 as i32; }  // i32 → f64 (cvtsi2sd, sign-ext 32→64)
+fn ILTOK_ULTOF()        -> i32 { return 56 as i32; }  // u64 → f64 (half trick 7 insn)
+fn ILTOK_UWTOF()        -> i32 { return 57 as i32; }  // u32 → f64 (movl %eax, %eax zero-ext + cvtsi2sd)
 
 // W-083 真修 (v3.0.6/Ph.3): QBE conversion ops (dtosi/stosi/swtof/exts/extu/extsw/extuw/truncd/...)
 // 走 ILTOK_CONV token + 新 emit_conv dispatcher (in codegen_amd64_emit_call.jhyy)。
@@ -72,7 +88,7 @@ fn ILTOK_VOLATILE()     -> i32 { return 15 as i32; }
 //   float widen:exts (s → d via cvtss2sd)
 //   float narrow:truncd (d → s via cvtpd2ps)
 //   int extend:exts/extu/extsh/extuh/extsb/extub/extsw/extuw (sub-word → word/long)
-fn ILTOK_CONV()         -> i32 { return 16 as i32; }
+fn ILTOK_CONV()         -> i32 { return 80 as i32; }  // v3.0.7/Commit 1 fix: 不与 ILTOK_DIRECTIVE (16) 冲突; 之前 V3 与 V2 merge 后共用 16 → dbgfile/dbgloc token 被误派发到 emit_conv → 静默 hang
 
 // ════════════════════════════════════════════════════
 // IL token struct(由 lexer.jhyy 构造,parse loop 消费)
@@ -106,6 +122,13 @@ type CGState = struct {
     shadow_space: i64,  // 32-byte shadow space (MS x64 calling convention)
     nparams:      i64,  // 当前函数的参数个数(影响 prologue size)
 
+    // v2.11.2 (T4-d 真修延伸):cur_call_text / cur_call_text_len —
+    // emit_call 在调 emit_amd64_arg_regs 前把 call 指令原文 slice 存这里,
+    // emit_amd64_arg_regs 解析每个 arg 的 (qt, temp_id)。之前 emit_amd64_arg_regs
+    // hardcode %t1..%t6, 错槽静默 wrong value(per W-074.6 T4-d)。
+    cur_call_text:     *u8,    // call 指令原文 slice (lexer set, NO null-term)
+    cur_call_text_len: i64,    // slice 长度
+
     // v2.7.0 Phase 2a: target tag threading through CGState.
     //   0 = TARGET_AMD64_WIN              (default; per Win ABI path)
     //   1 = TARGET_AMD64_WIN_FREESTANDING (per Win freestanding path)
@@ -114,6 +137,196 @@ type CGState = struct {
     // Phase 2a 仅加字段 + 默认 0 (Win),emit_call refactor 留 Phase 2b 调此字段
     // 决定 arg-reg 序列 (Win 4 reg + 32B shadow / SysV 6 reg + 无 shadow)。
     target_tag:   i32,
+
+    // v2.11.2 (W-074.6 T3-a): global max temp id seen across whole module。
+    // Per-function pre-scan table 留 v2.11.3;v2.11.2 用 global-max fallback
+    // (every function uses same frame size,浪费 stack 但 correctness 闭环)。
+    frame_max_temp: i64,
+
+    // v2.11.3 (W-074.7 T4-c SCOPE DOWN):defensive fields 保留以备 v2.11.4 真修。
+    // emit_func_header 末尾 cg_state_set_fn_header 调用已移除 — 字段不再写。
+    // 当前 emit_copy FN_ARG 路径仍 hardcode arg-1 = %rcx (Win) / %edi (SysV),
+    // 跟 v2.11.2 baseline 行为一致。v2.11.4 真修需要 lexer 把 fn args dup 到
+    // arena (currently lexer 只 dup name 不 dup args per codegen_amd64_lexer.jhyy
+    // next_token_func_header),然后 emit_func_header 把 args 喂 cg_find_arg_idx。
+    cur_fn_header_text: *u8,
+    cur_fn_header_len:  i64,
+    cur_fn_arg_count:   i64,   // 当前 function 的 arg 数量;emit_func_header 写
+
+    // v2.11.3 (W-074.7 T4-h 真修):per-module fn 序号,emit_jnz + emit_jmp +
+    // emit_label 在 `.L<name>` 后 append `_fn<N>` 后缀,避开 big_test 等多 fn 共享
+    // `@then1` / `@loop_body` 静默 label 重定义 → wrong jumps。0-based,
+    // cg_state_init init to 0,cg_state_bump_fn_idx 在 emit_func_header 末尾
+    // 调 — reset_for_function **不** reset (跨 fn 累加保证唯一)。
+    cur_fn_idx: i64,
+
+    // v2.11.5 (W-074.7 alloc-tracking 真修):per-fn temp id → stack slot map。
+    // emit_alloc 调 cg_record_temp_slot 写入,cg_offset_for_temp[t] 查询。
+    // 修 nested_struct_deep / struct_val_pass pre-existing bug — alloc'd %tN
+    // 之前走 formula `-(32 + t*8)` 跟 alloc 真分配的 slot 不一致 → read garbage。
+    // 256 entries × 8 bytes = 2KB per compile,negligible。arena alloc + memset 0
+    // 在 cg_state_init。reset_for_function 把 slot 数组 zero (per-fn 隔离)。
+    // MAX_TEMP_SLOTS=256 留 5x safety margin over regress max (nested_struct_deep 51)。
+    temp_slot_for_id: *u8,
+
+    // v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN):per-fn block-name
+    // uniquify table。emit_label 在 `.L<name>_fn<N>` 后 append `_b<count>` suffix,
+    // emit_jmp/jnz 用相同 lookup 保证 target 跟 def byte-equal。修 big_test 嵌套
+    // loop 共享 `@loop_body` / `@loop_end` 等 label 静默重定义 → GAS link error。
+    // 256 entries × 32 bytes = 8KB per compile,negligible。arena alloc + memset 0
+    // 在 cg_state_init。reset_for_function 把 table zero (per-fn 隔离,同 fn 内
+    // 多次同名 label 才 uniquify;跨 fn label 由 _fn<N> suffix 区分)。
+    block_name_uniq: *u8,
+
+    // v2.11.8 (W-074.7.8 derived-address tracking 真修 — FULL scope):bitmap 标
+    // 任何 temp holding derived address (alloc-result, binop add/sub pointer-arith
+    // 结果, copy of address-holder)。emit_load/store/loadsub 看 flag 决定 indirect
+    // (mov<size> (%r8), %reg) vs slot (mov<size> -<off>(%rbp), %reg)。
+    // 256 entries × 1 byte = 256 bytes per compile, negligible。emit_alloc /
+    // emit_binop / emit_copy 写 flag; reset_for_function per-fn zero。
+    // v2.11.7 attempt (commit reverted 11a7666) flag-named `temp_is_alloc_pointer`
+    // 跟当前 `temp_holds_address` 是不同概念: 前者只 flag alloc-result (1 种
+    // address-holder), 后者 flag 任何 derived address (真根因 = `add ptr, off`
+    // 产生的 runtime address, 不只 alloc-result)。
+    temp_holds_address: *u8,
+
+    // v2.11.10 (W-074.6 T3-a closure):per-fn pre-scan table,替换 v2.11.2 global-max
+    // frame variant。Two arena-alloc'd i64 arrays, each MAX_FN_ENTRIES (256) × 8 bytes
+    // = 2KB (4KB total negligible)。cg_compute_per_fn_max_temps (Phase A) 一次
+    // pre-scan 写: Phase 1 扫 fn_starts,Phase 2 per-fn max temp id → per_fn_max。
+    // emit_func_header 读 per_fn_max[cur_fn_idx] 算 frame_size,每个 fn 独立 frame
+    // (递归 fn fact/fib/gcd 只用 5-10 temps → frame_size = 88 字节 vs 老 15488,
+    // 修复递归函数 SIGSEGV,big_test 自-backend 跑通)。
+    // 256 entries 够 ~60 fns (big_test),future-proof 加 safety check fn_count < 256。
+    fn_starts: *u8,    // i64[256]: 每个 fn start token idx;fn_starts[fn_count]=n 哨兵
+    per_fn_max: *u8,   // i64[256]: 每个 fn 的 max temp id;frame_size = (max+1)*8
+    fn_count: i64,     // 实际 fn 数 (0 = 没跑 pre-scan → fall through global-max)
+
+    // v2.11.15 Iter 2 (C.3 emit_phi 真修): pending phi resolution table。
+    //   emit_phi 解析 `phi @armA %tN, @armB %tM` (target merge block 在 phi IL
+    //   的下一行),把每个 (dst_slot, arm_label_text, arm_label_len, tN_id)
+    //   append 到此 table。emit_jmp 在 emit `jmp` 之前扫描 table:若 current
+    //   block name 跟某 entry 的 arm_label match,emit `mov -tN_off(%rbp), %rax;
+    //   mov %rax, -dst_slot(%rbp)` (per L4 § 3.5 E6)。
+    //   reset_for_function 在 fn 切换时清零(per-fn 隔离)。
+    //   MAX_PHI_ENTRIES=128 够 ~10 个 phi × ~10 arms(3-12 arms 通常)。
+    pending_phi_dsts: *u8,           // i64[128]: dst slot offset
+    pending_phi_tN: *u8,             // i64[128]: %tN id (in source arm)
+    pending_phi_arm_label_ptrs: *u8, // *u8[128]: pointer to arm label text (arena_alloc'd)
+    pending_phi_arm_label_lens: *u8, // i64[128]: arm label text len
+    pending_phi_count: i64,          // 当前 pending entries
+
+    // v2.11.15 Iter 2 (C.3 emit_phi 真修): current block name (the @label of
+    //   the block we're currently emitting into)。emit_label 在 emit `.L<text>:`
+    //   后把 text + len 写到这两个字段;emit_jmp 用它来 match pending_phi entries。
+    //   text 在 arena alloc'd(per fn,reset_for_function 不需要清零因为 emit_label
+    //   每次都覆盖)。
+    cur_block_name: *u8,
+    cur_block_name_len: i64,
+
+    // v2.13.0 (Phase 1 真 XMM regalloc): per-call arg allocation counters。
+    //   emit_amd64_arg_regs 入口调 xmm_arg_reset 把两个 count 清零;每个 arg:
+    //     - f32/f64 → xmm_arg_alloc → 返 xmm reg idx (0-7 SysV / 0-3 Win)
+    //       或 -1 (XMM pool 满,caller 走 stack-arg fallback)
+    //     - int    → int_arg_alloc → 返 GPR reg idx (0-5 SysV / 0-3 Win)
+    //       或 -1 (GPR pool 满,同样 stack-arg)
+    //   替换 v2.11.15 的 hard-coded `sse_xmm_reg_for_arg_idx(ri)` 静态 mapping
+    //   (原 ri < 6 SysV XMM pool 是 bug — 实际 SysV 是 8 个 XMM arg reg)。
+    //   stack-arg 计数也跟踪 — stack_arg_offset 每次 +8 (Win) / +16 (SysV 含
+    //   16-byte align for f64) 递增。
+    xmm_arg_count:    i32,  // 当前 call 已用 XMM arg reg 数 (per-call reset)
+    int_arg_count:    i32,  // 当前 call 已用 int arg reg 数
+    stack_arg_offset: i64,  // 当前 call 已用 stack-arg 字节偏移 (8 字节对齐)
+}
+
+// v2.11.5 (W-074.7 alloc-tracking 真修): extern bridge 装当前 CGState 的
+// temp_slot_for_id 指针 (跟 regalloc jh_regalloc_get/set 同 pattern)。C-side
+// static BSS-zero init; jhyy-side let mut module-level 会触发 stage0 segfault
+// per codegen_amd64_regalloc.jhyy:76-87 注释。
+extern fn jh_cgstate_get_temp_slots() -> *u8;
+extern fn jh_cgstate_set_temp_slots(p: *u8) -> i32;
+
+// v2.11.8 (W-074.7.8 derived-address tracking 真修): same pattern for
+// temp_holds_address bitmap。query 走 (*s).temp_holds_address 直接读 (hot path),
+// setter 是 forward-ref-safe no-op (跟 jh_cgstate_set_temp_slots 同 pattern)。
+extern fn jh_cgstate_get_holds_address() -> *u8;
+extern fn jh_cgstate_set_holds_address(p: *u8) -> i32;
+// v2.11.8: byte-level access into 256-entry u8 bitmap (jhyy 没有 u8 direct deref)。
+extern fn jh_cgstate_set_holds_flag(bitmap: *u8, idx: i64) -> i32;
+extern fn jh_cgstate_get_holds_flag(bitmap: *u8, idx: i64) -> i32;
+
+// MAX_TEMP_SLOTS — alloc-tracking 数组大小。256 = 5x regress max (51) safety
+// margin。Out-of-bounds temp_id 走 formula fallback (graceful degradation)。
+fn cg_max_temp_slots() -> i64 {
+    return 256 as i64;
+}
+
+// cg_state_set_temp_slots — v2.11.5 setter,CGState 装 temp_slot_for_id 时调,
+// 让 cg_offset_for_temp 无 state 参数也能查到当前 CGState 的 alloc 表。
+fn cg_state_set_temp_slots(state: *u8) -> i32 {
+    let s = state as *CGState;
+    let _ = jh_cgstate_set_temp_slots((*s).temp_slot_for_id);
+    return 0 as i32;
+}
+
+// cg_record_temp_slot — v2.11.5 setter,emit_alloc 调,把 alloc'd %tN 的 stack
+// offset 写入当前 CGState 的 alloc-tracking 表。后续 cg_offset_for_temp[t]
+// 查询时返回 recorded offset (跟 cg_alloc_slot 返回的一致)。
+// bounds check: t < MAX_TEMP_SLOTS, 否则 no-op (formula fallback 仍走)。
+fn cg_record_temp_slot(state: *u8, temp_id: i64, slot: i64) -> i32 {
+    if temp_id < (0 as i64) || temp_id >= cg_max_temp_slots() {
+        return 0 as i32;
+    }
+    let s = state as *CGState;
+    if (*s).temp_slot_for_id == (0 as *u8) {
+        return 0 as i32;
+    }
+    let p = ptr_add_u8((*s).temp_slot_for_id, temp_id * (8 as i64)) as *i64;
+    *p = slot;
+    return 0 as i32;
+}
+
+// MAX_TEMP_HOLDS_ADDR — derived-address bitmap 大小。跟 MAX_TEMP_SLOTS 同 256
+// (parallel bitmap, same temp_id range)。256 = 5x regress max safety margin。
+fn cg_max_temp_holds_address() -> i64 {
+    return 256 as i64;
+}
+
+// cg_state_set_holds_address — v2.11.8 setter,CGState 装 temp_holds_address 时
+// 调,跟 cg_state_set_temp_slots 同 pattern (forward-ref-safe no-op)。
+fn cg_state_set_holds_address(state: *u8) -> i32 {
+    let s = state as *CGState;
+    let _ = jh_cgstate_set_holds_address((*s).temp_holds_address);
+    return 0 as i32;
+}
+
+// cg_record_temp_holds_address — v2.11.8 setter,flag temp_id 是 address-holder
+// (持有 derived address, 不是 VALUE)。emit_alloc / emit_binop (add/sub) / emit_copy
+// 调。bounds check: t < 256, 否则 no-op。
+fn cg_record_temp_holds_address(state: *u8, temp_id: i64) -> i32 {
+    if temp_id < (0 as i64) || temp_id >= cg_max_temp_holds_address() {
+        return 0 as i32;
+    }
+    let s = state as *CGState;
+    if (*s).temp_holds_address == (0 as *u8) {
+        return 0 as i32;
+    }
+    let _r = jh_cgstate_set_holds_flag((*s).temp_holds_address, temp_id);
+    return 0 as i32;
+}
+
+// cg_is_address_holder — v2.11.8 query,emit_load/store/loadsub 调决定 indirect
+// vs slot dispatch。1 = address-holder, 0 = value-temp (default; out-of-bounds 也 0)。
+fn cg_is_address_holder(state: *u8, temp_id: i64) -> i32 {
+    if temp_id < (0 as i64) || temp_id >= cg_max_temp_holds_address() {
+        return 0 as i32;
+    }
+    let s = state as *CGState;
+    if (*s).temp_holds_address == (0 as *u8) {
+        return 0 as i32;
+    }
+    let r = jh_cgstate_get_holds_flag((*s).temp_holds_address, temp_id);
+    return r;
 }
 
 // CGState 初始化 helper
@@ -132,21 +345,242 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     // v2.7.0 Phase 2a: target_tag 默认 0 (Win); Phase 2b 改 cg_state_init 签名 +
     // codegen_amd64_run 传 target_tag (target 来自 main.jhyy run_backend 的 `t` 参数)。
     (*s).target_tag = 0 as i32;
+    // v2.11.2 (W-074.6 T3-a): frame_max_temp init to -1 (no temps seen yet)
+    (*s).frame_max_temp = -(1 as i64);
+    // v2.11.3 (W-074.7 T4-h 真修): cur_fn_idx 必须 init 为 0 — 不 init 会读到
+    // arena 上残留字节 (e.g. "main.jhyy.exe\0" → 0x65002e00650063 ≈ 28429170222891107),
+    // emit_jnz/emit_label 拼出 ".L<name>_fn28429170222891107" → GAS linker 不识别
+    // 巨大 label offset → fib_renamed/big_test link 失败 (regression vs v2.11.2)。
+    (*s).cur_fn_idx = 0 as i64;
+    // v2.13.0 Phase 1: per-call arg allocation counters init。
+    // emit_amd64_arg_regs 入口 xmm_arg_reset 会重置(per-call),这里是 init。
+    (*s).xmm_arg_count    = 0 as i32;
+    (*s).int_arg_count    = 0 as i32;
+    (*s).stack_arg_offset = 0 as i64;
+    // v2.11.5 (W-074.7 alloc-tracking 真修):alloc 256-entry i64 数组 (2KB) zero-init。
+    // emit_alloc 调 cg_record_temp_slot 写 slot,reset_for_function 把数组 zero
+    // (per-fn 隔离)。MAX_TEMP_SLOTS = 256 (5x regress max 51 safety margin)。
+    // 然后 wire C-side static 让 cg_offset_for_temp 无 state 参数也能查到。
+    let slots_bytes = (256 as i64) * (8 as i64);
+    let slots_ptr = arena_alloc(arena, slots_bytes);
+    let _zero = memset(slots_ptr, 0 as i32, slots_bytes);
+    (*s).temp_slot_for_id = slots_ptr;
+    // v2.11.5 helper wire C-side static (forward ref-safe helper call):
+    let _wr = cg_state_set_temp_slots(state);
+    // v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN):alloc block-name
+    // uniquify table 256-entry (8KB) zero-init。emit_label 在每 fn 头调
+    // cg_record_block_name 写 entry;emit_jmp/emit_jnz 调 cg_lookup_block_name
+    // 拿 suffix。reset_for_function 把 table zero (per-fn 隔离,跟 alloc-tracking
+    // 同 pattern)。
+    // 注:cannot call cg_max_block_names (defined later) → inline literal 256。
+    let bnu_bytes = (256 as i64) * (32 as i64);
+    let bnu_ptr = arena_alloc(arena, bnu_bytes);
+    let _zero_bnu = memset(bnu_ptr, 0 as i32, bnu_bytes);
+    (*s).block_name_uniq = bnu_ptr;
+    // v2.11.8 (W-074.7.8 derived-address tracking 真修):alloc temp_holds_address
+    // 256-entry u8 bitmap (256 bytes) zero-init。emit_alloc / emit_binop (add/sub
+    // on address-holder src1) / emit_copy (TEMP→TEMP of address-holder) 写 flag;
+    // emit_load/store/loadsub 读 flag 决定 indirect (mov<size> (%r8), %reg) vs
+    // slot (mov<size> -<off>(%rbp), %reg)。reset_for_function per-fn zero。
+    // 256 entries × 1 byte = 256 bytes per compile, negligible in arena。
+    let ha_bytes = 256 as i64;
+    let ha_ptr = arena_alloc(arena, ha_bytes);
+    let _zero_ha = memset(ha_ptr, 0 as i32, ha_bytes);
+    (*s).temp_holds_address = ha_ptr;
+    // wire C-side static (跟 cg_state_set_temp_slots 同 pattern; setter 是
+    // forward-ref-safe no-op, query 走 (*s).temp_holds_address 直接读)
+    let _wr_ha = cg_state_set_holds_address(state);
+    // v2.11.10 (W-074.6 T3-a closure):alloc per-fn pre-scan table。
+    // fn_starts[256] i64 (2KB) + per_fn_max[256] i64 (2KB) = 4KB total zero-init。
+    // cg_compute_per_fn_max_temps (Phase A) 一次 pre-scan 填,emit_func_header 读
+    // per_fn_max[cur_fn_idx] 算 frame_size (替换 v2.11.2 global frame_max_temp
+    // → 跨 fn 共用 15488 字节 → 递归函数 SIGSEGV)。
+    let fns_bytes = (256 as i64) * (8 as i64);
+    let fns_ptr = arena_alloc(arena, fns_bytes);
+    let _zero_fns = memset(fns_ptr, 0 as i32, fns_bytes);
+    (*s).fn_starts = fns_ptr;
+    let pfm_bytes = (256 as i64) * (8 as i64);
+    let pfm_ptr = arena_alloc(arena, pfm_bytes);
+    let _zero_pfm = memset(pfm_ptr, 0 as i32, pfm_bytes);
+    (*s).per_fn_max = pfm_ptr;
+    (*s).fn_count = 0 as i64;
+    // v2.11.15 Iter 2 (C.3 emit_phi 真修):alloc pending phi resolution table。
+    //   4 parallel i64 arrays × 128 entries × 8 bytes = 4KB total negligible。
+    //   emit_phi append entries;emit_jmp scan entries for current arm;reset_for_function
+    //   zero all 4 arrays per-fn(per-fn isolation)。
+    let phi_dsts_bytes = (128 as i64) * (8 as i64);
+    let phi_dsts_ptr = arena_alloc(arena, phi_dsts_bytes);
+    let _zero_pd = memset(phi_dsts_ptr, 0 as i32, phi_dsts_bytes);
+    (*s).pending_phi_dsts = phi_dsts_ptr;
+    let phi_tn_bytes = (128 as i64) * (8 as i64);
+    let phi_tn_ptr = arena_alloc(arena, phi_tn_bytes);
+    let _zero_pt = memset(phi_tn_ptr, 0 as i32, phi_tn_bytes);
+    (*s).pending_phi_tN = phi_tn_ptr;
+    let phi_ap_bytes = (128 as i64) * (8 as i64);
+    let phi_ap_ptr = arena_alloc(arena, phi_ap_bytes);
+    let _zero_pap = memset(phi_ap_ptr, 0 as i32, phi_ap_bytes);
+    (*s).pending_phi_arm_label_ptrs = phi_ap_ptr;
+    let phi_al_bytes = (128 as i64) * (8 as i64);
+    let phi_al_ptr = arena_alloc(arena, phi_al_bytes);
+    let _zero_pal = memset(phi_al_ptr, 0 as i32, phi_al_bytes);
+    (*s).pending_phi_arm_label_lens = phi_al_ptr;
+    (*s).pending_phi_count = 0 as i64;
+    (*s).cur_block_name = 0 as *u8;
+    (*s).cur_block_name_len = 0 as i64;
     return 0;
 }
 
 // CGState 重置(per function prologue)
 // V2-B v2.6.0 (Unit B Stub-Fill): real impl — reset per-function fields.
 // v2.7.0 Phase 2a: 保留 target_tag(per-compile,跨 function 共享)
+// v2.11.2 (W-074.6 T3-a): 由 emit_func_header 调(per plan agent §5,关闭
+//   emit_func_header:361-363 TODO "cur_fn_name 由 caller 负责")。
 fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
     let s = state as *CGState;
     (*s).next_offset = 0 as i64;
     (*s).total_alloc = 0 as i64;
     (*s).cur_fn_name = fn_name;
     (*s).nparams = 0 as i64;
+    (*s).cur_call_text = 0 as *u8;
+    (*s).cur_call_text_len = 0 as i64;
+    // v2.11.3 (W-074.7 T4-c 真修):reset FN_ARG scan context。emit_func_header
+    // 末尾调 cg_state_set_fn_header 覆盖这两个;此处只是 init defensive 0。
+    (*s).cur_fn_header_text = 0 as *u8;
+    (*s).cur_fn_header_len  = 0 as i64;
+    (*s).cur_fn_arg_count   = 0 as i64;
+    // v2.13.0 Phase 1: per-call arg allocation counters init。
+    // emit_amd64_arg_regs 入口还会重置一次(per-call),这里是 defensive 0。
+    (*s).xmm_arg_count    = 0 as i32;
+    (*s).int_arg_count    = 0 as i32;
+    (*s).stack_arg_offset = 0 as i64;
+    // v2.11.5 (W-074.7 alloc-tracking 真修):zero temp_slot_for_id 数组 per-fn。
+    // 每个 fn 的 alloc slot 独立 — fn A 的 t17 != fn B 的 t17。重新 memset 0
+    // 让 cg_offset_for_temp 在新 fn fall through formula fallback (recorded=0)
+    // 直到 emit_alloc 重新写。
+    if (*s).temp_slot_for_id != (0 as *u8) {
+        let slots_bytes2 = (256 as i64) * (8 as i64);
+        let _zr = memset((*s).temp_slot_for_id, 0 as i32, slots_bytes2);
+    }
+    // v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN):zero block-name
+    // uniquify table per-fn。同 alloc-tracking 逻辑,per-fn 隔离。
+    if (*s).block_name_uniq != (0 as *u8) {
+        let bnu_bytes2 = (256 as i64) * (32 as i64);
+        let _zr_bnu = memset((*s).block_name_uniq, 0 as i32, bnu_bytes2);
+    }
+    // v2.11.8 (W-074.7.8 derived-address tracking 真修):zero temp_holds_address
+    // bitmap per-fn。fn A 的 t17 是 alloc-result address-holder, fn B 的 t17
+    // 可能是 value-temp — 跨 fn flag 不 inherit。memset 0 让 emit_load/store/loadsub
+    // 在新 fn 头 fall through default slot path,直到 emit_alloc / emit_binop / emit_copy
+    // 重新写 flag。
+    if (*s).temp_holds_address != (0 as *u8) {
+        let ha_bytes2 = 256 as i64;
+        let _zr_ha = memset((*s).temp_holds_address, 0 as i32, ha_bytes2);
+    }
+    // cur_fn_idx NOT reset — it grows across functions within a module
+    // (per-module accumulator, inited to 0 in cg_state_init)。reset 让它归 0 会让
+    // 每 fn 都从 _fn0 开始,反而破坏 T4-h 的跨 fn 唯一性设计 (fn 0 跟 fn 1 都
+    // emit ".Lthen1_fn0" → GAS 仍报 label 重定义)。
+    // cur_fn_idx 由 emit_func_header 末尾 bump (per-function 序号跨 module 累加)
+    // frame_max_temp 不重置 — global max across module(per v2.11.2 fallback)
     // target_tag 不重置 — per-compile constant
+    // v2.11.15 Iter 2 (C.3 emit_phi 真修): zero pending phi resolution tables per-fn。
+    //   per-fn 隔离 — fn A 的 phi `@arm2 %t4` 跟 fn B 的 phi `@arm2 %t4` 是不同的。
+    //   4 parallel i64 arrays × 128 entries × 8 bytes memset 0。
+    if (*s).pending_phi_dsts != (0 as *u8) {
+        let pd_bytes = (128 as i64) * (8 as i64);
+        let _zr_pd = memset((*s).pending_phi_dsts, 0 as i32, pd_bytes);
+    }
+    if (*s).pending_phi_tN != (0 as *u8) {
+        let pt_bytes = (128 as i64) * (8 as i64);
+        let _zr_pt = memset((*s).pending_phi_tN, 0 as i32, pt_bytes);
+    }
+    if (*s).pending_phi_arm_label_ptrs != (0 as *u8) {
+        let pap_bytes = (128 as i64) * (8 as i64);
+        let _zr_pap = memset((*s).pending_phi_arm_label_ptrs, 0 as i32, pap_bytes);
+    }
+    if (*s).pending_phi_arm_label_lens != (0 as *u8) {
+        let pal_bytes = (128 as i64) * (8 as i64);
+        let _zr_pal = memset((*s).pending_phi_arm_label_lens, 0 as i32, pal_bytes);
+    }
+    (*s).pending_phi_count = 0 as i64;
+    // cur_block_name NOT reset (emit_label 每次 emit 时覆盖,defer 到 emit_label call)
     return 0;
 }
+
+// ════════════════════════════════════════════════════
+// v2.11.15 Iter 2 (C.3 emit_phi 真修): phi resolution + cur_block_name helpers
+// ════════════════════════════════════════════════════
+
+// MAX_PHI_ENTRIES — pending phi table size。128 = ~12 phis × 10 arms avg safety。
+// Out-of-bounds → no-op append (silently lose phi resolution;merge slot 保留
+// stale 值,但不会 panic / crash — 退化但不恶化)。
+fn cg_max_phi_entries() -> i64 {
+    return 128 as i64;
+}
+
+// cg_state_set_cur_block_name — emit_label 调,把当前 block 名称写入 CGState。
+// arena_alloc 字符串(per-fn 不需要清零,因为 emit_label 每次都覆盖 cur_block_name
+// 指针)。
+fn cg_state_set_cur_block_name(state: *u8, name: *u8, name_len: i64) -> i32 {
+    if state == (0 as *u8) || name == (0 as *u8) || name_len <= (0 as i64) {
+        return 0 as i32;
+    }
+    let s = state as *CGState;
+    let arena = (*s).arena;
+    let buf = arena_alloc(arena, name_len + (1 as i64));
+    let mut i: i64 = 0 as i64;
+    while i < name_len {
+        let bp = ptr_add_u8(buf, i);
+        let sp = ptr_add_u8(name, i);
+        *bp = *sp;
+        i = i + (1 as i64);
+    }
+    let np = ptr_add_u8(buf, name_len);
+    *np = 0 as u8;
+    (*s).cur_block_name = buf;
+    (*s).cur_block_name_len = name_len;
+    return 0 as i32;
+}
+
+// cg_append_phi_entry — emit_phi 调,把 (dst_slot, arm_label_text, arm_label_len,
+// tN_id) append 到 pending phi table。bounds check: count < MAX_PHI_ENTRIES。
+fn cg_append_phi_entry(state: *u8, dst_slot: i64, arm_text: *u8, arm_len: i64, tN_id: i64) -> i32 {
+    let s = state as *CGState;
+    let cnt = (*s).pending_phi_count;
+    if cnt >= cg_max_phi_entries() {
+        return 0 as i32;
+    }
+    // store dst_slot
+    let pd = ptr_add_u8((*s).pending_phi_dsts, cnt * (8 as i64)) as *i64;
+    *pd = dst_slot;
+    // store tN
+    let pt = ptr_add_u8((*s).pending_phi_tN, cnt * (8 as i64)) as *i64;
+    *pt = tN_id;
+    // store arm label text (arena_alloc copy)
+    let arena = (*s).arena;
+    let buf = arena_alloc(arena, arm_len + (1 as i64));
+    let mut i: i64 = 0 as i64;
+    while i < arm_len {
+        let bp = ptr_add_u8(buf, i);
+        let sp = ptr_add_u8(arm_text, i);
+        *bp = *sp;
+        i = i + (1 as i64);
+    }
+    let np = ptr_add_u8(buf, arm_len);
+    *np = 0 as u8;
+    let pap = ptr_add_u8((*s).pending_phi_arm_label_ptrs, cnt * (8 as i64)) as *i64;
+    *pap = buf as i64;
+    let pal = ptr_add_u8((*s).pending_phi_arm_label_lens, cnt * (8 as i64)) as *i64;
+    *pal = arm_len;
+    (*s).pending_phi_count = cnt + (1 as i64);
+    return 0 as i32;
+}
+
+// cg_scan_pending_phi_for_arm — emit_jmp 调,scan pending_phi_* table for entry
+// whose arm_label matches cur_block_name。Returns matched count (0 if no match,
+// 1+ if multiple phis reference same arm — multi-phi-into-same-merge case)。
+// For each match, emits `mov<size> -arm_tN_off(%rbp), %rax; mov<size> %rax, -dst_off(%rbp)`。
+// Note: defined AFTER cg_streq_n (line ~907) due to jhyy no forward ref。
 
 // cg_state_set_target — v2.7.0 Phase 2a setter
 //
@@ -156,6 +590,17 @@ fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
 fn cg_state_set_target(state: *u8, target_tag: i32) -> i32 {
     let s = state as *CGState;
     (*s).target_tag = target_tag;
+    return 0;
+}
+
+// cg_state_set_frame_max_temp — v2.11.2 (T3-a) setter
+//
+// 显式 setter 给 codegen_amd64_run 在 cg_compute_global_max_temp 后调,
+// 把 module-global max temp id 写进 state.frame_max_temp。
+// emit_func_header 在 prologue 读 frame_max_temp 算 subq $N, %rsp 字节数。
+fn cg_state_set_frame_max_temp(state: *u8, frame_max_temp: i64) -> i32 {
+    let s = state as *CGState;
+    (*s).frame_max_temp = frame_max_temp;
     return 0;
 }
 
@@ -185,9 +630,24 @@ fn target_is_win(target_tag: i32) -> i32 {
 // 注:Unit C 只交付 regalloc 模块本身;Unit E wire 时 codegen_amd64_run 会调
 // regalloc_run 一次,然后 cg_offset_for_temp 才会返回非零值。当前 main.jhyy
 // 不 import codegen_amd64,所以 emit_mem.jhyy 的 cg_offset_for_temp 永远走 fallback。
+//
+// v2.11.5 (W-074.7 alloc-tracking 真修):先查 alloc-tracking 表(emit_alloc
+// 写入),recorded != 0 → 返回 recorded (跟 alloc 真分配的 slot 一致);
+// recorded == 0 → fall through regalloc / formula。
+// 这修 nested_struct_deep + struct_val_pass pre-existing bug: alloc'd %tN 之前
+// 走 formula `-(32 + t*8)` 跟 alloc 真分配的 slot 不一致 → read garbage。
 fn cg_offset_for_temp(t: i64) -> i64 {
     if t < (0 as i64) {
         return 0 as i64;
+    }
+    // v2.11.5 alloc-tracking:查询 alloc_slot 表 (per-fn CGState.temp_slot_for_id)。
+    let slots = jh_cgstate_get_temp_slots();
+    if slots != (0 as *u8) && t < cg_max_temp_slots() {
+        let p = ptr_add_u8(slots, t * (8 as i64)) as *i64;
+        let recorded = *p;
+        if recorded != (0 as i64) {
+            return recorded;
+        }
     }
     // 委托 regalloc query(per Unit C 集成契约)
     let spill_off = regalloc_query_spill_off_no_arr(t);
@@ -215,6 +675,15 @@ fn cg_offset_for_temp_with_target(t: i64, target_tag: i32) -> i64 {
     if t < (0 as i64) {
         return 0 as i64;
     }
+    // v2.11.5 alloc-tracking:同 cg_offset_for_temp 路径,target_tag 只影响 formula。
+    let slots2 = jh_cgstate_get_temp_slots();
+    if slots2 != (0 as *u8) && t < cg_max_temp_slots() {
+        let p2 = ptr_add_u8(slots2, t * (8 as i64)) as *i64;
+        let recorded2 = *p2;
+        if recorded2 != (0 as i64) {
+            return recorded2;
+        }
+    }
     let spill_off = regalloc_query_spill_off_no_arr(t);
     if spill_off != (0 as i64) {
         return spill_off;
@@ -222,21 +691,365 @@ fn cg_offset_for_temp_with_target(t: i64, target_tag: i32) -> i64 {
     if target_is_win(target_tag) == (1 as i32) {
         return (0 as i64) - (32 as i64) - t * (8 as i64);
     }
-    // SysV: no shadow
     return (0 as i64) - t * (8 as i64);
 }
 
 // alloc_slot(size: i64) -> i64
 // 输入:allocN size,返回对齐后的 slot offset(负方向,栈向下增长)
 // V2-B v2.6.0 (Unit B Stub-Fill): real impl — align-up + advance offset.
+//
+// v2.11.23 Phase 2 (W-074.13 sub-bug 1+4 真修 — alloc pool 从 formula pool 物理分离):
+// alloc pool 起始 offset = -8192 (公式 `-(32+t*8)` 在 t=255 = -2072), 留 8192-2072 = 6120 字节
+// gap 给 formula pool + 任何后续 alloc 不 collision。alloc pool 自身 advance 8 字节/8B slot
+// 或 aligned(alloc_size)。 Worst case:per-fn alloc ~50KB → -8192 - 50KB = -58800, 远在
+// 32KB MSYS2 mingw 栈范围(2MB default)内,no overflow risk。
 fn cg_alloc_slot(state: *u8, size: i64) -> i64 {
     // align-up to 8-byte boundary: (size + 7) & ~7
     let aligned = (size + (7 as i64)) & ((0 as i64) - (8 as i64));
     let s = state as *CGState;
+    // v2.11.23 Phase 2:alloc pool 起始 offset — formula pool 占用 [rbp-2072, rbp-32],
+    // alloc pool 必须从 rbp-8192 起向下增长 才不 collision
+    if (*s).next_offset == (0 as i64) {
+        (*s).next_offset = (0 as i64) - (8192 as i64);
+    }
     let off = (*s).next_offset - aligned;
     (*s).next_offset = off;
     (*s).total_alloc = (*s).total_alloc + aligned;
     return off;
+}
+
+// ════════════════════════════════════════════════════
+// v2.11.2 (W-074.6 T1-a): shared parse helpers for emit functions
+// ════════════════════════════════════════════════════
+//
+// After W-074.5 (v2.11.1) 真修 + W-074.6 T1-a 真修,ILToken 的 text/text_len 字段
+// 装整条 QBE IL 指令原文(per _emit_mem.jhyy:25-40 documented contract)。emit_*
+// 函数需要 scanner 在 tok.text 内 parse operands (temp ids / labels / int literals)。
+//
+// emit_mem 自带 mem_* 私有 scanner (mem_parse_temp / mem_parse_int_from 等);
+// v2.11.2 把这些 scanner lift 到 state 模块,emit_ctrl + emit_call 复用。
+//
+// emit_mem 保留自己的 mem_* 副本 — dedupe 留后续 sprint 清理。
+
+// cg_byte_at(s: *u8, i: i64) -> i32 — 取 s[i] 字节值 as i32 (供 is_digit / scan 用)
+fn cg_byte_at(s: *u8, i: i64) -> i32 {
+    let p = ptr_add_u8(s, i);
+    let c = *p;
+    return c as i32;
+}
+
+// v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN): block-name uniquify
+// table entry。每 entry = (name_hash, name_len, count)。name_hash + name_len
+// 用于 name 比对(避免 hash collision 错配)。放在 cg_byte_at 之后因为 record/lookup
+// helpers 调 cg_byte_at 取 hash,jhyy 不支持 forward ref。
+type BlockNameEntry = struct {
+    name_hash: i64,    // name 字符串 hash (sum * 31 + byte, 简化 FNV-like)
+    name_len:  i64,    // name 字符串长度
+    count:     i64,    // next suffix to emit (0 = first def → _b0, 1 = second → _b1, ...)
+}
+
+// MAX_BLOCK_NAMES — block-name uniquify table 大小。256 = 4x big_test 实测 (~60 unique
+// block names) safety margin。Out-of-bounds → linear search 跳过;emit_label 在
+// table full 时 fall through 默认 `_b<count>` (preserves baseline behavior, 退化
+// 静默重复但 link error 仍 report — 安全 net)。
+fn cg_max_block_names() -> i64 {
+    return 256 as i64;
+}
+
+// cg_record_block_name — v2.11.6 setter,emit_label 调,记录该 block name 在
+// 当前 fn 的 def 序号 (返回 next suffix to emit)。第一次 def → 0,第二次 → 1, etc。
+// Linear search 256-entry table;未找到空 slot → return -1 (emit_label fallback
+// 用 `_b<0>`,preserves v2.11.5 behavior,table full 时 link error 仍会出)。
+fn cg_record_block_name(state: *u8, name: *u8, name_len: i64) -> i64 {
+    if state == (0 as *u8) || name == (0 as *u8) || name_len <= (0 as i64) {
+        return -(1 as i64);
+    }
+    let s = state as *CGState;
+    if (*s).block_name_uniq == (0 as *u8) {
+        return -(1 as i64);
+    }
+    // hash name (FNV-like: h = h * 31 + byte)
+    let mut h: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < name_len {
+        let c = cg_byte_at(name, i) as i64;
+        h = h * (31 as i64) + c;
+        i = i + (1 as i64);
+    }
+    // linear search existing entry
+    let table = (*s).block_name_uniq;
+    let max_n = cg_max_block_names();
+    let mut j: i64 = 0 as i64;
+    while j < max_n {
+        let e = ptr_add_u8(table, j * (32 as i64)) as *BlockNameEntry;
+        if (*e).name_hash == h && (*e).name_len == name_len {
+            // found: increment + return next count
+            (*e).count = (*e).count + (1 as i64);
+            return (*e).count;
+        }
+        j = j + (1 as i64);
+    }
+    // not found: find empty slot (name_hash == 0 → empty)
+    let mut k: i64 = 0 as i64;
+    while k < max_n {
+        let e = ptr_add_u8(table, k * (32 as i64)) as *BlockNameEntry;
+        if (*e).name_hash == (0 as i64) {
+            (*e).name_hash = h;
+            (*e).name_len = name_len;
+            (*e).count = 0 as i64;
+            return 0 as i64;
+        }
+        k = k + (1 as i64);
+    }
+    // table full
+    return -(1 as i64);
+}
+
+// cg_lookup_block_name — v2.11.6 lookup,emit_jmp/emit_jnz 调,返回该 block name
+// 在当前 fn 的 "last assigned suffix"。Loop back-edge (jmp 在 def 后) 命中;
+// forward edge (jmp 在 def 前) miss → return 0 default _b0 (assumes first def,
+// 对 nested loops 大多正确;后续 false 跳转留 v2.11.7+ 真修)。
+fn cg_lookup_block_name(state: *u8, name: *u8, name_len: i64) -> i64 {
+    if state == (0 as *u8) || name == (0 as *u8) || name_len <= (0 as i64) {
+        return 0 as i64;
+    }
+    let s = state as *CGState;
+    if (*s).block_name_uniq == (0 as *u8) {
+        return 0 as i64;
+    }
+    // hash name
+    let mut h: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < name_len {
+        let c = cg_byte_at(name, i) as i64;
+        h = h * (31 as i64) + c;
+        i = i + (1 as i64);
+    }
+    // linear search
+    let table = (*s).block_name_uniq;
+    let max_n = cg_max_block_names();
+    let mut j: i64 = 0 as i64;
+    while j < max_n {
+        let e = ptr_add_u8(table, j * (32 as i64)) as *BlockNameEntry;
+        if (*e).name_hash == h && (*e).name_len == name_len {
+            return (*e).count;
+        }
+        j = j + (1 as i64);
+    }
+    return 0 as i64;
+}
+
+// cg_is_digit(c: i32) -> i32 — 1 if c 是 '0'-'9',else 0
+fn cg_is_digit(c: i32) -> i32 {
+    if c >= (48 as i32) && c <= (57 as i32) {
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
+// cg_parse_temp(text: *u8, len: i64, idx: i64) -> i64
+// 扫 text[0..len] 里第 idx 个(0-based)`%tN`,返回 N;不存在返回 -1。
+// `%` 后必须紧跟 't' 才算 temp — 避开 `%rbp` 之类(防御性写)。
+// 注:跟 _emit_mem.jhyy:96 mem_parse_temp 同样的 scan 规则,只是共用 cg_ 前缀。
+fn cg_parse_temp(text: *u8, len: i64, idx: i64) -> i64 {
+    if text == (0 as *u8) || len <= (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut seen: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i + (1 as i64) < len {
+        if cg_byte_at(text, i) == (37 as i32) && cg_byte_at(text, i + (1 as i64)) == (116 as i32) {
+            // 命中 "%t",往后收数字
+            let mut k: i64 = i + (2 as i64);
+            let mut val: i64 = 0 as i64;
+            let mut ndig: i64 = 0 as i64;
+            while k < len && cg_is_digit(cg_byte_at(text, k)) != (0 as i32) {
+                val = val * (10 as i64) + ((cg_byte_at(text, k) - (48 as i32)) as i64);
+                ndig = ndig + (1 as i64);
+                k = k + (1 as i64);
+            }
+            if ndig > (0 as i64) {
+                if seen == idx {
+                    return val;
+                }
+                seen = seen + (1 as i64);
+            }
+            i = k;
+        } else {
+            i = i + (1 as i64);
+        }
+    }
+    return -(1 as i64);
+}
+
+// cg_parse_int_from(text: *u8, len: i64, from: i64) -> i64
+// 扫 text[from..len] 里第一个十进制整数;返回值,没有返回 -1。
+// v2.11.20 RC-4: 支持 leading '-' 负数 prefix (e.g. `copy -3`)。
+// 原 code 只 parse digit,负数返正数 → match_range bucket_neg 范围 -3..-1
+// 解析成 3..1 → cslew 全 false → bucket_neg 全部 fallthrough 到 wildcard
+// arm 返 -1 → 3 个 assert fail。
+// (跟 mem_parse_int_from 同样的 scan 规则 — 共享 helper。)
+fn cg_parse_int_from(text: *u8, len: i64, from: i64) -> i64 {
+    if text == (0 as *u8) || from < (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut i: i64 = from;
+    let mut neg = 0 as i32;
+    while i < len {
+        if cg_byte_at(text, i) == (45 as i32) {  // '-'
+            neg = 1 as i32;
+            i = i + (1 as i64);
+            continue;
+        }
+        if cg_is_digit(cg_byte_at(text, i)) != (0 as i32) {
+            let mut val: i64 = 0 as i64;
+            while i < len && cg_is_digit(cg_byte_at(text, i)) != (0 as i32) {
+                val = val * (10 as i64) + ((cg_byte_at(text, i) - (48 as i32)) as i64);
+                i = i + (1 as i64);
+            }
+            if neg != (0 as i32) {
+                return -val;
+            }
+            return val;
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
+
+// cg_find_byte(text: *u8, len: i64, c: i32, from: i64) -> i64
+// 扫 text[from..len] 里第一个 byte 等于 c,返回 offset (相对 text 起);不存在返 -1。
+// v2.11.4 (W-074.7 T4-b 真修):emit_binop src1/src2 parse 找 `,` 分隔符。
+fn cg_find_byte(text: *u8, len: i64, c: i32, from: i64) -> i64 {
+    if text == (0 as *u8) || from < (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut i: i64 = from;
+    while i < len {
+        if cg_byte_at(text, i) == c {
+            return i;
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
+
+// cg_streq_n(a: *u8, b: *u8, n: i64) -> i32
+// N 字节定长比较 (跟 memcmp 不同:不强求 NUL 终止,严格 N 截断)。
+// 返 1 if a[0..n) == b[0..n),else 0。任一为 NULL → 0。
+fn cg_streq_n(a: *u8, b: *u8, n: i64) -> i32 {
+    if a == (0 as *u8) || b == (0 as *u8) {
+        return 0 as i32;
+    }
+    if n <= (0 as i64) {
+        return 1 as i32;
+    }
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        if cg_byte_at(a, i) != cg_byte_at(b, i) {
+            return 0 as i32;
+        }
+        i = i + (1 as i64);
+    }
+    return 1 as i32;
+}
+
+// cg_scan_pending_phi_for_arm — emit_jmp 调 (定义在 cg_streq_n 之后以满足
+// jhyy 无 forward reference)。scan pending_phi_* table for entry whose arm_label
+// matches cur_block_name。Returns matched count (0 if no match, 1+ if multiple
+// phis reference same arm — multi-phi-into-same-merge case)。
+// For each match, emits `movq -arm_tN_off(%rbp), %rax; movq %rax, -dst_off(%rbp)`
+// (8-byte l suffix — QBE IL phi 默认 l type,即使 phi 标 w/s/d 也容错,因为
+// slot 8 字节写满,l 读 OK;真正按 qt 分 W/L/S/D 留 v2.11.16 — 当前 Iter 2
+// 优先 closure 数量)。
+fn cg_scan_pending_phi_for_arm(state: *u8, out: *u8) -> i32 {
+    let s = state as *CGState;
+    let cnt = (*s).pending_phi_count;
+    if cnt <= (0 as i64) {
+        return 0 as i32;
+    }
+    let cur_name = (*s).cur_block_name;
+    let cur_len = (*s).cur_block_name_len;
+    if cur_name == (0 as *u8) || cur_len <= (0 as i64) {
+        return 0 as i32;
+    }
+    let mut matched: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < cnt {
+        let pap = ptr_add_u8((*s).pending_phi_arm_label_ptrs, i * (8 as i64)) as *i64;
+        let arm_name_i: i64 = *pap;
+        let arm_name = arm_name_i as *u8;
+        let pal = ptr_add_u8((*s).pending_phi_arm_label_lens, i * (8 as i64)) as *i64;
+        let arm_len = *pal;
+        if cg_streq_n(cur_name, arm_name, cur_len) != (0 as i32) && cur_len == arm_len {
+            // match: emit mov from arm_tN slot to dst_slot
+            let pd = ptr_add_u8((*s).pending_phi_dsts, i * (8 as i64)) as *i64;
+            let dst_off = *pd;
+            let pt = ptr_add_u8((*s).pending_phi_tN, i * (8 as i64)) as *i64;
+            let tN_id = *pt;
+            let arm_tN_off = cg_offset_for_temp(tN_id);
+            let _s2 = sb_appendf_lld((*s).arena, out, "  movq %lld(%%rbp), %%rax\n" as *u8, arm_tN_off);
+            let _s3 = sb_appendf_lld((*s).arena, out, "  movq %%rax, %lld(%%rbp)\n" as *u8, dst_off);
+            matched = matched + (1 as i64);
+        }
+        i = i + (1 as i64);
+    }
+    return matched as i32;
+}
+
+// cg_find_at(text: *u8, len: i64, from: i64) -> i64
+// 扫 text[from..len] 第一个 '@' 的 offset;没有返 -1。
+// emit_jnz / emit_jmp 用来定位 label (e.g. "@then1" → offset of '@')。
+fn cg_find_at(text: *u8, len: i64, from: i64) -> i64 {
+    if text == (0 as *u8) || from < (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut i: i64 = from;
+    while i < len {
+        if cg_byte_at(text, i) == (64 as i32) {  // '@' = 64
+            return i;
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
+
+// cg_find_dollar(text: *u8, len: i64, from: i64) -> i64
+// 扫 text[from..len] 第一个 '$' 的 offset;没有返 -1。
+// emit_call 用:解析 "$name" callee name (e.g. "$fib")。
+fn cg_find_dollar(text: *u8, len: i64, from: i64) -> i64 {
+    if text == (0 as *u8) || from < (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut i: i64 = from;
+    while i < len {
+        if cg_byte_at(text, i) == (36 as i32) {  // '$' = 36
+            return i;
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
+
+// cg_find_sub(text: *u8, len: i64, pat: *u8, pat_len: i64) -> i64
+// 在 text[0..len) 中找 pat[0..pat_len) 首次出现的下标,找不到返 -1。
+// 注:跟 _emit_mem.jhyy:66 mem_find_sub 区别 — mem_find_sub 要求 pat NUL-终止 +
+// strlen(pat),cg_find_sub 显式接 pat_len,允许任意 byte slice。
+fn cg_find_sub(text: *u8, len: i64, pat: *u8, pat_len: i64) -> i64 {
+    if text == (0 as *u8) || pat == (0 as *u8) {
+        return -(1 as i64);
+    }
+    if pat_len <= (0 as i64) || pat_len > len {
+        return -(1 as i64);
+    }
+    let mut i: i64 = 0 as i64;
+    while i + pat_len <= len {
+        if cg_streq_n(ptr_add_u8(text, i), pat, pat_len) != (0 as i32) {
+            return i;
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
 }
 
 // ════════════════════════════════════════════════════
@@ -279,3 +1092,243 @@ fn cg_alloc_slot(state: *u8, size: i64) -> i64 {
 // import 是为了把 regalloc 模块拉到 import graph 里,后续 Unit E 调用时不用再改
 // state.jhyy 的 import。
 // (import 已移到文件顶部 per jhyy 不支持 fn forward reference)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v2.11.2 (W-074.6 T3-a) global-max frame variant helpers
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 全 module 扫一次,找最大的 %tN,用做 frame size = 32 + (max_temp+1)*8。
+// Per-function pre-scan table 留 v2.11.3 EXIT exact (~60 LOC)。
+//
+// cg_token_max_temp_id(tok_p, tok_size, idx) -> i64
+//   读 token[idx],从 text 字段扫所有 %tN 取 max。tok_size=40 (per lex_il)。
+//   text=0 (declaration tokens) → 返 -1。
+//   没有 %tN → 返 -1。
+fn cg_token_max_temp_id(tok_p: *u8, tok_size: i64, idx: i64) -> i64 {
+    if tok_p == (0 as *u8) { return -(1 as i64); }
+    let tok_start = (tok_p as i64 + idx * tok_size) as *u8;
+    let t = tok_start as *ILToken;
+    let text = (*t).text;
+    let text_len = (*t).text_len;
+    if text == (0 as *u8) || text_len <= (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut max_id: i64 = -(1 as i64);
+    let mut i: i64 = 0 as i64;
+    while i < text_len {
+        let c = cg_byte_at(text, i);
+        if c == (37 as i32) && i + (1 as i64) < text_len {
+            let c2 = cg_byte_at(text, i + (1 as i64));
+            if c2 == (116 as i32) {  // 't'
+                let mut k: i64 = i + (2 as i64);
+                let mut val: i64 = 0 as i64;
+                let mut ndig: i64 = 0 as i64;
+                while k < text_len && cg_is_digit(cg_byte_at(text, k)) != (0 as i32) {
+                    val = val * (10 as i64) + ((cg_byte_at(text, k) - (48 as i32)) as i64);
+                    ndig = ndig + (1 as i64);
+                    k = k + (1 as i64);
+                }
+                if ndig > (0 as i64) {
+                    if val > max_id { max_id = val; }
+                }
+                i = k;
+            } else {
+                i = i + (1 as i64);
+            }
+        } else {
+            i = i + (1 as i64);
+        }
+    }
+    return max_id;
+}
+
+// cg_compute_global_max_temp(tok_p, tok_size, n) -> i64
+//   单 pass 扫整个 token 数组,返最大 %tN。找不到返 0 (safe 0 offset = 32 字节)。
+fn cg_compute_global_max_temp(tok_p: *u8, tok_size: i64, n: i64) -> i64 {
+    let mut gmax: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let t_max = cg_token_max_temp_id(tok_p, tok_size, i);
+        if t_max > gmax { gmax = t_max; }
+        i = i + (1 as i64);
+    }
+    return gmax;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// v2.11.10 (W-074.6 T3-a closure) per-fn max temp pre-scan
+// ═════════════════════════════════════════════════════════════════════════
+//
+// 替换 v2.11.2 cg_compute_global_max_temp (单 frame_size 全 module 共用 → 递归
+// fn SIGSEGV)。两阶段 pre-scan:
+//   Phase 1: 扫 tokens 找所有 ILTOK_FUNC_HEADER 位置 → state.fn_starts[256]
+//            + 哨兵 fn_starts[fn_count] = n (end of last fn body)
+//   Phase 2: 对每 [fn_starts[i], fn_starts[i+1]) 调 cg_token_max_temp_id 找
+//            max temp id → state.per_fn_max[i] (i64 array,frame_size = (max+1)*8)
+//
+// emit_func_header 读 per_fn_max[cur_fn_idx] 算 frame_size → 每个 fn 独立
+// frame。递归 fn fact/fib/gcd 只用 5-10 temps → frame 88 字节 vs 之前 15488
+// 字节 → 递归深度 30 才 2640 字节,完全 fit Windows 1MB default thread stack。
+//
+// MAX_FN_ENTRIES = 256 (per cdefn):big_test ~60 fns 安全;fn_count >= 256
+// safety check 截断到 255 + fn_starts[255] 哨兵 (留 last fn 的 remaining tokens
+// 全归 fn 255)。n=0 (空 module) → fn_count=0 → emit_func_header fall through
+// global-max legacy path (per-fn_max 都 0 → frame_size=8 → 0 字节 frame, 安全
+// no-op 退路)。
+//
+// fn_starts / per_fn_max 字段:见 CGState struct (v2.11.10 真修)。
+// 调用方:codegen_amd64.jhyy:279 (v2.11.10 替换 cg_compute_global_max_temp)。
+fn cg_compute_per_fn_max_temps(state: *u8, tok_p: *u8, tok_size: i64, n: i64) -> i32 {
+    let s = state as *CGState;
+    // Safety: fn_starts / per_fn_max 必须 alloc 过 (cg_state_init 必调)
+    if (*s).fn_starts == (0 as *u8) || (*s).per_fn_max == (0 as *u8) {
+        return 1 as i32;
+    }
+    // Phase 1: 扫 fn_starts
+    let mut fn_count: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let t = (tok_p as i64 + i * tok_size) as *ILToken;
+        if (*t).kind == ILTOK_FUNC_HEADER() {
+            // safety: 256 entries cap,溢出截断
+            if fn_count < 256 as i64 {
+                let p = ptr_add_u8((*s).fn_starts, fn_count * (8 as i64)) as *i64;
+                *p = i;
+            }
+            fn_count = fn_count + (1 as i64);
+        }
+        i = i + (1 as i64);
+    }
+    // 哨兵: fn_starts[fn_count] = n (end of last fn body)
+    if fn_count < 256 as i64 {
+        let p = ptr_add_u8((*s).fn_starts, fn_count * (8 as i64)) as *i64;
+        *p = n;
+    }
+    if fn_count > 255 as i64 {
+        fn_count = 255 as i64;
+    }
+    (*s).fn_count = fn_count;
+    // Phase 2: per_fn_max[i] = max temp id in [fn_starts[i], fn_starts[i+1])
+    let mut fi: i64 = 0 as i64;
+    while fi < fn_count {
+        let start_p = ptr_add_u8((*s).fn_starts, fi * (8 as i64)) as *i64;
+        let end_p = ptr_add_u8((*s).fn_starts, (fi + (1 as i64)) * (8 as i64)) as *i64;
+        let start: i64 = *start_p;
+        let end: i64 = *end_p;
+        let mut max_t: i64 = 0 as i64;
+        let mut j: i64 = start;
+        while j < end {
+            let t_max = cg_token_max_temp_id(tok_p, tok_size, j);
+            if t_max > max_t { max_t = t_max; }
+            j = j + (1 as i64);
+        }
+        let p2 = ptr_add_u8((*s).per_fn_max, fi * (8 as i64)) as *i64;
+        *p2 = max_t;
+        fi = fi + (1 as i64);
+    }
+    return 0 as i32;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// v2.11.3 (W-074.7 T4-c + T4-h 真修) FN_ARG scan context + arg index finder
+// ═════════════════════════════════════════════════════════════════════════
+//
+// QBE IL fn header 形如:
+//   "function $fib(w %n)"                  → 1 arg, %n 在 args 列表 idx=0 → %rcx
+//   "function $sum_point(l %point)"        → 1 arg, %point idx=0
+//   "function $read_deep(l %outer, l %k)"  → 2 args
+// emit_func_header 在 prologue 调 cg_state_set_fn_header 把这串 + 长度存
+// CGState,emit_copy FN_ARG 路径用 cg_find_arg_idx 找 %name 位置映射寄存器。
+//
+// 注:QBE IL args 列表每个 arg 形如 "{w|l|s|d} %name" — 字母是 qt,空格分隔。
+// 我们 scan 整个 text 找第 N 个 '%name' 出现位置;忽略 dest(=,前)中的 '%tN'。
+//
+// Simplification (v2.11.3): 我们不严格区分 args 段 vs body 段;只数 '%' 出
+// 现次数,把第 1..arg_count 个 '%' 当作 args(QBE IL 保证 args 全在 body 前
+// 的 '(args {...})' 段,lex_finish_instr 已把整条函数头 slice 化,args 段
+// 是唯一含 '%name' 的前缀)。body 段的 '%tN' 是 dest temp (int_val 字段),
+// 不在 args list 中 — emit_copy 时通过 cg_parse_temp 第二个返回值得
+// (idx=1 src temp) 区分,不会跟 args 重叠。
+
+// cg_state_set_fn_header — v2.11.3 setter
+//
+// 由 emit_func_header 末尾调,把当前 function header 原文 slice + 长度 +
+// arg_count 存 CGState。arg_count 从 text 中数 ',' 推断 (QBE IL args 段
+// 逗号分隔,即使没有嵌套括号;每个 arg 一段 {qt} %name)。
+fn cg_state_set_fn_header(state: *u8, header_text: *u8, header_len: i64) -> i32 {
+    let s = state as *CGState;
+    (*s).cur_fn_header_text = header_text;
+    (*s).cur_fn_header_len  = header_len;
+    // count args:数 '%' 出现次数(每个 arg 一个 '%name')
+    let mut cnt: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i + (1 as i64) < header_len {
+        if cg_byte_at(header_text, i) == (37 as i32) {  // '%'
+            cnt = cnt + (1 as i64);
+        }
+        i = i + (1 as i64);
+    }
+    (*s).cur_fn_arg_count = cnt;
+    return 0;
+}
+
+// cg_find_arg_idx(header_text, header_len, name_bytes, name_len) -> i64
+//
+// 在 fn header 中数到第 1 个匹配 '%<name_bytes>' 的出现位置 (0-based)。
+// 返 0..arg_count-1 表示 arg idx;返 -1 表示未找到 (用 caller fallback %rcx)。
+//
+// 注:QBE IL '%name' 用 % 后跟 ASCII identifier 字符 (字母数字下划线)。
+// 我们不强制是字母 — 直接 N 字节比较 name,匹配即接受 (防御 %name 中含
+// 数字也 ok)。
+fn cg_find_arg_idx(header_text: *u8, header_len: i64,
+                   name_bytes: *u8, name_len: i64) -> i64 {
+    if header_text == (0 as *u8) || name_bytes == (0 as *u8) {
+        return -(1 as i64);
+    }
+    if header_len <= (0 as i64) || name_len <= (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut seen: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i + (1 as i64) < header_len {
+        if cg_byte_at(header_text, i) == (37 as i32) {  // '%'
+            // match name_bytes after '%'
+            let mut j: i64 = 0 as i64;
+            let mut match_ok: i32 = 1 as i32;
+            while j < name_len {
+                if i + (1 as i64) + j >= header_len {
+                    match_ok = 0 as i32;
+                    break;
+                }
+                if cg_byte_at(header_text, i + (1 as i64) + j) != cg_byte_at(name_bytes, j) {
+                    match_ok = 0 as i32;
+                    break;
+                }
+                j = j + (1 as i64);
+            }
+            if match_ok == (1 as i32) {
+                return seen;
+            }
+            seen = seen + (1 as i64);
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
+
+// cg_state_bump_fn_idx — v2.11.3 (W-074.7 T4-h 真修)
+//
+// emit_func_header 末尾调,bump cur_fn_idx per-function 序号。emit_jnz /
+// emit_label 读此值 append "_fn<N>" 后缀到 .L<name>。
+fn cg_state_bump_fn_idx(state: *u8) -> i64 {
+    let s = state as *CGState;
+    let cur = (*s).cur_fn_idx;
+    (*s).cur_fn_idx = cur + (1 as i64);
+    return cur;
+}
+
+// cg_state_cur_fn_idx — getter for emit_jnz / emit_label
+fn cg_state_cur_fn_idx(state: *u8) -> i64 {
+    let s = state as *CGState;
+    return (*s).cur_fn_idx;
+}

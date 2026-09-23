@@ -31,6 +31,7 @@ import codegen_amd64_lexer;    // V2-B v2.6.3: lex_il / lex_il_count
 import codegen_amd64_emit_mem;    // V2-B v2.6.0 Unit B: emit_alloc / emit_store / emit_load / emit_loadsub
 import codegen_amd64_emit_ctrl;   // V2-B v2.6.0 Unit B: emit_jmp / emit_jnz / emit_label / emit_ret / emit_func_header / emit_data_string
 import codegen_amd64_emit_call;   // V2-B v2.6.0 Unit B: emit_call / emit_phi / emit_copy / emit_binop / emit_volatile
+import codegen_amd64_emit_sse;    // v2.11.19: 8 emit_conv_* (dtosi/stosi/truncd/exts/f32-f64/sltof/swtof/ultof/uwtof) + SSE helpers
 import codegen_amd64_peephole;    // V2-B v2.6.3: peephole_fold (local folding on emitted .s)
 import util;                      // V2-B v2.6.3: StringBuilder + sb_init / sb_buf / sb_len / ptr_add_u8
 import arena;                     // V2-B v2.6.3: Arena type + arena_alloc / arena_init
@@ -41,6 +42,7 @@ extern fn jh_read_file(path: *u8, out_buf: *u8, buf_cap: i64, out_len: *i64) -> 
 extern fn jh_write_file(path: *u8, buf: *u8, len: i64) -> i32;
 extern fn malloc(size: i64) -> *u8;
 extern fn free(p: *u8) -> i32;
+extern fn sprintf_lld(buf: *u8, fmt: *u8, val: i64) -> i32;
 
 // V3-B v3.0.1: inline asm side-file append — same externs as codegen.jhyy
 extern fn fopen(path: *u8, mode: *u8) -> *u8;
@@ -178,6 +180,40 @@ fn parse_and_emit(state: *u8, tokens: *u8, n: i64, target_tag: i32) -> i32 {
             let _ = emit_jnz(state, tok_p, target_tag);
         } else if kind == ILTOK_DATA_STRING() {
             let _ = emit_data_string(state, tok_p, target_tag);
+        } else if kind == ILTOK_DIRECTIVE() {
+            // v2.11.1 (W-074.5 真修): dbgfile / dbgloc / { / } — 不 emit .s body,仅让 parse_and_emit 不卡 cursor
+            let _x: i32 = 0 as i32;
+            let _ = _x;
+        } else if kind == ILTOK_DTOSI() {
+            // v2.11.19: f64 → i32/i64 via cvttsd2si (dst width 由 tok.qbe_type 决定)
+            let _ = emit_conv_dtosi(state, tok_p, target_tag);
+        } else if kind == ILTOK_STOSI() {
+            // v2.11.19: f32 → i32/i64 via cvttss2si (dst width 由 tok.qbe_type 决定)
+            let _ = emit_conv_stosi(state, tok_p, target_tag);
+        } else if kind == ILTOK_TRUNCD() {
+            // v2.11.19: f64 → f32 via cvtsd2ss
+            let _ = emit_conv_truncd(state, tok_p, target_tag);
+        } else if kind == ILTOK_EXTS() {
+            // v2.11.19: plain `exts` token 是 S→D float sign-extend (QBE IL spec
+            //   §3.2 用 plain exts 区分 integer extsb/extsw/extsh/extsl)。整数 ext
+            //   走 ILTOK_BINOP (per next_token_binop 'e' branch → extsb/extsw/extsl/
+            //   extsh)。所以 ILTOK_EXTS 100% 是 S→D — 无条件 emit cvtss2sd。
+            // 注:v2.11.19 Phase 5 修正 — 之前条件 `qbe_type == QBE_S_LOCAL()` 检查
+            //   DST type,但 exts DST 永远 =d (走 cg_coerce S→D),条件永远 false
+            //   → noop → 实测 dtosi 拿 0。
+            let _ = emit_conv_exts_f32_to_f64(state, tok_p, target_tag);
+        } else if kind == ILTOK_SLTOF() {
+            // v2.11.19: i64 (signed) → f64 via cvtsi2sd
+            let _ = emit_conv_sltof(state, tok_p, target_tag);
+        } else if kind == ILTOK_SWTOF() {
+            // v2.11.19: i32 (signed) → f64 via cvtsi2sd (sign-ext 32→64)
+            let _ = emit_conv_swtof(state, tok_p, target_tag);
+        } else if kind == ILTOK_ULTOF() {
+            // v2.11.19: u64 (unsigned) → f64 via half trick 7 insn
+            let _ = emit_conv_ultof(state, tok_p, target_tag);
+        } else if kind == ILTOK_UWTOF() {
+            // v2.11.19: u32 (unsigned) → f64 via "movl %eax,%eax" zero-ext + cvtsi2sd
+            let _ = emit_conv_uwtof(state, tok_p, target_tag);
         } else if kind == ILTOK_EOF() {
             return 0;
         }
@@ -220,11 +256,20 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32 {
     let il_cap: i64 = (4 as i64) * (1024 as i64) * (1024 as i64);
     let il_buf = malloc(il_cap);
     if il_buf == (0 as *u8) { return 1 as i32; }
-    let il_len: i64 = 0 as i64;
-    let read_rc = jh_read_file(il_path, il_buf, il_cap, &il_len);
+    // W-074 fix: heap-allocate out_len to bypass &stack-local codegen bug.
+    // Previous: `let il_len: i64 = 0; jh_read_file(... &il_len)` — C side wrote
+    // through the address but jhyy's `&local_i64` doesn't reliably write back to
+    // the caller's stack slot (the post-read `il_len` trace showed 0 despite
+    // read_rc=0 and il_buf filled correctly). Using heap-allocated i64 + manual
+    // deref works.
+    let il_len_box = malloc(8 as i64);
+    *(il_len_box as *i64) = 0 as i64;
+    let read_rc = jh_read_file(il_path, il_buf, il_cap, il_len_box);
+    let il_len: i64 = *(il_len_box as *i64);
     if read_rc != (0 as i32) {
         // 1 = buf too small; -1 = err; v2.6.x hard fail (re-try pattern = v2.7.x territory)
         free(il_buf);
+        free(il_len_box);
         return 1 as i32;
     }
 
@@ -236,17 +281,25 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32 {
     // against `{` → "expected ;, got {" error.
     let mut arena: Arena = Arena { start: 0 as *u8, cur: 0 as *u8, end: 0 as *u8,
                                    blocks: 0 as *u8, def_size: 0 as i64 };
-    arena_init(&arena, (2 as i64) * (1024 as i64) * (1024 as i64));
+    arena_init(&arena, (8 as i64) * (1024 as i64) * (1024 as i64));
     let tokens = lex_il(il_buf, il_len, &arena);
     if tokens == (0 as *u8) {
         free(il_buf);
+        free(il_len_box);
         arena_free(&arena);
         return 1 as i32;
     }
     let n = lex_il_count(tokens);
+    free(il_len_box);
 
     // 3. CGState + StringBuilder init (heap-alloc'd, state has stable ptr)
-    let state_buf = malloc(64 as i64);
+    // v2.11.15 (Iter 2 C.3 emit_phi 真修): CGState 字段 21 → 28 (+7 phi-related),
+    //   28 × 8 = 224 字节 malloc 上调。pre-existing 160 malloc 跟 168 字节 struct
+    //   已 8 字节 overflow (fn_count 写到 heap 边界外,触发 v2.11.14 OS pre-existing
+    //   bug per `feedback_codegen_amd64_run_zerobyte` 同 pattern)。
+    // v2.13.0 (W-074.6 RCA):CGState struct 在 Phase 1 加 fields 后变 ~248+
+    // 字节,224 不够 → fn_count 写到堆外 → 0-byte body。改 512 留 slack。
+    let state_buf = malloc(512 as i64);
     if state_buf == (0 as *u8) {
         free(il_buf);
         arena_free(&arena);
@@ -259,26 +312,64 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32) -> i32 {
     // v2.8.0: 显式设 target_tag(从 main.jhyy run_backend 传 `t` 进 codegen_amd64_run)
     let _set_tt_rc = cg_state_set_target(state_buf, target_tag);
 
+    // v2.11.10 (W-074.6 T3-a closure):per-fn pre-scan 替换 v2.11.2 global-max。
+    // Phase 1 扫 fn_starts (ILTOK_FUNC_HEADER positions),Phase 2 per-fn max temp
+    // id 填 state.per_fn_max[256]。emit_func_header 读 per_fn_max[cur_fn_idx]
+    // 算 frame_size → 每个 fn 独立 frame (递归 fn 不用 15488 字节 → big_test
+    // 自-backend 跑通)。frame_max_temp 字段保留兼容 (写但 emit_func_header 不用)。
+    let _scan_rc = cg_compute_per_fn_max_temps(state_buf, tokens, 40 as i64, n);
+    // Legacy: 仍 set frame_max_temp (备 cg_state_set_frame_max_temp 兼容;v2.11.10
+    // emit_func_header 走 per_fn_max 优先,frame_max_temp 仅作 out-of-range safety
+    // fallback)。
+    let g_max = cg_compute_global_max_temp(tokens, 40 as i64, n);
+    let _fms = cg_state_set_frame_max_temp(state_buf, g_max);
+
     // 4. Regalloc analysis (linear-scan; sets g_regalloc_arr via jh_regalloc_set)
-    let reg_arr = regalloc_init(&arena);
-    if reg_arr != (0 as *u8) {
-        let _ = regalloc_run(&arena, reg_arr, tokens, n);
-    }
+    // v2.11.2 (W-074.6 T3-b):regalloc_run SKIP — 走 cg_offset_for_temp_with_target
+    // 公式 fallback (v2.5.0 1-to-1 简化)。原因:regalloc_run 在 self path
+    // 还没 wire 完整,产出的 spill offset 跟 emit_mem/ctrl/call 不对齐会
+    // 静默错槽。skip 后所有 offset 走 identical `-(32 + t*8)` 公式 → 3 个
+    // 不一致 fn 路径全消除。v2.11.3 EXIT exact 重新 wire。
+    // 关键:skip 后必 regalloc_clear_global() 清 C-side static 指针,
+    // 否则 cg_offset_for_temp_with_target 会读 stale global → ret_off
+    // garbage (如 377464288912 = 0x57FC8C58870 某个 free'd chunk 残留)。
+    let _clear_rc = regalloc_clear_global();
+    // let reg_arr = regalloc_init(&arena);
+    // if reg_arr != (0 as *u8) {
+    //     let _ = regalloc_run(&arena, reg_arr, tokens, n);
+    // }
 
     // 5. Dispatch loop → emit each token → .s into sb.buf
     let _pe_rc = parse_and_emit(state_buf, tokens, n, target_tag);
+    // W-074 v2.11.0: warn on 0-byte output. Run-time silent fail if n>0 + sb.len=0.
+    if sb.len == (0 as i64) && n > (0 as i64) {
+        let trace_tmp_cap: i64 = 64 as i64;
+        let trace_tmp = malloc(trace_tmp_cap);
+        if trace_tmp != (0 as *u8) {
+            let _r = sprintf_lld(trace_tmp, "warning: self-backend produced 0-byte .s, n=%lld tokens dispatched\n" as *u8, n);
+            let _w = jh_fputs_stderr(trace_tmp);
+            let _f = free(trace_tmp);
+        }
+    }
 
     // 6. Peephole fold on emitted .s (no-op if arena alloc fails)
     let raw = sb.buf;
     let raw_len = sb.len;
-    let folded = peephole_fold(raw, raw_len, &arena, target_tag);
-    let final_buf: *u8 = if folded != (0 as *u8) { folded } else { raw };
-    // peephole_fold returns input unchanged on no-op (arena null), so final_buf
-    // might point to raw (which is arena-alloc'd, NOT null-terminated).
-    // jh_write_file takes explicit len, so no null-term needed.
+    // v2.11.2 (T2-d) 使用 peephole_fold_with_len 取 fold 后的真实长度,
+    // 避免 raw_len (pre-fold) 写成 fold-后-shorter 区间残余 padding 到 .s。
+    let folded_len_box = malloc(8 as i64);
+    *(folded_len_box as *i64) = raw_len;
+    let mut final_buf: *u8 = peephole_fold_with_len(raw, raw_len, arena, target_tag, folded_len_box);
+    let mut final_len: i64 = *(folded_len_box as *i64);
+    if final_buf == (0 as *u8) {
+        final_buf = raw;
+        final_len = raw_len;
+    }
+    free(folded_len_box);
 
     // 7. Write .s (binary mode, per feedback_qbe_crlf_root_cause)
-    let wr_rc = jh_write_file(asm_path, final_buf, raw_len);
+    // v2.11.2 (T2-d):用 final_len 写而非 raw_len,避免 fold 后 shorter → 写脏数据。
+    let wr_rc = jh_write_file(asm_path, final_buf, final_len);
 
     // 8. Cleanup
     free(state_buf);

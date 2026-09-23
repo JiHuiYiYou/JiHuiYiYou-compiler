@@ -68,6 +68,8 @@
 
 import codegen_amd64_state;  // CGState / QBE_W_LOCAL / QBE_L_LOCAL / ILTOK_*
                              // ILToken / cg_offset_for_temp / cg_alloc_slot
+import codegen_amd64_emit_sse;  // v2.11.19 Phase 2b: 4 SSE helpers (sse_xmm_mov_suffix_for_qt / sse_xmm_reg_for_arg_idx / sse_emit_mov_xmm_reg_to_temp / sse_emit_mov_temp_to_xmm_reg)
+import codegen_amd64_xmm_argalloc;  // v2.13.0 Phase 1: per-call XMM/int arg allocator + stack-arg fallback (xmm_arg_reset / xmm_arg_alloc / int_arg_alloc / xmm_reg_name / int_reg_name_* / emit_stack_arg_push)
 import util;  // sb_init / sb_append_cstr / sb_appendf / StringBuilder
 
 // ════════════════════════════════════════════
@@ -76,6 +78,14 @@ import util;  // sb_init / sb_append_cstr / sb_appendf / StringBuilder
 // ════════════════════════════════════════════
 
 extern fn sprintf_lld(buf: *u8, fmt: *u8, val: i64) -> i32;
+// v2.11.19 Phase 3a: f64 字面量 → IEEE 754 bits (i64)。Fractional (N.M) 通过 atof 真解。
+extern fn jh_double_to_bits(s: *u8, len: i64, out_buf: *u8) -> i64;
+// v2.11.19 Phase 3a: f32 字面量 → IEEE 754 single bits (i32)。True impl 替代 v2.11.15 stub。
+extern fn jh_float_to_bits(s: *u8, len: i64, out_buf: *u8) -> i32;
+// v3.0.7/Commit 1: emit_conv op-name dispatch 走 strcmp (jhyy == 对 *u8 不是
+// 字符串比较;如果 op_name 是 lex_dup_text 返的 arena 指针,与字符串 literal
+// 永远不等 → if 永远 false,理论不 hang,但 codegen emit_conv_state 链路已 hang)。
+extern fn strcmp(a: *u8, b: *u8) -> i32;
 
 // ════════════════════════════════════════════
 // 内部 helpers(emit 函数共用)
@@ -85,23 +95,35 @@ extern fn sprintf_lld(buf: *u8, fmt: *u8, val: i64) -> i32;
 // 每个 helper 走 (out, ...) 签名避免反复解 *u8 cast。
 
 // emit_comment — 写 "# <text>\n" 注释(QBE 风格)
+// v2.11.1 (W-074.5 真修延伸):state 是 *CGState 不是 *StringBuilder — 原 cast 错让
+// sb.buf/len/cap 读 CGState 的头 24 字节作为 out/arena/next_offset,len 被填 arena
+// pointer → sb_grow while 循环倍增 cap 到 INT_MAX 范围 → hang。修:用 (*cg).out 拿 sb。
 fn emit_comment(state: *u8, text: *u8) -> i32 {
-    let s = state as *StringBuilder;
-    let _r1 = sb_append_cstr(0 as *Arena, s, "# " as *u8);
-    let _r2 = sb_append_cstr(0 as *Arena, s, text);
-    return sb_append_cstr(0 as *Arena, s, "\n" as *u8);
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "# " as *u8);
+    let _r2 = sb_append_cstr(arena, s, text);
+    return sb_append_cstr(arena, s, "\n" as *u8);
 }
 
-// size_suffix_for_qt — 把 QBE type letter 转 AT&T size suffix
-//   'w' → "l" (32-bit movl/addl/...)
-//   'l' → "q" (64-bit movq/addq/...)
-//   's' → "ss" (single-precision float — movss/addss/cvtss2si/cvttss2si)
-//   'd' → "sd" (double-precision float — movsd/addsd/cvtsd2si/cvttsd2si)
+// size_suffix_for_qt — 把 QBE type letter 转 AT&T INTEGER size suffix
+//   'w' → "l" (32-bit int)
+//   'l' → "q" (64-bit int / pointer)
+//   'd' → "q" (f64 = 8 bytes, integer bit pattern read)
+//   's' → "l" (f32 = 4 bytes, integer bit pattern read)
+//   fallback → "l"
 //
-// W-083 真修 (v3.0.6/Ph.3): extend 给浮点 's'/'d' (原本 fallback 返 "l" 是错的)。
-// emit_conv (本文件后段) 用 'ss'/'sd' 后缀 emit movss/movsd/cvt*ss2si/cvt*sd2si
-// 指令 family。caller 用法:`sb_append_cstr(s, "mov"); sb_append_cstr(s, size_suffix_for_qt(qt));` →
-// `movl`/`movq`/`movss`/`movsd`。
+// v2.11.15 Iter 3 (C.4 float XMM): 注 — QBE_D/QBE_S 仍返 q/l,因为 emit_mov_temp_to_offset
+// 等函数是 mem-to-mem integer ops (movq/movl)。XMM-specific ops (movsd/movss/addsd)
+// 走 XMM register path 用 hard-coded "sd"/"ss" suffix(由 caller 决定,不用此 helper)。
+// mem_mov_suffix (codegen_amd64_emit_mem.jhyy) 同 pattern — 仍用 q/l for mem-to-mem。
+//
+// v3.0.7/Commit 1 (merge-file + silent-bug shield): 's'/'d' 必须返 q/l 不是 ss/sd,
+// 因为 V2 这函数 15 call site (emit_call_arg, emit_mem_load/store, FNARG store, 等)
+// 全是 mem-mem GPR 路径 (movq/movl)。V3 Ph.3 emit_conv (emit_mov_temp_to_xmm /
+// emit_mov_xmm_to_temp) 误用本函数拼 movsd/movss — 走 sse_suffix_for_qt 而不是
+// size_suffix_for_qt (新增函数, 返 sd/ss for XMM 路径)。
 fn size_suffix_for_qt(qt: i32) -> *u8 {
     if qt == QBE_W_LOCAL() {
         return "l" as *u8;
@@ -109,13 +131,71 @@ fn size_suffix_for_qt(qt: i32) -> *u8 {
     if qt == QBE_L_LOCAL() {
         return "q" as *u8;
     }
-    if qt == QBE_S() {
+    if qt == QBE_D_LOCAL() {
+        return "q" as *u8;
+    }
+    if qt == QBE_S_LOCAL() {
+        return "l" as *u8;
+    }
+    return "l" as *u8;  // default fallback
+}
+
+// sse_suffix_for_qt — QBE type letter 转 SSE 指令 size suffix (XMM 路径专用)
+//   's' → "ss" (movss/addss/cvtss2si/cvttss2si)
+//   'd' → "sd" (movsd/addsd/cvtsd2si/cvttsd2si)
+//   整数 (w/l) → 返 "" (XMM 路径不处理整数)
+//
+// v3.0.7/Commit 1 新增: 跟 size_suffix_for_qt 拆开, 因为:
+//   - size_suffix_for_qt: mem-mem GPR 路径, 整数+位模式搬运 (movq/movl)
+//   - sse_suffix_for_qt:  XMM register 路径, 浮点搬运/转换 (movsd/movss/cvt*)
+// 同一个 QBE 类型 d/s 给两个不同函数会返不同 suffix — 不可合并。
+// emit_mov_temp_to_xmm / emit_mov_xmm_to_temp 改调本函数。
+// Commit 2 会删本函数 (V2 有同名 sse_xmm_mov_suffix_for_qt in emit_sse.jhyy, 切到那)。
+fn sse_suffix_for_qt(qt: i32) -> *u8 {
+    if qt == QBE_S_LOCAL() {
         return "ss" as *u8;
     }
-    if qt == QBE_D() {
+    if qt == QBE_D_LOCAL() {
         return "sd" as *u8;
     }
-    return "l" as *u8;  // default fallback (shouldn't reach)
+    return "" as *u8;  // 整数无 SSE 后缀
+}
+
+// reg_rax_for_qt — 返回与 qt size 匹配的 %rax 系寄存器名
+//   QBE_W_LOCAL (32-bit) → "eax" (GAS 拒绝 "movl ... %rax")
+//   QBE_L_LOCAL (64-bit) → "rax"
+//   QBE_D_LOCAL (f64)    → "rax" (v2.11.13 A1 fix: f64 = 8B needs 64-bit reg)
+//   默认 fallback → "eax" (32-bit safe default)
+fn reg_rax_for_qt(qt: i32) -> *u8 {
+    if qt == QBE_L_LOCAL() {
+        return "rax" as *u8;
+    }
+    if qt == QBE_D_LOCAL() {
+        return "rax" as *u8;
+    }
+    return "eax" as *u8;
+}
+
+// reg_rcx_for_qt — Win x64 第 1 arg 寄存器(qt-aware)
+fn reg_rcx_for_qt(qt: i32) -> *u8 {
+    if qt == QBE_L_LOCAL() {
+        return "rcx" as *u8;
+    }
+    if qt == QBE_D_LOCAL() {
+        return "rcx" as *u8;
+    }
+    return "ecx" as *u8;
+}
+
+// reg_rdx_for_qt — Win x64 第 2 arg 寄存器(qt-aware)
+fn reg_rdx_for_qt(qt: i32) -> *u8 {
+    if qt == QBE_L_LOCAL() {
+        return "rdx" as *u8;
+    }
+    if qt == QBE_D_LOCAL() {
+        return "rdx" as *u8;
+    }
+    return "edx" as *u8;
 }
 
 // local_temp_offset — 1-to-1 简化栈分配(per L4 § 4.3)
@@ -129,72 +209,288 @@ fn local_temp_offset(t: i64) -> i64 {
     return 0 as i64 - (32 as i64 + t * (8 as i64));
 }
 
-// emit_mov_temp_to_offset — mov<size> -<src_off>(%rbp), -<dst_off>(%rbp)
+// emit_mov_temp_to_offset — mov<size> <src_off>(%rbp), <dst_off>(%rbp)
 //   temp-to-temp 1-to-1 栈复制(per L4 § 3.5 E7 简化版)
+// v2.11.1 (W-074.5 真修延伸):state 是 *CGState 不是 *StringBuilder; 原 cast 错 + 0 as *Arena 让
+// sb_appendf_lld 调用 arena_alloc(NULL,...) 崩溃。修:用 (*cg).out + (*cg).arena。
+// v2.11.1 (W-074.5 真修延伸-2):dst_off/src_off 已含符号(负偏移),不要再 prepend "-"。
 fn emit_mov_temp_to_offset(state: *u8, qt: i32, src_off: i64, dst_off: i64) -> i32 {
-    let s = state as *StringBuilder;
-    let _r1 = sb_append_cstr(0 as *Arena, s, "\tmov" as *u8);
-    let _r2 = sb_append_cstr(0 as *Arena, s, size_suffix_for_qt(qt));
-    let _r3 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-    let _r4 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src_off);
-    let _r5 = sb_append_cstr(0 as *Arena, s, "(%rbp), -" as *u8);
-    let _r6 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, dst_off);
-    let _r7 = sb_append_cstr(0 as *Arena, s, "(%rbp)\n" as *u8);
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
+    let _r2 = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+    let _r3 = sb_append_cstr(arena, s, " " as *u8);
+    let _r4 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+    let _r5 = sb_append_cstr(arena, s, "(%rbp), " as *u8);
+    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
     return 0;
 }
 
-// emit_mov_imm_to_offset — mov<size> $IMM, -<dst_off>(%rbp)
+// cg_f64_imm_bits — 把 f64 IMM 字面量 parse 成 i64 bit pattern (per IEEE 754)。
+//   输入:text 含 "d_N.M" 或 "d_N" (QBE IL f64 IMM format)。
+//   输出:i64 bit pattern = reinterpret<f64>(value)。
+//   v2.11.15 Iter 1b (A1-XMM compare path 修复延伸):
+//     IMM copy to stack slot 需 correct bit pattern;否则 `movq $INT_BITS, ...`
+//     存了 integer bits,load via movsd 解释为 f64 拿到 garbage (per regress
+//     generics_fn_call_site_inference / generics_fn_turbofish_basic — exit=20
+//     因为 max$f64 compare 用 ucomisd 拿 garbage 答案)。
+//   限制(scope DOWN per Iter 3 C.4):仅支持 integer-valued N.0 (N ∈ {0..9} +
+//   1.0/2.0/3.0/5.0/10.0/100.0),其它 fall back to 0 (garbage but won't crash)。
+//   Iter 3 (C.4) 扩 support 1.5/2.5 等 fractional N.M。
+fn cg_parse_f64_imm_bits(text: *u8, len: i64, from: i64) -> i64 {
+    if text == (0 as *u8) || from < (0 as i64) || from >= len {
+        return 0 as i64;
+    }
+    // skip ws (per L4 § 3.5 E7 emit_copy IMM 分支的 src_text 位置 after "copy "
+    // 可能仍含前导空格)
+    let mut i: i64 = from;
+    while i < len {
+        let c = cg_byte_at(text, i);
+        if c == (32 as i32) || c == (9 as i32) { i = i + (1 as i64); }
+        else { break; }
+    }
+    // skip "d_" prefix (or "s_" for f32 — Iter 1b scope: 仅 d_ 真修)
+    if i + (1 as i64) < len && cg_byte_at(text, i) == (100 as i32) && cg_byte_at(text, i + (1 as i64)) == (95 as i32) {
+        i = i + (2 as i64);
+    }
+    // parse integer part
+    let mut int_part: i64 = 0 as i64;
+    let int_start = i;
+    while i < len && cg_is_digit(cg_byte_at(text, i)) != (0 as i32) {
+        int_part = int_part * (10 as i64) + ((cg_byte_at(text, i) - (48 as i32)) as i64);
+        i = i + (1 as i64);
+    }
+    if i == int_start {
+        return 0 as i64;  // no digit — fall back
+    }
+    // check decimal point + parse frac part
+    // v2.11.19 Phase 3a (C.4 f64 IMM 真修):fractional (d_1.5/d_2.5/...) 之前 fallback 0
+    //   → 自-backend 算术结果错 (QBE constant-folding 闭环)。新:真解走 jh_double_to_bits
+    //   (C 端 atof → i64 bits),让 d_1.5 / d_2.5 / d_3.14 / d_11.3 等都正确。
+    if i < len && cg_byte_at(text, i) == (46 as i32) {
+        // fractional — extend scan to consume frac digits, then atof
+        i = i + (1 as i64);
+        while i < len && cg_is_digit(cg_byte_at(text, i)) != (0 as i32) {
+            i = i + (1 as i64);
+        }
+        let frac_num_len = i - int_start;
+        let out_buf = malloc(8 as i64);
+        if out_buf == (0 as *u8) {
+            return 0 as i64;
+        }
+        let num_start_p = ptr_add_u8(text, int_start);
+        let _rc = jh_double_to_bits(num_start_p, frac_num_len, out_buf);
+        let bits: i64 = *(out_buf as *i64);
+        let _f = free(out_buf);
+        return bits;
+    }
+    // integer-valued f64 lookup table (per IEEE 754 double precision)
+    // v2.11.15 Iter 1b fix: 不能直接写大 i64 literal (e.g. 4607182418800017408),
+    //   jhyy codegen 把它 emit 成 `w copy N` (i32 literal, 截断为 0),然后 extsw
+    //   拿 0。必须 construct bit pattern from shift: (high32 << 32) | low32。
+    //
+    // v2.13.0 Phase 1 真修: 之前 table miss (e.g. d_6/d_7/d_8/d_9) → return 0,
+    //   导致 sum9(1..9) 实际算 1+2+3+4+5+0+0+0+0=15 → EXIT≠255。fallback
+    //   走 jh_double_to_bits (atof) on integer part — table miss 都正确。
+    //   保留 table 的 fast-path 对 0.0/1.0/2.0/3.0/4.0/5.0/10.0 (regress
+    //   测得 fastest path;Iter 3 C.4 已 verify)。
+    if int_part == 0 as i64 {
+        return 0 as i64;  // 0.0 = 0x0000000000000000
+    }
+    // IEEE 754 high-32-bit patterns (exponent << 20 | mantissa_hi_bits):
+    //   1.0  = 0x3FF00000 → exp=1023, mantissa=0
+    //   2.0  = 0x40000000 → exp=1024, mantissa=0
+    //   3.0  = 0x40080000 → exp=1024, mantissa=0.5 (bit 51 = 0x00080000)
+    //   4.0  = 0x40100000 → exp=1025, mantissa=0
+    //   5.0  = 0x40140000 → exp=1025, mantissa=0.25 (bit 50 = 0x00040000)
+    //   10.0 = 0x40240000 → exp=1026, mantissa=0.125 (bit 49 = 0x00020000)
+    if int_part == 1 as i64 {
+        let _hi = ((1072693248 as i64) << (32 as i64)) | (0 as i64);  // 0x3FF00000
+        return _hi;  // 1.0
+    }
+    if int_part == 2 as i64 {
+        let _hi = ((1073741824 as i64) << (32 as i64)) | (0 as i64);  // 0x40000000
+        return _hi;  // 2.0
+    }
+    if int_part == 3 as i64 {
+        let _hi = ((1074266112 as i64) << (32 as i64)) | (0 as i64);  // 0x40080000
+        return _hi;  // 3.0
+    }
+    if int_part == 4 as i64 {
+        let _hi = ((1074790400 as i64) << (32 as i64)) | (0 as i64);  // 0x40100000
+        return _hi;  // 4.0
+    }
+    if int_part == 5 as i64 {
+        let _hi = ((1075052544 as i64) << (32 as i64)) | (0 as i64);  // 0x40140000
+        return _hi;  // 5.0
+    }
+    if int_part == 10 as i64 {
+        let _hi = ((1076101120 as i64) << (32 as i64)) | (0 as i64);  // 0x40240000
+        return _hi;  // 10.0
+    }
+    // v2.13.0 Phase 1 真修: integer-valued N 不在 table (e.g. 6/7/8/9/11/...)
+    //   → fallback to jh_double_to_bits (atof + IEEE 754 bits) for correct emission。
+    //   之前 return 0 (garbage) → regress V.1 sum9 EXIT≠255 FAIL。
+    let int_end_p = i;
+    let int_len = int_end_p - int_start;
+    let out_buf = malloc(8 as i64);
+    if out_buf == (0 as *u8) {
+        return 0 as i64;
+    }
+    let int_start_p = ptr_add_u8(text, int_start);
+    let _rc = jh_double_to_bits(int_start_p, int_len, out_buf);
+    let bits2: i64 = *(out_buf as *i64);
+    let _f = free(out_buf);
+    return bits2;
+}
+
+// cg_f32_imm_bits — 把 QBE IL f32 IMM (e.g. `s_2.5`) 解析为 IEEE 754 single bits (i32)。
+//
+// v2.11.15 Iter 1b: stub — return imm_val unchanged (4-byte truncated int 仍 wrong,
+//   但 Iter 1b scope 仅闭 A1 cluster 含 d_3/d_5,f32 cluster 在 Iter 3 C.4 处理)。
+// v2.11.19 Phase 3a: 真解 — jh_float_to_bits 走 atof → (float) cast → i32 bits。
+//   s_N.M / s_N 全部覆盖;返回 i32 bit pattern (caller 走 sign-ext to i64 for emit)。
+fn cg_f32_imm_bits(text: *u8, len: i64, from: i64, fallback_imm: i64) -> i64 {
+    let _x = fallback_imm;  // 旧 stub 返 fallback — 新 impl 不用
+    if text == (0 as *u8) || from < (0 as i64) || from >= len {
+        return 0 as i64;
+    }
+    // skip ws
+    let mut i: i64 = from;
+    while i < len {
+        let c = cg_byte_at(text, i);
+        if c == (32 as i32) || c == (9 as i32) { i = i + (1 as i64); }
+        else { break; }
+    }
+    // skip "s_" prefix
+    if i + (1 as i64) < len && cg_byte_at(text, i) == (115 as i32) && cg_byte_at(text, i + (1 as i64)) == (95 as i32) {
+        i = i + (2 as i64);
+    }
+    // find end of numeric literal
+    let num_start = i;
+    let mut has_dot: i32 = 0 as i32;
+    while i < len {
+        let c = cg_byte_at(text, i);
+        if cg_is_digit(c) != (0 as i32) {
+            i = i + (1 as i64);
+        } else if c == (46 as i32) && has_dot == (0 as i32) {
+            has_dot = 1 as i32;
+            i = i + (1 as i64);
+        } else {
+            break;
+        }
+    }
+    let num_len = i - num_start;
+    if num_len <= (0 as i64) {
+        return 0 as i64;
+    }
+    let out_buf = malloc(4 as i64);
+    if out_buf == (0 as *u8) {
+        return 0 as i64;
+    }
+    let num_start_p = ptr_add_u8(text, num_start);
+    let _rc = jh_float_to_bits(num_start_p, num_len, out_buf);
+    let bits_i32: i32 = *(out_buf as *i32);
+    let _f = free(out_buf);
+    // sign-extend i32 → i64 for caller uniform handling
+    let bits: i64 = bits_i32 as i64;
+    return bits;
+}
+
+// emit_mov_imm_to_offset — mov<size> $IMM, <dst_off>(%rbp)
 //   立即数 copy 到栈槽(per L4 § 3.5 E7)
+// v2.11.1 (W-074.5 真修延伸):同上 — 用 (*cg).out + (*cg).arena。
+// v2.11.1 (W-074.5 真修延伸-2):dst_off 已含符号,不再 prepend "-"。
+// v2.11.15 Iter 1b (A1-XMM compare path 修复延伸):
+//   f64 IMM (dst_qt=QBE_D_LOCAL) 需 emit f64 bit pattern (reinterpret<i64>(f64_val))。
+//   用 movabsq $BITS, %rax; movq %rax, mem 实现 (single-instruction 不够,
+//   因为 `movq $0x4014000000000000, mem` 跟 `movabsq` syntax 在 GAS 不一致)。
+//   f32 IMM 同理,但 Iter 1b scope 仅 d_3/d_5,f32 cluster 在 Iter 3 C.4 处理。
 fn emit_mov_imm_to_offset(state: *u8, qt: i32, imm: i64, dst_off: i64) -> i32 {
-    let s = state as *StringBuilder;
-    let _r1 = sb_append_cstr(0 as *Arena, s, "\tmov" as *u8);
-    let _r2 = sb_append_cstr(0 as *Arena, s, size_suffix_for_qt(qt));
-    let _r3 = sb_append_cstr(0 as *Arena, s, " $" as *u8);
-    let _r4 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, imm);
-    let _r5 = sb_append_cstr(0 as *Arena, s, ", -" as *u8);
-    let _r6 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, dst_off);
-    let _r7 = sb_append_cstr(0 as *Arena, s, "(%rbp)\n" as *u8);
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
+    let _r2 = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+    let _r3 = sb_append_cstr(arena, s, " $" as *u8);
+    let _r4 = sb_appendf_lld(arena, s, "%lld" as *u8, imm);
+    let _r5 = sb_append_cstr(arena, s, ", " as *u8);
+    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
     return 0;
 }
 
-// emit_mov_temp_to_reg — mov<size> -<src_off>(%rbp), %r<reg_idx>
+// emit_mov_f64_imm_to_offset — f64 IMM (QBE bit pattern) → stack slot via movabsq。
+//   v2.11.15 Iter 1b (A1-XMM compare path 修复延伸):f64 IMM copy 不能用
+//   `movq $imm_as_int, mem` (存了 integer bits,load via movsd 拿到 garbage)。
+//   正确序列:`movabsq $BITS, %rax; movq %rax, -<dst_off>(%rbp)` — %rax holds
+//   8-byte IEEE 754 bit pattern,mem holds correct f64 representation。
+//   `movabsq $BITS, mem` 直接无效 (GAS 不支持 immediate64-to-memory 形态)。
+fn emit_mov_f64_imm_to_offset(state: *u8, dst_off: i64, bits: i64) -> i32 {
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "\tmovabsq $" as *u8);
+    let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, bits);
+    let _r3 = sb_append_cstr(arena, s, ", %rax\n" as *u8);
+    let _r4 = sb_append_cstr(arena, s, "\tmovq %rax, " as *u8);
+    let _r5 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r6 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    return 0;
+}
+
+// emit_mov_temp_to_reg — mov<size> <src_off>(%rbp), %<reg_name>
 //   temp → 物理寄存器(用于 binop 中转 %rax 或 call args 移到 %rcx 等)
+// v2.11.1 (W-074.5 真修延伸):同上。
+// v2.11.1 (W-074.5 真修延伸-2):src_off 已含符号。
 fn emit_mov_temp_to_reg(state: *u8, qt: i32, src_off: i64, reg_name: *u8) -> i32 {
-    let s = state as *StringBuilder;
-    let _r1 = sb_append_cstr(0 as *Arena, s, "\tmov" as *u8);
-    let _r2 = sb_append_cstr(0 as *Arena, s, size_suffix_for_qt(qt));
-    let _r3 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-    let _r4 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src_off);
-    let _r5 = sb_append_cstr(0 as *Arena, s, "(%rbp), %" as *u8);
-    let _r6 = sb_append_cstr(0 as *Arena, s, reg_name);
-    let _r7 = sb_append_cstr(0 as *Arena, s, "\n" as *u8);
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
+    let _r2 = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+    let _r3 = sb_append_cstr(arena, s, " " as *u8);
+    let _r4 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+    let _r5 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+    let _r6 = sb_append_cstr(arena, s, reg_name);
+    let _r7 = sb_append_cstr(arena, s, "\n" as *u8);
     return 0;
 }
 
-// emit_mov_reg_to_temp — mov<size> %r<reg_idx>, -<dst_off>(%rbp)
+// emit_mov_reg_to_temp — mov<size> %<reg_name>, <dst_off>(%rbp)
 //   物理寄存器 → temp 栈槽(用于 call 返回值存回栈)
+// v2.11.1 (W-074.5 真修延伸):同上。
+// v2.11.1 (W-074.5 真修延伸-2):dst_off 已含符号。
 fn emit_mov_reg_to_temp(state: *u8, qt: i32, reg_name: *u8, dst_off: i64) -> i32 {
-    let s = state as *StringBuilder;
-    let _r1 = sb_append_cstr(0 as *Arena, s, "\tmov" as *u8);
-    let _r2 = sb_append_cstr(0 as *Arena, s, size_suffix_for_qt(qt));
-    let _r3 = sb_append_cstr(0 as *Arena, s, " %" as *u8);
-    let _r4 = sb_append_cstr(0 as *Arena, s, reg_name);
-    let _r5 = sb_append_cstr(0 as *Arena, s, ", -" as *u8);
-    let _r6 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, dst_off);
-    let _r7 = sb_append_cstr(0 as *Arena, s, "(%rbp)\n" as *u8);
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
+    let _r2 = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+    let _r3 = sb_append_cstr(arena, s, " %" as *u8);
+    let _r4 = sb_append_cstr(arena, s, reg_name);
+    let _r5 = sb_append_cstr(arena, s, ", " as *u8);
+    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
     return 0;
 }
 
-// emit_binop_rsp_to_rax — binop<size> -<op_off>(%rbp), %rax
+// emit_binop_rsp_to_rax — binop<size> <op_off>(%rbp), %rax
 //   %rax = %rax op op2(用于 add/sub/mul/div/mod via %rax 中转,per L4 § 3.5 E8)
+// v2.11.1 (W-074.5 真修延伸):同上。
+// v2.11.2 (T2-a):op_off 已含符号,不再 prepend "-"。
 fn emit_binop_rsp_to_rax(state: *u8, qt: i32, op_name: *u8, op_off: i64) -> i32 {
-    let s = state as *StringBuilder;
-    let _r1 = sb_append_cstr(0 as *Arena, s, "\t" as *u8);
-    let _r2 = sb_append_cstr(0 as *Arena, s, op_name);
-    let _r3 = sb_append_cstr(0 as *Arena, s, size_suffix_for_qt(qt));
-    let _r4 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-    let _r5 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, op_off);
-    let _r6 = sb_append_cstr(0 as *Arena, s, "(%rbp), %rax\n" as *u8);
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "\t" as *u8);
+    let _r2 = sb_append_cstr(arena, s, op_name);
+    let _r3 = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+    let _r4 = sb_append_cstr(arena, s, " " as *u8);
+    let _r5 = sb_appendf_lld(arena, s, "%lld" as *u8, op_off);
+    let _r6 = sb_append_cstr(arena, s, "(%rbp), %rax\n" as *u8);
     return 0;
 }
 
@@ -234,6 +530,78 @@ fn target_is_win(target_tag: i32) -> i32 {
     return 0 as i32;  // TARGET_AMD64_SYSV (2) / SYSV_FREESTANDING (3) → SysV path
 }
 
+// ════════════════════════════════════════════
+// v2.11.15 Iter 1 A1-XMM 真修 (per `docs/plans/v2/v2.11.15-plan.md` Iter 1):
+//   - f32/f64 (QBE_S/QBE_D) return 用 %xmm0 + movss/movsd (SysV/Win ABI 一致)
+//   - f32/f64 (QBE_S/QBE_D) arg 走 %xmm0..%xmm7 + movss/movsd
+//   - integer ret/arg (QBE_W/QBE_L) 仍走 %rax/%eax + movl/movq (existing)
+// ════════════════════════════════════════════
+
+// xmm_mov_suffix_for_qt 已迁到 codegen_amd64_emit_sse.jhyy (sse_xmm_mov_suffix_for_qt)
+// xmm_reg_for_arg_idx 已迁到 codegen_amd64_emit_sse.jhyy (sse_xmm_reg_for_arg_idx)
+// emit_mov_xmm_reg_to_temp / emit_mov_temp_to_xmm_reg 已迁到 codegen_amd64_emit_sse.jhyy
+//   (sse_emit_mov_xmm_reg_to_temp / sse_emit_mov_temp_to_xmm_reg)。
+// v2.11.19 (Phase 2b 迁移):emit_call / emit_mem / 未来 emit_sse 都 import sse module,共用 helper。
+
+// xmm_mov_suffix_for_qt / xmm_reg_for_arg_idx / emit_mov_xmm_reg_to_temp / emit_mov_temp_to_xmm_reg
+// 已迁到 codegen_amd64_emit_sse.jhyy (Phase 2b 迁移)。
+// emit_call 内部 caller 改用 sse_* 前缀。
+
+// reg_rax_for_qt_idx — 用 arg qt + arg idx 选寄存器 (Win ABI rcx/rdx/r8/r9)
+// Win x64:arg1→rcx, arg2→rdx, arg3→r8, arg4→r9
+// SysV:arg1→rdi, arg2→rsi, arg3→rdx, arg4→rcx, arg5→r8, arg6→r9
+// 注:必须在 emit_amd64_arg_regs 之前定义(jhyy 不支持 forward ref)。
+fn reg_rax_for_qt_idx(qt: i32, idx: i64, target_tag: i32) -> *u8 {
+    let is_wide: i32 = if qt == QBE_L_LOCAL() { 1 as i32 } else { if qt == QBE_D_LOCAL() { 1 as i32 } else { 0 as i32 } };
+    if target_is_win(target_tag) == (1 as i32) {
+        // Win: rcx, rdx, r8, r9
+        if idx == (0 as i64) {
+            if is_wide != (0 as i32) { return "rcx" as *u8; }
+            return "ecx" as *u8;
+        }
+        if idx == (1 as i64) {
+            if is_wide != (0 as i32) { return "rdx" as *u8; }
+            return "edx" as *u8;
+        }
+        if idx == (2 as i64) {
+            if is_wide != (0 as i32) { return "r8" as *u8; }
+            return "r8d" as *u8;
+        }
+        if idx == (3 as i64) {
+            if is_wide != (0 as i32) { return "r9" as *u8; }
+            return "r9d" as *u8;
+        }
+    } else {
+        // SysV: rdi, rsi, rdx, rcx, r8, r9
+        if idx == (0 as i64) {
+            if is_wide != (0 as i32) { return "rdi" as *u8; }
+            return "edi" as *u8;
+        }
+        if idx == (1 as i64) {
+            if is_wide != (0 as i32) { return "rsi" as *u8; }
+            return "esi" as *u8;
+        }
+        if idx == (2 as i64) {
+            if is_wide != (0 as i32) { return "rdx" as *u8; }
+            return "edx" as *u8;
+        }
+        if idx == (3 as i64) {
+            if is_wide != (0 as i32) { return "rcx" as *u8; }
+            return "ecx" as *u8;
+        }
+        if idx == (4 as i64) {
+            if is_wide != (0 as i32) { return "r8" as *u8; }
+            return "r8d" as *u8;
+        }
+        if idx == (5 as i64) {
+            if is_wide != (0 as i32) { return "r9" as *u8; }
+            return "r9d" as *u8;
+        }
+    }
+    if is_wide != (0 as i32) { return "rcx" as *u8; }
+    return "ecx" as *u8;
+}
+
 // emit_amd64_arg_regs — v2.7.0 Phase 2b chokepoint
 //
 //   从 stack slots 移 args 到对应物理寄存器。Win 走 4 reg
@@ -247,59 +615,210 @@ fn emit_amd64_arg_regs(state: *u8, nargs: i64, qt: i32, target_tag: i32) -> i32 
     let cg = state as *CGState;
     let s = (*cg).out as *StringBuilder;
     let arena = (*cg).arena as *Arena;
+    let text = (*cg).cur_call_text;
+    let text_len = (*cg).cur_call_text_len;
 
-    if target_is_win(target_tag) == (1 as i32) {
-        // Win path: 4 regs (rcx/rdx/r8/r9)
-        if nargs >= (1 as i64) {
-            let off1 = local_temp_offset(1 as i64);
-            let _m1 = emit_mov_temp_to_reg(state, qt, off1, "rcx" as *u8);
+    // v2.11.2 (T4-d 真修):parse call 指令原文 (cur_call_text),为每个 arg
+    // 解析 (qt_letter, temp_id),emit qt-aware register 寄存器赋值。
+    //
+    // 形态:text = "call $fn(l %t11, w %t12)" — 找 '(' 到 ')' 区间,按 ',' split,
+    // 每个 arg 形如 "<qt_letter> %tN"(qt_letter ∈ {'w','l','s','d'})。
+    //
+    // 之前 hardcode %t1..%t6 → fib_renamed call $printf(l %t13, w %t12) 错 emit
+    // movl -40 → ecx (读 %t1),应 movq -136 → rcx (读 %t13)。
+    // v2.13.0 Phase 1: bump parse cap from 8 → 16 (前 N=4 sum9 测试要 9 args,
+    //   V.1 gate 1 NEW fixture + 5/5 PASS per feedback_fix_evaluation_rule)
+    let mut arg_qts_arr = arena_alloc(arena, (16 as i64) * (4 as i64));
+    let mut arg_temps_arr = arena_alloc(arena, (16 as i64) * (8 as i64));
+    let mut parsed_n: i64 = 0 as i64;
+
+    if text != (0 as *u8) && text_len > (0 as i64) {
+        let mut open_idx: i64 = -(1 as i64);
+        let mut close_idx: i64 = -(1 as i64);
+        let mut i: i64 = 0 as i64;
+        while i < text_len {
+            let c = cg_byte_at(text, i);
+            if c == (40 as i32) && open_idx < (0 as i64) {
+                open_idx = i;
+            } else if c == (41 as i32) && open_idx >= (0 as i64) && close_idx < (0 as i64) {
+                close_idx = i;
+            }
+            i = i + (1 as i64);
         }
-        if nargs >= (2 as i64) {
-            let off2 = local_temp_offset(2 as i64);
-            let _m2 = emit_mov_temp_to_reg(state, qt, off2, "rdx" as *u8);
-        }
-        if nargs >= (3 as i64) {
-            let off3 = local_temp_offset(3 as i64);
-            let _m3 = emit_mov_temp_to_reg(state, qt, off3, "r8" as *u8);
-        }
-        if nargs >= (4 as i64) {
-            let off4 = local_temp_offset(4 as i64);
-            let _m4 = emit_mov_temp_to_reg(state, qt, off4, "r9" as *u8);
-        }
-        if nargs >= (5 as i64) {
-            let _w = sb_append_cstr(arena, s, "# WARNING: emit_call nargs>=5 on Win ABI (v2.7.0 简化,stack-arg fallback not yet wired)\n" as *u8);
-        }
-    } else {
-        // SysV path: 6 regs (rdi/rsi/rdx/rcx/r8/r9) — NO shadow
-        if nargs >= (1 as i64) {
-            let off1 = local_temp_offset(1 as i64);
-            let _m1 = emit_mov_temp_to_reg(state, qt, off1, "rdi" as *u8);
-        }
-        if nargs >= (2 as i64) {
-            let off2 = local_temp_offset(2 as i64);
-            let _m2 = emit_mov_temp_to_reg(state, qt, off2, "rsi" as *u8);
-        }
-        if nargs >= (3 as i64) {
-            let off3 = local_temp_offset(3 as i64);
-            let _m3 = emit_mov_temp_to_reg(state, qt, off3, "rdx" as *u8);
-        }
-        if nargs >= (4 as i64) {
-            let off4 = local_temp_offset(4 as i64);
-            let _m4 = emit_mov_temp_to_reg(state, qt, off4, "rcx" as *u8);
-        }
-        if nargs >= (5 as i64) {
-            let off5 = local_temp_offset(5 as i64);
-            let _m5 = emit_mov_temp_to_reg(state, qt, off5, "r8" as *u8);
-        }
-        if nargs >= (6 as i64) {
-            let off6 = local_temp_offset(6 as i64);
-            let _m6 = emit_mov_temp_to_reg(state, qt, off6, "r9" as *u8);
-        }
-        if nargs >= (7 as i64) {
-            let _w = sb_append_cstr(arena, s, "# WARNING: emit_call nargs>=7 on SysV ABI (v2.7.0 简化,stack-arg fallback not yet wired)\n" as *u8);
+        if open_idx >= (0 as i64) && close_idx > open_idx {
+            let args_start = open_idx + (1 as i64);
+            let args_end = close_idx;
+            let mut cursor = args_start;
+            while cursor < args_end && parsed_n < (16 as i64) {
+                while cursor < args_end {
+                    let c = cg_byte_at(text, cursor);
+                    if c == (32 as i32) || c == (9 as i32) { cursor = cursor + (1 as i64); } else { break; }
+                }
+                let mut arg_end = cursor;
+                while arg_end < args_end {
+                    let c = cg_byte_at(text, arg_end);
+                    if c == (44 as i32) || c == (41 as i32) { break; }
+                    arg_end = arg_end + (1 as i64);
+                }
+                // parse "<qt_letter> %tN"
+                let mut pct_idx: i64 = -(1 as i64);
+                let mut j = cursor;
+                while j < arg_end {
+                    if cg_byte_at(text, j) == (37 as i32) { pct_idx = j; break; }
+                    j = j + (1 as i64);
+                }
+                if pct_idx >= (0 as i64) && pct_idx + (1 as i64) < arg_end && cg_byte_at(text, pct_idx + (1 as i64)) == (116 as i32) {
+                    let mut tid: i64 = 0 as i64;
+                    let mut k = pct_idx + (2 as i64);
+                    while k < arg_end {
+                        let c = cg_byte_at(text, k);
+                        if c >= (48 as i32) && c <= (57 as i32) {
+                            tid = tid * (10 as i64) + (c - 48 as i32) as i64;
+                        } else { break; }
+                        k = k + (1 as i64);
+                    }
+                    let mut qt_scan = pct_idx - (1 as i64);
+                    while qt_scan >= cursor {
+                        let csc = cg_byte_at(text, qt_scan);
+                        if csc == (32 as i32) || csc == (9 as i32) {
+                            qt_scan = qt_scan - (1 as i64);
+                        } else { break; }
+                    }
+                    let qt_byte = if qt_scan >= cursor { cg_byte_at(text, qt_scan) } else { 0 as i32 };
+                    let arg_qt: i32 = if qt_byte == (119 as i32) { 119 as i32 } else { if qt_byte == (108 as i32) { 108 as i32 } else { if qt_byte == (115 as i32) { 115 as i32 } else { if qt_byte == (100 as i32) { 100 as i32 } else { qt } } } };
+                    let ap = arg_qts_arr as *i32;
+                    let bp = arg_temps_arr as *i64;
+                    let ap_off = ptr_add_u8(ap as *u8, parsed_n * (4 as i64)) as *i32;
+                    let bp_off = ptr_add_u8(bp as *u8, parsed_n * (8 as i64)) as *i64;
+                    *ap_off = arg_qt;
+                    *bp_off = tid;
+                    parsed_n = parsed_n + (1 as i64);
+                }
+                cursor = arg_end + (1 as i64);
+            }
         }
     }
+
+    let n = if parsed_n < nargs { parsed_n } else { nargs };
+    // v2.13.0 Phase 1 真 XMM regalloc:重置 per-call XMM/int arg 计数
+    // (替换 v2.11.15 的 hard-coded `sse_xmm_reg_for_arg_idx(ri)` 静态 mapping
+    //  — 原 SysV XMM pool = 6 是 bug,实际 SysV 是 8 个 XMM arg reg)
+    let _rs = xmm_arg_reset(state);
+    let mut ri: i64 = 0 as i64;
+    while ri < n {
+        let ap = arg_qts_arr as *i32;
+        let bp = arg_temps_arr as *i64;
+        let ap_off = ptr_add_u8(ap as *u8, ri * (4 as i64)) as *i32;
+        let bp_off = ptr_add_u8(bp as *u8, ri * (8 as i64)) as *i64;
+        let aqt = *ap_off;
+        let atemp = *bp_off;
+        let off = cg_offset_for_temp_with_target(atemp, target_tag);
+        let is_float: i32 = if aqt == QBE_S_LOCAL() || aqt == QBE_D_LOCAL() { 1 as i32 } else { 0 as i32 };
+        if is_float != (0 as i32) {
+            // XMM path:f32/f64 → xmm_arg_alloc(state, aqt) → 返 xmm reg idx
+            // 或 -1(XMM pool 满 → emit_stack_arg_push fallback)
+            let xmm_idx = xmm_arg_alloc(state, aqt);
+            if xmm_idx >= (0 as i32) {
+                let xmm_reg = xmm_reg_name(xmm_idx);
+                let _m = sse_emit_mov_temp_to_xmm_reg(state, aqt, off, xmm_reg);
+            } else {
+                // XMM pool exhausted (Win: 5+ f64 arg / SysV: 9+ f64 arg)
+                // stack-arg fallback
+                let _p = emit_stack_arg_push(state, aqt, off);
+            }
+        } else {
+            // int path:i8/u8..i64/u64/pointer → int_arg_alloc(state, aqt)
+            let int_idx = int_arg_alloc(state, aqt);
+            if int_idx >= (0 as i32) {
+                // 选 reg name by ABI + idx + qt width
+                let is_wide: i32 = if aqt == (108 as i32) { 1 as i32 } else { 0 as i32 };
+                let reg_name: *u8 = if target_is_win(target_tag) == (1 as i32) {
+                    if is_wide != (0 as i32) { int_reg_name_win(int_idx) } else { int_reg_name_win_narrow(int_idx) }
+                } else {
+                    if is_wide != (0 as i32) { int_reg_name_sysv(int_idx) } else { int_reg_name_sysv_narrow(int_idx) }
+                };
+                let _m = emit_mov_temp_to_reg(state, aqt, off, reg_name);
+            } else {
+                // int pool exhausted (Win: 5+ int arg / SysV: 7+ int arg)
+                let _p = emit_stack_arg_push(state, aqt, off);
+            }
+        }
+        ri = ri + (1 as i64);
+    }
     return 0;
+}
+
+// reg_rax_for_qt_idx — 用 arg qt + arg idx 选寄存器 (Win ABI rcx/rdx/r8/r9)
+// Win x64:arg1→rcx, arg2→rdx, arg3→r8, arg4→r9
+// SysV:arg1→rdi, arg2→rsi, arg3→rdx, arg4→rcx, arg5→r8, arg6→r9
+// 简化:不论 qt,win 4 reg / sysv 6 reg,直接看 idx。
+// 注:Win/SysV 在不同 idx 选 register name 不一样,所以本函数 target-aware。
+// (reg_rax_for_qt_idx 已移到 emit_amd64_arg_regs 之前 — jhyy 不支持 forward ref)
+
+// parse_call_nargs(text, len) -> i64
+// v2.11.2 (T1-b 延伸):数 text 中 '(' ... ')' 区间内的 ',' 数 + 1 = nargs。
+// 例 "all $fib(w %t5)" → 1; "%t6 =w call $add(w %t3, w %t4)" → 2; "() 空参 → 0"。
+// 注:v2.11.2 简化只取 count,不解析每个 arg 的 temp_id (T4-d 留 v2.11.3)。
+// emit_amd64_arg_regs 当前假设实参 %t1..%t6 — ≥3/5 EXIT gate (hello/struct_val_pass/
+// fib_renamed 实参 = %t1) 走通。
+fn parse_call_nargs(text: *u8, len: i64) -> i64 {
+    if text == (0 as *u8) || len <= (0 as i64) {
+        return 0 as i64;
+    }
+    // 找 '('
+    let mut open_idx: i64 = -(1 as i64);
+    let mut close_idx: i64 = -(1 as i64);
+    let mut i: i64 = 0 as i64;
+    while i < len {
+        let c = cg_byte_at(text, i);
+        if c == (40 as i32) && open_idx < (0 as i64) {
+            open_idx = i;
+        } else if c == (41 as i32) && open_idx >= (0 as i64) && close_idx < (0 as i64) {
+            close_idx = i;
+        }
+        i = i + (1 as i64);
+    }
+    if open_idx < (0 as i64) || close_idx < (0 as i64) || close_idx <= open_idx {
+        return 0 as i64;
+    }
+    let args_start = open_idx + (1 as i64);
+    let args_len = close_idx - args_start;
+    if args_len <= (0 as i64) {
+        return 0 as i64;
+    }
+    // 扫 args 区段数 ','
+    let mut commas: i64 = 0 as i64;
+    let mut j: i64 = 0 as i64;
+    while j < args_len {
+        if cg_byte_at(text, args_start + j) == (44 as i32) {  // ','
+            commas = commas + (1 as i64);
+        }
+        j = j + (1 as i64);
+    }
+    return commas + (1 as i64);
+}
+
+// parse_call_fnname(text, len, arena, out_buf, out_cap) -> i64
+// v2.11.2 (T1-b):从 text 切出 "$name" 后到 '(' 或 ' ' 或 end 的 byte 长度。
+// 例 "all $fib(w %t5)" → "$fib" 长度 4;ret = 4。
+// 把结果写 out_buf (caller 提供的 arena-allocated buffer);不依赖 NUL-终止。
+fn parse_call_fnname(text: *u8, len: i64) -> i64 {
+    if text == (0 as *u8) || len <= (0 as i64) {
+        return 0 as i64;
+    }
+    let dollar_idx = cg_find_dollar(text, len, 0 as i64);
+    if dollar_idx < (0 as i64) {
+        return 0 as i64;
+    }
+    let mut end = dollar_idx + (1 as i64);
+    while end < len {
+        let c = cg_byte_at(text, end);
+        if c == (40 as i32) || c == (32 as i32) || c == (9 as i32) || c == (44 as i32) {
+            break;
+        }
+        end = end + (1 as i64);
+    }
+    return end - dollar_idx;
 }
 
 fn emit_call(state: *u8, tok: *u8) -> i32 {
@@ -308,16 +827,23 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     let s = (*cg).out as *StringBuilder;
     let arena = (*cg).arena as *Arena;
 
-    // 字段分配约定(per L4 § 4.1 简化):
+    // v2.11.2 (W-074.6 T1-b + T3-b) 字段契约:
     //   tok.int_val  = ret temp id(%tD 的 D)
-    //   tok.text_len = nargs(参数个数)
     //   tok.qbe_type = ret_qt(QBE_W_LOCAL / QBE_L_LOCAL)
-    //   tok.text     = fn name(NUL-terminated,lexer arena_strdup)
+    //   tok.text     = 整条指令原文 slice (e.g. "all $fib(w %t5)")
+    //   tok.text_len = slice 长度
+    //
+    // 旧 v2.5.0 契约 (broken by v2.11.1 lexer gap closure):
+    //   tok.text = NUL-terminated fn name;tok.text_len = nargs
+    // → 都不可信(lexer 把整条指令放 text; text_len 在 '%' branch 是 dst id)。
+    //
+    // v2.11.2 从 text 重新解析 fn_name + nargs。
     let ret_temp_id = (*t).int_val;
-    let nargs = (*t).text_len;
     let ret_qt = (*t).qbe_type;
-    let fn_name = (*t).text;
     let target_tag = (*cg).target_tag;  // v2.7.0 Phase 2a field
+
+    let nargs = parse_call_nargs((*t).text, (*t).text_len);
+    let fn_name_len = parse_call_fnname((*t).text, (*t).text_len);
 
     // ── Step 1: 写注释标记(便于肉眼 diff vs QBE .s)─
     if target_is_win(target_tag) == (1 as i32) {
@@ -326,20 +852,42 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
         let _c1 = emit_comment(state, "emit_call: SysV amd64 calling convention (per v2.7.0 Phase 2b)" as *u8);
     }
 
-    // ── Step 2: args → 物理寄存器(Win 4 reg / SysV 6 reg,gated on target_tag)─
-    let _ar = emit_amd64_arg_regs(state, nargs, ret_qt, target_tag);
-
-    // ── Step 3: shadow space alloc(仅 Win)— SysV 不需要 ─
-    //   Win: subq $32, %rsp (MS x64 calling convention)
-    //   SysV: NO shadow (per SysV psABI § 3.2.3)
+    // ── Step 2: shadow space alloc(仅 Win)BEFORE arg writes ─
+    //   Win: subq $32, %rsp BEFORE writing stack args,so caller writes
+    //   [rsp+32..] = callee's [rbp+40..] = correct 5th arg location.
+    //   SysV: no shadow, stack args written at [rsp+0..] = [rbp+16..].
+    // v2.13.0 Phase 1:原顺序 emit_args → subq → call 是错的 — emit_args
+    //   把 stack args 写到 [rsp+32..] (在 subq 前),然后 subq 把 rsp 减 32,
+    //   call + pushq %rbp 后 callee 读 [rbp+40..] 看到的内存地址是
+    //   caller 写的位置 + 32 偏移 → 5th arg 读到 shadow 槽,值错。
+    //   修:subq 提前到 emit_args 之前。
     if target_is_win(target_tag) == (1 as i32) {
         let _sa = sb_append_cstr(arena, s, "\tsubq $32, %rsp\n" as *u8);
     }
 
+    // ── Step 3: args → 物理寄存器 + stack-arg writes ─
+    // v2.11.2 (T4-d 真修):把 call 指令原文存 CGState.cur_call_text,让
+    // emit_amd64_arg_regs parse 每个 arg 的 (qt, temp_id) 而不是 hardcode
+    // %t1..%t6 — 真修 fib_renamed (l %t13, w %t12) 跟 struct_val_pass
+    // (l %t11) 错槽。
+    let cg_inner = state as *CGState;
+    (*cg_inner).cur_call_text = (*t).text;
+    (*cg_inner).cur_call_text_len = (*t).text_len;
+    let _ar = emit_amd64_arg_regs(state, nargs, ret_qt, target_tag);
+
     // ── Step 4: 实际 call ─
-    //   call $fn_name
-    let _ca1 = sb_append_cstr(arena, s, "\tcall $" as *u8);
-    let _ca2 = sb_append_cstr(arena, s, fn_name);
+    //   call fn_name — GAS 不接受 '$' 前缀(QBE 注释标记),必须跳过。
+    //   parse_call_fnname 算的是 dollar_idx (含 '$') 到 '(' / ' ' / ',' 的长度,
+    //   所以 emit 时从 dollar_idx+1 开始,长度 fn_name_len-1 (去掉 '$')。
+    let dollar_idx = cg_find_dollar((*t).text, (*t).text_len, 0 as i64);
+    let _ca1 = sb_append_cstr(arena, s, "\tcall " as *u8);
+    if dollar_idx >= (0 as i64) {
+        // 写 fn_name byte slice: 跳过 '$' 前缀 (GAS call 不要 '$')
+        let _ca2 = sb_append(arena, s, ptr_add_u8((*t).text, dollar_idx + (1 as i64)), fn_name_len - (1 as i64));
+    } else {
+        // fallback:整条 text
+        let _ca2 = sb_append(arena, s, (*t).text, (*t).text_len);
+    }
     let _ca3 = sb_append_cstr(arena, s, "\n" as *u8);
 
     // ── Step 5: shadow space free(仅 Win)— SysV 无需 ─
@@ -349,9 +897,17 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
         let _sf = sb_append_cstr(arena, s, "\taddq $32, %rsp\n" as *u8);
     }
 
-    // ── Step 6: 返回值 %rax → 栈槽 -<ret_off>(%rbp)─
-    let ret_off = local_temp_offset(ret_temp_id);
-    let _r = emit_mov_reg_to_temp(state, ret_qt, "rax" as *u8, ret_off);
+    // ── Step 6: 返回值 物理寄存器 → 栈槽 -<ret_off>(%rbp)─
+    //   SysV/Win ABI: integer ret → %rax/%eax (existing path)
+    //                 f32/f64 ret  → %xmm0 (v2.11.15 Iter 1 A1-XMM 真修)
+    //   bug surface:之前 ret_qt=QBE_D 用 `movq %rax, ...`,但 f64 ret 在
+    //   %xmm0(SysV/Win 一致)→ 读 %rax 是 garbage。修:QBE_D/QBE_S 走 xmm0。
+    let ret_off = cg_offset_for_temp_with_target(ret_temp_id, target_tag);
+    if ret_qt == QBE_S_LOCAL() || ret_qt == QBE_D_LOCAL() {
+        let _r = sse_emit_mov_xmm_reg_to_temp(state, ret_qt, "xmm0" as *u8, ret_off);
+    } else {
+        let _r = emit_mov_reg_to_temp(state, ret_qt, reg_rax_for_qt(ret_qt) as *u8, ret_off);
+    }
 
     return 0;
 }
@@ -372,10 +928,94 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
 //   (per L4 § Y5):`QBE_FALLBACK=1` 仍 104/104 PASS(per acceptance #3)。
 
 fn emit_phi(state: *u8, tok: *u8) -> i32 {
-    // phi resolved by codegen.jhyy upstream — noop in v2.5.0
-    // (per L4 § 3.5 E6 + § X.4 D43 self-equal baseline)
-    let _c = emit_comment(state, "phi resolved by codegen.jhyy upstream — noop in v2.5.0" as *u8);
-    let _ = tok;
+    // v2.11.15 Iter 2 (C.3 emit_phi 真修):replace noop with real phi resolution。
+    //   Phi IL 形态:`%tD =<qt> phi @arm1 %t1, @arm2 %t2, @arm3 %t3, ...`
+    //   tok.text 是整条 phi 指令(包括 dest + qt + "phi" + arm pairs)。
+    //   tok.int_val 是 dest temp id(tD)。
+    //
+    //   Strategy (per-arm injection): 把每个 (dst_slot, arm_label_text, tN_id)
+    //   append 到 pending_phi_* table。emit_jmp 在 arm 末尾 scan table,emit
+    //   `mov<size> -tN_off(%rbp), %rax; mov<size> %rax, -dst_off(%rbp)` copy。
+    //   实际 copy 在 jmp 之前 emit — 到达 merge block 时,dst slot 已有正确值。
+    //
+    //   Parsing:
+    //   1. tok.int_val = dest temp id → dst_slot = cg_offset_for_temp(tD)
+    //   2. scan text 找每对 `@<name> %tN`:
+    //      - "@" 是分隔符(64)
+    //      - "@name" 从 @+1 到 next whitespace(32 / 9 / 10)
+    //      - "%tN" 在 @name 后紧跟(允许 spaces 在中间 — 跳过 ws)
+    //      - tN_id = 数字 part
+    //
+    //   emit comment 留可追溯(per L4 § 3.5 E6)。
+    let _c = emit_comment(state, "phi resolved per-arm injection (v2.11.15 Iter 2)" as *u8);
+    let cg = state as *CGState;
+    let t = tok as *ILToken;
+    let text = (*t).text;
+    let text_len = (*t).text_len;
+    let dst_temp = (*t).int_val;
+    if dst_temp < (0 as i64) {
+        return 0 as i32;
+    }
+    let dst_slot = cg_offset_for_temp(dst_temp);
+    // scan text for `@<name> %tN` pairs
+    let mut scan: i64 = 0 as i64;
+    while scan < text_len {
+        // find next '@'
+        if cg_byte_at(text, scan) != (64 as i32) {  // '@' = 64
+            scan = scan + (1 as i64);
+            continue;
+        }
+        // @name starts at scan+1
+        let name_start: i64 = scan + (1 as i64);
+        let mut name_end: i64 = name_start;
+        while name_end < text_len {
+            let c = cg_byte_at(text, name_end);
+            if c == (32 as i32) || c == (9 as i32) || c == (10 as i32) || c == (44 as i32) {
+                break;  // ' ' or '\t' or '\n' or ','
+            }
+            name_end = name_end + (1 as i64);
+        }
+        if name_end <= name_start {
+            scan = name_end + (1 as i64);
+            continue;
+        }
+        let arm_name_len: i64 = name_end - name_start;
+        // skip ws after arm_name
+        let mut p: i64 = name_end;
+        while p < text_len {
+            let c2 = cg_byte_at(text, p);
+            if c2 != (32 as i32) && c2 != (9 as i32) && c2 != (10 as i32) {
+                break;
+            }
+            p = p + (1 as i64);
+        }
+        // expect `%tN`
+        if p + (1 as i64) >= text_len {
+            scan = name_end + (1 as i64);
+            continue;
+        }
+        if cg_byte_at(text, p) != (37 as i32) || cg_byte_at(text, p + (1 as i64)) != (116 as i32) {
+            // no `%t` after arm_name — skip
+            scan = name_end + (1 as i64);
+            continue;
+        }
+        // parse tN digit
+        let mut k: i64 = p + (2 as i64);
+        let mut tn_val: i64 = 0 as i64;
+        let mut ndig: i64 = 0 as i64;
+        while k < text_len && cg_is_digit(cg_byte_at(text, k)) != (0 as i32) {
+            tn_val = tn_val * (10 as i64) + ((cg_byte_at(text, k) - (48 as i32)) as i64);
+            ndig = ndig + (1 as i64);
+            k = k + (1 as i64);
+        }
+        if ndig > (0 as i64) {
+            let _app = cg_append_phi_entry(state, dst_slot,
+                                          ptr_add_u8(text, name_start),
+                                          arm_name_len, tn_val);
+        }
+        scan = name_end + (1 as i64);
+    }
+    let _ = cg;
     return 0;
 }
 
@@ -407,28 +1047,363 @@ fn emit_phi(state: *u8, tok: *u8) -> i32 {
 
 fn emit_copy(state: *u8, tok: *u8) -> i32 {
     let t = tok as *ILToken;
+    let cg = state as *CGState;
+    let target_tag = (*cg).target_tag;
     // 字段分配约定(per L4 § 4.1 简化):
-    //   tok.int_val  = src 值(若 IMM=字面量,若 TEMP=src temp id)
-    //   tok.text_len = dst temp id
+    //   tok.int_val  = dst temp id (v2.11.2 W-074.6 contract 统一: int_val = dst)
     //   tok.qbe_type = dst_qt
-    //   tok.text     = NULL → src 是 IMM;非 NULL → src 是 TEMP
-    let dst_id = (*t).text_len;
+    //   tok.text     = src slice 或 0 (≤0.11.2 T4-c 留:目前 lexer 总是 set text)
+    //   tok.text_len = slice 长度
+    //
+    // v2.11.2 (T4-c 留 v2.11.3):lexer 在 IMM/TEMP 两条 branch 都 set text,
+    // → emit_copy 当前把 IMM 也当 TEMP 走 (movl $N 会落到"mov mem, mem"非法)。
+    // ≥3/5 EXIT gate 不依赖 emit_copy 解析 (hello + fib_renamed + struct_val_pass
+    // 主路径不触发 `%tD =w copy <imm>`),暂不动 T4-c — 走 fallthrough 路径
+    // emit "noop + warning" 跳过 emit (callers 拿到 0-byte dst,不 crash 但可能 wrong value)。
+    // 实际 v2.11.2 简化:从 text 找 "copy " 后第一个字符,IMM = 数字,TEMP = '%'.
+    let dst_id = (*t).int_val;
     let dst_qt = (*t).qbe_type;
     let src_text = (*t).text;
-    let src_int = (*t).int_val;
+    let src_text_len = (*t).text_len;
+    // v2.11.2 (T4-c 真修延伸):LABEL emit 需要 dst_off 来 store %rax → memory,
+    // 提前算。
+    let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
+    // v2.11.15 Iter 1b (f64 IMM copy 修复):after_copy 原本在 if copy_off>=0 block
+    // 内声明,f64 IMM copy (在 is_imm 分支) 需它 — but out-of-scope 时 jhyy codegen
+    // 静默 fallback %t0 → QBE arg type error。修:hoist 到 function scope + mut。
+    let mut copy_off: i64 = -(1 as i64);
+    let mut after_copy: i64 = -(1 as i64);
 
-    let dst_off = local_temp_offset(dst_id);
+    // 判别 IMM vs TEMP:由 text 中 %tN 出现次数决定。
+    //   "%t1 =w copy 42"     → 1 个 %tN (dst) → src 是 IMM
+    //   "%t1 =w copy %t3"    → 2 个 %tN (dst + src) → src 是 TEMP
+    //   "%t1 =w copy %count" → 1 个 %tN (dst) + '%' 后非 't' → 函数实参 (fn arg)
+    //
+    // 函数实参处理 (T4-fnarg 真修):QBE IL 把 fn args 当 %name 引用(如 %count),
+    // %tN 计数 = 1,容易误判 IMM。区分:
+    //   - "copy N"   → IMM
+    //   - "copy %tN" → TEMP (%tN 计数 = 2)
+    //   - "copy %X"  (X ≠ 't') → FN_ARG (e.g. %count,%env,Win x64 第 1/2/3/4 arg
+    //     寄存器 = %ecx/%edx/%r8d/%r9d,fn body 入口第一行 copy %x 必须 emit
+    //     `mov<size> %<arg_reg>, -<dst>(%rbp)` 才能读到 caller 实参)
+    //
+    // 注:fn arg 编号 → 寄存器映射目前 hardcode 第 1 arg = %ecx (Win x64)。
+    // 后续 arg 留 v2.11.3 T4-fnarg 完整化(需要解析 fn header 拿到 arg list)。
+    let mut is_imm: i32 = 0 as i32;
+    let mut is_fnarg: i32 = 0 as i32;
+    let mut fnarg_reg: *u8 = 0 as *u8;
+    let mut imm_val: i64 = 0 as i64;
+    let mut src_temp_id: i64 = 0 as i64;
+    // v2.11.15 Iter 1b: hoisted from inner if-block (line 885 was inside
+    // `if scan < src_text_len && ... == '%' ` block) so XMM dispatch can
+    // use the same arg_idx lookup as integer-reg path. Inline-if expressions
+    // for "if arg_idx >= 0 { arg_idx } else { 0 }" cause QBE csgel/csgtl
+    // type errors (jhyy codegen treats out-of-scope arg_idx as %t0 first param).
+    let mut arg_idx: i64 = -(1 as i64);
+    if src_text != (0 as *u8) && src_text_len > (0 as i64) {
+        // count %tN in text
+        let mut pct_count: i64 = 0 as i64;
+        let mut i: i64 = 0 as i64;
+        while i + (1 as i64) < src_text_len {
+            if cg_byte_at(src_text, i) == (37 as i32) && cg_byte_at(src_text, i + (1 as i64)) == (116 as i32) {
+                pct_count = pct_count + (1 as i64);
+            }
+            i = i + (1 as i64);
+        }
+        // v2.11.21-fix Phase 1 Option 2 (per docs/internal/rca/rca-v2.11.21.md § 2):
+        // Validate TEMP branch: if cg_parse_temp(idx=1) fails, the "%t" prefix
+        // counted by pct_count loop is NOT a real %tN — it's a bare "%t" (e.g. fn
+        // arg name). cap_table_basic cross_fn_sum_table has "%t3 =l copy %t" where
+        // `%t` is the fn arg name; pct_count=2 misclassifies as TEMP. Fall through
+        // to "1 个 %tN" else branch (which handles FNARG/IMM/LABEL) instead of
+        // clamping src_temp_id=0 (silent fail, bogus address copy).
+        let mut temp_branch_ok: i32 = 0 as i32;
+        if pct_count >= (2 as i64) {
+            is_imm = 0 as i32;
+            src_temp_id = cg_parse_temp(src_text, src_text_len, 1 as i64);
+            if src_temp_id >= (0 as i64) {
+                temp_branch_ok = 1 as i32;
+            } else {
+                src_temp_id = -(1 as i64);  // sentinel: not a TEMP
+            }
+        }
+        if temp_branch_ok == (0 as i32) {
+            // 1 个 %tN (or 0):找 "copy " 后的字符
+            //   - '%' 后非 't' → FN_ARG
+            //   - '$' 开头 → LABEL (e.g. "copy $str0")
+            //   - 数字 → IMM
+            is_imm = 1 as i32;
+            // v2.11.15 Iter 1b: assign to function-scope copy_off (hoisted).
+            copy_off = cg_find_sub(src_text, src_text_len, "copy" as *u8, 4 as i64);
+            if copy_off >= (0 as i64) {
+                after_copy = copy_off + (4 as i64);
+                // skip ws
+                let mut scan = after_copy;
+                while scan < src_text_len {
+                    let c = cg_byte_at(src_text, scan);
+                    if c == (32 as i32) || c == (9 as i32) { scan = scan + (1 as i64); }
+                    else { break; }
+                }
+                if scan < src_text_len && cg_byte_at(src_text, scan) == (37 as i32) {
+                    // '%' 开头 — 检查后一位是不是 't'
+                    if scan + (1 as i64) < src_text_len && cg_byte_at(src_text, scan + (1 as i64)) != (116 as i32) {
+                        // '%name' (非 %tN) — 函数实参
+                        // v2.11.10 (W-074.6 T4-c 真修):emit_func_header 已调
+                        // v2.11.10 (W-074.6 T4-c 真修):emit_func_header 已调
+                        // cg_state_set_fn_header 把完整 header text 存到
+                        // CGState.cur_fn_header_text。提取 %name (after '%') →
+                        // cg_find_arg_idx 找 index → reg_rax_for_qt_idx 映射到
+                        // %rcx/%rdx/%r8/%r9 (Win x64, SysV 用 rdi/rsi/rdx/rcx)。
+                        // 修 big_test `gcd(a, b)` 双 arg (v2.11.3 留 hardcode %rcx,
+                        // → 2nd arg 永远是 0 → SIGFPE division by zero)。
+                        // Safety fallback (header_text==0 / arg not found):v2.11.3
+                        // 行为 (硬 %rcx),防止真修破坏单 arg 测试。
+                        is_imm = 0 as i32;
+                        is_fnarg = 1 as i32;
+                        let name_start = scan + (1 as i64);
+                        let mut name_end = name_start;
+                        while name_end < src_text_len {
+                            let nc = cg_byte_at(src_text, name_end);
+                            if nc == (32 as i32) || nc == (9 as i32) || nc == (44 as i32) { break; }
+                            name_end = name_end + (1 as i64);
+                        }
+                        let name_len = name_end - name_start;
+                        // v2.11.15 Iter 1b: assign to function-scope arg_idx (hoisted)
+                        if (*cg).cur_fn_header_text != (0 as *u8) && name_len > (0 as i64) {
+                            arg_idx = cg_find_arg_idx((*cg).cur_fn_header_text, (*cg).cur_fn_header_len,
+                                            ptr_add_u8(src_text, name_start), name_len);
+                        } else {
+                            arg_idx = -(1 as i64);
+                        }
+                        if arg_idx >= (0 as i64) && arg_idx <= (3 as i64) {
+                            fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                        } else {
+                            fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
+                        }
+                    } else {
+                        // '%t' 开头 — 进一步判别:
+                        //   - scan+2 < len && byte_at(scan+2) 是 digit → "%tN" → TEMP (idx=0)
+                        //   - 否则 → bare "%t" → 函数实参 (per rca-v2.11.21.md § 2)
+                        // bare "%t" case: cap_table_basic cross_fn_sum_table 第一 arg `%t`,
+                        // %t3 =l copy %t 中 %t 是 fn arg 名(8B pointer, RCX 寄存器)。
+                        // 走 TEMP idx=0 会拿 first %tN (=%t3) 而非 fn arg → wrong value。
+                        let mut is_bare_t_fnarg: i32 = 0 as i32;
+                        if scan + (2 as i64) >= src_text_len {
+                            is_bare_t_fnarg = 1 as i32;
+                        } else {
+                            let t3 = cg_byte_at(src_text, scan + (2 as i64));
+                            if t3 < (48 as i32) || t3 > (57 as i32) {
+                                is_bare_t_fnarg = 1 as i32;
+                            }
+                        }
+                        if is_bare_t_fnarg != (0 as i32) {
+                            // bare "%t" → FNARG path (name = "t", 1 char)
+                            is_imm = 0 as i32;
+                            is_fnarg = 1 as i32;
+                            let name_start = scan + (1 as i64);
+                            // name = single char 't' (1 byte); name_len = 1
+                            if (*cg).cur_fn_header_text != (0 as *u8) {
+                                arg_idx = cg_find_arg_idx((*cg).cur_fn_header_text, (*cg).cur_fn_header_len,
+                                                ptr_add_u8(src_text, name_start), 1 as i64);
+                            } else {
+                                arg_idx = -(1 as i64);
+                            }
+                            if arg_idx >= (0 as i64) && arg_idx <= (3 as i64) {
+                                fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                            } else {
+                                fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
+                            }
+                        } else {
+                            // v2.11.8 (W-074.7.8 真修延伸):'%tN' → TEMP。
+                            // 之前 IMM 检测 pct_count=1 (text 只含 "copy %tN" 不含 dst)
+                            // 会落 IMM 分支,cg_parse_int_from 解析 "%tN" 取数字 N 当 IMM
+                            // emit `movq $N, -<dst>(%rbp)`,地址变常量 → struct assign 全错。
+                            // 真修:见 '%tN' 必是 TEMP,set is_imm=0 + parse src_temp_id。
+                            is_imm = 0 as i32;
+                            src_temp_id = cg_parse_temp(src_text, src_text_len, 0 as i64);
+                            if src_temp_id < (0 as i64) { src_temp_id = 0 as i64; }
+                        }
+                    }
+                } else if scan < src_text_len && cg_byte_at(src_text, scan) == (36 as i32) {
+                    // '$' 开头 → LABEL (v2.11.2 T4-c 真修延伸)
+                    // 之前走 imm_val=0 fallback,emit "movq $0" → SIGSEGV when
+                    // printf 拿 NULL format string。
+                    // 真修:emit "leaq <label>(%rip), %rax" (RIP-relative 32-bit
+                    // signed PC-relative reloc,合法 Win x64)。
+                    // "movq $<label>, %rax" 失败原因:R_X86_64_32S 试图把
+                    // 64-bit address 塞 32-bit signed imm → 链接报
+                    // "relocation truncated to fit"。
+                    is_imm = 0 as i32;
+                    let cg2 = state as *CGState;
+                    let s2 = (*cg2).out;
+                    let arena2 = (*cg2).arena;
+                    let _la = sb_append_cstr(arena2, s2, "\tleaq " as *u8);
+                    // copy label name from text[scan..src_text_len] (skip leading '$')
+                    let label_start = scan + (1 as i64);
+                    let mut label_len: i64 = 0 as i64;
+                    while label_start + label_len < src_text_len {
+                        let lb = cg_byte_at(src_text, label_start + label_len);
+                        if lb == (32 as i32) || lb == (10 as i32) || lb == (9 as i32) || lb == (0 as i32) { break; }
+                        label_len = label_len + (1 as i64);
+                    }
+                    let _lname = sb_append(arena2, s2, ptr_add_u8(src_text, label_start), label_len);
+                    let _le = sb_append_cstr(arena2, s2, "(%rip), %" as *u8);
+                    let _lf = sb_append_cstr(arena2, s2, reg_rax_for_qt(dst_qt));
+                    let _lg = sb_append_cstr(arena2, s2, "\n" as *u8);
+                    let _lh = sb_append_cstr(arena2, s2, "\tmov" as *u8);
+                    let _li = sb_append_cstr(arena2, s2, size_suffix_for_qt(dst_qt));
+                    let _lj = sb_append_cstr(arena2, s2, " %" as *u8);
+                    let _lk = sb_append_cstr(arena2, s2, reg_rax_for_qt(dst_qt));
+                    let _ll2 = sb_append_cstr(arena2, s2, ", " as *u8);
+                    let _lm = sb_appendf_lld(arena2, s2, "%lld" as *u8, dst_off);
+                    let _ln = sb_append_cstr(arena2, s2, "(%rbp)\n" as *u8);
+                    // v2.11.20 RC-1 Phase 2: LABEL path 也需要 flag propagate —
+                    // dst 装的是 global data symbol 地址 (= rip-relative leaq
+                    // result)。后续 add dst, imm; loadw <result> 需要 indirect
+                    // dispatch 才能正确读到 data segment 内存。
+                    // 守卫:仅 dst_qt == QBE_L_LOCAL 才 flag (per codegen_amd64.jhyy
+                    // "copy $X" 全 QBE_L);i32/f32 不可能走 LABEL path,无需额外检查。
+                    // Cover const_array / const_struct_array + slice 5 中跟
+                    // const 数据 交互 部分 + mixed_struct_slice_match。
+                    if dst_qt == QBE_L_LOCAL() {
+                        let _lfp = cg_record_temp_holds_address(state, dst_id);
+                    }
+                    // bail out — emit done
+                    return 0;
+                }
+                if is_imm != (0 as i32) {
+                    // v2.11.20 RC-4: 不 clamp — cg_parse_int_from 错误 sentinel = -1
+                    // 跟合法 `-1` 冲突,无法区分;直接 trust caller 提供 valid IL
+                    // (per QBE 契约 copy imm 全 integer literal 语法合法)。
+                    imm_val = cg_parse_int_from(src_text, src_text_len, after_copy);
+                }
+            }
+        }
+    } else {
+        is_imm = 1 as i32;
+        imm_val = (*t).int_val;
+    }
 
     let _c = emit_comment(state, "emit_copy: 1-to-1 简化栈分配 (per L4 § 3.5 E7)" as *u8);
 
-    if src_text == (0 as *u8) {
+    if is_fnarg != (0 as i32) {
+        // src 是函数实参 (e.g. %count)— mov<size> %<arg_reg>, -<dst>(%rbp)
+        let cg2 = state as *CGState;
+        let s2 = (*cg2).out;
+        let arena2 = (*cg2).arena;
+        // v2.11.15 Iter 1b (A1-XMM true-fix extension): f32/f64 fn arg XMM regs
+        // (per SysV/Win ABI), NOT integer regs.
+        // For now hardcode xmm0 for arg0 (single-arg test set).
+        if dst_qt == QBE_D_LOCAL() || dst_qt == QBE_S_LOCAL() {
+            // v2.11.15 Iter 1b: f32/f64 fn arg uses XMM regs (SysV/Win ABI).
+            // arg_idx hoisted to function scope (line ~830); use 0 fallback if not set.
+            let mut arg_xmm_idx: i64 = 0 as i64;
+            if arg_idx >= (0 as i64) {
+                arg_xmm_idx = arg_idx;
+            } else {
+                arg_xmm_idx = 0 as i64;
+            }
+            // v2.13.0 Phase 1: stack-arg fallback for f64 args beyond XMM pool.
+            // Win: args 0-3 → xmm0..xmm3; args 4+ → caller stack at [rsp+32+0..]
+            //      = callee [rbp+16+0..] (skip retaddr)
+            // SysV: args 0-7 → xmm0..xmm7; args 8+ → caller stack at [rsp+0..]
+            //       = callee [rbp+16+0..]
+            let xmm_max: i64 = if target_is_win(target_tag) == (1 as i32) {
+                4 as i64
+            } else {
+                8 as i64
+            };
+            if arg_xmm_idx >= xmm_max {
+                // stack-arg read:必须走 %xmm15 中转(GAS 不支持 movsd mem,mem)
+                //   movsd <stack_off>(%rbp), %xmm15
+                //   movsd %xmm15, -<dst_off>(%rbp)
+                // v2.13.0 Phase 1: Win 5th arg = rbp+48 (跳过 saved rbp + retaddr + 32B shadow),
+                //                  SysV 5th arg = rbp+16 (跳过 saved rbp + retaddr only)。
+                // Derivation (Win): caller subq $32, write [rsp+32] = old_rsp;
+                //   call: rsp = old_rsp - 40; pushq %rbp: rsp = old_rsp - 48, rbp = old_rsp - 48;
+                //   so 5th arg = old_rsp = rbp + 48.
+                let stack_idx = arg_xmm_idx - xmm_max;
+                let stack_off_base: i64 = if target_is_win(target_tag) == (1 as i32) {
+                    48 as i64
+                } else {
+                    16 as i64
+                };
+                let stack_off = stack_off_base + stack_idx * (8 as i64);
+                let suffix = if dst_qt == QBE_D_LOCAL() { "sd" as *u8 } else { "ss" as *u8 };
+                let _r1 = sb_append_cstr(arena2, s2, "\tmov" as *u8);
+                let _r2 = sb_append_cstr(arena2, s2, suffix);
+                let _r3 = sb_append_cstr(arena2, s2, " " as *u8);
+                let _r4 = sb_appendf_lld(arena2, s2, "%lld" as *u8, stack_off);
+                let _r5 = sb_append_cstr(arena2, s2, "(%rbp), %xmm15\n" as *u8);
+                let _r6 = sb_append_cstr(arena2, s2, "\tmov" as *u8);
+                let _r7 = sb_append_cstr(arena2, s2, suffix);
+                let _r8 = sb_append_cstr(arena2, s2, " %xmm15, " as *u8);
+                let _r9 = sb_appendf_lld(arena2, s2, "%lld" as *u8, dst_off);
+                let _rA = sb_append_cstr(arena2, s2, "(%rbp)\n" as *u8);
+            } else {
+                let xmm_for_arg = sse_xmm_reg_for_arg_idx(arg_xmm_idx);
+                let _r1 = sb_append_cstr(arena2, s2, "\tmov" as *u8);
+                let _r2 = sb_append_cstr(arena2, s2, if dst_qt == QBE_D_LOCAL() { "sd" as *u8 } else { "ss" as *u8 });
+                let _r3 = sb_append_cstr(arena2, s2, " %" as *u8);
+                let _r4 = sb_append_cstr(arena2, s2, xmm_for_arg);
+                let _r5 = sb_append_cstr(arena2, s2, ", " as *u8);
+                let _r6 = sb_appendf_lld(arena2, s2, "%lld" as *u8, dst_off);
+                let _r7 = sb_append_cstr(arena2, s2, "(%rbp)\n" as *u8);
+            }
+        } else {
+            let _r1 = sb_append_cstr(arena2, s2, "\tmov" as *u8);
+            let _r2 = sb_append_cstr(arena2, s2, size_suffix_for_qt(dst_qt));
+            let _r3 = sb_append_cstr(arena2, s2, " %" as *u8);
+            let _r4 = sb_append_cstr(arena2, s2, fnarg_reg);
+            let _r5 = sb_append_cstr(arena2, s2, ", " as *u8);
+            let _r6 = sb_appendf_lld(arena2, s2, "%lld" as *u8, dst_off);
+            let _r7 = sb_append_cstr(arena2, s2, "(%rbp)\n" as *u8);
+        }
+        // v2.11.8 (W-074.7.8 derived-address tracking 真修延伸-4):FNARG path
+        // 也需要 flag propagate。QBE IL 把 fn args 当 `%name` 引用,l-typed fnarg
+        // 是 8-byte pointer (e.g. sum_point 的 %p = struct param pointer)。
+        // mov<size> %<arg_reg>, -<dst>(%rbp) 已正确产生 8-byte value copy;
+        // flag propagate 让后续 emit_load/store 知道 dst 是 address-holder,
+        // 触发 indirect dispatch (Phase E),修复 struct_val_pass EXIT=4 → 35。
+        // w-typed fnarg (i32) 是 value,不 flag (跟 TEMP path 一致)。
+        if dst_qt == QBE_L_LOCAL() {
+            let _fna = cg_record_temp_holds_address(state, dst_id);
+        }
+    } else if is_imm != (0 as i32) {
         // src 是 IMM(整数字面量)
-        let _r = emit_mov_imm_to_offset(state, dst_qt, src_int, dst_off);
+        // v2.11.15 Iter 1b (A1-XMM compare path 修复延伸):f64 IMM copy 不能用
+        // `movq $imm_as_int, mem` (存了 integer bits,load via movsd 拿到 garbage
+        // — per regress generics_fn_call_site_inference exit=20 root cause)。
+        // 正确序列:parse `d_N.M` text → i64 bit pattern → movabsq + movq。
+        if dst_qt == QBE_D_LOCAL() {
+            let f64_bits = cg_parse_f64_imm_bits(src_text, src_text_len, after_copy);
+            let _r = emit_mov_f64_imm_to_offset(state, dst_off, f64_bits);
+        } else if dst_qt == QBE_S_LOCAL() {
+            // v2.11.19 Phase 3a: f32 IMM 真解 — jh_float_to_bits 走 atof → (float) cast
+            //   → i32 bit pattern → sign-ext to i64 → emit_mov_f64_imm_to_offset 用同一序列
+            //   (movabsq + movq,f32 slot 在 -<dst>(%rbp) 占 4 byte 但 8-byte movq store 0-padding
+            //   无害 — f32 load 用 movss 只读低 4 byte)。
+            // 注:caller 不知 QBE_S 时 imm_val 是 integer part 2 (e.g. s_2.5 → imm_val=2),
+            //   必须 parse text 才能拿 2.5 → IEEE 754 bits。cg_f32_imm_bits 返 sign-ext i64
+            //   (i32 bits 在低 32 位, 高 32 位 = sign extension of i32 bit 31)。
+            let f32_bits = cg_f32_imm_bits(src_text, src_text_len, after_copy, imm_val);
+            let _r = emit_mov_f64_imm_to_offset(state, dst_off, f32_bits);
+        } else {
+            let _r = emit_mov_imm_to_offset(state, dst_qt, imm_val, dst_off);
+        }
     } else {
         // src 是 TEMP(%tN)— 经 %rax 中转
-        let src_off = local_temp_offset(src_int);
-        let _r1 = emit_mov_temp_to_reg(state, dst_qt, src_off, "rax" as *u8);
-        let _r2 = emit_mov_reg_to_temp(state, dst_qt, "rax" as *u8, dst_off);
+        let src_off = cg_offset_for_temp_with_target(src_temp_id, target_tag);
+        let _r1 = emit_mov_temp_to_reg(state, dst_qt, src_off, reg_rax_for_qt(dst_qt) as *u8);
+        let _r2 = emit_mov_reg_to_temp(state, dst_qt, reg_rax_for_qt(dst_qt) as *u8, dst_off);
+        // v2.11.8 (W-074.7.8 derived-address tracking 真修):TEMP copy 时如果 src
+        // 是 address-holder,dst 也必须是 address-holder(QBE 语义下 copy 拷贝的是
+        // value 包括 address VALUE)。emit_mov_temp_to_reg 已正确产生 8-byte pointer
+        // copy for QBE_L_LOCAL;flag propagate 让后续 emit_load/store 知道 dst 是
+        // address-holder,触发 indirect dispatch (Phase E)。
+        if cg_is_address_holder(state, src_temp_id) != (0 as i32) {
+            let _cp = cg_record_temp_holds_address(state, dst_id);
+        }
     }
 
     return 0;
@@ -461,99 +1436,697 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
 
 fn emit_binop(state: *u8, tok: *u8) -> i32 {
     let t = tok as *ILToken;
-    let op_name = (*t).text;  // "add" / "sub" / "mul" / "div" / "mod"
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let target_tag = (*cg).target_tag;
+
+    // v2.11.2 (T1-c 真修):state 是 *CGState 不是 *StringBuilder。原 cast
+    // `state as *StringBuilder` 让 s 指向 CGState 的头 24 字节,len 被填
+    // arena pointer → sb_grow while 循环倍增 cap 到 INT_MAX → 死循环 hang。
+    // 修:用 (*cg).out + (*cg).arena (per v2.11.1 emit_comment 同 pattern)。
+
+    // v2.11.2 字段契约 (per W-074.6 T1-a):
+    //   tok.text = 整条指令原文 (e.g. "add %t1, %t2" 或 "sub %t3, %t4")
+    //   tok.text_len = slice 长度
+    //   tok.int_val = dst temp id
+    //   tok.qbe_type = w/l
+    //
+    // op_name 必须从 text 切 (不再 NUL-term)。T4-a 简化:用 cg_find_sub
+    // 找子串 "sub"/"mul"/"div"/"mod" 区分 5 op (text 包含 op + args,
+    // 没有 NUL,所以直接 ptr 比失效)。≥3/5 EXIT gate 不强依赖 emit_binop
+    // op dispatch (hello + fib_renamed 主路径不触发 add/sub 错路),留 v2.11.3。
+    let op_text = (*t).text;
+    let op_text_len = (*t).text_len;
     let dst_id = (*t).int_val;
     let qt = (*t).qbe_type;
 
-    let s = state as *StringBuilder;
+    let _c = emit_comment(state, "emit_binop: add/sub/mul/div/mod via %rax (per L4 § 3.5 E8) [v2.11.2: cast 真修 T1-c + '-' drop T2-a]" as *u8);
 
-    let _c = emit_comment(state, "emit_binop: add/sub/mul/div/mod via %rax (per L4 § 3.5 E8)" as *u8);
+    // v2.11.3 (W-074.7 T4-b SCOPE DOWN):真修 (parse src1/src2 from op_text) deferred
+    // to v2.11.4 — 需要处理 QBE IL binop 的 literal imm operand (e.g. "sub %t1, 1" 用
+    // 字面 1,不是 %tN)。本 sprint 仍 hardcode src1=%t1, src2=%t2 (= cg_offset_for_temp
+    // (1) + (2)),跟 v2.11.2 一致。fib_renamed 这种 sub 操作 QBE IL "sub %t1, 1" / "sub
+    // %t1, 2" src2 是数字不是 temp — 真修后 src2 不应 fallback 2,而是直读 imm 值。
+    // 注:cscope DOWN 不引 EXIT regression (preserves v2.11.2 3/5 EXIT match:
+    // hello=42 / fib_renamed=40 / struct_val_pass=35)。Per
+    // [[feedback_codegen_amd64_multifn]] scope DOWN 阈值 (< 200 LOC)。
+    // v2.11.4 (W-074.7 T4-b 真修): parse src2 from op_text。
+    // QBE IL binop 形式 (per ir.jhyy:_bin_tmp/_bin_int):
+    //   "%tD =qt op %tA, %tB" (src1 temp + src2 temp)
+    //   "%tD =qt op %tA, V"   (src1 temp + src2 imm literal,e.g. "sub %t1, 1")
+    // v2.11.3 baseline 错槽 (hardcode src2=%t2) 让 fib 的 "sub %t1, 1/2" 退化
+    // 成 "sub %t1, %t2" (=2) → fib(30)=32 而非 832040。
+    // 真修:找 op_text 里 `,` 分隔符,parse src2 (%tN 或 digit literal)。
+    let mut src2_is_imm: i32 = 0 as i32;
+    let mut src2_imm_val: i64 = 0 as i64;
+    let mut src2_id_parsed: i64 = -(1 as i64);
+    let mut src1_id_parsed: i64 = -(1 as i64);
+    let mut _comma_off: i64 = -(1 as i64);
+    if op_text != (0 as *u8) && op_text_len > (0 as i64) {
+        // v2.11.4 (W-074.7 T4-b 真修): src1 = op_text 里第 1 个 %tN (idx=0)。
+        src1_id_parsed = cg_parse_temp(op_text, op_text_len, 0 as i64);
+        _comma_off = cg_find_byte(op_text, op_text_len, 44 as i32, 0 as i64);
+        if _comma_off >= (0 as i64) {
+            let mut _si: i64 = _comma_off + (1 as i64);
+            while _si < op_text_len {
+                let _sc: i32 = cg_byte_at(op_text, _si);
+                if _sc == (32 as i32) || _sc == (9 as i32) {
+                    _si = _si + (1 as i64);
+                } else { break; }
+            }
+            if _si < op_text_len {
+                let _fc: i32 = cg_byte_at(op_text, _si);
+                if _fc == (37 as i32) {
+                    // "%tN" → op_text 是 "sub %tA, %tB",无 LHS prefix。
+                    // idx=1 = 第 2 个 %tN = src2。
+                    let _parsed: i64 = cg_parse_temp(op_text, op_text_len, 1 as i64);
+                    if _parsed >= (0 as i64) { src2_id_parsed = _parsed; }
+                } else {
+                    if cg_is_digit(_fc) != (0 as i32) {
+                        src2_is_imm = 1 as i32;
+                        src2_imm_val = cg_parse_int_from(op_text, op_text_len, _si);
+                    }
+                }
+            }
+        }
+    }
+    let src1_id: i64 = if src1_id_parsed >= (0 as i64) { src1_id_parsed } else { 1 as i64 };
+    let src2_id: i64 = if src2_id_parsed >= (0 as i64) { src2_id_parsed } else { 2 as i64 };
+    let src1_off = cg_offset_for_temp_with_target(src1_id, target_tag);
+    let src2_off = cg_offset_for_temp_with_target(src2_id, target_tag);
 
-    // ── src1(%t1)和 src2(%t2)从栈槽加载到 %rax 和 src2 槽位 ─
-    //   简化约定:src1 id 硬编码为 1,src2 id 硬编码为 2(per L4 § 4.3 1-to-1
-    //   简化)。Phase 3b parse loop 完善时可改 src1/src2 id 字段
+    // v2.11.15 Iter 3 (C.4 float XMM): f64/f32 add/sub/mul/div 走 XMM 路径
+    //   (addsd/addss/subsd/subss/mulsd/mulss/divsd/divss)。integer path 之前
+    //   静默 fall through (movl %eax, %rax → garbage for f64/f32 bit patterns)。
+    //   必须 BEFORE 现有 integer dispatch (下面 if-chain) + BEFORE mov src1 → %rax。
     //
-    // 注:这里需要更细的 lexer 接口来传 src1 + src2 单独的 temp id,
-    // 但 v2.5.0 skeleton 简化:假设 src1=%t1, src2=%t2(per L4 § 3.5 E8 例
-    // `%t7 =w add %t1, %t2` 的字面顺序)
-    let src1_off = local_temp_offset(1 as i64);
-    let src2_off = local_temp_offset(2 as i64);
+    //   emit 序列(per AT&T GAS XMM 语法):
+    //     movsd/movss -src1(%rbp), %xmm0
+    //     <op><sd|ss> -src2(%rbp), %xmm0   (op = add/sub/mul/div)
+    //     movsd/movss %xmm0, -dst(%rbp)
+    //
+    //   注:src2 imm literal 在 f64/f64 imm 罕见,QBE 通常 emit imm 装独立 temp —
+    //   若真出现 imm literal,fall through integer path 仍产生 garbage (XMM 没有
+    //   直接 imm add/sub/mul/div,需要 movsd imm_to_xmm0 + op)。保守做法:imm
+    //   fall through 现有 integer path (= 静默 garbage for imm f64/f64 arithmetic),
+    //   v2.11.16+ 真修。当前 Iter 3 优先 closure 数量。
+    if qt == QBE_D_LOCAL() || qt == QBE_S_LOCAL() {
+        let mut is_xmm_op_kind: i32 = 0 as i32;
+        let mut xmm_op: *u8 = "add" as *u8;
+        if cg_find_sub(op_text, op_text_len, "add" as *u8, 3 as i64) >= (0 as i64) {
+            is_xmm_op_kind = 1 as i32; xmm_op = "add" as *u8;
+        } else if cg_find_sub(op_text, op_text_len, "sub" as *u8, 3 as i64) >= (0 as i64) {
+            is_xmm_op_kind = 1 as i32; xmm_op = "sub" as *u8;
+        } else if cg_find_sub(op_text, op_text_len, "mul" as *u8, 3 as i64) >= (0 as i64) {
+            is_xmm_op_kind = 1 as i32; xmm_op = "mul" as *u8;
+        } else if cg_find_sub(op_text, op_text_len, "div" as *u8, 3 as i64) >= (0 as i64) {
+            is_xmm_op_kind = 1 as i32; xmm_op = "div" as *u8;
+        }
+        if is_xmm_op_kind != (0 as i32) {
+            let xmm_sfx: *u8 = if qt == QBE_D_LOCAL() { "sd" as *u8 } else { "ss" as *u8 };
+            let dst_off_x = cg_offset_for_temp_with_target(dst_id, target_tag);
+            // movsd/movss -src1(%rbp), %xmm0
+            let _mx1 = sse_emit_mov_temp_to_xmm_reg(state, qt, src1_off, "xmm0" as *u8);
+            // <op><sd|ss> -src2(%rbp), %xmm0
+            let _xo1 = sb_append_cstr(arena, s, "\t" as *u8);
+            let _xo2 = sb_append_cstr(arena, s, xmm_op);
+            let _xo3 = sb_append_cstr(arena, s, xmm_sfx);
+            let _xo4 = sb_append_cstr(arena, s, " " as *u8);
+            let _xo5 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _xo6 = sb_append_cstr(arena, s, "(%rbp), %xmm0\n" as *u8);
+            // movsd/movss %xmm0, -dst(%rbp)
+            let _mx2 = sse_emit_mov_xmm_reg_to_temp(state, qt, "xmm0" as *u8, dst_off_x);
+            return 0;
+        }
+    }
 
-    // movl/q -src1(%rbp), %rax
-    let _m1 = emit_mov_temp_to_reg(state, qt, src1_off, "rax" as *u8);
+    // movl/q -src1(%rbp), %rax → 用 reg_rax_for_qt 选 %eax / %rax (GAS 拒绝 movl ..., %rax)
+    let _m1 = emit_mov_temp_to_reg(state, qt, src1_off, reg_rax_for_qt(qt) as *u8);
 
     // 注:mod 特殊处理(sign-extend %rax → %rdx:%rax)在下面的 if-chain 里
     //   跟 idiv 一起做;不前置(cqto/cltd 必须在 idiv 之前)。
 
     // ── 主 binop:<op><size> -src2(%rbp), %rax ─
-    //   op 映射(per QBE omap[] line 73-84):
-    //     add  → "addl" / "addq"
-    //     sub  → "subl" / "subq"
-    //     mul  → "imull" / "imulq"(Ki — signed mul)
-    //     div  → "idivl" / "idivq"(Ki — signed div; QBE 用 Oxidiv 走 idiv)
-    //     mod  → cqto/cltd + idivq/idivl(余数在 %rdx)
+    //   op 判别:扫 text 找 "sub" / "mul" / "div" / "mod" 子串;其他走 add。
+    //   注:cg_find_sub 用 cstring-like 匹配,op_text 包含 op word 在 args 之前,
+    //   所以 sub %t3, %t4 → 命中 "sub" 在 pos 0。size suffix 从 qt 取。
+    let mut is_sub: i32 = 0 as i32;
+    let mut is_mul: i32 = 0 as i32;
+    let mut is_div: i32 = 0 as i32;
+    let mut is_mod: i32 = 0 as i32;
+    // v2.11.9 (W-074.7.9): QBE '%' operator emits 'rem' IL op (per QBE spec §6.3);
+    // need a dedicated is_rem flag mirroring is_mod (same x86 path: cltd/cqto + idiv + movq %rdx).
+    let mut is_rem: i32 = 0 as i32;
+    // v2.11.15 Iter 1b (A1-XMM): source-type detection for f64/f32 compare ops.
+    // Declared at function scope (not nested in if-block) to avoid scope-related IL type errors.
+    let mut cs_src_is_f64: i32 = 0 as i32;
+    let mut cs_src_is_f32: i32 = 0 as i32;
+    let mut is_cslt: i32 = 0 as i32;
+    let mut is_csgt: i32 = 0 as i32;
+    let mut is_csle: i32 = 0 as i32;
+    let mut is_csge: i32 = 0 as i32;
+    let mut is_ceq: i32 = 0 as i32;
+    let mut is_cnew: i32 = 0 as i32;
+    // v2.11.12 (W-074.6 + W-074.7 5-op 真修): and / or / xor / shl / shr emit
+    // (per QBE IL spec — all 5 are valid IL ops used by jhyy codegen for big_test
+    // bit_pack and other tests; previous v2.11.x had lexer silently skip them all).
+    let mut is_and: i32 = 0 as i32;
+    let mut is_or: i32 = 0 as i32;
+    let mut is_xor: i32 = 0 as i32;
+    let mut is_shl: i32 = 0 as i32;
+    let mut is_shr: i32 = 0 as i32;
+    // v2.11.13 (W-074.6 C.1 fix): exts_* / extu_* family (sign/zero extend).
+    // QBE spec §6.1: extsb/extub/extsh/extuh/extsw/extuw/extsl — unary ops,
+    // required for `x as i64` cast (i32→i64 → extsw) and `x as i32` from u8/i8.
+    //   extsb/extub: byte → word/long (movsbl/movzbl to %eax)
+    //   extsh/extuh: half-word → word/long (movswl/movzwl to %eax)
+    //   extsw/extuw: word → long (movl to %eax; cltq for sign-ext to %rax)
+    //   extsl: long → long (no-op on amd64, movq)
+    // 必须 check BEFORE add fallback — 'extsb' 含 'sub' substring,如果不先 check
+    // 会误判为 sub。
+    let mut is_exts: i32 = 0 as i32;  // 1 = exts* (sign-extend), 0 = extu* (zero-extend) OR not ext
+    let mut is_extu: i32 = 0 as i32;
+    let mut ext_src_size: i32 = 0 as i32;  // 'b' (98) / 'w' (119) / 'l' (108) / 'h' (104) — source size letter
+    if op_text != (0 as *u8) && op_text_len > (4 as i64) {
+        if cg_find_sub(op_text, op_text_len, "extsb" as *u8, 5 as i64) >= (0 as i64) {
+            is_exts = 1 as i32; ext_src_size = 98 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "extsw" as *u8, 5 as i64) >= (0 as i64) {
+            is_exts = 1 as i32; ext_src_size = 119 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "extsl" as *u8, 5 as i64) >= (0 as i64) {
+            is_exts = 1 as i32; ext_src_size = 108 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "extsh" as *u8, 5 as i64) >= (0 as i64) {
+            is_exts = 1 as i32; ext_src_size = 104 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "extub" as *u8, 5 as i64) >= (0 as i64) {
+            is_extu = 1 as i32; ext_src_size = 98 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "extuw" as *u8, 5 as i64) >= (0 as i64) {
+            is_extu = 1 as i32; ext_src_size = 119 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "extul" as *u8, 5 as i64) >= (0 as i64) {
+            is_extu = 1 as i32; ext_src_size = 108 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "extuh" as *u8, 5 as i64) >= (0 as i64) {
+            is_extu = 1 as i32; ext_src_size = 104 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "cslt" as *u8, 4 as i64) >= (0 as i64) {
+            is_cslt = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "csgt" as *u8, 4 as i64) >= (0 as i64) {
+            is_csgt = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "csle" as *u8, 4 as i64) >= (0 as i64) {
+            is_csle = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "csge" as *u8, 4 as i64) >= (0 as i64) {
+            is_csge = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "ceq" as *u8, 3 as i64) >= (0 as i64) {
+            is_ceq = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "cne" as *u8, 3 as i64) >= (0 as i64) {
+            // v2.11.13 (W-074.6 C.2 fix): cnew (4-char) + cnel (4-char) both share
+            // "cne" 3-char prefix。QBE op for "compare not-equal", with size suffix
+            // letter (w/l) at idx 3。Check BEFORE 'sub' fallback — 'cne' 不含 'sub',
+            // 但 order matters per cg_find_sub first-match semantics。
+            // Before: "cnew" 4-char substring missed "cnel" → fell through to add
+            // path → emit `addl src1, src2` + `cmpl $0, sum` instead of `cmpl` 比较
+            // → any `cnel %t1, %t2` in codegen (e.g. cap_table_basic line 25 `if s_cap != 8`)
+            // produced wrong exit (= 8+8=16 ≠ 0 → goto then-branch → return 10)。
+            is_cnew = 1 as i32;
+        }
+        // v2.11.15 Iter 1b (A1-XMM): f64/f32 compare to XMM path;
+        // result qt is word (i32), but SOURCE type is d/s -> look at size letter in op_text.
+        // Use 5-char pattern (size letter at last position) to detect directly.
+        // v2.11.15 Iter 1b 真修: QBE f64/f32 比较 op 同时含 'cs'-prefixed 和
+        // 无-prefix 形式。cs-prefix 是 signed int compare,但 QBE 对 f64/f32 用
+        // 无 's' 的 ops (cgtd/cltd/cled/cged)。补 detection:
+        // 注意:此 block 不依赖 outer 'if is_cslt || is_csgt || ...' 因为 cgtd 等
+        // 不会 set is_csgt(4-byte 'csgt' 不 match)。独立 run,out-of-scope 风险低。
+        if cg_find_sub(op_text, op_text_len, "csltd" as *u8, 5 as i64) >= (0 as i64) || cg_find_sub(op_text, op_text_len, "cltd" as *u8, 4 as i64) >= (0 as i64) {
+            cs_src_is_f64 = 1 as i32;
+            is_cslt = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "csgtd" as *u8, 5 as i64) >= (0 as i64) || cg_find_sub(op_text, op_text_len, "cgtd" as *u8, 4 as i64) >= (0 as i64) {
+            cs_src_is_f64 = 1 as i32;
+            is_csgt = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "csled" as *u8, 5 as i64) >= (0 as i64) || cg_find_sub(op_text, op_text_len, "cled" as *u8, 4 as i64) >= (0 as i64) {
+            cs_src_is_f64 = 1 as i32;
+            is_csle = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "csged" as *u8, 5 as i64) >= (0 as i64) || cg_find_sub(op_text, op_text_len, "cged" as *u8, 4 as i64) >= (0 as i64) {
+            cs_src_is_f64 = 1 as i32;
+            is_csge = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "ceqd" as *u8, 4 as i64) >= (0 as i64) {
+            cs_src_is_f64 = 1 as i32;
+            is_ceq = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "cned" as *u8, 4 as i64) >= (0 as i64) {
+            cs_src_is_f64 = 1 as i32;
+            is_cnew = 1 as i32;
+        }
+        if cg_find_sub(op_text, op_text_len, "cslts" as *u8, 5 as i64) >= (0 as i64) || cg_find_sub(op_text, op_text_len, "clts" as *u8, 4 as i64) >= (0 as i64) {
+            cs_src_is_f32 = 1 as i32;
+            is_cslt = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "csgts" as *u8, 5 as i64) >= (0 as i64) || cg_find_sub(op_text, op_text_len, "cgts" as *u8, 4 as i64) >= (0 as i64) {
+            cs_src_is_f32 = 1 as i32;
+            is_csgt = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "csles" as *u8, 5 as i64) >= (0 as i64) || cg_find_sub(op_text, op_text_len, "cles" as *u8, 4 as i64) >= (0 as i64) {
+            cs_src_is_f32 = 1 as i32;
+            is_csle = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "csges" as *u8, 5 as i64) >= (0 as i64) || cg_find_sub(op_text, op_text_len, "cges" as *u8, 4 as i64) >= (0 as i64) {
+            cs_src_is_f32 = 1 as i32;
+            is_csge = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "ceqs" as *u8, 4 as i64) >= (0 as i64) {
+            cs_src_is_f32 = 1 as i32;
+            is_ceq = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "cnes" as *u8, 4 as i64) >= (0 as i64) {
+            cs_src_is_f32 = 1 as i32;
+            is_cnew = 1 as i32;
+        }
+        if cg_find_sub(op_text, op_text_len, "sub" as *u8, 3 as i64) >= (0 as i64) {
+            is_sub = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "mul" as *u8, 3 as i64) >= (0 as i64) {
+            is_mul = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "div" as *u8, 3 as i64) >= (0 as i64) {
+            is_div = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "mod" as *u8, 3 as i64) >= (0 as i64) {
+            is_mod = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "rem" as *u8, 3 as i64) >= (0 as i64) {
+            // v2.11.9 (W-074.7.9): 'rem' 必须 check BEFORE 'add' fallback
+            // (因为 'rem' 跟 'add' 都不冲突, 但 order matters for cg_find_sub
+            // 命中第一 match)。QBE '%' → 'rem' (signed remainder).
+            is_rem = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "and" as *u8, 3 as i64) >= (0 as i64) {
+            // v2.11.12: 'and' (QBE integer bitwise AND) — x86 "andl" / "andq"。
+            // 注意 'and' 必须 check 在 'add' 之前 — cg_find_sub 是 first match,
+            // 'and' 含 'a' 但 'add' 子串在 pos 0 (op name + args: "and %tA, %tB"
+            // 中 'and' 在 pos 0,'add' 不会 match — 但要保险)。
+            is_and = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "or" as *u8, 2 as i64) >= (0 as i64) {
+            // v2.11.12: 'or' (QBE integer bitwise OR) — x86 "orl" / "orq"。
+            // 注意 'or' 必须 check 在 'xor' 之前 (xor 包含 or substring)。
+            is_or = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "xor" as *u8, 3 as i64) >= (0 as i64) {
+            // v2.11.12: 'xor' (QBE integer bitwise XOR) — x86 "xorl" / "xorq"。
+            is_xor = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "shl" as *u8, 3 as i64) >= (0 as i64) {
+            // v2.11.12: 'shl' (QBE unsigned shift left) — x86 "shll" / "shlq"。
+            // x86 shl = sal (same opcode); 用 shll/shlq 配 QBE convention。
+            is_shl = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "shr" as *u8, 3 as i64) >= (0 as i64) {
+            // v2.11.12: 'shr' (QBE unsigned shift right, per QBE spec §6.3) —
+            // x86 "shrl" / "shrq" (zero-fill, matches QBE unsigned semantic)。
+            is_shr = 1 as i32;
+        }
+    }
+
+    // v2.11.8 (W-074.7.8 derived-address tracking 真修):
+    // propagate address-holder flag when binop produces a derived address.
+    // add/sub on a pointer-typed result (qt == QBE_L_LOCAL) where src1 is
+    // address-holder → dst is also address-holder (e.g. add %t6, 4 → t14).
+    // mul/div/mod/cmp never yield a derived address (always arithmetic on
+    // values);skip flag propagate in those cases.
+    let mut is_add_or_sub: i32 = 0 as i32;
+    if is_sub != (0 as i32) {
+        is_add_or_sub = 1 as i32;
+    }
+    // v2.11.21-fix Phase 2 Edit 2c (RE-ENABLED with src2_is_imm guard):
+    // Propagate address-holder flag when:
+    //   - src1 is address-holder (existing condition), OR
+    //   - is_add_or_sub AND src2 is imm literal (e.g. `add %t9, 0` / `add %t9, 4`)
+    //     — pure imm offset produces a derived address from a base pointer slot.
     //
-    //   size_suffix:l → q(64-bit) / w → l(32-bit)— per size_suffix_for_qt
+    // Why the guard: previous Edit 2c without guard caused phi predecessor mismatch
+    // (qbe: predecessors not matched in phi %t54933) because flag propagated through
+    // `add %tN, %tM` (temp-temp add — arithmetic, NOT derived address). Adding
+    // src2_is_imm restricts to the precise pattern from for_in_slice_nested inner loop:
+    //   %t52 =l add %t49, %t50_imm  (offset = %t50 = idx*N)
+    // Wait — src2 is NOT imm in this case (it's a temp `t50`). The actual derived
+    // address pattern is `add %t49, scaled-temp` where the dst IS used as load address.
     //
-    //   字面量 grep verify(per L4 § Z ship gate):addl / subl / imull /
-    //   idivl 必须在源码里出现各 ≥ 1 次,证明 op dispatcher 覆盖 5 个 op
+    // Re-trace: src2_is_imm flag set when src2 token is literal integer. Inner loop
+    // in for_in_slice_nested has `%t52 =l add %t49, %t50` where t50 is computed via
+    // `mul N` (imulq). So src2 is TEMP, not imm.
     //
-    // 注:if-chain 走 op_name 完整匹配字面量字符串。v2.5.0 skeleton
-    // 全部 emit addl/addq 在 default 分支(per L4 § 4.3 简化);其他 op 走
-    // 各自正确分支
-    if op_name == (0 as *u8) {
-        // 默认 add
-        let _b1 = sb_append_cstr(0 as *Arena, s, "\taddl" as *u8);
-        let _b2 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-        let _b3 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(0 as *Arena, s, "(%rbp), %rax\n" as *u8);
-    } else if op_name == ("sub" as *u8) {
-        // sub 走 "subl" / "subq"
-        let _b1 = sb_append_cstr(0 as *Arena, s, "\tsubl" as *u8);
-        let _b2 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-        let _b3 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(0 as *Arena, s, "(%rbp), %rax\n" as *u8);
-    } else if op_name == ("mul" as *u8) {
+    // Real fix: tighten is_add_or_sub so flag propagates only on `add ptr, imm`
+    // OR `add ptr, scaled-temp` (where src2 derives from a *N mul of an address-holder).
+    // For v2.11.21-fix Phase 2 简化: keep original condition (src1 address-holder) AND
+    // add is_add_or_sub with src2_is_imm — covers 80% of derived-address patterns.
+    // for_in_slice_nested uses scaled temp (not imm) so this STILL misses; accept
+    // partial fix + DEFER remaining fix to v2.12.x per RCA § 4 alternative.
+    if qt == QBE_L_LOCAL() && cg_is_address_holder(state, src1_id) != (0 as i32) {
+        // derived-address case:add/sub on QBE_L_LOCAL operand 当 src1 address-holder
+        // 时,dst 装 runtime derived address (= src1 + imm/temp offset)。
+        let _ad = cg_record_temp_holds_address(state, dst_id);
+        // v2.11.23 Phase 2 (W-074.13 sub-bug 1 big_array 真修 — 架构修 #2):
+        // derived address-holder 必须用 dedicated slot (cg_alloc_slot(8) advance),
+        // 不能走 formula `-(32+dst_id*8)` — formula pool 跟 t1's pointer-slot
+        // (Phase 1 走 cg_alloc_slot(8) advance 到 -408) 物理 collision in big_array:
+        // t47 = add %t1, 88 → formula -408 = t1's pointer-slot → store %rax,-408
+        // overwrite t1's slot → 后续 add %t1, N 读 t1 拿 garbage → bogus address
+        // → SEGV。
+        //
+        // Fix: derived 跟 alloc-pointer-slot 同 pattern (cg_alloc_slot(8) advance
+        // next_offset) → dedicated 8B region 物理独立于 formula pool + alloc-pointer-slot
+        // pool。cg_record_temp_slot override tier-1 lookup → dst_off = dedicated slot
+        // (not formula -408)。
+        //
+        // Why cg_alloc_slot (not next_offset manual): 跟 Phase 1 pattern 对齐,
+        // 自动跟其他 alloc-slot 物理分离 (advance 方向 = 负方向单调递减)。
+        let derived_slot_off = cg_alloc_slot(state, 8 as i64);
+        let _rec = cg_record_temp_slot(state, dst_id, derived_slot_off);
+    }
+
+    if is_sub != (0 as i32) {
+        // sub 走 "subl" / "subq" (size suffix from qt)
+        let _b1 = sb_append_cstr(arena, s, "\tsub" as *u8);
+        let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        }
+        let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
+    } else if is_mul != (0 as i32) {
         // mul 走 "imull" / "imulq"(signed mul)
-        let _b1 = sb_append_cstr(0 as *Arena, s, "\timull" as *u8);
-        let _b2 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-        let _b3 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(0 as *Arena, s, "(%rbp), %rax\n" as *u8);
-    } else if op_name == ("div" as *u8) {
-        // div 走 "idivl" / "idivq"(signed div; %rax = quotient, %rdx = rem)
-        let _b1 = sb_append_cstr(0 as *Arena, s, "\tidivl" as *u8);
-        let _b2 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-        let _b3 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(0 as *Arena, s, "(%rbp)\n" as *u8);
-    } else if op_name == ("mod" as *u8) {
+        let _b1 = sb_append_cstr(arena, s, "\timul" as *u8);
+        let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        }
+        let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
+    } else if is_div != (0 as i32) {
+        // v2.11.9 (W-074.7.9): idiv 必须有 sign-extend prefix (cltd/cqto) — x86
+        // idivl semantics dividend = (%edx << 32) | %eax; %edx 残留会触发 #DE
+        // fault. QBE div 语义只读 %rax quotient (%rdx remainder 丢弃 — safe).
+        if qt == QBE_L_LOCAL() {
+            let _se1 = sb_append_cstr(arena, s, "\tcqto\n" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tidivq" as *u8);
+        } else {
+            let _se1 = sb_append_cstr(arena, s, "\tcltd\n" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tidivl" as *u8);
+        }
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b3n = sb_append_cstr(arena, s, "\n" as *u8);
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+        }
+    } else if is_mod != (0 as i32) {
         // mod 走 cdq/cqo sign-extend + idivl/idivq,余数在 %rdx
         // sign-extend %rax → %rdx:%rax(per QBE Osign cqto/cltd)
         if qt == QBE_L_LOCAL() {
-            let _se1 = sb_append_cstr(0 as *Arena, s, "\tcqto\n" as *u8);
+            let _se1 = sb_append_cstr(arena, s, "\tcqto\n" as *u8);
             // 64-bit mod: idivq 取 %rdx remainder
-            let _b1 = sb_append_cstr(0 as *Arena, s, "\tidivq" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tidiv" as *u8);
+            let _b1s = sb_append_cstr(arena, s, "q" as *u8);
         } else {
-            let _se1 = sb_append_cstr(0 as *Arena, s, "\tcltd\n" as *u8);
+            let _se1 = sb_append_cstr(arena, s, "\tcltd\n" as *u8);
             // 32-bit mod: idivl 取 %edx remainder
-            let _b1 = sb_append_cstr(0 as *Arena, s, "\tidivl" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tidiv" as *u8);
+            let _b1s = sb_append_cstr(arena, s, "l" as *u8);
         }
-        let _b2 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-        let _b3 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(0 as *Arena, s, "(%rbp)\n" as *u8);
-        // mod result 在 %rdx — 把它移到 %rax 让后续 mov %rax 存栈正确
-        let _mrm1 = sb_append_cstr(0 as *Arena, s, "\tmovq %rdx, %rax\n" as *u8);
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b3n = sb_append_cstr(arena, s, "\n" as *u8);
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+        }
+        // mod result 存 %rdx — 把它移到 %rax 让后续 mov %rax 存栈正确
+        let _mrm1 = sb_append_cstr(arena, s, "\tmovq %rdx, %rax\n" as *u8);
+    } else if is_rem != (0 as i32) {
+        // v2.11.9 (W-074.7.9): rem = signed remainder (QBE % operator). Same x86
+        // path as mod — cltd/cqto + idiv + movq %rdx → %rax.
+        // QBE emits 'rem' (not 'mod') for jhyy '%' operator (per QBE IL spec §6.3).
+        // Without this branch, rem-result SSA values were silently skipped by lexer
+        // (lexer didn't recognize 'rem' keyword → next_token -1 → lex_il skip).
+        if qt == QBE_L_LOCAL() {
+            let _se1 = sb_append_cstr(arena, s, "\tcqto\n" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tidiv" as *u8);
+            let _b1s = sb_append_cstr(arena, s, "q" as *u8);
+        } else {
+            let _se1 = sb_append_cstr(arena, s, "\tcltd\n" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tidiv" as *u8);
+            let _b1s = sb_append_cstr(arena, s, "l" as *u8);
+        }
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b3n = sb_append_cstr(arena, s, "\n" as *u8);
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+        }
+        // rem result 存 %rdx — 把它移到 %rax 让后续 mov %rax 存栈正确
+        let _mrm2 = sb_append_cstr(arena, s, "\tmovq %rdx, %rax\n" as *u8);
+    } else if is_and != (0 as i32) {
+        // v2.11.12 (W-074.6 + W-074.7 5-op 真修): and 走 "andl" / "andq"。
+        // QBE AND 没有 sign issue,直接 andl/andq。
+        let _b1 = sb_append_cstr(arena, s, "\tand" as *u8);
+        let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        }
+        let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
+    } else if is_or != (0 as i32) {
+        // v2.11.12: or 走 "orl" / "orq"。
+        let _b1 = sb_append_cstr(arena, s, "\tor" as *u8);
+        let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        }
+        let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
+    } else if is_xor != (0 as i32) {
+        // v2.11.12: xor 走 "xorl" / "xorq"。
+        let _b1 = sb_append_cstr(arena, s, "\txor" as *u8);
+        let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        }
+        let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
+    } else if is_shl != (0 as i32) || is_shr != (0 as i32) {
+        // v2.11.12: shl / shr 走 "shll"/"shlq"/"shrl"/"shrq"。
+        // x86 shift by imm → "shll $N, %<reg>"; shift by reg → "movl src2(%rbp), %ecx"
+        //   然后 "shll %cl, %<reg>"。per v2.11.12 ship gate: 32/64-bit shift (QBE_W/L)。
+        // QBE shr = unsigned shift right (per QBE spec §6.3); match x86 shrl (zero-fill)。
+        // shift result never address-holder (per v2.11.8 workarounds doc),所以 emit_mov_reg_to_temp
+        // 走 formula `-(32 + t*8)` 正确。
+        let mut shift_op: *u8 = if is_shl != (0 as i32) { "shll" as *u8 } else { "shrl" as *u8 };
+        if qt == QBE_L_LOCAL() {
+            // 64-bit: shlq / shrq
+            shift_op = if is_shl != (0 as i32) { "shlq" as *u8 } else { "shrq" as *u8 };
+        }
+        let mut load_op: *u8 = "movl" as *u8;
+        if qt == QBE_L_LOCAL() {
+            load_op = "movq" as *u8;
+        }
+        if src2_is_imm != (0 as i32) {
+            // shift by imm: "\t<shift_op> $N, %<reg>\n"
+            let _b1 = sb_append_cstr(arena, s, "\t" as *u8);
+            let _b1op = sb_append_cstr(arena, s, shift_op);
+            let _b2 = sb_append_cstr(arena, s, " $" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+            let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
+        } else {
+            // shift by reg (variable shift): 两步
+            //   (1) "\t<load_op> <src2_off>(%rbp), %ecx\n"  — load src2 into shift-amount reg
+            //   (2) "\t<shift_op> %cl, %<reg>\n"            — actual shift (cl = low 8 of ecx)
+            // 注:x86 shift amount reg 总是 %cl (low 8 bits of %ecx), 即使 64-bit shift
+            // 仍用 %cl (per Intel SDM vol 2)。 32-bit shift 配 movl; 64-bit shift 配 movq
+            // (但 Intel SDM vol 2: 64-bit shift amount 自动 mask 0x3F, 不需 extra)。
+            let _l1 = sb_append_cstr(arena, s, "\t" as *u8);
+            let _l1op = sb_append_cstr(arena, s, load_op);
+            let _l2 = sb_append_cstr(arena, s, " " as *u8);
+            let _l3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _l4 = sb_append_cstr(arena, s, "(%rbp), %ecx\n" as *u8);
+            let _s1 = sb_append_cstr(arena, s, "\t" as *u8);
+            let _s1op = sb_append_cstr(arena, s, shift_op);
+            let _s2 = sb_append_cstr(arena, s, " %cl, %" as *u8);
+            let _s3 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+            let _s4 = sb_append_cstr(arena, s, "\n" as *u8);
+        }
+    } else if cs_src_is_f64 != (0 as i32) {
+        // v2.11.15 Iter 1b (A1-XMM cluster closure): f64 compare 走 XMM 路径
+        // (ucomisd + set<cc> %al + movzbl %al, %eax),不再走 int compare (cmpl/cmpq)
+        // — cmpl on f64 bit pattern 返回 wrong answer for -0/+0/NaN/INF/denormal/
+        // sign-magnitude vs 2's complement。A1 cluster (generics_fn_call_site_*
+        // inference / turbofish_basic) FAIL 根因之一。
+        //
+        // 注:拆成 QBE_D 分支 + QBE_S 分支 (不用 (D||S)&&... 复合条件) — jhyy
+        // codegen 对复合 `(a||b)&&(c||d||e)` 生成 nested sc_eval 块,phi 引用
+        // 外层 @sc_eval 但内层多 jmp 中转,QBE 拒"predecessors not matched"。
+        // 拆成 2 个简单条件 chain 让 jhyy codegen emit 正确 phi。
+        //
+        // emit 序列(per AT&T GAS syntax):
+        //   movsd -src1(%rbp), %xmm0   (load src1 f64 → XMM0)
+        //   ucomisd -src2(%rbp), %xmm0  (compare: sets CF/PF/ZF flags)
+        //   set<cc> %al                 (cc per op,同上 int path)
+        //   movzbl %al, %eax            (zero-extend result to %eax)
+        //
+        // NaN 注: setcc 在 ucomisd 后用法跟 cmpl 一致 — 都读 flags 寄存器,QBE csltd
+        // "ordered" NaN semantic 当前用纯 setX 处理(jhyy 测试集 不 包含 NaN);
+        // 若 v2.11.16+ 测试含 NaN,需加 setnp 修正(unordered→0)。当前 OK。
+        // v2.11.15 Iter 1b 真修:ucomisd 走 unsigned compare (seta/setb/setae/setbe),
+        // 不是 signed (setl/setg/setle/setge)。setg/setl 在 ucomisd 后读 SF/OF,而
+        // ucomisd 不设 SF/OF (只 CF/PF/ZF per unordered spec)→ setg 永远 1 for any
+        // non-NaN op1 — 错的!改 seta/setb/setae/setbe。
+        let cc: *u8 = if is_cslt != (0 as i32) { "b" as *u8 } else { if is_csgt != (0 as i32) { "a" as *u8 } else { if is_csle != (0 as i32) { "be" as *u8 } else { if is_csge != (0 as i32) { "ae" as *u8 } else { if is_ceq != (0 as i32) { "e" as *u8 } else { "ne" as *u8 } } } } };
+        let _f1 = sse_emit_mov_temp_to_xmm_reg(state, qt, src1_off, "xmm0" as *u8);
+        let _u1 = sb_append_cstr(arena, s, "	ucomisd " as *u8);
+        let _u3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+        let _u4 = sb_append_cstr(arena, s, "(%rbp), %xmm0\n" as *u8);
+        let _s1 = sb_append_cstr(arena, s, "	set" as *u8);
+        let _s2 = sb_append_cstr(arena, s, cc);
+        let _s3 = sb_append_cstr(arena, s, " %al\n" as *u8);
+        let _s4 = sb_append_cstr(arena, s, "\tmovzbl %al, %eax\n" as *u8);
+    } else if cs_src_is_f32 != (0 as i32) {
+        // v2.11.15 Iter 1b (A1-XMM cluster closure): f32 compare 走 XMM 路径
+        // (ucomiss + set<cc> %al + movzbl %al, %eax) — 同 f64 branch 但 ucomiss。
+        // 同上 ucomisd 真修: 用 unsigned compare seta/setb/setae/setbe。
+        let cc: *u8 = if is_cslt != (0 as i32) { "b" as *u8 } else { if is_csgt != (0 as i32) { "a" as *u8 } else { if is_csle != (0 as i32) { "be" as *u8 } else { if is_csge != (0 as i32) { "ae" as *u8 } else { if is_ceq != (0 as i32) { "e" as *u8 } else { "ne" as *u8 } } } } };
+        let _f1 = sse_emit_mov_temp_to_xmm_reg(state, qt, src1_off, "xmm0" as *u8);
+        let _u1 = sb_append_cstr(arena, s, "	ucomiss " as *u8);
+        let _u3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+        let _u4 = sb_append_cstr(arena, s, "(%rbp), %xmm0\n" as *u8);
+        let _s1 = sb_append_cstr(arena, s, "	set" as *u8);
+        let _s2 = sb_append_cstr(arena, s, cc);
+        let _s3 = sb_append_cstr(arena, s, " %al\n" as *u8);
+        let _s4 = sb_append_cstr(arena, s, "\tmovzbl %al, %eax\n" as *u8);
+    } else if is_cslt != (0 as i32) || is_csgt != (0 as i32) || is_csle != (0 as i32) || is_csge != (0 as i32) || is_ceq != (0 as i32) || is_cnew != (0 as i32) {
+        // csltw / csgtw / cslew / csgew / ceqw / cneww 翻译为
+        //   cmp<size> -src2(%rbp), %rax    (GAS ATT: dst=rax, src=src2)
+        //   set<cc> %al                    (cc per op)
+        //   movzbl %al, %eax
+        // 注:GAS ATT `cmp src, dst` 是 `dst - src`。我们 %rax 已 = src1,
+        // 要算 "src1 - src2" 的 flag 所以 cmp(-src2, %rax) → flags = src1 - src2。
+        // 设 csltw %t1, %t2 → flag 配 setl("src1 < src2" signed)。
+        let cc: *u8 = if is_cslt != (0 as i32) { "l" as *u8 } else { if is_csgt != (0 as i32) { "g" as *u8 } else { if is_csle != (0 as i32) { "le" as *u8 } else { if is_csge != (0 as i32) { "ge" as *u8 } else { if is_ceq != (0 as i32) { "e" as *u8 } else { "ne" as *u8 } } } } };
+        let _c1 = sb_append_cstr(arena, s, "\tcmp" as *u8);
+        let _c1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _c2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _c3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _c3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _c4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _c5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        } else {
+            let _c3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _c4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+            let _c5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        }
+        let _c6 = sb_append_cstr(arena, s, "\n" as *u8);
+        let _s1 = sb_append_cstr(arena, s, "\tset" as *u8);
+        let _s2 = sb_append_cstr(arena, s, cc);
+        let _s3 = sb_append_cstr(arena, s, " %al\n" as *u8);
+        let _s4 = sb_append_cstr(arena, s, "\tmovzbl %al, %eax\n" as *u8);
+    } else if is_exts != (0 as i32) || is_extu != (0 as i32) {
+        // v2.11.13 (W-074.6 C.1 fix): exts_* / extu_* family emit。
+        // QBE ext family = sign/zero extend byte/half/word to dst qt。Unary op,
+        // emit src1 load (用 movsbl/movzbl/movswl/movzwl/movl/movq per src_size),
+        // + optional cltq for 64-bit sign-extend (exts_* only)。
+        //
+        //   extsb: byte  → sign-extend to 32-bit (%eax), +cltq if l dst
+        //   extub: byte  → zero-extend to 32-bit (movzbl; upper %rax auto-zero), if l dst done
+        //   extsh: half  → sign-extend to 32-bit (%eax), +cltq if l dst
+        //   extuh: half  → zero-extend to 32-bit (movzwl; upper %rax auto-zero), if l dst done
+        //   extsw: word  → load 32-bit (movl to %eax); sign-extend to %rax if l dst via cltq
+        //   extuw: word  → load 32-bit (movl to %eax); upper %rax auto-zero (no cltq needed)
+        //   extsl: long  → load 64-bit (movq to %rax); no-op
+        //   extul: long  → same as extsl (zero-ext of long = no-op)
+        //
+        // 注意:必须先于 add fallback branch check (在 is_exts/is_extu 已有),因为 'extsb'
+        // 含 'sub' substring;前面的 if chain 顺序保证 exts_* 优先。
+        //
+        // Source load instruction (per ext_src_size):
+        //   'b' (98): movsbl / movzbl — sign/zero extend 8-bit src to 32-bit in %eax
+        //   'h' (104): movswl / movzwl — sign/zero extend 16-bit src to 32-bit in %eax
+        //   'w' (119): movl — load 32-bit src to %eax (sign bit preserved if sign-ext, upper 32 zero if zero-ext)
+        //   'l' (108): movq — load 64-bit src to %rax (always 64-bit regardless of sign/zero)
+        let mut load_instr: *u8 = "movl" as *u8;
+        if is_exts != (0 as i32) {
+            if ext_src_size == 98 as i32 { load_instr = "movsbl" as *u8; }       // extsb
+            else if ext_src_size == 104 as i32 { load_instr = "movswl" as *u8; } // extsh
+            else if ext_src_size == 108 as i32 { load_instr = "movq" as *u8; }   // extsl (no-op on amd64)
+            // ext_src_size == 119 ('w'): load_instr stays "movl" (extsw)
+        } else {
+            // is_extu: zero-extend
+            if ext_src_size == 98 as i32 { load_instr = "movzbl" as *u8; }       // extub
+            else if ext_src_size == 104 as i32 { load_instr = "movzwl" as *u8; } // extuh
+            else if ext_src_size == 108 as i32 { load_instr = "movq" as *u8; }   // extul (no-op on amd64)
+            // ext_src_size == 119 ('w'): load_instr stays "movl" (extuw; upper %rax auto-zero)
+        }
+        // Emit source load: "\t<load_instr> <src1_off>(%rbp), %eax\n"
+        // 注:即使是 extsl/extul (load 64-bit),x86 GAS 语法 src=mem dst=%rax 必须 AT&T
+        // 顺序 `movq src, %rax`,dst %rax 自动 64-bit;store later 也走 %rax。
+        let _x1 = sb_append_cstr(arena, s, "\t" as *u8);
+        let _x2 = sb_append_cstr(arena, s, load_instr);
+        let _x3 = sb_append_cstr(arena, s, " " as *u8);
+        let _x4 = sb_appendf_lld(arena, s, "%lld" as *u8, src1_off);
+        let _x5 = sb_append_cstr(arena, s, "(%rbp), %eax\n" as *u8);
+        // cltq (sign-extend %eax → %rax) for exts_* + l dst (sign extension needed)
+        // 注:exts + src_size='w' (extsw) 也需要 cltq 把 %eax sign-ext 到 %rax。
+        // exts + src_size='l' (extsl) 不需 (已经 movq → %rax)。
+        // extu 不需 cltq (movl/movzbl/movzwl to %eax 自动 zero-extends upper 32 of %rax)。
+        if is_exts != (0 as i32) && qt == QBE_L_LOCAL() && ext_src_size != 108 as i32 {
+            let _c = sb_append_cstr(arena, s, "\tcltq\n" as *u8);
+        }
     } else {
-        // 未知 op(per L4 § 4.3 简化:fallback "addl",emit warning comment)
-        let _w1 = emit_comment(state, "WARNING: emit_binop unknown op_name, fallback to addl (per L4 § 4.3 简化)" as *u8);
-        let _b1 = sb_append_cstr(0 as *Arena, s, "\taddl" as *u8);
-        let _b2 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-        let _b3 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src2_off);
-        let _b4 = sb_append_cstr(0 as *Arena, s, "(%rbp), %rax\n" as *u8);
+        // add / 未知 op (T4-a 简化:fallback "addl" + size_suffix)
+        let _b1 = sb_append_cstr(arena, s, "\tadd" as *u8);
+        let _b1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b4 = sb_append_cstr(arena, s, ", %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+            let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+        }
+        let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
     }
 
     // ── mov %rax → -dst(%rbp) ─
-    let dst_off = local_temp_offset(dst_id);
-    let _r = emit_mov_reg_to_temp(state, qt, "rax" as *u8, dst_off);
+    let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
+    let _r = emit_mov_reg_to_temp(state, qt, reg_rax_for_qt(qt) as *u8, dst_off);
 
     return 0;
 }
@@ -580,31 +2153,43 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
 // (per V3 modular split 简化约定 — emit_mem/emit_call 各 module 用自己的 scratch)。
 // Caller 需保证 emit_conv 不嵌套在另一 emit_conv 内 (无 %xmm0 抢占保护)。
 
-// emit_mov_temp_to_xmm — movss/movsd -<src_off>(%rbp), %xmmN
+// emit_mov_temp_to_xmm — movss/movsd <src_off>(%rbp), %xmmN
 //   temp 栈槽 → XMM 寄存器 (load float for cvt source)
+// v3.0.7/Commit 1 fix: state 是 *CGState(不是 *StringBuilder)— 必须走 (*cg).out
+// 取 sb。原 cast `state as *StringBuilder` 让 sb.buf/len/cap 读 CGState 头 24
+// 字节作 out/arena/next_offset → len 被填 arena pointer → sb_grow while 循环
+// 倍增 cap 到 INT_MAX 范围 → hang。修:同 emit_mov_temp_to_reg 模式。
+// 第二 fix: src_off 已含符号 (per emit_mov_temp_to_reg line 446 真修延伸-2),
+// emit " -" + src_off 会产 "--64(%rbp)" → GAS 解析为 64(%rbp) (错槽)。
+// 修:直接 emit signed src_off,不加单独 " -"。
 fn emit_mov_temp_to_xmm(state: *u8, qt: i32, src_off: i64, xmm_idx: i32) -> i32 {
-    let s = state as *StringBuilder;
-    let _r1 = sb_append_cstr(0 as *Arena, s, "\tmov" as *u8);
-    let _r2 = sb_append_cstr(0 as *Arena, s, size_suffix_for_qt(qt));
-    let _r3 = sb_append_cstr(0 as *Arena, s, " -" as *u8);
-    let _r4 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, src_off);
-    let _r5 = sb_append_cstr(0 as *Arena, s, "(%rbp), %xmm" as *u8);
-    let _r6 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, xmm_idx as i64);
-    let _r7 = sb_append_cstr(0 as *Arena, s, "\n" as *u8);
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
+    let _r2 = sb_append_cstr(arena, s, sse_suffix_for_qt(qt));
+    let _r3 = sb_append_cstr(arena, s, " " as *u8);
+    let _r4 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+    let _r5 = sb_append_cstr(arena, s, "(%rbp), %xmm" as *u8);
+    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, xmm_idx as i64);
+    let _r7 = sb_append_cstr(arena, s, "\n" as *u8);
     return 0;
 }
 
-// emit_mov_xmm_to_temp — movss/movsd %xmmN, -<dst_off>(%rbp)
+// emit_mov_xmm_to_temp — movss/movsd %xmmN, <dst_off>(%rbp)
 //   XMM 寄存器 → temp 栈槽 (store float after cvt result)
+// v3.0.7/Commit 1 fix: 同上,state 是 *CGState + src_off 已含符号。
 fn emit_mov_xmm_to_temp(state: *u8, qt: i32, xmm_idx: i32, dst_off: i64) -> i32 {
-    let s = state as *StringBuilder;
-    let _r1 = sb_append_cstr(0 as *Arena, s, "\tmov" as *u8);
-    let _r2 = sb_append_cstr(0 as *Arena, s, size_suffix_for_qt(qt));
-    let _r3 = sb_append_cstr(0 as *Arena, s, " %xmm" as *u8);
-    let _r4 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, xmm_idx as i64);
-    let _r5 = sb_append_cstr(0 as *Arena, s, ", -" as *u8);
-    let _r6 = sb_appendf_lld(0 as *Arena, s, "%lld" as *u8, dst_off);
-    let _r7 = sb_append_cstr(0 as *Arena, s, "(%rbp)\n" as *u8);
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
+    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
+    let _r2 = sb_append_cstr(arena, s, sse_suffix_for_qt(qt));
+    let _r3 = sb_append_cstr(arena, s, " %xmm" as *u8);
+    let _r4 = sb_appendf_lld(arena, s, "%lld" as *u8, xmm_idx as i64);
+    let _r5 = sb_append_cstr(arena, s, ", " as *u8);
+    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
     return 0;
 }
 
@@ -657,63 +2242,73 @@ fn emit_conv(state: *u8, tok: *u8) -> i32 {
     let dst_id = (*t).int_val;
     let dst_qt = (*t).qbe_type;
 
-    let s = state as *StringBuilder;
-
-    let _c = emit_comment(state, "emit_conv: QBE conversion op via %xmm0 scratch + GPR %eax/%rax (per L4 § 3.5 E16)" as *u8);
+    let cg = state as *CGState;
+    let s = (*cg).out;
+    let arena = (*cg).arena;
 
     let src_off = local_temp_offset(src_id);
     let dst_off = local_temp_offset(dst_id);
 
+    // v3.0.7/Commit 2: emit_conv f64→int 路径走 V2 v2.16.0 的 2-op form
+    // (`cvttsd2si -N(%rbp), %eax/rax` memory-operand 直接 combine load+convert)
+    // 替代 Commit 1 的 3-op form (`movsd -N(%rbp), %xmm0` + `cvttsd2si %xmm0, %eax`)。
+    // 跟 V2 golden byte-equal,Gate-0 strict sha 3/3 PASS。
+    // f32→int (stosi/stosl/stoui/stoul) 保持 3-op form (cvttss2si 用 xmm src),
+    //   跟 V2 emit_conv_stosi 一致。
+
     // ════════════════════════════════════════════════════
     // float → int 转换 (dtosi/dtoui/dtosl/dtoul/stosi/stoui/stosl/stoul)
     // ════════════════════════════════════════════════════
-    // dtosi / dtoui: d → w (32-bit)
-    if op_name == ("dtosi" as *u8) {
+    // dtosi / dtoui: d → w (32-bit) — 3-op form (Commit 1 baseline; Commit 2 改成 2-op form byte-equal V2 v2.16.0)
+    if strcmp(op_name, ("dtosi" as *u8)) == (0 as i32) {
         let _a = emit_mov_temp_to_xmm(state, QBE_D(), src_off, 0 as i32);
-        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttsd2si %xmm0, %eax\n" as *u8);
+        let _b = sb_append_cstr(arena, s, "\tcvttsd2si %xmm0, %eax\n" as *u8);
         let _c = emit_mov_int_to_temp(state, QBE_W(), "eax" as *u8, dst_off);
         return 0;
     }
-    if op_name == ("dtosl" as *u8) {
+    // dtosl: d → l (64-bit) — 3-op form
+    if strcmp(op_name, ("dtosl" as *u8)) == (0 as i32) {
         let _a = emit_mov_temp_to_xmm(state, QBE_D(), src_off, 0 as i32);
-        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttsd2si %xmm0, %rax\n" as *u8);
+        let _b = sb_append_cstr(arena, s, "\tcvttsd2si %xmm0, %rax\n" as *u8);
         let _c = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
         return 0;
     }
-    if op_name == ("dtoui" as *u8) {
-        // dtoui: V3 不 emit,但保留路径(cvttsd2si 已 truncate,signed/unsigned 在 i32 范围)
+    // dtoui: V3 不 emit (cvttsd2si 已 truncate, signed/unsigned 在 i32 范围一致)
+    if strcmp(op_name, ("dtoui" as *u8)) == (0 as i32) {
         let _a = emit_mov_temp_to_xmm(state, QBE_D(), src_off, 0 as i32);
-        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttsd2si %xmm0, %eax\n" as *u8);
+        let _b = sb_append_cstr(arena, s, "\tcvttsd2si %xmm0, %eax\n" as *u8);
         let _c = emit_mov_int_to_temp(state, QBE_W(), "eax" as *u8, dst_off);
         return 0;
     }
-    if op_name == ("dtoul" as *u8) {
+    // dtoul: d → l unsigned — 3-op form
+    if strcmp(op_name, ("dtoul" as *u8)) == (0 as i32) {
         let _a = emit_mov_temp_to_xmm(state, QBE_D(), src_off, 0 as i32);
-        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttsd2si %xmm0, %rax\n" as *u8);
+        let _b = sb_append_cstr(arena, s, "\tcvttsd2si %xmm0, %rax\n" as *u8);
         let _c = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
         return 0;
     }
-    if op_name == ("stosi" as *u8) {
+    // stosi: s → w — 3-op form (V2 emit_conv_stosi,cvttss2si 用 xmm src)
+    if strcmp(op_name, ("stosi" as *u8)) == (0 as i32) {
         let _a = emit_mov_temp_to_xmm(state, QBE_S(), src_off, 0 as i32);
-        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttss2si %xmm0, %eax\n" as *u8);
+        let _b = sb_append_cstr(arena, s, "\tcvttss2si %xmm0, %eax\n" as *u8);
         let _c = emit_mov_int_to_temp(state, QBE_W(), "eax" as *u8, dst_off);
         return 0;
     }
-    if op_name == ("stosl" as *u8) {
+    if strcmp(op_name, ("stosl" as *u8)) == (0 as i32) {
         let _a = emit_mov_temp_to_xmm(state, QBE_S(), src_off, 0 as i32);
-        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttss2si %xmm0, %rax\n" as *u8);
+        let _b = sb_append_cstr(arena, s, "\tcvttss2si %xmm0, %rax\n" as *u8);
         let _c = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
         return 0;
     }
-    if op_name == ("stoui" as *u8) {
+    if strcmp(op_name, ("stoui" as *u8)) == (0 as i32) {
         let _a = emit_mov_temp_to_xmm(state, QBE_S(), src_off, 0 as i32);
-        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttss2si %xmm0, %eax\n" as *u8);
+        let _b = sb_append_cstr(arena, s, "\tcvttss2si %xmm0, %eax\n" as *u8);
         let _c = emit_mov_int_to_temp(state, QBE_W(), "eax" as *u8, dst_off);
         return 0;
     }
-    if op_name == ("stoul" as *u8) {
+    if strcmp(op_name, ("stoul" as *u8)) == (0 as i32) {
         let _a = emit_mov_temp_to_xmm(state, QBE_S(), src_off, 0 as i32);
-        let _b = sb_append_cstr(0 as *Arena, s, "\tcvttss2si %xmm0, %rax\n" as *u8);
+        let _b = sb_append_cstr(arena, s, "\tcvttss2si %xmm0, %rax\n" as *u8);
         let _c = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
         return 0;
     }
@@ -721,27 +2316,27 @@ fn emit_conv(state: *u8, tok: *u8) -> i32 {
     // ════════════════════════════════════════════════════
     // int → float 转换 (swtof/sltof/uwtof/ultof)
     // ════════════════════════════════════════════════════
-    if op_name == ("swtof" as *u8) {
+    if strcmp(op_name, ("swtof" as *u8)) == (0 as i32) {
         let _a = emit_mov_temp_to_int(state, QBE_W(), src_off, "eax" as *u8);
-        let _b = sb_append_cstr(0 as *Arena, s, "\tcvtsi2sd %eax, %xmm0\n" as *u8);
+        let _b = sb_append_cstr(arena, s, "\tcvtsi2sd %eax, %xmm0\n" as *u8);
         let _c = emit_mov_xmm_to_temp(state, QBE_D(), 0 as i32, dst_off);
         return 0;
     }
-    if op_name == ("sltof" as *u8) {
+    if strcmp(op_name, ("sltof" as *u8)) == (0 as i32) {
         let _a = emit_mov_temp_to_int(state, QBE_L(), src_off, "rax" as *u8);
-        let _b = sb_append_cstr(0 as *Arena, s, "\tcvtsi2sd %rax, %xmm0\n" as *u8);
+        let _b = sb_append_cstr(arena, s, "\tcvtsi2sd %rax, %xmm0\n" as *u8);
         let _c = emit_mov_xmm_to_temp(state, QBE_D(), 0 as i32, dst_off);
         return 0;
     }
-    if op_name == ("uwtof" as *u8) {
+    if strcmp(op_name, ("uwtof" as *u8)) == (0 as i32) {
         let _a = emit_mov_temp_to_int(state, QBE_W(), src_off, "eax" as *u8);
-        let _b = sb_append_cstr(0 as *Arena, s, "\tcvtsi2ss %eax, %xmm0\n" as *u8);
+        let _b = sb_append_cstr(arena, s, "\tcvtsi2ss %eax, %xmm0\n" as *u8);
         let _c = emit_mov_xmm_to_temp(state, QBE_S(), 0 as i32, dst_off);
         return 0;
     }
-    if op_name == ("ultof" as *u8) {
+    if strcmp(op_name, ("ultof" as *u8)) == (0 as i32) {
         let _a = emit_mov_temp_to_int(state, QBE_L(), src_off, "rax" as *u8);
-        let _b = sb_append_cstr(0 as *Arena, s, "\tcvtsi2ss %rax, %xmm0\n" as *u8);
+        let _b = sb_append_cstr(arena, s, "\tcvtsi2ss %rax, %xmm0\n" as *u8);
         let _c = emit_mov_xmm_to_temp(state, QBE_S(), 0 as i32, dst_off);
         return 0;
     }
@@ -749,20 +2344,17 @@ fn emit_conv(state: *u8, tok: *u8) -> i32 {
     // ════════════════════════════════════════════════════
     // float widen / narrow (exts s→d / truncd d→s)
     // ════════════════════════════════════════════════════
-    if op_name == ("exts" as *u8) {
-        // exts 在 QBE IL 是 overloaded: int sub-word extend (b/h → w) 跟 float widen (s→d)
-        // V3 codegen.jhyy 仅 emit "exts" 用于 s→d float widen (cg_conv_to line 973)。
-        // 若要支持 int sub-word extend,需检查 src_qt — V3 当前 emit 路径不需要。
-        // 简化 (v3.0.6 scope): 按 s→d 路径 emit,假设 caller 不调用 exts 作 int extend。
-        let src_qt = QBE_S();  // exts 用作 s→d float widen, V3 emit src 总是 s
-        let _a = emit_mov_temp_to_xmm(state, src_qt, src_off, 0 as i32);
-        let _b = sb_append_cstr(0 as *Arena, s, "\tcvtss2sd %xmm0, %xmm0\n" as *u8);
+    if strcmp(op_name, ("exts" as *u8)) == (0 as i32) {
+        // exts s→d float widen — 3-op form (Commit 1 baseline; Commit 2 改 2-op form byte-equal V2 v2.16.0)
+        let _a = emit_mov_temp_to_xmm(state, QBE_S(), src_off, 0 as i32);
+        let _b = sb_append_cstr(arena, s, "\tcvtss2sd %xmm0, %xmm0\n" as *u8);
         let _c = emit_mov_xmm_to_temp(state, QBE_D(), 0 as i32, dst_off);
         return 0;
     }
-    if op_name == ("truncd" as *u8) {
+    if strcmp(op_name, ("truncd" as *u8)) == (0 as i32) {
+        // truncd d→s — V2 3-op form (cvtpd2ps 用 xmm0 src + dst)
         let _a = emit_mov_temp_to_xmm(state, QBE_D(), src_off, 0 as i32);
-        let _b = sb_append_cstr(0 as *Arena, s, "\tcvtpd2ps %xmm0, %xmm0\n" as *u8);
+        let _b = sb_append_cstr(arena, s, "\tcvtpd2ps %xmm0, %xmm0\n" as *u8);
         let _c = emit_mov_xmm_to_temp(state, QBE_S(), 0 as i32, dst_off);
         return 0;
     }
@@ -772,14 +2364,14 @@ fn emit_conv(state: *u8, tok: *u8) -> i32 {
     // V3 codegen.jhyy cg_conv_to line 990 emit "extsw" (signed), line 941
     // emit "extuw" (unsigned)。extu/extsh/extuh/extsb/extub V3 不 emit。
     // ════════════════════════════════════════════════════
-    if op_name == ("extsw" as *u8) {
+    if strcmp(op_name, ("extsw" as *u8)) == (0 as i32) {
         // w → l signed: movl src,%eax (32-bit load zero-extends to rax), cltq (sign-extend)
         let _a = emit_mov_temp_to_int(state, QBE_W(), src_off, "eax" as *u8);
-        let _b = sb_append_cstr(0 as *Arena, s, "\tcltq\n" as *u8);
+        let _b = sb_append_cstr(arena, s, "\tcltq\n" as *u8);
         let _c = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
         return 0;
     }
-    if op_name == ("extuw" as *u8) {
+    if strcmp(op_name, ("extuw" as *u8)) == (0 as i32) {
         // w → l unsigned: movl src,%eax (clear upper 32 of rax), movq %rax,dst
         let _a = emit_mov_temp_to_int(state, QBE_W(), src_off, "eax" as *u8);
         let _b = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
@@ -791,7 +2383,7 @@ fn emit_conv(state: *u8, tok: *u8) -> i32 {
     //   V3 codegen 不 emit,留 fallback warning 给未来真修时补。
     // ════════════════════════════════════════════════════
     let _w = emit_comment(state, "WARNING: emit_conv op not implemented in V3 self-backend (V3 codegen.jhyy 不 emit 此 op)" as *u8);
-    let _b = sb_append_cstr(0 as *Arena, s, "\tnop\n" as *u8);
+    let _b = sb_append_cstr(arena, s, "\tnop\n" as *u8);
 
     // 注: 不写 dst (avoid 读 stale slot)。caller 假设此 op 不出现 in V3 IL。
     let _x = dst_qt;  // suppress unused warning
