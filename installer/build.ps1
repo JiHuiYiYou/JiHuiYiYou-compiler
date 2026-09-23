@@ -137,30 +137,16 @@ switch ($Target) {
         exit 0
     }
     "compiler" {
-        Write-Host "[build.ps1] === compiler MSI build (v1.5.4) ==="
-        # 1. prepare bin/ payload (jhyy.exe + qbe.exe)
+        Write-Host "[build.ps1] === compiler MSI build (v1.5.4 + v2.16.0 QBE removed) ==="
+        # 1. prepare bin/ payload (jhyy.exe; qbe.exe removed in v2.16.0)
         $binDir = "installer/build-artifacts/bin"
         if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
         Copy-Item -Path "compiler/build/bin/jhyy.exe" -Destination "$binDir/jhyy.exe" -Force
-        # qbe.exe resolution (W-025): prefer local qbe/qbe.exe (vendored source
-        # — always present post v1.5.5). PATH fallback retained for safety.
-        $qbeLocal = "qbe/qbe.exe"
-        $qbeOnPath = (Get-Command qbe.exe -ErrorAction SilentlyContinue)
-        if (Test-Path $qbeLocal) {
-            Copy-Item -Path $qbeLocal -Destination "$binDir/qbe.exe" -Force
-            Write-Host "[OK] qbe.exe from local source ($qbeLocal)"
-        } elseif ($qbeOnPath) {
-            Copy-Item -Path $qbeOnPath.Source -Destination "$binDir/qbe.exe" -Force
-            Write-Host "[OK] qbe.exe from PATH ($($qbeOnPath.Source))"
-        } else {
-            Write-Host "[ERROR] qbe.exe not found: run `cd qbe && make` to build from vendored source"
-            exit 1
-        }
 
         # 1a. v1.5.6 W-043: ship runtime.c + jhyy_helpers.c into bin\
         #   installer-layout jhyy.exe (jh_paths_init layout a) builds
         #   "<bindir>\runtime.c" + "<bindir>\jhyy_helpers.c" paths from
-        #   sibling qbe.exe. Without these, gcc link fails because the
+        #   sibling bindpath layout. Without these, gcc link fails because the
         #   cmdline lists them but the files are absent on disk. Regress
         #   uses source-tree layout (b) so this only manifests in fresh
         #   installs. See docs/internal/workarounds.md § W-043.
@@ -252,7 +238,7 @@ switch ($Target) {
         }
 
         # 3. build MSI via WiX 4/7
-        #   bindpath bin/        -> jhyy.exe + qbe.exe + runtime.{c,h} + jhyy_helpers.c + UI assets
+        #   bindpath bin/        -> jhyy.exe (sole production binary, v2.16.0 QBE removed) + runtime.{c,h} + jhyy_helpers.c + UI assets
         #   bindpath common/     -> license.rtf + install-configure-all.bat + 2 .ps1 helpers
         #   bindpath vscode-ext/ -> jhyy-lang-X.Y.Z.vsix
         #   loc Locale.zh-CN.wxl for Chinese UI strings

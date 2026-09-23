@@ -175,3 +175,38 @@ per `compiler/tests/bootstrap/fixed_point.sh N=3 dual-layer verification` (v2.15
 - V.5 ACTIVE workaround count = 0 (W-074.14 → RESOLVED, no new ACTIVE)
 
 **Both active** — D43 closure dual-layer invariant: "all generations within an active baseline byte-equal at both .il AND .s layer", 不是 "v1=v2=...=vN across history"。per `feedback_changelog_umbrella` SOP 每次 re-baseline 是 explicit event。
+
+---
+
+## v2.16.0 — D43 closure dual-layer hold + `.exe` baseline refresh (2026-09-22)
+
+**v2.16.0 active baseline (re-measured)**:
+- `.il` sha (cwd-relative per `cd $JHYY_ROOT`): `954a8563...` (HOLD v2.15.0 baseline, 不变 — v2.16.0 不动 codegen 主路径)
+- `.s` sha (hello.jhyy): `216683e18fbb461dbbfc6d57f3f6f1d1616afec250849d9f23d14e279a50058d` (HOLD v2.15.0 baseline, 不变)
+- `.exe` sha (jhyy.exe): `d984b9e4d50bd049e0dc2ae95c47daf3119c2e5b92eaf8746d40d7ebee8ced55` (REFRESH v2.15.0 `5f225239...` → v2.16.0 `d984b9e4...` — v2.16.0 D26 stage0 coverage 真修 + main.c `-Wl,--no-insert-timestamp` + stage0 `-Wl,--build-id=none -g0` + `SOURCE_DATE_EPOCH=1234567890` recipe 加 chain closure → jhyy.exe PE/COFF TimeDateStamp PE+0x88 deterministic)
+
+per `compiler/tests/bootstrap/fixed_point.sh N=3 dual-layer verification` (v2.16.0 不变, hold v2.15.0 closure):
+- jhyy_v2 → main_v2.il sha = `954a8563...` ✅ (byte-equal to baseline)
+- jhyy_v3 → main_v3.il sha = `954a8563...` ✅ (byte-equal to baseline)
+- jhyy_v4 → main_v4.il sha = `954a8563...` ✅ (byte-equal to baseline, in-mem path)
+
+per `v2.16.0 V.5 gate (4-runs byte-equal verification)`:
+- jhyy.exe (4 rebuilds): `d984b9e4d50bd049e0dc2ae95c47daf3119c2e5b92eaf8746d40d7ebee8ced55` ✅ 4/4 byte-equal
+- jhyy_stage0.exe (4 rebuilds): `3d5a73ae3c00d25bdd62b698a04812f47d0d24e7ad71d6b87b1d7b84e4dca8bf` ✅ 4/4 byte-equal
+
+**v2.16.0 `.exe` baseline refresh root cause**:
+- v2.15.0 jhyy.exe.sha256 = `5f22523992d6e038992866a3532b2d52c86d0a09abca6f59af336f1e460c7abd`
+- v2.16.0 真修 D26 stage0 coverage chain closure:PE/COFF TimeDateStamp PE+0x88 (8 bytes) + PE/COFF build-id (20 bytes, fix via `--build-id=none`) + COFF debug directory (zeroed via `-g0`) + link-time stamp (fix via `--no-insert-timestamp`) → all non-deterministic bytes 锁住, jhyy.exe rebuild → rebuild byte-equal
+- v2.15.0 = `5f225239...` 有 `--build-id=none` + `-g0` 但 link-time timestamp 没 fix (PE TimeDateStamp 来自 ld 内部时间, 不来自 build-id) + stage0 recipe 无 D26 coverage → 4-runs byte-equal 不通过
+- v2.16.0 4-runs byte-equal verified: `-Wl,--no-insert-timestamp` 是 PE TimeDateStamp 的非确定性 byte 唯一兜底 (per `feedback_make_clean_too_aggressive` 教训)
+
+**Both active** — D43 closure dual-layer invariant 持续 hold (`.il` + `.s`),新增 `.exe` byte-equal layer 是 supplementary D26 closure (per V.5 V.6 验证)。
+
+**v2.16.0 测量**:
+- regress 126/147 PASS HOLD (V.1 gate, QBE removal 不影响)
+- V.2 0 `qbe.exe` string refs in jhyy.exe (QBE mentions only as comments/error messages)
+- V.3 bench.sh fib 1.531x FAIL / ack 1.000x PASS / nq 0.965x PASS — first-time baseline accept (--report 模式)
+- V.4 jhyy_stage0.exe 4/4 byte-equal sha `3d5a73ae3c00d25...`
+- V.5 jhyy.exe 4/4 byte-equal sha `d984b9e4d50bd049...`
+- V.6 byte_equal.sh [3/3] V2-only closure (V.5 verified), V1 frozen INFO expected
+- V.7 ACTIVE workaround count = 1 (W-085 NEW discovered during bench.sh, workaround in bench.sh via signature reorder; fix deferred v3.x); 1 commit ship per worktree

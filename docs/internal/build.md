@@ -12,14 +12,13 @@ C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/
 ├── compiler/tests/         # 测试
 │   ├── examples/*.jhyy     # 集成测试
 │   └── unit/*.c            # 单元测试
-├── qbe/qbe.exe             # QBE IL 编译器（vendor）
 ├── mcp-jhyy/               # Claude Code MCP 服务
 └── docs/                   # 文档
 ```
 
 工具：
 - GCC：`/c/msys64/ucrt64/bin/gcc.exe` (15.2.0 MSYS2 ucrt64)
-- QBE：`./qbe/qbe.exe -t <target>` — **v2.0+ 起**,`jhyy compile --target=<triple>` CLI flag 决定 target(`amd64_win` / `amd64_win_freestanding` / `amd64_sysv_stub`,per [`jhyy-abi-v1.0.0.md` § 13.1](../abis/jhyy-abi-v1.0.0.md));v1.x 默认 `amd64_win`
+- Self-backend (jhyy-side 自研 x86-64 codegen):**v2.16.0 起 sole production path** (QBE 完全移除,per `docs/plans/v2/v2.16.0-plan.md`)
 - Git：`/d/Program Files/Git/bin/git.exe`
 
 ---
@@ -102,24 +101,24 @@ make clean && make stage0 && make
 
 ## 手动验证流水线
 
-当需要排查 codegen / QBE / 链接问题时，手动走一遍：
+当需要排查 codegen / 链接问题时，手动走一遍：
 
 ```bash
-# 1. 编译 .jhyy → 生成 QBE IL（停在这一步）
+# 1. 编译 .jhyy → 生成 .s (v2.15.0 起默认 in-mem path 不写盘;force 写盘设 JHY_WRITE_IL=1)
 ./compiler/build/bin/jhyy.exe compile test.jhyy -o test
 
-# 2. 查看 QBE IL
-cat compiler/build/bin/test.il
+# 2. v2.15.0+: 默认 in-mem self-backend 不写 .il/.s 文件。如需查看 .s 输出:
+JHY_WRITE_IL=1 JHY_SELF_BACKEND=1 ./compiler/build/bin/jhyy.exe compile test.jhyy -o test
+cat compiler/build/bin/test.s
 
-# 3. 手动调用 QBE (target 由 --target 决定,v1.x 默认 amd64_win)
-./qbe/qbe.exe -t <target> -o test.s compiler/build/bin/test.il
-
-# 4. 手动链接(需 runtime.c + jhyy_helpers.c,jhyy 编 jhyy 必需)
+# 3. 手动链接(需 runtime.c + jhyy_helpers.c,jhyy 编 jhyy 必需)
 /c/msys64/ucrt64/bin/gcc.exe test.s compiler/runtime/runtime.c compiler/src0/jhyy_helpers.c -o test.exe -lm
 
-# 5. 检查退出码
+# 4. 检查退出码
 ./test.exe; echo $?
 ```
+
+> **v2.16.0 注**:QBE 工具链已完全移除,不再有 `./qbe/qbe.exe` step。self-backend 是 sole production path (per `docs/plans/v2/v2.16.0-plan.md`)。
 
 ---
 
@@ -202,14 +201,18 @@ python compiler/build/bin/regress.py
 
 ---
 
-## QBE 后端坑（Windows 独有）
+## Backend 历史注（v2.16.0 之前）
 
-1. **临时变量必须带字母前缀**：`%t0`, `%t1`... 不能用 `%0`, `%1`（QBE Windows 构建拒绝纯数字）
-2. **缩进必须是空格**：4 空格，不能用 tab（QBE Windows 构建 tab 解析有 bug）
-3. **QBE 参数顺序**：`qbe -o output.s input.il`（输出在前，和常见 CLI 相反）
-4. **目标平台**：`-t <target>` 由 `--target=` CLI flag 决定(v2.0.0+,per [`jhyy-abi-v1.0.0.md` § 13.1](../abis/jhyy-abi-v1.0.0.md));v2.0 接受 `amd64_win` / `amd64_win_freestanding` / `amd64_sysv_stub` 三值,v1.x 仅 `amd64_win`(Windows x64 PE)。QBE 实际 backend 只认 `amd64_win` / `amd64_sysv` 两值,freestanding 复用 `amd64_win`(per D-GUI-12);SYSV 实 impl 推 v2.x M2
+> **v2.16.0 起**:QBE 工具链**完全移除**。`run_qbe` 改 fatal-stub (签名保留);`qbe/` git rm 41 files;qbe.exe mirror 删;installer/license.rtf/wxs QBE 引用删;`build.md` "QBE 后端坑" section 历史归档 (per `docs/plans/v2/v2.16.0-plan.md`)。self-backend 是 sole production path。
 
-见 `docs/internal/architecture.md` 中 codegen 相关章节。
+~~**QBE 后端坑（Windows 独有, v2.16.0 起历史归档）**~~:
+
+1. ~~**临时变量必须带字母前缀**：`%t0`, `%t1`... 不能用 `%0`, `%1`（QBE Windows 构建拒绝纯数字）~~
+2. ~~**缩进必须是空格**：4 空格，不能用 tab（QBE Windows 构建 tab 解析有 bug）~~
+3. ~~**QBE 参数顺序**：`qbe -o output.s input.il`（输出在前，和常见 CLI 相反）~~
+4. ~~**目标平台**：`-t <target>` 由 `--target=` CLI flag 决定(v2.0.0+,per [`jhyy-abi-v1.0.0.md` § 13.1](../abis/jhyy-abi-v1.0.0.md));v2.0 接受 `amd64_win` / `amd64_win_freestanding` / `amd64_sysv_stub` 三值,v1.x 仅 `amd64_win`(Windows x64 PE)。QBE 实际 backend 只认 `amd64_win` / `amd64_sysv` 两值,freestanding 复用 `amd64_win`(per D-GUI-12);SYSV 实 impl 推 v2.x M2~~
+
+见 `docs/internal/architecture.md` 中 codegen 相关章节(以 self-backend 路径为准)。
 
 ---
 

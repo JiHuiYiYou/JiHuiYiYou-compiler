@@ -248,7 +248,7 @@ powershell -File installer/build.ps1 stub
 ### Compiler MSI build (v1.5.2)
 
 ```powershell
-# 拷贝 jhyy.exe + qbe.exe → installer/build-artifacts/bin/, 编译 MSI
+# 拷贝 jhyy.exe → installer/build-artifacts/bin/ (v2.16.0 QBE removed), 编译 MSI
 powershell -File installer/build.ps1 compiler
 # 期望: [OK] installer/build-artifacts/jhyy-compiler-1.0.0.msi built (991KB)
 
@@ -260,7 +260,7 @@ wix msi validate installer/build-artifacts/jhyy-compiler-1.0.0.msi
 ### 产物
 
 - `installer/_stub/stub.msi` (~28KB) — minimal stub, 不参与实际 installer
-- `installer/build-artifacts/jhyy-compiler-X.Y.Z.msi` (~995KB) — 主 MSI, 装 jhyy.exe + qbe.exe + jhyy-setuc.exe (v1.8.3+) + .vsix + file association + Start Menu
+- `installer/build-artifacts/jhyy-compiler-X.Y.Z.msi` (~995KB) — 主 MSI, 装 jhyy.exe (v2.16.0 QBE removed) + jhyy-setuc.exe (v1.8.3+) + .vsix + file association + Start Menu
 - `installer/build-artifacts/jhyy-installer-X.Y.Z.exe` (**v1.5.x = ~1.6MB;v1.8.x = ~30MB**, 含 .NET 8 Desktop Runtime embed) — Burn bundle (installer wrapper)
 - `installer/build-artifacts/jhyy-lang-X.Y.Z.vsix` (~13KB) — VSCode extension (v1.8.x 起含 brand icon + runFile/compileOnly commands)
 - `installer/build-artifacts/*.wixpdb` — WiX 调试符号 (gitignored)
