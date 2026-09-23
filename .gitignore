@@ -135,3 +135,11 @@ compiler/tests/bootstrap/baseline/
 # v3.0.6/Gate-0 byte_equal_selfbackend.sh baseline: 跟 byte_equal_amd64.sh
 # 同 transient parity state (QBE 路径输出 sha, 是 self-backend 真修后的
 # "绿"目标), 不入仓. 跟 jhyy.exe.sha256 同 pattern: refresh after QBE 路径变化.
+# v3.0.7/Commit 0 V2 self-backend golden: 跟 baseline/ 不一样,这些是
+# V2 self-backend (axis-v2 branch) 实跑产出的真 .s 文本,作为 V3 self-backend
+# 真修后的对照 gold (替代 QBE 路径 baseline — V3 self-backend 跟 QBE 不可
+# byte-equal,因为两套 codegen 实现不同)。Refresh 仅在 axis-v2 self-backend
+# 行为变化时(rare),跟 baseline/ 不同 lifecycle。
+!compiler/tests/bootstrap/baseline_v2_self/
+!compiler/tests/bootstrap/baseline_v2_self/*.s
+!compiler/tests/bootstrap/baseline_v2_self/*.md
