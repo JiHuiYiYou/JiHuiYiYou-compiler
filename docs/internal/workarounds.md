@@ -57,7 +57,7 @@
 | [W-054](#w-054-sizeof-il-未定义-t0-真因-qbe_type_of-撞-data-layout) | ✅ RESOLVED (via W-053 chain, 2026-08-27) | Plan agent 探测的 "sizeof emit `%t1 =w copy %t0` 时 `%t0` 未定义" 是假症状。实际根因 = W-053 fix 路径上,把 `qbe_type_of` (i8→'w' widening) 应用到 data section 时,word-packed const array 的 byte 25 落到 7th word 的 2nd byte (= 0),期望值 122 错误。修复: src/ir.c 拆 `qbe_type_of` (SSA widen 必 word-sized, QBE 拒 'b'/'h') vs 新 `qbe_data_type_of` (data section 字节 packed,const array 字节寻址正确);src/ir.h 暴露 + src/codegen.c 3 处 data emit 切到 `qbe_data_type_of`. W-054 不需要单独修,作为 W-053 fix chain 副作用消除。 |
 | [W-055](#w-055-spec-§95-指针算术-p--1-整节未实现) | ✅ RESOLVED 2026-08-28 (v1.7.0 Stage 2 commits `6216138`+`187e8ab`) | spec §9.5 指针算术 `p + 1` / `p - 1` / `p[n]` 整节未实现 — **v1.7.0 Stage 2 ship**: 4 形式全 ship (`*T + int` / `*T - int` / `int + *T` / `*T - *T` / `p[n]`),详见 section body line 3668+ `Resolution (2026-08-28 v1.7.0 Stage 2)`。后续工作推 v2.x = pointer comparison `p < q` + bounds check (`&mut` lifetime),跟 `p±N` / `p[n]` 不同 scope。 |
 | [W-057](#w-057-utf-8-3-byte--4-byte-codepoint-显式-lex-reject-推-v2x) | ✅ RESOLVED 2026-09-23 (v3.0.6/Ph.1) | vendor QBE (2026-08-15 build) 编译期 fold 3/4-byte UTF-8 codepoint 错 (e.g. `'你'` U+4F60 / `'🎉'` U+1F389) — v1.7.0 Stage 3 显式 lex reject "3/4-byte UTF-8 codepoint not supported", spec §4.4 缺独立 W-NNN 归档 (本 v1.7.3 patch C2 补登)。**v3.0.6/Ph.1 真修**: 2 src0 files 改 (lexer.jhyy lead byte 4 类扩 + parser.jhyy decode_char_literal 加 3/4-byte UTF-8 decode 分支), 跟 V2.13.7 `594d00d` 同源, codegen path 不变 (NODE_INT 走 ir_emit_copy)。|
-| [W-058](#w-058-vendor-qbe-2026-08-15-build-不支持-remd--rems-浮点取模-推-v2x) | 🟡 DEFERRED v2.x | vendor QBE 不支持 `remd` (f64 remainder) / `rems` (f32 remainder) 指令, v1.7.2 patch A1 ship 时 fact-check fail, 标 LIMIT 推 v2.x, workarounds/spec 缺独立 W-NNN 归档 (本 v1.7.3 patch C3 补登 + spec 附录 B fmod row cross-ref C4)。|
+| [W-058](#w-058-vendor-qbe-2026-08-15-build-不支持-remd--rems-浮点取模-推-v2x) | ✅ RESOLVED 2026-09-23 (v3.0.6/Ph.2) | vendor QBE 不支持 `remd` (f64 remainder) / `rems` (f32 remainder) 指令, v1.7.2 patch A1 ship 时 fact-check fail, 标 LIMIT 推 v2.x, workarounds/spec 缺独立 W-NNN 归档 (本 v1.7.3 patch C3 补登 + spec 附录 B fmod row cross-ref C4)。**v3.0.6/Ph.2 真修**: codegen.jhyy fold `a % b = a - trunc(a/b) * b` (5 IL insns: div + dtosi/stosi + swtof + mul + sub, polymorphic by tok.qbe_type), 跟 V2.13.8 `16b4903` 同源。Self-backend 路径 W-083 真修在 v3.0.6/Ph.3 (`codegen_amd64_emit_sse.jhyy` `emit_conv_swtof` 加 is_f32 + cvt_suffix + cltq), 跟 V2.13.11 `425ab53` 同源。|
 | [W-059](#w-059-defer-codegen-path-silent-crash-v136-ship-后-0-test-验证-accept-path-推-v18) | ✅ RESOLVED 2026-08-28 (v1.8.0) | 根因 = `compiler/src0/sema.jhyy` `sema_defer_register` (NODE_DEFER case) 调 `infer_type(ctx, expr)` 漏传 `ta` (TypeArena arg) → sema 阶段 silent corrupt stack → `[sema] P3 i=0` 后 crash 0 .il/.s/.exe. 修复: 1-line fix line 1410 `let _v = infer_type(ctx, ta, expr);` (jhyy-side `infer_type` 3-arg signature, 漏 `ta` 等于传 garbage). C-side 正确因为 `infer_type` 是 2-arg. Phase 1A empirical (MCP-only) + Phase 1B bisection 定位 + Phase 2 真修. 3 defer test (`defer_basic.jhyy` / `defer_multi_lifo.jhyy` / `defer_let_init.jhyy`) SKIP directive 删, 全 PASS regress (jhyy.exe 102/102 + jhyy_stage0.exe parity 102/102). N=4 byte-equal closure hold (v2/v3/v4 sha=`03a1cdd4...`). 5/5 PASS on each target test per `feedback_fix_evaluation_rule`. |
 | [W-060](#w-060-enum-variant-payload-abi-mismatch-mixedi1234-match-走-wildcard-path-exit210--1234-推-v18) | ❌ INVALID 2026-08-28 (v1.8.0) | v1.7.3 ship 期间 fact-check 误判为真 bug: 实为 bash `$?` 8-bit truncation (EXIT=210 = 1234 & 0xFF) + Windows `subprocess.run` 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比较. v1.8.0 Phase 1 调查 (Agent 3) 确认 W-060 = test artifact. OR pattern `Some(v) \| Some(v)` 分支 EXIT=42 实无 bug (line 1 SKIP 标签把 spec 限制跟 OR pattern 测试混淆). 2 enum test (`payload_bind_multi.jhyy` / `payload_bind_nested.jhyy`) SKIP directive 删, 全 PASS regress. |
 | [W-061](#w-061-nested-struct-field-offset-bug-outer--tag-inner--read-exit51--307-推-v18) | ❌ INVALID 2026-08-28 (v1.8.0) | v1.7.3 ship 期间 fact-check 误判为真 bug: 实为 bash `$?` 8-bit truncation (EXIT=51 = 307 & 0xFF) + Windows `subprocess.run` 同步 8-bit truncate → regress.py W-028 mod-256 fix (line 243-263) 已 equalize 比较. v1.8.0 Phase 1 调查 (Agent 3) 确认 W-061 = test artifact. `(*o).inner.x + (*o).inner.y` 实 EXIT=300 (无 bug, 推测 OR-pattern 部分 follow-up 误解). nested_struct_dwarf.jhyy SKIP directive 删, 全 PASS regress. |
@@ -3905,19 +3905,21 @@ parse errors
 ## W-058: vendor QBE (2026-08-15 build) 不支持 `remd` / `rems` 浮点取模 (推 v2.x)
 
 **ID:** W-058
-**状态:** 🟡 DEFERRED v2.x
-**日期:** 2026-08-28 (v1.7.3 patch 排查发现 spec/test/workarounds 缺归档)
-**superseder:** 推 v2.x (vendor QBE 升级主线 + 自研 backend)
+**状态:** ✅ RESOLVED 2026-09-23 (v3.0.6/Ph.2)
+**日期:** 2026-08-28 (v1.7.3 patch 排查发现 spec/test/workarounds 缺归档) → 2026-09-23 (v3.0.6/Ph.2 sprint 真修)
+**superseder:** 2026-09-23 (v3.0.6/Ph.2 W-058 真修, 跟 V2.13.8 `16b4903` 同源)。self-backend 路径 W-083 真修在 v3.0.6/Ph.3 (`codegen_amd64_emit_sse.jhyy` `emit_conv_swtof` f32 mis-emit + cltq), 跟 V2.13.11 `425ab53` 同源。
 **触发面:** spec 附录 B P3 fmod row "浮点取模 `%=` / `a % b` reject" (i32/i64 整数模 ship, 浮点模不 ship).
 
-| 输入 | 期望 (per spec 附录 B P3) | v1.7.2 实际 |
-|------|--------------------------|-------------|
-| `i32 % i32` (整数模) | i32 余数 | ✅ OK (codegen emit `rem` / `div`) |
-| `i64 % i64` | i64 余数 | ✅ OK (codegen emit `rem` / `div`) |
-| `f64 % f64` (浮点模) | f64 IEEE 754 remainder | ❌ **vendor QBE reject** "invalid instruction: remd" |
-| `f64 %= f64` (compound) | f64 复合赋值 | ❌ **同上** (跟 `%=` sema 通过但 codegen emit `remd` reject) |
+| 输入 | 期望 (per spec 附录 B P3 v3.0.6 revision) | v1.7.2 实际 | v3.0.6/Ph.2 实际 |
+|------|--------------------------|-------------|-----------------|
+| `i32 % i32` (整数模) | i32 余数 | ✅ OK (codegen emit `rem` / `div`) | ✅ OK |
+| `i64 % i64` | i64 余数 | ✅ OK (codegen emit `rem` / `div`) | ✅ OK |
+| `f64 % f64` (浮点模) | f64 IEEE 754 remainder (trunc toward 0) | ❌ **vendor QBE reject** "invalid instruction: remd" | ✅ OK (Ph.2 ship, fold `a - trunc(a/b)*b`) |
+| `f64 %= f64` (compound) | f64 复合赋值 | ❌ **同上** | ✅ OK (Ph.2 ship, 同路径) |
+| `f32 % f32` (浮点模) | f32 IEEE 754 remainder | ❌ **vendor QBE reject** "invalid instruction: rems" | ✅ OK (Ph.2 ship, polymorphic f32 fold, stosi variant) |
+| `-7.5 % 2.0` (negative 区分 floor 关键) | -1.5 (trunc toward 0) | ❌ reject | ✅ OK (Ph.2 ship, trunc not floor) |
 
-**症状:**
+**症状 (resolved):**
 ```
 test.jhyy:3:9: error: invalid instruction 'remd' (vendor QBE 2026-08-15 build 不支持)
 codegen errors
@@ -3925,22 +3927,39 @@ codegen errors
 
 **根因:** vendor QBE (`qbe/qbe.exe` 2026-08-15 build, per `docs/logs/v1/changelog-v1.7.2.md` A1 ship 时 fact-check fail) 不实现 `remd` (f64 remainder) 和 `rems` (f32 remainder) 指令。其他 backend (e.g. gcc) 编译期折叠到 `fmod()` library call, 但 vendor QBE 不能 fold, 拒绝指令。
 
-**workaround (v1.7.2 期间):** v1.7.2 patch A1 ship 时 fact-check 发现 vendor QBE 不支持 `remd`/`rems`, 标 LIMIT 不修, 推 v2.x 真修 (vendor QBE 升级主线或自研 backend)。spec 附录 B P3 fmod row "推 v2.x" 段保留 v2.x 真修描述, 缺独立 W-NNN 归档 (本 v1.7.3 patch 补登)。
+**workaround (v1.7.2 期间, 已废弃):** v1.7.2 patch A1 ship 时 fact-check 发现 vendor QBE 不支持 `remd`/`rems`, 标 LIMIT 不修, 推 v2.x 真修 (vendor QBE 升级主线或自研 backend)。spec 附录 B P3 fmod row "推 v2.x" 段保留 v2.x 真修描述, 缺独立 W-NNN 归档 (本 v1.7.3 patch 补登)。
 
-**实现路径 (推 v2.x):**
-1. **vendor QBE 升级** — 拉 QBE 上游主线 (2026-Q3 或更新), 看是否新增 `remd`/`rems` 支持 (可能性高, QBE 上游对 SIMD + math 指令支持在持续推进)
-2. **自研 backend** — v2.x 末 QBE 重写后, codegen emit `remd`/`rems` 指令 (或 fold 到 `fmod()` library call, 跟 gcc 行为对齐)
-3. **fmod library helper** — 临时方案: codegen 把 `a % b` (f64) 折成 `(a - (a / b).floor() * b)` user-space formula, runtime 调用 `floor()` builtin (qbe 提供 `floord`) + 减法 + 乘法
+**Resolution (2026-09-23 v3.0.6/Ph.2)**:
+- **1 src0 file 真改** (跟 V2.13.8 `16b4903` 同源):
+  1. `compiler/src0/codegen.jhyy` line 2214+ 插 45 行: `TOKEN_PERCENT` + (QBE_D 或 QBE_S) early return 路径 → emit 5-instruction user-space formula `a - trunc(a/b) * b` (div + dtosi/stosi + swtof + mul + sub, polymorphic by `tok.qbe_type`)。Polymorphic arith op (`div`/`mul`/`sub`) 靠 `=d`/`=s` 类型后缀, 不嵌 type suffix 进 opcode name; type-conversion ops (`stosi`/`dtosi`/`swtof`) 把 type 后缀编入 name。is_f32 nested plain `if` 无 `&&`/`||` short-circuit (避免 W-081 sub-bug latent phi merge gap, per `feedback_jhyy_brace_nesting`)。
+- **codegen 跳过 `op = "rem"` dispatch**: line 2267 (post-Ph.2) 仍 emit `rem` for integer `%` (i32/i64 integer mod 走 vendor QBE `remw`/`reml`), f64/f32 路径在 `let mut op: *u8 = "add" ...` 之前 early-return。
+- **3 NEW test files** (沿用 V2 命名 per audit fix #1):
+  1. `fmod_basic.jhyy` (`7.0 % 2.0` exit=1)
+  2. `fmod_negative.jhyy` (`-7.5 % 2.0` exit=99 = `r_int + 100`; +100 避开 Windows NTSTATUS 误判 0xFFFFFFFF; trunc 区分 floor 关键)
+  3. `fmod_f32.jhyy` (`7.0_f32 % 2.0_f32` exit=1, polymorphic f32 fold)
+- **Verification**: 5/5 PASS on 3 new tests + regress 126/126 PASS / 0 FAIL / 21 sysv SKIP preserved (no regression; 3 fmod tests add 3 to FRESH total 129)。
+- **byte-equal D26 5/5 PASS preserved** (per V3 D26 stage0 recipe; jhyy.exe sha refresh post-Ph.2 rebuild)。
 
-**影响范围:**
-- user-space test: 仅 fmod 测试 (尚未 ship), 不影响 regress
-- OS-required (jhyy_OS): MMIO buffer scan 用到 `addr % page_size` 是整数模 (i64 % i64), 不依赖浮点模
-- math lib: jhyy 暂无 `<math.h>` 风格 lib, 用户写 fmod 一般用 lib call (`extern fn fmod(...)`), 不走 `%` 路径
+**实现路径 (resolved, v3.0.6/Ph.2 实施):**
+1. ~~vendor QBE 升级~~ — 不需要 (V3 codegen 不依赖 vendor QBE for `%` operator, fold user-space formula)
+2. ✅ **自研 backend codegen fold `a - trunc(a/b)*b`** (跟 V2 同源) — v3.0.6/Ph.2 codegen.jhyy fold, QBE IL 5 insns (div + dtosi/stosi + swtof + mul + sub); vendor QBE 全程处理 (无 `remd`/`rems` 依赖)
+3. ✅ **spec 附录 B P3 修订** — v3.0.6+ spec 把 fmod row 描述补回 ship 范围, 加 "codegen.jhyy fold `a - trunc(a/b)*b` 5 insns" 段
+
+**影响范围 (resolved):**
+- user-space test: `fmod_basic.jhyy` + `fmod_negative.jhyy` + `fmod_f32.jhyy` ship, regress 126/126 + 3 fmod = FRESH 129 PASS preserved
+- OS-required (jhyy_OS): jhyy_OS runtime 暂无 fmod use case (kernel 自带 IEEE 754 mod), 但 user-space `extern fn fmod(...)` lib call 现在有 jhyy-side 同源 fold
+- lib 路径: src0/util.jhyy / src0/std/*.jhyy fmod use now supported (per spec 附录 B P3 ship 范围)
+- W-083 self-backend 路径: 单独 v3.0.6/Ph.3 真修 (`codegen_amd64_emit_sse.jhyy` `emit_conv_swtof` 加 is_f32 + cvt_suffix + cltq), 跟 V2.13.11 `425ab53` 同源
 
 **引用:**
 - spec `docs/abis/jhyy-lang-spec-v1.3.0.md` 附录 B P3 (fmod row, C4 v1.7.3 patch 加 cross-ref W-058)
 - `docs/logs/v1/changelog-v1.7.2.md` A1 (v1.7.2 patch A1 ship 时 fact-check fail, 标 LIMIT 推 v2.x)
 - vendor QBE build `qbe/qbe.exe` 2026-08-15 (per `docs/internal/architecture.md` QBE IL 速查段)
+- V2.13.8 真修 commit `16b4903` (port reference)
+- V2.13.11 self-backend 真修 commit `425ab53` (W-083 closure)
+- `docs/plans/v3/v3.0.6-port-v2.16.0-src0-closure.md` Ph.2 section
+- `docs/logs/v3/changelog-v3.0.md` v3.0.6/Ph.2 section
+- V3.0.6/Ph.3 W-083 entry (self-backend closure, 跟 Ph.2 互补)
 
 ---
 

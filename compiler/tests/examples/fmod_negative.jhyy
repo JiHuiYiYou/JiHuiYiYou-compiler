@@ -1,0 +1,22 @@
+// EXPECT: 99
+// v3.0.6/Ph.2 W-058 真修 — fmod user-space formula trunc (negative operand
+//   区分 floor vs trunc 关键)
+//
+// -7.5 % 2.0 fold:
+//   div = -7.5 / 2.0 = -3.75
+//   dtosi = -3 (trunc toward 0, NOT floor -4)
+//   swtof = -3.0
+//   mul = -3.0 * 2.0 = -6.0
+//   sub = -7.5 - (-6.0) = -1.5
+//
+// trunc 跟 floor 区分关键 (floor would give -4 → -4 * 2 = -8 → -7.5 - (-8) =
+// 0.5 错答案)。exit=99 是 -1.5 as i32 = -1, +100 避开 Windows NTSTATUS 误判
+// 0xFFFFFFFF 退出码语义 (per V2 16b4903 commit message)。
+
+fn main_jhyy() -> i32 {
+    let a: f64 = -7.5;
+    let b: f64 = 2.0;
+    let r: f64 = a % b;
+    let r_int: i32 = r as i32;
+    r_int + 100
+}

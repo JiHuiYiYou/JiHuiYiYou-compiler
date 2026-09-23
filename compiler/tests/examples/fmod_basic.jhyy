@@ -1,0 +1,19 @@
+// EXPECT: 1
+// v3.0.6/Ph.2 W-058 真修 — fmod user-space formula trunc (basic f64)
+//
+// `decode_char_literal` 之外的 fold: 7.0 % 2.0 fold 成 user-space formula
+//   `a - trunc(a/b) * b`
+// 即 div=3.5 → dtosi=3 → swtof=3.0 → mul=6.0 → sub=1.0 (trunc toward 0, 跟
+// QBE upstream remd spec + C fmod + POSIX fmod 一致, 跟 IEEE 754 round-to-zero
+// 一致)。
+//
+// v1.7.2 patch A1 fact-check + v1.7.3 patch C2 补登: vendor QBE 2026-08-15
+// build 不支持 remd/rems 浮点取模 (workarounds.md W-058 DEFERRED since
+// 2026-08-28)。v3.0.6 真修: 5 IL insns (div + dtosi + swtof + mul + sub)。
+
+fn main_jhyy() -> i32 {
+    let a: f64 = 7.0;
+    let b: f64 = 2.0;
+    let r: f64 = a % b;
+    r as i32
+}

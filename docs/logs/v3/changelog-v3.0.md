@@ -628,6 +628,51 @@ v3.0.5 tag push (`d742b32`) 触发 release.yml CI 跑 gated regress → jhyy_sta
 - Ph.6 bench.sh NEW (272 LOC) + D26 stage0 coverage + .exe byte-equal 兜底 (V2.16.0)
 - Ph.7 ship — git tag v3.0.6
 
+### Ph.2 — codegen.jhyy W-058 fmod user-space formula trunc 📋
+
+**Source**: V2 `16b4903` (v2.13.8 W-058 fmod emit 路径真修, 2026-09-21).
+
+**Port reference diff**: V2 codegen.jhyy line 2264+ 插 45 行;V3 实测 offset = -49 (V3 line 2214+ vs V2 line 2264+), audit fix #3 估的 -74 偏差, V3 codegen.jhyy 实际更紧凑。
+
+**Critical file changes** (1 src0 file + 3 NEW tests + 1 workarounds entry):
+
+1. `compiler/src0/codegen.jhyy` line 2214+ 插 45 行 (在 `let mut op: *u8 = "add" as *u8;` line 2215 之前):
+   - `TOKEN_PERCENT` + (QBE_D 或 QBE_S) early return 路径 → emit 5-instruction user-space formula `a - trunc(a/b) * b` (div + dtosi/stosi + swtof + mul + sub, polymorphic by `tok.qbe_type`)。
+   - Polymorphic arith op (`div`/`mul`/`sub`) 靠 `=d`/`=s` 类型后缀, 不嵌 type suffix 进 opcode name;type-conversion ops (`stosi`/`dtosi`/`swtof`) 把 type 后缀编入 name。
+   - `is_f32 nested plain if` 无 `&&`/`||` short-circuit (避免 W-081 sub-bug latent phi merge gap, per `feedback_jhyy_brace_nesting`)。
+   - 跳过 `op = "rem"` dispatch (下方 line 2267, post-Ph.2);整数模 (`i32 % i32` / `i64 % i64`) 仍走 vendor QBE `remw`/`reml`, 不变。
+
+2. `compiler/tests/examples/fmod_basic.jhyy` NEW (`7.0 % 2.0` exit=1) — 沿用 V2 命名 per audit fix #1。
+3. `compiler/tests/examples/fmod_negative.jhyy` NEW (`-7.5 % 2.0` exit=99 = `r_int + 100`; +100 避开 Windows NTSTATUS 误判 0xFFFFFFFF; trunc 区分 floor 关键 case)。
+4. `compiler/tests/examples/fmod_f32.jhyy` NEW (`7.0_f32 % 2.0_f32` exit=1, polymorphic f32 fold `stosi` variant)。
+
+**Docs update**:
+- `docs/internal/workarounds.md` W-058 flip 🟡 DEFERRED → ✅ RESOLVED (line 60 索引 + line 3905+ body section rewrite with Resolution 段)。
+- `docs/plans/v3/v3.0.6-port-v2.16.0-src0-closure.md` Ph.2 status flip 📋 → ✅ + V3 line offset 实测 -49 (修正 audit fix #3 的 -74 估时)。
+- `README.md` v3.0.6/Ph.2 row append (after Ph.1 row)。
+
+**Verification gates (V.1-V.2) all PASS**:
+- V.1 fmod_basic.jhyy (7.0%2.0) EXIT=1 — 5/5 PASS
+- V.1 fmod_negative.jhyy (-7.5%2.0) EXIT=99 — 5/5 PASS (trunc 区分 floor 关键)
+- V.1 fmod_f32.jhyy (7.0_f32%2.0_f32) EXIT=1 — 5/5 PASS (polymorphic f32 fold)
+- V.2 regress — **126/126 + 3 new fmod = FRESH 129 PASS / 0 FAIL / 21 sysv SKIP** preserved (no regression)
+- jhyy.exe sha refresh post-Phase.2 rebuild (post V3 codegen.jhyy edit)
+- byte-equal D26 5/5 PASS preserved (per v3.1.0 D26 stage0 recipe)
+- byte-equal-amd64 V3-B 10/10 PASS preserved
+- fixed-point N=3 closure preserved (新 closure point through Ph.2 codegen.jhyy 改)
+
+**QBE IL opcode 选型 spec 修订** (per V2 16b4903 commit message): vendor QBE `ops.h` 把 `add`/`sub`/`mul`/`div` 列为 polymorphic op (靠 `=d`/`=s` 类型后缀), `stosi`/`dtosi`/`swtof` 才是嵌 type suffix 的独立 op;早期 plan 假设 emit `divd`/`divs`/`muld`/`muls`/`subd`/`subs` (通用记法), 实际用 `div` + `dtosi` + `swtof` + `mul` + `sub` (5 insns) 通过 vendor QBE parse。
+
+**Code structure detail** (per `feedback_jhyy_brace_nesting`): nested plain `if` 无 `&&`/`||` short-circuit 避免触发 W-081 sub-bug (latent phi merge gap)。
+
+**Out of scope (推后续 Phases)**:
+- Ph.3 codegen_amd64_emit_sse.jhyy W-083 self-backend fmod 真修 (V2.13.11, 跟 Ph.2 互补)
+- Ph.4 in-mem self-backend pipeline + codegen_amd64_inmem.jhyy NEW (V2.15.0)
+- Ph.5a git rm -r qbe/ (V3 48 files, NOT V2 41)
+- Ph.5b src0 run_qbe fatal-stub + jhyy_helpers.c QBE probing deleted + C-side parity + Makefile D26 + installer (V2.16.0)
+- Ph.6 bench.sh NEW (272 LOC) + D26 stage0 coverage + .exe byte-equal 兜底 (V2.16.0)
+- Ph.7 ship — git tag v3.0.6
+
 ---
 
 ## V3-C — v3.1.0+ (`&mut` + lifetime, 3g / 3g.5 / 3g.7) — pending (等 user 启动)

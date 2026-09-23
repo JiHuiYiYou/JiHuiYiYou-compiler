@@ -1,0 +1,20 @@
+// EXPECT: 1
+// v3.0.6/Ph.2 W-058 真修 — fmod user-space formula trunc (f32 polymorphic)
+//
+// 7.0_f32 % 2.0_f32 fold 成 user-space formula polymorphic by tok.qbe_type:
+//   div = 3.5_f32
+//   stosi (NOT dtosi — QBE IL f32→i32 用 stosi) = 3
+//   swtof = 3.0_f32
+//   mul = 6.0_f32
+//   sub = 1.0_f32
+//
+// vs f64 版本: conv_op 选 `stosi` (i32 QBE IL) 不是 `dtosi` (i64 QBE IL);
+// per `feedback_jhyy_brace_nesting`, is_f32 nested plain `if` 无 `&&`/`||`
+// short-circuit。
+
+fn main_jhyy() -> i32 {
+    let a: f32 = 7.0;
+    let b: f32 = 2.0;
+    let r: f32 = a % b;
+    r as i32
+}
