@@ -2259,32 +2259,44 @@ fn emit_conv(state: *u8, tok: *u8) -> i32 {
     // ════════════════════════════════════════════════════
     // float → int 转换 (dtosi/dtoui/dtosl/dtoul/stosi/stoui/stosl/stoul)
     // ════════════════════════════════════════════════════
-    // dtosi / dtoui: d → w (32-bit) — 3-op form (Commit 1 baseline; Commit 2 改成 2-op form byte-equal V2 v2.16.0)
+    // dtosi / dtoui: d → w (32-bit) — 2-op form per V2 v2.16.0
     if strcmp(op_name, ("dtosi" as *u8)) == (0 as i32) {
-        let _a = emit_mov_temp_to_xmm(state, QBE_D(), src_off, 0 as i32);
-        let _b = sb_append_cstr(arena, s, "\tcvttsd2si %xmm0, %eax\n" as *u8);
-        let _c = emit_mov_int_to_temp(state, QBE_W(), "eax" as *u8, dst_off);
+        let _r1 = sb_append_cstr(arena, s, "\tcvttsd2si " as *u8);
+        let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+        let _r3 = sb_append_cstr(arena, s, "(%rbp), %eax\n" as *u8);
+        let _r4 = sb_append_cstr(arena, s, "\tmovl %eax, " as *u8);
+        let _r5 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+        let _r6 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
         return 0;
     }
-    // dtosl: d → l (64-bit) — 3-op form
+    // dtosl: d → l (64-bit) — 2-op form
     if strcmp(op_name, ("dtosl" as *u8)) == (0 as i32) {
-        let _a = emit_mov_temp_to_xmm(state, QBE_D(), src_off, 0 as i32);
-        let _b = sb_append_cstr(arena, s, "\tcvttsd2si %xmm0, %rax\n" as *u8);
-        let _c = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
+        let _r1 = sb_append_cstr(arena, s, "\tcvttsd2si " as *u8);
+        let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+        let _r3 = sb_append_cstr(arena, s, "(%rbp), %rax\n" as *u8);
+        let _r4 = sb_append_cstr(arena, s, "\tmovq %rax, " as *u8);
+        let _r5 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+        let _r6 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
         return 0;
     }
-    // dtoui: V3 不 emit (cvttsd2si 已 truncate, signed/unsigned 在 i32 范围一致)
+    // dtoui: V3 不 emit (cvttsd2si 已 truncate, signed/unsigned 在 i32 范围一致) — 2-op form
     if strcmp(op_name, ("dtoui" as *u8)) == (0 as i32) {
-        let _a = emit_mov_temp_to_xmm(state, QBE_D(), src_off, 0 as i32);
-        let _b = sb_append_cstr(arena, s, "\tcvttsd2si %xmm0, %eax\n" as *u8);
-        let _c = emit_mov_int_to_temp(state, QBE_W(), "eax" as *u8, dst_off);
+        let _r1 = sb_append_cstr(arena, s, "\tcvttsd2si " as *u8);
+        let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+        let _r3 = sb_append_cstr(arena, s, "(%rbp), %eax\n" as *u8);
+        let _r4 = sb_append_cstr(arena, s, "\tmovl %eax, " as *u8);
+        let _r5 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+        let _r6 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
         return 0;
     }
-    // dtoul: d → l unsigned — 3-op form
+    // dtoul: d → l unsigned — 2-op form
     if strcmp(op_name, ("dtoul" as *u8)) == (0 as i32) {
-        let _a = emit_mov_temp_to_xmm(state, QBE_D(), src_off, 0 as i32);
-        let _b = sb_append_cstr(arena, s, "\tcvttsd2si %xmm0, %rax\n" as *u8);
-        let _c = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
+        let _r1 = sb_append_cstr(arena, s, "\tcvttsd2si " as *u8);
+        let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+        let _r3 = sb_append_cstr(arena, s, "(%rbp), %rax\n" as *u8);
+        let _r4 = sb_append_cstr(arena, s, "\tmovq %rax, " as *u8);
+        let _r5 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+        let _r6 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
         return 0;
     }
     // stosi: s → w — 3-op form (V2 emit_conv_stosi,cvttss2si 用 xmm src)
@@ -2345,10 +2357,13 @@ fn emit_conv(state: *u8, tok: *u8) -> i32 {
     // float widen / narrow (exts s→d / truncd d→s)
     // ════════════════════════════════════════════════════
     if strcmp(op_name, ("exts" as *u8)) == (0 as i32) {
-        // exts s→d float widen — 3-op form (Commit 1 baseline; Commit 2 改 2-op form byte-equal V2 v2.16.0)
-        let _a = emit_mov_temp_to_xmm(state, QBE_S(), src_off, 0 as i32);
-        let _b = sb_append_cstr(arena, s, "\tcvtss2sd %xmm0, %xmm0\n" as *u8);
-        let _c = emit_mov_xmm_to_temp(state, QBE_D(), 0 as i32, dst_off);
+        // exts s→d float widen — 2-op form per V2 v2.16.0
+        let _r1 = sb_append_cstr(arena, s, "\tcvtss2sd " as *u8);
+        let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
+        let _r3 = sb_append_cstr(arena, s, "(%rbp), %xmm0\n" as *u8);
+        let _r4 = sb_append_cstr(arena, s, "\tmovsd %xmm0, " as *u8);
+        let _r5 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+        let _r6 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
         return 0;
     }
     if strcmp(op_name, ("truncd" as *u8)) == (0 as i32) {
