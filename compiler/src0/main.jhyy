@@ -52,6 +52,7 @@ import abi_amd64_win;  // v2.1.0: QBE-level ABI shaping (5 functions, mirrors co
 // annotation, 移 parse_and_emit def 到 caller 之前, peephole.jhyy 加 parens 修
 // precedence. JHY_SELF_BACKEND=1 env gate activates real dispatch path.
 import codegen_amd64;
+import codegen_amd64_inmem;  // v3.1.0 (跟 V2 v2.15.0 同源): codegen_amd64_run_text in-mem entry
 
 // ═══ Local externs (ffi.jhyy 已声明 malloc/free/fopen/fread/fwrite/fclose/
 //    strlen/strcmp/system/jh_fputs_stderr/jh_fopen_wb 等；这里只补 main.jhyy
@@ -105,6 +106,16 @@ extern fn jh_setenv(name: *u8, value: *u8) -> i32;
 // v2.5.0: jh_getenv — read env var (QBE_FALLBACK gate for run_backend dispatch)
 // Returns *u8 (value string) or NULL (not set). Caller does NOT free.
 extern fn jh_getenv(name: *u8) -> *u8;
+
+// v3.1.0 (跟 V2 v2.15.0 同源): JHY_WRITE_IL env gate — 0 (default) = skip .il write, in-mem self path;
+// 1 = write .il to disk (debug / out-of-band self path)
+fn jh_write_il_enabled() -> i32 {
+    let v = jh_getenv("JHY_WRITE_IL" as *u8);
+    if v == (0 as *u8) { return 0 as i32; }
+    if strcmp(v, "1" as *u8) == 0 { return 1 as i32; }
+    if strcmp(v, "true" as *u8) == 0 { return 1 as i32; }
+    return 0 as i32;
+}
 
 // v2.6.0 (V2-B Unit A): jh_read_file / jh_write_file — file I/O consolidation
 // for codegen_amd64.jhyy. Caller-provided buffer (avoids **u8 ABI — jhyy
@@ -679,7 +690,11 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
     ir_flush_data(ir);
     jh_fputs_stderr("[4] codegen done\n" as *u8);
 
-    // ── 写 <output>.il ──
+    // ── v3.1.0 (跟 V2 v2.16.0 同源): in-mem dispatch / .il 写盘 (env-gated) ──
+    //   JHY_WRITE_IL 未设 + BACKEND_SELF → 走 codegen_amd64_run_text 直接
+    //   喂 (*ir.sb).buf/.len 给 self-backend, 省掉 jh_read_file round-trip。
+    //   返回 2 = in-mem 已写 .s; caller (compile()) 跳过 run_backend。
+    let mut rc: i32 = 0 as i32;
     let il_path_buf = malloc(1024 as i64);
     let il_path = il_path_buf;
     let n_o = strlen(output);
@@ -689,158 +704,91 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
     let nul1 = (il_path as i64 + off1) as *u8;
     store_byte_i32(nul1, 0 as i32);
 
-    let ilf = jh_fopen_wb(il_path);
-    if ilf == (0 as *u8) {
-        jh_fputs_stderr("cannot write il\n" as *u8);
-        free(source);
-        free(il_path_buf);
-        return 1 as i32;
-    }
-    // fwrite((*ir.sb).buf, 1, (*ir.sb).len, ilf)
+    // 算 asm_path (跟 compile() 同 pattern: output + ".s")
+    let asm_path_buf = malloc(1024 as i64);
+    let asm_path = asm_path_buf;
+    str_copy(asm_path, output);
+    let off2 = str_concat_at(asm_path, n_o, ".s" as *u8);
+    let nul2 = (asm_path as i64 + off2) as *u8;
+    store_byte_i32(nul2, 0 as i32);
+
     let sb_inner = (*ir).sb;
     let buf_p = (*sb_inner).buf;
     let buf_len = (*sb_inner).len;
-    fwrite(buf_p, (1 as i64), buf_len, ilf);
-    fclose(ilf);
+
+    // ── v3.1.0 (跟 V2 v2.16.0 同源): in-mem dispatch / .il 写盘 (env-gated) ──
+    //   JHY_WRITE_IL 未设 + BACKEND_SELF → 走 codegen_amd64_run_text 直接
+    //   喂 (*ir.sb).buf/.len 给 self-backend, 省掉 jh_read_file round-trip。
+    //   返回 2 = in-mem 已写 .s; caller (compile()) 跳过 run_backend。
+    let write_il = jh_write_il_enabled();
+    let mut did_inmem: i32 = 0 as i32;
+    if write_il == (0 as i32) {
+        let mode = target_backend_mode(t);
+        if mode == BACKEND_SELF() {
+            // In-mem self path: 直接 (*ir.sb).buf → codegen_amd64_run_text → .s
+            let im_rc = codegen_amd64_run_text(buf_p, buf_len, asm_path, t);
+            if im_rc == (0 as i32) {
+                rc = 2 as i32;
+                did_inmem = 1 as i32;
+            } else {
+                let _e = jh_fputs_stderr("build_il: in-mem self-backend failed, fallback to .il write\n" as *u8);
+                did_inmem = 0 as i32;
+            }
+        }
+    }
+
+    if did_inmem == (0 as i32) {
+        // 老 path: 写 .il, return 0 (caller 走 run_backend)
+        let ilf = jh_fopen_wb(il_path);
+        if ilf == (0 as *u8) {
+            jh_fputs_stderr("cannot write il\n" as *u8);
+            free(source);
+            free(il_path_buf);
+            free(asm_path_buf);
+            return 1 as i32;
+        }
+        fwrite(buf_p, (1 as i64), buf_len, ilf);
+        fclose(ilf);
+    }
 
     free(il_path_buf);
+    free(asm_path_buf);
     free(source);
     arena_free(&arena);
-    return 0 as i32;
+    return rc;
 }
 
-// run_qbe: invoke QBE on .il → .s
+// run_qbe: v3.1.0 (跟 V2 v2.16.0 同源) fatal-stub — QBE backend removed.
+// Self-backend (codegen_amd64_run / codegen_amd64_run_text) is sole production
+// path. This stub preserved for any external callers; emits clear diagnostic
+// instead of "QBE failed" with no resolution.
 fn run_qbe(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
-    let cmd_buf = malloc(16384 as i64);
-    let mut pos: i64 = 0 as i64;
-    let qbe = QBE_PATH();
-    // v1.5.6 W-039: wrap QBE_PATH in quotes so CreateProcessA treats the
-    // full path (e.g. "C:\Program Files\JHYY\bin\qbe.exe") as the module
-    // name. Without quotes, Windows tokenizes at first whitespace and
-    // launches C:\Program instead of qbe.exe if that file exists.
-    let lquote = "\"" as *u8;
-    pos = str_concat_at(cmd_buf, pos, lquote);
-    pos = str_concat_at(cmd_buf, pos, qbe);
-    let rquote = "\"" as *u8;
-    pos = str_concat_at(cmd_buf, pos, rquote);
-    // v2.0.0: -t <target_name(t)> — only TARGET_AMD64_WIN actually reaches
-    // here (other targets fatal at cg_module). Replacing hardcoded
-    // "-t amd64_win -o " lets v2.x later flip target without surgery here.
-    // v2.1.0: use target_qbe_flag() so freestanding (ABI-identical MS x64)
-    // and hosted both map to "amd64_win"; only amd64_sysv is a real QBE-
-    // different backend (ships v2.x M2).
-    let sep1 = " -t " as *u8;
-    pos = str_concat_at(cmd_buf, pos, sep1);
-    pos = str_concat_at(cmd_buf, pos, target_qbe_flag(t));
-    let sep1b = " -o " as *u8;
-    pos = str_concat_at(cmd_buf, pos, sep1b);
-    pos = str_concat_at(cmd_buf, pos, asm_path);
-    let sep2 = " " as *u8;
-    pos = str_concat_at(cmd_buf, pos, sep2);
-    pos = str_concat_at(cmd_buf, pos, il_path);
-    let nul_p = (cmd_buf as i64 + pos) as *u8;
-    store_byte_i32(nul_p, 0 as i32);
-
-    path_to_win(il_path);
-    path_to_win(asm_path);
-    // v1.5.6 W-038: use jh_run (CreateProcessA) instead of system() so that
-    // qbe paths with spaces (e.g. "C:\Program Files\JHYY\bin\qbe.exe") are
-    // handled correctly. cmd.exe /C tokenizes by whitespace and breaks on
-    // space; CreateProcessA's command-line parser preserves quoted paths.
-    // v1.5.6 W-039: run_qbe wraps QBE_PATH in quotes (above) — jh_run passes
-    // the cmd_line through unchanged.
-    let r = jh_run(cmd_buf);
-    let captured = jh_run_get_output();
-    if r != (0 as i32) {
-        // debug: print the actual command on failure so users can see which
-        // qbe path jh_paths_init resolved. cmd_buf is freed below.
-        jh_fputs_stderr("QBE failed: " as *u8);
-        jh_fputs_stderr(cmd_buf as *u8);
-        jh_fputs_stderr("\n" as *u8);
-        // v1.8.3.2 W-064: mirror link_with_gcc (W-045) — print captured QBE
-        // stderr so the real QBE diagnostic reaches the user. Without this,
-        // the user sees only "QBE failed: <cmd>" with no hint at *why* QBE
-        // rejected the .il (e.g. invalid SSA, type mismatch in phi).
-        if captured != (0 as *u8) {
-            let c0 = (*captured);
-            if c0 != (0 as i32) {
-                jh_fputs_stderr("QBE stderr:\n" as *u8);
-                jh_fputs_stderr(captured);
-                jh_fputs_stderr("\n" as *u8);
-            }
-        }
-        free(cmd_buf);
-        return 1 as i32;
-    }
-    free(cmd_buf);
-    return 0 as i32;
+    // suppress unused-parameter warnings
+    let _il = il_path;
+    let _asm = asm_path;
+    let _tt = t;
+    jh_fputs_stderr("error: QBE backend removed in v3.1.0 — self-backend sole production path\n" as *u8);
+    jh_fputs_stderr("  (codegen_amd64_run / codegen_amd64_run_text is the sole production path)\n" as *u8);
+    jh_fputs_stderr("  if you need QBE fallback for debug, check out pre-v3.1.0 tag.\n" as *u8);
+    return 1 as i32;
 }
 
-// run_backend: V2-B v2.6.0 Unit E Wire — real dispatch.
+// run_backend: v3.1.0 (跟 V2 v2.16.0 同源) simplified dispatch.
 //
-// QBE_FALLBACK env var (explicit override) → run_qbe regardless of target.
-// 否则 target_backend_mode(t) 决定:
-//   BACKEND_SELF (windows targets) → codegen_amd64_run(il_path, asm_path)
-//   BACKEND_QBE  (sysv stub)       → run_qbe(il_path, asm_path, t)
+// QBE removed in v3.1.0 — sole production path is codegen_amd64_run
+// (file-path self backend). build_il's in-mem path (codegen_amd64_run_text)
+// returns 2 to skip this function entirely; this is the rare file-path
+// fallback when JHY_WRITE_IL=1 or in-mem self path fails.
 //
-// codegen_amd64_run 返回 -1 表示 self path 暂未实现(Unit E 阶段 stub)→ 自动
-// 降级到 run_qbe 保持 regress 104/104 PASS。Unit E wire 完成即闭环 V2-A ship
-// gate #1 基础架构(codegen_amd64_run 真实 IL→.s body 留 v2.6.x follow-up)。
-//
-// 返回值同 run_qbe: 0 = 写了 .s, 非 0 = 失败。
+// QBE_FALLBACK env var still recognized for diagnostic — if set, print
+// warning and proceed with self path (no longer a fatal override, since
+// run_qbe itself is a fatal-stub).
 fn run_backend(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
-    // V2-B v2.6.5: self backend dispatch wired (W-068 真改)。
-    //
-    // 优先级链:
-    //   1. QBE_FALLBACK=1 (per docs/plans/v2/v2.0.0-os-prep § 6)
-    //      → run_qbe (强制 QBE 路径,绕过 self backend)
-    //   2. target_backend_mode(t) == BACKEND_SELF + JHY_SELF_BACKEND=1 env
-    //      → codegen_amd64_run(il_path, asm_path) (real self path)
-    //      → rc != 0 自动降级 run_qbe (robustness)
-    //   3. 默认 fallback → run_qbe (保持现有行为,104/104 regress 不变)
-    //
-    // 注: 默认 backend 仍是 QBE; self path 是 opt-in (env-gated)。regress.py
-    // 默认不设 JHY_SELF_BACKEND,所以 104/104 全程走 QBE (D43 closure 维持)。
-    //
-    // 实现细节: 每个 if-分支都显式 return,避免 inner if 没有 else 时
-    // sema 把内层类型推成 () 跟外层 i32 mismatch (per W-068 fix #4)。
     let fb = jh_getenv("QBE_FALLBACK" as *u8);
     if fb != (0 as *u8) {
-        return run_qbe(il_path, asm_path, t);
+        jh_fputs_stderr("run_backend: warning — QBE_FALLBACK ignored in v3.1.0 (QBE removed), proceeding with self-backend\n" as *u8);
     }
-    let mode = target_backend_mode(t);
-    if mode == BACKEND_SELF() {
-        let sb_env = jh_getenv("JHY_SELF_BACKEND" as *u8);
-        if sb_env != (0 as *u8) {
-            let rc = codegen_amd64_run(il_path, asm_path, t);
-            if rc == (0 as i32) {
-                return 0 as i32;
-            }
-            // self path 失败 → 自动降级 QBE (robustness)
-            jh_fputs_stderr("run_backend: self path failed, fallback to QBE\n" as *u8);
-            return run_qbe(il_path, asm_path, t);
-        }
-        // JHY_SELF_BACKEND not set → fallback QBE
-        return run_qbe(il_path, asm_path, t);
-    }
-    // target 不是 BACKEND_SELF → fallback QBE
-
-    // QBE_FALLBACK env gate
-    let fb_env = jh_getenv("QBE_FALLBACK" as *u8);
-    let mut use_qbe: i32 = 0 as i32;
-    if fb_env != (0 as *u8) {
-        if strcmp(fb_env, "1" as *u8) == 0 {
-            use_qbe = 1;
-        }
-    }
-    if use_qbe != (0 as i32) {
-        return run_qbe(il_path, asm_path, t);
-    }
-    // sysv stub + unknown → QBE fallback
-    // v3.1.4 W-068 真修 v2: 原 L839-856 Target-based dispatch 块删除(dead code)
-    //   — BACKEND_SELF 分支(L812-825)已显式 return,此 block 不可达
-    //   — 含 2-arg `codegen_amd64_run(il_path, asm_path)` 调用, stub 已在 codegen_amd64.jhyy dedup 删除
-    return run_qbe(il_path, asm_path, t);
+    return codegen_amd64_run(il_path, asm_path, t);
 }
 
 // link_with_gcc: jh_gcc_invoke(ASM_PATH RUNTIME_C HELPERS_C -o EXE_PATH -lm)
@@ -1430,8 +1378,12 @@ fn cmd_compile(argc: i32, argv: *u8, t: i32) -> i32 {
         out_buf = user_out;
     }
     // 1. build .il
-    if build_il(input, out_buf, t) != (0 as i32) {
-        if user_out == (0 as *u8) { free(derived); }  // Sprint 4.5 B Task #145 fix: avoid double-free when user_out was set
+    //   v3.1.0 (跟 V2 v2.15.0 同源): build_il 返回 2 = in-mem self-backend 已直接 emit .s,
+    //   跳过 run_backend; 返回 0 = 老 .il-on-disk 路径, 跑 run_backend;
+    //   返回 1 = 失败。
+    let bil_rc = build_il(input, out_buf, t);
+    if bil_rc == (1 as i32) {
+        if user_out == (0 as *u8) { free(derived); }
         return 1 as i32;
     }
     // 2. .il → .s
@@ -1452,11 +1404,17 @@ fn cmd_compile(argc: i32, argv: *u8, t: i32) -> i32 {
     let nul3 = (exe_path as i64 + off3) as *u8;
     store_byte_i32(nul3, 0 as i32);
 
-    let r1 = run_backend(il_path, asm_path, t);
-    if r1 != (0 as i32) {
-        if user_out == (0 as *u8) { free(derived); }
-        free(il_path); free(asm_path); free(exe_path);
-        return 1 as i32;
+    let mut r1: i32 = 0 as i32;
+    if bil_rc == (2 as i32) {
+        // v3.1.0 (跟 V2 v2.15.0 同源): in-mem self-backend 已在 build_il 里写完 asm_path,跳过 run_backend
+        r1 = 0 as i32;
+    } else {
+        r1 = run_backend(il_path, asm_path, t);
+        if r1 != (0 as i32) {
+            if user_out == (0 as *u8) { free(derived); }
+            free(il_path); free(asm_path); free(exe_path);
+            return 1 as i32;
+        }
     }
     // v2.8.3: --no-link flag → skip gcc link, 保留 .s 给 caller。
     // cmd_run 不传 --no-link (自己构造 arg_arr),所以 cmd_run 行为不变。
