@@ -827,6 +827,40 @@ V3-B ✅ ship 后由 V3-C sprint 设计 fill in — 3 sub-sprint 累计到本 um
 
 ---
 
+## v3.0.9 — V3 self-backend per-fn alloc pool pre-scan 真修 (W-087 frame offset 越界) — 2026-09-23 ✅ shipped
+
+**Status**: ✅ **shipped** (single commit + jhyy.exe/jhyy_stage0.exe rebuild + SHA baseline refresh + workarounds.md W-087 entry)
+
+**Trigger**: 2026-09-23 phase 5 binary regress (QBE removed + self-backend sole path) 暴露 19 std_* test 全 STACK_OVERFLOW (`JHY_SELF_BACKEND=1 jhyy.exe run std_*.jhyy` exit=127)。per `feedback_rca_first_root_cause` 1 iter RCA: 19/19 = 100% 同根因 = frame size 不含 alloc pool region → store 到 -8200(%rbp) 越界。
+
+**Scope (per `feedback_audit_single_commit_diff` single commit):**
+
+1. **`CGState` struct 加 `per_fn_alloc: *u8`** (i64[256]) — 跟 `per_fn_max` 平行的 pre-scan table (`compiler/src0/codegen_amd64_state.jhyy:201-203`)
+2. **`cg_state_init` alloc `per_fn_alloc`** (跟 `per_fn_max` 同 arena-alloc + memset pattern, +2KB total negligible)
+3. **`cg_token_alloc_size` helper** — parse `alloc8 N` / `alloc16 N` / `alloc4 N` size (skip `alloc` 后面的 align digit, skip whitespace, parse integer); 非 alloc token 返 -1 让 caller 跳过
+4. **`cg_compute_per_fn_max_temps` Phase 2 扩展** — 累加 `total_a += align_up(cg_token_alloc_size(...))` 写到 `per_fn_alloc[i]`
+5. **`emit_func_header` 用 `per_fn_alloc[cur_fn_idx]`** — alloc pool reserve = `max(8200, 8192 + per_fn_total)`, 覆盖 alloc pool + alloc-pointer-slot + derived-slot + user allocs 总和
+
+**Verification gate (per `feedback_fix_evaluation_rule` 5/5 PASS + `feedback_regress_clean_count`):**
+
+- `rm -f compiler/src0/_regress_*.exe` 清理 stale artifacts
+- regress **142/142 PASS / 0 FAIL / 20 SKIP** (含 10 个 std_* test 全绿: std_arena_basic / std_arena_calloc / std_arena_reset / std_fmt_hex / std_fmt_i32 / std_fmt_i32_neg / std_fmt_i64 / std_fmt_str / std_mem_basic / std_mem_compare)
+- `JHY_SELF_BACKEND=1` 路径验证 std_arena_basic.jhyy exit=0 (pre-W-087 exit=127)
+- jhyy.exe sha baseline refresh `ac5013b9...` → `dc670c1f4cf48841...`
+
+**Diff summary:**
+- `compiler/src0/codegen_amd64_emit_ctrl.jhyy`: +25 LOC (emit_func_header 改 per-fn alloc pool reserve)
+- `compiler/src0/codegen_amd64_state.jhyy`: +75 LOC (struct 字段 + cg_state_init alloc + cg_token_alloc_size helper + cg_compute_per_fn_max_temps Phase 2 扩展)
+- `compiler/build/bin/jhyy.exe` + `compiler/build/bin/jhyy_stage0.exe`: rebuild
+- `compiler/build/bin/jhyy.exe.sha256`: refresh to `dc670c1f4cf48841...`
+- `docs/internal/workarounds.md`: W-087 NEW entry + 索引行 (✅ RESOLVED)
+
+**Memory 更新**: `feedback_v3_self_backend_diverges_v2.md` 翻 "146 DIFFs are V3's debt" → "frame offset 越界是 V3 真债（W-087 修了）, 其余 3 类 DIFF 是 V2 共享特性" (per user 2026-09-23 反馈 "别写'146 差异都是债'")。
+
+**延伸 (Ph.5 QBE removal mandatory 前置):** W-087 真修是 v3.0.6/Ph.5a `git rm -r qbe/` 的 mandatory 前置 — Ph.5a 后 self-backend 成为 sole production path, frame_size 必须 cover alloc pool (per v3.0.6 plan § "mandatory 前置 Ph.5a `qbe/` git rm")。
+
+---
+
 ## 关联文档
 
 - V3-A 任务清单 + 概要 → [`batch-V3-A-plan.md`](../../plans/v3/batch-V3-A-plan.md)

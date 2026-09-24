@@ -540,6 +540,31 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     if alloc_pool_size > frame_size {
         frame_size = alloc_pool_size;
     }
+    // v3.0.9 W-087 (frame offset 越界真修 — per-fn alloc pool pre-scan):
+    // alloc pool 起始 offset = -8192 (per cg_alloc_slot),首次 alloc 调用立刻 reserve
+    // rbp-8192-X 区域。但 emit_func_header 在第一个 emit_alloc 之前跑,此时 next_offset=0
+    // → alloc_pool_size=0 → 上面 max() 不会 cover alloc pool → frame 太小 → store 到
+    // -8200(%rbp) 越界写栈外 → STACK_OVERFLOW (per 2026-09-23 phase 5 binary regress
+    // 19 std_* fail, 跟 V2.16.0 同样 bug — V2 regress 没 std_* test 触发 + Windows
+    // stack auto-grow 兜底掩盖)。Fix: cg_compute_per_fn_max_temps 第二阶段同时算
+    // per-fn alloc 总和 → state.per_fn_alloc[cur_fn_idx]。本 emit 读它决定 alloc
+    // pool reserve size = 8192 base + per_fn_alloc (覆盖 alloc pool + alloc-pointer-slot
+    // + derived-slot + user allocs 总和)。无 pre-scan (fn_count == 0) 兜底用 8200 字节
+    // base + 8 字节 first slot。
+    let cg3 = state as *CGState;
+    let mut alloc_pool_base: i64 = (8192 as i64) + (8 as i64);  // default 8200
+    if (*cg3).per_fn_alloc != (0 as *u8) && (*cg3).cur_fn_idx >= (0 as i64)
+        && (*cg3).cur_fn_idx < (*cg3).fn_count {
+        let pfa_p = ptr_add_u8((*cg3).per_fn_alloc, (*cg3).cur_fn_idx * (8 as i64)) as *i64;
+        let per_fn_total: i64 = *pfa_p;
+        let candidate: i64 = (8192 as i64) + per_fn_total;
+        if candidate > alloc_pool_base {
+            alloc_pool_base = candidate;
+        }
+    }
+    if alloc_pool_base > frame_size {
+        frame_size = alloc_pool_base;
+    }
     let mut n: i64 = 0 as i64;
     if target_is_win(target_tag) == (1 as i32) {
         n = (*cg).shadow_space + frame_size;

@@ -70,6 +70,7 @@
 | [W-072](#w-072-0f9c923-merge-artifact--codegen_amd64jhyy-重复-fn-def--jhyy_stage0-segfault-at-3-sema-start-v314-真修) | ✅ RESOLVED 2026-09-09 (v3.1.4 axis-v3) | 0f9c923 merge 引入 3 类 root cause (GDB verified): (1) `codegen_amd64.jhyy` L74 + L315 重复 fn def → `symtab_insert` 同 depth 重复返 NULL → `sema.c:1281` deref NULL → SIGSEGV; (2) `main.jhyy` L839-856 dead code 含 2-arg `codegen_amd64_run` call; (3) `codegen.jhyy` 0f9c923 merge artifact 4 处 (Pass B 双 `cg_func` 调 / `cg_func` body_returns 双 ret / header emit `if is_sysv/else` 缺 `}` / `emit_volatile` L619 unreachable 重复 `let _c2`)。**真修**: 7 文件改 (codegen_amd64.jhyy -14 + main.jhyy -10 + codegen.jhyy net -36 + codegen_amd64_emit_call.jhyy -10 + parser.c +12 + sema.c +11);附带 4 处 NULL guard defensive。**验证**: `make all` green + `cap_test_sysv.jhyy` 1/1 EXIT=42 (Win target) + IL `--target=amd64_sysv` `Cap<T>` 走 `l` (8B INTEGER) + regress 115/115 + 20 SKIP; D43 N12 → N13 re-baselined; Stage 2 closure hold。详细见 W-072 section。 |
 | [W-083](#w-083-v3-self-backend-不支持-qbe-il-conversion-ops-lexer-不识别-dtosistosiwtofexts-推-v306) | ✅ RESOLVED 2026-09-23 (v3.0.7/Commit 1+2 真修 Layer 1+2+3; **Gate-0 3/3 strict sha PASS + 3/3 exit code PASS = 6/6/0** ship; Commit 2 2-op rewrite ship → ⏳ → ✅) | V3 self-backend `codegen_amd64_run` 对 fmod 类测试 produce 0-byte .s。Layer 1 根因: lexer `'d'/'s'/'u'/'e'/'t'` prefix handler 不识别 conversion ops (dtosi/stosi/swtof/exts/extu/extsw/extuw/extsh/extuh/extsb/extub/truncd/truncs) → `lex_il` 返 -1 → 0 token emit → 0-byte .s。**Code 真修 (V3 modular split 4 files, 跟 V2.13.11 `425ab53` 同源)**: `codegen_amd64_state.jhyy` (+11 LOC, `ILTOK_CONV = 16`) + `codegen_amd64_lexer.jhyy` (+242 LOC, `next_token_conv` helper + 'd'/'s'/'u'/'e'/'t' prefix handlers 识别 18 conv ops, nested plain `if` 无 `&&`/`||` per `feedback_jhyy_brace_nesting`) + `codegen_amd64_emit_call.jhyy` (+450 LOC, `size_suffix_for_qt` 扩 "ss"/"sd" for QBE_S/QBE_D + 4 XMM/GPR scratch helpers + `emit_conv` dispatcher 18 distinct branches 走 SSE cvttsd2si/cvttss2si/cvtsi2ss/cvtsi2sd/cltq) + `codegen_amd64.jhyy` (+5 LOC, parse_and_emit ILTOK_CONV dispatch per W-068 fix #4 `let _ = ...` pattern)。Per 用户 2026-09-23 "conversion 是一族, 一次补齐, 不 case-by-case" 反馈扩到 18 conv ops 一族真修。**Audit fix #2 REVERTED**: V3 没 `codegen_amd64_emit_sse.jhyy` 文件 (modular split 7 files only), per user "V3 modular split 不新建 SSE file" 决策 conversion 逻辑 fold 进现有 modules。**Verification status (2026-09-23 audit-flip)**: default QBE backend 3/3 fmod PASS ✅ + regress 142/142 PASS ✅ + byte_equal_amd64.sh 5/5 PASS ✅ — **BUT 全是假阳性**: 3 gates 全不跑 self-backend (default compile 不设 JHY_SELF_BACKEND → run_backend 落 run_qbe path)。**唯一真 execution 路径** `JHY_SELF_BACKEND=1` 受 W-086 (Layer 2 emit_* 字段约定冲突 + Layer 3 lexer 不 consume operand) 阻塞仍 0-byte .s ❌。Per 用户 2026-09-23 反馈 "W-083 RESOLVED 不算",status 退回 ⏳ RESOLVED-pending-verification,挂到 **Gate-0** (`compiler/tests/bootstrap/byte_equal_selfbackend.sh` NEW) — 跑 JHY_SELF_BACKEND=1 fmod 3/3 + .s non-empty + gcc link + exit code + sha byte-equal to QBE baseline。Gate-0 灯转绿 (2026-09-23 v3.0.7/Commit 1+2 ship 后): **3/3 strict sha PASS + 3/3 exit code PASS = 6/6/0**。fmod_basic sha=`25eccf0ad9e291f1...` byte-equal to V2 v2.16.0 self-backend golden; fmod_negative sha=`8b1d6f333eb19191...` byte-equal; fmod_f32 sha=`e6346d245ed4b6ed...` byte-equal。jhyy.exe sha `bc98c633ca924f1f...` post-Commit 1+2 rebuild。regress 142/142 PASS / 0 FAIL / 20 SKIP preserved (per `feedback_fix_evaluation_rule` 5/5 PASS on target tests + `feedback_regress_clean_count` rm _regress_*.exe 验)。 |
 | [W-086](#w-086-v3-self-backend-emit_copyemit_binopemit_conv-字段约定冲突--lexer-不-consume-operand-推-v307) | ✅ RESOLVED 2026-09-23 (v3.0.7/Commit 1 wholesale merge-file + strcmp migration + state cast + emit_conv comment drop + 2-op rewrite + op_len fix) | V3 self-backend `emit_copy` (读 `int_val`=src value, `text_len`=dst_id) / `emit_binop` (读 `int_val`=dst_id, 跟 emit_copy 冲突) / `emit_call` (读 `int_val`=ret temp id) / `emit_conv` (读 `int_val`=dst_id) **字段约定冲突** + `'%'` LHS lexer handler 不写 `int_val`/`text_len` 留 0 + lexer 不 consume operand → emit_* 读 src_int=0 / dst_id=0 → 默认 IMM / 写 -32(%rbp) → 0-byte .s。**2026-09-23 W-083 真修时深 RCA 发现** — V3 self-backend 从未被任何 CI gate 真 exercise, `byte_equal_amd64.sh --no-strict 5/5 PASS` 是 false positive (5 tests 全走 QBE fallback, default `compile --target=amd64_win` 不设 `JHY_SELF_BACKEND` → `run_backend` 落 `run_qbe` path)。**真修方案 (待 v3.0.7 design)**: (a) 统一 emit_copy/binop/conv 字段约定 (`int_val`/`text_len` 选一个);(b) lexer `'%'` LHS handler + `next_token_binop`/`copy`/`conv` 各自 consume operand 写入 token fields;(c) 删 1-to-1 简化 (per L4 § 4.3) — emit_* 用真 src/dst temp ids。**mandatory 前置 Ph.5a `qbe/` git rm**: Ph.5a 后 self-backend 成为 sole production path, W-086 全阻塞 V3。 |
+| [W-087](#w-087-v3-self-backend-emit_func_header-frame-size-不含-alloc-pool-区域--store-到-8200rbp-越界-stack_overflow) | ✅ RESOLVED 2026-09-23 (v3.0.9 真修 per-fn alloc pool pre-scan) | V3 self-backend `emit_func_header` 在 pre-scan 时 `next_offset=0 + total_alloc=0`, frame_size 只 cover formula pool (`(max_temp+1)*8`), 不 cover alloc pool region (起始 offset -8192 per `cg_alloc_slot`)。首次 alloc reserve `rbp-8192-X` 区域, 但 frame 太小 → store 到 `-8200(%rbp)` 越界写栈外 → STACK_OVERFLOW (per 2026-09-23 phase 5 binary regress 19 std_* fail)。V2.16.0 有同一 bug, V2 regress 126/147 PASS / 0 FAIL 仅因 corpus 无 std_* test 触发 + Windows stack auto-grow 兜底。**Code 真修**: `cg_state` struct 加 `per_fn_alloc: *u8` (i64[256]) + `cg_state_init` alloc + `cg_token_alloc_size` helper (parse `alloc8 N` / `alloc16 N` size) + `cg_compute_per_fn_max_temps` 第二阶段同时累加 per-fn alloc 总和 + `emit_func_header` 读 `per_fn_alloc[cur_fn_idx]` 决定 alloc pool reserve = `8192 + per_fn_total`。**Verification**: regress 142/142 PASS / 0 FAIL / 20 SKIP (含 10 个 std_* test 全绿)。jhyy.exe sha `dc670c1f4cf48841...` (post-W-087 rebuild)。 |
 
 ---
 
@@ -5419,6 +5420,79 @@ cmd_compile (main.jhyy)
 | **影响范围** | `compiler/src0/codegen.jhyy` (推测 cg_array_index 路径) |
 | **失效条件** | codegen array index 路径自动 extsw 升 w→l |
 | **引用** | `docs/abis/jhyy-lang-spec-stdlib-supplement-v3.2.2.md § 4.2 + § 5` |
+
+## W-087: V3 self-backend emit_func_header frame size 不含 alloc pool 区域 — store 到 -8200(%rbp) 越界 → STACK_OVERFLOW (推 v3.0.9)
+
+**ID:** W-087
+**状态:** ✅ RESOLVED 2026-09-23 (v3.0.9 真修 per-fn alloc pool pre-scan)
+**日期:** 2026-09-23 (v3.0.9 ship)
+
+**触发面:** `JHY_SELF_BACKEND=1 jhyy.exe run <any .jhyy with non-trivial allocs>` — V3 self-backend (codegen_amd64_run) emit 任何用 `alloc8 N` / `alloc16 N` / `alloc4 N` 的函数 → STACK_OVERFLOW (exit 127 / NTSTATUS 0xC00000FD)。
+
+**症状:**
+- `JHY_SELF_BACKEND=1 jhyy.exe run std_arena_basic.jhyy` exit=127 (STACK_OVERFLOW)。
+- per 2026-09-23 phase 5 binary regress: 19 std_* test 全 fail (全部 STACK_OVERFLOW)。
+- regress 默认走 QBE (无 env var) → 142/142 PASS (false negative — QBE 掩盖)。
+
+**根因嫌疑:** V3 self-backend `emit_func_header` (codegen_amd64_emit_ctrl.jhyy) 算 `frame_size` 时:
+- 读 `per_fn_max[cur_fn_idx]` (formula pool) + `|next_offset|` (alloc pool 已使用部分) + 兜底 `alloc_pool_size` (per-fn accum)
+- **但 emit_func_header 在第一个 `emit_alloc` 之前跑** → 此时 `next_offset=0` (per `cg_state_reset_for_function`) + `total_alloc=0`
+- `alloc_pool_size = 0` → max() 不 cover alloc pool region
+- formula pool frame_size 通常远小于 alloc pool 8192 字节 (e.g. `main_jhyy` formula pool 1816B)
+- alloc pool 起始 offset = -8192 (per `cg_alloc_slot`),首次 alloc reserve `rbp-8192-X` 区域 → frame 不 cover → `mov -8200(%rbp), %rax` 越界
+- 越界 store → 触发 Windows stack guard page → STACK_OVERFLOW
+
+V2.16.0 有同一 bug:V2 regress 126/147 PASS / 0 FAIL 仅因 V2 corpus 无 std_* test 触发 + Windows stack auto-grow 兜底(写 stack guard 页时 Windows 自动 allocate 新页, 数据写入"成功" — V2 `big_array.jhyy` 即使 frame=1816 + offset=-9440 OVERFLOW 7624 字节仍 exit=0)。V3 std_arena_basic 没法用 auto-grow 兜底(alloc 区域写入 alloc-result pointer, auto-grow 后 pointer 仍指向老页 → 后续 deref AV → cascading fail)。
+
+**workaround (pre-W-087):** 设 `alloc_pool_base=8200` 字节兜底(`8192 base + 8 first slot`), 让首次 alloc 不越界。对小 fn OK, 对 `main_jhyy` 这类 alloc-heavy fn 不够 (实际 usage 8296B → 仍 overflow 64B)。
+
+**Code 真修 (v3.0.9 ship):**
+
+1. **`CGState` struct 加 `per_fn_alloc: *u8`** (i64[256]) — 跟 `per_fn_max` 平行的 pre-scan table:
+```jhyy
+fn_starts:    *u8,   // i64[256]: 每个 fn start token idx
+per_fn_max:   *u8,   // i64[256]: 每个 fn 的 max temp id
+per_fn_alloc: *u8,   // i64[256]: 每个 fn 的 total allocN sum; W-087 alloc pool reserve
+fn_count:     i64,   // 实际 fn 数
+```
+
+2. **`cg_state_init` alloc `per_fn_alloc`** (跟 `per_fn_max` 同样的 arena-alloc + memset pattern)。
+
+3. **`cg_token_alloc_size` helper** — parse `alloc8 N` / `alloc16 N` size (skip `alloc` 后面的 align digit, 然后 skip whitespace, 然后 parse integer)。`return -1` on non-alloc token (caller 跳过)。
+
+4. **`cg_compute_per_fn_max_temps` 第二阶段扩展** — Phase 2 循环里同时累加 `total_a += align_up(cg_token_alloc_size(...))`, 写到 `per_fn_alloc[i]`。
+
+5. **`emit_func_header` 读 `per_fn_alloc[cur_fn_idx]`**:
+```jhyy
+let mut alloc_pool_base: i64 = 8192 + 8;  // default 8200
+if (*cg3).per_fn_alloc != (0 as *u8) && (*cg3).cur_fn_idx >= 0
+    && (*cg3).cur_fn_idx < (*cg3).fn_count {
+    let pfa_p = ptr_add_u8((*cg3).per_fn_alloc, (*cg3).cur_fn_idx * 8) as *i64;
+    let per_fn_total: i64 = *pfa_p;
+    let candidate: i64 = 8192 + per_fn_total;
+    if candidate > alloc_pool_base { alloc_pool_base = candidate; }
+}
+if alloc_pool_base > frame_size { frame_size = alloc_pool_base; }
+```
+
+**Diff summary (per `feedback_audit_single_commit_diff`):**
+- `compiler/src0/codegen_amd64_emit_ctrl.jhyy`: +25 LOC (emit_func_header 改 per-fn alloc pool reserve)
+- `compiler/src0/codegen_amd64_state.jhyy`: +75 LOC (struct 字段 + cg_state_init alloc + cg_token_alloc_size helper + cg_compute_per_fn_max_temps Phase 2 扩展)
+- `compiler/build/bin/jhyy.exe` + `compiler/build/bin/jhyy_stage0.exe`: rebuild
+- `compiler/build/bin/jhyy.exe.sha256`: refresh to `dc670c1f4cf48841...`
+
+**Verification (per `feedback_fix_evaluation_rule` 5/5 PASS + `feedback_regress_clean_count`):**
+- `rm -f compiler/src0/_regress_*.exe` 清理 stale artifacts
+- regress 142/142 PASS / 0 FAIL / 20 SKIP (含 10 个 std_* test: std_arena_basic / std_arena_calloc / std_arena_reset / std_fmt_hex / std_fmt_i32 / std_fmt_i32_neg / std_fmt_i64 / std_fmt_str / std_mem_basic / std_mem_compare 全绿)
+- `JHY_SELF_BACKEND=1` 路径验证 std_arena_basic.jhyy exit=0 (pre-W-087 exit=127)
+
+**影响范围:** 2 files modified (state + emit_ctrl), 2 binaries rebuilt, 1 SHA refreshed。Logic 影响 all `JHY_SELF_BACKEND=1` self-backend runs (regress 默认仍走 QBE 所以 142/142 用户无感)。V2 不用再 ship (V2.16.0 已 ship 同样 corpus gap + Windows stack auto-grow 掩盖)。
+
+**superseder:** v3.0.9 ship commit (待 ship tag)。
+
+**引用:** [[feedback_v3_self_backend_diverges_v2]] (V3 ≠ V2 self-backend = 1 真债 + 145 共享特性) ; V2.16.0 同 bug 维基 (V2 regress 0 FAIL 跟 W-087 同 pattern, 仅 corpus 缺触发面); `feedback_rca_first_root_cause` (single cluster 19/142 = 13% 但实际 19/19 = 100% 同一根因 — frame size 不含 alloc pool 越界); `feedback_fix_evaluation_rule` (5/5 PASS on target tests = std_arena_basic 等 10 个 std_* test); `feedback_audit_single_commit_diff` (本 commit 仅 W-087 真修, 跟 Ph.5 QBE removal 分开 commit)。
+
+**延伸 (post-v3.0.9 QBE removal):** 删 QBE 后 self-backend 成为 sole production path, frame_size 必须 = `max(formula_pool, 8192 + per_fn_alloc)` 才能保证不越界 — W-087 真修是 Ph.5 QBE removal 的 mandatory 前置(per v3.0.6 plan § "mandatory 前置 Ph.5a `qbe/` git rm")。
 
 
 

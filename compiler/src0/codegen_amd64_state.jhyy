@@ -200,6 +200,7 @@ type CGState = struct {
     // 256 entries 够 ~60 fns (big_test),future-proof 加 safety check fn_count < 256。
     fn_starts: *u8,    // i64[256]: 每个 fn start token idx;fn_starts[fn_count]=n 哨兵
     per_fn_max: *u8,   // i64[256]: 每个 fn 的 max temp id;frame_size = (max+1)*8
+    per_fn_alloc: *u8, // i64[256]: 每个 fn 的 total allocN sum;W-087 alloc pool reserve
     fn_count: i64,     // 实际 fn 数 (0 = 没跑 pre-scan → fall through global-max)
 
     // v2.11.15 Iter 2 (C.3 emit_phi 真修): pending phi resolution table。
@@ -403,6 +404,17 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     let pfm_ptr = arena_alloc(arena, pfm_bytes);
     let _zero_pfm = memset(pfm_ptr, 0 as i32, pfm_bytes);
     (*s).per_fn_max = pfm_ptr;
+    // v3.0.9 W-087 (alloc pool frame offset 真修): per-fn alloc 总和 pre-scan table。
+    // 跟 per_fn_max 平行 alloc,emit_func_header 读 per_fn_alloc[cur_fn_idx]
+    // 决定 alloc pool reserve size (= 8192 base + per_fn_alloc)。没有这个 pre-scan
+    // → emit_func_header 时 next_offset=0 + total_alloc=0 → frame_size 不会 cover
+    // alloc pool → store 到 -8200(%rbp) 越界 → STACK_OVERFLOW (per 2026-09-23 phase 5
+    // binary regress 19 std_* fail, 跟 V2.16.0 同样 bug — V2 regress 没 std_* test
+    // 触发,Windows stack auto-grow 兜底掩盖)。
+    let pfa_bytes = (256 as i64) * (8 as i64);
+    let pfa_ptr = arena_alloc(arena, pfa_bytes);
+    let _zero_pfa = memset(pfa_ptr, 0 as i32, pfa_bytes);
+    (*s).per_fn_alloc = pfa_ptr;
     (*s).fn_count = 0 as i64;
     // v2.11.15 Iter 2 (C.3 emit_phi 真修):alloc pending phi resolution table。
     //   4 parallel i64 arrays × 128 entries × 8 bytes = 4KB total negligible。
@@ -1155,6 +1167,60 @@ fn cg_compute_global_max_temp(tok_p: *u8, tok_size: i64, n: i64) -> i64 {
     return gmax;
 }
 
+// cg_token_alloc_size(tok_p, tok_size, idx) -> i64
+//   读 token[idx] 的 ILTOK_ALLOC text,parse `alloc<N> <size>` 返 size (字节)。
+//   非 alloc token → 返 -1 (让 caller 跳过)。
+//   语法:`alloc4 N` / `alloc8 N` / `alloc16 N`,N 是正整数。
+//   必须跳过 `alloc` 后面的 align digit (例 `alloc8`),否则会把 '8' 当 size。
+fn cg_token_alloc_size(tok_p: *u8, tok_size: i64, idx: i64) -> i64 {
+    if tok_p == (0 as *u8) { return -(1 as i64); }
+    let tok_start = (tok_p as i64 + idx * tok_size) as *u8;
+    let t = tok_start as *ILToken;
+    if (*t).kind != ILTOK_ALLOC() {
+        return -(1 as i64);
+    }
+    let text = (*t).text;
+    let text_len = (*t).text_len;
+    if text == (0 as *u8) || text_len <= (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut i: i64 = 0 as i64;
+    while i + (4 as i64) < text_len {
+        if cg_byte_at(text, i) == (97 as i32) && cg_byte_at(text, i + (1 as i64)) == (108 as i32)
+            && cg_byte_at(text, i + (2 as i64)) == (108 as i32) && cg_byte_at(text, i + (3 as i64)) == (111 as i32)
+            && cg_byte_at(text, i + (4 as i64)) == (99 as i32) {
+            break;
+        }
+        i = i + (1 as i64);
+    }
+    if i + (4 as i64) >= text_len {
+        return -(1 as i64);
+    }
+    let mut j: i64 = i + (5 as i64);
+    while j < text_len && cg_is_digit(cg_byte_at(text, j)) != (0 as i32) {
+        j = j + (1 as i64);
+    }
+    while j < text_len {
+        let sc_byte: i32 = cg_byte_at(text, j);
+        if sc_byte == (32 as i32) || sc_byte == (9 as i32) {
+            j = j + (1 as i64);
+        } else {
+            break;
+        }
+    }
+    let mut size: i64 = 0 as i64;
+    let mut ndig: i64 = 0 as i64;
+    while j < text_len && cg_is_digit(cg_byte_at(text, j)) != (0 as i32) {
+        size = size * (10 as i64) + ((cg_byte_at(text, j) - (48 as i32)) as i64);
+        ndig = ndig + (1 as i64);
+        j = j + (1 as i64);
+    }
+    if ndig == (0 as i64) {
+        return -(1 as i64);
+    }
+    return size;
+}
+
 // ═════════════════════════════════════════════════════════════════════════
 // v2.11.10 (W-074.6 T3-a closure) per-fn max temp pre-scan
 // ═════════════════════════════════════════════════════════════════════════
@@ -1209,6 +1275,7 @@ fn cg_compute_per_fn_max_temps(state: *u8, tok_p: *u8, tok_size: i64, n: i64) ->
     }
     (*s).fn_count = fn_count;
     // Phase 2: per_fn_max[i] = max temp id in [fn_starts[i], fn_starts[i+1])
+    //          + per_fn_alloc[i] = sum of all allocN sizes (8-byte aligned)
     let mut fi: i64 = 0 as i64;
     while fi < fn_count {
         let start_p = ptr_add_u8((*s).fn_starts, fi * (8 as i64)) as *i64;
@@ -1216,14 +1283,22 @@ fn cg_compute_per_fn_max_temps(state: *u8, tok_p: *u8, tok_size: i64, n: i64) ->
         let start: i64 = *start_p;
         let end: i64 = *end_p;
         let mut max_t: i64 = 0 as i64;
+        let mut total_a: i64 = 0 as i64;
         let mut j: i64 = start;
         while j < end {
             let t_max = cg_token_max_temp_id(tok_p, tok_size, j);
             if t_max > max_t { max_t = t_max; }
+            let a_sz = cg_token_alloc_size(tok_p, tok_size, j);
+            if a_sz > (0 as i64) {
+                let aligned = (a_sz + (7 as i64)) & ((0 as i64) - (8 as i64));
+                total_a = total_a + aligned;
+            }
             j = j + (1 as i64);
         }
         let p2 = ptr_add_u8((*s).per_fn_max, fi * (8 as i64)) as *i64;
         *p2 = max_t;
+        let p3 = ptr_add_u8((*s).per_fn_alloc, fi * (8 as i64)) as *i64;
+        *p3 = total_a;
         fi = fi + (1 as i64);
     }
     return 0 as i32;
