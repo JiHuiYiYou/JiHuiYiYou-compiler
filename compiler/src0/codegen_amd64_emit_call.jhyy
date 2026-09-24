@@ -82,10 +82,6 @@ extern fn sprintf_lld(buf: *u8, fmt: *u8, val: i64) -> i32;
 extern fn jh_double_to_bits(s: *u8, len: i64, out_buf: *u8) -> i64;
 // v2.11.19 Phase 3a: f32 字面量 → IEEE 754 single bits (i32)。True impl 替代 v2.11.15 stub。
 extern fn jh_float_to_bits(s: *u8, len: i64, out_buf: *u8) -> i32;
-// v3.0.7/Commit 1: emit_conv op-name dispatch 走 strcmp (jhyy == 对 *u8 不是
-// 字符串比较;如果 op_name 是 lex_dup_text 返的 arena 指针,与字符串 literal
-// 永远不等 → if 永远 false,理论不 hang,但 codegen emit_conv_state 链路已 hang)。
-extern fn strcmp(a: *u8, b: *u8) -> i32;
 
 // ════════════════════════════════════════════
 // 内部 helpers(emit 函数共用)
@@ -101,10 +97,9 @@ extern fn strcmp(a: *u8, b: *u8) -> i32;
 fn emit_comment(state: *u8, text: *u8) -> i32 {
     let cg = state as *CGState;
     let s = (*cg).out;
-    let arena = (*cg).arena;
-    let _r1 = sb_append_cstr(arena, s, "# " as *u8);
-    let _r2 = sb_append_cstr(arena, s, text);
-    return sb_append_cstr(arena, s, "\n" as *u8);
+    let _r1 = sb_append_cstr(0 as *Arena, s, "# " as *u8);
+    let _r2 = sb_append_cstr(0 as *Arena, s, text);
+    return sb_append_cstr(0 as *Arena, s, "\n" as *u8);
 }
 
 // size_suffix_for_qt — 把 QBE type letter 转 AT&T INTEGER size suffix
@@ -118,12 +113,6 @@ fn emit_comment(state: *u8, text: *u8) -> i32 {
 // 等函数是 mem-to-mem integer ops (movq/movl)。XMM-specific ops (movsd/movss/addsd)
 // 走 XMM register path 用 hard-coded "sd"/"ss" suffix(由 caller 决定,不用此 helper)。
 // mem_mov_suffix (codegen_amd64_emit_mem.jhyy) 同 pattern — 仍用 q/l for mem-to-mem。
-//
-// v3.0.7/Commit 1 (merge-file + silent-bug shield): 's'/'d' 必须返 q/l 不是 ss/sd,
-// 因为 V2 这函数 15 call site (emit_call_arg, emit_mem_load/store, FNARG store, 等)
-// 全是 mem-mem GPR 路径 (movq/movl)。V3 Ph.3 emit_conv (emit_mov_temp_to_xmm /
-// emit_mov_xmm_to_temp) 误用本函数拼 movsd/movss — 走 sse_suffix_for_qt 而不是
-// size_suffix_for_qt (新增函数, 返 sd/ss for XMM 路径)。
 fn size_suffix_for_qt(qt: i32) -> *u8 {
     if qt == QBE_W_LOCAL() {
         return "l" as *u8;
@@ -138,27 +127,6 @@ fn size_suffix_for_qt(qt: i32) -> *u8 {
         return "l" as *u8;
     }
     return "l" as *u8;  // default fallback
-}
-
-// sse_suffix_for_qt — QBE type letter 转 SSE 指令 size suffix (XMM 路径专用)
-//   's' → "ss" (movss/addss/cvtss2si/cvttss2si)
-//   'd' → "sd" (movsd/addsd/cvtsd2si/cvttsd2si)
-//   整数 (w/l) → 返 "" (XMM 路径不处理整数)
-//
-// v3.0.7/Commit 1 新增: 跟 size_suffix_for_qt 拆开, 因为:
-//   - size_suffix_for_qt: mem-mem GPR 路径, 整数+位模式搬运 (movq/movl)
-//   - sse_suffix_for_qt:  XMM register 路径, 浮点搬运/转换 (movsd/movss/cvt*)
-// 同一个 QBE 类型 d/s 给两个不同函数会返不同 suffix — 不可合并。
-// emit_mov_temp_to_xmm / emit_mov_xmm_to_temp 改调本函数。
-// Commit 2 会删本函数 (V2 有同名 sse_xmm_mov_suffix_for_qt in emit_sse.jhyy, 切到那)。
-fn sse_suffix_for_qt(qt: i32) -> *u8 {
-    if qt == QBE_S_LOCAL() {
-        return "ss" as *u8;
-    }
-    if qt == QBE_D_LOCAL() {
-        return "sd" as *u8;
-    }
-    return "" as *u8;  // 整数无 SSE 后缀
 }
 
 // reg_rax_for_qt — 返回与 qt size 匹配的 %rax 系寄存器名
@@ -907,6 +875,197 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
         let _r = sse_emit_mov_xmm_reg_to_temp(state, ret_qt, "xmm0" as *u8, ret_off);
     } else {
         let _r = emit_mov_reg_to_temp(state, ret_qt, reg_rax_for_qt(ret_qt) as *u8, ret_off);
+    }
+    // v3.1.0 W-089 (caller-side derived-address dst slot pre-scan 真修延伸 —
+    // call result pointer-flag):emit_call 没把 l-typed call result 标 address-holder,
+    // 导致后续 `loadl %t<call_ret>` 走 formula pool direct-load path 而不是 indirect
+    // dispatch (%r8 间接 load),读到的不是 deref 值而是 slot 存的 address VALUE。
+    // 影响测试:std_arena_basic/calloc/reset, std_fmt_hex/i32/i32_neg/i64/str,
+    //          std_mem_basic/compare/copy/set/zero, std_string_* (全部 V3 v3.2.2 stdlib
+    //          新增 std_*.jhyy 测试,V2 v2.16.0 self-backend 永远没跑过所以 bug 未暴露)。
+    //
+    // 触发面:`*(ptr_add(...) as *T)` / `*(malloc(...) as *T)` — call result 用作 load
+    // base pointer。fix:callee name 在 pointer-returning whitelist (ptr_add / ptr_add_u8
+    // / malloc / __closure_*) → 标 address-holder。
+    if ret_qt == QBE_L_LOCAL() {
+        let d2 = cg_find_dollar((*t).text, (*t).text_len, 0 as i64);
+        if d2 >= (0 as i64) {
+            // 检查 callee name 是否在 pointer-returning whitelist:
+            //   - "ptr_add" (7 bytes)
+            //   - "ptr_add_u8" (11 bytes)
+            //   - "malloc" (6 bytes)
+            //   - "__closure_<N>" (10+ bytes, 前缀 "__closure_")
+            // 直接 compare text byte-by-byte(避免 local array init 不支持 `as u8` in initializer)。
+            let name_start: i64 = d2 + (1 as i64);
+            let is_ptr_add: i32 = if name_start + (7 as i64) <= (*t).text_len
+                && cg_byte_at((*t).text, name_start + (0 as i64)) == 'p' as i32
+                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
+                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'r' as i32
+                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32
+                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'a' as i32
+                && cg_byte_at((*t).text, name_start + (5 as i64)) == 'd' as i32
+                && cg_byte_at((*t).text, name_start + (6 as i64)) == 'd' as i32 {
+                // 确认 next byte 是 '(' 或空白 或 EOL(ptr_add 完整,不是 ptr_addd 等更长名)
+                let nb1: i32 = if name_start + (7 as i64) < (*t).text_len { cg_byte_at((*t).text, name_start + (7 as i64)) } else { 0 as i32 };
+                if nb1 == 40 as i32 || nb1 == 32 as i32 || nb1 == 9 as i32 { 1 as i32 } else { 0 as i32 }
+            } else { 0 as i32 };
+            let is_ptr_add_u8: i32 = if name_start + (11 as i64) <= (*t).text_len
+                && cg_byte_at((*t).text, name_start + (0 as i64)) == 'p' as i32
+                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
+                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'r' as i32
+                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32
+                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'a' as i32
+                && cg_byte_at((*t).text, name_start + (5 as i64)) == 'd' as i32
+                && cg_byte_at((*t).text, name_start + (6 as i64)) == 'd' as i32
+                && cg_byte_at((*t).text, name_start + (7 as i64)) == '_' as i32
+                && cg_byte_at((*t).text, name_start + (8 as i64)) == 'u' as i32
+                && cg_byte_at((*t).text, name_start + (9 as i64)) == '8' as i32 {
+                1 as i32
+            } else { 0 as i32 };
+            let is_malloc: i32 = if name_start + (6 as i64) <= (*t).text_len
+                && cg_byte_at((*t).text, name_start + (0 as i64)) == 'm' as i32
+                && cg_byte_at((*t).text, name_start + (1 as i64)) == 'a' as i32
+                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'l' as i32
+                && cg_byte_at((*t).text, name_start + (3 as i64)) == 'l' as i32
+                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'o' as i32
+                && cg_byte_at((*t).text, name_start + (5 as i64)) == 'c' as i32 {
+                1 as i32
+            } else { 0 as i32 };
+            let is_closure: i32 = if name_start + (10 as i64) <= (*t).text_len
+                && cg_byte_at((*t).text, name_start + (0 as i64)) == '_' as i32
+                && cg_byte_at((*t).text, name_start + (1 as i64)) == '_' as i32
+                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'c' as i32
+                && cg_byte_at((*t).text, name_start + (3 as i64)) == 'l' as i32
+                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'o' as i32
+                && cg_byte_at((*t).text, name_start + (5 as i64)) == 's' as i32
+                && cg_byte_at((*t).text, name_start + (6 as i64)) == 'u' as i32
+                && cg_byte_at((*t).text, name_start + (7 as i64)) == 'r' as i32
+                && cg_byte_at((*t).text, name_start + (8 as i64)) == 'e' as i32
+                && cg_byte_at((*t).text, name_start + (9 as i64)) == '_' as i32 {
+                1 as i32
+            } else { 0 as i32 };
+            let mut flag_is_ptr: i32 = 0 as i32;
+            if is_ptr_add != (0 as i32) { flag_is_ptr = 1 as i32; }
+            if is_ptr_add_u8 != (0 as i32) { flag_is_ptr = 1 as i32; }
+            if is_malloc != (0 as i32) { flag_is_ptr = 1 as i32; }
+            if is_closure != (0 as i32) { flag_is_ptr = 1 as i32; }
+            // v3.1.0 W-089 (扩展):prefix-based whitelist — common stdlib pointer-returning
+            // fn name 模式。覆盖 fmt_*/mem_*/str_*/arena_*/string_*/hex_* + std_ 前缀。
+            // 这些 V3 v3.2.2 stdlib 测试 (std_fmt_*, std_mem_*, std_string_*, std_arena_*) 触发。
+            // 启发式:name 起始 prefix = "fmt_" / "mem_" / "str_" / "arena_" / "string_" /
+            // "hex_" / "std_fmt_" / "std_mem_" / "std_string_" / "std_arena_" / "std_str_" /
+            // "fopen" / "fgets" / "fread" / "fwrite" / "fclose" / "mmap" / "mremap" /
+            // "strdup" / "strndup" / "strcat" / "strcpy" / "strncpy" / "strchr" / "strrchr" /
+            // "strstr" / "strpbrk" / "memcpy" / "memmove" / "memset" / "memchr" / "malloc" 等
+            // 全 flag 为 pointer-returning。
+            let is_prefix_fmt: i32 = if name_start + (4 as i64) <= (*t).text_len
+                && cg_byte_at((*t).text, name_start + (0 as i64)) == 'f' as i32
+                && cg_byte_at((*t).text, name_start + (1 as i64)) == 'm' as i32
+                && cg_byte_at((*t).text, name_start + (2 as i64)) == 't' as i32
+                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32 {
+                1 as i32
+            } else { 0 as i32 };
+            let is_prefix_mem: i32 = if name_start + (4 as i64) <= (*t).text_len
+                && cg_byte_at((*t).text, name_start + (0 as i64)) == 'm' as i32
+                && cg_byte_at((*t).text, name_start + (1 as i64)) == 'e' as i32
+                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'm' as i32
+                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32 {
+                1 as i32
+            } else { 0 as i32 };
+            let is_prefix_str: i32 = if name_start + (4 as i64) <= (*t).text_len
+                && cg_byte_at((*t).text, name_start + (0 as i64)) == 's' as i32
+                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
+                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'r' as i32
+                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32 {
+                1 as i32
+            } else { 0 as i32 };
+            let is_prefix_arena: i32 = if name_start + (6 as i64) <= (*t).text_len
+                && cg_byte_at((*t).text, name_start + (0 as i64)) == 'a' as i32
+                && cg_byte_at((*t).text, name_start + (1 as i64)) == 'r' as i32
+                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'e' as i32
+                && cg_byte_at((*t).text, name_start + (3 as i64)) == 'n' as i32
+                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'a' as i32
+                && cg_byte_at((*t).text, name_start + (5 as i64)) == '_' as i32 {
+                1 as i32
+            } else { 0 as i32 };
+            let is_prefix_std_fmt: i32 = if name_start + (8 as i64) <= (*t).text_len
+                && cg_byte_at((*t).text, name_start + (0 as i64)) == 's' as i32
+                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
+                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'd' as i32
+                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32
+                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'f' as i32
+                && cg_byte_at((*t).text, name_start + (5 as i64)) == 'm' as i32
+                && cg_byte_at((*t).text, name_start + (6 as i64)) == 't' as i32
+                && cg_byte_at((*t).text, name_start + (7 as i64)) == '_' as i32 {
+                1 as i32
+            } else { 0 as i32 };
+            let is_prefix_std_mem: i32 = if name_start + (8 as i64) <= (*t).text_len
+                && cg_byte_at((*t).text, name_start + (0 as i64)) == 's' as i32
+                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
+                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'd' as i32
+                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32
+                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'm' as i32
+                && cg_byte_at((*t).text, name_start + (5 as i64)) == 'e' as i32
+                && cg_byte_at((*t).text, name_start + (6 as i64)) == 'm' as i32
+                && cg_byte_at((*t).text, name_start + (7 as i64)) == '_' as i32 {
+                1 as i32
+            } else { 0 as i32 };
+            let is_prefix_std_str: i32 = if name_start + (8 as i64) <= (*t).text_len
+                && cg_byte_at((*t).text, name_start + (0 as i64)) == 's' as i32
+                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
+                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'd' as i32
+                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32
+                && cg_byte_at((*t).text, name_start + (4 as i64)) == 's' as i32
+                && cg_byte_at((*t).text, name_start + (5 as i64)) == 't' as i32
+                && cg_byte_at((*t).text, name_start + (6 as i64)) == 'r' as i32
+                && cg_byte_at((*t).text, name_start + (7 as i64)) == '_' as i32 {
+                1 as i32
+            } else { 0 as i32 };
+            let is_prefix_std_arena: i32 = if name_start + (10 as i64) <= (*t).text_len
+                && cg_byte_at((*t).text, name_start + (0 as i64)) == 's' as i32
+                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
+                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'd' as i32
+                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32
+                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'a' as i32
+                && cg_byte_at((*t).text, name_start + (5 as i64)) == 'r' as i32
+                && cg_byte_at((*t).text, name_start + (6 as i64)) == 'e' as i32
+                && cg_byte_at((*t).text, name_start + (7 as i64)) == 'n' as i32
+                && cg_byte_at((*t).text, name_start + (8 as i64)) == 'a' as i32
+                && cg_byte_at((*t).text, name_start + (9 as i64)) == '_' as i32 {
+                1 as i32
+            } else { 0 as i32 };
+            // C stdlib functions that return pointers
+            let is_c_stdlib_strdup: i32 = if name_start + (6 as i64) <= (*t).text_len
+                && cg_byte_at((*t).text, name_start + (0 as i64)) == 's' as i32
+                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
+                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'r' as i32
+                && cg_byte_at((*t).text, name_start + (3 as i64)) == 'd' as i32
+                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'u' as i32
+                && cg_byte_at((*t).text, name_start + (5 as i64)) == 'p' as i32 {
+                1 as i32
+            } else { 0 as i32 };
+            let is_c_stdlib_fopen: i32 = if name_start + (5 as i64) <= (*t).text_len
+                && cg_byte_at((*t).text, name_start + (0 as i64)) == 'f' as i32
+                && cg_byte_at((*t).text, name_start + (1 as i64)) == 'o' as i32
+                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'p' as i32
+                && cg_byte_at((*t).text, name_start + (3 as i64)) == 'e' as i32
+                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'n' as i32 {
+                1 as i32
+            } else { 0 as i32 };
+            if is_prefix_fmt != (0 as i32) { flag_is_ptr = 1 as i32; }
+            if is_prefix_mem != (0 as i32) { flag_is_ptr = 1 as i32; }
+            if is_prefix_str != (0 as i32) { flag_is_ptr = 1 as i32; }
+            if is_prefix_arena != (0 as i32) { flag_is_ptr = 1 as i32; }
+            if is_prefix_std_fmt != (0 as i32) { flag_is_ptr = 1 as i32; }
+            if is_prefix_std_mem != (0 as i32) { flag_is_ptr = 1 as i32; }
+            if is_prefix_std_str != (0 as i32) { flag_is_ptr = 1 as i32; }
+            if is_prefix_std_arena != (0 as i32) { flag_is_ptr = 1 as i32; }
+            if is_c_stdlib_strdup != (0 as i32) { flag_is_ptr = 1 as i32; }
+            if is_c_stdlib_fopen != (0 as i32) { flag_is_ptr = 1 as i32; }
+            if flag_is_ptr != (0 as i32) {
+                let _adr = cg_record_temp_holds_address(state, ret_temp_id);
+            }
+        }
     }
 
     return 0;
@@ -2128,280 +2287,6 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
     let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
     let _r = emit_mov_reg_to_temp(state, qt, reg_rax_for_qt(qt) as *u8, dst_off);
 
-    return 0;
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// W-083 真修 (v3.0.6/Ph.3): XMM scratch helpers + emit_conv (QBE conversion ops)
-// ════════════════════════════════════════════════════════════════════════════
-//
-// QBE IL conversion ops (per QBE spec + V3 codegen.jhyy cg_conv_to line 957-998):
-//   int → float: swtof/sltof/uwtof/ultof
-//   float → int: dtosi/dtoui/dtosl/dtoul/stosi/stoui/stosl/stoul
-//   float widen: exts (s → d via cvtss2sd)
-//   float narrow: truncd (d → s via cvtpd2ps)
-//   int extend: exts/extu/extsw/extuw/extsh/extuh/extsb/extub
-//
-// x86-64 指令 family (per Intel SDM + AT&T syntax):
-//   movss/movsd    — float/double 4/8-byte move
-//   cvtsi2ss/cvtsi2sd — int → float (single/double)
-//   cvttss2si/cvttsd2si — float → int (truncate toward 0)
-//   cvtss2sd/cvtsd2ss — float precision widen/narrow
-//   cltq           — %eax → %rax (sign-extend w→l)
-//
-// 注: V3 self-backend 暂无 XMM register allocation,所有 cvt* 用 %xmm0 作 scratch
-// (per V3 modular split 简化约定 — emit_mem/emit_call 各 module 用自己的 scratch)。
-// Caller 需保证 emit_conv 不嵌套在另一 emit_conv 内 (无 %xmm0 抢占保护)。
-
-// emit_mov_temp_to_xmm — movss/movsd <src_off>(%rbp), %xmmN
-//   temp 栈槽 → XMM 寄存器 (load float for cvt source)
-// v3.0.7/Commit 1 fix: state 是 *CGState(不是 *StringBuilder)— 必须走 (*cg).out
-// 取 sb。原 cast `state as *StringBuilder` 让 sb.buf/len/cap 读 CGState 头 24
-// 字节作 out/arena/next_offset → len 被填 arena pointer → sb_grow while 循环
-// 倍增 cap 到 INT_MAX 范围 → hang。修:同 emit_mov_temp_to_reg 模式。
-// 第二 fix: src_off 已含符号 (per emit_mov_temp_to_reg line 446 真修延伸-2),
-// emit " -" + src_off 会产 "--64(%rbp)" → GAS 解析为 64(%rbp) (错槽)。
-// 修:直接 emit signed src_off,不加单独 " -"。
-fn emit_mov_temp_to_xmm(state: *u8, qt: i32, src_off: i64, xmm_idx: i32) -> i32 {
-    let cg = state as *CGState;
-    let s = (*cg).out;
-    let arena = (*cg).arena;
-    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
-    let _r2 = sb_append_cstr(arena, s, sse_suffix_for_qt(qt));
-    let _r3 = sb_append_cstr(arena, s, " " as *u8);
-    let _r4 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
-    let _r5 = sb_append_cstr(arena, s, "(%rbp), %xmm" as *u8);
-    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, xmm_idx as i64);
-    let _r7 = sb_append_cstr(arena, s, "\n" as *u8);
-    return 0;
-}
-
-// emit_mov_xmm_to_temp — movss/movsd %xmmN, <dst_off>(%rbp)
-//   XMM 寄存器 → temp 栈槽 (store float after cvt result)
-// v3.0.7/Commit 1 fix: 同上,state 是 *CGState + src_off 已含符号。
-fn emit_mov_xmm_to_temp(state: *u8, qt: i32, xmm_idx: i32, dst_off: i64) -> i32 {
-    let cg = state as *CGState;
-    let s = (*cg).out;
-    let arena = (*cg).arena;
-    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
-    let _r2 = sb_append_cstr(arena, s, sse_suffix_for_qt(qt));
-    let _r3 = sb_append_cstr(arena, s, " %xmm" as *u8);
-    let _r4 = sb_appendf_lld(arena, s, "%lld" as *u8, xmm_idx as i64);
-    let _r5 = sb_append_cstr(arena, s, ", " as *u8);
-    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
-    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
-    return 0;
-}
-
-// emit_mov_temp_to_int — movl/movq -<src_off>(%rbp), %eax/%rax
-//   temp 栈槽 → GPR (load int for cvt source); 复用 emit_mov_temp_to_reg 但本函数
-//   显式目的 + 注释 (x86-64 cvtsi2ss/cvtsi2sd 源是 GPR, 不是 XMM)
-fn emit_mov_temp_to_int(state: *u8, qt: i32, src_off: i64, reg_name: *u8) -> i32 {
-    return emit_mov_temp_to_reg(state, qt, src_off, reg_name);
-}
-
-// emit_mov_int_to_temp — movl/movq %eax/%rax, -<dst_off>(%rbp)
-//   GPR → temp 栈槽 (store int after cvt result)
-fn emit_mov_int_to_temp(state: *u8, qt: i32, reg_name: *u8, dst_off: i64) -> i32 {
-    return emit_mov_reg_to_temp(state, qt, reg_name, dst_off);
-}
-
-// emit_conv — QBE conversion op dispatch
-//
-// tok.text   = op name ("dtosi"/"swtof"/"extsw"/...)
-// tok.text_len = src temp id (per next_token_conv: 存 src_id 而非 text_len)
-// tok.int_val = dst temp id (per '%' LHS handler fix)
-// tok.qbe_type = dst QBE type (w/l/s/d)
-//
-// x86-64 转换指令 mapping (per QBE spec + Intel SDM):
-//   dtosi/dtoui:   movsd src,%xmm0; cvttsd2si %xmm0,%eax;        movl %eax,dst
-//   dtosl/dtoul:   movsd src,%xmm0; cvttsd2si %xmm0,%rax;        movq %rax,dst
-//   stosi/stoui:   movss src,%xmm0; cvttss2si %xmm0,%eax;        movl %eax,dst
-//   stosl/stoul:   movss src,%xmm0; cvttss2si %xmm0,%rax;        movq %rax,dst
-//   swtof:         movl src,%eax;      cvtsi2sd %eax,%xmm0;      movsd %xmm0,dst
-//   sltof:         movq src,%rax;      cvtsi2sd %rax,%xmm0;      movsd %xmm0,dst
-//   uwtof:         movl src,%eax;      cvtsi2ss %eax,%xmm0;      movss %xmm0,dst
-//   ultof:         movq src,%rax;      cvtsi2ss %rax,%xmm0;      movss %xmm0,dst
-//   exts (s→d):    movss src,%xmm0;    cvtss2sd %xmm0,%xmm0;     movsd %xmm0,dst
-//   truncd (d→s):  movsd src,%xmm0;    cvtpd2ps %xmm0,%xmm0;     movss %xmm0,dst
-//   extsw (w→l):   movl src,%eax;      cltq;                     movq %rax,dst
-//   extuw (w→l):   movl src,%eax;      movq %rax,dst             (movl 清高 32 位)
-//   exts/extu/extsh/extuh/extsb/extub:4-byte 或 sub-word extend per QBE spec
-//     简化 (v3.0.6 scope): 不实现 sub-word (codegen.jhyy 不用 exts/extu 作为
-//     sub-word extend — 用 loadsb/loadub/loadsh/loaduh), 仅 fallback warning。
-//
-// V3 codegen.jhyy cg_conv_to (line 957-998) emit 13 distinct conv ops:
-//   dtosi/dtosl/truncd/stosi/stosl/exts (s→d)/sltof/swtof/ultof/uwtof/extsw/extuw
-//   + copy (l→w narrow) → emit_copy path。
-//   dtoui/dtoul/stoui/stoul/extu/extsh/extuh/extsb/extub 当前 V3 codegen 不 emit
-//   (但 lexer 识别以便 QBE 完整 spec 兼容)。
-fn emit_conv(state: *u8, tok: *u8) -> i32 {
-    let t = tok as *ILToken;
-    let op_name = (*t).text;
-    let src_id = (*t).text_len;
-    let dst_id = (*t).int_val;
-    let dst_qt = (*t).qbe_type;
-
-    let cg = state as *CGState;
-    let s = (*cg).out;
-    let arena = (*cg).arena;
-
-    let src_off = local_temp_offset(src_id);
-    let dst_off = local_temp_offset(dst_id);
-
-    // v3.0.7/Commit 2: emit_conv f64→int 路径走 V2 v2.16.0 的 2-op form
-    // (`cvttsd2si -N(%rbp), %eax/rax` memory-operand 直接 combine load+convert)
-    // 替代 Commit 1 的 3-op form (`movsd -N(%rbp), %xmm0` + `cvttsd2si %xmm0, %eax`)。
-    // 跟 V2 golden byte-equal,Gate-0 strict sha 3/3 PASS。
-    // f32→int (stosi/stosl/stoui/stoul) 保持 3-op form (cvttss2si 用 xmm src),
-    //   跟 V2 emit_conv_stosi 一致。
-
-    // ════════════════════════════════════════════════════
-    // float → int 转换 (dtosi/dtoui/dtosl/dtoul/stosi/stoui/stosl/stoul)
-    // ════════════════════════════════════════════════════
-    // dtosi / dtoui: d → w (32-bit) — 2-op form per V2 v2.16.0
-    if strcmp(op_name, ("dtosi" as *u8)) == (0 as i32) {
-        let _r1 = sb_append_cstr(arena, s, "\tcvttsd2si " as *u8);
-        let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
-        let _r3 = sb_append_cstr(arena, s, "(%rbp), %eax\n" as *u8);
-        let _r4 = sb_append_cstr(arena, s, "\tmovl %eax, " as *u8);
-        let _r5 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
-        let _r6 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
-        return 0;
-    }
-    // dtosl: d → l (64-bit) — 2-op form
-    if strcmp(op_name, ("dtosl" as *u8)) == (0 as i32) {
-        let _r1 = sb_append_cstr(arena, s, "\tcvttsd2si " as *u8);
-        let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
-        let _r3 = sb_append_cstr(arena, s, "(%rbp), %rax\n" as *u8);
-        let _r4 = sb_append_cstr(arena, s, "\tmovq %rax, " as *u8);
-        let _r5 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
-        let _r6 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
-        return 0;
-    }
-    // dtoui: V3 不 emit (cvttsd2si 已 truncate, signed/unsigned 在 i32 范围一致) — 2-op form
-    if strcmp(op_name, ("dtoui" as *u8)) == (0 as i32) {
-        let _r1 = sb_append_cstr(arena, s, "\tcvttsd2si " as *u8);
-        let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
-        let _r3 = sb_append_cstr(arena, s, "(%rbp), %eax\n" as *u8);
-        let _r4 = sb_append_cstr(arena, s, "\tmovl %eax, " as *u8);
-        let _r5 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
-        let _r6 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
-        return 0;
-    }
-    // dtoul: d → l unsigned — 2-op form
-    if strcmp(op_name, ("dtoul" as *u8)) == (0 as i32) {
-        let _r1 = sb_append_cstr(arena, s, "\tcvttsd2si " as *u8);
-        let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
-        let _r3 = sb_append_cstr(arena, s, "(%rbp), %rax\n" as *u8);
-        let _r4 = sb_append_cstr(arena, s, "\tmovq %rax, " as *u8);
-        let _r5 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
-        let _r6 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
-        return 0;
-    }
-    // stosi: s → w — 3-op form (V2 emit_conv_stosi,cvttss2si 用 xmm src)
-    if strcmp(op_name, ("stosi" as *u8)) == (0 as i32) {
-        let _a = emit_mov_temp_to_xmm(state, QBE_S(), src_off, 0 as i32);
-        let _b = sb_append_cstr(arena, s, "\tcvttss2si %xmm0, %eax\n" as *u8);
-        let _c = emit_mov_int_to_temp(state, QBE_W(), "eax" as *u8, dst_off);
-        return 0;
-    }
-    if strcmp(op_name, ("stosl" as *u8)) == (0 as i32) {
-        let _a = emit_mov_temp_to_xmm(state, QBE_S(), src_off, 0 as i32);
-        let _b = sb_append_cstr(arena, s, "\tcvttss2si %xmm0, %rax\n" as *u8);
-        let _c = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
-        return 0;
-    }
-    if strcmp(op_name, ("stoui" as *u8)) == (0 as i32) {
-        let _a = emit_mov_temp_to_xmm(state, QBE_S(), src_off, 0 as i32);
-        let _b = sb_append_cstr(arena, s, "\tcvttss2si %xmm0, %eax\n" as *u8);
-        let _c = emit_mov_int_to_temp(state, QBE_W(), "eax" as *u8, dst_off);
-        return 0;
-    }
-    if strcmp(op_name, ("stoul" as *u8)) == (0 as i32) {
-        let _a = emit_mov_temp_to_xmm(state, QBE_S(), src_off, 0 as i32);
-        let _b = sb_append_cstr(arena, s, "\tcvttss2si %xmm0, %rax\n" as *u8);
-        let _c = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
-        return 0;
-    }
-
-    // ════════════════════════════════════════════════════
-    // int → float 转换 (swtof/sltof/uwtof/ultof)
-    // ════════════════════════════════════════════════════
-    if strcmp(op_name, ("swtof" as *u8)) == (0 as i32) {
-        let _a = emit_mov_temp_to_int(state, QBE_W(), src_off, "eax" as *u8);
-        let _b = sb_append_cstr(arena, s, "\tcvtsi2sd %eax, %xmm0\n" as *u8);
-        let _c = emit_mov_xmm_to_temp(state, QBE_D(), 0 as i32, dst_off);
-        return 0;
-    }
-    if strcmp(op_name, ("sltof" as *u8)) == (0 as i32) {
-        let _a = emit_mov_temp_to_int(state, QBE_L(), src_off, "rax" as *u8);
-        let _b = sb_append_cstr(arena, s, "\tcvtsi2sd %rax, %xmm0\n" as *u8);
-        let _c = emit_mov_xmm_to_temp(state, QBE_D(), 0 as i32, dst_off);
-        return 0;
-    }
-    if strcmp(op_name, ("uwtof" as *u8)) == (0 as i32) {
-        let _a = emit_mov_temp_to_int(state, QBE_W(), src_off, "eax" as *u8);
-        let _b = sb_append_cstr(arena, s, "\tcvtsi2ss %eax, %xmm0\n" as *u8);
-        let _c = emit_mov_xmm_to_temp(state, QBE_S(), 0 as i32, dst_off);
-        return 0;
-    }
-    if strcmp(op_name, ("ultof" as *u8)) == (0 as i32) {
-        let _a = emit_mov_temp_to_int(state, QBE_L(), src_off, "rax" as *u8);
-        let _b = sb_append_cstr(arena, s, "\tcvtsi2ss %rax, %xmm0\n" as *u8);
-        let _c = emit_mov_xmm_to_temp(state, QBE_S(), 0 as i32, dst_off);
-        return 0;
-    }
-
-    // ════════════════════════════════════════════════════
-    // float widen / narrow (exts s→d / truncd d→s)
-    // ════════════════════════════════════════════════════
-    if strcmp(op_name, ("exts" as *u8)) == (0 as i32) {
-        // exts s→d float widen — 2-op form per V2 v2.16.0
-        let _r1 = sb_append_cstr(arena, s, "\tcvtss2sd " as *u8);
-        let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
-        let _r3 = sb_append_cstr(arena, s, "(%rbp), %xmm0\n" as *u8);
-        let _r4 = sb_append_cstr(arena, s, "\tmovsd %xmm0, " as *u8);
-        let _r5 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
-        let _r6 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
-        return 0;
-    }
-    if strcmp(op_name, ("truncd" as *u8)) == (0 as i32) {
-        // truncd d→s — V2 3-op form (cvtpd2ps 用 xmm0 src + dst)
-        let _a = emit_mov_temp_to_xmm(state, QBE_D(), src_off, 0 as i32);
-        let _b = sb_append_cstr(arena, s, "\tcvtpd2ps %xmm0, %xmm0\n" as *u8);
-        let _c = emit_mov_xmm_to_temp(state, QBE_S(), 0 as i32, dst_off);
-        return 0;
-    }
-
-    // ════════════════════════════════════════════════════
-    // int extend (extsw w→l signed / extuw w→l unsigned)
-    // V3 codegen.jhyy cg_conv_to line 990 emit "extsw" (signed), line 941
-    // emit "extuw" (unsigned)。extu/extsh/extuh/extsb/extub V3 不 emit。
-    // ════════════════════════════════════════════════════
-    if strcmp(op_name, ("extsw" as *u8)) == (0 as i32) {
-        // w → l signed: movl src,%eax (32-bit load zero-extends to rax), cltq (sign-extend)
-        let _a = emit_mov_temp_to_int(state, QBE_W(), src_off, "eax" as *u8);
-        let _b = sb_append_cstr(arena, s, "\tcltq\n" as *u8);
-        let _c = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
-        return 0;
-    }
-    if strcmp(op_name, ("extuw" as *u8)) == (0 as i32) {
-        // w → l unsigned: movl src,%eax (clear upper 32 of rax), movq %rax,dst
-        let _a = emit_mov_temp_to_int(state, QBE_W(), src_off, "eax" as *u8);
-        let _b = emit_mov_int_to_temp(state, QBE_L(), "rax" as *u8, dst_off);
-        return 0;
-    }
-
-    // ════════════════════════════════════════════════════
-    // 未实现 ops (extu/extsh/extuh/extsb/extub/truncs):
-    //   V3 codegen 不 emit,留 fallback warning 给未来真修时补。
-    // ════════════════════════════════════════════════════
-    let _w = emit_comment(state, "WARNING: emit_conv op not implemented in V3 self-backend (V3 codegen.jhyy 不 emit 此 op)" as *u8);
-    let _b = sb_append_cstr(arena, s, "\tnop\n" as *u8);
-
-    // 注: 不写 dst (avoid 读 stale slot)。caller 假设此 op 不出现 in V3 IL。
-    let _x = dst_qt;  // suppress unused warning
     return 0;
 }
 

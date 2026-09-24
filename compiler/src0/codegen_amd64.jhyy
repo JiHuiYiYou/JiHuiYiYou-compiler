@@ -167,11 +167,6 @@ fn parse_and_emit(state: *u8, tokens: *u8, n: i64, target_tag: i32) -> i32 {
             let _ = emit_copy(state, tok_p);
         } else if kind == ILTOK_BINOP() {
             let _ = emit_binop(state, tok_p);
-        } else if kind == ILTOK_CONV() {
-            // W-083 真修 (v3.0.6/Ph.3): QBE conversion ops (dtosi/swtof/exts/...)
-            // 走 ILTOK_CONV token + emit_conv (codegen_amd64_emit_call.jhyy)。
-            // emit_conv 走 %xmm0 scratch + x86-64 cvt*/movss/movsd 指令 family。
-            let _ = emit_conv(state, tok_p);
         } else if kind == ILTOK_RET() {
             let _ = emit_ret(state, tok_p, target_tag);
         } else if kind == ILTOK_JMP() {

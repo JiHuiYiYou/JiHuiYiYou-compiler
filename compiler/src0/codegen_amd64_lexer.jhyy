@@ -1245,51 +1245,6 @@ fn lex_match_volatile(s: *LexState) -> i32 {
     return 1 as i32;
 }
 
-// ── 17. conversion op (W-083 真修 v3.0.6/Ph.3) ──
-// dispatcher 已 consume 首字母 (d/s/u/e/t) + 已校验剩余字符匹配。
-// 这里 consume 剩余 op_len bytes + consume src operand (%t<N>) + emit ILTOK_CONV token。
-//
-// op_name 全部硬编码字面量,长度 3-6:
-//   3 chars: exts / extu
-//   4 chars: stosi/stosl/stoui/stoul/swtof/sltof/uwtof/ultof/extsw/extuw/extsh/extuh/extsb/extub
-//           dtosi/dtosl/dtoui/dtoul
-//   5 chars: truncd / truncs
-//
-// emit_conv (in codegen_amd64_emit_call.jhyy) 看 tok.text 字面 op name dispatch
-// 到对应 SSE cvt* / movss / movsd 指令 family。src temp id 存 tok.text_len
-// (offset 16, ILToken 字段复用 — conv 不需要 text 长度,dst_id 由 '%' LHS
-// handler 写在 tok.int_val)。
-fn next_token_conv(s: *LexState, arena: *u8, t: *u8, op_name: *u8, op_len: i64) -> i32 {
-    // consume 剩余 op chars
-    let mut i: i64 = 0 as i64;
-    while i < op_len {
-        let _x = lex_next_byte(s);
-        i = i + (1 as i64);
-    }
-    let _s = lex_skip_ws_and_comments(s);
-    // consume src operand: '%' + 't' + digits
-    // 必须 '%t<N>' 形态(QBE IL temp ref)。若不是 '%' 开头 → 返 -1 (error)。
-    let src_pct = lex_peek_byte(s);
-    if src_pct != (37 as i32) {
-        return -1 as i32;
-    }
-    let _x1 = lex_next_byte(s);  // consume '%'
-    let src_t = lex_peek_byte(s);
-    if src_t != (116 as i32) {
-        return -1 as i32;
-    }
-    let _x2 = lex_next_byte(s);  // consume 't'
-    let src_id = lex_scan_decimal_int(s);
-    let _s3 = lex_skip_ws_and_comments(s);
-    lex_init_token(t, ILTOK_CONV(), (*s).line);
-    let tp_text = ptr_add_u8(t, 8 as i64) as **u8;
-    *tp_text = lex_dup_text(arena, op_name, op_len);
-    // src_id 存 tok.text_len (offset 16, ILToken 字段复用)
-    let tp_textlen = ptr_add_u8(t, 16 as i64) as *i64;
-    *tp_textlen = src_id;
-    return 0;
-}
-
 // ════════════════════════════════════════════════════
 // Main dispatcher:next_token
 // ════════════════════════════════════════════════════
@@ -1446,7 +1401,7 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         return next_token_func_header(s, arena, t);
     }
 
-// ── 'd' → 'data' (data_string) / 'div' (binop) / 'dbgfile' / 'dbgloc' (DIRECTIVE) / 'dtosi' / 'dtosl' ──
+    // ── 'd' → 'data' (data_string) / 'div' (binop) / 'dbgfile' / 'dbgloc' (DIRECTIVE) / 'dtosi' / 'dtosl' ──
     if c0 == (100 as i32) {
         let n1 = lex_peek_byte_at(s, 1 as i64);
         let n2 = lex_peek_byte_at(s, 2 as i64);
@@ -1460,43 +1415,39 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
             let _x = lex_next_byte(s);  // 'd'
             return next_token_binop(s, arena, t, 100 as i32);
         }
-    // v3.0.6/Ph.3 W-083 + v2.11.1 W-074.5 merge:
-    //   V3 dtosi/dtosl/dtoui/dtoul (4 ops via next_token_conv) +
-    //   V2 dbgfile/dbgfile (2 directives via ILTOK_DIRECTIVE skip-to-EOL).
-        // nested plain `if` 无 `&&`/`||` short-circuit (per feedback_jhyy_brace_nesting)
-        if n1 == (116 as i32) {  // 't'
-            if n2 == (111 as i32) {  // 'o' -> dto*
-                let n3c = lex_peek_byte_at(s, 3 as i64);
-                let n4c = lex_peek_byte_at(s, 4 as i64);
-                // "dtosi": n3='s'(115), n4='i'(105)
-                if n3c == (115 as i32) {
-                    if n4c == (105 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "dtosi" as *u8, 5 as i64);
-                    }
-                    if n4c == (108 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "dtosl" as *u8, 5 as i64);
-                    }
+        // v2.11.19: 'dtosi' / 'dtosl' (f64 → i32/i64 via cvttsd2si)。直接 dispatch 到
+        //   ILTOK_DTOSI (单 enum,dst 宽度由 tok.qbe_type 决定),不走 next_token_binop
+        //   (因为 conversion op 是 unary src,不是 binary src1+src2,emit_binop 不适用)。
+        //   Phase 1 仅 tokenize;parse_and_emit dispatch 在 Phase 2 commit 加。
+        //   v2.11.19 Iter 2 fix (B3): 必须 lex_consume_to_eol 后再 lex_finish_instr,
+        //   否则 tok.text 只有 "dtosi" 不含 src %t5,emit_conv_dtosi 调 cg_parse_temp 拿不到 src。
+        // 注:必须 BEFORE dbgfile/dbgloc check (虽然 prefix 不冲突 — dtosi vs dbg 头两位
+        //   'd','t' vs 'd','b' — 但 order matters for fast reject)。
+        if n1 == (116 as i32) && n2 == (111 as i32) && n3 == (115 as i32) {  // 't','o','s'
+            let n4 = lex_peek_byte_at(s, 4 as i64);
+            if n4 == (105 as i32) || n4 == (108 as i32) {  // 'i' 或 'l'
+                // consume 'dtosi'/'dtosl' 5 chars
+                let mut k: i64 = 0 as i64;
+                while k < (5 as i64) {
+                    let _x = lex_next_byte(s);
+                    k = k + (1 as i64);
                 }
-                // "dtoui"/"dtoul": n3='u'(117)
-                if n3c == (117 as i32) {
-                    if n4c == (105 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "dtoui" as *u8, 5 as i64);
-                    }
-                    if n4c == (108 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "dtoul" as *u8, 5 as i64);
-                    }
-                }
+                let _s = lex_skip_ws(s);  // 不跨 '\n'
+                // consume 到行尾 (含 src %t5),跟 next_token_binop 同样的 pattern
+                let _eol = lex_consume_to_eol(s);
+                lex_init_token(t, ILTOK_DTOSI(), (*s).line);
+                // v2.11.2 contract: text = 整条 slice,cg_parse_temp 二次 scan 取 src
+                let _fin = lex_finish_instr(s, arena, t);
+                let _arena = arena;
+                return 0 as i32;
             }
         }
-        // v2.11.1 (W-074.5): "dbgfile" (7 chars) / "dbgloc" (6 chars) -> ILTOK_DIRECTIVE
-        // QBE IL output `dbgfile "path"` and `dbgloc N "file:line"` always at line head;
-        // consume keyword + skip rest-of-line.
+        // v2.11.1 (W-074.5): "dbgfile" (7 chars) / "dbgloc" (6 chars) → ILTOK_DIRECTIVE
+        // QBE IL output `dbgfile "path"` 和 `dbgloc N "file:line"` always at line head;
+        // consume 关键字 + skip rest-of-line 让 parse_and_emit 下一个 token 直接是 export/data。
         // dbgfile prefix: d,b,g,f (n3='f'=102). dbgloc prefix: d,b,g,l (n3='l'=108).
         if n1 == (98 as i32) && n2 == (103 as i32) && n3 == (102 as i32) {
+            // "dbgfile" — d,b,g,f,i,l,e (idx 0..6); need n4='i' n5='l' n6='e'
             let n4 = lex_peek_byte_at(s, 4 as i64);
             let n5 = lex_peek_byte_at(s, 5 as i64);
             let n6 = lex_peek_byte_at(s, 6 as i64);
@@ -1506,6 +1457,7 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                     let _x = lex_next_byte(s);
                     j = j + (1 as i64);
                 }
+                // skip 到行尾(\n 或 文件尾),不 consume \n 让 lex_skip_ws_and_comments 处理
                 let mut done_skip = 0 as i32;
                 while done_skip == (0 as i32) {
                     let cc = lex_peek_byte(s);
@@ -1517,6 +1469,7 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
             }
         }
         if n1 == (98 as i32) && n2 == (103 as i32) && n3 == (108 as i32) {
+            // "dbgloc" — d,b,g,l,o,c (idx 0..5); need n4='o'=111 n5='c'=99
             let n4 = lex_peek_byte_at(s, 4 as i64);
             let n5 = lex_peek_byte_at(s, 5 as i64);
             if n4 == (111 as i32) && n5 == (99 as i32) {
@@ -1534,8 +1487,8 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                 lex_init_token(t, ILTOK_DIRECTIVE(), (*s).line);
                 return 0 as i32;
             }
-            return -1 as i32;
         }
+        return -1 as i32;
     }
 
     // ── 'r' → 'ret' / 'rem' ──
@@ -1863,65 +1816,6 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                     return next_token_store(s, arena, t, n5);
                 }
             }
-            // W-083 真修 (v3.0.6/Ph.3): s→float conversion ops (n1='t', n2='o', n3='s'/'u')
-            //   stosi (s t o s i) — single → signed i32 (cvttss2si %xmm → %eax)
-            //   stosl (s t o s l) — single → signed i64
-            //   stoui (s t u i)   — single → unsigned i32
-            //   stoul (s t u l)   — single → unsigned i64
-            // n1='t' + n2='o' + n3='s'/'u' — must check n3 BEFORE
-            // store* path (which checks n3='r')
-            if n2 == (111 as i32) {
-                let n3c = lex_peek_byte_at(s, 3 as i64);
-                let n4c = lex_peek_byte_at(s, 4 as i64);
-                if n3c == (115 as i32) {  // 's' → stos*
-                    if n4c == (105 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "stosi" as *u8, 5 as i64);
-                    }
-                    if n4c == (108 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "stosl" as *u8, 5 as i64);
-                    }
-                }
-                if n3c == (117 as i32) {  // 'u' → stou*
-                    if n4c == (105 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "stoui" as *u8, 5 as i64);
-                    }
-                    if n4c == (108 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "stoul" as *u8, 5 as i64);
-                    }
-                }
-            }
-        }
-        // W-083 真修: "swtof" (s w t o f) — signed word → double (cvtsi2sd)
-        if n1 == (119 as i32) {
-            let n2 = lex_peek_byte_at(s, 2 as i64);
-            let n3 = lex_peek_byte_at(s, 3 as i64);
-            let n4 = lex_peek_byte_at(s, 4 as i64);
-            if n2 == (116 as i32) {
-                if n3 == (111 as i32) {
-                    if n4 == (102 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "swtof" as *u8, 5 as i64);
-                    }
-                }
-            }
-        }
-        // W-083 真修: "sltof" (s l t o f) — signed long → double
-        if n1 == (108 as i32) {
-            let n2 = lex_peek_byte_at(s, 2 as i64);
-            let n3 = lex_peek_byte_at(s, 3 as i64);
-            let n4 = lex_peek_byte_at(s, 4 as i64);
-            if n2 == (116 as i32) {
-                if n3 == (111 as i32) {
-                    if n4 == (102 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "sltof" as *u8, 5 as i64);
-                    }
-                }
-            }
         }
         return -1 as i32;
     }
@@ -2062,100 +1956,8 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         return -1 as i32;
     }
 
-    // unknown char — caller 决定如何处理
-
-    // W-083 真修 (v3.0.6/Ph.3): 'u' → 'uwtof' / 'ultof'
-    //   uwtof (u w t o f) — unsigned word → single (cvtsi2ss)
-    //   ultof (u l t o f) — unsigned long → single
-    // V3 codegen.jhyy cg_conv_to line 957-998 用 'uwtof'/'ultof' (unsigned) 给
-    // w→s / l→s 转换 (per QBE ultof spec, sign bit is ignored)。
-    if c0 == (117 as i32) {
-        let n1 = lex_peek_byte_at(s, 1 as i64);
-        let n2 = lex_peek_byte_at(s, 2 as i64);
-        let n3 = lex_peek_byte_at(s, 3 as i64);
-        let n4 = lex_peek_byte_at(s, 4 as i64);
-        // "uwtof" / "ultof": n2='t', n3='o', n4='f'
-        if n2 == (116 as i32) {
-            if n3 == (111 as i32) {
-                if n4 == (102 as i32) {
-                    if n1 == (119 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "uwtof" as *u8, 5 as i64);
-                    }
-                    if n1 == (108 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "ultof" as *u8, 5 as i64);
-                    }
-                }
-            }
-        }
-        return -1 as i32;
-    }
-
-    // W-083 真修 (v3.0.6/Ph.3): 'e' → 'ext*' family
-    //   exts (e x t s)      — sign-extend sub-word (b/h/w → w)
-    //   extu (e x t u)      — zero-extend sub-word
-    //   extsw (e x t s w)   — signed word → long (cltq)
-    //   extuw (e x t u w)   — unsigned word → long (zero-extend via mov)
-    //   extsh (e x t s h)   — signed hword → word
-    //   extuh (e x t u h)   — unsigned hword → word
-    //   extsb (e x t s b)   — signed byte → word
-    //   extub (e x t u b)   — unsigned byte → word
-    // 注:'t' 分支的 truncd 已在 conflict 3 分解 (✅ V2 ILTOK_TRUNCD path),
-    //   本处 drop V3 't' branch 避免重复。
-    if c0 == (101 as i32) {
-        let n1 = lex_peek_byte_at(s, 1 as i64);
-        let n2 = lex_peek_byte_at(s, 2 as i64);
-        if n1 == (120 as i32) {  // 'x'
-            if n2 == (116 as i32) {  // 't' → ext*
-                let n3 = lex_peek_byte_at(s, 3 as i64);
-                // 4 chars total: exts / extu
-                if n3 == (115 as i32) {
-                    let _x = lex_next_byte(s);
-                    return next_token_conv(s, arena, t, "exts" as *u8, 3 as i64);
-                }
-                if n3 == (117 as i32) {
-                    let _x = lex_next_byte(s);
-                    return next_token_conv(s, arena, t, "extu" as *u8, 3 as i64);
-                }
-                // 5 chars total: exts*/extu* (sw/uw/sh/uh/sb/ub)
-                let n4 = lex_peek_byte_at(s, 4 as i64);
-                if n3 == (115 as i32) {
-                    if n4 == (119 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "extsw" as *u8, 5 as i64);
-                    }
-                    if n4 == (104 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "extsh" as *u8, 5 as i64);
-                    }
-                    if n4 == (98 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "extsb" as *u8, 5 as i64);
-                    }
-                }
-                if n3 == (117 as i32) {
-                    if n4 == (119 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "extuw" as *u8, 5 as i64);
-                    }
-                    if n4 == (104 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "extuh" as *u8, 5 as i64);
-                    }
-                    if n4 == (98 as i32) {
-                        let _x = lex_next_byte(s);
-                        return next_token_conv(s, arena, t, "extub" as *u8, 5 as i64);
-                    }
-                }
-            }
-        }
-        return -1 as i32;
-    }
-
     // ── '{' / '}' → ILTOK_DIRECTIVE ── (v2.11.1 W-074.5 真修)
-    // QBE IL output 用 {} 包函数体 + data body;不 emit .s body,只是 lexer 哨兵
-    // 让 parse_and_emit 不卡 cursor。
+    // QBE IL output 用 {} 包函数体 + data body;不 emit .s body,只是 lexer 哨兵让 parse_and_emit 不卡 cursor。
     if c0 == (123 as i32) {  // '{'
         let _x = lex_next_byte(s);
         lex_init_token(t, ILTOK_DIRECTIVE(), (*s).line);
@@ -2168,7 +1970,19 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
     }
 
     // v2.11.19 (B3 真修): dispatcher 默认 hard-error 分支 — 任何未识别的 op
-    // 字面在 lexer 阶段就报错,不静静 skip (有助于掌控)。
+    // 字面在 lexer 阶段就报错,不静默 skip(per [[feedback_codegen_amd64_multifn]]
+    // "silent fail 防御" + 计划 v2.11.19 § Phase 1c)。早期 fallback "return -1" 让
+    // caller lex_il byte-skip → 静默 produce garbage .s,这是 v2.11.15 前 C.4 float
+    // 4/28 FAIL 的根因之一。新行为:不识别的 op → emit stderr error message + return -1
+    // (caller byte-skip,但 stderr 已被记录 — verify 脚本可见)。
+    //
+    // 注:有些合法 IL 操作已经被 'e'/'a'/'c'/'s'/'l'/'v' 主分支覆盖(per lexer
+    // dispatcher 设计);此 default 分支只 catch 完全未实现的 op 字面 + 不应出现
+    // 的 char(例如 IL 文件中间有 binary garbage)。
+    //
+    // B3 优先级:hard-error 必须先于 Phase 1 op 添加 — 否则就算本次 ship 加了
+    // dtosi/stosi/truncd 等,下次有人加新 op(如 f3x)又走 silent skip,根因没
+    // 闭环。
     let err_buf_cap: i64 = 128 as i64;
     let err_buf = malloc(err_buf_cap);
     if err_buf != (0 as *u8) {
@@ -2178,87 +1992,87 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
     }
     return -1 as i32;
 }
-    
-    // ════════════════════════════════════════════════════
-    // Public API
-    // ════════════════════════════════════════════════════
-    //
-    // lex_il — 全文件 lex,返回 *ILToken 数组 (arena-alloc)。
-    // 最后一个 token 必为 ILTOK_EOF(per L4 § 4.1 接口契约)。
-    //
-    // 大小预估:每条 IL instruction 平均 ~3 tokens (op + 2 operands)。
-    // 5 byte-equal test 用例最复杂 mixed.jhyy < 200 instructions;
-    // 用 1024 个 token slot (8 * 1024 = 8KB) 足够覆盖。不足则 abort 返 0。
-    //
-    // 输入:buf = 全 .il 字节;len = 字节长度;arena = arena 指针(供 strdup + alloc)。
-    // 返回:*ILToken 数组 (caller 通过 lex_il_count 拿长度)。
-    
-    fn lex_il(buf: *u8, len: i64, arena: *u8) -> *u8 {
-        // v2.11.2 (W-074.6 T5-a): slots 1024 → 16384。big_test.il ~3000+ tokens 截断;
-        // 16384 × 40 bytes = 640 KB,arena 8 MB 充足。
-        let slots: i64 = 16384 as i64;
-        let arr = arena_alloc(arena, slots * (40 as i64));
-        if arr == (0 as *u8) {
-            return 0 as *u8;
-        }
-        // heap-allocated LexState (per main.jhyy pattern: malloc + cast)
-        // LexState struct size: ptr+ptr+ptr+i32+i64+ptr = 8+8+8+4+8+8 = 44 → round up 64 (8-byte aligned)
-        // v2.11.2: 加 instr_start 字段(6 字段 vs 原 5 字段)。
-        let s_buf = malloc(64 as i64);
-        memset(s_buf, 0 as i32, 64 as i64);
-        let s = s_buf as *LexState;
-        (*s).buf = buf;
-        (*s).end = ptr_add_u8(buf, len);
-        (*s).cur = buf;
-        (*s).line = 1 as i32;
-        (*s).count = 0 as i64;
-        (*s).instr_start = buf;  // v2.11.2:init to buf, 任何 op 起点会 overwrite
-        let mut i: i64 = 0 as i64;
-        let mut done = 0 as i32;
-        while done == (0 as i32) {
-            if i >= slots { done = 1 as i32; }
-            else {
-                let tok = ptr_add_u8(arr, i * (40 as i64));
-                let rc = next_token(s, arena, tok);
-                if rc < (0 as i32) {
-                    // error: skip 1 byte,继续(避免死循环)
-                    let cc = lex_peek_byte(s);
-                    if cc == 0 { done = 1 as i32; }
-                    else { let _x = lex_next_byte(s); }
-                } else {
-                    let kind_addr = tok as *i32;
-                    let kind = *kind_addr;
-                    if kind == ILTOK_EOF() { done = 1 as i32; }
-                    i = i + (1 as i64);
-                }
-            }
-        }
-        let _f = free(s_buf);
-        return arr;
+
+// ════════════════════════════════════════════════════
+// Public API
+// ════════════════════════════════════════════════════
+//
+// lex_il — 全文件 lex,返回 *ILToken 数组 (arena-alloc)。
+// 最后一个 token 必为 ILTOK_EOF(per L4 § 4.1 接口契约)。
+//
+// 大小预估:每条 IL instruction 平均 ~3 tokens (op + 2 operands)。
+// 5 byte-equal test 用例最复杂 mixed.jhyy < 200 instructions;
+// 用 1024 个 token slot (8 * 1024 = 8KB) 足够覆盖。不足则 abort 返 0。
+//
+// 输入:buf = 全 .il 字节;len = 字节长度;arena = arena 指针(供 strdup + alloc)。
+// 返回:*ILToken 数组 (caller 通过 lex_il_count 拿长度)。
+
+fn lex_il(buf: *u8, len: i64, arena: *u8) -> *u8 {
+    // v2.11.2 (W-074.6 T5-a): slots 1024 → 16384。big_test.il ~3000+ tokens 截断;
+    // 16384 × 40 bytes = 640 KB,arena 8 MB 充足。
+    let slots: i64 = 16384 as i64;
+    let arr = arena_alloc(arena, slots * (40 as i64));
+    if arr == (0 as *u8) {
+        return 0 as *u8;
     }
-    
-    // lex_il_count — 返回 token 数(扫数组找第一个 ILTOK_EOF)。
-    // v2.11.2 (T5-a): cap 1024 → 16384,与 lex_il slots 一致。
-    fn lex_il_count(arr: *u8) -> i64 {
-        if arr == (0 as *u8) { return 0 as i64; }
-        let mut n: i64 = 0 as i64;
-        let mut done = 0 as i32;
-        while done == (0 as i32) {
-            if n >= (16384 as i64) { done = 1 as i32; }
-            else {
-                let tok = ptr_add_u8(arr, n * (40 as i64));
+    // heap-allocated LexState (per main.jhyy pattern: malloc + cast)
+    // LexState struct size: ptr+ptr+ptr+i32+i64+ptr = 8+8+8+4+8+8 = 44 → round up 64 (8-byte aligned)
+    // v2.11.2: 加 instr_start 字段(6 字段 vs 原 5 字段)。
+    let s_buf = malloc(64 as i64);
+    memset(s_buf, 0 as i32, 64 as i64);
+    let s = s_buf as *LexState;
+    (*s).buf = buf;
+    (*s).end = ptr_add_u8(buf, len);
+    (*s).cur = buf;
+    (*s).line = 1 as i32;
+    (*s).count = 0 as i64;
+    (*s).instr_start = buf;  // v2.11.2:init to buf, 任何 op 起点会 overwrite
+    let mut i: i64 = 0 as i64;
+    let mut done = 0 as i32;
+    while done == (0 as i32) {
+        if i >= slots { done = 1 as i32; }
+        else {
+            let tok = ptr_add_u8(arr, i * (40 as i64));
+            let rc = next_token(s, arena, tok);
+            if rc < (0 as i32) {
+                // error: skip 1 byte,继续(避免死循环)
+                let cc = lex_peek_byte(s);
+                if cc == 0 { done = 1 as i32; }
+                else { let _x = lex_next_byte(s); }
+            } else {
                 let kind_addr = tok as *i32;
                 let kind = *kind_addr;
                 if kind == ILTOK_EOF() { done = 1 as i32; }
-                else { n = n + (1 as i64); }
+                i = i + (1 as i64);
             }
         }
-        return n;
     }
-    
-    // main_jhyy — 编译验证入口(lexer 是 leaf module;本身无 main 行为)。
-    // 存在仅为让 jhyy_compile 通过(leaf module 无 fn main_jhyy 会 compile fail)。
-    // 实际功能由 codegen_amd64.jhyy main entry 通过 lex_il() 调用。
-    fn main_jhyy() -> i32 {
-        return 0 as i32;
+    let _f = free(s_buf);
+    return arr;
+}
+
+// lex_il_count — 返回 token 数(扫数组找第一个 ILTOK_EOF)。
+// v2.11.2 (T5-a): cap 1024 → 16384,与 lex_il slots 一致。
+fn lex_il_count(arr: *u8) -> i64 {
+    if arr == (0 as *u8) { return 0 as i64; }
+    let mut n: i64 = 0 as i64;
+    let mut done = 0 as i32;
+    while done == (0 as i32) {
+        if n >= (16384 as i64) { done = 1 as i32; }
+        else {
+            let tok = ptr_add_u8(arr, n * (40 as i64));
+            let kind_addr = tok as *i32;
+            let kind = *kind_addr;
+            if kind == ILTOK_EOF() { done = 1 as i32; }
+            else { n = n + (1 as i64); }
+        }
     }
+    return n;
+}
+
+// main_jhyy — 编译验证入口(lexer 是 leaf module;本身无 main 行为)。
+// 存在仅为让 jhyy_compile 通过(leaf module 无 fn main_jhyy 会 compile fail)。
+// 实际功能由 codegen_amd64.jhyy main entry 通过 lex_il() 调用。
+fn main_jhyy() -> i32 {
+    return 0 as i32;
+}
