@@ -1,7 +1,0 @@
-*.o
-qbe
-qbe.exe
-config.h
-.comfile
-*.out
-*~

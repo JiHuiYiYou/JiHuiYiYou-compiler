@@ -77,24 +77,22 @@ int jh_target_count(void) {
 }
 
 /* V2-B v2.6.0 (Unit E Wire): backend mode picker.
- * v2.8.1: C-side codegen (compiler/src/codegen.c) 只 emit Win IL, 所以
- * SYSV + SYSV_FREESTANDING → BACKEND_QBE (跟 v2.6.0/v2.7.0 行为一致,
- * C-side 没 jhyy-side self backend 替代)。Win + WinFreestanding → BACKEND_SELF。
- * QBE_FALLBACK env var (read by main.c / main.jhyy) 仍是 explicit override。
- *
- * 注: jhyy-side `target_backend_mode` 在 v2.7.0 ship 后 4 targets 都 →
- * BACKEND_SELF (jhyy-side codegen 真实现)。C-side 仍 BACKEND_QBE for SYSV 是
- * 因为 C-side codegen.c 不会 emit SysV — 真 path 走 jhyy.exe (production) 时
- * 调 jhyy-side target_backend_mode (跟 C-side 这函数无关)。
+ * v2.16.0: all 4 targets → BACKEND_SELF. QBE removed; jhyy-side
+ * `target_backend_mode` parity confirmed (compiler/src0/target_dispatch.jhyy
+ * already returned BACKEND_SELF for all 4 since v2.7.0). C-side parity
+ * cleanup eliminates potential sysv trigger path; jhyy.exe production does
+ * not use this C-side function but the parity keeps the dispatch tables
+ * consistent.
+ * QBE_FALLBACK env var no longer honored (QBE removed); main.jhyy prints
+ * a warning if set.
  */
 BackendMode target_backend_mode(Target t) {
     switch (t) {
     case TARGET_AMD64_WIN:
     case TARGET_AMD64_WIN_FREESTANDING:
-        return BACKEND_SELF;
     case TARGET_AMD64_SYSV:
     case TARGET_AMD64_SYSV_FREESTANDING:
-        return BACKEND_QBE;
+        return BACKEND_SELF;
     }
-    return BACKEND_QBE;  /* unknown → safe QBE fallback */
+    return BACKEND_SELF;  /* unknown → safe SELF fallback */
 }

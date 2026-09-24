@@ -2,9 +2,20 @@
 # v1.4.4: 改用 stage-0 链 — `all` 先产 jhyy_stage0.exe (C 端), 再用 stage-0
 # 编译 src0/main.jhyy → jhyy.exe (jhyy-side 产物)。jhyy.exe 是 production
 # binary, jhyy_stage0.exe 只用于 bootstrap (改 compiler/src/*.c 后重建)。
+# v2.16.0: D26 reproducibility recipe applied to stage0 build (-g0 + strip +
+# SOURCE_DATE_EPOCH); QBE still vendored for C-side bootstrap (full removal
+# is M5 scope per v1.x-phase-4-m5-boot-from-scratch.md).
 
 CC       = gcc
 CFLAGS   = -std=c11 -Wall -Wextra -g -I$(SRC_DIR)
+# v2.16.0 D26 stage0: -g0 + strip build-id for byte-equal rebuilds.
+# Per docs/plans/v2/v2.4.0任务清单 + 概要设计.md:26,104-124 + docs/logs/v2/changelog-v2.4.0.md
+CFLAGS_STAGE0 = -std=c11 -Wall -Wextra -g0 -Wl,--build-id=none -I$(SRC_DIR)
+STRIP         = strip
+SOURCE_DATE_EPOCH = 1234567890
+# QBE removed v2.16.0 from jhyy-side compile path; still vendored for C-side
+# bootstrap (compiler/src/main.c uses QBE in cmd_compile). Full QBE removal
+# is M5 scope (deferred — see docs/internal/workarounds.md W-XXX).
 QBE      = qbe/qbe.exe
 QBEFLAGS = -t amd64_win
 WINDRES  = windres
@@ -60,19 +71,28 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 
 $(OBJ_DIR)/runtime.o: $(RUNTIME_DIR)/runtime.c
 	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) -c $< -o $@
+	# v2.16.0 D26 reproducibility: runtime.c must compile with -g0 too, else
+	# the embedded debug info (incl. mingw-w64-crt build paths from crt0
+	# link-in) breaks jhyy.exe byte-equal rebuilds.
+	$(CC) $(CFLAGS_STAGE0) -c $< -o $@
 
 # v1.8.1 patch: windres rule producing icon resource .o (RT_ICON group).
+# v2.16.0 D26 reproducibility: SOURCE_DATE_EPOCH propagated to windres so
+# the .o timestamps don't break 4-rebuild byte-equal verification.
 $(RES_OBJ): $(SRC_DIR)/jhyy.rc $(ICON_SRC)
 	@mkdir -p $(OBJ_DIR)
-	$(WINDRES) -i $< -O coff -o $@
+	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(WINDRES) -i $< -O coff -o $@
 
 # v1.4.4: C 端产物改名 jhyy_stage0.exe (runtime.o 不链入 — 它是给 jhyy.exe 用
 # 的, 含重复符号 arena_alloc/main, 会跟 main.c/arena.c 冲突)
 # v1.8.1: jhyy-res.o (icon RT_ICON group) 链入 stage0,branded "J" 进 exe。
+# v2.16.0 D26 reproducibility: CFLAGS_STAGE0 (no -g debug info), strip
+# build-id post-link, SOURCE_DATE_EPOCH for deterministic timestamps.
+# Result: 4-rebuild byte-equal per docs/plans/v2/v2.4.0 § 2.1.1 byte_equal.sh.
 $(BIN_DIR)/jhyy_stage0.exe: $(OBJS) $(RES_OBJ)
 	@mkdir -p $(BIN_DIR)
-	$(CC) $(CFLAGS) $^ -o $@
+	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(CC) $(CFLAGS_STAGE0) $^ -o $@
+	$(STRIP) --strip-unneeded $@
 
 # v1.4.4: jhyy.exe 由 jhyy_stage0.exe 编 src0/main.jhyy 产
 # 依赖 stage0 (jhyy_stage0.exe 必须先存在)

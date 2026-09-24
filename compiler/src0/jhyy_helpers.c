@@ -70,6 +70,38 @@ int jh_f64_atof(const char *s, long long len, void *dst) {
     return 0;
 }
 
+/* v2.11.19 Phase 3a: 把 f64 字面量文本转 IEEE 754 bit pattern (i64)。
+   jhyy-side cg_parse_f64_imm_bits 用此走 fractional (N.M) 分支 — 自己解析
+   i64 literal 表只 cover integer-valued d_N (0/1/2/3/4/5/10),d_1.5/d_2.5/d_3.14
+   等 fractional 全 fallback 0 → 自-backend 的算术结果错 (QBE constant-folding 闭环)。
+   C 端 atof → 强转 bits,jhyy-side 拿 i64 bit pattern → emit movabsq $bits, %rax +
+   movq %rax, -<off>(%rbp)。
+   注:Win64 ABI f64 return 用 XMM0,jhyy extern 不能直接接 f64 — 用 store 模式:
+   本函数把解析后的 bits 写到 caller 提供的 8-byte buffer,jhyy-side 读 i64 出来。
+   abi/i386 SysV 同 pattern (XMM0 return) — jhyy-side 拿 8-byte heap buf,本函数写回。 */
+long long jh_double_to_bits(const char *s, long long len, void *out_buf) {
+    char buf[128];
+    long long n = len < 127 ? len : 127;
+    for (long long i = 0; i < n; i++) buf[i] = s[i];
+    buf[n] = '\0';
+    double d = atof(buf);
+    *(long long *)out_buf = *(long long *)&d;
+    return 0;
+}
+
+/* v2.11.19 Phase 3a: 把 f32 字面量文本转 IEEE 754 single-precision bit pattern (i32)。
+   jhyy-side cg_f32_imm_bits 用此走 true impl (替代 v2.11.15 Iter 1b stub "返 imm_val")。
+   store 模式同 jh_double_to_bits:caller 提供 4-byte buf,本函数写回 i32 bits。 */
+int jh_float_to_bits(const char *s, long long len, void *out_buf) {
+    char buf[128];
+    long long n = len < 127 ? len : 127;
+    for (long long i = 0; i < n; i++) buf[i] = s[i];
+    buf[n] = '\0';
+    float f = (float)atof(buf);
+    *(int *)out_buf = *(int *)&f;
+    return 0;
+}
+
 /* v1.7.1 patch A1 — W-042 Tier 3: post-link .exe stat check.
    链接成功 (jh_run 返回 0) 后, stat exe_path 验文件存在且 size > 0.
    抓 gcc "succeeded" 但 produce 0 字节 / missing 文件的 silent corruption case.
@@ -166,18 +198,19 @@ __attribute__((used)) int jh_fmt_lld_stderr(const char *fmt, long long val) {
 
 /* v1.4.1: 路径硬编码消除 — jhyy 端 codegen 不实现真正的顶层 let mut global
    (g_qbe 等会被常量折叠为 0), 所以路径状态放在 C runtime。
-   - jh_paths_init(argv0) 一次: argv[0] 推项目根, 填 4 个 static buffer
+   - jh_paths_init(argv0) 一次: argv[0] 推项目根, 填 3 个 static buffer
+     (gcc / runtime.c / jhyy_helpers.c)
    - jh_path_*() 多次读: 返回 const char* 到 static buffer
    ABI: argv0=*u8(i64 ptr), 返回 i32 (=0 OK / !=0 err)
    与 main.c compute_project_root 镜像 (C 端不调这个 fn, jhyy 端才调)。
 
-   v1.4.6 W-017 DEPRECATED: jhyy-side codegen 现在能 emit 真 module-level
-   global (QBE data section + mod_globals dict), 不再需要委托 path state 到
-   C runtime。本节保留 1-2 sprint 观察期, v1.5 installer 设计时决定删 / 留。
-   v1.4.6 后续: 可以逐步从 main.jhyy 移除 extern decl + wrapper, 改用顶层
-   `let mut path_qbe: *u8 = ...` 模式, 配合 init 函数一次性写入。
-   详见 docs/internal/workarounds.md W-017 superseder 段。 */
-static char jh_path_qbe_buf[1024];
+   v2.16.0: QBE 完全移除。QBE_PATH() / jh_path_qbe() 保留 extern linkage 返
+   回空字符串(永不调),以便 caller signature 不变。Path probing 只针对
+   runtime.c + jhyy_helpers.c (Layout (a) installer 兄弟 vs Layout (b) source-
+   tree walk-up)。GCC 路径默认 "gcc" (PATH 解析)。
+
+   详见 docs/internal/build.md "QBE 历史" 段 + docs/plans/v2/v2.16.0-plan.md。 */
+static char jh_path_qbe_buf[1024];  /* unused post-v2.16.0; empty string */
 static char jh_path_gcc_buf[1024];
 static char jh_path_runtime_buf[1024];
 static char jh_path_helpers_buf[1024];
@@ -205,8 +238,8 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
        但 installer layout 是 <INSTALLDIR>\bin\jhyy.exe (只有 1 层), dirname × 4
        走到 C:\ → qbe/qbe.exe 找不到 → "QBE failed". 用户 VSCode 通过 PATH
        调 installer 版 jhyy.exe (PATH 排第一) 时 100% 触发.
-       修法: 先试 installer layout (sibling qbe.exe), 否则 walk-up 找 <root>\qbe\qbe.exe.
-       详情 docs/internal/workarounds.md W-037. */
+       v2.16.0: QBE 移除, probing 目标改为 jhyy_helpers.c (Layout (a) 兄弟 vs
+       Layout (b) source-tree walk-up),runtime.c 同 pattern。 */
 
     /* Normalize path: ensure backslashes for consistent parsing */
     for (char *p = exe_path; *p; p++) if (*p == '/') *p = '\\';
@@ -217,36 +250,37 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
     *last = '\0';
     snprintf(dir_path, sizeof(dir_path), "%s", exe_path);
 
-    /* Layout (a) — sibling qbe.exe (installer 布局) */
-    snprintf(test_path, sizeof(test_path), "%s\\qbe.exe", dir_path);
+    /* GCC: default to "gcc" (PATH-resolved by gcc/jh_run). Always set. */
+    snprintf(jh_path_gcc_buf, sizeof(jh_path_gcc_buf), "gcc");
+    /* jh_path_qbe_buf: empty string (post-v2.16.0 QBE removed). */
+    jh_path_qbe_buf[0] = '\0';
+
+    /* Layout (a) — installer: runtime.c + jhyy_helpers.c as siblings of jhyy.exe */
+    snprintf(test_path, sizeof(test_path), "%s\\jhyy_helpers.c", dir_path);
     {
         struct stat st;
         if (stat(test_path, &st) == 0) {
             #pragma GCC diagnostic push
             #pragma GCC diagnostic ignored "-Wformat-truncation"
-            snprintf(jh_path_qbe_buf,     sizeof(jh_path_qbe_buf),     "%s\\qbe.exe", dir_path);
             snprintf(jh_path_runtime_buf, sizeof(jh_path_runtime_buf), "%s\\runtime.c", dir_path);
             snprintf(jh_path_helpers_buf, sizeof(jh_path_helpers_buf), "%s\\jhyy_helpers.c", dir_path);
-            snprintf(jh_path_gcc_buf,     sizeof(jh_path_gcc_buf),     "gcc");
             #pragma GCC diagnostic pop
             jh_paths_initialized = 1;
             return 0;
         }
     }
 
-    /* Layout (b) — source-tree: walk up to find <root>\qbe\qbe.exe */
+    /* Layout (b) — source-tree: walk up to find <root>\compiler\src0\jhyy_helpers.c */
     snprintf(root, sizeof(root), "%s", dir_path);
     for (int i = 0; i < 8; i++) {
-        snprintf(test_path, sizeof(test_path), "%s\\qbe\\qbe.exe", root);
+        snprintf(test_path, sizeof(test_path), "%s\\compiler\\src0\\jhyy_helpers.c", root);
         {
             struct stat st;
             if (stat(test_path, &st) == 0) {
                 #pragma GCC diagnostic push
                 #pragma GCC diagnostic ignored "-Wformat-truncation"
-                snprintf(jh_path_qbe_buf,     sizeof(jh_path_qbe_buf),     "%s\\qbe\\qbe.exe", root);
                 snprintf(jh_path_runtime_buf, sizeof(jh_path_runtime_buf), "%s\\compiler\\runtime\\runtime.c", root);
                 snprintf(jh_path_helpers_buf, sizeof(jh_path_helpers_buf), "%s\\compiler\\src0\\jhyy_helpers.c", root);
-                snprintf(jh_path_gcc_buf,     sizeof(jh_path_gcc_buf),     "gcc");
                 #pragma GCC diagnostic pop
                 jh_paths_initialized = 1;
                 return 0;
@@ -257,10 +291,10 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
         if (!up || up == root) break;  /* reached drive root, give up */
         *up = '\0';
     }
-    return 1;  /* no layout matched */
+    return 1;  /* no layout matched — runtime.c / jhyy_helpers.c not found */
 }
 
-__attribute__((used)) const char *jh_path_qbe(void)     { return jh_path_qbe_buf; }
+__attribute__((used)) const char *jh_path_qbe(void)     { return jh_path_qbe_buf; }  /* v2.16.0: always "" */
 __attribute__((used)) const char *jh_path_gcc(void)     { return jh_path_gcc_buf; }
 __attribute__((used)) const char *jh_path_runtime(void) { return jh_path_runtime_buf; }
 __attribute__((used)) const char *jh_path_helpers(void) { return jh_path_helpers_buf; }
@@ -626,6 +660,57 @@ __attribute__((used)) int jh_regalloc_set(void *arr) {
     return 0;
 }
 
+/* v2.11.5 (W-074.7 alloc-tracking 真修): jh_cgstate_get_temp_slots /
+   jh_cgstate_set_temp_slots — 跟 regalloc 同 pattern,C-side static 装当前 CGState
+   的 temp_slot_for_id (256-entry i64 array,per-fn alloc slot 表)。
+   emit_alloc 写入 alloc'd %tN 的 slot,cg_offset_for_temp[t] 查表(否则 fall through
+   formula)。BSS-zero init, set NULL = 关闭 alloc-tracking。Pointer-only: 实际数据
+   在 jhyy arena alloc (per-compile lifetime),C-side 只装指针。
+   修 nested_struct_deep + struct_val_pass pre-existing bug: alloc'd %tN 之前
+   走 formula `-(32 + t*8)` 跟 alloc 真分配的 slot 不一致 → read garbage。 */
+static void *g_jh_cgstate_temp_slots = (void *)0;
+__attribute__((used)) void *jh_cgstate_get_temp_slots(void) {
+    return g_jh_cgstate_temp_slots;
+}
+__attribute__((used)) int jh_cgstate_set_temp_slots(void *arr) {
+    g_jh_cgstate_temp_slots = arr;
+    return 0;
+}
+
+/* v2.11.8 (W-074.7.8 derived-address tracking 真修): jh_cgstate_get_holds_address /
+   jh_cgstate_set_holds_address — same pattern as temp_slots above; C-side static
+   holds 256-entry u8 bitmap (parallel to temp_slot_for_id i64 array, but 1 byte/entry)。
+   emit_alloc / emit_binop (add/sub on address-holder src1) / emit_copy (TEMP→TEMP of
+   address-holder) 写 flag; emit_load/store/loadsub 读 flag 决定 indirect
+   (mov<size> (%r8), %reg) vs slot (mov<size> -<off>(%rbp), %reg) dispatch。
+   BSS-zero init; query goes through (*s).temp_holds_address in state.jhyy (hot path);
+   setter is forward-ref-safe no-op kept for API consistency with temp_slots. */
+static void *g_jh_cgstate_holds_address = (void *)0;
+__attribute__((used)) void *jh_cgstate_get_holds_address(void) {
+    return g_jh_cgstate_holds_address;
+}
+__attribute__((used)) int jh_cgstate_set_holds_address(void *bitmap) {
+    /* unused — state.jhyy reads (*s).temp_holds_address directly via jh_cgstate_get_holds_address */
+    g_jh_cgstate_holds_address = bitmap;
+    return 0;
+}
+
+/* v2.11.8 (W-074.7.8 derived-address tracking 真修): jh_cgstate_set_holds_flag /
+   jh_cgstate_get_holds_flag — byte-level access into the 256-entry u8 bitmap。
+   cg_record_temp_holds_address / cg_is_address_holder (state.jhyy) 调这两个,
+   因为 jhyy 没有 u8 direct deref 语法 (*(u8*)p = 1 不支持),走 C-bridge。 */
+__attribute__((used)) int jh_cgstate_set_holds_flag(void *bitmap, long long idx) {
+    if (bitmap == NULL) return -1;
+    if (idx < 0 || idx >= 256) return -1;
+    ((unsigned char *)bitmap)[idx] = 1;
+    return 0;
+}
+__attribute__((used)) int jh_cgstate_get_holds_flag(void *bitmap, long long idx) {
+    if (bitmap == NULL) return 0;
+    if (idx < 0 || idx >= 256) return 0;
+    return ((unsigned char *)bitmap)[idx] != 0 ? 1 : 0;
+}
+
 /* v2.6.0: jh_read_file — read entire file into caller-provided buffer.
    Returns:
      0  on success (*out_len set to file size)
@@ -718,95 +803,3 @@ __attribute__((used)) int codegen_amd64_run(const char *il_path, const char *asm
     (void)il_path; (void)asm_path;
     return -1;  /* not implemented in C side; triggers QBE fallback */
 }
-
-/* === v3.0.7/Commit 1: 8 helpers ported from V2 v2.16.0 === */
-/* v3.0.7 (W-074.7 真修 merge): jh_double_to_bits / jh_float_to_bits / jh_cgstate_*
-   helpers are referenced by merged src0 backend code (V2 v2.11.x ~ v2.13.x 真修
-   chain) but V3 had only ~44 helpers. Adding the 8 missing ones to allow
-   Commit 1 build (without these, ld returns 5 — 8 unresolved jh_* symbols).
-
-   Per user 2026-09-23 decision: C-side 76 LOC 改豁免 (sweeping C-side 改动跟
-   V2 0b4cde5 同源). This is part of the "absorb V2 src0 backend closure" effort.
-
-   These 8 helpers are byte-for-byte ports of V2 v2.16.0 implementations
-   (sourced via `git show v2.16.0:compiler/src0/jhyy_helpers.c`). */
-
-/* v2.11.5 (W-074.7 alloc-tracking 真修): jh_cgstate_get_temp_slots /
-   jh_cgstate_set_temp_slots — 跟 regalloc 同 pattern,C-side static 装当前 CGState
-   的 temp_slot_for_id (256-entry i64 array,per-fn alloc slot 表)。
-   emit_alloc 写入 alloc'd %tN 的 slot,cg_offset_for_temp[t] 查表(否则 fall through
-   formula)。BSS-zero init, set NULL = 关闭 alloc-tracking。Pointer-only: 实际数据
-   在 jhyy arena alloc (per-compile lifetime),C-side 只装指针。
-   修 nested_struct_deep + struct_val_pass pre-existing bug: alloc'd %tN 之前
-   走 formula `-(32 + t*8)` 跟 alloc 真分配的 slot 不一致 → read garbage。 */
-static void *g_jh_cgstate_temp_slots = (void *)0;
-__attribute__((used)) void *jh_cgstate_get_temp_slots(void) {
-    return g_jh_cgstate_temp_slots;
-}
-__attribute__((used)) int jh_cgstate_set_temp_slots(void *arr) {
-    g_jh_cgstate_temp_slots = arr;
-    return 0;
-}
-
-/* v2.11.8 (W-074.7.8 derived-address tracking 真修): jh_cgstate_get_holds_address /
-   jh_cgstate_set_holds_address — same pattern as temp_slots above; C-side static
-   holds 256-entry u8 bitmap (parallel to temp_slot_for_id i64 array, but 1 byte/entry)。
-   emit_alloc / emit_binop (add/sub on address-holder src1) / emit_copy (TEMP→TEMP of
-   address-holder) 写 flag; emit_load/store/loadsub 读 flag 决定 indirect
-   (mov<size> (%r8), %reg) vs slot (mov<size> -<off>(%rbp), %reg) dispatch。
-   BSS-zero init; query goes through (*s).temp_holds_address in state.jhyy (hot path);
-   setter is forward-ref-safe no-op kept for API consistency with temp_slots。 */
-static void *g_jh_cgstate_holds_address = (void *)0;
-__attribute__((used)) void *jh_cgstate_get_holds_address(void) {
-    return g_jh_cgstate_holds_address;
-}
-__attribute__((used)) int jh_cgstate_set_holds_address(void *bitmap) {
-    /* unused — state.jhyy reads (*s).temp_holds_address directly via jh_cgstate_get_holds_address */
-    g_jh_cgstate_holds_address = bitmap;
-    return 0;
-}
-
-/* v2.11.8 (W-074.7.8 derived-address tracking 真修): jh_cgstate_set_holds_flag /
-   jh_cgstate_get_holds_flag — byte-level access into the 256-entry u8 bitmap。
-   cg_record_temp_holds_address / cg_is_address_holder (state.jhyy) 调这两个,
-   因为 jhyy 没有 u8 direct deref 语法 (*(u8*)p = 1 不支持),走 C-bridge。 */
-__attribute__((used)) int jh_cgstate_set_holds_flag(void *bitmap, long long idx) {
-    if (bitmap == NULL) return -1;
-    if (idx < 0 || idx >= 256) return -1;
-    ((unsigned char *)bitmap)[idx] = 1;
-    return 0;
-}
-__attribute__((used)) int jh_cgstate_get_holds_flag(void *bitmap, long long idx) {
-    if (bitmap == NULL) return 0;
-    if (idx < 0 || idx >= 256) return 0;
-    return ((unsigned char *)bitmap)[idx] != 0 ? 1 : 0;
-}
-
-/* v2.11.19 Phase 3a: 把 f64 字面量文本转 IEEE 754 double-precision bit pattern (i64)。
-   jhyy-side cg_f64_imm_bits 用此走 true impl (替代 v2.11.15 Iter 1b stub "返 imm_val")。
-   本函数把解析后的 bits 写到 caller 提供的 8-byte buffer,jhyy-side 读 i64 出来。
-   abi/i386 SysV 同 pattern (XMM0 return) — jhyy-side 拿 8-byte heap buf,本函数写回。 */
-long long jh_double_to_bits(const char *s, long long len, void *out_buf) {
-    char buf[128];
-    long long n = len < 127 ? len : 127;
-    for (long long i = 0; i < n; i++) buf[i] = s[i];
-    buf[n] = '\0';
-    double d = atof(buf);
-    *(long long *)out_buf = *(long long *)&d;
-    return 0;
-}
-
-/* v2.11.19 Phase 3a: 把 f32 字面量文本转 IEEE 754 single-precision bit pattern (i32)。
-   jhyy-side cg_f32_imm_bits 用此走 true impl (替代 v2.11.15 Iter 1b stub "返 imm_val")。
-   store 模式同 jh_double_to_bits:caller 提供 4-byte buf,本函数写回 i32 bits。 */
-int jh_float_to_bits(const char *s, long long len, void *out_buf) {
-    char buf[128];
-    long long n = len < 127 ? len : 127;
-    for (long long i = 0; i < n; i++) buf[i] = s[i];
-    buf[n] = '\0';
-    float f = (float)atof(buf);
-    *(int *)out_buf = *(int *)&f;
-    return 0;
-}
-/* === end v3.0.7/Commit 1 added helpers === */
-
