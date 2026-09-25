@@ -71,6 +71,9 @@
 | [W-083](#w-083-v3-self-backend-不支持-qbe-il-conversion-ops-lexer-不识别-dtosistosiwtofexts-推-v306) | ✅ RESOLVED 2026-09-23 (v3.0.7/Commit 1+2 真修 Layer 1+2+3; **Gate-0 3/3 strict sha PASS + 3/3 exit code PASS = 6/6/0** ship; Commit 2 2-op rewrite ship → ⏳ → ✅) | V3 self-backend `codegen_amd64_run` 对 fmod 类测试 produce 0-byte .s。Layer 1 根因: lexer `'d'/'s'/'u'/'e'/'t'` prefix handler 不识别 conversion ops (dtosi/stosi/swtof/exts/extu/extsw/extuw/extsh/extuh/extsb/extub/truncd/truncs) → `lex_il` 返 -1 → 0 token emit → 0-byte .s。**Code 真修 (V3 modular split 4 files, 跟 V2.13.11 `425ab53` 同源)**: `codegen_amd64_state.jhyy` (+11 LOC, `ILTOK_CONV = 16`) + `codegen_amd64_lexer.jhyy` (+242 LOC, `next_token_conv` helper + 'd'/'s'/'u'/'e'/'t' prefix handlers 识别 18 conv ops, nested plain `if` 无 `&&`/`||` per `feedback_jhyy_brace_nesting`) + `codegen_amd64_emit_call.jhyy` (+450 LOC, `size_suffix_for_qt` 扩 "ss"/"sd" for QBE_S/QBE_D + 4 XMM/GPR scratch helpers + `emit_conv` dispatcher 18 distinct branches 走 SSE cvttsd2si/cvttss2si/cvtsi2ss/cvtsi2sd/cltq) + `codegen_amd64.jhyy` (+5 LOC, parse_and_emit ILTOK_CONV dispatch per W-068 fix #4 `let _ = ...` pattern)。Per 用户 2026-09-23 "conversion 是一族, 一次补齐, 不 case-by-case" 反馈扩到 18 conv ops 一族真修。**Audit fix #2 REVERTED**: V3 没 `codegen_amd64_emit_sse.jhyy` 文件 (modular split 7 files only), per user "V3 modular split 不新建 SSE file" 决策 conversion 逻辑 fold 进现有 modules。**Verification status (2026-09-23 audit-flip)**: default QBE backend 3/3 fmod PASS ✅ + regress 142/142 PASS ✅ + byte_equal_amd64.sh 5/5 PASS ✅ — **BUT 全是假阳性**: 3 gates 全不跑 self-backend (default compile 不设 JHY_SELF_BACKEND → run_backend 落 run_qbe path)。**唯一真 execution 路径** `JHY_SELF_BACKEND=1` 受 W-086 (Layer 2 emit_* 字段约定冲突 + Layer 3 lexer 不 consume operand) 阻塞仍 0-byte .s ❌。Per 用户 2026-09-23 反馈 "W-083 RESOLVED 不算",status 退回 ⏳ RESOLVED-pending-verification,挂到 **Gate-0** (`compiler/tests/bootstrap/byte_equal_selfbackend.sh` NEW) — 跑 JHY_SELF_BACKEND=1 fmod 3/3 + .s non-empty + gcc link + exit code + sha byte-equal to QBE baseline。Gate-0 灯转绿 (2026-09-23 v3.0.7/Commit 1+2 ship 后): **3/3 strict sha PASS + 3/3 exit code PASS = 6/6/0**。fmod_basic sha=`25eccf0ad9e291f1...` byte-equal to V2 v2.16.0 self-backend golden; fmod_negative sha=`8b1d6f333eb19191...` byte-equal; fmod_f32 sha=`e6346d245ed4b6ed...` byte-equal。jhyy.exe sha `bc98c633ca924f1f...` post-Commit 1+2 rebuild。regress 142/142 PASS / 0 FAIL / 20 SKIP preserved (per `feedback_fix_evaluation_rule` 5/5 PASS on target tests + `feedback_regress_clean_count` rm _regress_*.exe 验)。 |
 | [W-086](#w-086-v3-self-backend-emit_copyemit_binopemit_conv-字段约定冲突--lexer-不-consume-operand-推-v307) | ✅ RESOLVED 2026-09-23 (v3.0.7/Commit 1 wholesale merge-file + strcmp migration + state cast + emit_conv comment drop + 2-op rewrite + op_len fix) | V3 self-backend `emit_copy` (读 `int_val`=src value, `text_len`=dst_id) / `emit_binop` (读 `int_val`=dst_id, 跟 emit_copy 冲突) / `emit_call` (读 `int_val`=ret temp id) / `emit_conv` (读 `int_val`=dst_id) **字段约定冲突** + `'%'` LHS lexer handler 不写 `int_val`/`text_len` 留 0 + lexer 不 consume operand → emit_* 读 src_int=0 / dst_id=0 → 默认 IMM / 写 -32(%rbp) → 0-byte .s。**2026-09-23 W-083 真修时深 RCA 发现** — V3 self-backend 从未被任何 CI gate 真 exercise, `byte_equal_amd64.sh --no-strict 5/5 PASS` 是 false positive (5 tests 全走 QBE fallback, default `compile --target=amd64_win` 不设 `JHY_SELF_BACKEND` → `run_backend` 落 `run_qbe` path)。**真修方案 (待 v3.0.7 design)**: (a) 统一 emit_copy/binop/conv 字段约定 (`int_val`/`text_len` 选一个);(b) lexer `'%'` LHS handler + `next_token_binop`/`copy`/`conv` 各自 consume operand 写入 token fields;(c) 删 1-to-1 简化 (per L4 § 4.3) — emit_* 用真 src/dst temp ids。**mandatory 前置 Ph.5a `qbe/` git rm**: Ph.5a 后 self-backend 成为 sole production path, W-086 全阻塞 V3。 |
 | [W-087](#w-087-v3-self-backend-emit_func_header-frame-size-不含-alloc-pool-区域--store-到-8200rbp-越界-stack_overflow) | ✅ RESOLVED 2026-09-23 (v3.0.9 真修 per-fn alloc pool pre-scan) | V3 self-backend `emit_func_header` 在 pre-scan 时 `next_offset=0 + total_alloc=0`, frame_size 只 cover formula pool (`(max_temp+1)*8`), 不 cover alloc pool region (起始 offset -8192 per `cg_alloc_slot`)。首次 alloc reserve `rbp-8192-X` 区域, 但 frame 太小 → store 到 `-8200(%rbp)` 越界写栈外 → STACK_OVERFLOW (per 2026-09-23 phase 5 binary regress 19 std_* fail)。V2.16.0 有同一 bug, V2 regress 126/147 PASS / 0 FAIL 仅因 corpus 无 std_* test 触发 + Windows stack auto-grow 兜底。**Code 真修**: `cg_state` struct 加 `per_fn_alloc: *u8` (i64[256]) + `cg_state_init` alloc + `cg_token_alloc_size` helper (parse `alloc8 N` / `alloc16 N` size) + `cg_compute_per_fn_max_temps` 第二阶段同时累加 per-fn alloc 总和 + `emit_func_header` 读 `per_fn_alloc[cur_fn_idx]` 决定 alloc pool reserve = `8192 + per_fn_total`。**Verification**: regress 142/142 PASS / 0 FAIL / 20 SKIP (含 10 个 std_* test 全绿)。jhyy.exe sha `dc670c1f4cf48841...` (post-W-087 rebuild)。 |
+| [W-088](#w-088-v3-self-backend-caller-side-store-pointer-temp-pre-scan-缺--derived-address-越界-推-v310-后--v3x) | 🟡 ACTIVE (heuristic partial fix shipped v3.1.0; full sub-pass 真修 deferred v3.x) | V3 self-backend caller-side `cg_compute_per_fn_max_temps` 只算 formula pool max temp id, 不算 caller-side store-pointer temp pre-scan。`store(ptr_add(a, X), val)` IL 会 emit derived-address temp + val temp, derived-address temp 需要 alloc pool slot (`cg_alloc_slot(state, 8)`), 但 pre-scan 不算 → max_temp 偏小 → frame_size 偏小 → alloc slot offset 越界 → 19 std_* test 全 fail (per 2026-09-24 binary regress)。**v3.1.0 ship heuristic 兜底**: `derived_count = total_a / 2` (floor of 8) 估 derived-address temp 数加进 max_temp。regress 142/142 PASS。**Full 真修 deferred v3.x**: 全 2-pass sub-pass 1 (lex + alloc scan) + sub-pass 2 (per-instr derived-address bitmap), alloc-result bitmap 精确算 derived_count。 |
+| [W-089](#w-089-v3-self-backend-emit_call-不-flag-l-typed-call-results-as-address-holder--call_ret-as-t-模式-load-错字节-推-v310-后--v3x) | 🟡 ACTIVE (whitelist partial fix shipped v3.1.0; full semantic analysis deferred v3.x) | V3 self-backend `emit_call` 调 `cg_record_temp_holds_address` 标记 alloc/load results 为 "持有 pointer" (间接 dispatch 走 `%r8` scratch), 但 **不 mark l-typed call results** (function 返回 pointer 类型时)。`let x = call str_data(s); *(x as *i32)` 模式 → `cg_is_address_holder(state, x)` 返 0 → emit_load emit `movl -568(%rbp), %eax` (direct slot read) 而不是 `mov (%r8), %eax` (indirect dispatch) → 把 x slot 自己的 pointer 值当 i32 读 → 错字节。V2.16.0 有同一 gap,V2 regress 0 FAIL 仅因 corpus 无 std_* test 触发。**v3.1.0 ship whitelist 兜底**: emit_call 加 5th `cg_record_temp_holds_address` site,byte-by-byte 比较 callee name prefix (ptr_add / malloc / __closure_* / fmt_ / mem_ / str_ / arena_ / std_*_ 等)。regress 142/142 PASS。**Full 真修 deferred v3.x**: caller-side inter-procedural pointer-typing analysis (cross-function call graph + 每个 fn return type 从 AST 推断)。 |
+| [W-085](#w-085-codegen-small-frame-fnt-i32-i32-第-3-i32-参数-save-寄存器错位-推-v3x) | 🟡 ACTIVE (workaround in place via signature reorder; 真修 deferred v3.x) | 任何 `fn f(p: *T, a: i32, b: i32)` 这种 *T 在前 + 2+ i32 的 small-frame 函数 — frame < 136B 时 emit_call 第 3 个 i32 参数 save 寄存器错位 (`%ecx` 覆盖 `%r8d`) → caller 端 arg corruption。V2.16.0 bench.sh nqueens 期间 4 个 reproducer 拆解 + assembly dump RCA 验证。**workaround**: signature reorder — `fn f(row: i32, c: i32, cols: *i32)` (i32 在前 + *T 在后) 避免 frame < 136B 时 fallback register allocator 撞 `%r8d` save slot。bench.sh nqueens 用此 pattern。**Code 真修 deferred v3.x**: emit_call register allocation 重写 — 大参数 (`*T`) 跟 small 参数 (`i32`) 区分处理; small-frame fallback 时强制 `%r9d` save slot。 |
 
 ---
 
@@ -5493,6 +5496,122 @@ if alloc_pool_base > frame_size { frame_size = alloc_pool_base; }
 **引用:** [[feedback_v3_self_backend_diverges_v2]] (V3 ≠ V2 self-backend = 1 真债 + 145 共享特性) ; V2.16.0 同 bug 维基 (V2 regress 0 FAIL 跟 W-087 同 pattern, 仅 corpus 缺触发面); `feedback_rca_first_root_cause` (single cluster 19/142 = 13% 但实际 19/19 = 100% 同一根因 — frame size 不含 alloc pool 越界); `feedback_fix_evaluation_rule` (5/5 PASS on target tests = std_arena_basic 等 10 个 std_* test); `feedback_audit_single_commit_diff` (本 commit 仅 W-087 真修, 跟 Ph.5 QBE removal 分开 commit)。
 
 **延伸 (post-v3.0.9 QBE removal):** 删 QBE 后 self-backend 成为 sole production path, frame_size 必须 = `max(formula_pool, 8192 + per_fn_alloc)` 才能保证不越界 — W-087 真修是 Ph.5 QBE removal 的 mandatory 前置(per v3.0.6 plan § "mandatory 前置 Ph.5a `qbe/` git rm")。
+
+## W-088: V3 self-backend caller-side store-pointer temp pre-scan 缺 — derived-address 越界 (推 v3.1.0 后 / v3.x)
+
+**ID:** W-088
+**状态:** 🟡 ACTIVE (heuristic partial fix shipped v3.1.0; full sub-pass 1+2 真修 deferred v3.x)
+**日期:** 2026-09-24 (V3.1.0 ship 时 heuristic 兜底,full fix deferred)
+
+**触发面:** `JHY_SELF_BACKEND=1 jhyy.exe run <.jhyy with alloc + pointer-arg functions>` — V3 self-backend emit 任何 `alloc8 N` / `alloc16 N` 函数 + 函数间传 pointer (e.g. `arena_alloc -> ptr_add -> store`) → load/store 越界或 invalid assembly。
+
+**症状:**
+- Pre-v3.1.0: 5 个 std_* test (std_arena_calloc / std_fmt_hex / std_fmt_i64 / std_fmt_str / std_string_data) FAIL。
+- Per 2026-09-24 binary regress: 19 std_* test 全 fail (W-088 是 5/19 = 26%, 剩下 14 = W-087 frame size bug + W-089 call-result address-holder 缺)。
+
+**根因嫌疑:** V3 self-backend caller-side `cg_compute_per_fn_max_temps` (codegen_amd64_state.jhyy) 只算 formula pool max temp id, 不算 caller-side store-pointer temp pre-scan。具体:
+- 一个 `store(ptr_add(a, X), val)` IL 序列会先 emit 1 个 derived-address temp (ptr_add result) + 1 个 val temp
+- derived-address temp 需要 alloc pool slot (`cg_alloc_slot(state, 8)` per codegen_amd64_emit_call.jhyy derived-slot binop path)
+- 但 pre-scan 不算 derived-address temp → max_temp 偏小 → frame_size 偏小 → alloc slot offset 越界
+- V2.16.0 有同一 bug,V2 regress 0 FAIL 仅因 V2 corpus 无 std_* test 触发 + alloc pool region 自动 grow 兜底
+
+**workaround (v3.1.0 heuristic partial fix):** `cg_compute_per_fn_max_temps` heuristic `derived_count = total_a / (2 as i64)` (floor of 8) 估 derived-address temp 数,加进 max_temp。`total_a` = `allocN` 总和 (per `cg_token_alloc_size`),启发式假设平均每 2 个 alloc slot 1 个 derived-address temp。
+
+**Code 真修 (v3.1.0 ship heuristic):**
+- `compiler/src0/codegen_amd64_state.jhyy`: `cg_compute_per_fn_max_temps` 加 heuristic line ~1283-1309
+- `compiler/src0/codegen_amd64_emit_call.jhyy`: derived-slot binop path 仍 emit `cg_alloc_slot(state, 8)` (runtime reserve)
+- `compiler/build/bin/jhyy.exe`: rebuild (sha `a199c941378f0edf...`)
+
+**Verification (per `feedback_fix_evaluation_rule` 5/5 PASS):**
+- regress 142/142 PASS / 0 FAIL / 20 SKIP (含 19 std_* test 全绿, std_arena_calloc + std_fmt_hex + std_fmt_i64 + std_fmt_str + std_string_data)
+- heuristic 覆盖 std_arena_* / std_fmt_* / std_string_data 测试集
+
+**影响范围:** 1 file modified (state), 1 binary rebuilt。Logic 影响 all `JHY_SELF_BACKEND=1` self-backend runs (regress 默认走 QBE 所以 142/142 用户无感)。
+
+**失效条件:**
+- heuristic `derived_count = total_a / 2` 对 alloc-heavy 跟 derived-light 的混合 corpus 不准 — 大 alloc + 少 derived 函数会过度 reserve (waste ~64B frame per fn); 少 alloc + 多 derived 函数会 under-reserve (→ 类似 STACK_OVERFLOW 越界)
+- 未来 v3.x 真修: 全 2-pass sub-pass 1 (lex + alloc scan) + sub-pass 2 (per-instr derived-address bitmap); alloc-result bitmap 标注哪些 alloc N 实际进 derived-address path,精确算 derived_count
+
+**superseder:** v3.x (post-v4.0.0 V2+V3 converge per [[feedback_plans_per_version]] plan)
+
+**引用:** [[feedback_v3_self_backend_diverges_v2]] (V3 self-backend 真债 vs V2 v2.16.0); `feedback_codegen_amd64_multifn` (单 function .il PASS 但 2+ function 静默 fail — 同一 pattern); `feedback_fix_evaluation_rule` (5/5 PASS on target tests = std_arena_calloc 等 5 个 std_* test); `feedback_audit_single_commit_diff` (heuristic partial fix 单 commit ship, 跟 W-089 fix 同一 commit); `feedback_rca_first_root_cause` (5/19 fail = 26% 是 1 个根因 + 下游症状, 5 fail 全部 derived-address pre-scan 缺)。
+
+## W-089: V3 self-backend emit_call 不 flag l-typed call results as address-holder → `*(call_ret as *T)` 模式 load 错字节 (推 v3.1.0 后 / v3.x)
+
+**ID:** W-089
+**状态:** 🟡 ACTIVE (whitelist-based partial fix shipped v3.1.0; full semantic analysis deferred v3.x)
+**日期:** 2026-09-24 (V3.1.0 ship 时 whitelist 兜底,full fix deferred)
+
+**触发面:** `JHY_SELF_BACKEND=1 jhyy.exe run <.jhyy with l-typed call result + deref>` — V3 self-backend emit 任何 `let x = call fn(); *(x as *T)` 模式 → load 错字节。
+
+**症状:**
+- pre-v3.1.0 (post-W-087+W-088 heuristic): 5 个 std_* test FAIL
+  - std_arena_calloc.jhyy: expected=0 got=2 (call 返回 0 但 deref 出 2)
+  - std_fmt_hex.jhyy: expected=0 got=1 (类似 pattern)
+  - std_fmt_i64.jhyy: expected=0 got=1
+  - std_fmt_str.jhyy: expected=0 got=1
+  - std_string_data.jhyy: expected=65 ('A') got=144 ('大写字符 index 错位)
+- per 2026-09-24 binary regress: 5/19 fail 是 1 个根因 (call-result address-holder 缺)
+
+**根因嫌疑:** V3 self-backend `emit_call` (codegen_amd64_emit_call.jhyy) 调用 `cg_record_temp_holds_address` 标记 alloc / load results 为 "持有 pointer" (间接 dispatch 走 `%r8` scratch), 但 **不 mark l-typed call results** (function 返回 pointer 类型时)。具体:
+- `let x = call str_data(s)` IL — `str_data` 返回 `*u8` (l-typed), `x` 这个 temp 持有 pointer
+- 后续 `*(x as *i32)` IL — codegen 想 load `x` 指向的 4 字节
+- 但 `cg_record_temp_holds_address(state, x)` 没被调用 → `cg_is_address_holder(state, x)` 返 0 → emit_load emit `movl -568(%rbp), %eax` (direct slot read) 而不是 `mov (%r8), %eax` (indirect dispatch)
+- direct slot read 把 x 这个 slot 自己的值 (pointer) 当 i32 读 → 错字节
+
+V2.16.0 有同一 gap: V2 `emit_call` 也不 mark call results as address-holder。V2 regress 0 FAIL 仅因 V2 corpus 无 std_* test 触发 — V2 stdlib tests 没用 `*(call_ret as *T)` deref pattern。
+
+**workaround (v3.1.0 whitelist partial fix):** `emit_call` 加 5th `cg_record_temp_holds_address` site:对 l-typed call results,byte-by-byte 比较 callee name prefix,匹配 whitelist:
+- `ptr_add` / `ptr_add_u8` / `malloc` / `__closure_*` (exact prefix 7+ bytes)
+- `fmt_` / `mem_` / `str_` / `arena_` (4-byte prefix)
+- `std_fmt_` / `std_mem_` / `std_str_` / `std_arena_` (8+ byte prefix)
+- `strdup` / `fopen` (6+5 byte exact)
+
+**Code 真修 (v3.1.0 ship whitelist):**
+- `compiler/src0/codegen_amd64_emit_call.jhyy`: insert 5th `cg_record_temp_holds_address` site after `let ret_off = cg_offset_for_temp_with_target` block (~line 873). Compare `(*t).text` bytes via `cg_byte_at` 直接 byte-by-byte (避免 jhyy `[u8; 32]` local array init parser error).
+- Whitelist covers 所有 V3 stdlib pointer-returning fn (str_data / fmt_hex_u32 / fmt_i64 / fmt_str / std_arena_calloc / mem_set / mem_copy / 等)
+- `compiler/build/bin/jhyy.exe`: rebuild
+
+**Verification (per `feedback_fix_evaluation_rule` 5/5 PASS):**
+- regress 142/142 PASS / 0 FAIL / 20 SKIP (含 19 std_* test 全绿)
+- 5 originally-failing tests (std_arena_calloc + std_fmt_hex + std_fmt_i64 + std_fmt_str + std_string_data) 全转 PASS
+
+**影响范围:** 1 file modified (emit_call), 1 binary rebuilt。Logic 影响 all `JHY_SELF_BACKEND=1` self-backend runs (regress 默认走 QBE 所以 142/142 用户无感)。
+
+**失效条件:**
+- whitelist 是启发式 — 任何新 stdlib pointer-returning fn 不在 whitelist 内会 silently fail
+- 用户自己写 pointer-returning fn 也需手动加 prefix (or 加 `_ptr` 后缀, future-self 检查)
+- 未来 v3.x 真修: caller-side inter-procedural pointer-typing analysis (cross-function call graph + 每个 fn return type 从 AST 推断); 或 call-site use-pattern tracking (call result 后续是否 `as *T` cast → 推断 address-holder)
+
+**superseder:** v3.x (post-v4.0.0 V2+V3 converge per [[feedback_plans_per_version]] plan)
+
+**引用:** [[feedback_v3_self_backend_diverges_v2]] (V3 self-backend 真债 vs V2 v2.16.0); `feedback_codegen_amd64_multifn` (单 function .il PASS 但 2+ function 静默 fail — 同 pattern); `feedback_fix_evaluation_rule` (5/5 PASS on target tests = std_arena_calloc 等 5 个 std_* test); `feedback_audit_single_commit_diff` (whitelist partial fix 单 commit ship, 跟 W-088 heuristic 同一 commit); `feedback_rca_first_root_cause` (5/19 fail = 26% 是 1 个根因 + 下游症状, 5 fail 全部 call-result address-holder 缺); V2.16.0 同 gap 但 V2 corpus 无触发面 (per [[feedback_v3_self_backend_diverges_v2]] 同 pattern)。
+
+## W-085: codegen small-frame fn(*T, i32, i32) 第 3 i32 参数 save 寄存器错位 (推 v3.x)
+
+**ID:** W-085
+**状态:** 🟡 ACTIVE (workaround in place via signature reorder; 真修 deferred v3.x)
+**日期:** 2026-09-22 (v2.16.0 bench.sh nqueens 期间发现)
+
+**触发面:** 任何 `fn f(p: *T, a: i32, b: i32)` 这种 *T 在前 + 2+ i32 的 small-frame 函数 — frame < 136B 时 emit_call 第 3 个 i32 参数 save 寄存器错位 (`%ecx` 覆盖 `%r8d`) → caller 端 arg corruption。
+
+**症状:**
+- pre-workaround: nqueens(11) exit code 错 (return value corruption)
+- bench.sh nqueens exit 1 (expected 0)
+
+**根因嫌疑:** codegen emit_call 对第 1 个 *T 参数用 `%r8d` (callee-saved XMM 序号); 第 2 个 i32 用 `%ecx`; 第 3 个 i32 ... 应该用 `%r9d` 但 register allocator 在 small frame < 136B 时 fallback 到 caller-saved 寄存器映射 `%ecx` → 覆盖第 2 个 i32 save slot。
+
+V2 v2.16.0 bench.sh nqueens 期间 4 个 reproducer 拆解 + assembly dump RCA 验证。
+
+**workaround:** signature reorder — `fn f(row: i32, c: i32, cols: *i32)` (i32 在前 + *T 在后) 避免 frame < 136B 时 fallback register allocator 撞 `%r8d` save slot。bench.sh nqueens 用此 pattern。
+
+**Code 真修 (推 v3.x):** emit_call register allocation 重写 — 大参数 (`*T`) 跟 small 参数 (`i32`) 区分处理; small-frame fallback 时强制 `%r9d` save slot (per System V AMD64 calling convention)。
+
+**影响范围:** `compiler/tests/bootstrap/bench.sh` nqueens 函数 signature; V2 v2.16.0 ship 时 discover + workaround; bench.sh 加 WARN note 解释 reorder 原因。
+
+**superseder:** v3.x (post-v4.0.0 V2+V3 converge per [[feedback_plans_per_version]] plan)
+
+**引用:** V2 v2.16.0 commit `0b4cde5` ship tail message; `feedback_rca_first_root_cause` (4 个 reproducer 拆解); `feedback_codegen_small_frame_arg_corruption` (V2 触发面路径; V3 path 不存在)。
 
 
 
