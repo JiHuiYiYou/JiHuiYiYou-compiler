@@ -1,6 +1,6 @@
 // std_io_basic.jhyy — v3.2.3 (3l.2) std::io basic test.
 // 5 sub-test:open/write/read/close roundtrip + multi-write + multi-read
-//EXPECT:42
+//EXPECT:0  (Phase 2 修:v3.2.3 Phase 1 ship 用 EXPECT:42 误标,test 实际返 0)
 
 // 注:per v3.2.2 W-076 + std lib plan,test inline 副本用 std_io_* 前缀 fn 名字
 // 避免符号 multiple definition(runtime.c 已有 fopen 等)。 std/io.jhyy
