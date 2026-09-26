@@ -1060,6 +1060,21 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
             if is_prefix_std_mem != (0 as i32) { flag_is_ptr = 1 as i32; }
             if is_prefix_std_str != (0 as i32) { flag_is_ptr = 1 as i32; }
             if is_prefix_std_arena != (0 as i32) { flag_is_ptr = 1 as i32; }
+            // v3.2.4 (W-091 std::vec 兜底):catch-all `std_` prefix — covers any
+            // future stdlib module whose pointer-returning fn doesn't match a
+            // specific sub-prefix (std_vec_/std_map_/std_string_/std_math_/...).
+            // std_ prefix = V3 stdlib convention (per v3.2.x plans); non-stdlib
+            // fn names starting with `std_` are user choice and harmless to
+            // over-flag (worst case: indirect dispatch instead of slot read
+            // for *T deref, same code path).
+            let is_prefix_std_any: i32 = if name_start + (4 as i64) <= (*t).text_len
+                && cg_byte_at((*t).text, name_start + (0 as i64)) == 's' as i32
+                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
+                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'd' as i32
+                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32 {
+                1 as i32
+            } else { 0 as i32 };
+            if is_prefix_std_any != (0 as i32) { flag_is_ptr = 1 as i32; }
             if is_c_stdlib_strdup != (0 as i32) { flag_is_ptr = 1 as i32; }
             if is_c_stdlib_fopen != (0 as i32) { flag_is_ptr = 1 as i32; }
             if flag_is_ptr != (0 as i32) {

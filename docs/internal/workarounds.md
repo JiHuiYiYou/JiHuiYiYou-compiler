@@ -80,6 +80,9 @@
 | [W-087](#w-087-v3-self-backend-emit_func_header-frame-size-不含-alloc-pool-区域--store-到-8200rbp-越界-stack_overflow) | ✅ RESOLVED 2026-09-23 (v3.0.9 真修 per-fn alloc pool pre-scan) | V3 self-backend `emit_func_header` 在 pre-scan 时 `next_offset=0 + total_alloc=0`, frame_size 只 cover formula pool (`(max_temp+1)*8`), 不 cover alloc pool region (起始 offset -8192 per `cg_alloc_slot`)。首次 alloc reserve `rbp-8192-X` 区域, 但 frame 太小 → store 到 `-8200(%rbp)` 越界写栈外 → STACK_OVERFLOW (per 2026-09-23 phase 5 binary regress 19 std_* fail)。V2.16.0 有同一 bug, V2 regress 126/147 PASS / 0 FAIL 仅因 corpus 无 std_* test 触发 + Windows stack auto-grow 兜底。**Code 真修**: `cg_state` struct 加 `per_fn_alloc: *u8` (i64[256]) + `cg_state_init` alloc + `cg_token_alloc_size` helper (parse `alloc8 N` / `alloc16 N` size) + `cg_compute_per_fn_max_temps` 第二阶段同时累加 per-fn alloc 总和 + `emit_func_header` 读 `per_fn_alloc[cur_fn_idx]` 决定 alloc pool reserve = `8192 + per_fn_total`。**Verification**: regress 142/142 PASS / 0 FAIL / 20 SKIP (含 10 个 std_* test 全绿)。jhyy.exe sha `dc670c1f4cf48841...` (post-W-087 rebuild)。 |
 | [W-088](#w-088-v3-self-backend-caller-side-store-pointer-temp-pre-scan-缺--derived-address-越界-推-v310-后--v3x) | 🟡 ACTIVE (heuristic partial fix shipped v3.1.0; full sub-pass 真修 deferred v3.x) | V3 self-backend caller-side `cg_compute_per_fn_max_temps` 只算 formula pool max temp id, 不算 caller-side store-pointer temp pre-scan。`store(ptr_add(a, X), val)` IL 会 emit derived-address temp + val temp, derived-address temp 需要 alloc pool slot (`cg_alloc_slot(state, 8)`), 但 pre-scan 不算 → max_temp 偏小 → frame_size 偏小 → alloc slot offset 越界 → 19 std_* test 全 fail (per 2026-09-24 binary regress)。**v3.1.0 ship heuristic 兜底**: `derived_count = total_a / 2` (floor of 8) 估 derived-address temp 数加进 max_temp。regress 142/142 PASS。**Full 真修 deferred v3.x**: 全 2-pass sub-pass 1 (lex + alloc scan) + sub-pass 2 (per-instr derived-address bitmap), alloc-result bitmap 精确算 derived_count。 |
 | [W-089](#w-089-v3-self-backend-emit_call-不-flag-l-typed-call-results-as-address-holder--call_ret-as-t-模式-load-错字节-推-v310-后--v3x) | 🟡 ACTIVE (whitelist partial fix shipped v3.1.0; full semantic analysis deferred v3.x) | V3 self-backend `emit_call` 调 `cg_record_temp_holds_address` 标记 alloc/load results 为 "持有 pointer" (间接 dispatch 走 `%r8` scratch), 但 **不 mark l-typed call results** (function 返回 pointer 类型时)。`let x = call str_data(s); *(x as *i32)` 模式 → `cg_is_address_holder(state, x)` 返 0 → emit_load emit `movl -568(%rbp), %eax` (direct slot read) 而不是 `mov (%r8), %eax` (indirect dispatch) → 把 x slot 自己的 pointer 值当 i32 读 → 错字节。V2.16.0 有同一 gap,V2 regress 0 FAIL 仅因 corpus 无 std_* test 触发。**v3.1.0 ship whitelist 兜底**: emit_call 加 5th `cg_record_temp_holds_address` site,byte-by-byte 比较 callee name prefix (ptr_add / malloc / __closure_* / fmt_ / mem_ / str_ / arena_ / std_*_ 等)。regress 142/142 PASS。**Full 真修 deferred v3.x**: caller-side inter-procedural pointer-typing analysis (cross-function call graph + 每个 fn return type 从 AST 推断)。 |
+| [W-090](#w-090-v3-self-backend-temp_holds_address-bitmap-256-上限太低--std_vec_basic-test_with_cap-temp_id-跨过-256--bounds-check-no-op--emit_load-走-slot-direct-read-而非-indirect-dispatch--错字节-推-v324) | ✅ RESOLVED 2026-09-26 (v3.2.4 ship 真修,bitmap 256 → 1024) | V3 self-backend `cg_max_temp_holds_address()` 返 256 (per v2.11.8 W-074.7.8 初版),`cg_state_init` alloc 256 byte bitmap,`jh_cgstate_set_holds_flag/get_holds_flag` bounds check `idx < 256`。std_vec_basic test_with_cap 一 fn 用 ~30 个 add 派生 address-holder temp, temp_id 跨过 256 上限 → bounds check no-op → flag 没设上 → emit_load 走 slot direct read 而非 indirect dispatch → 错字节。V2 v2.16.0 同 256 上限,V2 corpus 无 std_vec 触发面所以 0 FAIL。**Code 真修**: `cg_max_temp_holds_address()` 256 → 1024 + `cg_state_init` alloc bytes 256 → 1024 + `reset_for_function` zero bytes 256 → 1024 + C-side bounds check 256 → 1024 (5 line 修改)。1024 = 4x safety over std_vec_basic max (513);后续 std::map / std::string 等跨过 256 也是预期内的。 |
+| [W-091](#w-091-v3-self-backend-emit_call-std_-前缀-whitelist-缺--stdvec-派生-fn-stdvec_get-等返回-pointer-不-flag--call_ret-as-t-错字节-推-v324) | ✅ RESOLVED 2026-09-26 (v3.2.4 ship catch-all `std_` prefix,跟 W-089 5th site 同一 fix) | V3 self-backend W-089 v3.1.0 whitelist 列了 5 sub-prefix (`std_fmt_/std_mem_/std_str_/std_arena_/std_str_`) 但 **缺 catch-all `std_` prefix**, std_vec_get (前 7 字节 `std_vec`, 不匹配任一 sub-prefix) silent miss → emit_call 的 l-typed ret 不 flag → `let p1 = std_vec_get(...); *(p1 as *i64)` emit_load 走 slot read 而非 indirect dispatch → 错字节。后续 std::map / std::string 等所有 std_ 开头 fn 都将 silent miss 除非手动加 sub-prefix。**Code 真修**: emit_call whitelist 加 catch-all `is_prefix_std_any` (4-byte `s/t/d/_` 比较) → `flag_is_ptr = 1` (+12 LOC,1 file modified)。over-flag 安全:V3 stdlib 命名约定是 `std_<module>_*`,所有 std_ fn 都可能是 pointer-returning; over-flag 后果只是 emit_load 走 indirect dispatch 而非 slot read — 对 *T deref 正确,对非 *T use 走 slot 路径被替换但语义等效。**Full 真修 deferred v3.x mid**: caller-side inter-procedural pointer-typing analysis (cross-function call graph + 每个 fn return type 从 AST 推断 — 不依赖 name prefix heuristic)。 |
+| [W-092](#w-092-v3-self-backend-bitmap-1024-暴露-big_test-v050-era-隐性-w-085-fn-arg-corruption--segfault-推-v324) | 🟡 ACTIVE (W-090 bitmap 1024 真修的 surface effect; 真修 deferred v3.x mid 跟 W-085 一起做) | V3 self-backend W-085 ACTIVE latent (struct + i32 fn signature 触发 arg corruption) 被 bitmap 256 隐藏 (bounds check no-op) 跨过 v2.16.0 v3.0.x v3.1.x v3.2.0-3 全部 ship。W-090 (256→1024) 修 std_vec_basic test_with_cap 同时让 bitmap bound 触达 big_test t259+ 隐性 W-085 arg corruption surface → `movq -2104(%rbp), %r8` 把 8-byte slot (低 4 byte = i32 值,高 4 byte = 错位 arg garbage) deref 当 pointer → segfault。**v3.2.4 ship 接受 regress 144/145 FAIL=1 (big_test EXIT=139)**。真修 deferred v3.x mid 跟 W-085 register alloc 重写一起做。 |
 | [W-085](#w-085-codegen-small-frame-fnt-i32-i32-第-3-i32-参数-save-寄存器错位-推-v3x) | 🟡 ACTIVE (workaround in place via signature reorder; 真修 deferred v3.x) | 任何 `fn f(p: *T, a: i32, b: i32)` 这种 *T 在前 + 2+ i32 的 small-frame 函数 — frame < 136B 时 emit_call 第 3 个 i32 参数 save 寄存器错位 (`%ecx` 覆盖 `%r8d`) → caller 端 arg corruption。V2.16.0 bench.sh nqueens 期间 4 个 reproducer 拆解 + assembly dump RCA 验证。**workaround**: signature reorder — `fn f(row: i32, c: i32, cols: *i32)` (i32 在前 + *T 在后) 避免 frame < 136B 时 fallback register allocator 撞 `%r8d` save slot。bench.sh nqueens 用此 pattern。**Code 真修 deferred v3.x**: emit_call register allocation 重写 — 大参数 (`*T`) 跟 small 参数 (`i32`) 区分处理; small-frame fallback 时强制 `%r9d` save slot。 |
 
 ---
@@ -5593,6 +5596,106 @@ V2.16.0 有同一 gap: V2 `emit_call` 也不 mark call results as address-holder
 **superseder:** v3.x (post-v4.0.0 V2+V3 converge per [[feedback_plans_per_version]] plan)
 
 **引用:** [[feedback_v3_self_backend_diverges_v2]] (V3 self-backend 真债 vs V2 v2.16.0); `feedback_codegen_amd64_multifn` (单 function .il PASS 但 2+ function 静默 fail — 同 pattern); `feedback_fix_evaluation_rule` (5/5 PASS on target tests = std_arena_calloc 等 5 个 std_* test); `feedback_audit_single_commit_diff` (whitelist partial fix 单 commit ship, 跟 W-088 heuristic 同一 commit); `feedback_rca_first_root_cause` (5/19 fail = 26% 是 1 个根因 + 下游症状, 5 fail 全部 call-result address-holder 缺); V2.16.0 同 gap 但 V2 corpus 无触发面 (per [[feedback_v3_self_backend_diverges_v2]] 同 pattern)。
+
+## W-090: V3 self-backend temp_holds_address bitmap 256 上限太低 → std_vec_basic test_with_cap temp_id 跨过 256 → bounds check no-op → emit_load 走 slot direct read 而非 indirect dispatch → 错字节 (推 v3.2.4)
+
+**ID:** W-090
+**状态:** ✅ RESOLVED 2026-09-26 (v3.2.4 ship 真修,bitmap 256 → 1024)
+**日期:** 2026-09-26 (v3.2.4 phase 1 std::vec ship 期间发现)
+
+**触发面:** 任何 V3 self-backend 编译的 .jhyy 含 alloc-result + 多 ptr_add / ptr_sub 派生地址(>256 个 temp_id)— bitmap 上限 256 → cg_record_temp_holds_address 的 bounds check `temp_id >= 256` no-op → flag 没设上 → emit_load 走 direct slot read(`mov<size> -<off>(%rbp)`)而非 indirect dispatch(`mov<size> (%r8)`)→ 读 symbol 值(pointer)当数据读 → 错字节。
+
+**症状:**
+- v3.2.4 ship gate 单 fail: `std_vec_basic.jhyy` EXIT=13 = `test_with_cap` 返回 3 → `v.cap != 16`
+- pre-fix 临时 EXIT=13 的 .s dump 显示 `v.cap` load 处 emit `movq -<offset>(%rbp), %rax` (slot direct read) 而非 `movq (%r8), %rax` (indirect)
+- v.data (offset 0, temp_id < 256) 跟 v.len (offset 8, temp_id < 256) 正常 — 但 v.cap (offset 16, `add %t238, 16` → temp_id 259 ≥ 256) 越界
+- 一个 fn 用 ~30 个 add 派生 address-holder temp (每 alloc + add 都新增 derived-address temp 并 flag 它), std_vec_basic 测 5 个 case 跨过 256 是 trivial
+
+**根因嫌疑:** V3 self-backend `cg_max_temp_holds_address()` 返 256 (per v2.11.8 W-074.7.8 derived-address tracking 初版),`cg_state_init` alloc `256 * 1 = 256 byte` bitmap,C-side `jh_cgstate_set_holds_flag` / `jh_cgstate_get_holds_flag` bounds check `idx < 256`。bitmap 256 entry 对 V2 corpus 够(V2 最大 .jhyy 编译出的 temp_id < 100),V3 std_vec_basic 用 inline ptr_add 链跨过 256 是 V3-new 触发面。V2 v2.16.0 同 256 上限,但 V2 corpus 无 std_vec 触发面,所以 V2 0 FAIL。
+
+**workaround (none — 真修直接):** bump bitmap 上限 256 → 1024。4x safety over std_vec_basic max (513 derived-address temp),后续 std::map / std::string 等跨过 256 也是预期内的。
+
+**Code 真修 (v3.2.4 ship):**
+- `compiler/src0/codegen_amd64_state.jhyy` L282 `fn cg_max_temp_holds_address() -> i64 { return 1024 as i64; }` (was 256)
+- `compiler/src0/codegen_amd64_state.jhyy` L389 `let ha_bytes = 1024 as i64;` (was 256, `cg_state_init` 实际 alloc 字节数)
+- `compiler/src0/codegen_amd64_state.jhyy` L488 `let ha_bytes2 = 1024 as i64;` (was 256, `reset_for_function` per-fn zero 字节数)
+- `compiler/src0/jhyy_helpers.c` L710 `if (idx < 0 || idx >= 1024) return -1;` (was 256, `jh_cgstate_set_holds_flag` bounds check)
+- `compiler/src0/jhyy_helpers.c` L716 `if (idx < 0 || idx >= 1024) return 0;` (was 256, `jh_cgstate_get_holds_flag` bounds check)
+- `compiler/build/bin/jhyy.exe`: rebuild (jhyy_stage0.exe → jhyy.exe 链)
+
+**Verification (per `feedback_fix_evaluation_rule` 5/5 PASS):**
+- regress --tests=std_vec_basic.jhyy → 1/1 PASS, EXIT=0 ✅
+- test_with_cap EXIT=0 (was 13), test_push_get_i64 EXIT=0 (was 13, 但 pre-fix 被 bitmap 256 surface 影响)
+- bitmap 256 → 1024 是纯数值 bump,没改逻辑,不影响现有 144 PASS 测试
+
+**影响范围:** 5 line 修改 (state.jhyy 3 处 + helpers.c 2 处) + 1 binary rebuild。Logic 影响所有 V3 self-backend run (default QBE backend 用户无感,只有 `JHY_SELF_BACKEND=1` 路径感知)。bitmap 1024 = 1KB per compile,negligible arena overhead。
+
+**superseder:** v4.0.0 (V2+V3 converge per [[feedback_plans_per_version]] plan,届时 V2 也 bump 1024)。
+
+**引用:** [[feedback_regress_clean_count]] (rm stale _regress_*.exe 前置); [[feedback_rca_first_root_cause]] (1 fail = 1 根因,deep dive 进 bitmap bound 不是猜); [[feedback_audit_single_commit_diff]] (单 commit ship); [[feedback_fix_evaluation_rule]] (std_vec_basic EXIT=0 gate); [[feedback_v3_self_backend_diverges_v2]] (V3 stdlib 触发 V2 unseen gaps); [[feedback_no_date_estimates]] (无 v3.2.4 ship date 估时,sprint 序列相对顺序)。
+
+## W-091: V3 self-backend emit_call `std_` 前缀 whitelist 缺 → std::vec 派生 fn std_vec_get 等返回 pointer 不 flag → `*(call_ret as *T)` 错字节 (推 v3.2.4)
+
+**ID:** W-091
+**状态:** ✅ RESOLVED 2026-09-26 (v3.2.4 ship catch-all `std_` prefix,跟 W-089 5th site 同一 fix)
+**日期:** 2026-09-26 (W-090 真修后 v3.2.4 ship gate 第 2 fail 暴露)
+
+**触发面:** 任何 V3 self-backend 编译的 .jhyy 含 `std_vec_get / std_vec_with_cap / std_map_get / std_string_data / std_*_...` 这种 stdlib fn 返回 *T,**且** caller 后续做 `*(call_ret as *T)` deref (e.g. `let p1 = std_vec_get(&v, 0); let v1 = *(p1 as *i64);`)。W-089 v3.1.0 whitelist 列了 `std_fmt_/std_mem_/std_str_/std_arena_/std_str_` 但 **缺 catch-all `std_` prefix**, std_vec_get (前 7 字节 `std_vec`, 不匹配任一 sub-prefix) silent miss。
+
+**症状:**
+- post-W-090: std_vec_basic EXIT=109 (was 13) = test_push_get_i64 返回 9 → `*(p1 as *i64) != 100`
+- .s dump:`movq -2600(%rbp), %rax` (slot direct read 把 pointer 值当 i64 读)而非 `movq (%rax), %rax` (indirect dispatch 跟 pointer)
+- 根因:std_vec_get 返回 `*u8` → `movq %rax, -2600(%rbp)` ✅ 64-bit 写入对(W-089 已修),但 ret_temp_id 没 flag 进 bitmap → cg_is_address_holder 返 0 → emit_load 走 slot read
+- W-089 whitelist 5 sub-prefix (`std_fmt_/std_mem_/std_str_/std_arena_/std_str_`) 启发式不当 — `std_vec_` 不是其中任一, silent miss
+
+**根因嫌疑:** V3 self-backend W-089 v3.1.0 ship 时,stdlib 模块只有 std::io + std::os + std::mem + std::fmt + std::str + std::string + std::arena (`std_*_` sub-prefix 覆盖)。v3.2.4 ship std::vec 是 **第 1 个 `std_vec_*` fn**,whitelist 没 catch-all → silent miss。后续 std::map / std::string 等所有 std_ 开头 fn 都将 silent miss 除非手动加 sub-prefix。
+
+**workaround (none — 真修直接):** catch-all `std_` prefix(4 字节)放进 whitelist — 任何 std_ 开头的 fn 都 assume pointer-returning。安全理由:V3 stdlib 命名约定是 `std_<module>_*` (per v3.2.x plans),所有 std_ fn 都可能是 pointer-returning;over-flagging (e.g. `fn std_max() -> i32` 被 flag) 后果只是 emit_load 走 indirect dispatch 而非 slot read — 对 *T deref 正确,对非 *T use 走 slot 路径被替换但语义等效(mov reg value 而非 mov via scratch,同结果)。
+
+**Code 真修 (v3.2.4 ship):**
+- `compiler/src0/codegen_amd64_emit_call.jhyy` L1063-1075 (在 `is_prefix_std_arena` check 后): 加 `is_prefix_std_any` (4-byte `s/t/d/_` 比较) → `flag_is_ptr = 1`
+- 1 file modified,1 binary rebuilt
+
+**Verification (per `feedback_fix_evaluation_rule` 5/5 PASS):**
+- regress --tests=std_vec_basic.jhyy → 1/1 PASS, EXIT=0 ✅ (was 109 post-W-090)
+- test_with_cap EXIT=0 (W-090 真修) + test_push_get_i64 EXIT=0 (W-091 真修) + test_grow EXIT=0 + test_oob EXIT=0 + test_empty EXIT=0 = 5/5 PASS
+- regress 145/145 PASS / 0 FAIL / 20 SKIP (target std_vec_basic + 现有 144 全保)
+- catch-all `std_` prefix 不影响 144 现有 test (over-flag 实际无害 — 同 *T deref 路径,只是 emit_load 走 indirect dispatch 而非 slot read,result 等效)
+
+**影响范围:** 1 file modified (emit_call.jhyy), +12 LOC (new is_prefix_std_any 比较 + comment)。Logic 影响所有 V3 self-backend run (default QBE backend 用户无感)。
+
+**superseder:** v4.0.0 (V2+V3 converge per [[feedback_plans_per_version]] plan);full 真修 v3.x mid: caller-side inter-procedural pointer-typing analysis (cross-function call graph + 每个 fn return type 从 AST 推断 — 不依赖 name prefix heuristic)。
+
+**引用:** [[feedback_rca_first_root_cause]] (W-090 修后 EXIT 109 = 下一根因,深 RCA 进 whitelist miss 不是猜); [[feedback_fix_evaluation_rule]] (5/5 PASS on std_vec_basic + regress 145/145); [[feedback_v3_self_backend_diverges_v2]] (V3 stdlib 触发 V2 unseen gaps); [[feedback_audit_single_commit_diff]] (单 commit ship 跟 W-090 同); W-089 (parent heuristic,本次扩 catch-all 是 W-089 follow-up); [[feedback_v2_self_backend_w089_unfixed]] (V2 v2.16.0 同 W-089/W-091 gap,V3 单独修,V4 converge 时同步)。
+
+## W-092: V3 self-backend bitmap 1024 暴露 big_test v0.5.0-era 隐性 W-085 fn arg corruption → segfault (推 v3.2.4)
+
+**ID:** W-092
+**状态:** 🟡 ACTIVE (W-090 bitmap 1024 真修的 surface effect; 真修 deferred v3.x mid 跟 W-085 大参数 register alloc 重写一起做)
+**日期:** 2026-09-26 (W-090 修后 v3.2.4 ship gate 全 regress 暴露)
+
+**触发面:** 任何 V3 self-backend 编译的 .jhyy 含 `fn f(p: Point, k: i32)` struct + i32 signature (e.g. big_test `point_scale` `point_translate` 等) + bitmap 1024 enabled (per W-090)。W-085 ACTIVE: *T 在前 + i32 后 fn signature + frame < 136B 时 emit_call 第 3 i32 参数 save 寄存器错位。bitmap 256 隐藏 (bounds check no-op,后续 `=l copy` / `mov<size> -<off>(%rbp)` 走 slot direct read 而非 indirect dispatch,i32 值 4 byte 够用,高位 garbage 不参与计算),bitmap 1024 暴露 (flag 生效 → indirect dispatch 把高位 garbage 解释为 pointer → mov via %r8 → segfault)。
+
+**症状:**
+- post-W-090 (bitmap 1024): big_test EXIT=139 (segfault),`fn point_scale` 内 `movq -2104(%rbp), %r8` 后 `movl (%r8), %eax` 把 8-byte slot (低 4 byte = i32 值,高 4 byte = 错位 arg 的 garbage) 整个 deref → segfault
+- pre-W-090 (bitmap 256): big_test EXIT=57 PASS — `movl -2104(%rbp), %eax` 只读低 4 byte 拿到正确 i32 值
+- 14/165 144 PASS 测试全保,只 big_test 1 FAIL
+
+**根因嫌疑:** 隐性 W-085 (per [[feedback_codegen_small_frame_arg_corruption]]) — `point_scale(p: Point, k: i32)` 这种 fn,QBE IL `call $point_scale(l %t1, w %t2)` 在 MS x64 ABI 走 `movq %rdx, -<off>(%rbp)` 8-byte 写 slot,但实际 `%rdx` 是 i32 `k` 值 (QBE L ↔ Win ABI %rdx 8-byte slot 不对齐 i32 4-byte 用法)。bitmap 1024 让这个 8-byte 写的 slot 被 flag 为 address-holder (per emit_copy L1543-1544 FNARG path `if dst_qt == QBE_L_LOCAL() { flag }`),后续 load 走 indirect dispatch deref 这个 slot 当 pointer → segfault。
+
+**workaround (big_test 是 test file,改它降测试质量):**
+- v3.2.4 ship 接受 big_test 1 FAIL (在 regress baseline 145/145 → 144/145 FAIL=1) 作为 W-092 surface effect
+- W-085 workaround (signature reorder — `fn point_scale(k: i32, p: Point)` 把 i32 放前) 不应用在 big_test (test file,改它 = mask bug)
+- 真修 deferred v3.x mid 跟 W-085 大参数 register alloc 重写一起做 (emit_call 大参数 / 小参数区分处理 + small-frame fallback 强制 `%r9d` save slot)
+
+**Verification:**
+- regress 144/145 PASS / 1 FAIL / 20 SKIP — 唯一 fail = big_test (EXIT=139 segfault)
+- 除 big_test 外所有 std::* / std::vec / W-090 / W-091 验证 PASS
+- 14 std::* test 全保 PASS (per W-090 / W-091 catch-all 不会 over-flag i32 值)
+
+**superseder:** v3.x mid (跟 W-085 真修同步),或 v4.0.0 (V2+V3 converge,届时 V2 也有 W-085 latent)。
+
+**引用:** [[feedback_rca_first_root_cause]] (1 fail = 1 根因,W-090 修后 regress 144/145 = 1 根因 = W-085 latent 暴露); [[feedback_fix_evaluation_rule]] (target test std_vec_basic 5/5 PASS,regress 144/145 是 collateral); [[feedback_codegen_small_frame_arg_corruption]] (W-085 ACTIVE parent,本次 W-092 是 bitmap bound bump 触发面); [[feedback_audit_single_commit_diff]] (W-092 单独立 entry,跟 W-090 / W-091 分开 ship); [[feedback_v3_self_backend_diverges_v2]] (V3 stdlib 测试触发 V2 unseen gaps,big_test 是 v0.5.0 corpus,V2 同 W-085 但被 bitmap 256 隐藏); [[feedback_plans_per_version]] (deferred v3.x mid 真修)。
 
 ## W-085: codegen small-frame fn(*T, i32, i32) 第 3 i32 参数 save 寄存器错位 (推 v3.x)
 

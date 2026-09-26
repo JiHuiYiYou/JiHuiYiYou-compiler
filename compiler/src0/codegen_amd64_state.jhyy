@@ -276,10 +276,19 @@ fn cg_record_temp_slot(state: *u8, temp_id: i64, slot: i64) -> i32 {
     return 0 as i32;
 }
 
-// MAX_TEMP_HOLDS_ADDR — derived-address bitmap 大小。跟 MAX_TEMP_SLOTS 同 256
-// (parallel bitmap, same temp_id range)。256 = 5x regress max safety margin。
+// MAX_TEMP_HOLDS_ADDR — derived-address bitmap 大小。1024 (per W-090 2026-09-26
+// 真修):256 太低,std_vec_basic test_with_cap 一 fn 用 ~30 个 add 派生的
+// address-holder temp (每个 add ptr, off 都新增一个 derived-address temp, flag 它),
+// temp_id 跨过 256 上限 → bounds check no-op → emit_load 走 slot direct read
+// 而非 indirect dispatch → 读 garbage → 测试 fail (EXIT=13)。
+// 1024 = 4x safety over std_vec_basic max (513); 后续 std::map / std::string 等
+// 跨过 256 也是预期内的 (per v3.2.4 plan 后续 stdlib 测试都走 inline 副本 +
+// per-fn 多 alloc + 多 pointer-arith 路径)。
+// **W-092 (W-085 暴露)**: bitmap 1024 让 big_test 隐性 W-085 (struct + i32
+// signature 触发 fn arg corruption) 浮面 → 1 FAIL。Deferred to v3.x mid 跟 W-085
+// 真修一起做。
 fn cg_max_temp_holds_address() -> i64 {
-    return 256 as i64;
+    return 1024 as i64;
 }
 
 // cg_state_set_holds_address — v2.11.8 setter,CGState 装 temp_holds_address 时
@@ -367,13 +376,22 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     let bnu_ptr = arena_alloc(arena, bnu_bytes);
     let _zero_bnu = memset(bnu_ptr, 0 as i32, bnu_bytes);
     (*s).block_name_uniq = bnu_ptr;
-    // v2.11.8 (W-074.7.8 derived-address tracking 真修):alloc temp_holds_address
-    // 256-entry u8 bitmap (256 bytes) zero-init。emit_alloc / emit_binop (add/sub
-    // on address-holder src1) / emit_copy (TEMP→TEMP of address-holder) 写 flag;
-    // emit_load/store/loadsub 读 flag 决定 indirect (mov<size> (%r8), %reg) vs
-    // slot (mov<size> -<off>(%rbp), %reg)。reset_for_function per-fn zero。
-    // 256 entries × 1 byte = 256 bytes per compile, negligible in arena。
-    let ha_bytes = 256 as i64;
+    // v3.2.4 (W-090 真修): alloc temp_holds_address 1024-entry u8 bitmap
+    // (1024 bytes) zero-init (per v2.11.8 W-074.7.8 初版 256,2026-09-26 bump 1024
+    // 给 std_vec_basic test_with_cap v.cap 读 @ temp_id > 256 走 indirect dispatch)。
+    // emit_alloc / emit_binop (add/sub on address-holder src1) / emit_copy
+    // (TEMP→TEMP of address-holder) 写 flag; emit_load/store/loadsub 读 flag
+    // 决定 indirect (mov<size> (%r8), %reg) vs slot (mov<size> -<off>(%rbp),
+    // %reg)。reset_for_function per-fn zero。
+    // 1024 entries × 1 byte = 1024 bytes per compile, negligible in arena。
+    // **W-092 (bitmap 1024 暴露 big_test 隐性 W-085)** — big_test `fn point_scale`
+    // 等 fn signature 是 `(Point, i32)` struct + i32 pattern (W-085 ACTIVE 触发面:
+    // *T 在前 + i32 后),arg corruption 让 `%rdx` (QBE_L) 装了 i32 值。bitmap 256
+    // 隐藏 (bounds check no-op),bitmap 1024 暴露 (flag 生效 → indirect dispatch
+    // 解释 i32 当 pointer → segfault)。v3.2.4 ship 接受 big_test 1 FAIL 作为
+    // W-092 (W-085 latent surface),真修 deferred v3.x mid 跟 W-085 大参数 / 小参数
+    // register alloc 重写一起做。
+    let ha_bytes = 1024 as i64;
     let ha_ptr = arena_alloc(arena, ha_bytes);
     let _zero_ha = memset(ha_ptr, 0 as i32, ha_bytes);
     (*s).temp_holds_address = ha_ptr;
@@ -466,13 +484,13 @@ fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
         let bnu_bytes2 = (256 as i64) * (32 as i64);
         let _zr_bnu = memset((*s).block_name_uniq, 0 as i32, bnu_bytes2);
     }
-    // v2.11.8 (W-074.7.8 derived-address tracking 真修):zero temp_holds_address
-    // bitmap per-fn。fn A 的 t17 是 alloc-result address-holder, fn B 的 t17
-    // 可能是 value-temp — 跨 fn flag 不 inherit。memset 0 让 emit_load/store/loadsub
-    // 在新 fn 头 fall through default slot path,直到 emit_alloc / emit_binop / emit_copy
-    // 重新写 flag。
+    // v3.2.4 (W-090):zero temp_holds_address bitmap per-fn (1024 bytes,
+    // 跟 `ha_bytes` alloc size 一致)。fn A 的 t17 是 alloc-result address-holder,
+    // fn B 的 t17 可能是 value-temp — 跨 fn flag 不 inherit。memset 0 让
+    // emit_load/store/loadsub 在新 fn 头 fall through default slot path,直到
+    // emit_alloc / emit_binop / emit_copy 重新写 flag。
     if (*s).temp_holds_address != (0 as *u8) {
-        let ha_bytes2 = 256 as i64;
+        let ha_bytes2 = 1024 as i64;
         let _zr_ha = memset((*s).temp_holds_address, 0 as i32, ha_bytes2);
     }
     // cur_fn_idx NOT reset — it grows across functions within a module

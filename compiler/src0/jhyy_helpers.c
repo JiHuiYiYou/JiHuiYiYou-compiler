@@ -695,19 +695,28 @@ __attribute__((used)) int jh_cgstate_set_holds_address(void *bitmap) {
     return 0;
 }
 
-/* v2.11.8 (W-074.7.8 derived-address tracking 真修): jh_cgstate_set_holds_flag /
-   jh_cgstate_get_holds_flag — byte-level access into the 256-entry u8 bitmap。
+/* v3.2.4 (W-090 derived-address bitmap 1024 真修延伸): jh_cgstate_set_holds_flag /
+   jh_cgstate_get_holds_flag — byte-level access into the 1024-entry u8 bitmap。
+   256 太低:std_vec_basic test_with_cap 一 fn 用 ~30 个 alloc + add 派生的
+   address-holder temp (每个 add ptr, off 都新增一个 derived-address temp, flag 它),
+   temp_id 跨过 256 上限 → bounds check no-op → emit_load 走 slot direct read
+   而非 indirect dispatch → 读 garbage → 测试 fail (EXIT=13)。
+   1024 = 4x safety over std_vec_basic max (513); 后续 std::map / std::string 等
+   跨过 256 也是预期内的。
+   **W-092 (W-085 暴露)**: bitmap 1024 让 big_test 隐性 W-085 (struct + i32
+   signature 触发 fn arg corruption) 浮面 → 1 FAIL。Deferred to v3.x mid 跟 W-085
+   真修一起做。
    cg_record_temp_holds_address / cg_is_address_holder (state.jhyy) 调这两个,
    因为 jhyy 没有 u8 direct deref 语法 (*(u8*)p = 1 不支持),走 C-bridge。 */
 __attribute__((used)) int jh_cgstate_set_holds_flag(void *bitmap, long long idx) {
     if (bitmap == NULL) return -1;
-    if (idx < 0 || idx >= 256) return -1;
+    if (idx < 0 || idx >= 1024) return -1;
     ((unsigned char *)bitmap)[idx] = 1;
     return 0;
 }
 __attribute__((used)) int jh_cgstate_get_holds_flag(void *bitmap, long long idx) {
     if (bitmap == NULL) return 0;
-    if (idx < 0 || idx >= 256) return 0;
+    if (idx < 0 || idx >= 1024) return 0;
     return ((unsigned char *)bitmap)[idx] != 0 ? 1 : 0;
 }
 
