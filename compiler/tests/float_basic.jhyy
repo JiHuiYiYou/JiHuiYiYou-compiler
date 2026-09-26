@@ -1,0 +1,37 @@
+// v3.3.0 Phase 1: float literal + simple assignment baseline test.
+// Validates f32/f64 lexer + types table plumbing without arithmetic (Phase 2).
+//
+// 5/5 PASS gate (per feedback_fix_evaluation_rule):
+//   [1/5] f64 default literal (no suffix)        — expects type f64
+//   [2/5] f64 explicit f64 suffix                — redundant but accepted
+//   [3/5] f32 explicit f32 suffix                — narrow primitive
+//   [4/5] f64 large literal (decimal form)       — lexer edge case
+//   [5/5] explicit f32 → f64 widen (sema strict, no auto-promote)
+//
+// NOTE: exponent form (`1.0e3`) NOT supported by current lexer (Phase 1 lexer
+// edit added e/E scan but rebuild deferred to Phase 5+).
+// NOTE: implicit f32→f64 NOT auto-promoted (per current sema strict rules).
+//
+// Verification: return EXIT=0 (all 5 literals lexed + parsed + sema-typed OK).
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    // [1/5] default float literal → f64
+    let a: f64 = 3.14;
+    // [2/5] explicit f64 suffix (redundant, accepted)
+    let b: f64 = 2.5f64;
+    // [3/5] explicit f32 suffix → narrow
+    let c: f32 = 1.5f32;
+    // [4/5] large literal (simple form) → f64
+    let d: f64 = 1000.0;
+    // [5/5] explicit f32 → f64 widen (sema does NOT auto-promote across fn paths)
+    let e: f64 = c as f64;
+
+    // Sum check: (3.14 + 2.5) + 1.5 + 1000.0 + 1.5 = 1008.64
+    // Cast to i32 truncates to 1008
+    let s: f64 = a + b + (c as f64) + d + e;
+    let n: i32 = s as i32;
+    printf("float_basic: %d\n", n);
+    return 0;
+}
