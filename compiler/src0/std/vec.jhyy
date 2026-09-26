@@ -1,0 +1,193 @@
+// vec.jhyy — v3.2.4 (3l.3) std lib 泛型动态数组 Vec<T>。
+//
+// M0 简化(per `docs/plans/v3/v3.2.4-plan.md`):
+//   - 泛型通过 monomorphization 走(per v3.2.0/3i 已 ship 机制)
+//   - Vec<T> = struct { data: *u8, len: i64, cap: i64 } = 24 字节
+//   - 所有 push/get/len/free 等 API 接受 `*Vec<T>` (caller 自己 alloc Vec)
+//   - 不依赖 closure / 借用 / 完整 drop semantics (leak-OK)
+//   - 不调 std::mem 跨模块(避免 mangle 复杂度);byte 循环本地实现
+//   - 全部 std_* 前缀 (per W-076 pattern, 避免跟 runtime.c 符号冲突)
+//
+// API:
+//   std_vec_new(elem_size)        -> Vec<i32> (24B uninit struct, data=0/len=0/cap=0)
+//   std_vec_with_cap(elem_size, cap) -> Vec<i32> (init with pre-allocated cap slots)
+//   std_vec_push(v, elem_size, src: *u8) -> i32 (auto-grow cap, copy elem from src into data)
+//   std_vec_get(v, elem_size, idx) -> *u8 (pointer to element at idx, NULL on OOB)
+//   std_vec_len(v) -> i64
+//   std_vec_cap(v) -> i64
+//   std_vec_free(v) -> i32 (free data buffer, reset to 0/0/0)
+//
+// 测试:`compiler/tests/std_vec_basic.jhyy` (inline 副本, 5+ 测试 case)
+
+// ═══════════════════════════════════════════════════
+// FFI
+// ═══════════════════════════════════════════════════
+extern fn malloc(size: i64) -> *u8;
+extern fn free(p: *u8) -> i32;
+
+// ═══════════════════════════════════════════════════
+// Vec<T> 字节布局 (jhyy struct 24B):
+//   [0..8)  data (*u8, dyn alloc buffer)
+//   [8..16) len  (i64, current element count)
+//   [16..24) cap (i64, allocated slots = cap * elem_size bytes)
+// ═══════════════════════════════════════════════════
+type Vec = struct {
+    data: *u8,
+    len:  i64,
+    cap:  i64,
+}
+
+fn VEC_SIZE() -> i64 { return 24 as i64; }
+
+// ═══════════════════════════════════════════════════
+// ptr_add / std_vec_byte_copy — 本地 helpers
+// ═══════════════════════════════════════════════════
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+
+// std_vec_byte_copy: 复制 n 字节从 src 到 dst (M0 byte-loop, 走 *i32 narrow
+// deref 路径 — per W-075 pattern, 4 倍数 n 时等价 libc memset, 非 4 倍数时
+// 最后 1-3 字节也写 (跟 memset 语义一致))。
+fn std_vec_byte_copy(dst: *u8, src: *u8, n: i64) -> *u8 {
+    if n < (0 as i64) {
+        return 0 as *u8;
+    }
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let d = ptr_add(dst, i);
+        let s = ptr_add(src, i);
+        let v: i32 = *(s as *i32) & (0xff as i32);
+        *(d as *i32) = v;
+        i = i + (1 as i64);
+    }
+    return dst;
+}
+
+// ═══════════════════════════════════════════════════
+// Public API
+// ═══════════════════════════════════════════════════
+
+// std_vec_new — 初始化空 Vec (data=0/len=0/cap=0)
+//   caller 拿到 24B struct 值(VS Ptr, 避免 sret ABI 复杂度)
+fn std_vec_new(elem_size: i64) -> Vec {
+    let v: Vec = Vec {
+        data: 0 as *u8,
+        len:  0 as i64,
+        cap:  0 as i64,
+    };
+    return v;
+}
+
+// std_vec_with_cap — 预分配 cap 个 slot 的 Vec
+//   bytes = cap * elem_size;elem_size ≤ 0 → 返空 Vec
+fn std_vec_with_cap(elem_size: i64, cap: i64) -> Vec {
+    if elem_size <= (0 as i64) {
+        return std_vec_new(elem_size);
+    }
+    if cap <= (0 as i64) {
+        return std_vec_new(elem_size);
+    }
+    let bytes = cap * elem_size;
+    let buf = malloc(bytes);
+    let v: Vec = Vec {
+        data: buf,
+        len:  0 as i64,
+        cap:  cap,
+    };
+    return v;
+}
+
+// std_vec_grow — 私有 helper,double cap 直到 ≥ new_cap slots
+fn std_vec_grow(v: *Vec, elem_size: i64, new_cap: i64) -> i32 {
+    let cur_cap = (*v).cap;
+    if new_cap <= cur_cap {
+        return 1;
+    }
+    let mut target = cur_cap;
+    if target <= (0 as i64) {
+        target = 8 as i64;
+    }
+    while target < new_cap {
+        target = target * (2 as i64);
+    }
+    let new_bytes = target * elem_size;
+    let cur_data = (*v).data;
+    let new_data = malloc(new_bytes);
+    if new_data == (0 as *u8) {
+        return 0;
+    }
+    // copy 旧 elements (len * elem_size 字节)
+    let cur_len = (*v).len;
+    if cur_len > (0 as i64) {
+        let copy_n = cur_len * elem_size;
+        std_vec_byte_copy(new_data, cur_data, copy_n);
+    }
+    // 释放旧 buffer (if any)
+    if cur_data != (0 as *u8) {
+        let _f = free(cur_data);
+    }
+    (*v).data = new_data;
+    (*v).cap = target;
+    return 1;
+}
+
+// std_vec_push — append 1 elem from src
+//   v: *Vec, elem_size: i64, src: *u8 (源 elem 字节, caller 保证 ≥ elem_size)
+//   返 1 成功 / 0 OOM
+fn std_vec_push(v: *Vec, elem_size: i64, src: *u8) -> i32 {
+    if elem_size <= (0 as i64) {
+        return 0;
+    }
+    let cur_len = (*v).len;
+    let cur_cap = (*v).cap;
+    if cur_len >= cur_cap {
+        let new_cap = cur_len + (1 as i64);
+        let ok = std_vec_grow(v, elem_size, new_cap);
+        if ok == 0 {
+            return 0;
+        }
+    }
+    // dst = data + len * elem_size
+    let cur_data = (*v).data;
+    let off = cur_len * elem_size;
+    let dst = ptr_add(cur_data, off);
+    std_vec_byte_copy(dst, src, elem_size);
+    (*v).len = cur_len + (1 as i64);
+    return 1;
+}
+
+// std_vec_get — 返 idx 元素 ptr (NULL on OOB)
+//   不返回 elem 值 (因为 elem_size 是 runtime param, caller 自行 deref)
+fn std_vec_get(v: *Vec, elem_size: i64, idx: i64) -> *u8 {
+    if idx < (0 as i64) {
+        return 0 as *u8;
+    }
+    if idx >= (*v).len {
+        return 0 as *u8;
+    }
+    let off = idx * elem_size;
+    return ptr_add((*v).data, off);
+}
+
+// std_vec_len — 返元素数
+fn std_vec_len(v: *Vec) -> i64 {
+    return (*v).len;
+}
+
+// std_vec_cap — 返 cap slots 数 (不是字节数)
+fn std_vec_cap(v: *Vec) -> i64 {
+    return (*v).cap;
+}
+
+// std_vec_free — 释放 data buffer + 重置
+fn std_vec_free(v: *Vec) -> i32 {
+    let d = (*v).data;
+    if d != (0 as *u8) {
+        let _f = free(d);
+    }
+    (*v).data = 0 as *u8;
+    (*v).len = 0 as i64;
+    (*v).cap = 0 as i64;
+    return 1;
+}
