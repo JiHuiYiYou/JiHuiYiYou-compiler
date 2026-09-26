@@ -1,0 +1,197 @@
+// std_io_basic.jhyy — v3.2.3 (3l.2) std::io basic test.
+// 5 sub-test:open/write/read/close roundtrip + multi-write + multi-read
+//EXPECT:42
+
+// 注:per v3.2.2 W-076 + std lib plan,test inline 副本用 std_io_* 前缀 fn 名字
+// 避免符号 multiple definition(runtime.c 已有 fopen 等)。 std/io.jhyy
+// public API 等价此 inline 副本。
+
+extern fn fopen(path: *u8, mode: *u8) -> *u8;
+extern fn fclose(f: *u8) -> i32;
+extern fn fread(buf: *u8, size: i64, count: i64, f: *u8) -> i64;
+extern fn fwrite(buf: *u8, size: i64, count: i64, f: *u8) -> i64;
+
+// ════════════════════════════════════════════════════
+// ptr_add — 本地指针算术 helper
+// ════════════════════════════════════════════════════
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+
+// ════════════════════════════════════════════════════
+// std_io_* — std/io.jhyy inline 副本
+// ════════════════════════════════════════════════════
+fn std_io_open(path: *u8, mode: *u8) -> *u8 {
+    return fopen(path, mode);
+}
+
+fn std_io_close(f: *u8) -> i32 {
+    if f == (0 as *u8) {
+        return 0 as i32 - (1 as i32);
+    }
+    return fclose(f);
+}
+
+fn std_io_read(f: *u8, buf: *u8, n: i64) -> i64 {
+    if f == (0 as *u8) {
+        return 0 as i64 - (1 as i64);
+    }
+    if n <= (0 as i64) {
+        return 0 as i64;
+    }
+    return fread(buf, 1 as i64, n, f);
+}
+
+fn std_io_write(f: *u8, buf: *u8, n: i64) -> i64 {
+    if f == (0 as *u8) {
+        return 0 as i64 - (1 as i64);
+    }
+    if n <= (0 as i64) {
+        return 0 as i64;
+    }
+    return fwrite(buf, 1 as i64, n, f);
+}
+
+// ════════════════════════════════════════════════════
+// main_jhyy — 5 sub-test
+//   1: open("wb") 写 5 byte "hello" + close → 再 open("rb") 读 5 byte → verify "hello"
+//   2: 写 0 字节(空文件) + 读 0 字节
+//   3: multi-write:写两次,每次 3 byte → 读 6 byte
+//   4: open 不存在的文件(read 模式)→ f=0
+//   5: close(0) → -1
+// 总 EXIT:5 个 sub-test PASS (返回 0)。EXPECT:0
+// ════════════════════════════════════════════════════
+
+fn str_eq(a: *u8, b: *u8, n: i64) -> i32 {
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        if (*(ptr_add(a, i) as *i32) & (0xff as i32)) !=
+           (*(ptr_add(b, i) as *i32) & (0xff as i32)) {
+            return 0;
+        }
+        i = i + (1 as i64);
+    }
+    return 1;
+}
+
+fn main_jhyy() -> i32 {
+    let test_path = "compiler/build/bin/_std_io_basic_tmp.txt" as *u8;
+
+    // ── Sub-test 1: open("wb") 写 "hello" + close → open("rb") 读 verify ──
+    let f1 = std_io_open(test_path, "wb" as *u8);
+    if f1 == (0 as *u8) {
+        return 1;
+    }
+    let hello = "hello" as *u8;
+    let wn = std_io_write(f1, hello, 5 as i64);
+    if wn != (5 as i64) {
+        return 2;
+    }
+    let c1 = std_io_close(f1);
+    if c1 != (0 as i32) {
+        return 3;
+    }
+
+    let f2 = std_io_open(test_path, "rb" as *u8);
+    if f2 == (0 as *u8) {
+        return 4;
+    }
+    let mut buf1: [i32; 16] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let rn = std_io_read(f2, buf1 as *u8, 5 as i64);
+    if rn != (5 as i64) {
+        return 5;
+    }
+    if str_eq(buf1 as *u8, hello, 5 as i64) == 0 {
+        return 6;
+    }
+    let c2 = std_io_close(f2);
+    if c2 != (0 as i32) {
+        return 7;
+    }
+
+    // ── Sub-test 2: open 不存在的 read 模式 → f=0 ──
+    let f3 = std_io_open("compiler/build/bin/_nonexistent_xyzzy.txt" as *u8,
+                          "rb" as *u8);
+    if f3 != (0 as *u8) {
+        return 8;
+    }
+
+    // ── Sub-test 3: close(0) → -1 ──
+    let c3 = std_io_close(0 as *u8);
+    if c3 != (0 as i32 - (1 as i32)) {
+        return 9;
+    }
+
+    // ── Sub-test 4: write 0 字节(noop)+ read 0 字节(no-op,返 0) ──
+    let f4 = std_io_open(test_path, "wb" as *u8);
+    if f4 == (0 as *u8) {
+        return 10;
+    }
+    let wn0 = std_io_write(f4, hello, 0 as i64);
+    if wn0 != (0 as i64) {
+        return 11;
+    }
+    let c4 = std_io_close(f4);
+    if c4 != (0 as i32) {
+        return 12;
+    }
+    let f5 = std_io_open(test_path, "rb" as *u8);
+    if f5 == (0 as *u8) {
+        return 13;
+    }
+    let rn0 = std_io_read(f5, buf1 as *u8, 0 as i64);
+    if rn0 != (0 as i64) {
+        return 14;
+    }
+    let c5 = std_io_close(f5);
+    if c5 != (0 as i32) {
+        return 15;
+    }
+
+    // ── Sub-test 5: multi-write 6 byte + multi-read 6 byte ──
+    let f6 = std_io_open(test_path, "wb" as *u8);
+    if f6 == (0 as *u8) {
+        return 16;
+    }
+    let abc = "abcdef" as *u8;
+    let wn6a = std_io_write(f6, abc, 3 as i64);
+    let wn6b = std_io_write(f6, ptr_add(abc, 3 as i64), 3 as i64);
+    if wn6a != (3 as i64) {
+        return 17;
+    }
+    if wn6b != (3 as i64) {
+        return 18;
+    }
+    let c6 = std_io_close(f6);
+    if c6 != (0 as i32) {
+        return 19;
+    }
+    let f7 = std_io_open(test_path, "rb" as *u8);
+    if f7 == (0 as *u8) {
+        return 20;
+    }
+    let mut buf6: [i32; 16] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let rn6a = std_io_read(f7, buf6 as *u8, 3 as i64);
+    let rn6b = std_io_read(f7, ptr_add(buf6 as *u8, 3 as i64), 3 as i64);
+    if rn6a != (3 as i64) {
+        return 21;
+    }
+    if rn6b != (3 as i64) {
+        return 22;
+    }
+    if str_eq(buf6 as *u8, abc, 6 as i64) == 0 {
+        return 23;
+    }
+    let c7 = std_io_close(f7);
+    if c7 != (0 as i32) {
+        return 24;
+    }
+
+    return 0;
+}
