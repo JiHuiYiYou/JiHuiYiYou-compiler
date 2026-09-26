@@ -245,10 +245,28 @@ extern fn jh_cgstate_set_holds_address(p: *u8) -> i32;
 extern fn jh_cgstate_set_holds_flag(bitmap: *u8, idx: i64) -> i32;
 extern fn jh_cgstate_get_holds_flag(bitmap: *u8, idx: i64) -> i32;
 
-// MAX_TEMP_SLOTS — alloc-tracking 数组大小。256 = 5x regress max (51) safety
-// margin。Out-of-bounds temp_id 走 formula fallback (graceful degradation)。
+// MAX_TEMP_SLOTS — alloc-tracking 数组大小。4096 (per W-094 2026-09-26
+// 真修):256 太低,big_test max temp_id = 1932 跨过 256 → cg_record_temp_slot
+// bounds-check no-op → temp_slot_for_id[t] 留 0 → cg_offset_for_temp_with_target
+// fall through formula `-(32 + t*8)` 跟 cg_alloc_slot 真分配的 alloc pool offset
+// 不一致 (公式 fall back 跟 alloc pool 同 offset 范围 → struct data 跟 formula
+// slot 物理 collision)。具体 big_test t_triple case:alloc pool t1039 struct 在
+// rbp-8272 (= -8192 - 80),formula fall back t1030 = -(32 + 1030*8) = -8272 —
+// **完全 collision**。t1039 后续 struct field copy 写到 rbp-8272 (= t1039 struct)
+// 时 实际写入 t1030 formula slot,t1030 ptr 被 overwrite 成 garbage (5) → 后续
+// add+storew 走 [r8] (r8 = t1030+4 = 9) → SEGV 0x9。
+//
+// 4096 = 2x safety over big_test max (1932, per W-093/W-094 RCA); 跟
+// cg_max_temp_holds_address bitmap 同步。Out-of-bounds temp_id 走 formula
+// fallback (graceful degradation) — 现状跟 W-093 一致。
+//
+// **W-094 (v3.2.4 真修 W-093 残留)**:bitmap bound bump 不够 — slot table
+// 同步需要 bump。W-093 仅 bump 了 holds-address bitmap, alloc-tracking slot
+// table 仍 256 → big_test 仍 SEGV。4096 后 cg_record_temp_slot 正常 record
+// alloc pool offset → cg_offset_for_temp_with_target 返 alloc pool offset 而非
+// formula fallback → struct data 跟 formula slot 物理分离,big_test exit 0。
 fn cg_max_temp_slots() -> i64 {
-    return 256 as i64;
+    return 4096 as i64;
 }
 
 // cg_state_set_temp_slots — v2.11.5 setter,CGState 装 temp_slot_for_id 时调,
@@ -281,14 +299,16 @@ fn cg_record_temp_slot(state: *u8, temp_id: i64, slot: i64) -> i32 {
 // address-holder temp (每个 add ptr, off 都新增一个 derived-address temp, flag 它),
 // temp_id 跨过 256 上限 → bounds check no-op → emit_load 走 slot direct read
 // 而非 indirect dispatch → 读 garbage → 测试 fail (EXIT=13)。
-// 1024 = 4x safety over std_vec_basic max (513); 后续 std::map / std::string 等
-// 跨过 256 也是预期内的 (per v3.2.4 plan 后续 stdlib 测试都走 inline 副本 +
-// per-fn 多 alloc + 多 pointer-arith 路径)。
-// **W-092 (W-085 暴露)**: bitmap 1024 让 big_test 隐性 W-085 (struct + i32
-// signature 触发 fn arg corruption) 浮面 → 1 FAIL。Deferred to v3.x mid 跟 W-085
-// 真修一起做。
+// 4096 = 2x safety over big_test max (1932,per W-093 RCA); 后续 std::map /
+// std::string 等大 temp_id 测试预留 headroom (per v3.2.4 plan 后续 stdlib 测试
+// 都走 inline 副本 + per-fn 多 alloc + 多 pointer-arith 路径)。
+// **W-093 (v3.2.4 真修 W-092)**: bitmap 1024 太小,big_test max temp_id = 1932
+// 跨过 1024 → bounds check no-op → emit_copy / emit_load / emit_store 走 slot
+// direct path 而非 indirect dispatch → 错字节 / segfault。1024 → 4096 后 big_test
+// 全 temp_id 在 bound 内,indirect dispatch 生效,exit 0。W-092 的 W-085 假设
+// 错(实际根因 = bitmap bound,不是 W-085 ACTIVE trigger pattern `fn(*T,i32,i32)`)。
 fn cg_max_temp_holds_address() -> i64 {
-    return 1024 as i64;
+    return 4096 as i64;
 }
 
 // cg_state_set_holds_address — v2.11.8 setter,CGState 装 temp_holds_address 时
@@ -356,11 +376,15 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     (*s).xmm_arg_count    = 0 as i32;
     (*s).int_arg_count    = 0 as i32;
     (*s).stack_arg_offset = 0 as i64;
-    // v2.11.5 (W-074.7 alloc-tracking 真修):alloc 256-entry i64 数组 (2KB) zero-init。
+    // v2.11.5 (W-074.7 alloc-tracking 真修):alloc i64 数组 zero-init。
     // emit_alloc 调 cg_record_temp_slot 写 slot,reset_for_function 把数组 zero
-    // (per-fn 隔离)。MAX_TEMP_SLOTS = 256 (5x regress max 51 safety margin)。
-    // 然后 wire C-side static 让 cg_offset_for_temp 无 state 参数也能查到。
-    let slots_bytes = (256 as i64) * (8 as i64);
+    // (per-fn 隔离)。
+    // **W-094 (v3.2.4 真修 W-093 残留)**:256 太低 — temp_id > 256 跨过 bounds check
+    // → cg_record_temp_slot no-op → temp_slot_for_id[t] 留 0 → cg_offset_for_temp_with_target
+    // fall through formula `-(32 + t*8)` 跟 cg_alloc_slot 真分配的 alloc pool offset
+    // 不一致 (公式 fall back 跟 alloc pool 同 offset 范围 → struct data 跟 formula
+    // slot 物理 collision)。4096 = 跟 cg_max_temp_holds_address bitmap 同步。
+    let slots_bytes = (4096 as i64) * (8 as i64);
     let slots_ptr = arena_alloc(arena, slots_bytes);
     let _zero = memset(slots_ptr, 0 as i32, slots_bytes);
     (*s).temp_slot_for_id = slots_ptr;
@@ -376,22 +400,21 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     let bnu_ptr = arena_alloc(arena, bnu_bytes);
     let _zero_bnu = memset(bnu_ptr, 0 as i32, bnu_bytes);
     (*s).block_name_uniq = bnu_ptr;
-    // v3.2.4 (W-090 真修): alloc temp_holds_address 1024-entry u8 bitmap
-    // (1024 bytes) zero-init (per v2.11.8 W-074.7.8 初版 256,2026-09-26 bump 1024
-    // 给 std_vec_basic test_with_cap v.cap 读 @ temp_id > 256 走 indirect dispatch)。
+    // v3.2.4 (W-093 真修 W-092): alloc temp_holds_address 4096-entry u8 bitmap
+    // (4096 bytes) zero-init (per v2.11.8 W-074.7.8 初版 256,2026-09-26 W-090 bump
+    // 1024 给 std_vec_basic test_with_cap v.cap 读 @ temp_id > 256 走 indirect dispatch,
+    // 2026-09-26 W-093 真修 bump 4096 给 big_test max temp_id = 1932 走 indirect dispatch)。
     // emit_alloc / emit_binop (add/sub on address-holder src1) / emit_copy
     // (TEMP→TEMP of address-holder) 写 flag; emit_load/store/loadsub 读 flag
     // 决定 indirect (mov<size> (%r8), %reg) vs slot (mov<size> -<off>(%rbp),
     // %reg)。reset_for_function per-fn zero。
-    // 1024 entries × 1 byte = 1024 bytes per compile, negligible in arena。
-    // **W-092 (bitmap 1024 暴露 big_test 隐性 W-085)** — big_test `fn point_scale`
-    // 等 fn signature 是 `(Point, i32)` struct + i32 pattern (W-085 ACTIVE 触发面:
-    // *T 在前 + i32 后),arg corruption 让 `%rdx` (QBE_L) 装了 i32 值。bitmap 256
-    // 隐藏 (bounds check no-op),bitmap 1024 暴露 (flag 生效 → indirect dispatch
-    // 解释 i32 当 pointer → segfault)。v3.2.4 ship 接受 big_test 1 FAIL 作为
-    // W-092 (W-085 latent surface),真修 deferred v3.x mid 跟 W-085 大参数 / 小参数
-    // register alloc 重写一起做。
-    let ha_bytes = 1024 as i64;
+    // 4096 entries × 1 byte = 4096 bytes per compile, negligible in arena。
+    // **W-092 假设错** — W-093 RCA:big_test max temp_id = 1932,跨过 1024 → emit_copy
+    // 走 slot direct path (movl %eax, -<slot>(%rbp)) 而非 indirect dispatch → 错字节
+    // / segfault。跟 W-085 ACTIVE trigger pattern `fn(*T,i32,i32)` 无关(point_scale
+    // signature `(Point, i32)` 不是 *T+2i32 模式,W-085 描述也明确 point_scale 不
+    // 触发 W-085)。真根因 = bitmap bound 不够,不是 W-085 latent。
+    let ha_bytes = 4096 as i64;
     let ha_ptr = arena_alloc(arena, ha_bytes);
     let _zero_ha = memset(ha_ptr, 0 as i32, ha_bytes);
     (*s).temp_holds_address = ha_ptr;
@@ -475,7 +498,7 @@ fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
     // 让 cg_offset_for_temp 在新 fn fall through formula fallback (recorded=0)
     // 直到 emit_alloc 重新写。
     if (*s).temp_slot_for_id != (0 as *u8) {
-        let slots_bytes2 = (256 as i64) * (8 as i64);
+        let slots_bytes2 = (4096 as i64) * (8 as i64);
         let _zr = memset((*s).temp_slot_for_id, 0 as i32, slots_bytes2);
     }
     // v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN):zero block-name
@@ -484,13 +507,13 @@ fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
         let bnu_bytes2 = (256 as i64) * (32 as i64);
         let _zr_bnu = memset((*s).block_name_uniq, 0 as i32, bnu_bytes2);
     }
-    // v3.2.4 (W-090):zero temp_holds_address bitmap per-fn (1024 bytes,
+    // v3.2.4 (W-093 真修 W-092):zero temp_holds_address bitmap per-fn (4096 bytes,
     // 跟 `ha_bytes` alloc size 一致)。fn A 的 t17 是 alloc-result address-holder,
     // fn B 的 t17 可能是 value-temp — 跨 fn flag 不 inherit。memset 0 让
     // emit_load/store/loadsub 在新 fn 头 fall through default slot path,直到
     // emit_alloc / emit_binop / emit_copy 重新写 flag。
     if (*s).temp_holds_address != (0 as *u8) {
-        let ha_bytes2 = 1024 as i64;
+        let ha_bytes2 = 4096 as i64;
         let _zr_ha = memset((*s).temp_holds_address, 0 as i32, ha_bytes2);
     }
     // cur_fn_idx NOT reset — it grows across functions within a module

@@ -647,7 +647,33 @@ fn emit_load(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let qt = mem_effective_qbe_type((*t).qbe_type);
     let suffix = mem_mov_suffix(qt);
     let reg = mem_scratch_reg(qt);
-    let dst_off = mem_temp_offset(dst, target_tag);
+
+    // **W-095 (v3.2.4 真修 W-085/RCA-after-W-094)**: emit_load's dst result
+    // temp 必须用 dedicated alloc pool slot (cg_alloc_slot advance next_offset),
+    // 不能用 formula `-(32 + t*8)` fallback — formula 跟 alloc pool 物理重叠
+    // (formula range [-32, -32792], alloc pool starts at -8192)。Pre-fix 大
+    // temp_id 的 load result (e.g. t1023 = loadw t1021 in big_test t_rect_area)
+    // formula = -8216 = t1005 alloc-ptr-slot → loadw 写入 t1023 result 时
+    // overwrite t1005 pointer slot → 后续 `add t1005, N` 拿到 wrong ptr
+    // (= loaded i32 value) → bogus address → SEGV。
+    //
+    // Fix: 在 dst_off lookup 之前,先 cg_alloc_slot(8) + cg_record_temp_slot
+    // 给 dst 一个 dedicated alloc pool slot, 跟 alloc-ptr-slot + formula
+    // pool 都物理分离 (per v2.11.23 Phase 2 / W-074.13 sub-bug 4 design —
+    // dedicated pool always advance to deepest negative position not yet
+    // used by either formula or region pool)。
+    let dst_size: i64 = if qt == QBE_D_LOCAL() {
+        8 as i64
+    } else if qt == QBE_S_LOCAL() {
+        4 as i64
+    } else if mem_effective_qbe_type(qt) == QBE_L_LOCAL() {
+        8 as i64
+    } else {
+        4 as i64
+    };
+    let dst_slot = cg_alloc_slot(state, dst_size);
+    let _rec_dst = cg_record_temp_slot(state, dst, dst_slot);
+    let dst_off = dst_slot;
 
     // v2.11.20 W-017 真修 Phase 3: emit_load $label path — loadw $g_x / loadl $g_x / ...
     // 之前 mem_parse_temp 只认 %tN,遇到 $g_x 返回 -1 → emit_load 返 1 (silent

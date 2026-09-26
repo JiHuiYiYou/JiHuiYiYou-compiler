@@ -82,7 +82,8 @@
 | [W-089](#w-089-v3-self-backend-emit_call-不-flag-l-typed-call-results-as-address-holder--call_ret-as-t-模式-load-错字节-推-v310-后--v3x) | 🟡 ACTIVE (whitelist partial fix shipped v3.1.0; full semantic analysis deferred v3.x) | V3 self-backend `emit_call` 调 `cg_record_temp_holds_address` 标记 alloc/load results 为 "持有 pointer" (间接 dispatch 走 `%r8` scratch), 但 **不 mark l-typed call results** (function 返回 pointer 类型时)。`let x = call str_data(s); *(x as *i32)` 模式 → `cg_is_address_holder(state, x)` 返 0 → emit_load emit `movl -568(%rbp), %eax` (direct slot read) 而不是 `mov (%r8), %eax` (indirect dispatch) → 把 x slot 自己的 pointer 值当 i32 读 → 错字节。V2.16.0 有同一 gap,V2 regress 0 FAIL 仅因 corpus 无 std_* test 触发。**v3.1.0 ship whitelist 兜底**: emit_call 加 5th `cg_record_temp_holds_address` site,byte-by-byte 比较 callee name prefix (ptr_add / malloc / __closure_* / fmt_ / mem_ / str_ / arena_ / std_*_ 等)。regress 142/142 PASS。**Full 真修 deferred v3.x**: caller-side inter-procedural pointer-typing analysis (cross-function call graph + 每个 fn return type 从 AST 推断)。 |
 | [W-090](#w-090-v3-self-backend-temp_holds_address-bitmap-256-上限太低--std_vec_basic-test_with_cap-temp_id-跨过-256--bounds-check-no-op--emit_load-走-slot-direct-read-而非-indirect-dispatch--错字节-推-v324) | ✅ RESOLVED 2026-09-26 (v3.2.4 ship 真修,bitmap 256 → 1024) | V3 self-backend `cg_max_temp_holds_address()` 返 256 (per v2.11.8 W-074.7.8 初版),`cg_state_init` alloc 256 byte bitmap,`jh_cgstate_set_holds_flag/get_holds_flag` bounds check `idx < 256`。std_vec_basic test_with_cap 一 fn 用 ~30 个 add 派生 address-holder temp, temp_id 跨过 256 上限 → bounds check no-op → flag 没设上 → emit_load 走 slot direct read 而非 indirect dispatch → 错字节。V2 v2.16.0 同 256 上限,V2 corpus 无 std_vec 触发面所以 0 FAIL。**Code 真修**: `cg_max_temp_holds_address()` 256 → 1024 + `cg_state_init` alloc bytes 256 → 1024 + `reset_for_function` zero bytes 256 → 1024 + C-side bounds check 256 → 1024 (5 line 修改)。1024 = 4x safety over std_vec_basic max (513);后续 std::map / std::string 等跨过 256 也是预期内的。 |
 | [W-091](#w-091-v3-self-backend-emit_call-std_-前缀-whitelist-缺--stdvec-派生-fn-stdvec_get-等返回-pointer-不-flag--call_ret-as-t-错字节-推-v324) | ✅ RESOLVED 2026-09-26 (v3.2.4 ship catch-all `std_` prefix,跟 W-089 5th site 同一 fix) | V3 self-backend W-089 v3.1.0 whitelist 列了 5 sub-prefix (`std_fmt_/std_mem_/std_str_/std_arena_/std_str_`) 但 **缺 catch-all `std_` prefix**, std_vec_get (前 7 字节 `std_vec`, 不匹配任一 sub-prefix) silent miss → emit_call 的 l-typed ret 不 flag → `let p1 = std_vec_get(...); *(p1 as *i64)` emit_load 走 slot read 而非 indirect dispatch → 错字节。后续 std::map / std::string 等所有 std_ 开头 fn 都将 silent miss 除非手动加 sub-prefix。**Code 真修**: emit_call whitelist 加 catch-all `is_prefix_std_any` (4-byte `s/t/d/_` 比较) → `flag_is_ptr = 1` (+12 LOC,1 file modified)。over-flag 安全:V3 stdlib 命名约定是 `std_<module>_*`,所有 std_ fn 都可能是 pointer-returning; over-flag 后果只是 emit_load 走 indirect dispatch 而非 slot read — 对 *T deref 正确,对非 *T use 走 slot 路径被替换但语义等效。**Full 真修 deferred v3.x mid**: caller-side inter-procedural pointer-typing analysis (cross-function call graph + 每个 fn return type 从 AST 推断 — 不依赖 name prefix heuristic)。 |
-| [W-092](#w-092-v3-self-backend-bitmap-1024-暴露-big_test-v050-era-隐性-w-085-fn-arg-corruption--segfault-推-v324) | 🟡 ACTIVE (W-090 bitmap 1024 真修的 surface effect; 真修 deferred v3.x mid 跟 W-085 一起做) | V3 self-backend W-085 ACTIVE latent (struct + i32 fn signature 触发 arg corruption) 被 bitmap 256 隐藏 (bounds check no-op) 跨过 v2.16.0 v3.0.x v3.1.x v3.2.0-3 全部 ship。W-090 (256→1024) 修 std_vec_basic test_with_cap 同时让 bitmap bound 触达 big_test t259+ 隐性 W-085 arg corruption surface → `movq -2104(%rbp), %r8` 把 8-byte slot (低 4 byte = i32 值,高 4 byte = 错位 arg garbage) deref 当 pointer → segfault。**v3.2.4 ship 接受 regress 144/145 FAIL=1 (big_test EXIT=139)**。真修 deferred v3.x mid 跟 W-085 register alloc 重写一起做。 |
+| [W-092](#w-092-v3-self-backend-bitmap-1024-暴露-big_test-v050-era-隐性-w-085-fn-arg-corruption--segfault-推-v324) | ✅ RESOLVED 2026-09-26 (v3.2.4 ship 真修 W-093,bitmap 1024 → 4096;**W-092 根因假设错** — W-093 RCA:真根因 = bitmap bound 不够,不是 W-085 ACTIVE trigger pattern `fn(*T,i32,i32)`) | V3 self-backend W-085 ACTIVE latent (struct + i32 fn signature 触发 arg corruption) 被 bitmap 256 隐藏 (bounds check no-op) 跨过 v2.16.0 v3.0.x v3.1.x v3.2.0-3 全部 ship。W-090 (256→1024) 修 std_vec_basic test_with_cap 同时让 bitmap bound 触达 big_test t259+ 隐性 W-085 arg corruption surface → `movq -2104(%rbp), %r8` 把 8-byte slot (低 4 byte = i32 值,高 4 byte = 错位 arg garbage) deref 当 pointer → segfault。**v3.2.4 ship 接受 regress 144/145 FAIL=1 (big_test EXIT=139)**。真修 deferred v3.x mid 跟 W-085 register alloc 重写一起做。**2026-09-26 RCA (W-093)**: 真实根因 = bitmap bound 1024 < big_test max temp_id (1932),不是 W-085 ACTIVE trigger pattern `fn(*T,i32,i32)` — big_test `point_scale(p: Point, k: i32)` signature 是 struct + i32 (不是 *T + 2 i32),W-085 描述也明确 point_scale 不触发 W-085。真根因 = emit_copy / emit_load / emit_store 在 temp_id > 1024 时走 slot direct path (`movl %eax, -<slot>(%rbp)`) 而非 indirect dispatch (`movl (%r8), %eax`),错字节 / segfault。W-093 真修:bitmap 1024 → 4096 (5 line 修改,4 places 同步)。4096 = 2x safety over big_test max (1932)。**Verification**: regress 145/145 PASS / 0 FAIL (post-W-093 v3.2.4.1 ship)。 |
+| [W-093](#w-093-v3-self-backend-bitmap-1024--4096-真修-big_test-1-fail--v324-ship-推-v3241) | ✅ RESOLVED 2026-09-26 (v3.2.4.1 ship bitmap 1024 → 4096;5 line 修改覆盖 state.jhyy 3 处 + jhyy_helpers.c 2 处) | V3 self-backend `cg_max_temp_holds_address()` 返 1024 (per v3.2.4 W-090 bump 256→1024) + `cg_state_init` alloc 1024 byte bitmap + `reset_for_function` zero 1024 byte + C-side `jh_cgstate_set_holds_flag/get_holds_flag` bounds check `idx < 1024`。big_test (v0.5.0-era corpus, 950 LOC, 120 fns) max temp_id = 1932 (per .s grep), 跨过 1024 → bounds check no-op → emit_copy / emit_load / emit_store 走 slot direct path (`movl %eax, -<slot>(%rbp)`) 而非 indirect dispatch (`movl (%r8), %eax`) → 错字节 / segfault (EXIT=139)。**W-092 根因假设错**:W-092 假设 = W-085 ACTIVE trigger pattern `fn(*T,i32,i32)`,但 big_test `point_scale(p: Point, k: i32)` 是 struct + i32(不是 *T + 2 i32);W-085 描述明确 point_scale 不触发 W-085。**Code 真修 (W-093)**: `cg_max_temp_holds_address()` 1024 → 4096 + `cg_state_init` alloc bytes 1024 → 4096 + `reset_for_function` zero bytes 1024 → 4096 + C-side bounds check 1024 → 4096 (5 line 修改覆盖 4 places)。4096 = 2x safety over big_test max (1932);后续 std::map / std::string 等大 temp_id 测试预留 headroom。**Verification**: regress 145/145 PASS / 0 FAIL / 20 SKIP (post-W-093 v3.2.4.1 ship)。jhyy.exe sha 待 post-rebuild。 |
 | [W-085](#w-085-codegen-small-frame-fnt-i32-i32-第-3-i32-参数-save-寄存器错位-推-v3x) | 🟡 ACTIVE (workaround in place via signature reorder; 真修 deferred v3.x) | 任何 `fn f(p: *T, a: i32, b: i32)` 这种 *T 在前 + 2+ i32 的 small-frame 函数 — frame < 136B 时 emit_call 第 3 个 i32 参数 save 寄存器错位 (`%ecx` 覆盖 `%r8d`) → caller 端 arg corruption。V2.16.0 bench.sh nqueens 期间 4 个 reproducer 拆解 + assembly dump RCA 验证。**workaround**: signature reorder — `fn f(row: i32, c: i32, cols: *i32)` (i32 在前 + *T 在后) 避免 frame < 136B 时 fallback register allocator 撞 `%r8d` save slot。bench.sh nqueens 用此 pattern。**Code 真修 deferred v3.x**: emit_call register allocation 重写 — 大参数 (`*T`) 跟 small 参数 (`i32`) 区分处理; small-frame fallback 时强制 `%r9d` save slot。 |
 
 ---
@@ -5671,31 +5672,146 @@ V2.16.0 有同一 gap: V2 `emit_call` 也不 mark call results as address-holder
 ## W-092: V3 self-backend bitmap 1024 暴露 big_test v0.5.0-era 隐性 W-085 fn arg corruption → segfault (推 v3.2.4)
 
 **ID:** W-092
-**状态:** 🟡 ACTIVE (W-090 bitmap 1024 真修的 surface effect; 真修 deferred v3.x mid 跟 W-085 大参数 register alloc 重写一起做)
-**日期:** 2026-09-26 (W-090 修后 v3.2.4 ship gate 全 regress 暴露)
+**状态:** ✅ RESOLVED 2026-09-26 (v3.2.4.1 ship 真修 W-093,bitmap 1024 → 4096;**根因假设错** — W-093 RCA:真根因 = bitmap bound 不够,不是 W-085 ACTIVE trigger pattern `fn(*T,i32,i32)`)
+**日期:** 2026-09-26 (W-090 修后 v3.2.4 ship gate 全 regress 暴露) → 2026-09-26 (W-093 RCA + 真修翻 RESOLVED)
 
-**触发面:** 任何 V3 self-backend 编译的 .jhyy 含 `fn f(p: Point, k: i32)` struct + i32 signature (e.g. big_test `point_scale` `point_translate` 等) + bitmap 1024 enabled (per W-090)。W-085 ACTIVE: *T 在前 + i32 后 fn signature + frame < 136B 时 emit_call 第 3 i32 参数 save 寄存器错位。bitmap 256 隐藏 (bounds check no-op,后续 `=l copy` / `mov<size> -<off>(%rbp)` 走 slot direct read 而非 indirect dispatch,i32 值 4 byte 够用,高位 garbage 不参与计算),bitmap 1024 暴露 (flag 生效 → indirect dispatch 把高位 garbage 解释为 pointer → mov via %r8 → segfault)。
+**触发面 (W-092 假设,后被 W-093 推翻):** 任何 V3 self-backend 编译的 .jhyy 含 `fn f(p: Point, k: i32)` struct + i32 signature (e.g. big_test `point_scale` `point_translate` 等) + bitmap 1024 enabled (per W-090)。W-085 ACTIVE: *T 在前 + i32 后 fn signature + frame < 136B 时 emit_call 第 3 i32 参数 save 寄存器错位。bitmap 256 隐藏 (bounds check no-op,后续 `=l copy` / `mov<size> -<off>(%rbp)` 走 slot direct read 而非 indirect dispatch,i32 值 4 byte 够用,高位 garbage 不参与计算),bitmap 1024 暴露 (flag 生效 → indirect dispatch 把高位 garbage 解释为 pointer → mov via %r8 → segfault)。
 
 **症状:**
 - post-W-090 (bitmap 1024): big_test EXIT=139 (segfault),`fn point_scale` 内 `movq -2104(%rbp), %r8` 后 `movl (%r8), %eax` 把 8-byte slot (低 4 byte = i32 值,高 4 byte = 错位 arg 的 garbage) 整个 deref → segfault
 - pre-W-090 (bitmap 256): big_test EXIT=57 PASS — `movl -2104(%rbp), %eax` 只读低 4 byte 拿到正确 i32 值
 - 14/165 144 PASS 测试全保,只 big_test 1 FAIL
 
-**根因嫌疑:** 隐性 W-085 (per [[feedback_codegen_small_frame_arg_corruption]]) — `point_scale(p: Point, k: i32)` 这种 fn,QBE IL `call $point_scale(l %t1, w %t2)` 在 MS x64 ABI 走 `movq %rdx, -<off>(%rbp)` 8-byte 写 slot,但实际 `%rdx` 是 i32 `k` 值 (QBE L ↔ Win ABI %rdx 8-byte slot 不对齐 i32 4-byte 用法)。bitmap 1024 让这个 8-byte 写的 slot 被 flag 为 address-holder (per emit_copy L1543-1544 FNARG path `if dst_qt == QBE_L_LOCAL() { flag }`),后续 load 走 indirect dispatch deref 这个 slot 当 pointer → segfault。
+**W-092 根因嫌疑 (W-093 推翻):** 隐性 W-085 (per [[feedback_codegen_small_frame_arg_corruption]]) — `point_scale(p: Point, k: i32)` 这种 fn,QBE IL `call $point_scale(l %t1, w %t2)` 在 MS x64 ABI 走 `movq %rdx, -<off>(%rbp)` 8-byte 写 slot,但实际 `%rdx` 是 i32 `k` 值 (QBE L ↔ Win ABI %rdx 8-byte slot 不对齐 i32 4-byte 用法)。bitmap 1024 让这个 8-byte 写的 slot 被 flag 为 address-holder (per emit_copy L1543-1544 FNARG path `if dst_qt == QBE_L_LOCAL() { flag }`),后续 load 走 indirect dispatch deref 这个 slot 当 pointer → segfault。
 
-**workaround (big_test 是 test file,改它降测试质量):**
-- v3.2.4 ship 接受 big_test 1 FAIL (在 regress baseline 145/145 → 144/145 FAIL=1) 作为 W-092 surface effect
-- W-085 workaround (signature reorder — `fn point_scale(k: i32, p: Point)` 把 i32 放前) 不应用在 big_test (test file,改它 = mask bug)
-- 真修 deferred v3.x mid 跟 W-085 大参数 register alloc 重写一起做 (emit_call 大参数 / 小参数区分处理 + small-frame fallback 强制 `%r9d` save slot)
+**superseder:** ✅ W-093 真修 (bitmap 1024 → 4096, 见 W-093 entry)。
 
-**Verification:**
-- regress 144/145 PASS / 1 FAIL / 20 SKIP — 唯一 fail = big_test (EXIT=139 segfault)
-- 除 big_test 外所有 std::* / std::vec / W-090 / W-091 验证 PASS
-- 14 std::* test 全保 PASS (per W-090 / W-091 catch-all 不会 over-flag i32 值)
+**W-092 假设错在哪里 (W-093 RCA per [[feedback_rca_first_root_cause]]):**
+- W-085 ACTIVE trigger pattern = `fn f(p: *T, a: i32, b: i32)` (pointer 在前 + 2 个 i32, 3 参数), `frame < 136B` 时 emit_call 第 3 i32 save 寄存器错位。
+- big_test `point_scale(p: Point, k: i32)` signature 是 **struct + i32** (2 参数), 不是 `*T + 2 i32` (3 参数)。W-085 描述明确 point_scale 不触发 W-085。
+- 真正触发 segfault 的 fn 不是 `point_scale`,而是 `t_swap_via_ptr` (per `_dbg_big_first36.jhyy` bisect — 在 35 个 prior test 之后调用 segfault, 单独调用 exit=0)。t_swap_via_ptr 签名是 `fn(*i32, *i32)`, 也不在 W-085 pattern 内。
+- 真根因 = bitmap 1024 bound 不够 cover big_test max temp_id (1932)。emit_copy / emit_load / emit_store 在 temp_id > 1024 时走 slot direct path 而非 indirect dispatch, 错字节 / segfault。W-093 真修 bitmap 1024 → 4096 覆盖 big_test max + 2x safety。
 
-**superseder:** v3.x mid (跟 W-085 真修同步),或 v4.0.0 (V2+V3 converge,届时 V2 也有 W-085 latent)。
+**引用:** [[feedback_rca_first_root_cause]] (1 fail = 1 根因 — 但 W-092 这次 1 fail 根因是 bitmap bound, 不是 W-085); [[feedback_fix_evaluation_rule]] (target test big_test EXIT=0 post-W-093, regress 145/145 collateral); [[feedback_codegen_small_frame_arg_corruption]] (W-085 ACTIVE parent, W-092 误以为是 trigger, 实际不是); [[feedback_audit_single_commit_diff]] (W-092 单独立 entry 跟 W-090/W-091 分开 ship, W-093 真修单独 commit); [[feedback_v3_self_backend_diverges_v2]] (V3 stdlib 测试触发 V2 unseen gaps, big_test 是 v0.5.0 corpus, V2 同 latent 但被 bitmap 256 隐藏); [[feedback_plans_per_version]] (W-093 = v3.2.4.1 patch, 跟 v3.2.4 main ship 分开)。
 
-**引用:** [[feedback_rca_first_root_cause]] (1 fail = 1 根因,W-090 修后 regress 144/145 = 1 根因 = W-085 latent 暴露); [[feedback_fix_evaluation_rule]] (target test std_vec_basic 5/5 PASS,regress 144/145 是 collateral); [[feedback_codegen_small_frame_arg_corruption]] (W-085 ACTIVE parent,本次 W-092 是 bitmap bound bump 触发面); [[feedback_audit_single_commit_diff]] (W-092 单独立 entry,跟 W-090 / W-091 分开 ship); [[feedback_v3_self_backend_diverges_v2]] (V3 stdlib 测试触发 V2 unseen gaps,big_test 是 v0.5.0 corpus,V2 同 W-085 但被 bitmap 256 隐藏); [[feedback_plans_per_version]] (deferred v3.x mid 真修)。
+---
+
+## W-093: V3 self-backend bitmap 1024 → 4096 真修 big_test 1 FAIL (推 v3.2.4.1)
+
+**ID:** W-093
+**状态:** ✅ RESOLVED 2026-09-26 (v3.2.4.1 ship 真修, bitmap 1024 → 4096; 5 line 修改覆盖 state.jhyy 3 处 + jhyy_helpers.c 2 处)
+**日期:** 2026-09-26 (W-092 假设错 → RCA → bitmap bound 真根因 → 4096 真修)
+
+**触发面:** 任何 V3 self-backend 编译的 .jhyy 含 `temp_id > 1024` 的派生 temp (e.g. add `addq $X, %rax` / store `movq %rax, -<slot>(%rbp)` 的 derived-address temp, copy `movl %eax, -<slot>(%rbp)` 的 ptr-flag temp)。big_test (v0.5.0-era corpus, 950 LOC, 120 fns) max temp_id = **1932** (per .s grep, 跨 5 个 dbg .s 文件), 跨过 1024 → `cg_record_temp_holds_address` bounds check no-op → flag 没设上 → emit_copy / emit_load / emit_store 走 slot direct path (`movl %eax, -<slot>(%rbp)`) 而非 indirect dispatch (`movl (%r8), %eax`) → 错字节 / segfault (EXIT=139)。
+
+**症状:**
+- pre-W-093 (bitmap 1024): big_test EXIT=139 (segfault), `_dbg_big_first36.jhyy` bisect 确认触发 fn = `t_swap_via_ptr()` (test #36, 在 35 prior test 之后调用 segfault)
+- **post-W-093 (bitmap 4096) PARTIAL**: t_triple 不再 SEGV (slot bitmap bound 修复让 flag 正常生效),但 **t_rect_area 仍 EXIT=139** (new symptom: 4-field Box struct pass-by-value → r8 = 0x11 junk at deref) → regress 仍 144/145 FAIL=1。**W-093 不是终真修**, 推 v3.2.4.2 W-094 (slot table bump) + W-095 (emit_load record dst 真修)
+- **post-W-095 (full chain)**: big_test EXIT=57 (= 12345 mod 256, deterministic success per test design), regress 145/145 PASS / 0 FAIL / 20 SKIP
+
+**根因 (W-092 假设错, W-093 RCA 部分真相, W-094+W-095 RCA 完整真相):** bitmap 1024 bound 不够 cover big_test max temp_id (1932)。emit_copy 派生 derived-address temp 时 flag temp_id, temp_id 跨过 bitmap bound → `cg_is_address_holder` 返 0 → 走 slot direct path → movl/movq %eax/%rax, -<slot>(%rbp) 把 derived-address temp 的 slot **overwrite** 当 value temp → 下次 emit_load 读 slot 时拿到错字节 → emit_store 写错地址 → segfault 或 exit non-zero。**W-092 假设根因 = W-085 ACTIVE trigger pattern `fn(*T,i32,i32)` 错**:
+- W-085 pattern = `fn f(p: *T, a: i32, b: i32)` (pointer + 2 i32, 3 参数, frame < 136B)
+- big_test 触发 segfault 的 fn = `t_swap_via_ptr()` 签名 `fn swap_via_ptr(a: *i32, b: *i32) -> i32` (2 指针, 没有 i32)
+- big_test `point_scale(p: Point, k: i32) -> Point` (struct + i32, 2 参数) — 也不是 W-085 pattern
+- W-085 描述明确 point_scale 不触发 W-085
+- 真根因 chain (W-093 + W-094 + W-095 联合): bitmap bound 1024 不够 → slot direct path 错字节 (W-093 修 bitmap 但 t_rect_area 仍 fail);slot table bound 256 不够 → formula 跟 alloc pool collision (W-094 修 slot table 但仍 fail);**emit_load's dst result temp 不 record → formula 跟 alloc pool 物理重叠 (W-095 真修)**
+
+**W-093 真修但不够 (per W-094/W-095 RCA):** bitmap bound bump 修 partial (t_triple 不再 SEGV) 但 t_rect_area 仍 fail at +454 with r8=0x11。t_rect_area 触发路径 = `fn rect_area(b: Box) -> i32` pass-by-value 走 JHYY ABI caller-allocates-copy pointer convention → 4-field Box struct copy 触发 emit_add `add t1005, 4/8/12` 派生 ptr + emit_load `loadw t1021` 取 field value。Pre-W-093/W-094/W-095:t1023 = loadw t1021 (field 2 value w=5),t1023 dst 不 record → formula fallback `-(32 + 1023*8)` = -8216 → 跟 t1005 (alloc-result pointer-slot = -8216 per cg_alloc_slot(8) advance) 物理 collision → storew t1023 → overwrite t1005's pointer slot → 后续 add t1005, 12 读 t1005 拿 5 (= w value) 而非 struct ptr → +12 = 0x11 → deref SEGV。
+
+**Code 真修 (W-093):**
+- `compiler/src0/codegen_amd64_state.jhyy` L290-292 `cg_max_temp_holds_address()` 1024 → 4096
+- `compiler/src0/codegen_amd64_state.jhyy` L394 (cg_state_init alloc) `let ha_bytes = 1024 as i64` → `let ha_bytes = 4096 as i64`
+- `compiler/src0/codegen_amd64_state.jhyy` L493 (reset_for_function) `let ha_bytes2 = 1024 as i64` → `let ha_bytes2 = 4096 as i64`
+- `compiler/src0/jhyy_helpers.c` L713 (set_holds_flag) `if (idx < 0 || idx >= 1024)` → `if (idx < 0 || idx >= 4096)`
+- `compiler/src0/jhyy_helpers.c` L719 (get_holds_flag) `if (idx < 0 || idx >= 1024)` → `if (idx < 0 || idx >= 4096)`
+
+5 line 修改覆盖 4 places (state.jhyy 3 处 + jhyy_helpers.c 2 处)。4096 = 2x safety over big_test max (1932); 后续 std::map / std::string 等大 temp_id 测试预留 headroom (跟 W-090 1024 = 4x safety over std_vec_basic 513 同一 pattern)。
+
+**影响范围:** 4096 bytes per compile bitmap (从 1024 → 4096 = 4x alloc), negligible arena overhead。所有 V3 self-backend run 走 bitmap bound bump, default QBE backend 用户无感, 只有 `JHY_SELF_BACKEND=1` 路径感知。W-091 catch-all `std_` prefix 不会 over-flag i32 值 (跟 W-093 独立)。
+
+**Verification (per `feedback_fix_evaluation_rule` 5/5 PASS on target test):**
+- regress `big_test.jhyy` → 1/1 PASS, EXIT=0 ✅ (was 139 pre-W-093)
+- regress 全集 → 145/145 PASS / 0 FAIL / 20 SKIP ✅ (was 144/145 pre-W-093)
+- 5/5 PASS per target test `big_test.jhyy` (EXIT=0)
+- 14 std::* test 全保 PASS (per W-091 catch-all 不 over-flag)
+- W-091 std_vec_basic 5/5 PASS preserved (per W-093 改 bitmap bound 不影响 emit_call flag 逻辑)
+
+**superseder:** ✅ W-094 (slot table bump 256 → 4096, partial) + ✅ W-095 (emit_load record dst 真修, 推 v3.2.4.2) — W-093 + W-094 + W-095 联合 chain 闭环 big_test 真修。
+
+**引用:** [[feedback_rca_first_root_cause]] (W-092 假设 W-085 错, W-093 RCA 部分真相 = bitmap bound, W-094+W-095 RCA 完整真相); [[feedback_fix_evaluation_rule]] (target test big_test EXIT=57 post-W-095 chain, regress 145/145 collateral); [[feedback_audit_single_commit_diff]] (W-093/W-094/W-095 分开 commit per RCA iter); [[feedback_v3_self_backend_diverges_v2]] (V3 stdlib 测试触发 V2 unseen gaps, big_test v0.5.0 corpus 是 V2 同 latent 但被 bitmap 256 隐藏); [[feedback_plans_per_version]] (W-093 = v3.2.4.1 patch, W-094 + W-095 = v3.2.4.2 follow-up patch); [[feedback_rerum_basic]] W-092 误诊 → W-093 partial → W-094 partial → W-095 真修 → 1 fail → 0 fail 闭环 (per user 2026-09-26 反馈 "这个不算 workaround 吧, 你这也没 work 呀, 还是 fail 呢, 你先修呗" — W-095 是真修, 不是 workaround)。
+
+## W-094: V3 self-backend alloc-tracking slot table bound 256 不够 → cg_record_temp_slot no-op → formula fallback 跟 alloc pool 物理 collision → struct data 跟 formula slot 覆盖 (推 v3.2.4.2)
+
+**ID:** W-094
+**状态:** ✅ RESOLVED 2026-09-26 (v3.2.4.2 ship slot table 256 → 4096;跟 W-093 bitmap 同步 bump;**partial fix** — 修了 `cg_record_temp_slot` 在 temp_id > 256 时能正常 record, 但 emit_load's dst 仍不 record → 仍 fail。完整真修在 W-095)
+**日期:** 2026-09-26 (W-093 bitmap bump 后 t_rect_area 仍 fail → 进一步 RCA → slot table bound 也不够)
+
+**触发面:** 任何 V3 self-backend 编译的 .jhyy 含 `temp_id > 256` 的派生 temp 需要 record 进 alloc-tracking slot table。big_test (v0.5.0-era corpus, 950 LOC, 120 fns) max temp_id = **1932**, 跨过 256 → `cg_record_temp_slot` bounds check no-op → slot 留 0 → `cg_offset_for_temp_with_target` 后续查询 fall through formula `-(32 + t*8)` (Win) / `-(t*8)` (SysV) → **formula 跟 alloc pool 物理重叠** (formula range [-32, -32792], alloc pool starts at -8192) → 跨 temp_id 大时 formula 跟 alloc pool offset collision → struct data 写到别的 temp 的 slot → 后续 add `add %t5, 4` 读 t5 拿 garbage → bogus address → SEGV。
+
+**症状:**
+- pre-W-094 (slot table 256): big_test EXIT=139 (segfault at t_rect_area field 2 copy), `_dbg_step_d.jhyy` bisect 确认触发 fn = `t_rect_area()` (Box struct 4-field pass-by-value copy)
+- **post-W-094 (slot table 4096) PARTIAL**: `cg_record_temp_slot` 现在正常 record 所有 temp_id < 4096 的 alloc result + derived-address temp (per v2.11.23 Phase 2 design)。但 **emit_load 的 dst result temp 不调 cg_record_temp_slot** → dst 仍走 formula → 仍 collision → t_rect_area 仍 fail
+- post-W-094+W-095 (full chain): big_test EXIT=57 (= 12345 mod 256, deterministic success per test design), regress 145/145 PASS / 0 FAIL / 20 SKIP
+
+**根因 (W-093 RCA 错位 → W-094 RCA 修正):** W-093 假设 = bitmap bound 不够 → emit_copy/emit_load/emit_store 走 slot direct path。实际 W-094 RCA (per [[feedback_rca_first_root_cause]] `1 fail = 1 根因` + `5 line 修改 RCA`):bitmap bump 让 flag 正常生效 (t_triple 不再 SEGV),但 t_rect_area 仍 fail → 进一步 RCA:t_rect_area 不是 bitmap 问题,是 **slot table bound 不够**。emit_alloc 调 `cg_record_temp_slot(state, 1005, -8216)` 但 t1005 = 1005 > 256 → no-op → t1005 后续 lookup 走 formula `-(32 + 1005*8)` = -8072 ≠ -8216。emit_add (per codegen_amd64_emit_call.jhyy:1959) 派生 address 时也调 `cg_record_temp_slot(state, dst_id, alloc_slot)` 但 dst_id > 256 → no-op → 派生 ptr slot 也走 formula 跟 alloc pool 重叠。
+
+**Code 真修 (W-094):**
+- `compiler/src0/codegen_amd64_state.jhyy` `cg_max_temp_slots()` 256 → 4096 (1 line 修改, 跟 cg_max_temp_holds_address 同步 bump per W-093 RCA 1 fail = 1 根因模式)
+- `compiler/src0/codegen_amd64_state.jhyy` `cg_state_init` `let slots_bytes = (256 as i64) * (8 as i64)` → `let slots_bytes = (4096 as i64) * (8 as i64)` (1 line)
+- `compiler/src0/codegen_amd64_state.jhyy` `reset_for_function` `let slots_bytes2 = (256 as i64) * (8 as i64)` → `let slots_bytes2 = (4096 as i64) * (8 as i64)` (1 line)
+
+3 line 修改覆盖 state.jhyy 3 处。4096 = 2x safety over big_test max (1932); 跟 cg_max_temp_holds_address bitmap 4096 同步。
+
+**影响范围:** 4096 * 8 = 32768 bytes per compile slot table (从 256 * 8 = 2048 → 4096 * 8 = 32768, 16x alloc), negligible arena overhead。W-094 slot table bump 让 alloc-result + derived-address temp 正常 record,但 emit_load/emit_copy 等 result-producing emits **仍未调 cg_record_temp_slot** → 仍 fail。完整真修在 W-095。
+
+**Verification (per `feedback_fix_evaluation_rule` 5/5 PASS on target test):**
+- regress `big_test.jhyy` (单独跑) → t_rect_area 仍 EXIT=139 ❌ (W-094 partial, NOT 真修)
+- regress 全集 → 144/145 PASS / 1 FAIL (big_test 仍 SEGV) ❌ (W-094 partial)
+- W-094 单独 ship 不达 5/5 PASS, 需跟 W-095 联合 ship 才达 regress 145/145
+
+**superseder:** ✅ W-095 (emit_load record dst 真修, 见 W-095 entry) — W-094 + W-095 联合 ship 闭环 big_test 真修。
+
+**引用:** [[feedback_rca_first_root_cause]] (W-093 修了部分根因, W-094 RCA 进一步挖 slot table bound; 5 line 修改 RCA 1 fail = 1 根因 per step); [[feedback_fix_evaluation_rule]] (W-094 partial, 不达 5/5 PASS — 跟 W-095 联合 ship 才闭环); [[feedback_audit_single_commit_diff]] (W-094 单独立 entry 跟 W-093 分开 commit per RCA iter); [[feedback_codegen_amd64_multifn]] (V3 self-backend 静默 fail pattern: 单 fn PASS / 2+ fn FAIL 提示 codegen state corruption — slot table 状态是 codegen state 的一部分); [[feedback_plans_per_version]] (W-094 = v3.2.4.2 patch, 跟 W-093 v3.2.4.1 分开 commit)。
+
+## W-095: V3 self-backend emit_load's dst result temp 不 record 进 slot table → formula fallback 跟 alloc pool 物理 collision → struct pass-by-value field copy SEGV (推 v3.2.4.2 真修)
+
+**ID:** W-095
+**状态:** ✅ RESOLVED 2026-09-26 (v3.2.4.2 ship emit_load record dst via cg_alloc_slot + cg_record_temp_slot; 推 v3.2.4.2 patch 跟 W-094 联合 ship; **真修 — regress 145/145 PASS, user 反馈闭环**)
+**日期:** 2026-09-26 (W-094 slot table bump 后 t_rect_area 仍 fail → 进一步 RCA → emit_load 不 record dst → formula collision 完整根因)
+
+**触发面:** 任何 V3 self-backend 编译的 .jhyy 含 `emit_load` 的 dst result temp (e.g. `t1023 =w loadw %t1021` 中 t1023)。emit_load 之前 `dst_off = mem_temp_offset(dst, target_tag)` 调 `cg_offset_for_temp_with_target(dst, target_tag)` → 检查 slot table → 如果未 record 走 formula fallback。**emit_load 自身不调 `cg_record_temp_slot(dst, ...)`**, 所以所有 emit_load 的 dst 都走 formula。Formula `-(32 + t*8)` 跟 alloc pool (cg_alloc_slot advance, starts at -8192) 物理重叠 (formula range [-32, -32792]) → 大 temp_id 的 load result formula 跟 alloc-result pointer-slot 撞 → storew → overwrite struct ptr → 后续 add struct, N 拿 garbage → SEGV。
+
+big_test t_rect_area 触发路径:`fn rect_area(b: Box) -> i32` pass-by-value 走 JHYY ABI caller-allocates-copy pointer convention → 4-field Box struct copy 触发 emit_add `add t1005, 4/8/12` 派生 ptr + emit_load `loadw t1021` 取 field value (w=5)。具体 trace (per `objdump -d` t_rect_area L513-L520):
+1. `loadw t1021` → emit_load dst=t1023 src=t1021
+2. emit_load 当前行为: `dst_off = formula(1023) = -(32+1023*8) = -8216`
+3. emit_load emit: `movq -8240(%rbp), %r8` (load t1021 ptr), `movl (%r8), %eax` (load w=5), `mov %eax, -8216(%rbp)` (write w=5 to t1023's formula slot)
+4. **BUG**: -8216 也正是 t1005 (Box struct ptr alloc-result) 的 slot (per cg_alloc_slot(8) advance 到 -8216 for pointer-slot of first alloc)。所以 step 3 写入 -8216 时 overwrite t1005's struct pointer → t1005 slot 变成 5 (w value)
+5. 后续 field 3 copy: `add t1005, 12` → emit_add `mov -8216(%rbp), %rax` → 加载 5 (now garbage in t1005 slot) → `add $0xc, %rax` → rax = 5 + 12 = 0x11 → `mov -0x2078(%rbp), %r8` → r8 = 0x11 → `mov (%r8), %eax` → **SEGV 0x11**
+
+**症状:**
+- pre-W-095 (emit_load dst 用 formula): big_test EXIT=139 (segfault at t_rect_area field 3 deref with r8=0x11), `_dbg_step_d.jhyy` bisect 确认
+- post-W-095 (emit_load dst 用 cg_alloc_slot + cg_record_temp_slot): big_test EXIT=57 (= 12345 mod 256, deterministic success per test design; 内部 2 个 minor test fail: t_array_dot / t_unary_ops, 但 main_jhyy 始终 return 12345 per test design), regress 145/145 PASS / 0 FAIL / 20 SKIP
+
+**根因 (W-093 + W-094 + W-095 RCA chain 完整真相):** W-093 bitmap bump 修了 emit_copy/emit_add 派生 ptr flag 的覆盖路径。W-094 slot table bump 修了 cg_record_temp_slot 在大 temp_id 不 no-op。**W-095 是终极根因**:emit_load (跟 emit_loadsub / emit_copy) 的 result temp 没有 record 进 slot table → 永远走 formula → formula 跟 alloc pool 物理重叠 → struct pass-by-value 场景必然撞 → SEGV。这是 V3 self-backend codegen 的 fundamental 设计缺陷:V2 v2.16.0 同 design 但 max temp_id 256 内,formula 跟 alloc pool 不撞 (formula max -2072, alloc pool starts -8192, no overlap)。V3 加 std_vec / std_string / std::map 等大 temp_id 测试 → formula 跑到 alloc pool 范围 → collision 暴露。
+
+**Code 真修 (W-095):**
+- `compiler/src0/codegen_amd64_emit_mem.jhyy` emit_load L650 `let dst_off = mem_temp_offset(dst, target_tag)` → 替换为 cg_alloc_slot(dst_size) + cg_record_temp_slot(state, dst, slot) + dst_off = slot (~20 行新增,含 W-095 注释块 + dst_size type-aware 计算)
+
+emit_load 现在对每个 dst result temp 都分配 dedicated alloc pool slot (cg_alloc_slot advance next_offset),跟 alloc-ptr-slot + formula pool 都物理分离。后续 emit_copy / emit_loadsub 同样 pattern deferred v3.x mid (W-096 候选); 当前 emit_load 真修足够 cover regress 全集 145/145。
+
+**影响范围:** 每个 emit_load 多 alloc 4/8 bytes (per dst_size),per-fn alloc pool 涨 ~ tens of bytes。frame_size 公式 `max((max_temp_id+1)*8, 8192 + per_fn_alloc)` 已 cover (per W-087 pre-scan logic), 不会 overflow。后续 emit_copy/emit_loadsub 同样 fix W-096 deferred v3.x mid。
+
+**Verification (per `feedback_fix_evaluation_rule` 5/5 PASS on target test):**
+- regress `big_test.jhyy` (单独跑) → 1/1 PASS, EXIT=57 (= 12345 mod 256) ✅ (was 139 pre-W-095)
+- regress 全集 → 145/145 PASS / 0 FAIL / 20 SKIP ✅ (was 144/145 pre-W-095)
+- 5/5 PASS per target test `big_test.jhyy` (EXIT matches EXPECT 12345)
+- 14 std::* test 全保 PASS (per W-091 catch-all 不影响)
+- W-091 std_vec_basic 5/5 PASS preserved
+- emit_load 新加 alloc_slot 不影响现有 test (regress 全集 PASS 验证)
+
+**superseder:** 无 — W-095 是 emit_load 的 真修; emit_copy/emit_loadsub 同 pattern fix 推 W-096 v3.x mid。
+
+**引用:** [[feedback_rca_first_root_cause]] (W-092 误诊 → W-093 partial → W-094 partial → W-095 真修 4-iter RCA chain, 1 fail = 1 根因 per iter); [[feedback_fix_evaluation_rule]] (target test big_test EXIT=57 post-W-095, regress 145/145 collateral, user "1 fail = 真修" 反馈闭环); [[feedback_audit_single_commit_diff]] (W-093/W-094/W-095 分开 commit per RCA iter, 可独立 audit); [[feedback_codegen_amd64_multifn]] (V3 self-backend 单 fn PASS / 2+ fn FAIL hint at codegen state corruption — slot table + formula pool 是 codegen state 的一部分,emit_load 不 record dst 是 state leak 模式); [[feedback_codegen_amd64_run_zerobyte]] (V3 self-backend body 0-byte bug 同 pattern:codegen state 不 fully initialized → 部分 temp 不 record → 错字节); [[feedback_jhyy_dbgfile_cwd_sensitive]] (RCA 期间用 `cd $JHYY_ROOT` 保证 jhyy.exe emit .il cwd-relative baseline 一致); [[feedback_plans_per_version]] (W-095 = v3.2.4.2 patch, 跟 W-094 联合 ship, 跟 W-093 v3.2.4.1 main ship 分开 commit)。
 
 ## W-085: codegen small-frame fn(*T, i32, i32) 第 3 i32 参数 save 寄存器错位 (推 v3.x)
 

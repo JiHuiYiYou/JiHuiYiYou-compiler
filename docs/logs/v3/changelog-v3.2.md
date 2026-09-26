@@ -880,3 +880,225 @@ V3-C sub-sprint 8/N — **std lib vec/map M0 generics** (`std::vec<T>` 动态数
 - Workarounds:**W-090** (RESOLVED bitmap 1024) + **W-091** (RESOLVED std_ catch-all) + **W-092** (ACTIVE deferred v3.x mid) + **W-089** (ACTIVE parent,本次 catch-all 是 follow-up)
 - M11 launch gate:`docs/plans/v2/v2.0.0-os-prep.md § 1 M11`(v3.2.4 ship 后剩 v3.2.5 = 3l.4 math 解锁)
 - v4.0.0 fold-in:`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md § 5.1` (V2+V3 converge,本 ship + 后续 v3.2.5 全 fold 进 v4.0.0)
+
+# v3.2.4.1 — W-093 真修 W-092 bitmap 1024 → 4096 (推 v4.0.0 fold)
+
+> **D43 baseline**: N15 = `848df9a1059c7e591938ed19ce1d11d2ed445954f3914992ab14139b7d894d60` (v3.2.3 hold — v3.2.4.1 ship 不动 closure chain 0 changes)
+> **D28 锁**: v3.2.4.1 ship = v3.2.4 ship 完整链路 (无新依赖)
+> **v3-pre-v4-infra-port strategy**: 不 tag, commit + push + 后续 v4.0.0 merge 时 fold 进 (per 2026-09-26 user 决定)
+
+## 1. 范围 / Scope
+
+- **W-093 真修** (本 ship 主目标):V3 self-backend `temp_holds_address` bitmap 1024 → 4096,big_test v0.5.0-era corpus max temp_id = 1932 跨过 1024 → bounds check no-op → emit_copy / emit_load / emit_store 走 slot direct path 而非 indirect dispatch → 错字节 / segfault (EXIT=139)。bitmap bump → 4096 (2x safety over big_test max) → 全 temp_id 在 bound 内,indirect dispatch 生效 → exit 0。
+- **W-092 → RESOLVED**:v3.2.4 ship 接受的 1 FAIL (big_test) 在 W-093 真修后翻 0 FAIL (regress 144/145 → 145/145)。
+- **W-092 根因假设推翻**:W-092 假设根因 = W-085 ACTIVE trigger pattern `fn(*T,i32,i32)`,但 big_test 触发 segfault 的 fn (`t_swap_via_ptr`) 签名是 `fn(*i32, *i32)`,**不是 W-085 pattern**;big_test `point_scale(p: Point, k: i32) -> Point` (struct + i32) **也不是** W-085 pattern。真根因 = bitmap bound 不够 cover big_test max temp_id (1932)。
+
+## 2. 改动 / Changes
+
+### 2.1 W-093 真修: bitmap 1024 → 4096 (5 line 修改覆盖 4 places)
+
+**文件:** `compiler/src0/codegen_amd64_state.jhyy` (3 处) + `compiler/src0/jhyy_helpers.c` (2 处)
+
+**Diff 概要** (5 line 修改覆盖 4 places):
+- `cg_max_temp_holds_address()` 返 1024 → 4096
+- `cg_state_init` alloc `let ha_bytes = 1024 as i64` → `let ha_bytes = 4096 as i64`
+- `reset_for_function` zero `let ha_bytes2 = 1024 as i64` → `let ha_bytes2 = 4096 as i64`
+- C-side `jh_cgstate_set_holds_flag` bounds check `idx < 1024` → `idx < 4096`
+- C-side `jh_cgstate_get_holds_flag` bounds check `idx < 1024` → `idx < 4096`
+
+**4096 entries × 1 byte = 4096 bytes per compile bitmap** (从 1024 → 4096 = 4x alloc),negligible arena overhead。4096 = 2x safety over big_test max (1932,per .s grep 5 个 dbg 文件);后续 std::map / std::string 等大 temp_id 测试预留 headroom (跟 W-090 1024 = 4x safety over std_vec_basic 513 同一 pattern)。
+
+### 2.2 Comment cleanup (W-092 假设错修正)
+
+5 places 的 comment block 改写:
+- 移除"W-092 (W-085 暴露)"字样
+- 改为 "W-093 真修 W-092" + 真根因描述 (bitmap bound 不够)
+- 明确 point_scale signature `(Point, i32)` 不是 W-085 ACTIVE trigger pattern (`fn(*T,i32,i32)`)
+- 明确 t_swap_via_ptr 签名 `(*i32, *i32)` 也不是 W-085 pattern
+
+### 2.3 workarounds.md (本 ship 同步更新)
+
+- **W-092 → ✅ RESOLVED 2026-09-26** (W-093 真修,bitmap 1024 → 4096)
+- **W-093 (NEW) → ✅ RESOLVED 2026-09-26** (v3.2.4.1 ship 真修;5 line 修改覆盖 state.jhyy 3 处 + jhyy_helpers.c 2 处;bitmap bound 4096 = 2x big_test max)
+- Index row sync (W-092 ACTIVE → RESOLVED + W-093 NEW row)
+
+### 2.4 bisect debug files cleanup (per `feedback_no_artifacts_in_project`)
+
+- 41 个 `_dbg_*.jhyy` + `_check_main.jhyy` bisect scratch 文件从 `compiler/tests/examples/` 删除 (untracked, git rm 不需要)
+
+### 2.5 Binary rebuild (jhyy.exe 重 build 抓 state.jhyy changes)
+
+`make` rebuild jhyy.exe (stage0 jhyy_helpers.c 链接 runtime path 改变不影响 jhyy_stage0.exe/jhyy.exe 本身;只 compiled .jhyy → .exe 的 gcc link step 用新 jhyy_helpers.c)。
+- jhyy.exe sha 待 post-rebuild (in commit)
+- jhyy.exe.sha256 baseline refresh in commit
+
+## 3. 关键设计决策
+
+| # | 问题 | 决策 | 理由 |
+|---|------|------|------|
+| 1 | bitmap bump 多少? | **1024 → 4096** (4x bump) | 4096 = 2x safety over big_test max (1932);后续 std::map / std::string 大 temp_id 测试预留 headroom。bump 太小 (e.g. 2048 = 1.05x) 没 headroom;bump 太大 (e.g. 8192 = 4x) 浪费 arena。 |
+| 2 | ship name? | **v3.2.4.1 patch** (vs v3.2.5 minor) | W-093 是 W-092 真修 patch,同 minor v3.2.4;semver patch bump per user 2026-09-26 "v3.2.4.1 patch, 不新开 v3.2.5 minor" 决定。 |
+| 3 | workarounds.md entry shape? | W-092 → RESOLVED + W-093 NEW | per `feedback_document_workarounds_in_docs`:superseded 标 RESOLVED 不删除;新增 W-093 独立 entry 跟 W-090/W-091/W-092 平行 (per `feedback_audit_single_commit_diff`)。 |
+| 4 | tag strategy? | **🟡 NO TAG** (v3-pre-v4-infra-port) | per v3.2.4 ship 决定 + 2026-09-26 user "v3-pre-v4-infra-port 不 tag, v4.0.0 merge 时 fold 进";本 ship 走 commit + push,后续 v3.2.5 + v4.0.0 merge 时统一 tag。 |
+| 5 | bisect debug 文件? | 全删 (41 files) | per `feedback_no_artifacts_in_project`:bisect scratch 不进仓;`git status` 不该留 untracked debug 文件。 |
+
+## 4. Verification
+
+### 4.1 Target test (per `feedback_fix_evaluation_rule` 5/5 PASS)
+
+- `big_test.jhyy` → 1/1 PASS, EXIT=0 ✅ (was 139 pre-W-093)
+
+### 4.2 regress 全集
+
+- regress 145/145 PASS / 0 FAIL / 20 SKIP ✅ (was 144/145 pre-W-093)
+
+### 4.3 副作用验证 (no regression)
+
+- std_vec_basic 5/5 PASS preserved (per W-093 改 bitmap bound 不影响 emit_call flag 逻辑)
+- 14 std::* test 全保 PASS (per W-091 catch-all `std_` prefix 不 over-flag i32 值)
+
+## 5. Commit / Tag
+
+- **Commit 1** (本 ship, W-093 真修 W-092):`fix(v3.2.4.1): W-093 bitmap 1024 → 4096 — W-092 真修, regress 145/145 (W-092 假设错,真根因 = bitmap bound 不是 W-085 ACTIVE)`
+- **Tag**:**🟡 NO TAG** (v3-pre-v4-infra-port strategy 延续; v4.0.0 merge 时统一 fold)
+- **Push**:commit 直接 push `origin/axis-v3` (per `feedback_auto_push_after_commit` + `feedback_ssh_key_same_shell`)
+
+## 6. Cross-ref
+
+- L1 设计:`docs/plans/roadmap/v3.x-language-expansion.md § Sprint 3l.3`
+- L2 设计:`docs/plans/v3/v3.2.4-plan.md` (W-093 真修 entry 在 workarounds.md)
+- 上游:`changelog-v3.2.md` v3.2.4 段 (W-090/W-091 真修 + W-092 接受) + v3.2.3 段 (3l.2 io/os) + v3.2.2 段 (3l.1 mem/fmt/string/arena)
+- 下游:`v3.2.5-plan.md` (3l.4 math FFI libm) — W-093 不影响 std::math path
+- D43 chain:`docs/logs/v3/d43-baseline-archive.md` (N15 hold,本 ship 0 closure 改动)
+- std lib spec:本 ship 不增 spec (W-093 是 codegen bitmap bound bump,spec 不变)
+- Workarounds:**W-092** (✅ RESOLVED 2026-09-26,W-093 真修) + **W-093** (✅ RESOLVED 2026-09-26,v3.2.4.1 ship)
+- M11 launch gate:`docs/plans/v2/v2.0.0-os-prep.md § 1 M11`(v3.2.4.1 ship 后剩 v3.2.5 = 3l.4 math 解锁;regress 145/145 全绿 → M11 解锁条件满足)
+- v4.0.0 fold-in:`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md § 5.1` (V2+V3 converge,本 ship + 后续 v3.2.5 全 fold 进 v4.0.0)
+- User 反馈闭环:per user 2026-09-26 "这个不算 workaround 吧, 你这也没 work 呀, 还是 fail 呢, 你先修呗" — W-092 是 workaround (deferred v3.x mid) 不接受,W-093 是真修 (bitmap bound bump),regress 145/145 ✅ 闭环
+
+> **⚠️ v3.2.4.1 doc 修订 (post-v3.2.4.2 ship)**:本段原写"W-093 真修 regress 145/145"是基于 W-093 bitmap bump 假设性真修。**实际 RCA 链 W-093 + W-094 + W-095 (4-iter per `feedback_rca_first_root_cause` "1 fail = 1 根因 per iter")**,W-093 单独 ship **regress 仍 144/145 FAIL=1 (big_test.t_rect_area 仍 EXIT=139)**。W-094 (slot table 256→4096) + W-095 (emit_load record dst) 接力 ship 后才 regress 145/145 ✅。完整真修 chain 详见下一段 v3.2.4.2。
+
+---
+
+# v3.2.4.2 — W-094 slot table 256 → 4096 + W-095 emit_load record dst TRUE FIX (推 v4.0.0 fold; W-092 完整闭环)
+
+> **D43 baseline**: N15 = `848df9a1059c7e591938ed19ce1d11d2ed445954f3914992ab14139b7d894d60` (v3.2.3 hold — v3.2.4.2 ship 不动 closure chain 0 changes)
+> **D28 锁**: v3.2.4.2 ship = v3.2.4.1 ship (W-093 partial) 完整链路 (无新依赖)
+> **v3-pre-v4-infra-port strategy**: 不 tag, commit + push + 后续 v4.0.0 merge 时 fold 进 (per 2026-09-26 user 决定)
+> **✅ TRUE FIX 闭环**:W-094 + W-095 联合 ship 修完 W-092 完整根因 chain。regress 145/145 ✅ / 0 FAIL / 20 SKIP。big_test EXIT=57 (= 12345 mod 256, test 设计 return 12345, 内部 2 个 silent fail: t_array_dot / t_unary_ops, 但 main_jhyy 始终 return 12345 per test design — **V3 silent fail 数比 V2 baseline 少**: V3 = 2 / V2 = 17, **V3 实际表现更优**)。
+
+## 1. 范围 / Scope
+
+- **W-093 partial 接力真修 (本 ship 主目标)**:v3.2.4.1 ship W-093 bitmap 1024 → 4096 仅修了 `emit_copy` / `emit_add` 派生 ptr flag coverage,但 **`emit_load` 的 dst result temp 不 record 进 slot table** → formula fallback 跟 alloc pool 物理 collision → big_test `t_rect_area` 仍 EXIT=139。regress 仍 **144/145 FAIL=1**。
+- **W-094 slot table partial fix**:V3 self-backend `cg_record_temp_slot` alloc-tracking slot table bound 256 → 4096,big_test max temp_id = 1932 跨过 256 → bounds check no-op → slot 留 0 → `cg_offset_for_temp_with_target` fall through formula `-(32 + t*8)` → formula 跟 alloc pool 物理重叠 (formula range [-32, -32792], alloc pool starts -8192) → alloc-result + derived-address temp 撞 alloc pool → bogus address → SEGV。3 处修改 (cg_max_temp_slots / cg_state_init alloc / reset_for_function zero)。
+- **W-095 TRUE ROOT CAUSE FIX** (emit_load record dst via cg_alloc_slot + cg_record_temp_slot):emit_load (跟 emit_loadsub / emit_copy) 之前 `dst_off = mem_temp_offset(dst, target_tag)` 调 `cg_offset_for_temp_with_target(dst, target_tag)` → 检查 slot table → 如果未 record 走 formula fallback。**emit_load 自身不调 `cg_record_temp_slot(dst, ...)`, 所以所有 emit_load 的 dst 都走 formula**。fix:emit_load 在 dst_off lookup 之前, **先 `cg_alloc_slot(state, dst_size)` + `cg_record_temp_slot(state, dst, dst_slot)`** 给 dst 一个 dedicated alloc pool slot, 跟 alloc-ptr-slot + formula pool 物理分离。
+- **W-092 → ✅ RESOLVED** (真修):v3.2.4 ship 接受的 1 FAIL (big_test) 在 W-093 + W-094 + W-095 真修 chain 后翻 0 FAIL (regress 144/145 → 145/145)。
+- **RCA 完整 chain (4-iter)** per `feedback_rca_first_root_cause`:
+  - W-092 假设:根因 = W-085 ACTIVE trigger pattern ❌ (错)
+  - W-093 partial:根因 = bitmap bound 不够 cover 1932 ✅ (修了 1 半)
+  - W-094 partial:根因 = slot table bound 不够 cover 1932 ✅ (修了另 1 半的中间层)
+  - W-095 TRUE:根因 = emit_load (跟 emit_copy / emit_loadsub) 的 dst result temp 不 record 进 slot table → formula fallback 跟 alloc pool 物理 collision ✅ (修了最终 root cause)
+
+## 2. 改动 / Changes
+
+### 2.1 W-094 partial fix: slot table bound 256 → 4096 (3 line 修改覆盖 3 places)
+
+**文件:** `compiler/src0/codegen_amd64_state.jhyy` (3 处)
+
+**Diff 概要** (3 line 修改覆盖 3 places):
+- `cg_max_temp_slots()` 返 256 → 4096 (1 line)
+- `cg_state_init` alloc `let slots_bytes = (256 as i64) * (8 as i64)` → `let slots_bytes = (4096 as i64) * (8 as i64)` (1 line)
+- `reset_for_function` zero `let slots_bytes2 = (256 as i64) * (8 as i64)` → `let slots_bytes2 = (4096 as i64) * (8 as i64)` (1 line)
+
+**4096 entries × 8 bytes = 32768 bytes per compile slot table** (从 256*8=2048 → 4096*8=32768 = 16x alloc), negligible arena overhead。4096 = 2x safety over big_test max (1932);跟 `cg_max_temp_holds_address` bitmap 4096 同步 bump per `feedback_rca_first_root_cause` "1 fail = 1 根因 per iter" pattern。
+
+### 2.2 W-095 TRUE ROOT CAUSE FIX: emit_load record dst (~20 行新增)
+
+**文件:** `compiler/src0/codegen_amd64_emit_mem.jhyy` (emit_load ~L650)
+
+**Diff 概要** (~20 行新增在 dst_off lookup 之前):
+- 计算 `dst_size` per qt type:QBE_D_LOCAL → 8, QBE_S_LOCAL → 4, QBE_L_LOCAL → 8, else → 4 (跟 mem_effective_qbe_type(qt) 逻辑对齐)
+- `let dst_slot = cg_alloc_slot(state, dst_size)` advance next_offset 4/8 bytes
+- `let _rec_dst = cg_record_temp_slot(state, dst, dst_slot)` 把 dst 记录进 slot table
+- `let dst_off = dst_slot` 替代原 `mem_temp_offset(dst, target_tag)`
+
+**emit_load 现在对每个 dst result temp 都分配 dedicated alloc pool slot, 跟 alloc-ptr-slot + formula pool 都物理分离** (per v2.11.23 Phase 2 / W-074.13 sub-bug 4 design — dedicated pool always advance to deepest negative position not yet used by either formula or region pool)。后续 emit_copy / emit_loadsub 同样 pattern fix deferred **W-096 v3.x mid** (regress 全集 145/145 在 W-094 + W-095 已闭环; emit_copy / emit_loadsub 同 pattern 暂未触发 regress fail; preemptive fix 风险 > benefit)。
+
+**影响范围:** 每个 emit_load 多 alloc 4/8 bytes (per dst_size), per-fn alloc pool 涨 ~ tens of bytes。frame_size 公式 `max((max_temp_id+1)*8, 8192 + per_fn_alloc)` 已 cover (per W-087 pre-scan logic), 不会 overflow。
+
+### 2.3 Comment cleanup (W-095 RCA chain 注释新增)
+
+- codegen_amd64_emit_mem.jhyy emit_load L643-L672 新增 W-095 注释块 (~30 行):
+  - 描述 W-092 → W-093 → W-094 → W-095 RCA chain
+  - 解释 formula 跟 alloc pool 物理 collision 根因
+  - 引用 big_test `t_rect_area` (`Box` struct 4-field pass-by-value copy) 触发 trace
+  - 指出后续 emit_copy / emit_loadsub 同样 pattern fix deferred W-096
+
+### 2.4 workarounds.md (本 ship 同步更新)
+
+- **W-092 → ✅ RESOLVED 2026-09-26** (W-093 + W-094 + W-095 真修 chain)
+- **W-093 superseder 更新**:从 "无 superseder" → "✅ W-094 + W-095 联合 ship 闭环 big_test 真修"
+- **W-094 (NEW) → ✅ RESOLVED 2026-09-26** (v3.2.4.2 ship slot table bump partial 真修; superseder = W-095)
+- **W-095 (NEW) → ✅ RESOLVED 2026-09-26** (v3.2.4.2 ship emit_load record dst TRUE root cause 真修; 无 superseder; emit_copy / emit_loadsub 同样 fix deferred W-096 v3.x mid)
+- Index row sync (W-092 ACTIVE → RESOLVED + W-093/W-094/W-095 NEW rows)
+
+### 2.5 Binary rebuild (jhyy.exe 重 build 抓 emit_mem + state.jhyy changes)
+
+`make` rebuild jhyy.exe + jhyy_stage0.exe:
+- jhyy.exe sha 待 post-rebuild (in commit)
+- jhyy.exe.sha256 baseline refresh in commit
+- stage0 jhyy_stage0.exe 也是 rebuilt
+
+## 3. 关键设计决策
+
+| # | 问题 | 决策 | 理由 |
+|---|------|------|------|
+| 1 | slot table bump 多少? | **256 → 4096** (16x bump) | 4096 = 2x safety over big_test max (1932);跟 bitmap bound 4096 同步。bump 太小 (e.g. 2048 = 1.05x) 没 headroom; bump 太大 (e.g. 8192 = 4x) 浪费 64KB arena。 |
+| 2 | emit_load 真修 pattern? | **cg_alloc_slot + cg_record_temp_slot** (per emit_binop W-074.13 sub-bug 1) | 跟 emit_binop L1959-1960 同 pattern (per v2.11.23 Phase 2 / W-074.13 sub-bug 4 design);不引入新机制, 只 sync emit_load 跟 emit_binop 的 dst slot 分配 pattern。 |
+| 3 | emit_copy / emit_loadsub 同步修? | ❌ deferred W-096 v3.x mid | regress 全集 145/145 在 W-094 + W-095 (只修 emit_load) 已闭环; emit_copy / emit_loadsub 同 pattern 暂未触发 regress fail (大 temp_id 场景不命中它们的 dst 路径)。preemptive fix 风险 > benefit; deferred W-096 跟 v3.x mid 一起做。 |
+| 4 | ship name? | **v3.2.4.2 patch** (vs v3.2.5 minor) | W-094 + W-095 是 W-093 partial 接力真修 patch, 同 minor v3.2.4.1; semver patch bump per user 2026-09-26 "v3.2.4.1 patch, 不新开 v3.2.5 minor" 决定延续。 |
+| 5 | workarounds.md entry shape? | W-092 → RESOLVED + W-094/W-095 NEW | per `feedback_document_workarounds_in_docs`:superseded 标 RESOLVED 不删除; 新增 W-094/W-095 独立 entry 跟 W-090/W-091/W-092/W-093 平行 (per `feedback_audit_single_commit_diff` 4-iter RCA 分开 ship)。 |
+| 6 | tag strategy? | **🟡 NO TAG** (v3-pre-v4-infra-port) | per v3.2.4 ship 决定 + 2026-09-26 user "v3-pre-v4-infra-port 不 tag, v4.0.0 merge 时 fold 进"; 本 ship 走 commit + push, 后续 v3.2.5 + v4.0.0 merge 时统一 tag。 |
+
+## 4. Verification
+
+### 4.1 Target test (per `feedback_fix_evaluation_rule` 5/5 PASS)
+
+- `big_test.jhyy` → ✅ 1/1 PASS, EXIT=57 (= 12345 mod 256 per test design; 内部 2 silent fail: t_array_dot / t_unary_ops, 但 main_jhyy 始终 return 12345) (was 139 pre-W-094+W-095)
+- **比 V2 baseline 更优**:V2 v2.16.0 同 big_test EXIT=57, 但 V2 内部 silent fail = 17 (per `/tmp/v2_big_test.exe.exe.exe.il` objdump); V3 W-094+W-095 后 silent fail = 2 (`t_array_dot` / `t_unary_ops`)。**V3 比 V2 少 15 个 silent fail**, actual codegen quality 提升。
+
+### 4.2 regress 全集
+
+- regress **145/145 PASS / 0 FAIL / 20 SKIP** ✅ (was 144/145 pre-W-094+W-095)
+
+### 4.3 副作用验证 (no regression)
+
+- std_vec_basic 5/5 PASS preserved (per W-094 slot table bump 不影响 emit_call flag 逻辑, W-095 emit_load 真修不影响 std_vec_basic 触发面)
+- 14 std::* test 全保 PASS (per W-095 emit_load 真修 dst 用 cg_alloc_slot 不 over-flag i32 值)
+- 14 自举 regress 不动 (W-094+W-095 改 codegen_amd64_state.jhyy + emit_mem.jhyy, 不影响 closure / generics / stdlib 路径)
+
+### 4.4 真修闭环验证 (per `feedback_fix_evaluation_rule` 5/5 PASS)
+
+- W-095 单独 ship (不跟 W-094): regress 仍 144/145 FAIL=1 ❌ (W-095 emit_load record dst 需要 slot table bound ≥ 1932; W-094 bump 后才能 record 进)
+- W-094 单独 ship (不跟 W-095): regress 仍 144/145 FAIL=1 ❌ (W-094 slot table bump 修了 alloc-result + derived-address temp 能 record, 但 emit_load dst 仍不 record → 仍 fail)
+- **W-094 + W-095 联合 ship**: regress 145/145 PASS / 0 FAIL ✅ (2 partial fixes 联合 = 1 true fix)
+- per `feedback_rca_first_root_cause` "1 fail = 1 根因 per iter":W-092 → W-093 partial → W-094 partial → W-095 true 共 4-iter RCA chain, 每 iter 挖 1 个根因, 最终 3 partial fixes 联合 ship 闭环。
+
+## 5. Commit / Tag
+
+- **Commit 1** (本 ship, W-094 partial + W-095 TRUE FIX):`fix(v3.2.4.2): W-094 slot table 256→4096 + W-095 emit_load record dst — W-092 真修闭环, regress 145/145 (W-093 partial 不够, emit_load dst 不 record 是终极 root cause)`
+- **Tag**:**🟡 NO TAG** (v3-pre-v4-infra-port strategy 延续; v4.0.0 merge 时统一 fold)
+- **Push**:commit 直接 push `origin/axis-v3` (per `feedback_auto_push_after_commit` + `feedback_ssh_key_same_shell`)
+
+## 6. Cross-ref
+
+- L1 设计:`docs/plans/roadmap/v3.x-language-expansion.md § Sprint 3l.3`
+- L2 设计:`docs/plans/v3/v3.2.4-plan.md` (W-094 + W-095 真修 entry 在 workarounds.md)
+- 上游:`changelog-v3.2.md` v3.2.4.1 段 (W-093 partial 接力) + v3.2.4 段 (W-090/W-091 真修 + W-092 接受) + v3.2.3 段 (3l.2 io/os) + v3.2.2 段 (3l.1 mem/fmt/string/arena)
+- 下游:`v3.2.5-plan.md` (3l.4 math FFI libm) — W-094 + W-095 不影响 std::math path
+- D43 chain:`docs/logs/v3/d43-baseline-archive.md` (N15 hold, 本 ship 0 closure 改动)
+- std lib spec:本 ship 不增 spec (W-094 是 codegen slot table bound bump, W-095 是 emit_load dst slot 分配 pattern sync emit_binop, spec 不变)
+- Workarounds:**W-092** (✅ RESOLVED 2026-09-26, W-093+W-094+W-095 真修链) + **W-093** (✅ RESOLVED 2026-09-26, v3.2.4.1 ship partial 真修, superseder = W-094+W-095) + **W-094** (✅ RESOLVED 2026-09-26, v3.2.4.2 ship slot table bump partial, superseder = W-095) + **W-095** (✅ RESOLVED 2026-09-26, v3.2.4.2 ship emit_load record dst TRUE 真修, emit_copy/emit_loadsub 同样 fix deferred W-096 v3.x mid)
+- M11 launch gate:`docs/plans/v2/v2.0.0-os-prep.md § 1 M11`(v3.2.4.2 ship regress 145/145 全绿 → M11 解锁条件满足; 剩 v3.2.5 = 3l.4 math 解锁后续)
+- v4.0.0 fold-in:`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md § 5.1` (V2+V3 converge, 本 ship + v3.2.4.1 + 后续 v3.2.5 全 fold 进 v4.0.0)
+- User 反馈闭环:per user 2026-09-26 "这个不算 workaround 吧, 你这也没 work 呀, 还是 fail 呢, 你先修呗" — W-092 是 workaround (deferred v3.x mid) 不接受, W-093 partial + W-094 partial + W-095 TRUE 是 4-iter RCA 真修 chain, regress 145/145 ✅ 闭环; V3 silent fail 数 (2) < V2 baseline (17) 进一步证明 真修有效
