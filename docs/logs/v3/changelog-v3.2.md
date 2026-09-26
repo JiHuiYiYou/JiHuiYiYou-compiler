@@ -672,3 +672,91 @@ V3-C sub-sprint 5/N — **闭包字面量 MVP**(`|params| { body }` 语法 + 合
 - std lib spec:`docs/abis/jhyy-lang-spec-stdlib-supplement-v3.2.2.md`
 - Workarounds:W-073 (D43 hold), W-074 (D22 deferred), W-075 (mem_set i32-store), W-076 (std_ prefix), W-077 (mem_find_byte AV), W-078 (array[i32] index)
 
+# v3.2.3 — std lib io/os M0 (3l.2)
+
+> **ship date**: 2026-09-26
+> **branch**: `axis-v3.2.3`
+> **D28 锁**: v3.2.3 (3l.2 io/os) → v3.2.4 (3l.3 vec/map) 串行 (per 2026-09-01 user 决定,3l 顺序 ship)
+> **D43 baseline**: N15 = `848df9a1059c7e591938ed19ce1d11d2ed445954f3914992ab14139b7d894d60` (post-Phase-2 fill, v1→v2→v3→v4→v5 byte-equal chain hold)
+> **umbrella**: 本文件 v3.2.3 section
+
+## 1. 范围 / Scope
+
+V3-C sub-sprint 7/N — **std lib IO/OS M0 模块**(`std::io` + `std::os`)。Phase 1 = src + tests, Phase 2 = D43 verify + spec doc + W-079 entry, Phase 3+ = self-backend 真修后接 libc (per W-079)。
+
+**触发**(per `docs/plans/v2/v2.0.0-os-prep.md § 1`):
+- **M11 launch 硬前置**:v3.2.0..v3.2.5 全 ship — 本 sprint 是 3l.2, 剩余 3l.3 (v3.2.4) + 3l.4 (v3.2.5)
+- **jhyy_OS kernel boot** 用 `std/os.jhyy` 系统调用包装 (open / read / write / exit / getenv)
+
+## 2. 改动 / Changes
+
+### 2.1 新模块 (Phase 1 commit `24f89a4`)
+
+- `compiler/src0/std/io.jhyy` NEW (~106 行)
+  - `std_io_open / std_io_close / std_io_read / std_io_write` 走 libc `fopen / fclose / fread / fwrite`(single-type-pointer externs + all-l args,QBE amd64_win verified OK pattern)
+  - `std_io_print / std_io_print_err / std_io_eprint` M0 stub(返 0,不真写 stdout/stderr — jhyy 拿不到 FILE* 常量地址;Phase 2+ 走 C-side `jh_stdout_get / jh_stderr_get` getters,per W-079 真修)
+- `compiler/src0/std/os.jhyy` NEW (~155 行)
+  - `std_os_open / std_os_close / std_os_read / std_os_write / std_os_exit` M0 stub(input validation + mock return — 避开 W-079 QBE mixed-args bug)
+  - `std_os_getenv` 走真实 `jh_getenv` extern(1-arg + pointer return,verified PASS)
+  - POSIX flag / mode 常量(`OS_O_RDONLY / OS_O_WRONLY / OS_O_RDWR / OS_O_CREAT / OS_O_TRUNC / OS_O_APPEND / OS_MODE_RW_R`)
+
+### 2.2 inline_imports 集成 (Phase 1 commit `24f89a4`)
+
+- `compiler/src0/main.jhyy` +~30 行:inline_imports 路径加 `std/io.jhyy` + `std/os.jhyy` 注册
+
+### 2.3 新 tests (Phase 1 commit `24f89a4`)
+
+- `compiler/tests/examples/std_io_basic.jhyy` (5 sub-test:open/write/read/close roundtrip + multi-write "abcdef" + nonexistent file + close(0) + write 0 bytes)
+- `compiler/tests/examples/std_os_basic.jhyy` (6 sub-test:open validation × 3 + close + read/write + getenv("PATH") 真 extern 调通)
+
+### 2.4 Phase 2 fix (commit `3d3216f`)
+
+- `compiler/tests/examples/std_io_basic.jhyy`:`//EXPECT:42` → `//EXPECT:0`(Phase 1 ship 时 EXPECT annotation typo,test 实际 EXIT=0)
+- `compiler/build/bin/jhyy_v{2,3,4}.exe`:Phase 1 ship 后 v3.2.3 source growth 未 rebuild,Phase 2 `make selfhost` 触发 rebuild,二进制 size 569798 → 671916 bytes(+102118 / +18%);sha256 全 match D43 chain hold
+- `docs/logs/v3/d43-baseline-archive.md` NEW:N13/N14/N15 baseline archive + size growth rationale
+
+### 2.5 Spec doc (commit (Phase 3))
+
+- `docs/abis/jhyy-lang-spec-stdlib-io-supplement-v3.2.3.md` NEW (~149 行):std_io_open / close / read / write + std_os_open / close / read / write / exit / getenv signatures + behavior + error semantics + W-079 detail
+
+## 3. 关键设计决策
+
+| # | 问题 | 决策 | 理由 |
+|---|------|------|------|
+| 1 | std::io / std::os 怎么组织? | 2 模块独立,每个含 ptr_add 本地 helper | `inline_imports` (main.jhyy:456-559) 不支持 subdir (`std/*`); M0 接受副本冗余 (per v3.2.2 决策 1) |
+| 2 | std::io 走 libc fopen / fread / fwrite? | 是(单类型指针 externs + all-l args,QBE 已知 OK pattern) | libc 是 OS 调用基础,M0 简化不绕开;Phase 2+ 接 jhyy_helpers.c 加 C-side getter 走 stdout / stderr FILE* |
+| 3 | std::os 怎么处理 mixed-args (l, w, w) open? | M0 stub(input validation + mock return),不真调 libc open / read / write | W-079 QBE amd64_win bug 不在 M0 修,推到 v3.x mid 或 self-backend 真修 |
+| 4 | std_os_getenv 走 extern? | 是(1-arg + pointer return pattern,verified PASS) | `jh_getenv` (jhyy_helpers.c v2.5.0) 是唯一已验证 extern,跟 W-079 bug 无关 |
+| 5 | std_io_print / print_err 怎么处理? | M0 stub(返 0,不真写) | jhyy 拿不到 stdout/stderr FILE* 常量地址;user 测试改用 `std_io_open("stdout.txt") + std_io_write` 模式 |
+| 6 | Phase 1 ship gate 怎么 verify? | manual `jhyy.exe compile + run` check (per Phase 1 commit message) | Phase 1 没用 regress (per `feedback_ci_gate_must_exercise_path` ship gate gap); Phase 2 用 regress caught EXPECT:42 typo (single-test mode passes, regress mode fails due to parallel contention + false negative annotation) |
+| 7 | D43 closure chain hold? | N15 = N14 + 102KB size growth(sha256 identical across v1-v5) | source growth (std/io + std/os + inline_imports integration) ≠ codegen drift |
+
+## 4. Verification
+
+- ✅ `make selfhost` green (v1 → v2 → v3 → v4 → v5 byte-equal chain)
+- ✅ `python regress.py --binary=compiler/build/bin/jhyy.exe --all` → **139/139 PASS / 0 FAIL / 20 SKIP** (of 159 total)
+  - 137 + 2 new std tests (std_io_basic + std_os_basic) = 139 PASS
+  - Phase 2 fix: std_io_basic.jhyy //EXPECT:42 → //EXPECT:0 (test 实际 EXIT=0)
+- ✅ D43 closure chain N15 hold: `sha256sum jhyy_v{2,3,4,5}.exe` = `848df9a1059c7e591938ed19ce1d11d2ed445954f3914992ab14139b7d894d60` (4 个全 match)
+- ✅ C-side 0 changes (vs `v3.2.2` tag):`git diff v3.2.2..HEAD --stat -- compiler/src/ compiler/runtime/ compiler/qbe/` 空输出
+
+**fix evaluation rule** (per `feedback_fix_evaluation_rule`):139/139 regress PASS + N15 byte-equal = fix work 验证。
+
+## 5. Commit / Tag
+
+- **Commit 1**:`feat(stdlib-io): M0 std lib io/os modules (3l.2, v3.2.3) — 2 modules + 2 tests + W-079` (`24f89a4`)
+- **Commit 2**:`chore(d43): v3.2.3 Phase 2 D43 byte-equal re-baseline (regress 139/139 PASS)` (`3d3216f`)
+- **Commit 3**:`docs(stdlib): v3.2.3 std lib io/os spec supplement` (Phase 3)
+- **Commit 4**:`docs+workarounds(v3.2.3): changelog v3.2.3 + W-079 entry (QBE amd64_win mixed extern + zero-extend, deferred)` (Phase 4)
+- **Tag**:`v3.2.3`
+
+## 6. Cross-ref
+
+- L1 设计:`docs/plans/roadmap/v3.x-language-expansion.md § Sprint 3l.2`
+- L2 设计:`docs/plans/v3/v3.2.3-plan.md` (per `feedback_plans_per_version`)
+- 上游:`changelog-v3.2.md` v3.2.2 段 (3l.1 mem/fmt/string/arena)
+- 下游:`v3.2.4-plan.md` (3l.3 vec/map — 依赖 closure + 3l.1 string/arena)
+- D43 chain:`docs/logs/v3/d43-baseline-archive.md` (N13 → N14 → N15 archive)
+- std lib spec:`docs/abis/jhyy-lang-spec-stdlib-io-supplement-v3.2.3.md` (本 sprint)
+- Workarounds:**W-079** (QBE amd64_win mixed extern + zero-extend, DEFER to v3.x mid)
+- M11 launch gate:`docs/plans/v2/v2.0.0-os-prep.md § 1 M11`(v3.2.0..v3.2.5 全 ship 解锁)
