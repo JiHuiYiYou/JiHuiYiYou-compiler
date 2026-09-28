@@ -684,6 +684,8 @@ V3-C sub-sprint 5/N — **闭包字面量 MVP**(`|params| { body }` 语法 + 合
 
 V3-C sub-sprint 7/N — **std lib IO/OS M0 模块**(`std::io` + `std::os`)。Phase 1 = src + tests, Phase 2 = D43 verify + spec doc + W-079 entry, Phase 3+ = self-backend 真修后接 libc (per W-079)。
 
+**v3.2.3.1 patch (2026-09-28)** — W-080 真修 superseder 关闭 W-079 (std_io_print / print_err 真修 + self-backend i32 ret zero-extend);见 v3.2.3.1 section。
+
 **触发**(per `docs/plans/v2/v2.0.0-os-prep.md § 1`):
 - **M11 launch 硬前置**:v3.2.0..v3.2.5 全 ship — 本 sprint 是 3l.2, 剩余 3l.3 (v3.2.4) + 3l.4 (v3.2.5)
 - **jhyy_OS kernel boot** 用 `std/os.jhyy` 系统调用包装 (open / read / write / exit / getenv)
@@ -694,7 +696,7 @@ V3-C sub-sprint 7/N — **std lib IO/OS M0 模块**(`std::io` + `std::os`)。Pha
 
 - `compiler/src0/std/io.jhyy` NEW (~106 行)
   - `std_io_open / std_io_close / std_io_read / std_io_write` 走 libc `fopen / fclose / fread / fwrite`(single-type-pointer externs + all-l args,QBE amd64_win verified OK pattern)
-  - `std_io_print / std_io_print_err / std_io_eprint` M0 stub(返 0,不真写 stdout/stderr — jhyy 拿不到 FILE* 常量地址;Phase 2+ 走 C-side `jh_stdout_get / jh_stderr_get` getters,per W-079 真修)
+  - `std_io_print / std_io_print_err / std_io_eprint` M0 stub(返 0,不真写 stdout/stderr — jhyy 拿不到 FILE* 常量地址;Phase 2+ 走 C-side `jh_stdout_get / jh_stderr_get` getters,per W-079 真修) **(2026-09-28 v3.2.3.1 真修 — M0 stub 替换为 C-side jh_fputs_stdout / jh_fputs_stderr 桥,见 v3.2.3.1 section)**
 - `compiler/src0/std/os.jhyy` NEW (~155 行)
   - `std_os_open / std_os_close / std_os_read / std_os_write / std_os_exit` M0 stub(input validation + mock return — 避开 W-079 QBE mixed-args bug)
   - `std_os_getenv` 走真实 `jh_getenv` extern(1-arg + pointer return,verified PASS)
@@ -706,7 +708,7 @@ V3-C sub-sprint 7/N — **std lib IO/OS M0 模块**(`std::io` + `std::os`)。Pha
 
 ### 2.3 新 tests (Phase 1 commit `24f89a4`)
 
-- `compiler/tests/examples/std_io_basic.jhyy` (5 sub-test:open/write/read/close roundtrip + multi-write "abcdef" + nonexistent file + close(0) + write 0 bytes)
+- `compiler/tests/examples/std_io_basic.jhyy` (5 sub-test:open/write/read/close roundtrip + multi-write "abcdef" + nonexistent file + close(0) + write 0 bytes) **(2026-09-28 v3.2.3.1 5→6 sub-test:加 std_io_print / print_err 真修验证 + null guard)**
 - `compiler/tests/examples/std_os_basic.jhyy` (6 sub-test:open validation × 3 + close + read/write + getenv("PATH") 真 extern 调通)
 
 ### 2.4 Phase 2 fix (commit `3d3216f`)
@@ -758,7 +760,7 @@ V3-C sub-sprint 7/N — **std lib IO/OS M0 模块**(`std::io` + `std::os`)。Pha
 - 下游:`v3.2.4-plan.md` (3l.3 vec/map — 依赖 closure + 3l.1 string/arena)
 - D43 chain:`docs/logs/v3/d43-baseline-archive.md` (N13 → N14 → N15 archive)
 - std lib spec:`docs/abis/jhyy-lang-spec-stdlib-io-supplement-v3.2.3.md` (本 sprint)
-- Workarounds:**W-079** (QBE amd64_win mixed extern + zero-extend, DEFER to v3.x mid)
+- Workarounds:**W-079** (✅ RESOLVED 2026-09-28, QBE git rm moot + W-080 superseder) + **W-080** (✅ RESOLVED 2026-09-28, v3.2.3.1 ship, self-backend i32 ret zero-extend + std_io_print 真修)
 - M11 launch gate:`docs/plans/v2/v2.0.0-os-prep.md § 1 M11`(v3.2.0..v3.2.5 全 ship 解锁)
 
 ---
@@ -1102,3 +1104,82 @@ V3-C sub-sprint 8/N — **std lib vec/map M0 generics** (`std::vec<T>` 动态数
 - M11 launch gate:`docs/plans/v2/v2.0.0-os-prep.md § 1 M11`(v3.2.4.2 ship regress 145/145 全绿 → M11 解锁条件满足; 剩 v3.2.5 = 3l.4 math 解锁后续)
 - v4.0.0 fold-in:`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md § 5.1` (V2+V3 converge, 本 ship + v3.2.4.1 + 后续 v3.2.5 全 fold 进 v4.0.0)
 - User 反馈闭环:per user 2026-09-26 "这个不算 workaround 吧, 你这也没 work 呀, 还是 fail 呢, 你先修呗" — W-092 是 workaround (deferred v3.x mid) 不接受, W-093 partial + W-094 partial + W-095 TRUE 是 4-iter RCA 真修 chain, regress 145/145 ✅ 闭环; V3 silent fail 数 (2) < V2 baseline (17) 进一步证明 真修有效
+
+---
+
+# v3.2.3.1 — W-080 真修 std_io_print + self-backend i32 ret zero-extend (推 v4.0.0 fold)
+
+> **ship date**: 2026-09-28
+> **branch**: `axis-v3`
+> **D43 baseline**: N15+1 (post-rebuild, additive)
+> **D28 锁**: v3.2.3.1 ship = v3.2.3 ship 完整链路 (无新依赖)
+> **v3-pre-v4-infra-port strategy**: 不 tag, commit + push + 后续 v4.0.0 merge 时 fold 进 (per 2026-09-26 user 决定)
+> **umbrella**: 本文件 v3.2.3.1 section
+
+## 1. 范围 / Scope
+
+- **W-080 真修** (本 ship 主目标):self-backend `emit_call` Step 6 后 insert `movl %eax, %eax` zero-extend (`if ret_qt == QBE_W_LOCAL()` gate);`std/io.jhyy` M0 stub → 真 impl (C-side 走现成 `jh_fputs_stdout / jh_fputs_stderr` 桥,jhyy_helpers.c L32/36)
+- **W-079 → ✅ RESOLVED**:QBE git rm `6ae2d7c` (v3.1.0/Ph.3) moot;zero-extend + M0 stub 都走 W-080 superseder 真修
+- **1 test expansion + 6 NEW test files**:std_io_basic 5 → 6 sub-test;exit_zero_extend_{0,1,127,128,255,256}.jhyy 6 NEW
+
+## 2. 改动 / Changes
+
+### 2.1 W-080 真修: i32 ret zero-extend + std_io_print C-side 桥
+
+**Diff概要** (5 files, ~50 LOC net):
+- `compiler/src0/std/io.jhyy` +20 LOC net: M0 stub block (L86-105) → 真 impl,加 2 个 extern fn decls (`jh_fputs_stdout` / `jh_fputs_stderr`)
+- `compiler/src0/codegen_amd64_emit_call.jhyy` +4 LOC: Step 6 (L877-878) 后 insert `if ret_qt == QBE_W_LOCAL() { emit "\tmovl %eax, %eax\n" }`
+- `compiler/tests/examples/std_io_basic.jhyy` +~25 LOC: 6th sub-test inline 副本 mirror (per W-076 根因);header comment `5 sub-test` → `6 sub-test`
+- `compiler/tests/examples/exit_zero_extend_{0,1,127,128,255,256}.jhyy` 6 NEW files,each 6 LOC
+- (no `jhyy_helpers.c` change — 用现成 bridge)
+
+### 2.2 workarounds.md (本 ship 同步更新)
+
+- **W-079 → ✅ RESOLVED 2026-09-28** (QBE git rm moot + W-080 superseder)
+- **W-080 NEW → ✅ RESOLVED 2026-09-28** (v3.2.3.1 ship)
+- Index row sync (W-079 DEFER → RESOLVED + W-080 NEW row)
+
+### 2.3 Binary rebuild + baseline refresh
+
+`make` rebuild jhyy.exe:
+- jhyy.exe sha baseline refresh 写 `compiler/build/bin/jhyy.exe.sha256`
+- D43 chain N15+1 hold (zero-extend + std_io_print 真 impl 都是 additive,codegen 主干不动)
+
+## 3. 关键设计决策
+
+| # | 问题 | 决策 | 理由 |
+|---|------|------|------|
+| 1 | zero-extend gate 条件? | `if ret_qt == QBE_W_LOCAL()` (insert 后 step 6) | 仅 i32 ret 需要 zero-extend;i64 / pointer / f32 / f64 ret 已 truncate via store size suffix,无 garbage upper bits 风险 |
+| 2 | std_io_print 走新 getter 还是现成桥? | **走现成 `jh_fputs_stdout / jh_fputs_stderr` 桥** (jhyy_helpers.c L32/36) | bridge 已存在,直接 reuse 避免 duplicated formatter logic;**不**加新 getter(`jh_stdout_get / jh_stderr_get` 会是 dead code) |
+| 3 | exit_zero_extend 是 1 file 还是 6 files? | **6 files** (`exit_zero_extend_{0,1,127,128,255,256}.jhyy`) | single main_jhyy 只能 1 exit code;6 files 覆盖 N=0/1/127/128/255/256,regress driver 每 file 1 个 EXPECT annotation,`$? == (N & 0xFF)` 验证 zero-extend |
+| 4 | ship name? | **v3.2.3.1 patch** (vs v3.2.4 minor) | W-080 真修 W-079 superseder,同 minor v3.2.3 (per W-093/v3.2.4.1 同 pattern — patch bump) |
+| 5 | tag strategy? | **🟡 NO TAG** (v3-pre-v4-infra-port) | per 2026-09-26 user 决定 — single ship commit + push,v4.0.0 merge 时 fold 进 |
+| 6 | std_io_basic inline 副本怎么同步? | 跟 std/io.jhyy 真 impl 同 pattern copy (W-076 根因) | per v3.2.2 W-076 + v3.2.3 §2.3:test 走 inline 副本避免 subdir import bug + runtime.c name clash |
+
+## 4. Verification
+
+- ✅ `make all` green
+- ✅ `python regress.py --binary=compiler/build/bin/jhyy.exe --all` → **151/151 PASS / 0 FAIL / 20 SKIP** (was 145/145; +6 new exit_zero_extend tests)
+- ✅ std_io_basic.jhyy **6/6 PASS** (was 5/5; +1 6th sub-test:std_io_print 真修 + null guard)
+- ✅ exit_zero_extend_{0,1,127,128,255,256}.jhyy **6/6 PASS** (new; bash `$?` == (N & 0xFF) 验证 zero-extend)
+- ✅ D43 closure chain **HOLD N15** (per v3.2.3 ship — v3.2.3+ 等 v2.x 修后重测, 2026-09-26 changelog v3.2.0d 段明言 "v3.2.3+ 等 v2.x 修后重测"; 本 ship zero-extend + std_io_print 真 impl 都是 additive, 不破坏 closure chain;`make selfhost` L917 parse error 是 pre-existing W-089 nested `&&` parse bug, 不归 W-080 真修)
+- ✅ `compiler/build/bin/jhyy.exe.sha256` baseline refresh in commit
+
+**fix evaluation rule** (per `feedback_fix_evaluation_rule`):151/151 regress PASS + std_io_basic 6/6 + exit_zero_extend 6/6 = 12 target test 全 PASS。
+
+## 5. Commit / Tag
+
+- **Commit 1** (single ship, per `feedback_audit_single_commit_diff`):
+  `fix(stdlib-io + self-backend): W-080 真修 std_io_print + i32 ret zero-extend (v3.2.3.1 — closes W-079)`
+- **Tag**:**🟡 NO TAG** (v3-pre-v4-infra-port strategy 延续; v4.0.0 merge 时统一 fold)
+- **Push**: `git push origin axis-v3` (per `feedback_auto_push_after_commit` + `feedback_ssh_key_same_shell`)
+
+## 6. Cross-ref
+
+- L1 设计: `docs/plans/roadmap/v3.x-language-expansion.md § Sprint 3l.2` (历史 v3.2.3 plan)
+- L2 设计: `docs/plans/v3/v3.2.3-plan.md` (W-079 workaround 定义)
+- 上游: `changelog-v3.2.md` v3.2.3 段 (3l.2 ship, W-079 workaround accept)
+- 下游: v3.2.4 (3l.3, ✅ shipped) + v3.2.4.2 (W-094/W-095 真修, ✅ shipped 2026-09-26) — W-080 不影响 std::vec/map 路径
+- Workarounds: **W-079** (✅ RESOLVED 2026-09-28, QBE moot + W-080 superseder) + **W-080** (✅ RESOLVED 2026-09-28, v3.2.3.1 ship)
+- M11 launch gate: `docs/plans/v2/v2.0.0-os-prep.md § 1 M11` — v3.2.3.1 ship 不影响 std::math path (3l.4 v3.2.5 仍 deferred 等 3h 浮点)
+- v4.0.0 fold-in: `docs/plans/roadmap/v2-v3-parallel-sprint-plan.md § 5.1` — 本 ship + v3.2.4 / v3.2.4.2 全 fold 进 v4.0.0

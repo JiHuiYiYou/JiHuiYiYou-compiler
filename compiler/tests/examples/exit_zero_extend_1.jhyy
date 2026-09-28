@@ -1,0 +1,8 @@
+// exit_zero_extend_1.jhyy — v3.2.3.1 (W-080 真修) main_jhyy i32 return zero-extend test
+//EXPECT:1
+// 验证 main_jhyy 末尾 ret 路径 `movl %eax, %eax` zero-extend (W-059 QBE-era
+// 真修未 mirror → W-080 self-backend 真修)。bash `$?` 应 == (N & 0xFF)。
+
+fn main_jhyy() -> i32 {
+    return 1;
+}

@@ -876,6 +876,14 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     } else {
         let _r = emit_mov_reg_to_temp(state, ret_qt, reg_rax_for_qt(ret_qt) as *u8, ret_off);
     }
+    // v3.2.3.1 (W-080 真修): i32 ret zero-extend — `movl %eax, %eax` after store.
+    //   Win ABI caller-side 整 i32 在 %eax; self-backend ret temp store 用
+    //   `movl %eax, -<off>(%rbp)` 已 truncate 上位, 但 main_jhyy 末尾 ret path
+    //   不补 movl %eax, %eax → bash $? 读 %rax 高位 garbage。QBE era W-059 修过
+    //   同 bug; self-backend 镜像 here (W-080 真修)。
+    if ret_qt == QBE_W_LOCAL() {
+        let _zx = sb_append_cstr(arena, s, "\tmovl %eax, %eax\n" as *u8);
+    }
     // v3.1.0 W-089 (caller-side derived-address dst slot pre-scan 真修延伸 —
     // call result pointer-flag):emit_call 没把 l-typed call result 标 address-holder,
     // 导致后续 `loadl %t<call_ret>` 走 formula pool direct-load path 而不是 indirect

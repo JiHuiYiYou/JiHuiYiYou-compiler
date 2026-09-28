@@ -15,17 +15,19 @@
 //   std_io_close(f)            -> 0 ok / -1 fail
 //   std_io_read(f, buf, n)     -> 实际读字节数
 //   std_io_write(f, buf, n)    -> 实际写字节数
-//   std_io_print(s)            -> stdout 写 cstr(stub,Phase 1)
-//   std_io_print_err(s)        -> stderr 写 cstr(stub,Phase 1)
+//   std_io_print(s)            -> stdout 写 cstr(真 impl,W-080 v3.2.3.1)
+//   std_io_print_err(s)        -> stderr 写 cstr(真 impl,W-080 v3.2.3.1)
 //
 // 注:
-//   - std_io_print / std_io_print_err 在 M0 是 stub(返 0,不实际写 stdout/
-//     stderr)。原因:用 libc fputs(stdout) 需 FILE* 常量地址,jhyy 拿不到。
-//     OS kernel M11 launch 时换 syscall 实现(写 com1 / serial port 直接)。
-//   - Phase 2+:jhyy 拿到 stderr/stdout FILE* 需走 C-side 静态变量
-//     (jh_stdout_get / jh_stderr_get),per v3.x mid plan 留待后续。
+//   - std_io_print / std_io_print_err 真 impl (W-080 v3.2.3.1 ship):走
+//     C-side jh_fputs_stdout / jh_fputs_stderr 现成桥 (jhyy_helpers.c L32/36,
+//     v1.5.6 W-049 UTF-8 mode preserved)。fputs → stdout/stderr 直接写,
+//     无需 jhyy 拿 FILE* 地址 (bridge 帮做)。
+//   - OS kernel M11 launch 后换 syscall 实现 (写 com1 / serial port):
+//     改 jhyy_helpers.c 的 jh_fputs_* 实现 (printf→write syscall),std/io.jhyy
+//     不变。
 //
-// 测试:`compiler/tests/examples/std_io_basic.jhyy` (5+ sub-test)
+// 测试:`compiler/tests/examples/std_io_basic.jhyy` (6 sub-test)
 
 // ════════════════════════════════════════════════════
 // FFI — libc via runtime.c + jhyy_helpers.c link path
@@ -83,21 +85,31 @@ fn std_io_write(f: *u8, buf: *u8, n: i64) -> i64 {
 }
 
 // ════════════════════════════════════════════════════
-// stdio print API(M0 stub)
+// stdio print API (v3.2.3.1 W-080 真修)
 // ════════════════════════════════════════════════════
 //
-// M0 设计取舍:std_io_print / std_io_print_err 是 stub(返 0)。user 测试
-// 不走 stdout 比对,改用 std_io_open("stdout.txt") + std_io_write 模式。
-// 这样 std lib 跟 stdout 解耦,future OS kernel 时换 syscall 实现(写 com1 /
-// serial port)只改 std_io module,test 不变。Phase 2+:jhyy 拿到 stderr/stdout
-// FILE* 需走 jh_stdout_get / jh_stderr_get (C-side 静态变量,per v3.x mid plan)。
+// 走 C-side jh_fputs_stdout / jh_fputs_stderr 现成桥 (jhyy_helpers.c L32/36,
+// v1.5.6 W-049 UTF-8 mode preserved, W-079 verified path)。fputs 走 libc
+// UTF-8 mode,中文输出正常 (chcp 65001)。
+//
+// OS kernel M11 launch 后:改 jhyy_helpers.c jh_fputs_* 实现 (printf→
+// write syscall,目标 com1 / serial port),std/io.jhyy 不变。
 
-fn std_io_print(_s: *u8) -> i32 {
-    return 0;
+extern fn jh_fputs_stdout(s: *u8) -> i32;
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+
+fn std_io_print(s: *u8) -> i32 {
+    if s == (0 as *u8) {
+        return 0 as i32 - (1 as i32);
+    }
+    return jh_fputs_stdout(s);
 }
 
-fn std_io_print_err(_s: *u8) -> i32 {
-    return 0;
+fn std_io_print_err(s: *u8) -> i32 {
+    if s == (0 as *u8) {
+        return 0 as i32 - (1 as i32);
+    }
+    return jh_fputs_stderr(s);
 }
 
 fn std_io_eprint(s: *u8) -> i32 {
