@@ -3,6 +3,50 @@
 > JHYY 项目所有 workaround 的唯一权威登记处。
 > 每个 workaround 必须在此登记后才能应用到代码里。
 
+## ACTIVE/DEFERRED Audit Summary (2026-09-28)
+
+> Per user 2026-09-28 audit,区分"真 ACTIVE (🟡 真 bug,有 partial fix 或 workaround 兜底,full 真修 deferred)"vs"非 ACTIVE 残留 (entry 标 ACTIVE 但实际 ENV-ONLY / STABLE-PRODUCTION / RESOLVED label 滞后)"。
+
+### 真 ACTIVE (🟡)
+
+| Worktree | ID | Trigger | 兜底 |
+|---|---|---|---|
+| main (1 条) | W-085 | `fn(*T, i32, i32)` 小 frame emit_call 第 3 i32 参数 register 错位 | signature reorder |
+| axis-v3 (3 条) | W-085 | 同上 | 同上 |
+| axis-v3 | W-088 | `cg_compute_per_fn_max_temps` 不算 caller-side pre-scan → derived-address 越界 | `derived_count = total_a / 2` 估算 (state.jhyy:1345-1346) |
+| axis-v3 | W-089 | `emit_call` 不 flag l-typed call results as address-holder → `*(call_ret as *T)` load 错字节 | 5th `cg_record_temp_holds_address` site + byte-prefix 白名单 (emit_call.jhyy:1060-1090) |
+
+**Full 真修目标**: W-085 / W-088 / W-089 全推到 **v3.x mid** (emit_call register alloc 重写 + 2-pass alloc pre-scan + caller-side inter-procedural pointer-typing analysis)。
+
+### 真 DEFERRED (🔵)
+
+**0 条** (2026-09-28 audit 状态)— 之前 defer 的都在各 sprint 闭环了,无 active defer。
+
+### 容易混淆的"非 ACTIVE"残留 (entry label 滞后 / 已 reclassify)
+
+| ID | Entry 状态 | 实际状态 |
+|---|---|---|
+| W-022 | entry 标 ACTIVE | 🌍 ENV-ONLY (GitHub Actions windows-latest PS5.1) |
+| W-023 | entry 标 ACTIVE | 🌍 ENV-ONLY (GH Actions msys2 bash 设计如此) |
+| W-024 | entry 标 ACTIVE | 🌍 ENV-ONLY (GitHub Actions windows-latest PS5.1) |
+| W-029 | entry 标 🟢 ACTIVE | STABLE-PRODUCTION (v1.5.6 `a2dd4c1` ship,4+ 年无 case) |
+| W-051 | entry 标 🟢 ACTIVE | ✅ RESOLVED 2026-08-28 (v1.7.1 patch B2 永久 workaround 化) |
+
+W-022 / W-023 / W-024 / W-029 已在 main worktree 的 v2.13.4 audit-flip 标 SUPERSEDED closed (per main `workarounds.md` 同名 entry)。axis-v3 因 mirror 没追更,label 残留。**本次 ship audit-flip,统一**:W-022/023/024 → 🌍 ENV-ONLY SUPERSEDED + W-029 → 🟢 STABLE-PRODUCTION SUPERSEDED。
+
+### 合计
+
+| 状态 | main | axis-v3 |
+|---|---|---|
+| 🟡 真 ACTIVE | 1 | 3 |
+| 🔵 DEFERRED | 0 | 0 |
+| ✅ RESOLVED | 77+ | 80+ |
+| SUPERSEDED | 5 | 4 (本次 ship 后 → 9,追上 main 5+) |
+
+### 含义
+
+v3.x 即使 ship + v4.0.0 merge,3 条 ACTIVE 仍待 v3.x mid — 不影响 regress 145/145 / D43 closure / M11 launch (条件已 MET),但 self-backend 大型程序 (cross-fn pointer-returning call / 256+ temp_id) 仍受 heuristic + whitelist + bitmap bound 4096 限制。
+
 ## 登记格式
 
 每个 workaround 必须包含：
@@ -1932,7 +1976,7 @@ if (-not (Test-Path $balDll)) {
 
 ## W-022: Windows PowerShell 5.1 `Out-File -Encoding utf8` 加 UTF-8 BOM 污染 `$GITHUB_ENV`
 
-**状态:** ACTIVE (PowerShell 5.1 在 windows-latest runner 是 default; GH Actions 升级 PS7 之前持续)
+**状态:** SUPERSEDED closed 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.4 close) — 🌍 ENV-ONLY, 非 ACTIVE bug。PowerShell 5.1 是 GitHub Actions `windows-latest` runner default (`PSDefaultParameterValues` 不能 unset BOM/CRLF);Jhyy-side 不可修(不是 jhyy 编译产物问题,是 GitHub runner PS 版本依赖)。Canonical pattern (v1.5.5 起) = `Set bash as default shell step`,PowerShell step 改用 `[System.IO.File]::WriteAllText($path, $content, [System.Text.UTF8Encoding]::new($false))` 强制 utf8NoBOM。GH Actions 升 PS7 后 PS7 `Set-Content -Encoding utf8` default 无 BOM,可考虑删除 workaround;在此之前保留作为 stable pattern。原 entry label "ACTIVE" 是 v1.5.5 当时 lack of reclassify convention 残留。
 
 **触发场景:**
 在 `.github/workflows/release.yml` 的 pwsh step 里写 env 到 `$GITHUB_ENV`:
@@ -1974,7 +2018,7 @@ PowerShell 7+ 的 `Out-File -Encoding utf8` 是 UTF-8 no BOM (没有这个 bug),
 
 ## W-023: MSYS2 bash step 里 `${VAR}` 不展开 `${{ env.X }}` GH 表达式
 
-**状态:** ACTIVE (yaml 表达式 + bash sub-shell 语义鸿沟, GH Actions 设计就这样)
+**状态:** SUPERSEDED closed 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.3 close) — 🌍 ENV-ONLY, 非 ACTIVE bug。`${VAR}` 不展开 `${{ env.X }}` GH 表达式 是 GH Actions msys2 bash step 设计如此:yaml 表达式只 expanded 在 yaml 解析期, msys2 bash sub-shell `run:` block 拿不到。Canonical pattern = `echo "VERSION=${VERSION}"` 直接读 `$VERSION` (从 env block 注入),或用 `${{ env.VERSION }}` 强制 yaml 表达式 expand。entry 自身写 "失效条件 N/A (设计如此)" 即承认无 bug。原 label "ACTIVE" 是 v1.5.5 当时 lack of reclassify convention 残留。
 
 **触发场景:**
 `.github/workflows/release.yml` 的 msys2 bash step:
@@ -2019,7 +2063,7 @@ PowerShell 7+ 的 `Out-File -Encoding utf8` 是 UTF-8 no BOM (没有这个 bug),
 
 ## W-024: PowerShell 5.1 `Set-Content` / `Out-File` 写 UTF-8 文本默认加 BOM + CRLF
 
-**状态:** ACTIVE (PS5.1 default 在 windows-latest runner)
+**状态:** SUPERSEDED closed 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.4 close) — 🌍 ENV-ONLY, 非 ACTIVE bug。跟 W-022 同根因 (PS5.1 default 在 windows-latest runner):`Set-Content -Encoding utf8` / `Out-File -Encoding utf8` 写 UTF-8 文本默认加 BOM + CRLF。Jhyy-side 不可修(不是 jhyy 编译产物问题,是 GitHub runner PS 版本依赖)。Canonical pattern = `[System.IO.File]::WriteAllText($path, $content, [System.Text.UTF8Encoding]::new($false))` 强制 utf8NoBOM (或 `Set bash as default shell` 走 bash step,无 PS BOM 问题)。GH Actions 升 PS7 后 PS7 `Set-Content -Encoding utf8` default 无 BOM,可考虑删除 workaround。原 label "ACTIVE" 是 v1.5.5 当时 lack of reclassify convention 残留。
 
 **触发场景:**
 PowerShell 写 UTF-8 文本文件 (用于上传到 GitHub Release 或下游工具消费):
@@ -2253,7 +2297,7 @@ GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step
 
 ## W-029: jhyy.exe toolchain 探测收敛 — `jh_gcc_path()` 4-tier 优先级 + `jh_gcc_invoke()` 包装替代 v1.0.0 跨 3 文件 MSYS2 探测逻辑
 
-**状态:** 🟢 ACTIVE (v1.5.6 ship, commit TBD)
+**状态:** SUPERSEDED closed 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.4 close) — 🟢 STABLE-PRODUCTION, 非 ACTIVE unfixed bug。真修 ship 在 v1.5.6 commit `a2dd4c1` "feat(v1.5.6): jhyy_helpers.c 加 jh_gcc_path() + jh_gcc_invoke() — A 派 Driver 探测" + docs commit `28450d3` "docs(v1.5.6): workarounds W-027 SUPERSEDED + W-029 ACTIVE + changelog v1.5.6 section"。`commit TBD` 是 docs 漏填(真修 commit 已 ship,只是 entry 当时没补填);v2.13.4 RCA closeout 标 🟢 STABLE-PRODUCTION 替代 🟢 ACTIVE (后者 label 误导,future contributor 看到 🟢 ACTIVE 误以为还需真修)。Fix ship'd 4+ years stable in production,无未修项。原 label "🟢 ACTIVE" 是 v1.5.6 ship 当时 lack of reclassify convention 残留。
 **日期:** 2026-08-15
 **触发面:** `compiler/src0/jhyy_helpers.c` (jh_gcc_path + jh_gcc_invoke) +
 `compiler/src0/main.jhyy` (link_with_gcc 改用 jh_gcc_invoke) +
