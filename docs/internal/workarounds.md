@@ -3,50 +3,6 @@
 > JHYY 项目所有 workaround 的唯一权威登记处。
 > 每个 workaround 必须在此登记后才能应用到代码里。
 
-## ACTIVE/DEFERRED Audit Summary (2026-09-28)
-
-> Per user 2026-09-28 audit,区分"真 ACTIVE (🟡 真 bug,有 partial fix 或 workaround 兜底,full 真修 deferred)"vs"非 ACTIVE 残留 (entry 标 ACTIVE 但实际 ENV-ONLY / STABLE-PRODUCTION / RESOLVED label 滞后)"。
-
-### 真 ACTIVE (🟡)
-
-| Worktree | ID | Trigger | 兜底 |
-|---|---|---|---|
-| main (1 条) | W-085 | `fn(*T, i32, i32)` 小 frame emit_call 第 3 i32 参数 register 错位 | signature reorder |
-| axis-v3 (3 条) | W-085 | 同上 | 同上 |
-| axis-v3 | W-088 | `cg_compute_per_fn_max_temps` 不算 caller-side pre-scan → derived-address 越界 | `derived_count = total_a / 2` 估算 (state.jhyy:1345-1346) |
-| axis-v3 | W-089 | `emit_call` 不 flag l-typed call results as address-holder → `*(call_ret as *T)` load 错字节 | 5th `cg_record_temp_holds_address` site + byte-prefix 白名单 (emit_call.jhyy:1060-1090) |
-
-**Full 真修目标**: W-085 / W-088 / W-089 全推到 **v3.x mid** (emit_call register alloc 重写 + 2-pass alloc pre-scan + caller-side inter-procedural pointer-typing analysis)。
-
-### 真 DEFERRED (🔵)
-
-**0 条** (2026-09-28 audit 状态)— 之前 defer 的都在各 sprint 闭环了,无 active defer。
-
-### 容易混淆的"非 ACTIVE"残留 (entry label 滞后 / 已 reclassify)
-
-| ID | Entry 状态 | 实际状态 |
-|---|---|---|
-| W-022 | entry 标 ACTIVE | 🌍 ENV-ONLY (GitHub Actions windows-latest PS5.1) |
-| W-023 | entry 标 ACTIVE | 🌍 ENV-ONLY (GH Actions msys2 bash 设计如此) |
-| W-024 | entry 标 ACTIVE | 🌍 ENV-ONLY (GitHub Actions windows-latest PS5.1) |
-| W-029 | entry 标 🟢 ACTIVE | STABLE-PRODUCTION (v1.5.6 `a2dd4c1` ship,4+ 年无 case) |
-| W-051 | entry 标 🟢 ACTIVE | ✅ RESOLVED 2026-08-28 (v1.7.1 patch B2 永久 workaround 化) |
-
-W-022 / W-023 / W-024 / W-029 已在 main worktree 的 v2.13.4 audit-flip 标 SUPERSEDED closed (per main `workarounds.md` 同名 entry)。axis-v3 因 mirror 没追更,label 残留。**本次 ship audit-flip,统一**:W-022/023/024 → 🌍 ENV-ONLY SUPERSEDED + W-029 → 🟢 STABLE-PRODUCTION SUPERSEDED。
-
-### 合计
-
-| 状态 | main | axis-v3 |
-|---|---|---|
-| 🟡 真 ACTIVE | 1 | 3 |
-| 🔵 DEFERRED | 0 | 0 |
-| ✅ RESOLVED | 77+ | 80+ |
-| SUPERSEDED | 5 | 4 (本次 ship 后 → 9,追上 main 5+) |
-
-### 含义
-
-v3.x 即使 ship + v4.0.0 merge,3 条 ACTIVE 仍待 v3.x mid — 不影响 regress 145/145 / D43 closure / M11 launch (条件已 MET),但 self-backend 大型程序 (cross-fn pointer-returning call / 256+ temp_id) 仍受 heuristic + whitelist + bitmap bound 4096 限制。
-
 ## 登记格式
 
 每个 workaround 必须包含：
