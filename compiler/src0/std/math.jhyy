@@ -1,0 +1,70 @@
+// math.jhyy — v3.2.5 (3l.4) std lib 数学 (FFI libm, f64-only M0)。
+//
+// 设计 (per `docs/plans/v3/v3.2.5-plan.md` + user 2026-09-28 "v3.2.5 go"):
+//   - FFI libm 直接接 (Option A):`extern fn sin/cos/sqrt/pow` 直接 declare
+//     走 MSVCRT (Windows) / libc + libm (POSIX);`-lm` 已在 link line
+//     (per main.jhyy:1201 + jhyy_helpers.c:424 comment)。
+//   - 不走 C-side bridge (Option B 弃用):V3 self-backend 已 support f64 ret
+//     通过 %xmm0 + movsd (codegen_amd64_emit_call.jhyy:502-506 文档 + L873-886
+//     实 impl);Option B 的 store pattern 是 QBE-era 绕过,post-QBE moot。
+//   - f64-only M0:f32 variants 推 v3.x 中 (实际 f32 user case 出现后再加)。
+//   - 不用 closure / generic / 借用 (per v3.2.3 W-077 root cause 跨模块 import 不稳)。
+//   - 用 std_math_* 前缀 (W-076 风格 + W-091 catch-all `std_` prefix 覆盖
+//     std_math_* returns;但本模块 fn 全返 f64 不返 pointer,W-091 over-flag
+//     无副作用)。
+//
+// API:
+//   std_math_sin(x: f64)             -> f64 (sin(x), radian)
+//   std_math_cos(x: f64)             -> f64 (cos(x), radian)
+//   std_math_sqrt(x: f64)            -> f64 (sqrt(x) ≥ 0, NaN if x < 0)
+//   std_math_pow(base: f64, exp: f64) -> f64 (base^exp)
+//
+// OS kernel M11 launch 后:不动 std/math.jhyy,libc FFI 路径不变;kernel
+// 自带 sin/cos/sqrt/pow impl 替换 MSVCRT/libc 即可。
+//
+// 测试:`compiler/tests/examples/std_math_basic.jhyy` (6 sub-test)
+
+// ════════════════════════════════════════════
+// FFI — direct extern to libc / MSVCRT libm (per -lm link flag)
+// ════════════════════════════════════════════
+//
+// Per codegen_amd64_emit_call.jhyy:502-506:f32/f64 ret 用 %xmm0 + movss/movsd
+// (SysV/Win ABI 一致);f32/f64 arg 走 %xmm0..%xmm7 + movss/movsd。
+// 故 extern fn sin(x: f64) -> f64 走 XMM arg alloc + XMM ret store,
+// 无需 C-side bridge (Option B store pattern 是 QBE-era 绕过,post-QBE moot)。
+
+extern fn sin(x: f64) -> f64;
+extern fn cos(x: f64) -> f64;
+extern fn sqrt(x: f64) -> f64;
+extern fn pow(base: f64, exp: f64) -> f64;
+
+// ════════════════════════════════════════════
+// Math API
+// ════════════════════════════════════════════
+
+// std_math_sin — sin(x), x in radian
+//   libm 返回 finite 值 for finite input;inf/nan 透传 (IEEE 754)
+//   no exception / no errno
+fn std_math_sin(x: f64) -> f64 {
+    return sin(x);
+}
+
+// std_math_cos — cos(x), x in radian
+//   libm 返回 finite 值 for finite input;inf/nan 透传
+fn std_math_cos(x: f64) -> f64 {
+    return cos(x);
+}
+
+// std_math_sqrt — √x (square root)
+//   x ≥ 0 → finite value;x < 0 → NaN (no exception)
+//   x = +∞ → +∞;x = -∞ → NaN;x = NaN → NaN
+fn std_math_sqrt(x: f64) -> f64 {
+    return sqrt(x);
+}
+
+// std_math_pow — base^exp (general exponentiation)
+//   libm C99 semantics:pow(±0, exp) → ±0/+∞/1/NaN per exp sign;
+//   pow(base, ±0) → 1;pow(1, any) → 1;pow(NaN, exp) → NaN;etc.
+fn std_math_pow(base: f64, exp: f64) -> f64 {
+    return pow(base, exp);
+}

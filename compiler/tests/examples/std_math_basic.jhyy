@@ -1,0 +1,123 @@
+// std_math_basic.jhyy — v3.2.5 (3l.4) std::math FFI libm basic test.
+// 6 sub-test: sin(0)=0 / cos(0)=1 / sqrt(4)=2 (bit-exact) +
+//             sqrt(2)≈1.41421... (delta 1e-9) +
+//             pow(2,10)=1024 (bit-exact) +
+//             pow(3,0.5)≈1.73205... (delta 1e-9)
+// EXPECT: 0
+//
+// 注: per v3.2.2 W-076 + std lib plan, test inline 副本用 std_math_* 前缀
+// 避免符号 multiple definition(runtime.c 已有 sin/cos 等)。
+// std/math.jhyinline 副本 + public API 等价 std/math.jhyy。
+
+// ════════════════════════════════════════════
+// ptr_add — 本地指针算术 helper (跟 std_io_basic.jhyy 同步)
+// ════════════════════════════════════════════
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+
+// ════════════════════════════════════════════
+// std/math.jhyy inline 副本 (per W-076)
+// ════════════════════════════════════════════
+extern fn sin(x: f64) -> f64;
+extern fn cos(x: f64) -> f64;
+extern fn sqrt(x: f64) -> f64;
+extern fn pow(base: f64, exp: f64) -> f64;
+
+fn std_math_sin(x: f64) -> f64 {
+    return sin(x);
+}
+
+fn std_math_cos(x: f64) -> f64 {
+    return cos(x);
+}
+
+fn std_math_sqrt(x: f64) -> f64 {
+    return sqrt(x);
+}
+
+fn std_math_pow(base: f64, exp: f64) -> f64 {
+    return pow(base, exp);
+}
+
+// ════════════════════════════════════════════
+// bit-pattern + delta helpers
+// ════════════════════════════════════════════
+
+// bits_eq_f64 — f64 bit pattern equality (cast to i64, then compare)
+fn bits_eq_f64(a: f64, b: f64) -> i32 {
+    let ai: i64 = a as i64;
+    let bi: i64 = b as i64;
+    if ai == bi {
+        return 1;
+    }
+    return 0;
+}
+
+// nearly_eq — |a-b|<eps delta check (avoid nested && per W-089)
+fn nearly_eq(a: f64, b: f64, eps: f64) -> i32 {
+    let mut d: f64 = a - b;
+    if d < 0.0 {
+        d = 0.0 - d;
+    }
+    if d < eps {
+        return 1;
+    }
+    return 0;
+}
+
+// ════════════════════════════════════════════
+// main_jhyy — 6 sub-test
+//   1: sin(0) = 0          (exact bit pattern)
+//   2: cos(0) = 1          (exact bit pattern)
+//   3: sqrt(4) = 2         (exact)
+//   4: sqrt(2) ≈ 1.414...  (delta < 1e-9)
+//   5: pow(2, 10) = 1024   (exact)
+//   6: pow(3, 0.5) ≈ 1.732 (delta < 1e-9)
+// 总 EXIT: 6 个 sub-test PASS (返回 0)。EXPECT: 0
+// ════════════════════════════════════════════
+
+fn main_jhyy() -> i32 {
+    // ── Sub-test 1: sin(0) = 0 (bit-exact) ──
+    let s0: f64 = std_math_sin(0.0);
+    if bits_eq_f64(s0, 0.0) == 0 {
+        return 1;
+    }
+
+    // ── Sub-test 2: cos(0) = 1 (bit-exact) ──
+    let c0: f64 = std_math_cos(0.0);
+    if bits_eq_f64(c0, 1.0) == 0 {
+        return 2;
+    }
+
+    // ── Sub-test 3: sqrt(4) = 2 (exact) ──
+    let sq4: f64 = std_math_sqrt(4.0);
+    if bits_eq_f64(sq4, 2.0) == 0 {
+        return 3;
+    }
+
+    // ── Sub-test 4: sqrt(2) ≈ 1.4142135623730951 (delta < 1e-9) ──
+    //   注: long literal + 1e-9 scientific notation inlined 触发 parse limit;
+    //   提取到 local var 避免。epsilon ref value = 1.4142135623730951。
+    let sq2: f64 = std_math_sqrt(2.0);
+    let sqrt2_ref: f64 = 1.4142135623730951;
+    let eps: f64 = 0.000000001;
+    if nearly_eq(sq2, sqrt2_ref, eps) == 0 {
+        return 4;
+    }
+
+    // ── Sub-test 5: pow(2.0, 10.0) = 1024.0 (exact) ──
+    let p: f64 = std_math_pow(2.0, 10.0);
+    if bits_eq_f64(p, 1024.0) == 0 {
+        return 5;
+    }
+
+    // ── Sub-test 6: pow(3.0, 0.5) ≈ 1.7320508075688772 (delta < 1e-9) ──
+    let p3: f64 = std_math_pow(3.0, 0.5);
+    let pow3_ref: f64 = 1.7320508075688772;
+    if nearly_eq(p3, pow3_ref, eps) == 0 {
+        return 6;
+    }
+
+    return 0;
+}

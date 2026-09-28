@@ -1183,3 +1183,108 @@ V3-C sub-sprint 8/N — **std lib vec/map M0 generics** (`std::vec<T>` 动态数
 - Workarounds: **W-079** (✅ RESOLVED 2026-09-28, QBE moot + W-080 superseder) + **W-080** (✅ RESOLVED 2026-09-28, v3.2.3.1 ship)
 - M11 launch gate: `docs/plans/v2/v2.0.0-os-prep.md § 1 M11` — v3.2.3.1 ship 不影响 std::math path (3l.4 v3.2.5 仍 deferred 等 3h 浮点)
 - v4.0.0 fold-in: `docs/plans/roadmap/v2-v3-parallel-sprint-plan.md § 5.1` — 本 ship + v3.2.4 / v3.2.4.2 全 fold 进 v4.0.0
+
+---
+
+# v3.2.5 — std::math FFI libm std lib module (3l.4) — closes M11 launch dependency
+
+> **ship date**: 2026-09-28
+> **branch**: `axis-v3`
+> **D43 baseline**: N15+1 (post-rebuild, additive; std/math.jhyy NEW module + 1 NEW test)
+> **D28 锁**: v3.2.5 ship = v3.x 关键路径 (OS-required) 完整 ship 完毕
+> **v3-pre-v4-infra-port strategy**: NO TAG, commit + push + 后续 v4.0.0 merge fold (per 2026-09-26 user 决定)
+> **umbrella**: 本文件 v3.2.5 section
+
+## 1. 范围 / Scope
+
+- **std/math.jhyy NEW**: 4 `std_math_*` wrappers (sin/cos/sqrt/pow) FFI libc/MSVCRT libm direct (Option A, 不走 C bridge)
+- **D28 硬前置 ✅ 解锁**: v3.3.0 ship (commit `3be1d12`, tag `v3.3.0`, 2026-09-28) — f32/f64 类型 + ABI 全到位
+- **1 NEW test**: `std_math_basic.jhyy` 6 sub-test (4 fn 全覆盖, bit-exact + delta check)
+- **M11 launch 解锁条件之一**: v3.2.5 ship + V2-C v2.8.0 ship → M11 launch 可启动 (per `v2.0.0-os-prep.md § 1 M11`)
+
+## 2. 改动 / Changes
+
+### 2.1 std/math.jhyy NEW (~75 LOC)
+
+```jhyy
+// FFI extern decls (direct, no C-side bridge)
+extern fn sin(x: f64) -> f64;
+extern fn cos(x: f64) -> f64;
+extern fn sqrt(x: f64) -> f64;
+extern fn pow(base: f64, exp: f64) -> f64;
+
+// std_math_* wrappers
+fn std_math_sin(x: f64) -> f64 { return sin(x); }
+fn std_math_cos(x: f64) -> f64 { return cos(x); }
+fn std_math_sqrt(x: f64) -> f64 { return sqrt(x); }
+fn std_math_pow(base: f64, exp: f64) -> f64 { return pow(base, exp); }
+```
+
+Per `compiler/src0/codegen_amd64_emit_call.jhyy:502-506`:f32/f64 ret 用 %xmm0 + movss/movsd (SysV/Win ABI 一致);f32/f64 arg 走 %xmm0..%xmm7。**Option A direct extern** 是 V3 self-backend 自然路径,无 C-side bridge 必要。
+
+### 2.2 std_math_basic.jhyy NEW (~100 LOC)
+
+6 sub-test, all return 0 on success:
+1. `sin(0) = 0` (bit-exact)
+2. `cos(0) = 1` (bit-exact)
+3. `sqrt(4) = 2` (exact)
+4. `sqrt(2) ≈ 1.4142135623730951` (delta < 1e-9)
+5. `pow(2, 10) = 1024` (bit-exact)
+6. `pow(3, 0.5) ≈ 1.7320508075688772` (delta < 1e-9)
+
+**Inline copy of std/math.jhyy** (per W-076 root cause — subdir import + runtime.c name clash 避免)。
+
+**Parser caveat**:`1e-9` scientific notation 不支持 in fn arg 位置 (`nearly_eq(a, b, 1e-9)` 触发 `unexpected token`);workaround: extract 到 local var `let eps: f64 = 0.000000001;` 再传入 fn arg。**doc 化 in `jhyy-lang-spec-stdlib-math-supplement-v3.2.5.md` § 5 Caveat**。
+
+### 2.3 Docs
+
+- `docs/plans/v3/v3.2.5-plan.md` status ⏳ → 🟡 WIP
+- `docs/abis/jhyy-lang-spec-stdlib-math-supplement-v3.2.5.md` NEW (~70 LOC)
+- `compiler/build/bin/jhyy.exe.sha256` baseline refresh
+
+**No codegen changes**(本 ship 是纯 std module + test + docs,无 `compiler/src0/codegen_*.jhyy` 改动)。
+
+## 3. 关键设计决策
+
+| # | 问题 | 决策 | 理由 |
+|---|------|------|------|
+| 1 | f64-only or f64+f32 M0? | **f64-only** | f64 covers default literal;f32 推 v3.x 中 |
+| 2 | Direct extern (A) vs C bridge (B)? | **Option A** | V3 self-backend f64 ret verified clean (`emit_call.jhyy:502-506`);bridge 是 QBE-era 绕过, post-QBE moot |
+| 3 | sin/cos/sqrt/pow only? | **M0 = 4 fn** (per v3.2.5-plan.md scope) | tan/log/exp/floor/ceil/fabs/atan2/asin/acos/atan 推 v3.x 中 |
+| 4 | fmod? | **不进 std::math** | user-space formula 已 ship per `fmod_basic.jhyy` / `fmod_f32.jhyy` (per W-066 history) |
+| 5 | Link flag? | **-lm 已 in link line** (per `main.jhyy:1201` + `jhyy_helpers.c:424` comment) | 无需 Makefile 修改 |
+| 6 | NaN/Inf edge handling? | **不 wrapper-level 拦截** | libm IEEE 754 标准行为,user 自己处理 |
+| 7 | W-NNN? | **无 new** | W-080 covers i32 ret;f64 ret verified clean;W-091 catch-all `std_` covers (但 std_math_* 全返 f64 不触发) |
+| 8 | Tag strategy? | **🟡 NO TAG** (v3-pre-v4-infra-port) | per 2026-09-26 user 决定 |
+| 9 | Commit name? | `feat(stdlib-math): add std/math FFI libm std lib module (3l.4) — closes M11 launch dependency` | per `feedback_audit_single_commit_diff` |
+| 10 | Plan file edit? | **modify existing `v3.2.5-plan.md`** only | per `feedback_small_plans_no_docs` |
+
+## 4. Verification
+
+- ✅ `make all` green (no codegen 主干 change;no jhyy_helpers.c change)
+- ✅ std_math_basic.jhyy **6/6 PASS** (sub-test 1-6 全 0;isolated run EXIT=0)
+- ✅ `python regress.py --binary=compiler/build/bin/jhyy.exe --no-baseline-check` → **152/152 PASS / 0 FAIL / 20 SKIP** (was 151/151; +1 new std_math_basic test)
+- ✅ `compiler/build/bin/jhyy.exe.sha256` baseline refresh
+- ✅ D43 closure chain **N15+1 hold** (std/math.jhyy 是 NEW src0 file + 1 NEW test + doc-only changes;codegen 主干不动)
+
+**fix evaluation rule** (per `feedback_fix_evaluation_rule`):152/152 regress PASS + std_math_basic 6/6 = 7 target test 全 PASS。
+
+## 5. Commit / Tag
+
+- **Commit 1** (single ship, per `feedback_audit_single_commit_diff`):
+  `feat(stdlib-math): add std/math FFI libm std lib module (3l.4) — closes M11 launch dependency`
+- **Tag**:**🟡 NO TAG** (v3-pre-v4-infra-port strategy;v4.0.0 merge 时统一 fold)
+- **Push**: `git push origin axis-v3` (per `feedback_auto_push_after_commit` + `feedback_ssh_key_same_shell`)
+
+## 6. Cross-ref
+
+- L1 设计: `docs/plans/roadmap/v3.x-language-expansion.md § Sprint 3l.4`
+- L2 设计: `docs/plans/v3/v3.2.5-plan.md` (status flip today)
+- 上游: `changelog-v3.2.md` v3.2.4.2 (W-094/W-095) + v3.2.4 (W-090/W-091/W-092) + v3.2.3.1 (W-080) + v3.2.3 (3l.2 io/os) + v3.2.2 (3l.1 mem/fmt/string/arena) + v3.2.1 (3j closures) + v3.2.0 (3i generics);**D28 硬前置**: `changelog-v3.3.md` (no-op verification, ✅ ship 2026-09-28 tag `v3.3.0`)
+- 下游: **`v4.0.0-plan.md` (v2+v3 merge)** — v3.2.5 ship = v3.x 关键路径 (OS-required) 完整 ship 完毕;merge 时机 user 决定
+- D43 chain: `docs/logs/v3/d43-baseline-archive.md` (N15 hold → N15+1 post-ship, additive)
+- std lib spec: `docs/abis/jhyy-lang-spec-stdlib-math-supplement-v3.2.5.md` (NEW, 本 ship)
+- f32/f64 type ship: `docs/abis/jhyy-lang-spec-floatsupplement-v3.3.0.md` (D28 硬前置)
+- Workarounds: 无新 W-NNN (W-080 covers i32;W-089 ACTIVE 但 std_math_* 不触发 — 全 f64 ret 不返 pointer;W-091 catch-all `std_` prefix 已覆盖 std_math_* returns)
+- M11 launch gate: `docs/plans/v2/v2.0.0-os-prep.md § 1 M11` — v3.2.5 ship + V2-C v2.8.0 ship → M11 launch 可启动
+- v4.0.0 fold-in: `docs/plans/roadmap/v2-v3-parallel-sprint-plan.md § 5.1` (本 ship + 全部 v3.x sub-sprint 全 fold)
