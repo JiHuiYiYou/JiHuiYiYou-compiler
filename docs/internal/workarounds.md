@@ -5817,8 +5817,8 @@ emit_load 现在对每个 dst result temp 都分配 dedicated alloc pool slot (c
 ## W-085: codegen small-frame fn(*T, i32, i32) 第 3 i32 参数 save 寄存器错位 (推 v3.x)
 
 **ID:** W-085
-**状态:** 🟡 ACTIVE (workaround in place via signature reorder; 真修 deferred v3.x)
-**日期:** 2026-09-22 (v2.16.0 bench.sh nqueens 期间发现)
+**状态:** ✅ RESOLVED 2026-09-29 (v3.4.0 ship docs-only flip — RCA v3.4.0 发现 W-085 已在 V3 v3.3.0 self-backend 不 reproduce;bench.sh reorder 是 dead code;workaround revert + entry 翻 ✅)
+**日期:** 2026-09-22 (v2.16.0 bench.sh nqueens 期间发现) → 2026-09-29 (v3.4.0 RCA flip)
 
 **触发面:** 任何 `fn f(p: *T, a: i32, b: i32)` 这种 *T 在前 + 2+ i32 的 small-frame 函数 — frame < 136B 时 emit_call 第 3 个 i32 参数 save 寄存器错位 (`%ecx` 覆盖 `%r8d`) → caller 端 arg corruption。
 
@@ -5836,9 +5836,22 @@ V2 v2.16.0 bench.sh nqueens 期间 4 个 reproducer 拆解 + assembly dump RCA �
 
 **影响范围:** `compiler/tests/bootstrap/bench.sh` nqueens 函数 signature; V2 v2.16.0 ship 时 discover + workaround; bench.sh 加 WARN note 解释 reorder 原因。
 
-**superseder:** v3.x (post-v4.0.0 V2+V3 converge per [[feedback_plans_per_version]] plan)
+**superseder:** ✅ v3.4.0 RCA (commit `<sha>`, 2026-09-29) — `git diff --stat HEAD~1 HEAD` 验证 src0/ 无 codegen 改动,只 docs flip + bench.sh revert。
 
-**引用:** V2 v2.16.0 commit `0b4cde5` ship tail message; `feedback_rca_first_root_cause` (4 个 reproducer 拆解); `feedback_codegen_small_frame_arg_corruption` (V2 触发面路径; V3 path 不存在)。
+**RCA v3.4.0 (per [[feedback_rca_first_root_cause]]):**
+- v3.4.0 sprint 启动时按 plan v3.4.0-plan.md § Critical files 真修 `int_arg_alloc` → wide/narrow sub-pool → 实际 ship 后 literal W-085 trigger `fn(*T, i32, i32)` 测试 SEGV(因 sub-pool 让 narrow idx 0 → ecx 跟 wide idx 0 → rcx 物理重叠)。**RCA iter 1**:看 v3.3.0 baseline jhyy.exe 直接编 literal trigger pattern `fn t3_f(p: *i32, a: i32, b: i32)` → EXIT=3 PASS,emit `movq ... %rcx; movl ... %edx; movl ... %r8d` 正确 ABI,无 save slot collision。
+- **RCA iter 2**:v3.3.0 直接编 nqueens W-085 trigger sig `fn solve(cols: *i32, N: i32, row: i32, sols: *i32)` → EXIT=40 (correct),bench nq ratio 1.073x(跟 workaround 1.077x 在 timing noise 内)。
+- **结论**:W-085 在 V2 v2.16.0 期间是 real bug(commit `0b4cde5` 4-reproducer RCA),但 V3 self-backend port 期间(`a82fb57` v3.2.3.1 W-080 / `d760c51` v3.2.4 W-090 / `0d9c527` v3.1.0 wholesale V2 port)某 iter 修了 save-slot collision(可能 W-080 std_io i32 zero-extend 触发的 emit_call refactor 改了 save-slot layout,或者 v3.1.0 wholesale port 时重写了 emit_call arg-save 路径)。bench.sh reorder 从此变 dead code,W-085 entry 误标 ACTIVE。
+- **修复**:v3.4.0 ship = bench.sh revert + workarounds.md ✅ flip + changelog。无 codegen 改动 src0/ = 0 line diff。
+
+**Verification (per [[feedback_fix_evaluation_rule]] 5/5 PASS on target test, 但 W-085 是 false-active 所以 verification = 文档 flip + bench ratio stable):**
+- bench.sh nq ratio:workaround 1.077x → revert 后 1.073x(noise 内,gate ≥ 1.000x PASS)
+- nqueens W-085 trigger sig:EXIT=40 (correct answer)
+- literal trigger `fn(*T, i32, i32)` standalone:test EXIT=3 PASS,v3.3.0 emit `movq ... %rcx; movl ... %edx; movl ... %r8d` 正确 ABI
+- regress full run:无 src0 改动 → 应保持 145/145 PASS / 0 FAIL / 20 SKIP
+- D43 closure chain:无 src0 改动 → 应保持 N16 → N17 byte-equal hold
+
+**引用:** V2 v2.16.0 commit `0b4cde5` ship tail message; `feedback_rca_first_root_cause` (4 个 reproducer 拆解 v2.16.0 → v3.4.0 重新 RCA 发现 false-active); `feedback_codegen_small_frame_arg_corruption` (V2 触发面路径; V3 path 不存在); `feedback_plans_per_version` (v3.4.0 docs-only ship 符合 per-version plan 原则,无 batch-V3 umbrella); `feedback_no_artifacts_in_project` (ship gate 验证 evidence 留 in-commit / workarounds.md,不另写 rca-V3.4.0.md)。
 
 
 
