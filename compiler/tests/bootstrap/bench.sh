@@ -17,10 +17,6 @@
 #
 # v2.16.0: first-time baseline. Perf optimization is v3.x territory per
 # feedback_no_artifacts_in_project convention.
-#
-# nqueens uses reordered signature (row: i32, c: i32, cols: *i32) to work
-# around W-085 codegen small-frame fn(*T, i32, i32) 3rd-arg corruption.
-# See docs/internal/workarounds.md W-085 for details.
 
 set -u
 
@@ -133,7 +129,7 @@ fn ok(row: i32, c: i32, cols: *i32) -> i32 {
     return 1;
 }
 
-fn solve(row: i32, N: i32, cols: *i32, sols: *i32) {
+fn solve(cols: *i32, N: i32, row: i32, sols: *i32) {
     if row == N {
         *sols = *sols + 1;
         return;
@@ -142,7 +138,7 @@ fn solve(row: i32, N: i32, cols: *i32, sols: *i32) {
     while c < N {
         if ok(row, c, cols) == 1 {
             cols[row] = c;
-            solve(row + 1, N, cols, sols);
+            solve(cols, N, row + 1, sols);
         }
         c = c + 1;
     }
@@ -151,7 +147,7 @@ fn solve(row: i32, N: i32, cols: *i32, sols: *i32) {
 fn main_jhyy() -> i32 {
     let cols: [i32; 7] = [0, 0, 0, 0, 0, 0, 0];
     let mut sols: i32 = 0;
-    solve(0, 7, &cols as *i32, &sols as *i32);
+    solve(&cols as *i32, 7, 0, &sols as *i32);
     printf("nqueens(7) = %d (expect 40)\n" as *u8, sols);
     return sols;
 }
