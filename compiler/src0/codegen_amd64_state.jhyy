@@ -1334,17 +1334,52 @@ fn cg_compute_per_fn_max_temps(state: *u8, tok_p: *u8, tok_size: i64, n: i64) ->
             }
             j = j + (1 as i64);
         }
-        // v3.1.0 W-088 (frame offset 越界真修 — caller-side derived-address dst slot):
-        // emit_binop path (per codegen_amd64_emit_call.jhyy:1753) 当 binop 是
-        // `add l-temp, X` 且 src1 是 address-holder → dst 走 cg_alloc_slot(8) advance
-        // next_offset。每 derived-address binop 占 8B in alloc pool region,frame_size
-        // 必须 cover 否则 store 到 derived-slot 越界 → STACK_OVERFLOW。
-        // Sub-pass 1 + 2 pre-scan: 累加 alloc-result ids → bitmap → scan binop tokens
-        // check src1 ∈ set → derived_count。简化 heuristic (token-parse 复杂):
-        // 把 alloc count / 2 当 derived upper bound (实际 derived 通常 ≤ alloc count)。
-        let mut derived_count: i64 = total_a / (2 as i64);
-        if derived_count < (8 as i64) {
-            derived_count = 8 as i64;
+        // v3.4.1 W-088 真修:address-holder-aware 2-pass pre-scan 替换 heuristic
+        // `derived_count = total_a / 2` (floor 8)。
+        //
+        // 触发面 (per workarounds.md W-088 L5512+):per-fn allocN 函数 + 函数间传 pointer
+        // (e.g. `arena_alloc -> ptr_add -> store`) → alloc slot offset 越界或 invalid assembly。
+        // Heuristic 假设 平均每 2 alloc slot 1 derived-address temp → alloc-heavy 过度 reserve,
+        // alloc-light + many-derived 函数 under-reserve → runtime crash。
+        //
+        // 真修 (per docs/plans/v3/v3.4.0-plan.md L42-51 spec):
+        //   Sub-pass 1: scan tokens;对每 ILTOK_BINOP with qbe_type=='l' (108) — pointer
+        //     add binop — derived_count++。**upper bound**:每个 `add l-type` binop 在
+        //     emit_binop path (codegen_amd64_emit_call.jhyy L1948) 都检查 src1
+        //     is_address_holder,如果 true → reserve derived-slot。无法 pre-scan 阶段
+        //     准确判断 src1 is_address_holder (因为 holds_address bitmap 是 emit 期
+        //     增量 build 的)→ 用 upper bound:count 所有 `=l add` binops,假设每个都
+        //     触发 derived-slot reservation。
+        //
+        //   比 heuristic **safe** (≥ heuristic count when alloc-heavy;≥ actual count
+        //   when alloc-light + many-derived);比 heuristic 浪费 ≥ alloc-heavy 路径
+        //   (~0-200B per fn difference),但消除 alloc-light + many-derived 的 crash。
+        //
+        // 注:v3.x mid 可用完整 dataflow analysis (sub-pass 1 + transitive closure +
+        //   text-parsed src1) 替换此 upper bound,见 W-096 deferred v3.x mid 候选。
+        //
+        // V3'' iter 2 (2026-09-29):经验发现纯 `count_l_add` 在 zero-alloc 函数
+        // (e.g. ffi_file main 0 个 `=l alloc` + 0 个 `=l add` binop — 但 fopen 返回的
+        // 指针 temp 仍是 address-holder,后续 ptr_add 需要 derived-slot) = 0,
+        // SEGV。同理 std_io_basic total_a=80,heuristic=40 但 count_l_add=34 < 40
+        // → heuristic 补 buffer。**fix:max(heuristic, count_l_add)**,既保 heuristic
+        // floor 8 + alloc-derived buffer,也保 alloc-light many-binop 充足 reserve。
+        let mut heuristic: i64 = total_a / (2 as i64);
+        if heuristic < (8 as i64) {
+            heuristic = 8 as i64;
+        }
+        let mut count_l_add: i64 = 0 as i64;
+        j = start;
+        while j < end {
+            let t2 = (tok_p as i64 + j * tok_size) as *ILToken;
+            if (*t2).kind == ILTOK_BINOP() && (*t2).qbe_type == (108 as i32) {
+                count_l_add = count_l_add + (1 as i64);
+            }
+            j = j + (1 as i64);
+        }
+        let mut derived_count: i64 = heuristic;
+        if count_l_add > derived_count {
+            derived_count = count_l_add;
         }
         let p3 = ptr_add_u8((*s).per_fn_alloc, fi * (8 as i64)) as *i64;
         *p3 = total_a + derived_count * (8 as i64);
