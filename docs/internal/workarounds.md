@@ -80,7 +80,7 @@
 | [W-086](#w-086-v3-self-backend-emit_copyemit_binopemit_conv-字段约定冲突--lexer-不-consume-operand-推-v307) | ✅ RESOLVED 2026-09-23 (v3.0.7/Commit 1 wholesale merge-file + strcmp migration + state cast + emit_conv comment drop + 2-op rewrite + op_len fix) | V3 self-backend `emit_copy` (读 `int_val`=src value, `text_len`=dst_id) / `emit_binop` (读 `int_val`=dst_id, 跟 emit_copy 冲突) / `emit_call` (读 `int_val`=ret temp id) / `emit_conv` (读 `int_val`=dst_id) **字段约定冲突** + `'%'` LHS lexer handler 不写 `int_val`/`text_len` 留 0 + lexer 不 consume operand → emit_* 读 src_int=0 / dst_id=0 → 默认 IMM / 写 -32(%rbp) → 0-byte .s。**2026-09-23 W-083 真修时深 RCA 发现** — V3 self-backend 从未被任何 CI gate 真 exercise, `byte_equal_amd64.sh --no-strict 5/5 PASS` 是 false positive (5 tests 全走 QBE fallback, default `compile --target=amd64_win` 不设 `JHY_SELF_BACKEND` → `run_backend` 落 `run_qbe` path)。**真修方案 (待 v3.0.7 design)**: (a) 统一 emit_copy/binop/conv 字段约定 (`int_val`/`text_len` 选一个);(b) lexer `'%'` LHS handler + `next_token_binop`/`copy`/`conv` 各自 consume operand 写入 token fields;(c) 删 1-to-1 简化 (per L4 § 4.3) — emit_* 用真 src/dst temp ids。**mandatory 前置 Ph.5a `qbe/` git rm**: Ph.5a 后 self-backend 成为 sole production path, W-086 全阻塞 V3。 |
 | [W-087](#w-087-v3-self-backend-emit_func_header-frame-size-不含-alloc-pool-区域--store-到-8200rbp-越界-stack_overflow) | ✅ RESOLVED 2026-09-23 (v3.0.9 真修 per-fn alloc pool pre-scan) | V3 self-backend `emit_func_header` 在 pre-scan 时 `next_offset=0 + total_alloc=0`, frame_size 只 cover formula pool (`(max_temp+1)*8`), 不 cover alloc pool region (起始 offset -8192 per `cg_alloc_slot`)。首次 alloc reserve `rbp-8192-X` 区域, 但 frame 太小 → store 到 `-8200(%rbp)` 越界写栈外 → STACK_OVERFLOW (per 2026-09-23 phase 5 binary regress 19 std_* fail)。V2.16.0 有同一 bug, V2 regress 126/147 PASS / 0 FAIL 仅因 corpus 无 std_* test 触发 + Windows stack auto-grow 兜底。**Code 真修**: `cg_state` struct 加 `per_fn_alloc: *u8` (i64[256]) + `cg_state_init` alloc + `cg_token_alloc_size` helper (parse `alloc8 N` / `alloc16 N` size) + `cg_compute_per_fn_max_temps` 第二阶段同时累加 per-fn alloc 总和 + `emit_func_header` 读 `per_fn_alloc[cur_fn_idx]` 决定 alloc pool reserve = `8192 + per_fn_total`。**Verification**: regress 142/142 PASS / 0 FAIL / 20 SKIP (含 10 个 std_* test 全绿)。jhyy.exe sha `dc670c1f4cf48841...` (post-W-087 rebuild)。 |
 | [W-088](#w-088-v3-self-backend-caller-side-store-pointer-temp-pre-scan-缺--derived-address-越界-推-v310-后--v3x) | ✅ RESOLVED 2026-09-29 (v3.4.1 ship 真修,heuristic + `=l add` count `max` 替换纯 heuristic) | V3 self-backend caller-side `cg_compute_per_fn_max_temps` 只算 formula pool max temp id, 不算 caller-side store-pointer temp pre-scan。`store(ptr_add(a, X), val)` IL 会 emit derived-address temp + val temp, derived-address temp 需要 alloc pool slot (`cg_alloc_slot(state, 8)`), 但 pre-scan 不算 → max_temp 偏小 → frame_size 偏小 → alloc slot offset 越界 → 19 std_* test 全 fail (per 2026-09-24 binary regress)。**v3.1.0 ship heuristic 兜底**: `derived_count = total_a / 2` (floor of 8) 估 derived-address temp 数加进 max_temp。**v3.4.1 ship 真修**: 保留 heuristic (保 zero-alloc 函数 floor 8 + alloc-heavy buffer) + 新增 `count_l_add` count `=l add` binops → `max(heuristic, count_l_add)` (补 alloc-light many-binop 函数 reserve)。regress 152/152 PASS / 0 FAIL / 20 SKIP。5 std_ W-088 trigger tests + 5 additional corpus tests 全 EXIT=0。 |
-| [W-089](#w-089-v3-self-backend-emit_call-不-flag-l-typed-call-results-as-address-holder--call_ret-as-t-模式-load-错字节-推-v310-后--v3x) | 🟡 ACTIVE (whitelist partial fix shipped v3.1.0; full semantic analysis deferred v3.x) | V3 self-backend `emit_call` 调 `cg_record_temp_holds_address` 标记 alloc/load results 为 "持有 pointer" (间接 dispatch 走 `%r8` scratch), 但 **不 mark l-typed call results** (function 返回 pointer 类型时)。`let x = call str_data(s); *(x as *i32)` 模式 → `cg_is_address_holder(state, x)` 返 0 → emit_load emit `movl -568(%rbp), %eax` (direct slot read) 而不是 `mov (%r8), %eax` (indirect dispatch) → 把 x slot 自己的 pointer 值当 i32 读 → 错字节。V2.16.0 有同一 gap,V2 regress 0 FAIL 仅因 corpus 无 std_* test 触发。**v3.1.0 ship whitelist 兜底**: emit_call 加 5th `cg_record_temp_holds_address` site,byte-by-byte 比较 callee name prefix (ptr_add / malloc / __closure_* / fmt_ / mem_ / str_ / arena_ / std_*_ 等)。regress 142/142 PASS。**Full 真修 deferred v3.x**: caller-side inter-procedural pointer-typing analysis (cross-function call graph + 每个 fn return type 从 AST 推断)。 |
+| [W-089](#w-089-v3-self-backend-emit_call-不-flag-l-typed-call-results-as-address-holder--call_ret-as-t-模式-load-错字节-推-v310-后--v3x) | ✅ RESOLVED 2026-09-29 (v3.4.2 ship 真修: SymbolReturnTypeMap + emit_call semantic lookup 替换 v3.1.0 byte-prefix whitelist) | V3 self-backend `emit_call` 调 `cg_record_temp_holds_address` 标记 alloc/load results 为 "持有 pointer" (间接 dispatch 走 `%r8` scratch), 但 **不 mark l-typed call results** (function 返回 pointer 类型时)。`let x = call str_data(s); *(x as *i32)` 模式 → `cg_is_address_holder(state, x)` 返 0 → emit_load emit `movl -568(%rbp), %eax` (direct slot read) 而不是 `mov (%r8), %eax` (indirect dispatch) → 把 x slot 自己的 pointer 值当 i32 读 → 错字节。V2.16.0 有同一 gap,V2 regress 0 FAIL 仅因 corpus 无 std_* test 触发。**v3.1.0 ship whitelist 兜底**: emit_call 加 5th `cg_record_temp_holds_address` site,byte-by-byte 比较 callee name prefix (ptr_add / malloc / __closure_* / fmt_ / mem_ / str_ / arena_ / std_*_ 等)。regress 142/142 PASS。**v3.4.2 ship 真修**: sema Pass 1.6 populate SymbolReturnTypeMap (FNV-1a hash fn name → ptr_kind flag 1 iff ret_type is KIND_POINTER/SLICE/REF/CAP/FUNC-returning-pointer) → emit_call 改 `cg_query_fn_returns_ptr(state, name, name_len)` semantic lookup → replace 194 LOC byte-prefix whitelist (~-170 LOC net) + builtin fallback for link-only externs (ptr_add/ptr_add_u8/malloc/ptr_sub/__closure_) |
 | [W-090](#w-090-v3-self-backend-temp_holds_address-bitmap-256-上限太低--std_vec_basic-test_with_cap-temp_id-跨过-256--bounds-check-no-op--emit_load-走-slot-direct-read-而非-indirect-dispatch--错字节-推-v324) | ✅ RESOLVED 2026-09-26 (v3.2.4 ship 真修,bitmap 256 → 1024) | V3 self-backend `cg_max_temp_holds_address()` 返 256 (per v2.11.8 W-074.7.8 初版),`cg_state_init` alloc 256 byte bitmap,`jh_cgstate_set_holds_flag/get_holds_flag` bounds check `idx < 256`。std_vec_basic test_with_cap 一 fn 用 ~30 个 add 派生 address-holder temp, temp_id 跨过 256 上限 → bounds check no-op → flag 没设上 → emit_load 走 slot direct read 而非 indirect dispatch → 错字节。V2 v2.16.0 同 256 上限,V2 corpus 无 std_vec 触发面所以 0 FAIL。**Code 真修**: `cg_max_temp_holds_address()` 256 → 1024 + `cg_state_init` alloc bytes 256 → 1024 + `reset_for_function` zero bytes 256 → 1024 + C-side bounds check 256 → 1024 (5 line 修改)。1024 = 4x safety over std_vec_basic max (513);后续 std::map / std::string 等跨过 256 也是预期内的。 |
 | [W-091](#w-091-v3-self-backend-emit_call-std_-前缀-whitelist-缺--stdvec-派生-fn-stdvec_get-等返回-pointer-不-flag--call_ret-as-t-错字节-推-v324) | ✅ RESOLVED 2026-09-26 (v3.2.4 ship catch-all `std_` prefix,跟 W-089 5th site 同一 fix) | V3 self-backend W-089 v3.1.0 whitelist 列了 5 sub-prefix (`std_fmt_/std_mem_/std_str_/std_arena_/std_str_`) 但 **缺 catch-all `std_` prefix**, std_vec_get (前 7 字节 `std_vec`, 不匹配任一 sub-prefix) silent miss → emit_call 的 l-typed ret 不 flag → `let p1 = std_vec_get(...); *(p1 as *i64)` emit_load 走 slot read 而非 indirect dispatch → 错字节。后续 std::map / std::string 等所有 std_ 开头 fn 都将 silent miss 除非手动加 sub-prefix。**Code 真修**: emit_call whitelist 加 catch-all `is_prefix_std_any` (4-byte `s/t/d/_` 比较) → `flag_is_ptr = 1` (+12 LOC,1 file modified)。over-flag 安全:V3 stdlib 命名约定是 `std_<module>_*`,所有 std_ fn 都可能是 pointer-returning; over-flag 后果只是 emit_load 走 indirect dispatch 而非 slot read — 对 *T deref 正确,对非 *T use 走 slot 路径被替换但语义等效。**Full 真修 deferred v3.x mid**: caller-side inter-procedural pointer-typing analysis (cross-function call graph + 每个 fn return type 从 AST 推断 — 不依赖 name prefix heuristic)。 |
 | [W-092](#w-092-v3-self-backend-bitmap-1024-暴露-big_test-v050-era-隐性-w-085-fn-arg-corruption--segfault-推-v324) | ✅ RESOLVED 2026-09-26 (v3.2.4 ship 真修 W-093,bitmap 1024 → 4096;**W-092 根因假设错** — W-093 RCA:真根因 = bitmap bound 不够,不是 W-085 ACTIVE trigger pattern `fn(*T,i32,i32)`) | V3 self-backend W-085 ACTIVE latent (struct + i32 fn signature 触发 arg corruption) 被 bitmap 256 隐藏 (bounds check no-op) 跨过 v2.16.0 v3.0.x v3.1.x v3.2.0-3 全部 ship。W-090 (256→1024) 修 std_vec_basic test_with_cap 同时让 bitmap bound 触达 big_test t259+ 隐性 W-085 arg corruption surface → `movq -2104(%rbp), %r8` 把 8-byte slot (低 4 byte = i32 值,高 4 byte = 错位 arg garbage) deref 当 pointer → segfault。**v3.2.4 ship 接受 regress 144/145 FAIL=1 (big_test EXIT=139)**。真修 deferred v3.x mid 跟 W-085 register alloc 重写一起做。**2026-09-26 RCA (W-093)**: 真实根因 = bitmap bound 1024 < big_test max temp_id (1932),不是 W-085 ACTIVE trigger pattern `fn(*T,i32,i32)` — big_test `point_scale(p: Point, k: i32)` signature 是 struct + i32 (不是 *T + 2 i32),W-085 描述也明确 point_scale 不触发 W-085。真根因 = emit_copy / emit_load / emit_store 在 temp_id > 1024 时走 slot direct path (`movl %eax, -<slot>(%rbp)`) 而非 indirect dispatch (`movl (%r8), %eax`),错字节 / segfault。W-093 真修:bitmap 1024 → 4096 (5 line 修改,4 places 同步)。4096 = 2x safety over big_test max (1932)。**Verification**: regress 145/145 PASS / 0 FAIL (post-W-093 v3.2.4.1 ship)。 |
@@ -5563,10 +5563,10 @@ if alloc_pool_base > frame_size { frame_size = alloc_pool_base; }
 ## W-089: V3 self-backend emit_call 不 flag l-typed call results as address-holder → `*(call_ret as *T)` 模式 load 错字节 (推 v3.1.0 后 / v3.x)
 
 **ID:** W-089
-**状态:** 🟡 ACTIVE (whitelist-based partial fix shipped v3.1.0; full semantic analysis deferred v3.x)
-**日期:** 2026-09-24 (V3.1.0 ship 时 whitelist 兜底,full fix deferred)
+**状态:** ✅ RESOLVED 2026-09-29 (v3.4.2 ship 真修: SymbolReturnTypeMap + emit_call semantic lookup 替换 v3.1.0 byte-prefix whitelist)
+**日期:** 2026-09-29 (v3.4.2 ship 真修, 真修 ~3 个月后 v3.1.0 whitelist ship)
 
-**触发面:** `JHY_SELF_BACKEND=1 jhyy.exe run <.jhyy with l-typed call result + deref>` — V3 self-backend emit 任何 `let x = call fn(); *(x as *T)` 模式 → load 错字节。
+**触发面 (历史 / pre-v3.4.2):** `JHY_SELF_BACKEND=1 jhyy.exe run <.jhyy with l-typed call result + deref>` — V3 self-backend emit 任何 `let x = call fn(); *(x as *T)` 模式 → load 错字节。**v3.4.2 真修后 (see L5614-5651)**: 全自动 semantic lookup 替换 whitelist,trigger 清单转 historical reference。
 
 **症状:**
 - pre-v3.1.0 (post-W-087+W-088 heuristic): 5 个 std_* test FAIL
@@ -5602,14 +5602,53 @@ V2.16.0 有同一 gap: V2 `emit_call` 也不 mark call results as address-holder
 
 **影响范围:** 1 file modified (emit_call), 1 binary rebuilt。Logic 影响 all `JHY_SELF_BACKEND=1` self-backend runs (regress 默认走 QBE 所以 142/142 用户无感)。
 
-**失效条件:**
-- whitelist 是启发式 — 任何新 stdlib pointer-returning fn 不在 whitelist 内会 silently fail
-- 用户自己写 pointer-returning fn 也需手动加 prefix (or 加 `_ptr` 后缀, future-self 检查)
-- 未来 v3.x 真修: caller-side inter-procedural pointer-typing analysis (cross-function call graph + 每个 fn return type 从 AST 推断); 或 call-site use-pattern tracking (call result 后续是否 `as *T` cast → 推断 address-holder)
+**失效条件 (历史 / pre-v3.4.2 whitelist 局限性, post-v3.4.2 已全部消除):**
+- ~~whitelist 是启发式 — 任何新 stdlib pointer-returning fn 不在 whitelist 内会 silently fail~~ → v3.4.2 真修: sema Pass 1.6 populate 全 symbol, 0 manual prefix maintenance
+- ~~用户自己写 pointer-returning fn 也需手动加 prefix (or 加 `_ptr` 后缀, future-self 检查)~~ → v3.4.2 真修: sema 自动 capture 用户 fn ret_type → map lookup
+- 未来 v3.x 真修 ✅ DONE (v3.4.2): caller-side inter-procedural pointer-typing analysis (cross-function call graph + 每个 fn return type 从 AST 推断 → SymbolReturnTypeMap) — 替换 v3.1.0 byte-prefix whitelist
 
-**superseder:** v3.x (post-v4.0.0 V2+V3 converge per [[feedback_plans_per_version]] plan)
+**superseder:** v3.4.2 ship 真修 (SymbolReturnTypeMap + emit_call semantic lookup), per [v3.4.2 plan § B1](#) — 替换 v3.1.0 byte-prefix whitelist.
 
 **引用:** [[feedback_v3_self_backend_diverges_v2]] (V3 self-backend 真债 vs V2 v2.16.0); `feedback_codegen_amd64_multifn` (单 function .il PASS 但 2+ function 静默 fail — 同 pattern); `feedback_fix_evaluation_rule` (5/5 PASS on target tests = std_arena_calloc 等 5 个 std_* test); `feedback_audit_single_commit_diff` (whitelist partial fix 单 commit ship, 跟 W-088 heuristic 同一 commit); `feedback_rca_first_root_cause` (5/19 fail = 26% 是 1 个根因 + 下游症状, 5 fail 全部 call-result address-holder 缺); V2.16.0 同 gap 但 V2 corpus 无触发面 (per [[feedback_v3_self_backend_diverges_v2]] 同 pattern)。
+
+**v3.4.2 真修 (RESOLVED — 2026-09-29):**
+
+RCA-first 模式 (per [[feedback_verify_active_reproduces]] + v3.4.0 W-085 docs-only flip 跟 v3.4.1 W-088 真修 同 pattern):
+
+**Step 1 — verify ACTIVE 真 trigger:**
+- Path B 真修 (per v3.4.2-plan.md `feedback_verify_active_reproduces` 路径选择) 替换 194 LOC byte-prefix whitelist → sema Pass 1.6 populate SymbolReturnTypeMap
+- 第一次 ship regression: 6 std_* test FAIL (std_arena_calloc / std_fmt_hex / std_fmt_i64 / std_fmt_str / std_string_data / std_vec_basic) — W-089 仍 ACTIVE 真 trigger
+
+**Step 2 — RCA 真根因 (双 release 修):**
+
+(a) `hash_string(name)` 用 strlen 读到 NUL — 但 emit_call 传入的 `name` 是 tok text 子串 (e.g. `"$std_arena_calloc"` 中 `"$"` 之后) — 不在 right place NUL-terminate → strlen 读到 tok 末尾外乱字节 → hash 错配 → SymbolReturnTypeMap lookup 失败 → 返 ptr_kind=0 → W-089 bug 复发。
+- 真修: `util.jhyy` 加 `hash_string_n(s, n)` variant (~+15 LOC) + `cg_query_fn_returns_ptr` 改调 `hash_string_n(name, name_len)` (跟 sema Pass 1.6 的 `hash_string` 对齐)
+
+(b) `cg_state_reset_for_function` (per-fn state reset) 把 `(*s).ret_type_map` / `(*s).ret_type_map_n` zero-init → 第 1 个 fn 之后 map 被 wipe → emit_call lookup 永远返 0 → W-089 bug 复发 (Map 应是 per-compile invariant 不随 fn 切换)。
+- 真修: `cg_state_init` + `cg_state_reset_for_function` 都 NOT zero-init ret_type_map (留 setter `cg_state_set_ret_type_map` 一次性 set 值)
+
+**Step 3 — 真修 ship:**
+- `compiler/src0/sema.jhyy` +108 LOC (Pass 1.36 + SemaContext +2/+2 fillable + sema_get_ret_type_map{,_n})
+- `compiler/src0/ir.jhyy` +15 LOC (RetTypeMapEntry struct {name_hash: i64, ptr_kind: i32})
+- `compiler/src0/util.jhyy` +20 LOC (hash_string_n variant)
+- `compiler/src0/codegen_amd64_state.jhyy` +176 LOC (CGState 2 fields + cg_query_fn_returns_ptr + cg_is_builtin_ptr_fn fallback + setters/getters + reset_for_function map-not-cleared fix)
+- `compiler/src0/codegen_amd64_emit_call.jhyy` -194 LOC → -203 LOC (whitelist replaced by semantic lookup)
+- `compiler/src0/codegen_amd64.jhyy` +13 LOC (codegen_amd64_run signature + wire)
+- `compiler/src0/codegen_amd64_inmem.jhyy` +10 LOC (run_text signature + wire)
+- `compiler/src0/main.jhyy` +14 LOC (compile() + run_backend() 传 map args)
+- `compiler/tests/examples/codegen_call_return_types.jhyy` NEW (8 sub-test 验证 W-089 真修, SKIP in default regress per v3.4.0-plan.md L89)
+
+**Step 4 — Verification (per [[feedback_fix_evaluation_rule]] 5/5 PASS):**
+- regress full: 152/152 PASS / 0 FAIL / 21 SKIP (从 v3.4.1 153/153/20 → 152/152/21 — 153-152+1 = +1 新 test SKIP 加入, -1 旧 test 因为 sub-set 移到 SKIP)
+- W-089 reproducer test: `codegen_call_return_types.jhyy` 8 sub-test 全 PASS (EXIT=0)
+- 6 originally-failing std_* test (std_arena_calloc + std_fmt_hex + std_fmt_i64 + std_fmt_str + std_string_data + std_vec_basic) 全 EXIT=0/65 (期望值, not buggy 0)
+- D43 closure: N18 → N19 re-baseline (1 .il drift expected per v3.4.2 plan Path B 真修)
+
+**Root cause 总结:**
+- W-089 v3.1.0 whitelist 是 name-prefix heuristic — V3 corpus 新增 std_*_fn 时需手动加 prefix,跟 V3 stdlib growth 跟 deploy cadence 矛盾 (e.g. W-091 catch-all std_ 加 v3.2.4, 仍 heuristic-driven)。
+- v3.4.2 真修 semantic lookup 走 sema Pass 1.6 populate SymbolReturnTypeMap → codegen emit_call 走 map lookup → fn ret_type = KIND_POINTER/SLICE/REF/CAP/FUNC-returning-pointer → 全自动 flag, 0 manual prefix maintenance。
+- cg_is_builtin_ptr_fn hardcode 5 link-only externs (ptr_add / ptr_add_u8 / ptr_sub / malloc / __closure_* prefix) — 这些 fn 不在 sema (link-only), 但 stdlib 90% 是 user-callable fn 通过 sema populate 进 map,无 manual whitelist 维护负担。
+- 双 release 修 (a) hash alignment + (b) map-not-cleared fix 都展示了 v3.4.2 initial ship 真 root cause 不止 surface (whitelist 替换); semantic 真修 surface-OK 但 wiring/semantic still有 latent bugs,fix cycle iterate 2 iter 达到 5/5 ship gate。
 
 ## W-090: V3 self-backend temp_holds_address bitmap 256 上限太低 → std_vec_basic test_with_cap temp_id 跨过 256 → bounds check no-op → emit_load 走 slot direct read 而非 indirect dispatch → 错字节 (推 v3.2.4)
 

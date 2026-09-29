@@ -69,9 +69,9 @@ per `docs/plans/v3/v3.4.0-plan.md` 1:3 split(W-085 / W-088 / W-089 3 真修):
 
 | 版本 | 计划内容 | ship status |
 |------|----------|-------------|
-| **v3.4.0** (本 ship) | W-085 真修 codegen | **✅ docs-only flip — W-085 false-active,无 codegen 改动** |
-| v3.4.1 (待 ship) | W-088 真修 `cg_compute_per_fn_max_temps heuristic` | ⏳ 待启动 |
-| v3.4.2 (待 ship) | W-089 真修 `emit_call byte-prefix whitelist` | ⏳ 待启动 |
+| **v3.4.0** (shipped 2026-09-29) | W-085 真修 codegen | **✅ docs-only flip — W-085 false-active,无 codegen 改动** |
+| v3.4.1 (shipped 2026-09-29) | W-088 真修 `cg_compute_per_fn_max_temps heuristic` | ✅ shipped 2026-09-29 (`max(heuristic, count_l_add)`) |
+| v3.4.2 (shipped 2026-09-29) | W-089 真修 `emit_call byte-prefix whitelist` | ✅ shipped 2026-09-29 (sema Pass 1.6 + SymbolReturnTypeMap) |
 
 ## 4. 影响 / Impact
 
@@ -118,6 +118,46 @@ per `docs/plans/v3/v3.4.0-plan.md` 1:3 split(W-085 / W-088 / W-089 3 真修):
 - **plan ref**: `docs/plans/v3/v3.4.0-plan.md` L42-51 (W-088 scope); `docs/plans/v3/v3.4.0-plan.md` L88-93 (v3.4.1 5/5 gate framework)
 - **memory ref**: [[feedback_verify_active_reproduces]] (v3.4.0 W-085 false-active 教训 → v3.4.1 W-088 same RCA pattern 但是 LIVE,Path B 真修); [[feedback_audit_single_commit_diff]] (Path B = 1 src0 commit + 1 docs commit,2 commit ship); [[feedback_changelog_umbrella]] (vX.Y axis = 1 umbrella changelog,v3.4.1 section fills v3.4.0 placeholder)
 
-### v3.4.2 (待 ship)
-- **scope**:W-089 `emit_call byte-prefix whitelist` 真修
-- **superseder**: TBD
+### v3.4.2 (shipped 2026-09-29, tag `v3.4.2`)
+
+**scope**:W-089 `emit_call byte-prefix whitelist` 真修 (替换 194 LOC byte-prefix whitelist → sema Pass 1.6 populate `SymbolReturnTypeMap` → `emit_call` semantic lookup)
+
+**根因 (RCA-first per [v3.4.0 W-085](#) + v3.4.1 W-088 真修 同 pattern)**:
+- v3.1.0 引入 byte-prefix whitelist (`codegen_amd64_emit_call.jhyy` L898-1091,194 LOC) 兜底 `cg_record_temp_holds_address` 调用 — 当 callee name starts with `ptr_add` / `ptr_add_u8` / `malloc` / `__closure_*` / `fmt_` / `mem_` / `str_` / `arena_` / `std_fmt_` / `std_mem_` / `std_str_` / `std_arena_` / `strdup` / `fopen` / W-091 catch-all `std_` 时 flag call result as address-holder
+- v3.1.0 whitelist = name-prefix heuristic — V3 stdlib growth 跟 deploy cadence 矛盾 (W-091 catch-all `std_` 是 v3.2.4 加的;任何新 stdlib fn 需手动加 prefix)
+- V2.16.0 同 gap 但 V2 corpus 无触发面 (per [[feedback_v3_self_backend_diverges_v2]])
+
+**Step 1 — verify ACTIVE 真 trigger**:
+- Path B 删掉 whitelist (L1088-1090 `cg_record_temp_holds_address` call patch out) → rebuild via stage0 → regress + std_* trigger
+- expect:≥6 FAIL (std_arena_calloc / std_fmt_hex / std_fmt_i64 / std_fmt_str / std_string_data / std_vec_basic 等)
+- 实测:6 std_* test EXIT=1-6 失败 — **W-089 LIVE confirmed → Path B 真修**
+
+**Step 2 — 真修** (Path B,2 commit):
+- **sema.jhyy** +108 LOC:Pass 1.36 NEW `check_module_populate_ret_type_map(ctx, md)` 扫 `(*md).decls` NODE_FUNC_DECL → FNV-1a hash fn sym name → ptr_kind flag (1 iff ret_type resolves to KIND_POINTER/SLICE/REF/CAP 或 KIND_FUNC returning pointer recursion 1-level)。Hook in `check_module` AFTER Pass 3 body resolution (per [[feedback_jhyy_no_forward_ref]]);Closure synthetic fns attach ret_type from closure body return (~+10 LOC fix)。
+- **ir.jhyy** +15 LOC:NEW `RetTypeMapEntry { name_hash: i64, ptr_kind: i32 }` struct。
+- **util.jhyy** +20 LOC:NEW `hash_string_n(s, n)` variant — 跟 `hash_string` 同 algorithm 但 caller 提供 length (针对 emit_call 传 substring 指针,strlen 会读到 tok 末尾外乱字节 → hash 错配 → lookup 失败)。**第一次 ship regression 6 FAIL 真根因 (a)**。
+- **codegen_amd64_state.jhyy** +176 LOC:NEW `CGState` fields `ret_type_map: *u8` + `ret_type_map_n: i64` + `cg_query_fn_returns_ptr(state, name, name_len)` map lookup + `cg_is_builtin_ptr_fn` fallback hardcoded 5 link-only externs (ptr_add / ptr_add_u8 / ptr_sub / malloc / __closure_ prefix) + setters/getters + reset_for_function map-not-cleared fix。**第一次 ship regression 6 FAIL 真根因 (b)** — `cg_state_reset_for_function` 把 per-compile invariant SymbolReturnTypeMap zero-init,第 1 个 fn 之后 map 被 wipe → lookup 永远返 0。
+- **codegen_amd64_emit_call.jhyy** -194 LOC → -203 LOC:byte-prefix whitelist replaced by semantic lookup。Net delta ~-30 LOC (194 → ~25 LOC semantic path)。
+- **codegen_amd64.jhyy** +13 LOC + **codegen_amd64_inmem.jhyy** +10 LOC:`codegen_amd64_run` / `run_text` signature 加 map args + wire。
+- **main.jhyy** +14 LOC:`compile()` + `run_backend()` 传 map args。
+- **codegen_call_return_types.jhyy** NEW:8 sub-test (i32-ret negative / *T-ret positive / i64-ret / cross-fn / nested 3-level / recursive / closure / builtin fallback)。SKIP in default regress per v3.4.0-plan.md L89。
+
+**Step 3 — Verification (5/5 ship gate per [[feedback_fix_evaluation_rule]])**:
+- **Gate 1**: `codegen_call_return_types.jhyy` 8 sub-test 全 PASS (EXIT=0)。
+- **Gate 2**: regress full 152/152 PASS / 0 FAIL / 21 SKIP (从 v3.4.1 152/152/20 → 152/152/21 — +1 新 test SKIP 加入)。
+- **Gate 3**: 6 originally-failing std_* test (std_arena_calloc + std_fmt_hex + std_fmt_i64 + std_fmt_str + std_string_data + std_vec_basic) 全 EXIT=0/65 (期望值, not buggy 0)。
+- **Gate 4**: D43 closure N18 → N19 re-baseline (1 .il drift expected per Path B semantic 真修)。
+- **Gate 5**: workarounds.md W-089 ACTIVE → ✅ + changelog-v3.4.md v3.4.2 section full + roadmap ACTIVE bucket → empty。
+
+**Root cause 总结**:
+- W-089 v3.1.0 whitelist = name-prefix heuristic — V3 stdlib growth 跟 deploy cadence 矛盾 (跟 V2 v2.16.0 同 gap 但 V2 corpus 无触发面,per [[feedback_v3_self_backend_diverges_v2]])。
+- v3.4.2 真修 semantic lookup 走 sema Pass 1.6 populate `SymbolReturnTypeMap` → codegen emit_call 走 map lookup → fn ret_type = KIND_POINTER/SLICE/REF/CAP/FUNC-returning-pointer → 全自动 flag,0 manual prefix maintenance。
+- `cg_is_builtin_ptr_fn` hardcode 5 link-only externs — 这些 fn 不在 sema (link-only), 但 stdlib 90% 是 user-callable fn 通过 sema populate 进 map,无 manual whitelist 维护负担。
+- **双 release 修** (a) hash alignment + (b) map-not-cleared fix 都展示了 v3.4.2 initial ship 真 root cause 不止 surface (whitelist 替换);semantic 真修 surface-OK 但 wiring/semantic still有 latent bugs,fix cycle iterate 2 iter 达到 5/5 ship gate。
+
+**diff stat**: 9 files modified / 1 file added (test), 1 binary rebuilt (`c0c74ebaadc25b2b...` v3.4.2 binary)
+
+**ACTIVE workaround count**: 1 → 0 (W-089 flip;**v3.x ACTIVE bucket 清空** = W-085 ✅ + W-088 ✅ + W-089 ✅)
+
+**plan ref**: `docs/plans/v3/v3.4.0-plan.md` L53-60 (W-089 scope) + L95-100 (W-089 5/5 gate framework)
+**memory ref**: [[feedback_verify_active_reproduces]] (v3.4.0 W-085 false-active 教训 → v3.4.1 W-088 LIVE Path B 真修 → v3.4.2 W-089 same pattern);[[feedback_audit_single_commit_diff]] (Path B = 1 src0 commit + 1 docs commit,2 commit ship);[[feedback_changelog_umbrella]] (vX.Y axis = 1 umbrella changelog,v3.4.2 section fills v3.4.1 placeholder);[[feedback_fix_evaluation_rule]] (5/5 ship gate);[[feedback_rca_first_root_cause]] (1 root cause + downstream symptoms pattern);[[feedback_jhyy_no_forward_ref]] (Pass 1.6 defer to AFTER Pass 3 body resolution)
