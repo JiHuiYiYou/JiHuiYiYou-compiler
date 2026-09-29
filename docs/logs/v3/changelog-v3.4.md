@@ -99,9 +99,24 @@ per `docs/plans/v3/v3.4.0-plan.md` 1:3 split(W-085 / W-088 / W-089 3 真修):
 
 ## v3.4.x 后续 (placeholder)
 
-### v3.4.1 (待 ship)
-- **scope**:W-088 `cg_compute_per_fn_max_temps heuristic` `derived_count = total_a / 2` 真修
-- **superseder**: TBD
+### v3.4.1 (shipped 2026-09-29)
+- **scope**:W-088 `cg_compute_per_fn_max_temps heuristic` 真修 (heuristic + `=l add` count `max`)
+- **superseder**: heuristic 真替换 → `max(heuristic, count_l_add)`,heuristic 兜底保留
+- **5/5 ship gate verified**:
+  1. **regress full**: 152/152 PASS / 0 FAIL / 20 SKIP (跟 v3.4.0 baseline 持平,no regression)
+  2. **5 originally-failing std_* W-088 trigger tests** (std_arena_calloc + std_fmt_hex + std_fmt_i64 + std_fmt_str + std_string_data) 全 EXIT=0
+  3. **5 additional corpus tests** (ffi_file + std_io_basic + std_vec_basic + array_test + mixed_const_struct_import + mixed_struct_slice_match) 全 EXIT=0 — 涵盖 alloc-heavy / alloc-light + many-binop / zero-alloc 3 类触发面
+  4. **D43 closure**: v3.4.1 self-compile .il `6c6653fd49...` ≠ v3.4.0 self-compile .il `bb6e78c267...` (N17 → N18 expected drift,src0 diff → codegen 1 .il byte drift)
+  5. **workarounds.md + changelog**: W-088 entry ✅ flipped + RCA v3.4.1 段 full record
+- **RCA chain (per [[feedback_verify_active_reproduces]])**:
+  - Step 1: patch out heuristic `derived_count = total_a / 2` (floor 8) → rebuild via stage0 → binary `jhyy_noheuristic.exe`
+  - Step 2: regress full = **147/152 PASS, 5 FAIL** (array_test, mixed_const_struct_import, mixed_struct_slice_match, std_io_basic ACCESS_VIOLATION, std_vec_basic HEAP_CORRUPTION) → heuristic is LIVE (跟 W-085 v3.4.0 RCA 不同 pattern,W-088 heuristic 真 reproduce)
+  - Step 3: V3' (count-all-l-add binops) → regress 149/152 PASS, 2 FAIL (ffi_file ACCESS_VIOLATION, std_io_basic SEGV) — count-all-l-add 在 zero-alloc 函数 (ffi_file 0 `=l add` + 0 `=l alloc`) 给 0 reservation → SEGV;std_io_basic total_a=80 heuristic=40 > count=34 → under-reserve
+  - Step 4 V3'': `max(heuristic, count_l_add)` → regress 152/152 PASS / 0 FAIL / 20 SKIP ✅ — heuristic 保 zero-alloc 函数 floor 8 + alloc-heavy buffer;count_l_add 补 alloc-light many-binop 函数
+- **diff stat**: 1 file modified (state), 1 binary rebuilt (`8cf379cd58ed52f5...`)
+- **ACTIVE workaround count**: 2 → 1 (W-088 flip;剩 W-089 推 v3.4.2)
+- **plan ref**: `docs/plans/v3/v3.4.0-plan.md` L42-51 (W-088 scope); `docs/plans/v3/v3.4.0-plan.md` L88-93 (v3.4.1 5/5 gate framework)
+- **memory ref**: [[feedback_verify_active_reproduces]] (v3.4.0 W-085 false-active 教训 → v3.4.1 W-088 same RCA pattern 但是 LIVE,Path B 真修); [[feedback_audit_single_commit_diff]] (Path B = 1 src0 commit + 1 docs commit,2 commit ship); [[feedback_changelog_umbrella]] (vX.Y axis = 1 umbrella changelog,v3.4.1 section fills v3.4.0 placeholder)
 
 ### v3.4.2 (待 ship)
 - **scope**:W-089 `emit_call byte-prefix whitelist` 真修
