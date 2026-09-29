@@ -132,6 +132,21 @@ fn irval_is_undef(v: IRVal) -> i32 {
 // struct。原因：v0 codegen 对 `&(*ptr).struct_field`（nested struct field
 // address）emit loadw 而非 LEA，导致 QBE 类型不匹配。改用指针后 `(*ir).sb`
 // 本身是 *StringBuilder，不需要再 `&` 取地址，绕过 v0 bug。
+
+// v3.4.2 W-089 真修: SymbolReturnTypeMap entry struct.
+//   Populated by sema Pass 1.6 (check_module_populate_ret_type_map in sema.jhyy),
+//   consumed by cg_query_fn_returns_ptr (codegen_amd64_state.jhyy).
+//   Key = FNV-1a hash of fn sym name (per util.hash_string).
+//   Val = ptr_kind: 1 iff ret_type resolves to pointer-equivalent (*T / Cap<T> / &T /
+//   KIND_FUNC returning *T). 0 otherwise (i32 / void / struct-by-value etc.).
+//   Linear-scan array (max ~hundreds of fns per program); collision negligible
+//   for 64-bit FNV. Arena-allocated, owned by sema, read by codegen.
+type RetTypeMapEntry = struct {
+    name_hash: i64,
+    ptr_kind:  i32,
+}
+
+fn RET_TYPE_MAP_ENTRY_SIZE() -> i64 { return 16 as i64; }
 // StringBuilder 24 字节，ir_init 从 arena 各 alloc 24。
 type IRBuf = struct {
     arena:      *Arena,

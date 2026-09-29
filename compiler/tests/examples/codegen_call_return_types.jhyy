@@ -1,0 +1,163 @@
+// codegen_call_return_types.jhyy — v3.4.2 W-089 真修 reproducer test.
+//
+// 8 sub-tests 验证 emit_call semantic lookup (SymbolReturnTypeMap +
+// cg_is_builtin_ptr_fn fallback) 替换 v3.1.0 byte-prefix whitelist 后,
+//   各 pointer-equivalent return class 跟 builtin fallback 都正确 flag call result
+//   as address-holder (让后续 loadl 走 indirect dispatch 而非 slot direct-read)。
+//
+// 触发面 (per W-089 entry L5563-5612):
+//   - `*(call_str_data(s) as *T)`  // *T-returning fn call
+//   - `*(malloc(... as *T))`        // builtin fallback
+//   - 任何 pointer-equivalent return type 走 SymbolReturnTypeMap semantic lookup
+//
+// 8 sub-test cases:
+//   1. i32-returning fn (negative — result NOT address-holder, slot-direct-read OK)
+//   2. *T-returning fn (positive — result IS address-holder, indirect dispatch required)
+//   3. i64-returning fn (negative — like case 1 but i64, slot-direct-read OK)
+//   4. Cross-fn: outer calls inner that returns *T (cross-call chain in same fn graph)
+//   5. Nested call chain (3-level: top_level → intermediate → ptr_add)
+//   6. Recursive *T-returning fn
+//   7. Closure returning *T (uses sema closure path + ptr_kind detection)
+//   8. Builtin ptr_add / ptr_add_u8 / malloc (cg_is_builtin_ptr_fn fallback)
+//
+// main_jhyy runs all 8 sub-tests, returns 0 iff all PASS, else non-zero error code.
+// SKIP: v3.4.2 W-089 reproducer test (not in default regress CI gate per v3.4.0-plan.md L89)
+
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+
+fn ptr_add_u8(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+
+extern fn malloc(n: i64) -> *u8;
+extern fn memset(p: *u8, val: i32, n: i64) -> *u8;
+
+// Sub-test 1: i32-returning fn — result is NOT address-holder.
+//   Verifies that semantic lookup correctly returns 0 for value-type return.
+fn ret_i32(x: i32) -> i32 {
+    return x + 1;
+}
+
+// Sub-test 2: *T-returning fn — result IS address-holder (KIND_POINTER).
+//   Call result stored to dst slot, then loadl must go indirect dispatch
+//   (read the *T deref value, not the slot value).
+fn ret_ptr(buf: *u8) -> *u8 {
+    return ptr_add(buf, 4 as i64);
+}
+
+// Sub-test 3: i64-returning fn — value type, no address-holder flag.
+fn ret_i64(x: i64) -> i64 {
+    return x + (100 as i64);
+}
+
+// Sub-test 4: cross-fn call — outer fn calls inner fn that returns *T.
+//   Verifies SymbolReturnTypeMap covers the cross-call chain.
+fn ret_ptr_inner(buf: *u8) -> *u8 {
+    return ptr_add(buf, 8 as i64);
+}
+fn ret_ptr_outer(buf: *u8) -> *u8 {
+    return ret_ptr_inner(buf);
+}
+
+// Sub-test 5: nested call — fn takes *T, calls helper that returns *T, chains 3 fn calls.
+fn intermediate(buf: *u8, off: i64) -> *u8 {
+    return ptr_add(buf, off);
+}
+fn top_level(buf: *u8) -> *u8 {
+    return intermediate(buf, 16 as i64);
+}
+
+// Sub-test 6: recursive *T-returning fn.
+fn recurse(buf: *u8, depth: i32) -> *u8 {
+    if depth == 0 {
+        return buf;
+    }
+    return recurse(ptr_add(buf, 1 as i64), depth - 1);
+}
+
+// Sub-test 7: closure returning *T (uses ptr_add via builtin fallback).
+//   Closure body uses ptr_add which is in cg_is_builtin_ptr_fn builtin list.
+fn make_closure(buf: *u8) -> *u8 {
+    let f = |x: i32| { ptr_add(buf, x) };
+    return f(8 as i32);
+}
+
+fn main_jhyy() -> i32 {
+    // Use malloc'd buffer + memset for storage (v3.x [i32;8]={...} array literal
+    //   has separate emit_copy pre-existing gap not in W-089 范围)
+    let buf = malloc(32 as i64);
+    if buf == (0 as *u8) { return 99; }
+    let _m1 = memset(buf, 0 as i32, 32 as i64);
+    // Store sentinel bytes at buf+0..31: 0x41, 0x42, ..., 0x48 (8 i32 = 32 bytes)
+    let p0 = buf;
+    let p1 = ptr_add(buf, 4 as i64);
+    let p2 = ptr_add(buf, 8 as i64);
+    let p3 = ptr_add(buf, 12 as i64);
+    let p4 = ptr_add(buf, 16 as i64);
+    let p5 = ptr_add(buf, 20 as i64);
+    let p6 = ptr_add(buf, 24 as i64);
+    let p7 = ptr_add(buf, 28 as i64);
+    *(p0 as *i32) = 0x41414141 as i32;  // 4 bytes pattern
+    *(p1 as *i32) = 0x42424242 as i32;
+    *(p2 as *i32) = 0x43434343 as i32;
+    *(p3 as *i32) = 0x44444444 as i32;
+    *(p4 as *i32) = 0x45454545 as i32;  // sentinel at buf+16..19
+    *(p5 as *i32) = 0x46464646 as i32;
+    *(p6 as *i32) = 0x47474747 as i32;
+    *(p7 as *i32) = 0x48484848 as i32;
+
+    // ── Sub-test 1: i32-returning fn (negative case) ──
+    // ret_i32 result is i32 — NOT address-holder. Direct slot read OK.
+    let v1: i32 = ret_i32(10 as i32);
+    if v1 != (11 as i32) { return 1; }
+
+    // ── Sub-test 2: *T-returning fn (positive case) ──
+    // ret_ptr returns ptr_add(buf, 4). When we deref it, we should read buf+4..7=0x42.
+    let p_ret = ret_ptr(buf);
+    let v2: i32 = *(p_ret as *i32) & (0xff as i32);
+    if v2 != (0x42 as i32) { return 2; }
+
+    // ── Sub-test 3: i64-returning fn (negative case) ──
+    let v3: i64 = ret_i64(5 as i64);
+    if v3 != (105 as i64) { return 3; }
+
+    // ── Sub-test 4: cross-fn call (ret_ptr_outer → ret_ptr_inner) ──
+    // ret_ptr_inner returns ptr_add(buf, 8); ret_ptr_outer calls it.
+    // p4 = buf + 8. buf[8..11] = 0x43.
+    let p4_ret = ret_ptr_outer(buf);
+    let v4: i32 = *(p4_ret as *i32) & (0xff as i32);
+    if v4 != (0x43 as i32) { return 4; }
+
+    // ── Sub-test 5: nested call (top_level → intermediate) ──
+    // top_level returns intermediate(buf, 16) = buf + 16. buf[16..19] = 0x45.
+    let p5_ret = top_level(buf);
+    let v5: i32 = *(p5_ret as *i32) & (0xff as i32);
+    if v5 != (0x45 as i32) { return 5; }
+
+    // ── Sub-test 6: recursive *T-returning fn ──
+    // recurse(buf, 4) returns buf + 4. buf[4..7] = 0x42.
+    let p6_ret = recurse(buf, 4 as i32);
+    let v6: i32 = *(p6_ret as *i32) & (0xff as i32);
+    if v6 != (0x42 as i32) { return 6; }
+
+    // ── Sub-test 7: closure returning *T ──
+    // make_closure returns ptr_add(buf, 8). buf[8..11] = 0x43.
+    let p7_ret = make_closure(buf);
+    let v7: i32 = *(p7_ret as *i32) & (0xff as i32);
+    if v7 != (0x43 as i32) { return 7; }
+
+    // ── Sub-test 8: builtin ptr_add_u8 / malloc fallback ──
+    // ptr_add_u8 also in builtin list. malloc → just smoke that the call
+    // returns a valid pointer (no deref — malloc can return 0).
+    let p8 = malloc(8 as i64);
+    if p8 == (0 as *u8) { return 80; }  // malloc may fail in some envs — but ok
+    // smoke: write a byte via ptr_add_u8 to the malloc'd buffer, read back.
+    let target = ptr_add_u8(p8, 0 as i64);
+    *(target as *i32) = 0x5a as i32;
+    let v8: i32 = *(target as *i32) & (0xff as i32);
+    if v8 != (0x5a as i32) { return 8; }
+
+    return 0;
+}

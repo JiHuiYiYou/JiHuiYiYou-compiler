@@ -726,7 +726,11 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
         let mode = target_backend_mode(t);
         if mode == BACKEND_SELF() {
             // In-mem self path: 直接 (*ir.sb).buf → codegen_amd64_run_text → .s
-            let im_rc = codegen_amd64_run_text(buf_p, buf_len, asm_path, t);
+            // v3.4.2 W-089 真修: 传 sema.ret_type_map / n (Pass 1.6 populate)
+            //   让 emit_call 走 semantic lookup 替换 v3.1.0 byte-prefix whitelist
+            let im_rc = codegen_amd64_run_text(buf_p, buf_len, asm_path, t,
+                                               sema_get_ret_type_map(&sema),
+                                               sema_get_ret_type_map_n(&sema));
             if im_rc == (0 as i32) {
                 rc = 2 as i32;
                 did_inmem = 1 as i32;
@@ -788,7 +792,13 @@ fn run_backend(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
     if fb != (0 as *u8) {
         jh_fputs_stderr("run_backend: warning — QBE_FALLBACK ignored in v3.1.0 (QBE removed), proceeding with self-backend\n" as *u8);
     }
-    return codegen_amd64_run(il_path, asm_path, t);
+    // v3.4.2 W-089 真修: file-path fallback (compile() 写了 .il 后 caller 调)
+    //   拿不到 sema.ret_type_map (sema ctx 已 free),传 (0, 0) → emit_call 走
+    //   cg_is_builtin_ptr_fn fallback only (link-only externs)。生产路径走
+    //   compile() 内 in-mem dispatch (codegen_amd64_run_text with real map)。
+    //   File-path fallback 是 JHY_WRITE_IL=1 诊断模式,失去 stdlib pointer-flag
+    //   增益是 acceptable trade-off (JHY_WRITE_IL 用户主动 opt-in)。
+    return codegen_amd64_run(il_path, asm_path, t, 0 as *u8, 0 as i64);
 }
 
 // link_with_gcc: jh_gcc_invoke(ASM_PATH RUNTIME_C HELPERS_C -o EXE_PATH -lm)

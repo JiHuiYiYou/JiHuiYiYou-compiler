@@ -27,6 +27,8 @@
 import codegen_amd64_regalloc;
 // v2.11.2 (W-074.6 T1-a): cg_byte_at / cg_streq_n / cg_find_sub 用 ptr_add_u8
 import util;
+// v3.4.2 W-089: cg_query_fn_returns_ptr 解析 *RetTypeMapEntry (ir.jhyy 定义)
+import ir;
 
 // ════════════════════════════════════════════════════
 // QBE type constants(per ir.jhyy `QBE_W='w'=119` 等)
@@ -227,6 +229,13 @@ type CGState = struct {
     xmm_arg_count:    i32,  // 当前 call 已用 XMM arg reg 数 (per-call reset)
     int_arg_count:    i32,  // 当前 call 已用 int arg reg 数
     stack_arg_offset: i64,  // 当前 call 已用 stack-arg 字节偏移 (8 字节对齐)
+
+    // v3.4.2 (W-089 真修):SymbolReturnTypeMap wire from sema Pass 1.6 → emit_call
+    //   semantic lookup. Replaces v3.1.0 13-prefix byte-prefix whitelist (cg_query_fn
+    //   _returns_ptr in codegen_amd64_state.jhyy). map=0 / n=0=fall through to
+    //   cg_is_builtin_ptr_fn fallback only (link-only externs like ptr_add).
+    ret_type_map:   *u8,    // *RetTypeMapEntry[] arena-alloc'd by sema
+    ret_type_map_n: i64,    // entry count
 }
 
 // v2.11.5 (W-074.7 alloc-tracking 真修): extern bridge 装当前 CGState 的
@@ -376,6 +385,10 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     (*s).xmm_arg_count    = 0 as i32;
     (*s).int_arg_count    = 0 as i32;
     (*s).stack_arg_offset = 0 as i64;
+    // v3.4.2 W-089: ret_type_map / ret_type_map_n NOT zero-init in cg_state_init —
+    //   codegen_amd64_run / run_text's cg_state_set_ret_type_map runs IMMEDIATELY
+    //   after cg_state_init (per main.jhyy wire) and populates real sema map。
+    //   reset_for_function also NOT clear (per-compile invariant, see below).
     // v2.11.5 (W-074.7 alloc-tracking 真修):alloc i64 数组 zero-init。
     // emit_alloc 调 cg_record_temp_slot 写 slot,reset_for_function 把数组 zero
     // (per-fn 隔离)。
@@ -493,6 +506,11 @@ fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
     (*s).xmm_arg_count    = 0 as i32;
     (*s).int_arg_count    = 0 as i32;
     (*s).stack_arg_offset = 0 as i64;
+    // v3.4.2 W-089: ret_type_map 是 per-compile (sema 一次 populate),不随 fn 切换。
+    //   这里必须 NOT reset — per-fn reset 会 wipe sema populate 的 map → 第二个
+    //   fn 起 cg_query_fn_returns_ptr 拿不到 map → 返回 0 → W-089 bug 复发
+    //   (v3.4.2 initial ship 6 std_* regress 100% 此 bug)。map = per-compile invariant
+    //   across all functions。
     // v2.11.5 (W-074.7 alloc-tracking 真修):zero temp_slot_for_id 数组 per-fn。
     // 每个 fn 的 alloc slot 独立 — fn A 的 t17 != fn B 的 t17。重新 memset 0
     // 让 cg_offset_for_temp 在新 fn fall through formula fallback (recorded=0)
@@ -776,6 +794,164 @@ fn cg_byte_at(s: *u8, i: i64) -> i32 {
     let p = ptr_add_u8(s, i);
     let c = *p;
     return c as i32;
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// v3.4.2 W-089 真修: SymbolReturnTypeMap (跨函数 call graph semantic lookup)
+//
+// Replaces v3.1.0 byte-prefix whitelist (emit_call L898-1091 194 LOC) which
+//   was the last V3 self-backend workaround. Map populated by sema Pass 1.6
+//   (sema.jhyy check_module_populate_ret_type_map) — fn sym name (FNV-1 hash,
+//   util.hash_string) → ptr_kind flag. Query replaces heuristic with semantic
+//   "does this fn return a pointer-equivalent type?".
+//
+// Wired from main.jhyy:compile() AFTER sema_check populates sema.ret_type_map.
+//   Codegen reads from CGState directly (no extern bridge needed since both
+//   sema and codegen live in same compile).
+//
+// Position: 放在 cg_byte_at 之后因为 cg_is_builtin_ptr_fn 调 cg_byte_at
+//   取字节 — jhyy 单 pass 无 forward ref (per [[feedback_jhyy_no_forward_ref]])。
+// ════════════════════════════════════════════════════════════════════════
+
+// cg_state_set_ret_type_map — wire sema's SymbolReturnTypeMap into current
+//   CGState. Called by codegen_amd64_run / codegen_amd64_run_text after
+//   cg_state_init (per main.jhyy:compile() threading). map=0 / n=0 是合法空 map
+//   → cg_is_builtin_ptr_fn fallback 仍生效 (link-only externs 走 hardcoded list)。
+fn cg_state_set_ret_type_map(state: *u8, map: *u8, n: i64) -> i32 {
+    let s = state as *CGState;
+    (*s).ret_type_map = map;
+    (*s).ret_type_map_n = n;
+    return 0 as i32;
+}
+
+// cg_get_ret_type_map / cg_get_ret_type_map_n — query helpers (used by
+//   cg_query_fn_returns_ptr; exposed for tests / external access).
+fn cg_get_ret_type_map(state: *u8) -> *u8 {
+    let s = state as *CGState;
+    return (*s).ret_type_map;
+}
+
+fn cg_get_ret_type_map_n(state: *u8) -> i64 {
+    let s = state as *CGState;
+    return (*s).ret_type_map_n;
+}
+
+// cg_is_builtin_ptr_fn — fallback for link-only externs (functions that the
+//   compiler emits `call $name` to but don't appear in user source as
+//   `fn name(...)` declarations, so ret_type_map can't catch them). These
+//   are the C runtime helpers + stage0 codegen intrinsics.
+//
+// Hardcoded because they're stable: ptr_add / ptr_add_u8 / ptr_sub / malloc /
+//   __closure_<N> are core codegen / runtime primitives. Adding new entries
+//   requires editing this function (no string-prefix match → no false positives).
+//
+// Returns 1 iff name (with len) matches one of the builtin pointer-returning
+//   functions, 0 otherwise.
+fn cg_is_builtin_ptr_fn(name: *u8, name_len: i64) -> i32 {
+    // ptr_add (7 chars)
+    if name_len == (7 as i64) {
+        if cg_byte_at(name, 0 as i64) == 'p' as i32
+            && cg_byte_at(name, 1 as i64) == 't' as i32
+            && cg_byte_at(name, 2 as i64) == 'r' as i32
+            && cg_byte_at(name, 3 as i64) == '_' as i32
+            && cg_byte_at(name, 4 as i64) == 'a' as i32
+            && cg_byte_at(name, 5 as i64) == 'd' as i32
+            && cg_byte_at(name, 6 as i64) == 'd' as i32 {
+            return 1 as i32;
+        }
+    }
+    // ptr_add_u8 (11 chars)
+    if name_len == (11 as i64) {
+        if cg_byte_at(name, 0 as i64) == 'p' as i32
+            && cg_byte_at(name, 1 as i64) == 't' as i32
+            && cg_byte_at(name, 2 as i64) == 'r' as i32
+            && cg_byte_at(name, 3 as i64) == '_' as i32
+            && cg_byte_at(name, 4 as i64) == 'a' as i32
+            && cg_byte_at(name, 5 as i64) == 'd' as i32
+            && cg_byte_at(name, 6 as i64) == 'd' as i32
+            && cg_byte_at(name, 7 as i64) == '_' as i32
+            && cg_byte_at(name, 8 as i64) == 'u' as i32
+            && cg_byte_at(name, 9 as i64) == '8' as i32 {
+            return 1 as i32;
+        }
+    }
+    // ptr_sub (7 chars)
+    if name_len == (7 as i64) {
+        if cg_byte_at(name, 0 as i64) == 'p' as i32
+            && cg_byte_at(name, 1 as i64) == 't' as i32
+            && cg_byte_at(name, 2 as i64) == 'r' as i32
+            && cg_byte_at(name, 3 as i64) == '_' as i32
+            && cg_byte_at(name, 4 as i64) == 's' as i32
+            && cg_byte_at(name, 5 as i64) == 'u' as i32
+            && cg_byte_at(name, 6 as i64) == 'b' as i32 {
+            return 1 as i32;
+        }
+    }
+    // malloc (6 chars)
+    if name_len == (6 as i64) {
+        if cg_byte_at(name, 0 as i64) == 'm' as i32
+            && cg_byte_at(name, 1 as i64) == 'a' as i32
+            && cg_byte_at(name, 2 as i64) == 'l' as i32
+            && cg_byte_at(name, 3 as i64) == 'l' as i32
+            && cg_byte_at(name, 4 as i64) == 'o' as i32
+            && cg_byte_at(name, 5 as i64) == 'c' as i32 {
+            return 1 as i32;
+        }
+    }
+    // __closure_ prefix (≥10 chars starting with "__closure_")
+    if name_len >= (10 as i64) {
+        if cg_byte_at(name, 0 as i64) == '_' as i32
+            && cg_byte_at(name, 1 as i64) == '_' as i32
+            && cg_byte_at(name, 2 as i64) == 'c' as i32
+            && cg_byte_at(name, 3 as i64) == 'l' as i32
+            && cg_byte_at(name, 4 as i64) == 'o' as i32
+            && cg_byte_at(name, 5 as i64) == 's' as i32
+            && cg_byte_at(name, 6 as i64) == 'u' as i32
+            && cg_byte_at(name, 7 as i64) == 'r' as i32
+            && cg_byte_at(name, 8 as i64) == 'e' as i32
+            && cg_byte_at(name, 9 as i64) == '_' as i32 {
+            return 1 as i32;
+        }
+    }
+    return 0 as i32;
+}
+
+// cg_query_fn_returns_ptr — semantic lookup. Returns 1 iff callee name (with
+//   len) refers to a function whose return is pointer-equivalent (*T / Cap<T> /
+//   &T / KIND_FUNC returning *T). Replaces v3.1.0 byte-prefix whitelist.
+//
+// Lookup order:
+//   1. Map lookup: hash name → linear scan map (util.hash_string to match
+//      sema's hash). Returns ptr_kind flag.
+//   2. cg_is_builtin_ptr_fn fallback for link-only externs (ptr_add etc.)
+fn cg_query_fn_returns_ptr(state: *u8, name: *u8, name_len: i64) -> i32 {
+    if name == (0 as *u8) || name_len <= (0 as i64) {
+        return 0 as i32;
+    }
+    let s = state as *CGState;
+    let map = (*s).ret_type_map;
+    let n = (*s).ret_type_map_n;
+    // Map lookup — linear scan over RetTypeMapEntry array
+    // v3.4.2 W-089 真修:用 hash_string_n(name, name_len) (跟 sema Pass 1.6 的
+    //   hash_string 对齐)。hash_string 用 strlen 读到 NUL,但 emit_call 传入的
+    //   name 是 tok text 子串 (e.g. "$std_arena_calloc" 中 "$" 之后) — 不在 right
+    //   place NUL-terminate → strlen 读到 tok 末尾外乱字节 → hash 错配 →
+    //   SymbolReturnTypeMap lookup 失败 → 返回 ptr_kind=0 → emit_call 不 flag
+    //   address-holder → W-089 bug 复发 (v3.4.2 initial ship saw 6 std_* test
+    //   regress: std_arena_calloc/std_fmt_*/std_vec_basic → 100% 因 hash miss)。
+    if map != (0 as *u8) && n > (0 as i64) {
+        let h = hash_string_n(name, name_len);
+        let mut i: i64 = 0 as i64;
+        while i < n {
+            let entry = ptr_add_u8(map, i * (16 as i64)) as *RetTypeMapEntry;
+            if (*entry).name_hash == h {
+                return (*entry).ptr_kind;
+            }
+            i = i + (1 as i64);
+        }
+    }
+    // Builtin fallback (link-only externs not in sema)
+    return cg_is_builtin_ptr_fn(name, name_len);
 }
 
 // v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN): block-name uniquify

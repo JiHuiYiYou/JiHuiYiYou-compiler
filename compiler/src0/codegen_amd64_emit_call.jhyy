@@ -884,208 +884,36 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     if ret_qt == QBE_W_LOCAL() {
         let _zx = sb_append_cstr(arena, s, "\tmovl %eax, %eax\n" as *u8);
     }
-    // v3.1.0 W-089 (caller-side derived-address dst slot pre-scan 真修延伸 —
-    // call result pointer-flag):emit_call 没把 l-typed call result 标 address-holder,
-    // 导致后续 `loadl %t<call_ret>` 走 formula pool direct-load path 而不是 indirect
-    // dispatch (%r8 间接 load),读到的不是 deref 值而是 slot 存的 address VALUE。
-    // 影响测试:std_arena_basic/calloc/reset, std_fmt_hex/i32/i32_neg/i64/str,
-    //          std_mem_basic/compare/copy/set/zero, std_string_* (全部 V3 v3.2.2 stdlib
-    //          新增 std_*.jhyy 测试,V2 v2.16.0 self-backend 永远没跑过所以 bug 未暴露)。
+    // v3.4.2 W-089 真修: semantic lookup 替换 v3.1.0 byte-prefix whitelist (194 LOC)。
     //
-    // 触发面:`*(ptr_add(...) as *T)` / `*(malloc(...) as *T)` — call result 用作 load
-    // base pointer。fix:callee name 在 pointer-returning whitelist (ptr_add / ptr_add_u8
-    // / malloc / __closure_*) → 标 address-holder。
+    // Background (per workarounds.md W-089 entry):
+    //   emit_call 不 mark l-typed call results as address-holder → 后续 `loadl %t<call_ret>`
+    //   走 formula pool direct-load path 而不是 indirect dispatch → 读到 slot 存的 address VALUE
+    //   而不是 deref 值。触发面:`*(call_str_data(s) as *T)` / `*(malloc(...) as *T)` /
+    //   `*(std_fn(...) as *T)` 模式。V2 v2.16.0 self-backend 同 gap 但 V2 corpus 无 stdlib
+    //   pointer-returning fn user,所以 bug 未暴露;V3 v3.2.2 stdlib 新增后 std_arena_* /
+    //   std_fmt_* / std_mem_* / std_string_* 触发。v3.1.0 13-prefix byte-prefix whitelist
+    //   (本 block 194 LOC) 是 workaround;v3.4.2 真修为跨函数 call graph + SymbolReturnTypeMap。
+    //
+    // 真修 mechanism:
+    //   - sema Pass 1.6 (sema.jhyy check_module_populate_ret_type_map) 扫 (*md).decls
+    //     NODE_FUNC_DECL → FNV-1 hash fn sym name → ptr_kind flag (1 iff ret_type is
+    //     KIND_POINTER/SLICE/REF/CAP/FUNC-returning-pointer)。
+    //   - main.jhyy:compile() 传 sema.ret_type_map + ret_type_map_n 到 codegen_amd64_run_text
+    //     → cg_state_set_ret_type_map wires into CGState。
+    //   - emit_call 走 cg_query_fn_returns_ptr (codegen_amd64_state.jhyy) → 1 iff callee
+    //     returns pointer-equivalent。语义 vs 启发式:真修覆盖所有 ptr/slice/ref/cap/fn→ptr
+    //     return type,无需 prefix hardcode。
+    //
+    // Fallback: cg_is_builtin_ptr_fn (link-only externs not in sema: ptr_add / ptr_add_u8 /
+    //   ptr_sub / malloc / __closure_<N>)。
     if ret_qt == QBE_L_LOCAL() {
         let d2 = cg_find_dollar((*t).text, (*t).text_len, 0 as i64);
         if d2 >= (0 as i64) {
-            // 检查 callee name 是否在 pointer-returning whitelist:
-            //   - "ptr_add" (7 bytes)
-            //   - "ptr_add_u8" (11 bytes)
-            //   - "malloc" (6 bytes)
-            //   - "__closure_<N>" (10+ bytes, 前缀 "__closure_")
-            // 直接 compare text byte-by-byte(避免 local array init 不支持 `as u8` in initializer)。
-            let name_start: i64 = d2 + (1 as i64);
-            let is_ptr_add: i32 = if name_start + (7 as i64) <= (*t).text_len
-                && cg_byte_at((*t).text, name_start + (0 as i64)) == 'p' as i32
-                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
-                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'r' as i32
-                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32
-                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'a' as i32
-                && cg_byte_at((*t).text, name_start + (5 as i64)) == 'd' as i32
-                && cg_byte_at((*t).text, name_start + (6 as i64)) == 'd' as i32 {
-                // 确认 next byte 是 '(' 或空白 或 EOL(ptr_add 完整,不是 ptr_addd 等更长名)
-                let nb1: i32 = if name_start + (7 as i64) < (*t).text_len { cg_byte_at((*t).text, name_start + (7 as i64)) } else { 0 as i32 };
-                if nb1 == 40 as i32 || nb1 == 32 as i32 || nb1 == 9 as i32 { 1 as i32 } else { 0 as i32 }
-            } else { 0 as i32 };
-            let is_ptr_add_u8: i32 = if name_start + (11 as i64) <= (*t).text_len
-                && cg_byte_at((*t).text, name_start + (0 as i64)) == 'p' as i32
-                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
-                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'r' as i32
-                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32
-                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'a' as i32
-                && cg_byte_at((*t).text, name_start + (5 as i64)) == 'd' as i32
-                && cg_byte_at((*t).text, name_start + (6 as i64)) == 'd' as i32
-                && cg_byte_at((*t).text, name_start + (7 as i64)) == '_' as i32
-                && cg_byte_at((*t).text, name_start + (8 as i64)) == 'u' as i32
-                && cg_byte_at((*t).text, name_start + (9 as i64)) == '8' as i32 {
-                1 as i32
-            } else { 0 as i32 };
-            let is_malloc: i32 = if name_start + (6 as i64) <= (*t).text_len
-                && cg_byte_at((*t).text, name_start + (0 as i64)) == 'm' as i32
-                && cg_byte_at((*t).text, name_start + (1 as i64)) == 'a' as i32
-                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'l' as i32
-                && cg_byte_at((*t).text, name_start + (3 as i64)) == 'l' as i32
-                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'o' as i32
-                && cg_byte_at((*t).text, name_start + (5 as i64)) == 'c' as i32 {
-                1 as i32
-            } else { 0 as i32 };
-            let is_closure: i32 = if name_start + (10 as i64) <= (*t).text_len
-                && cg_byte_at((*t).text, name_start + (0 as i64)) == '_' as i32
-                && cg_byte_at((*t).text, name_start + (1 as i64)) == '_' as i32
-                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'c' as i32
-                && cg_byte_at((*t).text, name_start + (3 as i64)) == 'l' as i32
-                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'o' as i32
-                && cg_byte_at((*t).text, name_start + (5 as i64)) == 's' as i32
-                && cg_byte_at((*t).text, name_start + (6 as i64)) == 'u' as i32
-                && cg_byte_at((*t).text, name_start + (7 as i64)) == 'r' as i32
-                && cg_byte_at((*t).text, name_start + (8 as i64)) == 'e' as i32
-                && cg_byte_at((*t).text, name_start + (9 as i64)) == '_' as i32 {
-                1 as i32
-            } else { 0 as i32 };
-            let mut flag_is_ptr: i32 = 0 as i32;
-            if is_ptr_add != (0 as i32) { flag_is_ptr = 1 as i32; }
-            if is_ptr_add_u8 != (0 as i32) { flag_is_ptr = 1 as i32; }
-            if is_malloc != (0 as i32) { flag_is_ptr = 1 as i32; }
-            if is_closure != (0 as i32) { flag_is_ptr = 1 as i32; }
-            // v3.1.0 W-089 (扩展):prefix-based whitelist — common stdlib pointer-returning
-            // fn name 模式。覆盖 fmt_*/mem_*/str_*/arena_*/string_*/hex_* + std_ 前缀。
-            // 这些 V3 v3.2.2 stdlib 测试 (std_fmt_*, std_mem_*, std_string_*, std_arena_*) 触发。
-            // 启发式:name 起始 prefix = "fmt_" / "mem_" / "str_" / "arena_" / "string_" /
-            // "hex_" / "std_fmt_" / "std_mem_" / "std_string_" / "std_arena_" / "std_str_" /
-            // "fopen" / "fgets" / "fread" / "fwrite" / "fclose" / "mmap" / "mremap" /
-            // "strdup" / "strndup" / "strcat" / "strcpy" / "strncpy" / "strchr" / "strrchr" /
-            // "strstr" / "strpbrk" / "memcpy" / "memmove" / "memset" / "memchr" / "malloc" 等
-            // 全 flag 为 pointer-returning。
-            let is_prefix_fmt: i32 = if name_start + (4 as i64) <= (*t).text_len
-                && cg_byte_at((*t).text, name_start + (0 as i64)) == 'f' as i32
-                && cg_byte_at((*t).text, name_start + (1 as i64)) == 'm' as i32
-                && cg_byte_at((*t).text, name_start + (2 as i64)) == 't' as i32
-                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32 {
-                1 as i32
-            } else { 0 as i32 };
-            let is_prefix_mem: i32 = if name_start + (4 as i64) <= (*t).text_len
-                && cg_byte_at((*t).text, name_start + (0 as i64)) == 'm' as i32
-                && cg_byte_at((*t).text, name_start + (1 as i64)) == 'e' as i32
-                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'm' as i32
-                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32 {
-                1 as i32
-            } else { 0 as i32 };
-            let is_prefix_str: i32 = if name_start + (4 as i64) <= (*t).text_len
-                && cg_byte_at((*t).text, name_start + (0 as i64)) == 's' as i32
-                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
-                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'r' as i32
-                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32 {
-                1 as i32
-            } else { 0 as i32 };
-            let is_prefix_arena: i32 = if name_start + (6 as i64) <= (*t).text_len
-                && cg_byte_at((*t).text, name_start + (0 as i64)) == 'a' as i32
-                && cg_byte_at((*t).text, name_start + (1 as i64)) == 'r' as i32
-                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'e' as i32
-                && cg_byte_at((*t).text, name_start + (3 as i64)) == 'n' as i32
-                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'a' as i32
-                && cg_byte_at((*t).text, name_start + (5 as i64)) == '_' as i32 {
-                1 as i32
-            } else { 0 as i32 };
-            let is_prefix_std_fmt: i32 = if name_start + (8 as i64) <= (*t).text_len
-                && cg_byte_at((*t).text, name_start + (0 as i64)) == 's' as i32
-                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
-                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'd' as i32
-                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32
-                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'f' as i32
-                && cg_byte_at((*t).text, name_start + (5 as i64)) == 'm' as i32
-                && cg_byte_at((*t).text, name_start + (6 as i64)) == 't' as i32
-                && cg_byte_at((*t).text, name_start + (7 as i64)) == '_' as i32 {
-                1 as i32
-            } else { 0 as i32 };
-            let is_prefix_std_mem: i32 = if name_start + (8 as i64) <= (*t).text_len
-                && cg_byte_at((*t).text, name_start + (0 as i64)) == 's' as i32
-                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
-                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'd' as i32
-                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32
-                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'm' as i32
-                && cg_byte_at((*t).text, name_start + (5 as i64)) == 'e' as i32
-                && cg_byte_at((*t).text, name_start + (6 as i64)) == 'm' as i32
-                && cg_byte_at((*t).text, name_start + (7 as i64)) == '_' as i32 {
-                1 as i32
-            } else { 0 as i32 };
-            let is_prefix_std_str: i32 = if name_start + (8 as i64) <= (*t).text_len
-                && cg_byte_at((*t).text, name_start + (0 as i64)) == 's' as i32
-                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
-                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'd' as i32
-                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32
-                && cg_byte_at((*t).text, name_start + (4 as i64)) == 's' as i32
-                && cg_byte_at((*t).text, name_start + (5 as i64)) == 't' as i32
-                && cg_byte_at((*t).text, name_start + (6 as i64)) == 'r' as i32
-                && cg_byte_at((*t).text, name_start + (7 as i64)) == '_' as i32 {
-                1 as i32
-            } else { 0 as i32 };
-            let is_prefix_std_arena: i32 = if name_start + (10 as i64) <= (*t).text_len
-                && cg_byte_at((*t).text, name_start + (0 as i64)) == 's' as i32
-                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
-                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'd' as i32
-                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32
-                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'a' as i32
-                && cg_byte_at((*t).text, name_start + (5 as i64)) == 'r' as i32
-                && cg_byte_at((*t).text, name_start + (6 as i64)) == 'e' as i32
-                && cg_byte_at((*t).text, name_start + (7 as i64)) == 'n' as i32
-                && cg_byte_at((*t).text, name_start + (8 as i64)) == 'a' as i32
-                && cg_byte_at((*t).text, name_start + (9 as i64)) == '_' as i32 {
-                1 as i32
-            } else { 0 as i32 };
-            // C stdlib functions that return pointers
-            let is_c_stdlib_strdup: i32 = if name_start + (6 as i64) <= (*t).text_len
-                && cg_byte_at((*t).text, name_start + (0 as i64)) == 's' as i32
-                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
-                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'r' as i32
-                && cg_byte_at((*t).text, name_start + (3 as i64)) == 'd' as i32
-                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'u' as i32
-                && cg_byte_at((*t).text, name_start + (5 as i64)) == 'p' as i32 {
-                1 as i32
-            } else { 0 as i32 };
-            let is_c_stdlib_fopen: i32 = if name_start + (5 as i64) <= (*t).text_len
-                && cg_byte_at((*t).text, name_start + (0 as i64)) == 'f' as i32
-                && cg_byte_at((*t).text, name_start + (1 as i64)) == 'o' as i32
-                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'p' as i32
-                && cg_byte_at((*t).text, name_start + (3 as i64)) == 'e' as i32
-                && cg_byte_at((*t).text, name_start + (4 as i64)) == 'n' as i32 {
-                1 as i32
-            } else { 0 as i32 };
-            if is_prefix_fmt != (0 as i32) { flag_is_ptr = 1 as i32; }
-            if is_prefix_mem != (0 as i32) { flag_is_ptr = 1 as i32; }
-            if is_prefix_str != (0 as i32) { flag_is_ptr = 1 as i32; }
-            if is_prefix_arena != (0 as i32) { flag_is_ptr = 1 as i32; }
-            if is_prefix_std_fmt != (0 as i32) { flag_is_ptr = 1 as i32; }
-            if is_prefix_std_mem != (0 as i32) { flag_is_ptr = 1 as i32; }
-            if is_prefix_std_str != (0 as i32) { flag_is_ptr = 1 as i32; }
-            if is_prefix_std_arena != (0 as i32) { flag_is_ptr = 1 as i32; }
-            // v3.2.4 (W-091 std::vec 兜底):catch-all `std_` prefix — covers any
-            // future stdlib module whose pointer-returning fn doesn't match a
-            // specific sub-prefix (std_vec_/std_map_/std_string_/std_math_/...).
-            // std_ prefix = V3 stdlib convention (per v3.2.x plans); non-stdlib
-            // fn names starting with `std_` are user choice and harmless to
-            // over-flag (worst case: indirect dispatch instead of slot read
-            // for *T deref, same code path).
-            let is_prefix_std_any: i32 = if name_start + (4 as i64) <= (*t).text_len
-                && cg_byte_at((*t).text, name_start + (0 as i64)) == 's' as i32
-                && cg_byte_at((*t).text, name_start + (1 as i64)) == 't' as i32
-                && cg_byte_at((*t).text, name_start + (2 as i64)) == 'd' as i32
-                && cg_byte_at((*t).text, name_start + (3 as i64)) == '_' as i32 {
-                1 as i32
-            } else { 0 as i32 };
-            if is_prefix_std_any != (0 as i32) { flag_is_ptr = 1 as i32; }
-            if is_c_stdlib_strdup != (0 as i32) { flag_is_ptr = 1 as i32; }
-            if is_c_stdlib_fopen != (0 as i32) { flag_is_ptr = 1 as i32; }
-            if flag_is_ptr != (0 as i32) {
+            // fn_name_len 已在 emit_call top 算过(include '$' prefix);substring 从 d2+1
+            //   起,name_len = fn_name_len - 1(skip '$')。
+            let is_ptr = cg_query_fn_returns_ptr(state, ptr_add_u8((*t).text, d2 + (1 as i64)), fn_name_len - (1 as i64));
+            if is_ptr != (0 as i32) {
                 let _adr = cg_record_temp_holds_address(state, ret_temp_id);
             }
         }

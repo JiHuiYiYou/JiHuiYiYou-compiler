@@ -214,6 +214,26 @@ fn hash_string(s: *u8) -> i64 {
     return h;
 }
 
+// v3.4.2 W-089 真修:hash_string_n — 跟 hash_string 同 algorithm,但用 caller 提供
+//   length (针对 codegen_amd64_state::cg_query_fn_returns_ptr 调 s + name_len,s 是
+//   tok text 子串指针 (e.g. "$std_arena_calloc" 中 "$" 之后) — 不 NUL-terminated
+//   在 right place → strlen 会读到 tok 末尾外乱字节 → hash collision / wrong hash →
+//   SymbolReturnTypeMap lookup 失败 → 返回 ptr_kind=0 → emit_call 不 flag address-holder
+//   → W-089 bug 复发。修法:用 caller-provided n 拿 string,字节级跟 sema Pass 1.6 的
+//   hash_string 对齐。
+fn hash_string_n(s: *u8, n: i64) -> i64 {
+    let mut h: i64 = FNV_OFFSET();
+    h = (h ^ n) * FNV_PRIME();
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let c32 = *((s as i64 + i) as *u8) as i32;
+        let c = c32 as i64;
+        h = (h ^ c) * FNV_PRIME();
+        i = i + (1 as i64);
+    }
+    return h;
+}
+
 fn hm_alloc_buckets(a: *Arena, n: i64) -> *u8 {
     let total = n * HASH_ENTRY_SIZE();
     return arena_calloc(a, total);
