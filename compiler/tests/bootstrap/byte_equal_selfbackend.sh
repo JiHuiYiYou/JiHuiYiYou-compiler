@@ -2,7 +2,7 @@
 # byte_equal_selfbackend.sh — V3 self-backend REAL execution gate (Gate-0)
 #
 # 验证: V3 self-backend (`JHY_SELF_BACKEND=1`) 对同一 .jhyy emit **真 .s**,
-#       跟 V2 (axis-v2 v2.16.0) self-backend golden 对照 byte-equal 或
+#       跟 V2 (axis-v2 v4.0.0) self-backend golden 对照 byte-equal 或
 #       mnemonically equivalent (允许寄存器分配 / 指令顺序差异)。
 #
 # Why this script exists (per 用户 2026-09-23 反馈):
@@ -36,7 +36,7 @@
 #
 # Baseline 约定 (per v3.0.7/Commit 0):
 #   路径: compiler/tests/bootstrap/baseline_v2_self/v2_self_<name>.s
-#   内容: V2 (axis-v2 v2.16.0) self-backend 实跑产出 .s (静态 golden,commit 入仓)
+#   内容: V2 (axis-v2 v4.0.0) self-backend 实跑产出 .s (静态 golden,commit 入仓)
 #   3 测试: fmod_basic (exit 1) / fmod_negative (exit 99) / fmod_f32 (exit 1)
 #
 # [2/4] adaptive sha strategy (per 用户 2026-09-23 反馈 补强 #2):

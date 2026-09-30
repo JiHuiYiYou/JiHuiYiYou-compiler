@@ -533,7 +533,7 @@ static int compile(const char **inputs, int ninputs, const char *output) {
        path — it has its own jh_gcc_invoke + jh_run (CreateProcessA) flow
        that builds the gcc command jhyy-side. The D26 reproducibility recipe
        (`-g0 -Wl,--build-id=none` + SOURCE_DATE_EPOCH) is applied there.
-       v2.16.0: this C-side path is what jhyy_stage0.exe uses to bootstrap
+       v4.0.0: this C-side path is what jhyy_stage0.exe uses to bootstrap
        jhyy.exe (Stage 0 → jhyy-side). Apply D26 recipe here too + add
        -Wl,--no-insert-timestamp to suppress the PE-COFF timestamp that ld
        embeds despite SOURCE_DATE_EPOCH. Without these, jhyy.exe rebuilds
@@ -541,7 +541,7 @@ static int compile(const char **inputs, int ninputs, const char *output) {
     char exe_path[1024];
     snprintf(exe_path, sizeof(exe_path), "%s.exe", output);
     path_to_win(exe_path);
-    /* v2.16.0 D26: SOURCE_DATE_EPOCH in current process → child gcc sees it.
+    /* v4.0.0 D26: SOURCE_DATE_EPOCH in current process → child gcc sees it.
        putenv is in stdlib.h; sentinel 1234567890 = Unix epoch 2009-02-13 23:31:30. */
     _putenv("SOURCE_DATE_EPOCH=1234567890");
     #pragma GCC diagnostic push

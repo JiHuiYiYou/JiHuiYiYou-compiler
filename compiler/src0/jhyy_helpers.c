@@ -204,13 +204,13 @@ __attribute__((used)) int jh_fmt_lld_stderr(const char *fmt, long long val) {
    ABI: argv0=*u8(i64 ptr), 返回 i32 (=0 OK / !=0 err)
    与 main.c compute_project_root 镜像 (C 端不调这个 fn, jhyy 端才调)。
 
-   v2.16.0: QBE 完全移除。QBE_PATH() / jh_path_qbe() 保留 extern linkage 返
+   v4.0.0: QBE 完全移除。QBE_PATH() / jh_path_qbe() 保留 extern linkage 返
    回空字符串(永不调),以便 caller signature 不变。Path probing 只针对
    runtime.c + jhyy_helpers.c (Layout (a) installer 兄弟 vs Layout (b) source-
    tree walk-up)。GCC 路径默认 "gcc" (PATH 解析)。
 
-   详见 docs/internal/build.md "QBE 历史" 段 + docs/plans/v2/v2.16.0-plan.md。 */
-static char jh_path_qbe_buf[1024];  /* unused post-v2.16.0; empty string */
+   详见 docs/internal/build.md "QBE 历史" 段 + docs/plans/v2/v4.0.0-plan.md。 */
+static char jh_path_qbe_buf[1024];  /* unused post-v4.0.0; empty string */
 static char jh_path_gcc_buf[1024];
 static char jh_path_runtime_buf[1024];
 static char jh_path_helpers_buf[1024];
@@ -238,7 +238,7 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
        但 installer layout 是 <INSTALLDIR>\bin\jhyy.exe (只有 1 层), dirname × 4
        走到 C:\ → qbe/qbe.exe 找不到 → "QBE failed". 用户 VSCode 通过 PATH
        调 installer 版 jhyy.exe (PATH 排第一) 时 100% 触发.
-       v2.16.0: QBE 移除, probing 目标改为 jhyy_helpers.c (Layout (a) 兄弟 vs
+       v4.0.0: QBE 移除, probing 目标改为 jhyy_helpers.c (Layout (a) 兄弟 vs
        Layout (b) source-tree walk-up),runtime.c 同 pattern。 */
 
     /* Normalize path: ensure backslashes for consistent parsing */
@@ -252,7 +252,7 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
 
     /* GCC: default to "gcc" (PATH-resolved by gcc/jh_run). Always set. */
     snprintf(jh_path_gcc_buf, sizeof(jh_path_gcc_buf), "gcc");
-    /* jh_path_qbe_buf: empty string (post-v2.16.0 QBE removed). */
+    /* jh_path_qbe_buf: empty string (post-v4.0.0 QBE removed). */
     jh_path_qbe_buf[0] = '\0';
 
     /* Layout (a) — installer: runtime.c + jhyy_helpers.c as siblings of jhyy.exe */
@@ -294,7 +294,7 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
     return 1;  /* no layout matched — runtime.c / jhyy_helpers.c not found */
 }
 
-__attribute__((used)) const char *jh_path_qbe(void)     { return jh_path_qbe_buf; }  /* v2.16.0: always "" */
+__attribute__((used)) const char *jh_path_qbe(void)     { return jh_path_qbe_buf; }  /* v4.0.0: always "" */
 __attribute__((used)) const char *jh_path_gcc(void)     { return jh_path_gcc_buf; }
 __attribute__((used)) const char *jh_path_runtime(void) { return jh_path_runtime_buf; }
 __attribute__((used)) const char *jh_path_helpers(void) { return jh_path_helpers_buf; }

@@ -451,7 +451,7 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     // per-fn alloc 总和 pre-scan table。emit_func_header 读 per_fn_alloc[cur_fn_idx]
     // 决定 alloc pool reserve size (= 8192 base + per_fn_alloc)。没有 pre-scan
     // → frame_size 不 cover alloc pool → alloc 写 -8200(%rbp) 越界 → 错数据 / crash
-    // (V2 v2.16.0 self-backend 跟 V3 W-087 同一 bug,V2 regress 没 std_* test 触发)。
+    // (V2 v4.0.0 self-backend 跟 V3 W-087 同一 bug,V2 regress 没 std_* test 触发)。
     let pfa_bytes = (256 as i64) * (8 as i64);
     let pfa_ptr = arena_alloc(arena, pfa_bytes);
     let _zero_pfa = memset(pfa_ptr, 0 as i32, pfa_bytes);

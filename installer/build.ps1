@@ -137,8 +137,8 @@ switch ($Target) {
         exit 0
     }
     "compiler" {
-        Write-Host "[build.ps1] === compiler MSI build (v1.5.4 + v2.16.0 QBE removed) ==="
-        # 1. prepare bin/ payload (jhyy.exe; qbe.exe removed in v2.16.0)
+        Write-Host "[build.ps1] === compiler MSI build (v1.5.4 + v4.0.0 QBE removed) ==="
+        # 1. prepare bin/ payload (jhyy.exe; qbe.exe removed in v4.0.0)
         $binDir = "installer/build-artifacts/bin"
         if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
         Copy-Item -Path "compiler/build/bin/jhyy.exe" -Destination "$binDir/jhyy.exe" -Force
@@ -238,7 +238,7 @@ switch ($Target) {
         }
 
         # 3. build MSI via WiX 4/7
-        #   bindpath bin/        -> jhyy.exe (sole production binary, v2.16.0 QBE removed) + runtime.{c,h} + jhyy_helpers.c + UI assets
+        #   bindpath bin/        -> jhyy.exe (sole production binary, v4.0.0 QBE removed) + runtime.{c,h} + jhyy_helpers.c + UI assets
         #   bindpath common/     -> license.rtf + install-configure-all.bat + 2 .ps1 helpers
         #   bindpath vscode-ext/ -> jhyy-lang-X.Y.Z.vsix
         #   loc Locale.zh-CN.wxl for Chinese UI strings

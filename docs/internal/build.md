@@ -18,7 +18,7 @@ C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/
 
 工具：
 - GCC：`/c/msys64/ucrt64/bin/gcc.exe` (15.2.0 MSYS2 ucrt64)
-- Self-backend (jhyy-side 自研 x86-64 codegen):**v2.16.0 起 sole production path** (QBE 完全移除,per `docs/plans/v2/v2.16.0-plan.md`)
+- Self-backend (jhyy-side 自研 x86-64 codegen):**v4.0.0 起 sole production path** (QBE 完全移除,per `docs/plans/v2/v4.0.0-plan.md`)
 - Git：`/d/Program Files/Git/bin/git.exe`
 
 ---
@@ -118,7 +118,7 @@ cat compiler/build/bin/test.s
 ./test.exe; echo $?
 ```
 
-> **v2.16.0 注**:QBE 工具链已完全移除,不再有 `./qbe/qbe.exe` step。self-backend 是 sole production path (per `docs/plans/v2/v2.16.0-plan.md`)。
+> **v4.0.0 注**:QBE 工具链已完全移除,不再有 `./qbe/qbe.exe` step。self-backend 是 sole production path (per `docs/plans/v2/v4.0.0-plan.md`)。
 
 ---
 
@@ -201,11 +201,11 @@ python compiler/build/bin/regress.py
 
 ---
 
-## Backend 历史注（v2.16.0 之前）
+## Backend 历史注（v4.0.0 之前）
 
-> **v2.16.0 起**:QBE 工具链**完全移除**。`run_qbe` 改 fatal-stub (签名保留);`qbe/` git rm 41 files;qbe.exe mirror 删;installer/license.rtf/wxs QBE 引用删;`build.md` "QBE 后端坑" section 历史归档 (per `docs/plans/v2/v2.16.0-plan.md`)。self-backend 是 sole production path。
+> **v4.0.0 起**:QBE 工具链**完全移除**。`run_qbe` 改 fatal-stub (签名保留);`qbe/` git rm 41 files;qbe.exe mirror 删;installer/license.rtf/wxs QBE 引用删;`build.md` "QBE 后端坑" section 历史归档 (per `docs/plans/v2/v4.0.0-plan.md`)。self-backend 是 sole production path。
 
-~~**QBE 后端坑（Windows 独有, v2.16.0 起历史归档）**~~:
+~~**QBE 后端坑（Windows 独有, v4.0.0 起历史归档）**~~:
 
 1. ~~**临时变量必须带字母前缀**：`%t0`, `%t1`... 不能用 `%0`, `%1`（QBE Windows 构建拒绝纯数字）~~
 2. ~~**缩进必须是空格**：4 空格，不能用 tab（QBE Windows 构建 tab 解析有 bug）~~

@@ -890,7 +890,7 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     //   emit_call 不 mark l-typed call results as address-holder → 后续 `loadl %t<call_ret>`
     //   走 formula pool direct-load path 而不是 indirect dispatch → 读到 slot 存的 address VALUE
     //   而不是 deref 值。触发面:`*(call_str_data(s) as *T)` / `*(malloc(...) as *T)` /
-    //   `*(std_fn(...) as *T)` 模式。V2 v2.16.0 self-backend 同 gap 但 V2 corpus 无 stdlib
+    //   `*(std_fn(...) as *T)` 模式。V2 v4.0.0 self-backend 同 gap 但 V2 corpus 无 stdlib
     //   pointer-returning fn user,所以 bug 未暴露;V3 v3.2.2 stdlib 新增后 std_arena_* /
     //   std_fmt_* / std_mem_* / std_string_* 触发。v3.1.0 13-prefix byte-prefix whitelist
     //   (本 block 194 LOC) 是 workaround;v3.4.2 真修为跨函数 call graph + SymbolReturnTypeMap。

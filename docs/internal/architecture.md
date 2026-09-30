@@ -294,8 +294,8 @@ jnz %t0, @then, @else    # 条件跳转
 ### Out of scope (v2.14.0 不做)
 
 - ❌ **QBE 自写** (跳过 QBE IL, 直 emit x86-64) — v2.15.0 ✅ SHIPPED (per Strategy B+: 跳过 file I/O, IL 文本仍 in-memory 自写, NOT "跳过 QBE IL 直 emit")
-- ❌ **QBE 工具链移除** — v2.16.0
-- ❌ **性能 bench + .exe byte-equal** — v2.16.0
+- ❌ **QBE 工具链移除** — v4.0.0
+- ❌ **性能 bench + .exe byte-equal** — v4.0.0
 - ❌ **跨 Linux ARM64 / Win ARM64 / macOS Apple Silicon** — v3.x 后续 (audit 2026-09-17 verify)
 - ❌ **Mutation testing 自动化 (CI 集成)** — future sprint
 - ❌ **Fixed point 全量 126 test 跨代一致** — v2.14.0 只跑 main.jhyy, per-test N=3 已 ship per v2.9.0

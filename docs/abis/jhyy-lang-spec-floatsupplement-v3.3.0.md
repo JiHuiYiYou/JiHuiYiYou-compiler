@@ -67,11 +67,11 @@ f32/f64 **不是 v3.3.0 一次性 ship**;是**逐阶段 ship**:
 | v2.11.19 Phase 1-5 | (v2 axis 5 commit) | lexer tokenize 8 conversion op → emit_conv_* SSE2 → f32 IMM + f64 fractional → FNARG XMM bug → emit_load/store 浮点路径 xmm0 scratch + ss/sd |
 | v2.13.0/Ph.1 | `5d405bb` | 真 XMM regalloc (W-074.6 PARTIAL → FULL CLOSED) |
 | v2.13.0/Ph.2 | `b1ad5c3` | 真 amd64_sysv codegen 全覆盖 — 8-class §A.4 + SSE class for f32/f64 (`abi_amd64_sysv.jhyy:42-159`) |
-| v2.16.0 | `0b4cde5` | QBE toolchain removed + byte-equal .exe (v2.x FINAL) |
+| v4.0.0 | `0b4cde5` | QBE toolchain removed + byte-equal .exe (v2.x FINAL) |
 | v3.0.6/Ph.3 | `68b4b48` | src0 codegen_amd64 self-backend conversion family (W-083 Layer 1 + W-086 defer v3.0.7) |
 | v3.0.7/Commit 1 | `886eaea` | V3 self-backend W-086 wholesale 真修 Layer 2+3 (cltq + op_len + ILTOK_CONV=80 + emit_conv 2-op form) |
-| v3.0.7/Commit 3 | `fc49cd2` | land emit_sse.jhyy + xmm_argalloc.jhyy 跟 V2 v2.16.0 byte-equal (pure add, NO wiring) |
-| v3.1.0/Ph.1 | `0d9c527` | wholesale port V2 v2.16.0 src0 self-backend + W-089 V3 stdlib pointer-flag extension |
+| v3.0.7/Commit 3 | `fc49cd2` | land emit_sse.jhyy + xmm_argalloc.jhyy 跟 V2 v4.0.0 byte-equal (pure add, NO wiring) |
+| v3.1.0/Ph.1 | `0d9c527` | wholesale port V2 v4.0.0 src0 self-backend + W-089 V3 stdlib pointer-flag extension |
 | **v3.3.0** (本次 close-out) | **`a82fb57`** (current HEAD, +doc only) | **no-op verification + tag `v3.3.0`** (代码层无新增) |
 
 ## 6. v3.2.5 (math libm FFI) D28 硬前置解除

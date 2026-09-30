@@ -24,7 +24,7 @@
 #     .s closure 跨 backend 必须 byte-equal (per docs/plans/v2/v2.15.0-plan.md
 #     Strategy B+;验证点: in-mem .s 跟 JHY_WRITE_IL=1 self path .s byte-equal)。
 #
-# v2.16.0 升级:
+# v4.0.0 升级:
 #   - [3/3] .exe byte-equal 升级: V2-only closure 走 FAIL gate (V2 rebuild
 #     4 次后 jhyy.exe 内部 gcc link recipe 含 D26 + --no-insert-timestamp +
 #     SOURCE_DATE_EPOCH → 4 次 byte-equal)。V1 frozen predates stage0 D26
@@ -32,12 +32,12 @@
 #   - V2 4-rebuild verification 由 CI 独立跑 (在 fixed_point.sh 里),本 script
 #     只验 "V1 vs V2 跨版本 byte-equal" 这层。
 #
-# 关于 .exe byte-equal (v2.4.0 → v2.16.0 行为):
+# 关于 .exe byte-equal (v2.4.0 → v4.0.0 行为):
 #   - .il + .s byte-equal 是真实的 closure gate (QBE IL emit 确定性).
 #   - .exe byte-equal 是 supplementary check; jhyy 内部 gcc 默认带 build-id
 #     + 时间戳 → 同一 jhyy.exe 跑两次 .exe sha 不同. v2.4.0 在 main.c 内
 #     gcc link line 加 `-Wl,--build-id=none -g0`, 同 binary 两次跑现在
-#     byte-equal. v2.16.0 加 `-Wl,--no-insert-timestamp` + stage0 recipe
+#     byte-equal. v4.0.0 加 `-Wl,--no-insert-timestamp` + stage0 recipe
 #     + strip,完整 D26 三件套,同 binary 4 次 rebuild byte-equal (V.4+V.5).
 #   - 跨 V1↔V2 (V1 frozen predates 改动) .exe 仍会 diff,
 #     标 "INFORMATIONAL" — 这是预期, 不是 closure fail.
@@ -167,7 +167,7 @@ fi
 # `-Wl,--build-id=none -g0` 改动, 所以跨 V1↔V2 .exe 几乎一定 diff.
 # 状态标 "INFORMATIONAL" (不影响退出码).
 #
-# v2.16.0: V2-only closure (V2 rebuild → V2 rebuild 4 次 byte-equal) 由
+# v4.0.0: V2-only closure (V2 rebuild → V2 rebuild 4 次 byte-equal) 由
 # CI 在 fixed_point.sh 独立跑 (per V.4 + V.5 gates),本 script 只验跨版本
 # (V1 vs V2) 这层 — V1 frozen predates D26 coverage,跨版本 .exe diff 是
 # expected INFO (audit message 说明)。

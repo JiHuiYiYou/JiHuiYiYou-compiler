@@ -59,7 +59,7 @@ def main():
         )
         v3_s = work / f"{base}_v3.s"
 
-        # V2 compile (default path = self-backend after v2.16.0)
+        # V2 compile (default path = self-backend after v4.0.0)
         proc_v2 = subprocess.run(
             [str(JHYY_V2_EXE), "compile", str(dst_src), "-o", str(work / f"{base}_v2")],
             capture_output=True, timeout=30

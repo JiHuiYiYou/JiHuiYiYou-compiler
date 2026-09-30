@@ -77,7 +77,7 @@ int jh_target_count(void) {
 }
 
 /* V2-B v2.6.0 (Unit E Wire): backend mode picker.
- * v2.16.0: all 4 targets → BACKEND_SELF. QBE removed; jhyy-side
+ * v4.0.0: all 4 targets → BACKEND_SELF. QBE removed; jhyy-side
  * `target_backend_mode` parity confirmed (compiler/src0/target_dispatch.jhyy
  * already returned BACKEND_SELF for all 4 since v2.7.0). C-side parity
  * cleanup eliminates potential sysv trigger path; jhyy.exe production does

@@ -690,7 +690,7 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
     ir_flush_data(ir);
     jh_fputs_stderr("[4] codegen done\n" as *u8);
 
-    // ── v3.1.0 (跟 V2 v2.16.0 同源): in-mem dispatch / .il 写盘 (env-gated) ──
+    // ── v3.1.0 (跟 V2 v4.0.0 同源): in-mem dispatch / .il 写盘 (env-gated) ──
     //   JHY_WRITE_IL 未设 + BACKEND_SELF → 走 codegen_amd64_run_text 直接
     //   喂 (*ir.sb).buf/.len 给 self-backend, 省掉 jh_read_file round-trip。
     //   返回 2 = in-mem 已写 .s; caller (compile()) 跳过 run_backend。
@@ -716,7 +716,7 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
     let buf_p = (*sb_inner).buf;
     let buf_len = (*sb_inner).len;
 
-    // ── v3.1.0 (跟 V2 v2.16.0 同源): in-mem dispatch / .il 写盘 (env-gated) ──
+    // ── v3.1.0 (跟 V2 v4.0.0 同源): in-mem dispatch / .il 写盘 (env-gated) ──
     //   JHY_WRITE_IL 未设 + BACKEND_SELF → 走 codegen_amd64_run_text 直接
     //   喂 (*ir.sb).buf/.len 给 self-backend, 省掉 jh_read_file round-trip。
     //   返回 2 = in-mem 已写 .s; caller (compile()) 跳过 run_backend。
@@ -762,7 +762,7 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
     return rc;
 }
 
-// run_qbe: v3.1.0 (跟 V2 v2.16.0 同源) fatal-stub — QBE backend removed.
+// run_qbe: v3.1.0 (跟 V2 v4.0.0 同源) fatal-stub — QBE backend removed.
 // Self-backend (codegen_amd64_run / codegen_amd64_run_text) is sole production
 // path. This stub preserved for any external callers; emits clear diagnostic
 // instead of "QBE failed" with no resolution.
@@ -777,7 +777,7 @@ fn run_qbe(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
     return 1 as i32;
 }
 
-// run_backend: v3.1.0 (跟 V2 v2.16.0 同源) simplified dispatch.
+// run_backend: v3.1.0 (跟 V2 v4.0.0 同源) simplified dispatch.
 //
 // QBE removed in v3.1.0 — sole production path is codegen_amd64_run
 // (file-path self backend). build_il's in-mem path (codegen_amd64_run_text)

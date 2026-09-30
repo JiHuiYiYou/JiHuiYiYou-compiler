@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bench.sh — v2.16.0 perf gate (per v2.0.0-os-prep.md § 5.2 item #8)
+# bench.sh — v4.0.0 perf gate (per v2.0.0-os-prep.md § 5.2 item #8)
 #
 # Measure self-backend generated code runtime perf vs gcc -O2 same-source baseline.
 # PASS gate (--strict): jhyy_time / gcc_time ≤ 1.1 for all 3 programs.
@@ -15,7 +15,7 @@
 #   1 = FAIL (--strict mode, ratio > 1.1)
 #   2 = setup error (gcc missing, etc.)
 #
-# v2.16.0: first-time baseline. Perf optimization is v3.x territory per
+# v4.0.0: first-time baseline. Perf optimization is v3.x territory per
 # feedback_no_artifacts_in_project convention.
 
 set -u
@@ -208,7 +208,7 @@ compile_and_time() {
 # Main
 # ───────────────────────────────────────────────────────────────────
 
-echo "bench.sh — v2.16.0 perf gate (mode=$MODE)"
+echo "bench.sh — v4.0.0 perf gate (mode=$MODE)"
 echo "  jhyy: $JHY"
 echo "  gcc:  $GCC"
 echo "  threshold: ${THRESHOLD}x"
