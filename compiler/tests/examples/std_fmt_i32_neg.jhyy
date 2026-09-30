@@ -1,0 +1,62 @@
+// std_fmt_i32_neg.jhyy — v3.2.2 (3l.1) std::fmt fmt_i32 negative test.
+//EXPECT:0  (fmt_i32(-42) = "-42")
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+fn digit_char(d: i32) -> i32 {
+    if d == (0 as i32) { return 48 as i32; }
+    if d == (1 as i32) { return 49 as i32; }
+    if d == (2 as i32) { return 50 as i32; }
+    if d == (3 as i32) { return 51 as i32; }
+    if d == (4 as i32) { return 52 as i32; }
+    if d == (5 as i32) { return 53 as i32; }
+    if d == (6 as i32) { return 54 as i32; }
+    if d == (7 as i32) { return 55 as i32; }
+    if d == (8 as i32) { return 56 as i32; }
+    return 57 as i32;
+}
+fn fmt_i32(out_buf: *u8, val: i32) -> i64 {
+    let mut rev: [i32; 16] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let mut n: i64 = 0 as i64;
+    let mut v: i32 = val;
+    if v == (0 as i32) {
+        rev[0] = 48 as i32;
+        n = 1 as i64;
+    } else {
+        let negative: i32 = if v < (0 as i32) { 1 as i32 } else { 0 as i32 };
+        if negative != (0 as i32) {
+            v = 0 as i32 - v;
+        }
+        while v > (0 as i32) {
+            let d: i32 = v - (v / (10 as i32)) * (10 as i32);
+            rev[n] = digit_char(d);
+            n = n + (1 as i64);
+            v = v / (10 as i32);
+        }
+        if negative != (0 as i32) {
+            rev[n] = 45 as i32;
+            n = n + (1 as i64);
+        }
+    }
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let dst = ptr_add(out_buf, i);
+        *(dst as *i32) = rev[n - (1 as i64) - i];
+        i = i + (1 as i64);
+    }
+    *(ptr_add(out_buf, n) as *i32) = 0 as i32;
+    return n;
+}
+
+fn main_jhyy() -> i32 {
+    let buf: [i32; 8] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                         0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let n = fmt_i32(buf as *u8, 0 as i32 - (42 as i32));
+    if n != 3 as i64 { return 1; }
+    if (*((buf as *u8) as *i32) & (0xff as i32)) != 45 as i32 { return 2; }  // '-'
+    if (*(ptr_add(buf as *u8, 2 as i64) as *i32) & (0xff as i32)) != 50 as i32 { return 3; }  // '2'
+    return 0;
+}

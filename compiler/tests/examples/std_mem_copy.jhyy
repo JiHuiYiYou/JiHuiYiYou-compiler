@@ -1,0 +1,28 @@
+// std_mem_copy.jhyy — v3.2.2 (3l.1) std::mem mem_copy test.
+//EXPECT:0  (mem_copy 后 dst 第一个字节 == src 第一个字节)
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+fn mem_copy(dst: *u8, src: *u8, n: i64) -> *u8 {
+    if n < (0 as i64) {
+        return 0 as *u8;
+    }
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let d = ptr_add(dst, i);
+        let s = ptr_add(src, i);
+        let v: i32 = *(s as *i32) & (0xff as i32);
+        *(d as *i32) = v;
+        i = i + (1 as i64);
+    }
+    return dst;
+}
+fn main_jhyy() -> i32 {
+    let dst: [i32; 4] = [0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let src: [i32; 1] = [0xAB as i32];
+    mem_copy(dst as *u8, src as *u8, 1 as i64);
+    if (dst[0] & (0xff as i32)) != (0xAB as i32) {
+        return 1;
+    }
+    return 0;
+}

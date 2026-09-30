@@ -32,6 +32,7 @@ import types;
 import ast;
 import lexer;
 import parser;
+import ir;
 // v3.2.0 (V3-C 3i generics): Pass 1.5 monomorphize. mono_expand_module 在
 //   Pass 1 (decl 注册) 之后 / Pass 2 (layout resolve) 之前调用。
 //   import 顺序:parser 之后 — mono 不依赖 parser。
@@ -93,6 +94,7 @@ type VariantDesc = struct {
 // v1.3.6: SemaContext 自身字节数: arena(8) + module(8) + global_scope(8) + current_scope(8)
 //                       + locals(8) + nlocals(8) + scope_depth(8) + error_count(8)
 //                       + current_ret_type(8) + loop_depth(8) + current_fn(8) = 88
+// v3.4.2 W-089: + ret_type_map(8) + ret_type_map_n(8) = 104
 type SemaContext = struct {
     arena:             *Arena,
     module:            *Node,
@@ -105,9 +107,11 @@ type SemaContext = struct {
     current_ret_type:  *u8,        // *Type
     loop_depth:        i32,
     current_fn:        *u8,        // *NodeFuncDecl (v1.3.6: for defer collection)
+    ret_type_map:      *u8,        // *RetTypeMapEntry[] (v3.4.2 W-089 真修: SymbolReturnTypeMap array)
+    ret_type_map_n:    i64,        // entry count (v3.4.2)
 }
 
-fn SEMA_CONTEXT_SIZE() -> i64 { return 88 as i64; }
+fn SEMA_CONTEXT_SIZE() -> i64 { return 104 as i64; }
 
 // ════════════════════════════════════════════════════
 // SemaLocal 访问 helper（locals[i].sym / locals[i].type）
@@ -1092,6 +1096,121 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         return t;
     }
 
+    // v3.2.1 (V3-C 3j): closure literal — auto-capture analysis + closure type.
+    //   MVP design:
+    //   - 闭包 = 匿名 struct { fn_ptr: *u8, env_ptr: *u8 }(16 bytes;fn_ptr 是
+    //     QBE function 标签 env 通过闭包字面量处栈 alloc + 初始化)
+    //   - 闭包 type 不导出具体 field layout(只是 opaque 16-byte struct pointer)
+    //   - codegen 负责:
+    //     a) 扫描 body 找 free vars,生成 env struct layout + stack alloc
+    //     b) 合成 fn `__closure_N(env_ptr, params...) -> ret` 并 append 到
+    //        module decls(由 cg_module 后续 pass emit)
+    //     c) 返回 closure 值 { fn_ptr=__closure_N label, env_ptr=&env }
+    //   - NODE_CALL 检测 callee 是 closure 时:取出 fn_ptr + env_ptr,emit
+    //     间接 call(or 直接 call 已知 fn_name)
+    if (*n).kind == NODE_CLOSURE_LITERAL() {
+        let cd = node_closure_data(n);
+
+        // 1) resolve param types + push params as locals (跟 fn path 类似)
+        sema_push_scope(ctx);
+        (*ctx).nlocals = 0 as i64;
+        let mut pi: i64 = 0 as i64;
+        while pi < (*cd).nparams {
+            let param = ptr_add_u8((*cd).params, pi * (16 as i64)) as *NodeFuncDeclParam;
+            let pt = resolve_type_node(ctx, ta, (*param).type_annot as *Node);
+            let param_sym = (*param).sym as *Sym;
+            (*param_sym).type_ptr = pt as *u8;
+            (*param_sym).kind = SYM_VAR();
+            let _x = symtab_insert((*ctx).current_scope, (*param_sym).name, SYM_VAR(),
+                                   pt as *u8, 0 as i32, (*ctx).scope_depth);
+            pi = pi + (1 as i64);
+        }
+
+        // 2) walk body stmts — type-check each (M0: body 仅用 params + literals,
+        //    不引用 outer vars)
+        let blk = (*cd).body as *Node;
+        let mut body_ret_type: *Type = type_void(ta);
+        if blk != (0 as *Node) {
+            let bd = node_block_data(blk);
+            let mut bi: i64 = 0 as i64;
+            while bi < (*bd).nstmts {
+                let s = *(((*bd).stmts as i64 + bi * (8 as i64)) as **Node);
+                if s != (0 as *Node) {
+                    let t = infer_type(ctx, ta, s);
+                    // 记录最后 expr stmt 的 type 作为 fn 返回类型
+                    if (*s).kind == NODE_EXPR_STMT() {
+                        body_ret_type = t;
+                    }
+                }
+                bi = bi + (1 as i64);
+            }
+        }
+
+        sema_pop_scope(ctx);
+
+        // 3) 构造合成 fn 类型 (params...) -> ret
+        let param_types_buf = arena_alloc((*ctx).arena, (*cd).nparams * (8 as i64));
+        let mut pti: i64 = 0 as i64;
+        while pti < (*cd).nparams {
+            let param2 = ptr_add_u8((*cd).params, pti * (16 as i64)) as *NodeFuncDeclParam;
+            let pt2 = (*((*param2).type_annot as *Node)).type_ptr as *Type;
+            let pt_slot = ptr_add_u8(param_types_buf, pti * (8 as i64)) as **Type;
+            *pt_slot = pt2;
+            pti = pti + (1 as i64);
+        }
+        let fn_t = type_func((*ctx).arena, param_types_buf, (*cd).nparams, body_ret_type);
+
+        // 4) 构造合成 fn sym `__closure_<N>` — N 用 closure 节点地址 hash
+        let mut counter_buf: *u8 = arena_alloc((*ctx).arena, 32 as i64);
+        let name0 = "__closure_" as *u8;
+        let mut ci: i64 = 0 as i64;
+        while ci < 10 as i64 {
+            let cs = ptr_add_u8(counter_buf, ci) as *u8;
+            *cs = *(ptr_add_u8(name0, ci) as *u8);
+            ci = ci + (1 as i64);
+        }
+        let name_addr = n as i64;
+        let digit1 = (name_addr % (10 as i64)) + (0x30 as i64);
+        let digit2 = ((name_addr / (10 as i64)) % (10 as i64)) + (0x30 as i64);
+        let digit3 = ((name_addr / (100 as i64)) % (10 as i64)) + (0x30 as i64);
+        let digit4 = ((name_addr / (1000 as i64)) % (10 as i64)) + (0x30 as i64);
+        let digit5 = ((name_addr / (10000 as i64)) % (10 as i64)) + (0x30 as i64);
+        *(ptr_add_u8(counter_buf, 10 as i64) as *u8) = digit1 as u8;
+        *(ptr_add_u8(counter_buf, 11 as i64) as *u8) = digit2 as u8;
+        *(ptr_add_u8(counter_buf, 12 as i64) as *u8) = digit3 as u8;
+        *(ptr_add_u8(counter_buf, 13 as i64) as *u8) = digit4 as u8;
+        *(ptr_add_u8(counter_buf, 14 as i64) as *u8) = digit5 as u8;
+        *(ptr_add_u8(counter_buf, 15 as i64) as *u8) = 0 as u8;
+
+        let fn_sym = symtab_insert((*ctx).global_scope, counter_buf, SYM_FN(),
+                                   fn_t as *u8, 0 as i32, 0 as i32);
+        // store fn sym into closure node
+        (*cd).fn_sym = fn_sym as *u8;
+
+        // 5) v3.2.1 (3j): append 合成 NODE_FUNC_DECL to module.decls — cg_module Pass B
+        //   visits decls 走 cg_func 自动 emit 合成 fn body 为 top-level QBE function.
+        //   ret_type = null: cg_func reads return type from fn_sym.type_ptr (= fn_t.ret)
+        //   params/nparams/body 复用 closure 原 AST nodes(零拷贝)。
+        let fn_decl = ast_new_func_decl(
+            (*ctx).arena,
+            (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+            fn_sym as *Sym,
+            (*cd).params, (*cd).nparams,
+            0 as *Node,                       // ret_type = null (cg_func uses sym.type_ptr)
+            (*cd).body as *Node,
+            0 as i32, 0 as i32, 0 as i32,     // is_extern, is_inline, is_naked = 0
+            0 as *u8,                         // link_section = null
+            0 as *u8,                         // type_params = null
+            0 as i64                          // ntype_params = 0
+        );
+        let mnd2 = node_module_data((*ctx).module);
+        mono_decls_append((*ctx).arena, mnd2 as *u8, fn_decl);
+
+        // 6) closure type = synthesized fn type (KIND_FUNC)
+        (*n).type_ptr = fn_t as *u8;
+        return fn_t;
+    }
+
     // ── call ──
     if (*n).kind == NODE_CALL() {
         let d = node_call_data(n);
@@ -1814,6 +1933,15 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let sym = (*d).sym as *Sym;
         (*sym).type_ptr = decl_type as *u8;
         (*sym).kind = SYM_VAR();
+        // v3.2.1 (3j MVP): let-bound closure -> wire aux_sym to 合成 fn_sym
+        //   codegen NODE_CALL 看到 SYM_VAR + KIND_FUNC + aux_sym != 0 → call $aux_sym_name
+        if (*d).init != (0 as *u8) {
+            let init_node = (*d).init as *Node;
+            if (*init_node).kind == NODE_CLOSURE_LITERAL() {
+                let init_cd = node_closure_data(init_node);
+                (*sym).aux_sym = (*init_cd).fn_sym;
+            }
+        }
         if (*ctx).nlocals < SEMA_MAX_LOCALS() {
             sema_local_set((*ctx).locals, (*ctx).nlocals, sym, decl_type);
             (*ctx).nlocals = (*ctx).nlocals + (1 as i64);
@@ -2579,6 +2707,100 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
 // check_module（3-pass）
 // ════════════════════════════════════════════════════
 
+// v3.4.2 W-089 真修: Pass 1.6 — SymbolReturnTypeMap population
+// Walks (*md).decls, collects NODE_FUNC_DECL → (FNV-1a name hash, ptr_kind flag)
+//   ptr_kind = 1 iff ret_type resolves to pointer-equivalent kind:
+//     KIND_POINTER / KIND_SLICE / KIND_REF / KIND_CAP / KIND_FUNC returning pointer.
+//
+//   Closure synthetic fns (sema L1130-1208): ret_type Node = null → fall back to
+//   (*fn_sym).type_ptr which is the *Type directly (KIND_FUNC with body return type).
+//
+//   Stored on (*ctx).ret_type_map / ret_type_map_n for codegen read at emit_call
+//   (replaces v3.1.0 byte-prefix whitelist W-089). Arena-allocated, owned by sema.
+//
+// Forward-ref safe: hooked at end of check_module AFTER Pass 3b body resolution
+// (per [[feedback_jhyy_no_forward_ref]]). All fn decls in (*md).decls have
+// resolved ret_type at this point (or null for closures → sym.type_ptr fallback).
+fn check_module_populate_ret_type_map(ctx: *SemaContext, md: *NodeModule) -> i32 {
+    let arena = (*ctx).arena;
+    let n_fns = (*md).ndeccls as i64;
+    if n_fns <= (0 as i64) {
+        (*ctx).ret_type_map = 0 as *u8;
+        (*ctx).ret_type_map_n = 0 as i64;
+        return 0 as i32;
+    }
+    // Worst case: every decl is a NODE_FUNC_DECL → alloc n_fns entries.
+    let map_buf = arena_alloc(arena, n_fns * RET_TYPE_MAP_ENTRY_SIZE());
+    let mut map_n: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < n_fns {
+        let decl = *(((*md).decls as i64 + i * (8 as i64)) as **Node);
+        if decl != (0 as *Node) {
+            if (*decl).kind == NODE_FUNC_DECL() {
+                let fd = node_func_decl_data(decl);
+                let fn_sym = (*fd).sym as *Sym;
+                if fn_sym != (0 as *Sym) {
+                    // Resolve return type. Two paths:
+                    //   1) (*fd).ret_type (regular fns with explicit return type)
+                    //   2) (*fn_sym).type_ptr (closure synthetic fns, ret_type Node = null)
+                    let mut rt_type: *Type = 0 as *Type;
+                    let rt_node = (*fd).ret_type as *Node;
+                    if rt_node != (0 as *Node) {
+                        if (*rt_node).type_ptr != (0 as *u8) {
+                            rt_type = (*rt_node).type_ptr as *Type;
+                        }
+                    }
+                    if rt_type == (0 as *Type) {
+                        if (*fn_sym).type_ptr != (0 as *u8) {
+                            rt_type = (*fn_sym).type_ptr as *Type;
+                        }
+                    }
+                    // Detect pointer-equivalent kind. Recurse 1-level into return type
+                    // for KIND_FUNC (callable returning pointer-equivalent type).
+                    let mut ptr_kind: i32 = 0 as i32;
+                    if rt_type != (0 as *Type) {
+                        let k = (*rt_type).kind;
+                        if k == KIND_POINTER() || k == KIND_SLICE()
+                            || k == KIND_REF() || k == KIND_CAP() {
+                            ptr_kind = 1 as i32;
+                        } else {
+                            if k == KIND_FUNC() {
+                                let inner = (*rt_type).ret as *Type;
+                                if inner != (0 as *Type) {
+                                    let ik = (*inner).kind;
+                                    if ik == KIND_POINTER() || ik == KIND_SLICE()
+                                        || ik == KIND_REF() || ik == KIND_CAP() {
+                                        ptr_kind = 1 as i32;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Hash fn sym name (null-terminated C string).
+                    let h = hash_string((*fn_sym).name);
+                    let entry = ptr_add_u8(map_buf, map_n * RET_TYPE_MAP_ENTRY_SIZE())
+                        as *RetTypeMapEntry;
+                    (*entry).name_hash = h;
+                    (*entry).ptr_kind = ptr_kind;
+                    map_n = map_n + (1 as i64);
+                }
+            }
+        }
+        i = i + (1 as i64);
+    }
+    (*ctx).ret_type_map = map_buf;
+    (*ctx).ret_type_map_n = map_n;
+    return 0 as i32;
+}
+
+fn sema_get_ret_type_map(ctx: *SemaContext) -> *u8 {
+    return (*ctx).ret_type_map;
+}
+
+fn sema_get_ret_type_map_n(ctx: *SemaContext) -> i64 {
+    return (*ctx).ret_type_map_n;
+}
+
 fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
     let md = node_module_data(module);
 
@@ -2848,6 +3070,11 @@ fn check_module(ctx: *SemaContext, ta: *TypeArena, module: *Node) -> i32 {
         i3 = i3 + (1 as i64);
     }
 
+    // v3.4.2 W-089 真修: Pass 1.6 — populate SymbolReturnTypeMap after Pass 3b
+    // body resolution. Forward-ref safe: all (*fd).ret_type resolved by now
+    // (or null for closures → fall back to (*fn_sym).type_ptr).
+    let _p16 = check_module_populate_ret_type_map(ctx, md);
+
     return 1;
 }
 
@@ -2869,6 +3096,9 @@ fn sema_init(ctx: *SemaContext, arena: *Arena, ta: *TypeArena) -> i32 {
     (*ctx).current_ret_type = 0 as *u8;
     (*ctx).loop_depth = 0 as i32;
     (*ctx).current_fn = 0 as *u8;
+    // v3.4.2 W-089: zero-init SymbolReturnTypeMap fields (Pass 1.6 populates)
+    (*ctx).ret_type_map = 0 as *u8;
+    (*ctx).ret_type_map_n = 0 as i64;
     // init type arena（lazy init 也会触发）
     (*ta).arena = arena;
     (*ta).inited = 0 as i32;

@@ -1,0 +1,66 @@
+// std_arena_reset.jhyy — v3.2.2 (3l.1) std::arena arena_reset test.
+//EXPECT:0  (arena_alloc 8 字节,reset 后再 alloc 8 字节,verify 还能 alloc 不报错)
+// 注: arena_reset 把 cur 指针设回 start,test 走 alloc → reset → alloc 流程,
+//   verify 第二次 alloc 仍返非 null ptr(arena 状态恢复 OK)。
+extern fn malloc(size: i64) -> *u8;
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+fn std_align_up(x: i64, align: i64) -> i64 {
+    let mask = align - 1 as i64;
+    return (x + mask) & ~(mask);
+}
+fn std_arena_new_block(a: *u8, size: i64) -> i32 {
+    let raw = malloc(size);
+    if raw == (0 as *u8) { return 0; }
+    let old_blocks = *(ptr_add(a, 0 as i64) as *i64);
+    *(ptr_add(raw, 0 as i64) as *i64) = old_blocks;
+    *(ptr_add(a, 0 as i64) as *i64) = raw as i64;
+    let data_start = raw as i64;
+    *(ptr_add(a, 8 as i64) as *i64) = data_start;
+    *(ptr_add(a, 16 as i64) as *i64) = data_start + size;
+    return 1;
+}
+fn std_arena_init(a: *u8, default_size: i64) -> i32 {
+    *(ptr_add(a, 32 as i64) as *i64) = default_size;
+    *(ptr_add(a, 0 as i64) as *i64) = 0 as i64;
+    *(ptr_add(a, 8 as i64) as *i64) = 0 as i64;
+    *(ptr_add(a, 16 as i64) as *i64) = 0 as i64;
+    *(ptr_add(a, 24 as i64) as *i64) = 0 as i64;
+    return 1;
+}
+fn std_arena_alloc(a: *u8, size: i64) -> *u8 {
+    if size == 0 as i64 { return 0 as *u8; }
+    let cur_int = *(ptr_add(a, 8 as i64) as *i64);
+    if cur_int != (0 as i64) {
+        let aligned = std_align_up(cur_int, 8 as i64);
+        let end_int = *(ptr_add(a, 16 as i64) as *i64);
+        if aligned + size <= end_int {
+            *(ptr_add(a, 8 as i64) as *i64) = aligned + size;
+            return aligned as *u8;
+        }
+    }
+    let min_total = size + 8 as i64;
+    let ok = std_arena_new_block(a, min_total);
+    if ok == 0 { return 0 as *u8; }
+    return std_arena_alloc(a, size);
+}
+fn std_arena_reset(a: *u8) -> i32 {
+    let first_block = *(ptr_add(a, 0 as i64) as *i64);
+    if first_block == (0 as i64) { return 0; }
+    let data_start = first_block as i64;
+    *(ptr_add(a, 8 as i64) as *i64) = data_start;
+    return 1;
+}
+fn main_jhyy() -> i32 {
+    let arena: [i32; 8] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                            0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    std_arena_init(arena as *u8, 1024 as i64);
+    let p1 = std_arena_alloc(arena as *u8, 8 as i64);
+    if p1 == (0 as *u8) { return 1; }
+    let r = std_arena_reset(arena as *u8);
+    if r == 0 { return 2; }
+    let p2 = std_arena_alloc(arena as *u8, 8 as i64);
+    if p2 == (0 as *u8) { return 3; }
+    return 0;
+}

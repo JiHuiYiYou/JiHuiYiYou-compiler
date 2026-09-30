@@ -1,0 +1,70 @@
+// std_string_concat.jhyy — v3.2.2 (3l.1) std::string str_concat test.
+//EXPECT:10  ("hello" + "hello" = 10 chars; 用 str_concat(out, s, s) 验证
+//   concat 长度计算正确)
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+fn strlen_local(s: *u8) -> i64 {
+    let mut n: i64 = 0 as i64;
+    while *(ptr_add(s, n) as *i32) != (0 as i32) {
+        n = n + (1 as i64);
+    }
+    return n;
+}
+fn str_from_cstr(a: *u8, s: *u8) -> *u8 {
+    let n = strlen_local(s);
+    let buf = ptr_add(a, 16 as i64);
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        *(ptr_add(buf, i) as *i32) = *(ptr_add(s, i) as *i32);
+        i = i + (1 as i64);
+    }
+    *(ptr_add(buf, n) as *i32) = 0 as i32;
+    *(a as *i64) = buf as i64;
+    *(ptr_add(a, 8 as i64) as *i64) = n;
+    return a;
+}
+fn str_len(s: *u8) -> i64 { return *(ptr_add(s, 8 as i64) as *i64); }
+fn str_data(s: *u8) -> *u8 { return *(s as **u8); }
+fn str_concat(a: *u8, x: *u8, y: *u8) -> *u8 {
+    let xlen = str_len(x);
+    let ylen = str_len(y);
+    let total = xlen + ylen;
+    let buf = ptr_add(a, 16 as i64);
+    let xd = str_data(x);
+    let yd = str_data(y);
+    let mut i: i64 = 0 as i64;
+    while i < xlen {
+        *(ptr_add(buf, i) as *i32) = *(ptr_add(xd, i) as *i32);
+        i = i + (1 as i64);
+    }
+    let mut j: i64 = 0 as i64;
+    while j < ylen {
+        *(ptr_add(buf, xlen + j) as *i32) = *(ptr_add(yd, j) as *i32);
+        j = j + (1 as i64);
+    }
+    *(ptr_add(buf, total) as *i32) = 0 as i32;
+    *(a as *i64) = buf as i64;
+    *(ptr_add(a, 8 as i64) as *i64) = total;
+    return a;
+}
+
+fn main_jhyy() -> i32 {
+    // Test: build 1 string, str_concat into same buffer twice with itself
+    // verify result is "hellohello" (10 chars).
+    let s_storage: [i32; 16] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                 0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                 0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                 0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let out_storage: [i32; 32] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                  0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                  0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                  0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                  0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                  0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                  0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                  0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let s = str_from_cstr(s_storage as *u8, "hello" as *u8);
+    let out = str_concat(out_storage as *u8, s, s);
+    return str_len(out) as i32;
+}

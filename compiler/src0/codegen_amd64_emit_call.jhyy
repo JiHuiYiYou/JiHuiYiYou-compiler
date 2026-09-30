@@ -876,6 +876,48 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     } else {
         let _r = emit_mov_reg_to_temp(state, ret_qt, reg_rax_for_qt(ret_qt) as *u8, ret_off);
     }
+    // v3.2.3.1 (W-080 真修): i32 ret zero-extend — `movl %eax, %eax` after store.
+    //   Win ABI caller-side 整 i32 在 %eax; self-backend ret temp store 用
+    //   `movl %eax, -<off>(%rbp)` 已 truncate 上位, 但 main_jhyy 末尾 ret path
+    //   不补 movl %eax, %eax → bash $? 读 %rax 高位 garbage。QBE era W-059 修过
+    //   同 bug; self-backend 镜像 here (W-080 真修)。
+    if ret_qt == QBE_W_LOCAL() {
+        let _zx = sb_append_cstr(arena, s, "\tmovl %eax, %eax\n" as *u8);
+    }
+    // v3.4.2 W-089 真修: semantic lookup 替换 v3.1.0 byte-prefix whitelist (194 LOC)。
+    //
+    // Background (per workarounds.md W-089 entry):
+    //   emit_call 不 mark l-typed call results as address-holder → 后续 `loadl %t<call_ret>`
+    //   走 formula pool direct-load path 而不是 indirect dispatch → 读到 slot 存的 address VALUE
+    //   而不是 deref 值。触发面:`*(call_str_data(s) as *T)` / `*(malloc(...) as *T)` /
+    //   `*(std_fn(...) as *T)` 模式。V2 v2.16.0 self-backend 同 gap 但 V2 corpus 无 stdlib
+    //   pointer-returning fn user,所以 bug 未暴露;V3 v3.2.2 stdlib 新增后 std_arena_* /
+    //   std_fmt_* / std_mem_* / std_string_* 触发。v3.1.0 13-prefix byte-prefix whitelist
+    //   (本 block 194 LOC) 是 workaround;v3.4.2 真修为跨函数 call graph + SymbolReturnTypeMap。
+    //
+    // 真修 mechanism:
+    //   - sema Pass 1.6 (sema.jhyy check_module_populate_ret_type_map) 扫 (*md).decls
+    //     NODE_FUNC_DECL → FNV-1 hash fn sym name → ptr_kind flag (1 iff ret_type is
+    //     KIND_POINTER/SLICE/REF/CAP/FUNC-returning-pointer)。
+    //   - main.jhyy:compile() 传 sema.ret_type_map + ret_type_map_n 到 codegen_amd64_run_text
+    //     → cg_state_set_ret_type_map wires into CGState。
+    //   - emit_call 走 cg_query_fn_returns_ptr (codegen_amd64_state.jhyy) → 1 iff callee
+    //     returns pointer-equivalent。语义 vs 启发式:真修覆盖所有 ptr/slice/ref/cap/fn→ptr
+    //     return type,无需 prefix hardcode。
+    //
+    // Fallback: cg_is_builtin_ptr_fn (link-only externs not in sema: ptr_add / ptr_add_u8 /
+    //   ptr_sub / malloc / __closure_<N>)。
+    if ret_qt == QBE_L_LOCAL() {
+        let d2 = cg_find_dollar((*t).text, (*t).text_len, 0 as i64);
+        if d2 >= (0 as i64) {
+            // fn_name_len 已在 emit_call top 算过(include '$' prefix);substring 从 d2+1
+            //   起,name_len = fn_name_len - 1(skip '$')。
+            let is_ptr = cg_query_fn_returns_ptr(state, ptr_add_u8((*t).text, d2 + (1 as i64)), fn_name_len - (1 as i64));
+            if is_ptr != (0 as i32) {
+                let _adr = cg_record_temp_holds_address(state, ret_temp_id);
+            }
+        }
+    }
 
     return 0;
 }

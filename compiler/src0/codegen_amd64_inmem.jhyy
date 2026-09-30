@@ -56,7 +56,12 @@ extern fn jh_fputs_stderr(s: *u8) -> i32;
 //   8. jh_write_file(asm_path, final_buf, final_len)
 //
 // 返回值: 0 = 写了 .s, 1 = 失败 (malloc 失败 / lex_il 失败)
-fn codegen_amd64_run_text(text: *u8, len: i64, asm_path: *u8, target_tag: i32) -> i32 {
+//
+// v3.4.2 W-089 真修: 加 ret_type_map + ret_type_map_n (sema Pass 1.6 populate;
+//   wire into CGState via cg_state_set_ret_type_map → emit_call 走 semantic
+//   lookup 替换 v3.1.0 byte-prefix whitelist)。
+fn codegen_amd64_run_text(text: *u8, len: i64, asm_path: *u8, target_tag: i32,
+                          ret_type_map: *u8, ret_type_map_n: i64) -> i32 {
     // 1. (省掉) Read .il — 用入参 text/len 替代 caller buffer
     //    边界: len <= 0 视作 empty IL → return 1 (fail, 由 caller 处理)
     if len <= (0 as i64) {
@@ -85,6 +90,9 @@ fn codegen_amd64_run_text(text: *u8, len: i64, asm_path: *u8, target_tag: i32) -
     sb_init(&arena, &sb);
     let _init_rc = cg_state_init(state_buf, &sb, &arena, "" as *u8);
     let _set_tt_rc = cg_state_set_target(state_buf, target_tag);
+    // v3.4.2 W-089 真修: wire sema's SymbolReturnTypeMap into CGState
+    //   (per codegen_amd64.jhyy parallel pattern)
+    let _set_rm = cg_state_set_ret_type_map(state_buf, ret_type_map, ret_type_map_n);
 
     // 4. Per-fn pre-scan + global max temp (per codegen_amd64.jhyy:315-320)
     let _scan_rc = cg_compute_per_fn_max_temps(state_buf, tokens, 40 as i64, n);

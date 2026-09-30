@@ -1,0 +1,27 @@
+// std_mem_set.jhyy — v3.2.2 (3l.1) std::mem mem_set test.
+//EXPECT:0  (mem_set 后 buf[0] 的第一个字节 = 0x42)
+// 注: src0/std/mem.jhyy mem_set 走 *(p+i) as *i32 = b store 4 字节(M0 简化,
+//   等价语义: 每 4 字节写 val)。 test inline 副本一致。验证 buf[0] & 0xff == 0x42。
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+fn mem_set(dst: *u8, val: i32, n: i64) -> *u8 {
+    if n < (0 as i64) {
+        return 0 as *u8;
+    }
+    let b: i32 = val & (0xff as i32);
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        *(ptr_add(dst, i) as *i32) = b;
+        i = i + (1 as i64);
+    }
+    return dst;
+}
+fn main_jhyy() -> i32 {
+    let buf: [i32; 4] = [0x41 as i32, 0x41 as i32, 0x41 as i32, 0x41 as i32];
+    mem_set(buf as *u8, 0x42 as i32, 4 as i64);
+    if (buf[0] & (0xff as i32)) != (0x42 as i32) {
+        return 1;
+    }
+    return 0;
+}

@@ -1,0 +1,27 @@
+// std_fmt_hex.jhyy — v3.2.2 (3l.1) std::fmt fmt_hex_u32 test.
+//EXPECT:0  (fmt_hex_u32(255) 第一个字节 = 'F' = 0x46)
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+fn fmt_hex_u32(buf: *u8, v: i32) -> *u8 {
+    let hex_chars = "0123456789ABCDEF" as *u8;
+    let mut i: i32 = 0 as i32;
+    while i < 8 as i32 {
+        let shift = 28 as i32 - i * 4 as i32;
+        let nibble: i32 = (v >> shift) & (0xf as i32);
+        *(ptr_add(buf, i as i64) as *i32) = *(ptr_add(hex_chars, nibble as i64) as *i32);
+        i = i + (1 as i32);
+    }
+    *(ptr_add(buf, 8 as i64) as *i32) = 0 as i32;
+    return buf;
+}
+fn main_jhyy() -> i32 {
+    let storage: [i32; 8] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                              0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let s = fmt_hex_u32(storage as *u8, 255 as i32);
+    let c: i32 = *(s as *i32) & (0xff as i32);
+    if c != (0x30 as i32) { return 1; }   // '0'
+    let c2: i32 = *(ptr_add(s, 7 as i64) as *i32) & (0xff as i32);
+    if c2 != (0x46 as i32) { return 2; }   // 'F'
+    return 0;
+}

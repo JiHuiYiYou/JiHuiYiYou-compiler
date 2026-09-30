@@ -1,0 +1,7 @@
+// v3.2.1 (V3-C 3j): closures_basic — basic closure, no capture (MVP scope).
+fn main_jhyy() -> i32 {
+    let c = |y: i32| { y + 1 };
+    let r: i32 = c(5);
+    return r;
+}
+//EXPECT:6

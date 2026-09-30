@@ -840,58 +840,6 @@ fn cg_emit_store(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> i32 {
     if (*t).kind == KIND_STRUCT() {
         return cg_copy_struct(cg_raw, t_raw, addr, val);
     }
-    // v2.11.15 Iter 4 (C.5 slice copy): KIND_SLICE dispatcher.
-    //   Pre-Iter-4: KIND_SLICE fell through to cg_emit_store_primitive (QBE_L
-    //   storeq — single 8B store). For 16B slice header (ptr + len), only ptr
-    //   field gets written, len field stays garbage → subsequent loadl +8
-    //   reads stale len → ACCESS_VIOLATION on deref (for_in_slice_nested) /
-    //   wrong slice length (slice_subrange).
-    //
-    //   Iter 4 fix: emit 2× storeq (ptr + len) — QBE IL has no native 16B
-    //   aggregate store, so we manually split. val.id is the slice header's
-    //   first temp (per jhyy IR convention — slice literal `slice x = [1,2,3]`
-    //   compiles to `%tN =l add ...; %tN+1 =l len 3;` so val.id = ptr temp,
-    //   val.id+1 = len temp).
-    //
-    //   If caller passes single 16B header temp (legacy path), val.id+1 might
-    //   alias — fix at caller site (sema) is preferred, but Iter 4 takes
-    //   defensive dispatch here.
-    //
-    //   注:blit (QBE 块 copy) 也是 candidate,但 jhyy IR 没有 blit emit path —
-    //   引入新 IRVAL/IRBuf helper 是大改动,留 v2.11.16+。
-    if (*t).kind == KIND_SLICE() {
-        let cg2 = cg_raw as *CGContext;
-        let ir2 = (*cg2).ir as *IRBuf;
-        // ptr field
-        ir_emit_str(ir2, "    storel %t" as *u8);
-        ir_emit_int(ir2, "%d" as *u8, val.id);
-        ir_emit_str(ir2, "," as *u8);
-        let _a1 = ir_emit_arg(ir2, addr);
-        ir_emit_str(ir2, "\n" as *u8);
-        // len field — temp id = val.id + 1 (slice literal convention).
-        // NOTE: defensive — if val.id is last temp, val.id+1 wraps to garbage,
-        // but tests using slice_index/iterate/literal/subrange all use literal
-        // init that allocates val.id+1 as len temp. Caller (cg_assign / etc)
-        // may pass single-temp header — fall through to single storeq still
-        // corrupts, but at least ptr 字段 写入正确。
-        ir_emit_str(ir2, "    storel %t" as *u8);
-        let len_id = val.id + (1 as i32);
-        ir_emit_int(ir2, "%d" as *u8, len_id);
-        ir_emit_str(ir2, "," as *u8);
-        let mut addr_plus_8 = addr;
-        // addr+8: 没法直接 +8 整数 (IRVal 是 tagged union)。简化:emit loadl
-        //   addr 的 ptr, 加 8 到 %rax, 然后 storel。安全 net:caller 应 emit 完整
-        //   16B store 用 cg_copy_slice helper — v2.11.16+ 真修。
-        //   当前 Iter 4 用 addr.id (假设 addr 是 temp) + 8 trick: emit copy with
-        //   off=8 via QBE IL `storel %t<len_id>, addr+8` literal — 需要 addr.id
-        //   + 8 在 IRVal 里表达 (IRVAL_TEMP + offset)。
-        //   Pragmatic: emit `storel %t<len_id>, addr` AGAIN — wrong but无害 if
-        //   caller 已 emit len separately。算 partial fix — ptr 字段 store OK,
-        //   len 字段可能错。Tests 实际行为取决于 caller。
-        let _a2 = ir_emit_arg(ir2, addr_plus_8);
-        ir_emit_str(ir2, "\n" as *u8);
-        return 1;
-    }
     return cg_emit_store_primitive(cg_raw, t_raw, val, addr);
 }
 
@@ -1003,9 +951,6 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
     // [Status: 真修 B-φ1 (if-else phi predecessor) in C-side (commit 2.6); src0/ workaround kept for历史读者了解历史.]
     // v0 codegen bug 2 workaround: 避免 &&/|| 嵌套 short-circuit (nested phi predecessor mismatch)
     // 改成 nested if-else，无短路
-    // see workarounds.md W-082 (v2.13.10 audit-flip docs-only + convention enforced,
-    // 真修 deferred YAGNI — bug 只在 codegen-internal if-condition 写 `A && (B || C)` 时触发,
-    // user-facing `&&`/`||` 走 cg_expr store/load 模式 0 phi emit 不触发)
     // Sprint 4.5 C step 2 fix (float_cmp): D→S case was unreachable
     //   (above if src_qt==D matched first; inner QBE_W/L only — no QBE_S case).
     //   Add explicit QBE_S branch so f64→f32 truncd emits correctly.
@@ -2111,9 +2056,6 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
         //   - alloc result slot at outer scope
         //   - each branch stores its value to slot, jmps merge
         //   - merge loads from slot (no phi needed)
-        // see workarounds.md W-082 (v2.13.10 audit-flip docs-only + convention enforced,
-        // 真修 deferred YAGNI — user-facing `&&`/`||` 已走 store/load 0 phi 不触发 W-082,
-        // convention 守住: codegen.jhyy 内部 if-condition 不写嵌套 short-circuit)
         let d_op = (*d).op;
         if d_op == TOKEN_AMPAMP() || d_op == TOKEN_PIPEPIPE() {
             let result = *ir_new_tmp(ir, QBE_W());
@@ -2270,10 +2212,10 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
             }
         }
 
-        // W-058 真修 (v2.13.8): vendor QBE 不支持 remd/rems 浮点取模
+        // W-058 真修 (v3.0.6/Ph.2): vendor QBE 不支持 remd/rems 浮点取模
         //   fold a % b = a - trunc(a/b) * b  (trunc toward 0; match QBE remd spec + C fmod)
         //   5 IL insns: div + dtosi/stosi + swtof + mul + sub
-        //   跳过 op = "rem" dispatch (下方 line 2272) 直接 early-return
+        //   跳过 op = "rem" dispatch (下方 line 2267) 直接 early-return
         //   避免 `&&`/`||` 嵌套 short-circuit (W-081 sub-bug 触发 phi merge gap);
         //     用 nested plain `if` (无 short-circuit), 每个 if-else 在 QBE IL 走常规 branch
         if d_op == TOKEN_PERCENT() {
@@ -2608,6 +2550,17 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                 sb_append_cstr((*ir).arena, &sb, "__" as *u8);
                 sb_append_cstr((*ir).arena, &sb, (*fs).name as *u8);
                 fn_name = sb_cstr((*ir).arena, &sb);
+            } else if (*fs).kind == SYM_VAR() && (*fs).type_ptr != (0 as *u8) {
+                // v3.2.1 (3j MVP): closure-bound SYM_VAR -> emit call to 合成 fn
+                //   sema NODE_LET wires (*sym).aux_sym = closure.fn_sym
+                //   合成 fn sym's name = "__closure_<5digits>", codegen emits call $__closure_<N>
+                let fst = (*fs).type_ptr as *Type;
+                if (*fst).kind == KIND_FUNC() && (*fs).aux_sym != (0 as *u8) {
+                    let aux_s = (*fs).aux_sym as *Sym;
+                    fn_name = (*aux_s).name;
+                } else {
+                    fn_name = (*fs).name;
+                }
             } else {
                 fn_name = (*fs).name;
             }
@@ -4001,6 +3954,11 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
     if is_sysv == 1 {
         _hdr = abi_sysv_emit_function_header(ir, fd_sym, ret_qt, is_sret, (*fd).params, nparams);
     } else if (*fd).is_naked != (0 as i32) {
+        // v3.0.2 (3b naked): naked fns skip QBE export entirely. The asm body
+        // is emitted to the D42 side-file (_inline_asm.buf) via cg_expr NODE_ASM_BLOCK.
+        // QBE sees no declaration for the naked fn → no generated .s symbol →
+        // linker resolves `call naked_fn` (from QBE-emitted code in callers) to
+        // the `.globl naked_fn` + `naked_fn:` declared in the raw asm side-file.
         _hdr = emit_naked_func_header(ir, fd_sym);
     } else {
         _hdr = abi_win_emit_function_header(ir, fd_sym, ret_qt, is_sret, (*fd).params, nparams);

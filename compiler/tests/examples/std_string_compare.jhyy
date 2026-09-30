@@ -1,0 +1,55 @@
+// std_string_compare.jhyy — v3.2.2 (3l.1) std::string str_compare test.
+//EXPECT:0  (str_compare(s, s) where s = "abc" → 0 equal)
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+fn strlen_local(s: *u8) -> i64 {
+    let mut n: i64 = 0 as i64;
+    while *(ptr_add(s, n) as *i32) != (0 as i32) {
+        n = n + (1 as i64);
+    }
+    return n;
+}
+fn str_from_cstr(a: *u8, s: *u8) -> *u8 {
+    let n = strlen_local(s);
+    let buf = ptr_add(a, 16 as i64);
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        *(ptr_add(buf, i) as *i32) = *(ptr_add(s, i) as *i32);
+        i = i + (1 as i64);
+    }
+    *(ptr_add(buf, n) as *i32) = 0 as i32;
+    *(a as *i64) = buf as i64;
+    *(ptr_add(a, 8 as i64) as *i64) = n;
+    return a;
+}
+fn str_len(s: *u8) -> i64 { return *(ptr_add(s, 8 as i64) as *i64); }
+fn str_data(s: *u8) -> *u8 { return *(s as **u8); }
+fn str_compare(x: *u8, y: *u8) -> i32 {
+    let xlen = str_len(x);
+    let ylen = str_len(y);
+    let minlen = if xlen < ylen { xlen } else { ylen };
+    let xd = str_data(x);
+    let yd = str_data(y);
+    let mut i: i64 = 0 as i64;
+    while i < minlen {
+        let a: i32 = *(ptr_add(xd, i) as *i32) & (0xff as i32);
+        let b: i32 = *(ptr_add(yd, i) as *i32) & (0xff as i32);
+        if a != b {
+            if a < b { return 0 as i32 - (1 as i32); }
+            return 1;
+        }
+        i = i + (1 as i64);
+    }
+    if xlen < ylen { return 0 as i32 - (1 as i32); }
+    if xlen > ylen { return 1; }
+    return 0;
+}
+fn main_jhyy() -> i32 {
+    let storage: [i32; 16] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                               0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                               0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                               0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let s = str_from_cstr(storage as *u8, "abc" as *u8);
+    return str_compare(s, s);
+}

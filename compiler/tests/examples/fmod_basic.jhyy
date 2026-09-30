@@ -1,14 +1,15 @@
 // EXPECT: 1
-// v2.13.8 (W-058 RESOLVED): float fmod basic test
+// v3.0.6/Ph.2 W-058 真修 — fmod user-space formula trunc (basic f64)
 //
-// Per spec 附录 B P3 v2.13.8 revision: 浮点 `%` (a % b) 临时方案 = fold 到
-// user-space formula `a - trunc(a/b) * b` (trunc toward 0; 跟 QBE remd spec
-// + C fmod() 严格一致). vendor QBE 2026-08-15 build 不支持 remd/rems 浮点取模,
-// codegen.jhyy 改 emit 5-instruction formula (div + dtosi/stosi + swtof +
-// mul + sub),BOTH backend 自动受益 (default QBE + self-backend opt-in)。
+// `decode_char_literal` 之外的 fold: 7.0 % 2.0 fold 成 user-space formula
+//   `a - trunc(a/b) * b`
+// 即 div=3.5 → dtosi=3 → swtof=3.0 → mul=6.0 → sub=1.0 (trunc toward 0, 跟
+// QBE upstream remd spec + C fmod + POSIX fmod 一致, 跟 IEEE 754 round-to-zero
+// 一致)。
 //
-// v1.7.2 patch A1 fact-check fail 时 vendor QBE 显式 reject (DEFERRED v2.x)。
-// v2.13.8 真修: 7.0 % 2.0 = 1.0 → cast 1 → exit(1)。
+// v1.7.2 patch A1 fact-check + v1.7.3 patch C2 补登: vendor QBE 2026-08-15
+// build 不支持 remd/rems 浮点取模 (workarounds.md W-058 DEFERRED since
+// 2026-08-28)。v3.0.6 真修: 5 IL insns (div + dtosi + swtof + mul + sub)。
 
 fn main_jhyy() -> i32 {
     let a: f64 = 7.0;

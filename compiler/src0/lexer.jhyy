@@ -535,9 +535,9 @@ fn lex_scan_char(l: *Lexer, t: *Token) -> i32 {
             if is_hex_digit(lex_peek_char(l)) != (0 as i32) { lex_next_char(l); }
         }
     } else {
-        // UTF-8 multi-byte char literal (spec §4.4 v2.13.7 revision: full
+        // UTF-8 multi-byte char literal (spec §4.4 v3.0.6 revision: full
         // codepoint range U+0000-U+10FFFF per RFC 3629 ships).
-        // v1.7.0 Stage 3 originally limited to 2-byte BMP only; v2.13.7
+        // v1.7.0 Stage 3 originally limited to 2-byte BMP only; v3.0.6
         // 真修 W-057 (workarounds.md W-057 DEFERRED since 2026-08-28).
         // Lead byte determines continuation count:
         //   0xxxxxxx → 0 continuation (ASCII)

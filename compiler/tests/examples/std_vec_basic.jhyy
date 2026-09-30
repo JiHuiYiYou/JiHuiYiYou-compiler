@@ -1,0 +1,260 @@
+// std_vec_basic.jhyy — v3.2.4 (3l.3) std::vec basic test.
+// Per W-076: jhyy.exe compile 默认 link runtime.c + jhyy_helpers.c, runtime.c
+// 已定义 arena_* 等 (C-side) 符号;std::vec test 用 inline 副本 + std_vec_ 前缀
+// 避免 multiple definition。 std/vec.jhyy public API 等价此 inline 副本。
+//EXPECT:0  (全部 5 case 通过则 EXIT=0)
+
+// ═══════════════════════════════════════════════════
+// Inline copies of std/vec.jhyy (per W-076 pattern)
+// ═══════════════════════════════════════════════════
+extern fn malloc(size: i64) -> *u8;
+extern fn free(p: *u8) -> i32;
+
+type Vec = struct {
+    data: *u8,
+    len:  i64,
+    cap:  i64,
+}
+
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+
+fn std_vec_byte_copy(dst: *u8, src: *u8, n: i64) -> *u8 {
+    if n < (0 as i64) {
+        return 0 as *u8;
+    }
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let d = ptr_add(dst, i);
+        let s = ptr_add(src, i);
+        let v: i32 = *(s as *i32) & (0xff as i32);
+        *(d as *i32) = v;
+        i = i + (1 as i64);
+    }
+    return dst;
+}
+
+fn std_vec_new(elem_size: i64) -> Vec {
+    let v: Vec = Vec {
+        data: 0 as *u8,
+        len:  0 as i64,
+        cap:  0 as i64,
+    };
+    return v;
+}
+
+fn std_vec_with_cap(elem_size: i64, cap: i64) -> Vec {
+    if elem_size <= (0 as i64) {
+        return std_vec_new(elem_size);
+    }
+    if cap <= (0 as i64) {
+        return std_vec_new(elem_size);
+    }
+    let bytes = cap * elem_size;
+    let buf = malloc(bytes);
+    let v: Vec = Vec {
+        data: buf,
+        len:  0 as i64,
+        cap:  cap,
+    };
+    return v;
+}
+
+fn std_vec_grow(v: *Vec, elem_size: i64, new_cap: i64) -> i32 {
+    let cur_cap = (*v).cap;
+    if new_cap <= cur_cap {
+        return 1;
+    }
+    let mut target = cur_cap;
+    if target <= (0 as i64) {
+        target = 8 as i64;
+    }
+    while target < new_cap {
+        target = target * (2 as i64);
+    }
+    let new_bytes = target * elem_size;
+    let cur_data = (*v).data;
+    let new_data = malloc(new_bytes);
+    if new_data == (0 as *u8) {
+        return 0;
+    }
+    let cur_len = (*v).len;
+    if cur_len > (0 as i64) {
+        let copy_n = cur_len * elem_size;
+        std_vec_byte_copy(new_data, cur_data, copy_n);
+    }
+    if cur_data != (0 as *u8) {
+        let _f = free(cur_data);
+    }
+    (*v).data = new_data;
+    (*v).cap = target;
+    return 1;
+}
+
+fn std_vec_push(v: *Vec, elem_size: i64, src: *u8) -> i32 {
+    if elem_size <= (0 as i64) {
+        return 0;
+    }
+    let cur_len = (*v).len;
+    let cur_cap = (*v).cap;
+    if cur_len >= cur_cap {
+        let new_cap = cur_len + (1 as i64);
+        let ok = std_vec_grow(v, elem_size, new_cap);
+        if ok == 0 {
+            return 0;
+        }
+    }
+    let cur_data = (*v).data;
+    let off = cur_len * elem_size;
+    let dst = ptr_add(cur_data, off);
+    std_vec_byte_copy(dst, src, elem_size);
+    (*v).len = cur_len + (1 as i64);
+    return 1;
+}
+
+fn std_vec_get(v: *Vec, elem_size: i64, idx: i64) -> *u8 {
+    if idx < (0 as i64) {
+        return 0 as *u8;
+    }
+    if idx >= (*v).len {
+        return 0 as *u8;
+    }
+    let off = idx * elem_size;
+    return ptr_add((*v).data, off);
+}
+
+fn std_vec_len(v: *Vec) -> i64 {
+    return (*v).len;
+}
+
+fn std_vec_cap(v: *Vec) -> i64 {
+    return (*v).cap;
+}
+
+fn std_vec_free(v: *Vec) -> i32 {
+    let d = (*v).data;
+    if d != (0 as *u8) {
+        let _f = free(d);
+    }
+    (*v).data = 0 as *u8;
+    (*v).len = 0 as i64;
+    (*v).cap = 0 as i64;
+    return 1;
+}
+
+// ═══════════════════════════════════════════════════
+// Tests (5 cases, all must EXIT=0)
+// ═══════════════════════════════════════════════════
+
+// Test 1: std_vec_new / len / cap basic (empty Vec)
+//   EXIT 0 = all empty-Vec fields zero
+fn test_empty() -> i32 {
+    let v = std_vec_new(8 as i64);
+    let d = v.data;
+    if d != (0 as *u8) { return 1; }
+    if v.len != (0 as i64) { return 2; }
+    if v.cap != (0 as i64) { return 3; }
+    return 0;
+}
+
+// Test 2: std_vec_with_cap + len + cap after alloc
+fn test_with_cap() -> i32 {
+    let v = std_vec_with_cap(8 as i64, 16 as i64);
+    if v.data == (0 as *u8) { return 1; }
+    if v.len != (0 as i64) { return 2; }
+    if v.cap != (16 as i64) { return 3; }
+    let _f = std_vec_free(&v);
+    return 0;
+}
+
+// Test 3: std_vec_push + std_vec_get round-trip (i64 elem)
+//   push 3 个 i64 (100, 200, 300), get 回读, 验证顺序
+fn test_push_get_i64() -> i32 {
+    let mut v = std_vec_new(8 as i64);
+    let e1: i64 = 100 as i64;
+    let e2: i64 = 200 as i64;
+    let e3: i64 = 300 as i64;
+    if std_vec_push(&v, 8 as i64, (&e1) as *u8) == 0 { return 1; }
+    if std_vec_push(&v, 8 as i64, (&e2) as *u8) == 0 { return 2; }
+    if std_vec_push(&v, 8 as i64, (&e3) as *u8) == 0 { return 3; }
+    if std_vec_len(&v) != (3 as i64) { return 4; }
+    if std_vec_cap(&v) < (3 as i64) { return 5; }
+    let p1 = std_vec_get(&v, 8 as i64, 0 as i64);
+    let p2 = std_vec_get(&v, 8 as i64, 1 as i64);
+    let p3 = std_vec_get(&v, 8 as i64, 2 as i64);
+    if p1 == (0 as *u8) { return 6; }
+    if p2 == (0 as *u8) { return 7; }
+    if p3 == (0 as *u8) { return 8; }
+    let v1 = *(p1 as *i64);
+    let v2 = *(p2 as *i64);
+    let v3 = *(p3 as *i64);
+    if v1 != (100 as i64) { return 9; }
+    if v2 != (200 as i64) { return 10; }
+    if v3 != (300 as i64) { return 11; }
+    let _f = std_vec_free(&v);
+    return 0;
+}
+
+// Test 4: auto-grow (push 超过初始 cap)
+//   with_cap(8, 4) → push 12 个 → 验证 cap grow 正确 + len=12
+fn test_grow() -> i32 {
+    let mut v = std_vec_with_cap(8 as i64, 4 as i64);
+    let cap0 = std_vec_cap(&v);
+    if cap0 != (4 as i64) { return 1; }
+    let mut i: i64 = 0 as i64;
+    while i < (12 as i64) {
+        let e: i64 = i * (10 as i64);
+        let r = std_vec_push(&v, 8 as i64, (&e) as *u8);
+        if r == 0 { return 2; }
+        i = i + (1 as i64);
+    }
+    if std_vec_len(&v) != (12 as i64) { return 3; }
+    let cap_after = std_vec_cap(&v);
+    if cap_after < (12 as i64) { return 4; }
+    // verify push 11 elem == 110
+    let p = std_vec_get(&v, 8 as i64, 11 as i64);
+    if p == (0 as *u8) { return 5; }
+    let v11 = *(p as *i64);
+    if v11 != (110 as i64) { return 6; }
+    // verify push 0 elem == 0
+    let p0 = std_vec_get(&v, 8 as i64, 0 as i64);
+    let v0 = *(p0 as *i64);
+    if v0 != (0 as i64) { return 7; }
+    let _f = std_vec_free(&v);
+    return 0;
+}
+
+// Test 5: OOB guard (get idx >= len 返 NULL)
+fn test_oob() -> i32 {
+    let mut v = std_vec_new(4 as i64);
+    let e: i32 = 42 as i32;
+    let _p1 = std_vec_push(&v, 4 as i64, (&e) as *u8);
+    let p0 = std_vec_get(&v, 4 as i64, 0 as i64);
+    if p0 == (0 as *u8) { return 1; }
+    // OOB: idx=1 (only 1 elem)
+    let p1 = std_vec_get(&v, 4 as i64, 1 as i64);
+    if p1 != (0 as *u8) { return 2; }
+    // OOB: negative
+    let pn = std_vec_get(&v, 4 as i64, -(1 as i64));
+    if pn != (0 as *u8) { return 3; }
+    let _f = std_vec_free(&v);
+    return 0;
+}
+
+// ═══════════════════════════════════════════════════
+// Main — 跑全部 5 test,任一非 0 即 fail
+// ═══════════════════════════════════════════════════
+fn main_jhyy() -> i32 {
+    let r1 = test_empty();
+    if r1 != 0 { return r1 + (0 as i32); }  // 1-3
+    let r2 = test_with_cap();
+    if r2 != 0 { return r2 + (10 as i32); }  // 11-13
+    let r3 = test_push_get_i64();
+    if r3 != 0 { return r3 + (100 as i32); }  // 101-111
+    let r4 = test_grow();
+    if r4 != 0 { return r4 + (200 as i32); }  // 201-207
+    let r5 = test_oob();
+    if r5 != 0 { return r5 + (300 as i32); }  // 301-303
+    return 0;
+}

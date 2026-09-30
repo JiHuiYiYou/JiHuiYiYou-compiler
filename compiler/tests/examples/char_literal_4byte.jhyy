@@ -1,12 +1,12 @@
 // EXPECT: 0
-// v2.13.7 (W-057 RESOLVED): UTF-8 4-byte emoji char literal (`'🎉'`, U+1F389)
+// v3.0.6/Ph.1 W-057 真修 — UTF-8 4-byte emoji codepoint char literal fold
 //
-// Per spec §4.4 v2.13.7 revision: char literal full codepoint range (U+0000-U+10FFFF
+// `decode_char_literal` 加 4-byte UTF-8 decode 分支 (U+10000-U+10FFFF
 // per RFC 3629) now ships. codegen 路径不变 — parser 把 char codepoint
 // → ast_new_int(PRIM_I32), 走 NODE_INT emit.
 //
 // v1.7.0 Stage 3 显式 lex reject (workarounds.md W-057 DEFERRED since 2026-08-28).
-// v2.13.7 真修: 4-byte `🎉` (U+1F389 = 127881), UTF-8 bytes: F0 9F 8E 89.
+// v3.0.6 真修: 4-byte `🎉` (U+1F389 = 127881), UTF-8 bytes: F0 9F 8E 89.
 
 fn main_jhyy() -> i32 {
     let mut err: i32 = 0;

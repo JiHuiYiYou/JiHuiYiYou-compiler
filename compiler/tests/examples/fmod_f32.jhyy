@@ -1,11 +1,16 @@
 // EXPECT: 1
-// v2.13.8 (W-058 RESOLVED): float fmod f32 path test
+// v3.0.6/Ph.2 W-058 真修 — fmod user-space formula trunc (f32 polymorphic)
 //
-// f32 (`f32` 类型) 走 codegen fold 5-instruction formula (div + stosi +
-// swtof + mul + sub)。 f32 结果 swtof 走 `=s` 目标 → 产生 f32 (per QBE
-// RV64 emit.c: Oswtof Ka fcvt.%k.w — %k 跟 dest 类型 letter, =s → fcvt.s.w)。
+// 7.0_f32 % 2.0_f32 fold 成 user-space formula polymorphic by tok.qbe_type:
+//   div = 3.5_f32
+//   stosi (NOT dtosi — QBE IL f32→i32 用 stosi) = 3
+//   swtof = 3.0_f32
+//   mul = 6.0_f32
+//   sub = 1.0_f32
 //
-// 7.0_f32 % 2.0_f32 = 1.0_f32 → cast 1 → exit(1)。
+// vs f64 版本: conv_op 选 `stosi` (i32 QBE IL) 不是 `dtosi` (i64 QBE IL);
+// per `feedback_jhyy_brace_nesting`, is_f32 nested plain `if` 无 `&&`/`||`
+// short-circuit。
 
 fn main_jhyy() -> i32 {
     let a: f32 = 7.0;

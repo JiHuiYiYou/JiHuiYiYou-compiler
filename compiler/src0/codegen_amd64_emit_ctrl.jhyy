@@ -524,19 +524,26 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     } else {
         (frame_max + (1 as i64)) * TEMP_SLOT_BYTES()
     };
-    // v2.11.23 Phase 1+2 (W-074.13 sub-bug 1+4 真修 — frame_size 兜底):
-    // alloc pool 从 -8192 起 advance (per cg_alloc_slot 修改),frame_size 必须 ≥
-    // |next_offset| 覆盖 alloc pool + alloc-pointer-slot (Phase 1) + derived-slot
-    // (Phase 2)。formula pool 在 [rbp-2072, rbp-32] 范围已由 (max_temp_id+1)*8
-    // 覆盖;alloc pool 从 -8192 起向下增长 → frame_size 必须 max(per-fn formula pool,
-    // |next_offset|)。per B3 v2.6.3 教训:不显式 cover 会写 rsp 以下 → Windows
-    // auto-grow 救场但 fragile (regress 109 测试 ~5-10min 没全测 stack grow 边界)。
+    // v3.1.0 W-087 (alloc pool frame offset 真修,applied on top of V2 wholesale port):
+    // emit_func_header 时 next_offset=0 + total_alloc=0 (per cg_state_reset_for_function)
+    // → alloc_pool_size 算出来是 0 → frame_size 不 cover alloc pool (starts at -8192 per
+    // cg_alloc_slot)。Pre-scan (cg_token_alloc_size per fn) 算 per_fn_alloc[cur_fn_idx]
+    // 累加 alloc8 size + 8B pointer-slot per alloc。frame_size 必须 max 现有 formula pool
+    // 跟 (8192 + per_fn_alloc)。
     let cg2 = state as *CGState;
-    let alloc_pool_size: i64 = if (*cg2).next_offset < (0 as i64) {
-        (0 as i64) - (*cg2).next_offset
+    let mut alloc_pool_size: i64 = 0 as i64;
+    if use_per_fn != (0 as i32) && (*cg2).per_fn_alloc != (0 as *u8) {
+        let pfa_p = ptr_add_u8((*cg2).per_fn_alloc, (*cg2).cur_fn_idx * (8 as i64)) as *i64;
+        let pfa_v: i64 = *pfa_p;
+        alloc_pool_size = (8192 as i64) + pfa_v;
     } else {
-        0 as i64
-    };
+        let _legacy_alloc = if (*cg2).next_offset < (0 as i64) {
+            (0 as i64) - (*cg2).next_offset
+        } else {
+            0 as i64
+        };
+        alloc_pool_size = _legacy_alloc;
+    }
     if alloc_pool_size > frame_size {
         frame_size = alloc_pool_size;
     }
