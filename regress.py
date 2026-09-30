@@ -187,7 +187,7 @@ def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
         ok=False with "failed (...)" on compile/run error
     """
     abs_jhyy = os.path.abspath(
-        str(Path(__file__).resolve().parents[2] / "tests" / "examples" / test_name)
+        str(ROOT / "compiler" / "tests" / "examples" / test_name)
     )
     abs_binary = os.path.abspath(binary)
     # Build inside Linux env: compile to sysv_freestanding target, then
@@ -404,7 +404,7 @@ def test_byte_equal(tests=None):
     else:
         tests = [t if t.endswith(".jhyy") else f"{t}.jhyy" for t in tests]
 
-    examples_dir = Path(__file__).resolve().parents[2] / "tests" / "examples"
+    examples_dir = ROOT / "compiler" / "tests" / "examples"
     bootstrap_dir = examples_dir.parent / "bootstrap"
     byte_equal_sh = bootstrap_dir / "byte_equal.sh"
 
@@ -473,7 +473,7 @@ def test_fixed_point(tests=None):
 
     Returns 0 on N=3 PASS, 1 on any FAIL (per feedback_fix_evaluation_rule).
     """
-    bootstrap_dir = Path(__file__).resolve().parents[2] / "tests" / "bootstrap"
+    bootstrap_dir = ROOT / "compiler" / "tests" / "bootstrap"
     fixed_point_sh = bootstrap_dir / "fixed_point.sh"
     if not fixed_point_sh.exists():
         print(f"fixed-point: script not found at {fixed_point_sh}", file=sys.stderr)
@@ -592,7 +592,7 @@ def main():
         # deferred to v2.6.x (Unit E wire), so the script runs QBE-vs-QBE
         # (trivially PASS). Real self-vs-QBE gate auto-fires when v2.6.x
         # wires codegen_amd64_run into main.jhyy.
-        bootstrap_dir = Path(__file__).resolve().parents[2] / "tests" / "bootstrap"
+        bootstrap_dir = ROOT / "compiler" / "tests" / "bootstrap"
         byte_equal_amd64_sh = bootstrap_dir / "byte_equal_amd64.sh"
         if not byte_equal_amd64_sh.exists():
             print(f"byte-equal-amd64: script not found at {byte_equal_amd64_sh}",
