@@ -31,20 +31,30 @@ mmd -i "$FAT_IMAGE" ::EFI ::EFI/BOOT
 mcopy -i "$FAT_IMAGE" "$EFI" "::EFI/BOOT/BOOTX64.EFI"
 trap 'rm -f "$FAT_IMAGE"' EXIT
 
-# Start QEMU. Capture ConOut via debugcon (port 0x402 → stdio) — EDK2 routes
-# the UEFI console to the debug console when launched with -debugcon file.
+# Start QEMU. Capture ConOut via debugcon (port 0x402 → serial log file) — EDK2
+# routes the UEFI console to the debug console when launched with isa-debugcon.
 # EFI apps that print via ConOut->OutputString will appear here.
+#
+# QEMU 10.x syntax (vs QEMU 8.x `-debugcon file:stdio`):
+#   -chardev file,id=dbgcon,path=<file>  (was -debugcon file:<file>)
+#   -device isa-debugcon,chardev=dbgcon   (was -global isa-debugcon.iobase=0x402)
+#
 # -no-reboot: if the EFI app crashes, don't auto-reboot (we want to see it).
 # -monitor none: no HMP monitor over stdio (would mix with debug output).
 # -nographic: no SDL/VGA display.
 # -nodefaults: don't auto-add any default devices.
 # -machine q35: modern machine type with good UEFI support.
+#
+# Serial output → SERIAL_LOG file (v2.13.0 Ph.3 added: previously went to stdio
+# which mixed with shell output). Capture log via $SERIAL_LOG env or default /tmp.
+SERIAL_LOG="${SERIAL_LOG:-/tmp/_run_ovmf_serial.log}"
+DEBUG_LOG="${DEBUG_LOG:-/tmp/_run_ovmf_dbg.log}"
 qemu-system-x86_64 \
     -machine q35 \
     -drive "if=pflash,format=raw,readonly=on,file=$OVMF_DIR/edk2-x86_64-code.fd" \
     -drive "if=pflash,format=raw,file=$OVMF_DIR/edk2-vars.fd" \
     -drive "format=raw,file=$FAT_IMAGE" \
-    -serial stdio \
-    -debugcon "file:stdio" -global "isa-debugcon.iobase=0x402" \
+    -serial "file:$SERIAL_LOG" \
+    -chardev "file,id=dbgcon,path=$DEBUG_LOG" -device isa-debugcon,chardev=dbgcon \
     -nographic -monitor none -no-reboot -nodefaults \
     "$@"

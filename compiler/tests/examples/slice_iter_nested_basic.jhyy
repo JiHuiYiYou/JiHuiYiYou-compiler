@@ -1,0 +1,13 @@
+// EXPECT: 66
+fn main_jhyy() -> i32 {
+    let a: [*]i32 = &[1, 2, 3];
+    let b: [*]i32 = &[10, 20, 30];
+    let s: [*][*]i32 = &[a, b];
+    let mut total: i32 = 0;
+    for row in s {
+        for x in row {
+            total = total + x;
+        }
+    }
+    return total;
+}

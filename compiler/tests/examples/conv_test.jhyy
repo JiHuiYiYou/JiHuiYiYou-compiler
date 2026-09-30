@@ -1,0 +1,66 @@
+// conv_test.jhyy — v2.11.19 Phase 5 验证 6 个 user-reachable conversion op
+//
+// 触发机制:JHYY spec 不允许 `as` int↔float cast,但 fn call 时允许
+// call-site type coerce (codegen cg_coerce 走 src_qt != dst_qt 时 emit 转换 op)。
+// 每个 fn 把参数当返回值返回,让 caller 在 call site 触发 coerce。
+//
+// 覆盖:
+//   §1 dtosi  — f64 → i32 (return f64 to i32 var)         IL: dtosi
+//   §2 stosi  — f32 → i32 (return f32 to i32 var)         IL: stosi
+//   §3 truncd — f64 → f32 (return f64 to f32 var)         IL: truncd
+//   §4 exts   — f32 → f64 (pass f32 arg to f64 param)     IL: exts (S→D)
+//   §5 sltof  — i64 → f64 (return i64 to f64 var)         IL: sltof
+//   §6 swtof  — i32 → f64 (return i32 to f64 var)         IL: swtof
+//
+// 注:ultof/uwtof (u64/u32 → f32) 当前在 user-facing path 不可达
+//   (spec 5.6 禁止 int→float `as` cast; cg_coerce 仅在 dst=D 时 emit sltof/swtof;
+//   dst=S 且 src=L/W 的路径没有 user construct 触发)。仍 emit 在 dispatch table
+//   防御未来 spec 改动 + Phase 2 已验 self-backend 编译通过 (没有 regression)。
+
+fn id_f64(x: f64) -> f64 { return x; }     // §1/§3/§5 caller 走 f64 路径
+fn id_f32(x: f32) -> f32 { return x; }     // §2 caller 走 f32 路径
+fn id_i32(x: i32) -> i32 { return x; }     // §6 caller 走 i32 路径
+fn take_d(x: f64) -> f64 { return x; }     // §4 caller 用 f64 param 接 f32 arg → exts
+
+fn main_jhyy() -> i32 {
+    // §1 dtosi: f64 → i32
+    let v1: f64 = id_f64(3.7);
+    let r1: i32 = v1 as i32;            // dtosi  → 3
+
+    // §2 stosi: f32 → i32
+    let v2: f32 = id_f32(3.7);
+    let r2: i32 = v2 as i32;            // stosi  → 3
+
+    // §3 truncd: f64 → f32 (via fn return coerce)
+    let v3: f64 = id_f64(2.5);
+    let r3: f32 = v3 as f32;            // truncd → 2.5f32
+
+    // §4 exts: f32 → f64 (call-site arg coerce)
+    let v4_f32: f32 = id_f32(2.5);
+    let v4: f64 = take_d(v4_f32);       // exts   — pass f32 to f64 param
+
+    // §5 sltof: i64 → f64
+    let v5_i64: i64 = 7;
+    let r5: f64 = v5_i64 as f64;        // sltof  → 7.0f64
+
+    // §6 swtof: i32 → f64
+    let v6_i32: i32 = id_i32(9);
+    let r6: f64 = v6_i32 as f64;        // swtof  → 9.0f64
+
+    // 评分:每 op 命中 +1/2/4/8/16/32
+    let r3i: i32 = r3 as i32;           // 2
+    let r4i: i32 = v4 as i32;           // 2
+    let r5i: i32 = r5 as i32;           // 7
+    let r6i: i32 = r6 as i32;           // 9
+
+    let mut score: i32 = 0;
+    if r1 == 3 { score = score + 1; }
+    if r2 == 3 { score = score + 2; }
+    if r3i == 2 { score = score + 4; }
+    if r4i == 2 { score = score + 8; }
+    if r5i == 7 { score = score + 16; }
+    if r6i == 9 { score = score + 32; }
+
+    // 期望 EXIT = 63 (1+2+4+8+16+32)
+    return score;
+}

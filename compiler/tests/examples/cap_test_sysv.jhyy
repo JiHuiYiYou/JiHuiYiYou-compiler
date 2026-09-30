@@ -1,0 +1,39 @@
+// v3.1.3 ship-gate test: Cap<T> + PhantomData<T> on SysV target.
+// Verifies abi_sysv_classify_arg KIND_CAP / KIND_PHANTOM arms route INTEGER class
+// on --target=amd64_sysv. Mirrors cap_table_basic.jhyy + phantom_zst.jhyy patterns
+// (Cap<T> + PhantomData<T> are opaque builtin 8B / 0B structs, no named fields).
+
+// 跨函数 Cap<T> pass-by-value (走 SysV INTEGER class, RDI arg slot for 8-byte)
+fn cross_fn_cap(c: Cap<i32>) -> i64 {
+    let s: i64 = sizeof(c);
+    return s;
+}
+
+// 跨函数 PhantomData<T> pass-by-value (ZST, defensive INTEGER fallback —
+// codegen 不 emit PhantomData layout, 但 abi_sysv_classify_arg 防御 arm 走 INTEGER)
+fn cross_fn_pd(p: PhantomData<i32>) -> i32 {
+    return 42;
+}
+
+fn main_jhyy() -> i32 {
+    // sizeof sanity: Cap<i32> = 8B on all targets (per v3.1.0 spec § 3)
+    let s_cap: i64 = sizeof(Cap<i32>);
+    if s_cap != 8 {
+        return 10;
+    }
+
+    // cross-fn Cap<T> pass (Cap<i32> 8B → SysV INTEGER class, RDI)
+    let r1: i64 = cross_fn_cap(0 as Cap<i32>);
+    if r1 != 8 {
+        return 20;
+    }
+
+    // cross-fn PhantomData<T> pass (PhantomData<i32> ZST → INTEGER fallback)
+    let r2: i32 = cross_fn_pd(0 as PhantomData<i32>);
+    if r2 != 42 {
+        return 30;
+    }
+
+    return 42;
+}
+//EXPECT:42

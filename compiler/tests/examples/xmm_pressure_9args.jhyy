@@ -1,0 +1,28 @@
+// xmm_pressure_9args.jhyy — v2.13.0 Phase 1: 9 f64 args 验证 XMM regalloc
+// stack-arg fallback 真修(W-074.6 PARTIAL → 修)。
+//
+// SysV ABI f64 arg 走 xmm0..xmm7(8 个)+ stack-arg 9th+。
+// Win x64 ABI f64 arg 走 xmm0..xmm3(4 个)+ stack-arg 5th+。
+// v2.11.19 Phase 3b 真修前,> N args 的 f64 arg 走 hard-coded idx
+// → nargs>=5 直接错(WARNING + skip)。v2.13.0 Phase 1 真修:per-call
+// XMM arg counter + stack-arg fallback emit movsd -<off>(%rbp), %xmm15
+// 然后 movsd %xmm15, <stack_off>(%rsp)。
+//
+// 9 个 f64 arg 测试:sum(1..9) = 45.0;return 255 if correct
+// (255 = EXIT_OK 跟 float_arg_xmm.jhyy EXIT=15 一致,本 fixture 也返 255)
+//
+// SKIP-QBE: vendor QBE Win 模式 emit `movq <stack>(%rsp), %rax; addsd %rax, %xmm0`
+// operand type mismatch (QBE 没把 stack-arg f64 走 XMM)。这是 QBE upstream bug,
+// 不挡 self-backend 真修验证;--self-backend 模式仍跑 (V.1 gate 5/5 EXIT=255)。
+
+fn sum9(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64, g: f64, h: f64, i: f64) -> f64 {
+    return a + b + c + d + e + f + g + h + i;
+}
+
+fn main_jhyy() -> i32 {
+    let s: f64 = sum9(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0);
+    let s_int: i32 = s as i32;
+    let mut score: i32 = 0;
+    if s_int == 45 { score = score + 255; }
+    return score;
+}

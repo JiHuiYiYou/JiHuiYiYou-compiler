@@ -1,0 +1,131 @@
+// codegen_amd64_inmem.jhyy — v2.15.0 in-memory self-backend pipeline
+//
+// v2.15.0 ship: 消除 .il 文件 I/O round-trip。前端 codegen.jhyy 仍然 emit QBE IL
+// 文本到 IRBuf.sb, 但默认 (JHY_WRITE_IL 未设) 不再写盘。main.jhyy run_backend
+// 把 (*ir.sb).buf/.len 直接喂给本模块的 codegen_amd64_run_text, 省掉 jh_read_file
+// step 1;内部仍然走 lex_il → regalloc → parse_and_emit → peephole_fold_with_len
+// → jh_write_file 7 步编排 (vs codegen_amd64_run 8 步)。
+//
+// 设计依据 (per docs/plans/v2/v2.15.0-plan.md Strategy B+):
+// - 复用现有 9 个 codegen_amd64_*.jhyy 文件, 0 修改 lex_il / parse_and_emit /
+//   emit_* / peephole_fold_with_len; 只换 input source 从 file → caller buffer
+// - JHY_WRITE_IL=1 env var 给 regress.py (走 QBE path) 或 debug 用, 强制走
+//   老的 fopen / fwrite / fclose 路径
+// - W-074 closure: 此入口替代 jh_read_file 的 heap-boxed i64 兜底 (因 in-mem
+//   path 不需要 read_file, W-074 → RESOLVED)
+//
+// 跟 codegen_amd64_run 区别:
+//   步骤 1 (jh_read_file) → 删除, 改用入参 text/len
+//   步骤 2-7 → 跟 codegen_amd64_run 一致
+//   步骤 8 (cleanup) → free(state_buf) + arena_free(&arena); 不再 free(il_buf)
+//
+// 用法:
+//   main.jhyy run_backend: 检测 target_backend_mode(t) == BACKEND_SELF AND
+//   JHY_WRITE_IL 未设 → 调 codegen_amd64_run_text(text, len, asm_path, t)
+//   返回 0 = 写 .s 成功, 非 0 = 失败
+
+import codegen_amd64_state;        // cg_state_init / cg_state_set_target / cg_state_set_frame_max_temp / cg_compute_global_max_temp / cg_compute_per_fn_max_temps
+import codegen_amd64_lexer;        // lex_il / lex_il_count
+import codegen_amd64;              // parse_and_emit (24-way dispatch)
+import codegen_amd64_regalloc;     // regalloc_clear_global
+import codegen_amd64_peephole;     // peephole_fold_with_len
+import util;                       // StringBuilder + sb_init
+import arena;                      // Arena + arena_init / arena_free
+
+// ═══ Local externs (per codegen_amd64.jhyy:41-51 + jhyy_helpers.c) ═══
+extern fn jh_write_file(path: *u8, buf: *u8, len: i64) -> i32;
+extern fn malloc(size: i64) -> *u8;
+extern fn free(p: *u8) -> i32;
+extern fn sprintf_lld(buf: *u8, fmt: *u8, val: i64) -> i32;
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+
+// ════════════════════════════════════════════════════════════════════════
+// 公开 API
+// ════════════════════════════════════════════════════════════════════════
+
+// codegen_amd64_run_text — in-memory QBE IL text → amd64 GAS .s 主入口 (v2.15.0)
+//
+// 编排 (vs codegen_amd64_run 的 8 步):
+//   1. (省掉) jh_read_file(il_path) — 用入参 text/len 替代 caller buffer
+//   2. arena_init(8MB) → lex_il() → tokens; lex_il_count() → n
+//   3. malloc CGState (512) + sb_init + cg_state_init + cg_state_set_target
+//   4. cg_compute_per_fn_max_temps + cg_compute_global_max_temp + cg_state_set_frame_max_temp
+//   5. regalloc_clear_global (skip regalloc_run, 走公式 fallback)
+//   6. parse_and_emit(state, tokens, n, target_tag) → emit_* dispatch
+//   7. peephole_fold_with_len(raw, raw_len, arena, target_tag, &folded_len)
+//   8. jh_write_file(asm_path, final_buf, final_len)
+//
+// 返回值: 0 = 写了 .s, 1 = 失败 (malloc 失败 / lex_il 失败)
+fn codegen_amd64_run_text(text: *u8, len: i64, asm_path: *u8, target_tag: i32) -> i32 {
+    // 1. (省掉) Read .il — 用入参 text/len 替代 caller buffer
+    //    边界: len <= 0 视作 empty IL → return 1 (fail, 由 caller 处理)
+    if len <= (0 as i64) {
+        return 1 as i32;
+    }
+
+    // 2. Lex into tokens (arena-backed)
+    let mut arena: Arena = Arena { start: 0 as *u8, cur: 0 as *u8, end: 0 as *u8,
+                                   blocks: 0 as *u8, def_size: 0 as i64 };
+    arena_init(&arena, (8 as i64) * (1024 as i64) * (1024 as i64));
+    let tokens = lex_il(text, len, &arena);
+    if tokens == (0 as *u8) {
+        arena_free(&arena);
+        return 1 as i32;
+    }
+    let n = lex_il_count(tokens);
+
+    // 3. CGState + StringBuilder init (heap-alloc'd, state has stable ptr)
+    //    per codegen_amd64.jhyy:297 — CGState 实际 ~248+ 字节, 512 留 slack
+    let state_buf = malloc(512 as i64);
+    if state_buf == (0 as *u8) {
+        arena_free(&arena);
+        return 1 as i32;
+    }
+    let mut sb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
+    sb_init(&arena, &sb);
+    let _init_rc = cg_state_init(state_buf, &sb, &arena, "" as *u8);
+    let _set_tt_rc = cg_state_set_target(state_buf, target_tag);
+
+    // 4. Per-fn pre-scan + global max temp (per codegen_amd64.jhyy:315-320)
+    let _scan_rc = cg_compute_per_fn_max_temps(state_buf, tokens, 40 as i64, n);
+    let g_max = cg_compute_global_max_temp(tokens, 40 as i64, n);
+    let _fms = cg_state_set_frame_max_temp(state_buf, g_max);
+
+    // 5. Regalloc clear global (per codegen_amd64.jhyy:331; skip regalloc_run,
+    //    走公式 fallback per W-074.6 T3-b 解释)
+    let _clear_rc = regalloc_clear_global();
+
+    // 6. Dispatch loop → emit each token → .s into sb.buf
+    let _pe_rc = parse_and_emit(state_buf, tokens, n, target_tag);
+    // W-074 warning: n>0 但 sb.len=0 = 0-byte .s (per codegen_amd64.jhyy:340-348)
+    if sb.len == (0 as i64) && n > (0 as i64) {
+        let trace_tmp_cap: i64 = 96 as i64;
+        let trace_tmp = malloc(trace_tmp_cap);
+        if trace_tmp != (0 as *u8) {
+            let _r = sprintf_lld(trace_tmp, "warning: in-mem self-backend produced 0-byte .s, n=%lld tokens dispatched\n" as *u8, n);
+            let _w = jh_fputs_stderr(trace_tmp);
+            let _f = free(trace_tmp);
+        }
+    }
+
+    // 7. Peephole fold on emitted .s (no-op if arena alloc fails)
+    let raw = sb.buf;
+    let raw_len = sb.len;
+    let folded_len_box = malloc(8 as i64);
+    *(folded_len_box as *i64) = raw_len;
+    let mut final_buf: *u8 = peephole_fold_with_len(raw, raw_len, arena, target_tag, folded_len_box);
+    let mut final_len: i64 = *(folded_len_box as *i64);
+    if final_buf == (0 as *u8) {
+        final_buf = raw;
+        final_len = raw_len;
+    }
+    free(folded_len_box);
+
+    // 8. Write .s (binary mode, per feedback_qbe_crlf_root_cause)
+    let wr_rc = jh_write_file(asm_path, final_buf, final_len);
+
+    // Cleanup
+    free(state_buf);
+    arena_free(&arena);
+    return wr_rc;
+}

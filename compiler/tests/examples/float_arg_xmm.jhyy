@@ -1,0 +1,25 @@
+// float_arg_xmm.jhyy — v2.11.19 Phase 3b 验证 FNARG XMM 多 arg pass
+//
+// Phase 3b 修 emit_copy FNARG XMM arg_idx > 0 → 0 (buggy → 应 >= 0)。
+// Win64 ABI xmm0-xmm3 pass 4 个 f64/f32 arg,SysV xmm0-xmm7 pass 8 个。
+// 测试 4 个 f64 arg(Win64 走前 4 个 xmm0-3,no stack-arg fallback needed)。
+//
+// 注:5+ arg 测试触发 known pre-existing W-XXX "nargs>=5 stack-arg fallback not
+// yet wired" (self-backend 限制,跟 v2.11.19 无关);这个 fixture 只测 4 arg 以
+// 聚焦 Phase 3b 真修。
+//
+// EXIT:每个 arg 加分,期望 EXIT=15 (1+2+4+8)
+
+fn sum4(a: f64, b: f64, c: f64, d: f64) -> f64 {
+    return a + b + c + d;
+}
+
+fn main_jhyy() -> i32 {
+    let s: f64 = sum4(1.0, 2.0, 3.0, 4.0);  // 10.0
+    let s_int: i32 = s as i32;  // 10
+
+    let mut score: i32 = 0;
+    if s_int == 10 { score = score + 15; }  // 1 子项覆盖全 4 arg 都正确 pass
+
+    return score;
+}

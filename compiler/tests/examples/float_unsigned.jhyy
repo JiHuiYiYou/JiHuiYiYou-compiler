@@ -1,0 +1,39 @@
+// float_unsigned.jhyy — v2.11.19 Phase 5 u32/u64 → f64 IMM 真解覆盖
+//
+// v2.11.19 Phase 3 修 cg_parse_f64_imm_bits lookup table 高 32-bit 错位 bug
+// (之前 1.0 = 0x3FE00000_00000000 = 0.5f64,差 1× 倍数)。本 fixture 验证 5
+// 整数 f64 IMM 现在 emit 正确 IEEE 754 bit pattern (1.0/2.0/3.0/4.0/5.0/10.0)。
+//
+// 注:ultof/uwtof (u64/u32 → f32 conversion op) 在 user-facing path 不可达
+// (spec 5.6 禁止 int→float `as` cast)。仍 emit 在 dispatch table,defense-in-
+// depth。本 fixture 只覆盖 f64 IMM 真解,不触发 ultof/uwtof。
+//
+// EXIT:每 IMM 加分,期望 EXIT=63
+
+fn main_jhyy() -> i32 {
+    let mut score: i32 = 0;
+
+    // §1: 6 个整数 IMM 直接写 stack + load 读回
+    let v1: f64 = 1.0;
+    let v2: f64 = 2.0;
+    let v3: f64 = 3.0;
+    let v4: f64 = 4.0;
+    let v5: f64 = 5.0;
+    let v10: f64 = 10.0;
+
+    let v1i: i32 = v1 as i32;
+    let v2i: i32 = v2 as i32;
+    let v3i: i32 = v3 as i32;
+    let v4i: i32 = v4 as i32;
+    let v5i: i32 = v5 as i32;
+    let v10i: i32 = v10 as i32;
+
+    if v1i == 1 { score = score + 1; }
+    if v2i == 2 { score = score + 2; }
+    if v3i == 3 { score = score + 4; }
+    if v4i == 4 { score = score + 8; }
+    if v5i == 5 { score = score + 16; }
+    if v10i == 10 { score = score + 32; }
+
+    return score;
+}

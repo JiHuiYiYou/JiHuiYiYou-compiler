@@ -297,20 +297,25 @@ fn token_kind(tok: *u8) -> i32 {
 }
 
 // token_text(tok) -> *u8
+// v2.11.1 (W-074.5): 修正 offset — ILToken kind:i32 在 offset 0, *u8 (text) 因 8-byte
+// alignment 落在 offset 8(不是 4)。原 4-byte offset 让 walk_tokens 读 bytes 4-11 =
+// 4 bytes padding + 4 bytes of text ptr → 错乱,rega_count_temps 解错乱指针 → segfault。
 fn token_text(tok: *u8) -> *u8 {
-    let p = ptr_add_u8(tok, 4 as i64) as **u8;
+    let p = ptr_add_u8(tok, 8 as i64) as **u8;
     return *p;
 }
 
 // token_text_len(tok) -> i64
+// v2.11.1 (W-074.5): 修正 offset — text_len:i64 在 offset 16(原 12)。
 fn token_text_len(tok: *u8) -> i64 {
-    let p = ptr_add_u8(tok, 12 as i64) as *i64;
+    let p = ptr_add_u8(tok, 16 as i64) as *i64;
     return *p;
 }
 
 // token_int_val(tok) -> i64
+// v2.11.1 (W-074.5): 修正 offset — int_val:i64 在 offset 24(原 20)。
 fn token_int_val(tok: *u8) -> i64 {
-    let p = ptr_add_u8(tok, 20 as i64) as *i64;
+    let p = ptr_add_u8(tok, 24 as i64) as *i64;
     return *p;
 }
 

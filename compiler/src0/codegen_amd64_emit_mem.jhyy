@@ -147,6 +147,9 @@ fn mem_parse_int_from(text: *u8, len: i64, from: i64) -> i64 {
 
 // volatile token 归一:QBE_VOLATILE_MARKER 没带宽度信息,退回 'w'(per § 2.4,
 // emit 成普通 load/store,不插 barrier;3c ship 后才 flip 行为)。
+// v2.11.19 Phase 4: QBE_S/QBE_D 浮点类型保留原 type letter (v2.5.0 之前塌成 QBE_W,
+// 导致 f64 load 只 mov 4 byte — 截断丢精度)。现在 pass-through 让 callers 自决
+// 走 xmm0 scratch + movss/movsd。
 fn mem_effective_qbe_type(qt: i32) -> i32 {
     if qt == QBE_VOLATILE_MARKER() {
         return QBE_W_LOCAL();
@@ -154,24 +157,33 @@ fn mem_effective_qbe_type(qt: i32) -> i32 {
     if qt == QBE_L_LOCAL() || qt == QBE_B_LOCAL() || qt == QBE_H_LOCAL() {
         return qt;
     }
-    // 'w' / 's' / 未知一律按 32-bit word 处理(v2.5.0 不碰浮点栈搬运)
+    // v2.11.19 Phase 4: 浮点 type pass-through (QBE_S=f32, QBE_D=f64)
+    if qt == QBE_S_LOCAL() || qt == QBE_D_LOCAL() {
+        return qt;
+    }
+    // 'w' / 未知一律按 32-bit word 处理
     return QBE_W_LOCAL();
 }
 
 // GAS mov 后缀:w→l(32) / l→q(64) / b→b(8) / h→w(16),per qbe/amd64/emit.c 表。
+// v2.11.19 Phase 4: 加 s→ss / d→sd (SSE mov 后缀,for xmm scratch)。
 fn mem_mov_suffix(qt: i32) -> *u8 {
     if qt == QBE_L_LOCAL() { return "q" as *u8; }
     if qt == QBE_B_LOCAL() { return "b" as *u8; }
     if qt == QBE_H_LOCAL() { return "w" as *u8; }
+    if qt == QBE_S_LOCAL() { return "ss" as *u8; }
+    if qt == QBE_D_LOCAL() { return "sd" as *u8; }
     return "l" as *u8;
 }
 
 // scratch 寄存器:x86 没有 mem→mem mov,栈到栈必须过一次寄存器。
 // %rax 是 MS x64 的 volatile/返回寄存器,跨指令不需要保存 → 拿来当中转最省。
+// v2.11.19 Phase 4: 加 QBE_S/QBE_D → %xmm0 (SSE scratch,float load/store)。
 fn mem_scratch_reg(qt: i32) -> *u8 {
     if qt == QBE_L_LOCAL() { return "%rax" as *u8; }
     if qt == QBE_B_LOCAL() { return "%al" as *u8; }
     if qt == QBE_H_LOCAL() { return "%ax" as *u8; }
+    if qt == QBE_S_LOCAL() || qt == QBE_D_LOCAL() { return "%xmm0" as *u8; }
     return "%eax" as *u8;
 }
 
@@ -284,6 +296,66 @@ fn emit_alloc(state: *u8, tok: *u8, target_tag: i32) -> i32 {
         off = (*s).next_offset;
     }
 
+    // v2.11.8 (W-074.7.8 derived-address tracking 真修):alloc-result temp 是
+    // address-holder (持有 alloc'd 栈对象 ADDRESS, 不是 VALUE)。emit_load/store/loadsub
+    // 看 flag 决定 indirect (mov<size> (%r8), %reg) vs slot dispatch。
+    //
+    // v2.11.8 (W-074.7.8 真修延伸-3 — self-referential slot 真修):
+    //   v2.11.5 design: cg_record_temp_slot(state, dst, off=region) 让 dst 的 pointer-slot
+    //   == region offset (= -8 for first alloc)。lea+mov 写 address 到 dst slot =
+    //   写到 region 本身 — 后续 storew val, %t_derived 走 indirect 写 val 到 region,
+    //   覆盖掉地址。add %t6, 4 时读 -8(%rbp) 拿到 val (高 32-bit 是地址残留) 当
+    //   64-bit pointer → bogus address → SIGSEGV。
+    //
+    //   真修: SKIP cg_record_temp_slot (v2.11.5 的 alloc-tracking 留 deprecated, 但 v2.11.8
+    //   address-tracking 不再需要 — pointer-slot 走 cg_offset_for_temp_with_target 的
+    //   formula `-(32+t*8)` = -80 for t6 = DIFFERENT from region -8)。lea+mov 写
+    //   address 到 dst pointer-slot (-80) — t6 的 slot 和 region 物理分离, 后续
+    //   indirect store 写 val 到 region 不影响 pointer-slot, add %t6, off 重读
+    //   pointer-slot 永远拿到正确的 alloc'd 地址。
+    //
+    // 修 nested_struct_deep + struct_val_pass + struct_val_assign pre-existing bug
+    // + sigsegv on t6 二次 add %t6, 4 (this fix)。
+    //
+    // v2.11.23 Phase 1 ARCH FIX (corrected): re-enable cg_record_temp_slot with
+    // cg_alloc_slot(8) so the pointer-slot is in a dedicated 8B region BELOW the
+    // current next_offset — physical separate from BOTH formula pool
+    // (-(32+t*8) Win / -(t*8) SysV) AND region pool (cg_alloc_slot advance)。
+    //
+    // Why off-8 first try didn't work (v2.11.23 Phase 1 initial): off-8 lands in
+    // formula pool (t3 formula = -56 == t2 off-8 = -56 collision)。storew t3 →
+    // t3's formula slot (-56) overwritten → t2's pointer-slot corrupted → bogus
+    // address → SEGV。
+    //
+    // Why cg_alloc_slot(8) works: dedicated pool always advances next_offset to
+    // the deepest negative position not yet used by either formula or region
+    // pool. Pointer-slot 物理在 region "下面" (更负) + 跟后续 alloc's region
+    // 不会 collision (后续 alloc 走 cg_alloc_slot(aligned) 跟 pointer-slot
+    // 8B 不重叠)。No self-referential risk (pointer-slot 不 = region off itself)。
+    //
+    // frame_size impact: each alloc gets 8B extra → for_in_slice_nested 5 allocs
+    // = 40B extra. Should fit in current frame_size formula `(max_temp_id+1)*8`
+    // since per_fn_max grows with alloc count anyway. (per v2.11.23 audit verify。)
+    let _had = cg_record_temp_holds_address(state, dst);
+    let pointer_slot_off = cg_alloc_slot(state, 8 as i64);
+    let _rec = cg_record_temp_slot(state, dst, pointer_slot_off);
+
+    // Emit: leaq -<region_off>(%rbp), %rax; movq %rax, -<pointer_slot>(%rbp)
+    // pointer_slot = cg_offset_for_temp_with_target(dst, target_tag) = formula
+    //   = -(32 + dst*8) for Win, -(dst*8) for SysV (cg_offset_for_temp_with_target
+    //   fallback since cg_record_temp_slot no longer records dst).
+    let pointer_slot = cg_offset_for_temp_with_target(dst, target_tag);
+    mem_put(state, "\tleaq " as *u8);
+    mem_put_slot(state, off);
+    mem_put(state, ", %rax\t\t# &alloc'd memory for %t" as *u8);
+    mem_put_i64(state, dst);
+    mem_put(state, "\n" as *u8);
+    mem_put(state, "\tmovq %rax, " as *u8);
+    mem_put_slot(state, pointer_slot);
+    mem_put(state, "\t\t# -> %t" as *u8);
+    mem_put_i64(state, dst);
+    mem_put(state, "\n" as *u8);
+
     // `\t# alloc 16 (aligned 16) -> %t1 (offset -48(%rbp))`
     mem_put(state, "\t# alloc " as *u8);
     mem_put_i64(state, size);
@@ -322,7 +394,7 @@ fn emit_store(state: *u8, tok: *u8, target_tag: i32) -> i32 {
 
     let src = mem_parse_temp((*t).text, (*t).text_len, 0 as i64);
     let dst = mem_parse_temp((*t).text, (*t).text_len, 1 as i64);
-    if src < (0 as i64) || dst < (0 as i64) {
+    if src < (0 as i64) {
         return 1 as i32;  // 常量源(`storew 42, %t1`)v2.5.0 不在 scope
     }
 
@@ -330,7 +402,92 @@ fn emit_store(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let suffix = mem_mov_suffix(qt);
     let reg = mem_scratch_reg(qt);
     let src_off = mem_temp_offset(src, target_tag);
+
+    // v2.11.20 W-017 真修 Phase 3: emit_store $label path — `storew <val>, $g_x`。
+    // 跟 emit_load label branch 对称:scan text 找 '$',emit:
+    //   mov<suffix> <src_off>(%rbp), %<reg>
+    //   mov<suffix> %<reg>, <label>(%rip)
+    // Cover top_level_let_mut_test + types + defer_multi_lifo (W-017 ACTIVE 3 fail)。
+    if dst < (0 as i64) {
+        let mut label_start: i64 = -(1 as i64);
+        let mut label_len: i64 = 0 as i64;
+        let mut si: i64 = 0 as i64;
+        while si < (*t).text_len {
+            if mem_byte_at((*t).text, si) == (36 as i32) {  // '$'
+                label_start = si + (1 as i64);
+                while label_start + label_len < (*t).text_len {
+                    let lb = mem_byte_at((*t).text, label_start + label_len);
+                    if lb == (32 as i32) || lb == (10 as i32) || lb == (9 as i32) || lb == (0 as i32) { break; }
+                    label_len = label_len + (1 as i64);
+                }
+                break;
+            }
+            si = si + (1 as i64);
+        }
+        if label_start >= (0 as i64) && label_len > (0 as i64) {
+            mem_put(state, "\tmov" as *u8);
+            mem_put(state, suffix);
+            mem_put(state, " " as *u8);
+            mem_put_slot(state, src_off);
+            mem_put(state, ", " as *u8);
+            mem_put(state, reg);
+            mem_put(state, "\t\t# %t" as *u8);
+            mem_put_i64(state, src);
+            mem_put(state, "\n" as *u8);
+            mem_put(state, "\tmov" as *u8);
+            mem_put(state, suffix);
+            mem_put(state, " " as *u8);
+            mem_put(state, reg);
+            mem_put(state, ", " as *u8);
+            let _a = sb_append(mem_arena(state), mem_sb(state), ptr_add_u8((*t).text, label_start), label_len);
+            let _b = sb_append_cstr(mem_arena(state), mem_sb(state), "(%rip)\t\t# store $label\n" as *u8);
+            return 0 as i32;
+        }
+        return 1 as i32;
+    }
+
     let dst_off = mem_temp_offset(dst, target_tag);
+
+    // v2.11.8 (W-074.7.8 derived-address tracking 真修):
+    // dst 是 address-holder 时,slot store 写到的是 stack slot 存的 address VALUE,
+    // 不是实际 value。本应该是 indirect store:load src → %<reg>,load dst → %r8
+    // (= pointer),然后 store [r8] (= %<reg>)。Phase E 第二段:emit_store indirect dispatch。
+    if cg_is_address_holder(state, dst) != (0 as i32) {
+        // v2.11.20 RC-7: removed "both address-holder" special case (was at
+        // line 393-416 prior). Original code emitted mem-copy via deref of
+        // both src and dst (`mov<size> (%rsi), <reg>; mov<size> <reg>, (%r8)`)
+        // which is correct for struct-to-struct copy but WRONG for
+        // `storel <alloc>, <add %struct, off>` where the dst is a derived
+        // offset into a struct (e.g. `storel %t1, %t13` = `*%t13 = %t1` where
+        // %t13 = slice.ptr field). The flag on dst propagates from the
+        // struct via emit_binop add, but the value to store is the slot value
+        // of src (= the pointer itself), NOT the memory at *src.
+        // Treat all "dst is address-holder" cases uniformly: emit
+        // `movq <src_slot>, <reg>; movq <dst_slot>, %r8; mov<size> <reg>, (%r8)`,
+        // which correctly handles both struct-copy and pointer-into-struct.
+        // Cover slice 5 + const 2 + mixed_struct_slice_match + top_level_let_mut_*
+        // + defer_multi_lifo (per RCA RC-1 / RC-3 / RC-7 复合).
+        mem_put(state, "\tmov" as *u8);
+        mem_put(state, suffix);
+        mem_put(state, " " as *u8);
+        mem_put_slot(state, src_off);
+        mem_put(state, ", " as *u8);
+        mem_put(state, reg);
+        mem_put(state, "\t\t# %t" as *u8);
+        mem_put_i64(state, src);
+        mem_put(state, "\n" as *u8);
+        mem_put(state, "\tmovq " as *u8);
+        mem_put_slot(state, dst_off);
+        mem_put(state, ", %r8\t\t# %t" as *u8);
+        mem_put_i64(state, dst);
+        mem_put(state, " (address-holder)\n" as *u8);
+        mem_put(state, "\tmov" as *u8);
+        mem_put(state, suffix);
+        mem_put(state, " " as *u8);
+        mem_put(state, reg);
+        mem_put(state, ", (%r8)\n" as *u8);
+        return 0 as i32;
+    }
 
     // load-to-scratch
     mem_put(state, "\tmov" as *u8);
@@ -411,6 +568,34 @@ fn emit_loadsub(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let src_off = mem_temp_offset(src, target_tag);
     let dst_off = mem_temp_offset(dst, target_tag);
 
+    // v2.11.8 (W-074.7.8 derived-address tracking 真修):
+    // src 是 address-holder 时,slot loadsub 读到的是 slot address VALUE,
+    // 不是实际 value。本应该是 indirect loadsub via %r8 scratch。
+    // Phase E 第三段:emit_loadsub indirect dispatch。
+    if cg_is_address_holder(state, src) != (0 as i32) {
+        mem_put(state, "\tmovq " as *u8);
+        mem_put_slot(state, src_off);
+        mem_put(state, ", %r8\t\t# %t" as *u8);
+        mem_put_i64(state, src);
+        mem_put(state, " (address-holder)\n" as *u8);
+        mem_put(state, "\t" as *u8);
+        mem_put(state, ext);
+        mem_put(state, dst_suffix);
+        mem_put(state, " (%r8), " as *u8);
+        mem_put(state, dst_reg);
+        mem_put(state, "\n" as *u8);
+        mem_put(state, "\tmov" as *u8);
+        mem_put(state, dst_suffix);
+        mem_put(state, " " as *u8);
+        mem_put(state, dst_reg);
+        mem_put(state, ", " as *u8);
+        mem_put_slot(state, dst_off);
+        mem_put(state, "\t\t# -> %t" as *u8);
+        mem_put_i64(state, dst);
+        mem_put(state, "\n" as *u8);
+        return 0 as i32;
+    }
+
     // `movsbl -40(%rbp), %eax`
     mem_put(state, "\t" as *u8);
     mem_put(state, ext);
@@ -455,15 +640,104 @@ fn emit_load(state: *u8, tok: *u8, target_tag: i32) -> i32 {
 
     let dst = (*t).int_val;
     let src = mem_parse_temp((*t).text, (*t).text_len, 0 as i64);
-    if dst < (0 as i64) || src < (0 as i64) {
+    if dst < (0 as i64) {
         return 1 as i32;
     }
 
     let qt = mem_effective_qbe_type((*t).qbe_type);
     let suffix = mem_mov_suffix(qt);
     let reg = mem_scratch_reg(qt);
-    let src_off = mem_temp_offset(src, target_tag);
     let dst_off = mem_temp_offset(dst, target_tag);
+
+    // v2.11.20 W-017 真修 Phase 3: emit_load $label path — loadw $g_x / loadl $g_x / ...
+    // 之前 mem_parse_temp 只认 %tN,遇到 $g_x 返回 -1 → emit_load 返 1 (silent
+    // fail per W-074.6 PARTIAL);W-017 ACTIVE 期间 jhyy-side 不 implement,只剩
+    // codegen.jhyy emit data 段但读路径 missing。
+    // 现在 scan text 找 '$' (跳过 op 名 + ws),emit:
+    //   mov<suffix> <label>(%rip), %<reg>
+    //   mov<suffix> %<reg>, <dst_off>(%rbp)
+    // 兼容 W-017 = codegen.jhyy emit `data $g_x = { w 41 }` + `loadw $g_x` use site。
+    let cg_e = state as *CGState;
+    if src < (0 as i64) {
+        // scan text for '$'
+        let mut label_start: i64 = -(1 as i64);
+        let mut label_len: i64 = 0 as i64;
+        let mut si: i64 = 0 as i64;
+        while si < (*t).text_len {
+            if mem_byte_at((*t).text, si) == (36 as i32) {  // '$'
+                label_start = si + (1 as i64);
+                // scan ident chars
+                while label_start + label_len < (*t).text_len {
+                    let lb = mem_byte_at((*t).text, label_start + label_len);
+                    if lb == (32 as i32) || lb == (10 as i32) || lb == (9 as i32) || lb == (0 as i32) { break; }
+                    label_len = label_len + (1 as i64);
+                }
+                break;
+            }
+            si = si + (1 as i64);
+        }
+        if label_start >= (0 as i64) && label_len > (0 as i64) {
+            mem_put(state, "\tmov" as *u8);
+            mem_put(state, suffix);
+            mem_put(state, " " as *u8);
+            let _a = sb_append(mem_arena(state), mem_sb(state), ptr_add_u8((*t).text, label_start), label_len);
+            let _b = sb_append_cstr(mem_arena(state), mem_sb(state), "(%rip), " as *u8);
+            mem_put(state, reg);
+            mem_put(state, "\t\t# load $label\n" as *u8);
+            mem_put(state, "\tmov" as *u8);
+            mem_put(state, suffix);
+            mem_put(state, " " as *u8);
+            mem_put(state, reg);
+            mem_put(state, ", " as *u8);
+            mem_put_slot(state, dst_off);
+            mem_put(state, "\t\t# -> %t" as *u8);
+            mem_put_i64(state, dst);
+            mem_put(state, "\n" as *u8);
+            return 0 as i32;
+        }
+        // 未识别 format — fall through (still silent fail for this instr, 但不再
+        // 误 return 1 把后续 emits 全污染;其实这个 fall-through 不该发生,留给后续 debug)
+        return 1 as i32;
+    }
+
+    let src_off = mem_temp_offset(src, target_tag);
+
+    // v2.11.8 (W-074.7.8 derived-address tracking 真修):
+    // src 是 address-holder 时,slot read 拿到的是 stack slot 存的 address VALUE,
+    // 不是 slot 存的 value。本应该是 indirect read:load src's slot → %r8 (= pointer),
+    // 然后 read [r8] (= actual value)。Phase E 第一段:emit_load indirect dispatch。
+    // %r8 是 caller-saved scratch (per Win x64 ABI,跟 %rax/%rcx/%rdx/%rdi/%rsi 同组,
+    // 但 %r8 不是 codegen_amd64 通用 scratch,emit_load/store 自己用,不会跟 call clobber 冲突)。
+    if cg_is_address_holder(state, src) != (0 as i32) {
+        // movq -<src_off>(%rbp), %r8 ; mov<size> (%r8), %<reg> ; mov<size> %<reg>, -<dst_off>(%rbp)
+        mem_put(state, "\tmovq " as *u8);
+        mem_put_slot(state, src_off);
+        mem_put(state, ", %r8\t\t# %t" as *u8);
+        mem_put_i64(state, src);
+        mem_put(state, " (address-holder)\n" as *u8);
+        mem_put(state, "\tmov" as *u8);
+        mem_put(state, suffix);
+        mem_put(state, " (%r8), " as *u8);
+        mem_put(state, reg);
+        mem_put(state, "\n" as *u8);
+        // v2.11.20 RC-1: propagate address-holder flag to dst when src is
+        // address-holder AND result type is pointer (QBE_L_LOCAL). 后续
+        // add/load 可用 indirect dispatch。Cover slice_index / for_in_slice_nested /
+        // mixed_struct_slice_match 等。
+        if (*t).qbe_type == QBE_L_LOCAL() {
+            let _lp = cg_record_temp_holds_address(state, dst);
+        }
+        mem_put(state, "\tmov" as *u8);
+        mem_put(state, suffix);
+        mem_put(state, " " as *u8);
+        mem_put(state, reg);
+        mem_put(state, ", " as *u8);
+        mem_put_slot(state, dst_off);
+        mem_put(state, "\t\t# -> %t" as *u8);
+        mem_put_i64(state, dst);
+        mem_put(state, "\n" as *u8);
+        return 0 as i32;
+    }
 
     mem_put(state, "\tmov" as *u8);
     mem_put(state, suffix);

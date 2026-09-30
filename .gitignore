@@ -61,6 +61,7 @@ __pycache__/
 CLAUDE.md
 skills-lock.json
 !mcp-jhyy/CLAUDE.md
+!docs/internal/CLAUDE.md
 # codegraph 索引（daemon.pid mtime 抖动会污染 git status）
 .codegraph/
 

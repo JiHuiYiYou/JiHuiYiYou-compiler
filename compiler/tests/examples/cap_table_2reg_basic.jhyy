@@ -1,0 +1,16 @@
+// EXPECT: 42
+type CapTable<T> = struct {
+    data: *Cap<T>,
+    len: i64,
+}
+
+fn sum_table_fields(t: CapTable<i32>) -> i64 {
+    return (t.data as i64) + t.len;
+}
+
+fn main_jhyy() -> i32 {
+    let tbl: CapTable<i32> = CapTable<i32> { data: 0 as *Cap<i32>, len: 42 as i64 };
+    let s: i64 = sum_table_fields(tbl);
+    if s != 42 { return 30; }
+    return 42;
+}
