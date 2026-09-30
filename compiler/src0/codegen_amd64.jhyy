@@ -330,18 +330,6 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32,
     let g_max = cg_compute_global_max_temp(tokens, 40 as i64, n);
     let _fms = cg_state_set_frame_max_temp(state_buf, g_max);
 
-    // v2.11.10 (W-074.6 T3-a closure):per-fn pre-scan 替换 v2.11.2 global-max。
-    // Phase 1 扫 fn_starts (ILTOK_FUNC_HEADER positions),Phase 2 per-fn max temp
-    // id 填 state.per_fn_max[256]。emit_func_header 读 per_fn_max[cur_fn_idx]
-    // 算 frame_size → 每个 fn 独立 frame (递归 fn 不用 15488 字节 → big_test
-    // 自-backend 跑通)。frame_max_temp 字段保留兼容 (写但 emit_func_header 不用)。
-    let _scan_rc = cg_compute_per_fn_max_temps(state_buf, tokens, 40 as i64, n);
-    // Legacy: 仍 set frame_max_temp (备 cg_state_set_frame_max_temp 兼容;v2.11.10
-    // emit_func_header 走 per_fn_max 优先,frame_max_temp 仅作 out-of-range safety
-    // fallback)。
-    let g_max = cg_compute_global_max_temp(tokens, 40 as i64, n);
-    let _fms = cg_state_set_frame_max_temp(state_buf, g_max);
-
     // 4. Regalloc analysis (linear-scan; sets g_regalloc_arr via jh_regalloc_set)
     // v2.11.2 (W-074.6 T3-b):regalloc_run SKIP — 走 cg_offset_for_temp_with_target
     // 公式 fallback (v2.5.0 1-to-1 简化)。原因:regalloc_run 在 self path
