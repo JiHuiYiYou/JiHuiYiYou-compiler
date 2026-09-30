@@ -17,6 +17,8 @@ v4.x 是 v2.x + v3.x axes merge 后的主版本轴 — **integration axis**,不�
 
 ### v4.0 — merge
 - [`v4.0.0-plan.md`](v4.0.0-plan.md) — v2+v3 axes merge → main axis push(机械 merge,不开新 worktree)
+- **🟡 v4.0.0-rc1 shipped 2026-09-30**(per 2026-09-30 user 决定 downgrade,Gate 3 self-host deferred) → v4.0.0 final pending v4.0.1 multifn fix
+- [`v4.0.1-plan.md`](v4.0.1-plan.md) — **W-074.6 multifn silent-fail 真修** → promote v4.0.0-rc1 → v4.0.0
 
 ### v4.1 — 工具链闭环
 - [`v4.1.0-plan.md`](v4.1.0-plan.md) — M5 删 `src/*.c` + untrack QBE + 删 `runtime.c`(per 2026-09-06 决定从 v2/v3 后 → v4.x)

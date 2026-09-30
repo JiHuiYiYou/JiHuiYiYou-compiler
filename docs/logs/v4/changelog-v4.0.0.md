@@ -1,16 +1,18 @@
-# v4.0.0 umbrella changelog
+# v4.0.0-rc1 changelog (deferred from v4.0.0)
 
-**Ship date:** 2026-09-30 · **Branch:** `main` · **Tag:** `v4.0.0` · **Preconditions:** all ✅ (v1.8.3 / v2.16.0 / v3.4.2 all shipped)
+**Ship date:** 2026-09-30 · **Branch:** `main` · **Tag:** `v4.0.0-rc1` · **Preconditions:** all ✅ (v1.8.3 / v2.16.0 / v3.4.2 all shipped)
+
+> **Note:** v4.0.0 → v4.0.0-rc1 downgraded (per 2026-09-30 user 决定) — Gate 3 (jhyy_selfhost_check N≥3 src0/main.jhyy byte-equal) fails on pre-existing W-074.6 multifn silent fail bug. v4.0.0-rc1 ships the v2/v3-axis convergence with documented self-host main.jhyy known-limitation; v4.0.1+ closes the multifn bug per `feedback_codegen_amd64_multifn` (multi-func closure ~500+ LOC multi-sprint).
 
 ---
 
-## What is v4.0.0
+## What is v4.0.0-rc1
 
-v4.0.0 is the **convergence release** — first merge of the two parallel axes (`axis-v2` + `axis-v3`) into `main`, kicking off the v4.x minor-version series. Per user decision 2026-09-29, both v2.x and v3.x are declared FINAL; v4.0.0 unifies their state in a single tree and re-bases all version references, README, CLAUDE.md, and the roadmap.
+v4.0.0-rc1 is the **convergence release candidate** — first merge of the two parallel axes (`axis-v2` + `axis-v3`) into `main`, kicking off the v4.x minor-version series. Per user decision 2026-09-29, both v2.x and v3.x are declared FINAL; v4.0.0-rc1 unifies their state in a single tree and re-bases all version references, README, CLAUDE.md, and the roadmap.
 
-**No new features in v4.0.0 itself** — the feature surface is the union of v2.16.0 (QBE-removed, in-mem self-backend pipeline, N≥10 fixed point, `.exe` byte-equal D26 stage0 coverage) + v3.4.2 (V3 self-backend closure, stdlib `std::*` modules, char_literal_3/4byte + fmod 真修).
+**No new features in v4.0.0-rc1 itself** — the feature surface is the union of v2.16.0 (QBE-removed, in-mem self-backend pipeline, N≥10 fixed point, `.exe` byte-equal D26 stage0 coverage) + v3.4.2 (V3 self-backend closure, stdlib `std::*` modules, char_literal_3/4byte + fmod 真修).
 
-v4.0.0 = the moment when JHYY stops being two parallel compilers and becomes one.
+v4.0.0-rc1 = the moment when JHYY stops being two parallel compilers and becomes one. The `rc1` suffix reflects one deferred gate (self-host `src0/main.jhyy` N≥3 closure — pre-existing W-074.6 multifn bug) being intentionally NOT promoted to `v4.0.0` final until the fix lands in a v4.0.x follow-on sprint.
 
 ---
 
@@ -31,11 +33,11 @@ v4.0.0 = the moment when JHYY stops being two parallel compilers and becomes one
 |---|---|---|---|
 | 1 | `a4ba8fa` | `chore(merge): merge axis-v2 into main (v2.16.0 axis final)` | `--no-ff`; 1 conflict on `compiler/tests/bootstrap/fixed_point.sh` (resolved by `--theirs`; v3 doesn't have this file) |
 | 2 | `c13397d` | `chore(merge): merge axis-v3 into main (v3.4.2 axis final)` | `--no-ff`; 20 conflicts (src0/*.jhyy + workarounds.md + bench.sh + 6 new test files + 4 jhyy_v2..v5.exe + jhyy_stage0.exe); all resolved `--theirs` per user decision 2 (v3 slim workarounds + v3 stdlib + v3 new codegen arch wins) |
-| 3 | `c473246` | `chore(version): bump v2.16.0 → v4.0.0 across active source/docs/installer (~22 files)` | 22 files / 81 hits; excluded: `docs/logs/v2/`, `docs/plans/v2/`, `docs/logs/v3/changelog-v3.*`, `docs/plans/v3/v3.0.6-port-...` + `v3.4.0-plan.md`, `scripts/dev/v2_13_8_*.py` + `v2_15_0_*.py`, `compiler/tests/bootstrap/baseline_v2_self/README.md`, `installer/assets/license.rtf` |
+| 3 | `c473246` | `chore(version): bump v2.16.0 → v4.0.0-rc1 across active source/docs/installer (~22 files)` | 22 files / 81 hits; excluded: `docs/logs/v2/`, `docs/plans/v2/`, `docs/logs/v3/changelog-v3.*`, `docs/plans/v3/v3.0.6-port-...` + `v3.4.0-plan.md`, `scripts/dev/v2_13_8_*.py` + `v2_15_0_*.py`, `compiler/tests/bootstrap/baseline_v2_self/README.md`, `installer/assets/license.rtf` |
 | 4 | `b1cf522` | `docs(archive): move invalidated v2/v3 plans to docs/archive/v2-v3/` | per user decision 1: archive (not delete); `v2-v3-parallel-sprint-plan.md` + `v2.0.0-os-prep.md` → `docs/archive/v2-v3/` with README explaining rationale |
 | 5 | `3a48fdd` | `docs(readme): full rewrite for v4.0.0 (post-QBE self-backend + stdlib)` | per user decision 4: 432 → 363 lines; badges → v4.0.0 + self-hosted amd64 backend + Windows+Linux; status table reflects v4.0.0 state; roadmap points to v4.1.0..v4.12.0 |
-| 6 | (this commit) | `docs: v4.0.0 umbrella changelog + CLAUDE.md version-axis update` | per `feedback_changelog_umbrella`: single umbrella per vX.Y, no standalone changelog-v4.X.Y.md |
-| 7 | (later) | `chore(cleanup): remove axis-v2 + axis-v3 worktree/branch (post-v4.0.0 merge)` | per `feedback_batch_worktree_cleanup` triplet |
+| 6 | (this commit) | `docs: v4.0.0-rc1 umbrella changelog + CLAUDE.md version-axis update` | per `feedback_changelog_umbrella`: single umbrella per vX.Y, no standalone changelog-v4.X.Y.md; **v4.0 → v4.0.0-rc1 downgrade** per 2026-09-30 user 决定 (Gate 3 selfhost deferred) |
+| 7 | (later) | `chore(cleanup): remove axis-v2 + axis-v3 worktree/branch (post-v4.0.0-rc1 merge)` | per `feedback_batch_worktree_cleanup` triplet |
 
 ---
 
@@ -67,13 +69,20 @@ Per `v4.0.0-plan.md` lines 62-67:
 
 | Gate | Expected | Actual (post-merge) |
 |---|---|---|
-| regress.py (C-side `jhyy.exe`) | 104/104 PASS + 4 SKIP | ⏳ (Step 8 post-merge) |
-| regress.py (`--binary=jhyy_v1.exe.exe`) | 104/104 PASS + 4 SKIP parity | ⏳ (Step 8 post-merge) |
-| `jhyy_selfhost_check` (MCP) | N≥3 byte-equal stable | ⏳ (Step 8 post-merge) |
-| D43 final baseline freeze | SHA preserved from v2.16.0 → v4.0.0 closure | ⏳ (Step 8 post-merge) |
-| `byte_equal_selfbackend.sh` | 3/3 PASS (fmod_basic / fmod_negative / fmod_f32) | ⏳ (Step 8 post-merge) |
-| `bench.sh --report` | first-time baseline accept (--strict ≤ 1.7x FAIL) | ⏳ (Step 8 post-merge) |
-| ACTIVE workaround count | 0 (workarounds.md index) | ✅ per v3.4.2 ship state |
+| regress.py (C-side `jhyy.exe`) | 104/104 PASS + 4 SKIP | ✅ **158/158 PASS + 22 SKIP** (sha `4fd068d8...`) |
+| regress.py (`--binary=jhyy_v1.exe.exe`) | 104/104 PASS + 4 SKIP parity | ✅ **158/158 PASS + 22 SKIP** (sha `766c96cc...` — v1 frozen baseline parity preserved) |
+| `jhyy_selfhost_check` (MCP) | N≥3 byte-equal stable | ❌ **FAIL** — pre-existing `feedback_codegen_amd64_multifn` (W-074.6 family) drops `main_jhyy` in self-compile of `src0/main.jhyy` (large multi-func file). Reproduces on **both** axis-v2 (v2.16.0 baseline `0b4cde5`) AND v4.0.0 main. NOT a merge regression. Per `feedback_verify_active_reproduces` + `feedback_rca_first_root_cause`: ship-deferred to v4.x per CHANGELOG note "self-backend 1/5 hello PASS preserved (per W-074.6 baseline; multi-func closure deferred v2.x 中期)". |
+| D43 final baseline freeze | SHA preserved from v2.16.0 → v4.0.0 closure | ❌ **NOT APPLICABLE** — same root cause as selfhost. v2.14.0 baseline `43fee332...` was on **C-side QBE chain**, not self-host. Per D43 closure rule: re-baseline requires self-host closure working; if not, baseline is NOT preserved through the merge. New baseline = N/A until v4.x self-host 真修。 |
+| `byte_equal_selfbackend.sh` | 3/3 PASS (fmod_basic / fmod_negative / fmod_f32) | ✅ **6/6 PASS** (3 .s sha-mnemonic gates + 3 .exe exit gates); wssa drift between V2 emit_conv and V3 emit_conv_* (1-byte size delta) noted as ⚠️ INFO (per script design — "预期若 V3 emit_conv != V2 emit_conv_*") |
+| `bench.sh --report` | first-time baseline accept (--strict ≤ 1.7x FAIL) | ✅ **REPORT** mode PASS — fib 1.399x / ack 0.596x / nq 1.020x. fib > 1.1x accepted per first-time baseline rule; --strict gate deferred v4.x per `feedback_no_artifacts_in_project` |
+| ACTIVE workaround count | 0 (workarounds.md index) | ✅ 0 ACTIVE per v3.4.2 ship state |
+
+**Gate analysis** (per `feedback_rca_first_root_cause`):
+
+- G1-G2 + G5-G7: **5 of 7 gates ✅** — production regress + byte-equal + bench + ACTIVE=0 all pass. v4.0.0 ships the **union of v2.16.0 + v3.4.2 closure surface** cleanly.
+- G3 (self-host src0/main.jhyy) + G4 (D43 closure N≥10): **❌ pre-existing W-074.6 multifn silent fail**. Per v2.16.0 CHANGELOG "self-backend 1/5 hello PASS preserved ... multi-func closure deferred v2.x 中期". Per v3.4.x ship notes (W-085/W-088/W-089 ACTIVE bucket cleared for codegen SSE bugs but NOT multifn). v4.0.0 inherits this ACTIVE state.
+
+**Decision (per 2026-09-30 user)**: ship v4.0.0-rc1 (NOT v4.0.0 final) with G3+G4 documented as KNOWN-LIMITATION. Self-host src0/main.jhyy fix scope: ~500+ LOC across emit_binop/emit_jnz/emit_call/multi-func state — multi-sprint, deferred to v4.0.1+. The `rc1` suffix is the canonical way to signal "ship-ready but not promotion-final due to documented deferred gate" per `feedback_changelog_umbrella`.
 
 If any gate fails → STOP before tag push. Diagnose root cause per `feedback_rca_first_root_cause`; do not bypass with `git commit --no-verify`.
 
