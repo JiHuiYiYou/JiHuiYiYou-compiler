@@ -39,7 +39,9 @@ from pathlib import Path
 from typing import Optional, List, Tuple
 
 # Make mcp-jhyy/ importable
-ROOT = Path(__file__).resolve().parents[3]
+# v4.0.0: regress.py moved to repo root in v3-pre-v4-infra-port/Ph.5 (commit 8aa2326);
+# regress.py sits at <repo>/regress.py and mcp-jhyy/ is at <repo>/mcp-jhyy/, so ROOT = parents[0].
+ROOT = Path(__file__).resolve().parents[0]
 sys.path.insert(0, str(ROOT / "mcp-jhyy"))
 
 from jhyy_regress import run_all, save_baseline_hash  # noqa: E402
