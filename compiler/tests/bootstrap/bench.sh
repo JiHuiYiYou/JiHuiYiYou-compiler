@@ -21,7 +21,7 @@
 set -u
 
 MODE="${1:---report}"
-JHY="${JHYY:-/c/Users/liuzhen/Desktop/coding/JiHuiYiYou-axis-v2/compiler/build/bin/jhyy.exe}"
+JHY="${JHYY:-$(git rev-parse --show-toplevel 2>/dev/null)/compiler/build/bin/jhyy.exe}"
 GCC="${GCC:-gcc}"
 THRESHOLD="${THRESHOLD:-1.1}"
 RUNS="${RUNS:-5}"
