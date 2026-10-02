@@ -1210,6 +1210,16 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     pos = str_concat_at(cmd_buf, pos, rq);
     let lmflag = " -lm" as *u8;
     pos = str_concat_at(cmd_buf, pos, lmflag);
+    // v4.0.2 fix: add Windows system libs for GetCommandLineW/CommandLineToArgvW
+    // (W-047 argv re-decode path) + future MessageBoxA writes.
+    // 缺这俩 flag 时 ld 返回 exit 5 (undefined symbols), v4.0.2-rc1 起
+    // regress/closure gate fail 都源于此(W-073 真修后源码侧不再爆, 链接器真
+    // 露出此遗漏)。
+    // shell32 给 CommandLineToArgvW (kernel32 不够, 这是 v1.5.6 W-047 的
+    // argv re-decode path 必需)。 advapi32 + uuid 给 future MessageBox + COM
+    // call (W-062 v1.8.3 setuc path 用了), 提前 ship 不挂后下个sprint。
+    let win_libs = " -lkernel32 -luser32 -lshell32 -ladvapi32" as *u8;
+    pos = str_concat_at(cmd_buf, pos, win_libs);
     let nul_p = (cmd_buf as i64 + pos) as *u8;
     store_byte_i32(nul_p, 0 as i32);
 
