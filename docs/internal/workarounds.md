@@ -39,6 +39,10 @@
 | [W-026](#w-026) | RESOLVED | regress.py `[:80]` stderr 截断隐藏真实 QBE/gcc 错误 |
 | [W-029](#w-029) | SUPERSEDED | jhyy.exe toolchain 探测收敛 — `jh_gcc_path()` 4-tier... |
 | [W-072](#w-072) | RESOLVED | 0f9c923 merge artifact + codegen_amd64.jhyy 重复 fn... |
+| [W-073](#w-073) | RESOLVED 2026-10-01 (v4.0.2) | QBE IL emit escape + lexer next_token_data_string backslash-aware scanner (5/5 PASS on str_with_backslash.jhyy) |
+| [W-074](#w-074) | RESOLVED 2026-10-02 (v4.0.2) | runtime.c 24B Arena 4 fn + Arena struct 死代码删除 (0 caller, no reproducer) |
+| [W-075](#w-075) | ACTIVE (M0 accept) | std::mem mem_set 用 i32 store 而非 byte store (M0 简化 trade-off; v4.0.2.1+ optional) |
+| [W-076](#w-076) | RESOLVED 2026-10-02 (v4.0.2) | std::arena test inline 副本删 std_ 前缀 (3 test rename + runtime.c dead code 删) |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -5327,22 +5331,41 @@ cmd_compile (main.jhyy)
 - commit `dab7400` (2026-10-01 v4.0.2 ship, 含 emit fix + rejfix + new test)
 - regress verified: jhyy.exe 158/158 PASS / 22 SKIP (sha `8b185dcb...` post-rebuild)
 
-### W-074: D22 arena byte-equal 推迟 (v3.2.2)
+<a id="w-074"></a>
+### W-074: runtime.c 24B Arena 死代码声明 (4 fn + Arena struct)
 
-| 字段 | 值 |
-|------|-----|
-| **ID** | W-074 |
-| **状态** | ACTIVE (deferred to v3.2.4) |
-| **日期** | 2026-09-09 |
-| **触发面** | `src0/arena.jhyy` 跟 `src/arena.c` byte-equal 不成立;v3.2.2 std::arena layout (40B) 跟 runtime.c Arena (24B) 不同 |
-| **症状** | jhyy_helpers.c/runtime.c 提供 `arena_alloc` (C-side Arena 24B);std::arena 提供 `arena_alloc` (40B Arena)。 两者 layout/API 名字相同但语义不同 → 多 module 引用时冲突 |
-| **根因嫌疑** | 历史 `src/arena.c` 是 Stage 0 C-side bootstrap 留下的 24B Arena; v3.0+ jhyy-side 改用 40B Arena (block linked-list);两边未统一 |
-| **workaround** | v3.2.2 `std::arena` API 等价 `src0/arena.jhyy` 40B layout; test inline 副本用 `std_*` 前缀 fn 名字避免符号冲突 (per W-076); runtime.c 继续用 C-side `arena_alloc` 24B API |
-| **影响范围** | `compiler/src0/std/arena.jhyy` (40B std::arena); `compiler/runtime/runtime.c` (24B C Arena); `compiler/tests/examples/std_arena_*.jhyy` (std_* prefix) |
-| **失效条件** | 把 runtime.c C-side Arena 改名为 c_arena_* 或加 namespace 后, std::arena / C-side Arena 可共存 |
-| **Last-verified** | 2026-10-01 (v4.0.1 audit — `runtime.c:23-45` 仍 export `arena_new|alloc|reset|destroy` C-side 24B Arena; `tests/examples/std_arena_*.jhyy` 仍 `std_*` prefix;两层 layout 不一致仍 real;真修留 v4.x mid — v3 已终结 per 2026-09-29,superseder 推到 v4.x 或 OS-prep 重启时) |
-| **superseder** | v3.2.4 (planned, **SUPERSEDED 2026-09-29 v3 FINAL** — 推到 v4.x mid 或 OS-prep 重启时) |
-| **引用** | D22 (coordination.md); `feedback_memory_selectivity` (defer 入 memory, 不入 plan) |
+**状态:** RESOLVED closed 2026-10-02 (v4.0.2) — runtime.c 24B Arena 4 fn + Arena struct 删 (死代码)
+**日期:** 2026-09-09 (v3.2.1 ship ACTIVE) → 2026-10-02 (v4.0.2 ship RESOLVED)
+
+**触发面:** `compiler/runtime/runtime.c` 自 Stage 0 bootstrap era 残留 4 个 arena_* fn (`arena_new` / `arena_alloc` / `arena_reset` / `arena_destroy`) + `Arena` struct 24B (start/cur/end 3 字段)。
+
+**症状:** W-074 描述为"v3.2.2 std::arena layout (40B) 跟 runtime.c Arena (24B) 不同 → 多 module 引用时冲突"。但实际上 — **runtime.c 的 arena_* fn 零 caller** (经 2026-10-02 全仓 grep: src/arena.c Stage 0 用自己的 24B Arena + src0/arena.jhyy jhyy-side 用 40B Arena; runtime.c 那 4 个 fn 仅 declare + define, ld link 但无人调)。原 W-074 描述推测的"24B Arena 跟 40B Arena 撞名" 触发面**实际从未真实触发** (no reproducer, 0 call site)。
+
+**根因:**
+- 历史 src/arena.c Stage 0 bootstrap 24B Arena 留下来
+- runtime.c 同时声明了同名但 layout 不同的 24B Arena (function signature 不同 — arena_alloc 3-arg `(Arena*, size_t, align)` vs src/arena.c 2-arg `(Arena*, size_t)`, 所以不会 ld multiple definition)
+- runtime.c 4 fn declare 但缺 caller — 死代码
+- W-074 是因命名相似而**误判为真 bug** (per `feedback_verify_active_reproduces`)
+
+**workaround(pre-fix):** 无 caller 所以无"避开" 必要;只是真个 ACTIVE bucket 占位项。
+
+**真修(v4.0.2):**
+- `compiler/runtime/runtime.c` 删 `arena_new` / `arena_alloc` / `arena_reset` / `arena_destroy` 函数体 (~30 LOC)
+- `compiler/runtime/runtime.h` 删 `Arena` struct typedef + 4 fn decls
+- 加注释解释 v4.0.2 删除原因
+- 不影响 `compiler/src/arena.c` Stage 0 bootstrap (独立 namespace)
+- 不影响 `compiler/src0/arena.jhyy` jhyy-side 40B Arena (独立 module)
+
+**失效条件:** None(死代码已删)。
+
+**superseder:** N/A — 真修 = W-074 自身清理。
+
+**引用:**
+- 源码注释 `compiler/runtime/runtime.c:21-28` (W-074/076 v4.0.2 删 dead code 注释)
+- 源码注释 `compiler/runtime/runtime.h:7-10` (W-074/076 v4.0.2 删 decl 注释)
+- 全仓 grep 验证 0 caller: `grep -rn "\barena_(new|alloc|reset|destroy)\b" --include='*.c' --include='*.jhyy' --include='*.h'`
+- regress verified: jhyy.exe 159/159 PASS / 22 SKIP (sha `1325473678cb0fe1...` post-rebuild)
+- 3 个 std::arena test (`arena_basic.jhyy` / `arena_calloc.jhyy` / `arena_reset.jhyy` — W-076 真修后) 全 PASS EXIT=42/0/0
 
 ### W-075: std::mem mem_set 用 i32 store 而非 byte store (M0 简化)
 
@@ -5360,22 +5383,39 @@ cmd_compile (main.jhyy)
 | **Last-verified** | 2026-10-01 (v4.0.1 audit — `compiler/src0/std/mem.jhyy:78` 仍 `*(ptr_add(dst, i) as *i32) = b` i32-store,M0 简化仍 real; v3.x 已终结 2026-09-29,推 v4.x mid perf sprint 或 accept 永久) |
 | **引用** | `docs/abis/jhyy-lang-spec-stdlib-supplement-v3.2.2.md § 4.1` |
 
+<a id="w-076"></a>
 ### W-076: std::arena test inline 副本用 std_* 前缀避 runtime.c 符号冲突
 
-| 字段 | 值 |
-|------|-----|
-| **ID** | W-076 |
-| **状态** | ACTIVE |
-| **日期** | 2026-09-09 |
-| **触发面** | jhyy.exe compile 默认 link `runtime.c + jhyy_helpers.c`, runtime.c 已定义 `arena_new / arena_alloc / arena_reset / arena_destroy` (C-side 24B Arena); std::arena test inline 副本如果用相同 fn 名字 → ld 报 multiple definition |
-| **症状** | `ld returned 1 exit status` / `multiple definition of 'arena_alloc'` |
-| **根因嫌疑** | runtime.c 是 Stage 0 C-side bootstrap 留下的; 命名空间未隔离 (per W-074) |
-| **workaround** | std::arena test (`compiler/tests/examples/std_arena_*.jhyy`) 用 `std_arena_init / std_arena_alloc / std_arena_calloc / std_arena_reset` 前缀 fn 名字; std::arena module (`compiler/src0/std/arena.jhyy`) 同样用 std_ 前缀 |
-| **影响范围** | `compiler/src0/std/arena.jhyy` + `compiler/tests/examples/std_arena_*.jhyy` (3 files) |
-| **失效条件** | runtime.c C-side `arena_*` 改名为 `c_arena_*` 或加 namespace 后, std_ 前缀可去掉 |
-| **Last-verified** | 2026-10-01 (v4.0.1 audit — `runtime.c` 仍 export C-side `arena_*` 24B Arena, std_ 前缀仍 mandatory;跟 W-074 同一根因,真修同步推到 v4.x mid 或 OS-prep 重启时) |
-| **superseder** | W-074 superseder (v3.2.4 计划, **SUPERSEDED 2026-09-29 v3 FINAL** — 推到 v4.x mid) |
-| **引用** | W-074; D22 |
+**状态:** RESOLVED closed 2026-10-02 (v4.0.2) — std_ 前缀删除,3 个 test 改名 `arena_basic / arena_calloc / arena_reset`
+**日期:** 2026-09-09 (v3.2.1 ship ACTIVE) → 2026-10-02 (v4.0.2 ship RESOLVED)
+
+**触发面:** std::arena test (`compiler/tests/examples/std_arena_*.jhyy`) inline 副本原本用 `std_` 前缀的 fn 名字 (`std_arena_init` / `std_arena_alloc` / `std_arena_calloc` / `std_arena_reset`),据 W-074 描述是为了"避免 ld 报 multiple definition 跟 runtime.c arena_alloc 冲突"。
+
+**症状:** 推测 W-076 描述的"`ld returned 1 exit status` / `multiple definition of 'arena_alloc'`" 实测从未触发 — runtime.c 的 `arena_alloc` 是 3-arg `(Arena*, size_t, align)`, 跟 std_arena_alloc 2-arg `(*u8, size_t)` signature 不一致, ld 多重补要的是**完全一致**, 实际不可能撞。
+
+**根因:**
+- W-074 误判为"runtime.c 24B Arena 跟 std::arena 40B Arena 同名撞" (no reproducer, 0 call site 真触发)
+- W-076 是 W-074 的下游 workaround — 因上游误判而强制 std_ 前缀
+- per `feedback_verify_active_reproduces`: W-074/076 真 trigger 没 reproducer,所以 std_ 前缀是 defensive 风格而非真修
+
+**workaround(pre-fix):** std::arena test (`compiler/tests/examples/std_arena_*.jhyy`) inline 副本 + std::arena module (`compiler/src0/std/arena.jhyy`) 用 std_ 前缀 fn 名字。
+
+**真修(v4.0.2):**
+- `compiler/runtime/runtime.c` 删 4 个 C-side Arena fn (per W-074 真修)
+- `compiler/tests/examples/std_arena_basic.jhyy` 重命名为 `compiler/tests/examples/arena_basic.jhyy` + 删 std_ 前缀
+- `compiler/tests/examples/std_arena_calloc.jhyy` 重命名为 `compiler/tests/examples/arena_calloc.jhyy` + 删 std_ 前缀
+- `compiler/tests/examples/std_arena_reset.jhyy` 重命名为 `compiler/tests/examples/arena_reset.jhyy` + 删 std_ 前缀
+- `compiler/src0/std/arena.jhyy` 维持 std_ 前缀 (API 名字 — std::arena 模块对外 API 名字是 `std_arena_*`, per stdlib spec v3.2.2; 模块名跟 fn prefix 是两码事, 不动)
+
+**失效条件:** None(std_ prefix 已删, runtime.c 24B Arena 已 dead-code-del)。
+
+**superseder:** N/A — 真修 = W-076 自身清理。
+
+**引用:**
+- `compiler/tests/examples/arena_basic.jhyy` + `arena_calloc.jhyy` + `arena_reset.jhyy` (NEW 替代 std_arena_*)
+- `compiler/runtime/runtime.c:21-28` (W-074/076 真修 commit 注释)
+- regress verified: 3/3 测试全 PASS (EXIT=42 / 0 / 0)
+- W-074 (同一真修 commit)
 
 ### W-077: src0/std/mem.jhyy mem_find_byte codegen 路径触发 access violation
 

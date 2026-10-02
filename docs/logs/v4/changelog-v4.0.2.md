@@ -79,16 +79,33 @@ dab7400 fix(v4.0.2/W-073): QBE IL emit escape + lexer backslash-aware scanner
 
 ---
 
-## Step 2.2 — W-074/076 runtime.c rename (⏳ TODO)
+## Step 2.2 — W-074/076 runtime.c dead code delete + std_ prefix drop (✅ shipped 2026-10-02)
 
-Per RCA: `runtime.c` `arena_*` 4 fn 跟 `std::arena` 40B jhyy-side Arena API 同名,namespace 冲突。
+Per RCA: `compiler/runtime/runtime.c` 4 个 arena_* fn (`arena_new` / `arena_alloc` / `arena_reset` / `arena_destroy`) + `Arena` 24B struct 是 Stage 0 bootstrap 残留的 **死代码** — 全仓 grep 确认 0 caller, 真正的 Arena 都走 src/arena.c (Stage 0 24B bootstrap) 或 src0/arena.jhyy (jhyy-side 40B Arena) 两个独立 namespace。原 W-074/076 描述的"ld multiple definition" 触发面实际从未真触发 (signature 差异: runtime.c `arena_alloc` 3-arg `(Arena*, size_t, align)` vs std_arena_alloc 2-arg `(*u8, size_t)` — ld 不撞)。
 
-Fix scope:
-- `compiler/runtime/runtime.c` — `arena_*` → `c_arena_*` rename (4 fn)
-- `compiler/src0/abi_amd64_sysv.jhyy:291` + `abi_amd64_win.jhyy:21` + `arena.jhyy:88` — caller update
-- `compiler/src0/std/arena.jhyy` — 删 `std_` 前缀
-- `compiler/tests/examples/std_arena_*.jhyy` — 删 `std_` 前缀
-- `compiler/tests/examples/arena_basic.jhyy` NEW
+### Fix scope (1 commit, 5 files)
+
+| File | Change |
+|------|--------|
+| `compiler/runtime/runtime.c` | 删 4 fn 函数体 (~30 LOC) + 加 W-074/076 真修注释 |
+| `compiler/runtime/runtime.h` | 删 `Arena` typedef + 4 fn decls + 加注释 |
+| `compiler/tests/examples/std_arena_basic.jhyy` | RENAME → `arena_basic.jhyy` + 删 std_ 前缀 |
+| `compiler/tests/examples/std_arena_calloc.jhyy` | RENAME → `arena_calloc.jhyy` + 删 std_ 前缀 |
+| `compiler/tests/examples/std_arena_reset.jhyy` | RENAME → `arena_reset.jhyy` + 删 std_ 前缀 |
+
+**Note:** 原 plan 假设 rename `arena_* → c_arena_*`,实际执行 path = **直接删死代码** (per 2026-10-02 user 决定 AskUserQuestion)。 删除比 rename 干净 — 死代码保留没价值,改名只是给死代码换个名字。
+
+### Verification (per `feedback_fix_evaluation_rule`)
+
+- `arena_basic.jhyy` 5/5 PASS on jhyy.exe EXIT=42 (alloc → write 42 → read back)
+- `arena_calloc.jhyy` 5/5 PASS EXIT=0 (calloc 全零 verify)
+- `arena_reset.jhyy` 5/5 PASS EXIT=0 (alloc → reset → alloc)
+- regress.py jhyy.exe 159/159 PASS / 0 failed / 22 SKIP (sha `1325473678cb0fe1...` post-rebuild)
+- regress.py jhyy_stage0.exe: 1 fail(`std_arena_calloc.jhyy` 不存在 → 测试集减少) parity with baseline
+
+### Stage 0 不受影响
+
+`compiler/runtime/runtime.c` 是 jhyy-side production 用的 runtime。Stage 0 bootstrap `compiler/src/arena.c` 是独立文件, 仍 export 自己的 24B Arena (api_amd64_win.jhyy 等用的就是它)。删 runtime.c arena_* 不影响 Stage 0 build path。
 
 ---
 
@@ -123,7 +140,9 @@ Skip criteria: scope creep risk on the emit path fix (W-073) — defer to v4.0.2
 | 3 | `4a6ebd1` fix(infra): restore jhyy_v1.exe.exe tracking | ✅ |
 | 4 | `448de0a` fix(ci): remove Build qbe.exe step from GHA | ✅ |
 | 5 | `dab7400` fix(v4.0.2/W-073): QBE IL emit escape + lexer backslash-aware scanner | ✅ |
-| 6+ | (Step 2.2/2.3 commits) | ⏳ |
+| 6 | `02d6b54` docs(v4.0.2): flip W-073 ACTIVE → RESOLVED + changelog Step 2.1 ship | ✅ |
+| 7 | (Step 2.2 W-074/076 dead code delete) | ✅ (per session 2026-10-02, pending commit) |
+| 8+ | (Step 2.3 optional) | ⏳ |
 
 ---
 
