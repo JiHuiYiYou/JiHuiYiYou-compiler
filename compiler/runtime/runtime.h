@@ -4,17 +4,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/* ── Arena Allocator ── */
-typedef struct {
-    char *start;
-    char *cur;
-    char *end;
-} Arena;
-
-void  arena_new(Arena *a, size_t size);
-void *arena_alloc(Arena *a, size_t size, size_t align);
-void  arena_reset(Arena *a);
-void  arena_destroy(Arena *a);
+/* v4.0.2 W-074/076: removed unused C-side Arena 24B struct + 4 fn
+ * (`arena_new` / `arena_alloc` / `arena_reset` / `arena_destroy`).
+ * Real arena paths go through compiler/src/arena.c (C-side bootstrap)
+ * or compiler/src0/arena.jhyy (jhyy-side production 40B Arena). */
 
 /* user program entry point */
 extern int main_jhyy(int argc, char **argv);

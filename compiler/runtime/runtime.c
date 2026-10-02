@@ -20,32 +20,13 @@
  * `main → main_jhyy` bridge here is intentionally bypassed in no_std mode
  * (no libc startup, no `int main(int argc, char **argv)` transition). */
 
-void arena_new(Arena *a, size_t size) {
-    a->start = (char *)malloc(size);
-    if (!a->start) {
-        a->cur = a->end = 0;
-        return;
-    }
-    a->cur = a->start;
-    a->end = a->start + size;
-}
-
-void *arena_alloc(Arena *a, size_t size, size_t align) {
-    uintptr_t mask = align - 1;
-    char *p = (char *)(((uintptr_t)a->cur + mask) & ~mask);
-    if (p + size > a->end) return 0;
-    a->cur = p + size;
-    return p;
-}
-
-void arena_reset(Arena *a) {
-    a->cur = a->start;
-}
-
-void arena_destroy(Arena *a) {
-    free(a->start);
-    a->start = a->cur = a->end = 0;
-}
+/* v4.0.2 W-074/076: removed unused C-side Arena 24B (`arena_new` /
+ * `arena_alloc` / `arena_reset` / `arena_destroy` + `Arena` struct).
+ * These were declared + defined since the Stage 0 bootstrap era but
+ * have zero callers (real arena paths go through src/arena.c Stage 0
+ * or src0/arena.jhyy jhyy-side 40B Arena). Removing the public symbols
+ * from runtime.h lets std::arena module drop its `std_` prefix test
+ * workaround without ld "multiple definition" conflicts. */
 
 /* v1.5.6 W-047: re-decode Unicode command line to CP_ACP argv.
  *
