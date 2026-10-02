@@ -152,6 +152,27 @@ User 接受 v4.0.2 在当前 state 下 ship:
 
 Step 2.6 (tag v4.0.2) 在 ACTIVE = 1 状态 ship per user accept。
 
+### W-074.6 RCA evidence (audit 2026-10-02 post-ship)
+
+Symptom: 28-fn `src0/main.jhyy` 自举失败, `ld returned 5` (undefined symbol)。
+Specific case: `.Lelse2119_b0_fn464` 在 fn465 (parser__parser_tok_name) body 内 emit_jnz emit jmp ref (line 49578), 但 def 缺 (grep `^\.Lelse2119_b0_fn464:` = 0)。
+
+Stack trace evidence (per `/tmp/audit_main_v3.exe.s`):
+- `.Lstart2026_b0_fn447` 在 parser__parser_tok_name (fn465) header line 47320 — **header suffix = fn447, 但 fn465 内部 body emit 期间 cur_fn_idx 跳到 fn464**
+- `.Lthen2118_b0_fn464` def 在 fn465 body 范围 line 49579 (跟 `.Lelse2119_b0_fn464` ref 同 emit_jnz)
+- fn464 = parser__decode_char_literal (line 45658 起), fn465 = parser__parser_tok_name (line 47316 起)
+
+RCA hypothesis: `cg_state_bump_fn_idx` 在 `emit_func_header` 末尾调 (emit_ctrl.jhyy:567),但 `emit_func_header` emit header label + prologue 后 reset_for_function 不 bump — fn465 header suffix 用 fn447 写错 (即 fn464 末到 fn465 header emit 之间 bump 不一致)。
+
+V2.x 历史: v2.13.0 changelog 写 W-074.6 FULL CLOSED 实际只关了 XMM PARTIAL; emit_binop / emit_jnz 的 multi-fn label emit 跟 cur_fn_idx bump 顺序 这条根因 v2.x 没触 (1-fn 测试足够,28-fn main.jhyy 触发面 V2 axis 不达)。
+
+V4.0.2.1 真修起点 (估 ~50-150 LOC):
+1. `compiler/src0/codegen_amd64_emit_ctrl.jhyy:567` `cg_state_bump_fn_idx` 调用点 audit (line 567 vs before emit_func_header start)
+2. `compiler/src0/codegen_amd64_state.jhyy:537-541` cur_fn_idx 跨 fn 累加 logic 跟 block_name_uniq reset 一致性 audit
+3. `compiler/src0/codegen_amd64_emit_ctrl.jhyy:282 emit_label + 161 emit_jnz + 95 emit_jmp` 三个 cur_fn_idx call 一致性 audit
+
+Note: 实际真修 LOC 大概率 << 之前估的 ~500+ (memory `feedback_codegen_amd64_multifn` v2.11.1 估的 500+ 是 scope DOWN 偏保守), 但 verify-after-fix 还是 5/5 PASS on fixed_point N=3 + regress 158/158 必需。
+
 ---
 
 ## Commit cadence (current state)
