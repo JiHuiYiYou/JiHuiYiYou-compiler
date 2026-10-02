@@ -49,6 +49,13 @@ compiler/tests/examples/hello-freestanding/*.fat.img
 compiler/tests/examples/_tmp_jhyy_home/
 *.o
 *.exe
+# v4.0.2 W-073 follow-on GHA gate: qbe source git rm'd in v2.16.0 (commit
+# 6ae2d7c), but qbe.exe binary is still needed for C-side bootstrap (per
+# Makefile QBE = qbe/qbe.exe and compiler/src/main.c:489 cmd_compile).
+# Track the vendored binary + its sha baseline so GHA doesn't need
+# `cd qbe && make` (which fails because no source files exist in qbe/).
+!qbe/qbe.exe
+!qbe/qbe.exe.sha256
 *.ilk
 *.pdb
 __pycache__/
