@@ -1,0 +1,15 @@
+// W-073 regression: string literal with `\` and `"` escape sequences must
+// emit valid QBE IL `b "..."` literals. Pre-W-073: emit wrote raw bytes,
+// breaking the `b "..."` literal scan. Post-W-073: emitter routes every byte
+// through data_putc_escape_byte; lexer honors `\` escapes.
+// EXPECT: 0 (compile + run OK; no output).
+fn main_jhyy() -> i32 {
+    let s1: *u8 = "hello\\world" as *u8;
+    let s2: *u8 = "quote\"here" as *u8;
+    let s3: *u8 = "newline\nhere" as *u8;
+    let s4: *u8 = "tab\there" as *u8;
+    let s5: *u8 = "carriage\return" as *u8;
+    let s6: *u8 = "null\0byte" as *u8;
+    let s7: *u8 = "all\\\"\\\n\\\t\\\r\\\0" as *u8;
+    return 0 as i32;
+}

@@ -367,6 +367,73 @@ fn ir_emit_data_str_n(ir: *IRBuf, s: *u8, n: i64) -> i32 {
     return sb_append((*ir).arena, (*ir).data_sb, s, n);
 }
 
+// W-073 fix (v4.0.2): internal helper — escape a single byte for `b "..."` literal.
+// Inline form of data_putc that does NOT recurse (data_putc calls ir_emit_data_str_n
+// to flush its raw 1-byte buf, so we must avoid the escape loop calling data_putc).
+fn data_putc_escape_byte(ir: *IRBuf, ch: i32) -> i32 {
+    let c = ch & (255 as i32);
+    if c == (10 as i32) {
+        return ir_emit_data_str(ir, "\\n" as *u8);
+    }
+    if c == (9 as i32) {
+        return ir_emit_data_str(ir, "\\t" as *u8);
+    }
+    if c == (13 as i32) {
+        return ir_emit_data_str(ir, "\\r" as *u8);
+    }
+    if c == (34 as i32) {
+        return ir_emit_data_str(ir, "\\\"" as *u8);
+    }
+    if c == (92 as i32) {
+        return ir_emit_data_str(ir, "\\\\" as *u8);
+    }
+    if c < (32 as i32) {
+        // Other control chars: \xHH escape (2 hex digits uppercase).
+        // Inlined hex digit emit (jhyy single-pass — ir_emit_data_int is
+        // defined later in this file; raw 1-byte append via ir_emit_data_str_n
+        // is safe for hex digits '0'..'9' / 'A'..'F' which are all printable
+        // ASCII and have no QBE-escape interaction).
+        let high = (c >> (4 as i32)) & (15 as i32);
+        let low = c & (15 as i32);
+        let mut high_ch: i32 = 0 as i32;
+        if high < (10 as i32) {
+            high_ch = 48 + high;
+        } else {
+            high_ch = 55 + high;
+        }
+        let mut low_ch: i32 = 0 as i32;
+        if low < (10 as i32) {
+            low_ch = 48 + low;
+        } else {
+            low_ch = 55 + low;
+        }
+        ir_emit_data_str(ir, "\\x" as *u8);
+        let hbuf = arena_alloc((*ir).arena, 4 as i64);
+        let hbuf_i32 = hbuf as *i32;
+        *hbuf_i32 = high_ch;
+        let _w1 = ir_emit_data_str_n(ir, hbuf, 1 as i64);
+        let lbuf = arena_alloc((*ir).arena, 4 as i64);
+        let lbuf_i32 = lbuf as *i32;
+        *lbuf_i32 = low_ch;
+        let _w2 = ir_emit_data_str_n(ir, lbuf, 1 as i64);
+        return 1;
+    }
+    let buf = arena_alloc((*ir).arena, 4 as i64);
+    let buf_i32 = buf as *i32;
+    *buf_i32 = c;
+    return ir_emit_data_str_n(ir, buf, 1 as i64);
+}
+
+fn data_putc(ir: *IRBuf, c: i32) -> i32 {
+    // W-073 fix (v4.0.2): data_putc is the legacy raw-byte writer used by
+    // ir_emit_data_string for non-escape path (printable chars + edge cases
+    // like trailing backslash). Route through data_putc_escape_byte so that
+    // raw QBE-illegal bytes (newline / quote / backslash / control chars)
+    // are emitted as escape sequences (\n / \" / \\ / \xHH) instead of
+    // breaking the QBE IL `b "..."` literal.
+    return data_putc_escape_byte(ir, c);
+}
+
 fn ir_emit_data_int(ir: *IRBuf, fmt: *u8, val: i32) -> i32 {
     ir_data_init(ir);
     return sb_appendf((*ir).arena, (*ir).data_sb, fmt, val);
@@ -719,17 +786,8 @@ fn ir_emit_phi2(ir: *IRBuf, dst: IRVal, block1: IRVal, val1: IRVal,
 // ir_emit_data_string：data 段字面量
 // ════════════════════════════════════════════════════
 
-// 写一段 raw byte 到 data_sb（带 %c 处理）
-// [Status: v0 codegen bug 真修历史保留; workaround 代码保留作历史文档 (非 W-NNN 编号).]
-// 绕开 v0 codegen bug：jhyy 不支持 `&local_var`（地址 + 后续 store，codegen
-// 漏 store）。改用 arena_alloc(4) + *i32 写低字节。
-fn data_putc(ir: *IRBuf, c: i32) -> i32 {
-    let ch = c & (255 as i32);
-    let buf = arena_alloc((*ir).arena, 4 as i64);
-    let buf_i32 = buf as *i32;
-    *buf_i32 = ch;
-    return ir_emit_data_str_n(ir, buf, 1 as i64);
-}
+// ir_emit_data_string (real def below) — see data_putc at line 428 +
+// data_putc_escape_byte at line 384 for the W-073 escape-aware writer.
 
 fn ir_emit_data_string(ir: *IRBuf, id: IRVal, str: *u8, len: i64) -> i32 {
     ir_emit_data_str(ir, "data " as *u8);

@@ -1184,10 +1184,40 @@ fn next_token_data_string(s: *LexState, arena: *u8, t: *u8) -> i32 {
         let _q1 = lex_next_byte(s);
         content_start = (*s).cur;
         let mut cdone = 0 as i32;
+        // W-073 fix (v4.0.2): honor `\` escapes in `b "..."` literal so that
+        // content bytes like `\"` `\\` `\n` `\xHH` are NOT mis-parsed as
+        // literal-terminating `"` or stray `\`. The legacy loop scanned
+        // raw bytes until next `"`; the new loop skips the byte AFTER `\`:
+        //   - `\\` → 2 raw bytes (1 escape), 2 content bytes consumed
+        //   - `\n`/`\t`/`\r`/`\0` → 2 raw bytes (1 escape), 2 content bytes consumed
+        //   - `\"` → 2 raw bytes (1 escape), 2 content bytes consumed; closing `"`
+        //     is then correctly detected at the NEXT `"` after the escape pair
+        //   - `\xHH` → 4 raw bytes (1 escape), 4 content bytes consumed
+        //   - unknown `\` followed by anything else → 2 raw bytes (preserved
+        //     by emit path), 2 content bytes consumed
+        // content_len counts RAW bytes in source (not unescaped bytes).
         while cdone == (0 as i32) {
             let cc = lex_peek_byte(s);
-            if cc == (34 as i32) || cc == (0 as i32) { cdone = 1 as i32; }
-            else {
+            if cc == (0 as i32) { cdone = 1 as i32; }
+            else if cc == (34 as i32) { cdone = 1 as i32; }
+            else if cc == (92 as i32) {
+                // backslash — skip escape sequence
+                let _cn = lex_next_byte(s);
+                let cc2 = lex_peek_byte(s);
+                if cc2 == (120 as i32) {
+                    // \xHH — 2 hex digits
+                    let _cn2 = lex_next_byte(s);
+                    let _cn3 = lex_next_byte(s);
+                    let _cn4 = lex_next_byte(s);
+                    content_len = content_len + (4 as i64);
+                } else if cc2 != (0 as i32) {
+                    let _cn2 = lex_next_byte(s);
+                    content_len = content_len + (2 as i64);
+                } else {
+                    // dangling `\` at EOF — count just the `\`
+                    content_len = content_len + (1 as i64);
+                }
+            } else {
                 let _cn = lex_next_byte(s);
                 content_len = content_len + (1 as i64);
             }
