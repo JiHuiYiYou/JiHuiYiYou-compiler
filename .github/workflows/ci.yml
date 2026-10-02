@@ -87,7 +87,11 @@ jobs:
       - name: "Run regress.py --all (gated: jhyy.exe + jhyy_stage0.exe)"
         shell: msys2 {0}
         run: |
-          python compiler/build/bin/regress.py --all
+          # v4.0.2 W-073 follow-on GHA gate fix: regress.py lives at project root
+          # (regress.py, not compiler/build/bin/regress.py — it was relocated
+          # in v4.0.0-rc1 to keep the build/ tree artifact-only). Historical
+          # `python compiler/build/bin/regress.py` failed with FileNotFoundError.
+          python regress.py --all
 
       - name: Run regress.py --all --include-informational (v1 historical baseline, matrix only)
         shell: msys2 {0}
@@ -102,7 +106,7 @@ jobs:
           # (continue-on-error),v1 fail 不阻塞 PR,只作 matrix row。
           # v1.0.0 closure canonical (commit eabee0d) v1.4.4 后不再保留,原 TODO
           # "v1.5+ 恢复" moot。
-          python compiler/build/bin/regress.py --all --include-informational
+          python regress.py --all --include-informational
 
       - name: Build Stage 2 closure chain (v1→v2→v3→v4)
         shell: msys2 {0}
