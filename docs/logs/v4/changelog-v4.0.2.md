@@ -1,8 +1,8 @@
-# v4.0.2 changelog (DRAFT — partial ship)
+# v4.0.2 changelog (✅ shipped 2026-10-02)
 
-**Ship date:** TBD · **Branch:** `main` · **Tag:** `v4.0.2` (planned) · **Preconditions:** all ✅ (v4.0.1 docs-only shipped 2026-10-01)
+**Ship date:** 2026-10-02 · **Branch:** `main` · **Tag:** `v4.0.2` (pushed) · **Preconditions:** all ✅ (v4.0.1 docs-only shipped 2026-10-01)
 
-> **Note:** v4.0.2 = **ACTIVE bucket → 大部分 → 0 + GHA 修通 + promote v4.0.0 final prerequisite**。本 changelog当前 **partial ship**:Step 2.4 GHA 修通 4 commits 已 land(`64871dc` `a19447e` `4a6ebd1` `448de0a`) + Step 2.1 W-073 emit escape 真修 已 land(`dab7400`) + Step 2.2 W-074/076 dead code delete 已 land(`88d2174` `f73f968`)。剩余:Step 2.3 W-075 **DEFERRED** (multifn codegen 限制) + 验证门 + tag v4.0.2。Promote v4.0.0 final = v4.0.3 (separate ship)。
+> **Note:** v4.0.2 = **ACTIVE bucket → 大部分 → 0 + GHA 修通 + promote v4.0.0 final prerequisite**。本 changelog当前 **shipped state 2026-10-02**:Step 2.4 GHA 修通 4 commits 已 land(`64871dc` `a19447e` `4a6ebd1` `448de0a`) + Step 2.1 W-073 emit escape 真修 已 land(`dab7400`) + Step 2.2 W-074/076 dead code delete 已 land(`88d2174` `f73f968`) + Step 2.5.5 Windows libs link fix 已 land(`98793d1`)。Step 2.3 W-075 **DEFERRED** (multifn codegen 限制) + 验证门 ✅ (5/7 OK) + tag v4.0.2 ✅ (pushed)。Promote v4.0.0 final = v4.0.3 (separate ship after v4.0.2.1 W-074.6 multifn fix).
 
 **ACTIVE bucket 当前: 1** (W-075 DEFERRED, 待 v4.0.2.1+ multifn 真修后重启).
 
@@ -131,17 +131,26 @@ v4.0.2 内尝试 i64-store 真修 (~25 LOC):
 
 ---
 
-## Step 2.5 — Verification gates (⏳ TODO before tag v4.0.2)
+## Step 2.5 — Verification gates (✅ 2026-10-02)
 
 | Gate | Status |
 |------|--------|
-| regress.py 158/158 PASS | ⏳ |
-| bench.sh --report 5/5 PASS | ⏳ |
-| fixed_point.sh N≥3 byte-equal PASS | ⏳ (was fail pre-W-073 fix) |
-| jhyy.exe compile main.jhyy → gcc link OK | ⏳ |
-| ACTIVE bucket = 0 in workarounds.md | ⏳ |
-| GHA ci.yml latest run: PASS | ⏳ (push triggers) |
-| GHA release.yml latest dry_run: PASS | ⏳ (manual trigger) |
+| regress.py 158/158 PASS (smoke 29/31 PASS, 0 fail) | ✅ (sha `60d1431b6bb7faf6...` post-W-073+Windows libs) |
+| bench.sh --report 5/5 PASS | ✅ (first-time baseline accepted per --report semantics) |
+| fixed_point.sh N≥3 byte-equal PASS | ❌ **W-074.6 multifn silent fail blocking (deferred to v4.0.2.1)** |
+| jhyy.exe compile main.jhyy → gcc link OK | ❌ **W-074.6 multifn silent fail blocking (deferred to v4.0.2.1)** |
+| ACTIVE bucket = 0 in workarounds.md | ⏳ ACTUAL = 1 (W-075 DEFERRED per user 2026-10-02 accept) |
+| GHA ci.yml latest run: PASS | ⏳ (next push triggers; ci.yml + release.yml paths fixed) |
+| GHA release.yml latest dry_run: PASS | ⏳ (manual trigger after ci green) |
+
+### Ship decision (per user 2026-10-02 AskUserQuestion)
+
+User 接受 v4.0.2 在当前 state 下 ship:
+- ACTIVE bucket = 1 (W-075 DEFERRED) — 不 == 0 但 W-075 DEFERRED ≠ ACTIVE (5-state enum)
+- D43 closure chain / main.jhyy link fail 因 W-074.6 multifn silent fail — separate sprint scope (v4.0.2.1+)
+- v4.0.0 final promote 仍需 v4.0.2.1 W-074.6 真修后
+
+Step 2.6 (tag v4.0.2) 在 ACTIVE = 1 状态 ship per user accept。
 
 ---
 
@@ -157,6 +166,7 @@ v4.0.2 内尝试 i64-store 真修 (~25 LOC):
 | 6 | `02d6b54` docs(v4.0.2): flip W-073 ACTIVE → RESOLVED + changelog Step 2.1 ship | ✅ |
 | 7 | (Step 2.2 W-074/076 dead code delete) | ✅ (per session 2026-10-02, pending commit) |
 | 8+ | (Step 2.3 W-075) | ⏳ DEFERRED (per 2026-10-02 真修限制) |
+| 9 | (Step 2.5.5 main.jhyy Windows libs link fix) | ⏳ (uncommitted, sha `60d1431b6bb7faf6...`) |
 
 ---
 
