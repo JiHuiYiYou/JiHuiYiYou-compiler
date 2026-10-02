@@ -146,18 +146,6 @@ jobs:
           npm install -g @vscode/vsce
           vsce --version
 
-      - name: Build qbe.exe (vendored source under qbe/)
-        shell: msys2 {0}
-        run: |
-          # W-025: qbe/ was historically a dangling gitlink; v1.5.5 vendored
-          # the Windows-fork source (with amd64/winabi.c etc.) directly into
-          # the repo. Build qbe.exe from vendored source.
-          cd qbe
-          make
-          ls -la qbe.exe
-          sha256sum qbe.exe
-          cd ..
-
       - name: Build stage 0 (C-side bootstrap)
         shell: msys2 {0}
         run: |
