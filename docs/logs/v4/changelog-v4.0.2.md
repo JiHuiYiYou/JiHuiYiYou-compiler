@@ -2,7 +2,9 @@
 
 **Ship date:** TBD · **Branch:** `main` · **Tag:** `v4.0.2` (planned) · **Preconditions:** all ✅ (v4.0.1 docs-only shipped 2026-10-01)
 
-> **Note:** v4.0.2 = **ACTIVE bucket → 0 + GHA 修通 + promote v4.0.0 final prerequisite**。本 changelog当前 **partial ship**:Step 2.4 GHA 修通 4 commits 已 land(`64871dc` `a19447e` `4a6ebd1` `448de0a`) + Step 2.1 W-073 emit escape 真修 已 land(`dab7400`)。剩余:Step 2.2 W-074/076 runtime.c rename + (optional) Step 2.3 W-075 mem_set i64-store + 验证门 + tag v4.0.2。Promote v4.0.0 final = v4.0.3 (separate ship)。
+> **Note:** v4.0.2 = **ACTIVE bucket → 大部分 → 0 + GHA 修通 + promote v4.0.0 final prerequisite**。本 changelog当前 **partial ship**:Step 2.4 GHA 修通 4 commits 已 land(`64871dc` `a19447e` `4a6ebd1` `448de0a`) + Step 2.1 W-073 emit escape 真修 已 land(`dab7400`) + Step 2.2 W-074/076 dead code delete 已 land(`88d2174` `f73f968`)。剩余:Step 2.3 W-075 **DEFERRED** (multifn codegen 限制) + 验证门 + tag v4.0.2。Promote v4.0.0 final = v4.0.3 (separate ship)。
+
+**ACTIVE bucket 当前: 1** (W-075 DEFERRED, 待 v4.0.2.1+ multifn 真修后重启).
 
 ---
 
@@ -109,11 +111,23 @@ Per RCA: `compiler/runtime/runtime.c` 4 个 arena_* fn (`arena_new` / `arena_all
 
 ---
 
-## Step 2.3 — W-075 mem_set i64-store (⏳ TODO optional)
+## Step 2.3 — W-075 mem_set i64-store (⏳ DEFERRED 2026-10-02)
 
-Per RCA: `compiler/src0/std/mem.jhyy:78` 仍 `*(ptr_add(dst, i) as *i32) = b` i32-store,M0 简化 trade-off。
+**Status: 撤回 (推 v4.0.2.1+ per W-074.6 multifn 真修前置)。**
 
-Skip criteria: scope creep risk on the emit path fix (W-073) — defer to v4.0.2.1 if W-073 surface unexpected changes。
+Per RCA: `compiler/src0/std/mem.jhyy:78` 仍 `*(ptr_add(dst, i) as *i32) = b` i32-store, M0 简化 trade-off。
+
+### 撤回原因
+
+v4.0.2 内尝试 i64-store 真修 (~25 LOC):
+- `compiler/src0/std/mem.jhyy:mem_set` 改 i64-store (8B/loop) + 尾段 byte loop
+- 新 test `compiler/tests/examples/std_mem_set_aligned.jhyy` (n = 1/4/7/8/9/16/17/24 8 case verify)
+
+**撤回限制:** 新 test 触发 pre-existing codegen 限制 — 大 stack frame (8424B / 9424B subq) + multi-fn + 大 temp_id pattern, gcc link EXIT=1 但 stderr 0 byte (per W-064 jh_run stderr capture issue)。 推测同根因 W-074.6 multifn silent fail (per `feedback_codegen_amd64_multifn`)。
+
+**Note:** i64-store 代码本身 correct, 等 v4.0.2.1+ 解 multifn codegen 后重启。
+
+**superseder:** v4.0.2.1+ (W-074.6 真修后重启 W-075)。
 
 ---
 
@@ -142,7 +156,7 @@ Skip criteria: scope creep risk on the emit path fix (W-073) — defer to v4.0.2
 | 5 | `dab7400` fix(v4.0.2/W-073): QBE IL emit escape + lexer backslash-aware scanner | ✅ |
 | 6 | `02d6b54` docs(v4.0.2): flip W-073 ACTIVE → RESOLVED + changelog Step 2.1 ship | ✅ |
 | 7 | (Step 2.2 W-074/076 dead code delete) | ✅ (per session 2026-10-02, pending commit) |
-| 8+ | (Step 2.3 optional) | ⏳ |
+| 8+ | (Step 2.3 W-075) | ⏳ DEFERRED (per 2026-10-02 真修限制) |
 
 ---
 

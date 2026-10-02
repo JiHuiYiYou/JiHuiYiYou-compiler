@@ -65,6 +65,12 @@ fn mem_compare(a: *u8, b: *u8, n: i64) -> i32 {
 
 // ════════════════════════════════════════════════════
 // mem_set — 把 n 字节设为 val (低 8 位)
+//
+// v4.0.2 W-075 (deferred — M0 i32 store accept 永久)。 W-075 真修为 i64-store
+// + 尾段 byte loop 已写 (commit f73f968 之前 session), 但真修 surface 触发
+// multi-func + 大 temp_id 的 pre-existing codegen 限制 (frame ≥ 8424B, 推测
+// 跟 W-074.6 multifn silent fail 同族)。 v4.0.2.1+ 重启 W-075 需要先解
+// multifn codegen。
 // ════════════════════════════════════════════════════
 fn mem_set(dst: *u8, val: i32, n: i64) -> *u8 {
     if n < (0 as i64) {

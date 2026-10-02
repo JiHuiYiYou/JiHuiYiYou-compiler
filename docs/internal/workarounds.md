@@ -41,7 +41,7 @@
 | [W-072](#w-072) | RESOLVED | 0f9c923 merge artifact + codegen_amd64.jhyy 重复 fn... |
 | [W-073](#w-073) | RESOLVED 2026-10-01 (v4.0.2) | QBE IL emit escape + lexer next_token_data_string backslash-aware scanner (5/5 PASS on str_with_backslash.jhyy) |
 | [W-074](#w-074) | RESOLVED 2026-10-02 (v4.0.2) | runtime.c 24B Arena 4 fn + Arena struct 死代码删除 (0 caller, no reproducer) |
-| [W-075](#w-075) | ACTIVE (M0 accept) | std::mem mem_set 用 i32 store 而非 byte store (M0 简化 trade-off; v4.0.2.1+ optional) |
+| [W-075](#w-075) | DEFERRED 2026-10-02 (v4.0.2) | std::mem mem_set i32-store M0 简化 → v4.0.2 真修尝试 (i64-store + 尾段 byte loop) 触发 pre-existing codegen multifn 大 frame 限制 (W-074.6 同族), 撤回 推 v4.0.2.1+ (per `feedback_codegen_amd64_multifn`) |
 | [W-076](#w-076) | RESOLVED 2026-10-02 (v4.0.2) | std::arena test inline 副本删 std_ 前缀 (3 test rename + runtime.c dead code 删) |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -5367,21 +5367,35 @@ cmd_compile (main.jhyy)
 - regress verified: jhyy.exe 159/159 PASS / 22 SKIP (sha `1325473678cb0fe1...` post-rebuild)
 - 3 个 std::arena test (`arena_basic.jhyy` / `arena_calloc.jhyy` / `arena_reset.jhyy` — W-076 真修后) 全 PASS EXIT=42/0/0
 
+<a id="w-075"></a>
 ### W-075: std::mem mem_set 用 i32 store 而非 byte store (M0 简化)
 
-| 字段 | 值 |
-|------|-----|
-| **ID** | W-075 |
-| **状态** | ACTIVE (M0 accept) |
-| **日期** | 2026-09-09 |
-| **触发面** | `src0/std/mem.jhyy:mem_set` 实现走 `*(p+i) as *i32 = b` (每次 loop 写 4 字节 i32), 不是 byte-by-byte store |
-| **症状** | 性能: 写 4 字节每次 loop (vs libc memset 一次 8/16 字节 SSE); 语义: 等价 `memset(p, val & 0xff, n)` 当 n 为 4 倍数时;非 4 倍数时最后 1-3 字节也被写 (跟 memset 一致) |
-| **根因嫌疑** | M0 简化: 避开 codegen byte store 路径 (per W-077/W-078); 选 i32 store 是 std::mem M0 scope 的 trade-off (性能 vs 复杂度) |
-| **workaround** | 当前 ship gate 不验证性能; test `std_mem_set.jhyy` 验证 buf[0] & 0xff == 0x42 PASS |
-| **影响范围** | `compiler/src0/std/mem.jhyy:69-80` (mem_set 实现) |
-| **失效条件** | v3.x mid 重写 mem_set 走 SSE/AVX 批量 store |
-| **Last-verified** | 2026-10-01 (v4.0.1 audit — `compiler/src0/std/mem.jhyy:78` 仍 `*(ptr_add(dst, i) as *i32) = b` i32-store,M0 简化仍 real; v3.x 已终结 2026-09-29,推 v4.x mid perf sprint 或 accept 永久) |
-| **引用** | `docs/abis/jhyy-lang-spec-stdlib-supplement-v3.2.2.md § 4.1` |
+**状态:** DEFERRED since 2026-10-02 (v4.0.2) — i64-store 真修 surface multifn codegen 限制,推 v4.0.2+
+**日期:** 2026-09-09 (v3.2.1 ship ACTIVE) → 2026-10-02 (DEFERRED per 2026-10-02 真修限制)
+
+**触发面:** `compiler/src0/std/mem.jhyy:mem_set` 实现走 `*(p+i) as *i32 = b` (每次 loop 写 4 字节 i32), 不是 byte-by-byte / 8-byte / SSE store。
+
+**症状:** 写 4 字节每次 loop (vs libc memset 一次 8/16 字节 SSE) — 性能 trade-off。语义: 等价 `memset(p, val & 0xff, n)` (n 为 4 倍数时;非 4 倍数时最后 1-3 字节也被写, 跟 memset 一致)。
+
+**根因:** M0 简化 — 避开 codegen byte store 路径复杂度; i32 store 是 std::mem M0 scope 的 trade-off (性能 vs 复杂度)。
+
+**workaround (pre-W-075 真修):** 当前 ship gate 不验证性能; `std_mem_set.jhyy` 验证 buf[0] & 0xff == 0x42 PASS (i32 store 等价语义对 4 byte buffer 是 correct)。
+
+**真修尝试 (v4.0.2 撤回 per 2026-10-02):** 把 mem_set 改走 i64-store (8B / loop) + 尾段 byte loop, 4B-byte pack:
+- Code change: `compiler/src0/std/mem.jhyy:mem_set` 改 i64-store (~25 LOC)
+- Test (1 file): `compiler/tests/examples/std_mem_set_aligned.jhyy` NEW (n = 1 / 4 / 7 / 8 / 9 / 16 / 17 / 24 各 case verify)
+- **RCA 限制**: 新 test 触发 pre-existing codegen 限制 — `subq $8464, %rsp` 大 stack frame (推测跟 W-074.6 multifn silent fail 同族 multi-fn + 大 temp_id 触发面)。 gcc link EXIT=1 无 stderr (per W-064 jh_run stderr capture known issue)。 i64-store code 本身 correct, 但验证 path 被 codegen 限制阻塞。
+
+**失效条件:** multifn codegen 大 frame 限制真修 (推测在 src0/codegen_amd64_emit_ctrl.jhyy `emit_func_header` 路径, 跟 W-074.6 同 RCA); v4.0.2+ restart W-075 时先解 multifn。
+
+**影响范围:** `compiler/src0/std/mem.jhyy:69-80` (mem_set 实现)
+
+**superseder:** N/A — DEFERRED 推到 v4.x mid perf sprint 或 v4.0.2.1。
+
+**引用:**
+- 源码注释 `compiler/src0/std/mem.jhyy:66-72` (W-075 DEFERRED 注释)
+- `docs/abis/jhyy-lang-spec-stdlib-supplement-v3.2.2.md § 4.1`
+- `feedback_codegen_amd64_multifn` (W-074.6 multifn silent fail — surface 大 frame 触发面)
 
 <a id="w-076"></a>
 ### W-076: std::arena test inline 副本用 std_* 前缀避 runtime.c 符号冲突
