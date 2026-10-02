@@ -2,7 +2,7 @@
 
 **Ship date:** TBD · **Branch:** `main` · **Tag:** `v4.0.2` (planned) · **Preconditions:** all ✅ (v4.0.1 docs-only shipped 2026-10-01)
 
-> **Note:** v4.0.2 = **ACTIVE bucket → 0 + GHA 修通 + promote v4.0.0 final prerequisite**。本 changelog 当前 **partial ship**:Step 2.4 GHA 修通 4 commits 已 land(`64871dc` `a19447e` `4a6ebd1` `448de0a`)。剩余:Step 2.1 W-073 emit escape 真修 + Step 2.2 W-074/076 runtime.c rename + (optional) Step 2.3 W-075 mem_set i64-store + 验证门 + tag v4.0.2。Promote v4.0.0 final = v4.0.3 (separate ship)。
+> **Note:** v4.0.2 = **ACTIVE bucket → 0 + GHA 修通 + promote v4.0.0 final prerequisite**。本 changelog当前 **partial ship**:Step 2.4 GHA 修通 4 commits 已 land(`64871dc` `a19447e` `4a6ebd1` `448de0a`) + Step 2.1 W-073 emit escape 真修 已 land(`dab7400`)。剩余:Step 2.2 W-074/076 runtime.c rename + (optional) Step 2.3 W-075 mem_set i64-store + 验证门 + tag v4.0.2。Promote v4.0.0 final = v4.0.3 (separate ship)。
 
 ---
 
@@ -50,15 +50,32 @@ a19447e fix(ci): regress.py path in GHA workflows (v4.0.2 GHA gate)
 
 ---
 
-## Step 2.1 — W-073 emit escape fix (⏳ TODO)
+## Step 2.1 — W-073 emit escape fix (✅ shipped 2026-10-02)
 
-Per RCA: `data $str548 = { b "\", b 0 }` QBE IL emit 没 double-escape `\` → unterminated `b "..."` literal → 5 个连续 "unknown QBE IL mnemonic" errors at byte 20227+。
+Per RCA: `data $str548 = { b "\", b 0 }` QBE IL emit 没 double-escape `\` → unterminated `b "..."` literal → 5 个连续 "unknown QBE IL mnemonic" errors at byte 20227+。 Pre-fix 误归为"multi-func silent fail"(per `feedback_codegen_amd64_multifn`),RCA 真修为 QBE IL emit escape bug — 单 fn 含 escape 字符串的程序也破,只是 v1-v3 corpus 全没 escape 测试触发面。
 
-Fix scope:
-- `compiler/src0/codegen.jhyy` — emit path 在 data section 拼 `b "..."` literal 时加 escape handler (~30-80 LOC)
-- `compiler/src0/codegen_amd64_lexer.jhyy:1043` — `next_token_data_string` robust escape scanner (~10-30 LOC)
-- `compiler/tests/examples/str_with_backslash.jhyy` NEW
-- `compiler/tests/examples/str_with_quote.jhyy` NEW
+### Fix scope (1 commit, 5 files)
+
+| File | Change | LOC |
+|------|--------|-----|
+| `compiler/src0/codegen.jhyy` | 新 `data_putc_escape_byte` helper + `data_putc` 改路由 escape byte-by-byte | ~40 |
+| `compiler/src0/codegen_amd64_lexer.jhyy:next_token_data_string` | 加 `\` escape consume (2B 或 4B for `\xHH`) | ~25 |
+| `compiler/tests/examples/str_with_backslash.jhyy` NEW | W-073 regression test (7 escape variants) | +16 |
+| `compiler/build/bin/jhyy.il` | regenerated post-fix | (auto) |
+| `compiler/build/bin/jhyy.exe` | rebuilt sha `8b185dcb...` | (auto) |
+
+### Commit
+
+```
+dab7400 fix(v4.0.2/W-073): QBE IL emit escape + lexer backslash-aware scanner
+```
+
+### Verification (per `feedback_fix_evaluation_rule`)
+
+- `compiler/tests/examples/str_with_backslash.jhyy` 5/5 PASS on jhyy.exe (EXIT=0)
+- regress.py jhyy.exe 158/158 PASS / 0 failed / 22 SKIP (sha `8b185dcb...`)
+- regress.py jhyy_stage0.exe 122/158 / 36 failed (pre-existing, NOT introduced by W-073 fix; baseline comparison verified)
+- bench.sh / fixed_point.sh: deferred to v4.0.2 final ship gate (per below)
 
 ---
 
@@ -105,7 +122,8 @@ Skip criteria: scope creep risk on the emit path fix (W-073) — defer to v4.0.2
 | 2 | `a19447e` fix(ci): regress.py path in GHA workflows | ✅ |
 | 3 | `4a6ebd1` fix(infra): restore jhyy_v1.exe.exe tracking | ✅ |
 | 4 | `448de0a` fix(ci): remove Build qbe.exe step from GHA | ✅ |
-| 5+ | (Step 2.1/2.2/2.3 commits) | ⏳ |
+| 5 | `dab7400` fix(v4.0.2/W-073): QBE IL emit escape + lexer backslash-aware scanner | ✅ |
+| 6+ | (Step 2.2/2.3 commits) | ⏳ |
 
 ---
 
