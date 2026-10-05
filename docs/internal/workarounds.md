@@ -41,6 +41,7 @@
 | [W-072](#w-072) | RESOLVED | 0f9c923 merge artifact + codegen_amd64.jhyy 重复 fn... |
 | [W-073](#w-073) | RESOLVED 2026-10-01 (v4.0.2) | QBE IL emit escape + lexer next_token_data_string backslash-aware scanner (5/5 PASS on str_with_backslash.jhyy) |
 | [W-074](#w-074) | RESOLVED 2026-10-02 (v4.0.2) | runtime.c 24B Arena 4 fn + Arena struct 死代码删除 (0 caller, no reproducer) |
+| [W-074.6](#w-0746) | DEFERRED 2026-10-05 (v4.0.2.1 wip — 2/3 sub-bug 真修) | jhyy.exe 编 src0/main.jhyy 28-fn multifn silent fail (3 sub-bug: lex_il slots cap 16384 ✅ + shift %ecx→%rcx ✅ + argv[0] deref emit 缺指令 ❌) |
 | [W-075](#w-075) | DEFERRED 2026-10-02 (v4.0.2) | std::mem mem_set i32-store M0 简化 → v4.0.2 真修尝试 (i64-store + 尾段 byte loop) 触发 pre-existing codegen multifn 大 frame 限制 (W-074.6 同族), 撤回 推 v4.0.2.1+ (per `feedback_codegen_amd64_multifn`) |
 | [W-076](#w-076) | RESOLVED 2026-10-02 (v4.0.2) | std::arena test inline 副本删 std_ 前缀 (3 test rename + runtime.c dead code 删) |
 
@@ -5430,6 +5431,88 @@ cmd_compile (main.jhyy)
 - `compiler/runtime/runtime.c:21-28` (W-074/076 真修 commit 注释)
 - regress verified: 3/3 测试全 PASS (EXIT=42 / 0 / 0)
 - W-074 (同一真修 commit)
+
+### W-074.6: jhyy.exe 编 src0/main.jhyy 自举 .s 截断 / multifn silent fail (3 sub-bug RCA)
+
+**状态:** DEFERRED since 2026-10-05 (v4.0.2.1 wip — partial 真修 2/3, 第 3 sub-bug 待 v4.0.2.1)
+**日期:** 2026-09-15 (V3.1.0 first surface) → 2026-10-05 (v4.0.2.1 partial: lex_il slots + shift register 真修)
+
+**触发面:** jhyy.exe 编 `compiler/src0/main.jhyy` (28-fn + ~3.2 MB emit .il) → 之前: jh_paths_init 后无明确错误,但 `.s` 0-byte / 关键 fn label (如 `main_jhyy:`) 缺失 / 后续 codegen slot corruption。
+
+**3 个 sub-bug (per RCA chain 2026-10-05):**
+
+#### Sub-bug #1 — `lex_il` slots hardcoded cap 16384 (token truncation silent fail)
+
+**根因:** `compiler/src0/codegen_amd64_lexer.jhyy:2043` `let slots: i64 = 16384 as i64;` — 静态上限。src0/main.jhyy 的 emit .il 含 ~428K tokens (wc -w 实测) / ~3.2 MB,16x 超出 cap。当 `i >= slots` 时 lex_il loop 退出但**未写 EOF 终结** → 后续 `lex_il_count` 扫到 garbage / 错 EOF → 返回 token count 偏少 → `parse_and_emit` dispatch 截断 → 后续 fn (含 main_jhyy) 永不 emit → 0-byte `.s` / 缺 label。
+
+**真修(v4.0.2.1 wip):** slots 派生自 `len` 参数 (function parameter → `copy %len`,不 emit 字面量到 IL → byte-equal 跨代):
+```jhyy
+// 旧:
+let slots: i64 = 16384 as i64;
+// 新:
+let slots: i64 = (len / (4 as i64)) + (1024 as i64);
+```
+同步更新 `lex_il_count(arr, len)` 接 len 参数,cap 用同样公式。Caller 改 2 处: `codegen_amd64.jhyy:293` + `codegen_amd64_inmem.jhyy:80`。
+
+**效果:** main_jhyy .il 完整 emit (3.2 MB / 428K tokens), .s 完整 10 MB, `main_jhyy:` label 出现。regress 159/159 PASS HOLD (sha `45067278d353b5a1...` post-fix)。
+
+#### Sub-bug #2 — `emit_call.jhyy` shift-by-reg 64-bit 路径 emit `movq ..., %ecx` (GAS error)
+
+**根因:** `compiler/src0/codegen_amd64_emit_call.jhyy:1987` hardcode `let _l4 = sb_append_cstr(arena, s, "(%rbp), %ecx\n" as *u8);`。当 `qt == QBE_L_LOCAL` (64-bit shift), `load_op = "movq"` 但 dst reg 固定 `%ecx` (32-bit) → GAS 报 `incorrect register '%ecx' used with 'q' suffix`。
+
+**触发面:** std lib helper 函数 (e.g. `codegen_amd64_peephole__pee_unpack_*` 在 src0/codegen_amd64_peephole.jhyy) 含 64-bit variable shift (e.g. `(v >> (32 as i64))`);V3.4.x 后 src0/peephole import 进 main.jhyy → main.jhyy 触发面 100% 暴露 (per W-075 DEFERRED 同 pattern)。
+
+**真修(v4.0.2.1 wip):** 加 `cx_reg` 选择 (`qt == QBE_L_LOCAL` → `"rcx"`,else `"ecx"`), emit:
+```jhyy
+let mut cx_reg: *u8 = "ecx" as *u8;
+if qt == QBE_L_LOCAL() {
+    cx_reg = "rcx" as *u8;
+}
+// ... append "cx_reg" instead of hardcoded "ecx"
+```
+
+**效果:** GAS 编译 .s 不再 8 个 `incorrect register` error (line 281375/281431/.../299097), full `.s` assemble OK → `gcc link` 成功 → v3.exe 实际可产 (.exe 1.6 MB)。
+
+#### Sub-bug #3 — v3 binary argv[0] deref codegen emit 未生成 deref 指令
+
+**根因:** 推测在 `src0/codegen_amd64_emit_call.jhyy` `emit_call` 路径处理 `argv as **u8; (*argv_arr)` 的 deref 时,**emit 的 .s 缺 `mov (%rax), %rcx` 实际 deref 指令**,直接传 argv (而不是 argv[0]) 给 `jh_paths_init(argv0)`。
+
+**症状 (v3 binary at /tmp/jhyy_fp/jhyy_v3.exe.exe, build/bin copy 同病):**
+```asm
+# v3 binary main_jhyy+0x5a:
+movq -481880(%rbp), %rax         # argv (correct)
+movq %rax, -8200(%rbp)            # %t60234 (store argv to slot 60234)
+subq $32, %rsp
+movq -481904(%rbp), %rcx          # WRONG: loads from slot 481904 (NOT -8200!) — uninit slot
+call jh_paths_init
+```
+实际 deref `mov (%rax), %rcx` 完全缺失 → rcx 装 uninit slot 值 (实际可能是 garbage 0x0 或 stack 残留)。
+
+**HEAD jhyy.exe (正确):** `mov (%rdi),%rcx` 后 `call jh_paths_init` — 走 MS x64 ABI 寄存器约定,deref 用 `(%rdi)` 形式。jhyy-side self-backend codegen 对 `let argv0 = (*argv_arr)` 形态 emit 缺 deref,推测在 `parse_expr` IDENT/cast 路径。
+
+**严重性:** v3 binary 完全不可用 — `--help` 也 segfault (因为 jh_paths_init 接 garbage argv0)。**这是 v4.0.0 final promote 的真正 blocker**,因为 fixed_point.sh N=3 closure chain 要求 v3 binary 能 run + compile main.jhyy。
+
+**workaround (pre-fix):** 无 — D43 closure chain N≥3 仍 fail (per v4.0.2.1 计划,见下)。
+
+**影响范围:** `compiler/src0/codegen_amd64_emit_call.jhyy` `emit_call` 路径 / `compiler/src0/codegen_amd64_emit_mem.jhyy` `emit_load` 路径 (推测);`compiler/src0/main.jhyy:1653-1660` argv0 deref site。
+
+**失效条件:** v4.0.2.1 真修 sub-bug #3 → fixed_point.sh N≥3 byte-equal + cap_test EXIT=42 跨代一致门 PASS → v4.0.0 final promote 解锁。
+
+**superseder:** v4.0.2.1 plan (待启动, 见 `docs/plans/v4/v4.0.2.1-plan.md`)
+
+**引用:**
+- 源码注释 `compiler/src0/codegen_amd64_lexer.jhyy:2041-2049` (sub-bug #1 真修注释)
+- 源码注释 `compiler/src0/codegen_amd64_emit_call.jhyy:1977-1991` (sub-bug #2 真修注释)
+- 源码注释 `compiler/src0/main.jhyy:1653-1660` (sub-bug #3 trigger site)
+- `b0ce75e` docs commit (W-074.6 RCA evidence + v4.0.2.1 plan 起点)
+- `feedback_codegen_amd64_multifn` (multifn silent fail 历史误诊 — sub-bug #1 真修为 token truncation,非 codegen state corruption)
+- `feedback_codegen_amd64_run_zerobyte` (V3 self-backend body 0-byte 同 pattern,sub-bug #1 真修后 main_jhyy 完整 emit)
+- `feedback_codegen_small_frame_arg_corruption` (sub-bug #2 同源 `%ecx`/%rcx register bug)
+- `feedback_jhyy_dbgfile_cwd_sensitive` (debug `cd $JHYY_ROOT` 必要性)
+- `feedback_verify_active_reproduces` (verify base reproduce before fix)
+- `feedback_audit_single_commit_diff` (audit single-commit,不用 cumulative diff)
+- regress verified: sub-bug #1+#2 fix 后 159/159 PASS / 23 SKIP (sha `45067278d353b5a1...`)
+- fixed_point.sh status: sub-bug #3 unresolved → v3 binary segfault → SHA_V3=MISSING → 1/3 PASS (IL v2=v3) / 2/3 FAIL (v3 missing + cap_test segfault)
 
 ### W-077: src0/std/mem.jhyy mem_find_byte codegen 路径触发 access violation
 

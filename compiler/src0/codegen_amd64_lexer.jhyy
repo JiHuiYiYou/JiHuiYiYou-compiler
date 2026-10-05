@@ -2038,9 +2038,16 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
 // 返回:*ILToken 数组 (caller 通过 lex_il_count 拿长度)。
 
 fn lex_il(buf: *u8, len: i64, arena: *u8) -> *u8 {
-    // v2.11.2 (W-074.6 T5-a): slots 1024 → 16384。big_test.il ~3000+ tokens 截断;
-    // 16384 × 40 bytes = 640 KB,arena 8 MB 充足。
-    let slots: i64 = 16384 as i64;
+    // v4.0.2.1 (W-074.6 真修): slots 不再 hardcoded 16384。
+    // 旧 cap 16384 对 src0/main.jhyy 的 .il (~3.2 MB / 428K tokens) 静默截断在
+    // parser__parse_type 之前,导致 main_jhyy: label 缺失 + 后续 codegen 0-byte .s。
+    // 新公式:slots = len / 4 + slack。ratio 来自 wc 实测:
+    //   3.2 MB IL → 428K tokens → ~7.5 bytes/token (含空白); 除 4 给 ~1.87x 系数
+    //   留 headroom (稀疏 source 仍能装下); +1024 slack 兜底单 byte token。
+    // 关键:slots 派生自 len 参数 (function parameter load = `copy %len`),不 emit
+    // 字面量到 IL → byte-equal 跨代 (v2.il == v3.il) 保持。
+    // arena 8 MB 初始块; 大 slots (>8 MB) arena 自动 grow via arena_new_block。
+    let slots: i64 = (len / (4 as i64)) + (1024 as i64);
     let arr = arena_alloc(arena, slots * (40 as i64));
     if arr == (0 as *u8) {
         return 0 as *u8;
@@ -2082,13 +2089,17 @@ fn lex_il(buf: *u8, len: i64, arena: *u8) -> *u8 {
 }
 
 // lex_il_count — 返回 token 数(扫数组找第一个 ILTOK_EOF)。
-// v2.11.2 (T5-a): cap 1024 → 16384,与 lex_il slots 一致。
-fn lex_il_count(arr: *u8) -> i64 {
+// v4.0.2.1 (W-074.6 真修): cap 同步 lex_il slots 公式 → 必须接收 len 参数。
+// 旧 cap 16384 hardcoded 在 lex_il_count 里是隐性 cap (lex_il 跟 lex_il_count
+// 必须同步) → lex_il slots 16384, lex_il_count 扫 16384 cap → 一致但都太小。
+// 新版从 len 派生 cap,跟 lex_il 严格一致 → 跨代 byte-equal + 兜底 > 16384 IL。
+fn lex_il_count(arr: *u8, len: i64) -> i64 {
     if arr == (0 as *u8) { return 0 as i64; }
+    let cap: i64 = (len / (4 as i64)) + (1024 as i64);
     let mut n: i64 = 0 as i64;
     let mut done = 0 as i32;
     while done == (0 as i32) {
-        if n >= (16384 as i64) { done = 1 as i32; }
+        if n >= cap { done = 1 as i32; }
         else {
             let tok = ptr_add_u8(arr, n * (40 as i64));
             let kind_addr = tok as *i32;

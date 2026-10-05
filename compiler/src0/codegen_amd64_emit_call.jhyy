@@ -1975,16 +1975,25 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
             let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
         } else {
             // shift by reg (variable shift): 两步
-            //   (1) "\t<load_op> <src2_off>(%rbp), %ecx\n"  — load src2 into shift-amount reg
-            //   (2) "\t<shift_op> %cl, %<reg>\n"            — actual shift (cl = low 8 of ecx)
-            // 注:x86 shift amount reg 总是 %cl (low 8 bits of %ecx), 即使 64-bit shift
-            // 仍用 %cl (per Intel SDM vol 2)。 32-bit shift 配 movl; 64-bit shift 配 movq
-            // (但 Intel SDM vol 2: 64-bit shift amount 自动 mask 0x3F, 不需 extra)。
+            //   (1) "\t<load_op> <src2_off>(%rbp), %<cx_reg>\n"  — load src2 into shift-amount reg
+            //   (2) "\t<shift_op> %cl, %<reg>\n"                  — actual shift (cl = low 8 of cx)
+            // 注:x86 shift amount reg 总是 %cl (low 8 bits of %ecx/%rcx), 即使 64-bit shift
+            // 仍用 %cl (per Intel SDM vol 2)。
+            // v4.0.2.1 (W-074.6 真修副效应): 64-bit shift 必须 load 用 movq + %rcx 配对
+            // (movq ... %ecx = "incorrect register `%ecx' used with `q' suffix" GAS error)。
+            // 之前错用 %ecx 是 silent fail (V2.13.x 测试集没触发 64-bit var shift 路径,
+            // V3.4.x 后 codegen_amd64_peephole__pee_unpack_* 等 std lib helper 触发 → 暴露)。
+            let mut cx_reg: *u8 = "ecx" as *u8;
+            if qt == QBE_L_LOCAL() {
+                cx_reg = "rcx" as *u8;
+            }
             let _l1 = sb_append_cstr(arena, s, "\t" as *u8);
             let _l1op = sb_append_cstr(arena, s, load_op);
             let _l2 = sb_append_cstr(arena, s, " " as *u8);
             let _l3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
-            let _l4 = sb_append_cstr(arena, s, "(%rbp), %ecx\n" as *u8);
+            let _l4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
+            let _l5 = sb_append_cstr(arena, s, cx_reg);
+            let _l6 = sb_append_cstr(arena, s, "\n" as *u8);
             let _s1 = sb_append_cstr(arena, s, "\t" as *u8);
             let _s1op = sb_append_cstr(arena, s, shift_op);
             let _s2 = sb_append_cstr(arena, s, " %cl, %" as *u8);

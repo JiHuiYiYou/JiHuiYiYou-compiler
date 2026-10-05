@@ -77,7 +77,7 @@ fn codegen_amd64_run_text(text: *u8, len: i64, asm_path: *u8, target_tag: i32,
         arena_free(&arena);
         return 1 as i32;
     }
-    let n = lex_il_count(tokens);
+    let n = lex_il_count(tokens, len);
 
     // 3. CGState + StringBuilder init (heap-alloc'd, state has stable ptr)
     //    per codegen_amd64.jhyy:297 — CGState 实际 ~248+ 字节, 512 留 slack

@@ -290,7 +290,7 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32,
         arena_free(&arena);
         return 1 as i32;
     }
-    let n = lex_il_count(tokens);
+    let n = lex_il_count(tokens, il_len);
     free(il_len_box);
 
     // 3. CGState + StringBuilder init (heap-alloc'd, state has stable ptr)
