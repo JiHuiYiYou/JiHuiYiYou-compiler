@@ -1,0 +1,14 @@
+extern fn malloc(size: i64) -> *u8;
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+fn deref_via_local(p: *u8) -> *u8 {
+    let pp = p as **u8;
+    return (*pp);
+}
+fn main_jhyy() -> i32 {
+    let arr: *u8 = malloc((2 as i64) * (8 as i64));
+    let e0 = ptr_add(arr, 0 as i64);
+    let v0 = deref_via_local(e0);
+    return 0 as i32;
+}
