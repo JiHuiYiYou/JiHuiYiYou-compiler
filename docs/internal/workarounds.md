@@ -41,9 +41,10 @@
 | [W-072](#w-072) | RESOLVED | 0f9c923 merge artifact + codegen_amd64.jhyy 重复 fn... |
 | [W-073](#w-073) | RESOLVED 2026-10-01 (v4.0.2) | QBE IL emit escape + lexer next_token_data_string backslash-aware scanner (5/5 PASS on str_with_backslash.jhyy) |
 | [W-074](#w-074) | RESOLVED 2026-10-02 (v4.0.2) | runtime.c 24B Arena 4 fn + Arena struct 死代码删除 (0 caller, no reproducer) |
-| [W-074.6](#w-0746) | DEFERRED 2026-10-08 (v4.0.2.1 wip — 3/3 sub-bug 真修 jhyy.exe Stage 1) | jhyy.exe 编 src0/main.jhyy 28-fn multifn silent fail (3 sub-bug: lex_il slots cap 16384 ✅ + shift %ecx→%rcx ✅ + sema hash mismatch 真修 ✅; jhyy_v3.exe Stage 2 frame blow-up 仍 active,见新 W-NNN) |
+| [W-074.6](#w-0746) | DEFERRED 2026-10-08 (v4.0.2.1 wip — 3/3 sub-bug 真修 jhyy.exe Stage 1) | jhyy.exe 编 src0/main.jhyy 28-fn multifn silent fail (3 sub-bug: lex_il slots cap 16384 ✅ + shift %ecx→%rcx ✅ + sema hash mismatch 真修 ✅; jhyy_v3.exe Stage 2 frame blow-up 仍 active,见 W-096) |
 | [W-075](#w-075) | DEFERRED 2026-10-02 (v4.0.2) | std::mem mem_set i32-store M0 简化 → v4.0.2 真修尝试 (i64-store + 尾段 byte loop) 触发 pre-existing codegen multifn 大 frame 限制 (W-074.6 同族), 撤回 推 v4.0.2.1+ (per `feedback_codegen_amd64_multifn`) |
 | [W-076](#w-076) | RESOLVED 2026-10-02 (v4.0.2) | std::arena test inline 副本删 std_ 前缀 (3 test rename + runtime.c dead code 删) |
+| [W-096](#w-096) | DEFERRED 2026-10-08 (v4.0.2.1 wip — 1024 cap ship, emit-side per-fn-local counter 推 v3.x mid) | per-fn pre-scan table 256→1024 真修 jhyy.exe Stage 1; emit slot offset 仍 global t → v3 binary Stage 2 frame 484KB SEGFAULT, ~500 LOC 真修 |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -6004,6 +6005,130 @@ emit_load 现在对每个 dst result temp 都分配 dedicated alloc pool slot (c
 **superseder:** 无 — W-095 是 emit_load 的 真修; emit_copy/emit_loadsub 同 pattern fix 推 W-096 v3.x mid。
 
 **引用:** [[feedback_rca_first_root_cause]] (W-092 误诊 → W-093 partial → W-094 partial → W-095 真修 4-iter RCA chain, 1 fail = 1 根因 per iter); [[feedback_fix_evaluation_rule]] (target test big_test EXIT=57 post-W-095, regress 145/145 collateral, user "1 fail = 真修" 反馈闭环); [[feedback_audit_single_commit_diff]] (W-093/W-094/W-095 分开 commit per RCA iter, 可独立 audit); [[feedback_codegen_amd64_multifn]] (V3 self-backend 单 fn PASS / 2+ fn FAIL hint at codegen state corruption — slot table + formula pool 是 codegen state 的一部分,emit_load 不 record dst 是 state leak 模式); [[feedback_codegen_amd64_run_zerobyte]] (V3 self-backend body 0-byte bug 同 pattern:codegen state 不 fully initialized → 部分 temp 不 record → 错字节); [[feedback_jhyy_dbgfile_cwd_sensitive]] (RCA 期间用 `cd $JHYY_ROOT` 保证 jhyy.exe emit .il cwd-relative baseline 一致); [[feedback_plans_per_version]] (W-095 = v3.2.4.2 patch, 跟 W-094 联合 ship, 跟 W-093 v3.2.4.1 main ship 分开 commit)。
+
+<a id="w-096"></a>
+## W-096: per-fn-local temp_id counter → emit slot offset 用 global t → main.jhyy 997 fns frame over-reserve 484KB → Stage 2 closure SEGFAULT (推 v3.x mid 真修)
+
+**ID:** W-096
+**状态:** DEFERRED since 2026-10-08 (v4.0.2.1 wip — 1024 cap 256→1024 partial 真修 ship, 但 emit slot offset 仍用 global t → per-fn-local counter 是真正 fix, 需 ~500 LOC emit-side 改造)
+**日期:** 2026-10-08 (v4.0.2.1 sub-bug #3 真修后 W-074.6 entry "严重性 (jhyy_v3.exe 阶段)" 段首次明示 W-NNN;1024 cap ship 在 commit `573b189`)
+
+**触发面:** jhyy_v3.exe (Stage 2 self-compiled binary from `jhyy.exe compile main.jhyy`) 跑 `jhyy_v3.exe compile compiler/src0/main.jhyy -o /tmp/v4.exe` → cmd_compile 段 SEGFAULT。pre-W-074.6 sub-bug #3 真修:emit .s 缺 `main_jhyy:` label + 0-byte body。post-sub-bug #3 真修:emit .s 完整 10MB, main_jhyy label 出现, 但 `main_jhyy` frame_size = `(max_global+1) * 8 = (60656+1) * 8 ≈ 485KB` (0x764a0) → `___chkstk_ms` probe 后 Windows 1MB default thread stack 仍 hold 但 alloc pool formula collision 在 stack guard page 边界 → SEGV。
+
+**症状:**
+- `jhyy.exe compile main.jhyy` → emit `.s` 11MB, `.exe` 1.6MB OK
+- `jhyy_v3.exe.exe compile main.jhyy` → `objdump -d jhyy_v3_test.exe | grep "<main_jhyy>:"` show frame 0x764a0 = 484KB
+- `jhyy_v3.exe.exe` 跑任何 compile 命令 → exit 127 (SEGV at 1st chkstk_ms probe)
+- 单独 `jhyy_v3.exe.exe --version` (无 alloc 路径) → EXIT=0 OK, 确认 SEGV 在 alloc-heavy path
+- regress 160/160 PASS HOLD on `jhyy.exe` (Stage 1, sub-bug #3 真修后)
+
+**根因 (per RCA 2026-10-08):**
+
+`compiler/src0/codegen_amd64_emit_ctrl.jhyy` `emit_func_header` 算 `frame_size` 用 **global max temp_id**:
+```jhyy
+// codegen temp_id 是 跨 fn 累加 counter (single global atomic):
+// fn 0 max=2, fn 1 max=11, fn 2 max=53, ... main.jhyy max=60656
+// frame_size = (max_global + 1) * 8 = 485KB for main_jhyy
+```
+
+但 **emit slot offset (cg_offset_for_temp Win path)** 也用同一个 global t:
+```jhyy
+// compiler/src0/codegen_amd64_state.jhyy:708-728
+fn cg_offset_for_temp(state: *u8, t: i64, target_tag: i64) -> i64 {
+    // ... Win path:
+    return (0 as i64) - (32 as i64) - t * (8 as i64);  // global t!
+}
+```
+
+**per-fn-local 试修 + revert (2026-10-08 session):** 把 frame_size 改用 per-fn-local max (`per_fn_max[cur_fn_idx] - per_fn_max[cur_fn_idx-1]`) → 484KB → 9KB。但 emit slot offset 仍读 global t → 越界 stack access (slot offset -403000 在 9KB frame 外) → v3 binary Stage 2 SEGFAULT。**根因结论**:要彻底修,emit 路径也要 per-fn-local counter (`per_fn_base_offset[cur_fn_idx]` + `cur_fn_local_t` 累加),不是只改 frame_size。
+
+**1024 cap partial 真修 (shipped commit `573b189` 2026-10-08):**
+
+per `feedback_rca_first_root_cause` 1-iter 验证: per-fn pre-scan table 256 entries 触发 `if fn_count > 255 { fn_count = 255; }` 截断 → fn 256+ 走 `global-max fallback` → frame_size 公式错。**真根因不是 cap 太低,而是 global-max fallback 路径对 256+ fn 不可用**。
+
+改 4 个 size + 1 cap check + 1 truncation:
+```jhyy
+// codegen_amd64_state.jhyy CGState struct comment
+- // 256 entries 够 ~60 fns (big_test), future-proof 加 safety check fn_count < 256
++ // 1024 entries 够 main.jhyy 997 fns (W-074.6 v4.0.2.1 bump 256→1024:原 256 cap
++ // 触发 256+ fn 走 global-max fallback → frame over-reserve 484KB for trivial fn
++ // like codegen_amd64_lexer__main_jhyy)。
+- fn_starts: *u8,    // i64[256]
++ fn_starts: *u8,    // i64[1024]
+- per_fn_max: *u8,   // i64[256]
++ per_fn_max: *u8,   // i64[1024]
+- per_fn_alloc: *u8, // i64[256]
++ per_fn_alloc: *u8, // i64[1024]
+
+// cg_state_init alloc
+- let fns_bytes = (256 as i64) * (8 as i64);
++ let fns_bytes = (1024 as i64) * (8 as i64);
+- let pfm_bytes = (256 as i64) * (8 as i64);
++ let pfm_bytes = (1024 as i64) * (8 as i64);
+- let pfa_bytes = (256 as i64) * (8 as i64);
++ let pfa_bytes = (1024 as i64) * (8 as i64);
+
+// cg_compute_per_fn_max_temps capacity
+- if fn_count < 256 as i64 { ... }
++ if fn_count < 1024 as i64 { ... }
+- if fn_count > 255 as i64 { fn_count = 255 as i64; }
++ if fn_count > 1023 as i64 { fn_count = 1023 as i64; }
+```
+
+**1024 cap fix 效果 (regress 160/160 PASS HOLD on jhyy.exe, sha `a3e15f89da0d50c9...`):**
+- main.jhyy 997 fns 全部进 per_fn_max 表 (cap 1024 = 4x safety)
+- fn_starts[997] 哨兵 = 428K tokens (last fn 之前所有 token 全归 fn 0..996)
+- per_fn_max 仍 global max (per fn body) — **不是 local max** → frame_size 公式仍 `(max_global+1)*8 = 484KB`
+- frame_size 484KB 仍 ACTIVE in jhyy_v3.exe Stage 2 closure 路径
+- regress 全集 160/160 PASS HOLD because regress 走 Stage 1 (jhyy.exe 1.6MB .exe) — 1.6MB `.exe` 有 484KB frame 但 Windows 1MB default thread stack OK (per V2 v4.0.0 同 frame size ship gate 验证)
+- Stage 2 v3 binary → Stage 2 走同样的 484KB frame, chkstk_ms emit OK, 但 chkstk_ms 内 `movq $484000, %rax; call __chkstk_ms` probe 484KB → 写 stack guard page → 1MB thread stack 仍 hold, 但 alloc pool 区域 formula collision (-8200 跟 formula 范围 -32..-403000 重叠 in `main_jhyy` fn, 0-byte alloc slot advance 写 0-value 到 formula 区域 → 后续 alloc deref 拿 0 → SEGV at `mov (%rax), %eax`)
+
+**Code 真修 (推 v3.x mid, ~500 LOC):**
+
+1. **emit-side per-fn-local counter (CGState 加字段):**
+```jhyy
+type CGState = struct {
+    // ... 现有字段 ...
+    per_fn_base_t: *u8,  // i64[1024]: 每个 fn 起始时 global temp_id
+    cur_fn_local_t: i64, // 当前 fn 内 next temp id (从 0 开始 per fn)
+}
+```
+
+2. **cg_next_temp 改造:** 每次 emit start new fn (emit_func_header 之前) → `cur_fn_local_t = 0; per_fn_base_t[cur_fn_idx] = current_global_t;`。所有 temp 分配改 `cur_fn_local_t++; let t = per_fn_base_t + cur_fn_local_t;`。
+
+3. **cg_offset_for_temp 改造:** Win path `return -(32 as i64) - (cur_fn_local_t * 8)`。
+
+4. **emit_func_header frame_size:** `local_max = per_fn_max[cur_fn_idx] - per_fn_max[cur_fn_idx-1]` (per-fn-local), `frame_size = max((local_max+1) * 8, 8192 + per_fn_alloc[cur_fn_idx])`。
+
+5. **per_fn_max 改 local max:** Phase 2 scan 不存 global max, 存 `(max_in_fn_body - per_fn_max[prev_fn_idx])` 局部 max。
+
+**影响范围:**
+- 已 ship (1024 cap): `compiler/src0/codegen_amd64_state.jhyy` (5 处 256→1024, 30 行 diff, 3 文件 binary rebuild)
+- 待 ship (emit per-fn-local): `compiler/src0/codegen_amd64_state.jhyy` CGState struct + `cg_state_reset_for_function` + `cg_offset_for_temp` + `cg_compute_per_fn_max_temps` Phase 2 + `cg_token_max_temp_id` 派生 local id; `compiler/src0/codegen_amd64_emit_ctrl.jhyy` `emit_func_header` frame_size 公式; **all `let t = cg_next_temp(state); ... *t` pattern 在 src0/ (~50 处 emit 路径)**, 需 emit-side 统一把 global t → per-fn-local t
+- regress 影响: per-fn-local 真修后, v3 binary Stage 2 closure 走通 → regress `--binary=jhyy_v3.exe.exe` 同样 160/160 PASS; fixed_point.sh N≥3 byte-equal (per `feedback_codegen_amd64_multifn` 5/5 gate)
+
+**失效条件:** v3.x mid 真修 emit-side per-fn-local counter → 484KB → 9KB → jhyy_v3.exe Stage 2 跑通 → fixed_point.sh N≥3 byte-equal + regress `--binary=jhyy_v3.exe.exe` 160/160 PASS HOLD → v4.0.0 final promote 解锁 (per [[project_v2_v3_final]] W-074.6 v4.0.0 final gate)。
+
+**workaround (1024 cap partial):** main.jhyy 997 fns 全 cover; frame_size 仍 484KB 但 regress 160/160 PASS HOLD on jhyy.exe (Stage 1 OK, 1MB thread stack hold)。Stage 2 v3 binary 仍 fail — 需 v3.x mid 真修。
+
+**superseder:** 无 — W-096 是 alloc pool pre-scan 终极根因;W-087 (v3.0.9 真修 per-fn alloc pool) 已 ship, W-095 (v3.2.4.2 emit_load record dst) 已 ship, W-096 是 emit-side per-fn-local counter 真修 (~500 LOC, v3.x mid)。
+
+**引用:**
+- 源码注释 `compiler/src0/codegen_amd64_state.jhyy:182-200, 444-471, 1451-1498` (1024 cap ship comments)
+- 源码注释 `compiler/src0/codegen_amd64_emit_ctrl.jhyy` (emit_func_header frame_size, per-fn-local trial 2026-10-08 revert)
+- 源码注释 `compiler/src0/codegen_amd64_state.jhyy:708-728` (cg_offset_for_temp Win path global t)
+- commit `573b189` (1024 cap ship 2026-10-08 v4.0.2.1 wip, regress 160/160 PASS HOLD)
+- commit `b0ce75e` (W-074.6 RCA evidence + v4.0.2.1 plan 起点, W-NNN 段首次明示)
+- commit `850d815` (W-074.6 sub-bug #1+#2 partial 真修, 1024 cap 前置)
+- W-074.6 entry "严重性 (jhyy_v3.exe 阶段)" 段 (2026-10-08 update)
+- W-087 entry (per-fn alloc pool pre-scan 真修 v3.0.9)
+- W-095 entry (emit_load record dst 真修 v3.2.4.2)
+- `feedback_codegen_amd64_multifn` (5/5 gate: multifn .il byte-equal 不验 .s, 真 closure 需 self-backend 跑通)
+- `feedback_codegen_amd64_run_zerobyte` (V3 self-backend body 0-byte bug 同 pattern: per-fn tables 不 fully cover → 错字节)
+- `feedback_rca_first_root_cause` (per-fn-local trial 1-iter RCA: frame_size per-fn-local 跟 emit slot offset per-fn-local 需同步改, 否则越界)
+- `feedback_jhyy_dbgfile_cwd_sensitive` (RCA 期间 `cd $JHYY_ROOT` 保证 jhyy.exe emit .il cwd-relative baseline 一致)
+- `feedback_audit_single_commit_diff` (1024 cap ship 单独立 entry 跟 W-074.6 sub-bugs 分开 commit per RCA iter, 可独立 audit)
+- `feedback_plans_per_version` (W-096 = v3.x mid 真修, 不进 v4.0.2.1 plan)
 
 ## W-085: codegen small-frame fn(*T, i32, i32) 第 3 i32 参数 save 寄存器错位 (推 v3.x)
 

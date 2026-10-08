@@ -198,3 +198,86 @@ Note: 实际真修 LOC 大概率 << 之前估的 ~500+ (memory `feedback_codegen
 - v4.0.2 plan: `~/.claude/plans/merge-v2-axis-v3-axis-into-main-serialized-aho.md`
 - W-073 RCA evidence: byte 20227 in `data $str548 = { b "\", b 0 }` QBE IL emit output
 - Memory: `feedback_verify_active_reproduces`, `feedback_rca_first_root_cause`, `feedback_codegen_amd64_multifn`, `feedback_jhyy_dbgfile_cwd_sensitive`, `feedback_changelog_umbrella`, `feedback_fix_evaluation_rule`, `feedback_ssh_key_same_shell`, `feedback_audit_single_commit_diff`, `feedback_git_identity_canonical`, `feedback_editorconfig_vendor_eol`, `feedback_make_clean_too_aggressive`, `feedback_ci_yaml_debugging`, `feedback_regress_py_path_normalization`
+
+---
+
+# v4.0.2.1 — W-074.6 multifn 真修 (3 sub-bug) + W-096 1024 cap partial 真修 (✅ ship pending tag)
+
+**Ship date:** pending tag · **Branch:** `main` · **Tag:** `v4.0.2.1` (pushing after ship batch commit) · **Preconditions:** v4.0.2 ✅ shipped 2026-10-02
+
+> **Note:** v4.0.2.1 = **W-074.6 multifn 真修 sprint** (3 sub-bug + W-096 partial) → jhyy.exe Stage 1 走通。Stage 2 closure 仍待 v3.x mid W-096 emit-side per-fn-local counter 真修 (推 v3.x mid, 不进 v4.0.2.1 scope per `feedback_plans_per_version`)。
+>
+> **ACTIVE bucket 当前: 2 DEFERRED** (W-074.6 sub-bug #1+#2+#3 真修 ✅ → jhyy.exe Stage 1 走通, 但 W-074.6 entry 仍 DEFERRED 因为 Stage 2 closure 待 W-096;W-096 推 v3.x mid) + W-075 (推 v4.0.2.1+ multifn fix 后, 等 W-096 真修后重启)。
+
+## Sub-bug #1 真修 — lex_il slots 16384 → 动态 (len/4) + 1024 (commit `850d815`)
+
+`compiler/src0/codegen_amd64_lexer.jhyy:2043` 静态 `slots: i64 = 16384` → 动态派生 `let slots: i64 = (len / (4 as i64)) + (1024 as i64);`,同步更新 `lex_il_count` 接 len 参数,caller 改 2 处 (`codegen_amd64.jhyy:293` + `codegen_amd64_inmem.jhyy:80`)。
+
+**效果:** main.jhyy emit .il 428K tokens / 3.2 MB 完整 emit, .s 完整 10MB, `main_jhyy:` label 出现, regress 159/159 PASS HOLD sha `45067278d353b5a1...`。
+
+## Sub-bug #2 真修 — emit_call.jhyy 64-bit shift 路径 %ecx → %rcx (commit `850d815`)
+
+`compiler/src0/codegen_amd64_emit_call.jhyy:1987` 硬编码 `(..., %ecx)` → 选 `cx_reg` (`qt == QBE_L_LOCAL` → `"rcx"`, else `"ecx"`)。
+
+**效果:** GAS 8 个 `incorrect register '%ecx' used with 'q' suffix` error 消失, v3 binary .exe 1.6MB 实际可产。
+
+## Sub-bug #3 真修 — sema hash mismatch 真修 (commit `dbbdd97`)
+
+`compiler/src0/sema.jhyy:2776-2824` `check_module_populate_ret_type_map` 写 SymbolReturnTypeMap entry 时, `hash_string((*fn_sym).name)` (裸名) → `hash_string("module__name" if (*fn_sym).module != NULL else (*fn_sym).name)` (module-mangled)。
+
+**附:bitmap 4096 → 65536 bump (同 commit `dbbdd97`):** main.jhyy 实际 max temp_id = 60462+ 跨过 4096 cap → bitmap bound 不够, 跟 sub-bug #3 fix 同步 bump。Memory cost: 65536*8 = 512KB per compile arena (16x vs 4096), 可忽略。
+
+**附:`___chkstk_ms` emit (commit `98793d1` v4.0.2):** `compiler/src0/codegen_amd64_emit_ctrl.jhyy:574-579` Windows x64 ABI stack probe。
+
+**附:`JHY_WRITE_IL=1` 进 fixed_point.sh (同 commit `dbbdd97`):** jhyy-side in-mem self-backend 默认不写 .il 盘, env var 强制 emit .il alongside .s, fixed_point.sh v1/v2/v3 三个 stage 拿得到 `.il` for byte-equal diff。
+
+**效果:** jhyy.exe Stage 1 跑 `jhyy.exe compile main.jhyy -o /tmp/v3.exe` → emit `movq (%r8), %rax` indirect dispatch 正确, argv0 deref 不再退化成 argv, `jhyy.exe --help` 不 SEGFAULT, regress 160/160 PASS HOLD sha `a3e15f89da0d50c9...`。
+
+## W-096 1024 cap partial 真修 (commit `573b189`)
+
+per `feedback_rca_first_root_cause` 1-iter RCA: per-fn pre-scan table 256 entries 触发 `if fn_count > 255 { fn_count = 255; }` 截断 → fn 256+ 走 `global-max fallback` → frame_size 公式错。**真根因不是 cap 太低, 而是 global-max fallback 路径对 256+ fn 不可用**。
+
+`compiler/src0/codegen_amd64_state.jhyy` 改 4 个 alloc size + 1 capacity check + 1 truncation:
+- `fn_starts / per_fn_max / per_fn_alloc` 各 `*u8` 类型注释 `i64[256]` → `i64[1024]`
+- `cg_state_init` 3 个 alloc `let xxx_bytes = (256 as i64) * (8 as i64)` → `(1024 as i64) * (8 as i64)` (24KB total zero-init)
+- `cg_compute_per_fn_max_temps` capacity check `if fn_count < 256 as i64` → `if fn_count < 1024 as i64`
+- truncation `if fn_count > 255 as i64 { fn_count = 255 as i64; }` → `if fn_count > 1023 as i64 { fn_count = 1023 as i64; }`
+
+**效果:** main.jhyy 997 fns 全部进 per_fn_max 表 (cap 1024 = 4x safety), regress 160/160 PASS HOLD (sha `a3e15f89da0d50c9...`), fn_starts[997] 哨兵 = 428K tokens。
+
+**Stage 2 仍 fail (DEFERRED W-096 emit-side 真修):** frame_size 公式仍 `(max_global+1)*8 = 484KB` (per_fn_max 是 global max, 不是 local), jhyy_v3.exe Stage 2 仍 SEGFAULT at 1st chkstk_ms probe。emit-side per-fn-local counter 真修 (~500 LOC) 推 v3.x mid。
+
+## Verification gates (v4.0.2.1 ship)
+
+| Gate | Status |
+|------|--------|
+| regress.py jhyy.exe 160/160 PASS | ✅ (sha `a3e15f89da0d50c9...`) |
+| regress.py jhyy_v1.exe.exe parity 160/160 PASS | ✅ (Stage 1 closure parity) |
+| fixed_point.sh v1/v2 byte-equal PASS | ✅ (post `JHY_WRITE_IL=1`) |
+| jhyy.exe compile main.jhyy → .s 10MB + gcc link OK + .exe 1.6MB | ✅ |
+| jhyy.exe --help 不 SEGFAULT | ✅ (post sub-bug #3) |
+| jhyy_v3.exe.exe --version EXIT=0 | ✅ (alloc-free path) |
+| jhyy_v3.exe.exe compile main.jhyy → SEGFAULT | ❌ DEFERRED W-096 v3.x mid |
+| ACTIVE bucket = 0 | ⚠️ 2 DEFERRED (W-074.6 + W-075 + W-096 → 3 entries;W-074.6 sub-bug 真修 partial → Stage 1 走通但 entry 仍 DEFERRED 因 Stage 2 阻塞) |
+
+## Commit cadence (v4.0.2.1 ship batch)
+
+| # | Commit | Status |
+|---|--------|--------|
+| 1 | `b0ce75e` docs(v4.0.2): W-074.6 RCA evidence + v4.0.2.1 plan 起点 | ✅ |
+| 2 | `dbbdd97` fix(sema+codegen+helpers+boot): W-074.6 sub-bug #3 真修 jhyy.exe Stage 1 | ✅ |
+| 3 | `026584d` test(regress): argv_deref_repro — minimal repro for W-074.6 sub-bug #3 | ✅ |
+| 4 | `fb22dd7` docs(workarounds): W-074.6 sub-bug #3 真修 RCA 修正 + W-096 frame blow-up 标记 | ✅ |
+| 5 | `850d815` fix(lexer+emit_call): W-074.6 partial 真修 — lex_il slots cap + 64-bit shift | ✅ |
+| 6 | `573b189` fix(codegen): W-074.6 partial 真修 — per-fn pre-scan table 256→1024 (W-096 1024 cap ship) | ✅ |
+| 7 | (本 commit batch) `docs(workarounds): W-096 DEFERRED entry + 索引表 manual restore post-rebuild_index script H3 blind spot` | ⏳ |
+| 8 | (本 commit batch) `docs(v4.0.2.1): umbrella changelog section + v4.0.2.1-plan.md NEW` | ⏳ |
+| 9 | tag `v4.0.2.1` (pushed after commit batch) | ⏳ |
+
+## References (v4.0.2.1 add)
+
+- v4.0.2.1 plan: `docs/plans/v4/v4.0.2.1-plan.md` (NEW)
+- W-074.6 + W-096 entries: `docs/internal/workarounds.md` (W-074.6 DEFERRED 维持, W-096 DEFERRED 新 entry)
+- v3.x mid W-096 emit-side per-fn-local counter plan: TBD (post-v4.0.2.1 ship 启动)
+- v4.0.0 final promote: TBD (post v3.x mid W-096 真修 ship)
+- Memory: `feedback_codegen_amd64_multifn` (multifn 误诊历史), `feedback_rca_first_root_cause` (3 sub-bug + W-096 RCA chain, 1-iter), `feedback_audit_single_commit_diff` (per-sub-bug 独立 commit, 可独立 audit), `feedback_verify_active_reproduces` (1024 cap 1-iter 验证), `feedback_jhyy_dbgfile_cwd_sensitive` (RCA 期间 `cd $JHYY_ROOT` 必要性), `feedback_plans_per_version` (v4.0.2.1-plan.md 独立 minor plan, 不进 v4.0.2 umbrella)
