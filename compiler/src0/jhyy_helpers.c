@@ -697,30 +697,23 @@ __attribute__((used)) int jh_cgstate_set_holds_address(void *bitmap) {
 
 /* v3.2.4 (W-093 真修 W-092 derived-address bitmap 1024 → 4096):
    jh_cgstate_set_holds_flag / jh_cgstate_get_holds_flag — byte-level access into
-   the 4096-entry u8 bitmap (prior 256 → 1024 → 4096 evolution per W-074.7.8 → W-090 → W-093)。
-   256 太低:std_vec_basic test_with_cap 一 fn 用 ~30 个 alloc + add 派生的
-   address-holder temp (每个 add ptr, off 都新增一个 derived-address temp, flag 它),
-   temp_id 跨过 256 上限 → bounds check no-op → emit_load 走 slot direct read
-   而非 indirect dispatch → 读 garbage → 测试 fail (EXIT=13)。W-090 bump 1024 = 4x safety
-   over std_vec_basic max (513); W-093 bump 4096 = 2x safety over big_test max (1932)。
-   **W-093 (W-092 真修)**: bitmap 1024 让 big_test 1 FAIL (`fn point_scale` 等),但
-   W-092 假设根因 = W-085 latent 错。W-093 RCA:big_test max temp_id = 1932,跨过 1024
-   → emit_copy / emit_load / emit_store 走 slot direct path (movl %eax, -<slot>(%rbp))
-   而非 indirect dispatch (movl (%r8), %eax)。跟 W-085 ACTIVE trigger pattern
-   `fn(*T,i32,i32)` 无关 — point_scale signature `(Point, i32)` 不是 *T+2i32 模式。
-   真根因 = bitmap bound 不够,不是 W-085 latent。1024 → 4096 后 big_test 全 temp_id
-   在 bound 内,indirect dispatch 生效,exit 0。
+   the bitmap. 256 → 1024 (W-090 std_vec_basic max 513) → 4096 (W-093 big_test
+   max 1932) → 65536 (v4.0.2.1 W-074.6 sub-bug #3, main.jhyy max 60462)。
+   main.jhyy 多 fn + 多 alloc + 多 pointer-arith → max temp_id = 60462, 跨过 4096
+   → bounds check no-op → emit_load/store 走 slot direct path → argv[0] deref
+   `(*argv_arr)` 退化成 copy → SEGV on any input。
    cg_record_temp_holds_address / cg_is_address_holder (state.jhyy) 调这两个,
-   因为 jhyy 没有 u8 direct deref 语法 (*(u8*)p = 1 不支持),走 C-bridge。 */
+   因为 jhyy 没有 u8 direct deref 语法 (*(u8*)p = 1 不支持),走 C-bridge。
+   Bitmap size = cg_max_temp_holds_address() = 65536, 必须跟 state.jhyy 一致。 */
 __attribute__((used)) int jh_cgstate_set_holds_flag(void *bitmap, long long idx) {
     if (bitmap == NULL) return -1;
-    if (idx < 0 || idx >= 4096) return -1;
+    if (idx < 0 || idx >= 65536) return -1;
     ((unsigned char *)bitmap)[idx] = 1;
     return 0;
 }
 __attribute__((used)) int jh_cgstate_get_holds_flag(void *bitmap, long long idx) {
     if (bitmap == NULL) return 0;
-    if (idx < 0 || idx >= 4096) return 0;
+    if (idx < 0 || idx >= 65536) return 0;
     return ((unsigned char *)bitmap)[idx] != 0 ? 1 : 0;
 }
 

@@ -554,6 +554,29 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
         // SysV: round frame_size up to 16-byte boundary for stack alignment
         n = (frame_size + (15 as i64)) & ((0 as i64) - (16 as i64));
     }
+
+    // v4.0.2.1 (W-074.6 sub-bug #3 真修副效应):Windows x64 ABI — when allocating
+    // > 4096 bytes on stack, must call ___chkstk_ms (mingw convention: triple
+    // underscore) to probe all pages so OS commits them. Without probe, large
+    // frames (e.g. main.jhyy 483KB+) cause SIGSEGV at first stack write. GCC
+    // emits this automatically when compiling C/C++ source, but our self-backend
+    // emits .s directly — we must include it ourselves. Linux/SysV doesn't need
+    // this (kernel pre-commits stack pages).
+    // ABI 关键细节 (per gcc emit pattern big_local.c test):
+    //   pushq %rbp
+    //   mov $N, %rax        <- set rax FIRST (= stack size)
+    //   call ___chkstk_ms   <- call chkstk_ms BEFORE subq (probes pages so push
+    //                          in chkstk_ms 不会触发 unhandled page fault)
+    //   subq $N, %rsp       <- allocate (chkstk_ms 已 commit pages)
+    // 错误顺序:subq first → rsp 指向 uncommitted memory → call push return
+    // address 触发 SEGV (call instruction 进入 first page fault BEFORE chkstk_ms
+    // 跑)。第一次 emit (subq 先) 就在 call 指令 SEGV (gdb bt 在 call 地址)。
+    if target_is_win(target_tag) == (1 as i32) && n > (4096 as i64) {
+        sb_append_cstr(arena, sb, "\tmovq $" as *u8);
+        sb_appendf_lld(arena, sb, "%lld" as *u8, n);
+        sb_append_cstr(arena, sb, ", %rax\n" as *u8);
+        sb_append_cstr(arena, sb, "\tcall ___chkstk_ms\n" as *u8);
+    }
     sb_append_cstr(arena, sb, "\tsubq $" as *u8);
     sb_appendf_lld(arena, sb, "%lld" as *u8, n);
     sb_append_cstr(arena, sb, ", %rsp\n" as *u8);

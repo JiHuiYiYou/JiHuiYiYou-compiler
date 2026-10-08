@@ -151,21 +151,23 @@ S_V2="$JHY_FP_BUILD_DIR/main_v2.s"
 S_V3="$JHY_FP_BUILD_DIR/main_v3.s"
 
 # v1 emit .il
-# jhyy_v1.exe.exe 是 v2.5.0 frozen baseline,不支持 --no-link flag (v2.8.3 才加)
-# 但默认 compile 仍产 .il/.s/.exe 三件套,直接从 .exe 旁边拿 .il 即可
-(cd "$JHYY_ROOT" && "$JHYY_V1" compile --target=amd64_win "$JHYY_INPUT" -o "$JHY_FP_BUILD_DIR/_v1_main" > /dev/null 2>&1) || true
+# v4.0.2.1 (W-074.6 真修): jhyy_v1.exe.exe = jhyy.exe copy per v1.4.4 convention,
+# so jhyy-side in-mem self path 默认 skip .il 写盘 → 必须 JHY_WRITE_IL=1 强制写 .il。
+# (V2.5.0 frozen baseline 用 C-side compile 仍写 .il — 跟 v4.0.2.1+ jhyy-side
+# 行为不一致; 需 JHY_WRITE_IL 兼容双形态 binary。)
+(cd "$JHYY_ROOT" && JHY_WRITE_IL=1 "$JHYY_V1" compile --target=amd64_win "$JHYY_INPUT" -o "$JHY_FP_BUILD_DIR/_v1_main" > /dev/null 2>&1) || true
 if [[ -f "$JHY_FP_BUILD_DIR/_v1_main.il" ]]; then
     cp "$JHY_FP_BUILD_DIR/_v1_main.il" "$IL_V1"
 else
     echo "  ⚠️  v1 .il not produced (compile failed?)" >&2
 fi
-# v2.15.0: copy .s also
+# v2.15.0: copy .s also (jhyy-side in-mem 自 backend 也产 .s alongside .il 当 JHY_WRITE_IL=1)
 if [[ -f "$JHY_FP_BUILD_DIR/_v1_main.s" ]]; then
     cp "$JHY_FP_BUILD_DIR/_v1_main.s" "$S_V1"
 fi
 
 # v2 emit .il
-(cd "$JHYY_ROOT" && "$JHYY_V2" compile --target=amd64_win --no-link "$JHYY_INPUT" -o "$JHY_FP_BUILD_DIR/_v2_main" > /dev/null 2>&1) || true
+(cd "$JHYY_ROOT" && JHY_WRITE_IL=1 "$JHYY_V2" compile --target=amd64_win --no-link "$JHYY_INPUT" -o "$JHY_FP_BUILD_DIR/_v2_main" > /dev/null 2>&1) || true
 if [[ -f "$JHY_FP_BUILD_DIR/_v2_main.il" ]]; then
     cp "$JHY_FP_BUILD_DIR/_v2_main.il" "$IL_V2"
 fi
@@ -174,7 +176,7 @@ if [[ -f "$JHY_FP_BUILD_DIR/_v2_main.s" ]]; then
 fi
 
 # v3 emit .il (用 project-root-aware copy)
-(cd "$JHYY_ROOT" && "$JHYY_V3_INROOT" compile --target=amd64_win --no-link "$JHYY_INPUT" -o "$JHY_FP_BUILD_DIR/_v3_main" > /dev/null 2>&1) || true
+(cd "$JHYY_ROOT" && JHY_WRITE_IL=1 "$JHYY_V3_INROOT" compile --target=amd64_win --no-link "$JHYY_INPUT" -o "$JHY_FP_BUILD_DIR/_v3_main" > /dev/null 2>&1) || true
 if [[ -f "$JHY_FP_BUILD_DIR/_v3_main.il" ]]; then
     cp "$JHY_FP_BUILD_DIR/_v3_main.il" "$IL_V3"
 fi

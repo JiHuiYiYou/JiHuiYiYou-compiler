@@ -2776,8 +2776,51 @@ fn check_module_populate_ret_type_map(ctx: *SemaContext, md: *NodeModule) -> i32
                             }
                         }
                     }
-                    // Hash fn sym name (null-terminated C string).
-                    let h = hash_string((*fn_sym).name);
+                    // Hash fn sym name as it'll appear in QBE IL: "module__name"
+                    // when sym has module (per codegen abi_win_emit_mangled_name
+                    // `ir_emit_str("$"); ir_emit_str(module); ir_emit_str("__");
+                    // ir_emit_str(name)`), else just "name". emit_call
+                    // (codegen_amd64_emit_call.jhyy Step 7) hash_string_n 拿同样
+                    // 名字 + len 查表 → module 前缀必须一致,否则 emit_call 不 flag
+                    // address-holder → ptr_add_u8 / 等 imported ptr-returning fn
+                    // 调用结果 deref 走 slot direct load 而非 indirect dispatch
+                    // → argv[0] / 类似 `*imported_ptr_call(...)` 模式退化成
+                    // copy pointer value → 后续 SEGV (W-074.6 sub-bug #3 真修)。
+                    let mod_name = (*fn_sym).module;
+                    let name_only = (*fn_sym).name;
+                    let name_only_len = strlen(name_only);
+                    let mut h: i64 = 0 as i64;
+                    if mod_name != (0 as *u8) {
+                        let mod_len = strlen(mod_name);
+                        let total = mod_len + (2 as i64) + name_only_len;
+                        let mbuf = arena_alloc(arena, total + (1 as i64));
+                        // byte-by-byte copy (avoid *i32 misalign/over-read UB)
+                        let mut kk: i64 = 0 as i64;
+                        while kk < mod_len {
+                            let md = (mbuf as i64 + kk) as *u8;
+                            let ms = (mod_name as i64 + kk) as *u8;
+                            let sb = (*(ms as *u8)) as i32;
+                            (*(md as *u8)) = sb as u8;
+                            kk = kk + (1 as i64);
+                        }
+                        let mu0 = (mbuf as i64 + mod_len) as *u8;
+                        (*(mu0 as *u8)) = '_' as u8;
+                        let mu1 = (mbuf as i64 + mod_len + (1 as i64)) as *u8;
+                        (*(mu1 as *u8)) = '_' as u8;
+                        let mut jj: i64 = 0 as i64;
+                        while jj < name_only_len {
+                            let nd = (mbuf as i64 + mod_len + (2 as i64) + jj) as *u8;
+                            let ns = (name_only as i64 + jj) as *u8;
+                            let sb = (*(ns as *u8)) as i32;
+                            (*(nd as *u8)) = sb as u8;
+                            jj = jj + (1 as i64);
+                        }
+                        let nul = (mbuf as i64 + total) as *u8;
+                        (*(nul as *u8)) = 0 as u8;
+                        h = hash_string_n(mbuf, total);
+                    } else {
+                        h = hash_string_n(name_only, name_only_len);
+                    }
                     let entry = ptr_add_u8(map_buf, map_n * RET_TYPE_MAP_ENTRY_SIZE())
                         as *RetTypeMapEntry;
                     (*entry).name_hash = h;
