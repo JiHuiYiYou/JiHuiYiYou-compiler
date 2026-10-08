@@ -695,6 +695,22 @@ __attribute__((used)) int jh_cgstate_set_holds_address(void *bitmap) {
     return 0;
 }
 
+/* v4.0.2.2 (W-096 emit-side per-fn-local counter 真修): jh_cgstate_get_state /
+   jh_cgstate_set_state — expose current CGState pointer so cg_offset_for_temp
+   + cg_local_t_from_global (no state parameter) can read per_fn_base_t[cur_fn_idx]
+   做 global t → local t 翻译。Setter 在 cg_state_init 入口调一次 (per-compile
+   lifetime),getter hot-path 读。Pattern 跟 jh_cgstate_get_temp_slots 一致
+   (C-side static BSS-zero init)。 */
+
+static void *g_jh_cgstate_state = (void *)0;
+__attribute__((used)) void *jh_cgstate_get_state(void) {
+    return g_jh_cgstate_state;
+}
+__attribute__((used)) int jh_cgstate_set_state(void *s) {
+    g_jh_cgstate_state = s;
+    return 0;
+}
+
 /* v3.2.4 (W-093 真修 W-092 derived-address bitmap 1024 → 4096):
    jh_cgstate_set_holds_flag / jh_cgstate_get_holds_flag — byte-level access into
    the bitmap. 256 → 1024 (W-090 std_vec_basic max 513) → 4096 (W-093 big_test

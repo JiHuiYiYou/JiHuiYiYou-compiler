@@ -65,8 +65,11 @@ fn TEMP_SLOT_BYTES() -> i64 { return 8 as i64; }
 // v2.5.0 简化:offset = -(32 + t * 8)。返回 i64(matches GAS `-$N(%rbp)` 形式)。
 // v2.8.0: 仍用于 backward compat (jmp/jnz label 间接路径);
 // 真 target-aware path 用 compute_offset_for_temp_id_with_target。
+// v4.0.2.2 (W-096 emit-side per-fn-local counter 真修): 改用 local t 翻译
+// (cg_local_t_from_global 从 C-bridge 拿当前 state), 跟 cg_offset_for_temp 一致。
 fn compute_offset_for_temp_id(t: i64) -> i64 {
-    let raw = SHADOW_SPACE() + t * TEMP_SLOT_BYTES();
+    let local_t4 = cg_local_t_from_global(t);
+    let raw = SHADOW_SPACE() + local_t4 * TEMP_SLOT_BYTES();
     return 0 as i64 - raw;
 }
 
@@ -74,13 +77,15 @@ fn compute_offset_for_temp_id(t: i64) -> i64 {
 // v2.8.0: target-aware variant。Win (target_is_win=1): `-(32 + t*8)`;
 // SysV (target_is_win=0): `-(t*8)`。emit_jnz 用此拿 cond slot offset,
 // emit_func_header 用 total_alloc (state-tracked) 而非此函数。
+// v4.0.2.2 (W-096): 改用 local t 翻译。
 fn compute_offset_for_temp_id_with_target(t: i64, target_tag: i32) -> i64 {
+    let local_t5 = cg_local_t_from_global(t);
     if target_is_win(target_tag) == (1 as i32) {
-        let raw = SHADOW_SPACE() + t * TEMP_SLOT_BYTES();
+        let raw = SHADOW_SPACE() + local_t5 * TEMP_SLOT_BYTES();
         return 0 as i64 - raw;
     }
     // SysV: no shadow
-    return 0 as i64 - t * TEMP_SLOT_BYTES();
+    return 0 as i64 - local_t5 * TEMP_SLOT_BYTES();
 }
 
 // ════════════════════════════════════════════════════
@@ -514,15 +519,25 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
         let pfm_p = ptr_add_u8((*cg).per_fn_max, (*cg).cur_fn_idx * (8 as i64)) as *i64;
         pfm_val = *pfm_p;
     }
-    let frame_max: i64 = if use_per_fn != (0 as i32) {
-        pfm_val
+    // v4.0.2.2 (W-096 emit-side per-fn-local counter 真修):frame_max 改用
+    // local max (= pfm_val - prev_pfm),让 frame_size 跟 slot offset 物理一致
+    // (slot offset 用 local_t = global_t - per_fn_base_t[cur_fn_idx])。fn 0
+    // 用 0 作 prev (per_fn_max[-1] 不存在), fn>0 用 per_fn_max[cur_fn_idx-1]。
+    // legacy global-max fallback 保持 frame_max_temp 不变 (跟 V2 v4.0.0 兼容)。
+    let mut prev_pfm: i64 = 0 as i64;
+    if use_per_fn != (0 as i32) && (*cg).cur_fn_idx > (0 as i64) {
+        let prev_p = ptr_add_u8((*cg).per_fn_max, ((*cg).cur_fn_idx - (1 as i64)) * (8 as i64)) as *i64;
+        prev_pfm = *prev_p;
+    }
+    let local_max: i64 = if use_per_fn != (0 as i32) {
+        pfm_val - prev_pfm
     } else {
         (*cg).frame_max_temp
     };
-    let mut frame_size: i64 = if frame_max < (0 as i64) {
+    let mut frame_size: i64 = if local_max < (0 as i64) {
         0 as i64
     } else {
-        (frame_max + (1 as i64)) * TEMP_SLOT_BYTES()
+        (local_max + (1 as i64)) * TEMP_SLOT_BYTES()
     };
     // v3.1.0 W-087 (alloc pool frame offset 真修,applied on top of V2 wholesale port):
     // emit_func_header 时 next_offset=0 + total_alloc=0 (per cg_state_reset_for_function)

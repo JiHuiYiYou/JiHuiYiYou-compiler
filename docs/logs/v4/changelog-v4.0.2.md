@@ -281,3 +281,89 @@ per `feedback_rca_first_root_cause` 1-iter RCA: per-fn pre-scan table 256 entrie
 - v3.x mid W-096 emit-side per-fn-local counter plan: TBD (post-v4.0.2.1 ship 启动)
 - v4.0.0 final promote: TBD (post v3.x mid W-096 真修 ship)
 - Memory: `feedback_codegen_amd64_multifn` (multifn 误诊历史), `feedback_rca_first_root_cause` (3 sub-bug + W-096 RCA chain, 1-iter), `feedback_audit_single_commit_diff` (per-sub-bug 独立 commit, 可独立 audit), `feedback_verify_active_reproduces` (1024 cap 1-iter 验证), `feedback_jhyy_dbgfile_cwd_sensitive` (RCA 期间 `cd $JHYY_ROOT` 必要性), `feedback_plans_per_version` (v4.0.2.1-plan.md 独立 minor plan, 不进 v4.0.2 umbrella)
+
+# v4.0.2.2 — W-096 emit-side per-fn-local counter 真修 (✅ ship pending tag)
+
+**Ship date:** pending tag · **Branch:** `main` · **Tag:** `v4.0.2.2` (pushing after ship batch commit) · **Preconditions:** v4.0.2.1 ship pending (W-074.6 3 sub-bug + W-096 1024 cap)
+
+> **Note:** v4.0.2.2 = **W-096 emit-side per-fn-local counter 真修 sprint** (改 cg_local_t_from_global check 移除 fn_count, 改用 `cur_fn_idx - 1` 读 per_fn_base_t[idx]) → jhyy.exe Stage 1 emit slot offset 跟 frame_size per-fn-local 一致, 484KB → 9KB frame hold。Stage 2 closure chain 仍因 separate jhyy-side emit bug 卡住 (jh_read_file _wsplitpath_s SEGV), 推 v4.0.2.3+ 真修。
+
+> **ACTIVE bucket 当前: 0** (W-096 ✅ RESOLVED + W-074.6 仍 DEFERRED 但 Stage 1 走通;W-075 仍 DEFERRED multifn codegen 限制)。
+
+---
+
+## W-096 emit-side per-fn-local counter 真修
+
+**触发面:** jhyy.exe Stage 1 emit slot offset 用 `cg_local_t_from_global(global_t)` 翻译 global t → local t (per `feedback_rca_first_root_cause` 1-iter RCA chain)。OLD check `cur_fn_idx >= fn_count` 跟 `cg_state_bump_fn_idx` 在 `emit_func_header` 末尾调 (v2.11.3 T4-h) 冲突 — body emit 时 `cur_fn_idx = function_index + 1`,所以 last function (fi = fn_count - 1) → cur_fn_idx = fn_count → 错误 reject 走 fallback → `return global_t` → slot offset `-(32 + global_t * 8)` 越界 9KB frame (`global_t = 60472` → offset `-483808`)。
+
+**RCA 2026-10-08 (3 fix iter chain):**
+- **Fix 1 (per-fn-local frame_size):** 改 `frame_size = (per_fn_max[cur_fn_idx] - per_fn_max[cur_fn_idx-1]) * 8` — frame 484KB → 9KB, 但 emit slot offset 仍 global t → 越界
+- **Fix 2 (cur_fn_idx off-by-one):** 改 `< 0` check 配 `cur_fn_idx = function_index + 1` 注释 — incomplete
+- **Fix 3 (fn_count check 移除):** 移除 `cur_fn_idx >= fn_count` check, 改 `per_fn_base_t == 0 || cur_fn_idx < 1` 后用 `idx = cur_fn_idx - 1` 读 per_fn_base_t[idx] 0..N-1 索引
+
+**Code diff (`compiler/src0/codegen_amd64_state.jhyy:742-781`):**
+```jhyy
+fn cg_local_t_from_global(global_t: i64) -> i64 {
+    if global_t < (0 as i64) {
+        return 0 as i64;
+    }
+    let st_p = jh_cgstate_get_state();
+    if st_p == (0 as *u8) {
+        return global_t;
+    }
+    let st = st_p as *CGState;
+    // [W-096 fix 3] 用 per_fn_base_t == 0 || cur_fn_idx < 1 检查后
+    //  用 idx = cur_fn_idx - 1 读 per_fn_base_t[idx] 匹配 pre-scan 0..N-1
+    if (*st).per_fn_base_t == (0 as *u8) || (*st).cur_fn_idx < (1 as i64) {
+        return global_t;
+    }
+    let idx = (*st).cur_fn_idx - (1 as i64);
+    if idx < (0 as i64) {
+        return global_t;
+    }
+    let bp = ptr_add_u8((*st).per_fn_base_t, idx * (8 as i64)) as *i64;
+    let base_t = *bp;
+    let local_t = global_t - base_t;
+    if local_t < (0 as i64) {
+        return 0 as i64;
+    }
+    return local_t;
+}
+```
+
+**为什么 v4.0.2.1 1024 cap 修了 jhyy.exe Stage 1 但 v3 binary 仍 fail:** jhyy.exe 是从 intermediate source 编的, 同时有 NEW check (`per_fn_base_t == 0 || cur_fn_idx < 0`) AND OLD check (`cur_fn_idx >= fn_count`)。v4.0.2.1 ship 只 1024 cap + emit frame_size per-fn-local; emit slot offset 仍 global t via OLD check reject → last function slot offset 越界。v4.0.2.2 移除 fn_count check。
+
+**验证 (per `feedback_fix_evaluation_rule` 5/5 PASS):**
+- `jhyy.exe` (rebuilt via `jhyy_stage0.exe compile main.jhyy`) cg_local_t_from_global disasm: only `setl` (cur_fn_idx < 1), no `0xb0` (fn_count) reference ✅
+- `jhyy_v3_test.exe` (self-compiled) slot offsets: max `-0x2018` (frame alloc), `-0x70` / `-0x78` / `-0xc8` (normal slots) — no `-483888` garbage ✅
+- regress 159/160 PASS HOLD on `jhyy.exe` (std_math_basic pre-existing EXIT=4, per `feedback_regress_clean_count` 159 = baseline) ✅
+- `jhyy_v2_test.exe compile main.jhyy` closure hits separate jhyy-side emit bug in `jh_read_file` (Windows CRT `_wsplitpath_s` SEGV) — out of scope, defer to v4.0.2.3+ ⚠️
+
+## Verification gates (v4.0.2.2 ship)
+
+| Gate | Status |
+|------|--------|
+| regress.py jhyy.exe 159/160 PASS (std_math_basic pre-existing) | ✅ (sha `92ad34725ea8661d...`) |
+| regress.py jhyy_v1.exe.exe parity 159/160 PASS | ✅ (Stage 1 closure parity) |
+| cg_local_t_from_global disasm: no fn_count ref, only cur_fn_idx < 1 | ✅ |
+| jhyy.exe compile main.jhyy → .s 10MB + gcc link OK + .exe 1.6MB | ✅ |
+| jhyy_v3_test.exe main_jhyy slot offsets: max -0x2018 (9KB frame) | ✅ |
+| jhyy_v2_test.exe compile main.jhyy → SEGFAULT (jh_read_file _wsplitpath_s) | ⚠️ separate jhyy-side emit bug, defer v4.0.2.3 |
+| ACTIVE bucket = 0 | ✅ (W-096 ✅ RESOLVED + W-074.6 DEFERRED + W-075 DEFERRED) |
+
+## Commit cadence (v4.0.2.2 ship batch)
+
+| # | Commit | Status |
+|---|--------|--------|
+| 1 | `docs(workarounds): W-096 DEFERRED → RESOLVED entry` | ⏳ |
+| 2 | `fix(codegen+helpers+boot): W-096 emit-side per-fn-local counter 真修 (cur_fn_idx - 1 read per_fn_base_t[idx], fn_count check 移除)` | ⏳ |
+| 3 | `rebuild(jhyy.exe): stage0 compile main.jhyy → jhyy.exe (sha 92ad34725ea8661d...)` | ⏳ |
+| 4 | `docs(changelog): v4.0.2.2 W-096 emit-side 真修 section` | ⏳ |
+| 5 | tag `v4.0.2.2` (pushed after commit batch) | ⏳ |
+
+## References (v4.0.2.2 add)
+
+- W-096 entry: `docs/internal/workarounds.md` (✅ RESOLVED 2026-10-08)
+- v3.x mid W-096 emit-side per-fn-local counter plan: 推 v4.0.2.3 (Stage 2 jhyy-side emit bug 单独 fix)
+- v4.0.0 final promote: TBD (post v4.0.2.3 Stage 2 closure 真修 ship)
+- Memory: `feedback_codegen_amd64_multifn` (5/5 gate 误诊历史), `feedback_rca_first_root_cause` (3 fix iter chain, 1-iter), `feedback_audit_single_commit_diff` (per-fix 独立 audit), `feedback_verify_active_reproduces` (1024 cap + emit-side 1-iter 验证), `feedback_jhyy_dbgfile_cwd_sensitive` (RCA 期间 `cd $JHYY_ROOT`), `feedback_plans_per_version` (v4.0.2.2 独立 minor plan)

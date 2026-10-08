@@ -195,6 +195,13 @@ type CGState = struct {
     fn_starts: *u8,    // i64[1024]: 每个 fn start token idx;fn_starts[fn_count]=n 哨兵
     per_fn_max: *u8,   // i64[1024]: 每个 fn 的 max temp id;frame_size = (max+1)*8
     per_fn_alloc: *u8, // i64[1024]: 每个 fn 的 total allocN sum;W-087 alloc pool reserve
+    // v4.0.2.2 (W-096 emit-side per-fn-local counter 真修):per-fn temp base,
+    // 让 cg_offset_for_temp 把 global %tN (QBE IL 跨 fn 累加) 翻译成本 fn 的
+    // local t (从 0 起, frame_size = (local_max+1)*8)。per_fn_base_t[0]=0,
+    // per_fn_base_t[i] = per_fn_max[i-1] + 1 for i>0。self-backend self path
+    // regalloc_run skip (per codegen_amd64.jhyy:335) → 永远走 formula 路径
+    // → 必须改 formula 用 local t,否则 frame_size 跟 slot offset 不一致。
+    per_fn_base_t: *u8, // i64[1024]: 每个 fn 的 global t 起点;local_t = t - per_fn_base_t[cur_fn_idx]
     fn_count: i64,     // 实际 fn 数 (0 = 没跑 pre-scan → fall through global-max)
 
     // v2.11.15 Iter 2 (C.3 emit_phi 真修): pending phi resolution table。
@@ -256,6 +263,13 @@ extern fn jh_cgstate_set_holds_address(p: *u8) -> i32;
 // v2.11.8: byte-level access into 256-entry u8 bitmap (jhyy 没有 u8 direct deref)。
 extern fn jh_cgstate_set_holds_flag(bitmap: *u8, idx: i64) -> i32;
 extern fn jh_cgstate_get_holds_flag(bitmap: *u8, idx: i64) -> i32;
+
+// v4.0.2.2 (W-096 emit-side per-fn-local counter 真修): expose current CGState
+// pointer via C-bridge (per jh_cgstate_get_temp_slots pattern)。cg_local_t_from_global
+// 跟 cg_offset_for_temp 不接 state 参数,需要从 C-side static 拿当前 state 才能
+// 读 per_fn_base_t[cur_fn_idx]。cg_state_init 入口 set 一次(per-compile lifetime)。
+extern fn jh_cgstate_get_state() -> *u8;
+extern fn jh_cgstate_set_state(s: *u8) -> i32;
 
 // MAX_TEMP_SLOTS — alloc-tracking 数组大小。4096 (per W-094 2026-09-26
 // 真修):256 太低,big_test max temp_id = 1932 跨过 256 → cg_record_temp_slot
@@ -467,6 +481,16 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     let pfa_ptr = arena_alloc(arena, pfa_bytes);
     let _zero_pfa = memset(pfa_ptr, 0 as i32, pfa_bytes);
     (*s).per_fn_alloc = pfa_ptr;
+    // v4.0.2.2 (W-096 emit-side per-fn-local counter 真修):per_fn_base_t alloc
+    // (8KB) + zero-init。cg_compute_per_fn_max_temps Phase 2 写 per_fn_base_t[i]
+    // = per_fn_max[i-1] + 1 (i=0 用 0)。global t → local t 翻译表。
+    let pfbt_bytes = (1024 as i64) * (8 as i64);
+    let pfbt_ptr = arena_alloc(arena, pfbt_bytes);
+    let _zero_pfbt = memset(pfbt_ptr, 0 as i32, pfbt_bytes);
+    (*s).per_fn_base_t = pfbt_ptr;
+    // wire C-side state pointer for cg_offset_for_temp / cg_local_t_from_global
+    // (无 state 参数 hot path 通过 jh_cgstate_get_state 拿当前 state)
+    let _wr_st = jh_cgstate_set_state(state);
     (*s).fn_count = 0 as i64;
     // v2.11.15 Iter 2 (C.3 emit_phi 真修):alloc pending phi resolution table。
     //   4 parallel i64 arrays × 128 entries × 8 bytes = 4KB total negligible。
@@ -705,11 +729,62 @@ fn target_is_win(target_tag: i32) -> i32 {
 // recorded == 0 → fall through regalloc / formula。
 // 这修 nested_struct_deep + struct_val_pass pre-existing bug: alloc'd %tN 之前
 // 走 formula `-(32 + t*8)` 跟 alloc 真分配的 slot 不一致 → read garbage。
+//
+// v4.0.2.2 (W-096 emit-side per-fn-local counter 真修):formula 路径的
+// `-(32 + t*8)` 改 `-(32 + (t - per_fn_base_t[cur_fn_idx]) * 8)`。
+// global t (QBE IL 跨 fn 累加, main.jhyy max=60656) 必须翻译成 local t
+// (从 0 起, frame_size 用 local_max 算) 才能让 frame 跟 slot 一致
+// (否则 frame 484KB → 9KB 后 slot offset -403000 越界 9KB frame)。
+// helper `cg_local_t_from_global` 集中翻译,formula 路径用它。
+fn cg_local_t_from_global(global_t: i64) -> i64 {
+    if global_t < (0 as i64) {
+        return 0 as i64;
+    }
+    // jh_cgstate_get_state() 拿到当前 CGState 指针(per C-bridge convention)
+    let st_p = jh_cgstate_get_state();
+    if st_p == (0 as *u8) {
+        return global_t;
+    }
+    let st = st_p as *CGState;
+    if (*st).per_fn_base_t == (0 as *u8) || (*st).cur_fn_idx < (1 as i64) {
+        return global_t;
+    }
+    // v4.0.2.3 (W-096 fix 3 — fn_count off-by-one):cur_fn_idx = function_index + 1
+    // (after cg_state_bump_fn_idx in emit_func_header 末尾)。Pre-scan 写
+    // per_fn_base_t[fi] for fi=0..fn_count-1。所以 cur_fn_idx-1 必须 < fn_count,
+    // 即 cur_fn_idx 必须 ≤ fn_count。Last function (fi=fn_count-1) →
+    // cur_fn_idx = fn_count,被错误 reject 走 fallback → slot offset 越界。
+    // Fix:用 idx = cur_fn_idx - 1 后 bounds check 0..fn_count-1,不要在 cur_fn_idx
+    // 上早 reject。
+    // v4.0.2.2 (W-096 fix 2 — cur_fn_idx off-by-one):cg_state_bump_fn_idx
+    // 在 emit_func_header 末尾调(per v2.11.3 T4-h),所以 body emit 时
+    // cur_fn_idx = function_index + 1。Pre-scan 写 per_fn_base_t[fi] 用
+    // function_index (0..N-1)。所以读 per_fn_base_t 要用 (cur_fn_idx - 1)
+    // 才匹配 pre-scan 索引。emit_func_header 自己 (cur_fn_idx = function_index
+    // 时调) 读 per_fn_max[cur_fn_idx] 是 correct (因为 frame_size 在 bump 前算)。
+    // **关键不变量**:cur_fn_idx 在 emit_func_header 入口 = function_index
+    // (= pre-scan fi)。emit_func_header 末尾 bump → body emit 时
+    // cur_fn_idx = function_index + 1。所以 body 路径 (cg_offset_for_temp
+    // → cg_local_t_from_global) 要 (cur_fn_idx - 1) 才匹配 pre-scan。
+    let idx = (*st).cur_fn_idx - (1 as i64);
+    if idx < (0 as i64) {
+        return global_t;
+    }
+    let bp = ptr_add_u8((*st).per_fn_base_t, idx * (8 as i64)) as *i64;
+    let base_t = *bp;
+    let local_t = global_t - base_t;
+    if local_t < (0 as i64) {
+        return 0 as i64;
+    }
+    return local_t;
+}
 fn cg_offset_for_temp(t: i64) -> i64 {
     if t < (0 as i64) {
         return 0 as i64;
     }
     // v2.11.5 alloc-tracking:查询 alloc_slot 表 (per-fn CGState.temp_slot_for_id)。
+    // v4.0.2.2 (W-096): temp_slot_for_id 表 keyed by global t (cross-fn累加)
+    // 是 correct (alloc-result 是 unique by global t), 不变。
     let slots = jh_cgstate_get_temp_slots();
     if slots != (0 as *u8) && t < cg_max_temp_slots() {
         let p = ptr_add_u8(slots, t * (8 as i64)) as *i64;
@@ -718,13 +793,17 @@ fn cg_offset_for_temp(t: i64) -> i64 {
             return recorded;
         }
     }
-    // 委托 regalloc query(per Unit C 集成契约)
+    // 委托 regalloc query(per Unit C 集成契约) — keyed by global t (不需改)
     let spill_off = regalloc_query_spill_off_no_arr(t);
     if spill_off != (0 as i64) {
         return spill_off;
     }
-    // fallback:1-to-1 栈分配公式(Win 32-byte shadow + 8/temp)
-    return (0 as i64) - (32 as i64) - t * (8 as i64);
+    // v4.0.2.2 (W-096 emit-side per-fn-local counter 真修):formula 路径改用
+    // local t (从 0 起, frame_size 用 local_max 算)。global t → local t
+    // 翻译 per cg_local_t_from_global, 否则 frame 484KB → 9KB 后
+    // global t * 8 = -485280 越界 9KB frame。
+    let local_t = cg_local_t_from_global(t);
+    return (0 as i64) - (32 as i64) - local_t * (8 as i64);
 }
 
 // cg_offset_for_temp_with_target — v2.8.0 target-aware variant
@@ -757,10 +836,13 @@ fn cg_offset_for_temp_with_target(t: i64, target_tag: i32) -> i64 {
     if spill_off != (0 as i64) {
         return spill_off;
     }
+    // v4.0.2.2 (W-096 emit-side per-fn-local counter 真修):formula 路径
+    // 改用 local t (跟 cg_offset_for_temp 同 per-fn-local 翻译)。
+    let local_t2 = cg_local_t_from_global(t);
     if target_is_win(target_tag) == (1 as i32) {
-        return (0 as i64) - (32 as i64) - t * (8 as i64);
+        return (0 as i64) - (32 as i64) - local_t2 * (8 as i64);
     }
-    return (0 as i64) - t * (8 as i64);
+    return (0 as i64) - local_t2 * (8 as i64);
 }
 
 // alloc_slot(size: i64) -> i64
@@ -1508,6 +1590,19 @@ fn cg_compute_per_fn_max_temps(state: *u8, tok_p: *u8, tok_size: i64, n: i64) ->
         }
         let p2 = ptr_add_u8((*s).per_fn_max, fi * (8 as i64)) as *i64;
         *p2 = max_t;
+        // v4.0.2.2 (W-096 emit-side per-fn-local counter 真修):per_fn_base_t[fi]
+        // = 本 fn body 起始的 global t。fi=0 用 0 (QBE 第一个 fn 从 t0 起);
+        // fi>0 用上一 fn 的 max + 1 (QBE IL 跨 fn 累加 t counter,本 fn 的最小
+        // global t = 上一 fn max + 1)。cg_offset_for_temp 用这个算 local_t
+        // = global_t - per_fn_base_t[cur_fn_idx] → frame_size 用 local_max
+        // (不再是 global max 484KB) 跟 slot offset 物理一致。
+        let mut base_t: i64 = 0 as i64;
+        if fi > (0 as i64) {
+            let prev_p = ptr_add_u8((*s).per_fn_max, (fi - (1 as i64)) * (8 as i64)) as *i64;
+            base_t = *prev_p + (1 as i64);
+        }
+        let pfbt_p = ptr_add_u8((*s).per_fn_base_t, fi * (8 as i64)) as *i64;
+        *pfbt_p = base_t;
         // v3.1.0 W-087 (alloc pool frame offset 真修):per-fn alloc8 sum
         // 累加 alloc pool size (cg_alloc_slot per-alloc advance)。emit_func_header
         // 用这个 + 8192 base 决定 frame_size 覆盖 alloc pool。
