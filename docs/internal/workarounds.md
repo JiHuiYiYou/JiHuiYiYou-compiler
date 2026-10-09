@@ -6157,7 +6157,7 @@ RCA 突破:`cg_local_t_from_global` 的 OLD check `cur_fn_idx >= fn_count` 跟 `
 ## W-097: jhyy-side codegen emit_func_header per_fn_max lookup operand swap → frame > 4096B → ___chkstk_ms clobber rcx → 所有 C 函数 call SEGV (推 v4.0.2.3+)
 
 **ID:** W-097
-**状态:** DEFERRED since 2026-10-09 (v4.0.2.3 wip — jhyy-side codegen 真修需 separate deep fix;W-096 fix 4 off-by-one 尝试 REVERTED 2026-10-09 因 regress 7/160)
+**状态:** DEFERRED since 2026-10-09 (v4.0.2.3 wip → 推 v4.0.2.5; jhyy-side codegen 多-field-access 表达式 emit 真修需 separate deep sprint;W-096 fix 4 off-by-one 尝试 REVERTED 2026-10-09 因 regress 7/160;audit expansion 2026-10-09 surface 25 sites 跨 10 src0/ 文件 vs checklist 原始列 3 sites)
 **日期:** 2026-10-08 (W-096 真修 session 期间发现 W-NEW jh_read_file SEGV) → 2026-10-09 (RCA 深挖 + W-096 fix 4 revert + 登记)
 
 **触发面:** `compiler/src0/codegen_amd64_emit_ctrl.jhyy:519-573` `emit_func_header` 函数 — jhyy-side codegen (jhyy.exe / jhyy_v1.exe.exe 编 src0/main.jhyy) 处理 `ptr_add_u8((*cg).per_fn_max, ((*cg).cur_fn_idx - (1 as i64)) * (8 as i64))` 这类 multi-field-access 表达式时,emit wrong QBE IL (operand swap + mul operand 用错 field)。
@@ -6190,7 +6190,24 @@ RCA 突破:`cg_local_t_from_global` 的 OLD check `cur_fn_idx >= fn_count` 跟 `
 
 **失效条件:** jhyy-side codegen `emit_func_header` 处理 multi-field-access 表达式 (ptr_add_u8 跟 `(field - N) * 8` 组合) 真修 — 需要 separate deep W-NNN+ entry 跟踪 (RCA 路径: 检查 jhyy-side codegen 怎么 emit field access 跟 binary expression 的 operand order)。
 
-**superseder:** N/A (DEFERRED — 待 v4.0.2.3+ 启动 jhyy-side codegen 真修 sprint)
+**superseder:** N/A (DEFERRED — 待 v4.0.2.5 启动 jhyy-side codegen 真修 sprint)
+
+**Scope expansion 2026-10-09 (audit expansion):**
+W-097 audit checklist (`docs/audit/w-097-emit-audit-checklist.md`) 原始列 3 sites in `emit_ctrl` (line 519/529/551)。Re-audit grep `* (8 as i64)` ptr_add_u8 patterns 跨 src0/ surface **25 sites** in 10 files with multi-step arithmetic (`(var - N) * 8`):
+
+| File | Sites |
+|------|-------|
+| `compiler/src0/codegen.jhyy` | 7+ (NODE_BLOCK + NODE_RETURN defer-list + others) |
+| `compiler/src0/codegen_amd64_emit_call.jhyy` | 2 (multi-arg field access) |
+| `compiler/src0/codegen_amd64_peephole.jhyy` | 8+ |
+| `compiler/src0/codegen_amd64_state.jhyy` | 5+ (incl. `cg_compute_per_fn_max_temps` 1544+) |
+| `compiler/src0/main.jhyy` | 6+ |
+| `compiler/src0/parser.jhyy` | 3 |
+| `compiler/src0/sema.jhyy` | 7+ |
+| `compiler/src0/symtab.jhyy` | 1 |
+| `compiler/src0/types.jhyy` | small |
+
+**RCA 假说 (未验)**: 单一根因可能在 jhyy-side codegen `cg_expr` NODE_BINARY → `ir_emit_binary` 路径,对 ` (a - 1) * 8 ` 类型 chained binop-as-fn-arg emit 的 operand ordering。若 single fix in codegen 可消解 all 25 sites,v4.0.2.5 plan commit count 可压到 1-fix + audit + docs。否则需 per-site hoist decomposition (3 atomic steps 模式) + script 自动化 + per-site regress。
 
 **引用:**
 - 源码: `compiler/src0/codegen_amd64_emit_ctrl.jhyy:519-573` (emit_func_header per_fn_max lookup)
@@ -6199,7 +6216,7 @@ RCA 突破:`cg_local_t_from_global` 的 OLD check `cur_fn_idx >= fn_count` 跟 `
 - commit `95ba01a` (W-096 fix 3 ship,per_fn_base_t local_t translation)
 - regress baseline sha: `92ad34725ea8661d...` (159/160 PASS HOLD)
 - regress W-096 fix 4 ship build sha: `5d62c4814d49a18c...` (152/160, 7 regressions)
-- plan: `docs/plans/v4/v4.0.2.3-plan.md` (待写)
+- plan: `docs/plans/v4/v4.0.2.5-plan.md` (待写)
 - related: [[W-074.6]] (Stage 2 closure 阻塞同根因), [[W-096]] (frame blow-up upstream 真修)
 
 ## W-098: jhyy-side codegen emit i64 literal (>32-bit range) 截成 i32 + cltq sign-extend → 高 32 位丢 (W-075 mem_set 真修 surface;per `feedback_rca_first_root_cause` 1-iter RCA)
