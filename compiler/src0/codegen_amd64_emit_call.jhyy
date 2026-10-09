@@ -380,17 +380,41 @@ fn cg_f32_imm_bits(text: *u8, len: i64, from: i64, fallback_imm: i64) -> i64 {
 //   用 movabsq $BITS, %rax; movq %rax, mem 实现 (single-instruction 不够,
 //   因为 `movq $0x4014000000000000, mem` 跟 `movabsq` syntax 在 GAS 不一致)。
 //   f32 IMM 同理,但 Iter 1b scope 仅 d_3/d_5,f32 cluster 在 Iter 3 C.4 处理。
+// v4.0.2.2 (W-098 真修):QBE_L_LOCAL + imm > 32-bit signed range 走 movabsq + movq。
+//   `movq $0x100000001, mem` 被 GAS reject (imm64 > 2^31 范围), 必须用
+//   `movabsq $imm, %rax; movq %rax, mem` (同 f64 模式)。小 imm 仍走 direct movq。
 fn emit_mov_imm_to_offset(state: *u8, qt: i32, imm: i64, dst_off: i64) -> i32 {
     let cg = state as *CGState;
     let s = (*cg).out;
     let arena = (*cg).arena;
-    let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
-    let _r2 = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
-    let _r3 = sb_append_cstr(arena, s, " $" as *u8);
-    let _r4 = sb_appendf_lld(arena, s, "%lld" as *u8, imm);
-    let _r5 = sb_append_cstr(arena, s, ", " as *u8);
-    let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
-    let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    // W-098: 检查 imm 是否超 32-bit signed range + qt 是否 64-bit
+    let needs_wide: i32 = if qt == QBE_L_LOCAL() {
+        if imm > (2147483647 as i64) || imm < ((-2147483648 as i64)) {
+            (1 as i32)
+        } else {
+            (0 as i32)
+        }
+    } else {
+        (0 as i32)
+    };
+    if needs_wide != (0 as i32) {
+        // W-098: 64-bit imm > 32-bit signed → movabsq + movq (GAS-rejected direct path)
+        let _r1 = sb_append_cstr(arena, s, "\tmovabsq $" as *u8);
+        let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, imm);
+        let _r3 = sb_append_cstr(arena, s, ", %rax\n" as *u8);
+        let _r4 = sb_append_cstr(arena, s, "\tmovq %rax, " as *u8);
+        let _r5 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+        let _r6 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    } else {
+        // Original path (QBE_W_LOCAL always + QBE_L_LOCAL with small imm)
+        let _r1 = sb_append_cstr(arena, s, "\tmov" as *u8);
+        let _r2 = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _r3 = sb_append_cstr(arena, s, " $" as *u8);
+        let _r4 = sb_appendf_lld(arena, s, "%lld" as *u8, imm);
+        let _r5 = sb_append_cstr(arena, s, ", " as *u8);
+        let _r6 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+        let _r7 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    }
     return 0;
 }
 

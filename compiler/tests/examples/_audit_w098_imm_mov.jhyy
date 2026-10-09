@@ -1,0 +1,15 @@
+// _audit_w098_imm_mov.jhyy — W-098 discriminating test for emit_mov_imm_to_offset path.
+//   Build large i64 literal and use it without binop (so only mov path is hit).
+//EXPECT:0
+fn main_jhyy() -> i32 {
+    // Direct i64 literal assignment (emit_mov_imm_to_offset path with QBE_L_LOCAL).
+    // W-098 bug: movq $0x100000001, mem — GAS rejects, literal gets truncated to 1.
+    // W-098 fix: movabsq $0x100000001, %rax; movq %rax, mem — full 64-bit preserved.
+    let big: i64 = (0x100000001 as i64);
+    // Compare via shr to extract high 32 bits (no cmpl truncation issue).
+    let high32: i64 = big >> (32 as i64);
+    if high32 == (1 as i64) {
+        return 0;  // PASS — literal preserved as full 64-bit
+    }
+    return 1;  // FAIL — W-098 truncated literal to 1
+}

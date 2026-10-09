@@ -876,8 +876,16 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
     //   否则 literal 0 (NODE_INT emit "=w copy 0") 在比较 i64/pointer 字段时
     //   ceql/csltl 报 operand type 不匹配（QBE 要两边都是 l）。
     // W-009 fix: dst.kind=KIND_POINTER 也走转换（emit W→L extsw 给 pointer cast 用）
-    let src_qt: i32 = if src_t == (0 as *u8) { arg.qbe_type } else { qbe_type_of(src_t) };
+    let mut src_qt: i32 = if src_t == (0 as *u8) { arg.qbe_type } else { qbe_type_of(src_t) };
     let dst_qt = qbe_type_of(dst_t);
+    // v4.0.2.2 (W-098 真修 — cast-side):NODE_INT IR-builder 已 promote 大 imm W → L
+    //   (避免 W copy 静默截断),但 src_t 仍指 i32 AST type (default int prim)。
+    //   若 arg.qbe_type = L 而 src_qt = W,说明 IR 层已升级;cast 不应再 emit extsw
+    //   (会把 promote 后的 L 值 re-truncate 到低 32 位 → 静默 loss)。
+    //   Fix:取 IR-层实际宽度作 src_qt,跳过 downcast 重新 sign-extend。
+    if arg.qbe_type == QBE_L() && src_qt == QBE_W() {
+        src_qt = QBE_L();
+    }
     // 只有 src_t 非 0 时做 KIND_PRIMITIVE 早 bail（保留原语义）；src_t==0 时直接走转换
     // dst 不再硬要求 KIND_PRIMITIVE（pointer 是 qbe_type L，走 W→L extsw）
     if src_t != (0 as *u8) {
@@ -1367,7 +1375,18 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
     // ── NODE_INT ──
     if kind == NODE_INT() {
         let d = node_int_data(n);
-        let qt = qbe_type_of((*n).type_ptr);
+        let mut qt: i32 = qbe_type_of((*n).type_ptr);
+        // v4.0.2.2 (W-098 真修 — IR-builder side):如果字面量 > 32-bit signed range
+        //   且当前 qt = W (i32),promote 到 L (i64) 避免 W-098 movl $imm 静默截断。
+        //   触发模式:literal 0x100000001 在 i64 context 下,cg_expr NODE_INT
+        //   走 default W 槽 (`movl $imm, mem`) — GAS 不 reject 但只存低 32 位。
+        //   原先靠 cast binop (extsw) 救场,但 cltq 只能 sign-ext 已截断值。
+        //   Fix:IR 层直接把 literal 存 L 槽,movabsq 模式 emit (per W-098 emit-side fix)。
+        if qt == QBE_W() {
+            if (*d).value > (2147483647 as i64) || (*d).value < ((-2147483648 as i64)) {
+                qt = QBE_L();
+            }
+        }
         let v = *ir_new_tmp(ir, qt);
         ir_emit_copy(ir, v, (*d).value);
         return v;

@@ -1,0 +1,17 @@
+// _audit_w098_binop.jhyy — W-098 discriminating test for binop src2_is_imm path.
+//   Subtracts two L-typed values where src2 is a large i64 literal.
+//EXPECT:0
+fn main_jhyy() -> i32 {
+    // Build 0x100000000 via shift
+    let v: i64 = (1 as i64) << (32 as i64);  // 0x100000000
+    // v - 0x100000000 (i64 sub via subq — 64-bit)
+    // With W-098 bug in binop: src2 imm truncated to 0, v - 0 = 0x100000000, not 0.
+    // With W-098 fixed: v - 0x100000000 = 0
+    let diff: i64 = v - (0x100000000 as i64);
+    // Inspect high 32 bits via shr
+    let high32: i64 = diff >> (32 as i64);
+    if high32 == (0 as i64) {
+        return 0;  // PASS — binop sub preserved full 64-bit imm
+    }
+    return 1;  // FAIL — binop sub truncated src2 imm
+}

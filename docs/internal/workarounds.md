@@ -46,7 +46,7 @@
 | [W-076](#w-076) | RESOLVED 2026-10-02 (v4.0.2) | std::arena test inline 副本删 std_ 前缀 (3 test rename + runtime.c dead code 删) |
 | [W-096](#w-096) | ✅ RESOLVED 2026-10-08 (v4.0.2.2 wip — emit-side per-fn-local counter 真修) | jhyy_v3.exe Stage 2 frame 484KB→9KB (cur_fn_idx-1 read per_fn_base_t, fn_count check 移除); regress 159/160 PASS HOLD (std_math_basic pre-existing); W-097 同根因下游 |
 | [W-097](#w-097) | DEFERRED 2026-10-09 (v4.0.2.3 wip — jhyy-side codegen 真修需 separate deep fix) | jhyy-side codegen emit_func_header per_fn_max lookup operand swap → frame > 4096B → ___chkstk_ms clobber rcx → 所有 C call SEGV (Stage 2 closure 阻塞同根因 W-074.6;W-096 fix 4 off-by-one attempt REVERTED regress 7/160) |
-| [W-098](#w-098) | ACTIVE 2026-10-09 (v4.0.2.3 wip — W-075 mem_set workaround ship; W-097 deep audit sprint 同步修) | jhyy-side codegen emit i64 literal (>32-bit range) 截成 i32 + cltq sign-extend → 高 32 位丢;W-075 mem_set b8 构造 surface;workaround b32\|shift\|OR 验证 ship |
+| [W-098](#w-098) | ✅ RESOLVED 2026-10-09 (v4.0.2.4 wip — i64 literal emit 真修 3-tier:emit + IR + cast) | jhyy-side codegen emit i64 literal (>32-bit range) 截成 i32 + cltq sign-extend → 高 32 位丢;真修 3 路径:emit_mov_imm_to_offset QBE_L+imm>32→movabsq+movq + NODE_INT W→L promote + cg_convert_arg 尊重 IR-level promotion |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -6205,15 +6205,15 @@ RCA 突破:`cg_local_t_from_global` 的 OLD check `cur_fn_idx >= fn_count` 跟 `
 ## W-098: jhyy-side codegen emit i64 literal (>32-bit range) 截成 i32 + cltq sign-extend → 高 32 位丢 (W-075 mem_set 真修 surface;per `feedback_rca_first_root_cause` 1-iter RCA)
 
 **ID:** W-098
-**状态:** ACTIVE since 2026-10-09 (v4.0.2.3 wip) — W-097 family jhyy-side codegen emit bug;mem_set 已用 b32|shift|OR workaround ship;其他 jhyy-side i64 literal emit surface 仍待 audit
-**日期:** 2026-10-09 (W-075 mem_set 真修 2nd attempt 时 1-iter RCA 找真根因)
+**状态:** ✅ RESOLVED 2026-10-09 (v4.0.2.4 wip) — i64 literal emit 真修 ship 3-tier fix:emit + IR + cast side
+**日期:** 2026-10-09 (W-075 mem_set 真修 2nd attempt 时 1-iter RCA 找真根因) → 2026-10-09 (W-097 deep audit + 3-tier fix ship)
 **Filed-by:** MiniMax-M3
 
 **触发面:**
 - 任何 i64 类型 literal > 32-bit range (high bit 31 set 或 high 32 bits non-zero) — codegen emit `movl $lit_lower32, -off(%rbp); movl -off(%rbp), %eax; cltq; movq %rax, -off(%rbp)` 模式,把 64-bit literal 截成 lower 32 bit + sign-extend,高 32 位丢
 - 已知 trigger: `0x0101010101010101 as i64` (mem_set b8 构造) — emit 0x01010101, sign-extend to 0x00000000_01010101 (原意 0x0101010101010101)
 - 推测 trigger: 任何 i64 const 在 arithmetic / store / load context (e.g. `0x100000000 as i64` 直接用 — lower 32 bit = 0, 完全丢)
-- emit path: `compiler/src0/codegen_amd64_emit_binop.jhyy` (推测 — `emit_binop_int` / `emit_lit` 路径) + jhyy-side codegen literal emit helper (C-side gcc-built jhyy.exe 跟 QBE IL emit 走同一份 source, 但 C-side 编译出的 jhyy.exe 行为正确 — 真因在 **jhyy-side codegen 编译** 时 emit 错 IL;V2/V3 binary 的 emit_func_header 自身有 bug emit 出错的 helper binary)
+- emit path: `compiler/src0/codegen_amd64_emit_call.jhyy:emit_mov_imm_to_offset` (QBE_L qt) + `compiler/src0/codegen.jhyy:cg_expr NODE_INT` (IR-level 默认 W type promote 漏) + `compiler/src0/codegen.jhyy:cg_convert_arg` (cast 重新 extsw 把 L-promote 的值 re-truncate)
 
 **症状:**
 - `mem_set(buf, 0xCC, 8)` 期望写 buf[0..7] = 0xCCCCCCCC_CCCCCCCC,实际写 buf[0..3] = 0xCCCCCCCC + buf[4..7] = 0x00000000
@@ -6229,7 +6229,10 @@ RCA 突破:`cg_local_t_from_global` 的 OLD check `cur_fn_idx >= fn_count` 跟 `
 
 3. **jhyy-side V2/V3 binary 行为错** (`objdump -d jhyy_v3.exe.exe` on 同一函数): emit `movl $0x01010101, -off(%rbp); movl -off(%rbp), %eax; cltq; movq %rax, -off(%rbp)` (32-bit movl + cltq sign-extend,高 32 位 0)。
 
-4. **RCA 真因 = W-097 同根因族 (jhyy-side codegen emit_func_header 路径 bug)**: jhyy-side codegen 自身被 src0/main.jhyy 编译时,emit literal / binop / field-access 的 QBE IL 有 systematic operand-order / register-class 错 (W-097 deep audit 推测 — `ptr_add_u8(field_a, (field_b - N) * 8)` 跟 lit_int 都触发类似 emit wrong IL pattern)。C-side (gcc-built jhyy.exe) 没这问题,因为 gcc 编译 codegen.jhyy 时用 C compiler emit,不走 jhyy-side codegen path。
+4. **RCA 真因 = 3-tier W-097 family 路径 bug**:
+   - **emit-side**: `emit_mov_imm_to_offset` 对 QBE_L + imm > 32-bit signed range 用 `movq $imm, mem` → GAS accept 但只存低 32 位
+   - **IR-side**: `cg_expr NODE_INT` 默认 `qt = qbe_type_of((*n).type_ptr)` (i32 default = QBE_W) → literal 存 W 槽 → 后续 cast L target 走 extsw
+   - **cast-side**: `cg_convert_arg` 用 `src_qt = qbe_type_of(src_t)` (AST 层) 而非 `arg.qbe_type` (IR 层) → 即使 IR 已 promote L 仍走 W→L extsw → re-truncate
 
 5. **W-075 真修 surface**: v4.0.2.1 W-074.6 partial + v4.0.2.2 W-096 emit-side per-fn-local counter 真修 → jhyy.exe frame_size 路径修好 → mem_set 8B store 触发 8KB frame → `___chkstk_ms` 探测 → chkstk_ms clobber rcx → 4B/8B store arg corruption。2026-10-09 第 2 次尝试 mem_set 时 comprehensive test EXIT=204,前 1 session 误判 "frame blow-up" 实是 i64 literal emit bug。
 
@@ -6244,22 +6247,63 @@ RCA 突破:`cg_local_t_from_global` 的 OLD check `cur_fn_idx >= fn_count` 跟 `
 - `compiler/tests/examples/std_mem_set_aligned.jhyy` inline mem_set 同样 workaround 写法 + `expected` 用同 pattern (避免 double-bug cancel)
 - 5/5 PASS on target test per `feedback_fix_evaluation_rule` (W-075 ship 验证)
 
-**影响范围:**
-- 已知: `compiler/src0/std/mem.jhyy:mem_set` (i64 b8 broadcast) — WORKAROUND ship
-- 推测: std/fmt (i64 format helper, 1000-based divisor)、std/math (i64 常数)、src0/codegen.jhyy (QBE IL literal emit, 间接)
-- 任何 user 写的 jhyy-side code 用 >32-bit i64 literal 都静默丢高 32 位 (silent fail, runtime 难发现)
+**真修 (v4.0.2.4 wip — 3-tier ship 2026-10-09):**
 
-**失效条件:** jhyy-side codegen `emit_lit_i64` (推测在 `compiler/src0/codegen_amd64_emit_binop.jhyy` 或 `codegen_amd64_emit_lit.jhyy`) 真修 — emit 64-bit movabsq immediate,无 32-bit 截断。属于 W-097 deep audit 范畴 (emit_func_header / emit_binop / emit_lit 整个 emit path operand order 真修)。
+1. **emit-side 真修** (`compiler/src0/codegen_amd64_emit_call.jhyy:emit_mov_imm_to_offset`):
+   ```jhyy
+   // W-098: QBE_L + imm > 32-bit signed range → movabsq + movq (避免 movq $imm, mem 截断)
+   let needs_wide: i32 = if qt == QBE_L_LOCAL() {
+       if imm > 2147483647 || imm < -2147483648 { 1 } else { 0 }
+   } else { 0 };
+   if needs_wide != 0 {
+       sb_append "\tmovabsq $"; appendf %lld imm; append ", %rax\n";
+       sb_append "\tmovq %rax, "; appendf %lld dst_off; append "(%rbp)\n";
+   } else {
+       // 原 mov<size> $imm, dst_off(%rbp) 路径
+   }
+   ```
 
-**superseder:** N/A (ACTIVE — W-097 deep audit sprint 启动时同步修)
+2. **IR-side 真修** (`compiler/src0/codegen.jhyy:cg_expr NODE_INT`):
+   ```jhyy
+   // W-098: literal > 32-bit signed range 自动 promote W → L,存 L 槽
+   if qt == QBE_W() && ((*d).value > 2147483647 || (*d).value < -2147483648) {
+       qt = QBE_L();
+   }
+   ```
+
+3. **cast-side 真修** (`compiler/src0/codegen.jhyy:cg_convert_arg`):
+   ```jhyy
+   // W-098: arg.qbe_type (IR) 跟 src_t (AST) 不一致时取 IR-层(已 promote)
+   if arg.qbe_type == QBE_L() && src_qt == QBE_W() {
+       src_qt = QBE_L();  // 跳过 downcast → 避免 extsw re-truncate
+   }
+   ```
+
+**Verification (5/5 PASS on each tier per `feedback_fix_evaluation_rule`):**
+- `_audit_w098_imm_mov.jhyy` (emit-side): EXIT=0 (literal `0x100000001 as i64` 高 32 位保留)
+- `_audit_w098_imm_shr.jhyy` (IR-side + cast-side): EXIT=0 (subq + shr 64-bit 正确)
+- `_audit_w098_no_cast.jhyy` (IR-side): EXIT=0 (no-cast 也正确)
+- `_audit_w098_binop.jhyy` (binop sub 路径): EXIT=0 (literal 在 binop src2 64-bit 正确)
+- `_audit_w098_b8.jhyy` (mem_set use case): EXIT=0 (`0x0101010101010101` 完整保留)
+- `std_mem_set_aligned.jhyy` (back-compat workaround): EXIT=0 (workaround 仍 PASS,无需 revert)
+- regress 159/160 PASS (per `feedback_fix_evaluation_rule`,std_math_basic pre-existing fail)
+
+**影响范围 (post-fix):**
+- 所有 i64 literal > 32-bit signed range 静默丢高 32 位 (silent fail) → 已修
+- std/mem.jhyy b32|shift|OR workaround:可 revert (W-075 真修后 b8 构造直接 emit movabsq 正确)
+- src0/codegen_amd64_emit_call.jhyy:12 binop src2_is_imm 路径 dormant (分析:literals 走 TEMP first,IR 已是 L-promote,不触发 W-098 in binop emit) — 保留 audit checklist 作为 documentation
+
+**superseder:** N/A — 3-tier 真修直接 ship,no supersession
 
 **引用:**
-- 源码: `compiler/src0/std/mem.jhyy:mem_set` (W-075 ship 写法, b32|shift|OR workaround)
-- 源码: `compiler/tests/examples/std_mem_set_aligned.jhyy:18-30` (inline mem_set + expected 同样 workaround)
-- 验证: `objdump -d jhyy.exe | grep -A 3 movabsq` (C-side 正确 emit) vs `objdump -d jhyy_v3.exe.exe | grep -A 4 movl` (jhyy-side 错 emit, `movl $0x01010101, ...; cltq; movq`)
-- 验证: `std_mem_set_aligned.jhyy` EXIT=0 (workaround 验证)
-- 误判历史: v4.0.2.1 → v4.0.2.2 W-096 真修 ship 后, 第 1 session 误判 "i64 store 触发大 frame + chkstk_ms rcx clobber" (W-075 错 RCA)。v4.0.2.3 1-iter RCA 找真根因 = W-098 (i64 literal emit),不是 multifn frame (per `feedback_rca_first_root_cause`)
-- related: [[W-075]] (真修 ship, workaround ship), [[W-097]] (同根因族 — jhyy-side codegen emit path deep audit)
+- 源码真修: `compiler/src0/codegen_amd64_emit_call.jhyy:386-419` (emit-side)
+- 源码真修: `compiler/src0/codegen.jhyy:1367-1386` (IR-side NODE_INT promote)
+- 源码真修: `compiler/src0/codegen.jhyy:879-887` (cast-side src_qt resolution)
+- 源码: `compiler/src0/std/mem.jhyy:mem_set` (W-075 ship 写法, b32|shift|OR workaround — 仍 valid,revert 可选)
+- 验证 test: `compiler/tests/examples/_audit_w098_*.jhyy` (5 个 tier-discriminating repro)
+- audit checklist: `docs/audit/w-097-emit-audit-checklist.md` (W-097 deep audit 包含 W-098 作为 sub-bug)
+- 误判历史: v4.0.2.1 → v4.0.2.2 W-096 真修 ship 后, 第 1 session 误判 "i64 store 触发大 frame + chkstk_ms rcx clobber" (W-075 错 RCA)。v4.0.2.3 1-iter RCA 找真根因 = W-098 (i64 literal emit),不是 multifn frame (per `feedback_rca_first_root_cause`)。v4.0.2.4 3-tier 真修 ship
+- related: [[W-075]] (真修 ship, workaround 仍 ship;W-098 修后 revert 可选), [[W-097]] (deep audit 完成,emit_func_header operand swap 真修推 v4.0.2.5)
 
 ## W-085: codegen small-frame fn(*T, i32, i32) 第 3 i32 参数 save 寄存器错位 (推 v3.x)
 

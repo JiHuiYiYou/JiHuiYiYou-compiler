@@ -1,0 +1,14 @@
+// _audit_w098_no_cast.jhyy — W-098 test for let with no explicit cast (sema coerce).
+//EXPECT:0
+fn main_jhyy() -> i32 {
+    // Direct i64 literal assignment without explicit cast.
+    // Per jhyy sema, the literal default type is i32 → sema coerces to i64.
+    // W-098 fix: NODE_INT promotes W to L for value > 32-bit signed.
+    let big: i64 = 0x100000000 as i64;  // 4294967296
+    // Compare via shr
+    let high32: i64 = big >> (32 as i64);
+    if high32 == (1 as i64) {
+        return 0;  // PASS
+    }
+    return 1;  // FAIL
+}

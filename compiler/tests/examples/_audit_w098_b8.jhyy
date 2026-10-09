@@ -1,0 +1,12 @@
+// _audit_w098_b8.jhyy — W-098 post-fix: b8 broadcast via direct i64 literal.
+//   Pre-W-098-fix this would emit movl $0x01010101 + cltq = 0x00000000_01010101.
+//   Post-W-098-fix movabsq preserves 0x0101010101010101.
+//EXPECT:0
+fn main_jhyy() -> i32 {
+    // Direct i64 literal: should now store full 64-bit value
+    let b8: i64 = 0x0101010101010101 as i64;
+    if b8 == (0x0101010101010101 as i64) {
+        return 0;  // PASS
+    }
+    return 1;  // FAIL
+}

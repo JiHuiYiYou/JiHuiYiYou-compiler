@@ -1,0 +1,19 @@
+// _audit_w098_imm_shr.jhyy — W-098 discriminating test using shr (64-bit).
+//EXPECT:0
+fn main_jhyy() -> i32 {
+    // Build 0x100000001 via shift (no W-098 in build path)
+    let v: i64 = (1 as i64) << (32 as i64);  // 0x100000000
+    let v2: i64 = v + (1 as i64);             // 0x100000001
+    // diff = v2 - 0x100000001 (i64 sub via subq — 64-bit)
+    // With W-098 bug: literal 0x100000001 truncates to 1, so diff = 0x100000001 - 1 = 0x100000000
+    // With W-098 fixed: diff = 0
+    let diff: i64 = v2 - (0x100000001 as i64);
+    // Inspect high 32 bits via shr (64-bit):
+    //   If W-098 bug: diff = 0x100000000, high32 = 1, return 1 (FAIL)
+    //   If W-098 fixed: diff = 0, high32 = 0, return 0 (PASS)
+    let high32: i64 = diff >> (32 as i64);
+    if high32 == (0 as i64) {
+        return 0;  // PASS — literal was stored as full 64-bit
+    }
+    return 1;  // FAIL — W-098 truncated literal
+}
