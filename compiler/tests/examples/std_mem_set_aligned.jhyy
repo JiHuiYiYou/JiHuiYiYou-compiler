@@ -1,0 +1,113 @@
+// std_mem_set_aligned.jhyy — W-075 真修 test: i64-store mem_set with 8-aligned buf.
+// 单一 fn (avoid previous multifn frame blow-up pattern): 多个 n cases inline.
+//EXPECT:0
+extern fn malloc(size: i64) -> *u8;
+extern fn free(p: *u8) -> i32;
+
+fn ptr_add(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+
+// 新 mem_set 实现 (W-075 真修): i64-store + tail i32-store。
+// 注意: 此 test 用 malloc(8-byte aligned on most allocators) 拿 buf,
+//      保证 dst 8-aligned → i64 store 安全。
+// b8 构造: b32 (4-byte broadcast) + shift + OR 避开 W-NEW (i64 literal emit
+// 把 >32-bit literal 截成 i32 + sign-extend, 0x0101010101010101 退化成
+// 0x00000000_01010101 → i64 store 高 4 字节全 0 → byte 4..7 全 0 不是 val)。
+fn mem_set(dst: *u8, val: i32, n: i64) -> *u8 {
+    if n < (0 as i64) {
+        return 0 as *u8;
+    }
+    let b: i32 = val & (0xff as i32);
+    let b32: i64 = (b as i64) * (0x01010101 as i64);
+    let b8: i64 = b32 | (b32 << (32 as i64));
+    let mut i: i64 = 0 as i64;
+    let n8: i64 = n - (n % (8 as i64));
+    while i < n8 {
+        *(ptr_add(dst, i) as *i64) = b8;
+        i = i + (8 as i64);
+    }
+    while i < n {
+        *(ptr_add(dst, i) as *i32) = b;
+        i = i + (1 as i64);
+    }
+    return dst;
+}
+
+// 验证 buf 前 n 字节 == val; 返 0 if OK, else error code (1 + offset / 10000)
+fn check_bytes(buf: *u8, n: i64, val: i32) -> i32 {
+    let b: i32 = val & (0xff as i32);
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        let v: i32 = *(ptr_add(buf, i) as *i32) & (0xff as i32);
+        if v != b {
+            return 1;
+        }
+        i = i + (1 as i64);
+    }
+    return 0;
+}
+
+fn main_jhyy() -> i32 {
+    // 32 字节 malloc 缓冲区 (8-aligned per malloc contract on Win64)
+    let buf: *u8 = malloc(32 as i64);
+    if buf == (0 as *u8) {
+        return 100;
+    }
+
+    // Test cases: n = 0 (no-op), 1, 4, 7, 8, 9, 16, 17, 24
+    // 每个 case: mem_set(buf, 0xNN, n) → check_bytes(buf, n, 0xNN) → ret code
+    let mut failed: i32 = 0;
+
+    // Case 1: n=0 (no-op)
+    if check_bytes(buf, 0 as i64, 0x42 as i32) != 0 { failed = 1; }
+
+    // Case 2: n=1
+    mem_set(buf, 0x42 as i32, 1 as i64);
+    if check_bytes(buf, 1 as i64, 0x42 as i32) != 0 { failed = failed + 2; }
+
+    // Case 3: n=4 (单次 i64 store 不对齐? dst 8-aligned → 4 字节落 i64 低位)
+    mem_set(buf, 0xA3 as i32, 4 as i64);
+    if check_bytes(buf, 4 as i64, 0xA3 as i32) != 0 { failed = failed + 3; }
+
+    // Case 4: n=7 (i64 store 1 次 + tail 写 1 字节? 实际 n7 = 7 - 7%8 = 0,全 tail)
+    mem_set(buf, 0x55 as i32, 7 as i64);
+    if check_bytes(buf, 7 as i64, 0x55 as i32) != 0 { failed = failed + 4; }
+
+    // Case 5: n=8 (单 i64 store, 0 tail)
+    mem_set(buf, 0xCC as i32, 8 as i64);
+    if check_bytes(buf, 8 as i64, 0xCC as i32) != 0 { failed = failed + 5; }
+
+    // Case 6: n=9 (i64 store 1 + 1 tail i32)
+    mem_set(buf, 0x77 as i32, 9 as i64);
+    if check_bytes(buf, 9 as i64, 0x77 as i32) != 0 { failed = failed + 6; }
+
+    // Case 7: n=16 (i64 store 2)
+    mem_set(buf, 0x11 as i32, 16 as i64);
+    if check_bytes(buf, 16 as i64, 0x11 as i32) != 0 { failed = failed + 7; }
+
+    // Case 8: n=17 (i64 store 2 + 1 tail i32)
+    mem_set(buf, 0x22 as i32, 17 as i64);
+    if check_bytes(buf, 17 as i64, 0x22 as i32) != 0 { failed = failed + 8; }
+
+    // Case 9: n=24 (i64 store 3)
+    mem_set(buf, 0x33 as i32, 24 as i64);
+    if check_bytes(buf, 24 as i64, 0x33 as i32) != 0 { failed = failed + 9; }
+
+    // Case 10: n=32 (i64 store 4)
+    mem_set(buf, 0x44 as i32, 32 as i64);
+    if check_bytes(buf, 32 as i64, 0x44 as i32) != 0 { failed = failed + 10; }
+
+    // 验证 broadcast 正确性: 8 字节 pattern 应该是 val 重复 8 次
+    mem_set(buf, 0xAB as i32, 8 as i64);
+    let pattern: i64 = *(buf as *i64);
+    // 同样用 b32 + shift + OR 构造 expected (跟 mem_set 一致)
+    let b32_ab: i64 = (0xAB as i64) * (0x01010101 as i64);
+    let expected: i64 = b32_ab | (b32_ab << (32 as i64));
+    if pattern != expected {
+        failed = failed + 11;
+    }
+
+    free(buf);
+    return failed;
+}

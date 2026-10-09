@@ -46,6 +46,7 @@
 | [W-076](#w-076) | RESOLVED 2026-10-02 (v4.0.2) | std::arena test inline 副本删 std_ 前缀 (3 test rename + runtime.c dead code 删) |
 | [W-096](#w-096) | ✅ RESOLVED 2026-10-08 (v4.0.2.2 wip — emit-side per-fn-local counter 真修) | jhyy_v3.exe Stage 2 frame 484KB→9KB (cur_fn_idx-1 read per_fn_base_t, fn_count check 移除); regress 159/160 PASS HOLD (std_math_basic pre-existing); W-097 同根因下游 |
 | [W-097](#w-097) | DEFERRED 2026-10-09 (v4.0.2.3 wip — jhyy-side codegen 真修需 separate deep fix) | jhyy-side codegen emit_func_header per_fn_max lookup operand swap → frame > 4096B → ___chkstk_ms clobber rcx → 所有 C call SEGV (Stage 2 closure 阻塞同根因 W-074.6;W-096 fix 4 off-by-one attempt REVERTED regress 7/160) |
+| [W-098](#w-098) | ACTIVE 2026-10-09 (v4.0.2.3 wip — W-075 mem_set workaround ship; W-097 deep audit sprint 同步修) | jhyy-side codegen emit i64 literal (>32-bit range) 截成 i32 + cltq sign-extend → 高 32 位丢;W-075 mem_set b8 构造 surface;workaround b32\|shift\|OR 验证 ship |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -5373,32 +5374,32 @@ cmd_compile (main.jhyy)
 <a id="w-075"></a>
 ### W-075: std::mem mem_set 用 i32 store 而非 byte store (M0 简化)
 
-**状态:** DEFERRED since 2026-10-02 (v4.0.2) — i64-store 真修 surface multifn codegen 限制,推 v4.0.2+
-**日期:** 2026-09-09 (v3.2.1 ship ACTIVE) → 2026-10-02 (DEFERRED per 2026-10-02 真修限制)
+**状态:** ✅ RESOLVED 2026-10-09 (v4.0.2.3 wip) — i64-store 真修 ship + b32|shift|OR 避开 W-098 (i64 literal emit bug)
+**日期:** 2026-09-09 (v3.2.1 ship ACTIVE) → 2026-10-02 (DEFERRED) → 2026-10-09 (RESOLVED)
 
 **触发面:** `compiler/src0/std/mem.jhyy:mem_set` 实现走 `*(p+i) as *i32 = b` (每次 loop 写 4 字节 i32), 不是 byte-by-byte / 8-byte / SSE store。
 
 **症状:** 写 4 字节每次 loop (vs libc memset 一次 8/16 字节 SSE) — 性能 trade-off。语义: 等价 `memset(p, val & 0xff, n)` (n 为 4 倍数时;非 4 倍数时最后 1-3 字节也被写, 跟 memset 一致)。
 
-**根因:** M0 简化 — 避开 codegen byte store 路径复杂度; i32 store 是 std::mem M0 scope 的 trade-off (性能 vs 复杂度)。
+**根因 (M0 简化 — 2026-09-09 → 2026-10-02 DEFERRED):** 避开 codegen byte store 路径复杂度; i32 store 是 std::mem M0 scope 的 trade-off (性能 vs 复杂度)。
 
-**workaround (pre-W-075 真修):** 当前 ship gate 不验证性能; `std_mem_set.jhyy` 验证 buf[0] & 0xff == 0x42 PASS (i32 store 等价语义对 4 byte buffer 是 correct)。
+**真修尝试 (v4.0.2 撤回 per 2026-10-02):** mem_set 改 i64-store (~25 LOC) + 4B-byte pack。新 test `std_mem_set_aligned.jhyy` (n = 1/4/7/8/9/16/17/24/32 各 case verify) 触发 pre-existing codegen 限制 — `subq $8464, %rsp` 大 stack frame (推测跟 W-074.6 multifn silent fail 同族 multi-fn + 大 temp_id 触发面)。W-074.6 部分真修 (v4.0.2.1) + W-096 emit-side per-fn-local counter 真修 (v4.0.2.2) 消除 frame blow-up 后, 2026-10-09 复测: comprehensive test EXIT=204 (byte 4 wrong), 实非大 frame 问题,是 W-098 (i64 literal emit bug): `movl $0x01010101, ...; cltq` 把 64-bit literal 截成 32-bit 后 sign-extend, 上 32 位全 0 → b8 broadcast 退化成 0x00000000_CCCCCCCC, i64 store 写 buf[4..7] 全 0。
 
-**真修尝试 (v4.0.2 撤回 per 2026-10-02):** 把 mem_set 改走 i64-store (8B / loop) + 尾段 byte loop, 4B-byte pack:
-- Code change: `compiler/src0/std/mem.jhyy:mem_set` 改 i64-store (~25 LOC)
-- Test (1 file): `compiler/tests/examples/std_mem_set_aligned.jhyy` NEW (n = 1 / 4 / 7 / 8 / 9 / 16 / 17 / 24 各 case verify)
-- **RCA 限制**: 新 test 触发 pre-existing codegen 限制 — `subq $8464, %rsp` 大 stack frame (推测跟 W-074.6 multifn silent fail 同族 multi-fn + 大 temp_id 触发面)。 gcc link EXIT=1 无 stderr (per W-064 jh_run stderr capture known issue)。 i64-store code 本身 correct, 但验证 path 被 codegen 限制阻塞。
+**真修 (v4.0.2.3 — 2026-10-09 ship):**
+- Code change: `compiler/src0/std/mem.jhyy:mem_set` 改用 b32 (4-byte broadcast via `* 0x01010101`) + shift + OR 构造 b8 (8-byte broadcast via `b32 | (b32 << 32)`) — 避开 W-098 i64 literal emit bug
+- Test update: `compiler/tests/examples/std_mem_set_aligned.jhyy` inline mem_set 同样用 workaround 写法 + `expected` 计算用同 pattern (保证 byte-by-byte verify 是 truth, 不是 double-bug cancel)
+- Regress baseline: 160/161 PASS HOLD (1 pre-existing fail = std_math_basic, 22 SKIP), W-075 comprehensive test (std_mem_set_aligned.jhyy) PASS EXIT=0
+- 5/5 PASS on target test per `feedback_fix_evaluation_rule` (8 cases: n=0/1/4/7/8/9/16/17/24/32 + broadcast pattern verify)
 
-**失效条件:** multifn codegen 大 frame 限制真修 (推测在 src0/codegen_amd64_emit_ctrl.jhyy `emit_func_header` 路径, 跟 W-074.6 同 RCA); v4.0.2+ restart W-075 时先解 multifn。
+**影响范围:** `compiler/src0/std/mem.jhyy:mem_set` (i64-store 实现); b8 构造 pattern 未来可被 std/fmt / std/string 借鉴
 
-**影响范围:** `compiler/src0/std/mem.jhyy:69-80` (mem_set 实现)
-
-**superseder:** N/A — DEFERRED 推到 v4.x mid perf sprint 或 v4.0.2.1。
+**superseder:** N/A — 根因 W-098 仍 ACTIVE (per 2026-10-09 audit)
 
 **引用:**
-- 源码注释 `compiler/src0/std/mem.jhyy:66-72` (W-075 DEFERRED 注释)
+- 源码注释 `compiler/src0/std/mem.jhyy:66-83` (W-075 RESOLVED + W-098 workaround 注释)
 - `docs/abis/jhyy-lang-spec-stdlib-supplement-v3.2.2.md § 4.1`
-- `feedback_codegen_amd64_multifn` (W-074.6 multifn silent fail — surface 大 frame 触发面)
+- `feedback_codegen_amd64_multifn` (W-074.6 multifn silent fail — 之前误判, 实是 W-098 i64 literal)
+- `feedback_rca_first_root_cause` (1 iter 找真根因: 不是 multifn frame, 是 i64 literal emit)
 
 <a id="w-076"></a>
 ### W-076: std::arena test inline 副本用 std_* 前缀避 runtime.c 符号冲突
@@ -6200,6 +6201,65 @@ RCA 突破:`cg_local_t_from_global` 的 OLD check `cur_fn_idx >= fn_count` 跟 `
 - regress W-096 fix 4 ship build sha: `5d62c4814d49a18c...` (152/160, 7 regressions)
 - plan: `docs/plans/v4/v4.0.2.3-plan.md` (待写)
 - related: [[W-074.6]] (Stage 2 closure 阻塞同根因), [[W-096]] (frame blow-up upstream 真修)
+
+## W-098: jhyy-side codegen emit i64 literal (>32-bit range) 截成 i32 + cltq sign-extend → 高 32 位丢 (W-075 mem_set 真修 surface;per `feedback_rca_first_root_cause` 1-iter RCA)
+
+**ID:** W-098
+**状态:** ACTIVE since 2026-10-09 (v4.0.2.3 wip) — W-097 family jhyy-side codegen emit bug;mem_set 已用 b32|shift|OR workaround ship;其他 jhyy-side i64 literal emit surface 仍待 audit
+**日期:** 2026-10-09 (W-075 mem_set 真修 2nd attempt 时 1-iter RCA 找真根因)
+**Filed-by:** MiniMax-M3
+
+**触发面:**
+- 任何 i64 类型 literal > 32-bit range (high bit 31 set 或 high 32 bits non-zero) — codegen emit `movl $lit_lower32, -off(%rbp); movl -off(%rbp), %eax; cltq; movq %rax, -off(%rbp)` 模式,把 64-bit literal 截成 lower 32 bit + sign-extend,高 32 位丢
+- 已知 trigger: `0x0101010101010101 as i64` (mem_set b8 构造) — emit 0x01010101, sign-extend to 0x00000000_01010101 (原意 0x0101010101010101)
+- 推测 trigger: 任何 i64 const 在 arithmetic / store / load context (e.g. `0x100000000 as i64` 直接用 — lower 32 bit = 0, 完全丢)
+- emit path: `compiler/src0/codegen_amd64_emit_binop.jhyy` (推测 — `emit_binop_int` / `emit_lit` 路径) + jhyy-side codegen literal emit helper (C-side gcc-built jhyy.exe 跟 QBE IL emit 走同一份 source, 但 C-side 编译出的 jhyy.exe 行为正确 — 真因在 **jhyy-side codegen 编译** 时 emit 错 IL;V2/V3 binary 的 emit_func_header 自身有 bug emit 出错的 helper binary)
+
+**症状:**
+- `mem_set(buf, 0xCC, 8)` 期望写 buf[0..7] = 0xCCCCCCCC_CCCCCCCC,实际写 buf[0..3] = 0xCCCCCCCC + buf[4..7] = 0x00000000
+- byte-by-byte check 触发: `EXIT=200+i` (i = first byte where buf != 0xCC), 实测 i=4
+- 但 pattern-match test (`*(buf as *i64) == (val * 0x0101010101010101) as i64`) PASS — 因为 expected 跟 actual 都用同一 broken emit,double-bug cancel
+- regression 风险: 0 (C-side jhyy.exe 不受影响,W-075 真修 ship regress 160/161 PASS HOLD)
+
+**根因 (2026-10-09 session RCA,1-iter):**
+
+1. **表面 (surface)**: jhyy-side codegen (jhyy_v1.exe.exe / jhyy_v2.exe.exe / jhyy_v3.exe.exe) 处理 i64 literal emit 时,emit `movl $lit32, ...; cltq; movq %rax, ...` 模式,丢失高 32 位。
+
+2. **C-side jhyy.exe 行为正确** (`objdump -d jhyy.exe` on `cg_emit_lit_i64`): 用 `movabsq $lit64, %rax; movq %rax, -off(%rbp)` (single 64-bit movabsq immediate, 无截断)。
+
+3. **jhyy-side V2/V3 binary 行为错** (`objdump -d jhyy_v3.exe.exe` on 同一函数): emit `movl $0x01010101, -off(%rbp); movl -off(%rbp), %eax; cltq; movq %rax, -off(%rbp)` (32-bit movl + cltq sign-extend,高 32 位 0)。
+
+4. **RCA 真因 = W-097 同根因族 (jhyy-side codegen emit_func_header 路径 bug)**: jhyy-side codegen 自身被 src0/main.jhyy 编译时,emit literal / binop / field-access 的 QBE IL 有 systematic operand-order / register-class 错 (W-097 deep audit 推测 — `ptr_add_u8(field_a, (field_b - N) * 8)` 跟 lit_int 都触发类似 emit wrong IL pattern)。C-side (gcc-built jhyy.exe) 没这问题,因为 gcc 编译 codegen.jhyy 时用 C compiler emit,不走 jhyy-side codegen path。
+
+5. **W-075 真修 surface**: v4.0.2.1 W-074.6 partial + v4.0.2.2 W-096 emit-side per-fn-local counter 真修 → jhyy.exe frame_size 路径修好 → mem_set 8B store 触发 8KB frame → `___chkstk_ms` 探测 → chkstk_ms clobber rcx → 4B/8B store arg corruption。2026-10-09 第 2 次尝试 mem_set 时 comprehensive test EXIT=204,前 1 session 误判 "frame blow-up" 实是 i64 literal emit bug。
+
+**workaround (W-075 真修 ship 2026-10-09):**
+- `compiler/src0/std/mem.jhyy:mem_set` b8 构造改用 workaround 写法:
+  ```jhyy
+  // 不用 (W-098 bug):  let b8: i64 = (b as i64) * (0x0101010101010101 as i64);
+  // workaround (避免 >32-bit i64 literal):
+  let b32: i64 = (b as i64) * (0x01010101 as i64);  // 4B broadcast, 0x01010101 fits i32
+  let b8: i64 = b32 | (b32 << (32 as i64));          // combine low + high via shift + OR
+  ```
+- `compiler/tests/examples/std_mem_set_aligned.jhyy` inline mem_set 同样 workaround 写法 + `expected` 用同 pattern (避免 double-bug cancel)
+- 5/5 PASS on target test per `feedback_fix_evaluation_rule` (W-075 ship 验证)
+
+**影响范围:**
+- 已知: `compiler/src0/std/mem.jhyy:mem_set` (i64 b8 broadcast) — WORKAROUND ship
+- 推测: std/fmt (i64 format helper, 1000-based divisor)、std/math (i64 常数)、src0/codegen.jhyy (QBE IL literal emit, 间接)
+- 任何 user 写的 jhyy-side code 用 >32-bit i64 literal 都静默丢高 32 位 (silent fail, runtime 难发现)
+
+**失效条件:** jhyy-side codegen `emit_lit_i64` (推测在 `compiler/src0/codegen_amd64_emit_binop.jhyy` 或 `codegen_amd64_emit_lit.jhyy`) 真修 — emit 64-bit movabsq immediate,无 32-bit 截断。属于 W-097 deep audit 范畴 (emit_func_header / emit_binop / emit_lit 整个 emit path operand order 真修)。
+
+**superseder:** N/A (ACTIVE — W-097 deep audit sprint 启动时同步修)
+
+**引用:**
+- 源码: `compiler/src0/std/mem.jhyy:mem_set` (W-075 ship 写法, b32|shift|OR workaround)
+- 源码: `compiler/tests/examples/std_mem_set_aligned.jhyy:18-30` (inline mem_set + expected 同样 workaround)
+- 验证: `objdump -d jhyy.exe | grep -A 3 movabsq` (C-side 正确 emit) vs `objdump -d jhyy_v3.exe.exe | grep -A 4 movl` (jhyy-side 错 emit, `movl $0x01010101, ...; cltq; movq`)
+- 验证: `std_mem_set_aligned.jhyy` EXIT=0 (workaround 验证)
+- 误判历史: v4.0.2.1 → v4.0.2.2 W-096 真修 ship 后, 第 1 session 误判 "i64 store 触发大 frame + chkstk_ms rcx clobber" (W-075 错 RCA)。v4.0.2.3 1-iter RCA 找真根因 = W-098 (i64 literal emit),不是 multifn frame (per `feedback_rca_first_root_cause`)
+- related: [[W-075]] (真修 ship, workaround ship), [[W-097]] (同根因族 — jhyy-side codegen emit path deep audit)
 
 ## W-085: codegen small-frame fn(*T, i32, i32) 第 3 i32 参数 save 寄存器错位 (推 v3.x)
 
