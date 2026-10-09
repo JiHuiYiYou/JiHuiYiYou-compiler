@@ -6414,11 +6414,26 @@ if ret_temp_id == (0 as i64) {
 
 **superseder:** 待定 (W-101 需新 sprint 拆解)
 
+**Fix attempt history (audit ledger):**
+
+- **#1 (REVERTED 2026-10-09, v4.0.2.7 wip):** Revised 假设 — "address-holder pointer-slot aliasing":
+  - 4 文件修改:
+    - `codegen_amd64_emit_call.jhyy:1415-1452` (FNARG flag KEEP, comment expand)
+    - `codegen_amd64_emit_mem.jhyy:755-759` (REMOVE load propagation)
+    - `codegen_amd64_emit_ctrl.jhyy:553-587` (dynamic alloc_headroom from per_fn_max)
+    - `codegen_amd64_state.jhyy:854-907` (dynamic `cg_alloc_slot` init offset)
+  - 测试: 重建 jhyy.exe (779KB, W-100 ship baseline) → 重建 jhyy_v1.exe.exe (1.6MB) → `jhyy_v1.exe.exe compile hello.jhyy` → exit=127 silently (无 .s/.exe/.il 产出, 比 baseline SEGV exit=139 更差)
+  - **REVERT 触发**: v1 binary silent fail 比 baseline SEGV 难诊断 (无 SEGV signal), 违反 `feedback_verify_active_reproduces` "false fix is worse than no fix" 原则
+  - **RCA iter 1 (2026-10-09, post-revert)**: v1 binary SEGV exit=139 在 `parser__parse_expr+54146` 是 baseline W-101 症状 (W-100 ship state); fix attempt 让 jhyy_v1 走 `mov DWORD PTR [r8],eax` with r8=0 但 jhyy_v1 整个 initialization 阶段就 abort, 暗示 fix 引入的 dynamic alloc_headroom / dynamic init_off 公式有错 (跟 `per_fn_max` 索引语义不符 — pre-scan 阶段 `cur_fn_idx=0` 是 main 自身, emit 阶段 `cur_fn_idx` 是 current fn 在 fn_table 里的 index, 不一定 = pre-scan fn_idx)
+  - **结论**: W-101 fix 需要 deep audit checklist 先 (per `feedback_deep_audit_checklist_first`), 不是 1-iter RCA 能 cover; 推 v4.0.1+ 真修
+  - **W-101 status 保持 ACTIVE** (fix 未 ship, ACTIVE → ACTIVE 不算 transition; superseder 仍 "待定")
+
 **引用:**
 - SEGV 现场: `compiler/build/bin/_w099_v2.exe.s` 中 `parser__parse_expr` 函数体 + 0xD350 (54146) offset
 - 可疑源码: `compiler/src0/codegen_amd64_emit_call.jhyy:2189-2191` (emit_binop final store)
 - 可疑源码: `compiler/src0/codegen_amd64_state.jhyy:781-833` (cg_offset_for_temp + cg_offset_for_temp_with_target)
 - 可疑源码: `compiler/src0/codegen_amd64_state.jhyy` (per-fn-local temp_slots 表 / W-096 真修引入)
+- Fix attempt #1 (reverted) 改动: `compiler/src0/codegen_amd64_emit_call.jhyy:1415-1452` + `emit_mem.jhyy:755-759` + `emit_ctrl.jhyy:553-587` + `state.jhyy:854-907` (4 文件 115 LOC, REVERTED 2026-10-09)
 - related: [[W-100]] (前置, sret 真修 ship), [[W-096]] (holder mechanism 引入), [[W-074.6]] (Stage 2 closure 阻塞同根因)
 
 ## W-085: codegen small-frame fn(*T, i32, i32) 第 3 i32 参数 save 寄存器错位 (推 v3.x)
