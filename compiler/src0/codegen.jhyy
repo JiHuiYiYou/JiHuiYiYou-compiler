@@ -1039,7 +1039,9 @@ fn cg_body_returns(body_node: *Node) -> i32 {
     if (*body_node).kind == NODE_BLOCK() {
         let bd = node_block_data(body_node);
         if (*bd).nstmts > (0 as i64) {
-            let last_slot = ptr_add_u8((*bd).stmts, ((*bd).nstmts - (1 as i64)) * (8 as i64)) as **Node;
+            // v4.0.2.5 (W-097 hoist): atomic step decomposition for `(nstmts - 1) * 8`
+            let last_idx: i64 = (*bd).nstmts - (1 as i64);
+            let last_slot = ptr_add_u8((*bd).stmts, last_idx * (8 as i64)) as **Node;
             let last = *last_slot;
             if (*last).kind == NODE_RETURN() || (*last).kind == NODE_BREAK() || (*last).kind == NODE_CONTINUE() {
                 return 1;
@@ -1627,7 +1629,9 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                     if nd_a > (0 as i64) && dr_a != (0 as *u8) {
                         let mut ia: i64 = nd_a;
                         while ia > (0 as i64) {
-                            let dsa = ptr_add_u8(dr_a, (ia - (1 as i64)) * (8 as i64)) as **Node;
+                            // v4.0.2.5 (W-097 hoist): atomic step decomposition
+                            let ia_minus: i64 = ia - (1 as i64);
+                            let dsa = ptr_add_u8(dr_a, ia_minus * (8 as i64)) as **Node;
                             let dna = *dsa;
                             if dna != (0 as *Node) {
                                 let dd_a = node_defer_data(dna);
@@ -1661,7 +1665,9 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                     if nd_b > (0 as i64) && dr_b != (0 as *u8) {
                         let mut ib: i64 = nd_b;
                         while ib > (0 as i64) {
-                            let dsb = ptr_add_u8(dr_b, (ib - (1 as i64)) * (8 as i64)) as **Node;
+                            // v4.0.2.5 (W-097 hoist): atomic step decomposition
+                            let ib_minus: i64 = ib - (1 as i64);
+                            let dsb = ptr_add_u8(dr_b, ib_minus * (8 as i64)) as **Node;
                             let dnb = *dsb;
                             if dnb != (0 as *Node) {
                                 let dd_b = node_defer_data(dnb);
@@ -1693,7 +1699,9 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                     if nd_c > (0 as i64) && dr_c != (0 as *u8) {
                         let mut ic: i64 = nd_c;
                         while ic > (0 as i64) {
-                            let dsc = ptr_add_u8(dr_c, (ic - (1 as i64)) * (8 as i64)) as **Node;
+                            // v4.0.2.5 (W-097 hoist): atomic step decomposition
+                            let ic_minus: i64 = ic - (1 as i64);
+                            let dsc = ptr_add_u8(dr_c, ic_minus * (8 as i64)) as **Node;
                             let dnc = *dsc;
                             if dnc != (0 as *Node) {
                                 let dd_c = node_defer_data(dnc);
@@ -1722,7 +1730,9 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> IRVal {
                     if nd_d > (0 as i64) && dr_d != (0 as *u8) {
                         let mut id_: i64 = nd_d;
                         while id_ > (0 as i64) {
-                            let dsd = ptr_add_u8(dr_d, (id_ - (1 as i64)) * (8 as i64)) as **Node;
+                            // v4.0.2.5 (W-097 hoist): atomic step decomposition
+                            let id_minus: i64 = id_ - (1 as i64);
+                            let dsd = ptr_add_u8(dr_d, id_minus * (8 as i64)) as **Node;
                             let dnd = *dsd;
                             if dnd != (0 as *Node) {
                                 let dd_d = node_defer_data(dnd);

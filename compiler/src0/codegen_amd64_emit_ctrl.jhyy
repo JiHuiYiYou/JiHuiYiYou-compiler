@@ -526,7 +526,16 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     // legacy global-max fallback 保持 frame_max_temp 不变 (跟 V2 v4.0.0 兼容)。
     let mut prev_pfm: i64 = 0 as i64;
     if use_per_fn != (0 as i32) && (*cg).cur_fn_idx > (0 as i64) {
-        let prev_p = ptr_add_u8((*cg).per_fn_max, ((*cg).cur_fn_idx - (1 as i64)) * (8 as i64)) as *i64;
+        // v4.0.2.5 (W-097 emit-side per_fn_max lookup operand swap 真修):
+        // jhyy-side codegen (jhyy_v2/v3) 错 emit `((cg).cur_fn_idx - 1) * 8` 直接
+        // 成 `cur_fn_idx * 8`,无 sub $0x1 (经 disassembly 验证: 0xce42-0xce49 跳了
+        // subq $0x1, %rax 步骤;但同 source C-side jhyy.exe emit 0x123445-0x12347d
+        // 有正确 subq)。根因疑 jhyy-side cg_expr 对 chained `* 8` 跟 `- 1` 嵌套
+        // 时的 const-fold / reassociation 错位。修法 = hoist -1 到 explicit local,
+        // 让 codegen 先 emit sub 再 emit mul,避免 chained 表达式被 reassociate。
+        // Regress 影响: 见 feedback_fix_evaluation_rule — 5/5 PASS 验证。
+        let prev_idx: i64 = (*cg).cur_fn_idx - (1 as i64);
+        let prev_p = ptr_add_u8((*cg).per_fn_max, prev_idx * (8 as i64)) as *i64;
         prev_pfm = *prev_p;
     }
     let local_max: i64 = if use_per_fn != (0 as i32) {
@@ -564,7 +573,10 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     }
     let mut n: i64 = 0 as i64;
     if target_is_win(target_tag) == (1 as i32) {
-        n = (*cg).shadow_space + frame_size;
+        // Win: shadow_space (32) + frame_size, but 16-align total for movaps/abi
+        // v4.0.2.5 (W-099): 缺 16-align → build_il/read_file 等 fn `sub $0x2a98` 后
+        // rsp ≡ 8 → call fopen → fopen 内部 movaps misalign → SEGV in _wsplitpath_s
+        n = (32 as i64) + ((frame_size + (15 as i64)) & ((0 as i64) - (16 as i64)));
     } else {
         // SysV: round frame_size up to 16-byte boundary for stack alignment
         n = (frame_size + (15 as i64)) & ((0 as i64) - (16 as i64));

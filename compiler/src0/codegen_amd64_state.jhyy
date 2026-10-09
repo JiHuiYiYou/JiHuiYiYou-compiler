@@ -1598,7 +1598,12 @@ fn cg_compute_per_fn_max_temps(state: *u8, tok_p: *u8, tok_size: i64, n: i64) ->
         // (不再是 global max 484KB) 跟 slot offset 物理一致。
         let mut base_t: i64 = 0 as i64;
         if fi > (0 as i64) {
-            let prev_p = ptr_add_u8((*s).per_fn_max, (fi - (1 as i64)) * (8 as i64)) as *i64;
+            // v4.0.2.5 (W-097 emit-side per_fn_max lookup operand swap 真修):hoist
+            // `(fi - 1) * 8` into 2 atomic steps to avoid jhyy-side codegen
+            // reassociation / const-fold dropping the `sub $0x1`. See also
+            // codegen_amd64_emit_ctrl.jhyy:529 for the primary trigger.
+            let prev_idx: i64 = fi - (1 as i64);
+            let prev_p = ptr_add_u8((*s).per_fn_max, prev_idx * (8 as i64)) as *i64;
             base_t = *prev_p + (1 as i64);
         }
         let pfbt_p = ptr_add_u8((*s).per_fn_base_t, fi * (8 as i64)) as *i64;

@@ -203,11 +203,14 @@ fn mem_temp_offset(t: i64, target_tag: i32) -> i64 {
     }
     // v4.0.2.2 (W-096 emit-side per-fn-local counter 真修): fall-through 公式
     // 改用 local t 翻译(跟 cg_offset_for_temp_with_target 同 path)。
+    // v4.0.2.5 (W-097 hoist): `local_t3 * 8` 走 hoist decomposition — jhyy-side
+    // codegen 在 `function_call() * imm` 模式会掉 operand,先 * 8 进 local var
     let local_t3 = cg_local_t_from_global(t);
+    let local_t3_off: i64 = local_t3 * (8 as i64);
     if target_is_win(target_tag) == (1 as i32) {
-        return -((32 as i64) + local_t3 * (8 as i64));
+        return -((32 as i64) + local_t3_off);
     }
-    return -(local_t3 * (8 as i64));
+    return -(local_t3_off);
 }
 
 // ── StringBuilder 包装(4 个 emit 函数共用,省掉每处 cast)──

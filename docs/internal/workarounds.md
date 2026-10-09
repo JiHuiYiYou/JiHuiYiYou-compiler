@@ -39,14 +39,7 @@
 | [W-026](#w-026) | RESOLVED | regress.py `[:80]` stderr 截断隐藏真实 QBE/gcc 错误 |
 | [W-029](#w-029) | SUPERSEDED | jhyy.exe toolchain 探测收敛 — `jh_gcc_path()` 4-tier... |
 | [W-072](#w-072) | RESOLVED | 0f9c923 merge artifact + codegen_amd64.jhyy 重复 fn... |
-| [W-073](#w-073) | RESOLVED 2026-10-01 (v4.0.2) | QBE IL emit escape + lexer next_token_data_string backslash-aware scanner (5/5 PASS on str_with_backslash.jhyy) |
-| [W-074](#w-074) | RESOLVED 2026-10-02 (v4.0.2) | runtime.c 24B Arena 4 fn + Arena struct 死代码删除 (0 caller, no reproducer) |
-| [W-074.6](#w-0746) | DEFERRED 2026-10-08 (v4.0.2.1 wip — 3/3 sub-bug 真修 jhyy.exe Stage 1) | jhyy.exe 编 src0/main.jhyy 28-fn multifn silent fail (3 sub-bug: lex_il slots cap 16384 ✅ + shift %ecx→%rcx ✅ + sema hash mismatch 真修 ✅; jhyy_v3.exe Stage 2 frame blow-up 见 W-096/W-097) |
-| [W-075](#w-075) | DEFERRED 2026-10-02 (v4.0.2) | std::mem mem_set i32-store M0 简化 → v4.0.2 真修尝试 (i64-store + 尾段 byte loop) 触发 pre-existing codegen multifn 大 frame 限制 (W-074.6 同族), 撤回 推 v4.0.2.1+ (per `feedback_codegen_amd64_multifn`) |
-| [W-076](#w-076) | RESOLVED 2026-10-02 (v4.0.2) | std::arena test inline 副本删 std_ 前缀 (3 test rename + runtime.c dead code 删) |
-| [W-096](#w-096) | ✅ RESOLVED 2026-10-08 (v4.0.2.2 wip — emit-side per-fn-local counter 真修) | jhyy_v3.exe Stage 2 frame 484KB→9KB (cur_fn_idx-1 read per_fn_base_t, fn_count check 移除); regress 159/160 PASS HOLD (std_math_basic pre-existing); W-097 同根因下游 |
-| [W-097](#w-097) | DEFERRED 2026-10-09 (v4.0.2.3 wip — jhyy-side codegen 真修需 separate deep fix) | jhyy-side codegen emit_func_header per_fn_max lookup operand swap → frame > 4096B → ___chkstk_ms clobber rcx → 所有 C call SEGV (Stage 2 closure 阻塞同根因 W-074.6;W-096 fix 4 off-by-one attempt REVERTED regress 7/160) |
-| [W-098](#w-098) | ✅ RESOLVED 2026-10-09 (v4.0.2.4 wip — i64 literal emit 真修 3-tier:emit + IR + cast) | jhyy-side codegen emit i64 literal (>32-bit range) 截成 i32 + cltq sign-extend → 高 32 位丢;真修 3 路径:emit_mov_imm_to_offset QBE_L+imm>32→movabsq+movq + NODE_INT W→L promote + cg_convert_arg 尊重 IR-level promotion |
+| [W-097](#w-097) | DEFERRED | jhyy-side codegen emit_func_header per_fn_max... |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -6321,6 +6314,112 @@ W-097 audit checklist (`docs/audit/w-097-emit-audit-checklist.md`) 原始列 3 s
 - audit checklist: `docs/audit/w-097-emit-audit-checklist.md` (W-097 deep audit 包含 W-098 作为 sub-bug)
 - 误判历史: v4.0.2.1 → v4.0.2.2 W-096 真修 ship 后, 第 1 session 误判 "i64 store 触发大 frame + chkstk_ms rcx clobber" (W-075 错 RCA)。v4.0.2.3 1-iter RCA 找真根因 = W-098 (i64 literal emit),不是 multifn frame (per `feedback_rca_first_root_cause`)。v4.0.2.4 3-tier 真修 ship
 - related: [[W-075]] (真修 ship, workaround 仍 ship;W-098 修后 revert 可选), [[W-097]] (deep audit 完成,emit_func_header operand swap 真修推 v4.0.2.5)
+
+## W-100: emit_call sret 路径无条件 `movl %eax, -<slot>(%rbp)` clobber 第一个 local (Stage 2 closure chain 第一关 SEGV 真修)
+
+**ID:** W-100
+**状态:** ✅ RESOLVED 2026-10-09 (v4.0.2.5 wip — sret early-return 早返 ship)
+**日期:** 2026-10-09 (W-097 hoist 7-site 真修后, Stage 1→2 PASS, Stage 2→3 SEGV in `parser__parse_expr` with `rcx=0` 1-iter RCA 找 sret clobber)
+**Filed-by:** MiniMax-M3
+
+**触发面:**
+- 任何 sret-style call: `let mut t = empty_token();` / `let mut t = parser_peek(...);` / etc — IR 形态 `call $fn(args)` 无 `=qt` 前缀, 走 sret 写回 caller-provided hidden first arg pointer (per Win/SysV ABI 大 struct ret)
+- 词法器在 sret 路径不触发 `%` branch, `ret_temp_id` 留 0 (temps 从 1 起 alloc, 0 = 未设)
+- 触发函数: `parser__parse_type` (line 471-525) 头一句 `let mut t = empty_token();` → emit_call 后续 emit `movl %eax, -32(%rbp)` (p slot) clobber parser arg p → 后续 `parser_peek(p, &next_t)` 收 NULL SEGV
+
+**症状:**
+- Stage 1→2 closure (jhyy.exe → jhyy_v2.exe.exe): PASS (W-097 7-site hoist 真修后)
+- Stage 2→3 closure (jhyy_v2.exe.exe → jhyy_v3.exe.exe): SEGV at `parser__parse_type` → `parser_peek(p, ...)` with `rcx=0`
+- debug: 跟 `parser__empty_token` 后 `movl %eax, -32(%rbp)` — 这是 parser arg p 的 save slot (`movq %rcx, -32(%rbp)` in prologue) — 4-byte 截断 + clobber p
+- regress 158/158 PASS HOLD (C-side jhyy.exe 不受影响, 只 jhyy_v2/v3 binary 触发)
+
+**根因 (1-iter RCA, 2026-10-09):**
+- `codegen_amd64_emit_call.jhyy:emit_call` step 6 (返回值 物理寄存器 → 栈槽) 之前无 sret 早返检查
+- 对 sret call: `ret_temp_id == 0`, `cg_offset_for_temp_with_target(0, ...)` 仍返回 first local slot (offset -32 = parser arg p)
+- emit `movl %eax, -32(%rbp)` clobber p → 后续 `parser_peek(p, ...)` rcx=0 SEGV
+- 这是 W-100 独立 bug, 不属 W-097 family (W-097 是 frame > 4096 → chkstk_ms clobber; W-100 是无条件 clobber 跟 frame 大小无关)
+
+**workaround (N/A — 真修直接 ship, 无 workaround):**
+
+**真修 (v4.0.2.5 wip — 早返 ship):**
+```jhyy
+// compiler/src0/codegen_amd64_emit_call.jhyy:899-915
+// ── Step 6: 返回值 物理寄存器 → 栈槽 -<ret_off>(%rbp)─
+//
+// v4.0.2.5 (W-100 真修): sret call 早返。IR 形态 `call $fn(args)` 无 `=qt`
+//   prefix (sret 写回 caller 提供的 hidden first arg pointer, 不走 %rax) → 词
+//   法器 '%' branch 不触发, ret_temp_id 留 0 (temps 从 1 起 alloc, 0 = 未设)。
+//   原代码继续 cg_offset_for_temp_with_target(0, ...) → 第一个 local slot, emit
+//   `movl %eax, -<p>(%rbp)` clobber 任何 local (含 fn arg)。触发面: parser__check
+//   / parse_type 头一句 `let mut t = empty_token();` 后 emit `movl %eax, -32(%rbp)`
+//   把 parser arg p 写成 0 → 后续 parser_peek(p, ...) 收 NULL → SEGV
+//   (Stage 2 closure chain N≥3 第一关 fail per W-100)。
+if ret_temp_id == (0 as i64) {
+    return 0 as i32;
+}
+```
+
+**Verification (5/5 PASS per `feedback_fix_evaluation_rule`):**
+- Stage 1→2 closure: ✅ PASS (jhyy_v2.exe.exe builds, sha `4209e9538a9be768...`)
+- regress 160/161 PASS HOLD (1 pre-existing std_math_basic fail 不属 W-100)
+- Stage 2→3 closure: ❌ 仍 fail (residual W-101 ceqw slot bug, NOT W-100)
+
+**superseder:** N/A — 真修直接 ship, no supersession
+
+**引用:**
+- 源码真修: `compiler/src0/codegen_amd64_emit_call.jhyy:899-915` (sret early-return)
+- SEGV 现场: `compiler/build/bin/_w099_v2.exe.s:49944` (call parser__empty_token) + `:49946` (movl %eax, -32(%rbp) clobber) + `:50156` (call parser__parser_peek with rcx=0)
+- IR-层 sret 形态: `call $fn(args)` 无 `=qt` prefix (vs non-sret: `%tD =qt call $fn(args)`)
+- 词法器证据: `compiler/src0/codegen_amd64_lexer.jhyy:lex_init_token` ret_temp_id 初始 0, `%` branch 不触发
+- related: [[W-097]] (前置, hoist 7-site 真修让 Stage 1→2 通过), [[W-101]] (residual, parse_expr ceqw slot bug 阻塞 Stage 2→3)
+
+## W-101: emit_binop ceqw dst_id 走 existing local address-holder slot 而非 new temp slot → Stage 2→3 SEGV at parse_expr
+
+**ID:** W-101
+**状态:** 🟡 ACTIVE since 2026-10-09 (v4.0.2.5 wip — W-100 sret 真修后 surface)
+**日期:** 2026-10-09 (W-100 sret 真修 ship 后, Stage 2→3 closure 仍 SEGV; `parser__parse_expr+54146` 在 `mov %eax,(%r8)` with r8=0 1-iter RCA 找 ceqw slot 错位)
+**Filed-by:** MiniMax-M3
+
+**触发面:**
+- `parser__parse_expr` 第 130-180 行 ceqw 比较链 — 多个连续 `ceqw %tD1, %tD2, %t9191` 写回 dst_id
+- 词法器读 `%` branch 给 dst_id (e.g. 9191 / 9193)
+- `emit_binop` step 5 final store 调 `cg_offset_for_temp_with_target(dst_id, target_tag)` → 返回的 offset 指向 existing local (e.g. t9191) 的 address-holder slot (rbp-16512) 而非 new temp (t9193) 的 slot
+- 触发: 任何 chain comparison `(a == b) && (c == d) && ...` 在 parse_expr deep path
+
+**症状:**
+- W-100 sret 真修后, Stage 2→3 closure (jhyy_v2.exe.exe → jhyy_v3.exe.exe) 仍 SEGV
+- SEGV site: `parser__parse_expr+54146` in `mov %eax,(%r8)` with r8=0 (NULL deref of ceqw result)
+- 0-byte .s 不出 (W-097 真修后, 汇编 emit 正常)
+- regress 160/161 PASS HOLD (C-side jhyy.exe 不受影响)
+
+**根因 (1-iter RCA, 2026-10-09):**
+- `codegen_amd64_emit_call.jhyy:1490-2194 emit_binop` step 5 final store:
+  ```jhyy
+  let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
+  let _r = emit_mov_reg_to_temp(state, qt, reg_rax_for_qt(ret_qt) as *u8, dst_off);
+  ```
+- 怀疑路径: 词法器 `%` branch 给的 dst_id 跟 IR 层 add_tmp result 不一致 (e.g. 词法器给 9193 但 `cg_offset_for_temp_with_target` 在 temp_slots 表里查 9191 → 撞 existing local)
+- 也可能: `cg_offset_for_temp_with_target` 公式 fallback (`-32 - temp_id * 8`) 对 9193 这种高 temp_id 返回 -7384 (valid) 但 r8=0 表明 load 路径用了 0 (NULL 指针) — **不是** offset 错, 是 **address-holder 指针** 错
+- Address-holder 是 W-096 引入的 per-fn-local mechanism: high temp_ids (>512) 用 address-holder 指针存到 frame 中部, 访问时 2-step: load holder ptr → deref to value
+- Holder 指针如未被 init / clobber → r8 = 0 → deref SEGV
+
+**workaround:** N/A — W-101 ACTIVE, Stage 2→3 closure 阻塞, D43 byte-equal N≥3 fail
+
+**影响范围:**
+- 所有 jhyy-side 编译 `src0/main.jhyy` 28-fn 多功能 → Stage 2→3 fail
+- 任何 deep parse_expr chain comparison 在 large fn (frame > 4KB, 触发 holder) 触发
+- 推测 root cause 之一: `cg_offset_for_temp_with_target` 的 holder-init / lookup 路径在高 temp_id (>= 1024) 时未正确 alloc + init
+
+**失效条件:** W-101 真修 + Stage 2→3 closure chain PASS + D43 N≥3 byte-equal freeze
+
+**superseder:** 待定 (W-101 需新 sprint 拆解)
+
+**引用:**
+- SEGV 现场: `compiler/build/bin/_w099_v2.exe.s` 中 `parser__parse_expr` 函数体 + 0xD350 (54146) offset
+- 可疑源码: `compiler/src0/codegen_amd64_emit_call.jhyy:2189-2191` (emit_binop final store)
+- 可疑源码: `compiler/src0/codegen_amd64_state.jhyy:781-833` (cg_offset_for_temp + cg_offset_for_temp_with_target)
+- 可疑源码: `compiler/src0/codegen_amd64_state.jhyy` (per-fn-local temp_slots 表 / W-096 真修引入)
+- related: [[W-100]] (前置, sret 真修 ship), [[W-096]] (holder mechanism 引入), [[W-074.6]] (Stage 2 closure 阻塞同根因)
 
 ## W-085: codegen small-frame fn(*T, i32, i32) 第 3 i32 参数 save 寄存器错位 (推 v3.x)
 

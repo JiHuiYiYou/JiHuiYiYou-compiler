@@ -178,7 +178,10 @@ fn reg_rdx_for_qt(qt: i32) -> *u8 {
 // 重构,emit 函数接口不变。
 fn local_temp_offset(t: i64) -> i64 {
     let local_t = cg_local_t_from_global(t);
-    return 0 as i64 - (32 as i64 + local_t * (8 as i64));
+    // v4.0.2.5 (W-097 hoist): `local_t * 8` 走 hoist decomposition — jhyy-side
+    // codegen 在 `function_call() * imm` 模式会掉 operand,先 * 8 进 local var
+    let local_t_off: i64 = local_t * (8 as i64);
+    return 0 as i64 - (32 as i64 + local_t_off);
 }
 
 // emit_mov_temp_to_offset — mov<size> <src_off>(%rbp), <dst_off>(%rbp)
@@ -898,6 +901,18 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     //                 f32/f64 ret  → %xmm0 (v2.11.15 Iter 1 A1-XMM 真修)
     //   bug surface:之前 ret_qt=QBE_D 用 `movq %rax, ...`,但 f64 ret 在
     //   %xmm0(SysV/Win 一致)→ 读 %rax 是 garbage。修:QBE_D/QBE_S 走 xmm0。
+    //
+    // v4.0.2.5 (W-100 真修): sret call 早返。IR 形态 `call $fn(args)` 无 `=qt`
+    //   prefix (sret 写回 caller 提供的 hidden first arg pointer, 不走 %rax) → 词
+    //   法器 '%' branch 不触发, ret_temp_id 留 0 (temps 从 1 起 alloc, 0 = 未设)。
+    //   原代码继续 cg_offset_for_temp_with_target(0, ...) → 第一个 local slot,emit
+    //   `movl %eax, -<p>(%rbp)` clobber 任何 local (含 fn arg)。触发面:parser__check
+    //   / parse_type 头一句 `let mut t = empty_token();` 后 emit `movl %eax, -32(%rbp)`
+    //   把 parser arg p 写成 0 → 后续 parser_peek(p, ...) 收 NULL → SEGV
+    //   (Stage 2 closure chain N≥3 第一关 fail per W-100)。
+    if ret_temp_id == (0 as i64) {
+        return 0 as i32;
+    }
     let ret_off = cg_offset_for_temp_with_target(ret_temp_id, target_tag);
     if ret_qt == QBE_S_LOCAL() || ret_qt == QBE_D_LOCAL() {
         let _r = sse_emit_mov_xmm_reg_to_temp(state, ret_qt, "xmm0" as *u8, ret_off);
