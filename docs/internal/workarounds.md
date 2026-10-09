@@ -41,10 +41,11 @@
 | [W-072](#w-072) | RESOLVED | 0f9c923 merge artifact + codegen_amd64.jhyy 重复 fn... |
 | [W-073](#w-073) | RESOLVED 2026-10-01 (v4.0.2) | QBE IL emit escape + lexer next_token_data_string backslash-aware scanner (5/5 PASS on str_with_backslash.jhyy) |
 | [W-074](#w-074) | RESOLVED 2026-10-02 (v4.0.2) | runtime.c 24B Arena 4 fn + Arena struct 死代码删除 (0 caller, no reproducer) |
-| [W-074.6](#w-0746) | DEFERRED 2026-10-08 (v4.0.2.1 wip — 3/3 sub-bug 真修 jhyy.exe Stage 1) | jhyy.exe 编 src0/main.jhyy 28-fn multifn silent fail (3 sub-bug: lex_il slots cap 16384 ✅ + shift %ecx→%rcx ✅ + sema hash mismatch 真修 ✅; jhyy_v3.exe Stage 2 frame blow-up 见 W-096) |
+| [W-074.6](#w-0746) | DEFERRED 2026-10-08 (v4.0.2.1 wip — 3/3 sub-bug 真修 jhyy.exe Stage 1) | jhyy.exe 编 src0/main.jhyy 28-fn multifn silent fail (3 sub-bug: lex_il slots cap 16384 ✅ + shift %ecx→%rcx ✅ + sema hash mismatch 真修 ✅; jhyy_v3.exe Stage 2 frame blow-up 见 W-096/W-097) |
 | [W-075](#w-075) | DEFERRED 2026-10-02 (v4.0.2) | std::mem mem_set i32-store M0 简化 → v4.0.2 真修尝试 (i64-store + 尾段 byte loop) 触发 pre-existing codegen multifn 大 frame 限制 (W-074.6 同族), 撤回 推 v4.0.2.1+ (per `feedback_codegen_amd64_multifn`) |
 | [W-076](#w-076) | RESOLVED 2026-10-02 (v4.0.2) | std::arena test inline 副本删 std_ 前缀 (3 test rename + runtime.c dead code 删) |
-| [W-096](#w-096) | ✅ RESOLVED 2026-10-08 (v4.0.2.2 wip — emit-side per-fn-local counter 真修) | jhyy_v3.exe Stage 2 frame 484KB→9KB (cur_fn_idx-1 read per_fn_base_t, fn_count check 移除); regress 159/160 PASS HOLD (std_math_basic pre-existing) |
+| [W-096](#w-096) | ✅ RESOLVED 2026-10-08 (v4.0.2.2 wip — emit-side per-fn-local counter 真修) | jhyy_v3.exe Stage 2 frame 484KB→9KB (cur_fn_idx-1 read per_fn_base_t, fn_count check 移除); regress 159/160 PASS HOLD (std_math_basic pre-existing); W-097 同根因下游 |
+| [W-097](#w-097) | DEFERRED 2026-10-09 (v4.0.2.3 wip — jhyy-side codegen 真修需 separate deep fix) | jhyy-side codegen emit_func_header per_fn_max lookup operand swap → frame > 4096B → ___chkstk_ms clobber rcx → 所有 C call SEGV (Stage 2 closure 阻塞同根因 W-074.6;W-096 fix 4 off-by-one attempt REVERTED regress 7/160) |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -6150,6 +6151,55 @@ RCA 突破:`cg_local_t_from_global` 的 OLD check `cur_fn_idx >= fn_count` 跟 `
 - 已 ship: `compiler/src0/codegen_amd64_state.jhyy:742-781` (`cg_local_t_from_global` check 改写, 移除 fn_count, 改 cur_fn_idx - 1 read); `compiler/build/bin/jhyy.exe` (rebuild via stage0, sha `92ad34725ea8661d...`)
 - regress 影响: per-fn-local emit-side 真修后, jhyy.exe Stage 1 emit slot offset 跟 frame_size 一致, 484KB → 9KB frame 路径在 v3 binary 也不再 越界. Stage 2 closure chain 仍因 separate jhyy-side emit bug 卡住, 推 v4.0.2.3 真修
 - v4.0.0 final promote gate: W-096 闭环 (✅) + 5/5 closure chain N≥3 byte-equal 仍需 v4.0.2.3+ (per [[project_v2_v3_final]] W-074.6 v4.0.0 final gate)
+
+<a id="w-097"></a>
+## W-097: jhyy-side codegen emit_func_header per_fn_max lookup operand swap → frame > 4096B → ___chkstk_ms clobber rcx → 所有 C 函数 call SEGV (推 v4.0.2.3+)
+
+**ID:** W-097
+**状态:** DEFERRED since 2026-10-09 (v4.0.2.3 wip — jhyy-side codegen 真修需 separate deep fix;W-096 fix 4 off-by-one 尝试 REVERTED 2026-10-09 因 regress 7/160)
+**日期:** 2026-10-08 (W-096 真修 session 期间发现 W-NEW jh_read_file SEGV) → 2026-10-09 (RCA 深挖 + W-096 fix 4 revert + 登记)
+
+**触发面:** `compiler/src0/codegen_amd64_emit_ctrl.jhyy:519-573` `emit_func_header` 函数 — jhyy-side codegen (jhyy.exe / jhyy_v1.exe.exe 编 src0/main.jhyy) 处理 `ptr_add_u8((*cg).per_fn_max, ((*cg).cur_fn_idx - (1 as i64)) * (8 as i64))` 这类 multi-field-access 表达式时,emit wrong QBE IL (operand swap + mul operand 用错 field)。
+
+**症状:**
+- `jhyy_v2.exe.exe` / `jhyy_v3.exe.exe` 跑任何 compile 命令 → EXIT=127 (silent fail, 0-byte output)
+- `jhyy_v3.exe.exe` main function frame = 0x76990 = 486KB → `___chkstk_ms` 探测必触发
+- `objdump -d jhyy_v3.exe.exe | grep chkstk_ms` 多个函数 (main / read_file / ...) 都有 0x2060-0x76990 大 frame
+- 即使改 `read_file` 弃 fopen 改 jh_read_file (C-side `CreateFileW` 不走 `_wsplitpath_s` path),SEGV 仍发生 — 任何 C 函数 call (malloc/jh_read_file/free/...) 都 SEGV,不止 fopen
+
+**根因 (2026-10-09 session RCA):**
+
+1. **Windows x64 ABI + chkstk_ms rcx clobber (surface)**: 任何 frame > 4096B 的函数 call `___chkstk_ms` 探测 stack 页 → `___chkstk_ms` 是 System V 调用约定实现,clobbers `%rcx` (Windows x64 caller-saved register)。下一个 C 函数 call (rcx = first arg) 拿 corrupted rcx → SEGV 或 错字节读。
+
+2. **Frame blow-up 真因 (jhyy-side codegen bug)**: `emit_func_header` 的 `frame_size` 计算读 `per_fn_max[cur_fn_idx]`。jhyy-side codegen 编译 `src0/codegen_amd64_emit_ctrl.jhyy` 自身时,对 `ptr_add_u8(field_a, (field_b - N) * 8)` 表达式 emit wrong IL:
+   - Verified by `objdump -d jhyy_v2.exe.exe` on `codegen_amd64_emit_ctrl__emit_func_header`: imul pattern 是 `imul -0x4c0(%rbp), %rax` (2-operand, 用 stack var 而非 `$0x8` immediate),无 `sub $0x1, %rax` / `sub $0x2, %rax` 准备 cur_fn_idx-1/N-2
+   - C-side baseline (`objdump -d jhyy.exe`) 同一函数: `sub $0x1, %rax` + `imul $0x8, %rax, %rdx` 正确 (3-operand immediate form)
+   - 推断 jhyy-side codegen 把 `(field_b - N) * 8` 表达式 evaluate 时,operand 顺序错位 + mul 用错 field → per_fn_max lookup 读 garbage → frame_size > 4096B
+
+3. **W-096 fix 3 (commit `95ba01a`)** 改 `cg_local_t_from_global` 用 per_fn_base_t 翻译 global t → local t,**不修** per_fn_max lookup 本身。W-096 fix 3 ship 后 jhyy.exe (C-side) frame_size 路径正确,但 jhyy_v2/jhyy_v3 (jhyy-side) 的 emit_func_header 函数仍 emit wrong IL → frame blow-up。
+
+4. **W-096 fix 4 off-by-one attempt (2026-10-08 → REVERTED 2026-10-09)**: 试图改 bounds check `cur_fn_idx >= 1 && cur_fn_idx <= fn_count` (假设 cur_fn_idx 是 1-based `function_index + 1`) + `(cur_fn_idx - 1) * 8` array index。但 **假设错**: `compiler/src0/codegen_amd64_state.jhyy:402` `(*s).cur_fn_idx = 0 as i64;` init,emit_func_header 末尾 bump (line 576 comment: "cur_fn_idx 由 emit_func_header 末尾 bump")。**cur_fn_idx 是 0-based**,fix 4 的 `>= 1` 拒绝第一个函数 (cur_fn_idx=0) → use_per_fn=false → legacy frame_max_temp fallback → frame blow-up → regress 7 tests (gdb_pretty_test / mixed_const_struct_import / mixed_nested_struct_recursive / std_fmt_i32 / std_fmt_i32_neg + 2 more) → 152/160 PASS (baseline 159/160)。revert 后 baseline 恢复 159/160 PASS HOLD。
+
+**workaround:** 无 — Stage 2 closure (`jhyy_v2.exe.exe` / `jhyy_v3.exe.exe`) 自身 broken,任何 self-compile 都 SEGV。Stage 1 (`jhyy.exe` C-side compiled) 正常 159/160 PASS HOLD,regress 不受影响。
+
+**影响范围:**
+- Stage 2 closure chain (D43 N≥3 byte-equal `jhyy.exe → jhyy_v2.exe.exe → jhyy_v3.exe.exe → ...`) — 卡 W-097 + W-074.6 同根因
+- v4.0.0 final promote gate: W-074.6 闭环仍卡 W-097 (推 v4.0.2.3+ 真修 jhyy-side codegen)
+- regress 影响: 0 (Stage 1 C-side 不受影响,W-096 fix 4 revert 后 baseline 159/160 HOLD)
+
+**失效条件:** jhyy-side codegen `emit_func_header` 处理 multi-field-access 表达式 (ptr_add_u8 跟 `(field - N) * 8` 组合) 真修 — 需要 separate deep W-NNN+ entry 跟踪 (RCA 路径: 检查 jhyy-side codegen 怎么 emit field access 跟 binary expression 的 operand order)。
+
+**superseder:** N/A (DEFERRED — 待 v4.0.2.3+ 启动 jhyy-side codegen 真修 sprint)
+
+**引用:**
+- 源码: `compiler/src0/codegen_amd64_emit_ctrl.jhyy:519-573` (emit_func_header per_fn_max lookup)
+- 源码: `compiler/src0/codegen_amd64_state.jhyy:402` (cur_fn_idx init = 0)
+- 源码: `compiler/src0/codegen_amd64_state.jhyy:576` (cur_fn_idx bump comment)
+- commit `95ba01a` (W-096 fix 3 ship,per_fn_base_t local_t translation)
+- regress baseline sha: `92ad34725ea8661d...` (159/160 PASS HOLD)
+- regress W-096 fix 4 ship build sha: `5d62c4814d49a18c...` (152/160, 7 regressions)
+- plan: `docs/plans/v4/v4.0.2.3-plan.md` (待写)
+- related: [[W-074.6]] (Stage 2 closure 阻塞同根因), [[W-096]] (frame blow-up upstream 真修)
 
 ## W-085: codegen small-frame fn(*T, i32, i32) 第 3 i32 参数 save 寄存器错位 (推 v3.x)
 
