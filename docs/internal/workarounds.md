@@ -6428,6 +6428,26 @@ if ret_temp_id == (0 as i64) {
   - **结论**: W-101 fix 需要 deep audit checklist 先 (per `feedback_deep_audit_checklist_first`), 不是 1-iter RCA 能 cover; 推 v4.0.1+ 真修
   - **W-101 status 保持 ACTIVE** (fix 未 ship, ACTIVE → ACTIVE 不算 transition; superseder 仍 "待定")
 
+- **#2 (REVERTED 2026-10-10, v4.0.3 wip):** 重新尝试"alloc pool disjoint from formula pool" 假设 — 误判根因为 frame layout overlap,实际上不是 overlap 问题:
+  - 假设: parser__parse_expr local_max=2563 → formula_end_off=20544, alloc pool hardcoded at rbp-8192 → alloc/formula 12KB 物理 overlap → 内存 corruption → r8=0
+  - 2 文件修改 (4 edits):
+    - `codegen_amd64_state.jhyy` (CGState struct 加 `alloc_init_off: i64` field + `cg_state_set_alloc_init_off` setter + `cg_alloc_slot` first call init_off 选择)
+    - `codegen_amd64_emit_ctrl.jhyy:528-583` (frame_size 公式改 dynamic `alloc_init_off = -(formula_end_off + 64)` + `alloc_end_off = -alloc_init_off + per_fn_alloc_v` + `frame_size = max(formula_end_off, alloc_end_off)`)
+  - 测试:
+    - 重建 jhyy.exe (sha `e62cdd2c`) → regress 161/161 PASS HOLD ✓ (user-mode 编译不受影响)
+    - jhyy.exe compile src0/main.jhyy → gcc link OK → jhyy_v2.exe (1.6MB, sha `6eaf4573`)
+    - **jhyy_v2.exe run smoke.jhyy** → 5+ `(null):0:0: error: expected ;, got int` 反复 (parse 阶段崩) + hang (无超时自动退出)
+  - **RCA iter 1 (2026-10-10, post-revert)**: v2 binary 的 parse 错误 "(null):0:0" 表明 source path 是 NULL (v2 binary 读的是 embedded main.jhyy data section,不是 file path)。parse 错误 "expected ;, got int" 是 lexer 读词错位。
+  - **真根因 (与 attempt #1 区别)**: alloc_init_off dynamic 化对小 frame (local_max=0) 函数把 alloc pool 从 rbp-8192 移到 rbp-104,可能破坏了 codegen 对某些函数 (e.g. `main_jhyy`) 的隐式假设 (e.g. shadow space / chkstk_ms probe)。同时 alloc 区域紧贴 formula pool bottom 仅 64B gap,如果 per_fn_alloc > 8, alloc 区域延伸进 formula pool 仍 overlap (与原假设相反)。
+  - **REVERT 触发**: 比 attempt #1 更糟 — v1 binary parse 阶段 hang/反复报 NULL source path, 几乎无法定位,违反 `feedback_verify_active_reproduces` "false fix is worse than no fix" + "假阳性比无 gate 更糟" (per `feedback_ci_gate_must_exercise_path` 教训)
+  - **lesson learned (re-applied `feedback_deep_audit_checklist_first` / `feedback_verify_active_reproduces`)**:
+    1. **未读 W-101 entry fix attempt #1 history** 重新踩同一坑 (相同 4 文件 115 LOC 改动方向) — fix attempt #1 已 REVERTED + 结论"需要 deep audit checklist 先", 仍重做 = 浪费 sprint
+    2. **未做 1-iter RCA 验证假设** 就实施 fix — assumption "alloc/formula pool overlap = root cause" 没 evidence (audit 出 12KB overlap 是 per W-101 entry "1-iter RCA", 实际 SEGV 现场 r8=0 是 address-holder 指针 NULL, 不是 overlap 后果)
+    3. **未先跑 v1 binary regress baseline 验证** — attempt #2 实施前没看 v1 (jhyy-side 1.6MB) baseline 是否能 build + run smoke,直接实施 fix 后才发现 baseline 已 silent fail (没 attempt #1 fix 也有 W-101 SEGV, attempt #2 fix 没修好, 还引入新 regression)
+  - **结论 (与 attempt #1 一致)**: W-101 fix 需要 deep audit checklist 先 (per `feedback_deep_audit_checklist_first`) + 1-iter RCA 验证 root cause 假设,**不是** 重复实施相同方向的 fix 能 cover; 真根因 = `cg_offset_for_temp_with_target` 对 high temp_id (>= 1024) 的 address-holder init/lookup 路径,需 6 维度 deep audit (per `docs/audit/v4.0.3-codegen-deep-audit.md`)。推 v4.0.1+ 真修
+  - **W-101 status 保持 ACTIVE** (fix 未 ship, ACTIVE → ACTIVE 不算 transition; superseder 仍 "待定")
+  - **v4.0.3 plan 状态**: 计划文件 `docs/plans/v4/v4.0.3-plan.md` (committed 8d519f0) + 6 维度 audit checklist `docs/audit/v4.0.3-codegen-deep-audit.md` (committed 0c10168) 保留作为后续 sprint 参考,但 v4.0.0 final 不能 ship 因为 W-101/W-097 ACTIVE/DEFERRED (per user 决定 "所有defer和active的workaround必须在v4正式版中清零,所以大不了v4不发")
+
 **引用:**
 - SEGV 现场: `compiler/build/bin/_w099_v2.exe.s` 中 `parser__parse_expr` 函数体 + 0xD350 (54146) offset
 - 可疑源码: `compiler/src0/codegen_amd64_emit_call.jhyy:2189-2191` (emit_binop final store)
