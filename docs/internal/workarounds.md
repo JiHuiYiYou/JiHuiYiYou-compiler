@@ -6472,6 +6472,30 @@ if ret_temp_id == (0 as i64) {
   - **W-101 status 保持 ACTIVE** (fix 未 ship, ACTIVE → ACTIVE 不算 transition; superseder 仍 "待定")
   - **v4.0.0 final 收口决定** (2026-10-10 user 决定): v4.0.0 不能 ship。per user 政策 "所有defer和active的workaround必须在v4正式版中清零,所以大不了v4不发" — v4.0.0-rc1 tag 保留, 不打 v4.0.0 final tag。 v4.x 下一 sprint 起点 = 推 v4.0.4 真修 W-101 + W-097 (W-098 已 ship, W-100 已 ship; W-074.6 sub-bugs #1/#2/#3 partial ship v4.0.2.1, multifn silent fail 真修推后续 sprint per W-074.6 entry)
 
+- **#4 (REVERTED 2026-10-10, v4.0.3 wip → 4th consecutive REVERT same trap):** 第 4 次重做"alloc pool disjoint"假设 — 实施前**未读 attempt #3 lesson**(已于 attempt #3 显式记录"重复踩 attempt #2 REVERTED 同一坑 = 浪费 sprint"):
+  - 实施动机: 6 维度 audit `docs/audit/v4.0.3-codegen-deep-audit.md` (committed 0c10168) 标识 Fix 1+2 为 "alloc pool disjoint from formula pool" 是预测真修方向; 直接按 audit 建议实施未再独立 1-iter RCA
+  - 改动 (跟 attempt #2/#3 一字不差, 4 文件 → 实际 2 文件 4 edits):
+    - `compiler/src0/codegen_amd64_state.jhyy` (CGState struct 加 `alloc_init_off: i64` field + `cg_state_set_alloc_init_off` setter + `cg_alloc_slot` first call init_off 选择, + `cg_state_init` + `cg_state_reset_for_function` alloc_init_off=0 init)
+    - `compiler/src0/codegen_amd64_emit_ctrl.jhyy:543-595` (frame_size 公式改 dynamic `alloc_init_off` + small-fn 走 legacy -8192 + large-fn 移 formula pool 下方 + 64B gap)
+  - 实施 (full 重建 chain):
+    1. `jhyy_stage0.exe compile main.jhyy` → `jhyy.exe` 重建 (sha `345e1a3c9...`, 779535B, +67B 因加 `alloc_init_off` field + setter)
+    2. `jhyy.exe compile compiler/src0/main.jhyy` → gcc link OK → `jhyy_new.exe` (1.6MB)
+    3. `jhyy_new.exe compile simple.jhyy` → **5+ `(null):0:0: error: expected ;, got int` 反复** (跟 attempt #2/#3 同一症状)
+    4. **C-side regress 真修前未跑,实施 fix 后跑 — f64_suffix.jhyy 60s timeout (subprocess.TimeoutExpired)**:
+       - f64_suffix.jhyy 之前 baseline regress 160/161 PASS HOLD (1 pre-existing std_math_basic fail 不属 W-101)
+       - attempt #4 fix 让 C-side jhyy.exe 也 hang — **NEW failure mode** (attempt #1/#2/#3 仅 v1 binary parse 崩,C-side regress 没 regressed)
+       - exit code 0 (background 60s 后才 raise TimeoutExpired), jhyy.exe 不响应 = alloc_init_off 公式让 C-side codegen 也产生异常大 frame 或 chkstk probe 失败
+  - **真根因 (跟 attempt #1/#2/#3 一致 + 新增 evidence)**: `cg_offset_for_temp_with_target` 对 high temp_id (>= 1024) 的 address-holder init/lookup 路径在 src0/codegen_amd64_emit_call.jhyy + emit_load.jhyy; audit Fix 1+2 假设 "alloc/formula pool overlap" 是 per W-101 entry "1-iter RCA 推测根因",**无 evidence** (r8=0 是 address-holder 指针 NULL, 不是 overlap 后果); 修复 scope 是 emit_call 跟 emit_load 的 dst temp record 路径, 不是 frame_size 公式
+  - **REVERT 触发**:
+    1. v1 binary parse 阶段 hang + `(null):0:0` (跟 attempt #2/#3 一字不差)
+    2. C-side regress 新 regress (f64_suffix.jhyy 60s timeout) — **比 attempt #1/#2/#3 更糟**, 验证 `feedback_ci_gate_must_exercise_path` "5/5 PASS 假阳性比无 gate 更糟" 教训, alloc_init_off 公式对 user-mode small program 引入 C-side regress
+  - **lesson learned (4th re-application, 仍 fail)**:
+    1. **重复踩 attempt #2/#3 REVERTED 同一坑** — attempt #2 + #3 已 record 同一陷阱("未读 history 重新踩同一坑 = 浪费 sprint"), attempt #4 实施前**仍**未 grep `## W-101.*REVERTED` audit ledger → 浪费 sprint + C-side regress 受害
+    2. **盲目信 audit 预测** — 6 维度 audit `docs/audit/v4.0.3-codegen-deep-audit.md` Fix 1+2 方向是 "建议验证" 不是 "实施处方", attempt #4 直接按 audit 实施未独立 1-iter RCA 验证
+    3. **实施前未跑 baseline regress 对比** — attempt #4 没记录 fix 前 jhyy.exe 的 f64_suffix.jhyy 60s 阈值测试是否本身已 hang, fix 后才报 TimeoutExpired, 无法 isolate 引入 vs pre-existing
+  - **结论 (跟 attempt #1/#2/#3 一致, 4 attempts 全 REVERTED)**: W-101 真修需先**完整 1-iter RCA 验证 root cause 假设**(`cg_offset_for_temp_with_target` 对 high temp_id (>= 1024) address-holder 路径) + 写单测验证假设,再设计 fix scope (emit_call / emit_load 的 dst temp record 路径, NOT frame_size 公式); v4.0.0 final 不能 ship; v4.x 下一 sprint 起点 = 推 v4.0.4
+  - **W-101 status 保持 ACTIVE** (fix 未 ship, ACTIVE → ACTIVE 不算 transition; superseder 仍 "待定")
+
 **引用:**
 - SEGV 现场: `compiler/build/bin/_w099_v2.exe.s` 中 `parser__parse_expr` 函数体 + 0xD350 (54146) offset
 - 可疑源码: `compiler/src0/codegen_amd64_emit_call.jhyy:2189-2191` (emit_binop final store)
