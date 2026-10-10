@@ -6448,6 +6448,30 @@ if ret_temp_id == (0 as i64) {
   - **W-101 status 保持 ACTIVE** (fix 未 ship, ACTIVE → ACTIVE 不算 transition; superseder 仍 "待定")
   - **v4.0.3 plan 状态**: 计划文件 `docs/plans/v4/v4.0.3-plan.md` (committed 8d519f0) + 6 维度 audit checklist `docs/audit/v4.0.3-codegen-deep-audit.md` (committed 0c10168) 保留作为后续 sprint 参考,但 v4.0.0 final 不能 ship 因为 W-101/W-097 ACTIVE/DEFERRED (per user 决定 "所有defer和active的workaround必须在v4正式版中清零,所以大不了v4不发")
 
+- **#3 (REVERTED 2026-10-10, v4.0.3 wip → v4.0.0 final 终止):** 第三次重做"alloc pool disjoint" 假设 — 实施前**未读 attempt #2 REVERTED lesson** 又踩同一坑:
+  - 实施动机: 用户(2026-10-10)对"defer/active 推"不耐烦,要求"继续修"。但 6 维度 audit `docs/audit/v4.0.3-codegen-deep-audit.md` 已 commit + 真根因(R7 标识: `cg_offset_for_temp_with_target` 对 high temp_id (>= 1024) address-holder init/lookup 路径)已知,直接重复 attempt #2 4-edits 而不做真根因 fix
+  - 2 文件修改 (跟 attempt #2 一字不差):
+    - `codegen_amd64_state.jhyy` (CGState struct 加 `alloc_init_off: i64` field + `cg_state_set_alloc_init_off` setter + `cg_alloc_slot` first call init_off 选择, + `cg_state_init` + `cg_state_reset_for_function` alloc_init_off=0 init)
+    - `codegen_amd64_emit_ctrl.jhyy:543-595` (frame_size 公式改 dynamic `alloc_init_off` + small-fn 走 legacy -8192 + large-fn 移 formula pool 下方 + 64B gap)
+  - 实施 (full 重建 chain):
+    1. `make clean && make stage0` → `jhyy_stage0.exe` 重建 (C-side 无 src0 改动, sha 跟 v4.0.2.5 一致)
+    2. `make` (stage 1: `jhyy_stage0.exe` 编 `main.jhyy` 用 C-side codegen) → `jhyy.exe` 重建 (sha `2d6eb234...`, 779535B vs baseline 779468B, +67B 因加 `alloc_init_off` field + setter)
+    3. `jhyy.exe compile simple.jhyy` → EXIT=0 ✓ (user-mode compile 不受 W-101 影响)
+    4. `jhyy.exe compile main.jhyy` → gcc link OK → `jhyy_new.exe` (sha `bd7b0396...`)
+    5. `jhyy_new.exe compile simple.jhyy` → **5+ `(null):0:0: error: expected ;, got int` 反复 + hang**
+  - 跟 attempt #2 同一症状 (RCA 早应预测): v1 binary parse 阶段 hang/反复报 NULL source path,几乎无法定位
+  - `jhyy_new.s` dump: `parser__parse_expr` frame = 20544B (fix 起作用了 — local_max+1 = 2564, ×8 + 32 = 20544) ✓
+  - `jhyy_v1.s` dump: `parser__parse_expr` frame = **44640B** (NOT 20544B — fix NOT 传播到 v1's codegen) ✗
+    - **真根因确认**: Stage 0 (`gcc → jhyy_stage0.exe`) → Stage 1 (`jhyy_stage0.exe` 用 C-side codegen 编 `main.jhyy` → `jhyy.exe`) → Stage 2 (`jhyy.exe` 用 jhyy-side codegen 编 `main.jhyy` → `jhyy_v1.exe`) 的 codegen 链里,**C-side codegen 编出的 `jhyy.exe` 里的 jhyy-side codegen 函数**是 C-side-compiled 版(用 C-side codegen logic 编译 src0/codegen_amd64_*.jhyy,不是用新 src0 的 jhyy-side logic 编译自己)。所以 src0 改 alloc_init_off 后,jhyy.exe 里的 codegen 仍是 C-side-编-旧-src0 → 没 alloc_init_off → frame 44640B。
+  - **REVERT 触发**: 跟前 attempt #2 完全同一症状 — v1 binary parse 阶段崩 + hang,比 attempt #2 多浪费 2h(全 chain 重建 + dump 对比)
+  - **lesson learned (3rd re-application, 仍 fail)**:
+    1. **重复踩 attempt #2 REVERTED 同一坑** — attempt #2 已 record 同一陷阱("未读 history 重新踩同一坑"),未在实施前 grep `## W-101.*REVERTED` audit ledger → 浪费 sprint
+    2. **未做真根因 fix** — 6 维度 audit 已明确说真根因是 `cg_offset_for_temp_with_target` 对 high temp_id (>= 1024) address-holder 路径,但 attempt #3 仍是 alloc pool disjoint (跟真根因无关的方向)
+    3. **未读 Stage 0/1/2 codegen chain** — `jhyy_new.s` 跟 `jhyy_v1.s` frame size 不一致 (20544 vs 44640) 揭示 codegen chain 不传播 src0 改动,需先理解 C-side-编-jhyy-side-codegen 这层再设计 fix 方向
+  - **结论 (跟 attempt #1 / #2 一致)**: W-101 真修 = 修 `cg_offset_for_temp_with_target` 对 high temp_id (>= 1024) 的 address-holder init/lookup 路径 (per 6 维度 audit R7 标识); 跟 alloc/formula pool layout 无关; 修复 scope 是 emit_call 跟 emit_load 的 dst temp record 路径 (audit R3/R4),不是 frame_size 公式
+  - **W-101 status 保持 ACTIVE** (fix 未 ship, ACTIVE → ACTIVE 不算 transition; superseder 仍 "待定")
+  - **v4.0.0 final 收口决定** (2026-10-10 user 决定): v4.0.0 不能 ship。per user 政策 "所有defer和active的workaround必须在v4正式版中清零,所以大不了v4不发" — v4.0.0-rc1 tag 保留, 不打 v4.0.0 final tag。 v4.x 下一 sprint 起点 = 推 v4.0.4 真修 W-101 + W-097 (W-098 已 ship, W-100 已 ship; W-074.6 sub-bugs #1/#2/#3 partial ship v4.0.2.1, multifn silent fail 真修推后续 sprint per W-074.6 entry)
+
 **引用:**
 - SEGV 现场: `compiler/build/bin/_w099_v2.exe.s` 中 `parser__parse_expr` 函数体 + 0xD350 (54146) offset
 - 可疑源码: `compiler/src0/codegen_amd64_emit_call.jhyy:2189-2191` (emit_binop final store)
