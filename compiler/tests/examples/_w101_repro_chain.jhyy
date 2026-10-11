@@ -1,0 +1,10 @@
+fn main_jhyy() -> i32 {
+    let a: i32 = 1;
+    let b: i32 = 2;
+    let c: i32 = 3;
+    let d: i32 = 4;
+    if (a == b) && (c == d) && (a == c) && (b == d) {
+        return 1;
+    }
+    return 0;
+}
