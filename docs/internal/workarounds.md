@@ -6527,6 +6527,49 @@ if ret_temp_id == (0 as i64) {
   - **结论 (跟 attempt #1-#4 一致, 5 attempts 全 REVERTED)**: W-101 真修需 **separate address-holder pool** (per audit § 5) — emit_call + emit_load dst temp 走 alloc pool 之外独立 pool (e.g., alloc_init_off = frame_size + 64 gap); 跟 attempt #4 dynamic alloc_init_off 区别 = attempt #4 是把 alloc pool 推到 formula 下, **保持** alloc pool 在 formula 当前, 但 **separate** address-holder pool 在 alloc pool 下方. scope ~200 LOC, 风险: 5 attempt 历史 + 仍可能引入 C-side regress. **v4.0.5+ 真修 attempt (NOT v4.0.4)** per user 政策 "v4 不发" + 5 attempts 同陷阱 + scope > 1 sprint.
   - **W-101 status 保持 ACTIVE** (Step 2 fix REVERTED, Step 1 logging SHIP as docs-only data point; fix 未 ship, ACTIVE → ACTIVE 不算 transition; superseder 仍 "待定 — 推 v4.0.5+")
 
+- **#6 (REVERTED 2026-10-11, v4.0.5 wip → 6th consecutive REVERT — 走 audit § 5 separate address-holder pool direction 但新 trap family):** 第 6 次尝试 — 5 attempts REVERTED 后 v4.0.5 plan 显式走 audit § 5 direction (separate address-holder pool), NOT alloc/formula pool disjoint trap:
+  - **实施动机**: per attempt #5 lesson + audit `docs/audit/v4.0.3-codegen-deep-audit.md` § 5: fix 路径不是改 alloc/formula pool disjoint,而是给 address-holder slot 走**完全独立第三 pool** (alloc pool 下方 + 64 gap),formula/alloc/addr_holder 三 pool 完全物理 disjoint。 plan `docs/plans/v4/v4.0.5-plan.md` 完整 1-iter RCA + minimal repro + ~200 LOC 4-file fix + 10 verification gates 路线图。
+  - **改动 (4 文件, ~108 LOC, 走 audit § 5 direction)**:
+    - `compiler/src0/codegen_amd64_state.jhyy:243-253` CGState struct 加 3 fields: `alloc_init_off: i64` (value pool start = formula_end + 64 gap), `addr_holder_init_off: i64` (addr pool start = alloc_end + 64 gap), `is_in_addr_pool: i32` (dispatch flag)
+    - `compiler/src0/codegen_amd64_state.jhyy:323-340` 加 setter: `cg_state_set_alloc_init_off(state, off)` + `cg_state_set_addr_holder_init_off(state, off)` (mirrors attempt #4 v4.0.3.3 setter pattern)
+    - `compiler/src0/codegen_amd64_state.jhyy:432-438` cg_state_init: init 3 new fields to 0 (= "not set yet")
+    - `compiler/src0/codegen_amd64_state.jhyy:578-584` cg_state_reset_for_function: per-fn zero 3 new fields
+    - `compiler/src0/codegen_amd64_state.jhyy:949-984` cg_alloc_slot: 加 `is_addr: i32` param, first-call dispatch by is_addr flag (0=value pool, 1=addr_holder pool), is_addr=1 + addr_holder_init_off=0 fallback hardcoded -8192 (binary compat)
+    - `compiler/src0/codegen_amd64_emit_ctrl.jhyy:579-594` emit_func_header: 算完 alloc_pool_size + frame_size 后 set 2 init_off 进 state
+    - `compiler/src0/codegen_amd64_emit_mem.jhyy:292-293` emit_alloc: `cg_alloc_slot(state, aligned, 1)` (alloc-result = address-holder)
+    - `compiler/src0/codegen_amd64_emit_mem.jhyy:347` derived address-holder: `cg_alloc_slot(state, 8, 1)` (走独立 addr pool)
+    - `compiler/src0/codegen_amd64_emit_mem.jhyy:683-692` emit_load dst_slot: 先 `cg_is_address_holder(src)` 决定 is_addr flag, propagate holds-address flag 给 downstream
+    - `compiler/src0/codegen_amd64_emit_call.jhyy:1838` emit_copy derived: `cg_alloc_slot(state, 8, 1)` (走独立 addr pool)
+  - **实施 (full 重建 chain)**:
+    1. `jhyy_stage0.exe compile main.jhyy` → `jhyy.exe` 重建 (sha `22929a80...`, 781673B, +652B from v4.0.5 fields + setter + dual pool logic)
+    2. `jhyy.exe compile helloworld.jhyy` → PASS (EXIT=0, prints "Hello, world!")
+    3. `jhyy.exe compile fib_renamed.jhyy` → PASS (EXIT=0, prints "fib(30) = 832040")
+    4. `timeout 60s python regress.py --binary=jhyy.exe --tests=f64_suffix.jhyy` → PASS (pre-condition HOLD)
+    5. `python regress.py --binary=jhyy.exe` → **FAIL: float_arg_xmm.jhyy 60s timeout** (attempt #4 REVERTED pattern 复现)
+    6. `timeout 30s jhyy.exe compile float_arg_xmm.jhyy` → **TIMEOUT 30s** (Step 1 logging fires 完 emit 2 个 fn 的 efh_pre/rst/bfi/efh_post 之后 hang)
+  - **REVERT 触发**:
+    1. **Stage 1 logging show emit_module EXIT 0** (efh_post fn=2 出现), 但**进程不退出** → hang 在 parse_and_emit → peephole_fold / write_file / cleanup 阶段
+    2. **诊断细节 — 不是 emit_func_header trap** (attempt #6 fix scope 在 emit_func_header set init_off,但 hang 在 emit_func_header EXIT 后)
+    3. **可能根因 candidates**:
+       - (a) malloc(512) overflow: CGState 40 fields × 8 = 320 bytes < 512 应该够, 但 v2.13.0 (W-074.6 RCA) 升级从 160→512, 这次 +20 加 640 bytes (40×8 + padding) 可能实际 > 512 — 但 helloworld/Fib PASS 排除此可能 (state_buf heap write 覆盖会立即 segfault, 不是 hang)
+       - (b) **peephole_fold 新引入 pattern** (per `feedback_codegen_amd64_multifn`: peephole in self-backend 历史上多次 hidden sub-pattern bug, attempt #6 frame_size formula change → emit 字节 pattern shift → peephole 看不到旧 raw bytes) — **最可能根因**, 但需要 1-iter RCA verify
+       - (c) sb_init + jh_write_file 路径冲突 — 排除, helloworld PASS 走同 path
+    4. **C-side regress HOLD 没验** (regress 跑 float_arg_xmm 60s timeout 后被强制 kill, 没跑完)
+  - **保留 (Step 1 logging ship + jhyy.exe baseline)**:
+    - jhyy.exe binary rebuilt with src0/ REVERTED → sha `54e8ae5d8...` 跟 baseline 一致
+    - Step 1 logging (jh_dbg_log2 C-bridge + 5 site) 仍 ship 在 baseline
+    - regress C-side jhyy.exe 160/161 PASS + 22 SKIP HOLD (Step 1 baseline 不破坏)
+  - **lesson learned (6th re-application, 仍 fail, 不同 trap family)**:
+    1. **6 attempts 全 REVERTED** — 但 #1-#5 同 alloc/formula 假设错, #6 走 audit § 5 separate address-holder pool direction (设计正确), 但 trap 改在 **post-emit 阶段 (peephole_fold / write_file)**, NOT in frame_size 公式 / formula path lookup
+    #2. **emit_func_header EXIT ≠ codegen EXIT** — attempt #6 hang site 在 emit_func_header 成功 EXIT 之后, 即 parse_and_emit EXIT 之后某 stage 引入 hidden bug, 之前 5 attempts 没踩因为他们的 hang site 在 parse_and_emit 期间 (silent fail / parse hang)
+    #3. **attempt #6 fix design 本身正确** — 物理 disjoint 三 pool 是真根因 (audit § 5), 但**实施路径有 trap**: frame_size 公式改 + emit_func_header 加 setter 改了 emit 字节 pattern, peephole_fold 没跟上 pattern shift → infinite loop or buffer issue → hang
+  - **结论 (跟 attempt #1-#5 一致, 6 attempts 全 REVERTED)**: 
+    - **fix direction (separate address-holder pool) 仍正确** — audit § 5 + W-101 真根因 evidence 都支持
+    - **实施需更小 scope 跟更细粒度 verify** — 一次性 ship 4 文件 108 LOC 引入 post-emit hidden bug; **下次 attempt 必须分多个 commit, 每个 commit 独立 5/5 PASS verify**
+    - **下次 attempt 起点 = v4.0.6+** (per `feedback_audit_single_commit_diff` split cadence + 1-iter RCA on peephole_fold hang 根因)
+    - **下次 attempt 备选 direction**: emit_addr_holder 走独立 .data segment (per audit § 5 + Plan mode 备选) 替代 stack pool, 消除所有 stack 物理 overlap trap — scope 较大, 需 design first
+  - **W-101 status 保持 ACTIVE** (Step 2 fix REVERTED, Step 1 logging SHIP as docs-only data point; fix 未 ship, ACTIVE → ACTIVE 不算 transition; superseder 仍 "待定 — 推 v4.0.6+")
+
 **引用:**
 - SEGV 现场: `compiler/build/bin/_w099_v2.exe.s` 中 `parser__parse_expr` 函数体 + 0xD350 (54146) offset
 - 可疑源码: `compiler/src0/codegen_amd64_emit_call.jhyy:2189-2191` (emit_binop final store)
