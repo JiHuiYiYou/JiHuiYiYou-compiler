@@ -6496,6 +6496,37 @@ if ret_temp_id == (0 as i64) {
   - **结论 (跟 attempt #1/#2/#3 一致, 4 attempts 全 REVERTED)**: W-101 真修需先**完整 1-iter RCA 验证 root cause 假设**(`cg_offset_for_temp_with_target` 对 high temp_id (>= 1024) address-holder 路径) + 写单测验证假设,再设计 fix scope (emit_call / emit_load 的 dst temp record 路径, NOT frame_size 公式); v4.0.0 final 不能 ship; v4.x 下一 sprint 起点 = 推 v4.0.4
   - **W-101 status 保持 ACTIVE** (fix 未 ship, ACTIVE → ACTIVE 不算 transition; superseder 仍 "待定")
 
+- **#5 (REVERTED 2026-10-11, v4.0.4 wip → 5th consecutive REVERT same trap family):** bitmap "address-holder slot reservation" approach — 第 5 次尝试 (跟 attempt #1-#4 同 alloc/formula 错方向):
+  - **实施动机**: v4.0.4 plan `docs/plans/v4/v4.0.4-plan.md` § Step 1 加 jh_dbg_log2 C-bridge 后, 1-iter RCA 想用 bitmap (32K bits = 4KB) 跟踪哪些 formula slot 已被 address-holder temp 占用, `cg_offset_for_temp_with_target` formula 路径 advance 到下一 free slot。 Per Step 1 logs from Stage 0 jhyy.exe: `cg_record_temp_slot` write 跟 `cg_offset_for_temp_with_target` lookup 时序正确, 但 formula path 返回的 slot 跟 alloc'd address-holder slot 物理 overlap (per audit `docs/audit/v4.0.3-codegen-deep-audit.md` 维度 2: formula pool [rbp-16520, rbp-32] ∩ alloc pool [-8192 + delta, -8192] overlap 当 local_max > 1020)。
+  - **改动 (5 文件, 跟 attempt #1-#4 同方向 but 新实现)**:
+    - `compiler/src0/codegen_amd64_state.jhyy`: CGState struct 加 `address_holder_slot_bitmap: *u8` field
+    - `compiler/src0/codegen_amd64_state.jhyy:516-525` cg_state_init: arena_alloc 4096 bytes + zero-init bitmap
+    - `compiler/src0/codegen_amd64_state.jhyy:642-648` cg_state_reset_for_function: per-fn memset 0 bitmap
+    - `compiler/src0/codegen_amd64_state.jhyy:358-380` cg_record_temp_slot: 写完 entry 后, if temp is address-holder, set bitmap bit for slot
+    - `compiler/src0/codegen_amd64_state.jhyy:965-998` cg_offset_for_temp_with_target: formula 路径 lookup bitmap, 若 slot bit set, advance search_off -= 8 until free (max 256 attempts)
+    - `compiler/src0/jhyy_helpers.c:749-764` jh_cgstate_set_holder_slot_bit / get C-bridges (bit-level bitmap access)
+  - **实施 (full 重建 chain)**:
+    1. `jhyy_stage0.exe compile main.jhyy` → `jhyy.exe` 重建 (sha `54e8ae5d8...`, 781021B, +1553B from jh_dbg_log2 + bitmap field + 5 logging sites)
+    2. `jhyy.exe compile compiler/src0/main.jhyy -o /tmp/v1_step12.exe` → gcc link OK → v1 binary 1670301B
+    3. **diff `/tmp/v1_baseline.exe.s` vs `/tmp/v1_step12.exe.s`**: bitmap advance shifted multiple slots (-8248→-8256, -8320→-8336, -8368→-8384 etc.) — every alloc that matched a recorded holder bit got advanced, not just the clobber path
+    4. `jhyy_v1_step12.exe.exe compile main.jhyy` → silent SEGV (parse hang `(null):0:0: error: expected ;, got int` infinite loop, 跟 attempt #2/#3/#4 同一症状)
+  - **真根因 (跟 attempt #1-#4 一致 + bitmap 新错因)**: bitmap conflates "reserved by current temp" vs "reserved by OTHER temp":
+    - `cg_record_temp_slot(state, %t9191, -16512)` → bitmap bit 2064 set (current t's OWN holder)
+    - 后续 `cg_offset_for_temp_with_target(%t9194, ...)` formula returns -16512 (公式 `(32 + 2060*8) = 16512`, local_t2=2060) → bitmap bit 2064 check returns 1 (因为 %t9191 set 它) → advance to -16520
+    - 但 -16512 是 **%t9191 的 OWN slot** — 当 lookup 是 %t9194 自己时, advance 是 wrong, 因为 current lookup 不应跟 OWN slot 冲突
+    - bitmap 没有 per-temp ownership 区分 → every formula slot 跟任何 recorded holder slot 冲突都 advance → 全 -8B shift 不止 clobber path
+  - **REVERT 触发**:
+    1. .s diff 显示 bitmap approach 让 **every** alloc +8B shift (8-byte per advance), 不是只 fix W-101 clobber path → 所有 frame_size 公式重新算 → regress 必 regress (attempt #4 REVERTED pattern 复现)
+    2. v1 binary Stage 1→2 closure 仍 silent SEGV (parse hang) — **fix 未达目标**
+    3. C-side regress 风险: 跟 attempt #4 同样问题, 但还没 run C-side full regress (per `feedback_ci_gate_must_exercise_path` "5/5 PASS 假阳性比无 gate 更糟", bitmap 公式 + alloc pool disjoint 假设属同一陷阱)
+  - **保留 (Step 1 logging ship)**: jh_dbg_log2 C-bridge (jhyy_helpers.c:40-51) + extern decl (state.jhyy:280-289) + 5 site logging (cg_record_temp_slot rcs_pre/oob/null/ok, cg_state_reset_for_function rst_pre/post, cg_local_t_from_global ltg_pre/neg/out, cg_offset_for_temp_with_target oftt_neg/rec/spl/fm, cg_state_bump_fn_idx bfi_pre/post, emit_func_header efh_pre/post) 全部保留 — Stage 0 jhyy.exe baseline regress PASS (helloworld "Hello, world!" + fib_renamed "fib(30) = 832040"), 不破坏 C-side codegen
+  - **lesson learned (5th re-application, 仍 fail)**:
+    1. **5 attempts 全 REVERTED 同一 alloc/formula pool 错假设** — attempt #1 v2.13.9 (dynamic alloc_headroom) + #2 v4.0.2.7 (alloc pool disjoint) + #3 v4.0.3 (同 #2) + #4 v4.0.3 wip (alloc_init_off 公式) + #5 v4.0.4 wip (bitmap advance) — 5 个 fix 路径**全基于** "alloc pool 跟 formula pool 物理 disjoint 假设错", per audit 维度 2 实际 disjoint **仅在 small fn (local_max ≤ 1020)** 保证, large fn (parser__parse_expr local_max=2060) overlap 不可避免
+    2. **Step 1 logging 成功 ship** — 1-iter RCA 验证假设**成功找到真根因** (per `feedback_rca_first_root_cause`): `.s` line 70238 `movl %eax, -16512(%rbp)` clobber holder at -16512 (alloc'd for %t9191 holder) → 后续 `movq -16512(%rbp), %r8` (line 70470) loads 0 → SEGV `mov %eax, (%r8)` at parser__parse_expr+54146. 真根因 = formula path `cg_offset_for_temp_with_target(%t9194)` 返回 -16512 (公式 `-(32 + 2060*8)` = -16512) 跟 alloc'd %t9191 holder 物理 collision。 fix scope 必须改 formula path 对 address-holder collision **提前 alloc separate region** (separate address-holder pool per fn), NOT bitmap advance / NOT frame_size 公式。
+    3. **bitmap approach 错因深挖**: 错在**没区分 "current temp 的 own slot" vs "other temp 的 reserved slot"**. bitmap 是 global state, 但 formula 路径 lookup 应只考虑 other temps 的 reserved. 修 bitmap 必须加 per-temp ownership 跟踪 (e.g., bitmap 表 keyed by current temp_id + flag "is this bitmap entry current temp's own"), 复杂度 >> 1 sprint scope.
+  - **结论 (跟 attempt #1-#4 一致, 5 attempts 全 REVERTED)**: W-101 真修需 **separate address-holder pool** (per audit § 5) — emit_call + emit_load dst temp 走 alloc pool 之外独立 pool (e.g., alloc_init_off = frame_size + 64 gap); 跟 attempt #4 dynamic alloc_init_off 区别 = attempt #4 是把 alloc pool 推到 formula 下, **保持** alloc pool 在 formula 当前, 但 **separate** address-holder pool 在 alloc pool 下方. scope ~200 LOC, 风险: 5 attempt 历史 + 仍可能引入 C-side regress. **v4.0.5+ 真修 attempt (NOT v4.0.4)** per user 政策 "v4 不发" + 5 attempts 同陷阱 + scope > 1 sprint.
+  - **W-101 status 保持 ACTIVE** (Step 2 fix REVERTED, Step 1 logging SHIP as docs-only data point; fix 未 ship, ACTIVE → ACTIVE 不算 transition; superseder 仍 "待定 — 推 v4.0.5+")
+
 **引用:**
 - SEGV 现场: `compiler/build/bin/_w099_v2.exe.s` 中 `parser__parse_expr` 函数体 + 0xD350 (54146) offset
 - 可疑源码: `compiler/src0/codegen_amd64_emit_call.jhyy:2189-2191` (emit_binop final store)

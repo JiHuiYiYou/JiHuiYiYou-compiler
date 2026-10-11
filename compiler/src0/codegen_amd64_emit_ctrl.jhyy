@@ -444,6 +444,11 @@ fn emit_ret(state: *u8, tok: *u8, target_tag: i32) -> i32 {
 fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let cg = state as *CGState;
     let t = tok as *ILToken;
+    // v4.0.4 Step 1 (W-101 RCA): log entry — captures cur_fn_idx + target_tag + fn_count
+    // at function entry, useful for tracking emit_func_header <-> cg_state_reset_for_function
+    // ordering. (cur_fn_idx before bump, fn_count, target_tag, -1 placeholder).
+    let _l_pre = jh_dbg_log2("efh_pre" as *u8, (*cg).cur_fn_idx, (*cg).fn_count,
+                              target_tag as i64, -(1 as i64));
     if (*t).kind != ILTOK_FUNC_HEADER() {
         jh_fputs_stderr("emit_func_header: ILToken kind != ILTOK_FUNC_HEADER\n" as *u8);
         return 1;
@@ -615,6 +620,10 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     // emit_copy 仍 hardcode arg-0 = %rcx。CGState.cur_fn_header_text/len
     // 字段保留以备 v2.11.4 真修 lexer args dup 后启用。
     let _fnbump = cg_state_bump_fn_idx(state);
+    // v4.0.4 Step 1 (W-101 RCA): log post-bump — confirms cur_fn_idx increment
+    // matches fn_count progression.
+    let _l_post = jh_dbg_log2("efh_post" as *u8, (*cg).cur_fn_idx, (*cg).fn_count,
+                               target_tag as i64, -(1 as i64));
 
     return 0;
 }

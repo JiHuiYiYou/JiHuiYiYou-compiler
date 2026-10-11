@@ -37,6 +37,19 @@ int jh_fputs_stdout(const char *s) {
     return fputs(s, stdout);
 }
 
+/* v4.0.4 Step 1 (W-101 RCA 1-iter verification, per feedback_rca_first_root_cause):
+   jh_dbg_log2 — 5-arg structured logging bridge for jhyy-side codegen tracing.
+   Captures W-101 smoking gun: cg_record_temp_slot / cg_offset_for_temp_with_target
+   / cg_state_reset_for_function / emit_func_header 时序. 4 i64 values cover all
+   sites: (fn_idx, temp_id, slot_off, recorded_or_offset_or_size). label disambiguates
+   site via short tag. fflush(stderr) 保证 SEGV 段前 stderr buffer 真 flush。 */
+__attribute__((used)) int jh_dbg_log2(const char *label, long long a, long long b, long long c, long long d) {
+    int n = fprintf(stderr, "[W101DBG] %s fn=%lld t=%lld slot=%lld extra=%lld\n",
+                   label, a, b, c, d);
+    fflush(stderr);
+    return n;
+}
+
 /* 二进制模式 fopen（防 CRLF 污染 QBE IL — v0.6 memory feedback）。
    codegen 翻译 sprint 4 时所有写 .il 都走 jh_fopen_wb。 */
 void *jh_fopen_wb(const char *path) {
