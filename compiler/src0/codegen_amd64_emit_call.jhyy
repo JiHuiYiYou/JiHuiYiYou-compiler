@@ -1835,7 +1835,7 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         //
         // Why cg_alloc_slot (not next_offset manual): 跟 Phase 1 pattern 对齐,
         // 自动跟其他 alloc-slot 物理分离 (advance 方向 = 负方向单调递减)。
-        let derived_slot_off = cg_alloc_slot(state, 8 as i64);
+        let derived_slot_off = cg_alloc_slot(state, 8 as i64, 1 as i32);
         let _rec = cg_record_temp_slot(state, dst_id, derived_slot_off);
     }
 
