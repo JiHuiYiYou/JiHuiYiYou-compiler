@@ -576,6 +576,14 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     if alloc_pool_size > frame_size {
         frame_size = alloc_pool_size;
     }
+    // v4.0.6 (W-101 attempt #7): set addr_holder_init_off = -(frame_size + 64)
+    // and alloc_init_off = -(32 + (local_max+1)*8) — separate address-holder
+    // pool starts AFTER alloc pool + 64-byte gap, completely disjoint from
+    // formula/alloc pools. cg_alloc_slot first-call with is_addr=1 will
+    // initialize next_offset to this value. alloc_init_off is the formula
+    // end (per audit trail — formula path unchanged from baseline).
+    let _set_aio = cg_state_set_alloc_init_off(state, ((0 as i64) - (32 as i64)) - ((local_max + (1 as i64)) * (8 as i64)));
+    let _set_aho = cg_state_set_addr_holder_init_off(state, (0 as i64) - (frame_size + (64 as i64)));
     let mut n: i64 = 0 as i64;
     if target_is_win(target_tag) == (1 as i32) {
         // Win: shadow_space (32) + frame_size, but 16-align total for movaps/abi
