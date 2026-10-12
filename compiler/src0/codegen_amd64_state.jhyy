@@ -246,6 +246,15 @@ type CGState = struct {
     //   cg_is_builtin_ptr_fn fallback only (link-only externs like ptr_add).
     ret_type_map:   *u8,    // *RetTypeMapEntry[] arena-alloc'd by sema
     ret_type_map_n: i64,    // entry count
+
+    // v4.0.6 (W-101 attempt #7 separate address-holder pool per audit § 5):
+    // address-holder pool 起始 offset = alloc_pool_end + 64 gap,formula pool 跟
+    // alloc pool 完全 disjoint 后,address-holder 走完全独立第三 pool。emit_func_header
+    // 算完 alloc_pool_end_off 后 set 此值。cg_alloc_slot 接 is_addr=1 时 first-call
+    // 用此值 init next_offset → 物理完全 disjoint formula/alloc/addr_holder 三 pool。
+    alloc_init_off: i64,        // formula end + 64 gap (= -(32+(local_max+1)*8+64))
+    addr_holder_init_off: i64,  // alloc end + 64 gap (= -(alloc_pool_end_off + 64))
+    is_in_addr_pool: i32,       // cg_alloc_slot first-call dispatch: 0=value pool, 1=addr pool
 }
 
 // v2.11.5 (W-074.7 alloc-tracking 真修): extern bridge 装当前 CGState 的
@@ -543,6 +552,14 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     (*s).pending_phi_count = 0 as i64;
     (*s).cur_block_name = 0 as *u8;
     (*s).cur_block_name_len = 0 as i64;
+    // v4.0.6 (W-101 attempt #7 separate address-holder pool): init 3 new fields
+    // for the dual-pool design (per audit § 5 correct direction). All zero
+    // here; emit_func_header sets alloc_init_off (formula end + 64 gap) and
+    // addr_holder_init_off (alloc end + 64 gap) once it has computed
+    // alloc_pool_end_off. is_in_addr_pool starts 0 (value pool dispatch).
+    (*s).alloc_init_off = 0 as i64;
+    (*s).addr_holder_init_off = 0 as i64;
+    (*s).is_in_addr_pool = 0 as i32;
     return 0;
 }
 
@@ -634,6 +651,10 @@ fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
     // intra-fn — fine. If different, reset races with emit_func_header bump.
     let _l_post = jh_dbg_log2("rst_post" as *u8, (*s).cur_fn_idx, (*s).fn_count,
                                cg_max_temp_slots(), -(1 as i64));
+    // v4.0.6 (W-101 attempt #7): reset is_in_addr_pool dispatcher. alloc_init_off
+    // and addr_holder_init_off are NOT reset — they are per-fn-invariant
+    // (computed once by emit_func_header) and zeroed only in cg_state_init.
+    (*s).is_in_addr_pool = 0 as i32;
     return 0;
 }
 
@@ -938,19 +959,60 @@ fn cg_offset_for_temp_with_target(t: i64, target_tag: i32) -> i64 {
 // gap 给 formula pool + 任何后续 alloc 不 collision。alloc pool 自身 advance 8 字节/8B slot
 // 或 aligned(alloc_size)。 Worst case:per-fn alloc ~50KB → -8192 - 50KB = -58800, 远在
 // 32KB MSYS2 mingw 栈范围(2MB default)内,no overflow risk。
-fn cg_alloc_slot(state: *u8, size: i64) -> i64 {
+fn cg_alloc_slot(state: *u8, size: i64, is_addr: i32) -> i64 {
     // align-up to 8-byte boundary: (size + 7) & ~7
     let aligned = (size + (7 as i64)) & ((0 as i64) - (8 as i64));
     let s = state as *CGState;
     // v2.11.23 Phase 2:alloc pool 起始 offset — formula pool 占用 [rbp-2072, rbp-32],
     // alloc pool 必须从 rbp-8192 起向下增长 才不 collision
-    if (*s).next_offset == (0 as i64) {
-        (*s).next_offset = (0 as i64) - (8192 as i64);
+    // v4.0.6 (W-101 attempt #7 separate address-holder pool, per audit § 5):
+    // address-holder pool 走完全独立第三 pool (start = addr_holder_init_off,
+    // set by emit_func_header per fn = alloc_pool_end_off - 64 gap)。
+    // is_addr=1 first-call → init next_offset to addr_holder_init_off。
+    // is_addr=0 first-call (value pool, default) → init next_offset to -8192。
+    // is_in_addr_pool 跟踪当前 dispatch (per-fn, reset_for_function 0)。
+    if is_addr == (1 as i32) {
+        if (*s).is_in_addr_pool == (0 as i32) {
+            (*s).next_offset = (*s).addr_holder_init_off;
+            (*s).is_in_addr_pool = 1 as i32;
+        }
+    } else {
+        if (*s).is_in_addr_pool == (1 as i32) {
+            // Switch back to value pool: re-init from alloc pool base (-8192).
+            // Address-holder pool 已经被 previous calls 在 next_offset 推进,
+            // 再切回 value pool 必须 reset to alloc base 才能继续 alloc 推
+            // alloc pool (否则 value alloc 会继续用 addr_holder_init_off 当
+            // 起点 → 错位)。
+            (*s).next_offset = (0 as i64) - (8192 as i64);
+            (*s).is_in_addr_pool = 0 as i32;
+        } else {
+            if (*s).next_offset == (0 as i64) {
+                (*s).next_offset = (0 as i64) - (8192 as i64);
+            }
+        }
     }
     let off = (*s).next_offset - aligned;
     (*s).next_offset = off;
     (*s).total_alloc = (*s).total_alloc + aligned;
     return off;
+}
+
+// cg_state_set_alloc_init_off / cg_state_set_addr_holder_init_off —
+// v4.0.6 (W-101 attempt #7): emit_func_header 末尾调,在 alloc_pool_end_off
+// 算完后 set addr_holder_init_off = alloc_pool_end_off - 64。alloc_init_off
+// 保留记录 formula end (per audit trail,目前 unused by cg_alloc_slot —
+// formula 路径 cg_offset_for_temp_with_target fall through 仍走 -8192 formula
+// pool start 不变)。
+fn cg_state_set_alloc_init_off(state: *u8, off: i64) -> i32 {
+    let s = state as *CGState;
+    (*s).alloc_init_off = off;
+    return 0 as i32;
+}
+
+fn cg_state_set_addr_holder_init_off(state: *u8, off: i64) -> i32 {
+    let s = state as *CGState;
+    (*s).addr_holder_init_off = off;
+    return 0 as i32;
 }
 
 // ════════════════════════════════════════════════════
