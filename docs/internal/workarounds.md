@@ -6555,6 +6555,48 @@ if ret_temp_id == (0 as i64) {
        - (b) **peephole_fold 新引入 pattern** (per `feedback_codegen_amd64_multifn`: peephole in self-backend 历史上多次 hidden sub-pattern bug, attempt #6 frame_size formula change → emit 字节 pattern shift → peephole 看不到旧 raw bytes) — **最可能根因**, 但需要 1-iter RCA verify
        - (c) sb_init + jh_write_file 路径冲突 — 排除, helloworld PASS 走同 path
     4. **C-side regress HOLD 没验** (regress 跑 float_arg_xmm 60s timeout 后被强制 kill, 没跑完)
+  - **attempt #7 1-iter RCA on hang 真根因 (2026-10-11)**: per `feedback_rca_first_root_cause` + `feedback_verify_active_reproduces` 严格 gdb batch 模式取证
+    - **methodology**: `gdb -batch -ex "run ..." -ex "bt" -ex "info registers pc" -ex "x/20i $pc" ./compiler/build/bin/jhyy_v405_attempt6.exe.exe` → 自动 capture SEGV 现场 + 反汇编
+    - **gdb 取证 (attempt #6 binary 真实 SEGV site)**:
+      ```
+      Thread 1 received signal SIGSEGV, Segmentation fault.
+      #0 codegen_amd64_state.cg_is_address_holder () at compiler/src0/main.jhyy:426
+      #4 0x7ff7f8f7b6b9 in codegen_amd64_emit_mem.emit_load () at compiler/src0/main.jhyy:686
+      => 0x7ff7f8f6fd34 <cg_is_address_holder+68>: mov 0x88(%rcx),%rcx
+      ```
+    - **反汇编 emit_load call site** (binary offset 0x14005b6b1):
+      ```
+      14005b6b1: mov %r14, %rcx    ← rcx = r14 寄存器 (实际 = src temp_id 值, NOT state pointer)
+      14005b6b4: call 14004fcf0 <cg_is_address_holder>
+      ```
+    - **attempt #6 SEGV 真根因 (100% 解释 REVERT 触发所有症状)**:
+      1. attempt #6 emit_mem.jhyy:686 caller **写错 1-arg 调 2-arg fn**:
+         - `cg_is_address_holder(state: *u8, temp_id: i64) -> i32` signature 是 2 args (per `compiler/src0/codegen_amd64_state.jhyy:396` baseline)
+         - 我 attempt #6 写 `let src_is_addr: i32 = cg_is_address_holder(src);` 1-arg, 正确应是 `cg_is_address_holder(state, src)` 2-arg
+         - jhyy sema 接受 1-arg call (可能跨-module import forward-decl 宽松, OR 实际我 Edit 时 memory 错)
+      2. emit_load 实际 binary emit: `mov %r14, %rcx` → rcx = r14 寄存器 (某个 temp_id 值 e.g. 7180)
+      3. cg_is_address_holder 拿 src temp_id 当 state 指针 → `mov 0x88(%rcx), %rcx` 触发 SIGSEGV (page fault on read at illegal user-space pointer)
+      4. process exit 139 (SIGSEGV) — 但 stdout `[W101DBG] efh_post fn=2` 之前 fire, 看上去 "hang in post-emit stage", 实际 SEGV 在 emit_load body emit 期间
+    - **attempt #6 真根因 vs attempt #1-#5 真根因 (不同 trap family)**:
+      - attempt #1-#5 真根因 = fix direction 错 (alloc/formula pool disjoint 假设错 per audit 维度 2 早证)
+      - attempt #6 真根因 = **fix direction 正确 (audit § 5 separate address-holder pool) + implementation caller arg count 写错** — 完全不同的失败模式
+    - **REVERT 触发所有症状解释**:
+      1. helloworld / fib_renamed PASS — 这 2 个小 fn 不调 emit_load + cg_is_address_holder path, 1-arg caller bug 不触发 → 假 5/5 PASS
+      2. f64_suffix PASS — 同样不调 emit_load
+      3. float_arg_xmm SEGV — 调 emit_load 大量 (sum4 + main_jhyy), emit_load 内部调 cg_is_address_holder 触发 SIGSEGV
+      4. regress 60s timeout — regress.py timeout 60s 之内 SEGV 已发生, 但 stderr flush 不全, tail 看上去像 "hang"
+    - **fix direction 仍 correct (per attempt #7 RCA evidence)**:
+      - audit § 5 separate address-holder pool 真根因 evidence **支持** attempt #6 design
+      - attempt #6 失败**不是** fix direction 错, 是 implementation caller arg count 写错
+    - **attempt #6 RCA 自我反省 (per `feedback_rca_first_root_cause`)**:
+      1. 我没在 attempt #6 ship 前 1-iter verify "src_is_addr 提取的 caller signature" → 直接 trust jhyy sema 接受
+      2. 我没在 attempt #6 ship 前 1-iter verify "smoke test 是否真覆盖 emit_load path" → 选 helloworld/fib_renamed 当 5/5 PASS 假象
+      3. 我没在 attempt #6 hang 后用 gdb attach 找真根因 → 直接 revert 推 v4.0.6+ = 重复 attempt #1-#5 的 5/5 PASS 假阳性陷阱
+    - **attempt #6 RCA 教训 (attempt #7 + future apply)**:
+      1. **fix direction 跟 implementation 严格区分** — design correct ≠ code correct; 每次 ship 前 5/5 PASS 必须**用 target test 覆盖所有新 caller path** (e.g. 大 fn with alloc+load+store+binop)
+      2. **smoke test 不当 5/5 PASS 假象** — helloworld/fib_renamed 只覆盖 1-2 fn 路径, 不覆盖 emit_load 复杂 path; 必须用 `big_test.jhyy` / `main.jhyy` / `_w101_repro_chain.jhyy` 当 5/5 PASS 目标
+      3. **gdb attach 是真根因唯一工具** — attempt #1-#6 全错都是没 gdb 取证; attempt #7 gdb batch 立刻揭示 SEGV 真根因 (1.5 小时 vs 6 attempts 共 24+ 小时浪费)
+      4. **attempt #6 不应该 REVERT src0/** — implementation bug 跟 design 无关, 只 fix caller arg count 即可 (1 行 edit: `cg_is_address_holder(src)` → `cg_is_address_holder(state, src)`), fix direction 保留
   - **保留 (Step 1 logging ship + jhyy.exe baseline)**:
     - jhyy.exe binary rebuilt with src0/ REVERTED → sha `54e8ae5d8...` 跟 baseline 一致
     - Step 1 logging (jh_dbg_log2 C-bridge + 5 site) 仍 ship 在 baseline

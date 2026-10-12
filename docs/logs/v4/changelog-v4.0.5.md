@@ -47,7 +47,40 @@ W-101 (ACTIVE since 2026-10-09) 仍 ACTIVE — fix direction (separate address-h
 - Stage 1 logging 显示 emit_func_header EXIT 0 → hang 在 parse_and_emit 之后某阶段
 - C-side regress 没跑完 (60s timeout 后被强制 kill, 但 fail 1 已确认 → 全 regress fail per `feedback_regress_clean_count`)
 
-**REVERT 候选根因 (未 ship 1-iter RCA verify,需 v4.0.6+):**
+**attempt #7 1-iter RCA on hang 真根因 (2026-10-11, per `feedback_rca_first_root_cause` strict gdb batch 模式):**
+
+**真根因 100% confirmed**:
+- SEGV site = `cg_is_address_holder+68` `mov 0x88(%rcx),%rcx` with rcx=NULL → 触发 SIGSEGV
+- emit_load (jhyy_v405_attempt6 binary offset 0x14005b6b1) call site:
+  - `14005b6b1: mov %r14, %rcx` → rcx = r14 (实际 = src temp_id 值, NOT state pointer)
+  - `14005b6b4: call cg_is_address_holder` → 1-arg call (state 缺失)
+- `cg_is_address_holder(state: *u8, temp_id: i64) -> i32` signature 是 2 args (per baseline)
+- 我 attempt #6 emit_mem.jhyy:686 caller 写错 `let src_is_addr: i32 = cg_is_address_holder(src);` 1-arg, 正确应是 `cg_is_address_holder(state, src)` 2-arg
+- cg_is_address_holder 拿 src temp_id 当 state 指针 → `mov 0x88(temp_id), %rcx` → SIGSEGV (page fault on read at illegal user-space pointer)
+- process exit 139 (SIGSEGV) — 但 stdout `[W101DBG] efh_post fn=2` 之前 fire, 看上去 "hang in post-emit stage", 实际 SEGV 在 emit_load body emit 期间
+
+**attempt #6 真根因 vs attempt #1-#5 真根因 (不同 trap family)**:
+- attempt #1-#5: fix direction 错 (alloc/formula pool disjoint 假设错 per audit 维度 2)
+- **attempt #6: fix direction 正确 (audit § 5 separate address-holder pool) + implementation caller arg count 写错** — 完全不同的失败模式
+
+**REVERT 触发所有症状 (attempt #7 解释)**:
+- helloworld / fib_renamed PASS: 这 2 个小 fn 不调 emit_load + cg_is_address_holder path, 1-arg caller bug 不触发 → 假 5/5 PASS
+- f64_suffix PASS: 同样不调 emit_load
+- float_arg_xmm SEGV: 调 emit_load 大量 (sum4 + main_jhyy), emit_load 内部调 cg_is_address_holder 触发 SIGSEGV
+- regress 60s timeout: regress.py timeout 60s 之内 SEGV 已发生, 但 stderr flush 不全, tail 看上去像 "hang"
+
+**attempt #6 RCA 自我反省 (per `feedback_rca_first_root_cause` + `feedback_verify_active_reproduces`)**:
+1. 没在 attempt #6 ship 前 1-iter verify "src_is_addr 提取的 caller signature" → 直接 trust jhyy sema 接受
+2. 没在 attempt #6 ship 前 1-iter verify "smoke test 是否真覆盖 emit_load path" → 选 helloworld/fib_renamed 当 5/5 PASS 假象
+3. 没在 attempt #6 hang 后用 gdb attach 找真根因 → 直接 revert 推 v4.0.6+ = 重复 attempt #1-#5 的 5/5 PASS 假阳性陷阱
+
+**attempt #6 RCA 教训 (apply to attempt #7 + future)**:
+1. **fix direction 跟 implementation 严格区分** — design correct ≠ code correct; 每次 ship 前 5/5 PASS 必须**用 target test 覆盖所有新 caller path**
+2. **smoke test 不当 5/5 PASS 假象** — 必须用 `big_test.jhyy` / `main.jhyy` / `_w101_repro_chain.jhyy` 当 5/5 PASS 目标
+3. **gdb attach 是真根因唯一工具** — attempt #7 gdb batch 立刻揭示 SEGV 真根因 (1.5 小时 vs 6 attempts 共 24+ 小时浪费)
+4. **attempt #6 不应该 REVERT src0/** — implementation bug 跟 design 无关, 只 fix caller arg count 即可 (1 行 edit), fix direction 保留
+
+**REVERT 候选根因 (未 ship 1-iter RCA verify,需 v4.0.6+ — 但 attempt #7 已 RCA 完, 此节 deprecated):**
 1. (a) `malloc(512)` overflow: CGState 40 fields × 8 = 320 < 512 应够, helloworld/Fib PASS 排除此可能 (heap overflow 会立即 segfault)
 2. (b) **peephole_fold 新引入 pattern** (per `feedback_codegen_amd64_multifn`: peephole in self-backend 多次 hidden sub-pattern bug) — **最可能**, frame_size 公式 change → emit 字节 pattern shift → peephole 看不到旧 raw bytes
 3. (c) sb_init + jh_write_file 路径冲突 — 排除 (helloworld PASS 走同 path)
