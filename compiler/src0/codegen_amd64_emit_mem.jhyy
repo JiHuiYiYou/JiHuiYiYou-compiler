@@ -290,7 +290,7 @@ fn emit_alloc(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let aligned = mem_align_up8(size);
 
     // 走 A0 的 slot 分配器(推进 state.next_offset + total_alloc)。
-    let slot = cg_alloc_slot(state, aligned);
+    let slot = cg_alloc_slot(state, aligned, 0 as i32);
 
     // A0 stub 期 cg_alloc_slot 恒 0 且不动 state,这里补记账,保证 prologue
     // 的 subq 数字不为 0;A0 填实现后 slot != 0,记账交还给 A0 避免双算。
@@ -343,7 +343,9 @@ fn emit_alloc(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     // = 40B extra. Should fit in current frame_size formula `(max_temp_id+1)*8`
     // since per_fn_max grows with alloc count anyway. (per v2.11.23 audit verify。)
     let _had = cg_record_temp_holds_address(state, dst);
-    let pointer_slot_off = cg_alloc_slot(state, 8 as i64);
+    // v4.0.6 (W-101 attempt #7): is_addr=1 → address-holder pool 独立,
+    // 跟 alloc value pool 完全 disjoint (per audit § 5 direction)。
+    let pointer_slot_off = cg_alloc_slot(state, 8 as i64, 1 as i32);
     let _rec = cg_record_temp_slot(state, dst, pointer_slot_off);
 
     // Emit: leaq -<region_off>(%rbp), %rax; movq %rax, -<pointer_slot>(%rbp)
@@ -677,7 +679,7 @@ fn emit_load(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     } else {
         4 as i64
     };
-    let dst_slot = cg_alloc_slot(state, dst_size);
+    let dst_slot = cg_alloc_slot(state, dst_size, 1 as i32);
     let _rec_dst = cg_record_temp_slot(state, dst, dst_slot);
     let dst_off = dst_slot;
 
