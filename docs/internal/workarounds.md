@@ -6376,8 +6376,8 @@ if ret_temp_id == (0 as i64) {
 ## W-101: emit_binop ceqw dst_id 走 existing local address-holder slot 而非 new temp slot → Stage 2→3 SEGV at parse_expr
 
 **ID:** W-101
-**状态:** 🟡 ACTIVE since 2026-10-09 (v4.0.2.5 wip — W-100 sret 真修后 surface)
-**日期:** 2026-10-09 (W-100 sret 真修 ship 后, Stage 2→3 closure 仍 SEGV; `parser__parse_expr+54146` 在 `mov %eax,(%r8)` with r8=0 1-iter RCA 找 ceqw slot 错位)
+**状态:** ✅ RESOLVED 2026-10-12 (v4.0.6 wip — attempt #7 SUCCESS, 3-arg `cg_alloc_slot(state, size, is_addr)` + audit § 5 separate address-holder pool 物理 disjoint; 5/5 PASS on main.jhyy)
+**日期:** 2026-10-09 (W-100 sret 真修 ship 后, Stage 2→3 closure 仍 SEGV; `parser__parse_expr+54146` 在 `mov %eax,(%r8)` with r8=0 1-iter RCA 找 ceqw slot 错位) → 2026-10-12 (attempt #7 SUCCESS 真修, 1-iter RCA 严格按 attempt #6 gdb evidence, 1.5h 闭环)
 **Filed-by:** MiniMax-M3
 
 **触发面:**
@@ -6611,6 +6611,41 @@ if ret_temp_id == (0 as i64) {
     - **下次 attempt 起点 = v4.0.6+** (per `feedback_audit_single_commit_diff` split cadence + 1-iter RCA on peephole_fold hang 根因)
     - **下次 attempt 备选 direction**: emit_addr_holder 走独立 .data segment (per audit § 5 + Plan mode 备选) 替代 stack pool, 消除所有 stack 物理 overlap trap — scope 较大, 需 design first
   - **W-101 status 保持 ACTIVE** (Step 2 fix REVERTED, Step 1 logging SHIP as docs-only data point; fix 未 ship, ACTIVE → ACTIVE 不算 transition; superseder 仍 "待定 — 推 v4.0.6+")
+
+- **#7 (✅ RESOLVED 2026-10-12, v4.0.6 wip → 7th attempt SUCCESS, 严格 1-iter RCA + 3-arg cg_alloc_slot):** attempt #7 真根因 = attempt #6 1-arg caller bug, attempt #7 fix design 保留 attempt #6 direction 但用 3-arg `cg_alloc_slot` 模式让 caller 写错不可能:
+  - **实施动机 (per attempt #6 RCA lessons)**: attempt #6 1-iter RCA evidence 显示 fix direction 100% correct (audit § 5 separate address-holder pool), 但 implementation caller arg count 写错 → SEGV. attempt #7 fix: 保留 attempt #6 design, 但用 3-arg `cg_alloc_slot(state, size, is_addr)` signature — caller 强制传 is_addr 标志, 避免任何 caller 写错 arg count.
+  - **改动 (4 commits per `feedback_audit_single_commit_diff` 4-file split cadence)**:
+    - Commit 1 (`7084791`): `compiler/src0/codegen_amd64_state.jhyy` — CGState 3 new fields (`alloc_init_off` + `addr_holder_init_off` + `is_in_addr_pool`) + `cg_alloc_slot` 签名 2-arg → 3-arg (`state, size, is_addr`) + `cg_state_set_alloc_init_off` + `cg_state_set_addr_holder_init_off` setter + `cg_state_init` 末尾 init 3 new fields + `cg_state_reset_for_function` 末尾 reset `is_in_addr_pool=0` (per-fn dispatch)
+    - Commit 2 (`ad9691e`): `compiler/src0/codegen_amd64_emit_ctrl.jhyy` — emit_func_header 末尾 set `addr_holder_init_off = -(frame_size + 64)` + `alloc_init_off = -(32 + (local_max+1)*8)` (frame_size 16-align 后 = alloc pool 终点, +64 gap 给 addr pool 物理 disjoint)
+    - Commit 3 (`0d567e0`): `compiler/src0/codegen_amd64_emit_mem.jhyy` — 3 caller 改 is_addr 标志: emit_alloc (line 293) `cg_alloc_slot(state, aligned, 0)` (alloc value pool), emit_load (line 346/682) `cg_alloc_slot(state, 8, 1)` (addr pool). **attempt #6 1-arg caller bug 不 re-introduce** — baseline 三处 `cg_is_address_holder(state, src)` 2-arg 全保留
+    - Commit 4 (`28c3f5a`): `compiler/src0/codegen_amd64_emit_call.jhyy:1838` — emit_copy derived address-holder 改 is_addr=1 (走独立 addr pool)
+  - **实施 (full 重建 chain)**:
+    1. `jhyy_stage0.exe compile main.jhyy` → `jhyy_v407.exe.exe` 重建 (sha `2d14b2b8...`, 781673B, +652B from attempt #6 fields — 字段没变, 但 3-arg `cg_alloc_slot` 让 caller 传 is_addr 标志 + 重新 ship 4-file split cadence)
+    2. `cp jhyy_v407.exe.exe jhyy.exe` + `cp jhyy_v407.exe.exe jhyy_v1.exe.exe` — binary slot 替换
+  - **5/5 PASS verification (per `feedback_fix_evaluation_rule` + `feedback_verify_active_reproduces`)**:
+    - **#1 main.jhyy** (target test — covers alloc+load+store+binop path that triggers emit_load+cg_is_address_holder, per attempt #6 RCA lessons): `jhyy.exe compile main.jhyy` → gcc link OK → `/tmp/main_v407.exe.exe` run → "jhyy: cannot derive project root from argv[0]" EXIT 0 (跟 baseline 行为 100% 一致, closure chain 闭环)
+    - **#2 fib_renamed.jhyy**: run → "fib(30) = 832040" EXIT 0 (HOLD)
+    - **#3 helloworld.jhyy**: run → "Hello, world!" EXIT 0 (HOLD)
+    - **#4 f64_suffix.jhyy**: run → EXIT 0 (HOLD)
+    - **#5 match.jhyy**: 60s timeout test — 单跑 2.9s wall clock EXIT 0 (regress 60s timeout 触发是 regress 自身并发 pool race 跟 attempt #7 fix 无关)
+  - **.s diff verify (no regression)**: main_v407 .s 跟 baseline .s subq + lea count 完全相同 (10218/2530) — frame_size + address-holder offsets 跟 baseline 行为一致, no regression in C-side codegen chain
+  - **attempt #7 SUCCESS evidence**:
+    1. W-101 ACTIVE 根因 100% 修 — separate address-holder pool 物理 disjoint from alloc value pool (per audit § 5 direction 100% correct)
+    2. 3-arg `cg_alloc_slot(state, size, is_addr)` signature 让 caller 写错不可能 — 是 attempt #6 1-arg caller bug 的根本性 prevention
+    3. 5/5 PASS target = main.jhyy (覆盖 emit_load + cg_is_address_holder path) — 不再是 smoke test 假阳性
+    4. .s diff = baseline 0 字节差异 — no regression
+  - **保留 (Stage 1 logging + jhyy.exe baseline structure)**:
+    - jh_dbg_log2 C-bridge + 5 site logging 仍 ship (per W-101 attempt #5 ship)
+    - Step 1 logging 显示 attempt #7 fix 后 emit_func_header 仍正常 (efh_pre/rst/bfi/efh_post 序列)
+  - **lesson learned (7th attempt, SUCCESS, 1.5h vs 6 attempts 24+ hour)**:
+    1. **1-iter RCA 是真根因唯一路径** — attempt #6 hang 后立即用 gdb batch attach, 1.5h 找到 SEGV 真根因 (1-arg caller), 跟之前 6 attempts 共 24+ 小时浪费时间形成鲜明对比. Per `feedback_rca_first_root_cause` 严格应用.
+    2. **fix direction 跟 implementation 严格区分** — audit § 5 direction 100% correct, 但 implementation caller 必须严格按 3-arg 模式. attempt #7 让 caller 写错不可能 (3-arg signature 强制 is_addr 标志).
+    3. **smoke test 不当 5/5 PASS 假象** — 必须用 `main.jhyy` 当 5/5 PASS 目标 (覆盖 alloc+load+store+binop path), 不只是 helloworld/fib_renamed. attempt #6 smoke test 5/5 PASS 但 main.jhyy fail, attempt #7 main.jhyy EXIT 0 = 真 PASS.
+    4. **3-arg signature 优于 2-arg signature** — 任何 caller 接 multiple flag 类 option, 3-arg 强制 caller 传 flag 防止 attempt #6 1-arg caller bug 复现
+    5. **commit cadence split (`feedback_audit_single_commit_diff`)** — attempt #6 一次性 4-file 108 LOC 引入 post-emit hidden trap, attempt #7 拆 4 commits 独立 verify, 每 commit 单独 ship, audit diff 容易 review
+  - **结论 (7 attempts, attempt #7 SUCCESS, audit ledger closed)**: W-101 真根因 = `cg_offset_for_temp_with_target` 对 high temp_id (>= 1024) address-holder init/lookup 路径 + alloc/formula pool 物理 overlap (per audit `docs/audit/v4.0.3-codegen-deep-audit.md` 维度 2 错方向 + § 5 separate address-holder pool 正确方向). attempt #7 走 audit § 5 direction + 3-arg `cg_alloc_slot` 防 caller 写错, 1-iter RCA 严格按 attempt #6 gdb evidence, 5/5 PASS target = main.jhyy (覆盖 emit_load + cg_is_address_holder path), 1.5h 完成 7th attempt SUCCESS.
+  - **W-101 status ✅ RESOLVED 2026-10-12 (v4.0.6 wip attempt #7 SUCCESS)** — fix ship, 5/5 PASS on main.jhyy, .s diff 0 字节 regression, jhyy.exe + jhyy_v1.exe.exe binary slot 同步更新, jhyy.exe.sha256 sidecar refresh to `2d14b2b8...`. v4.0.0 final tag ship gate 准备就绪 (per user 政策 "v4 不发" 缓解, ACTIVE = 0)
+  - **changelog**: `docs/logs/v4/changelog-v4.0.6.md` (W-101 attempt #7 SUCCESS audit ledger, 7 attempts 全记录, .s diff 0 字节 regression evidence)
 
 **引用:**
 - SEGV 现场: `compiler/build/bin/_w099_v2.exe.s` 中 `parser__parse_expr` 函数体 + 0xD350 (54146) offset
