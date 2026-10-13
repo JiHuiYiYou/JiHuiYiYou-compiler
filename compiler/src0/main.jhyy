@@ -1177,7 +1177,19 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     // info into the .exe (without these, same jhyy run twice produces
     // different .exe sha). .il + .s byte-equal still hold since these flags
     // only affect the post-IL link step.
-    let d26_flags = " -g0 -Wl,--build-id=none " as *u8;
+    //
+    // v4.0.7 (W-097): `-Wl,--stack,67108864` = 64 MB 栈预留。
+    // 自举后端的 1-to-1 栈槽模型(每个 IL temp 一个 8B 槽,per L4 § 3.3)
+    // 让 temp 数最多的函数帧巨大 —— 实测 codegen__cg_expr 242 KB
+    // (gcc 编同一函数只要 7.6 KB,因为 gcc 用寄存器)。而 cg_expr / parse_expr /
+    // infer_type / cg_body_returns 都是**递归下降**,N 层递归 = N × 帧大小:
+    //   codegen__cg_body_returns  local_max=16554 → 132 KB 帧
+    //   sema__infer_type         local_max= 3033 →  24 KB 帧
+    //   parser__parse_expr       local_max= 2482 →  20 KB 帧
+    // 默认 1 MB 栈下,编 main.jhyy 时 cg_expr 递归几层就 ___chkstk_ms 失败
+    // → SIGSEGV(gdb bt: #0 ___chkstk_ms #3 codegen.cg_expr #5 codegen.cg_expr)。
+    // 64 MB 足够 main.jhyy 全量自举的递归深度。
+    let d26_flags = " -g0 -Wl,--build-id=none -Wl,--stack,67108864 " as *u8;
     pos = str_concat_at(cmd_buf, pos, d26_flags);
     pos = str_concat_at(cmd_buf, pos, lq);
     pos = str_concat_at(cmd_buf, pos, temp_asm);    // W-048: ASCII
