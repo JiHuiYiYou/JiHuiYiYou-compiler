@@ -1929,7 +1929,20 @@ fn cg_find_arg_idx(header_text: *u8, header_len: i64,
                 j = j + (1 as i64);
             }
             if match_ok == (1 as i32) {
-                return seen;
+                // v4.0.7 (W-097 第七缺陷):匹配必须是**整个**参数名,不能是前缀。
+                // 不加边界检查时,找名字 "s" 会先命中 "%sb"(同为 s 开头),找 "t"
+                // 会先命中 "%ta" —— 参数被映射到别人的寄存器。
+                // 实证:sb_append_cstr(a, sb, s) 的第 3 参 %s 命中了 %sb,
+                // prologue emit `movq %rdx, -48(%rbp)`(应为 %r8)。
+                let after = i + (1 as i64) + name_len;
+                if after >= header_len {
+                    return seen;
+                }
+                let nb = cg_byte_at(header_text, after);
+                if nb == (44 as i32) || nb == (41 as i32) || nb == (32 as i32) ||
+                   nb == (9 as i32) || nb == (10 as i32) || nb == (123 as i32) {
+                    return seen;
+                }
             }
             seen = seen + (1 as i64);
         }
