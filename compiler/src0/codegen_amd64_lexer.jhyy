@@ -1840,8 +1840,19 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
             let n4 = lex_peek_byte_at(s, 4 as i64);
             let n5 = lex_peek_byte_at(s, 5 as i64);
             if n2 == (111 as i32) && n3 == (114 as i32) && n4 == (101 as i32) {
+                // v4.0.7 (W-097 第八缺陷): 白名单原本只有 {w,l,s,d},缺 'b'(98) 和
+                // 'h'(104) → `storeb` / `storeh` 落到 return -1,该 IL 指令不被识别,
+                // 后续 token 错位,emit 出完全无关的指令(实测 `storeb %t10, %t9`
+                // emit 成 `movl src,%eax; orl dst,%eax; movl %eax,res`)。
+                // 影响面:所有 1/2 字节写。peephole_fold 的输出拷贝循环正是
+                // `*p = <u8>` → 全被丢 → out 保持 memset 的全 0 → final_len=0
+                // → .s 0 字节(Stage 2 闭环最后一块)。
+                // 载入侧 loadsb/loadub/loadsh/loaduh 一直有(emit movzbl 正常),
+                // 只有写侧漏了 —— 这也是历史 workaround "*u8 deref 用 *i32 对齐读"
+                // 存在的原因。
                 if n5 == (119 as i32) || n5 == (108 as i32)
-                    || n5 == (115 as i32) || n5 == (100 as i32) {
+                    || n5 == (115 as i32) || n5 == (100 as i32)
+                    || n5 == (98 as i32) || n5 == (104 as i32) {
                     let _x = lex_next_byte(s);  // 's'
                     return next_token_store(s, arena, t, n5);
                 }

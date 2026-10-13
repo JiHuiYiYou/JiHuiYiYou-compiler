@@ -1,0 +1,32 @@
+// w103_arena_layout.jhyy — 存穿指针 最小复现
+// W-097 第八缺陷下游二分: arena 缓冲写入标记读不回来。
+//EXPECT:65   (A=65 证明 1 字节 store 落地;修前返回 0 = storeb 被丢弃)
+extern fn malloc(size: i64) -> *u8;
+extern fn printf(fmt: *u8, a: i32, b: i32, c: i32, d: i32) -> i32;
+
+fn ptr_off(p: *u8, off: i64) -> *u8 {
+    return (p as i64 + off) as *u8;
+}
+
+fn main_jhyy() -> i32 {
+    let m = malloc(64 as i64);
+    let mp = ptr_off(m, 0);
+    (*mp) = 65 as u8;
+    let a1 = (*mp) as i32;
+
+    let m2 = malloc(64 as i64);
+    let m2p = ptr_off(m2, 3);
+    (*m2p) = 66 as u8;
+    let a2 = (*m2p) as i32;
+
+    (*m2) = 67 as u8;
+    let a3 = (*m2) as i32;
+
+    let m3 = malloc(64 as i64);
+    let slot = ptr_off(m3, 8);
+    *(slot as *i64) = 12345 as i64;
+    let a4 = (*(slot as *i64)) as i32;
+
+    printf("A=%d B=%d C=%d D=%d\n" as *u8, a1, a2, a3, a4);
+    return a1;
+}
