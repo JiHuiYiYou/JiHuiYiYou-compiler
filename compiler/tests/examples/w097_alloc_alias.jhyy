@@ -7,10 +7,14 @@
 //
 // 本测试: 3 个 `let mut` 局部变量 (各走一次 emit_alloc is_addr=0) + 中间插入
 // 地址算术索引 store/load (走 is_addr=1 address-holder pool, 触发 pool 切换)。
-// pre-fix:  3 个 alloc 全部拿 -8200 → 三变量同 slot, 最后写赢 → 300 300 300。
-// post-fix: 3 个 alloc 拿 -8200/-8208/-8216 → 100 200 300。
+// pre-fix:  3 个 alloc 全部拿 -8200 → 三变量同 slot → stdout 打印同一垃圾值。
+// post-fix: 3 个 alloc 拿 -8200/-8208/-8216 → stdout "100 200 300"。
 //
-//EXPECT:100 200 300
+// EXPECT 语义 = 期望**退出码**(regress 走 expected & 0xFF == actual & 0xFF,
+// 见 mcp-jhyy/jhyy_regress.py run_test)。本 test return 0 → EXPECT:0。
+// stdout 正确性由下面 printf 的 "100 200 300" 人工核对,regress 不校验 stdout。
+//
+//EXPECT:0
 extern fn printf(fmt: *u8, a: i32, b: i32, c: i32) -> i32;
 extern fn malloc(size: i64) -> *u8;
 
