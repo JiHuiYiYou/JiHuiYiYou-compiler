@@ -852,16 +852,33 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     }
 
     // ── Step 2: shadow space alloc(仅 Win)BEFORE arg writes ─
-    //   Win: subq $32, %rsp BEFORE writing stack args,so caller writes
-    //   [rsp+32..] = callee's [rbp+40..] = correct 5th arg location.
+    //   Win: subq $N, %rsp BEFORE writing stack args,so caller writes
+    //   [rsp+32..] = callee's [rbp+48..] = correct 5th arg location.
     //   SysV: no shadow, stack args written at [rsp+0..] = [rbp+16..].
     // v2.13.0 Phase 1:原顺序 emit_args → subq → call 是错的 — emit_args
     //   把 stack args 写到 [rsp+32..] (在 subq 前),然后 subq 把 rsp 减 32,
     //   call + pushq %rbp 后 callee 读 [rbp+40..] 看到的内存地址是
     //   caller 写的位置 + 32 偏移 → 5th arg 读到 shadow 槽,值错。
     //   修:subq 提前到 emit_args 之前。
+    //
+    // v4.0.7 (W-097 第八缺陷):N 不能硬编码 32。Win ABI 里栈参数写在
+    // [rsp+32+8*i],但 rsp 只减了 32 → [rsp+32] 正好落在**调用者自己栈帧的底部**
+    // (减 32 之前的旧 rsp 位置),栈参数写进去 = 踩掉调用者的最低局部变量。
+    // gcc 实测:1 个栈参数时 `subq $48` (32 shadow + 8 参数 + 8 对齐)。
+    // 正确 reserve = align16(32 + 8*栈参数数)。栈参数数用 nargs 上界:
+    // Win 整数/浮点各有 4 个寄存器,一个 arg 落到栈上必然要求它自己那类的
+    // 前 4 个已被占 → 该 arg 的位置下标必 >= 4 → 栈参数数 <= nargs - 4。
+    // 浮点参数会让实际栈参数更少(多 reserve 一点,安全)。
+    let mut shadow_bytes: i64 = 0 as i64;
     if target_is_win(target_tag) == (1 as i32) {
-        let _sa = sb_append_cstr(arena, s, "\tsubq $32, %rsp\n" as *u8);
+        let mut extra_args: i64 = nargs - (4 as i64);
+        if extra_args < (0 as i64) { extra_args = 0 as i64; }
+        shadow_bytes = (32 as i64) + (extra_args * (8 as i64));
+        // 16-byte 对齐(与 emit_func_header prologue 同规约,保 movaps 友好)
+        shadow_bytes = (shadow_bytes + (15 as i64)) & ((0 as i64) - (16 as i64));
+        let _sa = sb_append_cstr(arena, s, "\tsubq $" as *u8);
+        let _sb2 = sb_appendf_lld(arena, s, "%lld" as *u8, shadow_bytes);
+        let _sa2 = sb_append_cstr(arena, s, ", %rsp\n" as *u8);
     }
 
     // ── Step 3: args → 物理寄存器 + stack-arg writes ─
@@ -890,10 +907,12 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     let _ca3 = sb_append_cstr(arena, s, "\n" as *u8);
 
     // ── Step 5: shadow space free(仅 Win)— SysV 无需 ─
-    //   Win: addq $32, %rsp
+    //   Win: addq $N, %rsp (N 与 Step 2 的 subq 对称)
     //   SysV: NO free
     if target_is_win(target_tag) == (1 as i32) {
-        let _sf = sb_append_cstr(arena, s, "\taddq $32, %rsp\n" as *u8);
+        let _sf = sb_append_cstr(arena, s, "\taddq $" as *u8);
+        let _sf2 = sb_appendf_lld(arena, s, "%lld" as *u8, shadow_bytes);
+        let _sf3 = sb_append_cstr(arena, s, ", %rsp\n" as *u8);
     }
 
     // ── Step 6: 返回值 物理寄存器 → 栈槽 -<ret_off>(%rbp)─
