@@ -854,6 +854,17 @@ fn cg_local_t_from_global(global_t: i64) -> i64 {
     if idx < (0 as i64) {
         return global_t;
     }
+    // v4.0.7 (W-097 剩余 SEGV):per_fn_base_t 是 1024 项表,原来只查 idx<0 没查
+    // 上界。emit_func_header 每次 bump cur_fn_idx,而 pre-scan 只按它数到的
+    // function header 填表 —— 两者不一致时(emit 次数 > 预扫描计数)idx 会越过
+    // 表尾,`*bp` 读越界 → SIGSEGV。因为差值取决于当次跑到哪儿,所以表现为
+    // **非确定性** SEGV(同一输入有时 0 有时 139)。
+    if idx >= (1024 as i64) {
+        return global_t;
+    }
+    if (*st).fn_count > (0 as i64) && idx >= (*st).fn_count {
+        return global_t;
+    }
     let bp = ptr_add_u8((*st).per_fn_base_t, idx * (8 as i64)) as *i64;
     let base_t = *bp;
     let local_t = global_t - base_t;
