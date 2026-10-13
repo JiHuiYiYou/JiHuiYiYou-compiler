@@ -289,7 +289,7 @@ fn emit_alloc(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     }
     let aligned = mem_align_up8(size);
 
-    // 走 A0 的 slot 分配器(推进 state.next_offset + total_alloc)。
+    // 走 A0 的 slot 分配器(推进 state.value_next_offset + total_alloc)。
     let slot = cg_alloc_slot(state, aligned, 0 as i32);
 
     // A0 stub 期 cg_alloc_slot 恒 0 且不动 state,这里补记账,保证 prologue
@@ -297,9 +297,9 @@ fn emit_alloc(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let s = state as *CGState;
     let mut off: i64 = slot;
     if slot == (0 as i64) {
-        (*s).next_offset = (*s).next_offset - aligned;
+        (*s).value_next_offset = (*s).value_next_offset - aligned;
         (*s).total_alloc = (*s).total_alloc + aligned;
-        off = (*s).next_offset;
+        off = (*s).value_next_offset;
     }
 
     // v2.11.8 (W-074.7.8 derived-address tracking 真修):alloc-result temp 是

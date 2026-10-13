@@ -1,0 +1,37 @@
+// w097_alloc_alias.jhyy — W-097 regression test (v4.0.7 真根因真修).
+//
+// 真根因: cg_alloc_slot 用单一 next_offset + is_in_addr_pool 切回标记承载两个
+// pool。value alloc 遇到 is_in_addr_pool==1 时无条件 reset next_offset 到 -8192,
+//丢弃 value pool 已推进进度 → alloc offset 重发 → 不同 alloc 变量同 slot 互相
+// 覆盖 → 写错地址 → SEGV。
+//
+// 本测试: 3 个 `let mut` 局部变量 (各走一次 emit_alloc is_addr=0) + 中间插入
+// 地址算术索引 store/load (走 is_addr=1 address-holder pool, 触发 pool 切换)。
+// pre-fix:  3 个 alloc 全部拿 -8200 → 三变量同 slot, 最后写赢 → 300 300 300。
+// post-fix: 3 个 alloc 拿 -8200/-8208/-8216 → 100 200 300。
+//
+//EXPECT:100 200 300
+extern fn printf(fmt: *u8, a: i32, b: i32, c: i32) -> i32;
+extern fn malloc(size: i64) -> *u8;
+
+fn touch(buf: *u8, w: i64, val: *u8) -> i32 {
+    let w64: i64 = w;
+    let wp = (buf as i64 + w64 * (8 as i64)) as **u8;
+    (*wp) = val;
+    return 0 as i32;
+}
+
+fn main_jhyy() -> i32 {
+    let buf = malloc(64 as i64);
+    let mut a0: i64 = 100 as i64;
+    let _t0 = touch(buf, 8 as i64, (1 as *u8));
+    let mut a1: i64 = 200 as i64;
+    let _t1 = touch(buf, 16 as i64, (2 as *u8));
+    let mut a2: i64 = 300 as i64;
+    let _t2 = touch(buf, 24 as i64, (3 as *u8));
+    let x = a0 as i32;
+    let y = a1 as i32;
+    let z = a2 as i32;
+    printf("%d %d %d\n" as *u8, x, y, z);
+    return 0 as i32;
+}

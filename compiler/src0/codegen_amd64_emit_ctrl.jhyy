@@ -566,8 +566,11 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
         let pfa_v: i64 = *pfa_p;
         alloc_pool_size = (8192 as i64) + pfa_v;
     } else {
-        let _legacy_alloc = if (*cg2).next_offset < (0 as i64) {
-            (0 as i64) - (*cg2).next_offset
+        // v4.0.7 (W-097): value pool 贡献 subq $N — address-holder pool 是
+        // frame_size 之外的独立 region,由 alloc_pool_size 上界 addr_holder
+        // 段覆盖 (frame_size 本身 >= value pool end,见下面 max)。
+        let _legacy_alloc = if (*cg2).value_next_offset < (0 as i64) {
+            (0 as i64) - (*cg2).value_next_offset
         } else {
             0 as i64
         };
@@ -583,16 +586,28 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     // initialize next_offset to this value. alloc_init_off is the formula
     // end (per audit trail — formula path unchanged from baseline).
     let _set_aio = cg_state_set_alloc_init_off(state, ((0 as i64) - (32 as i64)) - ((local_max + (1 as i64)) * (8 as i64)));
+    // v4.0.7 (W-097 sub-bug 2): address-holder pool starts below frame_size, so
+    // its whole depth must be inside the reserved frame. Pre-scan stores the
+    // per-fn budget in per_fn_addr_pool (=(#ALLOC+#LOAD+#BINOP)*8 + 64 gap).
+    let mut addr_pool_reserve: i64 = 64 as i64;
+    if use_per_fn != (0 as i32) && (*cg2).per_fn_addr_pool != (0 as *u8) {
+        let pfp_ap = ptr_add_u8((*cg2).per_fn_addr_pool, (*cg2).cur_fn_idx * (8 as i64)) as *i64;
+        let pfp_av: i64 = *pfp_ap;
+        if pfp_av > addr_pool_reserve {
+            addr_pool_reserve = pfp_av;
+        }
+    }
     let _set_aho = cg_state_set_addr_holder_init_off(state, (0 as i64) - (frame_size + (64 as i64)));
+    let stack_need: i64 = frame_size + addr_pool_reserve;
     let mut n: i64 = 0 as i64;
     if target_is_win(target_tag) == (1 as i32) {
         // Win: shadow_space (32) + frame_size, but 16-align total for movaps/abi
         // v4.0.2.5 (W-099): 缺 16-align → build_il/read_file 等 fn `sub $0x2a98` 后
         // rsp ≡ 8 → call fopen → fopen 内部 movaps misalign → SEGV in _wsplitpath_s
-        n = (32 as i64) + ((frame_size + (15 as i64)) & ((0 as i64) - (16 as i64)));
+        n = (32 as i64) + ((stack_need + (15 as i64)) & ((0 as i64) - (16 as i64)));
     } else {
         // SysV: round frame_size up to 16-byte boundary for stack alignment
-        n = (frame_size + (15 as i64)) & ((0 as i64) - (16 as i64));
+        n = (stack_need + (15 as i64)) & ((0 as i64) - (16 as i64));
     }
 
     // v4.0.2.1 (W-074.6 sub-bug #3 真修副效应):Windows x64 ABI — when allocating
