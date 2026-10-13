@@ -1145,6 +1145,16 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
     let mut is_imm: i32 = 0 as i32;
     let mut is_fnarg: i32 = 0 as i32;
     let mut fnarg_reg: *u8 = 0 as *u8;
+    // v4.0.7 (W-097 第四缺陷): fn arg >= 寄存器数 时 callee 从 caller 栈上传入的
+    // home slot 读,不用寄存器。
+    // MS x64 callee 入栈布局(gcc -S 实测校准):[rbp+8]=返回地址,
+    // [rbp+16..47]=32 字节 shadow space(callee 存自己出参用),第 5 个整数参数
+    // 从 [rbp+48] 起。整数参数寄存器 4 个(rcx/rdx/r8/r9)→ arg_idx>=4 走栈,
+    // offset = 48 + 8*(arg_idx-4)。
+    // SysV 无 shadow space 且整数参数寄存器 6 个 → offset = 16 + 8*(arg_idx-6)。
+    // src0 全部 >=5 参数函数均为全整数参数(0 个含浮点),故 stack index =
+    // arg_idx - 整数寄存器数 精确成立。
+    let mut fnarg_stack_off: i64 = -(1 as i64);
     let mut imm_val: i64 = 0 as i64;
     let mut src_temp_id: i64 = 0 as i64;
     // v2.11.15 Iter 1b: hoisted from inner if-block (line 885 was inside
@@ -1230,6 +1240,8 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                         }
                         if arg_idx >= (0 as i64) && arg_idx <= (3 as i64) {
                             fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                        } else if arg_idx >= (4 as i64) && target_is_win(target_tag) == (1 as i32) {
+                            fnarg_stack_off = (48 as i64) + ((arg_idx - (4 as i64)) * (8 as i64));
                         } else {
                             fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
                         }
@@ -1263,6 +1275,8 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                             }
                             if arg_idx >= (0 as i64) && arg_idx <= (3 as i64) {
                                 fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                            } else if arg_idx >= (4 as i64) && target_is_win(target_tag) == (1 as i32) {
+                                fnarg_stack_off = (48 as i64) + ((arg_idx - (4 as i64)) * (8 as i64));
                             } else {
                                 fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
                             }
@@ -1403,6 +1417,27 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                 let _r6 = sb_appendf_lld(arena2, s2, "%lld" as *u8, dst_off);
                 let _r7 = sb_append_cstr(arena2, s2, "(%rbp)\n" as *u8);
             }
+        } else if fnarg_stack_off >= (0 as i64) {
+            // v4.0.7 (W-097 第四缺陷): arg 在 caller 栈上传入 → 经 scratch reg 中转。
+            // x86 mem→mem 不存在,且不能直接 `mov <src>(%rbp), <dst>(%rbp)`。
+            // scratch 寄存器名必须跟 mov 后缀宽度一致 (movl→%eax / movq→%rax),
+            // 否则 GAS 报 "incorrect register `%rax' used with `l' suffix"。
+            let suffix2 = size_suffix_for_qt(dst_qt);
+            // 注:*u8 比较比的是指针不是内容,必须按 qt 判宽度 (size_suffix_for_qt
+            // 的 "q" 对应 L / D,"l" 对应 W / S)。
+            let is_wide2: i32 = if dst_qt == QBE_L_LOCAL() || dst_qt == QBE_D_LOCAL() { 1 as i32 } else { 0 as i32 };
+            let scratch: *u8 = if is_wide2 != (0 as i32) { "%rax" as *u8 } else { "%eax" as *u8 };
+            let _q1 = sb_append_cstr(arena2, s2, "\tmov" as *u8);
+            let _q2 = sb_append_cstr(arena2, s2, suffix2);
+            let _q3 = sb_appendf_lld(arena2, s2, " %lld" as *u8, fnarg_stack_off);
+            let _q4 = sb_append_cstr(arena2, s2, "(%rbp), " as *u8);
+            let _q4b = sb_append_cstr(arena2, s2, scratch);
+            let _q5 = sb_append_cstr(arena2, s2, "\n\tmov" as *u8);
+            let _q6 = sb_append_cstr(arena2, s2, suffix2);
+            let _q7 = sb_append_cstr(arena2, s2, " " as *u8);
+            let _q7b = sb_append_cstr(arena2, s2, scratch);
+            let _q8 = sb_appendf_lld(arena2, s2, ", %lld" as *u8, dst_off);
+            let _q9 = sb_append_cstr(arena2, s2, "(%rbp)\n" as *u8);
         } else {
             let _r1 = sb_append_cstr(arena2, s2, "\tmov" as *u8);
             let _r2 = sb_append_cstr(arena2, s2, size_suffix_for_qt(dst_qt));
