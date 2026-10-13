@@ -1246,22 +1246,62 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                             fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
                         }
                     } else {
-                        // '%t' 开头 — 进一步判别:
-                        //   - scan+2 < len && byte_at(scan+2) 是 digit → "%tN" → TEMP (idx=0)
-                        //   - 否则 → bare "%t" → 函数实参 (per rca-v2.11.21.md § 2)
-                        // bare "%t" case: cap_table_basic cross_fn_sum_table 第一 arg `%t`,
-                        // %t3 =l copy %t 中 %t 是 fn arg 名(8B pointer, RCX 寄存器)。
-                        // 走 TEMP idx=0 会拿 first %tN (=%t3) 而非 fn arg → wrong value。
+                        // '%t' 开头 — 三态判别(顺序不可换):
+                        //   a) scan+2 >= len                    → bare "%t" → FNARG(1 字符名)
+                        //   b) byte_at(scan+2) 是分隔符 , ) 空白 ; } → bare "%t" → FNARG
+                        //   c) byte_at(scan+2) 是数字            → "%tN" 临时变量 → TEMP
+                        //   d) 其余                              → "%t<name>" 真实参数名 → FNARG
+                        //
+                        // v4.0.7 (W-097 第五缺陷)真根因: 旧判别是 "非数字即 bare %t",
+                        // 把所有 t* 参数名都当成 bare "%t",再用 name_len=1 的 "t" 去 header
+                        // 搜 → 全部命中第一个以 t 开头的参数 (%ta / %target_tag / %tok ...),
+                        // 拿到同一个 arg_idx → 错误的参数寄存器。src0 有 202/1435 (14%)
+                        // 参数以 t 开头,其中 140 个是这类真实名字。
+                        //
+                        // 注意 (c) 必须保留:数字必须走 TEMP 而不是当参数名,否则
+                        // `%t3` 这类临时变量会被误当函数参数(regress 36 FAIL 的教训)。
                         let mut is_bare_t_fnarg: i32 = 0 as i32;
+                        let mut is_tname_fnarg: i32 = 0 as i32;
                         if scan + (2 as i64) >= src_text_len {
                             is_bare_t_fnarg = 1 as i32;
                         } else {
                             let t3 = cg_byte_at(src_text, scan + (2 as i64));
-                            if t3 < (48 as i32) || t3 > (57 as i32) {
+                            if t3 == (44 as i32) || t3 == (41 as i32) || t3 == (32 as i32) ||
+                               t3 == (10 as i32) || t3 == (9 as i32) || t3 == (59 as i32) ||
+                               t3 == (125 as i32) {
                                 is_bare_t_fnarg = 1 as i32;
+                            } else if t3 < (48 as i32) || t3 > (57 as i32) {
+                                is_tname_fnarg = 1 as i32;
                             }
                         }
-                        if is_bare_t_fnarg != (0 as i32) {
+                        if is_tname_fnarg != (0 as i32) {
+                            // "%t<name>" 真实参数名 — 走通用 %name 路径(完整 name_len)
+                            is_imm = 0 as i32;
+                            is_fnarg = 1 as i32;
+                            let t_name_start = scan + (1 as i64);
+                            let mut t_name_end = t_name_start;
+                            while t_name_end < src_text_len {
+                                let nc = cg_byte_at(src_text, t_name_end);
+                                if nc == (32 as i32) || nc == (9 as i32) || nc == (44 as i32) ||
+                                   nc == (41 as i32) || nc == (10 as i32) || nc == (59 as i32) {
+                                    break;
+                                }
+                                t_name_end = t_name_end + (1 as i64);
+                            }
+                            if (*cg).cur_fn_header_text != (0 as *u8) {
+                                arg_idx = cg_find_arg_idx((*cg).cur_fn_header_text, (*cg).cur_fn_header_len,
+                                                ptr_add_u8(src_text, t_name_start), t_name_end - t_name_start);
+                            } else {
+                                arg_idx = -(1 as i64);
+                            }
+                            if arg_idx >= (0 as i64) && arg_idx <= (3 as i64) {
+                                fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                            } else if arg_idx >= (4 as i64) && target_is_win(target_tag) == (1 as i32) {
+                                fnarg_stack_off = (48 as i64) + ((arg_idx - (4 as i64)) * (8 as i64));
+                            } else {
+                                fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
+                            }
+                        } else if is_bare_t_fnarg != (0 as i32) {
                             // bare "%t" → FNARG path (name = "t", 1 char)
                             is_imm = 0 as i32;
                             is_fnarg = 1 as i32;
