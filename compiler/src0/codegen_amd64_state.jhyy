@@ -268,6 +268,9 @@ type CGState = struct {
 // temp_slot_for_id 指针 (跟 regalloc jh_regalloc_get/set 同 pattern)。C-side
 // static BSS-zero init; jhyy-side let mut module-level 会触发 stage0 segfault
 // per codegen_amd64_regalloc.jhyy:76-87 注释。
+extern fn memcmp(a: *u8, b: *u8, n: i64) -> i32;
+extern fn jh_name_ends_with(name: *u8, len: i64, suffix: *u8, slen: i64) -> i32;
+extern fn jh_byte_at(p: *u8, i: i64) -> i32;
 extern fn jh_cgstate_get_temp_slots() -> *u8;
 extern fn jh_cgstate_set_temp_slots(p: *u8) -> i32;
 
@@ -1051,10 +1054,15 @@ fn cg_state_set_addr_holder_init_off(state: *u8, off: i64) -> i32 {
 // emit_mem 保留自己的 mem_* 副本 — dedupe 留后续 sprint 清理。
 
 // cg_byte_at(s: *u8, i: i64) -> i32 — 取 s[i] 字节值 as i32 (供 is_digit / scan 用)
+// cg_byte_at — s[i],走 C 侧 jh_byte_at (v4.0.7 W-097 闭环根因)。
+// 不能用 ptr_add_u8(s, i) 再解引用: 那依赖 ptr_add_u8 返回 temp 是否被标成
+// address-holder, 而该标记来自 cg_query_fn_returns_ptr -> hash_string_n ->
+// cg_byte_at, 构成循环依赖 —— 首次进入时标记尚未建立, 退化成"读指针值低字节",
+// 哈希全错, 标记永远建不起来 (实测 self-backend 少标 ~1028 个 address-holder,
+// 级联出 212/3084 个函数 emit 不同)。
 fn cg_byte_at(s: *u8, i: i64) -> i32 {
-    let p = ptr_add_u8(s, i);
-    let c = *p;
-    return c as i32;
+    if s == (0 as *u8) { return 0 as i32; }
+    return jh_byte_at(s, i);
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -1109,70 +1117,26 @@ fn cg_get_ret_type_map_n(state: *u8) -> i64 {
 // Returns 1 iff name (with len) matches one of the builtin pointer-returning
 //   functions, 0 otherwise.
 fn cg_is_builtin_ptr_fn(name: *u8, name_len: i64) -> i32 {
-    // ptr_add (7 chars)
+    // v4.0.7 (W-097): 改用 memcmp,不再逐字节 cg_byte_at ——
+    // 后者要求 ptr_add_u8 的返回 temp 已标 address-holder,与被查询对象循环依赖。
+    //
+    // 注:"ptr_add_u8" 是 **10** 字符 (p,t,r,_,a,d,d,_,u,8)。旧代码门限写 11,
+    // 下面却只比较 10 个字节 —— 这个 off-by-one 让它永远匹配不上。
+    if name == (0 as *u8) || name_len <= (0 as i64) {
+        return 0 as i32;
+    }
     if name_len == (7 as i64) {
-        if cg_byte_at(name, 0 as i64) == 'p' as i32
-            && cg_byte_at(name, 1 as i64) == 't' as i32
-            && cg_byte_at(name, 2 as i64) == 'r' as i32
-            && cg_byte_at(name, 3 as i64) == '_' as i32
-            && cg_byte_at(name, 4 as i64) == 'a' as i32
-            && cg_byte_at(name, 5 as i64) == 'd' as i32
-            && cg_byte_at(name, 6 as i64) == 'd' as i32 {
-            return 1 as i32;
-        }
+        if memcmp(name, "ptr_add" as *u8, 7 as i64) == (0 as i32) { return 1 as i32; }
+        if memcmp(name, "ptr_sub" as *u8, 7 as i64) == (0 as i32) { return 1 as i32; }
     }
-    // ptr_add_u8 (11 chars)
-    if name_len == (11 as i64) {
-        if cg_byte_at(name, 0 as i64) == 'p' as i32
-            && cg_byte_at(name, 1 as i64) == 't' as i32
-            && cg_byte_at(name, 2 as i64) == 'r' as i32
-            && cg_byte_at(name, 3 as i64) == '_' as i32
-            && cg_byte_at(name, 4 as i64) == 'a' as i32
-            && cg_byte_at(name, 5 as i64) == 'd' as i32
-            && cg_byte_at(name, 6 as i64) == 'd' as i32
-            && cg_byte_at(name, 7 as i64) == '_' as i32
-            && cg_byte_at(name, 8 as i64) == 'u' as i32
-            && cg_byte_at(name, 9 as i64) == '8' as i32 {
-            return 1 as i32;
-        }
+    if name_len == (10 as i64) {
+        if memcmp(name, "ptr_add_u8" as *u8, 10 as i64) == (0 as i32) { return 1 as i32; }
     }
-    // ptr_sub (7 chars)
-    if name_len == (7 as i64) {
-        if cg_byte_at(name, 0 as i64) == 'p' as i32
-            && cg_byte_at(name, 1 as i64) == 't' as i32
-            && cg_byte_at(name, 2 as i64) == 'r' as i32
-            && cg_byte_at(name, 3 as i64) == '_' as i32
-            && cg_byte_at(name, 4 as i64) == 's' as i32
-            && cg_byte_at(name, 5 as i64) == 'u' as i32
-            && cg_byte_at(name, 6 as i64) == 'b' as i32 {
-            return 1 as i32;
-        }
-    }
-    // malloc (6 chars)
     if name_len == (6 as i64) {
-        if cg_byte_at(name, 0 as i64) == 'm' as i32
-            && cg_byte_at(name, 1 as i64) == 'a' as i32
-            && cg_byte_at(name, 2 as i64) == 'l' as i32
-            && cg_byte_at(name, 3 as i64) == 'l' as i32
-            && cg_byte_at(name, 4 as i64) == 'o' as i32
-            && cg_byte_at(name, 5 as i64) == 'c' as i32 {
-            return 1 as i32;
-        }
+        if memcmp(name, "malloc" as *u8, 6 as i64) == (0 as i32) { return 1 as i32; }
     }
-    // __closure_ prefix (≥10 chars starting with "__closure_")
     if name_len >= (10 as i64) {
-        if cg_byte_at(name, 0 as i64) == '_' as i32
-            && cg_byte_at(name, 1 as i64) == '_' as i32
-            && cg_byte_at(name, 2 as i64) == 'c' as i32
-            && cg_byte_at(name, 3 as i64) == 'l' as i32
-            && cg_byte_at(name, 4 as i64) == 'o' as i32
-            && cg_byte_at(name, 5 as i64) == 's' as i32
-            && cg_byte_at(name, 6 as i64) == 'u' as i32
-            && cg_byte_at(name, 7 as i64) == 'r' as i32
-            && cg_byte_at(name, 8 as i64) == 'e' as i32
-            && cg_byte_at(name, 9 as i64) == '_' as i32 {
-            return 1 as i32;
-        }
+        if memcmp(name, "__closure_" as *u8, 10 as i64) == (0 as i32) { return 1 as i32; }
     }
     return 0 as i32;
 }
@@ -1190,6 +1154,20 @@ fn cg_query_fn_returns_ptr(state: *u8, name: *u8, name_len: i64) -> i32 {
         return 0 as i32;
     }
     let s = state as *CGState;
+    // v4.0.7 (W-097): builtin + mangled 后缀 **先查**,map 哈希查找放后面。
+    // 顺序不能反: 旧的 map-first 顺序构成循环依赖 ——
+    //   cg_query_fn_returns_ptr("ptr_add_u8") -> hash_string_n -> cg_byte_at
+    //     -> 该 temp 要间接加载 -> 需 address-holder 标记 -> 又调本函数
+    // 嵌套进入时 hash_string_n 里的 cg_byte_at 尚未拿到标记,退化成"读指针值低
+    // 字节",哈希全错,builtin 分支永远匹配不上 —— 标记也就永远建立不起来。
+    // memcmp / C 后缀比较不经过 ptr_add_u8 + address-holder 机制,放最前即可切断。
+    if cg_is_builtin_ptr_fn(name, name_len) != (0 as i32) {
+        return 1 as i32;
+    }
+    if jh_name_ends_with(name, name_len, "ptr_add_u8" as *u8, 10 as i64) != (0 as i32) { return 1 as i32; }
+    if jh_name_ends_with(name, name_len, "ptr_add" as *u8, 7 as i64) != (0 as i32) { return 1 as i32; }
+    if jh_name_ends_with(name, name_len, "ptr_sub" as *u8, 7 as i64) != (0 as i32) { return 1 as i32; }
+    if jh_name_ends_with(name, name_len, "malloc" as *u8, 6 as i64) != (0 as i32) { return 1 as i32; }
     let map = (*s).ret_type_map;
     let n = (*s).ret_type_map_n;
     // Map lookup — linear scan over RetTypeMapEntry array

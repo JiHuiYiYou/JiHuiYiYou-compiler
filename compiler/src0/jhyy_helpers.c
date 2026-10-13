@@ -838,3 +838,25 @@ __attribute__((used)) int codegen_amd64_run(const char *il_path, const char *asm
     (void)il_path; (void)asm_path;
     return -1;  /* not implemented in C side; triggers QBE fallback */
 }
+
+/* v4.0.7 (W-097 闭环根因): cg_byte_at 的 C 侧字节读取。
+ * jhyy 侧原本用 ptr_add_u8(s, i) 再解引用, 而 ptr_add_u8 的返回 temp 能否
+ * 间接加载取决于它是否被标成 address-holder —— 那个标记又来自
+ * cg_query_fn_returns_ptr("ptr_add_u8") -> hash_string_n -> cg_byte_at, 构成
+ * 循环依赖: 首次进入时标记尚未建立, cg_byte_at 退化成"读指针值低字节", 哈希全错,
+ * 标记永远建不起来 (实测 self-backend 少标 1028 个 address-holder)。
+ * 这里直接按指针读字节, 完全不经过 ptr_add_u8 / address-holder 机制, 切断循环。 */
+__attribute__((used)) int jh_byte_at(const void *p, long long i) {
+    return ((const unsigned char *)p)[i];
+}
+
+/* v4.0.7 (W-097 闭环根因): 函数名后缀匹配。
+ * QBE IL 里的调用名是 mangled 的 (util__ptr_add_u8 / arena__arena_alloc ...),
+ * 而 builtin 指针函数清单是未 mangled 的 (ptr_add_u8)。之前在 jhyy 侧做偏移比较,
+ * 又依赖 ptr_add_u8 的 address-holder 标记 —— 与 cg_query_fn_returns_ptr 循环依赖。
+ * 放到 C 侧一次性比较, 完全绕开 jhyy 指针运算。 */
+__attribute__((used)) int jh_name_ends_with(const char *name, long long len,
+                                             const char *suffix, long long slen) {
+    if (len < slen || slen <= 0) return 0;
+    return memcmp(name + (len - slen), suffix, (size_t)slen) == 0 ? 1 : 0;
+}
