@@ -742,7 +742,18 @@ fn emit_load(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     // 然后 read [r8] (= actual value)。Phase E 第一段:emit_load indirect dispatch。
     // %r8 是 caller-saved scratch (per Win x64 ABI,跟 %rax/%rcx/%rdx/%rdi/%rsi 同组,
     // 但 %r8 不是 codegen_amd64 通用 scratch,emit_load/store 自己用,不会跟 call clobber 冲突)。
-    if cg_is_address_holder(state, src) != (0 as i32) {
+    if src >= (0 as i64) {
+        // v4.0.8 (W-097 根因 5):QBE 语义下 `%tD =<qt> load<sfx> %tS` 的 %tS 槽里
+        // **永远是地址**,load 必须解引用。原来这里按 cg_is_address_holder(src) 分派,
+        // flag=0 时走 fallback「把 src 槽的值拷到 dst」—— 而 src 槽存的是地址,
+        // 于是**地址被当成 load 出来的值**。
+        // flag 由 cg_query_fn_returns_ptr + emit_binop 的启发式链维护,只要有一环
+        // 漏标(返回指针的 extern 不在白名单、指针类型的 load 结果没传播 flag、
+        // 局部变量持有的指针没被标记),整条派生地址链就断在半路。
+        // 实测症状:`(*st).cur_fn_idx` 读到 `st+104` 而不是 1 → cur_fn_idx 变 1.6e12
+        // → per-fn 翻译全失效;`(*fi).name` / `(*struct_type).fields` 同理断链 →
+        // strcmp 拿不到字段名 → "struct has no field"。
+        // 改成无条件 indirect:这才是 QBE load 的定义,也不再依赖 flag 链的正确性。
         // movq -<src_off>(%rbp), %r8 ; mov<size> (%r8), %<reg> ; mov<size> %<reg>, -<dst_off>(%rbp)
         mem_put(state, "\tmovq " as *u8);
         mem_put_slot(state, src_off);
