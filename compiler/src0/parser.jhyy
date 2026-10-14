@@ -1626,8 +1626,12 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                         sfields = snf;
                     }
                     let sfd = (sfields as i64 + snfields * (16 as i64)) as *NodeFieldInit;
-                    (*sfd).name = sfname;
-                    (*sfd).value = sfval as *u8;
+                    // 逐字段 ptr 写(同 codegen.jhyy irval_box 的安全模式):
+                    // `(*p).f = v` 这条结构体字段赋值路径在 self-backend 上有
+                    // 未定位的失效(结构体字面量字段名写不进去,sema 报
+                    // "struct has no field");直接按偏移写指针可绕开该路径。
+                    *(ptr_add_u8(sfd as *u8, 0 as i64) as **u8) = sfname;
+                    *(ptr_add_u8(sfd as *u8, 8 as i64) as **u8) = sfval as *u8;
                     snfields = snfields + (1 as i64);
                     if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
                 }
@@ -1737,8 +1741,12 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                         fields = nf;
                     }
                     let fd = (fields as i64 + nfields * (16 as i64)) as *NodeFieldInit;
-                    (*fd).name = fname;
-                    (*fd).value = fval as *u8;
+                    // 逐字段 ptr 写(同 codegen.jhyy irval_box 的安全模式):
+                    // `(*p).f = v` 这条结构体字段赋值路径在 self-backend 上有
+                    // 未定位的失效(结构体字面量字段名写不进去,sema 报
+                    // "struct has no field");直接按偏移写指针可绕开该路径。
+                    *(ptr_add_u8(fd as *u8, 0 as i64) as **u8) = fname;
+                    *(ptr_add_u8(fd as *u8, 8 as i64) as **u8) = fval as *u8;
                     nfields = nfields + (1 as i64);
                     if parser_match(p, TOKEN_COMMA(), &t) == (0 as i32) { break; }
                 }
