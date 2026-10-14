@@ -1768,6 +1768,25 @@ fn cg_compute_per_fn_max_temps(state: *u8, tok_p: *u8, tok_size: i64, n: i64) ->
             if t_max > max_t { max_t = t_max; }
             j = j + (1 as i64);
         }
+        // v4.0.8 (W-097 根因 8):per_fn_max 必须单调不降。QBE 的 temp id 跨 fn
+        // 只增不减,所以第 fi 个 fn 的 max temp 必然 >= 第 fi-1 个;但
+        // cg_token_max_temp_id 对解析不出 %tN 的 token 返 0,一旦某个 fn 的
+        // token 区间没扫到 temp,per_fn_max[fi] 就可能比 per_fn_max[fi-1] 还小。
+        // 后果链(机械审计 3094 个函数,484 个中招):
+        //   local_max = pfm_val - prev_pfm < 0
+        //   → frame_size = 0
+        //   → addr_holder_init_off = -(0 + 64) = -64
+        //   → address-holder 池从 -64 一路往下长,穿过程式池和 value 池
+        //   → `(*fd).name = fname` 的 dst 槽被后面的 alloc8 覆盖
+        //   → jhyy_v2.exe 在 `mov %rax,(%r8)` 处 r8=5 直接 SEGV
+        //   (gdb 现场:parser__parse_expr,call ast_new_struct_lit 之后的 store)
+        // 单调钳制让 local_max >= 0 恒成立,frame_size 与公式槽同源对齐。
+        if fi > (0 as i64) {
+            let mono_idx: i64 = fi - (1 as i64);
+            let mono_p = ptr_add_u8((*s).per_fn_max, mono_idx * (8 as i64)) as *i64;
+            let prev_m: i64 = *mono_p;
+            if max_t < prev_m { max_t = prev_m; }
+        }
         let p2 = ptr_add_u8((*s).per_fn_max, fi * (8 as i64)) as *i64;
         *p2 = max_t;
         // v4.0.2.2 (W-096 emit-side per-fn-local counter 真修):per_fn_base_t[fi]
