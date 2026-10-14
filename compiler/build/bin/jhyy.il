@@ -101409,113 +101409,113 @@ export function w $codegen_amd64_emit_mem__emit_store(l %state, l %tok, w %targe
     dbgloc 457
     %t52576 =l call $codegen_amd64_emit_mem__mem_temp_offset(l %t52453, w %t52430)
     dbgloc 463
-    %t52577 =w call $codegen_amd64_state__cg_is_address_holder(l %t52428, l %t52453)
-    %t52578 =w copy 0
-    %t52579 =w cnew %t52577, %t52578
+    %t52577 =w copy 0
+    %t52578 =l extsw %t52577
+    %t52579 =w csgel %t52453, %t52578
     jnz %t52579, @then11564, @else11565
 @then11564
-    dbgloc 478
+    dbgloc 493
     %t52580 =l copy $str1264
     %t52581 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52580)
-    dbgloc 479
+    dbgloc 494
     %t52582 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52461)
-    dbgloc 480
+    dbgloc 495
     %t52583 =l copy $str1265
     %t52584 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52583)
-    dbgloc 481
+    dbgloc 496
     %t52585 =w call $codegen_amd64_emit_mem__mem_put_slot(l %t52428, l %t52463)
-    dbgloc 482
+    dbgloc 497
     %t52586 =l copy $str1266
     %t52587 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52586)
-    dbgloc 483
+    dbgloc 498
     %t52588 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52462)
-    dbgloc 484
+    dbgloc 499
     %t52589 =l copy $str1267
     %t52590 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52589)
-    dbgloc 485
+    dbgloc 500
     %t52591 =w call $codegen_amd64_emit_mem__mem_put_i64(l %t52428, l %t52446)
-    dbgloc 486
+    dbgloc 501
     %t52592 =l copy $str1268
     %t52593 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52592)
-    dbgloc 487
+    dbgloc 502
     %t52594 =l copy $str1269
     %t52595 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52594)
-    dbgloc 488
+    dbgloc 503
     %t52596 =w call $codegen_amd64_emit_mem__mem_put_slot(l %t52428, l %t52576)
-    dbgloc 489
+    dbgloc 504
     %t52597 =l copy $str1270
     %t52598 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52597)
-    dbgloc 490
+    dbgloc 505
     %t52599 =w call $codegen_amd64_emit_mem__mem_put_i64(l %t52428, l %t52453)
-    dbgloc 491
+    dbgloc 506
     %t52600 =l copy $str1271
     %t52601 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52600)
-    dbgloc 492
+    dbgloc 507
     %t52602 =l copy $str1272
     %t52603 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52602)
-    dbgloc 493
+    dbgloc 508
     %t52604 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52461)
-    dbgloc 494
+    dbgloc 509
     %t52605 =l copy $str1273
     %t52606 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52605)
-    dbgloc 495
+    dbgloc 510
     %t52607 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52462)
-    dbgloc 496
+    dbgloc 511
     %t52608 =l copy $str1274
     %t52609 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52608)
-    dbgloc 497
+    dbgloc 512
     %t52610 =w copy 0
     ret %t52610
 @else11565
     jmp @merge11566
 @merge11566
-    dbgloc 501
+    dbgloc 516
     %t52611 =l copy $str1275
     %t52612 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52611)
-    dbgloc 502
+    dbgloc 517
     %t52613 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52461)
-    dbgloc 503
+    dbgloc 518
     %t52614 =l copy $str1276
     %t52615 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52614)
-    dbgloc 504
+    dbgloc 519
     %t52616 =w call $codegen_amd64_emit_mem__mem_put_slot(l %t52428, l %t52463)
-    dbgloc 505
+    dbgloc 520
     %t52617 =l copy $str1277
     %t52618 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52617)
-    dbgloc 506
+    dbgloc 521
     %t52619 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52462)
-    dbgloc 507
+    dbgloc 522
     %t52620 =l copy $str1278
     %t52621 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52620)
-    dbgloc 508
+    dbgloc 523
     %t52622 =w call $codegen_amd64_emit_mem__mem_put_i64(l %t52428, l %t52446)
-    dbgloc 509
+    dbgloc 524
     %t52623 =l copy $str1279
     %t52624 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52623)
-    dbgloc 512
+    dbgloc 527
     %t52625 =l copy $str1280
     %t52626 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52625)
-    dbgloc 513
+    dbgloc 528
     %t52627 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52461)
-    dbgloc 514
+    dbgloc 529
     %t52628 =l copy $str1281
     %t52629 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52628)
-    dbgloc 515
+    dbgloc 530
     %t52630 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52462)
-    dbgloc 516
+    dbgloc 531
     %t52631 =l copy $str1282
     %t52632 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52631)
-    dbgloc 517
+    dbgloc 532
     %t52633 =w call $codegen_amd64_emit_mem__mem_put_slot(l %t52428, l %t52576)
-    dbgloc 518
+    dbgloc 533
     %t52634 =l copy $str1283
     %t52635 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52634)
-    dbgloc 519
+    dbgloc 534
     %t52636 =w call $codegen_amd64_emit_mem__mem_put_i64(l %t52428, l %t52453)
-    dbgloc 520
+    dbgloc 535
     %t52637 =l copy $str1284
     %t52638 =w call $codegen_amd64_emit_mem__mem_put(l %t52428, l %t52637)
-    dbgloc 521
+    dbgloc 536
     %t52639 =w copy 0
     ret %t52639
 }
@@ -101525,37 +101525,37 @@ export function w $codegen_amd64_emit_mem__emit_loadsub(l %state, l %tok, w %tar
     %t52640 =l copy %state
     %t52641 =l copy %tok
     %t52642 =w copy %target_tag
-    dbgloc 533
-    dbgloc 534
+    dbgloc 548
+    dbgloc 549
     %t52643 =w call $codegen_amd64_emit_mem__mem_args_bad(l %t52640, l %t52641)
     %t52644 =w copy 0
     %t52645 =w cnew %t52643, %t52644
     jnz %t52645, @then11568, @else11569
 @then11568
-    dbgloc 535
+    dbgloc 550
     %t52646 =w copy 1
     ret %t52646
 @else11569
     jmp @merge11570
 @merge11570
-    dbgloc 537
+    dbgloc 552
     %t52647 =l copy %t52641
-    dbgloc 538
+    dbgloc 553
     %t52648 =w loadw %t52647
     %t52649 =w call $codegen_amd64_regalloc__ILTOK_LOADSUB()
     %t52650 =w cnew %t52648, %t52649
     jnz %t52650, @then11571, @else11572
 @then11571
-    dbgloc 539
+    dbgloc 554
     %t52651 =w copy 1
     ret %t52651
 @else11572
     jmp @merge11573
 @merge11573
-    dbgloc 542
+    dbgloc 557
     %t52652 =l add %t52647, 24
     %t52653 =l loadl %t52652
-    dbgloc 543
+    dbgloc 558
     %t52654 =l add %t52647, 8
     %t52655 =l loadl %t52654
     %t52656 =l add %t52647, 16
@@ -101563,7 +101563,7 @@ export function w $codegen_amd64_emit_mem__emit_loadsub(l %state, l %tok, w %tar
     %t52658 =w copy 0
     %t52659 =l extsw %t52658
     %t52660 =l call $codegen_amd64_emit_mem__mem_parse_temp(l %t52655, l %t52657, l %t52659)
-    dbgloc 544
+    dbgloc 559
     %t52661 =w copy 0
     %t52662 =l extsw %t52661
     %t52663 =w csltl %t52653, %t52662
@@ -101581,24 +101581,24 @@ export function w $codegen_amd64_emit_mem__emit_loadsub(l %state, l %tok, w %tar
     %t52664 =w phi @sc_true11576 %t52665, @sc_eval11574 %t52669
     jnz %t52664, @then11577, @else11578
 @then11577
-    dbgloc 545
+    dbgloc 560
     %t52670 =w copy 1
     ret %t52670
 @else11578
     jmp @merge11579
 @merge11579
-    dbgloc 550
+    dbgloc 565
     %t52671 =l add %t52647, 8
     %t52672 =l loadl %t52671
-    dbgloc 551
+    dbgloc 566
     %t52673 =l add %t52647, 16
     %t52674 =l loadl %t52673
-    dbgloc 552
+    dbgloc 567
     %t52675 =w copy 0
     %t52676 =l extsw %t52675
     %t52677 =l alloc8 8
     storel %t52676, %t52677
-    dbgloc 553
+    dbgloc 568
     %t52678 =l copy $str1285
     %t52679 =l call $codegen_amd64_emit_mem__mem_find_sub(l %t52672, l %t52674, l %t52678)
     %t52680 =w copy 0
@@ -101606,12 +101606,12 @@ export function w $codegen_amd64_emit_mem__emit_loadsub(l %state, l %tok, w %tar
     %t52682 =w csgel %t52679, %t52681
     jnz %t52682, @then11580, @else11581
 @then11580
-    dbgloc 554
+    dbgloc 569
     %t52683 =l copy $str1286
     storel %t52683, %t52677
     jmp @merge11582
 @else11581
-    dbgloc 555
+    dbgloc 570
     %t52684 =l copy $str1287
     %t52685 =l call $codegen_amd64_emit_mem__mem_find_sub(l %t52672, l %t52674, l %t52684)
     %t52686 =w copy 0
@@ -101619,12 +101619,12 @@ export function w $codegen_amd64_emit_mem__emit_loadsub(l %state, l %tok, w %tar
     %t52688 =w csgel %t52685, %t52687
     jnz %t52688, @then11583, @else11584
 @then11583
-    dbgloc 556
+    dbgloc 571
     %t52689 =l copy $str1288
     storel %t52689, %t52677
     jmp @merge11585
 @else11584
-    dbgloc 557
+    dbgloc 572
     %t52690 =l copy $str1289
     %t52691 =l call $codegen_amd64_emit_mem__mem_find_sub(l %t52672, l %t52674, l %t52690)
     %t52692 =w copy 0
@@ -101632,12 +101632,12 @@ export function w $codegen_amd64_emit_mem__emit_loadsub(l %state, l %tok, w %tar
     %t52694 =w csgel %t52691, %t52693
     jnz %t52694, @then11586, @else11587
 @then11586
-    dbgloc 558
+    dbgloc 573
     %t52695 =l copy $str1290
     storel %t52695, %t52677
     jmp @merge11588
 @else11587
-    dbgloc 559
+    dbgloc 574
     %t52696 =l copy $str1291
     %t52697 =l call $codegen_amd64_emit_mem__mem_find_sub(l %t52672, l %t52674, l %t52696)
     %t52698 =w copy 0
@@ -101645,7 +101645,7 @@ export function w $codegen_amd64_emit_mem__emit_loadsub(l %state, l %tok, w %tar
     %t52700 =w csgel %t52697, %t52699
     jnz %t52700, @then11589, @else11590
 @then11589
-    dbgloc 560
+    dbgloc 575
     %t52701 =l copy $str1292
     storel %t52701, %t52677
     jmp @merge11591
@@ -101658,172 +101658,172 @@ export function w $codegen_amd64_emit_mem__emit_loadsub(l %state, l %tok, w %tar
 @merge11585
     jmp @merge11582
 @merge11582
-    dbgloc 562
+    dbgloc 577
     %t52702 =l loadl %t52677
     %t52703 =w copy 0
     %t52704 =l extsw %t52703
     %t52705 =w ceql %t52702, %t52704
     jnz %t52705, @then11592, @else11593
 @then11592
-    dbgloc 563
+    dbgloc 578
     %t52706 =w copy 1
     ret %t52706
 @else11593
     jmp @merge11594
 @merge11594
-    dbgloc 568
+    dbgloc 583
     %t52707 =l add %t52647, 32
     %t52708 =w loadw %t52707
     %t52709 =w call $codegen_amd64_emit_mem__mem_effective_qbe_type(w %t52708)
-    dbgloc 569
+    dbgloc 584
     %t52710 =l copy $str1293
     %t52711 =l alloc8 8
     storel %t52710, %t52711
-    dbgloc 570
+    dbgloc 585
     %t52712 =l copy $str1294
     %t52713 =l alloc8 8
     storel %t52712, %t52713
-    dbgloc 571
+    dbgloc 586
     %t52714 =w call $codegen_amd64_state__QBE_L_LOCAL()
     %t52715 =w ceqw %t52709, %t52714
     jnz %t52715, @then11595, @else11596
 @then11595
-    dbgloc 572
+    dbgloc 587
     %t52716 =l copy $str1295
     storel %t52716, %t52711
-    dbgloc 573
+    dbgloc 588
     %t52717 =l copy $str1296
     storel %t52717, %t52713
     jmp @merge11597
 @else11596
     jmp @merge11597
 @merge11597
-    dbgloc 576
+    dbgloc 591
     %t52718 =l call $codegen_amd64_emit_mem__mem_temp_offset(l %t52660, w %t52642)
-    dbgloc 577
+    dbgloc 592
     %t52719 =l call $codegen_amd64_emit_mem__mem_temp_offset(l %t52653, w %t52642)
-    dbgloc 583
+    dbgloc 598
     %t52720 =w call $codegen_amd64_state__cg_is_address_holder(l %t52640, l %t52660)
     %t52721 =w copy 0
     %t52722 =w cnew %t52720, %t52721
     jnz %t52722, @then11598, @else11599
 @then11598
-    dbgloc 584
+    dbgloc 599
     %t52723 =l copy $str1297
     %t52724 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52723)
-    dbgloc 585
+    dbgloc 600
     %t52725 =w call $codegen_amd64_emit_mem__mem_put_slot(l %t52640, l %t52718)
-    dbgloc 586
+    dbgloc 601
     %t52726 =l copy $str1298
     %t52727 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52726)
-    dbgloc 587
+    dbgloc 602
     %t52728 =w call $codegen_amd64_emit_mem__mem_put_i64(l %t52640, l %t52660)
-    dbgloc 588
+    dbgloc 603
     %t52729 =l copy $str1299
     %t52730 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52729)
-    dbgloc 589
+    dbgloc 604
     %t52731 =l copy $str1300
     %t52732 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52731)
-    dbgloc 590
+    dbgloc 605
     %t52733 =l loadl %t52677
     %t52734 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52733)
-    dbgloc 591
+    dbgloc 606
     %t52735 =l loadl %t52711
     %t52736 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52735)
-    dbgloc 592
+    dbgloc 607
     %t52737 =l copy $str1301
     %t52738 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52737)
-    dbgloc 593
+    dbgloc 608
     %t52739 =l loadl %t52713
     %t52740 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52739)
-    dbgloc 594
+    dbgloc 609
     %t52741 =l copy $str1302
     %t52742 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52741)
-    dbgloc 595
+    dbgloc 610
     %t52743 =l copy $str1303
     %t52744 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52743)
-    dbgloc 596
+    dbgloc 611
     %t52745 =l loadl %t52711
     %t52746 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52745)
-    dbgloc 597
+    dbgloc 612
     %t52747 =l copy $str1304
     %t52748 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52747)
-    dbgloc 598
+    dbgloc 613
     %t52749 =l loadl %t52713
     %t52750 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52749)
-    dbgloc 599
+    dbgloc 614
     %t52751 =l copy $str1305
     %t52752 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52751)
-    dbgloc 600
+    dbgloc 615
     %t52753 =w call $codegen_amd64_emit_mem__mem_put_slot(l %t52640, l %t52719)
-    dbgloc 601
+    dbgloc 616
     %t52754 =l copy $str1306
     %t52755 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52754)
-    dbgloc 602
+    dbgloc 617
     %t52756 =w call $codegen_amd64_emit_mem__mem_put_i64(l %t52640, l %t52653)
-    dbgloc 603
+    dbgloc 618
     %t52757 =l copy $str1307
     %t52758 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52757)
-    dbgloc 604
+    dbgloc 619
     %t52759 =w copy 0
     ret %t52759
 @else11599
     jmp @merge11600
 @merge11600
-    dbgloc 608
+    dbgloc 623
     %t52760 =l copy $str1308
     %t52761 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52760)
-    dbgloc 609
+    dbgloc 624
     %t52762 =l loadl %t52677
     %t52763 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52762)
-    dbgloc 610
+    dbgloc 625
     %t52764 =l loadl %t52711
     %t52765 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52764)
-    dbgloc 611
+    dbgloc 626
     %t52766 =l copy $str1309
     %t52767 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52766)
-    dbgloc 612
+    dbgloc 627
     %t52768 =w call $codegen_amd64_emit_mem__mem_put_slot(l %t52640, l %t52718)
-    dbgloc 613
+    dbgloc 628
     %t52769 =l copy $str1310
     %t52770 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52769)
-    dbgloc 614
+    dbgloc 629
     %t52771 =l loadl %t52713
     %t52772 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52771)
-    dbgloc 615
+    dbgloc 630
     %t52773 =l copy $str1311
     %t52774 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52773)
-    dbgloc 616
+    dbgloc 631
     %t52775 =w call $codegen_amd64_emit_mem__mem_put_i64(l %t52640, l %t52660)
-    dbgloc 617
+    dbgloc 632
     %t52776 =l copy $str1312
     %t52777 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52776)
-    dbgloc 620
+    dbgloc 635
     %t52778 =l copy $str1313
     %t52779 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52778)
-    dbgloc 621
+    dbgloc 636
     %t52780 =l loadl %t52711
     %t52781 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52780)
-    dbgloc 622
+    dbgloc 637
     %t52782 =l copy $str1314
     %t52783 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52782)
-    dbgloc 623
+    dbgloc 638
     %t52784 =l loadl %t52713
     %t52785 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52784)
-    dbgloc 624
+    dbgloc 639
     %t52786 =l copy $str1315
     %t52787 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52786)
-    dbgloc 625
+    dbgloc 640
     %t52788 =w call $codegen_amd64_emit_mem__mem_put_slot(l %t52640, l %t52719)
-    dbgloc 626
+    dbgloc 641
     %t52789 =l copy $str1316
     %t52790 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52789)
-    dbgloc 627
+    dbgloc 642
     %t52791 =w call $codegen_amd64_emit_mem__mem_put_i64(l %t52640, l %t52653)
-    dbgloc 628
+    dbgloc 643
     %t52792 =l copy $str1317
     %t52793 =w call $codegen_amd64_emit_mem__mem_put(l %t52640, l %t52792)
-    dbgloc 629
+    dbgloc 644
     %t52794 =w copy 0
     ret %t52794
 }
@@ -101833,37 +101833,37 @@ export function w $codegen_amd64_emit_mem__emit_load(l %state, l %tok, w %target
     %t52795 =l copy %state
     %t52796 =l copy %tok
     %t52797 =w copy %target_tag
-    dbgloc 640
-    dbgloc 641
+    dbgloc 655
+    dbgloc 656
     %t52798 =w call $codegen_amd64_emit_mem__mem_args_bad(l %t52795, l %t52796)
     %t52799 =w copy 0
     %t52800 =w cnew %t52798, %t52799
     jnz %t52800, @then11602, @else11603
 @then11602
-    dbgloc 642
+    dbgloc 657
     %t52801 =w copy 1
     ret %t52801
 @else11603
     jmp @merge11604
 @merge11604
-    dbgloc 644
+    dbgloc 659
     %t52802 =l copy %t52796
-    dbgloc 645
+    dbgloc 660
     %t52803 =w loadw %t52802
     %t52804 =w call $codegen_amd64_regalloc__ILTOK_LOAD()
     %t52805 =w cnew %t52803, %t52804
     jnz %t52805, @then11605, @else11606
 @then11605
-    dbgloc 646
+    dbgloc 661
     %t52806 =w copy 1
     ret %t52806
 @else11606
     jmp @merge11607
 @merge11607
-    dbgloc 649
+    dbgloc 664
     %t52807 =l add %t52802, 24
     %t52808 =l loadl %t52807
-    dbgloc 650
+    dbgloc 665
     %t52809 =l add %t52802, 8
     %t52810 =l loadl %t52809
     %t52811 =l add %t52802, 16
@@ -101871,59 +101871,59 @@ export function w $codegen_amd64_emit_mem__emit_load(l %state, l %tok, w %target
     %t52813 =w copy 0
     %t52814 =l extsw %t52813
     %t52815 =l call $codegen_amd64_emit_mem__mem_parse_temp(l %t52810, l %t52812, l %t52814)
-    dbgloc 651
+    dbgloc 666
     %t52816 =w copy 0
     %t52817 =l extsw %t52816
     %t52818 =w csltl %t52808, %t52817
     jnz %t52818, @then11608, @else11609
 @then11608
-    dbgloc 652
+    dbgloc 667
     %t52819 =w copy 1
     ret %t52819
 @else11609
     jmp @merge11610
 @merge11610
-    dbgloc 655
+    dbgloc 670
     %t52820 =l add %t52802, 32
     %t52821 =w loadw %t52820
     %t52822 =w call $codegen_amd64_emit_mem__mem_effective_qbe_type(w %t52821)
-    dbgloc 656
+    dbgloc 671
     %t52823 =l call $codegen_amd64_emit_mem__mem_mov_suffix(w %t52822)
-    dbgloc 657
+    dbgloc 672
     %t52824 =l call $codegen_amd64_emit_mem__mem_scratch_reg(w %t52822)
-    dbgloc 673
+    dbgloc 688
     %t52825 =w call $codegen_amd64_state__QBE_D_LOCAL()
     %t52826 =w ceqw %t52822, %t52825
     jnz %t52826, @then11611, @else11612
 @then11611
-    dbgloc 674
+    dbgloc 689
     %t52827 =w copy 8
     %t52828 =l extsw %t52827
     jmp @merge11613
 @else11612
-    dbgloc 675
+    dbgloc 690
     %t52829 =w call $codegen_amd64_state__QBE_S_LOCAL()
     %t52830 =w ceqw %t52822, %t52829
     jnz %t52830, @then11614, @else11615
 @then11614
-    dbgloc 676
+    dbgloc 691
     %t52831 =w copy 4
     %t52832 =l extsw %t52831
     jmp @merge11616
 @else11615
-    dbgloc 677
+    dbgloc 692
     %t52833 =w call $codegen_amd64_emit_mem__mem_effective_qbe_type(w %t52822)
     %t52834 =w call $codegen_amd64_state__QBE_L_LOCAL()
     %t52835 =w ceqw %t52833, %t52834
     jnz %t52835, @then11617, @else11618
 @then11617
-    dbgloc 678
+    dbgloc 693
     %t52836 =w copy 8
     %t52837 =l extsw %t52836
     jmp @merge11619
 @else11618
-    dbgloc 679
-    dbgloc 680
+    dbgloc 694
+    dbgloc 695
     %t52838 =w copy 4
     %t52839 =l extsw %t52838
     jmp @merge11619
@@ -101935,47 +101935,47 @@ export function w $codegen_amd64_emit_mem__emit_load(l %state, l %tok, w %target
     jmp @merge11613
 @merge11613
     %t52842 =l phi @then11611 %t52828, @merge11616 %t52841
-    dbgloc 682
+    dbgloc 697
     %t52843 =w copy 1
     %t52844 =l call $codegen_amd64_state__cg_alloc_slot(l %t52795, l %t52842, w %t52843)
-    dbgloc 683
+    dbgloc 698
     %t52845 =w call $codegen_amd64_state__cg_record_temp_slot(l %t52795, l %t52808, l %t52844)
-    dbgloc 684
-    dbgloc 694
+    dbgloc 699
+    dbgloc 709
     %t52846 =l copy %t52795
-    dbgloc 695
+    dbgloc 710
     %t52847 =w copy 0
     %t52848 =l extsw %t52847
     %t52849 =w csltl %t52815, %t52848
     jnz %t52849, @then11620, @else11621
 @then11620
-    dbgloc 697
+    dbgloc 712
     %t52850 =w copy 1
     %t52851 =l extsw %t52850
     %t52853 =l copy 0
     %t52852 =l sub %t52853, %t52851
     %t52854 =l alloc8 8
     storel %t52852, %t52854
-    dbgloc 698
+    dbgloc 713
     %t52855 =w copy 0
     %t52856 =l extsw %t52855
     %t52857 =l alloc8 8
     storel %t52856, %t52857
-    dbgloc 699
+    dbgloc 714
     %t52858 =w copy 0
     %t52859 =l extsw %t52858
     %t52860 =l alloc8 8
     storel %t52859, %t52860
     jmp @loop11623
 @loop11623
-    dbgloc 700
+    dbgloc 715
     %t52861 =l loadl %t52860
     %t52862 =l add %t52802, 16
     %t52863 =l loadl %t52862
     %t52864 =w csltl %t52861, %t52863
     jnz %t52864, @body11624, @exit11625
 @body11624
-    dbgloc 701
+    dbgloc 716
     %t52865 =l add %t52802, 8
     %t52866 =l loadl %t52865
     %t52867 =l loadl %t52860
@@ -101984,7 +101984,7 @@ export function w $codegen_amd64_emit_mem__emit_load(l %state, l %tok, w %target
     %t52870 =w ceqw %t52868, %t52869
     jnz %t52870, @then11626, @else11627
 @then11626
-    dbgloc 702
+    dbgloc 717
     %t52871 =l loadl %t52860
     %t52872 =w copy 1
     %t52873 =l extsw %t52872
@@ -101992,7 +101992,7 @@ export function w $codegen_amd64_emit_mem__emit_load(l %state, l %tok, w %target
     storel %t52874, %t52854
     jmp @loop11629
 @loop11629
-    dbgloc 704
+    dbgloc 719
     %t52875 =l loadl %t52854
     %t52876 =l loadl %t52857
     %t52877 =l add %t52875, %t52876
@@ -102001,14 +102001,14 @@ export function w $codegen_amd64_emit_mem__emit_load(l %state, l %tok, w %target
     %t52880 =w csltl %t52877, %t52879
     jnz %t52880, @body11630, @exit11631
 @body11630
-    dbgloc 705
+    dbgloc 720
     %t52881 =l add %t52802, 8
     %t52882 =l loadl %t52881
     %t52883 =l loadl %t52854
     %t52884 =l loadl %t52857
     %t52885 =l add %t52883, %t52884
     %t52886 =w call $codegen_amd64_emit_mem__mem_byte_at(l %t52882, l %t52885)
-    dbgloc 706
+    dbgloc 721
     %t52887 =w copy 32
     %t52888 =w ceqw %t52886, %t52887
     jnz %t52888, @sc_true11634, @sc_eval11632
@@ -102050,7 +102050,7 @@ export function w $codegen_amd64_emit_mem__emit_load(l %state, l %tok, w %target
 @else11642
     jmp @merge11643
 @merge11643
-    dbgloc 707
+    dbgloc 722
     %t52904 =l loadl %t52857
     %t52905 =w copy 1
     %t52906 =l extsw %t52905
@@ -102062,7 +102062,7 @@ export function w $codegen_amd64_emit_mem__emit_load(l %state, l %tok, w %target
 @else11627
     jmp @merge11628
 @merge11628
-    dbgloc 711
+    dbgloc 726
     %t52908 =l loadl %t52860
     %t52909 =w copy 1
     %t52910 =l extsw %t52909
@@ -102070,7 +102070,7 @@ export function w $codegen_amd64_emit_mem__emit_load(l %state, l %tok, w %target
     storel %t52911, %t52860
     jmp @loop11623
 @exit11625
-    dbgloc 713
+    dbgloc 728
     %t52912 =l loadl %t52854
     %t52913 =w copy 0
     %t52914 =l extsw %t52913
@@ -102090,15 +102090,15 @@ export function w $codegen_amd64_emit_mem__emit_load(l %state, l %tok, w %target
     %t52916 =w phi @sc_false11646 %t52917, @sc_eval11644 %t52922
     jnz %t52916, @then11647, @else11648
 @then11647
-    dbgloc 714
+    dbgloc 729
     %t52923 =l copy $str1318
     %t52924 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52923)
-    dbgloc 715
+    dbgloc 730
     %t52925 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52823)
-    dbgloc 716
+    dbgloc 731
     %t52926 =l copy $str1319
     %t52927 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52926)
-    dbgloc 717
+    dbgloc 732
     %t52928 =l call $codegen_amd64_emit_mem__mem_arena(l %t52795)
     %t52929 =l call $codegen_amd64_emit_mem__mem_sb(l %t52795)
     %t52930 =l add %t52802, 8
@@ -102107,174 +102107,174 @@ export function w $codegen_amd64_emit_mem__emit_load(l %state, l %tok, w %target
     %t52933 =l call $util__ptr_add_u8(l %t52931, l %t52932)
     %t52934 =l loadl %t52857
     %t52935 =w call $util__sb_append(l %t52928, l %t52929, l %t52933, l %t52934)
-    dbgloc 718
+    dbgloc 733
     %t52936 =l call $codegen_amd64_emit_mem__mem_arena(l %t52795)
     %t52937 =l call $codegen_amd64_emit_mem__mem_sb(l %t52795)
     %t52938 =l copy $str1320
     %t52939 =w call $util__sb_append_cstr(l %t52936, l %t52937, l %t52938)
-    dbgloc 719
+    dbgloc 734
     %t52940 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52824)
-    dbgloc 720
+    dbgloc 735
     %t52941 =l copy $str1321
     %t52942 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52941)
-    dbgloc 721
+    dbgloc 736
     %t52943 =l copy $str1322
     %t52944 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52943)
-    dbgloc 722
+    dbgloc 737
     %t52945 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52823)
-    dbgloc 723
+    dbgloc 738
     %t52946 =l copy $str1323
     %t52947 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52946)
-    dbgloc 724
+    dbgloc 739
     %t52948 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52824)
-    dbgloc 725
+    dbgloc 740
     %t52949 =l copy $str1324
     %t52950 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52949)
-    dbgloc 726
+    dbgloc 741
     %t52951 =w call $codegen_amd64_emit_mem__mem_put_slot(l %t52795, l %t52844)
-    dbgloc 727
+    dbgloc 742
     %t52952 =l copy $str1325
     %t52953 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52952)
-    dbgloc 728
+    dbgloc 743
     %t52954 =w call $codegen_amd64_emit_mem__mem_put_i64(l %t52795, l %t52808)
-    dbgloc 729
+    dbgloc 744
     %t52955 =l copy $str1326
     %t52956 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52955)
-    dbgloc 730
+    dbgloc 745
     %t52957 =w copy 0
     ret %t52957
 @else11648
     jmp @merge11649
 @merge11649
-    dbgloc 734
+    dbgloc 749
     %t52958 =w copy 1
     ret %t52958
 @else11621
     jmp @merge11622
 @merge11622
-    dbgloc 737
+    dbgloc 752
     %t52959 =l call $codegen_amd64_emit_mem__mem_temp_offset(l %t52815, w %t52797)
-    dbgloc 745
+    dbgloc 760
     %t52960 =w copy 0
     %t52961 =l extsw %t52960
     %t52962 =w csgel %t52815, %t52961
     jnz %t52962, @then11650, @else11651
 @then11650
-    dbgloc 758
+    dbgloc 773
     %t52963 =l copy $str1327
     %t52964 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52963)
-    dbgloc 759
+    dbgloc 774
     %t52965 =w call $codegen_amd64_emit_mem__mem_put_slot(l %t52795, l %t52959)
-    dbgloc 760
+    dbgloc 775
     %t52966 =l copy $str1328
     %t52967 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52966)
-    dbgloc 761
+    dbgloc 776
     %t52968 =w call $codegen_amd64_emit_mem__mem_put_i64(l %t52795, l %t52815)
-    dbgloc 762
+    dbgloc 777
     %t52969 =l copy $str1329
     %t52970 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52969)
-    dbgloc 763
+    dbgloc 778
     %t52971 =l copy $str1330
     %t52972 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52971)
-    dbgloc 764
+    dbgloc 779
     %t52973 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52823)
-    dbgloc 765
+    dbgloc 780
     %t52974 =l copy $str1331
     %t52975 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52974)
-    dbgloc 766
+    dbgloc 781
     %t52976 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52824)
-    dbgloc 767
+    dbgloc 782
     %t52977 =l copy $str1332
     %t52978 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52977)
-    dbgloc 772
+    dbgloc 787
     %t52979 =l add %t52802, 32
     %t52980 =w loadw %t52979
     %t52981 =w call $codegen_amd64_state__QBE_L_LOCAL()
     %t52982 =w ceqw %t52980, %t52981
     jnz %t52982, @then11653, @else11654
 @then11653
-    dbgloc 773
+    dbgloc 788
     %t52983 =w call $codegen_amd64_state__cg_record_temp_holds_address(l %t52795, l %t52808)
     jmp @merge11655
 @else11654
     jmp @merge11655
 @merge11655
-    dbgloc 775
+    dbgloc 790
     %t52984 =l copy $str1333
     %t52985 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52984)
-    dbgloc 776
+    dbgloc 791
     %t52986 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52823)
-    dbgloc 777
+    dbgloc 792
     %t52987 =l copy $str1334
     %t52988 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52987)
-    dbgloc 778
+    dbgloc 793
     %t52989 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52824)
-    dbgloc 779
+    dbgloc 794
     %t52990 =l copy $str1335
     %t52991 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52990)
-    dbgloc 780
+    dbgloc 795
     %t52992 =w call $codegen_amd64_emit_mem__mem_put_slot(l %t52795, l %t52844)
-    dbgloc 781
+    dbgloc 796
     %t52993 =l copy $str1336
     %t52994 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52993)
-    dbgloc 782
+    dbgloc 797
     %t52995 =w call $codegen_amd64_emit_mem__mem_put_i64(l %t52795, l %t52808)
-    dbgloc 783
+    dbgloc 798
     %t52996 =l copy $str1337
     %t52997 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52996)
-    dbgloc 784
+    dbgloc 799
     %t52998 =w copy 0
     ret %t52998
 @else11651
     jmp @merge11652
 @merge11652
-    dbgloc 787
+    dbgloc 802
     %t52999 =l copy $str1338
     %t53000 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52999)
-    dbgloc 788
+    dbgloc 803
     %t53001 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52823)
-    dbgloc 789
+    dbgloc 804
     %t53002 =l copy $str1339
     %t53003 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t53002)
-    dbgloc 790
+    dbgloc 805
     %t53004 =w call $codegen_amd64_emit_mem__mem_put_slot(l %t52795, l %t52959)
-    dbgloc 791
+    dbgloc 806
     %t53005 =l copy $str1340
     %t53006 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t53005)
-    dbgloc 792
+    dbgloc 807
     %t53007 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52824)
-    dbgloc 793
+    dbgloc 808
     %t53008 =l copy $str1341
     %t53009 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t53008)
-    dbgloc 794
+    dbgloc 809
     %t53010 =w call $codegen_amd64_emit_mem__mem_put_i64(l %t52795, l %t52815)
-    dbgloc 795
+    dbgloc 810
     %t53011 =l copy $str1342
     %t53012 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t53011)
-    dbgloc 797
+    dbgloc 812
     %t53013 =l copy $str1343
     %t53014 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t53013)
-    dbgloc 798
+    dbgloc 813
     %t53015 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52823)
-    dbgloc 799
+    dbgloc 814
     %t53016 =l copy $str1344
     %t53017 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t53016)
-    dbgloc 800
+    dbgloc 815
     %t53018 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t52824)
-    dbgloc 801
+    dbgloc 816
     %t53019 =l copy $str1345
     %t53020 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t53019)
-    dbgloc 802
+    dbgloc 817
     %t53021 =w call $codegen_amd64_emit_mem__mem_put_slot(l %t52795, l %t52844)
-    dbgloc 803
+    dbgloc 818
     %t53022 =l copy $str1346
     %t53023 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t53022)
-    dbgloc 804
+    dbgloc 819
     %t53024 =w call $codegen_amd64_emit_mem__mem_put_i64(l %t52795, l %t52808)
-    dbgloc 805
+    dbgloc 820
     %t53025 =l copy $str1347
     %t53026 =w call $codegen_amd64_emit_mem__mem_put(l %t52795, l %t53025)
-    dbgloc 806
+    dbgloc 821
     %t53027 =w copy 0
     ret %t53027
 }

@@ -460,7 +460,22 @@ fn emit_store(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     // dst 是 address-holder 时,slot store 写到的是 stack slot 存的 address VALUE,
     // 不是实际 value。本应该是 indirect store:load src → %<reg>,load dst → %r8
     // (= pointer),然后 store [r8] (= %<reg>)。Phase E 第二段:emit_store indirect dispatch。
-    if cg_is_address_holder(state, dst) != (0 as i32) {
+    if dst >= (0 as i64) {
+        // v4.0.8 (W-097 根因 5 的另一半):QBE 语义下 `store<sfx> %tS, %tD` 的 %tD 槽里
+        // **永远是地址**,store 必须解引用 —— 跟 emit_load 同理,不能靠
+        // cg_is_address_holder(dst) 的启发式 flag 决定。
+        //
+        // 症状:parser 的结构体字面量构造
+        //   let fd = (fields as i64 + nfields * 16) as *NodeFieldInit;
+        //   (*fd).name = fname;
+        // flag 漏标时 emit_store 走 fallback「把 dst 槽的值写进 dst 槽」——
+        // 等于把 fd 这个「地址 temp」自己覆盖掉,`*fields` 从没被写过,
+        // sema 拿到的是 arena 里没初始化的字节(struct init 报 "struct has no field")。
+        // 加一条 `*(ptr_add_u8(fields, 16))` 之类的旁路读就能「治好」,因为它
+        // 顺带把 fields 标成了 address-holder —— 这正说明是 flag 链不可靠,
+        // 而不是别的什么内存布局问题。
+        //
+        // mov<sfx> <src_slot>(%rbp), %<reg> ; movq <dst_slot>(%rbp), %r8 ; mov<sfx> %<reg>, (%r8)
         // v2.11.20 RC-7: removed "both address-holder" special case (was at
         // line 393-416 prior). Original code emitted mem-copy via deref of
         // both src and dst (`mov<size> (%rsi), <reg>; mov<size> <reg>, (%r8)`)
