@@ -975,41 +975,28 @@ fn cg_offset_for_temp_with_target(t: i64, target_tag: i32) -> i64 {
 // 或 aligned(alloc_size)。 Worst case:per-fn alloc ~50KB → -8192 - 50KB = -58800, 远在
 // 32KB MSYS2 mingw 栈范围(2MB default)内,no overflow risk。
 fn cg_alloc_slot(state: *u8, size: i64, is_addr: i32) -> i64 {
-    // align-up to 8-byte boundary: (size + 7) & ~7
     let aligned = (size + (7 as i64)) & ((0 as i64) - (8 as i64));
     let s = state as *CGState;
-    // v2.11.23 Phase 2:alloc pool 起始 offset — formula pool 占用 [rbp-2072, rbp-32],
-    // alloc pool 必须从 rbp-8192 起向下增长 才不 collision
-    // v4.0.6 attempt #7 shared ONE next_offset + is_in_addr_pool switch-back
-    // marker; a value alloc arriving while is_in_addr_pool==1 unconditionally
-    // reset next_offset to -8192, discarding the value pool's progress, so
-    // already-issued offsets got re-issued and distinct allocs aliased.
-    // gdb evidence (compiler/build/bin/w097_repro.jhyy under v4.0.7 jhyy.exe):
-    //   leaq -8200(%rbp), %rax   # alloc %t18 -> -8200
-    //   leaq -8200(%rbp), %rax   # alloc %t21 -> -8200  (should be -8208)
-    //   leaq -8200(%rbp), %rax   # alloc %t24 -> -8200  (should be -8216)
-    // -> main_jhyy argv compaction `(*wp) = rarg` wrote to buf0 (0) instead of
-    //    argv[w]; jhyy_v2 SEGV'd at `mov %eax,(%r8)` with r8 = code address.
-    if is_addr == (1 as i32) {
-        if (*s).addr_next_offset == (0 as i64) {
-            (*s).addr_next_offset = (*s).addr_holder_init_off;
-        }
-        let off = (*s).addr_next_offset - aligned;
-        (*s).addr_next_offset = off;
-        (*s).total_alloc = (*s).total_alloc + aligned;
-        return off;
-    }
+    // v4.0.8 (W-097/W-098 池重叠 —— 结构性修):**单一池**。
+    //
+    // 原来 value(alloc)池和 address-holder 池各有一个 head,两者的深度都靠
+    // pre-scan 估算(per_fn_alloc / per_fn_addr_pool)。只要估算偏小,两个池
+    // 就共用槽位,而 AH 分配和 value 分配在指令流里是**交错**的 —— AH 的起点
+    // 在函数头算好之后,后续的 value 分配仍可能长进 AH 区域,反过来也一样。
+    // 没有任何「起点」能同时避开两者。
+    //
+    // address-holder 是**语义**属性(temp_holds_address bitmap),跟槽位无关:
+    // 同一个槽被标记成 AH 只影响 emit_load/emit_store 走不走 indirect,
+    // 不影响它存什么。合成一个单调递减的池之后,槽位天然互斥,这类重叠从
+    // 结构上消失,也不再依赖任何 pre-scan 估算准不准。
+    //
+    // 实测危害(parser__parse_expr):AH 池 [-20584,-28824] 与 value 池
+    // [-20024,-21608] 重叠 36 个槽,其中 -20592 同时是 %t7137 的指针 holder
+    // 和 %t7778 的 alloc8 存储 → holder 被覆盖成 0 →
+    // `mov (%r8),%rax` r8 = 0+24 = 24 → jhyy_v2.exe SEGV。
+    // 泛型结构体字面量(`Box<i32> { v: 7 }`)必崩,非泛型正常 —— 因为只有那条
+    // 路径的 AST 深度大到触发交叠。
     if (*s).value_next_offset == (0 as i64) {
-        // v4.0.8 (W-097 根因):value pool 必须从 alloc_init_off(= 公式池末端)
-        // 往下长,不能硬编码 -8192。-8192 只在 local_max ≤ 1015 时才落在公式池
-        // 之外;cg_expr 的 local_max ≈ 27564(公式槽到 -220544),alloc 池从 -8192
-        // 往下长到 -28328 —— 与公式槽区间 [-28328, -8192] **完全重叠**。
-        // 机械审计:cg_expr 单函数 13,704 个非-alloc 槽落在 alloc 池区间里,
-        // 包括 cg_expr 自己的 `inner` 局部(-12824)被某个 alloc8 32 覆盖,
-        // 于是 `~expr` 的 IRVal 按值传参拿到垃圾(id 变 687 而非 22559)。
-        // 连锁后果:sema 结构体布局的 `al` / `offset` 局部同样被踩,
-        // `(offset + al - 1) & ~((al-1))` 掩码失效 → 字段偏移变成 `al - 1`
-        // 累积(i64 → 7/22/37,sizeof → 22/37/52),全量 IL 发散。
         let mut vbase: i64 = (*s).alloc_init_off;
         if vbase == (0 as i64) {
             vbase = (0 as i64) - (8192 as i64);

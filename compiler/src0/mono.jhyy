@@ -437,6 +437,43 @@ fn mono_subst_expr(arena: *Arena, node: *Node,
         return ast_new_int(arena, (*node).loc_filename, (*node).loc_line,
                            (*node).loc_col, val, prim);
     }
+    // NODE_STRUCT_LIT: type_sym@0(8) + fields@8(8) + nfields@16(8) = 24
+    // 泛型结构体字面量(`Box<i32> { v: 7 }`)必须走这条深拷贝。
+    //
+    // v4.0.8 (W-098 泛型 SEGV):之前这里没有分支,直接掉到文件末尾的兜底
+    // 「浅 clone」—— 那段只 `arena_alloc(NODE_SIZE())`,**不分配 variant data**。
+    // 而 NodeStructLit 的 payload(type_sym / fields / nfields)在
+    // `node + NODE_SIZE()` 处。调用方(sema 的 NODE_STRUCT_LIT 分支、
+    // codegen)随后从那里读字段,读到堆分配边界之外 → 垃圾指针 → SEGV。
+    // 实测:8 行复现 `type Box<T> = struct { v: i64 }` + `Box<i32> { v: 7 }`
+    // 在 self-hosted 二进制上必崩,非泛型结构体字面量正常(走的是别的路径)。
+    //
+    // 顺带修掉语义缺口:字段值表达式里的类型参数(T)之前也从未被替换。
+    if nk == NODE_STRUCT_LIT() {
+        let sl_data = (node as i64 + NODE_SIZE()) as *u8;
+        let sl_type_sym = *(sl_data as **u8);
+        let sl_fields = *(ptr_add_u8(sl_data, (8 as i64)) as **u8);
+        let sl_nfields = *(ptr_add_u8(sl_data, (16 as i64)) as *i64);
+        let mut new_fields: *u8 = 0 as *u8;
+        if sl_fields != (0 as *u8) && sl_nfields > (0 as i64) {
+            // NodeFieldInit = name@0(8) + value@8(8),stride 16(per parser.jhyy)
+            new_fields = arena_alloc(arena, sl_nfields * (16 as i64));
+            let mut fi2: i64 = 0 as i64;
+            while fi2 < sl_nfields {
+                let src_fi = ptr_add_u8(sl_fields, fi2 * (16 as i64)) as *u8;
+                let dst_fi = ptr_add_u8(new_fields, fi2 * (16 as i64)) as *u8;
+                let fname = *(src_fi as **u8);
+                let fval = *(ptr_add_u8(src_fi, (8 as i64)) as **Node);
+                *(dst_fi as **u8) = fname;
+                let new_val = mono_subst_expr(arena, fval, type_params, arg_nodes, nargs);
+                *(ptr_add_u8(dst_fi, (8 as i64)) as **Node) = new_val;
+                fi2 = fi2 + (1 as i64);
+            }
+        }
+        return ast_new_struct_lit(arena, (*node).loc_filename, (*node).loc_line,
+                                  (*node).loc_col, sl_type_sym as *Sym,
+                                  new_fields, sl_nfields);
+    }
     // 其他:浅 clone (返回 kind 正确但无 variant data 的占位 node — 用 caller 处理)
     let buf = arena_alloc(arena, NODE_SIZE());
     let n = ast_init_node(buf, nk,
