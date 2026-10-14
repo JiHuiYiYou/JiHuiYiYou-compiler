@@ -281,6 +281,7 @@ def run_all(
     tests: Optional[List[str]] = None,
     timeout: int = 10,
     enforce_baseline_hash: bool = True,
+    jobs: Optional[int] = None,
 ) -> dict:
     """跑全 regress (or 测试子集), 返回结构化 dict.
 
@@ -368,7 +369,11 @@ def run_all(
     passed, failed, skipped = 0, 0, 0
     failed_tests = []
 
-    workers = min(len(files), os.cpu_count() or 4)
+    # jobs=None → 原行为(全并行);传 N 则限制并发。self-hosted 二进制
+    # (jhyy_v2.exe)比 stage0 产物重 3-16x,185 路全并行时单个 compile 会
+    # 因 CPU + gcc 争抢超过硬编码的 60s 超时 —— 那不是编译器 bug,是 harness
+    # 并行度问题。--jobs 让人能把并发压下来真正跑到 self-hosted 二进制。
+    workers = min(len(files), jobs if jobs else (os.cpu_count() or 4))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(run_test, str(TEST_DIR / f), binary, timeout): f for f in files}
         results = {futures[fut]: fut.result() for fut in as_completed(futures)}

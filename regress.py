@@ -85,13 +85,14 @@ def _resolve_default_enforce(binary: str, no_baseline_check: bool) -> bool:
     return _GATED_DEFAULTS.get(binary, True)
 
 
-def _run_one(binary: str, label: str, tests, timeout, enforce_baseline_hash):
+def _run_one(binary: str, label: str, tests, timeout, enforce_baseline_hash, jobs=None):
     """Run run_all for one binary, return (result_dict, is_informational)."""
     result = run_all(
         binary=binary,
         tests=tests,
         timeout=timeout,
         enforce_baseline_hash=enforce_baseline_hash,
+        jobs=jobs,
     )
     return result
 
@@ -526,6 +527,10 @@ def main():
     ap.add_argument("--tests", default=None,
                     help="Comma-separated test names without .jhyy suffix "
                          "(e.g. 'hello,fib'). Default: all.")
+    ap.add_argument("--jobs", type=int, default=None,
+                    help="限制并发 compile 数 (default: 全并行 = min(测试数, CPU 数))。"
+                         "self-hosted 二进制比 stage0 产物重,全并行会撞 60s 硬超时 —— "
+                         "跑 self-hosted 二进制时建议 --jobs=4")
     ap.add_argument("--timeout", type=int, default=20,
                     help="Per-test timeout in seconds (default 20).")
     ap.add_argument("--no-baseline-check", action="store_true",
@@ -617,7 +622,7 @@ def main():
         for idx, (binary, label) in enumerate(binaries, 1):
             is_informational = (idx > len(_GATED_BINARIES))
             enforce = _resolve_default_enforce(binary, args.no_baseline_check)
-            result = _run_one(binary, label, tests, args.timeout, enforce)
+            result = _run_one(binary, label, tests, args.timeout, enforce, args.jobs)
             _print_matrix_row(idx, total, binary, label, result, is_informational)
             if is_informational:
                 informational_count += 1
@@ -656,7 +661,7 @@ def main():
         # Single-binary mode: explicit --binary (or default jhyy.exe)
         binary = args.binary
         enforce = _resolve_default_enforce(binary, args.no_baseline_check)
-        result = _run_one(binary, "single", tests, args.timeout, enforce)
+        result = _run_one(binary, "single", tests, args.timeout, enforce, args.jobs)
 
         # Same output as --all but for one binary (status line only, no matrix frame)
         status = "PASS" if result["ok"] else "FAIL"
