@@ -714,14 +714,28 @@ fn emit_amd64_arg_regs(state: *u8, nargs: i64, qt: i32, target_tag: i32) -> i32 
         let off = cg_offset_for_temp_with_target(atemp, target_tag);
         let is_float: i32 = if aqt == QBE_S_LOCAL() || aqt == QBE_D_LOCAL() { 1 as i32 } else { 0 as i32 };
         if is_float != (0 as i32) {
-            // XMM path:f32/f64 → xmm_arg_alloc(state, aqt) → 返 xmm reg idx
-            // 或 -1(XMM pool 满 → emit_stack_arg_push fallback)
-            let xmm_idx = xmm_arg_alloc(state, aqt);
+            // v4.0.8 (W-097 根因 3):Win target 的 XMM 分配按**参数位置**,不是
+            // float 独立计数。MS x64 ABI:XMM0-XMM3 与 RCX/RDX/R8/R9 共用同一个
+            // 位置计数 —— 第 n 个参数(1-based)若是 float 就走 XMM(n-1)。
+            // callee (emit_func_header) 一直按位置读(实测 `mix(x: i64, y: f64)`
+            // 的 y 从 %xmm1 读),caller 原来按 float 计数传 xmm0 → 双方不一致。
+            // 后果:所有「整数参数在前、float 参数在后」的调用都传错寄存器 ——
+            // printf(fmt, 3.14) 打印 0.00,jh_sprintf_f64 拿到未初始化 XMM →
+            // 浮点字面量格式化成垃圾(`d_1.1442827035977306e+243` 而不是 d_0)。
+            // SysV 保持 float 独立计数(xmm0-xmm7),那是 SysV 的正确规则。
+            let mut xmm_idx: i32 = -(1 as i32);
+            if target_is_win(target_tag) == (1 as i32) {
+                if ri < (4 as i64) {
+                    xmm_idx = ri as i32;
+                }
+            } else {
+                xmm_idx = xmm_arg_alloc(state, aqt);
+            }
             if xmm_idx >= (0 as i32) {
                 let xmm_reg = xmm_reg_name(xmm_idx);
                 let _m = sse_emit_mov_temp_to_xmm_reg(state, aqt, off, xmm_reg);
             } else {
-                // XMM pool exhausted (Win: 5+ f64 arg / SysV: 9+ f64 arg)
+                // XMM pool exhausted (Win: 位置 ≥ 5 的 f64 arg / SysV: 9+ f64 arg)
                 // stack-arg fallback
                 let _p = emit_stack_arg_push(state, aqt, off);
             }
@@ -1608,6 +1622,49 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
     let dst_id = (*t).int_val;
     let qt = (*t).qbe_type;
 
+    // v4.0.8 (W-097 根因 2):整数比较的**操作数宽度**必须来自 QBE 助记符尾字母
+    // (csgtl → 'l' = 64 位),不能用 qt(= dst.qbe_type)。QBE 规定比较结果是
+    // word(`%t =w csgtl %ta, %tb`),所以 qt 对所有比较恒为 W → 原来永远 emit
+    // `movl src1, %eax` + `cmpl src2, %eax`,64 位比较被静默截成 32 位。
+    // 后果:cg_expr NODE_INT 的 i64 大字面量 promote 判据
+    //   `(*d).value > 2147483647`
+    // 用 cmpl 比较 → 9223372036854775807 的低 32 位 = -1 → 判 false → 字面量
+    // 没 promote 到 l 槽 → emit `=w copy 9223372036854775807` + extsw
+    // (16 位截断,值全毁)→ util__FNV_OFFSET / FNV_PRIME 等常量函数出错
+    // → 全量 IL 发散。
+    // 浮点比较(csltd / cslts,尾字母 d/s)走 XMM 分支,不受这里影响。
+    let mut is_int_cmp: i32 = 0 as i32;
+    let mut cmp_op_qt: i32 = qt;
+    if op_text != (0 as *u8) && op_text_len > (0 as i64) {
+        // op_text 是整条指令原文("csgtl %t12, %t13"),助记符到第一个空格为止。
+        let mut mlen: i64 = 0 as i64;
+        while mlen < op_text_len && cg_byte_at(op_text, mlen) != (32 as i32) {
+            mlen = mlen + (1 as i64);
+        }
+        if mlen > (0 as i64) {
+            let lastc: i32 = cg_byte_at(op_text, mlen - (1 as i64));
+            if lastc == (119 as i32) || lastc == (108 as i32) {
+                if cg_find_sub(op_text, op_text_len, "cslt" as *u8, 4 as i64) >= (0 as i64)
+                    || cg_find_sub(op_text, op_text_len, "csgt" as *u8, 4 as i64) >= (0 as i64)
+                    || cg_find_sub(op_text, op_text_len, "csle" as *u8, 4 as i64) >= (0 as i64)
+                    || cg_find_sub(op_text, op_text_len, "csge" as *u8, 4 as i64) >= (0 as i64)
+                    || cg_find_sub(op_text, op_text_len, "ceq" as *u8, 3 as i64) >= (0 as i64)
+                    || cg_find_sub(op_text, op_text_len, "cne" as *u8, 3 as i64) >= (0 as i64) {
+                    is_int_cmp = 1 as i32;
+                    if lastc == (108 as i32) {
+                        cmp_op_qt = QBE_L();
+                    } else {
+                        cmp_op_qt = QBE_W();
+                    }
+                }
+            }
+        }
+    }
+    let mut src1_qt: i32 = qt;
+    if is_int_cmp != (0 as i32) {
+        src1_qt = cmp_op_qt;
+    }
+
     let _c = emit_comment(state, "emit_binop: add/sub/mul/div/mod via %rax (per L4 § 3.5 E8) [v2.11.2: cast 真修 T1-c + '-' drop T2-a]" as *u8);
 
     // v2.11.3 (W-074.7 T4-b SCOPE DOWN):真修 (parse src1/src2 from op_text) deferred
@@ -1709,7 +1766,8 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
     }
 
     // movl/q -src1(%rbp), %rax → 用 reg_rax_for_qt 选 %eax / %rax (GAS 拒绝 movl ..., %rax)
-    let _m1 = emit_mov_temp_to_reg(state, qt, src1_off, reg_rax_for_qt(qt) as *u8);
+    // v4.0.8:整数比较用 src1_qt (= 助记符尾字母宽度),其余 op 仍用 qt。
+    let _m1 = emit_mov_temp_to_reg(state, src1_qt, src1_off, reg_rax_for_qt(src1_qt) as *u8);
 
     // 注:mod 特殊处理(sign-extend %rax → %rdx:%rax)在下面的 if-chain 里
     //   跟 idiv 一起做;不前置(cqto/cltd 必须在 idiv 之前)。
@@ -1858,13 +1916,22 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
             // 'and' 含 'a' 但 'add' 子串在 pos 0 (op name + args: "and %tA, %tB"
             // 中 'and' 在 pos 0,'add' 不会 match — 但要保险)。
             is_and = 1 as i32;
-        } else if cg_find_sub(op_text, op_text_len, "or" as *u8, 2 as i64) >= (0 as i64) {
-            // v2.11.12: 'or' (QBE integer bitwise OR) — x86 "orl" / "orq"。
-            // 注意 'or' 必须 check 在 'xor' 之前 (xor 包含 or substring)。
-            is_or = 1 as i32;
         } else if cg_find_sub(op_text, op_text_len, "xor" as *u8, 3 as i64) >= (0 as i64) {
             // v2.11.12: 'xor' (QBE integer bitwise XOR) — x86 "xorl" / "xorq"。
+            // v4.0.8 (W-097 根因):'xor' 必须 check 在 'or' **之前**。'xor' 含 'or'
+            // 子串(x-o-r),原来 'or' 先判 → 'xor' 永远命中 is_or 分支,emit 出
+            // `orq reg, -1` 而不是 `xorq reg, -1`。jhyy 源码唯一的 xor 来源是
+            // `~expr`(cg_expr NODE_UNARY TOKEN_TILDE → xor(expr, -1)),所以
+            // `~x` 恒等于 -1。
+            // 连锁后果:sema 结构体布局的 align-up `(offset + al - 1) & ~((al-1))`
+            // 掩码退化成 -1 → 字段偏移变成 `al - 1` 累积(i64 → 7/22/37,
+            // sizeof → 22/37/52),全量 IL 发散 → v2 ≠ v3。
+            // 原注释「'or' 必须 check 在 'xor' 之前 (xor 包含 or substring)」
+            // 把因果写反了 —— 正是这个顺序造成误判。
             is_xor = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "or" as *u8, 2 as i64) >= (0 as i64) {
+            // v2.11.12: 'or' (QBE integer bitwise OR) — x86 "orl" / "orq"。
+            is_or = 1 as i32;
         } else if cg_find_sub(op_text, op_text_len, "shl" as *u8, 3 as i64) >= (0 as i64) {
             // v2.11.12: 'shl' (QBE unsigned shift left) — x86 "shll" / "shlq"。
             // x86 shl = sal (same opcode); 用 shll/shlq 配 QBE convention。
@@ -2194,17 +2261,17 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         // 设 csltw %t1, %t2 → flag 配 setl("src1 < src2" signed)。
         let cc: *u8 = if is_cslt != (0 as i32) { "l" as *u8 } else { if is_csgt != (0 as i32) { "g" as *u8 } else { if is_csle != (0 as i32) { "le" as *u8 } else { if is_csge != (0 as i32) { "ge" as *u8 } else { if is_ceq != (0 as i32) { "e" as *u8 } else { "ne" as *u8 } } } } };
         let _c1 = sb_append_cstr(arena, s, "\tcmp" as *u8);
-        let _c1s = sb_append_cstr(arena, s, size_suffix_for_qt(qt));
+        let _c1s = sb_append_cstr(arena, s, size_suffix_for_qt(cmp_op_qt));
         let _c2 = sb_append_cstr(arena, s, " " as *u8);
         if src2_is_imm != (0 as i32) {
             let _c3i = sb_append_cstr(arena, s, "$" as *u8);
             let _c3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
             let _c4 = sb_append_cstr(arena, s, ", %" as *u8);
-            let _c5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+            let _c5 = sb_append_cstr(arena, s, reg_rax_for_qt(cmp_op_qt));
         } else {
             let _c3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
             let _c4 = sb_append_cstr(arena, s, "(%rbp), %" as *u8);
-            let _c5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
+            let _c5 = sb_append_cstr(arena, s, reg_rax_for_qt(cmp_op_qt));
         }
         let _c6 = sb_append_cstr(arena, s, "\n" as *u8);
         let _s1 = sb_append_cstr(arena, s, "\tset" as *u8);

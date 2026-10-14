@@ -349,25 +349,21 @@ fn cg_record_temp_slot(state: *u8, temp_id: i64, slot: i64) -> i32 {
     // even when no-op (Option A diagnostic). post-write logs the actual write
     // so we can confirm recorded slot matches caller-provided slot.
     if temp_id >= (1024 as i64) {
-        let _l_pre = jh_dbg_log2("rcs_pre" as *u8, -(1 as i64), temp_id, slot, -(1 as i64));
     }
     if temp_id < (0 as i64) || temp_id >= cg_max_temp_slots() {
         if temp_id >= (1024 as i64) {
-            let _l_oob = jh_dbg_log2("rcs_oob" as *u8, -(1 as i64), temp_id, slot, cg_max_temp_slots());
         }
         return 0 as i32;
     }
     let s = state as *CGState;
     if (*s).temp_slot_for_id == (0 as *u8) {
         if temp_id >= (1024 as i64) {
-            let _l_null = jh_dbg_log2("rcs_null" as *u8, -(1 as i64), temp_id, slot, -(1 as i64));
         }
         return 0 as i32;
     }
     let p = ptr_add_u8((*s).temp_slot_for_id, temp_id * (8 as i64)) as *i64;
     *p = slot;
     if temp_id >= (1024 as i64) {
-        let _l_ok = jh_dbg_log2("rcs_ok" as *u8, (*s).cur_fn_idx, temp_id, slot, -(1 as i64));
     }
     return 0 as i32;
 }
@@ -590,8 +586,6 @@ fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
     let s = state as *CGState;
     // v4.0.4 Step 1 (W-101 RCA): log cur_fn_idx before reset + table sizes that
     // will be zeroed, to detect Option C (reset clobber between record/lookup).
-    let _l_pre = jh_dbg_log2("rst_pre" as *u8, (*s).cur_fn_idx, (*s).fn_count,
-                              cg_max_temp_slots(), cg_max_temp_holds_address());
     (*s).value_next_offset = 0 as i64;
     (*s).addr_next_offset = 0 as i64;
     (*s).total_alloc = 0 as i64;
@@ -668,8 +662,6 @@ fn cg_state_reset_for_function(state: *u8, fn_name: *u8) -> i32 {
     // v4.0.4 Step 1 (W-101 RCA): log cur_fn_idx after reset (note: NOT bumped here,
     // bump is in emit_func_header tail). If pre/post log same idx, table zero is
     // intra-fn — fine. If different, reset races with emit_func_header bump.
-    let _l_post = jh_dbg_log2("rst_post" as *u8, (*s).cur_fn_idx, (*s).fn_count,
-                               cg_max_temp_slots(), -(1 as i64));
     // alloc_init_off / addr_holder_init_off are NOT reset here — they are
     // per-fn-invariant (computed once by emit_func_header) and zeroed only in
     // cg_state_init. Both pool heads were already zeroed at the top of this fn.
@@ -820,8 +812,6 @@ fn cg_local_t_from_global(global_t: i64) -> i64 {
         let st_p_e = jh_cgstate_get_state();
         if st_p_e != (0 as *u8) {
             let st_e = st_p_e as *CGState;
-            let _l = jh_dbg_log2("ltg_pre" as *u8, (*st_e).cur_fn_idx, global_t,
-                                 (*st_e).fn_count, -(1 as i64));
         }
     }
     if global_t < (0 as i64) {
@@ -871,14 +861,14 @@ fn cg_local_t_from_global(global_t: i64) -> i64 {
     let bp = ptr_add_u8((*st).per_fn_base_t, idx * (8 as i64)) as *i64;
     let base_t = *bp;
     let local_t = global_t - base_t;
+    if global_t < (64 as i64) {
+    }
     if local_t < (0 as i64) {
         if global_t >= (1024 as i64) {
-            let _l = jh_dbg_log2("ltg_neg" as *u8, (*st).cur_fn_idx, global_t, base_t, local_t);
         }
         return 0 as i64;
     }
     if global_t >= (1024 as i64) {
-        let _l = jh_dbg_log2("ltg_out" as *u8, (*st).cur_fn_idx, global_t, base_t, local_t);
     }
     return local_t;
 }
@@ -935,7 +925,6 @@ fn cg_offset_for_temp_with_target(t: i64, target_tag: i32) -> i64 {
     };
     if t < (0 as i64) {
         if t >= (1024 as i64) {
-            let _l = jh_dbg_log2("oftt_neg" as *u8, cur_fni, t, -(1 as i64), -(1 as i64));
         }
         return 0 as i64;
     }
@@ -946,7 +935,6 @@ fn cg_offset_for_temp_with_target(t: i64, target_tag: i32) -> i64 {
         let recorded2 = *p2;
         if recorded2 != (0 as i64) {
             if t >= (1024 as i64) {
-                let _l = jh_dbg_log2("oftt_rec" as *u8, cur_fni, t, recorded2, (1 as i64));
             }
             return recorded2;
         }
@@ -954,7 +942,6 @@ fn cg_offset_for_temp_with_target(t: i64, target_tag: i32) -> i64 {
     let spill_off = regalloc_query_spill_off_no_arr(t);
     if spill_off != (0 as i64) {
         if t >= (1024 as i64) {
-            let _l = jh_dbg_log2("oftt_spl" as *u8, cur_fni, t, spill_off, (2 as i64));
         }
         return spill_off;
     }
@@ -973,7 +960,6 @@ fn cg_offset_for_temp_with_target(t: i64, target_tag: i32) -> i64 {
         } else {
             (4 as i64)
         };
-        let _l = jh_dbg_log2("oftt_fm" as *u8, cur_fni, t, local_t2, result_off);
         let _ = tag;
     }
     return result_off;
@@ -1014,7 +1000,21 @@ fn cg_alloc_slot(state: *u8, size: i64, is_addr: i32) -> i64 {
         return off;
     }
     if (*s).value_next_offset == (0 as i64) {
-        (*s).value_next_offset = (0 as i64) - (8192 as i64);
+        // v4.0.8 (W-097 根因):value pool 必须从 alloc_init_off(= 公式池末端)
+        // 往下长,不能硬编码 -8192。-8192 只在 local_max ≤ 1015 时才落在公式池
+        // 之外;cg_expr 的 local_max ≈ 27564(公式槽到 -220544),alloc 池从 -8192
+        // 往下长到 -28328 —— 与公式槽区间 [-28328, -8192] **完全重叠**。
+        // 机械审计:cg_expr 单函数 13,704 个非-alloc 槽落在 alloc 池区间里,
+        // 包括 cg_expr 自己的 `inner` 局部(-12824)被某个 alloc8 32 覆盖,
+        // 于是 `~expr` 的 IRVal 按值传参拿到垃圾(id 变 687 而非 22559)。
+        // 连锁后果:sema 结构体布局的 `al` / `offset` 局部同样被踩,
+        // `(offset + al - 1) & ~((al-1))` 掩码失效 → 字段偏移变成 `al - 1`
+        // 累积(i64 → 7/22/37,sizeof → 22/37/52),全量 IL 发散。
+        let mut vbase: i64 = (*s).alloc_init_off;
+        if vbase == (0 as i64) {
+            vbase = (0 as i64) - (8192 as i64);
+        }
+        (*s).value_next_offset = vbase;
     }
     let off = (*s).value_next_offset - aligned;
     (*s).value_next_offset = off;
@@ -1116,6 +1116,39 @@ fn cg_get_ret_type_map_n(state: *u8) -> i64 {
 //
 // Returns 1 iff name (with len) matches one of the builtin pointer-returning
 //   functions, 0 otherwise.
+// cg_is_ptr_ret_extern - 返回指针的 extern 白名单(v4.0.8 W-097 根因 4)。
+//
+// emit_load 的 fallback 分支是「把 src 槽的值拷到 dst」,只有在 src temp 被
+// 标成 address-holder 时才走 indirect 读(`movq -src(%rbp), %r8; mov (%r8), %rax`)。
+// call 返回值的 address-holder 标记由 cg_query_fn_returns_ptr 决定,而它只查
+//   (a) sema ret_type_map - 只装 module 内 NODE_FUNC_DECL,**extern 无函数体不装**
+//   (b) cg_is_builtin_ptr_fn 白名单 - 只有 ptr_add/ptr_add_u8/ptr_sub/malloc
+// `jh_cgstate_get_state` / `arena_alloc` 等 extern 两条路都落空 -> 返回 temp 没标记
+// -> `%t447 =l add %t446, 104` 派生地址也没标记 -> `%t448 =l loadl %t447`
+// 走 fallback 把**地址**当成值拷过去。
+// 后果实测:cg_local_t_from_global 读到 `st+104` 而不是 1 -> cur_fn_idx 变 1.6e12
+// -> `idx >= 1024` 提前 return -> per-fn 翻译全失效 -> 所有公式槽偏移错位。
+// stage0(C 编译器)是独立实现不走这条路径,所以只有 jhyy_v2.exe 中招。
+fn cg_is_ptr_ret_extern(name: *u8, name_len: i64) -> i32 {
+    if name_len == (11 as i64) && memcmp(name, "arena_alloc" as *u8, 11 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (5 as i64) && memcmp(name, "fopen" as *u8, 5 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (28 as i64) && memcmp(name, "jh_cgstate_get_holds_address" as *u8, 28 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (20 as i64) && memcmp(name, "jh_cgstate_get_state" as *u8, 20 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (25 as i64) && memcmp(name, "jh_cgstate_get_temp_slots" as *u8, 25 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (11 as i64) && memcmp(name, "jh_fopen_wb" as *u8, 11 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (9 as i64) && memcmp(name, "jh_getenv" as *u8, 9 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (11 as i64) && memcmp(name, "jh_path_gcc" as *u8, 11 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (15 as i64) && memcmp(name, "jh_path_helpers" as *u8, 15 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (11 as i64) && memcmp(name, "jh_path_qbe" as *u8, 11 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (15 as i64) && memcmp(name, "jh_path_runtime" as *u8, 15 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (15 as i64) && memcmp(name, "jh_regalloc_get" as *u8, 15 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (17 as i64) && memcmp(name, "jh_run_get_output" as *u8, 17 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (6 as i64) && memcmp(name, "memcpy" as *u8, 6 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (6 as i64) && memcmp(name, "memset" as *u8, 6 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (7 as i64) && memcmp(name, "realloc" as *u8, 7 as i64) == (0 as i32) { return 1 as i32; }
+    if name_len == (7 as i64) && memcmp(name, "strrchr" as *u8, 7 as i64) == (0 as i32) { return 1 as i32; }
+    return 0 as i32;
+}
 fn cg_is_builtin_ptr_fn(name: *u8, name_len: i64) -> i32 {
     // v4.0.7 (W-097): 改用 memcmp,不再逐字节 cg_byte_at ——
     // 后者要求 ptr_add_u8 的返回 temp 已标 address-holder,与被查询对象循环依赖。
@@ -1168,6 +1201,7 @@ fn cg_query_fn_returns_ptr(state: *u8, name: *u8, name_len: i64) -> i32 {
     if jh_name_ends_with(name, name_len, "ptr_add" as *u8, 7 as i64) != (0 as i32) { return 1 as i32; }
     if jh_name_ends_with(name, name_len, "ptr_sub" as *u8, 7 as i64) != (0 as i32) { return 1 as i32; }
     if jh_name_ends_with(name, name_len, "malloc" as *u8, 6 as i64) != (0 as i32) { return 1 as i32; }
+    if cg_is_ptr_ret_extern(name, name_len) != (0 as i32) { return 1 as i32; }
     let map = (*s).ret_type_map;
     let n = (*s).ret_type_map_n;
     // Map lookup — linear scan over RetTypeMapEntry array
@@ -1948,11 +1982,7 @@ fn cg_state_bump_fn_idx(state: *u8) -> i64 {
     let s = state as *CGState;
     let cur = (*s).cur_fn_idx;
     // v4.0.4 Step 1 (W-101 RCA): log pre/post bump to detect any per-fn zero race.
-    let _l_pre = jh_dbg_log2("bfi_pre" as *u8, cur, (*s).fn_count,
-                              cg_max_temp_slots(), -(1 as i64));
     (*s).cur_fn_idx = cur + (1 as i64);
-    let _l_post = jh_dbg_log2("bfi_post" as *u8, (*s).cur_fn_idx, (*s).fn_count,
-                               cg_max_temp_slots(), cur);
     return cur;
 }
 
