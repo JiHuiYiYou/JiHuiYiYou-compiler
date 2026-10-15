@@ -27,20 +27,97 @@
 |----|------|------|
 | [W-001](#w-001) | RESOLVED | hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错 |
 | [W-002](#w-002) | RESOLVED | main.jhyy 重命名绕 jhyy_v1 hash_string 堆损坏 |
+| [W-003](#w-003) | RESOLVED | jhyy_v1 `let _ = fncall(...)` 顶层 / 嵌套 segfault →... |
 | [W-004](#w-004) | RESOLVED | short local var (≤4 chars) → symtab hash 撞 →... |
 | [W-005](#w-005) | RESOLVED | `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕... |
 | [W-006](#w-006) | RESOLVED | jhyy_v1 `return x ± y` 两 1-char var 发 127（QBE... |
+| [W-007](#w-007) | RESOLVED | jhyy_v1 `fn() -> i64 { return X as i64; }` emit... |
 | [W-008](#w-008) | RESOLVED | jhyy_v1 cg_find_field_offset 双层 deref 漏（i64... |
 | [W-009](#w-009) | RESOLVED | jhyy_v1 cg_convert_arg src_t==0 早 bail，导致 literal... |
 | [W-010](#w-010) | RESOLVED | jhyy-端 MAX_LOCALS=512 vs C-端 1024 → cg_add_local... |
+| [W-011](#w-011) | RESOLVED | inline_imports emit module 全量重复（Stage 2 设计缺陷）—... |
+| [W-012](#w-012) | RESOLVED | codegen emit-layer sentinel pollution —... |
+| [W-013](#w-013) | RESOLVED | C-side cg_expr NODE_CAST w/l → b/h narrowing emit... |
+| [W-014](#w-014) | RESOLVED | `jhyy_selfhost_check` MCP pre-stage cleanup... |
+| [W-015](#w-015) | RESOLVED | `NODE_SIZEOF` 节点 arena 分配 8 字节 → sema const-fold... |
+| [W-016](#w-016) | RESOLVED | 8 字节 enum 参数 ABI mismatch — caller 用 `l` (slot)... |
+| [W-017](#w-017) | RESOLVED | jhyy 顶层 `let mut *u8 = 0` codegen 常量折叠 → 全局状态失效 |
+| [W-018](#w-018) | RESOLVED | v1.4.2 DWARF emit 引入 Stage 1 .il 字节差异 (非功能) |
+| [W-019](#w-019) | RESOLVED | codegen 嵌套 struct `(o).inner.a` emit `loadsw` 类型错 |
+| [W-020](#w-020) | RESOLVED | jhyy-side `parser.jhyy` parse_pattern... |
+| [W-021](#w-021) | RESOLVED | WiX 7 CLI `-ext` name 查找失败 — `-ext... |
 | [W-022](#w-022) | SUPERSEDED | Windows PowerShell 5.1 `Out-File -Encoding utf8`... |
 | [W-023](#w-023) | SUPERSEDED | MSYS2 bash step 里 `${VAR}` 不展开 `${{ env.X }}` GH... |
 | [W-024](#w-024) | SUPERSEDED | PowerShell 5.1 `Set-Content` / `Out-File` 写 UTF-8... |
 | [W-026](#w-026) | RESOLVED | regress.py `[:80]` stderr 截断隐藏真实 QBE/gcc 错误 |
+| [W-027](#w-027) | RESOLVED | GH Actions `setup-msys2@v2` 把 MSYS2 装在... |
 | [W-029](#w-029) | SUPERSEDED | jhyy.exe toolchain 探测收敛 — `jh_gcc_path()` 4-tier... |
+| [W-028](#w-028) | RESOLVED | Windows process exit code 是 8-bit (mod 256),... |
+| [W-030](#w-030) | RESOLVED | WiX 4 Theme.xml schema — Font 必须在 `<Theme>` 顶层... |
+| [W-031](#w-031) | RESOLVED | MSI LaunchCondition + INSTALLDIR resolution — 原探测... |
+| [W-033](#w-033) | RESOLVED | Theme.xml XML 1.0 well-formedness + WiX 4 thmutil... |
+| [W-034](#w-034) | RESOLVED | cmd_run system() — 用 jh_fullpath 解析绝对路径绕 cmd.exe... |
+| [W-035](#w-035) | RESOLVED | jh_paths_init 布局检测 — installer 布局 vs source-tree... |
+| [W-038](#w-038) | RESOLVED | cmd.exe /C 不处理带空格 path — CreateProcessA 替代... |
+| [W-039](#w-039) | RESOLVED | CreateProcessA 同样 unquoted-token 切错 — caller 显式... |
+| [W-040](#w-040) | RESOLVED | link_with_gcc 也需 quote path args (asm_path /... |
+| [W-041](#w-041) | RESOLVED | VSCode Code Runner 集成 — installer 自动装 extension +... |
+| [W-042](#w-042) | RESOLVED | link_with_gcc 失败只打 "gcc link failed" — 缺... |
+| [W-043](#w-043) | RESOLVED | MSI 漏装 runtime.c + jhyy_helpers.c → install 后... |
+| [W-044](#w-044) | RESOLVED | MSI 漏装 runtime.h → install 后 `fatal error:... |
+| [W-045](#w-045) | RESOLVED | link_with_gcc 失败时 gcc 实际 stderr 不可见 — 用户只见 "gcc... |
+| [W-048](#w-048) | RESOLVED | link_with_gcc 在 PowerShell + 中文文件名 silent fail —... |
+| [W-051](#w-051) | RESOLVED | MSI deferred ExeCommand CustomAction type 34 在本机... |
+| [W-052](#w-052) | RESOLVED | match 字面量范围模式 `1..10` 两侧 parser + codegen 都漏... |
+| [W-053](#w-053) | RESOLVED | 字符字面量转义不全 (`\n \t \r \0` 之外 escape) 以及 `\xHH` 漏解码 |
+| [W-054](#w-054) | RESOLVED | sizeof IL 未定义 `%t0` — 真因是 `qbe_type_of` 撞 data... |
+| [W-055](#w-055) | RESOLVED | spec §9.5 指针算术 `p + 1` 整节未实现 |
+| [W-056](#w-056) | RESOLVED | 多字节 UTF-8 char literal + char type `u8 → i32`... |
+| [W-057](#w-057) | RESOLVED | UTF-8 3-byte / 4-byte codepoint 显式 lex reject (推... |
+| [W-058](#w-058) | RESOLVED | vendor QBE (2026-08-15 build) 不支持 `remd` / `rems`... |
+| [W-083](#w-083) | RESOLVED | V3 self-backend 不支持 QBE IL conversion ops (lexer... |
+| [W-086](#w-086) | RESOLVED | V3 self-backend ILToken 字段数根本不足 (dst/lhs/rhs... |
+| [W-059](#w-059) | RESOLVED | defer codegen path silent crash (v1.3.6 ship 后 0... |
+| [W-060](#w-060) | INVALID | enum variant payload ABI mismatch (Mixed::I(1234)... |
+| [W-061](#w-061) | INVALID | nested struct field offset bug (Outer { tag,... |
+| [W-062](#w-062) | RESOLVED | VSCode UserChoice hijack + MSYS2 OpenWithProgids... |
+| [W-063](#w-063) | RESOLVED | 短名 enum 模式匹配 `Some(v) => v` bind, codegen 传错 type... |
+| [W-064](#w-064) | RESOLVED | run_qbe 失败只打 `QBE failed: ...` 缺 stderr 捕获, QBE... |
+| [W-065](#w-065) | RESOLVED | `jhyy run` 不预检 `fn main_jhyy` — 库 snippet 报... |
+| [W-066](#w-066) | RESOLVED | post-425970d refactor 漏改 jhyy-compiler.wxs:622 —... |
+| [W-067](#w-067) | RESOLVED | release.yml vs build.ps1 重复 strip-to-3 逻辑 → drift... |
+| [W-068](#w-068) | RESOLVED | v1.8.3 Burn bundle 双击闪退 — `Theme.xml`... |
+| [W-071](#w-071) | RESOLVED | 自写后端 codegen_amd64 模块未 e2e 验证 — v2.6.x 阶段 ship 但... |
+| [W-069](#w-069) | RESOLVED | jhyy.exe 编译产物 corrupt / ld exit 5 — stage0 build... |
 | [W-072](#w-072) | RESOLVED | 0f9c923 merge artifact + codegen_amd64.jhyy 重复 fn... |
-| [W-097](#w-097) | RESOLVED | emit_func_header per_fn_max lookup + 6 个 emit 根因 → 自举闭环达成 |
-| [W-102](#w-102) | RESOLVED | address-holder 池与 alloc 池重叠 → self-hosted 编译器泛型 SEGV | |
+| [W-073](#w-073) | RESOLVED | QBE IL emit escape + lexer `next_token_data_string... |
+| [W-074](#w-074) | RESOLVED | runtime.c 24B Arena 死代码声明 (4 fn + Arena struct) |
+| [W-075](#w-075) | RESOLVED | std::mem mem_set 用 i32 store 而非 byte store (M0 简化) |
+| [W-076](#w-076) | RESOLVED | std::arena test inline 副本用 std_* 前缀避 runtime.c... |
+| [W-074.6](#w-074.6) | RESOLVED | jhyy.exe 编 src0/main.jhyy 自举 .s 截断 / multifn... |
+| [W-087](#w-087) | RESOLVED | V3 self-backend emit_func_header frame size 不含... |
+| [W-088](#w-088) | RESOLVED | V3 self-backend caller-side store-pointer temp... |
+| [W-089](#w-089) | RESOLVED | V3 self-backend emit_call 不 flag l-typed call... |
+| [W-090](#w-090) | RESOLVED | V3 self-backend temp_holds_address bitmap 256... |
+| [W-091](#w-091) | RESOLVED | V3 self-backend emit_call `std_` 前缀 whitelist 缺 →... |
+| [W-092](#w-092) | RESOLVED | V3 self-backend bitmap 1024 暴露 big_test... |
+| [W-093](#w-093) | RESOLVED | V3 self-backend bitmap 1024 → 4096 真修 big_test 1... |
+| [W-094](#w-094) | RESOLVED | V3 self-backend alloc-tracking slot table bound... |
+| [W-095](#w-095) | RESOLVED | V3 self-backend emit_load's dst result temp 不... |
+| [W-096](#w-096) | RESOLVED | per-fn-local temp_id counter → emit slot offset 用... |
+| [W-097](#w-097) | RESOLVED | jhyy-side codegen emit_func_header per_fn_max... |
+| [W-098](#w-098) | RESOLVED | jhyy-side codegen emit i64 literal (>32-bit... |
+| [W-100](#w-100) | RESOLVED | emit_call sret 路径无条件 `movl %eax, -<slot>(%rbp)`... |
+| [W-101](#w-101) | RESOLVED | emit_binop ceqw dst_id 走 existing local... |
+| [W-085](#w-085) | RESOLVED | codegen small-frame fn(*T, i32, i32) 第 3 i32 参数... |
+| [W-102](#w-102) | RESOLVED | address-holder 池与 alloc 池槽位重叠 → self-hosted... |
+| [W-103](#w-103) | ACTIVE | std/os.jhyy 全部 I/O 与 exit 是 M0 mock — W-079 的... |
+| [W-104](#w-104) | ACTIVE | SysV ABI 参数分类调用 Win 分类器 — 正确的分类器就在同文件,没接线 |
+| [W-105](#w-105) | ACTIVE | check_borrow 是硬编码 return 1 — `&mut` 独占性完全不检查 |
+| [W-105.1](#w-105.1) | ACTIVE | check_cap_pass 同款空 stub,当前无调用点(死代码但签名在 API 面上) |
+| [W-106](#w-106) | ACTIVE | symtab_lookup_one 用 arena-touch 强制 codegen... |
+| [W-107](#w-107) | ACTIVE | 五个 per-fn pre-scan 表硬编码 1024 上限 — 距触发只剩 33 个函数 |
+| [W-108](#w-108) | RESOLVED | 索引重建脚本静默丢弃 59/89 条目 —— STATUS_RE 不容忍 前缀,且只匹配 H2 |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -5431,8 +5508,27 @@ cmd_compile (main.jhyy)
 
 ### W-074.6: jhyy.exe 编 src0/main.jhyy 自举 .s 截断 / multifn silent fail (3 sub-bug RCA)
 
-**状态:** DEFERRED since 2026-10-08 (v4.0.2.1 wip — partial 真修 3/3 jhyy.exe Stage 1; jhyy_v3.exe Stage 2 frame blow-up 待新 W-NNN, 仍 ACTIVE in Stage 2 path)
-**日期:** 2026-09-15 (V3.1.0 first surface) → 2026-10-08 (v4.0.2.1 sub-bug #3 partial: sema hash mismatch 真修 jhyy.exe Stage 1)
+**状态:** RESOLVED closed 2026-10-15 (v4.0.8) — 3 sub-bug 全真修;DEFERRED 所等的 W-096 / W-097 均已 RESOLVED,Stage 2 无残留症状
+**Filed-by:** audit-fanout-2026-10-15
+**日期:** 2026-09-15 (V3.1.0 first surface) → 2026-10-15 (v4.0.8:状态行 audit 修正为 RESOLVED)
+
+**Resolution (2026-10-15 audit 修正):** 本 entry 原为 `DEFERRED since 2026-10-08`,
+caption 里的两个未决条件现已全部落地 ——
+
+| DEFERRED 时点写下的待办 | 落地于 |
+|---|---|
+| sub-bug #1/#2/#3 在 jhyy.exe Stage 1 的真修 | v4.0.2.1(见下三个 Sub-bug 段各自的「真修」) |
+| "jhyy_v3.exe Stage 2 frame blow-up 待新 W-NNN, 仍 ACTIVE in Stage 2 path" | 该 W-NNN = **W-096**(2026-10-08 RESOLVED)与 **W-097**(2026-10-15 RESOLVED) |
+
+Stage 2 的 frame blow-up 症状已被真门验证不再复现:`closure_check.sh` PASS,
+Stage2 `.s` 与 Stage3 `.s` byte-identical(11,029,078 B,sha `da78987c`)。
+若 W-074.6 描述的 0-byte `.s` / 缺 `main_jhyy:` label / multifn silent fail
+仍存在,这两个 sha 不可能相等。
+
+**注意(留给下一个读这条的人):** 本 entry 从 DEFERRED 翻 RESOLVED 靠的是
+「阻塞项已被别的 W-NNN 解决」,不是「在这条 entry 下重跑验证」。W-074.6 的
+三个 Sub-bug 各自有自己的验证记录,Stage 2 的验证记录在 W-096 / W-097 里。
+
 
 **触发面:** jhyy.exe 编 `compiler/src0/main.jhyy` (28-fn + ~3.2 MB emit .il) → 之前: jh_paths_init 后无明确错误,但 `.s` 0-byte / 关键 fn label (如 `main_jhyy:`) 缺失 / 后续 codegen slot corruption。
 
@@ -6217,13 +6313,13 @@ regress jhyy_v2.exe → 163/163 PASS + 22 SKIP  ← self-hosted 编译器
 **workaround:** 无 — Stage 2 closure (`jhyy_v2.exe.exe` / `jhyy_v3.exe.exe`) 自身 broken,任何 self-compile 都 SEGV。Stage 1 (`jhyy.exe` C-side compiled) 正常 159/160 PASS HOLD,regress 不受影响。
 
 **影响范围:**
-- Stage 2 closure chain (D43 N≥3 byte-equal `jhyy.exe → jhyy_v2.exe.exe → jhyy_v3.exe.exe → ...`) — 卡 W-097 + W-074.6 同根因
-- v4.0.0 final promote gate: W-074.6 闭环仍卡 W-097 (推 v4.0.2.3+ 真修 jhyy-side codegen)
+- Stage 2 closure chain (D43 N≥3 byte-equal `jhyy.exe → jhyy_v2.exe.exe → jhyy_v3.exe.exe → ...`) — ~~卡 W-097 + W-074.6 同根因~~ **2026-10-15 已解除**:`closure_check.sh` PASS,Stage2 `.s` == Stage3 `.s`
+- ~~v4.0.0 final promote gate: W-074.6 闭环仍卡 W-097~~ **2026-10-15 已解除**,见顶部 RESOLVED section 的六个 emit 根因
 - regress 影响: 0 (Stage 1 C-side 不受影响,W-096 fix 4 revert 后 baseline 159/160 HOLD)
 
-**失效条件:** jhyy-side codegen `emit_func_header` 处理 multi-field-access 表达式 (ptr_add_u8 跟 `(field - N) * 8` 组合) 真修 — 需要 separate deep W-NNN+ entry 跟踪 (RCA 路径: 检查 jhyy-side codegen 怎么 emit field access 跟 binary expression 的 operand order)。
+**失效条件:** ~~jhyy-side codegen `emit_func_header` 处理 multi-field-access 表达式真修~~ **已于 2026-10-15 达成**,实际根因是六个独立 emit 缺陷而非单一 multi-field-access 问题,逐条见顶部 RESOLVED section。
 
-**superseder:** N/A (DEFERRED — 待 v4.0.2.5 启动 jhyy-side codegen 真修 sprint)
+**superseder:** N/A
 
 **Scope expansion 2026-10-09 (audit expansion):**
 W-097 audit checklist (`docs/audit/w-097-emit-audit-checklist.md`) 原始列 3 sites in `emit_ctrl` (line 519/529/551)。Re-audit grep `* (8 as i64)` ptr_add_u8 patterns 跨 src0/ surface **25 sites** in 10 files with multi-step arithmetic (`(var - N) * 8`):
@@ -6753,6 +6849,13 @@ V2 v4.0.0 bench.sh nqueens 期间 4 个 reproducer 拆解 + assembly dump RCA �
 
 **Resolution (2026-09-28 v3.2.3.1)**: QBE 已 `6ae2d7c` git rm (v3.1.0/Ph.3, self-backend sole production path)。W-079 mixed-args QBE bug 跟 zero-extend 都被 W-080 superseder 解决:见 W-080 entry。
 
+**更正 (2026-10-15 audit):上面这段 Resolution 只覆盖了 workaround 的一半。**
+W-079 的 workaround 实际有两半 —— (a) std_io 改走 single-type-pointer externs,
+(b) std_os 用 M0 stubs。W-080 真修的是 (a) 加上 zero-extend;**(b) 从来没被动过**,
+`compiler/src0/std/os.jhyy:69-144` 至今全是 mock(`std_os_exit` 甚至不退出进程)。
+本 entry 的 ✅ 状态把 (b) 一起盖住了。已另立 **W-103** 承接 (b),请到 W-103 看
+当前真实状态 —— 不要因为本条是 ✅ 就认为 std::os 是真实现。
+
 ### W-080: self-backend i32 return zero-extend missing + std_io_print M0 stub (v3.2.3.1 真修)
 
 | 字段 | 值 |
@@ -6829,3 +6932,309 @@ closure_check.sh                  PASS
 **为什么值得单独立一条:** `v2 == v3` 的闭环**只证明编译器自洽,不证明它正确**。
 今天这条 bug 就是闭环全绿的情况下,由「拿 self-hosted 编译器跑一遍全量回归」
 暴露出来的 —— 自举编译器自己编自己永远一致,但它可以一致地错。
+
+<a id="w-103"></a>
+## W-103: std/os.jhyy 全部 I/O 与 exit 是 M0 mock — W-079 的 std_os 一半从未解除
+
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — std_os_open/close/read/write 不做真实 I/O,std_os_exit 不退出;W-079 标 RESOLVED 遮蔽了它
+**Backfilled:** 2026-10-15 (W-079 workaround 的 std_os 一半 / v3.2.3 起)
+**Filed-by:** audit-fanout-2026-10-15
+**日期:** 2026-09-26 (v3.2.3 W-079 引入 M0 stub) → 至今
+
+**触发面:** `compiler/src0/std/os.jhyy:69-144` — `std_os_open` / `std_os_close` /
+`std_os_read` / `std_os_write` / `std_os_exit` 五个函数全部是 M0 mock。
+
+**症状:**
+- `std_os_open` 只校验入参(path==0 / flags<0 / mode<0 / mode>0777 → -1),
+  校验通过**恒返回 fd=42**,从不调用 `open(2)`
+- `std_os_read` / `std_os_write` 校验通过**恒返回 `n`**(声称读/写了 n 字节),
+  `buf` 内容不读不写,文件描述符无效也照样「成功」
+- `std_os_exit(code)` 只 `let _ignore = code; return;` —— **进程不退出**,
+  函数 docstring 写的 "never returns" 是假的
+- 连带:`compiler/tests/examples/std_os_basic.jhyy:20` 是这些 stub 的 **inline 副本**,
+  regress 里那个 PASS 验的是副本,不是 `std/os.jhyy` 里的真身
+
+**根因:**
+W-079(QBE amd64_win mixed `(l,w,w)` extern args bug)的 workaround 一半是
+「Phase 1 std_io 用 single-type-pointer externs」,另一半是「Phase 1 std_os 用
+M0 stubs」。W-079 在 2026-09-28 翻 RESOLVED,其 Resolution 只声明 mixed-args 与
+zero-extend 两件事由 W-080 解决;W-080 实际只动了 `std/io.jhyy`(print /
+print_err)和 `emit_call` 的 zero-extend。**stdio 那半修了,std_os 那半没人动过,
+但 W-079 的 ✅ 把整个 workaround 表面盖住了** —— 读台账的人会以为 std_os 已经
+是真实现。
+
+**workaround:** 调用方目前只能走 `jhyy_helpers.c` 的 C 侧 bridge
+(`jh_fopen_wb` 等)自己拿文件 IO,stdlib 表面这层是装饰。
+
+**影响范围:** 任何调用 `std::os` 的用户代码。当前 v4.x stdlib 未对外承诺
+os 层语义,所以**不阻塞 v4.0.0 final**;但它是「索引表 0 ACTIVE」这个说法
+不成立的直接证据之一 —— 一处货真价实的 mock 藏在 RESOLVED 条目底下。
+
+**失效条件:** std_os_* 改走 `jhyy_helpers.c` 的真实 libc bridge
+(同 W-080 给 std_io_print 做的 `jh_fputs_stdout` 手法),并把
+`std_os_basic.jhyy` 的 inline 副本改成 import 真身。
+
+**引用:**
+- 源码 `compiler/src0/std/os.jhyy:66-144`
+- 源码注释 `compiler/tests/examples/std_os_basic.jhyy:20`
+- W-079 entry 的 Resolution 段(该段遗漏 std_os 一半)
+- W-080 entry(只覆盖 std_io + zero-extend)
+
+<a id="w-104"></a>
+## W-104: SysV ABI 参数分类调用 Win 分类器 — 正确的分类器就在同文件,没接线
+
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — abi_sysv_emit_params 用 abi_win_classify_arg 出参类型字母;SysV 目标产出错误 ABI
+**Backfilled:** 2026-10-15 (v2.x amd64_sysv Stage 1c.3 mirror 占位)
+**Filed-by:** audit-fanout-2026-10-15
+**日期:** 2026-08 前后 (v2.0.0-os-prep Stage 1c.3 mirror) → 至今
+
+**触发面:** `compiler/src0/abi_amd64_sysv.jhyy:229` — SysV 函数签名 emit 时,
+参数类型字母取自 **Win** 的 `abi_win_classify_arg`。
+
+**症状:** SysV 后端按 Win x64 的参数/返回约定给函数定型。Win 与 SysV 的
+寄存器分配、struct 分类规则、返回约定都不同(例如 ≤16B 小 struct 返回:
+Win 走 hidden sret 指针,`abi_amd64_sysv.jhyy:209-211` 正是这么 emit 的;
+SysV 则走 rax/rdx)。分类错了,caller 与 callee 对同一参数的寄存器归属理解
+就不一致。
+
+**根因:** Stage 1c.3 mirror 阶段刻意先用 Win 分类器顶替,源码注释写得很清楚:
+
+```
+// Phase 1: use abi_win_classify_arg (QBE letter) as mirror placeholder.
+// Phase 2b: replace with abi_sysv_classify_arg + class→letter map.
+```
+
+**该修的函数已经写好了** —— `abi_sysv_classify_arg`(`:79`)与
+`abi_sysv_classify_arg_full`(`:147`)都在同一文件里,只是 emit 路径没调用它们。
+文件头 `:33` 的 import 注释也自认:`import abi_amd64_win;  // for
+abi_win_classify_arg (Phase 1 mirror placeholder)`。这是纯粹的未完成接线,
+不是设计决策。
+
+**workaround:** 无。默认编译目标是 `amd64_win`,SysV 路径平时不走,
+所以这个错误平时观察不到。
+
+**影响范围:** `--target=amd64_sysv` 的全部产出。v4.0.0-rc1 的 ship gate 只覆盖
+amd64_win,所以这条至今没有测试能触发它 —— 跟 `fixed_point_linux.sh` 那个门
+是同一类问题(没测到的路径不会被门发现)。
+
+**失效条件:** `abi_amd64_sysv.jhyy:229` 改调 `abi_sysv_classify_arg_full` +
+class→letter 映射表,并补一个 amd64_sysv 目标的 regress 用例。
+
+**引用:**
+- 源码 `compiler/src0/abi_amd64_sysv.jhyy:33, 79, 147, 189, 227-229`
+- 源码 `compiler/src0/abi_amd64_sysv.jhyy:248-254`(sret 差异的自述注释)
+- `docs/archive/v2-v3/v2.0.0-os-prep.md`(Stage 1c mirror 的原始计划)
+
+<a id="w-105"></a>
+## W-105: check_borrow 是硬编码 return 1 — `&mut` 独占性完全不检查
+
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — sema.jhyy:2558 函数体恒 return 1,每个函数声明都走这条空检查
+**Backfilled:** 2026-10-15 (v3.1.0 V3-C 3g ship-gate stub)
+**Filed-by:** audit-fanout-2026-10-15
+**日期:** 2026-08 前后 (v3.1.0 ship) → 至今
+
+**触发面:** `compiler/src0/sema.jhyy:2558-2560`
+
+```jhyy
+fn check_borrow(ctx: *SemaContext, ta: *TypeArena, body: *Node) -> i32 {
+    return 1;
+}
+```
+
+调用点 `compiler/src0/sema.jhyy:2677`(`let _bc = check_borrow(ctx, ta, (*fd).body)`)
+在函数声明检查路径上,**每个被 check 的函数都走这一句**。
+
+**症状:** 下面这些全部**不报错**:
+- `let y = &mut x; let z = &mut x;` —— 双 mutable 冲突
+- `&mut` 与 `&` 共享/可变互斥
+- reborrow `&mut *x`
+- 跨函数 borrow、nested block 借用作用域
+- lifetime 子类型 / variance
+
+**根因:** v3.1.0 的 ship-gate 选择「先 ship 表面,语义分析留 v3.x 末」。
+`compiler/src0/sema.jhyy:2549-2557` 的注释把不检查的项逐条列了出来,注释本身
+是诚实的 —— 问题在于它**没有登记进 workarounds.md**,于是台账显示 `0 ACTIVE`,
+而语言层面少了一整类检查。`&mut` 在 `compiler/src0/{ast,codegen_amd64_state,ir,
+mono,parser,sema,std/string,types}.jhyy` 都有使用,不是没人用的死代码。
+
+**workaround:** 无。调用方拿不到任何诊断。
+
+**影响范围:** 任何写了 `&mut` 的程序。`compiler/tests/examples/borrow_check_basic.jhyy`
+存在,但它测的是 borrow 的**表面可解析性**,不是冲突检测。
+
+**失效条件:** 实现 NLL / Polonius 借用分析(注释指 spec supplement v3.1.0 § 4,
+该设计随 v3.x 封版未见落地文档)。
+
+**引用:**
+- 源码 `compiler/src0/sema.jhyy:2544-2560`(check_borrow + 限制清单)
+- 源码 `compiler/src0/sema.jhyy:2677`(调用点)
+- 源码 `compiler/src0/sema.jhyy:398`(`&mut` 内层 immutable 的检查被推给 check_borrow)
+
+<a id="w-105-1"></a>
+## W-105.1: check_cap_pass 同款空 stub,当前无调用点(死代码但签名在 API 面上)
+
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — 恒 return 1;与 W-105 同族 stub,当前无调用点
+**Backfilled:** 2026-10-15 (v3.1.2 V3-C 3g.7 ship-gate stub)
+**Filed-by:** audit-fanout-2026-10-15
+**日期:** 2026-08 前后 (v3.1.2 ship) → 至今
+
+**触发面:** `compiler/src0/sema.jhyy:2578-2579` — `fn check_cap_pass(...) { return 1; }`
+
+**症状:** 同 W-105 —— 不检测 active-cap conflict / reentrancy / depth
+transition,不支持 `*Cap<T>` 裸指针、不支持 `cap_new()` builtin ctor。
+
+**根因:** v3.1.2 ship-gate stub,与 W-105 同一个「先 ship 表面」决策。
+
+**与 W-105 的关键差别(影响处置顺序):** grep 全 `compiler/src0` 后,
+`check_cap_pass` **没有任何调用点** —— 它是死代码,当前不会有程序因为它而
+缺检查。W-105 则每次函数声明都真跑。修的优先级 W-105 高得多。
+
+**workaround:** 无 —— 但因为没调用点,当前也没人能撞到。
+
+**影响范围:** 未来一旦有人把 `check_cap_pass` 接到声明检查路径上,`Cap<T>` 的
+跨函数 ownership 检查会静默变成 no-op。
+
+**失效条件:** 要么实现 cap ownership 分析,要么把该函数连同 stub 注释一起删掉
+—— 留一个没人调的「假装会检查」的函数,是比不检查更坏的状态。
+
+**引用:**
+- 源码 `compiler/src0/sema.jhyy:2562-2579`
+- 源码 `compiler/src0/sema.jhyy:2574`(自述「跟 check_borrow 同样 stub」)
+
+<a id="w-106"></a>
+## W-106: symtab_lookup_one 用 arena-touch 强制 codegen 物化栈帧(源码字面 WORKAROUND,未登记)
+
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — 靠 sb_init 一个立刻丢弃的 StringBuilder 迫使后端生成合法栈帧;行为正确性依赖后端实现细节
+**Backfilled:** 2026-10-15 (v1.x sprint-3 commit 5)
+**Filed-by:** audit-fanout-2026-10-15
+**日期:** v1.x sprint 3 起 → 至今
+
+**触发面:** `compiler/src0/symtab.jhyy:261-264`
+
+```jhyy
+// WORKAROUND: amd64_win stack-spill — touching arena forces
+// codegen to materialize stack frame in safe way (see sprint-3-commit-5-sema-attempt.md).
+let mut _wb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
+sb_init(t.arena as *Arena, &_wb);
+```
+
+**症状:** 每次 symbol lookup 都白造一个 `StringBuilder` 再丢掉。功能上无害,
+但它是一处**纯为迎合后端实现细节而存在的代码** —— 注释自己说得很清楚:
+touch arena 是为了让 codegen「以安全方式物化栈帧」。后端哪天不再需要这个
+touch(或者换了触发条件),这里不会报错,只会静默变成无效代码。
+
+**根因:** v1.x sprint 3 定位到的 amd64_win stack-spill 问题,当时的修法是在
+调用点人为制造一个后端「看得见」的 arena 操作。
+
+**workaround:** 就是这段代码本身。
+
+**影响范围:** `symtab_lookup_one` 全路径 —— 编译器的每一次符号查找。
+
+**失效条件:** 后端确认不再需要 arena-touch 触发栈帧物化(需要构造一个
+「删掉这三行」的复现来证明),或 stack-spill 根因真修后本段自然变成冗余。
+注意它引用的 `sprint-3-commit-5-sema-attempt.md` 已不在仓库里,追溯链断了。
+
+**引用:**
+- 源码 `compiler/src0/symtab.jhyy:261-264`
+
+<a id="w-107"></a>
+## W-107: 五个 per-fn pre-scan 表硬编码 1024 上限 — 距触发只剩 33 个函数
+
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — MAX_FN_ENTRIES=1024,实测已用 991;越过上限后 fn≥1023 静默退回 legacy 全局 max 帧路径
+**Backfilled:** 2026-10-15 (v2.11.10 W-074.6 T3-a 引入 256 → v4.0.2.1 bump 到 1024)
+**Filed-by:** audit-fanout-2026-10-15
+**日期:** 2026-07 前后 (v2.11.10) → 至今
+
+**触发面:** `compiler/src0/codegen_amd64_state.jhyy:511 / 515 / 524 / 530 / 537`
+—— **五个** 每函数 pre-scan 表,全部 `arena_alloc(1024 * 8)`:
+`fn_starts` / `per_fn_max` / `per_fn_alloc` / `per_fn_addr_pool` / `per_fn_base_t`。
+
+**症状(越界后的行为):** 写入侧有守卫(`codegen_amd64_state.jhyy:1727` 与 `:1736`
+的 `if fn_count < 1024`),哨兵写入会被跳过,`:1740-1742` 把 `fn_count` 截到 1023。
+于是索引 ≥1023 的函数:
+- `per_fn_max[1023]` 永远是 0(Phase 2 循环只跑到 `fi < 1023`)
+- `emit_func_header` 的 `use_per_fn` 判据(`codegen_amd64_emit_ctrl.jhyy:514` 要求
+  `cur_fn_idx < fn_count`)**失败** → 这些函数全部退回 v2.11.2 的 legacy
+  global-max 帧路径
+
+也就是说:**这不是缓冲区溢出,是静默降级** —— 越界的函数拿到一个按全局最大
+temp 数预留的巨型帧。W-074.6 当初的真症状(全局 max 帧让递归 fn SIGSEGV)会以
+「性能塌陷 + 深递归风险」的形式回来,但不会立刻炸。
+
+**余量(实测,非注释估计):**
+
+```
+JHY_WRITE_IL=1 jhyy.exe compile --target=amd64_win --no-link \
+  compiler/src0/main.jhyy -o <tmp>/main
+grep -cE '^export function [wl] |^function [wl] ' <tmp>/main.il   → 991
+上限 1024 − 已用 991 = 33
+```
+
+源码注释里记的是 997(那是 v4.0.2.1 bump 时的数),实测 991。原始源文件
+`grep -cE '^fn '` 合计 1133,但只有 main.jhyy 的 import 闭包进 token 流,
+1133 不是有效参照。
+
+**33 个函数的余量意味着:** 按 `std/` 现有 7 个模块(64 个 fn)的规模,
+再加三四个模块就会触发。v4.x 计划里的 package manager / multi-arch
+一旦让单模块函数数继续涨,这条会先静默变慢、再在深递归上出问题。
+
+**workaround:** 无。当前靠「还没到 1024」活着。
+
+**影响范围:** 所有 `--target=amd64_win` 编译,一旦单模块函数数越过 1023。
+
+**引用:**
+- 源码 `compiler/src0/codegen_amd64_state.jhyy:194, 511, 515, 524, 530, 537`
+- 源码 `compiler/src0/codegen_amd64_state.jhyy:1703-1743`(守卫 + 截断逻辑)
+- 源码 `compiler/src0/codegen_amd64_emit_ctrl.jhyy:508-524`(use_per_fn 判据 + legacy fallback)
+- W-074.6 entry(256→1024 bump 的来由)
+
+<a id="w-108"></a>
+## W-108: 索引重建脚本静默丢弃 59/89 条目 —— STATUS_RE 不容忍 ✅ 前缀,且只匹配 H2
+
+**状态:** RESOLVED closed 2026-10-15 (v4.0.8) — 索引 16 行 → 92 行,全部 W-NNN 条目可见
+**Backfilled:** 2026-10-15 (scripts/dev/v2_13_5_rebuild_index.py)
+**Filed-by:** audit-fanout-2026-10-15
+**日期:** 2026-07 前后 (v2.13.5 ship) → 2026-10-15
+
+**触发面:** `scripts/dev/v2_13_5_rebuild_index.py` 的 `H2_RE` + `STATUS_RE`。
+
+**症状:** `docs/internal/workarounds.md` 的索引表只有 **16 行**,而台账有
+**96 个 W-NNN 条目**。重建索引跑完不报错,只 print 一个行数 —— 少掉的条目
+不会留下任何痕迹。长期后果:读索引的人以为台账里只有 16 件事,于是
+「索引表 ACTIVE/DEFERRED = 0」这个结论被反复引用并写进 CLAUDE.md,
+而实际上台账里 59 条从未出现在索引中,新增条目(W-103+ 那批 mock/stub)
+也同样隐形。
+
+**根因(两个,叠加):**
+
+1. `STATUS_RE = r'^\*\*(?:状态|Status):\*\*\s+(ACTIVE|RESOLVED|...)'` 要求状态
+   关键字**紧跟**冒号(只允许空白)。但台账里 **59 个条目**的状态行写成
+   `**状态:** ✅ RESOLVED ...` —— 中间的 `✅` 不是空白,regex 不匹配,
+   `parse_file` 的 `current_status` 保持 `None`,该条目被 `finalize()` 丢弃。
+   89 个 H2 条目里只有约 20 个能进索引。
+2. `H2_RE = r'^##\s+(W-...)'` 只匹配二级标题。台账里 W-073..W-080 与
+   W-074.6 这 **9 条**挂在 H3 下(v2.13.5 之前的分组残留),结构上进不了索引。
+   其中 **W-079 / W-080 / W-074.6** 恰好是跟「0 ACTIVE」结论最相关的几条。
+
+**workaround:** 2026-10-15 修 `STATUS_RE`(允许任意数量 emoji 前缀)+
+扩 `H2_RE` 到 `#{2,3}`。索引从 16 行 → **92 行**,状态分布第一次完整可见:
+
+```
+ACTIVE 6 / RESOLVED 80 / SUPERSEDED 4 / INVALID 2 / DEFERRED 0
+```
+
+**6 条 ACTIVE 全是本次新登记的 W-103..W-107。** 在修这个 parser 之前,
+台账自己的索引里确实是 0 ACTIVE —— 但那是因为**读不到**,不是因为没有。
+
+**影响范围:** 任何依赖索引表做审计结论的人或工具,包括
+`mcp__jhyy__jhyy_workarounds`(它按 H3 section 附状态行,H3 条目的状态
+会被错挂到上一个 H2 条目上 —— W-074.6 的状态曾被误读成 W-072 的)。
+
+**失效条件:** 不适用(已修)。但**教训要留着**:一个「重建索引」的工具如果
+丢条目时不出声,它比没有工具更危险 —— 它制造了一种「已经同步过了」的错觉。
+
+**引用:**
+- 脚本 `scripts/dev/v2_13_5_rebuild_index.py:18-20`(H2_RE / STATUS_RE)
+- 台账 `docs/internal/workarounds.md`(96 个 W-NNN 条目 vs 16 行索引)
+- 修复 commit:见本次改动
+

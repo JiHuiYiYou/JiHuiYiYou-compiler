@@ -15,8 +15,17 @@ from pathlib import Path
 
 # Match real W-NNN entries with required colon-or-Chinese-colon separator.
 # Sub-section markers like "## W-001 RESOLVED — v0.8 ..." are excluded (no colon).
-H2_RE = re.compile(r'^##\s+(W-\d+(?:\.\d+)*)\s*[:：]\s*(.+?)\s*$')
-STATUS_RE = re.compile(r'^\*\*(?:状态|Status):\*\*\s+(ACTIVE|RESOLVED|SUPERSEDED|DEFERRED|INVALID)')
+# H2 or H3: 台账里 W-073..W-080 / W-074.6 这 9 条挂在 H3 下(v2.13.5 之前的
+# 分组残留),只匹配 H2 会让它们连同状态一起对索引隐身(见 W-108)。
+H2_RE = re.compile(r'^#{2,3}\s+(W-\d+(?:\.\d+)*)\s*[:：]\s*(.+?)\s*$')
+# 2026-10-15: 状态行允许 emoji 前缀。原 regex 要求状态关键字紧跟冒号,而台账里
+# 59 个条目写的是 `**状态:** ✅ RESOLVED ...` —— 那 59 条被静默丢弃,索引只剩
+# 16/89 行。这不是"索引没维护",是 parser 读不到它们(见 W-108)。
+STATUS_RE = re.compile(
+    r'^\*\*(?:状态|Status):\*\*\s*'
+    r'(?:[\U0001F300-\U0001FAFF☀-➿✅✨✔✖])*\s*'
+    r'(ACTIVE|RESOLVED|SUPERSEDED|DEFERRED|INVALID)'
+)
 
 # Anchor punctuation to remove (per GitHub markdown auto-anchor rules)
 ANCHOR_DROP = re.compile(r'[‘’“"＀`~!@#$%^&*+=,.;:?/\\|<>(){}\[\]]')
