@@ -722,27 +722,46 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
     //   返回 2 = in-mem 已写 .s; caller (compile()) 跳过 run_backend。
     let write_il = jh_write_il_enabled();
     let mut did_inmem: i32 = 0 as i32;
-    if write_il == (0 as i32) {
-        let mode = target_backend_mode(t);
-        if mode == BACKEND_SELF() {
-            // In-mem self path: 直接 (*ir.sb).buf → codegen_amd64_run_text → .s
-            // v3.4.2 W-089 真修: 传 sema.ret_type_map / n (Pass 1.6 populate)
-            //   让 emit_call 走 semantic lookup 替换 v3.1.0 byte-prefix whitelist
-            let im_rc = codegen_amd64_run_text(buf_p, buf_len, asm_path, t,
-                                               sema_get_ret_type_map(&sema),
-                                               sema_get_ret_type_map_n(&sema));
-            if im_rc == (0 as i32) {
-                rc = 2 as i32;
-                did_inmem = 1 as i32;
-            } else {
-                let _e = jh_fputs_stderr("build_il: in-mem self-backend failed, fallback to .il write\n" as *u8);
-                did_inmem = 0 as i32;
-            }
+
+    // v4.0.8 (W-097):JHY_WRITE_IL 只决定"要不要额外落一份 .il 供人检视",
+    // **不再决定走哪条 emit 路径**。
+    //
+    // 以前 write_il==1 会整个跳过 in-mem、退回文件路径(写 .il → run_backend →
+    // codegen_amd64_run)。两个入口源码几乎一致、输入字节也一致(都 wb 写、
+    // 纯 LF),但产出的 .s 槽位编号不同 —— 实测同一个 jhyy.exe 编同一份
+    // main.jhyy:in-mem → d6edde00,JHY_WRITE_IL=1 → 81d5e955。
+    // 后果:JHY_WRITE_IL 这个本该"只影响是否落盘"的调试开关,悄悄换了编译器的
+    // 实现路径,跨代比对(d43 / fixed_point)因此出现假的 "第 N 代 differs"。
+    //
+    // 统一之后:in-mem self path 永远是 self target 的实现;写不写 .il 退化成
+    // 一个纯副作用。不想有两条会漂移的路径,就别让一个 flag 能选路径。
+    if write_il != (0 as i32) {
+        let ilf_dbg = jh_fopen_wb(il_path);
+        if ilf_dbg != (0 as *u8) {
+            fwrite(buf_p, (1 as i64), buf_len, ilf_dbg);
+            fclose(ilf_dbg);
+        }
+    }
+
+    let mode = target_backend_mode(t);
+    if mode == BACKEND_SELF() {
+        // In-mem self path: 直接 (*ir.sb).buf → codegen_amd64_run_text → .s
+        // v3.4.2 W-089 真修: 传 sema.ret_type_map / n (Pass 1.6 populate)
+        //   让 emit_call 走 semantic lookup 替换 v3.1.0 byte-prefix whitelist
+        let im_rc = codegen_amd64_run_text(buf_p, buf_len, asm_path, t,
+                                           sema_get_ret_type_map(&sema),
+                                           sema_get_ret_type_map_n(&sema));
+        if im_rc == (0 as i32) {
+            rc = 2 as i32;
+            did_inmem = 1 as i32;
+        } else {
+            let _e = jh_fputs_stderr("build_il: in-mem self-backend failed, fallback to .il write\n" as *u8);
+            did_inmem = 0 as i32;
         }
     }
 
     if did_inmem == (0 as i32) {
-        // 老 path: 写 .il, return 0 (caller 走 run_backend)
+        // fallback: 写 .il 让 caller 的 run_backend 走文件路径
         let ilf = jh_fopen_wb(il_path);
         if ilf == (0 as *u8) {
             jh_fputs_stderr("cannot write il\n" as *u8);
