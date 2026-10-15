@@ -216,8 +216,15 @@ fi
 echo
 
 # ════════════════════════════════════════════════════════════════════════════
-# [1.5/3] .s closure N=3 (v2.15.0 in-mem self path: in-mem .s 跟 JHY_WRITE_IL=1
-# self path .s byte-equal, 跨代 closure 也是 byte-equal)
+# [1.5/3] .s closure N=3 (.s 第二层)
+#
+# v4.0.8 (W-097) 更正:本脚本原本注释写「in-mem .s 跟 JHY_WRITE_IL=1 self path
+# .s byte-equal」—— **实测不成立**。同一个 jhyy.exe 编同一份 main.jhyy:
+#   in-mem(不落 .il)        → d6edde00...
+#   JHY_WRITE_IL=1(落盘再读) → 81d5e955...
+# 差异纯粹是槽位编号(指令形态完全一致,归一化后逐条相同),但足以让 sha 不同。
+# 结论:**跨代比对必须在同一条 emit 路径下做**,否则 "第 N 代 differs" 只是在说
+# 路径不同,不是闭环没收敛。生产路径是 in-mem(closure_check.sh 测的就是它)。
 # ════════════════════════════════════════════════════════════════════════════
 
 SHA_S_V1="$(sha256sum "$S_V1" 2>/dev/null | awk '{print $1}' || echo MISSING)"
@@ -311,7 +318,10 @@ for N in $(seq 4 "$JHY_FP_MAX_N"); do
 
     # emit .il using v_N.exe (用 --no-link 跳过链接更快) + timing
     T_START=$(date +%s%3N 2>/dev/null || date +%s)
-    (cd "$JHYY_ROOT" && "$NEXT_BIN_INROOT" compile --target=amd64_win --no-link "$JHYY_INPUT" -o "$JHY_FP_BUILD_DIR/_v${N}_main" > /dev/null 2>&1) || true
+    # v4.0.8 (W-097):必须跟 v1/v2/v3 用**同一个** JHY_WRITE_IL=1。这里原本漏了,
+    # 于是 v4/v5 悄悄走 in-mem 路径,拿它跟前几代的 JHY_WRITE_IL 产物比 →
+    # 报出 "N=4 .s differs",看起来像"第 4 代才收敛",实际只是换了条 emit 路径。
+    (cd "$JHYY_ROOT" && JHY_WRITE_IL=1 "$NEXT_BIN_INROOT" compile --target=amd64_win --no-link "$JHYY_INPUT" -o "$JHY_FP_BUILD_DIR/_v${N}_main" > /dev/null 2>&1) || true
     T_END=$(date +%s%3N 2>/dev/null || date +%s)
     T_N_MS=$((T_END - T_START))
     if [[ -f "$JHY_FP_BUILD_DIR/_v${N}_main.il" ]]; then
@@ -376,7 +386,7 @@ for N in $(seq 4 "$JHY_FP_MAX_N"); do
     fi
 
     if [[ $SHA_S_OK -eq 1 ]]; then
-        echo "  ✅ PASS (N=$N .s byte-equal — in-mem self path 跨代 closure 成立)"
+        echo "  ✅ PASS (N=$N .s byte-equal — 跨代 closure 成立,同一 JHY_WRITE_IL=1 路径)"
         PASS=$((PASS + 1))
     else
         echo "  ⚠️  INFO (N=$N .s differs — informational for N>=4)"
