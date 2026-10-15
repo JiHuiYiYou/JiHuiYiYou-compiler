@@ -409,17 +409,19 @@ CAP_V2_EXIT="SKIP"
 CAP_V3_EXIT="SKIP"
 
 # v1 cap_test
-if (cd "$JHYY_ROOT" && "$JHYY_V1" compile --target=amd64_win "$CAP_TEST" -o "$JHY_FP_BUILD_DIR/cap_v1.exe" > /dev/null 2>&1) && [[ -f "$JHY_FP_BUILD_DIR/cap_v1.exe" ]]; then
+# -o 不能带 .exe:jhyy 会再补一个,`-o cap_v1.exe` 的产物是 cap_v1.exe.exe,
+# 于是下面 `-f` 判否 → exit 记 SKIP → 三代全 SKIP 仍判 PASS(这层门空转)。
+if (cd "$JHYY_ROOT" && "$JHYY_V1" compile --target=amd64_win "$CAP_TEST" -o "$JHY_FP_BUILD_DIR/cap_v1" > /dev/null 2>&1) && [[ -f "$JHY_FP_BUILD_DIR/cap_v1.exe" ]]; then
     CAP_V1_EXIT="$("$JHY_FP_BUILD_DIR/cap_v1.exe" > /dev/null 2>&1; echo $?)"
 fi
 
 # v2 cap_test
-if (cd "$JHYY_ROOT" && "$JHYY_V2" compile --target=amd64_win "$CAP_TEST" -o "$JHY_FP_BUILD_DIR/cap_v2.exe" > /dev/null 2>&1) && [[ -f "$JHY_FP_BUILD_DIR/cap_v2.exe" ]]; then
+if (cd "$JHYY_ROOT" && "$JHYY_V2" compile --target=amd64_win "$CAP_TEST" -o "$JHY_FP_BUILD_DIR/cap_v2" > /dev/null 2>&1) && [[ -f "$JHY_FP_BUILD_DIR/cap_v2.exe" ]]; then
     CAP_V2_EXIT="$("$JHY_FP_BUILD_DIR/cap_v2.exe" > /dev/null 2>&1; echo $?)"
 fi
 
 # v3 cap_test
-if [[ -f "$JHYY_V3_INROOT" ]] && (cd "$JHYY_ROOT" && "$JHYY_V3_INROOT" compile --target=amd64_win "$CAP_TEST" -o "$JHY_FP_BUILD_DIR/cap_v3.exe" > /dev/null 2>&1) && [[ -f "$JHY_FP_BUILD_DIR/cap_v3.exe" ]]; then
+if [[ -f "$JHYY_V3_INROOT" ]] && (cd "$JHYY_ROOT" && "$JHYY_V3_INROOT" compile --target=amd64_win "$CAP_TEST" -o "$JHY_FP_BUILD_DIR/cap_v3" > /dev/null 2>&1) && [[ -f "$JHY_FP_BUILD_DIR/cap_v3.exe" ]]; then
     CAP_V3_EXIT="$("$JHY_FP_BUILD_DIR/cap_v3.exe" > /dev/null 2>&1; echo $?)"
 fi
 
@@ -428,6 +430,12 @@ echo "  v2 cap_test exit = $CAP_V2_EXIT"
 echo "  v3 cap_test exit = $CAP_V3_EXIT"
 
 CAP_CONSISTENT=1
+# 三代全 SKIP = 一个都没跑成,不是"一致"。原逻辑让 CAP_CONSISTENT 停在 1,
+# 于是产物路径写错时这层门稳定报 PASS —— 必须显式判 FAIL。
+if [[ "$CAP_V1_EXIT" == "SKIP" && "$CAP_V2_EXIT" == "SKIP" && "$CAP_V3_EXIT" == "SKIP" ]]; then
+    CAP_CONSISTENT=0
+    echo "  ❌ 三代 cap_test 全 SKIP —— 产物路径错或编译失败,这层门没测到任何东西"
+fi
 if [[ "$CAP_V1_EXIT" != "SKIP" && "$CAP_V1_EXIT" != "$CAP_TEST_EXPECT" ]]; then CAP_CONSISTENT=0; fi
 if [[ "$CAP_V2_EXIT" != "SKIP" && "$CAP_V2_EXIT" != "$CAP_TEST_EXPECT" ]]; then CAP_CONSISTENT=0; fi
 if [[ "$CAP_V3_EXIT" != "SKIP" && "$CAP_V3_EXIT" != "$CAP_TEST_EXPECT" ]]; then CAP_CONSISTENT=0; fi

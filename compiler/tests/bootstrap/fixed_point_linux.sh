@@ -13,9 +13,13 @@
 #   JHYY_ROOT      = JHYY project root (default git rev-parse)
 #
 # 退出码:
-#   0  = 3 代 byte-equal + 5/5 main tests PASS
+#   0  = docker gcc:12 toolchain 可用 + 5/5 main test 的 Win 编译链产出非空
 #   1  = FAIL
 #   2  = docker 不可用 (warn, Win closure 已 verify per fixed_point.sh)
+#
+# 边界 (别把它当 Linux 自举闭环门):Linux ELF 自举链本身仍是 out-of-scope ——
+# v2.4.0 multi-target dispatcher 未 ship,本脚本没有编出过一个 Linux ELF 编译器。
+# 这里验的只是「容器 toolchain 可用 + Win 侧编译链没断」。
 
 set -uo pipefail
 
@@ -172,53 +176,51 @@ LINUX_FAIL=0
 for t in "${MAIN_TESTS[@]}"; do
     INPUT="$JHYY_ROOT/compiler/tests/examples/${t}.jhyy"
     if [[ ! -f "$INPUT" ]]; then
-        echo "  ⚠️  SKIP $t (file not found)"
+        echo "  ❌ FAIL $t (source not found: $INPUT)"
+        LINUX_FAIL=$((LINUX_FAIL + 1))
         continue
     fi
 
-    # Run Win jhyy.exe first (sanity: Win chain works)
-    WIN_RC=$("$JHYY_BIN" run "$INPUT" 2>/dev/null; echo $?)
-    echo "  Win run $t: EXIT=$WIN_RC"
-
-    # Try Linux docker cross-compile (per V.3 gate)
-    LINUX_RC=$(
-        MSYS_NO_PATHCONV=1 "$DOCKER_BIN" run --rm \
-            -v "$JHYY_ROOT:/work" \
-            -w /work \
-            "$DOCKER_IMAGE" bash -c "
-                set +e
-                # Cross-compile Win .s to ELF using gcc
-                cd /work/compiler/tests/examples
-                rm -f /tmp/${t}_test.s /tmp/${t}_test.o /tmp/${t}_test
-                # Note: this is a placeholder — full Linux ELF chain requires
-                # v2.4.0 multi-target dispatcher 真 ship (per v2.14.0 out-of-scope)
-                # For now, sanity check Win jhyy.exe via wine-like layer
-                echo \"LINUX_RC=42 placeholder (per v2.14.0 plan Phase 3 V.3 simplification)\"
-                exit 42
-            " 2>/dev/null
-        echo $?
+    # Docker 侧:验的是「容器里 gcc 真的能把 C 编成 ELF」。Linux ELF 链本身仍
+    # out-of-scope(v2.4.0 multi-target dispatcher 未 ship),但探针必须真跑 ——
+    # 原实现写死 `exit 42` 再拿它跟 Win 的 exit code 比对,两边一个是常量、一个
+    # 是噪声(见下),于是恒判一致,永不可能 FAIL。
+    DOCKER_PROBE=$(
+        MSYS_NO_PATHCONV=1 "$DOCKER_BIN" run --rm "$DOCKER_IMAGE" \
+            sh -c 'printf "int main(void){return 0;}" > /tmp/p.c && gcc /tmp/p.c -o /tmp/p && echo PROBE_OK' \
+            2>/dev/null | tr -d '\r' | grep -o 'PROBE_OK'
     )
-    echo "  Linux run $t: EXIT=$LINUX_RC (placeholder 42 per Phase 3 V.3 simplification)"
 
-    if [[ "$WIN_RC" == "$LINUX_RC" ]]; then
-        echo "  ✅ PASS $t (Win=$WIN_RC = Linux=$LINUX_RC)"
+    # Win 侧判产物非空,不用 exit code:这 5 个 example 程序都不显式设退出码,
+    # 实测 hello/arith/match/cap_test/break_continue 分别返回 42/106/20/42/25,
+    # 是残留寄存器值,拿它比对等于比对噪声。
+    WIN_OK=0
+    if (cd "$JHYY_ROOT" && "$JHYY_BIN" compile --target=amd64_win "$INPUT" -o "$LINUX_BUILD_DIR/win_$t") > /dev/null 2>&1 \
+        && [[ -s "$LINUX_BUILD_DIR/win_$t.exe" ]]; then
+        WIN_OK=1
+    fi
+
+    if [[ $WIN_OK -eq 1 && -n "$DOCKER_PROBE" ]]; then
+        echo "  ✅ PASS $t (Win 产物非空 + docker gcc:12 ELF 探针通过)"
         LINUX_PASS=$((LINUX_PASS + 1))
     else
-        echo "  ⚠️  WARN $t (Win=$WIN_RC Linux=$LINUX_RC, 已知 placeholder)"
+        echo "  ❌ FAIL $t (Win产物=$WIN_OK, docker探针=${DOCKER_PROBE:-无输出})"
+        LINUX_FAIL=$((LINUX_FAIL + 1))
     fi
 done
 echo
 
-echo "=== fixed_point_linux Phase 3 结果: $LINUX_PASS/${#MAIN_TESTS[@]} tests ==="
+echo "=== fixed_point_linux Phase 3 结果: $LINUX_PASS/${#MAIN_TESTS[@]} tests (failed: $LINUX_FAIL) ==="
 echo "  Win closure 已 ship per fixed_point.sh (N≥10 verified)"
 echo "  Linux full ELF chain 等 v2.4.0 multi-target dispatcher 真 ship 后启动"
-echo "  Per v2.14.0 plan Phase 3 V.3 simplification: 当前验证 toolchain sanity"
+echo "  Per v2.14.0 plan Phase 3 V.3 simplification: 当前只验 toolchain sanity"
 
-# Phase 3 gate: toolchain verified + Win parity holds
-if [[ $LINUX_PASS -ge 0 ]] && [[ -n "$GCC_VERSION" ]]; then
-    echo "  ✅ PASS (docker gcc:12 toolchain sanity + Win parity)"
+# 原判据 `LINUX_PASS -ge 0` 对初值 0 恒真 —— 这个脚本无论发生什么都 exit 0。
+# 现在要求 5 个 test 全过,且 gcc 版本探得到。
+if [[ $LINUX_FAIL -eq 0 && $LINUX_PASS -eq ${#MAIN_TESTS[@]} && -n "$GCC_VERSION" ]]; then
+    echo "  ✅ PASS (docker gcc:12 toolchain usable + Win 编译链 ${LINUX_PASS}/${#MAIN_TESTS[@]})"
     exit 0
 fi
 
-echo "  ❌ FAIL"
+echo "  ❌ FAIL ($LINUX_PASS passed, $LINUX_FAIL failed of ${#MAIN_TESTS[@]})"
 exit 1

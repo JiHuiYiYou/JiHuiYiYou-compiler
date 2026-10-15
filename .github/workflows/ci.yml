@@ -3,7 +3,8 @@
 # v1.4.7 单 regress 入口 + matrix 守门 (取代 v1.4.5 三跑 shim):
 #   1. python regress.py --all                            (gated: jhyy.exe + jhyy_stage0.exe)
 #   2. python regress.py --all --include-informational    (matrix only: jhyy_v1.exe.exe historical)
-#   3. make selfhost                                       (Stage 2 N=3 byte-equal closure)
+#   3. make selfhost                                       (build v2/v3/v4 closure chain)
+#   4. bash compiler/tests/bootstrap/closure_check.sh      (gated: Stage2 == Stage3 .s)
 #
 # 触发面:
 #   - push to main (含 v1.x ‖ v2.x ‖ v3.x 任何 commit)
@@ -100,45 +101,15 @@ jobs:
         run: |
           make selfhost
 
-      - name: Stage 2 N=3 byte-equal (closure chain)
+      - name: Stage 2 vs Stage 3 .s byte-equal (closure gate)
         shell: msys2 {0}
         run: |
-          # 手动跑 closure chain (跟 jhyy_selfhost_check MCP 等价但纯 bash)
-          # v1 → v2 → v3 → v4 .il sha 必须全相同
-          # 命名规则 (per `feedback_regress_baseline_binary_hash.md`):
-          #   jhyy_v1.exe.exe = v1 (jhyy.exe copy, tracked — v1.4.4+ 副本约定)
-          #   jhyy_v2/3/4.exe = 当前 closure product (每次 make selfhost 重 build)
-          set -e
-          SHA_V1=""
-          SHA_V2=""
-          SHA_V3=""
-          SHA_V4=""
-          for stage in v1 v2 v3 v4; do
-            if [ "$stage" = "v1" ]; then
-              BIN="compiler/build/bin/jhyy_v1.exe.exe"
-            else
-              BIN="compiler/build/bin/jhyy_${stage}.exe"
-            fi
-            if [ ! -x "$BIN" ]; then
-              echo "FAIL: $BIN not found — run \`make selfhost\` first"
-              exit 1
-            fi
-            $BIN compile compiler/src0/main.jhyy -o /tmp/closure_${stage}.exe >/dev/null 2>&1 || {
-              echo "FAIL: ${BIN} cannot compile src0/main.jhyy"
-              exit 1
-            }
-            SHA=$(sha256sum /tmp/closure_${stage}.exe.il | awk '{print $1}')
-            case "$stage" in
-              v1) SHA_V1="$SHA";;
-              v2) SHA_V2="$SHA";;
-              v3) SHA_V3="$SHA";;
-              v4) SHA_V4="$SHA";;
-            esac
-            echo "  ${stage}.il sha: $SHA"
-          done
-          if [ "$SHA_V1" != "$SHA_V2" ] || [ "$SHA_V2" != "$SHA_V3" ] || [ "$SHA_V3" != "$SHA_V4" ]; then
-            echo "FAIL: Stage 2 closure chain NOT byte-equal"
-            echo "  v1=$SHA_V1 v2=$SHA_V2 v3=$SHA_V3 v4=$SHA_V4"
-            exit 1
-          fi
-          echo "PASS: Stage 2 N=3 closure byte-equal (sha=$SHA_V1)"
+          # 真门是 compiler/tests/bootstrap/closure_check.sh:它比 Stage2 vs Stage3
+          # 的 .s(约 11 MB),带 `! -s` 非空守卫,已实测能翻红于「编译器静默 exit 0
+          # 但不产 .s」——也就是 W-086 那一类假阳性。
+          #
+          # v4.0.8:本 step 原先内联了 v1→v4 四代的 .il sha 比对,但既没设
+          # JHY_WRITE_IL=1(jhyy-side in-mem 路径默认不落 .il),也没检查 sha256sum
+          # 的退出码 —— 四个 SHA 全是空串,`"$SHA_V1" != "$SHA_V2"` 对空串恒假,
+          # 于是闭环与否都打印 `PASS (sha=)`。比没有门更糟,现在直接调真门。
+          bash compiler/tests/bootstrap/closure_check.sh
