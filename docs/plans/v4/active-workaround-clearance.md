@@ -11,14 +11,27 @@
 | # | W-NNN | 一句话 | 性质 | 相对工作量 |
 |---|-------|--------|------|-----------|
 | 1 | **W-105** | `check_borrow` 恒 `return 1` → `&mut` 独占性完全不检查 | 语言层静默失效 | **见下方 ⚠️ 决策点** |
-| 2 | **W-103** | `std_os_open/read/write/exit` 全是 mock,`std_os_exit` 不退出 | stdlib 对用户撒谎 | 小(5 个 C bridge) |
-| 3 | **W-104** | SysV ABI 参数分类调用 Win 分类器 | 错 ABI,目标路径平时不走 | 中(接线 + 新测试) |
-| 4 | **W-107** | 五个 per-fn 表硬编码 1024,距触发只剩 33 个 fn | 静默降级(非溢出) | 中(改预分配) |
-| 5 | **W-106** | `symtab_lookup_one` arena-touch 强制物化栈帧 | 冗余代码,后端依赖 | 小(需先构造复现) |
-| 6 | **W-105.1** | `check_cap_pass` 同款 stub,**当前无调用点** | 死代码 | 最小(删或实现) |
+| 2 | **W-109** | 自举 IL lexer 缺 6 个浮点比较助记符 → f32 比较按 f64 算,`f64 ==/!=` 硬失败 | **核心类型基本运算算错** | 小(补 6 个分支 + 能翻红的测试) |
+| 3 | **W-103** | `std_os_open/read/write/exit` 全是 mock,`std_os_exit` 不退出 | stdlib 对用户撒谎 | 小(5 个 C bridge) |
+| 4 | **W-104** | SysV ABI 参数分类调用 Win 分类器 | 错 ABI,目标路径平时不走 | 中(接线 + 新测试) |
+| 5 | **W-107** | 五个 per-fn 表硬编码 1024,距触发只剩 33 个 fn | 静默降级(非溢出) | 中(改预分配) |
+| 6 | **W-106** | `symtab_lookup_one` arena-touch 强制物化栈帧 | 冗余代码,后端依赖 | 小(需先构造复现) |
+| 7 | **W-105.1** | `check_cap_pass` 同款 stub,**当前无调用点** | 死代码 | 最小(删或实现) |
 
 排序依据:**① 现在就会让用户拿到错误结果** > ② 目标路径一旦启用就错 >
 ③ 距触发有明确余量的降级 > ④ 冗余/死代码。
+
+> **W-109 排第 2 还是第 1,值得再想一次。** 它和 W-105 同属「静默算错」,
+> 但命中面大得多(`&mut` 很少有人写,浮点比较人人都在写),修起来也更便宜。
+> 之所以没直接排第 1:W-105 撞的是语言级安全承诺(文档承诺过 `&mut` 有检查),
+> 而 W-109 是一个从没被承诺过、只是没被发现的实现缺陷。**若你认为命中面优先,
+> 两者对调只需改本表。**
+
+> **W-109 为什么至今没被发现:** 唯一覆盖它的测试 `float_cmp.jhyy` 第 48 行是
+> **无条件 `return 42`**,比较结果只喂给一个 5 个 `%d` 却只声明 1 个参数的
+> printf(正好撞上 B8)。所以 `regress.py --tests=float_cmp.jhyy` 报
+> `PASS EXIT=42` —— 这个 PASS 不携带任何信息。`src0` 自身几乎不用浮点比较,
+> 自举闭环因此一路绿灯。**又一次「闭环只证明自洽,不证明正确」。**
 
 ---
 
@@ -88,7 +101,50 @@ sema, std/string, types}.jhyy` 八个文件里都有使用,不是没人调的死
 
 ---
 
-## 2. W-103 — `std/os.jhyy` 全是 mock
+## 2. W-109 — 自举 IL lexer 缺 6 个浮点比较助记符
+
+**台账:** W-109 | **触发面:** `compiler/src0/codegen_amd64_lexer.jhyy:1628-1647`
+
+**症状(两类,已实测):** 后端 emit 出自己 lex 不回来的助记符。
+
+| emit 出的 | 语义 | lexer 命中 | 后果 |
+|---|---|---|---|
+| `cles` / `clts` / `cgts` / `cges` | f32 `<=` / `<` / `>` / `>=` | `:1638-1641` 只判 `n3=='t'/'e'`,**不判 `s`** | 认成 f64 版本 → **按 f64 比较** |
+| `ceqd` / `cned` | f64 `==` / `!=` | 落到 `:1642` else,无一命中 | **硬失败** `unknown QBE IL mnemonic` |
+
+f64 的 `<` `<=` `>` `>=` **是好的**(那 4 个 `c*d` lexer 认识),整数比较也齐全
+(`ceqw`/`cnew`/`cs*w`/`cu*w` 各 5 个)。
+
+**根因:** v2.11.15「A1-XMM」补 f64 比较时只加了 `n3 == 'd'` 的四种形式。
+更糟的是 `:1642` 的 else 分支会把未知助记符**默默映射成 `cs*w`** ——
+`cles` 恰好落进 `:1641` 的 `cled` 分支,所以它不报错,只是算错。
+
+**修法:**
+1. `:1635-1641` 补齐 6 个助记符(`cgts`/`cges`/`clts`/`cles` 加 `s` 分支,
+   另加 `ceqd`/`cned` 两个新分支)
+2. **`:1642` else 分支改成兜底报错** —— 现在它会把未知助记符映射成 `cs*w`,
+   下次再加助记符时同样的静默错类型会重演。这条比 1 更重要
+3. 改 `float_cmp.jhyy`:**exit code 从比较结果推导**,不再写死 42;
+   printf 拆成合法的单参数调用(它现在 5 个 `%d` 只声明 1 个参数,撞 B8)
+
+**验收 gate:**
+- **先造红灯**:改之前 `float_cmp.jhyy` 必须 FAIL(把 exit code 改成从结果推导后
+  立刻就会红,这是现成的红灯源)
+- 修后 `float_cmp.jhyy` PASS,且**输出值**跟手算一致
+  (期望 211137 —— 注意该测试第 46 行注释里的 111137 本身就算错了:
+  `cmp_d(3.0, 2.0)` 里 `b >= a` 为真,应得 100010 而非 10)
+- 新增用例覆盖 f64 的 `==` / `!=` 与 f32 的四个序比较
+- `closure_check.sh` PASS + `fixed_point.sh` 7 PASS + regress 不退步
+
+**风险:**
+| 风险 | 缓解 |
+|------|------|
+| else 分支改报错后,某些原本被静默映射的路径开始报错 | 那说明本来就在算错;逐个查清是真 bug 还是该加助记符 |
+| src0 自身若有依赖静默映射的比较 | `closure_check.sh` 是硬门,红了就说明踩到了 |
+
+---
+
+## 3. W-103 — `std/os.jhyy` 全是 mock
 
 **台账:** W-103 | **触发面:** `compiler/src0/std/os.jhyy:69-144`
 
@@ -128,7 +184,7 @@ W-080 实际只动了 `std/io.jhyy` 和 `emit_call`。**(b) 从来没人动过�
 
 ---
 
-## 3. W-104 — SysV 参数分类借用 Win 分类器
+## 4. W-104 — SysV 参数分类借用 Win 分类器
 
 **台账:** W-104 | **触发面:** `compiler/src0/abi_amd64_sysv.jhyy:229`
 
@@ -162,7 +218,7 @@ struct 分类、返回约定都不同(≤16B 小 struct 返回:Win 走 hidden sr
 
 ---
 
-## 4. W-107 — per-fn 表 1024 上限
+## 5. W-107 — per-fn 表 1024 上限
 
 **台账:** W-107 | **触发面:** `compiler/src0/codegen_amd64_state.jhyy:511 / 515 / 524 / 530 / 537`
 (五个表:`fn_starts` / `per_fn_max` / `per_fn_alloc` / `per_fn_addr_pool` / `per_fn_base_t`)
@@ -203,7 +259,7 @@ grep -cE '^export function [wl] |^function [wl] ' <tmp>/main.il   → 991
 
 ---
 
-## 5. W-106 — `symtab_lookup_one` arena-touch
+## 6. W-106 — `symtab_lookup_one` arena-touch
 
 **台账:** W-106 | **触发面:** `compiler/src0/symtab.jhyy:261-264`
 
@@ -235,7 +291,7 @@ materialize stack frame in safe way`。后端哪天不再需要这个 touch,
 
 ---
 
-## 6. W-105.1 — `check_cap_pass` 同款 stub(无调用点)
+## 7. W-105.1 — `check_cap_pass` 同款 stub(无调用点)
 
 **台账:** W-105.1 | **触发面:** `compiler/src0/sema.jhyy:2578-2579`
 

@@ -25,7 +25,7 @@
 | 文档 | 状态 | 用途 |
 |------|------|------|
 | [`jhyy-lang-spec-v1.3.0.md`](docs/abis/jhyy-lang-spec-v1.3.0.md) | 锁定（v1.3.0 = v1.1.0 + v1.3.x 增量）| 语言规范 + 附录 B 已知限制 + 附录 C/D/E v1.x 完整启动条件 + 历史 v1.0-v1.7 增量 |
-| [`jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) | 锁定（v0.4/v0.5/v0.6/v0.7 实现已追更） | 类型布局 + 调用约定 + § 11.1 阻塞自举问题清单 (v1.0.0 已全部 解锁) |
+| [`jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) | 锁定（v0.4/v0.5/v0.6/v0.7 实现已追更） | 类型布局 + 调用约定 + § 11.1 阻塞自举问题清单。**⚠️ 2026-10-15 修正:本文件此前称「已全部解锁」不成立** —— A3(struct 跨 FFI)从未实现,A5(浮点比较)是确证 bug(W-109),两者都没挡住自举(自举 v1.8.3 已达成),但也不能算「解锁」 |
 | [`jhyy-lang-spec-floatsupplement-v3.3.0.md`](docs/abis/jhyy-lang-spec-floatsupplement-v3.3.0.md) | 锁定（v3.3.0 收编）| 浮点补充规范 — float `as` cast / fmod trunc / signed-zero semantics |
 
 **所有 plan 文件以这两个为 100% 权威对齐**。其他 v*.* 计划文件措辞可能滞后或不准，遇到冲突以 lang-spec / abi 为准。

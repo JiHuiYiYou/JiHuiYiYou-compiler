@@ -118,6 +118,7 @@
 | [W-106](#w-106) | ACTIVE | symtab_lookup_one 用 arena-touch 强制 codegen... |
 | [W-107](#w-107) | ACTIVE | 五个 per-fn pre-scan 表硬编码 1024 上限 — 距触发只剩 33 个函数 |
 | [W-108](#w-108) | RESOLVED | 索引重建脚本静默丢弃 59/89 条目 —— STATUS_RE 不容忍 前缀,且只匹配 H2 |
+| [W-109](#w-109) | ACTIVE | 自举 IL lexer 缺 6 个浮点比较助记符 — f32/f64 六个比较运算静默降级 |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -7237,4 +7238,83 @@ ACTIVE 6 / RESOLVED 80 / SUPERSEDED 4 / INVALID 2 / DEFERRED 0
 - 脚本 `scripts/dev/v2_13_5_rebuild_index.py:18-20`(H2_RE / STATUS_RE)
 - 台账 `docs/internal/workarounds.md`(96 个 W-NNN 条目 vs 16 行索引)
 - 修复 commit:见本次改动
+
+<a id="w-109"></a>
+## W-109: 自举 IL lexer 缺 6 个浮点比较助记符 — f32/f64 六个比较运算静默降级
+
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — f32 <= < > >= 被当 f64 比较,f64 == != 直接 unknown mnemonic 硬失败
+**Backfilled:** 2026-10-15 (v2.11.15 Iter 1b A1-XMM 只补了 4 个 c*d 助记符时留下的缺口)
+**Filed-by:** audit-fanout-2026-10-15
+**日期:** v2.11.15 (A1-XMM) 起 → 至今
+
+**触发面:** `compiler/src0/codegen_amd64_lexer.jhyy:1628-1647` 的比较助记符分派。
+后端自己 emit 出自己 lex 不回来的助记符。
+
+**症状(两类,实测):**
+
+```
+$ JHY_WRITE_IL=1 jhyy.exe compile --no-link compiler/tests/examples/float_cmp.jhyy
+  → codegen_amd64_lexer: unknown QBE IL mnemonic at byte offset 2058
+     %t38 =w cles %t30, %t31
+```
+
+| emit 出的助记符 | 语义 | lexer 命中 | 实际后果 |
+|---|---|---|---|
+| `cles` | f32 `<=` | `:1641` `n2=='l' && n3=='e'` | 认成 **`cled`** → 按 f64 比较 |
+| `cgts` | f32 `>` | `:1638` 只判 `n3=='t'`,不判 `s` | 认成 `cgtd` → 按 f64 比较 |
+| `cges` | f32 `>=` | `:1639` 同上 | 认成 `cged` → 按 f64 比较 |
+| `clts` | f32 `<` | `:1640` 只判 `n3=='t'`,不判 `s` | 认成 `cltd` → 按 f64 比较 |
+| `ceqd` | f64 `==` | 落到 `:1642` else,无一命中 | **硬失败** unknown mnemonic |
+| `cned` | f64 `!=` | 同上 | **硬失败** unknown mnemonic |
+
+lexer 只认 4 个浮点比较助记符(`cged` / `cgtd` / `cled` / `cltd`)。
+整数侧齐全(`ceqw` / `cnew` / `cs*w` / `cu*w` 各 5 个)。
+
+**实测值对不上:** `float_cmp.jhyy` 注释里算出的期望总和是 111137(该注释本身
+也算错了 —— `cmp_d(3.0, 2.0)` 里 `b >= a` 为真,应得 100010 而非 10,正确总和是
+211137),实跑得到 `112237`,差 98900。
+
+**根因:** v2.11.15「Iter 1b (A1-XMM)」补 f64 比较时分派只判了 `n3 == 'd'`
+的四种形式(`cgtd`/`cged`/`cltd`/`cled`),没补 `s` 结尾的 f32 变体,也没补
+`ceqd`/`cned`。`else` 分支(`:1642`)只回退到 `cs*w` 系列,而 `cs*w` 只在
+`n2 ∈ {l,g,e,n}` 且 `n3 ∈ {t,e}` 时命中 —— `cles` 恰好落进 `:1641` 的
+`cled` 分支,这是最坏的一种:**不报错,只是算错**。
+
+**为什么至今没被发现:唯一覆盖它的测试无法失败。**
+`compiler/tests/examples/float_cmp.jhyy:48` 是**无条件 `return 42`** ——
+比较结果只喂给第 47 行的 printf,而那个 printf 有 5 个 `%d` 却只声明了 1 个
+参数(`extern fn printf(fmt: *u8, val: i32)`),正好撞上 B8(printf 变参限制),
+读的是栈上垃圾变参。于是:
+
+```
+$ python regress.py --tests=float_cmp.jhyy
+  PASS  float_cmp.jhyy    EXIT=42
+```
+
+这个 PASS 不携带任何信息。**这正是本项目自己的教训(见
+`feedback_ci_gate_must_exercise_path`):一个翻不了红的门比没有门更糟** ——
+它让人以为浮点比较是被测过的。
+
+**workaround:** 无。用户代码里 f32 的 `<` / `<=` / `>` / `>=` 与 f64 的
+`==` / `!=` 都不能用。src0 自身几乎不用浮点比较(只有 `jh_f64_atof` 等
+C 侧 bridge),所以自举闭环没踩到 —— 又一次「闭环只证明自洽,不证明正确」。
+
+**影响范围:** 任何用浮点比较的用户程序。注意 **f64 的 `<` `<=` `>` `>=`
+是好的**(那 4 个助记符 lexer 认识),坏的是 f64 的 `==` / `!=` 和
+f32 的全部四个序比较。
+
+**失效条件:**
+1. lexer `:1635-1641` 补齐 6 个助记符,并给 `:1642` else 分支加**兜底报错**
+   —— 现在 else 分支会把未知助记符默默映射成 `cs*w`,新加的助记符漏掉时
+   同样静默错类型
+2. `float_cmp.jhyy` 改成从比较结果**推导** exit code(而不是写死 42),
+   并把 printf 拆成合法的单参数调用 —— 修之前先造红灯
+
+**引用:**
+- 源码 `compiler/src0/codegen_amd64_lexer.jhyy:1628-1653`
+- 测试 `compiler/tests/examples/float_cmp.jhyy:4, 36-49`
+- 规范 [`../abis/jhyy-lang-spec-v1.3.0.md`](../abis/jhyy-lang-spec-v1.3.0.md)
+  §P2(该行的归因「用 QBE 默认指令」也已过时 —— QBE 早在 v3.1.0 移出生产路径)
+- ABI [`../abis/jhyy-abi-v1.0.0.md`](../abis/jhyy-abi-v1.0.0.md) § 11.1 A5 / § 11.2 B2
+
 

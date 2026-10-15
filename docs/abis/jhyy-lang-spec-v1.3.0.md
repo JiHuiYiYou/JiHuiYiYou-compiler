@@ -1404,7 +1404,7 @@ type ErrChain = struct {
 | # | 严重度 | 描述 | 影响范围 |
 |---|--------|------|---------|
 | ~~**P2**~~ | ~~类型已定义，codegen 缺失~~ | ~~切片 `[*]T` — 编译器接受 `[*]i32` 但 codegen 无实现~~ | **v0.6.0 sprint 6A 已实现**：按 struct pass-by-value sret 处理 |
-| **P2** | 不完整 | 浮点比较 (`==`/`<`/...) 部分场景未完全类型化（用 QBE 默认指令） | 大多数场景工作，极端 NaN/Inf 行为未规约（v0.5 sprint 5A 修了大部分） |
+| **P2** | 不完整 — **2026-10-15 修正** | 浮点比较 (`==`/`!=`/`<`/`<=`/`>`/`>=`) | ⚠️ 旧描述「用 QBE 默认指令,大多数场景工作,极端 NaN/Inf 行为未规约」**不准确**。QBE 已于 v3.1.0 (`6ae2d7c`) 移出生产路径,现在走自举后端;自举 IL lexer (`codegen_amd64_lexer.jhyy:1628-1647`) 只认 4 个 `c*d` 助记符。实际:**f32 的四个序比较被当成 f64 比较**(f32 变体 `cles`/`clts`/`cgts`/`cges` 落进 f64 分支),**f64 的 `==` / `!=` 直接 unknown mnemonic 硬失败**。f64 的 `<` `<=` `>` `>=` 是好的。详见 `docs/internal/workarounds.md` **W-109** 与 ABI § 11.1 A5。**唯一覆盖它的测试 `float_cmp.jhyy` 无条件 `return 42`,翻不了红** |
 | **P3** | 临时方案 (v2.13.8+) | 浮点 fmod (`%`) — 整数 `%` 工作,浮点 `%` codegen 不 emit `remd`/`rems`(vendor QBE 不支持),改 emit user-space formula `a - trunc(a/b) * b`(trunc toward 0; 5 IL insns: polymorphic `div` + `dtosi`/`stosi` + `swtof` + polymorphic `mul` + polymorphic `sub`)。Semantics 跟 QBE upstream `remd`/`rems` spec + C `fmod()` 严格一致(trunc toward 0)。BOTH backend 受益: default QBE 走 fold 5-instruction formula, self-backend opt-in (`JHY_SELF_BACKEND=1`) 同样走 fold 不见 `rem` token。详见 `docs/internal/workarounds.md` W-058 ✅ RESOLVED v2.13.8。**v1.7.2 patch A1 fact-check**: vendor QBE (2026-08-15 build) 不支持 `remd`/`rems`, 推 v2.x 真修; v2.13.8 sprint (commit `pending`) codegen.jhyy 改 fold。**v4.0.0 之后**: vendor QBE 移除, fold fix 仍 work (codegen.jhyy 层, 先于 backend 选择)。 |
 | **P3** | 缺失 | struct / enum 跨 FFI 边界（Windows x64 ABI 不兼容） | 需 C ABI 兼容 struct 传递（v0.6 候选） |
 | **P3** | 缺失 | 变参函数 (`printf` 的 `...`) — JHYY 侧需手动展开为多个 extern | 自举可手写 wrapper |
