@@ -1,23 +1,24 @@
-# 活跃 workaround 清零 — v4 发版前必须真修的 8 条
+# 活跃 workaround 清零 — v4 发版前必须真修的 9 条
 
 **状态:** 🔴 **进行中**(2026-10-15 建,per user 2026-10-10 决定「所有 defer/active 的 workaround
 必须在 v4 正式版中清零,大不了 v4 不发」)
 
-**基线:** `d2f5361`(2026-10-15)6 条首次进台账 → `93cdf3d` 补 W-109 → 补 W-110(8 条)。
-台账里的条目:`docs/internal/workarounds.md` W-103..W-107 / W-105.1 / W-109 / W-110。
+**基线:** `d2f5361`(2026-10-15)6 条首次进台账 → `93cdf3d` 补 W-109 → 补 W-110 / W-111(9 条)。
+台账里的条目:`docs/internal/workarounds.md` W-103..W-107 / W-105.1 / W-109 / W-110 / W-111。
 
 **优先级(高 → 低):**
 
 | # | W-NNN | 一句话 | 性质 | 相对工作量 |
 |---|-------|--------|------|-----------|
 | 1 | **W-105** | `check_borrow` 恒 `return 1` → `&mut` 独占性完全不检查 | 语言层静默失效 | **见下方 ⚠️ 决策点** |
-| 2 | **W-110** | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 | 静默算错,**根因未 RCA** | **先做 RCA** |
-| 3 | **W-109** | 自举 IL lexer 缺 6 个浮点比较助记符 → f32 比较按 f64 算,`f64 ==/!=` 硬失败 | **核心类型基本运算算错** | 小(补 6 个分支) |
-| 4 | **W-103** | `std_os_open/read/write/exit` 全是 mock,`std_os_exit` 不退出 | stdlib 对用户撒谎 | 小(5 个 C bridge) |
-| 5 | **W-104** | SysV ABI 参数分类调用 Win 分类器 | 错 ABI,目标路径平时不走 | 中(接线 + 新测试) |
-| 6 | **W-107** | 五个 per-fn 表硬编码 1024,距触发只剩 33 个 fn | 静默降级(非溢出) | 中(改预分配) |
-| 7 | **W-106** | `symtab_lookup_one` arena-touch 强制物化栈帧 | 冗余代码,后端依赖 | 小(需先构造复现) |
-| 8 | **W-105.1** | `check_cap_pass` 同款 stub,**当前无调用点** | 死代码 | 最小(删或实现) |
+| 2 | **W-111** | 泛型 enum 一旦被 match → sema 报错后 **SEGV** | **编译器崩溃** | 中(先修错误恢复) |
+| 3 | **W-110** | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 | 静默算错,**根因未 RCA** | **先做 RCA** |
+| 4 | **W-109** | 自举 IL lexer 缺 6 个浮点比较助记符 → f32 比较按 f64 算,`f64 ==/!=` 硬失败 | **核心类型基本运算算错** | 小(补 6 个分支) |
+| 5 | **W-103** | `std_os_open/read/write/exit` 全是 mock,`std_os_exit` 不退出 | stdlib 对用户撒谎 | 小(5 个 C bridge) |
+| 6 | **W-104** | SysV ABI 参数分类调用 Win 分类器 | 错 ABI,目标路径平时不走 | 中(接线 + 新测试) |
+| 7 | **W-107** | 五个 per-fn 表硬编码 1024,距触发只剩 33 个 fn | 静默降级(非溢出) | 中(改预分配) |
+| 8 | **W-106** | `symtab_lookup_one` arena-touch 强制物化栈帧 | 冗余代码,后端依赖 | 小(需先构造复现) |
+| 9 | **W-105.1** | `check_cap_pass` 同款 stub,**当前无调用点** | 死代码 | 最小(删或实现) |
 
 排序依据:**① 现在就会让用户拿到错误结果** > ② 目标路径一旦启用就错 >
 ③ 距触发有明确余量的降级 > ④ 冗余/死代码。
@@ -58,7 +59,7 @@ W-105 的修复,[`backlog.md` § 3](backlog.md)(原 `v4.3.0-plan.md`)已经规�
 | B. 直接上 Polonius | 把 v4.3.0 提到 v4 final 之前 | v4 final 被一个 600 行算法实现无限期挂起 |
 | C. W-105 降级为 DEFERRED | 台账改判,承认这是有意的 ship-gate 决策 | 政策实质上被自己放宽;但如实反映了 2026-08 当时的设计意图 |
 
-**本文档按 A 写。** 若 user 选 B 或 C,只需改 W-105 一节与本决策点,其余 7 条不受影响。
+**本文档按 A 写。** 若 user 选 B 或 C,只需改 W-105 一节与本决策点,其余 8 条不受影响。
 
 ---
 
@@ -96,7 +97,7 @@ sema, std/string, types}.jhyy` 八个文件里都有使用,不是没人调的死
 - 新增 `tests/borrow_conflict_double_mut.jhyy` / `borrow_conflict_mut_shared.jhyy` ——
   两者必须**编译失败**且错误信息指向第二个冲突点
 - `borrow_check_basic.jhyy`(现有)仍 PASS —— 不许把合法 borrow 也判死
-- regress 全量不退步(基线 163/163 PASS + 22 SKIP)
+- regress 全量不退步(基线 162/162 PASS + 23 SKIP)
 - `closure_check.sh` PASS(v2.s == v3.s)
 - `fixed_point.sh N=5` 7 PASS / 0 FAIL / 0 INFO
 
@@ -109,7 +110,47 @@ sema, std/string, types}.jhyy` 八个文件里都有使用,不是没人调的死
 
 ---
 
-## 2. W-110 — 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号
+## 2. W-111 — 泛型 enum 一旦真被使用 → sema 报错后 SEGV
+
+**台账:** W-111 | **触发面:** 用户写「泛型 enum」+「match 它的变体」
+
+**症状(四个变体全实测):**
+
+| 代码形态 | 结果 |
+|---|---|
+| `type Option<T> = enum { Some(T), None }` 声明但不使用 | exit 42,**不报错** |
+| 只构造 `let x = Option::None;` | exit 1,`unknown enum type`(干净报错) |
+| **match 变体** | **exit 139 SEGV** |
+| `type Pair<T> = enum { Two(T, T), Empty }` | exit 1,`expected )`(解析阶段挂) |
+| 泛型 fn(非 enum)对照组 | exit 42 正常 |
+
+崩溃在 **sema 阶段**,且是**打完错误之后**:
+
+```
+[3] sema start
+foo.jhyy:2:38: error: unknown enum type
+<SEGV>
+```
+
+`generics_enum.jhyy` 声称测的就是「enum generic — Option\<T\>」,但
+`main_jhyy` 只有 `return 42;`,**类型声明了却完全没被使用** —— 编译器走的是
+「声明但不实例化」路径,什么都不触发。跟 `float_cmp` 同款:**测试名字覆盖了
+功能,测试内容没有。**
+
+**两条独立缺陷,修的优先级不同:**
+1. **sema 错误恢复崩溃** —— 更该先修。泛型 enum 支不支持是另一个议题,但
+   报完错就崩是明确的健壮性缺陷:用户拿不到完整诊断
+2. **泛型 enum 实际未支持** —— 类型解析阶段就认不出 `Option<i32>`。泛型
+   *函数*正常,问题局限在 enum 的泛型化路径
+
+**验收 gate:**
+- 补 `// EXPECT-ERROR: "unknown enum type"` 测试(现在连这条都没有)
+- 修后**编译报错退出 1,不是 SEGV**
+- enum 多字段 payload 的解析器支持单独一条
+
+---
+
+## 3. W-110 — 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号
 
 **台账:** W-110 | **触发面:** 自举后端 temp 槽位管理(不是 lexer)
 
@@ -162,7 +203,7 @@ many(1,2)=1110    ← 正确
 
 ---
 
-## 3. W-109 — 自举 IL lexer 缺 6 个浮点比较助记符
+## 4. W-109 — 自举 IL lexer 缺 6 个浮点比较助记符
 
 **台账:** W-109 | **触发面:** `compiler/src0/codegen_amd64_lexer.jhyy:1628-1647`
 
@@ -215,7 +256,7 @@ f64 的 `<` `<=` `>` `>=` **是好的**(那 4 个 `c*d` lexer 认识),整数比�
 
 ---
 
-## 4. W-103 — `std/os.jhyy` 全是 mock
+## 5. W-103 — `std/os.jhyy` 全是 mock
 
 **台账:** W-103 | **触发面:** `compiler/src0/std/os.jhyy:69-144`
 
@@ -255,7 +296,7 @@ W-080 实际只动了 `std/io.jhyy` 和 `emit_call`。**(b) 从来没人动过�
 
 ---
 
-## 5. W-104 — SysV 参数分类借用 Win 分类器
+## 6. W-104 — SysV 参数分类借用 Win 分类器
 
 **台账:** W-104 | **触发面:** `compiler/src0/abi_amd64_sysv.jhyy:229`
 
@@ -289,7 +330,7 @@ struct 分类、返回约定都不同(≤16B 小 struct 返回:Win 走 hidden sr
 
 ---
 
-## 6. W-107 — per-fn 表 1024 上限
+## 7. W-107 — per-fn 表 1024 上限
 
 **台账:** W-107 | **触发面:** `compiler/src0/codegen_amd64_state.jhyy:511 / 515 / 524 / 530 / 537`
 (五个表:`fn_starts` / `per_fn_max` / `per_fn_alloc` / `per_fn_addr_pool` / `per_fn_base_t`)
@@ -330,7 +371,7 @@ grep -cE '^export function [wl] |^function [wl] ' <tmp>/main.il   → 991
 
 ---
 
-## 7. W-106 — `symtab_lookup_one` arena-touch
+## 8. W-106 — `symtab_lookup_one` arena-touch
 
 **台账:** W-106 | **触发面:** `compiler/src0/symtab.jhyy:261-264`
 
@@ -352,7 +393,7 @@ materialize stack frame in safe way`。后端哪天不再需要这个 touch,
 3. 红 → 保留,但把失效条件写进台账,并补回缺失的复现文档
 
 **验收 gate:**
-- 三行删除后 `closure_check.sh` PASS + `fixed_point.sh` 7 PASS + regress 163/163
+- 三行删除后 `closure_check.sh` PASS + `fixed_point.sh` 7 PASS + regress 162/162
 - 若删除后变红:新 W-NNN 登记根因,本条状态翻 ACTIVE 并写明复现
 
 **风险:**
@@ -362,7 +403,7 @@ materialize stack frame in safe way`。后端哪天不再需要这个 touch,
 
 ---
 
-## 8. W-105.1 — `check_cap_pass` 同款 stub(无调用点)
+## 9. W-105.1 — `check_cap_pass` 同款 stub(无调用点)
 
 **台账:** W-105.1 | **触发面:** `compiler/src0/sema.jhyy:2578-2579`
 
@@ -387,8 +428,8 @@ transition;不支持 `*Cap<T>` 裸指针、不支持 `cap_new()` builtin ctor。
 ## 全局 ship gate(6 条全修完)
 
 ```
-regress jhyy.exe              → 不低于 163/163 PASS + 22 SKIP
-regress jhyy_v2.exe           → 不低于 163/163 PASS + 22 SKIP   ← self-hosted 也跑
+regress jhyy.exe              → 不低于 162/162 PASS + 23 SKIP
+regress jhyy_v2.exe           → 不低于 162/162 PASS + 23 SKIP   ← self-hosted 也跑
 closure_check.sh              → PASS, v2.s == v3.s byte-identical
 fixed_point.sh N=5            → 7 PASS / 0 FAIL / 0 INFO
 workarounds.md 索引           → ACTIVE 0 / DEFERRED 0

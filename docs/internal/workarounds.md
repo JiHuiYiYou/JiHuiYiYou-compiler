@@ -120,6 +120,7 @@
 | [W-108](#w-108) | RESOLVED | 索引重建脚本静默丢弃 59/89 条目 —— STATUS_RE 不容忍 前缀,且只匹配 H2 |
 | [W-109](#w-109) | ACTIVE | 自举 IL lexer 缺 6 个浮点比较助记符 — f32/f64 六个比较运算静默降级 |
 | [W-110](#w-110) | ACTIVE | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 |
+| [W-111](#w-111) | ACTIVE | 泛型 enum 一旦真被使用 —— sema 报错后 segfault;多字段 payload... |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -7404,3 +7405,65 @@ many(1,2)=1110    ← 正确
 - 最小复现:见上(可直接抄进 `compiler/tests/examples/`)
 - `compiler/tests/examples/float_cmp.jhyy:36-52`(修好 arity 后暴露本条)
 - 相关:W-109(lexer 缺助记符,不同根因)/ W-096 / W-097 / W-101
+
+<a id="w-111"></a>
+## W-111: 泛型 enum 一旦真被使用 —— sema 报错后 segfault;多字段 payload 连解析都过不去
+
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — `type Option<T> = enum { Some(T), None }` 匹配时编译器崩溃(exit 139)
+**Backfilled:** 2026-10-15 (v3.2.0b「3i generics — enum generic」声称 ship 的那条)
+**Filed-by:** audit-fanout-2026-10-15
+**日期:** 2026-10-15 首次实测;实际引入时间待 RCA 确定
+
+**触发面:** 用户写「泛型 enum」+「对它的变体做 match」。
+
+**症状(四个变体,全部实测):**
+
+| 代码形态 | 结果 |
+|---|---|
+| `type Option<T> = enum { Some(T), None }` 声明但**不使用** | exit 42,**不报错** |
+| 只构造 `let x = Option::None;` | exit 1,`error: unknown enum type`(干净报错) |
+| **match** 变体 | **exit 139 SEGV** |
+| `type Pair<T> = enum { Two(T, T), Empty }` | exit 1,`error: expected )`(**解析阶段就挂**) |
+| 泛型 fn(非 enum)`fn id<T>(x: T) -> T` 对照组 | exit 42,**正常** |
+
+崩溃发生在 **sema 阶段**,且是在**已经打出错误之后**:
+
+```
+[3] sema start
+foo.jhyy:2:38: error: unknown enum type
+<SEGV>
+```
+
+即 `sema_error_str` 报完错,错误恢复路径继续往下走,拿到了无效指针。
+
+**为什么一直没被发现:** `compiler/tests/examples/generics_enum.jhyy` 声称测的
+就是「enum generic — Option\<T\> with Some(T) payload」,但它的 `main_jhyy`
+只有一行 `return 42;` —— **类型声明了却完全没被使用**。所以编译器走的是
+「声明但不实例化」的路径,什么都不会触发。这正是 `float_cmp` 的同款问题:
+**测试名字覆盖了功能,测试内容没有**。
+
+**根因(未 RCA,两条独立缺陷):**
+1. **sema 错误恢复崩溃** —— 这是更该先修的那条。泛型 enum 支不支持是另一个
+   议题,但**报完错就崩**是明确的健壮性缺陷:任何让 sema 进入该错误路径的
+   用户程序都会让编译器段错误,拿不到完整诊断。
+2. **泛型 enum 实际未被支持** —— 类型解析阶段就认不出 `Option<i32>`。
+   泛型 *函数* 正常,所以问题局限在 enum 的泛型化路径。
+
+**workaround:** 无。用户侧只能避开泛型 enum(改用非泛型 `type Opt = enum
+{ Some(i32), None }`,实测正常)。
+
+**影响范围:** 任何用泛型 enum 的用户程序 —— 编译器崩溃,而非错误诊断。
+`src0` 自身不用泛型 enum,所以自举闭环抓不到。
+
+**失效条件:**
+1. 先修 sema 错误恢复崩溃:打完 `unknown enum type` 后必须干净退出(补
+   `// EXPECT-ERROR: "unknown enum type"` 测试 —— 现在连这条都没有)
+2. 再决定泛型 enum 是「实现」还是「明确报不支持」。当前是**声明能过、用就崩**,
+   两头都不落地
+3. enum 多字段 payload(`Two(T, T)`)的解析器支持 —— 单独一条
+
+**引用:**
+- 声称覆盖该特性的测试 `compiler/tests/examples/generics_enum.jhyy`
+  (`main_jhyy` 仅 `return 42`,类型完全未使用)
+- 同族:`generics_err_unsubst.jhyy` 同样是假 EXPECT(见 tests.md 审计)
+- 相关:W-109 / W-110(同属「测试翻不了红 → 缺陷活下来」家族)

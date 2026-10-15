@@ -2,7 +2,7 @@
 
 > 集成测试清单 + 运行方法。详细每条 .jhyy 的预期值见 `compiler/tests/examples/`。
 >
-> **Last updated**: 2026-10-15 — `regress.py` baseline = **163/163 PASS + 22 SKIP**
+> **Last updated**: 2026-10-15 — `regress.py` baseline = **162/162 PASS + 23 SKIP**
 > (185 total;这是实测跑出来的数字,不是抄上一版)。Stage 2 closure sha `da78987c`。
 
 ## ⚠️ 引用「N/N PASS」之前先读这一段
@@ -48,7 +48,7 @@ python scripts/dev/audit_test_assertions.py --strict   # 有违规 exit 1(挂 CI
 | `literal-return-ok` | 6 | 合理例外:`exit_zero_extend_*` 的被测对象就是退出码本身 |
 | `expect-error` / `skipped` / `library` | 5 / 17 / 14 | — |
 
-**零信号合计 53 / 166 = 32%。** 所以「163/163 PASS」实际只证明「约 102 个测试的
+**零信号合计 53 / 166 = 32%。** 所以「162/162 PASS」实际只证明「约 102 个测试的
 结果是对的 + 其余没崩」。它**不**证明浮点比较、`&mut` 写路径、数组/字符串越界、
 除零、深递归 —— 这些要么没有断言,要么根本没有用例。实例见 `workarounds.md`
 **W-109** / **W-110**。
@@ -155,12 +155,12 @@ python regress.py --binary=jhyy_v2.exe  # 用 self-hosted 编译器跑
 ### 全量回归
 
 ```bash
-python compiler/build/bin/regress.py
+python regress.py          # 仓库根目录,不是 compiler/build/bin/
 ```
 
-输出示例(v2.4.0 baseline):
+当前输出:
 ```
-===== 104/104 passed, 0 failed, 4 skipped =====
+===== 162/162 passed, 0 failed, 23 skipped (of 185 total) =====
 ```
 
 baseline 历史:
@@ -168,8 +168,11 @@ baseline 历史:
 - v1.0.0 — 50/53 PASS + 3 SKIP(自举 parity)
 - v1.7.3 — 96/96 PASS + 10 SKIP(106 total)
 - v1.8.3 — 102/102 PASS + 4 SKIP(106 total)
-- v2.0.0 → v2.4.0 — 104/104 PASS + 4 SKIP(108 total,frozen v2.0.0 → v2.4.0 持平)
-- **v2.4.0 — 104/104 PASS + 4 SKIP(108 total)** ← 当前
+- v2.0.0 → v2.4.0 — 104/104 PASS + 4 SKIP(108 total)
+- **v4.0.8 — 162/162 PASS + 23 SKIP(185 total)** ← 当前(2026-10-15 实测)
+
+⚠️ 数量涨了不代表覆盖变强。见顶段「断言强度审计」:166 个可跑测试里 53 个
+零信号。**计数不是覆盖率的度量。**
 
 ### 单个测试
 
