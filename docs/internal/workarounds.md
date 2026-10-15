@@ -39,7 +39,8 @@
 | [W-026](#w-026) | RESOLVED | regress.py `[:80]` stderr 截断隐藏真实 QBE/gcc 错误 |
 | [W-029](#w-029) | SUPERSEDED | jhyy.exe toolchain 探测收敛 — `jh_gcc_path()` 4-tier... |
 | [W-072](#w-072) | RESOLVED | 0f9c923 merge artifact + codegen_amd64.jhyy 重复 fn... |
-| [W-097](#w-097) | DEFERRED | jhyy-side codegen emit_func_header per_fn_max... |
+| [W-097](#w-097) | RESOLVED | emit_func_header per_fn_max lookup + 6 个 emit 根因 → 自举闭环达成 |
+| [W-102](#w-102) | RESOLVED | address-holder 池与 alloc 池重叠 → self-hosted 编译器泛型 SEGV | |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -6150,8 +6151,47 @@ RCA 突破:`cg_local_t_from_global` 的 OLD check `cur_fn_idx >= fn_count` 跟 `
 ## W-097: jhyy-side codegen emit_func_header per_fn_max lookup operand swap → frame > 4096B → ___chkstk_ms clobber rcx → 所有 C 函数 call SEGV (推 v4.0.2.3+)
 
 **ID:** W-097
-**状态:** DEFERRED since 2026-10-09 (v4.0.2.3 wip → 推 v4.0.2.5; jhyy-side codegen 多-field-access 表达式 emit 真修需 separate deep sprint;W-096 fix 4 off-by-one 尝试 REVERTED 2026-10-09 因 regress 7/160;audit expansion 2026-10-09 surface 25 sites 跨 10 src0/ 文件 vs checklist 原始列 3 sites)
-**日期:** 2026-10-08 (W-096 真修 session 期间发现 W-NEW jh_read_file SEGV) → 2026-10-09 (RCA 深挖 + W-096 fix 4 revert + 登记)
+**状态:** ✅ RESOLVED 2026-10-15 (v4.0.8 wip — 闭环达成 `closure_check.sh` PASS, v2.s == v3.s byte-identical)
+**日期:** 2026-10-08 发现 → 2026-10-09 深挖后 DEFERRED → **2026-10-15 真修闭环**
+
+### 2026-10-15 RESOLVED — 六个 emit 根因,自举闭环达成
+
+DEFERRED 时的判断是「jhyy-side codegen 多-field-access 表达式 emit 真修需 separate deep
+sprint」。实际做下来**不是一个 bug 是一串**,而且真正的闸门不是 `.il` 相等而是
+**`.s` byte-equal**(`closure_check.sh`,commit `f85fa23` 新增)。闭环差距从
+**336,631 行 diff** 一路收敛到 0,逐个根因与证据:
+
+| # | 位置 | 机制 |
+|---|---|---|
+| 1 | `cg_alloc_slot` | value 池硬编码从 `-8192` 起;`cg_expr` 的 `local_max≈27564`(公式槽到 -220544),alloc 池与公式槽**完全重叠**,单函数 13,704 槽被踩。`frame_size` 同步漏算 value 池 |
+| 2 | `emit_binop` 助记符分派 | `"or"` 判在 `"xor"` 前,而 `"xor"` 含 `"or"` 子串 → `~expr` 恒 emit 成 `orq reg,-1`,即 `~x == -1`。连锁:sema 结构体布局 `align_up` 掩码失效,字段偏移退化成 `al-1` 累积(i64 → 7/22/37,`sizeof` → 22/37/52) |
+| 3 | `emit_binop` 整数比较宽度 | 取 `qt`(= dst 类型),而 QBE 里比较结果是 word → 64 位比较 emit 成 `cmpl`。`cg_expr` 的 i64 大字面量 promote 判据失效 → `=w copy 9223372036854775807` + `extsw` 截成 16 位 |
+| 4 | `cg_query_fn_returns_ptr` | 认不出返回指针的 extern(`jh_cgstate_get_state` / `arena_alloc` 等)—— 既不在 builtin 白名单,也不在 sema `ret_type_map`(extern 无函数体不装)→ 返回 temp 没标 address-holder → 派生地址链断 |
+| 5 | `emit_load` | fallback 分支「拷 src 槽的值」违反 QBE 语义(`load` 的 src 槽**永远是地址**)→ 改成无条件解引用 |
+| 6 | `emit_store` | 同上 |
+
+**验证(2026-10-15):**
+
+```
+closure_check.sh    → PASS, v2.s == v3.s byte-identical (sha da78987c)
+fixed_point.sh N=5  → 7 PASS / 0 FAIL / 0 INFO(第 2 代起全代 byte-equal)
+regress jhyy.exe    → 163/163 PASS + 22 SKIP
+regress jhyy_v2.exe → 163/163 PASS + 22 SKIP  ← self-hosted 编译器
+```
+
+**方法论教训(比结论更重要):**
+
+- **恒真的断言比没有断言更糟。** 排查中途发现 `fixed_point.sh` 报「N=4 .s differs」,
+  读起来像「第 4 代才收敛」。实际是脚本的 N≥4 循环漏设 `JHY_WRITE_IL=1`,拿
+  in-mem 路径的产物跟前几代 `JHY_WRITE_IL` 路径的产物互比 —— 假象。
+- **注释声称的性质必须实测。** 同一脚本注释写「in-mem .s 跟 JHY_WRITE_IL=1
+  self path .s byte-equal」,实测不等(槽位编号不同)。顺着这条线还发现
+  `JHY_WRITE_IL=1` 这个本该「只影响是否落盘」的开关,实际上会**切换编译器的
+  emit 路径** —— 已改成纯副作用(commit `a710320`)。
+- **单测 FAIL 先清残留进程再重跑。** 同一份代码在有我自己留下的后台编译进程时
+  会随机挂掉 `cap_table_basic` / `slice_len`,清干净就全绿。
+
+相关:[[W-102]](`make` 阶段同族的槽位重叠 → 泛型 SEGV)。
 
 **触发面:** `compiler/src0/codegen_amd64_emit_ctrl.jhyy:519-573` `emit_func_header` 函数 — jhyy-side codegen (jhyy.exe / jhyy_v1.exe.exe 编 src0/main.jhyy) 处理 `ptr_add_u8((*cg).per_fn_max, ((*cg).cur_fn_idx - (1 as i64)) * (8 as i64))` 这类 multi-field-access 表达式时,emit wrong QBE IL (operand swap + mul operand 用错 field)。
 
@@ -6728,3 +6768,64 @@ V2 v4.0.0 bench.sh nqueens 期间 4 个 reproducer 拆解 + assembly dump RCA �
 | **验证** | regress 151/151 PASS / 0 FAIL / 20 SKIP (+6 new tests);std_io_basic 6/6 sub-test PASS (5→6);exit_zero_extend_{0,1,127,128,255,256} 6/6 PASS (bash `$?` == (N & 0xFF)) |
 | **引用** | `docs/logs/v3/changelog-v3.2.md` v3.2.3.1 section;W-059 QBE-era history;`feedback_fix_evaluation_rule` 5/5 PASS |
 
+## W-102: address-holder 池与 alloc 池槽位重叠 → self-hosted 编译器编泛型结构体字面量 SEGV
+
+**ID:** W-102
+**状态:** ✅ RESOLVED 2026-10-15 (v4.0.8 wip — 合并为单一池)
+**日期:** 2026-10-15(W-097 闭环达成后跑 `regress --binary=jhyy_v2.exe` 才暴露)
+
+**触发面:** `compiler/src0/codegen_amd64_state.jhyy` `cg_alloc_slot` —— 只在
+**self-hosted 编译器**(`jhyy_v2.exe`)上复现;stage0 产物 `jhyy.exe` 不受影响。
+
+**症状:** `jhyy_v2.exe` 编含泛型结构体字面量的 `.jhyy` 必崩,`rc=139`,
+**stdout / stderr 全空**。8 行最小复现:
+
+```jhyy
+type Box<T> = struct { v: i64 }
+fn main_jhyy() -> i32 { let b = Box<i32> { v: 7 as i64 }; ... }
+```
+
+非泛型结构体字面量正常 —— 看着"跟泛型有关",**实际是 AST 深度相关**:
+只有泛型结构体字面量那条路径深到触发交叠。
+
+**根因:** `cg_alloc_slot` 分 value(alloc)池和 address-holder 池两个 head,
+两者深度都靠 pre-scan 估算(`per_fn_alloc` / `per_fn_addr_pool`)。估算偏小,
+两个池就共用槽位 —— 而**两类分配在指令流里是交错的**:函数头算好的 AH 起点
+挡不住后续 value 分配长进 AH 区,反过来也一样,**没有任何"起点"能同时避开**。
+
+实测(`parser__parse_expr`):AH 池 `[-20584, -28824]` 与 value 池
+`[-20024, -21608]` 重叠 **36 个槽**。其中 `-20592` 同时是 `%t7137` 的指针
+holder 和 `%t7778` 的 `alloc8` 存储 → holder 被覆盖成 0 →
+`mov (%r8),%rax` 里 `r8 = 0+24 = 24` → SEGV。
+
+**gdb 现场之所以难读:** `rip` 落在 `parser__parse_expr+19515`,但那一段的字节
+反汇编出来是 `movabs %eax, 0xffa3d0858b4cffff` / `decl -0x75(%rcx)` —— 明显是
+**字符串常量**。因为跳进了 `.rodata`,符号表指向 `parse_expr` 反而误导。
+第一版 gdb 拿到的是另一条指令(`mov %rax,(%r8)` r8=0x18),两次看到的字节
+不同才反应过来是"执行流跑进数据段"而不是"某个 emit 写错了"。
+
+**修法:** 合并成**单一单调递减的池**。address-holder 是**语义**属性
+(`temp_holds_address` bitmap),跟槽位无关 —— 同一槽被标 AH 只影响
+`emit_load`/`emit_store` 走不走 indirect,不影响它存什么。合并后槽位天然互斥,
+这类重叠**从结构上消失**,也不再依赖任何 pre-scan 估算准不准。
+
+**顺带修:** `mono_subst_expr` 补 `NODE_STRUCT_LIT` 深拷贝分支 —— 之前泛型结构体
+字面量落到文件末尾兜底「浅 clone」,只 `arena_alloc(NODE_SIZE())` **不分配
+variant data**,调用方读 `node + NODE_SIZE()` 处越界。字段值里的类型参数之前
+也从未被替换。
+
+**代价:** 帧变大,编译慢约 2x(`char_literal_3byte` jhyy_v2: 3.9s → 10.2s)。
+
+**验证:**
+
+```
+全文件 alloc∩holder 槽位碰撞      36(parse_expr 单函数)→ 0
+5 个 generics 测试 + 2 个最小复现   全部 exit=42
+regress --binary=jhyy.exe         163/163 PASS + 22 SKIP
+regress --binary=jhyy_v2.exe      163/163 PASS + 22 SKIP  ← 本条的关键证据
+closure_check.sh                  PASS
+```
+
+**为什么值得单独立一条:** `v2 == v3` 的闭环**只证明编译器自洽,不证明它正确**。
+今天这条 bug 就是闭环全绿的情况下,由「拿 self-hosted 编译器跑一遍全量回归」
+暴露出来的 —— 自举编译器自己编自己永远一致,但它可以一致地错。
