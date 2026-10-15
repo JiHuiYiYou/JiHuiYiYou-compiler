@@ -70,20 +70,20 @@ v3.x 是语言特性扩展轴,服务于 [jhyy_OS](../../../jhyy_OS/) 的 OS-requ
 
 ### 抽象 feature / v3.x 中/末 / M5 → v4.x(per 2026-09-06 user 决定)
 非 OS-required 抽象 feature + M5 全推到 **v4.x 串行轴**:
-- 3k 错误恢复 → [`../v4/v4.7.0-plan.md`](../v4/v4.7.0-plan.md)
-- 3m 基本优化 → [`../v4/v4.8.0-plan.md`](../v4/v4.8.0-plan.md)
-- 3n 包管理器 → [`../v4/v4.9.0-plan.md`](../v4/v4.9.0-plan.md)
-- async/await → [`../v4/v4.2.0-plan.md`](../v4/v4.2.0-plan.md)
-- lifetime 完整版 + Polonius → [`../v4/v4.3.0-plan.md`](../v4/v4.3.0-plan.md)
-- closure 增强 (move/borrow capture/generic/trait object)→ [`../v4/v4.4.0-plan.md`](../v4/v4.4.0-plan.md)
-- const generic → [`../v4/v4.5.0-plan.md`](../v4/v4.5.0-plan.md)
-- trait objects (dyn Trait)→ [`../v4/v4.6.0-plan.md`](../v4/v4.6.0-plan.md)
-- HKT + specialization → [`../v4/v4.10.0-plan.md`](../v4/v4.10.0-plan.md)
-- 并发 cap + 完整 memory model + 多架构 ABI → [`../v4/v4.11.0-plan.md`](../v4/v4.11.0-plan.md)
-- **M5**(删 `src/*.c` + untrack QBE + 删 `runtime.c`)→ [`../v4/v4.1.0-plan.md`](../v4/v4.1.0-plan.md)
+- 3k 错误恢复 → [`../v4/backlog.md § 7`](../v4/backlog.md)
+- 3m 基本优化 → [`../v4/backlog.md § 8`](../v4/backlog.md)
+- 3n 包管理器 → [`../v4/backlog.md § 9`](../v4/backlog.md)
+- async/await → [`../v4/backlog.md § 2`](../v4/backlog.md)
+- lifetime 完整版 + Polonius → [`../v4/backlog.md § 3`](../v4/backlog.md)
+- closure 增强 (move/borrow capture/generic/trait object)→ [`../v4/backlog.md § 4`](../v4/backlog.md)
+- const generic → [`../v4/backlog.md § 5`](../v4/backlog.md)
+- trait objects (dyn Trait)→ [`../v4/backlog.md § 6`](../v4/backlog.md)
+- HKT + specialization → [`../v4/backlog.md § 10`](../v4/backlog.md)
+- 并发 cap + 完整 memory model + 多架构 ABI → [`../v4/backlog.md § 11`](../v4/backlog.md)
+- **M5**(删 `src/*.c` + untrack QBE + 删 `runtime.c`)→ [`../v4/backlog.md § 1`](../v4/backlog.md)
 
 ### v4.x 合并触发
-- 触发前置:V2-C v2.8.0 ship + v3.x 全关键路径 ship + user 决定 merge 时机 → [`../v4/v4.0.0-plan.md`](../v4/v4.0.0-plan.md)
+- 触发前置:V2-C v2.8.0 ship + v3.x 全关键路径 ship + user 决定 merge 时机 → [`../v4/backlog.md § 0`](../v4/backlog.md)
 - v2+v3 merge 后**主版本轴串行**,v4.x 全 plan 见 [`../v4/README.md`](../v4/README.md)
 
 ## 命名约定

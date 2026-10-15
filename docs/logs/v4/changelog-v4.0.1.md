@@ -88,7 +88,7 @@ Per Step 1.1 verification matrix + Step 1.3 docs-only flips (per `merge-v2-axis-
 
 - Self-compile emit→lex round-trip fix (W-073 follow-on) — multi-func silent-fail issue not multifn count per se (1/2/3/5/118-fn tests all pass; only 28-fn main.jhyy self-compile fails with "unknown QBE IL mnemonic at byte 20227" — emit→lex round-trip on jhyy-side lexer 不识别自家 emit 形式)
 - v4.0.0-rc1 → v4.0.0 final promote (depends on v4.0.2 fix)
-- v4.1.0 M5 src/*.c delete + runtime.c delete (per `docs/plans/v4/v4.1.0-plan.md`)
+- v4.1.0 M5 src/*.c delete + runtime.c delete (per `docs/plans/v4/backlog.md § 1`)
 
 ---
 
