@@ -160,6 +160,13 @@ def run_test(
     # 只用于显示、不参与判定,于是 float_cmp 那类测试的输出全是摆设。
     # 只比 stdout(不比 stderr):混进诊断信息会造成假通过。
     expect_out_kw = None
+    # 2026-10-15: XFAIL directive — 「这个测试应该失败,因为对应 bug 还没修」。
+    #
+    # 为什么不用 SKIP:SKIP 是**不跑**,所以 bug 哪天被修好了它也不会吭声 ——
+    # 标记就永久失真了。XFAIL 是**真跑**:失败算预期(不计入 suite 失败),
+    # 但**通过就算 XPASS 并让 suite 失败**,因为那意味着有人修了 bug 却忘了摘标记。
+    # 「修好了必须有人看见」正是 SKIP 给不了的。
+    xfail_reason = None
     # v1.7.3: SKIP directive — 期望 test 暂 skip (有已知 bug 推后续 ship,
     # e.g. defer silent codegen crash 推 v1.8). 形式: `// SKIP: <reason>`.
     skip_reason = None
@@ -196,6 +203,9 @@ def run_test(
         m_out = re.search(r'//\s*EXPECT-OUT\s*[:=]\s*"([^"]+)"', src)
         if m_out:
             expect_out_kw = m_out.group(1)
+        m_xfail = re.search(r"//\s*XFAIL\s*:\s*(.+)", src)
+        if m_xfail:
+            xfail_reason = m_xfail.group(1).strip()
         m_skip = re.search(r"//\s*SKIP\s*:\s*(.+)", src)
         if m_skip:
             skip_reason = m_skip.group(1).strip()
@@ -321,6 +331,24 @@ def run_test(
     if _os.environ.get("JHYY_DEBUG_W028"):
         print(f"[W-028] fname={os.path.basename(jhyy_file)} actual={actual} expected={expected} actual_cmp={actual_cmp} expected_cmp={expected_cmp} sys.platform={sys.platform} is_win_py={_IS_WINDOWS_PY}")
     return (actual_cmp == expected_cmp, expected, actual, output)
+
+
+def _xfail_reason(fname: str) -> Optional[str]:
+    """该测试是否带 `// XFAIL:` 标记;带则返回原因,不带返回 None。
+
+    在 run_all 里重读一次文件,而不是让 run_test 多返回一个元素 —— run_test 的
+    4-tuple 是 Public API(docstring 里写明),改它会波及 MCP tool 与 regress.py。
+    """
+    path = TEST_DIR / fname
+    if not path.exists():
+        return None
+    try:
+        from audit_test_assertions import directive_source
+        raw = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return None
+    m = re.search(r"//\s*XFAIL\s*:\s*(.+)", directive_source(raw))
+    return m.group(1).strip() if m else None
 
 
 def _assertion_kind(fname: str) -> str:
@@ -462,6 +490,7 @@ def run_all(
     # 现在 a 进 passed,b/c 各自另立类别并计数,汇总行直接把它们写出来 ——
     # 「X/Y 全绿」这句话从此不需要额外解释了。
     noassert_tests, vacuous_tests = [], []
+    xfail_tests, xpass_tests = [], []
 
     # jobs=None → 原行为(全并行);传 N 则限制并发。self-hosted 二进制
     # (jhyy_v2.exe)比 stage0 产物重 3-16x,185 路全并行时单个 compile 会
@@ -495,6 +524,22 @@ def run_all(
 
     for fname in files:
         ok, exp, act, msg = results[fname]
+        xfail = _xfail_reason(fname)
+        if xfail is not None:
+            # XFAIL 语义(2026-10-15):这个测试**应该失败**。
+            #   失败 → XFAIL,预期内,不计入 suite 失败
+            #   通过 → XPASS,说明 bug 被修好了却没摘标记 → **计入失败**
+            # 「修好了必须有人看见」是 SKIP 给不了的:SKIP 根本不跑,修好了也不吭声。
+            if ok and not (msg and msg.startswith("skipped")):
+                print(f"XPASS {fname:<27}  (XFAIL 标记已过期 —— 对应 bug 似乎修好了,请摘掉 XFAIL)")
+                xpass_tests.append(fname)
+                failed += 1
+                failed_tests.append({"file": fname, "expected": exp, "actual": act,
+                                     "message": f"XPASS: XFAIL 标记过期 ({xfail})"})
+            else:
+                print(f"XFAIL {fname:<27}  {msg}"[:160])
+                xfail_tests.append(fname)
+            continue
         if ok and msg and msg.startswith("skipped"):
             # v1.7.3: SKIP directive + library skip 都走这条 path.
             print(f"SKIP  {fname:<30}  {msg}")
@@ -528,6 +573,9 @@ def run_all(
           f"{skipped} skipped (of {len(files)} total) =====")
     print(f"  ├─ NOASSERT {len(noassert_tests)}  无断言,只验了「进程没崩」")
     print(f"  ├─ VACUOUS  {len(vacuous_tests)}  有 EXPECT 但断言在数学上不可能失败")
+    print(f"  ├─ XFAIL    {len(xfail_tests)}  预期内失败(已知 bug,真跑了)")
+    if xpass_tests:
+        print(f"  ├─ XPASS    {len(xpass_tests)}  ⚠️ XFAIL 标记已过期 —— 对应 bug 修好了但没摘标记")
     if noassert_tests or vacuous_tests:
         print("  └─ ⚠️ 上面两类**不是 PASS**。它们仍会跑(能抓编译器崩溃),但验证不了"
               "任何计算结果。逐个补断言见 docs/internal/tests.md。")
@@ -565,6 +613,8 @@ def run_all(
         "passed_tests": passed_tests,
         "noassert_tests": noassert_tests,
         "vacuous_tests": vacuous_tests,
+        "xfail_tests": xfail_tests,
+        "xpass_tests": xpass_tests,
         "duration_sec": round(duration, 2),
         "baseline_warning": baseline_warning,
         "early_abort": None,

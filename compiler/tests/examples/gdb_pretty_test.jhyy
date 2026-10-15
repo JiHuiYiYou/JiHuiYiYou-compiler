@@ -4,7 +4,7 @@
 // 值(read_point 30 + read_color 1 + read_maybe 42 + read_slice 10+50=60 = 133)
 // 只被 printf 出去、没人看。合成 gdb 三个基础类型 + 三个 helper 的和。
 // EXPECT-OUT: "=133"
-// SKIP: W-114 全 unit-variant 的 enum match 永远命中第一支 —— read_color(Green)
+// XFAIL: W-114 全 unit-variant 的 enum match 永远命中第一支 —— 修好后本测试应转为 PASS,届时摘掉这行
 //       和 read_maybe(Some(42)) 目前都返回 0。修完 W-114 删掉这行即验收。
 //
 // Covers the three composite types handled by the pretty printer:

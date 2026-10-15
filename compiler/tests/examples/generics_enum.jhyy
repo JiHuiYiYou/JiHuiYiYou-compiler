@@ -1,17 +1,27 @@
-// v3.2.0b (3i generics — root cause fix): enum generic — Option<T> with
-// Some(T) payload + None variant. v3.2.0b activates monomorphize so
-// Option<i32> instantiation is real.
+// generics_enum.jhyy — 泛型 enum `Option<T>` 必须能用(match + 取 payload)。
+//
+// 2026-10-15 重写。此前本文件声明了 `Option<T>` 却从不在 main 里使用它,
+// main 只有 `return 42` —— 编译器走「声明但不实例化」路径,什么都不触发,
+// 所以它作为 v3.2.0b「enum generic ship gate」一直 PASS。
+//
+// 现在它**真的用上**这个类型,而编译器在这个位置 SEGV(W-111:sema 打完
+// `error: unknown enum type` 之后段错误,而不是干净退出)。
+// 这是本测试存在的意义:把「一用就崩」变成一条会响的红线。
+//
+// XFAIL: W-111 泛型 enum 一旦被 match → sema 报错后 SEGV —— 修好后本测试应转为 PASS,届时摘掉这行
+// EXPECT: 106
 type Option<T> = enum {
     Some(T),
     None,
 }
 
-fn main_jhyy() -> i32 {
-    return 42;
+fn unwrap_or(o: Option<i32>, d: i32) -> i32 {
+    return match o {
+        Option::Some(v) => v,
+        Option::None => d,
+    };
 }
-// 2026-10-15:加上这个断言会**让编译器段错误**(W-111:sema 打完
-// `error: unknown enum type` 之后 SEGV)。泛型 enum 一旦被真正使用就走那条路 ——
-// 而本文件此前只是「声明但不实例化」,所以一直 PASS。
-// 修完 W-111 删掉这行 SKIP 就是验收标准。
-// SKIP: W-111 泛型 enum 一旦被 match → sema 报错后 SEGV(编译器崩溃)
-//EXPECT:42
+
+fn main_jhyy() -> i32 {
+    return unwrap_or(Option::Some(7), 0) + unwrap_or(Option::None, 99);
+}

@@ -124,6 +124,7 @@
 | [W-112](#w-112) | ACTIVE | `#[link_section]` 完全失效 — 属性被解析但 codegen 是 no-op |
 | [W-113](#w-113) | ACTIVE | `asm!` 与 memory barrier 的字节被 emit 到 `ret` 之后,永不执行 |
 | [W-114](#w-114) | ACTIVE | 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效 |
+| [W-115](#w-115) | ACTIVE | W-089 标着 RESOLVED,但它自己的 reproducer 至今... |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -7634,3 +7635,57 @@ Mix(Z)=30      期望 30    ✓
 - 最小复现:见上(可直接抄进 `compiler/tests/examples/`)
 - 受影响测试 `compiler/tests/examples/gdb_pretty_test.jhyy`
 - 相关:`docs/internal/workarounds.md` enum match arm tag check 段(v1.7.1 patch A3)
+
+<a id="w-115"></a>
+## W-115: W-089 标着 RESOLVED,但它自己的 reproducer 至今 STACK_OVERFLOW
+
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — codegen_call_return_types.jhyy 运行期 STACK_OVERFLOW(0xC00000FD)
+**Backfilled:** 2026-10-15 (v3.4.2 W-089 声称真修时)
+**Filed-by:** audit-fanout-2026-10-15
+**日期:** 2026-09-29 (v3.4.2 声称 RESOLVED) → 至今
+
+**触发面:** `compiler/tests/examples/codegen_call_return_types.jhyy` —— 它是
+W-089 的官方 reproducer(文件头第 1 行就写着「v3.4.2 W-089 真修 reproducer test」)。
+
+**症状(实测):**
+
+```
+$ 去掉 // SKIP: 后实跑
+FAIL  zz_ccrt.jhyy  got=3221225725  runtime crash: STACK_OVERFLOW (0xC00000FD)
+```
+
+**矛盾:** W-089 台账写「✅ RESOLVED 2026-09-29 (v3.4.2 ship 真修:
+SymbolReturnTypeMap + emit_call semantic lookup 替换 v3.1.0 byte-prefix
+whitelist)」—— 而**验证它的那个 reproducer 自己就崩**。也就是说
+「W-089 已 RESOLVED」这句话**没有证据支撑**。
+
+**为什么一直没被发现:** 该测试从 v3.4.0 起就被标着
+`// SKIP: ... (not in default regress CI gate per v3.4.0-plan.md L89)` ——
+它被**故意排除在回归之外**。所以「真修」的验证证据来自别处(大概是手工跑),
+而那条证据在时间推移后没有再复核。这跟今天挖出的其余几条同一个病:
+**测试要么跑不了、要么跑不到、要么跑到了却不验结果。**
+
+**根因未定,两条可能(都没验证):**
+1. W-089 没真修 —— 声称的 `SymbolReturnTypeMap` 路径在某些调用形态上仍失效
+2. W-089 真修了,但这个 8-subtest 文件覆盖面更广,撞到的是**另一个**栈溢出 bug
+   (它测的 8 项:闭包返回 `*T` / builtin `ptr_add` / `ptr_add_u8` / `malloc` 等,
+   远不止 W-089 的触发面)
+
+区分这两条要先把栈溢出的位置定位出来 —— 而它至今被 SKIP 挡着。
+
+**workaround:** 无。
+
+**影响范围:** 待定,取决于上面哪条成立。若是 (1),W-089 相关的
+`*(call_ret as *T)` 模式仍可能读错字节;若是 (2),则另有一条未登记的栈溢出。
+
+**失效条件:**
+1. 先定位栈溢出在哪个 sub-test(拆开逐个跑,或用 `// SETENV:` 缩小)
+2. 据此判定 W-089 的 RESOLVED 是否成立 —— 若不成立,**把 W-089 翻回 ACTIVE**
+   (它现在是 2026-09-29 声称的真修,是本项目里最后一个没有 reproducer 佐证的 RESOLVED)
+3. 该测试的 `// SKIP:` 已于 2026-10-15 改成 `// XFAIL:` —— 现在它**真跑**,
+   崩溃会被记为 XFAIL 并出现在每次回归的输出里,不再是隐形项
+
+**引用:**
+- 测试 `compiler/tests/examples/codegen_call_return_types.jhyy`
+- W-089 entry(`docs/internal/workarounds.md`)
+- `v3.4.0-plan.md:89`(当初把它排除出 CI gate 的那行)

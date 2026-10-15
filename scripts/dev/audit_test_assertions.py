@@ -108,7 +108,7 @@ def strip_comments(src: str) -> str:
 
 
 RE_DIRECTIVE_TAIL = re.compile(
-    r'^\s*(EXPECT|EXPECT-ERROR|EXPECT-OUT|SKIP|SKIP-QBE|SETENV)')
+    r'^\s*(EXPECT|EXPECT-ERROR|EXPECT-OUT|XFAIL|SKIP|SKIP-QBE|SETENV)')
 
 
 def _comment_tail(line: str) -> str:

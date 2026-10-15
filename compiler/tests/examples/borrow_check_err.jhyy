@@ -1,4 +1,8 @@
-// SKIP: V3-C 3g feature — jhyy-side only (C-side bootstrap predates V3-C; chained &T not in C-side parser)
+// XFAIL: 本测试要的是 sema 阶段报「chained `&&T` not allowed」,实际报的是
+//       parser 阶段「expected type name, got &&」—— 阶段和措辞都不对。
+//       (原 SKIP 理由「jhyy-side only / C 端 parser 不认」是从那批 10 个继承来的
+//        过期文本,与本测试无关。)
+//       修好后本测试应转为 PASS,届时摘掉这行。
 // v3.1.0 (V3-C 3g) ship-gate test: chained `&&T` rejected at sema stage.
 // Per spec supplement v3.1.0 § 2: borrow is terminal — `&&T` is not allowed.
 fn main_jhyy() -> i32 {

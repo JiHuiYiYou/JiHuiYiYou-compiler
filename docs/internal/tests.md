@@ -2,7 +2,7 @@
 
 > 集成测试清单 + 运行方法。详细每条 .jhyy 的预期值见 `compiler/tests/examples/`。
 >
-> **Last updated**: 2026-10-15 — `regress.py` = **173/173 PASS(全部有断言)+ 24 SKIP**
+> **Last updated**: 2026-10-15 — `regress.py` = **173/173 PASS(全部有断言)+ 5 XFAIL + 19 SKIP**
 > (197 total,连跑两次一致)。Stage 2 closure sha `da78987c`。
 >
 > **注意 total 从 185 变成 197**:harness 原来用 `os.listdir`(不递归),
@@ -18,6 +18,7 @@
 | 源文件里的指令 | 实际验了什么 |
 |---|---|
 | `// EXPECT: 42` | 进程退出码 == 42 —— **真断言**(前提:见下第 2 条) |
+| `// XFAIL: <原因>` | **真跑,应该失败**。失败记 XFAIL(预期内);**通过记 XPASS 并让 suite 失败** |
 | `// EXPECT-OUT: "substr"` | **stdout 含该子串**(2026-10-15 新增)。只比 stdout 不比 stderr —— 混进诊断信息会造成假通过 |
 | `// EXPECT-ERROR: "kw"` | 编译必须失败且 stderr 含该子串 |
 | `// SKIP: reason` | 跳过 |
@@ -58,10 +59,36 @@ python scripts/dev/audit_test_assertions.py --strict   # 有违规 exit 1(挂 CI
 regress 汇总行现在**只计有断言的**:
 
 ```
-===== 173/173 passed (全部有断言), 0 failed, 24 skipped (of 197 total) =====
+===== 173/173 passed (全部有断言), 0 failed, 19 skipped (of 197 total) =====
   ├─ NOASSERT 0  无断言,只验了「进程没崩」
   ├─ VACUOUS  0  有 EXPECT 但断言在数学上不可能失败
+  ├─ XFAIL    5  预期内失败(已知 bug,真跑了)
 ```
+
+**19 个 SKIP 的构成:** 14 个 library(无 `fn main_jhyy`)+ 5 个 sysv
+(需 Linux;本机无 WSL/Docker 时跳过,但项目里有
+`compiler/tests/bootstrap/sysv_full_regress.sh` 专门跑它们)。
+
+**5 个 XFAIL** —— 全部对应一条已登记的 ACTIVE workaround,**真跑、真失败、
+出现在每次回归输出里**:
+
+| 测试 | 对应 |
+|---|---|
+| `float_cmp.jhyy` | W-109 浮点比较 |
+| `generics_enum.jhyy` | W-111 泛型 enum SEGV |
+| `gdb_pretty_test.jhyy` | W-114 enum match 恒取第一支 |
+| `codegen_call_return_types.jhyy` | W-115 W-089 reproducer 仍 STACK_OVERFLOW |
+| `borrow_check_err.jhyy` | chained `&&T` 在 parser 阶段就挂,不是 sema |
+
+### 为什么是 XFAIL 而不是 SKIP
+
+SKIP 是**不跑**,所以 bug 哪天被修好了它也不会吭声,标记永久失真。
+XFAIL **真跑**:失败算预期,但**通过就算 XPASS 并让 suite 失败** ——
+「修好了必须有人看见」是 SKIP 给不了的。
+
+XPASS 上线当场就抓到一个过期标记:`generics_enum` 报了 XPASS,因为它其实
+**没在用**那个泛型 enum(声明了但 main 从不引用),编译通过、返回 42、
+PASS 了 —— 标记是假的。改成真的用上之后才成为有效的 XFAIL。
 
 NOASSERT / VACUOUS **不是 PASS** —— 它们仍会跑(能抓编译器崩溃),但验证不了
 任何计算结果。以前这两类和 PASS 在汇总行里长得一模一样,「163/163 全绿」这句话

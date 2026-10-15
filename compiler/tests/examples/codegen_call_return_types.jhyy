@@ -21,7 +21,11 @@
 //   8. Builtin ptr_add / ptr_add_u8 / malloc (cg_is_builtin_ptr_fn fallback)
 //
 // main_jhyy runs all 8 sub-tests, returns 0 iff all PASS, else non-zero error code.
-// SKIP: v3.4.2 W-089 reproducer test (not in default regress CI gate per v3.4.0-plan.md L89)
+// XFAIL: W-089 标着 RESOLVED(2026-09-29 v3.4.2),但**本 reproducer 至今
+//       STACK_OVERFLOW**(0xC00000FD)。两者矛盾,成因待 RCA —— 可能 W-089
+//       没真修,也可能是这个 8-subtest 覆盖面更广、撞到另一个 bug。
+//       在查清之前,「W-089 已 RESOLVED」这句话没有证据支撑。
+//       修好后本测试应转为 PASS,届时摘掉这行。
 
 fn ptr_add(p: *u8, off: i64) -> *u8 {
     return (p as i64 + off) as *u8;
