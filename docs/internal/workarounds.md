@@ -125,6 +125,7 @@
 | [W-113](#w-113) | ACTIVE | `asm!` 与 memory barrier 的字节被 emit 到 `ret` 之后,永不执行 |
 | [W-114](#w-114) | ACTIVE | 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效 |
 | [W-115](#w-115) | ACTIVE | W-089 标着 RESOLVED,但它自己的 reproducer 至今... |
+| [W-116](#w-116) | ACTIVE | SysV callee 参数溢出只处理 4 个整数寄存器 —— 第 5 个及以后的参数全读到第 4... |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -7689,3 +7690,86 @@ whitelist)」—— 而**验证它的那个 reproducer 自己就崩**。也就�
 - 测试 `compiler/tests/examples/codegen_call_return_types.jhyy`
 - W-089 entry(`docs/internal/workarounds.md`)
 - `v3.4.0-plan.md:89`(当初把它排除出 CI gate 的那行)
+
+<a id="w-116"></a>
+## W-116: SysV callee 参数溢出只处理 4 个整数寄存器 —— 第 5 个及以后的参数全读到第 4 个的值
+
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — `>4` 个整数参数的函数在 amd64_sysv 上 callee 侧取参错误
+**Backfilled:** 2026-10-15 (v2.7.0 写 emit_call 时就已知道「stack-arg 实 wire 留 v2.7.1+」)
+**Filed-by:** audit-fanout-2026-10-15
+**日期:** 2026-10-15 首次实测(v2.7.0 起的已知缺口,一直无门可验)
+
+**触发面:** `amd64_sysv` / `amd64_sysv_freestanding` 目标下,**整数参数超过 4 个**
+的任何函数调用。
+
+**症状(逐位实测,实参 1..7):**
+
+```
+return a (arg1) → 1  ✓
+return b (arg2) → 2  ✓
+return c (arg3) → 3  ✓
+return d (arg4) → 4  ✓
+return e (arg5) → 4  ✗
+return f (arg6) → 4  ✗
+return g (arg7) → 4  ✗
+```
+
+**根因(生成代码逐条核对):caller 侧是对的,callee 侧错了。**
+
+caller(`main_jhyy`)完全符合 SysV:
+
+```
+movl -16(%rbp), %edi     # arg1
+movl -24(%rbp), %esi     # arg2
+movl -32(%rbp), %edx     # arg3
+movl -40(%rbp), %ecx     # arg4
+movl -48(%rbp), %r8d     # arg5  ✓ SysV 第 5 整数寄存器就是 r8
+movl -56(%rbp), %r9d     # arg6  ✓
+movl -64(%rbp), %r10d
+movl %r10d, 0(%rsp)      # arg7 走栈(call 后落在 callee 的 16(%rbp))✓
+call seven
+```
+
+callee(`seven`)的参数溢出循环**只处理 4 个寄存器**:
+
+```
+movl %edi, -8(%rbp)      # arg1 ✓
+movl %esi, -16(%rbp)     # arg2 ✓
+movl %edx, -24(%rbp)     # arg3 ✓
+movl %ecx, -32(%rbp)     # arg4 ✓
+movl %ecx, -40(%rbp)     # arg5 ✗ 又读 %ecx
+movl %ecx, -48(%rbp)     # arg6 ✗
+movl %ecx, -56(%rbp)     # arg7 ✗
+```
+
+**`%r8d` / `%r9d` / 栈参数从头到尾没有出现在 callee 里。** 溢出循环在第 4 个
+寄存器之后就重复用 `%ecx`,所以第 5 个及以后的实参全部拿到第 4 个的值。
+
+**为什么 v2.7.0 就知道、却拖到现在:** `sysv_abi_test.jhyy` 文件头白纸黑字写着
+「v2.7.0 emit_call emit 7th arg warning comment ... **stack-arg 实 wire 留
+v2.7.1+**」,而**该测试从 v2.7.0 起就标着 `// SKIP: sysv target requires Linux
+host`** —— 默认回归在本机(Windows 无 WSL/Docker)永远跳过它。2026-10-15 启了
+Docker Desktop 跑 `sysv_full_regress.sh`,5 个测试立刻挂 1 个,就是这条。
+
+**关联 W-104(不同代码路径,别一起「修」):** W-104 是 **caller 侧**的参数分类
+借用了 Win 分类器;本条是 **callee 侧**的参数溢出只做 4 个寄存器。症状都表现为
+「SysV 多参数传错」,但修的位置不同。两条都要修。
+
+**workaround:** 无。写不出可靠的用户侧绕法 —— 「函数别超过 4 个参数」在 SysV
+目标上是硬约束,而 SysV 约定本身允许 6 个整数寄存器 + 栈。
+
+**影响范围:** `amd64_sysv` / `amd64_sysv_freestanding` 目标的全部多参数调用。
+注意 **Win 目标不受影响**(`sysv_*` 测试只在 sysv target 下跑),这也是它能
+潜伏这么久的原因 —— 默认 ship gate 只跑 amd64_win。
+
+**失效条件:**
+1. callee 参数溢出循环支持完整 6 个 SysV 整数寄存器(`rdi/rsi/rdx/rcx/r8/r9`)+ 栈溢出
+2. 补测试:上面那个逐位复现,**对 arg5/arg6/arg7 分别断言**,断言不同实参必须
+   给出不同结果(只断言一个非前四的值,「恒取 arg4」恰好能过)
+3. `sysv_abi_test.jhyy` 期望值 28 需要重新对一遍(它同时混了几个子检查)
+
+**引用:**
+- 最小复现:见上
+- 测试 `compiler/tests/examples/sysv_abi_test.jhyy`(自 v2.7.0 SKIP 到今天)
+- 门 `compiler/tests/bootstrap/sysv_full_regress.sh`(需 Docker;本次实测 4/5)
+- 相关:W-104(SysV caller 侧分类错)

@@ -66,8 +66,26 @@ regress 汇总行现在**只计有断言的**:
 ```
 
 **19 个 SKIP 的构成:** 14 个 library(无 `fn main_jhyy`)+ 5 个 sysv
-(需 Linux;本机无 WSL/Docker 时跳过,但项目里有
-`compiler/tests/bootstrap/sysv_full_regress.sh` 专门跑它们)。
+(需 Linux)。
+
+### sysv 那 5 个:启了 Docker 就能跑,而且立刻挂了一个
+
+```bash
+bash compiler/tests/bootstrap/sysv_full_regress.sh --runs=1
+```
+
+2026-10-15 实测 **4/5 PASS,1 FAIL**:`sysv_abi_test` 退出 22,期望 28。
+逐位探针定位到根因 —— SysV callee 的参数溢出只处理 4 个整数寄存器,
+第 5/6/7 个实参全部读到第 4 个的值(`%r8d`/`%r9d`/栈参数从未被读),
+登记 **W-116**。
+
+**这个门从 v2.7.0 就存在**,而验它的测试从 v2.7.0 起就标着「sysv target
+requires Linux host」—— 在没装 Docker 的开发机上它**永远不会被跑到**。
+这也是为什么 W-104(SysV 借 Win 分类器)能一直活着:同一个根,同一个位置。
+
+**注意 Windows 上装了 Docker 也要手动启动 Docker Desktop** —— daemon
+没起来时 `docker info` 不响应,regress 的 `--cross=auto` 会静默降级成 SKIP,
+不会有任何提示。
 
 **5 个 XFAIL** —— 全部对应一条已登记的 ACTIVE workaround,**真跑、真失败、
 出现在每次回归输出里**:
