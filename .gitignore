@@ -63,12 +63,12 @@ __pycache__/
 # 忽略 Claude Code 本地配置
 .claude
 .agents
-# 项目级 Claude Code 协作入口（不随仓库公开；本地保留以供 AI 跨会话阅读）；
-# mcp-jhyy/CLAUDE.md 例外：该 subdir 的指令文件公开跟踪
-CLAUDE.md
 skills-lock.json
-!mcp-jhyy/CLAUDE.md
-!docs/internal/CLAUDE.md
+# 项目级 Claude Code 协作入口
+# 2026-10-15 user 决定放出版本控制。此前 CLAUDE.md 不随仓库公开,后果是
+# 「索引表 0 ACTIVE / 下一动作 = tag v4.0.0 final」这类状态断言没有 review 轨迹,
+# 也无法追溯是哪次改动让它过时。现在公开跟踪。
+# mcp-jhyy/CLAUDE.md + docs/internal/CLAUDE.md 本来就是公开跟踪的。
 # codegraph 索引（daemon.pid mtime 抖动会污染 git status）
 .codegraph/
 
