@@ -92,10 +92,9 @@ tmp/
 # v1.4.4 新增 jhyy_stage0.exe: C 端 stage-0 bootstrap binary (per v1.4.0 umbrella plan § Sprint v1.4.4)
 !compiler/build/bin/jhyy.exe
 !compiler/build/bin/jhyy_stage0.exe
-!compiler/build/bin/jhyy_v1.exe.exe
-!compiler/build/bin/jhyy_v2.exe
-!compiler/build/bin/jhyy_v3.exe
-!compiler/build/bin/jhyy_v4.exe
+# v4.0.8:jhyy_v1.exe.exe 不再 track —— 它改由 `make` 从 jhyy.exe 生成
+# (曾是 git 里的静态快照,3 天就跟本体脱钩,导致 fixed_point 的
+#  `v1 != v2 -> re-baseline` 恒真。见 Makefile 的 v4.0.8 说明。
 
 # pytest 测试发现需要 __init__.py — _*.py 通配会清掉
 !mcp-jhyy/tests/__init__.py
@@ -151,3 +150,10 @@ compiler/tests/bootstrap/baseline/
 !compiler/tests/bootstrap/baseline_v2_self/
 !compiler/tests/bootstrap/baseline_v2_self/*.s
 !compiler/tests/bootstrap/baseline_v2_self/*.md
+
+# v4.0.8:自举链产物 v2/v3/v4 也不再 track —— 它们是 `make selfhost` 每次
+# 重新生成的产物,不是 source。跟 jhyy_v1.exe.exe 同理(v1 改为构建时副本)。
+# 二进制基线该由 sha256 文件 + 门来管,不是把可再生产物塞进 git。
+compiler/build/bin/jhyy_v2.exe
+compiler/build/bin/jhyy_v3.exe
+compiler/build/bin/jhyy_v4.exe

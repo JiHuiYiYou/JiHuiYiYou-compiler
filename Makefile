@@ -56,11 +56,25 @@ RUNTIME_OBJ = $(OBJ_DIR)/runtime.o
 #   jhyy_stage0.exe — C 端 (stage-0 bootstrap, only needed after src/ change)
 #   jhyy.exe        — jhyy-side 产物 (production binary, what users invoke)
 #   jhyy.exe.exe    — jhyy.exe 的 baseline (per feedback_regress_baseline_binary_hash)
-#   jhyy_v1.exe.exe — v1.0.0 historical baseline (regress_v1.py 用, 不可退役)
+#   jhyy_v1.exe.exe — jhyy.exe 的**同内容改名副本**,由 `make` 每次构建时生成
+#                     (v4.0.8 起;见下方 v1_copy 规则)
+#
+# v4.0.8 更正 jhyy_v1.exe.exe 的定位 —— 它此前被三个地方用三种说法描述
+# (Makefile 说「v1.0.0 historical baseline, 不可退役」/ ci.yml 说「已脱节,
+# v1 = 当前 production」/ 实际是 git 里一个 10-12 的静态快照)。三者互相矛盾,
+# 而且快照 3 天就跟 jhyy.exe 脱钩,后果是 fixed_point.sh 的
+# `v1 != v2 → re-baseline archived` 每次改后端必然触发 —— 一个恒真的断言
+# 不是断言,是噪音(2026-10-15 的「v3!=v4 要到第 4 代才收敛」误读即源于此;
+# 实际是 fixed_point.sh 的 N>=4 循环漏设 JHY_WRITE_IL,详见 76e3b72)。
+#
+# 现在 v1 = 当前 jhyy.exe 的副本,v1==v2 于是恢复成一个有意义的检查:
+# **同一个二进制跑两遍必须产出相同的 .il / .s**(确定性)。re-baseline
+# 归档流程随之退休 —— 没有"跨版本差异"可比了,只有"自身是否确定"。
+# 它不再是 source artifact,改由 .gitignore 排除。
 
 .PHONY: all clean test stage0 selfhost
 
-all: $(BIN_DIR)/jhyy.exe
+all: $(BIN_DIR)/jhyy.exe $(BIN_DIR)/jhyy_v1.exe.exe
 
 # Stage 0: gcc 产 jhyy_stage0.exe (C 端 bootstrap)
 stage0: $(BIN_DIR)/jhyy_stage0.exe
@@ -100,9 +114,15 @@ $(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(BIN_DIR)/jhyy_st
 	@mkdir -p $(BIN_DIR)
 	$(BIN_DIR)/jhyy_stage0.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy
 
-# Self-host closure chain: v1.0.0 baseline = v1→v2→v3→v4 (Stage 2 N=3 byte-equal);
-# v1.8.3 = v1→v2→v3→v4→v5 (Stage 2 N=4 byte-equal closure, sha 03a1cdd4...)
-selfhost: $(BIN_DIR)/jhyy.exe
+# v4.0.8: jhyy_v1.exe.exe = jhyy.exe 的副本,**每次构建重新生成**。
+# 兑现 v1.4.4 的副本约定,同时让它不再是会腐烂的 git 快照。名字保留是因为
+# fixed_point.sh / byte_equal.sh / stage1-expanded.sh 三个脚本按名引用它。
+$(BIN_DIR)/jhyy_v1.exe.exe: $(BIN_DIR)/jhyy.exe
+	@cp -f $< $@
+
+# Self-host closure chain: v1→v2→v3→v4→v5 (v1 = 当前 jhyy.exe 的副本,
+# 所以 v1==v2 是确定性检查,不是跨版本对比)
+selfhost: $(BIN_DIR)/jhyy.exe $(BIN_DIR)/jhyy_v1.exe.exe
 	@echo "Stage 2 closure chain: v1 → v2 → v3 → v4 → v5 byte-equal check (v1.8.3 N=4 baseline)"
 	$(BIN_DIR)/jhyy.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy_v2
 	$(BIN_DIR)/jhyy_v2.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy_v3

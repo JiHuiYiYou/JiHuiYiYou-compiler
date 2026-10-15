@@ -43,7 +43,8 @@
 #     标 "INFORMATIONAL" — 这是预期, 不是 closure fail.
 #
 # 环境变量:
-#   JHYY_V1  = jhyy v1 binary path (default: compiler/build/bin/jhyy_v1.exe.exe)
+#   JHYY_V1  = jhyy.exe 的同内容副本 (default: compiler/build/bin/jhyy_v1.exe.exe,
+#              由 `make` 生成,v4.0.8 起不再是 git 里的静态快照)
 #   JHYY_V2  = jhyy v2 binary path (default: compiler/build/bin/jhyy.exe)
 #   JHY_WRITE_IL = 强制写 .il (debug 用; 默认 0 → 跳过 .il 写盘, in-mem path)
 #

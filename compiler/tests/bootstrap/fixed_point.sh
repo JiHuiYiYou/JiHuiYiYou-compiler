@@ -30,7 +30,8 @@
 #   - .s closure 在 N=3 (primary) + N=4..$JHY_FP_MAX_N (informational) 双重 verify
 #
 # 环境变量:
-#   JHYY_V1      = jhyy v1 frozen binary (default: compiler/build/bin/jhyy_v1.exe.exe)
+#   JHYY_V1      = jhyy.exe 的同内容副本 (default: compiler/build/bin/jhyy_v1.exe.exe,
+#                   由 `make` 每次构建生成,v4.0.8 起不再是 git 里的静态快照)
 #   JHYY_V2      = jhyy v2 binary         (default: compiler/build/bin/jhyy.exe)
 #   JHYY_INPUT   = 编的目标 .jhyy         (default: compiler/src0/main.jhyy)
 #   JHY_FP_BUILD_DIR = 临时 build dir     (default: /tmp/jhyy_fp)
@@ -199,9 +200,10 @@ echo "  v3=$SHA_V3"
 #   v2=v3 byte-equal (N=3 primary ship gate).v1=v2 match = "HOLD" (no re-baseline).
 if [[ "$SHA_V2" == "$SHA_V3" && "$SHA_V2" != "MISSING" ]]; then
     if [[ "$SHA_V1" == "$SHA_V2" ]]; then
-        echo "  ✅ PASS (N=3 .il byte-equal, HOLD)"
+        echo "  ✅ PASS (N=3 .il byte-equal — v1 是当前 jhyy.exe 的副本,这条同时验证确定性)"
     else
-        echo "  ✅ PASS (N=3 .il closure, v1≠v2 re-baseline archived in d43-baseline-archive.md)"
+        echo "  ✅ PASS (N=3 .il closure)"
+        echo "  ⚠️  v1 != v2:v1 已陈旧,重新 make 让它跟 jhyy.exe 同步。这不是闭环问题。"
     fi
     PASS=$((PASS + 1))
 else
@@ -241,9 +243,10 @@ echo "  v3.s=$SHA_S_V3"
 SHA_S_OK=0
 if [[ "$SHA_S_V2" == "$SHA_S_V3" && "$SHA_S_V2" != "MISSING" ]]; then
     if [[ "$SHA_S_V1" == "$SHA_S_V2" ]]; then
-        echo "  ✅ PASS (N=3 .s byte-equal, HOLD)"
+        echo "  ✅ PASS (N=3 .s byte-equal — v1 是当前 jhyy.exe 的副本,这条同时验证确定性)"
     else
-        echo "  ✅ PASS (N=3 .s closure, v1≠v2 re-baseline archived in d43-baseline-archive.md)"
+        echo "  ✅ PASS (N=3 .s closure)"
+        echo "  ⚠️  v1 != v2:v1 已陈旧,重新 make 让它跟 jhyy.exe 同步。这不是闭环问题。"
     fi
     SHA_S_OK=1
     PASS=$((PASS + 1))

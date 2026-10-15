@@ -87,15 +87,12 @@ jobs:
         shell: msys2 {0}
         continue-on-error: true
         run: |
-          # jhyy_v1.exe.exe 在 v1.4.4+ 是 jhyy.exe 的副本 (per mcp-jhyy/jhyy_runner.py
-          # copy 约定),v1 = 当前 jhyy-side production binary。closure chain 靠
-          # .il sha 验证 byte-equal (不靠 binary sha),副本语义 OK。
-          # 跟 v1.4.7 写注释时的原意 (v1 frozen historical baseline, v1.4.6 新 test
-          # 必然 fail) 已脱节:v1 binary = 当前 production → 应该 PASS 所有当前 regress
-          # test,不再是 expected-fail frozen baseline。该 step informational
-          # (continue-on-error),v1 fail 不阻塞 PR,只作 matrix row。
-          # v1.0.0 closure canonical (commit eabee0d) v1.4.4 后不再保留,原 TODO
-          # "v1.5+ 恢复" moot。
+          # v4.0.8:jhyy_v1.exe.exe = jhyy.exe 的副本,由 `make` 每次构建生成,
+          # 不再是 git 里的静态快照。它唯一的作用是给 fixed_point/byte_equal 当
+          # 「第 0 代」,使 v1==v2 成为一条真正的**确定性检查**(同一二进制跑
+          # 两遍必须产出相同 .il/.s)。
+          # 本 step 跑的是默认 binary(jhyy.exe)带 --include-informational,
+          # 与 v1 无关;保留 informational + continue-on-error 语义不变。
           python regress.py --all --include-informational
 
       - name: Build Stage 2 closure chain (v1→v2→v3→v4)
