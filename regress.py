@@ -14,7 +14,7 @@ Usage:
   python regress.py --save-baseline            # 存 binary sha256 baseline (转发 jhyy_regress)
   python regress.py --tests=foo,bar            # 跑测试子集
   python regress.py --no-baseline-check        # 跳过 phantom binary (mtime) check
-  python regress.py --timeout=30               # 单测试超时 (default 20)
+  python regress.py --timeout=600              # 死循环探测上限(秒),compile+run 各自适用 (default 300)
 
 Exit codes:
   0  全部 gated binary PASS
@@ -529,9 +529,8 @@ def main():
                          "(e.g. 'hello,fib'). Default: all.")
     ap.add_argument("--jobs", type=int, default=None,
                     help="限制并发 compile 数 (default: 全并行 = min(测试数, CPU 数))。"
-                         "self-hosted 二进制比 stage0 产物重,全并行会撞 60s 硬超时 —— "
-                         "跑 self-hosted 二进制时建议 --jobs=4")
-    ap.add_argument("--timeout", type=int, default=20,
+                         "只影响吞吐,不影响判定 —— 超时是死循环探测,不是性能预算")
+    ap.add_argument("--timeout", type=int, default=300,
                     help="Per-test timeout in seconds (default 20).")
     ap.add_argument("--no-baseline-check", action="store_true",
                     help="Skip phantom-binary (mtime vs source) check for all runs.")

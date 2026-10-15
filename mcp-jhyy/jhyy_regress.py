@@ -9,7 +9,7 @@ Sprint v1.4.7 (2026-08-14): regress.py 合并成单入口 (--all / --include-inf
 Public API:
     ntstatus_name(code)            -> str | None
     run_test(jhyy_file, binary, ...) -> (passed, expected, actual, message)
-    run_all(binary, tests=None, timeout=20, enforce_baseline_hash=True) -> dict
+    run_all(binary, tests=None, timeout=300, enforce_baseline_hash=True) -> dict
     save_baseline_hash(binary)     -> str (sha256)
 """
 import subprocess
@@ -135,7 +135,7 @@ def _check_baseline_freshness(binary: str, src_dir: str = "compiler/src") -> Tup
 def run_test(
     jhyy_file: str,
     binary: str,
-    timeout: int = 10,
+    timeout: int = 300,
     extra_inputs: Optional[List[str]] = None,
 ) -> Tuple[bool, Optional[int], int, str]:
     """Compile + run 单个 .jhyy 文件, 返回 (passed, expected, actual, message)."""
@@ -215,8 +215,14 @@ def run_test(
     if extra_inputs:
         for inp in extra_inputs:
             cmd.insert(2, _resolve_binary(inp))
-    # 60s (not 20s): 并行跑时单个 compile 会因 CPU 争抢拉长
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
+    # compile 与 run 共用同一个 --timeout(以前 compile 硬编码 60、run 用参数,
+    # 三个默认值还互相打架,--timeout 实际只管 run)。
+    # 默认给到 300s 是刻意的:这个上限的职责是抓**永不返回**的无限循环,
+    # 不是性能预算。并行跑(min(测试数, CPU 数) 路,每路还各 fork 一个 gcc)时
+    # 单个 compile 被 CPU 争抢拉长好几倍是常态;拿 60s 当性能线会随机误杀
+    # 慢测试 —— 实测同一份代码在有残留进程时能随机挂掉 cap_table_basic /
+    # slice_len,清干净就全绿。慢用 --jobs 限并发解决,不该动超时。
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                        encoding="utf-8", errors="replace", env=test_env)
     if r.returncode != 0:
         # v1.7.0 Stage 1: EXPECT-ERROR test 期望 compile fail.
@@ -452,7 +458,11 @@ if __name__ == "__main__":
                     help="Skip phantom-binary (mtime) check")
     ap.add_argument("--tests", nargs="*", default=None,
                     help="Subset of tests to run (default: all)")
-    ap.add_argument("--timeout", type=int, default=10)
+    ap.add_argument("--timeout", type=int, default=300,
+                    help="死循环探测上限(秒),compile 与 run 各自适用。"
+                         "刻意给得很宽:它要抓的是永不返回的无限循环,不是性能预算 —— "
+                         "并行跑时单个 compile 会被 CPU 争抢拉长好几倍,"
+                         "拿它当性能线会误杀慢测试")
     args = ap.parse_args()
 
     if args.save_baseline:
