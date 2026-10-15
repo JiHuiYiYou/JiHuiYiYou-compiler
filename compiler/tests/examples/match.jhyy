@@ -9,3 +9,4 @@ fn main_jhyy() -> i32 {
     };
     result
 }
+// EXPECT: 20

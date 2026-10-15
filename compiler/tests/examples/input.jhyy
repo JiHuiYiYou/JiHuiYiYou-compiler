@@ -1,3 +1,14 @@
+// EXPECT-OUT: "你输入的是: 0"
+// EXPECT: 0
+//
+// 判据取 **EOF 路径**,不是"有输入"路径:regress harness 跑测试时
+// stdin=subprocess.DEVNULL,所以 scanf("%d", &x) 恒立刻读到 EOF,
+// 返回 EOF(-1)且**不写** x。x 保持初值 0 → stdout 必须是 "你输入的是: 0"。
+//
+// 为什么这样断言是对的:被测语义是「scanf + 取址传参 &x 编译正确,且
+// 读取失败时 x 不被污染」。EOF 是这个 harness 下**唯一**可达的输入状态,
+// 断言它比断言一个只在喂了 stdin 时才成立的期望更稳。若哪天 harness
+// 改成喂数据,这里会失败并提示改期望 —— 那正是它该做的。
 extern fn printf(fmt: *u8, val: i32) -> i32;
 extern fn scanf(fmt: *u8, ptr: *i32) -> i32;
 
@@ -6,5 +17,8 @@ fn main_jhyy() -> i32 {
     let mut x = 0;
     scanf("%d", &x);
     printf("你输入的是: %d\n", x);
-    0
+    if x == 0 {
+        return 0 as i32;
+    }
+    return 1 as i32;
 }

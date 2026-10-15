@@ -9,3 +9,4 @@ fn main_jhyy() -> i32 {
     let b = ns_dup_b::process();   // returns 50
     a + b   // 150
 }
+// EXPECT: 150

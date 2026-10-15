@@ -7,3 +7,6 @@ fn add3(x: i32) -> i32 { return inc(inc(inc(x))); }
 fn main_jhyy() -> i32 {
     return add3(10);
 }
+// 2026-10-15 补断言: add3(x) = inc(inc(inc(x))) = ((x+1)+1)+1 → add3(10) = 13.
+// 验证一个 #[inline] 函数体里连续调用三次另一个 #[inline] 函数。
+// EXPECT: 13

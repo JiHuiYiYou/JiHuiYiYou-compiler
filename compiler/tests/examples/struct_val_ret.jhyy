@@ -14,3 +14,4 @@ fn main_jhyy() -> i32 {
     let p = make_point(7, 8);
     p.x + p.y  // should be 15
 }
+// EXPECT: 15

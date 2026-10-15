@@ -7,3 +7,6 @@ fn quad(x: i32) -> i32 { return dbl(dbl(x)); }
 fn main_jhyy() -> i32 {
     return quad(5);
 }
+// 2026-10-15 补断言: quad(x) = dbl(dbl(x)) = (x*2)*2 → quad(5) = 20.
+// 验证 inline 函数内部再调另一个 #[inline] 函数的嵌套 inline 路径。
+// EXPECT: 20

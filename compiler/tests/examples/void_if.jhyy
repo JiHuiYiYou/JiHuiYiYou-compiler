@@ -1,14 +1,18 @@
-// EXPECT: 0
-fn do_thing() {
+// 2026-10-15:原先 `do_thing` 的 if/else 两支都是空的,main 返回 0 ——
+// 断言的是「空函数体不崩」。改成两支真的写不同的值:保持 void 语义(out 指针),
+// 但 if/else 分支是否走对现在验得到。
+// EXPECT: 11
+fn do_thing(out: *i32) {
     let x = 1;
     if x == 1 {
-        // empty then
+        *(out) = 11;
     } else {
-        // empty else
+        *(out) = 22;
     }
 }
 
 fn main_jhyy() -> i32 {
-    do_thing();
-    0
+    let mut r: i32 = 0;
+    do_thing(&r);
+    r
 }

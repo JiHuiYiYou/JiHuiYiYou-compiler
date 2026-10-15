@@ -1,3 +1,19 @@
+// float_test.jhyy — f64 字面量解码 + 算术 (EXIT 断言)
+//
+// 原版只 puts 两行然后返回 0 —— 什么都不验。本版把「编译通过」换成
+// 「算出来的整数位对得上」。
+//
+// EXPECT 推导 (全部只用整数比较,绕开 W-109 浮点比较缺陷):
+//   a = 3.14, b = 2.5 (f64)
+//   ai = trunc(3.14) = 3          → +1
+//   bi = trunc(2.5)  = 2          → +2
+//   s  = a + b = 5.64, si = 5     → +4
+//   EXIT = 1 + 2 + 4 = 7
+//
+// 注:整条链上没有 f32/f64 的 `< > ==` 比较 —— `as i32` 之后的比较是
+// i32 比较,不受 W-109 / W-110 影响。所以这里不加 SKIP。
+
+// EXPECT: 7
 extern fn printf(fmt: *u8, val: i32) -> i32;
 extern fn puts(s: *u8) -> i32;
 
@@ -10,8 +26,20 @@ fn main_jhyy() -> i32 {
     let b = 2.5;
 
     /* Use integer arithmetic with float casts to verify values */
-    /* Since we can't printf floats yet, just verify compilation */
+    /* printf 打不了浮点,所以 `as i32` 转成整数再断言 */
+
+    // `as i32` 走 dtosi (截断),所以 3.14→3 / 2.5→2 / 5.64→5。
+    // 如果 f64 IMM 解码错位(历史上 1.0 被解成 0.5),这里会直接翻红。
+    let ai: i32 = a as i32;
+    let bi: i32 = b as i32;
+    let s: f64 = a + b;
+    let si: i32 = s as i32;
+
+    let mut score: i32 = 0;
+    if ai == 3 { score = score + 1; }
+    if bi == 2 { score = score + 2; }
+    if si == 5 { score = score + 4; }
 
     puts("Float test compiled OK");
-    0
+    score
 }

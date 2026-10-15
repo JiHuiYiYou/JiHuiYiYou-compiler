@@ -1,3 +1,14 @@
+// EXPECT: 0
+//
+// 这个测试的**被测性质就是「不崩」**,所以 EXPECT: 0 是真断言而不是
+// 摆设:regress 把任何 NTSTATUS(AV / heap 之类)算 FAIL,只有干净退出
+// 才是 PASS。原始 repro(W-101 attempt chain)是 self-hosted 编译器在
+// 「把 *u8 局部变量再 cast 成 **u8 解引用」这条路径上 SEGV。
+//
+// 为什么不加 EXPECT-OUT / 不断言 v0 的值:malloc(16) 的内容**未初始化**,
+// v0 读到的是堆上的任意字节,不是确定值。把某个观察到的字节写死成期望
+// 就是把「未定义」固化成「正确」,那比不写断言更糟。要断言值就得先写
+// 初始化缓冲区(`*e0 = ...`),那是另一个测试的职责(见 ptr_store 系列)。
 extern fn malloc(size: i64) -> *u8;
 fn ptr_add(p: *u8, off: i64) -> *u8 {
     return (p as i64 + off) as *u8;

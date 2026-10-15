@@ -1,9 +1,34 @@
 // =====================
 // FFI
 // =====================
+// printf 没有 `...`(ABI § 7.4 / B8),每个实参都必须在声明里逐个列出。
+// 本文件最大 arity 是 3 个实参(`printf("你的 HP: %d/%d\n", *hp, maxHp)`),
+// 所以按 3 参声明 —— jhyy 不校验调用点 arity,少传的那个实参寄存器
+// printf 读不到(格式串里没有对应转换符),行为与 C 一致。
+// 原先声明只有 2 参,那处 3 参调用读的是栈上垃圾。
 extern fn puts(s: *u8) -> i32;
-extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn printf(fmt: *u8, a: i32, b: i32) -> i32;
 extern fn scanf(fmt: *u8, ptr: *i32) -> i32;
+
+// dungeon_game.jhyy — 地牢文字 Rogue (交互式,靠 stdout 断言)
+//
+// harness 用 stdin=DEVNULL 起进程,scanf 直接 EOF 返回,
+// 于是每轮 `go` 都保持初值 0 → 第一间房(入口房)之后就 state=1 退出。
+//
+// EXPECT 推导 —— 推导全程:
+//   hp=20 maxHp=20 atk=4 potions=2 state=0 roomIndex=0 gold=0 seed=12345
+//   loop 1: roomIndex=0 → roomTag=0 → describeRoom(0) 打印入口文案,
+//           不进任何分支,state 仍 0
+//           state==0 → scanf EOF → go 保持 0 → state=1,退出循环
+//   state==1 → 打印逃出文案 → printf("最终金币：%d\n", gold=0)
+//   return 0
+//   EXIT = 0
+// EXPECT-OUT 推导 —— 期望 `最终金币：0`:
+//   gold 至今没被改过(roomTag=0 不是宝箱房),所以必须是 0。
+//   这行一次性验了「房间分发 → scanf 失败路径 → state 机 → 收尾」整条链。
+//
+// EXPECT: 0
+// EXPECT-OUT: "最终金币：0"
 
 // =====================
 // 随机数 (LCG)

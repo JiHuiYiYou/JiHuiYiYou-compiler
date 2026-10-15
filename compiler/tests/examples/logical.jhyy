@@ -1,20 +1,53 @@
+// logical.jhyy — && / || 短路语义
+//
+// 原版返回 0 且不判任何输出,短路真坏掉也看不出来。
+//
+// 关键设计:crash_if_called 拿一个 calls 计数器指针,把「被调过几次」
+// 带回 main。**光靠 EXPECT-OUT 抓不到 Test2 的短路失效** —— Test2 是
+// `true || X`,短路坏掉时它照样求值 X,`true || 99` 还是 true,输出
+// 一模一样。只有调用计数能区分。
+//
+// EXPECT 推导 —— EXIT = score + calls * 32:
+//   calls: 5 处 crash_if_called 全部被短路掉 → calls = 0
+//   逐项(bool 先用 if 表达式转 i32,jhyy 不让 bool 混进算术):
+//     t1 = false && X        → 0 → ==0 命中 +1
+//     t2 = true  || X        → 1 → ==1 命中 +2
+//     t3 = true  && true     → 1 → ==1 命中 +4
+//     t4 = false || true     → 1 → ==1 命中 +8
+//     t5 = false || false    → 0 → ==0 命中 +16
+//     score = 1+2+4+8+16 = 31
+//   EXIT = 31 + 0*32 = 31
+//   任一短路坏掉 → calls ≥ 1 → EXIT ≥ 63,断言立刻翻红。
+//
+// EXPECT-OUT 推导 —— 期望 `Test1 (false && X): 0`:
+//   a=0 → false && X 必须短路 → t1 = 0。
+//   若短路坏了,先打印 "BUG: short-circuit failed!" 且 t1 变成 99,
+//   这行变成 ": 99",substring 匹配失败。
+//
+// EXPECT: 31
+// EXPECT-OUT: "Test1 (false && X): 0"
+
 extern fn printf(fmt: *u8, val: i32) -> i32;
 
 /* crash_if_called: if this function is ever called, we'll know short-circuit failed */
-fn crash_if_called() -> i32 {
+fn crash_if_called(calls: *i32) -> i32 {
     printf("BUG: short-circuit failed!\n", 0);
+    let c = *calls;
+    *calls = c + 1;
     99
 }
 
 fn main_jhyy() -> i32 {
+    let mut calls: i32 = 0;
+
     /* Test 1: false && crash_if_called() should NOT call crash_if_called */
     let a = 0;
-    let t1 = (a != 0) && (crash_if_called() != 0);
+    let t1 = (a != 0) && (crash_if_called(&calls) != 0);
     printf("Test1 (false && X): %d (expect 0)\n", t1);
 
     /* Test 2: true || crash_if_called() should NOT call crash_if_called */
     let b = 1;
-    let t2 = (b != 0) || (crash_if_called() != 0);
+    let t2 = (b != 0) || (crash_if_called(&calls) != 0);
     printf("Test2 (true || X): %d (expect 1)\n", t2);
 
     /* Test 3: true && true = 1 */
@@ -29,5 +62,19 @@ fn main_jhyy() -> i32 {
     let t5 = (0 != 0) || (0 != 0);
     printf("Test5 (false || false): %d (expect 0)\n", t5);
 
-    0
+    // bool → i32(jhyy 的比较/逻辑结果是 bool,不能直接参与算术)
+    let t1i: i32 = if t1 { 1 } else { 0 };
+    let t2i: i32 = if t2 { 1 } else { 0 };
+    let t3i: i32 = if t3 { 1 } else { 0 };
+    let t4i: i32 = if t4 { 1 } else { 0 };
+    let t5i: i32 = if t5 { 1 } else { 0 };
+
+    let mut score: i32 = 0;
+    if t1i == 0 { score = score + 1; }
+    if t2i == 1 { score = score + 2; }
+    if t3i == 1 { score = score + 4; }
+    if t4i == 1 { score = score + 8; }
+    if t5i == 0 { score = score + 16; }
+
+    score + calls * 32
 }

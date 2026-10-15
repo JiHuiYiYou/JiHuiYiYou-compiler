@@ -1,6 +1,8 @@
+// EXPECT: 0
+//
 // V3-B 3c (v3.0.3) ship gate test: volatile 修饰的 primitive type 在 codegen 阶段
 // 走 "no regalloc" 路径。
-// SKIP: V3-B 3c feature — jhyy-side only (C-side bootstrap predates V3-B; volatile type qualifier not in C-side parser)
+// [SKIP 移除 2026-10-15] v1.4.4 把 jhyy.exe flip 成 jhyy-side binary 后本理由失效 —— 2026-10-15 去掉 SKIP,实测 PASS
 //
 // 由于 codegen 主路径走 qbe.exe → .s,QBE 本身不识别 volatile keyword。QBE
 // 通过 load.c / gvn.c 等 pass 会做 load elimination 与 register promotion —
@@ -44,6 +46,10 @@ fn main_jhyy() -> i32 {
     let b: i32 = x;
     let _h2 = write_log(b);
 
+    // EXPECT: 0 的推导: read_sensor() 恒返回 42,所以两次 volatile load
+    // 都必须是 42 —— a / b 任一被误优化(load elimination 折成常量、
+    // register promotion 跨 call 复用、或者第二次 load 读到脏值)都会让
+    // if 落到 return 1。语义上这是**值断言**,不是「没崩」。
     if a == 42 && b == 42 {
         return 0 as i32;
     }

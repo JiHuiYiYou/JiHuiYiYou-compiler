@@ -1,3 +1,5 @@
+// Minimal smoke test: main returns a literal, nothing printed.
+// EXPECT: 42 — exit code 42 is the whole subject here (emit/codegen smoke).
 fn main_jhyy() -> i32 {
     42
 }

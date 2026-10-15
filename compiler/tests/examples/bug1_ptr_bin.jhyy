@@ -1,3 +1,10 @@
+// EXPECT-OUT: "val after *p = *p - 20: 30"
+// EXPECT: 0
+//
+// 推导: val 初值 50,`*p = *p - 20` 一步写回 → val = 50 - 20 = 30。
+// workaround 路径同样 50 - 20 = 30。两条路径都得 30,否则 *p = *p - expr
+// 这个单语句形式就是坏的(2026-09-xx Bug 1)。退出码按两个值同时等于 30 给,
+// 任一条路径算错 → 1。
 extern fn printf(fmt: *u8, val: i32) -> i32;
 
 fn main_jhyy() -> i32 {
@@ -17,5 +24,8 @@ fn main_jhyy() -> i32 {
     *p2 = y;
     printf("val2 after workaround: %d\n", val2);
 
-    0
+    if val == 30 && val2 == 30 {
+        return 0 as i32;
+    }
+    return 1 as i32;
 }

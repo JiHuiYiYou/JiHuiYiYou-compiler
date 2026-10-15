@@ -12,3 +12,4 @@ fn main_jhyy() -> i32 {
     let c = lib_c::get_c();       // from lib_c, also transitively imported via lib_a
     a + b + c  // 10 + 20 + 30 = 60
 }
+// EXPECT: 60

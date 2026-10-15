@@ -1,3 +1,13 @@
+// EXPECT-OUT: "result = 100"
+// EXPECT: 0
+//
+// 推导: condition = 1。
+//   Test 1: 1 > 0 → then 分支 puts("positive")("not positive" 不该出现)。
+//           void 形态 if/else,值不被使用 —— 只验两条支路都编得出来、
+//           且选对了 then。
+//   Test 2: if-as-expression,1 > 0 → 取 then 分支字面量 100(不是 200)。
+//           这条是 Bug 2(if/else 有返回值时 phi 对齐)的直接判据:
+//           错的话 result 会是 200 或未初始化值。
 extern fn printf(fmt: *u8, val: i32) -> i32;
 extern fn puts(s: *u8) -> i32;
 
@@ -19,5 +29,8 @@ fn main_jhyy() -> i32 {
     };
     printf("result = %d\n", result);
 
-    0
+    if result == 100 {
+        return 0 as i32;
+    }
+    return 1 as i32;
 }

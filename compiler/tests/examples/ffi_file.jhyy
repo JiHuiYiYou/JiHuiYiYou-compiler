@@ -1,4 +1,18 @@
 // FFI file I/O test
+//
+// 路径是 cwd 相对的,harness 从 JHYY_ROOT 起跑,所以写到
+// compiler/build/bin/ffi_test_output.txt。
+//
+// EXPECT 推导:文件开成功(否则走 return 1 分支)→ 走到底返回 0。
+//   fopen 返回非空指针 → 不进 return 1 → fclose 成功返 0 → main 返回 0。
+//   EXIT = 0
+// EXPECT-OUT 推导 —— 期望 `file closed: 0`:
+//   fclose 成功时 C 返回 0;这行证明 fopen 指针真的传进了 fclose
+//   (若指针被截断/传错,fclose 会拿到垃圾 → 崩或返回非 0)。
+//
+// EXPECT: 0
+// EXPECT-OUT: "file closed: 0"
+
 extern fn fopen(path: *u8, mode: *u8) -> *u8;
 extern fn fclose(file: *u8) -> i32;
 extern fn printf(fmt: *u8, val: i32) -> i32;

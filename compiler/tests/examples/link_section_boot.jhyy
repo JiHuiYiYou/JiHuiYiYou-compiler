@@ -1,10 +1,21 @@
+// EXPECT: 0
+//
 // V3-B 3e ship gate test: #[link_section("name")] puts a function in a custom
 // ELF section. We don't actually boot a kernel here (no OVMF in regress), so
 // the test verifies:
-// SKIP: V3-B 3e feature — jhyy-side only (C-side bootstrap predates V3-B; #[link_section] not in C-side parser)
+// [SKIP 移除 2026-10-15] v1.4.4 把 jhyy.exe flip 成 jhyy-side binary 后本理由失效 —— 2026-10-15 去掉 SKIP,实测 PASS
 //   1. link_section-annotated fn compiles
-//   2. readelf shows the symbol in the custom section
+//   2. readelf shows the symbol in the custom section   ← ⚠️ 见下方「已知失效」
 //   3. main_jhyy returns 0 (EXIT:0)
+//
+// ⚠️ 已知失效(2026-10-15 实测,regress harness 判不出来,只能人工查):
+//   `#[link_section(".text.boot")]` 在当前 compiler/build/bin/jhyy.exe
+//   (jhyy-side)上**完全不生效** —— 实测 `_section_directive.buf` 是 0 字节,
+//   `objdump -h <exe>` 只有 `.text` 一段、没有 `.text.boot`,`_start` 落在
+//   普通 .text 里。所以下面第 2 条 "symbol in custom section" 事实上没在测。
+//   本文件因此只断言「带该属性的函数能编、能被调用、返回值正确」。
+//   复核命令(等修好后应能看到 .text.boot):
+//     objdump -h compiler/build/bin/_regress_link_section_boot.exe | grep text.boot
 //
 // Verifiable via:
 //   readelf -S build/link_section_boot.exe | grep "\.text\.boot"   # ≥ 1 hit
@@ -16,7 +27,12 @@ fn _start() -> i32 {
 }
 
 fn main_jhyy() -> i32 {
-    // _start not actually called (no kernel); just verify it compiles + symbol exists.
+    // _start 直接调用(不 boot 内核);断言它的返回值 —— 推导:_start 体是
+    // `return 42`,所以 _x 必须是 42。这条能验「带 link_section 属性的
+    // 函数体本身编得对、调用约定对」,但**验不到 section 归属**(见文件头)。
     let _x: i32 = _start();
-    return 0 as i32;
+    if _x == 42 {
+        return 0 as i32;
+    }
+    return 1 as i32;
 }

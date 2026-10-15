@@ -1,3 +1,15 @@
+// array_test.jhyy — 数组字面量 / 下标读写 / 类型标注
+//
+// 全部结果靠 stdout 判(printf 声明成 2 个固定参数,不撞 ABI B8 变参限制)。
+//
+// EXPECT-OUT 推导 —— 期望 `typed[1] = 99`:
+//   typed: [i32;3] = [7,8,9];typed[1] = 99;读回 99。
+//   这行同时验了「数组字面量初始化」+「下标写」+「下标读」三件事,
+//   比只断言字面量原值(arr[2] = 30)信息量更高。
+//
+// EXPECT: 0  — main 正常走完返回 0;退出码验的是「没崩」。
+// EXPECT-OUT: "typed[1] = 99"
+
 extern fn printf(fmt: *u8, val: i32) -> i32;
 extern fn puts(s: *u8) -> i32;
 

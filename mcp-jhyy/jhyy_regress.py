@@ -173,7 +173,20 @@ def run_test(
     setenv_overrides = {}  # type: Dict[str, str]
     try:
         with open(jhyy_file, encoding="utf-8") as f:
-            src = f.read()
+            raw_src = f.read()
+        # 判据扫描的两条规则(单一事实来源在 scripts/dev/audit_test_assertions.py):
+        #   指令只认「整行就是该指令」的独立注释行 —— 否则**文档里提到一个指令
+        #   就会凭空生成一条断言**(实测踩过:注释里写「此前是 `//EXPECT:42`」,
+        #   结果那条真的成了断言)。
+        #   结构检测(fn main_jhyy)用剥掉注释的源码 —— 否则注释里提到
+        #   `fn main_jhyy` 会让一个没有 main 的文件被当成可跑测试。
+        try:
+            from audit_test_assertions import directive_source as _dir_src,                                                strip_comments as _strip_comments
+            src = _dir_src(raw_src)
+            code_src = _strip_comments(raw_src)
+        except Exception:
+            src = raw_src
+            code_src = raw_src
         m = re.search(r"//\s*EXPECT(?:ECT)?\s*[:=]\s*(\d+)", src)
         if m:
             expected = int(m.group(1))
@@ -189,8 +202,9 @@ def run_test(
         m_skip_qbe = re.search(r"//\s*SKIP-QBE\s*:\s*(.+)", src)
         if m_skip_qbe:
             skip_qbe_reason = m_skip_qbe.group(1).strip()
-        # Skip library files (no main entry)
-        has_main = bool(re.search(r"\bfn\s+main_jhyy\b", src))
+        # Skip library files (no main entry) — 用剥掉注释的源码判定,
+        # 否则注释里提到 `fn main_jhyy` 会让一个没有 main 的文件被当成可跑测试。
+        has_main = bool(re.search(r"\bfn\s+main_jhyy\b", code_src))
         # SETENV: 解析多行 KEY=VALUE (注释行从 # 起; 行尾 # 也算注释)
         for line in src.splitlines():
             line_stripped = line.strip()
@@ -231,8 +245,16 @@ def run_test(
     # 单个 compile 被 CPU 争抢拉长好几倍是常态;拿 60s 当性能线会随机误杀
     # 慢测试 —— 实测同一份代码在有残留进程时能随机挂掉 cap_table_basic /
     # slice_len,清干净就全绿。慢用 --jobs 限并发解决,不该动超时。
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                       encoding="utf-8", errors="replace", env=test_env)
+    # 2026-10-15:这里原先是裸 subprocess.run,compile 超时会抛
+    # subprocess.TimeoutExpired **穿透 run_test 打死整个 run_all** —— 一个测试
+    # 卡住,剩下 170 多个的结果全丢,连「哪些跑过了」都看不到。
+    # 编译器挂死/资源争抢是常态(见上面关于并发的注释),不是异常情况,
+    # 应该记成该测试 FAIL 并继续跑其余的。
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           encoding="utf-8", errors="replace", env=test_env)
+    except subprocess.TimeoutExpired:
+        return (False, expected, -4, f"compile timeout ({timeout}s)")
     if r.returncode != 0:
         # v1.7.0 Stage 1: EXPECT-ERROR test 期望 compile fail.
         # kw check 用 full stderr (compile 启动 log 可能 200+ 字符);
@@ -301,6 +323,30 @@ def run_test(
     return (actual_cmp == expected_cmp, expected, actual, output)
 
 
+def _assertion_kind(fname: str) -> str:
+    """这个测试的断言强度 —— PASS / vacuous / noassert。
+
+    分类逻辑不在这里实现,直接复用 `scripts/dev/audit_test_assertions.py`
+    (单一事实来源)。harness 和审计脚本若各判各的,两边迟早漂移,那时
+    「汇总说 PASS、审计说违规」比没有分类更糟。
+    """
+    try:
+        from audit_test_assertions import classify, EXAMPLES
+    except Exception:
+        # 审计模块不可用时**不**把测试降级成 noassert —— 宁可保持旧行为,
+        # 也不要因为一次 import 失败就把一堆真测试从 PASS 里踢出去。
+        return "PASS"
+    path = EXAMPLES / fname
+    if not path.exists():
+        return "PASS"
+    cls = classify(path)["class"]
+    if cls == "crash-only":
+        return "noassert"
+    if cls == "literal-return":
+        return "vacuous"
+    return "PASS"
+
+
 def run_all(
     binary: str,
     tests: Optional[List[str]] = None,
@@ -343,6 +389,7 @@ def run_all(
             "baseline_sha256": None,
             "total": 0, "passed": 0, "failed": 0, "skipped": 0,
             "failed_tests": [],
+            "passed_tests": [],
             "duration_sec": round(time.time() - start, 2),
             "baseline_warning": None,
             "early_abort": f"binary not found: {bin_path}",
@@ -387,18 +434,61 @@ def run_all(
 
     # Discover tests
     if tests is None:
-        files = sorted(f for f in os.listdir(TEST_DIR) if f.endswith(".jhyy") and not f.startswith("_"))
+        # 2026-10-15: 改 rglob,原来是 os.listdir(**不递归**)。
+        # 后果:examples/ 下的 4 个子目录 —— arena_test/(Stage 0 自举验证)、
+        # hello-freestanding/(freestanding + UEFI 路径)、multi_file/(多文件 import)、
+        # namespace/(命名空间)—— 共 12 个 .jhyy **从来没进过全量回归**。
+        # 它们只有被显式 `--tests=multi_file/main.jhyy` 点名时才跑。
+        # 更糟的是 `scripts/dev/audit_test_assertions.py` 用的是 rglob(递归),
+        # 于是审计脚本看得见这些文件、回归跑不到,两边长期对不上而没人发现。
+        # 改成递归后 files 里是相对 TEST_DIR 的路径(如 `multi_file/main.jhyy`),
+        # 下面的 `TEST_DIR / f` 拼接方式天然支持子目录。
+        files = sorted(
+            str(p.relative_to(TEST_DIR)).replace(os.sep, "/")
+            for p in Path(TEST_DIR).rglob("*.jhyy")
+            if not p.name.startswith("_")
+        )
     else:
         files = tests
 
     passed, failed, skipped = 0, 0, 0
     failed_tests = []
+    passed_tests = []
+    # 2026-10-15 重构: 「PASS」只计**真的有断言且断言成立**的测试。
+    # 以前三种东西在汇总行里长得一模一样:
+    #   a) 断言了计算结果   b) main 返回写死的字面量(断言数学上不可能失败)
+    #   c) 什么都没断言     —— 只有「进程没崩」
+    # (c) 正是 W-109(浮点比较算错)在 `PASS EXIT=42` 里活了很多年的原因。
+    # 现在 a 进 passed,b/c 各自另立类别并计数,汇总行直接把它们写出来 ——
+    # 「X/Y 全绿」这句话从此不需要额外解释了。
+    noassert_tests, vacuous_tests = [], []
 
     # jobs=None → 原行为(全并行);传 N 则限制并发。self-hosted 二进制
     # (jhyy_v2.exe)比 stage0 产物重 3-16x,185 路全并行时单个 compile 会
     # 因 CPU + gcc 争抢超过硬编码的 60s 超时 —— 那不是编译器 bug,是 harness
     # 并行度问题。--jobs 让人能把并发压下来真正跑到 self-hosted 二进制。
-    workers = min(len(files), jobs if jobs else (os.cpu_count() or 4))
+    _dev = str(Path(__file__).resolve().parents[1] / "scripts" / "dev")
+    if _dev not in sys.path:
+        sys.path.insert(0, _dev)
+
+    # 默认并发 = cpu_count // 2,不是 cpu_count。
+    #
+    # 原因:一个「worker」不是单进程,是**一棵树** —— `jhyy.exe compile` 自己
+    # 还会 fork `gcc`,`gcc` 再 fork `cc1`。N 个 worker 最多同时存在 3N 个进程。
+    # 8 核机上实测(30 个样本,2026-10-15):
+    #     --jobs=1   180s
+    #     --jobs=4    45s   ← 拐点
+    #     --jobs=8    43s
+    #     --jobs=16   41s
+    # 吞吐在 4 就饱和:4→16 只快 9%,但进程数翻 4 倍。默认取 cpu_count(=8)
+    # 已在拐点之后,额外进程只会加剧争抢 —— 实测出现过单个 compile 从 3.5s
+    # 劣化到 300s 超时的情况。
+    #
+    # 注意**单测编译本身就要 ~3.5s**,那是自举编译器自己的速度,不是 harness
+    # 开销。197 个测试在 4 并发下约 172s,这是地板,调并发帮不上。
+    cpu = os.cpu_count() or 4
+    default_workers = max(2, cpu // 2)
+    workers = min(len(files), jobs if jobs else default_workers)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(run_test, str(TEST_DIR / f), binary, timeout): f for f in files}
         results = {futures[fut]: fut.result() for fut in as_completed(futures)}
@@ -410,8 +500,17 @@ def run_all(
             print(f"SKIP  {fname:<30}  {msg}")
             skipped += 1
         elif ok:
-            print(f"PASS  {fname:<30}  EXIT={act}")
-            passed += 1
+            kind = _assertion_kind(fname)
+            if kind == "vacuous":
+                print(f"VACUOUS {fname:<27}  EXIT={act}   (有 EXPECT,但 main 返回写死字面量 —— 断言不可能失败)")
+                vacuous_tests.append(fname)
+            elif kind == "noassert":
+                print(f"NOASSERT {fname:<27}  EXIT={act}   (无 EXPECT/EXPECT-OUT/EXPECT-ERROR —— 只验了没崩)")
+                noassert_tests.append(fname)
+            else:
+                print(f"PASS  {fname:<30}  EXIT={act}")
+                passed += 1
+                passed_tests.append(fname)
         else:
             # Sprint v1.5.5: print full stderr so CI logs include QBE/gcc link
             # errors (always after "[4] codegen done", past 80 chars).
@@ -425,8 +524,13 @@ def run_all(
             })
 
     duration = time.time() - start
-    print(f"\n===== {passed}/{passed + failed} passed, {failed} failed, {skipped} skipped "
-          f"(of {len(files)} total) =====")
+    print(f"\n===== {passed}/{passed + failed} passed (全部有断言), {failed} failed, "
+          f"{skipped} skipped (of {len(files)} total) =====")
+    print(f"  ├─ NOASSERT {len(noassert_tests)}  无断言,只验了「进程没崩」")
+    print(f"  ├─ VACUOUS  {len(vacuous_tests)}  有 EXPECT 但断言在数学上不可能失败")
+    if noassert_tests or vacuous_tests:
+        print("  └─ ⚠️ 上面两类**不是 PASS**。它们仍会跑(能抓编译器崩溃),但验证不了"
+              "任何计算结果。逐个补断言见 docs/internal/tests.md。")
 
     # Sprint mcp-2: cleanup _regress_* artifacts for tests that didn't fail.
     # Pass → clean dir after run; Fail → keep .il/.s/.exe for inspection
@@ -457,6 +561,10 @@ def run_all(
         "failed": failed,
         "skipped": skipped,
         "failed_tests": failed_tests,
+        # 2026-10-15: passed 只含真有断言的;下面两类单独计数,不再混进绿里。
+        "passed_tests": passed_tests,
+        "noassert_tests": noassert_tests,
+        "vacuous_tests": vacuous_tests,
         "duration_sec": round(duration, 2),
         "baseline_warning": baseline_warning,
         "early_abort": None,

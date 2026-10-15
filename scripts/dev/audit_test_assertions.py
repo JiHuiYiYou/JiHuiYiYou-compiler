@@ -58,17 +58,122 @@ EXIT_CODE_IS_SUBJECT = {
     "exit_zero_extend_128.jhyy",
     "exit_zero_extend_255.jhyy",
     "exit_zero_extend_256.jhyy",
+    # hello 是 byte-equal 基线 fixture(hello.il / hello_qbe.il / hello_self.il),
+    # main_jhyy 体就是 `42` —— 退出码本身就是被测对象,同 exit_zero_extend 一族。
+    "hello.jhyy",
 }
+
+
+
+def strip_comments(src: str) -> str:
+    """去掉注释,只留代码 —— 判据指令必须来自代码,不能来自文档。
+
+    2026-10-15 踩到:重写 `generics_err_unsubst.jhyy` 时,我在文件头的说明文字里
+    写了「此前是 `return 42` + `//EXPECT:42`」,结果那条 `//EXPECT:42` **真的
+    变成了判据指令** —— harness 的正则扫全文,不区分注释与代码。于是「这段文档在
+    描述旧行为」变成了「这个测试断言退出码 42」。
+
+    这不是笔误能概括的问题:任何人写 changelog 式注释时提到一个指令,就会静默
+    给自己造一条断言(或造一个永不失败的断言)。判据扫描必须先剥注释。
+    """
+    out, i, n = [], 0, len(src)
+    while i < n:
+        c = src[i]
+        if c == '"' or c == "'":
+            # 字符串字面量:原样拷贝到闭合引号(处理 \ 转义)
+            q = c
+            out.append(c); i += 1
+            while i < n:
+                if src[i] == "\\" and i + 1 < n:
+                    out.append(src[i]); out.append(src[i + 1]); i += 2; continue
+                out.append(src[i])
+                if src[i] == q:
+                    i += 1; break
+                if src[i] == "\n":
+                    break
+                i += 1
+            continue
+        if c == "/" and i + 1 < n and src[i + 1] == "/":
+            while i < n and src[i] != "\n":
+                i += 1
+            continue
+        if c == "/" and i + 1 < n and src[i + 1] == "*":
+            i += 2
+            while i + 1 < n and not (src[i] == "*" and src[i + 1] == "/"):
+                i += 1
+            i += 2
+            continue
+        out.append(c); i += 1
+    return "".join(out)
+
+
+RE_DIRECTIVE_TAIL = re.compile(
+    r'^\s*(EXPECT|EXPECT-ERROR|EXPECT-OUT|SKIP|SKIP-QBE|SETENV)')
+
+
+def _comment_tail(line: str) -> str:
+    """返回一行里**第一个不在字符串字面量中的 `//` 之后**的文本;没有则 ""。
+
+    必须跳过字符串:`let s = "// EXPECT: 42";` 这种不该被判成一条指令。
+    """
+    in_str = None
+    i, n = 0, len(line)
+    while i < n:
+        c = line[i]
+        if in_str:
+            if c == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if c == in_str:
+                in_str = None
+            i += 1
+            continue
+        if c in "\"'":
+            in_str = c
+            i += 1
+            continue
+        if c == "/" and i + 1 < n and line[i + 1] == "/":
+            return line[i + 2:]
+        i += 1
+    return ""
+
+
+def directive_source(raw: str) -> str:
+    """只保留「注释部分就是一条指令」的行,丢掉其余注释。
+
+    为什么不能简单地把所有注释剥掉再扫:判据指令本身就是 `//` 注释
+    (`// EXPECT: 42`),剥掉注释等于把指令也剥了。
+
+    为什么不能直接在全文里搜:那样**文档里提到一个指令就会凭空生成一条**。
+    实测踩到过 —— 重写 `generics_err_unsubst.jhyy` 时在说明文字里写了
+    「此前是 `return 42` + `//EXPECT:42`」,结果那条真的变成了断言。
+
+    判据:取该行**第一个不在字符串里的 `//` 之后**的文本,去掉空白后必须
+    以指令关键字开头。两种写法都支持:
+        `// EXPECT: 42`               (整行注释)
+        `    return 42;  // EXPECT: 42` (行尾注释 —— null_*.jhyy 就是这种)
+    散文里提到指令的那一行,`//` 后面是别的字,匹配不上。
+    """
+    out = []
+    for line in raw.splitlines():
+        tail = _comment_tail(line)
+        if tail and RE_DIRECTIVE_TAIL.match(tail):
+            # 把 `//` 加回去:下游的 RE_EXPECT / RE_EXPECT_OUT / ... 都以 `//` 开头,
+            # 剥掉会让它们全部匹配不上(踩过一次)。
+            out.append("//" + tail)
+    return "\n".join(out)
 
 
 def classify(path: Path) -> dict:
     """给单个测试文件分类。"""
-    src = path.read_text(encoding="utf-8", errors="replace")
-    has_main = bool(RE_MAIN.search(src))
-    expect = RE_EXPECT.search(src)
-    has_out = RE_EXPECT_OUT.search(src) is not None
-    has_err = RE_EXPECT_ERR.search(src) is not None
-    is_skip = RE_SKIP.search(src) is not None
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    dirs = directive_source(raw)       # 指令:只认独立成行的注释
+    code = strip_comments(raw)         # 结构(fn/return/if):只看代码
+    has_main = bool(RE_MAIN.search(code))
+    expect = RE_EXPECT.search(dirs)
+    has_out = RE_EXPECT_OUT.search(dirs) is not None
+    has_err = RE_EXPECT_ERR.search(dirs) is not None
+    is_skip = RE_SKIP.search(dirs) is not None
 
     info = {
         "file": str(path.relative_to(EXAMPLES)),
@@ -83,7 +188,7 @@ def classify(path: Path) -> dict:
         info["class"] = "library"
         return info
 
-    body = _main_body(src)
+    body = _main_body(code)
     # 只看真正的 return 语句 —— 不能把空行/注释算进分母,否则
     # `len(literal_codes) != len(returns)` 恒成立,all_literal 恒假,
     # 整个 literal-return 分类会静默失效(第一版就踩了这个坑)。

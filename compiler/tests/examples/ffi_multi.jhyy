@@ -1,4 +1,15 @@
 // FFI multi-parameter test (3+ arguments)
+//
+// printf 不支持 `...`(ABI § 7.4 / B8),3 个 %d 就得声明 3 个固定参数。
+//
+// EXPECT 推导:main 尾表达式 42 → EXIT = 42。
+// EXPECT-OUT 推导 —— 期望 `three numbers: 10 20 30`:
+//   printf 拿到 3 个 i32 实参,RCX=fmt / RDX=10 / R8=20 / R9=30。
+//   实参寄存器分配错了这行就对不上 —— 这正是多参数 FFI 唯一能验的东西。
+//
+// EXPECT: 42
+// EXPECT-OUT: "three numbers: 10 20 30"
+
 extern fn printf(fmt: *u8, a: i32, b: i32, c: i32) -> i32;
 
 fn main_jhyy() -> i32 {

@@ -1,5 +1,7 @@
 // conv_test.jhyy — v2.11.19 Phase 5 验证 6 个 user-reachable conversion op
 //
+// EXPECT: 63
+//
 // 触发机制:JHYY spec 不允许 `as` int↔float cast,但 fn call 时允许
 // call-site type coerce (codegen cg_coerce 走 src_qt != dst_qt 时 emit 转换 op)。
 // 每个 fn 把参数当返回值返回,让 caller 在 call site 触发 coerce。
@@ -62,5 +64,14 @@ fn main_jhyy() -> i32 {
     if r6i == 9 { score = score + 32; }
 
     // 期望 EXIT = 63 (1+2+4+8+16+32)
+    //
+    // EXPECT 推导(6 个比较全在 `as i32` 之后的 i32 上,不受 W-109 浮点比较缺陷影响):
+    //   §1 dtosi   trunc(3.7)          = 3  → +1
+    //   §2 stosi   trunc(3.7f32)       = 3  → +2
+    //   §3 truncd  trunc(2.5f32)       = 2  → +4
+    //   §4 exts    2.5f32 → 2.5f64 → 2    → +8
+    //   §5 sltof   7i64 → 7.0 → 7         → +16
+    //   §6 swtof   9i32 → 9.0 → 9         → +32
+    //   EXIT = 1+2+4+8+16+32 = 63
     return score;
 }

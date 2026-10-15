@@ -4,3 +4,6 @@ fn dbl(x: i32) -> i32 { return x * 2; }
 fn main_jhyy() -> i32 {
     return dbl(21);
 }
+// 2026-10-15 补断言: dbl(x) = x*2 → dbl(21) = 42. main 返回的是函数调用
+// 结果(非字面量),断言可失败。
+// EXPECT: 42

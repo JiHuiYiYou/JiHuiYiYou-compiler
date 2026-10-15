@@ -1,9 +1,15 @@
+// EXPECT: 0
+// EXPECT-OUT: "total=320"
+// 2026-10-15:原先 main 返回 total - 320(已经是推导值),但没有 EXPECT 指令 →
+// harness 只验「没崩」。同时 printf 声明只收 1 个参数却传 5 个(撞 ABI B8),
+// 输出的五个数全是读到的寄存器垃圾。加断言后就能抓到。
+//
 // Namespace test: two modules both define `init` and `helper`.
 // Use qualified call syntax to disambiguate.
 import mod_a;
 import mod_b;
 
-extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn printf(fmt: *u8, a: i32, b: i32, c: i32, d: i32, e: i32) -> i32;
 
 fn main_jhyy() -> i32 {
     let a_init = mod_a::init();   // 100

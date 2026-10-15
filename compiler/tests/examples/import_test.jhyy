@@ -6,3 +6,4 @@ fn main_jhyy() -> i32 {
     let y = mylib::get_answer();
     x + y   // 30 + 42 = 72
 }
+// EXPECT: 72

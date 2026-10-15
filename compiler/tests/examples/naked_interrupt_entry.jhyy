@@ -1,16 +1,34 @@
+// EXPECT: 0
+//
 // V3-B 3b ship gate test: #[naked] fn with asm!() body emits raw .s
 // without prologue/epilogue. We can't actually wire an IRQ handler here
 // (no kernel), so the test just verifies:
-// SKIP: V3-B 3b feature — jhyy-side only (C-side bootstrap predates V3-B; #[naked] not in C-side parser)
+// [SKIP 移除 2026-10-15] v1.4.4 把 jhyy.exe flip 成 jhyy-side binary 后本理由失效 —— 2026-10-15 去掉 SKIP,实测 PASS
 //   1. naked fn compiles
 //   2. naked fn symbol is exported (.globl in .s)
 //   3. naked fn body asm!() is in the .s
 //   4. naked fn has NO `push %rbp` prologue
 //   5. main_jhyy returns 0 (EXIT:0)
 //
+// ── 哪些是 harness 判的,哪些不是(2026-10-15 实测)────────────────
+// harness 只能判第 5 条(main 干净退出 = 0)。第 1-4 条都是**静态**性质,
+// 退出码看不见 —— `irq_entry` 全程没被调用过,所以哪怕 codegen 明天给它
+// 套上完整 prologue,这个测试照样 PASS。
+//
+// 第 4 条我已经人工验过,当前是**对的**:
+//   objdump -d <exe> | grep -A3 '<irq_entry>:'
+//     0000000140001476 <irq_entry>:
+//        140001476:  cf    iret        ← 函数第一条指令就是 iret
+//        140001477:  90    nop  (对齐填充)
+//   没有 push %rbp / mov %rsp,%rbp,`#[naked]` 确实生效。
+//
+// 顺带一条容易踩的坑:`<output>.s` 里**看不到** irq_entry —— jhyy 走的是
+// `_inline_asm.buf` 旁路文件,拼进的是给 gcc 用的临时 .s,不是 `-o` 那个
+// .s。所以上面 grep .s 的老复核方式在当前 jhyy.exe 上查不到东西,
+// 必须查最终 .exe。
+//
 // Verifiable via:
-//   grep -c "push %rbp" naked_interrupt_entry.s   # main_jhyy has 1, naked fn has 0
-//   grep "irq_entry" naked_interrupt_entry.s       # .globl + label present
+//   objdump -d <exe> | grep -A3 '<irq_entry>:'   # 首指令应为 iret,无 push %rbp
 
 #[naked]
 fn irq_entry() {

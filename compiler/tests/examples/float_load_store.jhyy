@@ -10,6 +10,14 @@
 //
 // EXIT:每个 sub-test 加分,期望 EXIT=7
 //
+// EXPECT 推导(比较全在 i32 上,不受 W-109 浮点比较缺陷影响):
+//   §1 s1=3.14 → s1_i=3            → +1
+//   §2 [1.5,2.5,3.5,4.5] → 1,2,3,4 → +4
+//   §3 [1.5f32,2.5f32,3.5f32] →1,2  → +2
+//   EXIT = 1 + 4 + 2 = 7
+//
+// EXPECT: 7
+//
 // 注:本 fixture 不在 f64 array 前放 i32 let(避免 pre-existing B-runtime stack
 // slot collision BUG,W-074.6 OUT-OF-SCOPE)。v2.11.20 修 stack layout。
 

@@ -12,3 +12,4 @@ fn main_jhyy() -> i32 {
     a = b;
     a.x + a.y  // should be 30
 }
+// EXPECT: 30

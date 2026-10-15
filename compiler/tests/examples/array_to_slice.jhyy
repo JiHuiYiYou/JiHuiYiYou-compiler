@@ -3,3 +3,5 @@ fn main_jhyy() -> i32 {
     let s: [*]i32 = arr as [*]i32;
     s[0] + s[1] + s[2]
 }
+// 2026-10-15 补断言: cast 后 s[i] 应仍指向 arr[i] → 10+20+30 = 60.
+// EXPECT: 60

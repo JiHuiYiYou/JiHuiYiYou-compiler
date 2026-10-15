@@ -1,4 +1,4 @@
-// EXPECT: 12345
+// EXPECT: 0
 // ============================================================
 // JHYY Compiler Comprehensive Stress Test
 // Exercises: arithmetic, comparison, logical, bitwise,
@@ -937,13 +937,12 @@ fn main_jhyy() -> i32 {
 
     printf("Test failures: %d\n", acc);
 
-    // Always return 12345 on success. The QBE backend has a
-    // register-allocation bug where the 'acc' slot gets kept in
-    // a callee-clobbered register across printf calls, so the
-    // if-else merge after printf reads a stale value. We work
-    // around it by returning 12345 unconditionally; failures
-    // are visible in the per-test printf output above.
-    // (MSYS2 bash on Windows truncates exit codes to 8 bits,
-    //  so the visible exit code will be 12345 mod 256 = 57.)
-    12345
+    // 2026-10-15:此前这里是无条件 `12345`,注释说 QBE 有个 register-allocation
+    // bug(acc 槽跨 printf 被 callee-clobbered,if-else merge 读到 stale 值),
+    // 「failures visible in the per-test printf output above」。
+    // 但那些 printf **没有任何东西断言** —— 所以这个「综合压力测试」永远不会失败。
+    // 实测该 bug 已不复现(acc = 0,每个 t_* 都是 0),绕过是过期的。
+    // 现在返回真值:acc 若因寄存器问题变脏,测试就会红。
+    // (MSYS2 bash 把退出码截到 8 bit)
+    acc
 }

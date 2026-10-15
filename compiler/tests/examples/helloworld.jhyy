@@ -1,4 +1,5 @@
 // Hello World — console output via extern puts
+// EXPECT-OUT: "Hello, world!"
 
 extern fn puts(s: *u8) -> i32;
 

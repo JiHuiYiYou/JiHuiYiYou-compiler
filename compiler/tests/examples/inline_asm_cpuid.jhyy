@@ -1,6 +1,11 @@
+// EXPECT: 0
+//
+// 只能断言「没崩 / 编译链接跑通」,**不能**断言任何值 —— 理由见文件末尾
+// 的「为什么这里只能给 EXPECT: 0」。本测试的真正判据(cpuid 字节进了 .exe)
+// harness 判不了,已实测确认并写进注释。
 // compiler/tests/examples/inline_asm_cpuid.jhyy
 // V3-B v3.0.1 inline asm 测试 — cpuid 指令 (D42 path)
-// SKIP: V3-B 3a feature — jhyy-side only (C-side bootstrap predates V3-B; asm! macro not in C-side parser)
+// [SKIP 移除 2026-10-15] v1.4.4 把 jhyy.exe flip 成 jhyy-side binary 后本理由失效 —— 2026-10-15 去掉 SKIP,实测 PASS
 //
 // 验证 `asm!("cpuid")` 走 QBE .s passthrough 路径 (per D42 in
 // docs/plans/v2/v2.0.0-os-prep.md):  codegen 不 emit QBE IL — 直接把
@@ -19,6 +24,21 @@
 // asm inline 进入函数体.  v3.1+ (per spec supplement § 6 roadmap) 会加
 // operand constraints + inline placement 时, 这个测试会改成
 // `if eax != 0 { return 42; }` 重新验证运行时行为.
+//
+// ── 为什么这里只能给 EXPECT: 0 ──────────────────────────────────
+// 2026-10-15 实测(objdump 反汇编 + opcode 字节计数):
+//   · `cpuid` 的 opcode 0f a2 确实进了 .exe —— 空 main 对照组计数 0,
+//     本测试计数 1,说明 D42 passthrough 把 raw asm 文本拼进去了。
+//   · 但它落在 `main_jhyy` 的 `ret` **之后**(全局尾随汇编),即**死代码,
+//     永不执行**。所以退出码跟 cpuid 毫无关系 —— cpuid 明天整个消失,
+//     EXPECT: 0 照样过。
+//   · 也不能反过来断言 eax/ebx/ecx/edx:那四个值取决于本机 CPU 的
+//     vendor / feature bits,是硬件相关的,写死就是把某台机器的答案
+//     固化成「正确」。
+// 所以能给的最诚实断言就是「asm! 走通 parse/sema/codegen/link,进程干净
+// 退出」。真正的判据得靠字节级检查(人工, harness 判不了):
+//     objdump -d <exe> | grep -c cpuid      # 期望 ≥ 1
+// 等 v3.1+ 把 asm 真正内联进函数体之后,再换成值断言。
 
 fn main_jhyy() -> i32 {
     // 占位: 语义上 cpuid 是 stmt-position call, 但 codegen 不 emit 任何 IL,

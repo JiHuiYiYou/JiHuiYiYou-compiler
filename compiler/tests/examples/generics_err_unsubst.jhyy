@@ -1,15 +1,16 @@
-// v3.2.0b (3i generics — root cause fix): bare type-param `T` in
-// non-generic scope → E0060 (per sema.jhyy resolve_type_node fall-through
-// at SYM_TYPE+type_ptr=0 sentinel).
-// PASS gate: error reported + main_jhyy still returns 42 (error recovery).
-type NotGeneric = struct {
-    field: i32,
-}
+// generics_err_unsubst.jhyy — 「非泛型作用域里的裸类型参数 T」必须被拒绝。
+//
+// 2026-10-15 重写。此前本文件声称验这条(注释写「sema emits E0060」),但正文里
+// 根本没有裸 `T`,编译器**干净编译零报错**,而 `return 42` + `//EXPECT:42` 让它
+// PASS —— 断言的是「没报错时退出码是 42」,与泛型错误处理毫无关系。
+//
+// 另外实测:真写裸 `T` 时,诊断是 `error: unknown type`(1:27),
+// **不是注释里写的 E0060**。所以旧描述两处都不准。
+//
+// 现在按它本来的意图真写出来,用 EXPECT-ERROR 断言编译必须失败。
+// EXPECT-ERROR: "unknown type"
+type Holder = struct { f: T }
 
 fn main_jhyy() -> i32 {
-    // Below intentionally NOT generic; T here would be unresolved — sema
-    // emits E0060 when monomorphize is active. v3.2.0b activates mono
-    // pipeline so this path is reachable.
     return 42;
 }
-//EXPECT:42

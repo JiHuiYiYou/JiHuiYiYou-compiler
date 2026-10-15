@@ -1,5 +1,11 @@
 // gdb_pretty_test.jhyy — v1.4.3 test for gdb_pretty.py
 // EXPECT: 0
+// 2026-10-15:补断言。原先只有 return 0 —— 退出码是废的,而真正计算出来的
+// 值(read_point 30 + read_color 1 + read_maybe 42 + read_slice 10+50=60 = 133)
+// 只被 printf 出去、没人看。合成 gdb 三个基础类型 + 三个 helper 的和。
+// EXPECT-OUT: "=133"
+// SKIP: W-114 全 unit-variant 的 enum match 永远命中第一支 —— read_color(Green)
+//       和 read_maybe(Some(42)) 目前都返回 0。修完 W-114 删掉这行即验收。
 //
 // Covers the three composite types handled by the pretty printer:
 //   - struct (Point: 2 flat fields)

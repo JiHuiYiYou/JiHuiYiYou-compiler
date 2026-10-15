@@ -2,6 +2,59 @@
 // jhyy 语言特性演示
 // ============================================================
 
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+// ------------------------------------------------------------
+// 退出码断言 —— 原版返回 0,什么都不验。
+//
+// checksum = final_count + e + (b % 100) + combined + (shifted / 240)
+//          + (c % 13) + t_i + u_i*2 + v_i*4 + la_i*8 + lb_i*16
+//
+// 比较/逻辑结果是 `bool`,jhyy 不允许 bool 混进 i32 算术
+// (实测 `5 + (1 < 2)` → error: type mismatch in binary),
+// 所以先用 `if x { 1 } else { 0 }` 转 0/1 再进 checksum。
+//
+// 逐步推导:
+//   factorial(5)          = 120
+//   fibonacci(10)         = 55
+//   combined = 120 + 55   = 175
+//   gcd(48, 18)           = 6
+//   sum_range(1, 10)      = 55
+//   mix      = 6 + 55     = 61
+//   a = 175 + 61          = 236
+//   b = 175 - 61          = 114
+//   c = 236 * 114         = 26904
+//   d = 26904 / 10        = 2690
+//   e = 2690 % 7          = 2      (7*384 = 2688)
+//   t = (236 == 26904)    = 0      → t_i  = 0
+//   u = (236 < 26904)     = 1      → u_i  = 1
+//   v = (236 > 2690)      = 0      → v_i  = 0
+//   logic_a = t && u      = 0      → la_i = 0
+//   logic_b = v || (!t)   = 0 || 1 = 1 → lb_i = 1
+//   bits    = 0xFF & 0x0F = 15
+//   shifted = 15 << 4     = 240
+//   counter: 1 → +=2 → 3 → *=3 → 9 → -=1 → final_count = 8
+//
+//   final_count   8
+//   e             2
+//   b % 100      14
+//   combined    175
+//   shifted/240   1
+//   c % 13        7   (13*2069 = 26897)
+//   t_i           0
+//   u_i * 2       2
+//   v_i * 4       0
+//   la_i * 8      0
+//   lb_i * 16    16
+//   ----------------------
+//   checksum     225
+//
+// EXPECT-OUT `combined=175` 复核 factorial + fibonacci + 递归 + 尾表达式返回。
+// ------------------------------------------------------------
+
+// EXPECT: 225
+// EXPECT-OUT: "combined=175"
+
 // 阶乘 — 演示 while 循环 + mut 变量
 fn factorial(n: i32) -> i32 {
     let mut result = 1;
@@ -85,6 +138,19 @@ fn main_jhyy() -> i32 {
     counter -= 1;
     let final_count = counter;
 
-    0
+    // 比较/逻辑的结果在 jhyy 里是 `bool`,不能直接混进 i32 算术
+    // (实测 `5 + (1 < 2)` → error: type mismatch in binary),
+    // 所以先用 if 表达式转成 0/1。
+    let t_i: i32 = if t { 1 } else { 0 };
+    let u_i: i32 = if u { 1 } else { 0 };
+    let v_i: i32 = if v { 1 } else { 0 };
+    let la_i: i32 = if logic_a { 1 } else { 0 };
+    let lb_i: i32 = if logic_b { 1 } else { 0 };
+
+    printf("combined=%d\n", combined);
+
+    // 每一项都对应文件头推导表里的一行 —— 任一环节算错,checksum 就会偏。
+    final_count + e + (b % 100) + combined + (shifted / 240) + (c % 13)
+        + t_i + u_i * 2 + v_i * 4 + la_i * 8 + lb_i * 16
 }
 

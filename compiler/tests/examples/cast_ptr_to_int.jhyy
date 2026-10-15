@@ -12,3 +12,7 @@ fn main_jhyy() -> i32 {
     printf("v=%ld\n", v as i64);
     if v == 42 { 0 } else { 1 }
 }
+// 2026-10-15 补断言: p as i64 → addr as *i32 → *back 必须还原出原值 42,
+// 相等返回 0。addr 本身是栈地址(每次跑都不同),只断言往返 + stdout。
+// EXPECT: 0
+// EXPECT-OUT: "v=42"

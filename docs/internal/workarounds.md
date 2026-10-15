@@ -121,6 +121,9 @@
 | [W-109](#w-109) | ACTIVE | 自举 IL lexer 缺 6 个浮点比较助记符 — f32/f64 六个比较运算静默降级 |
 | [W-110](#w-110) | ACTIVE | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 |
 | [W-111](#w-111) | ACTIVE | 泛型 enum 一旦真被使用 —— sema 报错后 segfault;多字段 payload... |
+| [W-112](#w-112) | ACTIVE | `#[link_section]` 完全失效 — 属性被解析但 codegen 是 no-op |
+| [W-113](#w-113) | ACTIVE | `asm!` 与 memory barrier 的字节被 emit 到 `ret` 之后,永不执行 |
+| [W-114](#w-114) | ACTIVE | 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效 |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -7467,3 +7470,167 @@ foo.jhyy:2:38: error: unknown enum type
   (`main_jhyy` 仅 `return 42`,类型完全未使用)
 - 同族:`generics_err_unsubst.jhyy` 同样是假 EXPECT(见 tests.md 审计)
 - 相关:W-109 / W-110(同属「测试翻不了红 → 缺陷活下来」家族)
+
+<a id="w-112"></a>
+## W-112: `#[link_section]` 完全失效 — 属性被解析但 codegen 是 no-op
+
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — 生成的 .s 里没有任何 `.section` 指令;V3-B 3e 的 ship gate 一直是空转
+**Backfilled:** 2026-10-15 (v3.0.x V3-B 3e「ship」时)
+**Filed-by:** audit-fanout-2026-10-15
+**日期:** 2026-09 前后 (V3-B 3e ship) → 至今
+
+**触发面:** `#[link_section(".text.boot")]` 属性 → `parser.jhyy:3213-3228`
+→ `ast_new_func_decl`(`ast.jhyy:1537`)→ `codegen.jhyy:4478-4485`。
+
+**症状(实测,最小复现):**
+
+```jhyy
+#[link_section(".text.boot")]
+fn _start() -> i32 { return 42; }
+fn main_jhyy() -> i32 { return _start(); }
+```
+
+```
+$ jhyy.exe compile --no-link zz_ls.jhyy -o /tmp/lst/ls
+$ grep '\.section' /tmp/lst/ls.s
+（一个都没有）
+```
+
+`codegen.jhyy:4478` 应往 `compiler/build/obj/_section_directive.buf` 写一行
+`_start|.text.boot`,`main.jhyy:836` 的 `apply_link_section_directives` 读回后插
+`.section` 行。**实测 buf 是 0 字节**,`.text.boot` section 不存在,`_start`
+落在普通 `.text`。属性整体是 no-op。
+
+**为什么一直没被发现:** `link_section_boot.jhyy` 是 V3-B 3e 的 ship gate,
+但它只断言「`_start()` 返回 42」—— 那个值跟 section 归属毫无关系。
+**属性完全失效的情况下它照样 PASS。** 同 `float_cmp` / `generics_enum` 一个
+病:测试名字覆盖了功能,测试内容没有。
+
+**旁证(同机制另两处是通的):** `#[naked]` 实测有效 —— `irq_entry` 的首指令
+就是 `iret`、没有 `push %rbp`。说明属性解析 + `.buf` 旁路整体没问题,
+断点就在 `link_section` 这一条链上。
+
+**次生问题:** `main.jhyy:838` 的 `jh_file_stat_ok(path)` 守卫对**已存在**的
+文件返回 0 就 early-return,连 buf 都不 unlink —— 普通编译会在 `obj/` 留下
+0 字节残留文件。
+
+**workaround:** 无。用户写 `#[link_section]` 不会报错,也不会生效。
+
+**影响范围:** 任何依赖自定义 section 的代码 —— bootloader 入口、UEFI
+`EFIAPI` 段、`jhyy_OS` loader 对接(ABI § 13 的 freestanding 约定)。这是
+OS-required 特性,而 OS 侧正是它的目标场景。
+
+**失效条件:** 打通 `codegen.jhyy:4478` → `_section_directive.buf` →
+`main.jhyy:836` 这条链,并把 `link_section_boot.jhyy` 的断言改成**真的检查
+产物里有没有 `.text.boot`**(当前没有任何测试读 .s / .exe 的 section 表)。
+
+**引用:**
+- 源码 `compiler/src0/codegen.jhyy:4478-4485`
+- 源码 `compiler/src0/main.jhyy:836-838`
+- 源码 `compiler/src0/parser.jhyy:3213-3228`
+- 测试 `compiler/tests/examples/link_section_boot.jhyy`(ship gate,空转)
+
+<a id="w-113"></a>
+## W-113: `asm!` 与 memory barrier 的字节被 emit 到 `ret` 之后,永不执行
+
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — opcode 编码正确但位置在函数末尾之后;这些 ship gate 的退出码对 asm 内容零敏感
+**Backfilled:** 2026-10-15 (V3-B 3a/3f「ship」时)
+**Filed-by:** audit-fanout-2026-10-15
+**日期:** 2026-09 前后 (V3-B 3a/3f ship) → 至今
+
+**触发面:** `asm!` 宏 → `_inline_asm.buf`;`fence_*` builtin。
+
+**症状(实测):**
+- `inline_asm_cpuid.jhyy`:`cpuid` 的 `0f a2` 确实进了 exe(空 main 对照组
+  计数 0,本测试计数 1)—— **但它落在 `main_jhyy` 的 `ret` 之后**,永不执行
+- `memory_barrier_smp.jhyy`:三条 fence 的编码也正确(`0f ae f0/e8/f8`),
+  同样在 `ret` 之后
+
+**后果:** 这两个测试的退出码对 asm 内容**完全零敏感** —— 把整个 asm 删掉
+照样 PASS。也就是说 V3-B 3a / 3f 的 ship gate **没有在 gate 任何东西**。
+
+跟 W-112 同病:`link_section_boot` 是属性 no-op,这三条是字节位置错了但测试
+察觉不到。**三个 V3-B ship gate 实际都没在 gate。**
+
+**workaround:** 无。
+
+**影响范围:** `asm!` 语义正确性、`memory_barrier_smp` 语义正确性 —— 都是
+OS-required 特性(`jhyy_OS` 多核同步的基础)。
+
+**失效条件:**
+1. asm 内联进函数体(在 `ret` 之前),位置正确后测试才可能对内容敏感
+2. harness 需要一个能读 `.exe` / `.s` 字节的门 —— 退出码这条路对 asm 天生
+   不敏感(asm 通常不改变返回值)
+
+**⚠️ 潜在竞态(未复现,待确认):** asm / link_section 走的是**硬编码固定路径**
+的旁路文件(`_inline_asm.buf` / `_section_directive.buf`),codegen `fopen "wb"`
+截断、main 读完 unlink。regress 是多线程并发的,理论上两个测试会互相覆盖或
+删掉对方的旁路文件。并发数提高后可能表现为随机 FAIL。
+
+**引用:**
+- 测试 `compiler/tests/examples/inline_asm_cpuid.jhyy` / `memory_barrier_smp.jhyy`
+- 相关:W-112(同属「V3-B ship gate 空转」家族)
+
+<a id="w-114"></a>
+## W-114: 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效
+
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — 所有变体都无 payload 时,match 不做 tag 检查,恒取第一臂
+**Backfilled:** 2026-10-15 (v1.7.1 patch A3「enum match arm tag check 真修」只覆盖了带 payload 的形状)
+**Filed-by:** audit-fanout-2026-10-15
+**日期:** 2026-08-28 (v1.7.1 patch A3 部分真修) → 至今
+
+**触发面:** `type T = enum { A, B, C }`(所有变体都是 unit variant)对
+`T::B` / `T::C` 做 match。
+
+**症状(最小复现,实测):**
+
+```jhyy
+type Unit3 = enum { A, B, C }
+type Pay1N = enum { S(i32), N }
+type Mix   = enum { X, Y(i32), Z }
+fn u3(v: Unit3) -> i32 { return match v { Unit3::A => 0, Unit3::B => 1, Unit3::C => 2 }; }
+fn pn(v: Pay1N) -> i32 { return match v { Pay1N::S(x) => 100 + x, Pay1N::N => 200 }; }
+fn mx(v: Mix)   -> i32 { return match v { Mix::X => 10, Mix::Y(y) => 20 + y, Mix::Z => 30 }; }
+```
+
+```
+Unit3(B)=0    期望 1     ✗
+Unit3(C)=0    期望 2     ✗
+Pay1N(N)=200  期望 200   ✓
+Mix(Z)=30      期望 30    ✓
+```
+
+**规律精确:** 只要 enum 里**有任意一个 variant 带 payload**,tag 检查就正常;
+**全部是 unit variant 时,`match` 退化成「永远第一臂」**。匹配对象是字面构造、
+局部变量还是函数参数都一样(`arm(Color::Green)` / `arm(g)` / `arm(Color::Blue)`
+三者全返 0)。
+
+**为什么一直没被发现:** 现有的 enum match 回归测试
+`compiler/tests/examples/enum_match_arm_tag_check.jhyy` 用的是
+`type Option = enum { Some(i32), None }` —— **首支带 payload**,正好落在
+「正常」那一侧,所以它一直 PASS 并给人「enum match 已被 A3 修好」的错觉。
+没有任何测试用**纯 unit variant** 的 enum 测过多臂 match。
+
+(附:`enum_match_arm_tag_check.jhyy` 注释里说这个 fix 见「W-057」,
+但台账里 W-057 是 UTF-8 显式 lex reject,不是 enum —— 那条引用也是错的。)
+
+**workaround:** 无。给任意一个变体加一个假的 payload 就能绕过,但那是改
+用户的领域模型来迁就编译器 bug。
+
+**影响范围:** 任何用「状态枚举 + match」表达控制流的程序 —— 状态机、
+结果类型(`Result<T,E>` 的 unit 分支)、错误码分派。这是 idiomatic 写法,
+不是边角用法。**静默给错结果,不报错。**
+
+**失效条件:**
+1. codegen 的 enum match 在「所有 variant 都是 unit」时也要 emit 真正的 tag
+   compare,不能退化成 first-arm
+2. 补测试:上面这个最小复现,断言 `u3(Unit3::B) == 1` 且 `u3(Unit3::C) == 2`
+   —— **只断言一个非第一臂的值不够**,要断言不同 variant 给出不同结果,
+   否则「恒取第一臂」恰好能过
+3. `gdb_pretty_test.jhyy` 删掉 `// SKIP:` 即为验收(它的 `read_color` /
+   `read_maybe` 目前都返回 0)
+
+**引用:**
+- 最小复现:见上(可直接抄进 `compiler/tests/examples/`)
+- 受影响测试 `compiler/tests/examples/gdb_pretty_test.jhyy`
+- 相关:`docs/internal/workarounds.md` enum match arm tag check 段(v1.7.1 patch A3)

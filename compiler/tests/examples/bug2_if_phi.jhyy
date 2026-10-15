@@ -1,3 +1,11 @@
+// EXPECT-OUT: "result = 300"
+// EXPECT: 0
+//
+// 推导: x = 10。
+//   Test 1: 10 > 5 → true → 打印 "x > 5"(else 分支的 "x <= 5" 不应出现)。
+//   Test 2: 10 > 20 false;else if 10 > 10 —— 严格大于,10 > 10 为 false,
+//           落到 else → result = 300(不是 200)。这条正是 phi label bug:
+//           三分支链若把 10 > 10 误判成 true 会得到 200,或错落到第二分支。
 extern fn printf(fmt: *u8, val: i32) -> i32;
 
 fn main_jhyy() -> i32 {
@@ -20,5 +28,8 @@ fn main_jhyy() -> i32 {
     };
     printf("result = %d\n", result);
 
-    0
+    if result == 300 {
+        return 0 as i32;
+    }
+    return 1 as i32;
 }

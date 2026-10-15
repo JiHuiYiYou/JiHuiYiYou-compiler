@@ -1,3 +1,12 @@
+// return_type.jhyy — 非 void 返回值 + 隐式尾表达式返回
+//
+// EXPECT 推导:main 尾表达式是 `greet()`,greet 打印一行后 `return 100`
+// → main 返回 100 → EXIT = 100。
+// 顺带验了「尾表达式即返回值」(main 里没有 return 语句)。
+//
+// EXPECT: 100
+// EXPECT-OUT: "10 + 20 = 30"   — add(10,20)=30 的值真的送进了 printf
+
 extern fn printf(fmt: *u8, val: i32) -> i32;
 
 fn add(a: i32, b: i32) -> i32 {

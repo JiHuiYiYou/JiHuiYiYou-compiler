@@ -1,5 +1,17 @@
 // arena_test.jhyy — driver that exercises arena.jhyy
 // Stage 0 self-hosting pilot: verifies arena.jhyy works as a standalone allocator.
+//
+// EXPECT 推导:main 尾表达式是字面量 42 → EXIT = 42。
+//
+// EXPECT-OUT 推导 —— 期望 `allocated 200 objects`:
+//   arena_init(&a, 1024) 之后循环 arena_alloc(&a, 16) × 200。
+//   初始 1024B 装不下 200×16B,中途必然要扩块 —— 这行打印出来就证明
+//   块增长 + 分配循环跑完了 200 轮没崩、没越界。
+//   （`p1=%d` / `calloc=%d` / `dup=%d` 打的是堆地址,每轮跑都不一样,
+//     不能拿来当期望值。）
+//
+// EXPECT: 42
+// EXPECT-OUT: "allocated 200 objects"
 
 import arena;
 
@@ -28,7 +40,9 @@ fn main_jhyy() -> i32 {
         let p = arena_alloc(&a, 16);
         i = i + 1;
     }
-    printf("allocated 200 objects\n");
+    // 打的是循环变量 i 而不是写死 "200" —— 写死的话,哪怕循环跑 0 轮
+    // 这行也照样打印 "allocated 200 objects",断言就废了。
+    printf("allocated %d objects\n", i);
 
     // calloc: should return zeroed memory
     let z = arena_calloc(&a, 32);

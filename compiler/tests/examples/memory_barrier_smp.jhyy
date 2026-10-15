@@ -1,12 +1,28 @@
+// EXPECT: 0
+//
 // V3-B 3f ship gate test: fence_seq_cst() / fence_acquire() / fence_release()
 // emit raw mnem (mfence / lfence / sfence) to .s side-file, get concat'd
 // into final .exe. Single-threaded runtime check: just verify all 3 fences
-// SKIP: V3-B 3f feature — jhyy-side only (C-side bootstrap predates V3-B; fence_* builtin not in C-side parser)
+// [SKIP 移除 2026-10-15] v1.4.4 把 jhyy.exe flip 成 jhyy-side binary 后本理由失效 —— 2026-10-15 去掉 SKIP,实测 PASS
 // can be called without crashing and the exe runs to completion.
 //
 // SMP verification is at .s grep level (look for mfence/lfence/sfence mnems);
 // actual multi-core ordering validation requires OS kernel + multi-threaded
 // test harness (deferred to jhyy_OS M1 launch integration).
+//
+// ── EXPECT: 0 到底覆盖了什么(2026-10-15 实测)────────────────────
+// objdump 反汇编:3 条 fence 全在,但落在 `main_jhyy` 的 `ret` **之后**
+// (全局尾随汇编),跟 inline_asm_cpuid 同一个 passthrough 形状 —— 是死代码,
+// **运行时一条都没执行**。所以 EXPECT: 0 证明不了「fence 会被执行」,
+// 它证明的是「fence 调用走通 parse/sema/codegen,链接出的 exe 能干净跑完」。
+//
+// 三条 fence 的**编码**是静态属性,当前是对的(人工验过):
+//   mfence = 0f ae f0 / lfence = 0f ae e8 / sfence = 0f ae f8
+//   objdump -d <exe> | grep -E 'm|l|s}fence'   # 期望各 ≥ 1
+//
+// 也不能拿 store-load 顺序当断言:本测试单线程、无并发数据竞争,
+// 观察不到任何重排 —— 那需要真 SMP + 多线程 harness。
+// 换句话说,「fence 真的生效」这件事目前没有任何回归在测。
 
 fn main_jhyy() -> i32 {
     fence_seq_cst();

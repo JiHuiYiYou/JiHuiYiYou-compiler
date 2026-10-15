@@ -7,3 +7,6 @@ fn fact(n: i32) -> i32 {
 fn main_jhyy() -> i32 {
     return fact(5);
 }
+// 2026-10-15 补断言: fact(5) = 5*4*3*2*1 = 120. #[inline] 递归函数
+// 不能真 inline,必须回落到正常调用 —— 递归 5 层还能算对即验证回落路径。
+// EXPECT: 120

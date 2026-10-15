@@ -1,3 +1,14 @@
+// EXPECT-OUT: "x = 100"
+// EXPECT: 0
+//
+// 推导: x = 1。
+//   Test 1: 1 > 0 → then 分支 x = 100(else 的 200 不该出现)→ 打印 "x = 100"。
+//           这条验 void 形态的 if/else 作为语句时,then 分支要真被执行。
+//   Test 2: count = 3,while count > 0 递减 —— 迭代 3 次,依次走
+//           count>1(count=3)、count>1(count=2)、count==1(count=1),
+//           stdout 应是 "count > 1" ×2 + "count == 1" ×1。
+//           这条是 dungeon game 原始 workaround 场景:void if/else 嵌在
+//           while 里,phi label 错的话会死循环或多跑一轮。
 extern fn printf(fmt: *u8, val: i32) -> i32;
 extern fn puts(s: *u8) -> i32;
 
@@ -25,5 +36,8 @@ fn main_jhyy() -> i32 {
         }
     }
 
-    0
+    if x == 100 && count == 0 {
+        return 0 as i32;
+    }
+    return 1 as i32;
 }

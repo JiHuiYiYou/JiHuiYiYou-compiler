@@ -6,3 +6,4 @@ fn main_jhyy() -> i32 {
     *p = 100;         // write through pointer
     x                 // should be 100
 }
+// EXPECT: 100

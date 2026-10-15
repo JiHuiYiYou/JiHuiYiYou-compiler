@@ -2,8 +2,12 @@
 
 > 集成测试清单 + 运行方法。详细每条 .jhyy 的预期值见 `compiler/tests/examples/`。
 >
-> **Last updated**: 2026-10-15 — `regress.py` baseline = **162/162 PASS + 23 SKIP**
-> (185 total;这是实测跑出来的数字,不是抄上一版)。Stage 2 closure sha `da78987c`。
+> **Last updated**: 2026-10-15 — `regress.py` = **173/173 PASS(全部有断言)+ 24 SKIP**
+> (197 total,连跑两次一致)。Stage 2 closure sha `da78987c`。
+>
+> **注意 total 从 185 变成 197**:harness 原来用 `os.listdir`(不递归),
+> `arena_test/` / `hello-freestanding/` / `multi_file/` / `namespace/` 四个子目录
+> 共 12 个 .jhyy **从来没进过全量回归**。已改 rglob。
 
 ## ⚠️ 引用「N/N PASS」之前先读这一段
 
@@ -38,26 +42,49 @@ python scripts/dev/audit_test_assertions.py --strict   # 有违规 exit 1(挂 CI
 `generics_enum.jhyy` 骗过(它有 `//EXPECT:42` 而 main 是字面 `return 42`)。
 判据是「`main_jhyy` 的返回值是否从被测表达式推导」。
 
-2026-10-15 实测(197 个 `.jhyy`,可跑 166):
+2026-10-15 终值(197 个 `.jhyy`,可跑 173):
 
 | 分类 | 数量 | 实际验了什么 |
 |---|---|---|
-| **真断言**(`real` + `out-asserted`) | **102** | 结果正确 |
-| **`literal-return`** | **6** | 有 EXPECT 但不可能失败:`generics_enum` / `generics_err_unsubst` / `defer_basic` / `big_test` / `void_if` / `gdb_pretty_test` |
-| **`crash-only`** | **47** | **只有「进程没崩」**;其中约 21 个带 printf,输出被丢弃 |
-| `literal-return-ok` | 6 | 合理例外:`exit_zero_extend_*` 的被测对象就是退出码本身 |
-| `expect-error` / `skipped` / `library` | 5 / 17 / 14 | — |
+| **真断言**(`real` + `out-asserted`) | **160** | 结果正确 |
+| `literal-return-ok` | 7 | 合理例外:`exit_zero_extend_*` + `hello`,被测对象就是退出码 |
+| `expect-error` | 6 | 编译必须失败且 stderr 含关键字 |
+| `skipped` | 10 | `// SKIP:` |
+| `library` | 14 | 无 `fn main_jhyy` |
 
-**零信号合计 53 / 166 = 32%。** 所以「162/162 PASS」实际只证明「约 102 个测试的
-结果是对的 + 其余没崩」。它**不**证明浮点比较、`&mut` 写路径、数组/字符串越界、
-除零、深递归 —— 这些要么没有断言,要么根本没有用例。实例见 `workarounds.md`
-**W-109** / **W-110**。
+**零信号合计 0。** 曾是 54(43 个只验没崩 + 11 个有 EXPECT 但不可能失败),
+2026-10-15 全部改成真断言。
 
-> **判据本身也踩过两次坑,记下来免得再犯:** 分类器第一版把 32 个测试误判成
-> 违规(`std_os_basic` 那种 `return 1..9` 不同失败分支返不同常量,是**真断言**);
-> 第二版漏掉隐式返回(`fn main_jhyy() { 42 }`)。**一个用来 gate CI 的分类器
-> 自己的假阳性比没有分类器更糟** —— 它会让人去「修」本来正确的测试。
-> 现在判据是「`if` 的条件有没有拿计算值做比较」,不是数 return 的字面量。
+regress 汇总行现在**只计有断言的**:
+
+```
+===== 173/173 passed (全部有断言), 0 failed, 24 skipped (of 197 total) =====
+  ├─ NOASSERT 0  无断言,只验了「进程没崩」
+  ├─ VACUOUS  0  有 EXPECT 但断言在数学上不可能失败
+```
+
+NOASSERT / VACUOUS **不是 PASS** —— 它们仍会跑(能抓编译器崩溃),但验证不了
+任何计算结果。以前这两类和 PASS 在汇总行里长得一模一样,「163/163 全绿」这句话
+因此不携带信息;现在不需要额外解释了。
+
+> **这一轮补断言挖出 3 个真 bug**(W-112 / W-113 / W-114),全部是「测试名字
+> 覆盖了功能,测试内容没有」:
+> - `link_section_boot` —— `#[link_section]` 是 no-op,ship gate 一直空转
+> - `inline_asm_cpuid` / `memory_barrier_smp` —— asm 字节被 emit 到 `ret` 之后,
+>   退出码对 asm 内容零敏感
+> - `gdb_pretty_test` —— 全 unit-variant 的 enum `match` 永远命中第一支
+>
+> 以及 `float_cmp` 挖出 W-109/W-110、`generics_enum` 挖出 W-111。
+> **补断言的投产比远高于读代码找 bug。**
+
+> **判据扫描踩过的坑(记下来免得再犯):**
+> 1. 「有没有 EXPECT 指令」当判据 —— 会被 `generics_enum`(有 `//EXPECT:42`
+>    而 main 是字面 `return 42`)骗过。判据必须是「返回值是否从被测表达式推导」。
+> 2. 「所有 return 都是字面量」当判据 —— 会把 `return 1..9` 不同失败分支返不同
+>    常量的**真断言**误判成违规。**分类器自己的假阳性比没有分类器更糟。**
+> 3. 指令扫描扫全文 —— **文档里提到一个指令就会凭空生成一条断言**(实测踩过)。
+>    现在只认「该行第一个不在字符串里的 `//` 之后以指令关键字开头」,
+>    整行注释与行尾注释都支持。
 
 ## 集成测试位置
 

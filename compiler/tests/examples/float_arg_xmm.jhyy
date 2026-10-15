@@ -9,6 +9,12 @@
 // 聚焦 Phase 3b 真修。
 //
 // EXIT:每个 arg 加分,期望 EXIT=15 (1+2+4+8)
+//
+// EXPECT 推导:`as i32` 之后是 i32 比较,不受 W-109 浮点比较缺陷影响。
+//   sum4(1,2,3,4) = 10.0 → s_int = trunc(10.0) = 10 → score = 15
+//   EXIT = 15
+//
+// EXPECT: 15
 
 fn sum4(a: f64, b: f64, c: f64, d: f64) -> f64 {
     return a + b + c + d;

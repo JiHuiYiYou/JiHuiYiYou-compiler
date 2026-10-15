@@ -11,3 +11,6 @@ fn main_jhyy() -> i32 {
     }
     return sum_sugar - sum_manual;
 }
+// 2026-10-15 补断言: `for x in s` 与 `for i in 0..s.len` 两条路径必须
+// 逐元素等价 —— 各自都得 15,差值恒为 0(任一路径多算/漏算/越界都非 0)。
+// EXPECT: 0

@@ -4,9 +4,16 @@
 // v1.8.0 fix: defer 在 cg_return 前 emit, `sink(log)` 在 `return 0` 之前调用
 //   (Go-style — return value capture 先). log = 42 在 defer register 后, sink
 //   看到 42. return 0 触发 defer → sink(42), 然后函数返回 0.
+// 2026-10-15:原先 `sink(log)` 的返回值被丢弃 —— 「sink 看到 42」只写在注释里,
+// 没有任何东西验它。改成 sink 自己打印,这样 EXPECT-OUT 才真的在 gate。
 // EXPECT: 0
+// EXPECT-OUT: "defer saw 42"
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
 
 fn sink(v: i32) -> i32 {
+    printf("defer saw %d
+" as *u8, v);
     return v;
 }
 

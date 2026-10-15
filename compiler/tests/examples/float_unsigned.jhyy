@@ -9,6 +9,12 @@
 // depth。本 fixture 只覆盖 f64 IMM 真解,不触发 ultof/uwtof。
 //
 // EXIT:每 IMM 加分,期望 EXIT=63
+//
+// EXPECT 推导:比较全在 i32 上(`f64 as i32` 之后),不受 W-109 浮点比较缺陷影响。
+//   1.0→1(+1) 2.0→2(+2) 3.0→3(+4) 4.0→4(+8) 5.0→5(+16) 10.0→10(+32)
+//   EXIT = 1+2+4+8+16+32 = 63
+//
+// EXPECT: 63
 
 fn main_jhyy() -> i32 {
     let mut score: i32 = 0;

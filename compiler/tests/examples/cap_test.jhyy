@@ -1,4 +1,4 @@
-// SKIP: V3-C 3g feature — jhyy-side only (C-side bootstrap predates V3-C; Cap builtin not in C-side parser)
+// [SKIP 移除 2026-10-15] v1.4.4 把 jhyy.exe flip 成 jhyy-side binary 后本理由失效 —— 2026-10-15 去掉 SKIP,实测 PASS
 // v3.1.0 (V3-C 3g) ship-gate test: Cap<T> builtin 8-byte layout (cnode/depth/rights/pad).
 // Per spec supplement v3.1.0 § 3: sizeof(Cap<T>) == 8 on all targets.
 fn main_jhyy() -> i32 {

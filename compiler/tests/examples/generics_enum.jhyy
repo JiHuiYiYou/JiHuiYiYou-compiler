@@ -9,4 +9,9 @@ type Option<T> = enum {
 fn main_jhyy() -> i32 {
     return 42;
 }
+// 2026-10-15:加上这个断言会**让编译器段错误**(W-111:sema 打完
+// `error: unknown enum type` 之后 SEGV)。泛型 enum 一旦被真正使用就走那条路 ——
+// 而本文件此前只是「声明但不实例化」,所以一直 PASS。
+// 修完 W-111 删掉这行 SKIP 就是验收标准。
+// SKIP: W-111 泛型 enum 一旦被 match → sema 报错后 SEGV(编译器崩溃)
 //EXPECT:42

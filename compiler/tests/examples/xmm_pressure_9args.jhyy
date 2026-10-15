@@ -11,7 +11,13 @@
 // 9 个 f64 arg 测试:sum(1..9) = 45.0;return 255 if correct
 // (255 = EXIT_OK 跟 float_arg_xmm.jhyy EXIT=15 一致,本 fixture 也返 255)
 //
-// SKIP-QBE: vendor QBE Win 模式 emit `movq <stack>(%rsp), %rax; addsd %rax, %xmm0`
+// EXPECT 推导:`as i32` 之后是 i32 比较,不受 W-109 浮点比较缺陷影响。
+//   sum9(1..9) = 45.0 → s_int = 45 → score = 255
+//   EXIT = 255
+//
+// EXPECT: 255
+//
+// [SKIP 移除 2026-10-15] vendor QBE 已 v3.1.0 移出默认路径 —— 2026-10-15 去掉 SKIP-QBE,实测 PASS
 // operand type mismatch (QBE 没把 stack-arg f64 走 XMM)。这是 QBE upstream bug,
 // 不挡 self-backend 真修验证;--self-backend 模式仍跑 (V.1 gate 5/5 EXIT=255)。
 

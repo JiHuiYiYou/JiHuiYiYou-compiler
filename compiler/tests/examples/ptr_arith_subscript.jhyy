@@ -6,3 +6,5 @@ fn main_jhyy() -> i32 {
     let p: *i32 = &arr[0];
     return p[2];                 // 期望 30
 }
+// 2026-10-15 补断言: p = &arr[0] → p[2] = *(p + 2*sizeof(i32)) = arr[2] = 30.
+// EXPECT: 30
