@@ -2,13 +2,58 @@
 
 > 集成测试清单 + 运行方法。详细每条 .jhyy 的预期值见 `compiler/tests/examples/`。
 >
-> **Last updated**: v2.4.0 (2026-09-04) — `regress.py` baseline = **104/104 PASS + 4 SKIP** (108 total);Stage 2 N=4 byte-equal closure re-baselined sha `51376ce5...` per D43。
+> **Last updated**: 2026-10-15 — `regress.py` baseline = **163/163 PASS + 22 SKIP**
+> (185 total;这是实测跑出来的数字,不是抄上一版)。Stage 2 closure sha `da78987c`。
+
+## ⚠️ 引用「N/N PASS」之前先读这一段
+
+**PASS 的强度取决于测试有没有断言,不取决于它跑没跑。**
+
+`mcp-jhyy/jhyy_regress.py` 的 `run_test()`(约 140-275 行)只有四种判据:
+
+| 源文件里的指令 | 实际验了什么 |
+|---|---|
+| `// EXPECT: 42` | 进程退出码 == 42 —— **真断言** |
+| `// EXPECT-ERROR: "kw"` | 编译必须失败且 stderr 含该子串 |
+| `// SKIP: reason` | 跳过 |
+| **什么都不写** | **只要进程没崩就 PASS**(`expected is None` 分支只查 NTSTATUS) |
+
+两个必须知道的事实:
+
+1. **stdout 从头到尾不被比较。** `output` 被捕获后只用于显示,不参与判定。
+   测试打印一堆值而 `main_jhyy` 直接 `return 常量`,那堆输出就是摆设。
+2. **有 `// EXPECT:` 也不等于有断言。** 若 `main_jhyy` 的所有 `return` 都是同一
+   个字面量,`// EXPECT:` 只是把字面量抄了一遍,零信息量。
+
+2026-10-15 全量审计(197 个 `.jhyy`)实际分布:
+
+| 分类 | 数量 | 实际验了什么 |
+|---|---|---|
+| 真断言(返回值由计算推导) | **108** | 结果正确 |
+| 有 `// EXPECT:` 但返回同一字面量 | 10 | 其中 6 个 `exit_zero_extend_*` **是合理的**(被测对象就是退出码本身);`gdb_pretty_test` 同理(被测对象是调试器输出)。真正假的约 3 个:`generics_enum` / `generics_err_unsubst` / `defer_basic`(断言只写在注释里,没被检查) |
+| **有 `main_jhyy` 但无任何指令** | **48** | **只有「进程没崩」**;其中 21 个还带 printf,输出被丢弃 |
+| library(无 `main_jhyy`) | 14 | 跳过 |
+
+**所以「163/163 PASS」实际只证明「约 108 个测试的结果是对的 + 其余没崩」。**
+它**不**证明浮点比较、`&mut` 写路径、数组/字符串越界、除零、深递归 ——
+这些要么没有断言,要么根本没有用例。实例见 `workarounds.md` **W-109**。
 
 ## 集成测试位置
 
 `compiler/tests/examples/*.jhyy`（主目录 + 子目录 `multi_file/` / `namespace/` / `arena_test/`）。
 
-回归脚本：`python compiler/build/bin/regress.py`，自动跑所有有 `main_jhyy` 的 .jhyy。
+回归脚本是**仓库根目录**的 `regress.py`(不是 `compiler/build/bin/`,仓库根
+relocation 之后的路径),自动跑所有有 `main_jhyy` 的 .jhyy
+(`jhyy_regress.py:371` 目录扫描,不是手工枚举):
+
+```
+python regress.py                       # 全量
+python regress.py --tests=foo.jhyy      # 单测(必须带 .jhyy 后缀)
+python regress.py --binary=jhyy_v2.exe  # 用 self-hosted 编译器跑
+```
+
+> ⚠️ `--tests=` **必须带 `.jhyy` 后缀**。不带时 harness 不补后缀,直接
+> `FileNotFoundError` 崩在 runner 里,不是干净报错。
 
 ---
 

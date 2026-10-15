@@ -14,8 +14,13 @@ CFLAGS_STAGE0 = -std=c11 -Wall -Wextra -g0 -Wl,--build-id=none -I$(SRC_DIR)
 STRIP         = strip
 SOURCE_DATE_EPOCH = 1234567890
 # QBE removed v4.0.0 from jhyy-side compile path; still vendored for C-side
-# bootstrap (compiler/src/main.c uses QBE in cmd_compile). Full QBE removal
-# is M5 scope (deferred — see docs/internal/workarounds.md W-XXX).
+# bootstrap — compiler/src/main.c:489 拼 `%s/qbe/qbe.exe` 并在 :498 用 system()
+# 调它跑 C 端 stage0。Full QBE removal 是 M5 scope(deferred — 见
+# docs/plans/v4/backlog.md § 1 M5)。M5 是计划项不是 workaround,故不登记进
+# workarounds.md —— 原先此处写的 `W-XXX` 是从未填过的悬空占位符。
+#
+# 注意:下面两个变量当前**没有任何 recipe 引用**(stage0 的 QBE 调用走 main.c
+# 内部,不经过 Makefile)。保留仅为记录路径。
 QBE      = qbe/qbe.exe
 QBEFLAGS = -t amd64_win
 WINDRES  = windres

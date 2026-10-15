@@ -98,9 +98,72 @@ If any gate fails → STOP before tag push. Diagnose root cause per `feedback_rc
 
 ---
 
+## v4.0.0 final — ⛔ 未 promote,blocked
+
+**这一节记录「为什么 v4.0.0 final 至今没有 tag」,而不是宣布 promote。**
+
+按 2026-10-10 user 决定:「所有 defer/active 的 workaround 必须在 v4 正式版中
+清零,大不了 v4 不发」。该门槛**当前未满足**。
+
+### 曾经写过「已清零」,那是错的
+
+`6d5eca4` 与 `1871cd7` 都写过「索引表 ACTIVE/DEFERRED = 0,blocker 清零,
+下一动作 = tag v4.0.0 final」。2026-10-15 的 fan-out audit 推翻了这个结论,
+两条独立的原因:
+
+1. **用来证明清零的那个工具读不到数据。** `v2_13_5_rebuild_index.py` 的
+   `STATUS_RE` 不容忍状态行里的 `✅` 前缀(59 条被静默丢弃),且只匹配 H2 而
+   9 条挂在 H3 下 —— 索引 16 行 vs 台账 96 条。所以「索引表 0 ACTIVE」
+   从来不是「没有 ACTIVE」,是「读不到」。已修(登记 **W-108**,索引 → 94 行)。
+
+2. **验证闭环的那几个门自己翻不了红。** CI 里内联的 Stage2/Stage3 `.il` sha
+   比对从没设 `JHY_WRITE_IL=1`,四个 sha 全是空串,`"$A" != "$B"` 对空串恒假,
+   闭环与否都打 `PASS (sha=)`;`fixed_point.sh` 的 cap_test 层因为 `-o` 多写了
+   `.exe` 三代全 SKIP 仍判 PASS;`fixed_point_linux.sh` 的终局判据
+   `LINUX_PASS -ge 0` 对初值 0 恒真。真正的门 `closure_check.sh` 从未被 CI 调用过。
+   已修(commit `4a117a1`,三个门逐一造过红灯)。
+
+### 当前真实状态(2026-10-15 实测)
+
+```
+索引表        7 ACTIVE / 81 RESOLVED / 4 SUPERSEDED / 2 INVALID / 0 DEFERRED
+regress       163/163 PASS + 22 SKIP (of 185)   ← 注意 PASS 的强度,见下
+closure_check PASS, v2.s == v3.s byte-identical (sha da78987c)
+fixed_point   7 PASS / 0 FAIL / 0 INFO (N=5)
+```
+
+**7 条 ACTIVE:** W-103(std_os 全 mock)/ W-104(SysV 借 Win 分类器)/
+W-105(`check_borrow` 恒 return 1)/ W-105.1(同款死 stub)/
+W-106(arena-touch)/ W-107(per-fn 表 1024 上限)/ W-109(浮点比较算错)。
+
+修法、优先级、验收 gate 见
+[`docs/plans/v4/active-workaround-clearance.md`](../../plans/v4/active-workaround-clearance.md)。
+
+### ⚠️ 「163/163 PASS」不能当作正确性证据
+
+`docs/internal/tests.md` 顶段有完整说明。一句话版本:185 个测试里约 108 个
+有真断言,48 个只验「进程没崩」,stdout 从不被比较。浮点比较就是这么活到今天
+的 —— `float_cmp.jhyy` 无判据指令且 `return 42` 写死,而 f32 比较实际按 f64 算、
+`f64 ==/!=` 直接编译失败(W-109)。
+
+**「PASS」证明的是「没崩」,不是「算对了」。**
+
+### promote 条件
+
+1. 上表 7 条 ACTIVE 全部 RESOLVED
+2. 每条都有**能翻红**的测试(造过红灯),不是新增一个 `return 42`
+3. `regress` 在 `jhyy.exe` 与 `jhyy_v2.exe` 两个 binary 上都不退步
+4. `closure_check.sh` + `fixed_point.sh` 保持绿
+
+---
+
 ## v4.x follow-on plans (⏳)
 
-Per [`docs/plans/v4/v4.X.Y-plan.md`](../../plans/v4/) (14 files: v4.0.0 → v4.12.0):
+> **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一
+> [`docs/plans/v4/backlog.md`](../../plans/v4/backlog.md),**不再以版本号命名**
+> —— 版本号在启动时才分配。已 ship 的 `v4.0.x` 计划保留原名作审计轨迹。
+
+Per [`docs/plans/v4/backlog.md`](../../plans/v4/backlog.md) (原 12 files: v4.1.0 → v4.12.0):
 
 | Sprint | Intent |
 |---|---|
