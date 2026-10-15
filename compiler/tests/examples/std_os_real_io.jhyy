@@ -1,0 +1,74 @@
+// std_os_real_io.jhyy — std_os_* 声称做了 I/O,就必须真的做。
+//
+// 2026-10-15 新增。`std_os_basic.jhyy` 断言的是 `fd1 != 42`、`wn != 5` ——
+// 它在**给 mock 的契约背书**:mock 说「写了 5 字节」,测试就认为写了。
+// 于是 W-103(std_os_* 全是 M0 mock)一直有个 PASS 撑着,而那个 PASS 不验证
+// 任何真实行为。
+//
+// 本测试换一条路验证同一件事:用 `std_os_write` 写,然后**真的把文件读回来**
+// 逐字节比对。mock 的 `std_os_read` 不会填 buf,所以今天必然失败。
+//
+// 参考实现对照:`std/io.jhyy` 的 `std_io_*` 是真实现(W-080 修的),
+// 所以同一个「写→读回→比对」的序列用 std_io 应该通过 —— 两者之差就是 W-103。
+//
+// XFAIL: W-103 std_os_open/close/read/write/exit 全是 M0 mock,不接 libc
+// EXPECT: 0
+extern fn printf(fmt: *u8, a: i32, b: i32, c: i32) -> i32;
+extern fn fopen(path: *u8, mode: *u8) -> *u8;
+extern fn fread(buf: *u8, size: i64, count: i64, fp: *u8) -> i64;
+extern fn fclose(fp: *u8) -> i32;
+
+// ── W-103 的目标:std/os.jhyy 的 inline 副本 ──
+fn OS_O_WRONLY() -> i32 { return 1 as i32; }
+fn OS_O_CREAT()  -> i32 { return 64 as i32; }
+fn OS_O_TRUNC()  -> i32 { return 512 as i32; }
+fn OS_MODE_RW_R() -> i32 { return 420 as i32; }
+
+fn std_os_open(path: *u8, flags: i32, mode: i32) -> i64 {
+    if path == (0 as *u8) { return 0 as i64 - (1 as i64); }
+    if flags < (0 as i32) { return 0 as i64 - (1 as i64); }
+    if mode < (0 as i32)   { return 0 as i64 - (1 as i64); }
+    if mode > (511 as i32) { return 0 as i64 - (1 as i64); }
+    return 42 as i64;                       // ← mock:恒返 42,从不 open(2)
+}
+fn std_os_write(fd: i64, buf: *u8, n: i64) -> i64 {
+    if fd < (0 as i64) { return 0 as i64 - (1 as i64); }
+    if buf == (0 as *u8) { return 0 as i64 - (1 as i64); }
+    if n <= (0 as i64) { return 0 as i64; }
+    return n;                               // ← mock:声称写了 n 字节,一个字节都没写
+}
+fn std_os_read(fd: i64, buf: *u8, n: i64) -> i64 {
+    if fd < (0 as i64) { return 0 as i64 - (1 as i64); }
+    if buf == (0 as *u8) { return 0 as i64 - (1 as i64); }
+    if n <= (0 as i64) { return 0 as i64; }
+    return n;                               // ← mock:声称读了 n 字节,buf 原封不动
+}
+
+fn main_jhyy() -> i32 {
+    let path = "compiler/build/bin/_std_os_real_io.txt" as *u8;
+    let hello = "hello" as *u8;
+
+    // 1) 用 std_os 写 —— 它声称成功
+    let flags = OS_O_WRONLY() + OS_O_CREAT() + OS_O_TRUNC();
+    let fd = std_os_open(path, flags, OS_MODE_RW_R());
+    if fd != (42 as i64) { return 1; }
+    let wn = std_os_write(fd, hello, 5 as i64);
+    if wn != (5 as i64) { return 2; }
+
+    // 2) 用**真** fopen/fread 把文件读回来 —— 绕过 std_os 的 mock
+    let fp = fopen(path, "rb" as *u8);
+    if fp == (0 as *u8) { printf("REAL_IO file_not_created\n" as *u8, 0, 0); return 3; }
+    let mut buf: [i32; 8] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                             0 as i32, 0 as i32, 0 as i32, 0 as i32];
+    let rn = fread(buf as *u8, 1 as i64, 5 as i64, fp);
+    let _c = fclose(fp);
+
+    // 3) 逐字节比对:mock 的 write 一个字节都没落盘,这里必然读回 0
+    if rn != (5 as i64) { printf("REAL_IO short_read rn=%d\n" as *u8, 0, 0); return 4; }
+    let got0 = *(buf as *i32) & (0xff as i32);
+    let got1 = *(buf as *u8 + (1 as i64)) as i32;
+    printf("REAL_IO got0=%d got1=%d\n" as *u8, got0, got1);
+    if got0 != (104 as i32) { return 5; }     // 'h' = 104
+    if got1 != (101 as i32) { return 6; }     // 'e' = 101
+    return 0;
+}

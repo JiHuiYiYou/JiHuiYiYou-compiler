@@ -1,0 +1,32 @@
+// borrow_mut_write.jhyy — 通过 `&mut i32` 形参写内存(可变引用的规范用法)。
+//
+// 2026-10-15 新增。此前台账声称的「W-105:`check_borrow` 恒 return 1,`&mut`
+// 独占性不检查」严重低估了实际情况 —— 实测下来更糟:
+//
+//   let p = &mut x;              → unexpected token 'mut' in expression
+//   let p: &mut i32 = &x;        → type mismatch in let
+//   (&x) as &mut i32             → cannot dereference non-pointer type
+//   fn setit(p: &mut i32) {*p=5} → cannot dereference non-pointer type  ← 本测试
+//
+// **`&mut` 是个装饰性标注**:parser 认、类型系统里有,但造不出、传不进、
+// 解引用不了。真正能写内存的只有裸 `&` + `*p`(见 borrow_raw_write.jhyy),
+// 而那条路**完全没有别名检查** —— 两个 `&` 指向同一变量随便写。
+//
+// 所以本测试测的是「`&mut` 最基本的用法能不能用」,答案 today 是不能。
+// 它同时覆盖 W-105 的两层:(1) `&mut` 不可用;(2) 可用的裸指针路径无检查。
+//
+// XFAIL: W-105 `&mut` 不可解引用 + check_borrow 恒 return 1 → `&mut` 独占性零检查
+// EXPECT: 5
+extern fn printf(fmt: *u8, a: i32, b: i32) -> i32;
+
+fn setit(p: &mut i32, v: i32) -> i32 {
+    *p = v;
+    return 0;
+}
+
+fn main_jhyy() -> i32 {
+    let mut x: i32 = 0;
+    setit(&x, 5);
+    printf("x=%d\n" as *u8, x);
+    return x;
+}
