@@ -154,6 +154,12 @@ def run_test(
     # v1.7.0 Stage 1: EXPECT-ERROR — 期望 compile fail 且 stderr 含 substring.
     # 跟 EXPECT (整数 exit code) 互斥: 同一 test 只能用一个.
     expect_error_kw = None
+    # 2026-10-15 (W-109 教训):EXPECT-OUT —— 断言 stdout 里的子串。
+    # 存在是因为 EXPECT 只管退出码,而本编译器**不支持变参 printf**
+    # (ABI § 11.2 B8),测试经常只能把结果打印出来;此前 stdout 被捕获后
+    # 只用于显示、不参与判定,于是 float_cmp 那类测试的输出全是摆设。
+    # 只比 stdout(不比 stderr):混进诊断信息会造成假通过。
+    expect_out_kw = None
     # v1.7.3: SKIP directive — 期望 test 暂 skip (有已知 bug 推后续 ship,
     # e.g. defer silent codegen crash 推 v1.8). 形式: `// SKIP: <reason>`.
     skip_reason = None
@@ -174,6 +180,9 @@ def run_test(
         m_err = re.search(r'//\s*EXPECT-ERROR\s*[:=]\s*"([^"]+)"', src)
         if m_err:
             expect_error_kw = m_err.group(1)
+        m_out = re.search(r'//\s*EXPECT-OUT\s*[:=]\s*"([^"]+)"', src)
+        if m_out:
+            expect_out_kw = m_out.group(1)
         m_skip = re.search(r"//\s*SKIP\s*:\s*(.+)", src)
         if m_skip:
             skip_reason = m_skip.group(1).strip()
@@ -245,9 +254,19 @@ def run_test(
                             stdin=subprocess.DEVNULL,  # ⚠️ MCP server 无有效 stdin → 子进程阻塞
                             encoding="utf-8", errors="replace", env=test_env)
         actual = r2.returncode
-        output = (r2.stdout or "") + (r2.stderr or "")
+        stdout_text = r2.stdout or ""
+        output = stdout_text + (r2.stderr or "")
     except subprocess.TimeoutExpired:
         return (False, expected, -3, f"timeout ({timeout}s)")
+
+    # EXPECT-OUT check — runs regardless of whether EXPECT is present, so a
+    # test can assert exit code and output independently (or output alone).
+    # Only stdout: folding stderr in would let a compiler diagnostic that happens
+    # to contain the expected text produce a false pass.
+    if expect_out_kw is not None and expect_out_kw not in stdout_text:
+        return (False, expected, actual,
+                f"EXPECT-OUT not found: expected={expect_out_kw!r}, "
+                f"got stdout[:200]={stdout_text[:200]!r}")
 
     if expected is None:
         # No EXPECT annotation: detect NTSTATUS (AV/heap/etc) → FAIL

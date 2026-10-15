@@ -130,11 +130,13 @@
 
 ## 当前活跃 workarounds
 
-**6 ACTIVE / 0 DEFERRED**(2026-10-15 fan-out audit + 复核,per `docs/internal/workarounds.md` 索引表):
+**8 ACTIVE / 0 DEFERRED**(2026-10-15 fan-out audit + 复核,per `docs/internal/workarounds.md` 索引表):
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
 | W-105 | `compiler/src0/sema.jhyy:2558-2560` | `check_borrow` 恒 `return 1`,`:2677` 每个函数声明都调 → `&mut` 独占性完全不检查 |
+| W-110 | 自举后端 temp 槽位(根因待 RCA) | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 |
+| W-109 | `compiler/src0/codegen_amd64_lexer.jhyy:1628-1647` | 自举 IL lexer 缺 6 个浮点比较助记符 → f32 比较按 f64 算,`f64 ==/!=` 硬失败 |
 | W-103 | `compiler/src0/std/os.jhyy:69-144` | `std_os_open/close/read/write` 全是 M0 mock,`std_os_exit` 不退出进程 |
 | W-104 | `compiler/src0/abi_amd64_sysv.jhyy:229` | SysV 参数分类调用 **Win** 分类器(`abi_sysv_classify_arg` 在同文件 `:79` 但没接线) |
 | W-107 | `compiler/src0/codegen_amd64_state.jhyy:511-537` | 五个 per-fn 表硬编码 1024,实测已用 991 → 余量 33 个函数 |
@@ -143,10 +145,18 @@
 
 排序、修法、验收 gate 见 [`active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md)。
 
-**⚠️ 这 6 条为什么以前「看不见」:** 索引重建脚本的 `STATUS_RE` 不容忍状态行里的
-`✅` 前缀(59 条被静默丢弃),且只匹配 H2 而 9 条挂在 H3 下 —— 索引 16 行 vs
-台账 96 条。已修(W-108,索引 16 → 93 行)。**结论:「索引表 0 ACTIVE」从来不是
-「没有 ACTIVE」,是「读不到」。** 查状态时回源码 `file:line` 复核,不要只信索引。
+**⚠️ 这几条为什么以前「看不见」:** 两个独立原因,都已修。
+
+1. **索引重建脚本读不到**(W-108):`STATUS_RE` 不容忍状态行里的 `✅` 前缀
+   (59 条被静默丢弃),且只匹配 H2 而 9 条挂在 H3 下 —— 索引 16 行 vs 台账 96 条。
+   **「索引表 0 ACTIVE」从来不是「没有 ACTIVE」,是「读不到」。**
+2. **回归测试本身不验证结果**:harness 只比退出码,stdout 从不参与判定。
+   166 个可跑测试里 **53 个(32%)零信号** —— 6 个有 `// EXPECT:` 但数学上不可能
+   失败,47 个只验「进程没崩」。W-109 就是这么活到今天的。详见
+   [`docs/internal/tests.md`](docs/internal/tests.md) 与
+   `scripts/dev/audit_test_assertions.py`。
+
+查状态时回源码 `file:line` 复核,不要只信索引或「N/N PASS」。
 
 **已 RESOLVED 的一批:**
 

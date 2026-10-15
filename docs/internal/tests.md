@@ -13,30 +13,51 @@
 
 | 源文件里的指令 | 实际验了什么 |
 |---|---|
-| `// EXPECT: 42` | 进程退出码 == 42 —— **真断言** |
+| `// EXPECT: 42` | 进程退出码 == 42 —— **真断言**(前提:见下第 2 条) |
+| `// EXPECT-OUT: "substr"` | **stdout 含该子串**(2026-10-15 新增)。只比 stdout 不比 stderr —— 混进诊断信息会造成假通过 |
 | `// EXPECT-ERROR: "kw"` | 编译必须失败且 stderr 含该子串 |
 | `// SKIP: reason` | 跳过 |
 | **什么都不写** | **只要进程没崩就 PASS**(`expected is None` 分支只查 NTSTATUS) |
 
 两个必须知道的事实:
 
-1. **stdout 从头到尾不被比较。** `output` 被捕获后只用于显示,不参与判定。
-   测试打印一堆值而 `main_jhyy` 直接 `return 常量`,那堆输出就是摆设。
-2. **有 `// EXPECT:` 也不等于有断言。** 若 `main_jhyy` 的所有 `return` 都是同一
-   个字面量,`// EXPECT:` 只是把字面量抄了一遍,零信息量。
+1. **此前 stdout 从头到尾不被比较。** `output` 被捕获后只用于显示。测试打印一堆
+   值而 `main_jhyy` 直接 `return 常量`,那堆输出就是摆设 —— `float_cmp.jhyy` 靠
+   这个活到了今天。现已加 `// EXPECT-OUT:` 让输出能参与判定。
+2. **有 `// EXPECT:` 也不等于有断言。** 若 `main_jhyy` 的返回值(显式 `return`
+   或隐式末句)是字面量,且与 EXPECT 值相同,这条断言**在数学上不可能失败**。
 
-2026-10-15 全量审计(197 个 `.jhyy`)实际分布:
+## 断言强度审计
+
+```bash
+python scripts/dev/audit_test_assertions.py           # 报告
+python scripts/dev/audit_test_assertions.py --strict   # 有违规 exit 1(挂 CI 用)
+```
+
+它机械分类每个测试,**不靠「有没有 EXPECT 指令」判断** —— 那样会被
+`generics_enum.jhyy` 骗过(它有 `//EXPECT:42` 而 main 是字面 `return 42`)。
+判据是「`main_jhyy` 的返回值是否从被测表达式推导」。
+
+2026-10-15 实测(197 个 `.jhyy`,可跑 166):
 
 | 分类 | 数量 | 实际验了什么 |
 |---|---|---|
-| 真断言(返回值由计算推导) | **108** | 结果正确 |
-| 有 `// EXPECT:` 但返回同一字面量 | 10 | 其中 6 个 `exit_zero_extend_*` **是合理的**(被测对象就是退出码本身);`gdb_pretty_test` 同理(被测对象是调试器输出)。真正假的约 3 个:`generics_enum` / `generics_err_unsubst` / `defer_basic`(断言只写在注释里,没被检查) |
-| **有 `main_jhyy` 但无任何指令** | **48** | **只有「进程没崩」**;其中 21 个还带 printf,输出被丢弃 |
-| library(无 `main_jhyy`) | 14 | 跳过 |
+| **真断言**(`real` + `out-asserted`) | **102** | 结果正确 |
+| **`literal-return`** | **6** | 有 EXPECT 但不可能失败:`generics_enum` / `generics_err_unsubst` / `defer_basic` / `big_test` / `void_if` / `gdb_pretty_test` |
+| **`crash-only`** | **47** | **只有「进程没崩」**;其中约 21 个带 printf,输出被丢弃 |
+| `literal-return-ok` | 6 | 合理例外:`exit_zero_extend_*` 的被测对象就是退出码本身 |
+| `expect-error` / `skipped` / `library` | 5 / 17 / 14 | — |
 
-**所以「163/163 PASS」实际只证明「约 108 个测试的结果是对的 + 其余没崩」。**
-它**不**证明浮点比较、`&mut` 写路径、数组/字符串越界、除零、深递归 ——
-这些要么没有断言,要么根本没有用例。实例见 `workarounds.md` **W-109**。
+**零信号合计 53 / 166 = 32%。** 所以「163/163 PASS」实际只证明「约 102 个测试的
+结果是对的 + 其余没崩」。它**不**证明浮点比较、`&mut` 写路径、数组/字符串越界、
+除零、深递归 —— 这些要么没有断言,要么根本没有用例。实例见 `workarounds.md`
+**W-109** / **W-110**。
+
+> **判据本身也踩过两次坑,记下来免得再犯:** 分类器第一版把 32 个测试误判成
+> 违规(`std_os_basic` 那种 `return 1..9` 不同失败分支返不同常量,是**真断言**);
+> 第二版漏掉隐式返回(`fn main_jhyy() { 42 }`)。**一个用来 gate CI 的分类器
+> 自己的假阳性比没有分类器更糟** —— 它会让人去「修」本来正确的测试。
+> 现在判据是「`if` 的条件有没有拿计算值做比较」,不是数 return 的字面量。
 
 ## 集成测试位置
 
