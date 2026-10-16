@@ -291,7 +291,25 @@ def run_test(
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                                encoding="utf-8", errors="replace", env=test_env)
         except subprocess.TimeoutExpired:
-            return (False, expected, -4, f"compile timeout ({timeout}s,重试后仍超时)")
+            # 超时时报告「卡在哪一步」—— 光说 timeout 没法行动。
+            # .il 出来但没 .s → 卡在 self-backend emit(可能无限循环)
+            # .s 出来但没 .exe → 卡在 gcc 链接(可能是 runner 环境,不是编译器)
+            # 什么都没有 → 卡在 parse/sema(逐 token 慢,或扫描/杀软拖慢 IO)
+            have = [e for e in (".il", ".s", ".exe")
+                    if os.path.exists(out_base + e)]
+            # 注意:in-mem self-backend 路径**默认不落 .il**(要 JHY_WRITE_IL=1
+            # 才写),所以「没有 .il」不代表没进 emit。第一版把 `.il` 当必经标记,
+            # 于是真到了链接阶段也报「未知」。
+            if ".s" in have:
+                stage = ("链接阶段(已产 .s,没有 .exe —— gcc/as 没返回,"
+                         "属 runner 环境而非编译器)")
+            elif ".il" in have:
+                stage = "emit 阶段(已产 .il,没有 .s)"
+            else:
+                stage = "前端或 emit 阶段(无任何产物)"
+            return (False, expected, -4,
+                    f"compile timeout ({timeout}s,重试后仍超时);卡在 {stage};"
+                    f"已有产物={have or '无'}")
         except Exception as exc:
             return (False, expected, -5, f"compile retry failed: {exc!r}")
     if r.returncode != 0:
