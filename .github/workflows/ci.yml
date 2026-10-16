@@ -5,6 +5,8 @@
 #   2. python regress.py --all --include-informational    (matrix only: jhyy_v1.exe.exe historical)
 #   3. make selfhost                                       (build v2/v3/v4 closure chain)
 #   4. bash compiler/tests/bootstrap/closure_check.sh      (gated: Stage2 == Stage3 .s)
+#   5. python scripts/dev/audit_test_assertions.py --strict (gated: 每个测试都有断言)
+#   6. bash compiler/tests/bootstrap/artifact_checks.sh     (non-blocking: 见 step 说明)
 #
 # 触发面:
 #   - push to main (含 v1.x ‖ v2.x ‖ v3.x 任何 commit)
@@ -38,7 +40,12 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: windows-latest
-    timeout-minutes: 30
+    # 30 → 45:本地实测一次全量 CI 流程(build stage0 + make + regress --all 两个
+    # binary + regress --all --include-informational + make selfhost + closure_check)
+    # 在 8 核机器上就要 ~15 分钟;GitHub runner 是 2 核且与自举编译的 fork/gcc
+    # 争抢,30 分钟不够 —— 超时的 CI 跑一半被砍,比红的 CI 更糟(它既没通过也没
+    # 告诉你哪一步没过)。宁可多花 minutes,不要半途而废。
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -113,3 +120,37 @@ jobs:
           # 的退出码 —— 四个 SHA 全是空串,`"$SHA_V1" != "$SHA_V2"` 对空串恒假,
           # 于是闭环与否都打印 `PASS (sha=)`。比没有门更糟,现在直接调真门。
           bash compiler/tests/bootstrap/closure_check.sh
+
+      - name: Assert every test has a real assertion (zero-signal gate)
+        shell: msys2 {0}
+        run: |
+          # v4.0.8:每个 .jhyy 都必须有能失败的断言。
+          #
+          # 背景:regress 的 `163/163 PASS` 曾长期不携带信息 —— 166 个可跑测试里
+          # 54 个零信号(43 个只验「进程没崩」,11 个有 `// EXPECT:` 但 main 返回
+          # 写死字面量、断言在数学上不可能失败)。W-109(浮点比较算错)就是靠
+          # `float_cmp.jhyy` 的「无 EXPECT + 无条件 return 42」活下来的。
+          #
+          # 门禁语义:**新增一个零信号测试就翻红**,而不是等下次 audit 才发现。
+          # `// XFAIL:` 标记的测试不算违规 —— 它声明为「预期失败」,标记是否
+          # 撒谎由运行时的 XPASS 负责(XFAIL 测试转绿 = XPASS = regress 失败)。
+          python scripts/dev/audit_test_assertions.py --strict
+
+      - name: Artifact-level gates (non-blocking until W-112/113/107/116 are RESOLVED)
+        shell: msys2 {0}
+        continue-on-error: true
+        run: |
+          # v4.0.8:验那些**不在程序返回值里**的失效模式 —— 它们的症状在编译
+          # 产物的字节布局里,任何 .jhyy 测试都验不到(写出来会 PASS)。
+          #
+          # 本 step **故意是 non-blocking**:四条检查各自对应一条已登记的
+          # ACTIVE workaround(W-112 link_section no-op / W-113 asm 字节落在
+          # ret 之后 / W-107 per-fn 表 1024 上限 / W-116 SysV callee 只 spill
+          # 4 个寄存器),所以现在**必然全红**(exit 1)。
+          #
+          # 它的作用是把这四条从「没人验」变成「每次 CI 都能看见」,而不是
+          # 让 CI 变红。四条在 v4.0.15 修完后,把 continue-on-error 删掉即可
+          # 升级成 blocking —— 那一步不该由改判据来完成,只能由真修来完成。
+          #
+          # ⚠️ 不要为了让 CI 变绿而放宽这里的判据。那正是本项目今天栽过的坑。
+          bash compiler/tests/bootstrap/artifact_checks.sh

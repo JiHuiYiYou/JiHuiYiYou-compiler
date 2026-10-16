@@ -1,3 +1,4 @@
+// SKIP-STAGE0: C 端 stage0 的 parser 早于 V3-B/V3-C,不认本测试用的语法(`&mut` / `Cap<T>` / `#[naked]` / `asm!` / `volatile` / 泛型)。本测试必须跑在 jhyy.exe 上 —— 它验的是自举后端。
 // [SKIP 移除 2026-10-15] v1.4.4 把 jhyy.exe flip 成 jhyy-side binary 后本理由失效 —— 2026-10-15 去掉 SKIP,实测 PASS
 // v3.1.0 (V3-C 3g) ship-gate test: Cap<T> builtin 8-byte layout (cnode/depth/rights/pad).
 // Per spec supplement v3.1.0 § 3: sizeof(Cap<T>) == 8 on all targets.

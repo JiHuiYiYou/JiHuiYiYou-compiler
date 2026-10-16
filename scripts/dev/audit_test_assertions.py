@@ -46,6 +46,7 @@ RE_EXPECT = re.compile(r"//\s*EXPECT(?:ECT)?\s*[:=]\s*(\d+)")
 RE_EXPECT_ERR = re.compile(r'//\s*EXPECT-ERROR\s*[:=]\s*"([^"]+)"')
 RE_EXPECT_OUT = re.compile(r'//\s*EXPECT-OUT\s*[:=]\s*"([^"]+)"')
 RE_SKIP = re.compile(r"//\s*SKIP\s*:")
+RE_XFAIL = re.compile(r"//\s*XFAIL\s*:")
 RE_MAIN = re.compile(r"\bfn\s+main_jhyy\b")
 RE_RETURN = re.compile(r"^\s*return\s+(-?\d+)\s*;?\s*$")
 
@@ -174,6 +175,7 @@ def classify(path: Path) -> dict:
     has_out = RE_EXPECT_OUT.search(dirs) is not None
     has_err = RE_EXPECT_ERR.search(dirs) is not None
     is_skip = RE_SKIP.search(dirs) is not None
+    is_xfail = RE_XFAIL.search(dirs) is not None
 
     info = {
         "file": str(path.relative_to(EXAMPLES)),
@@ -182,6 +184,7 @@ def classify(path: Path) -> dict:
         "has_out": has_out,
         "has_expect_error": has_err,
         "is_skip": is_skip,
+        "is_xfail": is_xfail,
     }
 
     if not has_main:
@@ -222,6 +225,14 @@ def classify(path: Path) -> dict:
 
     if is_skip:
         info["class"] = "skipped"
+    elif is_xfail:
+        # XFAIL = 声明为「预期失败」的测试(对应 bug 未修)。断言强度规则
+        # **不适用**于它 —— 它本来就该失败,「主程序写死常量」正是它该有的样子。
+        #
+        # 那 XFAIL 标记怎么保证不撒谎?靠运行时的 **XPASS**:一旦这个测试转绿,
+        # regress 会记 XPASS 并让 suite 失败(意味着 bug 修好了却忘了摘标记)。
+        # 所以这里不必再判违规 —— 那正是 XPASS 的职责。
+        info["class"] = "xfail"
     elif has_out:
         info["class"] = "out-asserted"
     elif expect and not all_literal:
@@ -282,7 +293,7 @@ def main() -> int:
         print(f"扫描 {len(results)} 个 .jhyy, 可跑 {runnable} 个")
         print(f"  真断言(real + out-asserted): {real}")
         for k in ("literal-return", "crash-only", "literal-return-ok",
-                  "expect-error", "skipped", "library"):
+                  "expect-error", "xfail", "skipped", "library"):
             if k in buckets:
                 print(f"  {k:24s} {len(buckets[k]):3d}")
         print(f"\n零信号违规合计: {len(violations)}")

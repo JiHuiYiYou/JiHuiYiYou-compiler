@@ -1,3 +1,4 @@
+// SKIP-STAGE0: C 端 stage0 的 parser 早于 V3-B/V3-C,不认本测试用的语法(`&mut` / `Cap<T>` / `#[naked]` / `asm!` / `volatile` / 泛型)。本测试必须跑在 jhyy.exe 上 —— 它验的是自举后端。
 // EXPECT: 0
 //
 // V3-B 3f ship gate test: fence_seq_cst() / fence_acquire() / fence_release()

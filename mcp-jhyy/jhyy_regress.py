@@ -174,6 +174,17 @@ def run_test(
     # 仍跑)。用法: 自写后端真修的 test,QBE 模式有已知 bug (e.g. xmm_pressure_9args
     # QBE Win ABI f64 stack-arg emit `addsd %rdi, %xmm0` operand type mismatch)。
     skip_qbe_reason = None
+    # 2026-10-15 (CI 修复):SKIP-STAGE0 —— 只在 `jhyy_stage0.exe`(C 端 bootstrap)
+    # 上跳过。存在的理由:`regress.py --all` 拿 jhyy.exe 与 jhyy_stage0.exe 两个
+    # binary 做 gated,而 stage0 是 **C 端编译器**,它的 parser 早于 V3-B / V3-C,
+    # 不认 `&mut` / `Cap<T>` / `#[naked]` / `asm!` / `volatile` 这些语法。
+    # 这些测试在 jhyy.exe(生产 binary)上必须跑 —— 它们验的是自举后端的行为,
+    # 而自举后端**只有 jhyy.exe 这条腿在验**。
+    #
+    # 与 SKIP-QBE 是镜像关系:SKIP-QBE 是「默认跳,opt进才跑」,本条是
+    # 「默认跑,只有 stage0 跳」。两边都不该被笼统的 SKIP 代替 —— 笼统 SKIP
+    # 会让这些测试在**两条腿上都不跑**,那才是真的没人验。
+    skip_stage0_reason = None
     # v1.5.6: SETENV directive — 解析 // SETENV: KEY=VALUE 行, 注入到
     # _build_subprocess_env() 返回的 env. 测试用: 验证 jh_gcc_path() 在不同
     # env 状态下的探测行为 (Priority 1 JHY_GCC / Priority 2 JHYY_HOME).
@@ -209,6 +220,9 @@ def run_test(
         m_skip = re.search(r"//\s*SKIP\s*:\s*(.+)", src)
         if m_skip:
             skip_reason = m_skip.group(1).strip()
+        m_s0 = re.search(r"//\s*SKIP-STAGE0\s*:\s*(.+)", src)
+        if m_s0:
+            skip_stage0_reason = m_s0.group(1).strip()
         m_skip_qbe = re.search(r"//\s*SKIP-QBE\s*:\s*(.+)", src)
         if m_skip_qbe:
             skip_qbe_reason = m_skip_qbe.group(1).strip()
@@ -224,6 +238,10 @@ def run_test(
                 setenv_overrides[key] = val
     except UnicodeDecodeError:
         pass
+
+    # SKIP-STAGE0 判定放在所有声明之后 —— binary 参数在这里可用,变量也已初始化。
+    if skip_stage0_reason is not None and os.path.basename(binary) == "jhyy_stage0.exe":
+        return (True, None, None, f"skipped (stage0-only: {skip_stage0_reason})")
 
     if not has_main:
         # Library file: skip (no standalone run possible)
