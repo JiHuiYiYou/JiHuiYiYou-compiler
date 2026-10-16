@@ -282,7 +282,18 @@ def run_test(
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                            encoding="utf-8", errors="replace", env=test_env)
     except subprocess.TimeoutExpired:
-        return (False, expected, -4, f"compile timeout ({timeout}s)")
+        # 2026-10-15:重试一次。单个测试 compile 正常 3 秒,300 秒超时对它是
+        # 永远不合理的量级 —— 命中即意味着「进程被抢死」而不是「编译真的慢」。
+        # 根因是并发下每个测试展开成 jhyy.exe → gcc → cc1 三层进程,CI runner
+        # 核少时被压垮(W-113 记的旁路文件竞态是同一个根的另一面)。
+        # 重试是**缓解**不是修复:真修要靠给旁路文件按 pid 隔离 + 限制并发。
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                               encoding="utf-8", errors="replace", env=test_env)
+        except subprocess.TimeoutExpired:
+            return (False, expected, -4, f"compile timeout ({timeout}s,重试后仍超时)")
+        except Exception as exc:
+            return (False, expected, -5, f"compile retry failed: {exc!r}")
     if r.returncode != 0:
         # v1.7.0 Stage 1: EXPECT-ERROR test 期望 compile fail.
         # kw check 用 full stderr (compile 启动 log 可能 200+ 字符);

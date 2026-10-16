@@ -186,6 +186,29 @@ def _docker_daemon_up() -> bool:
         return False
 
 
+def _docker_image_usable(image: str = "gcc:12") -> bool:
+    """该镜像能否在**本平台**跑起来。
+
+    2026-10-15:CI(Windows runner)上有 Docker,但 `gcc:12` 没有 windows/amd64
+    manifest:
+        docker: no matching manifest for windows(10.0.26100)/amd64
+    此前这被当成 FAIL 报出去,读起来像「测试挂了」,实际是**环境不适用**。
+    环境不适用应该是 SKIP。判据:真跑一次最小容器看 rc。
+    """
+    if not _DOCKER_BIN:
+        return False
+    try:
+        r = subprocess.run(
+            [_DOCKER_BIN, "run", "--rm", image, "true"],
+            capture_output=True, text=True, timeout=120,
+            encoding="utf-8", errors="replace",
+            env={**os.environ, "MSYS_NO_PATHCONV": "1"},
+        )
+        return r.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
 def _resolve_cross_mode(cross_arg: str) -> str:
     """Resolve --cross mode: auto probe wsl.exe then docker daemon.
 
@@ -197,10 +220,14 @@ def _resolve_cross_mode(cross_arg: str) -> str:
         print("cross: --cross=wsl but wsl.exe not on PATH → SKIP", file=sys.stderr)
         return "none"
     if cross_arg == "docker":
-        if _docker_daemon_up():
-            return "docker"
-        print("cross: --cross=docker 但 daemon 不可达 → SKIP", file=sys.stderr)
-        return "none"
+        if not _docker_daemon_up():
+            print("cross: --cross=docker 但 daemon 不可达 → SKIP", file=sys.stderr)
+            return "none"
+        if not _docker_image_usable():
+            print("cross: gcc:12 无本平台 manifest(如 Windows runner)→ SKIP",
+                  file=sys.stderr)
+            return "none"
+        return "docker"
     if cross_arg == "none":
         return "none"
     # auto: probe wsl first (faster on Windows; native Linux distro available)
@@ -250,8 +277,8 @@ def _resolve_cross_mode(cross_arg: str) -> str:
                           file=sys.stderr)
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             pass
-    # daemon 可达才算数(不是 binary 存在)—— 见 _docker_daemon_up 的说明。
-    if _docker_daemon_up():
+    # daemon 可达 + 镜像能在本平台跑,才算数 —— 见两个 _docker_*_usable 的说明。
+    if _docker_daemon_up() and _docker_image_usable():
         return "docker"
     return "none"
 
@@ -368,6 +395,12 @@ def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
                 encoding="utf-8", errors="replace",
                 env={**os.environ, "MSYS_NO_PATHCONV": "1"},
             )
+        except subprocess.TimeoutExpired:
+            # 2026-10-15:CI 上这条路径**把整个 run 打死**过 —— 未捕获的
+            # TimeoutExpired 从这里一路冒到 main(),而汇总行在它之前就已经
+            # 打印完了,于是 exit code 变成 2,CI 只看到一个没有上下文的
+            # traceback。一个测试超时不该让整轮失去意义。
+            return (False, f"stage1 compile timeout ({timeout}s, cross={cross_mode})")
         except FileNotFoundError as e:
             return (True, f"skipped (jhyy binary not found for Stage 1: {e})")
         if stage1.returncode != 0:
