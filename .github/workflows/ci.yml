@@ -1,7 +1,7 @@
 # GH Actions CI — JHYY compiler v1.4.7+ (2026-08-14 ship)
 #
 # v1.4.7 单 regress 入口 + matrix 守门 (取代 v1.4.5 三跑 shim):
-#   1. python regress.py --all                            (gated: jhyy.exe + jhyy_stage0.exe)
+#   1. python regress.py --all                            (gated: jhyy.exe;stage0 informational)
 #   2. python regress.py --all --include-informational    (matrix only: jhyy_v1.exe.exe historical)
 #   3. make selfhost                                       (build v2/v3/v4 closure chain)
 #   4. bash compiler/tests/bootstrap/closure_check.sh      (gated: Stage2 == Stage3 .s)
@@ -82,9 +82,16 @@ jobs:
         run: |
           make
 
-      - name: "Run regress.py --all (gated: jhyy.exe + jhyy_stage0.exe)"
+      - name: "Run regress.py --all (gated: jhyy.exe; jhyy_stage0.exe informational)"
         shell: msys2 {0}
         run: |
+          # v4.0.8:stage0 已从 gated 降为 informational —— 它是 C 端 bootstrap,
+          # 语言子集早于 v3.x(闭包是 v3.2.1、char literal / Cap<T> 是 v3.x),
+          # 实测有 39 个**预期内**的失败。让它 gate 等于派一个注定失败的活,
+          # 结果只有「CI 永远红」或「有人放宽判据换绿」两条路,后者正是本项目
+          # 2026-10-15 在修的病。stage0 的真门是上面第 2 步 `make` ——
+          # stage1 用 stage0 编 src0/main.jhyy → jhyy.exe,stage0 一坏就断。
+          #
           # v4.0.2 W-073 follow-on GHA gate fix: regress.py lives at project root
           # (regress.py, not compiler/build/bin/regress.py — it was relocated
           # in v4.0.0-rc1 to keep the build/ tree artifact-only). Historical

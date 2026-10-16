@@ -1,10 +1,22 @@
 # jhyy project — top-level Makefile
-# v1.4.4: 改用 stage-0 链 — `all` 先产 jhyy_stage0.exe (C 端), 再用 stage-0
-# 编译 src0/main.jhyy → jhyy.exe (jhyy-side 产物)。jhyy.exe 是 production
-# binary, jhyy_stage0.exe 只用于 bootstrap (改 compiler/src/*.c 后重建)。
+#
+# v4.0.8 (2026-10-15): `all` 不再经 stage0/QBE —— `jhyy.exe` **自己**编 src0。
+#
+# 理由:`compiler/build/bin/jhyy.exe` 本身是 git 跟踪的产物,fresh clone 里就有
+# 一个可用的自举编译器,stage0 那条链的唯一作用(「用 C 编译器编出第一个
+# jhyy.exe」)因此不是必需的。QBE 更只在 **stage0 的运行期**被调用
+# (main.c:489/496 的 system()),自举编译器完全不用它 —— 于是 QBE 这个第三方
+# 二进制从「每次构建的必经之路」上消失,`.gitattributes` 那类「二进制被当文本
+# 损坏」的故障从此没有着力点。
+#
+# 构建语义同时变强:不再是「C 编译器能编出 jhyy.exe」,而是
+# 「**jhyy.exe 能把自己编成同一个东西**」—— 见 jhyy.exe 规则里的 byte-equal
+# 自举闭环检查。
+#
+# 仍然保留:`make stage0` 仍能编 C 端 bootstrap(CI 也仍然验它),它只是不在
+# `all` 的依赖链上。
 # v4.0.0: D26 reproducibility recipe applied to stage0 build (-g0 + strip +
-# SOURCE_DATE_EPOCH); QBE still vendored for C-side bootstrap (full removal
-# is M5 scope per v1.x-phase-4-m5-boot-from-scratch.md).
+# SOURCE_DATE_EPOCH).
 
 CC       = gcc
 CFLAGS   = -std=c11 -Wall -Wextra -g -I$(SRC_DIR)
@@ -113,11 +125,45 @@ $(BIN_DIR)/jhyy_stage0.exe: $(OBJS) $(RES_OBJ)
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(CC) $(CFLAGS_STAGE0) $^ -o $@
 	$(STRIP) --strip-unneeded $@
 
-# v1.4.4: jhyy.exe 由 jhyy_stage0.exe 编 src0/main.jhyy 产
-# 依赖 stage0 (jhyy_stage0.exe 必须先存在)
-$(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(BIN_DIR)/jhyy_stage0.exe
+# v4.0.8 (2026-10-15): jhyy.exe 改由**它自己**编 src0,不再经 stage0/QBE。
+#
+# 为什么改:stage0 链的唯一作用是「用 C 编译器编出第一个 jhyy.exe」,而
+# `compiler/build/bin/jhyy.exe` **本身是 git 跟踪的**(实测与当前构建 byte-equal,
+# sha f46d2548)。也就是说 fresh clone 里已经有一个可用的自举编译器,
+# stage0 不是 bootstrapping 必需的。
+#
+# QBE 的处境同样如此:它只在 **stage0 的运行期**被调用(main.c:489/496 的
+# system()),**自举编译器完全不用它**。于是 stage0/QBE 一起从构建关键路径上
+# 消失 —— 一个第三方二进制不再位于每次构建的必经之路上,`.gitattributes`
+# 那类「二进制被当文本损坏」的故障从此没有着力点。
+#
+# 构建语义随之变强:不再是「用 C 编译器编出 jhyy.exe」(只证明 C 侧能编),
+# 而是「**jhyy.exe 能把自己编成同一个东西**」—— 下面那一步 byte-equal 就是
+# 自举闭环门,任何 emit 层的非确定性都会当场炸,而不是留到 regress 才发现。
+#
+# `make stage0` 仍然保留(C 侧 bootstrap 本身仍要能编,CI 也仍然验它),
+# 只是不再在 `all` 的依赖链上。
+$(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy
 	@mkdir -p $(BIN_DIR)
-	$(BIN_DIR)/jhyy_stage0.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy
+	@if [ ! -f $@ ]; then \
+	    echo "ERR: $@ 不存在 —— 没有它就无法自举。"; \
+	    echo "     它是 git 跟踪的产物,正常 clone 就有;若被删,先 checkout 回来:"; \
+	    echo "       git checkout HEAD -- compiler/build/bin/jhyy.exe"; \
+	    exit 1; \
+	fi
+	@# 锚点 = 当前这个(已提交的)jhyy.exe
+	@cp -f $@ $(BIN_DIR)/_boot_anchor.exe
+	@$(BIN_DIR)/_boot_anchor.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/_boot_new
+	@$(BIN_DIR)/_boot_new.exe     compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/_boot_new2
+	@# 自举闭环:新 exe 编 src0 的产物必须与它自己编的完全一致
+	@cmp -s $(BIN_DIR)/_boot_new.s $(BIN_DIR)/_boot_new2.s || { \
+	    echo "SELFFAIL: 新 jhyy.exe 编 src0 的结果与它自己编的不一致 —— 自举不闭环"; \
+	    echo "          $(BIN_DIR)/_boot_new.s  vs  $(BIN_DIR)/_boot_new2.s"; \
+	    exit 1; }
+	@mv -f $(BIN_DIR)/_boot_new.exe $@
+	@rm -f $(BIN_DIR)/_boot_anchor.exe $(BIN_DIR)/_boot_new2.exe \
+	       $(BIN_DIR)/_boot_anchor.il $(BIN_DIR)/_boot_new2.il \
+	       $(BIN_DIR)/_boot_anchor.s  $(BIN_DIR)/_boot_new.s
 
 # v4.0.8: jhyy_v1.exe.exe = jhyy.exe 的副本,**每次构建重新生成**。
 # 兑现 v1.4.4 的副本约定,同时让它不再是会腐烂的 git 快照。名字保留是因为

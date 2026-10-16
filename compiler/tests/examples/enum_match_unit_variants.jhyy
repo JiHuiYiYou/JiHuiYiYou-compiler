@@ -1,0 +1,39 @@
+// enum_match_unit_variants.jhyy — 全 unit-variant 的 enum 必须做真 tag dispatch。
+//
+// 2026-10-15 新增,作为 W-114 的**确定性**门。
+//
+// 为什么不拿 `gdb_pretty_test` 当那道门:它的输出依赖未初始化栈
+// (printf 之外的若干值读的是垃圾寄存器),所以它在 XFAIL 与 XPASS 之间随机
+// 摇摆 —— 实测连续三次输出分别是:
+//     p=90 c=67107264   m=1 s=67099120
+//     p=90 c=2105539584 m=1 s=2105531440
+//     p=90 c=-731907680 m=1 s=-731915824
+// 偶尔凑巧等于 133 就**假通过**。依赖垃圾内存的断言不是断言。
+//
+// 本测试只做确定性的 enum match,逐个变体断言,不同变体必须给出不同结果
+// ——「恒取第一臂」恰好能骗过「只断言一个非第一臂的值」。
+type Unit3 = enum { A, B, C }
+type Pay1N = enum { S(i32), N }
+
+fn u3(v: Unit3) -> i32 { return match v { Unit3::A => 0, Unit3::B => 1, Unit3::C => 2 }; }
+fn pn(v: Pay1N) -> i32 { return match v { Pay1N::S(x) => 100 + x, Pay1N::N => 200 }; }
+fn mx(v: Mix) -> i32 { return match v { Mix::X => 10, Mix::Y(y) => 20 + y, Mix::Z => 30 }; }
+type Mix = enum { X, Y(i32), Z }
+
+fn main_jhyy() -> i32 {
+    // 全 unit variant:三个必须给出三个不同的值
+    if u3(Unit3::A) != 0 { return 1; }
+    if u3(Unit3::B) != 1 { return 2; }
+    if u3(Unit3::C) != 2 { return 3; }
+    // 有 payload 的 enum:正常(用来证明 bug 只在「全 unit」时发生)
+    if pn(Pay1N::N) != 200 { return 4; }
+    if pn(Pay1N::S(5)) != 105 { return 5; }
+    // 混合形状:第一个臂带 payload,后面两个 unit
+    if mx(Mix::Z) != 30 { return 6; }
+    return 0;
+}
+
+// XFAIL: W-114 全 unit-variant 的 enum `match` 永远命中第一支 → 上面 return 2 / return 3。
+//       实测 u3(B) 与 u3(C) 都返回 0(= A 的臂);而同文件里带 payload 的
+//       pn / mx 完全正常 —— 边界精确。修完删掉这行即验收。
+// EXPECT: 0
