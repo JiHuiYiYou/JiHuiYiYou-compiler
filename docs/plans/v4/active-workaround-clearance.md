@@ -1,10 +1,10 @@
-# 活跃 workaround 清零 — v4 发版前必须真修的 12 条
+# 活跃 workaround 清零 — v4 发版前必须真修的 14 条
 
 **状态:** 🔴 **进行中**(2026-10-15 建,per user 2026-10-10 决定「所有 defer/active 的 workaround
 必须在 v4 正式版中清零,大不了 v4 不发」)
 
-**基线:** `d2f5361`(2026-10-15)6 条首次进台账 → `93cdf3d` 补 W-109 → 补 W-110..W-114(12 条)。
-台账里的条目:`docs/internal/workarounds.md` W-103..W-107 / W-105.1 / W-109..W-114。
+**基线:** `d2f5361`(2026-10-15)6 条首次进台账 → `93cdf3d` 补 W-109 → 补 W-110..W-116(14 条)。
+台账里的条目:`docs/internal/workarounds.md` W-103..W-107 / W-105.1 / W-109..W-116。
 
 **优先级(高 → 低):**
 
@@ -22,6 +22,8 @@
 | 10 | **W-114** | 全 unit-variant 的 enum `match` 永远命中第一支 | **核心语言功能失效** | 中 |
 | 11 | **W-112** | `#[link_section]` 是 no-op | OS-required 特性失效 | 中 |
 | 12 | **W-113** | `asm!` / fence 字节 emit 到 `ret` 之后 | ship gate 空转 | 中(先修 W-112 同链) |
+| 13 | **W-115** | W-089 的 reproducer 仍 STACK_OVERFLOW | **RESOLVED 声称无佐证** | 先做 RCA |
+| 14 | **W-116** | SysV callee 参数溢出只处理 4 个寄存器 | **多参数调用传错** | 中 |
 
 排序依据:**① 现在就会让用户拿到错误结果** > ② 目标路径一旦启用就错 >
 ③ 距触发有明确余量的降级 > ④ 冗余/死代码。
@@ -45,6 +47,83 @@
 > printf(正好撞上 B8)。所以 `regress.py --tests=float_cmp.jhyy` 报
 > `PASS EXIT=42` —— 这个 PASS 不携带任何信息。`src0` 自身几乎不用浮点比较,
 > 自举闭环因此一路绿灯。**又一次「闭环只证明自洽,不证明正确」。**
+
+---
+
+## ⚠️ 未完成事项清单(2026-10-15 收尾时写下)
+
+台账现有 **14 条 ACTIVE**。它们的**修法**都在下面各节,但**修之前缺的东西**
+不在 —— 这一节记的是「还没有做的事」。每条都是可独立领走的。
+
+### A. 有 bug 但**根本没有测试**(3 条)
+
+写一个红测试往往比修 bug 便宜,而且会直接告诉你该怎么修。
+
+| W-NNN | 缺什么 | 备注 |
+|---|---|---|
+| **W-104** | SysV **caller 侧**参数分类借 Win 分类器,没有任何用例 | docker 门已能跑,但现有 5 个用例都是 ≤4 参数,**碰不到 W-104**(需 >4 才暴露分类差异)。见 B |
+| **W-106** | `symtab_lookup_one` arena-touch,零覆盖 | 先删那三行跑三道门:绿 = 已是冗余可直接删;红 = 栈 spill 根因仍在,需补最小复现 |
+| **W-107** | per-fn 表 1024 上限,零覆盖 | **`.jhyy` 测试验不到**(失效模式不在返回值里)。已实测:1100 函数全对、递归深度无变化,只有 `.s` 里 `subq $N, %rsp` 从 8368 跳到 96928。需产物级检查,见 B |
+
+### B. 需要**产物级门**(`.jhyy` 测试表达不了的,4 条)
+
+这四条共同点:**失效模式在编译产物的字节里,不在程序的返回值里**。任何 `.jhyy`
+测试都验不到 —— 写出来会 PASS。需要一条读 `.s` / `.exe` 的 shell 门。
+
+| W-NNN | 门要断言什么 |
+|---|---|
+| **W-112** | 编译带 `#[link_section(".text.boot")]` 的文件后,`.exe` 的 section 表里**必须有 `.text.boot`**(现在只有 `.text`) |
+| **W-113** | `asm!` 产生的字节必须出现在 `ret` **之前**。现测法是数 exe 里 `0f a2`(cpuid)出现次数(对照组 0 / 本测试 1),但这只证明「emit 了」不证明「执行了」 —— 要看指令相对 `ret` 的位置 |
+| **W-107** | 生成 >1023 函数的模块,断言高索引函数的 `subq $N, %rsp` **不显著大于**低索引函数的 |
+| **W-116** | 逐位探针:实参 1..7,分别 return 第 n 个,断言**每个都不同**。只断言一个非前四的值会被「恒取 arg4」骗过 |
+
+新门必须遵守 `feedback_ci_gate_must_exercise_path`:**ship 前造红灯**,先证明它
+在 bug 存在时会 FAIL。
+
+### C. 要先做 RCA 才能动手(2 条)
+
+| W-NNN | 待做的 RCA |
+|---|---|
+| **W-110** | 浮点比较 temp 串号,两条假设都没验证:(1) 四条比较的布尔结果落到同一 temp 槽;(2) W-109 的 unknown mnemonic 造成 IL 解析错位。建议从 `codegen_amd64_state.jhyy` 的 temp 记录路径入手,对照 W-097 七处 hoist + W-101 record path |
+| **W-115** | `codegen_call_return_types.jhyy` 栈溢出的**位置未知**。先拆开逐个 sub-test 跑,定位是哪个;再判定 W-089 的 ✅ RESOLVED 是否成立 —— **若不成立要把 W-089 翻回 ACTIVE**(它现在是最后一个没有 reproducer 佐证的 RESOLVED) |
+
+### D. 测试基础设施缺口
+
+1. **并发 flake(未修,会影响每次 ship 判断)**
+   五次全量跑里三次干净、两次出现 compile 300s 超时,**每次受害者都不同**
+   (`return_type` / `sizeof_basic` / `ptr_arith_subscript`),单跑全部 PASS。
+   单次 compile 正常 3.5s,300s 不是「慢」是「卡住」。
+   最可能根因:后端旁路文件是**硬编码固定路径**
+   (`compiler/build/obj/_inline_asm.buf` / `_section_directive.buf`),
+   并发编译互相覆盖/删除(W-113 已记录同一根)。
+   **治根** = 旁路文件按 pid 隔离(要动编译器源码);
+   **过渡** = harness 对 timeout 重试一次(3 行,掩盖根因)。
+
+2. **freestanding / UEFI 路径没有任何可跑测试**
+   `hello-freestanding/` 三个文件全是 library(无 `main_jhyy`)。
+   而那正是 `#[link_section]`(W-112)的目标场景 —— OS loader 对接的入口。
+
+3. **一批负向行为从未观测过**,「越界会怎样 / 除零会怎样」目前无记录:
+   数组下标越界、字符串越界、`i32::MIN / -1`、除零、深递归(现最深 30,
+   而 W-116 那条实测能到 1998 —— 说明现在的递归测试根本没探到边界)。
+
+### E. 门的接线缺口(测试存在但 CI 跑不到)
+
+| 门 / 检查 | 状态 |
+|---|---|
+| `sysv_full_regress.sh` | **不在 CI**。CI runner 没有 Docker,5 个 sysv 测试默认全 SKIP —— 静默降级、零提示。需决定:CI 加 Docker service,还是明确接受「sysv 只在本地有 Docker 时验」 |
+| `audit_test_assertions.py --strict` | 已实现、已造红灯(零信号=0 时 EXIT 0、有违规 EXIT 1),**未接 CI**。接上才能防止「新增一个零信号测试」复发 |
+| XFAIL / XPASS 语义 | 已实现并验证(XPASS 当场抓到 `generics_enum` 假标记),**未接 CI** |
+| 产物级门(B 组) | 不存在,需新建 |
+
+### F. 文档债(从最初 audit 起一直没碰)
+
+- lang-spec § 17 语法描述与实现不符(首轮 audit 提出,未复核是否仍成立)
+- `Option sizeof = 12` 应为 8(首轮 audit 提出)
+- **16 处裸偏移指针访问**(ast / codegen / mono / sema)—— 首轮 audit 提到,
+  至今**没有一条复核过**。这类写法正是 W-102(address-holder 池重叠)的同族形态,
+  优先级可能被低估
+- `docs/internal/workarounds.md` 索引 101 行 vs 台账 104 个条目(仍有缺口)
 
 ---
 
@@ -73,7 +152,33 @@ W-105 的修复,[`backlog.md` § 3](backlog.md)(原 `v4.3.0-plan.md`)已经规�
 **调用点:** `compiler/src0/sema.jhyy:2677`(`let _bc = check_borrow(ctx, ta, (*fd).body)`,
 在函数声明检查路径上,**每个被 check 的函数都跑**)
 
-**症状(全部静默放过):**
+**⚠️ 2026-10-15 实测:本条的修法要整个重写 —— `&mut` 在 jhyy 里不可用。**
+
+下面这份「修最小独占检查」的方案是照初稿写的,实测后发现**前提不成立**:
+
+| 写法 | 实测结果 |
+|---|---|
+| `let p = &mut x;` | `unexpected token 'mut' in expression` |
+| `let p: &mut i32 = &x;` | `type mismatch in let` |
+| `(&x) as &mut i32` | `cannot dereference non-pointer type` |
+| `fn setit(p: &mut i32) { *p = 5; }` | `cannot dereference non-pointer type` |
+| `let p = &x; *p = 42;` | **OK** —— 唯一可用的写法,零检查 |
+
+`&mut` 是个**装饰性标注**:parser 认、类型系统里有、spec supplement 承诺过,
+但造不出、传不进、解引用不了。真正能写内存的只有裸 `&` + `*p`。
+
+**所以本条其实是两个独立的工作项:**
+- **(a) 让 `&mut` 真的能用** —— 这是功能缺失,不是检查缺失。在它能用之前,
+  任何「独占性检查」都无从谈起(没有第二个 `&mut` 能产生冲突)。
+- **(b) `check_borrow` 恒 `return 1`** —— 在 (a) 之后才需要做,否则它检查的是一个
+  空集合。
+
+新增测试 `borrow_mut_write.jhyy` 测的是最基本用法(过 `&mut i32` 形参写内存),
+已标 `// XFAIL:` —— 修 (a) 时删掉这行即验收。
+
+下列症状描述的是**一旦 (a) 完成之后**,`check_borrow` 恒 return 1 会漏掉什么:
+
+**症状(全部静默放过 —— 前提是 `&mut` 先变得可用):**
 - `let y = &mut x; let z = &mut x;` —— 双 mutable 冲突
 - `&mut` 与 `&` 共享/可变互斥
 - reborrow `&mut *x`
@@ -88,7 +193,18 @@ sema, std/string, types}.jhyy` 八个文件里都有使用,不是没人调的死
 `compiler/tests/examples/borrow_check_basic.jhyy` 存在,但它测的是 borrow 的
 **表面可解析性**,不是冲突检测。
 
-**修法(选项 A,最小独占检查):**
+**修法(选项 A —— 但要先做 (a),顺序不能反):**
+
+**(a) 先让 `&mut` 可用**(当前完全不可用,是功能缺失):
+- parser:`&mut` 在**表达式**位置被拒(`unexpected token 'mut'`),只能在类型
+  标注位置用
+- sema:`&mut T` 的类型解析产出的东西**不可解引用** —— `*p = 5` 报
+  `cannot dereference non-pointer type`,连函数形参都不行
+- 修法方向:让 `&mut T` 在表达式位置产出与 `*T` 同构的可解引用类型,`&x` 能
+  初始化 `&mut i32` 绑定,形参 `&mut i32` 能被 `*p` 解引用
+- 验收:`borrow_mut_write.jhyy` 删掉 XFAIL 后 PASS
+
+**(b) 再做独占检查**(仅在 (a) 完成后有意义):
 1. 在 `check_borrow` 里遍历 `body`,收集每个 `&T` / `&mut T` 表达式的
    (被借变量, 可变性, 作用域区间)
 2. 同一区间内:两条 `&mut` 指向同一变量 → 报错;一条 `&mut` + 一条 `&` 同变量 → 报错
@@ -101,7 +217,7 @@ sema, std/string, types}.jhyy` 八个文件里都有使用,不是没人调的死
 - 新增 `tests/borrow_conflict_double_mut.jhyy` / `borrow_conflict_mut_shared.jhyy` ——
   两者必须**编译失败**且错误信息指向第二个冲突点
 - `borrow_check_basic.jhyy`(现有)仍 PASS —— 不许把合法 borrow 也判死
-- regress 全量不退步(基线 162/162 PASS + 23 SKIP)
+- regress 全量不退步(基线 **173/173 PASS + 5 XFAIL + 19 SKIP**,含 XFAIL/XPASS 语义)
 - `closure_check.sh` PASS(v2.s == v3.s)
 - `fixed_point.sh N=5` 7 PASS / 0 FAIL / 0 INFO
 
@@ -429,7 +545,10 @@ transition;不支持 `*Cap<T>` 裸指针、不支持 `cap_new()` builtin ctor。
 
 ---
 
-## 全局 ship gate(6 条全修完)
+## 全局 ship gate(全部修完)
+
+> 修完之前先看上面 **§ 未完成事项清单** —— A 组(没测试)和 B 组(需产物级门)
+> 是「修之前的前置」,不是可选工作。
 
 ```
 regress jhyy.exe              → 不低于 162/162 PASS + 23 SKIP
