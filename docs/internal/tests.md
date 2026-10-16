@@ -140,13 +140,26 @@ relocation 之后的路径),自动跑所有有 `main_jhyy` 的 .jhyy
 (`jhyy_regress.py:371` 目录扫描,不是手工枚举):
 
 ```
-python regress.py                       # 全量
+python regress.py                       # 全量(gated:只有 jhyy.exe)
+python regress.py --all                 # matrix:gated + stage0/v1(informational)
 python regress.py --tests=foo.jhyy      # 单测(必须带 .jhyy 后缀)
 python regress.py --binary=jhyy_v2.exe  # 用 self-hosted 编译器跑
+python regress.py --binary=compiler/build/bin/jhyy_stage0.exe  # C 端 bootstrap(见下)
 ```
 
 > ⚠️ `--tests=` **必须带 `.jhyy` 后缀**。不带时 harness 不补后缀,直接
 > `FileNotFoundError` 崩在 runner 里,不是干净报错。
+
+### jhyy_stage0.exe 为什么不是 gated
+
+它是 **C 端 bootstrap 编译器**,语言子集早于 v3.x —— 不认闭包(v3.2.1)、
+char literal / `Cap<T>`(v3.x)。实测 39 个失败**全部是预期内的**。
+它的真门是 `make stage0 && make`(stage1 用它编 src0 → jhyy.exe),
+比跑 199 个用户测试更直接也更便宜。
+
+个别测试需要「只在 stage0 上跳过」时用 `// SKIP-STAGE0:` 指令
+(与 `// SKIP-QBE:` 镜像)。**不要用笼统的 `// SKIP:`** —— 那会让测试在
+两条腿上都不跑,那才是真的没人验。
 
 ---
 

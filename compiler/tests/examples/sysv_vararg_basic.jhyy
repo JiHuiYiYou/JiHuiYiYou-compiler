@@ -1,3 +1,4 @@
+// EXPECT: 42
 // sysv_vararg_basic.jhyy — v2.7.0 Phase 2b sysv regress fixture
 //
 // Test: extern fn with multiple args (vararg-like call shape, non-vararg).

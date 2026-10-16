@@ -1,3 +1,4 @@
+// EXPECT: 35
 // sysv_struct_pass.jhyy — v2.7.0 Phase 2b sysv regress fixture
 //
 // Test: 2-eightbyte struct pass-by-value (SysV ABI 8-class classifier).

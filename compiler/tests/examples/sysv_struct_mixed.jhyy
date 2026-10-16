@@ -1,3 +1,4 @@
+// EXPECT: 42
 // sysv_struct_mixed.jhyy — v2.7.0 Phase 2b sysv regress fixture
 //
 // Test: struct {i32, f64} → SysV 8-class classifier = INTEGER+SSE

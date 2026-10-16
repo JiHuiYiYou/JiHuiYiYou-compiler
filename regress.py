@@ -32,6 +32,7 @@ Sprint v1.4.7 (2026-08-14): 加 --all / --include-informational / _GATED_DEFAULT
 """
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -62,10 +63,30 @@ _GATED_DEFAULTS = {
 
 # Default `--all` 跑的 binary 列表 (gated, 影响 exit code)。
 # 不 glob `jhyy*.exe*` — v2/v3/v4.exe 是 make selfhost 产物, 不是 regress 语义。
+#
+# v4.0.8 (2026-10-15):jhyy_stage0.exe 从 gated 降为 informational。
+#
+# 实测 stage0 有 **39 个失败**,且**没有一个是 bug** —— 22 个编译期失败
+# (`closures_basic` / `char_literal_3byte` / `cap_table_*` / `fmod_*` …),
+# 因为 stage0 是 **C 端 bootstrap 编译器**,它的 parser 早于 V3-B / V3-C / V3.1
+# (闭包是 v3.2.1 特性、字符字面量与 Cap<T> 是 v3.x),本来就不认这些语法。
+# 把它当 gated 是在派一个它注定失败的活,结果只有两个:CI 永远红,或者
+# 有人为了让 CI 绿去放宽判据 —— 后者正是本项目 2026-10-15 这一整天在修的病。
+#
+# **stage0 的真实门是 `make stage0 && make`**:stage1 用 stage0 编
+# `src0/main.jhyy` → `jhyy.exe`,stage0 一坏这一步就断,比跑 199 个用户测试
+# 更直接也更便宜(且 CI 的第 2 步就在做这件事)。这条路径已经覆盖了它的职责。
 _GATED_BINARIES = [
     ("compiler/build/bin/jhyy.exe", "production"),
-    ("compiler/build/bin/jhyy_stage0.exe", "C-side bootstrap"),
 ]
+
+# stage0 仍然跑(看得见信号),但不参与 exit code。
+_STAGE0_BINARY = (
+    "compiler/build/bin/jhyy_stage0.exe",
+    "informational, C-side bootstrap — 语言子集早于 v3.x,预期有 39 个已知失败"
+    "(闭包 / char literal / Cap<T> / fmod 等新特性它都不认)。"
+    "它的真门是 `make stage0 && make`(stage1 用它编 src0 → jhyy.exe)。",
+)
 
 # `--include-informational` 加的 binary (matrix only, 不影响 exit code)。
 _INFORMATIONAL_BINARIES = [
@@ -129,10 +150,44 @@ def _resolve_docker_bin() -> Optional[str]:
 
 
 _DOCKER_BIN = _resolve_docker_bin()
+# Docker Desktop 不在 MSYS2 PATH 上(per feedback_gh_cli_path),探测时直接查文件。
+_DOCKER_FALLBACKS = (
+    "C:/Program Files/Docker/Docker/resources/bin/docker.exe",
+    "/c/Program Files/Docker/Docker/resources/bin/docker.exe",
+)
+
+
+def _docker_daemon_up() -> bool:
+    """Docker **daemon** 是否真的可达 —— 不只是 binary 在不在。
+
+    2026-10-15:原探测只看 `os.path.exists(docker.exe)`,于是「装了 Docker
+    Desktop 但没启动」这种**开发者机器上的常态**会被判成 cross=docker,然后
+    运行期报 `failed to connect to the docker API at npipe://...` → 5 个
+    sysv 测试从「SKIP(环境不可用)」变成「FAIL」,CI 变红。
+
+    环境不可用应该是 SKIP,不是 FAIL。判据必须是 daemon 真的能应答。
+
+    `MSYS_NO_PATHCONV=1` 是必须的(per feedback_docker_local):不设的话 MSYS2
+    会把 `npipe:////./pipe/dockerDesktopLinuxEngine` 当 POSIX 路径转换,
+    报出来的错误指向一个不存在的 pipe 名,看起来像「路径写错了」而不是
+    「daemon 没起」。
+    """
+    if not _DOCKER_BIN:
+        return False
+    try:
+        r = subprocess.run(
+            [_DOCKER_BIN, "info", "--format", "{{.ServerVersion}}"],
+            capture_output=True, text=True, timeout=30,
+            encoding="utf-8", errors="replace",
+            env={**os.environ, "MSYS_NO_PATHCONV": "1"},
+        )
+        return r.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
 
 
 def _resolve_cross_mode(cross_arg: str) -> str:
-    """Resolve --cross mode: auto probe wsl.exe then docker on PATH.
+    """Resolve --cross mode: auto probe wsl.exe then docker daemon.
 
     Returns: 'wsl' | 'docker' | 'none'
     """
@@ -142,40 +197,86 @@ def _resolve_cross_mode(cross_arg: str) -> str:
         print("cross: --cross=wsl but wsl.exe not on PATH → SKIP", file=sys.stderr)
         return "none"
     if cross_arg == "docker":
-        if shutil.which("docker"):
+        if _docker_daemon_up():
             return "docker"
-        # v2.8.3 fallback: docker Desktop 在 C:\Program Files\Docker\Docker\resources\bin
-        # 不在 MSYS2 PATH (跟 gh CLI 同 case per feedback_gh_cli_path)。按
-        # PATHS.md 规则应改 ~/.claude/settings.json env.PATH,但 docker ship
-        # gate 必须 immediate work — hardcoded fallback probe 先 unblock。
-        # Future: 加 docker 到 env.PATH 后删这 fallback block。
-        for fb in (
-            "C:/Program Files/Docker/Docker/resources/bin/docker.exe",
-            "/c/Program Files/Docker/Docker/resources/bin/docker.exe",
-        ):
-            if os.path.exists(fb):
-                return "docker"
-        print("cross: --cross=docker but docker not on PATH → SKIP", file=sys.stderr)
+        print("cross: --cross=docker 但 daemon 不可达 → SKIP", file=sys.stderr)
         return "none"
     if cross_arg == "none":
         return "none"
     # auto: probe wsl first (faster on Windows; native Linux distro available)
     if shutil.which("wsl.exe") or shutil.which("wsl"):
-        # Probe whether any distro is actually installed (wsl.exe -l -v
-        # returns nonzero + error message if no distros).
+        # Probe whether a **usable** distro is actually installed.
+        #
+        # 2026-10-15 修:原判据是「`wsl.exe -l -v` 返回 0 且输出不含 'no installed'」。
+        # 两个问题:
+        #   1. 装了 Docker Desktop 之后,`wsl.exe -l -v` 会列出 Docker 的**内部**
+        #      distro:
+        #          NAME              STATE      VERSION
+        #          * docker-desktop    Stopped    2
+        #      它不是可用的 Linux 用户环境(没工具链),把它当成可用 distro 会让
+        #      cross_mode=wsl 一路走下去,运行期才炸 `WSL_E_DISTRO_NOT_FOUND` ——
+        #      5 个 sysv 测试从「SKIP(环境不可用)」变成「FAIL」,CI 因此变红。
+        #   2. 'no installed' 是**英文**串;非英文 Windows 上匹配不到。
+        # 现在:解析 distro 名,排除 Docker 内部那几个,并且要求有非 docker 的条目。
         try:
             r = subprocess.run(
                 ["wsl.exe", "-l", "-v"],
                 capture_output=True, text=True, timeout=5,
                 encoding="utf-8", errors="replace",
             )
-            if r.returncode == 0 and "no installed" not in (r.stdout + r.stderr).lower():
-                return "wsl"
+            if r.returncode == 0:
+                text = (r.stdout or "") + (r.stderr or "")
+                names = []
+                for line in text.splitlines():
+                    line = line.replace("\x00", "").strip()
+                    if not line or line.upper().startswith("NAME"):
+                        continue
+                    tok = line.split()
+                    if not tok:
+                        continue
+                    # 行首 `*` 是「默认 distro」标记,不是名字本身 ——
+                    # `* docker-desktop  Stopped  2` 的 tok[0] 是 `*`。
+                    if tok[0] == "*" and len(tok) > 1:
+                        names.append(tok[1])
+                    else:
+                        names.append(tok[0])
+                usable = [n for n in names
+                          if not n.lower().startswith("docker")]
+                if usable:
+                    return "wsl"
+                if names:
+                    print("cross: wsl 只有 Docker 内部 distro"
+                          f"({', '.join(names)}),没有可用的 Linux 用户环境 → 继续探 docker",
+                          file=sys.stderr)
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             pass
-    if shutil.which("docker"):
+    # daemon 可达才算数(不是 binary 存在)—— 见 _docker_daemon_up 的说明。
+    if _docker_daemon_up():
         return "docker"
     return "none"
+
+
+def _read_expected_exit(jhyy_file: str) -> Optional[int]:
+    """读源文件里的 `// EXPECT: N`,取不到返回 None。
+
+    判据扫描规则与 jhyy_regress 一致:只认「整行就是指令」或「行尾指令」,
+    且跳过字符串字面量 —— 复用 audit_test_assertions.directive_source,
+    免得两边的判据规则漂移(那正是 W-110 的教训)。
+    """
+    try:
+        sys.path.insert(0, str(ROOT / "scripts" / "dev"))
+        from audit_test_assertions import directive_source
+        raw = Path(jhyy_file).read_text(encoding="utf-8", errors="replace")
+        m = re.search(r"//\s*EXPECT(?:ECT)?\s*[:=]\s*(\d+)", directive_source(raw))
+        return int(m.group(1)) if m else None
+    except Exception as exc:
+        # 诊断辅助读不到期望值时不能拖垮 regress,但**必须出声** ——
+        # 2026-10-15 踩过:`re` 忘了 import,NameError 被 `except: return None`
+        # 吞成 None,于是 cross 路径拿不到期望值、只要 ELF 跑起来就报 PASS,
+        # W-116(退出 22 / 期望 28)整整被放过。静默的兜底比崩溃更危险。
+        print(f"cross: 读 {_read_expected_exit.__name__} 异常({exc!r}),"
+              f"本次不比对期望值 —— 若非有意,这是 bug", file=sys.stderr)
+        return None
 
 
 def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
@@ -295,6 +396,15 @@ def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
             f"/tmp/{test_base}.elf || elf_exit=$?; "
             f"echo EXIT:$elf_exit",
         ]
+        # 2026-10-15:docker 分支**必须** MSYS_NO_PATHCONV=1。
+        # Stage 1 设了、Stage 2 漏了,于是 MSYS2 把 docker 的
+        # `npipe:////./pipe/dockerDesktopLinuxEngine` 当 POSIX 路径转换,
+        # 得到一个不存在的 pipe 名,报
+        #   「The system cannot find the file specified」
+        # 看起来像「Docker 没启动」,实际 daemon 是好的 ——
+        # 这正是 feedback_docker_local 记的那条规则。
+        # 只对 docker 分支设:WSL 分支反而**需要** MSYS 做路径转换。
+        run_env = {**os.environ, "MSYS_NO_PATHCONV": "1"}
     else:
         return (True, "skipped (cross-env disabled)")
 
@@ -302,6 +412,7 @@ def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
         r = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout,
             encoding="utf-8", errors="replace",
+            env=locals().get("run_env"),
         )
         output = (r.stdout or "") + (r.stderr or "")
         # Parse EXIT:N from output first (always, even if rc != 0), so we
@@ -337,6 +448,21 @@ def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
                                f"check gcc in container (use gcc:12 not ubuntu:22.04) — "
                                f"{output[-200:]}")
             # exit=127 真跑 ELF (rare, not in current 5 sysv fixtures) — pass。
+        # 2026-10-15:比期望值!此前只要 EXIT:N 解析出来就 PASS,**从不与测试自己
+        # 声明的 `// EXPECT:` 比对**。实测抓到:`sysv_abi_test` 的 ELF 退出 22,
+        # 而它声明期望 28 —— 也就是说 W-116(SysV callee 只 spill 4 个寄存器,
+        # 参数 5/6/7 读到 arg4 的值)就在这条门底下,regress 却报 PASS。
+        # 同一个病:「跑了就算过,不问结果对不对」。
+        expected = _read_expected_exit(
+            str(ROOT / "compiler" / "tests" / "examples" / test_name))
+        if expected is not None:
+            # Windows/ELF 两边都取 8 bit 语义(Windows 进程退出码是 8 bit;
+            # ELF 是完整 32 bit)。按 mod 256 比,跟 jhyy_regress 的 W-028 规则一致。
+            exp_cmp, act_cmp = expected & 0xFF, exit_code & 0xFF
+            if exp_cmp != act_cmp:
+                return (False, f"failed (expected={expected}, got={exit_code}, "
+                               f"cross={cross_mode}) — 期望值不匹配(W-116 等"
+                               f"SysV 缺陷见 docs/internal/workarounds.md)")
         return (True, f"passed (exit={exit_code}, cross={cross_mode})")
     except subprocess.TimeoutExpired:
         return (False, f"timeout ({timeout}s, cross={cross_mode})")
@@ -612,6 +738,9 @@ def main():
     if args.run_all_gated:
         # Matrix mode: gated binaries + optional informational
         binaries = list(_GATED_BINARIES)
+        # stage0 永远以 informational 身份跑(2026-10-15 从 gated 降级 ——
+        # 见 _STAGE0_BINARY 处的完整理由)。它给信号,但不参与 exit code。
+        binaries.append(_STAGE0_BINARY)
         if args.include_informational:
             binaries.extend(_INFORMATIONAL_BINARIES)
         total = len(binaries)

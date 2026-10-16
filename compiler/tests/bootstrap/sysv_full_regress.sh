@@ -38,11 +38,19 @@ for arg in "$@"; do
     esac
 done
 
-EXPECTED_ABITEST=28
-EXPECTED_MIXED=42
-EXPECTED_PASS=35
-EXPECTED_RET=18
-EXPECTED_VARARG=42
+# 2026-10-15:期望值搬进各个 .jhyy 文件本身(`// EXPECT: N`),本表从那里读 ——
+# 单一事实来源。此前它们只住在这个脚本里,于是 cross-env 那条路径
+# (regress.py --cross)拿不到期望值,只要 ELF 跑起来就报 PASS:W-116 的
+# `sysv_abi_test` 退出 22 / 期望 28 就这样被放过。
+read_expect() {
+    grep -oE '//[[:space:]]*EXPECT[[:space:]]*[:=][[:space:]]*[0-9]+'         "$JHYY_ROOT/compiler/tests/examples/$1" | head -1 | grep -oE '[0-9]+'
+}
+EXPECTED_ABITEST=$(read_expect sysv_abi_test.jhyy)
+EXPECTED_MIXED=$(read_expect sysv_struct_mixed.jhyy)
+EXPECTED_PASS=$(read_expect sysv_struct_pass.jhyy)
+EXPECTED_RET=$(read_expect sysv_struct_ret.jhyy)
+EXPECTED_VARARG=$(read_expect sysv_vararg_basic.jhyy)
+echo "期望值(从 .jhyy 读): abi=$EXPECTED_ABITEST mixed=$EXPECTED_MIXED pass=$EXPECTED_PASS ret=$EXPECTED_RET vararg=$EXPECTED_VARARG"
 
 SYSV_TESTS=(sysv_abi_test sysv_struct_mixed sysv_struct_pass sysv_struct_ret sysv_vararg_basic)
 declare -A EXPECTED=(
