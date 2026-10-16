@@ -63,9 +63,26 @@ v4.0.x 系列都占满了 —— v4.1 及以后的 backlog 在这条前提下**�
 | `audit_test_assertions.py --strict` 接 CI | E 组 |
 | XFAIL / XPASS 语义接 CI | E 组 |
 
+**进度:**
+- [x] **B 组 4 条产物级门已建**:`compiler/tests/bootstrap/artifact_checks.sh`,
+      四条**全部当场翻红**并给出准确定位(这既是造红灯验证,也说明它们真的在验东西):
+
+      | 检查 | 现在的输出 |
+      |---|---|
+      | W-112 link_section | `生成的 .s 里 0 条 .section 指令` |
+      | W-113 asm_before_ret | `BAD main_jhyy (cpuid@333 ret@332)` —— cpuid 在 ret 的下一行 |
+      | W-107 per_fn_frame | `f500 帧 8368B vs f1099 帧 96928B —— 11× 膨胀` |
+      | W-116 sysv_arg_spill | `callee 序言缺少: %r8d %r9d` |
+
+- [ ] A 组 3 个红测试(W-104 / W-106 / W-107 的 .jhyy 部分)
+- [ ] `audit --strict` 与 XFAIL/XPASS 接 CI
+
 **gate:** 新门**逐一造过红灯**(每条都要先证明它在 bug 存在时会 FAIL);
 `regress` 全量 173/173 + 5 XFAIL + 19 SKIP 不退步;新增测试以 XFAIL 形式出现
 而不是被 SKIP 掉。
+
+> ⚠️ **这个门在修完之前永远是红的**(exit 1)。这是刻意的 —— 它的作用是把四条
+> bug 从「没人验」变成「每次都红」。**不要为了让 CI 绿而放宽判据。**
 
 **风险:** 四条产物级门都可能立刻翻红(它们本来就在验存在的 bug),所以这一版
 **预期是红的** —— 红的部分用 XFAIL/已知失败登记,不是用「改判据让它绿」。
