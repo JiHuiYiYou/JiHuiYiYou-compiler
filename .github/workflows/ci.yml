@@ -124,21 +124,20 @@ jobs:
           # 副本一旦不同步,那两个脚本的 v1==v2 立刻失去意义。
           cmp compiler/build/bin/jhyy.exe compiler/build/bin/jhyy_v1.exe.exe             && echo "v1 是 jhyy.exe 的 byte-equal 副本 ✓"             || { echo "FAIL: jhyy_v1.exe.exe 与 jhyy.exe 不一致 —— 副本约定被破坏"; exit 1; }
 
-      - name: "[DIAG] 三个可疑测试串行单跑(定位 CI 挂死)"
-        # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
-        #   加它是因为 job 原本在第一个失败 step 就中止 —— 一次 CI 周期只能拿到一个
-        #   结论,排查要等好几轮。step 7 仍是唯一的硬门,其余是补充信息。
-        if: always()
+      - name: "[DIAG] 三个可疑测试串行 + 600s 上限(是挂死还是极慢)"
         shell: msys2 {0}
         continue-on-error: true
         run: |
-          # 2026-10-15 临时诊断:CI 上 f32_suffix / f64_suffix / fmod_basic 三个
-          # 各烧满 300s 超时(占整轮 1207s 里的 900s),本地怎么都复现不了。
-          # 这一步把它们**串行**单跑(--jobs=1,--timeout=60):
-          #   串行也挂 → 确定性挂死,可以拿这三条最小复现去查
-          #   串行能过 → 纯粹是并发争抢,该调 worker 数而不是查编译器
-          # 60s 上限:单个测试本地只要 1.26s,60s 已经是 47 倍余量。
-          python regress.py --tests=f32_suffix.jhyy,f64_suffix.jhyy,fmod_basic.jhyy             --jobs=1 --timeout=60
+          # 2026-10-15 第二轮诊断。
+          # 上一轮 `--jobs=1 --timeout=60` 已经确认:**串行也挂** → 确定性的,
+          # 不是并发争抢。所以现在的唯一问题是:它是「卡死」还是「极慢」?
+          #   600s 内完成 → 极慢,去查为什么 CI 上这几个输入慢 100 倍
+          #   600s 仍不完成 → 死循环/死锁,拿这三条最小复现去查
+          #
+          # 另:上一轮那个「卡在前端或 emit 阶段(无任何产物)」的诊断**不可信** ——
+          # `codegen_amd64_run_text` 里 0 处文件写操作,in-mem 路径**根本不写 .s**,
+          # 所以「无产物」是常态而非信号。基于它排除掉的一批假设要重新算。
+          python regress.py --tests=f32_suffix.jhyy,f64_suffix.jhyy,fmod_basic.jhyy             --jobs=1 --timeout=600
 
       - name: Build Stage 2 closure chain (v1→v2→v3→v4)
         # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。

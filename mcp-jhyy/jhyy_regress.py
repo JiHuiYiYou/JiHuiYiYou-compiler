@@ -306,7 +306,10 @@ def run_test(
             elif ".il" in have:
                 stage = "emit 阶段(已产 .il,没有 .s)"
             else:
-                stage = "前端或 emit 阶段(无任何产物)"
+                    # ⚠️ 2026-10-15:这个分支**不能**当作「卡在前端」的证据 ——
+                #   codegen_amd64_run_text 里 0 处文件写操作,in-mem 路径不写 .s,
+                #   所以「无产物」是常态。已用 [DIAG] 步独立定位。
+                stage = "未知(in-mem 路径默认不落 .s,「无产物」是常态而非信号)"
             return (False, expected, -4,
                     f"compile timeout ({timeout}s,重试后仍超时);卡在 {stage};"
                     f"已有产物={have or '无'}")
