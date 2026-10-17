@@ -147,6 +147,40 @@ jobs:
           echo "  python exit=$?"
           sed 's/^/    /' /tmp/d2.log
 
+      - name: "[DIAG-3] 换回提交进仓的 jhyy.exe 再跑那三个测试"
+        if: always()
+        shell: msys2 {0}
+        continue-on-error: true
+        run: |
+          # 2026-10-17 第八轮。现在只剩**二进制**这一个变量没排。
+          #
+          # 依据:同一个 CI 二进制、同一个文件,从 bash 直接调 10 秒内编完(DIAG 步),
+          # 走 harness 就卡死在 self-backend;而路径形态(相对/绝对/反斜杠)与
+          # harness 改过的那几个 env 变量,本地四种组合全部秒过。
+          #
+          # 旁证:CI 上 `XPASS codegen_call_return_types.jhyy` —— 该测试**本地是
+          # STACK_OVERFLOW、CI 上却通过了**。同一个测试两种行为,说明 CI 现编的
+          # jhyy.exe(sha 00473e6b)与提交进仓的那个(37837b3f)**行为不同**。
+          # 此前「sha 差异只来自 gcc 版本、不改行为」的判断是错的。
+          #
+          # 本步:把 git 里跟踪的 jhyy.exe 恢复回来,用**同一个 harness** 跑那三个
+          #   恢复后的二进制(37837b3f)+ 不再挂  → 根因是 CI 的工具链编出来的编译器
+          #   恢复后的二进制 + 仍挂            → 根因在 harness 调用方式
+          #
+          # ⚠️ 必须还原:下一步 regress --all 门要的就是**现编的**那个二进制。
+          # 直接留下 git checkout 的版本,等于主门测的东西被这一步悄悄换掉 ——
+          # 那正是本项目反复栽的「门被改判据换绿」。
+          cp -f compiler/build/bin/jhyy.exe /tmp/fresh_jhyy.exe
+          git checkout HEAD -- compiler/build/bin/jhyy.exe
+          echo "  现编的 sha: $(sha256sum /tmp/fresh_jhyy.exe | cut -c1-16)"
+          echo "  恢复的 sha: $(sha256sum compiler/build/bin/jhyy.exe | cut -c1-16)"
+          T=f32_suffix.jhyy,f64_suffix.jhyy,fmod_basic.jhyy
+          python -u regress.py --binary=compiler/build/bin/jhyy.exe               --jobs=1 --timeout=60 --no-baseline-check --tests=$T               > /tmp/d3.log 2>&1
+          echo "  python exit=$?"
+          sed 's/^/    /' /tmp/d3.log
+          cp -f /tmp/fresh_jhyy.exe compiler/build/bin/jhyy.exe
+          echo "  已还原成现编的二进制: $(sha256sum compiler/build/bin/jhyy.exe | cut -c1-16)"
+
       - name: "Run regress.py --all (gated: jhyy.exe; jhyy_stage0.exe informational)"
         shell: msys2 {0}
         run: |
