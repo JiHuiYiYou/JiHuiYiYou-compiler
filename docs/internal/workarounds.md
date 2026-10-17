@@ -7708,14 +7708,32 @@ Mix(Z)=30      期望 30    ✓
 (直接证据:去掉 sub-test 6 那一行,程序完整跑完;把 `recurse(buf, 4)` 换成
 `recurse(buf, 8)`,同样完整跑完。)
 
-**跨环境不一致(同一个二进制 sha 4e987dd):** 开发机(MINGW64 shell + ucrt64 gcc)
-稳定 STACK_OVERFLOW 5/5;GitHub Actions windows-latest 上同一二进制**通过**,
-于是 regress 报 `XPASS`(XFAIL 标记已过期)。
+**跨环境不一致 —— 已解释(2026-10-17,不再是谜团):** 开发机稳定 STACK_OVERFLOW
+5/5,GitHub Actions 上同一二进制「通过」→ regress 报 XPASS。当时记的是
+「尚未 RCA,不能摘标记」。
 
-这个跨环境差异**尚未 RCA**。不能因此摘掉 XFAIL 标记 —— 标记描述的是开发机上
-**稳定可复现**的事实,而 XPASS 的语义是「标记可能过期了,去看一眼」,它没有说
-「对面环境是对的」。摘掉它等于把一个未解释的现象写成已知结论,门就失去意义。
-下次 CI 报 XPASS 时它会继续提醒,直到这个差异被解释。
+**真相:根本没有跨环境差异。** `codegen_call_return_types.jhyy` **没有 EXPECT
+标注**,而 harness 对无 EXPECT 的测试走 `if expected is None` 分支 —— 只要不是
+NTSTATUS 崩溃就算 PASS。于是它**从写下来那天起就只断言了「程序没崩」**,那 8 个
+子测试的错误码 1..8 一个都没校验。开发机碰巧崩了 → XFAIL;CI 上不崩 → PASS
+(假绿)。
+
+补上 `// EXPECT: 0` 之后**两边都失败**(开发机 STACK_OVERFLOW,CI 上同样跑不过,
+各自报 XFAIL),XFAIL 标记在两边都变成诚实的描述。CI 于 run 39023240304 转绿:
+**176/176,0 failed**。
+
+**这个 bug 形态值得单独记:** 一个测试「在 A 环境失败、B 环境通过」,最容易被
+读成环境差异,实际是**它在两边都没在测任何东西**。XPASS 在这里是**假信号** ——
+无 EXPECT 的测试无论 bug 在不在都算过,XPASS 恒定触发。判据:XPASS 只有在
+「这个测试真能失败」时才携带信息。
+
+**配套修的两处:**
+- `audit_test_assertions.py` 新增 `zero-signal-xfail` 类别 —— XFAIL 豁免的是
+  「断言强度」,不是「有没有断言」。XFAIL 但无 EXPECT / EXPECT-ERROR /
+  EXPECT-OUT 的测试一律判违规。
+- 同一轮还查出 `borrow_check_err.jhyy` 的 `//EXPECT-ERROR` 用了**反引号**而非
+  双引号,而 harness 与 audit 的正则都要求 `"([^"]+)"` → 该指令**从未被识别**,
+  错误消息从来没校验过。同类形态:**指令写了但语法不对 = 静默失效**。
 
 **方法论沉淀:** 这类「同一个二进制、两个环境、结论相反」的故障,判据要来自
 **读实际代码**和**按 CI 的真实条件造用例**,不是从「报错在哪」倒推。本轮里
