@@ -187,8 +187,13 @@ $(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(JHY_RUNTIME_O) $
 	@# CI 跑 `make` 只为验「工具链能编出自举闭环的编译器」,而闭环与工具链无关。
 	@# 漂移检查管的是「这个编译器该不该被发布」,不是「能不能编出来」。
 	@# CI 侧另有 warning 报出两个 sha 的差异 —— 不静默。
+	@#
+	@# ⚠️ 这道门只在**源码没动过时**才有意义:src0 一改,make 本来就该产出不同
+	@# 的二进制,拿它跟提交进仓的旧产物比会挡住每一次正常的源码修改(踩过)。
+	@# 所以先用 git 判断 src0/runtime 是否与 HEAD 一致;不一致就跳过并说明。
 	@echo "STRICT_TOOLCHAIN=$(STRICT_TOOLCHAIN)"
-	@if ! cmp -s $@ $(BIN_DIR)/_boot_new.exe; then \
+	@if git diff --quiet HEAD -- $(SRC0_DIR) $(RUNTIME_DIR) 2>/dev/null; then \
+	  if ! cmp -s $@ $(BIN_DIR)/_boot_new.exe; then \
 	    echo "TOOLCHAIN-DRIFT (W-117): 重新编出的 jhyy.exe 与提交进仓的那份不同。"; \
 	    echo "  本机工具链: $$($(CC) --version 2>/dev/null | head -1)"; \
 	    echo "  已知后果:换 gcc 版本可能改变编译器行为,而自举的 byte-equal"; \
@@ -198,6 +203,9 @@ $(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(JHY_RUNTIME_O) $
 	    echo "  新产物留在 $(BIN_DIR)/_boot_new.exe,可自行比对。"; \
 	    if [ "$(STRICT_TOOLCHAIN)" = "1" ]; then exit 1; fi; \
 	    echo "  (STRICT_TOOLCHAIN=0:只报不拦 —— CI 不发布,它验的是提交进仓的产物)"; \
+	  fi; \
+	else \
+	  echo "  (src0/runtime 与 HEAD 有改动 —— 新产物本就该不同,跳过漂移检查)"; \
 	fi
 	@mv -f $(BIN_DIR)/_boot_new.exe $@
 	@rm -f $(BIN_DIR)/_boot_anchor.exe $(BIN_DIR)/_boot_new2.exe \
