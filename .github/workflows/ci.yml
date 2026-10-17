@@ -127,45 +127,25 @@ jobs:
             sleep 1
           done
 
-      - name: "[DIAG-2] 同样三个测试,走 harness 串行 / 高并发"
+      - name: "[DIAG-2] 走 harness 串行,看阶段标记"
         if: always()
         shell: msys2 {0}
         continue-on-error: true
         run: |
-          # 2026-10-17 第六轮。DIAG 已证明:**直接命令行调用时三个测试都在 10 秒内
-          # 编译完成**(整个 DIAG 步耗时 30 秒 = 3 × 10s sleep)。编译器本身不挂、
-          # 输入不挂 —— 挂的是 harness。
+          # 2026-10-17 第七轮。上一轮的三组对照给出了确定结论:
+          #   挂死形态 = **编译器进程仍在运行**,停在 `[4] codegen done` 之后、
+          #   没有任何产物 —— 即卡在 in-mem self-backend `codegen_amd64_run_text`
+          #   里空转。不是等管道、不是阻塞、不是 harness 的并发。
+          #   同时坐实 `taskkill /F /T` 就是把 step shell 带走(exit 2304)的元凶,
+          #   该函数已删除。
           #
-          # 前两轮本步都是「在 --timeout 那一刻整个消失 + 零输出 + exit 2304」。
-          # 头一个怀疑是超时清理杀树杀到了自己(已加 proc.poll() 存活判定),
-          # 但症状没变 —— 所以这里做**三组对照**,一次把「是不是杀树」和
-          # 「是不是并发」同时分开:
-          #   jobs1_杀树    :基线,复现消失
-          #   jobs1_不杀树  :只关掉杀树 → 还在消失就说明不是它
-          #   jobs4_不杀树  :并发 4 路 → 只在这里消失就是并发
-          #
-          # 超时压到 60s:这个实验只要「挂 / 不挂」这个布尔,不需要复现 300s 的
-          # 完整烧钱过程。输出写文件再无条件 cat —— 进程被杀之后,管道里的缓冲
-          # 会一起没,写文件是唯一还能留下证据的办法。
+          # 本步只剩一件事:确认「串行 3 个测试」与「整轮 200 个测试」给出的
+          # 阶段标记一致 —— 不一致就说明有前序测试留下的状态在影响后续。
+          # 超时压到 60s(只要布尔,不复现 300s 烧钱)。输出写文件再 cat。
           T=f32_suffix.jhyy,f64_suffix.jhyy,fmod_basic.jhyy
-          rm -f /tmp/d2_*.log /tmp/kill.log
-          run() {   # $1=标签 $2=jobs $3=额外环境
-            echo "=== $1 ==="
-            env JHY_KILL_LOG=/tmp/kill_$1.log $3 python -u regress.py --binary=compiler/build/bin/jhyy.exe               --jobs=$2 --timeout=60 --no-baseline-check --tests=$T               > "/tmp/d2_$1.log" 2>&1
-            echo "  python exit=$?"
-            echo "  --- 输出 ---"
-            sed 's/^/    /' "/tmp/d2_$1.log"
-            echo "  --- 杀树日志 ---"
-            sed 's/^/    /' "/tmp/kill_$1.log" 2>/dev/null || echo "    (无 —— 一次都没走到清理)"
-            echo "  --- 结束 ---"
-          }
-          set +e
-          # ⚠️ 顺序是关键:**安全组排前面**。带杀树的那组会把整个 step 的 shell
-          # 一起带走(2026-10-17 实测,连丢三组数据),排后面至少前两组的结论
-          # 还能拿到。
-          run "jobs1_不杀树"  1 "JHY_NO_KILL_TREE=1"
-          run "jobs4_不杀树"  4 "JHY_NO_KILL_TREE=1"
-          run "jobs1_杀树"    1 ""
+          python -u regress.py --binary=compiler/build/bin/jhyy.exe               --jobs=1 --timeout=60 --no-baseline-check --tests=$T               > /tmp/d2.log 2>&1
+          echo "  python exit=$?"
+          sed 's/^/    /' /tmp/d2.log
 
       - name: "Run regress.py --all (gated: jhyy.exe; jhyy_stage0.exe informational)"
         shell: msys2 {0}

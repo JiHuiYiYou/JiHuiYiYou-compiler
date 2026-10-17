@@ -78,64 +78,13 @@ def _build_subprocess_env() -> dict:
     return env
 
 
-def _kill_tree(proc) -> None:
-    """超时后清理子进程,但**只在该进程还活着的时候**。
-
-    ⚠️ 2026-10-17:第一版无条件 `taskkill /F /T /PID <pid>`,结果 CI 上两次
-    (DIAG-2 60s / regress 300s)都在**超时那一刻连 harness 一起杀掉** ——
-    零输出、退出码 2304。子进程此刻可能早已退出,pid 已被系统回收给别的进程,
-    `/T` 就把无辜者连坐了。所以这里先看 `proc.poll()`:还在跑才杀。
-
-    另一个必须分清的情况:**子进程已退出、communicate 却还在等** ——
-    说明有孙进程(jhyy.exe `system()` 拉起的 gcc → cc1/as)继承了管道写端。
-    那种情况下杀树没有意义(树根已经没了),真正的形态是「编译器没卡,
-    卡的是管道」,由调用方如实报告。
-    """
-    trace = os.environ.get("JHY_KILL_LOG")
-    try:
-        alive = proc.poll() is None
-        # 杀之前把「到底在杀哪个进程」落到独立文件。harness 自己被连坐的时候,
-        # stdout 已经没了,这是唯一还能留下证据的地方。
-        if trace:
-            with open(trace, "a", encoding="utf-8") as fh:
-                fh.write(f"_kill_tree pid={proc.pid} alive={alive}\n")
-                if os.name == "nt":
-                    tl = subprocess.run(
-                        ["tasklist", "/FI", f"PID eq {proc.pid}", "/FO", "CSV", "/NH"],
-                        capture_output=True, text=True, errors="replace", timeout=30)
-                    fh.write(f"  tasklist: {tl.stdout.strip()[:200]}\n")
-        if os.environ.get("JHY_NO_KILL_TREE"):
-            # 二分用:完全禁用清理,用来判定「消失」到底是不是杀树造成的。
-            # 见 .github/workflows/ci.yml 的 [DIAG-2]。
-            return
-        if not alive:
-            return          # 已退出:树根不在,杀不了也不该杀
-        if os.name == "nt":
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                           capture_output=True, timeout=30)
-        else:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        proc.kill()
-        if trace:
-            with open(trace, "a", encoding="utf-8") as fh:
-                fh.write("  taskkill 已发出\n")
-    except Exception as exc:
-        if trace:
-            with open(trace, "a", encoding="utf-8") as fh:
-                fh.write(f"  异常: {exc!r}\n")
-        try:
-            proc.kill()
-        except Exception:
-            pass
-
-
 def _run_capture(cmd, timeout: int, env: dict) -> tuple:
     """跑 cmd 并抓取输出,超时则**杀整棵进程树**。
 
     不用 `subprocess.run` 的两个原因(都踩过):
 
-    1. 它超时只 TerminateProcess 直接子进程,jhyy.exe `system()` 拉起的
-       gcc → cc1/as 留在后台满核跑。
+    1. 它超时只 TerminateProcess 直接子进程 —— 这正是我们要的(见下面
+       「为什么不用 taskkill /T」)。
     2. 它**不把 Popen 对象交出来**,而 `TimeoutExpired` 上只有
        cmd/timeout/output/stderr,**没有 `.pid`** —— 事后想补杀后代都做不到。
        (2026-10-17 加 `_kill_tree(exc.pid)` 时踩到:AttributeError 直接打死
@@ -161,7 +110,10 @@ def _run_capture(cmd, timeout: int, env: dict) -> tuple:
     except subprocess.TimeoutExpired as exc:
         child_exited = proc.poll() is not None
         child_rc = proc.returncode
-        _kill_tree(proc)
+        # 只杀直接子进程。**不要 taskkill /T**:2026-10-17 实测它会把
+        # harness 自己的 shell 一起带走(step 零输出 + exit 2304,连丢三轮
+        # CI 数据)。留着的 gcc/cc1 孤儿是真问题,但比把测试框架杀了强。
+        proc.kill()
         # 排空只给 2s。管道写端可能被**孙进程**持有(见 child_exited),那种情况
         # 下无论等多久都关不上 —— 第一版给 30s,单次超时就多烧 30s,3 个测试 ×
         # 2 次重试 = 白等 3 分钟。拿不到就用 TimeoutExpired 里已有的部分输出。
