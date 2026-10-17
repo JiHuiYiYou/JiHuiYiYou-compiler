@@ -776,11 +776,19 @@ def main():
     if args.run_all_gated:
         # Matrix mode: gated binaries + optional informational
         binaries = list(_GATED_BINARIES)
-        # stage0 永远以 informational 身份跑(2026-10-15 从 gated 降级 ——
-        # 见 _STAGE0_BINARY 处的完整理由)。它给信号,但不参与 exit code。
-        binaries.append(_STAGE0_BINARY)
         if args.include_informational:
             binaries.extend(_INFORMATIONAL_BINARIES)
+            # stage0 也归到 --include-informational 之后(2026-10-15)。
+            #
+            # 它**不再默认跑**:一次全量在 CI 上要 ~24 分钟,而 stage0 是
+            # informational —— 不影响 exit code。CI 的时间账因此是
+            # 「jhyy.exe 一次」而不是「jhyy.exe + stage0」两次。
+            #
+            # 它的真门是 `make stage0`(CI step 5)—— 那个只编 C 端编译器,
+            # 几秒钟,stage0 坏不坏在那里立刻断;跑 200 个 jhyy 语言测试对它
+            # 几乎没有信息量(39 个失败全是「C 端 parser 不认 v3.x 新语法」,
+            # 与 stage0 健不健康无关)。
+            binaries.append(_STAGE0_BINARY)
         total = len(binaries)
 
         gated_failures = 0

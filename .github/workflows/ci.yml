@@ -112,7 +112,13 @@ jobs:
           # jhyy.exe 的副本)。实测一次全量在 CI 上要 ~24 分钟,跑两遍必然撞
           # 45 分钟的 job 上限,而 job 超时是**最坏的失败形态**:没有产出、
           # 没有告诉你卡在哪一步。改成只跑那一个 binary。
-          python regress.py --binary=compiler/build/bin/jhyy_v1.exe.exe
+          # v1 是 jhyy.exe 的**逐字节副本**(make 每次构建重新生成)。
+          # 对一个逐字节相同的二进制再跑 200 个测试 = 24 分钟换零信息 ——
+          # 同样的字节必然给同样的结果。它的用途是给 fixed_point.sh /
+          # byte_equal.sh 当「第 0 代」种子做确定性检查,不是拿来跑套件的。
+          # 所以这里只验「副本确实是副本」—— 几十毫秒,信息量还不小:
+          # 副本一旦不同步,那两个脚本的 v1==v2 立刻失去意义。
+          cmp compiler/build/bin/jhyy.exe compiler/build/bin/jhyy_v1.exe.exe             && echo "v1 是 jhyy.exe 的 byte-equal 副本 ✓"             || { echo "FAIL: jhyy_v1.exe.exe 与 jhyy.exe 不一致 —— 副本约定被破坏"; exit 1; }
 
       - name: Build Stage 2 closure chain (v1→v2→v3→v4)
         shell: msys2 {0}
