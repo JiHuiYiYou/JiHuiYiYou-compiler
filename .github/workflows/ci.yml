@@ -125,6 +125,10 @@ jobs:
           cmp compiler/build/bin/jhyy.exe compiler/build/bin/jhyy_v1.exe.exe             && echo "v1 是 jhyy.exe 的 byte-equal 副本 ✓"             || { echo "FAIL: jhyy_v1.exe.exe 与 jhyy.exe 不一致 —— 副本约定被破坏"; exit 1; }
 
       - name: "[DIAG] 三个可疑测试串行 + 600s 上限(是挂死还是极慢)"
+        # 2026-10-15 修:上一笔改这个 step 的正文时,把夹在 name 与 run 之间的
+        #   `if: always()` 一起截掉了,于是它又变回「前一个 step 失败就跳过」,
+        #   白等一个 22 分钟的 CI 周期。
+        if: always()
         shell: msys2 {0}
         continue-on-error: true
         run: |
