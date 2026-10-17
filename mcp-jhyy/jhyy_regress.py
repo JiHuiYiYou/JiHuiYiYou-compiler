@@ -564,13 +564,21 @@ def run_all(
     # 开销。197 个测试在 4 并发下约 172s,这是地板,调并发帮不上。
     cpu = os.cpu_count() or 4
     default_workers = max(2, cpu // 2)
+    _t0 = time.time()
     workers = min(len(files), jobs if jobs else default_workers)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(run_test, str(TEST_DIR / f), binary, timeout): f for f in files}
         results = {futures[fut]: fut.result() for fut in as_completed(futures)}
 
-    for fname in files:
+    total_tests = len(files)
+    for idx, fname in enumerate(files, 1):
         ok, exp, act, msg = results[fname]
+        # 心跳:CI 上 GitHub 会折叠逐行输出,一个跑了 20 分钟的 regress step
+        # 看不到任何中间信息 —— 只能干等,而「哪一步慢」是唯一有用的线索。
+        # 每 20 个打一行进度 + 已用时,慢测试跑完立刻能看到它排在第几。
+        if idx % 20 == 0 or idx == total_tests:
+            print(f"[progress] {idx}/{total_tests} done, {time.time() - _t0:.0f}s elapsed",
+                  flush=True)
         xfail = _xfail_reason(fname)
         if xfail is not None:
             # XFAIL 语义(2026-10-15):这个测试**应该失败**。

@@ -689,12 +689,15 @@ def main():
     ap.add_argument("--jobs", type=int, default=None,
                     help="限制并发 compile 数 (default: 全并行 = min(测试数, CPU 数))。"
                          "只影响吞吐,不影响判定 —— 超时是死循环探测,不是性能预算")
-    # 2026-10-15:300 → 900。实测**每个**文件的 compile 都要 ~7s(不是个别文件慢,
-    # 200 个测试在 CI 少核 runner 上单跑就要 24 分钟)。per-test 超时的职责是
-    # 「抓永不返回的死循环」,不是性能预算 —— 拿它当性能线会在满负载时随机误杀
-    # 正常测试。CI 上 f32_suffix / f64_suffix / fmod_basic 三个就是被 300s
-    # 砍掉的(它们并不比其他文件慢,只是排队时排到了最后)。
-    ap.add_argument("--timeout", type=int, default=900,
+    # 2026-10-15:曾试过 300 → 900,**那是错的,已回退到 300**。
+    # per-test 超时的职责是「抓永不返回的死循环」,不是性能预算;但它同时是
+    # **挂死测试要烧多久**的上限,而 CI 上有几个测试会挂死:把上限从 300 提到 900
+    # 让每个挂死测试多烧 600s,一轮就多花 22 分钟 —— 优化链接省下的时间被它
+    # 吃回去了。宁可快速 FAIL(留下产物可查),也不要长时间占着 2 个 worker。
+    #
+    # 真正该修的是「为什么会挂死」,不是把超时调大。单次编译实测 1.26s
+    # (486ms 编译器 + 1083ms gcc 链接),300s 对它是 240 倍余量,够宽裕了。
+    ap.add_argument("--timeout", type=int, default=300,
                     help="Per-test timeout in seconds (dead-loop ceiling, not a perf budget)")
     ap.add_argument("--no-baseline-check", action="store_true",
                     help="Skip phantom-binary (mtime vs source) check for all runs.")
