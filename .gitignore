@@ -157,3 +157,7 @@ compiler/tests/bootstrap/baseline/
 compiler/build/bin/jhyy_v2.exe
 compiler/build/bin/jhyy_v3.exe
 compiler/build/bin/jhyy_v4.exe
+
+# v4.0.8:预编的 runtime.o / jhyy_helpers.o(Makefile 规则产出,可随时重建)
+compiler/build/obj/_jhyy_runtime.o
+compiler/build/obj/_jhyy_helpers.o

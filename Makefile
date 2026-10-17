@@ -45,6 +45,11 @@ RUNTIME_DIR  = $(COMPILER_DIR)/runtime
 BUILD_DIR    = $(COMPILER_DIR)/build
 OBJ_DIR      = $(BUILD_DIR)/obj
 BIN_DIR      = $(BUILD_DIR)/bin
+# v4.0.8:预编 runtime.c / jhyy_helpers.c 的产物(link_with_gcc 优先用它们,
+# 见下方规则处的完整理由)。定义放在这里是因为 `all:` 等规则会引用 —— Make 在
+# 解析到使用点时就展开,定义在使用点之后等于没定义。
+JHY_RUNTIME_O = $(OBJ_DIR)/_jhyy_runtime.o
+JHY_HELPERS_O = $(OBJ_DIR)/_jhyy_helpers.o
 
 # v1.8.1 patch: branded "J" icon embedded into jhyy_stage0.exe (and via main.c
 # system() spawn, into jhyy.exe + every .jhyy-compiled program).
@@ -91,7 +96,7 @@ RUNTIME_OBJ = $(OBJ_DIR)/runtime.o
 
 .PHONY: all clean test stage0 selfhost
 
-all: $(BIN_DIR)/jhyy.exe $(BIN_DIR)/jhyy_v1.exe.exe
+all: $(JHY_RUNTIME_O) $(JHY_HELPERS_O) $(BIN_DIR)/jhyy.exe $(BIN_DIR)/jhyy_v1.exe.exe
 
 # Stage 0: gcc 产 jhyy_stage0.exe (C 端 bootstrap)
 stage0: $(BIN_DIR)/jhyy_stage0.exe
@@ -143,7 +148,7 @@ $(BIN_DIR)/jhyy_stage0.exe: $(OBJS) $(RES_OBJ)
 #
 # `make stage0` 仍然保留(C 侧 bootstrap 本身仍要能编,CI 也仍然验它),
 # 只是不再在 `all` 的依赖链上。
-$(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy
+$(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(JHY_RUNTIME_O) $(JHY_HELPERS_O)
 	@mkdir -p $(BIN_DIR)
 	@if [ ! -f $@ ]; then \
 	    echo "ERR: $@ 不存在 —— 没有它就无法自举。"; \
@@ -164,6 +169,27 @@ $(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy
 	@rm -f $(BIN_DIR)/_boot_anchor.exe $(BIN_DIR)/_boot_new2.exe \
 	       $(BIN_DIR)/_boot_anchor.il $(BIN_DIR)/_boot_new2.il \
 	       $(BIN_DIR)/_boot_anchor.s  $(BIN_DIR)/_boot_new.s
+
+# v4.0.8:预编 runtime.c / jhyy_helpers.c 成 .o。
+#
+# 为什么:实测「gcc .s + runtime.c + jhyy_helpers.c」= 5045ms,而
+# 「gcc .s + 两个预编 .o」= 531ms —— `link_with_gcc` 每次都在**重复编这两个
+# C 文件**,而编译器自己的活只占 ~450ms。200 个测试 × 省 4.5s ≈ 15 分钟;
+# CI 的 job 上限 45 分钟,而 regress 阶段已经撞满(cancelled)。
+#
+# 新鲜度由这里的依赖关系保证:改了 runtime.c 跑一次 make 就重编。
+# `.o` 不存在时 `link_with_gcc` 自动回退到 `.c` 路径,行为与 v4.0.7 一致。
+#
+# D26 可复现性:两条路径在 SOURCE_DATE_EPOCH 固定时产出**逐字节相同**的 exe
+# (实测);.o 在下面这组 flags 下也可复现(同 flags 两次编译 sha 相同)。
+
+$(JHY_RUNTIME_O): $(RUNTIME_DIR)/runtime.c
+	@mkdir -p $(OBJ_DIR)
+	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(CC) $(CFLAGS_STAGE0) -c $< -o $@
+
+$(JHY_HELPERS_O): $(SRC0_DIR)/jhyy_helpers.c
+	@mkdir -p $(OBJ_DIR)
+	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(CC) $(CFLAGS_STAGE0) -c $< -o $@
 
 # v4.0.8: jhyy_v1.exe.exe = jhyy.exe 的副本,**每次构建重新生成**。
 # 兑现 v1.4.4 的副本约定,同时让它不再是会腐烂的 git 快照。名字保留是因为

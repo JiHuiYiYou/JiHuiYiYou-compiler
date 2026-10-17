@@ -149,6 +149,24 @@ fn GCC_PATH() -> *u8 { return jh_path_gcc(); }
 fn RUNTIME_C() -> *u8 { return jh_path_runtime(); }
 fn HELPERS_C() -> *u8 { return jh_path_helpers(); }
 
+// v4.0.8:预编的 .o —— 固定路径,沿用 compiler/build/obj/ 的既有约定
+// (同 _inline_asm.buf / _section_directive.buf)。
+//
+// 为什么:实测「gcc .s + runtime.c + jhyy_helpers.c」= **5045ms**,而
+// 「gcc .s + 两个预编 .o」= **531ms** —— 每次编译都在**重复编那两个 C 文件**。
+// 编译器自己的活只占 ~450ms。200 个测试 × 省 4.5s ≈ **15 分钟**,而 CI job
+// 上限 45 分钟、regress 阶段已经撞满。
+//
+// D26 可复现性不受影响:实测两条路径在 SOURCE_DATE_EPOCH 固定时产出**逐字节
+// 相同**的 exe(不带它差 2 字节时间戳,而编译器内部本来就设它);.o 在固定
+// flags 下也可复现(同 flags 两次编译 sha 相同)。
+//
+// 新鲜度由 Makefile 负责(目标依赖 .c),所以改 runtime.c 后跑一次 make 就
+// 会重编。.o 不存在时自动回退到 .c 路径,行为与今天完全一致。
+fn RUNTIME_O() -> *u8 { return "compiler/build/obj/_jhyy_runtime.o" as *u8; }
+fn HELPERS_O() -> *u8 { return "compiler/build/obj/_jhyy_helpers.o" as *u8; }
+
+
 // ═══ Helpers ═══
 
 // path_to_win: / → \ 转换（Windows cmd.exe 需要）
@@ -1220,13 +1238,30 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     // OS entry point. Default path (is_no_std=0) keeps the v2.4.0 link
     // line untouched.
     if is_no_std == (0 as i32) {
+        // v4.0.8:优先链预编 .o(见 RUNTIME_O 的注释:省 ~4.5s/次编译)。
+        // .o 不存在就退回 .c —— 两条路径在 SOURCE_DATE_EPOCH 固定时产出相同 exe。
+        let rt_o = RUNTIME_O();
+        let hp_o = HELPERS_O();
+        let mut use_obj = 1 as i32;
+        // jh_file_stat_ok:文件存在且非空返回 1,否则 0(见 jhyy_helpers.c)。
+        // 写反会导致「.o 存在时反而不用它」—— 第一版就栽在这,链接时间没变。
+        if jh_file_stat_ok(rt_o) == (0 as i32) { use_obj = 0 as i32; }
+        if jh_file_stat_ok(hp_o) == (0 as i32) { use_obj = 0 as i32; }
         pos = str_concat_at(cmd_buf, pos, sp);
         pos = str_concat_at(cmd_buf, pos, lq);
-        pos = str_concat_at(cmd_buf, pos, RUNTIME_C());
+        if use_obj != (0 as i32) {
+            pos = str_concat_at(cmd_buf, pos, rt_o);
+        } else {
+            pos = str_concat_at(cmd_buf, pos, RUNTIME_C());
+        }
         pos = str_concat_at(cmd_buf, pos, rq);
         pos = str_concat_at(cmd_buf, pos, sp);
         pos = str_concat_at(cmd_buf, pos, lq);
-        pos = str_concat_at(cmd_buf, pos, HELPERS_C());
+        if use_obj != (0 as i32) {
+            pos = str_concat_at(cmd_buf, pos, hp_o);
+        } else {
+            pos = str_concat_at(cmd_buf, pos, HELPERS_C());
+        }
         pos = str_concat_at(cmd_buf, pos, rq);
     } else {
         // no_std path: no runtime.c, no helpers.c, but still need kernel
