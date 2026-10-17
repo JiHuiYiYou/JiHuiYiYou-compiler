@@ -120,6 +120,18 @@ jobs:
           # 副本一旦不同步,那两个脚本的 v1==v2 立刻失去意义。
           cmp compiler/build/bin/jhyy.exe compiler/build/bin/jhyy_v1.exe.exe             && echo "v1 是 jhyy.exe 的 byte-equal 副本 ✓"             || { echo "FAIL: jhyy_v1.exe.exe 与 jhyy.exe 不一致 —— 副本约定被破坏"; exit 1; }
 
+      - name: "[DIAG] 三个可疑测试串行单跑(定位 CI 挂死)"
+        shell: msys2 {0}
+        continue-on-error: true
+        run: |
+          # 2026-10-15 临时诊断:CI 上 f32_suffix / f64_suffix / fmod_basic 三个
+          # 各烧满 300s 超时(占整轮 1207s 里的 900s),本地怎么都复现不了。
+          # 这一步把它们**串行**单跑(--jobs=1,--timeout=60):
+          #   串行也挂 → 确定性挂死,可以拿这三条最小复现去查
+          #   串行能过 → 纯粹是并发争抢,该调 worker 数而不是查编译器
+          # 60s 上限:单个测试本地只要 1.26s,60s 已经是 47 倍余量。
+          python regress.py --tests=f32_suffix.jhyy,f64_suffix.jhyy,fmod_basic.jhyy             --jobs=1 --timeout=60
+
       - name: Build Stage 2 closure chain (v1→v2→v3→v4)
         shell: msys2 {0}
         run: |
