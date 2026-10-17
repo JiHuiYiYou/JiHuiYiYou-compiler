@@ -77,7 +77,7 @@ jobs:
         run: |
           make stage0
 
-      - name: Build jhyy.exe (self-bootstrap: jhyy.exe compiles src0, byte-equal gated)
+      - name: "Build jhyy.exe (self-bootstrap: jhyy.exe compiles src0, byte-equal gated)"
         shell: msys2 {0}
         run: |
           make
@@ -101,10 +101,9 @@ jobs:
           # 是 0.3s,而一个跑了 5 秒的短任务 CPU 也是 0.3s —— 单点读数区分不了。
           # `Get-Process .CPU` 单位是**秒**(不是 ms),所以阈值取 0.5 也没意义,
           # 真正的信号是「20 秒里涨了多少」。
-          cpu_sec() {
-            powershell -NoProfile -Command               "(Get-Process -Id $1 -ErrorAction SilentlyContinue).CPU" 2>/dev/null               | tr -d ' 
-'
-          }
+          # 单行写法:MSYS2 bash 下 `\` 续行 + YAML 块标量很容易在某次编辑里
+          # 少一行缩进就把整个 run 块截断(YAML 报 'multiline key' 很难看出根因)。
+          cpu_sec() { powershell -NoProfile -Command "(Get-Process -Id $1 -ErrorAction SilentlyContinue).CPU" 2>/dev/null | tr -d '[:space:]'; }
           for t in f32_suffix f64_suffix fmod_basic; do
             echo "=== $t ==="
             rm -f "compiler/build/bin/_diag_$t."{il,s,exe}
