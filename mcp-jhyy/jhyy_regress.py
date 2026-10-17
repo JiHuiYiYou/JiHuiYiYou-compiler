@@ -78,37 +78,33 @@ def _build_subprocess_env() -> dict:
     return env
 
 
-def _kill_tree(pid: int) -> None:
-    """杀掉子进程**及其全部后代**,而不是只杀直接子进程。
+def _kill_tree(proc) -> None:
+    """超时后清理子进程,但**只在该进程还活着的时候**。
 
-    `subprocess.run(timeout=…)` 到点只对直接子进程调 TerminateProcess。可是
-    jhyy.exe 编译时用 `system()` 拉起 `gcc` → `cc1`/`as`/`ld`,这些孙子进程不在
-    杀的范围里 —— 一次 300s 超时就留下**两三个还在满核跑的编译/链接进程**。
+    ⚠️ 2026-10-17:第一版无条件 `taskkill /F /T /PID <pid>`,结果 CI 上两次
+    (DIAG-2 60s / regress 300s)都在**超时那一刻连 harness 一起杀掉** ——
+    零输出、退出码 2304。子进程此刻可能早已退出,pid 已被系统回收给别的进程,
+    `/T` 就把无辜者连坐了。所以这里先看 `proc.poll()`:还在跑才杀。
 
-    后果是级联的:GitHub runner 只有 2 核,几个孤儿就把核占死,后续测试越跑越慢,
-    超时越来越多,最后整轮 regress 都不可用。表现上像「某些测试天生会挂」,
-    实际是前面几次超时留下的垃圾在拖垮后面所有测试 —— 这也是为什么故障看起来
-    与代码内容无关。
-
-    本地复现不了:本地几乎不触发超时,也就没有孤儿可留。
-
-    Windows 走 `taskkill /T`(按父 PID 递归子树);POSIX 走 killpg(要求 spawn 时
-    用 start_new_session=True 建独立进程组)。
+    另一个必须分清的情况:**子进程已退出、communicate 却还在等** ——
+    说明有孙进程(jhyy.exe `system()` 拉起的 gcc → cc1/as)继承了管道写端。
+    那种情况下杀树没有意义(树根已经没了),真正的形态是「编译器没卡,
+    卡的是管道」,由调用方如实报告。
     """
-    if pid <= 0:
-        return
     try:
+        if proc.poll() is not None:
+            return          # 已退出:树根不在,杀不了也不该杀
         if os.name == "nt":
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                            capture_output=True, timeout=30)
         else:
-            os.killpg(os.getpgid(pid), signal.SIGKILL)
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        proc.kill()
     except Exception:
-        pass
-    try:
-        os.kill(pid, signal.SIGKILL)
-    except Exception:
-        pass
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
 
 def _run_capture(cmd, timeout: int, env: dict) -> tuple:
@@ -127,22 +123,38 @@ def _run_capture(cmd, timeout: int, env: dict) -> tuple:
     str**:调用点不必再猜类型 —— 原先 `run(text=True)` 正常返回给 str、超时时
     给 bytes,两处都得判类型,漏一处就是 TypeError。
 
-    超时时抛 `TimeoutExpired`,其 output/stderr 已是 str,进程树已清理。
+    超时时抛 `TimeoutExpired`,其 output/stderr 已是 str;并在异常上挂两个
+    调用方要用的属性:
+      `child_exited` — 子进程**是否已经退出**。
+        False = 它自己卡住(真死循环/真阻塞);
+        True  = 它早退了,`communicate()` 是在等**孙进程持有的管道写端**
+                (gcc/as 继承了 stdout/stderr)。这两种的修法完全不同,
+                报告里必须分开,否则又是一句「超时了没法行动」。
+      `child_rc` — 已退出时的退出码。
     """
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             stdin=subprocess.DEVNULL, env=env)
     try:
         out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
-        _kill_tree(proc.pid)
+        child_exited = proc.poll() is not None
+        child_rc = proc.returncode
+        _kill_tree(proc)
+        # 排空只给 2s。管道写端可能被**孙进程**持有(见 child_exited),那种情况
+        # 下无论等多久都关不上 —— 第一版给 30s,单次超时就多烧 30s,3 个测试 ×
+        # 2 次重试 = 白等 3 分钟。拿不到就用 TimeoutExpired 里已有的部分输出。
         try:
-            out, err = proc.communicate(timeout=30)
+            out, err = proc.communicate(timeout=2)
         except Exception:
             out, err = exc.output, exc.stderr
         dec = lambda b: (b or b"").decode("utf-8", "replace") \
             if isinstance(b, bytes) else (b or "")
-        raise subprocess.TimeoutExpired(cmd, timeout,
-                                        output=dec(out), stderr=dec(err))
+        err_exc = subprocess.TimeoutExpired(cmd, timeout,
+                                            output=dec(out), stderr=dec(err))
+        # 挂在新异常对象上 —— 直接 raise exc 会丢属性(raise 的是新构造的对象)。
+        err_exc.child_exited = child_exited
+        err_exc.child_rc = child_rc
+        raise err_exc
     dec = lambda b: b.decode("utf-8", "replace") if b else ""
     return proc.returncode, dec(out), dec(err)
 
@@ -390,9 +402,15 @@ def run_test(
                           if ln.strip().startswith("[")]
             marks = list(dict.fromkeys(marks))
             tail = " → ".join(marks[-3:]) if marks else "(无阶段标记)"
+            # 「编译器卡住」与「编译器早退了、孙进程占着管道」是两回事。
+            if getattr(exc2, "child_exited", False):
+                shape = (f"编译器**已退出**(rc={getattr(exc2, 'child_rc', None)})"
+                         "——卡住的是管道:gcc/as 继承了 stdout/stderr 写端没关闭")
+            else:
+                shape = "编译器进程仍在运行 —— 它自己卡住了"
             return (False, expected, -4,
-                    f"compile timeout ({timeout}s,重试后仍超时);卡在{stage};"
-                    f"产物={have or '无'};最后阶段标记: {tail}")
+                    f"compile timeout ({timeout}s,重试后仍超时);{shape};"
+                    f"卡在{stage};产物={have or '无'};最后阶段标记: {tail}")
         except Exception as exc:
             return (False, expected, -5, f"compile retry failed: {exc!r}")
     if rc != 0:

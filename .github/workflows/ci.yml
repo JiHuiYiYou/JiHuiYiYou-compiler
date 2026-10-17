@@ -146,7 +146,10 @@ jobs:
           # 300s 的完整烧钱过程。3 个测试 × (60 + 60 重试) 上限 6 分钟。
           for j in 1 4; do
             echo "=== harness --jobs=$j ==="
-            python regress.py --binary=compiler/build/bin/jhyy.exe --jobs=$j --timeout=60 --no-baseline-check --tests=f32_suffix.jhyy,f64_suffix.jhyy,fmod_basic.jhyy 2>&1 | tail -12
+            # -u:无缓冲。非 TTY 下 Python 块缓冲,`| tail` 会把整轮输出压到退出
+            # 才刷 —— 2026-10-17 harness 在超时处崩掉时,`| tail` 一个字都没留下,
+            # 现场全丢。去掉 tail 让输出实时流。
+            python -u regress.py --binary=compiler/build/bin/jhyy.exe --jobs=$j --timeout=60 --no-baseline-check --tests=f32_suffix.jhyy,f64_suffix.jhyy,fmod_basic.jhyy 2>&1 || echo "  (--jobs=$j 本轮非零退出 $?)"
           done
 
       - name: "Run regress.py --all (gated: jhyy.exe; jhyy_stage0.exe informational)"
@@ -163,7 +166,9 @@ jobs:
           # (regress.py, not compiler/build/bin/regress.py — it was relocated
           # in v4.0.0-rc1 to keep the build/ tree artifact-only). Historical
           # `python compiler/build/bin/regress.py` failed with FileNotFoundError.
-          python regress.py --all
+          # -u:无缓冲 —— 否则整轮 20 分钟的 [progress] 心跳全压在退出时一次性
+          # 刷出,时间戳落在同一秒,拿不到执行时序(排查并发问题时的硬障碍)。
+          python -u regress.py --all
 
       - name: Run regress.py on jhyy_v1.exe.exe (v1 historical baseline, matrix only)
         # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
