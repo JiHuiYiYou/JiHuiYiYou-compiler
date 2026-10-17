@@ -124,24 +124,35 @@ jobs:
           # 副本一旦不同步,那两个脚本的 v1==v2 立刻失去意义。
           cmp compiler/build/bin/jhyy.exe compiler/build/bin/jhyy_v1.exe.exe             && echo "v1 是 jhyy.exe 的 byte-equal 副本 ✓"             || { echo "FAIL: jhyy_v1.exe.exe 与 jhyy.exe 不一致 —— 副本约定被破坏"; exit 1; }
 
-      - name: "[DIAG] 三个可疑测试串行 + 600s 上限(是挂死还是极慢)"
-        # 2026-10-15 修:上一笔改这个 step 的正文时,把夹在 name 与 run 之间的
-        #   `if: always()` 一起截掉了,于是它又变回「前一个 step 失败就跳过」,
-        #   白等一个 22 分钟的 CI 周期。
+      - name: "[DIAG] 三个可疑测试:空转 vs 阻塞"
         if: always()
         shell: msys2 {0}
         continue-on-error: true
         run: |
-          # 2026-10-15 第二轮诊断。
-          # 上一轮 `--jobs=1 --timeout=60` 已经确认:**串行也挂** → 确定性的,
-          # 不是并发争抢。所以现在的唯一问题是:它是「卡死」还是「极慢」?
-          #   600s 内完成 → 极慢,去查为什么 CI 上这几个输入慢 100 倍
-          #   600s 仍不完成 → 死循环/死锁,拿这三条最小复现去查
-          #
-          # 另:上一轮那个「卡在前端或 emit 阶段(无任何产物)」的诊断**不可信** ——
-          # `codegen_amd64_run_text` 里 0 处文件写操作,in-mem 路径**根本不写 .s**,
-          # 所以「无产物」是常态而非信号。基于它排除掉的一批假设要重新算。
-          python regress.py --tests=f32_suffix.jhyy,f64_suffix.jhyy,fmod_basic.jhyy             --jobs=1 --timeout=600
+          # 2026-10-15 第三轮诊断。
+          # 已确定的事实:串行也挂(确定性)、600s 跑不完(是挂死不是极慢)、
+          #   源文件与 GitHub 上逐字节相同、本地 1.26s 稳定复现不了。
+          # 这一步只回答一个问题:**进程是在空转还是在等**——
+          #   CPU 时间持续增长 → 死循环(lexer/parser/codegen 某处自旋)
+          #   CPU 时间几乎不动    → 阻塞(等子进程 / 等锁 / 等 IO)
+          # 两者修法完全不同,所以这个区分是接下来所有工作的前提。
+          for t in f32_suffix f64_suffix fmod_basic; do
+            echo "=== $t ==="
+            ./compiler/build/bin/jhyy.exe compile               compiler/tests/examples/$t.jhyy -o "compiler/build/bin/_diag_$t"               > "/tmp/diag_$t.log" 2>&1 &
+            pid=$!
+            sleep 30
+            if kill -0 $pid 2>/dev/null; then
+              echo "  30s 后仍在运行。CPU 时间(ms) / 工作集:"
+              powershell -NoProfile -Command                 "Get-Process -Id $pid -ErrorAction SilentlyContinue |                  Select-Object -ExpandProperty CPU" 2>/dev/null || echo "  (取不到 CPU)"
+              sleep 20
+              echo "  50s 时 CPU 时间(ms):"
+              powershell -NoProfile -Command                 "Get-Process -Id $pid -ErrorAction SilentlyContinue |                  Select-Object -ExpandProperty CPU" 2>/dev/null || echo "  (取不到)"
+              kill $pid 2>/dev/null || true
+            else
+              echo "  30s 内已结束 —— 它没挂,看日志:"
+              tail -5 "/tmp/diag_$t.log"
+            fi
+          done
 
       - name: Build Stage 2 closure chain (v1→v2→v3→v4)
         # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
