@@ -1,0 +1,90 @@
+// EXPECT: 0
+// 2026-10-17 诊断:把「浮点比较坏了」与「libm 返回值不同」分开。
+//
+// 为什么需要这个测试:`std_math_basic.jhyy` 在 CI 上返回 4(子测试 4 =
+// nearly_eq(sqrt(2), 1.4142135623730951, 1e-9) 失败),本地返回 0。而这个测试
+// 用的是**同一个二进制**(37837b3f)、**同一份源文件**,编译器为它生成的 .s
+// 也是逐字节相同的 —— 所以「结果不同」不可能来自编译器。
+//
+// 但也不能直接归给 libm:编译 std_math_basic 时编译器**自己在报**
+// `codegen_amd64_lexer: unknown QBE IL mnemonic`(W-109),而 lexer 遇到未知
+// 助记符是「跳 1 个字节继续」—— 也就是说 nearly_eq 里那个 `d < eps` 很可能
+// 被编成了垃圾指令。本地蒙对了,CI 上没蒙对。
+//
+// 本测试把三件事拆开,每个用**互不相同**的返回码,一次运行就能定位:
+//   41 = 纯比较就坏了(不碰 libm):nearly_eq(x, x, eps) 对两个相同的值都判不等
+//   42 = 浮点字面量解析坏了:1.4142135623730951 存进去再取出来不等于自己
+//   43 = eps 字面量 0.000000001 解析坏了
+//   44 = libm 的 sqrt(2) 与参考值差超过 1e-9(纯 libm 问题)
+//   45 = libm 的 sqrt(4) 不是精确的 2.0(libm/CRT 问题)
+//   0  = 全部正常
+
+extern fn sqrt(x: f64) -> f64;
+extern fn pow(base: f64, exp: f64) -> f64;
+
+fn std_math_sqrt(x: f64) -> f64 {
+    return sqrt(x);
+}
+
+fn std_math_pow(base: f64, exp: f64) -> f64 {
+    return pow(base, exp);
+}
+
+fn bits_eq_f64(a: f64, b: f64) -> i32 {
+    let ai: i64 = a as i64;
+    let bi: i64 = b as i64;
+    if ai == bi {
+        return 1;
+    }
+    return 0;
+}
+
+fn nearly_eq(a: f64, b: f64, eps: f64) -> i32 {
+    let mut d: f64 = a - b;
+    if d < 0.0 {
+        d = 0.0 - d;
+    }
+    if d < eps {
+        return 1;
+    }
+    return 0;
+}
+
+fn main_jhyy() -> i32 {
+    let eps: f64 = 0.000000001;
+
+    // 41 —— 纯比较,**完全不碰 libm**。同一个值跟自己比,差必然是 0,
+    //      任何正确的实现都必须返回 1。这一条不过 = 比较指令本身坏了。
+    if nearly_eq(1.5, 1.5, eps) == 0 {
+        return 41;
+    }
+    // 再来一次,用不同的字面量,排除「只有某个常量被编错」。
+    if nearly_eq(2.25, 2.25, eps) == 0 {
+        return 41;
+    }
+
+    // 42 —— 参考值字面量本身:存进去、原样取出来,必须逐位相同。
+    let sqrt2_ref: f64 = 1.4142135623730951;
+    if bits_eq_f64(sqrt2_ref, 1.4142135623730951) == 0 {
+        return 42;
+    }
+
+    // 43 —— eps 字面量:0.000000001 与 1e-9 必须相同。
+    if bits_eq_f64(eps, 0.000000001) == 0 {
+        return 43;
+    }
+
+    // 44 —— libm:sqrt(2) 与参考值的差应远小于 1e-9。
+    let sq2: f64 = std_math_sqrt(2.0);
+    if nearly_eq(sq2, sqrt2_ref, eps) == 0 {
+        return 44;
+    }
+
+    // 45 —— libm:sqrt(4) 必须是精确的 2.0。
+    let sq4: f64 = std_math_sqrt(4.0);
+    if bits_eq_f64(sq4, 2.0) == 0 {
+        return 45;
+    }
+
+    return 0;
+}
