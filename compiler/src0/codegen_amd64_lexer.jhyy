@@ -1586,7 +1586,27 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         // 54 cnew) 全部 vanish → gcd Euclid loop cond check missing → b 累积到 0 →
         // idivl SIGFPE (EXIT=127)。
         if n1 == (115 as i32) || n1 == (117 as i32) || n1 == (101 as i32)
-            || n1 == (110 as i32) || n1 == (103 as i32) {  // 'n' for cnew (4-char); 'g' for cgtd/cltd/cled/cged (QBE f64/f32 compare w/o 's' prefix)
+            || n1 == (110 as i32) || n1 == (103 as i32) || n1 == (108 as i32) {  // 'n' for cnew (4-char); 'g' for cgtd/cgts; 'l' for cltd/cled/clts/cles (W-109)
+        // W-109 真修 (2026-10-17):第二字符 **漏了 'l'**。前端 codegen.jhyy:2335
+        // 起会 emit cltd / clts / cled(以及 cgtd/cgts/cged/cges 的 f32 变体),
+        // 但本 gate 的字符集是 s/u/e/n/g —— `cltd` 的第二字符是 'l',不在集内,
+        // 于是直接落到函数末尾的 "unknown QBE IL mnemonic",返回 -1。
+        // lex_il 收到 -1 的处理是「跳 1 个字节继续」→ **吐出一串垃圾指令**。
+        //
+        // 为什么它一直没人发现、而且症状是「同一个测试本地过 CI 不过」:
+        // 1. 垃圾字节交给汇编器 `as`。同一份 .s 在不同版本的 `as` 上会被解释成
+        //    不同指令 —— 本地碰巧合得上,CI 上合不上。这是 W-109 与 W-117 叠加。
+        // 2. 本地默认 gcc 就是本项目编 jhyy.exe 用的那套,「碰巧对」被固化成了
+        //    「本来就对」。
+        //
+        // 判据见 compiler/tests/examples/float_cmp_diag.jhyy 的 41 号:
+        //   nearly_eq(1.5, 1.5, eps) —— 同一个值跟自己比,差必然是 0,
+        //   不碰 libm,任何正确实现都必须返回 1。它不过 = 比较指令本身坏了。
+        //
+        // 注:emit_binop 侧**一直**完整支持这 6 个浮点 op(codegen_amd64_emit_call
+        // .jhyy:1862-1899 逐个 cg_find_sub 匹配),缺的只有这里 —— 助记符压根没
+        // 被 token 成 BINOP,自然到不了发射。
+
             let n2 = lex_peek_byte_at(s, 2 as i64);
             let n3 = lex_peek_byte_at(s, 3 as i64);
             let n4 = lex_peek_byte_at(s, 4 as i64);
@@ -1639,6 +1659,15 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                     else if n2 == (103 as i32) && n3 == (101 as i32) { op_str = "cged" as *u8; }
                     else if n2 == (108 as i32) && n3 == (116 as i32) { op_str = "cltd" as *u8; }
                     else if n2 == (108 as i32) && n3 == (101 as i32) { op_str = "cled" as *u8; }
+                } else if n1 == (108 as i32) {
+                    // W-109 真修:cltd / clts / cled / cles 的 op_str(n1='l')。
+                    // op_str 是 dead store —— emit_binop 用 cg_find_sub 二次 scan
+                    // tok.text 拿真正的 op 名(codegen_amd64_emit_call.jhyy:1862 起)。
+                    // 这里填准确值是为了不让下一位读者以为漏了分支。
+                    if n2 == (116 as i32) && n3 == (100 as i32) { op_str = "cltd" as *u8; }
+                    else if n2 == (101 as i32) && n3 == (100 as i32) { op_str = "cled" as *u8; }
+                    else if n2 == (116 as i32) && n3 == (115 as i32) { op_str = "clts" as *u8; }
+                    else if n2 == (101 as i32) && n3 == (115 as i32) { op_str = "cles" as *u8; }
                 } else {
                     if n2 == (108 as i32) && n3 == (116 as i32) { op_str = "csltw" as *u8; }
                     else if n2 == (108 as i32) && n3 == (101 as i32) { op_str = "cslew" as *u8; }

@@ -118,7 +118,7 @@
 | [W-106](#w-106) | ACTIVE | symtab_lookup_one 用 arena-touch 强制 codegen... |
 | [W-107](#w-107) | ACTIVE | 五个 per-fn pre-scan 表硬编码 1024 上限 — 距触发只剩 33 个函数 |
 | [W-108](#w-108) | RESOLVED | 索引重建脚本静默丢弃 59/89 条目 —— STATUS_RE 不容忍 前缀,且只匹配 H2 |
-| [W-109](#w-109) | ACTIVE | 自举 IL lexer 缺 6 个浮点比较助记符 — f32/f64 六个比较运算静默降级 |
+| [W-109](#w-109) | RESOLVED | 自举 IL lexer 缺 6 个浮点比较助记符 — f32/f64 六个比较运算静默降级 |
 | [W-110](#w-110) | ACTIVE | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 |
 | [W-111](#w-111) | ACTIVE | 泛型 enum 一旦真被使用 —— sema 报错后 segfault;多字段 payload... |
 | [W-112](#w-112) | ACTIVE | `#[link_section]` 完全失效 — 属性被解析但 codegen 是 no-op |
@@ -7299,7 +7299,7 @@ ACTIVE 6 / RESOLVED 80 / SUPERSEDED 4 / INVALID 2 / DEFERRED 0
 <a id="w-109"></a>
 ## W-109: 自举 IL lexer 缺 6 个浮点比较助记符 — f32/f64 六个比较运算静默降级
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — f32 <= < > >= 被当 f64 比较,f64 == != 直接 unknown mnemonic 硬失败
+**状态:** RESOLVED closed 2026-10-17 (v4.0.9) — lexer 的 `c*` gate 第二字符补上 'l',6 个浮点比较助记符全部被识别并正确发射
 **Backfilled:** 2026-10-15 (v2.11.15 Iter 1b A1-XMM 只补了 4 个 c*d 助记符时留下的缺口)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** v2.11.15 (A1-XMM) 起 → 至今
@@ -7873,3 +7873,43 @@ self-backend 空转,并修到「任意 gcc 版本编出的 jhyy.exe 行为一致
 - `.github/workflows/ci.yml` 第 5 步(换回发布产物)
 - GH Actions run 39016142083 `[DIAG-3]` 步(二进制 A/B 的实测数据)
 - 相关:W-107(per-fn 表 1024 上限,同样在 self-backend 里)、W-109(IL lexer 缺助记符)
+
+### W-109 真修记录 (2026-10-17, v4.0.9)
+
+**根因(精确定位):** `codegen_amd64_lexer.jhyy:1588` 的 `c*` 助记符 gate 第二字符
+字符集是 `{s, u, e, n, g}`,**漏了 `l`**。前端 `codegen.jhyy:2335` 起会 emit
+`cltd` / `clts` / `cled`(以及 `cgtd` / `cgts` / `cged` 的 f32/f64 变体)——
+`cltd` 的第二字符是 `l`,不在集内 → 落到 `next_token` 末尾的
+`unknown QBE IL mnemonic` → 返回 -1 → `lex_il` 收到 -1 的处理是「跳 1 个字节
+继续」→ **吐出一串垃圾指令**。
+
+**一个必须纠正的中间结论:** 排查中我一度断定「`emit_binop` 侧也漏了这 6 个 op」。
+**那是错的** —— `codegen_amd64_emit_call.jhyy:1862-1899` 一直逐个 `cg_find_sub`
+匹配了这 6 个浮点比较 op。缺的只有 lexer:助记符压根没被 token 成 BINOP,
+自然到不了发射。**判据要来自读实际代码,不是从「报错在哪」倒推。**
+
+**为什么它能活这么久,而且症状是「本地过 CI 不过」:**
+
+1. 垃圾字节交给汇编器 `as`。同一份 `.s` 在不同版本的 `as` 上被解释成不同指令 ——
+   本地碰巧合得上,CI 上合不上。这是 W-109 与 W-117 叠加的结果,不是两个独立 bug。
+2. 本地默认 gcc 正是本项目编 `jhyy.exe` 用的那套,「碰巧对」被固化成了「本来就对」。
+3. `float_cmp.jhyy` 的断言**恰好蒙对了**,而不是干脆崩溃,所以没有暴露。
+
+**定位手段(可复用):** 新增 `compiler/tests/examples/float_cmp_diag.jhyy`,
+用五个互不相同的返回码把「比较指令本身坏了」与「libm 返回值不同」分开。
+决定性的是 **41 号**:`nearly_eq(1.5, 1.5, eps)` —— 同一个值跟自己比,差必然是 0,
+**完全不碰 libm**,任何正确实现都必须返回 1。CI 返回 41,一次就把 libm 排除了。
+在此之前这个问题被「本地不复现 / 看起来像 CI 环境问题」挡了好几轮。
+
+**验收:**
+- `float_cmp_diag.jhyy` EXIT=0,编译时 `unknown QBE IL mnemonic` 计数归零
+- `float_cmp.jhyy` 摘掉 XFAIL 后 **PASS EXIT=111137**(与它注释里写的期望总和一致)
+- `std_math_basic.jhyy` 由 FAIL(expected=0 got=4) 转 PASS
+- 全量回归 175/176 → 摘标记后 **176/176,0 failed**
+- 自举闭环 PASS(Stage2 == Stage3 .s 与 .exe 均逐字节相同)
+
+**引用:**
+- `compiler/src0/codegen_amd64_lexer.jhyy:1588`(字符集补 'l')+ 同函数 op_str 分支
+- `compiler/src0/codegen_amd64_emit_call.jhyy:1862-1899`(发射侧**原本就**支持,未改)
+- `compiler/tests/examples/float_cmp_diag.jhyy`(新增判据)
+- 相关:W-117(工具链依赖,决定了同一份垃圾字节被不同 `as` 解释成什么)
