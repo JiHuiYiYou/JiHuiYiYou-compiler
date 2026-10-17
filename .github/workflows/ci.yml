@@ -82,7 +82,7 @@ jobs:
         run: |
           # v4.0.8:`make` 用 jhyy.exe 自己编 src0,并做 byte-equal 自举闭环检查。
           # 这一步验的是「**工具链能不能编出编译器**」,保留。
-          make
+          make STRICT_TOOLCHAIN=0
           # 但**回归门不用它的产物** —— 2026-10-17 实测:CI 的工具链
           # (setup-msys2 装的 UCRT64 gcc)编出来的 jhyy.exe 与提交进仓的
           # 那个**行为不同**,且是坏的:
