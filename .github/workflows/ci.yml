@@ -126,6 +126,29 @@ jobs:
             kill $pid 2>/dev/null || true
             sleep 1
           done
+
+      - name: "[DIAG-2] 同样三个测试,走 harness 串行 / 高并发"
+        if: always()
+        shell: msys2 {0}
+        continue-on-error: true
+        run: |
+          # 2026-10-17 第五轮。DIAG 已证明:**直接命令行调用时三个测试都在 10 秒内
+          # 编译完成**(整个 DIAG 步耗时 30 秒 = 3 × 10s sleep)。也就是说编译器本身
+          # 不挂、输入不挂 —— 挂的是 harness。
+          #
+          # 本步把同一批测试喂给 regress.py,只改并发度,把「harness 的哪一部分」
+          # 切成两半:
+          #   --jobs=1 仍挂 → 是 harness 自身(capture_output 的管道 / env /
+          #                 绝对路径的 argv[0] / 300s 超时语义)
+          #   --jobs=1 过、--jobs=4 挂 → 是并发(CI runner 只有 2 核)
+          #
+          # 超时压到 60s:这个实验只是要「挂 / 不挂」这个布尔,不需要复现
+          # 300s 的完整烧钱过程。3 个测试 × (60 + 60 重试) 上限 6 分钟。
+          for j in 1 4; do
+            echo "=== harness --jobs=$j ==="
+            python regress.py --binary=compiler/build/bin/jhyy.exe --jobs=$j --timeout=60 --no-baseline-check --tests=f32_suffix.jhyy,f64_suffix.jhyy,fmod_basic.jhyy 2>&1 | tail -12
+          done
+
       - name: "Run regress.py --all (gated: jhyy.exe; jhyy_stage0.exe informational)"
         shell: msys2 {0}
         run: |

@@ -17,6 +17,7 @@ import sys
 import os
 import re
 import hashlib
+import signal
 import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -75,6 +76,39 @@ def _build_subprocess_env() -> dict:
     if not env.get("SystemDrive"):
         env["SystemDrive"] = "C:"
     return env
+
+
+def _kill_tree(pid: int) -> None:
+    """杀掉子进程**及其全部后代**,而不是只杀直接子进程。
+
+    `subprocess.run(timeout=…)` 到点只对直接子进程调 TerminateProcess。可是
+    jhyy.exe 编译时用 `system()` 拉起 `gcc` → `cc1`/`as`/`ld`,这些孙子进程不在
+    杀的范围里 —— 一次 300s 超时就留下**两三个还在满核跑的编译/链接进程**。
+
+    后果是级联的:GitHub runner 只有 2 核,几个孤儿就把核占死,后续测试越跑越慢,
+    超时越来越多,最后整轮 regress 都不可用。表现上像「某些测试天生会挂」,
+    实际是前面几次超时留下的垃圾在拖垮后面所有测试 —— 这也是为什么故障看起来
+    与代码内容无关。
+
+    本地复现不了:本地几乎不触发超时,也就没有孤儿可留。
+
+    Windows 走 `taskkill /T`(按父 PID 递归子树);POSIX 走 killpg(要求 spawn 时
+    用 start_new_session=True 建独立进程组)。
+    """
+    if pid <= 0:
+        return
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                           capture_output=True, timeout=30)
+        else:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+    except Exception:
+        pass
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except Exception:
+        pass
 
 
 def _sha256_file(path: str) -> str:
@@ -280,9 +314,19 @@ def run_test(
     # 应该记成该测试 FAIL 并继续跑其余的。
     first_timeout = None
     try:
+        # stdin=DEVNULL:非交互式调用编译器,不该继承 harness 的 stdin。
+        # jhyy.exe 用 system() 拉 gcc,整条链都会继承这个 stdin。GitHub Actions
+        # 给每个 step 的 stdin 是**一根永远不送数据、也永远不关闭**的管道 ——
+        # 链上任何一环(常见是 cmd.exe /c)去读它就永久阻塞,表现出来就是
+        # 「compile 挂到超时」。本地下 Bash 工具跑的 stdin 是关闭的,所以复现不了。
+        # 运行阶段本来就有这一行(注释写着「MCP server 无有效 stdin → 子进程阻塞」),
+        # 编译阶段漏了 —— 两处本该一致。
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           stdin=subprocess.DEVNULL,
                            encoding="utf-8", errors="replace", env=test_env)
     except subprocess.TimeoutExpired as exc:
+        # 杀掉 jhyy.exe 拉起的 gcc/cc1 —— 见 _kill_tree 的 docstring。
+        _kill_tree(exc.pid)
         # 2026-10-15:重试一次。单个测试 compile 正常 3 秒,300 秒超时对它是
         # 永远不合理的量级 —— 命中即意味着「进程被抢死」而不是「编译真的慢」。
         # 根因是并发下每个测试展开成 jhyy.exe → gcc → cc1 三层进程,CI runner
@@ -291,8 +335,11 @@ def run_test(
         first_timeout = exc
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                               stdin=subprocess.DEVNULL,
                                encoding="utf-8", errors="replace", env=test_env)
         except subprocess.TimeoutExpired as exc2:
+            # 同上:重试也超时就再清一次树(重试是**新**的进程,有自己的 gcc)。
+            _kill_tree(exc2.pid)
             # 超时时报告「卡在哪一步」—— 光说 timeout 没法行动。
             # .il 出来但没 .s → 卡在 self-backend emit(可能无限循环)
             # .s 出来但没 .exe → 卡在 gcc 链接(可能是 runner 环境,不是编译器)
@@ -352,7 +399,8 @@ def run_test(
         actual = r2.returncode
         stdout_text = r2.stdout or ""
         output = stdout_text + (r2.stderr or "")
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        _kill_tree(exc.pid)
         return (False, expected, -3, f"timeout ({timeout}s)")
 
     # EXPECT-OUT check — runs regardless of whether EXPECT is present, so a
