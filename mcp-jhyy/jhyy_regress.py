@@ -92,6 +92,10 @@ def _kill_tree(proc) -> None:
     卡的是管道」,由调用方如实报告。
     """
     try:
+        if os.environ.get("JHY_NO_KILL_TREE"):
+            # 二分用:完全禁用清理,用来判定「消失」到底是不是杀树造成的。
+            # 见 .github/workflows/ci.yml 的 [DIAG-2]。
+            return
         if proc.poll() is not None:
             return          # 已退出:树根不在,杀不了也不该杀
         if os.name == "nt":

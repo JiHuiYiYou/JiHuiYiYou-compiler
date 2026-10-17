@@ -132,25 +132,34 @@ jobs:
         shell: msys2 {0}
         continue-on-error: true
         run: |
-          # 2026-10-17 第五轮。DIAG 已证明:**直接命令行调用时三个测试都在 10 秒内
-          # 编译完成**(整个 DIAG 步耗时 30 秒 = 3 × 10s sleep)。也就是说编译器本身
-          # 不挂、输入不挂 —— 挂的是 harness。
+          # 2026-10-17 第六轮。DIAG 已证明:**直接命令行调用时三个测试都在 10 秒内
+          # 编译完成**(整个 DIAG 步耗时 30 秒 = 3 × 10s sleep)。编译器本身不挂、
+          # 输入不挂 —— 挂的是 harness。
           #
-          # 本步把同一批测试喂给 regress.py,只改并发度,把「harness 的哪一部分」
-          # 切成两半:
-          #   --jobs=1 仍挂 → 是 harness 自身(capture_output 的管道 / env /
-          #                 绝对路径的 argv[0] / 300s 超时语义)
-          #   --jobs=1 过、--jobs=4 挂 → 是并发(CI runner 只有 2 核)
+          # 前两轮本步都是「在 --timeout 那一刻整个消失 + 零输出 + exit 2304」。
+          # 头一个怀疑是超时清理杀树杀到了自己(已加 proc.poll() 存活判定),
+          # 但症状没变 —— 所以这里做**三组对照**,一次把「是不是杀树」和
+          # 「是不是并发」同时分开:
+          #   jobs1_杀树    :基线,复现消失
+          #   jobs1_不杀树  :只关掉杀树 → 还在消失就说明不是它
+          #   jobs4_不杀树  :并发 4 路 → 只在这里消失就是并发
           #
-          # 超时压到 60s:这个实验只是要「挂 / 不挂」这个布尔,不需要复现
-          # 300s 的完整烧钱过程。3 个测试 × (60 + 60 重试) 上限 6 分钟。
-          for j in 1 4; do
-            echo "=== harness --jobs=$j ==="
-            # -u:无缓冲。非 TTY 下 Python 块缓冲,`| tail` 会把整轮输出压到退出
-            # 才刷 —— 2026-10-17 harness 在超时处崩掉时,`| tail` 一个字都没留下,
-            # 现场全丢。去掉 tail 让输出实时流。
-            python -u regress.py --binary=compiler/build/bin/jhyy.exe --jobs=$j --timeout=60 --no-baseline-check --tests=f32_suffix.jhyy,f64_suffix.jhyy,fmod_basic.jhyy 2>&1 || echo "  (--jobs=$j 本轮非零退出 $?)"
-          done
+          # 超时压到 60s:这个实验只要「挂 / 不挂」这个布尔,不需要复现 300s 的
+          # 完整烧钱过程。输出写文件再无条件 cat —— 进程被杀之后,管道里的缓冲
+          # 会一起没,写文件是唯一还能留下证据的办法。
+          T=f32_suffix.jhyy,f64_suffix.jhyy,fmod_basic.jhyy
+          run() {   # $1=标签 $2=jobs $3=额外环境
+            echo "=== $1 ==="
+            env $3 python -u regress.py --binary=compiler/build/bin/jhyy.exe               --jobs=$2 --timeout=60 --no-baseline-check --tests=$T               > "/tmp/d2_$1.log" 2>&1
+            echo "  exit=$?"
+            echo "  --- 输出 ---"
+            sed 's/^/    /' "/tmp/d2_$1.log"
+            echo "  --- 结束 ---"
+          }
+          set +e
+          run "jobs1_杀树"    1 ""
+          run "jobs1_不杀树"  1 "JHY_NO_KILL_TREE=1"
+          run "jobs4_不杀树"  4 "JHY_NO_KILL_TREE=1"
 
       - name: "Run regress.py --all (gated: jhyy.exe; jhyy_stage0.exe informational)"
         shell: msys2 {0}
