@@ -7695,6 +7695,33 @@ Mix(Z)=30      期望 30    ✓
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-09-29 (v3.4.2 声称 RESOLVED) → 至今
 
+### 2026-10-17 补充定位:崩溃与递归深度**不成正比**
+
+用 harness(而非 bash —— bash 的退出码在 MSYS2 下会被截断,127 vs 0xC00000FD
+对不上,照 bash 的读数下结论会判错)逐个替换 `recurse(buf, N)` 的 N 实测:
+
+| depth | 1 | 2 | 3 | **4** | **5** | 8 | 16 | 64 |
+|---|---|---|---|---|---|---|---|---|
+| 结果 | PASS | PASS | PASS | **STACK_OVERFLOW** | **STACK_OVERFLOW** | PASS | PASS | PASS |
+
+**64 层正常、4 层栈溢出** —— 所以这不是栈用量问题,是**特定常量取值下被编出了坏代码**。
+(直接证据:去掉 sub-test 6 那一行,程序完整跑完;把 `recurse(buf, 4)` 换成
+`recurse(buf, 8)`,同样完整跑完。)
+
+**跨环境不一致(同一个二进制 sha 4e987dd):** 开发机(MINGW64 shell + ucrt64 gcc)
+稳定 STACK_OVERFLOW 5/5;GitHub Actions windows-latest 上同一二进制**通过**,
+于是 regress 报 `XPASS`(XFAIL 标记已过期)。
+
+这个跨环境差异**尚未 RCA**。不能因此摘掉 XFAIL 标记 —— 标记描述的是开发机上
+**稳定可复现**的事实,而 XPASS 的语义是「标记可能过期了,去看一眼」,它没有说
+「对面环境是对的」。摘掉它等于把一个未解释的现象写成已知结论,门就失去意义。
+下次 CI 报 XPASS 时它会继续提醒,直到这个差异被解释。
+
+**方法论沉淀:** 这类「同一个二进制、两个环境、结论相反」的故障,判据要来自
+**读实际代码**和**按 CI 的真实条件造用例**,不是从「报错在哪」倒推。本轮里
+我两次差点下错结论:①断定 emit_binop 侧也漏了 6 个浮点 op(错,读代码后纠正);
+②用 bash 的退出码判断栈溢出深度(错,bash 会截断 NTSTATUS)。
+
 **触发面:** `compiler/tests/examples/codegen_call_return_types.jhyy` —— 它是
 W-089 的官方 reproducer(文件头第 1 行就写着「v3.4.2 W-089 真修 reproducer test」)。
 
