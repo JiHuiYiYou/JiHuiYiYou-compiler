@@ -165,6 +165,27 @@ $(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(JHY_RUNTIME_O) $
 	    echo "SELFFAIL: 新 jhyy.exe 编 src0 的结果与它自己编的不一致 —— 自举不闭环"; \
 	    echo "          $(BIN_DIR)/_boot_new.s  vs  $(BIN_DIR)/_boot_new2.s"; \
 	    exit 1; }
+	@# v4.0.9 (W-117):产物还必须与**提交进仓的那个**逐字节相同,否则停下。
+	@#
+	@# 为什么必须硬失败而不是打个 warning:上面那条自举闭环检查只证明
+	@# 「这份源码编出来的东西,自己再编一遍还是一样」—— 换成任何一套工具链
+	@# 它都成立。实测 CI 上换成 setup-msys2 装的 UCRT64 gcc,闭环照样 PASS,
+	@# 编出来的 jhyy.exe 却在编译三个小测试时**卡死在自己的 self-backend 里**
+	@# (进程还在跑、`[4] codegen done` 之后零产物),而提交进仓的那份 3/3 全过。
+	@# 也就是说:工具链一换,编译器会**静默地变成另一个**,而既有门照样全绿。
+	@#
+	@# 这里拦的是「换工具链」这件事本身 —— 要换的人会在这里看到明确的失败,
+	@# 而不是几天后从 CI 的玄学超时里反推。
+	@if ! cmp -s $@ $(BIN_DIR)/_boot_new.exe; then \
+	    echo "TOOLCHAIN-DRIFT (W-117): 重新编出的 jhyy.exe 与提交进仓的那份不同。"; \
+	    echo "  本机工具链: $$($(CC) --version 2>/dev/null | head -1)"; \
+	    echo "  已知后果:换 gcc 版本可能改变编译器行为,而自举的 byte-equal"; \
+	    echo "  检查对这种改变是瞎的 —— 它只验自洽,不验与发布产物等价。"; \
+	    echo "  要换:先确认新产物过全量回归,再 git add compiler/build/bin/jhyy.exe。"; \
+	    echo "  不要删掉这条检查或加 --force 来「让它过去」—— 那正是本项目栽过的坑。"; \
+	    echo "  新产物留在 $(BIN_DIR)/_boot_new.exe,可自行比对。"; \
+	    exit 1; \
+	fi
 	@mv -f $(BIN_DIR)/_boot_new.exe $@
 	@rm -f $(BIN_DIR)/_boot_anchor.exe $(BIN_DIR)/_boot_new2.exe \
 	       $(BIN_DIR)/_boot_anchor.il $(BIN_DIR)/_boot_new2.il \
