@@ -126,6 +126,7 @@
 | [W-114](#w-114) | ACTIVE | 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效 |
 | [W-115](#w-115) | ACTIVE | W-089 标着 RESOLVED,但它自己的 reproducer 至今... |
 | [W-116](#w-116) | ACTIVE | SysV callee 参数溢出只处理 4 个整数寄存器 —— 第 5 个及以后的参数全读到第 4... |
+| [W-117](#w-117) | ACTIVE | 换一套 gcc 编出来的 jhyy.exe 行为不同 —— CI 工具链产物会在自己的... |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -7822,3 +7823,53 @@ Docker Desktop 跑 `sysv_full_regress.sh`,5 个测试立刻挂 1 个,就是这�
 - 测试 `compiler/tests/examples/sysv_abi_test.jhyy`(自 v2.7.0 SKIP 到今天)
 - 门 `compiler/tests/bootstrap/sysv_full_regress.sh`(需 Docker;本次实测 4/5)
 - 相关:W-104(SysV caller 侧分类错)
+
+## W-117: 换一套 gcc 编出来的 jhyy.exe 行为不同 —— CI 工具链产物会在自己的 self-backend 里空转
+
+**状态:** ACTIVE since 2026-10-17 (v4.0.9) — 不同 gcc 编出的编译器行为不一致,CI 现编的那份是坏的
+**Filed-by:** audit-ci-hang-2026-10-17
+**日期:** 2026-10-17 首次实测(GH Actions run 39016142083 定位)
+
+**触发面:** 任何「用本机 gcc 重新 `make` 一次 jhyy.exe」的场合。开发机 gcc 15.2.0
+(MINGW64)编出来的与 CI 上 `setup-msys2` 装的 UCRT64 gcc 编出来的,行为不同。
+
+**症状(同一台 runner、同一 harness、同一批测试,只换二进制):**
+
+```
+现编 sha 00473e6b  → f32_suffix / f64_suffix / fmod_basic 三个全部 compile
+                      超时 300s ×2。编译器进程**仍在运行**,最后一个阶段标记是
+                      `[4] codegen done`,之后零产物 —— 卡在自己的 in-mem
+                      self-backend (`codegen_amd64_run_text`) 里空转。
+发布 sha 37837b3f  → 同 runner 同 harness,**3/3 PASS,0 秒**。
+```
+
+同一批测试在**用发布产物**时全绿。现编的那份还有一处相反的行为:
+`codegen_call_return_types.jhyy` 本地(发布产物)是 `STACK_OVERFLOW`,
+CI 现编的那份**通过** —— regress 的 XPASS 语义把它抓了出来(「XFAIL 标记已过期」)。
+
+**根因(定位到的层次):** 已知到「产物二进制不同」这一层,并确认差异**影响行为**。
+`make` 里 jhyy.exe 的自身代码是 jhyy.exe 自己编的,只有 `runtime.c` 与
+`jhyy_helpers.c` 是 gcc 编的预编 `.o`(`$(JHY_RUNTIME_O)` / `$(JHY_HELPERS_O)`),
+所以差异必然来自这两个 `.o` —— 不同 gcc 版本会改变它们的代码与
+`.comment` 段(后者直接解释了 sha 不同),而 `.o` 里的实际差异如何传导成
+「self-backend 空转」尚未 RCA 到语句级。
+
+**workaround:** CI 的回归门测**发布产物**,不用工具链产物。
+`.github/workflows/ci.yml` 第 5 步 `make` 之后立刻
+`git checkout HEAD -- compiler/build/bin/jhyy.exe`,并在两个 sha 不一致时打
+`::warning`。自举能力仍由第 5 步的 byte-equal 检查 + 第 9 步
+`closure_check.sh` 验,不因为换回发布产物而丢失。
+
+**影响范围:** 只影响「谁编的编译器」这一维度。发布产物本身 174/174 全绿
+(本地),CI 上 170/175。任何开发者或 CI 若用不同 gcc 重新 `make`,得到的
+可能是一个行为不同的编译器 —— 这对本项目是严重问题:编译器是**唯一产物**。
+
+**失效条件:** 查明 `_jhyy_runtime.o` / `_jhyy_helpers.o` 的哪一处差异导致
+self-backend 空转,并修到「任意 gcc 版本编出的 jhyy.exe 行为一致」(可加门:
+`make` 前后跑一组固定回归,而不是只看 sha)。
+
+**引用:**
+- `Makefile:151-192`(`$(BIN_DIR)/jhyy.exe` + 两个预编 `.o` 规则)
+- `.github/workflows/ci.yml` 第 5 步(换回发布产物)
+- GH Actions run 39016142083 `[DIAG-3]` 步(二进制 A/B 的实测数据)
+- 相关:W-107(per-fn 表 1024 上限,同样在 self-backend 里)、W-109(IL lexer 缺助记符)

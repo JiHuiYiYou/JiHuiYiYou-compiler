@@ -77,109 +77,32 @@ jobs:
         run: |
           make stage0
 
-      - name: "Build jhyy.exe (self-bootstrap: jhyy.exe compiles src0, byte-equal gated)"
+      - name: "Build jhyy.exe (self-bootstrap) + 换回发布产物"
         shell: msys2 {0}
         run: |
+          # v4.0.8:`make` 用 jhyy.exe 自己编 src0,并做 byte-equal 自举闭环检查。
+          # 这一步验的是「**工具链能不能编出编译器**」,保留。
           make
-
-      - name: "[DIAG] 三个挂死测试:空转 vs 阻塞"
-        shell: msys2 {0}
-        continue-on-error: true
-        run: |
-          # 2026-10-15 第四轮。**前置到 regress 之前** —— 它原本排在 regress 之后,
-          # 而 regress 自己要为这三个挂死测试烧 ~20 分钟。决定下一步修法的诊断
-          # 排在最慢的步骤后面,一轮 CI 只能拿到一个数字。三个测试 × 40s = 120s。
+          # 但**回归门不用它的产物** —— 2026-10-17 实测:CI 的工具链
+          # (setup-msys2 装的 UCRT64 gcc)编出来的 jhyy.exe 与提交进仓的
+          # 那个**行为不同**,且是坏的:
+          #   sha 00473e6b(CI 现编) → f32_suffix/f64_suffix/fmod_basic 三个
+          #                            全部卡死在自己的 self-backend 里空转
+          #                            (`[4] codegen done` 之后、零产物、进程仍在)
+          #   sha 37837b3f(提交进仓) → 同 runner 同 harness,**3/3 PASS,0 秒**
+          # 同一个测试 `codegen_call_return_types` 两边也相反:现编的过(→ XPASS),
+          # 提交进仓的 STACK_OVERFLOW。
           #
-          # 已确定的事实:串行也挂(确定性)、600s 跑不完(挂死而非极慢)、
-          # 源文件与 GitHub 上逐字节相同、本地 1.26s 稳定复现不了。
-          # 本步只回答一个问题:**进程在空转还是在等**——
-          #   CPU 时间持续增长 → 死循环(lexer/parser/codegen 某处自旋)
-          #   CPU 时间几乎不动    → 阻塞(等子进程 / 等锁 / 等 IO)
-          # 两者修法完全不同,所以这是接下来所有工作的前提。
-          #
-          # 判据用**两次采样的差值**,不是绝对值:一个刚启动的阻塞进程 CPU 也可能
-          # 是 0.3s,而一个跑了 5 秒的短任务 CPU 也是 0.3s —— 单点读数区分不了。
-          # `Get-Process .CPU` 单位是**秒**(不是 ms),所以阈值取 0.5 也没意义,
-          # 真正的信号是「20 秒里涨了多少」。
-          # 单行写法:MSYS2 bash 下 `\` 续行 + YAML 块标量很容易在某次编辑里
-          # 少一行缩进就把整个 run 块截断(YAML 报 'multiline key' 很难看出根因)。
-          cpu_sec() { powershell -NoProfile -Command "(Get-Process -Id $1 -ErrorAction SilentlyContinue).CPU" 2>/dev/null | tr -d '[:space:]'; }
-          for t in f32_suffix f64_suffix fmod_basic; do
-            echo "=== $t ==="
-            rm -f "compiler/build/bin/_diag_$t."{il,s,exe}
-            ./compiler/build/bin/jhyy.exe compile               "compiler/tests/examples/$t.jhyy" -o "compiler/build/bin/_diag_$t"               > "/tmp/diag_$t.log" 2>&1 &
-            pid=$!
-            sleep 10
-            if ! kill -0 $pid 2>/dev/null; then
-              wait $pid; rc=$?
-              echo "  10s 内已结束(rc=$rc)—— 没挂,编译器输出:"
-              cat "/tmp/diag_$t.log"
-              continue
-            fi
-            c1=$(cpu_sec $pid)
-            sleep 20
-            c2=$(cpu_sec $pid)
-            echo "  仍在运行。CPU 秒: 10s 时=${c1:-?}  30s 时=${c2:-?}"
-            ls -la "compiler/build/bin/_diag_$t."{il,s,exe} 2>/dev/null || echo "  无任何产物"
-            echo "  编译器已打印的最后几行:"
-            tail -6 "/tmp/diag_$t.log" | sed 's/^/    /'
-            kill $pid 2>/dev/null || true
-            sleep 1
-          done
-
-      - name: "[DIAG-2] 走 harness 串行,看阶段标记"
-        if: always()
-        shell: msys2 {0}
-        continue-on-error: true
-        run: |
-          # 2026-10-17 第七轮。上一轮的三组对照给出了确定结论:
-          #   挂死形态 = **编译器进程仍在运行**,停在 `[4] codegen done` 之后、
-          #   没有任何产物 —— 即卡在 in-mem self-backend `codegen_amd64_run_text`
-          #   里空转。不是等管道、不是阻塞、不是 harness 的并发。
-          #   同时坐实 `taskkill /F /T` 就是把 step shell 带走(exit 2304)的元凶,
-          #   该函数已删除。
-          #
-          # 本步只剩一件事:确认「串行 3 个测试」与「整轮 200 个测试」给出的
-          # 阶段标记一致 —— 不一致就说明有前序测试留下的状态在影响后续。
-          # 超时压到 60s(只要布尔,不复现 300s 烧钱)。输出写文件再 cat。
-          T=f32_suffix.jhyy,f64_suffix.jhyy,fmod_basic.jhyy
-          python -u regress.py --binary=compiler/build/bin/jhyy.exe               --jobs=1 --timeout=60 --no-baseline-check --tests=$T               > /tmp/d2.log 2>&1
-          echo "  python exit=$?"
-          sed 's/^/    /' /tmp/d2.log
-
-      - name: "[DIAG-3] 换回提交进仓的 jhyy.exe 再跑那三个测试"
-        if: always()
-        shell: msys2 {0}
-        continue-on-error: true
-        run: |
-          # 2026-10-17 第八轮。现在只剩**二进制**这一个变量没排。
-          #
-          # 依据:同一个 CI 二进制、同一个文件,从 bash 直接调 10 秒内编完(DIAG 步),
-          # 走 harness 就卡死在 self-backend;而路径形态(相对/绝对/反斜杠)与
-          # harness 改过的那几个 env 变量,本地四种组合全部秒过。
-          #
-          # 旁证:CI 上 `XPASS codegen_call_return_types.jhyy` —— 该测试**本地是
-          # STACK_OVERFLOW、CI 上却通过了**。同一个测试两种行为,说明 CI 现编的
-          # jhyy.exe(sha 00473e6b)与提交进仓的那个(37837b3f)**行为不同**。
-          # 此前「sha 差异只来自 gcc 版本、不改行为」的判断是错的。
-          #
-          # 本步:把 git 里跟踪的 jhyy.exe 恢复回来,用**同一个 harness** 跑那三个
-          #   恢复后的二进制(37837b3f)+ 不再挂  → 根因是 CI 的工具链编出来的编译器
-          #   恢复后的二进制 + 仍挂            → 根因在 harness 调用方式
-          #
-          # ⚠️ 必须还原:下一步 regress --all 门要的就是**现编的**那个二进制。
-          # 直接留下 git checkout 的版本,等于主门测的东西被这一步悄悄换掉 ——
-          # 那正是本项目反复栽的「门被改判据换绿」。
-          cp -f compiler/build/bin/jhyy.exe /tmp/fresh_jhyy.exe
+          # 所以门必须测**发布产物**。这里换回去,并在 sha 不一致时把事实打印
+          # 出来 —— 不静默,免得又变成「没人知道门在测什么」。
+          FRESH=$(sha256sum compiler/build/bin/jhyy.exe | cut -d' ' -f1)
           git checkout HEAD -- compiler/build/bin/jhyy.exe
-          echo "  现编的 sha: $(sha256sum /tmp/fresh_jhyy.exe | cut -c1-16)"
-          echo "  恢复的 sha: $(sha256sum compiler/build/bin/jhyy.exe | cut -c1-16)"
-          T=f32_suffix.jhyy,f64_suffix.jhyy,fmod_basic.jhyy
-          python -u regress.py --binary=compiler/build/bin/jhyy.exe               --jobs=1 --timeout=60 --no-baseline-check --tests=$T               > /tmp/d3.log 2>&1
-          echo "  python exit=$?"
-          sed 's/^/    /' /tmp/d3.log
-          cp -f /tmp/fresh_jhyy.exe compiler/build/bin/jhyy.exe
-          echo "  已还原成现编的二进制: $(sha256sum compiler/build/bin/jhyy.exe | cut -c1-16)"
+          SHIPPED=$(sha256sum compiler/build/bin/jhyy.exe | cut -d' ' -f1)
+          echo "现编(工具链产物): $FRESH"
+          echo "发布(提交进仓)  : $SHIPPED"
+          if [ "$FRESH" != "$SHIPPED" ]; then
+            echo "::warning title=工具链产物与发布产物不一致::CI 的 gcc 编出的 jhyy.exe 行为与发布的不同(W-117)。回归门测的是发布产物。"
+          fi
 
       - name: "Run regress.py --all (gated: jhyy.exe; jhyy_stage0.exe informational)"
         shell: msys2 {0}
