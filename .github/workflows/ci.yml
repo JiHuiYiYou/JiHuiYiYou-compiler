@@ -99,6 +99,10 @@ jobs:
           python regress.py --all
 
       - name: Run regress.py on jhyy_v1.exe.exe (v1 historical baseline, matrix only)
+        # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
+        #   加它是因为 job 原本在第一个失败 step 就中止 —— 一次 CI 周期只能拿到一个
+        #   结论,排查要等好几轮。step 7 仍是唯一的硬门,其余是补充信息。
+        if: always()
         shell: msys2 {0}
         continue-on-error: true
         run: |
@@ -121,6 +125,10 @@ jobs:
           cmp compiler/build/bin/jhyy.exe compiler/build/bin/jhyy_v1.exe.exe             && echo "v1 是 jhyy.exe 的 byte-equal 副本 ✓"             || { echo "FAIL: jhyy_v1.exe.exe 与 jhyy.exe 不一致 —— 副本约定被破坏"; exit 1; }
 
       - name: "[DIAG] 三个可疑测试串行单跑(定位 CI 挂死)"
+        # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
+        #   加它是因为 job 原本在第一个失败 step 就中止 —— 一次 CI 周期只能拿到一个
+        #   结论,排查要等好几轮。step 7 仍是唯一的硬门,其余是补充信息。
+        if: always()
         shell: msys2 {0}
         continue-on-error: true
         run: |
@@ -133,11 +141,19 @@ jobs:
           python regress.py --tests=f32_suffix.jhyy,f64_suffix.jhyy,fmod_basic.jhyy             --jobs=1 --timeout=60
 
       - name: Build Stage 2 closure chain (v1→v2→v3→v4)
+        # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
+        #   加它是因为 job 原本在第一个失败 step 就中止 —— 一次 CI 周期只能拿到一个
+        #   结论,排查要等好几轮。step 7 仍是唯一的硬门,其余是补充信息。
+        if: always()
         shell: msys2 {0}
         run: |
           make selfhost
 
       - name: Stage 2 vs Stage 3 .s byte-equal (closure gate)
+        # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
+        #   加它是因为 job 原本在第一个失败 step 就中止 —— 一次 CI 周期只能拿到一个
+        #   结论,排查要等好几轮。step 7 仍是唯一的硬门,其余是补充信息。
+        if: always()
         shell: msys2 {0}
         run: |
           # 真门是 compiler/tests/bootstrap/closure_check.sh:它比 Stage2 vs Stage3
@@ -151,6 +167,10 @@ jobs:
           bash compiler/tests/bootstrap/closure_check.sh
 
       - name: Assert every test has a real assertion (zero-signal gate)
+        # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
+        #   加它是因为 job 原本在第一个失败 step 就中止 —— 一次 CI 周期只能拿到一个
+        #   结论,排查要等好几轮。step 7 仍是唯一的硬门,其余是补充信息。
+        if: always()
         shell: msys2 {0}
         run: |
           # v4.0.8:每个 .jhyy 都必须有能失败的断言。
@@ -166,6 +186,10 @@ jobs:
           python scripts/dev/audit_test_assertions.py --strict
 
       - name: Artifact-level gates (non-blocking until W-112/113/107/116 are RESOLVED)
+        # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
+        #   加它是因为 job 原本在第一个失败 step 就中止 —— 一次 CI 周期只能拿到一个
+        #   结论,排查要等好几轮。step 7 仍是唯一的硬门,其余是补充信息。
+        if: always()
         shell: msys2 {0}
         continue-on-error: true
         run: |
