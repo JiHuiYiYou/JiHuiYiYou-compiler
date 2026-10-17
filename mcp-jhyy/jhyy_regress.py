@@ -91,12 +91,24 @@ def _kill_tree(proc) -> None:
     那种情况下杀树没有意义(树根已经没了),真正的形态是「编译器没卡,
     卡的是管道」,由调用方如实报告。
     """
+    trace = os.environ.get("JHY_KILL_LOG")
     try:
+        alive = proc.poll() is None
+        # 杀之前把「到底在杀哪个进程」落到独立文件。harness 自己被连坐的时候,
+        # stdout 已经没了,这是唯一还能留下证据的地方。
+        if trace:
+            with open(trace, "a", encoding="utf-8") as fh:
+                fh.write(f"_kill_tree pid={proc.pid} alive={alive}\n")
+                if os.name == "nt":
+                    tl = subprocess.run(
+                        ["tasklist", "/FI", f"PID eq {proc.pid}", "/FO", "CSV", "/NH"],
+                        capture_output=True, text=True, errors="replace", timeout=30)
+                    fh.write(f"  tasklist: {tl.stdout.strip()[:200]}\n")
         if os.environ.get("JHY_NO_KILL_TREE"):
             # 二分用:完全禁用清理,用来判定「消失」到底是不是杀树造成的。
             # 见 .github/workflows/ci.yml 的 [DIAG-2]。
             return
-        if proc.poll() is not None:
+        if not alive:
             return          # 已退出:树根不在,杀不了也不该杀
         if os.name == "nt":
             subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
@@ -104,7 +116,13 @@ def _kill_tree(proc) -> None:
         else:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         proc.kill()
-    except Exception:
+        if trace:
+            with open(trace, "a", encoding="utf-8") as fh:
+                fh.write("  taskkill 已发出\n")
+    except Exception as exc:
+        if trace:
+            with open(trace, "a", encoding="utf-8") as fh:
+                fh.write(f"  异常: {exc!r}\n")
         try:
             proc.kill()
         except Exception:

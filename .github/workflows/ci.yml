@@ -148,18 +148,24 @@ jobs:
           # 完整烧钱过程。输出写文件再无条件 cat —— 进程被杀之后,管道里的缓冲
           # 会一起没,写文件是唯一还能留下证据的办法。
           T=f32_suffix.jhyy,f64_suffix.jhyy,fmod_basic.jhyy
+          rm -f /tmp/d2_*.log /tmp/kill.log
           run() {   # $1=标签 $2=jobs $3=额外环境
             echo "=== $1 ==="
-            env $3 python -u regress.py --binary=compiler/build/bin/jhyy.exe               --jobs=$2 --timeout=60 --no-baseline-check --tests=$T               > "/tmp/d2_$1.log" 2>&1
-            echo "  exit=$?"
+            env JHY_KILL_LOG=/tmp/kill_$1.log $3 python -u regress.py --binary=compiler/build/bin/jhyy.exe               --jobs=$2 --timeout=60 --no-baseline-check --tests=$T               > "/tmp/d2_$1.log" 2>&1
+            echo "  python exit=$?"
             echo "  --- 输出 ---"
             sed 's/^/    /' "/tmp/d2_$1.log"
+            echo "  --- 杀树日志 ---"
+            sed 's/^/    /' "/tmp/kill_$1.log" 2>/dev/null || echo "    (无 —— 一次都没走到清理)"
             echo "  --- 结束 ---"
           }
           set +e
-          run "jobs1_杀树"    1 ""
+          # ⚠️ 顺序是关键:**安全组排前面**。带杀树的那组会把整个 step 的 shell
+          # 一起带走(2026-10-17 实测,连丢三组数据),排后面至少前两组的结论
+          # 还能拿到。
           run "jobs1_不杀树"  1 "JHY_NO_KILL_TREE=1"
           run "jobs4_不杀树"  4 "JHY_NO_KILL_TREE=1"
+          run "jobs1_杀树"    1 ""
 
       - name: "Run regress.py --all (gated: jhyy.exe; jhyy_stage0.exe informational)"
         shell: msys2 {0}
