@@ -2,7 +2,7 @@
 #
 # v1.4.7 单 regress 入口 + matrix 守门 (取代 v1.4.5 三跑 shim):
 #   1. python regress.py --all                            (gated: jhyy.exe;stage0 informational)
-#   2. python regress.py --all --include-informational    (matrix only: jhyy_v1.exe.exe historical)
+#   2. python regress.py --binary=.../jhyy_v1.exe.exe      (matrix only: 只跑那一个 binary)
 #   3. make selfhost                                       (build v2/v3/v4 closure chain)
 #   4. bash compiler/tests/bootstrap/closure_check.sh      (gated: Stage2 == Stage3 .s)
 #   5. python scripts/dev/audit_test_assertions.py --strict (gated: 每个测试都有断言)
@@ -98,7 +98,7 @@ jobs:
           # `python compiler/build/bin/regress.py` failed with FileNotFoundError.
           python regress.py --all
 
-      - name: Run regress.py --all --include-informational (v1 historical baseline, matrix only)
+      - name: Run regress.py on jhyy_v1.exe.exe (v1 historical baseline, matrix only)
         shell: msys2 {0}
         continue-on-error: true
         run: |
@@ -106,9 +106,13 @@ jobs:
           # 不再是 git 里的静态快照。它唯一的作用是给 fixed_point/byte_equal 当
           # 「第 0 代」,使 v1==v2 成为一条真正的**确定性检查**(同一二进制跑
           # 两遍必须产出相同 .il/.s)。
-          # 本 step 跑的是默认 binary(jhyy.exe)带 --include-informational,
-          # 与 v1 无关;保留 informational + continue-on-error 语义不变。
-          python regress.py --all --include-informational
+          #
+          # v4.0.8 修:本 step 原先跑 `regress.py --all --include-informational`
+          # —— 那是把**整个套件再跑一遍**,只为了多验 jhyy_v1.exe(而它就是
+          # jhyy.exe 的副本)。实测一次全量在 CI 上要 ~24 分钟,跑两遍必然撞
+          # 45 分钟的 job 上限,而 job 超时是**最坏的失败形态**:没有产出、
+          # 没有告诉你卡在哪一步。改成只跑那一个 binary。
+          python regress.py --binary=compiler/build/bin/jhyy_v1.exe.exe
 
       - name: Build Stage 2 closure chain (v1→v2→v3→v4)
         shell: msys2 {0}

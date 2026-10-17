@@ -14,7 +14,7 @@ Usage:
   python regress.py --save-baseline            # 存 binary sha256 baseline (转发 jhyy_regress)
   python regress.py --tests=foo,bar            # 跑测试子集
   python regress.py --no-baseline-check        # 跳过 phantom binary (mtime) check
-  python regress.py --timeout=600              # 死循环探测上限(秒),compile+run 各自适用 (default 300)
+  python regress.py --timeout=900              # 死循环探测上限(秒),compile+run 各自适用 (default 900)
 
 Exit codes:
   0  全部 gated binary PASS
@@ -689,8 +689,13 @@ def main():
     ap.add_argument("--jobs", type=int, default=None,
                     help="限制并发 compile 数 (default: 全并行 = min(测试数, CPU 数))。"
                          "只影响吞吐,不影响判定 —— 超时是死循环探测,不是性能预算")
-    ap.add_argument("--timeout", type=int, default=300,
-                    help="Per-test timeout in seconds (default 20).")
+    # 2026-10-15:300 → 900。实测**每个**文件的 compile 都要 ~7s(不是个别文件慢,
+    # 200 个测试在 CI 少核 runner 上单跑就要 24 分钟)。per-test 超时的职责是
+    # 「抓永不返回的死循环」,不是性能预算 —— 拿它当性能线会在满负载时随机误杀
+    # 正常测试。CI 上 f32_suffix / f64_suffix / fmod_basic 三个就是被 300s
+    # 砍掉的(它们并不比其他文件慢,只是排队时排到了最后)。
+    ap.add_argument("--timeout", type=int, default=900,
+                    help="Per-test timeout in seconds (dead-loop ceiling, not a perf budget)")
     ap.add_argument("--no-baseline-check", action="store_true",
                     help="Skip phantom-binary (mtime vs source) check for all runs.")
     ap.add_argument("--byte-equal", action="store_true",
