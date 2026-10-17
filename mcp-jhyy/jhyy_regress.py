@@ -278,19 +278,21 @@ def run_test(
     # 卡住,剩下 170 多个的结果全丢,连「哪些跑过了」都看不到。
     # 编译器挂死/资源争抢是常态(见上面关于并发的注释),不是异常情况,
     # 应该记成该测试 FAIL 并继续跑其余的。
+    first_timeout = None
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                            encoding="utf-8", errors="replace", env=test_env)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         # 2026-10-15:重试一次。单个测试 compile 正常 3 秒,300 秒超时对它是
         # 永远不合理的量级 —— 命中即意味着「进程被抢死」而不是「编译真的慢」。
         # 根因是并发下每个测试展开成 jhyy.exe → gcc → cc1 三层进程,CI runner
         # 核少时被压垮(W-113 记的旁路文件竞态是同一个根的另一面)。
         # 重试是**缓解**不是修复:真修要靠给旁路文件按 pid 隔离 + 限制并发。
+        first_timeout = exc
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                                encoding="utf-8", errors="replace", env=test_env)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc2:
             # 超时时报告「卡在哪一步」—— 光说 timeout 没法行动。
             # .il 出来但没 .s → 卡在 self-backend emit(可能无限循环)
             # .s 出来但没 .exe → 卡在 gcc 链接(可能是 runner 环境,不是编译器)
@@ -298,21 +300,33 @@ def run_test(
             have = [e for e in (".il", ".s", ".exe")
                     if os.path.exists(out_base + e)]
             # 注意:in-mem self-backend 路径**默认不落 .il**(要 JHY_WRITE_IL=1
-            # 才写),所以「没有 .il」不代表没进 emit。第一版把 `.il` 当必经标记,
-            # 于是真到了链接阶段也报「未知」。
+            # 才写),所以「没有 .il」不代表没进 emit;但 **.s 是落的** ——
+            # asm_path 一直传给 codegen_amd64_run_text(实测 `jhyy.exe compile
+            # arith.jhyy` 产出 _probe.s 1272B + _probe.exe)。2026-10-15 我一度
+            # 反过来断言「in-mem 路径不落 .s,无产物是常态」,那是错的:
+            # 不落盘的只有 .il。这里把两个事实都定死,免得再被推翻一次。
             if ".s" in have:
                 stage = ("链接阶段(已产 .s,没有 .exe —— gcc/as 没返回,"
                          "属 runner 环境而非编译器)")
-            elif ".il" in have:
-                stage = "emit 阶段(已产 .il,没有 .s)"
             else:
-                    # ⚠️ 2026-10-15:这个分支**不能**当作「卡在前端」的证据 ——
-                #   codegen_amd64_run_text 里 0 处文件写操作,in-mem 路径不写 .s,
-                #   所以「无产物」是常态。已用 [DIAG] 步独立定位。
-                stage = "未知(in-mem 路径默认不落 .s,「无产物」是常态而非信号)"
+                stage = "emit 之前(无 .s —— lexer/parser/sema 或 emit 之中)"
+            # 带上编译器自己的阶段标记 —— 它每阶段打一行
+            # ([1] imports start / [3] sema start / [4] post-sema /
+            #  [4a] ir_init done / [4b] cg_module done / [4] codegen done),
+            # **它停在哪个标记之后就是精确的阶段**,与产物判定互补。
+            marks = []
+            for e in (first_timeout, exc2):
+                text = (getattr(e, "stdout", "") or "") + \
+                       (getattr(e, "stderr", "") or "")
+                if isinstance(text, bytes):
+                    text = text.decode("utf-8", "replace")
+                marks += [ln.strip() for ln in text.splitlines()
+                          if ln.strip().startswith("[")]
+            marks = list(dict.fromkeys(marks))
+            tail = " → ".join(marks[-3:]) if marks else "(无阶段标记)"
             return (False, expected, -4,
-                    f"compile timeout ({timeout}s,重试后仍超时);卡在 {stage};"
-                    f"已有产物={have or '无'}")
+                    f"compile timeout ({timeout}s,重试后仍超时);卡在{stage};"
+                    f"产物={have or '无'};最后阶段标记: {tail}")
         except Exception as exc:
             return (False, expected, -5, f"compile retry failed: {exc!r}")
     if r.returncode != 0:
