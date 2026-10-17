@@ -226,13 +226,31 @@ def classify(path: Path) -> dict:
     if is_skip:
         info["class"] = "skipped"
     elif is_xfail:
-        # XFAIL = 声明为「预期失败」的测试(对应 bug 未修)。断言强度规则
-        # **不适用**于它 —— 它本来就该失败,「主程序写死常量」正是它该有的样子。
+        # XFAIL = 声明为「预期失败」的测试(对应 bug 未修)。「主程序写死常量」
+        # 这类断言强度规则**不适用**于它 —— 它本来就该失败。
         #
         # 那 XFAIL 标记怎么保证不撒谎?靠运行时的 **XPASS**:一旦这个测试转绿,
         # regress 会记 XPASS 并让 suite 失败(意味着 bug 修好了却忘了摘标记)。
-        # 所以这里不必再判违规 —— 那正是 XPASS 的职责。
-        info["class"] = "xfail"
+        #
+        # ⚠️ 但 XPASS 只有在「这个测试真能失败」时才携带信息。
+        # harness 对**无 EXPECT** 的测试是「只要不是 NTSTATUS 崩溃就算 PASS」
+        # (jhyy_regress.py run_test 的 `if expected is None` 分支)—— 这种测试
+        # 无论 bug 在不在都算过,XPASS 恒定触发,安全网是空的。
+        #
+        # 实测踩到过:codegen_call_return_types.jhyy 有 XFAIL 但**没有 EXPECT**,
+        # 于是本地 STACK_OVERFLOW → XFAIL(对),CI 上不崩 → XPASS(假绿),
+        # 而 audit --strict 也没报它 —— XFAIL 豁免把它藏住了。
+        #
+        # 所以:XFAIL 豁免的是「断言强度」,不是「有没有断言」。完全没有断言
+        # 指令的 XFAIL 测试必须判违规。
+        if not (expect or has_err or has_out):
+            info["class"] = "zero-signal-xfail"
+            info["violation"] = (
+                "XFAIL 测试没有任何断言(无 EXPECT / EXPECT-ERROR / EXPECT-OUT)。"
+                "无 EXPECT 时 harness 只要不崩就算 PASS,XPASS 恒定触发,"
+                "XFAIL 的安全网是空的。")
+        else:
+            info["class"] = "xfail"
     elif has_out:
         info["class"] = "out-asserted"
     elif expect and not all_literal:
@@ -278,7 +296,8 @@ def main() -> int:
         buckets.setdefault(r["class"], []).append(r)
 
     real = len(buckets.get("real", [])) + len(buckets.get("out-asserted", []))
-    violations = buckets.get("crash-only", []) + buckets.get("literal-return", [])
+    violations = (buckets.get("crash-only", []) + buckets.get("literal-return", [])
+                  + buckets.get("zero-signal-xfail", []))
     runnable = len([r for r in results if r["has_main"] and r["class"] != "skipped"])
 
     if args.json:
@@ -293,7 +312,7 @@ def main() -> int:
         print(f"扫描 {len(results)} 个 .jhyy, 可跑 {runnable} 个")
         print(f"  真断言(real + out-asserted): {real}")
         for k in ("literal-return", "crash-only", "literal-return-ok",
-                  "expect-error", "xfail", "skipped", "library"):
+                  "expect-error", "xfail", "zero-signal-xfail", "skipped", "library"):
             if k in buckets:
                 print(f"  {k:24s} {len(buckets[k]):3d}")
         print(f"\n零信号违规合计: {len(violations)}")
@@ -305,6 +324,12 @@ def main() -> int:
             for r in buckets.get("literal-return", []):
                 print(f"    {r['file']}  (return {'/'.join(r['return_codes'])}, "
                       f"EXPECT={r['expect']})")
+            zs = buckets.get("zero-signal-xfail", [])
+            if zs:
+                print("\n--- zero-signal-xfail(XFAIL 但没有任何断言)---")
+                for r in zs:
+                    print(f"    {r['file']}")
+                    print(f"      {r.get('violation', '')}")
 
     if args.baseline:
         bp = Path(args.baseline)

@@ -1,3 +1,4 @@
+// EXPECT: 0
 // codegen_call_return_types.jhyy — v3.4.2 W-089 真修 reproducer test.
 //
 // 8 sub-tests 验证 emit_call semantic lookup (SymbolReturnTypeMap +
@@ -21,6 +22,12 @@
 //   8. Builtin ptr_add / ptr_add_u8 / malloc (cg_is_builtin_ptr_fn fallback)
 //
 // main_jhyy runs all 8 sub-tests, returns 0 iff all PASS, else non-zero error code.
+// 2026-10-17:本测试此前**没有 EXPECT 标注** —— harness 对无 EXPECT 的测试只要
+// 不是 NTSTATUS 崩溃就算 PASS,所以它实际上只断言了「程序没崩」。于是开发机
+// STACK_OVERFLOW → XFAIL(对),GitHub Actions 上不崩 → XPASS(假绿)。
+// `audit --strict` 也没报它零信号 —— **XFAIL 标记把断言检查豁免掉了**,这正是
+// 本次审计要消灭的那类测试躲藏的地方。补上 EXPECT: 0 才是真断言。
+//
 // XFAIL: W-089 标着 RESOLVED(2026-09-29 v3.4.2),但**本 reproducer 至今
 //       STACK_OVERFLOW**(0xC00000FD)。两者矛盾,成因待 RCA —— 可能 W-089
 //       没真修,也可能是这个 8-subtest 覆盖面更广、撞到另一个 bug。

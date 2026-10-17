@@ -10,4 +10,7 @@ fn main_jhyy() -> i32 {
     let x: &&i32 = 0 as &&i32;
     return 0 as i32;
 }
-//EXPECT-ERROR: chained `&&T` not allowed
+// EXPECT-ERROR: "chained `&&T` not allowed"
+// ⚠️ 此前写成反引号(`&&T` not allowed)而 harness / audit 的正则都要求**双引号**
+//    ("([^"]+)"),于是这条指令**从未被识别** —— 测试只验了「编译失败」,
+//    错误消息从来没被校验过。补上引号后它才真的是一条断言。
