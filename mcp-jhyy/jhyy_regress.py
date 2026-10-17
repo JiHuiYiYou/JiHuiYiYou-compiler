@@ -111,6 +111,42 @@ def _kill_tree(pid: int) -> None:
         pass
 
 
+def _run_capture(cmd, timeout: int, env: dict) -> tuple:
+    """跑 cmd 并抓取输出,超时则**杀整棵进程树**。
+
+    不用 `subprocess.run` 的两个原因(都踩过):
+
+    1. 它超时只 TerminateProcess 直接子进程,jhyy.exe `system()` 拉起的
+       gcc → cc1/as 留在后台满核跑。
+    2. 它**不把 Popen 对象交出来**,而 `TimeoutExpired` 上只有
+       cmd/timeout/output/stderr,**没有 `.pid`** —— 事后想补杀后代都做不到。
+       (2026-10-17 加 `_kill_tree(exc.pid)` 时踩到:AttributeError 直接打死
+       整个 regress。)
+
+    返回 `(returncode, stdout_str, stderr_str)`。stdout/stderr **统一解码成
+    str**:调用点不必再猜类型 —— 原先 `run(text=True)` 正常返回给 str、超时时
+    给 bytes,两处都得判类型,漏一处就是 TypeError。
+
+    超时时抛 `TimeoutExpired`,其 output/stderr 已是 str,进程树已清理。
+    """
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            stdin=subprocess.DEVNULL, env=env)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        _kill_tree(proc.pid)
+        try:
+            out, err = proc.communicate(timeout=30)
+        except Exception:
+            out, err = exc.output, exc.stderr
+        dec = lambda b: (b or b"").decode("utf-8", "replace") \
+            if isinstance(b, bytes) else (b or "")
+        raise subprocess.TimeoutExpired(cmd, timeout,
+                                        output=dec(out), stderr=dec(err))
+    dec = lambda b: b.decode("utf-8", "replace") if b else ""
+    return proc.returncode, dec(out), dec(err)
+
+
 def _sha256_file(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -314,19 +350,9 @@ def run_test(
     # 应该记成该测试 FAIL 并继续跑其余的。
     first_timeout = None
     try:
-        # stdin=DEVNULL:非交互式调用编译器,不该继承 harness 的 stdin。
-        # jhyy.exe 用 system() 拉 gcc,整条链都会继承这个 stdin。GitHub Actions
-        # 给每个 step 的 stdin 是**一根永远不送数据、也永远不关闭**的管道 ——
-        # 链上任何一环(常见是 cmd.exe /c)去读它就永久阻塞,表现出来就是
-        # 「compile 挂到超时」。本地下 Bash 工具跑的 stdin 是关闭的,所以复现不了。
-        # 运行阶段本来就有这一行(注释写着「MCP server 无有效 stdin → 子进程阻塞」),
-        # 编译阶段漏了 —— 两处本该一致。
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                           stdin=subprocess.DEVNULL,
-                           encoding="utf-8", errors="replace", env=test_env)
+        # stdin=DEVNULL + 杀进程树 + 统一 str 解码,都在 _run_capture 里。
+        rc, stdout_compile, stderr_compile = _run_capture(cmd, timeout, test_env)
     except subprocess.TimeoutExpired as exc:
-        # 杀掉 jhyy.exe 拉起的 gcc/cc1 —— 见 _kill_tree 的 docstring。
-        _kill_tree(exc.pid)
         # 2026-10-15:重试一次。单个测试 compile 正常 3 秒,300 秒超时对它是
         # 永远不合理的量级 —— 命中即意味着「进程被抢死」而不是「编译真的慢」。
         # 根因是并发下每个测试展开成 jhyy.exe → gcc → cc1 三层进程,CI runner
@@ -334,13 +360,8 @@ def run_test(
         # 重试是**缓解**不是修复:真修要靠给旁路文件按 pid 隔离 + 限制并发。
         first_timeout = exc
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                               stdin=subprocess.DEVNULL,
-                               encoding="utf-8", errors="replace", env=test_env)
+            rc, stdout_compile, stderr_compile = _run_capture(cmd, timeout, test_env)
         except subprocess.TimeoutExpired as exc2:
-            # 同上:重试也超时就再清一次树(重试是**新**的进程,有自己的 gcc)。
-            _kill_tree(exc2.pid)
-            # 超时时报告「卡在哪一步」—— 光说 timeout 没法行动。
             # .il 出来但没 .s → 卡在 self-backend emit(可能无限循环)
             # .s 出来但没 .exe → 卡在 gcc 链接(可能是 runner 环境,不是编译器)
             # 什么都没有 → 卡在 parse/sema(逐 token 慢,或扫描/杀软拖慢 IO)
@@ -361,12 +382,10 @@ def run_test(
             # ([1] imports start / [3] sema start / [4] post-sema /
             #  [4a] ir_init done / [4b] cg_module done / [4] codegen done),
             # **它停在哪个标记之后就是精确的阶段**,与产物判定互补。
+            # output/stderr 在 _run_capture 里已统一解码成 str,这里直接拼。
             marks = []
             for e in (first_timeout, exc2):
-                text = (getattr(e, "stdout", "") or "") + \
-                       (getattr(e, "stderr", "") or "")
-                if isinstance(text, bytes):
-                    text = text.decode("utf-8", "replace")
+                text = (e.output or "") + (e.stderr or "")
                 marks += [ln.strip() for ln in text.splitlines()
                           if ln.strip().startswith("[")]
             marks = list(dict.fromkeys(marks))
@@ -376,31 +395,26 @@ def run_test(
                     f"产物={have or '无'};最后阶段标记: {tail}")
         except Exception as exc:
             return (False, expected, -5, f"compile retry failed: {exc!r}")
-    if r.returncode != 0:
+    if rc != 0:
         # v1.7.0 Stage 1: EXPECT-ERROR test 期望 compile fail.
         # kw check 用 full stderr (compile 启动 log 可能 200+ 字符);
         # display msg 仍 truncate 200 字符 for human readability.
         if expect_error_kw is not None:
-            if expect_error_kw in r.stderr:
+            if expect_error_kw in stderr_compile:
                 return (True, None, -1, f"compile-failed (expected, kw={expect_error_kw!r})")
             return (False, None, -1,
                     f"compile failed but kw not found: expected={expect_error_kw!r}, "
-                    f"got stderr[:200]={r.stderr[:200]!r}")
-        return (False, expected, -1, f"compile failed: {r.stderr[:200]}")
+                    f"got stderr[:200]={stderr_compile[:200]!r}")
+        return (False, expected, -1, f"compile failed: {stderr_compile[:200]}")
     exe = os.path.abspath(out_base + ".exe")
     if not os.path.exists(exe):
         return (False, expected, -2, "exe not created")
 
     # Run
     try:
-        r2 = subprocess.run([exe], capture_output=True, text=True, timeout=timeout,
-                            stdin=subprocess.DEVNULL,  # ⚠️ MCP server 无有效 stdin → 子进程阻塞
-                            encoding="utf-8", errors="replace", env=test_env)
-        actual = r2.returncode
-        stdout_text = r2.stdout or ""
-        output = stdout_text + (r2.stderr or "")
-    except subprocess.TimeoutExpired as exc:
-        _kill_tree(exc.pid)
+        actual, stdout_text, stderr_run = _run_capture([exe], timeout, test_env)
+        output = stdout_text + stderr_run
+    except subprocess.TimeoutExpired:
         return (False, expected, -3, f"timeout ({timeout}s)")
 
     # EXPECT-OUT check — runs regardless of whether EXPECT is present, so a

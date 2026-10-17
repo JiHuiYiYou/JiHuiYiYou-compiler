@@ -93,14 +93,45 @@
 ### D. 测试基础设施缺口
 
 1. **并发 flake(未修,会影响每次 ship 判断)**
-   五次全量跑里三次干净、两次出现 compile 300s 超时,**每次受害者都不同**
-   (`return_type` / `sizeof_basic` / `ptr_arith_subscript`),单跑全部 PASS。
-   单次 compile 正常 3.5s,300s 不是「慢」是「卡住」。
-   最可能根因:后端旁路文件是**硬编码固定路径**
-   (`compiler/build/obj/_inline_asm.buf` / `_section_directive.buf`),
-   并发编译互相覆盖/删除(W-113 已记录同一根)。
-   **治根** = 旁路文件按 pid 隔离(要动编译器源码);
-   **过渡** = harness 对 timeout 重试一次(3 行,掩盖根因)。
+
+   **2026-10-17 复盘 —— 受害者不是随机的,是固定的三个,而且与代码内容无关。**
+   早先「每次受害者都不同」的观察只说明*谁先撞上*在变;真正稳定的性质是:
+   `f32_suffix` / `f64_suffix` / `fmod_basic` **恒定**在 CI 上 compile 超时,
+   单跑全过,本地恒过。已排除的解释(都实测过,不是靠推理排除的):
+
+   | 假设 | 排除方式 |
+   |---|---|
+   | CRLF(`core.autocrlf` 差异) | `.gitattributes` 有 `*.jhyy text eol=lf`,CI 上也是 LF;本地三个文件 CR 数 = 0 |
+   | 内容分组(浮点 / `as i32` / 类型标注) | `float_test` / `float_arith` / `fmod_f32` / `fmod_negative` 形态完全相同却全部通过;字母序上三个受害者还**不相邻**(中间隔着 7 个通过的 float 测试) |
+   | 编译器二进制不同(CI 现编 vs 提交进仓的) | 本地 `touch src0/main.jhyy && make` 重建出**逐字节相同**的 `37837b3f`;CI 报的 `00473e6b` 差异可由 CI 的 gcc 版本解释(`.comment` 段记版本号),不改变行为 |
+   | 编译器本身挂 | CI 上 `[DIAG]` 步**直接命令行调用**,整步耗时 30 秒 = 3 × 10s sleep,即三个测试**全部 10 秒内编译完成** |
+
+   所以挂的是 **harness**,不是编译器、不是输入。
+
+   **已确认的机制(代码级,非推测):**
+
+   a) **编译阶段没关 stdin。** 运行阶段有 `stdin=subprocess.DEVNULL`(注释:
+      「MCP server 无有效 stdin → 子进程阻塞」),编译阶段漏了。jhyy.exe 用
+      `system()` 拉 gcc,整条链继承 harness 的 stdin,而 GitHub Actions 给每个
+      step 的 stdin 是**一根永远不送数据、也永远不关闭**的管道。链上任何一环
+      (常见 `cmd.exe /c`)去读它就永久阻塞。本地 stdin 已关闭,复现不了。
+      → 已修(`a25d03c`)
+
+   b) **超时只杀直接子进程。** `subprocess.run(timeout=)` 到点只
+      TerminateProcess jhyy.exe,它 `system()` 拉起的 gcc → cc1/as 留下继续满核跑。
+      runner 只有 2 核,几个孤儿就占死;后续测试越跑越慢、超时越来越多 ——
+      故障因此表现得**与内容无关**,实际是前一次超时的残骸在拖垮后面所有测试。
+      → 已修(`a25d03c`,`_kill_tree`)
+
+   c) **旁路文件确实是固定路径且无条件读。** `codegen.jhyy:4463` 每次编译都用
+      `"wb"` 打开 `_section_directive.buf`;`main.jhyy:1154/1179/854` 在**任何**
+      编译结束时都无条件读它、拼进自己的 `.s`、然后 unlink。「文件里只有我自己
+      写的内容」这个不变量在并发下直接不成立。**治根 = 旁路文件按 pid 隔离。**
+
+      ⚠️ 但 2026-10-17 复现**失败**:9 个用 asm/naked 的测试交错 4 轮并发
+      (36 次编译)逐个与串行基线比对,**0 处差异**;旁路文件也被正常 unlink、
+      没有累积。所以 c 是**机制成立但未观测到发作**的隐患,不能算本次 CI 挂死的
+      已确认根因 —— 记在这里是为了别把它当成已经排除。
 
 2. **freestanding / UEFI 路径没有任何可跑测试**
    `hello-freestanding/` 三个文件全是 library(无 `main_jhyy`)。
@@ -109,6 +140,11 @@
 3. **一批负向行为从未观测过**,「越界会怎样 / 除零会怎样」目前无记录:
    数组下标越界、字符串越界、`i32::MIN / -1`、除零、深递归(现最深 30,
    而 W-116 那条实测能到 1998 —— 说明现在的递归测试根本没探到边界)。
+
+4. **CI 上 regress 全程无实时进度。** Python 在非 TTY 下块缓冲,整轮 20 分钟的
+   `[progress]` 心跳全部在退出时一次性刷出,时间戳全落在同一秒 —— 拿不到执行
+   时序,也就看不出「谁和谁同时在跑」。诊断依赖时序时这是硬障碍。
+   → `python -u regress.py` 或在 harness 里对 progress 用 `flush=True`。
 
 ### E. 门的接线缺口(测试存在但 CI 跑不到)
 
