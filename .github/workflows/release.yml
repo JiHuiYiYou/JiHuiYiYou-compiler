@@ -201,6 +201,10 @@ jobs:
           # 里 `$?` 拿到的是 `tail` 的退出码,永远是 0 —— 无论 jhyy.exe 编译
           # 成功还是崩。要拿编译器自己的退出码,必须绕开管道。
           echo "=== Sanity: compile arith.jhyy directly ==="
+          # tmp/ 在本 job 里没人创建过(ci.yml 的 build-and-test 里有 SysV emit
+          # 步会建它,这里没有)—— 第一次 dry-run 就死在这行:
+          #   tmp/sanity.log: No such file or directory
+          mkdir -p tmp
           compiler/build/bin/jhyy.exe compile compiler/tests/examples/arith.jhyy \
               -o tmp/sanity_arith.exe >tmp/sanity.log 2>&1
           rc=$?
