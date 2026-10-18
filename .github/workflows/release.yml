@@ -350,9 +350,23 @@ jobs:
           Write-Host "DRY RUN — nothing uploaded, no Release created"
           Write-Host "VERSION=$($env:VERSION) DISPLAY=$($env:JHY_VERSION_DISPLAY) TAG=$($env:JHY_TAG_NAME) IS_RC=$($env:JHY_IS_RC)"
           Write-Host "Built artifacts:"
-          foreach ($f in Get-ChildItem installer/build-artifacts/*.{exe,msi,vsix} | Where-Object { $_.Name -match $env:JHY_VERSION_DISPLAY }) {
-            Write-Host "  $($f.Name) ($($f.Length) bytes)"
+          # 2026-10-18 修:`*.{exe,msi,vsix}` 是 **bash 的 brace expansion**,
+          # PowerShell 会把它当成参数列表 → ParserError: Missing argument in
+          # parameter list。这个 step 此前**从来没跑过**(布尔判断 bug),所以这个
+          # 解析错误也一直藏着。一道从没执行过的检查不是检查。
+          # PowerShell 里按扩展名过滤要用 -in / -Include,不能靠 glob。
+          $arts = Get-ChildItem installer/build-artifacts -File |
+                  Where-Object { $_.Extension -in '.exe', '.msi', '.vsix' } |
+                  Where-Object { $_.Name -match [regex]::Escape($env:JHY_VERSION_DISPLAY) }
+          if (-not $arts) {
+            Write-Host "  ❌ 没有任何产物匹配 DISPLAY=$($env:JHY_VERSION_DISPLAY)"
+            Write-Host "     build-artifacts 实际内容:"
+            Get-ChildItem installer/build-artifacts -File | ForEach-Object { Write-Host "       $($_.Name)" }
+            exit 1
+          }
+          foreach ($f in $arts) {
+            Write-Host "  ✅ $($f.Name) ($($f.Length) bytes)"
           }
           Write-Host "SHA256 (for this VERSION):"
-          Get-Content installer/SHA256.txt | Where-Object { $_ -match $env:JHY_VERSION_DISPLAY }
+          Get-Content installer/SHA256.txt | Where-Object { $_ -match [regex]::Escape($env:JHY_VERSION_DISPLAY) }
           Write-Host "============================================="
