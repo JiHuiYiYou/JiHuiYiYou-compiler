@@ -188,6 +188,46 @@ def _check_baseline_freshness(binary: str, src_dir: str = "compiler/src") -> Tup
     ))
 
 
+def artifact_slug(jhyy_file: str) -> str:
+    """测试路径 → 唯一的 artifact 名(无扩展名)。
+
+    2026-10-18:原来这里只用 `basename`,于是
+    `compiler/tests/examples/multi_file/main.jhyy` 与
+    `compiler/tests/examples/namespace/main.jhyy` **都**映射到
+    `compiler/build/bin/_regress_main.{il,s,exe}`。
+
+    两者自 2026-10-15 改用 rglob 后就进了同一个并发 suite(`:592`),于是
+    互相删对方的 .il/.s/.exe、互相覆盖 `-o` 输出、`:407` 甚至可能执行
+    **另一个测试**编出来的 .exe。两个测试的期望还不同(EXIT=60 vs EXIT=0)。
+
+    实际后果: `multi_file/main.jhyy` 偶发 FAIL 而单跑必绿 —— 2026-10-17
+    实测同一个 binary sha `4e987dd9`,CI 176/176 绿、本地全量 175/176 红,
+    红的就是它。当时按 flake 记下了,根因是这个命名冲突。
+
+    现在路径分隔符统一替换成 `__`,路径越深名字越唯一。
+
+    **入参形态不统一,必须在这里归一化。** 两个调用点传的东西不一样:
+      - `run_test` 收绝对路径(`:665` 的 `str(TEST_DIR / f)`)
+      - cleanup / failed_names 用相对路径(`files` 元素,如 `multi_file/main.jhyy`)
+    所以先转成「相对 TEST_DIR」再拼名,否则两边算出两个名字,artifact 永久堆积。
+
+    **建名(run_test)与清名(cleanup)必须都走这个函数** —— 只改一处同样会堆积。
+    """
+    p = Path(jhyy_file)
+    if not p.is_absolute():
+        # `files` 元素是「相对 TEST_DIR」的(`multi_file/main.jhyy`)。
+        # 不先挂上 TEST_DIR,resolve() 会拿 CWD 去解释,必然 relative_to 失败
+        # → 退到 basename → 冲突原样回来。
+        p = TEST_DIR / p
+    try:
+        rel = p.resolve().relative_to(TEST_DIR)
+    except ValueError:
+        # 真的不在 TEST_DIR 下(`--tests=` 传了外部绝对路径)→ 退到 basename。
+        # 这类文件不在 files 里,只可能从 --tests= 进来。
+        rel = Path(p.name)
+    return str(rel.with_suffix("")).replace(os.sep, "__")
+
+
 def run_test(
     jhyy_file: str,
     binary: str,
@@ -195,7 +235,7 @@ def run_test(
     extra_inputs: Optional[List[str]] = None,
 ) -> Tuple[bool, Optional[int], int, str]:
     """Compile + run 单个 .jhyy 文件, 返回 (passed, expected, actual, message)."""
-    name = os.path.splitext(os.path.basename(jhyy_file))[0]
+    name = artifact_slug(jhyy_file)
     out_base = str(JHYY_ROOT / "compiler/build/bin" / f"_regress_{name}")
 
     # Sprint 4.4 C: stale .exe hardening — 避免 stale cache 掩盖 cleanup crash
@@ -709,10 +749,17 @@ def run_all(
     # Sprint mcp-2: cleanup _regress_* artifacts for tests that didn't fail.
     # Pass → clean dir after run; Fail → keep .il/.s/.exe for inspection
     # (per feedback_il_s_debugging_pattern: .il 比 gdb 无符号更有效).
-    failed_names = {os.path.splitext(ft["file"])[0] for ft in failed_tests}
+    #
+    # 2026-10-18: 走 artifact_slug(),与 run_test() 的建名保持一致。
+    # 原来这里用 splitext(fname)[0] 而 run_test 用 splitext(basename(...))[0],
+    # 两边算法不同:子目录测试(multi_file/main.jhyy)在这里被算成
+    # 「_regress_multi_file/main.il」—— 一个 run_test 从不产生的路径,
+    # 于是清理永远不触发。工作树里实测躺着 _regress_main.exe /
+    # _regress_arena_test.s 就是这么来的。
+    failed_names = {artifact_slug(ft["file"]) for ft in failed_tests}
     cleaned = 0
     for fname in files:
-        name = os.path.splitext(fname)[0]
+        name = artifact_slug(fname)
         if name not in failed_names:
             for ext in (".il", ".s", ".exe"):
                 p = str(JHYY_ROOT / "compiler/build/bin" / f"_regress_{name}{ext}")
