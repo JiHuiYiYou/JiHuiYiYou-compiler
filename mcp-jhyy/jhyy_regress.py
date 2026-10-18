@@ -757,6 +757,9 @@ def run_all(
     # 「X/Y 全绿」这句话从此不需要额外解释了。
     noassert_tests, vacuous_tests = [], []
     xfail_tests, xpass_tests = [], []
+    # FLAKY:首次失败、隔离重跑通过。它**不是**通过(结果不可信),也不是失败
+    # (重跑确实过了)—— 单列一类,汇总行点名。
+    flaky_tests = []
 
     # jobs=None → 原行为(全并行);传 N 则限制并发。self-hosted 二进制
     # (jhyy_v2.exe)比 stage0 产物重 3-16x,185 路全并行时单个 compile 会
@@ -831,23 +834,62 @@ def run_all(
                 passed += 1
                 passed_tests.append(fname)
         else:
-            # Sprint v1.5.5: print full stderr so CI logs include QBE/gcc link
-            # errors (always after "[4] codegen done", past 80 chars).
+            # ── FLAKY 检测(2026-10-18)────────────────────────────────────
+            # 单测失败 → **隔离重跑一次**;过了就是 FLAKY,不算 suite 失败。
+            #
+            # 为什么要有:2026-10-18 反复观测到「全量里随机某个测试红、单跑必绿」。
+            # 排除过的嫌疑(全否):产物名冲突(已修)、codegen 并发不确定(70 次并发
+            # 编译 .s 逐字节相同)、栈帧算小(1004 函数零越界)、
+            # `_section_directive.buf` 竞争(探针未观测到发作)、编译器临时文件
+            # 重名(名字含 PID)。
+            #
+            # 没有这个机制时,每次偶发都要靠人回忆「上次是不是它」——而那正是
+            # [[feedback_regress_flaky_rerun]] 说的:单次 FAIL 不能直接改代码,
+            # 但也不能当没发生。
+            #
+            # ⚠️ 代价要说清楚:FLAKY **不阻断**。一个长期偶发的测试会一直绿,
+            # 而它的间歇性可能正是真 bug(间歇性错代码比确定性错更危险)。
+            # 对冲办法是它每次都**打印出来**并进汇总行与返回值 —— 它会出现在
+            # 每一轮 CI 日志里,不是只出现一次。
+            _retry_ok, _retry_exp, _retry_act, _retry_msg = run_test(
+                str(TEST_DIR / fname), binary, timeout)
+            if _retry_ok and not (_retry_msg or "").startswith("skipped"):
+                print(f"FLAKY {fname:<27}  首次 FAIL(expected={exp} got={act}),"
+                      f"隔离重跑 PASS(EXIT={_retry_act})  ← 间歇性问题,未阻断")
+                flaky_tests.append({
+                    "file": fname,
+                    "first_failure": msg,
+                    "first_expected": exp,
+                    "first_actual": act,
+                    "retry_actual": _retry_act,
+                })
+                # 不进 failed —— 但也不进 passed:它是「结果不可信」,不是「通过」。
+                # 汇总里单列一类,理由见下。
+                continue
             print(f"FAIL  {fname:<30}  expected={exp} got={act}  {msg}")
+            if not _retry_ok:
+                print(f"      └─ 隔离重跑仍失败: expected={_retry_exp} got={_retry_act}  {_retry_msg}")
             failed += 1
             failed_tests.append({
                 "file": fname,
                 "expected": exp,
                 "actual": act,
                 "message": msg,
+                "retry_message": _retry_msg if not _retry_ok else None,
             })
 
     duration = time.time() - start
+    _flaky_note = f", {len(flaky_tests)} FLAKY(未计 passed)" if flaky_tests else ""
     print(f"\n===== {passed}/{passed + failed} passed (全部有断言), {failed} failed, "
-          f"{skipped} skipped (of {len(files)} total) =====")
+          f"{skipped} skipped{_flaky_note} (of {len(files)} total) =====")
     print(f"  ├─ NOASSERT {len(noassert_tests)}  无断言,只验了「进程没崩」")
     print(f"  ├─ VACUOUS  {len(vacuous_tests)}  有 EXPECT 但断言在数学上不可能失败")
     print(f"  ├─ XFAIL    {len(xfail_tests)}  预期内失败(已知 bug,真跑了)")
+    if flaky_tests:
+        print(f"  ├─ FLAKY    {len(flaky_tests)}  ⚠️ 全量里红、隔离重跑绿 —— 间歇性问题,未阻断")
+        for f in flaky_tests:
+            print(f"  │            {f['file']}: 首次 {f['first_failure']}"
+                  f" → 重跑 EXIT={f['retry_actual']}")
     if xpass_tests:
         print(f"  ├─ XPASS    {len(xpass_tests)}  ⚠️ XFAIL 标记已过期 —— 对应 bug 修好了但没摘标记")
     if noassert_tests or vacuous_tests:
@@ -896,6 +938,7 @@ def run_all(
         "vacuous_tests": vacuous_tests,
         "xfail_tests": xfail_tests,
         "xpass_tests": xpass_tests,
+        "flaky_tests": flaky_tests,
         "duration_sec": round(duration, 2),
         "baseline_warning": baseline_warning,
         "early_abort": None,
