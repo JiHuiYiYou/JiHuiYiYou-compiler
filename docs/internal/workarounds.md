@@ -7795,6 +7795,28 @@ whitelist)」—— 而**验证它的那个 reproducer 自己就崩**。也就�
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-10-15 首次实测(v2.7.0 起的已知缺口,一直无门可验)
 
+**2026-10-18:门建起来了,而且第一次跑就确认了这条。** CI 新增 `sysv` job
+(windows 侧编 `--target=amd64_sysv_freestanding --no-link` 出 `.s` → ubuntu
+侧链 `runtime/linux_elf/crt0.S` + `link.ld` 成 ELF → 跑 → 比 `// EXPECT:`),
+首次运行结果:
+
+```
+⚠️  KNOWN-FAIL sysv_abi_test  EXIT=22 期望 28 [W-116]
+✅  sysv_struct_mixed / struct_pass / struct_ret / vararg_basic  全部匹配
+```
+
+`sysv_abi_test` 期望 28 = 1+2+3+4+5+6+7,实得 22 —— 与本条描述吻合:callee 侧
+只 spill 4 个整数寄存器,参数 5/6/7(`%r8d` / `%r9d` / 栈)从未被读。
+
+⚠️ **这个 22-vs-28 台账里早就写着**(`sysv_full_regress.sh` 的注释:「W-116 的
+`sysv_abi_test` 退出 22 / 期望 28 就这样被放过」),之所以一直隐形,是因为当时
+cross-env 那条路径拿不到期望值,只要 ELF 跑起来就报 PASS。**这是「ACTIVE 条目
+没有门等于没登记」的第一个实证** —— 也是本次 CI 重构最直接的收益。
+
+登记在 `compiler/tests/bootstrap/sysv_link_run.sh` 的 `KNOWN_FAIL` 里,格式
+`<test>|<W-NNN>|<实际退出值>`(带签名而不只带 W 号,避免已登记的测试换了失败
+方式时被当成「已知」吞掉)。**本条转 RESOLVED 时删掉那一行,门自动升级成真门。**
+
 **触发面:** `amd64_sysv` / `amd64_sysv_freestanding` 目标下,**整数参数超过 4 个**
 的任何函数调用。
 
