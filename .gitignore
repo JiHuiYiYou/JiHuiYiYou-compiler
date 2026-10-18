@@ -3,8 +3,17 @@ compiler/build/*
 !compiler/build/ovmf/.gitignore          # v2.3.0 OVMF firmware dir carveout (inner .gitignore ignores *.fd)
 compiler/build/bin/*
 !compiler/build/bin/.gitkeep
-!compiler/build/bin/regress.py
-!compiler/build/bin/jhyy.exe.sha256
+# 2026-10-18 删掉两条失效 carveout:
+#   !compiler/build/bin/regress.py      —— regress.py 在 v4.0.0-rc1 已移到仓根,bin 下
+#                                         从来没有过这个跟踪文件(grep + git ls-files 核实)
+#   !compiler/build/bin/jhyy.exe.sha256 —— 对应文件已删。而且它就算在也是死的:
+#                                         jhyy_regress.py:154 用 `bin_path + ".sha256"`
+#                                         拼出路径读它,但 :574 的
+#                                         `baseline_match = None  # 不再判定 match`
+#                                         让读出来的值从未参与任何判定。
+# bin/ 下现存的跟踪文件只有两个,都是「有角色」的:
+#   jhyy.exe         gen-0 bootstrap 种子(自举链起点)
+#   jhyy_stage0.exe  C 端 bootstrap
 _*.txt
 !compiler/src0/bootstrap/v1.0/_W002_rename_map.txt
 _*.py
