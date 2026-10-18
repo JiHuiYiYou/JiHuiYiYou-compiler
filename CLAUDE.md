@@ -138,7 +138,6 @@
 | W-105 | `compiler/src0/sema.jhyy:2558-2560` | `check_borrow` 恒 `return 1`,`:2677` 每个函数声明都调 → `&mut` 独占性完全不检查 |
 | W-111 | 泛型 enum 的 sema 错误恢复路径 | 泛型 enum 一旦被 match → 报完 `unknown enum type` 后 **SEGV**(编译器崩溃) |
 | W-110 | 自举后端 temp 槽位(根因待 RCA) | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 |
-| W-109 | `compiler/src0/codegen_amd64_lexer.jhyy:1628-1647` | 自举 IL lexer 缺 6 个浮点比较助记符 → f32 比较按 f64 算,`f64 ==/!=` 硬失败 |
 | W-103 | `compiler/src0/std/os.jhyy:69-144` | `std_os_open/close/read/write` 全是 M0 mock,`std_os_exit` 不退出进程 |
 | W-104 | `compiler/src0/abi_amd64_sysv.jhyy:229` | SysV 参数分类调用 **Win** 分类器(`abi_sysv_classify_arg` 在同文件 `:79` 但没接线) |
 | W-107 | `compiler/src0/codegen_amd64_state.jhyy:511-537` | 五个 per-fn 表硬编码 1024,实测已用 991 → 余量 33 个函数 |
@@ -149,6 +148,15 @@
 | W-115 | `codegen_call_return_types.jhyy` | W-089 标 ✅ RESOLVED,但它自己的 reproducer 仍 STACK_OVERFLOW |
 | W-116 | SysV callee 参数溢出 | 只处理 4 个整数寄存器,`%r8d`/`%r9d`/栈参数从未被读 |
 | W-105.1 | `compiler/src0/sema.jhyy:2578-2579` | `check_cap_pass` 同款 stub,当前无调用点 |
+| W-118 | `compiler/src0/lexer.jhyy:212-258` | 语言 lexer `lex_peek_char` 无 EOF 守卫 → 越过 end 前进(W-117 的同族另一处,尚未观测到危害) |
+
+2026-10-18 调整(**W-109 移出、W-118 移入,总数仍 14**):W-109(IL lexer 缺浮点比较
+助记符)已于 2026-10-17 真修(`codegen_amd64_lexer.jhyy:1588` 的 `c*` gate 漏第二字符
+`l`),台账状态 RESOLVED,但本表此前仍列着它 —— 这是既有陈旧,不是本次引入。
+W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_char` 同样无守卫,
+但 `lex_next_char` 读到非 0 垃圾会照常推进,所以是越界前进而不是空转)。
+**计数以 `docs/internal/workarounds.md` 的脚本生成索引表为准**,不要数正文状态行
+——104 个条目里只有 35 行是可解析的 `**状态:**` 格式(W-108 同源问题)。
 
 排序、修法、验收 gate 见 [`active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md)。
 
