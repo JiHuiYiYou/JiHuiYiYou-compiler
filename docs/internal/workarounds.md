@@ -7020,6 +7020,57 @@ SysV 则走 rax/rdx)。分类错了,caller 与 callee 对同一参数的寄存�
 abi_win_classify_arg (Phase 1 mirror placeholder)`。这是纯粹的未完成接线,
 不是设计决策。
 
+### 2026-10-18 精确定位:不是「分类器接错」,是**struct 参数整体退化成按指针传**
+
+台账原文写「SysV 参数分类调用 Win 分类器,正确的 `abi_sysv_classify_arg` 在同
+文件 `:79` 但没接线」。**这个描述不准确 —— 问题比它大。**
+
+实测 `--target=amd64_sysv_freestanding`,`Mixed = { i_field: i32, d_field: f64 }`:
+
+```
+export function w $process(l %m) {     ← 参数被声明成一个 64 位值
+    %t1 =l copy %m                     ← 直接当地址用
+    %t2 =l add %t1, 8
+    %t3 =d loadd %t2                   ← 从 m+8 读 f64
+    %t4 =w loadw %t1
+}
+```
+调用侧:
+```
+movq -208(%rbp), %rdi                  ← 只传一个指针
+call process
+```
+
+真实 SysV 要求 `{i32, f64}` = **INTEGER(rdi) + SSE(xmm0)** 两个寄存器按值传。
+这里整个 struct 被塞进**一个整数槽位**,caller 与 callee 都按**指针约定**处理。
+
+`abi_win_classify_arg(struct) → QBE_L()` 是这个降级的直接产物。
+
+### ⚠️ 关键推论:**任何纯 jhyy 测试都抓不到它**
+
+因为 caller 与 callee 用的是**同一套约定**,彼此自洽。现有的
+`sysv_struct_mixed.jhyy` 就是证据 —— 它 PASS,但:
+
+```jhyy
+fn process(m: Mixed) -> i32 {
+    let _ = m.d_field;      // 读了一下就丢
+    m.i_field + 1           // 结果只依赖 i_field
+}
+```
+`d_field` 确实从 `m+8` 读了(在指针约定下**这是对的**),但值**不参与结果**。
+所以即使让它参与计算,**这个测试仍然会通过** —— 它压根没验那件事。
+
+> 这是本项目**第三个**同款「测试名字覆盖了功能、测试内容没有」
+> (`float_cmp.jhyy`、`generics_enum.jhyy` 之前都是)。
+
+**能抓到它的只有一种测试:与真正的 SysV 实现对拍。** 例如让 jhyy 函数调用一个
+手写汇编 / gcc 编译的 SysV 函数,用 struct 参数 —— 对方的 callee 会按 SysV
+从 rdi+xmm0 读,拿到的是指针,立刻错开。
+
+**影响:** jhyy 编译的 SysV 目标代码**无法与 gcc 编译的 SysV 代码在跨 struct
+边界的函数调用上互操作**。jhyy↔jhyy 之间不受影响。
+
+
 **workaround:** 无。默认编译目标是 `amd64_win`,SysV 路径平时不走,
 所以这个错误平时观察不到。
 
@@ -7905,6 +7956,40 @@ Docker Desktop 跑 `sysv_full_regress.sh`,5 个测试立刻挂 1 个,就是这�
 **关联 W-104(不同代码路径,别一起「修」):** W-104 是 **caller 侧**的参数分类
 借用了 Win 分类器;本条是 **callee 侧**的参数溢出只做 4 个寄存器。症状都表现为
 「SysV 多参数传错」,但修的位置不同。两条都要修。
+
+### 2026-10-18 精确定位:callee 把参数 5/6/7 全读成 `%ecx`
+
+实测(`--target=amd64_sysv_freestanding --no-link` 看 `.s`):
+
+**调用侧是对的** —— arg1-6 正确进 rdi/rsi/rdx/rcx/r8/r9,arg7 落栈:
+```
+movl 0(%rbp),  %edi      arg1
+movl -8(%rbp), %esi      arg2
+movl -16(%rbp),%edx      arg3
+movl -24(%rbp),%ecx      arg4
+movl -32(%rbp),%r8d      arg5   ✓
+movl -40(%rbp),%r9d      arg6   ✓
+movl -48(%rbp),%r10d → 0(%rsp)  arg7  (r10 是多余的中转,最终落栈正确)
+```
+
+**callee 侧错了** —— arg5/6/7 全部读 `%ecx`(= arg4 的寄存器):
+```
+movl %edi, -8(%rbp)      arg1 ✓
+movl %esi, -16(%rbp)     arg2 ✓
+movl %edx, -24(%rbp)     arg3 ✓
+movl %ecx, -32(%rbp)     arg4 ✓
+movl %ecx, -40(%rbp)     arg5 ✗ 应为 %r8d
+movl %ecx, -48(%rbp)     arg6 ✗ 应为 %r9d
+movl %ecx, -56(%rbp)     arg7 ✗ 应为 16(%rbp)(栈)
+```
+
+于是 `seven_arg_fn(1,2,3,4,5,6,7)` 算成 **1+2+3+4+4+4+4 = 22** ——
+与 `sysv_abi_test` 实测的 `EXIT=22` **精确吻合**,根因坐实。
+
+调用侧那张表(`codegen_amd64_emit_call.jhyy:577-601` `reg_rax_for_qt_idx`)SysV 分支
+idx 0..5 是对的,但 **idx ≥ 6 落到函数末尾的 `return "ecx"`** —— 这本身是 arg7 的
+独立缺口(该走栈)。**callee 侧用的是另一张表,本次未定位到。**
+
 
 **workaround:** 无。写不出可靠的用户侧绕法 —— 「函数别超过 4 个参数」在 SysV
 目标上是硬约束,而 SysV 约定本身允许 6 个整数寄存器 + 栈。
