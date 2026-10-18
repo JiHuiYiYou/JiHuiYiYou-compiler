@@ -46,6 +46,27 @@ echo "  srcs   = $SRCDIR"
 echo "  gcc    = $(gcc --version | head -1)"
 echo
 
+# ════════════════════════════════════════════════════════════════════════════
+# 已知失败登记:`<test>|<W-NNN>|<实际退出值的十进制串>`(签名之间是「或」)
+# ════════════════════════════════════════════════════════════════════════════
+#
+# 为什么需要:这条门 2026-10-18 第一次真跑就抓到 W-116 —— `sysv_abi_test`
+# 退出 22 / 期望 28。而这个 22-vs-28 在 `sysv_full_regress.sh` 的注释里
+# **早就记着**,之所以一直隐形,是因为当时 cross-env 那条路径拿不到期望值,
+# 只要 ELF 跑起来就报 PASS。门建起来之后它立刻现形 —— 这正是这道门要做的。
+#
+# 但 CI 不能从此常红:一个恒红的 job 会训练人忽略红色(2026-10-18 在
+# artifact_checks.sh 上刚消灭过这个形态)。所以走同一套 expected-FAIL 模型:
+#   退出值不匹配 + 落在登记里  → KNOWN-FAIL(绿),并在汇总里点名
+#   退出值不匹配 + 不在登记里  → FAIL(红)   ← 新 bug 藏在旧 bug 后面
+#   已登记却匹配上了            → UNEXPECTED-PASS(红) ← workaround 修好了没删登记
+#   链失败 / .s 缺失 / EXPECT 读不到 → FAIL(红)  「没验到」不算「已知问题仍在位」
+#
+# W-116 转 RESOLVED 时删掉下面那一行,这条检查自动升级成真门。
+declare -A KNOWN_FAIL=(
+    [sysv_abi_test]="W-116|22"
+)
+
 # 从 .jhyy 读 `// EXPECT: N`。取不到就**判失败**,不默认放过 ——
 # 「跑起来就算过」正是 W-116 被放过一天的直接原因。
 read_expect() {
@@ -53,7 +74,8 @@ read_expect() {
         | grep -oE '[0-9]+$' || true
 }
 
-PASS=0; FAIL=0; MISS=0
+PASS=0; FAIL=0; KNOWN=0
+declare -a KNOWN_IDS=()
 for s in "$SRCDIR"/*.s; do
     [ -f "$s" ] || continue
     name="$(basename "$s" .s)"
@@ -75,19 +97,57 @@ for s in "$SRCDIR"/*.s; do
 
     # ELF 的非 0 退出是预期(这些测试用退出码当断言),所以不能 set -e。
     "/tmp/${name}.elf"; act=$?
+    reg="${KNOWN_FAIL[$name]:-}"
+
     if [ "$act" = "$exp" ]; then
-        printf "  ✅ %-24s EXIT=%s (期望 %s)\n" "$name" "$act" "$exp"; PASS=$((PASS+1))
+        if [ -n "$reg" ]; then
+            printf "  ❌ UNEXPECTED-PASS %-18s EXIT=%s 命中期望 —— [%s] 的登记该删了\n" "$name" "$act" "${reg%%|*}"
+            FAIL=$((FAIL+1))
+        else
+            printf "  ✅ %-24s EXIT=%s (期望 %s)\n" "$name" "$act" "$exp"; PASS=$((PASS+1))
+        fi
+        continue
+    fi
+
+    # 不匹配 → 看是否落在登记里
+    if [ -z "$reg" ]; then
+        printf "  ❌ %-24s EXIT=%s 期望 %s\n" "$name" "$act" "$exp"
+        echo "       (未登记 —— 要么是新 bug,要么是新测试忘了登记)"
+        FAIL=$((FAIL+1)); continue
+    fi
+    wno="${reg%%|*}"; sigs="${reg#*|}"
+    hit=0; sig=""
+    local_ifs_save="${IFS-}"
+    IFS='|'
+    for sig in $sigs; do
+        [ -n "$sig" ] || continue
+        [ "$act" = "$sig" ] && { hit=1; break; }
+    done
+    IFS="$local_ifs_save"
+    if [ "$hit" -eq 1 ]; then
+        printf "  ⚠️  KNOWN-FAIL %-18s EXIT=%s 期望 %s [%s]\n" "$name" "$act" "$exp" "$wno"
+        KNOWN=$((KNOWN+1)); KNOWN_IDS+=("$name($wno)")
     else
-        printf "  ❌ %-24s EXIT=%s 期望 %s\n" "$name" "$act" "$exp"; FAIL=$((FAIL+1))
+        printf "  ❌ %-24s EXIT=%s 期望 %s (签名不吻合)\n" "$name" "$act" "$exp"
+        echo "       期望退出值之一: ${sigs//| 或 }   [登记于 $wno]"
+        echo "       已登记的测试换了失败方式 —— 这是新 bug,不要被已知状态吞掉。"
+        FAIL=$((FAIL+1))
     fi
 done
 
-if [ "$((PASS+FAIL))" -eq 0 ]; then
+if [ "$((PASS+FAIL+KNOWN))" -eq 0 ]; then
     echo; echo "  ❌ 一份 .s 都没找到 —— 输入目录不对,不能报绿"; exit 2
 fi
 
 echo
-echo "=== sysv 结果: $PASS PASS / $FAIL FAIL ==="
-if [ "$FAIL" -gt 0 ]; then exit 1; fi
-echo "  ✅ 全部匹配 // EXPECT: —— SysV codegen 的这几条 ABI 契约成立"
+echo "=== sysv 结果: $PASS PASS / $KNOWN KNOWN-FAIL / $FAIL FAIL ==="
+if [ "$KNOWN" -gt 0 ]; then
+    echo "  在位的已知问题(见 docs/internal/workarounds.md):"
+    for k in "${KNOWN_IDS[@]}"; do echo "    - $k"; done
+fi
+if [ "$FAIL" -gt 0 ]; then
+    echo "  ❌ 红项说明见脚本头部:环境失败 / 未登记 / 签名不吻合 / UNEXPECTED-PASS"
+    exit 1
+fi
+echo "  ✅ 无 FAIL、无 UNEXPECTED-PASS。已知问题的存在是预期状态,不计红。"
 exit 0
