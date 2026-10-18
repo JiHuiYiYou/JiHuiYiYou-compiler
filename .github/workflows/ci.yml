@@ -145,6 +145,89 @@ jobs:
           echo "本 job 编译出的 jhyy.exe: $(sha256sum compiler/build/bin/jhyy.exe | cut -d' ' -f1)"
           echo "后续所有门(regress / closure / artifact_checks)都测这一个二进制。"
 
+      - name: 提交产物与当前源码同步(artifact-fresh)
+        # ══════════════════════════════════════════════════════════════
+        # 这道门守的是「**fresh clone 拿到的那份二进制**」——
+        # `compiler/build/bin/jhyy.exe` 是 git 跟踪的 bootstrap 种子,
+        # 绝大多数人 clone 下来拿到的就是它。
+        #
+        # 为什么需要:2026-10-18 第 3 期把 build 步里的
+        # `git checkout HEAD -- compiler/build/bin/jhyy.exe` 删掉了 ——
+        # 那一步有两个功能,第一个(让 regress 测陈旧产物)是缺陷,有意删;
+        # 第二个(**让提交产物被读到**)是副作用,我没意识到就一起删了,
+        # 随后又把提到它的那条 warning 也删了。于是这个问题从「答了一半」
+        # 变成「完全没人答」:
+        #
+        #     改了 src0 但忘了重新提交 jhyy.exe → CI 全绿
+        #     而 fresh clone 拿到的正是没更新的那份
+        #
+        # 比什么:比 **`.s`,不比 `.exe`**。`.s` 是 (源码 × 编译器) 的函数,
+        # 与 host gcc 版本无关;`.exe` 是 (源码 × 工具链版本) 的函数,跨
+        # toolchain 比必假阳性 —— W-117 那条 TOOLCHAIN-DRIFT 就是拿 `.exe`
+        # 跨 toolchain 比出来的噪音。
+        #
+        # ⚠️ **这道门看不见什么(实测,别夸大它)**:
+        # 它比的是「提交产物对当前源码的**行为**」,不是「提交产物的字节」。
+        # 因此**任何 codegen 中性的源码改动它都看不见** —— 实测:
+        #   W-117 修复前后那两个编译器编同一份 src0,产出逐字节相同
+        #   (都是 dd3cc455)—— 因为那个修复(加 EOF 守卫)本身输出中性。
+        # 行为相同意味着在链路上它们可互换,所以门判「绿」是对的;
+        # 但新 clone 拿到的编译器确实比源码**旧**,带着那个已被修掉的隐患。
+        # 对这一类,下面那条 git 层的 annotation 会点出来。
+        shell: msys2 {0}
+        run: |
+          set -e
+          AF=tmp/artifact_fresh
+          rm -rf "$AF"; mkdir -p "$AF"
+          BIN=compiler/build/bin/jhyy.exe
+          SRC=compiler/src0/main.jhyy
+
+          # 提交进仓那份(不是 make 刚编出来的)
+          if ! git show "HEAD:$BIN" > "$AF/committed.exe" 2>/dev/null; then
+            echo "::error::仓里没有 $BIN —— bootstrap 种子没了,fresh clone 无法自举"; exit 1
+          fi
+          chmod +x "$AF/committed.exe"
+          echo "提交版 sha: $(sha256sum "$AF/committed.exe" | cut -c1-16)"
+          echo "现编版 sha: $(sha256sum "$BIN" | cut -c1-16)"
+
+          # 两者各自编 src0,比 .s。`! -s` 守卫是 W-086 那一类:编译器静默
+          # exit 0 但不产 .s,那时 cmp 会因为文件缺失而给出误导性的「不同」。
+          for who in committed fresh; do
+            exe="$AF/committed.exe"; [ "$who" = fresh ] && exe="$BIN"
+            if ! timeout 300 "$exe" compile "$SRC" --no-link -o "$AF/$who" > "$AF/$who.log" 2>&1; then
+              echo "::error::$who 版编译器编 src0 失败(见 $AF/$who.log)"; tail -5 "$AF/$who.log"; exit 1
+            fi
+            if [ ! -s "$AF/$who.s" ]; then
+              echo "::error::$who 版没产出 .s —— 门无法判定"; exit 1
+            fi
+            echo "  $who.s $(wc -c < "$AF/$who.s") B  sha $(sha256sum "$AF/$who.s" | cut -c1-16)"
+          done
+
+          if cmp -s "$AF/committed.s" "$AF/fresh.s"; then
+            echo "  ✅ 提交产物对当前源码的行为与现编产物一致 —— fresh clone 的自举链是完整的"
+          else
+            echo "::error::提交产物与当前源码不同步 —— fresh clone 拿到的是落后的编译器"
+            echo "::error::修法:make(同机同 toolchain 逐字节可复现)然后 git add $BIN"
+            echo "--- 首个差异 ---"
+            diff "$AF/committed.s" "$AF/fresh.s" | head -20 | sed 's/^/    /'
+            exit 1
+          fi
+
+          # 这道门看不见的那一类:codegen 中性的 src0 改动。用 git 层的信息点出来,
+          # **不阻断** —— 它只是一个「你可能忘了」提示,而唯一能确定判定的信号
+          # (二进制 sha)在跨 toolchain 时是假阳性,不能拿来当门。
+          #
+          # 先确认 HEAD~1 存在:仓库的第一个 commit 没有父,`git diff HEAD~1 HEAD`
+          # 会报错而非返回 0,不先判一下会在那种情况下误报。
+          if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            if ! git diff --quiet HEAD~1 HEAD -- compiler/src0/ \
+               && git diff --quiet HEAD~1 HEAD -- "$BIN"; then
+              echo "::warning title=src0 变了但二进制没跟着提交::本次 commit 改了 compiler/src0/ 却没改 $BIN。"
+              echo "::warning::本门比的是行为;codegen 中性的改动(例如加一个边界守卫)它看不见 ——"
+              echo "::warning::那种情况下新 clone 会拿到一个落后于源码的编译器。确认是否需要重新 make 并提交。"
+            fi
+          fi
+
       - name: "Run regress.py --all (gated: jhyy.exe; jhyy_stage0.exe informational)"
         shell: msys2 {0}
         run: |
