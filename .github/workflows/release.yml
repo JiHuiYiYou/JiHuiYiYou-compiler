@@ -335,9 +335,23 @@ jobs:
         # 整条 `!inputs.dry_run || ...` 退化成只看 dry_run。
         # 手动路径的 dry_run 默认已改成 true,所以手动跑默认**不会**发版 ——
         # 要发必须显式 dry_run=false,那是有意的:门没跑过的东西不该被发出去。
-        # workflow_call 那条路(ci.yml 的 release job)不看 dry_run,永远发 ——
-        # 因为它已经过了 build-and-test 的门。
-        if: ${{ github.event_name == 'workflow_call' || inputs.dry_run == 'false' }}
+        # ⚠️ 2026-10-18 第二次修正:**不能用 `github.event_name` 判定「是不是被
+        # workflow_call 调进来的」** —— 被调用的 workflow 里 `github.event_name`
+        # 是**调用方的** event(这里是 `push`)。run 39102630449 实测:构建、
+        # MSI 验证全 success,唯独这一步 skipped,run 整体却是绿的,GitHub Release
+        # 根本没被创建 —— **一道跳过自己的门比没有门更隐蔽**,因为 run 是 ✓。
+        #
+        # 改成用「只在 workflow_call 下才存在的 input」来判定:`tag` 只在
+        # `on: workflow_call` 里声明,workflow_dispatch 路径没有它。
+        # 这比 `github.event_name` 可靠 —— 后者的值取决于调用方从哪来。
+        #
+        # 顺带:`inputs.dry_run` 是 boolean,不能拿 'false' 字符串比(同上)。
+        #
+        # 三条路径逐一核对:
+        #   workflow_call                    → tag != ''            → 发
+        #   workflow_dispatch dry_run=true   → tag == '' 且 true     → 不发
+        #   workflow_dispatch dry_run=false  → tag == '' 且 == false → 发
+        if: ${{ inputs.tag != '' || inputs.dry_run == false }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.JHY_TAG_NAME }}
