@@ -7233,6 +7233,56 @@ touch(或者换了触发条件),这里不会报错,只会静默变成无效代�
 **根因:** v1.x sprint 3 定位到的 amd64_win stack-spill 问题,当时的修法是在
 调用点人为制造一个后端「看得见」的 arena 操作。
 
+### 2026-10-18 判定实验:这个 workaround **是承重的,不能删**
+
+`active-workaround-clearance.md` 定的判定实验是「删掉那三行跑三道门:绿 = 已是冗余
+可直接删;红 = 栈 spill 根因仍在」。**实跑结果:红。**
+
+删除的三行(`symtab.jhyy:260-264`,一个建了 StringBuilder 用 arena 初始化、
+然后立刻丢弃的死存储):
+
+```jhyy
+// WORKAROUND: amd64_win stack-spill — touching arena forces
+// codegen to materialize stack frame in safe way (see sprint-3-commit-5-sema-attempt.md).
+let mut _wb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
+sb_init(t.arena as *Arena, &_wb);
+```
+
+**对照实验(同一台机器、同一个 toolchain、只换这一个变量):**
+
+| 构建 | 全量回归结果 |
+|---|---|
+| **基线**(保留 workaround) | **3/3 全绿**(176/176,0 failed) |
+| 删掉 workaround | **3 次里失败 2 次** |
+
+失败形态(**两个不同的测试,且各自单跑都绿**):
+
+```
+第 1 次  FAIL  cap_table_basic.jhyy   expected=42 got=-1  compile failed
+第 2 次  FAIL  float_cmp.jhyy  expected=111137 got=0  EXPECT-OUT not found, stdout=''
+```
+
+两次单跑 `cap_table_basic` 均 PASS(3/3),全量里才红;`float_cmp` 同理。
+
+### 这说明什么
+
+1. **不是「冗余代码,可删」** —— 它掩盖的是一个**真实的 codegen 栈溢出缺陷**。
+   删掉它不是「少一层无用代码」,是**间歇性错代码**:同样的输入,全量并发下可能
+   编译失败、可能静默算错(`float_cmp` 是 stdout 为空 + 退出码不对,典型的
+   被编坏的程序)。
+
+2. **症状是「与内容无关的随机失败」** —— 这正是台账里 D 组描述的那一类 flake。
+   两个完全不同的测试在两次运行里先后中招,且都单跑必绿。
+
+3. **workaround 的注释其实早就说对了** —— "touching arena forces codegen to
+   materialize stack frame in safe way"。它是用**死存储**逼 codegen 走安全路径。
+   真正的修法在 codegen(栈帧物化),不在这里。
+
+⚠️ 因此 W-106 的性质应从「冗余代码,后端依赖」更正为:**「掩盖 codegen 栈溢出
+缺陷的死存储补丁;删除会导致间歇性错代码」**。它的修法与 W-096 / W-097 同族
+(frame blow-up / 栈溢出),**不属于「收尾时删掉」那一类**。
+
+
 **workaround:** 就是这段代码本身。
 
 **影响范围:** `symtab_lookup_one` 全路径 —— 编译器的每一次符号查找。

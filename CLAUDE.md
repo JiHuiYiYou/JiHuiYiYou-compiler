@@ -150,7 +150,7 @@
 | W-103 | `compiler/src0/std/os.jhyy:69-144` | `std_os_open/close/read/write` 全是 M0 mock,`std_os_exit` 不退出进程 |
 | W-104 | `compiler/src0/abi_amd64_sysv.jhyy:229` | SysV 参数分类调用 **Win** 分类器(`abi_sysv_classify_arg` 在同文件 `:79` 但没接线) |
 | W-107 | `compiler/src0/codegen_amd64_state.jhyy:511-537` | 五个 per-fn 表硬编码 1024,实测已用 991 → 余量 33 个函数 |
-| W-106 | `compiler/src0/symtab.jhyy:261-264` | arena-touch 强制后端物化栈帧(源码字面 `// WORKAROUND:`) |
+| W-106 | `compiler/src0/symtab.jhyy:260-264` | 死存储强制后端物化栈帧。**2026-10-18 实测:承重,删不得** —— 删掉后全量回归 3 次失败 2 次(间歇性错代码,单跑必绿) |
 | W-112 | `compiler/src0/codegen.jhyy:4478` | `#[link_section]` 是 no-op,生成的 .s 里没有任何 `.section` |
 | W-113 | `asm!` / `fence_*` emit 路径 | 字节被 emit 到 `ret` 之后,永不执行;ship gate 零敏感 |
 | W-114 | enum match codegen | **全 unit-variant 的 enum `match` 永远命中第一支** |
