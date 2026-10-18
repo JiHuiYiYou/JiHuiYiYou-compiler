@@ -103,6 +103,16 @@ jobs:
           # v4.0.8:`make` 用 jhyy.exe 自己编 src0,并做 byte-equal 自举闭环检查。
           # 这一步验的是「**工具链能不能编出编译器**」,保留。
           make STRICT_TOOLCHAIN=0
+          # ══════════════════════════════════════════════════════════════
+          # W-117 RCA (2026-10-18, 诊断分支,合并前删掉):
+          #
+          # 此刻 compiler/build/bin/jhyy.exe **就是 gen1** —— Makefile 的
+          # `mv -f $(BIN_DIR)/_boot_new.exe $@` 刚把它移到位,而它自己的清理
+          # 规则只删 _boot_anchor.exe / _boot_new2.*,**不删 _boot_new.exe**
+          # (那个已经被 mv 走了)。下一行 `git checkout HEAD --` 就会把它覆盖成
+          # gen0。所以必须在这里抢救,晚了就没了。
+          cp -f compiler/build/bin/jhyy.exe compiler/build/bin/_gen1.exe
+          echo "gen1 已抢救:_gen1.exe sha $(sha256sum compiler/build/bin/_gen1.exe | cut -c1-16)"
           # 但**回归门不用它的产物** —— 2026-10-17 实测:CI 的工具链
           # (setup-msys2 装的 UCRT64 gcc)编出来的 jhyy.exe 与提交进仓的
           # 那个**行为不同**,且是坏的:
@@ -123,6 +133,67 @@ jobs:
           if [ "$FRESH" != "$SHIPPED" ]; then
             echo "::warning title=工具链产物与发布产物不一致::CI 的 gcc 编出的 jhyy.exe 行为与发布的不同(W-117)。回归门测的是发布产物。"
           fi
+
+      - name: "W-117 RCA: gen0 vs gen1 的 .s 比对 + 挂死点 backtrace"
+        # 2026-10-18 诊断 step(continue-on-error,合并前删掉)。
+        # 本地已经把 axis 0/1/2/3 扫空了(12 个 -O* 决策、两个 .o 分别替换、
+        # lld 链接器全部 clean),且本机只有一套 gcc 15.2.0 —— 剩下的嫌疑必须
+        # 在 CI 的 gcc 16.2.0 上验。
+        #
+        # 要回答两个问题:
+        #   Q1  gen0 与 gen1 编译 src0 产出的 `.s` 是否相同?
+        #       ⚠️ 注意比的是 **gen0 的输出 vs gen1 的输出**。
+        #       Makefile 里 `_boot_anchor.s`(gen0 出)与 `_boot_new.s`(仍是 gen0 出)
+        #       是恒等比较 —— `_boot_new.s` 是 `_boot_anchor.exe` 编译出来的。
+        #       真正有信息量的是 _gen0.exe 编出来的 vs _gen1.exe 编出来的。
+        #   Q2  gen1 挂死时,gdb 栈顶是谁?
+        #       jhyy.exe 是 -g0 编的(无行号),但符号还在(形如
+        #       codegen_amd64_lexer__lex_peek_byte),bt 的叶子帧足以点名循环。
+        #       `timeout -s INT` 让 gdb 自己接住信号并打印栈 —— 一条命令,
+        #       不用找 PID、不用 attach 授权(那个在 CI 上是额外的失败源)。
+        if: always()
+        shell: msys2 {0}
+        continue-on-error: true
+        run: |
+          set -x
+          gcc --version | head -1; as --version | head -1; ld --version | head -1
+          mkdir -p tmp/rca
+          G0=compiler/build/bin/jhyy.exe          # 已被换回 gen0
+          G1=compiler/build/bin/_gen1.exe
+          ls -la "$G0" "$G1" || exit 0
+
+          # ---- Q1: 两代编译器编 src0 的 .s 是否相同 ----
+          "$G0" compile compiler/src0/main.jhyy --no-link -o tmp/rca/gen0_main || true
+          "$G1" compile compiler/src0/main.jhyy --no-link -o tmp/rca/gen1_main || true
+          if [ -s tmp/rca/gen0_main.s ] && [ -s tmp/rca/gen1_main.s ]; then
+            echo "gen0.s sha: $(sha256sum tmp/rca/gen0_main.s | cut -c1-16)"
+            echo "gen1.s sha: $(sha256sum tmp/rca/gen1_main.s | cut -c1-16)"
+            cmp -s tmp/rca/gen0_main.s tmp/rca/gen1_main.s \
+              && echo "Q1 ANSWER: .s IDENTICAL —— emit 层无差异,分歧只在 .o / as / ld" \
+              || { echo "Q1 ANSWER: .s DIFFER —— emit 层就有分歧"; \
+                   diff tmp/rca/gen0_main.s tmp/rca/gen1_main.s | head -30; }
+          else
+            echo "Q1: .s 未产出,gen1 可能在这两个测试之前就已经挂"
+          fi
+
+          # ---- Q2: 三个测试,两代对照 + 挂死时的栈 ----
+          for t in f32_suffix f64_suffix fmod_basic; do
+            echo "##### $t / gen0 (对照) #####"
+            timeout 25 "$G0" compile compiler/tests/examples/$t.jhyy --no-link \
+                -o tmp/rca/g0_$t >/dev/null 2>&1; echo "gen0 rc=$?"
+            echo "##### $t / gen1 #####"
+            timeout 25 "$G1" compile compiler/tests/examples/$t.jhyy --no-link \
+                -o tmp/rca/g1_$t >/dev/null 2>&1; echo "gen1 rc=$? (124=挂死)"
+            if [ -f tmp/rca/g1_$t.s ]; then
+              echo "gen1 正常产出 .s ($(wc -c <tmp/rca/g1_$t.s) B),不需 backtrace"
+            else
+              echo "### gen1 挂死,gdb 抓栈 ###"
+              timeout -s INT 100 /c/msys64/ucrt64/bin/gdb.exe -batch \
+                  -ex run -ex "bt 40" -ex "info registers rip" \
+                  --args "$G1" compile compiler/tests/examples/$t.jhyy \
+                         --no-link -o tmp/rca/bt_$t 2>&1 | tail -60
+            fi
+          done
 
       - name: "Run regress.py --all (gated: jhyy.exe; jhyy_stage0.exe informational)"
         shell: msys2 {0}
