@@ -157,6 +157,8 @@ W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_
 但 `lex_next_char` 读到非 0 垃圾会照常推进,所以是越界前进而不是空转)。
 **计数以 `docs/internal/workarounds.md` 的脚本生成索引表为准**,不要数正文状态行
 ——104 个条目里只有 35 行是可解析的 `**状态:**` 格式(W-108 同源问题)。
+索引本身也漏 2 条(W-025 / W-070,二者都是 RESOLVED 故不影响 ACTIVE 计数:
+前者有 "follow-up" H3 打乱解析,后者的状态行还带 `✅` 前缀且日期格式不合 schema)。
 
 排序、修法、验收 gate 见 [`active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md)。
 
