@@ -258,8 +258,28 @@ fn symtab_lookup_one(t_raw: *u8, name: *u8) -> *Sym {
     if (*t).count == (0 as i64) {
         return 0 as *Sym;
     }
-    // WORKAROUND: amd64_win stack-spill — touching arena forces
-    // codegen to materialize stack frame in safe way (see sprint-3-commit-5-sema-attempt.md).
+    // WORKAROUND (W-106)。**删不得,但原注释的理由已被证伪 —— 见下。**
+    //
+    // 原注释写的是「touching arena forces codegen to materialize stack frame
+    // in safe way」并指向 sprint-3-commit-5-sema-attempt.md。2026-10-18 实测:
+    //
+    //   有本行: movq $8880,%rax ; call ___chkstk_ms ; subq $8880,%rsp
+    //   无本行: movq $8656,%rax ; call ___chkstk_ms ; subq $8656,%rsp
+    //
+    // **两边都完整物化了栈帧**,探栈与 chekstk 都在。函数体逐行 diff 也没有
+    // 任何逻辑差异 —— 只多了 sb_init 的内联(60 行),所有栈偏移整体平移
+    // 104 字节(-408 → -512),指令序列完全相同。
+    //
+    // 那个 commit 是 **v2.x QBE 后端时代**的,self-backend 后来整体重写过,
+    // 它描述的 codegen 行为早就不存在。**所以本行的真实作用是「改变栈布局」,
+    // 而布局变化为何影响正确性,目前没有解释。**
+    //
+    // 已知:删掉它之后全量回归出现过间歇性失败(失败项每次不同、且单跑必绿)。
+    // 观测到 1 次 / 约 11 次全量运行,基线 9 次全绿 —— **样本不足以定论**。
+    //
+    // ⚠️ 在找到真正的根因之前不要删这一行。一个连自己注释都不对的
+    // workaround 是最危险的那一种:下一个人会照着注释去「修根因」,而那个
+    // 根因已经不在注释说的地方了。详见 docs/internal/workarounds.md W-106。
     let mut _wb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
     sb_init(t.arena as *Arena, &_wb);
 
