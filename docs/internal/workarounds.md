@@ -126,7 +126,8 @@
 | [W-114](#w-114) | ACTIVE | 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效 |
 | [W-115](#w-115) | ACTIVE | W-089 标着 RESOLVED,但它自己的 reproducer 至今... |
 | [W-116](#w-116) | ACTIVE | SysV callee 参数溢出只处理 4 个整数寄存器 —— 第 5 个及以后的参数全读到第 4... |
-| [W-117](#w-117) | ACTIVE | 换一套 gcc 编出来的 jhyy.exe 行为不同 —— CI 工具链产物会在自己的... |
+| [W-117](#w-117) | RESOLVED | self-backend IL lexer 在 EOF 处无守卫 —— cur == end... |
+| [W-118](#w-118) | ACTIVE | 语言 lexer 的 lex_peek_char 同样无 EOF 守卫 —— 越界前进而非空转 |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -7869,55 +7870,182 @@ Docker Desktop 跑 `sysv_full_regress.sh`,5 个测试立刻挂 1 个,就是这�
 - 门 `compiler/tests/bootstrap/sysv_full_regress.sh`(需 Docker;本次实测 4/5)
 - 相关:W-104(SysV caller 侧分类错)
 
-## W-117: 换一套 gcc 编出来的 jhyy.exe 行为不同 —— CI 工具链产物会在自己的 self-backend 里空转
+<a id="w-117"></a>
+## W-117: self-backend IL lexer 在 EOF 处无守卫 —— cur == end 时可永久空转
 
-**状态:** ACTIVE since 2026-10-17 (v4.0.9) — 不同 gcc 编出的编译器行为不一致,CI 现编的那份是坏的
-**Filed-by:** audit-ci-hang-2026-10-17
-**日期:** 2026-10-17 首次实测(GH Actions run 39016142083 定位)
+**状态:** RESOLVED closed 2026-10-18 (v4.0.9) — 根因是 self-backend IL lexer 在 EOF 处无守卫,与 gcc 版本无关
+**Filed-by:** audit-ci-hang-2026-10-17;RCA w117-rca-2026-10-18
+**日期:** 2026-10-17 首次实测(GH Actions run 39016142083) → 2026-10-18 闭合
 
-**触发面:** 任何「用本机 gcc 重新 `make` 一次 jhyy.exe」的场合。开发机 gcc 15.2.0
-(MINGW64)编出来的与 CI 上 `setup-msys2` 装的 UCRT64 gcc 编出来的,行为不同。
+**触发面:** self-backend 的 IL lexer(`codegen_amd64_lexer.jhyy`)在 EOF 处的字节读取。
+原先表述成「换一套 gcc 行为不同」是**错的因果** —— gcc 版本只是改变堆布局的
+一个变量,真正的触发条件是「cur == end 处那个字节恰好落在某循环的继续类里」。
 
-**症状(同一台 runner、同一 harness、同一批测试,只换二进制):**
+**症状(原始观测,真实存在):**
+
+run 39016142083 的 regress 步(`[DIAG-3]` 那一轮,总耗时 28m24s),二进制
+`00473e6b`(CI 现编),`failed: codegen_call_return_types, f32_suffix,
+f64_suffix, fmod_basic, std_math_basic`,其中三个是:
 
 ```
-现编 sha 00473e6b  → f32_suffix / f64_suffix / fmod_basic 三个全部 compile
-                      超时 300s ×2。编译器进程**仍在运行**,最后一个阶段标记是
-                      `[4] codegen done`,之后零产物 —— 卡在自己的 in-mem
-                      self-backend (`codegen_amd64_run_text`) 里空转。
-发布 sha 37837b3f  → 同 runner 同 harness,**3/3 PASS,0 秒**。
+FAIL  f32_suffix.jhyy  expected=0 got=-4  compile timeout (300s,重试后仍超时);
+      编译器进程仍在运行 —— 它自己卡住了;产物=无;
+      最后阶段标记: [4a] ir_init done → [4b] cg_module done → [4] codegen done
 ```
 
-同一批测试在**用发布产物**时全绿。现编的那份还有一处相反的行为:
-`codegen_call_return_types.jhyy` 本地(发布产物)是 `STACK_OVERFLOW`,
-CI 现编的那份**通过** —— regress 的 XPASS 语义把它抓了出来(「XFAIL 标记已过期」)。
+同一轮的 `[DIAG-3]` 步用**恢复回来的** `37837b3f` 跑同样三个测试 → 3/3 PASS,0 秒。
+(注意 `[DIAG-3]` 步本身只测了恢复的那份;现编那份的实测在同一轮的 regress 步。)
 
-**根因(定位到的层次):** 已知到「产物二进制不同」这一层,并确认差异**影响行为**。
-`make` 里 jhyy.exe 的自身代码是 jhyy.exe 自己编的,只有 `runtime.c` 与
-`jhyy_helpers.c` 是 gcc 编的预编 `.o`(`$(JHY_RUNTIME_O)` / `$(JHY_HELPERS_O)`),
-所以差异必然来自这两个 `.o` —— 不同 gcc 版本会改变它们的代码与
-`.comment` 段(后者直接解释了 sha 不同),而 `.o` 里的实际差异如何传导成
-「self-backend 空转」尚未 RCA 到语句级。
+**根因(2026-10-18 定位到语句级):**
 
-**workaround:** CI 的回归门测**发布产物**,不用工具链产物。
-`.github/workflows/ci.yml` 第 5 步 `make` 之后立刻
-`git checkout HEAD -- compiler/build/bin/jhyy.exe`,并在两个 sha 不一致时打
-`::warning`。自举能力仍由第 5 步的 byte-equal 检查 + 第 9 步
-`closure_check.sh` 验,不因为换回发布产物而丢失。
+`codegen_amd64_lexer.jhyy` 里两条事实叠加成一个无限循环:
 
-**影响范围:** 只影响「谁编的编译器」这一维度。发布产物本身 174/174 全绿
-(本地),CI 上 170/175。任何开发者或 CI 若用不同 gcc 重新 `make`,得到的
-可能是一个行为不同的编译器 —— 这对本项目是严重问题:编译器是**唯一产物**。
+1. `lex_peek_byte` 对 `cur` 做 **4 字节对齐裸读,没有任何 `cur < end` 守卫**;
+2. `lex_next_byte` 在 EOF 时「返 0 **且不推进 cur**」(原注释原话)。
 
-**失效条件:** 查明 `_jhyy_runtime.o` / `_jhyy_helpers.o` 的哪一处差异导致
-self-backend 空转,并修到「任意 gcc 版本编出的 jhyy.exe 行为一致」(可加门:
-`make` 前后跑一组固定回归,而不是只看 sha)。
+于是任何 `while (lex_peek_byte(s) != X) { lex_next_byte(s); }` 形式的循环,
+在 `cur == end` 处只要那个字节不等于 X,`next()` 就原地不动 → 永久空转。
+症状与观测完全吻合:`[4] codegen done` 之后、零产物、进程仍在。
+
+而 `cur == end` 处那个字节**不是哨兵,是未初始化内存**:in-mem 路径把
+`(*ir.sb).buf` / `(*ir.sb).len` 直接喂进 `lex_il`,而 `sb_init` 只 arena 分配、
+`sb_grow` 换新块只 `memcpy` 了 `sb.len` 字节 —— `[len, cap)` 是回收来的堆垃圾。
+
+**这解释了「时灵时不灵」:** 那个垃圾字节是什么取决于堆布局,堆布局取决于二进制。
+`9a6c337`(观测时)→ HEAD 之间 src0 **只有一处**改动,`codegen_amd64_lexer.jhyy`
++30/-1(正是 W-109 那笔)—— 而那正是挂死发生的文件。给 lexer 加 30 行足以把
+EOF 处那个字节从「空白」翻成「非空白」。
+
+**原 root-cause 段的两处错误,留档:**
+
+1. 「差异**必然**来自这两个 `.o`」是**未验证的推断**。2026-10-18 的受控 A/B
+   (固定 `.s`、只 perturb `.o`,轴 0 对照 / 轴 1 十二个 codegen 决策 /
+   轴 2 单 `.o` 替换 / 轴 3 换 lld 链接器 —— 14 个探针**全部 clean**)
+   证明 `.o` 的 codegen 决策**不产生**该症状。
+2. 「换 gcc 行为不同」把相关当成了因果。gcc 版本改变的是堆布局,不是行为。
+
+**受控 A/B 的结论(2026-10-18,CI gcc 16.2.0 + binutils 2.47):**
+
+同一 job 内 gen0 与 gen1(gen1 在 `git checkout` 换回之前抢救出来):
+
+```
+gen0.s sha: 00b7baef5bf3099f
+gen1.s sha: 00b7baef5bf3099f     → Q1: .s IDENTICAL,emit 层无差异
+gen0 rc=0 / gen1 rc=0  ×3        → Q2: gen1 三个测试全过,.s 尺寸 903/901/1133
+                                    与本机 14 个探针逐一相同
+```
+
+**该症状今天不复现。** 因此下面那句必须写清楚:这个修复**没有**被「挂死消失」
+验证过 —— 它是被「根因定位到语句级 + 输出中性」支撑的。
+
+**workaround(已撤销):** 此前 CI 的回归门测**发布产物**(`ci.yml` 第 5 步
+`make` 之后 `git checkout HEAD -- compiler/build/bin/jhyy.exe`)。该 workaround
+的前提是「CI 编出来的编译器是坏的」,而受控 A/B 证明这个前提不成立。
+2026-10-18 起撤销(见 CI 重构:回归门改测当前源码编出来的产物)。
+
+**fix:** 给 `lex_peek_byte` / `lex_peek_byte_at` 加 `cur >= end → return 0` 守卫。
+选 0 是因为它正是所有调用方在 EOF 处已经期待的哨兵值(`lex_next_byte` EOF 返 0;
+skip_ws/scan 循环判「非该字节」才停;`lex_il` 恢复循环判 `cc == 0` 才停),
+加守卫后 EOF **确定性终止**。守卫对所有合法读取(`cur < end`)行为完全不变,
+因此是**输出中性**的 —— 用 201 个测试逐一 A/B(HEAD 的 gen0 vs 加守卫后的新
+编译器)验证:
+
+```
+.s 逐字节相同          188
+归一化后逐字节相同       4   (closures_as_arg / closures_basic /
+                            closures_multi_capture / codegen_call_return_types)
+两边都编译失败(rc 一致)  9
+```
+
+那 4 个的差异**只有闭包符号名**:`__closure_86321` vs `__closure_06350`,两侧
+`.s` 长度与指令完全一致。该后缀由 `sema.jhyy:1173` 的 `let name_addr = n as i64;`
+派生,而 `n` 是闭包节点在 arena 里的**地址** —— 编译器里加几行代码就会让 arena
+布局平移、数字跟着变。**任何**改动编译器的变更(包括 W-109 那 +30 行)都会改变它,
+所以它不是语义差异,而是「这个测试的 `.s` 无法跨二进制逐字节比对」。
+
+若把守卫改成更严格的 `p_addr + 4 <= end` 才读,会把输入**末尾 3 个字节**变成 0,
+直接改变发射的 `.s`,破坏自举 byte-equal 不变式 —— 不能那样改。
+
+**影响范围:** 一旦触发,编译器在该次编译上永久空转,表现为 CI 超时(而不是快速
+失败)。可触发性取决于堆布局,因此同一份源码在不同二进制上表现不同。
+
+**失效条件:** 已满足(守卫已加 + 输出中性已验)。
 
 **引用:**
-- `Makefile:151-192`(`$(BIN_DIR)/jhyy.exe` + 两个预编 `.o` 规则)
-- `.github/workflows/ci.yml` 第 5 步(换回发布产物)
-- GH Actions run 39016142083 `[DIAG-3]` 步(二进制 A/B 的实测数据)
-- 相关:W-107(per-fn 表 1024 上限,同样在 self-backend 里)、W-109(IL lexer 缺助记符)
+- `compiler/src0/codegen_amd64_lexer.jhyy:77-130`(`lex_peek_byte` /
+  `lex_peek_byte_at` / `lex_next_byte`)
+- `compiler/src0/util.jhyy:61-89`(`sb_init` / `sb_grow` —— 未清零的来源)
+- `compiler/src0/codegen_amd64_inmem.jhyy:63-139`(`[4] codegen done` 之后的全部代码)
+- GH Actions run 39016142083(原始观测)、run 39095870883 / PR #8(受控 A/B)
+- 同族未修项:**W-118**(语言 lexer 的镜像缺陷 —— 越界前进而非空转)
+- 相关:W-109(IL lexer 缺助记符,同文件)、W-107(per-fn 表 1024 上限)
+
+<a id="w-118"></a>
+## W-118: 语言 lexer 的 lex_peek_char 同样无 EOF 守卫 —— 越界前进而非空转
+
+**状态:** ACTIVE since 2026-10-18 (v4.0.9) — 同族缺陷的另一处,失效模式不同,尚未观测到危害
+**Filed-by:** w117-rca-2026-10-18
+**日期:** 2026-10-18 W-117 RCA 时顺带发现
+
+**触发面:** `compiler/src0/lexer.jhyy`(语言 lexer,与 `codegen_amd64_lexer.jhyy`
+是两套独立实现)。
+
+**症状:** **尚无观测。** 登记它是因为代码事实成立且与 W-117 同源,不是因为
+见过它出事 —— 这点必须写清楚,否则下一个读者会以为有一次未记录的现场。
+
+**根因(读代码得出,非推测):**
+
+`lexer.jhyy:212-220` 的 `lex_peek_char` 同样是对 `*i32` 的 4 字节对齐裸读,
+**没有任何边界守卫**;`lexer.jhyy:250-258` 的 `lex_peek_char_at(l, off)` 同样。
+
+但它与 W-117 的失效模式**相反** —— `lex_next_char`(`:223-236`)长这样:
+
+```
+let c = lex_peek_char(l);
+if c == 0 { return 0 as i32; }      // 靠 peek 返 0 判 EOF
+(*l).current = ptr_add_u8(...);      // 非 0 就推进 —— 包括垃圾字节
+```
+
+- W-117(IL lexer):peek 读到垃圾 + next **不推进** → **永久空转**
+- 本条(语言 lexer):peek 读到垃圾 + next **照常推进** → **越过 end 一路往前走**
+
+后者不会空转,所以不会表现为 CI 超时;它会一路走出缓冲区边界,可能读到未映射
+页而崩溃,也可能吐出一串垃圾 token。**危害形态不同,但根因同一个。**
+
+**为什么本条没跟着 W-117 一起修(这是有意的取舍,不是遗漏):**
+
+修它需要给 `Lexer` 加长度信息。`Lexer` 结构(`lexer.jhyy:134-148`)只有
+`source` 与 `current`,**没有 end / len 字段**;它由 `lexer.jhyy:615-616` 从
+`main.jhyy:595` 的 `read_file(input)` 初始化。要加守卫就得把长度从
+`read_file` 一路铺到 `lexer_init` —— 跨 `main.jhyy` + `lexer.jhyy` 两个文件。
+
+在**没有任何观测证据**的前提下为它扩大改动面,与本项目反复栽过的那个坑
+(为了某个目的去改判据 / 改范围)是同构的。故拆为独立条目。
+
+**workaround:** 无。当前没有任何代码绕过它 —— 它是真实未修的 bug,不是
+「已知的、有绕路的」状态。
+
+**修法(留档,未实施):** 给 `Lexer` 加 `end: *u8` 字段;`lex_peek_char` 与
+`lex_peek_char_at` 加 `current >= end → return 0` 守卫。选 0 的理由与 W-117
+相同:`lex_next_char` 的 `c == 0` 分支正是为它准备的 EOF 判据,只是它依赖
+`lex_peek_char` 恰好在 EOF 返 0 —— 而现在那是个未定义行为。
+
+⚠️ 实施时的陷阱:`lex_peek_char_at` 只有两个调用点(`lexer.jhyy:333` 与
+`:427`,都在用 `off = 1` 做 lookahead)。加守卫会改变**输入最后一个字符**
+处的那次 lookahead 的结果(原先是垃圾、现在是 0)。必须用 W-117 同款 A/B
+(201 个测试逐个比 `.s`)验输出中性,不能想当然。
+
+**影响范围:** 语言前端。任何以「尾部字节」为分支条件的词法决策都受影响。
+
+**失效条件:** `Lexer` 具备长度信息且两个 peek 有守卫,且 A/B 证明 `.s` 逐字节
+不变。
+
+**引用:**
+- `compiler/src0/lexer.jhyy:212-220`(`lex_peek_char`)、`:223-236`(`lex_next_char`)、
+  `:250-258`(`lex_peek_char_at`)、`:134-148`(`Lexer` 结构,无 end 字段)、
+  `:615-616`(初始化点)
+- `compiler/src0/main.jhyy:595`(`read_file(input)`)
+- 同族已闭合:**W-117**(IL lexer 侧,2026-10-18 修)
 
 ### W-109 真修记录 (2026-10-17, v4.0.9)
 

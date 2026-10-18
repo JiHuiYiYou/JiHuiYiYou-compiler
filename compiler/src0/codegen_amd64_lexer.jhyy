@@ -75,6 +75,34 @@ type LexState = struct {
 // ════════════════════════════════════════════════════
 
 fn lex_peek_byte(s: *LexState) -> i32 {
+    // W-118 (2026-10-18):EOF 哨兵。**必须加,否则编译器会永久空转。**
+    //
+    // 下面这行 4 字节对齐裸读,原本没有任何 `cur < end` 守卫;而
+    // `lex_next_byte` 在 EOF 时「返 0 **且不推进 cur**」(见下)。两者叠加的后果:
+    // 任何写成「while peek != X { next(); }」的循环,在 cur == end 处如果
+    // 读到的那个字节恰好不等于 X,`next()` 就原地不动 → 无限循环。
+    //
+    // 而 cur == end 处那个字节**不是哨兵,是未初始化内存**:in-mem 路径把
+    // (*ir.sb).buf / (*ir.sb).len 直接喂进 lex_il,而 sb_init 只 arena 分配、
+    // sb_grow 换了新块只 memcpy 了 sb.len 字节 —— [len, cap) 是回收来的堆垃圾。
+    //
+    // 这就是 W-117 观测到的「`[4] codegen done` 之后零产物、进程还在跑」。
+    // 它为什么**时灵时不灵**:那个垃圾字节是什么,取决于堆布局,而堆布局取决于
+    // 二进制。给 lexer 加 30 行就足以把它从「空白」翻成「非空白」——
+    // W-117 观测到挂死的那份 gen1 与今天不复现的那份 gen1,源码只差 W-109
+    // 那 +30 行(同样在 codegen_amd64_lexer.jhyy 里)。
+    //
+    // 为什么返回 0 而不是别的:0 正是所有调用方在 EOF 处已经期待的哨兵值 ——
+    // `lex_next_byte` EOF 返 0;所有 skip_ws/scan 循环判「非该字节」才停;
+    // lex_il 的恢复循环判 `cc == 0` 才停。返回 0 让 EOF **确定性终止**。
+    //
+    // 为什么不是更严格的「p_addr + 4 <= end 才读」:那样会把输入**末尾 3 个
+    // 字节**变成 0,直接改变发射出的 .s 字节,破坏自举 byte-equal 不变式。
+    // 本守卫对**所有合法读取(cur < end)行为完全不变**,只把 EOF 那一个
+    // 不确定点钉成确定值 —— 输出中性。
+    if (*s).cur >= (*s).end {
+        return 0 as i32;
+    }
     let p_addr = (*s).cur as i64;
     let aligned = p_addr & (~(3 as i64));
     let rem = (p_addr - aligned) as i32;
@@ -85,6 +113,11 @@ fn lex_peek_byte(s: *LexState) -> i32 {
 }
 
 fn lex_peek_byte_at(s: *LexState, off: i64) -> i32 {
+    // W-118:同一个守卫。off 最大到 4(c* gate 的 n4),不守卫的话在 EOF 附近
+    // 会读到分配边界之外 5-8 字节 —— 那已经不是「读到垃圾」,是真的越界。
+    if ((*s).cur as i64) + off >= (*s).end as i64 {
+        return 0 as i32;
+    }
     let p_addr = ((*s).cur as i64) + off;
     let aligned = p_addr & (~(3 as i64));
     let rem = (p_addr - aligned) as i32;
