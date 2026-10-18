@@ -189,7 +189,7 @@ XFAIL 在两边都变成诚实描述。
 | # | 内容 | 性质 | 为什么是现在 |
 |---|------|------|------------|
 | 1 | **W-111** 泛型 enum 的**关联构造器**在无类型上下文处报 `unknown enum type` | 功能未完成(干净的诊断,不是崩溃) | `generics_enum.jhyy` 是 XFAIL + `// EXPECT: 106`,**门是现成的**:修好后会 XPASS → regress 立刻变红,直到摘掉标记。不依赖任何前置。⚠️ 但修它是**功能补全**不是 bug 修复 —— 需要先决定「类型参数从哪来」,见台账 |
-| 2 | **W-104 的 >4 参数 SysV 用例** | 补门(不修 bug) | `sysv` job 已在 ubuntu 上每轮跑那 5 个用例,**只缺第 6 个**。现有 5 个都 ≤4 参数,碰不到 caller 侧分类 |
+| 2 | **W-104 的跨实现对拍探针**(见下方更正) | 补门(不修 bug) | **任何纯 jhyy 测试都抓不到它** —— caller 与 callee 用同一套「struct 按指针」约定,彼此自洽。必须引入一个**非 jhyy 的 callee**(手写 asm,`runtime/linux_elf/` 已有现成基础设施)才能观测到错开 |
 | 3 | **W-106 的判定实验**:删 `symtab.jhyy:261-264` 三行跑全部门 | 补门(不修 bug) | 门(`artifact_checks` / `artifact-fresh` / `closure` / `sysv`)是齐的,实验今天才做得起。绿 = 已是冗余可直接删;红 = 栈 spill 根因仍在,需补最小复现 |
 | 4 | **W-110 的 RCA** | 补门(不修 bug) | 它两条假设里有一条是「W-109 的 unknown mnemonic 造成 IL 解析错位」,而 W-109 是 2026-10-17 才修的 —— **前提今天才具备** |
 
@@ -197,6 +197,38 @@ XFAIL 在两边都变成诚实描述。
 相关 XFAIL 减少、`regress` 不退步;W-104 的新用例以 XFAIL 形式进入 `sysv` job
 并当场翻红(造红灯);W-106 判定实验有明确结论并记进台账;W-110 的 RCA 定位到
 语句级。
+
+#### ⚠️ 一处更正(2026-10-18):原第 2 项的前提是错的
+
+原写「给 W-104 加一个 >4 参数的 SysV 用例,现有 5 个都 ≤4 参数」。**不成立** ——
+`sysv_abi_test.jhyy` 就是 7 参数用例(`seven_arg_fn`),而且已被
+`sysv_link_run.sh` 验着(KNOWN-FAIL W-116)。
+
+顺着查下去得到一个更要紧的结论:**W-104 根本不可能被任何纯 jhyy 测试抓到。**
+
+实测 `--target=amd64_sysv_freestanding`,`Mixed = {i32, f64}`:
+
+```
+export function w $process(l %m) {     ← 参数是一个 64 位值,当地址用
+    %t3 =d loadd (%m + 8)
+}
+调用侧: movq -208(%rbp), %rdi ; call process     ← 只传一个指针
+```
+
+真实 SysV 要求 `{i32,f64}` = INTEGER(rdi) + SSE(xmm0) **按值**传。
+caller 与 callee 都按**指针约定**处理 → 彼此自洽 → 所有现有测试都过。
+
+而 `docs/abis/jhyy-abi-v1.0.0.md:872`(locked 规范)明确要求
+`amd64_sysv` 的 struct pass-by-value 遵循 SysV ABI,`:881` 要求「所有 `extern fn`
+遵循对应 ABI」。**所以这是违反项目自己锁定的规范,不是规范没写。**
+
+`sysv_struct_mixed.jhyy` 是这件事的完美反例 —— 它 PASS,但
+`let _ = m.d_field;` 读一下就丢、结果只依赖 `i_field`。**即使让 `d_field`
+参与计算,它仍然会通过。** 这是本项目第三个同款「测试名字覆盖了功能、内容没有」。
+
+所以本版第 2 项改为:**写一个手写 asm 的 SysV callee(按真实 SysV 从
+rdi+xmm0 读),让 jhyy 去调它** —— 以 XFAIL 形式进 `sysv` job 并当场翻红。
+这是 v4.0.11 修 W-104 时唯一能验的东西,不先建它,那一版的修无从验证。
 
 > ⚠️ 第 2-4 项**预期是红的** —— 缺口补上的那一刻,对应的三个 bug 会第一次
 > 有门在验。红用 XFAIL / KNOWN-FAIL 登记,**不是用「改判据让它绿」**。
@@ -215,8 +247,8 @@ XFAIL 在两边都变成诚实描述。
 
 | 内容 | 说明 |
 |---|---|
-| **W-116** callee 参数溢出只做 4 个寄存器 | `%r8d`/`%r9d`/栈参数从未被读 |
-| **W-104** caller 参数分类借 Win 分类器 | 正确的 `abi_sysv_classify_arg` 就在同文件 `:79`,没接线 |
+| **W-116** callee 参数溢出 | 实测:callee 把 **arg5/6/7 全读成 `%ecx`**(arg4 的寄存器)。调用侧是对的(arg1-6 → rdi/rsi/rdx/rcx/r8/r9,arg7 落栈)。于是 1+2+3+4+**4+4+4**=22,与实测 `EXIT=22` 精确吻合。**入口是 callee 侧那张参数寄存器表(本次未定位到)**;调用侧 `reg_rax_for_qt_idx`(`codegen_amd64_emit_call.jhyy:577-601`)idx 0..5 正确但 **idx ≥ 6 落到末尾的 `return "ecx"`**,是 arg7 的独立缺口 |
+| **W-104** SysV struct 传参 | **不是「分类器接错」—— 是 struct 参数整体退化成按指针传。** 实测 `process(l %m)` + `movq ..,%rdi ; call process`,两边用同一套指针约定因而自洽,所有现有测试都过。而 locked 规范 `jhyy-abi-v1.0.0.md:872` 要求 SysV struct pass-by-value 遵循 SysV ABI。**这是规范符合性缺陷,规模是 ABI 级(sprint 级),不是接线** |
 
 **gate:** `sysv_link_run.sh` 5/5(**不需要 Docker** —— 两段式 job:windows 侧编
 `.s`,ubuntu 侧链 `crt0.S` + `link.ld` 成 ELF 再跑);W-104 的 >4 参数逐位用例
@@ -227,8 +259,21 @@ XFAIL 在两边都变成诚实描述。
 `sysv_abi_test` 都登记着它。一次改动就能证明这套门是真的在验东西,
 这是给整套 CI 最好的验收。
 
-**注意:** 这两条症状都是「SysV 多参数传错」但代码路径不同,**别当成一个 bug 修**。
-修 W-116 不会自动修好 W-104。
+**注意(2026-10-18 修正):** 原写「这两条症状都是『SysV 多参数传错』但代码路径不同,
+**别当成一个 bug 修**」。前半句仍然成立,但**两条共享同一段未完成的 SysV 调用约定**,
+耦合度比原先记的高:
+
+- W-116 = **整数/浮点参数**在寄存器与栈之间的分配(callee 侧表缺失)
+- W-104 = **struct 参数**的 eightbyte 分类(整体退化成指针)
+
+修 W-116 **不会**自动修好 W-104(不同代码路径),但两者都要动
+`codegen_amd64_emit_call.jhyy` / `abi_amd64_sysv.jhyy` 这一层的寄存器分配,
+**排期上应视为相邻而非独立**。
+
+⚠️ 反过来:**只修 W-116 可能不足以让 `sysv_abi_test` 转绿** —— 该测试的失败
+目前完全归因于 W-116(22 = 1+2+3+4+4+4+4 精确吻合),但 W-104 也在同一 job 里
+被同一批测试覆盖。真修时若 `sysv_abi_test` 仍红,先看是不是签名不吻合触发了
+`sysv_link_run.sh` 的「签名不吻合 → 红」分支 —— 那说明还有第三个贡献者。
 
 ### v4.0.12 — 浮点(W-110 单条)
 

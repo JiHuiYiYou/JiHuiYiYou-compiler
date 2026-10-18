@@ -7067,6 +7067,28 @@ fn process(m: Mixed) -> i32 {
 手写汇编 / gcc 编译的 SysV 函数,用 struct 参数 —— 对方的 callee 会按 SysV
 从 rdi+xmm0 读,拿到的是指针,立刻错开。
 
+### ⚠️ 这不是「未规定的自选约定」,是**违反项目自己锁定的 ABI 规范**
+
+`docs/abis/jhyy-abi-v1.0.0.md`(100% 权威、locked)对三个目标的 struct 传参规定:
+
+> `| struct pass-by-value | per v0.4 ABI(MS x64)| per v0.4 ABI(同 MS x64)| **per v0.4 ABI(SysV)** |`
+
+同文件 `:881`:「ABI 调用:所有 `extern fn` 显式声明遵循对应 ABI」。
+
+**所以按指针传不符合规范,不是规范没写。** 这条的性质从「未使用的目标路径」
+上升为「违反 locked ABI 文档」——优先级判断应以后者为准。
+
+好消息:地基是齐的。
+- struct **布局**已经与 SysV 自然对齐兼容(`{i32,f64}` → i32@0 / f64@8;
+  `{i32,i32}` → 0 / 4,实测 caller 的写入偏移证实)
+- `abi_sysv_classify_arg`(`abi_amd64_sysv.jhyy:79`)**不是死代码** —— 同文件
+  `:933-936` 记录它在 v3.1.4 已给 `Cap<T>` / `PhantomData<T>` 分类(class →
+  寄存器槽),只是没接到普通 struct 的参数发射点上
+- class→letter 映射 `sysv_class_to_qbe_letter`(`:68`)也在
+
+缺的只是:把这两步接到 `abi_amd64_sysv_emit_function_header:229` + 真正按
+eightbyte 拆分多寄存器传参 + MEMORY class(>16B)落栈 + 调用侧对称实现。
+
 **影响:** jhyy 编译的 SysV 目标代码**无法与 gcc 编译的 SysV 代码在跨 struct
 边界的函数调用上互操作**。jhyy↔jhyy 之间不受影响。
 
