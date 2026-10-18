@@ -20,6 +20,11 @@
 #   - artifact_checks          = 那两条验不到的失效模式(症状在产物字节布局里,
 #                                任何 .jhyy 测试都验不到)
 #
+# **所有门测的都是同一个二进制:本 job `make` 刚编出来的那份。** 这一条在
+# 2026-10-18 之前是反的 —— regress 测的是 `git checkout HEAD --` 换回来的提交
+# 产物,于是「改 src0 引入语义回归」这件事 201 个测试一个都不会红。挡着这层的
+# 理由(W-117:CI 编出的编译器行为不同)已于同日闭合,理由不再成立。
+#
 # **「不验正确性」这句对 artifact_checks 同样适用**:它验的是「某个已知缺陷是否
 #   仍以登记的方式存在」,不是「编译器是否正确」。
 #
@@ -36,6 +41,11 @@
 # 触发面:
 #   - push to main (含 v1.x ‖ v2.x ‖ v3.x 任何 commit)
 #   - PR to main
+#   - 手动 dispatch(此前只能 `gh run rerun` 重跑整轮,不能只重跑某个 job)
+#
+# **所有门测的都是本 job 刚编出来的 `jhyy.exe`**(2026-10-18 起)。此前 regress
+# 测的是 `git checkout HEAD --` 换回来的提交产物,等于改 src0 的语义回归一个
+# 测试都不会红。详见下面 build 步的注释与 workarounds.md 的 W-117 条目。
 #
 # Windows runner (windows-latest) — 跟开发机一致 (Windows 10 + MSYS2 bash +
 # gcc + QBE + runtime)。其他 OS 留给未来扩展 (per `docs/plans/v2/v2.0.0-os-prep.md`
@@ -49,13 +59,19 @@ name: JHYY CI
 on:
   push:
     branches: [main]
+  workflow_dispatch:
   pull_request:
     branches: [main]
 
-# Concurrency: 同一 ref 新 push 自动 cancel 在跑的 run, 节省 CI minutes
+# Concurrency: 同一 ref 新 push 自动 cancel 在跑的 run, 节省 CI minutes。
+#
+# 2026-10-18 收窄:`cancel-in-progress` 此前**无差别**作用在 push to main 上,
+# 会把进行中的主干 run 砍掉一半。PR 上确实该取消(同一分支连续 push,前面的
+# 结果已无意义),主干上是另一回事 —— 一次完整跑完的 main run 是发布前的凭据,
+# 半途中被取消等于没跑。表达式按 event name 区分。
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-and-test:
@@ -97,32 +113,30 @@ jobs:
         run: |
           make stage0
 
-      - name: "Build jhyy.exe (self-bootstrap) + 换回发布产物"
+      - name: Build jhyy.exe (self-bootstrap) — 回归门就测这个产物
         shell: msys2 {0}
         run: |
           # v4.0.8:`make` 用 jhyy.exe 自己编 src0,并做 byte-equal 自举闭环检查。
-          # 这一步验的是「**工具链能不能编出编译器**」,保留。
-          make STRICT_TOOLCHAIN=0
-          # 但**回归门不用它的产物** —— 2026-10-17 实测:CI 的工具链
-          # (setup-msys2 装的 UCRT64 gcc)编出来的 jhyy.exe 与提交进仓的
-          # 那个**行为不同**,且是坏的:
-          #   sha 00473e6b(CI 现编) → f32_suffix/f64_suffix/fmod_basic 三个
-          #                            全部卡死在自己的 self-backend 里空转
-          #                            (`[4] codegen done` 之后、零产物、进程仍在)
-          #   sha 37837b3f(提交进仓) → 同 runner 同 harness,**3/3 PASS,0 秒**
-          # 同一个测试 `codegen_call_return_types` 两边也相反:现编的过(→ XPASS),
-          # 提交进仓的 STACK_OVERFLOW。
           #
-          # 所以门必须测**发布产物**。这里换回去,并在 sha 不一致时把事实打印
-          # 出来 —— 不静默,免得又变成「没人知道门在测什么」。
-          FRESH=$(sha256sum compiler/build/bin/jhyy.exe | cut -d' ' -f1)
-          git checkout HEAD -- compiler/build/bin/jhyy.exe
-          SHIPPED=$(sha256sum compiler/build/bin/jhyy.exe | cut -d' ' -f1)
-          echo "现编(工具链产物): $FRESH"
-          echo "发布(提交进仓)  : $SHIPPED"
-          if [ "$FRESH" != "$SHIPPED" ]; then
-            echo "::warning title=工具链产物与发布产物不一致::CI 的 gcc 编出的 jhyy.exe 行为与发布的不同(W-117)。回归门测的是发布产物。"
-          fi
+          # STRICT_TOOLCHAIN=0 的理由(2026-10-18 修正措辞):它比的是 `.exe` 字节,
+          # 而 `.exe` 是 (源码 × **工具链版本**) 的函数。同机同 toolchain 重建是
+          # 逐字节可复现的(实测两次 `make` 同得 1eeb81b5),但 CI runner 的
+          # gcc 16.2.0 / ld 2.47 与开发机的 15.2.0 / 2.45 必然产出不同字节 ——
+          # 那不是漂移,是两个不同工具链的正常结果。该门对**发布者**有意义
+          # (「我编出来的 == 我提交进仓的那份吗」),对 CI 没有意义。
+          #
+          # 2026-10-17 至 2026-10-18 之间这里曾把产物 `git checkout` 回提交那份,
+          # 并打 warning 说「CI 编出的编译器行为与发布的不同(W-117)」。那句话是
+          # **错的**:W-117 已于 2026-10-18 闭合(根因 = IL lexer 在 EOF 处无守卫,
+          # `lex_peek_byte` 无 `cur < end` 边界检查 + `lex_next_byte` 在 EOF 不推进
+          # cur),该症状在受控 A/B 下不复现 —— 见 docs/internal/workarounds.md。
+          #
+          # 现在:**不换回产物**。回归门测的就是本 job 刚编出来的这份,也就是
+          # **当前源码**编出来的编译器。改 src0 引入的语义回归,201 个测试
+          # 至少有一个会红 —— 这正是这道门存在的意义。
+          make STRICT_TOOLCHAIN=0
+          echo "本 job 编译出的 jhyy.exe: $(sha256sum compiler/build/bin/jhyy.exe | cut -d' ' -f1)"
+          echo "后续所有门(regress / closure / artifact_checks)都测这一个二进制。"
 
       - name: "Run regress.py --all (gated: jhyy.exe; jhyy_stage0.exe informational)"
         shell: msys2 {0}
@@ -138,9 +152,14 @@ jobs:
           # (regress.py, not compiler/build/bin/regress.py — it was relocated
           # in v4.0.0-rc1 to keep the build/ tree artifact-only). Historical
           # `python compiler/build/bin/regress.py` failed with FileNotFoundError.
-          # -u:无缓冲 —— 否则整轮 20 分钟的 [progress] 心跳全压在退出时一次性
-          # 刷出,时间戳落在同一秒,拿不到执行时序(排查并发问题时的硬障碍)。
-          python -u regress.py --all
+          # -u:无缓冲 —— 否则整轮 [progress] 心跳全压在退出时一次性刷出,
+          # 时间戳落在同一秒,拿不到执行时序(排查并发问题时的硬障碍)。
+          #
+          # 2026-10-18:默认 binary 就是上一步刚编出来的那份(此前这一步测的是
+          # `git checkout` 换回来的提交产物 —— 那意味着改 src0 的语义回归
+          # 一个测试都不会红)。`--jobs` 此前**完全没传**,实际在跑
+          # `max(2, cpu//2)`;显式传,让并发度成为配置而不是隐式默认。
+          python -u regress.py --all --jobs=2 --timeout=300
 
       - name: Build Stage 2 closure chain (v1→v2→v3→v4)
         # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
