@@ -71,10 +71,11 @@ jobs:
   build-and-release:
     name: Build installer + create GitHub Release
     runs-on: windows-latest
-    # 30 → 40。实测:build-and-test 全程 ~2m40s,本 job 的 WiX bundle + MSI
-    # + vsix 打包是未知的耗时大头(过去 6 周从没跑成功过,没人知道它多长)。
-    # 取 40 是「宁可多花 minutes,不要半途而废」—— job 被超时砍掉会留下
-    # 半套 artifacts,而 GitHub Release 一旦被创建再补产物是另一套麻烦。
+    # 30 → 40。**实测(2026-10-18 run 39099930527,dry-run 全绿):4 分 49 秒**
+    # (05:15:30 → 05:20:19),其中 WiX bundle + MSI + vsix 打包是最大一块。
+    # 留 40 分钟是有意的余量:job 被超时砍掉会留下半套 artifacts,而 GitHub
+    # Release 一旦被创建再补产物是另一套麻烦。实测值的用途是「知道它多长」,
+    # 不是把上限压到实测附近。
     timeout-minutes: 40
 
     env:
@@ -290,7 +291,11 @@ jobs:
           Write-Host "[OK] MSI validation passed (0 ICE errors)"
 
       - name: Confirm artifacts present (dry-run gate)
-        if: inputs.dry_run == 'true' && github.event_name == 'workflow_dispatch'
+        # 2026-10-18 修:`inputs.dry_run` 是 **boolean**,拿字符串 'true' 去比
+        # 永远为 false —— 于是这两个 dry-run 专属的检查从上线起就没跑过一次
+        # (2026-10-18 的 dry-run 实测:两者都 skipped)。tag 路径不受影响
+        # (它们本来就该 skip),但 dry-run 因此一直没在做 dry-run 该做的核对。
+        if: inputs.dry_run && github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
           foreach ($f in @(
@@ -333,7 +338,11 @@ jobs:
           # GITHUB_TOKEN auto-provided; no extra secrets needed.
 
       - name: Dry-run summary
-        if: inputs.dry_run == 'true' && github.event_name == 'workflow_dispatch'
+        # 2026-10-18 修:`inputs.dry_run` 是 **boolean**,拿字符串 'true' 去比
+        # 永远为 false —— 于是这两个 dry-run 专属的检查从上线起就没跑过一次
+        # (2026-10-18 的 dry-run 实测:两者都 skipped)。tag 路径不受影响
+        # (它们本来就该 skip),但 dry-run 因此一直没在做 dry-run 该做的核对。
+        if: inputs.dry_run && github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
           Write-Host ""
