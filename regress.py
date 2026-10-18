@@ -45,7 +45,7 @@ from typing import Optional, List, Tuple
 ROOT = Path(__file__).resolve().parents[0]
 sys.path.insert(0, str(ROOT / "mcp-jhyy"))
 
-from jhyy_regress import run_all, save_baseline_hash  # noqa: E402
+from jhyy_regress import DEFAULT_TIMEOUT, run_all, save_baseline_hash  # noqa: E402
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Per-binary `enforce_baseline_hash` default mapping (centralize)
@@ -697,7 +697,7 @@ def main():
     #
     # 真正该修的是「为什么会挂死」,不是把超时调大。单次编译实测 1.26s
     # (486ms 编译器 + 1083ms gcc 链接),300s 对它是 240 倍余量,够宽裕了。
-    ap.add_argument("--timeout", type=int, default=300,
+    ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
                     help="Per-test timeout in seconds (dead-loop ceiling, not a perf budget)")
     ap.add_argument("--no-baseline-check", action="store_true",
                     help="Skip phantom-binary (mtime vs source) check for all runs.")

@@ -127,6 +127,33 @@ jobs:
       - name: Build jhyy.exe (self-bootstrap) — 回归门就测这个产物
         shell: msys2 {0}
         run: |
+          # ── 工具链版本上报(刻意**不**钉版本)────────────────────────────
+          # 为什么不上 `setup-msys2` 的 `update: false`:
+          # **它换不来可复现性**。GitHub 的 `windows-latest` 本身是滚动镜像,
+          # 每周更新、每次自带某个 MSYS2 状态;`update: false` 只是说「不在本次
+          # job 内额外升级」,镜像照样漂。设了它会制造一个「已经可复现」的错觉,
+          # 而错觉比不设更糟 —— 本次会话已经吃过一次这种亏(见 Makefile 里
+          # STRICT_TOOLCHAIN 注释:它拿 `.exe` 跨 toolchain 比,报出来的漂移
+          # 没有一条是真问题)。
+          #
+          # 真正要的是:**一条「因为工具链变了」而红的 CI 能立刻被归因**,
+          # 而不是让人猜「是不是我们改坏了」。所以把四个版本写进 job summary ——
+          # 它在 run 页面顶部,不用翻日志。
+          {
+            echo "### 工具链"
+            echo ""
+            echo "| 组件 | 版本 |"
+            echo "|------|------|"
+            echo "| gcc    | $(gcc --version 2>/dev/null | head -1) |"
+            echo "| as     | $(as --version 2>/dev/null | head -1) |"
+            echo "| ld     | $(ld --version 2>/dev/null | head -1) |"
+            echo "| python | $(python --version 2>&1 | head -1) |"
+            echo ""
+            echo "runner 镜像是滚动的,工具链会随时间变化 —— 这是**已知且刻意接受**的。"
+            echo "因此所有产物判定一律比 `.s`(源码 × 编译器的函数)而不是 `.exe`"
+            echo "(源码 × 工具链版本的函数)。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
           # v4.0.8:`make` 用 jhyy.exe 自己编 src0,并做 byte-equal 自举闭环检查。
           #
           # STRICT_TOOLCHAIN=0 的理由(2026-10-18 修正措辞):它比的是 `.exe` 字节,

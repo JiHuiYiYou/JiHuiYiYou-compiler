@@ -105,6 +105,9 @@ def jhyy_compile(
 def jhyy_run(
     file: str,
     extra_inputs: Optional[list] = None,
+    # ⚠️ 这个 10 **不是** DEFAULT_TIMEOUT,别顺手改:它是交互式单文件编译+运行,
+    # 语义是「敲一条命令该等多久」,过紧会卡住人,过松则失去意义。
+    # 套件级的超时统一走 jhyy_regress.DEFAULT_TIMEOUT。
     timeout: int = 10,
 ) -> dict:
     """Compile AND execute a .jhyy file. Returns exit code + stdout/stderr.
@@ -294,7 +297,7 @@ def _simple_format(src: str) -> str:
 def jhyy_regress(
     binary: str = "compiler/build/bin/jhyy.exe",
     tests: Optional[list] = None,
-    timeout: int = 20,
+    timeout: int = regress_mod.DEFAULT_TIMEOUT,
     enforce_baseline_hash: bool = True,
 ) -> dict:
     """Run regression tests against a JHYY compiler binary.

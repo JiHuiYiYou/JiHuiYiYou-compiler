@@ -30,6 +30,30 @@ JHYY_ROOT = Path(__file__).resolve().parents[1]
 TEST_DIR = JHYY_ROOT / "compiler/tests/examples"
 
 
+# ── 单测试超时(死循环探测上限,秒)—— **单一事实来源** ──────────────────
+#
+# 2026-10-18:此前这个数字散在**四个**地方且互相矛盾:
+#
+#   regress.py   --timeout            default=300
+#   jhyy_regress --timeout            default=300
+#   run_all()    签名默认              **10**    ← 病灶
+#   server.py    jhyy_regress MCP 工具 default=**20**
+#
+# 危害:`server.py:323` 按位置传参,所以 MCP 走的是 20 而不是 10 —— 但任何
+# **直接调 `run_all(...)` 而不显式传 timeout** 的调用方(包括将来的代码、
+# 一次性的排查脚本)都会拿到 **10 秒**。单次编译实测 1.26s,并发争抢下
+# 会被放大好几倍(`:328-331` 自己的注释就写了这件事),于是变成随机被杀:
+# 失败看起来像「这个测试坏了」,实际是超时太紧。**这种 flake 比没有门更糟**,
+# 因为它会诱导人去改一个没坏的测试。
+#
+# 300 不是随便挑的:`Makefile:225` 与 regress 实测单次完整编译(编译器 + gcc
+# 链接)约 1.26s,300s 对它是 240 倍余量。它的职责是抓**永不返回**的循环,
+# 不是性能预算 —— 所以宁可宽裕。
+#
+# 改这里,不要在任何调用点再写数字。
+DEFAULT_TIMEOUT = 300
+
+
 # Sprint mcp-2: NTSTATUS table 抽到 jhyy_ntstatus.py 共享给 jhyy_runner.compile_and_run.
 # Re-export here 保 back-compat (test_regress.py / regress.py shim 都 import 此模块).
 from jhyy_ntstatus import NTSTATUS_NAMES, ntstatus_name  # noqa: E402,F401
@@ -78,6 +102,44 @@ def _build_subprocess_env() -> dict:
     return env
 
 
+def _kill_process_tree(pid: int) -> None:
+    """杀掉 `pid` 及其**后代**,不碰父进程。
+
+    2026-10-18 补回。背景:`_run_capture` 超时时只 `proc.kill()` 直接子进程,
+    而 jhyy.exe 是通过 `system()` / CreateProcess 调 gcc 的 —— gcc / cc1 / as
+    这些**孙进程会活下来**,在一次 201 个测试的运行里持续累积。它们占 CPU、
+    占句柄、占 exe 文件锁,表现为「某些测试随机挂」(harness 自己的注释
+    `:328-331` 就记着这个症状)。
+
+    ⚠️ 为什么当年 `taskkill /T` 把 harness 自己的 shell 一起杀了(2026-10-17,
+    连丢三轮 CI 数据):那次**没有带 `/PID`**,是按进程名杀的。
+    **`/PID` 是必须的** —— 带显式 PID 时 taskkill 只杀那棵以它为根的子树,
+    父进程(harness)不在其中。
+
+    两道守卫,防止任何情况下误伤自己:
+      · 目标 pid 不得是本进程或父进程
+      · 只在 Windows 上执行,其余平台直接返回(POSIX 上子进程不 fork 孙进程)
+
+    失败一律吞掉:清理是 best-effort,不该让一次测试失败变成 harness 崩溃
+    —— 那正是 2026-10-17 那三轮 CI 的失败形态。
+    """
+    if os.name != "nt":
+        return
+    try:
+        if not pid or pid <= 0:
+            return
+        me, parent = os.getpid(), os.getppid()
+        if pid in (me, parent):
+            return
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(pid)],
+            capture_output=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception:
+        pass
+
+
 def _run_capture(cmd, timeout: int, env: dict) -> tuple:
     """跑 cmd 并抓取输出,超时则**杀整棵进程树**。
 
@@ -110,10 +172,17 @@ def _run_capture(cmd, timeout: int, env: dict) -> tuple:
     except subprocess.TimeoutExpired as exc:
         child_exited = proc.poll() is not None
         child_rc = proc.returncode
-        # 只杀直接子进程。**不要 taskkill /T**:2026-10-17 实测它会把
-        # harness 自己的 shell 一起带走(step 零输出 + exit 2304,连丢三轮
-        # CI 数据)。留着的 gcc/cc1 孤儿是真问题,但比把测试框架杀了强。
+        # 先杀直接子进程,再扫掉它的后代(gcc/cc1/as)。
+        #
+        # 2026-10-17 之所以只留 `proc.kill()`:那次试 `taskkill /T` 把 harness
+        # 自己的 shell 一起杀了(step 零输出 + exit 2304,连丢三轮 CI 数据)。
+        # 复盘:那次**没带 `/PID`**,是按进程名杀的。带显式 `/PID` 时只杀那棵
+        # 以它为根的子树,harness 作为父进程不在其中 —— `_kill_process_tree()`
+        # 里另有两道守卫(不得是本进程/父进程、Windows 限定)。
+        #
+        # 只在超时路径上扫:正常完成时 jhyy.exe 已经等过 gcc 了,没有遗留。
         proc.kill()
+        _kill_process_tree(proc.pid)
         # 排空只给 2s。管道写端可能被**孙进程**持有(见 child_exited),那种情况
         # 下无论等多久都关不上 —— 第一版给 30s,单次超时就多烧 30s,3 个测试 ×
         # 2 次重试 = 白等 3 分钟。拿不到就用 TimeoutExpired 里已有的部分输出。
@@ -157,34 +226,73 @@ def save_baseline_hash(binary: str) -> str:
     return sha
 
 
-def _check_baseline_freshness(binary: str, src_dir: str = "compiler/src") -> Tuple[bool, str]:
-    """检查 binary 是否在 src 之后被构建过. 防止 phantom binary (忘记
+def _freshness_src_dirs(binary: str) -> list:
+    """这个二进制该跟哪些源树比 mtime。
+
+    2026-10-18:此前这里硬编码 `src_dir="compiler/src"`,而 `compiler/src`
+    是**已冻结的 C 端**(v0.x,最后改动 2026-09-30)。它的 mtime 一直很旧,
+    于是对 `jhyy.exe` 而言 `bin_mtime >= newest_src` 恒成立 —— **这道
+    phantom-binary 保护从来没触发过**,只是看起来在跑。
+
+    而 `jhyy.exe` 真正是从 `compiler/src0/*.jhyy`(jhyy 端语言)编的,
+    并且链接了两个 host-gcc 编的 `.o`:
+        compiler/build/obj/_jhyy_runtime.o     ← compiler/runtime/runtime.c
+        compiler/build/obj/_jhyy_helpers.o   ← compiler/src0/jhyy_helpers.c
+    所以它的依赖面是 **src0 + runtime**。
+
+    不能一刀切成 src0:`jhyy_stage0.exe` 确实是从 `compiler/src/*.c` 编的,
+    拿 src0 去比它就是另一处失效。按二进制选。
+
+    Returns:
+        [相对 JHYY_ROOT 的目录路径, ...];不存在的目录会被静默跳过。
+    """
+    name = os.path.basename(binary).lower()
+    if name == "jhyy_stage0.exe":
+        # C 端 bootstrap:编译器源码 + 运行时
+        return ["compiler/src", "compiler/runtime"]
+    # jhyy 端(jhyy.exe / jhyy_v1.exe.exe / 任何 gen-N 副本)
+    return ["compiler/src0", "compiler/runtime"]
+
+
+def _check_baseline_freshness(binary: str, src_dirs=None) -> Tuple[bool, str]:
+    """检查 binary 是否在它的源之后被构建过. 防止 phantom binary (忘记
     重编就跑 regress).
 
     Returns:
         (is_fresh, message)
-        is_fresh=True 当: 源文件全部比 binary 旧 (binary mtime >= max(src mtime))
-                       OR baseline 文件不存在 (warning, 不 fail)
+        is_fresh=True 当: 所有源目录都缺失, 或源文件全部比 binary 旧
         is_fresh=False 当: 源里有文件比 binary 新, 怀疑 binary 是旧 build
 
     Rationale: .il byte-equal 是真回归信号, .exe sha 防不了非确定性 drift
     也没必要防. binary mtime 跟 src mtime 的相对关系才决定 binary 是不是
     "新构建的" — 这才是 phantom binary 场景的真信号.
+
+    ⚠️ 这道检查回答的是**本地**的同一个问题:`ci.yml` 的 `artifact-fresh`
+    门回答的是「提交产物 vs 当前源码」。两边曾经一个真一个空,现在对齐了 ——
+    否则会出现「CI 绿但本地拿到的是旧编译器」这种最难查的组合。
     """
     bin_mtime = os.path.getmtime(binary)
-    src_root = JHYY_ROOT / src_dir
-    if not src_root.exists():
-        return (True, f"src dir missing ({src_root}), skipping freshness check")
-    newest_src = max(
-        (os.path.getmtime(p) for p in Path(src_root).rglob("*") if p.is_file()),
-        default=0.0,
-    )
+    dirs = src_dirs if src_dirs is not None else _freshness_src_dirs(binary)
+    newest_src = 0.0
+    seen = []
+    for d in dirs:
+        src_root = JHYY_ROOT / d
+        if not src_root.exists():
+            continue
+        seen.append(d)
+        newest_src = max(
+            [newest_src]
+            + [os.path.getmtime(p) for p in Path(src_root).rglob("*") if p.is_file()]
+        )
+    if not seen:
+        return (True, f"src dirs missing ({dirs}), skipping freshness check")
     if bin_mtime + 0.5 >= newest_src:  # 0.5s 容忍文件系统 mtime 精度
-        return (True, f"binary mtime {bin_mtime:.0f} >= newest src mtime {newest_src:.0f}")
+        return (True, f"binary mtime {bin_mtime:.0f} >= newest src mtime "
+                       f"{newest_src:.0f} (src: {', '.join(seen)})")
     return (False, (
         f"binary is older than source: binary mtime={bin_mtime:.0f}, "
-        f"newest src mtime={newest_src:.0f} — suspect phantom binary. "
-        f"Rebuild before running regress."
+        f"newest src mtime={newest_src:.0f} (src: {', '.join(seen)}) — "
+        f"suspect phantom binary. Rebuild before running regress."
     ))
 
 
@@ -536,7 +644,7 @@ def _assertion_kind(fname: str) -> str:
 def run_all(
     binary: str,
     tests: Optional[List[str]] = None,
-    timeout: int = 10,
+    timeout: int = DEFAULT_TIMEOUT,
     enforce_baseline_hash: bool = True,
     jobs: Optional[int] = None,
 ) -> dict:
@@ -808,7 +916,7 @@ if __name__ == "__main__":
                     help="Skip phantom-binary (mtime) check")
     ap.add_argument("--tests", nargs="*", default=None,
                     help="Subset of tests to run (default: all)")
-    ap.add_argument("--timeout", type=int, default=300,
+    ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
                     help="死循环探测上限(秒),compile 与 run 各自适用。"
                          "刻意给得很宽:它要抓的是永不返回的无限循环,不是性能预算 —— "
                          "并行跑时单个 compile 会被 CPU 争抢拉长好几倍,"
