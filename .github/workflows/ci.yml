@@ -59,6 +59,13 @@ name: JHYY CI
 on:
   push:
     branches: [main]
+    # ⚠️ tags 必须**单独**列 —— `branches: [main]` 只匹配分支 ref
+    # (`refs/heads/main`),不匹配 `refs/tags/*`。2026-10-18 实测:打完
+    # v4.0.9-rc1 push 上去,**没有任何 run 被触发**,release job 里那个
+    # `if: startsWith(github.ref, 'refs/tags/v')` 根本没机会求值。
+    # 也就是说发布链在真 tag 上从来没被跑过 —— 正是这次要消灭的那类静默失效。
+    # 注意:GitHub 的 push 过滤器里 branches 与 tags 是**或**关系,不是且。
+    tags: ['v*']
   workflow_dispatch:
   pull_request:
     branches: [main]
