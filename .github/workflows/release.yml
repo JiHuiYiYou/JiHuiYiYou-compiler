@@ -26,10 +26,27 @@
 # Reference: docs/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.5
 name: JHYY Installer Release
 
+# 2026-10-18:本文件从「tag push 直接触发」改成 **reusable workflow**。
+#
+# 为什么要改:`push: tags` 触发的 run **无法 `needs:` 别的 workflow**,所以
+# release 一直是「门没过也能发布」。实测后果是 v3.4.2 / v4.0.0-rc1 / v4.0.1 /
+# v4.0.2 / v4.0.6 五次 tag push 全部失败,最后一个真实 release 停在
+# 2026-09-08 的 v3.2.0 —— 而同期文档里一直在写 "v4.0.0-rc1 shipped"。
+# 「文档说 shipped」与「有可安装产物」之间断了 6 周,没人发现,因为发布失败
+# 不阻塞任何东西。
+#
+# 现在由 ci.yml 以 `needs: build-and-test` 调用本文件 —— 门不绿就发不出去。
+# 调用点见 `.github/workflows/ci.yml` 的 `release` job。
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_call:
+    inputs:
+      tag:
+        description: '要发布的 tag(由调用方传入)'
+        required: true
+        type: string
+  # 手动路径:不经过 CI 的门,只用于验证发布链本身能不能跑通(dry-run 首选)。
+  # 它**不会**创建 Release,除非显式 dry_run=false —— 那条路是给「CI 已经绿了、
+  # 只是想手动重发一遍」用的,不是给「门没跑就发」用的。
   workflow_dispatch:
     inputs:
       version:
@@ -39,7 +56,7 @@ on:
       dry_run:
         description: 'Dry-run (skip upload + release creation)'
         type: boolean
-        default: false
+        default: true
 
 # Release builds cannot be cancelled mid-flight (assets would be partial).
 # concurrency cancel-in-progress: false ensures a tag push waits for prior runs.
@@ -54,7 +71,11 @@ jobs:
   build-and-release:
     name: Build installer + create GitHub Release
     runs-on: windows-latest
-    timeout-minutes: 30
+    # 30 → 40。实测:build-and-test 全程 ~2m40s,本 job 的 WiX bundle + MSI
+    # + vsix 打包是未知的耗时大头(过去 6 周从没跑成功过,没人知道它多长)。
+    # 取 40 是「宁可多花 minutes,不要半途而废」—— job 被超时砍掉会留下
+    # 半套 artifacts,而 GitHub Release 一旦被创建再补产物是另一套麻烦。
+    timeout-minutes: 40
 
     env:
       # IS_RC: '1' if version contains '-rc' suffix
@@ -65,13 +86,22 @@ jobs:
       - name: Compute VERSION + IS_RC + JHY_TAG_NAME
         shell: pwsh
         run: |
-          # Determine VERSION: prefer workflow_dispatch input, else strip 'v' from tag ref.
-          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+          # 三条入口,优先级从高到低:
+          #   workflow_call     —— ci.yml 传来的 tag(唯一会真正发布的那条路)
+          #   workflow_dispatch —— 手动输入的 version(dry-run / 手动重发)
+          if ("${{ inputs.tag }}" -ne "") {
+            $env:VERSION = "${{ inputs.tag }}" -replace '^v', ''
+            Write-Host "[via workflow_call] tag=${{ inputs.tag }}"
+          } elseif ("${{ inputs.version }}" -ne "") {
             $env:VERSION = "${{ inputs.version }}"
+            Write-Host "[via workflow_dispatch] version=${{ inputs.version }}"
           } else {
-            # push tag: github.ref_name like "v1.5.5-rc1" -> "1.5.5-rc1"
+            # 兜底:tag 名。保留是因为 reusable workflow 的 inputs 在某些
+            # 手动场景下可能为空,那时至少还能推出一个版本号。
             $env:VERSION = "${{ github.ref_name }}" -replace '^v', ''
+            Write-Host "[fallback] ref_name=${{ github.ref_name }}"
           }
+          if ($env:VERSION -eq "") { throw "VERSION 解析失败,拒绝发布" }
           $env:JHY_IS_RC = ($env:VERSION -match '-rc') ? '1' : '0'
           $env:JHY_TAG_NAME = "v$($env:VERSION)"
           Write-Host "VERSION=$($env:VERSION)"
@@ -146,16 +176,17 @@ jobs:
           npm install -g @vscode/vsce
           vsce --version
 
-      - name: Build stage 0 (C-side bootstrap)
+      # 2026-10-18:删掉 `make stage0`。v4.0.8 起 QBE 与 stage0 都已移出 `all`
+      # 的依赖链(jhyy.exe 自己编 src0),而 C 侧 stage0 的运行期仍需要
+      # `qbe/qbe.exe` —— 那个 vendored 二进制被 `.gitattributes` 的
+      # `qbe/** text eol=lf` glob 做 CRLF 转换损坏过(实测差 31 字节,
+      # 症状 "not compatible with the version of Windows you're running")。
+      # v4.0.6 的 release 就是死在这一步。
+      - name: Build jhyy.exe (self-bootstrap, jhyy compiles src0)
         shell: msys2 {0}
         run: |
-          make stage0
-
-      - name: Build jhyy.exe (jhyy-side production via stage 0)
-        shell: msys2 {0}
-        run: |
-          make
-          sha256sum compiler/build/bin/jhyy.exe
+          make STRICT_TOOLCHAIN=0
+          echo "jhyy.exe sha: $(sha256sum compiler/build/bin/jhyy.exe | cut -d' ' -f1)"
           ls -la compiler/build/bin/jhyy.exe
 
       - name: Run regress (gated — must PASS)
@@ -165,14 +196,25 @@ jobs:
           # jh_gcc_path()), regress.py 不再需要 prepend MSYS2 bin 到 PATH.
           # 之前 "Propagate MSYS2 paths" step 已删 (W-029 superseder).
           # W-028 保留 ACTIVE: Windows process exit code 8-bit, compare mod 256.
-          # Sanity: compile one .jhyy directly to verify jhyy.exe works
+          #
+          # Sanity 那段此前是**空转**的:`... | tail -20; echo "Sanity exit: $?"`
+          # 里 `$?` 拿到的是 `tail` 的退出码,永远是 0 —— 无论 jhyy.exe 编译
+          # 成功还是崩。要拿编译器自己的退出码,必须绕开管道。
           echo "=== Sanity: compile arith.jhyy directly ==="
-          compiler/build/bin/jhyy.exe compile compiler/tests/examples/arith.jhyy -o /tmp/sanity_arith.exe 2>&1 | tail -20
-          echo "Sanity exit: $?"
-          ls -la /tmp/sanity_arith.exe 2>&1 || echo "no exe created"
+          compiler/build/bin/jhyy.exe compile compiler/tests/examples/arith.jhyy \
+              -o tmp/sanity_arith.exe >tmp/sanity.log 2>&1
+          rc=$?
+          tail -20 tmp/sanity.log
+          echo "Sanity exit: $rc   (期望 0)"
+          if [ "$rc" != "0" ]; then echo "::error::jhyy.exe 编译 arith.jhyy 失败,拒绝发布"; exit 1; fi
+          if [ ! -s tmp/sanity_arith.exe ]; then echo "::error::没产出 exe,拒绝发布"; exit 1; fi
           echo "=== End sanity ==="
           echo ""
-          JHYY_DEBUG_W028=1 python regress.py --all
+          # 注意:这里测的是**本 job 刚编出来的** jhyy.exe,与 ci.yml 的门同一个
+          # 二进制语义。ci.yml 的 build-and-test 已经先跑过一遍同样的 regress,
+          # 这里重跑是因为 release 会打 tag —— tag 上的产物必须自己验一遍,
+          # 不能只引用上游 job 的结论。
+          python regress.py --all --jobs=2 --timeout=300
           # exit code 0 = pass; non-zero = fail (will block release)
 
       - name: Build installer (Burn bundle + MSI + .vsix)
@@ -256,7 +298,14 @@ jobs:
           Write-Host "[OK] all 5 artifacts present"
 
       - name: Create GitHub Release
-        if: ${{ !inputs.dry_run || github.event_name == 'push' }}
+        # 2026-10-18:`github.event_name == 'push'` 那半边在改成 reusable
+        # workflow 之后永远是 false(push 触发的是 ci.yml,不是本文件),于是
+        # 整条 `!inputs.dry_run || ...` 退化成只看 dry_run。
+        # 手动路径的 dry_run 默认已改成 true,所以手动跑默认**不会**发版 ——
+        # 要发必须显式 dry_run=false,那是有意的:门没跑过的东西不该被发出去。
+        # workflow_call 那条路(ci.yml 的 release job)不看 dry_run,永远发 ——
+        # 因为它已经过了 build-and-test 的门。
+        if: ${{ github.event_name == 'workflow_call' || inputs.dry_run == 'false' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.JHY_TAG_NAME }}

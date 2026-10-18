@@ -210,6 +210,47 @@ jobs:
           # 红的门不算门(feedback_ci_gate_must_exercise_path)。
           bash compiler/tests/bootstrap/artifact_checks.sh --selftest
 
+      - name: Emit SysV .s for the Linux-side gate
+        if: always()
+        shell: msys2 {0}
+        run: |
+          # 这 5 个测试在 windows-latest 上**跑不了**:link 出来的是 Win PE,
+          # 要验 SysV ABI 得用 `runtime/linux_elf/crt0.S` + `link.ld` 链成 ELF。
+          # 而 regress.py 的 `--cross=auto` 在 CI 上探测不到能用的环境
+          # (windows-latest 没有 Docker daemon,gcc:12 也没有 windows manifest)
+          # → 5 个测试永远 SKIP,`_sysv_failed == 0` 就算通过。
+          #
+          # 拆成两段:本 job 只负责「编出 .s」(需要 Windows 的 jhyy.exe),
+          # sysv job 在 ubuntu-latest 上负责「链 + 跑 + 比期望值」。
+          #
+          # 顺带关掉 regress 里的 wire-only SKIP:这里显式列出 5 个名字,
+          # 少编出一个就在本步失败,而不是悄悄进到下游。
+          mkdir -p tmp/sysv_il
+          TESTS="sysv_abi_test sysv_struct_mixed sysv_struct_pass sysv_struct_ret sysv_vararg_basic"
+          missing=0
+          for t in $TESTS; do
+            src="compiler/tests/examples/$t.jhyy"
+            [ -f "$src" ] || { echo "::error::缺测试文件 $src"; missing=$((missing+1)); continue; }
+            cp -f "$src" "tmp/sysv_il/$t.jhyy"
+            compiler/build/bin/jhyy.exe compile --target=amd64_sysv_freestanding --no-link \
+                "$src" -o "tmp/sysv_il/$t"
+            if [ -s "tmp/sysv_il/$t.s" ]; then
+              echo "  ✅ $t.s  $(wc -c < tmp/sysv_il/$t.s) B"
+            else
+              echo "::error::$t 没产出 .s —— SysV 门将在下游拿不到输入"
+              missing=$((missing+1))
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+
+      - name: Upload SysV .s artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sysv-il
+          path: tmp/sysv_il/
+          if-no-files-found: error
+
       - name: Artifact-level gates (expected-FAIL model — blocking as of 2026-10-18)
         # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
         #   加它是因为 job 原本在第一个失败 step 就中止 —— 一次 CI 周期只能拿到一个
@@ -238,3 +279,68 @@ jobs:
           #
           # ⚠️ 不要为了让 CI 变绿去放宽 KNOWN_FAIL 里的签名。那正是本项目栽过的坑。
           bash compiler/tests/bootstrap/artifact_checks.sh
+
+  # ══════════════════════════════════════════════════════════════════════
+  # 5 个 SysV ABI 测试 —— 此前在 CI 上**根本不存在门**
+  # ══════════════════════════════════════════════════════════════════════
+  #
+  # `regress.py` 的 `--cross=auto` 在 windows-latest 上三个探测全失败
+  # (没有可用的 WSL distro / docker 镜像 gcc:12 没有 windows-amd64 manifest),
+  # 于是 cross_mode=none → 5 个 sysv 测试永远 SKIP,`_sysv_failed == 0`
+  # 就算通过。CI 日志实证:`cross: --cross=auto → resolved=none`。
+  #
+  # 而 W-104(SysV caller 侧分类错)与 W-116(SysV callee 只 spill 4 个寄存器)
+  # 都在待清零的 ACTIVE 名单里 —— **它们的门压根不存在**。
+  #
+  # ubuntu-latest 上这条路能通:没有 wsl.exe(wsl 分支自动跳过),
+  # `_docker_daemon_up()` 会成功,gcc:12 在 linux/amd64 上有 manifest。
+  # docker 分支(`regress.py:377-441`)的 Stage 1(Windows 侧编译)在 Linux 上
+  # 本来就可用。`runtime/linux_elf/crt0.S` 与 `link.ld` 都已在仓里。
+  sysv:
+    name: SysV ABI (5 tests windows-latest can never run)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download .s emitted on the Windows runner
+        uses: actions/download-artifact@v4
+        with:
+          name: sysv-il
+          path: tmp/sysv_il
+
+      - name: SysV ABI gate (link + run + compare // EXPECT:)
+        run: |
+          set -x
+          uname -a
+          gcc --version | head -1
+          ls -la tmp/sysv_il/
+          # 5 份一份都不能少 —— 少了就是上游 emit 步出了问题,不能当成通过
+          n=$(ls tmp/sysv_il/*.s 2>/dev/null | wc -l)
+          echo "收到 $n 份 .s(期望 5)"
+          [ "$n" -eq 5 ] || { echo "::error::.s 数量不对,拒绝报绿"; exit 1; }
+          bash compiler/tests/bootstrap/sysv_link_run.sh tmp/sysv_il
+
+  # ══════════════════════════════════════════════════════════════════════
+  # 发布 —— 门不绿就发不出去
+  # ══════════════════════════════════════════════════════════════════════
+  #
+  # 2026-10-18 之前,发布由 release.yml 的 `push: tags` 触发。那条路
+  # **无法 needs: 别的 workflow**,所以门没过也能发布。实测后果:
+  # v3.4.2 / v4.0.0-rc1 / v4.0.1 / v4.0.2 / v4.0.6 五次 tag push 全部失败,
+  # 最后一个真实 release 停在 2026-09-08 的 v3.2.0 —— 而同期文档一直在写
+  # "v4.0.0-rc1 shipped"。「文档说 shipped」与「有可安装产物」断了 6 周。
+  #
+  # 现在 release.yml 改成 reusable workflow(`on: workflow_call`),由本 job
+  # 以 `needs: build-and-test` 调用 —— 这是 `needs:` 能跨文件生效的唯一途径,
+  # 且零代码重复。
+  release:
+    name: Release installer
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write   # 创建 GitHub Release
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ github.ref_name }}
