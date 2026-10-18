@@ -201,12 +201,18 @@ jobs:
           # 里 `$?` 拿到的是 `tail` 的退出码,永远是 0 —— 无论 jhyy.exe 编译
           # 成功还是崩。要拿编译器自己的退出码,必须绕开管道。
           echo "=== Sanity: compile arith.jhyy directly ==="
-          # tmp/ 在本 job 里没人创建过(ci.yml 的 build-and-test 里有 SysV emit
-          # 步会建它,这里没有)—— 第一次 dry-run 就死在这行:
-          #   tmp/sanity.log: No such file or directory
+          # 两个坑都在这里踩过,都是第一次 dry-run 抓出来的:
+          #   1) tmp/ 本 job 没人创建过(ci.yml 的 build-and-test 里有 SysV emit
+          #      步会建它,这里没有)→ tmp/sanity.log: No such file or directory
+          #   2) `-o` 是**加** .exe 后缀,不是替换:`-o tmp/x.exe` 产出的是
+          #      `tmp/x.exe.exe`。全仓惯例都是 `-o <不带后缀>`
+          #      (closure_check.sh 的 `-o "$WORK/v2"` → v2.exe、artifact_checks
+          #      的 `-o "$WORK/ls"` → ls.exe),原来这行写的是
+          #      `-o /tmp/sanity_arith.exe` + `ls /tmp/sanity_arith.exe`,
+          #      两处都错 —— 但因为 ls 是纯信息性的、没人看,所以从没暴露。
           mkdir -p tmp
           compiler/build/bin/jhyy.exe compile compiler/tests/examples/arith.jhyy \
-              -o tmp/sanity_arith.exe >tmp/sanity.log 2>&1
+              -o tmp/sanity_arith >tmp/sanity.log 2>&1
           rc=$?
           tail -20 tmp/sanity.log
           echo "Sanity exit: $rc   (期望 0)"
