@@ -61,7 +61,24 @@ on:
 # Release builds cannot be cancelled mid-flight (assets would be partial).
 # concurrency cancel-in-progress: false ensures a tag push waits for prior runs.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # ⚠️ 2026-10-18:这个 group **必须与调用方 ci.yml 的不一样**。
+  #
+  # GitHub docs 的明确警告:caller 与 called workflow 用同一个 concurrency
+  # group 时,两边都是 cancel-in-progress: false 就会互相等待 —— 调用方等
+  # 被调用的跑完,被调用的等调用方让出 group。死锁的结果是 job 永远不出现,
+  # run 以 failure 结束且**没有任何注解说明原因**。
+  #
+  # 实测踩过:tag 推送后 run 39102042307 里 build-and-test 与 sysv 都 success,
+  # 但 `Release installer` 连 check-run 都没生成,run 结论却是 failure。
+  #
+  # 为什么四次 workflow_dispatch 的 dry-run 全过:那条路径下
+  # `github.workflow` = "JHYY Installer Release",与 caller 的
+  # "JHYY CI" 本来就不同,不冲突。**只有真 tag 经 reusable call 时才踩到** ——
+  # 又一次「dry-run 测不到的那一层」。
+  #
+  # 被调用的 workflow 里 `github.workflow` 是**调用方的**名字,所以光写
+  # `${{ github.workflow }}` 不够 —— 必须显式加后缀区分。
+  group: ${{ github.workflow }}-release-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
