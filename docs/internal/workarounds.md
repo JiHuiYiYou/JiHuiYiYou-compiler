@@ -120,7 +120,7 @@
 | [W-108](#w-108) | RESOLVED | 索引重建脚本静默丢弃 59/89 条目 —— STATUS_RE 不容忍 前缀,且只匹配 H2 |
 | [W-109](#w-109) | RESOLVED | 自举 IL lexer 缺 6 个浮点比较助记符 — f32/f64 六个比较运算静默降级 |
 | [W-110](#w-110) | ACTIVE | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 |
-| [W-111](#w-111) | ACTIVE | 泛型 enum 一旦真被使用 —— sema 报错后 segfault;多字段 payload... |
+| [W-111](#w-111) | ACTIVE | 泛型 enum 的关联构造器在无类型上下文处不被识别;多字段 payload 连解析都过不去 |
 | [W-112](#w-112) | ACTIVE | `#[link_section]` 完全失效 — 属性被解析但 codegen 是 no-op |
 | [W-113](#w-113) | ACTIVE | `asm!` 与 memory barrier 的字节被 emit 到 `ret` 之后,永不执行 |
 | [W-114](#w-114) | ACTIVE | 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效 |
@@ -7463,68 +7463,101 @@ many(1,2)=1110    ← 正确
 - 相关:W-109(lexer 缺助记符,不同根因)/ W-096 / W-097 / W-101
 
 <a id="w-111"></a>
-## W-111: 泛型 enum 一旦真被使用 —— sema 报错后 segfault;多字段 payload 连解析都过不去
+## W-111: 泛型 enum 的关联构造器在无类型上下文处不被识别;多字段 payload 连解析都过不去
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — `type Option<T> = enum { Some(T), None }` 匹配时编译器崩溃(exit 139)
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — 2026-10-18 复核:构造器缺口仍真实存在,但「编译器崩溃」已不成立
 **Backfilled:** 2026-10-15 (v3.2.0b「3i generics — enum generic」声称 ship 的那条)
-**Filed-by:** audit-fanout-2026-10-15
-**日期:** 2026-10-15 首次实测;实际引入时间待 RCA 确定
+**Filed-by:** audit-fanout-2026-10-15;RCA rca-w111-2026-10-18
+**日期:** 2026-10-15 首次实测 → 2026-10-18 复核(**SEGV 不复现,剩余缺口已重新定位**)
 
-**触发面:** 用户写「泛型 enum」+「对它的变体做 match」。
+### ⚠️ 2026-10-18 复核:本条的性质描述**曾经是错的**,已更正
 
-**症状(四个变体,全部实测):**
+原条目登记为「泛型 enum 一旦被 match → sema 报错后 SEGV(编译器崩溃)」。
+**2026-10-18 在 binary sha `1eeb81b5` 上逐形态实测:SEGV 已不复现。**
+编译器给出的是**干净的诊断**(`error: unknown enum type` + exit 1),用户拿得到
+完整信息 —— 与「崩溃 / 拿不到诊断」相反。
 
-| 代码形态 | 结果 |
+台账留一个已经不成立的性质,会让下一个做它的人从错误的前提出发,所以更正。
+
+| 代码形态 | 2026-10-15 记录 | 2026-10-18 实测 |
+|---|---|---|
+| `type Option<T> = enum { Some(T), None }` 声明但不使用 | exit 42,不报错 | ✅ 一致 |
+| 只构造 `Option::None` | exit 1,干净报错 | ✅ 一致 |
+| **match 变体** | **exit 139 SEGV** | ✅ **干净,无 SEGV** |
+| 多字段泛型 payload `Two(T, T)` | exit 1,`error: expected )` | ✅ 一致 |
+| 泛型 fn(非 enum)对照组 | exit 42,正常 | ✅ 一致 |
+
+SEGV 应是被 W-097 / W-098..W-101 / W-102 那一批修复顺带解决的。**未能定位到
+具体哪一笔** —— W-102 的描述是「泛型**结构体**字面量 SEGV」,不是 enum,不能断言。
+
+### 仍然存在的缺口(精确边界)
+
+四组对照,**每一格都工作,除了最后一格**:
+
+| 对照 | 结果 |
 |---|---|
-| `type Option<T> = enum { Some(T), None }` 声明但**不使用** | exit 42,**不报错** |
-| 只构造 `let x = Option::None;` | exit 1,`error: unknown enum type`(干净报错) |
-| **match** 变体 | **exit 139 SEGV** |
-| `type Pair<T> = enum { Two(T, T), Empty }` | exit 1,`error: expected )`(**解析阶段就挂**) |
-| 泛型 fn(非 enum)`fn id<T>(x: T) -> T` 对照组 | exit 42,**正常** |
+| 泛型 struct 作参数类型 | exit 0 |
+| 泛型 struct **构造** `Box<i32> { v: 7 }` | exit 0 |
+| 非泛型 enum 构造 `Opt::None` | exit 0 |
+| 泛型 enum **作类型 + match**(不构造) | exit 0 |
+| **泛型 enum 构造 `Option::None`** | **exit 1 `unknown enum type`** |
 
-崩溃发生在 **sema 阶段**,且是在**已经打出错误之后**:
+**行为上的关键差异:** `generics_enum.jhyy` 里 `match` 内的 `Option::Some` /
+`Option::None`(第 19-22 行)**不报错**,只有 `main_jhyy` 里的构造调用
+(第 26 行)报错。
 
-```
-[3] sema start
-foo.jhyy:2:38: error: unknown enum type
-<SEGV>
-```
+> **即:有类型上下文时(match 的 scrutinee)能解析,没有时不解析。**
+> 连 `fn mk() -> Option<i32>` 的**返回类型**上下文都不生效。
 
-即 `sema_error_str` 报完错,错误恢复路径继续往下走,拿到了无效指针。
+### 机制(定位到文件行)
 
-**为什么一直没被发现:** `compiler/tests/examples/generics_enum.jhyy` 声称测的
-就是「enum generic — Option\<T\> with Some(T) payload」,但它的 `main_jhyy`
-只有一行 `return 42;` —— **类型声明了却完全没被使用**。所以编译器走的是
-「声明但不实例化」的路径,什么都不会触发。这正是 `float_cmp` 的同款问题:
-**测试名字覆盖了功能,测试内容没有**。
+- `sema.jhyy:2157`(struct lit)与 `sema.jhyy:2231`(enum variant)的解析结构
+  **完全相同**:`type_sym → type_ptr/kind 检查 → 回退 symtab_lookup(name) → 报错`。
+  所以差异**不在解析算法**,在**上游 `type_ptr` 被设成了什么**。
+- 泛型单态化机制**存在**:`mono.jhyy:839 mono_clone_enum_def` 会克隆泛型 enum
+  并注册成带 mangled 名的实例(`Option<i32>`)。
+- 但它目前只在**函数调用**路径被调用(`sema.jhyy:1246 mono_expand_fn_call`,
+  turbofish)。**表达式位置的 enum 变体引用没走到实例化。**
 
-**根因(未 RCA,两条独立缺陷):**
-1. **sema 错误恢复崩溃** —— 这是更该先修的那条。泛型 enum 支不支持是另一个
-   议题,但**报完错就崩**是明确的健壮性缺陷:任何让 sema 进入该错误路径的
-   用户程序都会让编译器段错误,拿不到完整诊断。
-2. **泛型 enum 实际未被支持** —— 类型解析阶段就认不出 `Option<i32>`。
-   泛型 *函数* 正常,所以问题局限在 enum 的泛型化路径。
+### 这条现在是「功能缺失」还是「bug」?
 
-**workaround:** 无。用户侧只能避开泛型 enum(改用非泛型 `type Opt = enum
-{ Some(i32), None }`,实测正常)。
+**是未完成的实现,不是崩溃缺陷。** 泛型 enum 的**类型**能用、**match** 能用、
+泛型 struct 的**构造**能用,唯独泛型 enum 的**关联构造器**在无类型上下文处
+不认 —— 同一特性里唯一没接上的那条路。
 
-**影响范围:** 任何用泛型 enum 的用户程序 —— 编译器崩溃,而非错误诊断。
-`src0` 自身不用泛型 enum,所以自举闭环抓不到。
+⚠️ 而 `generics_enum.jhyy` 的 `// EXPECT: 106` 期望**整个程序可用**。
+任何部分修复都过不了这条测试 —— 要真修就得让它完全可用。
+
+**修它需要先回答一个设计问题:类型参数从哪来?**
+  · 从 match 的 scrutinee —— 已能工作(现有路径)
+  · 从调用点的期望参数类型 —— `unwrap_or(o: Option<i32>, ...)` 的首参类型已知,
+    理论上可以,但**期望类型是否一路传到了变体引用点是未知的**
+  · 强制 turbofish —— 语法变更
+
+**workaround:** 用户侧只能避开泛型 enum 的构造器(改用非泛型
+`type Opt = enum { Some(i32), None }`,实测正常;或有类型上下文的地方用 match)。
+
+**影响范围:** 泛型 enum 的构造器在无类型上下文的位置不可用。**这是干净的错误
+诊断,不是崩溃** —— 用户知道哪里错了,拿得到行号列号。`src0` 自身不用泛型 enum,
+自举闭环抓不到。
 
 **失效条件:**
-1. 先修 sema 错误恢复崩溃:打完 `unknown enum type` 后必须干净退出(补
-   `// EXPECT-ERROR: "unknown enum type"` 测试 —— 现在连这条都没有)
-2. 再决定泛型 enum 是「实现」还是「明确报不支持」。当前是**声明能过、用就崩**,
-   两头都不落地
-3. enum 多字段 payload(`Two(T, T)`)的解析器支持 —— 单独一条
+1. 先决定设计问题(类型参数从哪来),再动手
+2. `generics_enum.jhyy` 摘 XFAIL 且 PASS(exit 106)
+3. enum 多字段 payload(`Two(T, T)`)的解析器支持 —— 单独一条,`error: expected )`
 
 **引用:**
-- 声称覆盖该特性的测试 `compiler/tests/examples/generics_enum.jhyy`
-  (`main_jhyy` 仅 `return 42`,类型完全未使用)
+- `compiler/src0/sema.jhyy:2228-2259`(`NODE_ENUM_VARIANT` 解析与报错点)
+- `compiler/src0/sema.jhyy:2154-2180`(struct lit —— 结构相同、行为不同的对照)
+- `compiler/src0/mono.jhyy:839`(`mono_clone_enum_def` —— 机制存在但这条路径没调到)
+- 触发测试 `compiler/tests/examples/generics_enum.jhyy`
+  (**2026-10-15 已重写**:此前 `main_jhyy` 仅 `return 42`、类型完全未使用,
+  所以它作为 v3.2.0b 的 ship gate 一直空转;现在真用上了,`// EXPECT: 106`)
 - 同族:`generics_err_unsubst.jhyy` 同样是假 EXPECT(见 tests.md 审计)
-- 相关:W-109 / W-110(同属「测试翻不了红 → 缺陷活下来」家族)
+- 相关:W-109 / W-110(同属「测试翻不了红 → 缺陷活下来」家族)、
+  W-102(泛型**结构体**字面量 SEGV,已 RESOLVED,与本条的 SEGV 症状相邻但不同源)
 
-<a id="w-112"></a>
+
 ## W-112: `#[link_section]` 完全失效 — 属性被解析但 codegen 是 no-op
 
 **状态:** ACTIVE since 2026-10-15 (v4.0.8) — 生成的 .s 里没有任何 `.section` 指令;V3-B 3e 的 ship gate 一直是空转
