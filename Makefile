@@ -241,13 +241,43 @@ $(BIN_DIR)/jhyy_v1.exe.exe: $(BIN_DIR)/jhyy.exe
 
 # Self-host closure chain: v1→v2→v3→v4→v5 (v1 = 当前 jhyy.exe 的副本,
 # 所以 v1==v2 是确定性检查,不是跨版本对比)
+#
+# 2026-10-18 (CI 重构): 本 target 此前编完 v2..v5 之后**只 echo 一句**
+# "Check: sha256sum ... must match" 就退出 —— 真正的比对留给人工。
+# 它在 ci.yml 里是 blocking step,于是「一个从不判定的步骤」拿到了
+# 「一个会阻断合并的门」的权重。这比没有门更糟(feedback_ci_gate_must_exercise_path):
+# 读日志的人会以为闭环验过了。
+#
+# 现在它自己比。比对对象是 `.s` 不是 `.exe`: `.s` 是 (源码 × 编译器) 的函数,
+# 与 host gcc 版本无关; `.exe` 是 (源码 × gcc 版本) 的函数,跨 toolchain 必假阳性
+# —— W-117 那条 TOOLCHAIN-DRIFT 就是拿 .exe 跨 toolchain 比出来的噪音。
+#
+# 语义边界(重要,别误读):本 target 与 closure_check.sh 验的都是**确定性与自洽**,
+# 不是**正确性**。一个确定性的错误编译器照样闭环通过。正确性只有 regress 门管。
 selfhost: $(BIN_DIR)/jhyy.exe $(BIN_DIR)/jhyy_v1.exe.exe
-	@echo "Stage 2 closure chain: v1 → v2 → v3 → v4 → v5 byte-equal check (v1.8.3 N=4 baseline)"
-	$(BIN_DIR)/jhyy.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy_v2
+	@echo "Stage 2 closure chain: v1 → v2 → v3 → v4 → v5 .s byte-equal check"
+	$(BIN_DIR)/jhyy.exe  compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy_v2
 	$(BIN_DIR)/jhyy_v2.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy_v3
 	$(BIN_DIR)/jhyy_v3.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy_v4
 	$(BIN_DIR)/jhyy_v4.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy_v5
-	@echo "Check: sha256sum jhyy_v2.exe jhyy_v3.exe jhyy_v4.exe jhyy_v5.exe must match"
+	@for n in 2 3 4 5; do \
+	    if [ ! -s "$(BIN_DIR)/jhyy_v$$n.s" ]; then \
+	        echo "SELFFAIL: jhyy_v$$n.s 缺失或为空 —— 编译器静默 exit 0 但没产 .s(W-086 那类)"; \
+	        exit 1; \
+	    fi; \
+	done
+	@for pair in "2 3" "3 4" "4 5"; do \
+	    set -- $$pair; \
+	    if cmp -s "$(BIN_DIR)/jhyy_v$$1.s" "$(BIN_DIR)/jhyy_v$$2.s"; then \
+	        echo "  v$$1.s == v$$2.s  ✓"; \
+	    else \
+	        echo "SELFFAIL: v$$1.s != v$$2.s —— 自举未闭环"; \
+	        echo "  $(BIN_DIR)/jhyy_v$$1.s vs $(BIN_DIR)/jhyy_v$$2.s"; \
+	        diff "$(BIN_DIR)/jhyy_v$$1.s" "$(BIN_DIR)/jhyy_v$$2.s" 2>/dev/null | head -10 | sed 's/^/    /'; \
+	        exit 1; \
+	    fi; \
+	done
+	@echo "PASS — 自举闭环达成 (v2..v5 逐字节相同)"
 
 test:
 	@echo "Running tests..."

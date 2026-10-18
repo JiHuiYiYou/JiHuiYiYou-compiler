@@ -69,9 +69,14 @@ CAP_TEST_EXPECT=42
 
 if [[ ! -f "$JHYY_V1" ]]; then
     echo "ERR: JHYY_V1 not found at $JHYY_V1" >&2
-    echo "  v1 baseline binary missing. Restore via:" >&2
-    echo "    git checkout archive/v2.6.6 -- compiler/build/bin/jhyy_v1.exe.exe" >&2
-    echo "  Or build fresh v1 (jhyy.exe 编 src0/main.jhyy + freeze)" >&2
+    echo "  jhyy_v1.exe.exe = jhyy.exe 的副本,由 Makefile 每次 make 时生成" >&2
+    echo "  (cp -f),**不是 git 跟踪文件**。跑一次 make 就有:" >&2
+    echo "    make" >&2
+    echo "  (2026-10-18 更正:此前这里建议" >&2
+    echo "   'git checkout archive/v2.6.6 -- compiler/build/bin/jhyy_v1.exe.exe'," >&2
+    echo "   那条建议是错的 —— v1.4.4 曾是 git 里的静态快照,v4.0.8 起改为 make 生成," >&2
+    echo "   文件从那时起就不再跟踪,archive/v2.6.6 这个 ref 也早已不存在。照着做只会拿到" >&2
+    echo "   'error: pathspec ... did not match' —— 一个比原错误更难查的错误。)" >&2
     exit 1
 fi
 if [[ ! -f "$JHYY_V2" ]]; then

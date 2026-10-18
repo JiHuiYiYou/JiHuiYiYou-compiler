@@ -19,7 +19,42 @@
 #   bash compiler/tests/bootstrap/artifact_checks.sh              # 全部
 #   bash compiler/tests/bootstrap/artifact_checks.sh --only=link_section
 #
-# 退出码:0 = 全绿;1 = 有 FAIL;2 = 环境不可用(如需要 Docker 而没有)
+# 退出码:0 = 无 FAIL 且无 UNEXPECTED-PASS;1 = 有 FAIL;2 = 环境不可用
+#
+# ════════════════════════════════════════════════════════════════════════════
+# 已知失败的登记(2026-10-18 重构)
+# ════════════════════════════════════════════════════════════════════════════
+#
+# **为什么改。** 本脚本此前是「4 条已登记 ACTIVE → 必然全红 → CI 配
+# `continue-on-error: true` 忽略」。CI 日志每轮固定打 `0 PASS / 4 FAIL`,
+# 于是这个红在读日志的人眼里约等于不存在。一个恒红且被忽略的步骤比没有门更糟:
+# 它训练人忽略红色(feedback_ci_gate_must_exercise_path)。
+#
+# **改成 expected-FAIL 模型。** 已知问题显式登记,登记与实际一致就是**绿的**;
+# 红只留给「不该红的情况」。
+#
+# | 实际结果                          | 登记?      | 判定              |
+# |-----------------------------------|-----------|-------------------|
+# | 断言失败 + 签名吻合               | 有        | KNOWN-FAIL(绿)   |
+# | 断言失败 + 签名**不**吻合         | 有        | FAIL(红)         |
+# | 断言失败                          | 无        | FAIL(红)         |
+# | 通过                              | 有        | UNEXPECTED-PASS(红)|
+# | 通过                              | 无        | PASS(绿)          |
+# | 环境/编译失败(badenv)             | —          | FAIL(红)          |
+#
+# 两条关键设计:
+#
+# 1) **带签名,不只带 W 号。** 只登记 W 号的话,一条已登记的 check 以**另一种
+#    原因**失败会被当成「已知」吞掉 —— 那是一个新 bug 躲在旧 bug 后面。
+#    签名不符一律翻红。
+#
+# 2) **UNEXPECTED-PASS 是红的。** 对应 regress 的 XPASS 语义
+#    (feedback: 修好了必须有人看见)。workaround 修好后没人删登记,状态就永久
+#    失真 —— 那正是 XFAIL 语义存在的理由。workaround 转 RESOLVED 时,删掉
+#    `KNOWN_FAIL` 里对应那一行即可自动升级成真门,**不需要改 CI 配置**。
+#
+# 维护:新增 check 时,若它当前是红的,必须同时往 KNOWN_FAIL 加一行并写明签名。
+#     加 check 不加登记 → 第一次跑就红(这是有意的)。
 
 set -uo pipefail
 
@@ -29,10 +64,12 @@ cd "$JHYY_ROOT" || { echo "ERR: cd $JHYY_ROOT failed" >&2; exit 2; }
 JHYY_EXE="${JHYY_EXE:-$JHYY_ROOT/compiler/build/bin/jhyy.exe}"
 WORK="${WORK:-$JHYY_ROOT/compiler/build/bin/_artifact_checks}"
 ONLY=""
+SELFTEST=0
 
 for arg in "$@"; do
     case "$arg" in
-        --only=*) ONLY="${arg#*=}" ;;
+        --only=*)   ONLY="${arg#*=}" ;;
+        --selftest) SELFTEST=1 ;;
         *) echo "unknown arg: $arg" >&2; exit 2 ;;
     esac
 done
@@ -41,12 +78,94 @@ mkdir -p "$WORK"
 
 PASS_N=0
 FAIL_N=0
+KNOWN_N=0
+SKIP_N=0
 declare -a FAILED=()
+declare -a KNOWN=()
+declare -a SKIPPED=()
+
+# ════════════════════════════════════════════════════════════════════════════
+# 已知失败登记表:`<check_id>|<W-NNN>|<签名1>[|<签名2>...]`
+# 签名之间是「或」关系 —— 命中任一即视为已知失败。
+# ════════════════════════════════════════════════════════════════════════════
+#
+# ⚠️ 这里每一行都对应 docs/internal/workarounds.md 里一条 **ACTIVE** 条目。
+#    那条转 RESOLVED 时,**删掉这里对应的一行** —— check 会自动变成真门。
+#    不要用「把签名改宽」的方式让它继续绿,那等于把新 bug 一起吞掉。
+#
+# 为什么 asm_before_ret 有两个签名:W-113 在 `check_asm_before_ret` 里有**两条**
+# 失败路径,同一个 bug 的两种形态 ——
+#   精确形态: cpuid 落在某函数体内、但在 ret 之后 → `BAD main_jhyy (cpuid@333 ret@332)`
+#   退化形态: cpuid 不落在任何函数体内           → "没有任何函数体包含它"
+# 两条都是「asm 字节落在 ret 之后,永不执行」。只登记其中一条会让另一条被误判成
+# 新 bug(2026-10-18 实测踩到了:先只登记了退化形态,精确形态立刻翻红)。
+declare -A KNOWN_FAIL=(
+    [link_section]="W-112|0 条 .section 指令"
+    [asm_before_ret]="W-113|没有任何函数体包含它|BAD "
+    [per_fn_frame]="W-107|膨胀(1024 上限已触发)"
+    [sysv_arg_spill]="W-116|参数 5/6/7 没被正确读"
+)
+
+# 从 "link_section(.text.boot 已出现在产物里)" 里取出 "link_section"
+_check_id() { printf '%s' "${1%%[ (]*}"; }
 
 hdr()  { echo; echo "── $* ──────────────────────────────────────"; }
-ok()   { printf "  ✅ PASS %s\n" "$1"; PASS_N=$((PASS_N+1)); }
-bad()  { printf "  ❌ FAIL %s\n    %s\n" "$1" "$2"; FAIL_N=$((FAIL_N+1)); FAILED+=("$1"); }
-skip() { printf "  ⏭  SKIP %s (%s)\n" "$1" "$2"; }
+
+# ok <id+说明>
+# 已登记却通过了 → UNEXPECTED-PASS,红(对应 regress 的 XPASS 语义)
+ok() {
+    local cid; cid=$(_check_id "$1")
+    local w="${KNOWN_FAIL[$cid]:-}"
+    if [ -n "$w" ]; then
+        printf "  ❌ UNEXPECTED-PASS %s [%s]\n" "$cid" "${w%%|*}"
+        echo "    ${1}"
+        echo "    这条 check 对应的 workaround 看起来修好了 —— 但 KNOWN_FAIL 里的登记还在。"
+        echo "    去 docs/internal/workarounds.md 确认状态,若是 RESOLVED 就删掉 KNOWN_FAIL 里"
+        echo "    '${cid}' 那一行,check 会自动升级成真门。状态不失真是这一条存在的全部意义。"
+        FAIL_N=$((FAIL_N+1)); FAILED+=("$cid(UNEXPECTED-PASS)")
+    else
+        printf "  ✅ PASS %s\n" "$1"; PASS_N=$((PASS_N+1))
+    fi
+}
+
+# bad <id> <原因>  —— 断言失败(可能落在已知登记里)
+bad() {
+    local cid="$1" reason="$2"
+    local w="${KNOWN_FAIL[$cid]:-}"
+    if [ -z "$w" ]; then
+        printf "  ❌ FAIL %s\n    %s\n" "$cid" "$reason"
+        echo "    (未登记的失败 —— 要么是新 bug,要么是新加的 check 没在 KNOWN_FAIL 里登记)"
+        FAIL_N=$((FAIL_N+1)); FAILED+=("$cid")
+        return
+    fi
+    local wno="${w%%|*}" sigs="${w#*|}"
+    local hit=0 sig
+    local IFS='|'
+    for sig in $sigs; do
+        [[ -n "$sig" ]] || continue
+        if [[ "$reason" == *"$sig"* ]]; then hit=1; break; fi
+    done
+    unset IFS
+    if [ "$hit" -eq 1 ]; then
+        printf "  ⚠️  KNOWN-FAIL %s [%s]\n    %s\n" "$cid" "$wno" "$reason"
+        KNOWN_N=$((KNOWN_N+1)); KNOWN+=("$cid($wno)")
+    else
+        printf "  ❌ FAIL %s (签名不吻合)\n    实际:%s\n" "$cid" "$reason"
+        printf "    期望包含以下之一: %s   [登记于 %s]\n" "${sigs//|/ 或 }" "$wno"
+        echo "    已登记的 check 以**另一种原因**失败 —— 这是一个新 bug,不要被已知状态吞掉。"
+        FAIL_N=$((FAIL_N+1)); FAILED+=("$cid(签名不吻合)")
+    fi
+}
+
+# badenv <id> <原因> —— 环境/编译失败。**永远红**,不查登记:
+# 「因为环境坏了所以没验到」不能算「已知问题仍在位」。
+badenv() {
+    printf "  ❌ FAIL %s (环境/编译失败)\n    %s\n" "$1" "$2"
+    FAIL_N=$((FAIL_N+1)); FAILED+=("$1(env)")
+}
+
+# skip <id> <原因> —— 没跑成,什么都没验到。不算绿,单独计数并在汇总里点名。
+skip() { printf "  ⏭  SKIP %s (%s)\n" "$1" "$2"; SKIP_N=$((SKIP_N+1)); SKIPPED+=("$1"); }
 
 # ════════════════════════════════════════════════════════════════════════════
 # 1. W-112 — `#[link_section(".x")]` 必须真的产生一个 .section 指令
@@ -70,7 +189,7 @@ EOF
 
     if ! "$JHYY_EXE" compile --target=amd64_win --no-link "$WORK/ls.jhyy" \
             -o "$WORK/ls" > "$WORK/ls.log" 2>&1; then
-        bad "link_section" "编译失败:$(tail -3 "$WORK/ls.log" | tr '\n' ' ')"
+        badenv "link_section" "编译失败:$(tail -3 "$WORK/ls.log" | tr '\n' ' ')"
         return
     fi
 
@@ -115,11 +234,11 @@ EOF
     # 因为 .s 里只有外层的拼接痕迹,真正的 cpuid 指令要到 .exe 的反汇编里才看得到)。
     if ! "$JHYY_EXE" compile --target=amd64_win "$f" -o "$WORK/asm" \
             > "$WORK/asm.log" 2>&1; then
-        bad "asm_before_ret" "编译失败:$(tail -3 "$WORK/asm.log" | tr '\n' ' ')"
+        badenv "asm_before_ret" "编译失败:$(tail -3 "$WORK/asm.log" | tr '\n' ' ')"
         return
     fi
     local exe; exe=$(cygpath -w "$WORK/asm.exe" 2>/dev/null || echo "$WORK/asm.exe")
-    [ -f "$exe" ] || { bad "asm_before_ret" "没产出 .exe"; return; }
+    [ -f "$exe" ] || { badenv "asm_before_ret" "没产出 .exe"; return; }
 
     local dis
     dis=$(objdump -d "$exe" 2>/dev/null)
@@ -189,11 +308,11 @@ for i in range(N):
 L += ["    return 0;", "}"]
 open(out, "w", encoding="utf-8").write("\n".join(L) + "\n")
 PY
-    [ -f "$f" ] || { bad "per_fn_frame" "生成测试模块失败"; return; }
+    [ -f "$f" ] || { badenv "per_fn_frame" "生成测试模块失败"; return; }
 
     if ! "$JHYY_EXE" compile --target=amd64_win --no-link "$f" -o "$WORK/fn" \
             > "$WORK/fn.log" 2>&1; then
-        bad "per_fn_frame" "编译失败:$(tail -3 "$WORK/fn.log" | tr '\n' ' ')"
+        badenv "per_fn_frame" "编译失败:$(tail -3 "$WORK/fn.log" | tr '\n' ' ')"
         return
     fi
 
@@ -202,7 +321,7 @@ PY
     local low high ratio
     low=$(awk '/^f500:/{f=1} f && /subq \$[0-9]+, %rsp/{print; exit}' "$WORK/fn.s" | grep -oE '[0-9]+' | head -1)
     high=$(awk '/^f1099:/{f=1} f && /subq \$[0-9]+, %rsp/{print; exit}' "$WORK/fn.s" | grep -oE '[0-9]+' | head -1)
-    [ -n "$low" ] && [ -n "$high" ] || { bad "per_fn_frame" "量不到帧大小(low='$low' high='$high')"; return; }
+    [ -n "$low" ] && [ -n "$high" ] || { badenv "per_fn_frame" "量不到帧大小(low='$low' high='$high')"; return; }
 
     ratio=$(( high / (low > 0 ? low : 1) ))
     if [ "$ratio" -ge 4 ]; then
@@ -237,7 +356,7 @@ fn main_jhyy() -> i32 { return seven(1,2,3,4,5,6,7); }
 EOF
     if ! "$JHYY_EXE" compile --target=amd64_sysv_freestanding --no-link \
             "$WORK/sysv.jhyy" -o "$WORK/sysv" > "$WORK/sysv.log" 2>&1; then
-        bad "sysv_arg_spill" "编译失败:$(tail -3 "$WORK/sysv.log" | tr '\n' ' ')"
+        badenv "sysv_arg_spill" "编译失败:$(tail -3 "$WORK/sysv.log" | tr '\n' ' ')"
         return
     fi
 
@@ -259,6 +378,65 @@ EOF
 
 # ════════════════════════════════════════════════════════════════════════════
 
+# ════════════════════════════════════════════════════════════════════════════
+# 自检:证明分类逻辑(而不是编译器行为)本身是对的
+# ════════════════════════════════════════════════════════════════════════════
+#
+# 为什么需要:上面那张判定表里,「绿」只有一个来源(登记一致),「红」有四种。
+# 一旦分类逻辑写错(把该红的判绿、或反之),整道门就静默失真 —— 而这正是
+# feedback_ci_gate_must_exercise_path 说的那种「从没被见过红的门」。
+#
+# 成本:纯字符串运算,不碰编译器,不产生任何 .jhyy/.s/.exe,亚秒级。
+# 所以它可以被塞进 CI 的 audit job(不需要 build)每轮都跑。
+selftest() {
+    local st_fail=0
+
+    # _case <说明> <期望 FAIL 增量> <期望 KNOWN 增量> <动作...>
+    _case() {
+        local desc="$1" xf="$2" xk="$3"; shift 3
+        local f0=$FAIL_N k0=$KNOWN_N
+        "$@" >/dev/null 2>&1
+        local df=$((FAIL_N - f0)) dk=$((KNOWN_N - k0))
+        if [ "$df" = "$xf" ] && [ "$dk" = "$xk" ]; then
+            printf "  ✅ %-46s (FAIL +%d / KNOWN +%d)\n" "$desc" "$df" "$dk"
+        else
+            printf "  ❌ %-46s 期望 FAIL +%d / KNOWN +%d,实得 FAIL +%d / KNOWN +%d\n" \
+                   "$desc" "$xf" "$xk" "$df" "$dk"
+            st_fail=$((st_fail + 1))
+        fi
+    }
+
+    echo "=== artifact_checks.sh — 分类逻辑自检(不跑编译) ==="
+    _case "已登记+签名吻合 → KNOWN-FAIL(绿)" 0 1 \
+          bad link_section "生成的 .s 里 0 条 .section 指令 —— 属性是 no-op(W-112 未修)"
+    _case "W-113 精确形态(BAD fn) → KNOWN-FAIL" 0 1 \
+          bad asm_before_ret "BAD main_jhyy (cpuid@333 ret@332)"
+    _case "W-113 退化形态(不在函数体内) → KNOWN-FAIL" 0 1 \
+          bad asm_before_ret "反汇编里有 2 条 cpuid,但**没有任何函数体包含它**"
+    _case "已登记+签名不吻合 → FAIL(红)" 1 0 \
+          bad link_section "有 3 条 .section,但没有 .text.boot —— 属性名没生效"
+    _case "未登记的 check 失败 → FAIL(红)" 1 0 \
+          bad some_new_check "随便什么失败"
+    _case "环境/编译失败 → FAIL(红),不查登记" 1 0 \
+          badenv link_section "编译失败:..."
+    _case "已登记却通过 → UNEXPECTED-PASS(红)" 1 0 \
+          ok "link_section(.text.boot 已出现在产物里)"
+    _case "未登记却通过 → PASS(绿)" 0 0 \
+          ok "some_new_check(一切正常)"
+
+    echo
+    if [ "$st_fail" -gt 0 ]; then
+        echo "  ❌ 自检 $st_fail 条不符 —— 分类逻辑本身坏了,门已失真"
+        exit 1
+    fi
+    echo "  ✅ 8/8 分类用例通过 —— 四种红与两种绿都能正确触发"
+    exit 0
+}
+
+if [ "$SELFTEST" -eq 1 ]; then
+    selftest
+fi
+
 echo "=== artifact_checks.sh — 产物级门 ==="
 echo "  JHYY_ROOT = $JHYY_ROOT"
 echo "  JHYY_EXE  = $JHYY_EXE"
@@ -272,11 +450,26 @@ want per_fn_frame    && check_per_fn_frame
 want sysv_arg_spill  && check_sysv_arg_spill
 
 echo
-echo "=== artifact_checks 结果: $PASS_N PASS / $FAIL_N FAIL ==="
+echo "=== artifact_checks 结果: $PASS_N PASS / $KNOWN_N KNOWN-FAIL / $FAIL_N FAIL / $SKIP_N SKIP ==="
+if [ "$SKIP_N" -gt 0 ]; then
+    echo "  未跑成(什么都没验到,不算绿): ${SKIPPED[*]}"
+fi
+if [ "$KNOWN_N" -gt 0 ]; then
+    echo "  在位的已知问题(见 docs/internal/workarounds.md):"
+    for k in "${KNOWN[@]}"; do echo "    - $k"; done
+fi
 if [ "$FAIL_N" -gt 0 ]; then
-    echo "  失败项: ${FAILED[*]}"
-    echo "  ⚠️ 这些是**已登记的 ACTIVE workaround**(见 docs/internal/workarounds.md)。"
-    echo "     本门的作用是把它们从「没人验」变成「每次都红」—— FAIL 在修完之前是预期状态。"
+    echo
+    echo "  ❌ 红项: ${FAILED[*]:-none}"
+    echo "  这**不是**已知问题的常规状态。红只有三种来源:"
+    echo "    · FAIL(env)        环境/编译失败 —— 什么都没验到"
+    echo "    · FAIL(未登记)      新 bug,或新 check 忘了在 KNOWN_FAIL 里登记"
+    echo "    · FAIL(签名不吻合)   已登记的 check 换了失败方式 —— 新 bug 躲在旧 bug 后面"
+    echo "    · UNEXPECTED-PASS    workaround 修好了但登记没删 —— 去 workarounds.md 核实后"
+    echo "                        删掉 KNOWN_FAIL 里对应那一行,check 自动升级成真门"
     exit 1
 fi
+echo
+echo "  ✅ 无 FAIL、无 UNEXPECTED-PASS。"
+echo "  已知问题在 KNOWN_FAIL 里登记着,它们的存在是**预期状态**,不计红。"
 exit 0

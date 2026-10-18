@@ -1,12 +1,37 @@
-# GH Actions CI — JHYY compiler v1.4.7+ (2026-08-14 ship)
+# GH Actions CI — JHYY compiler
 #
-# v1.4.7 单 regress 入口 + matrix 守门 (取代 v1.4.5 三跑 shim):
-#   1. python regress.py --all                            (gated: jhyy.exe;stage0 informational)
-#   2. python regress.py --binary=.../jhyy_v1.exe.exe      (matrix only: 只跑那一个 binary)
-#   3. make selfhost                                       (build v2/v3/v4 closure chain)
-#   4. bash compiler/tests/bootstrap/closure_check.sh      (gated: Stage2 == Stage3 .s)
-#   5. python scripts/dev/audit_test_assertions.py --strict (gated: 每个测试都有断言)
-#   6. bash compiler/tests/bootstrap/artifact_checks.sh     (non-blocking: 见 step 说明)
+# 2026-10-18 重构:本文件的门表此前长期与实际脱节(列着已删的步骤、把一个
+# 从不判定的 `make selfhost` 算成门)。下面这张表是**逐 step 对照实际配置**
+# 写出来的,改动本文件时必须同步改它。
+#
+# | step                                   | 阻断?  | 验的是                                    |
+# |----------------------------------------|--------|-------------------------------------------|
+# | regress.py --all                       | ✅ 是  | 201 个测试的退出码/stdout 断言            |
+# | make selfhost                          | ✅ 是  | v2..v5 的 `.s` 逐字节相同(确定性+自洽)   |
+# | closure_check.sh                       | ✅ 是  | Stage2 `.s` == Stage3 `.s`(自举闭环)      |
+# | audit_test_assertions.py --strict      | ✅ 是  | 每个测试都有能失败的断言                   |
+# | artifact_checks.sh                     | ✅ 是  | 产物字节布局(expected-FAIL 模型,见 step)  |
+# | ~~jhyy_v1.exe.exe cmp 副本约定~~       | —     | 2026-10-18 删除,理由见下方 [已删 step]    |
+#
+# **每道门验的是什么边界,别互相误读:**
+#   - regress / audit          = 正确性 + 断言强度
+#   - make selfhost / closure  = 确定性 + 自洽。**不验正确性** —— 一个确定性的
+#                                错误编译器照样闭环通过。
+#   - artifact_checks          = 那两条验不到的失效模式(症状在产物字节布局里,
+#                                任何 .jhyy 测试都验不到)
+#
+# **「不验正确性」这句对 artifact_checks 同样适用**:它验的是「某个已知缺陷是否
+#   仍以登记的方式存在」,不是「编译器是否正确」。
+#
+# **[已删 step] 2026-10-18**:`cmp jhyy.exe jhyy_v1.exe.exe` 那一步删掉了,两条理由:
+#   1. 它**恒红**。上一步 `git checkout HEAD -- compiler/build/bin/jhyy.exe` 把
+#      jhyy.exe 换回 git 版本,而副本是 make 从新编产物 cp 的,两者必然不同。
+#      CI 日志每轮都打 `FAIL: 副本约定被破坏` 配 `continue-on-error: true` ——
+#      恒红且被忽略的步骤 = 训练人忽略红色。
+#   2. 就算不换回,它也**恒真**:`Makefile` 里那条规则字面就是 `cp -f $< $@`,
+#      同一次 make 内不可能不同步。被保护者自己保证的不变量不需要门。
+#   真正需要 v1 的是 fixed_point.sh / byte_equal.sh,那两个脚本内部本来就在
+#   用它跑比对 —— 那里才是判据该在的地方。
 #
 # 触发面:
 #   - push to main (含 v1.x ‖ v2.x ‖ v3.x 任何 commit)
@@ -15,11 +40,6 @@
 # Windows runner (windows-latest) — 跟开发机一致 (Windows 10 + MSYS2 bash +
 # gcc + QBE + runtime)。其他 OS 留给未来扩展 (per `docs/plans/v2/v2.0.0-os-prep.md`
 # amd64_sysv target 之后)。
-#
-# 守门:
-#   - gated binary 全 PASS → CI pass
-#   - 任一 gated fail → CI fail (block merge)
-#   - informational fail → log only, 不 block PR (matrix row)
 #
 # 不做 (per `feedback_auto_push_after_commit.md`):
 #   - 不自动 push / tag — 保留人工 review
@@ -122,32 +142,6 @@ jobs:
           # 刷出,时间戳落在同一秒,拿不到执行时序(排查并发问题时的硬障碍)。
           python -u regress.py --all
 
-      - name: Run regress.py on jhyy_v1.exe.exe (v1 historical baseline, matrix only)
-        # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
-        #   加它是因为 job 原本在第一个失败 step 就中止 —— 一次 CI 周期只能拿到一个
-        #   结论,排查要等好几轮。step 7 仍是唯一的硬门,其余是补充信息。
-        if: always()
-        shell: msys2 {0}
-        continue-on-error: true
-        run: |
-          # v4.0.8:jhyy_v1.exe.exe = jhyy.exe 的副本,由 `make` 每次构建生成,
-          # 不再是 git 里的静态快照。它唯一的作用是给 fixed_point/byte_equal 当
-          # 「第 0 代」,使 v1==v2 成为一条真正的**确定性检查**(同一二进制跑
-          # 两遍必须产出相同 .il/.s)。
-          #
-          # v4.0.8 修:本 step 原先跑 `regress.py --all --include-informational`
-          # —— 那是把**整个套件再跑一遍**,只为了多验 jhyy_v1.exe(而它就是
-          # jhyy.exe 的副本)。实测一次全量在 CI 上要 ~24 分钟,跑两遍必然撞
-          # 45 分钟的 job 上限,而 job 超时是**最坏的失败形态**:没有产出、
-          # 没有告诉你卡在哪一步。改成只跑那一个 binary。
-          # v1 是 jhyy.exe 的**逐字节副本**(make 每次构建重新生成)。
-          # 对一个逐字节相同的二进制再跑 200 个测试 = 24 分钟换零信息 ——
-          # 同样的字节必然给同样的结果。它的用途是给 fixed_point.sh /
-          # byte_equal.sh 当「第 0 代」种子做确定性检查,不是拿来跑套件的。
-          # 所以这里只验「副本确实是副本」—— 几十毫秒,信息量还不小:
-          # 副本一旦不同步,那两个脚本的 v1==v2 立刻失去意义。
-          cmp compiler/build/bin/jhyy.exe compiler/build/bin/jhyy_v1.exe.exe             && echo "v1 是 jhyy.exe 的 byte-equal 副本 ✓"             || { echo "FAIL: jhyy_v1.exe.exe 与 jhyy.exe 不一致 —— 副本约定被破坏"; exit 1; }
-
       - name: Build Stage 2 closure chain (v1→v2→v3→v4)
         # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
         #   加它是因为 job 原本在第一个失败 step 就中止 —— 一次 CI 周期只能拿到一个
@@ -192,26 +186,36 @@ jobs:
           # `// XFAIL:` 标记的测试不算违规 —— 它声明为「预期失败」,标记是否
           # 撒谎由运行时的 XPASS 负责(XFAIL 测试转绿 = XPASS = regress 失败)。
           python scripts/dev/audit_test_assertions.py --strict
+          # 顺带跑 artifact_checks 的**分类逻辑自检**(纯字符串运算,不碰编译器,
+          # 亚秒级)。它证明「四种红 + 两种绿」都能正确触发 —— 一道从没被见过
+          # 红的门不算门(feedback_ci_gate_must_exercise_path)。
+          bash compiler/tests/bootstrap/artifact_checks.sh --selftest
 
-      - name: Artifact-level gates (non-blocking until W-112/113/107/116 are RESOLVED)
+      - name: Artifact-level gates (expected-FAIL model — blocking as of 2026-10-18)
         # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
         #   加它是因为 job 原本在第一个失败 step 就中止 —— 一次 CI 周期只能拿到一个
-        #   结论,排查要等好几轮。step 7 仍是唯一的硬门,其余是补充信息。
+        #   结论,排查要等好几轮。
         if: always()
         shell: msys2 {0}
-        continue-on-error: true
         run: |
           # v4.0.8:验那些**不在程序返回值里**的失效模式 —— 它们的症状在编译
           # 产物的字节布局里,任何 .jhyy 测试都验不到(写出来会 PASS)。
           #
-          # 本 step **故意是 non-blocking**:四条检查各自对应一条已登记的
-          # ACTIVE workaround(W-112 link_section no-op / W-113 asm 字节落在
-          # ret 之后 / W-107 per-fn 表 1024 上限 / W-116 SysV callee 只 spill
-          # 4 个寄存器),所以现在**必然全红**(exit 1)。
+          # 2026-10-18:本 step 从 non-blocking 升级为 blocking,因为脚本改成了
+          # expected-FAIL 模型。此前是「4 条已登记 ACTIVE → 必然全红 → 配
+          # `continue-on-error: true` 忽略」,CI 每轮固定打 `0 PASS / 4 FAIL`。
+          # 一个恒红且被忽略的步骤比没有门更糟:它训练人忽略红色。
           #
-          # 它的作用是把这四条从「没人验」变成「每次 CI 都能看见」,而不是
-          # 让 CI 变红。四条在 v4.0.15 修完后,把 continue-on-error 删掉即可
-          # 升级成 blocking —— 那一步不该由改判据来完成,只能由真修来完成。
+          # 现在:已知问题显式登记,登记与实际一致就是**绿的**(当前 4 KNOWN-FAIL /
+          # 0 FAIL / exit 0),红只留给「不该红的情况」——
+          #   · 环境/编译失败      什么都没验到
+          #   · 未登记的 check 失败  新 bug,或新 check 忘了登记
+          #   · 签名不吻合          已登记的 check 换了失败方式(新 bug 躲在旧 bug 后面)
+          #   · UNEXPECTED-PASS     workaround 修好了但登记没删 → 状态失真
           #
-          # ⚠️ 不要为了让 CI 变绿而放宽这里的判据。那正是本项目今天栽过的坑。
+          # 升级不需要「真修」,只需要**判据本身是对的** —— 这正是这次改动的意义。
+          # 每条 workaround 转 RESOLVED 时,删掉脚本 KNOWN_FAIL 里对应那一行即可,
+          # check 自动升级成真门,**不需要再动本文件**。
+          #
+          # ⚠️ 不要为了让 CI 变绿去放宽 KNOWN_FAIL 里的签名。那正是本项目栽过的坑。
           bash compiler/tests/bootstrap/artifact_checks.sh
