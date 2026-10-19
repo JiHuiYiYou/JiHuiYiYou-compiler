@@ -140,12 +140,11 @@
 
 ## 当前活跃 workarounds
 
-**13 ACTIVE / 0 DEFERRED**(2026-10-18 复核:W-110 随 W-109 一并 RESOLVED;W-109/W-110 出表,**13 ACTIVE / 103 索引行**,per `docs/internal/workarounds.md` 索引表):
+**12 ACTIVE / 0 DEFERRED**(2026-10-19 复核:W-110 随 W-109、W-111 随期望类型接线一并 RESOLVED,三条出表,**12 ACTIVE / 103 索引行**,per `docs/internal/workarounds.md` 索引表):
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
 | W-105 | `compiler/src0/sema.jhyy:2558-2560` | `check_borrow` 恒 `return 1`,`:2677` 每个函数声明都调 → `&mut` 独占性完全不检查 |
-| W-111 | `compiler/src0/sema.jhyy:2228-2259` | 泛型 enum 的**关联构造器**在无类型上下文处报 `unknown enum type`;**干净的诊断,不是崩溃** |
 | W-103 | `compiler/src0/std/os.jhyy:69-144` | `std_os_open/close/read/write` 全是 M0 mock,`std_os_exit` 不退出进程 |
 | W-104 | `compiler/src0/abi_amd64_sysv.jhyy:229` | SysV 参数分类调用 **Win** 分类器(`abi_sysv_classify_arg` 在同文件 `:79` 但没接线) |
 | W-107 | `compiler/src0/codegen_amd64_state.jhyy:511-537` | 五个 per-fn 表硬编码 1024,实测已用 991 → 余量 33 个函数 |

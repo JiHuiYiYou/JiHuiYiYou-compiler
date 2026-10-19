@@ -109,9 +109,15 @@ type SemaContext = struct {
     current_fn:        *u8,        // *NodeFuncDecl (v1.3.6: for defer collection)
     ret_type_map:      *u8,        // *RetTypeMapEntry[] (v3.4.2 W-089 真修: SymbolReturnTypeMap array)
     ret_type_map_n:    i64,        // entry count (v3.4.2)
+    // W-111:泛型 enum 的**关联构造器**在无类型上下文处认不出 `Option::None`。
+    // `Type` 里没有泛型实参字段(单态化已把 T 替换掉、克隆出具体的 Option<i32>),
+    // 所以**期望类型本身就是充分信息**,不需要反推类型实参。调用点把它塞进来,
+    // 变体解析拿它兜底 —— 与 NODE_PATTERN_ENUM 走 match_type 兜底同款形状
+    // (sema.jhyy:527-545)。
+    expected_enum_type: *u8,       // *Type
 }
 
-fn SEMA_CONTEXT_SIZE() -> i64 { return 104 as i64; }
+fn SEMA_CONTEXT_SIZE() -> i64 { return 112 as i64; }
 
 // ════════════════════════════════════════════════════
 // SemaLocal 访问 helper（locals[i].sym / locals[i].type）
@@ -1521,7 +1527,24 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         // 推所有 arg 类型
         let mut i: i64 = 0 as i64;
         while i < (*d).nargs {
+            // W-111:把**期望形参类型**递给变体解析。
+            //
+            // 实参此前是**无约束推断**(`infer_type` 逐个独立推),期望形参类型
+            // 就在 `callee_type` 手边却从不往下传。泛型 enum 的构造器
+            // (`Option::None`)正是靠这个期望类型才能定位到具体的
+            // `Option<i32>` —— 否则它只知道泛型模板 `Option`,查不到变体。
+            //
+            // save/restore:推断实参可能递归进别的表达式,不能让它看到
+            // 上一个实参的期望类型。
+            let saved_exp = (*ctx).expected_enum_type;
+            if (*callee_type).kind == KIND_FUNC() {
+                if i < (*callee_type).nparams {
+                    (*ctx).expected_enum_type =
+                        *(((*callee_type).params as i64 + i * (8 as i64)) as **u8);
+                }
+            }
             let _x = infer_type(ctx, ta, *(((*d).args as i64 + i * (8 as i64)) as **Node));
+            (*ctx).expected_enum_type = saved_exp;
             i = i + (1 as i64);
         }
         if (*callee_type).kind == KIND_FUNC() {
@@ -1903,7 +1926,11 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                 }
             }
         }
+        // W-111:期望类型 = 类型标注(`let x: Option<i32> = Option::None;`)
+        let saved_exp_let = (*ctx).expected_enum_type;
+        if decl_type != (0 as *Type) { (*ctx).expected_enum_type = decl_type as *u8; }
         let mut init_type: *Type = infer_type(ctx, ta, (*d).init as *Node);
+        (*ctx).expected_enum_type = saved_exp_let;
         // v1.3.1: null auto-coerces to declared pointer type; else error
         if (*d).init != (0 as *u8) {
             if (*((*d).init as *Node)).kind == NODE_NULL() {
@@ -2031,15 +2058,33 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                         expr_type = ret_t;
                         (*n).type_ptr = expr_type as *u8;
                     } else {
-                        expr_type = infer_type(ctx, ta, (*dr).expr as *Node);
+                                            // W-111:期望类型 = 函数返回类型
+                    let saved_exp_r = (*ctx).expected_enum_type;
+                    if (*ctx).current_ret_type != (0 as *u8) {
+                        (*ctx).expected_enum_type = (*ctx).current_ret_type;
+                    }
+                    expr_type = infer_type(ctx, ta, (*dr).expr as *Node);
+                    (*ctx).expected_enum_type = saved_exp_r;
                         (*n).type_ptr = expr_type as *u8;
                     }
                 } else {
+                                        // W-111:期望类型 = 函数返回类型
+                    let saved_exp_r = (*ctx).expected_enum_type;
+                    if (*ctx).current_ret_type != (0 as *u8) {
+                        (*ctx).expected_enum_type = (*ctx).current_ret_type;
+                    }
                     expr_type = infer_type(ctx, ta, (*dr).expr as *Node);
+                    (*ctx).expected_enum_type = saved_exp_r;
                     (*n).type_ptr = expr_type as *u8;
                 }
             } else {
-                expr_type = infer_type(ctx, ta, (*dr).expr as *Node);
+                                    // W-111:期望类型 = 函数返回类型
+                    let saved_exp_r = (*ctx).expected_enum_type;
+                    if (*ctx).current_ret_type != (0 as *u8) {
+                        (*ctx).expected_enum_type = (*ctx).current_ret_type;
+                    }
+                    expr_type = infer_type(ctx, ta, (*dr).expr as *Node);
+                    (*ctx).expected_enum_type = saved_exp_r;
                 (*n).type_ptr = expr_type as *u8;
             }
         } else {
@@ -2246,6 +2291,36 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                         let t = (*gsym).type_ptr as *Type;
                         if (*t).kind == KIND_ENUM() {
                             et = t;
+                        }
+                    }
+                }
+            }
+        }
+                if et == (0 as *Type) {
+            // W-111 第三级兜底:用上下文给的**期望类型**。
+            //
+            // 前两级(type_sym 直接查 / 按名字全局查)都失败时,变体所属的 enum 是
+            // 泛型模板(`Option` 而非 `Option<i32>`),查不到。但调用点知道期望类型
+            // (形参类型),而期望类型是**单态化后的具体类型** —— 它的 variants 已经
+            // 填好,按变体名找即可。
+            //
+            // 判据与下面的 payload 检查一致:在 expected.variants 里按**变体名**找
+            // (与 match 路径 `:548` 同款)。找错 enum 的风险与既有代码同源,真找错
+            // 会被随后的 payload 类型检查抓出来。
+            let exp = (*ctx).expected_enum_type as *Type;
+            if exp != (0 as *Type) {
+                if (*exp).kind == KIND_ENUM() {
+                    let vsym0 = (*d).variant_sym as *Sym;
+                    if vsym0 != (0 as *Sym) {
+                        let mut j: i64 = 0 as i64;
+                        while j < (*exp).nvariants {
+                            let e_off = ptr_add_u8((*exp).variants, j * VARIANT_DESC_SIZE());
+                            let e_name = *(e_off as **Sym);
+                            if var_name_eq_v1(e_name, vsym0) == (0 as i32) {
+                                et = exp;
+                                break;
+                            }
+                            j = j + (1 as i64);
                         }
                     }
                 }

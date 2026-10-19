@@ -683,6 +683,16 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
         error_count:      0 as i32,
         current_ret_type: 0 as *u8,
         loop_depth:       0 as i32,
+        // ↓ 这四个字段此前**没在 struct literal 里列出**(v3.4.2 加 ret_type_map
+        // 时漏的)。jhyy 的 struct literal 按**列出的字段数**决定分配多少字节,
+        // 漏掉的字段落在分配区之外 —— 谁读谁越界。
+        // W-111 加 expected_enum_type 时,前三个的旧洞被撞了出来:return / let
+        // 标注位置直接让编译器 SEGV(exit 139)。
+        // 字段顺序必须与 sema.jhyy 的 SemaContext 声明**逐字一致**。
+        current_fn:        0 as *u8,
+        ret_type_map:      0 as *u8,
+        ret_type_map_n:    0 as i64,
+        expected_enum_type: 0 as *u8,
     };
     sema_init(&sema, &arena, &ta);
     if sema_check(&sema, &ta, ast_node) > (0 as i32) {

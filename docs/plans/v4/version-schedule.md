@@ -197,9 +197,23 @@ XFAIL 在两边都变成诚实描述。
 相关 XFAIL 减少、`regress` 不退步;W-104 的探针造过红灯;W-106 判定实验有明确
 结论并记进台账;W-110 的 RCA 定位到语句级。
 
-**当前状态(2026-10-19):** 第 2/3/4 项**完成**;**第 1 项只做了设计决策,实现
-待做** —— 而它的 gate(「摘 XFAIL 且 PASS」)要求实现落地。所以严格说
-**v4.0.10 尚未完成**,差 W-111 的实现(以及它那句「实施前必须先验」的前置验证)。
+**当前状态(2026-10-19):✅ v4.0.10 全部四项完成。**
+
+第 1 项 W-111 已落地实现并通过验收(`generics_enum.jhyy` 摘 XFAIL 且 PASS=106);
+那句「实施前必须先验」的前置验证也做了 —— 依据是 NODE_PATTERN_ENUM 的
+`match_type` 兜底(`sema.jhyy:527-545`)**今天就在工作**,证明形参类型已是
+单态化后的具体 KIND_ENUM,同一个 Type 也正是 `callee_type.params[i]`。
+
+顺带撞出并修掉一个 2024-11 就在的越界读:`main.jhyy` 构造 `SemaContext` 的
+struct literal 漏列 `current_fn` / `ret_type_map` / `ret_type_map_n` 三字段
+(jhyy 的 struct literal 按列出字段数决定分配大小),导致 `return` / `let` 位置
+读越界 → **exit 139 SEGV**。这大概也是 W-111 当初被记成「编译器崩溃」的原因:
+台账测的是 match 形态,而 match 不碰这三个字段。
+
+验收:自举闭环 v2..v5 逐字节相同 · `closure_check.sh` PASS ·
+全量回归 **177/177, 0 failed**(此前 176/176,多出来的那个是 generics_enum
+从 XFAIL 转 PASS)· artifact 级门 0 PASS / 5 KNOWN-FAIL / 0 FAIL。
+**ACTIVE 14 → 12**(W-109/W-110/W-111 三条出表)。
 
 #### ⚠️ 一处更正(2026-10-18):原第 2 项的前提是错的
 

@@ -120,7 +120,7 @@
 | [W-108](#w-108) | RESOLVED | 索引重建脚本静默丢弃 59/89 条目 —— STATUS_RE 不容忍 前缀,且只匹配 H2 |
 | [W-109](#w-109) | RESOLVED | 自举 IL lexer 缺 6 个浮点比较助记符 — f32/f64 六个比较运算静默降级 |
 | [W-110](#w-110) | RESOLVED | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 |
-| [W-111](#w-111) | ACTIVE | 泛型 enum 的关联构造器在无类型上下文处不被识别;多字段 payload 连解析都过不去 |
+| [W-111](#w-111) | RESOLVED | 泛型 enum 的关联构造器在无类型上下文处不被识别;多字段 payload 连解析都过不去 |
 | [W-112](#w-112) | ACTIVE | `#[link_section]` 完全失效 — 属性被解析但 codegen 是 no-op |
 | [W-113](#w-113) | ACTIVE | `asm!` 与 memory barrier 的字节被 emit 到 `ret` 之后,永不执行 |
 | [W-114](#w-114) | ACTIVE | 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效 |
@@ -7694,7 +7694,7 @@ temp(`%t5` / `%t9` / `%t13` / `%t17`),各自 `jnz` 到自己的 then/else/merge,
 <a id="w-111"></a>
 ## W-111: 泛型 enum 的关联构造器在无类型上下文处不被识别;多字段 payload 连解析都过不去
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — 2026-10-18 复核:构造器缺口仍真实存在,但「编译器崩溃」已不成立
+**状态:** RESOLVED closed 2026-10-19 (v4.0.9) — 走「调用点期望类型」接通,`generics_enum.jhyy` 摘 XFAIL 且 PASS(106)
 **Backfilled:** 2026-10-15 (v3.2.0b「3i generics — enum generic」声称 ship 的那条)
 **Filed-by:** audit-fanout-2026-10-15;RCA rca-w111-2026-10-18
 **日期:** 2026-10-15 首次实测 → 2026-10-18 复核(**SEGV 不复现,剩余缺口已重新定位**)
@@ -7818,6 +7818,43 @@ SEGV 应是被 W-097 / W-098..W-101 / W-102 那一批修复顺带解决的。**�
 在那一处**确实已经完成单态化**。若它仍是未实例化的 `Option<T>`,
 方案要改成在 `mono_expand_fn_call` 之后再解析变体。**这一步没验之前不要动手。**
 
+
+### 2026-10-19 已修:走「调用点期望类型」,三处调用点全部接通
+
+设计决策(2026-10-18)落地。实现形态:
+
+1. **`SemaContext` 加 `expected_enum_type: *u8`**(W-111 槽位)。
+2. **`NODE_ENUM_VARIANT` 解析加第三级兜底**(第三级 = 期望类型),形状与
+   NODE_PATTERN_ENUM 走 `match_type` 兜底完全同款(`sema.jhyy:527-545`)。
+   在 `expected.variants` 里按**变体名**找(与下面 payload 检查一致)。
+3. **三处调用点把期望类型塞进去,推断后 save/restore**:
+   - 调用实参 —— `callee_type.params[i]`(此前实参是**无约束推断**,期望类型就在
+     手边却从不往下传)
+   - `let x: T = <expr>` —— 类型标注
+   - `return <expr>` —— `ctx.current_ret_type`(本来就有)
+
+**验收:** `generics_enum.jhyy` **摘 XFAIL 且 PASS(exit 106)**;
+自举闭环 v2..v5 逐字节相同;`closure_check.sh` PASS;全量回归 **177/177, 0 failed**
+(此前 176/176 —— 多出来的那一个就是它从 XFAIL 转 PASS);artifact 级门 0 FAIL。
+
+### ⚠️ 顺带撞出一个 2024-11 就在的越界读(已修)
+
+`main.jhyy` 用 struct literal 构造 `SemaContext` 时**只列了 11 个字段**,
+漏掉 `current_fn` / `ret_type_map` / `ret_type_map_n`
+(字段顺序按声明逐字对齐,jhyy 的 struct literal 按**列出的字段数**决定分配
+多少字节)。加 `expected_enum_type` 时,前三个的旧洞被撞出来:
+
+```
+fn mk() -> Option<i32> { return Option::None; }   → exit 139 SEGV
+let x: Option<i32> = Option::None;                → exit 139 SEGV
+```
+
+**这是本次唯一一处真正的编译器崩溃** —— 也解释了为什么 W-111 当初被记成
+「编译器崩溃」:那两条路径当时就会 SEGV,只是没人单独试过它们(台账测的是
+match 形态,而 match 形态不碰这三个字段)。
+
+补全 literal 后 SEGV 消失,两处都变成干净的 `unknown enum type`,再接上期望类型
+兜底即通过。
 
 **workaround:** 用户侧只能避开泛型 enum 的构造器(改用非泛型
 `type Opt = enum { Some(i32), None }`,实测正常;或有类型上下文的地方用 match)。
