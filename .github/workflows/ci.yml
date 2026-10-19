@@ -381,14 +381,20 @@ jobs:
           fi
           echo "  sysv_abi_caller.s $(wc -c < tmp/sysv_abi/sysv_abi_caller.s) B"
 
-      - name: Upload SysV .s artifacts
+      - name: Upload SysV .s artifacts (regress 用例)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sysv-il
-          path: |
-            tmp/sysv_il/
-            tmp/sysv_abi/
+          path: tmp/sysv_il/
+          if-no-files-found: error
+
+      - name: Upload ABI cross-check .s
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sysv-abi
+          path: tmp/sysv_abi/
           if-no-files-found: error
 
       - name: Artifact-level gates (expected-FAIL model — blocking as of 2026-10-18)
@@ -449,6 +455,12 @@ jobs:
         with:
           name: sysv-il
           path: tmp/sysv_il
+
+      - name: Download ABI cross-check .s
+        uses: actions/download-artifact@v4
+        with:
+          name: sysv-abi
+          path: tmp/sysv_abi
 
       - name: SysV ABI gate (link + run + compare // EXPECT:)
         run: |
