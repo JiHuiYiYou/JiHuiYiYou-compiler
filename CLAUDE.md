@@ -140,7 +140,7 @@
 
 ## 当前活跃 workarounds
 
-**10 ACTIVE / 0 DEFERRED**(2026-10-19 复核:W-104 / W-110 / W-111 / W-116 四条本轮 RESOLVED,**10 ACTIVE / 103 索引行**,per `docs/internal/workarounds.md` 索引表):
+**11 ACTIVE / 0 DEFERRED**(2026-10-19 复核:W-110 / W-111 / W-116 三条本轮 RESOLVED;**W-104 部分修复但仍 ACTIVE**(>16B 的 MEMORY class 未实现),**11 ACTIVE / 103 索引行**,per `docs/internal/workarounds.md` 索引表):
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
@@ -153,6 +153,7 @@
 | W-114 | enum match codegen | **全 unit-variant 的 enum `match` 永远命中第一支** |
 | W-115 | `codegen_call_return_types.jhyy` | W-089 标 ✅ RESOLVED,但它自己的 reproducer 仍 STACK_OVERFLOW |
 | W-105.1 | `compiler/src0/sema.jhyy:2578-2579` | `check_cap_pass` 同款 stub,当前无调用点 |
+| W-104 | `compiler/src0/abi_amd64_sysv.jhyy` | SysV struct 传参。**2026-10-19 部分修复**:≤16B 已按 eightbyte 分类传值(与 gcc 双向对拍 44);**>16B 的 MEMORY class 仍未实现**(走栈而非指针,与 gcc 不兼容) |
 | W-118 | `compiler/src0/lexer.jhyy:212-258` | 语言 lexer `lex_peek_char` 无 EOF 守卫 → 越过 end 前进(W-117 的同族另一处,尚未观测到危害) |
 
 2026-10-18 调整(**W-109 移出、W-118 移入,总数仍 14**):W-109(IL lexer 缺浮点比较

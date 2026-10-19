@@ -112,7 +112,7 @@
 | [W-085](#w-085) | RESOLVED | codegen small-frame fn(*T, i32, i32) 第 3 i32 参数... |
 | [W-102](#w-102) | RESOLVED | address-holder 池与 alloc 池槽位重叠 → self-hosted... |
 | [W-103](#w-103) | ACTIVE | std/os.jhyy 全部 I/O 与 exit 是 M0 mock — W-079 的... |
-| [W-104](#w-104) | RESOLVED | SysV ABI 参数分类调用 Win 分类器 — 正确的分类器就在同文件,没接线 |
+| [W-104](#w-104) | ACTIVE | SysV ABI 参数分类调用 Win 分类器 — 正确的分类器就在同文件,没接线 |
 | [W-105](#w-105) | ACTIVE | check_borrow 是硬编码 return 1 — `&mut` 独占性完全不检查 |
 | [W-105.1](#w-105.1) | ACTIVE | check_cap_pass 同款空 stub,当前无调用点(死代码但签名在 API 面上) |
 | [W-106](#w-106) | ACTIVE | symtab_lookup_one 用 arena-touch 强制 codegen... |
@@ -6993,7 +6993,9 @@ os 层语义,所以**不阻塞 v4.0.0 final**;但它是「索引表 0 ACTIVE」�
 <a id="w-104"></a>
 ## W-104: SysV ABI 参数分类调用 Win 分类器 — 正确的分类器就在同文件,没接线
 
-**状态:** RESOLVED closed 2026-10-19 (v4.0.9) — SysV struct 按 eightbyte 分类传值,与 gcc 双向对拍一致(44)
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — 2026-10-19 **部分修复**:≤16B 的 struct
+已按 eightbyte 分类传值(与 gcc 双向对拍一致,44);**>16B 的 MEMORY class 仍未实现**
+(实测 jhyy→gcc 退出码 0,应 15)
 **Backfilled:** 2026-10-15 (v2.x amd64_sysv Stage 1c.3 mirror 占位)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-08 前后 (v2.0.0-os-prep Stage 1c.3 mirror) → 至今
@@ -7147,6 +7149,38 @@ artifact 级门:            sysv_mixed_struct / sysv_arg_spill 均 PASS
 
 新增常驻门 `compiler/tests/bootstrap/sysv_abi_cross.sh`(ubuntu job 跑)——
 **这是唯一能抓到「自洽但不兼容」这一类的检查**:纯 jhyy 测试永远看不到它。
+
+
+### ⚠️ 剩余缺口:**>16B 的 struct(MEMORY class)仍未实现**
+
+本次修复只覆盖 **≤16B** 的 struct(INTEGER / SSE eightbyte 传值)。SysV § A.2/A.3
+里 **>16B 的 struct 是 MEMORY class** —— 整体**拷贝到栈上**传递,不是传指针。
+
+现状:>16B 的 struct 仍然整体按指针传。实测(2026-10-19):
+
+```
+type Big = struct { a: i32, b: i32, c: i32, d: i32, e: i32 }   // 20 B
+jhyy caller → gcc callee:  退出码 = 0   (正确应为 15)
+```
+
+即 **≤16B 已与 gcc 互操作,>16B 仍不能**。jhyy↔jhyy 两者都自洽(都是指针),
+所以现有测试照样全绿 —— 又一次「自洽但不兼容」。
+
+**为什么没一并做**:MEMORY class 需要**两端的栈布局协调** ——
+
+- **caller 侧**:把 struct 复制到 outgoing args 区(`call` 之前 `subq $N, %rsp`
+  并写入),偏移取决于前面已经占了多少栈空间
+- **callee 侧**:从 `16(%rbp)` 之后按「前面所有 MEMORY/溢出参数的总大小」顺序读
+
+self-backend 的栈帧大小是自动算的,要让两端算出一致的布局,得动栈帧布局这一层 ——
+比 eightbyte 拆分(纯寄存器分配)大一个量级,且要保证自举闭环不被破坏。
+
+**因此本条不能标 RESOLVED** —— >16B 的 struct 传参与 locked 规范
+(`jhyy-abi-v1.0.0.md:872`)仍不符。这是**已知、有实测、范围明确**的剩余缺口。
+
+**建议处置**:单列为下一个版本的独立项(与 SysV 栈布局改造一起做),或接受
+「jhyy 的 SysV struct 只在 ≤16B 时与 gcc 互操作」并**如实写进 locked ABI 文档**
+的已知限制。当前先记在这里,不假装闭合。
 
 
 **workaround:** 无。默认编译目标是 `amd64_win`,SysV 路径平时不走,
