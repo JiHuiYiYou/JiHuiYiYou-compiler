@@ -104,6 +104,7 @@ declare -A KNOWN_FAIL=(
     [asm_before_ret]="W-113|没有任何函数体包含它|BAD "
     [per_fn_frame]="W-107|膨胀(1024 上限已触发)"
     [sysv_arg_spill]="W-116|参数 5/6/7 没被正确读"
+    [sysv_mixed_struct]="W-104|含 f64 的 struct 整体退化成一个整数寄存器槽位"
 )
 
 # 从 "link_section(.text.boot 已出现在产物里)" 里取出 "link_section"
@@ -346,6 +347,59 @@ PY
 # 验法:不跑二进制,直接看 .s 里 callee 的溢出序列用了哪几个寄存器。
 # 这比「实跑看退出码」快且不受 docker 影响 —— 编译侧就已经错了。
 
+check_sysv_mixed_struct() {
+    hdr "W-104  含 f64 的 struct 在 SysV 下是否按 eightbyte 分类(INTEGER + SSE)"
+    [ -x "$JHYY_EXE" ] || { skip "sysv_mixed_struct" "jhyy.exe 不存在"; return; }
+
+    cat > "$WORK/sysvmix.jhyy" <<'EOF'
+type Mixed = struct { i_field: i32, d_field: f64 }
+fn plain_f64(x: f64, y: i32) -> i32 { return (x as i32) + y; }
+fn mixed_struct(m: Mixed) -> i32 { return m.i_field + (m.d_field as i32); }
+fn main_jhyy() -> i32 { return 0; }
+EOF
+    if ! "$JHYY_EXE" compile --target=amd64_sysv_freestanding --no-link             "$WORK/sysvmix.jhyy" -o "$WORK/sysvmix" > "$WORK/sysvmix.log" 2>&1; then
+        badenv "sysv_mixed_struct" "编译失败:$(tail -3 "$WORK/sysvmix.log" | tr '
+' ' ')"
+        return
+    fi
+    [ -s "$WORK/sysvmix.s" ] || { badenv "sysv_mixed_struct" "没产出 .s"; return; }
+
+    # 探针规则(为什么是「第一条 movsd 的源」而不是「有没有 xmm 源 movsd」):
+    #   SysV § A.2/A.3:`{i32, f64}` 占**两个** eightbyte —— INTEGER(rdi) +
+    #   SSE(xmm0)。所以正确实现的序言里,f64 参数是**直接从 xmm0 落进栈槽**的,
+    #   函数体内第一条 `movsd` 的**源操作数必然是 xmm 寄存器**。
+    #
+    #   ⚠️ 不能只判「有没有 xmm 源的 movsd」—— 那会假阳性:`movsd %xmm0, -N(%rbp)`
+    #   是一次**存**,缺陷版本里也有(它是「从内存载入 xmm0」之后的落袋动作)。
+    #   必须看**第一条**:它才是「参数以什么形式进来」。
+    #
+    #   现状:整个 struct 被塞进**一个**整数槽位,第一条 movsd 是
+    #   `movsd (%r8), %xmm0` —— f64 是靠 `(%rdi + 8)` 的偏移读出来的。
+    #
+    #   **对照组 `plain_f64` 保证判据不空转** —— 同一文件里的标量 f64 参数
+    #   必须命中 xmm 源,否则说明判据本身写错了,报 env 而不是报 bug。
+    local first_ctrl first_mix
+    first_ctrl=$(sed -n '/^plain_f64:/,/^  ret/p' "$WORK/sysvmix.s"                  | grep -m1 -E 'movsd' || true)
+    first_mix=$(sed -n '/^mixed_struct:/,/^  ret/p' "$WORK/sysvmix.s"                 | grep -m1 -E 'movsd' || true)
+    [ -n "$first_ctrl" ] || { badenv "sysv_mixed_struct" "对照组没产出 movsd"; return; }
+    [ -n "$first_mix" ]  || { badenv "sysv_mixed_struct" "实测组没产出 movsd"; return; }
+
+    if ! printf '%s' "$first_ctrl" | grep -qE 'movsd[[:space:]]+%xmm'; then
+        badenv "sysv_mixed_struct" "对照组 plain_f64 首条 movsd 的源不是 xmm(本该是):$first_ctrl"
+        return
+    fi
+    if printf '%s' "$first_mix" | grep -qE 'movsd[[:space:]]+%xmm'; then
+        ok "sysv_mixed_struct(首条 movsd 从 xmm 进来:$first_mix)"
+        return
+    fi
+
+    # 报告实际读法,便于诊断
+    local how
+    how=$(sed -n '/^mixed_struct:/,/^  ret/p' "$WORK/sysvmix.s"           | grep -E 'addq[[:space:]]+\$8|movsd' | head -2 | tr '
+' ' ')
+    bad "sysv_mixed_struct" "含 f64 的 struct 整体退化成一个整数寄存器槽位(d_field 靠偏移读:$how)"
+}
+
 check_sysv_arg_spill() {
     hdr "W-116  SysV callee 参数溢出是否覆盖 6 个整数寄存器"
     [ -x "$JHYY_EXE" ] || { skip "sysv_arg_spill" "jhyy.exe 不存在"; return; }
@@ -447,6 +501,7 @@ want() { [ -z "$ONLY" ] || [ "$ONLY" = "$1" ]; }
 want link_section    && check_link_section
 want asm_before_ret  && check_asm_before_ret
 want per_fn_frame    && check_per_fn_frame
+want sysv_mixed_struct && check_sysv_mixed_struct
 want sysv_arg_spill  && check_sysv_arg_spill
 
 echo

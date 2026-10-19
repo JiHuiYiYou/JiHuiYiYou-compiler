@@ -7763,6 +7763,62 @@ SEGV 应是被 W-097 / W-098..W-101 / W-102 那一批修复顺带解决的。**�
     理论上可以,但**期望类型是否一路传到了变体引用点是未知的**
   · 强制 turbofish —— 语法变更
 
+### 2026-10-18 设计决策:**调用点期望类型**方案(实测可行,规模小)
+
+**「类型参数从哪来」的三个选项,逐一验过:**
+
+| 选项 | 状态 |
+|---|---|
+| A. 从 match 的 scrutinee 拿 | ✅ **已经能用**(实测 `match o { Option::Some(v) => ... }` 不报错) |
+| B. **从调用点的期望参数类型拿** | ✅ **可行 —— 见下,定为方案** |
+| C. 强制 turbofish | ❌ 语法变更,破坏现有写法 |
+
+#### 选 B 的关键前提:期望类型是**充分**信息
+
+担心的是「拿到 `Option<i32>` 还要反推类型实参才能定位变体」。**不必** ——
+`types.jhyy:95` 的 `Type` 结构**没有泛型实参字段**,因为单态化
+(`mono.jhyy:878 mono_clone_and_subst`)已经把 `T` 替换掉、克隆出了**具体的**
+`Option<i32>`。它的 `variants` / `nvariants` 直接可用。
+
+所以在变体引用点,只要手里有一个期望类型,就能按 `name` 匹配 enum sym、
+再从它的 `variants` 里找变体 —— **不需要反推任何东西**。
+
+#### 实现形态:局部辅助函数,不改 `infer_type` 签名
+
+`infer_type` 全 src0 有 **45 个调用点**,加 `expected` 参数会波及全部。
+**不这么做。** 改为:
+
+1. 新增 `infer_type_expected(ctx, ta, n, expected: *Type) -> *Type`:
+   若 `n` 是 `NODE_ENUM_VARIANT`、且其 `type_sym` 指向泛型模板
+   (直接解析失败的那条路),且 `expected.kind == KIND_ENUM`
+   且 `expected.name` 与该 sym 匹配 → 从 `expected.variants` 取变体;
+   **否则原样 fallthrough 到 `infer_type`**(行为完全不变)。
+
+2. 在**期望类型已知**的三处改调它:
+   - `sema.jhyy:1522` 调用实参循环 —— `callee_type.params[i]` 就在手边,
+     **只是从来没往下传**(实测:`infer_type` 对实参是无约束推断,见 `:1523`)
+   - `let x: T = <expr>` 的类型标注位置
+   - 函数 `return` 位置(return type)
+
+3. `generics_enum.jhyy` 摘 XFAIL 即通过(exit 106)。
+
+#### 明确的范围边界
+
+**本方案覆盖「期望类型是具体类型」的情况**(如 `unwrap_or(o: Option<i32>, ...)`)。
+**不覆盖**「函数本身是泛型、参数类型是 `Option<T>` 未实例化」——
+那种要在调用点先 mono(该处已有 `sema.jhyy:1246 mono_expand_fn_call`),
+属下一阶段。
+
+#### 规模估计
+
+~50 行,全部局部(一个新函数 + 三处调用点替换),**不动 `infer_type` 签名、
+不动类型系统、不动单态化**。
+
+**⚠️ 一个实施前必须先做的验证(尚未做):** 确认 `callee_type.params[i]`
+在那一处**确实已经完成单态化**。若它仍是未实例化的 `Option<T>`,
+方案要改成在 `mono_expand_fn_call` 之后再解析变体。**这一步没验之前不要动手。**
+
+
 **workaround:** 用户侧只能避开泛型 enum 的构造器(改用非泛型
 `type Opt = enum { Some(i32), None }`,实测正常;或有类型上下文的地方用 match)。
 
