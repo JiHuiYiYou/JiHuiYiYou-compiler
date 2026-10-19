@@ -367,20 +367,28 @@ jobs:
           # W-104 的跨实现对拍:jhyy 侧 caller(调用 gcc 编译的 callee)。
           # 与上面 5 个测试不同 —— 这里验的是「jhyy 与 **真正的 SysV 实现**
           # 能否互调」,纯 jhyy 测试永远看不到这一类(自洽但不兼容)。
-          cp -f compiler/tests/bootstrap/sysv_abi_caller.jhyy tmp/sysv_il/sysv_abi_caller.jhyy
-          compiler/build/bin/jhyy.exe compile --target=amd64_sysv_freestanding --no-link               tmp/sysv_il/sysv_abi_caller.jhyy -o tmp/sysv_il/sysv_abi_caller
-          if [ ! -s tmp/sysv_il/sysv_abi_caller.s ]; then
+          # ⚠️ 编到**独立目录** tmp/sysv_abi/ —— tmp/sysv_il/ 是 regress 测试的
+          # 目录,sysv_link_run.sh 会遍历里面**所有** .s 并要求每个都有
+          # `// EXPECT:`。ABI 对拍的 caller 不是 regress 测试(它没有 EXPECT),
+          # 放进去会被判「读不到 EXPECT → 失败」。
+          mkdir -p tmp/sysv_abi
+          cp -f compiler/tests/bootstrap/sysv_abi_caller.jhyy tmp/sysv_abi/sysv_abi_caller.jhyy
+          compiler/build/bin/jhyy.exe compile --target=amd64_sysv_freestanding --no-link \
+              tmp/sysv_abi/sysv_abi_caller.jhyy -o tmp/sysv_abi/sysv_abi_caller
+          if [ ! -s tmp/sysv_abi/sysv_abi_caller.s ]; then
             echo "::error::没产出 sysv_abi_caller.s —— ABI 对拍门无法运行"
             exit 1
           fi
-          echo "  sysv_abi_caller.s $(wc -c < tmp/sysv_il/sysv_abi_caller.s) B"
+          echo "  sysv_abi_caller.s $(wc -c < tmp/sysv_abi/sysv_abi_caller.s) B"
 
       - name: Upload SysV .s artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sysv-il
-          path: tmp/sysv_il/
+          path: |
+            tmp/sysv_il/
+            tmp/sysv_abi/
           if-no-files-found: error
 
       - name: Artifact-level gates (expected-FAIL model — blocking as of 2026-10-18)
@@ -451,12 +459,15 @@ jobs:
             # 6 份一份都不能少(5 个 sysv 测试 + 1 个 ABI 对拍 caller)——
             # 少了就是上游 emit 步出了问题,不能当成通过。
             n=$(ls tmp/sysv_il/*.s 2>/dev/null | wc -l)
-            echo "收到 $n 份 .s(期望 6)"
-            [ "$n" -eq 6 ] || { echo "::error::.s 数量不对,拒绝报绿"; exit 1; }
+            echo "收到 $n 份 regress 用例 .s(期望 5)"
+            [ "$n" -eq 5 ] || { echo "::error::.s 数量不对,拒绝报绿"; exit 1; }
+            m=$(ls tmp/sysv_abi/*.s 2>/dev/null | wc -l)
+            echo "收到 $m 份 ABI 对拍用 .s(期望 1)"
+            [ "$m" -eq 1 ] || { echo "::error::ABI 对拍 .s 缺失,拒绝报绿"; exit 1; }
             bash compiler/tests/bootstrap/sysv_link_run.sh tmp/sysv_il
           echo ""
           echo "### W-104 跨实现 ABI 对拍(jhyy ↔ gcc)"
-          bash compiler/tests/bootstrap/sysv_abi_cross.sh tmp/sysv_il
+          bash compiler/tests/bootstrap/sysv_abi_cross.sh tmp/sysv_abi
 
   # ══════════════════════════════════════════════════════════════════════
   # 发布 —— 门不绿就发不出去
