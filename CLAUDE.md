@@ -140,7 +140,7 @@
 
 ## 当前活跃 workarounds
 
-**12 ACTIVE / 0 DEFERRED**(2026-10-19 复核:W-110 随 W-109、W-111 随期望类型接线一并 RESOLVED,三条出表,**12 ACTIVE / 103 索引行**,per `docs/internal/workarounds.md` 索引表):
+**11 ACTIVE / 0 DEFERRED**(2026-10-19 复核:W-110 / W-111 / W-116 三条本轮 RESOLVED,四条出表,**11 ACTIVE / 103 索引行**,per `docs/internal/workarounds.md` 索引表):
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
@@ -153,7 +153,6 @@
 | W-113 | `asm!` / `fence_*` emit 路径 | 字节被 emit 到 `ret` 之后,永不执行;ship gate 零敏感 |
 | W-114 | enum match codegen | **全 unit-variant 的 enum `match` 永远命中第一支** |
 | W-115 | `codegen_call_return_types.jhyy` | W-089 标 ✅ RESOLVED,但它自己的 reproducer 仍 STACK_OVERFLOW |
-| W-116 | SysV callee 参数溢出 | 只处理 4 个整数寄存器,`%r8d`/`%r9d`/栈参数从未被读 |
 | W-105.1 | `compiler/src0/sema.jhyy:2578-2579` | `check_cap_pass` 同款 stub,当前无调用点 |
 | W-118 | `compiler/src0/lexer.jhyy:212-258` | 语言 lexer `lex_peek_char` 无 EOF 守卫 → 越过 end 前进(W-117 的同族另一处,尚未观测到危害) |
 

@@ -284,8 +284,8 @@ rdi+xmm0 读),让 jhyy 去调它** —— 以 XFAIL 形式进 `sysv` job 并当�
 
 | 内容 | 说明 |
 |---|---|
-| **W-116** callee 参数溢出 | 实测:callee 把 **arg5/6/7 全读成 `%ecx`**(arg4 的寄存器)。调用侧是对的(arg1-6 → rdi/rsi/rdx/rcx/r8/r9,arg7 落栈)。于是 1+2+3+4+**4+4+4**=22,与实测 `EXIT=22` 精确吻合。**入口是 callee 侧那张参数寄存器表(本次未定位到)**;调用侧 `reg_rax_for_qt_idx`(`codegen_amd64_emit_call.jhyy:577-601`)idx 0..5 正确但 **idx ≥ 6 落到末尾的 `return "ecx"`**,是 arg7 的独立缺口 |
-| **W-104** SysV struct 传参 | **不是「分类器接错」—— 是 struct 参数整体退化成按指针传。** 实测 `process(l %m)` + `movq ..,%rdi ; call process`,两边用同一套指针约定因而自洽,所有现有测试都过。而 locked 规范 `jhyy-abi-v1.0.0.md:872` 要求 SysV struct pass-by-value 遵循 SysV ABI。**这是规范符合性缺陷,规模是 ABI 级(sprint 级),不是接线** |
+| **W-116** callee 参数溢出 | ✅ **2026-10-19 已修**。根因:`codegen_amd64_emit_call.jhyy` 里 arg_idx → 寄存器的判别**缺了 SysV 的 `arg_idx >= 4` 分支**(只有 `idx 0..3 给寄存器` + `idx>=4 **且 Win** 给栈`),SysV 的 idx≥4 全落到 `%ecx` 兜底;同一段代码重复 3 处、3 处都错。`reg_rax_for_qt_idx` 的 SysV idx 4/5 本来就对,只是够不着。**两个门同时转绿**:`sysv_abi_test` EXIT 22 → **28**,artifact 级门 KNOWN-FAIL → **PASS**(这些门历史上第一个 PASS) |
+| **W-104** SysV struct 传参 | ❌ 未做。**不是「分类器接错」—— 是 struct 参数整体退化成按指针传。** 实测 `process(l %m)` + `movq ..,%rdi ; call process`,两边用同一套指针约定因而自洽,所有现有测试都过。而 locked 规范 `jhyy-abi-v1.0.0.md:872` 要求 SysV struct pass-by-value 遵循 SysV ABI。**这是规范符合性缺陷,规模是 ABI 级**,不是接线。探针已在位(`artifact_checks` 的 `sysv_mixed_struct`,KNOWN-FAIL),修完删登记即转真门 |
 
 **gate:** `sysv_link_run.sh` 5/5(**不需要 Docker** —— 两段式 job:windows 侧编
 `.s`,ubuntu 侧链 `crt0.S` + `link.ld` 成 ELF 再跑);W-104 的 >4 参数逐位用例

@@ -125,7 +125,7 @@
 | [W-113](#w-113) | ACTIVE | `asm!` 与 memory barrier 的字节被 emit 到 `ret` 之后,永不执行 |
 | [W-114](#w-114) | ACTIVE | 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效 |
 | [W-115](#w-115) | ACTIVE | W-089 标着 RESOLVED,但它自己的 reproducer 至今... |
-| [W-116](#w-116) | ACTIVE | SysV callee 参数溢出只处理 4 个整数寄存器 —— 第 5 个及以后的参数全读到第 4... |
+| [W-116](#w-116) | RESOLVED | SysV callee 参数溢出只处理 4 个整数寄存器 —— 第 5 个及以后的参数全读到第 4... |
 | [W-117](#w-117) | RESOLVED | self-backend IL lexer 在 EOF 处无守卫 —— cur == end... |
 | [W-118](#w-118) | ACTIVE | 语言 lexer 的 lex_peek_char 同样无 EOF 守卫 —— 越界前进而非空转 |
 
@@ -8145,7 +8145,7 @@ whitelist)」—— 而**验证它的那个 reproducer 自己就崩**。也就�
 <a id="w-116"></a>
 ## W-116: SysV callee 参数溢出只处理 4 个整数寄存器 —— 第 5 个及以后的参数全读到第 4 个的值
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — `>4` 个整数参数的函数在 amd64_sysv 上 callee 侧取参错误
+**状态:** RESOLVED closed 2026-10-19 (v4.0.9) — SysV callee arg 寄存器分配补上 r8d/r9d/栈,`sysv_abi_test` EXIT 22 → 28
 **Backfilled:** 2026-10-15 (v2.7.0 写 emit_call 时就已知道「stack-arg 实 wire 留 v2.7.1+」)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-10-15 首次实测(v2.7.0 起的已知缺口,一直无门可验)
@@ -8264,6 +8264,44 @@ idx 0..5 是对的,但 **idx ≥ 6 落到函数末尾的 `return "ecx"`** ——
 
 **workaround:** 无。写不出可靠的用户侧绕法 —— 「函数别超过 4 个参数」在 SysV
 目标上是硬约束,而 SysV 约定本身允许 6 个整数寄存器 + 栈。
+
+### 2026-10-19 真修:判别缺了 SysV 的 `arg_idx >= 4` 分支
+
+`codegen_amd64_emit_call.jhyy` 里 arg_idx → 寄存器的判别只有两条分支:
+
+```jhyy
+if arg_idx >= 0 && arg_idx <= 3        { fnarg_reg = reg_rax_for_qt_idx(...); }
+else if arg_idx >= 4 && target_is_win { fnarg_stack_off = 48 + (arg_idx-4)*8; }
+else                                  { fnarg_reg = reg_rcx_for_qt(dst_qt); }   // ← SysV 掉这里
+```
+
+**SysV 的 `arg_idx >= 4` 整个分支不存在** → 全部落到最后的 `%ecx` 兜底 →
+arg5/6/7 读到的都是 arg4 的值。同样的代码重复 **3 处,3 处都错**。
+
+`reg_rax_for_qt_idx` 里 SysV 的 idx 4→r8d / 5→r9d **本来就是对的**,只是从来没够着。
+
+修法按 ABI 分派寄存器数量:SysV 6 个整数寄存器、第 7 个起落栈、栈基址
+`16(%rbp)`(`push rbp` 后返回地址在 8、无影子区);Win 4 个 + 32B 影子区、基址 48。
+
+顺带实测确认 **caller 侧一直是对的**(edi/esi/edx/ecx/r8d/r9d + `0(%rsp)`),
+不需要改 —— 序言里的 `subq $N, %rsp` 顺带当了 outgoing 区。
+
+**修复后 callee 序言:**
+```
+movl %edi → arg1   %esi → arg2   %edx → arg3
+%ecx → arg4   %r8d → arg5   %r9d → arg6   16(%rbp) → arg7
+```
+
+### 两个门同时转绿(这次重构的目的)
+
+```
+artifact 级门:  ⚠️ KNOWN-FAIL sysv_arg_spill  →  ✅ PASS sysv_arg_spill
+sysv 门(ubuntu): ⚠️ sysv_abi_test EXIT=22       →  ✅ sysv_abi_test EXIT=28
+                 === sysv 结果: 5 PASS / 0 KNOWN-FAIL / 0 FAIL ===
+```
+
+两处 W-116 登记已删除 → 两项**升级成真门**,任何回归都会红。
+
 
 **影响范围:** `amd64_sysv` / `amd64_sysv_freestanding` 目标的全部多参数调用。
 注意 **Win 目标不受影响**(`sysv_*` 测试只在 sysv target 下跑),这也是它能
