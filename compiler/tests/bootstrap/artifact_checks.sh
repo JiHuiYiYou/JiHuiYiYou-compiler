@@ -104,7 +104,6 @@ declare -A KNOWN_FAIL=(
     [asm_before_ret]="W-113|没有任何函数体包含它|BAD "
     [per_fn_frame]="W-107|膨胀(1024 上限已触发)"
     # W-116 已修(2026-10-19),这一项升级成真门 —— 登记删除即生效
-    [sysv_mixed_struct]="W-104|含 f64 的 struct 整体退化成一个整数寄存器槽位"
 )
 
 # 从 "link_section(.text.boot 已出现在产物里)" 里取出 "link_section"

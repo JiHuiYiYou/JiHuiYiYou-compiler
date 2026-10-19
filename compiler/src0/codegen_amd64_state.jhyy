@@ -1980,6 +1980,85 @@ fn cg_find_arg_idx(header_text: *u8, header_len: i64,
     return -(1 as i64);
 }
 
+// cg_find_class_arg_idx — W-104 (2026-10-19):同类序列里的参数序号
+//
+// SysV psABI § A.2:整数类参数走**整数寄存器序列**(rdi/rsi/rdx/rcx/r8/r9),
+// 浮点类参数走**独立的 SSE 序列**(xmm0..xmm7)—— 两个序列各自从 0 开始数。
+//
+// cg_find_arg_idx 给的是**参数在 header 里的整体序号**,对 SysV 是错的:
+//   fn take(d %a, w %b)   ← SSE 在前、INTEGER 在后
+//     %a 应进 xmm0(SSE 序列第 0)
+//     %b 应进 rdi(INTEGER 序列第 0)
+// 用整体序号算,%b 会拿到 rdx —— 整体序号 1。
+//
+// is_sse=1 → 数前面有多少个 d/s 参数(SSE 序列)
+// is_sse=0 → 数前面有多少个非 d/s 参数(INTEGER 序列)
+//
+// ⚠️ 这只适用于 **SysV**。Win x64 的 XMM 按**参数位置**计数(第 n 个参数是
+// float 就走 XMM(n-1)),与 SysV 规则不同 —— 调用方必须用 target_is_win 区分。
+fn cg_find_class_arg_idx(header_text: *u8, header_len: i64,
+                         name_bytes: *u8, name_len: i64,
+                         is_sse: i32) -> i64 {
+    if header_text == (0 as *u8) || name_bytes == (0 as *u8) {
+        return -(1 as i64);
+    }
+    if header_len <= (0 as i64) || name_len <= (0 as i64) {
+        return -(1 as i64);
+    }
+    let mut n_class: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i + (1 as i64) < header_len {
+        if cg_byte_at(header_text, i) == (37 as i32) {  // '%'
+            // 这个参数的字母 = '%' 前面的非空白字符
+            let mut b: i64 = i - (1 as i64);
+            while b >= (0 as i64) {
+                let bc = cg_byte_at(header_text, b);
+                if bc != (32 as i32) && bc != (9 as i32) { break; }
+                b = b - (1 as i64);
+            }
+            let mut this_sse: i32 = 0 as i32;
+            if b >= (0 as i64) {
+                let lc = cg_byte_at(header_text, b);
+                if lc == (100 as i32) || lc == (115 as i32) {   // 'd' / 's'
+                    this_sse = 1 as i32;
+                }
+            }
+            // match the target name
+            let mut j: i64 = 0 as i64;
+            let mut match_ok: i32 = 1 as i32;
+            while j < name_len {
+                if i + (1 as i64) + j >= header_len {
+                    match_ok = 0 as i32;
+                    break;
+                }
+                if cg_byte_at(header_text, i + (1 as i64) + j) != cg_byte_at(name_bytes, j) {
+                    match_ok = 0 as i32;
+                    break;
+                }
+                j = j + (1 as i64);
+            }
+            if match_ok == (1 as i32) {
+                let after = i + (1 as i64) + name_len;
+                if after >= header_len {
+                    return n_class;
+                }
+                let nb = cg_byte_at(header_text, after);
+                if nb == (44 as i32) || nb == (41 as i32) || nb == (32 as i32) ||
+                   nb == (9 as i32) || nb == (10 as i32) || nb == (123 as i32) {
+                    return n_class;
+                }
+            }
+            // 不是目标参数 → 按它的 class 计数
+            if (this_sse != (0 as i32) && is_sse != (0 as i32)) ||
+               (this_sse == (0 as i32) && is_sse == (0 as i32)) {
+                n_class = n_class + (1 as i64);
+            }
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
+
 // cg_state_bump_fn_idx — v2.11.3 (W-074.7 T4-h 真修)
 //
 // emit_func_header 末尾调,bump cur_fn_idx per-function 序号。emit_jnz /

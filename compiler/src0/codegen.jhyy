@@ -203,6 +203,11 @@ type CGContext = struct {
     //   (2 call_prelude + 2 struct_arg_slot + 4 stmt-level return sites) to
     //   dispatch abi_win_* vs abi_sysv_*. +4 bytes (padded +4 = +8 total).
     target_tag:       i32,
+    // W-104 (2026-10-19):SysV 下 struct 实参按 eightbyte 展开 —— 这两个字段
+    // 暂存「刚拆出来的 eightbyte 值」,由调用方取出写进 args 数组。
+    last_struct_arg_vals: *u8,   // *IRVal[] (最多 2 个)
+    last_struct_arg_n:    i64,
+
 }
 
 // CGModGlobal layout (24 bytes): sym(0..8) + qbe_name(8..16) + qbe_type(16..20), padded to 24
@@ -707,6 +712,84 @@ fn cg_emit_store_primitive(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> 
 //
 // jhyy 无 forward decl：必须在 cg_emit_load / cg_emit_store_primitive 之后定义，
 // 在 cg_emit_store dispatcher 之前定义。
+// cg_sysv_expanded_nargs — W-104:SysV 下 struct 实参按 eightbyte 展开后,
+// args 数组的容量与 call 文本里的实参个数都要按**展开后**的数量算。
+//
+// 只在 SysV 目标下展开;Win 仍是「一个 struct 一个实参(指针)」。
+fn cg_sysv_expanded_nargs(cg_raw: *u8, args_node: *u8, nargs: i64) -> i64 {
+    let cg = cg_raw as *CGContext;
+    if (*cg).target_tag != TARGET_AMD64_SYSV() && (*cg).target_tag != TARGET_AMD64_SYSV_FREESTANDING() {
+        return nargs;
+    }
+    let mut total: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < nargs {
+        let an = *(ptr_add_u8(args_node, i * (8 as i64)) as **Node);
+        let mut cnt: i64 = 1 as i64;
+        if an != (0 as *Node) {
+            let at = (*an).type_ptr;
+            if at != (0 as *u8) {
+                let ne = abi_sysv_struct_n_eightbytes(at);
+                if ne > (0 as i64) { cnt = ne; }
+            }
+        }
+        total = total + cnt;
+        i = i + (1 as i64);
+    }
+    return total;
+}
+
+// cg_emit_struct_arg_eightbytes — W-104:把一个 struct 实参按 eightbyte 拆成
+// 若干个「值」实参(而不是一个指针),写进 args 数组。
+//
+// 拆出来的每个 eightbyte 从 struct 副本的对应偏移**按值加载**:
+//   INTEGER eightbyte → w(4B) / l(8B)  → GPR
+//   SSE     eightbyte → s(4B) / d(8B)  → XMM
+// 字母与宽度与 callee 侧的声明严格对称(同一个 abi_sysv_eightbyte_letter)。
+//
+// 返回写入 args 数组的实参个数(1 或 2)。
+fn cg_emit_struct_arg_eightbytes(cg_raw: *u8, st_raw: *u8, copy_slot: IRVal) -> i64 {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    let st = st_raw as *Type;
+    // ⚠️ 只有 **SysV** 才按 eightbyte 拆 —— Win x64 的 struct 传参规则不同
+    // (>8B 走间接:传指针;≤8B 走寄存器)。
+    if (*cg).target_tag != TARGET_AMD64_SYSV() && (*cg).target_tag != TARGET_AMD64_SYSV_FREESTANDING() {
+        return 0 as i64;
+    }
+    let ne = abi_sysv_struct_n_eightbytes(st_raw);
+    if ne <= (0 as i64) {
+        return 0 as i64;
+    }
+    // 加载出的 temp 们要放进 args 数组 —— 数组由调用方持有,这里只把
+    // 「值」放进一个临时的 IRVal 数组,调用方再取。
+    let mut vals = arena_alloc((*ir).arena, (2 as i64) * IRVAL_SIZE());
+    let mut k: i64 = 0 as i64;
+    while k < ne {
+        let eoff = k * (8 as i64);
+        let eaddr = *ir_new_tmp(ir, QBE_L());
+        if eoff > (0 as i64) {
+            ir_emit_binary(ir, eaddr, "add" as *u8, copy_slot, ir_new_int(eoff));
+        } else {
+            ir_emit_str(ir, "    %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, eaddr.id);
+            ir_emit_str(ir, " =l copy %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, copy_slot.id);
+            ir_emit_str(ir, "
+" as *u8);
+        }
+        let eqt = abi_sysv_eightbyte_letter(st_raw, k);
+        let eval = *ir_new_tmp(ir, eqt);
+        ir_emit_load(ir, eval, eqt, eaddr);
+        let vslot = ptr_add_u8(vals, k * IRVAL_SIZE()) as *IRVal;
+        *vslot = eval;
+        k = k + (1 as i64);
+    }
+    (*cg).last_struct_arg_vals = vals;
+    (*cg).last_struct_arg_n = ne;
+    return ne;
+}
+
 fn cg_copy_struct(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) -> i32 {
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
@@ -2635,7 +2718,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         let mut args_arr2: *u8 = 0 as *u8;
         // W-070 v2.8.2: dispatch call_prelude Win vs SysV (first call site).
         if (*cg).target_tag == TARGET_AMD64_SYSV() || (*cg).target_tag == TARGET_AMD64_SYSV_FREESTANDING() {
-            args_arr2 = abi_sysv_emit_call_prelude(ir, (*ir).arena, nargs, is_sret, rsize, ret_slot_buf);
+            args_arr2 = abi_sysv_emit_call_prelude(ir, (*ir).arena, cg_sysv_expanded_nargs(cg_raw, args_node, nargs), is_sret, rsize, ret_slot_buf);
         } else {
             args_arr2 = abi_win_emit_call_prelude(ir, (*ir).arena, nargs, is_sret, rsize, ret_slot_buf);
         }
@@ -2760,13 +2843,30 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                     }
                 }
             }
-            let out_slot = ptr_add_u8(args_arr2, ((extra as i64) + i) * IRVAL_SIZE()) as *IRVal;
-            *out_slot = arg_v;
+            // W-104:SysV 下 struct 实参按 eightbyte 拆成多个「值」实参。
+            // 写 args 数组的索引改用运行计数器 out_idx(不再是 i)—— 展开后
+            // 后续实参的位置会整体后移。
+            let mut out_idx: i64 = i;
+            let n_eb_arg = cg_emit_struct_arg_eightbytes(cg_raw, arg_t, arg_v);
+            if n_eb_arg > (0 as i64) {
+                let vals = (*cg).last_struct_arg_vals;
+                let mut k: i64 = 0 as i64;
+                while k < n_eb_arg {
+                    let out_slot = ptr_add_u8(args_arr2, ((extra as i64) + out_idx) * IRVAL_SIZE()) as *IRVal;
+                    *out_slot = *(ptr_add_u8(vals, k * IRVAL_SIZE()) as *IRVal);
+                    out_idx = out_idx + (1 as i64);
+                    k = k + (1 as i64);
+                }
+            } else {
+                let out_slot = ptr_add_u8(args_arr2, ((extra as i64) + out_idx) * IRVAL_SIZE()) as *IRVal;
+                *out_slot = arg_v;
+                out_idx = out_idx + (1 as i64);
+            }
             i = i + (1 as i64);
         }
 
         if is_sret != 0 {
-            ir_emit_call_void(ir, fn_name, args_arr2, ((nargs + (extra as i64)) as i32));
+            ir_emit_call_void(ir, fn_name, args_arr2, ((cg_sysv_expanded_nargs(cg_raw, args_node, nargs) + (extra as i64)) as i32));
             return irval_box(ir, (ret_slot).kind, (ret_slot).id, (ret_slot).ival, (ret_slot).name, (ret_slot).qbe_type);
         }
         let mut qt: i32 = QBE_W();
@@ -2774,7 +2874,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             qt = qbe_type_of((*n).type_ptr);
         }
         let result = *ir_new_tmp(ir, qt);
-        ir_emit_call(ir, result, fn_name, args_arr2, (nargs as i32));
+        ir_emit_call(ir, result, fn_name, args_arr2, (cg_sysv_expanded_nargs(cg_raw, args_node, nargs) as i32));
         return irval_box(ir, (result).kind, (result).id, (result).ival, (result).name, (result).qbe_type);
     }
 
@@ -2821,7 +2921,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         let mut args_arr2: *u8 = 0 as *u8;
         // W-070 v2.8.2: dispatch call_prelude Win vs SysV (second call site).
         if (*cg).target_tag == TARGET_AMD64_SYSV() || (*cg).target_tag == TARGET_AMD64_SYSV_FREESTANDING() {
-            args_arr2 = abi_sysv_emit_call_prelude(ir, (*ir).arena, nargs, is_sret, rsize2, ret_slot_buf2);
+            args_arr2 = abi_sysv_emit_call_prelude(ir, (*ir).arena, cg_sysv_expanded_nargs(cg_raw, args_node, nargs), is_sret, rsize2, ret_slot_buf2);
         } else {
             args_arr2 = abi_win_emit_call_prelude(ir, (*ir).arena, nargs, is_sret, rsize2, ret_slot_buf2);
         }
@@ -2940,13 +3040,30 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                     }
                 }
             }
-            let out_slot = ptr_add_u8(args_arr2, ((extra as i64) + i) * IRVAL_SIZE()) as *IRVal;
-            *out_slot = arg_v;
+            // W-104:SysV 下 struct 实参按 eightbyte 拆成多个「值」实参。
+            // 写 args 数组的索引改用运行计数器 out_idx(不再是 i)—— 展开后
+            // 后续实参的位置会整体后移。
+            let mut out_idx: i64 = i;
+            let n_eb_arg = cg_emit_struct_arg_eightbytes(cg_raw, arg_t, arg_v);
+            if n_eb_arg > (0 as i64) {
+                let vals = (*cg).last_struct_arg_vals;
+                let mut k: i64 = 0 as i64;
+                while k < n_eb_arg {
+                    let out_slot = ptr_add_u8(args_arr2, ((extra as i64) + out_idx) * IRVAL_SIZE()) as *IRVal;
+                    *out_slot = *(ptr_add_u8(vals, k * IRVAL_SIZE()) as *IRVal);
+                    out_idx = out_idx + (1 as i64);
+                    k = k + (1 as i64);
+                }
+            } else {
+                let out_slot = ptr_add_u8(args_arr2, ((extra as i64) + out_idx) * IRVAL_SIZE()) as *IRVal;
+                *out_slot = arg_v;
+                out_idx = out_idx + (1 as i64);
+            }
             i = i + (1 as i64);
         }
 
         if is_sret != 0 {
-            ir_emit_call_void(ir, fn_name, args_arr2, ((nargs + (extra as i64)) as i32));
+            ir_emit_call_void(ir, fn_name, args_arr2, ((cg_sysv_expanded_nargs(cg_raw, args_node, nargs) + (extra as i64)) as i32));
             return irval_box(ir, (ret_slot).kind, (ret_slot).id, (ret_slot).ival, (ret_slot).name, (ret_slot).qbe_type);
         }
         let mut qt: i32 = QBE_W();
@@ -2954,7 +3071,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             qt = qbe_type_of((*n).type_ptr);
         }
         let result = *ir_new_tmp(ir, qt);
-        ir_emit_call(ir, result, fn_name, args_arr2, (nargs as i32));
+        ir_emit_call(ir, result, fn_name, args_arr2, (cg_sysv_expanded_nargs(cg_raw, args_node, nargs) as i32));
         return irval_box(ir, (result).kind, (result).id, (result).ival, (result).name, (result).qbe_type);
     }
 
@@ -4067,14 +4184,71 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
             pq = abi_win_classify_arg(pt2);
         }
         let pv = *ir_new_tmp(ir, pq);
-        ir_emit_str(ir, "    %t" as *u8);
-        ir_emit_int(ir, "%d" as *u8, pv.id);
-        ir_emit_str(ir, " =" as *u8);
-        ir_emit_int(ir, "%c" as *u8, pq);
-        ir_emit_str(ir, " copy %" as *u8);
-        ir_emit_str(ir, (*p2_sym).name);
-        ir_emit_str(ir, "\n" as *u8);
-        cg_add_local(cg_raw, p2_sym_raw, pv, 0);
+        // W-104 (2026-10-19):struct 参数在 SysV 下按 eightbyte 拆成多个 IL
+        // 参数(签名见 abi_sysv_emit_function_header)。这里要把它们**重建**
+        // 回一个连续的 struct 槽,并让 param 的局部指向该槽 —— body 里
+        // `loadw %pv` / `add %pv, 8` 就能照常按偏移取字段。
+        //
+        // 重建方式与 gcc 一致(gcc 的 callee 也是把八个byte存回栈槽):
+        //   %pv =l alloc16 <size>       ← struct 槽
+        //   store<qt> %<name>__e<k>, %pv (+ k*8)
+        // ⚠️ 只有 **SysV** 才做 eightbyte 重建 —— Win x64 的 struct 传参规则
+        // 完全不同(>8B 走间接:传指针;≤8B 走寄存器),不能套用 SysV 的切分。
+        let mut n_eb2: i64 = 0 as i64;
+        if (*cg).target_tag == TARGET_AMD64_SYSV() || (*cg).target_tag == TARGET_AMD64_SYSV_FREESTANDING() {
+            n_eb2 = abi_sysv_struct_n_eightbytes(pt2);
+        }
+        if n_eb2 > (0 as i64) {
+            let ssize = type_size(pt2 as *Type);
+            let pv2 = *ir_new_tmp(ir, QBE_L());
+            // ⚠️ 必须用 ir_emit_alloc:它输出 `alloc<align> <size>` —— 手工拼
+            // "alloc" + "%d" 会把 size 拼成**类型标记**(`alloc16` 而不是
+            // `alloc16 16`),槽只有 8 字节却被写入 16 字节 → 踩坏栈 → SEGV。
+            ir_emit_alloc(ir, pv2, ssize as i32);
+            let mut k2: i64 = 0 as i64;
+            while k2 < n_eb2 {
+                let eoff = k2 * (8 as i64);
+                let eaddr = *ir_new_tmp(ir, QBE_L());
+                if eoff > (0 as i64) {
+                    ir_emit_binary(ir, eaddr, "add" as *u8, pv2, ir_new_int(eoff));
+                } else {
+                    ir_emit_str(ir, "    %t" as *u8);
+                    ir_emit_int(ir, "%d" as *u8, eaddr.id);
+                    ir_emit_str(ir, " =l copy %t" as *u8);
+                    ir_emit_int(ir, "%d" as *u8, pv2.id);
+                    ir_emit_str(ir, "
+" as *u8);
+                }
+                // 源:IL 参数 %<name>__e<k>(self-backend 把它从参数寄存器搬进栈槽)
+                // temp 的 qt 必须与该 eightbyte 的字母一致 —— SSE 的 temp 是
+                // XMM-backed,用 l 会把 f64 的位模式当整数搬。
+                let eqt = abi_sysv_eightbyte_letter(pt2, k2);
+                let esrc = *ir_new_tmp(ir, eqt);
+                ir_emit_str(ir, "    %t" as *u8);
+                ir_emit_int(ir, "%d" as *u8, esrc.id);
+                ir_emit_str(ir, " =" as *u8);
+                ir_emit_int(ir, "%c" as *u8, eqt);
+                ir_emit_str(ir, " copy %" as *u8);
+                ir_emit_str(ir, (*p2_sym).name);
+                ir_emit_str(ir, "__e" as *u8);
+                ir_emit_int(ir, "%d" as *u8, k2);
+                ir_emit_str(ir, "
+" as *u8);
+                ir_emit_store(ir, eqt, esrc, eaddr);
+                k2 = k2 + (1 as i64);
+            }
+            cg_add_local(cg_raw, p2_sym_raw, pv2, 0);
+        } else {
+            ir_emit_str(ir, "    %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, pv.id);
+            ir_emit_str(ir, " =" as *u8);
+            ir_emit_int(ir, "%c" as *u8, pq);
+            ir_emit_str(ir, " copy %" as *u8);
+            ir_emit_str(ir, (*p2_sym).name);
+            ir_emit_str(ir, "
+" as *u8);
+            cg_add_local(cg_raw, p2_sym_raw, pv, 0);
+        }
         pi = pi + (1 as i64);
     }
 

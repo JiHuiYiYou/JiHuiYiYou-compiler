@@ -1,0 +1,30 @@
+// sysv_abi_caller.jhyy — W-104 的跨实现 ABI 对拍:jhyy 侧
+//
+// 目的:证明 jhyy 编译出来的 SysV 代码**能与 gcc 编译的代码互调**。
+//
+// 为什么需要这个门:W-104 这类缺陷的特征是「自洽但不兼容」——
+//
+//   jhyy caller 传 struct  →  jhyy callee 收 struct   ✅ 两者约定一致
+//   jhyy caller 传 struct  →  gcc  callee 收 struct   ❌ 约定不同就错开
+//
+// 纯 jhyy 测试**永远看不到**这一类:W-104 存在期间,`sysv_struct_mixed` 等
+// 全部 PASS(它们只验 jhyy↔jhyy)。而 locked 规范
+// `docs/abis/jhyy-abi-v1.0.0.md:872` 要求 SysV 的 struct pass-by-value
+// 遵循 SysV ABI —— 只有与真正的 SysV 实现对拍才能验这条。
+//
+// 本文件是 **caller**:它把一个 `{i32, f64}` struct 按 SysV 传给
+// `gcc_take`(由 sysv_abi_callee.c 用 gcc 编译)。
+//
+// 期望:44 = 41 + 3。
+
+type Mixed = struct {
+    i_field: i32,
+    d_field: f64,
+}
+
+extern fn gcc_take(m: Mixed) -> i32;
+
+fn main_jhyy() -> i32 {
+    let m = Mixed { i_field: 41, d_field: 3.14 };
+    return gcc_take(m);
+}

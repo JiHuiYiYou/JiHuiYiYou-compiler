@@ -112,7 +112,7 @@
 | [W-085](#w-085) | RESOLVED | codegen small-frame fn(*T, i32, i32) 第 3 i32 参数... |
 | [W-102](#w-102) | RESOLVED | address-holder 池与 alloc 池槽位重叠 → self-hosted... |
 | [W-103](#w-103) | ACTIVE | std/os.jhyy 全部 I/O 与 exit 是 M0 mock — W-079 的... |
-| [W-104](#w-104) | ACTIVE | SysV ABI 参数分类调用 Win 分类器 — 正确的分类器就在同文件,没接线 |
+| [W-104](#w-104) | RESOLVED | SysV ABI 参数分类调用 Win 分类器 — 正确的分类器就在同文件,没接线 |
 | [W-105](#w-105) | ACTIVE | check_borrow 是硬编码 return 1 — `&mut` 独占性完全不检查 |
 | [W-105.1](#w-105.1) | ACTIVE | check_cap_pass 同款空 stub,当前无调用点(死代码但签名在 API 面上) |
 | [W-106](#w-106) | ACTIVE | symtab_lookup_one 用 arena-touch 强制 codegen... |
@@ -6993,7 +6993,7 @@ os 层语义,所以**不阻塞 v4.0.0 final**;但它是「索引表 0 ACTIVE」�
 <a id="w-104"></a>
 ## W-104: SysV ABI 参数分类调用 Win 分类器 — 正确的分类器就在同文件,没接线
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — abi_sysv_emit_params 用 abi_win_classify_arg 出参类型字母;SysV 目标产出错误 ABI
+**状态:** RESOLVED closed 2026-10-19 (v4.0.9) — SysV struct 按 eightbyte 分类传值,与 gcc 双向对拍一致(44)
 **Backfilled:** 2026-10-15 (v2.x amd64_sysv Stage 1c.3 mirror 占位)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-08 前后 (v2.0.0-os-prep Stage 1c.3 mirror) → 至今
@@ -7091,6 +7091,62 @@ eightbyte 拆分多寄存器传参 + MEMORY class(>16B)落栈 + 调用侧对称�
 
 **影响:** jhyy 编译的 SysV 目标代码**无法与 gcc 编译的 SysV 代码在跨 struct
 边界的函数调用上互操作**。jhyy↔jhyy 之间不受影响。
+
+
+### 2026-10-19 真修:struct 按 eightbyte 分类传值
+
+**先看跨实现对拍实测(修复前)**:jhyy caller → gcc callee,退出码 **171**,
+正确应为 44(= 41 + 3)。这证明「struct 整体按指针传」不只是与规范不符,
+而是**与 gcc 完全不能互操作**。
+
+**gcc 的 ground truth(docker gcc:12 -O0 实测)**:
+
+```
+struct {int  a; int  b;}   → 1 个 INTEGER eightbyte,加载 8 字节
+struct {int  a; double b;} → INTEGER(4) + SSE(8),分别加载 4 / 8 字节
+struct {double a;}          → 1 个 SSE eightbyte,加载 8 字节
+struct {float  a;}          → 1 个 SSE eightbyte,加载 4 字节
+```
+
+**宽度 = 该 eightbyte 内字段实际覆盖到的范围** —— 不能统一成 8 字节:
+`{int,int}` 的第二个 int 在 offset 4,若只按 4 字节传而 callee 按 8 字节读,
+第二个 int 就是垃圾;反之若 callee 只读 4 字节而 caller 传 8 字节,gcc 的 callee
+会丢掉高位。**两边必须按同一宽度。**
+
+#### 实现:IL 层拆成 eightbyte,self-backend 无需改动
+
+1. **`abi_amd64_sysv.jhyy` 新增三个分类 helper**
+   (`abi_sysv_struct_n_eightbytes` / `_eightbyte_class` / `_eightbyte_width` /
+   `_eightbyte_letter`)。按 SysV § A.2/A.3:eightbyte 内全是 f32/f64 → SSE 类,
+   否则 INTEGER 类(含任何非浮点字段就整块 INTEGER)。
+2. **callee 签名**(`abi_sysv_emit_function_header`):struct 参数拆成 N 个 IL 参数
+   (`w %m__e0, d %m__e1`)。
+3. **callee 序言重建**(`codegen.jhyy` 的「register params as locals」):
+   `alloc` 一个连续的 struct 槽,把八个byte按宽度存回去,param 的局部指向该槽 ——
+   body 里的 `loadw %pv` / `add %pv, 8` 照常按偏移取字段。
+4. **caller 侧**:struct 实参按 eightbyte **按值加载**后进 args 数组。
+5. **register 序列修正**:SysV 的 INTEGER 与 SSE 是**两个独立序列**,各自从 0 数。
+   原来两侧都用「参数整体序号」,SSE 参数在前时后面 INTEGER 参数的寄存器会偏一位。
+   新增 `cg_find_class_arg_idx` 按 class 计数(Win x64 的 XMM 按**参数位置**计数,
+   规则不同,那里不动)。
+
+⚠️ 全程 gate 在 **SysV target** 上 —— Win x64 的 struct 传参规则完全不同
+(>8B 走间接:传指针;≤8B 走寄存器),套用 SysV 的切分会让 5 个 Win 测试回归
+(实测 big_test / cap_table_* / mixed_* 全红)。
+
+#### 验收
+
+```
+跨实现对拍(新编译器):  jhyy caller → gcc callee  = 44 ✅
+                        gcc caller → jhyy callee  = 44 ✅
+跨实现对拍(旧编译器):  11 ❌   ← 门能抓到回归
+自举闭环:                v2..v5 逐字节相同 ✅
+全量回归:                177/177, 0 failed ✅
+artifact 级门:            sysv_mixed_struct / sysv_arg_spill 均 PASS
+```
+
+新增常驻门 `compiler/tests/bootstrap/sysv_abi_cross.sh`(ubuntu job 跑)——
+**这是唯一能抓到「自洽但不兼容」这一类的检查**:纯 jhyy 测试永远看不到它。
 
 
 **workaround:** 无。默认编译目标是 `amd64_win`,SysV 路径平时不走,

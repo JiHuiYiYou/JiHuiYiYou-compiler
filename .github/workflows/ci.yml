@@ -364,6 +364,17 @@ jobs:
           done
           [ "$missing" -eq 0 ] || exit 1
 
+          # W-104 的跨实现对拍:jhyy 侧 caller(调用 gcc 编译的 callee)。
+          # 与上面 5 个测试不同 —— 这里验的是「jhyy 与 **真正的 SysV 实现**
+          # 能否互调」,纯 jhyy 测试永远看不到这一类(自洽但不兼容)。
+          cp -f compiler/tests/bootstrap/sysv_abi_caller.jhyy tmp/sysv_il/sysv_abi_caller.jhyy
+          compiler/build/bin/jhyy.exe compile --target=amd64_sysv_freestanding --no-link               tmp/sysv_il/sysv_abi_caller.jhyy -o tmp/sysv_il/sysv_abi_caller
+          if [ ! -s tmp/sysv_il/sysv_abi_caller.s ]; then
+            echo "::error::没产出 sysv_abi_caller.s —— ABI 对拍门无法运行"
+            exit 1
+          fi
+          echo "  sysv_abi_caller.s $(wc -c < tmp/sysv_il/sysv_abi_caller.s) B"
+
       - name: Upload SysV .s artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -437,11 +448,15 @@ jobs:
           uname -a
           gcc --version | head -1
           ls -la tmp/sysv_il/
-          # 5 份一份都不能少 —— 少了就是上游 emit 步出了问题,不能当成通过
-          n=$(ls tmp/sysv_il/*.s 2>/dev/null | wc -l)
-          echo "收到 $n 份 .s(期望 5)"
-          [ "$n" -eq 5 ] || { echo "::error::.s 数量不对,拒绝报绿"; exit 1; }
-          bash compiler/tests/bootstrap/sysv_link_run.sh tmp/sysv_il
+            # 6 份一份都不能少(5 个 sysv 测试 + 1 个 ABI 对拍 caller)——
+            # 少了就是上游 emit 步出了问题,不能当成通过。
+            n=$(ls tmp/sysv_il/*.s 2>/dev/null | wc -l)
+            echo "收到 $n 份 .s(期望 6)"
+            [ "$n" -eq 6 ] || { echo "::error::.s 数量不对,拒绝报绿"; exit 1; }
+            bash compiler/tests/bootstrap/sysv_link_run.sh tmp/sysv_il
+          echo ""
+          echo "### W-104 跨实现 ABI 对拍(jhyy ↔ gcc)"
+          bash compiler/tests/bootstrap/sysv_abi_cross.sh tmp/sysv_il
 
   # ══════════════════════════════════════════════════════════════════════
   # 发布 —— 门不绿就发不出去

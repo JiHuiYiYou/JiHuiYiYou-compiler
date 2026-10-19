@@ -1268,6 +1268,21 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                         if (*cg).cur_fn_header_text != (0 as *u8) && name_len > (0 as i64) {
                             arg_idx = cg_find_arg_idx((*cg).cur_fn_header_text, (*cg).cur_fn_header_len,
                                             ptr_add_u8(src_text, name_start), name_len);
+                            // W-104: SysV 的 INTEGER / SSE 是**两个独立序列**,各自从 0 数。
+                            // cg_find_arg_idx 给的是**整体序号**,对 SysV 是错的:SSE 参数在前时,
+                            // 后面 INTEGER 参数的 GPR 序号会整体偏移一位。
+                            //   fn take(d %a, w %b) → %a 应进 xmm0(SSE 第 0),%b 应进 rdi(INTEGER 第 0)
+                            // 用整体序号算,%b 会拿到 rdx。
+                            //
+                            // Win x64 的 XMM 按**参数位置**计数,规则不同 —— 那里不动。
+                            // ⚠️ inline-if 不能当函数实参,先落变量。
+                            if arg_idx >= (0 as i64) && target_is_win(target_tag) == (0 as i32) {
+                              let mut _is_sse: i32 = 0 as i32;
+                              if dst_qt == QBE_D_LOCAL() || dst_qt == QBE_S_LOCAL() { _is_sse = 1 as i32; }
+                              let _ci = cg_find_class_arg_idx((*cg).cur_fn_header_text, (*cg).cur_fn_header_len,
+                                ptr_add_u8(src_text, name_start), name_len, _is_sse);
+                              if _ci >= (0 as i64) { arg_idx = _ci; }
+                            }
                         } else {
                             arg_idx = -(1 as i64);
                         }
@@ -1345,6 +1360,21 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                             if (*cg).cur_fn_header_text != (0 as *u8) {
                                 arg_idx = cg_find_arg_idx((*cg).cur_fn_header_text, (*cg).cur_fn_header_len,
                                                 ptr_add_u8(src_text, t_name_start), t_name_end - t_name_start);
+                                // W-104: SysV 的 INTEGER / SSE 是**两个独立序列**,各自从 0 数。
+                                // cg_find_arg_idx 给的是**整体序号**,对 SysV 是错的:SSE 参数在前时,
+                                // 后面 INTEGER 参数的 GPR 序号会整体偏移一位。
+                                //   fn take(d %a, w %b) → %a 应进 xmm0(SSE 第 0),%b 应进 rdi(INTEGER 第 0)
+                                // 用整体序号算,%b 会拿到 rdx。
+                                //
+                                // Win x64 的 XMM 按**参数位置**计数,规则不同 —— 那里不动。
+                                // ⚠️ inline-if 不能当函数实参,先落变量。
+                                if arg_idx >= (0 as i64) && target_is_win(target_tag) == (0 as i32) {
+                                  let mut _is_sse: i32 = 0 as i32;
+                                  if dst_qt == QBE_D_LOCAL() || dst_qt == QBE_S_LOCAL() { _is_sse = 1 as i32; }
+                                  let _ci = cg_find_class_arg_idx((*cg).cur_fn_header_text, (*cg).cur_fn_header_len,
+                                    ptr_add_u8(src_text, t_name_start), t_name_end - t_name_start, _is_sse);
+                                  if _ci >= (0 as i64) { arg_idx = _ci; }
+                                }
                             } else {
                                 arg_idx = -(1 as i64);
                             }
@@ -1385,6 +1415,21 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                             if (*cg).cur_fn_header_text != (0 as *u8) {
                                 arg_idx = cg_find_arg_idx((*cg).cur_fn_header_text, (*cg).cur_fn_header_len,
                                                 ptr_add_u8(src_text, name_start), 1 as i64);
+                                // W-104: SysV 的 INTEGER / SSE 是**两个独立序列**,各自从 0 数。
+                                // cg_find_arg_idx 给的是**整体序号**,对 SysV 是错的:SSE 参数在前时,
+                                // 后面 INTEGER 参数的 GPR 序号会整体偏移一位。
+                                //   fn take(d %a, w %b) → %a 应进 xmm0(SSE 第 0),%b 应进 rdi(INTEGER 第 0)
+                                // 用整体序号算,%b 会拿到 rdx。
+                                //
+                                // Win x64 的 XMM 按**参数位置**计数,规则不同 —— 那里不动。
+                                // ⚠️ inline-if 不能当函数实参,先落变量。
+                                if arg_idx >= (0 as i64) && target_is_win(target_tag) == (0 as i32) {
+                                  let mut _is_sse: i32 = 0 as i32;
+                                  if dst_qt == QBE_D_LOCAL() || dst_qt == QBE_S_LOCAL() { _is_sse = 1 as i32; }
+                                  let _ci = cg_find_class_arg_idx((*cg).cur_fn_header_text, (*cg).cur_fn_header_len,
+                                    ptr_add_u8(src_text, name_start), 1 as i64, _is_sse);
+                                  if _ci >= (0 as i64) { arg_idx = _ci; }
+                                }
                             } else {
                                 arg_idx = -(1 as i64);
                             }

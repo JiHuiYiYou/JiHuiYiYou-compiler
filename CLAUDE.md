@@ -140,13 +140,12 @@
 
 ## 当前活跃 workarounds
 
-**11 ACTIVE / 0 DEFERRED**(2026-10-19 复核:W-110 / W-111 / W-116 三条本轮 RESOLVED,四条出表,**11 ACTIVE / 103 索引行**,per `docs/internal/workarounds.md` 索引表):
+**10 ACTIVE / 0 DEFERRED**(2026-10-19 复核:W-104 / W-110 / W-111 / W-116 四条本轮 RESOLVED,**10 ACTIVE / 103 索引行**,per `docs/internal/workarounds.md` 索引表):
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
 | W-105 | `compiler/src0/sema.jhyy:2558-2560` | `check_borrow` 恒 `return 1`,`:2677` 每个函数声明都调 → `&mut` 独占性完全不检查 |
 | W-103 | `compiler/src0/std/os.jhyy:69-144` | `std_os_open/close/read/write` 全是 M0 mock,`std_os_exit` 不退出进程 |
-| W-104 | `compiler/src0/abi_amd64_sysv.jhyy:229` | SysV 参数分类调用 **Win** 分类器(`abi_sysv_classify_arg` 在同文件 `:79` 但没接线) |
 | W-107 | `compiler/src0/codegen_amd64_state.jhyy:511-537` | 五个 per-fn 表硬编码 1024,实测已用 991 → 余量 33 个函数 |
 | W-106 | `compiler/src0/symtab.jhyy:260-264` | 死存储改栈布局。**2026-10-18 三次实测:原注释的理由已被证伪(栈帧两边都物化)、机制未知、删除的安全性未证实(约 11 次运行里 1 次间歇失败 vs 基线 9 次全绿)。不删,但别信旧注释** |
 | W-112 | `compiler/src0/codegen.jhyy:4478` | `#[link_section]` 是 no-op,生成的 .s 里没有任何 `.section` |
