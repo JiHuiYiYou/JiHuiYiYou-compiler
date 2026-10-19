@@ -1271,10 +1271,31 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                         } else {
                             arg_idx = -(1 as i64);
                         }
-                        if arg_idx >= (0 as i64) && arg_idx <= (3 as i64) {
-                            fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
-                        } else if arg_idx >= (4 as i64) && target_is_win(target_tag) == (1 as i32) {
-                            fnarg_stack_off = (48 as i64) + ((arg_idx - (4 as i64)) * (8 as i64));
+                        // W-116 (2026-10-19 真修):原判别只有「idx 0..3 给寄存器」+「idx>=4 **且 Win**
+                        // 给栈」。**SysV 的 idx>=4 整个分支不存在**,全部掉进最后的 `reg_rcx_for_qt`
+                        // 兜底 —— callee 于是把 arg5/6/7 全读成 `%ecx`(arg4 的寄存器)。
+                        // 实测 `seven_arg_fn(1,2,3,4,5,6,7)` 算成 1+2+3+4+**4+4+4** = 22,
+                        // 与 `sysv_abi_test` 的 EXIT=22 精确吻合。
+                        //
+                        // SysV 是 **6** 个整数寄存器(rdi/rsi/rdx/rcx/r8/r9),第 7 个起落栈;
+                        // Win 是 4 个 + 32B 影子区。reg_rax_for_qt_idx 两边的映射本来就对,
+                        // 只是 SysV 的 idx 4/5 从来够不着。
+                        if arg_idx >= (0 as i64) {
+                            if target_is_win(target_tag) == (1 as i32) {
+                                if arg_idx <= (3 as i64) {
+                                    fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                                } else {
+                                    fnarg_stack_off = (48 as i64) + ((arg_idx - (4 as i64)) * (8 as i64));
+                                }
+                            } else {
+                                if arg_idx <= (5 as i64) {
+                                    fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                                } else {
+                                    // push rbp 后:retaddr @ 8(%rbp),首个栈参数 @ 16(%rbp)
+                                    // (Win 多 32B 影子区 → 48)
+                                    fnarg_stack_off = (16 as i64) + ((arg_idx - (6 as i64)) * (8 as i64));
+                                }
+                            }
                         } else {
                             fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
                         }
@@ -1327,10 +1348,31 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                             } else {
                                 arg_idx = -(1 as i64);
                             }
-                            if arg_idx >= (0 as i64) && arg_idx <= (3 as i64) {
-                                fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
-                            } else if arg_idx >= (4 as i64) && target_is_win(target_tag) == (1 as i32) {
-                                fnarg_stack_off = (48 as i64) + ((arg_idx - (4 as i64)) * (8 as i64));
+                            // W-116 (2026-10-19 真修):原判别只有「idx 0..3 给寄存器」+「idx>=4 **且 Win**
+                            // 给栈」。**SysV 的 idx>=4 整个分支不存在**,全部掉进最后的 `reg_rcx_for_qt`
+                            // 兜底 —— callee 于是把 arg5/6/7 全读成 `%ecx`(arg4 的寄存器)。
+                            // 实测 `seven_arg_fn(1,2,3,4,5,6,7)` 算成 1+2+3+4+**4+4+4** = 22,
+                            // 与 `sysv_abi_test` 的 EXIT=22 精确吻合。
+                            //
+                            // SysV 是 **6** 个整数寄存器(rdi/rsi/rdx/rcx/r8/r9),第 7 个起落栈;
+                            // Win 是 4 个 + 32B 影子区。reg_rax_for_qt_idx 两边的映射本来就对,
+                            // 只是 SysV 的 idx 4/5 从来够不着。
+                            if arg_idx >= (0 as i64) {
+                                if target_is_win(target_tag) == (1 as i32) {
+                                    if arg_idx <= (3 as i64) {
+                                        fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                                    } else {
+                                        fnarg_stack_off = (48 as i64) + ((arg_idx - (4 as i64)) * (8 as i64));
+                                    }
+                                } else {
+                                    if arg_idx <= (5 as i64) {
+                                        fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                                    } else {
+                                        // push rbp 后:retaddr @ 8(%rbp),首个栈参数 @ 16(%rbp)
+                                        // (Win 多 32B 影子区 → 48)
+                                        fnarg_stack_off = (16 as i64) + ((arg_idx - (6 as i64)) * (8 as i64));
+                                    }
+                                }
                             } else {
                                 fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
                             }
@@ -1346,10 +1388,31 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                             } else {
                                 arg_idx = -(1 as i64);
                             }
-                            if arg_idx >= (0 as i64) && arg_idx <= (3 as i64) {
-                                fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
-                            } else if arg_idx >= (4 as i64) && target_is_win(target_tag) == (1 as i32) {
-                                fnarg_stack_off = (48 as i64) + ((arg_idx - (4 as i64)) * (8 as i64));
+                            // W-116 (2026-10-19 真修):原判别只有「idx 0..3 给寄存器」+「idx>=4 **且 Win**
+                            // 给栈」。**SysV 的 idx>=4 整个分支不存在**,全部掉进最后的 `reg_rcx_for_qt`
+                            // 兜底 —— callee 于是把 arg5/6/7 全读成 `%ecx`(arg4 的寄存器)。
+                            // 实测 `seven_arg_fn(1,2,3,4,5,6,7)` 算成 1+2+3+4+**4+4+4** = 22,
+                            // 与 `sysv_abi_test` 的 EXIT=22 精确吻合。
+                            //
+                            // SysV 是 **6** 个整数寄存器(rdi/rsi/rdx/rcx/r8/r9),第 7 个起落栈;
+                            // Win 是 4 个 + 32B 影子区。reg_rax_for_qt_idx 两边的映射本来就对,
+                            // 只是 SysV 的 idx 4/5 从来够不着。
+                            if arg_idx >= (0 as i64) {
+                                if target_is_win(target_tag) == (1 as i32) {
+                                    if arg_idx <= (3 as i64) {
+                                        fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                                    } else {
+                                        fnarg_stack_off = (48 as i64) + ((arg_idx - (4 as i64)) * (8 as i64));
+                                    }
+                                } else {
+                                    if arg_idx <= (5 as i64) {
+                                        fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                                    } else {
+                                        // push rbp 后:retaddr @ 8(%rbp),首个栈参数 @ 16(%rbp)
+                                        // (Win 多 32B 影子区 → 48)
+                                        fnarg_stack_off = (16 as i64) + ((arg_idx - (6 as i64)) * (8 as i64));
+                                    }
+                                }
                             } else {
                                 fnarg_reg = reg_rcx_for_qt(dst_qt) as *u8;
                             }
