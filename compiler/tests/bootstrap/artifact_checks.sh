@@ -166,6 +166,90 @@ badenv() {
 skip() { printf "  ⏭  SKIP %s (%s)\n" "$1" "$2"; SKIP_N=$((SKIP_N+1)); SKIPPED+=("$1"); }
 
 # ════════════════════════════════════════════════════════════════════════════
+# 7. W-107 / W-120 — 函数数 / temp id 越界时,编译器是否仍然产出**正确**的代码
+# ════════════════════════════════════════════════════════════════════════════
+#
+# 两个悬崖,症状都是**静默产出错代码**:
+#
+#   · W-107:五张 per-fn 表按固定上限分配(256 → 1024 → 4096)→ 超出部分被
+#     **丢弃** → 那些函数的 per_fn_max 保持 0 → 帧算成 8 字节 → 局部变量
+#     **冲出帧** → 踩坏调用者的帧 → 被编译程序的 target 变成随机值。
+#   · W-120:temp_slot_for_id 按固定 65536 分配 → temp id 越界时**静默**跳过
+#     查表 → 落到 formula 兜底 → 同一个 temp 在「写」和「读」两处解析成
+#     **不同的槽** → 值静默丢失。
+#
+# 为什么这个 check 必须是「产物级」的:两个悬崖的共同症状是
+# **编译成功、链接成功、运行成功、结果是错的**。只看退出码的测试抓不到它
+# —— 除非它恰好断言了那个值。所以这里断言**打印出来的和**。
+#
+# 用例:4100 个函数(> 旧的 4096 表长上限)。每个函数返回 9,main 求和
+# → 期望 9 × 4100 = 36900。
+# **这一个文件同时踩中两个悬崖**:4100 个函数 × ~16 个 temp ≈ 65600 > 65536
+# → temp id 也越界 ✓(实测 4100 函数时最大 temp id = 65607)。
+check_many_functions() {
+    hdr "W-107/W-120  函数数 / temp id 越界时是否仍然产出正确的代码"
+    [ -x "$JHYY_EXE" ] || { skip "many_functions" "jhyy.exe 不存在"; return; }
+
+    local N=4100
+    local i=0
+    {
+        echo 'extern fn printf(fmt: *u8, a: i32, b: i32) -> i32;'
+        while [ "$i" -lt "$N" ]; do
+            echo "fn f$i() -> i32 {"
+            echo "    let mut x: i32 = 1;"
+            echo "    let mut y: i32 = 2;"
+            echo "    let mut z: i32 = x + y;"
+            echo "    let mut w: i32 = z * 3;"
+            echo "    return w;"
+            echo "}"
+            i=$((i+1))
+        done
+        echo 'fn main_jhyy() -> i32 {'
+        echo '    let mut s: i32 = 0;'
+        i=0
+        while [ "$i" -lt "$N" ]; do
+            echo "    s = s + f$i();"
+            i=$((i+1))
+        done
+        echo '    printf("MANYFUNC %d\n" as *u8, s, 0);'
+        echo '    return s;'
+        echo '}'
+    } > "$WORK/many.jhyy"
+
+    if ! "$JHYY_EXE" compile "$WORK/many.jhyy" -o "$WORK/many" > "$WORK/many.log" 2>&1; then
+        badenv "many_functions" "编译失败:$(tail -3 "$WORK/many.log" | tr '\n' ' ')"
+        return
+    fi
+    if [ ! -x "$WORK/many.exe" ]; then
+        badenv "many_functions" "编译成功但没产出 exe"
+        return
+    fi
+    # ── 这道门必须真的踩中两个悬崖,否则它就是一道「永远绿」的门 ──
+    #   · 函数数 4101 > 4032(旧 per-fn 表上限)→ 旧编译器在这里**编译失败**
+    #   · max temp id > 65536(旧 temp 表上限)→ 旧编译器在这里**静默算错**
+    # 第二个断言尤其重要:temp id 只差 71 就越界(实测 65607),合成文件的
+    # 语句数一变就可能悄悄掉回 65536 以下 → 门变成空门而不报任何东西。
+    local maxt
+    maxt=$(grep -o '%t[0-9]*' "$WORK/many.s" 2>/dev/null | sed 's/%t//' | sort -n | tail -1)
+    if [ -z "$maxt" ]; then
+        badenv "many_functions" "产物 .s 里找不到 %tN —— 合成文件或产物异常"
+        return
+    fi
+    if [ "$maxt" -le 65536 ]; then
+        bad "many_functions" "合成文件的最大 temp id = $maxt(需要 > 65536)—— 这个用例**没有**踩到 W-120 的悬崖,门是空的"
+        return
+    fi
+    local out want
+    out=$("$WORK/many.exe" 2>/dev/null | tr -d '\r')
+    want=$((9 * N))
+    if [ "$out" != "MANYFUNC $want" ]; then
+        bad "many_functions" "求和 = '$out'(期望 MANYFUNC $want)—— 越界的函数/temp 拿到了错误的槽(W-107/W-120 未修)"
+        return
+    fi
+    ok "many_functions($N 个函数求和 = $want ✓)"
+}
+
+# ════════════════════════════════════════════════════════════════════════════
 # 1. W-112 — `#[link_section(".x")]` 必须真的产生一个 .section 指令
 # ════════════════════════════════════════════════════════════════════════════
 #
@@ -576,6 +660,7 @@ want per_fn_frame    && check_per_fn_frame
 want sysv_mixed_struct && check_sysv_mixed_struct
 want sysv_memory_class && check_sysv_memory_class
 want sysv_arg_spill  && check_sysv_arg_spill
+want many_functions   && check_many_functions
 
 echo
 echo "=== artifact_checks 结果: $PASS_N PASS / $KNOWN_N KNOWN-FAIL / $FAIL_N FAIL / $SKIP_N SKIP ==="

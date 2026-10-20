@@ -5,16 +5,16 @@
 在 CI 重构把发布链修通之后打的 tag:
 <https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v4.0.9-rc1>
 （installer .exe 28.5 MB + compiler .msi + vscode .vsix + SHA256.txt）。
-**v4.0.0 final 仍被 7 条 ACTIVE workaround 挡着**，按既定决策清零前不 promote；
+**v4.0.0 final 仍被 6 条 ACTIVE workaround 挡着**，按既定决策清零前不 promote；
 4.0.9-rc1 是 RC，`make_latest` 为 false，v3.2.0 仍是 Latest。
 此前 v3.4.2 / v4.0.0-rc1 / v4.0.1 / v4.0.2 / v4.0.6 五个 tag 全部发布失败，
 最后一个真实 release 停在 2026-09-08 的 v3.2.0 —— 那段时间文档里的 "shipped"
 指源码 commit，不指可安装产物。
 - **v4.0.0-rc1 shipped** (2026-09-30, post-merge of `axis-v2` + `axis-v3` → main):
-- **v4.0.0-rc1 shipped** (commits `a4ba8fa`..`675e7da`;tag `v4.0.0-rc1` 已打) — **v4.x 首发 RC** = v2.x FINAL (v2.16.0) + v3.x FINAL (v3.4.2) 合并入 main;QBE toolchain 完全移除 + bench.sh + .exe byte-equal D26 stage0 coverage + self-backend closure + stdlib (mem/fmt/io/math/string/vec) 落地。**🔴 2026-10-15 audit 后 blocker 未清零**(per 2026-10-10 user 决定 "所有defer/active的workaround必须在v4正式版中清零,大不了v4不发"):W-101 RESOLVED (v4.0.6 attempt #7) + W-097 RESOLVED (2026-10-15,六个 emit 根因,`closure_check.sh` PASS `v2.s == v3.s` byte-identical) + W-072 早已 RESOLVED (2026-09-09)。**索引表 ACTIVE = 14 / DEFERRED = 0**(2026-10-15 复核后修正 —— 此前写的「0」是索引重建脚本读不到 59/89 条目造成的假象,见 W-108;**2026-10-20 已降到 7 条**:W-104 / W-112 / W-114 / W-103 先后闭合),**下一个动作 = 清零剩下的 7 条活 workaround**(排期见 [`version-schedule.md`](docs/plans/v4/version-schedule.md))([`active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md)),不是 tag final
+- **v4.0.0-rc1 shipped** (commits `a4ba8fa`..`675e7da`;tag `v4.0.0-rc1` 已打) — **v4.x 首发 RC** = v2.x FINAL (v2.16.0) + v3.x FINAL (v3.4.2) 合并入 main;QBE toolchain 完全移除 + bench.sh + .exe byte-equal D26 stage0 coverage + self-backend closure + stdlib (mem/fmt/io/math/string/vec) 落地。**🔴 2026-10-15 audit 后 blocker 未清零**(per 2026-10-10 user 决定 "所有defer/active的workaround必须在v4正式版中清零,大不了v4不发"):W-101 RESOLVED (v4.0.6 attempt #7) + W-097 RESOLVED (2026-10-15,六个 emit 根因,`closure_check.sh` PASS `v2.s == v3.s` byte-identical) + W-072 早已 RESOLVED (2026-09-09)。**索引表 ACTIVE = 14 / DEFERRED = 0**(2026-10-15 复核后修正 —— 此前写的「0」是索引重建脚本读不到 59/89 条目造成的假象,见 W-108;**2026-10-20 已降到 7 条**:W-104 / W-112 / W-114 / W-103 先后闭合),**下一个动作 = 清零剩下的 6 条活 workaround**(排期见 [`version-schedule.md`](docs/plans/v4/version-schedule.md))([`active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md)),不是 tag final
 - **v1.x 已 ship** (v1.8.3 tag `98c8272`, 2026-08-29) — Stage 2 N=4 byte-equal 闭环 + installer v1.8.3 WiX + UCPD.sys bypass。v1.x 终结。
 
-**v4.0 阶段**:v2.x 中/末 items (QBE 自写 — 现已 in-mem self-backend 直接 x86-64 emit 完成 / amd64_sysv 实 impl — V2-B 5/5 + V2-C v2.8.0 已 ship / N 代 fixed point — v2.14.0 N≥10 已 ship) 跟 v3.x items (3a-3f OS-required: inline asm / `#[naked]` / volatile / `#[link_section]` / memory barrier / `#[no_std]` / `&mut` + lifetime) 全部走完 / dropped off-axis (per 2026-09-29 user FINAL 决定);v4.0.0-rc1 = convergence release candidate (RC 保持,不 promote final per 2026-10-10 user 决定),后续 v4.x 工作走 [`docs/plans/v4/`](docs/plans/v4/) 的当前计划 + backlog。**已 ship 实际状态**(2026-10-11 v4.0.4 plan 已 commit):v4.0.2 ACTIVE bucket → 0 (W-073 emit escape + W-074/076 arena rename + W-075 mem_set i64-store + GHA 修通);v4.0.2.1 W-074.6 sub-bug #3 partial 真修 (sema hash + 65536 + chkstk_ms);v4.0.2.2 W-096 frame blow-up;v4.0.2.3 W-098 i64 literal emit;v4.0.2.5 W-097 hoist 7-site + W-100 sret clobber 真修。**emit 类 blocker 已清零(2026-10-15)**:W-101 RESOLVED (v4.0.6 attempt #7)+ W-097 RESOLVED (2026-10-15 六个 emit 根因,`closure_check.sh` PASS,`fixed_point.sh N=5` 7 PASS / 0 FAIL / 0 INFO,N=2 起全代 byte-equal)+ W-072 早已 RESOLVED (2026-09-09)。**但 2026-10-15 audit 挖出 14 条此前从未登记的活 workaround**(W-103..W-107 / W-105.1 首批;补断言测试又挖出 W-109 浮点比较、W-110 比较串号、W-111 泛型 enum 构造器(当时记为崩溃,2026-10-18 复核不复现)、W-112 link_section no-op、W-113 asm 位置错、W-114 enum match 失效;启 Docker 跑 sysv 门再挖出 W-115 W-089 reproducer 仍崩、W-116 SysV callee 只 spill 4 个寄存器) —— 见下 §当前活跃 workarounds。**下一动作 = 清零剩下的 7 条**(2026-10-20:W-104 / W-112 / W-114 / W-103 已先后闭合),不是 tag v4.0.0 final。OS M11 launch 路径需重新评估 (`v2.0.0-os-prep.md` + `v2-v3-parallel-sprint-plan.md` 中硬前置假设已作废并归档到 `docs/archive/v2-v3/`)。
+**v4.0 阶段**:v2.x 中/末 items (QBE 自写 — 现已 in-mem self-backend 直接 x86-64 emit 完成 / amd64_sysv 实 impl — V2-B 5/5 + V2-C v2.8.0 已 ship / N 代 fixed point — v2.14.0 N≥10 已 ship) 跟 v3.x items (3a-3f OS-required: inline asm / `#[naked]` / volatile / `#[link_section]` / memory barrier / `#[no_std]` / `&mut` + lifetime) 全部走完 / dropped off-axis (per 2026-09-29 user FINAL 决定);v4.0.0-rc1 = convergence release candidate (RC 保持,不 promote final per 2026-10-10 user 决定),后续 v4.x 工作走 [`docs/plans/v4/`](docs/plans/v4/) 的当前计划 + backlog。**已 ship 实际状态**(2026-10-11 v4.0.4 plan 已 commit):v4.0.2 ACTIVE bucket → 0 (W-073 emit escape + W-074/076 arena rename + W-075 mem_set i64-store + GHA 修通);v4.0.2.1 W-074.6 sub-bug #3 partial 真修 (sema hash + 65536 + chkstk_ms);v4.0.2.2 W-096 frame blow-up;v4.0.2.3 W-098 i64 literal emit;v4.0.2.5 W-097 hoist 7-site + W-100 sret clobber 真修。**emit 类 blocker 已清零(2026-10-15)**:W-101 RESOLVED (v4.0.6 attempt #7)+ W-097 RESOLVED (2026-10-15 六个 emit 根因,`closure_check.sh` PASS,`fixed_point.sh N=5` 7 PASS / 0 FAIL / 0 INFO,N=2 起全代 byte-equal)+ W-072 早已 RESOLVED (2026-09-09)。**但 2026-10-15 audit 挖出 14 条此前从未登记的活 workaround**(W-103..W-107 / W-105.1 首批;补断言测试又挖出 W-109 浮点比较、W-110 比较串号、W-111 泛型 enum 构造器(当时记为崩溃,2026-10-18 复核不复现)、W-112 link_section no-op、W-113 asm 位置错、W-114 enum match 失效;启 Docker 跑 sysv 门再挖出 W-115 W-089 reproducer 仍崩、W-116 SysV callee 只 spill 4 个寄存器) —— 见下 §当前活跃 workarounds。**下一动作 = 清零剩下的 6 条**(2026-10-20:W-104 / W-112 / W-114 / W-103 / W-107 / W-120 已先后闭合),不是 tag v4.0.0 final。OS M11 launch 路径需重新评估 (`v2.0.0-os-prep.md` + `v2-v3-parallel-sprint-plan.md` 中硬前置假设已作废并归档到 `docs/archive/v2-v3/`)。
 
 ## Reading order
 
@@ -50,7 +50,7 @@
 | **v1.x** | jhyy 自举（`compiler/src0/*.jhyy`） | 真自举闭环（v1.0 = byte-equal `.il`）— **🟢 v1.8.3 shipped = v1.x 终结** |
 | **v2.x** | QBE 完整重写 + 多目标 / 自研 OS 准备 | amd64_sysv / 多目标 / freestanding — **🟢 v2.16.0 shipped 2026-09-22 = v2.x 终结** (per 2026-09-29 user FINAL 决定;v2.x 中/末 items 全部 dropped off-axis,QBE 自写在 in-mem self-backend 里走完) |
 | **v3.x** | 语言特性扩展（OS-required：inline asm / volatile / naked / no_std / `&mut` + lifetime）| 服务于 jhyy_OS — **🟢 v3.4.2 shipped 2026-09-29 = v3.x 终结** (per 2026-09-29 user FINAL 决定;v3.0 3a-3f 全部 dropped off-axis;3 个 minor v3.4.0/1/2 ship 走完 W-085/W-088/W-089 真修,ACTIVE workaround bucket 清空) |
-| **v4.x** | 后合并 axis — stdlib / 0-C 闭环 / async / lifetime / trait / package manager / multi-arch / `.jhyynb` | 服务于编译器自身现代化 + jhyy_OS 重启评估 — **🟡 v4.0.0-rc1 shipped 2026-09-30 = v4.x 首发 RC** (axis-v2 + axis-v3 merge 入 main;**剩 7 条活 workaround 清零 → v4.0.0 final promote**;其余 12 项未启动,合并在 [`docs/plans/v4/backlog.md`](docs/plans/v4/backlog.md)) |
+| **v4.x** | 后合并 axis — stdlib / 0-C 闭环 / async / lifetime / trait / package manager / multi-arch / `.jhyynb` | 服务于编译器自身现代化 + jhyy_OS 重启评估 — **🟡 v4.0.0-rc1 shipped 2026-09-30 = v4.x 首发 RC** (axis-v2 + axis-v3 merge 入 main;**剩 6 条活 workaround 清零 → v4.0.0 final promote**;其余 12 项未启动,合并在 [`docs/plans/v4/backlog.md`](docs/plans/v4/backlog.md)) |
 
 **轴之间的关系**（关键，避免误读 semver）：
 - **v0.x → v1.x**：严格顺序（v1.0 强前置 v0.x 全部完成）✅
@@ -105,12 +105,12 @@
 | L1 | [`v3.x-language-expansion.md`](docs/plans/roadmap/v3.x-language-expansion.md) | **v3.4.2 完成**（2026-09-29 — 3 个 minor v3.4.0/1/2 ship 走完 W-085/W-088/W-089 真修）|
 | L1 | [`v4.x-post-merge.md`](docs/plans/roadmap/v4.x-post-merge.md) | **v4.0.0-rc1 完成**（2026-09-30 — axis-v2 + axis-v3 合并入 main;Gate 3 selfhost deferred → v4.0.1）|
 | L1.5 | [`v2-v3-parallel-sprint-plan.md`](docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md) | ⚠️ **SUPERSEDED** — 已归档到 [`docs/archive/v2-v3/`](docs/archive/v2-v3/) (per 2026-09-30 v4.0.0 archive step) |
-| L3 | [`docs/plans/v4/active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md) | **当前唯一进行中** — 剩 7 条活 workaround 真修(W-105 / W-105.1 / W-106 / W-107 / W-113 / W-115 / W-118) |
+| L3 | [`docs/plans/v4/active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md) | **当前唯一进行中** — 剩 6 条活 workaround 真修(W-105 / W-105.1 / W-106 / W-113 / W-115 / W-118) |
 | L3 | [`docs/plans/v4/backlog.md`](docs/plans/v4/backlog.md) | 12 项未启动的未来工作(原 v4.1.0 - v4.12.0 合并,2026-10-15) |
 
 最近完成的 sprint: **v4.0.0-rc1 shipped 2026-09-30** — axis-v2 + axis-v3 merged into main。
 
-下一阶段: **清零剩 7 条活 workaround**(见 [`active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md))→ 然后才谈 promote v4.0.0 final。backlog 那 12 项无优先级,不抢这条线。
+下一阶段: **清零剩 6 条活 workaround**(见 [`active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md))→ 然后才谈 promote v4.0.0 final。backlog 那 12 项无优先级,不抢这条线。
 
 **plan 命名约定(2026-10-15 修订)**:已 ship / 进行中的 sprint 保留 `v4.X.Y-plan.md`(审计轨迹,改名会破坏跟 changelog / commit 的对应);未启动的 backlog 与进行中的工作用描述性文件名,**不用版本号** —— 版本号在启动时才分配。
 历史: changelog 见 `docs/logs/v0/changelog-v0.X.Y.md` (C 编译器) + `docs/logs/v1/changelog-v1.X.Y.md` (jhyy 自举) + `docs/logs/v2/changelog-v2.*.0.md` (QBE rewrite + freestanding) + `docs/logs/v3/changelog-v3.*.md` (language expansion + self-backend) + `docs/logs/v4/changelog-v4.0.0.md` (post-merge umbrella);早期 sprint（命名 `sprint-1*.md`）同目录。
@@ -121,7 +121,7 @@
 - [`architecture.md`](docs/internal/architecture.md) — 流水线 / 模块 / 设计细节 / **self-backend codegen 速查** / Stage 0 自举
 - [`conventions.md`](docs/internal/conventions.md) — 编码约定 / 文件命名 / 提交规则
 - [`tests.md`](docs/internal/tests.md) — 集成测试清单 + 运行方法
-- [`workarounds.md`](docs/internal/workarounds.md) — W-NNN workaround 台账（**ACTIVE = 7**,见下方 §当前活跃 workarounds）
+- [`workarounds.md`](docs/internal/workarounds.md) — W-NNN workaround 台账（**ACTIVE = 6**,见下方 §当前活跃 workarounds）
 
 ### 语言规范 & ABI（`docs/abis/`，locked）
 
@@ -140,13 +140,14 @@
 
 ## 当前活跃 workarounds
 
-**7 ACTIVE / 0 DEFERRED**(2026-10-20 复核:**W-104 RESOLVED**(v4.0.12 —— ≤16B eightbyte 分类 + >16B MEMORY class 整体落栈,与 gcc 三方向对拍全绿);**W-114 RESOLVED**(v4.0.14 —— enum 的 ABI 两侧统一:参数按地址传、返回值走 sret、调用结果是 8 字节指针;顺带修了 **W-119**:SysV 帧布局把第 0 号局部变量放在 `0(%rbp)` = 覆盖旧 rbp);**W-112 RESOLVED**(v4.0.16 —— `#[link_section]` 的 `.section` 之前被插进 link 路径的副本,磁盘上的 .s 里没有);**W-103 RESOLVED**(v4.0.16 —— `std_os_*` 五个 mock 接真 libc bridge;顺带把 POSIX/Win 的 `O_*` flag 差异在桥这一层翻译掉 —— **Windows 的 `_O_CREAT`=0x100 不是 POSIX 的 0x40**,mock 从不调 `open(2)` 所以这错一直藏着;并让 std lib **第一次真的可被用户代码 import**(`import os;` 两级查找:main 文件旁边 → std lib 目录)),测试从 inline 副本改成 import 真身),**7 ACTIVE / 104 索引行**,per `docs/internal/workarounds.md` 索引表):
+**6 ACTIVE / 0 DEFERRED**(2026-10-20 复核:**W-104 RESOLVED**(v4.0.12 —— ≤16B eightbyte 分类 + >16B MEMORY class 整体落栈,与 gcc 三方向对拍全绿);**W-114 RESOLVED**(v4.0.14 —— enum 的 ABI 两侧统一:参数按地址传、返回值走 sret、调用结果是 8 字节指针;顺带修了 **W-119**:SysV 帧布局把第 0 号局部变量放在 `0(%rbp)` = 覆盖旧 rbp);**W-112 RESOLVED**(v4.0.16 —— `#[link_section]` 的 `.section` 之前被插进 link 路径的副本,磁盘上的 .s 里没有);**W-103 RESOLVED**(v4.0.16 —— `std_os_*` 五个 mock 接真 libc bridge;顺带把 POSIX/Win 的 `O_*` flag 差异在桥这一层翻译掉 —— **Windows 的 `_O_CREAT`=0x100 不是 POSIX 的 0x40**,mock 从不调 `open(2)` 所以这错一直藏着;并让 std lib **第一次真的可被用户代码 import**(`import os;` 两级查找:main 文件旁边 → std lib 目录)),测试从 inline 副本改成 import 真身),**W-107 RESOLVED**(v4.0.17 —— 五张 per-fn 表改成**按实际函数数**分配,固定上限 4096 与「太多函数」的响亮守门一并删除,**没有上限了**;顺带挖出并修掉 **W-120**:temp 表的 65536 上限会让**越界静默算错值** —— 修 W-107 会暴露它,两者必须一起做),**6 ACTIVE / 105 索引行**,per `docs/internal/workarounds.md` 索引表):
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
 | W-105 | `compiler/src0/sema.jhyy` | `check_borrow` 恒 `return 1` → `&mut` 独占性完全不检查。**2026-10-20 部分修**:「`&mut` 真的能用」已修(parser 接受 `&mut expr`、类型是 KIND_REF、解引用可用、`borrow_mut_write` 摘 XFAIL → EXIT=5);**独占性检查仍未做**(最小实现让自举编译器 SEGV,详见台账) |
 | W-103 | — | ~~`std_os_open/close/read/write` 全是 M0 mock,`std_os_exit` 不退出进程~~ ✅ **2026-10-20 已修**:5 个 libc bridge 进 `jhyy_helpers.c`;`import` 加 std lib 目录回落 → 测试改 import 真身(新增 `std_os_exit.jhyy` 验进程真退出) |
-| W-107 | `compiler/src0/codegen_amd64_state.jhyy` | 五个 per-fn 表(表长 2026-10-20 从 1024 提到 **4096**,余量 3066 个函数);**越界不再静默截断** → 改成大声报错并让编译失败(静默截断 = 帧算成 8 字节 = 局部变量冲出帧 = 静默产出错代码)。终局「按实际函数数分配」仍待做 |
+| W-107 | — | ~~五个 per-fn 表按固定上限分配~~ ✅ **2026-10-20 已修**:改成**按实际函数数**分配(`fn_count + 1`),`MAX_FN_ENTRIES` 常量删除、「太多函数」守门删除 —— **没有上限了**。之前那次动态分配被撤回,是因为「查表上界」那另一半真修还没落地(两者从未同时存在);这次两半齐了 |
+| W-120 | — | ~~temp 表(65536)越界 → 静默算错值~~ ✅ **2026-10-20 已修**:两张按 temp id 索引的表改成按**实际最大 temp id** 分配 + 越界**响亮失败**。**HEAD 上本来就可复现**(一个 25000 语句的函数就够:算出 s=0,正确值 74994)。`main.jhyy` 自己的 max temp id 已到 64953 —— 离越界只剩 583 |
 | W-106 | `compiler/src0/symtab.jhyy:260-264` | 死存储改栈布局。**2026-10-18 三次实测:原注释的理由已被证伪(栈帧两边都物化)、机制未知、删除的安全性未证实(约 11 次运行里 1 次间歇失败 vs 基线 9 次全绿)。不删,但别信旧注释** |
 | W-112 | — | ~~`#[link_section]` 是 no-op~~ ✅ **2026-10-20 已修**:`.section` 之前被插进 link 路径的**副本**(`temp_asm`),磁盘上的 .s 和 `--no-link` 产物里都没有 → 现在 .s 产出后立刻对 `asm_path` 处理一次 |
 | W-113 | `asm!` / `fence_*` emit 路径 | 字节被 emit 到 `ret` 之后,永不执行;ship gate 零敏感 |
@@ -189,6 +190,8 @@ W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_
 - W-104 → RESOLVED (2026-10-20, v4.0.12 —— SysV struct 传参:≤16B eightbyte 分类 + >16B MEMORY class 整体落栈,与 gcc 三方向对拍一致)
 - W-114 → RESOLVED (2026-10-20, v4.0.14 —— enum ABI 两侧统一:参数按地址、返回值 sret、调用结果 8 字节;顺带修了 W-119 的 SysV 帧布局)
 - W-103 → RESOLVED (2026-10-20, v4.0.16 —— `std_os_*` 接真 libc bridge;POSIX/Win 的 `O_*` flag 差异在桥这层翻译;`import` 加 std lib 目录回落 → std lib 第一次真的可被用户代码 import)
+- W-107 → RESOLVED (2026-10-20, v4.0.17 —— 五张 per-fn 表按实际函数数分配;新增常驻门 `artifact_checks.sh many_functions`:4100 个函数的合成文件求和必须 == 36900)
+- W-120 → RESOLVED (2026-10-20, v4.0.17 —— temp 表按实际最大 temp id 分配 + 越界响亮失败;**同一道门**也抓它:关掉修复 → 求和 = 0(静默错值)被当场抓住)
 
 历史 workaround 走 git history;`workarounds.md` 保留 RESOLVED/SUPERSEDED/INVALID 状态作 audit ledger。
 

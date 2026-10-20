@@ -116,7 +116,8 @@
 | [W-105](#w-105) | ACTIVE | `&mut` 独占性不检查 — (a)「`&mut` 能用」已修,(b)check_borrow... |
 | [W-105.1](#w-105.1) | ACTIVE | check_cap_pass 同款空 stub,当前无调用点(死代码但签名在 API 面上) |
 | [W-106](#w-106) | ACTIVE | symtab_lookup_one 用 arena-touch 强制 codegen... |
-| [W-107](#w-107) | ACTIVE | 五个 per-fn pre-scan 表:上限已提到 4096,终局(按实际函数数分配)待做 |
+| [W-107](#w-107) | RESOLVED | 五个 per-fn pre-scan 表按固定上限分配 —— 已改成按实际函数数分配 |
+| [W-120](#w-120) | RESOLVED | temp_slot_for_id 按固定 65536 分配 —— 越界时**静默**产出错代码 |
 | [W-108](#w-108) | RESOLVED | 索引重建脚本静默丢弃 59/89 条目 —— STATUS_RE 不容忍 前缀,且只匹配 H2 |
 | [W-109](#w-109) | RESOLVED | 自举 IL lexer 缺 6 个浮点比较助记符 — f32/f64 六个比较运算静默降级 |
 | [W-110](#w-110) | RESOLVED | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 |
@@ -7643,10 +7644,10 @@ codegen,顺带得到验证)。
 - 源码 `compiler/src0/symtab.jhyy:261-264`
 
 <a id="w-107"></a>
-## W-107: 五个 per-fn pre-scan 表:上限已提到 4096,终局(按实际函数数分配)待做
+## W-107: 五个 per-fn pre-scan 表按固定上限分配 —— 已改成按实际函数数分配
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — 2026-10-20:表长 1024 → **4096**(+ 响亮守门),
-实测已用 1022 → 余量 3066 个函数。**终局(按实际函数数分配)仍待做**
+**状态:** RESOLVED closed 2026-10-20 (v4.0.17) — 五张 per-fn 表按**实际函数数**分配,
+固定上限(4096)与「太多函数」的响亮守门一并删除 —— 没有上限了
 **Backfilled:** 2026-10-15 (v2.11.10 W-074.6 T3-a 引入 256 → v4.0.2.1 bump 到 1024)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-07 前后 (v2.11.10) → 至今
@@ -7778,13 +7779,149 @@ grep -cE '^export function [wl] |^function [wl] ' <tmp>/main.il   → 991
 会 PASS(实测就是 PASS)。要钉住它只能查 `.s` 里 `subq $N, %rsp` 的 N,
 即一条**产物级**门,跟 W-112 / W-113 同一类。
 
+### 2026-10-20 终局:按实际函数数分配(**没有上限了**)
+
+**为什么之前两次都失败,这次成功 —— 差别在「另一半」有没有同时到位。**
+
+本 entry 记了「动态分配试过、实测仍有残留缺陷、已撤回」(commit `a21c207` →
+`b7c4e6e`)。当时的结论是「动态分配没修干净」。**2026-10-20 复盘发现:
+那次撤回的同一个 commit(`b7c4e6e`)里还带着另一条真修,而它恰好是动态分配的
+另一半**:
+
+| 缺陷 | 症状 | 修法 | 落地时间 |
+|---|---|---|---|
+| 表按固定长分配 | 超出部分被**丢弃** → 该函数没有 per_fn_max → local_max 被钳成 0 → 帧只有 8 字节 → 局部变量冲出帧 | 按实际函数数分配 | **本次** |
+| 查表按**表长**判界 | idx 越界时**跳过查表** → local_t 变成**全局 temp id** → 帧偏移 ≈ -518KB | 上界改用 `fn_count` 判 | `b7c4e6e`(2026-10-20,早于本次) |
+
+**只修一半时,动态分配仍然 SEGV** —— 这就是 `a21c207` 被撤回的原因:
+动态分配先落地,上界真修后落地,**两者从未同时存在过**。本次两条同时在场,
+动态分配一次通过。
+
+**改法(与台账 W-120 同款「按实际需要分配」):**
+
+- `cg_state_init` 不再分配五张表,只留 0 指针
+- `cg_compute_per_fn_max_temps` 的 Phase 1 **先数**函数个数 → 按 `fn_count + 1`
+  分配五张表(`fn_starts` 多一项放哨兵)→ Phase 1b 再填 `fn_starts`
+- `MAX_FN_ENTRIES()` 常量**删除**(留着只会让人以为「还有个上限」)
+- 「太多函数」的响亮守门**删除**(不再有上限;它的存在是为了替代「静默截断」)
+
+**⚠️ 这次修 W-107 顺带挖出 W-120(另一个更深的悬崖)** —— 见 W-120 条目。
+两个悬崖的**症状都是静默产出错代码**,而 W-120 那个在 HEAD 上**本来就可复现**
+(不需要 4000 个函数,一个 25000 语句的函数就够)。
+
+**验收:**
+
+```
+台账自己的复现(util.jhyy 加 6 个 dummy → main.jhyy 1022 → 1028 个函数):
+    自举编译器编 1028 个函数的 main.jhyy → ✅ 不再崩(HEAD 会崩)
+4100 个函数的合成文件(main.jhyy 的 4 倍规模):
+    ✅ 编译通过 + 求和正确(36900 = 9 × 4100)
+    修复前:旧编译器**大声失败**(4096 硬上限);只修 W-107 不修 W-120 →
+            编译通过但求和 = 0(静默错值)
+新常驻门 artifact_checks.sh `many_functions`:
+    ✅ PASS(4100 个函数求和 = 36900)
+    造红灯:① 旧编译器 → 红(env:编译失败)
+            ② 禁掉 W-120 的 resize → 红(env:响亮守门触发)
+            ③ 再禁掉守门 → 红(**求和 = 'MANYFUNC 0'** —— 静默错值被抓住)
+全量回归:  181/181 PASS, 0 failed ✅
+自举闭环:  closure_check.sh v2.s == v3.s byte-identical ✅
+产物级门:  6 PASS / 1 KNOWN-FAIL(W-113) / 0 FAIL ✅
+普通文件产物不变: hello / fib_renamed / struct_val_pass / nested_struct_deep /
+                big_test 五个用例的 .s 与修复前**逐字节相同** ✅
+```
+
 **影响范围:** 所有 `--target=amd64_win` 编译,一旦单模块函数数越过 1023。
 
 **引用:**
-- 源码 `compiler/src0/codegen_amd64_state.jhyy:194, 511, 515, 524, 530, 537`
-- 源码 `compiler/src0/codegen_amd64_state.jhyy:1703-1743`(守卫 + 截断逻辑)
+- 源码 `compiler/src0/codegen_amd64_state.jhyy`(五张表的分配点 + pre-scan)
 - 源码 `compiler/src0/codegen_amd64_emit_ctrl.jhyy:508-524`(use_per_fn 判据 + legacy fallback)
+- commit `a21c207`(动态分配首版,已撤回)→ `b7c4e6e`(撤回 + 上界真修)→ 本次(动态分配终局)
 - W-074.6 entry(256→1024 bump 的来由)
+- W-120 entry(同一次挖出来的第二个悬崖)
+
+<a id="w-120"></a>
+## W-120: temp_slot_for_id 按固定 65536 分配 —— 越界时**静默**产出错代码
+
+**状态:** RESOLVED closed 2026-10-20 (v4.0.17) — 两张按 temp id 索引的表按**实际最大
+temp id** 分配;越界另有**响亮失败**兜底(不再静默)
+**Filed-by:** audit-w107-2026-10-20
+**日期:** 2026-10-20 (发现并修复,同 commit)
+
+**触发面:** `compiler/src0/codegen_amd64_state.jhyy` —— `cg_max_temp_slots()`
+(= 65536)与 `cg_max_temp_holds_address()`(= 65536)两个常量,以及
+`cg_record_temp_slot` / `cg_offset_for_temp_with_target` /
+`cg_record_temp_holds_address` / `cg_is_address_holder` 里的 bound check。
+
+**症状:**
+
+- 一个**函数**里有 25000 条语句(实测 max temp id = **75003**)的源文件:
+  编译**成功**、链接**成功**、运行**成功** —— **算出来的值是错的**:
+  `s = 0`(正确值 74994)。没有报错,没有崩溃,没有警告。
+- 4100 个**函数**的源文件(实测 max temp id = **65607**):同样静默算错
+  (`求和 = 0`,正确值 36900)。
+
+**根因:** temp id 是 IL emitter **全局**编号的 —— 一个文件里用过的最大 id
+就是这张表需要的容量。而这两张表按**固定 65536** 分配:
+
+```
+temp id ≥ 65536
+  → cg_record_temp_slot 的 bound check 直接 return  → **不记录**
+  → cg_offset_for_temp_with_target 的 bound check    → **跳过查表**
+  → 落到 formula 兜底路径 `-(32 + t*8)`
+  → 同一个 temp 在「写」和「读」两处解析成**不同的槽**
+  → 值静默丢失
+```
+
+**为什么这个悬崖一直活着:** 它跟 W-107 那个是**同一个形状**(固定上限),
+但 W-107 的上限(per-fn 表 4096 条)**先撞上** → 编译器**大声失败** →
+W-120 这条路径(需要 max temp id > 65536)在 HEAD 上被**完全挡住**。
+实测边界正好对上:4033 个函数(max temp id 64535 < 65536)→ ✅;
+4100 个函数(65607 > 65536)→ ❌。
+
+**⇒ 所以修 W-107 会「暴露」W-120** —— 这两件事必须一起做,
+否则就是把「响亮的失败」换成「静默的错代码」(严格更坏)。
+
+**⚠️ 余量有多小:** `main.jhyy` 自己的 max temp id 已经到 **64953** ——
+离 65536 只剩 **583 个**。也就是说本仓库自己再加几十行代码就跨过去了。
+(同样的道理,W-074.6 sub-bug #3 当年也是用「4096 → 65536」把同一个形状的
+悬崖往后推的 —— 这次是彻底消掉。)
+
+**修法(按实际需要分配,跟 W-107 同款):**
+
+- CGState 加 `temp_slots_size` / `temp_holds_size` 两个**实际容量**字段
+- pre-scan 的 Phase 2 之后,`per_fn_max[fn_count-1]` 就是**全局**最大 temp id
+  → `cg_resize_temp_tables` 按它重新分配两张表(只在需要更大时才换 ——
+  小文件的行为与修复前**逐字节相同**)
+- 所有 bound check 改成读**实际容量**,不再读常量
+- 越界时**响亮失败**:`temp_table_overflow` 粘滞标志 + 编译结束时
+  (`codegen_amd64.jhyy` / `codegen_amd64_inmem.jhyy`)检查 → 报错并让编译失败
+  —— 一个响亮的失败远好过一个静默产出错代码的编译器 ✓
+
+**验收:**
+
+```
+25000 语句的单函数:  s = 0 → **74994** ✅
+4100 个函数的合成文件:求和 = 0 → **36900** ✅
+新常驻门 artifact_checks.sh `many_functions`(4100 个函数):
+    ✅ PASS
+    造红灯:① 旧编译器 → 红(编译失败)
+            ② 禁掉 resize → 红(响亮守门触发)
+            ③ 再禁掉守门 → 红(**求和 = 'MANYFUNC 0'** —— 静默错值被抓住)
+门本身的自检:门里断言「合成文件的 max temp id > 65536」——
+    temp id 只差 71 就越界,合成文件一变就可能悄悄掉回 65536 以下
+    → 那样门就变成空门而不报任何东西 ⇒ 显式断言它**真的**踩到了悬崖 ✅
+全量回归:181/181 PASS ✅   自举闭环:v2.s == v3.s byte-identical ✅
+```
+
+**影响范围:** 任何 max temp id 超过 65535 的源文件 —— 也就是「单个大函数」
+或「很多函数」的源文件。HEAD 上**本来就可复现**(不需要 W-107 修完)。
+
+**引用:**
+- 源码 `compiler/src0/codegen_amd64_state.jhyy`(`cg_max_temp_slots` /
+  `cg_max_temp_holds_address` / `cg_resize_temp_tables` / 四处 bound check)
+- 源码 `compiler/src0/codegen_amd64.jhyy` + `codegen_amd64_inmem.jhyy`(越界守门)
+- commit `v4.0.2.1`(W-074.6 sub-bug #3:同一个形状的悬崖,当时用 4096→65536 推远)
+- W-107 entry(同一次修的两个悬崖)
 
 <a id="w-108"></a>
 ## W-108: 索引重建脚本静默丢弃 59/89 条目 —— STATUS_RE 不容忍 ✅ 前缀,且只匹配 H2

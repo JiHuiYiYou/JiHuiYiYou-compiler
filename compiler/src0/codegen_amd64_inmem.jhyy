@@ -110,6 +110,14 @@ fn codegen_amd64_run_text(text: *u8, len: i64, asm_path: *u8, target_tag: i32,
 
     // 6. Dispatch loop → emit each token → .s into sb.buf
     let _pe_rc = parse_and_emit(state_buf, tokens, n, target_tag);
+    // W-120:temp 表越界 → 读侧跳过查表 → 同一个 temp 在两处解析成不同的槽
+    // → **静默产出错代码** → 响亮失败(一个响亮的失败远好过静默的错代码 ✓)。
+    if cg_state_get_temp_overflow(state_buf) != (0 as i32) {
+        jh_fputs_stderr("jhyy error: temp id exceeded the temp-slot table — refusing to emit silently-wrong code (W-120)" as *u8);
+        jh_fputs_stderr("
+" as *u8);
+        return 1 as i32;
+    }
     // W-074 warning: n>0 但 sb.len=0 = 0-byte .s (per codegen_amd64.jhyy:340-348)
     if sb.len == (0 as i64) && n > (0 as i64) {
         let trace_tmp_cap: i64 = 96 as i64;
