@@ -1879,8 +1879,19 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
             let arr = ast_new_array_lit((*p).arena, loc_lf, loc_ll, loc_lc, elems, nelems);
             left = ast_new_slice_lit((*p).arena, loc_lf, loc_ll, loc_lc, arr);
         } else {
+            // W-105 (2026-10-20):`&mut expr` —— 独占借用。
+            // 之前 `mut` 在表达式位置直接报「unexpected token 'mut' in expression」
+            // → `&mut` 造不出来(只是类型标注层面的装饰)。
+            //
+            // ⚠️ 与**类型**位置的 `&mut T` 是两条路:那边由 parse_type 的
+            //    NODE_REF_TYPE 分支处理(已存在 ✓),这边是表达式位置 ✓。
+            let mut is_mut_borrow: i32 = 0;
+            if parser_check(p, TOKEN_MUT()) != (0 as i32) {
+                parser_advance(p, &t);  // consume `mut`
+                is_mut_borrow = 1;
+            }
             let expr = parse_expr(p, PREC_UNARY());
-            left = ast_new_addr_of((*p).arena, loc_lf, loc_ll, loc_lc, expr);
+            left = ast_new_addr_of_mut((*p).arena, loc_lf, loc_ll, loc_lc, expr, is_mut_borrow);
         }
     }
     else if t.kind == TOKEN_LPAREN() {

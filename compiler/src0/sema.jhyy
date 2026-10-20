@@ -276,6 +276,40 @@ fn sema_pop_scope(ctx: *SemaContext) -> i32 {
 
 // ta: TypeArena 引用
 // tn: type annotation AST node
+// sema_make_ref_type — 造一个 KIND_REF 类型(`&T` / `&mut T`)。
+//
+// W-105 (2026-10-20):**类型位置**的 `&mut T`(NODE_REF_TYPE)与**表达式位置**的
+// `&mut expr`(NODE_ADDR_OF)共用它 —— 两边产出的类型表示必须一致,否则
+// `let p: &mut i32 = &mut x;` 的 decl_type 与 init_type type_eq 不成立
+// → "type mismatch in let"。
+fn sema_make_ref_type(ctx: *SemaContext, inner: *Type, is_mut: i32) -> *Type {
+    let ref_type = arena_alloc((*ctx).arena, TYPE_SIZE()) as *Type;
+    (*ref_type).kind = KIND_REF();
+    (*ref_type).prim = (*inner).prim;
+    (*ref_type).elem = inner as *u8;
+    (*ref_type).arr_count = (*inner).arr_count;
+    (*ref_type).params = (*inner).params;
+    (*ref_type).nparams = (*inner).nparams;
+    (*ref_type).ret = (*inner).ret;
+    (*ref_type).name = (*inner).name;
+    (*ref_type).fields = (*inner).fields;
+    (*ref_type).nfields = (*inner).nfields;
+    (*ref_type).size = (*inner).size;
+    (*ref_type).align = (*inner).align;
+    (*ref_type).variants = (*inner).variants;
+    (*ref_type).nvariants = (*inner).nvariants;
+    (*ref_type).tag_size = (*inner).tag_size;
+    (*ref_type).payload_off = (*inner).payload_off;
+    (*ref_type).payload_sz = (*inner).payload_sz;
+    (*ref_type).sym = (*inner).sym;
+    (*ref_type).underlying = (*inner).underlying;
+    (*ref_type).is_volatile = 0 as i32;
+    (*ref_type)._pad_volatile = 0 as i32;
+    (*ref_type).is_mut = is_mut;
+    (*ref_type)._pad_mut = 0 as i32;
+    return ref_type;
+}
+
 fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
     if tn == (0 as *Node) { return 0 as *Type; }
 
@@ -431,30 +465,8 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
             return type_primitive(ta, PRIM_I32());
         }
         // 分配新 Type = 复制 inner + KIND_REF + is_mut + elem=inner
-        let ref_type = arena_alloc((*ctx).arena, TYPE_SIZE()) as *Type;
-        (*ref_type).kind = KIND_REF();
-        (*ref_type).prim = (*inner).prim;
-        (*ref_type).elem = inner as *u8;
-        (*ref_type).arr_count = (*inner).arr_count;
-        (*ref_type).params = (*inner).params;
-        (*ref_type).nparams = (*inner).nparams;
-        (*ref_type).ret = (*inner).ret;
-        (*ref_type).name = (*inner).name;
-        (*ref_type).fields = (*inner).fields;
-        (*ref_type).nfields = (*inner).nfields;
-        (*ref_type).size = (*inner).size;
-        (*ref_type).align = (*inner).align;
-        (*ref_type).variants = (*inner).variants;
-        (*ref_type).nvariants = (*inner).nvariants;
-        (*ref_type).tag_size = (*inner).tag_size;
-        (*ref_type).payload_off = (*inner).payload_off;
-        (*ref_type).payload_sz = (*inner).payload_sz;
-        (*ref_type).sym = (*inner).sym;
-        (*ref_type).underlying = (*inner).underlying;
-        (*ref_type).is_volatile = 0 as i32;
-        (*ref_type)._pad_volatile = 0 as i32;
-        (*ref_type).is_mut = (*rt).is_mut;
-        (*ref_type)._pad_mut = 0 as i32;
+        // (W-105:与表达式位置的 `&mut expr` 共用同一个构造器 ✓)
+        let ref_type = sema_make_ref_type(ctx, inner, (*rt).is_mut);
         return ref_type;
     }
 
@@ -1081,7 +1093,10 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     if (*n).kind == NODE_DEREF() {
         let d = node_deref_data(n);
         let inner = infer_type(ctx, ta, (*d).expr as *Node);
-        if (*inner).kind != KIND_POINTER() {
+        // W-105 (2026-10-20):`&mut T` / `&T`(KIND_REF)也能解引用 ——
+        // 之前只认 KIND_POINTER → `fn setit(p: &mut i32) { *p = 5; }`
+        // 报「cannot dereference non-pointer type」(W-105 的核心症状之一)。
+        if (*inner).kind != KIND_POINTER() && (*inner).kind != KIND_REF() {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "cannot dereference non-pointer type" as *u8);
             let v = type_void(ta);
@@ -1097,6 +1112,18 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     if (*n).kind == NODE_ADDR_OF() {
         let d = node_addr_of_data(n);
         let inner = infer_type(ctx, ta, (*d).expr as *Node);
+        // W-105:`&mut expr` 的类型是 **KIND_REF(is_mut=1)** —— 与**类型**位置的
+        // `&mut T` 同一个表示(NODE_REF_TYPE 分支产的也是 KIND_REF)。
+        //
+        // `&expr`(共享)仍然是 KIND_POINTER —— v3.1.0 的既定语义
+        // (borrow_check_basic.jhyy 的注释明写「`&expr` in expression position
+        // still produces *T (POINTER)」),**不改** ✓(改了会波及 codegen 的 11 处
+        // KIND_POINTER 判定)。
+        if (*d).is_mut != (0 as i32) {
+            let t = sema_make_ref_type(ctx, inner, 1 as i32);
+            (*n).type_ptr = t as *u8;
+            return t;
+        }
         let t = type_pointer((*ctx).arena, inner);
         (*n).type_ptr = t as *u8;
         return t;

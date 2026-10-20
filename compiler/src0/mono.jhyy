@@ -410,13 +410,15 @@ fn mono_subst_expr(arena: *Arena, node: *Node,
         return ast_new_slice_range(arena, (*node).loc_filename, (*node).loc_line,
                                    (*node).loc_col, new_target, new_start, new_end);
     }
-    // NODE_ADDR_OF: operand@0(8) = 8
+    // NODE_ADDR_OF: operand@0(8) + is_mut@8(4) = 16
     if nk == NODE_ADDR_OF() {
         let an_data = (node as i64 + NODE_SIZE()) as *u8;
         let an_op_off = an_data as **Node;
+        let an_is_mut = *(ptr_add_u8(an_data, (8 as i64)) as *i32);
         let new_op = mono_subst_expr(arena, *an_op_off, type_params, arg_nodes, nargs);
-        return ast_new_addr_of(arena, (*node).loc_filename, (*node).loc_line,
-                               (*node).loc_col, new_op);
+        // W-105:泛型实例化时**保留 is_mut** —— 丢了就把 `&mut` 降级成 `&`
+        return ast_new_addr_of_mut(arena, (*node).loc_filename, (*node).loc_line,
+                                   (*node).loc_col, new_op, an_is_mut);
     }
     // NODE_DEREF: operand@0(8) = 8
     if nk == NODE_DEREF() {

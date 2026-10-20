@@ -7259,7 +7259,8 @@ regress 用例。
 <a id="w-105"></a>
 ## W-105: check_borrow 是硬编码 return 1 — `&mut` 独占性完全不检查
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — sema.jhyy:2558 函数体恒 return 1,每个函数声明都走这条空检查
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — 2026-10-20 **(a)「`&mut` 真的能用」已真修**;
+(b)「`check_borrow` 恒 return 1」**仍未实现**(借用记录放进 `infer_type` 会让**自举编译器** SEGV,机制未定位)
 **Backfilled:** 2026-10-15 (v3.1.0 V3-C 3g ship-gate stub)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-08 前后 (v3.1.0 ship) → 至今
@@ -7313,6 +7314,38 @@ fn check_borrow(ctx: *SemaContext, ta: *TypeArena, body: *Node) -> i32 {
 mono,parser,sema,std/string,types}.jhyy` 都有使用,不是没人用的死代码。
 
 **workaround:** 无。调用方拿不到任何诊断。
+
+### 2026-10-20 部分真修:(a)「`&mut` 真的能用」
+
+台账原文说「`&mut` 是个装饰性标注:parser 认、类型系统里有,但造不出、传不进、
+解引用不了」—— 这部分**已修** ✓:
+
+| 改动 | 内容 |
+|---|---|
+| `ast.jhyy` | `NodeAddrOf` 加 `is_mut` 字段(记录大小 8 → 16) |
+| `parser.jhyy` | 表达式位置接受 `&mut expr`(之前报「unexpected token 'mut' in expression」) |
+| `sema.jhyy` | `&mut expr` 的类型是 **KIND_REF(is_mut=1)** —— 与**类型**位置的 `&mut T` 同一个表示(抽出 `sema_make_ref_type` 供两边共用)→ `let p: &mut i32 = &mut x;` 两边类型一致 ✓ |
+| `sema.jhyy` | 解引用接受 KIND_REF(之前只认 KIND_POINTER)→ `fn setit(p: &mut i32) { *p = v; }` 能写内存 ✓ |
+| `mono.jhyy` | 泛型实例化时**保留 is_mut**(丢了就把 `&mut` 降级成 `&`) |
+
+**验收:** `borrow_mut_write.jhyy` 摘掉 XFAIL → **EXIT=5** ✓(之前编译不过);
+`borrow_check_basic.jhyy` 仍 EXIT=42 ✓;全量回归 178/178 ✓;自举闭环 v2..v5 ✓。
+
+#### ⚠️ (b)「借用独占性检查」**没做成**,原因记录在案
+
+最小实现(在 sema 的 `infer_type` 里记录每次 `&`/`&mut` 借用,`check_borrow`
+里比对同一符号的借用集合)—— **做出来了,但让自举编译器 SEGV** ✗:
+
+- 现象:**自举出来的 jhyy.exe 编任何文件都崩**(确定性 ✗,gdb 下不复现 ✗)
+- 崩溃点:一个**帧偏移 ≈ -515KB** 的写(局部变量冲出帧 → 踩坏调用者的帧)
+- 二分结果:与「用不用 helper 调用」无关 —— **调用**与**内联**两种写法都复现 ✓
+  ⇒ 触发条件是「**在 `infer_type` 里加代码**」这个动作本身
+- `infer_type` 是**递归热路径**,它的帧大小按 per-fn max temp 估(W-096)✗ →
+  加了局部变量后帧布局整体位移 ✗ → 这条线还没查清 ✗
+
+⇒ **下一步**:把借用记录**挪出 `infer_type`**(例如在 sema 里做一趟独立的借用
+收集 pass,或在 pattern/match 的窄路径上做),不要动递归热路径的帧布局 ✗。
+在那之前,**W-105 保持 ACTIVE** ✗ —— 独占性仍然零检查 ✗。
 
 **影响范围:** 任何写了 `&mut` 的程序。`compiler/tests/examples/borrow_check_basic.jhyy`
 存在,但它测的是 borrow 的**表面可解析性**,不是冲突检测。
@@ -7516,7 +7549,8 @@ codegen,顺带得到验证)。
 <a id="w-107"></a>
 ## W-107: 五个 per-fn pre-scan 表硬编码 1024 上限 — 距触发只剩 33 个函数
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — MAX_FN_ENTRIES=1024,实测已用 991;越过上限后 fn≥1023 静默退回 legacy 全局 max 帧路径
+**状态:** ACTIVE since 2026-10-15 (v4.0.8) — MAX_FN_ENTRIES=1024;**2026-10-20 复核:实测已用 1022,余量只剩 2 个函数**;
+越过上限后 fn≥1023 静默退回 legacy 全局 max 帧路径。**已试过「按实际函数数动态分配」,实测没修干净(见下)—— 本条升级为高优先**
 **Backfilled:** 2026-10-15 (v2.11.10 W-074.6 T3-a 引入 256 → v4.0.2.1 bump 到 1024)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-07 前后 (v2.11.10) → 至今
@@ -7524,6 +7558,32 @@ codegen,顺带得到验证)。
 **触发面:** `compiler/src0/codegen_amd64_state.jhyy:511 / 515 / 524 / 530 / 537`
 —— **五个** 每函数 pre-scan 表,全部 `arena_alloc(1024 * 8)`:
 `fn_starts` / `per_fn_max` / `per_fn_alloc` / `per_fn_addr_pool` / `per_fn_base_t`。
+
+### 2026-10-20:试过「按实际函数数动态分配」——**没修干净,已撤回**
+
+**改法**:pre-scan 的 Phase 1 先**数**函数个数,再按 `fn_count + 1` 分配五张表
+(`fn_starts` 多一项放哨兵),并删掉 `fn_count > 1023` 的截断。
+
+**实测(1100 个函数的合成文件)**:修复前被丢弃的函数拿到 79392 字节的帧
+(global-max fallback),修复后 1100 个函数全部正确(8384 字节的帧)✓。
+
+**但是**:编译器**自己**(main.jhyy,1022+ 个函数)编译一份函数数 > 1023 的源码时,
+**自举出来的 jhyy.exe 会 SEGV**(帧偏移 ≈ -515KB 的写 → 冲出帧 → 踩坏调用者的
+帧 → 被编译程序的 target 变随机值)。逐项二分(用不用 helper 调用 / 内联 / AST /
+parser / sema 各子集 / 加不加 dummy 函数)**都没能定位到残留的那一处**,而
+**固定 1024 的版本在同样多的函数下是稳的** ⇒ 动态分配已撤回(b7c4e6e)。
+
+**顺带真修的一条**(`cg_local_t_from_global`):查 `per_fn_base_t` 的上界**写死
+1024**,且在真正的上界检查(fn_count)**之前**就 return → idx ≥ 1024 时跳过查表
+→ local_t 变成**全局 temp id** → 局部变量帧偏移 ≈ -518KB。这个越界写**多数时候
+无害**(被丢弃的函数同时走了 global-max fallback,帧被预留成 518KB,偏移刚好落在
+帧内 ✓);真正炸的是**帧被算成 8 字节**的场合(local_max 被钳成 0)→ 偏移彻底
+出框 ✓。
+
+**⇒ 本条现在是高优先**:余量只剩 2 个函数 —— 本仓库自己再加两个顶层函数就跨过
+1024 了。**正确的修法**应该是「按实际函数数分配 + 把「丢弃函数」这个行为本身
+去掉」(丢弃 ⇒ 该函数没有 per_fn_max ⇒ local_max 被钳成 0 ⇒ 帧只有 8 字节 ⇒
+局部变量冲出帧 ✗✗✗ —— 这才是真正的祸根 ✗,不是表长本身 ✗)。
 
 **症状(越界后的行为):** 写入侧有守卫(`codegen_amd64_state.jhyy:1727` 与 `:1736`
 的 `if fn_count < 1024`),哨兵写入会被跳过,`:1740-1742` 把 `fn_count` 截到 1023。

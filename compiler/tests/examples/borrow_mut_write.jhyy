@@ -15,7 +15,15 @@
 // 所以本测试测的是「`&mut` 最基本的用法能不能用」,答案 today 是不能。
 // 它同时覆盖 W-105 的两层:(1) `&mut` 不可用;(2) 可用的裸指针路径无检查。
 //
-// XFAIL: W-105 `&mut` 不可解引用 + check_borrow 恒 return 1 → `&mut` 独占性零检查
+// 2026-10-20(W-105 (a) 真修):XFAIL 标记已摘 —— `&mut` 现在**真的能用**了:
+//   · parser 接受表达式位置的 `&mut expr`(之前报「unexpected token 'mut'」)
+//   · `&mut expr` 的类型是 KIND_REF(is_mut=1),与**类型**位置的 `&mut T` 同一个表示
+//     → `let p: &mut i32 = &mut x;` 两边类型一致
+//   · 解引用接受 KIND_REF → `fn setit(p: &mut i32) { *p = v; }` 能写内存
+//   · 泛型实例化(mono)保留 is_mut —— 丢了就把 `&mut` 降级成 `&`
+//
+// 本测试只验**可用性**。`&mut` 的**独占性检查**(W-105 (b) / check_borrow 恒
+// return 1)仍未实现 —— 见 workarounds.md W-105。
 // EXPECT: 5
 extern fn printf(fmt: *u8, a: i32, b: i32) -> i32;
 

@@ -371,8 +371,13 @@ fn NODE_ALIGNOF_SIZE() -> i64 { return 8 as i64; }
 // expr(*u8 8) = 8
 type NodeAddrOf = struct {
     expr: *u8,
+    // W-105 (2026-10-20):is_mut = 1 → `&mut expr`(独占借用);
+    // 0 → `&expr`(共享借用)。
+    // 之前 AST 里没有这个位点 → parser 只能造 `&`,`&mut` 造不出来
+    // (「unexpected token 'mut' in expression」)。
+    is_mut: i32,
 }
-fn NODE_ADDR_OF_SIZE() -> i64 { return 8 as i64; }
+fn NODE_ADDR_OF_SIZE() -> i64 { return 16 as i64; }
 
 // expr(*u8 8) = 8
 type NodeDeref = struct {
@@ -1041,13 +1046,23 @@ fn node_alignof_data(n: *Node) -> *NodeAlignof {
     return (n as i64 + NODE_SIZE()) as *NodeAlignof;
 }
 
-fn ast_new_addr_of(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
-                   expr: *Node) -> *Node {
+// ast_new_addr_of_mut — W-105:`&mut expr` 的构造点(is_mut=1 → 独占借用)
+//
+// ⚠️ 放在 ast_new_addr_of **之前**:jhyy 无 forward decl,被调用的函数
+//    必须先定义 ✓。
+fn ast_new_addr_of_mut(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                        expr: *Node, is_mut: i32) -> *Node {
     let buf = arena_alloc(a, NODE_SIZE() + NODE_ADDR_OF_SIZE());
     let n = ast_init_node(buf, NODE_ADDR_OF(), loc_filename, loc_line, loc_col);
     let d = (buf as i64 + NODE_SIZE()) as *NodeAddrOf;
     (*d).expr = expr as *u8;
+    (*d).is_mut = is_mut;
     return n;
+}
+
+fn ast_new_addr_of(a: *Arena, loc_filename: *u8, loc_line: i32, loc_col: i32,
+                   expr: *Node) -> *Node {
+    return ast_new_addr_of_mut(a, loc_filename, loc_line, loc_col, expr, 0 as i32);
 }
 
 fn node_addr_of_data(n: *Node) -> *NodeAddrOf {
