@@ -682,6 +682,67 @@ fn emit_func_header(state: *u8, tok: *u8, target_tag: i32) -> i32 {
 //   emit_data_string 读 flag:1 → emit `.byte N, N, ...` (no .ascii + no .byte 0 trailing);
 //   flag:0 → string form (per legacy)。
 
+// hex_val — 一个 hex 字符 → 0..15(非 hex 字符返 -1)
+fn hex_val(c: i32) -> i32 {
+    if c >= (48 as i32) && c <= (57 as i32) { return c - (48 as i32); }
+    if c >= (97 as i32) && c <= (102 as i32) { return c - (97 as i32) + (10 as i32); }
+    if c >= (65 as i32) && c <= (70 as i32) { return c - (65 as i32) + (10 as i32); }
+    return -(1 as i32);
+}
+
+// emit_raw_asm_inline — W-113 (2026-10-20):把 `dbgasm <hex>` 里的 asm 文本
+// **内联**写进 .s(在函数体内部 ✓)。
+//
+// 之前(W-113 的症状):asm 文本由前端写进 side-file,main.jhyy 在链接前把
+// side-file 拼到 .s **末尾** ⇒ asm 字节落在**所有函数之外** ⇒ 死字节,
+// 永不执行(spec supplement v3.0.1 § 6「appended 到 .s 末」)。
+//
+// 现在:前端把文本 hex 编码成一条 IL 指令 `dbgasm <hex>` ⇒ 后端在**那个位置**
+// 解回原文写进 .s ⇒ asm 落在它该在的函数体里、在该函数的 ret 之前 ✓。
+fn emit_raw_asm_inline(state: *u8, tok: *u8) -> i32 {
+    let cg = state as *CGState;
+    let t = tok as *ILToken;
+    let text = (*t).text;
+    let text_len = (*t).text_len;
+    if text == (0 as *u8) { return 0 as i32; }
+    // 找 "dbgasm" 之后的第一个空格 —— hex 从那里开始
+    let mut sp: i64 = -(1 as i64);
+    let mut i: i64 = 0 as i64;
+    while i < text_len {
+        let c = *(ptr_add_u8(text, i)) as i32;
+        if c == (32 as i32) { sp = i; break; }
+        i = i + (1 as i64);
+    }
+    if sp < (0 as i64) { return 0 as i32; }
+    let hstart = sp + (1 as i64);
+    let hlen = text_len - hstart;
+    let nbytes = hlen / (2 as i64);
+    if nbytes <= (0 as i64) { return 0 as i32; }
+    let arena = (*cg).arena;
+    let sb = (*cg).out;
+    let buf = arena_alloc(arena, nbytes + (1 as i64));
+    if buf == (0 as *u8) { return 1 as i32; }
+    // hex → 字节
+    let mut k: i64 = 0 as i64;
+    while k < nbytes {
+        let h1 = hex_val(*(ptr_add_u8(text, hstart + k * (2 as i64))) as i32);
+        let h2 = hex_val(*(ptr_add_u8(text, hstart + k * (2 as i64) + (1 as i64))) as i32);
+        if h1 < (0 as i32) || h2 < (0 as i32) {
+            jh_fputs_stderr("jhyy: malformed dbgasm payload (non-hex char)
+" as *u8);
+            return 1 as i32;
+        }
+        let b = h1 * (16 as i32) + h2;
+        *(ptr_add_u8(buf, k) as *i32) = b;
+        k = k + (1 as i64);
+    }
+    // 写进 .s —— 原样 + 换行(asm 文本是多行时,每行都要有自己的结尾)
+    sb_append(arena, sb, buf, nbytes);
+    sb_append_cstr(arena, sb, "
+" as *u8);
+    return 0 as i32;
+}
+
 fn emit_data_string(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let cg = state as *CGState;
     let t = tok as *ILToken;

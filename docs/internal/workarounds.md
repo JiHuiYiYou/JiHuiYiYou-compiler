@@ -125,7 +125,7 @@
 | [W-110](#w-110) | RESOLVED | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 |
 | [W-111](#w-111) | RESOLVED | 泛型 enum 的关联构造器在无类型上下文处不被识别;多字段 payload 连解析都过不去 |
 | [W-112](#w-112) | RESOLVED | `#[link_section]` 完全失效 — 属性被解析但 codegen 是 no-op |
-| [W-113](#w-113) | ACTIVE | `asm!` 与 memory barrier 的字节被 emit 到 `ret` 之后,永不执行 |
+| [W-113](#w-113) | RESOLVED | `asm!` 与 memory barrier 的字节被 emit 到 `ret` 之后,永不执行 |
 | [W-114](#w-114) | RESOLVED | 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效 |
 | [W-115](#w-115) | ACTIVE | W-089 标着 RESOLVED,但它自己的 reproducer 至今... |
 | [W-116](#w-116) | RESOLVED | SysV callee 参数溢出只处理 4 个整数寄存器 —— 第 5 个及以后的参数全读到第 4... |
@@ -8626,7 +8626,8 @@ OS-required 特性,而 OS 侧正是它的目标场景。
 <a id="w-113"></a>
 ## W-113: `asm!` 与 memory barrier 的字节被 emit 到 `ret` 之后,永不执行
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — opcode 编码正确但位置在函数末尾之后;这些 ship gate 的退出码对 asm 内容零敏感
+**状态:** RESOLVED closed 2026-10-20 (v4.0.18) — asm 文本经 IL(`dbgasm <hex>`)**内联进函数体**;
+`asm_before_ret` 从 KNOWN-FAIL 升级成真门
 **Backfilled:** 2026-10-15 (V3-B 3a/3f「ship」时)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-09 前后 (V3-B 3a/3f ship) → 至今
@@ -8651,18 +8652,60 @@ OS-required 特性,而 OS 侧正是它的目标场景。
 OS-required 特性(`jhyy_OS` 多核同步的基础)。
 
 **失效条件:**
-1. asm 内联进函数体(在 `ret` 之前),位置正确后测试才可能对内容敏感
-2. harness 需要一个能读 `.exe` / `.s` 字节的门 —— 退出码这条路对 asm 天生
-   不敏感(asm 通常不改变返回值)
+1. ~~asm 内联进函数体(在 `ret` 之前),位置正确后测试才可能对内容敏感~~
+   → **2026-10-20 已做**(见下)
+2. ~~harness 需要一个能读 `.exe` / `.s` 字节的门~~ → **已存在**
+   (`artifact_checks.sh` 的 `asm_before_ret`,objdump 反汇编判位置 ✓)
 
-**⚠️ 潜在竞态(未复现,待确认):** asm / link_section 走的是**硬编码固定路径**
-的旁路文件(`_inline_asm.buf` / `_section_directive.buf`),codegen `fopen "wb"`
-截断、main 读完 unlink。regress 是多线程并发的,理论上两个测试会互相覆盖或
-删掉对方的旁路文件。并发数提高后可能表现为随机 FAIL。
+### 2026-10-20 真修:asm 文本经 IL 内联进函数体
+
+**做法(spec § 6 roadmap 说的「占位符 + placement tracking」):**
+
+| 层 | 内容 |
+|---|---|
+| 前端 `codegen.jhyy` | `asm!` / `fence_*` 的文本**hex 编码**成一条 IL 指令 `dbgasm <hex>` 写进 IL(不再是写 side-file) |
+| IL lexer `codegen_amd64_lexer.jhyy` | 认 `dbgasm` → ILTOK_DIRECTIVE(复用 dbgfile/dbgloc 的同款 token),**必须**调 `lex_finish_instr`(dbgfile/dbgloc 不调它 —— 它们不需要 token 文本;dbgasm 需要:后端要从 `tok.text` 取 hex) |
+| 后端 `codegen_amd64_emit_ctrl.jhyy` | `emit_raw_asm_inline`:把 hex 解回原文,**原样写进 .s**(在函数体内部 ✓) |
+
+**为什么 hex 编码而不是原样写进 IL:** IL 是**按行**的文本格式,而 asm 文本
+可能含换行 / 引号 / 反斜杠 —— hex 一次性消掉这三个问题 ✓(跨平台也稳)。
+
+**⚠️ 顺带修掉的第二个东西:memory barrier 之前也是死字节。**
+`fence_seq_cst` / `fence_acquire` / `fence_release` 走的是同一个 side-file
+⇒ 之前 `mfence` / `lfence` / `sfence` **也**落在所有函数之外 ⇒ **内存屏障
+从来没执行过** ✗。对一个多核程序,这是**正确性**问题(不只是「gate 空转」)。
+现在三条 fence 都内联在函数体里 ✓(实测 `.s`:`mfence` / `lfence` / `sfence`
+紧跟在函数序言之后 ✓)。
+
+**验收:**
+
+```
+产物级门 artifact_checks.sh `asm_before_ret`:
+    修复前:KNOWN-FAIL(「反汇编里有 N 条 cpuid,但**没有任何函数体包含它**」)
+    修复后:**PASS** ✓(objdump:cpuid 落在函数体内部、该函数的 ret 之前)
+    ⇒ KNOWN_FAIL 里那一行已删 ⇒ 它从「已知问题」升级成**真门** ✓
+产物级门总计:7 PASS / 0 KNOWN-FAIL / 0 FAIL ✅(W-113 是最后一条 KNOWN-FAIL)
+全量回归:  182/182 PASS, 0 failed ✅
+自举闭环:  closure_check.sh v2.s == v3.s byte-identical ✅
+SysV 回归: 6 PASS ✅   W-104 三方向 ABI 对拍: 3 PASS ✅
+```
+
+**⚠️ 关于「潜在竞态」那一段(顺带更新):** 原文担心 asm / link_section 的
+**硬编码固定路径**旁路文件在并发下互相覆盖。**asm / fence 两条路已经不走
+旁路文件了**(改走 IL ✓)⇒ 那条竞态对它们**不再成立** ✓。
+剩下的 `_section_directive.buf` / `_inline_asm.buf`(naked fn 用)仍走旁路
+文件,但 W-122 已经给「每次编译开头清干净」加了防线 ✓(顺序泄漏免疫)。
 
 **引用:**
 - 测试 `compiler/tests/examples/inline_asm_cpuid.jhyy` / `memory_barrier_smp.jhyy`
-- 相关:W-112(同属「V3-B ship gate 空转」家族)
+- 源码 `compiler/src0/codegen.jhyy`(`cg_emit_raw_asm_inline` + 两个 arm)
+- 源码 `compiler/src0/codegen_amd64_lexer.jhyy`(`dbgasm` 分支)
+- 源码 `compiler/src0/codegen_amd64_emit_ctrl.jhyy`(`emit_raw_asm_inline` + `hex_val`)
+- 源码 `compiler/src0/codegen_amd64.jhyy`(`parse_and_emit` 的 DIRECTIVE 分支)
+- spec `docs/abis/jhyy-lang-spec-inline-asm-supplement-v3.0.1.md` § 6
+  (「要 inline 调用 asm,需要 v3.1+ 加 operand constraints + placement
+  tracking」—— placement tracking 就是这一条;operand constraints 仍未做)
+- 相关:W-112(同属「V3-B ship gate 空转」家族)、W-122(旁路文件泄漏)
 
 <a id="w-114"></a>
 ## W-114: 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效

@@ -177,6 +177,31 @@ fn parse_and_emit(state: *u8, tokens: *u8, n: i64, target_tag: i32) -> i32 {
             let _ = emit_data_string(state, tok_p, target_tag);
         } else if kind == ILTOK_DIRECTIVE() {
             // v2.11.1 (W-074.5 真修): dbgfile / dbgloc / { / } — 不 emit .s body,仅让 parse_and_emit 不卡 cursor
+            //
+            // W-113 (2026-10-20):`dbgasm <hex>` 是**例外** —— 它带 asm 文本,
+            // 必须**内联**写进 .s(在函数体内部 ✓)。之前 asm 文本被 append 到
+            // .s 末 ⇒ 落在所有函数之外 = 死字节,永不执行。
+            let _td = (*(tok_p as *ILToken)).text;
+            let _tdl = (*(tok_p as *ILToken)).text_len;
+            let mut _is_asm = 0 as i32;
+            if _td != (0 as *u8) && _tdl >= (7 as i64) {
+                if (*(ptr_add_u8(_td, 0 as i64)) as i32) == (100 as i32) {
+                    if (*(ptr_add_u8(_td, 1 as i64)) as i32) == (98 as i32) {
+                        if (*(ptr_add_u8(_td, 2 as i64)) as i32) == (103 as i32) {
+                            if (*(ptr_add_u8(_td, 3 as i64)) as i32) == (97 as i32) {
+                                if (*(ptr_add_u8(_td, 4 as i64)) as i32) == (115 as i32) {
+                                    if (*(ptr_add_u8(_td, 5 as i64)) as i32) == (109 as i32) {
+                                        _is_asm = 1 as i32;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if _is_asm != (0 as i32) {
+                let _ra = emit_raw_asm_inline(state, tok_p);
+            }
             let _x: i32 = 0 as i32;
             let _ = _x;
         } else if kind == ILTOK_DTOSI() {

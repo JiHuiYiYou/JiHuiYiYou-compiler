@@ -14,12 +14,19 @@
 // binary mode per feedback_qbe_crlf_root_cause), 然后 main.jhyy 在
 // gcc link 之前把 .buf 拼接到 .s 文件末。
 //
-// v3.0.1 限制 (per spec supplement § 6):  asm 文本作为全局汇编被 append
-// 到 .s 末,**不**内联到函数体里.  所以 cpuid 在 main_jhyy 返回后才执行
-// (objdump 显示 cpuid 紧跟在 main_jhyy `ret` 之后).  这个测试只验证:
-//   (a) parse / sema / codegen 走通, 没编译失败
-//   (b) 链接 .exe 成功 (size > 0)
-//   (c) cpuid 指令字节 (0f a2) 真的进了 .exe (sema_no_inline 检查)
+// ⚠️ 2026-10-20 (W-113 真修):asm 文本**现在内联进函数体**了 ——
+//   前端把文本 hex 编码成一条 IL 指令 `dbgasm <hex>`,后端在**那个位置**把
+//   hex 解回原文写进 .s ⇒ cpuid 落在 main_jhyy 的函数体内部、它的 `ret` 之前 ✓
+//   (之前是 append 到 .s 末 ⇒ 落在所有函数之外 = 死字节,永不执行)。
+//
+//   所以本测试从「只验字节进了 .exe」升级成「验它**真的在函数体里**」——
+//   判据在**产物级门** `artifact_checks.sh` 的 `asm_before_ret`:objdump 反汇编,
+//   要求 cpuid 落在某个函数体内部且在该函数的 ret 之前 ✓(W-113 修好后
+//   它从 KNOWN-FAIL 升级成真门)。
+//
+//   本文件仍只给 EXPECT: 0 —— 因为 cpuid **会毁掉 eax/ebx/ecx/edx**
+//   (CPUID 的输出),而返回值不依赖它们 ⇒ 运行时行为**在本测试里不可断言**;
+//   「它有没有被内联」由产物级门回答 ✓(职责分离)。
 //
 // 不再依赖 cpuid 实际"运行时"行为, 因为 D42 passthrough 路径根本不让
 // asm inline 进入函数体.  v3.1+ (per spec supplement § 6 roadmap) 会加

@@ -646,6 +646,50 @@ A/B:        193/193 逐字节相同 ✅
 
 ---
 
+## v4.0.18(续)—— W-113:`asm!` / memory barrier 内联进函数体(死字节变真指令)
+
+**2026-10-20。** ACTIVE 条数 3 → 2。
+
+### 症状:asm 字节落在**所有函数之外**
+
+`asm!` 的文本之前由前端写进 side-file(`_inline_asm.buf`),`main.jhyy` 在链接前
+把它拼接到 `.s` 的**末尾** ⇒ asm 字节落在**所有函数之外** ⇒ 是**死字节**,
+永不执行(spec supplement v3.0.1 § 6 记的「appended 到 .s 末」)。
+
+**⚠️ 顺带发现:`fence_*` 走的是同一个 side-file ⇒ `mfence` / `lfence` / `sfence`
+也从来没执行过。** 对一个多核程序,这是**正确性**问题 —— 内存屏障不存在。
+
+spec 的 § 6 roadmap 写明「要 inline 调用 asm,需要 v3.1+ 加 operand constraints
++ **placement tracking**」—— placement tracking 就是这一条。
+
+### 做法
+
+| 层 | 内容 |
+|---|---|
+| 前端 `codegen.jhyy` | `asm!` / `fence_*` 的文本**hex 编码**成一条 IL 指令 `dbgasm <hex>` 写进 IL(不再是写 side-file) |
+| IL lexer | 认 `dbgasm` → ILTOK_DIRECTIVE(复用 dbgfile/dbgloc 的同款 token)。⚠️ **必须**调 `lex_finish_instr` —— dbgfile/dbgloc 不调它(它们不需要 token 文本),dbgasm 需要(后端要从 `tok.text` 取 hex) |
+| 后端 | `emit_raw_asm_inline`:hex 解回原文,**原样写进 .s**(在函数体内部 ✓) |
+
+**为什么 hex 而不是原样写进 IL:** IL 是**按行**的文本格式,而 asm 文本可能含
+换行 / 引号 / 反斜杠 —— hex 一次性消掉这三个问题 ✓(跨平台也稳)。
+
+### 验收
+
+```
+产物级门 artifact_checks.sh `asm_before_ret`(objdump 判位置):
+    修复前:KNOWN-FAIL(「没有任何函数体包含它」)
+    修复后:**PASS** ✓ ⇒ KNOWN_FAIL 里那行已删 ⇒ 升级成**真门** ✓
+产物级门总计:7 PASS / 0 KNOWN-FAIL / 0 FAIL ✅(W-113 是最后一条 KNOWN-FAIL)
+内存屏障:实测 .s 里 mfence/lfence/sfence 紧跟函数序言 ✅(之前在 .s 末尾)
+全量回归:  182/182 PASS, 0 failed ✅
+自举闭环:  closure_check.sh v2.s == v3.s byte-identical ✅
+SysV 回归: 6 PASS ✅   W-104 三方向 ABI 对拍: 3 PASS ✅
+```
+
+**ACTIVE 条数:3 → 2。**
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

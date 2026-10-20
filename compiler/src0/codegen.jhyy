@@ -1701,6 +1701,49 @@ fn irval_box(ir: *IRBuf, kind: i32, id: i32, ival: i64, name: *u8, qbe_type: i32
 // MS x64 无结构体按值返回约定,原 `-> IRVal` 从未实现 sret:ret 时 rax 里是最后
 // 一个字段的值,调用方当结构体指针拷贝 → 读到垃圾 → arena__align_up 的 `~m`
 // emit 成 `xor %t687,%t10`,而 %t687 全文件从未定义(悬空 temp)。
+// cg_emit_raw_asm_inline — W-113 (2026-10-20):把 asm 文本**内联进函数体**。
+//
+// 之前:codegen 把 asm 原文写进 side-file(`_inline_asm.buf`),main.jhyy 在
+// **链接前**把 side-file 拼接到 .s 的**末尾** ⇒ asm 字节落在**所有函数之外**
+// ⇒ 是**死字节**,永不执行(spec supplement v3.0.1 § 6 记的「appended 到 .s 末」)。
+// spec 的 § 6 roadmap 写明「要 inline 调用 asm,需要 v3.1+ 加 operand constraints
+// + **placement tracking**」—— placement tracking 就是这一条。
+//
+// 做法:文本 **hex 编码**后作为一条 IL 指令 `dbgasm <hex>` 写进 IL ——
+// 后端在**那个位置**把 hex 解回原文,直接写进 .s(在函数体内部 ✓)。
+//
+// 为什么 hex 而不是原样写进 IL:IL 是**按行**的文本格式,而 asm 文本可能含
+// 换行 / 引号 / 反斜杠 —— hex 编码把这三个问题一次性消掉 ✓(跨平台也稳)。
+fn cg_emit_raw_asm_inline(ir: *IRBuf, text: *u8) -> i32 {
+let n = strlen(text);
+let hex = arena_alloc((*ir).arena, n * (2 as i64) + (1 as i64));
+if hex == (0 as *u8) {
+    return 1 as i32;
+}
+let mut i: i64 = 0 as i64;
+while i < n {
+    let b = *(ptr_add_u8(text, i)) as i32;
+    let hi = (b >> 4) & (15 as i32);
+    let lo = b & (15 as i32);
+    let h1 = hi + (48 as i32);
+    let h2 = lo + (48 as i32);
+    // 0-9 → '0'..'9';10-15 → 'a'..'f'
+    let h1c: i32 = if h1 > (57 as i32) { h1 + (39 as i32) } else { h1 };
+    let h2c: i32 = if h2 > (57 as i32) { h2 + (39 as i32) } else { h2 };
+    let hp = ptr_add_u8(hex, i * (2 as i64)) as *u8;
+    *(hp as *i32) = h1c;
+    *(ptr_add_u8(hex, i * (2 as i64) + (1 as i64)) as *i32) = h2c;
+    i = i + (1 as i64);
+}
+let nul = ptr_add_u8(hex, n * (2 as i64)) as *u8;
+*(nul as *i32) = 0 as i32;
+let _e = ir_emit_str(ir, "dbgasm " as *u8);
+let _e2 = ir_emit_str(ir, hex);
+let _e3 = ir_emit_str(ir, "\n" as *u8);
+return 0 as i32;
+}
+
+
 fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
@@ -4287,15 +4330,9 @@ let cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*matched_node).type_pt
     //   literal — operands array always NULL.
     if kind == NODE_ASM_BLOCK() {
         let ad = node_asm_block_data(n);
-        let asm_buf_path = "compiler/build/obj/_inline_asm.buf" as *u8;
-        let afp = fopen(asm_buf_path, "ab" as *u8);
-        if afp != (0 as *u8) {
-            let text_len = strlen((*ad).text);
-            let _w1 = fwrite((*ad).text, 1 as i64, text_len, afp);
-            let nl = "\n" as *u8;
-            let _w2 = fwrite(nl, 1 as i64, 1 as i64, afp);
-            let _c = fclose(afp);
-        }
+        // W-113:asm 文本走 IL(`dbgasm <hex>`)⇒ 后端把它**内联**进函数体 ✓
+        // (之前是 append 到 .s 末的死字节 —— 见 cg_emit_raw_asm_inline 的注释)。
+        let _ra = cg_emit_raw_asm_inline(ir, (*ad).text);
         // Return zero IRVal (asm is stmt-position; never used as expr value).
         return irval_box(ir, (zero).kind, (zero).id, (zero).ival, (zero).name, (zero).qbe_type);
     }
@@ -4317,15 +4354,9 @@ let cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*matched_node).type_pt
         if (*fd).kind == (2 as i64) {
             mnem = "sfence" as *u8;
         }
-        let fence_buf_path = "compiler/build/obj/_fence.buf" as *u8;
-        let ffp = fopen(fence_buf_path, "ab" as *u8);
-        if ffp != (0 as *u8) {
-            let mnem_len = strlen(mnem);
-            let _fw1 = fwrite(mnem, 1 as i64, mnem_len, ffp);
-            let nl = "\n" as *u8;
-            let _fw2 = fwrite(nl, 1 as i64, 1 as i64, ffp);
-            let _fc = fclose(ffp);
-        }
+        // W-113:跟 asm! 一样走 IL(`dbgasm <hex>`)⇒ 内联进函数体 ✓
+        // (之前是 append 到 .s 末 —— 同样落在所有函数之外 = 死字节)。
+        let _rf = cg_emit_raw_asm_inline(ir, mnem);
         return irval_box(ir, (zero).kind, (zero).id, (zero).ival, (zero).name, (zero).qbe_type);
     }
 

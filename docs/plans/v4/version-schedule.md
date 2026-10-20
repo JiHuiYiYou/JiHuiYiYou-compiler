@@ -604,6 +604,17 @@ temp id 只差 71 就越界,合成文件一变就可能悄悄掉回去 → 那�
 的源文件,「同一输入两次编译逐字节相同」这个假设**当时是不成立的**;而现有门
 比的是**两个不同代**的编译器(布局恰好一致)⇒ 一直是绿的 ⇒ 没人发现。
 
+### v4.0.18(续)—— W-113 ✅ **已完成(2026-10-20)**
+
+**`asm!` / `fence_*` 内联进函数体**(spec § 6 roadmap 的「placement tracking」):
+文本 hex 编码成 IL 指令 `dbgasm <hex>` ⇒ 后端在**那个位置**解回原文写进 .s ✓。
+
+**⚠️ 顺带修掉的是正确性问题:** `fence_seq_cst` / `fence_acquire` / `fence_release`
+走同一个 side-file ⇒ **内存屏障从来没执行过** ✗(对多核程序是正确性问题)。
+
+`artifact_checks.sh` 的 `asm_before_ret` 从 KNOWN-FAIL 升级成**真门** ——
+它是**最后一条** KNOWN-FAIL ⇒ 产物级门现在 **7 PASS / 0 KNOWN-FAIL / 0 FAIL** ✓。
+
 **两个 stub 处置不同的理由(记在台账里):** `check_cap_pass` 没人调 → 删;
 `check_borrow` 每个函数声明都调 → 走「实现最小检查」而不是删。
 

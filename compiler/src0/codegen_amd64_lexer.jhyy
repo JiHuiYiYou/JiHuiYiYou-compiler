@@ -1537,6 +1537,38 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
                 return 0 as i32;
             }
         }
+        // W-113 (2026-10-20): "dbgasm" (6 chars) → ILTOK_DIRECTIVE,
+        //   tok.text = 整条指令("dbgasm <hex>")—— hex 部分由后端解回原文,
+        //   **内联**写进函数体(之前 asm 文本被 append 到 .s 末 = 死字节)。
+        //   走 ILTOK_DIRECTIVE(复用 dbgfile/dbgloc 的同款 token)✓
+        //   前缀: d,b,g,a (n3='a'=97) —— 与 dbgfile('f')/dbgloc('l') 不冲突 ✓
+        if n1 == (98 as i32) && n2 == (103 as i32) && n3 == (97 as i32) {
+            // "dbgasm" — d,b,g,a,s,m (idx 0..5); need n4='s'=115 n5='m'=109
+            let n4 = lex_peek_byte_at(s, 4 as i64);
+            let n5 = lex_peek_byte_at(s, 5 as i64);
+            if n4 == (115 as i32) && n5 == (109 as i32) {
+                let mut j: i64 = 0 as i64;
+                while j < (6 as i64) {
+                    let _x = lex_next_byte(s);
+                    j = j + (1 as i64);
+                }
+                // hex payload 留到行尾 —— lex_finish_instr 会把 [instr_start, cur)
+                // 整段填进 tok.text ✓(后端自己找空格后的 hex 部分)
+                let mut done_skip = 0 as i32;
+                while done_skip == (0 as i32) {
+                    let cc = lex_peek_byte(s);
+                    if cc == (10 as i32) || cc == (0 as i32) { done_skip = 1 as i32; }
+                    else { let _x2 = lex_next_byte(s); }
+                }
+                lex_init_token(t, ILTOK_DIRECTIVE(), (*s).line);
+                // ⚠️ 必须 lex_finish_instr —— dbgfile / dbgloc 分支**不**调它
+                // (它们不需要 token 文本),但 dbgasm **需要**:后端要从
+                // tok.text 里取 hex payload。instr_start 由 dispatcher 在进
+                // op 分支前捕获 ⇒ text = "dbgasm <hex>" ✓
+                let _fin = lex_finish_instr(s, arena, t);
+                return 0 as i32;
+            }
+        }
         if n1 == (98 as i32) && n2 == (103 as i32) && n3 == (108 as i32) {
             // "dbgloc" — d,b,g,l,o,c (idx 0..5); need n4='o'=111 n5='c'=99
             let n4 = lex_peek_byte_at(s, 4 as i64);
