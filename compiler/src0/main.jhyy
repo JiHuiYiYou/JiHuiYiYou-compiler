@@ -633,6 +633,31 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
         return 1 as i32;
     }
 
+    // ── W-122 (2026-10-20):清掉**上一次**编译留下的 side-file ──
+    //
+    // 这四个 side-file 是「codegen 写 → link 路径读」的跨阶段通道,路径**固定**:
+    //   compiler/build/obj/_no_std.flag
+    //   compiler/build/obj/_inline_asm.buf
+    //   compiler/build/obj/_section_directive.buf
+    //   compiler/build/obj/_fence.buf
+    //
+    // 它们的生命周期本该是「**本次**编译写 → **本次**编译读」,但固定路径意味着:
+    // 一次编译**没走到读的那一步**(比如 `--no-link` 只编 .s 不链),它们就
+    // **留在盘上** ⇒ 下一��编译把**上一次**的内容当自己的用。
+    //
+    // 实测(2026-10-20):一次 `--no-link` 的批量编译(freestanding 用例会写
+    // _no_std.flag)之后,紧接着的 `make` 拿 **no_std 的链接行**去链一个正常
+    // 程序 → **链接失败**(no crt0 / no defaultlibs)⇒ 整个 build 挂掉。
+    // 这正是 version-schedule § D3 说的「旁路文件固定路径在并发下会互相踩」
+    // —— 那一节记的是「机制成立但**未观测到发作**」;今天它**发作了** ✓。
+    //
+    // 修法:每次编译**开头**先把这四个删干净 —— 本次编译需要的话,codegen
+    // 会重新写 ✓。于是「陈旧」在物理上就不可能发生。
+    let _cl1 = jh_unlink_file("compiler/build/obj/_no_std.flag" as *u8);
+    let _cl2 = jh_unlink_file("compiler/build/obj/_inline_asm.buf" as *u8);
+    let _cl3 = jh_unlink_file("compiler/build/obj/_section_directive.buf" as *u8);
+    let _cl4 = jh_unlink_file("compiler/build/obj/_fence.buf" as *u8);
+
     // ── Arena ──
     let mut arena: Arena = Arena {
         start: 0 as *u8,
@@ -658,6 +683,9 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
     let mut lexer: Lexer = Lexer {
         source:       0 as *u8,
         current:      0 as *u8,
+        // W-118:EOF 边界(lexer.jhyy 的 Lexer 声明里在 current 之后)——
+        // **字段顺序必须与声明逐字一致**(漏字段 = 落在分配区外 = 越界)。
+        end:          0 as *u8,
         filename:     0 as *u8,
         line:         0 as i32,
         col:          0 as i32,
@@ -734,6 +762,8 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
         borrow_recs:      0 as *u8,
         borrow_rec_n:     0 as i64,
         borrow_rec_cap:   0 as i64,
+        // W-121:合成 closure fn 的编号计数器(与 sema.jhyy 声明逐字对齐)。
+        closure_counter:  0 as i64,
     };
     sema_init(&sema, &arena, &ta);
     if sema_check(&sema, &ta, ast_node) > (0 as i32) {

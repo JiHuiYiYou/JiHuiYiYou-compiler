@@ -118,6 +118,8 @@
 | [W-106](#w-106) | ACTIVE | symtab_lookup_one 用 arena-touch 强制 codegen... |
 | [W-107](#w-107) | RESOLVED | 五个 per-fn pre-scan 表按固定上限分配 —— 已改成按实际函数数分配 |
 | [W-120](#w-120) | RESOLVED | temp_slot_for_id 按固定 65536 分配 —— 越界时**静默**产出错代码 |
+| [W-121](#w-121) | RESOLVED | 合成 closure 的符号名取自**节点堆地址** ⇒ ASLR ⇒ 产物不可复现 |
+| [W-122](#w-122) | RESOLVED | 四个 side-file 用**固定路径** ⇒ 上一次编译的内容泄漏到下一次编译 |
 | [W-108](#w-108) | RESOLVED | 索引重建脚本静默丢弃 59/89 条目 —— STATUS_RE 不容忍 前缀,且只匹配 H2 |
 | [W-109](#w-109) | RESOLVED | 自举 IL lexer 缺 6 个浮点比较助记符 — f32/f64 六个比较运算静默降级 |
 | [W-110](#w-110) | RESOLVED | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 |
@@ -128,7 +130,7 @@
 | [W-115](#w-115) | ACTIVE | W-089 标着 RESOLVED,但它自己的 reproducer 至今... |
 | [W-116](#w-116) | RESOLVED | SysV callee 参数溢出只处理 4 个整数寄存器 —— 第 5 个及以后的参数全读到第 4... |
 | [W-117](#w-117) | RESOLVED | self-backend IL lexer 在 EOF 处无守卫 —— cur == end... |
-| [W-118](#w-118) | ACTIVE | 语言 lexer 的 lex_peek_char 同样无 EOF 守卫 —— 越界前进而非空转 |
+| [W-118](#w-118) | RESOLVED | 语言 lexer 的 lex_peek_char 同样无 EOF 守卫 —— 越界前进而非空转 |
 | [W-119](#w-119) | RESOLVED | SysV 帧布局把第 0 号局部变量放在 0(%rbp) —— 覆盖 saveq %rbp 存的旧... |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -7980,6 +7982,114 @@ W-120 这条路径(需要 max temp id > 65536)在 HEAD 上被**完全挡住**。
 - commit `v4.0.2.1`(W-074.6 sub-bug #3:同一个形状的悬崖,当时用 4096→65536 推远)
 - W-107 entry(同一次修的两个悬崖)
 
+<a id="w-121"></a>
+## W-121: 合成 closure 的符号名取自**节点堆地址** ⇒ ASLR ⇒ 产物不可复现
+
+**状态:** RESOLVED closed 2026-10-20 (v4.0.18) — 改用每次编译单调递增的计数器;
+同一编译器连编三次 `.s` 逐字节相同
+**Filed-by:** audit-w118-2026-10-20
+**日期:** 2026-10-20 (做 W-118 的 A/B 时顺带发现)
+
+**触发面:** `compiler/src0/sema.jhyy` 的 `NODE_CLOSURE_LITERAL` 分支 ——
+合成 fn 的名字 `__closure_<N>` 的 `N` 取自 `n as i64`(closure 节点的**堆地址**)
+的最后 5 位十进制。
+
+**症状:** **同一个源文件,同一个编译器,连编两次,产出的 `.s` 不一样** ——
+差别只在 `__closure_<N>` 那个符号名上:
+
+```
+<   call __closure_44756          >   call __closure_08251
+< .globl __closure_44756         > .globl __closure_08251
+```
+
+**根因:** 堆地址受 **ASLR** 影响 ⇒ 同一个 AST 节点两次运行拿到不同的地址
+⇒ 名字不同 ⇒ 产物不可复现。
+
+**为什么这条以前没人发现:** 现有门**没有一个**在比「同一编译器两次编译」的
+产物 —— `closure_check.sh` 比的是**两个不同代**的编译器(v2 vs v3),而它们的
+**布局恰好一致**(同一份源码、同一套分配序列)⇒ 地址相同 ⇒ 名字相同 ⇒ 门是绿的。
+只有「同一编译器跑两遍」才会露馅。
+
+**影响范围:** 任何**含 closure** 的源文件的产物可复现性:
+· `.s` / `.exe` 的逐字节比对(D26 的 byte-equal 性质)对含 closure 的文件**不成立**
+· 任何「同一输入两次编译应当逐字节相同」的假设
+
+**修法:** `N` 改用 **SemaContext 里的单调计数器**(`closure_counter`,每次编译从 0
+开始)—— 名字只跟「第几个 closure」有关,与内存布局无关 ⇒ 逐字节可复现 ✓。
+
+**验收:**
+
+```
+同一个编译器连编三次 closures_basic.jhyy:
+    修复前: 3 个不同的 sha ✗
+    修复后: 3 个**相同**的 sha ✅
+A/B(旧编译器 vs 新编译器,closure 名归一化后):193/193 逐字节相同 ✅
+全量回归 182/182 PASS ✅   自举闭环 v2.s == v3.s byte-identical ✅
+```
+
+**引用:**
+- 源码 `compiler/src0/sema.jhyy`(`NODE_CLOSURE_LITERAL` 分支的命名段 +
+  `SemaContext.closure_counter` + `sema_init` 的归零)
+- 源码 `compiler/src0/main.jhyy`(`SemaContext` struct literal 补字段)
+- 同批 **W-118**(修它的 A/B 才发现这条 —— A/B 报「4 个 .s 不同」,
+  顺着查下去才发现根因不是 W-118,而是 closure 名的地址依赖)
+
+<a id="w-122"></a>
+## W-122: 四个 side-file 用**固定路径** ⇒ 上一次编译的内容泄漏到下一次编译
+
+**状态:** RESOLVED closed 2026-10-20 (v4.0.18) — 每次编译**开头**先把这四个删干净;
+「陈旧」在物理上不再可能
+**Filed-by:** audit-w118-2026-10-20
+**日期:** 2026-10-20 (做 W-118 的 A/B 时顺带发作 —— 见「症状」)
+
+**触发面:** `compiler/src0/main.jhyy` + `compiler/src0/codegen.jhyy` —— 四个
+「codegen 写 → link 路径读」的跨阶段通道,路径**固定**:
+
+```
+compiler/build/obj/_no_std.flag
+compiler/build/obj/_inline_asm.buf
+compiler/build/obj/_section_directive.buf
+compiler/build/obj/_fence.buf
+```
+
+**症状(实测发作,不是推演):** 一次 `--no-link` 的**批量**编译(freestanding /
+`#[no_std]` 用例会写 `_no_std.flag`)之后,紧接着的 `make` 拿 **no_std 的链接行**
+(`-nostartfiles -nodefaultlibs -Wl,--entry=main_jhyy`)去链一个**正常**程序
+⇒ **链接失败**(no crt0 / no default libs)⇒ 整个 build 挂掉。
+
+根因是**生命周期错位**:这四个文件的本意是「**本次**编译写 → **本次**编译读」,
+但固定路径意味着:一次编译**没走到读的那一步**(`--no-link` 只编 .s 不链),
+它们就**留在盘上** ⇒ 下一次编译把**上一次**的内容当自己的用。
+
+**⚠️ 这正是 `version-schedule.md` § D3 记的那件事** —— 那一节写的是
+「机制成立但**未观测到发作**」;今天它**发作了** ✓(D3 那节可以更新了)。
+D3 讨论的方案是「按 pid 隔离旁路文件」;本条走的是**更省事也更强**的路子:
+**每次编译开头先把它们删干净** —— 本次编译需要的话,codegen 会重新写 ✓。
+
+**修法:** `build_il`(编译管线的入口,`cmd_compile` 与 `cmd_run` 都走它)在
+**读源之后、codegen 之前**把四个文件全删掉。
+
+**⚠️ 为什么「删干净」比「按 pid 隔离」好:** 隔离只能解决**并发**互相踩;
+而这里的问题是**顺序**泄漏(上一次编译的内容被下一次读到)—— 删干净对两者
+都免疫 ✓(并发时:两个编译同时删 → 谁后写谁赢 → 仍是竞态 ⚠️,但那需要两个
+编译**同时**处理同一个 side-file,而 side-file 是 per-compile 的 ⇒ 真正的
+并发问题要等 side-file 按 pid 隔离才彻底解决 —— 留给 D3)。
+
+**验收(造过红灯):**
+
+```
+红灯(旧编译器):--no-link 编 no_std 用例 → flag 留在盘上
+                → 下一次编 hello → 链接失败(collect2: ld returned 1)✗
+绿灯(新编译器):同样两步 → hello 正常链出 → EXIT=42 ✅
+```
+
+**引用:**
+- 源码 `compiler/src0/main.jhyy`(`build_il` 开头的四个 `jh_unlink_file`)
+- 源码 `compiler/src0/codegen.jhyy:5123`(flag 的写入点)
+- 源码 `compiler/src0/main.jhyy:1128`(flag 的读取点 —— 读完即删,只覆盖「读」
+  发生过的情况,覆盖不了「没读」的情况)
+- `docs/plans/v4/version-schedule.md` § D3(「机制成立但未观测到发作」—— 已发作)
+
 <a id="w-108"></a>
 ## W-108: 索引重建脚本静默丢弃 59/89 条目 —— STATUS_RE 不容忍 ✅ 前缀,且只匹配 H2
 
@@ -9086,7 +9196,8 @@ skip_ws/scan 循环判「非该字节」才停;`lex_il` 恢复循环判 `cc == 0
 <a id="w-118"></a>
 ## W-118: 语言 lexer 的 lex_peek_char 同样无 EOF 守卫 —— 越界前进而非空转
 
-**状态:** ACTIVE since 2026-10-18 (v4.0.9) — 同族缺陷的另一处,失效模式不同,尚未观测到危害
+**状态:** RESOLVED closed 2026-10-20 (v4.0.18) — `Lexer` 加 `end` 字段,两个 peek 都加
+`current >= end → return 0` 守卫;A/B 证明 `.s` 逐字节不变(193/193)
 **Filed-by:** w117-rca-2026-10-18
 **日期:** 2026-10-18 W-117 RCA 时顺带发现
 
@@ -9128,6 +9239,43 @@ if c == 0 { return 0 as i32; }      // 靠 peek 返 0 判 EOF
 **workaround:** 无。当前没有任何代码绕过它 —— 它是真实未修的 bug,不是
 「已知的、有绕路的」状态。
 
+### 2026-10-20 真修:给 `Lexer` 加 `end`,两个 peek 加守卫
+
+按本 entry「修法(留档,未实施)」那一节实施(改动面比当初估的小):
+
+| 位置 | 内容 |
+|---|---|
+| `lexer.jhyy` `Lexer` 结构 | 加 `end: *u8`(指向源缓冲区的 NUL 终止字节) |
+| `lexer.jhyy` `lexer_init` | `(*l).end = ptr_add_u8(source, strlen(source))` —— 源由 `read_file` 读入,保证 NUL 终止 ✓ |
+| `lexer.jhyy` `lex_peek_char` | `if current >= end { return 0; }` —— 到头就返 0(= NUL 的语义,调用方不用改) |
+| `lexer.jhyy` `lex_peek_char_at` | 同一个守卫(`current + off >= end → 0`) |
+| `main.jhyy` `Lexer` struct literal | 补 `end` 字段 —— **顺序必须与声明逐字一致**(漏字段 = 落在分配区外 = 越界,见那段血泪注释) |
+
+**为什么 `end` 用 strlen 算而不是把长度从 read_file 一路铺下来:** 源是
+NUL 终止的 ✓,strlen 得到的就是「最后一个有效字节 + 1」= end ✓。
+源里若含**内嵌** NUL,end 会落在那个 NUL 上 —— 而那正是 lexer 原本就会停下来的
+位置(`lex_next_char` 读到 0 就不前进)⇒ **行为不变** ✓。
+
+**⚠️ 实施时的陷阱(本 entry 早就写下了):** 加守卫会改变「输入最后一个字符」
+处的那次 lookahead 结果(原先是垃圾、现在是 0)。所以**必须 A/B 验输出中性**,
+不能想当然。
+
+**A/B 实证(W-117 同款做法):** 用**修复前的**编译器与**修复后**的编译器,
+对 `compiler/tests/examples/*.jhyy` 逐个编译并比 `.s`:
+
+```
+A/B(closure 名归一化后):逐字节相同 193 / 不同 0 / 编译失败 8
+```
+
+(8 个「编译失败」是两个编译器**都**失败的用例 —— 那些是 expect-error 类测试 ✓。
+「closure 名归一化」的原因见 **W-121**:修复前 closure 的合成符号名取自**节点
+堆地址** ⇒ ASLR ⇒ 同一个编译器连编两次 `.s` 就已经不同 ⇒ 逐字节不可比。)
+
+⇒ **输出中性 ✓** —— 守卫没有改变任何正常程序的产物。
+
+**验收:** 全量回归 182/182 PASS ✅;自举闭环 v2.s == v3.s byte-identical ✅;
+产物级门 6 PASS / 1 KNOWN-FAIL / 0 FAIL ✅。
+
 **修法(留档,未实施):** 给 `Lexer` 加 `end: *u8` 字段;`lex_peek_char` 与
 `lex_peek_char_at` 加 `current >= end → return 0` 守卫。选 0 的理由与 W-117
 相同:`lex_next_char` 的 `c == 0` 分支正是为它准备的 EOF 判据,只是它依赖
@@ -9140,8 +9288,14 @@ if c == 0 { return 0 as i32; }      // 靠 peek 返 0 判 EOF
 
 **影响范围:** 语言前端。任何以「尾部字节」为分支条件的词法决策都受影响。
 
-**失效条件:** `Lexer` 具备长度信息且两个 peek 有守卫,且 A/B 证明 `.s` 逐字节
-不变。
+**失效条件:** ~~`Lexer` 具备长度信息且两个 peek 有守卫,且 A/B 证明 `.s` 逐字节
+不变~~ → **2026-10-20 全部满足** ✓(`end` 字段 + 两个守卫 + A/B 193/193 逐字节相同)。
+
+**⚠️ 一句必须写清楚的:** 这条**从来没有观测到危害**(本 entry 开头就写了
+「尚无观测」)—— 正常路径上 `read_file` 保证 NUL 终止,lexer 因此**到不了**边界
+之外。所以这次是**防御性**修复:把「EOF 是隐式的」变成「EOF 是显式的」,
+跟 IL lexer(W-117)结构对齐。**它不是一次「修好了某个可见故障」** —— 别把它
+当成那种修复来读。
 
 **引用:**
 - `compiler/src0/lexer.jhyy:212-220`(`lex_peek_char`)、`:223-236`(`lex_next_char`)、

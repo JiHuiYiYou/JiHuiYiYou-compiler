@@ -122,9 +122,15 @@ type SemaContext = struct {
     borrow_recs:      *u8,
     borrow_rec_n:     i64,
     borrow_rec_cap:   i64,
+    // W-121 (2026-10-20):合成 closure fn 的编号计数器。
+    // 之前编号取自「closure 节点的堆地址」→ ASLR → **同一个源文件两次编译
+    // 出来的 .s 不一样**(closure 符号名不同)⇒ 产物不可复现。
+    // 改成**每次编译单调递增的计数器** → 名字只跟「第几个 closure」有关,
+    // 与内存布局无关 ⇒ 逐字节可复现 ✓。
+    closure_counter:  i64,
 }
 
-fn SEMA_CONTEXT_SIZE() -> i64 { return 136 as i64; }
+fn SEMA_CONTEXT_SIZE() -> i64 { return 144 as i64; }
 
 // ════════════════════════════════════════════════════
 // SemaLocal 访问 helper（locals[i].sym / locals[i].type）
@@ -1280,7 +1286,14 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         }
         let fn_t = type_func((*ctx).arena, param_types_buf, (*cd).nparams, body_ret_type);
 
-        // 4) 构造合成 fn sym `__closure_<N>` — N 用 closure 节点地址 hash
+        // 4) 构造合成 fn sym `__closure_<N>`
+        //
+        // ⚠️ W-121 (2026-10-20):N **不再**取自 closure 节点的堆地址 ——
+        // 地址受 ASLR 影响 ⇒ **同一个源文件两次编译出来的 .s 不一样**
+        // (closure 符号名不同)⇒ 产物不可复现(D26 的 byte-equal 性质被破坏)。
+        // 实测:同一编译器连编两次 closures_basic.jhyy,`.s` 就已经不同。
+        // 改成**每次编译单调递增的计数器** —— 名字只跟「第几个 closure」有关,
+        // 与内存布局无关 ✓。
         let mut counter_buf: *u8 = arena_alloc((*ctx).arena, 32 as i64);
         let name0 = "__closure_" as *u8;
         let mut ci: i64 = 0 as i64;
@@ -1289,7 +1302,8 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             *cs = *(ptr_add_u8(name0, ci) as *u8);
             ci = ci + (1 as i64);
         }
-        let name_addr = n as i64;
+        let name_addr = (*ctx).closure_counter;
+        (*ctx).closure_counter = name_addr + (1 as i64);
         let digit1 = (name_addr % (10 as i64)) + (0x30 as i64);
         let digit2 = ((name_addr / (10 as i64)) % (10 as i64)) + (0x30 as i64);
         let digit3 = ((name_addr / (100 as i64)) % (10 as i64)) + (0x30 as i64);
@@ -3371,6 +3385,9 @@ fn sema_init(ctx: *SemaContext, arena: *Arena, ta: *TypeArena) -> i32 {
     let br_ptr = arena_alloc(arena, br_bytes);
     let _zbr = memset(br_ptr, 0 as i32, br_bytes);
     (*ctx).borrow_recs = br_ptr;
+    // W-121:合成 closure fn 的编号计数器(每次编译从 0 开始 —— 名字只跟
+    // 「第几个 closure」有关,与内存布局无关 ⇒ 产物可复现 ✓)。
+    (*ctx).closure_counter = 0 as i64;
     // init type arena（lazy init 也会触发）
     (*ta).arena = arena;
     (*ta).inited = 0 as i32;
