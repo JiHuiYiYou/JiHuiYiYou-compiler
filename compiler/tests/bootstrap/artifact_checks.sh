@@ -519,23 +519,36 @@ selftest() {
         fi
     }
 
+    # 自检用**自己的**登记条目 —— 不复用真表里的任何 check id。
+    #
+    # 为什么(2026-10-20 实测踩到):真表会随 workaround 修复而变。W-112 修好后
+    # `link_section` 从 KNOWN_FAIL 删掉,自检里 3 个以它为例的用例当场失效 ——
+    # **分类逻辑本身没坏**,CI 却红了(跑 39389190863 就是这么红的)。
+    # 这类「夹具绑在真表上」的自检,每修一条 workaround 都要跟着改一次 ——
+    # 而它要验的东西(四种红 + 两种绿的分类)根本跟「当前哪条 check 登记着」无关。
+    #
+    # 所以自检自带一条假登记,验完就撤 —— 与真表解耦,真表怎么变都不影响它。
+    KNOWN_FAIL[selftest_probe]="W-SELFTEST|签名甲|签名乙"
+
     echo "=== artifact_checks.sh — 分类逻辑自检(不跑编译) ==="
     _case "已登记+签名吻合 → KNOWN-FAIL(绿)" 0 1 \
-          bad link_section "生成的 .s 里 0 条 .section 指令 —— 属性是 no-op(W-112 未修)"
-    _case "W-113 精确形态(BAD fn) → KNOWN-FAIL" 0 1 \
-          bad asm_before_ret "BAD main_jhyy (cpuid@333 ret@332)"
-    _case "W-113 退化形态(不在函数体内) → KNOWN-FAIL" 0 1 \
-          bad asm_before_ret "反汇编里有 2 条 cpuid,但**没有任何函数体包含它**"
+          bad selftest_probe "生成的 .s 里 0 条 .section 指令 —— 签名甲"
+    _case "已登记+第二签名吻合 → KNOWN-FAIL(绿)" 0 1 \
+          bad selftest_probe "反汇编里有 2 条 cpuid,但签名乙"
+    _case "已登记+签名是子串 → KNOWN-FAIL(绿)" 0 1 \
+          bad selftest_probe "xx签名甲yy"
     _case "已登记+签名不吻合 → FAIL(红)" 1 0 \
-          bad link_section "有 3 条 .section,但没有 .text.boot —— 属性名没生效"
+          bad selftest_probe "有 3 条 .section,但没有 .text.boot —— 属性名没生效"
     _case "未登记的 check 失败 → FAIL(红)" 1 0 \
           bad some_new_check "随便什么失败"
     _case "环境/编译失败 → FAIL(红),不查登记" 1 0 \
-          badenv link_section "编译失败:..."
+          badenv selftest_probe "编译失败:..."
     _case "已登记却通过 → UNEXPECTED-PASS(红)" 1 0 \
-          ok "link_section(.text.boot 已出现在产物里)"
+          ok "selftest_probe(.text.boot 已出现在产物里)"
     _case "未登记却通过 → PASS(绿)" 0 0 \
           ok "some_new_check(一切正常)"
+
+    unset 'KNOWN_FAIL[selftest_probe]'
 
     echo
     if [ "$st_fail" -gt 0 ]; then
