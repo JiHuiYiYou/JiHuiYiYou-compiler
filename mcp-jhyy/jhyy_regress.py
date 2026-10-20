@@ -254,6 +254,25 @@ def _freshness_src_dirs(binary: str) -> list:
     return ["compiler/src0", "compiler/runtime"]
 
 
+# v4.0.16 (W-103): `compiler/src0/std/` 下的 8 个 std lib 模块**不是编译器的输入**。
+#
+# 它们是**发给用户**的库源码(现在也装进 MSI 的 bin\std\,`import <mod>;` 从那里
+# 找),jhyy.exe 里一个字节都不含它们 —— 编译器只 import `ffi` / `util` /
+# `arena` / `ast` / … 这些**同目录**模块,`std/` 子目录从来没进过编译单元。
+#
+# 但 freshness 检查用 `rglob("*")` 扫 `compiler/src0`,会把 std/ 一起扫进来 →
+# **只改一个 std 模块就让 regress 报「binary is older than source / suspect
+# phantom binary」并 early_abort**,而二进制其实一个字节都没变。
+#
+# 实测(2026-10-20):改完 `std/os.jhyy` 跑 regress,0 个测试被执行,
+# 直接 early_abort —— 一道**假阳性**的门比没有门更糟:它训练人忽略红色。
+#
+# 所以这里把 std/ 从 jhyy 端二进制的 freshness 依赖面里排除。
+# ⚠️ 排除的是**依赖面**,不是检查本身 —— 改 `compiler/src0/*.jhyy` 仍然会触发
+#    这道门(见本轮验证:touch main.jhyy → 照样 early_abort)。
+_FRESHNESS_EXCLUDE_JHY = ("compiler/src0/std",)
+
+
 def _check_baseline_freshness(binary: str, src_dirs=None) -> Tuple[bool, str]:
     """检查 binary 是否在它的源之后被构建过. 防止 phantom binary (忘记
     重编就跑 regress).
@@ -280,10 +299,15 @@ def _check_baseline_freshness(binary: str, src_dirs=None) -> Tuple[bool, str]:
         if not src_root.exists():
             continue
         seen.append(d)
-        newest_src = max(
-            [newest_src]
-            + [os.path.getmtime(p) for p in Path(src_root).rglob("*") if p.is_file()]
-        )
+        bin_name = os.path.basename(binary).lower()
+        excludes = () if bin_name == "jhyy_stage0.exe" else _FRESHNESS_EXCLUDE_JHY
+        for p in Path(src_root).rglob("*"):
+            if not p.is_file():
+                continue
+            rel = p.relative_to(JHYY_ROOT).as_posix()
+            if any(rel == ex or rel.startswith(ex + "/") for ex in excludes):
+                continue
+            newest_src = max(newest_src, os.path.getmtime(p))
     if not seen:
         return (True, f"src dirs missing ({dirs}), skipping freshness check")
     if bin_mtime + 0.5 >= newest_src:  # 0.5s 容忍文件系统 mtime 精度

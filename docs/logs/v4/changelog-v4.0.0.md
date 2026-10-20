@@ -328,6 +328,96 @@ parser / sema 各子集 / dummy 函数)都没定位到残留的那一处,触发�
 
 ---
 
+## v4.0.16 — std_os_* 接真 libc(W-103 闭合)+ `#[link_section]` 落到真的 .s(W-112 闭合)
+
+**2026-10-20。** v4.0.16 计划里的三项:W-103 ✅ / W-112 ✅ / W-113 ⏳(未做)。
+
+### W-103 —— `std_os_*` 的五个 mock 全是真实现了
+
+**RCA 推翻了原描述的一半。** 台账写的是「W-079(QBE mixed-args bug)挡住了
+std_os_*」。W-079 当年挡的是 **QBE**;QBE 随 v4.0.0 完全移除,self-backend
+(codegen_amd64_*)不再经过 QBE。**实测 mixed-width extern 调用在 self-backend
+下完全正常**(`jh_os_open(*u8, i32, i32) -> i64` 一次跑通)—— W-079 当年的
+理由早已失效,W-079 的 RESOLVED 只是没覆盖 std_os 这一半。
+
+**但 mock 还藏了第二个 bug,而且它比「不做事」严重。** `std/os.jhyy` 的
+`O_*` 常量是 **POSIX 值**(`O_CREAT`=0x40),而 Windows 的 `_O_CREAT`=**0x100**。
+mock 从不调 `open(2)`,所以这个错一直藏着;真接上 libc 之后第一次调用直接
+返 -1。从 C 侧复现同样 -1 才定位到是 **flag 值**而不是 FFI:
+
+```
+Windows:  _O_CREAT  0x100   _O_EXCL 0x400   _O_APPEND 0x8   _O_TRUNC 0x200
+POSIX:    O_CREAT   0x40    O_EXCL  0x80    O_APPEND  0x400 O_TRUNC  0x200
+                                      ↑ 只有 TRUNC 两边同值
+```
+
+错法很隐蔽:POSIX 的 `O_CREAT`=0x40 落到 Windows 上是 `_O_NOINHERIT`,
+于是「没带 O_CREAT」→ 文件不存在 → ENOENT → fd=-1,**看起来像「路径不对」**。
+
+| 层 | 改动 |
+|---|---|
+| `jhyy_helpers.c` | 5 个 libc bridge:`jh_os_open/close/read/write/exit`。签名跟 `std_os_*` **1:1 对齐**(指针宽 / i32 / i64 各就各位)→ jhyy 侧零宽度转换。`read`/`write` 循环到读满/写满 n 或 EOF(POSIX 允许部分完成)。Windows 走 `_open/_close/_read/_write`,POSIX 走 `open/close/read/write` |
+| `jhyy_helpers.c` | `jh_os_translate_flags()`:POSIX ↔ 平台 `O_*` 逐位翻译 + Windows 无条件 OR `_O_BINARY`(jhyy 的 `std_os_*` 是**字节**语义;不强制 binary 的话 CRT 会做 CRLF↔LF 转换,字节级往返就废了) |
+| `std/os.jhyy` | 五个函数改调 bridge;入参校验(路径空 / flags<0 / mode 越界 → -1)保留 |
+| `main.jhyy` | **import 两级查找**:main 文件旁边找不到 → 回落到 std lib 目录(`jh_path_stdlib()`)。这是 std lib **第一次真的可被用户代码 import** |
+| `jhyy_helpers.c` | `jh_path_stdlib()`:源码树 layout (b) = `<root>\compiler\src0\std\`;installer layout (a) = `<bindir>\std\` |
+| `installer/` | 8 个 std 模块进 MSI 的 `bin\std\`(WiX `StdDir` + 一个装 8 个 File 的 Component) |
+
+**为什么 import 回落是这次修复的必需品(不是顺手加的)。** 之前 `import <mod>;`
+**只在 main 文件旁边找**,于是 `compiler/src0/std/` 下的 8 个模块**任何用户程序
+都够不着** —— 想测 `std/os.jhyy` 只能在测试文件里**抄一份 inline 副本**。
+而副本是不受约束的:那份副本给「mock 契约」背书(`fd==42`、`write` 返 5),
+于是一个**从不碰文件系统**的纯 mock 一直有个 PASS 撑着,而那个 PASS 不验证
+任何真实行为。**mock 能活这么久,根因之一就是「测试验的是副本」。**
+
+**测试改成 import 真身,断言全部对着真实行为重写:**
+
+| 测试 | 验什么 | 造红灯 |
+|---|---|---|
+| `std_os_basic.jhyy`(改写) | import 真身 + 6 个 sub-test:真 fd(≥0)、写落盘、**读回的字节 == 文件里的字节**、getenv | `std_os_read` 退回 mock → **EXIT=9** 红 ✓ |
+| `std_os_real_io.jhyy`(改写,XFAIL 已摘) | 用 **libc fopen/fread** 读回 std_os 写的文件 | `std_os_write` 退回 mock → **EXIT=4** 红 ✓ |
+| `std_os_exit.jhyy`(**新增**) | 整个测试就是调 `std_os_exit(42)`;进程退出码必须 == 42 | `std_os_exit` 退回 no-op → **EXIT=99** 红 ✓ |
+
+`std_os_real_io` 绕开 `std_os_read`、改用 libc fread 是**故意的**:两边都走
+std_os 的话,「写进 A、读出 A」的闭环在 mock 下也自洽(mock 的 read 声称读了
+n 字节,buf 里是上次残留)。只有**第三方读者**(libc)才能证明字节真的落盘。
+
+**⚠️ 方向张力(有意识的取舍,不是疏忽):** 这 5 个 bridge 让 jhyy 程序**又依赖
+C runtime**,与 M5「删 C runtime / 0-C 闭环」方向相反。取舍:std_os_* 是
+**POSIX 语义层**,OS kernel M11 launch 之前由 host libc 兑现最省事。真要 0-C
+时,**换掉的是这 5 个 bridge 的实现**(改成 syscall / kernel call),
+`std/os.jhyy` 里的 `std_os_*` **一行都不用动** —— 张力被限制在
+`jhyy_helpers.c` 一个文件里,不在语言语义层。同族先例:`std/io.jhyy` 的
+`std_io_print` 走 `jh_fputs_stdout`(W-080),同一个手法。
+
+**验收:**
+
+```
+全量回归:       181/181 PASS, 0 failed (203 total / 20 skip / 2 XFAIL 都是别的 bug)
+自举闭环:       closure_check.sh v2.s == v3.s byte-identical ✅
+产物级门:       artifact_checks.sh 5 PASS / 1 KNOWN-FAIL(W-113) / 0 FAIL
+SysV 6 个回归:  6 PASS ✅    W-104 三方向 ABI 对拍: 3 PASS ✅
+MSI:            wix build 成功,8 个 std 模块进 File 表 ✅
+3 个新/改测试:  各自当场造过红灯 ✅
+```
+
+**ACTIVE 条数:8 → 7。**
+
+### W-112 —— `#[link_section]` 的 `.section` 之前插进了**错误的文件**
+
+台账记的是「`#[link_section]` 是 no-op,生成的 .s 里没有任何 `.section`」。
+真因更具体:`.section` 指令被 apply 到 **link 路径的副本**(`temp_asm`),
+而磁盘上的 `.s`(`--no-link` 的产物、也是所有 .s 级门的输入)**没有**。
+修法:.s 产出后立刻对 `asm_path` 处理一次。产物级门
+`artifact_checks.sh` 的 `link_section` check 从 KNOWN-FAIL 升成真门。
+
+### W-113 —— ⏳ 本版未做
+
+`asm!` / `fence_*` 的字节仍被 emit 到 `ret` 之后(永不执行)。这是 IL 层的
+管道活(asm blob 要流过 IL 进 self-backend 才能落在函数体里),留在 v4.0.17。
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

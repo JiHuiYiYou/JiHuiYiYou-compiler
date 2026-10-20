@@ -149,6 +149,15 @@
     <DirectoryRef Id="ProgramFiles6432Folder">
       <Directory Id="INSTALLDIR" Name="JHYY">
         <Directory Id="BinDir" Name="bin" FileSource="!(bindpath.bin)" />
+        <!--
+          StdDir (v4.0.16 / W-103): std lib 模块目录。
+          installer-layout 的 jhyy.exe 走 jh_paths_init layout (a) →
+          jh_path_stdlib() = "<bindir>\std"。`import <mod>;` 在 main 文件旁边
+          找不到模块时回落到这里 —— 源码树 layout (b) 的对应目录是
+          <root>\compiler\src0\std\。
+          少了这个目录,装出来的编译器**任何 std 模块都 import 不到**。
+        -->
+        <Directory Id="StdDir" Name="std" FileSource="!(bindpath.bin)\std" />
         <Directory Id="CommonDir" Name="common" FileSource="!(bindpath.common)" />
         <Directory Id="VSCodeExtDir" Name="vscode-ext" FileSource="!(bindpath.vscode-ext)" />
       </Directory>
@@ -176,6 +185,7 @@
              TypicalDefault="install">
 
       <ComponentGroupRef Id="JHYYBinFiles" />
+      <ComponentGroupRef Id="JHYStdLibFiles" />
       <ComponentGroupRef Id="JHYYURLShortcuts" />
       <ComponentGroupRef Id="JHYYPathRegistry" />
       <ComponentGroupRef Id="JHYYShortcuts" />
@@ -505,6 +515,33 @@
               Source="!(bindpath.common)\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.deps.json" />
         <File Id="JHYYSetUCExeRuntime"
               Source="!(bindpath.common)\jhyy-setuc\bin\Release\net8.0-windows\jhyy-setuc.runtimeconfig.json" />
+      </Component>
+    </ComponentGroup>
+
+    <!--
+      StdLib modules (v4.0.16 / W-103): the 8 std lib modules ship to
+      INSTALLDIR\bin\std\ so an installed jhyy.exe can `import os;` etc.
+
+      Why the std lib needs shipping at all: `import <mod>;` resolves the
+      module next to the main file first, then falls back to the std lib dir
+      (jh_path_stdlib → layout (a) <bindir>\std). Before W-103 there was no
+      fallback, so the modules under compiler/src0/std/ were reachable by
+      **nobody** — the tests had to carry inline copies, and those copies
+      endorsed the mocks (see docs/internal/workarounds.md W-103).
+
+      One Component with 8 Files (only the first is the KeyPath) — MSI allows
+      a Component to hold several files as long as exactly one is the KeyPath.
+    -->
+    <ComponentGroup Id="JHYStdLibFiles" Directory="StdDir">
+      <Component Id="JhyyStdLib" Bitness="always64" Guid="3C9E71A4-58D2-4B67-9E05-71A8D3C6F204">
+        <File Id="StdArenaFile"  Source="!(bindpath.bin)\std\arena.jhyy" KeyPath="yes" Checksum="yes" />
+        <File Id="StdFmtFile"    Source="!(bindpath.bin)\std\fmt.jhyy"   Checksum="yes" />
+        <File Id="StdIoFile"     Source="!(bindpath.bin)\std\io.jhyy"    Checksum="yes" />
+        <File Id="StdMathFile"   Source="!(bindpath.bin)\std\math.jhyy"  Checksum="yes" />
+        <File Id="StdMemFile"    Source="!(bindpath.bin)\std\mem.jhyy"   Checksum="yes" />
+        <File Id="StdOsFile"     Source="!(bindpath.bin)\std\os.jhyy"    Checksum="yes" />
+        <File Id="StdStringFile" Source="!(bindpath.bin)\std\string.jhyy" Checksum="yes" />
+        <File Id="StdVecFile"    Source="!(bindpath.bin)\std\vec.jhyy"   Checksum="yes" />
       </Component>
     </ComponentGroup>
 

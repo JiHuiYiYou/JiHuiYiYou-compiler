@@ -17,6 +17,11 @@
 
 #ifdef _WIN32
 #include <windows.h>  // GetModuleFileNameA (jh_paths_init) + CreateProcessA etc (W-038 jh_run)
+#include <io.h>       // _open/_close/_read/_write (W-103 std_os_* libc bridge)
+#include <fcntl.h>    // O_BINARY / O_CREAT ... (W-103)
+#else
+#include <fcntl.h>    // open / O_* (W-103 std_os_* libc bridge)
+#include <unistd.h>   // close / read / write (W-103)
 #endif
 
 /* sprintf_lld：i64 参数 sprintf wrapper（jhyy extern 不能 variadic）。
@@ -227,6 +232,7 @@ static char jh_path_qbe_buf[1024];  /* unused post-v4.0.0; empty string */
 static char jh_path_gcc_buf[1024];
 static char jh_path_runtime_buf[1024];
 static char jh_path_helpers_buf[1024];
+static char jh_path_stdlib_buf[1024];  /* W-103: std lib 模块目录 */
 static int  jh_paths_initialized = 0;
 
 __attribute__((used)) int jh_paths_init(const char *argv0) {
@@ -277,6 +283,8 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
             #pragma GCC diagnostic ignored "-Wformat-truncation"
             snprintf(jh_path_runtime_buf, sizeof(jh_path_runtime_buf), "%s\\runtime.c", dir_path);
             snprintf(jh_path_helpers_buf, sizeof(jh_path_helpers_buf), "%s\\jhyy_helpers.c", dir_path);
+            /* W-103: installer 把 src0/std 下的 .jhyy 模块装到 <bin>/std/ */
+            snprintf(jh_path_stdlib_buf, sizeof(jh_path_stdlib_buf), "%s\\std", dir_path);
             #pragma GCC diagnostic pop
             jh_paths_initialized = 1;
             return 0;
@@ -294,6 +302,7 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
                 #pragma GCC diagnostic ignored "-Wformat-truncation"
                 snprintf(jh_path_runtime_buf, sizeof(jh_path_runtime_buf), "%s\\compiler\\runtime\\runtime.c", root);
                 snprintf(jh_path_helpers_buf, sizeof(jh_path_helpers_buf), "%s\\compiler\\src0\\jhyy_helpers.c", root);
+                snprintf(jh_path_stdlib_buf, sizeof(jh_path_stdlib_buf), "%s\\compiler\\src0\\std", root);
                 #pragma GCC diagnostic pop
                 jh_paths_initialized = 1;
                 return 0;
@@ -306,6 +315,12 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
     }
     return 1;  /* no layout matched — runtime.c / jhyy_helpers.c not found */
 }
+
+/* W-103 (2026-10-20): std lib 模块目录 —— `import <mod>;` 在 main 文件旁边
+   找不到 <mod>.jhyy 时,回落到这里找(<root>/compiler/src0/std/ 或 <bin>/std/)。
+   这是 std lib 第一次真正**可被用户代码 import**(之前 std 目录下的 .jhyy 只是源码,
+   任何用户程序都够不着 —— 测试全靠 inline 副本,而副本给 mock 背书)。 */
+__attribute__((used)) const char *jh_path_stdlib(void) { return jh_path_stdlib_buf; }
 
 __attribute__((used)) const char *jh_path_qbe(void)     { return jh_path_qbe_buf; }  /* v4.0.0: always "" */
 __attribute__((used)) const char *jh_path_gcc(void)     { return jh_path_gcc_buf; }
@@ -859,4 +874,130 @@ __attribute__((used)) int jh_name_ends_with(const char *name, long long len,
                                              const char *suffix, long long slen) {
     if (len < slen || slen <= 0) return 0;
     return memcmp(name + (len - slen), suffix, (size_t)slen) == 0 ? 1 : 0;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   W-103 (2026-10-20 真修): std_os_* 的真 libc bridge
+   ══════════════════════════════════════════════════════════════════════════
+   std/os.jhyy 的 std_os_open / close / read / write / exit 之前**全是 M0 mock**
+   (恒返 fd=42、恒返 n、进程不退出)。M0 的理由是 W-079「QBE amd64_win mixed
+   (l,w,w) extern args bug」—— QBE 随 v4.0.0 完全移除,self-backend 不再经过
+   QBE,那个理由早已失效(W-079 翻 RESOLVED 时只修了 std_io 那一半,std_os 这半
+   没人动过,见 workarounds.md W-103 的 RCA)。
+
+   签名跟 std/os.jhyy 的 std_os_* **1:1 对齐**,jhyy 侧零宽度转换:
+     jh_os_open (const char*, int, int)                 -> long long
+     jh_os_close(long long)                             -> int
+     jh_os_read (long long, void*, long long)           -> long long
+     jh_os_write(long long, const void*, long long)    -> long long
+     jh_os_exit (int)                                   -> void
+
+   ⚠️ 方向张力(必记):这 5 个 bridge 让 jhyy 程序**又依赖 C runtime**,与 M5
+   「删 C runtime / 0-C 闭环」方向相反。取舍 + 卸载路径见 workarounds.md
+   W-103「方向张力」段:真要 0-C 时,换掉的是这 5 个 bridge 的**实现**
+   (改成 syscall / kernel call),jhyy 侧的 std_os_* 一行都不用动。
+
+   Windows 用 _open/_close/_read/_write(msvcrt);POSIX 用 open/close/read/write。
+
+   ⚠️ **两边的 O_* 常量值不一样** —— std/os.jhyy 里写死的是 **POSIX 值**
+   (O_CREAT 0x40 / O_EXCL 0x80 / O_APPEND 0x400 / O_TRUNC 0x200),
+   而 Windows 的 _O_* 是 (_O_CREAT **0x100** / _O_EXCL 0x400 /
+   _O_APPEND **0x8** / _O_TRUNC 0x200)—— **只有 TRUNC 两边同值**。
+   所以下面有一层 jh_os_translate_flags() 逐位翻译;POSIX 侧原样透传。
+
+   ⚠️ 这条翻译的存在本身说明 M0 mock 藏了一个真 bug:mock 从不调 open(2),
+   所以 POSIX 的 O_CREAT=64 拿到 Windows 上(0x40 = _O_NOINHERIT)恒错,
+   而且错法很隐蔽 —— 文件不存在 + 没 O_CREAT → ENOENT → fd=-1,
+   看起来像「路径不对」而不是「flag 值不对」。
+
+   Windows 侧无条件 OR 上 _O_BINARY —— jhyy 的 std_os_* 是**字节**语义
+   (POSIX 风格),不强制 binary 的话 CRT 会做 CRLF↔LF 转换,字节级往返就废了。 */
+
+#ifdef _WIN32
+#define JH_OS_OPEN  _open
+#define JH_OS_CLOSE _close
+#define JH_OS_READ  _read
+#define JH_OS_WRITE _write
+#else
+#define JH_OS_OPEN  open
+#define JH_OS_CLOSE close
+#define JH_OS_READ  read
+#define JH_OS_WRITE write
+#endif
+
+/* 单次 syscall 的字节上限 —— POSIX 的 read/write 允许部分完成,
+   这里循环到读满 n / 写满 n / EOF 为止,语义跟 POSIX 一致。 */
+#define JH_OS_CHUNK 0x7ffff000LL
+
+/* POSIX-style open flags -> 平台 flags。
+   Windows(_O_*,<fcntl.h>): _O_CREAT 0x100 / _O_EXCL 0x400 / _O_APPEND 0x8 /
+   _O_TRUNC 0x200。POSIX(<fcntl.h>): O_CREAT 0x40 / O_EXCL 0x80 /
+   O_APPEND 0x400 / O_TRUNC 0x200。**只有 TRUNC 两边同值**,其余全不同。
+   std/os.jhyy 里写死的是 POSIX 值(它的注释写着「跟 fcntl.h 一致」),
+   所以翻译必须发生在桥这一层 —— jhyy 侧保持 POSIX 语义,平台差异不外泄。
+
+   ⚠️ 这条翻译的存在本身说明 M0 mock 藏了一个真 bug:mock 从不调 open(2),
+   所以 POSIX 的 O_CREAT=64 拿到 Windows 上(0x40 = _O_NOINHERIT)恒错,
+   而且错法很隐蔽:文件不存在 + 没 O_CREAT -> ENOENT -> fd=-1,
+   看起来像「路径不对」而不是「flag 值不对」。 */
+static int jh_os_translate_flags(int flags) {
+#ifdef _WIN32
+    int out = flags & 0x3;             /* O_RDONLY / O_WRONLY / O_RDWR */
+    if (flags & 0x40) out |= 0x100;    /* POSIX O_CREAT  -> _O_CREAT  */
+    if (flags & 0x80) out |= 0x400;    /* POSIX O_EXCL   -> _O_EXCL   */
+    if (flags & 0x200) out |= 0x200;   /* POSIX O_TRUNC  -> _O_TRUNC  */
+    if (flags & 0x400) out |= 0x8;     /* POSIX O_APPEND -> _O_APPEND */
+    out |= 0x8000;                    /* _O_BINARY —— 字节语义,不做 CRLF 转换 */
+    return out;
+#else
+    return flags;
+#endif
+}
+
+__attribute__((used)) long long jh_os_open(const char *path, int flags, int mode) {
+    if (path == NULL) return -1;
+    return (long long)JH_OS_OPEN(path, jh_os_translate_flags(flags), mode);  /* -1 on failure */
+}
+
+__attribute__((used)) int jh_os_close(long long fd) {
+    if (fd < 0) return -1;
+    return JH_OS_CLOSE((int)fd) == 0 ? 0 : -1;
+}
+
+__attribute__((used)) long long jh_os_read(long long fd, void *buf, long long n) {
+    if (fd < 0 || buf == NULL) return -1;
+    if (n <= 0) return 0;
+    unsigned char *p = (unsigned char *)buf;
+    long long total = 0;
+    while (total < n) {
+        long long chunk = n - total;
+        if (chunk > JH_OS_CHUNK) chunk = JH_OS_CHUNK;
+        long long got = (long long)JH_OS_READ((int)fd, p + total, (unsigned int)chunk);
+        if (got < 0) return total > 0 ? total : -1;
+        if (got == 0) break;              /* EOF */
+        total += got;
+    }
+    return total;
+}
+
+__attribute__((used)) long long jh_os_write(long long fd, const void *buf, long long n) {
+    if (fd < 0 || buf == NULL) return -1;
+    if (n <= 0) return 0;
+    const unsigned char *p = (const unsigned char *)buf;
+    long long total = 0;
+    while (total < n) {
+        long long chunk = n - total;
+        if (chunk > JH_OS_CHUNK) chunk = JH_OS_CHUNK;
+        long long put = (long long)JH_OS_WRITE((int)fd, p + total, (unsigned int)chunk);
+        if (put < 0) return total > 0 ? total : -1;
+        if (put == 0) break;
+        total += put;
+    }
+    return total;
+}
+
+/* exit() 而不是 _exit():前者 flush stdio 缓冲 —— jhyy 程序的 printf 输出
+   必须在进程退出前落盘,否则「写完日志再退出」会丢最后一段。 */
+__attribute__((used)) void jh_os_exit(int code) {
+    exit(code);
 }

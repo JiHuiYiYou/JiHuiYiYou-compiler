@@ -82,6 +82,9 @@ extern fn jh_path_qbe() -> *u8;
 extern fn jh_path_gcc() -> *u8;
 extern fn jh_path_runtime() -> *u8;
 extern fn jh_path_helpers() -> *u8;
+// W-103 (2026-10-20): std lib 模块目录 —— `import <mod>;` 在 main 文件旁边
+// 找不到 <mod>.jhyy 时回落到这里。stdlib 之前**任何用户程序都够不着**。
+extern fn jh_path_stdlib() -> *u8;
 // v1.5.6: A 派 Driver 探测 — link_with_gcc 改用 jh_gcc_invoke (resolved gcc 路径
 // + 引号包裹, 替代裸 system("gcc ...") 拼 cmd_buf). 4 层优先级: JHY_GCC env →
 // env.txt → MSYS2 magic → SearchPathA → fallback "gcc".
@@ -328,6 +331,23 @@ fn dir_from_path(path: *u8, dir_buf: *u8) -> i32 {
     return 0 as i32;
 }
 
+// build_mod_path — 把 "<dir>/<name>.jhyy" 拼进 out_buf(caller 提供 ≥1024 字节)
+//   返回写入长度(不含结尾 NUL)。
+//   W-103:import 解析的两级查找(main 文件旁边 → std lib 目录)共用这一个拼接器,
+//   免得两处各拼一遍、拼法走偏(上一次两处不一致就是一个 silent bug 的形状)。
+fn build_mod_path(out_buf: *u8, dir: *u8, name: *u8) -> i64 {
+    let mut off: i64 = 0 as i64;
+    off = str_concat_at(out_buf, off, dir);
+    let slash_m = "/" as *u8;
+    off = str_concat_at(out_buf, off, slash_m);
+    off = str_concat_at(out_buf, off, name);
+    let ext_m = ".jhyy" as *u8;
+    off = str_concat_at(out_buf, off, ext_m);
+    let nul_p = (out_buf as i64 + off) as *u8;
+    store_byte_i32(nul_p, 0 as i32);
+    return off;
+}
+
 // resolve_one_import_v1: 翻译 v0 main.c:101 resolve_one_import
 //   读 mod_path 文件 → parse → 递归处理 nested imports
 //   → 对每个非-import decl, 设 sym.module = mod_name 后 append 到 out_decls
@@ -543,15 +563,31 @@ fn inline_imports(module: *Node, main_path: *u8, arena: *Arena) -> i32 {
             let mod_name_str = (*id_sym_p).name;
             // mod_path = main_dir/mod_name.jhyy
             let mod_path_buf = malloc(1024 as i64);
-            let mut off_m: i64 = 0 as i64;
-            off_m = str_concat_at(mod_path_buf, off_m, main_dir_buf);
-            let slash_m = "/" as *u8;
-            off_m = str_concat_at(mod_path_buf, off_m, slash_m);
-            off_m = str_concat_at(mod_path_buf, off_m, mod_name_str);
-            let ext_m = ".jhyy" as *u8;
-            off_m = str_concat_at(mod_path_buf, off_m, ext_m);
-            let nul_mp = (mod_path_buf as i64 + off_m) as *u8;
-            store_byte_i32(nul_mp, 0 as i32);
+            let _mp_len = build_mod_path(mod_path_buf, main_dir_buf, mod_name_str);
+            // W-103 (2026-10-20):main 文件旁边找不到 → 回落到 std lib 目录。
+            //
+            // 为什么需要这一层:之前 import **只在 main 文件旁边找**,于是
+            // compiler/src0/std/ 下的模块(arena/fmt/io/math/mem/os/string/vec)
+            // 任何用户程序都够不着 —— 想测 std/os.jhyy 只能在测试文件里
+            // **抄一份 inline 副本**。而副本是不受约束的:std_os_basic.jhyy
+            // 那份副本给「mock 契约」背书(fd==42、write 返 5),于是
+            // 一个纯 mock 一直有个 PASS 撑着(W-103 的根因之一)。
+            //
+            // 有了回落,测试可以直接 `import os;` 引用**真身**。
+            if jh_file_stat_ok(mod_path_buf) == (0 as i32) {
+                let std_dir = jh_path_stdlib();
+                if std_dir != (0 as *u8) {
+                    if strlen(std_dir) > (0 as i64) {
+                        let alt_buf = malloc(1024 as i64);
+                        let _alt_len = build_mod_path(alt_buf, std_dir, mod_name_str);
+                        if jh_file_stat_ok(alt_buf) != (0 as i32) {
+                            let alt_n = strlen(alt_buf);
+                            let _cp = memcpy(mod_path_buf, alt_buf, alt_n + (1 as i64));
+                        }
+                        free(alt_buf);
+                    }
+                }
+            }
             errors = errors + resolve_one_import_v1(mod_path_buf, mod_name_str, arena,
                                                      (&new_decls as **u8), &new_count, &new_cap,
                                                      in_progress, &nin_progress,

@@ -111,12 +111,12 @@
 | [W-101](#w-101) | RESOLVED | emit_binop ceqw dst_id 走 existing local... |
 | [W-085](#w-085) | RESOLVED | codegen small-frame fn(*T, i32, i32) 第 3 i32 参数... |
 | [W-102](#w-102) | RESOLVED | address-holder 池与 alloc 池槽位重叠 → self-hosted... |
-| [W-103](#w-103) | ACTIVE | std/os.jhyy 全部 I/O 与 exit 是 M0 mock — W-079 的... |
+| [W-103](#w-103) | RESOLVED | std/os.jhyy 全部 I/O 与 exit 是 M0 mock — W-079 的... |
 | [W-104](#w-104) | RESOLVED | SysV ABI 参数分类调用 Win 分类器 — 正确的分类器就在同文件,没接线 |
-| [W-105](#w-105) | ACTIVE | check_borrow 是硬编码 return 1 — `&mut` 独占性完全不检查 |
+| [W-105](#w-105) | ACTIVE | `&mut` 独占性不检查 — (a)「`&mut` 能用」已修,(b)check_borrow... |
 | [W-105.1](#w-105.1) | ACTIVE | check_cap_pass 同款空 stub,当前无调用点(死代码但签名在 API 面上) |
 | [W-106](#w-106) | ACTIVE | symtab_lookup_one 用 arena-touch 强制 codegen... |
-| [W-107](#w-107) | ACTIVE | 五个 per-fn pre-scan 表硬编码 1024 上限 — 距触发只剩 33 个函数 |
+| [W-107](#w-107) | ACTIVE | 五个 per-fn pre-scan 表:上限已提到 4096,终局(按实际函数数分配)待做 |
 | [W-108](#w-108) | RESOLVED | 索引重建脚本静默丢弃 59/89 条目 —— STATUS_RE 不容忍 前缀,且只匹配 H2 |
 | [W-109](#w-109) | RESOLVED | 自举 IL lexer 缺 6 个浮点比较助记符 — f32/f64 六个比较运算静默降级 |
 | [W-110](#w-110) | RESOLVED | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 |
@@ -6947,13 +6947,14 @@ closure_check.sh                  PASS
 <a id="w-103"></a>
 ## W-103: std/os.jhyy 全部 I/O 与 exit 是 M0 mock — W-079 的 std_os 一半从未解除
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — std_os_open/close/read/write 不做真实 I/O,std_os_exit 不退出;W-079 标 RESOLVED 遮蔽了它
+**状态:** RESOLVED closed 2026-10-20 (v4.0.16) — std_os_* 接真 libc bridge;POSIX/Win 的 O_* flag 差异在桥这一层翻译
 **Backfilled:** 2026-10-15 (W-079 workaround 的 std_os 一半 / v3.2.3 起)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-09-26 (v3.2.3 W-079 引入 M0 stub) → 至今
 
-**触发面:** `compiler/src0/std/os.jhyy:69-144` — `std_os_open` / `std_os_close` /
+**触发面:** `compiler/src0/std/os.jhyy` — `std_os_open` / `std_os_close` /
 `std_os_read` / `std_os_write` / `std_os_exit` 五个函数全部是 M0 mock。
+(2026-10-20 真修后这五个函数走 `jhyy_helpers.c` 的 libc bridge。)
 
 **症状:**
 - `std_os_open` 只校验入参(path==0 / flags<0 / mode<0 / mode>0777 → -1),
@@ -6981,13 +6982,108 @@ print_err)和 `emit_call` 的 zero-extend。**stdio 那半修了,std_os 那半�
 os 层语义,所以**不阻塞 v4.0.0 final**;但它是「索引表 0 ACTIVE」这个说法
 不成立的直接证据之一 —— 一处货真价实的 mock 藏在 RESOLVED 条目底下。
 
-**失效条件:** std_os_* 改走 `jhyy_helpers.c` 的真实 libc bridge
+**失效条件:** ~~std_os_* 改走 `jhyy_helpers.c` 的真实 libc bridge
 (同 W-080 给 std_io_print 做的 `jh_fputs_stdout` 手法),并把
-`std_os_basic.jhyy` 的 inline 副本改成 import 真身。
+`std_os_basic.jhyy` 的 inline 副本改成 import 真身。~~
+→ **2026-10-20 已满足**,见下节。
+
+### 2026-10-20 真修:四层改动
+
+**第 1 层 — `jhyy_helpers.c` 补 5 个 libc bridge**
+
+```c
+__attribute__((used)) long long jh_os_open (const char *path, int flags, int mode);
+__attribute__((used)) int         jh_os_close(long long fd);
+__attribute__((used)) long long jh_os_read (long long fd, void *buf, long long n);
+__attribute__((used)) long long jh_os_write(long long fd, const void *buf, long long n);
+__attribute__((used)) void        jh_os_exit (int code);
+```
+
+签名跟 `std/os.jhyy` 的 `std_os_*` **1:1 对齐**(指针宽 / i32 / i64 各就各位),
+所以 jhyy 侧**零宽度转换**。Windows 走 `_open/_close/_read/_write`(msvcrt),
+POSIX 走 `open/close/read/write`。`read`/`write` 都循环到读满/写满 n 或 EOF ——
+POSIX 允许部分完成,jhyy 侧不能假设一次到位。
+
+**第 2 层 — POSIX ↔ Win 的 `O_*` flag 差异在桥这一层翻译**
+
+`std/os.jhyy` 的常量是 **POSIX 值**(`O_CREAT`=0x40、`O_EXCL`=0x80、
+`O_APPEND`=0x400、`O_TRUNC`=0x200),而 Windows 的 `_O_*` 是
+(`_O_CREAT`=0x100、`_O_EXCL`=0x400、`_O_APPEND`=0x8、`_O_TRUNC`=0x200)——
+**只有 TRUNC 两边同值**。所以 `jh_os_open` 里有一层
+`jh_os_translate_flags()` 逐位翻译,外加无条件 OR 上 `_O_BINARY`
+(jhyy 的 std_os_* 是**字节**语义;不强制 binary 的话 CRT 会做 CRLF↔LF 转换,
+字节级往返就废了)。
+
+> **这条翻译的存在本身说明 M0 mock 藏了一个真 bug。** mock 从不调 `open(2)`,
+> 所以 POSIX 的 `O_CREAT`=64 拿到 Windows 上(0x40 = `_O_NOINHERIT`)恒错,
+> 而且错法很隐蔽:文件不存在 + 没 O_CREAT → ENOENT → fd=-1,
+> 看起来像「路径不对」而不是「flag 值不对」。实测:第一次跑 bridge 时
+> `jh_os_open("..._w103_probe.txt", 1+64+512, 420)` 直接返 -1,
+> 从 C 侧复现同样 -1 才定位到 flag 而不是 FFI。
+
+**第 3 层 — `import` 回落:std lib 第一次真的可被用户代码 import**
+
+之前 `import <mod>;` **只在 main 文件旁边找** `<mod>.jhyy`
+(`main.jhyy` 的 `inline_imports` 拼 `main_dir/<mod>.jhyy`)。于是
+`compiler/src0/std/` 下的 8 个模块(arena/fmt/io/math/mem/os/string/vec)
+**任何用户程序都够不着** —— 想测 `std/os.jhyy` 只能在测试文件里
+**抄一份 inline 副本**。而副本是不受约束的:那份副本给「mock 契约」背书
+(`fd==42`、`write` 返 5),于是一个纯 mock 一直有个 PASS 撑着。
+
+现在 `inline_imports` 变成**两级查找**:main 文件旁边找不到 →
+回落到 std lib 目录(`jh_path_stdlib()`;源码树 layout (b) =
+`<root>\compiler\src0\std\`,installer layout (a) = `<bindir>\std\`)。
+installer 侧同步把 8 个模块装进 MSI 的 `bin\std\`。
+
+**第 4 层 — 测试改成 import 真身**
+
+`std_os_basic.jhyy` / `std_os_real_io.jhyy` 的 inline 副本删掉,改成
+`import os;`;断言全部重写成对着**真实行为**写(fd 是真 fd ≥ 0、
+write 返回值是内核给的、read 读回来的是文件里的字节)。
+另加 `std_os_exit.jhyy`(新):整个测试就是调 `std_os_exit(42)`,
+进程退出码必须是 42 —— mock 语义下它会返回 99 → 红。
+
+### ⚠️ 方向张力(必记):这 5 个 bridge 与 M5「删 C runtime」相反
+
+std_os_* 现在**依赖 C runtime**(`jhyy_helpers.c` 里的 libc 调用),
+而 M5 是「删 C runtime / 0-C 闭环」。这不是疏忽,是**有意识的取舍**:
+
+- std_os_* 是 **POSIX 语义层**。OS kernel M11 launch 之前,由 host libc
+  兑现最省事(不写 syscall 汇编、不写 kernel ABI)。
+- 真要 0-C 时,**换掉的是这 5 个 bridge 的实现**(改成 syscall / kernel call),
+  `std/os.jhyy` 里的 `std_os_*` **一行都不用动**。张力被限制在
+  `jhyy_helpers.c` 一个文件里,不在语言语义层。
+- 同族先例:`std/io.jhyy` 的 `std_io_print` 走 `jh_fputs_stdout`
+  (W-080) —— 同一个手法,同一个方向。
+
+### 验收(全部当场造过红灯)
+
+| 门 | 判据 | 造红灯 |
+|---|---|---|
+| `std_os_basic.jhyy` | import 真身 + 6 个 sub-test(真 fd / 写落盘 / 读回字节 / getenv) | 把 `std_os_read` 退回 mock → **EXIT=9** 红 ✓ |
+| `std_os_real_io.jhyy` | 用 **libc fopen/fread** 读回 std_os 写的文件(第三方读者才证明落盘) | 把 `std_os_write` 退回 mock → **EXIT=4** 红 ✓ |
+| `std_os_exit.jhyy` | 进程退出码 == 42 | 把 `std_os_exit` 退回 no-op → **EXIT=99** 红 ✓ |
+| 全量回归 | 181/181 PASS / 0 FAIL(203 total,20 skip,2 XFAIL 都是别的 bug) | — |
+| 自举闭环 | `closure_check.sh` v2.s == v3.s byte-identical | — |
+| 产物级门 | `artifact_checks.sh` 5 PASS / 1 KNOWN-FAIL(W-113) / 0 FAIL | — |
+
+**为什么 `std_os_real_io` 要用 libc fread 而不是 std_os_read:**
+两边都走 std_os 的话,一个「写进 A、读出 A」的闭环在 mock 下也自洽
+(mock 的 read 声称读了 n 字节,buf 里是上次残留)。只有**第三方读者**
+(libc)才能证明字节真的落到了磁盘上。
+
+**顺带证伪了一条老结论:** W-079 当年挡 `std_os_*` 的理由是
+「QBE amd64_win mixed `(l,w,w)` extern args bug」。QBE 随 v4.0.0 完全移除,
+self-backend 不再经过 QBE —— 实测 mixed-width extern 调用
+(`jh_os_open(*u8, i32, i32) -> i64`)**完全正常**,W-079 当年的理由早已失效。
+这次真修同时把「mixed args 在 self-backend 下是否真的坏」这条疑问一并关掉。
 
 **引用:**
-- 源码 `compiler/src0/std/os.jhyy:66-144`
-- 源码注释 `compiler/tests/examples/std_os_basic.jhyy:20`
+- 源码 `compiler/src0/std/os.jhyy`(真实现)
+- 源码 `compiler/src0/jhyy_helpers.c`(`jh_os_*` 5 个 bridge + `jh_os_translate_flags` + `jh_path_stdlib`)
+- 源码 `compiler/src0/main.jhyy`(`build_mod_path` + import 两级查找回落)
+- 测试 `compiler/tests/examples/std_os_basic.jhyy` / `std_os_real_io.jhyy` / `std_os_exit.jhyy`
+- installer `installer/build.ps1` + `installer/wix/compiler/jhyy-compiler.wxs`(StdDir)
 - W-079 entry 的 Resolution 段(该段遗漏 std_os 一半)
 - W-080 entry(只覆盖 std_io + zero-extend)
 
@@ -7257,7 +7353,7 @@ regress 用例。
 - `docs/archive/v2-v3/v2.0.0-os-prep.md`(Stage 1c mirror 的原始计划)
 
 <a id="w-105"></a>
-## W-105: check_borrow 是硬编码 return 1 — `&mut` 独占性完全不检查
+## W-105: `&mut` 独占性不检查 — (a)「`&mut` 能用」已修,(b)check_borrow 仍恒 return 1
 
 **状态:** ACTIVE since 2026-10-15 (v4.0.8) — 2026-10-20 **(a)「`&mut` 真的能用」已真修**;
 (b)「`check_borrow` 恒 return 1」**仍未实现**(借用记录放进 `infer_type` 会让**自举编译器** SEGV,机制未定位)
@@ -7547,7 +7643,7 @@ codegen,顺带得到验证)。
 - 源码 `compiler/src0/symtab.jhyy:261-264`
 
 <a id="w-107"></a>
-## W-107: 五个 per-fn pre-scan 表硬编码 1024 上限 — 距触发只剩 33 个函数
+## W-107: 五个 per-fn pre-scan 表:上限已提到 4096,终局(按实际函数数分配)待做
 
 **状态:** ACTIVE since 2026-10-15 (v4.0.8) — 2026-10-20:表长 1024 → **4096**(+ 响亮守门),
 实测已用 1022 → 余量 3066 个函数。**终局(按实际函数数分配)仍待做**

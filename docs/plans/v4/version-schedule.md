@@ -535,16 +535,34 @@ gdb 下不复现),崩溃点是一个**帧偏移 ≈ -515KB** 的写。
 **⚠️ 这是整条线上最大的一项,且性质存疑** —— 它是功能不是 bug。若 D1 选 C,
 整条 v4.0.14 取消,政策实质放宽。
 
-### v4.0.16 — stdlib 诚实 + emit 旁路
+### v4.0.16 — stdlib 诚实 + emit 旁路 ✅ **W-103 / W-112 已完成(2026-10-20)**
 
-| 内容 | 说明 |
-|---|---|
-| **W-103** `std_os_*` 全部接真 libc | 往 `jhyy_helpers.c` 补 5 个 bridge;**方向与 M5(删 C runtime)相反**,需记张力 |
-| **W-112** `#[link_section]` 打通 | `codegen.jhyy:4478` → `_section_directive.buf` → `main.jhyy:836` |
-| **W-113** asm 字节内联进函数体 | 现在落在 `ret` 之后 |
+| 内容 | 说明 | 状态 |
+|---|---|---|
+| **W-103** `std_os_*` 全部接真 libc | 往 `jhyy_helpers.c` 补 5 个 bridge;**方向与 M5(删 C runtime)相反**,需记张力 | ✅ **2026-10-20 已完成** |
+| **W-112** `#[link_section]` 打通 | `codegen.jhyy:4478` → `_section_directive.buf` → `main.jhyy:836` | ✅ **2026-10-20 已完成**(commit `c4c8345`) |
+| **W-113** asm 字节内联进函数体 | 现在落在 `ret` 之后 | ⏳ **未做** → 留给 v4.0.17 |
 
-**gate:** `std_os_real_io.jhyy` 删 XFAIL 后 PASS(真文件读回 byte-equal);
-产物级门「`.exe` 有 `.text.boot`」转绿;asm 相对 `ret` 的位置门转绿。
+**W-103 的实际内容比计划多一层。** 计划只说「补 5 个 bridge」,实测发现
+**光接 bridge 不够**:① `O_*` 常量是 POSIX 值,Windows 的 `_O_CREAT`=0x100
+不是 POSIX 的 0x40 —— 这层翻译必须在 bridge 里做(mock 从不调 `open(2)`,
+所以这个错一直藏着);② **std lib 之前任何用户程序都 import 不到**
+(`import <mod>;` 只在 main 文件旁边找)—— 测试只能抄 inline 副本,而副本
+给 mock 契约背书,这正是 mock 能活这么久的根因之一。所以额外加了
+**import 的 std lib 目录回落** + MSI 里装 8 个 std 模块。
+
+**gate:** `std_os_real_io.jhyy` 删 XFAIL 后 PASS(真文件读回 byte-equal)✅;
+产物级门「`.exe` 有 `.text.boot`」转绿 ✅;新增 `std_os_exit.jhyy` 验进程
+真退出(EXPECT=42)✅;三个测试**各自当场造过红灯**(mock 化 → 9 / 4 / 99)✅;
+MSI `wix build` 成功且 8 个 std 模块进 File 表 ✅。
+
+**⚠️ 记下的张力:** 5 个 bridge 让 jhyy 程序**又依赖 C runtime**,与 M5
+「删 C runtime / 0-C 闭环」方向相反。取舍已在台账 W-103 写明:真要 0-C 时
+换掉的是 **bridge 的实现**(改 syscall),`std/os.jhyy` 的 `std_os_*` 一行不动。
+
+**W-113 留给 v4.0.17 的理由:** 它是 IL 层管道活(asm blob 要流过 IL 进
+self-backend 才能落在函数体里),跟本版的两项(一个是 stdlib 语义、一个是
+emit 落地位置)不在一个层面上,混在一起会让 diff 难审。
 
 ### v4.0.17 — 收尾
 

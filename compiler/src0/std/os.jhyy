@@ -16,38 +16,53 @@
 //   std_os_getenv(name)             -> env value cstr / 0 on miss
 //
 // ════════════════════════════════════════════════════════════════════════════
-// W-079: QBE amd64_win mixed (l, w, w) args bug + i32 return zero-extension
-// 现象:QBE 不 emit 完整 arg register 装载 给 extern fn (l path, w flags, w mode),
-//       extern fn 拿 uninitialized registers → 行为未定义。
-// 现象2:QBE 在 main_jhyy 末尾 return i32 from extern i32 result 时,不 emit
-//       `movl %eax, %eax` zero-extend → bash exit code 拿到 garbage upper bits。
-// 影响:std_os_open / std_os_read / std_os_write 不可在 M0 跑通 (Phase 1)。
-// workaround:
-//   M0 Phase 1 — std_os_* API 表面 ship,但 std_os_open / read / write 用
-//   stub 实现(verify args + return success / -1 based on input validation)。
-//   实际 libc POSIX 集成留 v3.x 中,等 self-backend (codegen_amd64) 修 QBE
-//   bug 后回退。或者 QBE upstream patch + 重编 qbe/qbe.exe (per v2.x 中
-//   QBE 自写 sprint 计划)。
+// W-103 (2026-10-20 真修):std_os_* 现在是**真 I/O**,不再是 M0 mock
+// ════════════════════════════════════════════════════════════════════════════
+// 之前这五个函数全是 mock:open 恒返 fd=42、read/write 恒返 n(声称做了,
+// 但 buf 一个字节都没动)、exit 只是 `let _ignore = code; return;`(进程不退出)。
 //
-// M0 设计意图:
-//   - API surface (fn signature + 错误语义) 锁;OS kernel M11 launch 时只
-//     换 impl,不改 user code。
-//   - std_os_getenv + std_os_exit + std_os_open stub (verify args + return -1
-//     on invalid input) 跑 5/5 PASS,验证 jhyy-side jh_getenv (extern fn →
-//     pointer return) 工作正常。
-//   - std_os_read / write / close stub 同上。
+// M0 的理由是 W-079「QBE amd64_win mixed (l,w,w) extern args bug」——
+// QBE 随 v4.0.0 完全移除,self-backend(codegen_amd64_*)不再经过 QBE,
+// 那个理由早已失效。W-079 在 2026-09-28 翻 RESOLVED 时只声明了 mixed-args
+// 与 zero-extend 两件事由 W-080 解决,W-080 实际只动了 std/io.jhyy。
+// **stdio 那半修了,std_os 这半没人动过,而 W-079 的 ✅ 把整个表面盖住了。**
+//
+// 现在走 jhyy_helpers.c 的 5 个 libc bridge(W-103 新增):
+//   jh_os_open / jh_os_close / jh_os_read / jh_os_write / jh_os_exit
+// 签名跟下面的 std_os_* **1:1 对齐**,jhyy 侧零宽度转换。
+//
+// ⚠️ 方向张力(必记,见 docs/internal/workarounds.md W-103):
+// 这 5 个 bridge 让 jhyy 程序**又依赖 C runtime**,与 M5「删 C runtime /
+// 0-C 闭环」方向相反。取舍:std_os_* 是 POSIX 语义层,OS kernel M11 launch
+// 之前由 host libc 兑现最省事。真要 0-C 时,换掉的是 bridge 的**实现**
+// (改成 syscall / kernel call),本文件的 std_os_* 一行都不用动。
+//
+// ⚠️ flag 语义:下面的 O_* 常量是 **POSIX 值**(O_CREAT=0x40 …),
+// 与 Windows 的 _O_* (O_CREAT=0x100)不同。平台差异由 bridge 翻译,
+// jhyy 侧保持 POSIX 语义。
 // ════════════════════════════════════════════════════════════════════════════
 
 // ════════════════════════════════════════════════════
-// FFI(只走已验证的 1-arg + pointer-return pattern,绕开 W-079)
+// FFI — 真 libc bridge (jhyy_helpers.c, W-103)
 // ════════════════════════════════════════════════════
+//
+// 签名与 std_os_* 逐个对齐:
+//   jh_os_open (const char*, int, int)              -> long long
+//   jh_os_close(long long)                          -> int
+//   jh_os_read (long long, void*, long long)        -> long long
+//   jh_os_write(long long, const void*, long long) -> long long
+//   jh_os_exit (int)                                -> void
+extern fn jh_os_open(path: *u8, flags: i32, mode: i32) -> i64;
+extern fn jh_os_close(fd: i64) -> i32;
+extern fn jh_os_read(fd: i64, buf: *u8, n: i64) -> i64;
+extern fn jh_os_write(fd: i64, buf: *u8, n: i64) -> i64;
+extern fn jh_os_exit(code: i32);
 
 // jh_getenv — read env var (jh_helpers.c v2.5.0)
-// extern fn → pointer return → QBE amd64_win 已知 OK pattern
 extern fn jh_getenv(name: *u8) -> *u8;
 
 // ════════════════════════════════════════════════════
-// POSIX open flag constants (M0 子集, 跟 fcntl.h 一致)
+// POSIX open flag constants(POSIX 值 —— 平台差异由 bridge 翻译)
 // ════════════════════════════════════════════════════
 fn OS_O_RDONLY() -> i32 { return 0 as i32; }
 fn OS_O_WRONLY() -> i32 { return 1 as i32; }
@@ -56,23 +71,21 @@ fn OS_O_CREAT()  -> i32 { return 64 as i32; }     // 0x40
 fn OS_O_TRUNC()  -> i32 { return 512 as i32; }    // 0x200
 fn OS_O_APPEND() -> i32 { return 1024 as i32; }   // 0x400
 
-// POSIX mode bits(M0 子集,owner-only 写 0644 = 0x1A4)
+// POSIX mode bits(0644 = 0x1A4)
 fn OS_MODE_RW_R() -> i32 { return 420 as i32; }   // 0644
 
 // ════════════════════════════════════════════════════
-// File descriptor API (M0 stub — see W-079)
+// File descriptor API — 真实现(W-103)
 // ════════════════════════════════════════════════════
 
-// std_os_open — open(2) wrapper (M0 stub)
+// std_os_open — open(2) wrapper
 //   返回 fd (i64) / -1 on fail / -1 if path/flags invalid
-//   Phase 2+: 接 libc open() (W-079 修后)
 fn std_os_open(path: *u8, flags: i32, mode: i32) -> i64 {
-    // 输入验证 (跟 future libc open() 错误语义对齐):
+    // 输入验证 (跟 libc open() 错误语义对齐):
     //   path == 0 → -1 (EINVAL)
     //   flags < 0  → -1 (EINVAL)
     //   mode < 0   → -1 (EINVAL)
     //   mode > 0777 → -1 (EINVAL)
-    // M0 stub:验证失败 → -1;验证成功 → 返回模拟 fd=42 (Phase 2 替换)
     if path == (0 as *u8) {
         return 0 as i64 - (1 as i64);
     }
@@ -85,20 +98,19 @@ fn std_os_open(path: *u8, flags: i32, mode: i32) -> i64 {
     if mode > (511 as i32) {
         return 0 as i64 - (1 as i64);
     }
-    // M0 stub:模拟成功 fd(Phase 2 接 libc open 后,return real fd)
-    return 42 as i64;
+    return jh_os_open(path, flags, mode);
 }
 
-// std_os_close — close(2) wrapper (M0 stub)
+// std_os_close — close(2) wrapper
 fn std_os_close(fd: i64) -> i32 {
     if fd < (0 as i64) {
         return 0 as i32 - (1 as i32);
     }
-    // M0 stub:模拟成功(Phase 2 接 libc close)
-    return 0;
+    return jh_os_close(fd);
 }
 
-// std_os_read — read(2) wrapper (M0 stub)
+// std_os_read — read(2) wrapper
+//   返回实际读到的字节数;EOF 返回 0;出错返回 -1
 fn std_os_read(fd: i64, buf: *u8, n: i64) -> i64 {
     if fd < (0 as i64) {
         return 0 as i64 - (1 as i64);
@@ -109,11 +121,11 @@ fn std_os_read(fd: i64, buf: *u8, n: i64) -> i64 {
     if n <= (0 as i64) {
         return 0 as i64;
     }
-    // M0 stub:模拟读到 n 字节(Phase 2 接 libc read)
-    return n;
+    return jh_os_read(fd, buf, n);
 }
 
-// std_os_write — write(2) wrapper (M0 stub)
+// std_os_write — write(2) wrapper
+//   返回实际写出的字节数;出错返回 -1
 fn std_os_write(fd: i64, buf: *u8, n: i64) -> i64 {
     if fd < (0 as i64) {
         return 0 as i64 - (1 as i64);
@@ -124,22 +136,17 @@ fn std_os_write(fd: i64, buf: *u8, n: i64) -> i64 {
     if n <= (0 as i64) {
         return 0 as i64;
     }
-    // M0 stub:模拟写入 n 字节(Phase 2 接 libc write)
-    return n;
+    return jh_os_write(fd, buf, n);
 }
 
 // ════════════════════════════════════════════════════
-// Process API(M0 stub for exit — never returns in real impl)
+// Process API — 真实现(真退出进程)
 // ════════════════════════════════════════════════════
 
 // std_os_exit — 终止进程(exit(3))
-//   never returns
-//   Phase 2+:接 libc exit() (M0 stub 不调 exit,avoid QBE bug 触发现实进程退出)
+//   never returns(真不返回:bridge 调 libc exit())
 fn std_os_exit(code: i32) {
-    // M0 stub:不调 exit,设置 internal marker(Phase 2 接 libc exit)
-    // 通过 asm volatile 内存屏障 (M0 简化 → just assign to global dummy)
-    let _ignore = code;
-    // unreachable 但 jhyy codegen 需要
+    jh_os_exit(code);
     return;
 }
 

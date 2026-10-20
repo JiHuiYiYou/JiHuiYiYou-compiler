@@ -156,6 +156,15 @@ switch ($Target) {
         Copy-Item -Path "compiler/runtime/runtime.h"    -Destination "$binDir/runtime.h"       -Force
         Copy-Item -Path "compiler/src0/jhyy_helpers.c" -Destination "$binDir/jhyy_helpers.c"  -Force
 
+        # 1b. v4.0.16 (W-103): ship the std lib modules into bin\std\.
+        #   `import <mod>;` falls back to <bindir>\std\ when the module isn't
+        #   next to the main file (jh_path_stdlib → jh_paths_init layout a).
+        #   Without this, an installed jhyy.exe can't import ANY std module
+        #   (source-tree layout (b) finds <root>\compiler\src0\std\ instead).
+        $stdDir = "$binDir/std"
+        if (-not (Test-Path $stdDir)) { New-Item -ItemType Directory -Path $stdDir -Force | Out-Null }
+        Copy-Item -Path "compiler/src0/std/*.jhyy" -Destination "$stdDir/" -Force
+
         # 1c. v1.5.8: recolored WiX default UI assets (replaces rev 2 navy bg).
         #   jhyy-banner.bmp   - 493x58 default WiX banner, red→mint + J logo
         #                       at disc position (replaces rev 2 navy+mint title).

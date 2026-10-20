@@ -1,0 +1,20 @@
+// std_os_exit.jhyy — std_os_exit 必须**真的**退出进程。
+//
+// W-103 之前,std/os.jhyy 的 std_os_exit 是 `let _ignore = code; return;`
+// —— 进程**不退出**,函数 docstring 写的 "never returns" 是假的。
+// 跟 open/read/write 的 mock 一样,它被一个「inline 副本」测试的 PASS 盖住了。
+//
+// 本测试的全部内容就是:调 std_os_exit(42),然后**什么都不做**。
+//   · exit 生效 → 进程以 42 退出 → 与 EXPECT: 42 相符 → PASS
+//   · exit 没生效 → 走到下面的 return 99 → 与 EXPECT 不符 → FAIL
+// 所以 EXPECT 选 42 而不是 0,是为了让「exit 没生效」这件事**必然**被抓到
+// (哪怕有人把 return 99 改成 return 0,也仍然 != 42)。
+//
+// EXPECT: 42
+import os;
+
+fn main_jhyy() -> i32 {
+    std_os_exit(42);
+    // 走到这里 = exit 没生效 → 退出码 99 ≠ EXPECT 42 → FAIL
+    return 99;
+}

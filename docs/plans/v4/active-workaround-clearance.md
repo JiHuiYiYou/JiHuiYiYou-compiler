@@ -27,7 +27,7 @@ W-109 → **RESOLVED**(真修 `958c2b8`);W-118 新登记(B 组之外,
 | 2 | **W-111** | 泛型 enum 一旦被 match → sema 报错后 **SEGV** | **编译器崩溃** | ✅ XFAIL 测试 | 中(先修错误恢复) |
 | 3 | ~~W-110~~ | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 | 静默算错 | ❌ 无 | ✅ **2026-10-17 已随 W-109 一并真修,RESOLVED** |
 | 4 | ~~W-109~~ | 自举 IL lexer 缺 6 个浮点比较助记符 | — | — | ✅ **2026-10-17 真修,RESOLVED** |
-| 5 | **W-103** | `std_os_open/read/write/exit` 全是 mock,`std_os_exit` 不退出 | stdlib 对用户撒谎 | ✅ XFAIL 测试 | 小(5 个 C bridge) |
+| 5 | **W-103** | `std_os_open/read/write/exit` 全是 mock,`std_os_exit` 不退出 | stdlib 对用户撒谎 | ✅ XFAIL 测试 | 小(5 个 C bridge) | ✅ **2026-10-20 已修(v4.0.16)** |
 | 6 | ~~W-104~~ | SysV ABI 参数分类调用 Win 分类器 | 错 ABI,目标路径平时不走 | ❌ 门在跑但**覆盖不到** | ✅ **2026-10-20 真修,RESOLVED**(v4.0.12) |
 | 7 | **W-107** | 五个 per-fn 表硬编码 1024,距触发只剩 33 个 fn | 静默降级(非溢出) | ✅ 产物级门 | 中(改预分配) |
 | 8 | **W-106** | `symtab_lookup_one` arena-touch 强制物化栈帧 | 冗余代码,后端依赖 | ❌ 无 | 小(判定实验,v4.0.10) |
@@ -479,6 +479,35 @@ f64 的 `<` `<=` `>` `>=` **是好的**(那 4 个 `c*d` lexer 认识),整数比�
 ---
 
 ## 5. W-103 — `std/os.jhyy` 全是 mock
+
+**✅ 2026-10-20 已修完(v4.0.16)—— 台账转 RESOLVED。**
+
+实际落地比本节原先写的多两层,都是实测逼出来的:
+
+1. **光接 bridge 不够 —— `O_*` flag 有平台差异。** 本节写的修法假设
+   `std/os.jhyy` 里的 `O_CREAT`=64 能直接用;实测那是 **POSIX 值**,Windows 的
+   `_O_CREAT`=**0x100**(而且 0x40 在 Windows 上是 `_O_NOINHERIT`)。第一次调用
+   直接返 -1,从 C 侧复现同样 -1 才定位到是 flag 而不是 FFI。所以 bridge 里
+   多了一层 `jh_os_translate_flags()`(POSIX ↔ 平台逐位翻译 + Windows 无条件
+   OR `_O_BINARY`)。**这个错 mock 藏了很久 —— 因为 mock 从不调 `open(2)`。**
+2. **光接 bridge 也不够 —— std lib 之前**任何用户程序都 import 不到**。
+   本节第 3 步写的是「改成 `import std::os` 用真身」,但当前 import 语法只认
+   单个标识符(`import os;`),而且**只在 main 文件旁边找** `<mod>.jhyy` ——
+   `compiler/src0/std/` 下的 8 个模块谁都够不着。所以额外加了 **import 的
+   std lib 目录回落**(`jh_path_stdlib()`:源码树 `<root>\compiler\src0\std\`、
+   installer `<bindir>\std\`),并把 8 个模块装进 MSI。
+   **这一层不是顺手加的:** 没有它,测试只能继续抄 inline 副本,而副本给
+   mock 契约背书(`fd==42`)—— 那正是这个 mock 能活这么久的根因之一。
+
+另外,本节原文把根因归给「W-079 的 workaround 有两半」,**方向对但要补一句**:
+W-079 当年挡的是 **QBE**;QBE 随 v4.0.0 完全移除,实测 mixed-width extern
+调用在 self-backend 下**完全正常** —— W-079 当年的技术理由早已失效,
+它的 RESOLVED 只是没覆盖 std_os 这一半。
+
+修法与验收见 [`version-schedule.md`](version-schedule.md) § v4.0.16
+与台账 `docs/internal/workarounds.md` 的 W-103 条目。下面保留本节原文作为
+**审计轨迹**(桥的名字从 `jh_open/jh_close/...` 改成 `jh_os_open/jh_os_close/...`
+—— 前缀跟已有 `jh_os_*` 家族对齐,避免跟 runtime.c 的 C 侧符号撞名)。
 
 **台账:** W-103 | **触发面:** `compiler/src0/std/os.jhyy:69-144`
 

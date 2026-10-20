@@ -2,8 +2,8 @@
 
 > 集成测试清单 + 运行方法。详细每条 .jhyy 的预期值见 `compiler/tests/examples/`。
 >
-> **Last updated**: 2026-10-15 — `regress.py` = **173/173 PASS(全部有断言)+ 5 XFAIL + 19 SKIP**
-> (197 total,连跑两次一致)。Stage 2 closure sha `da78987c`。
+> **Last updated**: 2026-10-20 — `regress.py` = **181/181 PASS(全部有断言)+ 2 XFAIL + 20 SKIP**
+> (203 total)。`closure_check.sh` v2.s == v3.s byte-identical。
 >
 > **注意 total 从 185 变成 197**:harness 原来用 `os.listdir`(不递归),
 > `arena_test/` / `hello-freestanding/` / `multi_file/` / `namespace/` 四个子目录
@@ -87,16 +87,23 @@ requires Linux host」—— 在没装 Docker 的开发机上它**永远不会�
 没起来时 `docker info` 不响应,regress 的 `--cross=auto` 会静默降级成 SKIP,
 不会有任何提示。
 
-**5 个 XFAIL** —— 全部对应一条已登记的 ACTIVE workaround,**真跑、真失败、
+**2 个 XFAIL** —— 全部对应一条已登记的 ACTIVE workaround,**真跑、真失败、
 出现在每次回归输出里**:
 
 | 测试 | 对应 |
 |---|---|
-| `float_cmp.jhyy` | W-109 浮点比较 |
-| `generics_enum.jhyy` | W-111 泛型 enum SEGV |
-| `gdb_pretty_test.jhyy` | W-114 enum match 恒取第一支 |
 | `codegen_call_return_types.jhyy` | W-115 W-089 reproducer 仍 STACK_OVERFLOW |
 | `borrow_check_err.jhyy` | chained `&&T` 在 parser 阶段就挂,不是 sema |
+
+**2026-10-20(W-103)摘掉的 XFAIL:`std_os_real_io.jhyy`。** 它原本验证的是
+「std_os_* 声称做了 I/O 就必须真的做」—— 但 `std/os.jhyy` 那五个函数当时
+**全是 M0 mock**(恒返 fd=42、恒返 n、进程不退出),所以这个 XFAIL 标的其实是
+「mock 的写不会落盘」而不是「真实现会落盘」。W-103 真修之后它改成 import 真身,
+断言重写成对着真实行为,**XFAIL 标记摘掉 → 转 PASS**。
+
+同批新增 `std_os_exit.jhyy`:整个测试就是调 `std_os_exit(42)`,进程退出码必须
+== 42 —— mock 语义下它会返回 99 → 门能翻红。**「进程真的会退出」这件事以前
+没有任何测试覆盖过**(mock 的 exit 只是 `let _ignore = code; return;`)。
 
 ### 为什么是 XFAIL 而不是 SKIP
 
@@ -245,8 +252,8 @@ python regress.py          # 仓库根目录,不是 compiler/build/bin/
 
 当前输出:
 ```
-===== 173/173 passed (全部有断言), 0 failed, 19 skipped (of 197 total) =====
-  ├─ NOASSERT 0 / VACUOUS 0 / XFAIL 5
+===== 181/181 passed (全部有断言), 0 failed, 20 skipped (of 203 total) =====
+  ├─ NOASSERT 0 / VACUOUS 0 / XFAIL 2
 ```
 
 baseline 历史:
@@ -255,7 +262,8 @@ baseline 历史:
 - v1.7.3 — 96/96 PASS + 10 SKIP(106 total)
 - v1.8.3 — 102/102 PASS + 4 SKIP(106 total)
 - v2.0.0 → v2.4.0 — 104/104 PASS + 4 SKIP(108 total)
-- **v4.0.8 — 173/173 PASS + 5 XFAIL + 19 SKIP(197 total)** ← 当前(2026-10-15 实测)
+- v4.0.8 — 173/173 PASS + 5 XFAIL + 19 SKIP(197 total)
+- **v4.0.16 — 181/181 PASS + 2 XFAIL + 20 SKIP(203 total)** ← 当前(2026-10-20 实测)
 
 ⚠️ 数量涨了不代表覆盖变强。**断言强度**和**失败模式覆盖**是两个轴:
 前者今天清零了(零信号 54 → 0),后者仍然低 —— 13 条 ACTIVE 里只有 5 条有
