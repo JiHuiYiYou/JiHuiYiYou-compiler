@@ -95,7 +95,12 @@ fn codegen_amd64_run_text(text: *u8, len: i64, asm_path: *u8, target_tag: i32,
     let _set_rm = cg_state_set_ret_type_map(state_buf, ret_type_map, ret_type_map_n);
 
     // 4. Per-fn pre-scan + global max temp (per codegen_amd64.jhyy:315-320)
+    // W-107:pre-scan 失败(函数数逼近 per-fn 表上限)→ **让编译失败**,
+    // 不要继续 —— 继续就是静默产出错代码的编译器。
     let _scan_rc = cg_compute_per_fn_max_temps(state_buf, tokens, 40 as i64, n);
+    if _scan_rc != (0 as i32) {
+        return 1 as i32;
+    }
     let g_max = cg_compute_global_max_temp(tokens, 40 as i64, n);
     let _fms = cg_state_set_frame_max_temp(state_buf, g_max);
 

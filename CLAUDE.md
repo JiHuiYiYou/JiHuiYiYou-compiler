@@ -146,7 +146,7 @@
 |-------|------|------|
 | W-105 | `compiler/src0/sema.jhyy` | `check_borrow` 恒 `return 1` → `&mut` 独占性完全不检查。**2026-10-20 部分修**:「`&mut` 真的能用」已修(parser 接受 `&mut expr`、类型是 KIND_REF、解引用可用、`borrow_mut_write` 摘 XFAIL → EXIT=5);**独占性检查仍未做**(最小实现让自举编译器 SEGV,详见台账) |
 | W-103 | `compiler/src0/std/os.jhyy:69-144` | `std_os_open/close/read/write` 全是 M0 mock,`std_os_exit` 不退出进程 |
-| W-107 | `compiler/src0/codegen_amd64_state.jhyy:511-537` | 五个 per-fn 表硬编码 1024,**实测已用 1022 → 余量只剩 2 个函数**;越过上限的函数被丢弃 → 拿到 8 字节的帧 → 局部变量冲出帧 |
+| W-107 | `compiler/src0/codegen_amd64_state.jhyy` | 五个 per-fn 表(表长 2026-10-20 从 1024 提到 **4096**,余量 3066 个函数);**越界不再静默截断** → 改成大声报错并让编译失败(静默截断 = 帧算成 8 字节 = 局部变量冲出帧 = 静默产出错代码)。终局「按实际函数数分配」仍待做 |
 | W-106 | `compiler/src0/symtab.jhyy:260-264` | 死存储改栈布局。**2026-10-18 三次实测:原注释的理由已被证伪(栈帧两边都物化)、机制未知、删除的安全性未证实(约 11 次运行里 1 次间歇失败 vs 基线 9 次全绿)。不删,但别信旧注释** |
 | W-112 | `compiler/src0/codegen.jhyy:4478` | `#[link_section]` 是 no-op,生成的 .s 里没有任何 `.section` |
 | W-113 | `asm!` / `fence_*` emit 路径 | 字节被 emit 到 `ret` 之后,永不执行;ship gate 零敏感 |

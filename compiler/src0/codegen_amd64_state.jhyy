@@ -27,6 +27,7 @@
 import codegen_amd64_regalloc;
 // v2.11.2 (W-074.6 T1-a): cg_byte_at / cg_streq_n / cg_find_sub 用 ptr_add_u8
 import util;
+extern fn jh_fputs_stderr(s: *u8) -> i32;
 // v3.4.2 W-089: cg_query_fn_returns_ptr 解析 *RetTypeMapEntry (ir.jhyy 定义)
 import ir;
 
@@ -327,6 +328,23 @@ extern fn jh_dbg_log2(label: *u8, a: i64, b: i64, c: i64, d: i64) -> i32;
 // table 仍 256 → big_test 仍 SEGV。4096 后 cg_record_temp_slot 正常 record
 // alloc pool offset → cg_offset_for_temp_with_target 返 alloc pool offset 而非
 // formula fallback → struct data 跟 formula slot 物理分离,big_test exit 0。
+// MAX_FN_ENTRIES — per-fn pre-scan 表的项数(W-107)
+//
+// 之前是 1024(2026-10-15 从 256 bump 上来)。**2026-10-20 实测:main.jhyy 的
+// 函数数已经到 1022** —— 余量只剩 2 个函数。
+//
+// 跨过上限的后果不是「多几个函数没帧」这么简单:超出表的函数被 pre-scan
+// **丢弃** → per_fn_max 保持 0 → local_max 被钳成 0 → frame_size = 8
+// → **局部变量冲出帧** → 踩坏调用者的帧 → 被编译程序的 target 变成随机值
+// (「Win 目标却按 SysV 出码」)+ 间歇性 SEGV。
+//
+// 4096 = 4x 当前用量,跟 temp slot 表的 256→4096→65536 是同一套路
+// (per W-094 / v4.0.2.1 W-074.6 sub-bug #3)。
+//
+// ⚠️ 这是**把悬崖推远**的止血措施,不是终局。终局是「按实际函数数分配」
+//    (2026-10-20 试过,实测仍有残留缺陷,已撤回 —— 详见台账 W-107)。
+fn MAX_FN_ENTRIES() -> i64 { return 4096 as i64; }
+
 fn cg_max_temp_slots() -> i64 {
     return 65536 as i64;
 }
@@ -508,11 +526,11 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     // cg_compute_per_fn_max_temps (Phase A) 一次 pre-scan 填,emit_func_header 读
     // per_fn_max[cur_fn_idx] 算 frame_size (替换 v2.11.2 global frame_max_temp
     // → 跨 fn 共用 15488 字节 → 递归函数 SIGSEGV)。
-    let fns_bytes = (1024 as i64) * (8 as i64);
+    let fns_bytes = MAX_FN_ENTRIES() * (8 as i64);
     let fns_ptr = arena_alloc(arena, fns_bytes);
     let _zero_fns = memset(fns_ptr, 0 as i32, fns_bytes);
     (*s).fn_starts = fns_ptr;
-    let pfm_bytes = (1024 as i64) * (8 as i64);
+    let pfm_bytes = MAX_FN_ENTRIES() * (8 as i64);
     let pfm_ptr = arena_alloc(arena, pfm_bytes);
     let _zero_pfm = memset(pfm_ptr, 0 as i32, pfm_bytes);
     (*s).per_fn_max = pfm_ptr;
@@ -521,20 +539,20 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     // 决定 alloc pool reserve size (= 8192 base + per_fn_alloc)。没有 pre-scan
     // → frame_size 不 cover alloc pool → alloc 写 -8200(%rbp) 越界 → 错数据 / crash
     // (V2 v4.0.0 self-backend 跟 V3 W-087 同一 bug,V2 regress 没 std_* test 触发)。
-    let pfa_bytes = (1024 as i64) * (8 as i64);
+    let pfa_bytes = MAX_FN_ENTRIES() * (8 as i64);
     let pfa_ptr = arena_alloc(arena, pfa_bytes);
     let _zero_pfa = memset(pfa_ptr, 0 as i32, pfa_bytes);
     (*s).per_fn_alloc = pfa_ptr;
     // v4.0.7 (W-097 sub-bug 2): per-fn address-holder pool byte budget。address-holder
     // pool 从 -(frame_size+64) 往下长,必须额外 reserve 进 `subq $n, %rsp`。
-    let pfap_bytes = (1024 as i64) * (8 as i64);
+    let pfap_bytes = MAX_FN_ENTRIES() * (8 as i64);
     let pfap_ptr = arena_alloc(arena, pfap_bytes);
     let _zero_pfap = memset(pfap_ptr, 0 as i32, pfap_bytes);
     (*s).per_fn_addr_pool = pfap_ptr;
     // v4.0.2.2 (W-096 emit-side per-fn-local counter 真修):per_fn_base_t alloc
     // (8KB) + zero-init。cg_compute_per_fn_max_temps Phase 2 写 per_fn_base_t[i]
     // = per_fn_max[i-1] + 1 (i=0 用 0)。global t → local t 翻译表。
-    let pfbt_bytes = (1024 as i64) * (8 as i64);
+    let pfbt_bytes = MAX_FN_ENTRIES() * (8 as i64);
     let pfbt_ptr = arena_alloc(arena, pfbt_bytes);
     let _zero_pfbt = memset(pfbt_ptr, 0 as i32, pfbt_bytes);
     (*s).per_fn_base_t = pfbt_ptr;
@@ -1746,7 +1764,7 @@ fn cg_compute_per_fn_max_temps(state: *u8, tok_p: *u8, tok_size: i64, n: i64) ->
             // bump:main.jhyy 997 fns 触发 256+ fn 走 global-max fallback → frame
             // over-reserve 484KB for trivial fns like codegen_amd64_lexer__main_jhyy。
             // 1024 = 4x safety over main.jhyy,future-proof for stdlib-heavy modules)
-            if fn_count < 1024 as i64 {
+            if fn_count < MAX_FN_ENTRIES() {
                 let p = ptr_add_u8((*s).fn_starts, fn_count * (8 as i64)) as *i64;
                 *p = i;
             }
@@ -1755,12 +1773,28 @@ fn cg_compute_per_fn_max_temps(state: *u8, tok_p: *u8, tok_size: i64, n: i64) ->
         i = i + (1 as i64);
     }
     // 哨兵: fn_starts[fn_count] = n (end of last fn body)
-    if fn_count < 1024 as i64 {
+    if fn_count < MAX_FN_ENTRIES() {
         let p = ptr_add_u8((*s).fn_starts, fn_count * (8 as i64)) as *i64;
         *p = n;
     }
-    if fn_count > 1023 as i64 {
-        fn_count = 1023 as i64;
+    // W-107:截断上限跟表长一致(MAX_FN_ENTRIES)。
+    //
+    // ⚠️ 截断 = **静默损坏**:超出表的函数被丢弃 → per_fn_max 保持 0
+    // → local_max 被钳成 0 → frame_size = 8 → 局部变量冲出帧 → 踩坏调用者的帧
+    // → 被编译程序的 target 变成随机值 + 间歇性 SEGV。
+    //
+    // ⇒ 所以这里**不截断**,改成**大声报错并让编译失败**:一个响亮的失败远好过
+    // 一个静默产出错代码的编译器。
+    if fn_count > MAX_FN_ENTRIES() - (64 as i64) {
+        // ⚠️ sprintf_lld(buf, fmt, val) 要**缓冲区** —— 把返回值当 buffer 传
+        //    会往野地址写 → 自己把编译器搞崩(实测)。
+        let msg_buf = arena_alloc((*s).arena, 64 as i64);
+        let _w = sprintf_lld(msg_buf, "jhyy error: too many functions for the per-fn pre-scan tables (limit %d, got %d). W-107: raise MAX_FN_ENTRIES or switch to per-actual-count allocation." as *u8,
+                          MAX_FN_ENTRIES() - (64 as i64), fn_count);
+        jh_fputs_stderr(msg_buf);
+        jh_fputs_stderr("
+" as *u8);
+        return 1 as i32;
     }
     (*s).fn_count = fn_count;
     // Phase 2: per_fn_max[i] = max temp id in [fn_starts[i], fn_starts[i+1])
