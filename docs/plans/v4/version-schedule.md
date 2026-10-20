@@ -492,14 +492,45 @@ SysV(同款):     同样的用例在 amd64_sysv 目标下 = 217 ✅
   (Win 与 SysV 两条路径都要验 —— 只验 Win 的话,「同一份 enum 语义在两个目标上
   不一致」这类缺陷会隐形)
 
-### v4.0.15 — `&mut` 路线(待 D1 确认)
+### v4.0.15 — `&mut` 路线(D1=A)· 2026-10-20 部分完成
 
-**(a) 让 `&mut` 真的可用** —— parser 表达式位置拒 `&mut`、`&mut T` 产出的类型
-不可解引用。这是**功能缺失**。
-**(b) `check_borrow` 恒 return 1** —— 只在 (a) 之后有意义。
+**(a) 让 `&mut` 真的可用** —— ✅ **2026-10-20 已真修**(见下)。
+**(b) `check_borrow` 恒 return 1** —— ❌ **未做**:最小实现让自举编译器 SEGV(见下)。
 
 **gate:** `borrow_mut_write.jhyy` 删 XFAIL 后 PASS;`borrow_check_basic.jhyy`
 仍 PASS(不许把合法 borrow 判死);`closure_check.sh` PASS(src0 自己就用 `&mut`)。
+
+#### (a) 完成记录(2026-10-20)
+
+| 改动 | 内容 |
+|---|---|
+| `ast.jhyy` | `NodeAddrOf` 加 `is_mut`(记录大小 8 → 16) |
+| `parser.jhyy` | 表达式位置接受 `&mut expr` |
+| `sema.jhyy` | `&mut expr` 的类型 = KIND_REF(is_mut=1),与**类型**位置的 `&mut T` 同一表示(抽出 `sema_make_ref_type` 供两边共用) |
+| `sema.jhyy` | 解引用接受 KIND_REF |
+| `mono.jhyy` | 泛型实例化保留 is_mut |
+
+**验收:** `borrow_mut_write.jhyy` 摘 XFAIL → EXIT=5 ✓;`borrow_check_basic.jhyy`
+仍 EXIT=42 ✓;全量回归 **179/179** ✓;自举闭环 v2..v5 ✓。
+
+**`&expr`(共享)的表示没动** —— 仍是 KIND_POINTER(v3.1.0 既定语义 ✓)。
+
+#### (b) 未做 —— 原因记录在案
+
+最小实现(在 sema 里记录每次借用,`check_borrow` 比对同一符号的借用集合)
+**做出来了但让自举编译器 SEGV**:自举出来的 jhyy.exe 编任何文件都崩(确定性,
+gdb 下不复现),崩溃点是一个**帧偏移 ≈ -515KB** 的写。
+
+逐项二分(用不用 helper 调用 / 内联 / AST / parser / sema 各子集 / 加不加 dummy
+函数)**都没定位到残留的那一处**,触发条件是「**在 `infer_type`(递归热路径)里加
+代码**」这个动作本身 —— infer_type 的帧大小按 per-fn max temp 估(W-096)✗。
+
+⇒ **下一步**:把借用记录**挪出 `infer_type`**(独立 pass,或 pattern/match 的窄
+路径)✗,不要动递归热路径的帧布局 ✗。
+
+**⚠️ 附带发现:W-107 的余量只剩 2 个函数**(main.jhyy 现在 1022 个 ✗)——
+本仓库自己再加两个顶层函数就跨过 1024 ✗,而越过之后被丢弃的函数会拿到
+**8 字节的帧** ✗ → 局部变量冲出帧 ✗。W-107 已升级为高优先 ✗(详见台账)。
 
 **⚠️ 这是整条线上最大的一项,且性质存疑** —— 它是功能不是 bug。若 D1 选 C,
 整条 v4.0.14 取消,政策实质放宽。

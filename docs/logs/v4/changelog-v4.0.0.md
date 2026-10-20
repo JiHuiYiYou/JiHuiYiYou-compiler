@@ -297,6 +297,37 @@ SysV(同款):     同样的用例在 amd64_sysv 目标下 = 217 ✅
 
 ---
 
+## v4.0.15 — W-105 (a):`&mut` 真的能用了(D1=A 路线的一半)
+
+**2026-10-20。** 台账 W-105 的原描述是「`&mut` 是个装饰性标注:parser 认、
+类型系统里有、spec supplement 也承诺过,但造不出、传不进、解引用不了」。
+**这一半修好了** —— 另一半(独占性检查)仍未做,W-105 保持 ACTIVE。
+
+| 改动 | 内容 |
+|---|---|
+| `ast.jhyy` | `NodeAddrOf` 加 `is_mut` 字段 |
+| `parser.jhyy` | 表达式位置接受 `&mut expr`(之前报「unexpected token 'mut' in expression」) |
+| `sema.jhyy` | `&mut expr` 的类型 = KIND_REF(is_mut=1),与**类型**位置的 `&mut T` 同一表示(抽出 `sema_make_ref_type` 供两边共用) |
+| `sema.jhyy` | 解引用接受 KIND_REF(之前只认 KIND_POINTER) |
+| `mono.jhyy` | 泛型实例化保留 is_mut |
+
+**`&expr`(共享)仍是 KIND_POINTER** —— v3.1.0 既定语义 ✓,不动 ✓。
+
+**验收:** `borrow_mut_write.jhyy` 摘 XFAIL → **EXIT=5** ✓;`borrow_check_basic.jhyy`
+仍 EXIT=42 ✓;全量回归 **179/179** ✓;自举闭环 v2..v5 ✓。
+
+**❌ 独占性检查(W-105 (b))没做**:最小实现让**自举编译器 SEGV** ——
+自举出来的 jhyy.exe 编任何文件都崩(确定性,gdb 下不复现),崩溃点是一个
+**帧偏移 ≈ -515KB** 的写(局部变量冲出帧)。逐项二分(调用 vs 内联 / AST /
+parser / sema 各子集 / dummy 函数)都没定位到残留的那一处,触发条件是
+「**在 `infer_type`(递归热路径)里加代码**」这个动作本身。⇒ 下一步:把借用
+记录挪出 `infer_type`。详见台账 W-105。
+
+**⚠️ 顺带发现:W-107 的余量只剩 2 个函数**(main.jhyy 现在 1022 个)。越过 1024
+之后被丢弃的函数会拿到 **8 字节的帧** → 局部变量冲出帧。**W-107 升级为高优先**。
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一
