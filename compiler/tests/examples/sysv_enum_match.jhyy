@@ -1,0 +1,31 @@
+// EXPECT: 217
+// sysv_enum_match.jhyy — W-114:enum 在 **SysV 目标**下的 ABI 一致性
+//
+// 2026-10-20 新增。W-114 的真修改了 enum 的 ABI(参数按地址传、返回值走
+// sret、调用结果是 8 字节指针),**Win 与 SysV 两条路径都要验** ——
+// 只验 Win 的话,「同一份 enum 语义在两个目标上不一致」这类缺陷会隐形。
+//
+// 这个用例同时覆盖三件事:
+//   ① enum **参数**:caller 传「指向 image 的地址」,callee 按地址读 tag
+//      (≤16B 的 enum 之前被分类成按值传 → 两边理解不一致 → 恒命中第一臂)
+//   ② enum **返回值**:走 sret(ABI § 3.3)—— callee 拷 image 到 caller 的槽。
+//      之前是「返回 callee 自己帧里那个槽的地址」→ 函数一返回就悬垂
+//      (下一个函数的序言会盖掉它 → tag 读成 0)
+//   ③ **嵌套调用**:把返回的 enum 再传给另一个函数 —— 这正是悬垂会发作的形状
+//
+// 期望:arm(U::B)=1 + parm(P::S(5))=105 + arm(mk())=2 + parm(mkp())=109
+//       = 217
+
+// SKIP: sysv target requires Linux host (WSL/Docker) — see sysv_struct_pass.jhyy header.
+
+type U = enum { A, B, C }
+type P = enum { S(i32), N }
+
+fn arm(v: U) -> i32 { return match v { U::A => 0, U::B => 1, U::C => 2 }; }
+fn parm(v: P) -> i32 { return match v { P::S(x) => 100 + x, P::N => 200 }; }
+fn mk() -> U { return U::C; }
+fn mkp() -> P { return P::S(9); }
+
+fn main_jhyy() -> i32 {
+    return arm(U::B) + parm(P::S(5)) + arm(mk()) + parm(mkp());
+}

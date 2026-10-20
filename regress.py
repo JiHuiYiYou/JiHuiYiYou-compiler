@@ -126,6 +126,7 @@ def _run_one(binary: str, label: str, tests, timeout, enforce_baseline_hash, job
 
 _SYSV_TEST_NAMES = (
     "sysv_abi_test.jhyy",
+    "sysv_enum_match.jhyy",
     "sysv_struct_mixed.jhyy",
     "sysv_struct_pass.jhyy",
     "sysv_struct_ret.jhyy",

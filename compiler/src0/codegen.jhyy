@@ -715,6 +715,32 @@ fn cg_emit_store_primitive(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> 
 //
 // jhyy 无 forward decl：必须在 cg_emit_load / cg_emit_store_primitive 之后定义，
 // 在 cg_emit_store dispatcher 之前定义。
+// cg_value_type_of — 一个表达式的**运行时值**在栈上的类型。
+//
+// 与 `qbe_type_of` 的区别只在 enum 上:
+//
+// jhyy 的 enum 值 = **指向一个槽的地址**(槽里是 [tag|padding|payload],
+// 见 ABI § 2.6 / § 4.1)。所以一个「返回 enum 的调用」的结果是一个
+// **8 字节指针**,不是 4 字节的 tag。
+//
+// ⚠️ W-114 (2026-10-20):之前这里走 `qbe_type_of(enum)` = 'w' → 调用方只把
+// %rax 的**低 4 字节**存进结果槽 → callee 拿到的地址是**截断的** →
+// `match mk() {...}` 读到垃圾、`arm(mk())` 直接 SEGV。
+//
+// 什么时候用哪个:
+//   · `qbe_type_of` —— 描述**槽里的 image**(struct 字段的 load/store 用它)
+//   · `cg_value_type_of` —— 描述**一个表达式的值**(调用结果 / if 结果 /
+//     match 结果用它)
+fn cg_value_type_of(t_raw: *u8) -> i32 {
+    if t_raw != (0 as *u8) {
+        let t = t_raw as *Type;
+        if (*t).kind == KIND_ENUM() {
+            return QBE_L();
+        }
+    }
+    return qbe_type_of(t_raw);
+}
+
 // cg_sysv_check_memory_scope — W-104 MEMORY class 的**受限实现**边界检查。
 //
 // SysV 栈参数排布:所有落栈的实参(MEMORY class 的 + 整数寄存器溢出后落栈的)
@@ -901,6 +927,86 @@ fn cg_emit_struct_arg_eightbytes(cg_raw: *u8, st_raw: *u8, copy_slot: IRVal) -> 
     (*cg).last_struct_arg_n = ne;
     return ne;
 }
+// cg_copy_enum — W-114 (2026-10-20):把一个 enum 的**内存映像**(image)从
+// src 拷到 dst。
+//
+// enum 的运行时值 = **指向一个槽的地址**,槽里是
+// [tag | padding | payload](ABI § 2.6 布局 / § 4.1「enum 构造 → 栈槽」)。
+//
+// sret 返回时 caller 提供目标槽,callee 必须把 **image** 拷进去 ——
+// 不能只把地址拷过去:那个地址指向 **callee 自己帧里**的槽,函数一返回
+// 它就悬垂了(实测:`arm(mk())` 里 arm 的序言把 mk 的槽整个盖掉 → tag 读成 0)。
+//
+// 拷贝粒度:enum 的 size 总是 4 的倍数(tag_size = 4,align ≥ 4)→
+// 8 字节一组,尾巴最多 4 字节 —— 不需要 1/2 字节的 load/store。
+fn cg_copy_enum(cg_raw: *u8, et_raw: *u8, dst_addr: IRVal, src_addr: IRVal) -> i32 {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    if et_raw == (0 as *u8) {
+        return 0;
+    }
+    let et = et_raw as *Type;
+    if (*et).kind != KIND_ENUM() {
+        return 0;
+    }
+    // 与 cg_copy_struct 同款守卫:sentinel src/dst 会 emit `copy %t0`(QBE 报错)
+    if irval_is_undef(src_addr) != 0 {
+        return 0;
+    }
+    if irval_is_undef(dst_addr) != 0 {
+        return 0;
+    }
+    let size = type_size(et);
+    let mut off: i64 = 0 as i64;
+    while off + (8 as i64) <= size {
+        let s = *ir_new_tmp(ir, QBE_L());
+        let d = *ir_new_tmp(ir, QBE_L());
+        if off > (0 as i64) {
+            ir_emit_binary(ir, s, "add" as *u8, src_addr, ir_new_int(off));
+            ir_emit_binary(ir, d, "add" as *u8, dst_addr, ir_new_int(off));
+        } else {
+            ir_emit_str(ir, "    %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, s.id);
+            ir_emit_str(ir, " =l copy %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, src_addr.id);
+            ir_emit_str(ir, "\n" as *u8);
+            ir_emit_str(ir, "    %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, d.id);
+            ir_emit_str(ir, " =l copy %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, dst_addr.id);
+            ir_emit_str(ir, "\n" as *u8);
+        }
+        let v = *ir_new_tmp(ir, QBE_L());
+        ir_emit_load(ir, v, QBE_L(), s);
+        ir_emit_store(ir, QBE_L(), v, d);
+        off = off + (8 as i64);
+    }
+    if off < size {
+        // 尾巴:4 字节(tag 本身,或 12 字节 enum 的最后 4 字节)
+        let s = *ir_new_tmp(ir, QBE_L());
+        let d = *ir_new_tmp(ir, QBE_L());
+        if off > (0 as i64) {
+            ir_emit_binary(ir, s, "add" as *u8, src_addr, ir_new_int(off));
+            ir_emit_binary(ir, d, "add" as *u8, dst_addr, ir_new_int(off));
+        } else {
+            ir_emit_str(ir, "    %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, s.id);
+            ir_emit_str(ir, " =l copy %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, src_addr.id);
+            ir_emit_str(ir, "\n" as *u8);
+            ir_emit_str(ir, "    %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, d.id);
+            ir_emit_str(ir, " =l copy %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, dst_addr.id);
+            ir_emit_str(ir, "\n" as *u8);
+        }
+        let v = *ir_new_tmp(ir, QBE_W());
+        ir_emit_load(ir, v, QBE_W(), s);
+        ir_emit_store(ir, QBE_W(), v, d);
+    }
+    return 1;
+}
+
 
 fn cg_copy_struct(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) -> i32 {
     let cg = cg_raw as *CGContext;
@@ -973,17 +1079,22 @@ fn cg_copy_struct(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) ->
             ir_emit_str(ir, "\n" as *u8);
         }
         let ft_kind = (*ftype).kind;
-        if ft_kind == KIND_STRUCT() {
-            cg_copy_struct(cg_raw, ftype as *u8, dst_off, src_off);
+        if ft_kind == KIND_ENUM() {
+            // W-114:enum 字段内联存放 image —— 拷 image,不是拷地址
+            let _ce = cg_copy_enum(cg_raw, ftype as *u8, dst_off, src_off);
+        } else if ft_kind == KIND_STRUCT() {
+            let _cs = cg_copy_struct(cg_raw, ftype as *u8, dst_off, src_off);
         } else {
             let fval = *ir_new_tmp(ir, qbe_type_of(ftype as *u8));
-            cg_emit_load(cg_raw, fval, ftype as *u8, src_off);
-            cg_emit_store_primitive(cg_raw, ftype as *u8, fval, dst_off);
+            let _ld = cg_emit_load(cg_raw, fval, ftype as *u8, src_off);
+            let _sp = cg_emit_store_primitive(cg_raw, ftype as *u8, fval, dst_off);
         }
         i = i + (1 as i64);
     }
     return 1;
 }
+
+
 
 // cg_find_field_offset：full helper
 fn cg_find_field_offset(st_raw: *u8, field_name: *u8, out_buf: *u8) -> i32 {
@@ -1036,6 +1147,27 @@ fn cg_emit_store(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> i32 {
         return cg_copy_struct(cg_raw, t_raw, addr, val);
     }
     return cg_emit_store_primitive(cg_raw, t_raw, val, addr);
+}
+
+// cg_store_enum_image — W-114 (2026-10-20):往一个 **enum 类型的存储**
+// (局部变量 / struct 字段 / 数组元素 / 循环变量)写值。
+//
+// enum 的**存储**放的是内存映像(image = [tag|padding|payload]),不是那个
+// 地址 —— enum 的**表达式**才求值为「指向 image 的地址」。
+//   · 存储:本地变量槽、struct 字段、数组元素 → 放 image
+//   · 表达式:enum 变量 / enum 字段 / enum 解引用 → 求值为 image 的地址
+//
+// ⚠️ 之前一律用 `cg_emit_store`(宽度 = qbe_type_of(enum) = 'w' = 4 字节)
+//    → 存的是**地址的低 32 位**(截断的指针)→ 读回来是垃圾。
+//    `let mut c: U = U::B;` 因此恒读出 tag 0。
+fn cg_store_enum_image(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> i32 {
+    if t_raw != (0 as *u8) {
+        let t = t_raw as *Type;
+        if (*t).kind == KIND_ENUM() {
+            return cg_copy_enum(cg_raw, t_raw, addr, val);
+        }
+    }
+    return cg_emit_store(cg_raw, t_raw, val, addr);
 }
 
 // ════════════════════════════════════════════════════
@@ -1769,6 +1901,12 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                 if (*nt).kind == KIND_STRUCT() || (*nt).kind == KIND_ARRAY() || (*nt).kind == KIND_SLICE() {
                     return irval_box(ir, (loc).kind, (loc).id, (loc).ival, (loc).name, (loc).qbe_type);
                 }
+                // W-114:enum 同理 —— 局部变量槽里放的是 image,enum 表达式
+                // 求值为「指向 image 的地址」→ 直接给地址,不 load。
+                // (load 出来的是 4 字节 image → tag 对、payload 丢)
+                if (*nt).kind == KIND_ENUM() {
+                    return irval_box(ir, (loc).kind, (loc).id, (loc).ival, (loc).name, (loc).qbe_type);
+                }
             }
             /* load from stack */
             let v = *ir_new_tmp(ir, qbe_type_of((*n).type_ptr));
@@ -1833,7 +1971,18 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                 let src = *cg_expr(cg_raw, (*d).expr);
                 let sret_addr = IRVal { kind: 0, id: (*cg).sret_slot_id as i32, ival: 0 as i64, name: 0 as *u8, qbe_type: QBE_L() };
                 if irval_is_undef(src) == 0 {
-                    let _copy = cg_copy_struct(cg_raw, (*cg).current_ret_type, sret_addr, src);
+                    // W-114:enum 的 sret 拷的是**内存映像**,不是地址
+                    // (地址指向 callee 自己的帧 → 返回即悬垂)。
+                    let mut _is_enum_ret: i32 = 0;
+                    if (*cg).current_ret_type != (0 as *u8) {
+                        let crt = (*cg).current_ret_type as *Type;
+                        if (*crt).kind == KIND_ENUM() { _is_enum_ret = 1 as i32; }
+                    }
+                    if _is_enum_ret != (0 as i32) {
+                        let _ce = cg_copy_enum(cg_raw, (*cg).current_ret_type, sret_addr, src);
+                    } else {
+                        let _copy = cg_copy_struct(cg_raw, (*cg).current_ret_type, sret_addr, src);
+                    }
                 }
                 // v1.3.6: emit LIFO defers before `ret` (sret path)
                 //   (inline — jhyy 无 forward decl → 不能抽成 helper call from cg_expr)
@@ -2087,7 +2236,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                 if sz2 < 4 { sz2 = 4; }
                 let slot = *ir_new_tmp(ir, QBE_L());
                 ir_emit_alloc(ir, slot, sz2);
-                cg_emit_store(cg_raw, sym_t, init_v, slot);
+                let _st0 = cg_store_enum_image(cg_raw, sym_t, init_v, slot);
                 cg_add_local(cg_raw, (*d).sym, slot, 1);
             }
         } else {
@@ -2110,7 +2259,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         if target_kind == NODE_DEREF() {
             let dd = node_deref_data(target);
             let ptr = *cg_expr(cg_raw, (*dd).expr);
-            let _store = cg_emit_store(cg_raw, (*target).type_ptr, val, ptr);
+            let _store = cg_store_enum_image(cg_raw, (*target).type_ptr, val, ptr);
         } else if target_kind == NODE_IDENT() {
             let id = node_ident_data(target);
             let is_stack = cg_find_local_is_stack(cg_raw, (*id).sym);
@@ -2136,7 +2285,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                     if (*tt).kind == KIND_STRUCT() {
                         let _copy = cg_copy_struct(cg_raw, tgt_t, slot, val);
                     } else {
-                        let _store = cg_emit_store(cg_raw, tgt_t, val, slot);
+                        let _store = cg_store_enum_image(cg_raw, tgt_t, val, slot);
                     }
                 }
             }
@@ -2144,7 +2293,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                cg_emit_store dispatch on addr.kind (storew %val, $g_x). */
             else if *(slot_buf_u8 as *i32) == IRVAL_STR() {
                 let tgt_t2 = (*target).type_ptr;
-                let _store2 = cg_emit_store(cg_raw, tgt_t2, val, slot);
+                let _store2 = cg_store_enum_image(cg_raw, tgt_t2, val, slot);
             }
         } else if target_kind == NODE_INDEX() {
             // arr[i] = value
@@ -2185,7 +2334,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                         }
                         let final_addr = *ir_new_tmp(ir, QBE_L());
                         ir_emit_binary(ir, final_addr, "add" as *u8, real_base, offset2);
-                        let _store = cg_emit_store(cg_raw, elem_type, val, final_addr);
+                        let _store = cg_store_enum_image(cg_raw, elem_type, val, final_addr);
                     } else {
                         // 路径 2: 通用 → base from expr + offset
                         let base = *cg_expr(cg_raw, idx_expr_node);
@@ -2215,7 +2364,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                         // addr = base + offset
                         let addr = *ir_new_tmp(ir, QBE_L());
                         ir_emit_binary(ir, addr, "add" as *u8, base, offset);
-                        let _store = cg_emit_store(cg_raw, elem_type, val, addr);
+                        let _store = cg_store_enum_image(cg_raw, elem_type, val, addr);
                     }
                 }
             }
@@ -2248,7 +2397,17 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                     addr = *ir_new_tmp(ir, QBE_L());
                     ir_emit_binary(ir, addr, "add" as *u8, base, ir_new_int(offset));
                 }
-                let _store = cg_emit_store(cg_raw, field_type_raw, val, addr);
+                // W-114:enum 字段存的是 image,不是地址
+                let mut _af_is_enum: i32 = 0;
+                if field_type_raw != (0 as *u8) {
+                    let aft = field_type_raw as *Type;
+                    if (*aft).kind == KIND_ENUM() { _af_is_enum = 1 as i32; }
+                }
+                if _af_is_enum != (0 as i32) {
+                    let _ce = cg_copy_enum(cg_raw, field_type_raw, addr, val);
+                } else {
+                    let _store = cg_emit_store(cg_raw, field_type_raw, val, addr);
+                }
             }
         }
         return irval_box(ir, (zero).kind, (zero).id, (zero).ival, (zero).name, (zero).qbe_type);
@@ -2652,6 +2811,11 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             if (*et).kind == KIND_STRUCT() {
                 return irval_box(ir, (elem_addr).kind, (elem_addr).id, (elem_addr).ival, (elem_addr).name, (elem_addr).qbe_type);
             }
+            // W-114:enum 元素同理 —— 数组元素槽里放的是 image,
+            // enum 表达式求值为「指向 image 的地址」→ 给地址,不 load。
+            if (*et).kind == KIND_ENUM() {
+                return irval_box(ir, (elem_addr).kind, (elem_addr).id, (elem_addr).ival, (elem_addr).name, (elem_addr).qbe_type);
+            }
         }
         let result = *ir_new_tmp(ir, qbe_type_of((*n).type_ptr));
         // 用 cg_emit_load 而非 ir_emit_load — u8 走 loadub (与 C 端 byte-equal 对齐)
@@ -2718,6 +2882,12 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             if (*ft).kind == KIND_STRUCT() {
                 return irval_box(ir, (addr).kind, (addr).id, (addr).ival, (addr).name, (addr).qbe_type);
             }
+            // W-114:enum 字段同理 —— enum 的值是「指向 image 的地址」,
+            // 字段里放的是 image 本体 → 取字段 = 取它的地址。
+            // (与 struct 字段同一处理:不 load,直接给地址)
+            if (*ft).kind == KIND_ENUM() {
+                return irval_box(ir, (addr).kind, (addr).id, (addr).ival, (addr).name, (addr).qbe_type);
+            }
         }
         let result = *ir_new_tmp(ir, qbe_type_of(field_type_raw));
         cg_emit_load(cg_raw, result, field_type_raw, addr);
@@ -2739,7 +2909,9 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         if (*t_inner_t).kind == KIND_POINTER() && (*t_inner_t).elem != (0 as *u8) {
             let elem_t = (*t_inner_t).elem;
             let et = elem_t as *Type;
-            if (*et).kind == KIND_STRUCT() || (*et).kind == KIND_ARRAY() || (*et).kind == KIND_SLICE() {
+            // W-114:enum 同 struct —— `*p`(p: *U)求值为「指向 image 的地址」
+            // = p 本身;load 出来的是 4 字节 image → tag 对、payload 丢。
+            if (*et).kind == KIND_STRUCT() || (*et).kind == KIND_ARRAY() || (*et).kind == KIND_SLICE() || (*et).kind == KIND_ENUM() {
                 return irval_box(ir, (ptr).kind, (ptr).id, (ptr).ival, (ptr).name, (ptr).qbe_type);
             }
         }
@@ -2817,7 +2989,11 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         let mut is_sret: i32 = 0;
         if (*n).type_ptr != (0 as *u8) {
             let nt = (*n).type_ptr as *Type;
-            if (*nt).kind == KIND_STRUCT() {
+            // W-114:enum 的返回值也走 sret —— ABI § 3.3 明写
+            // 「struct / enum → 通过隐式 sret 指针参数返回」。
+            // 之前 enum 按值返回(地址),而那个地址指向 **callee 自己帧里**的槽
+            // → 函数一返回就悬垂(实测:下一个函数的序言把它盖掉 → tag 读成 0)。
+            if (*nt).kind == KIND_STRUCT() || (*nt).kind == KIND_ENUM() {
                 is_sret = 1;
             }
         }
@@ -3023,7 +3199,8 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         }
         let mut qt: i32 = QBE_W();
         if (*n).type_ptr != (0 as *u8) {
-            qt = qbe_type_of((*n).type_ptr);
+            // W-114:enum 的返回值是**地址** → 结果槽 8 字节,不是 4 字节的 tag
+            qt = cg_value_type_of((*n).type_ptr);
         }
         let result = *ir_new_tmp(ir, qt);
         ir_emit_call(ir, result, fn_name, args_arr2, (cg_sysv_expanded_nargs(cg_raw, args_node, nargs) as i32));
@@ -3060,7 +3237,11 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         let mut is_sret: i32 = 0;
         if (*n).type_ptr != (0 as *u8) {
             let nt = (*n).type_ptr as *Type;
-            if (*nt).kind == KIND_STRUCT() {
+            // W-114:enum 的返回值也走 sret —— ABI § 3.3 明写
+            // 「struct / enum → 通过隐式 sret 指针参数返回」。
+            // 之前 enum 按值返回(地址),而那个地址指向 **callee 自己帧里**的槽
+            // → 函数一返回就悬垂(实测:下一个函数的序言把它盖掉 → tag 读成 0)。
+            if (*nt).kind == KIND_STRUCT() || (*nt).kind == KIND_ENUM() {
                 is_sret = 1;
             }
         }
@@ -3251,7 +3432,8 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         }
         let mut qt: i32 = QBE_W();
         if (*n).type_ptr != (0 as *u8) {
-            qt = qbe_type_of((*n).type_ptr);
+            // W-114:enum 的返回值是**地址** → 结果槽 8 字节,不是 4 字节的 tag
+            qt = cg_value_type_of((*n).type_ptr);
         }
         let result = *ir_new_tmp(ir, qt);
         ir_emit_call(ir, result, fn_name, args_arr2, (cg_sysv_expanded_nargs(cg_raw, args_node, nargs) as i32));
@@ -3285,7 +3467,8 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             if (*nt).kind == KIND_VOID() {
                 is_void = 1;
             } else {
-                ret_qt = qbe_type_of((*n).type_ptr);
+                // W-114:同调用结果 —— enum 的值是地址
+                ret_qt = cg_value_type_of((*n).type_ptr);
             }
         }
 
@@ -3407,7 +3590,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         // Allocate stack slot for loop variable (mutable)
         let slot = *ir_new_tmp(ir, QBE_L());
         ir_emit_alloc(ir, slot, var_sz);
-        cg_emit_store(cg_raw, var_type_raw, start_v, slot);
+        let _st_lv = cg_store_enum_image(cg_raw, var_type_raw, start_v, slot);
         cg_add_local(cg_raw, var_sym_raw, slot, 1);
 
         // 4 blocks
@@ -3447,7 +3630,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         cg_emit_load(cg_raw, current, var_type_raw, slot);
         let next_val = *ir_new_tmp(ir, var_qt);
         ir_emit_binary(ir, next_val, "add" as *u8, current, ir_new_int(1 as i64));
-        cg_emit_store(cg_raw, var_type_raw, next_val, slot);
+        let _st_lv2 = cg_store_enum_image(cg_raw, var_type_raw, next_val, slot);
         ir_emit_jmp(ir, loop_start);
 
         // loop_end
@@ -3536,7 +3719,20 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             let addr = *ir_new_tmp(ir, QBE_L());
             let off_val = ir_new_int(offset);
             ir_emit_binary(ir, addr, "add" as *u8, slot, off_val);
-            cg_emit_store(cg_raw, (*fval_node).type_ptr, fval, addr);
+            // W-114:enum 字段放的是**内存映像**(tag|padding|payload),不是那个
+            // 地址 —— 字段是**内联**存放的(ABI § 2.6 的布局),而 enum 的值
+            // 是「指向 image 的地址」。直接存地址会存成**截断的指针**
+            // (enum 字段 4 字节 → 指针低 32 位)→ 读回来是垃圾。
+            let mut _fld_is_enum: i32 = 0;
+            if (*fval_node).type_ptr != (0 as *u8) {
+                let fvt = (*fval_node).type_ptr as *Type;
+                if (*fvt).kind == KIND_ENUM() { _fld_is_enum = 1 as i32; }
+            }
+            if _fld_is_enum != (0 as i32) {
+                let _ce = cg_copy_enum(cg_raw, (*fval_node).type_ptr, addr, fval);
+            } else {
+                let _st = cg_emit_store(cg_raw, (*fval_node).type_ptr, fval, addr);
+            }
             i = i + (1 as i64);
         }
         return irval_box(ir, (slot).kind, (slot).id, (slot).ival, (slot).name, (slot).qbe_type);
@@ -3791,6 +3987,19 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             if is_stack != 0 {
                 return irval_box(ir, (loc).kind, (loc).id, (loc).ival, (loc).name, (loc).qbe_type);  // already address
             }
+            // W-114:enum 的**值本身就是「指向 image 的地址」**→ `&e` == `e`。
+            // 走通用 SSA 路径会「alloc 一个 temp 把地址存进去,再取 temp 的地址」
+            // → 得到的是「指向一个装着地址的槽的地址」→ 解引用后读到的是
+            // 地址的字节,不是 image 的 tag(实测 read_color(&c) 读出垃圾)。
+            let mut _inner_is_enum: i32 = 0;
+            if (*inner_node).type_ptr != (0 as *u8) {
+                let it = (*inner_node).type_ptr as *Type;
+                if (*it).kind == KIND_ENUM() { _inner_is_enum = 1 as i32; }
+            }
+            if _inner_is_enum != (0 as i32) {
+                let v_enum = *cg_expr(cg_raw, inner_node);
+                return irval_box(ir, (v_enum).kind, (v_enum).id, (v_enum).ival, (v_enum).name, (v_enum).qbe_type);
+            }
             // SSA value → alloc temp slot, store, return slot
             let v = *cg_expr(cg_raw, inner_node);
             let slot = *ir_new_tmp(ir, QBE_L());
@@ -3968,7 +4177,8 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         if (*n).type_ptr != (0 as *u8) {
             let nt = (*n).type_ptr as *Type;
             if (*nt).kind != KIND_VOID() {
-                qt = qbe_type_of((*n).type_ptr);
+                // W-114:同调用结果 —— enum 的值是地址
+                qt = cg_value_type_of((*n).type_ptr);
             }
         }
 
@@ -4282,7 +4492,8 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
     let mut ret_qt: i32 = 0 as i32;
     if ret_type != (0 as *u8) {
         let rt = ret_type as *Type;
-        if (*rt).kind == KIND_STRUCT() {
+        // W-114:enum 的返回也走 sret(ABI § 3.3)—— 与调用侧必须一致。
+        if (*rt).kind == KIND_STRUCT() || (*rt).kind == KIND_ENUM() {
             is_sret = 1;
         } else {
             // v2.1.0 Stage 1c.1: abi_win_classify_arg centralises type-letter
@@ -4493,7 +4704,17 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
                 // which was never overwritten). Without this guard, cg_copy_struct
                 // emits `copy %t0` and QBE rejects the whole function.
                 if irval_is_undef(body_val) == 0 {
-                    let _copy = cg_copy_struct(cg_raw, ret_type, sret_addr, body_val);
+                    // W-114:enum 的 sret 拷的是**内存映像**,不是地址
+                    let mut _is_enum_ret2: i32 = 0;
+                    if ret_type != (0 as *u8) {
+                        let rt2 = ret_type as *Type;
+                        if (*rt2).kind == KIND_ENUM() { _is_enum_ret2 = 1 as i32; }
+                    }
+                    if _is_enum_ret2 != (0 as i32) {
+                        let _ce = cg_copy_enum(cg_raw, ret_type, sret_addr, body_val);
+                    } else {
+                        let _copy = cg_copy_struct(cg_raw, ret_type, sret_addr, body_val);
+                    }
                 }
             }
             // v3.1.4 W-068 真修 v2 (codegen merge artifact): emit ONE fallback ret

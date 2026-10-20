@@ -140,7 +140,7 @@
 
 ## 当前活跃 workarounds
 
-**10 ACTIVE / 0 DEFERRED**(2026-10-20 复核:**W-104 RESOLVED**(v4.0.12 —— ≤16B eightbyte 分类 + >16B MEMORY class 整体落栈,与 gcc 三方向对拍全绿),**10 ACTIVE / 103 索引行**,per `docs/internal/workarounds.md` 索引表):
+**9 ACTIVE / 0 DEFERRED**(2026-10-20 复核:**W-104 RESOLVED**(v4.0.12 —— ≤16B eightbyte 分类 + >16B MEMORY class 整体落栈,与 gcc 三方向对拍全绿);**W-114 RESOLVED**(v4.0.14 —— enum 的 ABI 两侧统一:参数按地址传、返回值走 sret、调用结果是 8 字节指针;顺带修了 **W-119**:SysV 帧布局把第 0 号局部变量放在 `0(%rbp)` = 覆盖旧 rbp),**9 ACTIVE / 104 索引行**,per `docs/internal/workarounds.md` 索引表):
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
@@ -150,7 +150,6 @@
 | W-106 | `compiler/src0/symtab.jhyy:260-264` | 死存储改栈布局。**2026-10-18 三次实测:原注释的理由已被证伪(栈帧两边都物化)、机制未知、删除的安全性未证实(约 11 次运行里 1 次间歇失败 vs 基线 9 次全绿)。不删,但别信旧注释** |
 | W-112 | `compiler/src0/codegen.jhyy:4478` | `#[link_section]` 是 no-op,生成的 .s 里没有任何 `.section` |
 | W-113 | `asm!` / `fence_*` emit 路径 | 字节被 emit 到 `ret` 之后,永不执行;ship gate 零敏感 |
-| W-114 | enum match codegen | **全 unit-variant 的 enum `match` 永远命中第一支** |
 | W-115 | `codegen_call_return_types.jhyy` | W-089 标 ✅ RESOLVED,但它自己的 reproducer 仍 STACK_OVERFLOW |
 | W-105.1 | `compiler/src0/sema.jhyy:2578-2579` | `check_cap_pass` 同款 stub,当前无调用点 |
 | W-118 | `compiler/src0/lexer.jhyy:212-258` | 语言 lexer `lex_peek_char` 无 EOF 守卫 → 越过 end 前进(W-117 的同族另一处,尚未观测到危害) |
@@ -188,6 +187,7 @@ W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_
 - W-102 → RESOLVED (2026-10-15, address-holder 池与 alloc 池重叠 → self-hosted 编译器泛型 SEGV)
 - W-074.6 → RESOLVED (2026-10-15,原 DEFERRED;所等的 W-096 / W-097 均已 RESOLVED)
 - W-104 → RESOLVED (2026-10-20, v4.0.12 —— SysV struct 传参:≤16B eightbyte 分类 + >16B MEMORY class 整体落栈,与 gcc 三方向对拍一致)
+- W-114 → RESOLVED (2026-10-20, v4.0.14 —— enum ABI 两侧统一:参数按地址、返回值 sret、调用结果 8 字节;顺带修了 W-119 的 SysV 帧布局)
 
 历史 workaround 走 git history;`workarounds.md` 保留 RESOLVED/SUPERSEDED/INVALID 状态作 audit ledger。
 

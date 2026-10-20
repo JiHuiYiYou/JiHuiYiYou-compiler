@@ -949,10 +949,29 @@ fn cg_offset_for_temp_with_target(t: i64, target_tag: i32) -> i64 {
     // 改用 local t (跟 cg_offset_for_temp 同 per-fn-local 翻译)。
     let local_t2 = cg_local_t_from_global(t);
     let win_flag = target_is_win(target_tag);
+    // Win:影子区 32 字节占了 [rbp-32, rbp) → 局部变量从 -32 起往下排。
+    // SysV:没有影子区,但 **[rbp+0] 是 saveq %rbp 存回来的旧 rbp**,
+    //      [rbp+8] 是返回地址 —— 局部变量**一个都不能占这两格**。
+    //
+    // ⚠️ W-118(2026-10-20 顺带挖出):SysV 分支原来写的是 `- local_t2*8`,
+    //    于是 **local_t2 == 0 的那个局部落在 0(%rbp)** —— 直接把 saveq %rbp
+    //    存回来的旧 rbp 覆盖掉。
+    //    后果:该函数返回时 `popq %rbp` 弹出的是垃圾 → **rbp 寄存器被污染**
+    //    (rbp 是 callee-saved)→ 它的调用者的 rbp 也跟着坏 → 调用者的
+    //    序言/尾声按 rbp 算帧 → 踩飞 → SEGV。
+    //    实测:`sysv_abi_test` 的 main_jhyy 里就有 `movl $1, 0(%rbp)`
+    //    (它自己碰巧没崩,因为它是最外层,crt0 不在乎 rbp);
+    //    同样的形状出现在**被别的函数调用**的函数里就直接 SEGV
+    //    (W-114 的 enum sret 用例就是这么炸的)。
+    //
+    //    修法:SysV 也从 -8 起排(即 `-(local_t2+1)*8`)—— 与 Win 的语义对齐
+    //    (Win 靠 -32 的影子区避开 [rbp+0..15],SysV 靠 -8 的偏移避开)。
+    //    帧大小不变(frame_size = (local_max+1)*8):最低的局部变量正好落在
+    //    帧底,alloc 池在再往下 32 字节 → 不重叠。
     let result_off: i64 = if win_flag == (1 as i32) {
         (0 as i64) - (32 as i64) - local_t2 * (8 as i64)
     } else {
-        (0 as i64) - local_t2 * (8 as i64)
+        (0 as i64) - (local_t2 + (1 as i64)) * (8 as i64)
     };
     if t >= (1024 as i64) {
         let tag: i64 = if win_flag == (1 as i32) {

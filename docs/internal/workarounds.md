@@ -123,11 +123,12 @@
 | [W-111](#w-111) | RESOLVED | 泛型 enum 的关联构造器在无类型上下文处不被识别;多字段 payload 连解析都过不去 |
 | [W-112](#w-112) | ACTIVE | `#[link_section]` 完全失效 — 属性被解析但 codegen 是 no-op |
 | [W-113](#w-113) | ACTIVE | `asm!` 与 memory barrier 的字节被 emit 到 `ret` 之后,永不执行 |
-| [W-114](#w-114) | ACTIVE | 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效 |
+| [W-114](#w-114) | RESOLVED | 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效 |
 | [W-115](#w-115) | ACTIVE | W-089 标着 RESOLVED,但它自己的 reproducer 至今... |
 | [W-116](#w-116) | RESOLVED | SysV callee 参数溢出只处理 4 个整数寄存器 —— 第 5 个及以后的参数全读到第 4... |
 | [W-117](#w-117) | RESOLVED | self-backend IL lexer 在 EOF 处无守卫 —— cur == end... |
 | [W-118](#w-118) | ACTIVE | 语言 lexer 的 lex_peek_char 同样无 EOF 守卫 —— 越界前进而非空转 |
+| [W-119](#w-119) | RESOLVED | SysV 帧布局把第 0 号局部变量放在 0(%rbp) —— 覆盖 saveq %rbp 存的旧... |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -8129,10 +8130,10 @@ OS-required 特性(`jhyy_OS` 多核同步的基础)。
 <a id="w-114"></a>
 ## W-114: 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — 所有变体都无 payload 时,match 不做 tag 检查,恒取第一臂
+**状态:** RESOLVED closed 2026-10-20 (v4.0.14) — enum 的 ABI 两侧统一(参数按地址、返回值走 sret、调用结果是 8 字节指针)
 **Backfilled:** 2026-10-15 (v1.7.1 patch A3「enum match arm tag check 真修」只覆盖了带 payload 的形状)
 **Filed-by:** audit-fanout-2026-10-15
-**日期:** 2026-08-28 (v1.7.1 patch A3 部分真修) → 至今
+**日期:** 2026-08-28 (v1.7.1 patch A3 部分真修) → 2026-10-20 (真修)
 
 **触发面:** `type T = enum { A, B, C }`(所有变体都是 unit variant)对
 `T::B` / `T::C` 做 match。
@@ -8176,7 +8177,7 @@ Mix(Z)=30      期望 30    ✓
 结果类型(`Result<T,E>` 的 unit 分支)、错误码分派。这是 idiomatic 写法,
 不是边角用法。**静默给错结果,不报错。**
 
-**失效条件:**
+**失效条件(已于 2026-10-20 全部满足):**
 1. codegen 的 enum match 在「所有 variant 都是 unit」时也要 emit 真正的 tag
    compare,不能退化成 first-arm
 2. 补测试:上面这个最小复现,断言 `u3(Unit3::B) == 1` 且 `u3(Unit3::C) == 2`
@@ -8185,8 +8186,87 @@ Mix(Z)=30      期望 30    ✓
 3. `gdb_pretty_test.jhyy` 删掉 `// SKIP:` 即为验收(它的 `read_color` /
    `read_maybe` 目前都返回 0)
 
+### 2026-10-20 真修:不是「match 不做 tag 检查」,是 **enum 的 ABI 两侧不一致**
+
+原台账把根因写成「match 不做 tag check」。**RCA 推翻了这个描述** —— tag compare
+**一直都在 emit**(实测 IL:`%t8 =w ceqw %t6, %t7` + `jnz`),只是**比的东西不对**。
+
+**真正的根因:jhyy 的 enum 值是「指向一个槽的地址」,而 ABI 分类把它当成了
+4 字节的值。**
+
+ABI 规范(`docs/abis/jhyy-abi-v1.0.0.md` § 2.6 布局 + § 3.2 传参 + § 4.1 栈分配)
+把 enum 定成:内存映像 `[tag | padding | payload]` 放在一个**栈槽**里,
+**enum 的值 = 那个槽的地址**。而 `abi_win_classify_arg` 对 **size ≤ 4 的 enum
+返回 QBE_W(按值传)** —— 与规范相反。
+
+于是:
+
+| 位置 | caller 给的 | callee 期望的 | 后果 |
+|---|---|---|---|
+| enum 参数(≤16B,全 unit) | 地址(`l`) | 值(`w`) | 两边对同一参数的寄存器归属理解不一致 → **tag 比较永远不成立** → 恒命中第一支 |
+| enum 返回值 | callee 帧里那个槽的地址 | — | 函数一返回就**悬垂**(下一个函数的序言会盖掉它) |
+| enum 调用结果 | 8 字节地址 | 只存了 %rax 的**低 4 字节** | 地址被**截断** → 读 tag 读到垃圾 |
+
+而**带 payload 的 enum**(size > 4)恰好被分类成 QBE_L(地址)✓ —— 所以它一直
+正常。这解释了「规律精确:有任意一个 variant 带 payload 就正常」。
+
+#### 实现:先定表示,再统一两侧
+
+1. **`abi_win_classify_arg` 对 enum 一律返回 QBE_L**(地址)。
+   它同时决定**参数**与**返回值**的字母(4 个调用点:Win header / SysV header /
+   返回类型 / callee 的 param 局部)—— enum 的值在两边都是地址,四处一次改齐。
+2. **enum 的返回值改走 sret**(ABI § 3.3 明写「struct / enum → 隐式 sret 指针
+   参数返回」)。caller 出目标槽,callee 把 **image** 拷进去
+   (新增 `cg_copy_enum`:按 8/4 字节分组拷 `sizeof(enum)` 字节)。
+   不能只把地址拷过去 —— 那个地址指向 callee 自己帧里的槽,返回即悬垂。
+3. **enum 的调用结果 / if 结果 / match 结果**用 `cg_value_type_of`(enum → 8 字节
+   地址),不是 `qbe_type_of`(→ 4 字节 tag)。
+4. **enum 的「存储」放 image,「表达式」求值为地址**:
+   - 存储(局部变量槽 / struct 字段 / 数组元素 / 循环变量)→ 拷 image
+     (新增 `cg_store_enum_image`;struct 字面量 / `cg_copy_struct` / 赋值路径
+     分别走 image 拷贝)
+   - 表达式(enum 变量 / enum 字段 / `*p` / `arr[i]` / `&e`)→ 给**地址**,不 load
+     (load 出来的是 4 字节 image → tag 对、**payload 丢**)
+
+#### 途中挖出的两个更早的 bug
+
+- **`&e` 对 enum 取的是「指向一个装着地址的槽的地址」**:通用 SSA 路径会
+  「alloc 一个 temp 把地址存进去,再取 temp 的地址」。enum 的值本身就是地址,
+  `&e` 应直接等于 `e`。
+- **W-119**(单独登记):SysV 帧布局把第 0 号局部变量放在 `0(%rbp)` ——
+  那是 `saveq %rbp` 存的旧 rbp。见 [W-119](#w-119)。
+
+#### 验收
+
+```
+最小复现(Win):   u3(A)=0 ✅  u3(B)=1 ✅  u3(C)=2 ✅
+                 pn(N)=200 ✅  pn(S(5))=105 ✅  mx(Z)=30 ✅
+返回值:          arm(mk())=1 ✅  arm(passthru(U::C))=2 ✅  match mk(){..}=1 ✅
+payload enum:    arm(P::N)=200 ✅  arm(P::S(5))=105 ✅  arm(mk())=200 ✅
+局部变量:        let mut c: U = U::B → match c = 1 ✅  赋值后再 match = 2 ✅
+                 let mut p: P = P::S(7) → arm(p) = 107 ✅(payload 没丢)
+struct 字段:     get_e(WithE{e:U::C}) = 2 ✅
+gdb_pretty_test: read_color=1 + read_maybe=42 = 43 ✅(之前是垃圾)
+SysV(同款):     同样的用例在 amd64_sysv 目标下 217 ✅
+全量回归:        178/178, 0 failed ✅
+自举闭环:        v2..v5 逐字节相同 ✅  closure_check v2==v3 ✅
+```
+
+新增常驻门:
+
+- `compiler/tests/examples/enum_match_unit_variants.jhyy` —— XFAIL 标记已摘,
+  并**扩了三个用例**(跨函数返回 / struct 字段 / payload enum 的返回)
+- `compiler/tests/examples/sysv_enum_match.jhyy` —— **新增**,SysV 侧的 enum 回归
+  (Win 与 SysV 两条路径都要验:只验 Win 的话,「同一份 enum 语义在两个目标上
+  不一致」这类缺陷会隐形)
+
 **引用:**
-- 最小复现:见上(可直接抄进 `compiler/tests/examples/`)
+- 最小复现:见上(已抄进 `compiler/tests/examples/enum_match_unit_variants.jhyy`)
+- 源码 `compiler/src0/abi_amd64_win.jhyy`(`abi_win_classify_arg` 的 enum 分支)
+- 源码 `compiler/src0/codegen.jhyy`(`cg_value_type_of` / `cg_copy_enum` /
+  `cg_store_enum_image` / `cg_sysv_check_memory_scope` 同一批改动里)
+- 源码 `compiler/src0/codegen_amd64_state.jhyy`(`cg_offset_for_temp_with_target`
+  —— 见 W-119)
 - 受影响测试 `compiler/tests/examples/gdb_pretty_test.jhyy`
 - 相关:`docs/internal/workarounds.md` enum match arm tag check 段(v1.7.1 patch A3)
 
@@ -8682,3 +8762,71 @@ if c == 0 { return 0 as i32; }      // 靠 peek 返 0 判 EOF
 - `compiler/src0/codegen_amd64_emit_call.jhyy:1862-1899`(发射侧**原本就**支持,未改)
 - `compiler/tests/examples/float_cmp_diag.jhyy`(新增判据)
 - 相关:W-117(工具链依赖,决定了同一份垃圾字节被不同 `as` 解释成什么)
+
+<a id="w-119"></a>
+## W-119: SysV 帧布局把第 0 号局部变量放在 0(%rbp) —— 覆盖 saveq %rbp 存的旧 rbp
+
+**状态:** RESOLVED closed 2026-10-20 (v4.0.14) — SysV 的局部变量改为从 -8 起排
+**Filed-by:** w114-rca-2026-10-20
+**日期:** 2026-10-20 W-114 真修时顺带发现
+
+**触发面:** `compiler/src0/codegen_amd64_state.jhyy` 的 `cg_offset_for_temp_with_target`
+—— SysV 分支的偏移公式。
+
+**症状:**
+
+SysV 目标下,某个函数的**第一个局部变量**被写在 `0(%rbp)`:
+
+```
+main_jhyy:
+	pushq %rbp
+	movq %rsp, %rbp
+	subq $8320, %rsp
+	movl $1, 0(%rbp)      ← ⚠️ 0(%rbp) 是 saveq %rbp 存回来的**旧 rbp**
+	movl $2, -8(%rbp)
+```
+
+`0(%rbp)` 是**保存下来的 rbp**,`8(%rbp)` 是返回地址 —— 局部变量占了这两格
+就等于踩了调用链。
+
+**根因:** Win 与 SysV 的偏移公式不对称:
+
+```
+Win :  off = -32 - local_t*8      ← 影子区 32 字节占了 [rbp-32, rbp),局部变量从 -32 起
+SysV:  off = -local_t*8           ← ⚠️ local_t == 0 时落在 0(%rbp)
+```
+
+SysV 没有影子区,但**照样不能占 [rbp+0] 和 [rbp+8]**。旧公式把第 0 号局部变量
+放在了 `0(%rbp)`。
+
+**后果(为什么它平时没炸):** 该函数返回时 `movq %rbp,%rsp; popq %rbp; ret` ——
+`popq` 从 [rbp] 弹出**被覆盖过的垃圾** → rbp 寄存器被污染(rbp 是 callee-saved)
+→ **它的调用者的 rbp 也跟着坏** → 调用者的序言/尾声按 rbp 算帧 → 踩飞 → SEGV。
+
+但如果被污染的那个函数是**最外层**(caller 是 crt0,不关心 rbp),就只是
+「rbp 寄存器是垃圾」而不会崩 —— 所以长期没人发现。
+
+**实测:**
+- `sysv_abi_test` 的 `main_jhyy` 里就有 `movl $1, 0(%rbp)` ✓(它自己没崩)
+- 一旦同样的形状出现在**被别的 jhyy 函数调用**的函数里 → 立刻 SEGV
+  (W-114 的 enum sret 用例就是这么炸的:`arm` 的参数被写在 `0(%rbp)`)
+
+**修法:** SysV 分支也留出 [rbp+0] 这一格 —— `off = -(local_t+1)*8`
+(与 Win 的语义对齐:Win 靠 -32 的影子区避开, SysV 靠 -8 的偏移避开)。
+
+帧大小不变(`frame_size = (local_max+1)*8`):最低的局部变量正好落在帧底,
+alloc 池在再往下 32 字节 → 不重叠。
+
+**影响范围:** `--target=amd64_sysv*` 的全部产出。Win 路径的公式**没动**
+(它本来就对,而且动了会破坏自举闭环的 byte-equal 门)。
+
+**验收:**
+- 5 个 SysV regress 用例 5 PASS(Win 侧零回归:全量 178/178)
+- 新增 `sysv_enum_match.jhyy`(SysV 侧的 enum 回归用例)PASS,exit=217
+- W-104 的三方向跨实现对拍 3 PASS(44 / 42 / 42)
+
+**引用:**
+- 源码 `compiler/src0/codegen_amd64_state.jhyy`(`cg_offset_for_temp_with_target`
+  的 SysV 分支)
+- 源码 `compiler/tests/examples/sysv_abi_test.jhyy`(修复前就有 `movl $1, 0(%rbp)`)
+- 相关:W-114(enum ABI 统一时踩到它)、W-104(SysV struct 传参)

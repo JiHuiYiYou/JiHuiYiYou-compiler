@@ -217,6 +217,86 @@ artifact 级门:    sysv_mixed_struct / sysv_memory_class / sysv_arg_spill 全 P
 
 ---
 
+## v4.0.14 — enum 的 ABI 两侧统一 · W-114 闭合(+ 顺带修 W-119)
+
+**2026-10-20。** W-114(全 unit-variant 的 enum `match` 永远命中第一支)是最后
+一条「核心语言功能静默失效」的 ACTIVE —— 现在 **RESOLVED**。台账:
+`docs/internal/workarounds.md` W-114 / W-119。
+
+### RCA 推翻了原描述
+
+原台账写「match 不做 tag check」。**不对** —— tag compare **一直都在 emit**
+(IL:`%t8 =w ceqw %t6, %t7` + `jnz`),只是**比的东西不对**。
+
+真根因:**enum 的 ABI 两侧不一致**。jhyy 的 enum 值 = 「指向一个槽的地址」
+(ABI § 2.6 布局 + § 4.1「enum 构造 → 栈槽」),而 `abi_win_classify_arg` 对
+**size ≤ 4 的 enum 返回 QBE_W(按值传)** —— 与规范相反。
+
+| 位置 | caller 给的 | callee 期望的 | 后果 |
+|---|---|---|---|
+| enum 参数(全 unit) | 地址(`l`) | 值(`w`) | 寄存器归属理解不一致 → **tag 比较永不成立** → 恒命中第一支 |
+| enum 返回值 | callee 帧里那个槽的地址 | — | 函数一返回就**悬垂**(下一个函数的序言会盖掉它) |
+| enum 调用结果 | 8 字节地址 | 只存 %rax 的**低 4 字节** | 地址被**截断** → 读 tag 读到垃圾 |
+
+带 payload 的 enum(size > 4)恰好被分类成 QBE_L(地址)✓ —— 所以它一直正常。
+这解释了「规律精确:有任意一个 variant 带 payload 就正常」。
+
+### 实现:先定表示,再统一两侧
+
+1. `abi_win_classify_arg` 对 enum 一律返回 QBE_L(地址)。它同时决定**参数**与
+   **返回值**的字母(4 个调用点:Win header / SysV header / 返回类型 /
+   callee 的 param 局部)—— enum 的值在两边都是地址,四处一次改齐。
+2. **enum 的返回值改走 sret**(ABI § 3.3 明写「struct / enum → 隐式 sret 指针
+   参数返回」)。caller 出目标槽,callee 把 **image** 拷进去(新增
+   `cg_copy_enum`:按 8/4 字节分组拷 `sizeof(enum)` 字节)。不能只拷地址 ——
+   那个地址指向 callee 自己帧里的槽,返回即悬垂。
+3. enum 的**调用结果 / if 结果 / match 结果**用 `cg_value_type_of`(8 字节地址),
+   不是 `qbe_type_of`(4 字节 tag)。
+4. **「存储放 image,表达式求值为地址」**:局部变量槽 / struct 字段 / 数组元素 /
+   循环变量 → 拷 image(新增 `cg_store_enum_image`);enum 变量 / 字段 / `*p` /
+   `arr[i]` / `&e` → 给**地址**,不 load(load 出来的是 4 字节 image → tag 对、
+   **payload 丢**)。
+
+### 途中挖出的两个更早的 bug
+
+- **`&e` 对 enum 取的是「指向一个装着地址的槽的地址」**:通用 SSA 路径会先 alloc
+  一个 temp 把地址存进去、再取 temp 的地址。enum 的值本身就是地址 → `&e` 应
+  等于 `e`。
+- **W-119**(单独登记):**SysV 帧布局把第 0 号局部变量放在 `0(%rbp)`** ——
+  那是 `saveq %rbp` 存的**旧 rbp**。Win 侧靠 -32 的影子区避开,SysV 侧没有
+  影子区就得靠 -8 的偏移避开(公式改成 `-(local_t+1)*8`)。
+  **这条是活的**:`sysv_abi_test` 的 `main_jhyy` 里一直有 `movl $1, 0(%rbp)`;
+  它自己没崩是因为它是最外层(caller 是 crt0,不关心 rbp)—— 同样的形状出现在
+  **被别的 jhyy 函数调用**的函数里就直接 SEGV。
+
+### 验收
+
+```
+最小复现(Win):  u3(A)=0 u3(B)=1 u3(C)=2 ✅  pn(N)=200 pn(S(5))=105 ✅  mx(Z)=30 ✅
+返回值:         arm(mk())=1 ✅  arm(passthru(U::C))=2 ✅  match mk(){..}=1 ✅
+payload enum:   arm(P::N)=200 ✅  arm(P::S(5))=105 ✅  arm(mk())=200 ✅
+局部变量:       let mut c: U = U::B → match=1 ✅  赋值后再 match=2 ✅
+                let mut p: P = P::S(7) → arm(p)=107 ✅(payload 没丢)
+struct 字段:    get_e(WithE{e:U::C})=2 ✅
+gdb_pretty_test: read_color=1 + read_maybe=42 = 43 ✅(之前是垃圾)
+SysV(同款):     同样的用例在 amd64_sysv 目标下 = 217 ✅
+全量回归:       178/178, 0 failed ✅
+自举闭环:       v2..v5 逐字节相同 ✅  closure_check v2==v3 ✅
+5 个 SysV 回归:  5 PASS ✅   W-104 三方向对拍: 3 PASS ✅
+```
+
+新增常驻门:
+
+- `compiler/tests/examples/enum_match_unit_variants.jhyy` —— XFAIL 标记已摘,并
+  扩了三个用例(跨函数返回 / struct 字段 / payload enum 的返回)
+- `compiler/tests/examples/sysv_enum_match.jhyy` —— **新增**:SysV 侧的 enum 回归
+  (Win 与 SysV 两条路径都要验 —— 只验 Win 的话,「同一份 enum 语义在两个目标上
+  不一致」这类缺陷会隐形)
+
+**ACTIVE 条数:10 → 9。**
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

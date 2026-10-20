@@ -47,11 +47,24 @@ fn abi_win_classify_arg(t_raw: *u8) -> i32 {
         return QBE_L();
     }
     if kind == KIND_ENUM() {
-        // W-007 fix: large enums (>4 bytes size) by slot pointer
-        if (*t).size > (4 as i64) {
-            return QBE_L();
-        }
-        return QBE_W();
+        // W-114 (2026-10-20):enum **一律**按「地址」传(QBE_L),不再按 size
+        // 分「≤4 字节按值 / >4 字节按指针」。
+        //
+        // jhyy 的 enum 运行时表示 = **指向一个槽的地址**(槽里是
+        // [tag | padding | payload] —— ABI § 2.6 布局 + § 4.1「enum 构造 →
+        // 栈槽」)。caller 侧 enum 表达式的值**就是那个地址**
+        // (NODE_ENUM_VARIANT 返回 slot 地址),所以 callee 侧必须按地址收。
+        //
+        // 之前 size ≤ 4 的 enum 被分类成 QBE_W(按值)→ caller 传地址、
+        // callee 当值收 → 两边对同一参数的寄存器归属理解不一致 →
+        // tag 比较永远不成立 → `match` 恒命中第一支(W-114)。
+        //
+        // ABI § 3.2 明写:「enum 同 struct: 副本地址」。
+        //
+        // ⚠️ 本函数同时决定**参数**与**返回值**的字母(4 个调用点:Win header /
+        //    SysV header / 返回类型 / callee 的 param 局部)—— enum 的值在两边
+        //    都是地址,所以四处必须一致。
+        return QBE_L();
     }
     // Delegate: KIND_PRIMITIVE / POINTER / SLICE / FUNC / VOID / unknown
     return qbe_type_of(t_raw);

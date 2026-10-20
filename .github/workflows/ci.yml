@@ -347,7 +347,7 @@ jobs:
           # 顺带关掉 regress 里的 wire-only SKIP:这里显式列出 5 个名字,
           # 少编出一个就在本步失败,而不是悄悄进到下游。
           mkdir -p tmp/sysv_il
-          TESTS="sysv_abi_test sysv_struct_mixed sysv_struct_pass sysv_struct_ret sysv_vararg_basic"
+          TESTS="sysv_abi_test sysv_enum_match sysv_struct_mixed sysv_struct_pass sysv_struct_ret sysv_vararg_basic"
           missing=0
           for t in $TESTS; do
             src="compiler/tests/examples/$t.jhyy"
@@ -472,11 +472,11 @@ jobs:
           uname -a
           gcc --version | head -1
           ls -la tmp/sysv_il/
-            # 6 份一份都不能少(5 个 sysv 测试 + 1 个 ABI 对拍 caller)——
+            # 7 份一份都不能少(6 个 sysv 测试 + 1 个 ABI 对拍 caller)——
             # 少了就是上游 emit 步出了问题,不能当成通过。
             n=$(ls tmp/sysv_il/*.s 2>/dev/null | wc -l)
-            echo "收到 $n 份 regress 用例 .s(期望 5)"
-            [ "$n" -eq 5 ] || { echo "::error::.s 数量不对,拒绝报绿"; exit 1; }
+            echo "收到 $n 份 regress 用例 .s(期望 6)"
+            [ "$n" -eq 6 ] || { echo "::error::.s 数量不对,拒绝报绿"; exit 1; }
             m=$(ls tmp/sysv_abi/*.s 2>/dev/null | wc -l)
             echo "收到 $m 份 ABI 对拍用 .s(期望 3:small caller / MEMORY caller / MEMORY callee)"
             [ "$m" -eq 3 ] || { echo "::error::ABI 对拍 .s 缺失,拒绝报绿"; exit 1; }

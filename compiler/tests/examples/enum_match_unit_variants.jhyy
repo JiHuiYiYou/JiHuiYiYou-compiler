@@ -20,6 +20,16 @@ fn pn(v: Pay1N) -> i32 { return match v { Pay1N::S(x) => 100 + x, Pay1N::N => 20
 fn mx(v: Mix) -> i32 { return match v { Mix::X => 10, Mix::Y(y) => 20 + y, Mix::Z => 30 }; }
 type Mix = enum { X, Y(i32), Z }
 
+// 返回 enum 的函数 —— 2026-10-20 之前 enum 的返回是「callee 自己帧里那个
+// 槽的地址」,函数一返回就悬垂(下一个函数的序言会盖掉它)。
+// 现在走 sret(ABI § 3.3):caller 出目标槽,callee 拷 image 进去。
+fn mk_u3() -> Unit3 { return Unit3::B; }
+fn mk_pn() -> Pay1N { return Pay1N::S(7); }
+
+// enum 存在 struct 字段里
+type WithE = struct { e: Unit3, x: i32 }
+fn get_e(s: WithE) -> i32 { return match s.e { Unit3::A => 0, Unit3::B => 1, Unit3::C => 2 }; }
+
 fn main_jhyy() -> i32 {
     // 全 unit variant:三个必须给出三个不同的值
     if u3(Unit3::A) != 0 { return 1; }
@@ -30,10 +40,32 @@ fn main_jhyy() -> i32 {
     if pn(Pay1N::S(5)) != 105 { return 5; }
     // 混合形状:第一个臂带 payload,后面两个 unit
     if mx(Mix::Z) != 30 { return 6; }
+    // 跨函数返回的 enum:返回值不能悬垂
+    if u3(mk_u3()) != 1 { return 7; }
+    if pn(mk_pn()) != 107 { return 8; }
+    // enum 存在 struct 字段里
+    if get_e(WithE { e: Unit3::C, x: 7 }) != 2 { return 9; }
     return 0;
 }
 
-// XFAIL: W-114 全 unit-variant 的 enum `match` 永远命中第一支 → 上面 return 2 / return 3。
-//       实测 u3(B) 与 u3(C) 都返回 0(= A 的臂);而同文件里带 payload 的
-//       pn / mx 完全正常 —— 边界精确。修完删掉这行即验收。
+// 2026-10-20(W-114 真修):XFAIL 标记已摘 —— 全 unit-variant 的 enum `match`
+//   现在做**真 tag dispatch**。
+//
+//   根因不是「match 不做 tag 检查」,而是 **enum 的 ABI 两侧不一致**:
+//   jhyy 的 enum 值 = 「指向一个槽的地址」(槽里是 [tag|padding|payload],
+//   ABI § 2.6 / § 4.1),caller 传的**就是那个地址**;而 callee 侧把
+//   size ≤ 4 的 enum 按 **QBE_W(按值)** 收 → 两边对同一参数的寄存器归属
+//   理解不一致 → tag 比较永远不成立 → 恒命中第一支。
+//
+//   修法(见台账 W-104 同款「先定表示、再统一两侧」的思路):
+//   ① `abi_win_classify_arg` 对 enum 一律返回 QBE_L(地址)—— 参数与返回值
+//      共用它,四处调用点(Win header / SysV header / 返回类型 / callee 的
+//      param 局部)一次改齐。
+//   ② enum 的**返回值改走 sret**(ABI § 3.3 明写「struct / enum → 隐式
+//      sret 指针参数返回」)。之前是「返回 callee 自己帧里那个槽的地址」,
+//      函数一返回就悬垂 —— 实测 `arm(mk())` 里 arm 的序言把 mk 的槽整个盖掉
+//      → tag 读成 0。sret 由 caller 出目标槽,callee 拷 image 进去。
+//   ③ enum 的**调用结果**是 8 字节指针,不是 4 字节 tag
+//      (`cg_value_type_of`)—— 之前只存 %rax 的低 4 字节 → 地址被截断。
+//
 // EXPECT: 0
