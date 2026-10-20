@@ -630,6 +630,35 @@ MVP 范围里明确不支持,**但编译器没有任何检查** ⇒ 给它生成
 `closure_capture_unsupported.jhyy`(EXPECT-ERROR)⇒ **W-089 的官方 reproducer
 现在跑通了**(EXIT=0)—— 「W-089 已 RESOLVED」这句话**终于有证据支撑** ✓。
 
+### v4.0.19 — 台账清零 ✅ **已完成(2026-10-20)**
+
+| 内容 | 状态 |
+|---|---|
+| **W-123** 临时文件名 seed = `pid ^ tid ^ ctr` 会规律性碰撞 | ✅ **2026-10-20 已完成** —— Windows 的 pid 与主线程 tid 来自**同一个全局计数器** ⇒ `N ^ (N+1) = 1` ⇒ **每两个并发进程就撞一次同一个临时名** ⇒ rename 失败 ⇒ 编译失败。换成乘法混合的哈希 + **独占创建**(CREATE_NEW)重试 ⇒ 并发编 32 个 → **0 失败**(修复前 4 个) |
+| **W-106** 「每次 symbol lookup 白造一个 StringBuilder」的死存储 | ✅ **2026-10-20 已完成** —— 删掉。它注释里的理由早已被证伪;而 2026-10-18 那次「删掉它 ⇒ 偶发失败 ⇒ 它承重」的对照实验**归错了因**(真凶是 W-123 —— 那个 workaround 只改变了时序) |
+
+## 🎉 ACTIVE 桶清零(2026-10-20)
+
+**台账 108 行:102 RESOLVED + 4 SUPERSEDED + 2 INVALID + 0 ACTIVE + 0 DEFERRED。**
+这是本项目**第一次**清空 ACTIVE 桶(14 → 0)。
+
+**清零名单:** W-104 / W-112 / W-113 / W-114 / W-115 / W-118 / W-120 / W-121 /
+W-122 / W-123 / W-103 / W-105 / W-105.1 / W-106 / W-107。
+
+**余下的 promote 条件**(见 `active-workaround-clearance.md` § 全局 ship gate):
+- ✅ `regress jhyy.exe` → 184/184 PASS + 20 SKIP
+- ⏳ `regress jhyy_v2.exe`(自举产物也跑一遍)
+- ✅ `closure_check.sh` → PASS,v2.s == v3.s byte-identical
+- ⏳ `fixed_point.sh N=5` → 7 PASS / 0 FAIL / 0 INFO
+- ✅ `workarounds.md 索引` → **ACTIVE 0 / DEFERRED 0**
+
+**⚠️ 方法论沉淀(W-106 那条最值钱):** 「删掉 X ⇒ 偶发失败 ⇒ X 承重」这个推理链
+**只在一个前提下成立**:那个偶发失败是**由 X 引起的**。W-106 那次不是 —— X 只
+改变了时序,让另一个 bug(W-123)撞上了。**所以「删掉试试」的实验必须配合
+「失败症状的归因」** ✓:本例的关键是症状是「**compile failed**」而不是「算错」——
+编译期失败指向「编译过程本身出了问题」,「算错」才指向「生成的代码有问题」
+⇒ 方向完全不一样 ✓。
+
 **两个 stub 处置不同的理由(记在台账里):** `check_cap_pass` 没人调 → 删;
 `check_borrow` 每个函数声明都调 → 走「实现最小检查」而不是删。
 

@@ -762,6 +762,76 @@ W-089 的 reproducer codegen_call_return_types.jhyy:EXIT=0 ✅(XFAIL 摘掉)
 
 ---
 
+## v4.0.19 — 台账清零:ACTIVE 14 → **0** 🎉(W-106 + W-123)
+
+**2026-10-20。** 这是本项目**第一次**把 ACTIVE 桶清空(台账 108 行:
+102 RESOLVED + 4 SUPERSEDED + 2 INVALID + **0 ACTIVE** + 0 DEFERRED)。
+
+### W-123 —— 临时文件名 seed 会**规律性**碰撞(并发编译随机失败的真凶)
+
+`jh_mktemp_ascii` 的 seed = `GetCurrentProcessId() ^ GetCurrentThreadId() ^ ++ctr`,
+注释写「collision vanishingly rare」—— **那个结构会规律性地撞**:
+
+- Windows 的 **process id 与主线程 thread id 来自同一个全局计数器**
+  ⇒ 一个新进程常见的 (pid, tid) 形态是 **(N, N+1)**
+- ⇒ `N ^ (N+1) = 1`(N 为偶数时)⇒ **每两个并发进程就撞一次同一个临时文件名**
+- ⇒ 两个并发编译抢同一个临时名 ⇒ 后一个的 rename 失败 ⇒ **编译失败**
+
+「4 billion combos」那个论证把**输出空间的大小**当成了保证 ——
+但**映射到输出空间的函数不是单射** ✗。
+
+**复现:** 并发编译 32 个文件 → **4 个失败**,报「W-048: rename temp exe failed
+(kept at ...\Temp\jhe0000000e.exe)」—— 两次失败的临时文件名**一字不差**
+(`0000000e` = seed 14 = 1 ^ 15)。
+
+**修法:** ① 换掉裸 XOR,用**乘法混合**(Knuth multiplicative hash)把
+pid / tid / 计数器 / 时钟揉成一个 32 位值;② **真的独占创建一次**
+(`CreateFileA` + `CREATE_NEW`),名字被占了就让内核拒绝、换 hash 重试 ⇒
+**「唯一」由文件系统保证**。
+
+修复后:同样的压力 → **0 失败** ✓。
+
+### W-106 —— 那处「每次 symbol lookup 白造一个 StringBuilder」删掉了
+
+**这一条的价值在于:它洗清了一个被误判了两年多的 workaround。**
+
+2026-10-18 的对照实验:「删掉这三行 ⇒ 全量回归偶发失败(2/3,后来记为 1/11)
+⇒ 它在承重 ⇒ 不能删」。**那个实验归错了因** —— 偶发失败的真凶是 **W-123**
+(临时名碰撞 ✗),而那个 workaround 只是**改变了时序** ✗(让另一个 bug 撞上了
+而已 ✗)。
+
+⇒ **⇒ 那个 workaround 的「承重性」从来就不存在** ✓ —— 删掉它 ⇐ W-123 真修 ⇐
+两个 bug 各自归位 ✓。
+
+**方法论沉淀(比修复本身更值钱):** 「删掉 X ⇒ 偶发失败 ⇒ X 承重」这个推理链
+**只在一个前提下成立**:那个偶发失败是**由 X 引起的**。本例里不是 —— X 只改变
+了时序。**所以「删掉试试」的实验必须配合「失败症状的归因」** ✓:
+本例的关键是症状是「**compile failed**」而不是「算错」——
+**编译期失败**指向「编译过程本身出了问题」(临时名 / 旁路文件 / 并发),
+而「算错」才指向「生成的代码有问题」⇒ 方向完全不一样 ✓。
+
+**验收:**
+
+```
+并发压力:  32 个并发编译 → 0 失败 ✅(修复前 4 个)
+全量回归:  184/184 PASS, 0 failed, 0 flaky ✅
+自举闭环:  closure_check.sh v2.s == v3.s byte-identical ✅
+产物级门:  7 PASS / 0 KNOWN-FAIL / 0 FAIL ✅
+SysV 回归: 6 PASS ✅   W-104 三方向 ABI 对拍: 3 PASS ✅
+```
+
+### v4.0.18 那一轮清掉的(W-113 / W-115 / W-118 / W-121 / W-122 / W-105 / W-105.1)
+
+见上文各节。**14 → 0** 的完整名单:
+W-104 / W-112 / W-113 / W-114 / W-115 / W-118 / W-120 / W-121 / W-122 / W-123 /
+W-103 / W-105 / W-105.1 / W-106 / W-107。
+
+**⇒ ACTIVE 桶清空。** 剩下的 promote 条件(见
+[`active-workaround-clearance.md`](../../plans/v4/active-workaround-clearance.md)
+§ 全局 ship gate):`regress jhyy_v2.exe`(自举产物也跑)与 `fixed_point.sh N=5`。
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

@@ -463,15 +463,53 @@ __attribute__((used)) int jh_gcc_invoke(char *out_buf, int out_size, const char 
    run gcc there, rename output .exe back to original Chinese location.
    All return 0 on success, -1 on failure. Windows-only. */
 #ifdef _WIN32
+/* W-123 (2026-10-20):临时文件名的唯一性。
+ *
+ * 原来的 seed = `pid ^ tid ^ ++ctr`,注释写「collision vanishingly rare」——
+ * **那个结构会规律性地撞**:
+ *
+ *   Windows 的 process id 与主线程 thread id 来自**同一个全局计数器**
+ *   ⇒ 常见形态是 (pid, tid) = (N, N+1) ⇒ N ^ (N+1) = 1(N 为偶数时)
+ *   ⇒ 每两个并发进程里就有一对的 seed **完全相同** ⇒ 两个并发编译抢同一个
+ *   临时文件名 ⇒ 后一个的 rename 失败 ⇒ **编译失败**。
+ *
+ * 实测(2026-10-20):并发编译 32 个文件 → **4 个失败**,报
+ *   「W-048: rename temp exe failed (kept at ...\Temp\jhe0000000e.exe)」
+ * —— 两次失败的临时文件名**一字不差**(`0000000e` = seed 14 = 1 ^ 15)。
+ *
+ * 这也是台账里那些「全量里偶发 compile failed、单跑必绿」的 flake 的真凶
+ * (2026-10-18 记的 W-106 现象:「删掉 workaround 后 cap_table_basic 偶发
+ * compile failed」—— 与本条是**同一个 bug**,跟那个 workaround 无关)。
+ *
+ * 修法两件事:
+ *   1. 换掉裸 XOR —— 用**乘法混合**(Knuth multiplicative hash)把
+ *      pid / tid / 计数器 / 毫秒时钟揉成一个 32 位值;
+ *   2. **真的独占创建一次**(CREATE_NEW)—— 名字真被占了就让内核拒绝,
+ *      换一组 hash 重试(最多 8 次)。这样「唯一」由文件系统保证,
+ *      不再依赖「hash 撞的概率很小」这种推理 ✓。
+ */
 __attribute__((used)) int jh_mktemp_ascii(const char *tag, char *out, int out_cap) {
     char temp_dir[MAX_PATH];
     if (!GetTempPathA(MAX_PATH, temp_dir)) return -1;
-    /* pid + tid + static counter for uniqueness within one jhyy invocation.
-       8 hex chars = 4 billion combos; collision vanishingly rare. */
     static unsigned int ctr = 0;
-    unsigned int seed = (unsigned int)(GetCurrentProcessId() ^ GetCurrentThreadId() ^ ++ctr);
-    int n = _snprintf(out, (size_t)out_cap, "%sjh%s%08x.tmp", temp_dir, tag, seed);
-    return (n > 0 && n < out_cap) ? 0 : -1;
+    for (int attempt = 0; attempt < 8; attempt++) {
+        unsigned int h = (unsigned int)GetCurrentProcessId();
+        h = h * 2654435761u;
+        h = h ^ ((unsigned int)GetCurrentThreadId() * 2246822519u);
+        h = h + (unsigned int)GetTickCount64();
+        h = h * 2654435761u;
+        h = h ^ (++ctr * 3266489917u);
+        int n = _snprintf(out, (size_t)out_cap, "%sjh%s%08x.tmp", temp_dir, tag, h);
+        if (n <= 0 || n >= out_cap) return -1;
+        /* 独占创建:名字真被占了 → CreateFile 失败 → 换一组 hash 再试 */
+        HANDLE fh = CreateFileA(out, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+                                FILE_ATTRIBUTE_TEMPORARY, NULL);
+        if (fh != INVALID_HANDLE_VALUE) {
+            CloseHandle(fh);
+            return 0;
+        }
+    }
+    return -1;
 }
 
 __attribute__((used)) int jh_file_copy(const char *src, const char *dst) {

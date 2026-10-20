@@ -115,11 +115,12 @@
 | [W-104](#w-104) | RESOLVED | SysV ABI 参数分类调用 Win 分类器 — 正确的分类器就在同文件,没接线 |
 | [W-105](#w-105) | RESOLVED | `&mut` 独占性不检查 — (a)「`&mut` 能用」+ (b)最小独占检查,均已修 |
 | [W-105.1](#w-105.1) | RESOLVED | check_cap_pass 同款空 stub,当前无调用点(死代码但签名在 API 面上) |
-| [W-106](#w-106) | ACTIVE | symtab_lookup_one 用 arena-touch 强制 codegen... |
+| [W-106](#w-106) | RESOLVED | symtab_lookup_one 用 arena-touch 强制 codegen... |
 | [W-107](#w-107) | RESOLVED | 五个 per-fn pre-scan 表按固定上限分配 —— 已改成按实际函数数分配 |
 | [W-120](#w-120) | RESOLVED | temp_slot_for_id 按固定 65536 分配 —— 越界时**静默**产出错代码 |
 | [W-121](#w-121) | RESOLVED | 合成 closure 的符号名取自**节点堆地址** ⇒ ASLR ⇒ 产物不可复现 |
 | [W-122](#w-122) | RESOLVED | 四个 side-file 用**固定路径** ⇒ 上一次编译的内容泄漏到下一次编译 |
+| [W-123](#w-123) | RESOLVED | 临时文件名 seed = `pid ^ tid ^ ctr` —— 这个结构会**规律性**碰撞 |
 | [W-108](#w-108) | RESOLVED | 索引重建脚本静默丢弃 59/89 条目 —— STATUS_RE 不容忍 前缀,且只匹配 H2 |
 | [W-109](#w-109) | RESOLVED | 自举 IL lexer 缺 6 个浮点比较助记符 — f32/f64 六个比较运算静默降级 |
 | [W-110](#w-110) | RESOLVED | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 |
@@ -7548,7 +7549,8 @@ transition,不支持 `*Cap<T>` 裸指针、不支持 `cap_new()` builtin ctor。
 <a id="w-106"></a>
 ## W-106: symtab_lookup_one 用 arena-touch 强制 codegen 物化栈帧(源码字面 WORKAROUND,未登记)
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — 靠 sb_init 一个立刻丢弃的 StringBuilder 迫使后端生成合法栈帧;行为正确性依赖后端实现细节
+**状态:** RESOLVED closed 2026-10-20 (v4.0.19) — workaround 已删除:当年那些间歇性失败
+真凶是 **W-123**(临时文件名 seed 的结构会规律性碰撞),不是这个 workaround
 **Backfilled:** 2026-10-15 (v1.x sprint-3 commit 5)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** v1.x sprint 3 起 → 至今
@@ -7662,6 +7664,58 @@ borrow_check_basic     同上 = 0
 且每组都与**串行基线逐字节相同**。
 
 **结论:`_section_directive.buf` 那条固定路径的竞争,在本轮实测中没有发作。**
+
+### 2026-10-20 第四次更正:那些间歇性失败**归错了因** ⇒ workaround 可删
+
+2026-10-18 的结论是「现象存在但频率不足以定论 ⇒ 保留」。**2026-10-20 真修
+W-123 时,真凶浮出来了** —— 它跟这个 workaround **毫无关系**:
+
+| 2026-10-18 观测到的症状 | 真凶 | 机制 |
+|---|---|---|
+| `FAIL cap_table_basic.jhyy expected=42 got=-1 **compile failed**` | **W-123** | `jh_mktemp_ascii` 的 seed = `pid ^ tid ^ ++ctr`。Windows 的 **process id 与主线程 thread id 来自同一个全局计数器** ⇒ 常见形态是 (pid, tid) = (N, N+1) ⇒ **N ^ (N+1) = 1**(N 为偶数时)⇒ **每两个并发进程就撞一次同一个临时文件名** ⇒ 后一个的 rename 失败 ⇒ **编译失败** |
+| `FAIL float_cmp.jhyy expected=111137 got=0 **stdout 为空**` | 同上(另一个受害者) | 同一个临时名冲突 ⇒ 链接产物不对 |
+
+**⇒ 那个对照实验把原因归给了这个 workaround —— 归错了。** 它之所以看起来
+「承重」,是因为**它恰好改变了 arena 的分配序列**,而 arena 分配序列又影响了
+…… 什么?其实**什么都不影响** —— 真正被影响的是那些**与本 workaround 毫无
+关系**的并发编译(它们抢同一个临时名),而本 workaround 的存在与否只是改变了
+「谁先谁后」⇒ 看起来像「删掉它就出事」✗ ⇒ **一个观察上的巧合被当成了因果**。
+
+**直接证据(2026-10-20):**
+
+```
+并发编译 32 个文件(16 对 × 2 个用 side-file 的用例),修复前:
+    ❌ 4 个失败,报「W-048: rename temp exe failed
+       (kept at ...\Temp\jhe0000000e.exe)」—— 两次失败的临时文件名一字不差
+       (0000000e = seed 14 = 1 ^ 15)
+修复 W-123 之后(同样的压力):
+    ✅ 0 个失败
+```
+
+⇒ **⇒ 本 workaround 的「承重性」从来就不存在** ✓ —— 删掉它 ⇐ W-123 真修 ⇐
+两个 bug 各自归位 ✓。
+
+**删除后的验证(2026-10-20):**
+
+```
+全量回归连跑:184/184 PASS,0 failed,0 flaky ✅(删之前那 6 次里有 1 次 FLAKY ——
+    同一个 W-123 flake;W-123 修完之后 0)
+自举闭环:  closure_check.sh v2.s == v3.s byte-identical ✅
+产物级门:  7 PASS / 0 KNOWN-FAIL / 0 FAIL ✅
+SysV 回归: 6 PASS ✅   W-104 三方向 ABI 对拍: 3 PASS ✅
+并发压力:  32 个并发编译 → 0 失败 ✅(修复前 4 失败)
+```
+
+**顺带去掉一处纯浪费:** 每次 symbol lookup 都白造一个 StringBuilder 再丢掉
+(`sb_init` 一次 arena 分配)✓。
+
+**⚠️ 方法论沉淀(这一条比修复本身更值钱):** 「删掉 X ⇒ 偶发失败 ⇒ X 承重」
+这个推理链**只在一个前提下成立**:那个偶发失败是**由 X 引起的**。本例里它
+不是 —— X 只是**改变了时序**,让另一个 bug(W-123)撞上了。**所以「删掉试试」
+的实验必须配合「失败症状的归因」** —— 否则就是在给巧合写因果。
+本例的归因关键是:症状是「**compile failed**」而不是「算错」——
+**编译期失败**指向「编译过程本身出了问题」(临时名/旁路文件/并发),
+而「算错」才指向「生成的代码有问题」⇒ 方向完全不一样 ✓。
 
 ### 2026-10-18 第三次更正:「承重」的判断**样本不足**
 
@@ -8089,6 +8143,66 @@ D3 讨论的方案是「按 pid 隔离旁路文件」;本条走的是**更省事
 - 源码 `compiler/src0/main.jhyy:1128`(flag 的读取点 —— 读完即删,只覆盖「读」
   发生过的情况,覆盖不了「没读」的情况)
 - `docs/plans/v4/version-schedule.md` § D3(「机制成立但未观测到发作」—— 已发作)
+
+<a id="w-123"></a>
+## W-123: 临时文件名 seed = `pid ^ tid ^ ctr` —— 这个结构会**规律性**碰撞
+
+**状态:** RESOLVED closed 2026-10-20 (v4.0.19) — 换成乘法混合的哈希 + **独占创建**
+(CREATE_NEW)重试;并发编译 32 个 → 0 失败(修复前 4 个)
+**Filed-by:** audit-w106-2026-10-20
+**日期:** 2026-10-20 (做 W-106 的对照实验时抓到)
+
+**触发面:** `compiler/src0/jhyy_helpers.c` 的 `jh_mktemp_ascii` —— 编译器每次
+编译都要用它生成**临时 .s / .exe 的路径**(W-048 的 ASCII 临时路径,绕开
+MSYS2 的中文路径问题)。
+
+**症状:** **并发编译时随机失败**,报:
+
+```
+W-048: rename temp exe failed (kept at C:\...\Temp\jhe0000000e.exe)
+```
+
+—— 两次失败的临时文件名**一字不差**(`0000000e` = seed 14)。
+
+**根因:** 原来的 seed 是 `GetCurrentProcessId() ^ GetCurrentThreadId() ^ ++ctr`,
+注释写「8 hex chars = 4 billion combos; collision vanishingly rare」
+—— **那个结构会规律性地撞**:
+
+- Windows 的 **process id 与主线程 thread id 来自同一个全局计数器**
+  ⇒ 一个新进程常见的 (pid, tid) 形态是 **(N, N+1)**
+- ⇒ `N ^ (N+1) = 1`(N 为偶数时)⇒ **每两个并发进程里就有一对的 seed 完全相同**
+- ⇒ 两个并发编译抢同一个临时文件名 ⇒ 后一个的 `rename` 失败(目标已存在)⇒
+  **编译失败**
+
+「4 billion combos」这个论证把**输出空间的大小**当成了保证 —— 但**映射到
+输出空间的函数不是单射** ✗(XOR 把结构相近的输入映到相近的输出 ✓)。
+
+**复现(可重复):** 并发编译 32 个文件(16 对 × 2 个用 side-file 的用例):
+
+```
+修复前:❌ 4 个失败(两个报同一个临时名 jhe0000000e.exe)
+修复后:✅ 0 个失败
+```
+
+**修法(两件事):**
+
+1. **换掉裸 XOR** —— 用**乘法混合**(Knuth multiplicative hash)把
+   pid / tid / 进程内计数器 / 毫秒时钟揉成一个 32 位值 ⇒ 相邻 pid 不再撞。
+2. **真的独占创建一次**(`CreateFileA` + `CREATE_NEW`)—— 名字真被占了就让
+   内核拒绝,换一组 hash 重试(最多 8 次)⇒ **「唯一」由文件系统保证**,
+   不再依赖「hash 撞的概率很小」这种推理 ✓。
+
+**⚠️ 这条的真正价值不在它自己,而在它**解释了 W-106 的谜团**:2026-10-18
+那次「删掉 workaround ⇒ 偶发失败 ⇒ workaround 承重」的对照实验,**归错了因**
+—— 真凶是本条(临时名碰撞),而那个 workaround 只是**改变了时序**。
+详见 [`docs/internal/workarounds.md`](workarounds.md) W-106 条目的
+「2026-10-20 第四次更正」段。
+
+**引用:**
+- 源码 `compiler/src0/jhyy_helpers.c`(`jh_mktemp_ascii`)
+- W-106 条目(被本条「洗清」的那个 workaround)
+- `docs/plans/v4/version-schedule.md` § D3(「机制成立但未观测到发作」—— 本条
+  就是那个机制,**它发作了**)
 
 <a id="w-108"></a>
 ## W-108: 索引重建脚本静默丢弃 59/89 条目 —— STATUS_RE 不容忍 ✅ 前缀,且只匹配 H2
