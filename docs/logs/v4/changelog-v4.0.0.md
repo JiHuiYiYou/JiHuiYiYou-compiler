@@ -843,6 +843,32 @@ W-103 / W-105 / W-105.1 / W-106 / W-107。
 
 ---
 
+## v4.0.19 — 已发布(2026-10-20)🎉
+
+<https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v4.0.19>
+
+**台账 ACTIVE 桶首次清空(14 → 0)** —— 102 RESOLVED + 4 SUPERSEDED + 2 INVALID +
+0 ACTIVE + 0 DEFERRED(108 行)。
+
+**promote 条件的实测:**
+
+| 门 | 结果 |
+|---|---|
+| `regress jhyy.exe` | ✅ **184/184 PASS** + 20 SKIP |
+| `regress jhyy_v2.exe`(**自举产物也跑**) | ✅ **184/184 PASS** + 20 SKIP |
+| `closure_check.sh` | ✅ PASS,v2.s == v3.s byte-identical |
+| `fixed_point.sh` | ✅ **17 PASS / 0 FAIL / 0 INFO**(跑到 N=10) |
+| `make selfhost` | ✅ v2..v5 逐字节相同 |
+| `artifact_checks.sh` | ✅ **7 PASS / 0 KNOWN-FAIL / 0 FAIL** |
+| SysV 6 个回归 + W-104 三方向 ABI 对拍 | ✅ 6 PASS + 3 PASS |
+| CI | ✅ 全绿 |
+
+**发布链:** tag push → `ci.yml`(needs: build-and-test)→ `release.yml`
+(reusable workflow)→ 出 installer .exe + compiler .msi + vscode .vsix + SHA256.txt
+⇒ **门不绿就发不出去** ✓(这条链修好后 v4.0.9-rc1 与 v4.0.19 连续两次成功)。
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

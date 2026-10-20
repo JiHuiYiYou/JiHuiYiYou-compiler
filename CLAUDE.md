@@ -1,15 +1,15 @@
 # CLAUDE.md — JHYY (机会翼游) 编译器项目
 
 自研静态类型编程语言 + 自举编译器。
-当前: **🟡 v4.0.9-rc1 发布**（2026-10-18，**6 周来第一个真实可安装产物**）——
-在 CI 重构把发布链修通之后打的 tag:
-<https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v4.0.9-rc1>
-（installer .exe 28.5 MB + compiler .msi + vscode .vsix + SHA256.txt）。
-**v4.0.0 final 的 ACTIVE 障碍已清零**(2026-10-20)，按既定决策清零前不 promote；
-4.0.9-rc1 是 RC，`make_latest` 为 false，v3.2.0 仍是 Latest。
+当前: **🟢 v4.0.19 发布**（2026-10-20，**台账 ACTIVE 桶首次清空(14 → 0)**）——
+<https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v4.0.19>
+（installer .exe + compiler .msi + vscode .vsix + SHA256.txt）。
+**v4.0.0 final 的 promote 条件全部满足**（184/184 生产+自举、closure v2==v3、
+fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 此前 v3.4.2 / v4.0.0-rc1 / v4.0.1 / v4.0.2 / v4.0.6 五个 tag 全部发布失败，
-最后一个真实 release 停在 2026-09-08 的 v3.2.0 —— 那段时间文档里的 "shipped"
-指源码 commit，不指可安装产物。
+最后一个真实 release 曾停在 2026-09-08 的 v3.2.0 —— 那段时间文档里的 "shipped"
+指源码 commit，不指可安装产物；v4.0.9-rc1(2026-10-18)与 v4.0.19(2026-10-20)
+先后把发布链接通。
 - **v4.0.0-rc1 shipped** (2026-09-30, post-merge of `axis-v2` + `axis-v3` → main):
 - **v4.0.0-rc1 shipped** (commits `a4ba8fa`..`675e7da`;tag `v4.0.0-rc1` 已打) — **v4.x 首发 RC** = v2.x FINAL (v2.16.0) + v3.x FINAL (v3.4.2) 合并入 main;QBE toolchain 完全移除 + bench.sh + .exe byte-equal D26 stage0 coverage + self-backend closure + stdlib (mem/fmt/io/math/string/vec) 落地。**🔴 2026-10-15 audit 后 blocker 未清零**(per 2026-10-10 user 决定 "所有defer/active的workaround必须在v4正式版中清零,大不了v4不发"):W-101 RESOLVED (v4.0.6 attempt #7) + W-097 RESOLVED (2026-10-15,六个 emit 根因,`closure_check.sh` PASS `v2.s == v3.s` byte-identical) + W-072 早已 RESOLVED (2026-09-09)。**索引表 ACTIVE = 14 / DEFERRED = 0**(2026-10-15 复核后修正 —— 此前写的「0」是索引重建脚本读不到 59/89 条目造成的假象,见 W-108;**2026-10-20 已降到 0 条**:W-104 / W-112 / W-114 / W-103 / W-107 / W-120 / W-105 / W-105.1 / W-118 / W-121 / W-122 / W-113 / W-115 / W-106 / W-123 先后闭合 ⇒ **ACTIVE = 0 / DEFERRED = 0** ✅),**下一个动作 = 走 v4.0.0 final 的 promote 流程**(排期见 [`version-schedule.md`](docs/plans/v4/version-schedule.md))([`active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md)),不是 tag final
 - **v1.x 已 ship** (v1.8.3 tag `98c8272`, 2026-08-29) — Stage 2 N=4 byte-equal 闭环 + installer v1.8.3 WiX + UCPD.sys bypass。v1.x 终结。
