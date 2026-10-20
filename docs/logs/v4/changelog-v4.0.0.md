@@ -495,6 +495,79 @@ SysV 回归:  6 PASS ✅   W-104 三方向 ABI 对拍: 3 PASS ✅
 
 ---
 
+## v4.0.18 — W-105 (b):`&mut` 最小独占检查 · W-105.1:死 stub 删除
+
+**2026-10-20。** ACTIVE 条数 6 → 4。
+
+### 上一版 (b) 失败的真根因,是 W-107 —— 不是「infer_type 的帧布局」
+
+台账记着:上一版最小实现(在 sema 的 `infer_type` 里记录借用)**做出来了,但让
+自举编译器 SEGV** —— 崩溃点是「帧偏移 ≈ -515KB 的写」,当时的结论是
+「infer_type 是递归热路径,加局部变量后帧布局位移,机制未定位」。
+
+**2026-10-20 修 W-107 时,这个症状被认出来了** —— 「帧偏移 ≈ -515KB 的写」
+正是 W-107 的签名:
+
+```
+local_t = global_t - base_t        ← 查表失败时退化成「全局 temp id」
+帧偏移 = -(32 + local_t*8) ≈ -515KB
+```
+
+W-107 的机制:五张 per-fn 表按**固定上限 1024**分配 → 函数数超过 1024 的那些
+函数**被丢弃** → per_fn_max 保持 0 → local_max 被钳成 0 → 帧算成 8 字节 →
+局部变量冲出帧。
+
+**上一版尝试恰好加了几个顶层函数**(把 main.jhyy 从 1022 推到 1025+)
+⇒ **跨过了 1024 那道悬崖** ⇒ SEGV。**它撞的是 W-107,跟 infer_type 是什么
+函数没关系。**
+
+⇒ W-107 改成**按实际函数数分配**之后,这条阻塞**自然消失** ✓
+⇒ 本次(b)在**同一个位置**(`infer_type` 的 NODE_ADDR_OF 分支)重做,**一次通过**。
+
+### 做了什么(plan of record 的选项 A)
+
+| 位置 | 内容 |
+|---|---|
+| `sema.jhyy` `SemaContext` | 加 3 个字段(`borrow_recs` / `borrow_rec_n` / `borrow_rec_cap`)—— **字段顺序必须与 struct literal 逐字一致**(漏字段 = 越界) |
+| `sema.jhyy` `sema_record_borrow` | 记录一条借用 + 查冲突。**比名字不比指针** —— jhyy 的每个 IDENT 节点有**自己的** Sym(同名不同实例),比指针的话冲突检查恒不触发 |
+| `sema.jhyy` `infer_type` | NODE_ADDR_OF:`&mut x`(x 是局部变量)→ 记录借用;NODE_BLOCK:进 block 记 mark、出 block 回卷 ⇒ **借用作用域 = 一个 block** |
+| `sema_init` | 分配借用记录表(512 条);**满了响亮报错**,不静默丢 |
+
+**检查规则:** `&mut x` 而 x 已有活的 `&mut` → 冲突。共享 `&x` 按 spec §2.2 是
+POINTER(v1.x 语义)不是借用 ⇒ 不记录 ⇒「`&mut` 与 `&` 互斥」在 v3.1.0 根本
+表达不出来(spec §4.1 也这么列)。reborrow / 字段 / 下标不记录(spec §4.1)。
+
+**⚠️ 已知限制(诚实登记):** 词法作用域,不是 NLL —— borrow 提前结束的情况会
+**误报**(`let y = &mut x; *y = 1; let z = &mut x;` 会被拒)。真正的
+NLL/Polonius 在 backlog 的 **v4.3.0**。
+
+### W-105.1 —— 死 stub 直接删
+
+`check_cap_pass`(恒 return 1)grep 全 `compiler/src0` —— **零调用点**。
+函数体 + 那 16 行「已知限制」注释一并删掉,原位置留一份「将来要做什么」的
+清单。**零行为变化** ✓。
+
+两个 stub 的处置不同,理由也记在台账里:`check_cap_pass` 没人调 → 删;
+`check_borrow` 每个函数声明都调 → 走「实现最小检查」而不是删。
+
+### 验收
+
+```
+新测试 borrow_mut_conflict.jhyy(EXPECT-ERROR):编译**失败** ✓
+    「cannot borrow this variable as mutable more than once at the same time」
+    (修复前:编译成功 —— 两个 &mut 真的指向同一个变量)
+borrow_mut_write.jhyy(单个 &mut 写内存):仍 EXIT=5 ✓
+borrow_check_basic.jhyy:特征化段使命完成,正向断言搬到新文件 ✓
+全量回归:  182/182 PASS, 0 failed (204 total / 20 skip / 2 XFAIL)
+自举闭环:  closure_check.sh v2.s == v3.s byte-identical ✅
+产物级门:  6 PASS / 1 KNOWN-FAIL(W-113) / 0 FAIL ✅
+断言审计:  零信号违规 0 ✅
+```
+
+**ACTIVE 条数:6 → 4。**
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

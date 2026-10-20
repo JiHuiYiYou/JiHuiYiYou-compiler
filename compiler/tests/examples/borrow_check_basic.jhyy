@@ -1,10 +1,25 @@
-// SKIP-STAGE0: C 端 stage0 的 parser 早于 V3-B/V3-C,不认本测试用的语法(`&mut` / `Cap<T>` / `#[naked]` / `asm!` / `volatile` / 泛型)。本测试必须跑在 jhyy.exe 上 —— 它验的是自举后端。
-// [SKIP 移除 2026-10-15] v1.4.4 把 jhyy.exe flip 成 jhyy-side binary 后本理由失效 —— 2026-10-15 去掉 SKIP,实测 PASS
-// v3.1.0 (V3-C 3g) ship-gate test: `&T` / `&mut T` borrow type resolution + 8-byte layout.
+// borrow_check_basic.jhyy — v3.1.0 (V3-C 3g) ship-gate test: `&T` / `&mut T` borrow type resolution + 8-byte layout.
 // Per spec supplement v3.1.0 § 2: `&T` parses as borrow type, sizeof == 8 (single ptr).
 //
-// Note (v3.1.0 simplification): active-borrow conflict detection (NLL) is stub-only.
-// Conflicting `&mut` re-borrows are NOT detected in this sprint — full NLL is v3.x 末.
+// SKIP-STAGE0: C 端 stage0 的 parser 早于 V3-B/V3-C,不认本测试用的语法(`&mut` / `Cap<T>` / `#[naked]` / `asm!` / `volatile` / 泛型)。本测试必须跑在 jhyy.exe 上 —— 它验的是自举后端。
+// [SKIP 移除 2026-10-15] v1.4.4 把 jhyy.exe flip 成 jhyy-side binary 后本理由失效 —— 2026-10-15 去掉 SKIP,实测 PASS
+//
+// Note (v3.1.0 simplification): active-borrow conflict detection (NLL) is **not
+// implemented** —— locked spec `jhyy-lang-spec-borrow-check-supplement-v3.1.0.md`
+// §4.1 把 8 项限制逐条列出来(双 `&mut` 冲突 / `&mut`+`&` 互斥 / reborrow /
+// lifetime 子类型 / 跨函数 borrow / nested block 作用域 / path-based NLL /
+// escape analysis),§4.2 写明「当前 v3.1.0 实现是 STUB」,§4.3 给的理由是
+// 「ship-gate 优先类型系统 + ABI 集成,借用检查延迟到后续 sprint」。
+// 真正的活在 backlog 的 v4.3.0「full lifetime + Polonius borrow check」。
+//
+// ⚠️ 2026-10-20(W-105):之前 `check_borrow` 是个**恒 return 1** 的 stub
+// (名字承诺会检查、实际什么都不做),连同它的调用点一起删掉了 —— 留一个
+// 假装会检查的函数比不检查更坏。**本测试因此多了一段「特征化」代码**
+// (见下):它断言的是「双 `&mut` 冲突**今天不报错**」这个 spec §6.2 的行为。
+//
+//   将来 v4.0.x 之外的某个版本真把 Polonius 落地时,那一段会**编译失败**
+//   → 本测试变红 → 那时把它反过来写成 EXPECT-ERROR(期望编译报错)✓
+//   —— 那一刻这个缺口才真的关上,而不是像现在这样「没人记得它还开着」。
 //
 // Note: `&expr` in expression position still produces *T (POINTER) per existing
 // v1.x semantics. To produce a `&T` borrow, the type must be declared as `&T`
@@ -13,6 +28,13 @@
 fn main_jhyy() -> i32 {
     let s_ref: i64 = sizeof(&i32);
     let s_mut: i64 = sizeof(&mut i32);
+
+    // ⚠️ 2026-10-20(W-105 (b)):这个文件原来带一段「双 `&mut`」的**特征化**
+    // 代码(断言「冲突今天不被检测」)。W-105 (b) 的最小独占检查落地后,
+    // 那段代码**不再能编译** ⇒ 特征化测试失效 ⇒ 它的使命完成 ✓
+    // 冲突检测的正向断言搬到了新文件 `borrow_mut_conflict.jhyy`
+    // (EXPECT-ERROR: 编译必须失败)。
+
     if s_ref == 8 {
         if s_mut == 8 {
             return 42;

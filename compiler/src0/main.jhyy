@@ -729,6 +729,11 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
         ret_type_map:      0 as *u8,
         ret_type_map_n:    0 as i64,
         expected_enum_type: 0 as *u8,
+        // W-105(b):借用记录表 —— 字段顺序必须与 sema.jhyy 的 SemaContext
+        // 声明**逐字一致**(漏字段 = 落在分配区之外 = 越界读,见上面那段注释)。
+        borrow_recs:      0 as *u8,
+        borrow_rec_n:     0 as i64,
+        borrow_rec_cap:   0 as i64,
     };
     sema_init(&sema, &arena, &ta);
     if sema_check(&sema, &ta, ast_node) > (0 as i32) {

@@ -451,7 +451,8 @@ fn type_eq(a: *Type, b: *Type) -> i32 {
     if k == KIND_VOID() { return 1 as i32; }
     // v3.1.0: KIND_REF — same inner + same is_mut → equal。
     // 不同 is_mut 不等(&T vs &mut T 是 distinct types);shared 可以 coerce 到
-    // shared 的 sub,但不在 type_eq 里表达(留 NLL check_borrow 端)。
+    // shared 的 sub,但不在 type_eq 里表达(borrow 冲突检查按 locked spec
+    // v3.1.0 §4.1 明确 out of scope,留 backlog v4.3.0)。
     if k == KIND_REF() {
         if (*a).is_mut != (*b).is_mut { return 0 as i32; }
         return type_eq((*a).elem as *Type, (*b).elem as *Type);

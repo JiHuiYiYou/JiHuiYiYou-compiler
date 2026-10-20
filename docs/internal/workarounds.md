@@ -113,8 +113,8 @@
 | [W-102](#w-102) | RESOLVED | address-holder 池与 alloc 池槽位重叠 → self-hosted... |
 | [W-103](#w-103) | RESOLVED | std/os.jhyy 全部 I/O 与 exit 是 M0 mock — W-079 的... |
 | [W-104](#w-104) | RESOLVED | SysV ABI 参数分类调用 Win 分类器 — 正确的分类器就在同文件,没接线 |
-| [W-105](#w-105) | ACTIVE | `&mut` 独占性不检查 — (a)「`&mut` 能用」已修,(b)check_borrow... |
-| [W-105.1](#w-105.1) | ACTIVE | check_cap_pass 同款空 stub,当前无调用点(死代码但签名在 API 面上) |
+| [W-105](#w-105) | RESOLVED | `&mut` 独占性不检查 — (a)「`&mut` 能用」+ (b)最小独占检查,均已修 |
+| [W-105.1](#w-105.1) | RESOLVED | check_cap_pass 同款空 stub,当前无调用点(死代码但签名在 API 面上) |
 | [W-106](#w-106) | ACTIVE | symtab_lookup_one 用 arena-touch 强制 codegen... |
 | [W-107](#w-107) | RESOLVED | 五个 per-fn pre-scan 表按固定上限分配 —— 已改成按实际函数数分配 |
 | [W-120](#w-120) | RESOLVED | temp_slot_for_id 按固定 65536 分配 —— 越界时**静默**产出错代码 |
@@ -7354,10 +7354,10 @@ regress 用例。
 - `docs/archive/v2-v3/v2.0.0-os-prep.md`(Stage 1c mirror 的原始计划)
 
 <a id="w-105"></a>
-## W-105: `&mut` 独占性不检查 — (a)「`&mut` 能用」已修,(b)check_borrow 仍恒 return 1
+## W-105: `&mut` 独占性不检查 — (a)「`&mut` 能用」+ (b)最小独占检查,均已修
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — 2026-10-20 **(a)「`&mut` 真的能用」已真修**;
-(b)「`check_borrow` 恒 return 1」**仍未实现**(借用记录放进 `infer_type` 会让**自举编译器** SEGV,机制未定位)
+**状态:** RESOLVED closed 2026-10-20 (v4.0.18) — (a)「`&mut` 真的能用」+ (b)最小独占检查
+(同作用域内双 `&mut` 互斥)均已真修;完整 NLL/Polonius 留 backlog v4.3.0
 **Backfilled:** 2026-10-15 (v3.1.0 V3-C 3g ship-gate stub)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-08 前后 (v3.1.0 ship) → 至今
@@ -7428,37 +7428,90 @@ mono,parser,sema,std/string,types}.jhyy` 都有使用,不是没人用的死代�
 **验收:** `borrow_mut_write.jhyy` 摘掉 XFAIL → **EXIT=5** ✓(之前编译不过);
 `borrow_check_basic.jhyy` 仍 EXIT=42 ✓;全量回归 178/178 ✓;自举闭环 v2..v5 ✓。
 
-#### ⚠️ (b)「借用独占性检查」**没做成**,原因记录在案
+### 2026-10-20 (b) 真修:最小独占检查落地
 
-最小实现(在 sema 的 `infer_type` 里记录每次 `&`/`&mut` 借用,`check_borrow`
-里比对同一符号的借用集合)—— **做出来了,但让自举编译器 SEGV** ✗:
+**上一版为什么失败 —— 复盘后找到了真根因(不是「infer_type 的帧布局」)。**
 
-- 现象:**自举出来的 jhyy.exe 编任何文件都崩**(确定性 ✗,gdb 下不复现 ✗)
-- 崩溃点:一个**帧偏移 ≈ -515KB** 的写(局部变量冲出帧 → 踩坏调用者的帧)
-- 二分结果:与「用不用 helper 调用」无关 —— **调用**与**内联**两种写法都复现 ✓
-  ⇒ 触发条件是「**在 `infer_type` 里加代码**」这个动作本身
-- `infer_type` 是**递归热路径**,它的帧大小按 per-fn max temp 估(W-096)✗ →
-  加了局部变量后帧布局整体位移 ✗ → 这条线还没查清 ✗
+上一版的结论是「在 `infer_type` 里加代码 → 自举编译器 SEGV(帧偏移 ≈ -515KB
+的写)⇒ 机制未定位」。**2026-10-20 修 W-107 时,这个症状被认出来了** ——
+「帧偏移 ≈ -515KB 的写」正是 **W-107** 的签名:
 
-⇒ **下一步**:把借用记录**挪出 `infer_type`**(例如在 sema 里做一趟独立的借用
-收集 pass,或在 pattern/match 的窄路径上做),不要动递归热路径的帧布局 ✗。
-在那之前,**W-105 保持 ACTIVE** ✗ —— 独占性仍然零检查 ✗。
+```
+local_t = global_t - base_t     ← 查表失败时退化成「全局 temp id」
+帧偏移 = -(32 + local_t*8) ≈ -515KB   ← 全局 temp id 约 64000
+```
+
+而 W-107 的机制是:五张 per-fn 表按**固定上限 1024**分配 → 函数数超过 1024
+的那些函数**被丢弃** → 它们的 per_fn_max 保持 0 → local_max 被钳成 0 →
+帧算成 8 字节 → 局部变量冲出帧。
+
+**上一版尝试恰好加了几个顶层函数**(把 main.jhyy 从 1022 推到 1025+)
+⇒ **跨过了 1024 那道悬崖** ⇒ SEGV。**它撞的是 W-107,不是「infer_type 布局
+位移」** —— 跟 infer_type 是什么函数没关系。
+
+⇒ 2026-10-20 W-107 改成**按实际函数数分配**之后,这条阻塞**自然消失** ✓
+⇒ 本次(b)在**同一个位置**(`infer_type` 的 NODE_ADDR_OF 分支)重做,**一次通过**。
+
+**做了什么(plan of record 的选项 A:`active-workaround-clearance.md` § 决策点 A):**
+
+| 位置 | 内容 |
+|---|---|
+| `sema.jhyy` `SemaContext` | 加 3 个字段:`borrow_recs` / `borrow_rec_n` / `borrow_rec_cap`(**字段顺序必须与 struct literal 逐字一致** —— 漏字段 = 落在分配区外 = 越界,见 main.jhyy 那段血泪注释) |
+| `sema.jhyy` `sema_record_borrow` | 记录一条借用 + 查冲突。**比名字不比指针** —— jhyy 的每个 IDENT 节点有**自己的** Sym(同名不同实例),比指针的话冲突检查恒不触发 ✗ |
+| `sema.jhyy` `infer_type` NODE_ADDR_OF | `&mut x`(x 是局部变量)→ 记录借用 |
+| `sema.jhyy` `infer_type` NODE_BLOCK | 进 block 记 mark,出 block 回卷 ⇒ **借用作用域 = 一个 block**(嵌套 block 之间不冲突 —— spec §4.1 的已知限制 ✓) |
+| `sema_init` | 分配借用记录表(固定 512 条 = 8KB);**满了响亮报错**,不静默丢(静默丢 = 静默漏检) |
+
+**检查规则**(spec §6.2 那个例子的反向断言):
+
+- `&mut x` 而 x 已有活的 `&mut` → **冲突**(双可变借用)
+- 共享 `&x` 按 spec §2.2 是 **POINTER**(v1.x 语义),**不是借用** ⇒ 不记录
+  ⇒ 「`&mut` 与 `&` 互斥」这一项在 v3.1.0 **根本表达不出来**(spec §4.1 也这么列)
+- reborrow(`&mut *p`)/ 字段(`&mut s.f`)/ 下标(`&mut arr[i]`)不记录(spec §4.1 已知限制)
+
+**⚠️ 已知限制(诚实登记,与 spec §4.1 对齐):**
+
+- 词法作用域,不是 NLL —— borrow 提前结束的情况会**误报**:
+  `let y = &mut x; *y = 1; let z = &mut x;` 会被拒(NLL 下这是合法的)。
+  真正的 NLL/Polonius 在 backlog 的 **v4.3.0**。
+- 跨函数 borrow / lifetime 子类型 / variance 不检测(spec §4.1 逐条列明)。
+
+**验收:**
+
+```
+新测试 compiler/tests/examples/borrow_mut_conflict.jhyy(EXPECT-ERROR):
+    编译**失败** ✓「cannot borrow this variable as mutable more than once at the same time」
+    (修复前:编译成功 —— 两 个 &mut 真的指向同一个变量)
+borrow_check_basic.jhyy 的「特征化」段使命完成,正向断言搬到新文件 ✓
+borrow_mut_write.jhyy(单个 &mut 写内存):仍 EXIT=5 ✓
+编译器自己的源码:无 `&mut` 借用表达式 → 不受新检查影响 ✓(自举闭环 PASS 即证)
+全量回归:  182/182 PASS, 0 failed ✅
+自举闭环:  closure_check.sh v2.s == v3.s byte-identical ✅
+产物级门:  6 PASS / 1 KNOWN-FAIL(W-113) / 0 FAIL ✅
+断言审计:  零信号违规 0 ✅
+```
 
 **影响范围:** 任何写了 `&mut` 的程序。`compiler/tests/examples/borrow_check_basic.jhyy`
 存在,但它测的是 borrow 的**表面可解析性**,不是冲突检测。
 
-**失效条件:** 实现 NLL / Polonius 借用分析(注释指 spec supplement v3.1.0 § 4,
-该设计随 v3.x 封版未见落地文档)。
+**失效条件:** ~~实现 NLL / Polonius 借用分析~~ → **2026-10-20 已做「最小独占检查」**
+(同作用域内双 `&mut` 互斥)。**完整** NLL/Polonius 仍在 backlog 的 v4.3.0
+(那里才有词法→NLL 的精度、跨函数 borrow、lifetime 子类型)。
 
 **引用:**
-- 源码 `compiler/src0/sema.jhyy:2544-2560`(check_borrow + 限制清单)
-- 源码 `compiler/src0/sema.jhyy:2677`(调用点)
-- 源码 `compiler/src0/sema.jhyy:398`(`&mut` 内层 immutable 的检查被推给 check_borrow)
+- 源码 `compiler/src0/sema.jhyy`(`sema_record_borrow` + `infer_type` 的
+  NODE_ADDR_OF / NODE_BLOCK 两个挂点 + `SemaContext` 的三个新字段)
+- 源码 `compiler/src0/main.jhyy`(`SemaContext` struct literal 的三个新字段)
+- 测试 `compiler/tests/examples/borrow_mut_conflict.jhyy`(EXPECT-ERROR)
+- 测试 `compiler/tests/examples/borrow_check_basic.jhyy`(sizeof + 特征化段的历史)
+- spec `docs/abis/jhyy-lang-spec-borrow-check-supplement-v3.1.0.md` §2.2 / §4.1 / §4.3 / §6.2
+- plan `docs/plans/v4/active-workaround-clearance.md` § 决策点 A
 
 <a id="w-105-1"></a>
 ## W-105.1: check_cap_pass 同款空 stub,当前无调用点(死代码但签名在 API 面上)
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — 恒 return 1;与 W-105 同族 stub,当前无调用点
+**状态:** RESOLVED closed 2026-10-20 (v4.0.18) — 恒 return 1 的 stub 连同注释一并删除
+(它连一个调用点都没有 —— 留一个没人调的「假装会检查」的函数比不检查更坏)
 **Backfilled:** 2026-10-15 (v3.1.2 V3-C 3g.7 ship-gate stub)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-08 前后 (v3.1.2 ship) → 至今
@@ -7481,10 +7534,14 @@ transition,不支持 `*Cap<T>` 裸指针、不支持 `cap_new()` builtin ctor。
 
 **失效条件:** 要么实现 cap ownership 分析,要么把该函数连同 stub 注释一起删掉
 —— 留一个没人调的「假装会检查」的函数,是比不检查更坏的状态。
+**→ 2026-10-20 选了「删」**:`check_cap_pass` 函数体 + 那 16 行「已知限制」
+注释一起删掉,原位置留一段**说明它将来要做什么**的清单(免得下一个读代码的人
+重新发明一遍)。**零行为变化**(它没有调用点)✓。
 
 **引用:**
-- 源码 `compiler/src0/sema.jhyy:2562-2579`
-- 源码 `compiler/src0/sema.jhyy:2574`(自述「跟 check_borrow 同样 stub」)
+- 源码 `compiler/src0/sema.jhyy`(`check_cap_pass` stub 已删,原位置留清单)
+- 同族 W-105(同一决策的另一半 —— 那条**有**调用点,所以走的是「实现最小检查」
+  而不是「删」)
 
 <a id="w-106"></a>
 ## W-106: symtab_lookup_one 用 arena-touch 强制 codegen 物化栈帧(源码字面 WORKAROUND,未登记)

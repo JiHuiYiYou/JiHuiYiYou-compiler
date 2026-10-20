@@ -1,0 +1,19 @@
+// borrow_mut_conflict.jhyy — 双 `&mut` 借用冲突**必须**被拒绝(W-105 (b))
+//
+// 2026-10-20 新增。W-105 (b) 之前,`check_borrow` 是个恒 return 1 的 stub
+// (名字承诺会检查、实际什么都不做)—— 下面这段双可变借用**能编译**,两个
+// `&mut` 真的指向同一个变量。W-105 (b) 落地后,它必须在**编译期**被拒。
+//
+// 这条是 spec v3.1.0 borrow-check supplement §6.2 那个例子的**反向**断言:
+//   spec §6.2 的例子说「v3.1.0: NOT detected; v3.x 末: error」
+//   → 现在 error 这一半落地了 ✓(完整 Polonius 仍在 backlog 的 v4.3.0)
+//
+// EXPECT-ERROR: "cannot borrow"
+fn main_jhyy() -> i32 {
+    let mut x: i32 = 42;
+    let y = &mut x;
+    let z = &mut x;   // ← 这一行必须报「双可变借用」错误
+    *y = 1;
+    *z = 2;
+    return x;
+}

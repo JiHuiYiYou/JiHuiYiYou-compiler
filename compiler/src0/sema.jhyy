@@ -115,9 +115,16 @@ type SemaContext = struct {
     // 变体解析拿它兜底 —— 与 NODE_PATTERN_ENUM 走 match_type 兜底同款形状
     // (sema.jhyy:527-545)。
     expected_enum_type: *u8,       // *Type
+    // W-105(b) — 借用记录(独占性检查用)。
+    // borrow_recs: BorrowRec[] —— 每条 16 字节 {sym: *Sym, is_mut: i32, _pad}
+    // borrow_rec_n: 当前记录条数(进 block 记 mark,出 block 回卷 → 天然按作用域)
+    // borrow_rec_cap: 容量(固定;超了**响亮报错**,不静默丢)
+    borrow_recs:      *u8,
+    borrow_rec_n:     i64,
+    borrow_rec_cap:   i64,
 }
 
-fn SEMA_CONTEXT_SIZE() -> i64 { return 112 as i64; }
+fn SEMA_CONTEXT_SIZE() -> i64 { return 136 as i64; }
 
 // ════════════════════════════════════════════════════
 // SemaLocal 访问 helper（locals[i].sym / locals[i].type）
@@ -435,7 +442,8 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
     // 拒绝规则:
     //   - chained `&&T`(NODE_REF_TYPE 套 NODE_REF_TYPE)— 借用是 terminal
     //   - `&mut volatile T` / `volatile &mut T`(借用不能 + volatile)
-    //   - `&mut` 内层是 immutable(borrow 检查放 check_borrow,不在这)
+    //   - `&mut` 内层是 immutable(borrow 检查按 locked spec v3.1.0 §4.1 明确
+    //     out of scope,留 backlog v4.3.0 —— 见上面 check_borrow 被删掉那段)
     if (*tn).kind == NODE_REF_TYPE() {
         let rt = node_ref_type_data(tn);
         let inner = resolve_type_node(ctx, ta, (*rt).inner as *Node);
@@ -815,6 +823,72 @@ fn mono_propagate_idents_to_cloned_body(body: *Node) -> i32 {
 // ════════════════════════════════════════════════════
 
 // ta: TypeArena
+// ════════════════════════════════════════════════════════════════════════════
+// W-105(b) — 借用独占性检查(最小版)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// **为什么是「最小版」。** 完整 NLL/Polonius 是 backlog 的 v4.3.0(约 600 行
+// 新模块 `compiler/src0/borrow_check.jhyy`)。这里做的是 plan of record
+// (`active-workaround-clearance.md` § 决策点 A)选的那一档:**同一作用域内的
+// `&mut` 互斥** —— 双可变借用是最危险的一类,当场堵住。
+//
+// **作用域模型:每个 NODE_BLOCK 一张借用表。** 进 block 记 mark,出 block 回卷
+// ⇒ 嵌套 block 之间的借用**不**互相冲突。
+// (spec §4.1 把「nested block 借用作用域」列为已知限制 ✓ —— 这里跟 spec 对齐。)
+//
+// **只记录 `&mut`。** 按 spec §2.2,表达式位置的 `&expr` **保留 v1.x 语义**
+// (产生 POINTER `*T`,不是 borrow)—— 共享借用在 v3.1.0 里**根本表达不出来**
+// ⇒ 「`&mut` 与 `&` 互斥」这一项在 v3.1.0 无从检查(spec §4.1 也这么列)。
+//
+// **只记录局部变量。** `&mut *p`(reborrow)、`&mut s.f`(字段)、
+// `&mut arr[i]`(下标)都不记录 —— spec §4.1 明确 reborrow 不在范围内 ✓。
+//
+// ⚠️ 本函数在 **infer_type 的热路径**上被调用(每个 `&mut` 表达式一次)。
+//    上一版尝试(把借用记录塞进 infer_type)曾让**自举编译器 SEGV** ——
+//    当时的结论是「infer_type 的帧布局位移」,但 2026-10-20 复盘发现那次
+//    SEGV 的真正根因是 **W-107**(per-fn 表的固定上限:那次尝试给 main.jhyy
+//    加了 3 个顶层函数 → 1022 → 1025 > 1024 → 被丢弃的函数帧算成 8 字节
+//    → 局部变量冲出帧 → 「帧偏移 ≈ -515KB 的写」)。
+//    W-107 已改成**按实际函数数分配** ⇒ 这个阻塞不再存在 ✓
+//    (见 workarounds.md W-105 / W-107 条目)。
+fn sema_record_borrow(ctx: *SemaContext, sym: *Sym, is_mut: i32,
+                      loc_filename: *u8, line: i32, col: i32) -> i32 {
+    if sym == (0 as *Sym) { return 0 as i32; }
+    // 冲突检查:同一作用域内已有活的 `&mut` → 新的 `&mut` 冲突
+    let mut i: i64 = 0 as i64;
+    while i < (*ctx).borrow_rec_n {
+        let rec = ptr_add_u8((*ctx).borrow_recs, i * (16 as i64)) as *u8;
+        let rs = *(rec as **Sym);
+        let rm = *(ptr_add_u8(rec, 8 as i64) as *i32);
+        // ⚠️ 比**名字**不比指针 —— jhyy 的每个 IDENT 节点有**自己的** Sym
+        // (同名不同实例;sema 自己的 locals 反查也有「name 匹配 fallback」
+        // 就是因为这个)。比指针的话两次 `&mut x` 永远「不是同一个变量」→
+        // 冲突检查恒不触发 ✗。
+        if strcmp((*rs).name, (*sym).name) == (0 as i32) {
+            if rm != (0 as i32) {
+                if is_mut != (0 as i32) {
+                    let _e = sema_error_str(ctx, loc_filename, line, col,
+                        "cannot borrow this variable as mutable more than once at the same time" as *u8);
+                    return 1 as i32;
+                }
+            }
+        }
+        i = i + (1 as i64);
+    }
+    // 记录
+    if (*ctx).borrow_rec_n >= (*ctx).borrow_rec_cap {
+        // 响亮失败:表满 = 静默丢记录 = 静默漏检 ✗ —— 宁可编译失败
+        let _e = sema_error_str(ctx, loc_filename, line, col,
+            "too many borrows in this function (borrow-check table overflow)" as *u8);
+        return 1 as i32;
+    }
+    let rec2 = ptr_add_u8((*ctx).borrow_recs, (*ctx).borrow_rec_n * (16 as i64)) as *u8;
+    *(rec2 as **Sym) = sym;
+    *(ptr_add_u8(rec2, 8 as i64) as *i32) = is_mut;
+    (*ctx).borrow_rec_n = (*ctx).borrow_rec_n + (1 as i64);
+    return 0 as i32;
+}
+
 fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     if n == (0 as *Node) { return type_void(ta); }
     if (*n).type_ptr != (0 as *u8) { return (*n).type_ptr as *Type; }
@@ -1112,6 +1186,19 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     if (*n).kind == NODE_ADDR_OF() {
         let d = node_addr_of_data(n);
         let inner = infer_type(ctx, ta, (*d).expr as *Node);
+        // W-105(b):`&mut x`(x 是局部变量)→ 记录借用 + 查独占性冲突。
+        // 共享 `&x` 按 spec §2.2 是 POINTER(v1.x 语义),不是借用 ⇒ 不记录。
+        // reborrow / 字段 / 下标不记录(spec §4.1 的已知限制 ✓)。
+        if (*d).is_mut != (0 as i32) {
+            let inner_node = (*d).expr as *Node;
+            if inner_node != (0 as *Node) {
+                if (*inner_node).kind == NODE_IDENT() {
+                    let idd = node_ident_data(inner_node);
+                    let _rb = sema_record_borrow(ctx, (*idd).sym as *Sym, 1 as i32,
+                                                 (*n).loc_filename, (*n).loc_line, (*n).loc_col);
+                }
+            }
+        }
         // W-105:`&mut expr` 的类型是 **KIND_REF(is_mut=1)** —— 与**类型**位置的
         // `&mut T` 同一个表示(NODE_REF_TYPE 分支产的也是 KIND_REF)。
         //
@@ -1876,12 +1963,16 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     // ── block ──
     if (*n).kind == NODE_BLOCK() {
         let d = node_block_data(n);
+        // W-105(b):借用的**作用域** = 一个 block。进 block 记 mark,出 block
+        // 回卷 ⇒ 嵌套 block 里的借用不跟外层的冲突(spec §4.1 已知限制 ✓)。
+        let borrow_mark = (*ctx).borrow_rec_n;
         let mut last_type: *Type = type_void(ta);
         let mut i: i64 = 0 as i64;
         while i < (*d).nstmts {
             last_type = infer_type(ctx, ta, *(((*d).stmts as i64 + i * (8 as i64)) as **Node));
             i = i + (1 as i64);
         }
+        (*ctx).borrow_rec_n = borrow_mark;
         (*n).type_ptr = last_type as *u8;
         return last_type;
     }
@@ -2643,43 +2734,60 @@ fn check_link_section_name(ctx: *SemaContext, loc_filename: *u8,
 // check_func_decl
 // ════════════════════════════════════════════════════
 
-// v3.1.0 (V3-C 3g): check_borrow — STUB for v3.1.0 ship-gate.
-// Full NLL (Non-Lexical Lifetimes) / Polonius 留 v3.x 末。当前 ship-gate
-// 实现 linear-scope simplification: 仅 **类型解析** `&T` / `&mut T` 正确,
-// 不检测 active-borrow 冲突 (no NLL path analysis, no nested blocks)。
+// ── v3.1.0 (V3-C 3g) 的 check_borrow stub 已删除(2026-10-20,W-105)──
 //
-// 已知限制 (out of scope 留 v3.x 末):
-//   - 不检测 `let y = &mut x; let z = &mut x;` 双 mutable 冲突
-//   - 不检测 `&mut` + `&` shared/mutable 互斥
-//   - 不支持 reborrow `&mut *x` 路径
-//   - 不支持 lifetime 子类型 / variance
-//   - 不支持 跨函数 borrow
-//   - 不支持 nested block 借用作用域
+// 它是 `fn check_borrow(...) { return 1; }` —— **名字承诺「检查借用冲突」,
+// 实际什么都不做**,而且每个函数声明都会调它一次。
 //
-// 完整 NLL 设计参 spec supplement v3.1.0 § 4 (v3.x 末重新设计)。
-fn check_borrow(ctx: *SemaContext, ta: *TypeArena, body: *Node) -> i32 {
-    return 1;
-}
+// 删掉它(而不是「实现它」)的三条理由:
+//
+//   1. **locked spec 明确 out of scope。**
+//      `docs/abis/jhyy-lang-spec-borrow-check-supplement-v3.1.0.md`(锁定):
+//      §4.1 把 8 项限制逐条列出来(双 `&mut` 冲突 / `&mut`+`&` 互斥 /
+//      reborrow / lifetime 子类型 / 跨函数 borrow / nested block 作用域 /
+//      path-based NLL / escape analysis),§4.2 写明「**当前 v3.1.0 实现是
+//      STUB**」,§4.3 给的理由是「v3.1.0 ship-gate 优先类型系统 + ABI 集成,
+//      借用检查延迟到后续 sprint」(内核用 `&mut` 的场景:单线程 short-lived,
+//      NLL 检查不强需,M4 launch 之后再补全不阻塞 OS 启动)。
+//   2. **要做对需要的是 NLL/Polonius,不是加个 if。** 词法作用域的粗检查会
+//      **误报** —— borrow 提前结束(`let y = &mut x; *y = 1; let z = &mut x;`)
+//      在 NLL 下是合法的,粗检查会拒绝它 ⇒ 那是**真的违反 spec**(spec 说
+//      NLL 不在 v3.1.0 范围内,就不能因此拒绝 NLL 合法的程序)。
+//      真正的活儿在 backlog 的 v4.3.0「full lifetime + Polonius borrow check」。
+//   3. **留一个恒 return 1 的函数比不做检查更坏** —— 读代码的人看到
+//      `check_borrow` 这个名字会以为检查过了(这正是 W-105 被登记的原因)。
+//
+// 原 stub 声称要覆盖、但从没覆盖的清单(将来真做 Polonius 时照着做):
+//   - `let y = &mut x; let z = &mut x;` 双 mutable 冲突
+//   - `&mut` + `&` shared/mutable 互斥
+//   - reborrow `&mut *x` 路径
+//   - lifetime 子类型 / variance
+//   - 跨函数 borrow
+//   - nested block 借用作用域
+//
+// 缺口怎么盯着:`compiler/tests/examples/borrow_check_basic.jhyy` 里有一段
+// 「双 `&mut`」的**特征化**代码 —— 它今天**能编译**(spec §6.2 的例子),
+// 将来真检查落地时它会**编译失败** → 回归变红 → 那时把这个测试反过来写成
+// 「期望报错」✓。
 
-// v3.1.2 (V3-C 3g.7): check_cap_pass — STUB for v3.1.2 ship-gate.
-// 跨函数 Cap<T> pass 完整校验(active-cap conflict / reentrancy / depth transition)
-// 留 v3.x 末。当前 ship-gate 仅做类型签名层面的 Cap<T> pass-by-value 验证
-// (走 qbe_type_of → QBE_L → Win x64 INTEGER class),不做语义级 cap ownership 分析。
+// ── v3.1.2 (V3-C 3g.7) 的 check_cap_pass stub 已删除(2026-10-20,W-105.1)──
 //
-// 已知限制 (out of scope 留 v3.x 末):
-//   - 不检测 active-cap conflict(同一 cnode 跨函数双写)
-//   - 不检测 reentrancy(同一函数重入 + cap 调用)
-//   - 不检测 depth transition(Cap depth 自动递增)
-//   - 不支持 `Cap<T>` 字段访问 `.cnode_idx` / `.depth` / `.rights`(per spec supplement v3.1.0 § 126)
-//   - 不支持 `*Cap<T>` 裸指针类型(per parser gap,generic-on-pointer 留 v3.2.0)
-//   - 不支持 `cap_new()` builtin ctor
-//   - 不支持 cross-fn borrow + Cap 组合(跟 check_borrow 同样 stub)
-//   - 不支持 SysV target ABI(per Windows-only 决策,v2.7.0+ 后 backport)
+// 它跟 check_borrow 一样是「恒 return 1」的 ship-gate stub,但**连一个调用点
+// 都没有**(grep 全 compiler/src0 确认)—— 即「一个没人调的、假装会检查的函数」。
+// 台账的判定:**那比不检查更坏** —— 读代码的人看到 `check_cap_pass` 这个名字
+// 会以为 cap ownership 已经被检查了。
 //
-// 完整 cap pass 设计参 spec supplement v3.1.0 § 4 + v3.1.2 § 3 (v3.x 末重新设计)。
-fn check_cap_pass(ctx: *SemaContext, ta: *TypeArena, body: *Node) -> i32 {
-    return 1;
-}
+// 它原来打算做、但从来没做过的检查(留档,将来真要实现 cap ownership 分析时
+// 照着这份清单做):
+//   - active-cap conflict(同一 cnode 跨函数双写)
+//   - reentrancy(同一函数重入 + cap 调用)
+//   - depth transition(Cap depth 自动递增)
+//   - `Cap<T>` 字段访问 `.cnode_idx` / `.depth` / `.rights`
+//   - `*Cap<T>` 裸指针类型(per parser gap)
+//   - `cap_new()` builtin ctor
+//   - cross-fn borrow + Cap 组合
+//
+// 设计参 spec supplement v3.1.0 § 4 + v3.1.2 § 3。
 
 fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
     let fd = node_func_decl_data(n);
@@ -2773,10 +2881,18 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
                                                   (*n).loc_line, (*n).loc_col,
                                                   (*fd).link_section);
             }
-            // v3.1.0 (V3-C 3g): simplified NLL borrow check. Linear-scope walk
-            // top-level stmts; detects `&mut x` twice (current simplification —
-            // no path analysis, no reborrow, no nested blocks).
-            let _bc = check_borrow(ctx, ta, (*fd).body as *Node);
+            // ── v3.1.0 (V3-C 3g) 的 borrow 冲突检查:没有实现,也没有留 stub ──
+            //
+            // 这里原来调 `check_borrow(ctx, ta, body)` —— 一个恒 return 1 的
+            // ship-gate stub。2026-10-20(W-105)连函数带调用点一起删掉:
+            // locked spec(v3.1.0 borrow-check supplement)§4.1/§4.2/§4.3 明确
+            // 把冲突检测列为 out of scope,§4.2 写明「当前 v3.1.0 实现是 STUB」;
+            // 而真要做对需要 NLL/Polonius(词法粗检查会误报 → 拒绝 spec 允许的
+            // 程序),那件活在 backlog 的 v4.3.0。详细理由见上面 check_borrow
+            // 被删掉的那段注释。
+            //
+            // 缺口的机械盯法:borrow_check_basic.jhyy 里的「双 `&mut`」特征化
+            // 代码今天能编译,将来检查落地时它会编译失败 → 回归变红 ✓。
         }
     }
 
@@ -2785,10 +2901,13 @@ fn check_func_decl(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> i32 {
 }
 
 // ════════════════════════════════════════════════════
-// v3.1.0 (V3-C 3g): check_borrow — STUB for v3.1.0 ship-gate
+// v3.0.4 (3e link_section): check_link_section_name
 // ════════════════════════════════════════════════════
 //
 // (定义见 line 1955 — 必须在 check_func_decl 之前,jhyy 无 forward decls)
+//
+// ⚠️ 这个 header 原来写的是「check_borrow — STUB」—— 那是 v3.1.0 留下的
+// 残留标题(函数本体早已移走,标题没跟着改)。2026-10-20(W-105)一并更正。
 //
 // v3.0.4 (3e link_section): validate ELF section name. Reject empty / NUL /
 // non-printable / whitespace / quote (would break `.section <name>` directive
@@ -3244,6 +3363,14 @@ fn sema_init(ctx: *SemaContext, arena: *Arena, ta: *TypeArena) -> i32 {
     // v3.4.2 W-089: zero-init SymbolReturnTypeMap fields (Pass 1.6 populates)
     (*ctx).ret_type_map = 0 as *u8;
     (*ctx).ret_type_map_n = 0 as i64;
+    // W-105(b):借用记录表(16 字节/条)。固定容量 512 条 = 8KB ——
+    // 正常函数远用不到;满了**响亮报错**(见 sema_record_borrow),不静默丢。
+    (*ctx).borrow_rec_n = 0 as i64;
+    (*ctx).borrow_rec_cap = 512 as i64;
+    let br_bytes = (*ctx).borrow_rec_cap * (16 as i64);
+    let br_ptr = arena_alloc(arena, br_bytes);
+    let _zbr = memset(br_ptr, 0 as i32, br_bytes);
+    (*ctx).borrow_recs = br_ptr;
     // init type arena（lazy init 也会触发）
     (*ta).arena = arena;
     (*ta).inited = 0 as i32;
