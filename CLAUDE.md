@@ -140,7 +140,7 @@
 
 ## 当前活跃 workarounds
 
-**9 ACTIVE / 0 DEFERRED**(2026-10-20 复核:**W-104 RESOLVED**(v4.0.12 —— ≤16B eightbyte 分类 + >16B MEMORY class 整体落栈,与 gcc 三方向对拍全绿);**W-114 RESOLVED**(v4.0.14 —— enum 的 ABI 两侧统一:参数按地址传、返回值走 sret、调用结果是 8 字节指针;顺带修了 **W-119**:SysV 帧布局把第 0 号局部变量放在 `0(%rbp)` = 覆盖旧 rbp),**9 ACTIVE / 104 索引行**,per `docs/internal/workarounds.md` 索引表):
+**8 ACTIVE / 0 DEFERRED**(2026-10-20 复核:**W-104 RESOLVED**(v4.0.12 —— ≤16B eightbyte 分类 + >16B MEMORY class 整体落栈,与 gcc 三方向对拍全绿);**W-114 RESOLVED**(v4.0.14 —— enum 的 ABI 两侧统一:参数按地址传、返回值走 sret、调用结果是 8 字节指针;顺带修了 **W-119**:SysV 帧布局把第 0 号局部变量放在 `0(%rbp)` = 覆盖旧 rbp);**W-112 RESOLVED**(v4.0.16 —— `#[link_section]` 的 `.section` 之前被插进 link 路径的副本,磁盘上的 .s 里没有),**8 ACTIVE / 104 索引行**,per `docs/internal/workarounds.md` 索引表):
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
@@ -148,7 +148,7 @@
 | W-103 | `compiler/src0/std/os.jhyy:69-144` | `std_os_open/close/read/write` 全是 M0 mock,`std_os_exit` 不退出进程 |
 | W-107 | `compiler/src0/codegen_amd64_state.jhyy` | 五个 per-fn 表(表长 2026-10-20 从 1024 提到 **4096**,余量 3066 个函数);**越界不再静默截断** → 改成大声报错并让编译失败(静默截断 = 帧算成 8 字节 = 局部变量冲出帧 = 静默产出错代码)。终局「按实际函数数分配」仍待做 |
 | W-106 | `compiler/src0/symtab.jhyy:260-264` | 死存储改栈布局。**2026-10-18 三次实测:原注释的理由已被证伪(栈帧两边都物化)、机制未知、删除的安全性未证实(约 11 次运行里 1 次间歇失败 vs 基线 9 次全绿)。不删,但别信旧注释** |
-| W-112 | `compiler/src0/codegen.jhyy:4478` | `#[link_section]` 是 no-op,生成的 .s 里没有任何 `.section` |
+| W-112 | — | ~~`#[link_section]` 是 no-op~~ ✅ **2026-10-20 已修**:`.section` 之前被插进 link 路径的**副本**(`temp_asm`),磁盘上的 .s 和 `--no-link` 产物里都没有 → 现在 .s 产出后立刻对 `asm_path` 处理一次 |
 | W-113 | `asm!` / `fence_*` emit 路径 | 字节被 emit 到 `ret` 之后,永不执行;ship gate 零敏感 |
 | W-115 | `codegen_call_return_types.jhyy` | W-089 标 ✅ RESOLVED,但它自己的 reproducer 仍 STACK_OVERFLOW |
 | W-105.1 | `compiler/src0/sema.jhyy:2578-2579` | `check_cap_pass` 同款 stub,当前无调用点 |

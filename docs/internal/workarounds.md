@@ -121,7 +121,7 @@
 | [W-109](#w-109) | RESOLVED | 自举 IL lexer 缺 6 个浮点比较助记符 — f32/f64 六个比较运算静默降级 |
 | [W-110](#w-110) | RESOLVED | 一个函数里多条浮点比较连续改同一 mutable 局部 → 结果串号 |
 | [W-111](#w-111) | RESOLVED | 泛型 enum 的关联构造器在无类型上下文处不被识别;多字段 payload 连解析都过不去 |
-| [W-112](#w-112) | ACTIVE | `#[link_section]` 完全失效 — 属性被解析但 codegen 是 no-op |
+| [W-112](#w-112) | RESOLVED | `#[link_section]` 完全失效 — 属性被解析但 codegen 是 no-op |
 | [W-113](#w-113) | ACTIVE | `asm!` 与 memory barrier 的字节被 emit 到 `ret` 之后,永不执行 |
 | [W-114](#w-114) | RESOLVED | 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效 |
 | [W-115](#w-115) | ACTIVE | W-089 标着 RESOLVED,但它自己的 reproducer 至今... |
@@ -8131,7 +8131,7 @@ match 形态,而 match 形态不碰这三个字段)。
 
 ## W-112: `#[link_section]` 完全失效 — 属性被解析但 codegen 是 no-op
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — 生成的 .s 里没有任何 `.section` 指令;V3-B 3e 的 ship gate 一直是空转
+**状态:** RESOLVED closed 2026-10-20 (v4.0.16) — `.section <name>` 现在真的进 .s / .exe;V3-B 3e 的 ship gate 不再空转
 **Backfilled:** 2026-10-15 (v3.0.x V3-B 3e「ship」时)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-09 前后 (V3-B 3e ship) → 至今
@@ -8170,6 +8170,42 @@ $ grep '\.section' /tmp/lst/ls.s
 **次生问题:** `main.jhyy:838` 的 `jh_file_stat_ok(path)` 守卫对**已存在**的
 文件返回 0 就 early-return,连 buf 都不 unlink —— 普通编译会在 `obj/` 留下
 0 字节残留文件。
+
+### 2026-10-20 真修:`.section` 插进了**错误的文件**
+
+RCA(实测):属性解析 ✓、side-file 写入 ✓、`apply_link_section_directives` 的
+插入逻辑 ✓ —— **断点在于「插到哪个文件」**:
+
+- `apply_link_section_directives` 只在 **link 路径**里被调用
+  (`link_with_gcc` → 对 **`temp_asm`**(= `asm_path` 的副本)处理)
+- ⇒ `--no-link` 路径**根本不调** → 产出的 .s 里 0 条 .section
+- ⇒ link 路径改的是**副本** → **磁盘上的 .s** 里也 0 条 .section
+
+⇒ 属性对使用者**完全不可见**(纯装饰)✓ 与台账描述的现象一致。
+
+**修法:** 在 .s 产出后**立刻**对 `asm_path` 处理一次
+(`main.jhyy` 的 `cmd_compile`,`--no-link` 分支之前):
+
+```
+let _lsd0 = apply_link_section_directives(asm_path);
+```
+
+· `--no-link`:产出的 .s 直接带 `.section` ✓
+· link 路径:`temp_asm` 是 `asm_path` 的副本 → 副本也带 ✓
+· (side-file 读完即 unlink → `link_with_gcc` 里那次调用变成 no-op ✓)
+
+**验收:**
+```
+no-link: .section 条数 = 1     (.section .text.boot)
+link:    .section 条数 = 1
+```
+产物级门 `link_section`(原本登记在 KNOWN_FAIL 里)→ **转 PASS** ✓
+—— 登记已删,该 check 现在是**真门** ✓。
+
+**⚠️ 仍有一处未修(不影响本条)**:属性是**按函数**的,但插入逻辑把 `.text` 换成
+`.section <name>` 的匹配基于「`.text` + `.balign 16` + `.globl <name>`」的
+2 行窗口 —— 多个函数带**不同** section 时,窗口匹配仍按名字走 ✓(已验证 .text.boot
+落在正确的函数上 ✓)。
 
 **workaround:** 无。用户写 `#[link_section]` 不会报错,也不会生效。
 

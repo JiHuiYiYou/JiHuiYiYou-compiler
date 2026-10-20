@@ -1512,6 +1512,21 @@ fn cmd_compile(argc: i32, argv: *u8, t: i32) -> i32 {
             return 1 as i32;
         }
     }
+    // W-112 (2026-10-20 真修):把 `#[link_section("X")]` 的 `.section X` 指令
+    // 插进 **.s 文件本身**。
+    //
+    // 之前只在 link_with_gcc 里对 **temp_asm**(link 路径的副本)调用
+    // apply_link_section_directives ⇒
+    //   · `--no-link` 路径根本不调 → 产出的 .s 里 0 条 .section
+    //   · link 路径改的是副本 → **磁盘上的 .s** 里也 0 条 .section
+    // ⇒ 属性对使用者完全不可见(纯装饰),这是 W-112 的根因。
+    //
+    // 现在在 .s 产出后立刻对 asm_path 处理一次:
+    //   · --no-link:产出的 .s 直接带 .section ✓
+    //   · link 路径:temp_asm 是 asm_path 的副本 → 副本也带 ✓
+    // (side-file 读完即 unlink → link_with_gcc 里那次调用变成 no-op ✓)
+    let _lsd0 = apply_link_section_directives(asm_path);
+
     // v2.8.3: --no-link flag → skip gcc link, 保留 .s 给 caller。
     // cmd_run 不传 --no-link (自己构造 arg_arr),所以 cmd_run 行为不变。
     let mut r2: i32 = 0 as i32;

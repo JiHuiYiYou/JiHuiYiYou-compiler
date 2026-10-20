@@ -100,9 +100,7 @@ declare -a SKIPPED=()
 # 两条都是「asm 字节落在 ret 之后,永不执行」。只登记其中一条会让另一条被误判成
 # 新 bug(2026-10-18 实测踩到了:先只登记了退化形态,精确形态立刻翻红)。
 declare -A KNOWN_FAIL=(
-    [link_section]="W-112|0 条 .section 指令"
     [asm_before_ret]="W-113|没有任何函数体包含它|BAD "
-    [per_fn_frame]="W-107|膨胀(1024 上限已触发)"
     # W-116 已修(2026-10-19),这一项升级成真门 —— 登记删除即生效
 )
 
