@@ -508,36 +508,30 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     // cg_compute_per_fn_max_temps (Phase A) 一次 pre-scan 填,emit_func_header 读
     // per_fn_max[cur_fn_idx] 算 frame_size (替换 v2.11.2 global frame_max_temp
     // → 跨 fn 共用 15488 字节 → 递归函数 SIGSEGV)。
-    let fns_bytes = (1024 as i64) * (8 as i64);
-    let fns_ptr = arena_alloc(arena, fns_bytes);
-    let _zero_fns = memset(fns_ptr, 0 as i32, fns_bytes);
-    (*s).fn_starts = fns_ptr;
-    let pfm_bytes = (1024 as i64) * (8 as i64);
-    let pfm_ptr = arena_alloc(arena, pfm_bytes);
-    let _zero_pfm = memset(pfm_ptr, 0 as i32, pfm_bytes);
-    (*s).per_fn_max = pfm_ptr;
+    // W-107 (2026-10-20):per-fn 表**不再**在这里按固定 1024 分配 ——
+    // 改由 cg_compute_per_fn_max_temps 的 Phase 1 **按实际函数数**分配
+    // (见该函数)。理由见那里的说明:固定 1024 的上限一旦被超过,溢出的函数
+    // 会被**丢弃** → 它们的 per_fn_max 保持 0 → 单调钳制把 local_max 压成 0
+    // → frame_size = 8 → 那个函数的局部变量**冲出帧** → 踩坏调用者的帧
+    // → 编译器的 target 变成随机值(表现为「Win 目标却按 SysV 出码」)
+    // + 间歇性 SEGV。
+    //
+    // 这里只留 0 指针:pre-scan 会覆盖它们 ✓。
+    (*s).fn_starts = 0 as *u8;
+    (*s).per_fn_max = 0 as *u8;
     // v3.1.0 W-087 (alloc pool frame offset 真修,applied on top of V2 wholesale port):
     // per-fn alloc 总和 pre-scan table。emit_func_header 读 per_fn_alloc[cur_fn_idx]
     // 决定 alloc pool reserve size (= 8192 base + per_fn_alloc)。没有 pre-scan
     // → frame_size 不 cover alloc pool → alloc 写 -8200(%rbp) 越界 → 错数据 / crash
     // (V2 v4.0.0 self-backend 跟 V3 W-087 同一 bug,V2 regress 没 std_* test 触发)。
-    let pfa_bytes = (1024 as i64) * (8 as i64);
-    let pfa_ptr = arena_alloc(arena, pfa_bytes);
-    let _zero_pfa = memset(pfa_ptr, 0 as i32, pfa_bytes);
-    (*s).per_fn_alloc = pfa_ptr;
+    (*s).per_fn_alloc = 0 as *u8;
     // v4.0.7 (W-097 sub-bug 2): per-fn address-holder pool byte budget。address-holder
     // pool 从 -(frame_size+64) 往下长,必须额外 reserve 进 `subq $n, %rsp`。
-    let pfap_bytes = (1024 as i64) * (8 as i64);
-    let pfap_ptr = arena_alloc(arena, pfap_bytes);
-    let _zero_pfap = memset(pfap_ptr, 0 as i32, pfap_bytes);
-    (*s).per_fn_addr_pool = pfap_ptr;
+    (*s).per_fn_addr_pool = 0 as *u8;
     // v4.0.2.2 (W-096 emit-side per-fn-local counter 真修):per_fn_base_t alloc
     // (8KB) + zero-init。cg_compute_per_fn_max_temps Phase 2 写 per_fn_base_t[i]
     // = per_fn_max[i-1] + 1 (i=0 用 0)。global t → local t 翻译表。
-    let pfbt_bytes = (1024 as i64) * (8 as i64);
-    let pfbt_ptr = arena_alloc(arena, pfbt_bytes);
-    let _zero_pfbt = memset(pfbt_ptr, 0 as i32, pfbt_bytes);
-    (*s).per_fn_base_t = pfbt_ptr;
+    (*s).per_fn_base_t = 0 as *u8;
     // wire C-side state pointer for cg_offset_for_temp / cg_local_t_from_global
     // (无 state 参数 hot path 通过 jh_cgstate_get_state 拿当前 state)
     let _wr_st = jh_cgstate_set_state(state);
@@ -1729,36 +1723,61 @@ fn cg_token_alloc_size(tok_p: *u8, tok_size: i64, idx: i64) -> i64 {
 // 调用方:codegen_amd64.jhyy:279 (v2.11.10 替换 cg_compute_global_max_temp)。
 fn cg_compute_per_fn_max_temps(state: *u8, tok_p: *u8, tok_size: i64, n: i64) -> i32 {
     let s = state as *CGState;
-    // Safety: fn_starts / per_fn_max 必须 alloc 过 (cg_state_init 必调)
-    if (*s).fn_starts == (0 as *u8) || (*s).per_fn_max == (0 as *u8) {
-        return 1 as i32;
-    }
-    // Phase 1: 扫 fn_starts
+    // ── W-107 (2026-10-20):per-fn 表改为**按实际函数数**分配 ──
+    //
+    // 之前:五张表固定 1024 项,fn_count > 1023 时被截断。**溢出的函数被丢弃**
+    // → 它们的 per_fn_max 保持 0 → 单调钳制把 local_max 压成 0
+    // → frame_size = 8 → 那个函数的局部变量冲出帧 → **踩坏调用者的帧**
+    // → 编译器的 target 变成随机值(表现为「Win 目标却按 SysV 出码」)
+    // + 间歇性 SEGV。
+    //
+    // 触发面:main.jhyy 的函数数当时是 1020(离 1024 只差 4)—— 本仓库自己
+    // 加几个函数就跨过去了。现在按实际个数分配,没有上限。
+    //
+    // Phase 1:数函数个数
     let mut fn_count: i64 = 0 as i64;
     let mut i: i64 = 0 as i64;
     while i < n {
         let t = (tok_p as i64 + i * tok_size) as *ILToken;
         if (*t).kind == ILTOK_FUNC_HEADER() {
-            // safety: 1024 entries cap,溢出截断 (v4.0.2.1 W-074.6 256→1024
-            // bump:main.jhyy 997 fns 触发 256+ fn 走 global-max fallback → frame
-            // over-reserve 484KB for trivial fns like codegen_amd64_lexer__main_jhyy。
-            // 1024 = 4x safety over main.jhyy,future-proof for stdlib-heavy modules)
-            if fn_count < 1024 as i64 {
-                let p = ptr_add_u8((*s).fn_starts, fn_count * (8 as i64)) as *i64;
-                *p = i;
-            }
             fn_count = fn_count + (1 as i64);
         }
         i = i + (1 as i64);
     }
+    // 分配五张表(cap = fn_count + 1:fn_starts 要多一个哨兵项)
+    let arena = (*s).arena;
+    let cap = fn_count + (1 as i64);
+    let tbl_bytes = cap * (8 as i64);
+    let fns_ptr = arena_alloc(arena, tbl_bytes);
+    let _z1 = memset(fns_ptr, 0 as i32, tbl_bytes);
+    (*s).fn_starts = fns_ptr;
+    let pfm_ptr = arena_alloc(arena, tbl_bytes);
+    let _z2 = memset(pfm_ptr, 0 as i32, tbl_bytes);
+    (*s).per_fn_max = pfm_ptr;
+    let pfa_ptr = arena_alloc(arena, tbl_bytes);
+    let _z3 = memset(pfa_ptr, 0 as i32, tbl_bytes);
+    (*s).per_fn_alloc = pfa_ptr;
+    let pfap_ptr = arena_alloc(arena, tbl_bytes);
+    let _z4 = memset(pfap_ptr, 0 as i32, tbl_bytes);
+    (*s).per_fn_addr_pool = pfap_ptr;
+    let pfbt_ptr = arena_alloc(arena, tbl_bytes);
+    let _z5 = memset(pfbt_ptr, 0 as i32, tbl_bytes);
+    (*s).per_fn_base_t = pfbt_ptr;
+    // Phase 1b:填 fn_starts(第二遍扫 —— 先数后填,才能按实际个数分配)
+    let mut fidx: i64 = 0 as i64;
+    i = 0 as i64;
+    while i < n {
+        let t = (tok_p as i64 + i * tok_size) as *ILToken;
+        if (*t).kind == ILTOK_FUNC_HEADER() {
+            let p = ptr_add_u8((*s).fn_starts, fidx * (8 as i64)) as *i64;
+            *p = i;
+            fidx = fidx + (1 as i64);
+        }
+        i = i + (1 as i64);
+    }
     // 哨兵: fn_starts[fn_count] = n (end of last fn body)
-    if fn_count < 1024 as i64 {
-        let p = ptr_add_u8((*s).fn_starts, fn_count * (8 as i64)) as *i64;
-        *p = n;
-    }
-    if fn_count > 1023 as i64 {
-        fn_count = 1023 as i64;
-    }
+    let sp = ptr_add_u8((*s).fn_starts, fn_count * (8 as i64)) as *i64;
+    *sp = n;
     (*s).fn_count = fn_count;
     // Phase 2: per_fn_max[i] = max temp id in [fn_starts[i], fn_starts[i+1])
     let mut fi: i64 = 0 as i64;
