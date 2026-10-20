@@ -645,12 +645,24 @@ MVP 范围里明确不支持,**但编译器没有任何检查** ⇒ 给它生成
 **清零名单:** W-104 / W-112 / W-113 / W-114 / W-115 / W-118 / W-120 / W-121 /
 W-122 / W-123 / W-103 / W-105 / W-105.1 / W-106 / W-107。
 
-**余下的 promote 条件**(见 `active-workaround-clearance.md` § 全局 ship gate):
-- ✅ `regress jhyy.exe` → 184/184 PASS + 20 SKIP
-- ⏳ `regress jhyy_v2.exe`(自举产物也跑一遍)
-- ✅ `closure_check.sh` → PASS,v2.s == v3.s byte-identical
-- ⏳ `fixed_point.sh N=5` → 7 PASS / 0 FAIL / 0 INFO
-- ✅ `workarounds.md 索引` → **ACTIVE 0 / DEFERRED 0**
+**余下的 promote 条件**(见 `active-workaround-clearance.md` § 全局 ship gate)
+—— **2026-10-20 全部满足**:
+
+| 门 | 结果 |
+|---|---|
+| `regress jhyy.exe` | ✅ **184/184 PASS** + 20 SKIP |
+| `regress jhyy_v2.exe`(**自举产物也跑**) | ✅ **184/184 PASS** + 20 SKIP |
+| `closure_check.sh` | ✅ PASS,v2.s == v3.s byte-identical |
+| `fixed_point.sh` | ✅ **17 PASS / 0 FAIL / 0 INFO**(跑到 N=10) |
+| `workarounds.md 索引` | ✅ **ACTIVE 0 / DEFERRED 0** |
+| `make selfhost` | ✅ v2..v5 逐字节相同 |
+| `artifact_checks.sh` | ✅ 7 PASS / 0 KNOWN-FAIL / 0 FAIL |
+| SysV 6 个回归 + W-104 三方向 ABI 对拍 | ✅ 6 PASS + 3 PASS |
+| CI | ✅ 全绿(连续 5 个 push) |
+
+⇒ **v4.0.0 final 的 promote 条件已全部满足** —— 下一步是打 tag + 走发布链
+(`release.yml` 现在是 reusable workflow,由 CI 的 `release` job 调用 ⇒ 门不绿
+就发不出去 ✓)。
 
 **⚠️ 方法论沉淀(W-106 那条最值钱):** 「删掉 X ⇒ 偶发失败 ⇒ X 承重」这个推理链
 **只在一个前提下成立**:那个偶发失败是**由 X 引起的**。W-106 那次不是 —— X 只

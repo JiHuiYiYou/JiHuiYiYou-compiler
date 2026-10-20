@@ -826,9 +826,20 @@ SysV 回归: 6 PASS ✅   W-104 三方向 ABI 对拍: 3 PASS ✅
 W-104 / W-112 / W-113 / W-114 / W-115 / W-118 / W-120 / W-121 / W-122 / W-123 /
 W-103 / W-105 / W-105.1 / W-106 / W-107。
 
-**⇒ ACTIVE 桶清空。** 剩下的 promote 条件(见
-[`active-workaround-clearance.md`](../../plans/v4/active-workaround-clearance.md)
-§ 全局 ship gate):`regress jhyy_v2.exe`(自举产物也跑)与 `fixed_point.sh N=5`。
+**⇒ ACTIVE 桶清空。** promote 条件的实测(2026-10-20):
+
+| 门 | 结果 |
+|---|---|
+| `regress jhyy.exe` | ✅ 184/184 PASS + 20 SKIP |
+| `regress jhyy_v2.exe`(**自举产物也跑**) | ✅ 184/184 PASS + 20 SKIP |
+| `closure_check.sh` | ✅ v2.s == v3.s byte-identical |
+| `fixed_point.sh` | ✅ 17 PASS / 0 FAIL / 0 INFO(跑到 N=10) |
+| `make selfhost` | ✅ v2..v5 逐字节相同 |
+| `artifact_checks.sh` | ✅ 7 PASS / 0 KNOWN-FAIL / 0 FAIL |
+| SysV 回归 + W-104 三方向 ABI 对拍 | ✅ 6 PASS + 3 PASS |
+| CI | ✅ 全绿 |
+
+⇒ **v4.0.0 final 的 promote 条件已全部满足。**
 
 ---
 
