@@ -430,6 +430,68 @@ EOF
 }
 
 # ════════════════════════════════════════════════════════════════════════════
+# W-104(b) MEMORY class(>16B 的 struct 整体落栈)
+# ════════════════════════════════════════════════════════════════════════════
+#
+# ≤16B 的 struct 走 eightbyte 分类(上面那条 check 验的);**>16B** 的走
+# MEMORY class(SysV psABI § A.2/A.3):整份拷贝到栈上,不占整数寄存器。
+#
+# 这条 check **不跑二进制**,只看 .s —— 于是它在 Windows runner 上就能跑,
+# 不依赖 docker(跨实现对拍在 sysv job 里,需要 Linux)。
+#
+# 判据(两条都验,缺一不可):
+#   ① caller 侧:调用点前有 `subq $N, %rsp`(N>0)预留 outgoing 区,
+#      且 struct 的每个 8 字节 slot 被写到 0/8/16(%rsp)。
+#      ⚠️ 没有 outgoing 区的话,slot 会写进**调用者自己帧的最底部** ——
+#      踩掉调用者的局部变量。缺陷版本正是这样。
+#   ② callee 侧:序言里从 16(%rbp) / 24(%rbp) / 32(%rbp) 读这三个 slot,
+#      **而不是**从 %rdi 读(那是 ≤16B 的 INTEGER 路径)。
+check_sysv_memory_class() {
+    hdr "W-104(b)  >16B 的 struct 在 SysV 下是否走 MEMORY class(整体落栈)"
+    [ -x "$JHYY_EXE" ] || { skip "sysv_memory_class" "jhyy.exe 不存在"; return; }
+
+    cat > "$WORK/sysvmem.jhyy" <<'EOF'
+type Big = struct { a: i64, b: i64, c: i64 }
+extern fn take_big(m: Big) -> i32;
+fn callee_big(m: Big) -> i32 { return (m.a + m.b + m.c) as i32; }
+fn main_jhyy() -> i32 { let m = Big { a: 1 as i64, b: 2 as i64, c: 3 as i64 }; return callee_big(m); }
+EOF
+    if ! "$JHYY_EXE" compile --target=amd64_sysv_freestanding --no-link \
+            "$WORK/sysvmem.jhyy" -o "$WORK/sysvmem" > "$WORK/sysvmem.log" 2>&1; then
+        badenv "sysv_memory_class" "编译失败:$(tail -3 "$WORK/sysvmem.log" | tr '\n' ' ')"
+        return
+    fi
+    [ -s "$WORK/sysvmem.s" ] || { badenv "sysv_memory_class" "没产出 .s"; return; }
+
+    # ① caller 侧:调用点前预留 outgoing 区 + 三个 slot 写到 0/8/16(%rsp)
+    local callzone
+    callzone=$(awk '/emit_call: SysV/,/call /' "$WORK/sysvmem.s")
+    local miss=""
+    printf '%s' "$callzone" | grep -qE 'subq[[:space:]]+\$[0-9]+,[[:space:]]*%rsp' \
+        || miss="$miss no-outgoing-area"
+    for off in 0 8 16; do
+        printf '%s' "$callzone" | grep -qE "movq[[:space:]]+%r10,[[:space:]]+$off\(%rsp\)" \
+            || miss="$miss slot@$off(%rsp)"
+    done
+
+    # ② callee 侧:从 16/24/32(%rbp) 读,且**不是**从 %rdi 读
+    local body
+    body=$(awk '/^callee_big:/,/ret/' "$WORK/sysvmem.s")
+    for off in 16 24 32; do
+        printf '%s' "$body" | grep -qE "movq[[:space:]]+$off\(%rbp\)," \
+            || miss="$miss read@$off(%rbp)"
+    done
+    printf '%s' "$body" | grep -qE 'movq[[:space:]]+%rdi,' \
+        && miss="$miss read-from-rdi"
+
+    if [ -n "$miss" ]; then
+        bad "sysv_memory_class" "MEMORY class 的栈传递不完整:$miss —— >16B 的 struct 没有整体落到栈上"
+        return
+    fi
+    ok "sysv_memory_class(caller 预留 outgoing 区并推 3 个 slot;callee 从 16/24/32(%rbp) 读)"
+}
+
+# ════════════════════════════════════════════════════════════════════════════
 
 # ════════════════════════════════════════════════════════════════════════════
 # 自检:证明分类逻辑(而不是编译器行为)本身是对的
@@ -501,6 +563,7 @@ want link_section    && check_link_section
 want asm_before_ret  && check_asm_before_ret
 want per_fn_frame    && check_per_fn_frame
 want sysv_mixed_struct && check_sysv_mixed_struct
+want sysv_memory_class && check_sysv_memory_class
 want sysv_arg_spill  && check_sysv_arg_spill
 
 echo

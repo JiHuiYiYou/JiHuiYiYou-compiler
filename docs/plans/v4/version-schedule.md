@@ -50,6 +50,14 @@ CI 重构(`2c952e2`..`497868f`)顺带把这份排期里的几件事做掉了,排
 `active-workaround-clearance.md` 的「未完成事项清单」A/B/C/E 四组基本作废,
 只剩 A 组的三分之一(见该文档修订)。
 
+> **2026-10-20 增补:** 上表「修完没有任何门会响」里的 **W-104 已修完**
+> (v4.0.11 的 ≤16B eightbyte 分类 + v4.0.12 的 >16B MEMORY class),
+> **并且门是补上之后才修的** —— 补门这一步就是本节说的「给 W-104 加一个
+> >4 参数的 SysV 用例」,顺带加的还有 >16B 的 MEMORY 用例与 gcc→jhyy 反向用例。
+> 三方向跨实现对拍全绿(44 / 42 / 42),修复前分别是 171 / 139 SEGV / 20。
+> 所以「W-104 修完没门会响」这个判断**在它被修的时候已经不成立了** ——
+> 缺口 1 已闭合,剩 2(W-106 判定实验)与 3(W-110 RCA)。
+
 ### 修完有反馈 vs 修完没反馈
 
 这是重排期的依据 —— **14 条 ACTIVE 里,只有一半修完会有门告诉你对不对**。
@@ -285,7 +293,7 @@ rdi+xmm0 读),让 jhyy 去调它** —— 以 XFAIL 形式进 `sysv` job 并当�
 | 内容 | 说明 |
 |---|---|
 | **W-116** callee 参数溢出 | ✅ **2026-10-19 已修**。根因:`codegen_amd64_emit_call.jhyy` 里 arg_idx → 寄存器的判别**缺了 SysV 的 `arg_idx >= 4` 分支**(只有 `idx 0..3 给寄存器` + `idx>=4 **且 Win** 给栈`),SysV 的 idx≥4 全落到 `%ecx` 兜底;同一段代码重复 3 处、3 处都错。`reg_rax_for_qt_idx` 的 SysV idx 4/5 本来就对,只是够不着。**两个门同时转绿**:`sysv_abi_test` EXIT 22 → **28**,artifact 级门 KNOWN-FAIL → **PASS**(这些门历史上第一个 PASS) |
-| **W-104** SysV struct 传参 | ⚠️ **2026-10-19 部分修复**。跨实现对拍实测:修复前 jhyy caller → gcc callee 退出码 **171**(应 44)——「struct 按指针传」不只是不符规范,而是**与 gcc 完全不能互操作**。已改为按 eightbyte 分类传值(IL 层拆分,self-backend 无需改动),**双向对拍都 44**。新增常驻门 `sysv_abi_cross.sh`(ubuntu job)—— 纯 jhyy 测试永远看不到「自洽但不兼容」这一类。**⚠️ 剩余缺口:>16B 的 struct(MEMORY class)仍未实现** —— 仍按指针传,与 gcc 不兼容(实测退出码 0,应 15)。MEMORY class 要两端栈布局协调(callee 从 `16(%rbp)` 之后按前面所有栈参数总大小读),比 eightbyte 拆分大一个量级,需单列一项 |
+| **W-104** SysV struct 传参 | ✅ **2026-10-20 已全部修完(v4.0.12)**。跨实现对拍实测:修复前 jhyy caller → gcc callee 退出码 **171**(应 44)——「struct 按指针传」不只是不符规范,而是**与 gcc 完全不能互操作**。≤16B 部分 2026-10-19 改为按 eightbyte 分类传值(IL 层拆分,self-backend 无需改动),**双向对拍都 44**;>16B 的 **MEMORY class**(整体落栈)2026-10-20 补齐 —— 三方向对拍全绿:small jhyy→gcc = 44、big jhyy→gcc = 42、big gcc→jhyy = 42(修复前分别是 139 SEGV / 20)。新增常驻门 `sysv_abi_cross.sh`(ubuntu job)—— 纯 jhyy 测试永远看不到「自洽但不兼容」这一类 |
 
 **gate:** `sysv_link_run.sh` 5/5(**不需要 Docker** —— 两段式 job:windows 侧编
 `.s`,ubuntu 侧链 `crt0.S` + `link.ld` 成 ELF 再跑);W-104 的 >4 参数逐位用例
@@ -353,14 +361,46 @@ self-backend 表达不了 —— 现有 IL 里没有任何形式能表达「这�
 遍历。**检测到「整数溢出 + MEMORY 混排」时明确报编译错误**(「暂不支持」),
 而不是静默产出错误代码。
 
-#### 验收
+#### ✅ 完成记录(2026-10-20)
 
-- 跨实现对拍:**>16B struct** 的 jhyy→gcc 与 gcc→jhyy 双向都得到正确值
-  (当前:退出码 0,应 15)
-- `sysv_abi_cross.sh` 加一个 >16B 用例 —— **当前会红**,修完转 PASS
-- Win 目标零回归(self-backend 改动 gate 在 SysV,自举闭环走 Win,应不受影响)
-- 自举闭环 v2..v5 逐字节相同
-- 全量回归 177/177
+按上面的「受限实现」方案做完,四个层面都动了:
+
+| 层 | 改动 |
+|---|---|
+| IL(header) | `abi_amd64_sysv.jhyy`:MEMORY 参数声明成 N 个 `__m<k>` slot(k 跨所有 MEMORY 参数累计) |
+| IL(caller) | `codegen.jhyy`:每个 slot 从 struct 副本按值 load,作为独立实参进 args 数组,letter = `'m'`(109) |
+| self-backend(caller) | `codegen_amd64_xmm_argalloc.jhyy`:`int_arg_alloc` 对 `'m'` 返 -1(落栈)且不占 INTEGER 序列;`codegen_amd64_emit_call.jhyy`:调用点 `subq $N, %rsp` 预留 outgoing 区,call 后对称 `addq` |
+| self-backend(callee) | `codegen_amd64_emit_call.jhyy`:FNARG 识别 `__m<k>` → 从 `16(%rbp)+k*8` 读 |
+
+**受限边界照做**:`cg_sysv_check_memory_scope`(`codegen.jhyy`)在「有 MEMORY 参数
+且整数参数 > 6 或浮点参数 > 8」时**明确报错并退出**,不静默产错码。
+
+**途中挖出的两个更早的 bug(不限于 MEMORY)**:
+
+- `codegen.jhyy` 的 `out_idx` 写成 `= i`(原始下标)而不是跨实参累计 ——
+  struct 展开后,后续实参会写回**已被占用**的槽位(`f(Mixed m, i32 x)` 的 %x
+  落在 m 的第二个 eightbyte 上,call 文本多出一个空槽 `%t0`)。
+  **单参数调用测不到**(只有一个实参时 i == out_idx)—— 这就是 ≤16B 的测试当初全绿的原因。
+- `codegen_amd64_state.jhyy` 的 `cg_parse_mem_slot` 按 `_m_` 三字节比较 ——
+  标记其实是 `__m<k>`(两个下划线)→ 永远匹配不上 → MEMORY 参数被当普通 INTEGER 参数从 %rdi 读。
+
+**验收(全绿):**
+
+- 跨实现对拍:small jhyy→gcc = **44**、big jhyy→gcc = **42**、big gcc→jhyy = **42**
+  (修复前 big 两个方向分别是 **139 SEGV** 与 **20** —— 门确实能抓到)
+- jhyy↔jhyy:big = **42**
+- `sysv_abi_cross.sh` 扩成三方向,新 fixture `sysv_abi_mem_caller.jhyy` /
+  `sysv_abi_mem_callee.jhyy`
+- 新增 artifact 级门 `sysv_memory_class`(**只看 .s,不跑二进制 → Windows runner
+  上就能跑,不依赖 docker**)
+- Win 目标零回归:全量 **177/177**,0 failed(含 5 个 sysv 用例)
+- 自举闭环 v2..v5 逐字节相同 + `closure_check.sh` v2==v3
+
+#### 遗留(不在本版范围)
+
+「整数溢出参数 + MEMORY 参数混排」仍是**报错**(不是静默错码),但没实现。
+要支持它,callee 侧的溢出参数栈偏移也得改成从 header 完整遍历算出来
+(`16 + 真实栈序号*8`),不再用「INTEGER 序列第 N 个」推。
 
 ### v4.0.13 — 浮点(W-110 单条)
 

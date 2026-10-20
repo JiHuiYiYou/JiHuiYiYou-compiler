@@ -1,0 +1,29 @@
+// sysv_abi_mem_callee.jhyy — W-104 MEMORY class 对拍的**另一个方向**:jhyy 当 callee
+//
+// 与 sysv_abi_mem_caller.jhyy 相反:这次是 **gcc 调 jhyy**。
+//
+// callee 侧要按 SysV MEMORY class 从**栈上**读参数(push %rbp 之后第一个栈
+// 参数在 16(%rbp)),而不是从 %rdi 读。jhyy 的 self-backend 靠参数名里的
+// `__m<k>` 标记识别「这个参数走栈」。
+//
+// 纯 jhyy↔jhyy 的测试**验不到这一侧** —— 两边都按同一套(可能错的)约定来,
+// 永远自洽。要证明与真正的 SysV 实现兼容,必须让 gcc 来调。
+//
+// 期望:42 = 10 + 20 + 12。
+
+type Big = struct {
+    a: i64,
+    b: i64,
+    c: i64,
+}
+
+// 被 gcc 调用的函数 —— 参数 m 是 MEMORY class(24B > 16B)
+fn jhyy_take_big(m: Big) -> i32 {
+    return (m.a + m.b + m.c) as i32;
+}
+
+// 这个 main_jhyy 在本用例里不会被调用(gcc 侧自带 _start),
+// 但 jhyy 模块需要一个入口 —— 保留一个恒返回 0 的。
+fn main_jhyy() -> i32 {
+    return 0;
+}

@@ -684,7 +684,10 @@ fn emit_amd64_arg_regs(state: *u8, nargs: i64, qt: i32, target_tag: i32) -> i32 
                         } else { break; }
                     }
                     let qt_byte = if qt_scan >= cursor { cg_byte_at(text, qt_scan) } else { 0 as i32 };
-                    let arg_qt: i32 = if qt_byte == (119 as i32) { 119 as i32 } else { if qt_byte == (108 as i32) { 108 as i32 } else { if qt_byte == (115 as i32) { 115 as i32 } else { if qt_byte == (100 as i32) { 100 as i32 } else { qt } } } };
+                    // W-104: 'm'(109)= MEMORY class 标记 —— SysV 里这个实参走栈、不占整数寄存器。
+                    // ⚠️ **必须在这里显式认它** —— 落进最后的 `else { qt }` 兜底会被当成
+                    // 别的类型,于是既不落栈也不报错,静默传错。
+                    let arg_qt: i32 = if qt_byte == (119 as i32) { 119 as i32 } else { if qt_byte == (108 as i32) { 108 as i32 } else { if qt_byte == (115 as i32) { 115 as i32 } else { if qt_byte == (100 as i32) { 100 as i32 } else { if qt_byte == (109 as i32) { 109 as i32 } else { qt } } } } };
                     let ap = arg_qts_arr as *i32;
                     let bp = arg_temps_arr as *i64;
                     let ap_off = ptr_add_u8(ap as *u8, parsed_n * (4 as i64)) as *i32;
@@ -834,6 +837,52 @@ fn parse_call_fnname(text: *u8, len: i64) -> i64 {
     return end - dollar_idx;
 }
 
+// cg_count_mem_args — W-104:数当前 call 里有几个 **MEMORY class** 实参。
+//
+// MEMORY 实参在 IL 里以 `m %tN` 出现(字母 'm' = 109 是我们自己的标记,
+// 不是 QBE 类型)。SysV 下它们落栈 → caller 必须预留 outgoing 区。
+//
+// 判据:字母 'm' 前面(跳过空白)必须是 ',' 或 '(' —— 即它是一个实参的类型
+// 字母,而不是函数名/标识符里的一字母。
+fn cg_count_mem_args(state: *u8) -> i64 {
+    let cg = state as *CGState;
+    let text = (*cg).cur_call_text;
+    let text_len = (*cg).cur_call_text_len;
+    if text == (0 as *u8) || text_len <= (0 as i64) {
+        return 0 as i64;
+    }
+    let mut n: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < text_len {
+        if cg_byte_at(text, i) == (109 as i32) {
+            // 往前找非空白字符
+            let mut j = i - (1 as i64);
+            while j >= (0 as i64) {
+                let c = cg_byte_at(text, j);
+                if c == (32 as i32) || c == (9 as i32) { j = j - (1 as i64); } else { break; }
+            }
+            let mut is_arg_letter: i32 = 0 as i32;
+            if j >= (0 as i64) {
+                let c = cg_byte_at(text, j);
+                if c == (44 as i32) || c == (40 as i32) { is_arg_letter = 1 as i32; }
+            }
+            // 往后必须是空白 + '%'(即 "m %tN" 形态)
+            if is_arg_letter != (0 as i32) {
+                let mut k = i + (1 as i64);
+                while k < text_len {
+                    let c = cg_byte_at(text, k);
+                    if c == (32 as i32) || c == (9 as i32) { k = k + (1 as i64); } else { break; }
+                }
+                if k < text_len && cg_byte_at(text, k) == (37 as i32) {
+                    n = n + (1 as i64);
+                }
+            }
+        }
+        i = i + (1 as i64);
+    }
+    return n;
+}
+
 fn emit_call(state: *u8, tok: *u8) -> i32 {
     let t = tok as *ILToken;
     let cg = state as *CGState;
@@ -884,6 +933,13 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
     // 前 4 个已被占 → 该 arg 的位置下标必 >= 4 → 栈参数数 <= nargs - 4。
     // 浮点参数会让实际栈参数更少(多 reserve 一点,安全)。
     let mut shadow_bytes: i64 = 0 as i64;
+    // v2.11.2 (T4-d):call 指令原文存 CGState.cur_call_text,给
+    // emit_amd64_arg_regs / cg_count_mem_args 解析实参用。
+    // ⚠️ 必须**在** Step 2 的 subq 之前设好 —— SysV 的 outgoing 区大小
+    //    要靠它算(见下)。
+    let cg_inner = state as *CGState;
+    (*cg_inner).cur_call_text = (*t).text;
+    (*cg_inner).cur_call_text_len = (*t).text_len;
     if target_is_win(target_tag) == (1 as i32) {
         let mut extra_args: i64 = nargs - (4 as i64);
         if extra_args < (0 as i64) { extra_args = 0 as i64; }
@@ -893,16 +949,32 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
         let _sa = sb_append_cstr(arena, s, "\tsubq $" as *u8);
         let _sb2 = sb_appendf_lld(arena, s, "%lld" as *u8, shadow_bytes);
         let _sa2 = sb_append_cstr(arena, s, ", %rsp\n" as *u8);
+    } else {
+        // ── W-104 MEMORY class(SysV):MEMORY 实参落栈,必须先留 outgoing 区 ──
+        //
+        // SysV 没有 shadow space,但**落栈实参仍然要占栈**。之前 SysV 路径
+        // 完全不 subq(注释写「stack args written at [rsp+0..]」)—— 那是把
+        // 实参写进**调用者自己帧的最底部**,会踩掉调用者的局部变量。
+        //
+        // MEMORY class 的 struct 可能有好几个 slot(>16B),踩的面积更大,
+        // 所以这里改成:有 MEMORY 实参时先 subq 预留,call 之后再 addq 收回。
+        //
+        // 16-byte 对齐:subq 之后 rsp 仍 ≡ 0 (mod 16),call 处满足 SysV
+        // 「rsp 在 call 前 16 字节对齐」的要求。
+        //
+        // ⚠️ 只有 MEMORY 实参走这条路(整数溢出参数的老路径不动)—— 那条路
+        //    的偏移公式跟 MEMORY 混排时算不对,IL 层会拒绝那种组合(见
+        //    cg_sysv_check_memory_scope)。
+        let n_mem = cg_count_mem_args(state);
+        if n_mem > (0 as i64) {
+            shadow_bytes = ((n_mem * (8 as i64)) + (15 as i64)) & ((0 as i64) - (16 as i64));
+            let _sa = sb_append_cstr(arena, s, "\tsubq $" as *u8);
+            let _sb2 = sb_appendf_lld(arena, s, "%lld" as *u8, shadow_bytes);
+            let _sa2 = sb_append_cstr(arena, s, ", %rsp\n" as *u8);
+        }
     }
 
     // ── Step 3: args → 物理寄存器 + stack-arg writes ─
-    // v2.11.2 (T4-d 真修):把 call 指令原文存 CGState.cur_call_text,让
-    // emit_amd64_arg_regs parse 每个 arg 的 (qt, temp_id) 而不是 hardcode
-    // %t1..%t6 — 真修 fib_renamed (l %t13, w %t12) 跟 struct_val_pass
-    // (l %t11) 错槽。
-    let cg_inner = state as *CGState;
-    (*cg_inner).cur_call_text = (*t).text;
-    (*cg_inner).cur_call_text_len = (*t).text_len;
     let _ar = emit_amd64_arg_regs(state, nargs, ret_qt, target_tag);
 
     // ── Step 4: 实际 call ─
@@ -922,11 +994,18 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
 
     // ── Step 5: shadow space free(仅 Win)— SysV 无需 ─
     //   Win: addq $N, %rsp (N 与 Step 2 的 subq 对称)
-    //   SysV: NO free
+    //   SysV: NO free —— ⚠️ W-104 MEMORY class 例外:SysV 的 MEMORY 实参要
+    //   落栈,Step 2 为它 subq 预留了 outgoing 区,这里必须对称 addq 收回。
     if target_is_win(target_tag) == (1 as i32) {
         let _sf = sb_append_cstr(arena, s, "\taddq $" as *u8);
         let _sf2 = sb_appendf_lld(arena, s, "%lld" as *u8, shadow_bytes);
         let _sf3 = sb_append_cstr(arena, s, ", %rsp\n" as *u8);
+    } else {
+        if shadow_bytes > (0 as i64) {
+            let _sf = sb_append_cstr(arena, s, "\taddq $" as *u8);
+            let _sf2 = sb_appendf_lld(arena, s, "%lld" as *u8, shadow_bytes);
+            let _sf3 = sb_append_cstr(arena, s, ", %rsp\n" as *u8);
+        }
     }
 
     // ── Step 6: 返回值 物理寄存器 → 栈槽 -<ret_off>(%rbp)─
@@ -1196,6 +1275,10 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
     // for "if arg_idx >= 0 { arg_idx } else { 0 }" cause QBE csgel/csgtl
     // type errors (jhyy codegen treats out-of-scope arg_idx as %t0 first param).
     let mut arg_idx: i64 = -(1 as i64);
+    // W-104: MEMORY class 参数的 slot 序号(函数作用域 hoisted,三处 FNARG 路径共用)
+    let mut mem_k: i64 = -(1 as i64);
+    // W-104: 当前这条 FNARG 是不是 MEMORY class 参数(是 → 从栈上读,不用寄存器)
+    let mut is_mem_arg: i32 = 0 as i32;
     if src_text != (0 as *u8) && src_text_len > (0 as i64) {
         // count %tN in text
         let mut pct_count: i64 = 0 as i64;
@@ -1296,19 +1379,34 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                         // Win 是 4 个 + 32B 影子区。reg_rax_for_qt_idx 两边的映射本来就对,
                         // 只是 SysV 的 idx 4/5 从来够不着。
                         if arg_idx >= (0 as i64) {
-                            if target_is_win(target_tag) == (1 as i32) {
-                                if arg_idx <= (3 as i64) {
-                                    fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
-                                } else {
-                                    fnarg_stack_off = (48 as i64) + ((arg_idx - (4 as i64)) * (8 as i64));
-                                }
+                            // W-104 MEMORY class:该参数**不在寄存器里**,从栈上读。
+                            // SysV 栈上第一个内存参数在 16(%rbp)(push rbp 后 retaddr 在 8(%rbp))。
+                            // fnarg_stack_off >= 0 就是「从栈读」通道 —— 复用它,不新增机制。
+                            // ⚠️ 这个判定必须在 **target 分支之外** —— 之前它被塞在
+                            //    `if win {...}` 块里,而它自己又要求 `!win` → 永远
+                            //    是死代码,SysV 的 MEMORY 参数一直走寄存器路径(读 %rdi)。
+                            mem_k = cg_parse_mem_slot(src_text, name_start);
+                            is_mem_arg = 0 as i32;
+                            if mem_k >= (0 as i64) && target_is_win(target_tag) == (0 as i32) {
+                                is_mem_arg = 1 as i32;
+                            }
+                            if is_mem_arg != (0 as i32) {
+                                fnarg_stack_off = (16 as i64) + (mem_k * (8 as i64));
                             } else {
-                                if arg_idx <= (5 as i64) {
-                                    fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                                if target_is_win(target_tag) == (1 as i32) {
+                                    if arg_idx <= (3 as i64) {
+                                        fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                                    } else {
+                                        fnarg_stack_off = (48 as i64) + ((arg_idx - (4 as i64)) * (8 as i64));
+                                    }
                                 } else {
-                                    // push rbp 后:retaddr @ 8(%rbp),首个栈参数 @ 16(%rbp)
-                                    // (Win 多 32B 影子区 → 48)
-                                    fnarg_stack_off = (16 as i64) + ((arg_idx - (6 as i64)) * (8 as i64));
+                                    if arg_idx <= (5 as i64) {
+                                        fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                                    } else {
+                                        // push rbp 后:retaddr @ 8(%rbp),首个栈参数 @ 16(%rbp)
+                                        // (Win 多 32B 影子区 → 48)
+                                        fnarg_stack_off = (16 as i64) + ((arg_idx - (6 as i64)) * (8 as i64));
+                                    }
                                 }
                             }
                         } else {
@@ -1388,19 +1486,29 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                             // Win 是 4 个 + 32B 影子区。reg_rax_for_qt_idx 两边的映射本来就对,
                             // 只是 SysV 的 idx 4/5 从来够不着。
                             if arg_idx >= (0 as i64) {
-                                if target_is_win(target_tag) == (1 as i32) {
-                                    if arg_idx <= (3 as i64) {
-                                        fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
-                                    } else {
-                                        fnarg_stack_off = (48 as i64) + ((arg_idx - (4 as i64)) * (8 as i64));
-                                    }
+                                // W-104 MEMORY class:见上面同名注释(判定必须在 target 分支之外)。
+                                mem_k = cg_parse_mem_slot(src_text, t_name_start);
+                                is_mem_arg = 0 as i32;
+                                if mem_k >= (0 as i64) && target_is_win(target_tag) == (0 as i32) {
+                                    is_mem_arg = 1 as i32;
+                                }
+                                if is_mem_arg != (0 as i32) {
+                                    fnarg_stack_off = (16 as i64) + (mem_k * (8 as i64));
                                 } else {
-                                    if arg_idx <= (5 as i64) {
-                                        fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                                    if target_is_win(target_tag) == (1 as i32) {
+                                        if arg_idx <= (3 as i64) {
+                                            fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                                        } else {
+                                            fnarg_stack_off = (48 as i64) + ((arg_idx - (4 as i64)) * (8 as i64));
+                                        }
                                     } else {
-                                        // push rbp 后:retaddr @ 8(%rbp),首个栈参数 @ 16(%rbp)
-                                        // (Win 多 32B 影子区 → 48)
-                                        fnarg_stack_off = (16 as i64) + ((arg_idx - (6 as i64)) * (8 as i64));
+                                        if arg_idx <= (5 as i64) {
+                                            fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                                        } else {
+                                            // push rbp 后:retaddr @ 8(%rbp),首个栈参数 @ 16(%rbp)
+                                            // (Win 多 32B 影子区 → 48)
+                                            fnarg_stack_off = (16 as i64) + ((arg_idx - (6 as i64)) * (8 as i64));
+                                        }
                                     }
                                 }
                             } else {
@@ -1443,19 +1551,29 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                             // Win 是 4 个 + 32B 影子区。reg_rax_for_qt_idx 两边的映射本来就对,
                             // 只是 SysV 的 idx 4/5 从来够不着。
                             if arg_idx >= (0 as i64) {
-                                if target_is_win(target_tag) == (1 as i32) {
-                                    if arg_idx <= (3 as i64) {
-                                        fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
-                                    } else {
-                                        fnarg_stack_off = (48 as i64) + ((arg_idx - (4 as i64)) * (8 as i64));
-                                    }
+                                // W-104 MEMORY class:见上面同名注释(判定必须在 target 分支之外)。
+                                mem_k = cg_parse_mem_slot(src_text, name_start);
+                                is_mem_arg = 0 as i32;
+                                if mem_k >= (0 as i64) && target_is_win(target_tag) == (0 as i32) {
+                                    is_mem_arg = 1 as i32;
+                                }
+                                if is_mem_arg != (0 as i32) {
+                                    fnarg_stack_off = (16 as i64) + (mem_k * (8 as i64));
                                 } else {
-                                    if arg_idx <= (5 as i64) {
-                                        fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                                    if target_is_win(target_tag) == (1 as i32) {
+                                        if arg_idx <= (3 as i64) {
+                                            fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                                        } else {
+                                            fnarg_stack_off = (48 as i64) + ((arg_idx - (4 as i64)) * (8 as i64));
+                                        }
                                     } else {
-                                        // push rbp 后:retaddr @ 8(%rbp),首个栈参数 @ 16(%rbp)
-                                        // (Win 多 32B 影子区 → 48)
-                                        fnarg_stack_off = (16 as i64) + ((arg_idx - (6 as i64)) * (8 as i64));
+                                        if arg_idx <= (5 as i64) {
+                                            fnarg_reg = reg_rax_for_qt_idx(dst_qt, arg_idx, target_tag) as *u8;
+                                        } else {
+                                            // push rbp 后:retaddr @ 8(%rbp),首个栈参数 @ 16(%rbp)
+                                            // (Win 多 32B 影子区 → 48)
+                                            fnarg_stack_off = (16 as i64) + ((arg_idx - (6 as i64)) * (8 as i64));
+                                        }
                                     }
                                 }
                             } else {

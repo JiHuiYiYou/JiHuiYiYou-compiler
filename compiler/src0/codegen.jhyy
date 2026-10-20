@@ -54,6 +54,9 @@ import abi_amd64_sysv_freestanding;  // v2.7.0 Phase 1: SysV freestanding delega
 // ════════════════════════════════════════════════════
 
 extern fn jh_fputs_stderr(s: *u8) -> i32;
+// W-104: MEMORY class 的受限实现边界 —— 遇到「不支持」的组合必须**报错退出**,
+// 而不是静默产出错误的代码(见 cg_sysv_check_memory_scope)。
+extern fn exit(code: i32);
 extern fn jh_sprintf_f64(buf: *u8, val: f64) -> i32;
 extern fn jh_sprintf_f32(buf: *u8, val: f64) -> i32;
 
@@ -712,6 +715,73 @@ fn cg_emit_store_primitive(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> 
 //
 // jhyy 无 forward decl：必须在 cg_emit_load / cg_emit_store_primitive 之后定义，
 // 在 cg_emit_store dispatcher 之前定义。
+// cg_sysv_check_memory_scope — W-104 MEMORY class 的**受限实现**边界检查。
+//
+// SysV 栈参数排布:所有落栈的实参(MEMORY class 的 + 整数寄存器溢出后落栈的)
+// 按**声明顺序**排在栈上。callee 侧读 MEMORY slot 用的是 `16(%rbp) + k*8`
+// (k = 该 MEMORY 参数在栈上的 slot 序号)—— 这只在「栈上**只有** MEMORY 参数」
+// 时成立。
+//
+// 整数参数超过 6 个(SysV 只有 rdi/rsi/rdx/rcx/r8/r9)时第 7 个起也落栈,
+// 于是 MEMORY slot 的真实位置被推后 → 偏移公式失效。SSE 参数超过 8 个
+// (xmm0-xmm7)同理。
+//
+// 所以:检测到「有 MEMORY 参数」且「整数/SSE 参数溢出」时**明确报错退出**,
+// 而不是静默产出错误的代码。
+//
+// 只在 SysV 目标下检查;Win 的 struct 传参规则完全不同(>8B 走指针)。
+fn cg_sysv_check_memory_scope(cg_raw: *u8, args_node: *u8, nargs: i64) -> i32 {
+    let cg = cg_raw as *CGContext;
+    if (*cg).target_tag != TARGET_AMD64_SYSV() && (*cg).target_tag != TARGET_AMD64_SYSV_FREESTANDING() {
+        return 0 as i32;
+    }
+    let mut has_mem: i32 = 0 as i32;
+    let mut n_int: i64 = 0 as i64;
+    let mut n_sse: i64 = 0 as i64;
+    let mut i: i64 = 0 as i64;
+    while i < nargs {
+        let an = *(ptr_add_u8(args_node, i * (8 as i64)) as **Node);
+        let mut at: *u8 = 0 as *u8;
+        if an != (0 as *Node) {
+            at = (*an).type_ptr;
+        }
+        if at != (0 as *u8) {
+            if abi_sysv_struct_is_memory(at) != (0 as i32) {
+                has_mem = 1 as i32;
+            } else {
+                let ne = abi_sysv_struct_n_eightbytes(at);
+                if ne > (0 as i64) {
+                    // ≤16B 的 struct:每个 eightbyte 独立分类
+                    let mut k: i64 = 0 as i64;
+                    while k < ne {
+                        if abi_sysv_eightbyte_class(at, k) == SYSV_CLASS_SSE() {
+                            n_sse = n_sse + (1 as i64);
+                        } else {
+                            n_int = n_int + (1 as i64);
+                        }
+                        k = k + (1 as i64);
+                    }
+                } else {
+                    if abi_sysv_classify_arg(at) == SYSV_CLASS_SSE() {
+                        n_sse = n_sse + (1 as i64);
+                    } else {
+                        n_int = n_int + (1 as i64);
+                    }
+                }
+            }
+        }
+        i = i + (1 as i64);
+    }
+    if has_mem != (0 as i32) && (n_int > (6 as i64) || n_sse > (8 as i64)) {
+        let _e = jh_fputs_stderr("jhyy error: SysV MEMORY-class struct (>16 bytes) cannot be mixed with register-overflow arguments" as *u8);
+        let _e2 = jh_fputs_stderr(" (integer args > 6 or float args > 8)." as *u8);
+        let _e3 = jh_fputs_stderr(" This combination is not implemented yet -- the compiler refuses to emit wrong code." as *u8);
+        let _x = exit(1 as i32);
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
 // cg_sysv_expanded_nargs — W-104:SysV 下 struct 实参按 eightbyte 展开后,
 // args 数组的容量与 call 文本里的实参个数都要按**展开后**的数量算。
 //
@@ -729,8 +799,12 @@ fn cg_sysv_expanded_nargs(cg_raw: *u8, args_node: *u8, nargs: i64) -> i64 {
         if an != (0 as *Node) {
             let at = (*an).type_ptr;
             if at != (0 as *u8) {
-                let ne = abi_sysv_struct_n_eightbytes(at);
-                if ne > (0 as i64) { cnt = ne; }
+                if abi_sysv_struct_is_memory(at) != (0 as i32) {
+                    cnt = abi_sysv_struct_mem_slots(at);
+                } else {
+                    let ne = abi_sysv_struct_n_eightbytes(at);
+                    if ne > (0 as i64) { cnt = ne; }
+                }
             }
         }
         total = total + cnt;
@@ -748,6 +822,43 @@ fn cg_sysv_expanded_nargs(cg_raw: *u8, args_node: *u8, nargs: i64) -> i64 {
 // 字母与宽度与 callee 侧的声明严格对称(同一个 abi_sysv_eightbyte_letter)。
 //
 // 返回写入 args 数组的实参个数(1 或 2)。
+fn cg_emit_struct_arg_memory_slots(cg_raw: *u8, st_raw: *u8, copy_slot: IRVal) -> i64 {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    if (*cg).target_tag != TARGET_AMD64_SYSV() && (*cg).target_tag != TARGET_AMD64_SYSV_FREESTANDING() {
+        return 0 as i64;
+    }
+    if abi_sysv_struct_is_memory(st_raw) == (0 as i32) {
+        return 0 as i64;
+    }
+    let nslots = abi_sysv_struct_mem_slots(st_raw);
+    let mut vals = arena_alloc((*ir).arena, (8 as i64) * IRVAL_SIZE());
+    let mut k: i64 = 0 as i64;
+    while k < nslots {
+        let eoff = k * (8 as i64);
+        let eaddr = *ir_new_tmp(ir, QBE_L());
+        if eoff > (0 as i64) {
+            ir_emit_binary(ir, eaddr, "add" as *u8, copy_slot, ir_new_int(eoff));
+        } else {
+            ir_emit_str(ir, "    %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, eaddr.id);
+            ir_emit_str(ir, " =l copy %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, copy_slot.id);
+            ir_emit_str(ir, "
+" as *u8);
+        }
+        let eval = *ir_new_tmp(ir, QBE_L());
+        ir_emit_load(ir, eval, QBE_L(), eaddr);
+        let vslot = ptr_add_u8(vals, k * IRVAL_SIZE()) as *IRVal;
+        *vslot = eval;
+        *(ptr_add_u8(vslot, 24 as i64) as *i32) = 109 as i32;
+        k = k + (1 as i64);
+    }
+    (*cg).last_struct_arg_vals = vals;
+    (*cg).last_struct_arg_n = nslots;
+    return nslots;
+}
+
 fn cg_emit_struct_arg_eightbytes(cg_raw: *u8, st_raw: *u8, copy_slot: IRVal) -> i64 {
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
@@ -2719,6 +2830,8 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         // W-070 v2.8.2: dispatch call_prelude Win vs SysV (first call site).
         if (*cg).target_tag == TARGET_AMD64_SYSV() || (*cg).target_tag == TARGET_AMD64_SYSV_FREESTANDING() {
             args_arr2 = abi_sysv_emit_call_prelude(ir, (*ir).arena, cg_sysv_expanded_nargs(cg_raw, args_node, nargs), is_sret, rsize, ret_slot_buf);
+            // W-104: MEMORY class 与「寄存器溢出参数」混排暂不支持 → 明确报错
+            let _scope = cg_sysv_check_memory_scope(cg_raw, args_node, nargs);
         } else {
             args_arr2 = abi_win_emit_call_prelude(ir, (*ir).arena, nargs, is_sret, rsize, ret_slot_buf);
         }
@@ -2814,6 +2927,14 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         let extra: i64 = if is_sret != 0 { (1 as i64) } else { (0 as i64) };
 
         let mut i: i64 = 0 as i64;
+        // W-104:args 数组的写入位置必须是**跨实参累计**的运行计数器 ——
+        // 一个 struct 实参展开成 N 个「值」实参后,后续实参的位置整体后移。
+        // ⚠️ 之前这里写的是 `let mut out_idx = i`(实参在**原始**列表里的下标),
+        //    于是 struct 展开后,下一个实参会写回**已被占用的**槽位 ——
+        //    `f(Mixed m, i32 x)` 的 %x 落在 m 的第二个 eightbyte 上,
+        //    而 call 文本里多出一个没写过的空槽(渲染成 `%t0`)。
+        //    单参数调用测不到(只有一个实参时 i == out_idx)。
+        let mut out_idx: i64 = 0 as i64;
         while i < nargs {
             let arg_slot_node = ptr_add_u8(args_node, i * (8 as i64)) as **Node;
             let arg_node = *arg_slot_node;
@@ -2846,18 +2967,48 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             // W-104:SysV 下 struct 实参按 eightbyte 拆成多个「值」实参。
             // 写 args 数组的索引改用运行计数器 out_idx(不再是 i)—— 展开后
             // 后续实参的位置会整体后移。
-            let mut out_idx: i64 = i;
-            let n_eb_arg = cg_emit_struct_arg_eightbytes(cg_raw, arg_t, arg_v);
-            if n_eb_arg > (0 as i64) {
+            let n_mem_arg = cg_emit_struct_arg_memory_slots(cg_raw, arg_t, arg_v);
+            let mut n_eb_arg = 0 as i64;
+            if n_mem_arg == (0 as i64) {
+                n_eb_arg = cg_emit_struct_arg_eightbytes(cg_raw, arg_t, arg_v);
+            }
+            // W-104 MEMORY class(>16B 的 struct):整体走栈,不拆 eightbyte。
+            //
+            // 每个 8 字节 slot 作为**独立实参**进 args 数组,type letter 用
+            // 'm'(109)—— self-backend 见到 'm' 就把它推进 outgoing 栈区,
+            // 且**不消耗整数寄存器**(SysV: MEMORY class 不占 INTEGER 序列)。
+            //
+            // ⚠️ 这里必须显式写进 args 数组。之前 MEMORY 分支只调 helper
+            //    (生成 slot temp)却**没写 args**,于是 call 文本里那些 slot
+            //    位置读到未初始化的 IRVal(id=0)→ 渲染成 `%t0` → 传的是垃圾。
+            let mut n_written: i64 = 0 as i64;
+            if n_mem_arg > (0 as i64) {
                 let vals = (*cg).last_struct_arg_vals;
                 let mut k: i64 = 0 as i64;
-                while k < n_eb_arg {
+                while k < n_mem_arg {
                     let out_slot = ptr_add_u8(args_arr2, ((extra as i64) + out_idx) * IRVAL_SIZE()) as *IRVal;
                     *out_slot = *(ptr_add_u8(vals, k * IRVAL_SIZE()) as *IRVal);
+                    // IRVal 布局:kind@0 id@4 ival@8 name@16 qbe_type@24
+                    *(ptr_add_u8(out_slot, 24 as i64) as *i32) = 109 as i32;
                     out_idx = out_idx + (1 as i64);
                     k = k + (1 as i64);
                 }
-            } else {
+                n_written = n_mem_arg;
+            }
+            if n_written == (0 as i64) {
+                if n_eb_arg > (0 as i64) {
+                    let vals = (*cg).last_struct_arg_vals;
+                    let mut k: i64 = 0 as i64;
+                    while k < n_eb_arg {
+                        let out_slot = ptr_add_u8(args_arr2, ((extra as i64) + out_idx) * IRVAL_SIZE()) as *IRVal;
+                        *out_slot = *(ptr_add_u8(vals, k * IRVAL_SIZE()) as *IRVal);
+                        out_idx = out_idx + (1 as i64);
+                        k = k + (1 as i64);
+                    }
+                    n_written = n_eb_arg;
+                }
+            }
+            if n_written == (0 as i64) {
                 let out_slot = ptr_add_u8(args_arr2, ((extra as i64) + out_idx) * IRVAL_SIZE()) as *IRVal;
                 *out_slot = arg_v;
                 out_idx = out_idx + (1 as i64);
@@ -2922,6 +3073,8 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         // W-070 v2.8.2: dispatch call_prelude Win vs SysV (second call site).
         if (*cg).target_tag == TARGET_AMD64_SYSV() || (*cg).target_tag == TARGET_AMD64_SYSV_FREESTANDING() {
             args_arr2 = abi_sysv_emit_call_prelude(ir, (*ir).arena, cg_sysv_expanded_nargs(cg_raw, args_node, nargs), is_sret, rsize2, ret_slot_buf2);
+            // W-104: MEMORY class 与「寄存器溢出参数」混排暂不支持 → 明确报错
+            let _scope = cg_sysv_check_memory_scope(cg_raw, args_node, nargs);
         } else {
             args_arr2 = abi_win_emit_call_prelude(ir, (*ir).arena, nargs, is_sret, rsize2, ret_slot_buf2);
         }
@@ -3013,6 +3166,14 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         let extra: i64 = if is_sret != 0 { (1 as i64) } else { (0 as i64) };
 
         let mut i: i64 = 0 as i64;
+        // W-104:args 数组的写入位置必须是**跨实参累计**的运行计数器 ——
+        // 一个 struct 实参展开成 N 个「值」实参后,后续实参的位置整体后移。
+        // ⚠️ 之前这里写的是 `let mut out_idx = i`(实参在**原始**列表里的下标),
+        //    于是 struct 展开后,下一个实参会写回**已被占用的**槽位 ——
+        //    `f(Mixed m, i32 x)` 的 %x 落在 m 的第二个 eightbyte 上,
+        //    而 call 文本里多出一个没写过的空槽(渲染成 `%t0`)。
+        //    单参数调用测不到(只有一个实参时 i == out_idx)。
+        let mut out_idx: i64 = 0 as i64;
         while i < nargs {
             let arg_slot_node = ptr_add_u8(args_node, i * (8 as i64)) as **Node;
             let arg_node = *arg_slot_node;
@@ -3043,18 +3204,39 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             // W-104:SysV 下 struct 实参按 eightbyte 拆成多个「值」实参。
             // 写 args 数组的索引改用运行计数器 out_idx(不再是 i)—— 展开后
             // 后续实参的位置会整体后移。
-            let mut out_idx: i64 = i;
-            let n_eb_arg = cg_emit_struct_arg_eightbytes(cg_raw, arg_t, arg_v);
-            if n_eb_arg > (0 as i64) {
+            let n_mem_arg = cg_emit_struct_arg_memory_slots(cg_raw, arg_t, arg_v);
+            let mut n_eb_arg = 0 as i64;
+            if n_mem_arg == (0 as i64) {
+                n_eb_arg = cg_emit_struct_arg_eightbytes(cg_raw, arg_t, arg_v);
+            }
+            // W-104 MEMORY class:见 NODE_CALL 分支的同名注释(结构相同)。
+            let mut n_written: i64 = 0 as i64;
+            if n_mem_arg > (0 as i64) {
                 let vals = (*cg).last_struct_arg_vals;
                 let mut k: i64 = 0 as i64;
-                while k < n_eb_arg {
+                while k < n_mem_arg {
                     let out_slot = ptr_add_u8(args_arr2, ((extra as i64) + out_idx) * IRVAL_SIZE()) as *IRVal;
                     *out_slot = *(ptr_add_u8(vals, k * IRVAL_SIZE()) as *IRVal);
+                    *(ptr_add_u8(out_slot, 24 as i64) as *i32) = 109 as i32;
                     out_idx = out_idx + (1 as i64);
                     k = k + (1 as i64);
                 }
-            } else {
+                n_written = n_mem_arg;
+            }
+            if n_written == (0 as i64) {
+                if n_eb_arg > (0 as i64) {
+                    let vals = (*cg).last_struct_arg_vals;
+                    let mut k: i64 = 0 as i64;
+                    while k < n_eb_arg {
+                        let out_slot = ptr_add_u8(args_arr2, ((extra as i64) + out_idx) * IRVAL_SIZE()) as *IRVal;
+                        *out_slot = *(ptr_add_u8(vals, k * IRVAL_SIZE()) as *IRVal);
+                        out_idx = out_idx + (1 as i64);
+                        k = k + (1 as i64);
+                    }
+                    n_written = n_eb_arg;
+                }
+            }
+            if n_written == (0 as i64) {
                 let out_slot = ptr_add_u8(args_arr2, ((extra as i64) + out_idx) * IRVAL_SIZE()) as *IRVal;
                 *out_slot = arg_v;
                 out_idx = out_idx + (1 as i64);
@@ -4198,7 +4380,42 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
         if (*cg).target_tag == TARGET_AMD64_SYSV() || (*cg).target_tag == TARGET_AMD64_SYSV_FREESTANDING() {
             n_eb2 = abi_sysv_struct_n_eightbytes(pt2);
         }
-        if n_eb2 > (0 as i64) {
+        let mut is_mem2: i32 = 0 as i32;
+        if (*cg).target_tag == TARGET_AMD64_SYSV() || (*cg).target_tag == TARGET_AMD64_SYSV_FREESTANDING() {
+            is_mem2 = abi_sysv_struct_is_memory(pt2);
+        }
+        if is_mem2 != (0 as i32) {
+            let msize = type_size(pt2 as *Type);
+            let mv = *ir_new_tmp(ir, QBE_L());
+            ir_emit_alloc(ir, mv, msize as i32);
+            let mut mem_k2: i64 = 0 as i64;
+            while mem_k2 < abi_sysv_struct_mem_slots(pt2) {
+                let maddr = *ir_new_tmp(ir, QBE_L());
+                let moff = mem_k2 * (8 as i64);
+                if moff > (0 as i64) {
+                    ir_emit_binary(ir, maddr, "add" as *u8, mv, ir_new_int(moff));
+                } else {
+                    ir_emit_str(ir, "    %t" as *u8);
+                    ir_emit_int(ir, "%d" as *u8, maddr.id);
+                    ir_emit_str(ir, " =l copy %t" as *u8);
+                    ir_emit_int(ir, "%d" as *u8, mv.id);
+                    ir_emit_str(ir, "
+" as *u8);
+                }
+                let msrc = *ir_new_tmp(ir, QBE_L());
+                ir_emit_str(ir, "    %t" as *u8);
+                ir_emit_int(ir, "%d" as *u8, msrc.id);
+                ir_emit_str(ir, " =l copy %" as *u8);
+                ir_emit_str(ir, (*p2_sym).name);
+                ir_emit_str(ir, "__m" as *u8);
+                ir_emit_int(ir, "%d" as *u8, mem_k2);
+                ir_emit_str(ir, "
+" as *u8);
+                ir_emit_store(ir, QBE_L(), msrc, maddr);
+                mem_k2 = mem_k2 + (1 as i64);
+            }
+            cg_add_local(cg_raw, p2_sym_raw, mv, 0);
+        } else if n_eb2 > (0 as i64) {
             let ssize = type_size(pt2 as *Type);
             let pv2 = *ir_new_tmp(ir, QBE_L());
             // ⚠️ 必须用 ir_emit_alloc:它输出 `alloc<align> <size>` —— 手工拼

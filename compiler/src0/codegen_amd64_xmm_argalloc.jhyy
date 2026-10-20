@@ -132,6 +132,13 @@ fn int_arg_alloc(state: *u8, qt: i32) -> i32 {
     if qbe_is_float(qt) != (0 as i32) {
         return -1 as i32;
     }
+    // W-104 MEMORY class:字母 'm'(109)标记「这个实参走栈」。
+    // SysV 规定 MEMORY class 参数**不消耗整数寄存器却必须落栈**,而本函数
+    // 原先只有「寄存器池耗尽」这一种落栈判据 —— 表达不了这个语义。
+    // 直接返回 -1:落栈(emit_stack_arg_push)且**不**动 int_arg_count。
+    if qt == (109 as i32) {
+        return -1 as i32;
+    }
     let cg = state as *CGState;
     let tt = (*cg).target_tag;
     let max = int_arg_max(tt);
@@ -220,7 +227,8 @@ fn emit_stack_arg_push(state: *u8, qt: i32, src_off: i64) -> i32 {
     let s = (*cg).out;
     let stack_off = (*cg).stack_arg_offset;
     let is_float = qbe_is_float(qt);
-    let is_wide = qbe_is_wide(qt);
+    // W-104 MEMORY class:字母 'm'(109)按 **8 字节**推(MEMORY slot 是 8 字节粒度)
+    let is_wide = if qt == (109 as i32) { 1 as i32 } else { qbe_is_wide(qt) };
     if is_float != (0 as i32) {
         // f32 → movss, f64 → movsd
         let suffix = if qt == (115 as i32) { "ss" as *u8 } else { "sd" as *u8 };

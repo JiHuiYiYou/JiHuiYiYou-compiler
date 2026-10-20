@@ -520,6 +520,20 @@ W-080 实际只动了 `std/io.jhyy` 和 `emit_call`。**(b) 从来没人动过�
 
 ## 6. W-104 — SysV 参数分类借用 Win 分类器
 
+**✅ 2026-10-20 已修完(v4.0.11 的 ≤16B + v4.0.12 的 >16B)—— 台账转 RESOLVED。**
+
+实际根因比本节原先写的更大:不是「分类器接错」,是**整个 struct 参数退化成按指针传**。
+修法与验收见 [`version-schedule.md`](version-schedule.md) § v4.0.11 / § v4.0.12
+与台账 `docs/internal/workarounds.md` 的 W-104 条目。摘要:
+
+- ≤16B → 按 eightbyte 分类(INTEGER→GPR,SSE→XMM);>16B → MEMORY class 整体落栈
+- 常驻门 `sysv_abi_cross.sh` 扩成**三方向**(small jhyy→gcc / big jhyy→gcc /
+  big gcc→jhyy),44 / 42 / 42 全绿;修复前 big 两个方向是 139 SEGV / 20
+- 另加 artifact 级门 `sysv_memory_class`(**只看 .s,Windows runner 上就能跑**)
+
+下面保留本节原文作为**审计轨迹**(修法描述已被实际实现取代 —— 实际不是
+「改调 `abi_sysv_classify_arg_full`」那么简单,而是把 struct 拆成多个 IL 实参)。
+
 **台账:** W-104 | **触发面:** `compiler/src0/abi_amd64_sysv.jhyy:229`
 
 **症状:** SysV 后端按 Win x64 约定给函数定型。Win 与 SysV 的寄存器分配、

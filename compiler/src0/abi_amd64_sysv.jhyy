@@ -122,6 +122,42 @@ fn abi_sysv_struct_n_eightbytes(t_raw: *u8) -> i64 {
     return (sz + (7 as i64)) / (8 as i64);
 }
 
+// abi_sysv_struct_is_memory(t_raw) -> i32
+//   >16B 的 struct 是 SysV § A.2/A.3 的 **MEMORY class** —— 整体**拷贝到栈上**
+//   传递(不是传指针、也不占整数寄存器)。
+//
+//   ≤16B 的 struct 走 eightbyte 分类(见 abi_sysv_struct_n_eightbytes);
+//   >16B 的走 MEMORY,本函数返回 1。
+fn abi_sysv_struct_is_memory(t_raw: *u8) -> i32 {
+    if t_raw == (0 as *u8) {
+        return 0 as i32;
+    }
+    let t = t_raw as *Type;
+    if (*t).kind != KIND_STRUCT() {
+        return 0 as i32;
+    }
+    let sz = type_size(t);
+    if sz > (16 as i64) {
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
+// abi_sysv_struct_mem_slots(t_raw) -> i64
+//   MEMORY class 参数在栈上占的 slot 数(每 slot 8 字节,向上取整)。
+//   20B 的 struct → 3 slots(24 字节)。
+fn abi_sysv_struct_mem_slots(t_raw: *u8) -> i64 {
+    if t_raw == (0 as *u8) {
+        return 0 as i64;
+    }
+    let t = t_raw as *Type;
+    let sz = type_size(t);
+    if sz <= (0 as i64) {
+        return 0 as i64;
+    }
+    return (sz + (7 as i64)) / (8 as i64);
+}
+
 // abi_sysv_eightbyte_class(t_raw, idx) -> i32
 //   第 idx 个 eightbyte 的 class:SYSV_CLASS_INTEGER / SYSV_CLASS_SSE
 fn abi_sysv_eightbyte_class(t_raw: *u8, idx: i64) -> i32 {
@@ -352,6 +388,11 @@ fn abi_sysv_emit_function_header(
         first = 0;
     }
     let mut pi: i64 = 0 as i64;
+    // W-104 MEMORY class:MEMORY slot 的**全局**序号(跨所有 MEMORY 参数累计)。
+    // 必须跨参数循环累计 —— SysV 栈上只有 MEMORY 参数时,第 k 个 MEMORY slot
+    // 就在 16(%rbp)+k*8;两个 MEMORY 参数各自从 0 起会撞名(第二个参数的
+    // `__m0` 会被当成第一个参数的 slot 读)。
+    let mut mem_slot_base: i64 = 0 as i64;
     while pi < nparams {
         if first == 0 {
             ir_emit_str(ir, ", " as *u8);
@@ -381,20 +422,47 @@ fn abi_sysv_emit_function_header(
         // void、ir_emit_str 的返回是 i32 —— 放一起就报
         // "if/else branches must have same type"。
         let n_eb = abi_sysv_struct_n_eightbytes(pt);
-        let mut k: i64 = 0 as i64;
+        // W-104: 本参数已 emit 的 IL 参数个数(0 = 走下面的「单参数」老路径)。
+        // ⚠️ 必须声明在 if/else **外面** —— 之前它被声明在 else 块里却在块外
+        //    被读(jhyy 的块作用域不保证可见性),MEMORY 分支下读到的是垃圾。
         let mut n_emitted: i64 = 0 as i64;
-        while k < n_eb {
-            if k > (0 as i64) {
-                ir_emit_str(ir, ", " as *u8);
+        // W-104 MEMORY class:>16B 的 struct 整体走栈。header 里声明成 N 个
+        // 8 字节 slot,名字带 `__m<k>`(k = **跨所有 MEMORY 参数累计**的 slot
+        // 序号 —— 必须在参数循环外累计,否则两个 MEMORY 参数会撞名)。callee 侧
+        // 由 self-backend 识别这个名字 → 从 16(%rbp)+k*8 读。
+        if abi_sysv_struct_is_memory(pt) != (0 as i32) {
+            let nslots = abi_sysv_struct_mem_slots(pt);
+            let mut k2: i64 = 0 as i64;
+            while k2 < nslots {
+                if k2 > (0 as i64) {
+                    ir_emit_str(ir, ", " as *u8);
+                }
+                // letter 用 'l'(64 位)—— self-backend 不解析 header 的 letter
+                // (lexer 整体跳过 args 部分),真正决定读法的是 body 里那条
+                // copy 的目标 temp 类型 + 名字里的 __m 标记。
+                ir_emit_str(ir, "l %" as *u8);
+                ir_emit_str(ir, (*p_sym).name);
+                ir_emit_str(ir, "__m" as *u8);
+                ir_emit_int(ir, "%d" as *u8, mem_slot_base + k2);
+                k2 = k2 + (1 as i64);
             }
-            let lqt = abi_sysv_eightbyte_letter(pt, k);
-            ir_emit_int(ir, "%c " as *u8, lqt);
-            ir_emit_str(ir, "%" as *u8);
-            ir_emit_str(ir, (*p_sym).name);
-            ir_emit_str(ir, "__e" as *u8);
-            ir_emit_int(ir, "%d" as *u8, k);
-            n_emitted = n_emitted + (1 as i64);
-            k = k + (1 as i64);
+            mem_slot_base = mem_slot_base + nslots;
+            n_emitted = nslots;
+        } else {
+            let mut k: i64 = 0 as i64;
+            while k < n_eb {
+                if k > (0 as i64) {
+                    ir_emit_str(ir, ", " as *u8);
+                }
+                let lqt = abi_sysv_eightbyte_letter(pt, k);
+                ir_emit_int(ir, "%c " as *u8, lqt);
+                ir_emit_str(ir, "%" as *u8);
+                ir_emit_str(ir, (*p_sym).name);
+                ir_emit_str(ir, "__e" as *u8);
+                ir_emit_int(ir, "%d" as *u8, k);
+                n_emitted = n_emitted + (1 as i64);
+                k = k + (1 as i64);
+            }
         }
         if n_emitted == (0 as i64) {
             // 非 struct(或 >16B 的 MEMORY class):单参数,沿用原逻辑

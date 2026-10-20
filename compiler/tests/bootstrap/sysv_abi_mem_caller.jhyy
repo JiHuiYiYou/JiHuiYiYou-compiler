@@ -1,0 +1,30 @@
+// sysv_abi_mem_caller.jhyy — W-104 **MEMORY class** 的跨实现 ABI 对拍:jhyy 侧
+//
+// MEMORY class(SysV psABI § A.2/A.3):**>16 字节**的 struct 整体**拷贝到栈上**
+// 传递 —— 不拆 eightbyte、不占整数寄存器(rdi/rsi/rdx/rcx/r8/r9 一个都不占)。
+//
+// 这跟 ≤16B 的 struct 是两条完全不同的路径:
+//   ≤16B  → 按 eightbyte 分类(INTEGER → GPR,SSE → XMM)
+//   >16B  → MEMORY class,整体落栈
+//
+// W-104 的 ≤16B 部分在 2026-10-19 真修(当时实测 jhyy→gcc 退出 171,应 44)。
+// >16B 的部分当时**仍未实现** —— jhyy 传的是指针,gcc 期望栈上有一份拷贝,
+// 于是读到的是指针的低位当字段值(实测退出 0,应 42)。
+//
+// 本文件是 **caller**:它把一个 `{i64, i64, i64}`(24B)struct 按 MEMORY class
+// 传给 `gcc_take_big`(由 sysv_abi_cross.sh 里的 gcc 侧实现)。
+//
+// 期望:42 = 10 + 20 + 12。
+
+type Big = struct {
+    a: i64,
+    b: i64,
+    c: i64,
+}
+
+extern fn gcc_take_big(m: Big) -> i32;
+
+fn main_jhyy() -> i32 {
+    let m = Big { a: 10 as i64, b: 20 as i64, c: 12 as i64 };
+    return gcc_take_big(m);
+}

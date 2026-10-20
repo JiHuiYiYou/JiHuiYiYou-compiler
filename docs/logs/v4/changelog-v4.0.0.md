@@ -157,6 +157,66 @@ W-106(arena-touch)/ W-107(per-fn 表 1024 上限)/ W-109(浮点比较算错)。
 
 ---
 
+## v4.0.12 — SysV MEMORY class(>16B struct 走栈)· W-104 闭合
+
+**2026-10-20。** W-104 是最后一条「违反 locked ABI 规范」的 ACTIVE —— 现在
+**RESOLVED**。台账:`docs/internal/workarounds.md` W-104。
+
+### 修了什么
+
+SysV 的 struct 传参有**两条**完全不同的路径,之前只实现了一条:
+
+| struct 大小 | SysV 分类 | 传递方式 |
+|---|---|---|
+| ≤16B | INTEGER / SSE eightbyte | 按值分进 GPR / XMM |
+| **>16B** | **MEMORY class** | **整份拷贝到栈上**,不占任何整数寄存器 |
+
+≤16B 部分 2026-10-19 已修(v4.0.11)。本版补齐 >16B。
+
+MEMORY class 的语义是「这个实参走栈」,而 self-backend 判定「实参落栈」的**唯一**
+依据是「寄存器池耗尽」—— 表达不了「不占寄存器但必须落栈」。所以动了四个层面:
+
+| 层 | 改动 |
+|---|---|
+| IL(header) | MEMORY 参数声明成 N 个 8 字节 slot,名字带 `__m<k>` 标记 |
+| IL(caller) | 每个 slot 从 struct 副本按值 load,作为独立实参进 args 数组,letter `'m'`(109) |
+| self-backend(caller) | `int_arg_alloc` 对 `'m'` 返 -1(落栈)且**不占 INTEGER 序列**;调用点 `subq $N,%rsp` 预留 outgoing 区,call 后对称 `addq` |
+| self-backend(callee) | FNARG 识别 `__m<k>` → 从 `16(%rbp)+k*8` 读 |
+
+**受限边界照做**:「有 MEMORY 参数」且「整数参数 > 6 或浮点参数 > 8」时
+**明确报编译错误并退出**(`cg_sysv_check_memory_scope`),不静默产错码。
+
+### 途中挖出的两个更早的 bug(不限于 MEMORY)
+
+- `codegen.jhyy` 的 `out_idx` 写成 `= i`(原始下标)而不是跨实参累计 ——
+  struct 展开后,后续实参会写回**已被占用**的槽位。`f(Mixed m, i32 x)` 的 %x
+  落在 m 的第二个 eightbyte 上,call 文本多出一个空槽 `%t0`。
+  **单参数调用测不到** —— 这就是 ≤16B 的测试当初全绿的原因。
+- `codegen_amd64_state.jhyy` 的 `cg_parse_mem_slot` 按 `_m_` 三字节比较 ——
+  标记其实是 `__m<k>`(两个下划线)→ 永远匹配不上。
+
+### 验收
+
+```
+跨实现对拍(新):  small jhyy→gcc = 44 ✅   big jhyy→gcc = 42 ✅   big gcc→jhyy = 42 ✅
+跨实现对拍(旧):  big jhyy→gcc = 139(SEGV) ❌   big gcc→jhyy = 20 ❌   ← 门能抓到
+jhyy↔jhyy:       big = 42 ✅
+全量回归:        177/177, 0 failed ✅(含 5 个 sysv 用例)
+自举闭环:        v2..v5 逐字节相同 ✅   closure_check v2==v3 ✅
+artifact 级门:    sysv_mixed_struct / sysv_memory_class / sysv_arg_spill 全 PASS
+```
+
+新增常驻门:
+
+- `compiler/tests/bootstrap/sysv_abi_cross.sh` —— 扩成**三方向**
+- `compiler/tests/bootstrap/artifact_checks.sh` 新增 `sysv_memory_class` ——
+  **只看 .s 不跑二进制** → Windows runner 上就能跑,不依赖 docker
+- fixture `sysv_abi_mem_caller.jhyy` / `sysv_abi_mem_callee.jhyy`
+
+**ACTIVE 条数:11 → 10。**
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

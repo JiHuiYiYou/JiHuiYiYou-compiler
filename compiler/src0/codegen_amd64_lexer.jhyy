@@ -327,6 +327,12 @@ fn lex_qbe_type_from_byte(c: i32) -> i32 {
     if c == (100 as i32) { return QBE_D_LOCAL(); }  // 'd'
     if c == (98 as i32)  { return QBE_B_LOCAL(); }  // 'b'
     if c == (104 as i32) { return QBE_H_LOCAL(); }  // 'h'
+    // W-104 MEMORY class:'m'(109)不是 QBE 类型,是我们自己的标记 ——
+    // 「这个实参按 SysV MEMORY class 走栈」。call 文本里以 `m %tN` 出现,
+    // self-backend 的 int_arg_alloc 见到它就落栈且不占整数寄存器。
+    // ⚠️ 它只出现在 **call 的实参位置**,不会出现在算术/load/store 指令上
+    //    (那些位置仍只认 w/l/s/d/b/h)。
+    if c == (109 as i32) { return 109 as i32; }  // 'm' = MEMORY class 标记
     return 0 as i32;
 }
 

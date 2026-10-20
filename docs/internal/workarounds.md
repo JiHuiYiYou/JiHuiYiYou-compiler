@@ -112,7 +112,7 @@
 | [W-085](#w-085) | RESOLVED | codegen small-frame fn(*T, i32, i32) 第 3 i32 参数... |
 | [W-102](#w-102) | RESOLVED | address-holder 池与 alloc 池槽位重叠 → self-hosted... |
 | [W-103](#w-103) | ACTIVE | std/os.jhyy 全部 I/O 与 exit 是 M0 mock — W-079 的... |
-| [W-104](#w-104) | ACTIVE | SysV ABI 参数分类调用 Win 分类器 — 正确的分类器就在同文件,没接线 |
+| [W-104](#w-104) | RESOLVED | SysV ABI 参数分类调用 Win 分类器 — 正确的分类器就在同文件,没接线 |
 | [W-105](#w-105) | ACTIVE | check_borrow 是硬编码 return 1 — `&mut` 独占性完全不检查 |
 | [W-105.1](#w-105.1) | ACTIVE | check_cap_pass 同款空 stub,当前无调用点(死代码但签名在 API 面上) |
 | [W-106](#w-106) | ACTIVE | symtab_lookup_one 用 arena-touch 强制 codegen... |
@@ -6993,9 +6993,7 @@ os 层语义,所以**不阻塞 v4.0.0 final**;但它是「索引表 0 ACTIVE」�
 <a id="w-104"></a>
 ## W-104: SysV ABI 参数分类调用 Win 分类器 — 正确的分类器就在同文件,没接线
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — 2026-10-19 **部分修复**:≤16B 的 struct
-已按 eightbyte 分类传值(与 gcc 双向对拍一致,44);**>16B 的 MEMORY class 仍未实现**
-(实测 jhyy→gcc 退出码 0,应 15)
+**状态:** RESOLVED closed 2026-10-20 (v4.0.12) — ≤16B eightbyte + >16B MEMORY class 均已与 gcc 双向对拍一致
 **Backfilled:** 2026-10-15 (v2.x amd64_sysv Stage 1c.3 mirror 占位)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-08 前后 (v2.0.0-os-prep Stage 1c.3 mirror) → 至今
@@ -7151,36 +7149,80 @@ artifact 级门:            sysv_mixed_struct / sysv_arg_spill 均 PASS
 **这是唯一能抓到「自洽但不兼容」这一类的检查**:纯 jhyy 测试永远看不到它。
 
 
-### ⚠️ 剩余缺口:**>16B 的 struct(MEMORY class)仍未实现**
+### 2026-10-20 真修(补齐):**>16B 的 struct = MEMORY class(整体落栈)**
 
-本次修复只覆盖 **≤16B** 的 struct(INTEGER / SSE eightbyte 传值)。SysV § A.2/A.3
-里 **>16B 的 struct 是 MEMORY class** —— 整体**拷贝到栈上**传递,不是传指针。
+≤16B 的部分 2026-10-19 已修(见上)。剩下的 **>16B** 走 SysV § A.2/A.3 的
+**MEMORY class** —— 整份拷贝到栈上,不拆 eightbyte、不占整数寄存器。
 
-现状:>16B 的 struct 仍然整体按指针传。实测(2026-10-19):
+修复前实测(2026-10-19,20B 的 struct):`jhyy caller → gcc callee` 退出码 **0**
+(应 42)—— 又一次「自洽但不兼容」:jhyy 传指针,gcc 期望栈上有一份拷贝。
+
+#### 实现:四层改动,全部 gate 在 SysV target
+
+MEMORY class 的语义是「这个实参走栈」,而 self-backend 判定「某个实参落栈」的
+**唯一**依据是「寄存器池耗尽」—— 表达不了「不占寄存器但必须落栈」。所以要动
+四个层面:
+
+1. **IL 层(header 编码)** — `abi_amd64_sysv.jhyy`:
+   MEMORY-class 参数在签名里声明成 N 个 8 字节 slot,名字带 `__m<k>` 标记
+   (k = **跨所有 MEMORY 参数累计**的 slot 序号 —— 每个参数各自从 0 起会撞名)。
+   `__m` 参数**不消耗整数寄存器序列**,所以 `cg_find_class_arg_idx` 计数时
+   必须跳过它们,否则后面真正的 INTEGER 参数序号整体偏一位。
+2. **IL 层(caller 侧)** — `codegen.jhyy`:MEMORY struct 的每个 8 字节 slot
+   从 struct 副本**按值 load** 出来,作为**独立实参**进 args 数组,
+   type letter 用 `'m'`(109)—— 这是我们自己的标记,不是 QBE 类型。
+3. **self-backend(caller 侧)** — `codegen_amd64_xmm_argalloc.jhyy`:
+   `int_arg_alloc` 见到 `'m'` 直接返 -1(落栈)且**不动** `int_arg_count`
+   (MEMORY class 不占 INTEGER 序列);`emit_stack_arg_push` 按 8 字节推。
+   `codegen_amd64_emit_call.jhyy`:调用点前 `subq $N, %rsp` 预留 outgoing 区,
+   call 之后对称 `addq`。
+4. **self-backend(callee 侧)** — `codegen_amd64_emit_call.jhyy`:
+   FNARG 路径识别 `__m<k>` → 从 `16(%rbp) + k*8` 读(push %rbp 之后第一个栈
+   参数在 16(%rbp))。
+
+#### 途中挖出的两个**更早的** bug(不限于 MEMORY)
+
+- **`out_idx` 复位**(`codegen.jhyy`):args 数组的写入位置写成
+  `let mut out_idx = i`(实参在**原始**列表里的下标),而 struct 实参会展开成
+  N 个「值」实参 → 后续实参写回**已被占用**的槽位。
+  `f(Mixed m, i32 x)` 的 %x 会落在 m 的第二个 eightbyte 上,call 文本里多出
+  一个没写过的空槽(渲染成 `%t0`)。**单参数调用测不到**(只有一个实参时
+  i == out_idx)—— 这就是为什么 ≤16B 的测试当初全绿。
+  修法:`out_idx` 改成**跨实参累计**的运行计数器。
+- **`cg_parse_mem_slot` 匹配错**(`codegen_amd64_state.jhyy`):标记是
+  `__m<k>`(两个下划线),代码却按 `_m_` 三字节比较 → 永远匹配不上 →
+  MEMORY 参数被当成普通 INTEGER 参数从 %rdi 读。
+
+#### 受限实现的边界(明确报编译错误,不静默产错码)
+
+SysV 栈上排布的是**所有落栈实参按声明顺序**的序列。callee 侧读 MEMORY slot
+用的是 `16(%rbp) + k*8`,这只在「栈上**只有** MEMORY 参数」时成立 ——
+整数参数超过 6 个(SysV 只有 rdi/rsi/rdx/rcx/r8/r9)时第 7 个起也落栈,
+MEMORY slot 的真实位置就被推后了。
+
+因此 `cg_sysv_check_memory_scope`(`codegen.jhyy`)在检测到
+「有 MEMORY 参数」且「整数参数 > 6 或浮点参数 > 8」时**明确报错并退出**,
+而不是静默产出错误的代码。
+
+#### 验收
 
 ```
-type Big = struct { a: i32, b: i32, c: i32, d: i32, e: i32 }   // 20 B
-jhyy caller → gcc callee:  退出码 = 0   (正确应为 15)
+跨实现对拍(新编译器):  small jhyy→gcc = 44 ✅   big jhyy→gcc = 42 ✅   big gcc→jhyy = 42 ✅
+跨实现对拍(旧编译器):  big jhyy→gcc = 139(SEGV) ❌   big gcc→jhyy = 20 ❌   ← 门能抓到回归
+jhyy↔jhyy:             big = 42 ✅
+自举闭环:               v2..v5 逐字节相同 ✅   closure_check v2==v3 ✅
+全量回归:               177/177, 0 failed ✅(含 5 个 sysv 用例)
+artifact 级门:           sysv_mixed_struct / sysv_memory_class / sysv_arg_spill 全 PASS
 ```
 
-即 **≤16B 已与 gcc 互操作,>16B 仍不能**。jhyy↔jhyy 两者都自洽(都是指针),
-所以现有测试照样全绿 —— 又一次「自洽但不兼容」。
-
-**为什么没一并做**:MEMORY class 需要**两端的栈布局协调** ——
-
-- **caller 侧**:把 struct 复制到 outgoing args 区(`call` 之前 `subq $N, %rsp`
-  并写入),偏移取决于前面已经占了多少栈空间
-- **callee 侧**:从 `16(%rbp)` 之后按「前面所有 MEMORY/溢出参数的总大小」顺序读
-
-self-backend 的栈帧大小是自动算的,要让两端算出一致的布局,得动栈帧布局这一层 ——
-比 eightbyte 拆分(纯寄存器分配)大一个量级,且要保证自举闭环不被破坏。
-
-**因此本条不能标 RESOLVED** —— >16B 的 struct 传参与 locked 规范
-(`jhyy-abi-v1.0.0.md:872`)仍不符。这是**已知、有实测、范围明确**的剩余缺口。
-
-**建议处置**:单列为下一个版本的独立项(与 SysV 栈布局改造一起做),或接受
-「jhyy 的 SysV struct 只在 ≤16B 时与 gcc 互操作」并**如实写进 locked ABI 文档**
-的已知限制。当前先记在这里,不假装闭合。
+新增常驻门:
+- `compiler/tests/bootstrap/sysv_abi_cross.sh` —— 扩成**三个方向**
+  (small jhyy→gcc / big jhyy→gcc / big gcc→jhyy),ubuntu job 跑
+- `compiler/tests/bootstrap/artifact_checks.sh` 新增 `sysv_memory_class` ——
+  **不跑二进制**,只看 .s(调用点有没有 `subq` 预留 outgoing 区、三个 slot 是否
+  写到 0/8/16(%rsp)、callee 是否从 16/24/32(%rbp) 读而不是从 %rdi 读)。
+  它在 Windows runner 上就能跑,**不依赖 docker**。
+- 新 fixture:`sysv_abi_mem_caller.jhyy` / `sysv_abi_mem_callee.jhyy`
 
 
 **workaround:** 无。默认编译目标是 `amd64_win`,SysV 路径平时不走,
@@ -7190,12 +7232,27 @@ self-backend 的栈帧大小是自动算的,要让两端算出一致的布局,�
 amd64_win,所以这条至今没有测试能触发它 —— 跟 `fixed_point_linux.sh` 那个门
 是同一类问题(没测到的路径不会被门发现)。
 
-**失效条件:** `abi_amd64_sysv.jhyy:229` 改调 `abi_sysv_classify_arg_full` +
-class→letter 映射表,并补一个 amd64_sysv 目标的 regress 用例。
+**失效条件(已于 2026-10-20 满足):** `abi_amd64_sysv.jhyy:229` 改调
+`abi_sysv_classify_arg_full` + class→letter 映射表,并补一个 amd64_sysv 目标的
+regress 用例。
 
 **引用:**
 - 源码 `compiler/src0/abi_amd64_sysv.jhyy:33, 79, 147, 189, 227-229`
 - 源码 `compiler/src0/abi_amd64_sysv.jhyy:248-254`(sret 差异的自述注释)
+- 源码 `compiler/src0/abi_amd64_sysv.jhyy`(`abi_sysv_struct_is_memory` /
+  `abi_sysv_struct_mem_slots` —— MEMORY class 判定,2026-10-20 加)
+- 源码 `compiler/src0/codegen.jhyy`(`cg_sysv_check_memory_scope` —— 受限边界,
+  2026-10-20 加;`cg_emit_struct_arg_memory_slots`)
+- 源码 `compiler/src0/codegen_amd64_state.jhyy`(`cg_parse_mem_slot` —— `__m<k>`
+  标记识别;`cg_find_class_arg_idx` 跳过 `__m` 参数)
+- 源码 `compiler/src0/codegen_amd64_emit_call.jhyy`(`cg_count_mem_args` ——
+  outgoing 区大小;FNARG 的 `__m` 栈读路径)
+- 源码 `compiler/src0/codegen_amd64_xmm_argalloc.jhyy`(`int_arg_alloc` 对 `'m'`
+  返 -1 且不占 INTEGER 序列)
+- 门 `compiler/tests/bootstrap/sysv_abi_cross.sh`(三个方向)、
+  `compiler/tests/bootstrap/artifact_checks.sh`(`sysv_memory_class`)
+- fixture `compiler/tests/bootstrap/sysv_abi_mem_caller.jhyy` /
+  `compiler/tests/bootstrap/sysv_abi_mem_callee.jhyy`
 - `docs/archive/v2-v3/v2.0.0-os-prep.md`(Stage 1c mirror 的原始计划)
 
 <a id="w-105"></a>

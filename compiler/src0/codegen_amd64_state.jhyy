@@ -1980,6 +1980,73 @@ fn cg_find_arg_idx(header_text: *u8, header_len: i64,
     return -(1 as i64);
 }
 
+// cg_parse_mem_slot — W-104:识别 MEMORY class 参数名里的 "__m<k>" 标记,
+// 返回 k(该 slot 的**全局** MEMORY slot 序号);不是 MEMORY 参数则返回 -1。
+//
+// IL 层给 MEMORY-class 参数的每个 8 字节 slot 起名 `<原名>__m<k>`,k 是**跨所有
+// MEMORY 参数累计**的 slot 序号 —— 因为 SysV 栈上只有内存参数,它们的偏移就是
+// 16(%rbp) + k*8(第一个栈参数在 16(%rbp):push rbp 后 retaddr 在 8(%rbp))。
+//
+// ⚠️ 这个「只有内存参数在栈上」的假设 = **整数参数不能溢出**(>6 个)。
+//    整数溢出参数也在栈上,会与 MEMORY 参数交错,那时 k*8 就不对了。
+//    IL 层负责检测这种情况并报「暂不支持」(不静默产出错误代码)。
+fn cg_parse_mem_slot(src_text: *u8, name_start: i64) -> i64 {
+    if src_text == (0 as *u8) || name_start < (0 as i64) {
+        return -(1 as i64);
+    }
+    // 自己扫到标识符结束 —— 三个 FNARG 路径里名字变量的**名字都不一样**
+    // (name_start / t_name_start / name_start),len 也只有一处可见。
+    // 依赖调用方传 len 会踩「out-of-scope 变量被当成 %t0 首参」那个老坑。
+    let mut name_len: i64 = 0 as i64;
+    while name_len < (256 as i64) {
+        let nc = cg_byte_at(src_text, name_start + name_len);
+        // ⚠️ 不能写成 `let is_alnum = (A && B) || (C && D) || ...` ——
+        // let 绑定多段布尔表达式生成的 IL 形态 self-backend 的 lexer 不认
+        // ("unknown QBE IL mnemonic")。逐步赋值。
+        let mut is_alnum: i32 = 0 as i32;
+        if nc >= (48 as i32) && nc <= (57 as i32) { is_alnum = 1 as i32; }
+        if nc >= (65 as i32) && nc <= (90 as i32) { is_alnum = 1 as i32; }
+        if nc >= (97 as i32) && nc <= (122 as i32) { is_alnum = 1 as i32; }
+        if nc == (95 as i32) { is_alnum = 1 as i32; }
+        if is_alnum == (0 as i32) { break; }
+        name_len = name_len + (1 as i64);
+    }
+    if name_len <= (0 as i64) {
+        return -(1 as i64);
+    }
+    let name_bytes = ptr_add_u8(src_text, name_start);
+    // 找 "__m" 子串
+    //
+    // ⚠️ 标记是 **`__m<k>`**(两个下划线 + m + 数字),不是 `_m_`。
+    //    参数名形如 `<原名>__m0` → 里面的子串是 "__m0"。
+    //    (之前写成 `_`/`m`/`_` 三字节比较 → 永远匹配不上 → MEMORY 参数
+    //     被当成普通 INTEGER 参数从 %rdi 读 → 读到垃圾。)
+    let mut i: i64 = 0 as i64;
+    while i + (3 as i64) < name_len {
+        if cg_byte_at(name_bytes, i) == (95 as i32)                 // '_'
+           && cg_byte_at(name_bytes, i + (1 as i64)) == (95 as i32) // '_'
+           && cg_byte_at(name_bytes, i + (2 as i64)) == (109 as i32) { // 'm'
+            // "__m" 之后应是数字
+            let mut j: i64 = i + (3 as i64);
+            if j >= name_len { return -(1 as i64); }
+            let d0 = cg_byte_at(name_bytes, j);
+            if d0 < (48 as i32) || d0 > (57 as i32) { return -(1 as i64); }
+            let mut k: i64 = 0 as i64;
+            while j < name_len {
+                let dc = cg_byte_at(name_bytes, j);
+                if dc < (48 as i32) || dc > (57 as i32) { break; }
+                k = k * (10 as i64) + (dc - 48 as i32) as i64;
+                j = j + (1 as i64);
+            }
+            // "__m<k>" 必须在名字**末尾** —— 否则像 "foo__m0bar" 这种
+            // 普通参数名会被误判成 MEMORY slot。
+            if j != name_len { return -(1 as i64); }
+            return k;
+        }
+        i = i + (1 as i64);
+    }
+    return -(1 as i64);
+}
 // cg_find_class_arg_idx — W-104 (2026-10-19):同类序列里的参数序号
 //
 // SysV psABI § A.2:整数类参数走**整数寄存器序列**(rdi/rsi/rdx/rcx/r8/r9),
@@ -2049,15 +2116,28 @@ fn cg_find_class_arg_idx(header_text: *u8, header_len: i64,
                 }
             }
             // 不是目标参数 → 按它的 class 计数
-            if (this_sse != (0 as i32) && is_sse != (0 as i32)) ||
-               (this_sse == (0 as i32) && is_sse == (0 as i32)) {
-                n_class = n_class + (1 as i64);
+            //
+            // ⚠️ W-104 MEMORY class:带 `__m<k>` 标记的参数**不占寄存器**
+            // (SysV: MEMORY class 参数落栈,不消耗 INTEGER/SSE 序列)。
+            //    不跳过它就会把后面真正的 INTEGER 参数序号整体推偏一位 ——
+            //    `f(Big b, i32 x)` 的 %x 会被算成第 5 个 INTEGER 参数(进 %r8),
+            //    而 gcc 把它放 %rdi。
+            let mut skip_count: i32 = 0 as i32;
+            if cg_parse_mem_slot(header_text, i + (1 as i64)) >= (0 as i64) {
+                skip_count = 1 as i32;
+            }
+            if skip_count == (0 as i32) {
+                if (this_sse != (0 as i32) && is_sse != (0 as i32)) ||
+                   (this_sse == (0 as i32) && is_sse == (0 as i32)) {
+                    n_class = n_class + (1 as i64);
+                }
             }
         }
         i = i + (1 as i64);
     }
     return -(1 as i64);
 }
+
 
 // cg_state_bump_fn_idx — v2.11.3 (W-074.7 T4-h 真修)
 //

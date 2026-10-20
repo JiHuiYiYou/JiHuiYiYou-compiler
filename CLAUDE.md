@@ -140,7 +140,7 @@
 
 ## 当前活跃 workarounds
 
-**11 ACTIVE / 0 DEFERRED**(2026-10-19 复核:W-110 / W-111 / W-116 三条本轮 RESOLVED;**W-104 部分修复但仍 ACTIVE**(>16B 的 MEMORY class 未实现),**11 ACTIVE / 103 索引行**,per `docs/internal/workarounds.md` 索引表):
+**10 ACTIVE / 0 DEFERRED**(2026-10-20 复核:**W-104 RESOLVED**(v4.0.12 —— ≤16B eightbyte 分类 + >16B MEMORY class 整体落栈,与 gcc 三方向对拍全绿),**10 ACTIVE / 103 索引行**,per `docs/internal/workarounds.md` 索引表):
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
@@ -153,7 +153,6 @@
 | W-114 | enum match codegen | **全 unit-variant 的 enum `match` 永远命中第一支** |
 | W-115 | `codegen_call_return_types.jhyy` | W-089 标 ✅ RESOLVED,但它自己的 reproducer 仍 STACK_OVERFLOW |
 | W-105.1 | `compiler/src0/sema.jhyy:2578-2579` | `check_cap_pass` 同款 stub,当前无调用点 |
-| W-104 | `compiler/src0/abi_amd64_sysv.jhyy` | SysV struct 传参。**2026-10-19 部分修复**:≤16B 已按 eightbyte 分类传值(与 gcc 双向对拍 44);**>16B 的 MEMORY class 仍未实现**(走栈而非指针,与 gcc 不兼容) |
 | W-118 | `compiler/src0/lexer.jhyy:212-258` | 语言 lexer `lex_peek_char` 无 EOF 守卫 → 越过 end 前进(W-117 的同族另一处,尚未观测到危害) |
 
 2026-10-18 调整(**W-109 移出、W-118 移入,总数仍 14**):W-109(IL lexer 缺浮点比较
@@ -188,6 +187,7 @@ W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_
 - W-098 / W-099 / W-100 / W-101 → RESOLVED (2026-10-09 ~ 2026-10-12)
 - W-102 → RESOLVED (2026-10-15, address-holder 池与 alloc 池重叠 → self-hosted 编译器泛型 SEGV)
 - W-074.6 → RESOLVED (2026-10-15,原 DEFERRED;所等的 W-096 / W-097 均已 RESOLVED)
+- W-104 → RESOLVED (2026-10-20, v4.0.12 —— SysV struct 传参:≤16B eightbyte 分类 + >16B MEMORY class 整体落栈,与 gcc 三方向对拍一致)
 
 历史 workaround 走 git history;`workarounds.md` 保留 RESOLVED/SUPERSEDED/INVALID 状态作 audit ledger。
 
