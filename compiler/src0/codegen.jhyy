@@ -776,6 +776,7 @@ fn cg_sysv_check_memory_scope(cg_raw: *u8, args_node: *u8, nargs: i64) -> i32 {
         let _e = jh_fputs_stderr("jhyy error: SysV MEMORY-class struct (>16 bytes) cannot be mixed with register-overflow arguments" as *u8);
         let _e2 = jh_fputs_stderr(" (integer args > 6 or float args > 8)." as *u8);
         let _e3 = jh_fputs_stderr(" This combination is not implemented yet -- the compiler refuses to emit wrong code." as *u8);
+        let _e4 = jh_fputs_stderr("\n" as *u8);
         let _x = exit(1 as i32);
         return 1 as i32;
     }

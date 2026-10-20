@@ -2047,6 +2047,7 @@ fn cg_parse_mem_slot(src_text: *u8, name_start: i64) -> i64 {
     }
     return -(1 as i64);
 }
+
 // cg_find_class_arg_idx — W-104 (2026-10-19):同类序列里的参数序号
 //
 // SysV psABI § A.2:整数类参数走**整数寄存器序列**(rdi/rsi/rdx/rcx/r8/r9),
@@ -2137,7 +2138,6 @@ fn cg_find_class_arg_idx(header_text: *u8, header_len: i64,
     }
     return -(1 as i64);
 }
-
 
 // cg_state_bump_fn_idx — v2.11.3 (W-074.7 T4-h 真修)
 //
