@@ -9,7 +9,7 @@
 
 ⚠️ **v4.0.x 是 patch 序列,不是 minor 序列** —— 中间只出现过 `v4.0.2.1` /
 `v4.0.2.5` 这样的第三段,说明历史上 v4.0.x 的粒度已经细到 patch 级。
-如果一次 sprint 的内容超过一个 patch 的合理体量(比如 v4.0.12 的浮点一对
+如果一次 sprint 的内容超过一个 patch 的合理体量(比如 v4.0.13 的浮点一对
 可能就不止一个 patch),**届时应该开 v4.1.0 而不是继续挤 v4.0.x**。
 本文档目前按 patch 排是因为 v4.0.x 已有的先例如此,不是因为它适合。
 
@@ -97,7 +97,7 @@ v4.0.x 系列都占满了 —— v4.1 及以后的 backlog 在这条前提下**�
 |---|------|------|
 | **D1** | **W-105 走 A/B/C 哪条?** 见 [`active-workaround-clearance.md` § 决策点](active-workaround-clearance.md) | 选 A 就要先**实现 `&mut`**(功能缺失,不是检查缺失)→ 至少 2 个版本;选 C(判 DEFERRED)则政策实质放宽,v4.0.0 final 立刻解锁一大半 |
 | **D2** | **v4.0.0 final 真的必须等 14 条全清?** | 若接受「先 promote RC 之外的部分」,整个排期前移 |
-| **D3** | ~~并发 flake 治根(改编译器源码给旁路文件加 pid 隔离)算不算 v4.0.x 范围?~~ | ✅ **2026-10-18 关闭**:真根因是 harness 命名冲突,已修。旁路文件那条机制**未观测到发作**,降级为「先加并发压力探针,再决定改不改」—— 见 v4.0.16 |
+| **D3** | ~~并发 flake 治根(改编译器源码给旁路文件加 pid 隔离)算不算 v4.0.x 范围?~~ | ✅ **2026-10-18 关闭**:真根因是 harness 命名冲突,已修。旁路文件那条机制**未观测到发作**,降级为「先加并发压力探针,再决定改不改」—— 见 v4.0.17 |
 
 **D2 的补充事实(2026-10-18):** 政策要求的前置条件数量**没松动**
 (W-109 转 RESOLVED、W-118 新增,净数仍是 14),但**实际成本比 10-15 写下这份
@@ -312,7 +312,57 @@ rdi+xmm0 读),让 jhyy 去调它** —— 以 XFAIL 形式进 `sysv` job 并当�
 被同一批测试覆盖。真修时若 `sysv_abi_test` 仍红,先看是不是签名不吻合触发了
 `sysv_link_run.sh` 的「签名不吻合 → 红」分支 —— 那说明还有第三个贡献者。
 
-### v4.0.12 — 浮点(W-110 单条)
+### v4.0.12 — SysV MEMORY class(>16B struct 走栈)
+
+**背景:** W-104 的 ≤16B 部分已修(2026-10-19),>16B 仍未实现。本版做剩下的部分。
+
+#### 已查清的机制(2026-10-19,不必重查)
+
+| 事实 | 位置 |
+|---|---|
+| SysV 栈参数**已支持**:caller `subq $N,%rsp` 后写 `0(%rsp)` | `codegen_amd64_emit_call.jhyy:869` |
+| 实测第 7 个整数参数:`movl -48(%rbp),%r10d; movl %r10d, 0(%rsp)` | — |
+| temp 就是**固定 rbp 偏移的槽位** → `emit_stack_arg_push` 能直接推一个 load 出来的 temp | `codegen_amd64_xmm_argalloc.jhyy:217` |
+| `frame_size = (max+1)*8` —— **帧大小只由 temp 数量决定,没有 outgoing area 概念** | `codegen_amd64_state.jhyy:195` |
+| callee 侧读栈参数:`fnarg_stack_off` = Win `48+(idx-4)*8` / SysV `16+(idx-6)*8` | `codegen_amd64_emit_call.jhyy:1291` |
+
+#### 真正的障碍
+
+**self-backend 判定「某个实参落栈」的唯一依据是「寄存器池耗尽」**(`int_arg_alloc` /
+`xmm_arg_alloc` 返回 -1 → `emit_stack_arg_push`)。
+
+而 SysV 规定 MEMORY class 参数:**不消耗整数寄存器,却必须落栈**。这个语义
+self-backend 表达不了 —— 现有 IL 里没有任何形式能表达「这个实参走栈」。
+
+#### 实现需要动的四个层面
+
+1. **IL 层(header 编码)**:MEMORY-class struct 参数在 header 里声明为 N 个 slot,
+   名字带标记(如 `<name>__m<k>`,k = 全局 MEMORY slot 序号),让 self-backend
+   能识别「这是栈参数」。
+2. **self-backend(callee 侧)**:`emit_copy` 的 FNARG 路径遇到 `__m` 参数 →
+   从 `16(%rbp) + off` 读,而不是从寄存器;`off` = 该参数在**内存参数序列**中的位置。
+3. **self-backend(caller 侧)**:MEMORY struct 的每个 8 字节 slot 从 struct 副本
+   load 成 temp → 推入 outgoing 区,且**不分配 GPR**。
+4. **栈偏移协调**:caller 的 outgoing 区与 callee 的读区必须算出同一个位置。
+   ⚠️ **整数溢出参数也在栈上**,与 MEMORY 参数混排时会打乱偏移 ——
+   两者都按**声明顺序**排。**若整数参数 > 6 且同时有 MEMORY 参数,偏移计算需要
+   完整遍历 header 的所有参数**,不能只数 MEMORY slot。
+
+**建议的受限实现(先做这个):** 只支持「整数参数 ≤ 6(无溢出)+ 有 MEMORY 参数」。
+此时栈上只有 MEMORY 参数,偏移 = `16 + MEMORY slot 全局序号*8`,不需要完整 header
+遍历。**检测到「整数溢出 + MEMORY 混排」时明确报编译错误**(「暂不支持」),
+而不是静默产出错误代码。
+
+#### 验收
+
+- 跨实现对拍:**>16B struct** 的 jhyy→gcc 与 gcc→jhyy 双向都得到正确值
+  (当前:退出码 0,应 15)
+- `sysv_abi_cross.sh` 加一个 >16B 用例 —— **当前会红**,修完转 PASS
+- Win 目标零回归(self-backend 改动 gate 在 SysV,自举闭环走 Win,应不受影响)
+- 自举闭环 v2..v5 逐字节相同
+- 全量回归 177/177
+
+### v4.0.13 — 浮点(W-110 单条)
 
 | 内容 | 状态 |
 |---|---|
@@ -327,7 +377,7 @@ rdi+xmm0 读),让 jhyy 去调它** —— 以 XFAIL 形式进 `sysv` job 并当�
 W-110 的两条假设里有一条是 W-109 造成的 IL 解析错位」。现在那条假设**可以直接
 被验证或证伪** —— 这条不再是不确定性。
 
-### v4.0.13 — enum match
+### v4.0.14 — enum match
 
 **W-114**:全 unit-variant 的 enum `match` 永远命中第一支。有 variant 带 payload
 就正常,所以现有测试全 PASS。
@@ -335,7 +385,7 @@ W-110 的两条假设里有一条是 W-109 造成的 IL 解析错位」。现在
 **gate:** `gdb_pretty_test.jhyy` 删 XFAIL 后 PASS;新增纯 unit-variant 三臂用例
 (必须断言**不同变体给不同结果**,只断言一个非第一臂会被「恒取第一支」骗过)。
 
-### v4.0.14 — `&mut` 路线(待 D1 确认)
+### v4.0.15 — `&mut` 路线(待 D1 确认)
 
 **(a) 让 `&mut` 真的可用** —— parser 表达式位置拒 `&mut`、`&mut T` 产出的类型
 不可解引用。这是**功能缺失**。
@@ -347,7 +397,7 @@ W-110 的两条假设里有一条是 W-109 造成的 IL 解析错位」。现在
 **⚠️ 这是整条线上最大的一项,且性质存疑** —— 它是功能不是 bug。若 D1 选 C,
 整条 v4.0.14 取消,政策实质放宽。
 
-### v4.0.15 — stdlib 诚实 + emit 旁路
+### v4.0.16 — stdlib 诚实 + emit 旁路
 
 | 内容 | 说明 |
 |---|---|
@@ -358,7 +408,7 @@ W-110 的两条假设里有一条是 W-109 造成的 IL 解析错位」。现在
 **gate:** `std_os_real_io.jhyy` 删 XFAIL 后 PASS(真文件读回 byte-equal);
 产物级门「`.exe` 有 `.text.boot`」转绿;asm 相对 `ret` 的位置门转绿。
 
-### v4.0.16 — 收尾
+### v4.0.17 — 收尾
 
 | 内容 |
 |---|
