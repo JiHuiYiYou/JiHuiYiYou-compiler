@@ -615,6 +615,21 @@ temp id 只差 71 就越界,合成文件一变就可能悄悄掉回去 → 那�
 `artifact_checks.sh` 的 `asm_before_ret` 从 KNOWN-FAIL 升级成**真门** ——
 它是**最后一条** KNOWN-FAIL ⇒ 产物级门现在 **7 PASS / 0 KNOWN-FAIL / 0 FAIL** ✓。
 
+### v4.0.18(续)—— W-115 ✅ **已完成(2026-10-20)**
+
+**W-089 的 reproducer 之所以 STACK_OVERFLOW,根因不是 W-089** —— 逐 sub-test
+二分定位到第 7 个(闭包):那个闭包**捕获了外层变量**,而闭包捕获在 v3.2.1 的
+MVP 范围里明确不支持,**但编译器没有任何检查** ⇒ 给它生成坏代码(env 压根没
+传进合成 fn)⇒ 运行时炸。
+
+修法:**不实现捕获**(那是 feature 工作,留 backlog),改成**编译期明确报错**
+(`closure cannot capture outer variables (not supported yet)`)⇒ 把「静默生成
+坏代码」换成「说人话的诊断」✓。
+
+那个闭包 sub-test 从 W-089 的 reproducer **移出**到新文件
+`closure_capture_unsupported.jhyy`(EXPECT-ERROR)⇒ **W-089 的官方 reproducer
+现在跑通了**(EXIT=0)—— 「W-089 已 RESOLVED」这句话**终于有证据支撑** ✓。
+
 **两个 stub 处置不同的理由(记在台账里):** `check_cap_pass` 没人调 → 删;
 `check_borrow` 每个函数声明都调 → 走「实现最小检查」而不是删。
 

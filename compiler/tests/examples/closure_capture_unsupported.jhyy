@@ -1,0 +1,27 @@
+// closure_capture_unsupported.jhyy — 闭包**捕获外层变量**必须被**编译期**拒绝。
+//
+// 2026-10-20 新增(W-115)。之前这件事**没有任何检查**:
+//   · 闭包的 MVP 范围(见 sema.jhyy 的闭包分支注释)只允许闭包体用自己的
+//     参数和字面量 —— **不允许捕获外层变量**;
+//   · 但编译器不检查 ⇒ 给捕获了外层变量的闭包**生成坏代码**:
+//     合成 fn `__closure_N` 的调用约定里**没有 env 参数**(env 从来没被
+//     传进去),闭包体读外层变量读到的是垃圾指针 ⇒ **运行时**炸。
+//
+// 实测症状:那个闭包出现在 W-089 的 reproducer 里 ⇒ 整个测试在运行期
+// STACK_OVERFLOW(0xC00000FD)—— 一个**看起来跟闭包毫无关系**的崩溃。
+// 现在:同样的代码在**编译期**报一个说人话的错 ✓。
+//
+// EXPECT-ERROR: "closure cannot capture outer variables"
+extern fn malloc(n: i64) -> *u8;
+fn ptr_add(p: *u8, off: i64) -> *u8 { return (p as i64 + off) as *u8; }
+
+fn make_closure(buf: *u8) -> *u8 {
+    let f = |x: i32| { ptr_add(buf, x) };   // ← 捕获了外层的 buf ✗
+    return f(8 as i32);
+}
+
+fn main_jhyy() -> i32 {
+    let buf = malloc(32 as i64);
+    let p = make_closure(buf);
+    return *(p as *i32) & (0xff as i32);
+}

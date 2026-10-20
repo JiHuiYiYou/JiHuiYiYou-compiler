@@ -690,6 +690,78 @@ SysV 回归: 6 PASS ✅   W-104 三方向 ABI 对拍: 3 PASS ✅
 
 ---
 
+## v4.0.18(续)—— W-115:闭包捕获外层变量 → 编译期明确报错(W-089 的 reproducer 转 PASS)
+
+**2026-10-20。** ACTIVE 条数 3 → 2 → **1**。
+
+### 根因:不是 W-089,是**闭包捕获**
+
+台账记的是「W-089 标着 RESOLVED,但它自己的 reproducer 至今 STACK_OVERFLOW」。
+
+**逐 sub-test 二分定位**(每个中间版本都真编译 + 真跑):
+
+```
+N=1..6: exit=0                                     ← 前 6 个 sub-test 全绿
+N=7:    exit=3221225725 (0xC00000FD = STACK_OVERFLOW)  ← 崩溃在第 7 个
+```
+
+第 7 个 sub-test 是闭包:`let f = |x: i32| { ptr_add(buf, x) };` —— 它
+**捕获了外层的 `buf`**。生成的 .s 把坏在哪显示得很清楚:
+
+```
+make_closure:
+    movl $8, -40(%rbp)
+    movl -40(%rbp), %ecx     ← 只传了 x
+    call __closure_00000     ← **没有传 env** ✗
+__closure_00000:
+    movl %ecx, -32(%rbp)     ← 32 位存 env 指针(截断)✗
+    call ptr_add             ← **一个参数都没设** ✗
+```
+
+**⇒ 根因:闭包的 env 机制压根没实现** —— 合成 fn `__closure_N` 的调用约定里
+**没有 env 参数**(sema 建的合成 fn 只有用户的参数),env 从来没被传进去 ⇒
+闭包体读外层变量读到垃圾指针 ⇒ 运行时炸。
+
+**而「闭包不能捕获外层变量」一直只是注释里的约定**(sema 的闭包分支写着
+「M0: body 仅用 params + literals, 不引用 outer vars」)—— **没有任何检查**
+⇒ 编译器给捕获了外层变量的闭包**生成坏代码** ✗。
+
+### 修法:不实现捕获,改成**编译期明确报错**
+
+闭包捕获在 v3.2.1 的 MVP 范围里**明确排除** ⇒ 实现它是 feature 工作
+(backlog),不属于「清零 ACTIVE」。本轮做的是**把「静默生成坏代码」换成
+「编译期明确报错」**:
+
+- `SemaContext` 加 `in_closure` 标志(闭包体检查期间为 1)
+- `NODE_CLOSURE_LITERAL` 分支:检查闭包体期间置位,结束后恢复
+- `NODE_IDENT` 分支:在闭包里,若该 sym 是变量且**不在当前作用域**(闭包自己的
+  作用域 = 参数 + 闭包体内局部变量)⇒ 它来自外层函数 ⇒ 一次**捕获** ⇒ 报错:
+  `closure cannot capture outer variables (not supported yet)`
+
+### 测试的处置
+
+W-089 的 reproducer 里那个闭包 sub-test **移出**到新文件
+`closure_capture_unsupported.jhyy`(EXPECT-ERROR)—— W-089 的 reproducer 验的
+是「call 返回类型的 semantic lookup」,闭包不在它的射程里 ✓。
+
+**⇒「W-089 已 RESOLVED」这句话现在有证据支撑** —— 它的官方 reproducer 跑通了 ✓。
+
+### 验收
+
+```
+新测试 closure_capture_unsupported.jhyy(EXPECT-ERROR):编译**失败** ✓
+    (修复前:编译**成功**,运行时 STACK_OVERFLOW)
+W-089 的 reproducer codegen_call_return_types.jhyy:EXIT=0 ✅(XFAIL 摘掉)
+不捕获外层变量的闭包:仍正常编 + 跑出正确值 ✅
+全量回归:  184/184 PASS, 0 failed, 0 flaky ✅(XFAIL 从 2 条降到 1 条)
+自举闭环:  closure_check.sh v2.s == v3.s byte-identical ✅
+产物级门:  7 PASS / 0 KNOWN-FAIL / 0 FAIL ✅
+```
+
+**ACTIVE 条数:2 → 1。**
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

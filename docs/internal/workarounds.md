@@ -127,7 +127,7 @@
 | [W-112](#w-112) | RESOLVED | `#[link_section]` 完全失效 — 属性被解析但 codegen 是 no-op |
 | [W-113](#w-113) | RESOLVED | `asm!` 与 memory barrier 的字节被 emit 到 `ret` 之后,永不执行 |
 | [W-114](#w-114) | RESOLVED | 全 unit-variant 的 enum `match` 永远命中第一支 — 核心语言功能失效 |
-| [W-115](#w-115) | ACTIVE | W-089 标着 RESOLVED,但它自己的 reproducer 至今... |
+| [W-115](#w-115) | RESOLVED | W-089 标着 RESOLVED,但它自己的 reproducer 至今... |
 | [W-116](#w-116) | RESOLVED | SysV callee 参数溢出只处理 4 个整数寄存器 —— 第 5 个及以后的参数全读到第 4... |
 | [W-117](#w-117) | RESOLVED | self-backend IL lexer 在 EOF 处无守卫 —— cur == end... |
 | [W-118](#w-118) | RESOLVED | 语言 lexer 的 lex_peek_char 同样无 EOF 守卫 —— 越界前进而非空转 |
@@ -8853,7 +8853,8 @@ SysV(同款):     同样的用例在 amd64_sysv 目标下 217 ✅
 <a id="w-115"></a>
 ## W-115: W-089 标着 RESOLVED,但它自己的 reproducer 至今 STACK_OVERFLOW
 
-**状态:** ACTIVE since 2026-10-15 (v4.0.8) — codegen_call_return_types.jhyy 运行期 STACK_OVERFLOW(0xC00000FD)
+**状态:** RESOLVED closed 2026-10-20 (v4.0.18) — 根因是**闭包捕获外层变量**生成坏代码
+(不是 W-089);现在编译期明确报错,reproducer 已转 PASS
 **Backfilled:** 2026-10-15 (v3.4.2 W-089 声称真修时)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-09-29 (v3.4.2 声称 RESOLVED) → 至今
@@ -8944,9 +8945,86 @@ whitelist)」—— 而**验证它的那个 reproducer 自己就崩**。也就�
 3. 该测试的 `// SKIP:` 已于 2026-10-15 改成 `// XFAIL:` —— 现在它**真跑**,
    崩溃会被记为 XFAIL 并出现在每次回归的输出里,不再是隐形项
 
+### 2026-10-20 真修:根因是**闭包捕获**,不是 W-089
+
+**RCA(逐 sub-test 二分定位):** 用 harness 逐个累加 sub-test 找崩溃点
+(每个中间版本都真编译 + 真跑),实测:
+
+```
+N=1..6: exit=0        ← 前 6 个 sub-test 全绿
+N=7:    exit=3221225725 (= 0xC00000FD = STACK_OVERFLOW)   ← 崩溃点在第 7 个
+```
+
+**第 7 个 sub-test 是闭包:**
+
+```jhyy
+fn make_closure(buf: *u8) -> *u8 {
+    let f = |x: i32| { ptr_add(buf, x) };   // ← 捕获了外层的 buf
+    return f(8 as i32);
+}
+```
+
+**看反汇编/生成的 .s,坏在哪一目了然:**
+
+```
+make_closure:
+    movl $8, -40(%rbp)
+    movl -40(%rbp), %ecx     ← 只传了 x
+    call __closure_00000     ← **没有传 env** ✗
+__closure_00000:
+    movl %ecx, -32(%rbp)     ← 32 位存 env 指针(截断)✗
+    ...
+    call ptr_add             ← **一个参数都没设** ✗(rcx/rdx 是垃圾)
+```
+
+**⇒ 根因:闭包的 env 机制压根没实现。** 合成 fn `__closure_N` 的调用约定里
+**没有 env 参数**(sema 建的合成 fn 只有用户的参数),env 从来没被传进去 ⇒
+闭包体读外层变量读到的是垃圾指针 ⇒ 运行时炸。
+
+**而「闭包不能捕获外层变量」这条一直只是注释里的约定**(sema 的闭包分支
+写着「M0: body 仅用 params + literals, 不引用 outer vars」)—— **没有任何
+检查** ⇒ 编译器给捕获了外层变量的闭包**生成坏代码** ✗。
+
+**修法(不实现捕获,改成明确报错):** 闭包捕获在 v3.2.1 的 MVP 范围里
+**明确排除** ⇒ 实现它是 feature 工作(backlog),不属于「清零 ACTIVE」。
+本轮做的是**把「静默生成坏代码」换成「编译期明确报错」**:
+
+- `SemaContext` 加 `in_closure` 标志(闭包体检查期间为 1)
+- `NODE_CLOSURE_LITERAL` 分支:检查闭包体期间置位,结束后恢复
+- `NODE_IDENT` 分支:在闭包里,若该 sym 是变量(SYM_VAR)且**不在当前作用域**
+  (闭包自己的作用域 = 参数 + 闭包体内局部变量)⇒ 它来自外层函数 ⇒ 一次
+  **捕获** ⇒ **报错**:
+  `closure cannot capture outer variables (not supported yet): the closure body
+  may only use its own parameters and literals`
+
+**测试的处置:** W-089 的 reproducer(`codegen_call_return_types.jhyy`)里那个
+闭包 sub-test **移出**到新文件 `closure_capture_unsupported.jhyy`
+(EXPECT-ERROR)—— W-089 的 reproducer 验的是「call 返回类型的 semantic
+lookup」,闭包不在它的射程里 ✓。
+
+**⇒ 「W-089 已 RESOLVED」这句话现在有证据支撑** —— 它的官方 reproducer
+**跑通了**(EXIT=0)✓。
+
+**验收:**
+
+```
+新测试 closure_capture_unsupported.jhyy(EXPECT-ERROR):编译**失败** ✓
+    「closure cannot capture outer variables (not supported yet)」
+    (修复前:编译**成功**,运行时 STACK_OVERFLOW)
+W-089 的 reproducer codegen_call_return_types.jhyy:EXIT=0 ✅(XFAIL 摘掉)
+不捕获外层变量的闭包(clos_ok.jhyy):仍正常编 + 跑出正确值(EXIT=9)✅
+全量回归:  184/184 PASS, 0 failed, 0 flaky ✅(XFAIL 从 2 条降到 1 条)
+自举闭环:  closure_check.sh v2.s == v3.s byte-identical ✅
+产物级门:  7 PASS / 0 KNOWN-FAIL / 0 FAIL ✅
+断言审计:  零信号违规 0 ✅
+```
+
 **引用:**
-- 测试 `compiler/tests/examples/codegen_call_return_types.jhyy`
-- W-089 entry(`docs/internal/workarounds.md`)
+- 测试 `compiler/tests/examples/codegen_call_return_types.jhyy`(W-089 reproducer,现 EXIT=0)
+- 测试 `compiler/tests/examples/closure_capture_unsupported.jhyy`(新,EXPECT-ERROR)
+- 源码 `compiler/src0/sema.jhyy`(`SemaContext.in_closure` + 闭包分支 + `NODE_IDENT` 分支)
+- 源码 `compiler/src0/main.jhyy`(`SemaContext` struct literal 补字段)
+- W-089 entry(`docs/internal/workarounds.md`)—— 它的 reproducer 现在跑通了 ✓
 - `v3.4.0-plan.md:89`(当初把它排除出 CI gate 的那行)
 
 <a id="w-116"></a>

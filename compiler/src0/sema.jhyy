@@ -128,9 +128,19 @@ type SemaContext = struct {
     // 改成**每次编译单调递增的计数器** → 名字只跟「第几个 closure」有关,
     // 与内存布局无关 ⇒ 逐字节可复现 ✓。
     closure_counter:  i64,
+    // W-115 (2026-10-20):在**闭包体**里检查时为 1。
+    //
+    // 闭包的 MVP 范围(见下面 NODE_CLOSURE_LITERAL 分支的注释)只允许闭包体
+    // 用**自己的参数**和字面量 —— **不允许捕获外层变量**。但这件事之前
+    // **没有任何检查** ⇒ 捕获了外层变量的闭包会**生成坏代码**:
+    // 合成 fn `__closure_N` 的调用约定里**没有 env 参数**(env 从来没被传进去),
+    // 闭包体里读外层变量读到的是垃圾指针 ⇒ 运行时炸(实测 STACK_OVERFLOW)。
+    //
+    // 现在:捕获外层变量 → **编译期明确报错** ✓(而不是生成坏代码)。
+    in_closure:       i32,
 }
 
-fn SEMA_CONTEXT_SIZE() -> i64 { return 144 as i64; }
+fn SEMA_CONTEXT_SIZE() -> i64 { return 152 as i64; }
 
 // ════════════════════════════════════════════════════
 // SemaLocal 访问 helper（locals[i].sym / locals[i].type）
@@ -975,6 +985,27 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     if (*n).kind == NODE_IDENT() {
         let d = node_ident_data(n);
         let id_sym = (*d).sym as *Sym;
+        // W-115 (2026-10-20):闭包体里引用**外层变量**(= 捕获)→ 明确报错。
+        //
+        // 判据:该 sym 是变量(SYM_VAR)且**不在当前作用域**里 —— 当前作用域
+        // 是闭包自己的作用域(参数 + 闭包体内的局部变量都插在这里 ✓)⇒
+        // 不在里面 ⇒ 它来自**外层函数** ⇒ 这是一次捕获 ✓。
+        //
+        // 为什么不实现捕获(env 结构体 + 把 env 传进合成 fn + 闭包体从 env
+        // 读捕获值):那是 v3.2.1 MVP 明确**排除**的范围(见本函数上方的
+        // 「MVP design」注释)—— 现在做的只是**把「静默生成坏代码」换成
+        // 「编译期报错」** ✓。
+        if (*ctx).in_closure != (0 as i32) {
+            if id_sym != (0 as *Sym) {
+                if (*id_sym).kind == SYM_VAR() {
+                    let in_scope = symtab_lookup_local((*ctx).current_scope, (*id_sym).name);
+                    if in_scope == (0 as *Sym) {
+                        let _ce = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                            "closure cannot capture outer variables (not supported yet): the closure body may only use its own parameters and literals" as *u8);
+                    }
+                }
+            }
+        }
         // 1) sym 本身有 type
         if id_sym != (0 as *Sym) {
             if (*id_sym).type_ptr != (0 as *u8) {
@@ -1254,6 +1285,14 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
 
         // 2) walk body stmts — type-check each (M0: body 仅用 params + literals,
         //    不引用 outer vars)
+        //
+        // ⚠️ W-115 (2026-10-20):「不引用 outer vars」这条以前**只是注释里的
+        // 约定**,没有任何检查 ⇒ 捕获了外层变量的闭包会生成坏代码(env 压根没
+        // 被传进合成 fn ⇒ 闭包体读到垃圾指针 ⇒ 运行时炸)。
+        // 现在:置 in_closure ⇒ NODE_IDENT 分支会检查「这个 ident 是不是外层
+        // 变量」⇒ 是就**编译期报错** ✓。
+        let saved_in_closure = (*ctx).in_closure;
+        (*ctx).in_closure = 1 as i32;
         let blk = (*cd).body as *Node;
         let mut body_ret_type: *Type = type_void(ta);
         if blk != (0 as *Node) {
@@ -1273,6 +1312,7 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         }
 
         sema_pop_scope(ctx);
+        (*ctx).in_closure = saved_in_closure;
 
         // 3) 构造合成 fn 类型 (params...) -> ret
         let param_types_buf = arena_alloc((*ctx).arena, (*cd).nparams * (8 as i64));
@@ -3388,6 +3428,8 @@ fn sema_init(ctx: *SemaContext, arena: *Arena, ta: *TypeArena) -> i32 {
     // W-121:合成 closure fn 的编号计数器(每次编译从 0 开始 —— 名字只跟
     // 「第几个 closure」有关,与内存布局无关 ⇒ 产物可复现 ✓)。
     (*ctx).closure_counter = 0 as i64;
+    // W-115:闭包体检查标志(默认不在闭包里)
+    (*ctx).in_closure = 0 as i32;
     // init type arena（lazy init 也会触发）
     (*ta).arena = arena;
     (*ta).inited = 0 as i32;

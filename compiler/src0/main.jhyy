@@ -764,6 +764,8 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
         borrow_rec_cap:   0 as i64,
         // W-121:合成 closure fn 的编号计数器(与 sema.jhyy 声明逐字对齐)。
         closure_counter:  0 as i64,
+        // W-115:闭包体检查标志(与 sema.jhyy 声明逐字对齐)。
+        in_closure:       0 as i32,
     };
     sema_init(&sema, &arena, &ta);
     if sema_check(&sema, &ta, ast_node) > (0 as i32) {

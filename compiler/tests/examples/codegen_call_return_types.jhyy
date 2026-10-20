@@ -11,14 +11,17 @@
 //   - `*(malloc(... as *T))`        // builtin fallback
 //   - 任何 pointer-equivalent return type 走 SymbolReturnTypeMap semantic lookup
 //
-// 8 sub-test cases:
+// 8 sub-test cases(2026-10-20 起是 **7** 个 —— case 7 移出,见下):
 //   1. i32-returning fn (negative — result NOT address-holder, slot-direct-read OK)
 //   2. *T-returning fn (positive — result IS address-holder, indirect dispatch required)
 //   3. i64-returning fn (negative — like case 1 but i64, slot-direct-read OK)
 //   4. Cross-fn: outer calls inner that returns *T (cross-call chain in same fn graph)
 //   5. Nested call chain (3-level: top_level → intermediate → ptr_add)
 //   6. Recursive *T-returning fn
-//   7. Closure returning *T (uses sema closure path + ptr_kind detection)
+//   7. ~~Closure returning *T~~ → **移出**(W-115):那个闭包捕获了外层变量,
+//      而闭包捕获在 v3.2.1 的 MVP 范围里明确不支持 ⇒ 编译器以前给它生成
+//      坏代码 ⇒ 本测试运行时 STACK_OVERFLOW。现在编译期就明确报错 ✓
+//      (见 `closure_capture_unsupported.jhyy`)
 //   8. Builtin ptr_add / ptr_add_u8 / malloc (cg_is_builtin_ptr_fn fallback)
 //
 // main_jhyy runs all 8 sub-tests, returns 0 iff all PASS, else non-zero error code.
@@ -28,11 +31,12 @@
 // `audit --strict` 也没报它零信号 —— **XFAIL 标记把断言检查豁免掉了**,这正是
 // 本次审计要消灭的那类测试躲藏的地方。补上 EXPECT: 0 才是真断言。
 //
-// XFAIL: W-089 标着 RESOLVED(2026-09-29 v3.4.2),但**本 reproducer 至今
-//       STACK_OVERFLOW**(0xC00000FD)。两者矛盾,成因待 RCA —— 可能 W-089
-//       没真修,也可能是这个 8-subtest 覆盖面更广、撞到另一个 bug。
-//       在查清之前,「W-089 已 RESOLVED」这句话没有证据支撑。
-//       修好后本测试应转为 PASS,届时摘掉这行。
+// 2026-10-20 (W-115):XFAIL 摘掉 —— 本测试**已 PASS** ✅。
+//   之前的 STACK_OVERFLOW 根因**不是** W-089:是 sub-test 7 那个**捕获了外层
+//   变量**的闭包 —— 闭包捕获在 v3.2.1 的 MVP 范围里明确不支持,但编译器
+//   没有任何检查 ⇒ 给它生成坏代码(env 没传进合成 fn)⇒ 运行时炸。
+//   现在:捕获外层变量 → 编译期明确报错 ✓(case 7 移出本文件)。
+//   ⇒ 「W-089 已 RESOLVED」这句话**现在有证据支撑**:本 reproducer 跑通了。
 
 fn ptr_add(p: *u8, off: i64) -> *u8 {
     return (p as i64 + off) as *u8;
@@ -88,12 +92,16 @@ fn recurse(buf: *u8, depth: i32) -> *u8 {
     return recurse(ptr_add(buf, 1 as i64), depth - 1);
 }
 
-// Sub-test 7: closure returning *T (uses ptr_add via builtin fallback).
-//   Closure body uses ptr_add which is in cg_is_builtin_ptr_fn builtin list.
-fn make_closure(buf: *u8) -> *u8 {
-    let f = |x: i32| { ptr_add(buf, x) };
-    return f(8 as i32);
-}
+// Sub-test 7(closure)**已移出本文件**(2026-10-20,W-115):
+//   那个闭包**捕获了外层变量** `buf` —— 而闭包捕获在 v3.2.1 的 MVP 范围里
+//   **明确不支持**(sema 的闭包分支注释:「M0: body 仅用 params + literals,
+//   不引用 outer vars」)。之前这件事**没有任何检查** ⇒ 编译器给捕获了外层
+//   变量的闭包**生成坏代码**(env 压根没传进合成 fn)⇒ 本测试在**运行时**
+//   STACK_OVERFLOW(而不是在这里报一个清楚的编译错误)。
+//   现在:捕获外层变量 → **编译期明确报错** ✓(见
+//   `closure_capture_unsupported.jhyy`,EXPECT-ERROR)。
+//   本文件是 W-089 的 reproducer(验 call 返回类型的 semantic lookup),
+//   闭包不在它的射程里 ⇒ 分出去单独当门。
 
 fn main_jhyy() -> i32 {
     // Use malloc'd buffer + memset for storage (v3.x [i32;8]={...} array literal
@@ -153,11 +161,7 @@ fn main_jhyy() -> i32 {
     let v6: i32 = *(p6_ret as *i32) & (0xff as i32);
     if v6 != (0x42 as i32) { return 6; }
 
-    // ── Sub-test 7: closure returning *T ──
-    // make_closure returns ptr_add(buf, 8). buf[8..11] = 0x43.
-    let p7_ret = make_closure(buf);
-    let v7: i32 = *(p7_ret as *i32) & (0xff as i32);
-    if v7 != (0x43 as i32) { return 7; }
+    // ── Sub-test 7(closure)已移出 → 见文件头的说明 ──
 
     // ── Sub-test 8: builtin ptr_add_u8 / malloc fallback ──
     // ptr_add_u8 also in builtin list. malloc → just smoke that the call
