@@ -1,10 +1,37 @@
+// no_std_hello.jhyy — `#[no_std]` 程序的 ship gate(退出码 42)
+//
 // V3-A ship gate test: minimal #[no_std] program exits with 42.
 // Verifies parser recognizes #[no_std], codegen skips runtime bridge,
 // main.jhyy link line uses -nostartfiles -nodefaultlibs.
 //
 // See: docs/abis/jhyy-lang-spec-no_std-supplement-v3.0.0.md
-
+//
+// 2026-10-24 (W-124)—— 这个用例此前是**死的**,现在活了:
+//
+//   ① harness 只认 `fn main_jhyy` 当入口,而 `#[no_std]` 程序的入口按 sema
+//      强制要求是 `fn main`(sema.jhyy:3160)⇒ 本文件一直被当成「library」
+//      **静默跳过**,从来没编过、更没跑过。
+//   ② 就算真跑,它当时也**链不过**:链接行写的是 `-Wl,--entry=main_jhyy`,
+//      而 codegen 按函数名原样发符号(用户的 `fn main` → `main`)⇒
+//      ld: warning: cannot find entry symbol main_jhyy
+//      ld: undefined reference to `___chkstk_ms'(self-backend 对 >4KB 栈帧
+//      会发这个调用,而 `-nodefaultlibs` 把提供它的 CRT 踢掉了)
+//   ⇒ v3.0 changelog 里「no_std ship gate EXIT:42」这条**当时不可复现**。
+//
+// 现在:链接行 = `-nostartfiles -nodefaultlibs -Wl,--entry=main -lgcc`
+// (`-lgcc` 提供 `___chkstk_ms`,且不含 C 运行时),PE 入口返回值即进程退出码。
+//
+// 断言强度:返回值**从被测表达式推导**(20 + 22),不是写死的字面量 ——
+// 这样「编出来的码算错了」也会被抓到,而不是只验「进程没崩」。
+//
+// EXPECT: 42
+// SKIP-STAGE0: C 端 stage0(jhyy_stage0.exe)是 v1.x 时代的 **C 端**编译器,
+//   它的链接行里**没有 no_std 分支** ⇒ 编得过但链接失败(`ld returned 5`)。
+//   本测试验的正是 no_std 的链接行 ⇒ 必须跑在 jhyy.exe(生产 binary)上。
+//   (用 `// SKIP:` 笼统跳过会让它在**两条腿上都不跑** —— 那才是真的没人验。)
 #[no_std]
 fn main() -> i32 {
-    return 42 as i32;
+    let a: i32 = 20;
+    let b: i32 = 22;
+    return a + b;
 }

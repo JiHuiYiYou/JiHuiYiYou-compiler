@@ -48,6 +48,11 @@ RE_EXPECT_OUT = re.compile(r'//\s*EXPECT-OUT\s*[:=]\s*"([^"]+)"')
 RE_SKIP = re.compile(r"//\s*SKIP\s*:")
 RE_XFAIL = re.compile(r"//\s*XFAIL\s*:")
 RE_MAIN = re.compile(r"\bfn\s+main_jhyy\b")
+# 2026-10-24 (W-124):`#[no_std]` 程序的入口是 `fn main`(sema 强制要求,
+# compiler/src0/sema.jhyy:3160),不是 `fn main_jhyy`。harness 已认它
+# (jhyy_regress.py 的 has_main),审计脚本必须**同口径** —— 两边判据漂移时
+# 「harness 跑、审计说没跑」会长期对不上(那是 rglob 那次踩过的坑)。
+RE_MAIN_NOSTD = re.compile(r"\bfn\s+main\s*\(")
 RE_RETURN = re.compile(r"^\s*return\s+(-?\d+)\s*;?\s*$")
 
 # 判为「被测对象就是退出码本身」的例外 —— 这类测试 return 字面量是正确的,
@@ -170,7 +175,8 @@ def classify(path: Path) -> dict:
     raw = path.read_text(encoding="utf-8", errors="replace")
     dirs = directive_source(raw)       # 指令:只认独立成行的注释
     code = strip_comments(raw)         # 结构(fn/return/if):只看代码
-    has_main = bool(RE_MAIN.search(code))
+    has_main = bool(RE_MAIN.search(code)) or (
+        "#[no_std]" in code and bool(RE_MAIN_NOSTD.search(code)))
     expect = RE_EXPECT.search(dirs)
     has_out = RE_EXPECT_OUT.search(dirs) is not None
     has_err = RE_EXPECT_ERR.search(dirs) is not None
@@ -271,6 +277,11 @@ def classify(path: Path) -> dict:
 
 def _main_body(src: str) -> str:
     m = re.search(r"\bfn\s+main_jhyy\b[^\n{]*\{(.*?)\n\}", src, re.S)
+    if m:
+        return m.group(1)
+    # 2026-10-24 (W-124):`#[no_std]` 程序的入口是 `fn main`。
+    # (`\bfn\s+main\s*\(` 不会误配 `fn main_jhyy(` —— `_` 既不是 `(` 也不是空白。)
+    m = re.search(r"\bfn\s+main\s*\([^\n{]*\{(.*?)\n\}", src, re.S)
     return m.group(1) if m else ""
 
 

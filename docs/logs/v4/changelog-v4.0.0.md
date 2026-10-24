@@ -869,6 +869,119 @@ W-103 / W-105 / W-105.1 / W-106 / W-107。
 
 ---
 
+## v4.0.20 — 审计「skip test / 新增 test」:三处**门**的问题(W-124 / W-125 / W-126)
+
+**2026-10-24。** 起因是一次针对「SKIP 用例」与「新增用例」的审计。三个问题
+**都是门的问题**,不是功能的问题 —— 门绿着,但它没在验它声称在验的东西。
+
+### W-126 — regress harness 的 `EXPECT-ERROR` 漏洞:编译意外成功时判 PASS
+
+`run_test` 只在「编译失败」(`rc != 0`)分支检查 `// EXPECT-ERROR:` 的关键词;
+编译**意外成功**时一路落到 `if expected is None:` 分支 —— 那个分支只查
+「进程是不是 NTSTATUS 崩溃」,不崩就算过 ⇒ 报 **PASS**,还进汇总行的「全部有断言」。
+
+实测(探针,已删):
+```
+// EXPECT-ERROR: "zzz-this-keyword-never-appears-zzz"   ← 一个能正常编译的程序
+→ PASS  _probe_expect_error.jhyy   EXIT=1
+```
+同形状的探针(把 `borrow_mut_conflict.jhyy` 的双 `&mut` 冲突去掉、指令原样不动)
+→ 一样 PASS。
+
+**危害:** 凡是「靠编译期报错兜住」的测试**都不会变红** —— 编译器哪天不再报那个错,
+门照样绿。套件里 8 个 `expect-error` 测试全在射程内,其中 2 个是最新加的门:
+`borrow_mut_conflict.jhyy`(W-105(b) 的 `&mut` 独占检查)与
+`closure_capture_unsupported.jhyy`(W-115 的闭包捕获)。
+
+**修法:** `rc == 0` 且 `expect_error_kw` 非空 ⇒ 直接 FAIL
+(「编译失败但没有那个关键词」本来就 FAIL;补的是「编译成功」这一侧)。
+**同一个探针当场由绿转红** ✓。
+
+### W-124 — `#[no_std]` 从「零覆盖」变成「有门」
+
+两个问题叠在一起,让 `#[no_std]` 这个 v3.0 ship gate **从来没有真正跑过**:
+
+1. **链接行指向不存在的 entry 符号。** 链接行写的是 `-Wl,--entry=main_jhyy`,
+   旁边的注释还宣称「codegen 把用户的 `fn main` 发成 `main_jhyy`」——
+   **代码从来没这么做过**:codegen 按函数名原样发符号,用户的 `fn main` 就是 `main`。
+   ⇒ no_std 程序 **100% 链不过**:
+   ```
+   ld: warning: cannot find entry symbol main_jhyy; defaulting to ...
+   ld: undefined reference to `___chkstk_ms'
+   ```
+   第二个错是 `-nodefaultlibs` 的连带后果:self-backend 对 >4KB 的栈帧会发
+   `call ___chkstk_ms`(W-074.6 sub-bug #3 修的),而那个符号在 CRT 里。
+2. **没人跑它。** harness 只认 `fn main_jhyy` 当入口,而 `#[no_std]` 程序的入口
+   按 sema 强制要求是 `fn main`(`sema.jhyy:3160`)⇒ `no_std_hello.jhyy` 被判成
+   「library」→ **静默跳过**,从来没编过、更没跑过。
+
+**修法:**
+- 链接行 = `-nostartfiles -nodefaultlibs -Wl,--entry=main -lgcc`
+  (`-lgcc` 提供 `___chkstk_ms`,且**不含** C 运行时 —— 这正是 freestanding 的
+  标准做法:`-nostdlib` + 显式 `-lgcc`);
+- 入口返回值语义:PE 入口函数返回的值**就是**进程退出码 ⇒ `fn main` 返回 42 ⇒
+  退出码 42(**实测**,不是推测);
+- harness + 审计脚本都改成认 `#[no_std]` 的 `fn main` 入口;
+- 用例加 `// EXPECT: 42`,返回值改成推导式(`20 + 22`)而非字面量。
+
+**⚠️ 附带规避(根因未根治):** `#[no_std]` 用例**串行**跑。编译器的 4 个 side-file
+走**固定路径**通道(codegen 写 → link 读)+ 每次编译开头删干净 ⇒ 两个并发编译
+会互相删对方的 side-file(根因见台账 W-122 的余量)。⇒ harness 把 `#[no_std]`
+用例从并发池里拿出来,等并发池跑完再串行跑。
+
+### W-125 — chained `&&T` 的报错路径:sema 那条规则是**死代码**
+
+`let x: &&i32 = 0 as &&i32;` 此前报的是:
+```
+error: expected =, got &&
+error: unexpected token '&&' in expression
+error: expected ;, got ident
+error: expected type name, got &&      ← 对用户毫无意义
+```
+**根因:** lexer 把 `&&` 切成**一个** `TOKEN_AMPAMP`,而 `parse_type` 的 borrow
+分支只认 `TOKEN_AMP` ⇒ type 位置的 `&&i32` 压根不进 borrow 分支,落到
+default ident 路径 ⇒ 报「expected type name」。
+
+**连带后果(比症状本身更重要):**
+1. `sema.jhyy:469` 那条真正的规则「chained `&&T` not allowed (borrow is terminal)」
+   **永远走不到** —— 那条规则是**死代码**,从没被执行过,也就从没有被验证过;
+2. `borrow_check_err.jhyy` 因此长期挂 XFAIL —— 而 **XFAIL 是已知 bug 的藏身处**:
+   台账写着「ACTIVE = 0」,测试套件却自报「1 个已知失败」,两边**长期并存却没人
+   对起来**。⇒ **「台账清零」不等于「没有已知 bug」**。
+
+**修法:** parser 在 type 位置显式拦 `&&`,措辞与 sema 的规则对齐
+(与既有的 `&mut &mut T` / `volatile volatile` 同一模式:parser 拦一道,
+sema 兜底)。⇒ XFAIL 摘掉 → **PASS**,**套件 XFAIL 数 1 → 0**。
+
+### 顺带修的
+
+- `sysv_full_regress.sh` 的用例名单从 5 个补到 **6 个** —— CI 的 sysv job 早就在
+  跑 6 个,本地脚本还停在 5 个 ⇒「本地绿、CI 红」的对不齐;
+- CI 的 job 名 `SysV ABI (5 tests ...)` → `6 tests`;
+- **本机 Docker:** Docker Desktop 起 daemon 后,`regress.py --cross=auto` 从 `none`
+  解析成 **docker** ⇒ 6 个 sysv 用例**本地也真跑**(exit=28/217/42/35/18/42)。
+
+### 门(2026-10-24 实测)
+
+| 门 | 结果 |
+|---|---|
+| `regress jhyy.exe` | ✅ **186/186 PASS** + 0 XFAIL + 19 SKIP(205 total) |
+| `regress jhyy_v2.exe`(自举产物也跑) | ✅ **186/186 PASS** + 0 XFAIL + 19 SKIP |
+| `regress --cross=auto`(本机 docker) | ✅ 6 个 sysv 用例全 PASS |
+| `sysv_full_regress.sh --runs=1` | ✅ **6/6 PASS** |
+| `make selfhost` | ✅ v2.s == v3.s == v4.s == v5.s 逐字节相同 |
+| `closure_check.sh` | ✅ PASS |
+| `fixed_point.sh` | ✅ PASS |
+| `artifact_checks.sh` | ✅ PASS |
+| SysV ABI 三方向对拍 | ✅ 3 PASS |
+| `audit_test_assertions.py --strict` | ✅ 0 违规 |
+| 台账 | ✅ **0 ACTIVE / 0 DEFERRED** / 111 索引行(108 + W-124/125/126) |
+
+**⇒ ACTIVE 桶仍然清空**(本轮三条全是 RESOLVED:一个门坏了(修门)、一个功能坏了
+(修功能 + 补门)、一个规则是死代码(把规则接上 + 把门打开))。
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

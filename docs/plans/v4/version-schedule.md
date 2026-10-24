@@ -637,6 +637,45 @@ MVP 范围里明确不支持,**但编译器没有任何检查** ⇒ 给它生成
 | **W-123** 临时文件名 seed = `pid ^ tid ^ ctr` 会规律性碰撞 | ✅ **2026-10-20 已完成** —— Windows 的 pid 与主线程 tid 来自**同一个全局计数器** ⇒ `N ^ (N+1) = 1` ⇒ **每两个并发进程就撞一次同一个临时名** ⇒ rename 失败 ⇒ 编译失败。换成乘法混合的哈希 + **独占创建**(CREATE_NEW)重试 ⇒ 并发编 32 个 → **0 失败**(修复前 4 个) |
 | **W-106** 「每次 symbol lookup 白造一个 StringBuilder」的死存储 | ✅ **2026-10-20 已完成** —— 删掉。它注释里的理由早已被证伪;而 2026-10-18 那次「删掉它 ⇒ 偶发失败 ⇒ 它承重」的对照实验**归错了因**(真凶是 W-123 —— 那个 workaround 只改变了时序) |
 
+### v4.0.20 — 审计「skip test / 新增 test」的三处修复 ✅ **已完成(2026-10-24)**
+
+> 起因:一次针对「SKIP 用例」与「新增用例」的审计。三个问题**都是门的问题**,
+> 不是功能的问题 —— 门绿着,但它没在验它声称在验的东西。
+
+| 内容 | 状态 |
+|---|---|
+| **W-126** regress harness 的 `EXPECT-ERROR` 漏洞 | ✅ **2026-10-24 已完成** —— `expect_error_kw` 只在「编译失败」分支被检查 ⇒ 编译**意外成功**时落到「只要进程没崩就算过」的分支 ⇒ 报 PASS。套件里 8 个 expect-error 测试(含 `borrow_mut_conflict` / `closure_capture_unsupported` 两道最新门)全部**不会变红**。修法:`rc == 0` 且有 EXPECT-ERROR ⇒ FAIL。探针当场由绿转红 |
+| **W-124** `#[no_std]` 零覆盖 | ✅ **2026-10-24 已完成** —— (a) 链接行写 `-Wl,--entry=main_jhyy`,而 codegen 按函数名原样发符号(用户的 `fn main` → `main`)⇒ **no_std 程序 100% 链不过**;(b) harness 只认 `fn main_jhyy` ⇒ `no_std_hello.jhyy` 被当「library」**静默跳过**,v3.0 的 ship gate 从没跑过。修法:链接行 = `-nostartfiles -nodefaultlibs -Wl,--entry=main -lgcc`(`-lgcc` 提供 `___chkstk_ms`,不含 C 运行时)+ harness/审计认 `#[no_std]` 的 `fn main` 入口 ⇒ **EXIT=42** ✓ |
+| **W-125** chained `&&T` 的报错路径 | ✅ **2026-10-24 已完成** —— lexer 把 `&&` 切成一个 token,而 `parse_type` 只认单 `&` ⇒ 落到 default ident 路径报「expected type name, got &&」(对用户毫无意义)⇒ sema 里那条「chained `&&T` not allowed」**永远走不到**(死代码)⇒ `borrow_check_err.jhyy` 长期挂 XFAIL,而那个 XFAIL **从未登记进台账** ⇒ 「台账 ACTIVE=0」与「套件自报 1 个已知失败」长期并存。修法:parser 显式拦 `&&` + 措辞对齐 sema ⇒ XFAIL 摘掉 → PASS,**套件 XFAIL 1 → 0** |
+
+**顺带修的:** `sysv_full_regress.sh` 的用例名单从 5 个补到 **6 个**(CI 的 sysv job
+早就在跑 6 个,本地脚本还停在 5 个 ⇒「本地绿、CI 红」的对不齐);CI 的 job 名
+`5 tests` → `6 tests`。
+
+**本机 Docker:** Docker Desktop 起 daemon 后,`regress.py --cross=auto` 从 `none`
+解析成 **docker** ⇒ 6 个 sysv 用例**本地也真跑**(exit=28/217/42/35/18/42)。
+
+**⚠️ 遗留(已登记在 W-122 的余量里,本轮只规避未根治):** 编译器的 4 个 side-file
+走**固定路径**通道(codegen 写 → link 读)+ 每次编译开头删干净 ⇒ **两个并发编译
+会互相踩**。`#[no_std]` 用例因此**串行**跑(harness 里从并发池拿出来)。根治 =
+per-compilation 唯一路径(§D3 的方案),属独立 sprint。
+
+#### 门(2026-10-24 实测)
+
+| 门 | 结果 |
+|---|---|
+| `regress jhyy.exe` | ✅ **186/186 PASS** + 0 XFAIL + 19 SKIP(205 total) |
+| `regress jhyy_v2.exe`(自举产物也跑) | ✅ **186/186 PASS** + 0 XFAIL + 19 SKIP |
+| `regress --cross=auto`(本机 docker) | ✅ 6 个 sysv 用例全 PASS |
+| `sysv_full_regress.sh --runs=1` | ✅ **6/6 PASS** |
+| `make selfhost` | ✅ v2.s == v3.s == v4.s == v5.s 逐字节相同 |
+| `closure_check.sh` | ✅ PASS |
+| `fixed_point.sh` | ✅ PASS |
+| `artifact_checks.sh` | ✅ PASS |
+| SysV ABI 三方向对拍 | ✅ 3 PASS |
+| `audit_test_assertions.py --strict` | ✅ 0 违规 |
+| 台账 | ✅ **0 ACTIVE / 0 DEFERRED** / 111 索引行(108 + W-124/125/126) |
+
 ## 🎉 ACTIVE 桶清零(2026-10-20)
 
 **台账 108 行:102 RESOLVED + 4 SUPERSEDED + 2 INVALID + 0 ACTIVE + 0 DEFERRED。**

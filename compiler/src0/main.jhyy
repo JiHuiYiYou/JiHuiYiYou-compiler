@@ -1316,10 +1316,23 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     pos = str_concat_at(cmd_buf, pos, rq);
     // v3.0.0 (3d no_std): if is_no_std=1, link line skips runtime.c +
     // jhyy_helpers.c (no C runtime bridge) and adds `-nostartfiles
-    // -nodefaultlibs -Wl,--entry=main_jhyy` so the user-defined `fn main`
-    // (which codegen emits as `main_jhyy` regardless of is_no_std) is the
-    // OS entry point. Default path (is_no_std=0) keeps the v2.4.0 link
-    // line untouched.
+    // -nodefaultlibs -Wl,--entry=main -lgcc`.
+    //
+    // 2026-10-24 真修(W-124;台账见 docs/internal/workarounds.md):
+    // 原来这里写的是 `-Wl,--entry=main_jhyy`,注释还宣称「codegen 把用户的
+    // `fn main` 发成 `main_jhyy`」—— **代码从来没这么做过**:codegen 按函数名
+    // 原样发符号,用户的 `fn main` 就是 `main`。于是 no_std 程序 100% 链不过:
+    //   ld: warning: cannot find entry symbol main_jhyy; defaulting to ...
+    //   ld: undefined reference to `___chkstk_ms'
+    // 第二个错是 `-nodefaultlibs` 的连带后果:self-backend 对 >4KB 的栈帧会发
+    // `call ___chkstk_ms`(W-074.6 sub-bug #3 修的),而那个符号在 CRT 里。
+    // `-lgcc` 提供它(libgcc 的 `_chkstk_ms.o`),且**不含** C 运行时 ——
+    // 这正是 freestanding 的标准做法(`-nostdlib` + 显式 `-lgcc`)。
+    //
+    // 入口返回值语义:PE 入口函数返回的值**就是**进程退出码 ⇒ `fn main`
+    // 返回 42 ⇒ 进程退出码 42(实测验证,不是推测)。
+    //
+    // Default path (is_no_std=0) keeps the v2.4.0 link line untouched.
     if is_no_std == (0 as i32) {
         // v4.0.8:优先链预编 .o(见 RUNTIME_O 的注释:省 ~4.5s/次编译)。
         // .o 不存在就退回 .c —— 两条路径在 SOURCE_DATE_EPOCH 固定时产出相同 exe。
@@ -1349,7 +1362,14 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     } else {
         // no_std path: no runtime.c, no helpers.c, but still need kernel
         // entry + entry-point override.
-        let no_std_flags = " -nostartfiles -nodefaultlibs -Wl,--entry=main_jhyy " as *u8;
+        //
+        // `--entry=main`:codegen 按函数名原样发符号,用户的 `fn main` → `main`
+        // (见上面 2026-10-24 的 W-124 真修说明 —— 原来的 `main_jhyy` 是
+        // v3.0 的**错误假设**,从没生效过,结果是 no_std 程序 100% 链不过)。
+        // `-lgcc`:self-backend 对 >4KB 栈帧发 `call ___chkstk_ms`,该符号在
+        // libgcc 里;`-nodefaultlibs` 把它踢掉了 → 显式加回来。libgcc **不含**
+        // C 运行时(不含 exit/atexit/stdio),所以 no_std 语义不被破坏。
+        let no_std_flags = " -nostartfiles -nodefaultlibs -Wl,--entry=main -lgcc " as *u8;
         pos = str_concat_at(cmd_buf, pos, no_std_flags);
     }
     let oflag = " -o " as *u8;

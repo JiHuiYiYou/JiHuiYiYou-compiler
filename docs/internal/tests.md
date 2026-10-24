@@ -2,8 +2,10 @@
 
 > 集成测试清单 + 运行方法。详细每条 .jhyy 的预期值见 `compiler/tests/examples/`。
 >
-> **Last updated**: 2026-10-20 — `regress.py` = **181/181 PASS(全部有断言)+ 2 XFAIL + 20 SKIP**
-> (203 total)。`closure_check.sh` v2.s == v3.s byte-identical。
+> **Last updated**: 2026-10-24 — `regress.py` = **186/186 PASS(全部有断言)+ 0 XFAIL + 19 SKIP**
+> (205 total)。`closure_check.sh` v2.s == v3.s byte-identical。
+> 本机 Docker 已起 → `--cross=auto` 解析成 **docker**,6 个 sysv 用例**本地也真跑**
+> (exit=28/217/42/35/18/42 全对)。
 >
 > **注意 total 从 185 变成 197**:harness 原来用 `os.listdir`(不递归),
 > `arena_test/` / `hello-freestanding/` / `multi_file/` / `namespace/` 四个子目录
@@ -59,41 +61,52 @@ python scripts/dev/audit_test_assertions.py --strict   # 有违规 exit 1(挂 CI
 regress 汇总行现在**只计有断言的**:
 
 ```
-===== 173/173 passed (全部有断言), 0 failed, 19 skipped (of 197 total) =====
+===== 186/186 passed (全部有断言), 0 failed, 19 skipped (of 205 total) =====
   ├─ NOASSERT 0  无断言,只验了「进程没崩」
   ├─ VACUOUS  0  有 EXPECT 但断言在数学上不可能失败
-  ├─ XFAIL    5  预期内失败(已知 bug,真跑了)
+  ├─ XFAIL    0  预期内失败(已知 bug,真跑了)
 ```
 
-**19 个 SKIP 的构成:** 14 个 library(无 `fn main_jhyy`)+ 5 个 sysv
-(需 Linux)。
+**19 个 SKIP 的构成:** 13 个 library(无入口函数)+ 6 个 sysv(需 Linux)。
 
-### sysv 那 5 个:启了 Docker 就能跑,而且立刻挂了一个
+### sysv 那 6 个:启了 Docker 就能跑 —— 2026-10-24 实测 **6/6 PASS**
 
 ```bash
 bash compiler/tests/bootstrap/sysv_full_regress.sh --runs=1
 ```
 
-2026-10-15 实测 **4/5 PASS,1 FAIL**:`sysv_abi_test` 退出 22,期望 28。
+2026-10-15 第一次跑是 **4/5 PASS,1 FAIL**:`sysv_abi_test` 退出 22,期望 28。
 逐位探针定位到根因 —— SysV callee 的参数溢出只处理 4 个整数寄存器,
 第 5/6/7 个实参全部读到第 4 个的值(`%r8d`/`%r9d`/栈参数从未被读),
-登记 **W-116**。
+登记 **W-116**(2026-10-19 真修)。
+
+**2026-10-24 实测 6/6 PASS**(本机 Docker Desktop 起 daemon 后):
+`sysv_abi_test`=28 / `sysv_enum_match`=217 / `sysv_struct_mixed`=42 /
+`sysv_struct_pass`=35 / `sysv_struct_ret`=18 / `sysv_vararg_basic`=42。
+`regress.py --cross=auto` 现在直接解析成 `docker`,6 个用例**在回归里也真跑**
+(不是 SKIP)。
 
 **这个门从 v2.7.0 就存在**,而验它的测试从 v2.7.0 起就标着「sysv target
-requires Linux host」—— 在没装 Docker 的开发机上它**永远不会被跑到**。
+requires Linux host」—— 在没启 Docker daemon 的开发机上它**永远不会被跑到**。
 这也是为什么 W-104(SysV 借 Win 分类器)能一直活着:同一个根,同一个位置。
 
 **注意 Windows 上装了 Docker 也要手动启动 Docker Desktop** —— daemon
 没起来时 `docker info` 不响应,regress 的 `--cross=auto` 会静默降级成 SKIP,
 不会有任何提示。
 
-**2 个 XFAIL** —— 全部对应一条已登记的 ACTIVE workaround,**真跑、真失败、
-出现在每次回归输出里**:
+### XFAIL 现在是 **0** —— 而这件事本身是个教训
 
-| 测试 | 对应 |
-|---|---|
-| `codegen_call_return_types.jhyy` | W-115 W-089 reproducer 仍 STACK_OVERFLOW |
-| `borrow_check_err.jhyy` | chained `&&T` 在 parser 阶段就挂,不是 sema |
+2026-10-24 之前有 2 个 XFAIL,今天都摘了:
+
+| 测试 | 当时的 XFAIL 理由 | 摘掉的原因 |
+|---|---|---|
+| `codegen_call_return_types.jhyy` | W-115 W-089 reproducer 仍 STACK_OVERFLOW | 2026-10-20 W-115 真修(闭包捕获改成编译期报错)→ 转 PASS |
+| `borrow_check_err.jhyy` | chained `&&T` 在 parser 阶段就挂,不是 sema | 2026-10-24 **W-125** 真修:parser 在 type 位置显式拦 `&&`,措辞与 sema 规则对齐 → 转 PASS |
+
+**⚠️ 第二个 XFAIL 暴露了一个更值得记的东西:它**从未登记进台账**。
+台账写着「ACTIVE = 0」,测试套件却自报「1 个已知失败」—— 两边长期并存,
+**没人把它们对起来**。⇒ **「台账清零」不等于「没有已知 bug」**;
+XFAIL 是已知 bug 的**藏身处**(它只在输出里出现一次,没人会去对台账)。
 
 **2026-10-20(W-103)摘掉的 XFAIL:`std_os_real_io.jhyy`。** 它原本验证的是
 「std_os_* 声称做了 I/O 就必须真的做」—— 但 `std/os.jhyy` 那五个函数当时
@@ -143,7 +156,8 @@ NOASSERT / VACUOUS **不是 PASS** —— 它们仍会跑(能抓编译器崩溃)
 `compiler/tests/examples/*.jhyy`（主目录 + 子目录 `multi_file/` / `namespace/` / `arena_test/`）。
 
 回归脚本是**仓库根目录**的 `regress.py`(不是 `compiler/build/bin/`,仓库根
-relocation 之后的路径),自动跑所有有 `main_jhyy` 的 .jhyy
+relocation 之后的路径),自动跑所有有**入口函数**的 .jhyy
+(`main_jhyy`;`#[no_std]` 程序是 `main` —— 见下面 2026-10-24 的 ②)
 (`jhyy_regress.py:371` 目录扫描,不是手工枚举):
 
 ```
@@ -232,13 +246,23 @@ char literal / `Cap<T>`(v3.x)。实测 39 个失败**全部是预期内的**。
 
 ## 库文件（SKIP，不计入 passed/failed）
 
+13 个 —— **没有入口函数**(不是「入口函数名字不一样」):
+
 - `mylib.jhyy`
+- `const_struct_lib.jhyy`
 - `multi_file/lib_a.jhyy`, `lib_b.jhyy`, `lib_c.jhyy`
 - `namespace/mod_a.jhyy`, `mod_b.jhyy`
 - `ns_dup_a.jhyy`, `ns_dup_b.jhyy`
 - `arena_test/arena.jhyy`
+- `hello-freestanding/efi.jhyy`, `hello-freestanding.jhyy`, `no-op.jhyy`
+  (UEFI 用例由 `scripts/dev/build/build-efi.sh` + `run-ovmf.sh` 单独跑,
+  不走回归 —— 它们要 UEFI 固件环境)
 
-无 `fn main_jhyy` → 回归脚本自动 SKIP。
+无入口函数 → 回归脚本自动 SKIP。
+
+> ⚠️ **`#[no_std]` 程序不在这张表里**:它的入口是 `fn main`(sema 强制要求),
+> 不是 `fn main_jhyy` —— harness 与审计脚本都已认它(见上面 2026-10-24 的 ②)。
+> 曾经它被当成「library」**静默跳过**,而它当时还链不过 ⇒ `#[no_std]` 零覆盖。
 
 ---
 
@@ -252,8 +276,8 @@ python regress.py          # 仓库根目录,不是 compiler/build/bin/
 
 当前输出:
 ```
-===== 181/181 passed (全部有断言), 0 failed, 20 skipped (of 203 total) =====
-  ├─ NOASSERT 0 / VACUOUS 0 / XFAIL 2
+===== 186/186 passed (全部有断言), 0 failed, 19 skipped (of 205 total) =====
+  ├─ NOASSERT 0 / VACUOUS 0 / XFAIL 0
 ```
 
 baseline 历史:
@@ -263,12 +287,39 @@ baseline 历史:
 - v1.8.3 — 102/102 PASS + 4 SKIP(106 total)
 - v2.0.0 → v2.4.0 — 104/104 PASS + 4 SKIP(108 total)
 - v4.0.8 — 173/173 PASS + 5 XFAIL + 19 SKIP(197 total)
-- **v4.0.16 — 181/181 PASS + 2 XFAIL + 20 SKIP(203 total)** ← 当前(2026-10-20 实测)
+- v4.0.16 — 181/181 PASS + 2 XFAIL + 20 SKIP(203 total)
+- **v4.0.20 — 186/186 PASS + 0 XFAIL + 19 SKIP(205 total)** ← 当前(2026-10-24 实测)
 
 ⚠️ 数量涨了不代表覆盖变强。**断言强度**和**失败模式覆盖**是两个轴:
-前者今天清零了(零信号 54 → 0),后者仍然低 —— 13 条 ACTIVE 里只有 5 条有
-「活的、能失败的测试」,其余的失败模式根本没有测试触及。一个没有测试的 bug,
+前者今天清零了(零信号 54 → 0),后者仍然低 —— 一个没有测试的 bug,
 对回归套件而言在定义上就是不可见的。**计数不是覆盖率的度量。**
+
+### 2026-10-24 的三处修复(审计「skip test / 新增 test」时挖出)
+
+**① `EXPECT-ERROR` 类测试此前**不会变红**(W-126)。**
+harness 只在「编译失败」分支检查 `// EXPECT-ERROR:` 的关键词;编译**意外成功**时
+一路落到「只要进程没崩就算过」的分支 ⇒ 报 **PASS**,还进汇总行的「全部有断言」。
+实测(探针):一个能正常编译的程序 + `// EXPECT-ERROR: "zzz-..."` → `PASS`。
+⇒ 凡是「靠编译期报错兜住」的测试都是**假门** —— 编译器哪天不再报那个错,门照样绿。
+套件里 8 个 `expect-error` 测试全在射程内,其中 2 个是最新加的门
+(`borrow_mut_conflict` = W-105(b) 的 `&mut` 独占检查、`closure_capture_unsupported`
+= W-115 的闭包捕获)。**修法:`rc == 0` 且有 EXPECT-ERROR ⇒ FAIL**(探针当场由绿转红)。
+
+**② `#[no_std]` 从「零覆盖」变成「有门」(W-124)。**
+`no_std_hello.jhyy` 的入口是 `fn main`(sema 强制),而 harness 只认 `fn main_jhyy`
+⇒ 它一直被当「library」**静默跳过**;而且它当时**根本链不过**
+(链接行写 `-Wl,--entry=main_jhyy`,可 codegen 发的符号是 `main`)。
+现在:链接行 = `-nostartfiles -nodefaultlibs -Wl,--entry=main -lgcc`
+(`-lgcc` 提供 `___chkstk_ms`,不含 C 运行时),用例加 `// EXPECT: 42` → **EXIT=42** ✓。
+⚠️ `#[no_std]` 用例**串行**跑:编译器的 4 个 side-file 走固定路径通道,
+并发编译会互相删对方的 side-file(根因见台账 W-122 的余量)。
+
+**③ chained `&&T` 的报错路径(W-125)。**
+此前 parser 报的是无意义的「expected type name, got &&」,导致 sema 里那条
+「chained `&&T` not allowed」**永远走不到**(死代码)⇒ `borrow_check_err.jhyy`
+长期挂 XFAIL,而那个 XFAIL **从未登记进台账** ⇒ 「台账 ACTIVE = 0」与
+「套件自报 1 个已知失败」长期并存。现在 parser 显式拦 `&&`、措辞对齐 sema
+⇒ XFAIL 摘掉 → 转 PASS,**套件 XFAIL 数 1 → 0**。
 
 ### 单个测试
 

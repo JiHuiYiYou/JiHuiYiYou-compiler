@@ -1,12 +1,24 @@
-// XFAIL: 本测试要的是 sema 阶段报「chained `&&T` not allowed」,实际报的是
-//       parser 阶段「expected type name, got &&」—— 阶段和措辞都不对。
-//       (原 SKIP 理由「jhyy-side only / C 端 parser 不认」是从那批 10 个继承来的
-//        过期文本,与本测试无关。)
-//       修好后本测试应转为 PASS,届时摘掉这行。
-// v3.1.0 (V3-C 3g) ship-gate test: chained `&&T` rejected at sema stage.
+// borrow_check_err.jhyy — chained `&&T` 必须被拒绝(spec v3.1.0 § 2:borrow 是 terminal)
+//
+// v3.1.0 (V3-C 3g) ship-gate test: chained `&&T` rejected.
 // Per spec supplement v3.1.0 § 2: borrow is terminal — `&&T` is not allowed.
+//
+// 2026-10-24 (W-125)—— XFAIL 标记摘掉,本测试转 PASS:
+//
+//   此前它挂 XFAIL,理由是「要的是 sema 阶段报『chained `&&T` not allowed』,
+//   实际报的是 parser 阶段『expected type name, got &&』—— 阶段和措辞都不对」。
+//   根因:lexer 把 `&&` 切成**一个** TOKEN_AMPAMP,于是 type 位置的 `&&i32`
+//   压根没进 borrow 分支(那个分支只认 TOKEN_AMP)→ 落到 default ident 路径
+//   → 报「expected type name, got &&」。⇒ sema 里那条真正的规则
+//   (sema.jhyy:469)永远走不到 —— **规则是死的,也没人能验它**。
+//
+//   修法:parser 在 type 位置显式拦 `&&`,措辞与 sema 的规则对齐
+//   (与既有的 `&mut &mut T` / `volatile volatile` 同一模式),sema 那条留作兜底。
+//
+//   ⚠️ 这条 XFAIL 此前**从未登记进台账** —— 「台账 ACTIVE = 0」与「测试套件
+//   自报 1 个已知失败」长期并存,却没人把两者对起来。见 W-125。
 fn main_jhyy() -> i32 {
-    // chained borrow must be rejected at sema; exit -1 expected
+    // chained borrow must be rejected; exit -1 expected
     let x: &&i32 = 0 as &&i32;
     return 0 as i32;
 }

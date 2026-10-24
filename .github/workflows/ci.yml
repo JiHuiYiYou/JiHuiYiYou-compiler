@@ -335,11 +335,11 @@ jobs:
         if: always()
         shell: msys2 {0}
         run: |
-          # 这 5 个测试在 windows-latest 上**跑不了**:link 出来的是 Win PE,
+          # 这 6 个测试在 windows-latest 上**跑不了**:link 出来的是 Win PE,
           # 要验 SysV ABI 得用 `runtime/linux_elf/crt0.S` + `link.ld` 链成 ELF。
           # 而 regress.py 的 `--cross=auto` 在 CI 上探测不到能用的环境
           # (windows-latest 没有 Docker daemon,gcc:12 也没有 windows manifest)
-          # → 5 个测试永远 SKIP,`_sysv_failed == 0` 就算通过。
+          # → 6 个测试永远 SKIP,`_sysv_failed == 0` 就算通过。
           #
           # 拆成两段:本 job 只负责「编出 .s」(需要 Windows 的 jhyy.exe),
           # sysv job 在 ubuntu-latest 上负责「链 + 跑 + 比期望值」。
@@ -365,7 +365,7 @@ jobs:
           [ "$missing" -eq 0 ] || exit 1
 
           # W-104 的跨实现对拍:jhyy 侧 caller(调用 gcc 编译的 callee)。
-          # 与上面 5 个测试不同 —— 这里验的是「jhyy 与 **真正的 SysV 实现**
+          # 与上面 6 个测试不同 —— 这里验的是「jhyy 与 **真正的 SysV 实现**
           # 能否互调」,纯 jhyy 测试永远看不到这一类(自洽但不兼容)。
           # ⚠️ 编到**独立目录** tmp/sysv_abi/ —— tmp/sysv_il/ 是 regress 测试的
           # 目录,sysv_link_run.sh 会遍历里面**所有** .s 并要求每个都有
@@ -436,7 +436,7 @@ jobs:
   #
   # `regress.py` 的 `--cross=auto` 在 windows-latest 上三个探测全失败
   # (没有可用的 WSL distro / docker 镜像 gcc:12 没有 windows-amd64 manifest),
-  # 于是 cross_mode=none → 5 个 sysv 测试永远 SKIP,`_sysv_failed == 0`
+  # 于是 cross_mode=none → 6 个 sysv 测试永远 SKIP,`_sysv_failed == 0`
   # 就算通过。CI 日志实证:`cross: --cross=auto → resolved=none`。
   #
   # 而 W-104(SysV caller 侧分类错)与 W-116(SysV callee 只 spill 4 个寄存器)
@@ -447,7 +447,7 @@ jobs:
   # docker 分支(`regress.py:377-441`)的 Stage 1(Windows 侧编译)在 Linux 上
   # 本来就可用。`runtime/linux_elf/crt0.S` 与 `link.ld` 都已在仓里。
   sysv:
-    name: SysV ABI (5 tests windows-latest can never run)
+    name: SysV ABI (6 tests windows-latest can never run)
     runs-on: ubuntu-latest
     needs: build-and-test
     timeout-minutes: 15

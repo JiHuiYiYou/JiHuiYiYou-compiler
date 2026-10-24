@@ -1,24 +1,25 @@
 #!/usr/bin/env bash
 # sysv_full_regress.sh — v2.13.0 Phase 2 ship gate (V.3) — 真 amd64_sysv codegen 全覆盖
 #
-# 跑 5 sysv regress tests (sysv_abi_test / sysv_struct_mixed / sysv_struct_pass /
-# sysv_struct_ret / sysv_vararg_basic) 走 self-backend 真 emit → docker gcc:12 chain
-# 链 crt0.S + link.ld → 跑 ELF。5/5 expected exit codes:
+# 跑 6 sysv regress tests (sysv_abi_test / sysv_enum_match / sysv_struct_mixed /
+# sysv_struct_pass / sysv_struct_ret / sysv_vararg_basic) 走 self-backend 真 emit
+# → docker gcc:12 chain 链 crt0.S + link.ld → 跑 ELF。6/6 expected exit codes:
 #   sysv_abi_test    = 28 (1+2+3+4+5+6+7)
+#   sysv_enum_match  = 217 (enum 参数/返回值/sret/嵌套,W-114)
 #   sysv_struct_mixed= 42 (41+1)
 #   sysv_struct_pass = 35 (10+25)
 #   sysv_struct_ret  = 18 (struct return)
 #   sysv_vararg_basic= 42 (10+32)
 #
-# Per `feedback_fix_evaluation_rule`:5 consecutive runs 必 5/5 PASS (count by PASS=0)。
+# Per `feedback_fix_evaluation_rule`:5 consecutive runs 必 6/6 PASS (count by PASS=0)。
 #
 # 用法:
 #   bash compiler/tests/bootstrap/sysv_full_regress.sh
 #   bash compiler/tests/bootstrap/sysv_full_regress.sh --runs=N   (default --runs=5)
 #
 # Exit code:
-#   0 = 5/5 PASS on every run
-#   1 = any FAIL or non-5/5 result
+#   0 = 6/6 PASS on every run
+#   1 = any FAIL or non-6/6 result
 #
 # 环境要求:
 #   - docker daemon 启动 (gcc:12 image cached)
@@ -50,11 +51,16 @@ EXPECTED_MIXED=$(read_expect sysv_struct_mixed.jhyy)
 EXPECTED_PASS=$(read_expect sysv_struct_pass.jhyy)
 EXPECTED_RET=$(read_expect sysv_struct_ret.jhyy)
 EXPECTED_VARARG=$(read_expect sysv_vararg_basic.jhyy)
-echo "期望值(从 .jhyy 读): abi=$EXPECTED_ABITEST mixed=$EXPECTED_MIXED pass=$EXPECTED_PASS ret=$EXPECTED_RET vararg=$EXPECTED_VARARG"
+EXPECTED_ENUM=$(read_expect sysv_enum_match.jhyy)
+echo "期望值(从 .jhyy 读): abi=$EXPECTED_ABITEST mixed=$EXPECTED_MIXED pass=$EXPECTED_PASS ret=$EXPECTED_RET vararg=$EXPECTED_VARARG enum=$EXPECTED_ENUM"
 
-SYSV_TESTS=(sysv_abi_test sysv_struct_mixed sysv_struct_pass sysv_struct_ret sysv_vararg_basic)
+# 2026-10-24:加 sysv_enum_match(W-114 新增)—— CI 的 sysv job 已经在跑 6 个,
+#   本地脚本还停在 5 个 → 「本地 5/5 绿、CI 6 个」的对不齐。单一事实来源:
+#   测试名单 = CI job 的名单。
+SYSV_TESTS=(sysv_abi_test sysv_enum_match sysv_struct_mixed sysv_struct_pass sysv_struct_ret sysv_vararg_basic)
 declare -A EXPECTED=(
     [sysv_abi_test]=$EXPECTED_ABITEST
+    [sysv_enum_match]=$EXPECTED_ENUM
     [sysv_struct_mixed]=$EXPECTED_MIXED
     [sysv_struct_pass]=$EXPECTED_PASS
     [sysv_struct_ret]=$EXPECTED_RET
@@ -88,7 +94,7 @@ for ((run=1; run<=RUNS; run++)); do
     RUN_FAIL=0
     RUN_FAIL_LIST=""
 
-    # Stage 1: jhyy.exe 真编 5 个 sysv test (self-backend 真 amd64_sysv_freestanding emit)
+    # Stage 1: jhyy.exe 真编 ${#SYSV_TESTS[@]} 个 sysv test (self-backend 真 amd64_sysv_freestanding emit)
     # 注意:不要 MSYS_NO_PATHCONV=1 — jhyy.exe 是 native Win32 binary 不识 POSIX path,
     # MSYS 默认 convert POSIX → Windows 才让 jhyy 能 open file。
     for t in "${SYSV_TESTS[@]}"; do
@@ -104,7 +110,7 @@ for ((run=1; run<=RUNS; run++)); do
         fi
     done
 
-    # Stage 2: docker gcc:12 链 crt0.S + link.ld + 5 .s → 5 ELF → 跑 + check exit code
+    # Stage 2: docker gcc:12 链 crt0.S + link.ld + N .s → N ELF → 跑 + check exit code
     DOCKER_OUT=$(cd "$JHYY_ROOT" && MSYS_NO_PATHCONV=1 "$DOCKER_BIN" run --rm \
         -v "$(pwd):/work" -w /work gcc:12 bash -c '
         for t in '"$(printf '%s ' "${SYSV_TESTS[@]}")"'; do
@@ -145,5 +151,5 @@ for ((run=1; run<=RUNS; run++)); do
     echo
 done
 
-echo "=== sysv_full_regress.sh 结果: $OVERALL_PASS/$RUNS runs 全 5/5 PASS, $OVERALL_FAIL/$RUNS FAIL ==="
+echo "=== sysv_full_regress.sh 结果: $OVERALL_PASS/$RUNS runs 全 ${#SYSV_TESTS[@]}/${#SYSV_TESTS[@]} PASS, $OVERALL_FAIL/$RUNS FAIL ==="
 [[ $OVERALL_FAIL -eq 0 ]] && exit 0 || exit 1

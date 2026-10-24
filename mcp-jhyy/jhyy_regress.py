@@ -456,7 +456,16 @@ def run_test(
             skip_qbe_reason = m_skip_qbe.group(1).strip()
         # Skip library files (no main entry) — 用剥掉注释的源码判定,
         # 否则注释里提到 `fn main_jhyy` 会让一个没有 main 的文件被当成可跑测试。
-        has_main = bool(re.search(r"\bfn\s+main_jhyy\b", code_src))
+        #
+        # 2026-10-24 (W-124):`#[no_std]` 程序的入口是 `fn main`(不是
+        # `fn main_jhyy`)—— sema 强制要求(compiler/src0/sema.jhyy:3160:
+        # 「#[no_std] module must define `fn main()` as the entry point」)。
+        # 此前 harness 只认 `fn main_jhyy` ⇒ no_std 程序被判成「library」→
+        # **静默跳过,从来没编过、更没跑过**(它当时还链不过,见 W-124)。
+        # 现在:`#[no_std]` 文件 + `fn main` ⇒ 算可跑测试。
+        is_no_std = "#[no_std]" in code_src
+        has_main = bool(re.search(r"\bfn\s+main_jhyy\b", code_src)) or (
+            is_no_std and bool(re.search(r"\bfn\s+main\s*\(", code_src)))
         # SETENV: 解析多行 KEY=VALUE (注释行从 # 起; 行尾 # 也算注释)
         for line in src.splitlines():
             line_stripped = line.strip()
@@ -570,6 +579,23 @@ def run_test(
                     f"compile failed but kw not found: expected={expect_error_kw!r}, "
                     f"got stderr[:200]={stderr_compile[:200]!r}")
         return (False, expected, -1, f"compile failed: {stderr_compile[:200]}")
+    if expect_error_kw is not None:
+        # 2026-10-24 (P0):EXPECT-ERROR 测试**编译成功** = 断言根本没触发 = FAIL。
+        #
+        # 为什么必须在这里补:此前 expect_error_kw 只在 `rc != 0` 分支被检查 ——
+        # 编译**意外成功**时一路落到下面 `if expected is None` 分支,而那个分支
+        # 只看「进程没崩」→ 直接判 PASS,还进了汇总行的「全部有断言」里。
+        #
+        # 实测证据(探针,已删):一个能正常编译的程序 + `// EXPECT-ERROR:
+        # "zzz-this-keyword-never-appears-zzz"` → regress 报 `PASS ... EXIT=1`。
+        #
+        # 危害:凡是「靠编译期报错兜住」的测试都不会变红 —— 编译器哪天不再报那个
+        # 错,门照样绿。W-105(b) 的 `&mut` 独占检查门(borrow_mut_conflict.jhyy)
+        # 与 W-115 的闭包捕获门(closure_capture_unsupported.jhyy)都属这一类:
+        # 它们的**唯一**断言就是这条 EXPECT-ERROR。
+        return (False, None, -1,
+                f"compile succeeded but EXPECT-ERROR expected: kw={expect_error_kw!r} "
+                f"— 编译器没报这个错(断言没触发)")
     exe = os.path.abspath(out_base + ".exe")
     if not os.path.exists(exe):
         return (False, expected, -2, "exe not created")
@@ -663,6 +689,27 @@ def _assertion_kind(fname: str) -> str:
     if cls == "literal-return":
         return "vacuous"
     return "PASS"
+
+
+def _is_no_std_source(fname: str) -> bool:
+    """该测试是不是 `#[no_std]` 程序(入口是 `fn main` 而不是 `fn main_jhyy`)。
+
+    2026-10-24 (W-124):`#[no_std]` 用例必须**串行**跑 —— 原因见 run_all 里
+    的注释(side-file 固定路径 + 并发编译互踩)。
+    """
+    path = TEST_DIR / fname
+    if not path.exists():
+        return False
+    try:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return False
+    try:
+        from audit_test_assertions import strip_comments
+        code = strip_comments(raw)
+    except Exception:
+        code = raw
+    return "#[no_std]" in code
 
 
 def run_all(
@@ -811,10 +858,32 @@ def run_all(
     cpu = os.cpu_count() or 4
     default_workers = max(2, cpu // 2)
     _t0 = time.time()
-    workers = min(len(files), jobs if jobs else default_workers)
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(run_test, str(TEST_DIR / f), binary, timeout): f for f in files}
-        results = {futures[fut]: fut.result() for fut in as_completed(futures)}
+    # 2026-10-24 (W-124):`#[no_std]` 用例从并发池里拿出来,**串行**跑。
+    #
+    # 为什么:编译器的 4 个 side-file(`_no_std.flag` / `_inline_asm.buf` /
+    # `_section_directive.buf` / `_fence.buf`)走的是**固定路径**通道
+    # (codegen 写 → link 读),而每次编译**开头**会把这 4 个删干净
+    # (W-122 的修法)。⇒ **两个并发编译会互相踩**:A 写完 side-file、还没读,
+    # B 的编译开头把它删了 → A 读到空 → A 的产物缺东西。
+    #
+    # 具体到 no_std:它的链接行由 `_no_std.flag` 决定,被别人删掉 ⇒ 链成
+    # hosted(带 runtime.c,入口 `main_jhyy`)⇒ 链接失败 ⇒ **flaky**。
+    # 同理,no_std 用例自己的「开头删 4 个」也会打断并发中的 asm 用例。
+    #
+    # 所以:`#[no_std]` 用例等并发池跑完再串行跑(此时没有别的编译在跑)。
+    # 根治(把 side-file 改成 per-compilation 唯一路径)见台账 W-125。
+    no_std_files = [f for f in files if _is_no_std_source(f)]
+    parallel_files = [f for f in files if f not in no_std_files]
+    workers = min(len(parallel_files), jobs if jobs else default_workers)
+    results = {}
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = {pool.submit(run_test, str(TEST_DIR / f), binary, timeout): f
+                   for f in parallel_files}
+        for fut in as_completed(futures):
+            results[futures[fut]] = fut.result()
+    # 串行补跑 `#[no_std]` 用例(此时并发池已空,side-file 不会被抢)。
+    for f in no_std_files:
+        results[f] = run_test(str(TEST_DIR / f), binary, timeout)
 
     total_tests = len(files)
     for idx, fname in enumerate(files, 1):

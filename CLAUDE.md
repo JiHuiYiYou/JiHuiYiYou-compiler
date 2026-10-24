@@ -4,6 +4,10 @@
 当前: **🟢 v4.0.19 发布**（2026-10-20，**台账 ACTIVE 桶首次清空(14 → 0)**）——
 <https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v4.0.19>
 （installer .exe + compiler .msi + vscode .vsix + SHA256.txt）。
+**🟡 v4.0.20 进行中**（2026-10-24，**审计「skip test / 新增 test」的三处门修复**：
+W-126 harness 的 `EXPECT-ERROR` 漏洞 / W-124 `#[no_std]` 零覆盖 / W-125 chained
+`&&T` 死规则 ⇒ **186/186 PASS + 0 XFAIL + 19 SKIP**；本机 Docker 起 daemon 后
+6 个 sysv 用例本地也真跑）—— **未发布**，下一个动作 = 走发布链 + promote v4.0.0 final。
 **v4.0.0 final 的 promote 条件全部满足**（184/184 生产+自举、closure v2==v3、
 fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 此前 v3.4.2 / v4.0.0-rc1 / v4.0.1 / v4.0.2 / v4.0.6 五个 tag 全部发布失败，
@@ -146,7 +150,7 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 真凶是 **W-123**(`jh_mktemp_ascii` 的 seed = `pid ^ tid ^ ctr`,而 Windows 的 pid
 与主线程 tid 来自**同一个全局计数器** ⇒ `N ^ (N+1) = 1` ⇒ **每两个并发进程就撞一次
 同一个临时文件名** ⇒ 一个的 rename 失败 ⇒ **编译失败**。W-123 修好后:并发编译 32 个
-→ **0 失败**(修复前 4 个)),**0 ACTIVE / 108 索引行**,per `docs/internal/workarounds.md` 索引表):
+→ **0 失败**(修复前 4 个)),**0 ACTIVE / 111 索引行**,per `docs/internal/workarounds.md` 索引表):
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
@@ -163,6 +167,20 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 | W-118 | — | ~~语言 lexer `lex_peek_char` 无 EOF 守卫~~ ✅ **2026-10-20 已修**:`Lexer` 加 `end` 字段 + 两个 peek 加守卫;A/B 证明 `.s` 逐字节不变(193/193)。**防御性**修复 —— 这条从来没观测到危害 |
 | W-121 | — | ~~合成 closure 的符号名依赖堆地址 ⇒ 产物不可复现~~ ✅ **2026-10-20 已修**:改用每次编译单调递增的计数器(同一编译器连编三次 `.s` 现在逐字节相同) |
 | W-122 | — | ~~四个 side-file 用固定路径 ⇒ 泄漏到下一次编译~~ ✅ **2026-10-20 已修**:每次编译开头先删干净(`version-schedule` § D3 记的「机制成立但未观测到发作」—— 今天发作了) |
+
+**2026-10-24 追加(v4.0.20 —— 审计「skip test / 新增 test」挖出的三处;ACTIVE 仍是 0,
+三条全是 RESOLVED)。** 三条都是**门**的问题 —— 门绿着,但它没在验它声称在验的东西:
+
+| W-NNN | 性质 |
+|-------|------|
+| W-126 | ~~regress harness 的 `EXPECT-ERROR` 漏洞:编译**意外成功**时判 PASS~~ ✅ **2026-10-24 已修** —— `expect_error_kw` 只在「编译失败」分支被检查 ⇒ 编译成功时落到「只要进程没崩就算过」的分支。**8 个 expect-error 测试(含 `borrow_mut_conflict` / `closure_capture_unsupported` 两道最新门)全部不会变红**。修法:`rc == 0` 且有 EXPECT-ERROR ⇒ FAIL(探针当场由绿转红) |
+| W-124 | ~~`#[no_std]` 零覆盖~~ ✅ **2026-10-24 已修** —— (a) 链接行写 `-Wl,--entry=main_jhyy`,而 codegen 按函数名原样发符号(用户的 `fn main` → `main`)⇒ **no_std 程序 100% 链不过**;(b) harness 只认 `fn main_jhyy` ⇒ `no_std_hello.jhyy` 被当「library」**静默跳过** ⇒ v3.0 的 ship gate 从没跑过。修法:链接行 = `-nostartfiles -nodefaultlibs -Wl,--entry=main -lgcc`(`-lgcc` 提供 `___chkstk_ms`,不含 C 运行时)+ harness/审计认 `#[no_std]` 的 `fn main` 入口 ⇒ **EXIT=42** ✓。⚠️ `#[no_std]` 用例**串行**跑(side-file 固定路径的并发互踩,根因见 W-122 余量) |
+| W-125 | ~~chained `&&T` 的报错路径:sema 那条规则是死代码~~ ✅ **2026-10-24 已修** —— lexer 把 `&&` 切成一个 token,而 `parse_type` 只认单 `&` ⇒ 报「expected type name, got &&」(对用户毫无意义)⇒ sema 里那条「chained `&&T` not allowed」**永远走不到** ⇒ `borrow_check_err.jhyy` 长期挂 XFAIL,而那个 XFAIL **从未登记进台账** ⇒「台账 ACTIVE=0」与「套件自报 1 个已知失败」长期并存。修法:parser 显式拦 `&&` + 措辞对齐 sema ⇒ **套件 XFAIL 1 → 0** |
+
+**回归现状(2026-10-24 实测):186/186 PASS + 0 XFAIL + 19 SKIP(205 total)**
+(此前 184/184 + 2 XFAIL + 20 SKIP / 203 total)。本机 Docker Desktop 起 daemon 后
+`regress.py --cross=auto` 解析成 **docker** ⇒ 6 个 sysv 用例本地也真跑
+(exit=28/217/42/35/18/42 全对)。
 
 2026-10-18 调整(**W-109 移出、W-118 移入,总数仍 14**):W-109(IL lexer 缺浮点比较
 助记符)已于 2026-10-17 真修(`codegen_amd64_lexer.jhyy:1588` 的 `c*` gate 漏第二字符

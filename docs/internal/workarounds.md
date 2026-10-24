@@ -133,6 +133,9 @@
 | [W-117](#w-117) | RESOLVED | self-backend IL lexer 在 EOF 处无守卫 —— cur == end... |
 | [W-118](#w-118) | RESOLVED | 语言 lexer 的 lex_peek_char 同样无 EOF 守卫 —— 越界前进而非空转 |
 | [W-119](#w-119) | RESOLVED | SysV 帧布局把第 0 号局部变量放在 0(%rbp) —— 覆盖 saveq %rbp 存的旧... |
+| [W-124](#w-124) | RESOLVED | `#[no_std]` 的链接行指向**不存在的** entry 符号 ⇒ no_std 程序... |
+| [W-125](#w-125) | RESOLVED | chained `&&T` 的报错路径 —— parser 先报「expected type... |
+| [W-126](#w-126) | RESOLVED | regress harness 的 `EXPECT-ERROR` 漏洞 ——... |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -9646,3 +9649,164 @@ alloc 池在再往下 32 字节 → 不重叠。
   的 SysV 分支)
 - 源码 `compiler/tests/examples/sysv_abi_test.jhyy`(修复前就有 `movl $1, 0(%rbp)`)
 - 相关:W-114(enum ABI 统一时踩到它)、W-104(SysV struct 传参)
+
+<a id="w-124"></a>
+## W-124: `#[no_std]` 的链接行指向**不存在的** entry 符号 ⇒ no_std 程序 100% 链不过
+
+**状态:** RESOLVED closed 2026-10-24 (v4.0.20) — 链接行改 `--entry=main` + 显式 `-lgcc`;
+唯一的 ship-gate 用例此前被 harness 当 library **静默跳过**,现已进回归并 PASS(EXIT=42)
+**Filed-by:** audit-skip-newtest-2026-10-24
+**日期:** 2026-10-24 (审计「skip test / 新增 test」时抓到)
+
+**触发面:**
+- `compiler/src0/main.jhyy` 的 `link_with_gcc` —— no_std 分支的链接行
+- `compiler/src0/sema.jhyy:3160-3176`(`#[no_std]` 模块**必须**有 `fn main`)
+- `compiler/tests/examples/no_std_hello.jhyy`(唯一的 ship-gate 用例)
+
+**症状:**
+1. 手工跑 `jhyy compile no_std_hello.jhyy` → **链接失败**:
+```
+ld: warning: cannot find entry symbol main_jhyy; defaulting to 0000000140001000
+ld: undefined reference to `___chkstk_ms'
+```
+2. 更糟的是**没人跑它**:regress harness 只认 `fn main_jhyy` 当入口,而 `#[no_std]`
+   程序的入口按 sema 强制要求是 `fn main` ⇒ 该文件被判成「library」→ **静默跳过**,
+   从来没编过、更没跑过;审计脚本同口径,把它算进「14 个 library」里。
+   ⇒ `#[no_std]` 这个 v3.0 ship gate **零自动覆盖**,而台账里没有它的任何痕迹。
+
+**根因:**
+- 链接行写的是 `-Wl,--entry=main_jhyy`,旁边的注释还宣称「codegen 把用户的
+  `fn main` 发成 `main_jhyy`」—— **代码从来没这么做过**:codegen 按函数名原样发符号,
+  用户的 `fn main` 就是 `main`。这个错误假设从 v3.0.0 的 `d721cb5`
+  (「fix(v3.0.0): no_std entry symbol」)就写进了注释与链接行,一直没被证伪 ——
+  因为**唯一的用例从没跑过**。
+- `___chkstk_ms` 未定义是 `-nodefaultlibs` 的连带后果:self-backend 对 >4KB 的栈帧
+  会发 `call ___chkstk_ms`(W-074.6 sub-bug #3 修的),而那个符号在 CRT 里。
+- ⇒ v3.0 changelog 里「no_std ship gate EXIT:42」这条**当时就不可复现**。
+
+**修法(2026-10-24):**
+1. 链接行改成 `-nostartfiles -nodefaultlibs -Wl,--entry=main -lgcc`
+   - `--entry=main`:与 codegen 实际发出的符号一致;
+   - `-lgcc`:提供 `___chkstk_ms`(libgcc 的 `_chkstk_ms.o`),且**不含** C 运行时
+     —— 这正是 freestanding 的标准做法(`-nostdlib` + 显式 `-lgcc`);
+   - 入口返回值语义:PE 入口函数返回的值**就是**进程退出码 ⇒ `fn main` 返回 42 ⇒
+     进程退出码 42(实测,不是推测)。
+2. harness(`mcp-jhyy/jhyy_regress.py`)与审计脚本(`scripts/dev/audit_test_assertions.py`)
+   都改成认 `#[no_std]` 的 `fn main` 入口(此前两边都只认 `main_jhyy`)。
+3. `no_std_hello.jhyy` 加 `// EXPECT: 42`,返回值改成推导式(`20 + 22`)而非字面量,
+   这样「算错了」也会被抓到,不是只验「进程没崩」。
+
+**⚠️ 附带的坑(根因在 W-122 的余量里,本条只做规避):** `#[no_std]` 用例必须
+**串行**跑。编译器的 4 个 side-file(`_no_std.flag` / `_inline_asm.buf` /
+`_section_directive.buf` / `_fence.buf`)走**固定路径**通道(codegen 写 → link 读),
+而每次编译**开头**会把这四个删干净(W-122 的修法)⇒ **两个并发编译会互相踩**:
+no_std 的链接行由 `_no_std.flag` 决定,被别人删掉 ⇒ 链成 hosted ⇒ 链接失败(flaky)。
+⇒ harness 把 `#[no_std]` 用例从并发池里拿出来,等并发池跑完再**串行**跑。
+根治(per-compilation 唯一路径)属 W-122 的余量,未做。
+
+**验收:**
+- `jhyy compile no_std_hello.jhyy` → 链出 exe → **EXIT=42** ✓
+- `regress.py --tests=no_std_hello.jhyy` → PASS ✓(进汇总行的「全部有断言」)
+- 审计:该用例从「library」变成「真断言(real)」,library 14 → 13 ✓
+
+**引用:**
+- 源码 `compiler/src0/main.jhyy`(`link_with_gcc` 的 no_std 分支)
+- 源码 `compiler/src0/sema.jhyy:3160`(`#[no_std]` 必须有 `fn main`)
+- 源码 `mcp-jhyy/jhyy_regress.py`(`has_main` 判定 + no_std 串行 pass)
+- 源码 `scripts/dev/audit_test_assertions.py`(`has_main` / `_main_body`)
+- 历史 commit `d721cb5`(v3.0.0「no_std entry symbol」—— 那个 fix 建立在错误假设上)
+- 规范 `docs/abis/jhyy-lang-spec-no_std-supplement-v3.0.0.md`
+
+<a id="w-125"></a>
+## W-125: chained `&&T` 的报错路径 —— parser 先报「expected type name」⇒ sema 那条规则是死代码
+
+**状态:** RESOLVED closed 2026-10-24 (v4.0.20) — parser 在 type 位置显式拦 `&&`,
+措辞与 sema 规则对齐;`borrow_check_err.jhyy` 的 XFAIL 摘掉 → 转 PASS
+**Filed-by:** audit-skip-newtest-2026-10-24
+**日期:** 2026-10-24 (审计「skip test」时发现:台账 ACTIVE=0 与套件自报「1 个已知失败」并存)
+
+**触发面:**
+- `compiler/src0/parser.jhyy` 的 `parse_type` —— type 位置**没有** `&&` 分支
+- `compiler/src0/sema.jhyy:459-472` —— chained `&&T` 的 sema 规则
+
+**症状:** `let x: &&i32 = 0 as &&i32;` → parser 报四条噪声错:
+```
+error: expected =, got &&
+error: unexpected token '&&' in expression
+error: expected ;, got ident
+error: expected type name, got &&
+```
+末条那条是**误导性**的:用户写的是 `&&i32`,不是「忘了写类型名」。
+
+**根因:** lexer 把 `&&` 切成**一个** `TOKEN_AMPAMP`(`compiler/src0/lexer.jhyy:801`),
+而 `parse_type` 的 borrow 分支只认 `TOKEN_AMP` ⇒ type 位置的 `&&i32` 压根不进
+borrow 分支,落到 default ident 路径 ⇒ 报「expected type name」。
+同款 `&mut &mut T` 在 parser 层**有**专门的拒绝分支(`parser.jhyy:508`),`&&T` 没有。
+
+**连带后果(比症状本身更重要):**
+1. `sema.jhyy:469` 那条真正的规则「chained `&&T` not allowed (borrow is terminal)」
+   **永远走不到** —— parser 先把类型解析炸了 ⇒ 那条规则是**死代码**,从没被执行过,
+   也从没有被验证过。
+2. `borrow_check_err.jhyy` 因此长期挂 XFAIL(「阶段和措辞都不对」)—— 而 **XFAIL 让
+   它在台账里彻底隐身**:台账写「ACTIVE = 0」,测试套件却自报「1 个已知失败」,
+   两边从未被对起来(2026-10-24 审计时才发现)。⇒ 「台账清零」不等于「没有已知 bug」。
+
+**修法(2026-10-24):** parser 在 type 位置显式拦 `&&`,措辞与 sema 的规则对齐:
+```
+error: chained `&&T` not allowed (borrow is terminal — use one `&` per level)
+```
+sema 那条继续留作兜底 —— 与既有的 `volatile volatile` 同一模式
+(parser 拦一道 + sema 兜底,见 `sema.jhyy:506` 的注释)。
+
+**验收:** `borrow_check_err.jhyy` —— XFAIL 摘掉 → **PASS**(编译失败且 stderr 含
+`chained `&&T` not allowed`)✓;套件 XFAIL 数 1 → 0 ✓。
+
+**引用:**
+- 源码 `compiler/src0/parser.jhyy`(`parse_type` 的 `TOKEN_AMPAMP` 分支)
+- 源码 `compiler/src0/sema.jhyy:459-472`(那条终于能被人引用的规则)
+- 源码 `compiler/src0/lexer.jhyy:801`(`&&` → 单 token)
+- 测试 `compiler/tests/examples/borrow_check_err.jhyy`
+
+<a id="w-126"></a>
+## W-126: regress harness 的 `EXPECT-ERROR` 漏洞 —— 编译**意外成功**时判 PASS
+
+**状态:** RESOLVED closed 2026-10-24 (v4.0.20) — `rc == 0` 且有 EXPECT-ERROR 时
+直接 FAIL;探针当场由绿转红
+**Filed-by:** audit-skip-newtest-2026-10-24
+**日期:** 2026-10-24 (审计「新增 test」时用探针实测抓到)
+
+**触发面:** `mcp-jhyy/jhyy_regress.py` 的 `run_test`(运行期性质 ⇒
+`scripts/dev/audit_test_assertions.py` 的静态分类**查不出**这条)。
+
+**症状:** 带 `// EXPECT-ERROR: "kw"` 的测试,**如果编译意外成功**,regress 报
+**PASS**,而且还进汇总行的「全部有断言」里。
+
+实测(探针,已删):
+```
+// EXPECT-ERROR: "zzz-this-keyword-never-appears-zzz"   ← 一个能正常编译的程序
+→ PASS  _probe_expect_error.jhyy   EXIT=1
+```
+同形状的探针(把 `borrow_mut_conflict.jhyy` 的双 `&mut` 冲突去掉、指令原样不动)
+→ 一样 PASS。
+
+**根因:** `expect_error_kw` 只在 `rc != 0`(编译失败)分支被检查;编译**成功**时
+一路落到 `if expected is None:` 分支 —— 那个分支只查「进程是不是 NTSTATUS 崩溃」,
+不崩就算过。
+
+**危害:** 凡是「靠编译期报错兜住」的测试**都不会变红** —— 编译器哪天不再报那个错,
+门照样绿。套件里 8 个 `expect-error` 测试全在射程内,其中 2 个是最新加的门:
+- `borrow_mut_conflict.jhyy`(W-105(b) 的 `&mut` 独占检查门)
+- `closure_capture_unsupported.jhyy`(W-115 的闭包捕获门)
+
+**修法(2026-10-24):** `run_test` 在 `rc == 0` 且 `expect_error_kw` 非空时直接 FAIL:
+```
+compile succeeded but EXPECT-ERROR expected: kw='...' — 编译器没报这个错(断言没触发)
+```
+(「编译失败但没有那个关键词」本来就 FAIL;补的是「编译成功」这一侧。)
+
+**验收:** 同一个探针现在报 FAIL ✓;套件里 8 个 expect-error 测试仍全绿
+(它们本来就在报那个错)✓。
+
+**引用:**
+- 源码 `mcp-jhyy/jhyy_regress.py`(`run_test` 的 `rc == 0` 分支)
+- 源码 `scripts/dev/audit_test_assertions.py`(`expect-error` 类别 —— 静态查不出这条)
