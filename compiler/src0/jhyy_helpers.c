@@ -1224,10 +1224,19 @@ __attribute__((used)) void jh_os_exit(int code) {
 __attribute__((used)) int jh_build_icon_obj(char *out_obj, int out_cap) {
 #ifdef _WIN32
     const char *icon_path = jh_path_icon();
-    if (!icon_path || icon_path[0] == '\0') return 1;
+    if (!icon_path || icon_path[0] == '\0') {
+        fprintf(stderr, "W-132: no icon source path (layout not detected) — 跳过嵌图标\n");
+        return 1;
+    }
     {
         struct stat st;
-        if (stat(icon_path, &st) != 0 || st.st_size <= 0) return 1;
+        if (stat(icon_path, &st) != 0 || st.st_size <= 0) {
+            /* 不静默跳过:「为什么没图标」这件事必须看得见
+               (v4.0.8 之后图标一路静到用户在 Explorer 里看见白板)。 */
+            fprintf(stderr, "W-132: icon source not found at %s — 跳过嵌图标\n",
+                    icon_path);
+            return 1;
+        }
     }
 
     char tmp_ico[1024], tmp_rc[1024], tmp_obj[1024];
@@ -1294,6 +1303,14 @@ __attribute__((used)) int jh_build_icon_obj(char *out_obj, int out_cap) {
     }
     if ((int)strlen(tmp_obj) >= out_cap) { DeleteFileA(tmp_obj); return -1; }
     snprintf(out_obj, (size_t)out_cap, "%s", tmp_obj);
+    {   /* 每进程打印一次:图标 .o 确实进了链接行(「加没加」必须看得见) */
+        static int reported = 0;
+        if (!reported) {
+            reported = 1;
+            fprintf(stderr, "W-132: icon resource object added to link line: %s\n",
+                    tmp_obj);
+        }
+    }
     return 0;
 #else
     /* POSIX: 没有 PE / DefaultIcon 这回事 —— 跳过(不算错) */
