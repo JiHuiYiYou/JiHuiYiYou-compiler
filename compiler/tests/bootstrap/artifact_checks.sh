@@ -596,39 +596,15 @@ EOF
 
 # icon_probe <exe> → 打印 ExtractIconEx 拿到的图标个数(0 = 没有图标)
 #
-# ⚠️ 两种 python 都要能用(2026-10-24 实测踩到):
-#   · Windows 原生 python → ctypes.WinDLL + ExtractIconExW
-#   · MSYS2 的 /usr/bin/python(Cygwin 版)→ **ctypes 没有 WinDLL**
-#     (AttributeError: module 'ctypes' has no attribute 'WinDLL')
-#     ⇒ CI runner 上那个探针直接抛异常、什么输出都没有 ⇒ 门判 0 ⇒ **假红**
-#     (而实测 CI 的产物 .rsrc 节是在的 ⇒ 图标功能本身没坏)
-# 所以:有 WinDLL 用 W 版,没有就退回 CDLL + ANSI 版(路径是 ASCII,CP_ACP 无碍)。
+# 实现放在独立脚本 compiler/tests/bootstrap/icon_probe.ps1 ✓ —— 因为:
+#   · **python 在 CI 上不可用**:CI runner 的 python 是 MSYS2 的 /usr/bin/python
+#     (Cygwin 版)—— ctypes 没有 WinDLL,退回 CDLL("shell32") 又被 Cygwin 的
+#     _dlopen 挡掉(OSError)。两条路都不通(本地是 Windows python 才绿)。
+#   · PowerShell 走 Windows 原生 API ✓,且和 Explorer 用同一套
+#     shell32!ExtractIconExW ⇒ 判据最忠实。
+#   · 独立 .ps1 文件 ⇒ bash→PowerShell 的引号地狱不存在(param() 收参 ✓)。
 icon_probe() {
-    python - "$1" <<'PYEOF'
-import ctypes, sys
-from ctypes import wintypes
-path = sys.argv[1]
-try:
-    dll = ctypes.WinDLL("shell32")
-    fn = dll.ExtractIconExW
-    fn.argtypes = [wintypes.LPCWSTR, ctypes.c_int,
-                   ctypes.POINTER(wintypes.HICON),
-                   ctypes.POINTER(wintypes.HICON), wintypes.UINT]
-    fn.restype = wintypes.UINT
-except AttributeError:
-    dll = ctypes.CDLL("shell32")
-    fn = dll.ExtractIconExA
-    fn.argtypes = [ctypes.c_char_p, ctypes.c_int,
-                   ctypes.POINTER(wintypes.HICON),
-                   ctypes.POINTER(wintypes.HICON), wintypes.UINT]
-    fn.restype = wintypes.UINT
-    path = path.encode("mbcs", "replace")
-large = (wintypes.HICON * 1)()
-small = (wintypes.HICON * 1)()
-r = fn(path, 0, large, small, 1)
-# 0xFFFFFFFF = 文件不存在/取不到(不是「没有图标」)
-print(0 if r == 0xFFFFFFFF else int(r))
-PYEOF
+    powershell -NoProfile -ExecutionPolicy Bypass         -File "$JHYY_ROOT/compiler/tests/bootstrap/icon_probe.ps1" "$1" 2>/dev/null
 }
 
 # icon_diag <exe> → 失败时的诊断尾巴:产物里到底有没有 .rsrc 节,以及
