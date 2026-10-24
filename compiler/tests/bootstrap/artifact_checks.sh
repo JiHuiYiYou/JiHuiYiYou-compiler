@@ -594,23 +594,41 @@ EOF
 #   ① 编译器自己(jhyy.exe)带图标 —— v1.8.1 的原意之一;
 #   ② **它编出来的程序**带图标 —— v1.8.1 的原意之二(用户天天看的东西)。
 
-# icon_probe <exe> → 打印 ExtractIconExW 拿到的图标个数(0 = 没有图标)
+# icon_probe <exe> → 打印 ExtractIconEx 拿到的图标个数(0 = 没有图标)
+#
+# ⚠️ 两种 python 都要能用(2026-10-24 实测踩到):
+#   · Windows 原生 python → ctypes.WinDLL + ExtractIconExW
+#   · MSYS2 的 /usr/bin/python(Cygwin 版)→ **ctypes 没有 WinDLL**
+#     (AttributeError: module 'ctypes' has no attribute 'WinDLL')
+#     ⇒ CI runner 上那个探针直接抛异常、什么输出都没有 ⇒ 门判 0 ⇒ **假红**
+#     (而实测 CI 的产物 .rsrc 节是在的 ⇒ 图标功能本身没坏)
+# 所以:有 WinDLL 用 W 版,没有就退回 CDLL + ANSI 版(路径是 ASCII,CP_ACP 无碍)。
 icon_probe() {
-    python - "$1" <<'PY'
+    python - "$1" <<'PYEOF'
 import ctypes, sys
 from ctypes import wintypes
-shell32 = ctypes.WinDLL("shell32")
-shell32.ExtractIconExW.argtypes = [wintypes.LPCWSTR, ctypes.c_int,
-                                   ctypes.POINTER(wintypes.HICON),
-                                   ctypes.POINTER(wintypes.HICON),
-                                   wintypes.UINT]
-shell32.ExtractIconExW.restype = wintypes.UINT
+path = sys.argv[1]
+try:
+    dll = ctypes.WinDLL("shell32")
+    fn = dll.ExtractIconExW
+    fn.argtypes = [wintypes.LPCWSTR, ctypes.c_int,
+                   ctypes.POINTER(wintypes.HICON),
+                   ctypes.POINTER(wintypes.HICON), wintypes.UINT]
+    fn.restype = wintypes.UINT
+except AttributeError:
+    dll = ctypes.CDLL("shell32")
+    fn = dll.ExtractIconExA
+    fn.argtypes = [ctypes.c_char_p, ctypes.c_int,
+                   ctypes.POINTER(wintypes.HICON),
+                   ctypes.POINTER(wintypes.HICON), wintypes.UINT]
+    fn.restype = wintypes.UINT
+    path = path.encode("mbcs", "replace")
 large = (wintypes.HICON * 1)()
 small = (wintypes.HICON * 1)()
-r = shell32.ExtractIconExW(sys.argv[1], 0, large, small, 1)
+r = fn(path, 0, large, small, 1)
 # 0xFFFFFFFF = 文件不存在/取不到(不是「没有图标」)
 print(0 if r == 0xFFFFFFFF else int(r))
-PY
+PYEOF
 }
 
 # icon_diag <exe> → 失败时的诊断尾巴:产物里到底有没有 .rsrc 节,以及

@@ -583,12 +583,14 @@ __attribute__((used)) int jh_gcc_invoke(char *out_buf, int out_size, const char 
         {
             int n = snprintf(out_buf, (size_t)out_size, "\"%s\" \"%s\" %s",
                              jh_gcc_path(), ico_obj, args);
-            /* 每进程打印一次完整链接行:「图标 .o 到底在不在链接行里」必须看得见
-               (CI 上产物没图标、本地有 —— 差异只能靠这行定位)。 */
-            static int reported = 0;
-            if (!reported) {
-                reported = 1;
-                fprintf(stderr, "W-132: link line = %s\n", out_buf);
+            if (getenv("JHY_ICON_TRACE")) {
+                /* 每进程打印一次完整链接行(排查用,默认安静)。
+                   「图标 .o 到底在不在链接行里」必须能一眼看见。 */
+                static int reported = 0;
+                if (!reported) {
+                    reported = 1;
+                    fprintf(stderr, "W-132: link line = %s\n", out_buf);
+                }
             }
             return n;
         }
@@ -1313,7 +1315,9 @@ __attribute__((used)) int jh_build_icon_obj(char *out_obj, int out_cap) {
     }
     if ((int)strlen(tmp_obj) >= out_cap) { DeleteFileA(tmp_obj); return -1; }
     snprintf(out_obj, (size_t)out_cap, "%s", tmp_obj);
-    {   /* 每进程打印一次:图标 .o 确实进了链接行(「加没加」必须看得见) */
+    if (getenv("JHY_ICON_TRACE")) {
+        /* 每进程打印一次:图标 .o 确实进了链接行(「加没加」必须看得见)。
+           默认安静 —— 设 JHY_ICON_TRACE=1 才出声(排查用)。 */
         static int reported = 0;
         if (!reported) {
             reported = 1;
