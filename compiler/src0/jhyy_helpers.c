@@ -233,6 +233,7 @@ static char jh_path_gcc_buf[1024];
 static char jh_path_runtime_buf[1024];
 static char jh_path_helpers_buf[1024];
 static char jh_path_stdlib_buf[1024];  /* W-103: std lib 模块目录 */
+static char jh_path_icon_buf[1024];    /* W-127: JHYY "J" 图标 (.ico) */
 static int  jh_paths_initialized = 0;
 
 __attribute__((used)) int jh_paths_init(const char *argv0) {
@@ -245,12 +246,36 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
     if (!has_sep) {
         unsigned long n = GetModuleFileNameA(NULL, exe_path, sizeof(exe_path));
         if (n == 0 || n >= sizeof(exe_path)) return 1;
-    } else
-#endif
+    } else {
+        if (!argv0) return 1;
+        snprintf(exe_path, sizeof(exe_path), "%s", argv0);
+        /* W-127 (v4.0.20): argv[0] 绝对化。
+         *
+         * 为什么必须:从**相对**路径调用编译器时(make 里的
+         * `compiler/build/bin/_boot_anchor.exe` 就是相对路径),推出来的
+         * root 是相对的 —— 走到盘根时 root 变成空串,于是
+         * jh_path_icon 变成 "\installer\assets\icons\jhyy-icon.ico"。
+         * 以反斜杠开头的路径在 Windows 上是「当前**盘**的根目录」,不是
+         * 「当前目录」⇒ 永远找不到 ⇒ 图标被静默跳过。
+         *
+         * 这不只是图标路径的问题:jh_path_runtime / jh_path_helpers /
+         * jh_path_stdlib 同样是「相对 root」推出来的,一律带这个坑。
+         * 一次绝对化把整类问题消掉。
+         */
+        {
+            char full[MAX_PATH];
+            DWORD fl = GetFullPathNameA(exe_path, (DWORD)sizeof(full), full, NULL);
+            if (fl > 0 && fl < sizeof(full)) {
+                snprintf(exe_path, sizeof(exe_path), "%s", full);
+            }
+        }
+    }
+#else
     {
         if (!argv0) return 1;
         snprintf(exe_path, sizeof(exe_path), "%s", argv0);
     }
+#endif
 
     /* v1.5.6 W-037: layout detection (取代 v1.4.1 hardcoded dirname × 4).
        原 bug: dirname × 4 假设 jhyy.exe 在 <root>\compiler\build\bin\ (源码树),
@@ -285,6 +310,11 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
             snprintf(jh_path_helpers_buf, sizeof(jh_path_helpers_buf), "%s\\jhyy_helpers.c", dir_path);
             /* W-103: installer 把 src0/std 下的 .jhyy 模块装到 <bin>/std/ */
             snprintf(jh_path_stdlib_buf, sizeof(jh_path_stdlib_buf), "%s\\std", dir_path);
+            /* W-127: installer 把 jhyy-icon.ico 装到 <bin>\ (wxs 的 JhyyIconFile
+               组件)。自举链接路径靠它把 "J" 图标嵌进每一个链出来的 exe ——
+               v4.0.8 把 jhyy.exe 的产出改到自举编译器后,这条链断了
+               (icon 逻辑原本只在 C 侧 compiler/src/main.c 里)。 */
+            snprintf(jh_path_icon_buf, sizeof(jh_path_icon_buf), "%s\\jhyy-icon.ico", dir_path);
             #pragma GCC diagnostic pop
             jh_paths_initialized = 1;
             return 0;
@@ -303,6 +333,10 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
                 snprintf(jh_path_runtime_buf, sizeof(jh_path_runtime_buf), "%s\\compiler\\runtime\\runtime.c", root);
                 snprintf(jh_path_helpers_buf, sizeof(jh_path_helpers_buf), "%s\\compiler\\src0\\jhyy_helpers.c", root);
                 snprintf(jh_path_stdlib_buf, sizeof(jh_path_stdlib_buf), "%s\\compiler\\src0\\std", root);
+                /* W-127: 源码树布局 —— 图标源在 installer/assets/icons/。
+                   (installer/build.ps1 会把同一个 .ico 拷进安装包的 bin\) */
+                snprintf(jh_path_icon_buf, sizeof(jh_path_icon_buf),
+                         "%s\\installer\\assets\\icons\\jhyy-icon.ico", root);
                 #pragma GCC diagnostic pop
                 jh_paths_initialized = 1;
                 return 0;
@@ -326,6 +360,12 @@ __attribute__((used)) const char *jh_path_qbe(void)     { return jh_path_qbe_buf
 __attribute__((used)) const char *jh_path_gcc(void)     { return jh_path_gcc_buf; }
 __attribute__((used)) const char *jh_path_runtime(void) { return jh_path_runtime_buf; }
 __attribute__((used)) const char *jh_path_helpers(void) { return jh_path_helpers_buf; }
+
+/* W-127 (v4.0.20): JHYY "J" 图标 (.ico) 的绝对路径。
+   空串 = 本布局下没有图标资源(自举链接路径据此**跳过**嵌图标,而不是编不出来)。
+   两处布局各自在 jh_paths_init 里填:installer = <bin>\jhyy-icon.ico,
+   源码树 = <root>\installer\assets\icons\jhyy-icon.ico。 */
+__attribute__((used)) const char *jh_path_icon(void) { return jh_path_icon_buf; }
 
 /* v1.5.6 W-034: jh_fullpath — convert relative → absolute path.
    Used by cmd_run to produce absolute exe path, since cmd.exe /C only
@@ -447,11 +487,111 @@ __attribute__((used)) const char *jh_gcc_path(void) {
 }
 #endif
 
+/* W-127 (v4.0.20): windres 的路径 —— 用来把 "J" 图标编成 RT_ICON 资源。
+ *
+ * windres 与 gcc 来自**同一个** mingw-w64 工具链(都在 binutils 里),所以从
+ * 已解析出的 gcc 路径**推**出 windres.exe 最稳:gcc 在
+ * C:\msys64\ucrt64\bin\gcc.exe ⇒ windres 就在同一个目录。
+ * 推不出来(比如 JHY_GCC 指向一个没有同名 windres 的地方)就退回 "windres",
+ * 交给 PATH 解析 —— 跟 gcc 的 fallback 同款。
+ */
+__attribute__((used)) const char *jh_path_windres(void) {
+    static char buf[1024];
+    if (buf[0] != '\0') return buf;
+    const char *gcc = jh_gcc_path();
+    const char *slash = strrchr(gcc, '\\');
+    if (slash != NULL && slash != gcc) {
+        int dlen = (int)(slash - gcc);
+        snprintf(buf, sizeof(buf), "%.*s\\windres.exe", dlen, gcc);
+#ifdef _WIN32
+        if (GetFileAttributesA(buf) != INVALID_FILE_ATTRIBUTES) return buf;
+#endif
+    }
+    snprintf(buf, sizeof(buf), "windres");
+    return buf;
+}
+
+/* W-127 (v4.0.20): 路径里的 '\' → '/'。
+ *
+ * windres 读 .rc 时走 gcc -E 预处理,而 gcc -E 把 '\' 当转义符 —— 所以 .rc
+ * 里的路径必须写正斜杠(C 侧 compiler/src/main.c:507-509 踩过同一个坑,
+ * 那边的注释写的是「用 path_to_fwd() 让前导反斜杠变成正斜杠」)。
+ *
+ * 为什么这个 helper 放在 C 侧而不是 .jhyy 里:jhyy 语言**没有 1 字节标量
+ * 类型**,字节级改写只能借 *i32,而那是 **4 字节**的存 —— 写一个字节会把
+ * 后面 3 个字节连带清成 NUL,直接把路径截断。(实测确认:*i32 存法是 4 字节,
+ * 见 v4.0.20 的 W-127 记录。)所以这类逐字节活儿一律留在 C 侧。
+ */
+__attribute__((used)) int jh_path_to_fwd(char *p) {
+    if (!p) return -1;
+    for (; *p; p++) if (*p == '\\') *p = '/';
+    return 0;
+}
+
+/* W-127 (v4.0.20): 把 jh_mktemp_ascii 产出的 4 字节 ".tmp" 尾巴换成给定后缀。
+ * 后缀 ≤ 4 字节;短于 4 的部分补 NUL( ".tmp" → ".ico" / ".rc" / ".o" )。
+ * 同样因为「jhyy 没有 1 字节标量」而留在 C 侧。
+ */
+__attribute__((used)) int jh_set_tmp_suffix(char *p, const char *suffix) {
+    if (!p || !suffix) return -1;
+    size_t n = strlen(p);
+    if (n < 4) return -1;
+    size_t sl = strlen(suffix);
+    if (sl > 4) return -1;
+    char *base = p + (n - 4);
+    memcpy(base, suffix, sl);
+    for (size_t i = sl; i < 4; i++) base[i] = '\0';
+    return 0;
+}
+
+/* W-132 (v4.0.20): 图标资源对象的生命周期。
+   jh_gcc_invoke 构造链接命令时把它建出来并记在这里;jh_run 在子进程结束后
+   把它删掉(链接期间需要,之后就是垃圾)。 */
+static char g_jh_icon_obj[1024];
+
+__attribute__((used)) void jh_icon_obj_store(const char *p) {
+    if (!p) { g_jh_icon_obj[0] = '\0'; return; }
+    snprintf(g_jh_icon_obj, sizeof(g_jh_icon_obj), "%s", p);
+}
+
+/* jh_build_icon_obj 定义在本文件后面(它要用 jh_mktemp_ascii / jh_set_tmp_suffix /
+   jh_path_to_fwd),这里前置声明。 */
+__attribute__((used)) int jh_build_icon_obj(char *out_obj, int out_cap);
+
 /* v1.5.6: jh_gcc_invoke — system() 包装, 内部调 jh_gcc_path() 拿 resolved gcc.
    main.jhyy link_with_gcc 改用此函数 (替代裸 system("gcc ...") 拼 cmd_buf).
    ABI: caller 提供 cmd_args (e.g. "ASM_PATH RUNTIME_C HELPERS_C -o EXE -lm"),
-   返回写入字节数 (跟 sprintf_lld 同模式); out_buf 至少 2048 字节. */
+   返回写入字节数 (跟 sprintf_lld 同模式); out_buf 至少 2048 字节.
+
+   W-132 (v4.0.20): **图标资源对象从这里进链接行**。
+
+   为什么挂钩在 C 侧、而不是在 main.jhyy 的 link_with_gcc 里加几行:
+   给 main.jhyy **新增任何局部变量**都会移位模块级 temp 编号 ⇒ 自举产物
+   的**行为**会漂移(实测:main_jhyy 里那段 argv 扫描的 `movzbl (%r8)` 1 字节读
+   被整条丢掉 ⇒ `--target=` 不再被识别 ⇒ "cannot open file" ⇒ 6 个 sysv
+   cross 用例全红)。详见 workarounds.md 的「自举产物行为漂移」那条。
+
+   **⇒ 结论:这条链上的改动一律不进 main.jhyy。** 本函数是链接命令的构造点,
+   正好是 C 侧能插手而不动 .jhyy 的位置。 */
 __attribute__((used)) int jh_gcc_invoke(char *out_buf, int out_size, const char *args) {
+    char ico_obj[1024];
+    int ico_rc = jh_build_icon_obj(ico_obj, (int)sizeof(ico_obj));
+    if (ico_rc == 0) {
+        /* 图标对象插在 .s 前面 —— gcc/mingw 的 .o 顺序无关,放前面便于
+           在链接命令里一眼看见它。jh_run 会在子进程结束后把它删掉。 */
+        jh_icon_obj_store(ico_obj);
+        return snprintf(out_buf, (size_t)out_size, "\"%s\" \"%s\" %s",
+                        jh_gcc_path(), ico_obj, args);
+    }
+    if (ico_rc < 0) {
+        /* 失败 = **响亮地**让链接失败,而不是静默产出一个没图标的 exe。
+           (v4.0.8 之后图标就是这样一路静到用户在 Explorer 里看见白板。) */
+        fprintf(stderr, "W-132: icon embedding failed — 链接将失败\n");
+        return snprintf(out_buf, (size_t)out_size,
+                        "\"%s\" \"__jhyy_icon_obj_missing__\" %s",
+                        jh_gcc_path(), args);
+    }
+    /* ico_rc == 1:本布局没有图标资源(例如裁剪过的安装)⇒ 跳过,不算错。 */
     return snprintf(out_buf, (size_t)out_size, "\"%s\" %s", jh_gcc_path(), args);
 }
 
@@ -662,6 +802,13 @@ __attribute__((used)) int jh_run(const char *cmd_line) {
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     CloseHandle(hReadPipe);
+    /* W-132: 链接结束(图标资源对象只在**链接期间**需要)⇒ 删掉它。
+       只在「这条命令确实带了图标对象」时删 —— jh_run 还被 windres 和用户程序
+       复用,不能误删别人的文件。 */
+    if (g_jh_icon_obj[0] != '\0' && strstr(cmd_line, g_jh_icon_obj) != NULL) {
+        DeleteFileA(g_jh_icon_obj);
+        g_jh_icon_obj[0] = '\0';
+    }
     HeapFree(GetProcessHeap(), 0, cmd_buf);
     return (int)exit_code;
 }
@@ -1038,4 +1185,119 @@ __attribute__((used)) long long jh_os_write(long long fd, const void *buf, long 
    必须在进程退出前落盘,否则「写完日志再退出」会丢最后一段。 */
 __attribute__((used)) void jh_os_exit(int code) {
     exit(code);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * W-132 (v4.0.20): 把 JHYY "J" 图标编成 RT_ICON 资源对象,给链接行用
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ * 背景:嵌图标的 windres 步骤原本**只在 C 侧**有(compiler/src/main.c:503-558)。
+ * v4.0.8(commit 1dc6a23, 2026-10-16)把 jhyy.exe 的产出从 C 侧编译器改到
+ * **自举编译器**,而自举侧一行图标逻辑都没有 ⇒ 从那以后:
+ *   · 每个 jhyy.exe 都不带 RT_ICON 资源
+ *     ⇒ installer 的 FileAssoc(DefaultIcon = jhyy.exe,0)取不到图标
+ *     ⇒ **所有 .jhyy 文件在 Explorer 里是白板**(见 W-131);
+ *   · 用户用 jhyy.exe **编出来的每个程序**也没有 J 图标
+ *     (v1.8.1 的原意是两者都带,见 compiler/src/jhyy.rc 的注释)。
+ *
+ * 为什么整个做在 C 侧、.jhyy 侧只留一次调用:
+ *   ① jhyy 语言**没有 1 字节标量类型** —— `*i32` 存是 **4 字节**(实测:
+ *      往 *i32 写 0x41 之后按 i32 读回来是 0x414141),逐字节的活儿(路径
+ *      '\' → '/'、换临时文件后缀)在 .jhyy 里做会把相邻 3 字节连带清成 NUL
+ *      ⇒ 路径直接被截断;
+ *   ② 跟 C 侧 main.c:503-558 的既有做法同构(那边也是 windres + 链 .ico.o),
+ *      两边行为一致,不会一个能一个不能。
+ *
+ * 三个**实测**出来的约束(踩过才知道的):
+ *   ① windres 的 -i / -o 路径**必须用正斜杠** —— windres 走 gcc -E 预处理,
+ *      而 gcc -E 把 '\' 当转义符:`C:\Users\x.rc` → `C:Usersx.rc`,
+ *      报 "No such file or directory"。.rc 里那个 ICON 路径同样要正斜杠。
+ *   ② .ico 要先拷到**纯 ASCII** 临时路径 —— mingw CRT 的 argv 走 CP_ACP,
+ *      中文路径会变 mojibake(W-048 同款)。
+ *   ③ SOURCE_DATE_EPOCH 必须在 windres **之前**设好 —— windres 会把 .o 的
+ *      时间戳写进去,不固定就破坏 D26 逐字节可复现(同 gcc 那条一样)。
+ *
+ * 返回:0 = 成功(out_obj 里是 .ico.o 的路径 —— caller 负责在链接后 unlink)
+ *      1 = 跳过(本布局没有图标资源 —— 不算错)
+ *     -1 = 失败(caller 必须报错退出)
+ */
+__attribute__((used)) int jh_build_icon_obj(char *out_obj, int out_cap) {
+#ifdef _WIN32
+    const char *icon_path = jh_path_icon();
+    if (!icon_path || icon_path[0] == '\0') return 1;
+    {
+        struct stat st;
+        if (stat(icon_path, &st) != 0 || st.st_size <= 0) return 1;
+    }
+
+    char tmp_ico[1024], tmp_rc[1024], tmp_obj[1024];
+    if (jh_mktemp_ascii("i", tmp_ico, (int)sizeof(tmp_ico)) != 0) return -1;
+    if (jh_mktemp_ascii("r", tmp_rc, (int)sizeof(tmp_rc)) != 0) {
+        DeleteFileA(tmp_ico); return -1;
+    }
+    if (jh_mktemp_ascii("o", tmp_obj, (int)sizeof(tmp_obj)) != 0) {
+        DeleteFileA(tmp_ico); DeleteFileA(tmp_rc); return -1;
+    }
+    if (jh_set_tmp_suffix(tmp_ico, ".ico") != 0 ||
+        jh_set_tmp_suffix(tmp_rc, ".rc") != 0 ||
+        jh_set_tmp_suffix(tmp_obj, ".o") != 0) {
+        DeleteFileA(tmp_ico); DeleteFileA(tmp_rc); DeleteFileA(tmp_obj);
+        return -1;
+    }
+    /* ① windres 的路径必须是正斜杠(见上面的约束 ①) */
+    jh_path_to_fwd(tmp_ico);
+    jh_path_to_fwd(tmp_rc);
+    jh_path_to_fwd(tmp_obj);
+
+    /* ② .ico 拷到 ASCII 临时路径(约束 ②) */
+    if (jh_file_copy(icon_path, tmp_ico) != 0) {
+        DeleteFileA(tmp_ico); DeleteFileA(tmp_rc); DeleteFileA(tmp_obj);
+        return -1;
+    }
+
+    /* .rc 现场生成 —— 不依赖仓库里的 compiler/src/jhyy.rc(那份用相对路径指向
+       installer/assets/icons/,在 installer 布局下根本不存在)。 */
+    char rcbuf[1024];
+    int rn = snprintf(rcbuf, sizeof(rcbuf), "IDI_ICON1 ICON \"%s\"\n", tmp_ico);
+    if (rn <= 0 || rn >= (int)sizeof(rcbuf)) {
+        DeleteFileA(tmp_ico); DeleteFileA(tmp_rc); DeleteFileA(tmp_obj);
+        return -1;
+    }
+    if (jh_write_file(tmp_rc, rcbuf, (long long)rn) != 0) {
+        DeleteFileA(tmp_ico); DeleteFileA(tmp_rc); DeleteFileA(tmp_obj);
+        return -1;
+    }
+
+    /* ③ SOURCE_DATE_EPOCH 必须在 windres 之前设好(约束 ③) */
+    SetEnvironmentVariableA("SOURCE_DATE_EPOCH", "1234567890");
+
+    char cmd[3072];
+    snprintf(cmd, sizeof(cmd), "\"%s\" -i \"%s\" -O coff -o \"%s\"",
+             jh_path_windres(), tmp_rc, tmp_obj);
+    /* 用 jh_run(CreateProcessA)而不是 system():cmd.exe /c 遇到**以引号开头**的
+       命令行会把外层引号吃掉(经典坑),报「文件名或目录名语法不正确」。
+       CreateProcessA 自己解析 quoted path,路径带空格也安全(W-038 同款理由)。
+       C 侧 main.c:522 用的是 system() —— 那边的 windres 是 PATH 解析的裸名
+       (不以引号开头),所以没踩到这个坑;这里用的是绝对路径,必须走 jh_run。 */
+    int rc = jh_run(cmd);
+    DeleteFileA(tmp_ico);
+    DeleteFileA(tmp_rc);
+    if (rc != 0) {
+        const char *out = jh_run_get_output();
+        if (out && out[0]) {
+            fprintf(stderr, "W-132: windres failed: %s\n", out);
+        } else {
+            fprintf(stderr, "W-132: windres failed (exit=%d)\n", rc);
+        }
+        DeleteFileA(tmp_obj);
+        return -1;
+    }
+    if ((int)strlen(tmp_obj) >= out_cap) { DeleteFileA(tmp_obj); return -1; }
+    snprintf(out_obj, (size_t)out_cap, "%s", tmp_obj);
+    return 0;
+#else
+    /* POSIX: 没有 PE / DefaultIcon 这回事 —— 跳过(不算错) */
+    (void)out_obj; (void)out_cap;
+    return 1;
+#endif
 }

@@ -773,11 +773,14 @@
       - DefaultIcon 改成 [INSTALLDIR]bin\jhyy.exe,0 (v1.8.1 之后 jhyy.exe 自己
         embed RT_ICON group via Makefile + compiler/src/jhyy.rc),去掉对独立
         jhyy-icon.ico 的运行时依赖.
+        **W-131 (v4.0.20) 撤回这一条**:v4.0.8 起 jhyy.exe 由自举编译器产出,
+        不再 embed RT_ICON ⇒ "jhyy.exe,0" 取不到图标 ⇒ .jhyy 文件全是白板。
+        DefaultIcon 改回独立的 [INSTALLDIR]bin\jhyy-icon.ico(本来就装着)。
 
       Layout:
         HKCR\.jhyy\             (default) = "JHYY.SourceFile"
         HKCR\JHYY.SourceFile\   (default) = "JHYY Source File"
-                                  DefaultIcon\(default) = "[INSTALLDIR]bin\jhyy.exe,0"
+                                  DefaultIcon\(default) = "[INSTALLDIR]bin\jhyy-icon.ico",0
                                   shell\open\(default) = "Run with JHYY"
                                   shell\open\command\(default) = '"[INSTALLDIR]bin\jhyy.exe" run "%1"'
 
@@ -818,19 +821,27 @@
                        Key="DefaultIcon"
                        ForceCreateOnInstall="yes">
             <!--
-              v1.8.1 patch: point DefaultIcon at jhyy.exe's embedded RT_ICON
-              group (jhyy.exe,0). v1.5.7-rc1 rev 2 used the standalone
-              [INSTALLDIR]bin\jhyy-icon.ico file (named value mapping then
-              silently broken). jhyy.exe now embeds the same branded 6-frame
-              Vista+ ICO via windres (Makefile + compiler/src/jhyy.rc +
-              compiler/src/main.c), matching the brand asset and removing
-              the 7491-byte .ico runtime dependency for FileAssoc.
+              W-131 (v4.0.20) 修正: DefaultIcon 改回指向**独立**的
+              [INSTALLDIR]bin\jhyy-icon.ico。
 
-              Python uses the same idiom: HKCR\Python.File\DefaultIcon =
-              "C:\Python312\python.exe,0".
+              为什么必须改回来 —— v1.8.1 的前提**已经不成立**:
+              当时 jhyy.exe 由 C 侧编译器产出,那条路径会 windres 编
+              <out>.ico.o 再链进 exe(compiler/src/main.c:503-558),所以
+              "jhyy.exe,0" 能取到图标。v4.0.8(commit 1dc6a23)把 jhyy.exe
+              的产出改到**自举编译器**,而自举侧一行 windres 逻辑都没有
+              ⇒ 从那以后每个 jhyy.exe 都不带 RT_ICON 资源 ⇒ "jhyy.exe,0"
+              取不到图标 ⇒ **所有 .jhyy 文件在 Explorer 里变成白板**。
+
+              指向独立的 .ico 不依赖「exe 里有没有图标」这件事 ——
+              而这个 .ico 本来就装在 bin\(JhyyIconFile 组件),不多一个字节
+              的运行时依赖,也不受构建路径变化的影响。
+
+              路径带空格("C:\Program Files\...")⇒ 必须加引号。同一形式见
+              installer/common/jhyy-setuc/Program.cs:207
+              (iconKey.SetValue(null, $"\"{iconPath}\",{iconIndex}"))。
             -->
             <RegistryValue Type="string"
-                           Value="[INSTALLDIR]bin\jhyy.exe,0" />
+                           Value="&quot;[INSTALLDIR]bin\jhyy-icon.ico&quot;,0" />
           </RegistryKey>
           <RegistryKey Id="HKCR_JhyyShell"
                        Key="shell"

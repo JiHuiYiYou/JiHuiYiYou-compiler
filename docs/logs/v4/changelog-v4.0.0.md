@@ -980,6 +980,69 @@ sema 兜底)。⇒ XFAIL 摘掉 → **PASS**,**套件 XFAIL 数 1 → 0**。
 **⇒ ACTIVE 桶仍然清空**(本轮三条全是 RESOLVED:一个门坏了(修门)、一个功能坏了
 (修功能 + 补门)、一个规则是死代码(把规则接上 + 把门打开))。
 
+### W-131 / W-132 —— 「图标全没了」:v4.0.8 起 jhyy.exe 不再带图标资源
+
+**2026-10-24。** 用户报「我的文件图标没了」。查下来**不是** Explorer 设置、也
+**不是**图标缓存坏了 —— 是 **`jhyy.exe` 这个二进制自己不带图标资源**,而 `.jhyy`
+文件的图标恰恰是从它身上取的。
+
+**取证(三条互相独立的证据):**
+1. 注册表 `HKCR\JHYY.SourceFile\DefaultIcon` = `C:\Program Files\JHYY\bin\jhyy.exe,0`;
+2. `shell32!ExtractIconEx(那个 exe, 0)` = **0**(取不到);同目录 2026-09-02 的
+   备份 = **2**(32×32,有);
+3. 该 exe 的 sha256 == HEAD 提交的 `compiler/build/bin/jhyy.exe`
+   ⇒ **装出去的就是提交进仓的那份**,不是安装过程弄坏的。
+
+**根因:** 嵌图标的 windres 步骤**只在 C 侧编译器**里
+(`compiler/src/main.c:503-558`)。v4.0.8(commit `1dc6a23`,2026-10-16)把 jhyy.exe
+的产出改到**自举编译器**,而自举侧一行 windres 逻辑都没有 ⇒ 从那以后每个
+jhyy.exe 都不带图标资源。
+
+历史扫描(30 个已提交版本逐个 `ExtractIconEx`)给出的分界线非常干净:
+`a710320`(10-15)及之前 → 有图标;`1dc6a23`(10-16,v4.0.8)及之后 → 无图标。
+
+**两个修法:**
+- **W-131(文件图标)**:安装器的 FileAssoc `DefaultIcon` 改指**独立**的
+  `[INSTALLDIR]bin\jhyy-icon.ico`(`JhyyIconFile` 组件本来就装它),不再依赖
+  「exe 里有没有图标」这件事。已装机器的即时恢复:写 HKCU 影子键
+  (`HKCU\Software\Classes\JHYY.SourceFile\DefaultIcon`)+ `ie4uinit` 刷图标缓存。
+- **W-132(编译产物的图标)**:自举链接路径补 windres 步骤 ——
+  `compiler/src0/jhyy_helpers.c` 新增 `jh_build_icon_obj()`(整个做在 C 侧),
+  由 **`jh_gcc_invoke()`(链接命令的构造点)把 .o 插进链接行**,`jh_run()` 在链接
+  结束后删掉它。**`main.jhyy` 一个字节都没动** —— 见下面那条教训。
+
+**为什么 W-132 整个做在 C 侧、且 `main.jhyy` 一个字节都不动**:两条理由,第二条
+更要命。
+
+1. jhyy 语言**没有 1 字节标量类型** —— `*i32` 存是 **4 字节**(实测:写 0x41 之后
+   按 i32 读回来是 0x414141),逐字节的活儿(路径转正斜杠、换临时文件后缀)在 `.jhyy`
+   里做会把相邻 3 字节连带清成 NUL ⇒ 路径直接被截断;
+2. **给 `main.jhyy` 新增任何局部变量都会移位模块级 temp 编号 ⇒ 自举产物的行为会
+   漂移。** 实测:往 `link_with_gcc` 加 36 行 ⇒ 同一个编译器编出的 `main_jhyy` 里,
+   那段 argv 扫描的 `movzbl (%r8)`(1 字节读)从 **2 处变成 0 处** ⇒ `--target=`
+   不再被识别 ⇒ "cannot open file" ⇒ 6 个 sysv cross 用例全红 + artifact 门 7/9 红。
+   ⇒ `main.jhyy` 是当前编译器里「加一行就可能自伤」的文件(用户代码注释里那条
+   「自举产物行为漂移」说的就是它)⇒ **图标这条链全部落在 C 侧**。
+
+三个**实测**出来的约束(都写进了代码注释):
+1. **windres 的 `-i`/`-o` 路径必须用正斜杠** —— windres 走 gcc -E 预处理,gcc -E
+   把 '\' 当转义符:`C:\Users\x.rc` → `C:Usersx.rc`;
+2. **`.ico` 要先拷到纯 ASCII 临时路径** —— mingw CRT 的 argv 走 CP_ACP,中文路径
+   会变 mojibake(W-048 同款);
+3. **`SOURCE_DATE_EPOCH` 必须在 windres 之前设好** —— 否则 .o 的时间戳破坏 D26
+   逐字节可复现。
+
+还有一条:`system()` 不行 —— cmd.exe /c 遇到**以引号开头**的命令行会把外层引号
+吃掉(报「文件名或目录名语法不正确」),必须走 `jh_run`(CreateProcessA)。
+
+**新门:** `compiler/tests/bootstrap/artifact_checks.sh` 加两道常驻门 ——
+`compiler_icon`(jhyy.exe 自己带图标)+ `program_icon`(编出来的程序带图标),
+都用 **Explorer 同一套 API**(`shell32!ExtractIconExW`)问「这个 exe 里到底有没有
+图标」,而不是猜 `.rsrc` 节在不在。
+
+**验收:** jhyy.exe 与它编出来的 exe,`ExtractIconEx` 都从 0 变成 2 ✓;两道门都
+PASS ✓;`.jhyy` 文件在 Explorer 里恢复显示 "J" 图标 ✓。
+
 ---
 
 ## v4.x follow-on plans (⏳)

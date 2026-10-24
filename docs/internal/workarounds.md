@@ -136,6 +136,11 @@
 | [W-124](#w-124) | RESOLVED | `#[no_std]` 的链接行指向**不存在的** entry 符号 ⇒ no_std 程序... |
 | [W-125](#w-125) | RESOLVED | chained `&&T` 的报错路径 —— parser 先报「expected type... |
 | [W-126](#w-126) | RESOLVED | regress harness 的 `EXPECT-ERROR` 漏洞 ——... |
+| [W-127](#w-127) | ACTIVE | Windows 目标整数 / 浮点实参寄存器编号不自洽 —— 浮点参在前时读错寄存器 |
+| [W-128](#w-128) | ACTIVE | `0o` / `0b` 字面量静默算成 0 —— lexer 认前缀,求值走... |
+| [W-129](#w-129) | ACTIVE | `alignof(T)` 表达式无类型 —— 语义分析里没有 `alignof` 分支 |
+| [W-131](#w-131) | RESOLVED | jhyy.exe 不再 embed 图标资源 ⇒ `.jhyy` 文件在 Explorer... |
+| [W-132](#w-132) | RESOLVED | 自举链接路径不 embed 图标 ⇒ 用户编译出来的程序也没有 J 图标 |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -9810,3 +9815,293 @@ compile succeeded but EXPECT-ERROR expected: kw='...' — 编译器没报这个�
 **引用:**
 - 源码 `mcp-jhyy/jhyy_regress.py`(`run_test` 的 `rc == 0` 分支)
 - 源码 `scripts/dev/audit_test_assertions.py`(`expect-error` 类别 —— 静态查不出这条)
+
+---
+
+<a id="w-127"></a>
+## W-127: Windows 目标整数 / 浮点实参寄存器编号不自洽 —— 浮点参在前时读错寄存器
+
+**状态:** ACTIVE (2026-10-24 登记 —— v4.0.0 规范审核时实测抓到)
+**Filed-by:** audit-v4-spec-2026-10-24
+**日期:** 2026-10-24
+
+**触发面:** `compiler/src0/codegen_amd64_emit_call.jhyy` 的** caller 侧**实参寄存器分配
+（float 用**位置**计数,见 L729-736）与 **callee 侧**形参寄存器读取（整数按**整体参数位置**,
+见 L1396-1401）;整数实参分配器 `int_arg_alloc` 在
+`compiler/src0/codegen_amd64_xmm_argalloc.jhyy:131-151`。目标 = `amd64_win` /
+`amd64_win_freestanding`(**默认目标**,所有用户都踩得到)。
+
+**症状:** 浮点参数排在整数参数之前时,callee 从错误的寄存器读整数实参 ⇒ 拿到垃圾值。
+实测(探针,已删):
+```jhyy
+fn f(a: f64, b: i32) -> i32 { return b; }
+f(1.0, 42)          // → EXIT=1624839680(垃圾),不是 42
+fn g(a: i32, b: f64) -> i32 { return a; }
+g(42, 1.0)          // → EXIT=42 ✓(整数在前时正常)
+```
+
+**根因:** MS x64 的整数与浮点实参**共享同一个位置计数器**(第 1 个实参无论整数浮点
+都占 RCX/XMM0 这一「槽位」)。实现里:
+- caller 侧 float 走**位置**计数(`xmm_arg_pos`),整数走**整数独立计数器**
+  (`int_arg_alloc`),两者互不知情;
+- callee 侧整数形参按**整体参数位置**推算该读哪个整数寄存器。
+
+于是 `f(1.0, 42)`:caller 把 42 放进第 1 个整数槽(RCX),但 callee 按「整体位置 1」
+去读第 2 个整数槽(RDX)⇒ 读到未定义值。
+
+**危害:** 任何 `fn(f64, i32)` / `fn(f64, i64)` / `fn(f32, i32)` 形态的**调用方与
+被调方都在同一个编译单元里**就会静默算错值 —— 无编译期诊断、无运行时检查。
+跨语言调用(gcc → jhyy)同样受影响。
+
+**为什么现有门覆盖不到:** 回归套件里所有含浮点形参的函数要么**全是浮点**
+(`sum4(a: f64,b: f64,c: f64,d: f64)`)、要么**单个浮点**,**没有一道是
+「浮点参在前、整型参在后」**。186/186 PASS 说明不了这条 —— 与 W-126 / W-124 / W-125
+同一类:门绿着,但没在验它声称在验的东西。
+
+**修法(建议):** caller 与 callee 统一到 MS x64 的**共享位置计数器**:实参分配时
+维护一个 `arg_pos`,整数与浮点各自占位但不各自计数;callee 侧按同一规则反推。
+修完必须补一道回归用例(例 `mixed_int_float_arg.jhyy`:断言
+`f(1.0,42)==42 && g(42,1.0)==42`),并让**旧代码路径先红后绿**。
+
+**引用:**
+- 源码 `compiler/src0/codegen_amd64_emit_call.jhyy:729-736`(caller float 位置计数)
+- 源码 `compiler/src0/codegen_amd64_emit_call.jhyy:1396-1401`(callee 整数按位置读)
+- 源码 `compiler/src0/codegen_amd64_xmm_argalloc.jhyy:131-151`(`int_arg_alloc` 独立计数器)
+- 规范 `docs/abis/jhyy-abi-v4.0.0.md` § 12.12(已登记为 ABI 偏离)
+
+---
+
+<a id="w-128"></a>
+## W-128: `0o` / `0b` 字面量静默算成 0 —— lexer 认前缀,求值走 `strtoll(base=0)`
+
+**状态:** ACTIVE (2026-10-24 登记 —— v4.0.0 规范审核时实测抓到)
+**Filed-by:** audit-v4-spec-2026-10-24
+**日期:** 2026-10-24
+
+**触发面:** `compiler/src0/lexer.jhyy` 的 `lex_scan_number`(正确识别 `0o` / `0b` 前缀
+并设置 `base = 8` / `base = 2`),但 **base 不进 token**;真正求值在
+`compiler/src0/parser.jhyy:915`(以及 `:964` / `:1082` / `:1130` / `:1421`),
+一律是 `strtoll(t.start, 0, 0)` —— **base 0 = C 的自动识别,只认 `0x` 与前导零
+八进制,不认 `0o` / `0b`**(那是 C23 / GCC 扩展)。C 侧镜像同样:
+`compiler/src/lexer.c:142-156` 检出 base 后丢弃,`compiler/src/parser.c:249` /
+`:271` / `:859` 用 `strtoll(..., NULL, 0)`。
+
+**症状:** `0o77` → **0**(应 63),`0b1010` → **0**(应 10)。**无编译错误、无警告**。
+实测(探针,已删):
+```jhyy
+let o: i32 = 0o77;     // → EXIT=0(应 63)
+let b: i32 = 0b1010;   // → EXIT=0(应 10)
+let h: i32 = 0xFF;     // → EXIT=255 ✓
+let z: i32 = 077;      // → EXIT=63 ✓(前导零按八进制,C 语义)
+```
+
+**根因:** `strtoll(s, endptr, 0)` 遇到 `"0o77"` 时:前导 `0` ⇒ 判定为八进制 ⇒
+消费掉 `0` 后遇到 `o` 停止 ⇒ 返回 **0**,`endptr` 指向 `o`。`"0b1010"` 同理。
+
+**危害:** 静默错值(不是编译错误)。用户写二进制掩码 / 八进制权限位会拿到 0,
+且**没有任何信号**。旧规范 v1.3.0 § 4.1 明确文档化了 `0o77` / `0b1010` 是合法
+写法 —— 照着旧规范写代码就会踩。新规范 v4.0.0 已把两者移出正文(见
+`docs/abis/jhyy-lang-spec-v4.0.0.md` § 2.5 / 附录 B),但**编译器层面的 bug 仍在**。
+
+**修法(建议)二选一:**
+1. **真修**:lexer 把 base 存进 token(或直接在前缀检出时完成转换),parser 用
+   `strtoll(t.start, 0, base)` —— 注意 `base` 传 8 / 2 时 `strtoll` **不接受** `0o`/`0b`
+   前缀,得先把前缀剥掉或改用自写转换;同时保留「前导零 = 八进制」的 C 语义。
+2. **改成响亮失败**(最小改动):lexer 检出 `0o` / `0b` 时直接报
+   `octal/binary literal prefixes are not supported (use decimal or 0x hex)`,
+   杜绝静默 0。
+
+无论哪条,都要补一道回归用例(当前**零覆盖**)。
+
+**引用:**
+- 源码 `compiler/src0/lexer.jhyy`(`lex_scan_number`,`base` 检出后丢弃)
+- 源码 `compiler/src0/parser.jhyy:915` 等 5 处 `strtoll(t.start, 0, 0)`
+- 源码 `compiler/src/lexer.c:142-156` + `compiler/src/parser.c:249`(C 侧同缺陷)
+- 规范 `docs/abis/jhyy-lang-spec-v4.0.0.md` § 2.5 / 附录 B(已登记为语言限制)
+
+---
+
+<a id="w-129"></a>
+## W-129: `alignof(T)` 表达式无类型 —— 语义分析里没有 `alignof` 分支
+
+**状态:** ACTIVE (2026-10-24 登记 —— v4.0.0 规范审核时实测抓到)
+**Filed-by:** audit-v4-spec-2026-10-24
+**日期:** 2026-10-24
+
+**触发面:** `compiler/src0/sema.jhyy` 的常量折叠:有 `NODE_SIZEOF` 分支
+(约 L970-982),**没有 `NODE_ALIGNOF` 分支** —— `grep NODE_ALIGNOF sema.jhyy` = 0 命中。
+AST 节点本身存在(`compiler/src0/ast.jhyy:86` / `:1033-1039`)。
+
+**症状:** 两种写法都编译不过:
+```jhyy
+let a: i64 = alignof(i64);   // → error: type mismatch in let
+let a = alignof(i64);        // → error: function body type does not match return type
+```
+(`sizeof` 完全正常:`sizeof(i32)` = 4,类型 `i64`;`sizeof(some_var)` 则是
+`unknown type` —— `sizeof` 只接受**类型**不接受表达式。)
+
+**根因:** `alignof` 表达式在 sema 阶段没有被赋予类型,推断链走到 `void` / 无类型分支,
+于是「带标注」报类型不匹配、「不带标注」报函数返回类型不匹配。
+
+**危害:** 纯编译期功能完全不可用,但**零测试覆盖** —— 套件里有 `sizeof_basic.jhyy`,
+**没有** `alignof` 用例。旧规范 v1.3.0 § 2.8 声称 `alignof` 是可用的编译期常量表达式
+(新规范 v4.0.0 已把它移出正文并登记为限制)。注意:编译器**内部**的 `type_align()`
+是完整实现的(`compiler/src0/types.jhyy:372-391`)—— 缺的只是**语言层表达式**这一层接线。
+
+**修法(建议):** 在 sema 的常量折叠里补 `NODE_ALIGNOF` 分支,复用已有的
+`type_align(t)`;`alignof(T)` 的类型定为 `i64`(与 `sizeof` 一致)。补一道回归用例
+(`alignof_basic.jhyy`,断言 `alignof(i64)==8 && alignof(i32)==4 && alignof(u8)==1`),
+并**先确认旧代码路径红**再修。
+
+**引用:**
+- 源码 `compiler/src0/sema.jhyy:970-982`(`NODE_SIZEOF` 分支;无 `NODE_ALIGNOF`)
+- 源码 `compiler/src0/types.jhyy:372-391`(`type_align` —— 内部实现是完整的)
+- 源码 `compiler/src0/ast.jhyy:86` / `:1033-1039`(`NODE_ALIGNOF` AST 节点)
+- 规范 `docs/abis/jhyy-lang-spec-v4.0.0.md` § 2.8 / 附录 B(已登记为语言限制)
+
+<a id="w-131"></a>
+
+## W-131: jhyy.exe 不再 embed 图标资源 ⇒ `.jhyy` 文件在 Explorer 里全是白板
+
+**状态:** RESOLVED closed 2026-10-24 (v4.0.20) — DefaultIcon 改指独立的 jhyy-icon.ico;exe 自带图标另立 W-132
+**Filed-by:** audit-icon-2026-10-24
+**日期:** 2026-10-16 (v4.0.8 起) → 2026-10-24 (RESOLVED)
+
+**触发面:** `installer/wix/compiler/jhyy-compiler.wxs` 的 `HKCR_JhyyDefaultIcon`
+(装到 `HKLM\SOFTWARE\Classes\JHYY.SourceFile\DefaultIcon`),值 =
+`[INSTALLDIR]bin\jhyy.exe,0`。消费方是 Explorer 的图标解析(以及任何按
+DefaultIcon 取图标的程序)。
+
+**症状:** 所有 `.jhyy` 文件在资源管理器里显示**白板图标**(不是"没有图标",是
+默认的空白文件图标)。刷图标缓存、重新安装、换 shell 都不影响 —— 因为
+**取图标的源本身就没有图标**。
+
+实测取证(2026-10-24):
+- `HKCR\JHYY.SourceFile\DefaultIcon` = `C:\Program Files\JHYY\bin\jhyy.exe,0`
+- `shell32!ExtractIconEx("C:\Program Files\JHYY\bin\jhyy.exe", 0)` → **0**(取不到)
+- 同一目录 2026-09-02 的备份 `jhyy.exe.*.bak.20260902-092034` → **2**(32×32,有)
+- 该 exe 的 sha256 `97c56933…` == HEAD 提交的 `compiler/build/bin/jhyy.exe`
+  ⇒ 装出去的就是提交进仓的那份,**不是安装过程弄坏的**
+
+**根因:** v1.8.1 的 FileAssoc 前提是「jhyy.exe 自己 embed RT_ICON group」。
+那条 embed 逻辑**只在 C 侧编译器**里(`compiler/src/main.c:503-558`:windres 编
+`<out>.ico.o` 再链进 exe)。v4.0.8(commit `1dc6a23`,2026-10-16,"jhyy.exe 自己编
+src0 —— stage0/QBE 移出关键路径")把 jhyy.exe 的产出改到**自举编译器**,而自举侧
+(`compiler/src0/`)一行 windres 逻辑都没有 ⇒ 从那以后每个 jhyy.exe 都不带图标资源。
+
+历史扫描(30 个已提交版本逐个 `ExtractIconEx`)给出的分界线非常干净:
+- `a710320`(2026-10-15)及之前 → 有图标
+- `1dc6a23`(2026-10-16,v4.0.8)及之后 → 无图标
+
+**workaround:** `installer/wix/compiler/jhyy-compiler.wxs` 的 DefaultIcon 改指
+**独立**的 `[INSTALLDIR]bin\jhyy-icon.ico`(`JhyyIconFile` 组件本来就把它装到
+INSTALLDIR\bin\,不多一个字节的运行时依赖),不再依赖"exe 里有没有图标"这件事。
+
+已装机器的即时恢复(不需要 admin):写 HKCU 影子键 —— HKCR 合并视图里 HKCU 优先:
+```
+HKCU\Software\Classes\JHYY.SourceFile\DefaultIcon = "C:\Program Files\JHYY\bin\jhyy-icon.ico",0
+```
+(同时把 `shell\open` + `shell\open\command` 一起镜像过去,免得 HKCU 的半截
+ProgId 遮住 HKLM 的其余部分。)然后 `ie4uinit.exe -ClearIconCache` +
+`ie4uinit.exe -show` 刷图标缓存。
+
+**验收:** 即时恢复后 `SHGetFileInfo` 取 `.jhyy` 的图标 = 32×32 的 "J" 图标
+(取之前是 0/取不到)✓;Explorer 立刻恢复显示 ✓。
+
+**影响范围:** 所有用官方安装包装的用户 —— `.jhyy` 文件在 Explorer 里全是白板。
+不影响编译/运行(jhyy.exe 本身功能正常)。
+
+**失效条件:** 不适用(已 RESOLVED)。若将来 W-132 也修好(jhyy.exe 自带图标),
+DefaultIcon 指回 `jhyy.exe,0` 亦可 —— 但指向独立 .ico 与之等价且不依赖构建路径。
+
+**引用:**
+- 源码 `installer/wix/compiler/jhyy-compiler.wxs`(`HKCR_JhyyDefaultIcon` + 上方注释)
+- 源码 `compiler/src/main.c:503-558`(C 侧 windres 嵌图标的**唯一**实现)
+- commit `1dc6a23` (2026-10-16) — v4.0.8 自举切换,图标链断在这里
+- 源码 `installer/common/jhyy-setuc/Program.cs:207`(同一图标写法的第二处实现)
+
+<a id="w-132"></a>
+
+## W-132: 自举链接路径不 embed 图标 ⇒ 用户编译出来的程序也没有 J 图标
+
+**状态:** RESOLVED closed 2026-10-24 (v4.0.20) — 图标资源对象由 C 侧插进链接行
+**Filed-by:** audit-icon-2026-10-24
+**日期:** 2026-10-16 (v4.0.8 起) → 2026-10-24 (RESOLVED)
+
+**触发面:** `compiler/src0/jhyy_helpers.c` 的 `jh_gcc_invoke`(自举侧唯一的**链接
+命令构造点**)——图标资源对象由它产出并插进链接行。
+
+**症状:** 用户用 jhyy.exe 编出来的 **.exe 没有 JHYY "J" 图标**(默认应用图标)。
+v1.8.1 的原意(`compiler/src/jhyy.rc` 的注释)是「embed 进 jhyy.exe **和每一个
+.jhyy 编译出来的程序**」—— 后半句从来没被兑现过。
+
+**根因:** 嵌图标的 windres 步骤只存在于 **C 侧**(`compiler/src/main.c:503-558`)。
+v4.0.8(commit `1dc6a23`)把 jhyy.exe 的产出改到自举编译器,自举侧的链接路径不做
+任何图标处理 ⇒ 链接行里没有 `.ico.o` ⇒ 产物无 RT_ICON。
+
+**修法(2026-10-24):** 在自举链接路径补 windres 步骤:
+1. `compiler/src0/jhyy_helpers.c` 新增 `jh_build_icon_obj()` —— 拷 `.ico` 到 ASCII
+   临时路径 → 现场生成 `.rc` → windres 编成 `.ico.o`;
+2. **`jh_gcc_invoke()` 挂钩** —— 它是链接命令的构造点,在那里把 `.ico.o` 插进
+   命令行(`.o` 顺序无关);
+3. **`jh_run()` 收尾** —— 链接结束(成或败)后删掉那个 `.ico.o`。
+
+**⚠️ 为什么这条链上的改动**一个字节都不进 `main.jhyy`**(这是本条最要紧的教训):**
+
+给 `main.jhyy` **新增任何局部变量**都会移位**模块级 temp 编号** ⇒ 自举产物的
+**行为**会漂移。实测(往 `link_with_gcc` 加 36 行:2 个局部变量 + 1 个 extern 声明
++ 几处调用):
+
+- 同一个编译器编 HEAD 源码 vs 编这份源码 ⇒ `main_jhyy` 里的
+  `movzbl (%r8)`(那段 argv 扫描的**1 字节读**)从 **2 处变成 0 处**
+  ⇒ `--target=` 不再被识别 ⇒ 编译器把 `--target=xxx` 当成文件名
+  ⇒ **"cannot open file"**;
+- 连带:6 个 sysv cross 用例全红 + `artifact_checks.sh` 9 条里 7 条红;
+- 同一份源码、同一条命令,有时过有时不过(读的是错位的槽 ⇒ 读到垃圾)。
+
+⇒ **`main.jhyy` 是当前编译器里「加一行就可能自伤」的文件**(根因是 temp→槽
+的映射随全局编号漂移 —— 见用户代码注释里那条「自举产物行为漂移」)。
+⇒ **图标这条链全部落在 C 侧**:`jh_gcc_invoke` 是 C 函数,正好是能插手链接命令
+而不动 `.jhyy` 的位置。
+
+**为什么图标处理整个做在 C 侧(另外两条理由):**
+- **jhyy 语言没有 1 字节标量类型** —— `*i32` 存是 **4 字节**(实测:往 *i32 写
+  0x41 之后按 i32 读回来是 0x414141),逐字节的活儿(路径反斜杠 → 正斜杠、换临时
+  文件后缀)在 `.jhyy` 里做会把相邻 3 字节连带清成 NUL ⇒ 路径直接被截断;
+- 跟 C 侧 `main.c:503-558` 的既有做法同构(那边也是 windres + 链 .ico.o),
+  两边行为一致,不会一个能一个不能。
+
+三个**实测**出来的约束(都写进了代码注释):
+1. **windres 的 `-i`/`-o` 路径必须用正斜杠** —— windres 走 gcc -E 预处理,
+   gcc -E 把反斜杠当转义符:`C:\Users\x.rc` → `C:Usersx.rc`,报
+   "No such file or directory"。.rc 里那个 ICON 路径同样要正斜杠。
+2. **.ico 要先拷到纯 ASCII 临时路径** —— mingw CRT 的 argv 走 CP_ACP,
+   中文路径会变 mojibake(W-048 同款)。
+3. **SOURCE_DATE_EPOCH 必须在 windres 之前设好** —— windres 会把 .o 的时间戳
+   写进去,不固定就破坏 D26 逐字节可复现(同 gcc 那条一样)。
+
+还有一条**踩过的坑**:`system()` 不行 —— cmd.exe /c 遇到**以引号开头**的命令行会
+把外层引号吃掉,报「文件名或目录名语法不正确」。必须走 `jh_run`
+(CreateProcessA,自己解析 quoted path)。C 侧 main.c 用 system() 没事,是因为
+那边的 windres 是 PATH 解析的裸名(不以引号开头)。
+
+**验收:**
+- 编出来的 exe:`ExtractIconEx(exe, 0)` = **2**(32×32 图标可取)✓(修之前是 0)
+- `compiler/tests/bootstrap/artifact_checks.sh` 新增两道常驻门:
+  `compiler_icon`(jhyy.exe 自己带图标)+ `program_icon`(编出来的程序带图标)✓
+- 全量回归 190/190 PASS ✓
+
+**影响范围:** 所有用户编译出来的程序(不含 jhyy.exe 自身 —— 那部分见 W-131)。
+
+**失效条件:** 不适用(已 RESOLVED)。若 windres 不在 PATH 上 → `jh_path_windres()`
+退回裸名 → windres 找不到 → 链接**硬失败**(不静默丢图标:图标失败时链接命令里
+会被塞一个不存在的 .o,让 ld 报错)。若图标源文件不存在(例如裁剪过的安装)→
+跳过嵌图标,编译照常(不算错)。
+
+**引用:**
+- 源码 `compiler/src0/jhyy_helpers.c`(`jh_build_icon_obj` / `jh_gcc_invoke` 挂钩 /
+  `jh_run` 收尾 / `jh_path_icon` / `jh_path_windres` / `jh_path_to_fwd` /
+  `jh_set_tmp_suffix`)
+- 源码 `compiler/src/jhyy.rc`(v1.8.1 的原意声明)
+- 源码 `compiler/src/main.c:503-558`(C 侧同款实现)
+- commit `1dc6a23` (2026-10-16) — v4.0.8 自举切换(图标链断在这里)

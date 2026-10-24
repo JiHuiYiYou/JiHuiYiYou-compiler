@@ -226,6 +226,8 @@ W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_
 - W-122 → RESOLVED (2026-10-20, v4.0.18 —— side-file 每次编译开头清干净 ⇒ 不再跨编译泄漏)
 - W-113 → RESOLVED (2026-10-20, v4.0.18 —— `asm!` / `fence_*` 内联进函数体;之前是 .s 末的死字节)
 - W-115 → RESOLVED (2026-10-20, v4.0.18 —— 根因是闭包捕获生成坏代码;现在编译期明确报错,W-089 的 reproducer 转 PASS)
+- W-131 → RESOLVED (2026-10-24, v4.0.20 —— **v4.0.8 起 jhyy.exe 不再 embed 图标资源** ⇒ `.jhyy` 文件在 Explorer 里全是白板。安装器 `DefaultIcon` 改指独立 `jhyy-icon.ico`(本来就装着);已装机器写 HKCU 影子键即时恢复)
+- W-132 → RESOLVED (2026-10-24, v4.0.20 —— 自举链接路径补 windres 步骤 ⇒ **用户编译出来的程序**也带 "J" 图标;**实现全在 C 侧**(`jh_gcc_invoke` 挂钩 + `jh_run` 收尾),`main.jhyy` 零改动 —— 给它加局部变量会移位 temp 编号 ⇒ 自举产物行为漂移;新增常驻门 `artifact_checks.sh compiler_icon` + `program_icon`,都用 Explorer 同一套 API(`shell32!ExtractIconExW`)问「exe 里到底有没有图标」)
 
 历史 workaround 走 git history;`workarounds.md` 保留 RESOLVED/SUPERSEDED/INVALID 状态作 audit ledger。
 

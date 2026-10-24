@@ -575,6 +575,88 @@ EOF
 }
 
 # ════════════════════════════════════════════════════════════════════════════
+# 8. W-131/W-132 — 链出来的 exe 必须带 RT_ICON 资源
+# ════════════════════════════════════════════════════════════════════════════
+#
+# 症状(v4.0.8 起):v4.0.8 把 jhyy.exe 的产出从 C 侧编译器改到**自举编译器**,
+# 而嵌图标的 windres 步骤只在 C 侧(compiler/src/main.c:503-558)有 —— 自举侧
+# 一行都没有。于是每一个 jhyy.exe 都不带图标资源。
+#
+# 这个失效模式**任何 .jhyy 测试都验不到**:程序照跑、退出码照对,只是图标没了。
+# 用户侧的表征是「.jhyy 文件在 Explorer 里全是白板」——
+# 因为 installer 的 FileAssoc 把 DefaultIcon 指向 jhyy.exe,0。
+#
+# 验法:用 **Explorer 同一套 API**(shell32!ExtractIconExW)问「这个 exe 里到底
+# 有没有图标」。不用 objdump 猜 .rsrc 节 —— 那个只能证明有资源节,不能证明
+# 里面有可取的图标组。
+#
+# 两条断言:
+#   ① 编译器自己(jhyy.exe)带图标 —— v1.8.1 的原意之一;
+#   ② **它编出来的程序**带图标 —— v1.8.1 的原意之二(用户天天看的东西)。
+
+# icon_probe <exe> → 打印 ExtractIconExW 拿到的图标个数(0 = 没有图标)
+icon_probe() {
+    python - "$1" <<'PY'
+import ctypes, sys
+from ctypes import wintypes
+shell32 = ctypes.WinDLL("shell32")
+shell32.ExtractIconExW.argtypes = [wintypes.LPCWSTR, ctypes.c_int,
+                                   ctypes.POINTER(wintypes.HICON),
+                                   ctypes.POINTER(wintypes.HICON),
+                                   wintypes.UINT]
+shell32.ExtractIconExW.restype = wintypes.UINT
+large = (wintypes.HICON * 1)()
+small = (wintypes.HICON * 1)()
+r = shell32.ExtractIconExW(sys.argv[1], 0, large, small, 1)
+# 0xFFFFFFFF = 文件不存在/取不到(不是「没有图标」)
+print(0 if r == 0xFFFFFFFF else int(r))
+PY
+}
+
+check_compiler_icon() {
+    hdr "W-131/W-132  jhyy.exe 自己是否带图标资源"
+    [ -x "$JHYY_EXE" ] || { skip "compiler_icon" "jhyy.exe 不存在"; return; }
+
+    local exe n
+    exe=$(cygpath -w "$JHYY_EXE" 2>/dev/null || echo "$JHYY_EXE")
+    n=$(icon_probe "$exe")
+    if [ "${n:-0}" -eq 0 ]; then
+        bad "compiler_icon" "jhyy.exe 里取不到图标(ExtractIconEx=0)—— 自举链接路径没嵌 RT_ICON 资源(W-131/W-132 未修)"
+        return
+    fi
+    ok "compiler_icon(jhyy.exe 带 $n 个图标)"
+}
+
+check_program_icon() {
+    hdr "W-131/W-132  jhyy 编出来的程序是否带图标资源"
+    [ -x "$JHYY_EXE" ] || { skip "program_icon" "jhyy.exe 不存在"; return; }
+
+    cat > "$WORK/icon.jhyy" <<'EOF'
+fn main_jhyy() -> i32 { return 7; }
+EOF
+    # 注意:这里**不传 --target** —— 默认 target 就是 amd64_win(见 target_default()),
+    # 而 `--target=` 放文件前面这条形式当前有个**既有**回归(见 workarounds.md 的
+    # 「自举产物行为漂移」那条):argv 里的 --target= 没被剥掉 → 编译器把
+    # "--target=amd64_win" 当成文件名 → "cannot open file"。
+    # 那条不是本门要验的东西,门不该被它拖红。
+    if ! "$JHYY_EXE" compile "$WORK/icon.jhyy" -o "$WORK/icon" \
+            > "$WORK/icon.log" 2>&1; then
+        badenv "program_icon" "编译失败:$(tail -3 "$WORK/icon.log" | tr '\n' ' ')"
+        return
+    fi
+    local exe n
+    exe=$(cygpath -w "$WORK/icon.exe" 2>/dev/null || echo "$WORK/icon.exe")
+    [ -f "$exe" ] || { badenv "program_icon" "没产出 .exe"; return; }
+
+    n=$(icon_probe "$exe")
+    if [ "${n:-0}" -eq 0 ]; then
+        bad "program_icon" "编出来的 exe 里取不到图标(ExtractIconEx=0)—— 链接路径没嵌 RT_ICON 资源(W-131/W-132 未修)"
+        return
+    fi
+    ok "program_icon(编出来的 exe 带 $n 个图标)"
+}
+
+# ════════════════════════════════════════════════════════════════════════════
 
 # ════════════════════════════════════════════════════════════════════════════
 # 自检:证明分类逻辑(而不是编译器行为)本身是对的
@@ -662,6 +744,8 @@ want sysv_mixed_struct && check_sysv_mixed_struct
 want sysv_memory_class && check_sysv_memory_class
 want sysv_arg_spill  && check_sysv_arg_spill
 want many_functions   && check_many_functions
+want compiler_icon    && check_compiler_icon
+want program_icon     && check_program_icon
 
 echo
 echo "=== artifact_checks 结果: $PASS_N PASS / $KNOWN_N KNOWN-FAIL / $FAIL_N FAIL / $SKIP_N SKIP ==="
