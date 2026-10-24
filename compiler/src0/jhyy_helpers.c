@@ -580,8 +580,18 @@ __attribute__((used)) int jh_gcc_invoke(char *out_buf, int out_size, const char 
         /* 图标对象插在 .s 前面 —— gcc/mingw 的 .o 顺序无关,放前面便于
            在链接命令里一眼看见它。jh_run 会在子进程结束后把它删掉。 */
         jh_icon_obj_store(ico_obj);
-        return snprintf(out_buf, (size_t)out_size, "\"%s\" \"%s\" %s",
-                        jh_gcc_path(), ico_obj, args);
+        {
+            int n = snprintf(out_buf, (size_t)out_size, "\"%s\" \"%s\" %s",
+                             jh_gcc_path(), ico_obj, args);
+            /* 每进程打印一次完整链接行:「图标 .o 到底在不在链接行里」必须看得见
+               (CI 上产物没图标、本地有 —— 差异只能靠这行定位)。 */
+            static int reported = 0;
+            if (!reported) {
+                reported = 1;
+                fprintf(stderr, "W-132: link line = %s\n", out_buf);
+            }
+            return n;
+        }
     }
     if (ico_rc < 0) {
         /* 失败 = **响亮地**让链接失败,而不是静默产出一个没图标的 exe。

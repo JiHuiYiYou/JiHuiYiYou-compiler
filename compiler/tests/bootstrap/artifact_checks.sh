@@ -613,6 +613,27 @@ print(0 if r == 0xFFFFFFFF else int(r))
 PY
 }
 
+# icon_diag <exe> → 失败时的诊断尾巴:产物里到底有没有 .rsrc 节,以及
+# **对照探针** —— jhyy_stage0.exe 是 C 侧编译器(main.c 的 windres)链出来的,
+# 走的是同款「windres → .ico.o → 链接」流程:
+#   · stage0 **有**图标而 jhyy.exe 没有 ⇒ 链接这一步把 .rsrc 丢了
+#   · stage0 **也没有**           ⇒ windres 那一侧的问题(或工具链版本)
+# 这条对照是本门能自我定位的关键 —— 光看「取不到图标」分不出这两种。
+icon_diag() {
+    local exe="$1" out="" sect="" s0=""
+    sect=$(objdump -h "$exe" 2>/dev/null | grep -E '\.rsrc' | head -1 | tr -s ' ')
+    if [ -n "$sect" ]; then
+        out=" | .rsrc 节: $sect"
+    else
+        out=" | 产物里**没有 .rsrc 节**"
+    fi
+    if [ -x "$JHYY_ROOT/compiler/build/bin/jhyy_stage0.exe" ]; then
+        s0=$(icon_probe "$(cygpath -w "$JHYY_ROOT/compiler/build/bin/jhyy_stage0.exe" 2>/dev/null || echo "$JHYY_ROOT/compiler/build/bin/jhyy_stage0.exe")")
+        out="$out | 对照 jhyy_stage0.exe(C 侧 windres 链法)图标数=${s0:-?}"
+    fi
+    printf '%s' "$out"
+}
+
 check_compiler_icon() {
     hdr "W-131/W-132  jhyy.exe 自己是否带图标资源"
     [ -x "$JHYY_EXE" ] || { skip "compiler_icon" "jhyy.exe 不存在"; return; }
@@ -621,7 +642,7 @@ check_compiler_icon() {
     exe=$(cygpath -w "$JHYY_EXE" 2>/dev/null || echo "$JHYY_EXE")
     n=$(icon_probe "$exe")
     if [ "${n:-0}" -eq 0 ]; then
-        bad "compiler_icon" "jhyy.exe 里取不到图标(ExtractIconEx=0)—— 自举链接路径没嵌 RT_ICON 资源(W-131/W-132 未修)"
+        bad "compiler_icon" "jhyy.exe 里取不到图标(ExtractIconEx=0)—— 自举链接路径没嵌 RT_ICON 资源(W-131/W-132 未修)$(icon_diag "$exe")"
         return
     fi
     ok "compiler_icon(jhyy.exe 带 $n 个图标)"
@@ -650,7 +671,7 @@ EOF
 
     n=$(icon_probe "$exe")
     if [ "${n:-0}" -eq 0 ]; then
-        bad "program_icon" "编出来的 exe 里取不到图标(ExtractIconEx=0)—— 链接路径没嵌 RT_ICON 资源(W-131/W-132 未修)"
+        bad "program_icon" "编出来的 exe 里取不到图标(ExtractIconEx=0)—— 链接路径没嵌 RT_ICON 资源(W-131/W-132 未修)$(icon_diag "$exe")"
         return
     fi
     ok "program_icon(编出来的 exe 带 $n 个图标)"
