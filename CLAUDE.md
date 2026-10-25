@@ -4,10 +4,14 @@
 当前: **🟢 v4.0.19 发布**（2026-10-20，**台账 ACTIVE 桶首次清空(14 → 0)**）——
 <https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v4.0.19>
 （installer .exe + compiler .msi + vscode .vsix + SHA256.txt）。
-**🟡 v4.0.20 进行中**（2026-10-24，**审计「skip test / 新增 test」的三处门修复**：
-W-126 harness 的 `EXPECT-ERROR` 漏洞 / W-124 `#[no_std]` 零覆盖 / W-125 chained
-`&&T` 死规则 ⇒ **200/200 PASS + 0 XFAIL + 19 SKIP**(219 total，本轮又真修 W-130 / W-133)；本机 Docker 起 daemon 后
-6 个 sysv 用例本地也真跑）—— **未发布**，下一个动作 = 走发布链 + promote v4.0.0 final。
+**🟡 v4.0.21 进行中**（2026-10-25，**W-136 side-file per-pid 唯一化 + W-137 Makefile
+变量漏改** ⇒ **200/200 PASS + 0 XFAIL + 19 SKIP**(219 total)；本机 Docker 起 daemon 后
+**7 个** sysv 用例本地也真跑；artifact_checks **13 PASS**(新增 `helpers_symbols` 门)；
+台账 **0 ACTIVE / 0 DEFERRED**）—— **未发布**，下一个动作 = 走发布链 + promote v4.0.0 final。
+⚠️ 本轮最值得记住的一条：**「链接失败」的三层掩护**（悬空注释吞掉 C 桥符号 →
+`$(CFLAGS_STAGE0)` 未定义把 `-Wall -Wextra` 一起丢掉 → PATH 里 `/mingw64/bin`
+抢在 ucrt64 前面导致 ld 加载错版本 DLL、**失败时零输出**）⇒ 详见
+[`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md) § v4.0.21。
 **v4.0.0 final 的 promote 条件全部满足**（184/184 生产+自举、closure v2==v3、
 fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 此前 v3.4.2 / v4.0.0-rc1 / v4.0.1 / v4.0.2 / v4.0.6 五个 tag 全部发布失败，
@@ -144,13 +148,14 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 
 ## 当前活跃 workarounds
 
-**0 ACTIVE / 1 DEFERRED**(2026-10-25 —— ACTIVE 仍为 **0**;2026-10-20 曾清零 14 → 0,清零过程:**W-104 RESOLVED**(v4.0.12 —— ≤16B eightbyte 分类 + >16B MEMORY class 整体落栈,与 gcc 三方向对拍全绿);**W-114 RESOLVED**(v4.0.14 —— enum 的 ABI 两侧统一:参数按地址传、返回值走 sret、调用结果是 8 字节指针;顺带修了 **W-119**:SysV 帧布局把第 0 号局部变量放在 `0(%rbp)` = 覆盖旧 rbp);**W-112 RESOLVED**(v4.0.16 —— `#[link_section]` 的 `.section` 之前被插进 link 路径的副本,磁盘上的 .s 里没有);**W-103 RESOLVED**(v4.0.16 —— `std_os_*` 五个 mock 接真 libc bridge;顺带把 POSIX/Win 的 `O_*` flag 差异在桥这一层翻译掉 —— **Windows 的 `_O_CREAT`=0x100 不是 POSIX 的 0x40**,mock 从不调 `open(2)` 所以这错一直藏着;并让 std lib **第一次真的可被用户代码 import**(`import os;` 两级查找:main 文件旁边 → std lib 目录)),测试从 inline 副本改成 import 真身),**W-107 RESOLVED**(v4.0.17 —— 五张 per-fn 表改成**按实际函数数**分配,固定上限 4096 与「太多函数」的响亮守门一并删除,**没有上限了**;顺带挖出并修掉 **W-120**:temp 表的 65536 上限会让**越界静默算错值** —— 修 W-107 会暴露它,两者必须一起做),**W-105 + W-105.1 RESOLVED**(v4.0.18 —— (a)「`&mut` 真的能用」(v4.0.15)+ (b)**最小独占检查**(同作用域内双 `&mut` 互斥)落地;`check_borrow` / `check_cap_pass` 两个「恒 return 1 的假装会检查」函数都删掉了。**上一版 (b) 失败的真根因是 W-107**(per-fn 表的固定上限:那次尝试加了几个顶层函数把 main.jhyy 推过 1024 → 被丢弃的函数帧算成 8 字节 → 「帧偏移 ≈ -515KB 的写」),W-107 改成按实际函数数分配后阻塞自然消失),**W-118 RESOLVED**(v4.0.18 —— 语言 lexer 的 `lex_peek_char` 加 EOF 守卫;**防御性**修复:这条从来没观测到危害,只是把「EOF 是隐式的」变成显式的),顺带挖出并修掉 **W-121**(合成 closure 的符号名取自**节点堆地址** ⇒ ASLR ⇒ **同一编译器连编两次 `.s` 就不同**,产物不可复现;改用计数器)和 **W-122**(四个 side-file 用**固定路径** ⇒ 上一次编译的内容泄漏到下一次 —— `--no-link` 批量编译后紧接 `make` 会用 no_std 的链接行链一个正常程序 ⇒ 整个 build 挂掉),**W-113 RESOLVED**(v4.0.18 —— `asm!` / `fence_*` 的文本经 IL(`dbgasm <hex>`)**内联进函数体**;之前是 append 到 .s 末 = 落在所有函数之外 = **死字节** —— 连**内存屏障都从来没执行过**;`asm_before_ret` 从 KNOWN-FAIL 升级成真门),**W-115 RESOLVED**(v4.0.18 —— W-089 的 reproducer 之所以 STACK_OVERFLOW,根因**不是** W-089:是那个 8-subtest 里的**闭包捕获了外层变量** —— 闭包捕获在 v3.2.1 的 MVP 范围里明确不支持,但编译器**没有任何检查** ⇒ 给它生成坏代码(env 压根没传进合成 fn)⇒ 运行时炸。现在**编译期明确报错** ✓,reproducer 已转 PASS(EXIT=0)——「W-089 已 RESOLVED」这句话**现在有证据支撑**了),**W-106 RESOLVED**(v4.0.19 —— 那处「每次 symbol lookup 白造一个 StringBuilder」的
+**0 ACTIVE / 0 DEFERRED**(2026-10-25 —— ACTIVE 仍为 **0**;DEFERRED 也归零了:W-134.1
+的 CI pytest step 已由 commit `2ab0f24` 落地,台账此前忘了翻状态 ⇒ 0/0;2026-10-20 曾清零 14 → 0,清零过程:**W-104 RESOLVED**(v4.0.12 —— ≤16B eightbyte 分类 + >16B MEMORY class 整体落栈,与 gcc 三方向对拍全绿);**W-114 RESOLVED**(v4.0.14 —— enum 的 ABI 两侧统一:参数按地址传、返回值走 sret、调用结果是 8 字节指针;顺带修了 **W-119**:SysV 帧布局把第 0 号局部变量放在 `0(%rbp)` = 覆盖旧 rbp);**W-112 RESOLVED**(v4.0.16 —— `#[link_section]` 的 `.section` 之前被插进 link 路径的副本,磁盘上的 .s 里没有);**W-103 RESOLVED**(v4.0.16 —— `std_os_*` 五个 mock 接真 libc bridge;顺带把 POSIX/Win 的 `O_*` flag 差异在桥这一层翻译掉 —— **Windows 的 `_O_CREAT`=0x100 不是 POSIX 的 0x40**,mock 从不调 `open(2)` 所以这错一直藏着;并让 std lib **第一次真的可被用户代码 import**(`import os;` 两级查找:main 文件旁边 → std lib 目录)),测试从 inline 副本改成 import 真身),**W-107 RESOLVED**(v4.0.17 —— 五张 per-fn 表改成**按实际函数数**分配,固定上限 4096 与「太多函数」的响亮守门一并删除,**没有上限了**;顺带挖出并修掉 **W-120**:temp 表的 65536 上限会让**越界静默算错值** —— 修 W-107 会暴露它,两者必须一起做),**W-105 + W-105.1 RESOLVED**(v4.0.18 —— (a)「`&mut` 真的能用」(v4.0.15)+ (b)**最小独占检查**(同作用域内双 `&mut` 互斥)落地;`check_borrow` / `check_cap_pass` 两个「恒 return 1 的假装会检查」函数都删掉了。**上一版 (b) 失败的真根因是 W-107**(per-fn 表的固定上限:那次尝试加了几个顶层函数把 main.jhyy 推过 1024 → 被丢弃的函数帧算成 8 字节 → 「帧偏移 ≈ -515KB 的写」),W-107 改成按实际函数数分配后阻塞自然消失),**W-118 RESOLVED**(v4.0.18 —— 语言 lexer 的 `lex_peek_char` 加 EOF 守卫;**防御性**修复:这条从来没观测到危害,只是把「EOF 是隐式的」变成显式的),顺带挖出并修掉 **W-121**(合成 closure 的符号名取自**节点堆地址** ⇒ ASLR ⇒ **同一编译器连编两次 `.s` 就不同**,产物不可复现;改用计数器)和 **W-122**(四个 side-file 用**固定路径** ⇒ 上一次编译的内容泄漏到下一次 —— `--no-link` 批量编译后紧接 `make` 会用 no_std 的链接行链一个正常程序 ⇒ 整个 build 挂掉),**W-113 RESOLVED**(v4.0.18 —— `asm!` / `fence_*` 的文本经 IL(`dbgasm <hex>`)**内联进函数体**;之前是 append 到 .s 末 = 落在所有函数之外 = **死字节** —— 连**内存屏障都从来没执行过**;`asm_before_ret` 从 KNOWN-FAIL 升级成真门),**W-115 RESOLVED**(v4.0.18 —— W-089 的 reproducer 之所以 STACK_OVERFLOW,根因**不是** W-089:是那个 8-subtest 里的**闭包捕获了外层变量** —— 闭包捕获在 v3.2.1 的 MVP 范围里明确不支持,但编译器**没有任何检查** ⇒ 给它生成坏代码(env 压根没传进合成 fn)⇒ 运行时炸。现在**编译期明确报错** ✓,reproducer 已转 PASS(EXIT=0)——「W-089 已 RESOLVED」这句话**现在有证据支撑**了),**W-106 RESOLVED**(v4.0.19 —— 那处「每次 symbol lookup 白造一个 StringBuilder」的
 死存储删掉了:它注释里的理由(「逼 codegen 物化栈帧」)**早就被证伪**(删不删栈帧都
 完整物化);而 2026-10-18 那次「删掉它 ⇒ 偶发失败 ⇒ 它承重」的对照实验**归错了因** ——
 真凶是 **W-123**(`jh_mktemp_ascii` 的 seed = `pid ^ tid ^ ctr`,而 Windows 的 pid
 与主线程 tid 来自**同一个全局计数器** ⇒ `N ^ (N+1) = 1` ⇒ **每两个并发进程就撞一次
 同一个临时文件名** ⇒ 一个的 rename 失败 ⇒ **编译失败**。W-123 修好后:并发编译 32 个
-→ **0 失败**(修复前 4 个)),**0 ACTIVE / 123 索引行**(DEFERRED 1 条 = W-134.1;2026-10-25 登记),per `docs/internal/workarounds.md` 索引表):
+→ **0 失败**(修复前 4 个)),**0 ACTIVE / 0 DEFERRED / 126 索引行**(W-134.1 的 CI step 已由 `2ab0f24` 落地,2026-10-25 补翻状态),per `docs/internal/workarounds.md` 索引表):
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
@@ -250,6 +255,9 @@ W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_
 - W-115 → RESOLVED (2026-10-20, v4.0.18 —— 根因是闭包捕获生成坏代码;现在编译期明确报错,W-089 的 reproducer 转 PASS)
 - W-131 → RESOLVED (2026-10-24, v4.0.20 —— **v4.0.8 起 jhyy.exe 不再 embed 图标资源** ⇒ `.jhyy` 文件在 Explorer 里全是白板。安装器 `DefaultIcon` 改指独立 `jhyy-icon.ico`(本来就装着);已装机器写 HKCU 影子键即时恢复)
 - W-132 → RESOLVED (2026-10-24, v4.0.20 —— 自举链接路径补 windres 步骤 ⇒ **用户编译出来的程序**也带 "J" 图标;**实现全在 C 侧**(`jh_gcc_invoke` 挂钩 + `jh_run` 收尾),`main.jhyy` 零改动 —— 给它加局部变量会移位 temp 编号 ⇒ 自举产物行为漂移;新增常驻门 `artifact_checks.sh compiler_icon` + `program_icon`,都用 Explorer 同一套 API(`shell32!ExtractIconExW`)问「exe 里到底有没有图标」)
+- W-136 → RESOLVED (2026-10-25, v4.0.21 —— side-file 路径加 **pid 后缀** ⇒ 并发编译互不干扰。A/B 实测:旧编译器 12 路并发**静默丢掉 2/12 的 `#[link_section]` 指令**(2 种不同产物),新编译器 12/12 逐字节相同)
+- W-137 → RESOLVED (2026-10-25, v4.0.21 —— `Makefile` 的 `$(CFLAGS_STAGE0)` 未定义(M5 Part 1 改名时漏改两处使用处)⇒ 两个 `.o` 丢掉 `-std=c11 -Wall -Wextra` ⇒ **`-Wcomment` 警告被静默** ⇒ 正是它掩护了 W-136 那次「悬空注释吞掉两个 C 桥符号」的编译期错误)
+- W-134.1 → RESOLVED (2026-10-25, v4.0.21 —— CI 已接 MCP pytest 套件,commit `2ab0f24`;此前台账一直写着 DEFERRED ⇒ **DEFERRED 桶归零**)
 
 历史 workaround 走 git history;`workarounds.md` 保留 RESOLVED/SUPERSEDED/INVALID 状态作 audit ledger。
 

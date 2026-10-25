@@ -146,8 +146,11 @@
 | [W-133.1](#w-133.1) | SUPERSEDED | 聚合 `==` / `!=` 不接受**函数调用结果**作为操作数 |
 | [W-133.2](#w-133.2) | SUPERSEDED | 聚合类型的**大小比较**(`<` `>` `<=` `>=`)未实装 —— 编译期报错 |
 | [W-133.3](#w-133.3) | SUPERSEDED | struct 字面量的字段值类型必须**精确匹配**字段类型 |
+| [W-137](#w-137) | RESOLVED | Makefile 的 `$(CFLAGS_STAGE0)` 未定义 —— 两个 `.o` 丢掉... |
+| [W-136](#w-136) | RESOLVED | side-file 用固定路径 —— 并发编译互相截断/删除 ⇒ 静默产出错代码 |
+| [W-135](#w-135) | SUPERSEDED | emit 侧两张固定上限表(pending phi / block-name... |
 | [W-134](#w-134) | RESOLVED | MCP pytest 套件里有一个**恒红**的陈旧测试 —— 断言的行为早已被换掉 |
-| [W-134.1](#w-134.1) | DEFERRED | `mcp-jhyy/tests/` 在 CI 里**零覆盖** —— 套件红绿都不影响 CI 结论 |
+| [W-134.1](#w-134.1) | RESOLVED | `mcp-jhyy/tests/` 在 CI 里**零覆盖** —— 套件红绿都不影响 CI 结论 |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -10445,6 +10448,195 @@ bug ⇒ 归 SUPERSEDED(台账 schema:「不是 workaround ⇒ 不进高优桶」
 - 测试:`compiler/tests/examples/agg_eq_struct.jhyy`(注释记录该限制)
 - 规范:`docs/abis/jhyy-lang-spec-v4.0.0.md` 附录 B
 
+<a id="w-137"></a>
+## W-137: Makefile 的 `$(CFLAGS_STAGE0)` 未定义 —— 两个 `.o` 丢掉 `-std=c11 -Wall -Wextra`
+
+**状态:** RESOLVED closed 2026-10-25 (v4.0.21) — 改名时漏改两处引用 ⇒ 展开成空 ⇒ -Wcomment 这类警告被静默,坏掉的 C 文件畅通无阻
+**Filed-by:** w136-rca-2026-10-25
+**日期:** 2026-10-25(W-136 落地时链接失败,顺带查出)
+
+**触发面:** `Makefile:174` 与 `Makefile:178`(`$(JHY_RUNTIME_O)` / `$(JHY_HELPERS_O)`
+两条 `.o` 规则)。`Makefile:26` 已把 `CFLAGS_STAGE0` 改名成 `CFLAGS_REPRO`
+(M5 Part 1 / b6efe61 删 C 端编译器时做的),**这两处没跟着改**。
+
+**症状:** `make` 编出来的 `_jhyy_helpers.o` **不带** `-std=c11 -Wall -Wextra`。
+`CFLAGS_STAGE0` 是全 Makefile 里**唯一**一个「用了但没定义」的变量 ⇒ 展开成空
+⇒ 前面三个 flag 一起消失(不是只丢一个)。
+
+**根因:** 变量改名时只改了**定义处**,没 grep **使用处**。`-Wall -Wextra` 正是
+GCC 会报 `-Wcomment`(「块注释未闭合」)的开关 —— 它一丢,下面 W-136 那条
+**把两个 C 桥函数吞进注释**的错误就**没有任何编译期信号**了。
+
+**修法:** 两处 `$(CFLAGS_STAGE0)` → `$(CFLAGS_REPRO)`。两个 `.o` 重新带上
+`-std=c11 -Wall -Wextra -g0 -Wl,--build-id=none`。
+
+**⇒ 顺带修掉两处既有警告:** `jhyy_helpers.c` 的 `jh_paths_init` 里有两处
+`snprintf(test_path, ...)` 会触发 `-Wformat-truncation`。**同一个函数里另外
+四处** `snprintf` 早就被作者用 `#pragma GCC diagnostic ignored
+"-Wformat-truncation"` 包起来了 —— **唯独漏了这两处**(它们在 pragma 区域
+**外面**)。⇒ 按作者自己的做法把这两处也包进 pragma ⇒ `-Wall -Wextra`
+下**零警告**(这是 `docs/internal/build.md` 的硬要求)。
+
+**影响范围:** 任何跑 `make` 的人。丢的是「C 桥编译期诊断」这条防线,
+受害的是**所有**靠「C 文件编译过了」判断安全的人 —— 本次就栽在这。
+
+**失效条件:** 任何人再加/改 Makefile 变量时,必须 grep **使用处**;
+`make -n` 看一眼实际命令行是最便宜的兜底。
+
+**引用:**
+- 源码:`Makefile:26`(定义)、`Makefile:174` / `Makefile:178`(漏改的使用处)
+- 关联:W-136(被这条掩护的那次真故障)
+- 事故记录:`docs/logs/v4/changelog-v4.0.0.md` § v4.0.21
+
+---
+
+<a id="w-136"></a>
+## W-136: side-file 用固定路径 —— 并发编译互相截断/删除 ⇒ 静默产出错代码
+
+**状态:** RESOLVED closed 2026-10-25 (v4.0.21) — 改用 per-pid 唯一路径;并发编译的产物不再互相污染(实测 12 路并发输出逐字节相同)
+**Filed-by:** w136-rca-2026-10-25
+**日期:** 2026-10-25(实现 → 当天 RCA → 当天落地)
+
+**触发面:** 编译器有三个「codegen 写 → link 步骤读」的跨阶段通道(side-file),
+全在 `compiler/build/obj/` 下、用**固定路径**:
+`_inline_asm.buf`(naked fn / asm 文本)、`_section_directive.buf`(`#[link_section]`
+指令)、`_no_std.flag`(no_std 链接行标志)、`_fence.buf`(读路径,当前无写者)。
+
+**症状:** 两个并发编译互相踩:
+- codegen 用 `fopen(path, "wb")` 打开 ⇒ **截断** ⇒ 另一个进程刚写的内容没了;
+- `main.jhyy` 编译**开头**先删干净(W-122 的修法)⇒ 直接把另一个进程的
+  side-file 删掉。
+⇒ 后果是**静默错代码**:A 的 link 步骤读到 B 的(空)内容 ⇒ A 的 `.s` 少了
+`#[link_section]` 的 `.section` 指令 / B 拿了 A 的 `no_std` 标志 ⇒ **产物变了,
+不报任何错**。
+
+**根因:** side-file 是**全局共享的名字**,而编译器进程之间没有任何隔离。
+
+**修法:** 路径加 **pid 后缀**(`jh_sidefile_path()`,C 侧实现)⇒ 每个进程用自己的
+文件 ⇒ 结构上不可能互踩。写侧与读侧在**同一个进程**内 ⇒ 同一个 pid ⇒ 同一个路径
+⇒ 仍然配对正确。
+
+**A/B 实测(同一台机器,同一份程序,`#[link_section(".text.boot")]`):**
+
+| 编译器 | 8 路并发 | 12 路并发 |
+|---|---|---|
+| 旧(固定路径) | 6/8 保住 `.section` 指令,**2 种不同产物** | 10/12 保住,**2 种不同产物** |
+| 新(per-pid) | **8/8 保住,1 种产物** | **12/12 保住,1 种产物** |
+
+⇒ 旧行为**静默丢掉 25% 的 `#[link_section]` 指令** —— 这正是「不报任何错」的
+那类故障。
+
+**⇒ 为什么这一轮(2026-10-25)查了整整一轮才定位 —— 三层叠加,每层都把上一层藏住:**
+
+1. **实现本身有个编译期看不出来的错**(真正的根因):W-136 在
+   `compiler/src0/jhyy_helpers.c` 里留下一行**未闭合的块注释起始符**,把
+   `jh_cgstate_get_state` / `jh_cgstate_set_state` 两个 C 桥函数**整块吞进注释**;
+   同时把 `static void *g_jh_cgstate_state` 的定义删掉了。
+   ⇒ C 文件**照样编译通过**(只有一条 `-Wcomment` 警告)⇒ 产物里**少了两个符号**
+   ⇒ 链接期才炸 `undefined reference`。
+2. **那条本该报出问题的警告被静音了**(W-137):`Makefile` 里 `$(CFLAGS_STAGE0)`
+   是未定义变量 ⇒ 两个 `.o` 不带 `-Wall -Wextra` ⇒ `-Wcomment` 从不出现。
+3. **链接器的错误输出也被吞了**(纯环境问题,不是仓库缺陷):本机 PATH 里
+   `/mingw64/bin` 抢在 `/c/msys64/ucrt64/bin` 前面,而前者带的
+   `libintl-8.dll` / `libiconv-2.dll` / `zlib1.dll` / `libwinpthread-1.dll`
+   **版本与 ucrt64 的不同** ⇒ ucrt64 的 `ld.exe` 加载到错版本的运行时 DLL
+   ⇒ **链接失败时一个字都不打印**(实测:同一条链接命令,PATH 干净时报
+   `undefined reference to 'jh_cgstate_get_state'`,PATH 污染时 stderr **零字节**)。
+
+**⇒ 教训(已各自落成常驻门 / 文档):**
+- 「编译通过」不等于「符号齐全」⇒ 新增常驻门 `artifact_checks.sh` 的
+  `helpers_symbols`:把 `jhyy_helpers.c` **独立编译**一遍,取它真正导出的
+  `jh_*` 符号,与 src0 里 `extern fn jh_*` 的声明集合比对 ⇒ **少一个就红**。
+  (已造红灯验证:还原成出事那版 ⇒ 门立刻报出那两个符号。)
+- 改 Makefile 变量必须 grep 使用处 ⇒ 见 W-137。
+- 链接失败时**先看 PATH,再看真错误** ⇒ 记在 `docs/internal/build.md`。
+
+**影响范围:** 任何**并发**跑编译器的人(并行 CI、批量交叉编译、MCP server
+并发请求)。单进程串行时**从不发作** —— 这就是它能活这么久的原因。
+
+**失效条件:** 若将来 side-file 的写侧与读侧**不在同一个进程**(例如把 codegen
+拆成独立后端进程),per-pid 就不成立(两个进程 pid 不同)⇒ 必须改成显式传参或
+共享内存通道。
+
+**引用:**
+- 源码:`compiler/src0/jhyy_helpers.c`(`jh_sidefile_path`)、
+  `compiler/src0/main.jhyy`(`build_il` 的删干净、`apply_link_section_directives`、
+  `link_with_gcc` 的三个读点)、`compiler/src0/codegen.jhyy`(`cg_module` 写
+  `_section_directive.buf` / `_no_std.flag`)、`compiler/src0/codegen_amd64.jhyy` 与
+  `compiler/src0/abi_amd64_win.jhyy`(写 `_inline_asm.buf`)
+- 门:`compiler/tests/bootstrap/artifact_checks.sh` 的 `helpers_symbols`
+- 关联:W-137(掩护它的那条)、W-122(当初的「开头删干净」只解决了串行陈旧,
+  没解决并发互踩)
+- 事故记录:`docs/logs/v4/changelog-v4.0.0.md` § v4.0.21
+
+---
+
+<a id="w-135"></a>
+## W-135: emit 侧两张固定上限表(pending phi / block-name uniquify)—— 一个不可达,一个可达但溢出无害
+
+**状态:** SUPERSEDED closed 2026-10-25 (v4.0.21) — 不是待修的 bug:pending-phi 上限不可达,block-name 上限可达但溢出无害(名字全局唯一 ⇒ 回落字节相同)
+**Filed-by:** audit-v4-spec-2026-10-24
+**日期:** 2026-10-25(2026-10-24 审计「skip test / 新增 test」时列为候选,当天复核后定性;2026-10-25 二次复核**改正了推理**,结论不变)
+
+**触发面:** `compiler/src0/codegen_amd64_state.jhyy` 的两张 per-fn 表:
+`pending phi`(4 条并行 i64 数组,固定 **128** 条)与
+`block_name_uniq`(`BlockNameEntry[256]`,每条 32 B)。
+
+**当时的怀疑(2026-10-24 审计):** 两处都是「固定上限 + 满了**静默降级**」——
+与 W-107 / W-120 / W-130 同族:
+- pending phi 表满 → `cg_append_phi_entry` 直接 `return 0`(**且 0 与成功返回值同形**
+  ⇒ 调用方**无法分辨**被丢)⇒ 那个 arm 被丢掉 ⇒ 那个 phi 永远不会被 resolve
+  ⇒ **错代码,零诊断**;
+- block-name 表满 → `cg_record_block_name` 返 −1 ⇒ emit_label 退回 `_b0`
+  ⇒ **不同 block 拿到同一个 label** ⇒ link error / 跳错地方。
+
+**复核结论(2026-10-25,逐条查证):两个上限的定性**不同**,别混为一谈。**
+
+| 表 | 上限可达? | 为什么 |
+|---|---|---|
+| **pending phi** | **不可达** | `cg_emit_phi`(`codegen.jhyy:1371-1379`)自 **v2.11.18 起是 no-op**(phi 已被 move-pair lowering 取代,IL 里**从不产 `phi`**),且**零调用者** ⇒ 唯一的写入路径(`emit_phi` ← ILTOK_PHI 分派)是**死的**。唯一另一个 phi 发射器 `ir_emit_phi2`(`ir.jhyy:762`)在 src0 里也没有调用者(只在 `bootstrap/v1.0/_driver_ir.jhyy` 这个历史测试驱动里) |
+| **block-name** | **可达**(而且自举时真的会被走到) | 表里存的是**完整块名**(`then5`),**每个块一条** —— 不是「每个 base 名一条」。`ir_new_block`(`ir.jhyy:280-300`)把**模块级全局计数器**拼进名字(`then5` / `else6` …),所以一个函数有多少块就占多少条。`cg_expr` 一个函数就 ≈1492 块 ⇒ 256 条**远远不够** |
+
+**为什么「block-name 满表无害」:** 名字带全局计数后缀 ⇒ 模块内**每个块名唯一**
+⇒ 每个名字在 per-fn 表里**只登记一次** ⇒ `count` **恒为 0** ⇒ 正常路径发的标签
+就是 `.L<name>_b0_fn<N>`;而 `emit_label`(`codegen_amd64_emit_ctrl.jhyy:287-296`)
+在 `cg_record_block_name` 返 −1 时把 `b_count` 置 0 ⇒ 发的**仍是**
+`.L<name>_b0_fn<N>` ⇒ 与正常路径**逐字节一致** ⇒ **不产生 label 冲突**。
+跳转侧也对得上:`cg_lookup_block_name` 未命中时返回 0,与 `_b0` 的定义一致。
+
+**⚠️ 自举时这条满表路径真的会被走到 —— 但归因要写对:**
+超 256 块的函数**不在 `main.jhyy` 自己的正文里**(它自己最大的函数是
+`apply_link_section_directives` ≈126 块),而在它 **inline_import 进来的模块**里:
+`codegen.jhyy` 的 `cg_expr` ≈1492、`sema.jhyy` 的 `infer_type` ≈1212、
+`codegen_amd64_lexer.jhyy` 的 `next_token` ≈848。
+inline_import 把它们并进**同一个模块** ⇒ 编译 main.jhyy 时 per-fn 表确实会满。
+**⇒ 因此「满表就响亮失败」在这里是错的治法**(把一条**无害**的路径变成必然失败
+的路径 ⇒ 自举直接断)。本条**没有**实际做过并回退这个改法 —— `git log --all` /
+stash / reflog 里都没有对应提交或回退痕迹,工作树里 `codegen_amd64_state.jhyy`
+也从未被改过;上面那段是**推演**,不是实验记录。
+
+**⇒ 归 SUPERSEDED 而不是 DEFERRED/ACTIVE:** 不是待修的 bug(pending-phi 写入路径
+是死的;block-name 溢出虽可达但**无害**),按 2026-10-25 的桶口径**不入高优待办桶**。
+本条留作审计轨迹,免得后人重新调查一遍。
+
+**失效条件:** ① 若 `cg_emit_phi` 复活(真发 phi)或 IL 里开始出现 `phi` ⇒
+pending-phi 上限变得可达 ⇒ 应改成动态扩容 + 响亮失败。
+② 若 codegen **不再**给块名拼全局计数后缀(名字不再全局唯一)⇒ block-name 的
+`count` 就不再恒为 0 ⇒ 满表回落会与正常路径**产生不同标签** ⇒ 同一 bug 复发。
+
+**引用:**
+- 源码:`compiler/src0/codegen_amd64_state.jhyy`(`cg_append_phi_entry:837` /
+  `cg_max_phi_entries:807` / `cg_record_block_name` / `cg_max_block_names:1411` /
+  `cg_lookup_block_name`)、`compiler/src0/codegen.jhyy:1371`(`cg_emit_phi` 的
+  DEPRECATED no-op)、`compiler/src0/ir.jhyy:280`(`ir_new_block` 拼全局计数器)、
+  `compiler/src0/codegen_amd64_emit_ctrl.jhyy:287`(`emit_label` 的 −1 回落)
+- base 名共 **15** 个:`then` / `else` / `merge` / `loop_start` / `loop_body` /
+  `loop_inc` / `loop_end` / `loop_cont` / `arm` / `next` / `sc_eval` / `sc_merge` /
+  `sc_false` / `sc_true` / `start`
+- 同族:W-107 / W-120 / W-130(固定上限 + 静默降级,那三条是**真上限**,已修)
+
+---
+
 <a id="w-134"></a>
 ## W-134: MCP pytest 套件里有一个**恒红**的陈旧测试 —— 断言的行为早已被换掉
 
@@ -10495,13 +10687,13 @@ assert "binary drifted" in data["early_abort"]
 <a id="w-134.1"></a>
 ## W-134.1: `mcp-jhyy/tests/` 在 CI 里**零覆盖** —— 套件红绿都不影响 CI 结论
 
-**状态:** DEFERRED since 2026-10-25 (v4.0.20) — 补 CI step 需要 network pip 依赖(fastmcp/pytest/pytest-asyncio);本轮不动流水线
+**状态:** RESOLVED closed 2026-10-25 (v4.0.21) — CI 已接 pytest 套件(commit 2ab0f24);「MCP 工具坏了 ⇒ CI 红」现在是真门
 **Filed-by:** audit-v4-spec-2026-10-24
-**日期:** 2026-10-25 (W-134 的成因之一)
+**日期:** 2026-10-25 (W-134 的成因之一) → 2026-10-25 落地(commit `2ab0f24`)
 
 **触发面:** `.github/workflows/ci.yml`。
 
-**症状:** `grep -n "pytest\|pip install" .github/workflows/*.yml` ⇒ **零命中**。
+**症状(修前):** `grep -n "pytest\|pip install" .github/workflows/*.yml` ⇒ **零命中**。
 CI 跑 `make` / `regress.py` / `closure_check.sh` / `fixed_point.sh` /
 `artifact_checks.sh` / `audit_test_assertions.py`,**但从不跑 `mcp-jhyy/tests/`**。
 
@@ -10513,36 +10705,42 @@ CI 的 MSYS2 装了 `python` / `python-pip`,但**没有任何 `pip install` 步�
 「MCP 工具坏了」这件事只能靠人手动跑才发现。这正是本项目反复踩的坑:
 **门绿着,但它没在验它声称在验的东西**(甚至根本没跑)。
 
-**workaround(当前):** 本地跑 `pytest mcp-jhyy/tests`。
-⚠️ 本机 **MSYS2 mingw64 的 python 没有 pip / pytest / yaml**;
-可用的解释器是 `C:\Users\liuzhen\miniconda3\python.exe`(3.13,带
-pytest 9.1.1 + yaml + pytest_asyncio + fastmcp 3.3.1)。
-
-**修法(待做,已想清楚):** 在 `ci.yml` 的 `build-and-test` job 里加一个 step:
+**修法(已做,commit `2ab0f24`):** 在 `ci.yml` 的 `build-and-test` job **末尾**加两步:
 
 ```yaml
-      - name: MCP server test suite
-        shell: msys2 {0}
+      - name: Set up Python (MCP test suite)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: MCP server test suite (pytest)
+        shell: bash
         run: |
-          python -m pip install --user --upgrade fastmcp pytest pytest-asyncio
+          python -m pip install --disable-pip-version-check -q fastmcp pytest pytest-asyncio
           python -m pytest mcp-jhyy/tests -q
 ```
 
-⚠️ **为什么本轮没做**:
-1. 本机 MSYS2 python **连 pip 都没有** ⇒ 这条命令**无法本地验证**;
-2. CI 是**发布链**的硬门(已有 5 次发布失败),在发布前给流水线加
-   **第一个网络依赖**、且不能本地验证 —— 风险不对称;
-3. `fastmcp` 依赖树不小(pydantic / httpx / anyio / starlette / uvicorn),
-   会给 job 加 1-2 分钟。
+**⚠️ 为什么必须用 `actions/setup-python` 而不是 job 里已有的 MSYS2 python:**
+MSYS2 的 mingw64 python **不是标准 Windows CPython** ⇒ PyPI 上 fastmcp 依赖链
+**没有对应的 wheel** ⇒ pip 只能源码构建 ⇒ 必失败(实测:MSYS2 python 下
+`pip install fastmcp` 报「pip subprocess to install build dependencies did not
+run successfully」)。setup-python 给的是标准 CPython ⇒ wheel 直接可用。
+**这两步放在 job 最后**:setup-python 会改 PATH,放末尾就不会影响前面那些
+msys2 step 用的 MSYS2 python。
 
-⇒ 建议**单独一个 commit / 一次 CI 周期**做,并且**先在 PR 分支上观察一轮**。
+**本地验证:** `C:\Users\liuzhen\miniconda3\python.exe -m pytest mcp-jhyy/tests -q`
+⇒ **40 passed / 1 skipped / 0 failed**(2026-10-25 实测)。
+⚠️ 本机 **MSYS2 mingw64 的 python 没有 pip / pytest / yaml** —— 本地跑这个套件
+要用 miniconda 的解释器。
 
 **影响范围:** MCP 工具(`jhyy_run` / `jhyy_lang_ref` / `jhyy_abi_info` /
 `jhyy_regress` / `jhyy_il_diff` / `jhyy_selfhost_check` / `jhyy_workarounds` /
 `jhyy_format` / `jhyy_check` / `jhyy_compile` / `jhyy_get_il`)的回归保护。
-**失效条件:** 补上 CI step 后本条关闭。
+**失效条件:** 不适用(已 RESOLVED)。若将来 PyPI 上 fastmcp 换了 wheel 策略,
+需要复核 setup-python 的 Python 版本。
 
 **引用:**
-- `mcp-jhyy/tests/`(41 个测试,当前 **0** 个进 CI)
-- `.github/workflows/ci.yml`(`build-and-test` job)
+- `mcp-jhyy/tests/`(41 个测试,**现在全部进 CI**)
+- `.github/workflows/ci.yml`(`build-and-test` job 末尾两步)
+- commit `2ab0f24`(2026-10-25)
 - 同族:`docs/internal/tests.md`

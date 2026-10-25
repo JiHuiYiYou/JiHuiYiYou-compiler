@@ -1118,6 +1118,124 @@ selfhost_target_flag);`compiler/tests/examples/` 加 **14 个**用例
 
 ---
 
+## v4.0.21 — W-136 side-file per-pid 唯一化 · W-137 Makefile 变量漏改 · 台账归零
+
+**2026-10-25。** 起因:上一个 agent 提交了 M5 Part 1(删 C 端编译器)与
+「MCP pytest 接进 CI」之后,在 **W-136** 上卡住 —— 它把「链接失败」的结论写成
+「跟我的改动无关,是这台机器/这套 gcc 的独立问题」,代码留在工作树没提交。
+
+**本节记录:那个结论是错的,以及为什么错成那样。**
+
+### W-136 — side-file 用固定路径 ⇒ 并发编译互相截断/删除 ⇒ 静默错代码
+
+编译器有三个「codegen 写 → link 步骤读」的跨阶段通道(side-file),全在
+`compiler/build/obj/` 下、用**固定路径**:`_inline_asm.buf` /
+`_section_directive.buf` / `_no_std.flag` / `_fence.buf`。
+两个并发编译会互相踩:codegen 用 `fopen(path,"wb")` **截断**对方刚写的内容;
+`main.jhyy` 编译开头「删干净」(W-122 的修法)又会把对方的文件删掉。
+⇒ **静默错代码**:A 的 link 步骤读到 B 的空内容 ⇒ A 的 `.s` 少了
+`#[link_section]` 的 `.section` 指令,不报任何错。
+
+**A/B 实测(同一台机器,同一份 `#[link_section(".text.boot")]` 程序):**
+
+| 编译器 | 8 路并发 | 12 路并发 |
+|---|---|---|
+| 旧(固定路径) | 6/8 保住 `.section`,**2 种不同产物** | 10/12 保住,**2 种不同产物** |
+| 新(per-pid) | **8/8 保住,1 种产物** | **12/12 保住,1 种产物** |
+
+⇒ 旧行为**静默丢掉 25% 的 `#[link_section]` 指令**。
+
+**修法:** 路径加 **pid 后缀**(`jh_sidefile_path()`,C 侧实现)⇒ 每个进程用自己的
+文件 ⇒ 结构上不可能互踩。写侧与读侧在同一进程 ⇒ 同 pid ⇒ 仍配对正确。
+
+### 真正的根因:一行**未闭合的块注释**
+
+W-136 的实现里,`compiler/src0/jhyy_helpers.c` 留下一行没闭合的块注释起始符,
+把 `jh_cgstate_get_state` / `jh_cgstate_set_state` 两个 C 桥函数**整块吞进
+注释**;同时把 `static void *g_jh_cgstate_state` 的定义删掉了。
+
+⇒ C 文件**照样编译通过**(只有一条 `-Wcomment` 警告)⇒ 产物里**少了两个符号**
+⇒ 链接期才炸 `undefined reference to 'jh_cgstate_get_state'`。
+
+### W-137 — 为什么那条警告从没出现:`$(CFLAGS_STAGE0)` 未定义
+
+`Makefile:26` 在 M5 Part 1(b6efe61)里把 `CFLAGS_STAGE0` 改名成 `CFLAGS_REPRO`,
+**`:174` / `:178` 两条 `.o` 规则没跟着改** ⇒ 展开成空 ⇒ 两个 `.o` **不带**
+`-std=c11 -Wall -Wextra -g0` ⇒ **`-Wall -Wextra` 正是会报 `-Wcomment` 的开关**,
+它一丢,上一节那条警告就静默了。`CFLAGS_STAGE0` 是全 Makefile 里**唯一一个**
+「用了但没定义」的变量。
+
+**修法:** 两处改回 `$(CFLAGS_REPRO)`。顺带把 `jhyy_helpers.c` 里两处漏掉的
+`-Wformat-truncation` 也按作者自己的做法包进 pragma(同一个函数里另外四处
+`snprintf` 早就包了)⇒ `-Wall -Wextra` 下**零警告**。
+
+### 第三层:链接器的错误输出被 DLL 冲突吞掉(纯环境,不是仓库缺陷)
+
+本机 PATH 里 `/mingw64/bin` 抢在 `/c/msys64/ucrt64/bin` 前面,而前者带的
+`libintl-8.dll` / `libiconv-2.dll` / `zlib1.dll` / `libwinpthread-1.dll`
+**版本与 ucrt64 的不同** ⇒ ucrt64 的 `ld.exe` 加载到错版本的运行时 DLL
+⇒ **链接失败时一个字都不打印**。
+
+实测同一条链接命令:
+
+| PATH | ld 的输出 |
+|---|---|
+| 当前 PATH(`/mingw64/bin` 在前) | **零字节** |
+| ucrt64 优先 / 去掉 `/mingw64/bin` | `undefined reference to 'jh_cgstate_get_state'` ×5 |
+
+⇒ **真错误被环境吞掉**,所以现场看到的是「ld 静默死 / flaky / plugin 开才有
+exe」这类没法归因的现象。已记进 `docs/internal/build.md`(构建时把 ucrt64 提到
+PATH 最前)。
+
+### 新常驻门:`artifact_checks.sh` 的 `helpers_symbols`
+
+「编译通过」不等于「符号齐全」—— 本次就是这样溜过去的。加一道**产物级**门:
+把 `jhyy_helpers.c` **独立编译**一遍(不复用仓里那个可能陈旧的 `.o`),
+取它真正导出的 `jh_*` 符号,与 src0 里 `extern fn jh_*` 的声明集合比对 ——
+**少一个就红**,多了不红(新加 C 桥函数是正常演进)。
+
+**已造红灯验证:** 还原成出事那版 ⇒ 门当场报出那两个符号(且 gcc 编译**零错误**,
+说明「编译过了」确实不足以说明问题)。
+
+### 台账:0 ACTIVE / 0 DEFERRED
+
+- **W-135 的推理被改正**(结论不变):原写「block-name 表存的是 base 名 ⇒ 256 条
+  用不满」是**错的** —— 它存的是**完整块名**(`then5`),**每个块一条**,
+  `cg_expr` 一个函数就 ≈1492 块 ⇒ **上限可达**;无害的理由只有一条:
+  名字带全局计数后缀 ⇒ 名字全局唯一 ⇒ `count` 恒为 0 ⇒ 满表回落发的标签与
+  正常路径**逐字节相同**。另:超 256 块的函数在 **inline_import 进来的模块**
+  里(`cg_expr` ≈1492 / `infer_type` ≈1212 / `next_token` ≈848),不在
+  `main.jhyy` 自己的正文里(它自己最大 ≈126 块)。原文还写「曾尝试『响亮失败』
+  改法并撤回」—— `git log --all` / stash / reflog 里**没有任何对应痕迹**,
+  已改成明确的推演标注。
+- **W-134.1 的 DEFERRED 是陈旧的**:commit `2ab0f24` 已经把 MCP pytest 接进
+  CI(实测 40 passed / 1 skipped),台账却还写着 DEFERRED ⇒ 已翻成 RESOLVED。
+  ⇒ **DEFERRED 桶归零**。
+
+### 门(2026-10-25 实测)
+
+| 门 | 结果 |
+|---|---|
+| `make`(自举闭环 + 漂移检查) | ✅ 通过(`_boot_new.s` == `_boot_new2.s` byte-equal) |
+| `gcc -std=c11 -Wall -Wextra -c compiler/src0/jhyy_helpers.c` | ✅ **零警告**(rc=0) |
+| `regress jhyy.exe` | ✅ **200/200 PASS** + 0 XFAIL + 19 SKIP(219 total) |
+| `regress --cross=auto`(本机 docker) | ✅ **7 个** sysv 用例全 PASS(exit=28/217/42/35/18/42/**170**) |
+| `closure_check.sh` | ✅ PASS(v2.s == v3.s,byte-identical) |
+| `fixed_point.sh` | ✅ 17 PASS / 0 FAIL / 0 INFO(N=10 .il 与 .s 跨代 byte-equal) |
+| `artifact_checks.sh` | ✅ **13 PASS** / 0 KNOWN-FAIL / 0 FAIL / 0 SKIP(+1 = 新门 `helpers_symbols`) |
+| `artifact_checks.sh --only=helpers_symbols`(造红灯) | ✅ 出事那版 ⇒ **FAIL**,报出 `jh_cgstate_get_state` / `jh_cgstate_set_state` |
+| `audit_test_assertions.py --strict` | ✅ 0 违规 |
+| MCP pytest | ✅ **40 passed / 1 skipped**(miniconda python) |
+| 台账 | ✅ **0 ACTIVE / 0 DEFERRED** / 126 索引行 |
+
+**⇒ 另附一条漂移体检(手工,未进门):** 把新旧 `.s` 的 temp id / 字符串池下标 /
+栈槽偏移全部归一化后 diff,12 MB 的 `.s` 只剩 **132 行**差异,且每一行要么是
+路径字面量、要么是 `call jh_sidefile_path` ⇒ **零语义漂移**(W-132 记录的
+「改 main.jhyy 会移位 temp 编号 ⇒ 自举产物行为漂移」这次没有发作;
+`movzbl` 计数 HEAD 与新产物都是 5744)。
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

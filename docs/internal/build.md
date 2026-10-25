@@ -6,8 +6,7 @@
 
 ```
 C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/
-├── compiler/src/*.c        # 编译器源
-├── compiler/src0/          # jhyy 端自举翻译（v1.x — 与 src/ byte-equal 输出）
+├── compiler/src0/          # 编译器源（jhyy 端自举翻译）—— **唯一的编译器实现**
 ├── compiler/runtime/       # 运行时（main → main_jhyy 桥接）
 ├── compiler/tests/         # 测试
 │   ├── examples/*.jhyy     # 集成测试
@@ -16,6 +15,10 @@ C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/
 └── docs/                   # 文档
 ```
 
+> ⚠️ **v4.0.21 (M5 Part 1)起 `compiler/src/` 已删除** —— C 端编译器(9771 行)
+> 不再存在,`make stage0` 目标随之消失。构建语义变成「**jhyy.exe 能把自己编成
+> 同一个东西**」(见下节)。
+
 工具：
 - GCC：`/c/msys64/ucrt64/bin/gcc.exe` (15.2.0 MSYS2 ucrt64)
 - Self-backend (jhyy-side 自研 x86-64 codegen):**v4.0.0 起 sole production path** (QBE 完全移除,per `docs/plans/v2/v4.0.0-plan.md`)
@@ -23,38 +26,62 @@ C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/
 
 ---
 
-## 编译编译器 (v1.4.4 stage-0 链)
+## 编译编译器 (自举链)
 
-**Stage 0**: gcc 编译 C 端 bootstrap → `compiler/build/bin/jhyy_stage0.exe`
-
-```bash
-gcc -std=c11 -Wall -Wextra \
-    compiler/src/*.c \
-    -o compiler/build/bin/jhyy_stage0.exe \
-    -I compiler/src
-```
-
-**Stage 1**: jhyy_stage0.exe 编译 src0/main.jhyy → `compiler/build/bin/jhyy.exe` (production)
+**本仓没有 C 端了。** `compiler/build/bin/jhyy.exe` 是 **git 跟踪的**产物
+(fresh clone 里就有),它**自己**编 src0:
 
 ```bash
-compiler/build/bin/jhyy_stage0.exe compile compiler/src0/main.jhyy \
-    -o compiler/build/bin/jhyy
+make            # = 编 jhyy_helpers.o / runtime.o + 自举闭环检查,产 jhyy.exe
+make selfhost   # v1 → v2 → v3 → v4 → v5 .s 逐字节 byte-equal 闭环检查
 ```
 
-**或用 Makefile 一键**:
-```bash
-make           # = stage0 + stage1, 产 jhyy.exe
-make stage0    # 只 stage 0 (改 src/*.c 后)
-make selfhost  # stage 1 + 3 次自举 closure (v1 → v2 → v3 → v4 byte-equal)
-```
+`make` 的 `jhyy.exe` 规则做三件事:
+
+1. 把**当前这个**(已提交的)jhyy.exe 复制成 `_boot_anchor.exe`;
+2. `_boot_anchor.exe` 编 src0 → `_boot_new`(+`.s`),`_boot_new.exe` 再编一遍 →
+   `_boot_new2`(+`.s`);
+3. **闭环检查**:`cmp -s _boot_new.s _boot_new2.s` ⇒ 新编译器编 src0 的产物必须与
+   它自己编的逐字节相同(任何 emit 层的非确定性都会当场炸)。
+
+第 3 步之后还有一道**漂移检查**(W-117):新产物还要与**提交进仓的那份**逐字节
+相同 —— 但**只在 src0/runtime 与 HEAD 一致时**才生效(src0 一改,新产物本就该
+不同,拿它跟旧产物比会挡住每一次正常的源码修改)。谁要发布,谁负责把新的
+`compiler/build/bin/jhyy.exe` 提交上去。
 
 构建产物:
-- `compiler/build/bin/jhyy.exe` — jhyy-side 产物 (production, users invoke)
-- `compiler/build/bin/jhyy_stage0.exe` — C 端 bootstrap (改 src/*.c 后重建)
-- `compiler/build/bin/jhyy.exe.exe` — jhyy.exe baseline (per baseline binary hash rule)
-- `compiler/build/bin/jhyy_v1.exe.exe` — v1.0.0 historical baseline (regress.py --binary=jhyy_v1.exe.exe 用, 不可退役 — v1.4.7 合并进 regress.py)
+- `compiler/build/bin/jhyy.exe` — **git 跟踪**的自举锚点(production, users invoke)
+- `compiler/build/bin/jhyy_v1.exe.exe` — jhyy.exe 的**同内容副本**,每次构建重新生成
+  (v4.0.8 起;`fixed_point.sh` / `byte_equal*.sh` / `stage1-expanded.sh` 按名引用它)
 
 `-Wall -Wextra` 必须零警告。
+
+---
+
+## ⚠️ 构建前必读:工具链 PATH 顺序(链接失败会**一个字都不打印**)
+
+本机 PATH 里 `/mingw64/bin` 排在 `/c/msys64/ucrt64/bin` **前面**,而前者带的
+`libintl-8.dll` / `libiconv-2.dll` / `zlib1.dll` / `libwinpthread-1.dll`
+**版本与 ucrt64 的不同**。ucrt64 的 `ld.exe` 于是加载到错版本的运行时 DLL ⇒
+**链接失败时 stderr 零字节**,只剩一句 `collect2.exe: error: ld returned 1
+exit status` —— **真错误完全看不见**。
+
+**症状对照(同一条链接命令,只改 PATH):**
+
+| PATH | ld 的输出 |
+|---|---|
+| 当前 PATH(`/mingw64/bin` 在前) | **零字节** |
+| ucrt64 优先 | `undefined reference to 'xxx'`(真错误) |
+
+**⇒ 构建 / 链接前先把 ucrt64 提到最前:**
+
+```bash
+export PATH="/c/msys64/ucrt64/bin:/c/msys64/usr/bin:$PATH"
+```
+
+**⇒ 排查链接失败的第一件事:先把 PATH 调干净,拿到 ld 的真实输出再判断。**
+不要凭 exit code 猜。(2026-10-25 实测:因为这条,一次「C 文件编译通过但少了
+两个符号」的编译期错误被伪装成了「ld 静默死 / flaky」,查了整整一轮。)
 
 ---
 
@@ -73,19 +100,30 @@ make selfhost  # stage 1 + 3 次自举 closure (v1 → v2 → v3 → v4 byte-equ
 
 所有 binary 都内嵌 branded "J" 图标(256×256 RGBA, Vista+ 6 frame),通过 MinGW `windres.exe` 把 `installer/jhyy-icon.ico` 编为 COFF `.o` 链入 PE 资源段 `.rsrc`:
 
-- **`jhyy_stage0.exe`**:Makefile 直接编 `compiler/src/jhyy.rc` → `compiler/build/obj/jhyy-res.o` → 链入(`$(RES_OBJ)`)
-- **`jhyy.exe`**:**以及**所有 user-compiled `.jhyy` 程序:`compiler/src/main.c` 的 `compile()` 函数在 `system()` 拼出的 gcc 命令前先调 `windres` 把 `compiler/src/jhyy.rc` 编为 `<output>.ico.o`,链接加入 gcc 命令末尾,结束后 `unlink()` 清理 tmp 文件
+- **`jhyy.exe`** **以及所有 user-compiled `.jhyy` 程序**:`compiler/src0/jhyy_helpers.c` 的
+  `jh_build_icon_obj()` **现场生成** `.rc` → 调 `windres.exe` 编成临时 `.o`
+  → 由 `jh_gcc_invoke()` 插进链接行 → `jh_run()` 在子进程结束后删掉临时 `.o`
+  (见 W-132)。
+  ⚠️ **v4.0.21 (M5 Part 1)起这套逻辑全在 C 侧**(`jhyy_helpers.c`),
+  **`compiler/src/main.c` 已删除** ⇒ 以前那条「C 端的 `compile()` 调 windres」
+  的说法不再成立;`compiler/src/jhyy.rc` 这个文件也不存在了(`.rc` 现在是
+  运行时生成的)。
 
-**改图标后必须重 build stage0 + stage1**:
+**改图标后必须重 build**:
 ```bash
-make clean && make stage0 && make
+make
 ```
 
-不重 build stage0,`jhyy.exe` 内嵌的还是旧 icon(.ico 修改走 `installer/build-jhyy-icons.ps1`,deterministic 重出 6-frame ICO)。
+(.ico 修改走 `installer/build-jhyy-icons.ps1`,deterministic 重出 6-frame ICO;
+改完不重 build,`jhyy.exe` 内嵌的还是旧 icon。)
 
-**path 坑**:`windres` 内部走 `gcc -E` 预处理,路径里的 `\` 会被当 escape 字符吃掉。`compiler/src/main.c` 用 `path_to_fwd()` 把 `\` 全部转 `/` 才传给 windres(教训 2026-08-27 v1.8.1 patch 阶段)。
+**path 坑**:`windres` 内部走 `gcc -E` 预处理,路径里的 `\` 会被当 escape 字符吃掉。
+C 侧用 `path_to_fwd()` 把 `\` 全部转 `/` 才传给 windres(教训 2026-08-27 v1.8.1 patch 阶段)。
 
-**验证**: `objdump -h compiler/build/bin/jhyy.exe | grep rsrc` 应见 `.rsrc` 段(9184B);`grep -c '89 50 4e 47' <(objdump -s -j .rsrc ...)` 应为 6(每个 ICO frame 内嵌 PNG signature)。
+**验证**: `objdump -h compiler/build/bin/jhyy.exe | grep rsrc` 应见 `.rsrc` 段(9184B);
+`grep -c '89 50 4e 47' <(objdump -s -j .rsrc ...)` 应为 6(每个 ICO frame 内嵌 PNG signature)。
+**常驻门**:`compiler/tests/bootstrap/artifact_checks.sh` 的 `compiler_icon` /
+`program_icon` 两道(用 Explorer 同一套 API 问「exe 里到底有没有图标」)。
 
 ---
 
@@ -172,20 +210,16 @@ python compiler/build/bin/regress.py
 
 ## 单元测试
 
-```bash
-# 单文件单元测试（独立编译运行）
-/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra \
-    compiler/tests/unit/test_lexer.c compiler/src/lexer.c compiler/src/arena.c \
-    -o compiler/build/bin/test_lexer.exe -I compiler/src && \
-    ./compiler/build/bin/test_lexer.exe
+**v4.0.21(M5 Part 1)起没有 C 端单元测试了。**
 
-# test_sprint1b 需要链接多个模块
-/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra \
-    compiler/tests/unit/test_sprint1b.c \
-    compiler/src/arena.c compiler/src/types.c compiler/src/symtab.c compiler/src/ast.c \
-    -o compiler/build/bin/test_sprint1b.exe -I compiler/src && \
-    ./compiler/build/bin/test_sprint1b.exe
-```
+`compiler/tests/unit/test_{lexer,parser,sema,sprint1b}.c` 测的是 **C 端**的
+lexer / parser / sema(它们 `#include "../../src/*.h"`)。`compiler/src/` 整个目录
+被删掉之后,这几个测试**再也编不出来**,而且它们要测的代码**已经不存在了**
+⇒ 已随 M5 Part 1 一并删除。
+
+⇒ 现在的测试覆盖**全部**在 `.jhyy` 集成测试里(`compiler/tests/examples/`),
+由 `python regress.py` 跑;C 桥那一层的门是
+`compiler/tests/bootstrap/artifact_checks.sh`。
 
 ---
 

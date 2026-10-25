@@ -162,25 +162,26 @@ relocation 之后的路径),自动跑所有有**入口函数**的 .jhyy
 
 ```
 python regress.py                       # 全量(gated:只有 jhyy.exe)
-python regress.py --all                 # matrix:gated + stage0/v1(informational)
+python regress.py --all                 # matrix:所有 gated binary(当前只有 jhyy.exe)
+python regress.py --all --include-informational   # matrix + jhyy_v1.exe.exe(informational)
 python regress.py --tests=foo.jhyy      # 单测(必须带 .jhyy 后缀)
 python regress.py --binary=jhyy_v2.exe  # 用 self-hosted 编译器跑
-python regress.py --binary=compiler/build/bin/jhyy_stage0.exe  # C 端 bootstrap(见下)
 ```
 
 > ⚠️ `--tests=` **必须带 `.jhyy` 后缀**。不带时 harness 不补后缀,直接
 > `FileNotFoundError` 崩在 runner 里,不是干净报错。
 
-### jhyy_stage0.exe 为什么不是 gated
+### v4.0.21(M5 Part 1)起矩阵里没有 C 端了
 
-它是 **C 端 bootstrap 编译器**,语言子集早于 v3.x —— 不认闭包(v3.2.1)、
-char literal / `Cap<T>`(v3.x)。实测 39 个失败**全部是预期内的**。
-它的真门是 `make stage0 && make`(stage1 用它编 src0 → jhyy.exe),
-比跑 199 个用户测试更直接也更便宜。
+`jhyy_stage0.exe` 已随 `compiler/src/` 一起删除 ⇒ `--all` 现在只跑
+`jhyy.exe` 一个 gated binary(加 `--include-informational` 才带上
+`jhyy_v1.exe.exe`,它**不影响 exit code**)。
 
-个别测试需要「只在 stage0 上跳过」时用 `// SKIP-STAGE0:` 指令
-(与 `// SKIP-QBE:` 镜像)。**不要用笼统的 `// SKIP:`** —— 那会让测试在
-两条腿上都不跑,那才是真的没人验。
+以前 stage0 是 informational(它认不了闭包 / char literal / `Cap<T>`,
+实测 39 个失败全是预期内的),而且它的 W-133(聚合 `==`)至今没同步 ——
+拿它编用户代码会**静默错值** ⇒ 删掉比留着更好。
+
+⇒ `// SKIP-STAGE0:` 指令**已无对象**,可以退休了(留着无害,但别再新增)。
 
 ---
 
@@ -328,19 +329,13 @@ harness 只在「编译失败」分支检查 `// EXPECT-ERROR:` 的关键词;编
 ./hello.exe; echo $?     # 期望 42
 ```
 
-### 单元测试（不常用）
+### C 端单元测试 —— v4.0.21 起**已不存在**
 
-```bash
-# 单文件单元测试（独立编译运行）
-/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra \
-    compiler/tests/unit/test_lexer.c compiler/src/lexer.c compiler/src/arena.c \
-    -o compiler/build/bin/test_lexer.exe -I compiler/src && \
-    ./compiler/build/bin/test_lexer.exe
+`compiler/tests/unit/test_{lexer,parser,sema,sprint1b}.c` 测的是 **C 端**
+的 lexer / parser / sema(它们 `#include "../../src/*.h"`)。v4.0.21(M5 Part 1)
+把整个 `compiler/src/` 删掉之后,这几个测试**再也编不出来**
+(`fatal error: ../../src/lexer.h: No such file or directory`),
+而且它们要测的代码**已经不存在了** ⇒ 已随 M5 Part 1 一并删除。
 
-# test_sprint1b 需要链接多个模块
-/c/msys64/ucrt64/bin/gcc.exe -std=c11 -Wall -Wextra \
-    compiler/tests/unit/test_sprint1b.c \
-    compiler/src/arena.c compiler/src/types.c compiler/src/symtab.c compiler/src/ast.c \
-    -o compiler/build/bin/test_sprint1b.exe -I compiler/src && \
-    ./compiler/build/bin/test_sprint1b.exe
-```
+⇒ C 端逻辑的测试覆盖现在**全部**由 `.jhyy` 集成测试(`compiler/tests/examples/`)
+承担 —— 那才是现在唯一的实现。

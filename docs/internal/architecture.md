@@ -31,24 +31,50 @@ read_file
 
 ## 源文件清单
 
-`compiler/src/` 下 19 个文件（含 .c + .h）：
+> ⚠️ **v4.0.21 (M5 Part 1)起 `compiler/src/`(C 端编译器,19 个 .c/.h)已删除。**
+> 现在**唯一**的编译器实现是 `compiler/src0/*.jhyy` —— 自举编译器自己编自己。
+
+`compiler/src0/` 下 30 个 `.jhyy`（按行数）：
 
 | 文件 | 行数 | 职责 |
 |------|------|------|
-| `arena.c/h` | ~150 | Bump allocator（编译器内部用） |
-| `lexer.c/h` | ~400 | 词法分析：源码 → Token 流（50+ token 类型） |
-| `ast.c/h` | ~400 | AST：35 种节点类型（tagged union） |
-| `types.c/h` | ~250 | 类型系统：原始类型/指针/切片/数组/struct/enum/func/alias |
-| `symtab.c/h` | ~120 | 符号表：FNV-1a hash，开放寻址 + 链式作用域 |
-| `parser.c/h` | ~750 | 递归下降 + Pratt 表达式解析 |
-| `sema.c/h` | ~500 | 语义分析：类型检查/推断，3 遍遍历 |
-| `ir.c/h` | ~250 | IR 构建器：QBE IL 文本生成 |
-| `codegen.c/h` | ~550 | AST → QBE IL 发射 |
-| `main.c` | ~150 | CLI 入口，驱动流水线，调用 QBE + GCC |
+| `codegen.jhyy` | 5392 | AST → QBE IL 发射（前端到中间表示的主干） |
+| `parser.jhyy` | 3958 | 递归下降 + Pratt 表达式解析 |
+| `sema.jhyy` | 3528 | 语义分析：类型检查 / 推断 |
+| `codegen_amd64_emit_call.jhyy` | 2721 | 自写后端：调用发射（MS x64 / SysV） |
+| `codegen_amd64_state.jhyy` | 2461 | 自写后端：per-fn 状态表（temp 槽 / 地址持有位图） |
+| `codegen_amd64_lexer.jhyy` | 2230 | 自写后端：QBE IL 文本的 lexer |
+| `main.jhyy` | 1993 | CLI 入口，驱动流水线，调用 gcc 链接 |
+| `ast.jhyy` | 1685 | AST 节点类型 |
+| `mono.jhyy` | 1451 | 单态化 / 泛型实例化 |
+| `codegen_amd64_regalloc.jhyy` | 972 | 寄存器分配（**已实现但未接**，见下） |
+| `ir.jhyy` | 960 | IR 构建器：QBE IL 文本生成 |
+| `lexer.jhyy` | 954 | 词法分析：源码 → Token 流 |
+| `codegen_amd64_emit_mem.jhyy` | 822 | 自写后端：内存读写发射 |
+| `codegen_amd64_emit_ctrl.jhyy` | 818 | 自写后端：控制流 / 标签发射 |
+| `codegen_amd64_peephole.jhyy` | 797 | 自写后端：窥孔优化（3 条局部规则） |
+| `abi_amd64_sysv.jhyy` | 584 | SysV ABI：8-class 分类 / sret / vararg |
+| `types.jhyy` | 550 | 类型系统 |
+| `codegen_amd64.jhyy` | 490 | 自写后端入口（`codegen_amd64_run`） |
+| `symtab.jhyy` | 375 | 符号表 |
+| `util.jhyy` | 374 | 通用工具 |
+| `codegen_amd64_emit_sse.jhyy` | 355 | 自写后端：SSE / 浮点发射 |
+| `abi_amd64_win.jhyy` | 313 | MS x64 ABI |
+| `codegen_amd64_xmm_argalloc.jhyy` | 267 | XMM 实参分配 |
+| `target_dispatch.jhyy` | 186 | 目标三元组分派 |
+| `codegen_amd64_inmem.jhyy` | 161 | in-mem self-backend 路径 |
+| `arena.jhyy` | 161 | Bump allocator |
+| `abi_amd64_win_freestanding.jhyy` | 93 | Win freestanding（UEFI） |
+| `abi_amd64_sysv_freestanding.jhyy` | 88 | SysV freestanding |
+| `ffi.jhyy` | 71 | FFI 声明 |
 
-运行时：
-- `compiler/runtime/runtime.c` ~50 行：`main → main_jhyy` 桥接 + Arena 实现（重复声明，仅供运行时使用）
+C 桥 + 运行时：
+- `compiler/src0/jhyy_helpers.c` — **唯一的 C 端桥接层**（stdio 流 / 二进制 fopen /
+  路径探测 / gcc 调用 / 图标资源 / side-file 路径等）。jhyy 拿不到的东西都在这里。
+- `compiler/runtime/runtime.c` ~50 行：`main → main_jhyy` 桥接 + Arena 实现
+  （重复声明，仅供运行时使用）
 - `compiler/runtime/runtime.h` ~25 行：运行时头文件
+- `compiler/src0/std/` — 标准库模块（`os` / `io` / `fmt` / `mem` / `math` / `string` / `vec`）
 
 ---
 
