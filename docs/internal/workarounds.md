@@ -10314,8 +10314,19 @@ a  == a   // → true   ✅(同址 —— 这就是「身份比较」的证据)
 - `artifact_checks.sh`:**12 PASS / 0 KNOWN-FAIL / 0 FAIL / 0 SKIP**;`--selftest` **8/8**。
 - `audit_test_assertions.py --strict`:**0 违规**。
 
+**C 镜像(`compiler/src/*.c`)未同步本条** —— 用户 2026-10-25 明确指示:
+**C 侧早就不维护了,不再投入**。后果(如实记录):
+stage0(C 端 bootstrap 编译器)走 **QBE** 路径,没有 `cg_value_eq`、
+也没有浮点有序守卫 ⇒ **stage0 在聚合 `==` / 浮点 NaN 两类用例上仍判错**
+(实测 stage0 136/190 通过、54 红 —— 其中 15 个是本轮新增用例触发的;
+stage0 自 v4.0.8 起是 **informational**,不参与 regress exit code,
+它的真门是 `make stage0 && make`)。
+⚠️ C 侧的「聚合比地址」是**静默错值**,不是编译错误 —— 别拿 stage0 编用户代码。
+(W-128 / W-129 那两处 C 镜像的改动保留:它们是**同一个 bug 的并行实现**,
+留着比回退好。)
+
 **影响范围:** 聚合类型的相等判断(去重 / 集合查找 / 状态比对)。
-**失效条件:** 无 —— 已是最终语义。
+**失效条件:** 无 —— 已是最终语义(jhyy 侧)。
 
 **引用:**
 - 源码:`compiler/src0/types.jhyy`(`type_unwrap_alias`)、`compiler/src0/codegen.jhyy`
