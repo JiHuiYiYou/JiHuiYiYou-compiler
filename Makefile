@@ -167,15 +167,22 @@ $(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(JHY_RUNTIME_O) $
 # `.o` 不存在时 `link_with_gcc` 自动回退到 `.c` 路径,行为与 v4.0.7 一致。
 #
 # D26 可复现性:两条路径在 SOURCE_DATE_EPOCH 固定时产出**逐字节相同**的 exe
-# (实测);.o 在下面这组 flags 下也可复现(同 flags 两次编译 sha 相同)。
+# (实测);.o 在下面这组 flags 下也可复现(同 flags 两次编译 sha 相同).
+#
+# ⚠️ v4.0.21 (W-137)修:这两条规则原本引用 `$(CFLAGS_STAGE0)` —— 那个变量在
+# M5 Part 1 (b6efe61)里被改名成 `$(CFLAGS_REPRO)`,**这两处没跟着改** ⇒
+# 展开成空 ⇒ 两个 .o **不带 -std=c11 -Wall -Wextra** 编译。
+# 后果不是「少几个警告」那么轻:`-Wall -Wextra` 正是会报 `-Wcomment`
+# (「块注释未闭合」)的开关 —— W-136 就是靠这个洞把两个 C 桥函数吞进注释,
+# 编译照过、符号没了,直到链接期才炸。详见 workarounds.md W-136 / W-137。
 
 $(JHY_RUNTIME_O): $(RUNTIME_DIR)/runtime.c
 	@mkdir -p $(OBJ_DIR)
-	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(CC) $(CFLAGS_STAGE0) -c $< -o $@
+	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(CC) $(CFLAGS_REPRO) -c $< -o $@
 
 $(JHY_HELPERS_O): $(SRC0_DIR)/jhyy_helpers.c
 	@mkdir -p $(OBJ_DIR)
-	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(CC) $(CFLAGS_STAGE0) -c $< -o $@
+	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(CC) $(CFLAGS_REPRO) -c $< -o $@
 
 # v4.0.8: jhyy_v1.exe.exe = jhyy.exe 的副本,**每次构建重新生成**。
 # 兑现 v1.4.4 的副本约定,同时让它不再是会腐烂的 git 快照。名字保留是因为

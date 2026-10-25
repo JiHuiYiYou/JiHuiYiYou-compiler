@@ -39,6 +39,8 @@ import arena;                     // V2-B v2.6.3: Arena type + arena_alloc / are
 // ═══ Local externs (jh_* helpers from jhyy_helpers.c, per V2-B v2.6.0 Unit A) ═══
 // Used by read_file / write_file below.
 extern fn jh_read_file(path: *u8, out_buf: *u8, buf_cap: i64, out_len: *i64) -> i32;
+/* W-136:side-file 路径 per-compilation 唯一(pid 后缀)—— 见 jhyy_helpers.c */
+extern fn jh_sidefile_path(name: *u8) -> *u8;
 extern fn jh_write_file(path: *u8, buf: *u8, len: i64) -> i32;
 extern fn malloc(size: i64) -> *u8;
 extern fn free(p: *u8) -> i32;
@@ -78,7 +80,8 @@ fn codegen_amd64_init() -> i32 {
 fn codegen_amd64_emit_raw_asm(text: *u8) -> i32 {
     // V3-B v3.0.1: open side-file "ab" (binary mode, per
     // feedback_qbe_crlf_root_cause), append text + newline, close.
-    let asm_buf_path = "compiler/build/obj/_inline_asm.buf" as *u8;
+    // W-136:per-compilation 唯一路径(以前固定路径 ⇒ 并发编译互相截断)
+    let asm_buf_path = jh_sidefile_path("_inline_asm.buf" as *u8);
     let afp = fopen(asm_buf_path, "ab" as *u8);
     if afp != (0 as *u8) {
         let text_len = strlen(text);

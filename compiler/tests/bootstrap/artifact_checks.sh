@@ -939,6 +939,70 @@ check_selfhost_target_flag() {
     ok "selfhost_target_flag(--target= 被正确摘掉,普通路径也正常)"
 }
 
+# ════════════════════════════════════════════════════════════════════════════
+# 9. W-136 / W-137 — C 桥导出的符号不得被「未闭合的注释」静默吞掉
+# ════════════════════════════════════════════════════════════════════════════
+#
+# 背景(v4.0.21,W-136 落地时踩的坑;三层叠加,查了整整一轮才定位):
+#
+#   ① W-136 给 side-file 路径加 pid 后缀时,在 jhyy_helpers.c 里留下一行
+#      **未闭合的块注释起始符**,把 `jh_cgstate_get_state` /
+#      `jh_cgstate_set_state` 两个 C 桥函数整块吞进注释 ⇒
+#        · C 文件**照样编译通过**(gcc 只报一条 `-Wcomment` 警告);
+#        · 产物里**没有**这两个符号 ⇒ 链接期才炸 `undefined reference`。
+#   ② 当时 Makefile 里 `$(CFLAGS_STAGE0)` 是**未定义变量**(M5 Part 1 改名成
+#      `$(CFLAGS_REPRO)` 时漏改这两处,见 W-137)⇒ 两个 .o 根本没带
+#      `-Wall -Wextra` ⇒ ① 里那条 `-Wcomment` 警告被**静默**。
+#   ③ 本机 PATH 里 `/mingw64/bin` 抢在 ucrt64 前面 ⇒ ld 加载到版本不同的
+#      libintl/libiconv/zlib ⇒ **链接失败一个字都不打印** ⇒ 真错误被吞掉。
+#
+#   ⇒ 失效形态是「编译成功 + 链接失败 + 链接器零输出」——**任何只看退出码的
+#     测试都抓不到**,连日志里都没有线索。所以这道门必须**产物级**。
+#
+# 判定方式:问一个**可判定**的问题 ——
+#   **jhyy 侧声明要用的每一个 `extern fn jh_*`,C 桥是不是真的导出了?**
+#   答不上来 ⇒ 少符号 ⇒ 链接期必炸 ⇒ 提前红。
+#
+# ⚠️ 必须**独立编译** jhyy_helpers.c,不复用 compiler/build/obj/_jhyy_helpers.o:
+#   那个 .o 的新鲜度由 Makefile 保证,而本门可能在没跑 make 的环境下被单独调用
+#   ⇒ 读它会验到**旧**的产物。独立编译只多花 ~2 秒,换来「验的一定是当前源码」。
+#
+#   新增 C 桥函数 ⇒ provided 变多 ⇒ **不红**(正常演进)。少一个 ⇒ 红。
+check_helpers_symbols() {
+    hdr "W-136/W-137  C 桥导出的符号不得被未闭合的注释静默吞掉"
+    local c="$JHYY_ROOT/compiler/src0/jhyy_helpers.c"
+    [ -f "$c" ] || { badenv "helpers_symbols" "找不到 $c"; return; }
+    command -v gcc  >/dev/null 2>&1 || { badenv "helpers_symbols" "PATH 里没有 gcc"; return; }
+    command -v nm    >/dev/null 2>&1 || { badenv "helpers_symbols" "PATH 里没有 nm"; return; }
+
+    # 1) jhyy 侧(src0 全部模块,含 std/ 与 bootstrap/)声明要用的 C 桥符号
+    local req="$WORK/helpers_req.txt"
+    grep -rhoE 'extern fn jh_[A-Za-z0-9_]+' "$JHYY_ROOT/compiler/src0" \
+        | sed 's/^extern fn //' | sort -u > "$req"
+    if [ ! -s "$req" ]; then
+        badenv "helpers_symbols" "没从 src0 里解析出任何 extern fn jh_* 声明 —— 提取规则失效"
+        return
+    fi
+
+    # 2) C 桥**当前源码**真正导出的符号(独立编译 ⇒ 一定是当前源码的产物)
+    local obj="$WORK/helpers_gate.o"
+    if ! gcc -std=c11 -c "$c" -o "$obj" > "$WORK/helpers_gate.log" 2>&1; then
+        badenv "helpers_symbols" "编译 jhyy_helpers.c 失败:$(tail -3 "$WORK/helpers_gate.log" | tr '\n' ' ')"
+        return
+    fi
+    nm --defined-only "$obj" 2>/dev/null | awk '{print $NF}' | grep -E '^jh_' | sort -u > "$WORK/helpers_prov.txt"
+
+    # 3) 差集 = 声明了但 C 桥没导出 ⇒ 链接期必炸 undefined reference
+    local missing
+    missing=$(comm -23 "$req" "$WORK/helpers_prov.txt")
+    if [ -n "$missing" ]; then
+        bad "helpers_symbols" "jhyy 侧声明了但 C 桥没导出:$(echo "$missing" | tr '\n' ' ')—— 链接期必炸 undefined reference(W-136 同款:被未闭合的注释吞掉?)"
+        return
+    fi
+    ok "helpers_symbols($(wc -l < "$req") 个 extern fn jh_* 全部由 C 桥导出)"
+}
+
+want helpers_symbols && check_helpers_symbols
 want link_section    && check_link_section
 want asm_before_ret  && check_asm_before_ret
 want holds_bitmap    && check_holds_bitmap

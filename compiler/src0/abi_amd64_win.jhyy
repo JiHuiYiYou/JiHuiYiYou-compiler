@@ -164,8 +164,12 @@ fn abi_win_emit_function_header(
 // Body asm!() statements get appended via cg_expr NODE_ASM_BLOCK.
 // We DON'T use QBE for naked fns — QBE would emit a `ret` and conflict with
 // the side-file's raw `mangled:` label (multiple definition at link time).
+/* W-136:side-file 路径 per-compilation 唯一(pid 后缀)—— 见 jhyy_helpers.c */
+extern fn jh_sidefile_path(name: *u8) -> *u8;
+
 fn emit_naked_func_header(ir: *IRBuf, fn_sym: *Sym) -> i32 {
-    let buf_path = "compiler/build/obj/_inline_asm.buf" as *u8;
+    // W-136:per-compilation 唯一路径(以前固定路径 ⇒ 并发编译互相截断)
+    let buf_path = jh_sidefile_path("_inline_asm.buf" as *u8);
     let fp = fopen(buf_path, "ab" as *u8);
     if fp != (0 as *u8) {
         let _w1 = fwrite(".globl " as *u8, 1 as i64, 7 as i64, fp);

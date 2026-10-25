@@ -300,7 +300,13 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
     jh_path_qbe_buf[0] = '\0';
 
     /* Layout (a) — installer: runtime.c + jhyy_helpers.c as siblings of jhyy.exe */
+    /* `-Wformat-truncation`: dir_path 最长 1024 ⇒ 拼上后可能超 test_path。
+       与本函数下面几处 snprintf 用**同一套** pragma 抑制(作者原本就只包了
+       里面的、漏了这两处 —— v4.0.21 恢复 -Wall -Wextra 时才暴露出来)。 */
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wformat-truncation"
     snprintf(test_path, sizeof(test_path), "%s\\jhyy_helpers.c", dir_path);
+    #pragma GCC diagnostic pop
     {
         struct stat st;
         if (stat(test_path, &st) == 0) {
@@ -324,7 +330,10 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
     /* Layout (b) — source-tree: walk up to find <root>\compiler\src0\jhyy_helpers.c */
     snprintf(root, sizeof(root), "%s", dir_path);
     for (int i = 0; i < 8; i++) {
+        #pragma GCC diagnostic push
+        #pragma GCC diagnostic ignored "-Wformat-truncation"
         snprintf(test_path, sizeof(test_path), "%s\\compiler\\src0\\jhyy_helpers.c", root);
+        #pragma GCC diagnostic pop
         {
             struct stat st;
             if (stat(test_path, &st) == 0) {
@@ -942,6 +951,65 @@ __attribute__((used)) long long jh_cgstate_get_holds_cap(void) {
    lifetime),getter hot-path 读。Pattern 跟 jh_cgstate_get_temp_slots 一致
    (C-side static BSS-zero init)。 */
 
+/* ── W-136 (2026-10-25 真修):side-file 路径 **per-compilation 唯一** ──
+ *
+ * 背景:编译器有三个「codegen 写 → link 步骤读」的跨阶段通道(side-file):
+ *   compiler/build/obj/_inline_asm.buf      (naked fn / 旧 asm 路径)
+ *   compiler/build/obj/_section_directive.buf(link_section 指令)
+ *   compiler/build/obj/_no_std.flag         (no_std 链接行标志)
+ *
+ * 它们以前用**固定路径** ⇒ 两个并发编译会互相踩:
+ *   · codegen 用 fopen(path, "wb") 打开 ⇒ **截断** ⇒ 另一个进程刚写的内容没了;
+ *   · main.jhyy 编译**开头**先删干净(W-122 的修法)⇒ 直接把另一个进程的
+ *     side-file 删掉。
+ * 后果是**静默错代码**:A 的 link 步骤读到 B 的(空)内容 ⇒ A 的 .s 少了
+ * `#[link_section]` 的 `.section` 指令 / B 拿了 A 的 no_std 标志 ⇒ 产物变了,
+ * **不报任何错**。
+ *
+ * 修法:路径加 **pid 后缀** ⇒ 每个进程用自己的文件 ⇒ 结构上不可能互踩。
+ * (Windows 的 pid 在活进程之间唯一;pid 复用由「开头删干净」兜底。)
+ *
+ * 返回的是 **malloc 出来的**缓冲(调用方不释放)—— 编译器是短命进程,一次编译
+ * 泄漏几个几十字节无关紧要;而返回静态缓冲会在多次调用时互相覆盖(写侧与读侧
+ * 必须拿到**同一个**路径字符串)。
+ */
+__attribute__((used)) char *jh_sidefile_path(const char *name) {
+    size_t n = strlen(name);
+    char *buf = (char *)malloc(n + 64);
+    if (buf == NULL) {
+        /* malloc 失败 = 进程内存见底。此时**不能**返回 NULL:8 个调用点会把
+           NULL 直接喂给 fopen / jh_unlink_file ⇒ 无消息崩溃。
+           回落到「不带 pid 的旧路径」(静态槽池,轮转分配,内容确定 ⇒ 写侧与
+           读侧拿到的仍是同一个字符串)⇒ 行为退化成 W-136 之前的固定路径。 */
+        static char fallback[32][1024];
+        static int fallback_idx = 0;
+        int slot = fallback_idx;
+        fallback_idx = (fallback_idx + 1) % 32;
+        snprintf(fallback[slot], sizeof(fallback[slot]),
+                 "compiler/build/obj/%s", name);
+        return fallback[slot];
+    }
+#ifdef _WIN32
+    unsigned long pid = (unsigned long)GetCurrentProcessId();
+#else
+    /* POSIX 分支:<unistd.h> 已在文件头的 #else 里 include。
+       CI 现在只在 windows-latest 上编这个文件(ci.yml:88-89),但 ci.yml:55
+       明说「其他 OS 留给未来扩展」⇒ 别让这个文件在 POSIX 上编不过。 */
+    unsigned long pid = (unsigned long)getpid();
+#endif
+    snprintf(buf, n + 64, "compiler/build/obj/%s.%lu", name, pid);
+    return buf;
+}
+/* jh_cgstate_get_state / jh_cgstate_set_state —— 见上方 v4.0.2.2 (W-096) 的说明。
+ *
+ * ⚠️ W-136 落地时,这一行曾经是一个**未闭合的块注释起始符**,把下面两个函数整块吞进
+ * 注释 ⇒ C 文件**照样编译通过**(只剩一条 `-Wcomment` 警告),但两个符号从
+ * 产物里消失 ⇒ 链接期才炸 `undefined reference to jh_cgstate_get_state`。
+ * 那个警告本来能当场抓住它,却被 Makefile 里未定义的 `$(CFLAGS_STAGE0)`
+ * 吞掉了(见 workarounds.md W-137)。
+ *
+ * ⇒ `g_jh_cgstate_state` 的定义必须留在这里(它是被 W-136 的编辑误删的),
+ * 且必须在这两个函数**之前**。 */
 static void *g_jh_cgstate_state = (void *)0;
 __attribute__((used)) void *jh_cgstate_get_state(void) {
     return g_jh_cgstate_state;

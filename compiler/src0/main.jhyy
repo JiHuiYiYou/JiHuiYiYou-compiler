@@ -26,6 +26,8 @@ import util;
 // v1 sprint W-005 workaround: jhyy_v1 inline_imports 不带 extern 声明跨文件，
 // 编译器自身用的 libc 函数必须显式 extern 在 main.jhyy 顶部。
 extern fn malloc(size: i64) -> *u8;
+/* W-136:side-file 路径 per-compilation 唯一(pid 后缀)—— 见 jhyy_helpers.c */
+extern fn jh_sidefile_path(name: *u8) -> *u8;
 extern fn free(p: *u8) -> i32;
 extern fn strlen(s: *u8) -> i64;
 extern fn strcmp(a: *u8, b: *u8) -> i32;
@@ -653,10 +655,13 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
     //
     // 修法:每次编译**开头**先把这四个删干净 —— 本次编译需要的话,codegen
     // 会重新写 ✓。于是「陈旧」在物理上就不可能发生。
-    let _cl1 = jh_unlink_file("compiler/build/obj/_no_std.flag" as *u8);
-    let _cl2 = jh_unlink_file("compiler/build/obj/_inline_asm.buf" as *u8);
-    let _cl3 = jh_unlink_file("compiler/build/obj/_section_directive.buf" as *u8);
-    let _cl4 = jh_unlink_file("compiler/build/obj/_fence.buf" as *u8);
+    // W-136:路径带 pid 后缀 ⇒ 每个进程删的是**自己**的(以前删的是**全局**的
+    // 固定路径 ⇒ 顺手把另一个并发编译的 side-file 删了 ⇒ 它的产物静默变错)。
+    // 这里仍然删:同一进程连编两个文件时(或 pid 复用时)不留上一轮的陈旧内容。
+    let _cl1 = jh_unlink_file(jh_sidefile_path("_no_std.flag" as *u8));
+    let _cl2 = jh_unlink_file(jh_sidefile_path("_inline_asm.buf" as *u8));
+    let _cl3 = jh_unlink_file(jh_sidefile_path("_section_directive.buf" as *u8));
+    let _cl4 = jh_unlink_file(jh_sidefile_path("_fence.buf" as *u8));
 
     // ── Arena ──
     let mut arena: Arena = Arena {
@@ -935,7 +940,8 @@ fn run_backend(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
 //   that carry #[link_section("name")]. Done BEFORE inline_asm append so
 //   naked fns (which go through `_inline_asm.buf`, not QBE .s) are unaffected.
 fn apply_link_section_directives(temp_asm: *u8) -> i32 {
-    let path = "compiler/build/obj/_section_directive.buf" as *u8;
+    // W-136:per-compilation 唯一路径(写侧在 codegen.jhyy,同一 pid ⇒ 同一路径)
+    let path = jh_sidefile_path("_section_directive.buf" as *u8);
     if jh_file_stat_ok(path) == (0 as i32) {
         return 0;
     }
@@ -1152,7 +1158,8 @@ fn apply_link_section_directives(temp_asm: *u8) -> i32 {
 fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     // v3.0.0 (3d no_std): detect side-file flag from codegen. We use a
     // plain file-stat via jh_file_stat_ok (defined in jhyy_helpers.c).
-    let no_std_flag_path = "compiler/build/obj/_no_std.flag" as *u8;
+    // W-136:per-compilation 唯一路径
+    let no_std_flag_path = jh_sidefile_path("_no_std.flag" as *u8);
     let is_no_std: i32 = jh_file_stat_ok(no_std_flag_path);
     // v3.0.0 (3d no_std) bug fix: if a previous no_std compile left the
     // flag on disk (e.g. compile succeeded then user ran a default-path
@@ -1233,7 +1240,8 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     // the END of the .s file (after the function body), so it executes as
     // global-scope asm after main_jhyy returns. v3.1+ will place asm inline
     // within function bodies (operand constraints + placement tracking).
-    let inline_asm_path = "compiler/build/obj/_inline_asm.buf" as *u8;
+    // W-136:per-compilation 唯一路径
+    let inline_asm_path = jh_sidefile_path("_inline_asm.buf" as *u8);
     if jh_file_stat_ok(inline_asm_path) != (0 as i32) {
         let ia_fp = fopen(inline_asm_path, "rb" as *u8);
         if ia_fp != (0 as *u8) {
@@ -1258,7 +1266,9 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     // before gcc link, then unlink to keep next compile clean. Order matters:
     // append AFTER inline_asm (fences typically come after asm blocks in
     // user code; either order is fine since both are at global .s scope).
-    let fence_buf_path = "compiler/build/obj/_fence.buf" as *u8;
+    // W-136:per-compilation 唯一路径(注:当前**没有写者** —— fence 已内联进 .s,
+    // 这条读路径是死的;保留同构,将来若复活也不会踩并发)
+    let fence_buf_path = jh_sidefile_path("_fence.buf" as *u8);
     if jh_file_stat_ok(fence_buf_path) != (0 as i32) {
         let fe_fp = fopen(fence_buf_path, "rb" as *u8);
         if fe_fp != (0 as *u8) {

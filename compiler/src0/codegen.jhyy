@@ -54,6 +54,8 @@ import abi_amd64_sysv_freestanding;  // v2.7.0 Phase 1: SysV freestanding delega
 // ════════════════════════════════════════════════════
 
 extern fn jh_fputs_stderr(s: *u8) -> i32;
+/* W-136:side-file 路径 per-compilation 唯一(pid 后缀)—— 见 jhyy_helpers.c */
+extern fn jh_sidefile_path(name: *u8) -> *u8;
 // W-104: MEMORY class 的受限实现边界 —— 遇到「不支持」的组合必须**报错退出**,
 // 而不是静默产出错误的代码(见 cg_sysv_check_memory_scope)。
 extern fn exit(code: i32);
@@ -5327,7 +5329,8 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
     // before each function's label. Format: `<mangled_name>|<section_name>\n`.
     // Skipped for naked fns (they go through `_inline_asm.buf`, not QBE).
     let mut section_fp: *u8 = 0 as *u8;
-    let section_path = "compiler/build/obj/_section_directive.buf" as *u8;
+    // W-136:路径带 pid 后缀 ⇒ 并发编译互不干扰(以前是固定路径 ⇒ 互相截断)
+    let section_path = jh_sidefile_path("_section_directive.buf" as *u8);
     let section_open_fp = fopen(section_path, "wb" as *u8);
     if section_open_fp != (0 as *u8) {
         section_fp = section_open_fp;
@@ -5375,7 +5378,8 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
         // Side-file flag at compiler/build/obj/_no_std.flag. Use direct
         // fopen "wb" (per feedback_qbe_crlf_root_cause: IL/derived files
         // must use binary mode to avoid Windows \n → \r\n mangling).
-        let flag_path = "compiler/build/obj/_no_std.flag" as *u8;
+        // W-136:同 section_directive —— per-compilation 唯一路径
+        let flag_path = jh_sidefile_path("_no_std.flag" as *u8);
         let flag_fp = fopen(flag_path, "wb" as *u8);
         if flag_fp != (0 as *u8) {
             let payload = "no_std\n" as *u8;
