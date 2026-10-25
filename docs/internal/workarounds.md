@@ -136,11 +136,18 @@
 | [W-124](#w-124) | RESOLVED | `#[no_std]` 的链接行指向**不存在的** entry 符号 ⇒ no_std 程序... |
 | [W-125](#w-125) | RESOLVED | chained `&&T` 的报错路径 —— parser 先报「expected type... |
 | [W-126](#w-126) | RESOLVED | regress harness 的 `EXPECT-ERROR` 漏洞 ——... |
-| [W-127](#w-127) | ACTIVE | Windows 目标整数 / 浮点实参寄存器编号不自洽 —— 浮点参在前时读错寄存器 |
-| [W-128](#w-128) | ACTIVE | `0o` / `0b` 字面量静默算成 0 —— lexer 认前缀,求值走... |
-| [W-129](#w-129) | ACTIVE | `alignof(T)` 表达式无类型 —— 语义分析里没有 `alignof` 分支 |
+| [W-127](#w-127) | RESOLVED | Windows 目标整数 / 浮点实参寄存器编号不自洽 —— 浮点参在前时读错寄存器 |
+| [W-128](#w-128) | RESOLVED | `0o` / `0b` 字面量静默算成 0 —— lexer 认前缀,求值走... |
+| [W-129](#w-129) | RESOLVED | `alignof(T)` 表达式无类型 —— 语义分析里没有 `alignof` 分支 |
 | [W-131](#w-131) | RESOLVED | jhyy.exe 不再 embed 图标资源 ⇒ `.jhyy` 文件在 Explorer... |
 | [W-132](#w-132) | RESOLVED | 自举链接路径不 embed 图标 ⇒ 用户编译出来的程序也没有 J 图标 |
+| [W-130](#w-130) | RESOLVED | address-holder bitmap 的**容量**在 C 桥接层与 jhyy 侧脱节 ——... |
+| [W-133](#w-133) | RESOLVED | `==` / `!=` 对 `struct` / `enum` /... |
+| [W-133.1](#w-133.1) | DEFERRED | 聚合 `==` / `!=` 不接受**函数调用结果**作为操作数 |
+| [W-133.2](#w-133.2) | DEFERRED | 聚合类型的**大小比较**(`<` `>` `<=` `>=`)未实装 —— 编译期报错 |
+| [W-133.3](#w-133.3) | DEFERRED | struct 字面量的字段值类型必须**精确匹配**字段类型 |
+| [W-134](#w-134) | RESOLVED | MCP pytest 套件里有一个**恒红**的陈旧测试 —— 断言的行为早已被换掉 |
+| [W-134.1](#w-134.1) | DEFERRED | `mcp-jhyy/tests/` 在 CI 里**零覆盖** —— 套件红绿都不影响 CI 结论 |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -9821,7 +9828,7 @@ compile succeeded but EXPECT-ERROR expected: kw='...' — 编译器没报这个�
 <a id="w-127"></a>
 ## W-127: Windows 目标整数 / 浮点实参寄存器编号不自洽 —— 浮点参在前时读错寄存器
 
-**状态:** ACTIVE (2026-10-24 登记 —— v4.0.0 规范审核时实测抓到)
+**状态:** RESOLVED closed 2026-10-24 (v4.0.20) —— 修法 + 回归门见下方
 **Filed-by:** audit-v4-spec-2026-10-24
 **日期:** 2026-10-24
 
@@ -9858,11 +9865,18 @@ g(42, 1.0)          // → EXIT=42 ✓(整数在前时正常)
 「浮点参在前、整型参在后」**。186/186 PASS 说明不了这条 —— 与 W-126 / W-124 / W-125
 同一类:门绿着,但没在验它声称在验的东西。
 
-**修法(建议):** caller 与 callee 统一到 MS x64 的**共享位置计数器**:实参分配时
-维护一个 `arg_pos`,整数与浮点各自占位但不各自计数;callee 侧按同一规则反推。
-修完必须补一道回归用例(例 `mixed_int_float_arg.jhyy`:断言
-`f(1.0,42)==42 && g(42,1.0)==42`),并让**旧代码路径先红后绿**。
+**修法(2026-10-24 已实施):** caller 侧 Win 分支的整数实参改用**参数位置** `ri`
+(与 float 侧 v4.0.8/W-097 已有的按位置一致);SysV 保持 per-bank 独立计数
+(整数 rdi..r9 / 浮点 xmm0..xmm7 各按出现顺序编号 —— 与 callee 侧的
+`cg_find_class_arg_idx` 一致)。位置 ≥ 4 的实参落栈。
 
+**验收:**
+- 新增回归门 `compiler/tests/examples/mixed_int_float_arg.jhyy`
+  (覆盖 (f64,i32)/(i32,f64)/(f64,f64,i32)/(i32,i32,f64,i32) 四种交错,期望 EXIT=170)
+- **先红后绿**:修复前该门 EXIT=1007823737(垃圾值),修复后 EXIT=170 ✓
+- 另一道门 `compiler/tests/examples/sysv_mixed_int_float.jhyy` 同一份源码同时
+  验两套相反的规则(Win 共享位置 / SysV 两独立 bank)—— 两个目标都要过
+- `regress.py`:全绿(SysV 交叉 6 个 sysv 用例走 Docker 也全绿 ✓)
 **引用:**
 - 源码 `compiler/src0/codegen_amd64_emit_call.jhyy:729-736`(caller float 位置计数)
 - 源码 `compiler/src0/codegen_amd64_emit_call.jhyy:1396-1401`(callee 整数按位置读)
@@ -9874,7 +9888,7 @@ g(42, 1.0)          // → EXIT=42 ✓(整数在前时正常)
 <a id="w-128"></a>
 ## W-128: `0o` / `0b` 字面量静默算成 0 —— lexer 认前缀,求值走 `strtoll(base=0)`
 
-**状态:** ACTIVE (2026-10-24 登记 —— v4.0.0 规范审核时实测抓到)
+**状态:** RESOLVED closed 2026-10-24 (v4.0.20) —— 修法 + 回归门见下方
 **Filed-by:** audit-v4-spec-2026-10-24
 **日期:** 2026-10-24
 
@@ -9903,16 +9917,17 @@ let z: i32 = 077;      // → EXIT=63 ✓(前导零按八进制,C 语义)
 写法 —— 照着旧规范写代码就会踩。新规范 v4.0.0 已把两者移出正文(见
 `docs/abis/jhyy-lang-spec-v4.0.0.md` § 2.5 / 附录 B),但**编译器层面的 bug 仍在**。
 
-**修法(建议)二选一:**
-1. **真修**:lexer 把 base 存进 token(或直接在前缀检出时完成转换),parser 用
-   `strtoll(t.start, 0, base)` —— 注意 `base` 传 8 / 2 时 `strtoll` **不接受** `0o`/`0b`
-   前缀,得先把前缀剥掉或改用自写转换;同时保留「前导零 = 八进制」的 C 语义。
-2. **改成响亮失败**(最小改动):lexer 检出 `0o` / `0b` 时直接报
-   `octal/binary literal prefixes are not supported (use decimal or 0x hex)`,
-   杜绝静默 0。
+**修法(2026-10-24 已实施,选「真修」):** parser 加 helper `parse_int_literal(start, length)`:
+按前缀分派到 `strtoll` 的**显式** base(8 / 2);`strtoll` 带显式 base 时**不接受**
+`0o`/`0b` 前缀,所以先把前缀切掉再传。base 0 的路径保持原样(它同时覆盖 `0x`
+十六进制与前导零八进制 = C 语义)。6 个求值点(array size / pattern / expr)
+全部改走该 helper。C 侧镜像 `compiler/src/parser.c` 同步。
 
-无论哪条,都要补一道回归用例(当前**零覆盖**)。
-
+**验收:**
+- 新增回归门 `compiler/tests/examples/int_literal_radix.jhyy`
+  (0o/0O/0b/0B 四种前缀 + 0x 十六进制 + 前导零八进制,期望 EXIT=419)
+- **先红后绿**:修复前 EXIT=318(四个 0o/0b 值全为 0,差值 101 正好对得上),
+  修复后 EXIT=419 ✓
 **引用:**
 - 源码 `compiler/src0/lexer.jhyy`(`lex_scan_number`,`base` 检出后丢弃)
 - 源码 `compiler/src0/parser.jhyy:915` 等 5 处 `strtoll(t.start, 0, 0)`
@@ -9924,7 +9939,7 @@ let z: i32 = 077;      // → EXIT=63 ✓(前导零按八进制,C 语义)
 <a id="w-129"></a>
 ## W-129: `alignof(T)` 表达式无类型 —— 语义分析里没有 `alignof` 分支
 
-**状态:** ACTIVE (2026-10-24 登记 —— v4.0.0 规范审核时实测抓到)
+**状态:** RESOLVED closed 2026-10-24 (v4.0.20) —— 修法 + 回归门见下方
 **Filed-by:** audit-v4-spec-2026-10-24
 **日期:** 2026-10-24
 
@@ -9948,11 +9963,23 @@ let a = alignof(i64);        // → error: function body type does not match ret
 (新规范 v4.0.0 已把它移出正文并登记为限制)。注意:编译器**内部**的 `type_align()`
 是完整实现的(`compiler/src0/types.jhyy:372-391`)—— 缺的只是**语言层表达式**这一层接线。
 
-**修法(建议):** 在 sema 的常量折叠里补 `NODE_ALIGNOF` 分支,复用已有的
-`type_align(t)`;`alignof(T)` 的类型定为 `i64`(与 `sizeof` 一致)。补一道回归用例
-(`alignof_basic.jhyy`,断言 `alignof(i64)==8 && alignof(i32)==4 && alignof(u8)==1`),
-并**先确认旧代码路径红**再修。
+**修法(2026-10-24 已实施):**
+- `sema.jhyy`:`NODE_SIZEOF` / `NODE_ALIGNOF` **合并成一个分支** ——
+  `NodeSizeof` 与 `NodeAlignof` 布局完全一致(都是 `{ target: *u8 }`),data accessor
+  可共用;值走 `type_align` 而不是 `type_size`。
+- `codegen.jhyy`:`NODE_SIZEOF` / `NODE_ALIGNOF` 同样合并成一个 case
+  (sema 已把值填进 node_int_data,codegen 照 NODE_INT 发即可)。
+- C 侧 `sema.c` / `codegen.c` 同步。
+- **刻意不新开分支、不加局部变量**:infer_type / cg_expr 是编译器的巨型递归函数,
+  往里加 local 会推高它们的栈帧 ⇒ 自举产物行为漂移(见 W-130)。合并后两个巨型
+  函数的局部变量数**不变**。
 
+**验收:**
+- 新增回归门 `compiler/tests/examples/alignof_basic.jhyy`
+  (alignof(i64/i32/u8/f64/*u8/struct),期望 EXIT=37)
+- **先红后绿**:修复前两种写法都编译失败(`type mismatch in let` /
+  `function body type does not match return type`);sema 修好后 codegen 未修时
+  求值为 **0**(EXIT=0);两层都修好后 EXIT=37 ✓
 **引用:**
 - 源码 `compiler/src0/sema.jhyy:970-982`(`NODE_SIZEOF` 分支;无 `NODE_ALIGNOF`)
 - 源码 `compiler/src0/types.jhyy:372-391`(`type_align` —— 内部实现是完整的)
@@ -10105,3 +10132,385 @@ v4.0.8(commit `1dc6a23`)把 jhyy.exe 的产出改到自举编译器,自举侧的
 - 源码 `compiler/src/jhyy.rc`(v1.8.1 的原意声明)
 - 源码 `compiler/src/main.c:503-558`(C 侧同款实现)
 - commit `1dc6a23` (2026-10-16) — v4.0.8 自举切换(图标链断在这里)
+
+---
+
+<a id="w-130"></a>
+## W-130: address-holder bitmap 的**容量**在 C 桥接层与 jhyy 侧脱节 —— `--target=` 前缀判定失效
+
+**状态:** RESOLVED closed 2026-10-24 (v4.0.21) —— 根因定位 + 真修 + 四层常驻门
+**Filed-by:** audit-v4-spec-2026-10-24
+**日期:** 2026-10-24
+
+**根因(已逐行复核,数字闭合):**
+
+jhyy 侧的 address-holder bitmap 按**实际 max temp id 动态扩容**
+(`codegen_amd64_state.jhyy:1862` `cg_resize_temp_tables`,`need = max_temp_id + 1 + 4096`),
+边界检查(`cg_record_temp_holds_address` / `cg_is_address_holder`)也用动态的
+`state.temp_holds_size` —— **但 C 桥接层 `compiler/src0/jhyy_helpers.c:951/957`
+把索引上限硬编码 `65536`**。
+
+⇒ temp id ≥ 65536 的 address-holder 标记**写不进去(set 返 -1)、读不出来(get 返 0)**。
+⇒ `codegen_amd64_emit_mem.jhyy:598` `emit_loadsub` 靠这个 flag 分派 indirect / slot
+⇒ 退化成 `movzbl -N(%rbp), %eax`(读栈槽里**指针的低字节**),而不是 `movzbl (%r8), %eax`。
+⇒ **32/64 位 load 不受影响**(W-097 已把 emit_load / emit_store 改成无条件 indirect)
+⇒ **只坏字节/半字节读** ⇒ 恰好打死 `--target=` 的 9 字节前缀比较。
+
+**症状:** 编译器**自己**的 `--target=<triple>` 调用失效:
+- argv 里的 `--target=` 没被摘掉 ⇒ `cmd_compile` 把它当成**输入文件名** ⇒
+  `cannot open file`;更糟的一档是压缩循环把文件写进 `argv[1]` ⇒
+  `cmd_dispatched` 不再是 "compile" ⇒ `unknown command`;
+- 有一档:target 字符串被读成路径的尾巴(`ain.jhyy`)。
+- 外在表现:`jhyy.exe compile --target=amd64_sysv_freestanding ...` 全坏 ⇒
+  **regress 的 SysV 交叉门(6 个 sysv 用例)全红**。
+
+**触发条件(实测,干净工作区复现):** 与**被编译单元自身的 temp id 规模**有关,
+与任何具体改动的语义无关 —— 这是一条**悬崖**:
+
+| 源码组合 | max temp id | `--target` |
+|---|---|---|
+| HEAD | 65537(最高间接字节读 base = 65477,距悬崖 59) | OK |
+| + W-127 | +18 temp → 65495 | OK |
+| + W-128 | +50 temp → 65527 | OK |
+| **+ W-127 + W-128** | **+68 temp → 65545 ≥ 65536** | **BROKEN** |
+
+⇒ **单改一个都好好的,凑两个就坏** —— 典型悬崖。
+**同一个坑历史上撞过一次**(C 侧注释里记着:上限 4096 时 main.jhyy 的 temp id 60462
+越界 ⇒ emit_load/store 走 slot direct path ⇒ argv[0] deref 退化成 copy ⇒ SEGV on any input)。
+那次把上限从 4096 提到 65536,这次源码长大又撞上 65536 ⇒ **第二次**。
+
+**真修(2026-10-24):**
+1. **C 侧容量通道**(`compiler/src0/jhyy_helpers.c`):新增
+   `jh_cgstate_set_holds_table(bitmap, cap)` —— **原子**地装 bitmap 指针 + 容量
+   (单个 C 函数 ⇒ 没有「cap 已更新 / bitmap 还是旧的」窗口);
+   `jh_cgstate_set_holds_flag` / `jh_cgstate_get_holds_flag` 改用该容量,
+   **删除 65536 硬编码**;越界 / 通道未初始化 / 指针不同步 → 返回**哨兵 -1**
+   (get 侧返 0 会被 jhyy 侧当成「不是 address-holder」⇒ 仍是静默错代码)。
+2. **jhyy 侧**(`compiler/src0/codegen_amd64_state.jhyy`):`cg_state_set_holds_address`
+   改成调 `jh_cgstate_set_holds_table(ptr, size)`;两个访问器见到哨兵 → 置
+   **粘滞标志** `holds_bitmap_overflow` + 打印一次。
+3. **编译末尾闸**(`codegen_amd64.jhyy` + `codegen_amd64_inmem.jhyy` 两条入口):
+   粘滞标志置上 ⇒ **响亮的编译失败**,不再静默产出错代码(同 W-120 的处理方式)。
+4. **第二处同款硬编码**:`cg_offset_for_temp` 用常量 `cg_max_temp_slots()` 判界,
+   而 `cg_offset_for_temp_with_target` 用动态 `temp_slots_size` ⇒ 同批改成一致。
+5. **`CGState` 加字段** ⇒ `malloc(512)` → `malloc(768)`(两个入口),并注明
+   「加字段时必须同步改这里 —— 越界 = 静默写坏相邻堆块」。
+6. **strncmp 绕开已于同日回退**:两处判定恢复成手写 9 字节比较循环(HEAD 原形态)。
+   回改后 `--target=` 仍然 OK ⇒ 证明 flag 机制真的修对了(而不是被绕开掩盖)。
+   ⇒ **本条曾短暂用 `strncmp` 绕开,现已作废,不要再沿用。**
+
+**⚠️ 自举需要两步(这次特有的):** 修复让编译器**自己**的行为变了(多了 overflow
+检查 + 哨兵处理)⇒ **旧编译器编新源码**的产物与**新编译器编新源码**的不一致
+⇒ 第一次 `make` 必然报 `SELFFAIL` ⇒ 需要把 `_boot_new.exe` 装回
+`compiler/build/bin/jhyy.exe` 再 `make` ⇒ 闭环达成(自举的两步法)。
+
+**四层常驻门**(全部在 `compiler/tests/bootstrap/artifact_checks.sh`):
+- `holds_cap_source`(源码形态):C 侧不得再有字面量上界 + 容量通道必须在
+- `holds_bitmap`(产物+行为,**主门**):合成 5600 个哑函数把 max temp id 顶过
+  65536 + 一个 **u8 读** probe ⇒ ① 前置断言「max temp > 65536」
+  ② 判别「产物里存在 base temp > 65536 的**间接**字节读」③ 判别「probe 退出码 0」
+- `selfhost_target_flag`(端到端症状):自举后的编译器必须还能摘掉 `--target=`
+- 编译期闸:标记写不进去就**拒绝出码**(粘滞标志 + 末尾闸)
+
+**引用:**
+- 源码 `compiler/src0/jhyy_helpers.c`(`jh_cgstate_set_holds_table` / flag 访问器)
+- 源码 `compiler/src0/codegen_amd64_state.jhyy`(`cg_state_set_holds_address` /
+  `cg_record_temp_holds_address` / `cg_is_address_holder` / `cg_holds_bitmap_overflow` /
+  `cg_resize_temp_tables` / `cg_offset_for_temp`)
+- 源码 `compiler/src0/codegen_amd64_emit_mem.jhyy:598`(`emit_loadsub` 的 flag 分派 —— 受害者)
+- 门 `compiler/tests/bootstrap/artifact_checks.sh`(`holds_bitmap` / `holds_cap_source` /
+  `selfhost_target_flag`)
+- 同族历史 `docs/internal/workarounds.md` W-120(temp 表动态化)与 W-097(load/store 无条件 indirect)
+- 不涉及 ABI 本身 ⇒ `docs/abis/jhyy-abi-v4.0.0.md` 无对应条目
+
+---
+
+<a id="w-133"></a>
+## W-133: `==` / `!=` 对 `struct` / `enum` / 数组是**身份比较**,不是值比较
+
+**状态:** RESOLVED closed 2026-10-24 (v4.0.20) — 聚合 `==` / `!=` 改为按值比较(struct 逐字段 / enum 比 tag / 数组逐元素 / slice 比头)
+**Filed-by:** audit-v4-spec-2026-10-24
+**日期:** 2026-10-24 (ACTIVE 登记) → 2026-10-24 (v4.0.20 真修闭合)
+
+**触发面:** 编译器对**聚合类型**(`struct` / `enum` / 数组 / 切片)的 `==` / `!=`。
+
+**症状(修前):** 编译**通过**、无任何诊断,但结果错 ——
+
+```jhyy
+type P = struct { x: i32, y: i32 }
+let a = P { x: 1, y: 2 };
+let b = P { x: 1, y: 2 };   // 字段完全相同
+a  == b   // → false  ❌(应当 true)
+a  == a   // → true   ✅(同址 —— 这就是「身份比较」的证据)
+```
+
+**危害:** 静默错值 —— 与 W-127(混合 int/float 实参)、W-128(0o/0b 字面量)同类。
+凡是拿聚合类型做相等判断的代码(去重 / 集合查找 / 状态比对)都会**安静地判不相等**。
+
+**根因:** 三处叠加 ——
+
+1. `sema` 对 6 个比较运算符**零类型约束**:直接返回 bool,不检查操作数类型
+   (`compiler/src0/sema.jhyy` 的 `infer_type` NODE_BINARY 分支)。
+2. `codegen` 的 `qbe_type_of` 对 KIND_STRUCT / ENUM / ARRAY **无专门分支** ⇒ 默认 `'w'`
+   ⇒ `==` 走 `ceqw` / `!=` 走 `cnew`,而操作数是 `'l'`(槽地址)
+   ⇒ 汇编是 `movl -A(%rbp), %eax; cmpl -B(%rbp), %eax`
+   ⇒ **比的是两个槽地址,而且只比低 32 位**。
+3. `KIND_ALIAS` **全仓无人解包** ⇒ `type Q = P` 会静默退回身份比较。
+
+**为什么以前没人看见:** 两份规范**都没写**聚合类型 `==` 的语义 —— 旧
+`jhyy-lang-spec-v1.3.0.md` 没写,旧 `jhyy-abi-v1.0.0.md` 的「结构体相等性 /
+枚举相等性」讲的是**名义类型相等性**(两个 struct 类型是不是同一个类型),
+**不是** `==` 运算符。⇒ 这是规范本身的空白,不是回归。
+
+**真修(v4.0.20):**
+
+- `compiler/src0/types.jhyy` 新增 `type_unwrap_alias`(解 KIND_ALIAS,16 层深度上限防环)。
+- `compiler/src0/codegen.jhyy` 新增 `cg_value_eq`(**单函数自递归** —— jhyy **无 forward
+  reference**,拆成 `cg_struct_eq` / `cg_enum_eq` 会互相递归、编不过):
+  - **struct**:逐字段递归;`KIND_PHANTOM` 字段跳过;字段地址 = `a_addr + foff`
+  - **enum**:tag(`loadw` @offset 0)+ payload 按**该变体**的类型比
+    (**不按字节比** —— 变体 padding 是未初始化垃圾);变体 payload 类型不一致时
+    per-variant 掩码 dispatch(`m = (tag == v)`;`sel = (pv AND m) OR (1-m)`)
+  - **array**:逐元素全展开(`arr_count` 是编译期常量)
+  - **slice**:比头(ptr@0 + len@8)—— O(1),不逐元素
+  - **标量 / 指针 / ref / Cap / fn**:`cg_emit_load` 两次 + `ceqw` / `ceql` / `ceqd` / `ceqs`
+    (bool / u8 走 `loadub` 1 字节读取后零扩展 ⇒ **不越界**读相邻字段)
+  - 实现形态是 **and 链**(全字段求值后汇总),**不短路** —— 短路要 branch + merge + phi,
+    踩本仓最脆区;字段读无副作用,全求值安全。
+- `compiler/src0/codegen.jhyy` 的 `cg_expr` NODE_BINARY 接线:左操作数解包后 kind ∈
+  {STRUCT, ENUM, ARRAY, SLICE} ⇒ 走 `cg_value_eq`;`!=` 用 `xor eq, 1`
+  (**不是** `cnew eq, 0` —— `cnew(a,b)` 本身表示「a ≠ b」,`cnew(eq,0)` 等于 `eq` ⇒ 反而取反)。
+- `compiler/src0/sema.jhyy` 拆成两支:`==` / `!=` 对聚合要求**同类型**
+  (`type_eq` 不等 ⇒ `type mismatch in binary`)+ 调用结果报错;
+  `<` / `>` / `<=` / `>=` 对聚合**编译期报错**(大小比较无定义)。
+
+**顺带真修(同属 W-133 语义):标量浮点 `==` / `!=` 的 NaN 语义。**
+
+修前:`ucomisd` + 纯 `setcc`(只读 ZF)⇒ unordered 时 ZF 也置 1 ⇒ 分不清「相等」与
+「unordered」⇒ **`NaN == NaN` 恒为 true(错)**;`!=` 同样错(unordered 时 `setne` 得 0)。
+
+修法(`compiler/src0/codegen_amd64_emit_call.jhyy` 的 f64 / f32 两条分支各加一次):
+
+| 运算 | 发射序列 |
+|---|---|
+| `==` | `sete %al` + `setnp %r10b`(PF=0 ⇒ **有序**)+ `andb %r10b, %al` |
+| `!=` | `setne %al` + `setp %r10b`(PF=1 ⇒ **unordered**)+ `orb %r10b, %al` |
+| 序比较 | `set<cc> %al` + `setnp %r10b` + `andb %r10b, %al` |
+
+⇒ 有 NaN 参与时 `==` 为 `false`、`!=` 为 `true`,符合 IEEE 754。
+`struct` 的浮点字段走同一条 `ceqd` / `cned` 路径 ⇒ **语义一致**。
+守卫寄存器用 `%r10b`(该文件零处使用 `%r10`;`%cl` 已被 shift 路径占用)。
+
+**验证:**
+
+- 新增 10 个用例(`compiler/tests/examples/`):`agg_eq_struct` / `agg_eq_enum` /
+  `agg_eq_array` / `agg_eq_slice`(行为,EXPECT 0)、`agg_eq_type_mismatch` /
+  `agg_order_error` / `agg_eq_call_result_error` / `agg_eq_array_len_mismatch` /
+  `agg_eq_alias`(EXPECT-ERROR)、`float_nan_eq`(行为,EXPECT 0)—— 全绿。
+- `regress.py`:**200/200 PASS + 0 XFAIL + 19 SKIP(219 total)**;
+  `--cross=auto`(docker)SysV **7/7 PASS**。
+- `closure_check.sh`:**PASS**(v2.s == v3.s,byte-identical)。
+- `fixed_point.sh`:**17 PASS / 0 FAIL / 0 INFO**(N=10 .il 与 .s 跨代 byte-equal)。
+- `artifact_checks.sh`:**12 PASS / 0 KNOWN-FAIL / 0 FAIL / 0 SKIP**;`--selftest` **8/8**。
+- `audit_test_assertions.py --strict`:**0 违规**。
+
+**影响范围:** 聚合类型的相等判断(去重 / 集合查找 / 状态比对)。
+**失效条件:** 无 —— 已是最终语义。
+
+**引用:**
+- 源码:`compiler/src0/types.jhyy`(`type_unwrap_alias`)、`compiler/src0/codegen.jhyy`
+  (`cg_value_eq` + `cg_expr` 接线)、`compiler/src0/sema.jhyy`(比较运算符分支)、
+  `compiler/src0/codegen_amd64_emit_call.jhyy`(浮点有序守卫)
+- 规范:`docs/abis/jhyy-lang-spec-v4.0.0.md` § 4.2 / § 4.2.1 / 附录 B
+- 同族限制:W-133.1 / W-133.2 / W-133.3
+
+---
+
+<a id="w-133.1"></a>
+## W-133.1: 聚合 `==` / `!=` 不接受**函数调用结果**作为操作数
+
+**状态:** DEFERRED since 2026-10-24 (v4.0.20) — 聚合 == 不接受函数调用结果(返回值 ABI 下不统一是地址)—— 留 backlog,版本号启动时分配
+**Filed-by:** audit-v4-spec-2026-10-24
+**日期:** 2026-10-24 (W-133 真修时引入的边界) —— 状态 DEFERRED:能力缺口真实,但不在 v4.0.20 范围内修
+
+**触发面:** `make_p(1) == make_p(2)` 这类**表达式层面**的调用结果参与聚合相等比较。
+
+**症状:** 编译期报错
+`equality comparison of a function call result is not supported for aggregate types`。
+
+**根因:** 聚合返回值在 ABI 下**不统一是地址** —— >16B 的 struct / enum 走 sret
+(传的是「指向 image 的地址」),≤16B 的走寄存器(codegen 给的是 `'w'`,**不是**地址)
+⇒ 按地址比会读到寄存器里的头几个字节 ⇒ **静默错值**。
+
+**workaround:** 把结果先落进变量再比 —— `let a = make_p(1); a == b` 里的 `a` 是
+**变量**(值在栈槽里)⇒ 按值比较安全 ⇒ **不报错**。
+
+**影响范围:** 只有「直接拿调用结果比」这一种写法。
+**失效条件:** 当 ABI 让所有聚合返回值都走同一表示(全 sret 或全寄存器)时可放开。
+
+**引用:**
+- 源码:`compiler/src0/sema.jhyy`(`sema_operand_is_call`)、`compiler/src0/codegen.jhyy`
+- 测试:`compiler/tests/examples/agg_eq_call_result_error.jhyy`
+- 规范:`docs/abis/jhyy-lang-spec-v4.0.0.md` § 4.2.1 / 附录 B
+
+---
+
+<a id="w-133.2"></a>
+## W-133.2: 聚合类型的**大小比较**(`<` `>` `<=` `>=`)未实装 —— 编译期报错
+
+**状态:** DEFERRED since 2026-10-24 (v4.0.20) — 聚合的大小比较未实装(语言未定义聚合全序)—— 留 backlog,版本号启动时分配
+**Filed-by:** audit-v4-spec-2026-10-24
+**日期:** 2026-10-24 (W-133 真修时引入的边界) —— 状态 DEFERRED:能力缺口真实,但不在 v4.0.20 范围内修
+
+**触发面:** `a < b` / `a >= b`(struct / enum / 数组 / 切片)。
+
+**症状:** 编译期报错
+`ordering comparison is not supported for struct/enum/array/slice types`。
+
+**根因:** 聚合类型**没有自然的全序**(字段顺序、变体 tag 序、元素序都不构成语言级
+大小关系)。修前这类比较**编译通过**并走标量路径 ⇒ 实际比的是两个槽地址
+⇒ 静默错值。⇒ 与其定义一个随实现漂移的序,不如在语义分析阶段明确拒绝。
+
+**workaround:** 需要排序语义时,显式写比较函数(按你想要的键逐字段比)。
+
+**影响范围:** 聚合类型的大小比较。
+**失效条件:** 语言将来定义聚合的全序语义后可实装。
+
+**引用:**
+- 源码:`compiler/src0/sema.jhyy`(比较运算符分支)
+- 测试:`compiler/tests/examples/agg_order_error.jhyy`
+- 规范:`docs/abis/jhyy-lang-spec-v4.0.0.md` § 4.2.1 / 附录 B
+
+---
+
+<a id="w-133.3"></a>
+## W-133.3: struct 字面量的字段值类型必须**精确匹配**字段类型
+
+**状态:** DEFERRED since 2026-10-24 (v4.0.20) — struct 字面量字段值类型须精确匹配(整数字面量默认 i32)—— 留 backlog,版本号启动时分配
+**Filed-by:** audit-v4-spec-2026-10-24
+**日期:** 2026-10-24 (W-133 真修期间实测发现) —— 状态 DEFERRED:能力缺口真实,但不在 v4.0.20 范围内修
+
+**触发面:** `P { c: 7 }` 其中 `P` 的字段 `c` 是 `u8` / `bool` 等非 `i32` 类型。
+
+**症状:** 编译期报错 `field type mismatch`。
+
+**根因:** sema 用 `type_eq(field_type, value_type)` 判定,而**整数字面量默认推断为
+`i32`** ⇒ `u8` 字段配 `7` 不相等 ⇒ 报错。用户必须自己写出带类型的变量:
+
+```jhyy
+let c: u8 = 7;
+let p = P { c: c };     // ✅
+```
+
+**workaround:** 如上 —— 先声明带类型的局部变量再放进字面量。
+
+**影响范围:** 所有**非 i32** 字段的结构体字面量(`bool` / `u8` / `i64` / `f64` …
+中,`f64` 字段配 `2.5` 可用,因为浮点字面量推断为 f64)。
+**失效条件:** sema 加上「字面量可窄化到字段类型」的隐式转换后可放开。
+
+**引用:**
+- 源码:`compiler/src0/sema.jhyy`(NODE_STRUCT_LITERAL 的字段类型校验)
+- 测试:`compiler/tests/examples/agg_eq_struct.jhyy`(注释记录该限制)
+- 规范:`docs/abis/jhyy-lang-spec-v4.0.0.md` 附录 B
+
+<a id="w-134"></a>
+## W-134: MCP pytest 套件里有一个**恒红**的陈旧测试 —— 断言的行为早已被换掉
+
+**状态:** RESOLVED closed 2026-10-25 (v4.0.20) — 测试断言的「sha 漂移即失败」已被新鲜度检查取代;拆成「漂移不误报」+「binary 比源旧才拦」
+**Filed-by:** audit-v4-spec-2026-10-24
+**日期:** 2026-10-25 (本轮修 v4 spec 时跑 pytest 才撞见)
+
+**触发面:** `mcp-jhyy/tests/test_regress.py::test_regress_baseline_drift_detection`。
+
+**症状:** `pytest mcp-jhyy/tests` ⇒ **1 failed / 38 passed**。失败断言:
+
+```
+assert data["ok"] is False
+assert "binary drifted" in data["early_abort"]
+```
+
+但实现里**根本没有 `binary drifted` 这个字符串** —— `mcp-jhyy/jhyy_regress.py`
+现在返回的是 `"binary is older than source: ... — suspect phantom binary"`。
+
+**根因:** commit `f72cef4`(v4.0.20,上一轮修 W-126 / W-124 / W-125 那批)把
+`.exe` 的 **sha 比对**换成了**新鲜度检查**(mtime 比源)。理由写在实现的注释里:
+`.exe` 的 sha 随每次构建漂移(build 非确定性),拿它当回归信号是**假信号**;
+真正的 phantom-binary 信号是「binary 比源旧」。
+
+**但那次改动没有同步更新这条测试** ⇒ 从 `f72cef4` 起,`mcp-jhyy/tests/` 就是
+**红的**。而 **CI 从不跑 pytest**(见 W-134.1)⇒ 没人发现。
+
+**真修(2026-10-25):** 把那条测试拆成两条,各自验**当前真实**的语义:
+
+| 新测试 | 验什么 |
+|---|---|
+| `test_regress_sha_drift_is_not_fatal` | baseline sha 与实际不符 ⇒ **不得**失败(`ok is True`)+ `early_abort is None` —— 一道**假阳性**的门比没有门更糟:它训练人忽略红色 |
+| `test_regress_stale_binary_detected` | 把 binary 的 mtime 拨到 1 天前 ⇒ `ok is False` + `early_abort` 含 `older than source` + `total == 0`(一个测试都没跑)—— 这才是现在的**真门** |
+
+**验证:** `pytest mcp-jhyy/tests` ⇒ **40 passed / 1 skipped / 0 failed**
+(修前 38 passed / 1 failed / 1 skipped)。
+
+**影响范围:** 只影响 MCP 工具的测试套件,不影响编译器行为。
+**失效条件:** 不适用(已 RESOLVED)。
+
+**引用:**
+- 测试:`mcp-jhyy/tests/test_regress.py`
+- 实现:`mcp-jhyy/jhyy_regress.py`(`_check_baseline_freshness` + `run_all`)
+- 引入变更:commit `f72cef4`
+
+---
+
+<a id="w-134.1"></a>
+## W-134.1: `mcp-jhyy/tests/` 在 CI 里**零覆盖** —— 套件红绿都不影响 CI 结论
+
+**状态:** DEFERRED since 2026-10-25 (v4.0.20) — 补 CI step 需要 network pip 依赖(fastmcp/pytest/pytest-asyncio);本轮不动流水线
+**Filed-by:** audit-v4-spec-2026-10-24
+**日期:** 2026-10-25 (W-134 的成因之一)
+
+**触发面:** `.github/workflows/ci.yml`。
+
+**症状:** `grep -n "pytest\|pip install" .github/workflows/*.yml` ⇒ **零命中**。
+CI 跑 `make` / `regress.py` / `closure_check.sh` / `fixed_point.sh` /
+`artifact_checks.sh` / `audit_test_assertions.py`,**但从不跑 `mcp-jhyy/tests/`**。
+
+**根因:** MCP 测试要 `fastmcp`(in-memory client)+ `pytest` + `pytest_asyncio`。
+CI 的 MSYS2 装了 `python` / `python-pip`,但**没有任何 `pip install` 步骤** ——
+补这一条等于给 CI 引入**第一个网络依赖**。
+
+**危害:** 套件里的红(比如 W-134 那个)或绿**都不影响 CI 结论** ⇒
+「MCP 工具坏了」这件事只能靠人手动跑才发现。这正是本项目反复踩的坑:
+**门绿着,但它没在验它声称在验的东西**(甚至根本没跑)。
+
+**workaround(当前):** 本地跑 `pytest mcp-jhyy/tests`。
+⚠️ 本机 **MSYS2 mingw64 的 python 没有 pip / pytest / yaml**;
+可用的解释器是 `C:\Users\liuzhen\miniconda3\python.exe`(3.13,带
+pytest 9.1.1 + yaml + pytest_asyncio + fastmcp 3.3.1)。
+
+**修法(待做,已想清楚):** 在 `ci.yml` 的 `build-and-test` job 里加一个 step:
+
+```yaml
+      - name: MCP server test suite
+        shell: msys2 {0}
+        run: |
+          python -m pip install --user --upgrade fastmcp pytest pytest-asyncio
+          python -m pytest mcp-jhyy/tests -q
+```
+
+⚠️ **为什么本轮没做**:
+1. 本机 MSYS2 python **连 pip 都没有** ⇒ 这条命令**无法本地验证**;
+2. CI 是**发布链**的硬门(已有 5 次发布失败),在发布前给流水线加
+   **第一个网络依赖**、且不能本地验证 —— 风险不对称;
+3. `fastmcp` 依赖树不小(pydantic / httpx / anyio / starlette / uvicorn),
+   会给 job 加 1-2 分钟。
+
+⇒ 建议**单独一个 commit / 一次 CI 周期**做,并且**先在 PR 分支上观察一轮**。
+
+**影响范围:** MCP 工具(`jhyy_run` / `jhyy_lang_ref` / `jhyy_abi_info` /
+`jhyy_regress` / `jhyy_il_diff` / `jhyy_selfhost_check` / `jhyy_workarounds` /
+`jhyy_format` / `jhyy_check` / `jhyy_compile` / `jhyy_get_il`)的回归保护。
+**失效条件:** 补上 CI step 后本条关闭。
+
+**引用:**
+- `mcp-jhyy/tests/`(41 个测试,当前 **0** 个进 CI)
+- `.github/workflows/ci.yml`(`build-and-test` job)
+- 同族:`docs/internal/tests.md`

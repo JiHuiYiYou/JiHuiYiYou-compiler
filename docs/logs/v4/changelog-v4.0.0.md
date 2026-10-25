@@ -1045,6 +1045,79 @@ PASS ✓;`.jhyy` 文件在 Explorer 里恢复显示 "J" 图标 ✓。
 
 ---
 
+### W-127 / W-128 / W-129 / W-130 / W-133 —— 重写 v4 ABI / spec 时挖出的五个编译器缺陷
+
+**2026-10-24。** 本轮的主线是**重写** `docs/abis/` 的 ABI 与语言规范(v4.0.0),
+重写时逐条对照实现,**挖出五个编译器缺陷** —— 三个是编译器 bug,两个是
+「编译器自身」的缺陷。全部**真修**(不是绕开)。
+
+| W-NNN | 一句话 |
+|---|---|
+| W-127 | Windows 目标下整数 / 浮点实参**共用一个位置计数器**(MS x64 ABI),旧实现给浮点单独计数 ⇒ 浮点参在前时整数参**读错寄存器** |
+| W-128 | `0o` / `0b` 字面量**静默算成 0**(lexer 认前缀,求值却走 `strtoll(base=0)`) |
+| W-129 | `alignof(T)` 表达式**无类型**(sema 里只有 `NODE_SIZEOF` 分支)⇒ 报「type mismatch in let」 |
+| W-130 | address-holder bitmap 的**容量**在 C 桥接层与 jhyy 侧脱节 ⇒ 编译器**自己的** `--target=` 前缀判定失效 |
+| W-133 | `==` / `!=` 对 `struct` / `enum` / 数组是**身份比较**(比地址)不是值比较 ⇒ 字段完全相同的两个 struct 判 `false` |
+
+**W-130 —— 数字闭合的根因链。** 这个最值得记,因为它**跨了两次改动**:
+
+1. C 侧 `jh_cgstate_set/get_holds_flag` 把 `idx >= 65536` **硬编码**拒绝;
+2. jhyy 侧 `cg_resize_temp_tables` 已把同一张 bitmap **动态扩到**
+   `max_temp_id + 1 + 4096`(可以 > 65536)⇒ **两边脱节**;
+3. ⇒ temp id ≥ 65536 的 address-holder 标记**写不进去**;
+4. ⇒ `emit_loadsub`(**唯一**查这张 flag 的 load 路径)退化成「读栈槽里指针的
+   **低字节**」⇒ 编译器**自己**那段 9 字节 `--target=` 前缀比较失效
+   ⇒ "cannot open file" ⇒ 6 个 sysv cross 用例全红;
+5. 数字:好产物里「最高间接字节读的 base temp」= **65477**(距悬崖 59);
+   +W-127(+18 temp)→ 65495 OK;+W-128(+50)→ 65527 OK;
+   **+两者(+68)→ 65545 ≥ 65536 ⇒ 坏**。
+
+⇒ 也就是说:**W-127 / W-128 这两个「无害的修复」恰好把源码推过了悬崖** ——
+修 bug 修出了新 bug。修法:C 侧加**容量通道**
+(`jh_cgstate_set_holds_table(bitmap, cap)` 原子地装指针 + 容量,越界返 **-1 哨兵**)
++ jhyy 侧**粘滞标志 + 编译末尾响亮失败** + **3 道常驻门**。
+
+> ⚠️ 记一笔:第一轮 `make` 报 **SELFFAIL** 是**预期内**的 —— 改了 codegen 行为,
+> 锚点编译器编出来的产物与新编译器自己的产物必然不同 ⇒ 需要**两步自举**
+> (把 `_boot_new.exe` 装成 `jhyy.exe` 再 `make`)。
+
+**W-133 —— 规范本身的空白。** 两份旧规范**都没写**聚合类型 `==` 的语义:
+旧 lang-spec 没写;旧 ABI 的「结构体相等性 / 枚举相等性」讲的是**名义类型相等性**
+(两个 struct 类型是不是同一个类型),**不是** `==` 运算符。⇒ 这是**规范空白**,
+不是回归。根因三处叠加:sema 对比较运算符**零类型约束** + `qbe_type_of` 对聚合
+无分支(默认 `'w'`)⇒ `ceqw` 比的是两个**槽地址的低 32 位** + `KIND_ALIAS`
+**全仓无人解包**。
+
+修法:新增 `cg_value_eq`(struct 逐字段递归 / enum 比 tag + 按变体类型比 payload /
+数组逐元素 / slice 比头)+ sema 拆两支 + **顺带真修标量浮点 `==` 的 NaN 语义**
+(`ucomisd` + 纯 `setcc` 只读 ZF ⇒ unordered 时分不清「相等」⇒ **`NaN == NaN`
+恒为 true(错)**;现在加 `setnp` / `setp` 有序守卫 ⇒ 有 NaN 参与时 `==` 为 `false`、
+`!=` 为 `true`,符合 IEEE 754)。
+
+**语义决策(用户拍板):** slice 的 `==` 比**头**;聚合的 `<` `>` `<=` `>=`
+**编译期报错**;enum 各变体 payload 类型不一致 → per-variant 掩码 dispatch;
+标量浮点 `==` 的 NaN 语义**本次一起修**。
+
+**新门:** `artifact_checks.sh` 加 3 道(W-130 的 holds_cap_source / holds_bitmap /
+selfhost_target_flag);`compiler/tests/examples/` 加 **14 个**用例
+(W-127 / W-128 / W-129 各 1 + W-133 的 9 个聚合用例 + `float_nan_eq` +
+1 个 sysv 交叉用例)。
+
+**门(2026-10-24 实测):**
+
+| 门 | 结果 |
+|---|---|
+| `regress jhyy.exe` | ✅ **200/200 PASS** + 0 XFAIL + 19 SKIP(219 total) |
+| `regress --cross=auto`(本机 docker) | ✅ **7 个** sysv 用例全 PASS(exit=28/217/42/35/18/42/**170**) |
+| `closure_check.sh` | ✅ PASS(v2.s == v3.s,byte-identical) |
+| `fixed_point.sh` | ✅ 17 PASS / 0 FAIL / 0 INFO(N=10 .il 与 .s 跨代 byte-equal) |
+| `artifact_checks.sh` | ✅ 12 PASS / 0 KNOWN-FAIL / 0 FAIL / 0 SKIP |
+| `artifact_checks.sh --selftest` | ✅ 8/8 |
+| `audit_test_assertions.py --strict` | ✅ 0 违规 |
+| 台账 | ✅ **0 ACTIVE / 3 DEFERRED** / 121 索引行(DEFERRED 3 条 = W-133.1 / .2 / .3) |
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一
