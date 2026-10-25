@@ -1,0 +1,37 @@
+// EXPECT: 0
+// agg_eq_slice.jhyy — slice 的 == 比**头**(ptr + len)(W-133 真修)
+//
+// 语义决策(2026-10-24 用户拍板):slice 的 == 比较数据指针 + 长度,
+// **不**逐元素比较(逐元素需要运行期循环,元素类型还可能本身是聚合 ⇒ 递归不可控)。
+// 「同一起点 + 同一长度」才相等。
+extern fn printf(fmt: *u8, v: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+    let mut same: i32 = 0;
+
+    // 同一起点 + 同一长度 ⇒ 相等(同一个 slice 变量)
+    let s1: [*]u8 = "ab" as [*]u8;
+    same = 0;
+    if s1 == s1 { same = 1; }
+    if same == 0 { fails = fails + 1; }
+
+    // 长度不同 ⇒ 不等
+    let l1: [*]u8 = "ab" as [*]u8;
+    let l2: [*]u8 = "abc" as [*]u8;
+    same = 0;
+    if l1 == l2 { same = 1; }
+    if same == 1 { fails = fails + 1; }
+
+    // 同内容但**不同字面量** ⇒ 起点不同 ⇒ 不等。
+    // 这是「比 slice 头」语义的直接体现(不是 bug):两个 "ab" 字面量是两个
+    // 不同的字符串常量,数据指针不同 ⇒ 按头比较就是不相等。
+    let d1: [*]u8 = "ab" as [*]u8;
+    let d2: [*]u8 = "ab" as [*]u8;
+    same = 0;
+    if d1 == d2 { same = 1; }
+    if same == 1 { fails = fails + 1; }
+
+    printf("fails=%d\n", fails);
+    return fails;
+}

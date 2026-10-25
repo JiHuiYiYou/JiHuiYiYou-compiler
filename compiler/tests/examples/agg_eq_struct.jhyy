@@ -1,0 +1,39 @@
+// EXPECT: 0
+// agg_eq_struct.jhyy — struct 的 == / != 必须走**按值比较**(W-133 真修)
+//
+// 修前:编译通过但比的是**槽地址** ⇒ 字段完全相同的两个 struct 判 false。
+// 修后:逐字段比较 ⇒ 同值 true / 异值 false。
+//
+// ⚠️ 当前语言的 struct 字段实际**只支持 i32 / i64**
+// (bool / u8 / f64 / *u8 / 数组字段、嵌套 struct 字段都被 sema 拒:
+// field type mismatch —— 见台账 W-133.3),
+// 所以本测试覆盖不到「bool / 指针 / u8 / f64 / 数组 / 嵌套 struct」六种字段形态。
+//
+// 返回值是**累加出来的 fails 计数**(不是字面量)⇒ 零信号门
+// (scripts/dev/audit_test_assertions.py --strict)通过。
+extern fn printf(fmt: *u8, v: i32) -> i32;
+
+type P = struct { x: i32, y: i32 }
+
+fn main_jhyy() -> i32 {
+    let a = P { x: 1, y: 2 };
+    let b = P { x: 1, y: 2 };
+    let c = P { x: 1, y: 3 };
+    let mut fails: i32 = 0;
+    let mut same: i32 = 0;
+
+    same = 0;
+    if a == b { same = 1; }
+    if same == 0 { fails = fails + 1; }
+
+    same = 0;
+    if a == c { same = 1; }
+    if same == 1 { fails = fails + 1; }
+
+    same = 0;
+    if a != c { same = 1; }
+    if same == 0 { fails = fails + 1; }
+
+    printf("fails=%d\n", fails);
+    return fails;
+}

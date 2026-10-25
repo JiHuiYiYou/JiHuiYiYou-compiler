@@ -1,0 +1,40 @@
+// W-127 回归门 —— Windows/MS x64 的整数与浮点实参**共享同一个位置计数器**。
+//
+// MS x64:第 n 个实参(1-based)无论整数浮点都占同一个「槽位」:
+//   槽 0 → RCX / XMM0
+//   槽 1 → RDX / XMM1
+//   槽 2 → R8  / XMM2
+//   槽 3 → R9  / XMM3
+//   槽 ≥ 4 → 落栈
+//
+// 修复前:callee 一直按**位置**读,而 caller 的整数实参按「整数独立计数」分配
+// 寄存器 ⇒ 浮点实参排在整数实参前面时,callee 从错误的寄存器读整数实参 →
+// 垃圾值。float 侧早在 v4.0.8 (W-097) 就改成按位置了,int 侧没跟上 ——
+// 这道门就是补那个缺口。
+//
+// 覆盖四种组合:
+//   (f64, i32) / (i32, f64) / (f64, f64, i32) / (i32, i32, f64, i32)
+fn float_then_int(a: f64, b: i32) -> i32 {
+    return b;
+}
+
+fn int_then_float(a: i32, b: f64) -> i32 {
+    return a;
+}
+
+fn fff_i(a: f64, b: f64, c: i32) -> i32 {
+    return c;
+}
+
+fn ii_f_i(a: i32, b: i32, c: f64, d: i32) -> i32 {
+    return d;
+}
+
+fn main_jhyy() -> i32 {
+    let r = float_then_int(1.0, 42);      // 42
+    let s = int_then_float(41, 1.0);      // 41
+    let t = fff_i(1.0, 2.0, 43);         // 43
+    let u = ii_f_i(1, 2, 3.0, 44);       // 44
+    return r + s + t + u;                // 170
+}
+//EXPECT:170

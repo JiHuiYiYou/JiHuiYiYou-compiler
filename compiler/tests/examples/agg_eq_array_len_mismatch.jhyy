@@ -1,0 +1,13 @@
+// EXPECT-ERROR: "type mismatch in binary"
+// agg_eq_array_len_mismatch.jhyy — 数组 == 的两个操作数必须**同类型**(W-133 真修)
+//
+// type_eq 对 KIND_ARRAY 会比 arr_count ⇒ `[i32;2] == [i32;3]` 直接被拒。
+// (按值比较两个不同长度的数组也没有意义 ⇒ 编译期报错,而不是静默比地址。)
+fn main_jhyy() -> i32 {
+    let l1: [i32; 2] = [1, 2];
+    let l2: [i32; 3] = [1, 2, 3];
+    if l1 == l2 {
+        return 1;
+    }
+    return 0;
+}

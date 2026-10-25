@@ -185,6 +185,8 @@ type CGState = struct {
     //
     // 一个响亮的失败远好过一个静默产出错代码的编译器 ✓。
     temp_table_overflow: i32,
+    // W-130:address-holder bitmap 越界 / C 桥哨兵的粘滞标志(编译末尾闸读它)
+    holds_bitmap_overflow: i32,
 
     // v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN):per-fn block-name
     // uniquify table。emit_label 在 `.L<name>_fn<N>` 后 append `_b<count>` suffix,
@@ -305,8 +307,15 @@ extern fn jh_cgstate_set_temp_slots(p: *u8) -> i32;
 // temp_holds_address bitmap。query 走 (*s).temp_holds_address 直接读 (hot path),
 // setter 是 forward-ref-safe no-op (跟 jh_cgstate_set_temp_slots 同 pattern)。
 extern fn jh_cgstate_get_holds_address() -> *u8;
-extern fn jh_cgstate_set_holds_address(p: *u8) -> i32;
-// v2.11.8: byte-level access into 256-entry u8 bitmap (jhyy 没有 u8 direct deref)。
+// W-130 (2026-10-24 真修):容量通道 —— bitmap 指针 + 实际容量**一起**装
+// (单个 C 函数 ⇒ 没有「cap 已更新 / bitmap 还是旧的」窗口)。C 侧不再有硬编码
+// 上界:65536 那条硬上限当年圈住了 main.jhyy 的 temp id(60462),后来源码长大
+// 又撞上第二次(W-130)。
+extern fn jh_cgstate_set_holds_table(p: *u8, cap: i64) -> i32;
+extern fn jh_cgstate_get_holds_cap() -> i64;
+// v2.11.8: byte-level access into the u8 bitmap (jhyy 没有 u8 direct deref)。
+// W-130:越界 / 通道未初始化 / 指针不同步 → 返回哨兵 -1(不是 0 —— 返 0 会被
+// jhyy 侧当成「不是 address-holder」⇒ 静默产出错代码)。
 extern fn jh_cgstate_set_holds_flag(bitmap: *u8, idx: i64) -> i32;
 extern fn jh_cgstate_get_holds_flag(bitmap: *u8, idx: i64) -> i32;
 
@@ -388,6 +397,13 @@ fn cg_state_get_temp_overflow(state: *u8) -> i32 {
     return ((state as *CGState)).temp_table_overflow;
 }
 
+// cg_state_get_holds_overflow — W-130:address-holder bitmap 越界标志
+// (编译结束时检查 → 响亮的编译失败,而不是静默产出错代码)。
+fn cg_state_get_holds_overflow(state: *u8) -> i32 {
+    if state == (0 as *u8) { return 0 as i32; }
+    return ((state as *CGState)).holds_bitmap_overflow;
+}
+
 fn cg_state_set_temp_slots(state: *u8) -> i32 {
     let s = state as *CGState;
     let _ = jh_cgstate_set_temp_slots((*s).temp_slot_for_id);
@@ -449,11 +465,28 @@ fn cg_max_temp_holds_address() -> i64 {
     return 65536 as i64;
 }
 
+// cg_holds_bitmap_overflow — W-130:address-holder bitmap 越界 / C 桥哨兵的
+// **响亮失败**。打印一次(第一次)并置粘滞标志 → 编译结束时 fail
+// (见 codegen_amd64.jhyy / codegen_amd64_inmem.jhyy 的末尾闸)。
+// 语义:标记被丢弃 ⇒ emit_loadsub 走 slot direct path ⇒ 静默产出错代码。
+// 一个响亮的失败远好过静默的错代码 ✓(同 W-120 的处理方式)。
+fn cg_holds_bitmap_overflow(state: *u8, temp_id: i64, cap: i64) -> i32 {
+    let s = state as *CGState;
+    if (*s).holds_bitmap_overflow == (0 as i32) {
+        (*s).holds_bitmap_overflow = 1 as i32;
+        jh_fputs_stderr("jhyy error: address-holder bitmap out of range (W-130 guard) — the compiled output would be silently wrong" as *u8);
+        jh_fputs_stderr("
+" as *u8);
+    }
+    return 0 as i32;
+}
+
 // cg_state_set_holds_address — v2.11.8 setter,CGState 装 temp_holds_address 时
-// 调,跟 cg_state_set_temp_slots 同 pattern (forward-ref-safe no-op)。
+// 调,跟 cg_state_set_temp_slots 同 pattern。
+// W-130:指针 + 容量**一起**装(C 侧单函数 ⇒ 原子,没有中间窗口)。
 fn cg_state_set_holds_address(state: *u8) -> i32 {
     let s = state as *CGState;
-    let _ = jh_cgstate_set_holds_address((*s).temp_holds_address);
+    let _ = jh_cgstate_set_holds_table((*s).temp_holds_address, (*s).temp_holds_size);
     return 0 as i32;
 }
 
@@ -462,15 +495,22 @@ fn cg_state_set_holds_address(state: *u8) -> i32 {
 // 调。bounds check: t < 256, 否则 no-op。
 fn cg_record_temp_holds_address(state: *u8, temp_id: i64) -> i32 {
     // W-120:bound 用实际容量(state.temp_holds_size),不是常量。
-    let _cap0 = (state as *CGState).temp_holds_size;
+    let s = state as *CGState;
+    let _cap0 = (*s).temp_holds_size;
     if temp_id < (0 as i64) || temp_id >= _cap0 {
+        // W-130:越界 = 标记会被**丢弃** ⇒ emit_loadsub 走 slot direct path ⇒
+        // 静默产出错代码。响亮失败(记下来 → 编译末尾 fail)。
+        let _o = cg_holds_bitmap_overflow(state, temp_id, _cap0);
         return 0 as i32;
     }
-    let s = state as *CGState;
     if (*s).temp_holds_address == (0 as *u8) {
         return 0 as i32;
     }
     let _r = jh_cgstate_set_holds_flag((*s).temp_holds_address, temp_id);
+    if _r != (0 as i32) {
+        // W-130:C 侧哨兵 -1 = 越界 / 容量通道没装 / 指针不同步。
+        let _o2 = cg_holds_bitmap_overflow(state, temp_id, _cap0);
+    }
     return 0 as i32;
 }
 
@@ -478,15 +518,22 @@ fn cg_record_temp_holds_address(state: *u8, temp_id: i64) -> i32 {
 // vs slot dispatch。1 = address-holder, 0 = value-temp (default; out-of-bounds 也 0)。
 fn cg_is_address_holder(state: *u8, temp_id: i64) -> i32 {
     // W-120:bound 用实际容量(state.temp_holds_size),不是常量。
-    let _cap1 = (state as *CGState).temp_holds_size;
+    let s = state as *CGState;
+    let _cap1 = (*s).temp_holds_size;
     if temp_id < (0 as i64) || temp_id >= _cap1 {
+        let _o = cg_holds_bitmap_overflow(state, temp_id, _cap1);
         return 0 as i32;
     }
-    let s = state as *CGState;
     if (*s).temp_holds_address == (0 as *u8) {
         return 0 as i32;
     }
     let r = jh_cgstate_get_holds_flag((*s).temp_holds_address, temp_id);
+    if r < (0 as i32) {
+        // W-130:C 侧哨兵 -1。**不能**当成「不是 address-holder」——
+        // 那正是 W-130 静默错代码的成因。返 0 + 置粘滞标志 + 编译末尾失败。
+        let _o2 = cg_holds_bitmap_overflow(state, temp_id, _cap1);
+        return 0 as i32;
+    }
     return r;
 }
 
@@ -543,6 +590,7 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     (*s).temp_slots_size = cg_max_temp_slots();
     // W-120:越界粘滞标志初始为 0。
     (*s).temp_table_overflow = 0 as i32;
+    (*s).holds_bitmap_overflow = 0 as i32;
     // v2.11.5 helper wire C-side static (forward ref-safe helper call):
     let _wr = cg_state_set_temp_slots(state);
     // v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN):alloc block-name
@@ -964,7 +1012,15 @@ fn cg_offset_for_temp(t: i64) -> i64 {
     // v4.0.2.2 (W-096): temp_slot_for_id 表 keyed by global t (cross-fn累加)
     // 是 correct (alloc-result 是 unique by global t), 不变。
     let slots = jh_cgstate_get_temp_slots();
-    if slots != (0 as *u8) && t < cg_max_temp_slots() {
+    // W-130:界用**实际容量**(state.temp_slots_size),不是常量 —— 常量
+    // 65536 在大文件上会越界 → 静默不查表 → formula 兜底 → 同一个 temp 在
+    // 两处解析成不同的槽 → 静默错代码(与 cg_offset_for_temp_with_target 对齐)。
+    let _stp = jh_cgstate_get_state();
+    let mut _cap_t: i64 = 0 as i64;
+    if _stp != (0 as *u8) {
+        _cap_t = ((_stp as *CGState)).temp_slots_size;
+    }
+    if slots != (0 as *u8) && _cap_t > (0 as i64) && t < _cap_t {
         let p = ptr_add_u8(slots, t * (8 as i64)) as *i64;
         let recorded = *p;
         if recorded != (0 as i64) {

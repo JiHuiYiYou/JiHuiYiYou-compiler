@@ -1096,6 +1096,193 @@ fn cg_copy_struct(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) ->
 
 
 
+// ════════════════════════════════════════════════════════════════════════════
+// cg_value_eq — 值的**按值**相等比较(W-133 真修)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// 返回一个 'w' 的 IRVal(1 = 相等, 0 = 不相等)。
+//   t_raw  : 值的类型(Type*;可能是 KIND_ALIAS → 入口解包)
+//   a_addr : 左值的**槽地址**(IRVal,'l')
+//   b_addr : 右值的**槽地址**(IRVal,'l')
+//
+// ⚠️ **单函数实现**:struct 字段 / 数组元素 / enum payload 的比较都要**递归**
+// 调用本函数 —— jhyy 无 forward reference,拆成 cg_struct_eq / cg_enum_eq 会变成
+// **互相递归**(编不过)。所以全部 kind 在一个函数里 dispatch。
+//
+// 语义(2026-10-24 用户拍板):
+//   · struct → 逐字段递归比较(浅比较:指针字段比指针值本身)
+//   · enum   → tag 相等 + payload 按变体类型比(**不按字节比** —— 两个分别构造的
+//              同值 enum,padding 是未初始化垃圾,按字节比会误判不等);
+//              各变体 payload 类型不一致时用 per-variant 掩码 dispatch(branch-free,
+//              不碰 phi / 分支区)
+//   · array  → 逐元素(arr_count 是编译期常量 ⇒ 全展开)
+//   · slice  → 比**头**(ptr@0 + len@8),不逐元素
+//   · bool 字段 → 按原值比(与标量 bool == 一致,不做 0/1 归一化)
+//   · float 字段 → 与标量浮点 == 同语义(ordered)
+fn cg_value_eq(cg_raw: *u8, t_raw: *u8, a_addr: IRVal, b_addr: IRVal) -> *IRVal {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    // W-133 必做:alias 解包。`type Q = P`(P 是 struct)必须按 P 的布局比。
+    let t = type_unwrap_alias(t_raw as *Type);
+    let mut result: *IRVal = ir_new_tmp(ir, QBE_W());
+    if t == (0 as *Type) {
+        ir_emit_copy(ir, *result, 0);
+        return result;
+    }
+    let k = (*t).kind;
+
+    // ── 标量 / 指针 / 引用 / Cap / fn:load 后按值比 ──
+    if k == KIND_PRIMITIVE() || k == KIND_POINTER() || k == KIND_REF() ||
+       k == KIND_CAP() || k == KIND_FUNC() {
+        let qt = qbe_type_of(t as *u8);
+        let av = *ir_new_tmp(ir, qt);
+        let bv = *ir_new_tmp(ir, qt);
+        let _l1 = cg_emit_load(cg_raw, av, t as *u8, a_addr);
+        let _l2 = cg_emit_load(cg_raw, bv, t as *u8, b_addr);
+        let mut op: *u8 = "ceqw" as *u8;
+        if qt == QBE_L() { op = "ceql" as *u8; }
+        else if qt == QBE_D() { op = "ceqd" as *u8; }
+        else if qt == QBE_S() { op = "ceqs" as *u8; }
+        ir_emit_binary(ir, *result, op, av, bv);
+        return result;
+    }
+
+    // ── struct:逐字段(and 链,不短路)──
+    if k == KIND_STRUCT() {
+        let nfields = (*t).nfields;
+        let fields = (*t).fields;
+        let acc = *ir_new_tmp(ir, QBE_W());
+        ir_emit_copy(ir, acc, 1);
+        let mut i: i64 = 0 as i64;
+        while i < nfields {
+            // fields[i]: name(*u8 8) + type(*u8 8) + offset(i64 8) = 24 bytes
+            // (布局同 cg_copy_struct:1011 —— 名字在 0,类型在 8,偏移在 16)
+            let fdesc_ptr = ptr_add_u8(fields, i * (24 as i64)) as *u8;
+            let ftype_slot = ptr_add_u8(fdesc_ptr, 8 as i64) as **Type;
+            let ftype = *ftype_slot;
+            let foffset_ptr = ptr_add_u8(fdesc_ptr, 16 as i64) as *i64;
+            let offset = *foffset_ptr;
+            // PhantomData ZST 字段不参与比较(同 cg_copy_struct)
+            if (*ftype).kind != KIND_PHANTOM() {
+                let fa = *ir_new_tmp(ir, QBE_L());
+                let fb = *ir_new_tmp(ir, QBE_L());
+                ir_emit_binary(ir, fa, "add" as *u8, a_addr, ir_new_int(offset));
+                ir_emit_binary(ir, fb, "add" as *u8, b_addr, ir_new_int(offset));
+                let fc = cg_value_eq(cg_raw, ftype as *u8, fa, fb);
+                ir_emit_binary(ir, acc, "and" as *u8, acc, *fc);
+            }
+            i = i + (1 as i64);
+        }
+        ir_emit_copy_tmp(ir, *result, acc);
+        return result;
+    }
+
+    // ── enum:tag 相等 + payload 按变体类型比(掩码 dispatch)──
+    if k == KIND_ENUM() {
+        // tag 在 image 的 offset 0(4 字节)
+        let tag_a = *ir_new_tmp(ir, QBE_W());
+        let tag_b = *ir_new_tmp(ir, QBE_W());
+        ir_emit_load(ir, tag_a, QBE_W(), a_addr);
+        ir_emit_load(ir, tag_b, QBE_W(), b_addr);
+        let acc = *ir_new_tmp(ir, QBE_W());
+        ir_emit_binary(ir, acc, "ceqw" as *u8, tag_a, tag_b);
+        let nvariants = (*t).nvariants;
+        let variants = (*t).variants;
+        let payload_off = (*t).payload_off;
+        let mut j: i64 = 0 as i64;
+        while j < nvariants {
+            // variants[j]: name(*u8 8) + payload_type(*u8 8) + tag(i64 8) = 24 bytes
+            // (布局见 sema.jhyy:3300-3303 —— payload 类型在 offset 8)
+            let vd_ptr = ptr_add_u8(variants, j * (24 as i64)) as *u8;
+            let pt_slot = ptr_add_u8(vd_ptr, 8 as i64) as **Type;
+            let pt = *pt_slot;
+            // 没有 payload 的变体(pt == 0)⇒ 不比 payload
+            if pt != (0 as *Type) {
+                // tagv = copy j  (temp vs temp,避开「立即数当第一操作数」的边角)
+                let tagv = *ir_new_tmp(ir, QBE_W());
+                ir_emit_copy(ir, tagv, j);
+                // m = (tag_a == tagv)
+                let m = *ir_new_tmp(ir, QBE_W());
+                ir_emit_binary(ir, m, "ceqw" as *u8, tag_a, tagv);
+                // payload 地址
+                let pa = *ir_new_tmp(ir, QBE_L());
+                let pb = *ir_new_tmp(ir, QBE_L());
+                ir_emit_binary(ir, pa, "add" as *u8, a_addr, ir_new_int(payload_off));
+                ir_emit_binary(ir, pb, "add" as *u8, b_addr, ir_new_int(payload_off));
+                // pv = 按该变体的 payload 类型比
+                let pv = cg_value_eq(cg_raw, pt as *u8, pa, pb);
+                // sel = (pv AND m) OR (1 - m)   —— 命中取 pv,未命中取 1
+                let pv_and_m = *ir_new_tmp(ir, QBE_W());
+                ir_emit_binary(ir, pv_and_m, "and" as *u8, *pv, m);
+                let one = *ir_new_tmp(ir, QBE_W());
+                ir_emit_copy(ir, one, 1);
+                let one_minus_m = *ir_new_tmp(ir, QBE_W());
+                ir_emit_binary(ir, one_minus_m, "sub" as *u8, one, m);
+                let sel = *ir_new_tmp(ir, QBE_W());
+                ir_emit_binary(ir, sel, "or" as *u8, pv_and_m, one_minus_m);
+                ir_emit_binary(ir, acc, "and" as *u8, acc, sel);
+            }
+            j = j + (1 as i64);
+        }
+        ir_emit_copy_tmp(ir, *result, acc);
+        return result;
+    }
+
+    // ── array:逐元素(arr_count 编译期常量 ⇒ 全展开)──
+    if k == KIND_ARRAY() {
+        let elem_t = (*t).elem as *Type;
+        let cnt = (*t).arr_count;
+        let esz = type_size(elem_t);
+        let acc = *ir_new_tmp(ir, QBE_W());
+        ir_emit_copy(ir, acc, 1);
+        let mut i: i64 = 0 as i64;
+        while i < cnt {
+            let ea = *ir_new_tmp(ir, QBE_L());
+            let eb = *ir_new_tmp(ir, QBE_L());
+            ir_emit_binary(ir, ea, "add" as *u8, a_addr, ir_new_int(i * esz));
+            ir_emit_binary(ir, eb, "add" as *u8, b_addr, ir_new_int(i * esz));
+            let ec = cg_value_eq(cg_raw, elem_t as *u8, ea, eb);
+            ir_emit_binary(ir, acc, "and" as *u8, acc, *ec);
+            i = i + (1 as i64);
+        }
+        ir_emit_copy_tmp(ir, *result, acc);
+        return result;
+    }
+
+    // ── slice:比头(ptr@0 + len@8),不逐元素 ──
+    if k == KIND_SLICE() {
+        let a_ptr_at = *ir_new_tmp(ir, QBE_L());
+        let a_len_at = *ir_new_tmp(ir, QBE_L());
+        let b_ptr_at = *ir_new_tmp(ir, QBE_L());
+        let b_len_at = *ir_new_tmp(ir, QBE_L());
+        ir_emit_binary(ir, a_ptr_at, "add" as *u8, a_addr, ir_new_int(0));
+        ir_emit_binary(ir, a_len_at, "add" as *u8, a_addr, ir_new_int(8));
+        ir_emit_binary(ir, b_ptr_at, "add" as *u8, b_addr, ir_new_int(0));
+        ir_emit_binary(ir, b_len_at, "add" as *u8, b_addr, ir_new_int(8));
+        let a_ptr = *ir_new_tmp(ir, QBE_L());
+        let a_len = *ir_new_tmp(ir, QBE_L());
+        let b_ptr = *ir_new_tmp(ir, QBE_L());
+        let b_len = *ir_new_tmp(ir, QBE_L());
+        ir_emit_load(ir, a_ptr, QBE_L(), a_ptr_at);
+        ir_emit_load(ir, a_len, QBE_L(), a_len_at);
+        ir_emit_load(ir, b_ptr, QBE_L(), b_ptr_at);
+        ir_emit_load(ir, b_len, QBE_L(), b_len_at);
+        let e1 = *ir_new_tmp(ir, QBE_W());
+        let e2 = *ir_new_tmp(ir, QBE_W());
+        ir_emit_binary(ir, e1, "ceql" as *u8, a_ptr, b_ptr);
+        ir_emit_binary(ir, e2, "ceql" as *u8, a_len, b_len);
+        let acc = *ir_new_tmp(ir, QBE_W());
+        ir_emit_binary(ir, acc, "and" as *u8, e1, e2);
+        ir_emit_copy_tmp(ir, *result, acc);
+        return result;
+    }
+
+    // 未知 kind(KIND_ALIAS 已解包 / KIND_VOID / KIND_UNRESOLVED 等)
+    //   → 不等(而不是退回身份比较)
+    ir_emit_copy(ir, *result, 0);
+    return result;
+}
+
 // cg_find_field_offset：full helper
 fn cg_find_field_offset(st_raw: *u8, field_name: *u8, out_buf: *u8) -> i32 {
     if st_raw == (0 as *u8) {
@@ -1790,7 +1977,14 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
     //   Mirror of src/codegen.c:570-575 (src-side has it; src0-side was missing).
     //   Without this case sizeof(Type) falls through to zero IRVal (line 1214) and
     //   emits `=l copy 0`, so sizeof_basic gets total=0 instead of 4+8+1+8+8=29.
-    if kind == NODE_SIZEOF() {
+    // W-129 (2026-10-24 真修):NODE_ALIGNOF 与 NODE_SIZEOF **同形** ——
+    //   sema 已经把值填进 node_int_data(value),codegen 只要照 NODE_INT 发。
+    //   之前 codegen 没有 NODE_ALIGNOF 分支 ⇒ 落到默认分支返回零 IRVal ⇒
+    //   alignof 求值恒为 0(编译能过,值是错的)。
+    //   ⚠️ 合并成一个分支(不新开 case):cg_expr 是编译器的巨型递归函数,
+    //   新开 case 会给它加局部变量 → 推高栈帧(实测 +720 B)→ 自举产物
+    //   行为漂移(见 W-130)。
+    if kind == NODE_SIZEOF() || kind == NODE_ALIGNOF() {
         let d = node_int_data(n);
         let v = *ir_new_tmp(ir, qbe_type_of((*n).type_ptr));
         ir_emit_copy(ir, v, (*d).value);
@@ -2773,6 +2967,36 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             }
         }
 
+        // W-133 (2026-10-24 真修):聚合类型(struct/enum/array/slice)的
+        // == / != 走**按值比较**,不再比槽地址。
+        //
+        // 修前:qbe_type_of(聚合) 落到默认 'w' ⇒ op 选 ceqw ⇒ 比的是两个
+        // **槽地址**(而且只比低 32 位)⇒ 字段完全相同的两个 struct 判 false。
+        //
+        // left / right 对聚合类型就是**值的地址**(struct 字面量 / is_stack 局部
+        // 都返回 slot 地址)⇒ 直接喂给 cg_value_eq。
+        if d_op == TOKEN_EQEQ() || d_op == TOKEN_BANGEQ() {
+            let lt_raw = (*left_node).type_ptr;
+            if lt_raw != (0 as *u8) {
+                let lt = type_unwrap_alias(lt_raw as *Type);
+                let lk = (*lt).kind;
+                if lk == KIND_STRUCT() || lk == KIND_ENUM() ||
+                   lk == KIND_ARRAY()  || lk == KIND_SLICE() {
+                    let eqp = cg_value_eq(cg_raw, lt_raw, left, right);
+                    if d_op == TOKEN_BANGEQ() {
+                        // != → !eq。⚠️ **不能**用 `cnew eq, 0` —— cnew(a,b) 的语义
+                        // 是「a ≠ b」,所以 cnew(eq, 0) = (eq ≠ 0) = eq ⇒ 取反取反了。
+                        // 用 xor 1(位取反)最直白:eq 是 0/1, xor 1 就是它的否定。
+                        let one = *ir_new_tmp(ir, QBE_W());
+                        ir_emit_copy(ir, one, 1);
+                        let res = *ir_new_tmp(ir, QBE_W());
+                        ir_emit_binary(ir, res, "xor" as *u8, *eqp, one);
+                        return irval_box(ir, (res).kind, (res).id, (res).ival, (res).name, (res).qbe_type);
+                    }
+                    return irval_box(ir, (*eqp).kind, (*eqp).id, (*eqp).ival, (*eqp).name, (*eqp).qbe_type);
+                }
+            }
+        }
         // 比较时若左右 qbe_type 不同，coerce right 到 left type
         let mut right_coerced = right;
         if d_op >= TOKEN_EQEQ() && d_op <= TOKEN_GTEQ() {

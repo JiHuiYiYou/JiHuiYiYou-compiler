@@ -1,0 +1,14 @@
+// EXPECT-ERROR: "ordering comparison is not supported"
+// agg_order_error.jhyy — 聚合类型的**大小比较**无定义 ⇒ 编译期报错(W-133 真修)
+//
+// 修前:struct 的 < / > 静默比地址 ⇒ 编译通过、结果错。
+type P = struct { x: i32, y: i32 }
+
+fn main_jhyy() -> i32 {
+    let a = P { x: 1, y: 2 };
+    let b = P { x: 3, y: 4 };
+    if a < b {
+        return 1;
+    }
+    return 0;
+}

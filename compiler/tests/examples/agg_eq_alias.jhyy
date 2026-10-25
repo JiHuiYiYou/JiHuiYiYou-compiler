@@ -1,0 +1,20 @@
+// EXPECT-ERROR: "type mismatch in let"
+// agg_eq_alias.jhyy — 类型别名(`type Q = P`)在**当前实现里整体不可用**
+//
+// 2026-10-24 实测:别名变量的赋值、构造、字段访问**全部**被 sema 拒:
+//   let a: Q = p;              → type mismatch in let
+//   let b: Q = P { x: 1 };     → type mismatch in let
+//   a.x                        → cannot access field on type
+//
+// ⇒ 「别名变量参与聚合 ==」这条路径**用户代码根本走不到**。
+// ⇒ W-133 里的 KIND_ALIAS 解包是**防御性**实现(sema 的 kind 判定、codegen 的
+// 分派、cg_value_eq 的入口三处一致),等别名可用时自动正确。
+// 本测试记录「别名当前不可用」这个现状,免得后人以为能写这种代码。
+type P = struct { x: i32, y: i32 }
+type Q = P
+
+fn main_jhyy() -> i32 {
+    let p: P = P { x: 1, y: 2 };
+    let a: Q = p;
+    return 0;
+}

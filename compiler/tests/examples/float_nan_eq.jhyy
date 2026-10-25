@@ -1,0 +1,50 @@
+// EXPECT: 0
+// float_nan_eq.jhyy — 浮点 == 必须遵循 IEEE 754 的 **ordered** 语义(W-133 真修)
+//
+// 修前:`ucomisd` + `sete` ⇒ unordered 时 ZF 也置 1 ⇒ `NaN == NaN` 返回 **true**
+// (错)。`!=` 同样错(unordered 时 `setne` 得 0 ⇒ `NaN != NaN` 返回 false)。
+//
+// 修后:== 用 `setnp`(PF=1 ⇒ unordered)+ `sete` 取与;!= 用 `setne` + `setp` 取或。
+// ⇒ NaN == NaN ⇒ false;NaN != NaN ⇒ true;普通浮点相等不受影响。
+extern fn printf(fmt: *u8, v: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+    let mut same: i32 = 0;
+    let mut diff: i32 = 0;
+
+    let nan: f64 = (0.0 as f64) / (0.0 as f64);
+    let one: f64 = 1.0 as f64;
+
+    // NaN == NaN ⇒ false
+    same = 0;
+    if nan == nan { same = 1; }
+    if same == 1 { fails = fails + 1; }
+
+    // NaN != NaN ⇒ true
+    diff = 0;
+    if nan != nan { diff = 1; }
+    if diff == 0 { fails = fails + 1; }
+
+    // NaN == 1.0 ⇒ false
+    same = 0;
+    if nan == one { same = 1; }
+    if same == 1 { fails = fails + 1; }
+
+    // 普通浮点相等不受影响
+    same = 0;
+    if one == one { same = 1; }
+    if same == 0 { fails = fails + 1; }
+    diff = 0;
+    if one != nan { diff = 1; }
+    if diff == 0 { fails = fails + 1; }
+
+    // f32 同语义
+    let nan32: f32 = (0.0 as f32) / (0.0 as f32);
+    same = 0;
+    if nan32 == nan32 { same = 1; }
+    if same == 1 { fails = fails + 1; }
+
+    printf("fails=%d\n", fails);
+    return fails;
+}

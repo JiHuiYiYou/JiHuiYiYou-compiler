@@ -1,0 +1,16 @@
+// EXPECT-ERROR: "type mismatch in binary"
+// agg_eq_type_mismatch.jhyy — 聚合 == 的两个操作数必须是**同一类型**(W-133 真修)
+//
+// struct A == struct B 按值比较**没有定义**(字段集不同)⇒ 编译期报错。
+// 修前:静默比地址 ⇒ 编译通过、结果错。
+type A = struct { x: i32 }
+type B = struct { x: i32 }
+
+fn main_jhyy() -> i32 {
+    let a = A { x: 1 };
+    let b = B { x: 1 };
+    if a == b {
+        return 1;
+    }
+    return 0;
+}

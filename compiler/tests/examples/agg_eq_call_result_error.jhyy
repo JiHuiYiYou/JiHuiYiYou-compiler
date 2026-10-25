@@ -1,0 +1,22 @@
+// EXPECT-ERROR: "function call result is not supported"
+// agg_eq_call_result_error.jhyy — 聚合 == 不接受**函数调用结果**作为操作数(W-133 真修)
+//
+// 聚合返回值在 ABI 下**不统一是地址**:>16B 走 sret(是地址),≤16B 走寄存器
+// (codegen 给的是 'w')⇒ 按地址比会读到寄存器里的头几个字节 ⇒ 静默错值。
+// 宁可报错。
+//
+// ⚠️ 注意形态:必须是**表达式**层面的调用。
+// `let a = make_p(1); a == b` 里的 `a` 是**变量**(值在栈槽里)⇒ 按值比较
+// 安全 ⇒ 不报错(这是正确行为)。
+type P = struct { x: i32, y: i32 }
+
+fn make_p(v: i32) -> P {
+    return P { x: v, y: v };
+}
+
+fn main_jhyy() -> i32 {
+    if make_p(1) == make_p(1) {
+        return 1;
+    }
+    return 0;
+}

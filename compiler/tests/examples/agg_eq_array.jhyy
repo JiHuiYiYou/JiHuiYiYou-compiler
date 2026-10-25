@@ -1,0 +1,43 @@
+// EXPECT: 0
+// agg_eq_array.jhyy — 数组的 == / != 必须走**按值比较**(W-133 真修)
+//
+// 修前:比的是槽地址 ⇒ 元素相同的两个数组判 false。
+// 修后:逐元素比较(arr_count 是编译期常量 ⇒ 全展开)。
+extern fn printf(fmt: *u8, v: i32) -> i32;
+
+type P = struct { x: i32, y: i32 }
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+    let mut same: i32 = 0;
+
+    let a1: [i32; 3] = [1, 2, 3];
+    let a2: [i32; 3] = [1, 2, 3];
+    let a3: [i32; 3] = [1, 2, 4];
+    same = 0;
+    if a1 == a2 { same = 1; }
+    if same == 0 { fails = fails + 1; }
+    same = 0;
+    if a1 == a3 { same = 1; }
+    if same == 1 { fails = fails + 1; }
+    same = 0;
+    if a1 != a3 { same = 1; }
+    if same == 0 { fails = fails + 1; }
+
+    // (「长度不同」那条现在**编译期报错** —— 数组比较要求两个操作数同类型,
+//  arr_count 不同 ⇒ type_eq=0 ⇒ 见 agg_eq_array_len_mismatch.jhyy)
+//
+// 元素是 struct
+    let s1: [P; 2] = [P { x: 1, y: 2 }, P { x: 3, y: 4 }];
+    let s2: [P; 2] = [P { x: 1, y: 2 }, P { x: 3, y: 4 }];
+    let s3: [P; 2] = [P { x: 1, y: 2 }, P { x: 3, y: 5 }];
+    same = 0;
+    if s1 == s2 { same = 1; }
+    if same == 0 { fails = fails + 1; }
+    same = 0;
+    if s1 == s3 { same = 1; }
+    if same == 1 { fails = fails + 1; }
+
+    printf("fails=%d\n", fails);
+    return fails;
+}

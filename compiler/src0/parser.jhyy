@@ -59,6 +59,41 @@ import arena;
 import symtab;
 import ast;
 
+// W-128 (2026-10-24 真修):整数字面量求值 —— 支持 `0o`(八进制)/ `0b`(二进制)前缀。
+//
+// 修复前:一律 `strtoll(s, NULL, 0)`。base 0 = C 的自动识别,**只认**
+//   "0x"(十六进制)与前导零(八进制),**不认** "0o" / "0b"(C23 / GCC 扩展)⇒
+//     "0o77"   → strtoll 消费掉 '0' 后遇到 'o' 停下 ⇒ 返回 **0**
+//     "0b1010" → 同理 ⇒ 返回 **0**
+// 也就是说:lexer 正确认出了前缀并按对应 base 扫完了数字(base 只活在
+// lex_scan_number 的局部变量里,出了函数就丢),但**求值完全不知道有这回事**
+// ⇒ 静默得到 0,零诊断。
+//
+// 修法:按前缀分派到 strtoll 的**显式** base(8 / 2)。strtoll 带显式 base 时
+// **不接受** "0o"/"0b" 前缀,所以要把前缀切掉再传。
+// base 0 的路径保持原样 —— 它同时覆盖 "0x" 十六进制与前导零八进制(C 语义)。
+fn parse_int_literal(start: *u8, length: i64) -> i64 {
+    if length >= (2 as i64) {
+        let c_lo = strncmp(start, "0o" as *u8, 2 as i64);
+        if c_lo == (0 as i32) {
+            return strtoll(ptr_add_u8(start, 2 as i64), 0 as *u8, 8 as i32);
+        }
+        let c_uc_lo = strncmp(start, "0O" as *u8, 2 as i64);
+        if c_uc_lo == (0 as i32) {
+            return strtoll(ptr_add_u8(start, 2 as i64), 0 as *u8, 8 as i32);
+        }
+        let c_lb = strncmp(start, "0b" as *u8, 2 as i64);
+        if c_lb == (0 as i32) {
+            return strtoll(ptr_add_u8(start, 2 as i64), 0 as *u8, 2 as i32);
+        }
+        let c_uc_lb = strncmp(start, "0B" as *u8, 2 as i64);
+        if c_uc_lb == (0 as i32) {
+            return strtoll(ptr_add_u8(start, 2 as i64), 0 as *u8, 2 as i32);
+        }
+    }
+    return strtoll(start, 0 as *u8, 0 as i32);
+}
+
 // ════════════════════════════════════════════════════
 // Parser state（pre 字段平铺避免 nested struct，plan § 1.5 bug #5）
 // ════════════════════════════════════════════════════
@@ -577,7 +612,7 @@ fn parse_type(p: *Parser) -> *Node {
         parser_expect(p, TOKEN_SEMICOLON(), "; in array type" as *u8, &t);
         let mut count_t = empty_token();
         parser_expect(p, TOKEN_INT(), "array size" as *u8, &count_t);
-        let count_val = strtoll(count_t.start, 0 as *u8, 0 as i32);
+        let count_val = parse_int_literal(count_t.start, count_t.length);
         let count_node = ast_new_int((*p).arena, body_loc_lf, body_loc_ll, body_loc_lc,
                                      count_val, PRIM_I32());
         parser_expect(p, TOKEN_RBRACKET(), "] in array type" as *u8, &t);
@@ -912,7 +947,7 @@ fn parse_pattern_primary(p: *Parser) -> *Node {
     // ── TOKEN_INT 分支 ──
     if t.kind == TOKEN_INT() {
         parser_advance(p, &t);
-        let val = strtoll(t.start, 0 as *u8, 0 as i32);
+        let val = parse_int_literal(t.start, t.length);
         return ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_I32());
     }
 
@@ -961,7 +996,7 @@ fn parse_pattern_primary(p: *Parser) -> *Node {
     if t.kind == TOKEN_MINUS() {
         parser_advance(p, &t);  // consume '-'
         parser_expect(p, TOKEN_INT(), "integer after - in pattern" as *u8, &t);
-        let val = strtoll(t.start, 0 as *u8, 0 as i32);
+        let val = parse_int_literal(t.start, t.length);
         return ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, -val, PRIM_I32());
     }
 
@@ -1079,7 +1114,7 @@ fn parse_pattern(p: *Parser) -> *Node {
     // ── TOKEN_INT 分支 ──
     if t.kind == TOKEN_INT() {
         parser_advance(p, &t);
-        let val = strtoll(t.start, 0 as *u8, 0 as i32);
+        let val = parse_int_literal(t.start, t.length);
         let lo = ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_I32());
         // v1.6.x: literal range pattern `1..10` → wrap as NODE_PATTERN_RANGE
         if parser_match(p, TOKEN_DOTDOT(), &t) != (0 as i32) {
@@ -1127,7 +1162,7 @@ fn parse_pattern(p: *Parser) -> *Node {
     if t.kind == TOKEN_MINUS() {
         parser_advance(p, &t);  // consume '-'
         parser_expect(p, TOKEN_INT(), "integer after - in pattern" as *u8, &t);
-        let val = strtoll(t.start, 0 as *u8, 0 as i32);
+        let val = parse_int_literal(t.start, t.length);
         let lo = ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, -val, PRIM_I32());
         // v1.6.x: literal range pattern `-3..-1` → wrap as NODE_PATTERN_RANGE
         if parser_match(p, TOKEN_DOTDOT(), &t) != (0 as i32) {
@@ -1418,7 +1453,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
     }
     else if t.kind == TOKEN_INT() {
         parser_advance(p, &t);
-        let val = strtoll(t.start, 0 as *u8, 0 as i32);
+        let val = parse_int_literal(t.start, t.length);
         let prim = jh_int_suffix_prim(t.start, t.length);
         left = ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, val, prim);
     }

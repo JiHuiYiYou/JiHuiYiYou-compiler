@@ -905,6 +905,21 @@ fn sema_record_borrow(ctx: *SemaContext, sym: *Sym, is_mut: i32,
     return 0 as i32;
 }
 
+// sema_operand_is_call — 操作数是不是一个**函数调用**。
+//
+// W-133 (2026-10-24 真修):聚合类型的 == / != **不接受函数调用结果**。
+// 理由:聚合返回值在 ABI 下**不统一是地址** ——
+//   · >16B 的 struct/enum 走 sret ⇒ 传的是「指向 image 的地址」(是地址)
+//   · ≤16B 的走寄存器 ⇒ codegen 给的是 'w'(**不是**地址)
+// ⇒ 按地址比会读到寄存器里的头几个字节 ⇒ **静默错值**。宁可报错。
+fn sema_operand_is_call(n: *Node) -> i32 {
+    if n == (0 as *Node) { return 0 as i32; }
+    let k = (*n).kind;
+    if k == NODE_CALL() { return 1 as i32; }
+    if k == NODE_QUALIFIED_CALL() { return 1 as i32; }
+    return 0 as i32;
+}
+
 fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     if n == (0 as *Node) { return type_void(ta); }
     if (*n).type_ptr != (0 as *u8) { return (*n).type_ptr as *Type; }
@@ -967,16 +982,37 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     }
     // v1.3.3: sizeof(TypeName) — compile-time const. Mirror C-side sema.c.
     // Resolve target type, compute size, fill n->type=i64 + node_int_data.
-    if (*n).kind == NODE_SIZEOF() {
+    // v1.3.3: sizeof(TypeName) — compile-time const. Mirror C-side sema.c.
+    // Resolve target type, compute size, fill n->type=i64 + node_int_data.
+    //
+    // W-129 (2026-10-24 真修):alignof(TypeName) 走**同一个分支** ——
+    //   NodeSizeof 与 NodeAlignof 的布局完全一致(都是 `{ target: *u8 }`),
+    //   所以 data accessor 可以共用;值走 type_align 而不是 type_size。
+    //   之前 sema 里**只有** NODE_SIZEOF 分支,没有 NODE_ALIGNOF 分支 ⇒ alignof
+    //   表达式在推断链里走不到任何类型 ⇒ 报「type mismatch in let」。
+    //   编译器**内部**的 type_align() 早就是完整的(types.jhyy),缺的只是这层接线。
+    //
+    //   ⚠️ **刻意不新开分支、不加局部变量**:infer_type 是编译器的巨型递归函数,
+    //   往里加 local 会推高它的栈帧 ⇒ 自举产物行为漂移(见 W-130)。
+    //   合并后 infer_type 的局部变量数**不变**。
+    //
+    //   注:type_align 对 enum **硬编码返回 4**(与 enum 布局算出的
+    //   max(4, max_payload_align) 不一致)—— 那是已登记的内部不一致
+    //   (ABI v4.0.0 § 12.2),这里如实反映,不在本次一并修正。
+    if (*n).kind == NODE_SIZEOF() || (*n).kind == NODE_ALIGNOF() {
         let sd = node_sizeof_data(n);
         let target_type = resolve_type_node(ctx, ta, (*sd).target as *Node);
         if target_type == (0 as *Type) {
-            sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col, "unknown type in sizeof" as *u8);
+            sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col, "unknown type in sizeof/alignof" as *u8);
         }
         let t = type_primitive(ta, PRIM_I64());
         (*n).type_ptr = t as *u8;
         let id = node_int_data(n);
-        (*id).value = type_size(target_type as *Type);
+        if (*n).kind == NODE_ALIGNOF() {
+            (*id).value = type_align(target_type as *Type);
+        } else {
+            (*id).value = type_size(target_type as *Type);
+        }
         (*id).prim = PRIM_I64() as i32;
         return t;
     }
@@ -1159,9 +1195,57 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             (*n).type_ptr = lt as *u8;
             return lt;
         }
+        // W-133 (2026-10-24 真修):比较运算符按语义拆成两支。
+        //
+        //   · == / !=         : 聚合类型(struct/enum/array/slice)走**按值比较**
+        //                        (codegen 的 cg_value_eq)⇒ 两个操作数必须**同类型**
+        //   · < / > / <= / >= : 聚合类型的**大小比较无定义**(以前静默比地址 ⇒
+        //                        编译通过、结果错)⇒ 编译期报错
+        //
+        // 聚合 kind 判定必须用**解包后**的类型 —— 用户类型别名是 KIND_ALIAS,
+        // 不解包就会被当成标量放过去(全仓原来零处检查 KIND_ALIAS)。
         if op == TOKEN_EQEQ() || op == TOKEN_BANGEQ() ||
            op == TOKEN_LT() || op == TOKEN_GT() ||
            op == TOKEN_LTEQ() || op == TOKEN_GTEQ() {
+            let mut l_agg: i32 = 0 as i32;
+            let mut r_agg: i32 = 0 as i32;
+            if lt != (0 as *Type) {
+                let lu = type_unwrap_alias(lt);
+                let lk = (*lu).kind;
+                if lk == KIND_STRUCT() || lk == KIND_ENUM() ||
+                   lk == KIND_ARRAY()  || lk == KIND_SLICE() {
+                    l_agg = 1 as i32;
+                }
+            }
+            if rt != (0 as *Type) {
+                let ru = type_unwrap_alias(rt);
+                let rk = (*ru).kind;
+                if rk == KIND_STRUCT() || rk == KIND_ENUM() ||
+                   rk == KIND_ARRAY()  || rk == KIND_SLICE() {
+                    r_agg = 1 as i32;
+                }
+            }
+            if l_agg != (0 as i32) || r_agg != (0 as i32) {
+                if op == TOKEN_LT() || op == TOKEN_GT() ||
+                   op == TOKEN_LTEQ() || op == TOKEN_GTEQ() {
+                    let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                            "ordering comparison is not supported for struct/enum/array/slice types" as *u8);
+                } else {
+                    // == / != :两个操作数必须**同类型**。
+                    // type_eq 对 struct/enum 按**名字**判、对 array 比 arr_count ⇒
+                    // `struct A == struct B` / `[i32;2] == [i32;3]` 都会被拒。
+                    if type_eq(lt, rt) == (0 as i32) {
+                        let _x2 = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                                 "type mismatch in binary" as *u8);
+                    }
+                    // 聚合 == 不接受函数调用结果(见 sema_operand_is_call 的注释)
+                    if sema_operand_is_call((*d).left as *Node) != (0 as i32) ||
+                       sema_operand_is_call((*d).right as *Node) != (0 as i32) {
+                        let _x3 = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                                 "equality comparison of a function call result is not supported for aggregate types" as *u8);
+                    }
+                }
+            }
             let t = type_primitive(ta, PRIM_BOOL());
             (*n).type_ptr = t as *u8;
             return t;

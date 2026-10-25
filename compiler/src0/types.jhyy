@@ -394,6 +394,37 @@ fn type_align(t: *Type) -> i64 {
 // type_eq
 // ════════════════════════════════════════════════════
 
+// type_unwrap_alias — 解开 KIND_ALIAS 层,返回**底层**类型。
+//
+// W-133 (2026-10-24 真修):用户类型别名(`type Q = P`)在 sema 里是
+// KIND_ALIAS,而 resolve_type_node(sema.jhyy)对用户类型**直接返回**
+// (*gsym).type_ptr ⇒ `Q` 的 kind 是 KIND_ALIAS 而不是 KIND_STRUCT。
+// 全仓(改动前)在 sema / codegen 里**没有任何一处**检查 KIND_ALIAS ⇒
+// 别名变量会被当成标量 ⇒ 聚合 == 静默退回身份比较。
+//
+// type_eq(:397)已经会递归 underlying(别名**相等性**是对的),但**kind 判定**
+// 处处不解包 —— 这两件事必须分开看。
+//
+// 放在 types.jhyy:跟 type_eq 同族,且 sema.jhyy / codegen.jhyy 都 import types。
+// 加 16 层深度上限:理论上 sema 不会造 alias 环(`type Q = Q` 早就递归爆栈),
+// 但这里绝不能死循环。
+fn type_unwrap_alias(t: *Type) -> *Type {
+    if t == (0 as *Type) {
+        return t;
+    }
+    let mut cur = t;
+    let mut depth: i64 = 0 as i64;
+    while (*cur).kind == KIND_ALIAS() && depth < (16 as i64) {
+        let u = (*cur).underlying as *Type;
+        if u == (0 as *Type) {
+            return cur;
+        }
+        cur = u;
+        depth = depth + (1 as i64);
+    }
+    return cur;
+}
+
 fn type_eq(a: *Type, b: *Type) -> i32 {
     if a == b { return 1 as i32; }
     if a == (0 as *Type) { return 0 as i32; }

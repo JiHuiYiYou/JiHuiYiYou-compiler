@@ -1,0 +1,75 @@
+// EXPECT: 0
+// agg_eq_enum.jhyy — enum 的 == / != 必须走**按值比较**(W-133 真修)
+//
+// 修前:比的是槽地址 ⇒ 同变体的两个 enum 判 false。
+// 修后:tag 相等 + payload 按变体类型比(**不按字节比** —— 两个分别构造的
+// 同值 enum,padding 是未初始化垃圾,按字节比会误判不等)。
+//
+// 覆盖:unit 变体 / 带 payload / 混合 payload 类型 / payload 是 struct。
+extern fn printf(fmt: *u8, v: i32) -> i32;
+
+type Unit = enum { A, B }
+type Pay = enum { X(i32), Y(i32), Z }
+type Mixed = enum { M0, M1(i32), M2(i64) }
+type Payload = struct { v: i32 }
+type WithStruct = enum { S(Payload), T }
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+    let mut same: i32 = 0;
+
+    // unit 变体
+    let u1 = Unit::A;
+    let u2 = Unit::A;
+    let u3 = Unit::B;
+    same = 0;
+    if u1 == u2 { same = 1; }
+    if same == 0 { fails = fails + 1; }
+    same = 0;
+    if u1 == u3 { same = 1; }
+    if same == 1 { fails = fails + 1; }
+
+    // 带 payload
+    let p1 = Pay::X(42);
+    let p2 = Pay::X(42);
+    let p3 = Pay::X(43);
+    let p4 = Pay::Y(42);
+    same = 0;
+    if p1 == p2 { same = 1; }
+    if same == 0 { fails = fails + 1; }
+    same = 0;
+    if p1 == p3 { same = 1; }
+    if same == 1 { fails = fails + 1; }
+    same = 0;
+    if p1 == p4 { same = 1; }
+    if same == 1 { fails = fails + 1; }
+
+    // 混合 payload 类型(i32 / i64)—— per-variant 掩码 dispatch
+    let m1 = Mixed::M1(7);
+    let m2 = Mixed::M1(7);
+    let m3 = Mixed::M2(7 as i64);
+    let m4 = Mixed::M0;
+    same = 0;
+    if m1 == m2 { same = 1; }
+    if same == 0 { fails = fails + 1; }
+    same = 0;
+    if m1 == m3 { same = 1; }
+    if same == 1 { fails = fails + 1; }
+    same = 0;
+    if m1 == m4 { same = 1; }
+    if same == 1 { fails = fails + 1; }
+
+    // payload 是 struct
+    let s1 = WithStruct::S(Payload { v: 5 });
+    let s2 = WithStruct::S(Payload { v: 5 });
+    let s3 = WithStruct::S(Payload { v: 6 });
+    same = 0;
+    if s1 == s2 { same = 1; }
+    if same == 0 { fails = fails + 1; }
+    same = 0;
+    if s1 == s3 { same = 1; }
+    if same == 1 { fails = fails + 1; }
+
+    printf("fails=%d\n", fails);
+    return fails;
+}

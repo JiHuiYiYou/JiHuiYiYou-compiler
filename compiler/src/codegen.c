@@ -576,7 +576,11 @@ static void cg_expr(CGContext *cg, Node *n, IRVal *out) {
     }
     /* v1.3.3: sizeof(TypeName) — sema fills n->type=i64 + node_int_data(value).
        Emit like NODE_INT (value is the compile-time-computed size). */
-    case NODE_SIZEOF: {
+    /* v1.3.3: sizeof(TypeName) — sema fills n->type=i64 + node_int_data(value).
+       W-129 (2026-10-24):alignof(TypeName) 走同一个 case(同形)。
+       之前没有 NODE_ALIGNOF 分支 ⇒ 落到默认分支 ⇒ alignof 求值恒为 0。 */
+    case NODE_SIZEOF:
+    case NODE_ALIGNOF: {
         NodeInt *d = node_int_data(n);
         IRVal v = ir_new_tmp(cg->ir, qbe_type_of(n->type));
         ir_emit_copy(cg->ir, v, d->value);

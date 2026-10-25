@@ -743,8 +743,33 @@ fn emit_amd64_arg_regs(state: *u8, nargs: i64, qt: i32, target_tag: i32) -> i32 
                 let _p = emit_stack_arg_push(state, aqt, off);
             }
         } else {
-            // int path:i8/u8..i64/u64/pointer → int_arg_alloc(state, aqt)
-            let int_idx = int_arg_alloc(state, aqt);
+            // int path:i8/u8..i64/u64/pointer
+            //
+            // W-127 (2026-10-24 真修):Win 与 SysV 的整数实参编号规则**不同**。
+            //
+            //   Win (MS x64):整数与浮点实参**共享同一个位置计数器** ——
+            //     槽 0 → RCX/XMM0,槽 1 → RDX/XMM1,槽 2 → R8/XMM2,槽 3 → R9/XMM3,
+            //     槽 ≥ 4 落栈。callee (emit_func_header) 一直按**位置**读
+            //     (int 走 reg_rax_for_qt_idx(dst_qt, arg_idx, win);
+            //      float 走 arg_xmm_idx = arg_idx),所以 caller 必须按位置传。
+            //     修复前这里走 int_arg_alloc ——「整数独立计数」⇒ 浮点实参在前时,
+            //     后面的整数实参被放进 RCX,而 callee 从 RDX 读 ⇒ 读到垃圾值。
+            //     (float 侧早在 v4.0.8 / W-097 就改成按位置了,int 侧是漏网的那半。)
+            //     回归门:compiler/tests/examples/mixed_int_float_arg.jhyy
+            //
+            //   SysV:整数(rdi..r9)与浮点(xmm0..xmm7)是**两个独立 bank**,
+            //     每个 bank 内部按出现顺序编号 —— 与 callee 的 class index
+            //     (cg_find_class_arg_idx)一致 ⇒ 保持 int_arg_alloc。
+            let mut int_idx: i32 = -(1 as i32);
+            if target_is_win(target_tag) == (1 as i32) && aqt != (109 as i32) {
+                // 'm'(MEMORY class)是 SysV 专有,Win 不会出;保险起见仍走
+                // int_arg_alloc(它对 'm' 直接返回 -1 = 落栈)。
+                if ri < (4 as i64) {
+                    int_idx = ri as i32;
+                }
+            } else {
+                int_idx = int_arg_alloc(state, aqt);
+            }
             if int_idx >= (0 as i32) {
                 // 选 reg name by ABI + idx + qt width
                 let is_wide: i32 = if aqt == (108 as i32) { 1 as i32 } else { 0 as i32 };
@@ -2448,9 +2473,9 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         //   set<cc> %al                 (cc per op,同上 int path)
         //   movzbl %al, %eax            (zero-extend result to %eax)
         //
-        // NaN 注: setcc 在 ucomisd 后用法跟 cmpl 一致 — 都读 flags 寄存器,QBE csltd
-        // "ordered" NaN semantic 当前用纯 setX 处理(jhyy 测试集 不 包含 NaN);
-        // 若 v2.11.16+ 测试含 NaN,需加 setnp 修正(unordered→0)。当前 OK。
+        // NaN 注(W-133 已真修,2026-10-24):以前这里用纯 setX(setcc 只读 ZF),
+        // 而 ucomisd 在 unordered 时 ZF 也置 1 ⇒ 分不清「相等」与「unordered」
+        // ⇒ `NaN == NaN` 恒为 true(错)。现在加 setnp/setp 有序守卫(见下)。
         // v2.11.15 Iter 1b 真修:ucomisd 走 unsigned compare (seta/setb/setae/setbe),
         // 不是 signed (setl/setg/setle/setge)。setg/setl 在 ucomisd 后读 SF/OF,而
         // ucomisd 不设 SF/OF (只 CF/PF/ZF per unordered spec)→ setg 永远 1 for any
@@ -2463,6 +2488,26 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         let _s1 = sb_append_cstr(arena, s, "	set" as *u8);
         let _s2 = sb_append_cstr(arena, s, cc);
         let _s3 = sb_append_cstr(arena, s, " %al\n" as *u8);
+        // W-133 (2026-10-24 真修):IEEE 754 的**有序**语义守卫。
+        //
+        // ucomisd / ucomiss 在 unordered(有 NaN 参与)时 **ZF=1 且 PF=1**;
+        // 真正相等时 **ZF=1 且 PF=0**。⇒ setcc 只读 ZF,分不清「相等」与
+        // 「unordered」⇒ 以前 `NaN == NaN` 恒为 true(错),序比较也全错。
+        //
+        //   setnp ⇒ PF=0 ⇒ 1 当且仅当**有序**
+        //   setp  ⇒ PF=1 ⇒ 1 当且仅当**unordered**
+        //
+        //   · == / 序比较(< > <= >=):NaN 参与时结果必须是 false ⇒ AND 有序守卫
+        //   · != :IEEE 754 规定 NaN != NaN 为 true ⇒ OR unordered 守卫
+        //
+        // 守卫寄存器用 %r10b(本文件零处使用 %r10;%al 是结果寄存器)。
+        if is_cnew != (0 as i32) {
+            let _n1 = sb_append_cstr(arena, s, "	setp %r10b\n" as *u8);
+            let _n2 = sb_append_cstr(arena, s, "	orb %r10b, %al\n" as *u8);
+        } else {
+            let _n1 = sb_append_cstr(arena, s, "	setnp %r10b\n" as *u8);
+            let _n2 = sb_append_cstr(arena, s, "	andb %r10b, %al\n" as *u8);
+        }
         let _s4 = sb_append_cstr(arena, s, "\tmovzbl %al, %eax\n" as *u8);
     } else if cs_src_is_f32 != (0 as i32) {
         // v2.11.15 Iter 1b (A1-XMM cluster closure): f32 compare 走 XMM 路径
@@ -2476,6 +2521,26 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         let _s1 = sb_append_cstr(arena, s, "	set" as *u8);
         let _s2 = sb_append_cstr(arena, s, cc);
         let _s3 = sb_append_cstr(arena, s, " %al\n" as *u8);
+        // W-133 (2026-10-24 真修):IEEE 754 的**有序**语义守卫。
+        //
+        // ucomisd / ucomiss 在 unordered(有 NaN 参与)时 **ZF=1 且 PF=1**;
+        // 真正相等时 **ZF=1 且 PF=0**。⇒ setcc 只读 ZF,分不清「相等」与
+        // 「unordered」⇒ 以前 `NaN == NaN` 恒为 true(错),序比较也全错。
+        //
+        //   setnp ⇒ PF=0 ⇒ 1 当且仅当**有序**
+        //   setp  ⇒ PF=1 ⇒ 1 当且仅当**unordered**
+        //
+        //   · == / 序比较(< > <= >=):NaN 参与时结果必须是 false ⇒ AND 有序守卫
+        //   · != :IEEE 754 规定 NaN != NaN 为 true ⇒ OR unordered 守卫
+        //
+        // 守卫寄存器用 %r10b(本文件零处使用 %r10;%al 是结果寄存器)。
+        if is_cnew != (0 as i32) {
+            let _n1 = sb_append_cstr(arena, s, "	setp %r10b\n" as *u8);
+            let _n2 = sb_append_cstr(arena, s, "	orb %r10b, %al\n" as *u8);
+        } else {
+            let _n1 = sb_append_cstr(arena, s, "	setnp %r10b\n" as *u8);
+            let _n2 = sb_append_cstr(arena, s, "	andb %r10b, %al\n" as *u8);
+        }
         let _s4 = sb_append_cstr(arena, s, "\tmovzbl %al, %eax\n" as *u8);
     } else if is_cslt != (0 as i32) || is_csgt != (0 as i32) || is_csle != (0 as i32) || is_csge != (0 as i32) || is_ceq != (0 as i32) || is_cnew != (0 as i32) {
         // csltw / csgtw / cslew / csgew / ceqw / cneww 翻译为

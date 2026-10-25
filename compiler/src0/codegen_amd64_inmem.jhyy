@@ -81,7 +81,9 @@ fn codegen_amd64_run_text(text: *u8, len: i64, asm_path: *u8, target_tag: i32,
 
     // 3. CGState + StringBuilder init (heap-alloc'd, state has stable ptr)
     //    per codegen_amd64.jhyy:297 — CGState 实际 ~248+ 字节, 512 留 slack
-    let state_buf = malloc(512 as i64);
+    // W-130:加了 holds_bitmap_overflow 字段 ⇒ CGState ~336B。768 留 2x 余量。
+    // **加字段时必须同步改这里** —— 越界 = 静默写坏相邻堆块。
+    let state_buf = malloc(768 as i64);
     if state_buf == (0 as *u8) {
         arena_free(&arena);
         return 1 as i32;
@@ -114,6 +116,14 @@ fn codegen_amd64_run_text(text: *u8, len: i64, asm_path: *u8, target_tag: i32,
     // → **静默产出错代码** → 响亮失败(一个响亮的失败远好过静默的错代码 ✓)。
     if cg_state_get_temp_overflow(state_buf) != (0 as i32) {
         jh_fputs_stderr("jhyy error: temp id exceeded the temp-slot table — refusing to emit silently-wrong code (W-120)" as *u8);
+        jh_fputs_stderr("
+" as *u8);
+        return 1 as i32;
+    }
+    // W-130:address-holder bitmap 越界 / C 桥哨兵 → 标记被丢弃 ⇒
+    // emit_loadsub 走 slot direct path ⇒ **静默产出错代码**。同样响亮失败。
+    if cg_state_get_holds_overflow(state_buf) != (0 as i32) {
+        jh_fputs_stderr("jhyy error: address-holder bitmap overflow — refusing to emit silently-wrong code (W-130)" as *u8);
         jh_fputs_stderr("
 " as *u8);
         return 1 as i32;

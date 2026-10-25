@@ -1,0 +1,23 @@
+// W-129 回归门 —— alignof(TypeName) 是编译期常量表达式。
+//
+// 修复前:sema 里**只有** NODE_SIZEOF 分支,没有 NODE_ALIGNOF 分支 ⇒
+// alignof 表达式在推断链里走不到任何类型 ⇒
+//   带类型标注 → "type mismatch in let"
+//   不带标注   → "function body type does not match return type"
+// 编译器内部的 type_align() 早就是完整的,缺的只是这一层接线。
+//
+// 注:alignof(enum) 当前硬编码返回 4(与 enum 布局算出的
+// max(4, max_payload_align) 不一致)—— 那是 ABI v4.0.0 § 12.2 已登记的
+// 内部不一致,本门不把它固化进来。
+type Point = struct { x: i32, y: i64 }
+
+fn main_jhyy() -> i32 {
+    let a: i64 = alignof(i64);      // 8
+    let b: i64 = alignof(i32);      // 4
+    let c: i64 = alignof(u8);       // 1
+    let d: i64 = alignof(f64);      // 8
+    let e: i64 = alignof(*u8);      // 8
+    let f: i64 = alignof(Point);    // 8(含 i64 成员 ⇒ align 8)
+    return (a + b + c + d + e + f) as i32;   // 37
+}
+//EXPECT:37

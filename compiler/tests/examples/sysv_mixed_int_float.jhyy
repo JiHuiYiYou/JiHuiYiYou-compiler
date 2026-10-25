@@ -1,0 +1,41 @@
+// 混合 int/float 实参编号 —— **同一个文件同时验证两套相反的规则**。
+//
+//   SysV (amd64_sysv):整数与浮点是**两个独立 bank** ——
+//     整数实参按出现顺序占 rdi/rsi/rdx/rcx/r8/r9;
+//     浮点实参按出现顺序占 xmm0..xmm7。两个 bank 各自编号,互不影响。
+//
+//   MS x64 (amd64_win):整数与浮点**共享同一个位置计数器** ——
+//     槽 1 → RCX/XMM0,槽 2 → RDX/XMM1,槽 3 → R8/XMM2,槽 4 → R9/XMM3。
+//     所以 `f(a: f64, b: i32)` 在 Win 下 b 在 **EDX**(不是 ECX)。
+//
+// 同一个源码在两个目标下都必须给出同样的**值** —— 值只取决于函数体,
+// 不取决于实参落在哪个寄存器。本文件在 Windows 本地跑一遍(MS x64 规则),
+// 又被 regress 的 --cross 线拉进 SysV ELF 里跑一遍(SysV 规则)——
+// 两套规则任一实现错了,这里就会红。
+//
+// 覆盖四种 bank 交错:
+//   (f64, i32) / (i32, f64) / (i64, f64, i64) / (f64, f64, i64)
+fn f(a: f64, b: i32) -> i32 {
+    return b;
+}
+
+fn g(a: i32, b: f64) -> i32 {
+    return a;
+}
+
+fn h(a: i64, b: f64, c: i64) -> i64 {
+    return c;
+}
+
+fn k(a: f64, b: f64, c: i64) -> i64 {
+    return c;
+}
+
+fn main_jhyy() -> i32 {
+    let r = f(1.0, 42);        // 42
+    let s = g(41, 1.0);        // 41
+    let t = h(1, 2.0, 43);     // 43
+    let u = k(1.0, 2.0, 44);   // 44
+    return r + s + t as i32 + u as i32;   // 170
+}
+//EXPECT:170

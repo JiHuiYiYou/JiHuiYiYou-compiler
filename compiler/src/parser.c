@@ -181,6 +181,19 @@ static Node *try_pattern_range(Parser *p, SourceLoc loc, Node *lo) {
     return lo;
 }
 
+
+/* W-128 (2026-10-24 真修):整数字面量求值 —— 支持 0o(八进制)/ 0b(二进制)前缀。
+   之前一律 strtoll(s, NULL, 0):base 0 是 C 的自动识别,只认 "0x" 与前导零,
+   不认 "0o"/"0b" ⇒ "0o77" / "0b1010" 静默得到 0。
+   strtoll 带显式 base 时不接受 0o/0b 前缀 ⇒ 把前缀切掉再传。 */
+static int64_t parse_int_literal(const char *s, size_t len) {
+    if (len >= 2) {
+        if ((s[0] == '0') && (s[1] == 'o' || s[1] == 'O')) return strtoll(s + 2, NULL, 8);
+        if ((s[0] == '0') && (s[1] == 'b' || s[1] == 'B')) return strtoll(s + 2, NULL, 2);
+    }
+    return strtoll(s, NULL, 0);
+}
+
 static Node *parse_pattern(Parser *p) {
     Token t = peek(p);
 
@@ -246,7 +259,7 @@ static Node *parse_pattern(Parser *p) {
 
     case TOKEN_INT: {
         advance(p);
-        int64_t val = strtoll(t.start, NULL, 0);
+        int64_t val = parse_int_literal(t.start, (size_t)t.length);
         Node *lo = ast_new_pattern_lit(p->arena, t.loc, val, PRIM_I32);
         return try_pattern_range(p, t.loc, lo);
     }
@@ -268,7 +281,7 @@ static Node *parse_pattern(Parser *p) {
     case TOKEN_MINUS: {
         advance(p);
         Token n = expect(p, TOKEN_INT, "integer after - in pattern");
-        int64_t val = -strtoll(n.start, NULL, 0);
+        int64_t val = -parse_int_literal(n.start, (size_t)n.length);
         Node *lo = ast_new_pattern_lit(p->arena, t.loc, val, PRIM_I32);
         return try_pattern_range(p, t.loc, lo);
     }
@@ -856,7 +869,7 @@ static Node *parse_expr(Parser *p, Precedence min_prec) {
 /* ── Prefix functions ── */
 
 static Node *prefix_int(Parser *p, Token token) {
-    int64_t val = strtoll(token.start, NULL, 0);
+    int64_t val = parse_int_literal(token.start, (size_t)token.length);
     TypePrimitive prim = PRIM_I32;
     /* check suffix */
     for (size_t i = 0; i < token.length; i++) {

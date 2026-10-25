@@ -911,13 +911,28 @@ __attribute__((used)) int jh_cgstate_set_temp_slots(void *arr) {
    BSS-zero init; query goes through (*s).temp_holds_address in state.jhyy (hot path);
    setter is forward-ref-safe no-op kept for API consistency with temp_slots. */
 static void *g_jh_cgstate_holds_address = (void *)0;
+/* W-130 (2026-10-24 真修):bitmap 的**实际容量**。
+   C 侧以前只能自己猜容量(硬编码 65536),而 jhyy 侧已经按实际 max temp id
+   动态扩容(cg_resize_temp_tables)⇒ 两边脱节 ⇒ temp_id >= 65536 的
+   address-holder 标记写不进去、读不出来 ⇒ emit_loadsub 退化成 slot direct
+   path ⇒ 静默产出错代码(详见 workarounds.md W-130)。
+   现在容量**从 jhyy 侧同步过来**,C 侧不再有任何硬编码上界。 */
+static long long g_jh_cgstate_holds_cap = 0;
 __attribute__((used)) void *jh_cgstate_get_holds_address(void) {
     return g_jh_cgstate_holds_address;
 }
-__attribute__((used)) int jh_cgstate_set_holds_address(void *bitmap) {
-    /* unused — state.jhyy reads (*s).temp_holds_address directly via jh_cgstate_get_holds_address */
+/* jh_cgstate_set_holds_table — **原子**地装 bitmap 指针 + 容量。
+   单个 C 函数 ⇒ 不存在「cap 已更新 / bitmap 还是旧的」的中间窗口。
+   jhyy 侧唯一入口:cg_state_set_holds_address (codegen_amd64_state.jhyy)。 */
+__attribute__((used)) int jh_cgstate_set_holds_table(void *bitmap, long long cap) {
+    if (bitmap == NULL) return -1;
+    if (cap <= 0) return -1;
     g_jh_cgstate_holds_address = bitmap;
+    g_jh_cgstate_holds_cap = cap;
     return 0;
+}
+__attribute__((used)) long long jh_cgstate_get_holds_cap(void) {
+    return g_jh_cgstate_holds_cap;
 }
 
 /* v4.0.2.2 (W-096 emit-side per-fn-local counter 真修): jh_cgstate_get_state /
@@ -945,16 +960,27 @@ __attribute__((used)) int jh_cgstate_set_state(void *s) {
    `(*argv_arr)` 退化成 copy → SEGV on any input。
    cg_record_temp_holds_address / cg_is_address_holder (state.jhyy) 调这两个,
    因为 jhyy 没有 u8 direct deref 语法 (*(u8*)p = 1 不支持),走 C-bridge。
-   Bitmap size = cg_max_temp_holds_address() = 65536, 必须跟 state.jhyy 一致。 */
+
+   ⚠️ W-130 (2026-10-24):65536 这个硬编码上限**第二次**撞悬崖。
+   state.jhyy 侧已按实际 max temp id 动态扩容(cg_resize_temp_tables),
+   边界检查也用动态的 state.temp_holds_size ⇒ C 侧再按 65536 判界就脱节了。
+   真修:容量从 jhyy 侧经 jh_cgstate_set_holds_table 同步过来,C 侧无硬编码上界。 */
+/* W-130:越界 / 容量通道未初始化 / 指针不同步 → 返回**哨兵 -1**。
+   ⚠️ get 侧返 0 会被 jhyy 侧当成「这个 temp 不是 address-holder」⇒
+   emit_loadsub 走 slot direct path ⇒ **静默产出错代码**。所以必须是 -1。 */
 __attribute__((used)) int jh_cgstate_set_holds_flag(void *bitmap, long long idx) {
     if (bitmap == NULL) return -1;
-    if (idx < 0 || idx >= 65536) return -1;
+    if (g_jh_cgstate_holds_cap <= 0) return -1;              /* 容量通道未初始化 */
+    if (bitmap != g_jh_cgstate_holds_address) return -1;     /* 指针不同步 */
+    if (idx < 0 || idx >= g_jh_cgstate_holds_cap) return -1; /* 越界 */
     ((unsigned char *)bitmap)[idx] = 1;
     return 0;
 }
 __attribute__((used)) int jh_cgstate_get_holds_flag(void *bitmap, long long idx) {
-    if (bitmap == NULL) return 0;
-    if (idx < 0 || idx >= 65536) return 0;
+    if (bitmap == NULL) return -1;
+    if (g_jh_cgstate_holds_cap <= 0) return -1;
+    if (bitmap != g_jh_cgstate_holds_address) return -1;
+    if (idx < 0 || idx >= g_jh_cgstate_holds_cap) return -1;
     return ((unsigned char *)bitmap)[idx] != 0 ? 1 : 0;
 }
 

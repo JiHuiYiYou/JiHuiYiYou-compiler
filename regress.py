@@ -131,6 +131,11 @@ _SYSV_TEST_NAMES = (
     "sysv_struct_pass.jhyy",
     "sysv_struct_ret.jhyy",
     "sysv_vararg_basic.jhyy",
+    # W-127 回归门:同一份源码同时验两套**相反**的实参编号规则 ——
+    #   MS x64:整数/浮点**共享**位置计数器(槽 1 → RCX/XMM0,槽 2 → RDX/XMM1)
+    #   SysV  :整数/浮点是**两个独立 bank**(rdi..r9 / xmm0..xmm7 各自编号)
+    # 值只取决于函数体,不取决于实参落在哪个寄存器 ⇒ 两个目标都必须过。
+    "sysv_mixed_int_float.jhyy",
 )
 
 # v2.8.3: docker CLI absolute path fallback (跟 feedback_gh_cli_path 同 pattern)。

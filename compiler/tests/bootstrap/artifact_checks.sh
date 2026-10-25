@@ -752,8 +752,198 @@ echo "  JHYY_EXE  = $JHYY_EXE"
 
 want() { [ -z "$ONLY" ] || [ "$ONLY" = "$1" ]; }
 
+# ════════════════════════════════════════════════════════════════════════════
+# 8. W-130 — address-holder bitmap 的容量在 C 桥接层与 jhyy 侧脱节
+# ════════════════════════════════════════════════════════════════════════════
+#
+# 背景(2026-10-24 定位,数字闭合):
+#   jhyy 侧的 address-holder bitmap 按**实际 max temp id 动态扩容**
+#   (cg_resize_temp_tables, codegen_amd64_state.jhyy:1862),边界检查
+#   (cg_record_temp_holds_address / cg_is_address_holder)也用动态的
+#   state.temp_holds_size。但 C 桥接层(jhyy_helpers.c:951/957)仍把索引
+#   上限**硬编码 65536**。
+#   ⇒ temp id ≥ 65536 的 address-holder 标记**写不进去、读不出来**
+#   ⇒ emit_loadsub 的 indirect/slot 分派退化成「读栈槽里**指针的低字节**」
+#   ⇒ 编译器**自己**的 `--target=` 9 字节前缀比较失效
+#     (症状:unknown command / cannot open file / target 字符串读成路径尾巴)。
+#
+#   为什么 32/64 位 load 不受影响:W-097 已把 emit_load / emit_store 改成
+#   **无条件 indirect** ⇒ 只有**字节/半字节读**会被打坏。
+#
+#   触发条件是**被编译单元自身的 temp id 规模**(随源码单调增长),不是某个
+#   具体改动的语义 ⇒ 这是一条**悬崖**:temp id 越过 65536 就静默产出错代码。
+#   同一个坑历史上撞过一次(上限 4096 → 提到 65536),这次是第二次。
+#
+# 三条门:
+#   G2 check_holds_bitmap        产物+行为(主门)—— 字节读在悬崖之上还准不准
+#   G3 check_holds_cap_source    源码形态 —— C 桥不得再有字面量上界
+#   G4 check_selfhost_target_flag 端到端症状 —— 自举后的编译器还认不认 --target=
+
+# _max_indirect_byte_base <file.s> — .s 里「间接字节读」的最高 base temp id。
+# 形态(W-097 修后):
+#     movq -2256(%rbp), %r8        # %t65425 (address-holder)
+#     movzbl (%r8), %eax
+# base temp id 就在**上一行**装 %r8 的注释里。
+# 只认 mov(s|z)[bwl]+ (%r8) 这一族(字节/半字节读);movl/movq (%r8) 是 W-097 的
+# 无条件 indirect(本来就是对的),movsd/movss 是浮点,都不算。
+_max_indirect_byte_base() {
+    awk '
+    {
+        if (match($0, /, %r8/) && match($0, /%t[0-9]+/)) {
+            last = substr($0, RSTART + 2, RLENGTH - 2) + 0
+        }
+        if (match($0, /mov(s|z)[bwl]+[ \t]*\(%r8\)/)) {
+            if (last > max) max = last
+        }
+    }
+    END { print max + 0 }' "$1"
+}
+
+check_holds_bitmap() {
+    hdr "W-130  address-holder bitmap 越界时,字节读是否仍然正确"
+    [ -x "$JHYY_EXE" ] || { skip "holds_bitmap" "jhyy.exe 不存在"; return; }
+
+    # 合成文件:N 个哑函数把 max temp id 顶过 65536,最后放一个**字节读** probe。
+    #
+    # ⚠️ N 的取值有讲究(实测,别乱改):temp id 是**按函数逐段分配**的,probe 的
+    # 段起点 = 哑函数占的量 + 一点余量。N=5000 时 probe 的段起点 ≈ 65003 —— **还在
+    # 悬崖之下** ⇒ probe 的字节读 base temp 也不过悬崖 ⇒ 读是对的 ⇒ 这道门测不到
+    # W-130(实测踩过:门报了「最高 base = 65003」)。N=5600 时 probe 段起点
+    # ≈ 72800 ⇒ 越过悬崖 ⇒ 修前字节读被降级成槽直读 ⇒ probe 退出码 90 ⇒ 红。
+    # 门里有前置断言,改这个数后会自己报「门是空的」,不会静默变绿。
+    local N=5600
+    local i=0
+    {
+        echo 'extern fn malloc(size: i64) -> *u8;'
+        while [ "$i" -lt "$N" ]; do
+            echo "fn f$i() -> i32 {"
+            echo "    let mut x: i32 = 1;"
+            echo "    let mut y: i32 = 2;"
+            echo "    let mut z: i32 = x + y;"
+            echo "    let mut w: i32 = z * 3;"
+            echo "    return w;"
+            echo "}"
+            i=$((i+1))
+        done
+        # probe:同一个地址,先用 i64 通路写/读(权威来源,走 W-097 的无条件
+        # indirect,一定对),再用 u8 通路读(W-130 的命中点:走 emit_loadsub,
+        # 依赖 address-holder flag)。堆指针 16 字节对齐 ⇒ 槽直读拿到的是
+        # 指针低字节(16 的倍数),必 ≠ 1 ⇒ 修前必红。
+        echo 'fn probe() -> i32 {'
+        echo '    let p = malloc(8 as i64);'
+        echo '    *(p as *i64) = 1 as i64;'
+        echo '    let w: i64 = *(p as *i64);'
+        echo '    let expect: i32 = (w & (255 as i64)) as i32;'
+        echo '    let b: i32 = (*(p as *u8)) as i32;'
+        echo '    if b != expect { return 1; }'
+        echo '    return 0;'
+        echo '}'
+        echo 'fn main_jhyy() -> i32 {'
+        echo '    let mut s: i32 = 0;'
+        i=0
+        while [ "$i" -lt "$N" ]; do
+            echo "    s = s + f$i();"
+            i=$((i+1))
+        done
+        echo '    if probe() != 0 { return 90; }'
+        echo '    return 0;'
+        echo '}'
+    } > "$WORK/holds.jhyy"
+
+    if ! "$JHYY_EXE" compile "$WORK/holds.jhyy" -o "$WORK/holds" > "$WORK/holds.log" 2>&1; then
+        badenv "holds_bitmap" "编译失败:$(tail -3 "$WORK/holds.log" | tr '\n' ' ')"
+        return
+    fi
+    if [ ! -x "$WORK/holds.exe" ]; then
+        badenv "holds_bitmap" "编译成功但没产出 exe"
+        return
+    fi
+    # ── 前置断言:这道门必须真的踩中悬崖,否则它就是一道「永远绿」的门 ──
+    #   max temp id 必须 > 65536(C 桥的旧硬上限)⇒ 标记会被丢弃
+    local maxt
+    maxt=$(grep -o '%t[0-9]*' "$WORK/holds.s" 2>/dev/null | sed 's/%t//' | sort -n | tail -1)
+    if [ -z "$maxt" ]; then
+        badenv "holds_bitmap" "产物 .s 里找不到 %tN —— 合成文件或产物异常"
+        return
+    fi
+    if [ "$maxt" -le 65536 ]; then
+        bad "holds_bitmap" "合成文件的最大 temp id = $maxt(需要 > 65536)—— 这个用例**没有**踩到 W-130 的悬崖,门是空的"
+        return
+    fi
+    # ── 判别 1:产物形态 —— 那处字节读必须是**间接**的,且 base temp 已越过悬崖 ──
+    local base
+    base=$(_max_indirect_byte_base "$WORK/holds.s")
+    if [ "$base" -le 65536 ]; then
+        bad "holds_bitmap" "产物里没有「base temp > 65536 的间接字节读」(实测最高 base = $base)—— 字节读被降级成了槽直读(C 桥容量通道未修好)"
+        return
+    fi
+    # ── 判别 2:行为 —— 跑起来必须对 ──
+    local rc
+    "$WORK/holds.exe" >/dev/null 2>&1
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        bad "holds_bitmap" "probe 退出码 = $rc(期望 0)—— 越过 65536 后的 u8 读拿到了错误的字节(address-holder 标记被丢弃)"
+        return
+    fi
+    ok "holds_bitmap(max temp=$maxt, 最高间接字节读 base=$base, probe 正确)"
+}
+
+check_holds_cap_source() {
+    hdr "W-130  C 桥的 address-holder bitmap 不得再有字面量上界"
+    local f="$JHYY_ROOT/compiler/src0/jhyy_helpers.c"
+    [ -f "$f" ] || { badenv "holds_cap_source" "找不到 $f"; return; }
+
+    # 容量通道必须还在(jhyy 侧靠它把实际容量告诉 C 侧)
+    if ! grep -q "jh_cgstate_set_holds_table" "$f"; then
+        bad "holds_cap_source" "C 侧找不到 jh_cgstate_set_holds_table —— 容量通道不见了(W-130 回归)"
+        return
+    fi
+    # 两个 flag 访问器里不得再出现字面量上界(C 侧不能自己猜容量)
+    local hits
+    hits=$(
+        {
+            sed -n '/jh_cgstate_set_holds_flag/,/^}/p' "$f"
+            sed -n '/jh_cgstate_get_holds_flag/,/^}/p' "$f"
+        } | grep -nE 'idx[[:space:]]*(>=|>)[^;]*[[:space:]][0-9]+' || true
+    )
+    if [ -n "$hits" ]; then
+        bad "holds_cap_source" "C 侧又出现了字面量上界: $hits —— W-130 的原始形态"
+        return
+    fi
+    ok "holds_cap_source(容量从 jhyy 侧同步,C 侧无字面量上界)"
+}
+
+check_selfhost_target_flag() {
+    hdr "W-130  自举后的编译器必须还能摘掉 --target="
+    [ -x "$JHYY_EXE" ] || { skip "selfhost_target_flag" "jhyy.exe 不存在"; return; }
+
+    # compiler/build/bin/jhyy.exe **本身就是自举产物**(v4.0.8 起由它自己编 src0),
+    # 所以它跑 --target= 的行为**就是** W-130 的症状本身 —— 不需要另编 stage2。
+    #
+    # 症状形态(W-130):argv 里的 --target= 没被摘掉 ⇒ cmd_compile 把它当成输入
+    # 文件名 ⇒ fopen 失败 ⇒ 打印 "cannot open file";更糟的一档是压缩循环把输入
+    # 文件写进 argv[1] ⇒ cmd_dispatched 不再是 "compile" ⇒ "unknown command"。
+    if ! "$JHYY_EXE" compile --target=amd64_win --no-link \
+            "$JHYY_ROOT/compiler/tests/examples/arith.jhyy" -o "$WORK/tgt" \
+            > "$WORK/tgt.log" 2>&1; then
+        bad "selfhost_target_flag" "自举后的编译器处理 --target= 失败:$(tail -3 "$WORK/tgt.log" | tr '\n' ' ')—— W-130 回归"
+        return
+    fi
+    # 顺带验普通路径没被带坏(--target= 摘掉之后,剩下的 argv 仍要正确)
+    if ! "$JHYY_EXE" compile --no-link \
+            "$JHYY_ROOT/compiler/tests/examples/arith.jhyy" -o "$WORK/tgt2" \
+            > "$WORK/tgt2.log" 2>&1; then
+        badenv "selfhost_target_flag" "普通 compile 也失败了:$(tail -3 "$WORK/tgt2.log" | tr '\n' ' ')"
+        return
+    fi
+    ok "selfhost_target_flag(--target= 被正确摘掉,普通路径也正常)"
+}
+
 want link_section    && check_link_section
 want asm_before_ret  && check_asm_before_ret
+want holds_bitmap    && check_holds_bitmap
+want holds_cap_source && check_holds_cap_source
+want selfhost_target_flag && check_selfhost_target_flag
 want per_fn_frame    && check_per_fn_frame
 want sysv_mixed_struct && check_sysv_mixed_struct
 want sysv_memory_class && check_sysv_memory_class
