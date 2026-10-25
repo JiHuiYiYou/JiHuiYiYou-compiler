@@ -425,6 +425,36 @@ jobs:
           # ⚠️ 不要为了让 CI 变绿去放宽 KNOWN_FAIL 里的签名。那正是本项目栽过的坑。
           bash compiler/tests/bootstrap/artifact_checks.sh
 
+      # ── MCP 工具的 pytest 套件 ──────────────────────────────────────
+      # v4.0.20 (W-134.1):`mcp-jhyy/tests/`(41 个测试)此前在 CI 里**零覆盖**
+      # —— ci.yml 既没有 pytest step,也没有任何 pip install ⇒ **套件里的红绿
+      # 完全不影响 CI 结论**。实测代价:W-134 那条「恒红」的陈旧测试从 commit
+      # f72cef4 起就躺在树里没人发现(它断言的行为早已被换掉)。
+      #
+      # 门禁语义:**MCP 工具坏了 ⇒ CI 红**。
+      #
+      # ⚠️ 为什么用 `actions/setup-python` 而不是 job 里已有的 MSYS2 python:
+      #   MSYS2 的 mingw64 python **不是标准 Windows CPython** ⇒ PyPI 上
+      #   fastmcp 依赖链**没有对应的 wheel** ⇒ pip 只能源码构建 ⇒ 必失败。
+      #   (实测:`python -m venv` + `pip install fastmcp` 在 MSYS2 python 下
+      #   报「pip subprocess to install build dependencies did not run
+      #   successfully」。)
+      #   setup-python 给的是标准 CPython ⇒ wheel 直接可用。
+      #   本地已用标准 Windows CPython 验证过完整命令:40 passed / 1 skipped。
+      #
+      # 这两步放在 job **最后**:setup-python 会改 PATH,放在末尾就不会影响
+      # 前面那些 msys2 step 用的 MSYS2 python。
+      - name: Set up Python (MCP test suite)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: MCP server test suite (pytest)
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check -q fastmcp pytest pytest-asyncio
+          python -m pytest mcp-jhyy/tests -q
+
   # ══════════════════════════════════════════════════════════════════════
   # 5 个 SysV ABI 测试 —— 此前在 CI 上**根本不存在门**
   # ══════════════════════════════════════════════════════════════════════

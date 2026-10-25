@@ -170,3 +170,7 @@ compiler/build/bin/jhyy_v4.exe
 # v4.0.8:预编的 runtime.o / jhyy_helpers.o(Makefile 规则产出,可随时重建)
 compiler/build/obj/_jhyy_runtime.o
 compiler/build/obj/_jhyy_helpers.o
+
+# v4.0.20 (W-134.1):本地跑 MCP pytest 用的 venv(不入库)
+.venv-mcp/
+.venv-test/
