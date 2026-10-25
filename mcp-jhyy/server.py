@@ -192,7 +192,7 @@ def jhyy_lang_ref(query: str, limit: int = 20) -> dict:
 
     Returns:
         {ok, version, query, matches: [{section, title, level, score, excerpt}, ...]}
-        section e.g. "10.4" — 直接对应 jhyy-lang-spec-v1.3.0.md 章节号, 可引用.
+        section e.g. "10.4" — 直接对应 jhyy-lang-spec-v4.0.0.md 章节号, 可引用.
     """
     import jhyy_lang_ref as langref_mod
     return langref_mod.search(query, limit=limit)
@@ -200,12 +200,12 @@ def jhyy_lang_ref(query: str, limit: int = 20) -> dict:
 
 @mcp.tool
 def jhyy_abi_info(query: str, limit: int = 20) -> dict:
-    """Search the JHYY ABI v1.0.0 information by keyword.
+    """Search the JHYY ABI v4.0.0 information by keyword.
 
     USE THIS WHEN the user asks about ABI conventions, struct passing, FFI rules,
     calling conventions, or any low-level binary interface question.
     Triggers: "how are structs passed", "calling convention", "FFI rules",
-              "sret", "what's the v1.0.0 ABI say about X", "struct pass-by-value",
+              "sret", "what's the v4.0.0 ABI say about X", "struct pass-by-value",
               "how do I call a C function", "module import ABI".
 
     Call this BEFORE answering any question about the JHYY ABI. Do NOT
@@ -217,11 +217,11 @@ def jhyy_abi_info(query: str, limit: int = 20) -> dict:
 
     Returns:
         {ok, version, query, matches: [{section, title, level, score, excerpt, key}, ...]}
-        section e.g. "4.2" — 直接对应 jhyy-abi-v1.0.0.md 章节号, 可引用.
+        section e.g. "4.2" — 直接对应 jhyy-abi-v4.0.0.md 章节号, 可引用.
     """
     try:
         import jhyy_spec_doc
-        abi_md = jhyy_spec_doc.load_spec_doc(JHYY_ROOT / "docs/abis/jhyy-abi-v1.0.0.md")
+        abi_md = jhyy_spec_doc.load_spec_doc(JHYY_ROOT / "docs/abis/jhyy-abi-v4.0.0.md")
         md_result = jhyy_spec_doc.search_spec_doc(abi_md, query, limit=limit)
         return {
             "ok": True,
@@ -236,7 +236,7 @@ def jhyy_abi_info(query: str, limit: int = 20) -> dict:
             ],
         }
     except Exception as e:
-        return {"ok": False, "query": query, "error": f"failed to load jhyy-abi-v1.0.0.md: {e}"}
+        return {"ok": False, "query": query, "error": f"failed to load jhyy-abi-v4.0.0.md: {e}"}
 
 
 @mcp.tool
@@ -417,21 +417,30 @@ def jhyy_workarounds(query: str, status: Optional[str] = None) -> dict:
 
 # ========== MCP Resources ==========
 
+# 这两个 resource 直接发**活的**规范文档(不是快照)。
+#
+# 2026-10-24 修正:此前它们发的是 `spec_data.json` / `abi_data.json` —— 那是
+# **手编的 v0.5.0 / v1.0.0 快照**(连 ABI 都只有 40% 覆盖),而 `jhyy_lang_ref` /
+# `jhyy_abi_info` 两个**搜索工具**早已改成直读 `docs/abis/*-v4.0.0.md`
+# ⇒ 同一份规范在工具与资源里给出**两个不同版本**。
+#
+# 快照在这里没有任何价值:规范 markdown 才是权威源,而它就在仓里。
+# ⇒ 直接读文件,从此**不可能陈旧**。
 @mcp.resource("jhyy://spec")
 def jhyy_spec() -> str:
-    """JHYY 语言规范 (v0.5.0) — 完整结构化数据。"""
-    spec_path = MCP_DIR / "spec_data.json"
+    """JHYY 语言规范 v4.0.0 — 权威 markdown 全文。"""
+    spec_path = JHYY_ROOT / "docs/abis/jhyy-lang-spec-v4.0.0.md"
     if not spec_path.exists():
-        return f"spec_data.json not found at {spec_path}"
+        return f"spec not found at {spec_path}"
     return spec_path.read_text(encoding="utf-8")
 
 
 @mcp.resource("jhyy://abi")
 def jhyy_abi() -> str:
-    """JHYY ABI v1.0.0 信息 — 完整结构化数据。"""
-    abi_path = MCP_DIR / "abi_data.json"
+    """JHYY ABI v4.0.0 — 权威 markdown 全文。"""
+    abi_path = JHYY_ROOT / "docs/abis/jhyy-abi-v4.0.0.md"
     if not abi_path.exists():
-        return f"abi_data.json not found at {abi_path}"
+        return f"abi not found at {abi_path}"
     return abi_path.read_text(encoding="utf-8")
 
 

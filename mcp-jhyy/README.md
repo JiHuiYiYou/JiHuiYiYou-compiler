@@ -108,8 +108,8 @@ Claude Code 会根据工具描述中的触发条件**自动判断何时调用**�
 
 | URI | 内容 |
 |-----|------|
-| `jhyy://spec` | 语言规范 v0.5.0 (JSON) |
-| `jhyy://abi` | ABI 信息 v1.0.0 (JSON) |
+| `jhyy://spec` | 语言规范 **v4.0.0**(权威 markdown 全文,直读 `docs/abis/`) |
+| `jhyy://abi` | ABI **v4.0.0**(权威 markdown 全文,直读 `docs/abis/`) |
 | `jhyy://examples` | 示例代码列表 |
 | `jhyy://changelog` | 最新 changelog |
 
@@ -117,8 +117,8 @@ Claude Code 会根据工具描述中的触发条件**自动判断何时调用**�
 
 | 类别 | 来源 | 文件 |
 |------|------|------|
-| 语言规范 | `docs/abis/jhyy-lang-spec-v1.3.0.md` | `spec_data.json` |
-| ABI 信息 | `docs/abis/jhyy-abi-v1.0.0.md` | `abi_data.json` |
+| 语言规范 | `docs/abis/jhyy-lang-spec-v4.0.0.md` | **直读**(`jhyy_spec_doc.load_spec_doc`)—— 无快照 |
+| ABI 信息 | `docs/abis/jhyy-abi-v4.0.0.md` | **直读**(`jhyy_spec_doc.load_spec_doc`)—— 无快照 |
 | 集成测试 | `compiler/tests/examples/*.jhyy` | 由 `jhyy_run` 动态读 |
 
 ## 项目结构
@@ -129,12 +129,10 @@ mcp-jhyy/
 ├── jhyy_runner.py         # subprocess 封装（compile / run / check / get_il）
 ├── jhyy_regress.py        # jhyy_regress / jhyy_il_diff / jhyy_selfhost_check 实现（Sprint 1, 2026-08-11）
 ├── jhyy_lang_ref.py       # jhyy_lang_ref tool 实现（关键词搜索 spec）
-├── jhyy_spec_doc.py       # spec 文档解析辅助（spec_data.json 生成上游）
+├── jhyy_spec_doc.py       # spec / ABI markdown 解析（h2/h3 切节 + token-AND 搜索）
 ├── jhyy_workarounds.py    # jhyy_workarounds tool 实现（W-NNN 索引搜索）
 ├── jhyy_ntstatus.py       # 内部 NTSTATUS helper —— 未注册 MCP 工具，留给 OS sprint
 ├── (jhyy_format tool  实现内联在 server.py line 240 区域，无独立 .py 文件)
-├── spec_data.json         # 语言规范数据快照（从 jhyy-lang-spec-v1.3.0.md 提取）
-├── abi_data.json          # ABI 数据快照（从 jhyy-abi-v1.0.0.md 提取）
 ├── CLAUDE.md              # 局部 Claude Code 项目指令（给"打开 mcp-jhyy/"场景用）
 ├── tests/                 # pytest 测试
 │   ├── __init__.py
@@ -156,11 +154,15 @@ mcp-jhyy/
 
 ### 更新语言规范 / ABI 数据
 
-`spec_data.json` 和 `abi_data.json` 是从 `docs/` 下的 markdown 提取的快照。手动更新步骤：
+**没有快照要更新** —— 工具(`jhyy_lang_ref` / `jhyy_abi_info`)与资源
+(`jhyy://spec` / `jhyy://abi`)都**直读** `docs/abis/*-v4.0.0.md` 的权威 markdown。
 
-1. 编辑 `docs/abis/jhyy-lang-spec-*.md` 或 `docs/abis/jhyy-abi-*.md`
-2. 重新提取 JSON（目前是手编，未来 v0.6+ 考虑写自动提取脚本）
-3. 重启 Claude Code 让 MCP 重新加载
+1. 编辑 `docs/abis/jhyy-lang-spec-v4.0.0.md` 或 `docs/abis/jhyy-abi-v4.0.0.md`
+2. 完事（重启 Claude Code 让 MCP 重新加载即可，但内容本身不缓存）
+
+> 历史:此前存在 `spec_data.json` / `abi_data.json` 两个**手编**快照
+> (v0.5.0 / v1.0.0,ABI 只有 40% 覆盖),与工具直读的 v4.0.0 文档**互相矛盾**。
+> 2026-10-24 删除,资源改为直发活文档 ⇒ 不可能再陈旧。
 
 ### 添加新工具
 

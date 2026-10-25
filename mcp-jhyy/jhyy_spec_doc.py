@@ -22,8 +22,12 @@ from typing import Optional, List, Dict, Any
 #   `### 状态变化` / `### 推荐的 v0.6` → unnumbered content headings
 # Any h2/h3/h4 line flushes a section boundary so content doesn't bleed.
 _HEADING_RE = re.compile(r"^(#{2,4})\s+(.+?)\s*$")
+# 2026-10-24 修正:编号原来只支持**两级**(`\d+(?:\.\d+)?`)⇒ 三级编号
+# (`#### 4.2.1 xxx`)被解析成 num="4.2" + title="1 xxx" ⇒ **章节号报错**、
+# **标题被截断**(MCP 调用方按 section 号引用规范,会引到错的章节)。
+# 现在支持到三级(`\d+(?:\.\d+){0,2}`)。
 _NUM_PREFIX_RE = re.compile(
-    r"^(?:(\d+(?:\.\d+)?)\.?|附录\s+([A-Z])[：:]|v(\d+\.\d+\.\d+))[\s:：]*(.+)$"
+    r"^(?:(\d+(?:\.\d+){0,2})\.?|附录\s+([A-Z])[：:]|v(\d+\.\d+\.\d+))[\s:：]*(.+)$"
 )
 _VERSION_RE = re.compile(r"(?:spec|abi)[-_ ]v?(\d+\.\d+\.\d+)", re.IGNORECASE)
 

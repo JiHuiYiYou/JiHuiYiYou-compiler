@@ -1,7 +1,7 @@
 """test_abi_info.py — jhyy_abi_info 回归测试 (Sprint mcp-2)
 
 之前 jhyy_abi_info 用 atomic substring over abi_data.json — multi-word 自然语言
-查询永远 0 命中. 现在用 jhyy_spec_doc 读 locked jhyy-abi-v1.0.0.md, token-AND search.
+查询永远 0 命中. 现在用 jhyy_spec_doc 读 locked jhyy-abi-v4.0.0.md, token-AND search.
 """
 import sys
 from pathlib import Path
@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import jhyy_spec_doc
 
 
-ABI_PATH = Path(__file__).resolve().parents[2] / "docs/abis/jhyy-abi-v1.0.0.md"
+ABI_PATH = Path(__file__).resolve().parents[2] / "docs/abis/jhyy-abi-v4.0.0.md"
 
 
 def _search(query, limit=20):
@@ -20,10 +20,10 @@ def _search(query, limit=20):
     return jhyy_spec_doc.search_spec_doc(doc, query, limit=limit)
 
 
-def test_version_is_locked_v1_0_0():
+def test_version_is_locked_v4_0_0():
     r = _search("anything")
     assert r["ok"]
-    assert r["version"] == "1.0.0", f"expected locked v1.0.0, got {r['version']!r}"
+    assert r["version"] == "4.0.0", f"expected locked v4.0.0, got {r['version']!r}"
 
 
 def test_struct_calling_convention_finds_matches():
