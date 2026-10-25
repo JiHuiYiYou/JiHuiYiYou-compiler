@@ -943,6 +943,13 @@ fn apply_link_section_directives(temp_asm: *u8) -> i32 {
     // W-136:per-compilation 唯一路径(写侧在 codegen.jhyy,同一 pid ⇒ 同一路径)
     let path = jh_sidefile_path("_section_directive.buf" as *u8);
     if jh_file_stat_ok(path) == (0 as i32) {
+        // W-136 补充:空文件**也要删**。`jh_file_stat_ok` = 「存在且非空」⇒
+        // 空文件走这里提前返回 ⇒ 以前(固定路径)无所谓 —— 下一次编译会用
+        // 同一个路径把它覆盖掉;但 per-pid 路径**不会被覆盖** ⇒ 每次编译都在
+        // compiler/build/obj/ 里留一个 `_section_directive.buf.<pid>`。
+        // 实测一次 regress(219 个用例 ≈ 400 个编译进程)就在那儿堆了 400 个
+        // 空文件。⇒ 这里补一次 unlink(文件不存在时是无害的 no-op)。
+        let _u0 = jh_unlink_file(path);
         return 0;
     }
     // 1. Read side-file into sb
