@@ -1197,6 +1197,43 @@ PATH 最前)。
 **已造红灯验证:** 还原成出事那版 ⇒ 门当场报出那两个符号(且 gcc 编译**零错误**,
 说明「编译过了」确实不足以说明问题)。
 
+### W-138 — 跨盘改名失败:CI 第一次跑 MCP pytest 才暴露出来的**老** bug
+
+**这一条跟 W-136 无关**,是 commit `2ab0f24`(把 MCP pytest 接进 CI)让一个
+**从没在 CI 里跑过**的步骤第一次跑起来,顺手挖出来的。
+
+`jh_rename_file` 用 `MoveFileExW` 把 `%TEMP%` 里的临时 exe 改名成用户要的
+输出路径(W-048 的设计)。**不带 `MOVEFILE_COPY_ALLOWED` 时,`MoveFileExW`
+不能跨卷移动**(`ERROR_NOT_SAME_DEVICE` = 17)⇒ **输出路径与 `%TEMP%` 不同盘
+⇒ 产物不落地**,编译器报:
+
+```
+W-048: rename temp exe failed (kept at C:\Users\<user>\AppData\Local\Temp\jhe<8hex>.exe)
+```
+
+编译与链接其实**都成功**了(日志里有 `[4] codegen done`),只有最后这步改名失败。
+
+**本地为什么从不发作:** 工作区与 `%TEMP%` 同在 C:。
+**CI 上为什么只有 pytest 那一步红:** 两步的 `%TEMP%` 不在同一个盘 ——
+regress 步骤 `shell: msys2 {0}` ⇒ MSYS2 的 `/tmp` = `$RUNNER_TEMP\msys64\tmp`
+= **D:**(与工作区同盘)⇒ 移动成功;pytest 步骤 `shell: bash`(Git Bash)⇒
+`%TEMP%` = `C:\Users\RUNNER~1\AppData\Local\Temp` = **C:** ⇒ 跨卷 ⇒ 失败。
+
+**修法:** 加 `MOVEFILE_COPY_ALLOWED` ⇒ 跨卷时退化成「复制 + 删除」。
+**A/B 实测(本机,输出到 D: 而 `%TEMP%` 在 C:):**
+
+| 二进制 | 结果 |
+|---|---|
+| 旧(不带 flag) | `W-048: rename temp exe failed` ⇒ **无 exe** |
+| 新(带 flag) | exe 落地 ⇒ 运行退出码 42 ✓ |
+
+**新常驻门 `artifact_checks.sh crossvolume_rename`:** 这条**没法用行为测**
+(要第二个卷,不是每台机器都有)⇒ 只能测源码契约(与 `holds_cap_source` 同款
+做法):`jh_rename_file` 里必须出现 `MOVEFILE_COPY_ALLOWED`。已造红灯验证。
+
+**⇒ 影响面比 CI 大得多:** 任何**输出路径与 `%TEMP%` 不同盘**的用户都会撞上
+(输出到 D:/E:/移动硬盘);本地同盘 ⇒ 完全无感 ⇒ 这就是它能活这么久的原因。
+
 ### 台账:0 ACTIVE / 0 DEFERRED
 
 - **W-135 的推理被改正**(结论不变):原写「block-name 表存的是 base 名 ⇒ 256 条
@@ -1222,11 +1259,13 @@ PATH 最前)。
 | `regress --cross=auto`(本机 docker) | ✅ **7 个** sysv 用例全 PASS(exit=28/217/42/35/18/42/**170**) |
 | `closure_check.sh` | ✅ PASS(v2.s == v3.s,byte-identical) |
 | `fixed_point.sh` | ✅ 17 PASS / 0 FAIL / 0 INFO(N=10 .il 与 .s 跨代 byte-equal) |
-| `artifact_checks.sh` | ✅ **13 PASS** / 0 KNOWN-FAIL / 0 FAIL / 0 SKIP(+1 = 新门 `helpers_symbols`) |
+| `artifact_checks.sh` | ✅ **14 PASS** / 0 KNOWN-FAIL / 0 FAIL / 0 SKIP(+2 = 新门 `helpers_symbols` + `crossvolume_rename`) |
 | `artifact_checks.sh --only=helpers_symbols`(造红灯) | ✅ 出事那版 ⇒ **FAIL**,报出 `jh_cgstate_get_state` / `jh_cgstate_set_state` |
+| `artifact_checks.sh --only=crossvolume_rename`(造红灯) | ✅ 去掉 `MOVEFILE_COPY_ALLOWED` ⇒ **FAIL** |
+| 跨盘编译(输出到 D:、%TEMP% 在 C:) | ✅ 旧二进制 **无 exe** ⇒ 新二进制 **exe 落地 + 退出码 42** |
 | `audit_test_assertions.py --strict` | ✅ 0 违规 |
 | MCP pytest | ✅ **40 passed / 1 skipped**(miniconda python) |
-| 台账 | ✅ **0 ACTIVE / 0 DEFERRED** / 126 索引行 |
+| 台账 | ✅ **0 ACTIVE / 0 DEFERRED** / 127 索引行 |
 
 **⇒ 另附一条漂移体检(手工,未进门):** 把新旧 `.s` 的 temp id / 字符串池下标 /
 栈槽偏移全部归一化后 diff,12 MB 的 `.s` 只剩 **132 行**差异,且每一行要么是

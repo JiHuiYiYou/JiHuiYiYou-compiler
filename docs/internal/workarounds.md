@@ -146,6 +146,7 @@
 | [W-133.1](#w-133.1) | SUPERSEDED | 聚合 `==` / `!=` 不接受**函数调用结果**作为操作数 |
 | [W-133.2](#w-133.2) | SUPERSEDED | 聚合类型的**大小比较**(`<` `>` `<=` `>=`)未实装 —— 编译期报错 |
 | [W-133.3](#w-133.3) | SUPERSEDED | struct 字面量的字段值类型必须**精确匹配**字段类型 |
+| [W-138](#w-138) | RESOLVED | `jh_rename_file` 不带 `MOVEFILE_COPY_ALLOWED` ⇒... |
 | [W-137](#w-137) | RESOLVED | Makefile 的 `$(CFLAGS_STAGE0)` 未定义 —— 两个 `.o` 丢掉... |
 | [W-136](#w-136) | RESOLVED | side-file 用固定路径 —— 并发编译互相截断/删除 ⇒ 静默产出错代码 |
 | [W-135](#w-135) | SUPERSEDED | emit 侧两张固定上限表(pending phi / block-name... |
@@ -10447,6 +10448,68 @@ bug ⇒ 归 SUPERSEDED(台账 schema:「不是 workaround ⇒ 不进高优桶」
 - 源码:`compiler/src0/sema.jhyy`(NODE_STRUCT_LITERAL 的字段类型校验)
 - 测试:`compiler/tests/examples/agg_eq_struct.jhyy`(注释记录该限制)
 - 规范:`docs/abis/jhyy-lang-spec-v4.0.0.md` 附录 B
+
+<a id="w-138"></a>
+## W-138: `jh_rename_file` 不带 `MOVEFILE_COPY_ALLOWED` ⇒ 跨盘时产物**不落地**
+
+**状态:** RESOLVED closed 2026-10-25 (v4.0.21) — 跨卷改名退化成「复制+删除」;跨盘输出实测可落地(旧版 100% 失败)
+**Filed-by:** w136-rca-2026-10-25
+**日期:** 2026-10-25(W-136 落地后 CI 第一次跑 MCP pytest 步骤 ⇒ 暴露)
+
+**触发面:** `compiler/src0/jhyy_helpers.c` 的 `jh_rename_file`。它是
+`link_with_gcc` 的**最后一步**:gcc 把 exe 链到 `%TEMP%` 里的临时文件,再用
+`MoveFileExW` 改名成用户要的输出路径(W-048 的设计:绕开 mingw CRT 对中文
+路径的 argv 解码 bug)。
+
+**症状:** 编译与链接**都成功**(日志里有 `[4] codegen done`),但最后一步失败:
+
+```
+W-048: rename temp exe failed (kept at C:\Users\<user>\AppData\Local\Temp\jhe<8hex>.exe)
+```
+
+⇒ **产物没落地**,用户拿到的是「编译失败」。而错误信息指向的是「临时文件
+还在」,看不出真正的原因(源在 C: 盘,目标在 D: 盘)。
+
+**根因:** `MoveFileExW` **不带** `MOVEFILE_COPY_ALLOWED` 时**不能跨卷移动**
+(`ERROR_NOT_SAME_DEVICE` = 17)。⇒ **输出路径与 `%TEMP%` 不同盘 ⇒ 100% 失败。**
+
+**为什么本地从不发作:** 开发机上工作区与 `%TEMP%` 同在 C:。
+**为什么 CI 上第一次露出来:** commit `2ab0f24` 刚把 MCP pytest 套件接进 CI
+(此前**从未**在 CI 里跑过)。同一个 job 里 regress 那一步却绿 —— 因为两步的
+`%TEMP%` **不在同一个盘**:
+- regress 步骤 `shell: msys2 {0}` ⇒ MSYS2 的 `/tmp` = `$RUNNER_TEMP\msys64\tmp`
+  = **D:**(与工作区同盘)⇒ 移动成功;
+- pytest 步骤 `shell: bash`(Git Bash)⇒ `%TEMP%` =
+  `C:\Users\RUNNER~1\AppData\Local\Temp` = **C:** ⇒ 跨卷 ⇒ 移动失败。
+
+**修法:** `MoveFileExW(..., MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)`
+⇒ 跨卷时退化成「复制 + 删除」。
+
+**A/B 实测(本机,输出到 D: 而 `%TEMP%` 在 C:):**
+
+| 二进制 | 结果 |
+|---|---|
+| 旧(不带 flag) | `W-048: rename temp exe failed` ⇒ **无 exe** |
+| 新(带 flag) | exe 落地 ⇒ 运行退出码 42 ✓ |
+
+**⇒ 新常驻门 `artifact_checks.sh crossvolume_rename`:** 这条**没法用行为测**
+(要第二个卷,不是每台机器都有)⇒ 只能测源码契约(与 `holds_cap_source` 同款
+做法):`jh_rename_file` 里必须出现 `MOVEFILE_COPY_ALLOWED`。已造红灯验证。
+
+**影响范围:** 任何**输出路径与 `%TEMP%` 不同盘**的用户(输出到 D:/E:/移动硬盘
+等),以及 CI 上任何用 Git Bash 跑编译器的步骤。本地同盘 ⇒ 完全无感。
+
+**失效条件:** 若将来 `link_with_gcc` 改成直接把 gcc 的 `-o` 指向最终路径
+(不再走临时文件 + 改名),本条自然消失。
+
+**引用:**
+- 源码:`compiler/src0/jhyy_helpers.c`(`jh_rename_file`)、`compiler/src0/main.jhyy`
+  (`link_with_gcc` 末尾的改名 + W-048 的报错)
+- 门:`compiler/tests/bootstrap/artifact_checks.sh` 的 `crossvolume_rename`
+- 关联:W-048(临时文件 + 改名的原始设计)、W-123(临时文件名唯一性)
+- 事故记录:`docs/logs/v4/changelog-v4.0.0.md` § v4.0.21
+
+---
 
 <a id="w-137"></a>
 ## W-137: Makefile 的 `$(CFLAGS_STAGE0)` 未定义 —— 两个 `.o` 丢掉 `-std=c11 -Wall -Wextra`

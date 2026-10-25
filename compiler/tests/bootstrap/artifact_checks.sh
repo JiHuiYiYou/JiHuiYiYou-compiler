@@ -1002,7 +1002,32 @@ check_helpers_symbols() {
     ok "helpers_symbols($(wc -l < "$req") 个 extern fn jh_* 全部由 C 桥导出)"
 }
 
+check_crossvolume_rename() {
+    hdr "W-138  跨盘改名必须带 MOVEFILE_COPY_ALLOWED"
+    local f="$JHYY_ROOT/compiler/src0/jhyy_helpers.c"
+    [ -f "$f" ] || { badenv "crossvolume_rename" "找不到 $f"; return; }
+
+    # jh_rename_file 用 MoveFileExW 把 %TEMP% 里的临时 exe 改名成用户要的
+    # 输出路径。**不带** MOVEFILE_COPY_ALLOWED 时,MoveFileExW 不能跨卷
+    # (ERROR_NOT_SAME_DEVICE = 17)⇒ 输出路径与 %TEMP% 不同盘时**产物不落地**。
+    #
+    # 这条**没法用行为测**(要第二个卷,不是每台机器都有)⇒ 只能测源码契约,
+    # 与 holds_cap_source 同款做法(那边也是「源码里不许再出现字面量上界」)。
+    local fn
+    fn=$(sed -n '/int jh_rename_file/,/^}/p' "$f")
+    if [ -z "$fn" ]; then
+        badenv "crossvolume_rename" "jhyy_helpers.c 里找不到 jh_rename_file"
+        return
+    fi
+    if ! printf '%s' "$fn" | grep -q "MOVEFILE_COPY_ALLOWED"; then
+        bad "crossvolume_rename" "jh_rename_file 的 MoveFileExW 没有 MOVEFILE_COPY_ALLOWED —— 跨盘时产物不落地(W-138 回归)"
+        return
+    fi
+    ok "crossvolume_rename(改名带 MOVEFILE_COPY_ALLOWED,跨盘可落地)"
+}
+
 want helpers_symbols && check_helpers_symbols
+want crossvolume_rename && check_crossvolume_rename
 want link_section    && check_link_section
 want asm_before_ret  && check_asm_before_ret
 want holds_bitmap    && check_holds_bitmap

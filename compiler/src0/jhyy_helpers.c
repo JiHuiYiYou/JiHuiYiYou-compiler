@@ -680,11 +680,31 @@ __attribute__((used)) int jh_file_copy(const char *src, const char *dst) {
     return CopyFileW(wsrc, wdst, FALSE) ? 0 : -1;
 }
 
+/* W-138 (2026-10-25 真修):MoveFileExW **不带** MOVEFILE_COPY_ALLOWED 时
+ * **不能跨卷移动**(ERROR_NOT_SAME_DEVICE = 17)。
+ *
+ * 症状:编译链接都成功,但最后一步「把 %TEMP% 里的临时 exe 改名成用户要的
+ * 输出路径」失败 ⇒ 编译器报 `W-048: rename temp exe failed` ⇒ **产物没落地**。
+ * 本地不发作(工作区与 %TEMP% 同在 C:),**跨盘就 100% 发作** ——
+ * 典型场景:输出到 D:\ 而 %TEMP% 在 C:\。
+ *
+ * CI 上第一次露出来是 2026-10-25:`build-and-test` job 的 **MCP pytest** 那一步
+ * (2ab0f24 刚把它接进 CI,此前从未在 CI 里跑过)。为什么同一个 job 里的
+ * regress 步骤却绿?—— 因为两步的 %TEMP% 不在同一个盘:
+ *   · regress 步骤 `shell: msys2 {0}` ⇒ MSYS2 的 /tmp = $RUNNER_TEMP\msys64\tmp
+ *     = **D:**(与工作区同盘)⇒ 移动成功;
+ *   · pytest 步骤 `shell: bash`(Git Bash)⇒ %TEMP% = C:\Users\RUNNER~1\AppData\
+ *     Local\Temp = **C:** ⇒ 跨卷 ⇒ 移动失败。
+ *
+ * 修法:加 `MOVEFILE_COPY_ALLOWED` ⇒ 跨卷时退化成「复制 + 删除」。
+ * (本机实测:不带该 flag ⇒ MoveFileExW 返回 0(失败),带 ⇒ 返回 1(成功)且
+ * 目标文件确实落地。) */
 __attribute__((used)) int jh_rename_file(const char *src, const char *dst) {
     wchar_t wsrc[MAX_PATH], wdst[MAX_PATH];
     if (!MultiByteToWideChar(CP_ACP, 0, src, -1, wsrc, MAX_PATH)) return -1;
     if (!MultiByteToWideChar(CP_ACP, 0, dst, -1, wdst, MAX_PATH)) return -1;
-    return MoveFileExW(wsrc, wdst, MOVEFILE_REPLACE_EXISTING) ? 0 : -1;
+    return MoveFileExW(wsrc, wdst,
+                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED) ? 0 : -1;
 }
 
 __attribute__((used)) int jh_unlink_file(const char *path) {

@@ -5,12 +5,17 @@
 <https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v4.0.19>
 （installer .exe + compiler .msi + vscode .vsix + SHA256.txt）。
 **🟡 v4.0.21 进行中**（2026-10-25，**W-136 side-file per-pid 唯一化 + W-137 Makefile
-变量漏改** ⇒ **200/200 PASS + 0 XFAIL + 19 SKIP**(219 total)；本机 Docker 起 daemon 后
-**7 个** sysv 用例本地也真跑；artifact_checks **13 PASS**(新增 `helpers_symbols` 门)；
-台账 **0 ACTIVE / 0 DEFERRED**）—— **未发布**，下一个动作 = 走发布链 + promote v4.0.0 final。
-⚠️ 本轮最值得记住的一条：**「链接失败」的三层掩护**（悬空注释吞掉 C 桥符号 →
-`$(CFLAGS_STAGE0)` 未定义把 `-Wall -Wextra` 一起丢掉 → PATH 里 `/mingw64/bin`
-抢在 ucrt64 前面导致 ld 加载错版本 DLL、**失败时零输出**）⇒ 详见
+变量漏改 + W-138 跨盘改名** ⇒ **200/200 PASS + 0 XFAIL + 19 SKIP**(219 total)；
+本机 Docker 起 daemon 后 **7 个** sysv 用例本地也真跑；artifact_checks **14 PASS**
+(新增 `helpers_symbols` + `crossvolume_rename` 两道门)；台账 **0 ACTIVE / 0 DEFERRED**）
+—— **未发布**，下一个动作 = 走发布链 + promote v4.0.0 final。
+⚠️ 本轮最值得记住的两条：
+① **「链接失败」的三层掩护**（悬空注释吞掉 C 桥符号 → `$(CFLAGS_STAGE0)` 未定义
+把 `-Wall -Wextra` 一起丢掉 → PATH 里 `/mingw64/bin` 抢在 ucrt64 前面导致 ld
+加载错版本 DLL、**失败时零输出**）；
+② **跨盘输出 100% 失败**（`MoveFileExW` 不带 `MOVEFILE_COPY_ALLOWED` ⇒ 不能跨卷
+⇒ 输出到 D: 而 `%TEMP%` 在 C: 时**产物不落地**）—— 本地同盘 ⇒ 完全无感，
+是 CI 第一次跑 MCP pytest 才暴露的**老** bug ⇒ 详见
 [`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md) § v4.0.21。
 **v4.0.0 final 的 promote 条件全部满足**（184/184 生产+自举、closure v2==v3、
 fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
@@ -155,7 +160,7 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 真凶是 **W-123**(`jh_mktemp_ascii` 的 seed = `pid ^ tid ^ ctr`,而 Windows 的 pid
 与主线程 tid 来自**同一个全局计数器** ⇒ `N ^ (N+1) = 1` ⇒ **每两个并发进程就撞一次
 同一个临时文件名** ⇒ 一个的 rename 失败 ⇒ **编译失败**。W-123 修好后:并发编译 32 个
-→ **0 失败**(修复前 4 个)),**0 ACTIVE / 0 DEFERRED / 126 索引行**(W-134.1 的 CI step 已由 `2ab0f24` 落地,2026-10-25 补翻状态),per `docs/internal/workarounds.md` 索引表):
+→ **0 失败**(修复前 4 个)),**0 ACTIVE / 0 DEFERRED / 127 索引行**(W-134.1 的 CI step 已由 `2ab0f24` 落地,2026-10-25 补翻状态),per `docs/internal/workarounds.md` 索引表):
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
@@ -257,6 +262,7 @@ W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_
 - W-132 → RESOLVED (2026-10-24, v4.0.20 —— 自举链接路径补 windres 步骤 ⇒ **用户编译出来的程序**也带 "J" 图标;**实现全在 C 侧**(`jh_gcc_invoke` 挂钩 + `jh_run` 收尾),`main.jhyy` 零改动 —— 给它加局部变量会移位 temp 编号 ⇒ 自举产物行为漂移;新增常驻门 `artifact_checks.sh compiler_icon` + `program_icon`,都用 Explorer 同一套 API(`shell32!ExtractIconExW`)问「exe 里到底有没有图标」)
 - W-136 → RESOLVED (2026-10-25, v4.0.21 —— side-file 路径加 **pid 后缀** ⇒ 并发编译互不干扰。A/B 实测:旧编译器 12 路并发**静默丢掉 2/12 的 `#[link_section]` 指令**(2 种不同产物),新编译器 12/12 逐字节相同)
 - W-137 → RESOLVED (2026-10-25, v4.0.21 —— `Makefile` 的 `$(CFLAGS_STAGE0)` 未定义(M5 Part 1 改名时漏改两处使用处)⇒ 两个 `.o` 丢掉 `-std=c11 -Wall -Wextra` ⇒ **`-Wcomment` 警告被静默** ⇒ 正是它掩护了 W-136 那次「悬空注释吞掉两个 C 桥符号」的编译期错误)
+- W-138 → RESOLVED (2026-10-25, v4.0.21 —— `jh_rename_file` 的 `MoveFileExW` 不带 `MOVEFILE_COPY_ALLOWED` ⇒ **不能跨卷移动** ⇒ 输出路径与 `%TEMP%` 不同盘时**产物不落地**(`W-048: rename temp exe failed`)。本地同盘 ⇒ 一直无感;CI 第一次跑 MCP pytest(commit `2ab0f24` 刚接进 CI)才暴露 —— 那一步用 Git Bash ⇒ `%TEMP%` 在 C:,而工作区在 D:。加 flag ⇒ 跨卷退化成「复制+删除」;新门 `artifact_checks.sh crossvolume_rename`)
 - W-134.1 → RESOLVED (2026-10-25, v4.0.21 —— CI 已接 MCP pytest 套件,commit `2ab0f24`;此前台账一直写着 DEFERRED ⇒ **DEFERRED 桶归零**)
 
 历史 workaround 走 git history;`workarounds.md` 保留 RESOLVED/SUPERSEDED/INVALID 状态作 audit ledger。
