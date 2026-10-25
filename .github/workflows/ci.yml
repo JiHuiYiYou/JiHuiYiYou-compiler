@@ -119,11 +119,6 @@ jobs:
           echo "MSYS2_PATH=/c/msys64/usr/bin:$PATH" >> $GITHUB_ENV
           which gcc python make
 
-      - name: Build stage 0 (C-side bootstrap)
-        shell: msys2 {0}
-        run: |
-          make stage0
-
       - name: Build jhyy.exe (self-bootstrap) — 回归门就测这个产物
         shell: msys2 {0}
         run: |
@@ -259,7 +254,7 @@ jobs:
             fi
           fi
 
-      - name: "Run regress.py --all (gated: jhyy.exe; jhyy_stage0.exe informational)"
+      - name: "Run regress.py --all (gated: jhyy.exe)"
         shell: msys2 {0}
         run: |
           # v4.0.8:stage0 已从 gated 降为 informational —— 它是 C 端 bootstrap,

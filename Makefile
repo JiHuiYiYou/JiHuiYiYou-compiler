@@ -1,49 +1,41 @@
 # jhyy project — top-level Makefile
 #
-# v4.0.8 (2026-10-15): `all` 不再经 stage0/QBE —— `jhyy.exe` **自己**编 src0。
+# v4.0.21 (2026-10-25): **C 端编译器已删除**(M5 Part 1)—— `compiler/src/`
+# 整个目录删掉,`make stage0` 目标随之消失。
 #
-# 理由:`compiler/build/bin/jhyy.exe` 本身是 git 跟踪的产物,fresh clone 里就有
-# 一个可用的自举编译器,stage0 那条链的唯一作用(「用 C 编译器编出第一个
-# jhyy.exe」)因此不是必需的。QBE 更只在 **stage0 的运行期**被调用
-# (main.c:489/496 的 system()),自举编译器完全不用它 —— 于是 QBE 这个第三方
-# 二进制从「每次构建的必经之路」上消失,`.gitattributes` 那类「二进制被当文本
-# 损坏」的故障从此没有着力点。
+# 为什么现在做:user 2026-10-25 明确「C 不用改了,早就不维护了」。而 C 端早
+# 就从构建关键路径上退出(v4.0.8:`jhyy.exe` **自己**编 src0,不再经 stage0/QBE
+# —— `compiler/build/bin/jhyy.exe` 本身是 git 跟踪的产物,fresh clone 里就有
+# 一个可用的自举编译器)。留着它只剩三个坏处:
+#   ① **两套实现分叉** —— 同一个 bug 要修两遍(W-127/128/129 就是分叉出来的),
+#      而 C 侧的 W-133(聚合 ==)至今没同步 ⇒ stage0 编译**静默错值**;
+#   ② stage0 是 regress 的 informational 项(v4.0.8 起),长期 39+ 个红,
+#      噪音盖住信号;
+#   ③ ~9800 行死代码,每个读代码的人都要先判断「这份还在用吗」。
 #
-# 构建语义同时变强:不再是「C 编译器能编出 jhyy.exe」,而是
-# 「**jhyy.exe 能把自己编成同一个东西**」—— 见 jhyy.exe 规则里的 byte-equal
-# 自举闭环检查。
+# 构建语义不变、且更强:「**jhyy.exe 能把自己编成同一个东西**」——
+# 见 jhyy.exe 规则里的 byte-equal 自举闭环检查。
 #
-# 仍然保留:`make stage0` 仍能编 C 端 bootstrap(CI 也仍然验它),它只是不在
-# `all` 的依赖链上。
-# v4.0.0: D26 reproducibility recipe applied to stage0 build (-g0 + strip +
-# SOURCE_DATE_EPOCH).
+# ⚠️ 本仓**没有** C 端了 ⇒ 「自举门槛」这个概念只剩 jhyy 侧一档
+# (v1.x 达成的那一档就是它)。
 
 CC       = gcc
-CFLAGS   = -std=c11 -Wall -Wextra -g -I$(SRC_DIR)
-# v4.0.0 D26 stage0: -g0 + strip build-id for byte-equal rebuilds.
+# v4.0.0 D26: -g0 + strip build-id for byte-equal rebuilds.
 # Per docs/plans/v2/v2.4.0任务清单 + 概要设计.md:26,104-124 + docs/logs/v2/changelog-v2.4.0.md
-CFLAGS_STAGE0 = -std=c11 -Wall -Wextra -g0 -Wl,--build-id=none -I$(SRC_DIR)
-STRIP         = strip
+# (原名 CFLAGS_STAGE0 —— C 端删掉后 "stage0" 已无指代对象,改名 CFLAGS_REPRO)
+CFLAGS_REPRO = -std=c11 -Wall -Wextra -g0 -Wl,--build-id=none
 SOURCE_DATE_EPOCH = 1234567890
 # v4.0.9 (W-117):1 = 产物必须与提交进仓的那份逐字节相同,否则 make 失败。
 # 任何要发布的人都要过这道门。CI 传 0 —— CI 不发布,它验的是提交进仓的产物,
 # 跑 `make` 仅为验「工具链能编出自举闭环的编译器」。理由见 jhyy.exe 规则处。
 STRICT_TOOLCHAIN ?= 1
-# QBE removed v4.0.0 from jhyy-side compile path; still vendored for C-side
-# bootstrap — compiler/src/main.c:489 拼 `%s/qbe/qbe.exe` 并在 :498 用 system()
-# 调它跑 C 端 stage0。Full QBE removal 是 M5 scope(deferred — 见
-# docs/plans/v4/backlog.md § 1 M5)。M5 是计划项不是 workaround,故不登记进
-# workarounds.md —— 原先此处写的 `W-XXX` 是从未填过的悬空占位符。
-#
-# 注意:下面两个变量当前**没有任何 recipe 引用**(stage0 的 QBE 调用走 main.c
-# 内部,不经过 Makefile)。保留仅为记录路径。
-QBE      = qbe/qbe.exe
-QBEFLAGS = -t amd64_win
-WINDRES  = windres
+# v4.0.21: QBE / windres 变量一并删除 —— 它们只服务于 C 端
+# (QBE 由 compiler/src/main.c 拼路径调 system();windres 只给 C 端的
+# compiler/src/jhyy.rc 用)。自举侧的图标走 `jhyy_helpers.c` 里的
+# `jh_build_icon_obj()`(**现场生成** .rc),与 C 端无关。
 
 # Directories
 COMPILER_DIR = compiler
-SRC_DIR      = $(COMPILER_DIR)/src
 SRC0_DIR     = $(COMPILER_DIR)/src0
 RUNTIME_DIR  = $(COMPILER_DIR)/runtime
 BUILD_DIR    = $(COMPILER_DIR)/build
@@ -55,31 +47,8 @@ BIN_DIR      = $(BUILD_DIR)/bin
 JHY_RUNTIME_O = $(OBJ_DIR)/_jhyy_runtime.o
 JHY_HELPERS_O = $(OBJ_DIR)/_jhyy_helpers.o
 
-# v1.8.1 patch: branded "J" icon embedded into jhyy_stage0.exe (and via main.c
-# system() spawn, into jhyy.exe + every .jhyy-compiled program).
-ICON_SRC = installer/assets/icons/jhyy-icon.ico
-RES_OBJ  = $(OBJ_DIR)/jhyy-res.o
-
-# Source files
-SRCS = $(SRC_DIR)/main.c \
-       $(SRC_DIR)/arena.c \
-       $(SRC_DIR)/lexer.c \
-       $(SRC_DIR)/parser.c \
-       $(SRC_DIR)/ast.c \
-       $(SRC_DIR)/types.c \
-       $(SRC_DIR)/symtab.c \
-       $(SRC_DIR)/sema.c \
-       $(SRC_DIR)/ir.c \
-       $(SRC_DIR)/codegen.c \
-       $(SRC_DIR)/target/target_dispatch.c \
-       $(SRC_DIR)/target/abi_amd64_win.c \
-       $(SRC_DIR)/target/abi_amd64_win_freestanding.c
-
-OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
-RUNTIME_OBJ = $(OBJ_DIR)/runtime.o
-
-# v1.4.4: 4 个 binary 共存
-#   jhyy_stage0.exe — C 端 (stage-0 bootstrap, only needed after src/ change)
+# v4.0.21: C 端 binary(jhyy_stage0.exe)随 compiler/src/ 一起删除。
+# 现在只有 jhyy 侧的产物:
 #   jhyy.exe        — jhyy-side 产物 (production binary, what users invoke)
 #   jhyy.exe.exe    — jhyy.exe 的 baseline (per feedback_regress_baseline_binary_hash)
 #   jhyy_v1.exe.exe — jhyy.exe 的**同内容改名副本**,由 `make` 每次构建时生成
@@ -98,41 +67,16 @@ RUNTIME_OBJ = $(OBJ_DIR)/runtime.o
 # 归档流程随之退休 —— 没有"跨版本差异"可比了,只有"自身是否确定"。
 # 它不再是 source artifact,改由 .gitignore 排除。
 
-.PHONY: all clean test stage0 selfhost
+.PHONY: all clean test selfhost
 
 all: $(JHY_RUNTIME_O) $(JHY_HELPERS_O) $(BIN_DIR)/jhyy.exe $(BIN_DIR)/jhyy_v1.exe.exe
-
-# Stage 0: gcc 产 jhyy_stage0.exe (C 端 bootstrap)
-stage0: $(BIN_DIR)/jhyy_stage0.exe
-
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
-	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/runtime.o: $(RUNTIME_DIR)/runtime.c
 	@mkdir -p $(@D)
 	# v4.0.0 D26 reproducibility: runtime.c must compile with -g0 too, else
 	# the embedded debug info (incl. mingw-w64-crt build paths from crt0
 	# link-in) breaks jhyy.exe byte-equal rebuilds.
-	$(CC) $(CFLAGS_STAGE0) -c $< -o $@
-
-# v1.8.1 patch: windres rule producing icon resource .o (RT_ICON group).
-# v4.0.0 D26 reproducibility: SOURCE_DATE_EPOCH propagated to windres so
-# the .o timestamps don't break 4-rebuild byte-equal verification.
-$(RES_OBJ): $(SRC_DIR)/jhyy.rc $(ICON_SRC)
-	@mkdir -p $(OBJ_DIR)
-	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(WINDRES) -i $< -O coff -o $@
-
-# v1.4.4: C 端产物改名 jhyy_stage0.exe (runtime.o 不链入 — 它是给 jhyy.exe 用
-# 的, 含重复符号 arena_alloc/main, 会跟 main.c/arena.c 冲突)
-# v1.8.1: jhyy-res.o (icon RT_ICON group) 链入 stage0,branded "J" 进 exe。
-# v4.0.0 D26 reproducibility: CFLAGS_STAGE0 (no -g debug info), strip
-# build-id post-link, SOURCE_DATE_EPOCH for deterministic timestamps.
-# Result: 4-rebuild byte-equal per docs/plans/v2/v2.4.0 § 2.1.1 byte_equal.sh.
-$(BIN_DIR)/jhyy_stage0.exe: $(OBJS) $(RES_OBJ)
-	@mkdir -p $(BIN_DIR)
-	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(CC) $(CFLAGS_STAGE0) $^ -o $@
-	$(STRIP) --strip-unneeded $@
+	$(CC) $(CFLAGS_REPRO) -c $< -o $@
 
 # v4.0.8 (2026-10-15): jhyy.exe 改由**它自己**编 src0,不再经 stage0/QBE。
 #
@@ -150,8 +94,8 @@ $(BIN_DIR)/jhyy_stage0.exe: $(OBJS) $(RES_OBJ)
 # 而是「**jhyy.exe 能把自己编成同一个东西**」—— 下面那一步 byte-equal 就是
 # 自举闭环门,任何 emit 层的非确定性都会当场炸,而不是留到 regress 才发现。
 #
-# `make stage0` 仍然保留(C 侧 bootstrap 本身仍要能编,CI 也仍然验它),
-# 只是不再在 `all` 的依赖链上。
+# v4.0.21:`make stage0` 连同 C 端一起删除 —— 它已不在 `all` 依赖链上两年,
+# 现在连「能编」这件事本身也不再维护(user 2026-10-25 决策)。
 $(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(JHY_RUNTIME_O) $(JHY_HELPERS_O)
 	@mkdir -p $(BIN_DIR)
 	@if [ ! -f $@ ]; then \
@@ -284,4 +228,10 @@ test:
 	@echo "TODO: test runner"
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(OBJ_DIR)
+	@# bin/ 下**只删未跟踪**的产物。git 跟踪的两个必须留在树上:
+	@#   .gitkeep  — 目录占位
+	@#   jhyy.exe  — 自举锚点(fresh clone 里就有;删了就没法自举)
+	@# 旧的 `rm -rf $(BUILD_DIR)` 把这两个一起删掉 ⇒ 仓库当场不可用
+	@# (per feedback_make_clean_too_aggressive)。
+	@find $(BIN_DIR) -maxdepth 1 -type f ! -name '.gitkeep' ! -name 'jhyy.exe' -delete 2>/dev/null || true

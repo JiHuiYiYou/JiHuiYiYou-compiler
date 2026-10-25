@@ -7,8 +7,8 @@ informational step。
 
 Usage:
   python regress.py                            # 默认 binary=jhyy.exe (production)
-  python regress.py --binary=PATH              # 跑指定 binary (--binary=stage0 / v1 等)
-  python regress.py --all                      # 跑所有 gated binary (jhyy.exe + jhyy_stage0.exe)
+  python regress.py --binary=PATH              # 跑指定 binary (--binary=jhyy_v1.exe.exe 等)
+  python regress.py --all                      # 跑所有 gated binary (当前只有 jhyy.exe)
   python regress.py --all --include-informational
                                                # 加跑 jhyy_v1.exe.exe (matrix only, 不影响 exit)
   python regress.py --save-baseline            # 存 binary sha256 baseline (转发 jhyy_regress)
@@ -23,7 +23,6 @@ Exit codes:
 
 Per-binary `enforce_baseline_hash` 默认 (centralize 取代原 3 shim 散落的 magic-default):
   jhyy.exe         → True  (production, phantom binary 必 catch)
-  jhyy_stage0.exe  → False (gcc 链接非确定性, sha 每次变)
   jhyy_v1.exe.exe  → False (frozen historical baseline, mtime 永远比 src 旧 → phantom 必 fail)
 
 Sprint mcp-1 (2026-08-11): shim that delegates to mcp-jhyy/jhyy_regress.py.
@@ -57,36 +56,28 @@ from jhyy_regress import DEFAULT_TIMEOUT, run_all, save_baseline_hash  # noqa: E
 # Unknown binary 默认 True (catch phantom)。
 _GATED_DEFAULTS = {
     "compiler/build/bin/jhyy.exe": True,
-    "compiler/build/bin/jhyy_stage0.exe": False,
     "compiler/build/bin/jhyy_v1.exe.exe": False,
 }
 
 # Default `--all` 跑的 binary 列表 (gated, 影响 exit code)。
 # 不 glob `jhyy*.exe*` — v2/v3/v4.exe 是 make selfhost 产物, 不是 regress 语义。
 #
-# v4.0.8 (2026-10-15):jhyy_stage0.exe 从 gated 降为 informational。
+# v4.0.21 (2026-10-25):**C 端编译器已删除**(M5 Part 1)—— `compiler/src/` 与
+# `jhyy_stage0.exe` 一起删掉,stage0 这个 informational 项随之消失。
 #
-# 实测 stage0 有 **39 个失败**,且**没有一个是 bug** —— 22 个编译期失败
-# (`closures_basic` / `char_literal_3byte` / `cap_table_*` / `fmod_*` …),
-# 因为 stage0 是 **C 端 bootstrap 编译器**,它的 parser 早于 V3-B / V3-C / V3.1
-# (闭包是 v3.2.1 特性、字符字面量与 Cap<T> 是 v3.x),本来就不认这些语法。
-# 把它当 gated 是在派一个它注定失败的活,结果只有两个:CI 永远红,或者
-# 有人为了让 CI 绿去放宽判据 —— 后者正是本项目 2026-10-15 这一整天在修的病。
+# 删它的理由(user 2026-10-25「C 不用改了,早就不维护了」):
+#   · v4.0.8 起 stage0 就已是 informational(v4.0.8 降级时实测 39 个失败,
+#     全是「C 端 parser 不认 v3.x 新语法」,没有一个是 bug);
+#   · 它的 W-133(聚合 ==)至今没同步 ⇒ 用 stage0 编用户代码会**静默错值**
+#     (比地址而不是比值)—— 一个留在树上的陷阱比删掉更糟;
+#   · regress 矩阵少一项噪音。
 #
-# **stage0 的真实门是 `make stage0 && make`**:stage1 用 stage0 编
-# `src0/main.jhyy` → `jhyy.exe`,stage0 一坏这一步就断,比跑 199 个用户测试
-# 更直接也更便宜(且 CI 的第 2 步就在做这件事)。这条路径已经覆盖了它的职责。
+# ⚠️ 「自举门槛」这个概念随之只剩 jhyy 侧一档(v1.x 达成的那一档就是它):
+# `compiler/build/bin/jhyy.exe` 是 git 跟踪的产物,fresh clone 里就有可用的
+# 自举编译器,`make` 用它编自己并做 byte-equal 闭环检查。
 _GATED_BINARIES = [
     ("compiler/build/bin/jhyy.exe", "production"),
 ]
-
-# stage0 仍然跑(看得见信号),但不参与 exit code。
-_STAGE0_BINARY = (
-    "compiler/build/bin/jhyy_stage0.exe",
-    "informational, C-side bootstrap — 语言子集早于 v3.x,预期有 39 个已知失败"
-    "(闭包 / char literal / Cap<T> / fmod 等新特性它都不认)。"
-    "它的真门是 `make stage0 && make`(stage1 用它编 src0 → jhyy.exe)。",
-)
 
 # `--include-informational` 加的 binary (matrix only, 不影响 exit code)。
 _INFORMATIONAL_BINARIES = [
@@ -366,7 +357,7 @@ def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
             return (True, "skipped (wslpath garbled output — likely no WSL distro)")
         # v2.8.1 WSL branch 不变 logic:`{wsl_binary}` 默认 = jhyy.exe
         # (jhyy-side production binary, per Makefile line 46 comment)。jhyy.exe
-        # 是 jhyy-side binary (由 jhyy_stage0.exe compile src0/main.jhyy 产出),
+        # 是 jhyy-side binary (自举产物:jhyy.exe 自己编 src0/main.jhyy),
         # 走 jhyy-side target_parse (4 targets, v2.7.0 ship) + codegen_amd64_run
         # (4 targets 真 emit, v2.8.0 ship) → 产 SysV ABI .s → gcc 链 crt0.S
         # + link.ld → 跑。C-side target_dispatch fix (v2.8.1) 不影响 WSL
@@ -681,7 +672,7 @@ def main():
                     help="Compiler binary path (default: jhyy.exe production). "
                          "Use --all to run all gated binaries.")
     ap.add_argument("--all", dest="run_all_gated", action="store_true",
-                    help="Run all gated binaries (jhyy.exe + jhyy_stage0.exe), "
+                    help="Run all gated binaries (currently jhyy.exe), "
                          "output matrix, exit code reflects any gated failure.")
     ap.add_argument("--include-informational", action="store_true",
                     help="With --all, also run jhyy_v1.exe.exe historical baseline "
@@ -787,17 +778,7 @@ def main():
         binaries = list(_GATED_BINARIES)
         if args.include_informational:
             binaries.extend(_INFORMATIONAL_BINARIES)
-            # stage0 也归到 --include-informational 之后(2026-10-15)。
-            #
-            # 它**不再默认跑**:一次全量在 CI 上要 ~24 分钟,而 stage0 是
-            # informational —— 不影响 exit code。CI 的时间账因此是
-            # 「jhyy.exe 一次」而不是「jhyy.exe + stage0」两次。
-            #
-            # 它的真门是 `make stage0`(CI step 5)—— 那个只编 C 端编译器,
-            # 几秒钟,stage0 坏不坏在那里立刻断;跑 200 个 jhyy 语言测试对它
-            # 几乎没有信息量(39 个失败全是「C 端 parser 不认 v3.x 新语法」,
-            # 与 stage0 健不健康无关)。
-            binaries.append(_STAGE0_BINARY)
+            # v4.0.21:stage0 随 C 端一起删除,这里不再有第三项。
         total = len(binaries)
 
         gated_failures = 0
