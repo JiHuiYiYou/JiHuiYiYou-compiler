@@ -1114,7 +1114,7 @@ selfhost_target_flag);`compiler/tests/examples/` 加 **14 个**用例
 | `artifact_checks.sh` | ✅ 12 PASS / 0 KNOWN-FAIL / 0 FAIL / 0 SKIP |
 | `artifact_checks.sh --selftest` | ✅ 8/8 |
 | `audit_test_assertions.py --strict` | ✅ 0 违规 |
-| 台账 | ✅ **0 ACTIVE / 3 DEFERRED** / 121 索引行(DEFERRED 3 条 = W-133.1 / .2 / .3) |
+| 台账 | ✅ **0 ACTIVE / 1 DEFERRED** / 123 索引行(DEFERRED 1 条 = W-134.1;W-133.1/.2/.3 是**设计边界** ⇒ 归 SUPERSEDED,不入高优桶) |
 
 ---
 

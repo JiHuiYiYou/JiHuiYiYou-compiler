@@ -13,10 +13,24 @@ workarounds.md 每个 entry 顶部 `**状态:**` 行的 `<STATUS>` 字段必须�
 | `ACTIVE` | 真 bug 在生产代码，fix 未 ship | `→` RESOLVED（fix ship）/ SUPERSEDED（新 workaround 取代）/ DEFERRED（推后续 sprint） |
 | `RESOLVED` | Fix ship + regress verified + D43 closure hold | terminal（entry 保留历史） |
 | `SUPERSEDED` | 被新 workaround 取代 OR 不是 workaround（e.g. canonical pattern / 已迁 conventions.md） | terminal，body cross-ref 取代者 |
-| `DEFERRED` | 决定不在当前 sprint 修，但 bug 真实，caption 必填版本目标 | `→` ACTIVE（sprint 拾起）/ RESOLVED（fix ship） |
+| `DEFERRED` | 决定不在当前 sprint 修，但 bug 真实，caption 必填版本目标。**⚠️ 只放「将来会修」的东西** —— DEFERRED 与 ACTIVE 同属**高优待办桶**（user 2026-10-25 口径） | `→` ACTIVE（sprint 拾起）/ RESOLVED（fix ship） |
 | `INVALID` | 归档时误判，后确认是 test artifact | terminal，entry 保留审计 trail |
 
 历史 10+ ad-hoc label（`PARTIAL` / `FULL CLOSED` / `DEFERRED` / `INVALID` / `PAUSED` / `DOCS` / `PARTIALLY CLOSED` / `ENV-ONLY` / `STABLE-PRODUCTION` / plain `RESOLVED` 等等）v2.13.5 ship 后**全部不再使用**。若发现新 ad-hoc label 出现，先在 sprint plan 登记映射再 ship。
+
+**⚠️ 桶的语义(user 2026-10-25 明确):**
+
+| 桶 | 含义 | 典型内容 |
+|---|---|---|
+| `ACTIVE` | 真 bug，高优待办 | 修 |
+| `DEFERRED` | 真 bug，但**将来会修**，只是不在本轮 | 修（排期） |
+| `SUPERSEDED` | **不是待修的 bug** —— 设计如此 / 编译期明确拒绝 / canonical pattern | 不修 |
+| `RESOLVED` | 已修完 | — |
+
+⇒ **「以后不修的」不要用 DEFERRED** —— 那会把高优桶灌水,让「0 ACTIVE / 0 DEFERRED」
+这句话失去信号。设计边界归 `SUPERSEDED`(schema:「不是 workaround ⇒ 不进高优桶」),
+正文保留作审计轨迹。**例:W-133.1 / W-133.2 / W-133.3**(聚合 `==` 的三条能力边界)—— 初版登记成
+DEFERRED,2026-10-25 按本口径改成 SUPERSEDED。
 
 ## 2. 状态行 schema（6-field, no emoji）
 
