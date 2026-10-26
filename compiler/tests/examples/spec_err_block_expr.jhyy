@@ -1,0 +1,11 @@
+// spec_err_block_expr.jhyy — spec 附录 B:块表达式未实装
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):附录 B 列的「未实装」清单里,
+// 「块表达式(let v = { ... };)—— 表达式位置不认左花括号」这条零回归门。
+// 编译器哪天支持了块表达式,没人知道。
+//
+// EXPECT-ERROR: "unexpected token '{' in expression"
+fn main_jhyy() -> i32 {
+    let v = { 1 };
+    return v;
+}

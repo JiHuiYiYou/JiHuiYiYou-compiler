@@ -1,0 +1,15 @@
+// spec_err_unit_type.jhyy — spec §2.1:单元类型 `()` 未实装
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):spec §2.1 的基础类型表里列了
+// `()`(零大小类型,sizeof 0 / alignof 1),§6 说「返回类型可省略(`-> ()`)」——
+// 但 **`()` 在类型位置不被 parser 接受**(`let x: () = ();` 与 `fn f() -> ()`
+// 都报 parse error)。
+//
+// 注意:函数**省略**返回类型是支持的(`fn noop() { ... }` 正常)—— 不支持的
+// 只是**显式写** `-> ()`。
+//
+// EXPECT-ERROR: "expected type name, got ("
+fn main_jhyy() -> i32 {
+    let u: () = ();
+    return 0;
+}

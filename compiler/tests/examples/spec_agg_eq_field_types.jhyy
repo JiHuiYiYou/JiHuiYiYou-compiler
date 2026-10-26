@@ -1,0 +1,74 @@
+// spec_agg_eq_field_types.jhyy — spec §4.2.1:struct 按值比较的**字段类型矩阵**
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):
+//   spec §4.2.1 的 struct 行明写「逐字段递归比较;PhantomData(ZST)字段跳过;
+//   指针字段比**指针值本身**;bool / u8 字段按原值比;浮点字段按 IEEE 754 ordered
+//   语义」—— 但回归套件里 struct `==` **只覆盖过 i32 字段**
+//   (agg_eq_struct.jhyy 的文件头甚至写着「bool / u8 / f64 / *u8 / 数组字段、
+//   嵌套 struct 字段都被 sema 拒」—— **那条注释已过时**,实测这些字段类型
+//   现在**都能用**)。
+//
+// 本用例把 spec §4.2.1 承诺的每一种字段类型都跑一遍:
+//   bool / u8 / f64 / *u8 / PhantomData(ZST,跳过) / 嵌套 struct
+//
+// ⚠️ **数组类型字段不在本用例里** —— 它是另一个缺陷(W-144,见
+// spec_struct_array_field.jhyy 的 XFAIL 门)。
+//
+// EXPECT: 0
+type PB = struct { b: bool }
+type PU = struct { u: u8 }
+type PF = struct { f: f64 }
+type PP = struct { p: *u8 }
+type PZ = struct { m: PhantomData<i32>, v: i32 }
+type Inner = struct { a: i32, b: i32 }
+type PN = struct { i: Inner, tag: i32 }
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+
+    // ── bool 字段:按原值比(1 字节,不归一化)──
+    let b1 = PB { b: true };
+    let b2 = PB { b: true };
+    let b3 = PB { b: false };
+    if !(b1 == b2) { fails = fails + 1; }
+    if b1 == b3 { fails = fails + 1; }
+
+    // ── u8 字段:按原值比 ──
+    let u1 = PU { u: 200 as u8 };
+    let u2 = PU { u: 200 as u8 };
+    let u3 = PU { u: 201 as u8 };
+    if !(u1 == u2) { fails = fails + 1; }
+    if u1 == u3 { fails = fails + 1; }
+
+    // ── f64 字段:IEEE 754 ordered 语义 ──
+    let f1 = PF { f: 1.5 };
+    let f2 = PF { f: 1.5 };
+    let f3 = PF { f: 2.5 };
+    if !(f1 == f2) { fails = fails + 1; }
+    if f1 == f3 { fails = fails + 1; }
+
+    // ── 指针字段:比**指针值本身**(浅比较,不解引用)──
+    let p1 = PP { p: 0 as *u8 };
+    let p2 = PP { p: 0 as *u8 };
+    let p3 = PP { p: 1 as *u8 };
+    if !(p1 == p2) { fails = fails + 1; }
+    if p1 == p3 { fails = fails + 1; }
+
+    // ── PhantomData(ZST)字段:跳过,不参与比较 ──
+    let z1 = PZ { m: 0 as PhantomData<i32>, v: 7 };
+    let z2 = PZ { m: 0 as PhantomData<i32>, v: 7 };
+    let z3 = PZ { m: 0 as PhantomData<i32>, v: 8 };
+    if !(z1 == z2) { fails = fails + 1; }
+    if z1 == z3 { fails = fails + 1; }
+
+    // ── 嵌套 struct 字段:递归比较 ──
+    let n1 = PN { i: Inner { a: 1, b: 2 }, tag: 3 };
+    let n2 = PN { i: Inner { a: 1, b: 2 }, tag: 3 };
+    let n3 = PN { i: Inner { a: 9, b: 2 }, tag: 3 };
+    let n4 = PN { i: Inner { a: 1, b: 2 }, tag: 4 };
+    if !(n1 == n2) { fails = fails + 1; }
+    if n1 == n3 { fails = fails + 1; }
+    if n1 == n4 { fails = fails + 1; }
+
+    return fails;
+}

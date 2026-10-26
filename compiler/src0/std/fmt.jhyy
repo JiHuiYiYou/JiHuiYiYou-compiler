@@ -91,10 +91,10 @@ fn fmt_i32(out_buf: *u8, val: i32) -> i64 {
     let mut i: i64 = 0 as i64;
     while i < n {
         let dst = ptr_add(out_buf, i);
-        *(dst as *i32) = rev[n - (1 as i64) - i];
+        *(dst as *u8) = rev[n - (1 as i64) - i] as u8;
         i = i + (1 as i64);
     }
-    *(ptr_add(out_buf, n) as *i32) = 0 as i32;
+    *(ptr_add(out_buf, n) as *u8) = 0 as u8;
     return n;
 }
 
@@ -133,10 +133,10 @@ fn fmt_i64(out_buf: *u8, val: i64) -> i64 {
     let mut i: i64 = 0 as i64;
     while i < n {
         let dst = ptr_add(out_buf, i);
-        *(dst as *i32) = rev[n - (1 as i64) - i];
+        *(dst as *u8) = rev[n - (1 as i64) - i] as u8;
         i = i + (1 as i64);
     }
-    *(ptr_add(out_buf, n) as *i32) = 0 as i32;
+    *(ptr_add(out_buf, n) as *u8) = 0 as u8;
     return n;
 }
 
@@ -145,11 +145,11 @@ fn fmt_i64(out_buf: *u8, val: i64) -> i64 {
 // ════════════════════════════════════════════════════
 fn fmt_str(out_buf: *u8, s: *u8) -> i64 {
     let mut i: i64 = 0 as i64;
-    while *(ptr_add(s, i) as *i32) != (0 as i32) {
-        *(ptr_add(out_buf, i) as *i32) = *(ptr_add(s, i) as *i32);
+    while *(ptr_add(s, i) as *u8) != (0 as u8) {
+        *(ptr_add(out_buf, i) as *u8) = *(ptr_add(s, i) as *u8);
         i = i + (1 as i64);
     }
-    *(ptr_add(out_buf, i) as *i32) = 0 as i32;
+    *(ptr_add(out_buf, i) as *u8) = 0 as u8;
     return i;
 }
 
@@ -160,8 +160,8 @@ fn fmt_str(out_buf: *u8, s: *u8) -> i64 {
 // ════════════════════════════════════════════════════
 fn fmt_hex_u32(out_buf: *u8, val: i32, upper: i32) -> i64 {
     if val == (0 as i32) {
-        *(out_buf as *i32) = 48 as i32;
-        *(ptr_add(out_buf, 1 as i64) as *i32) = 0 as i32;
+        *(out_buf as *u8) = 48 as u8;
+        *(ptr_add(out_buf, 1 as i64) as *u8) = 0 as u8;
         return 1 as i64;
     }
     let mut rev: [i32; 12] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
@@ -178,9 +178,9 @@ fn fmt_hex_u32(out_buf: *u8, val: i32, upper: i32) -> i64 {
     let mut i: i64 = 0 as i64;
     while i < n {
         let dst = ptr_add(out_buf, i);
-        *(dst as *i32) = rev[n - (1 as i64) - i];
+        *(dst as *u8) = rev[n - (1 as i64) - i] as u8;
         i = i + (1 as i64);
     }
-    *(ptr_add(out_buf, n) as *i32) = 0 as i32;
+    *(ptr_add(out_buf, n) as *u8) = 0 as u8;
     return n;
 }

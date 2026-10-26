@@ -152,6 +152,12 @@
 | [W-135](#w-135) | SUPERSEDED | emit 侧两张固定上限表(pending phi / block-name... |
 | [W-134](#w-134) | RESOLVED | MCP pytest 套件里有一个**恒红**的陈旧测试 —— 断言的行为早已被换掉 |
 | [W-134.1](#w-134.1) | RESOLVED | `mcp-jhyy/tests/` 在 CI 里**零覆盖** —— 套件红绿都不影响 CI 结论 |
+| [W-142](#w-142) | ACTIVE | 同作用域 shadowing 让编译器在 sema 阶段**空指针写崩溃**(0xC0000005) |
+| [W-141](#w-141) | RESOLVED | std/string.jhyy 的 arena block 布局错误 ⇒ 分配互相踩 ⇒... |
+| [W-140](#w-140) | RESOLVED | std/string.jhyy 的 `str_find` 返回裸字面量 ⇒ `import... |
+| [W-139](#w-139) | RESOLVED | std lib 的字节循环写 `*(p as *i32) = v` ⇒ store 宽度 4 字节... |
+| [W-143](#w-143) | ACTIVE | 浮点 ↔ 指针**不是按位重解释** —— 浮点→指针走数值截断,指针→浮点得 0 |
+| [W-144](#w-144) | ACTIVE | 数组类型的 struct 字段没被拷贝 —— 字面量读到垃圾 + 按值赋值... |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -10819,3 +10825,345 @@ msys2 step 用的 MSYS2 python。
 - `.github/workflows/ci.yml`(`build-and-test` job 末尾两步)
 - commit `2ab0f24`(2026-10-25)
 - 同族:`docs/internal/tests.md`
+
+---
+
+<a id="w-142"></a>
+## W-142: 同作用域 shadowing 让编译器在 sema 阶段**空指针写崩溃**(0xC0000005)
+
+**状态:** ACTIVE since 2026-10-26 (v4.0.22) — spec §3 承诺的 shadowing 遇同作用域重名 let ⇒ 编译器崩;XFAIL 门已挂
+**Filed-by:** lang-spec-coverage-audit-2026-10-26
+**日期:** 2026-10-26(lang-spec 覆盖审计时补一条 shadowing 用例才撞出来)
+
+**触发面:** `compiler/src0/parser.jhyy:2374`(`parse_let`)+ `compiler/src0/symtab.jhyy:212-216`
+(`symtab_insert` 的重复检查)+ `compiler/src0/sema.jhyy` 的 `NODE_LET` 分支。
+
+**症状:**
+```
+$ jhyy.exe compile sh_a.jhyy
+[1] imports start
+[2] imports done
+[3] sema start
+<编译器进程 ACCESS_VIOLATION 退出>
+```
+最小复现:
+```jhyy
+fn main_jhyy() -> i32 {
+    let x = 1;
+    let x = 2;      // ← 同作用域同名 let
+    return x;
+}
+```
+
+**根因(已定位到源码行):**
+1. `parser.jhyy:2374` `parse_let` 调 `symtab_insert(current_scope, vname, SYM_VAR(), ...)`;
+2. `symtab.jhyy:212-216` 的「重复检查(同 scope)」命中时 **`return 0 as *Sym;`**(注释写着「已定义」)
+   —— 于是 AST 节点的 `sym` 字段是 **null**;
+3. `sema.jhyy` 的 `NODE_LET` 分支拿到该 sym 后**无条件解引用**:
+   `let sym = (*d).sym as *Sym; (*sym).type_ptr = decl_type as *u8;` ⇒ **写 null** ⇒ AV。
+
+**workaround(用户侧):** 同作用域内不要复用同一个名字;改成嵌套作用域
+(`if` / 块内另起同名 let 是**正常**的 —— 病灶精确落在「同作用域」)。
+
+**实测范围(2026-10-26):** `jhyy.exe` / `jhyy_v1.exe.exe` / `jhyy_v3_fp.exe.exe` /
+`jhyy_v10_fp.exe.exe` **全部崩** ⇒ **长期存在的 bug,不是新回归**(至少从 v1 起就在)。
+嵌套作用域的 shadowing 正常 ⇒ 病灶就是 `symtab_insert` 的同 scope 重复检查。
+
+**为什么一直没被发现:** 回归套件里**没有一个用例做同作用域 shadowing** ——
+2026-10-26 的 lang-spec 覆盖审计补了 `spec_shadowing.jhyy` 才撞出来。
+
+**门:** `compiler/tests/examples/spec_shadowing.jhyy` —— `// XFAIL:` + `// EXPECT: 0`。
+XFAIL 是**真跑**(不是 SKIP):现在崩 ⇒ 记 XFAIL;哪天修好 ⇒ **XPASS ⇒ suite 失败**
+⇒ 强制有人摘标记。
+
+**影响范围:** 任何写同作用域重名 let 的用户程序 ⇒ 编译器崩溃(不是编译错误)。
+
+**失效条件:** 若 `symtab_insert` 改为允许同 scope 重定义(shadowing 语义),或
+`parse_let` 在 `symtab_insert` 返回 null 时**报编译错误**而不是把 null 塞进 AST
+—— 任一条落地,本条自然消失。
+
+**引用:**
+- 源码:`compiler/src0/parser.jhyy:2374`、`compiler/src0/symtab.jhyy:212-216`、
+  `compiler/src0/sema.jhyy`(`NODE_LET` 分支的 `(*sym).type_ptr = ...`)
+- 门:`compiler/tests/examples/spec_shadowing.jhyy`
+- spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §3 + 附录 B
+- 事故记录:`docs/logs/v4/changelog-v4.0.0.md` § v4.0.22
+
+---
+
+<a id="w-141"></a>
+## W-141: std/string.jhyy 的 arena block 布局错误 ⇒ 分配互相踩 ⇒ ACCESS_VIOLATION
+
+**状态:** RESOLVED closed 2026-10-26 (v4.0.22) — block 布局改成 [next][payload_size][payload];payload 起点不再压在 next 指针上、bump 指针也推进
+**Filed-by:** lang-spec-coverage-audit-2026-10-26
+**日期:** 2026-10-26(lang-spec 覆盖审计补 std::string 真身覆盖时撞出来)
+
+**触发面:** `compiler/src0/std/string.jhyy` 的 `arena_alloc`(及依赖它的 `arena_reset`)。
+
+**症状:** `str_from_bytes` 之后再 `str_from_cstr`、再 `str_concat` ⇒
+**ACCESS_VIOLATION**:
+```
+$ jhyy.exe compile s8.jhyy
+... [4] codegen done
+<ACCESS_VIOLATION>
+```
+
+**根因:** 原 block 布局是 `[next(8B)][payload...]`,而 `arena_alloc` 的新建 block 分支:
+```
+let data_start = (raw as i64);          // ← payload 起点 = block 起点
+*(ptr_add(a, 8 as i64) as *i64) = data_start;   // ← cur 停在 raw,**不推进**
+```
+两处错叠加:
+1. **payload 起点压在 next 指针那一格上** ⇒ 第一次分配的字节直接覆盖 block 的
+   next 指针(blocks 链表当场损坏);
+2. **`cur` 停在 `raw` 没有推进** ⇒ 下一次 `arena_alloc` 算出 `aligned == raw`
+   ⇒ **返回同一个地址**,后一次分配踩坏前一次的数据。
+
+具体到症状:`str_from_bytes` 的 StringHeader 落在 `raw`;随后 `str_from_cstr` 的
+第一次分配又拿到 `raw` ⇒ 把前者的 **data 指针** 覆盖成 `"abc\0"` 的字节 ⇒
+`str_concat` 拿它当指针解引用 ⇒ AV。
+
+**workaround(修法):** block 布局改成 `[next(8B)][payload_size(8B)][payload...]`:
+- payload 起点 = `raw + 16`(跳过 next + payload_size 两格);
+- `cur` 推进到 `data_start + size` ⇒ 后续 alloc 不会拿到重叠地址;
+- `payload_size` 存进 block 头 ⇒ `arena_reset` 能算准这个 block 的可用区。
+
+**A/B 实测(2026-10-26):**
+
+| 用例 | 修前 | 修后 |
+|---|---|---|
+| `s8.jhyy`(from_bytes → from_cstr → concat) | ACCESS_VIOLATION | EXIT=6 ✓ |
+| `std_string_import.jhyy`(真身覆盖全套) | 编译失败(见 W-140) | EXIT=0 ✓ |
+
+**影响范围:** 任何 `import string;` 的用户程序 —— 只要连续分配两个以上字符串,
+后一个就可能踩坏前一个。**整个 `std::string` 模块实际不可用。**
+
+**失效条件:** 若 `arena_alloc` 改成真正的多分配共享 block(而不是「一次分配
+一个 block」),本条的修法仍成立(cur/end 语义不变);若整块 arena 重写,重新评估。
+
+**引用:**
+- 源码:`compiler/src0/std/string.jhyy`(`arena_alloc` / `arena_reset`)
+- 门:`compiler/tests/examples/std_string_import.jhyy`(真身覆盖 + 行为断言)
+- 关联:W-140(同文件的另一个独立缺陷)、W-139(同批的字节循环宽度缺陷)
+
+---
+
+<a id="w-140"></a>
+## W-140: std/string.jhyy 的 `str_find` 返回裸字面量 ⇒ `import string;` **编译失败**
+
+**状态:** RESOLVED closed 2026-10-26 (v4.0.22) — 裸字面量 0 推断成 i32,与 `-> i64` 不匹配;改 `return 0 as i64;`
+**Filed-by:** lang-spec-coverage-audit-2026-10-26
+**日期:** 2026-10-26(lang-spec 覆盖审计补 std::string 真身覆盖时撞出来)
+
+**触发面:** `compiler/src0/std/string.jhyy:289`(`str_find` 的第一个 early-return)。
+
+**症状:** 任何 `import string;` 的程序**根本编不过**:
+```
+C:\...\compiler\src0\std/string.jhyy:289:9: error: return type does not match function return type
+semantic errors
+```
+
+**根因:** `str_find` 的签名是 `-> i64`,但它的第一个 early-return 写的是裸字面量:
+```
+fn str_find(s: *u8, needle: *u8) -> i64 {
+    ...
+    if nlen == 0 as i64 {
+        return 0;              // ← 裸整数字面量默认推断成 **i32**
+    }
+```
+jhyy **不做**隐式整型扩宽 ⇒ `i32` 与 `i64` 不匹配 ⇒ 语义错误。
+
+**workaround(修法):** `return 0 as i64;`(与同文件里其它 early-return 的写法一致
+—— `return 0 as i64 - (1 as i64);` 就是对的)。
+
+**为什么 2 个月没人发现:** `compiler/tests/examples/std_string_*.jhyy` 这 5 个用例
+测的**全是 std/string.jhyy 的 inline 副本**(文件头自己写着「inline 副本」),
+**没有一个 import 真身** ⇒ 真身里的类型错误零覆盖。W-103(2026-10-20)给 `import`
+加了 std lib 目录回落,`std_os_*` 那几个测试改成了 import 真身 —— **string 这 6 个
+模块没跟上**。2026-10-26 的 lang-spec 覆盖审计补了 `std_string_import.jhyy`
+(第一个 import 真身的用例)才撞出来。
+
+**影响范围:** `import string;` 完全不可用 —— 该模块的任何 API 都调不到。
+
+**失效条件:** 若 sema 改成允许 i32 → i64 的隐式扩宽,本条自然消失(但那会跟
+「整数与浮点之间不允许隐式转换」之外的其它规则打架,需另议)。
+
+**引用:**
+- 源码:`compiler/src0/std/string.jhyy:289`
+- 门:`compiler/tests/examples/std_string_import.jhyy`(import 真身 + 全 API 断言)
+- 关联:W-139 / W-141(同批的 std lib 缺陷)、W-103(import 回落机制)
+
+---
+
+<a id="w-139"></a>
+## W-139: std lib 的字节循环写 `*(p as *i32) = v` ⇒ store 宽度 4 字节 ⇒ **写穿 4n 字节**
+
+**状态:** RESOLVED closed 2026-10-26 (v4.0.22) — 字节循环的读写改成 `*u8` 宽度;mem/fmt/string/vec 四个模块共 12 处
+**Filed-by:** lang-spec-coverage-audit-2026-10-26
+**日期:** 2026-10-26(lang-spec 覆盖审计补 std lib 真身覆盖时撞出来)
+
+**触发面:** `compiler/src0/std/{mem,fmt,string,vec}.jhyy` 里所有**按字节**循环
+里的 `*(ptr as *i32) = v` / `*(ptr as *i32) & 0xff`。
+
+**症状:** `mem_copy(dst, src, 5)` 实际写了 **8 字节**;`mem_set(dst, val, 4)`
+实际写了 **7 字节** ⇒ **踩掉调用方缓冲区后面的内容**。
+实测(2026-10-26,`std_mem_import.jhyy` 加哨兵字节后):
+```
+mem_set(b, 0x41424344, 4) 之后:  b0..b3 = 68 68 68 68,  b4..b6 = 0(哨兵被清成 0!),  b7 = 9
+```
+⇒ 请求 4 字节,实际写了 7 字节。
+
+**根因:** jhyy 的 `*(p as *i32) = v` 里,**store 宽度跟 cast 之后的 pointee 类型走**
+(4 字节),**不跟循环步进走**(1 字节)。而这些字节循环的作者(以及编译器作者本人)
+以为「指针是 `*u8` ⇒ 写 1 字节」。
+
+实测证据(2026-10-26):
+- `*(p as *i32) = 0x41424344` ⇒ 写 **4 字节**(0x44,0x43,0x42,0x41);
+- `*(p as *u8) = 66` ⇒ 写 **1 字节**;
+- `compiler/runtime/no_std_core/memset.jhyy` 用的是 `*(dst + i) = val;`(**不 cast**)
+  ⇒ 1 字节 ⇒ 正确 —— 这就是正确写法。
+
+**workaround(修法):** 字节循环里的读写一律用 `*u8` 宽度:
+- 写:`*(ptr_add(dst, i) as *u8) = b as u8;`
+- 读:`let v: i32 = *(ptr_add(a, i) as *u8) as i32;`(原来的 `& 0xff` 掩码是多余的)
+
+共 12 处:`mem.jhyy` 3 处、`fmt.jhyy` 5 类、`string.jhyy` 9 处、`vec.jhyy` 1 处。
+
+**A/B 实测(2026-10-26):** `std_mem_import.jhyy` 加了「越界哨兵」断言
+(整块缓冲先填 0xAA,请求区之后的字节必须还是 0xAA):
+
+| 二进制 | 结果 |
+|---|---|
+| 修前 | EXIT=9(9 处哨兵被踩) |
+| 修后 | EXIT=0 ✓ |
+
+**影响范围:** `std::mem` 的 `mem_copy` / `mem_set` / `mem_zero`(越界写)、
+`std::fmt` 的 `fmt_i32` / `fmt_i64` / `fmt_str` / `fmt_hex_u32`(写穿缓冲区)、
+`std::string` 的 `str_from_cstr` / `str_from_bytes` / `str_concat`、
+`std::vec` 的 `std_vec_byte_copy`。
+**任何把 std lib 用在「缓冲区后面还有别的东西」的场景都会静默内存损坏。**
+
+**为什么一直没被发现:** 同 W-140 —— 这 6 个模块的测试全是 **inline 副本**,
+而且副本里是**同样的错误代码** ⇒ 副本测试给错误实现背书,改真身也发现不了。
+
+**失效条件:** 若语言改成「`*(p as *i32)` 的 store 宽度跟**原始**指针的 pointee 走」
+(即 cast 只改类型不改宽度),本条自然消失 —— 但那会让 `*(p as *i32) = v` 读回来是
+**类型不匹配的值**,是更坏的设计。当前语义(C-like:cast 改宽度)是对的。
+
+**引用:**
+- 源码:`compiler/src0/std/mem.jhyy` / `fmt.jhyy` / `string.jhyy` / `vec.jhyy`
+- 门:`compiler/tests/examples/std_{mem,fmt,string,vec}_import.jhyy`(真身覆盖 + 越界哨兵)
+- 关联:W-140 / W-141(同批的 std lib 缺陷)
+
+---
+
+---
+
+<a id="w-143"></a>
+## W-143: 浮点 ↔ 指针**不是按位重解释** —— 浮点→指针走数值截断,指针→浮点得 0
+
+**状态:** ACTIVE since 2026-10-26 (v4.0.22) — spec §4.3 承诺「按位重解释」;实现两头都不符;XFAIL 门已挂
+**Filed-by:** lang-spec-coverage-audit-2026-10-26
+**日期:** 2026-10-26(lang-spec 覆盖审计补 §4.3 转换表覆盖时撞出来)
+
+**触发面:** `as` 转换的**浮点 ↔ 指针**这一对。
+
+**症状(2026-10-26 实测):**
+```
+let x: f64 = 1.5;
+let b: *i64 = x as *i64;
+(b as i64)      ⇒ 1        ← 应为 0x3FF8000000000000(1.5 的 IEEE 754 位模式)
+(b as f64)      ⇒ 0.0      ← 应为 1.5(按位回读);也不是地址(1.0)
+```
+⇒ 浮点→指针是**数值截断**(1.5 → 1);指针→浮点给 **0** —— **静默算错值**
+(指针的值根本没被读到)。
+
+**根因:** `as` 的浮点/指针分支没有独立的 emit 路径:浮点→指针复用了整数的
+截断路径;指针→浮点这条根本没 emit 指针的 load。
+
+**workaround(用户侧):** 需要「按位看一个 double」时,用**两个 i32** 手工拼:
+```
+let mut buf: [u8; 8] = [0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                       0 as u8, 0 as u8, 0 as u8, 0 as u8];
+*(buf as *f64) = x;                    // f64 存进字节缓冲
+let hi: i32 = *(buf as *i32);
+let lo: i32 = *(buf as *i32) + 4 as i32;  // ← 需要按偏移取,当前无 ptr_add 时不通用
+```
+(注:`std::mem::ptr_add` 可用于第二个字段的偏移。)
+
+**门:** `compiler/tests/examples/spec_ptr_float_cast.jhyy` —— 按 **spec 的承诺**
+(按位重解释)写断言,当前实现两条都达不到 ⇒ `// XFAIL:` + `// EXPECT: 0`。
+修好后 XPASS ⇒ suite 失败 ⇒ 强制摘标记。
+
+**影响范围:** 任何依赖「浮点当指针用」的用户代码(少见但合法用法);更值得担心的是
+**指针→浮点静默给 0** —— 用了就会算错值,且**零诊断**。
+
+**失效条件:** 若 `as` 的浮点/指针分支改成真的位模式搬运(两向),本条自然消失。
+
+**引用:**
+- 源码:`compiler/src0/codegen.jhyy`(`as` 的 cast emit 分支)——
+  具体行号待下次 RCA 定位(本轮只做了行为取证)
+- 门:`compiler/tests/examples/spec_ptr_float_cast.jhyy`
+- spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §4.3 + 附录 B
+
+---
+
+<a id="w-144"></a>
+## W-144: 数组类型的 struct 字段没被拷贝 —— 字面量读到垃圾 + 按值赋值 ACCESS_VIOLATION
+
+**状态:** ACTIVE since 2026-10-26 (v4.0.22) — cg_emit_store 缺 KIND_ARRAY 分支;XFAIL 门已挂
+**Filed-by:** lang-spec-coverage-audit-2026-10-26
+**日期:** 2026-10-26(lang-spec 覆盖审计补 §4.2.1 的字段类型矩阵时撞出来)
+
+**触发面:** `compiler/src0/codegen.jhyy` 的 `cg_emit_store`(struct 字段的 store 派发)。
+
+**症状(2026-10-26 实测):**
+```
+type Arr = struct { buf: [i32; 3] }
+let a1 = Arr { buf: [1, 2, 3] };
+a1.buf[0]              ⇒ -935332216   ← 应为 1(读到未初始化垃圾)
+let plain: [i32; 3] = [7, 8, 9];
+a2 = Arr { buf: plain };                ← ACCESS_VIOLATION(0xC0000005)
+```
+⇒ 数组字段**没被拷贝**;而且按值赋值**直接崩**。
+
+连带症状:含数组字段的 struct,`==` 退化成**身份比较** ——
+`a1 == a1` 为 true、`a1 == a2` 为 false(尽管两者内容相同)⇒ 违反 spec §4.2.1
+的「数组 → 逐元素比较」。
+
+**根因(已定位到源码行):** `cg_emit_store`(codegen.jhyy:~1332)的派发:
+```
+if (*t).kind == KIND_STRUCT() {
+    return cg_copy_struct(cg_raw, t_raw, addr, val);   // ← struct 字段:递归拷贝 ✓
+}
+return cg_emit_store_primitive(cg_raw, t_raw, val, addr);   // ← 数组字段落到这里 ✗
+```
+**没有 KIND_ARRAY 分支** ⇒ 数组字段走「按标量存一个值」的兜底路径 ⇒ 存进去的
+是数组的**地址**而不是元素内容 ⇒ ① 读到垃圾;② 之后按它当指针解引用 ⇒ AV。
+
+顶层数组的 `==` 是好的(agg_eq_array.jhyy ✓)—— 因为那条路径直接进
+`cg_value_eq` 的 KIND_ARRAY 分支,**不经过** `cg_emit_store`。
+
+**workaround(用户侧):** 别把数组放进 struct 字段;改成
+`struct { buf: *i32, len: i64 }`(指针 + 长度),或把数组单独放顶层变量、
+struct 里只存指针。
+
+**门:** `compiler/tests/examples/spec_struct_array_field.jhyy` —— `// XFAIL:` +
+`// EXPECT: 0`,三条断言(字面量拷贝 / 按值赋值 / `==` 按值)都按 spec 的承诺写。
+修好后 XPASS ⇒ suite 失败 ⇒ 强制摘标记。
+另外 `spec_agg_eq_field_types.jhyy` 覆盖**能工作**的那些字段类型
+(bool / u8 / f64 / *u8 / PhantomData / 嵌套 struct)。
+
+**为什么一直没被发现:** 回归语料里**零个**用例用数组类型的 struct 字段
+(`grep "struct {[^}]*\[" compiler/tests/examples/*.jhyy` 无命中)。
+
+**影响范围:** 任何把定长数组放进 struct 的用户程序 ⇒ 静默错值或崩溃。
+
+**失效条件:** 若 `cg_emit_store` 加一个 KIND_ARRAY 分支(按
+`arr_count * elem_size` 逐元素拷贝)—— 本条自然消失。
+
+**引用:**
+- 源码:`compiler/src0/codegen.jhyy`(`cg_emit_store` 的 kind 派发;缺 KIND_ARRAY)
+- 门:`compiler/tests/examples/spec_struct_array_field.jhyy`(XFAIL)、
+  `compiler/tests/examples/spec_agg_eq_field_types.jhyy`(可用的字段类型)
+- spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §4.2.1 + 附录 B

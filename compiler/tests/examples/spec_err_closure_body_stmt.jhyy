@@ -1,0 +1,11 @@
+// spec_err_closure_body_stmt.jhyy — spec §5.7:闭包体是**单个表达式**
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「函数体是单个表达式,不是语句块:
+// 里面不能写 let / return / match」这条限制零回归门(闭包**捕获**外层变量那条
+// 已有门:closure_capture_unsupported.jhyy)。
+//
+// EXPECT-ERROR: "unexpected token 'let' in expression"
+fn main_jhyy() -> i32 {
+    let f = |n: i32| { let y = n; n };
+    return f(1);
+}

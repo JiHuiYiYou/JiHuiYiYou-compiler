@@ -1,0 +1,10 @@
+// spec_err_volatile_chained.jhyy — spec §17.1:volatile volatile 是编译错误
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「volatile volatile T 是编译错误」
+// 这条限制零回归门。
+//
+// EXPECT-ERROR: "chained `volatile volatile` is not allowed"
+fn main_jhyy() -> i32 {
+    let mut v: volatile volatile i32 = 0 as i32;
+    return 0;
+}

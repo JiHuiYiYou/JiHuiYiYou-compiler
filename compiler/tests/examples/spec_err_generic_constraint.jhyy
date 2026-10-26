@@ -1,0 +1,15 @@
+// spec_err_generic_constraint.jhyy — spec §11.3:不支持泛型约束 `<T: Ord>`
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):泛型约束 / 生命周期泛型 / const
+// generic / trait objects / HKT 这五条「未实装」边界里,只有「未实例化的裸
+// type-param」(E0060)有门,其余零覆盖。
+//
+// EXPECT-ERROR: "expected > after type param list, got :"
+fn max<T: Ord>(a: T, b: T) -> T {
+    if a > b { return a; }
+    return b;
+}
+
+fn main_jhyy() -> i32 {
+    return max::<i32>(1, 2);
+}

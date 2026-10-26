@@ -1275,6 +1275,144 @@ regress 步骤 `shell: msys2 {0}` ⇒ MSYS2 的 `/tmp` = `$RUNNER_TEMP\msys64\tm
 
 ---
 
+## v4.0.22 — lang-spec 覆盖审计:补 34 条回归门 · 挖出 std lib 三处**真**缺陷 + 一处编译器崩溃
+
+**2026-10-26。** 起因:user 指示「对照 lang-spec 看看有没有没有覆盖到的回归测试,
+缺少的话需要新建」。做法:把 `docs/abis/jhyy-lang-spec-v4.0.0.md`(1071 行)逐条
+拆成可观察行为,每条配一个探针正则,扫全量测试语料(228 个 `.jhyy`)⇒ 得出
+**17 个「零命中」探针**,再逐个手工复核(区分「真缺口」与「探针写太严」)。
+
+**结果比预想的重:补测试的过程本身挖出了 4 个真缺陷。**
+
+### 新增回归门(49 条)
+
+| 组 | 数量 | 内容 |
+|---|---|---|
+| **std lib 真身覆盖** | 6 | `std_{mem,fmt,string,io,vec,math}_import.jhyy` —— 第一次**import 真身**逐条调 API |
+| **spec 正向行为** | 11 | argc/argv · i16/u64 后缀 · **运算符优先级** · 指针算术 · struct 省略字段 · const 元素不检查 · import 位置 · 字面量后缀 / bool / 整数↔指针 · **聚合比较的字段类型矩阵** |
+| **错误诊断门** | 31 | §18 的 5 条高频文本 + E0050/E0062 + §17 的 5 条限制 + 附录 B 的 8 条「未实装」+ §5.1/§5.6/§6/§10.2/§11.3/§12 的 6 条边界 + `fn(...)` / `()` 类型两条 |
+| **XFAIL 门** | 3 | `spec_shadowing.jhyy`(W-142)· `spec_ptr_float_cast.jhyy`(W-143)· `spec_struct_array_field.jhyy`(W-144) |
+
+**这 6 个 std lib 真身用例是本节最有价值的一半** —— 见下。
+
+### 缺陷 ①(W-139):std lib 的字节循环写穿 4n 字节
+
+`compiler/src0/std/{mem,fmt,string,vec}.jhyy` 里的字节循环写
+`*(p as *i32) = v`。jhyy 的语义是「**store 宽度跟 cast 之后的 pointee 类型走**」
+⇒ 那是 **4 字节** store,而循环步进是 1 字节 ⇒ **请求 n 字节实际写 4n 字节**。
+
+实测(`mem_set(b, 0x41424344, 4)`,b 预填 0xAA 哨兵):
+```
+b0..b3 = 68 68 68 68    b4..b6 = 0(哨兵被清成 0!)    b7 = 9
+```
+⇒ 请求 4 字节,写了 **7 字节** ⇒ **静默内存损坏**。
+
+正确写法是**不 cast**(`compiler/runtime/no_std_core/memset.jhyy` 用的就是
+`*(dst + i) = val;` ⇒ 1 字节 ⇒ 对)。修法:12 处字节循环的读写统一改成 `*u8` 宽度。
+
+### 缺陷 ②(W-140):`import string;` **编译失败**
+
+`std/string.jhyy:289` 的 `str_find` 签名是 `-> i64`,但第一个 early-return 写的是
+裸字面量 `return 0;` ⇒ 推断成 **i32** ⇒ 类型不匹配 ⇒
+```
+std/string.jhyy:289:9: error: return type does not match function return type
+```
+⇒ **`std::string` 模块整个不可用**。
+
+### 缺陷 ③(W-141):`std::string` 的 arena 把分配互相踩 ⇒ ACCESS_VIOLATION
+
+`arena_alloc` 新建 block 时:`data_start = raw` ⇒ **payload 起点压在 next 指针
+那一格上**;且 `cur` 停在 `raw` **不推进** ⇒ 下一次 alloc 又算出 `aligned == raw`
+⇒ **返回同一地址** ⇒ 后一次分配踩坏前一次。
+
+症状:`str_from_bytes` → `str_from_cstr` → `str_concat` ⇒ 崩(后者的分配覆盖了
+前者的 StringHeader.data 指针)。修法:block 布局改成
+`[next(8B)][payload_size(8B)][payload...]`。
+
+### 缺陷 ④(W-143):浮点 ↔ 指针**不是按位重解释**
+
+spec §4.3 的转换表承诺「浮点 ↔ 指针 ✅(**按位重解释**)」,实测两头都不成立:
+`1.5 as *i64` = **1**(数值截断,不是 0x3FF8000000000000);`(1 as *i64) as f64`
+= **0.0**(既不是地址也不是位模式)⇒ **静默错值**。门:
+`spec_ptr_float_cast.jhyy`(**XFAIL**,按 spec 承诺写断言)。
+
+### 缺陷 ⑤(W-144):数组类型的 struct 字段**没被拷贝**
+
+`cg_emit_store`(`compiler/src0/codegen.jhyy`)有 **KIND_STRUCT** 分支(递归拷贝
+嵌套 struct)但**没有 KIND_ARRAY 分支** ⇒ 数组字段落到「按标量存一个值」的兜底
+路径 ⇒ 存进去的是数组的**地址**。实测:
+```
+let a1 = Arr { buf: [1,2,3] };   a1.buf[0] ⇒ -935332216(未初始化垃圾)
+a2 = Arr { buf: plain };         ⇒ ACCESS_VIOLATION
+```
+⇒ 含数组字段的 struct `==` 退化成**身份比较**(违反 spec §4.2.1 的「数组逐元素
+比较」)。门:`spec_struct_array_field.jhyy`(**XFAIL**)。
+
+### 缺陷 ⑥(W-142):同作用域 shadowing 让**编译器**崩溃
+
+spec §3 承诺支持 shadowing。实现里 `symtab_insert` 对同 scope 重名
+**`return 0`**(注释「已定义」)⇒ AST 的 sym 是 null ⇒ sema 无条件
+`(*sym).type_ptr = ...` ⇒ **空指针写** ⇒ 编译器 ACCESS_VIOLATION。
+
+实测 `jhyy.exe` / `jhyy_v1.exe.exe` / `jhyy_v3_fp` / `jhyy_v10_fp` **全部崩**
+⇒ **长期存在**(至少从 v1 起)。嵌套作用域正常 ⇒ 病灶精确在「同作用域」。
+
+⇒ 登记 **ACTIVE**,挂 **XFAIL 门**(`spec_shadowing.jhyy`)⇒ 修好后 XPASS 会
+强制有人摘标记。
+
+### 为什么①②③躲了两个月
+
+**6 个 std 模块的测试全是 inline 副本。** `std_mem_basic.jhyy` 的文件头自己
+写着「测试文件 inline 复制 std/mem.jhyy 顶层 fn」⇒ 副本**不受约束**:改真身
+**零回归覆盖**;而且副本里是**同样的错误代码** ⇒ 副本测试给错误实现背书。
+
+W-103(2026-10-20)给 `import` 加了 std lib 目录回落,`std_os_*` 那几个测试
+改成了 import 真身 —— **另外 6 个模块没跟上**。
+
+### 顺带修正 8 处规范措辞(fact-check 出来的)
+
+**这 7 处全都是「spec 声称的行为与实现不符」** —— 其中 3 处是**真缺陷**
+(W-142 / W-143 / §8 的未初始化),4 处是**规范措辞过头**(实现其实更宽松):
+
+| spec 位置 | 原文 | 实测 | 处置 |
+|---|---|---|---|
+| §8 | 省略字段「静默取默认值(**0**)」 | **未初始化读(栈垃圾)** | 措辞改;值是未定义 ⇒ 测试不断言它 |
+| §3 | shadowing | 同作用域**编译器崩** | 降级到附录 B + W-142 |
+| §3 | 顶层变量「类型**必须**显式标注」 | 不标注也**能编且取值正确** | 措辞改(实现更宽松) |
+| §2.1 | `()` 是零大小基础类型 | 类型位置**不认** `()` | 降级到附录 B |
+| §2.2 | `fn(...)` 函数指针类型 | 类型位置**不认** | 降级到附录 B |
+| §4.3 | 浮点↔指针「按位重解释」 | 数值截断 / 指针→浮点给 0 | 降级到附录 B + W-143 |
+| §4.2.1 | struct 字段「逐字段递归」含数组字段 | 数组字段**没被拷贝** | 降级到附录 B + W-144 |
+| §5.7 | 闭包值「可当函数值**传递**」 | 没有 `fn(...)` 类型语法 ⇒ 传不了 | 措辞改 |
+
+⚠️ 这批 fact-check 的**方法论**值得记住:**spec 是「100% 权威」,但它里面有若干条
+是未经实测的断言** —— 「默认 0」「必须显式标注」「按位重解释」这类**看起来很具体**
+的措辞,恰恰是最容易写成想象而不是实测的。审计时逐条跑一遍,比读十遍规范有用。
+
+### 门结果(2026-10-26 实测)
+
+| 门 | 结果 |
+|---|---|
+| `regress.py`(全量) | ✅ **245 PASS + 3 XFAIL + 0 failed + 20 SKIP**(268 total)—— 上一版 200/200 + 19 SKIP(219) |
+| `audit_test_assertions.py --strict` | ✅ **0 违规** |
+| `artifact_checks.sh` | ✅ **14 PASS / 0 FAIL** |
+| `closure_check.sh` | ✅ **PASS** —— v2.s == v3.s 逐字节相同(`e037dddefd05fc5b`) |
+
+### 台账
+
+| W-NNN | 状态 | 一句话 |
+|---|---|---|
+| W-139 | RESOLVED | std lib 字节循环写穿 4n 字节(12 处) |
+| W-140 | RESOLVED | `std/string.jhyy` 的 `str_find` 类型不匹配 ⇒ `import string;` 编译失败 |
+| W-141 | RESOLVED | `std/string.jhyy` 的 arena block 布局 ⇒ 分配互相踩 ⇒ AV |
+| W-144 | **ACTIVE** | 数组类型 struct 字段没被拷贝(垃圾值 + 赋值 AV) |
+| W-143 | **ACTIVE** | 浮点↔指针不是按位重解释(指针→浮点静默给 0) |
+| W-142 | **ACTIVE** | 同作用域 shadowing ⇒ 编译器空指针写崩溃(XFAIL 门已挂) |
+
+⇒ 台账 **0 ACTIVE → 3 ACTIVE / 0 DEFERRED**、133 索引行。
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

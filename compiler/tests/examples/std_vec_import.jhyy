@@ -1,0 +1,70 @@
+// std_vec_import.jhyy — std::vec 的**真身**覆盖(import std lib 目录里的 vec.jhyy)
+//
+// 为什么要有这个文件(2026-10-26 覆盖审计):
+//   `compiler/tests/examples/std_vec_basic.jhyy` 此前是 std/vec.jhyy 的 **inline
+//   副本**。副本不受约束 ⇒ 改 `compiler/src0/std/vec.jhyy` 真身**没有任何回归
+//   用例发现**。
+//
+// 本文件是 vec.jhyy 真身的第一个真实调用方。
+// 覆盖:std_vec_new / std_vec_with_cap / std_vec_push / std_vec_get /
+//      std_vec_len / std_vec_cap / std_vec_grow / std_vec_free
+//
+// 断言方式:累加 fails 计数(不是字面量 return)⇒ 零信号门通过。
+// EXPECT: 0
+import vec;
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+
+    // ── std_vec_new: 空 Vec(len=0, cap=0)──
+    let mut v = vec::std_vec_new(4 as i64);
+    if vec::std_vec_len(&v) != 0 as i64 { fails = fails + 1; }
+    if vec::std_vec_cap(&v) != 0 as i64 { fails = fails + 1; }
+
+    // ── std_vec_with_cap: cap=8, len=0 ──
+    let mut w = vec::std_vec_with_cap(4 as i64, 8 as i64);
+    if vec::std_vec_len(&w) != 0 as i64 { fails = fails + 1; }
+    if vec::std_vec_cap(&w) != 8 as i64 { fails = fails + 1; }
+
+    // ── std_vec_push: 推入 42 → len=1, cap 仍 ≥ 1 ──
+    let mut elem: [i32; 1] = [42 as i32];
+    let rc = vec::std_vec_push(&v, 4 as i64, elem as *u8);
+    if rc != 1 { fails = fails + 1; }
+    if vec::std_vec_len(&v) != 1 as i64 { fails = fails + 1; }
+    if vec::std_vec_cap(&v) < 1 as i64 { fails = fails + 1; }
+
+    // ── std_vec_get: 取回第 0 个元素 = 42;越界 → null ──
+    let p = vec::std_vec_get(&v, 4 as i64, 0 as i64);
+    if p == (0 as *u8) { fails = fails + 1; }
+    else {
+        if *(p as *i32) != 42 { fails = fails + 1; }
+    }
+    let oob = vec::std_vec_get(&v, 4 as i64, 99 as i64);
+    if oob != (0 as *u8) { fails = fails + 1; }
+
+    // ── 推第二个元素,值应是 7 ──
+    let mut elem2: [i32; 1] = [7 as i32];
+    let rc2 = vec::std_vec_push(&v, 4 as i64, elem2 as *u8);
+    if rc2 != 1 { fails = fails + 1; }
+    if vec::std_vec_len(&v) != 2 as i64 { fails = fails + 1; }
+    let p1 = vec::std_vec_get(&v, 4 as i64, 1 as i64);
+    if p1 == (0 as *u8) { fails = fails + 1; }
+    else {
+        if *(p1 as *i32) != 7 { fails = fails + 1; }
+    }
+
+    // ── std_vec_grow: 显式扩到 16 ──
+    let gr = vec::std_vec_grow(&v, 4 as i64, 16 as i64);
+    if gr != 1 { fails = fails + 1; }
+    if vec::std_vec_cap(&v) != 16 as i64 { fails = fails + 1; }
+    // grow 不该改 len
+    if vec::std_vec_len(&v) != 2 as i64 { fails = fails + 1; }
+
+    // ── std_vec_free: 释放后 len/cap 归零 ──
+    let fr = vec::std_vec_free(&v);
+    if fr < 0 { fails = fails + 1; }
+    if vec::std_vec_len(&v) != 0 as i64 { fails = fails + 1; }
+    if vec::std_vec_cap(&v) != 0 as i64 { fails = fails + 1; }
+
+    return fails;
+}

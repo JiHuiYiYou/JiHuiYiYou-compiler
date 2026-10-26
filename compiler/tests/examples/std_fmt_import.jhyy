@@ -1,0 +1,134 @@
+// std_fmt_import.jhyy — std::fmt 的**真身**覆盖(import std lib 目录里的 fmt.jhyy)
+//
+// 为什么要有这个文件(2026-10-26 覆盖审计):
+//   `compiler/tests/examples/std_fmt_*.jhyy` 此前全是 std/fmt.jhyy 的 **inline
+//   副本**(文件头写着「test inline 副本 + public API 等价 std/fmt.jhyy」)。
+//   副本不受约束 ⇒ 改 `compiler/src0/std/fmt.jhyy` 真身**没有任何回归用例发现**。
+//   W-103 给 import 加了 std lib 目录回落,`std_os_*` 已改用 import 真身 ——
+//   fmt 这 6 个模块还没跟上。
+//
+// 本文件是 fmt.jhyy 真身的第一个真实调用方。
+// 覆盖:digit_char / hex_char / fmt_i32 / fmt_i64 / fmt_str / fmt_hex_u32
+//
+// ⚠️ 越界哨兵:字节循环里写 `*(p as *i32) = v` 时,store 宽度跟 **cast 后的
+// pointee 类型**走(4 字节)而不是跟循环步进走(1 字节)⇒ 请求 n 字节实际写了
+// 4n 字节。哨兵字节专门盯这件事(fmt_i32("12345") 只该写 6 字节含 NUL)。
+//
+// 每个用例前都重填一遍哨兵(否则上一轮写入的残留会污染下一轮的断言)。
+//
+// 断言方式:累加 fails 计数(不是字面量 return)⇒ 零信号门通过。
+// EXPECT: 0
+import fmt;
+
+// fill_sentinel — 把 n 个字节填成 0xAA(越界哨兵)
+fn fill_sentinel(buf: *u8, n: i64) {
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        *(buf + i) = 170 as u8;
+        i = i + (1 as i64);
+    }
+}
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+
+    let mut buf: [u8; 32] = [0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8];
+
+    // ── digit_char: 0 → '0'(48),5 → '5'(53),9 → '9'(57)──
+    if fmt::digit_char(0 as i32) != 48 as i32 { fails = fails + 1; }
+    if fmt::digit_char(5 as i32) != 53 as i32 { fails = fails + 1; }
+    if fmt::digit_char(9 as i32) != 57 as i32 { fails = fails + 1; }
+
+    // ── hex_char: 10 → 'a'(97) / 'A'(65);15 → 'f'(102) / 'F'(70)──
+    if fmt::hex_char(10 as i32, 0 as i32) != 97 as i32 { fails = fails + 1; }
+    if fmt::hex_char(10 as i32, 1 as i32) != 65 as i32 { fails = fails + 1; }
+    if fmt::hex_char(15 as i32, 0 as i32) != 102 as i32 { fails = fails + 1; }
+    if fmt::hex_char(15 as i32, 1 as i32) != 70 as i32 { fails = fails + 1; }
+
+    // ── fmt_i32("12345"): 5 字节 + NUL,哨兵不动 ──
+    fill_sentinel(buf as *u8, 32 as i64);
+    let n = fmt::fmt_i32(buf as *u8, 12345 as i32);
+    if n != 5 as i64 { fails = fails + 1; }
+    if buf[0] != 49 as u8 { fails = fails + 1; }
+    if buf[1] != 50 as u8 { fails = fails + 1; }
+    if buf[2] != 51 as u8 { fails = fails + 1; }
+    if buf[3] != 52 as u8 { fails = fails + 1; }
+    if buf[4] != 53 as u8 { fails = fails + 1; }
+    if buf[5] != 0 as u8 { fails = fails + 1; }
+    // 第 7 字节起必须是哨兵(fmt_i32 只该写 6 字节)
+    if buf[6] != 170 as u8 { fails = fails + 1; }
+    if buf[7] != 170 as u8 { fails = fails + 1; }
+
+    // ── fmt_i32(0) → "0" ──
+    fill_sentinel(buf as *u8, 32 as i64);
+    let n0 = fmt::fmt_i32(buf as *u8, 0 as i32);
+    if n0 != 1 as i64 { fails = fails + 1; }
+    if buf[0] != 48 as u8 { fails = fails + 1; }
+    if buf[1] != 0 as u8 { fails = fails + 1; }
+    if buf[2] != 170 as u8 { fails = fails + 1; }
+
+    // ── fmt_i32(-12345) → "-12345"(6 字节)──
+    fill_sentinel(buf as *u8, 32 as i64);
+    let nn = fmt::fmt_i32(buf as *u8, 0 as i32 - 12345 as i32);
+    if nn != 6 as i64 { fails = fails + 1; }
+    if buf[0] != 45 as u8 { fails = fails + 1; }
+    if buf[1] != 49 as u8 { fails = fails + 1; }
+    if buf[5] != 53 as u8 { fails = fails + 1; }
+    if buf[6] != 0 as u8 { fails = fails + 1; }
+    if buf[7] != 170 as u8 { fails = fails + 1; }
+
+    // ── fmt_i64(1234567890123) → 13 字节 ──
+    fill_sentinel(buf as *u8, 32 as i64);
+    let n64 = fmt::fmt_i64(buf as *u8, 1234567890123 as i64);
+    if n64 != 13 as i64 { fails = fails + 1; }
+    if buf[0] != 49 as u8 { fails = fails + 1; }
+    if buf[12] != 51 as u8 { fails = fails + 1; }
+    if buf[13] != 0 as u8 { fails = fails + 1; }
+    if buf[14] != 170 as u8 { fails = fails + 1; }
+
+    // ── fmt_str("hello") → 5 字节 ──
+    fill_sentinel(buf as *u8, 32 as i64);
+    let ns = fmt::fmt_str(buf as *u8, "hello" as *u8);
+    if ns != 5 as i64 { fails = fails + 1; }
+    if buf[0] != 104 as u8 { fails = fails + 1; }
+    if buf[1] != 101 as u8 { fails = fails + 1; }
+    if buf[4] != 111 as u8 { fails = fails + 1; }
+    if buf[5] != 0 as u8 { fails = fails + 1; }
+    if buf[6] != 170 as u8 { fails = fails + 1; }
+    if buf[7] != 170 as u8 { fails = fails + 1; }
+
+    // ── fmt_hex_u32(255, lower) → "ff" ──
+    fill_sentinel(buf as *u8, 32 as i64);
+    let nh = fmt::fmt_hex_u32(buf as *u8, 255 as i32, 0 as i32);
+    if nh != 2 as i64 { fails = fails + 1; }
+    if buf[0] != 102 as u8 { fails = fails + 1; }
+    if buf[1] != 102 as u8 { fails = fails + 1; }
+    if buf[2] != 0 as u8 { fails = fails + 1; }
+    if buf[3] != 170 as u8 { fails = fails + 1; }
+
+    // ── fmt_hex_u32(255, upper) → "FF" ──
+    fill_sentinel(buf as *u8, 32 as i64);
+    let nhu = fmt::fmt_hex_u32(buf as *u8, 255 as i32, 1 as i32);
+    if nhu != 2 as i64 { fails = fails + 1; }
+    if buf[0] != 70 as u8 { fails = fails + 1; }
+    if buf[1] != 70 as u8 { fails = fails + 1; }
+    if buf[2] != 0 as u8 { fails = fails + 1; }
+    if buf[3] != 170 as u8 { fails = fails + 1; }
+
+    // ── fmt_hex_u32(0) → "0" ──
+    fill_sentinel(buf as *u8, 32 as i64);
+    let nh0 = fmt::fmt_hex_u32(buf as *u8, 0 as i32, 0 as i32);
+    if nh0 != 1 as i64 { fails = fails + 1; }
+    if buf[0] != 48 as u8 { fails = fails + 1; }
+    if buf[1] != 0 as u8 { fails = fails + 1; }
+    if buf[2] != 170 as u8 { fails = fails + 1; }
+
+    return fails;
+}

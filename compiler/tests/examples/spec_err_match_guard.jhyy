@@ -1,0 +1,19 @@
+// spec_err_match_guard.jhyy — spec §5.6 / 附录 B:match 不支持 guard pattern
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「不支持 guard pattern
+// (Some(x) if x > 0 → 解析错误)」这条零回归门。
+//
+// EXPECT-ERROR: "expected =>, got if"
+type Opt = enum {
+    A(i32),
+    B,
+}
+
+fn main_jhyy() -> i32 {
+    let o = Opt::A(1);
+    match o {
+        Opt::A(x) if x > 0 => x,
+        _ => 0,
+    }
+    return 0;
+}

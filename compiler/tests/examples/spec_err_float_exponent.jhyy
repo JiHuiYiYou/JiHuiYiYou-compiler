@@ -1,0 +1,10 @@
+// spec_err_float_exponent.jhyy — spec §2.5 / 附录 B:浮点字面量不支持指数写法
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「浮点字面量的指数写法
+// (1.0e10)未实装」这条零回归门。
+//
+// EXPECT-ERROR: "expected ;, got ident"
+fn main_jhyy() -> i32 {
+    let x: f64 = 1.0e10;
+    return 0;
+}

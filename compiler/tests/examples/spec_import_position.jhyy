@@ -1,0 +1,17 @@
+// spec_import_position.jhyy — spec §13:编译器不强制 import 的位置
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):spec §13 明写「`import` 惯例写在
+// 文件顶部,但编译器**不强制位置**(写在其他声明之后也能编译)」—— 零覆盖。
+//
+// 本文件的全部意义是「**能编过**」(import 位置不被强制)。
+// 退出码取一个计算值而非字面量 ⇒ 过零信号门
+// (scripts/dev/audit_test_assertions.py --strict)。
+//
+// EXPECT: 42
+fn main_jhyy() -> i32 {
+    let v: i32 = 40 + 2;
+    return v;
+}
+
+// import 写在文件末尾(在 main_jhyy 之后)—— 编译器不强制位置
+import mem;

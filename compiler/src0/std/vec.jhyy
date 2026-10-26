@@ -57,8 +57,8 @@ fn std_vec_byte_copy(dst: *u8, src: *u8, n: i64) -> *u8 {
     while i < n {
         let d = ptr_add(dst, i);
         let s = ptr_add(src, i);
-        let v: i32 = *(s as *i32) & (0xff as i32);
-        *(d as *i32) = v;
+        let v: u8 = *(s as *u8);
+        *(d as *u8) = v;
         i = i + (1 as i64);
     }
     return dst;

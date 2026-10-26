@@ -1,0 +1,9 @@
+// spec_err_circular_import/b.jhyy — 与 a.jhyy 构成 import 环
+//
+// 本文件没有 main ⇒ harness 当 library 跳过(不单独跑)。
+// 它的作用是让 a.jhyy 的 import 图成环。
+import a;
+
+fn b_val() -> i32 {
+    return 1;
+}

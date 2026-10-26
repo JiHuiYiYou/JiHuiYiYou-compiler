@@ -1,0 +1,13 @@
+// spec_err_default_param.jhyy — spec §6:不支持默认参数
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「不支持默认参数与变参」这条限制
+// 零回归门。
+//
+// EXPECT-ERROR: "expected ), got ="
+fn add(a: i32, b: i32 = 3) -> i32 {
+    return a + b;
+}
+
+fn main_jhyy() -> i32 {
+    return add(1);
+}

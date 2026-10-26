@@ -1,0 +1,12 @@
+// spec_err_nested_fn.jhyy — spec §6:不支持嵌套函数
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「所有函数必须在顶层声明
+// (函数体里写 fn 是解析错误)」这条零回归门。
+//
+// EXPECT-ERROR: "unexpected token 'fn' in expression"
+fn main_jhyy() -> i32 {
+    fn inner() -> i32 {
+        return 1;
+    }
+    return inner();
+}

@@ -1,0 +1,15 @@
+// spec_err_no_std_no_main.jhyy — spec §17.4:no_std 模块必须有 fn main
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「没有 fn main 会得到
+// error: #[no_std] module must define 'fn main()'」这条限制零回归门。
+//
+// 本文件写 fn main_jhyy 而不是 fn main:harness 的 has_main 判据是
+// 「fn main_jhyy 存在 **或** (no_std 且 fn main 存在)」—— 若这里写 fn main,
+// 文件会被当成可跑的 no_std 程序,而它要报的正是「缺 main」。
+// 写 main_jhyy ⇒ harness 认它是可跑测试 ⇒ 编译失败被 EXPECT-ERROR 抓到。
+//
+// EXPECT-ERROR: "must define `fn main()`"
+#[no_std]
+fn main_jhyy() -> i32 {
+    return 0;
+}

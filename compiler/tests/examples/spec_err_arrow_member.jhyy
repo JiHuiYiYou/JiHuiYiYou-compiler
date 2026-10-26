@@ -1,0 +1,13 @@
+// spec_err_arrow_member.jhyy — spec §7.1:箭头不是成员访问运算符
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「通过指针访问字段写 (*p).field;
+// p->field 是解析错误」这条零回归门。
+//
+// EXPECT-ERROR: "expected ;, got ->"
+type P = struct { x: i32 }
+
+fn main_jhyy() -> i32 {
+    let p = P { x: 1 };
+    let v = p->x;
+    return v;
+}

@@ -1,0 +1,83 @@
+// std_string_import.jhyy — std::string 的**真身**覆盖(import std lib 目录里的 string.jhyy)
+//
+// 为什么要有这个文件(2026-10-26 覆盖审计):
+//   `compiler/tests/examples/std_string_*.jhyy` 此前全是 std/string.jhyy 的
+//   **inline 副本**。副本不受约束 ⇒ 改 `compiler/src0/std/string.jhyy` 真身
+//   **没有任何回归用例发现**。
+//
+//   而且副本把真身的两个真缺陷一起遮住了(2026-10-26 本轮审计才暴露):
+//     ① `str_find` 里 `return 0;` 在 `-> i64` 函数中 —— 裸整数字面量推断成
+//        i32 ⇒ **类型不匹配** ⇒ `import string;` 直接**编译失败**
+//        (compiler/src0/std/string.jhyy:289)。
+//     ② 字节循环写 `*(p as *i32) = v` ⇒ store 宽度跟 cast 后的 pointee 走
+//        (4 字节)⇒ str_from_cstr / str_from_bytes / str_concat 都多写 3 倍。
+//
+// 本文件是 string.jhyy 真身的第一个真实调用方。
+// 覆盖:arena_init / strlen_local / str_from_cstr / str_from_bytes /
+//      str_len / str_data / str_concat / str_compare / str_equals / str_find
+//
+// 断言方式:累加 fails 计数(不是字面量 return)⇒ 零信号门通过。
+// EXPECT: 0
+import string;
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+
+    // arena header 是 40 字节(见 string.jhyy 的 layout 注释)
+    let mut arena: [i32; 10] = [0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                0 as i32, 0 as i32, 0 as i32, 0 as i32,
+                                0 as i32, 0 as i32];
+    let a = arena as *u8;
+    // arena_init 成功返回 1(不是 0)
+    if string::arena_init(a, 1024 as i64) != 1 { fails = fails + 1; }
+
+    // ── strlen_local: 裸 cstr 长度 ──
+    if string::strlen_local("abcd" as *u8) != 4 as i64 { fails = fails + 1; }
+    if string::strlen_local("" as *u8) != 0 as i64 { fails = fails + 1; }
+
+    // ── str_from_cstr("abc") ──
+    let h = string::str_from_cstr(a, "abc" as *u8);
+    if h == (0 as *u8) { fails = fails + 1; }
+    if string::str_len(h) != 3 as i64 { fails = fails + 1; }
+    let d = string::str_data(h);
+    if *(d as *u8) != 97 as u8 { fails = fails + 1; }
+    let d_at1 = d + 1 as i64;
+    if *(d_at1 as *u8) != 98 as u8 { fails = fails + 1; }
+    let d_at2 = d + 2 as i64;
+    if *(d_at2 as *u8) != 99 as u8 { fails = fails + 1; }
+
+    // ── str_from_bytes(3 字节) ──
+    let raw: [u8; 3] = [120 as u8, 121 as u8, 122 as u8];
+    let h2 = string::str_from_bytes(a, raw as *u8, 3 as i64);
+    if h2 == (0 as *u8) { fails = fails + 1; }
+    if string::str_len(h2) != 3 as i64 { fails = fails + 1; }
+    let d2_of_h2 = string::str_data(h2);
+    if *(d2_of_h2 as *u8) != 120 as u8 { fails = fails + 1; }
+
+    // ── str_concat("abc" + "xyz") → "abcxyz",6 字节 ──
+    let h3 = string::str_concat(a, h, h2);
+    if h3 == (0 as *u8) { fails = fails + 1; }
+    if string::str_len(h3) != 6 as i64 { fails = fails + 1; }
+    let d3 = string::str_data(h3);
+    if *(d3 as *u8) != 97 as u8 { fails = fails + 1; }
+    // 第 4 字节应为 'x'(120)
+    let p3 = d3 + 3 as i64;
+    if *(p3 as *u8) != 120 as u8 { fails = fails + 1; }
+    // 第 6 字节应为 'z'(122)
+    let p5 = d3 + 5 as i64;
+    if *(p5 as *u8) != 122 as u8 { fails = fails + 1; }
+
+    // ── str_compare: 同串 0;不同串非 0 ──
+    if string::str_compare(h, h) != 0 { fails = fails + 1; }
+    if string::str_compare(h, h2) == 0 { fails = fails + 1; }
+
+    // ── str_equals ──
+    if string::str_equals(h, h) != 1 { fails = fails + 1; }
+    if string::str_equals(h, h2) != 0 { fails = fails + 1; }
+
+    // ── str_find: 在 "abcxyz" 里找 "xy" → 3;找 "zz" → -1 ──
+    if string::str_find(h3, "xy" as *u8) != 3 as i64 { fails = fails + 1; }
+    if string::str_find(h3, "zz" as *u8) != 0 as i64 - (1 as i64) { fails = fails + 1; }
+
+    return fails;
+}

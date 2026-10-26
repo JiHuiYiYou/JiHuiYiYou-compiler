@@ -1,0 +1,54 @@
+// std_math_import.jhyy — std::math 的**真身**覆盖(import std lib 目录里的 math.jhyy)
+//
+// 为什么要有这个文件(2026-10-26 覆盖审计):
+//   `compiler/tests/examples/std_math_basic.jhyy` 此前是 std/math.jhyy 的 **inline
+//   副本**。副本不受约束 ⇒ 改 `compiler/src0/std/math.jhyy` 真身**没有任何回归
+//   用例发现**。
+//
+// 本文件是 math.jhyy 真身的第一个真实调用方(走 libm 的 extern fn 桥)。
+// 覆盖:std_math_sin / std_math_cos / std_math_sqrt / std_math_pow
+//
+// ⚠️ std::math 只有 f64 版本(spec §15 / 附录 B),无 f32、无 tan/log/exp。
+//
+// 断言方式:累加 fails 计数(不是字面量 return)⇒ 零信号门通过。
+// EXPECT: 0
+import math;
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+
+    // ── sin(0) == 0(精确)──
+    let s0 = math::std_math_sin(0.0);
+    if s0 != 0.0 { fails = fails + 1; }
+
+    // ── cos(0) == 1(精确)──
+    let c0 = math::std_math_cos(0.0);
+    if c0 != 1.0 { fails = fails + 1; }
+
+    // ── sqrt(4) == 2(精确)──
+    let r4 = math::std_math_sqrt(4.0);
+    if r4 != 2.0 { fails = fails + 1; }
+
+    // ── pow(2, 10) == 1024(精确)──
+    let p = math::std_math_pow(2.0, 10.0);
+    if p != 1024.0 { fails = fails + 1; }
+
+    // ── pow(x, 0) == 1 ──
+    let p0 = math::std_math_pow(7.0, 0.0);
+    if p0 != 1.0 { fails = fails + 1; }
+
+    // ── sqrt(2) ≈ 1.41421356(误差 < 1e-6)──
+    let r2 = math::std_math_sqrt(2.0);
+    let diff = r2 - 1.41421356;
+    if diff > 0.000001 { fails = fails + 1; }
+    if diff < 0.0 - 0.000001 { fails = fails + 1; }
+
+    // ── sin(pi/2) ≈ 1(误差 < 1e-6)──
+    let half_pi = 1.5707963;
+    let sh = math::std_math_sin(half_pi);
+    let dsh = sh - 1.0;
+    if dsh > 0.000001 { fails = fails + 1; }
+    if dsh < 0.0 - 0.000001 { fails = fails + 1; }
+
+    return fails;
+}

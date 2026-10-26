@@ -1,0 +1,57 @@
+// spec_literals_types.jhyy — spec §2.5 / §2.1 / §4.3:字面量后缀与类型边界
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):
+//   ① §2.5「后缀:`f32` / `f64` / `f`(= f64)」—— `f` 这个别名**零覆盖**
+//      (int_suffix.jhyy 覆盖了整数后缀,但浮点的 `f` 别名没有);
+//   ② §2.1 `bool` 占 1 字节、字面量只有 true/false —— 作为**类型**零覆盖
+//      (既有测试只在 sizeof(bool) 里出现过);
+//   ③ §4.3 的**整数 ↔ 指针**与**整数 → 浮点** —— 零覆盖。
+//   (浮点 ↔ 指针那一对与 spec 不符,已拆成 XFAIL 门 spec_ptr_float_cast.jhyy)
+//
+// EXPECT: 0
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+
+    // ── ① 浮点后缀:f32 / f64 / f(= f64)──
+    let a: f32 = 2.5f32;
+    if a as i32 != 2 { fails = fails + 1; }
+    let b: f64 = 2.5f64;
+    if b as i32 != 2 { fails = fails + 1; }
+    // `f` 是 f64 的别名
+    let c: f64 = 2.5f;
+    if c as i32 != 2 { fails = fails + 1; }
+    // `f` 后缀的值与 f64 后缀的值一致
+    let d: f64 = 7.25f;
+    let e: f64 = 7.25f64;
+    if d != e { fails = fails + 1; }
+
+    // ── ② bool 类型 ──
+    let t: bool = true;
+    let f: bool = false;
+    if t == f { fails = fails + 1; }
+    // bool 只能进条件,不能混进 i32 算术(那是设计如此,这里只验条件用法)
+    let mut r: i32 = 0;
+    if t { r = 1; }
+    if r != 1 { fails = fails + 1; }
+    let mut r2: i32 = 0;
+    if f { r2 = 1; }
+    if r2 != 0 { fails = fails + 1; }
+
+    // ── ③ 整数 ↔ 指针(地址原样保留)──
+    let addr: i64 = 0x41424344 as i64;
+    let p: *i32 = addr as *i32;
+    if (p as i64) != 0x41424344 as i64 { fails = fails + 1; }
+    if (p as i64) != addr { fails = fails + 1; }
+
+    // ── ④ 整数 → 浮点(数值转换)──
+    let one: i64 = 1;
+    let onef: f64 = one as f64;
+    if onef != 1.0 { fails = fails + 1; }
+
+    // ⚠️ 浮点 ↔ 指针(spec §4.3 写的是「按位重解释」)的现状**与 spec 不符**,
+    //   已单独拆成 XFAIL 门 `spec_ptr_float_cast.jhyy`(台账 W-143)——
+    //   实测:浮点→指针走**数值截断**(1.5 → 1),指针→浮点给 **0**
+    //   (既不是地址也不是位模式)。本用例只覆盖已定义正确的部分。
+
+    return fails;
+}

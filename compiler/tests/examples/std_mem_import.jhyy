@@ -1,0 +1,94 @@
+// std_mem_import.jhyy — std::mem 的**真身**覆盖(import std lib 目录里的 mem.jhyy)
+//
+// 为什么要有这个文件(2026-10-26 覆盖审计):
+//   在此之前,`compiler/tests/examples/std_mem_basic.jhyy` 是 std/mem.jhyy 的
+//   **inline 副本** —— 文件头自己写着「测试文件 inline 复制 std/mem.jhyy 顶层 fn」。
+//   副本不受任何约束:改了 `compiler/src0/std/mem.jhyy` 真身,**没有任何一个
+//   回归用例会发现**。W-103(2026-10-20)给 `import` 加了 std lib 目录回落,
+//   `std_os_*` 那几个测试也改成了 import 真身 —— 但 mem/fmt/string/io/vec/math
+//   这 6 个模块的测试**至今仍是 inline 副本**。
+//
+// 本文件是 mem.jhyy 真身的第一个真实调用方:每条 API 都真调一遍,断言真值。
+// 覆盖:ptr_add / mem_copy / mem_compare / mem_set / mem_find_byte / mem_zero
+//
+// ⚠️ 本文件同时是 **`mem_copy` / `mem_set` 越界写**的回归门(见文件末尾的
+// 「越界哨兵」段):字节循环里写 `*(p as *i32) = v` 时,store 宽度跟**cast 后的
+// pointee 类型**走(4 字节),而不是跟循环步进走(1 字节)⇒ 请求 n 字节实际写了
+// 4n 字节,多出来的 3n 字节会踩掉调用方的缓冲区。哨兵字节专门盯这件事。
+//
+// 断言方式:累加 fails 计数(不是字面量 return)⇒ 零信号门
+// (scripts/dev/audit_test_assertions.py --strict)通过。
+// EXPECT: 0
+import mem;
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+
+    let mut a: [u8; 16] = [1 as u8, 2 as u8, 3 as u8, 4 as u8,
+                           5 as u8, 6 as u8, 7 as u8, 8 as u8,
+                           9 as u8, 10 as u8, 11 as u8, 12 as u8,
+                           13 as u8, 14 as u8, 15 as u8, 16 as u8];
+
+    // ══════════════════════════════════════════════════════════════════
+    // 越界哨兵:整个缓冲区先填 0xAA,任何「多写」都会把哨兵改成别的值
+    // ══════════════════════════════════════════════════════════════════
+    let mut b: [u8; 16] = [170 as u8, 170 as u8, 170 as u8, 170 as u8,
+                           170 as u8, 170 as u8, 170 as u8, 170 as u8,
+                           170 as u8, 170 as u8, 170 as u8, 170 as u8,
+                           170 as u8, 170 as u8, 170 as u8, 170 as u8];
+
+    // ── mem_copy: 只拷 n 字节,哨兵不能被动 ──
+    mem::mem_copy(b as *u8, a as *u8, 5 as i64);
+    if b[0] != 1 as u8 { fails = fails + 1; }
+    if b[1] != 2 as u8 { fails = fails + 1; }
+    if b[2] != 3 as u8 { fails = fails + 1; }
+    if b[3] != 4 as u8 { fails = fails + 1; }
+    if b[4] != 5 as u8 { fails = fails + 1; }
+    // 第 6 字节起必须是哨兵 —— 若 mem_copy 多写,这里会红
+    if b[5] != 170 as u8 { fails = fails + 1; }
+    if b[6] != 170 as u8 { fails = fails + 1; }
+    if b[7] != 170 as u8 { fails = fails + 1; }
+
+    // ── mem_compare: 逐字节相同 → 0 ──
+    if mem::mem_compare(a as *u8, b as *u8, 5 as i64) != 0 { fails = fails + 1; }
+
+    // ── mem_set: 只设 n 字节,哨兵不能被动 ──
+    mem::mem_set(b as *u8, 66 as i32, 4 as i64);
+    if b[0] != 66 as u8 { fails = fails + 1; }
+    if b[1] != 66 as u8 { fails = fails + 1; }
+    if b[2] != 66 as u8 { fails = fails + 1; }
+    if b[3] != 66 as u8 { fails = fails + 1; }
+    // 第 6 字节起必须是哨兵 —— 若 mem_set 多写,这里会红
+    // (b[4] 是上面 mem_copy 复制过来的 5,不是哨兵)
+    if b[4] != 5 as u8 { fails = fails + 1; }
+    if b[5] != 170 as u8 { fails = fails + 1; }
+    if b[6] != 170 as u8 { fails = fails + 1; }
+    if b[7] != 170 as u8 { fails = fails + 1; }
+
+    // ── mem_compare: 已被改过 → 非 0 ──
+    if mem::mem_compare(a as *u8, b as *u8, 5 as i64) == 0 { fails = fails + 1; }
+
+    // ── mem_find_byte: a 里找 3 → index 2;找 99 → -1 ──
+    if mem::mem_find_byte(a as *u8, 16 as i64, 3 as i32) != 2 as i64 { fails = fails + 1; }
+    if mem::mem_find_byte(a as *u8, 16 as i64, 99 as i32) != 0 as i64 - (1 as i64) {
+        fails = fails + 1;
+    }
+
+    // ── mem_zero: 前 4 字节清零,哨兵不动 ──
+    mem::mem_zero(b as *u8, 4 as i64);
+    if b[0] != 0 as u8 { fails = fails + 1; }
+    if b[1] != 0 as u8 { fails = fails + 1; }
+    if b[2] != 0 as u8 { fails = fails + 1; }
+    if b[3] != 0 as u8 { fails = fails + 1; }
+    if b[4] != 5 as u8 { fails = fails + 1; }
+    if b[5] != 170 as u8 { fails = fails + 1; }
+
+    // ── ptr_add: 按**字节**偏移(不是按元素)──
+    // a 是 u8 数组 ⇒ 偏移 2 就是第 3 个字节
+    let p2 = mem::ptr_add(a as *u8, 2 as i64);
+    if *(p2 as *u8) != 3 as u8 { fails = fails + 1; }
+    let p0 = mem::ptr_add(a as *u8, 0 as i64);
+    if *(p0 as *u8) != 1 as u8 { fails = fails + 1; }
+
+    return fails;
+}

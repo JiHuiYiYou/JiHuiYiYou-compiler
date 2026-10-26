@@ -1,0 +1,10 @@
+// spec_err_const_in_fn.jhyy — spec §12:仅支持**顶层** const;函数体内不允许
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「仅支持顶层 const;函数体内不允许」
+// 这条限制零回归门。
+//
+// EXPECT-ERROR: "unexpected token 'const' in expression"
+fn main_jhyy() -> i32 {
+    const ARR: [i32; 2] = [1, 2];
+    return ARR[0];
+}

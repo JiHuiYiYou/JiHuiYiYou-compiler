@@ -1,0 +1,18 @@
+// spec_err_fn_ptr_type.jhyy — spec §2.2 / §5.7:函数指针类型语法未实装
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):spec §2.2 的复合类型表里列了
+// `fn(...)` 函数指针,§5.7 说「闭包值可当函数值传递 / 调用」—— 但
+// **parser 不认 `fn(...)` 类型注解**(`fn(i32) -> i32` 与 `fn(i32)` 都被拒)。
+// ⇒ 这两条 spec 措辞与实现不符;本门把「实现现状」钉住,spec 已同步降级
+// (见 docs/abis/jhyy-lang-spec-v4.0.0.md 附录 B)。
+//
+// 内部有 KIND_FUNC 类型(见 compiler/src0/types.jhyy),但**没有语法入口**。
+//
+// EXPECT-ERROR: "expected ), got ->"
+fn apply(f: fn(i32) -> i32, x: i32) -> i32 {
+    return f(x);
+}
+
+fn main_jhyy() -> i32 {
+    return apply(|n: i32| { n + 1 }, 41);
+}

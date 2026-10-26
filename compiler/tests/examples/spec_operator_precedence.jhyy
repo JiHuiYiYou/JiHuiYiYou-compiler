@@ -1,0 +1,78 @@
+// spec_operator_precedence.jhyy — spec §4.1 / §4.2:运算符优先级与短路求值
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):spec §4.1 明列 12 级优先级表,
+// 并点名三处「与直觉/与旧规范不同」的点(|| 比 && 松、复合赋值与 = 同级、
+// as 与 * / % 同级)—— 但回归套件里**没有一条用例**专门验优先级。
+// 优先级写错会让整个语言静默算错值,是最难靠肉眼发现的一类缺陷。
+//
+// 覆盖:
+//   ① || 比 && 松(spec §4.1 点 1)
+//   ② << 比 + 紧(移位优先于加法)
+//   ③ as 与 * 同级、左结合 ⇒ (2*3) as i64 == 6
+//   ④ && / || 短路求值(spec §4.2)
+//   ⑤ ! 是逻辑非、~ 是按位取反(spec §4.2)
+//
+// EXPECT: 0
+
+// counter 是顶层全局 —— 用来观测短路求值到底执行了几次
+let mut counter: i32 = 0;
+
+fn bump() -> bool {
+    counter = counter + 1;
+    return true;
+}
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+
+    // ── ① || 比 && 松 ──
+    // 若 || 更松 ⇒ a || (b && c);若 && 更松 ⇒ (a || b) && c
+    // 取 a=T, b=F, c=F:
+    //   || 更松 ⇒ true || (false && false) = true
+    //   && 更松 ⇒ (true || false) && false = false
+    // 两种规则结果不同 ⇒ 这条能区分。
+    let mut r: i32 = 0;
+    if (1 == 1) || (1 == 2) && (1 == 3) {
+        r = 1;
+    }
+    if r != 1 { fails = fails + 1; }
+
+    // ── ② << 比 + 紧 ──
+    // `1 << 2 + 1` ⇒ 1 << (2+1) = 8;若 + 更紧则是 (1<<2)+1 = 5
+    let sh: i32 = 1 << 2 + 1;
+    if sh != 8 { fails = fails + 1; }
+
+    // ── ③ as 与 * 同级、左结合 ⇒ (2*3) as i64 ──
+    let v: i64 = 2 * 3 as i64;
+    if v != 6 { fails = fails + 1; }
+
+    // ── ④ && / || 短路求值 ──
+    // bump() || bump():第一个为 true ⇒ 第二个**不执行** ⇒ counter 只 +1
+    counter = 0;
+    if bump() || bump() {
+        r = 2;
+    }
+    if counter != 1 { fails = fails + 1; }
+    if r != 2 { fails = fails + 1; }
+
+    // && 同样短路:第一个为 false ⇒ 第二个不执行
+    counter = 0;
+    if bump() && bump() {
+        r = 3;
+    }
+    // bump() 第一次返回 true ⇒ 两次都执行 ⇒ counter == 2
+    if counter != 2 { fails = fails + 1; }
+    if r != 3 { fails = fails + 1; }
+
+    // ── ⑤ ! 是逻辑非、~ 是按位取反 ──
+    let mut t: i32 = 0;
+    if !false { t = 1; }
+    if t != 1 { fails = fails + 1; }
+    let mut f: i32 = 0;
+    if !true { f = 1; }
+    if f != 0 { fails = fails + 1; }
+    let bit: i32 = ~0;
+    if bit != 0 - 1 { fails = fails + 1; }
+
+    return fails;
+}

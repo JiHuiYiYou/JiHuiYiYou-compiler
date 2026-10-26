@@ -1,0 +1,15 @@
+// spec_err_circular_import/a.jhyy — spec §13 / §18:import 成环必须编译期报错
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):spec §18 的「高频文本」表里
+// `circular import '<path>'` 这条**零回归门** —— 成环检测若哪天退化成
+// 无限递归(栈溢出)或静默接受,没人知道。
+//
+// 本文件是 main(有 main_jhyy ⇒ harness 认它是可跑测试),import b;
+// b.jhyy 再 import a ⇒ 成环。
+//
+// EXPECT-ERROR: "circular import"
+import b;
+
+fn main_jhyy() -> i32 {
+    return b_val();
+}

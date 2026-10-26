@@ -1,0 +1,44 @@
+// spec_int_suffix_i16_u64.jhyy — spec §2.5:整数字面量的 i16 / u64 后缀
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):int_suffix.jhyy 覆盖了
+// i8/u8/i32/i64/u32/u16,**独缺 i16 与 u64**;且没有任何用例验证 > 32-bit 的
+// i64/u64 字面量(它们走 movabsq 路径,与小立即路径不同)。
+//
+// ⚠️ u64 **最大值**不在本用例范围 —— `18446744073709551615u64` 会被解析成
+// i64 max(已知限制,见 int_suffix.jhyy 头部注释)。本用例用 18000000000u64。
+//
+// EXPECT: 0
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+
+    // ── i16 后缀 ──
+    let a: i16 = 1000i16;
+    if a as i32 != 1000 { fails = fails + 1; }
+    let b: i16 = 0i16 - 1000i16;
+    if b as i32 != 0 - 1000 { fails = fails + 1; }
+    let c: i16 = 32767i16;
+    if c as i32 != 32767 { fails = fails + 1; }
+
+    // ── u16 后缀 ──
+    let d: u16 = 65535u16;
+    if d as i32 != 65535 { fails = fails + 1; }
+    let e: u16 = 0u16;
+    if e as i32 != 0 { fails = fails + 1; }
+
+    // ── u64 后缀(> 32-bit ⇒ 走 movabsq 路径)──
+    let f: u64 = 18000000000u64;
+    if f != 18000000000u64 { fails = fails + 1; }
+
+    // ── i64 后缀(> 32-bit)──
+    let g: i64 = 18000000000i64;
+    if g != 18000000000i64 { fails = fails + 1; }
+    let h: i64 = 4000000000i64;
+    if h != 4000000000i64 { fails = fails + 1; }
+
+    // ── 无后缀但超出 32-bit 的 i64 字面量(默认 i32 语境下会溢出)──
+    // 注:这里显式标注 i64,验证字面量本身不被截断。
+    let i: i64 = 4000000000;
+    if i != 4000000000 { fails = fails + 1; }
+
+    return fails;
+}

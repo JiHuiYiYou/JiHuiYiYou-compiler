@@ -1,0 +1,10 @@
+// spec_err_underscore_literal.jhyy — spec §2.5:下划线分隔的数字字面量未实装
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「1_000_000 解析错误」这条
+// 零回归门。
+//
+// EXPECT-ERROR: "expected ;, got ident"
+fn main_jhyy() -> i32 {
+    let x = 1_000_000;
+    return 0;
+}

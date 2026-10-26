@@ -1,0 +1,11 @@
+// spec_err_len_on_cstr.jhyy — spec §10.2:len() 只接受切片 / 数组
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「`len()` 是内建,只接受切片 / 数组;
+// 对字符串字面量(`*u8`)不适用」这条限制零回归门。
+//
+// EXPECT-ERROR: "undefined variable"
+fn main_jhyy() -> i32 {
+    let s: *u8 = "hi" as *u8;
+    let n = len(s);
+    return n as i32;
+}

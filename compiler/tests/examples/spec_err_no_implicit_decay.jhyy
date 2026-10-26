@@ -1,0 +1,11 @@
+// spec_err_no_implicit_decay.jhyy — spec §2.5:字符串字面量**无隐式 decay**
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「没有隐式 decay:`let s: [*]u8 =
+// "hello";` 会得到 type mismatch in let」这条限制零回归门(既有测试全都写
+// `as [*]u8`,从没验过**不写**会怎样)。
+//
+// EXPECT-ERROR: "type mismatch in let"
+fn main_jhyy() -> i32 {
+    let s: [*]u8 = "hello";
+    return 0;
+}

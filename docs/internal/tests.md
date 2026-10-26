@@ -2,8 +2,8 @@
 
 > 集成测试清单 + 运行方法。详细每条 .jhyy 的预期值见 `compiler/tests/examples/`。
 >
-> **Last updated**: 2026-10-24 — `regress.py` = **186/186 PASS(全部有断言)+ 0 XFAIL + 19 SKIP**
-> (205 total)。`closure_check.sh` v2.s == v3.s byte-identical。
+> **Last updated**: 2026-10-26 — `regress.py` = **245 PASS + 3 XFAIL + 0 failed + 20 SKIP**
+> (268 total)。`closure_check.sh` v2.s == v3.s byte-identical。
 > 本机 Docker 已起 → `--cross=auto` 解析成 **docker**,6 个 sysv 用例**本地也真跑**
 > (exit=28/217/42/35/18/42 全对)。
 >
@@ -49,10 +49,11 @@ python scripts/dev/audit_test_assertions.py --strict   # 有违规 exit 1(挂 CI
 
 | 分类 | 数量 | 实际验了什么 |
 |---|---|---|
-| **真断言**(`real` + `out-asserted`) | **160** | 结果正确 |
-| `literal-return-ok` | 7 | 合理例外:`exit_zero_extend_*` + `hello`,被测对象就是退出码 |
-| `expect-error` | 6 | 编译必须失败且 stderr 含关键字 |
-| `skipped` | 10 | `// SKIP:` |
+| **真断言**(`real` + `out-asserted`) | **193** | 结果正确 |
+| `literal-return-ok` | 8 | 合理例外:`exit_zero_extend_*` + `hello`,被测对象就是退出码 |
+| `expect-error` | 44 | 编译必须失败且 stderr 含关键字 |
+| `xfail` | 3 | 预期内失败(真跑;修好 ⇒ XPASS ⇒ suite 红)—— `spec_shadowing.jhyy`(W-142)/`spec_ptr_float_cast.jhyy`(W-143)/`spec_struct_array_field.jhyy`(W-144) |
+| `skipped` | 6 | `// SKIP:` |
 | `library` | 14 | 无 `fn main_jhyy` |
 
 **零信号合计 0。** 曾是 54(43 个只验没崩 + 11 个有 EXPECT 但不可能失败),
@@ -289,7 +290,8 @@ baseline 历史:
 - v2.0.0 → v2.4.0 — 104/104 PASS + 4 SKIP(108 total)
 - v4.0.8 — 173/173 PASS + 5 XFAIL + 19 SKIP(197 total)
 - v4.0.16 — 181/181 PASS + 2 XFAIL + 20 SKIP(203 total)
-- **v4.0.20 — 186/186 PASS + 0 XFAIL + 19 SKIP(205 total)** ← 当前(2026-10-24 实测)
+- v4.0.20 — 186/186 PASS + 0 XFAIL + 19 SKIP(205 total)
+- **v4.0.22 — 245 PASS + 3 XFAIL + 0 failed + 20 SKIP(268 total)** ← 当前(2026-10-26 实测;lang-spec 覆盖审计补 49 条门)
 
 ⚠️ 数量涨了不代表覆盖变强。**断言强度**和**失败模式覆盖**是两个轴:
 前者今天清零了(零信号 54 → 0),后者仍然低 —— 一个没有测试的 bug,

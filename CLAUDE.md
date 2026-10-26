@@ -4,11 +4,16 @@
 当前: **🟢 v4.0.19 发布**（2026-10-20，**台账 ACTIVE 桶首次清空(14 → 0)**）——
 <https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v4.0.19>
 （installer .exe + compiler .msi + vscode .vsix + SHA256.txt）。
-**🟡 v4.0.21 进行中**（2026-10-25，**W-136 side-file per-pid 唯一化 + W-137 Makefile
-变量漏改 + W-138 跨盘改名** ⇒ **200/200 PASS + 0 XFAIL + 19 SKIP**(219 total)；
-本机 Docker 起 daemon 后 **7 个** sysv 用例本地也真跑；artifact_checks **14 PASS**
-(新增 `helpers_symbols` + `crossvolume_rename` 两道门)；台账 **0 ACTIVE / 0 DEFERRED**）
+**🟡 v4.0.22 进行中**（2026-10-26，**lang-spec 覆盖审计：补 49 条回归门 + std lib 三处
+真缺陷真修 + 3 条 ACTIVE 入账** ⇒ **245 PASS + 3 XFAIL + 0 failed + 20 SKIP**(268 total)；
+artifact_checks **14 PASS**；closure_check PASS(v2.s == v3.s)；台账 **3 ACTIVE / 0 DEFERRED**）
 —— **未发布**，下一个动作 = 走发布链 + promote v4.0.0 final。
+⚠️ v4.0.22 最值得记住的一条：**6 个 std 模块的测试全是 inline 副本** ⇒ 改
+`compiler/src0/std/*.jhyy` 真身**零回归覆盖**，而且副本里是**同样的错误代码**
+⇒ 副本测试给错误实现背书。补的 6 个 `std_*_import.jhyy`(第一次 import 真身)
+当场挖出三处真缺陷：**字节循环写穿 4n 字节**(12 处)、**`import string;` 编译失败**、
+**arena 把分配互相踩 ⇒ AV**。详见
+[`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md) § v4.0.22。
 ⚠️ 本轮最值得记住的两条：
 ① **「链接失败」的三层掩护**（悬空注释吞掉 C 桥符号 → `$(CFLAGS_STAGE0)` 未定义
 把 `-Wall -Wextra` 一起丢掉 → PATH 里 `/mingw64/bin` 抢在 ucrt64 前面导致 ld
@@ -153,7 +158,15 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 
 ## 当前活跃 workarounds
 
-**0 ACTIVE / 0 DEFERRED**(2026-10-25 —— ACTIVE 仍为 **0**;DEFERRED 也归零了:W-134.1
+**3 ACTIVE / 0 DEFERRED**(2026-10-26 —— ACTIVE 从 0 涨到 **3**,三条都是
+lang-spec 覆盖审计撞出来的,都挂了 XFAIL 门:**W-142** = 同作用域 shadowing 让
+**编译器**崩溃(0xC0000005);**W-143** = 浮点↔指针**不是按位重解释**(浮点→指针走
+数值截断;指针→浮点**静默给 0**);**W-144** = 数组类型的 struct 字段**没被拷贝**
+(字面量读到垃圾 + 按值赋值 ACCESS_VIOLATION)。
+**W-139 / W-140 / W-141 三个 RESOLVED** 是同一轮挖出的 std lib 真缺陷(字节循环
+写穿 4n 字节 / `import string;` 编译失败 / arena 分配互相踩)—— 根因都是
+「**6 个 std 模块的测试全是 inline 副本**」⇒ 改真身零覆盖、副本给错误实现背书。
+(此前:2026-10-25 —— ACTIVE 仍为 **0**;DEFERRED 也归零了:W-134.1
 的 CI pytest step 已由 commit `2ab0f24` 落地,台账此前忘了翻状态 ⇒ 0/0;2026-10-20 曾清零 14 → 0,清零过程:**W-104 RESOLVED**(v4.0.12 —— ≤16B eightbyte 分类 + >16B MEMORY class 整体落栈,与 gcc 三方向对拍全绿);**W-114 RESOLVED**(v4.0.14 —— enum 的 ABI 两侧统一:参数按地址传、返回值走 sret、调用结果是 8 字节指针;顺带修了 **W-119**:SysV 帧布局把第 0 号局部变量放在 `0(%rbp)` = 覆盖旧 rbp);**W-112 RESOLVED**(v4.0.16 —— `#[link_section]` 的 `.section` 之前被插进 link 路径的副本,磁盘上的 .s 里没有);**W-103 RESOLVED**(v4.0.16 —— `std_os_*` 五个 mock 接真 libc bridge;顺带把 POSIX/Win 的 `O_*` flag 差异在桥这一层翻译掉 —— **Windows 的 `_O_CREAT`=0x100 不是 POSIX 的 0x40**,mock 从不调 `open(2)` 所以这错一直藏着;并让 std lib **第一次真的可被用户代码 import**(`import os;` 两级查找:main 文件旁边 → std lib 目录)),测试从 inline 副本改成 import 真身),**W-107 RESOLVED**(v4.0.17 —— 五张 per-fn 表改成**按实际函数数**分配,固定上限 4096 与「太多函数」的响亮守门一并删除,**没有上限了**;顺带挖出并修掉 **W-120**:temp 表的 65536 上限会让**越界静默算错值** —— 修 W-107 会暴露它,两者必须一起做),**W-105 + W-105.1 RESOLVED**(v4.0.18 —— (a)「`&mut` 真的能用」(v4.0.15)+ (b)**最小独占检查**(同作用域内双 `&mut` 互斥)落地;`check_borrow` / `check_cap_pass` 两个「恒 return 1 的假装会检查」函数都删掉了。**上一版 (b) 失败的真根因是 W-107**(per-fn 表的固定上限:那次尝试加了几个顶层函数把 main.jhyy 推过 1024 → 被丢弃的函数帧算成 8 字节 → 「帧偏移 ≈ -515KB 的写」),W-107 改成按实际函数数分配后阻塞自然消失),**W-118 RESOLVED**(v4.0.18 —— 语言 lexer 的 `lex_peek_char` 加 EOF 守卫;**防御性**修复:这条从来没观测到危害,只是把「EOF 是隐式的」变成显式的),顺带挖出并修掉 **W-121**(合成 closure 的符号名取自**节点堆地址** ⇒ ASLR ⇒ **同一编译器连编两次 `.s` 就不同**,产物不可复现;改用计数器)和 **W-122**(四个 side-file 用**固定路径** ⇒ 上一次编译的内容泄漏到下一次 —— `--no-link` 批量编译后紧接 `make` 会用 no_std 的链接行链一个正常程序 ⇒ 整个 build 挂掉),**W-113 RESOLVED**(v4.0.18 —— `asm!` / `fence_*` 的文本经 IL(`dbgasm <hex>`)**内联进函数体**;之前是 append 到 .s 末 = 落在所有函数之外 = **死字节** —— 连**内存屏障都从来没执行过**;`asm_before_ret` 从 KNOWN-FAIL 升级成真门),**W-115 RESOLVED**(v4.0.18 —— W-089 的 reproducer 之所以 STACK_OVERFLOW,根因**不是** W-089:是那个 8-subtest 里的**闭包捕获了外层变量** —— 闭包捕获在 v3.2.1 的 MVP 范围里明确不支持,但编译器**没有任何检查** ⇒ 给它生成坏代码(env 压根没传进合成 fn)⇒ 运行时炸。现在**编译期明确报错** ✓,reproducer 已转 PASS(EXIT=0)——「W-089 已 RESOLVED」这句话**现在有证据支撑**了),**W-106 RESOLVED**(v4.0.19 —— 那处「每次 symbol lookup 白造一个 StringBuilder」的
 死存储删掉了:它注释里的理由(「逼 codegen 物化栈帧」)**早就被证伪**(删不删栈帧都
 完整物化);而 2026-10-18 那次「删掉它 ⇒ 偶发失败 ⇒ 它承重」的对照实验**归错了因** ——
@@ -164,6 +177,12 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
+| W-142 | — | 🔴 **ACTIVE** —— **同作用域 shadowing 让编译器崩溃**(0xC0000005)。根因链已定位到源码行:`parser.jhyy:2374` 的 `parse_let` 调 `symtab_insert` → `symtab.jhyy:212-216` 的「重复检查(同 scope)」命中时 **`return 0`** ⇒ AST 的 sym 是 null → sema 无条件 `(*sym).type_ptr = ...` ⇒ **空指针写**。实测 `jhyy.exe` / `jhyy_v1.exe.exe` / `jhyy_v3_fp` / `jhyy_v10_fp` **全部崩** ⇒ 长期存在(至少从 v1 起);嵌套作用域正常 ⇒ 病灶精确在「同作用域」。门:`spec_shadowing.jhyy`(**XFAIL**,修好 ⇒ XPASS ⇒ 强制摘标记) |
+| W-144 | — | 🔴 **ACTIVE** —— **数组类型的 struct 字段没被拷贝**。根因:`codegen.jhyy` 的 `cg_emit_store` 有 **KIND_STRUCT** 分支(递归拷贝嵌套 struct)但**没有 KIND_ARRAY 分支** ⇒ 数组字段落到「按标量存一个值」的兜底路径 ⇒ 存进去的是数组的**地址**。症状:struct 字面量里的数组字段读到**未初始化垃圾**;按值赋值 `a = Arr { buf: plain };` ⇒ **ACCESS_VIOLATION**;含数组字段的 struct `==` 退化成**身份比较**。门:`spec_struct_array_field.jhyy`(**XFAIL**) |
+| W-143 | — | 🔴 **ACTIVE** —— **浮点 ↔ 指针不是按位重解释**。spec §4.3 的转换表承诺「浮点 ↔ 指针 ✅(按位重解释)」,实测两头都不符:`1.5 as *i64` = **1**(数值截断,不是 0x3FF8000000000000);`(1 as *i64) as f64` = **0.0**(既不是地址也不是位模式 ⇒ **静默错值**)。门:`spec_ptr_float_cast.jhyy`(**XFAIL**,按 spec 承诺写断言) |
+| W-139 | — | ~~std lib 的字节循环写 `*(p as *i32) = v` ⇒ store 宽度 4 字节 ⇒ 请求 n 字节实际写 4n 字节~~ ✅ **2026-10-26 已修**:jhyy 的 store 宽度跟 **cast 后的 pointee 类型**走(实测 `*(p as *i32) = 0x41424344` 写 4 字节、`*(p as *u8)` 写 1 字节)⇒ 12 处字节循环的读写统一改成 `*u8` 宽度(mem/fmt/string/vec)。`mem_set(b, 0x41424344, 4)` 修前写 7 字节(踩掉哨兵)修后写 4 字节 ✓ |
+| W-140 | — | ~~`std/string.jhyy` 的 `str_find` 返回裸字面量 ⇒ `import string;` 编译失败~~ ✅ **2026-10-26 已修**:`-> i64` 的函数里 `return 0;` 推断成 i32 ⇒ 类型不匹配 ⇒ 改 `return 0 as i64;` |
+| W-141 | — | ~~`std/string.jhyy` 的 arena 新建 block 时 payload 起点压在 next 指针上、且 bump 指针不推进 ⇒ 分配互相踩 ⇒ ACCESS_VIOLATION~~ ✅ **2026-10-26 已修**:block 布局改成 `[next(8B)][payload_size(8B)][payload...]`,payload 起点 = `raw+16`,`cur` 推进到 `data_start+size` |
 | W-105 | — | ~~`&mut` 独占性完全不检查~~ ✅ **2026-10-20 已修**:(a)「`&mut` 真的能用」+ (b)**最小独占检查**(同作用域内双 `&mut` 互斥,新测试 `borrow_mut_conflict.jhyy` EXPECT-ERROR ✓)。词法作用域(borrow 提前结束会误报)—— 完整 NLL/Polonius 留 backlog v4.3.0 |
 | W-103 | — | ~~`std_os_open/close/read/write` 全是 M0 mock,`std_os_exit` 不退出进程~~ ✅ **2026-10-20 已修**:5 个 libc bridge 进 `jhyy_helpers.c`;`import` 加 std lib 目录回落 → 测试改 import 真身(新增 `std_os_exit.jhyy` 验进程真退出) |
 | W-107 | — | ~~五个 per-fn 表按固定上限分配~~ ✅ **2026-10-20 已修**:改成**按实际函数数**分配(`fn_count + 1`),`MAX_FN_ENTRIES` 常量删除、「太多函数」守门删除 —— **没有上限了**。之前那次动态分配被撤回,是因为「查表上界」那另一半真修还没落地(两者从未同时存在);这次两半齐了 |
@@ -203,7 +222,10 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 | W-134 | ~~MCP pytest 套件里有一个**恒红**的陈旧测试~~ ✅ **2026-10-25 已修** —— `test_regress_baseline_drift_detection` 断言「sha 漂移 ⇒ 报 binary drifted」,但那个行为已被上一轮 commit `f72cef4` 刻意换成「binary 比源旧」的新鲜度检查 ⇒ **从那次起套件就是红的**,而 CI 从不跑 pytest ⇒ 没人发现。修法:拆成两条 —— `test_regress_sha_drift_is_not_fatal`(漂移**不**误报)+ `test_regress_stale_binary_detected`(binary 比源旧 ⇒ early_abort `older than source`)。**套件 40 passed / 1 skipped / 0 failed** |
 | W-134.1 | **DEFERRED** —— `mcp-jhyy/tests/`(41 个测试)在 CI 里**零覆盖**(`ci.yml` 没有 pytest step,也没有任何 `pip install`)⇒ 套件红绿都不影响 CI 结论。补 CI step 需要**第一个网络依赖**(fastmcp / pytest / pytest-asyncio),而本机 MSYS2 python 连 pip 都没有 ⇒ 命令**无法本地验证** ⇒ 建议单独一个 commit + 先在 PR 分支观察一轮 |
 
-**回归现状(2026-10-24 实测,本轮真修后):200/200 PASS + 0 XFAIL + 19 SKIP(219 total)**
+**回归现状(2026-10-26 实测,lang-spec 覆盖审计后):245 PASS + 3 XFAIL + 0 failed + 20 SKIP(268 total)**
+(新增 49 条门:6 个 std lib 真身覆盖 + 11 个 spec 正向行为 + 31 个错误诊断门 +
+1 个聚合比较字段类型矩阵;3 个 XFAIL = `spec_shadowing.jhyy`(W-142)/
+`spec_ptr_float_cast.jhyy`(W-143)/`spec_struct_array_field.jhyy`(W-144))
 (本日早些时候 —— W-126 / W-124 / W-125 修完时 —— 是 186/186 + 0 XFAIL + 19 SKIP / 205 total;
 再往前 184/184 + 2 XFAIL + 20 SKIP / 203 total)。本机 Docker Desktop 起 daemon 后
 `regress.py --cross=auto` 解析成 **docker** ⇒ **7 个** sysv 用例本地也真跑

@@ -1,0 +1,53 @@
+// spec_struct_array_field.jhyy — spec §4.2.1 / §8:数组类型的 struct 字段
+//
+// ⚠️ 这是 2026-10-26 lang-spec 覆盖审计挖出的**实现缺口**。
+//
+// 实测(2026-10-26),数组类型的 struct 字段有两处坏:
+//   ① **字面量不拷贝**:let a1 = Arr { buf: [1,2,3] }; 之后 a1.buf 读到的是
+//      **未初始化垃圾**(实测 -935332216 / -624410634 / 31115327),不是 1/2/3。
+//   ② **按值赋值崩**:`a = Arr { buf: plain };` ⇒ **ACCESS_VIOLATION**。
+//
+// 根因(已定位到源码行):compiler/src0/codegen.jhyy 的 `cg_emit_store` 有
+// **KIND_STRUCT** 分支(递归拷贝嵌套 struct),但**没有 KIND_ARRAY 分支**
+// ⇒ 数组字段落到「按标量存一个值」的兜底路径 ⇒ 存进去的是数组的**地址**
+// 而不是元素内容 ⇒ ① 读到垃圾;② 之后按它当指针解引用 ⇒ AV。
+//
+// 影响:spec §4.2.1 承诺的「数组 → 逐元素比较」在**顶层**可用
+// (agg_eq_array.jhyy ✓),但**作为 struct 字段**不可用 ⇒ struct 的 `==`
+// 对含数组字段的结构体退化成**身份比较**(实测 a1 == a1 为 true、a1 == a2 为
+// false,尽管两者内容相同)。
+//
+// 本用例按 spec 的承诺写断言 ⇒ 当前实现达不到 ⇒ XFAIL。
+// 修好后本用例 XPASS ⇒ suite 失败 ⇒ 强制有人摘标记。
+//
+// 台账:**W-144**
+//
+// EXPECT: 0
+// XFAIL: W-144 数组类型 struct 字段:字面量不拷贝(读到垃圾)+ 按值赋值 ACCESS_VIOLATION
+type Arr = struct { buf: [i32; 3] }
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+
+    // ① 字面量必须真的把数组拷进 struct
+    let a1 = Arr { buf: [1 as i32, 2 as i32, 3 as i32] };
+    if a1.buf[0] != 1 { fails = fails + 1; }
+    if a1.buf[1] != 2 { fails = fails + 1; }
+    if a1.buf[2] != 3 { fails = fails + 1; }
+
+    // ② 按值赋值不能崩,且内容要一致
+    let plain: [i32; 3] = [7 as i32, 8 as i32, 9 as i32];
+    let mut a2 = Arr { buf: [0 as i32, 0 as i32, 0 as i32] };
+    a2 = Arr { buf: plain };
+    if a2.buf[0] != 7 { fails = fails + 1; }
+    if a2.buf[2] != 9 { fails = fails + 1; }
+
+    // ③ 含数组字段的 struct,`==` 必须按值比(而不是比地址)
+    let b1 = Arr { buf: [1 as i32, 2 as i32, 3 as i32] };
+    let b2 = Arr { buf: [1 as i32, 2 as i32, 3 as i32] };
+    let b3 = Arr { buf: [1 as i32, 9 as i32, 3 as i32] };
+    if !(b1 == b2) { fails = fails + 1; }
+    if b1 == b3 { fails = fails + 1; }
+
+    return fails;
+}

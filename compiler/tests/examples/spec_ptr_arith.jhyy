@@ -1,0 +1,35 @@
+// spec_ptr_arith.jhyy — spec §7.1:指针算术按元素缩放、指针差是元素个数
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):spec §7.1 明写「指针算术 p + n /
+// p - n 是按元素缩放的:p + 1 在 *i32 上前进 sizeof(i32) = 4 字节;p - q 的
+// 结果是元素个数(i64)」—— 回归套件里**零覆盖**(所有指针测试都靠 std::mem 的
+// ptr_add 帮手,那是字节偏移,不是语言级指针算术)。
+//
+// EXPECT: 0
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+
+    let mut arr: [i32; 4] = [10 as i32, 20 as i32, 30 as i32, 40 as i32];
+    let p = &arr[0];
+    let q = &arr[3];
+
+    // ── p - q = 元素个数(i64)──
+    let d = q - p;
+    if d != 3 as i64 { fails = fails + 1; }
+
+    // ── p + n 按元素缩放(不是按字节)──
+    let r = p + 1;
+    if *(r as *i32) != 20 { fails = fails + 1; }
+    let r3 = p + 3;
+    if *(r3 as *i32) != 40 { fails = fails + 1; }
+
+    // ── p - n ──
+    let s = q - 1;
+    if *(s as *i32) != 30 { fails = fails + 1; }
+
+    // ── p + n 之后再减回来,应回到同一个地址 ──
+    let back = (p + 2) - 2;
+    if back != p { fails = fails + 1; }
+
+    return fails;
+}

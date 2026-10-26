@@ -1,0 +1,11 @@
+// spec_err_type_decl_semicolon.jhyy — spec §2.3 / §18:type 声明结尾不能带分号
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):spec §18 的「高频文本」表里
+// `unexpected token ';' in expression` 这条**零回归门**。
+//
+// EXPECT-ERROR: "unexpected token ';' in expression"
+type P = struct { x: i32 };
+
+fn main_jhyy() -> i32 {
+    return 0;
+}

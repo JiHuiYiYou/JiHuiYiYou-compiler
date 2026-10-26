@@ -1,0 +1,10 @@
+// spec_err_if_branch_block.jhyy — spec §5.1:if/else 分支体是**表达式**,不能写块
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「分支体是表达式,不能写 `{ stmt; }`
+// 块」这条限制零回归门。
+//
+// EXPECT-ERROR: "unexpected token 'let' in expression"
+fn main_jhyy() -> i32 {
+    let x = if 1 == 1 { let y = 2; } else { 0 };
+    return x;
+}

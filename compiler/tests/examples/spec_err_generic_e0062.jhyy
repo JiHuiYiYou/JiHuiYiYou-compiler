@@ -1,0 +1,15 @@
+// spec_err_generic_e0062.jhyy — spec §18:E0062 泛型 type-param 推断冲突
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):E0062 零回归门。
+// 触发写法:同一个 type-param 从两个实参推出不同的类型。
+//
+// EXPECT-ERROR: "E0062"
+fn max<T>(a: T, b: T) -> T {
+    if a > b { return a; }
+    return b;
+}
+
+fn main_jhyy() -> i32 {
+    let bad = max(1, "str");
+    return 0;
+}

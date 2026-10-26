@@ -1,0 +1,12 @@
+// spec_err_phantomdata_e0050.jhyy — spec §18:E0050 不允许实例化 PhantomData
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):spec §18 的 E0050 / E0060 / E0062
+// 三个错误码里,只有 E0060 有门(generics_err_unsubst.jhyy),E0050 与 E0062
+// **零回归门**。
+//
+// EXPECT-ERROR: "E0050"
+let p: PhantomData<i32> = 0;
+
+fn main_jhyy() -> i32 {
+    return 0;
+}

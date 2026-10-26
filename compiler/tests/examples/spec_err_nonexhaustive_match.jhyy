@@ -1,0 +1,20 @@
+// spec_err_nonexhaustive_match.jhyy — spec §18:enum match 未覆盖全变体必须编译期报错
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):spec §18 的「高频文本」表里
+// `non-exhaustive match: missing variant` 这条**零回归门** —— 之前没有任何
+// EXPECT-ERROR 用例钉它。编译器哪天不再做穷尽性检查,门照样绿。
+//
+// EXPECT-ERROR: "non-exhaustive match: missing variant"
+type Opt = enum {
+    A(i32),
+    B(i32),
+    C,
+}
+
+fn main_jhyy() -> i32 {
+    let o = Opt::A(1);
+    match o {
+        Opt::A(x) => x,
+    }
+    return 0;
+}

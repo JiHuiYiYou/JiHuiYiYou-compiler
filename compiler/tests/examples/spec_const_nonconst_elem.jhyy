@@ -1,0 +1,25 @@
+// spec_const_nonconst_elem.jhyy — spec §12:编译器不做 const 表达式检查
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):spec §12 明写「编译器不做 const
+// 表达式检查:元素位置放函数调用能编译通过,但**不会被求值**,运行时取到 0」——
+// 这条行为零覆盖。它是「已实装但受限」清单里的一条,行为一旦漂移(比如哪天
+// 开始真的求值了),没人知道。
+//
+// EXPECT: 0
+fn seven() -> i32 {
+    return 7;
+}
+
+const ARR: [i32; 3] = [seven(), 2, 3];
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+
+    // 元素位置放函数调用 → 编译通过,但不求值 ⇒ 运行时取到 0
+    if ARR[0] != 0 { fails = fails + 1; }
+    // 其余字面量元素正常
+    if ARR[1] != 2 { fails = fails + 1; }
+    if ARR[2] != 3 { fails = fails + 1; }
+
+    return fails;
+}

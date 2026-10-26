@@ -1,0 +1,13 @@
+// spec_err_match_arm_type.jhyy — spec §5.6:所有 arm 返回类型必须一致
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「所有 arm 返回类型必须一致」这条
+// 限制零回归门。
+//
+// EXPECT-ERROR: "match arm type mismatch"
+fn main_jhyy() -> i32 {
+    let v = match 1 {
+        1 => 1,
+        2 => "s",
+    };
+    return v;
+}

@@ -1,0 +1,11 @@
+// spec_err_import_nested_path.jhyy — spec §13:不支持嵌套 import 路径
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):`import utils::io;` 这条限制
+// 在回归套件里没有门 —— 解析器哪天开始支持嵌套路径,没人知道。
+//
+// EXPECT-ERROR: "expected ;, got ::"
+import utils::io;
+
+fn main_jhyy() -> i32 {
+    return 0;
+}

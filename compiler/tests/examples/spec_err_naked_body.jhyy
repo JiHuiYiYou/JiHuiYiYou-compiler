@@ -1,0 +1,14 @@
+// spec_err_naked_body.jhyy — spec §17.3:naked 函数体只能含 asm 语句
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「naked function body may only
+// contain asm!(...) statements」这条限制零回归门。
+//
+// EXPECT-ERROR: "naked function body may only contain asm!"
+#[naked]
+fn irq_entry() {
+    let x = 1;
+}
+
+fn main_jhyy() -> i32 {
+    return 0;
+}

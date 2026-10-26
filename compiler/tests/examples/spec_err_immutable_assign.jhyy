@@ -1,0 +1,11 @@
+// spec_err_immutable_assign.jhyy — spec §3 / §18:给不可变绑定赋值必须编译期报错
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):spec §18 的「高频文本」表里
+// `cannot assign to immutable variable (use let mut)` 这条**零回归门**。
+//
+// EXPECT-ERROR: "cannot assign to immutable variable"
+fn main_jhyy() -> i32 {
+    let x = 1;
+    x = 2;
+    return x;
+}

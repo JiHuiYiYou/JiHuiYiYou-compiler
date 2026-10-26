@@ -1,0 +1,14 @@
+// spec_err_link_section_nonascii.jhyy — spec §17.4:link_section 名必须是可打印 ASCII
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「link_section name contains
+// non-ASCII byte」这条限制零回归门。
+//
+// EXPECT-ERROR: "link_section name contains non-ASCII byte"
+#[link_section(".text.启动")]
+fn _start() -> i32 {
+    return 42 as i32;
+}
+
+fn main_jhyy() -> i32 {
+    return 0;
+}

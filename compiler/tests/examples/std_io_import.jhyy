@@ -1,0 +1,64 @@
+// std_io_import.jhyy — std::io 的**真身**覆盖(import std lib 目录里的 io.jhyy)
+//
+// 为什么要有这个文件(2026-10-26 覆盖审计):
+//   `compiler/tests/examples/std_io_basic.jhyy` 此前是 std/io.jhyy 的 **inline
+//   副本**(文件头写着「test inline 副本用 std_io_* 前缀 fn 名字避免符号
+//   multiple definition」)。副本不受约束 ⇒ 改 `compiler/src0/std/io.jhyy` 真身
+//   **没有任何回归用例发现**。
+//
+// 本文件是 io.jhyy 真身的第一个真实调用方:真开文件、真写、真读回来。
+// 覆盖:std_io_open / std_io_write / std_io_read / std_io_close /
+//      std_io_print / std_io_print_err
+//
+// 路径用相对路径(跟 std_os_basic.jhyy 同约定)⇒ 依赖 regress 从仓根跑。
+//
+// 断言方式:累加 fails 计数(不是字面量 return)⇒ 零信号门通过。
+// EXPECT: 0
+import io;
+
+extern fn printf(fmt: *u8, a: i32, b: i32, c: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+
+    let path = "compiler/build/bin/_std_io_import_tmp.txt" as *u8;
+
+    // ── 写:open("w") → write 5 字节 → close ──
+    let fw = io::std_io_open(path, "w" as *u8);
+    if fw == (0 as *u8) { return 1; }
+    let nw = io::std_io_write(fw, "hello" as *u8, 5 as i64);
+    if nw != 5 as i64 { fails = fails + 1; }
+    let cw = io::std_io_close(fw);
+    if cw != 0 { fails = fails + 1; }
+
+    // ── 读:open("r") → read 5 字节 → 逐字节比对 → close ──
+    let fr = io::std_io_open(path, "r" as *u8);
+    if fr == (0 as *u8) { return 2; }
+    let mut buf: [u8; 8] = [0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                            0 as u8, 0 as u8, 0 as u8, 0 as u8];
+    let nr = io::std_io_read(fr, buf as *u8, 5 as i64);
+    if nr != 5 as i64 { fails = fails + 1; }
+    if buf[0] != 104 as u8 { fails = fails + 1; }
+    if buf[1] != 101 as u8 { fails = fails + 1; }
+    if buf[2] != 108 as u8 { fails = fails + 1; }
+    if buf[3] != 108 as u8 { fails = fails + 1; }
+    if buf[4] != 111 as u8 { fails = fails + 1; }
+    // 第 6 字节没被读过 ⇒ 保持 0
+    if buf[5] != 0 as u8 { fails = fails + 1; }
+    let cr = io::std_io_close(fr);
+    if cr != 0 { fails = fails + 1; }
+
+    // ── 打开不存在的文件 → 返回 0(而不是崩)──
+    let bad = io::std_io_open("compiler/build/bin/_definitely_not_here_9d2f.txt" as *u8,
+                              "r" as *u8);
+    if bad != (0 as *u8) { fails = fails + 1; }
+
+    // ── std_io_print / std_io_print_err 走真 stdout/stderr 桥 ──
+    let pr = io::std_io_print("std_io_import ok" as *u8);
+    if pr < 0 { fails = fails + 1; }
+    let pe = io::std_io_print_err("std_io_import err" as *u8);
+    if pe < 0 { fails = fails + 1; }
+
+    printf("std_io_import fails=%d\n", fails);
+    return fails;
+}

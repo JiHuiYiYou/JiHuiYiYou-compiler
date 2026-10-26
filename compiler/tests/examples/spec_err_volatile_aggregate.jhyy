@@ -1,0 +1,12 @@
+// spec_err_volatile_aggregate.jhyy — spec §17.1:volatile 只修饰基础类型
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):「volatile 修饰 struct / 指针 /
+// 数组 / 切片是编译错误」这条限制零回归门。
+//
+// EXPECT-ERROR: "requires a primitive type"
+type P = struct { x: i32 }
+
+fn main_jhyy() -> i32 {
+    let mut v: volatile P = P { x: 1 };
+    return 0;
+}

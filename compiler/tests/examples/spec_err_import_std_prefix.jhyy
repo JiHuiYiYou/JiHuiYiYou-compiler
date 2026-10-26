@@ -1,0 +1,11 @@
+// spec_err_import_std_prefix.jhyy — spec §13 / §18:import 不能带 std 前缀双冒号
+//
+// 覆盖缺口(2026-10-26 lang-spec 覆盖审计):spec §18 的「高频文本」表里
+// `expected ;, got ::` 这条**零回归门**。
+//
+// EXPECT-ERROR: "expected ;, got ::"
+import std::vec;
+
+fn main_jhyy() -> i32 {
+    return 0;
+}

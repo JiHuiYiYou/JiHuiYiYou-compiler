@@ -26,6 +26,10 @@ fn ptr_add(p: *u8, off: i64) -> *u8 {
 // mem_copy — 复制 n 字节从 src 到 dst
 // 语义跟 libc memcpy 一致:不处理 overlap;overlap 用 memmove(M0 不实现)
 // ════════════════════════════════════════════════════
+// ⚠ 2026-10-26 真修(W-139):本文件的字节循环原来写 `*(p as *i32) = v` ——
+// jhyy 的 store 宽度跟 **cast 之后的 pointee 类型**走(4 字节),不跟循环步进走
+// (1 字节)⇒ **请求 n 字节实际写 4n 字节**,多出来的部分踩掉调用方的缓冲区。
+// 现在全部改成 `*u8` 宽度(读侧同理:原来的 `& 0xff` 掩码是多余的)。
 fn mem_copy(dst: *u8, src: *u8, n: i64) -> *u8 {
     if n < (0 as i64) {
         return 0 as *u8;
@@ -34,8 +38,8 @@ fn mem_copy(dst: *u8, src: *u8, n: i64) -> *u8 {
     while i < n {
         let d = ptr_add(dst, i);
         let s = ptr_add(src, i);
-        let v: i32 = *(s as *i32) & (0xff as i32);
-        *(d as *i32) = v;
+        let v: u8 = *(s as *u8);
+        *(d as *u8) = v;
         i = i + (1 as i64);
     }
     return dst;
@@ -50,8 +54,8 @@ fn mem_compare(a: *u8, b: *u8, n: i64) -> i32 {
     }
     let mut i: i64 = 0 as i64;
     while i < n {
-        let av: i32 = *(ptr_add(a, i) as *i32) & (0xff as i32);
-        let bv: i32 = *(ptr_add(b, i) as *i32) & (0xff as i32);
+        let av: i32 = *(ptr_add(a, i) as *u8) as i32;
+        let bv: i32 = *(ptr_add(b, i) as *u8) as i32;
         if av != bv {
             if av < bv {
                 return 0 as i32 - (1 as i32);
@@ -89,7 +93,7 @@ fn mem_set(dst: *u8, val: i32, n: i64) -> *u8 {
         i = i + (8 as i64);
     }
     while i < n {
-        *(ptr_add(dst, i) as *i32) = b;
+        *(ptr_add(dst, i) as *u8) = b as u8;
         i = i + (1 as i64);
     }
     return dst;
@@ -105,7 +109,7 @@ fn mem_find_byte(p: *u8, n: i64, val: i32) -> i64 {
     let b: i32 = val & (0xff as i32);
     let mut i: i64 = 0 as i64;
     while i < n {
-        let v: i32 = *(ptr_add(p, i) as *i32) & (0xff as i32);
+        let v: i32 = *(ptr_add(p, i) as *u8) as i32;
         if v == b {
             return i;
         }
