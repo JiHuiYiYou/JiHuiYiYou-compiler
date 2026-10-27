@@ -152,7 +152,8 @@
 | [W-135](#w-135) | SUPERSEDED | emit 侧两张固定上限表(pending phi / block-name... |
 | [W-134](#w-134) | RESOLVED | MCP pytest 套件里有一个**恒红**的陈旧测试 —— 断言的行为早已被换掉 |
 | [W-134.1](#w-134.1) | RESOLVED | `mcp-jhyy/tests/` 在 CI 里**零覆盖** —— 套件红绿都不影响 CI 结论 |
-| [W-142](#w-142) | ACTIVE | 同作用域 shadowing 让编译器在 sema 阶段**空指针写崩溃**(0xC0000005) |
+| [W-142](#w-142) | RESOLVED | 同作用域 shadowing 让编译器在 sema 阶段**空指针写崩溃**(0xC0000005) |
+| [W-150](#w-150) | RESOLVED | 同作用域重名(fn / type / const / 参数)⇒ 编译器**空指针写崩溃** |
 | [W-141](#w-141) | RESOLVED | std/string.jhyy 的 arena block 布局错误 ⇒ 分配互相踩 ⇒... |
 | [W-140](#w-140) | RESOLVED | std/string.jhyy 的 `str_find` 返回裸字面量 ⇒ `import... |
 | [W-139](#w-139) | RESOLVED | std lib 的字节循环写 `*(p as *i32) = v` ⇒ store 宽度 4 字节... |
@@ -10836,14 +10837,14 @@ msys2 step 用的 MSYS2 python。
 <a id="w-142"></a>
 ## W-142: 同作用域 shadowing 让编译器在 sema 阶段**空指针写崩溃**(0xC0000005)
 
-**状态:** ACTIVE since 2026-10-26 (v4.0.22) — spec §3 承诺的 shadowing 遇同作用域重名 let ⇒ 编译器崩;XFAIL 门已挂
+**状态:** RESOLVED closed 2026-10-27 (v4.0.22) — 同作用域同名 let 改成 **shadowing**(新建 Sym 原地替换旧槽);门已转真门
 **Filed-by:** lang-spec-coverage-audit-2026-10-26
-**日期:** 2026-10-26(lang-spec 覆盖审计时补一条 shadowing 用例才撞出来)
+**日期:** 2026-10-26(lang-spec 覆盖审计时补一条 shadowing 用例才撞出来) → 2026-10-27(真修)
 
-**触发面:** `compiler/src0/parser.jhyy:2374`(`parse_let`)+ `compiler/src0/symtab.jhyy:212-216`
-(`symtab_insert` 的重复检查)+ `compiler/src0/sema.jhyy` 的 `NODE_LET` 分支。
+**触发面:** `compiler/src0/parser.jhyy` 的 `parse_let` + `compiler/src0/symtab.jhyy` 的
+`symtab_insert`(同 scope 重复检查)+ `compiler/src0/sema.jhyy` 的 `NODE_LET` 分支。
 
-**症状:**
+**症状(修前):**
 ```
 $ jhyy.exe compile sh_a.jhyy
 [1] imports start
@@ -10860,39 +10861,102 @@ fn main_jhyy() -> i32 {
 }
 ```
 
-**根因(已定位到源码行):**
-1. `parser.jhyy:2374` `parse_let` 调 `symtab_insert(current_scope, vname, SYM_VAR(), ...)`;
-2. `symtab.jhyy:212-216` 的「重复检查(同 scope)」命中时 **`return 0 as *Sym;`**(注释写着「已定义」)
-   —— 于是 AST 节点的 `sym` 字段是 **null**;
-3. `sema.jhyy` 的 `NODE_LET` 分支拿到该 sym 后**无条件解引用**:
-   `let sym = (*d).sym as *Sym; (*sym).type_ptr = decl_type as *u8;` ⇒ **写 null** ⇒ AV。
+**根因(逐行复核过):**
+1. `parse_let` 调 `symtab_insert(current_scope, vname, SYM_VAR(), ...)` —— **直接插入,
+   不先查**;
+2. `symtab_insert` 的「重复检查(同 scope)」命中时 **`return 0 as *Sym;`**(注释写着
+   「已定义」)⇒ AST 节点的 `sym` 字段是 **null**;
+3. sema 的 `NODE_LET` 分支**无条件解引用**:`let sym = (*d).sym as *Sym;
+   (*sym).type_ptr = decl_type as *u8;` ⇒ **写 null** ⇒ AV。
 
-**workaround(用户侧):** 同作用域内不要复用同一个名字;改成嵌套作用域
-(`if` / 块内另起同名 let 是**正常**的 —— 病灶精确落在「同作用域」)。
+**修法(2026-10-27 真修):** 同作用域同名 `let` ⇒ **shadowing**(spec §3 的原承诺
+「同名 let 建立新绑定覆盖旧的(可以改变可变性)」)⇒ 新增 `symtab_insert_or_shadow`
+(`compiler/src0/symtab.jhyy`):探测到同 scope 同名条目 ⇒ **新建**一个 Sym
+**原地替换**该槽 ⇒ 表里这条名字只剩一条 ⇒ 后续按名查找拿到的就是**新**绑定。
 
-**实测范围(2026-10-26):** `jhyy.exe` / `jhyy_v1.exe.exe` / `jhyy_v3_fp.exe.exe` /
-`jhyy_v10_fp.exe.exe` **全部崩** ⇒ **长期存在的 bug,不是新回归**(至少从 v1 起就在)。
-嵌套作用域的 shadowing 正常 ⇒ 病灶就是 `symtab_insert` 的同 scope 重复检查。
+⚠ 两个必须踩对的实现要点(踩错就是「静默拿到旧值」):
+- **必须新建 Sym,不能复用旧指针** —— codegen 的 local 表按 **sym 指针**认
+  (`cg_find_local`,`codegen.jhyy`)⇒ 复用旧指针 = 「先绑定赢」(`return x` 读到 1)。
+- **必须原地替换,不能新旧两条都留在表里** —— `symtab_lookup_one` 返回探测链上的
+  **第一个**同名条目 ⇒ 两条都在表里时按名查找会拿到**旧的**那条。
 
-**为什么一直没被发现:** 回归套件里**没有一个用例做同作用域 shadowing** ——
-2026-10-26 的 lang-spec 覆盖审计补了 `spec_shadowing.jhyy` 才撞出来。
+(旧 Sym 不用回收:它仍被旧 AST 节点引用 ⇒ sema 照样给它写类型、codegen 照样给它
+分配一个槽 ⇒ 无害 —— 只是多一个用不到的局部。)
 
-**门:** `compiler/tests/examples/spec_shadowing.jhyy` —— `// XFAIL:` + `// EXPECT: 0`。
-XFAIL 是**真跑**(不是 SKIP):现在崩 ⇒ 记 XFAIL;哪天修好 ⇒ **XPASS ⇒ suite 失败**
-⇒ 强制有人摘标记。
+**语义参照:** 嵌套作用域的 shadowing 一直是对的(可改可变性,两个方向都成立)⇒
+同作用域现在与它**完全一致**。
 
-**影响范围:** 任何写同作用域重名 let 的用户程序 ⇒ 编译器崩溃(不是编译错误)。
+**门:** `compiler/tests/examples/spec_shadowing.jhyy` —— **XFAIL 已摘**(转真门):
+五条断言(读到新值 / 可变性放宽可赋值 / 嵌套作用域不受影响 / shadow 后类型以新的为准 /
+两个同名 let 各自独立)。
+⚠ 该门原先还带着**自己的**一个 bug:程序 `return x`(=2)却写 `EXPECT: 0` ⇒ 就算
+shadowing 修好了它仍会 FAIL ⇒ 改写成「返回 fails 计数」的形式。
 
-**失效条件:** 若 `symtab_insert` 改为允许同 scope 重定义(shadowing 语义),或
-`parse_let` 在 `symtab_insert` 返回 null 时**报编译错误**而不是把 null 塞进 AST
-—— 任一条落地,本条自然消失。
+**影响范围(修前):** 任何写同作用域重名 let 的用户程序 ⇒ 编译器崩溃(不是编译错误)。
+
+**失效条件:** 已消除(2026-10-27 真修,见上)。
 
 **引用:**
-- 源码:`compiler/src0/parser.jhyy:2374`、`compiler/src0/symtab.jhyy:212-216`、
-  `compiler/src0/sema.jhyy`(`NODE_LET` 分支的 `(*sym).type_ptr = ...`)
-- 门:`compiler/tests/examples/spec_shadowing.jhyy`
-- spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §3 + 附录 B
-- 事故记录:`docs/logs/v4/changelog-v4.0.0.md` § v4.0.22
+- 源码:`compiler/src0/symtab.jhyy`(`symtab_insert_or_shadow`)、
+  `compiler/src0/parser.jhyy`(`parse_let`)
+- 门:`compiler/tests/examples/spec_shadowing.jhyy`(真门)、
+  `spec_shadowing_immutable.jhyy`(shadow 成不可变后再赋值 ⇒ 报错)
+- spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §3(已恢复 shadowing 承诺)+ 附录 B
+- 关联:**W-150**(同一个 null sym 的兄弟崩溃:重名 fn / type / const / 参数)
+
+---
+
+<a id="w-150"></a>
+## W-150: 同作用域重名(fn / type / const / 参数)⇒ 编译器**空指针写崩溃**
+
+**状态:** RESOLVED closed 2026-10-27 (v4.0.22) — 5 个直接插入点加守卫 + 编译期报错;三条门已挂
+**Filed-by:** W-142 真修时顺带挖出(同一个 null sym 的兄弟路径)
+**日期:** 2026-10-27
+
+**触发面:** `symtab_insert` 对「同 scope 重名」返回 **null** ⇒ 调用方不检查 ⇒
+null 进 AST 节点的 sym 字段 ⇒ sema 无条件解引用 ⇒ 空指针写。
+
+**症状(2026-10-27 实测,全部 0xC0000005 崩溃):**
+
+| 触发 | 插入点(`compiler/src0/parser.jhyy`) | 空指针写点(`compiler/src0/sema.jhyy`) |
+|---|---|---|
+| 重名 **fn 参数** | `parse_func` 的参数循环 | `NODE_FUNC_DECL` 分支 `(*param_sym).type_ptr = ...` |
+| 重名 **闭包参数** | 闭包字面量的参数循环 | `NODE_CLOSURE_LITERAL` 分支 `(*param_sym).type_ptr = ...` |
+| 重名**顶层 fn** | `parse_func` | `check_module` Pass 1 `(*fn_sym).kind = SYM_FN()` |
+| 重名**顶层 type** | `parse_type_decl` | `check_module` Pass 1 `(*td_sym).name` |
+| 重名**顶层 const** | `parse_const_decl` | `NODE_CONST_DECL` 分支 `(*cd_sym).kind = SYM_CONST()` |
+
+(重名**类型参数** `fn f<T, T>` 也走同一条插入路径,但 null 被容忍 ⇒ **不崩** ⇒
+不进本条。)
+
+**根因:** 与 W-142 同源 —— `symtab_insert` 的「同 scope 重名 → 返回 null」这条
+「已定义」语义,调用方当成「插不进去」处理,但**没人检查返回值**。
+
+**修法(2026-10-27 真修):** 语义(user 2026-10-27 拍板):重名 fn / type / const /
+参数是**错误**(不像 `let` 那样 shadowing)⇒ **编译期报错**,干净退出。
+- 新增 `parser_duplicate_name`(`compiler/src0/parser.jhyy`):报错
+  (`<what> \`<name>\` is defined multiple times`)+ 返回一个**可用**的 sym
+  (优先复用已存在的那条,否则造占位)⇒ **永不返回 null** ⇒ AST 合法;
+- 5 个「直接插入」点各加一个守卫;
+- parser 的 `error_count > 0` ⇒ 驱动在 `main.jhyy` 直接 `parse errors` + exit 1
+  ⇒ **sema 根本不会跑** ⇒ 那条重复定义的后续代码不会被编译。
+
+**门:** `spec_dup_fn_name.jhyy` / `spec_dup_type_name.jhyy` / `spec_dup_param.jhyy`
+(三条 EXPECT-ERROR)。
+⚠ 这三条门在修前也会「编译失败」(崩溃也是编译失败)⇒ **光看退出码是假阳性** ⇒
+靠 **关键字匹配**(harness 的 `expect_error_kw in stderr_compile`)才有效 ⇒
+修前 stderr 里没有那句消息 ⇒ 关键字找不到 ⇒ 门判 FAIL ✓(造过红灯)。
+
+**影响范围(修前):** 任何写重名 fn / type / const / 参数的用户程序 ⇒ 编译器崩溃。
+
+**失效条件:** 已消除(2026-10-27 真修,见上)。
+
+**引用:**
+- 源码:`compiler/src0/parser.jhyy`(`parser_duplicate_name` + 5 个守卫点)、
+  `compiler/src0/symtab.jhyy`(`symtab_insert` 的重复检查)
+- 门:`compiler/tests/examples/spec_dup_fn_name.jhyy`、`spec_dup_type_name.jhyy`、
+  `spec_dup_param.jhyy`
+- 关联:**W-142**(同一个 null sym 的 `let` 那条)
 
 ---
 

@@ -1481,11 +1481,72 @@ fresh clone 的 CI 没有陈旧文件 ⇒ **CI 会当场失败**,不会带着这
 f32 目标统一「先转 f64,再 `truncd`」。新门 `spec_int_to_float.jhyy` 是
 **8 组合矩阵**(修前红:`expected=0 got=234`)。
 
+### 缺陷 ⑥(W-142)的**真修**:同作用域 shadowing + 重名变成干净的编译期报错
+
+**2026-10-27 —— 台账里最后一条 ACTIVE。**
+
+**症状:** 同一个 `let` 在**同一作用域**里重名 ⇒ 编译器在 sema 阶段**空指针写崩溃**
+(0xC0000005 / ACCESS_VIOLATION):
+```jhyy
+fn main_jhyy() -> i32 {
+    let x = 1;
+    let x = 2;      // ← 编译器崩
+    return x;
+}
+```
+而**嵌套作用域**的同名 `let` 一直是对的 ⇒ 病灶精确在「同作用域」。
+
+**崩溃链(逐行复核):**
+`parser.jhyy` 的 `parse_let` → `symtab.jhyy` 的 `symtab_insert`「同 scope 重名 ⇒
+`return 0 as *Sym`」⇒ AST 的 sym 字段是 null ⇒ `sema.jhyy` 的
+`(*sym).type_ptr = ...` ⇒ **写 null** ⇒ 崩。
+
+**修法:** 同作用域同名 `let` ⇒ **shadowing**(spec §3 的原承诺「同名 let 建立新绑定
+覆盖旧的(可以改变可变性)」)⇒ 新增 `symtab_insert_or_shadow`:探测到同 scope 同名条目
+⇒ **新建**一个 Sym **原地替换**该槽。
+
+⚠ 两个必须踩对的实现要点(踩错就是「静默拿到旧值」):
+- **必须新建 Sym,不能复用旧指针** —— codegen 的 local 表按 **sym 指针**认 ⇒
+  复用旧指针 = 「先绑定赢」(`return x` 读到 1 而不是 2);
+- **必须原地替换,不能新旧两条都留在表里** —— `symtab_lookup_one` 返回探测链上的
+  **第一个**同名条目 ⇒ 两条都在表里时按名查找会拿到**旧的**那条。
+
+⇒ 语义与嵌套作用域的 shadowing **完全一致**(可改可变性,两个方向)。
+
+### W-150:同一个 null sym 的兄弟崩溃 —— 重名 fn / type / const / 参数
+
+本轮顺带把**同一个 null sym** 的兄弟路径全挖出来了(实测全崩 0xC0000005):
+重名 **fn 参数** / **闭包参数** / **顶层 fn** / **顶层 type** / **顶层 const**
+⇒ 各自在 sema 有一个无条件解引用。
+
+**修法(user 2026-10-27 拍板):** 这几类是**错误**(不像 `let` 那样 shadowing)⇒
+**编译期报错**,干净退出:
+```
+foo.jhyy:2:1: error: the name `f` is defined multiple times
+parse errors
+```
+⇒ 新增 `parser_duplicate_name`:报错 + 返回一个**可用**的 sym(优先复用已存在的那条)
+⇒ **永不返回 null** ⇒ AST 合法;而 parser 的 `error_count > 0` ⇒ 驱动直接
+`parse errors` + exit 1 ⇒ **sema 根本不会跑**。
+
+⇒ **null sym 这一整类空指针写从根上断掉了。**
+
+**门:** `spec_shadowing.jhyy`(XFAIL → 真门)+ 新增 4 条
+(`spec_shadowing_immutable` / `spec_dup_fn_name` / `spec_dup_type_name` /
+`spec_dup_param`)。四条 EXPECT-ERROR 门在修前也会「编译失败」(崩溃也是编译失败)
+⇒ **光看退出码是假阳性** ⇒ 靠 **关键字匹配**才有效 ⇒ 修前 stderr 里没有那句消息
+⇒ 门判 FAIL ✓(造过红灯)。
+
+⚠ `spec_shadowing.jhyy` 这个门原先还带着**自己的**一个 bug:程序 `return x`(=2)却写
+`EXPECT: 0` ⇒ 就算 shadowing 修好了它仍会 FAIL ⇒ 一并改写成「返回 fails 计数」。
+
+⇒ **台账 ACTIVE 桶清零(第二次)**:1 → 0。
+
 ### 门结果(2026-10-26 实测,本轮真修后)
 
 | 门 | 结果 |
 |---|---|
-| `regress.py`(全量) | ✅ **249 PASS + 1 XFAIL + 0 failed + 20 SKIP**(270 total)—— 修前 245 PASS + 3 XFAIL / 268;新增 1 条(`spec_int_to_float.jhyy`)、2 个 XFAIL 转真门 |
+| `regress.py`(全量) | ✅ **254 PASS + 0 XFAIL + 0 failed + 20 SKIP**(274 total)—— 上一版 249 PASS + 1 XFAIL / 270;本轮再 +4 条门 + 1 个 XFAIL 转真门(⇒ **套件 XFAIL 归零**) |
 | `regress.py --cross=auto`(Docker 起) | ✅ 7 个 sysv 交叉用例全过(exit=28/217/42/35/18/42/170) |
 | `audit_test_assertions.py --strict` | ✅ **0 违规** |
 | `artifact_checks.sh` | ✅ **14 PASS / 0 FAIL** |
@@ -1508,9 +1569,10 @@ f32 目标统一「先转 f64,再 `truncd`」。新门 `spec_int_to_float.jhyy` 
 | W-147 | RESOLVED | 自举闭环门验错了代 ⇒ 改成迭代到不动点 |
 | W-148 | RESOLVED | 后端浮点字面量解析丢掉指数 |
 | W-149 | RESOLVED | 整数→浮点 conv 表丢符号性 + f32 目标拿到 f64 |
-| W-142 | **ACTIVE** | 同作用域 shadowing ⇒ 编译器空指针写崩溃(XFAIL 门已挂) |
+| W-142 | RESOLVED | 同作用域同名 let ⇒ **shadowing**(spec §3 的承诺已恢复) |
+| W-150 | RESOLVED | 重名 fn / type / const / 参数 ⇒ 空指针写崩溃 ⇒ 改编译期报错 |
 
-⇒ 台账 **3 ACTIVE → 1 ACTIVE / 0 DEFERRED**、138 索引行。
+⇒ 台账 **3 ACTIVE → 0 ACTIVE / 0 DEFERRED**、139 索引行(**ACTIVE 桶第二次清空**)。
 
 ---
 

@@ -6,9 +6,11 @@
 （installer .exe + compiler .msi + vscode .vsix + SHA256.txt）。
 **🟡 v4.0.22 进行中**（2026-10-26，**lang-spec 覆盖审计：补 49 条回归门 + std lib 三处
 真缺陷真修 + 3 条 ACTIVE 入账**；**同日第二轮：W-143 / W-144 真修 + 浮点转换链路上
-另外挖出 5 条(W-145..W-149)⇒ ACTIVE 桶 3 → 1** ⇒ **249 PASS + 1 XFAIL + 0 failed +
-20 SKIP**(270 total)；artifact_checks **14 PASS**；closure_check PASS(v2.s == v3.s)；
-台账 **1 ACTIVE / 0 DEFERRED**、138 索引行）
+另外挖出 5 条(W-145..W-149)⇒ ACTIVE 桶 3 → 1**；**第三轮(2026-10-27)：W-142 真修
+(同作用域 shadowing)+ 兄弟缺陷 W-150(重名 fn/type/const/参数)⇒ **ACTIVE 桶 1 → 0
+(第二次清空)**）⇒ **254 PASS + 0 XFAIL + 0 failed + 20 SKIP**(274 total)；
+artifact_checks **14 PASS**；closure_check PASS(v2.s == v3.s)；
+台账 **0 ACTIVE / 0 DEFERRED**、139 索引行）
 —— **未发布**，下一个动作 = 走发布链 + promote v4.0.0 final。
 ⚠️ v4.0.22 第二轮最值得记住的一条：**自举闭环门验错了代**（W-147）—— 旧逻辑验的是
 **锚点**的不动点、`mv` 装出去的却是**没被验过**的第 1 代 ⇒ 改后端时 src0 自己的 `.s`
@@ -164,12 +166,11 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 
 ## 当前活跃 workarounds
 
-**1 ACTIVE / 0 DEFERRED**(2026-10-26 —— ACTIVE 从 **3 降到 1**:W-143 / W-144
-两条已在 v4.0.22 第二轮**真修**,顺带把浮点转换链路上另外挖出的 5 条
-(W-145 / W-146 / W-147 / W-148 / W-149)全部闭掉。
-**剩下的唯一一条 ACTIVE = W-142** = 同作用域 shadowing 让**编译器**崩溃
-(0xC0000005)—— 独立的 sema 缺陷,需要单独 RCA + 修复,门 `spec_shadowing.jhyy`
-(**XFAIL**)仍挂着。
+**0 ACTIVE / 0 DEFERRED**(2026-10-27 —— **ACTIVE 桶第二次清空**(第一次是 2026-10-20)。
+v4.0.22 三轮下来把审计挖出的 6 条 ACTIVE 全闭了:W-143 / W-144(第二轮)、
+W-145..W-149(第二轮)、**W-142(第三轮:同作用域 shadowing → 改成 shadowing)+ 兄弟
+缺陷 W-150(重名 fn/type/const/参数 ⇒ 空指针写崩溃 → 改编译期报错)**。
+⇒ 套件的 **XFAIL 也归零**(254 PASS + 0 XFAIL)。
 (此前:2026-10-26 早些时候 —— ACTIVE 涨到 **3** —— **W-143** = 浮点↔指针**不是按位
 重解释**(浮点→指针走数值截断;指针→浮点**静默给 0**);**W-144** = 数组类型的 struct
 字段**没被拷贝**(字面量读到垃圾 + 按值赋值 ACCESS_VIOLATION))。
@@ -187,7 +188,8 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
-| W-142 | — | 🔴 **ACTIVE** —— **同作用域 shadowing 让编译器崩溃**(0xC0000005)。根因链已定位到源码行:`parser.jhyy:2374` 的 `parse_let` 调 `symtab_insert` → `symtab.jhyy:212-216` 的「重复检查(同 scope)」命中时 **`return 0`** ⇒ AST 的 sym 是 null → sema 无条件 `(*sym).type_ptr = ...` ⇒ **空指针写**。实测 `jhyy.exe` / `jhyy_v1.exe.exe` / `jhyy_v3_fp` / `jhyy_v10_fp` **全部崩** ⇒ 长期存在(至少从 v1 起);嵌套作用域正常 ⇒ 病灶精确在「同作用域」。门:`spec_shadowing.jhyy`(**XFAIL**,修好 ⇒ XPASS ⇒ 强制摘标记) |
+| W-150 | — | ~~重名 **fn / type / const / 参数** ⇒ 编译器**空指针写崩溃**(0xC0000005)~~ ✅ **2026-10-27 已修**:与 W-142 同源(`symtab_insert` 对「同 scope 重名」返回 null ⇒ 调用方不检查 ⇒ null 进 AST ⇒ sema 无条件解引用)。user 拍板:这几类是**错误**(不像 `let` 那样 shadowing)⇒ 编译期报 `the name \`f\` is defined multiple times`。新增 `parser_duplicate_name`(报错 + 返回一个**可用**的 sym ⇒ 永不 null)+ 5 个直接插入点加守卫;parser 的 `error_count > 0` ⇒ 驱动直接 `parse errors` + exit 1 ⇒ sema 根本不跑。门:`spec_dup_fn_name.jhyy` / `spec_dup_type_name.jhyy` / `spec_dup_param.jhyy` |
+| W-142 | — | ~~同作用域 shadowing 让编译器崩溃**(0xC0000005)~~ ✅ **2026-10-27 已修**:根因链 `parser.jhyy` 的 `parse_let` 调 `symtab_insert` → `symtab.jhyy` 的「重复检查(同 scope)」命中时 **`return 0`** ⇒ AST 的 sym 是 null → sema 无条件 `(*sym).type_ptr = ...` ⇒ **空指针写**。修法:同作用域同名 `let` ⇒ **shadowing**(spec §3 的原承诺已恢复)⇒ 新增 `symtab_insert_or_shadow`(**新建** Sym **原地替换**旧槽 —— 两个要点:复用旧指针 = 先绑定赢;新旧两条都留表里 = 按名查找拿到旧的)。语义与嵌套作用域的 shadowing 完全一致(可改可变性)。门:`spec_shadowing.jhyy`(**XFAIL 已摘**,转真门)+ `spec_shadowing_immutable.jhyy` |
 | W-149 | — | ~~整数→浮点 conv 表丢**符号性** + f32 目标拿到 **f64** ⇒ 8 个组合里 5 个错~~ ✅ **2026-10-26 已修**:前端 conv 表(`cg_convert_arg`)对 `u64 → f64` 一律发**有符号**的 `sltof` ⇒ 值 ≥ 2^63 变负数(后端的 `ultof` 算法早就对、**W-146 还修过**,但前端从来没发过它 ⇒ 死代码);且给 f32 目标发 `ultof`/`uwtof` ⇒ 那几个 op 在本后端**恒产 f64** ⇒ f64 位模式塞进 f32 槽。修法:按源类型 prim 判符号性 + f32 目标统一「先转 f64,再 `truncd`」。门:`spec_int_to_float.jhyy`(8 组合矩阵;修前红 `got=234`) |
 | W-148 | — | ~~后端 f64/f32 字面量解析**丢掉指数** ⇒ 任何 ≥1e16 的浮点常量都错~~ ✅ **2026-10-26 已修**:`cg_parse_f64_imm_bits` / `cg_f32_imm_bits` 只扫「数字+小数」⇒ 停在 'e' ⇒ `d_9.2233720368547758e+18` 被读成 `9.2233720368547758`(**差 1e18 倍**)。最狠的一处:W-143 的饱和阈值 2^63/2^64 变成 9.22/1.84 ⇒ `3.7 as u32` 饱和到 `u32::MAX`。修法:扫指数段后把整段交给 `atof` |
 | W-147 | — | ~~自举闭环门**验错了代** —— 验锚点、装第 1 代 ⇒ 改后端时硬卡死 + 装出坏产物~~ ✅ **2026-10-26 已修**:旧逻辑比的是「锚点编的 .s」vs「锚点编出的 exe 再编的 .s」⇒ 验的是**锚点**的不动点,`mv` 装的却是**没验过**的第 1 代。改成**迭代到不动点**(每轮推进锚点,最多 3 轮;收敛即装 ⇒ 门从「验锚点」升级成「验装出去的产物」;3 轮不收敛 ⇒ 硬失败)。**过渡期自动消化,不需要 escape hatch** |
@@ -237,7 +239,7 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 | W-134 | ~~MCP pytest 套件里有一个**恒红**的陈旧测试~~ ✅ **2026-10-25 已修** —— `test_regress_baseline_drift_detection` 断言「sha 漂移 ⇒ 报 binary drifted」,但那个行为已被上一轮 commit `f72cef4` 刻意换成「binary 比源旧」的新鲜度检查 ⇒ **从那次起套件就是红的**,而 CI 从不跑 pytest ⇒ 没人发现。修法:拆成两条 —— `test_regress_sha_drift_is_not_fatal`(漂移**不**误报)+ `test_regress_stale_binary_detected`(binary 比源旧 ⇒ early_abort `older than source`)。**套件 40 passed / 1 skipped / 0 failed** |
 | W-134.1 | **DEFERRED** —— `mcp-jhyy/tests/`(41 个测试)在 CI 里**零覆盖**(`ci.yml` 没有 pytest step,也没有任何 `pip install`)⇒ 套件红绿都不影响 CI 结论。补 CI step 需要**第一个网络依赖**(fastmcp / pytest / pytest-asyncio),而本机 MSYS2 python 连 pip 都没有 ⇒ 命令**无法本地验证** ⇒ 建议单独一个 commit + 先在 PR 分支观察一轮 |
 
-**回归现状(2026-10-26 实测,lang-spec 覆盖审计 + W-143/144 真修后):249 PASS + 1 XFAIL + 0 failed + 20 SKIP(270 total)**
+**回归现状(2026-10-27 实测,W-142/W-150 真修后):254 PASS + 0 XFAIL + 0 failed + 20 SKIP(274 total)**
 (新增 49 条门:6 个 std lib 真身覆盖 + 11 个 spec 正向行为 + 31 个错误诊断门 +
 1 个聚合比较字段类型矩阵;第二轮再 +1 条 `spec_int_to_float.jhyy`(W-149 的 8 组合矩阵);
 `spec_ptr_float_cast.jhyy`(W-143)/ `spec_struct_array_field.jhyy`(W-144)两个 XFAIL
