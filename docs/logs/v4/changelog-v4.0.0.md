@@ -1710,6 +1710,35 @@ MCP 红」这种最难查的组合。
 
 ⇒ MCP 套件 **45 passed / 1 skipped**。
 
+### W-157:`spec_argc_argv` 门断言的不是它声称的东西 —— `*argv` 只 load **1 字节**
+
+W-156 落地后 CI 只剩**一条**红:`FAIL spec_argc_argv.jhyy expected=0 got=1`
+(本地同一份代码 257/257 全绿)⇒ 第一反应是「env 改动弄坏了运行时」。
+
+**根因:** 门的第三条断言写错了**宽度**:
+```jhyy
+let argv0 = *argv;                    // ✠ argv: *u8 ⇒ loadub ⇒ 只读 1 字节
+```
+入口签名的 `argv` 实际是 C 的 `char **`(类型却写作 `*u8`)⇒ `*argv` 生成的 IL 是
+`%t16 =w loadub %t2` ⇒ 读到的是 **`argv[0]` 指针的最低字节**,不是指针本身
+⇒ 那条断言实际在验「**堆地址最低字节 ≠ 0**」—— 跟堆布局绑定的**假信号**:
+环境变量(PATH)一变 ⇒ 堆基址偏移 ⇒ 最低字节恰好为 0 ⇒ 假红。
+
+**A/B 实测(本地复现,同一份 exe 只换 PATH):**
+
+| PATH 形态 | 旧门 | 新门 |
+|---|---|---|
+| 继承的 Windows 形式 | EXIT=0 | EXIT=0 |
+| 追加 Windows 形式兜底(W-156 之后 CI 的形态) | EXIT=0 | EXIT=0 |
+| **MSYS 形式 + `;` + Windows 形式混排(CI 的形态)** | **EXIT=1** ✠ | **EXIT=0** ✓ |
+
+⇒ **W-156 本身没有缺陷** —— 是门在验错的东西(与 W-126 / W-134 同一类:
+「门绿着,但它没在验它声称在验的东西」,只不过这次是**红**的)。
+
+**修法:** 门改成 `*(argv as **u8)`(IL 变成 `loadl`,取满 8 字节指针)⇒ 断言回到
+「argv[0] 指针非空」这个它本来要验的东西;spec §1.1 补一条 ⚠️ 写明 `argv` 的
+cast 约定(`argv as **u8` 才能下标),附录 B 同步登记。
+
 ### 门结果(2026-10-26 实测,本轮真修后)
 
 | 门 | 结果 |
@@ -1741,8 +1770,12 @@ MCP 红」这种最难查的组合。
 | W-150 | RESOLVED | 重名 fn / type / const / 参数 ⇒ 空指针写崩溃 ⇒ 改编译期报错 |
 | W-151 | RESOLVED | match arm 不开作用域 ⇒ arm 的模式绑定复用外层同名变量 ⇒ **payload 被静默丢弃** |
 | W-152 | RESOLVED | 重名 import ⇒ 编译器崩溃;重名类型参数 ⇒ 误导性错误链 |
+| W-154 | RESOLVED | MCP 的 `jhyy_workarounds` 与索引脚本口径不一致 ⇒ 计数不可信 + 13 条幽灵条目 |
+| W-155 | RESOLVED | `jhyy_get_il` 从来没成功过 —— 编译器默认不落 .il |
+| W-156 | RESOLVED | 两份 `_build_subprocess_env()` 分叉 ⇒ MCP 的 regress 报 207/277 假失败 |
+| W-157 | RESOLVED | `spec_argc_argv` 门断言错宽度(`*argv` 只 load 1 字节)⇒ 跟堆布局绑定的假信号 |
 
-⇒ 台账 **3 ACTIVE → 0 ACTIVE / 0 DEFERRED**、141 索引行(**ACTIVE 桶第二次清空**)。
+⇒ 台账 **3 ACTIVE → 0 ACTIVE / 0 DEFERRED**、152 索引行(**ACTIVE 桶第二次清空**)。
 
 ---
 

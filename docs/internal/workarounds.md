@@ -159,6 +159,7 @@
 | [W-134](#w-134) | RESOLVED | MCP pytest 套件里有一个**恒红**的陈旧测试 —— 断言的行为早已被换掉 |
 | [W-134.1](#w-134.1) | RESOLVED | `mcp-jhyy/tests/` 在 CI 里**零覆盖** —— 套件红绿都不影响 CI 结论 |
 | [W-142](#w-142) | RESOLVED | 同作用域 shadowing 让编译器在 sema 阶段**空指针写崩溃**(0xC0000005) |
+| [W-157](#w-157) | RESOLVED | `spec_argc_argv` 门断言的不是它声称的东西 —— `*argv` 只 load... |
 | [W-156](#w-156) | RESOLVED | 两个模块各写一份 `_build_subprocess_env()` ⇒ **分叉** ⇒ MCP... |
 | [W-155](#w-155) | RESOLVED | `jhyy_get_il` **从来没成功过** —— 编译器默认不落 .il |
 | [W-154](#w-154) | RESOLVED | MCP 的 `jhyy_workarounds` 与索引脚本**口径不一致** ⇒ 计数对不上 +... |
@@ -11096,6 +11097,62 @@ shadowing 修好了它仍会 FAIL ⇒ 改写成「返回 fails 计数」的形�
   `spec_shadowing_immutable.jhyy`(shadow 成不可变后再赋值 ⇒ 报错)
 - spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §3(已恢复 shadowing 承诺)+ 附录 B
 - 关联:**W-150**(同一个 null sym 的兄弟崩溃:重名 fn / type / const / 参数)
+
+---
+
+<a id="w-157"></a>
+## W-157: `spec_argc_argv` 门断言的不是它声称的东西 —— `*argv` 只 load **1 字节**
+
+**状态:** RESOLVED closed 2026-10-27 (v4.0.22) — 门改用 `*(argv as **u8)`;spec §1.1 写明 cast 约定
+**Filed-by:** 2026-10-27 CI(W-156 落地后)唯一一条红:256/257,failed=spec_argc_argv
+**日期:** 2026-10-27
+
+**触发面:** `compiler/tests/examples/spec_argc_argv.jhyy` —— 2026-10-26 lang-spec 覆盖
+审计新加的门(入口 argc/argv 这条路径此前零覆盖)。
+
+**症状:**
+```
+FAIL  spec_argc_argv.jhyy   expected=0 got=1
+```
+⇒ 只在 **CI** 上红(本地同一份代码 257/257 全绿)⇒ 第一次撞上时差点判成
+「W-156 的 env 改动弄坏了运行时」。
+
+**根因:** 门的第三条断言写错了**宽度**:
+```jhyy
+let argv0 = *argv;                    // ✠ argv: *u8 ⇒ loadub ⇒ 只读 1 字节
+if argv0 == (0 as *u8) { fails = fails + 1; }
+```
+入口签名的 `argv` 类型是 `*u8`(spec §1.1),但它**实际是 C 的 `char **`**。
+`*argv` 因此是对 `*u8` 的解引用 ⇒ 生成的 IL 是 `%t16 =w loadub %t2`
+⇒ 读到的是 **`argv[0]` 指针的最低字节**,不是指针本身。
+⇒ 那条断言实际在验「**堆地址的最低字节 ≠ 0**」—— 一个跟堆布局绑定的
+**假信号**:环境变量(PATH)一变 ⇒ 堆基址偏移 ⇒ 最低字节可能恰好为 0 ⇒ 假红。
+
+**A/B 实测(2026-10-27,本地复现,同一份 exe 只换 PATH):**
+| PATH 形态 | 旧门 | 新门 |
+|---|---|---|
+| 继承的 Windows 形式 | EXIT=0 | EXIT=0 |
+| 追加 Windows 形式兜底(W-156 之后 CI 的形态) | EXIT=0 | EXIT=0 |
+| **MSYS 形式 + `;` + Windows 形式混排(CI 的形态)** | **EXIT=1** ✠ | **EXIT=0** ✓ |
+
+⇒ 复现条件 = 「MSYS 形式 PATH 后面接一段 `;` 分隔的 Windows 形式 PATH」——
+正是 W-156 落地后 CI 的形态(`MSYS2_PATH` 是 `/c/...` 形式,共享 env 构造器在
+末尾追加了 Windows 形式的 MSYS2 目录)⇒ ⇒ **W-156 本身没有缺陷,是门在验错的东西**。
+
+**修法(2026-10-27 真修):**
+- 门改成 `let argv0 = *(argv as **u8);` ⇒ IL 变成 `%t16 =l loadl %t2`(取满 8 字节
+  指针)⇒ 断言回到「argv[0] 指针非空」这个它本来要验的东西;
+- spec §1.1 补一条 ⚠️:`argv` 写作 `*u8` 但实际是 `char **` ⇒ 读 `argv[i]` 必须先
+  `argv as **u8`;附录 B 同步登记(台账 W-157)。
+
+**影响范围(修前):** 只有这道门自己(⇒ CI 红了 1 条);**编译器本身无缺陷**。
+
+**失效条件:** 已消除(2026-10-27 真修,见上)。
+
+**引用:**
+- 门:`compiler/tests/examples/spec_argc_argv.jhyy`
+- spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §1.1 + 附录 B
+- 关联:**W-156**(CI 上唯一变红的那次 env 改动;本身无缺陷)
 
 ---
 

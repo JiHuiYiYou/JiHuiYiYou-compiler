@@ -24,6 +24,20 @@ fn main_jhyy() -> i32 {
 ```
 
 - 入口的真实签名是 `main_jhyy(argc: i32, argv: *u8) -> i32`；`argc` / `argv` 是可选的（写 `fn main_jhyy() -> i32` 也合法）。
+- ⚠️ **`argv` 的类型写作 `*u8`，实际却是「指向指针数组的指针」**（C 的 `char **`）。
+  写 `*argv` 只会 **load 1 个字节**（生成的 IL 是 `loadub`）—— 那是 `argv[0]` **指针的最低字节**，不是指针本身。
+  ⇒ 要读 `argv[i]` 必须先 cast 成 `**u8`：
+
+  ```jhyy
+  fn main_jhyy(argc: i32, argv: *u8) -> i32 {
+      let p = argv as **u8;   // 指针数组
+      let a0 = p[0];          // argv[0]
+      let a1 = *(p + 1);      // argv[1]
+      0
+  }
+  ```
+
+  见[附录 B](#附录-b未实装--已实装但受限)。
 - 返回值作为进程退出码。
 - `#[no_std]` 程序改为 `fn main`（见 [§ 17.4](#174-link_section-与-no_std)）。
 
@@ -992,6 +1006,7 @@ type ErrChain = struct {
 
 | 项 | 现象 | 台账 |
 |---|---|---|
+| **`argv` 的类型写作 `*u8`，实际是 `char **`** | 入口签名里的 `argv` 是「指向指针数组的指针」，但类型写作 `*u8` ⇒ `*argv` 只 load **1 字节**（IL `loadub`）—— 那是 `argv[0]` **指针的最低字节**，不是指针本身 ⇒ 拿它跟 `0` 比等于断言「堆地址最低字节 ≠ 0」（跟堆布局绑定的假信号）。读 `argv[i]` 必须先 `argv as **u8`（见 §1.1） | **W-157** |
 | **聚合 `==` 不接受函数调用结果** | `make_p(1) == make_p(2)` 编译期报错(`equality comparison of a function call result is not supported for aggregate types`)。聚合返回值在 ABI 下**不统一是地址**(>16B 走 sret 是地址;≤16B 走寄存器)⇒ 按地址比会读到寄存器里的头几个字节。**形态差别**:`let a = make_p(1); a == b` 里的 `a` 是**变量**(值在栈槽里)⇒ 安全 ⇒ 不报错 | **W-133.1** |
 | **聚合的大小比较未实装** | `a < b` / `a >= b`(struct / enum / 数组 / 切片)编译期报错(`ordering comparison is not supported for struct/enum/array/slice types`)—— 聚合的大小比较无定义 | **W-133.2** |
 | **struct 字面量的字段值类型必须精确匹配字段类型** | `type P = struct { c: u8 }` 写 `P { c: 7 }` 报 `field type mismatch` —— 整数字面量默认推断为 `i32`,与 `u8` 不相等。须写成 `let c: u8 = 7;` 再 `P { c: c }` | **W-133.3** |

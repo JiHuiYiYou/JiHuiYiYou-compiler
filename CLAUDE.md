@@ -8,9 +8,11 @@
 真缺陷真修 + 3 条 ACTIVE 入账**；**同日第二轮：W-143 / W-144 真修 + 浮点转换链路上
 另外挖出 5 条(W-145..W-149)⇒ ACTIVE 桶 3 → 1**；**第三轮(2026-10-27)：W-142 真修
 (同作用域 shadowing)+ 兄弟缺陷 W-150(重名 fn/type/const/参数)⇒ **ACTIVE 桶 1 → 0
-(第二次清空)**）⇒ **254 PASS + 0 XFAIL + 0 failed + 20 SKIP**(274 total)；
+(第二次清空)**；**第四轮(同日)：MCP 工具逐个 smoke-test ⇒ W-154 / W-155 / W-156
+三条工具真缺陷 + 门自身的 W-157(`*argv` 只 load 1 字节 ⇒ 跟堆布局绑定的假信号)**）
+⇒ **257 PASS + 0 XFAIL + 0 failed + 20 SKIP**(277 total)；
 artifact_checks **14 PASS**；closure_check PASS(v2.s == v3.s)；
-台账 **0 ACTIVE / 0 DEFERRED**、139 索引行）
+台账 **0 ACTIVE / 0 DEFERRED**、152 索引行）
 —— **未发布**，下一个动作 = 走发布链 + promote v4.0.0 final。
 ⚠️ v4.0.22 第二轮最值得记住的一条：**自举闭环门验错了代**（W-147）—— 旧逻辑验的是
 **锚点**的不动点、`mv` 装出去的却是**没被验过**的第 1 代 ⇒ 改后端时 src0 自己的 `.s`
@@ -173,7 +175,15 @@ W-145..W-149(第二轮)、**W-142(第三轮:同作用域 shadowing → 改成 sh
 第三轮晚又查出并修掉 **W-151**(match arm 不开作用域 ⇒ arm 的模式绑定复用外层同名
 变量 ⇒ **payload 被静默丢弃**)与 **W-152**(重名 import ⇒ 编译器崩溃;重名类型参数 ⇒
 误导性错误链)⇒ **「null sym 空指针写」这一整类收口**(13 类重名形态全扫:0 崩溃)。
-⇒ 套件的 **XFAIL 也归零**(255 PASS + 0 XFAIL + 0 failed + 20 SKIP)。
+⇒ 套件的 **XFAIL 也归零**。
+**第四轮(同日)**:逐个 smoke-test MCP 工具 ⇒ 挖出 **W-154**(`jhyy_workarounds`
+与索引脚本口径不一致 ⇒ 计数不可信)/ **W-155**(`jhyy_get_il` 从来没成功过)/
+**W-156**(两份 env 构造器分叉 ⇒ MCP 的 regress 报 207/277 假失败)—— 三条都是
+**工具自身**的沉默失效;外加 **W-157**:`spec_argc_argv` 门断言错宽度
+(`*argv` 只 load 1 字节 ⇒ 它验的是「堆地址最低字节 ≠ 0」⇒ 跟堆布局绑定的假信号
+⇒ CI 上因 PATH 形态变化而假红)。
+⇒ 回归 **257 PASS + 0 XFAIL + 0 failed + 20 SKIP**(277 total);
+MCP 套件 **46 passed / 1 skipped**。
 (此前:2026-10-26 早些时候 —— ACTIVE 涨到 **3** —— **W-143** = 浮点↔指针**不是按位
 重解释**(浮点→指针走数值截断;指针→浮点**静默给 0**);**W-144** = 数组类型的 struct
 字段**没被拷贝**(字面量读到垃圾 + 按值赋值 ACCESS_VIOLATION))。
@@ -191,6 +201,7 @@ W-145..W-149(第二轮)、**W-142(第三轮:同作用域 shadowing → 改成 sh
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
+| W-157 | — | ~~`spec_argc_argv` 门断言的不是它声称的东西 —— `*argv` 只 load **1 字节**~~ ✅ **2026-10-27 已修**:入口签名的 `argv` 实际是 C 的 `char **`(类型却写作 `*u8`)⇒ `*argv` 生成的 IL 是 `loadub` ⇒ 读到的是 **`argv[0]` 指针的最低字节** ⇒ 那条断言实际在验「**堆地址最低字节 ≠ 0**」⇒ **跟堆布局绑定的假信号**(PATH 形态一变 ⇒ 堆基址偏移 ⇒ 最低字节恰好为 0 ⇒ 假红;2026-10-27 CI 上就是这样炸的,本地用「MSYS 形式 PATH + `;` + Windows 形式」当场复现)。修法:门改 `*(argv as **u8)`(IL 变 `loadl`);spec §1.1 + 附录 B 写明 `argv` 的 cast 约定。门:`spec_argc_argv.jhyy` |
 | W-152 | — | ~~重名 **import** ⇒ 编译器**崩溃**(0xC0000005);重名**类型参数** ⇒ 报一串指不到病根的错~~ ✅ **2026-10-27 已修**:同一个 null sym 的最后两条路径 —— import 的 sym 是 null ⇒ `main.jhyy` 的 `inline_imports` 直接 `(*id_sym_p).name` 解引用它 ⇒ 崩;类型参数的 null 进了 type_params 数组 ⇒ 声明与符号表对不上 ⇒ 后面报「E0062: cannot infer type parameter」这种误导性错误。两处都加 `parser_duplicate_name` 守卫。门:`spec_dup_import.jhyy` / `spec_dup_type_param.jhyy` |
 | W-151 | — | ~~match arm 不开作用域 ⇒ arm 的模式绑定**复用外层同名变量** ⇒ **payload 被静默丢弃**(静默错值)~~ ✅ **2026-10-27 已修**:arm 的模式绑定落进**外层**作用域 + `parse_pattern` 的 ident 绑定走「先查后插」且查是 `symtab_lookup`(沿链往外找)⇒ 模式的「绑定」变成「引用」。修法:每个 arm 一个**独立作用域**(push/pop)—— ⚠ statement 形式(`parse_match`)与 expression 形式(inline match 在 `parse_expr` 里)是**两份**代码,**都要改**(实测踩过);模式里的 ident 只查**当前**作用域(`symtab_lookup_local`)。门:`spec_match_arm_scope.jhyy` |
 | W-150 | — | ~~重名 **fn / type / const / 参数** ⇒ 编译器**空指针写崩溃**(0xC0000005)~~ ✅ **2026-10-27 已修**:与 W-142 同源(`symtab_insert` 对「同 scope 重名」返回 null ⇒ 调用方不检查 ⇒ null 进 AST ⇒ sema 无条件解引用)。user 拍板:这几类是**错误**(不像 `let` 那样 shadowing)⇒ 编译期报 `the name \`f\` is defined multiple times`。新增 `parser_duplicate_name`(报错 + 返回一个**可用**的 sym ⇒ 永不 null)+ 5 个直接插入点加守卫;parser 的 `error_count > 0` ⇒ 驱动直接 `parse errors` + exit 1 ⇒ sema 根本不跑。门:`spec_dup_fn_name.jhyy` / `spec_dup_type_name.jhyy` / `spec_dup_param.jhyy` |
