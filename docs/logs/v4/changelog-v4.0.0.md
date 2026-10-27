@@ -1662,6 +1662,22 @@ ACTIVE/DEFERRED audit)")会盖掉真正的状态(SUPERSEDED)⇒ **凭空多出 6
 ⇒ 结果:工具 **149** 条 / 索引表 **149** 行 / **一致**;`unknown_count` 13 → **0**;
 MCP 自带测试套件 **41 passed / 1 skipped**。
 
+### W-155:`jhyy_get_il` **从来没成功过** —— 编译器默认不落 .il
+
+2026-10-27 逐个 smoke-test MCP 工具时挖出(与 W-154 同一轮)。
+
+**症状:** `jhyy_get_il("demo.jhyy")` ⇒ `{"ok": false, "stderr": "IL file not found:
+...\compiler\build\bin\demo_mcp_il.il"}` ⇒ **每次都失败**。
+
+**根因:** 编译器**默认不落 .il**(`main.jhyy` 的 `JHY_WRITE_IL` env gate:未设 ⇒
+只写 `.s` / `.exe`;设了 ⇒ **额外**落一份 `.il` 供人检视)⇒ 而 `runner.get_il`
+编译完就去找 `<output>.il` ⇒ 那个文件**从来没被创建过** ⇒ **这工具自打上线起就
+没成功过一次**。⇒ 而 MCP 套件里**没有一条覆盖它** ⇒ 坏了没人知道。
+
+**修法:** `_run_cmd` / `compile_file` 加 `extra_env` 参数;`get_il` 这次编译带
+`JHY_WRITE_IL=1`;补回归门 `mcp-jhyy/tests/test_get_il.py`(**真调编译器**,不是
+mock)⇒ 工具再坏,套件当场变红。
+
 ### 门结果(2026-10-26 实测,本轮真修后)
 
 | 门 | 结果 |

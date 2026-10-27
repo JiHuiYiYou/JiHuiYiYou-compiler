@@ -81,8 +81,16 @@ def _build_subprocess_env() -> dict:
     return env
 
 
-def _run_cmd(cmd: list, timeout: int = 30, cwd: Optional[str] = None) -> dict:
-    """运行命令并返回结果。统一处理 Windows 编码问题。"""
+def _run_cmd(cmd: list, timeout: int = 30, cwd: Optional[str] = None,
+             extra_env: Optional[dict] = None) -> dict:
+    """运行命令并返回结果。统一处理 Windows 编码问题。
+
+    extra_env: 追加/覆盖到 subprocess env 的变量(2026-10-27 W-155 加 ——
+    `jhyy_get_il` 需要 `JHY_WRITE_IL=1` 才能让编译器**额外**落一份 .il)。
+    """
+    env = _build_subprocess_env()
+    if extra_env:
+        env.update(extra_env)
     try:
         r = subprocess.run(
             cmd,
@@ -92,7 +100,7 @@ def _run_cmd(cmd: list, timeout: int = 30, cwd: Optional[str] = None) -> dict:
             encoding="utf-8",
             errors="replace",
             cwd=cwd or str(JHYY_ROOT),
-            env=_build_subprocess_env(),
+            env=env,
         )
         return {
             "ok": r.returncode == 0,
@@ -143,8 +151,12 @@ def _safe_remove(path: str, retries: int = 3, delay_ms: int = 500) -> bool:
     return False
 
 
-def compile_file(file: str, output: Optional[str] = None, extra_inputs: list = None) -> dict: # type: ignore
-    """编译 .jhyy 文件为可执行程序。"""
+def compile_file(file: str, output: Optional[str] = None, extra_inputs: list = None,
+                extra_env: Optional[dict] = None) -> dict: # type: ignore
+    """编译 .jhyy 文件为可执行程序。
+
+    extra_env: 透传给编译器的环境变量(见 `_run_cmd`)。
+    """
     src = _resolve_path(file)
     if not os.path.exists(src):
         return {
@@ -162,7 +174,7 @@ def compile_file(file: str, output: Optional[str] = None, extra_inputs: list = N
     if extra_inputs:
         for inp in extra_inputs:
             cmd.insert(2, _resolve_path(inp))
-    return _run_cmd(cmd, timeout=60)
+    return _run_cmd(cmd, timeout=60, extra_env=extra_env)
 
 
 def run_exe(exe: str, args: list = None, timeout: int = 10) -> dict: # type: ignore
@@ -291,7 +303,10 @@ def get_il(file: str) -> dict:
         }
     output_base = os.path.splitext(os.path.basename(src))[0] + "_mcp_il"
     output = str(JHYY_ROOT / "compiler/build/bin" / output_base)
-    cresult = compile_file(file, output)
+    # ⚠ 2026-10-27 (W-155):编译器**默认不落 .il**(`JHY_WRITE_IL` 未设 ⇒ 只写
+    #   .s / .exe)⇒ 不带这个 env 就永远找不到 .il ⇒ 本工具**从来没成功过**。
+    #   `JHY_WRITE_IL=1` 只表示「额外落一份 .il 供人检视」,不影响 .s / .exe。
+    cresult = compile_file(file, output, extra_env={"JHY_WRITE_IL": "1"})
     if not cresult["ok"]:
         return {
             "ok": False,

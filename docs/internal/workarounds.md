@@ -159,6 +159,7 @@
 | [W-134](#w-134) | RESOLVED | MCP pytest 套件里有一个**恒红**的陈旧测试 —— 断言的行为早已被换掉 |
 | [W-134.1](#w-134.1) | RESOLVED | `mcp-jhyy/tests/` 在 CI 里**零覆盖** —— 套件红绿都不影响 CI 结论 |
 | [W-142](#w-142) | RESOLVED | 同作用域 shadowing 让编译器在 sema 阶段**空指针写崩溃**(0xC0000005) |
+| [W-155](#w-155) | RESOLVED | `jhyy_get_il` **从来没成功过** —— 编译器默认不落 .il |
 | [W-154](#w-154) | RESOLVED | MCP 的 `jhyy_workarounds` 与索引脚本**口径不一致** ⇒ 计数对不上 +... |
 | [W-153](#w-153) | RESOLVED | 索引重建脚本把索引表与下一个 H2 之间的内容**整段丢掉** ⇒ 锚点被吃 ⇒ 死链 |
 | [W-152](#w-152) | RESOLVED | 重名 **import** ⇒ 编译器崩溃;重名**类型参数** ⇒ 报一串指不到病根的错 |
@@ -11094,6 +11095,51 @@ shadowing 修好了它仍会 FAIL ⇒ 改写成「返回 fails 计数」的形�
   `spec_shadowing_immutable.jhyy`(shadow 成不可变后再赋值 ⇒ 报错)
 - spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §3(已恢复 shadowing 承诺)+ 附录 B
 - 关联:**W-150**(同一个 null sym 的兄弟崩溃:重名 fn / type / const / 参数)
+
+---
+
+<a id="w-155"></a>
+## W-155: `jhyy_get_il` **从来没成功过** —— 编译器默认不落 .il
+
+**状态:** RESOLVED closed 2026-10-27 (v4.0.22) — 编译时加 `JHY_WRITE_IL=1`;补真调编译器的回归门
+**Filed-by:** 2026-10-27 逐个 smoke-test MCP 工具时挖出
+**日期:** 2026-10-27
+
+**触发面:** `mcp-jhyy/jhyy_runner.py` 的 `get_il` / `compile_file` / `_run_cmd`。
+
+**症状:**
+```
+jhyy_get_il("tmp/mcptest/demo.jhyy")
+⇒ {"ok": false, "exit_code": -1,
+   "stderr": "IL file not found: ...\compiler\build\bin\demo_mcp_il.il"}
+```
+⇒ 工具**每次都失败**;失败信息看着像「文件没生成」⇒ 很容易被当成「编译器的 .il
+输出路径变了」⇒ 但根因不是路径,是**根本没写**。
+
+**根因:** 编译器**默认不落 .il** —— `main.jhyy` 的 `JHY_WRITE_IL` env gate
+(未设 ⇒ 走 in-mem self path,只写 `.s` / `.exe`;设了 ⇒ **额外**落一份 `.il`
+供人检视,不影响 `.s` / `.exe`)。
+⇒ 而 `runner.get_il` 编译完就去找 `<output>.il` ⇒ 那个文件从来没被创建过
+⇒ ⇒ **这个工具自打上线起就没成功过一次**。
+⇒ 而 MCP 测试套件里**没有一条覆盖它**(41 条里没有 `jhyy_get_il`)⇒ 坏了没人知道。
+
+**修法(2026-10-27 真修):**
+- `_run_cmd` / `compile_file` 加 `extra_env` 参数(叠在 `_build_subprocess_env()` 之上);
+- `get_il` 这次编译带 `JHY_WRITE_IL=1`;
+- 补回归门 `mcp-jhyy/tests/test_get_il.py`(**真调编译器**,不是 mock):编一个
+  最小程序 ⇒ 断言 `ok=True` + IL 文本非空 + 含 `export function` + `il_file` 以
+  `.il` 结尾 ⇒ 以后工具再坏,套件当场变红。
+
+**影响范围(修前):** 任何用 `jhyy_get_il` 看编译产物的场合 ⇒ 永远返回
+「IL file not found」⇒ 只能退回用 Bash 抄 `.il` —— 而那**正是**这个工具要取代的做法
+(见 `mcp-jhyy/CLAUDE.md` 的「严禁走旁路」表)。
+
+**失效条件:** 已消除(2026-10-27 真修,见上)。
+
+**引用:**
+- 工具:`mcp-jhyy/jhyy_runner.py`(`get_il` / `compile_file` / `_run_cmd`)、
+  `mcp-jhyy/tests/test_get_il.py`
+- 相关:**W-154**(同一轮查 MCP 挖出的另一个真问题:工具与索引脚本口径不一致)
 
 ---
 
