@@ -159,6 +159,7 @@
 | [W-134](#w-134) | RESOLVED | MCP pytest 套件里有一个**恒红**的陈旧测试 —— 断言的行为早已被换掉 |
 | [W-134.1](#w-134.1) | RESOLVED | `mcp-jhyy/tests/` 在 CI 里**零覆盖** —— 套件红绿都不影响 CI 结论 |
 | [W-142](#w-142) | RESOLVED | 同作用域 shadowing 让编译器在 sema 阶段**空指针写崩溃**(0xC0000005) |
+| [W-156](#w-156) | RESOLVED | 两个模块各写一份 `_build_subprocess_env()` ⇒ **分叉** ⇒ MCP... |
 | [W-155](#w-155) | RESOLVED | `jhyy_get_il` **从来没成功过** —— 编译器默认不落 .il |
 | [W-154](#w-154) | RESOLVED | MCP 的 `jhyy_workarounds` 与索引脚本**口径不一致** ⇒ 计数对不上 +... |
 | [W-153](#w-153) | RESOLVED | 索引重建脚本把索引表与下一个 H2 之间的内容**整段丢掉** ⇒ 锚点被吃 ⇒ 死链 |
@@ -11095,6 +11096,70 @@ shadowing 修好了它仍会 FAIL ⇒ 改写成「返回 fails 计数」的形�
   `spec_shadowing_immutable.jhyy`(shadow 成不可变后再赋值 ⇒ 报错)
 - spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §3(已恢复 shadowing 承诺)+ 附录 B
 - 关联:**W-150**(同一个 null sym 的兄弟崩溃:重名 fn / type / const / 参数)
+
+---
+
+<a id="w-156"></a>
+## W-156: 两个模块各写一份 `_build_subprocess_env()` ⇒ **分叉** ⇒ MCP 的 regress 207/277 全挂
+
+**状态:** RESOLVED closed 2026-10-27 (v4.0.22) — 抽成共享模块 `jhyy_env.py`;三条门守住「不再分叉」
+**Filed-by:** 2026-10-27 smoke-test MCP 的 `jhyy_regress` 时挖出(与 W-154 / W-155 同一轮)
+**日期:** 2026-10-27
+
+**触发面:** `mcp-jhyy/jhyy_runner.py` 与 `mcp-jhyy/jhyy_regress.py` 各有一份
+`_build_subprocess_env()`。
+
+**症状(2026-10-27 实测):**
+```
+MCP jhyy_regress ⇒ ok=false, total=277, passed=50, failed=207
+```
+⇒ **同一个二进制**(sha `d9336ff0…`)用 CLI `python regress.py` 跑是 **0 failed**,
+用 MCP 工具跑是 **207 failed** ⇒ 全部 207 个的失败原因**完全一样**:
+```
+W-132: windres failed: C:\msys64\ucrt64\bin\windres.exe: preprocessing failed
+```
+
+**根因:** 两份 `_build_subprocess_env()` **分叉**了:
+- `jhyy_runner.py` 那份:**强制 Windows-style PATH** + 把 `C:\msys64\ucrt64\bin`
+  提到 PATH 头(注释写明:MSYS bash 起的 server 继承到的 `/c/...` 形式 PATH 传给
+  jhyy.exe 内部的 cmd.exe 会坏 ⇒ gcc/cc1/as/ld 找不到 ⇒ "gcc link failed");
+- `jhyy_regress.py` 那份:**完全不碰 PATH**(注释说「jhyy.exe 自己负责探测 gcc 路径」)。
+
+⇒ 于是:**MCP server 启动时若 env 里没有 ucrt64**,regress 跑编译器就挑到**错的
+gcc** ⇒ 那个 gcc 的 `windres` 预处理失败 ⇒ **要链 .exe 的测试全挂**(207 个)⇒
+而 `jhyy_run` 走的是 runner 那份 ⇒ 正常 ⇒ **同一个编译器、同一个二进制,两条路径
+一个绿一个红**。
+
+⇒ ⇒ 而且它**只在 MCP 里犯**:CLI `python regress.py` 继承的是用户 shell 的 PATH
+⇒ 一切正常 ⇒ ⇒ 「CI 绿 + MCP 红」这种最难查的组合。
+
+**A/B 实测(2026-10-27,受限 env(PATH 里无 ucrt64)+ 3 个会链 .exe 的测试):**
+
+| env 构造器 | 结果 |
+|---|---|
+| 旧版(regress 那份,不碰 PATH) | **0/3 passed** —— 全是 `windres ... preprocessing failed` |
+| 新版(共享那份,强制 ucrt64 进 PATH) | **3/3 passed** ✓ |
+
+**修法(2026-10-27 真修):**
+- 抽出**唯一实现** `mcp-jhyy/jhyy_env.py`(`build_subprocess_env()`);
+- 两个模块都 `from jhyy_env import build_subprocess_env as _build_subprocess_env`
+  (真别名,不是包装函数 ⇒ 「是不是同一份」可以用 `is` 断言);
+- 补门 `mcp-jhyy/tests/test_env.py`(3 条):① 两模块用的是**同一个**对象
+  ② 受限 env 下 PATH 仍含 ucrt64 且是 Windows 形式 ③ TMP/TEMP/SystemRoot 缺了要补
+  ⇒ 以后再分叉,当场变红。
+
+⇒ MCP 套件 **45 passed / 1 skipped**。
+
+**影响范围(修前):** 通过 MCP 调 `jhyy_regress` ⇒ **207/277 假失败**(全是环境导致
+的链接失败,不是代码回归)⇒ ⇒ 一个「以为代码坏了」的假警报,而 CI 是绿的。
+
+**失效条件:** 已消除(2026-10-27 真修,见上)。
+
+**引用:**
+- 工具:`mcp-jhyy/jhyy_env.py`(新)、`mcp-jhyy/jhyy_runner.py`、
+  `mcp-jhyy/jhyy_regress.py`、`mcp-jhyy/tests/test_env.py`(新)
+- 关联:**W-154**(工具与索引脚本口径不一致)、**W-155**(jhyy_get_il 从没成功过)
+  —— 三条同属「MCP 工具的沉默失效」这一类
 
 ---
 

@@ -35,50 +35,11 @@ def _resolve_path(p: str) -> str:
     return str(JHYY_ROOT / p)
 
 
-def _build_subprocess_env() -> dict:
-    """构造 subprocess env. 修复 MCP server env={} 引起的 'gcc link failed'.
-
-    Root cause (2026-08-12): ~/.claude.json 把 jhyy MCP server 启动为 env={},
-    Python 进程 inherit empty env → os.environ 空 → subprocess.run inherit empty →
-    jhyy.exe system("C:/msys64/ucrt64/bin/gcc.exe ...") 的 gcc 也 empty env →
-    collect2 找不到 tmp dir → silent exit 1 → "gcc link failed".
-
-    Empirical (env -i simulation, 2026-08-12): gcc 需要 TMP/TEMP (collect2 tmp file)
-    + PATH 含 /c/msys64/ucrt64/bin (ld.exe). 缺任一 → EXIT=1 silent.
-
-    ⚠️ 2026-08-12 加: 当 MCP server 在 MSYS bash 下 spawn, os.environ['PATH'] 可能是
-    `/c/...` 格式. 即使 PATH 不为空, 这种格式传给 jhyy.exe 内部的 cmd.exe 仍然坏:
-    cmd.exe 不认 `/c/...` 虚拟路径, gcc subprocess (cc1/as/ld) 找不到 → "gcc link failed".
-    所以 PATH 处理必须 FORCE Windows-style, 不是只补缺.
-
-    Fix: 拷贝 os.environ (already-populated 时不动) + 补 critical 缺失 vars
-    + sanitize PATH 为 Windows-style.
-    Direct python regress.py 调用时 os.environ 已 Windows-style, sanitize no-op —
-    不破坏现有 env.
-    """
-    import tempfile
-    default_tmp = tempfile.gettempdir()
-    env = os.environ.copy()
-    if not env.get("TMP"):
-        env["TMP"] = default_tmp
-    if not env.get("TEMP"):
-        env["TEMP"] = default_tmp
-    if not env.get("TMPDIR"):
-        env["TMPDIR"] = default_tmp
-    # ALWAYS force Windows-style PATH
-    win_path = r"C:\Windows\System32;C:\Windows;C:\msys64\ucrt64\bin;C:\msys64\usr\bin"
-    if env.get("PATH") and not env["PATH"].startswith("/"):
-        # 已 Windows-style, 补 ucrt64 进 head (gcc/cc1 在这里)
-        if r"C:\msys64\ucrt64\bin" not in env["PATH"]:
-            env["PATH"] = r"C:\msys64\ucrt64\bin;" + env["PATH"]
-    else:
-        # 空 / MSYS-style (`/c/...`), 用 Windows fallback
-        env["PATH"] = win_path
-    if not env.get("SystemRoot"):
-        env["SystemRoot"] = r"C:\Windows"
-    if not env.get("SystemDrive"):
-        env["SystemDrive"] = "C:"
-    return env
+# 2026-10-27 (W-156):env 构造器移到 jhyy_env.py —— runner 与 regress 各有一份
+# 曾经**分叉**(regress 那份不碰 PATH ⇒ MCP server env 缺 ucrt64 时挑到错的 gcc
+# ⇒ windres 预处理失败 ⇒ 207/277 个测试全挂)。现在**只有一份**,
+# 这里直接 import 成别名(不是包装函数)⇒ 「是不是同一份」可以用 `is` 断言。
+from jhyy_env import build_subprocess_env as _build_subprocess_env  # noqa: E402
 
 
 def _run_cmd(cmd: list, timeout: int = 30, cwd: Optional[str] = None,

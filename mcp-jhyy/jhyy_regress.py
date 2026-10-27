@@ -66,40 +66,12 @@ def _resolve_binary(binary: str) -> str:
     return str(JHYY_ROOT / binary)
 
 
-def _build_subprocess_env() -> dict:
-    """构造 subprocess env. 基础 env (TMP / SystemRoot / SystemDrive).
-
-    v1.5.6 (superseder W-027 v8): jhyy.exe 自己负责探测 gcc 路径 (见
-    jh_gcc_path() 4-tier probe), 不再需要 Python 侧主动 prepend MSYS2 bin
-    到 PATH. 之前 W-026/W-027 全部 MSYS2 探测逻辑 (~30 行) 收敛到 jhyy.exe
-    内部一处, regress.py 只保留基础 env + SETENV 注入.
-
-    Mirror jhyy_runner.py:_build_subprocess_env (modules 独立, 不互相 import).
-
-    历史 (per docs/internal/workarounds.md W-027 v8):
-    W-026 (2026-08-15): CI GH Actions release.yml regress 53/53 FAIL,
-      'gcc is not recognized'.
-    W-027 v4 (2026-08-15): setup-msys2@v2 装 MSYS2 到 $RUNNER_TEMP\\msys64
-      (CI) 不在 C:\\msys64. 试了 shutil.which / cmd where / bash cmd where,
-      都有 quoting / encoding 问题. v4 用 deterministic MSYS2 root + 已知
-      bin subdirs.
-    v1.5.6 fix: 把 W-027 v4 整段 (含 found_dirs + shutil.which + msys2_roots)
-      删掉, 改由 jhyy.exe jh_gcc_path() 接管. 见 workarounds.md W-029.
-    """
-    import tempfile
-    default_tmp = tempfile.gettempdir()
-    env = os.environ.copy()
-    if not env.get("TMP"):
-        env["TMP"] = default_tmp
-    if not env.get("TEMP"):
-        env["TEMP"] = default_tmp
-    if not env.get("TMPDIR"):
-        env["TMPDIR"] = default_tmp
-    if not env.get("SystemRoot"):
-        env["SystemRoot"] = r"C:\Windows"
-    if not env.get("SystemDrive"):
-        env["SystemDrive"] = "C:"
-    return env
+# 2026-10-27 (W-156):改用**共享**的 env 构造器(jhyy_env.py)—— 本文件原来那份
+# **不碰 PATH**,而 jhyy_runner 那份强制 Windows-style PATH ⇒ 两份分叉 ⇒
+# MCP server 的 env 缺 ucrt64 时,regress 跑编译器会挑到错的 gcc ⇒ windres
+# 预处理失败 ⇒ 207/277 个测试全挂(CLI 直跑却正常,因为继承的是 shell 的 PATH)。
+# 直接 import 成别名(不是包装函数)⇒ 「是不是同一份」可以用 `is` 断言。
+from jhyy_env import build_subprocess_env as _build_subprocess_env  # noqa: E402
 
 
 def _kill_process_tree(pid: int) -> None:

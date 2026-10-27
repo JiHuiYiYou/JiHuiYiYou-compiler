@@ -1678,6 +1678,31 @@ MCP 自带测试套件 **41 passed / 1 skipped**。
 `JHY_WRITE_IL=1`;补回归门 `mcp-jhyy/tests/test_get_il.py`(**真调编译器**,不是
 mock)⇒ 工具再坏,套件当场变红。
 
+### W-156:MCP 的 `jhyy_regress` 报 **207/277 假失败** —— 两份 env 构造器分叉
+
+同一轮 smoke-test 里挖出的第三个 MCP 真问题(W-154 / W-155 之外)。
+
+**症状:** MCP 的 `jhyy_regress` ⇒ `ok=false, passed=50, failed=207`;
+而**同一个二进制**用 CLI `python regress.py` 跑是 **0 failed** ⇒ 207 个失败原因
+**完全一样**:`W-132: windres failed: …\windres.exe: preprocessing failed`。
+
+**根因:** `jhyy_runner.py` 与 `jhyy_regress.py` 各有一份 `_build_subprocess_env()`,
+两份**分叉**:runner 那份**强制 Windows-style PATH** 并把 ucrt64 提到头;regress
+那份**完全不碰 PATH** ⇒ ⇒ **MCP server 启动时若 env 缺 ucrt64**,regress 跑编译器
+就挑到**错的 gcc** ⇒ 那个 gcc 的 `windres` 预处理失败 ⇒ **要链 .exe 的测试全挂**
+⇒ 而 `jhyy_run` 走 runner 那份 ⇒ 正常 ⇒ **同一个编译器、同一个二进制,两条路径
+一个绿一个红**。⇒ 且**只在 MCP 里犯**(CLI 继承用户 shell 的 PATH)⇒ 「CI 绿 +
+MCP 红」这种最难查的组合。
+
+**A/B 实测(受限 env + 3 个会链 .exe 的测试):** 旧 env 构造器 **0/3**(全是 windres
+报错)vs 共享那份 **3/3** ✓。
+
+**修法:** 抽出唯一实现 `mcp-jhyy/jhyy_env.py`;两模块直接 import 成**真别名**
+⇒ 「是不是同一份」可用 `is` 断言;补门 `mcp-jhyy/tests/test_env.py`(3 条:同一对象 /
+受限 env 下 PATH 仍含 ucrt64 / 关键变量缺了要补)⇒ 以后再分叉当场变红。
+
+⇒ MCP 套件 **45 passed / 1 skipped**。
+
 ### 门结果(2026-10-26 实测,本轮真修后)
 
 | 门 | 结果 |
