@@ -1,0 +1,19 @@
+// spec_shadowing_immutable.jhyy — spec §3:shadowing **可以改变可变性**
+//
+// 2026-10-27(W-142 真修):shadow 后的新绑定**可以**是不可变的 ⇒ 给它赋值
+// 应当编译期报错(而不是默默写进去)。
+//
+// 这条与 `spec_shadowing.jhyy` 里的「可变性可以放宽」是同一件事的两个方向:
+//   · 不可变 → 可变:可赋值(spec_shadowing.jhyy 断言)
+//   · 可变 → 不可变:不可赋值(本用例断言)
+//
+// 参照:嵌套作用域的同款写法一直就是这个行为
+// (`let mut y = 1; { let y = 2; y = 5; }` ⇒ 报同一条错)。
+//
+// EXPECT-ERROR: "cannot assign to immutable variable"
+fn main_jhyy() -> i32 {
+    let mut y = 1;
+    let y = 2;   // ← shadow 成**不可变**
+    y = 5;       // ← 应报错:新绑定不可变
+    return 0;
+}

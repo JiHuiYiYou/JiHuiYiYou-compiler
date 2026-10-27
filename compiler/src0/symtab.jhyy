@@ -222,6 +222,58 @@ fn symtab_insert(t_raw: *u8, name: *u8, kind: i32,
     return 0 as *Sym;  // 兜底
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// W-142 真修(2026-10-27):同作用域重名的 **shadowing** 插入
+// ══════════════════════════════════════════════════════════════════════
+//
+// 语义(spec §3「支持 shadowing:同名 let 建立新绑定覆盖旧的(可以改变可变性)」):
+// 同作用域同名 `let` ⇒ **新绑定覆盖旧的** —— 与嵌套作用域的 shadowing 一致。
+//
+// 为什么不简单地「新旧两条都留在表里」:
+//   `symtab_lookup_one`(本文件下面)返回探测链上的**第一个**同名条目,而新条目
+//   落在 home bucket 的**下一个**空槽 ⇒ 按名查找会拿到**旧的**那条
+//   ⇒ `return x` 读到旧值 ⇒ 那不叫 shadowing。
+// ⇒ 所以这里**原地替换**哈希槽里的条目:表里这条名字只剩一条 ⇒ 后续按名查找
+//   拿到的就是**新**绑定 ✓。
+//
+// 为什么必须**新建** Sym 而不是复用旧的:
+//   codegen 的 local 表按 **sym 指针**认(`cg_find_local`,codegen.jhyy:452-463,
+//   返回第一个**指针相同**的条目)⇒ 复用旧指针 = 「先绑定赢」(`return x` 读到 1)。
+//   新建 ⇒ 两个同名 let 是**两个不同的局部** ⇒ 各自一个槽 ✓。
+//
+// 旧 Sym 不用回收:它仍被旧 AST 节点引用 ⇒ sema 照样给它写类型、codegen 照样
+// 给它分配一个槽 ⇒ 无害(只是多一个用不到的局部)。
+//
+// 表里**没有**同名条目时 ⇒ 退回 symtab_insert(现有行为,零风险)。
+fn symtab_insert_or_shadow(t_raw: *u8, name: *u8, kind: i32,
+                            type_ptr: *u8, is_mutable: i32, depth: i32) -> *Sym {
+    let t = t_raw as *SymTable;
+    let h = hash_string(name);
+    let mut idx = h & (*t).mask;
+    let start_idx = idx;
+    while true {
+        let entry = symtab_load_entry(t_raw, idx);
+        if entry == (0 as *Sym) {
+            break;  // 空 slot ⇒ 没有同名条目 ⇒ 走普通插入
+        }
+        if (*entry).depth == depth {
+            if strcmp((*entry).name, name) == (0 as i32) {
+                // 命中 ⇒ 新建 Sym **原地覆盖**旧条目(shadowing)
+                let sym = symtab_alloc_sym((*t).arena as *Arena, name, kind,
+                                            type_ptr, is_mutable, depth);
+                symtab_set_entry(t_raw, idx, sym);
+                return sym;
+            }
+        }
+        idx = (idx + (1 as i64)) & (*t).mask;
+        if idx == start_idx {
+            break;
+        }
+    }
+    // 没有同名条目 ⇒ 普通插入(symtab_insert 会按负载因子 grow)
+    return symtab_insert(t_raw, name, kind, type_ptr, is_mutable, depth);
+}
+
 fn symtab_insert_sym(t_raw: *u8, sym: *Sym) -> *Sym {
     let t = t_raw as *SymTable;
     if (*t).count * SYMTAB_LOAD_DEN() >= (*t).nentries * SYMTAB_LOAD_NUM() {

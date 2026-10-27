@@ -1,0 +1,21 @@
+// spec_dup_fn_name.jhyy — 同名 **fn** ⇒ 编译期报错(不是编译器崩溃)
+//
+// 2026-10-27(W-150 真修):`symtab_insert` 对「同 scope 重名」返回 null ⇒
+// 若调用方不检查,null 会进 AST ⇒ sema 的 `(*fn_sym).kind = SYM_FN()` ⇒
+// **空指针写** ⇒ 编译器 ACCESS_VIOLATION(0xC0000005)。
+//
+// 语义(user 2026-10-27 拍板):同名 fn 是**错误**(不像 `let` 那样 shadowing)
+// ⇒ 编译期报「the name `f` is defined multiple times」,干净退出。
+//
+// EXPECT-ERROR: "is defined multiple times"
+fn f() -> i32 {
+    return 1;
+}
+
+fn f() -> i32 {
+    return 2;
+}
+
+fn main_jhyy() -> i32 {
+    return f();
+}

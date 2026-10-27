@@ -209,6 +209,52 @@ fn parser_expect(p: *Parser, kind: i32, what: *u8, t: *Token) -> i32 {
 }
 
 // ════════════════════════════════════════════════════
+// W-150 真修(2026-10-27):同作用域重名 ⇒ 编译期报错(不是编译器崩溃)
+// ════════════════════════════════════════════════════
+//
+// 背景:`symtab_insert` 对「同 scope 重名」返回 **null**。调用方若不检查,null
+//   会进 AST 节点的 sym 字段 ⇒ sema 的 `(*sym).type_ptr = ...` ⇒ **空指针写**
+//   ⇒ 编译器 ACCESS_VIOLATION(0xC0000005)。
+//   ⇒ 同名 `let` 那条由 `parse_let` 改走 `symtab_insert_or_shadow`(shadowing),
+//     而**重名 fn / type / const / 参数**是**错误**(user 2026-10-27 拍板)
+//     ⇒ 走本函数 ⇒ 干净的编译期报错。
+//
+// 返回一个**可用**的 sym(优先复用已存在的那条,否则造一个占位)⇒ **永不返回
+//   null** ⇒ AST 合法 ⇒ 不会空指针写。
+//   (parser 的 error_count > 0 ⇒ 驱动在 main.jhyy:726 直接 `parse errors` +
+//    exit 1 ⇒ sema 根本不会跑 ⇒ 这条重复定义的后续代码不会被编译。)
+fn parser_duplicate_name(p: *Parser, loc_lf: *u8, loc_ll: i32, loc_lc: i32,
+                         name: *u8, what: *u8) -> *Sym {
+    // 消息:`<what> \`<name>\` is defined multiple times`
+    //   (StringBuilder 拼串 —— 与 sema_error_str 同款;parser 这边是第一处)
+    let mut sb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
+    sb_init((*p).arena, &sb);
+    sb_append_cstr((*p).arena, &sb, what);
+    sb_append_cstr((*p).arena, &sb, " `" as *u8);
+    sb_append_cstr((*p).arena, &sb, name);
+    sb_append_cstr((*p).arena, &sb, "` is defined multiple times" as *u8);
+    let msg = sb_cstr((*p).arena, &sb);
+    jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+    jh_fputs_stderr("error: " as *u8);
+    jh_fputs_stderr(msg);
+    jh_fputs_stderr("\n" as *u8);
+    (*p).error_count = (*p).error_count + (1 as i32);
+    sb_free(&sb);
+    // 复用已存在的那条(当前作用域 / 全局作用域都找一下 —— fn / type / const
+    // 是插在 global scope 的)⇒ AST 拿到一个真实存在的 sym
+    let existing = symtab_lookup_local((*p).current_scope, name);
+    if existing != (0 as *Sym) {
+        return existing;
+    }
+    let existing2 = symtab_lookup_local((*p).global_scope, name);
+    if existing2 != (0 as *Sym) {
+        return existing2;
+    }
+    // 兜底:造一个占位 Sym(保证非 null ⇒ 后面谁都不会空指针写)
+    return symtab_alloc_sym((*p).arena, name, SYM_VAR(), 0 as *u8, 0 as i32, (*p).scope_depth);
+}
+
+// ════════════════════════════════════════════════════
 // Scope management
 // ════════════════════════════════════════════════════
 
@@ -1379,8 +1425,13 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
             parser_expect(p, TOKEN_COLON(), ":" as *u8, &t);
             let ptype = parse_type(p);
 
-            let psym = symtab_insert((*p).current_scope, pname, SYM_VAR(),
-                                     0 as *u8, 0 as i32, (*p).scope_depth);
+            // W-150:重名闭包参数 ⇒ 编译期报错(不是崩)
+            let mut psym = symtab_insert((*p).current_scope, pname, SYM_VAR(),
+                                          0 as *u8, 0 as i32, (*p).scope_depth);
+            if psym == (0 as *Sym) {
+                psym = parser_duplicate_name(p, loc_lf, loc_ll, loc_lc, pname,
+                                             "the parameter name" as *u8);
+            }
 
             if nparams >= pcap {
                 pcap = if pcap != (0 as i64) { pcap * (2 as i64) } else { (4 as i64) };
@@ -2371,8 +2422,25 @@ fn parse_let(p: *Parser) -> *Node {
     let init = parse_expr(p, PREC_NONE());
     parser_expect(p, TOKEN_SEMICOLON(), ";" as *u8, &t);
 
-    let sym = symtab_insert((*p).current_scope, vname, SYM_VAR(),
-                            0 as *u8, is_mut, (*p).scope_depth);
+    // W-142 真修(2026-10-27):同作用域同名 `let` ⇒ **shadowing**(spec §3)
+    //
+    //   语义:同名 `let` 建立**新绑定覆盖旧的**(可以改变可变性)——
+    //   与嵌套作用域的 shadowing 一致(那边一直是对的)。
+    //
+    //   ⚠ 不能用 symtab_insert:它对「同 scope 重名」返回 **null** ⇒ AST 的 sym
+    //     字段是 null ⇒ sema 的 `(*sym).type_ptr = ...` **空指针写** ⇒
+    //     编译器 ACCESS_VIOLATION(0xC0000005)—— 这就是 W-142 的崩溃链。
+    //     ⇒ 改用 symtab_insert_or_shadow:同作用域同名 ⇒ **原地替换**哈希槽里
+    //     的旧条目(且**新建** Sym,不复用旧指针)⇒ 表里只剩一条 ⇒ 后续按名查找
+    //     拿到的就是新绑定 ⇒ 两个同名 let 是两个不同的局部。
+    let mut sym = symtab_insert_or_shadow((*p).current_scope, vname, SYM_VAR(),
+                                          0 as *u8, is_mut, (*p).scope_depth);
+    if sym == (0 as *Sym) {
+        // 表满(实际不可达 —— insert 前会按负载因子 grow)⇒ 造一个占位 Sym,
+        // 保证 AST 里的 sym 不是 null(否则 sema 会空指针写)。
+        sym = symtab_alloc_sym((*p).arena, vname, SYM_VAR(), 0 as *u8, is_mut,
+                               (*p).scope_depth);
+    }
     return ast_new_let((*p).arena, loc_lf, loc_ll, loc_lc, is_mut, sym, type_annot, init);
 }
 
@@ -3337,8 +3405,13 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
     let fname = parser_tok_name(p, &t);
 
     // 注册到 global scope（递归调用支持）
-    let sym = symtab_insert((*p).global_scope, fname, SYM_FN(),
-                            0 as *u8, 0 as i32, 0 as i32);
+    // W-150:重名 fn ⇒ 编译期报错(不是崩)
+    let mut sym = symtab_insert((*p).global_scope, fname, SYM_FN(),
+                                 0 as *u8, 0 as i32, 0 as i32);
+    if sym == (0 as *Sym) {
+        sym = parser_duplicate_name(p, loc_lf, loc_ll, loc_lc, fname,
+                                     "the name" as *u8);
+    }
     if is_extern != (0 as i32) {
         if sym != (0 as *Sym) {
             (*sym).is_extern = 1 as i32;
@@ -3405,8 +3478,13 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
         parser_expect(p, TOKEN_COLON(), ":" as *u8, &t);
         let ptype = parse_type(p);
 
-        let psym = symtab_insert((*p).current_scope, pname, SYM_VAR(),
-                                 0 as *u8, 0 as i32, (*p).scope_depth);
+        // W-150:重名 fn 参数 ⇒ 编译期报错(不是崩)
+        let mut psym = symtab_insert((*p).current_scope, pname, SYM_VAR(),
+                                      0 as *u8, 0 as i32, (*p).scope_depth);
+        if psym == (0 as *Sym) {
+            psym = parser_duplicate_name(p, loc_lf, loc_ll, loc_lc, pname,
+                                         "the parameter name" as *u8);
+        }
 
         if nparams >= pcap {
             pcap = if pcap != (0 as i64) { pcap * (2 as i64) } else { (4 as i64) };
@@ -3694,8 +3772,13 @@ fn parse_type_decl(p: *Parser) -> *Node {
         body = alias_type;
     }
 
-    let sym = symtab_insert((*p).global_scope, tname, SYM_TYPE(),
-                            0 as *u8, 0 as i32, 0 as i32);
+    // W-150:重名 type ⇒ 编译期报错(不是崩)
+    let mut sym = symtab_insert((*p).global_scope, tname, SYM_TYPE(),
+                                 0 as *u8, 0 as i32, 0 as i32);
+    if sym == (0 as *Sym) {
+        sym = parser_duplicate_name(p, loc_lf, loc_ll, loc_lc, tname,
+                                     "the name" as *u8);
+    }
     let n = ast_new_type_decl((*p).arena, loc_lf, loc_ll, loc_lc, sym, body,
                              type_params, ntype_params);
     // 弹 generic scope(if pushed)。body parse 已完成,type-param 不再可见。
@@ -3782,8 +3865,13 @@ fn parse_const_decl(p: *Parser) -> *Node {
 
     parser_expect(p, TOKEN_SEMICOLON(), "; after const decl" as *u8, &t);
 
-    let sym = symtab_insert((*p).global_scope, cname, SYM_CONST(),
-                            0 as *u8, 0 as i32, 0 as i32);
+    // W-150:重名 const ⇒ 编译期报错(不是崩)
+    let mut sym = symtab_insert((*p).global_scope, cname, SYM_CONST(),
+                                 0 as *u8, 0 as i32, 0 as i32);
+    if sym == (0 as *Sym) {
+        sym = parser_duplicate_name(p, loc_lf, loc_ll, loc_lc, cname,
+                                     "the name" as *u8);
+    }
     return ast_new_const_decl((*p).arena, loc_lf, loc_ll, loc_lc, sym, type_annot, init);
 }
 

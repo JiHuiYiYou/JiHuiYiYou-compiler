@@ -1,0 +1,17 @@
+// spec_dup_param.jhyy — 同名 **函数参数** ⇒ 编译期报错(不是编译器崩溃)
+//
+// 2026-10-27(W-150 真修):同 `spec_dup_fn_name.jhyy` 的根因 ——
+// `symtab_insert` 对「同 scope 重名」返回 null ⇒ 调用方不检查 ⇒ null 进 AST ⇒
+// sema 的 `(*param_sym).type_ptr = ...` 解引用 null ⇒ **空指针写** ⇒
+// 编译器崩(0xC0000005)。
+//
+// 语义(user 2026-10-27 拍板):同名参数是**错误** ⇒ 编译期报错,干净退出。
+//
+// EXPECT-ERROR: "the parameter name"
+fn f(a: i32, a: i32) -> i32 {
+    return a;
+}
+
+fn main_jhyy() -> i32 {
+    return f(1, 2);
+}
