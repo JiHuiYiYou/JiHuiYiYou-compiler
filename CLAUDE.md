@@ -5,9 +5,15 @@
 <https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v4.0.19>
 （installer .exe + compiler .msi + vscode .vsix + SHA256.txt）。
 **🟡 v4.0.22 进行中**（2026-10-26，**lang-spec 覆盖审计：补 49 条回归门 + std lib 三处
-真缺陷真修 + 3 条 ACTIVE 入账** ⇒ **245 PASS + 3 XFAIL + 0 failed + 20 SKIP**(268 total)；
-artifact_checks **14 PASS**；closure_check PASS(v2.s == v3.s)；台账 **3 ACTIVE / 0 DEFERRED**）
+真缺陷真修 + 3 条 ACTIVE 入账**；**同日第二轮：W-143 / W-144 真修 + 浮点转换链路上
+另外挖出 5 条(W-145..W-149)⇒ ACTIVE 桶 3 → 1** ⇒ **249 PASS + 1 XFAIL + 0 failed +
+20 SKIP**(270 total)；artifact_checks **14 PASS**；closure_check PASS(v2.s == v3.s)；
+台账 **1 ACTIVE / 0 DEFERRED**、138 索引行）
 —— **未发布**，下一个动作 = 走发布链 + promote v4.0.0 final。
+⚠️ v4.0.22 第二轮最值得记住的一条：**自举闭环门验错了代**（W-147）—— 旧逻辑验的是
+**锚点**的不动点、`mv` 装出去的却是**没被验过**的第 1 代 ⇒ 改后端时 src0 自己的 `.s`
+编码一变就**硬卡死**，而且那一代恰恰是**常量错**的一代 ⇒ 门已改成**迭代到不动点**
+（过渡期自动消化，且门从「验锚点」升级成「验装出去的那个产物」）。
 ⚠️ v4.0.22 最值得记住的一条：**6 个 std 模块的测试全是 inline 副本** ⇒ 改
 `compiler/src0/std/*.jhyy` 真身**零回归覆盖**，而且副本里是**同样的错误代码**
 ⇒ 副本测试给错误实现背书。补的 6 个 `std_*_import.jhyy`(第一次 import 真身)
@@ -158,11 +164,15 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 
 ## 当前活跃 workarounds
 
-**3 ACTIVE / 0 DEFERRED**(2026-10-26 —— ACTIVE 从 0 涨到 **3**,三条都是
-lang-spec 覆盖审计撞出来的,都挂了 XFAIL 门:**W-142** = 同作用域 shadowing 让
-**编译器**崩溃(0xC0000005);**W-143** = 浮点↔指针**不是按位重解释**(浮点→指针走
-数值截断;指针→浮点**静默给 0**);**W-144** = 数组类型的 struct 字段**没被拷贝**
-(字面量读到垃圾 + 按值赋值 ACCESS_VIOLATION)。
+**1 ACTIVE / 0 DEFERRED**(2026-10-26 —— ACTIVE 从 **3 降到 1**:W-143 / W-144
+两条已在 v4.0.22 第二轮**真修**,顺带把浮点转换链路上另外挖出的 5 条
+(W-145 / W-146 / W-147 / W-148 / W-149)全部闭掉。
+**剩下的唯一一条 ACTIVE = W-142** = 同作用域 shadowing 让**编译器**崩溃
+(0xC0000005)—— 独立的 sema 缺陷,需要单独 RCA + 修复,门 `spec_shadowing.jhyy`
+(**XFAIL**)仍挂着。
+(此前:2026-10-26 早些时候 —— ACTIVE 涨到 **3** —— **W-143** = 浮点↔指针**不是按位
+重解释**(浮点→指针走数值截断;指针→浮点**静默给 0**);**W-144** = 数组类型的 struct
+字段**没被拷贝**(字面量读到垃圾 + 按值赋值 ACCESS_VIOLATION))。
 **W-139 / W-140 / W-141 三个 RESOLVED** 是同一轮挖出的 std lib 真缺陷(字节循环
 写穿 4n 字节 / `import string;` 编译失败 / arena 分配互相踩)—— 根因都是
 「**6 个 std 模块的测试全是 inline 副本**」⇒ 改真身零覆盖、副本给错误实现背书。
@@ -178,8 +188,13 @@ lang-spec 覆盖审计撞出来的,都挂了 XFAIL 门:**W-142** = 同作用域 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
 | W-142 | — | 🔴 **ACTIVE** —— **同作用域 shadowing 让编译器崩溃**(0xC0000005)。根因链已定位到源码行:`parser.jhyy:2374` 的 `parse_let` 调 `symtab_insert` → `symtab.jhyy:212-216` 的「重复检查(同 scope)」命中时 **`return 0`** ⇒ AST 的 sym 是 null → sema 无条件 `(*sym).type_ptr = ...` ⇒ **空指针写**。实测 `jhyy.exe` / `jhyy_v1.exe.exe` / `jhyy_v3_fp` / `jhyy_v10_fp` **全部崩** ⇒ 长期存在(至少从 v1 起);嵌套作用域正常 ⇒ 病灶精确在「同作用域」。门:`spec_shadowing.jhyy`(**XFAIL**,修好 ⇒ XPASS ⇒ 强制摘标记) |
-| W-144 | — | 🔴 **ACTIVE** —— **数组类型的 struct 字段没被拷贝**。根因:`codegen.jhyy` 的 `cg_emit_store` 有 **KIND_STRUCT** 分支(递归拷贝嵌套 struct)但**没有 KIND_ARRAY 分支** ⇒ 数组字段落到「按标量存一个值」的兜底路径 ⇒ 存进去的是数组的**地址**。症状:struct 字面量里的数组字段读到**未初始化垃圾**;按值赋值 `a = Arr { buf: plain };` ⇒ **ACCESS_VIOLATION**;含数组字段的 struct `==` 退化成**身份比较**。门:`spec_struct_array_field.jhyy`(**XFAIL**) |
-| W-143 | — | 🔴 **ACTIVE** —— **浮点 ↔ 指针不是按位重解释**。spec §4.3 的转换表承诺「浮点 ↔ 指针 ✅(按位重解释)」,实测两头都不符:`1.5 as *i64` = **1**(数值截断,不是 0x3FF8000000000000);`(1 as *i64) as f64` = **0.0**(既不是地址也不是位模式 ⇒ **静默错值**)。门:`spec_ptr_float_cast.jhyy`(**XFAIL**,按 spec 承诺写断言) |
+| W-149 | — | ~~整数→浮点 conv 表丢**符号性** + f32 目标拿到 **f64** ⇒ 8 个组合里 5 个错~~ ✅ **2026-10-26 已修**:前端 conv 表(`cg_convert_arg`)对 `u64 → f64` 一律发**有符号**的 `sltof` ⇒ 值 ≥ 2^63 变负数(后端的 `ultof` 算法早就对、**W-146 还修过**,但前端从来没发过它 ⇒ 死代码);且给 f32 目标发 `ultof`/`uwtof` ⇒ 那几个 op 在本后端**恒产 f64** ⇒ f64 位模式塞进 f32 槽。修法:按源类型 prim 判符号性 + f32 目标统一「先转 f64,再 `truncd`」。门:`spec_int_to_float.jhyy`(8 组合矩阵;修前红 `got=234`) |
+| W-148 | — | ~~后端 f64/f32 字面量解析**丢掉指数** ⇒ 任何 ≥1e16 的浮点常量都错~~ ✅ **2026-10-26 已修**:`cg_parse_f64_imm_bits` / `cg_f32_imm_bits` 只扫「数字+小数」⇒ 停在 'e' ⇒ `d_9.2233720368547758e+18` 被读成 `9.2233720368547758`(**差 1e18 倍**)。最狠的一处:W-143 的饱和阈值 2^63/2^64 变成 9.22/1.84 ⇒ `3.7 as u32` 饱和到 `u32::MAX`。修法:扫指数段后把整段交给 `atof` |
+| W-147 | — | ~~自举闭环门**验错了代** —— 验锚点、装第 1 代 ⇒ 改后端时硬卡死 + 装出坏产物~~ ✅ **2026-10-26 已修**:旧逻辑比的是「锚点编的 .s」vs「锚点编出的 exe 再编的 .s」⇒ 验的是**锚点**的不动点,`mv` 装的却是**没验过**的第 1 代。改成**迭代到不动点**(每轮推进锚点,最多 3 轮;收敛即装 ⇒ 门从「验锚点」升级成「验装出去的产物」;3 轮不收敛 ⇒ 硬失败)。**过渡期自动消化,不需要 escape hatch** |
+| W-146 | — | ~~`emit_conv_ultof` 算的是 `2*((x>>1)+(x>>63))` ⇒ **把最低位清零**~~ ✅ **2026-10-26 已修**:`1 → 0.0`、`3 → 2.0` ⇒ u64/指针 → f64 全错。修法:换成标准两分支(`< 2^63` 直接 `cvtsi2sd`;`≥ 2^63` 取低 63 位 + 2^63) |
+| W-145 | — | ~~IL lexer 没有 `'u'` 分支 ⇒ `ultof` / `uwtof` 是**死 op**~~ ✅ **2026-10-26 已修**:两个 op 被**嵌套在 `c0 == 's'` 分支**里,而它们以 'u' 开头 ⇒ 永远进不去 ⇒ IL 里一出现就「unknown mnemonic」⇒ 跳 1 字节继续 ⇒ **吐出一串垃圾指令**。修法:`next_token` 加独立 `'u'` 分支 |
+| W-144 | — | ~~数组类型的 struct 字段**没被拷贝**~~ ✅ **2026-10-26 已修**:`cg_emit_store` 有 KIND_STRUCT 分支但**没有 KIND_ARRAY 分支** ⇒ 数组字段落到「按标量存一个值」的兜底路径 ⇒ 存进去的是数组的**地址**(字面量读到垃圾 + 按值赋值 AV + `==` 退化成身份比较)。修法:`cg_copy_struct` 改名 **`cg_copy_agg`** 统一处理 struct 与 array(两者互相递归 ⇒ 不能拆)+ `cg_emit_store` 加 KIND_ARRAY 分支 + `NODE_FIELD`/`NODE_INDEX` 对数组返回地址。门:`spec_struct_array_field.jhyy`(**XFAIL 已摘**,转真门) |
+| W-143 | — | ~~浮点 ↔ 指针**不是按位重解释**~~ ✅ **2026-10-26 已修**:按 user 拍板改成**数值转换**语义(浮点→指针 = 饱和转 u64 当地址;指针→浮点 = 地址当 u64 数值转浮点;浮点→整数 = **饱和**:区间内向 0 截断 / 越界饱和到 MIN/MAX / NaN → 0)。真根因不是「少发一条指令」:**指针→浮点一条指令都不发** ⇒ 结果 temp 的 qbe_type 仍是 `'l'` ⇒ 流进 f64 形参时 **caller 放整数寄存器 / callee 读 XMM** ⇒ ABI 寄存器类错配。门:`spec_ptr_float_cast.jhyy` + `spec_float_sat.jhyy`(**XFAIL 已摘**,转真门);spec §4.3 已同步 |
 | W-139 | — | ~~std lib 的字节循环写 `*(p as *i32) = v` ⇒ store 宽度 4 字节 ⇒ 请求 n 字节实际写 4n 字节~~ ✅ **2026-10-26 已修**:jhyy 的 store 宽度跟 **cast 后的 pointee 类型**走(实测 `*(p as *i32) = 0x41424344` 写 4 字节、`*(p as *u8)` 写 1 字节)⇒ 12 处字节循环的读写统一改成 `*u8` 宽度(mem/fmt/string/vec)。`mem_set(b, 0x41424344, 4)` 修前写 7 字节(踩掉哨兵)修后写 4 字节 ✓ |
 | W-140 | — | ~~`std/string.jhyy` 的 `str_find` 返回裸字面量 ⇒ `import string;` 编译失败~~ ✅ **2026-10-26 已修**:`-> i64` 的函数里 `return 0;` 推断成 i32 ⇒ 类型不匹配 ⇒ 改 `return 0 as i64;` |
 | W-141 | — | ~~`std/string.jhyy` 的 arena 新建 block 时 payload 起点压在 next 指针上、且 bump 指针不推进 ⇒ 分配互相踩 ⇒ ACCESS_VIOLATION~~ ✅ **2026-10-26 已修**:block 布局改成 `[next(8B)][payload_size(8B)][payload...]`,payload 起点 = `raw+16`,`cur` 推进到 `data_start+size` |
@@ -222,17 +237,19 @@ lang-spec 覆盖审计撞出来的,都挂了 XFAIL 门:**W-142** = 同作用域 
 | W-134 | ~~MCP pytest 套件里有一个**恒红**的陈旧测试~~ ✅ **2026-10-25 已修** —— `test_regress_baseline_drift_detection` 断言「sha 漂移 ⇒ 报 binary drifted」,但那个行为已被上一轮 commit `f72cef4` 刻意换成「binary 比源旧」的新鲜度检查 ⇒ **从那次起套件就是红的**,而 CI 从不跑 pytest ⇒ 没人发现。修法:拆成两条 —— `test_regress_sha_drift_is_not_fatal`(漂移**不**误报)+ `test_regress_stale_binary_detected`(binary 比源旧 ⇒ early_abort `older than source`)。**套件 40 passed / 1 skipped / 0 failed** |
 | W-134.1 | **DEFERRED** —— `mcp-jhyy/tests/`(41 个测试)在 CI 里**零覆盖**(`ci.yml` 没有 pytest step,也没有任何 `pip install`)⇒ 套件红绿都不影响 CI 结论。补 CI step 需要**第一个网络依赖**(fastmcp / pytest / pytest-asyncio),而本机 MSYS2 python 连 pip 都没有 ⇒ 命令**无法本地验证** ⇒ 建议单独一个 commit + 先在 PR 分支观察一轮 |
 
-**回归现状(2026-10-26 实测,lang-spec 覆盖审计后):245 PASS + 3 XFAIL + 0 failed + 20 SKIP(268 total)**
+**回归现状(2026-10-26 实测,lang-spec 覆盖审计 + W-143/144 真修后):249 PASS + 1 XFAIL + 0 failed + 20 SKIP(270 total)**
 (新增 49 条门:6 个 std lib 真身覆盖 + 11 个 spec 正向行为 + 31 个错误诊断门 +
-1 个聚合比较字段类型矩阵;3 个 XFAIL = `spec_shadowing.jhyy`(W-142)/
-`spec_ptr_float_cast.jhyy`(W-143)/`spec_struct_array_field.jhyy`(W-144))
+1 个聚合比较字段类型矩阵;第二轮再 +1 条 `spec_int_to_float.jhyy`(W-149 的 8 组合矩阵);
+`spec_ptr_float_cast.jhyy`(W-143)/ `spec_struct_array_field.jhyy`(W-144)两个 XFAIL
+**转真门** ⇒ 剩 1 个 XFAIL = `spec_shadowing.jhyy`(W-142))
 (本日早些时候 —— W-126 / W-124 / W-125 修完时 —— 是 186/186 + 0 XFAIL + 19 SKIP / 205 total;
 再往前 184/184 + 2 XFAIL + 20 SKIP / 203 total)。本机 Docker Desktop 起 daemon 后
 `regress.py --cross=auto` 解析成 **docker** ⇒ **7 个** sysv 用例本地也真跑
 (exit=28/217/42/35/18/42/170 全对 —— 新增 `sysv_mixed_int_float`)。
 `closure_check.sh` PASS(v2.s == v3.s 逐字节)、`fixed_point.sh` 17 PASS / 0 FAIL
-(N=10 .il 与 .s 跨代 byte-equal)、`artifact_checks.sh` 12 PASS / 0 FAIL
-(含 W-130 新增 3 道门)、`audit_test_assertions.py --strict` 0 违规。
+(N=10 .il 与 .s 跨代 byte-equal)、`artifact_checks.sh` **14 PASS** / 0 FAIL
+(含 W-130 新增 3 道门)、`audit_test_assertions.py --strict` 0 违规、
+`make`(自举闭环门)PASS —— 过渡期自动消化,**再跑一次产物逐字节不变**(幂等)。
 
 **回归现状见下方「v4.0.20 真修批次」—— 数字已更新到 200/200 + 0 XFAIL / 219 total。**
 

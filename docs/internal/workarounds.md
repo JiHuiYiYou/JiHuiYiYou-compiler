@@ -156,8 +156,13 @@
 | [W-141](#w-141) | RESOLVED | std/string.jhyy 的 arena block 布局错误 ⇒ 分配互相踩 ⇒... |
 | [W-140](#w-140) | RESOLVED | std/string.jhyy 的 `str_find` 返回裸字面量 ⇒ `import... |
 | [W-139](#w-139) | RESOLVED | std lib 的字节循环写 `*(p as *i32) = v` ⇒ store 宽度 4 字节... |
-| [W-143](#w-143) | ACTIVE | 浮点 ↔ 指针**不是按位重解释** —— 浮点→指针走数值截断,指针→浮点得 0 |
-| [W-144](#w-144) | ACTIVE | 数组类型的 struct 字段没被拷贝 —— 字面量读到垃圾 + 按值赋值... |
+| [W-143](#w-143) | RESOLVED | 浮点 ↔ 指针**不是按位重解释** —— 浮点→指针走数值截断,指针→浮点得 0 |
+| [W-144](#w-144) | RESOLVED | 数组类型的 struct 字段没被拷贝 —— 字面量读到垃圾 + 按值赋值... |
+| [W-145](#w-145) | RESOLVED | IL lexer 没有 'u' 分支 —— `ultof` / `uwtof` 是**死 op** |
+| [W-146](#w-146) | RESOLVED | `emit_conv_ultof` 算的是 `2*((x>>1) + (x>>63))` ⇒... |
+| [W-147](#w-147) | RESOLVED | 自举闭环门**验错了代** —— 验锚点、装第 1 代 ⇒ 过渡期卡死 + 装出坏产物 |
+| [W-148](#w-148) | RESOLVED | 后端 f64/f32 字面量解析**丢掉指数** ⇒ 任何 ≥1e16 的浮点常量都错 |
+| [W-149](#w-149) | RESOLVED | 整数→浮点 conv 表丢**符号性** + f32 目标拿到 **f64** ⇒ 8 个组合里... |
 
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
@@ -11062,56 +11067,79 @@ mem_set(b, 0x41424344, 4) 之后:  b0..b3 = 68 68 68 68,  b4..b6 = 0(哨兵被�
 <a id="w-143"></a>
 ## W-143: 浮点 ↔ 指针**不是按位重解释** —— 浮点→指针走数值截断,指针→浮点得 0
 
-**状态:** ACTIVE since 2026-10-26 (v4.0.22) — spec §4.3 承诺「按位重解释」;实现两头都不符;XFAIL 门已挂
+**状态:** RESOLVED closed 2026-10-26 (v4.0.22) — 改为**数值转换**语义;浮点→整数改**饱和**;门已转真门
 **Filed-by:** lang-spec-coverage-audit-2026-10-26
-**日期:** 2026-10-26(lang-spec 覆盖审计补 §4.3 转换表覆盖时撞出来)
+**日期:** 2026-10-26(lang-spec 覆盖审计补 §4.3 转换表覆盖时撞出来) → 2026-10-26(真修)
 
-**触发面:** `as` 转换的**浮点 ↔ 指针**这一对。
+**触发面:** `as` 转换的**浮点 ↔ 指针**这一对,以及**浮点 → 整数**的越界语义。
 
-**症状(2026-10-26 实测):**
+**症状(2026-10-26 实测,修前):**
 ```
 let x: f64 = 1.5;
 let b: *i64 = x as *i64;
-(b as i64)      ⇒ 1        ← 应为 0x3FF8000000000000(1.5 的 IEEE 754 位模式)
-(b as f64)      ⇒ 0.0      ← 应为 1.5(按位回读);也不是地址(1.0)
+(b as i64)      ⇒ 1        ← 数值截断,不是位模式
+(b as f64)      ⇒ 0.0      ← 既不是地址(1.0)也不是位模式回读(1.5)
 ```
-⇒ 浮点→指针是**数值截断**(1.5 → 1);指针→浮点给 **0** —— **静默算错值**
+⇒ 浮点→指针是**数值截断**;指针→浮点给 **0** —— **静默算错值**
 (指针的值根本没被读到)。
+另外:裸 `cvttsd2si` 对越界 / NaN 给的是「integer indefinite」
+(`i32::MIN` / `i64::MIN`)⇒ 浮点→整数的越界行为既不是截断也不是饱和 ⇒ spec 推不出来。
 
-**根因:** `as` 的浮点/指针分支没有独立的 emit 路径:浮点→指针复用了整数的
-截断路径;指针→浮点这条根本没 emit 指针的 load。
+**根因(两条,都不是「少写了一条 emit」那么简单):**
+1. **指针→浮点一条指令都不发。** `as` 的浮点/指针分支没有独立的 emit 路径 ⇒
+   结果 temp 的 qbe_type 仍是 `'l'` ⇒ 流进 f64 形参时 **caller 放整数寄存器 /
+   callee 读 XMM** ⇒ **ABI 寄存器类错配**。这才是「指针→浮点得 0」的机制。
+2. **浮点→整数走裸 `cvttsd2si`**,越界/NaN 语义未定义。
 
-**workaround(用户侧):** 需要「按位看一个 double」时,用**两个 i32** 手工拼:
-```
-let mut buf: [u8; 8] = [0 as u8, 0 as u8, 0 as u8, 0 as u8,
-                       0 as u8, 0 as u8, 0 as u8, 0 as u8];
-*(buf as *f64) = x;                    // f64 存进字节缓冲
-let hi: i32 = *(buf as *i32);
-let lo: i32 = *(buf as *i32) + 4 as i32;  // ← 需要按偏移取,当前无 ptr_add 时不通用
-```
-(注:`std::mem::ptr_add` 可用于第二个字段的偏移。)
+**语义决策(user 2026-10-26 拍板):** **数值转换** —— 不是位重解释、不是解引用。
+- `x as *T` ≡ **饱和**转成 64 位无符号整数 → 当地址
+  (NaN → 0;x < 0 → 0;x ≥ 2^64 → `u64::MAX`;区间内向 0 截断)
+- `p as f64` ≡ 地址当 64 位**无符号**整数 → 数值转浮点
+  (整数→浮点是 roundTiesToEven,只可能丢精度;**不涉及饱和** ⇒ 不对称化)
+- 浮点 → 整数同理:**区间内向 0 截断;越界饱和到目标类型 MIN/MAX;NaN → 0**
+  (Rust 风格)。区间内的行为与旧措辞一致(向 0 截断),只有越界/NaN 从
+  「未定义的 integer indefinite」变成**可预期的饱和**。
 
-**门:** `compiler/tests/examples/spec_ptr_float_cast.jhyy` —— 按 **spec 的承诺**
-(按位重解释)写断言,当前实现两条都达不到 ⇒ `// XFAIL:` + `// EXPECT: 0`。
-修好后 XPASS ⇒ suite 失败 ⇒ 强制摘标记。
+**修法(2026-10-26 真修,全在 `compiler/src0/codegen.jhyy`):**
+- `cg_convert_arg` 在 KIND_PRIMITIVE 早 bail **之前**加指针↔浮点分支:
+  指针→浮点显式发 `=d ultof`(u64→f64);浮点→指针走饱和转 u64
+- 新增饱和转换一组 helper:`cg_mask_from_cmp` / `cg_select_mask` /
+  `cg_clamp_i64` / `cg_clamp_u64_narrow` / `cg_clamp_int` /
+  `cg_sat_f64_to_i64` / `cg_sat_f64_to_u64` / `cg_sat_f64_to_int`
+  (branch-free:整数 mask select,不碰 phi / 分支区)
+- 窄宽度(i8/u8/i16/u16/i32/u32/bool):先按 64 位饱和,再在**整数域**夹到
+  目标类型的 [MIN, MAX](iN 的区间是 i64 区间的子集 ⇒ 等价)
+- ⚠ 窄宽度用**有符号**比较会出错(u64 ≥ 2^63 看是负数)⇒ `cg_clamp_u64_narrow`
+  单独处理:有符号看是负 ⇒ 一定 > 任何窄无符号类型的 MAX ⇒ 直接给 MAX
 
-**影响范围:** 任何依赖「浮点当指针用」的用户代码(少见但合法用法);更值得担心的是
-**指针→浮点静默给 0** —— 用了就会算错值,且**零诊断**。
+**门:**
+- `compiler/tests/examples/spec_ptr_float_cast.jhyy` —— **XFAIL 已摘**(转真门):
+  判定性往返(1.0 → 指针 → f64 ⇒ 1.0)/ 区间内截断(1.5 → 1)/ 负数 → 0 /
+  NaN → 0 / 指针→浮点与 `q as u64` 一致
+- `compiler/tests/examples/spec_float_sat.jhyy` —— **新增真门**:NaN / 区间内 /
+  上溢 / 下溢 / 无符号下溢,各宽度逐个断言
+- `compiler/tests/examples/spec_int_to_float.jhyy` —— 整数→浮点的 8 组合矩阵
+  (见 **W-149**)
 
-**失效条件:** 若 `as` 的浮点/指针分支改成真的位模式搬运(两向),本条自然消失。
+**影响范围:** 修前:浮点↔指针两头都错(指针→浮点更是静默给 0);
+浮点→整数越界给 `i64::MIN` 这类垃圾值。
+
+**失效条件:** 已消除(2026-10-26 真修,见上)。
 
 **引用:**
-- 源码:`compiler/src0/codegen.jhyy`(`as` 的 cast emit 分支)——
-  具体行号待下次 RCA 定位(本轮只做了行为取证)
-- 门:`compiler/tests/examples/spec_ptr_float_cast.jhyy`
-- spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §4.3 + 附录 B
+- 源码:`compiler/src0/codegen.jhyy`(`cg_convert_arg` 的指针↔浮点分支 +
+  饱和转换 helper 组)
+- 门:`compiler/tests/examples/spec_ptr_float_cast.jhyy`、
+  `spec_float_sat.jhyy`、`spec_int_to_float.jhyy`
+- spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §4.3(转换表 + 饱和语义)+ 附录 B
+- 关联:**W-145** / **W-146** / **W-148** / **W-149**(同一条链路上挖出的四个根因)
 
 ---
 
 <a id="w-144"></a>
 ## W-144: 数组类型的 struct 字段没被拷贝 —— 字面量读到垃圾 + 按值赋值 ACCESS_VIOLATION
 
-**状态:** ACTIVE since 2026-10-26 (v4.0.22) — cg_emit_store 缺 KIND_ARRAY 分支;XFAIL 门已挂
+**状态:** RESOLVED closed 2026-10-26 (v4.0.22) — 数组类型 struct 字段按值拷贝已实装(cg_copy_agg 统一 struct/array);XFAIL 门转真门
 **Filed-by:** lang-spec-coverage-audit-2026-10-26
 **日期:** 2026-10-26(lang-spec 覆盖审计补 §4.2.1 的字段类型矩阵时撞出来)
 
@@ -11144,13 +11172,27 @@ return cg_emit_store_primitive(cg_raw, t_raw, val, addr);   // ← 数组字段�
 顶层数组的 `==` 是好的(agg_eq_array.jhyy ✓)—— 因为那条路径直接进
 `cg_value_eq` 的 KIND_ARRAY 分支,**不经过** `cg_emit_store`。
 
-**workaround(用户侧):** 别把数组放进 struct 字段;改成
-`struct { buf: *i32, len: i64 }`(指针 + 长度),或把数组单独放顶层变量、
-struct 里只存指针。
+**修法(2026-10-26 真修):** 全部在 `compiler/src0/codegen.jhyy`:
+- `cg_copy_struct` 改名 **`cg_copy_agg`** 并同时处理 **struct 与 array** ——
+  array 元素可能是 struct、struct 字段可能是 array ⇒ 两个函数**互相递归**
+  ⇒ jhyy 无 forward decl ⇒ 不能拆(与 `cg_value_eq` 同款处理:一个函数 dispatch)
+- `cg_copy_agg` 加 **array 分支**:逐元素拷贝(不是按字节块)⇒ 元素是 u8/i8/u16/i16
+  时走 `cg_emit_load`/`cg_emit_store_primitive` 的 **sub-word** 路径
+  (loadub/storeb/loaduh/storeh)⇒ 不会越界多写 3 字节;元素是 struct/array 时
+  递归自调;元素是 enum 时走 `cg_copy_enum`(拷 image 而非地址)
+- `cg_copy_agg` 的 struct 字段分派加 **KIND_ARRAY** 分支
+- `cg_emit_store` 加 **KIND_ARRAY** 分支(原来落到 `cg_emit_store_primitive`
+  ⇒ 按 `qbe_type_of(array)='w'` 只写 4 字节 ⇒ 字段槽里是截断指针)
+- `NODE_FIELD` / `NODE_INDEX`:数组类型字段/元素**返回地址**(与 struct/enum 同款)
+  ⇒ 原来做 `loadw` 把「数组前 4 字节」当值 ⇒ 后续下标拿它当基址 ⇒ AV
+- `NODE_ADDR_OF`:临时槽按 `type_size` 分配(原来固定 8 字节 ⇒ `&arr`(12 字节)越界写)
 
-**门:** `compiler/tests/examples/spec_struct_array_field.jhyy` —— `// XFAIL:` +
-`// EXPECT: 0`,三条断言(字面量拷贝 / 按值赋值 / `==` 按值)都按 spec 的承诺写。
-修好后 XPASS ⇒ suite 失败 ⇒ 强制摘标记。
+注意:**没有改 `qbe_type_of`**(`ir.jhyy:202` 对 `KIND_ARRAY` 返回 `'w'`)—— 改了会波及
+所有数组路径;新分支只在 kind 判定点显式处理数组。
+
+**门:** `compiler/tests/examples/spec_struct_array_field.jhyy` —— **XFAIL 已摘**
+(转成真门)。五条断言:字面量拷贝 / 按值赋值 / `==` 按值 / **按值传参**(caller 建副本)
+/ **按值返回**(sret)⇒ 后两条走的是 `cg_copy_agg` 的另两个入口。
 另外 `spec_agg_eq_field_types.jhyy` 覆盖**能工作**的那些字段类型
 (bool / u8 / f64 / *u8 / PhantomData / 嵌套 struct)。
 
@@ -11159,11 +11201,215 @@ struct 里只存指针。
 
 **影响范围:** 任何把定长数组放进 struct 的用户程序 ⇒ 静默错值或崩溃。
 
-**失效条件:** 若 `cg_emit_store` 加一个 KIND_ARRAY 分支(按
-`arr_count * elem_size` 逐元素拷贝)—— 本条自然消失。
+**失效条件:** 已消除(2026-10-26 真修,见上)。
 
 **引用:**
 - 源码:`compiler/src0/codegen.jhyy`(`cg_emit_store` 的 kind 派发;缺 KIND_ARRAY)
 - 门:`compiler/tests/examples/spec_struct_array_field.jhyy`(XFAIL)、
   `compiler/tests/examples/spec_agg_eq_field_types.jhyy`(可用的字段类型)
 - spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §4.2.1 + 附录 B
+
+<a id="w-145"></a>
+## W-145: IL lexer 没有 'u' 分支 —— `ultof` / `uwtof` 是**死 op**
+
+**状态:** RESOLVED closed 2026-10-26 (v4.0.22) — lexer 补 'u' 分支;门已转真门
+**Filed-by:** W-143 取证时顺带挖出(浮点转换链路的根因之一)
+**日期:** 2026-10-26
+
+**触发面:** IL 里出现 `ultof`(u64→f64)/ `uwtof`(u32→f64)这两条 op 的地方。
+前端 conv 表的 `L → S` 分支就发 `ultof` ⇒ 任何 `i64 as f32` 都会踩到。
+
+**症状(2026-10-26 实测):**
+IL lexer 遇到 `ultof` 时报「unknown QBE IL mnemonic」⇒ **跳 1 字节继续**
+⇒ 后面的字节被当成新助记符 ⇒ **吐出一串垃圾指令**(不是报错,是静默错代码)。
+
+**根因:** `compiler/src0/codegen_amd64_lexer.jhyy` 的 `next_token` 里,`ultof` /
+`uwtof` 的识别被**嵌套在 `c0 == 's'` 分支**内(历史版本的死代码段)—— 而它们
+以 **'u'** 开头 ⇒ **永远进不去**。
+
+**修法:** `next_token` 加独立的 `c0 == 'u'` 分支:认 `ultof`(u,l,t,o,f)与
+`uwtof`(u,w,t,o,f),复用 `lex_finish_instr` 的通用路径(吃空格 + 吃到行尾)。
+
+**门:** `compiler/tests/examples/spec_int_to_float.jhyy`(真门)——
+`u64 → f64` / `u64 → f32` 两条都走 `ultof`。
+
+**影响范围:** 修前 `i64 as f32` / `u64 as f32` / `u32 as f32` / `u64 as f64`
+产出的都是垃圾指令。
+
+**失效条件:** 已消除(2026-10-26 真修,见上)。
+
+**引用:**
+- 源码:`compiler/src0/codegen_amd64_lexer.jhyy`(`next_token` 的 `'u'` 分支)
+- 门:`compiler/tests/examples/spec_int_to_float.jhyy`
+
+---
+
+<a id="w-146"></a>
+## W-146: `emit_conv_ultof` 算的是 `2*((x>>1) + (x>>63))` ⇒ **把最低位清零**
+
+**状态:** RESOLVED closed 2026-10-26 (v4.0.22) — 换成标准两分支;门已转真门
+**Filed-by:** W-143 取证时顺带挖出
+**日期:** 2026-10-26
+
+**触发面:** u64 → f64 的转换(后端 `emit_conv_ultof`)。指针 → f64 也走这条
+(`compiler/src0/codegen.jhyy` 的指针→浮点分支显式发 `=d ultof`)。
+
+**症状(2026-10-26 实测):**
+`1` 转成 `0.0`、`3` 转成 `2.0` —— 最低位被清零。⇒ 「u64 as f64」「指针 as f64」
+的值全错(且**静默**:不报错、不崩)。
+
+**根因:** `compiler/src0/codegen_amd64_emit_sse.jhyy` 的 `emit_conv_ultof` 用了一个
+错误的「半值」技巧:`(x>>1) + (x>>63)` 之后再 `* 2` ⇒ 低位永远是 0。
+
+**修法:** 换成标准的无符号→浮点两分支:
+- `x < 2^63` ⇒ 直接 `cvtsi2sd`(此时无符号值 == 有符号值 ⇒ IEEE 转换精确)
+- `x >= 2^63` ⇒ 取低 63 位(`andq $9223372036854775807`)⇒ `cvtsi2sd` ⇒ 再加
+  `2^63`(`movabsq $4890909195324358656` = 2^63 的 double 位模式,`addsd` 加上去)
+
+标签名带 `dst_id` + `fn_idx` ⇒ 同函数内多次转换不撞名(沿用 `emit_ctrl` 的
+`_fn<N>` 后缀约定)。
+
+**门:** `compiler/tests/examples/spec_int_to_float.jhyy`(真门)+
+`compiler/tests/examples/spec_ptr_float_cast.jhyy`(指针 → f64 走 `ultof`)。
+
+**失效条件:** 已消除(2026-10-26 真修,见上)。
+
+**引用:**
+- 源码:`compiler/src0/codegen_amd64_emit_sse.jhyy`(`emit_conv_ultof`)
+- 门:`compiler/tests/examples/spec_int_to_float.jhyy`、`spec_ptr_float_cast.jhyy`
+
+---
+
+<a id="w-147"></a>
+## W-147: 自举闭环门**验错了代** —— 验锚点、装第 1 代 ⇒ 过渡期卡死 + 装出坏产物
+
+**状态:** RESOLVED closed 2026-10-26 (v4.0.22) — 门改成「迭代到不动点」
+**Filed-by:** 本轮(W-148 落地后 `make` 卡死 ⇒ 定位到门本身)
+**日期:** 2026-10-26
+
+**触发面:** `Makefile` 的 `$(BIN_DIR)/jhyy.exe` 规则(自举闭环门)。
+
+**症状(2026-10-26 实测):**
+```
+SELFFAIL: 新 jhyy.exe 编 src0 的结果与它自己编的不一致 —— 自举不闭环
+```
+⇒ 改了后端(让 src0 自己的 `.s` 编码变了)之后,`make` **硬失败**,而且**没有
+任何办法推进** —— 门是死的。
+
+**根因(两层):**
+1. **一代 bootstrap 过渡是合法的。** 后端改了浮点常量的编码方式(W-148)⇒
+   src0 自己的 `.s` 变了 ⇒ 第 1 代与第 2 代必然不同 ⇒ 再编一代就收敛。
+   实测:`gen1.s != gen2.s`(只差 3 行,全是 src0 里 2^63 / 2^64 那三个常量)、
+   `gen2.s == gen3.s`、`gen2.exe == gen3.exe` 逐字节相同 ⇒ **不动点在第 2 代**。
+2. **门验的是错的那一代。** 旧逻辑是「锚点编第 1 代 → 第 1 代编第 2 代 → 比
+   第 1 代与第 2 代」⇒ 它验的是**锚点**的不动点;而 `mv -f _boot_new.exe $@`
+   装出去的是**没被验过**的第 1 代。⇒ 过渡期里装出去的那一代恰恰是**常量错的**
+   一代(src0 的 2^63 被写成 `9.2233720368547758`)⇒ 「门绿了但装的是坏产物」。
+
+**修法:** 改成**迭代到不动点**:每轮「锚点编第 N 代 → 第 N 代编第 N+1 代 →
+比第 N 与第 N+1 代」;不等就把锚点推进一代,最多 3 轮。收敛的那一轮,第 N 代
+**就是不动点**(第 N+1 代与它同产物)⇒ 装它是对的。
+- 门从「验锚点」升级成「验**装出去的那个产物**」—— 只会更强,不会更松;
+- 过渡期自动消化,**不需要任何 escape hatch**(仓库规矩:门不许有后门);
+- 3 轮仍不收敛 ⇒ 硬失败(真正的非确定性照样被抓,见 W-121 那类)。
+
+**门:** `make` 本身(= 自举闭环门)。实测:本次过渡被自动消化(第 1 代 vs 第 2 代
+不同 ⇒ 推进 ⇒ 第 2 代 vs 第 3 代相同 ⇒ 装第 2 代),`make` 一次通过;
+**再跑一次产物逐字节不变**(幂等)。
+
+**影响范围:** 每个改后端 / 改 src0 编码的人(过去只能手工绕过门)。
+
+**失效条件:** 已消除(2026-10-26 真修,见上)。
+
+**引用:**
+- 构建:`Makefile`(`$(BIN_DIR)/jhyy.exe` 规则的闭环门)
+- 相关:**W-148**(触发这次过渡的那条后端修复)
+
+---
+
+<a id="w-148"></a>
+## W-148: 后端 f64/f32 字面量解析**丢掉指数** ⇒ 任何 ≥1e16 的浮点常量都错
+
+**状态:** RESOLVED closed 2026-10-26 (v4.0.22) — 扫指数段后整段交给 atof
+**Filed-by:** W-143 取证时顺带挖出
+**日期:** 2026-10-26
+
+**触发面:** 后端把 IL 里的浮点常量文本(`d_<数字>`)翻译成机器码的时候。
+
+**症状(2026-10-26 实测):**
+IL 里的 `d_9.2233720368547758e+18` 被解析成 `9.2233720368547758` ——
+**差 1e18 倍**。⇒ 任何 |v| ≥ 1e16 的浮点常量都错。
+最狠的一处:W-143 的饱和阈值 2^63 / 2^64 实际变成 `9.22` / `1.84`
+⇒ `3.7 as u32` 被判成「≥ 2^64」⇒ 饱和到 `u32::MAX`(实测返回 **4294967295**)。
+
+**根因:** `compiler/src0/codegen_amd64_emit_call.jhyy` 的 `cg_parse_f64_imm_bits`
+与 `cg_f32_imm_bits` 只扫「数字 + 可选小数点」⇒ **停在 'e'**。而 IL 里的浮点
+常量由 `%.17g` 生成 ⇒ |v| ≥ 1e16 时**必然**是指数形式。
+
+**修法:** 小数点后扫小数数字,再扫指数部分('e'/'E' + 可选 +/- + 数字),
+然后把**整段数字文本**交给 `jh_double_to_bits`(C 端 `atof` 支持指数)。
+指数后面没有数字时回退(不把 'e' 当指数)。
+
+**门:** `compiler/tests/examples/spec_float_sat.jhyy`(真门)+
+自举闭环门(见 **W-147** —— 本条正是触发那一代过渡的原因)。
+
+**影响范围:** 所有含大浮点常量的用户程序 —— 症状是**静默错值**,零诊断。
+
+**失效条件:** 已消除(2026-10-26 真修,见上)。
+
+**引用:**
+- 源码:`compiler/src0/codegen_amd64_emit_call.jhyy`(`cg_parse_f64_imm_bits`、
+  `cg_f32_imm_bits`)
+- 门:`compiler/tests/examples/spec_float_sat.jhyy`
+
+---
+
+<a id="w-149"></a>
+## W-149: 整数→浮点 conv 表丢**符号性** + f32 目标拿到 **f64** ⇒ 8 个组合里 5 个错
+
+**状态:** RESOLVED closed 2026-10-26 (v4.0.22) — 前端按符号性选 op + f32 走 truncd
+**Filed-by:** 本轮(W-146 修好后核对「u64 as f64 真的好了吗」时挖出)
+**日期:** 2026-10-26
+
+**触发面:** 所有 `整数 as 浮点` 的转换(前端 `cg_convert_arg` 的 conv 表)。
+
+**症状(2026-10-26 实测,8 组合的失败位掩码 = 234 = 2|8|32|64|128):**
+
+| 组合 | 修前 | 症状 |
+|---|---|---|
+| i32→f64 / u32→f64 / i64→f64 | ✅ | — |
+| **u64→f64** | ❌ | 值 ≥ 2^63 变**负数** |
+| **i32→f32 / u32→f32 / i64→f32 / u64→f32** | ❌ | f64 的位模式塞进 f32 槽 ⇒ 读出来是垃圾 |
+
+**根因(两处):**
+1. **符号性丢了。** `compiler/src0/codegen.jhyy` 的 conv 表:`L → D` 一律发
+   `sltof`(i64→f64,**有符号**)⇒ u64 值 ≥ 2^63 变负数。
+   ⚠ 后端的 `ultof`(u64→f64)早就写好了、**W-146 还把它的算法修对了**,但前端
+   **从来没发过它** ⇒ 那条修复对 u64→f64 是**死代码**。
+   (这正是「W-146 说 u64 as f64 已修」只对了一半的原因。)
+2. **f32 目标拿到的是 f64。** 后端四个 tof op 里只有 `swtof` 会按目标槽在
+   `cvtsi2ss` / `cvtsi2sd` 之间切(见 `codegen_amd64_emit_sse.jhyy`),
+   `sltof` / `ultof` / `uwtof` **恒产 f64**(见 `codegen_amd64_state.jhyy` 的
+   `ILTOK_*` 注释)⇒ 旧表给 f32 目标发 `ultof`/`uwtof` ⇒ **f64 的位模式塞进
+   f32 槽**。
+
+**修法(全在 `compiler/src0/codegen.jhyy` 的 `cg_convert_arg`):**
+- 按**源类型的 prim** 判符号性(拿不到 `src_t` ⇒ 不猜,保持 `sltof`):
+  `L` + 无符号 ⇒ `ultof`;`W` + 无符号 ⇒ `uwtof`;
+- f32 目标统一「**先转 f64,再 `truncd`**」(那四个 op 在本后端恒产 f64,
+  而 `truncd` 后端已支持)。
+
+**门:** `compiler/tests/examples/spec_int_to_float.jhyy` —— **真门**,8 个组合
+逐个断言(用位掩码定位是哪一条错)。修好后是绿;修前红(`expected=0 got=234`)。
+
+**影响范围:** 修前 `u64 as f64` 在值 ≥ 2^63 时静默给负数;**任何**整数 → f32
+都读到垃圾值。
+
+**失效条件:** 已消除(2026-10-26 真修,见上)。
+
+**引用:**
+- 源码:`compiler/src0/codegen.jhyy`(`cg_convert_arg` 的 conv 表 + 发射段)
+- 后端语义:`compiler/src0/codegen_amd64_state.jhyy`(`ILTOK_SLTOF` 等的注释)、
+  `compiler/src0/codegen_amd64_emit_sse.jhyy`(`emit_conv_*tof`)
+- 门:`compiler/tests/examples/spec_int_to_float.jhyy`
+- 相关:**W-146**(后端算法已对,但前端没接上)
