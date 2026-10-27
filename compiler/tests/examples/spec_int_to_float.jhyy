@@ -73,5 +73,36 @@ fn main_jhyy() -> i32 {
     let c2: f64 = c1 as f64;
     if c2 != 1.5 { fails = fails + 256; }
 
+    // ── 窄宽度(u8/u16/i8/i16)→ 浮点 ──
+    //
+    // 这四条走的是 **'w' 槽** 那条路(值是 loadub/loaduh 零扩展进 4 字节槽)
+    // ⇒ 发的是 `swtof` / **`uwtof`** —— 而 `uwtof` 在 W-145 之前是**死 op**
+    // (IL lexer 没有 'u' 分支)⇒ 这几条是 W-145 的**载荷覆盖**。
+    let d1: u8 = 255u8;
+    let e1: f64 = d1 as f64;
+    if e1 != 255.0 { fails = fails + 512; }
+
+    let d2: u16 = 65535u16;
+    let e2: f64 = d2 as f64;
+    if e2 != 65535.0 { fails = fails + 1024; }
+
+    let d3: i8 = -5i8;
+    let e3: f64 = d3 as f64;
+    if e3 != -5.0 { fails = fails + 2048; }
+
+    let d4: i16 = -5i16;
+    let e4: f64 = d4 as f64;
+    if e4 != -5.0 { fails = fails + 4096; }
+
+    let d5: u8 = 255u8;
+    let e5: f32 = d5 as f32;
+    let e5d: f64 = e5 as f64;
+    if e5d != 255.0 { fails = fails + 8192; }
+
+    let d6: u16 = 65535u16;
+    let e6: f32 = d6 as f32;
+    let e6d: f64 = e6 as f64;
+    if e6d != 65535.0 { fails = fails + 16384; }
+
     return fails;
 }
