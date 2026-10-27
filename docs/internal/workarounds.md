@@ -49,6 +49,7 @@
 | [W-022](#w-022) | SUPERSEDED | Windows PowerShell 5.1 `Out-File -Encoding utf8`... |
 | [W-023](#w-023) | SUPERSEDED | MSYS2 bash step 里 `${VAR}` 不展开 `${{ env.X }}` GH... |
 | [W-024](#w-024) | SUPERSEDED | PowerShell 5.1 `Set-Content` / `Out-File` 写 UTF-8... |
+| [W-025](#w-025) | RESOLVED | qbe/ gitlink 无 .gitmodules — release.yml... |
 | [W-026](#w-026) | RESOLVED | regress.py `[:80]` stderr 截断隐藏真实 QBE/gcc 错误 |
 | [W-027](#w-027) | RESOLVED | GH Actions `setup-msys2@v2` 把 MSYS2 装在... |
 | [W-029](#w-029) | SUPERSEDED | jhyy.exe toolchain 探测收敛 — `jh_gcc_path()` 4-tier... |
@@ -89,12 +90,15 @@
 | [W-068](#w-068) | RESOLVED | v1.8.3 Burn bundle 双击闪退 — `Theme.xml`... |
 | [W-071](#w-071) | RESOLVED | 自写后端 codegen_amd64 模块未 e2e 验证 — v2.6.x 阶段 ship 但... |
 | [W-069](#w-069) | RESOLVED | jhyy.exe 编译产物 corrupt / ld exit 5 — stage0 build... |
+| [W-070](#w-070) | RESOLVED | jhyy.exe --target=amd64_sysv_freestanding 在... |
 | [W-072](#w-072) | RESOLVED | 0f9c923 merge artifact + codegen_amd64.jhyy 重复 fn... |
 | [W-073](#w-073) | RESOLVED | QBE IL emit escape + lexer `next_token_data_string... |
 | [W-074](#w-074) | RESOLVED | runtime.c 24B Arena 死代码声明 (4 fn + Arena struct) |
 | [W-075](#w-075) | RESOLVED | std::mem mem_set 用 i32 store 而非 byte store (M0 简化) |
 | [W-076](#w-076) | RESOLVED | std::arena test inline 副本用 std_* 前缀避 runtime.c... |
 | [W-074.6](#w-074.6) | RESOLVED | jhyy.exe 编 src0/main.jhyy 自举 .s 截断 / multifn... |
+| [W-077](#w-077) | RESOLVED | src0/std/mem.jhyy mem_find_byte codegen 路径触发... |
+| [W-078](#w-078) | RESOLVED | array[i32] index codegen 触发 QBE invalid type for... |
 | [W-087](#w-087) | RESOLVED | V3 self-backend emit_func_header frame size 不含... |
 | [W-088](#w-088) | RESOLVED | V3 self-backend caller-side store-pointer temp... |
 | [W-089](#w-089) | RESOLVED | V3 self-backend emit_call 不 flag l-typed call... |
@@ -110,6 +114,8 @@
 | [W-100](#w-100) | RESOLVED | emit_call sret 路径无条件 `movl %eax, -<slot>(%rbp)`... |
 | [W-101](#w-101) | RESOLVED | emit_binop ceqw dst_id 走 existing local... |
 | [W-085](#w-085) | RESOLVED | codegen small-frame fn(*T, i32, i32) 第 3 i32 参数... |
+| [W-079](#w-079) | RESOLVED | QBE amd64_win mixed (l, w, w) extern fn args bug... |
+| [W-080](#w-080) | RESOLVED | self-backend i32 return zero-extend missing +... |
 | [W-102](#w-102) | RESOLVED | address-holder 池与 alloc 池槽位重叠 → self-hosted... |
 | [W-103](#w-103) | RESOLVED | std/os.jhyy 全部 I/O 与 exit 是 M0 mock — W-079 的... |
 | [W-104](#w-104) | RESOLVED | SysV ABI 参数分类调用 Win 分类器 — 正确的分类器就在同文件,没接线 |
@@ -153,6 +159,7 @@
 | [W-134](#w-134) | RESOLVED | MCP pytest 套件里有一个**恒红**的陈旧测试 —— 断言的行为早已被换掉 |
 | [W-134.1](#w-134.1) | RESOLVED | `mcp-jhyy/tests/` 在 CI 里**零覆盖** —— 套件红绿都不影响 CI 结论 |
 | [W-142](#w-142) | RESOLVED | 同作用域 shadowing 让编译器在 sema 阶段**空指针写崩溃**(0xC0000005) |
+| [W-154](#w-154) | RESOLVED | MCP 的 `jhyy_workarounds` 与索引脚本**口径不一致** ⇒ 计数对不上 +... |
 | [W-153](#w-153) | RESOLVED | 索引重建脚本把索引表与下一个 H2 之间的内容**整段丢掉** ⇒ 锚点被吃 ⇒ 死链 |
 | [W-152](#w-152) | RESOLVED | 重名 **import** ⇒ 编译器崩溃;重名**类型参数** ⇒ 报一串指不到病根的错 |
 | [W-151](#w-151) | RESOLVED | match arm 不开作用域 ⇒ arm 的模式绑定**复用外层同名变量** ⇒ payload... |
@@ -1650,7 +1657,8 @@ input (canonical) 跟 output (scratch `_sh_vN`) 物理分开 → pre-stage clean
 <a id="w-015"></a>
 ## W-015: `NODE_SIZEOF` 节点 arena 分配 8 字节 → sema const-fold 写 16 字节溢出到下一块
 
-**Status:** ✅ RESOLVED (commit TBD, v1.3.3)
+**状态:** RESOLVED closed 2026-08-13 (v1.3.3) — `NODE_SIZEOF` 节点 arena 分配 8 字节 → sema const-fold 写 16 字节溢出到下一块
+**提交/说明:** RESOLVED (commit TBD
 
 **触发面:** v1.3.3 sizeof end-to-end implement。`ast_new_sizeof` 跟 `ast_new_alignof` 分配 `NODE_SIZE() + sizeof(NodeSizeof)` (= 8 bytes for `*Node target`),sema const-fold 透过 `node_int_data(n)` 写 `int64_t value` (8) + `TypePrimitive prim` (4) 共 16 bytes 溢出 8 bytes 到 next arena chunk → 随机 data corruption,典型症状: `sizeof(i32)` emit `208` (读 garbage),jhyy_v1 编 src0/main.jhyy 崩溃 `[4a] ir_init done`。
 
@@ -1694,7 +1702,8 @@ input (canonical) 跟 output (scratch `_sh_vN`) 物理分开 → pre-stage clean
 <a id="w-016"></a>
 ## W-016: 8 字节 enum 参数 ABI mismatch — caller 用 `l` (slot) 传,callee 用 `w` (value) 收
 
-**Status:** ✅ RESOLVED (v1.3.7 fix commit TBD, 2026-08-13)
+**状态:** RESOLVED closed 2026-08-13 (v1.3.7) — 8 字节 enum 参数 ABI mismatch — caller 用 `l` (slot) 传,callee 用 `w` (value) 收
+**提交/说明:** RESOLVED ( fix commit TBD
 
 **触发面 (v1.3.7 pattern binding 引入)**:enum 携带 payload(> 4 字节,如 `Option::Some(i32)` = 8 字节),caller 通过 `l` (slot pointer) 传给 callee,但 codegen 早期默认所有 enum 都按 `w` (4-byte value) emit → callee 拿到的是 slot 指针的低 32 位(garbage),tag compare 永远 false,`Some(v) => v` 实际 fallback 到 always-match 但 `v` 没绑 → 测试 exit=0(应是 v 的值)。
 
@@ -1756,7 +1765,8 @@ export function w $unwrap_or(w %opt, ...)  ← ❌ callee 声明 w!
 <a id="w-017"></a>
 ## W-017: jhyy 顶层 `let mut *u8 = 0` codegen 常量折叠 → 全局状态失效
 
-**Status:** ✅ RESOLVED 2026-08-14 (commit `f20e36d`, v1.4.6 W-017 真修)
+**状态:** RESOLVED closed 2026-08-14 (v1.4.6) — jhyy 顶层 `let mut *u8 = 0` codegen 常量折叠 → 全局状态失效
+**提交/说明:** RESOLVED  (commit `f20e36d`,  W-017 真修
 
 **Why RESOLVED:** v1.4.6 W-017 真修 — cg_module pass A 加 NODE_LET 分支 emit
 QBE `.data` section (e.g. `data $g_x = { w 41 }`) + 注册到 `mod_globals` dict
@@ -1857,7 +1867,8 @@ export function l $QBE_PATH() {
 <a id="w-018"></a>
 ## W-018: v1.4.2 DWARF emit 引入 Stage 1 .il 字节差异 (非功能)
 
-**Status:** ✅ RESOLVED 2026-08-14
+**状态:** RESOLVED closed 2026-08-14 (v1.4.2) — v1.4.2 DWARF emit 引入 Stage 1 .il 字节差异 (非功能)
+**提交/说明:** RESOLVED
 
 **Why RESOLVED:** v1.4.2 ship 当时记的"Stage 1 byte-equal 不再 7/7"证据来自
 broken `compiler/tests/stage1-expanded.sh` (JHY_1 路径错写成不存在的
@@ -1875,7 +1886,8 @@ v1.4.2 DWARF 改动对 .il byte-equal 无影响。
 <a id="w-019"></a>
 ## W-019: codegen 嵌套 struct `(o).inner.a` emit `loadsw` 类型错
 
-**Status:** ✅ RESOLVED 2026-08-14 (commit `6638134`, v1.4.6 W-019 真修)
+**状态:** RESOLVED closed 2026-08-14 (v1.4.6) — codegen 嵌套 struct `(o).inner.a` emit `loadsw` 类型错
+**提交/说明:** RESOLVED  (commit `6638134`,  W-019 真修
 
 **Why RESOLVED:** v1.4.6 W-019 真修 — `cg_expr NODE_FIELD` 嵌套 struct 路径
 加 "field is STRUCT → return addr (don't load)" guard,跟 NODE_DEREF 现有 pattern
@@ -1927,7 +1939,8 @@ line 15 通常是读取 `(*o).inner.a` 对应 `loadsw` 那行。
 <a id="w-020"></a>
 ## W-020: jhyy-side `parser.jhyy` parse_pattern `Color::Variant` 分支 bug
 
-**Status:** ✅ RESOLVED 2026-08-14 (commit `ad42117`, v1.4.6 W-020 真修)
+**状态:** RESOLVED closed 2026-08-14 (v1.4.6) — jhyy-side `parser.jhyy` parse_pattern `Color::Variant` 分支 bug
+**提交/说明:** RESOLVED  (commit `ad42117`,  W-020 真修
 
 **Why RESOLVED:** v1.4.6 W-020 真修 — `parse_pattern` + `parse_match` 上移到
 `parse_expr` 之前 (reorder); inline match 在 `parse_expr` 里改用 `parse_match`
@@ -2207,6 +2220,7 @@ $content = ($lines -join "`n") + "`n"
 
 <a id="w-025"></a>
 ## W-025: qbe/ gitlink 无 .gitmodules — release.yml `submodules: recursive` 失败 + installer/build.ps1 hardcoded `qbe/qbe.exe`
+**状态:** RESOLVED closed 2026-08-15 (v1.5.5) — qbe/ vendoring 进仓 + release.yml 去掉 `submodules: recursive`;workaround 已在位(见下方 workaround 节)
 
 **症状 (2026-08-15 v1.5.5 dry-run run 31859843640):**
 - `actions/checkout@v4` with `submodules: recursive` fail at Checkout step:
@@ -3979,7 +3993,8 @@ spec §9.5 4 形式全 ship:
 
 **ID:** W-056
 
-**Status:** ✅ RESOLVED (2026-08-28 v1.7.0 Stage 3)
+**状态:** RESOLVED closed 2026-08-28 (v1.7.0) — 多字节 UTF-8 char literal + char type `u8 → i32` (spec §4.4)
+**提交/说明:** RESOLVED (  Stage 3
 
 **症状 (Stage 3 修前):**
 1. `let c = '你'` lexer 单字节 close-check → "unterminated character literal" (lexer.c:230 / lexer.jhyy:517)。3 字节 CJK / 4 字节 emoji 全 lex fail
@@ -5417,6 +5432,7 @@ TBD — v2.6.6 单独 sprint 排障, scope 跟 fix 见上。
 
 <a id="w-070"></a>
 ## W-070: jhyy.exe --target=amd64_sysv_freestanding 在 cg_module 阶段 fatal (v2.8.1 surface)
+**状态:** RESOLVED closed 2026-09-07 (v2.7.0) — cg_module 的 SYSV / SYSV_FREESTANDING stub 已实装(commit `a9c874d`;changelog-v2.7.0.md:491「核心 W-070 fix」)
 
 **现象 (CLI smoke test, post-v2.8.1 ship):**
 
@@ -5818,7 +5834,8 @@ sema 写 hash 跟 codegen 查 hash **哈希对象不一致** → emit_call (code
 | 字段 | 值 |
 |------|-----|
 | **ID** | W-077 |
-| **状态** | ✅ RESOLVED 2026-10-01 (v4.0.1 audit-flip — literal trigger no longer reproduces) |
+**状态:** RESOLVED closed 2026-10-01 (v4.0.1) — src0/std/mem.jhyy mem_find_byte codegen 路径触发 access violation
+**提交/说明:** RESOLVED  ( audit-flip — literal trigger no longer reproduces
 | **日期** | 2026-09-09 |
 | **触发面** | `mem_find_byte(p, n, val)` 走 `while i < n { *(ptr_add(p, i) as *i32) ...; i++; }`; 在某些 stack pattern (call 前 subq $32 + main 内 multi-i32 store) 下产生 access violation / stack overflow |
 | **症状** | `test std_mem_find_byte.jhyy` 编译 OK 但运行 exit 127 (access violation); strace 看到 `exited with status 0x72813000` (stack reservation) 或 `0xffffffff` (AV) |
@@ -5836,7 +5853,8 @@ sema 写 hash 跟 codegen 查 hash **哈希对象不一致** → emit_call (code
 | 字段 | 值 |
 |------|-----|
 | **ID** | W-078 |
-| **状态** | ✅ RESOLVED 2026-10-01 (v4.0.1 audit-flip — QBE git rm 后 self-backend 是 sole production path;extsw cross-cutting 已覆盖 array indexing 路径) |
+**状态:** RESOLVED closed 2026-10-01 (v4.0.1) — array[i32] index codegen 触发 QBE invalid type for first operand
+**提交/说明:** RESOLVED  ( audit-flip — QBE git rm 后 self-backend 是 sole production path;extsw cross-cutting 已覆盖 array indexing 路径
 | **日期** | 2026-09-09 |
 | **触发面** | `array[i32]` index (e.g. `tmp[n]` where `n: i32`) 时, codegen 算 index offset = n * 4 走 `mul %t91, 4` 但 %t91 是 `w` (32-bit), QBE 要求 long operand |
 | **症状** | QBE error: `invalid type for first operand %t91 in mul`; 测试 `std_fmt_i64.jhyy` v1 用 `n: i32` 当 tmp[] index 触发 → QBE fail; 改 `n: i64` 后 PASS |
@@ -7045,7 +7063,8 @@ V2 v4.0.0 bench.sh nqueens 期间 4 个 reproducer 拆解 + assembly dump RCA �
 | 字段 | 值 |
 |------|-----|
 | **ID** | W-079 |
-| **状态** | ✅ RESOLVED 2026-09-28 (v3.2.3.1 ship, superseded by W-080) |
+**状态:** RESOLVED closed 2026-09-28 (v3.2.3) — QBE amd64_win mixed (l, w, w) extern fn args bug + i32 return zero-extension missing (v3.2.3 DEFER)
+**提交/说明:** RESOLVED  (.1 ship, superseded by W-080
 | **日期** | 2026-09-26 |
 | **触发面** | (1) external fn calls with mixed-type args (e.g. `open(path: *u8, flags: i32, mode: i32)` = (l, w, w) 3-arg pattern); (2) main_jhyy returning i32 from extern i32 result |
 | **症状** | (1) QBE 不 emit 完整 arg register 装载 给 extern fn (l path, w flags, w mode) → extern fn 拿 uninitialized registers → 行为未定义; (2) QBE 在 main_jhyy 末尾 `return std_io_close(...)` / `return std_os_open(...)` 等 i32 from extern i32 result 时不 emit `movl %eax, %eax` zero-extend → bash exit code 拿到 garbage upper bits |
@@ -7070,7 +7089,8 @@ W-079 的 workaround 实际有两半 —— (a) std_io 改走 single-type-pointe
 | 字段 | 值 |
 |------|-----|
 | **ID** | W-080 |
-| **状态** | ✅ RESOLVED 2026-09-28 |
+**状态:** RESOLVED closed 2026-09-28 (v3.2.3.1) — self-backend i32 return zero-extend missing + std_io_print M0 stub (v3.2.3.1 真修)
+**提交/说明:** RESOLVED
 | **日期** | 2026-09-28 |
 | **superseder** | W-079 (✅ RESOLVED 2026-09-28, QBE git rm moot) |
 | **触发面** | (1) main_jhyy 末尾 `return std_io_close(...)` 等 i32 from extern i32 result;(2) `std_io_print("hello\n")` call (M0 stub 返 0,不真写 stdout) |
@@ -11074,6 +11094,67 @@ shadowing 修好了它仍会 FAIL ⇒ 改写成「返回 fails 计数」的形�
   `spec_shadowing_immutable.jhyy`(shadow 成不可变后再赋值 ⇒ 报错)
 - spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §3(已恢复 shadowing 承诺)+ 附录 B
 - 关联:**W-150**(同一个 null sym 的兄弟崩溃:重名 fn / type / const / 参数)
+
+---
+
+<a id="w-154"></a>
+## W-154: MCP 的 `jhyy_workarounds` 与索引脚本**口径不一致** ⇒ 计数对不上 + 一堆幽灵条目
+
+**状态:** RESOLVED closed 2026-10-27 (v4.0.22) — 切分口径对齐索引脚本 + alias 表认英文 Status + 补 13 条缺失状态行 + 加一致性门
+**Filed-by:** 2026-10-27 检查 MCP 工具有没有问题时挖出
+**日期:** 2026-10-27
+
+**触发面:** `mcp-jhyy/jhyy_workarounds.py`(`_split_entries` / `_parse_entry_body` /
+`FIELD_ALIASES`)vs `scripts/dev/v2_13_5_rebuild_index.py` 的 `H2_RE` / `STATUS_RE`。
+
+**症状(2026-10-27 实测):**
+
+| | MCP 工具报的 | 索引表的 |
+|---|---|---|
+| 条目数 | 138 | 142 |
+| 状态读不出来(幽灵条目) | 13 | — |
+
+⇒ 三个口径差异:
+1. **详情节被当成独立条目** —— 台账里有 9 个 `## W-001 RESOLVED — ...` 形式的
+   **详情节**(id 后面**不带冒号**)⇒ 工具的切分正则
+   `^##\s+(W-\d+)(?:[:\s—\-].*)?$` 把它们也切成了条目 ⇒ 同一个 W-NNN 被数
+   两次 + 冒出 9 个状态为空的幽灵条目;
+2. **H3 子条目看不见** —— 工具只切 `##` ⇒ `W-073..W-080` 这 8 个 H3 子条目不在
+   工具的结果里(索引脚本的 `H2_RE` 是 `#{2,3}` ⇒ 认);
+3. **英文 `**Status:**` 读不出来** —— 工具的 alias 表里只有「状态」⇒ 台账里 7 条
+   写 `**Status:**` 的老条目(W-015..W-020 / W-056)状态读不出来 —— 而**索引脚本
+   的 `STATUS_RE` 是 `(?:状态|Status)`** ⇒ 认 ⇒ 两个工具口径不一致。
+
+⇒ ⇒ **掩盖掉的真问题**:**6 条条目根本没有状态行**(W-025 / W-070 / W-077..W-080
+—— 后 4 条的状态还藏在 **markdown 表格行**里 `| **状态** | ... |`)⇒ 两个工具都
+读不到 ⇒ 它们**根本不在索引里** ⇒ 造成「索引里没有 ⇒ 台账没这条」的错觉。
+
+**修法(2026-10-27 真修):**
+- **台账侧**:13 条补/改成 canonical `**状态:**` 行(7 条 `**Status:**` → `**状态:**`,
+  2 条补上,4 条从表格行提出来)⇒ 日期/版本**全部有据**:
+  W-015 用 git 的 ship commit `bb15f98`(v1.3.3, 2026-08-13)、
+  W-070 用 `a9c874d`(v2.7.0, 2026-09-07;changelog-v2.7.0.md:491
+  「核心 W-070 fix」)、其余取原行或条目自己的 `**日期:**`;
+- **工具侧**:切分口径改成「**H2/H3 + 冒号**」(与索引脚本一致)⇒ 详情节并进上一条
+  的正文(不再当独立条目);同名字段**先到先得**(条目自己的表头字段不被详情节的
+  同名字段覆盖);alias 表补 `Status`;
+- **加一致性门**(`mcp-jhyy/tests/test_workarounds.py`):工具的条目数 **必须等于**
+  索引表行数,且 `unknown_count == 0` ⇒ 这类口径漂移以后当场变红。
+
+⇒ 结果:工具 **148** 条 / 索引表 **148** 行 / **一致**;`unknown_count` 13 → **0**;
+台账 **149 条**全部有 canonical 状态行(⇒ 索引 148 行 + 1 条不在索引里的说明行)。
+
+**影响范围(修前):** 任何问「台账里有多少条 / 有哪些 ACTIVE」的问题 ⇒ MCP 工具给的
+数**不可信**(幽灵条目 + 漏 H3 + 漏英文 Status);**最坑的是**它把「6 条条目没有状态
+行」这件事变成了「它们不在索引里」——看着像台账没写,实际是写了但读不出来。
+
+**失效条件:** 已消除(2026-10-27 真修,见上)。
+
+**引用:**
+- 工具:`mcp-jhyy/jhyy_workarounds.py`(`_split_entries` / `_parse_entry_body` /
+  `FIELD_ALIASES`)、`mcp-jhyy/tests/test_workarounds.py`(一致性门)
+- 关联:**W-108**(索引脚本读不到条目 ⇒ 报出假的 0)、**W-153**(索引脚本静默删锚点)
+  —— 三条同属「工具静默失灵」这一类
 
 ---
 

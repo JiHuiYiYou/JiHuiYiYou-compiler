@@ -232,7 +232,10 @@ DEFAULT_PATH = JHYY_ROOT / "docs/internal/workarounds.md"
 # 字段格式: **alias:** value  (markdown bold 包裹 "alias:")
 FIELD_ALIASES = {
     "id": ["ID"],
-    "status": ["状态"],
+    # 「状态」是规范写法;「Status」是台账里的历史英文写法(7 条老条目)——
+    # 索引脚本的 STATUS_RE 认这两种(`(?:状态|Status)`)⇒ 这边也得认,
+    # 否则两个工具口径不一致(2026-10-27 W-154)。
+    "status": ["状态", "Status"],
     "date": ["日期"],
     "trigger": ["触发面"],
     "symptom": ["症状"],
@@ -263,14 +266,27 @@ _ALIAS_RE = _build_alias_regex()
 
 
 def _split_entries(text: str) -> list[tuple[str, str]]:
-    """切分 workarounds.md 为 [(heading, body), ...]."""
+    """切分 workarounds.md 为 [(heading, body), ...].
+
+    2026-10-27 (W-154) 修:切分口径与 `scripts/dev/v2_13_5_rebuild_index.py`
+    的 `H2_RE` 对齐 —— **只有「id 后面带冒号」的标题才是条目**:
+        ## W-001: <标题>          ← 条目(H2)
+        ### W-073: <标题>         ← 条目(H3 子条目,索引表里也有)
+    而 **不带冒号**的
+        ## W-001 RESOLVED — v0.8 commit 9 ...   ← **详情节**,属于上一条的正文
+    之前被当成了**独立条目** ⇒ 同一个 W-NNN 被数两次 ⇒ 计数虚高 + 冒出一堆
+    状态为空的幽灵条目(实测 9 个详情节 ⇒ 9 个幽灵 UNKNOWN)。
+
+    详情节的正文仍然并进上一条(它的 `**修复:**` / `**验证:**` 有价值),
+    但**不能覆盖**上一条自己的字段(见 `_parse_entry_body` 的 first-wins)。
+    """
     lines = text.splitlines(keepends=True)
     entries = []
     current_heading = None
     current_body_lines = []
     for line in lines:
-        # W-XXX entry 标题: "## W-XXX: ..." or "## W-XXX RESOLVED — ..." or "## W-XXX anything"
-        m = re.match(r"^##\s+(W-\d+)(?:[:\s—\-].*)?$", line)
+        # 条目标题:**必须带冒号**(与索引脚本口径一致)
+        m = re.match(r"^#{2,3}\s+(W-\d+(?:\.\d+)*)\s*[:：]", line)
         if m:
             # Push previous
             if current_heading is not None:
@@ -286,12 +302,29 @@ def _split_entries(text: str) -> list[tuple[str, str]]:
     return entries
 
 
+# 详情节标题(不带冒号):`## W-001 RESOLVED — ...` / `### W-0xx anything`
+_DETAIL_HEADING_RE = re.compile(r"^#{2,3}\s+W-\d+(?:\.\d+)*\s*[^:\n]?\s*$")
+
+
 def _parse_entry_body(body: str) -> dict:
-    """从 entry body 提取 alias 字段. 格式: '**alias:** value' 多行连续算一个字段."""
+    """从 entry body 提取 alias 字段. 格式: '**alias:** value' 多行连续算一个字段.
+
+    2026-10-27 (W-154):同名字段**先到先得**(first-wins)——
+    条目自己的表头字段优先于并进来的「详情节」的字段(详情节里也有 `**日期:**`,
+    之前会把条目自己的日期覆盖掉)。另外遇到详情节标题时先**收尾**当前字段
+    (否则详情节的标题行会被当成上一个字段的续行)。
+    """
     fields = {}
     current_field = None
     current_value_lines = []
     for line in body.splitlines():
+        # 详情节标题:先收尾当前字段,标题本身不进任何字段
+        if _DETAIL_HEADING_RE.match(line):
+            if current_field is not None and current_field not in fields:
+                fields[current_field] = "\n".join(current_value_lines).strip()
+            current_field = None
+            current_value_lines = []
+            continue
         # Try to match any **<alias>:** field marker
         matched_field = None
         m = _ALIAS_RE.match(line)
@@ -303,8 +336,8 @@ def _parse_entry_body(body: str) -> dict:
                     matched_field = canonical
                     break
         if matched_field:
-            # Push previous
-            if current_field is not None:
+            # Push previous(**先到先得**:条目自己的字段不被后面的覆盖)
+            if current_field is not None and current_field not in fields:
                 fields[current_field] = "\n".join(current_value_lines).strip()
             current_field = matched_field
             # Strip the field marker from the line
@@ -315,7 +348,7 @@ def _parse_entry_body(body: str) -> dict:
                 # Continuation of current field
                 current_value_lines.append(line)
     # Push last
-    if current_field is not None:
+    if current_field is not None and current_field not in fields:
         fields[current_field] = "\n".join(current_value_lines).strip()
     return fields
 
