@@ -1,30 +1,37 @@
-// spec_struct_array_field.jhyy — spec §4.2.1 / §8:数组类型的 struct 字段
+// spec_struct_array_field.jhyy — spec §4.2.1 / §8:数组类型的 struct 字段按值拷贝
 //
-// ⚠️ 这是 2026-10-26 lang-spec 覆盖审计挖出的**实现缺口**。
+// 2026-10-26:这是 lang-spec 覆盖审计挖出的**实现缺口**(台账 W-144)的回归门。
+// 修好后本用例从 XFAIL 转成**真门**(XFAIL 标记已摘 —— 留着会让 regress 报 XPASS)。
 //
-// 实测(2026-10-26),数组类型的 struct 字段有两处坏:
-//   ① **字面量不拷贝**:let a1 = Arr { buf: [1,2,3] }; 之后 a1.buf 读到的是
-//      **未初始化垃圾**(实测 -935332216 / -624410634 / 31115327),不是 1/2/3。
-//   ② **按值赋值崩**:`a = Arr { buf: plain };` ⇒ **ACCESS_VIOLATION**。
+// 曾经的三个症状(全部已修):
+//   ① struct 字面量里的数组字段读到**未初始化垃圾**(实测 -935332216 / -624410634 /
+//      31115327,而不是 1/2/3)—— `cg_emit_store` 缺 KIND_ARRAY 分支 ⇒ 落到
+//      `cg_emit_store_primitive` ⇒ 按 `qbe_type_of(array)='w'` 只写 4 字节
+//      (数组地址的低 32 位)⇒ 字段槽里是截断指针;
+//   ② 按值赋值 `a2 = Arr { buf: plain };` ⇒ **ACCESS_VIOLATION**
+//      —— `NODE_FIELD` 对数组字段做 `loadw`(把数组前 4 字节当值取出来)
+//      ⇒ 后续 `a.buf[0]` 拿它当基址 ⇒ 野指针读;
+//   ③ 含数组字段的 struct `==` 退化成**身份比较**(实测 a1==a1 为 true、
+//      a1==a2 为 false,尽管两者内容相同)。
 //
-// 根因(已定位到源码行):compiler/src0/codegen.jhyy 的 `cg_emit_store` 有
-// **KIND_STRUCT** 分支(递归拷贝嵌套 struct),但**没有 KIND_ARRAY 分支**
-// ⇒ 数组字段落到「按标量存一个值」的兜底路径 ⇒ 存进去的是数组的**地址**
-// 而不是元素内容 ⇒ ① 读到垃圾;② 之后按它当指针解引用 ⇒ AV。
-//
-// 影响:spec §4.2.1 承诺的「数组 → 逐元素比较」在**顶层**可用
-// (agg_eq_array.jhyy ✓),但**作为 struct 字段**不可用 ⇒ struct 的 `==`
-// 对含数组字段的结构体退化成**身份比较**(实测 a1 == a1 为 true、a1 == a2 为
-// false,尽管两者内容相同)。
-//
-// 本用例按 spec 的承诺写断言 ⇒ 当前实现达不到 ⇒ XFAIL。
-// 修好后本用例 XPASS ⇒ suite 失败 ⇒ 强制有人摘标记。
-//
-// 台账:**W-144**
+// 修法(codegen.jhyy):`cg_copy_struct` 改名 `cg_copy_agg` 并同时处理 struct 与
+// array(两者互相递归 ⇒ 不能拆成两个函数,jhyy 无 forward decl);
+// `cg_emit_store` 加 KIND_ARRAY 分支;`NODE_FIELD` / `NODE_INDEX` 对数组字段/元素
+// 返回地址(不 load);`NODE_ADDR_OF` 的临时槽按 type_size 分配。
 //
 // EXPECT: 0
-// XFAIL: W-144 数组类型 struct 字段:字面量不拷贝(读到垃圾)+ 按值赋值 ACCESS_VIOLATION
 type Arr = struct { buf: [i32; 3] }
+
+// 按值传参:ABI 规定 caller 在栈上建副本(逐字段复制)⇒ 副本里的数组字段
+// 必须也是对的 ⇒ 这条走的是 cg_copy_agg 的另一条入口。
+fn take_by_value(a: Arr) -> i32 {
+    return a.buf[0] + a.buf[1] + a.buf[2];
+}
+
+// 按值返回(sret):callee 把 image 写进 caller 的槽 ⇒ 同样走拷贝路径。
+fn make_by_value() -> Arr {
+    return Arr { buf: [4 as i32, 5 as i32, 6 as i32] };
+}
 
 fn main_jhyy() -> i32 {
     let mut fails: i32 = 0;
@@ -48,6 +55,14 @@ fn main_jhyy() -> i32 {
     let b3 = Arr { buf: [1 as i32, 9 as i32, 3 as i32] };
     if !(b1 == b2) { fails = fails + 1; }
     if b1 == b3 { fails = fails + 1; }
+
+    // ④ 按值传参:caller 建的副本里数组字段必须也是对的
+    if take_by_value(a1) != 6 { fails = fails + 1; }
+
+    // ⑤ 按值返回(sret):callee 写进 caller 槽的 image 里数组字段必须对
+    let a3 = make_by_value();
+    if a3.buf[0] != 4 { fails = fails + 1; }
+    if a3.buf[2] != 6 { fails = fails + 1; }
 
     return fails;
 }

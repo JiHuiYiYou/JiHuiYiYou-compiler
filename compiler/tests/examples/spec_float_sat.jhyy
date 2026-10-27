@@ -1,0 +1,74 @@
+// spec_float_sat.jhyy — spec §4.3:float → 整数的**饱和**转换(Rust 风格)
+//
+// 2026-10-26:随 W-143 一同落地(台账 W-143 / W-143 的 saturating 子决策)。
+//
+// 语义(spec §4.3 v4.0.22):
+//   · 区间内:向 0 截断
+//   · 越界:饱和到目标类型 MIN / MAX
+//   · NaN:0
+//
+// 修前的症状:裸 cvttsd2si 对越界/NaN 给的是「integer indefinite」
+// (i32::MIN / i64::MIN)—— 既不是截断也不是饱和 ⇒ spec 推不出来。
+//
+// EXPECT: 0
+fn div(a: f64, b: f64) -> f64 {
+    return a / b;
+}
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+    let zero: f64 = 0.0;
+    let one: f64 = 1.0;
+    // 除法走函数调用 ⇒ 不会被常量折叠 ⇒ NaN / inf 是运行时的真值
+    let nan: f64 = div(zero, zero);
+    let inf: f64 = div(one, zero);
+    let big: f64 = 1000000000.0 * 1000000000.0 * 1000000000.0;
+    let neginf: f64 = div(0.0 - one, zero);
+
+    // ── NaN → 0(各宽度)──
+    let a: i32 = nan as i32;
+    if a != 0 { fails = fails + 1; }
+    let b: i64 = nan as i64;
+    if b != 0 { fails = fails + 1; }
+    let c: u32 = nan as u32;
+    if c != 0 { fails = fails + 1; }
+    let d: u64 = nan as u64;
+    if d != 0 { fails = fails + 1; }
+
+    // ── 区间内:向 0 截断 ──
+    let e: i32 = 3.7 as i32;
+    if e != 3 { fails = fails + 1; }
+    let f: i64 = 3.7 as i64;
+    if f != 3 { fails = fails + 1; }
+    let g: u32 = 3.7 as u32;
+    if g != 3 { fails = fails + 1; }
+    let h: i32 = (0.0 - 3.7) as i32;
+    if h != 0 - 3 { fails = fails + 1; }
+
+    // ── 上溢:饱和到 MAX(含 +inf)──
+    let q: i32 = inf as i32;
+    if q != 2147483647 { fails = fails + 1; }
+    let i: i32 = big as i32;
+    if i != 2147483647 { fails = fails + 1; }
+    let j: i64 = big as i64;
+    if j != 9223372036854775807i64 { fails = fails + 1; }
+    let k: u32 = big as u32;
+    if k != 4294967295 { fails = fails + 1; }
+    // u64::MAX 用位模式表达(-1 as i64 == 0xFFFF_FFFF_FFFF_FFFF)
+    let l: u64 = big as u64;
+    if (l as i64) != (0 as i64) - 1i64 { fails = fails + 1; }
+
+    // ── 下溢:饱和到 MIN ──
+    let m: i32 = neginf as i32;
+    if m != 0 - 2147483648 { fails = fails + 1; }
+    let n: i64 = neginf as i64;
+    if n != (0 as i64) - 9223372036854775807i64 - 1i64 { fails = fails + 1; }
+
+    // ── 无符号下溢:→ 0(不是 uN::MAX)──
+    let o: u32 = neginf as u32;
+    if o != 0 { fails = fails + 1; }
+    let p: u64 = neginf as u64;
+    if p != 0 { fails = fails + 1; }
+
+    return fails;
+}

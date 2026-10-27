@@ -16,7 +16,7 @@
 //
 // 本 commit 覆盖：
 //   - § helpers (emit_mangled_name / cg_add_local / cg_find_local / ir_new_int)
-//   - § load/store (cg_emit_load / cg_emit_store / cg_copy_struct)
+//   - § load/store (cg_emit_load / cg_emit_store / cg_copy_agg)
 //   - § pattern (cg_match_pattern)
 //   - § convert (cg_convert_arg)
 //   - § cg_expr literal cases (NODE_INT/BOOL/FLOAT/STRING/CHAR/IDENT/UNARY)
@@ -417,7 +417,7 @@ fn cg_add_local(cg_raw: *u8, sym: *u8, val: IRVal, is_stack: i32) -> i32 {
     let entry_ptr = ptr_add_u8((*cg).locals, (idx as i64) * LOCALENTRY_SIZE()) as *u8;
     // [Status: 真修 W-005 #2 in C-side (commit 2.81); src0/ workaround kept for历史读者了解历史.]
     // v0 codegen bug workaround: 避免 (*entry_ptr).value = val 这种 struct value
-    //   field assignment (bug 8: multi-field struct 走 cg_copy_struct 时会 emit
+    //   field assignment (bug 8: multi-field struct 走 cg_copy_agg 时会 emit
     //   错 sret body). 改走 ptr_add_u8 + 字段级 store.
     // IRVal layout: kind(0) + id(4) + ival(8) + name(16) + qbe_type(24) = 32, padded to 40
     // LocalEntry: sym(0..8) + value(8..48) + is_stack(48..52), padded to 56
@@ -604,7 +604,7 @@ fn ir_new_int(val: i64) -> IRVal {
 }
 
 // ════════════════════════════════════════════════════
-// cg_emit_load / cg_emit_store / cg_copy_struct
+// cg_emit_load / cg_emit_store / cg_copy_agg
 // ════════════════════════════════════════════════════
 
 // cg_emit_load：emit 正确 load 指令（sub-word 用 loadsb/loadub/loadsh/loaduh，
@@ -664,11 +664,11 @@ fn cg_emit_load(cg_raw: *u8, dst: IRVal, t_raw: *u8, addr: IRVal) -> i32 {
 }
 
 // cg_emit_store_primitive：emit 标量 store 指令（sub-word 走 storeb/storeh，
-// word/long 走 ir_emit_store）。**struct 不走这里**，struct 走 cg_copy_struct
+// word/long 走 ir_emit_store）。**struct 不走这里**，struct 走 cg_copy_agg
 // 字段级拷贝（在 cg_emit_store dispatcher 里 dispatch）。
 //
-// cg_copy_struct 用这个函数（而不是 cg_emit_store）来 store 标量字段，
-// 避开 cg_emit_store ↔ cg_copy_struct mutual recursion（jhyy 无 forward decl）。
+// cg_copy_agg 用这个函数（而不是 cg_emit_store）来 store 标量字段，
+// 避开 cg_emit_store ↔ cg_copy_agg mutual recursion（jhyy 无 forward decl）。
 fn cg_emit_store_primitive(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> i32 {
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
@@ -711,8 +711,8 @@ fn cg_emit_store_primitive(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> 
     return ir_emit_store(ir, qt, val, addr);
 }
 
-// cg_copy_struct：field-by-field 拷贝 struct 值（QBE 无 aggregate store）。
-// 嵌套 struct 递归（用 cg_copy_struct 自身）；标量字段走 cg_emit_load +
+// cg_copy_agg：field-by-field 拷贝 struct 值（QBE 无 aggregate store）。
+// 嵌套 struct 递归（用 cg_copy_agg 自身）；标量字段走 cg_emit_load +
 // cg_emit_store_primitive（不用 cg_emit_store，避开 mutual recursion）。
 //
 // jhyy 无 forward decl：必须在 cg_emit_load / cg_emit_store_primitive 之后定义，
@@ -951,7 +951,7 @@ fn cg_copy_enum(cg_raw: *u8, et_raw: *u8, dst_addr: IRVal, src_addr: IRVal) -> i
     if (*et).kind != KIND_ENUM() {
         return 0;
     }
-    // 与 cg_copy_struct 同款守卫:sentinel src/dst 会 emit `copy %t0`(QBE 报错)
+    // 与 cg_copy_agg 同款守卫:sentinel src/dst 会 emit `copy %t0`(QBE 报错)
     if irval_is_undef(src_addr) != 0 {
         return 0;
     }
@@ -1010,14 +1010,21 @@ fn cg_copy_enum(cg_raw: *u8, et_raw: *u8, dst_addr: IRVal, src_addr: IRVal) -> i
 }
 
 
-fn cg_copy_struct(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) -> i32 {
+fn cg_copy_agg(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) -> i32 {
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
     let st = st_raw as *Type;
     if st_raw == (0 as *u8) {
         return 0;
     }
-    if (*st).kind != KIND_STRUCT() {
+    // W-144 (2026-10-26):本函数现在同时处理 **struct** 与 **array** 两种聚合。
+    //
+    // 为什么必须合并成一个函数(而不是拆成 cg_copy_array + cg_copy_struct):
+    // array 元素可能是 struct(struct-in-array),而 struct 字段可能是 array
+    // (array-in-struct)⇒ 两个函数**互相递归**⇒ jhyy 无 forward decl ⇒ 编不过。
+    // 与 cg_value_eq 同款处理(它也把 struct/enum/array/slice 全塞一个函数里 dispatch)。
+    let agg_kind = (*st).kind;
+    if agg_kind != KIND_STRUCT() && agg_kind != KIND_ARRAY() {
         return 0;
     }
     // Sprint 4.25 W-005 #2 真修: callers may pass a sentinel IRVal (kind=0,
@@ -1031,6 +1038,45 @@ fn cg_copy_struct(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) ->
     if irval_is_undef(dst_addr) != 0 {
         return 0;
     }
+
+    // ── array:逐元素拷贝 ──
+    //
+    // W-144:数组在 struct 里是**内联字节**(ABI § 2.2/§ 2.3:数组是值类型,
+    // sizeof = N × sizeof(elem))⇒ 拷数组 = 拷 N × elem_size 字节。
+    //
+    // 「数组的值」在 IR/后端里是**数组数据的地址**(数组字面量 alloc 一个槽、
+    // 逐元素 store、返回槽地址)⇒ 所以 src_addr 已经是「源数组数据地址」。
+    //
+    // 逐元素(而不是按字节块)拷贝 ⇒ 元素是 u8/i8/u16/i16 时走
+    // cg_emit_load / cg_emit_store_primitive 的 **sub-word** 路径
+    // (loadub/storeb/loaduh/storeh)⇒ 不会越界多写 3 字节。
+    if agg_kind == KIND_ARRAY() {
+        let elem_t = (*st).elem as *Type;
+        let cnt = (*st).arr_count;
+        let esz = type_size(elem_t);
+        let mut i: i64 = 0 as i64;
+        while i < cnt {
+            let src_off = *ir_new_tmp(ir, QBE_L());
+            let dst_off = *ir_new_tmp(ir, QBE_L());
+            ir_emit_binary(ir, src_off, "add" as *u8, src_addr, ir_new_int(i * esz));
+            ir_emit_binary(ir, dst_off, "add" as *u8, dst_addr, ir_new_int(i * esz));
+            let et_kind = (*elem_t).kind;
+            if et_kind == KIND_ENUM() {
+                // enum 元素内联放 image ⇒ 拷 image(与 struct 字段同款)
+                let _ce = cg_copy_enum(cg_raw, elem_t as *u8, dst_off, src_off);
+            } else if et_kind == KIND_STRUCT() || et_kind == KIND_ARRAY() {
+                // struct/array 元素:递归(自递归,无 forward decl 问题)
+                let _cs = cg_copy_agg(cg_raw, elem_t as *u8, dst_off, src_off);
+            } else {
+                let fval = *ir_new_tmp(ir, qbe_type_of(elem_t as *u8));
+                let _ld = cg_emit_load(cg_raw, fval, elem_t as *u8, src_off);
+                let _sp = cg_emit_store_primitive(cg_raw, elem_t as *u8, fval, dst_off);
+            }
+            i = i + (1 as i64);
+        }
+        return 1;
+    }
+
     let nfields = (*st).nfields;
     let fields = (*st).fields;
     let mut i: i64 = 0 as i64;
@@ -1085,7 +1131,10 @@ fn cg_copy_struct(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) ->
             // W-114:enum 字段内联存放 image —— 拷 image,不是拷地址
             let _ce = cg_copy_enum(cg_raw, ftype as *u8, dst_off, src_off);
         } else if ft_kind == KIND_STRUCT() {
-            let _cs = cg_copy_struct(cg_raw, ftype as *u8, dst_off, src_off);
+            let _cs = cg_copy_agg(cg_raw, ftype as *u8, dst_off, src_off);
+        } else if ft_kind == KIND_ARRAY() {
+            // W-144: array 字段内联存放 ⇒ 拷元素(src_off 就是源数组的内联地址)
+            let _ca = cg_copy_agg(cg_raw, ftype as *u8, dst_off, src_off);
         } else {
             let fval = *ir_new_tmp(ir, qbe_type_of(ftype as *u8));
             let _ld = cg_emit_load(cg_raw, fval, ftype as *u8, src_off);
@@ -1158,13 +1207,13 @@ fn cg_value_eq(cg_raw: *u8, t_raw: *u8, a_addr: IRVal, b_addr: IRVal) -> *IRVal 
         let mut i: i64 = 0 as i64;
         while i < nfields {
             // fields[i]: name(*u8 8) + type(*u8 8) + offset(i64 8) = 24 bytes
-            // (布局同 cg_copy_struct:1011 —— 名字在 0,类型在 8,偏移在 16)
+            // (布局同 cg_copy_agg:1011 —— 名字在 0,类型在 8,偏移在 16)
             let fdesc_ptr = ptr_add_u8(fields, i * (24 as i64)) as *u8;
             let ftype_slot = ptr_add_u8(fdesc_ptr, 8 as i64) as **Type;
             let ftype = *ftype_slot;
             let foffset_ptr = ptr_add_u8(fdesc_ptr, 16 as i64) as *i64;
             let offset = *foffset_ptr;
-            // PhantomData ZST 字段不参与比较(同 cg_copy_struct)
+            // PhantomData ZST 字段不参与比较(同 cg_copy_agg)
             if (*ftype).kind != KIND_PHANTOM() {
                 let fa = *ir_new_tmp(ir, QBE_L());
                 let fb = *ir_new_tmp(ir, QBE_L());
@@ -1324,16 +1373,19 @@ fn cg_find_field_offset(st_raw: *u8, field_name: *u8, out_buf: *u8) -> i32 {
     return 0;
 }
 
-// cg_emit_store：dispatcher。struct 走 cg_copy_struct 字段级拷贝；
-// 标量走 cg_emit_store_primitive。jhyy 无 forward decl → 必须 cg_copy_struct
+// cg_emit_store：dispatcher。struct 走 cg_copy_agg 字段级拷贝；
+// 标量走 cg_emit_store_primitive。jhyy 无 forward decl → 必须 cg_copy_agg
 // 先于 cg_emit_store 定义。
 fn cg_emit_store(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> i32 {
     if t_raw == (0 as *u8) {
         return cg_emit_store_primitive(cg_raw, 0 as *u8, val, addr);
     }
     let t = t_raw as *Type;
-    if (*t).kind == KIND_STRUCT() {
-        return cg_copy_struct(cg_raw, t_raw, addr, val);
+    // W-144: array 与 struct 同款 —— 聚合没有单条 store ⇒ 走逐元素/逐字段拷贝。
+    // 缺这个分支时 array 落到 cg_emit_store_primitive ⇒ 按 qbe_type_of(array)='w'
+    // 只写 4 字节(数组地址的低 32 位)⇒ 字段槽里是截断指针,读出来是垃圾。
+    if (*t).kind == KIND_STRUCT() || (*t).kind == KIND_ARRAY() {
+        return cg_copy_agg(cg_raw, t_raw, addr, val);
     }
     return cg_emit_store_primitive(cg_raw, t_raw, val, addr);
 }
@@ -1378,6 +1430,298 @@ fn cg_emit_phi(ir: *IRBuf, result: IRVal, block1: IRVal, val1: IRVal,
     return 0;
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// W-143:饱和的 float→整数 转换(Rust 风格)
+// ══════════════════════════════════════════════════════════════════════
+//
+// 语义(spec §4.3 v4.0.22):
+//   · 区间内:向 0 截断
+//   · 越界:饱和到目标类型 MIN / MAX
+//   · NaN:0
+//
+// 为什么不用裸 cvttsd2si:它对越界/NaN 给的是「integer indefinite」
+// (0x8000_0000_0000_0000)—— 既不是截断也不是饱和,spec 推不出来。
+//
+// 实现要点:
+//   · 浮点比较(后端已有 W-133 的有序守卫 setnp/setp ⇒ NaN 下 `<`/`>=` 为 false)
+//   · 整数 mask select(and/or/xor)—— branch-free,不碰 phi / 分支区
+//   · 窄宽度:先按 64 位饱和,再在**整数域**夹到窄类型的 [MIN, MAX]
+//     (iN 的区间是 i64 区间的子集 ⇒「先判大区间、再夹小区间」等价)
+//
+// ⚠ 实现纪律(jhyy 侧的三条硬约束,踩过):
+//   ① 无 forward ref ⇒ 本块的 helper 只能调**本块里更靠前**定义的函数。
+//      (irval_box 在 codegen.jhyy:2308,本块在它之前 ⇒ 一律不用它,
+//       改用 `*ir_new_tmp(...)` 按值返回 IRVal —— 与 cg_convert_arg 同款做法)
+//   ② **struct 局部变量不可重新赋值**(W-097:struct-by-value 赋值会越界写坏 arena)
+//      ⇒ 所有 struct 类型的中间量只绑定一次;分支用「早返回」而不是重新赋值。
+//   ③ 不做隐式整型扩宽 ⇒ 字面量运算必须显式 i64 后缀。
+
+// cg_mask_from_cmp — 'w' 的 0/1 比较结果 → 'l' 的全 0 / 全 1 掩码
+//
+// 0 → 掩码 0;1 → 掩码 0xFFFFFFFFFFFFFFFF。
+fn cg_mask_from_cmp(cg_raw: *u8, cmp_w: IRVal) -> IRVal {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    let ext = *ir_new_tmp(ir, QBE_L());
+    ir_emit_str(ir, "    %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, ext.id);
+    ir_emit_str(ir, " =l extsw %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, cmp_w.id);
+    ir_emit_str(ir, "\n" as *u8);
+    let zero = *ir_new_tmp(ir, QBE_L());
+    ir_emit_copy(ir, zero, 0);
+    let m = *ir_new_tmp(ir, QBE_L());
+    ir_emit_binary(ir, m, "sub" as *u8, zero, ext);
+    return m;
+}
+
+// cg_select_mask — 按掩码选值:mask != 0 ⇒ a,否则 b
+fn cg_select_mask(cg_raw: *u8, mask: IRVal, a: IRVal, b: IRVal) -> IRVal {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    // nm = mask ^ (-1)   (取反)
+    let ones = *ir_new_tmp(ir, QBE_L());
+    ir_emit_copy(ir, ones, 0i64 - 1i64);
+    let nm = *ir_new_tmp(ir, QBE_L());
+    ir_emit_binary(ir, nm, "xor" as *u8, mask, ones);
+    // r = (a & mask) | (b & nm)
+    //   mask != 0 ⇒ a     (nm = ~mask = 0 ⇒ 第二项被清掉)
+    //   mask == 0 ⇒ b     (mask = 0 ⇒ 第一项被清掉)
+    let t1 = *ir_new_tmp(ir, QBE_L());
+    ir_emit_binary(ir, t1, "and" as *u8, a, mask);
+    let t2 = *ir_new_tmp(ir, QBE_L());
+    ir_emit_binary(ir, t2, "and" as *u8, b, nm);
+    let r = *ir_new_tmp(ir, QBE_L());
+    ir_emit_binary(ir, r, "or" as *u8, t1, t2);
+    return r;
+}
+
+// cg_clamp_i64 — 整数域夹到 [lo, hi](有符号 64 位比较)
+//
+// lo/hi 都在 i64 范围内 ⇒ signed 比较足够。
+// (u64 的窄宽度夹取走 cg_clamp_u64_narrow —— 有符号比较在 u64 上是错的。)
+fn cg_clamp_i64(cg_raw: *u8, t: IRVal, lo: i64, hi: i64) -> IRVal {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    let lo_t = *ir_new_tmp(ir, QBE_L());
+    ir_emit_copy(ir, lo_t, lo);
+    let hi_t = *ir_new_tmp(ir, QBE_L());
+    ir_emit_copy(ir, hi_t, hi);
+    // c_lo = (t < lo)
+    let c_lo = *ir_new_tmp(ir, QBE_W());
+    ir_emit_binary(ir, c_lo, "csltl" as *u8, t, lo_t);
+    // c_hi = (t > hi)
+    let c_hi = *ir_new_tmp(ir, QBE_W());
+    ir_emit_binary(ir, c_hi, "csgel" as *u8, t, hi_t);
+    let m_lo = cg_mask_from_cmp(cg_raw, c_lo);
+    let m_hi = cg_mask_from_cmp(cg_raw, c_hi);
+    let r1 = cg_select_mask(cg_raw, m_lo, lo_t, t);
+    let r2 = cg_select_mask(cg_raw, m_hi, hi_t, r1);
+    return r2;
+}
+
+// cg_clamp_u64_narrow — u64 值 → 窄无符号类型的 [0, MAX]
+//
+// ⚠ **不能用有符号比较**:u64 值 ≥ 2^63 时有符号看是负数 ⇒「t < 0 ⇒ 0」会
+//   把合法的 u64 值清成 0。正确做法:
+//   · t 有符号看是负数 ⇒ t (无符号) ≥ 2^63 ⇒ **一定** > 任何窄无符号类型的 MAX
+//     ⇒ 直接给 MAX
+//   · 否则(t < 2^63)⇒ 用有符号比较与 MAX 比即可(MAX ≤ 2^32−1,是正的)
+fn cg_clamp_u64_narrow(cg_raw: *u8, t: IRVal, hi: i64) -> IRVal {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    let hi_t = *ir_new_tmp(ir, QBE_L());
+    ir_emit_copy(ir, hi_t, hi);
+    let zero = *ir_new_tmp(ir, QBE_L());
+    ir_emit_copy(ir, zero, 0);
+    // c_neg = (t < 0)   —— 有符号看是负数 ⇒ 无符号看 ≥ 2^63
+    let c_neg = *ir_new_tmp(ir, QBE_W());
+    ir_emit_binary(ir, c_neg, "csltl" as *u8, t, zero);
+    // c_hi  = (t > hi)
+    let c_hi = *ir_new_tmp(ir, QBE_W());
+    ir_emit_binary(ir, c_hi, "csgel" as *u8, t, hi_t);
+    let m_neg = cg_mask_from_cmp(cg_raw, c_neg);
+    let m_hi = cg_mask_from_cmp(cg_raw, c_hi);
+    // r1 = neg ? hi : t
+    let r1 = cg_select_mask(cg_raw, m_neg, hi_t, t);
+    // r2 = (t > hi) ? hi : r1
+    let r2 = cg_select_mask(cg_raw, m_hi, hi_t, r1);
+    return r2;
+}
+
+// cg_clamp_int — 窄宽度的整数域夹取(统一入口)
+//
+// is_unsigned != 0 ⇒ 走 u64 语义(「负数看是 ≥ 2^63」的规则);
+// 否则走有符号语义。
+fn cg_clamp_int(cg_raw: *u8, t: IRVal, lo: i64, hi: i64, is_unsigned: i32) -> IRVal {
+    if is_unsigned != 0 {
+        return cg_clamp_u64_narrow(cg_raw, t, hi);
+    }
+    return cg_clamp_i64(cg_raw, t, lo, hi);
+}
+
+// cg_f64_const — 造一个 f64 常量 temp('d')
+//
+// 与 NODE_FLOAT 同款:jh_sprintf_f64 格式化 ⇒ "d_<十进制>" 文本。
+// ⚠ 后端对 f64 **立即数**的算术会静默走整数路径(产生 garbage)⇒
+//   任何用到浮点常量的地方都必须先把常量发射进 temp,再对 temp 做算术。
+fn cg_f64_const(cg_raw: *u8, val: f64) -> IRVal {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    let mut buf: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
+    sb_init((*ir).arena, &buf);
+    sb_append_cstr((*ir).arena, &buf, "d_" as *u8);
+    let fmt_buf_u8 = arena_alloc((*ir).arena, 64 as i64);
+    jh_sprintf_f64(fmt_buf_u8, val);
+    sb_append_cstr((*ir).arena, &buf, fmt_buf_u8);
+    let v = *ir_new_tmp(ir, QBE_D());
+    ir_emit_str(ir, "    %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, v.id);
+    ir_emit_str(ir, " =d copy " as *u8);
+    let fmt_str = sb_cstr((*ir).arena, &buf);
+    ir_emit_str(ir, fmt_str);
+    ir_emit_str(ir, "\n" as *u8);
+    return v;
+}
+
+// cg_promote_f32_to_f64 — f32 → f64 无损提升(exts)
+fn cg_promote_f32_to_f64(cg_raw: *u8, x: IRVal) -> IRVal {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    let up = *ir_new_tmp(ir, QBE_D());
+    ir_emit_str(ir, "    %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, up.id);
+    ir_emit_str(ir, " =d exts %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, x.id);
+    ir_emit_str(ir, "\n" as *u8);
+    return up;
+}
+
+// cg_sat_f64_to_i64 — f64 → i64 饱和(Rust 风格)
+//
+//   NaN          → 0
+//   x < i64::MIN → i64::MIN   (dtosl 的 invalid 恰好就是 i64::MIN ⇒ 天然对上)
+//   x > i64::MAX → i64::MAX   (需一次浮点比较)
+//   区间内       → 向 0 截断
+fn cg_sat_f64_to_i64(cg_raw: *u8, x: IRVal) -> IRVal {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    // t = dtosl(x) —— 区间内精确;NaN / 越界 ⇒ 0x8000_0000_0000_0000
+    let t = *ir_new_tmp(ir, QBE_L());
+    ir_emit_str(ir, "    %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, t.id);
+    ir_emit_str(ir, " =l dtosl %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, x.id);
+    ir_emit_str(ir, "\n" as *u8);
+    // big = (x >= 2^63)
+    let big_c = cg_f64_const(cg_raw, 9223372036854775808.0);
+    let c_big = *ir_new_tmp(ir, QBE_W());
+    ir_emit_binary(ir, c_big, "cged" as *u8, x, big_c);
+    // nan = (x != x)
+    let c_nan = *ir_new_tmp(ir, QBE_W());
+    ir_emit_binary(ir, c_nan, "cned" as *u8, x, x);
+    let m_big = cg_mask_from_cmp(cg_raw, c_big);
+    let m_nan = cg_mask_from_cmp(cg_raw, c_nan);
+    let i64_max = *ir_new_tmp(ir, QBE_L());
+    ir_emit_copy(ir, i64_max, 9223372036854775807i64);
+    let zero = *ir_new_tmp(ir, QBE_L());
+    ir_emit_copy(ir, zero, 0);
+    // r1 = big ? i64::MAX : t
+    let r1 = cg_select_mask(cg_raw, m_big, i64_max, t);
+    // r2 = nan ? 0 : r1
+    let r2 = cg_select_mask(cg_raw, m_nan, zero, r1);
+    return r2;
+}
+
+// cg_sat_f64_to_u64 — f64 → u64 饱和(Rust 风格)
+//
+//   NaN          → 0
+//   x < 0        → 0
+//   x >= 2^64    → u64::MAX
+//   区间内       → 向 0 截断
+//
+// 「区间内」对 x ∈ [2^63, 2^64) 需要两步(经典无符号转换):
+//   x < 2^63       → dtosl(x)
+//   x >= 2^63      → dtosl(x - 2^63) + 2^63
+// (dtosl 是**有符号**转换,对 x >= 2^63 给 invalid ⇒ 直接用它会丢一半值。)
+//
+// ⚠ 三个角落(NaN / 负数 / 太大)必须在**浮点域**做比较:
+//   整数域的有符号比较会把 x ∈ [2^63, 2^64)(合法精确值)与 u64::MAX 一起当负数。
+fn cg_sat_f64_to_u64(cg_raw: *u8, x: IRVal) -> IRVal {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    // 两步常量:2^63 与 2^64
+    let c_2p63 = cg_f64_const(cg_raw, 9223372036854775808.0);
+    let c_2p64 = cg_f64_const(cg_raw, 18446744073709551616.0);
+    // y = x - 2^63      (浮点减;常量已是 temp ⇒ 不会踩「f64 立即数算术」的坑)
+    let y = *ir_new_tmp(ir, QBE_D());
+    ir_emit_binary(ir, y, "sub" as *u8, x, c_2p63);
+    // t_lo = dtosl(x)    (x < 2^63 时精确)
+    let t_lo = *ir_new_tmp(ir, QBE_L());
+    ir_emit_str(ir, "    %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, t_lo.id);
+    ir_emit_str(ir, " =l dtosl %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, x.id);
+    ir_emit_str(ir, "\n" as *u8);
+    // t_hi = dtosl(y) + 2^63
+    let t_hi = *ir_new_tmp(ir, QBE_L());
+    ir_emit_str(ir, "    %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, t_hi.id);
+    ir_emit_str(ir, " =l dtosl %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, y.id);
+    ir_emit_str(ir, "\n" as *u8);
+    let c_2p63_i = *ir_new_tmp(ir, QBE_L());
+    ir_emit_copy(ir, c_2p63_i, 0i64 - 9223372036854775807i64 - 1i64);
+    let t_hi2 = *ir_new_tmp(ir, QBE_L());
+    ir_emit_binary(ir, t_hi2, "add" as *u8, t_hi, c_2p63_i);
+    // ge63 = (x >= 2^63)
+    let c_ge63 = *ir_new_tmp(ir, QBE_W());
+    ir_emit_binary(ir, c_ge63, "cged" as *u8, x, c_2p63);
+    let m_ge63 = cg_mask_from_cmp(cg_raw, c_ge63);
+    // t = ge63 ? t_hi2 : t_lo
+    let t = cg_select_mask(cg_raw, m_ge63, t_hi2, t_lo);
+    // big = (x >= 2^64) → u64::MAX
+    let c_big = *ir_new_tmp(ir, QBE_W());
+    ir_emit_binary(ir, c_big, "cged" as *u8, x, c_2p64);
+    let m_big = cg_mask_from_cmp(cg_raw, c_big);
+    let u64_max = *ir_new_tmp(ir, QBE_L());
+    ir_emit_copy(ir, u64_max, 0i64 - 1i64);
+    let t1 = cg_select_mask(cg_raw, m_big, u64_max, t);
+    // NaN → 0
+    let c_nan = *ir_new_tmp(ir, QBE_W());
+    ir_emit_binary(ir, c_nan, "cned" as *u8, x, x);
+    let m_nan = cg_mask_from_cmp(cg_raw, c_nan);
+    let zero = *ir_new_tmp(ir, QBE_L());
+    ir_emit_copy(ir, zero, 0);
+    let t2 = cg_select_mask(cg_raw, m_nan, zero, t1);
+    // x < 0 → 0
+    let c_zero_f = cg_f64_const(cg_raw, 0.0);
+    let c_neg = *ir_new_tmp(ir, QBE_W());
+    ir_emit_binary(ir, c_neg, "cltd" as *u8, x, c_zero_f);
+    let m_neg = cg_mask_from_cmp(cg_raw, c_neg);
+    let t3 = cg_select_mask(cg_raw, m_neg, zero, t2);
+    return t3;
+}
+
+// cg_sat_f64_to_int — f64/f32 → 目标整型的饱和转换(统一入口)
+//
+// src_is_f32 != 0 ⇒ 先无损提升到 f64(阈值比较只维护一套)。
+// is_unsigned != 0 ⇒ 走 u64 饱和;否则走 i64 饱和。
+fn cg_sat_f64_to_int(cg_raw: *u8, x: IRVal, src_is_f32: i32, is_unsigned: i32) -> IRVal {
+    if is_unsigned != 0 {
+        if src_is_f32 != 0 {
+            let up = cg_promote_f32_to_f64(cg_raw, x);
+            return cg_sat_f64_to_u64(cg_raw, up);
+        }
+        return cg_sat_f64_to_u64(cg_raw, x);
+    }
+    if src_is_f32 != 0 {
+        let up = cg_promote_f32_to_f64(cg_raw, x);
+        return cg_sat_f64_to_i64(cg_raw, up);
+    }
+    return cg_sat_f64_to_i64(cg_raw, x);
+}
+
 // 当 arg.qbe_type != param.qbe_type 时 emit QBE 转换指令（dtosi/stosi/sltof/...
 // 等）。返回转换后的 IRVal（同 qt）或原 arg（不需要转换）。
 //
@@ -1401,6 +1745,64 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
     //   Fix:取 IR-层实际宽度作 src_qt,跳过 downcast 重新 sign-extend。
     if arg.qbe_type == QBE_L() && src_qt == QBE_W() {
         src_qt = QBE_L();
+    }
+    // ── W-143:指针 ↔ 浮点 ──
+    //
+    // 放在下面的 KIND_PRIMITIVE 早 bail **之前** —— 早 bail 会让指针原样返回
+    // (一条指令都不发)⇒ 「指针→浮点」既没有转换、结果的 qbe_type 也仍是 'l'
+    // ⇒ 流进 f64 形参时 caller 放整数寄存器 / callee 读 XMM ⇒ **ABI 错配**。
+    //
+    // 语义(用户 2026-10-26 拍板):**数值转换**,不是位重解释、不是解引用
+    //   · 指针 → f64/f32:地址当 64 位**无符号**整数 → 数值转浮点
+    //     (整数→浮点是 roundTiesToEven,只可能丢精度,**不涉及饱和** ⇒ 不对称化)
+    //   · f64/f32 → 指针:浮点值**饱和**转成 64 位无符号整数 → 当地址
+    if src_t != (0 as *u8) && dst_t != (0 as *u8) {
+        let src2 = src_t as *Type;
+        let dst2 = dst_t as *Type;
+        let mut src_is_ptr: i32 = 0;
+        if (*src2).kind == KIND_POINTER() || (*src2).kind == KIND_REF() {
+            src_is_ptr = 1;
+        }
+        let mut dst_is_ptr: i32 = 0;
+        if (*dst2).kind == KIND_POINTER() || (*dst2).kind == KIND_REF() {
+            dst_is_ptr = 1;
+        }
+        let mut src_is_f: i32 = 0;
+        if (*src2).kind == KIND_PRIMITIVE() {
+            if (*src2).prim == PRIM_F64() || (*src2).prim == PRIM_F32() { src_is_f = 1; }
+        }
+        let mut dst_is_f: i32 = 0;
+        if (*dst2).kind == KIND_PRIMITIVE() {
+            if (*dst2).prim == PRIM_F64() || (*dst2).prim == PRIM_F32() { dst_is_f = 1; }
+        }
+        // 指针 → 浮点:地址当 u64 → 数值转浮点(ultof = u64→f64,后端已有)
+        if src_is_ptr != 0 && dst_is_f != 0 {
+            // u64 → f64
+            let mid = *ir_new_tmp(ir, QBE_D());
+            ir_emit_str(ir, "    %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, mid.id);
+            ir_emit_str(ir, " =d ultof %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, arg.id);
+            ir_emit_str(ir, "\n" as *u8);
+            if (*dst2).prim == PRIM_F32() {
+                // f64 → f32(ultof 只发 f64)
+                let out = *ir_new_tmp(ir, QBE_S());
+                ir_emit_str(ir, "    %t" as *u8);
+                ir_emit_int(ir, "%d" as *u8, out.id);
+                ir_emit_str(ir, " =s truncd %t" as *u8);
+                ir_emit_int(ir, "%d" as *u8, mid.id);
+                ir_emit_str(ir, "\n" as *u8);
+                return out;
+            }
+            return mid;
+        }
+        // 浮点 → 指针:饱和转 u64 → 当地址
+        if src_is_f != 0 && dst_is_ptr != 0 {
+            let mut src_is_f32: i32 = 0;
+            if src_qt == QBE_S() { src_is_f32 = 1; }
+            let sat = cg_sat_f64_to_int(cg_raw, arg, src_is_f32, 1);
+            return sat;
+        }
     }
     // 只有 src_t 非 0 时做 KIND_PRIMITIVE 早 bail（保留原语义）；src_t==0 时直接走转换
     // dst 不再硬要求 KIND_PRIMITIVE（pointer 是 qbe_type L，走 W→L extsw）
@@ -1479,35 +1881,112 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
     //   (above if src_qt==D matched first; inner QBE_W/L only — no QBE_S case).
     //   Add explicit QBE_S branch so f64→f32 truncd emits correctly.
     //   S→D exts branch already in dedicated else-if below; mirror here for src_qt==S.
+    // ── W-143:float → 整数 走**饱和**转换(Rust 风格)──
+    //
+    // 放在 conv 表**之前**:裸 cvttsd2si 对越界/NaN 给的是 integer indefinite
+    // (i32::MIN / i64::MIN)—— 既不是「向 0 截断」也不是「饱和」⇒ spec 推不出来。
+    //
+    // 窄宽度(i8/u8/i16/u16/i32/u32/bool):先按 64 位饱和,再在**整数域**夹到
+    // 目标类型的 [MIN, MAX](iN 的区间是 i64 区间的子集 ⇒ 等价)。
+    if (src_qt == QBE_D() || src_qt == QBE_S()) && (dst_qt == QBE_W() || dst_qt == QBE_L()) {
+        // 目标整型的 prim 决定有符号性
+        let mut is_unsigned: i32 = 0;
+        if dst_t != (0 as *u8) {
+            let dt = dst_t as *Type;
+            if (*dt).kind == KIND_PRIMITIVE() {
+                let dp = (*dt).prim;
+                if dp == PRIM_U64() || dp == PRIM_U32() || dp == PRIM_U16() || dp == PRIM_U8() {
+                    is_unsigned = 1;
+                }
+            }
+        }
+        let mut src_is_f32: i32 = 0;
+        if src_qt == QBE_S() { src_is_f32 = 1; }
+        let sat = cg_sat_f64_to_int(cg_raw, arg, src_is_f32, is_unsigned);
+        if dst_qt == QBE_L() {
+            return sat;
+        }
+        // 窄宽度:整数域夹到目标类型的 [MIN, MAX],再窄化成 'w'
+        let mut lo: i64 = 0i64 - 2147483648i64;
+        let mut hi: i64 = 2147483647i64;
+        let mut unsigned_narrow: i32 = 0;
+        if dst_t != (0 as *u8) {
+            let dt = dst_t as *Type;
+            if (*dt).kind == KIND_PRIMITIVE() {
+                let dp = (*dt).prim;
+                if dp == PRIM_I8() { lo = 0i64 - 128i64; hi = 127i64; }
+                else if dp == PRIM_U8() { lo = 0i64; hi = 255i64; unsigned_narrow = 1; }
+                else if dp == PRIM_I16() { lo = 0i64 - 32768i64; hi = 32767i64; }
+                else if dp == PRIM_U16() { lo = 0i64; hi = 65535i64; unsigned_narrow = 1; }
+                else if dp == PRIM_I32() { lo = 0i64 - 2147483648i64; hi = 2147483647i64; }
+                else if dp == PRIM_U32() { lo = 0i64; hi = 4294967295i64; unsigned_narrow = 1; }
+            }
+        }
+        let clamped = cg_clamp_int(cg_raw, sat, lo, hi, unsigned_narrow);
+        // 'l' → 'w' 窄化(QBE 'copy' 从 l 到 w 隐式截断)
+        let out = *ir_new_tmp(ir, QBE_W());
+        ir_emit_str(ir, "    %t" as *u8);
+        ir_emit_int(ir, "%d" as *u8, out.id);
+        ir_emit_str(ir, " =w copy %t" as *u8);
+        ir_emit_int(ir, "%d" as *u8, clamped.id);
+        ir_emit_str(ir, "\n" as *u8);
+        return out;
+    }
     let mut conv: *u8 = 0 as *u8;
+    // W-149:conv 这个 op 产出的是 f64 还是 f32?——
+    //   整数→浮点的四个 op(sltof/swtof/ultof/uwtof)在本后端**恒产 f64**
+    //   (只有 swtof 会按目标槽在 cvtsi2ss/cvtsi2sd 之间切,见
+    //    codegen_amd64_emit_sse.jhyy:264-268;另三个恒 cvtsi2sd + movsd,
+    //    见 codegen_amd64_state.jhyy 的 ILTOK_* 注释)
+    //   ⇒ f32 目标必须「先落 f64,再 truncd」。
+    let mut conv_makes_f64: i32 = 0;
     if src_qt == QBE_D() {
-        if dst_qt == QBE_W() {
-            conv = "dtosi" as *u8;
-        } else if dst_qt == QBE_L() {
-            conv = "dtosl" as *u8;
-        } else if dst_qt == QBE_S() {
+        if dst_qt == QBE_S() {
             conv = "truncd" as *u8;
         }
     } else if src_qt == QBE_S() {
-        if dst_qt == QBE_W() {
-            conv = "stosi" as *u8;
-        } else if dst_qt == QBE_L() {
-            conv = "stosl" as *u8;
-        } else if dst_qt == QBE_D() {
+        if dst_qt == QBE_D() {
             conv = "exts" as *u8;
         }
-    } else if dst_qt == QBE_D() {
-        if src_qt == QBE_L() {
-            conv = "sltof" as *u8;
-        } else if src_qt == QBE_W() {
-            conv = "swtof" as *u8;
+    } else if dst_qt == QBE_D() || dst_qt == QBE_S() {
+        // ── W-149 (2026-10-26 真修):整数 → 浮点 ──
+        //
+        // 修前两处错:
+        //   ① **符号性丢了** —— u64 → f64 发的是 `sltof`(有符号)⇒ 值 ≥ 2^63
+        //      变**负数**。后端的 `ultof` 早就写好了(W-146 还把它的算法修对了),
+        //      但前端从来没发过它 ⇒ 那条修复对 u64→f64 是**死代码**。
+        //   ② **f32 目标拿到的是 f64** —— 旧表给 f32 目标发 `ultof`/`uwtof`,
+        //      而这两个恒产 f64 ⇒ **f64 的位模式塞进 f32 槽** ⇒ 读出来是垃圾。
+        //
+        // 修法:按**源类型的 prim** 判符号性(拿不到 src_t ⇒ 不猜,保持 sltof);
+        //       f32 目标统一走「f64 + truncd」(见下面的 conv_makes_f64 分支)。
+        //
+        // 注:u8/u16/u32 的值在 64 位槽里是**零扩展**的(实测 u32→i64 保号),
+        //     所以 L 槽上的无符号源用 `ultof`(u64→f64)是对的。
+        let mut src_unsigned: i32 = 0;
+        if src_t != (0 as *u8) {
+            let st = src_t as *Type;
+            if (*st).kind == KIND_PRIMITIVE() {
+                let sp = (*st).prim;
+                if sp == PRIM_U64() || sp == PRIM_U32() || sp == PRIM_U16() || sp == PRIM_U8() {
+                    src_unsigned = 1;
+                }
+            }
         }
-    } else if dst_qt == QBE_S() {
         if src_qt == QBE_L() {
-            conv = "ultof" as *u8;
+            if src_unsigned != (0 as i32) {
+                conv = "ultof" as *u8;
+            } else {
+                conv = "sltof" as *u8;
+            }
         } else if src_qt == QBE_W() {
-            conv = "uwtof" as *u8;
+            if src_unsigned != (0 as i32) {
+                conv = "uwtof" as *u8;
+            } else {
+                conv = "swtof" as *u8;
+            }
         }
+        conv_makes_f64 = 1;
     } else if src_qt == QBE_W() {
         // W-007 fix (v0.8 bug 11 analog): i32→i64 sign-extend via extsw
         if dst_qt == QBE_L() {
@@ -1522,6 +2001,28 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
     }
     if conv == (0 as *u8) {
         return arg;
+    }
+    // ── W-149:f32 目标 ⇒ 先转 f64,再 truncd ──
+    //
+    // 整数→浮点的 op 恒产 f64(见上面 conv_makes_f64 的说明)⇒ 直接发
+    // `=s <conv> %t` 会把 f64 的位模式塞进 f32 槽 ⇒ 读出来是垃圾。
+    // 正确形状:先落一个 'd' 临时槽,再 `=s truncd` 收窄(后端已支持 truncd)。
+    if conv_makes_f64 != (0 as i32) && dst_qt == QBE_S() {
+        let mid = *ir_new_tmp(ir, QBE_D());
+        ir_emit_str(ir, "    %t" as *u8);
+        ir_emit_int(ir, "%d" as *u8, mid.id);
+        ir_emit_str(ir, " =d " as *u8);
+        ir_emit_str(ir, conv);
+        ir_emit_str(ir, " %t" as *u8);
+        ir_emit_int(ir, "%d" as *u8, arg.id);
+        ir_emit_str(ir, "\n" as *u8);
+        let result = *ir_new_tmp(ir, QBE_S());
+        ir_emit_str(ir, "    %t" as *u8);
+        ir_emit_int(ir, "%d" as *u8, result.id);
+        ir_emit_str(ir, " =s truncd %t" as *u8);
+        ir_emit_int(ir, "%d" as *u8, mid.id);
+        ir_emit_str(ir, "\n" as *u8);
+        return result;
     }
     let result = *ir_new_tmp(ir, dst_qt);
     ir_emit_str(ir, "    %t" as *u8);
@@ -2204,7 +2705,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         if (*d).expr != (0 as *Node) {
             if (*cg).has_sret != 0 {
                 // Sprint 4.25 W-005 #2 真修: sret struct return path.
-                //   cg_expr(expr) returns value; copy to sret slot via cg_copy_struct
+                //   cg_expr(expr) returns value; copy to sret slot via cg_copy_agg
                 //   (guarded against sentinel src); then bare `ret`.
                 //   Mirror of compiler/src/codegen.c NODE_RETURN sret branch.
                 let src = *cg_expr(cg_raw, (*d).expr);
@@ -2220,7 +2721,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                     if _is_enum_ret != (0 as i32) {
                         let _ce = cg_copy_enum(cg_raw, (*cg).current_ret_type, sret_addr, src);
                     } else {
-                        let _copy = cg_copy_struct(cg_raw, (*cg).current_ret_type, sret_addr, src);
+                        let _copy = cg_copy_agg(cg_raw, (*cg).current_ret_type, sret_addr, src);
                     }
                 }
                 // v1.3.6: emit LIFO defers before `ret` (sret path)
@@ -2365,7 +2866,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
 
     // NOTE: sret void function return fix is handled via IL post-processing
     // (fix_il.py in cmd_compile) — cg_func can't fix NODE_RETURN emit here
-    // because cg_copy_struct inside cg_expr triggers v0 codegen SIGSEGV.
+    // because cg_copy_agg inside cg_expr triggers v0 codegen SIGSEGV.
 
     // ── NODE_BLOCK（expr-position: block 最后一个 expr 的值）──
     // [Status: 真修 W-005 #2 in C-side (commit 2.81); src0/ workaround kept for历史读者了解历史.]
@@ -2466,7 +2967,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                 if sz2 < 4 { sz2 = 4; }
                 let slot = *ir_new_tmp(ir, QBE_L());
                 ir_emit_alloc(ir, slot, sz2);
-                cg_copy_struct(cg_raw, sym_t, slot, init_v);
+                cg_copy_agg(cg_raw, sym_t, slot, init_v);
                 cg_add_local(cg_raw, (*d).sym, slot, 1);
             } else {
                 let sym_t = ((*d).sym as *Sym).type_ptr;
@@ -2522,7 +3023,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                 if tgt_t != (0 as *u8) {
                     let tt = tgt_t as *Type;
                     if (*tt).kind == KIND_STRUCT() {
-                        let _copy = cg_copy_struct(cg_raw, tgt_t, slot, val);
+                        let _copy = cg_copy_agg(cg_raw, tgt_t, slot, val);
                     } else {
                         let _store = cg_store_enum_image(cg_raw, tgt_t, val, slot);
                     }
@@ -3085,6 +3586,10 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             if (*et).kind == KIND_ENUM() {
                 return irval_box(ir, (elem_addr).kind, (elem_addr).id, (elem_addr).ival, (elem_addr).name, (elem_addr).qbe_type);
             }
+            // W-144: array 元素同理(数组元素也是内联字节 ⇒ 给地址,不 load)
+            if (*et).kind == KIND_ARRAY() {
+                return irval_box(ir, (elem_addr).kind, (elem_addr).id, (elem_addr).ival, (elem_addr).name, (elem_addr).qbe_type);
+            }
         }
         let result = *ir_new_tmp(ir, qbe_type_of((*n).type_ptr));
         // 用 cg_emit_load 而非 ir_emit_load — u8 走 loadub (与 C 端 byte-equal 对齐)
@@ -3155,6 +3660,13 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             // 字段里放的是 image 本体 → 取字段 = 取它的地址。
             // (与 struct 字段同一处理:不 load,直接给地址)
             if (*ft).kind == KIND_ENUM() {
+                return irval_box(ir, (addr).kind, (addr).id, (addr).ival, (addr).name, (addr).qbe_type);
+            }
+            // W-144: array 字段同理 —— 数组在 struct 里是**内联字节**,
+            // 取字段 = 取它的地址(与 struct/enum 字段同款)。
+            // 不走这条时 array 落到下面的 loadw ⇒ 读到「数组前 4 字节」当值,
+            // 后续 a.buf[0] 拿它当基址 ⇒ ACCESS_VIOLATION。
+            if (*ft).kind == KIND_ARRAY() {
                 return irval_box(ir, (addr).kind, (addr).id, (addr).ival, (addr).name, (addr).qbe_type);
             }
         }
@@ -3397,7 +3909,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                     } else {
                         copy_slot = abi_win_emit_struct_arg_slot(ir, arg_t);
                     }
-                    cg_copy_struct(cg_raw, arg_t, copy_slot, arg_v);
+                    cg_copy_agg(cg_raw, arg_t, copy_slot, arg_v);
                     arg_v = copy_slot;
                 } else {
                     // 隐式类型转换（cg_convert_arg）
@@ -3640,7 +4152,7 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                     } else {
                         copy_slot = abi_win_emit_struct_arg_slot(ir, arg_t);
                     }
-                    cg_copy_struct(cg_raw, arg_t, copy_slot, arg_v);
+                    cg_copy_agg(cg_raw, arg_t, copy_slot, arg_v);
                     arg_v = copy_slot;
                 } else {
                     if param_ts_raw != (0 as *u8) && i < nparams {
@@ -4270,9 +4782,16 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                 return irval_box(ir, (v_enum).kind, (v_enum).id, (v_enum).ival, (v_enum).name, (v_enum).qbe_type);
             }
             // SSA value → alloc temp slot, store, return slot
+            // W-144:槽大小按 type_size 分配(不再固定 8 字节)——
+            // 被取引用的值是 array(12 字节)时,固定 8 字节的槽会被 store 写穿 4 字节。
             let v = *cg_expr(cg_raw, inner_node);
             let slot = *ir_new_tmp(ir, QBE_L());
-            ir_emit_alloc(ir, slot, 8 as i32);
+            let mut slot_size: i32 = 8 as i32;
+            if (*inner_node).type_ptr != (0 as *u8) {
+                let its = type_size((*inner_node).type_ptr as *Type) as i32;
+                if its > slot_size { slot_size = its; }
+            }
+            ir_emit_alloc(ir, slot, slot_size);
             let _store = cg_emit_store(cg_raw, (*inner_node).type_ptr, v, slot);
             return irval_box(ir, (slot).kind, (slot).id, (slot).ival, (slot).name, (slot).qbe_type);
         }
@@ -4958,7 +5477,7 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
                 // `cg_body_returns()` is syntactic-only (e.g. body is `if c { return A }
                 // else { return B }` — both arms terminate, but the if-expression
                 // still produces a value, and codegen returns the pre-return then_val
-                // which was never overwritten). Without this guard, cg_copy_struct
+                // which was never overwritten). Without this guard, cg_copy_agg
                 // emits `copy %t0` and QBE rejects the whole function.
                 if irval_is_undef(body_val) == 0 {
                     // W-114:enum 的 sret 拷的是**内存映像**,不是地址
@@ -4970,7 +5489,7 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
                     if _is_enum_ret2 != (0 as i32) {
                         let _ce = cg_copy_enum(cg_raw, ret_type, sret_addr, body_val);
                     } else {
-                        let _copy = cg_copy_struct(cg_raw, ret_type, sret_addr, body_val);
+                        let _copy = cg_copy_agg(cg_raw, ret_type, sret_addr, body_val);
                     }
                 }
             }

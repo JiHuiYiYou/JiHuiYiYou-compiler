@@ -237,6 +237,10 @@ fn emit_conv_sltof(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let src_id = cg_parse_temp((*t).text, (*t).text_len, 0 as i64);
     let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
     let src_off = cg_offset_for_temp_with_target(src_id, target_tag);
+    // W-145 (2026-10-26):转换 op 是**值语义**(不做内存访问)⇒ 源 temp 的值
+    // 就是**槽里的内容**。对指针 temp 来说槽里存的正是**地址** ⇒ `p as f64`
+    // = 地址当数字(不是 `*p`)。⇒ 这里**不**做 address-holder 的 indirect load
+    // (那是 load / store 的语义:解引用 / 写穿)。
     let _r1 = sb_append_cstr(arena, s, "\tmovq " as *u8);
     let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
     let _r3 = sb_append_cstr(arena, s, "(%rbp), %rax\n" as *u8);
@@ -271,6 +275,7 @@ fn emit_conv_swtof(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     // W-083 v2.13.11: 选 cvtsi2ss vs cvtsi2sd / movss vs movsd by dst qt
     let is_f32: i32 = if (*t).qbe_type == QBE_S_LOCAL() { 1 as i32 } else { 0 as i32 };
     let cvt_suffix: *u8 = if is_f32 != (0 as i32) { "ss" as *u8 } else { "sd" as *u8 };
+    // W-145 (2026-10-26):值语义 ⇒ 直接读槽(同 sltof 的说明)。
     let _r1 = sb_append_cstr(arena, s, "\tmovl " as *u8);
     let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
     let _r3 = sb_append_cstr(arena, s, "(%rbp), %eax\n" as *u8);
@@ -314,15 +319,54 @@ fn emit_conv_ultof(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let src_id = cg_parse_temp((*t).text, (*t).text_len, 0 as i64);
     let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
     let src_off = cg_offset_for_temp_with_target(src_id, target_tag);
+    // W-145 (2026-10-26):值语义 ⇒ 直接读槽(同 sltof 的说明)。
     let _r1 = sb_append_cstr(arena, s, "\tmovq " as *u8);
     let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
     let _r3 = sb_append_cstr(arena, s, "(%rbp), %rax\n" as *u8);
-    let _r4 = sb_append_cstr(arena, s, "\tmovq %rax, %rcx\n\tshrq $1, %rcx\n" as *u8);
-    let _r5 = sb_append_cstr(arena, s, "\tmovq %rax, %rdx\n\tshrq $63, %rdx\n\taddq %rdx, %rcx\n" as *u8);
-    let _r6 = sb_append_cstr(arena, s, "\tcvtsi2sd %rcx, %xmm0\n\taddsd %xmm0, %xmm0\n" as *u8);
-    let _r7 = sb_append_cstr(arena, s, "\tmovsd %xmm0, " as *u8);
-    let _r8 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
-    let _r9 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+    // W-146 (2026-10-26 真修):原实现算的是 `2*((x>>1) + (x>>63))` ⇒ **把最低位
+    // 清零** ⇒ x=1 给 0.0、x=3 给 2.0 ⇒ 「u64 as f64」「指针 as f64」全错。
+    // 改成标准两分支:
+    //   x <  2^63 ⇒ cvtsi2sd 直接转(此时无符号值 == 有符号值 ⇒ IEEE 转换正确)
+    //   x >= 2^63 ⇒ low = x & 0x7FFF_FFFF_FFFF_FFFF(< 2^63)⇒ cvtsi2sd(low) + 2^63
+    // label 名带 dst_id + fn_idx ⇒ 同函数内多次转换不撞名(per emit_ctrl 的
+    // `_fn<N>` 后缀约定)。
+    let fn_idx = cg_state_cur_fn_idx(state);
+    let _t1 = sb_append_cstr(arena, s, "\ttestq %rax, %rax\n" as *u8);
+    let _t2 = sb_append_cstr(arena, s, "\tjs .Lultof" as *u8);
+    let _t3 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_id);
+    let _t4 = sb_append_cstr(arena, s, "_fn" as *u8);
+    let _t5 = sb_appendf_lld(arena, s, "%lld" as *u8, fn_idx);
+    let _t6 = sb_append_cstr(arena, s, "_big\n" as *u8);
+    let _t7 = sb_append_cstr(arena, s, "\tcvtsi2sd %rax, %xmm0\n" as *u8);
+    let _t8 = sb_append_cstr(arena, s, "\tjmp .Lultof" as *u8);
+    let _t9 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_id);
+    let _ta = sb_append_cstr(arena, s, "_fn" as *u8);
+    let _tb = sb_appendf_lld(arena, s, "%lld" as *u8, fn_idx);
+    let _tc = sb_append_cstr(arena, s, "_end\n" as *u8);
+    // ── big 分支(x >= 2^63)──
+    let _u1 = sb_append_cstr(arena, s, ".Lultof" as *u8);
+    let _u2 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_id);
+    let _u3 = sb_append_cstr(arena, s, "_fn" as *u8);
+    let _u4 = sb_appendf_lld(arena, s, "%lld" as *u8, fn_idx);
+    let _u5 = sb_append_cstr(arena, s, "_big:\n" as *u8);
+    // 0x7FFF_FFFF_FFFF_FFFF(低 63 位)
+    let _u6 = sb_append_cstr(arena, s, "\tmovabsq $9223372036854775807, %rcx\n" as *u8);
+    let _u7 = sb_append_cstr(arena, s, "\tmovq %rax, %rdx\n\tandq %rcx, %rdx\n" as *u8);
+    let _u8 = sb_append_cstr(arena, s, "\tcvtsi2sd %rdx, %xmm0\n" as *u8);
+    // 2^63 的 double 位模式 0x43E0000000000000 = 4890909195324358656
+    let _u9 = sb_append_cstr(arena, s, "\tmovabsq $4890909195324358656, %rcx\n" as *u8);
+    // addsd 只吃 XMM 操作数 ⇒ 通用寄存器要先 movq 进 xmm1
+    let _ub = sb_append_cstr(arena, s, "\tmovq %rcx, %xmm1\n" as *u8);
+    let _ua = sb_append_cstr(arena, s, "\taddsd %xmm1, %xmm0\n" as *u8);
+    // ── end ──
+    let _v1 = sb_append_cstr(arena, s, ".Lultof" as *u8);
+    let _v2 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_id);
+    let _v3 = sb_append_cstr(arena, s, "_fn" as *u8);
+    let _v4 = sb_appendf_lld(arena, s, "%lld" as *u8, fn_idx);
+    let _v5 = sb_append_cstr(arena, s, "_end:\n" as *u8);
+    let _v6 = sb_append_cstr(arena, s, "\tmovsd %xmm0, " as *u8);
+    let _v7 = sb_appendf_lld(arena, s, "%lld" as *u8, dst_off);
+    let _v8 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
     return 0;
 }
 
@@ -344,6 +388,7 @@ fn emit_conv_uwtof(state: *u8, tok: *u8, target_tag: i32) -> i32 {
     let src_id = cg_parse_temp((*t).text, (*t).text_len, 0 as i64);
     let dst_off = cg_offset_for_temp_with_target(dst_id, target_tag);
     let src_off = cg_offset_for_temp_with_target(src_id, target_tag);
+    // W-145 (2026-10-26):值语义 ⇒ 直接读槽(同 sltof 的说明)。
     let _r1 = sb_append_cstr(arena, s, "\tmovl " as *u8);
     let _r2 = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
     let _r3 = sb_append_cstr(arena, s, "(%rbp), %eax\n" as *u8);

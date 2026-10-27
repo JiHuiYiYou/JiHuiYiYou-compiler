@@ -1961,6 +1961,42 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         return -1 as i32;
     }
 
+    // ── 'u' → 'ultof' / 'uwtof' (u64 / u32 → f64) ──
+    //
+    // W-145 (2026-10-26 真修):这两个 op 之前被**嵌套在 `c0 == 's'` 分支**里
+    // (本文件历史版本的 "ultof" 死代码段)—— 而它们以 **'u'** 开头 ⇒ **永远进不去**
+    // ⇒ IL 里一出现就报「unknown QBE IL mnemonic」⇒ lexer 跳 1 字节继续 ⇒
+    // **吐出一串垃圾指令**。
+    //
+    // 影响面:`u64 as f32` / `u32 as f32`(codegen.jhyy 的 conv 表里 dst=S & src=L/W)
+    // 一直坏 —— 静默产生垃圾指令。
+    //
+    // 字节索引口径:lex_peek_byte_at(s, N) 的 N=0 是**当前字节**(即 c0)。
+    if c0 == (117 as i32) {
+        let n1 = lex_peek_byte_at(s, 1 as i64);
+        let n2 = lex_peek_byte_at(s, 2 as i64);
+        let n3 = lex_peek_byte_at(s, 3 as i64);
+        let n4 = lex_peek_byte_at(s, 4 as i64);
+        // 'ultof' = u,l,t,o,f / 'uwtof' = u,w,t,o,f
+        if (n1 == (108 as i32) || n1 == (119 as i32)) && n2 == (116 as i32)
+            && n3 == (111 as i32) && n4 == (102 as i32) {
+            let tok_kind: i32 = if n1 == (108 as i32) { ILTOK_ULTOF() } else { ILTOK_UWTOF() };
+            let mut k: i64 = 0 as i64;
+            while k < (5 as i64) {
+                let _x = lex_next_byte(s);
+                k = k + (1 as i64);
+            }
+            let _s = lex_skip_ws(s);
+            // consume 到行尾(含 src %t5)
+            let _eol = lex_consume_to_eol(s);
+            lex_init_token(t, tok_kind, (*s).line);
+            let _fin = lex_finish_instr(s, arena, t);
+            let _arena = arena;
+            return 0 as i32;
+        }
+        return -1 as i32;
+    }
+
     // ── 'o' → 'or' (binop) ──
     // v2.11.12 (W-074.6 + W-074.7 5-op 真修): "or" — main 之前无 'o' 分支 →
     // 5 个 or op 全部 silent skip (match_range + dungeon_game + or_exhaust + others)。
