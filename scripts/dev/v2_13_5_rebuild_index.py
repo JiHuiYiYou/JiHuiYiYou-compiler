@@ -142,6 +142,26 @@ def rebuild_file(input_path: Path, output_path: Path) -> None:
     if idx_end is None:
         idx_end = len(lines)
 
+    # ── 2026-10-27 (W-153):索引表与下一个 `## ` 之间还有内容(锚点!)──
+    #
+    # 原来这里是 `lines[:idx_start] + new_index_lines + lines[idx_end:]`
+    # ⇒ **把索引表到下一个 H2 之间的所有内容整段丢掉** ⇒ 而那正好是
+    # `<a id="w-001"></a>` 这类锚点的位置(第一个条目的锚点在索引表之后、
+    # H2 之前)⇒ **W-001 的锚点每次重建索引都被吃掉** ⇒ 索引里的
+    # `(#w-001)` 变成死链。
+    #
+    # ⇒ 现在:找出旧索引表的最后一行(最后一条 `| [W-` 行),**保留它之后的
+    #   空行/锚点**(gap),拼在新索引表后面 ⇒ 锚点不再被吃。
+    gap_start = idx_start
+    for i in range(idx_start, idx_end):
+        if lines[i].startswith('| ['):
+            gap_start = i + 1
+    gap = lines[gap_start:idx_end]
+    # gap 开头的空行由 new_index_lines 末尾那个空行提供 ⇒ 去掉,否则每跑一次
+    # 就多一个空行(幂等性破掉)。
+    while gap and gap[0].strip() == '':
+        gap.pop(0)
+
     # Parse all H2 entries (with status line)
     entries = parse_file(content)
     rows = build_index_rows(entries)
@@ -156,13 +176,22 @@ def rebuild_file(input_path: Path, output_path: Path) -> None:
     new_index_lines.extend(rows)
     new_index_lines.append('')
 
-    new_lines = lines[:idx_start] + new_index_lines + lines[idx_end:]
+    new_lines = lines[:idx_start] + new_index_lines + gap + lines[idx_end:]
     new_content = '\n'.join(new_lines)
+
+    # ── 自检:重建索引**不许丢内容**(锚点尤其)──
+    before = set(re.findall(r'<a id="([^"]+)"></a>', content))
+    after = set(re.findall(r'<a id="([^"]+)"></a>', new_content))
+    lost = before - after
+    if lost:
+        raise SystemExit(
+            f'REBUILD-FAIL: 重建索引丢了 {len(lost)} 个锚点: {sorted(lost)[:10]}\n'
+            f'  (索引脚本不许静默删内容 —— 见 W-153)')
 
     with open(output_path, 'w', encoding='utf-8', newline='') as f:
         f.write(new_content)
 
-    print(f'Rebuilt index: {len(rows)} rows')
+    print(f'Rebuilt index: {len(rows)} rows (anchors kept: {len(after)})')
 
 
 if __name__ == '__main__':

@@ -40,6 +40,7 @@ DEFERRED,2026-10-25 按本口径改成 SUPERSEDED。
 **状态:** <STATUS> <verb> YYYY-MM-DD (vX.Y.Z) — <caption, ≤120 chars>
 **Backfilled:** YYYY-MM-DD (original W-NNN reference)   // 仅补登条目
 **Filed-by:** <author | audit-flip-vN.N.N | patch-C2>   // 可选
+**提交/说明:** <commit ref / audit 说明 / 归一化时从状态行移出来的原文>   // 可选
 ```
 
 字段约束：
@@ -51,6 +52,9 @@ DEFERRED,2026-10-25 按本口径改成 SUPERSEDED。
 - caption `≤120` 字符，**no emoji**，no commit hash inline（commit refs 在正文）
 - `**Backfilled:**` 仅补登条目使用，引用 original W-NNN
 - `**Filed-by:**` 可选，author handle 或 audit-flip handle
+- `**提交/说明:**` 可选（2026-10-27 加）。承载**状态行里塞不下的原文**：commit ref、
+  audit 说明等。规范是「状态行不放 commit hash」⇒ 这类信息搬到这里，**信息不丢**。
+  2026-10-27 那次归一化把 80 条历史状态行里的 commit ref / audit 说明搬进了这里。
 
 ## 3. Backfilled 规则（锁死）
 

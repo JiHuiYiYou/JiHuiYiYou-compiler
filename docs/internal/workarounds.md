@@ -153,6 +153,7 @@
 | [W-134](#w-134) | RESOLVED | MCP pytest 套件里有一个**恒红**的陈旧测试 —— 断言的行为早已被换掉 |
 | [W-134.1](#w-134.1) | RESOLVED | `mcp-jhyy/tests/` 在 CI 里**零覆盖** —— 套件红绿都不影响 CI 结论 |
 | [W-142](#w-142) | RESOLVED | 同作用域 shadowing 让编译器在 sema 阶段**空指针写崩溃**(0xC0000005) |
+| [W-153](#w-153) | RESOLVED | 索引重建脚本把索引表与下一个 H2 之间的内容**整段丢掉** ⇒ 锚点被吃 ⇒ 死链 |
 | [W-152](#w-152) | RESOLVED | 重名 **import** ⇒ 编译器崩溃;重名**类型参数** ⇒ 报一串指不到病根的错 |
 | [W-151](#w-151) | RESOLVED | match arm 不开作用域 ⇒ arm 的模式绑定**复用外层同名变量** ⇒ payload... |
 | [W-150](#w-150) | RESOLVED | 同作用域重名(fn / type / const / 参数)⇒ 编译器**空指针写崩溃** |
@@ -167,10 +168,12 @@
 | [W-148](#w-148) | RESOLVED | 后端 f64/f32 字面量解析**丢掉指数** ⇒ 任何 ≥1e16 的浮点常量都错 |
 | [W-149](#w-149) | RESOLVED | 整数→浮点 conv 表丢**符号性** + f32 目标拿到 **f64** ⇒ 8 个组合里... |
 
+<a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
 
 **ID:** W-001
-**状态:** RESOLVED (v0.8 commit 9 `d570c72`, 2026-08-03) — 见下方"W-001 RESOLVED" section (byte-by-byte FNV-1a 真修, 移除了 *i32 overread workaround + W-002 失效)
+**状态:** RESOLVED closed 2026-08-03 (v0.8) — 见下方"W-001 RESOLVED" section (byte-by-byte FNV-1a 真修, 移除了 *i32 overread workaround + W-002 失效)
+**提交/说明:** v0.8 commit 9 `d570c72`, 2026-08-03
 **日期:** v0.6 sprint（~2026-05, ACTIVE）→ 2026-08-03 (RESOLVED)
 **触发面:** `hash_string` 函数里需要 deref `*u8` 一次读 1 byte
 **症状:**
@@ -230,10 +233,12 @@ let c = ((w >> sh) & (255 as i32)) as i64;
 
 ---
 
+<a id="w-002"></a>
 ## W-002: main.jhyy 重命名绕 jhyy_v1 hash_string 堆损坏
 
 **ID:** W-002
-**状态:** RESOLVED (v0.9 wip commit 2.12)
+**状态:** RESOLVED closed 2026-08-03 (v0.9) — main.jhyy 重命名绕 jhyy_v1 hash_string 堆损坏
+**提交/说明:** v0.9 wip commit 2.12
 **日期:** 2026-08-03 (ACTIVE) → 2026-08-05 (RESOLVED)
 **触发面:**（任一即可）
 1. 源码标识符长度 ∈ {6, 7, 8} 字符（如 `out_buf`、`in_buf`、`cmd_buf`）
@@ -377,10 +382,12 @@ W-002 revert 实施时产生的 archive 文件保留作为可重放参考:
 
 ---
 
+<a id="w-003"></a>
 ## W-003: jhyy_v1 `let _ = fncall(...)` 顶层 / 嵌套 segfault → direct call (top-level only)
 
 **ID:** W-003
-**状态:** ✅ RESOLVED (transitive — jhyy_v1.exe.exe sha `ba94df93...` 已消除 Bug 7/7b 触发面,minimal repros for top-level + nested + NODE_ASSIGN[NODE_FIELD] all 5×5 PASS, 2026-08-12 verified)
+**状态:** RESOLVED closed 2026-08-12 (v1.0.0) — jhyy_v1 `let _ = fncall(...)` 顶层 / 嵌套 segfault → direct call (top-level only)
+**提交/说明:** transitive — jhyy_v1.exe.exe sha `ba94df93...` 已消除 Bug 7/7b 触发面,minimal repros for top-level + nested + NODE_ASSIGN[NODE_FIELD] all 5×5 PASS, 2026-08-12 verified
 **日期:** 2026-08-03 (ACTIVE) → 2026-08-12 (RESOLVED transitive)
 **触发面:** 任何 `let _NAME = fncall(...)` 模式，无论 `_NAME` 是什么；无论 fncall 是否在函数顶层或嵌套 if/while 块内
 **症状:** jhyy_v1 编译含此模式的源码 → 0xC0000005 segfault（exit 139）
@@ -476,10 +483,12 @@ store_byte_i32(nul1, 0 as i32);
 
 ---
 
+<a id="w-004"></a>
 ## W-004: short local var (≤4 chars) → symtab hash 撞 → jhyy_v1 field assign 死循环
 
 **ID:** W-004
-**状态:** RESOLVED (transitive — W-001 byte-by-byte FNV-1a 真修 indirect coverage; minimal repro + 4 boundary variations all pass codegen on jhyy_v1 (sha `ba94df93...`) with EXIT=1 (link stage only), 2026-08-12 verified)
+**状态:** RESOLVED closed 2026-08-12 (v0.8) — short local var (≤4 chars) → symtab hash 撞 → jhyy_v1 field assign 死循环
+**提交/说明:** transitive — W-001 byte-by-byte FNV-1a 真修 indirect coverage; minimal repro + 4 boundary variations all pass codegen on jhyy_v1 (sha `ba94df93...`) with EXIT=1 (link stage only), 2026-08-12 verified
 **日期:** 2026-08-03
 **触发面:** 同时存在 ① 短（≤4 字符）函数名 + ② 短（≤4 字符）`let` 局部 var 名 + ③ struct field 赋值的组合。具体阈值取决于三者长度之和（如 `fn main` 4 + `let a` 1 + `field cur` 3 = fail；`fn entry` 5 + `let a` 1 + `field cur` 3 = OK）。
 **症状:** jhyy_v1 编译含此模式的源码 → 0xC00000FD STACK OVERFLOW（exit 3221226356）。**不是** segfault（exit 3221225477）。
@@ -597,10 +606,12 @@ fn ab() -> i32 {                              // fn 长度 2，但其它都长
 
 ---
 
+<a id="w-005"></a>
 ## W-005: `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault
 
 **ID:** W-005
-**状态:** RESOLVED (v0.9 wip commit 2.13)
+**状态:** RESOLVED closed 2026-08-03 (v0.9) — `let mut x: T; x = expr;` 改 `*pos_ptr += ...` 绕 jhyy_v1 codegen segfault
+**提交/说明:** v0.9 wip commit 2.13
 **日期:** 2026-08-03 (workaround) → 2026-08-05 (commit 2.11 真修) → 2026-08-05 (commit 2.13 revert 加固)
 **触发面:** 函数体内任意 `let mut` 变量 + 后续 `x = expr;` 赋值语句（不论 expr 类型、变量名长度、是否被 read、所在 fn 深度）。**100% 触发**（exit 139 / 0xC0000005）。
 **症状:** jhyy_v1 编译含此模式的源码 → 0xC0000005 segfault。v0 jhyy.exe 编同一源码 → exit 0（IL 正确）。
@@ -737,10 +748,12 @@ fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
 
 ---
 
+<a id="w-006"></a>
 ## W-006: jhyy_v1 `return x ± y` 两 1-char var 发 127（QBE fail）
 
 **ID:** W-006
-**状态:** RESOLVED (transitively closed by Sprint 4.21-4.25 W-005 #2 真修 chain — minimal repro no longer triggers, 2026-08-11 verified)
+**状态:** RESOLVED closed 2026-08-11 (v1.0.0) — jhyy_v1 `return x ± y` 两 1-char var 发 127（QBE fail）
+**提交/说明:** transitively closed by Sprint 4.21-4.25 W-005 #2 真修 chain — minimal repro no longer triggers, 2026-08-11 verified
 **日期:** 2026-08-04 (open) → 2026-08-11 (close, transitive)
 **触发面:** 函数体末尾 `return X OP Y`（OP ∈ `+`, `-`），X 和 Y 都是 1-char 局部变量（任意 i32/i64 类型）。
 **症状:** jhyy_v1 编译 → exit 127（无输出）→ 可能是 segfault 也可能是 QBE fail。QBE fail 时报 "invalid type for jump argument"。
@@ -872,10 +885,12 @@ v1.1 wip commit 1.1 最初版本把 W-006 标 "RESOLVED (escaped — codegen fix
 
 ---
 
+<a id="w-007"></a>
 ## W-007: jhyy_v1 `fn() -> i64 { return X as i64; }` emit `w copy`
 
 **ID:** W-007
-**状态:** ✅ RESOLVED (transitive — jhyy_v1.exe.exe sha `ba94df93...` 已含 type propagation fix per v0.8 commit 7 `0453cef` `cg_convert_arg src=W → dst=L extsw 分支补全`,2026-08-12 verified 5x5 PASS on 4 BAD variants, IL byte-equal C-side)
+**状态:** RESOLVED closed 2026-08-12 (v0.8) — jhyy_v1 `fn() -> i64 { return X as i64; }` emit `w copy`
+**提交/说明:** transitive — jhyy_v1.exe.exe sha `ba94df93...` 已含 type propagation fix per v0.8 commit 7 `0453cef` `cg_convert_arg src=W → dst=L extsw 分支补全`,2026-08-12 verified 5x5 PASS on 4 BAD variants, IL byte-equal C-side
 **日期:** 2026-08-04 (ACTIVE) → 2026-08-12 (RESOLVED transitive)
 **触发面:** 函数体末尾 `return literal as i64;` 或 `let x = literal as i64; return x;`，且 literal 是字面整数常量。
 **症状:** QBE 拒绝 → "invalid type for jump argument %t0 in block @start0"。jhyy_v1 编译 exit 1。
@@ -968,10 +983,12 @@ export function l $small_const() {
 
 ---
 
+<a id="w-008"></a>
 ## W-008: jhyy_v1 cg_find_field_offset 双层 deref 漏（i64 struct field emit `=w loadw` + 全 struct field 走 fallback）
 
 **ID:** W-008
-**状态:** RESOLVED（v0.8 commit 11，2d4c319 — codegen.jhyy 三处 deref 漏 + workarounds.md 文档同步；下游 cslel/ceql 错转为 W-009 候选）
+**状态:** RESOLVED closed 2026-08-04 (v0.8) — codegen.jhyy 三处 deref 漏 + workarounds.md 文档同步；下游 cslel/ceql 错转为 W-009 候选）
+**提交/说明:** v0.8 commit 11，2d4c319
 **日期:** 2026-08-04
 **触发面:** jhyy 源码里**任意 `(*ptr).field_X` 或 `s.field` 或 `field.assign()` 路径**走 cg_find_field_offset / cg_copy_struct — 包括 codegen 阶段任何按 struct 字段 emit 的代码：
 - `(*a).def_size`（i64）— arena.jhyy 赋值/读取 def_size
@@ -1069,10 +1086,12 @@ ret %t4
 
 ---
 
+<a id="w-009"></a>
 ## W-009: jhyy_v1 cg_convert_arg src_t==0 早 bail，导致 literal `0` 在 ceql/csltl 中以 w 操作数出现
 
 **ID:** W-009
-**状态:** RESOLVED（v0.8 commit 12, 5820793 — codegen.jhyy cg_convert_arg src_t==0 兜底 + dst.kind=KIND_POINTER 不再 bail + NODE_CAST 移除 src_t==0 早 bail；arena.jhyy Stage 0 closure 解锁）
+**状态:** RESOLVED closed 2026-08-04 (v0.8) — codegen.jhyy cg_convert_arg src_t==0 兜底 + dst.kind=KIND_POINTER 不再 bail + NODE_CAST 移除 src_t==0 早 bail；arena.jhyy Stage…
+**提交/说明:** v0.8 commit 12, 5820793
 **日期:** 2026-08-04
 **触发面:** jhyy 源码里**任意 `l_field == 0` / `l_field != 0` / `i64_var cmp 0` / `pointer cmp 0` 路径**走 cg_expr → 比较操作 → cg_convert_arg：
 - `if (*a).def_size > 0` — arena.jhyy: arena_new_block 的 fallback 路径
@@ -1228,7 +1247,8 @@ QBE：`invalid type for second operand %t29 in ceql`
 ## Cross-ref: B-let2 (Stage 1 byte-equal codegen gap)
 
 **ID:** B-let2
-**状态:** RESOLVED (v0.9 wip commit 2.5)
+**状态:** RESOLVED closed 2026-08-04 (v0.9) — jhyy_v1 cg_convert_arg src_t==0 早 bail，导致 literal `0` 在 ceql/csltl 中以 w 操作数出现
+**提交/说明:** v0.9 wip commit 2.5
 **日期:** 2026-08-05
 **触发面:** jhyy_v1 `cg_convert_arg` 函数 (`compiler/src0/codegen.jhyy:544-634`)
 **症状:** Stage 1 byte-equal 验收 (`stage1-expanded.sh`) 跑 `arith.jhyy` 时 FAIL —— `let down_val: i32 = total_val as i32;` (total_val: i64 → down_val: i32) emit `=w copy %l_value`,QBE 报 "type mismatch"。
@@ -1330,10 +1350,12 @@ QBE：`invalid type for second operand %t29 in ceql`
 
 ---
 
+<a id="w-010"></a>
 ## W-010: jhyy-端 MAX_LOCALS=512 vs C-端 1024 → cg_add_local 静默溢出致 `%t0` 污染
 
 **ID:** W-010
-**状态:** RESOLVED (v0.9 wip commit 2.79)
+**状态:** RESOLVED closed 2026-08-10 (v0.9) — jhyy-端 MAX_LOCALS=512 vs C-端 1024 → cg_add_local 静默溢出致 `%t0` 污染
+**提交/说明:** v0.9 wip commit 2.79
 **日期:** 2026-08-10（Sprint 4.21–4.23 triage 实证）
 **触发面:** jhyy_v2 编译 `compiler/src0/main.jhyy`（cg_expr 内本地变量数 > 512）
 **症状:**
@@ -1377,10 +1399,12 @@ QBE：`invalid type for second operand %t29 in ceql`
 
 ---
 
+<a id="w-011"></a>
 ## W-011: inline_imports emit module 全量重复（Stage 2 设计缺陷）— RESOLVED
 
 **ID:** W-011
-**状态:** ✅ RESOLVED (Sprint 4.24 commit 2.80)
+**状态:** RESOLVED closed 2026-08-10 (v0.9) — inline_imports emit module 全量重复（Stage 2 设计缺陷）— RESOLVED
+**提交/说明:** Sprint 4.24 commit 2.80
 **日期:** 2026-08-10
 **触发面:** `jhyy_v2` 编 `compiler/src0/main.jhyy` (12 个 module + transitive imports)，所有 module 函数在 IL 里 emit 多份（arena 89 份/util 47 份）
 **症状:** QBE 通过，但 `as` 报 1500+ 处 `symbol 'X' is already defined`；jhyy_v2 self-build 在 link 阶段 fail
@@ -1410,10 +1434,12 @@ QBE：`invalid type for second operand %t29 in ceql`
 
 ---
 
+<a id="w-012"></a>
 ## W-012: codegen emit-layer sentinel pollution — cg_copy_struct emit `copy %t0` when src/dst undef
 
 **ID:** W-012
-**状态:** ✅ RESOLVED (v0.9 wip commit 2.81, Sprint 4.25)
+**状态:** RESOLVED closed 2026-08-10 (v0.9) — codegen emit-layer sentinel pollution — cg_copy_struct emit `copy %t0` when src/dst undef
+**提交/说明:** v0.9 wip commit 2.81, Sprint 4.25
 **日期:** 2026-08-10
 **触发面:** 函数体是 `if c { return A } else { return B }` 这种**两条 return 分支**的结构，其中：
 - B = struct return 函数（has_sret = 1, 返回 aggregate type）
@@ -1474,10 +1500,12 @@ QBE：`invalid type for second operand %t29 in ceql`
 
 ---
 
+<a id="w-013"></a>
 ## W-013: C-side cg_expr NODE_CAST w/l → b/h narrowing emit sentinel `%t0`
 
 **ID:** W-013
-**状态:** ✅ RESOLVED (v0.9 wip commit 2.87, Sprint v1.1.7)
+**状态:** RESOLVED closed 2026-08-12 (v0.9) — C-side cg_expr NODE_CAST w/l → b/h narrowing emit sentinel `%t0`
+**提交/说明:** v0.9 wip commit 2.87, Sprint v1.1.7
 **日期:** 2026-08-12
 **触发面:** 任意 `*T_ptr = expr as u8/i8/u16/i16/bool` (T ∈ {i32,i64,u32,u64})：
 - `*p_u8 = 65 as u8` (literal → sub-word)
@@ -1534,10 +1562,12 @@ if (!conv && (src_qt == 'w' || src_qt == 'l') && (dst_qt == 'b' || dst_qt == 'h'
 - Sprint 4.7 IRVal pass-by-value memory: `project_sprint4_7_irval_pass_by_value_bug.md`
 - v0.9 wip commit 2.87 (Sprint v1.1.7 Bug 4 narrow 真修)
 
+<a id="w-014"></a>
 ## W-014: `jhyy_selfhost_check` MCP pre-stage cleanup deletes canonical closure binaries
 
 **ID:** W-014
-**状态:** ✅ RESOLVED (2026-08-12, Sprint mcp-2 W-014)
+**状态:** RESOLVED closed 2026-08-12 (v1.0.0) — `jhyy_selfhost_check` MCP pre-stage cleanup deletes canonical closure binaries
+**提交/说明:** 2026-08-12, Sprint mcp-2 W-014
 **日期:** 2026-08-12
 **触发面:** `mcp__jhyy__jhyy_selfhost_check` (默认 `auto_rebuild=False`) — 调 `mcp-jhyy/jhyy_runner.py:selfhost_check()`,Stage 2/3 pre-stage cleanup 把 chain input binary 删了 → FileNotFoundError → 整链 early-abort,canonical closure binaries (`jhyy_v2.exe` / `jhyy_v3.exe`) 被销毁。
 
@@ -1617,6 +1647,7 @@ input (canonical) 跟 output (scratch `_sh_vN`) 物理分开 → pre-stage clean
 
 ---
 
+<a id="w-015"></a>
 ## W-015: `NODE_SIZEOF` 节点 arena 分配 8 字节 → sema const-fold 写 16 字节溢出到下一块
 
 **Status:** ✅ RESOLVED (commit TBD, v1.3.3)
@@ -1660,6 +1691,7 @@ input (canonical) 跟 output (scratch `_sh_vN`) 物理分开 → pre-stage clean
 
 ---
 
+<a id="w-016"></a>
 ## W-016: 8 字节 enum 参数 ABI mismatch — caller 用 `l` (slot) 传,callee 用 `w` (value) 收
 
 **Status:** ✅ RESOLVED (v1.3.7 fix commit TBD, 2026-08-13)
@@ -1721,6 +1753,7 @@ export function w $unwrap_or(w %opt, ...)  ← ❌ callee 声明 w!
 - v1.3.7 父 sprint: `docs/plans/v1/v1.3.0任务清单 + 概要设计.md` § v1.3.7
 - ABI spec: [`docs/abis/jhyy-abi-v1.0.0.md`](../abis/jhyy-abi-v1.0.0.md) § enum pass semantics (大 enum = slot 传)
 
+<a id="w-017"></a>
 ## W-017: jhyy 顶层 `let mut *u8 = 0` codegen 常量折叠 → 全局状态失效
 
 **Status:** ✅ RESOLVED 2026-08-14 (commit `f20e36d`, v1.4.6 W-017 真修)
@@ -1821,6 +1854,7 @@ export function l $QBE_PATH() {
 
 ---
 
+<a id="w-018"></a>
 ## W-018: v1.4.2 DWARF emit 引入 Stage 1 .il 字节差异 (非功能)
 
 **Status:** ✅ RESOLVED 2026-08-14
@@ -1838,6 +1872,7 @@ v1.4.2 DWARF 改动对 .il byte-equal 无影响。
 - 根因: `compiler/tests/stage1-expanded.sh` 的 `JHY_1` 路径错 + stderr 被吞
 - 验证: `bash compiler/tests/stage1-expanded.sh` → 7/7 PASS (2026-08-14)
 
+<a id="w-019"></a>
 ## W-019: codegen 嵌套 struct `(o).inner.a` emit `loadsw` 类型错
 
 **Status:** ✅ RESOLVED 2026-08-14 (commit `6638134`, v1.4.6 W-019 真修)
@@ -1889,6 +1924,7 @@ line 15 通常是读取 `(*o).inner.a` 对应 `loadsw` 那行。
 - repro: v1.4.3 验证时跑的 `wnested_test.jhyy` (内嵌在会话日志,未 commit)
 - W-008 (已 RESOLVED) 类似路径但单层 field offset;W-019 是嵌套场景的复发
 
+<a id="w-020"></a>
 ## W-020: jhyy-side `parser.jhyy` parse_pattern `Color::Variant` 分支 bug
 
 **Status:** ✅ RESOLVED 2026-08-14 (commit `ad42117`, v1.4.6 W-020 真修)
@@ -1967,9 +2003,11 @@ match tag { 0 => ..., 1 => ..., 2 => ... }
 - v1.4.4 ship 时 changelog 把此 bug 误标 "pre-existing v1.4.3" 已更正 → [`docs/logs/v1/changelog-v1.4.0.md`](../logs/v1/changelog-v1.4.0.md) § v1.4.4 ship
 - W-019 是 codegen 嵌套 struct,跟 W-020 (parser enum pattern) 不同面,但同样等真修;建议 v1.4.6 合并
 
+<a id="w-021"></a>
 ## W-021: WiX 7 CLI `-ext` name 查找失败 — `-ext WixToolset.Bal.wixext` 找不到
 
-**状态:** ✅ RESOLVED 2026-08-28 (v1.7.1 patch B1) — 永久 workaround 化, 标 RESOLVED 是因为 v1.7.1 patch ship 时 review 确认 underlying issue 依赖 WiX 上游 DLL 命名 (external dep, 项目不可控), 短期/中期不会真修。workaround `installer/build.ps1:131-136` 显式传 DLL 绝对路径, stable ship v1.5.3+ 至今。
+**状态:** RESOLVED closed 2026-08-28 (v1.7.1) — 永久 workaround 化, 标 RESOLVED 是因为 v1.7.1 patch ship 时 review 确认 underlying issue 依赖 WiX 上游 DLL 命名 (external dep, 项目不可控),…
+**提交/说明:** 2026-08-28 (v1.7.1 patch B1
 
 **触发场景:** Sprint v1.5.3 Burn bundle build, `wix build installer/Bundle.wxs -ext WixToolset.Bal.wixext ...` 时报 WIX0144 (`The extension 'WixToolset.Bal.wixext' could not be found. Checked paths: WixToolset.Bal.wixext`)。
 
@@ -2008,9 +2046,11 @@ if (-not (Test-Path $balDll)) {
 
 ---
 
+<a id="w-022"></a>
 ## W-022: Windows PowerShell 5.1 `Out-File -Encoding utf8` 加 UTF-8 BOM 污染 `$GITHUB_ENV`
 
-**状态:** SUPERSEDED closed 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.4 close) — 🌍 ENV-ONLY, 非 ACTIVE bug。PowerShell 5.1 是 GitHub Actions `windows-latest` runner default (`PSDefaultParameterValues` 不能 unset BOM/CRLF);Jhyy-side 不可修(不是 jhyy 编译产物问题,是 GitHub runner PS 版本依赖)。Canonical pattern (v1.5.5 起) = `Set bash as default shell step`,PowerShell step 改用 `[System.IO.File]::WriteAllText($path, $content, [System.Text.UTF8Encoding]::new($false))` 强制 utf8NoBOM。GH Actions 升 PS7 后 PS7 `Set-Content -Encoding utf8` default 无 BOM,可考虑删除 workaround;在此之前保留作为 stable pattern。原 entry label "ACTIVE" 是 v1.5.5 当时 lack of reclassify convention 残留。
+**状态:** SUPERSEDED closed 2026-09-28 (v2.13.4) — 🌍 ENV-ONLY, 非 ACTIVE bug。PowerShell 5.1 是 GitHub Actions `windows-latest` runner default (`PSDefaultParameterValues` 不能…
+**提交/说明:** 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.4 close
 
 **触发场景:**
 在 `.github/workflows/release.yml` 的 pwsh step 里写 env 到 `$GITHUB_ENV`:
@@ -2050,9 +2090,11 @@ PowerShell 7+ 的 `Out-File -Encoding utf8` 是 UTF-8 no BOM (没有这个 bug),
 
 ---
 
+<a id="w-023"></a>
 ## W-023: MSYS2 bash step 里 `${VAR}` 不展开 `${{ env.X }}` GH 表达式
 
-**状态:** SUPERSEDED closed 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.3 close) — 🌍 ENV-ONLY, 非 ACTIVE bug。`${VAR}` 不展开 `${{ env.X }}` GH 表达式 是 GH Actions msys2 bash step 设计如此:yaml 表达式只 expanded 在 yaml 解析期, msys2 bash sub-shell `run:` block 拿不到。Canonical pattern = `echo "VERSION=${VERSION}"` 直接读 `$VERSION` (从 env block 注入),或用 `${{ env.VERSION }}` 强制 yaml 表达式 expand。entry 自身写 "失效条件 N/A (设计如此)" 即承认无 bug。原 label "ACTIVE" 是 v1.5.5 当时 lack of reclassify convention 残留。
+**状态:** SUPERSEDED closed 2026-09-28 (v2.13.3) — 🌍 ENV-ONLY, 非 ACTIVE bug。`${VAR}` 不展开 `${{ env.X }}` GH 表达式 是 GH Actions msys2 bash step 设计如此:yaml 表达式只 expanded 在 yaml…
+**提交/说明:** 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.3 close
 
 **触发场景:**
 `.github/workflows/release.yml` 的 msys2 bash step:
@@ -2095,9 +2137,11 @@ PowerShell 7+ 的 `Out-File -Encoding utf8` 是 UTF-8 no BOM (没有这个 bug),
 
 ---
 
+<a id="w-024"></a>
 ## W-024: PowerShell 5.1 `Set-Content` / `Out-File` 写 UTF-8 文本默认加 BOM + CRLF
 
-**状态:** SUPERSEDED closed 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.4 close) — 🌍 ENV-ONLY, 非 ACTIVE bug。跟 W-022 同根因 (PS5.1 default 在 windows-latest runner):`Set-Content -Encoding utf8` / `Out-File -Encoding utf8` 写 UTF-8 文本默认加 BOM + CRLF。Jhyy-side 不可修(不是 jhyy 编译产物问题,是 GitHub runner PS 版本依赖)。Canonical pattern = `[System.IO.File]::WriteAllText($path, $content, [System.Text.UTF8Encoding]::new($false))` 强制 utf8NoBOM (或 `Set bash as default shell` 走 bash step,无 PS BOM 问题)。GH Actions 升 PS7 后 PS7 `Set-Content -Encoding utf8` default 无 BOM,可考虑删除 workaround。原 label "ACTIVE" 是 v1.5.5 当时 lack of reclassify convention 残留。
+**状态:** SUPERSEDED closed 2026-09-28 (v2.13.4) — 🌍 ENV-ONLY, 非 ACTIVE bug。跟 W-022 同根因 (PS5.1 default 在 windows-latest runner):`Set-Content -Encoding utf8` / `Out-File -…
+**提交/说明:** 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.4 close
 
 **触发场景:**
 PowerShell 写 UTF-8 文本文件 (用于上传到 GitHub Release 或下游工具消费):
@@ -2161,6 +2205,7 @@ $content = ($lines -join "`n") + "`n"
 - workaround 实现: `installer/gen-sha256.ps1:65-72` + release.yml Generate release notes step
 - v1.5.5 ship commit
 
+<a id="w-025"></a>
 ## W-025: qbe/ gitlink 无 .gitmodules — release.yml `submodules: recursive` 失败 + installer/build.ps1 hardcoded `qbe/qbe.exe`
 
 **症状 (2026-08-15 v1.5.5 dry-run run 31859843640):**
@@ -2271,9 +2316,11 @@ if (Test-Path $qbeLocal) {
 - workaround 实现: vendored 41 qbe files + `.github/workflows/release.yml` (Build qbe.exe step) + `installer/build.ps1` (qbe.exe resolution)
 - v1.5.5 ship commit (post vendoring)
 
+<a id="w-026"></a>
 ## W-026: regress.py `[:80]` stderr 截断隐藏真实 QBE/gcc 错误
 
-**状态:** RESOLVED (2026-08-15, commit `0d58efe` — full stderr print)
+**状态:** RESOLVED closed 2026-08-15 (v1.5.5) — regress.py `[:80]` stderr 截断隐藏真实 QBE/gcc 错误
+**提交/说明:** 2026-08-15, commit `0d58efe` — full stderr print
 **日期:** 2026-08-15
 **触发面:** `mcp-jhyy/jhyy_regress.py` run_all() FAIL print
 
@@ -2295,9 +2342,11 @@ GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step
 - workaround 实现: `mcp-jhyy/jhyy_regress.py` line 313 (FAIL print)
 - fix commit: `0d58efe`
 
+<a id="w-027"></a>
 ## W-027: GH Actions `setup-msys2@v2` 把 MSYS2 装在 `$RUNNER_TEMP\msys64` (CI = `D:\a\_temp\msys64`), 不在 `C:\msys64` — 硬编码 `C:\msys64\ucrt64\bin` 找不到 gcc
 
-**状态:** ✅ RESOLVED → SUPERSEDED by W-029 (v1.5.6 superseder commit TBD)
+**状态:** RESOLVED closed 2026-08-15 (v1.5.6) — GH Actions `setup-msys2@v2` 把 MSYS2 装在 `$RUNNER_TEMP\msys64` (CI = `D:\a\_temp\msys64`), 不在 `C:\msys64` — 硬编码 `C:\msys6…
+**提交/说明:** → SUPERSEDED by W-029 (v1.5.6 superseder commit TBD
 **日期:** 2026-08-15
 **触发面:** `.github/workflows/release.yml` Run regress step (53/53 FAIL → 47/53 FAIL → 53/53 PASS over 4 fix attempts)
 
@@ -2329,9 +2378,11 @@ GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step
 - v1.5.6 superseder: 见 W-029 — `jh_gcc_path()` 4-tier 探测, regress.py / release.yml
   不再 prepend MSYS2 bin 到 PATH, W-027 v8 Python 探测段整段删.
 
+<a id="w-029"></a>
 ## W-029: jhyy.exe toolchain 探测收敛 — `jh_gcc_path()` 4-tier 优先级 + `jh_gcc_invoke()` 包装替代 v1.0.0 跨 3 文件 MSYS2 探测逻辑
 
-**状态:** SUPERSEDED closed 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.4 close) — 🟢 STABLE-PRODUCTION, 非 ACTIVE unfixed bug。真修 ship 在 v1.5.6 commit `a2dd4c1` "feat(v1.5.6): jhyy_helpers.c 加 jh_gcc_path() + jh_gcc_invoke() — A 派 Driver 探测" + docs commit `28450d3` "docs(v1.5.6): workarounds W-027 SUPERSEDED + W-029 ACTIVE + changelog v1.5.6 section"。`commit TBD` 是 docs 漏填(真修 commit 已 ship,只是 entry 当时没补填);v2.13.4 RCA closeout 标 🟢 STABLE-PRODUCTION 替代 🟢 ACTIVE (后者 label 误导,future contributor 看到 🟢 ACTIVE 误以为还需真修)。Fix ship'd 4+ years stable in production,无未修项。原 label "🟢 ACTIVE" 是 v1.5.6 ship 当时 lack of reclassify convention 残留。
+**状态:** SUPERSEDED closed 2026-09-28 (v2.13.4) — 🟢 STABLE-PRODUCTION, 非 ACTIVE unfixed bug。真修 ship 在 v1.5.6 commit `a2dd4c1` "feat(v1.5.6): jhyy_helpers.c 加 jh_gcc_path…
+**提交/说明:** 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.4 close
 **日期:** 2026-08-15
 **触发面:** `compiler/src0/jhyy_helpers.c` (jh_gcc_path + jh_gcc_invoke) +
 `compiler/src0/main.jhyy` (link_with_gcc 改用 jh_gcc_invoke) +
@@ -2389,9 +2440,11 @@ GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step
 - related workaround: W-027 v8 (Python 探测 → jhyy.exe 接管)
 - 实施 commit: TBD (v1.5.6 sprint 末 ship)
 
+<a id="w-028"></a>
 ## W-028: Windows process exit code 是 8-bit (mod 256), EXPECT 注释里的值 > 255 在 CI regress FAIL (got=106 不是 got=1000042)
 
-**状态:** ✅ RESOLVED 2026-08-15 (commit `6d2ab8f` + commit TBD — `sys.platform` cygwin/msys 兼容)
+**状态:** RESOLVED closed 2026-08-15 (v1.5.5) — Windows process exit code 是 8-bit (mod 256), EXPECT 注释里的值 > 255 在 CI regress FAIL (got=106 不是 got=1000042)
+**提交/说明:** 2026-08-15 (commit `6d2ab8f` + commit TBD — `sys.platform` cygwin/msys 兼容
 **日期:** 2026-08-15
 **触发面:** `mcp-jhyy/jhyy_regress.py` run_test EXPECT comparison (47/53 PASS post-W-027)
 
@@ -2460,9 +2513,11 @@ dry_run=true 仍 publish release — `if: inputs.dry_run != 'true' || github.eve
 
 ---
 
+<a id="w-030"></a>
 ## W-030: WiX 4 Theme.xml schema — Font 必须在 `<Theme>` 顶层 (不能 nested in `<Window>`); `<Window>` 用 Caption + FontId (不用 Title + 内嵌 Font + Weight)
 
-**状态:** ✅ RESOLVED 2026-08-15 (commit TBD)
+**状态:** RESOLVED closed 2026-08-15 (v1.5.6) — WiX 4 Theme.xml schema — Font 必须在 `<Theme>` 顶层 (不能 nested in `<Window>`); `<Window>` 用 Caption + FontId (不用 Title + 内嵌…
+**提交/说明:** 2026-08-15 (commit TBD
 **日期:** 2026-08-15
 **触发面:** `installer/Theme.xml` + `installer/Bundle.wxs` Burn bundle (`jhyy-installer-*.exe`)
 
@@ -2503,9 +2558,11 @@ dry_run=true 仍 publish release — `if: inputs.dry_run != 'true' || github.eve
 
 ---
 
+<a id="w-031"></a>
 ## W-031: MSI LaunchCondition + INSTALLDIR resolution — 原探测 HKLM Uninstall\ucrt64 GCC 误报 + WiX 4 `<SetDirectory>` 不生效
 
-**状态:** ✅ RESOLVED 2026-08-15 (commit TBD)
+**状态:** RESOLVED closed 2026-08-15 (v1.5.2) — MSI LaunchCondition + INSTALLDIR resolution — 原探测 HKLM Uninstall\ucrt64 GCC 误报 + WiX 4 `<SetDirectory>` 不生效
+**提交/说明:** 2026-08-15 (commit TBD
 **日期:** 2026-08-15
 **触发面:** `installer/compiler/jhyy-compiler.wxs` LaunchCondition + INSTALLDIR
 
@@ -2578,9 +2635,11 @@ Property(S): INSTALLDIR = C:\JHYY\
 
 ---
 
+<a id="w-033"></a>
 ## W-033: Theme.xml XML 1.0 well-formedness + WiX 4 thmutil schema + wixstdba 默认控件名/string ID 完整对齐
 
-**状态:** ✅ RESOLVED 2026-08-16 (commit TBD)
+**状态:** RESOLVED closed 2026-08-16 (v1.5.6) — Theme.xml XML 1.0 well-formedness + WiX 4 thmutil schema + wixstdba 默认控件名/string ID 完整对齐
+**提交/说明:** 2026-08-16 (commit TBD
 **日期:** 2026-08-16
 **触发面:** `installer/Theme.xml` + `installer/Bundle.zh-CN.wxl` — Burn bundle (`jhyy-installer-*.exe`)
 
@@ -2635,9 +2694,11 @@ Win32 error 0x8007006e = decimal 110 = `ERROR_BAD_FORMAT` — Burn 拒绝接受 
 
 ---
 
+<a id="w-034"></a>
 ## W-034: cmd_run system() — 用 jh_fullpath 解析绝对路径绕 cmd.exe cwd/PATH 解析陷阱
 
-**状态:** ✅ RESOLVED 2026-08-17
+**状态:** RESOLVED closed 2026-08-17 (v1.4.1) — cmd_run system() — 用 jh_fullpath 解析绝对路径绕 cmd.exe cwd/PATH 解析陷阱
+**提交/说明:** 2026-08-17
 **日期:** 2026-08-17
 **触发面:** `compiler/src0/main.jhyy:cmd_run` + `compiler/src0/jhyy_helpers.c:jh_fullpath` — `jhyy run <file.jhyy>` 命令
 
@@ -2708,9 +2769,11 @@ let rc = system(abs_exe);  // system("C:\abs\path\foo_run.exe") — cmd.exe find
 
 ---
 
+<a id="w-035"></a>
 ## W-035: jh_paths_init 布局检测 — installer 布局 vs source-tree 布局
 
-**状态:** ✅ RESOLVED 2026-08-17
+**状态:** RESOLVED closed 2026-08-17 (v1.4.1) — jh_paths_init 布局检测 — installer 布局 vs source-tree 布局
+**提交/说明:** 2026-08-17
 **日期:** 2026-08-17
 **触发面:** `compiler/src0/jhyy_helpers.c:jh_paths_init` — `jhyy.exe` 启动时一次性推导 4 个 path(qbe / gcc / runtime.c / jhyy_helpers.c)
 
@@ -2798,9 +2861,11 @@ return 1;  /* no layout matched */
 
 ---
 
+<a id="w-038"></a>
 ## W-038: cmd.exe /C 不处理带空格 path — CreateProcessA 替代 system()
 
-**状态:** ✅ RESOLVED 2026-08-17
+**状态:** RESOLVED closed 2026-08-17 (v1.5.6) — cmd.exe /C 不处理带空格 path — CreateProcessA 替代 system()
+**提交/说明:** 2026-08-17
 **日期:** 2026-08-17
 **触发面:** `compiler/src0/jhyy_helpers.c:jh_run` + `run_qbe` / `link_with_gcc` / `cmd_run` 全部从 `system()` 切到 `jh_run()`
 
@@ -2874,9 +2939,11 @@ main.jhyy 三处 `system(...)` 全部改 `jh_run(...)`:
 
 ---
 
+<a id="w-039"></a>
 ## W-039: CreateProcessA 同样 unquoted-token 切错 — caller 显式 quote exe path
 
-**状态:** ✅ RESOLVED 2026-08-17
+**状态:** RESOLVED closed 2026-08-17 (v1.5.6) — CreateProcessA 同样 unquoted-token 切错 — caller 显式 quote exe path
+**提交/说明:** 2026-08-17
 **日期:** 2026-08-17
 **触发面:** `compiler/src0/main.jhyy:run_qbe` + `cmd_run`
 
@@ -2926,9 +2993,11 @@ cmd_run 同样:abs_exe 前加 `"`,后加 `"`,传给 jh_run。
 
 ---
 
+<a id="w-040"></a>
 ## W-040: link_with_gcc 也需 quote path args (asm_path / RUNTIME_C / HELPERS_C / exe_path)
 
-**状态:** ✅ RESOLVED 2026-08-17
+**状态:** RESOLVED closed 2026-08-17 (v1.5.6) — link_with_gcc 也需 quote path args (asm_path / RUNTIME_C / HELPERS_C / exe_path)
+**提交/说明:** 2026-08-17
 **日期:** 2026-08-17
 **触发面:** `compiler/src0/main.jhyy:link_with_gcc`
 
@@ -2973,6 +3042,7 @@ pos = str_concat_at(cmd_buf, pos, rq);  // 右 "
 
 ---
 
+<a id="w-041"></a>
 ## W-041: VSCode Code Runner 集成 — installer 自动装 extension + 写 settings.json
 
 > **⚠️ SUPERSEDED in v1.5.9** — Code Runner 集成完全移除, 替换为原生 jhyy-lang VSCode
@@ -2982,7 +3052,8 @@ pos = str_concat_at(cmd_buf, pos, rq);  // 右 "
 > 本节作为 v1.5.6-patch2 历史方案存档; 不再是当前实现。`configure-coderunner.ps1` /
 > `install-vsix.bat` / `InstallVSIXBat` + `ConfigureCodeRunnerPS1` Component 已在 v1.5.10 清理。
 
-**状态:** ✅ RESOLVED 2026-08-17 (in v1.5.6-patch2) → SUPERSEDED 2026-08-27 (in v1.5.9)
+**状态:** RESOLVED closed 2026-08-17 (v1.5.6) — VSCode Code Runner 集成 — installer 自动装 extension + 写 settings.json
+**提交/说明:** 2026-08-17 (in v1.5.6-patch2) → SUPERSEDED 2026-08-27 (in v1.5.9
 **日期:** 2026-08-17
 **触发面:** MSI 安装完 → 用户打开 VSCode → 没有"Run Code" 选项 for `.jhyy` files
 
@@ -3044,9 +3115,11 @@ v1.5.6-patch2 加 2 件:
 - related: regress.py 不测 installer 行为 — W-041 同样 ship 但没在 CI 暴露 (本地 5 场景手动测)
 - lesson: v2.x installer 升级时把 PowerShell 脚本链打包到 `installer/vscode/` 子目录,避免根 common/ 过度膨胀
 
+<a id="w-042"></a>
 ## W-042: link_with_gcc 失败只打 "gcc link failed" — 缺 invoke_buf 诊断
 
-**状态:** ✅ RESOLVED 2026-08-28 (v1.7.1 patch A1 — Tier 1 invoke_buf echo (v1.5.6 ship) + Tier 2 stderr capture via pipe + Tier 3 post-link .exe stat 全链 ship; master table line 53 + row 已加 2026-08-28)
+**状态:** RESOLVED closed 2026-08-28 (v1.7.1) — link_with_gcc 失败只打 "gcc link failed" — 缺 invoke_buf 诊断
+**提交/说明:** 2026-08-28 (v1.7.1 patch A1 — Tier 1 invoke_buf echo (v1.5.6 ship) + Tier 2 stderr capture via pipe + Tier 3 post-link .exe stat 全链 ship; master table line 53 + row 已加 2026-08-28
 **日期:** 2026-08-24
 **触发面:** `jhyy run <file.jhyy>` / `jhyy compile <file.jhyy>` 任一步失败, link_with_gcc 返回非 0 (`compiler/src0/main.jhyy:744`)
 
@@ -3107,9 +3180,11 @@ Tier 2 (stderr capture via pipe) + Tier 3 (post-link .exe stat check) 都 ship �
 - `run_qbe:684-686` (镜像源 pattern)
 
 
+<a id="w-043"></a>
 ## W-043: MSI 漏装 runtime.c + jhyy_helpers.c → install 后 `gcc link failed`
 
-**状态:** ✅ RESOLVED (v1.5.6 W-043, 2026-08-24)
+**状态:** RESOLVED closed 2026-08-24 (v1.5.6) — MSI 漏装 runtime.c + jhyy_helpers.c → install 后 `gcc link failed`
+**提交/说明:** v1.5.6 W-043, 2026-08-24
 **日期:** 2026-08-24
 **触发面:** 全新 / upgrade install 后, `jhyy run <file.jhyy>` → link 阶段失败
 
@@ -3169,9 +3244,11 @@ layout (b) (source-tree walk-up) regress 走的是这条, 文件本来就在 `<r
 - W-040 (link_with_gcc 路径 quote, 跟 W-043 一起让 install 位置能跑)
 
 
+<a id="w-044"></a>
 ## W-044: MSI 漏装 runtime.h → install 后 `fatal error: runtime.h`
 
-**状态:** ✅ RESOLVED (v1.5.6 W-044, 2026-08-24)
+**状态:** RESOLVED closed 2026-08-24 (v1.5.6) — MSI 漏装 runtime.h → install 后 `fatal error: runtime.h`
+**提交/说明:** v1.5.6 W-044, 2026-08-24
 **日期:** 2026-08-24
 **触发面:** W-043 ship 后 fresh / upgrade install 跑 `jhyy run <file.jhyy>` → gcc 编译 `runtime.c` 阶段失败
 
@@ -3234,9 +3311,11 @@ sprint 设计 MSI payload 时, **必须** map 完整 include graph (`grep -E '^#
 - W-037 (jh_paths_init layout a 路径策略, runtime.c / runtime.h 必须同居 bin/)
 
 
+<a id="w-045"></a>
 ## W-045: link_with_gcc 失败时 gcc 实际 stderr 不可见 — 用户只见 "gcc link failed" + cmd_buf
 
-**状态:** ✅ RESOLVED (v1.5.6 W-045, 2026-08-24)
+**状态:** RESOLVED closed 2026-08-24 (v1.5.6) — link_with_gcc 失败时 gcc 实际 stderr 不可见 — 用户只见 "gcc link failed" + cmd_buf
+**提交/说明:** v1.5.6 W-045, 2026-08-24
 **日期:** 2026-08-24
 **触发面:** v1.5.6 W-042 ship 后, fresh / upgrade install 跑 `jhyy run <file.jhyy>` → gcc 阶段失败 (e.g. runtime.c 找不到 / runtime.h 缺失 / 其他 cc1.exe 编译错误)
 
@@ -3309,9 +3388,11 @@ src0/main.jhyy 改 1 extern decl + 14 行 (fail 块), jhyy_helpers.c 改 jh_run 
 - W-038 (CreateProcessA 替代 cmd.exe /C, jh_run 现有 wrapper)
 - W-039 (caller-side quote exe path — 跟 W-045 互补, W-039 修 quote, W-045 修 stderr visibility)
 
+<a id="w-048"></a>
 ## W-048: link_with_gcc 在 PowerShell + 中文文件名 silent fail — temp ASCII path + copy + rename 绕 mingw CRT argv decode
 
-**状态:** ✅ RESOLVED (v1.5.6 W-048, 2026-08-24)
+**状态:** RESOLVED closed 2026-08-24 (v1.5.6) — link_with_gcc 在 PowerShell + 中文文件名 silent fail — temp ASCII path + copy + rename 绕 mingw CRT argv decode
+**提交/说明:** v1.5.6 W-048, 2026-08-24
 **日期:** 2026-08-24
 **触发面:** v1.5.6 W-045 ship 后, PowerShell 5.1 (用户终端) 跑 `jhyy run 新建文本文档.jhyy` (含中文路径) → gcc 阶段 silent exit 1, stderr 字节 = 0 (gcc 根本没起来)。
 
@@ -3391,9 +3472,11 @@ src0/main.jhyy 改 4 extern decl + ~50 行 (link_with_gcc 改造 + rename), jhyy
 - W-047 (argv re-decode in runtime.c — 用户 exec 时的 argv 修复, 跟 W-048 是不同层面, 互补)
 
 
+<a id="w-051"></a>
 ## W-051: MSI deferred ExeCommand CustomAction type 34 在本机 systematic 报 1721 — 改用 HKLM RunOnce 解决
 
-**状态:** ✅ RESOLVED 2026-08-28 (v1.7.1 patch B2, workaround 已 ship v1.5.7-rc1) — 永久 workaround 化, 标 RESOLVED 是因为 v1.7.1 patch ship 时 review 确认 underlying issue (MSI deferred CA type 34 SYSTEM context CreateProcess argv mis-tokenize) 真实根因不明 (试过 type 65 / WixQuietExec 都没解决), HKLM RunOnce 是已知最 stable 的替代路径。MSI engine 升级不可预期, 强标 ACTIVE 不解决任何 active 问题。
+**状态:** RESOLVED closed 2026-08-28 (v1.7.1) — 永久 workaround 化, 标 RESOLVED 是因为 v1.7.1 patch ship 时 review 确认 underlying issue (MSI deferred CA type 34 SYSTEM context…
+**提交/说明:** 2026-08-28 (v1.7.1 patch B2, workaround 已 ship v1.5.7-rc1
 
 **日期:** 2026-08-26 (workaround ship v1.5.7-rc1) → 2026-08-28 (标 RESOLVED via v1.7.1 patch B2 review)
 **触发面:** v1.5.7-rc1 写 post-install CustomActions (InstallEnvConfig + InstallVSCodeConfig + 已有 InstallVSCodeExt) 配 MSYS2_PATH_TYPE + VSCode defaultProfile,MSI install log 全 3 个 CA 报 1721:
@@ -3469,9 +3552,11 @@ Note: 1: 1721 2: InstallVSCodeExt 3: "C:\WINDOWS\system32\cmd.exe" /c "..."
 - W-045 (jh_run pipe-capture stderr — diagnostic 类比: W-051 的 1721 是 CreateProcess 一句话 fail, 跟 W-045 的 captured=0 字节 silent fail 类似, 都得靠绕路)
 
 
+<a id="w-052"></a>
 ## W-052: match 字面量范围模式 `1..10` 两侧 parser + codegen 都漏 literal range
 
-**状态:** ✅ RESOLVED 2026-08-27 (W-052 ship)
+**状态:** RESOLVED closed 2026-08-27 (v1.4.6) — match 字面量范围模式 `1..10` 两侧 parser + codegen 都漏 literal range
+**提交/说明:** 2026-08-27 (W-052 ship
 **ID:** W-052
 **日期:** 历史 v1.4.6 W-020 隐含 (gap 暴露但未 ship 修复) → 2026-08-27 真修
 **触发面:** 任何 jhyy 源在 match arm 里用 `N..M` 字面量范围 (例如 README `tour of the syntax` 的 `1..10 => "single digit"`,或 `let result = match n { -3..-1 => ... }`)。
@@ -3564,10 +3649,12 @@ il_sha256: 54f8e2a1e320f1584535176191dfb0e999f4425b4ae50d095c9178c1e78ca494 (sta
 
 ---
 
+<a id="w-053"></a>
 ## W-053: 字符字面量转义不全 (`\n \t \r \0` 之外 escape) 以及 `\xHH` 漏解码
 
 **ID:** W-053
-**状态:** ✅ RESOLVED 2026-08-27 (v1.6.0 umbrella ship)
+**状态:** RESOLVED closed 2026-08-27 (v1.6.0) — 字符字面量转义不全 (`\n \t \r \0` 之外 escape) 以及 `\xHH` 漏解码
+**提交/说明:** 2026-08-27 (v1.6.0 umbrella ship
 **日期:** 历史 gap (spec §4.4 字符字面量族从 v0.x 一直只实现 `\n \t \r \0` 4 个 escape) → 2026-08-27 (RESOLVED, parity src + src0)
 **触发面:** 任何 jhyy 源码在 `prefix_char` (`as T` cast) 或 match arm `TOKEN_CHAR` pattern 里出现字符字面量,涵盖所有 escape 序列:
 
@@ -3678,10 +3765,12 @@ il_sha256: 兼容 W-052 baseline (54f8e2a1... family), W-053 没改 codegen 路�
 
 ---
 
+<a id="w-054"></a>
 ## W-054: sizeof IL 未定义 `%t0` — 真因是 `qbe_type_of` 撞 data layout
 
 **ID:** W-054
-**状态:** ✅ RESOLVED (via W-053 fix chain, 2026-08-27)
+**状态:** RESOLVED closed 2026-08-27 (v1.4.6) — sizeof IL 未定义 `%t0` — 真因是 `qbe_type_of` 撞 data layout
+**提交/说明:** via W-053 fix chain, 2026-08-27
 **日期:** 探测 ~2026-08-26 (Plan agent 探测假症状) → 2026-08-27 (真因确认 + fix)
 **触发面:** Plan agent 探测报 `let b: i64 = sizeof(...)` 触发 QBE 拒绝。但**实际跟 sizeof 无直接关系**,触发面是**任何 `const_array.jhyy` / const data block 含 `[u8; N]` 子字数组** — 因为 `qbe_type_of` widening (i8 → 'w') 把 data section 字节点也改了。
 
@@ -3773,10 +3862,12 @@ il_sha256: 兼容 W-053 baseline (W-054 不改 IL,W-053 fix 已 ship 稳定)
 
 ---
 
+<a id="w-055"></a>
 ## W-055: spec §9.5 指针算术 `p + 1` 整节未实现
 
 **ID:** W-055
-**状态:** ✅ RESOLVED 2026-08-28 (v1.7.0 Stage 2)
+**状态:** RESOLVED closed 2026-08-28 (v1.7.0) — spec §9.5 指针算术 `p + 1` 整节未实现
+**提交/说明:** 2026-08-28 (v1.7.0 Stage 2
 **日期:** 2026-08-27 (探测 + 登记, 标 LIMIT 不修) → 2026-08-28 (Stage 2 真修)
 **superseder:** v1.7.0 Stage 2 commit (per `docs/logs/v1/changelog-v1.7.0.md`)
 **触发面:** 任何 jhyy 源码在表达式上下文对 `*T` pointer / `[*]T` slice 类型做整型算术:
@@ -3883,6 +3974,7 @@ spec §9.5 4 形式全 ship:
 - `docs/logs/v1/changelog-v1.6.0.md` § Known uncovered (umbrella changelog)
 
 
+<a id="w-056"></a>
 ## W-056: 多字节 UTF-8 char literal + char type `u8 → i32` (spec §4.4)
 
 **ID:** W-056
@@ -3945,10 +4037,12 @@ spec §9.5 4 形式全 ship:
 
 ---
 
+<a id="w-057"></a>
 ## W-057: UTF-8 3-byte / 4-byte codepoint 显式 lex reject (推 v2.x)
 
 **ID:** W-057
-**状态:** ✅ RESOLVED 2026-09-23 (v3.0.6/Ph.1)
+**状态:** RESOLVED closed 2026-09-23 (v3.0.6) — UTF-8 3-byte / 4-byte codepoint 显式 lex reject (推 v2.x)
+**提交/说明:** 2026-09-23 (v3.0.6/Ph.1
 **日期:** 2026-08-28 (v1.7.3 patch 排查发现 spec/test/workarounds 缺归档)
 **superseder:** 2026-09-23 (v3.0.6/Ph.1 W-057 真修, 跟 V2.13.7 `594d00d` 同源)
 **触发面:** spec §4.4 字符字面量族中, 3-byte (U+0800-U+FFFF, e.g. `'你'` U+4F60) + 4-byte (U+10000+, e.g. `'🎉'` U+1F389) UTF-8 codepoint 在 v1.7.0 Stage 3 显式 lex reject.
@@ -3998,10 +4092,12 @@ parse errors
 
 ---
 
+<a id="w-058"></a>
 ## W-058: vendor QBE (2026-08-15 build) 不支持 `remd` / `rems` 浮点取模 (推 v2.x)
 
 **ID:** W-058
-**状态:** ✅ RESOLVED 2026-09-23 (v3.0.6/Ph.2)
+**状态:** RESOLVED closed 2026-09-23 (v3.0.6) — vendor QBE (2026-08-15 build) 不支持 `remd` / `rems` 浮点取模 (推 v2.x)
+**提交/说明:** 2026-09-23 (v3.0.6/Ph.2
 **日期:** 2026-08-28 (v1.7.3 patch 排查发现 spec/test/workarounds 缺归档) → 2026-09-23 (v3.0.6/Ph.2 sprint 真修)
 **superseder:** 2026-09-23 (v3.0.6/Ph.2 W-058 真修, 跟 V2.13.8 `16b4903` 同源)。self-backend 路径 W-083 真修在 v3.0.6/Ph.3 (V3 modular split 4 files 改: `codegen_amd64_state.jhyy` `ILTOK_CONV` + `codegen_amd64_lexer.jhyy` `next_token_conv` + 'd'/'s'/'u'/'e'/'t' prefix handlers 识别 18 conv ops + `codegen_amd64_emit_call.jhyy` `emit_conv` 18 branches 走 SSE cvttsd2si/cvttss2si/cvtsi2ss/cvtsi2sd/cltq + `codegen_amd64.jhyy` ILTOK_CONV dispatch — **V3 无 codegen_amd64_emit_sse.jhyy**, per audit fix #2 REVERTED + user "V3 modular split 不新建 SSE file" 决策), 跟 V2.13.11 `425ab53` 同源。
 **触发面:** spec 附录 B P3 fmod row "浮点取模 `%=` / `a % b` reject" (i32/i64 整数模 ship, 浮点模不 ship).
@@ -4059,10 +4155,12 @@ codegen errors
 
 ---
 
+<a id="w-083"></a>
 ## W-083: V3 self-backend 不支持 QBE IL conversion ops (lexer 不识别 dtosi/stosi/swtof/exts/...) (推 v3.0.6)
 
 **ID:** W-083
-**状态:** ✅ RESOLVED 2026-09-23 (v3.0.7/Commit 1+2 真修 Layer 1+2+3; Gate-0 3/3 strict sha PASS + 3/3 exit code PASS = 6/6/0)
+**状态:** RESOLVED closed 2026-09-23 (v3.0.7) — V3 self-backend 不支持 QBE IL conversion ops (lexer 不识别 dtosi/stosi/swtof/exts/...) (推 v3.0.6)
+**提交/说明:** 2026-09-23 (v3.0.7/Commit 1+2 真修 Layer 1+2+3; Gate-0 3/3 strict sha PASS + 3/3 exit code PASS = 6/6/0
 **日期:** 2026-09-23 (v3.0.6 Ph.3 ship 时 audit-flip closure) → 2026-09-23 (Layer 2/3 W-086 NEW defer)
 **superseder:** v3.0.6/Ph.3 真修:
   - `codegen_amd64_state.jhyy`: +ILTOK_CONV enum constant
@@ -4122,10 +4220,12 @@ regress 142/142 PASS / 0 FAIL / 20 SKIP preserved (default QBE path 不变)。
 
 ---
 
+<a id="w-086"></a>
 ## W-086: V3 self-backend ILToken 字段数根本不足 (dst/lhs/rhs 三元组塌缩到 2 槽) + lexer 不 consume operand (推 v3.0.6/Gate-0 后 / v3.0.7)
 
 **ID:** W-086
-**状态:** ✅ RESOLVED 2026-09-23 (v3.0.7/Commit 1 wholesale merge-file + strcmp migration + state cast + emit_conv comment drop + 2-op rewrite + op_len fix; Gate-0 灯转绿作为 closure 证据)
+**状态:** RESOLVED closed 2026-09-23 (v3.0.7) — V3 self-backend ILToken 字段数根本不足 (dst/lhs/rhs 三元组塌缩到 2 槽) + lexer 不 consume operand (推 v3.0.6/Gate-0 后 / v3.0.7)
+**提交/说明:** 2026-09-23 (v3.0.7/Commit 1 wholesale merge-file + strcmp migration + state cast + emit_conv comment drop + 2-op rewrite + op_len fix; Gate-0 灯转绿作为 closure 证据
 **日期:** 2026-09-23 (v3.0.6/Ph.3 W-083 真修时深 RCA 发现; 用户 2026-09-23 反馈重排 (a)(b)(c) 顺序 + 纠正 (a) 写法)
 **superseder:** v3.0.7/Commit 1 (wholesale merge-file + strcmp migration + state cast + emit_conv comment drop + 2-op rewrite + op_len fix) + v3.0.7/Commit 2 (emit_conv 2-op form rewrite strict sha alignment), 跟 Gate-0 是 1 commit group (Commit 0 造红灯 ship + Commit 1+2 真修 ship + Gate-0 灯转绿验证)
 **触发面:** V3 self-backend (JHY_SELF_BACKEND=1) 对**任何** test with arithmetic (binop / copy IMM / conv) produce 0-byte .s。RCA: ILToken 字段数根本不够装 binop 的 (dst, lhs, rhs) 三元组, 加 lexer 不 consume operand → token 字段大部分 default 0 → emit 函数 emit 错指令但 codegen_amd64_run 返 0 (write 0-byte .s) → gcc link fail。
@@ -4193,10 +4293,12 @@ binop 语义 = `dst = op(lhs, rhs)`, 需要 3 个 operand slots。当前 ILToken
 
 ---
 
+<a id="w-059"></a>
 ## W-059: defer codegen path silent crash (v1.3.6 ship 后 0 test 验证 accept path) (推 v1.8)
 
 **ID:** W-059
-**状态:** ✅ RESOLVED 2026-08-28 (v1.8.0)
+**状态:** RESOLVED closed 2026-08-28 (v1.8.0) — defer codegen path silent crash (v1.3.6 ship 后 0 test 验证 accept path) (推 v1.8)
+**提交/说明:** 2026-08-28 (v1.8.0
 **日期:** 2026-08-28 (v1.7.3 patch A1/A2/A3 attempt 时发现) → 2026-08-28 (v1.8.0 Phase 2 真修)
 **superseder:** v1.8.0 Phase 2 真修 (1-line fix `src0/sema.jhyy:1410`, 3 defer test SKIP 删)
 **触发面:** v1.3.6 defer ship 后 0 accept-path test 在 default regress 跑过, v1.7.3 patch A1 attempt 写 `defer sink(log);` 测试时发现 codegen silent exit (EXIT=0 但不产出 .il / .s / .exe).
@@ -4284,10 +4386,12 @@ v1.3.6 defer ship 时 0 accept-path test 验证 (commit `169759c` ship 时 defer
 
 ---
 
+<a id="w-060"></a>
 ## W-060: enum variant payload ABI mismatch (Mixed::I(1234) match 走 wildcard path EXIT=210 ≠ 1234) (推 v1.8)
 
 **ID:** W-060
-**状态:** ❌ INVALID 2026-08-28 (v1.8.0) — v1.7.3 ship 期间 fact-check 误判为真 bug, v1.8.0 Phase 1 调查 (Agent 3) 确认 = test artifact (bash `$?` 8-bit truncation + W-028 mod-256 fix 已 equalize 比较)
+**状态:** INVALID since 2026-08-28 (v1.8.0) — v1.7.3 ship 期间 fact-check 误判为真 bug, v1.8.0 Phase 1 调查 (Agent 3) 确认 = test artifact (bash `$?` 8-bit truncation + W-028…
+**提交/说明:** 2026-08-28 (v1.8.0
 **日期:** 2026-08-28 (v1.7.3 patch A5/A6 attempt 时 fact-check 误判) → 2026-08-28 (v1.8.0 Phase 1 INVALID 闭环)
 **superseder:** v1.8.0 Phase 3 INVALID 清理 (2 enum test SKIP 删, regress W-028 fix PASS)
 **触发面:** v1.7.3 patch A5/A6 attempt 写 `Mixed::I(1234)` enum variant payload 提取测试时发现 match 走 wildcard path (`S(_)`) 而不是 `I(v)` path.
@@ -4361,10 +4465,12 @@ v1.7.3 fact-check 只看了 EXIT vs EXPECT 数字不同就标 DEFERRED v1.8, 没
 
 ---
 
+<a id="w-061"></a>
 ## W-061: nested struct field offset bug (Outer { tag, inner } read EXIT=51 ≠ 307) (推 v1.8)
 
 **ID:** W-061
-**状态:** ❌ INVALID 2026-08-28 (v1.8.0) — v1.7.3 ship 期间 fact-check 误判为真 bug, v1.8.0 Phase 1 调查 (Agent 3) 确认 = test artifact (bash `$?` 8-bit truncation + W-028 mod-256 fix 已 equalize 比较)
+**状态:** INVALID since 2026-08-28 (v1.8.0) — v1.7.3 ship 期间 fact-check 误判为真 bug, v1.8.0 Phase 1 调查 (Agent 3) 确认 = test artifact (bash `$?` 8-bit truncation + W-028…
+**提交/说明:** 2026-08-28 (v1.8.0
 **日期:** 2026-08-28 (v1.7.3 patch A7 attempt 时 fact-check 误判) → 2026-08-28 (v1.8.0 Phase 1 INVALID 闭环)
 **superseder:** v1.8.0 Phase 3 INVALID 清理 (nested_struct_dwarf.jhyy SKIP 删, regress W-028 fix PASS)
 **触发面:** v1.7.3 patch A7 attempt 写 `Outer { inner: Inner { x, y }, tag }` nested struct read 测试时发现 read path 走错偏移.
@@ -4440,10 +4546,12 @@ fact-check EXIT mismatch 必先 trace 到 exit code propagation path. v1.7.3 误
 
 ---
 
+<a id="w-062"></a>
 ## W-062: VSCode UserChoice hijack + MSYS2 OpenWithProgids 双层 shadow → `.jhyy` 图标不显示 (推 v1.8.2)
 
 **ID:** W-062
-**状态:** ✅ RESOLVED 2026-08-29 (v1.8.3.1 patch — WiX MSI SYSTEM-context CustomAction 写 per-user UserChoice, 绕过 UCPD.sys kernel filter;v1.8.3 首次实现但 CustomAction 静默失败,v1.8.3.1 加 3-attempt fallback 真修)
+**状态:** RESOLVED closed 2026-08-29 (v1.8.3) — VSCode UserChoice hijack + MSYS2 OpenWithProgids 双层 shadow → `.jhyy` 图标不显示 (推 v1.8.2)
+**提交/说明:** 2026-08-29 (v1.8.3.1 patch — WiX MSI SYSTEM-context CustomAction 写 per-user UserChoice, 绕过 UCPD.sys kernel filter;v1.8.3 首次实现但 CustomAction 静默失败,v1.8.3.1 加 3-attempt fallback 真修
 **日期:** 2026-08-29 (v1.8.1 patch ship 后 user 反馈图标仍白板)
 **superseder:** v1.8.3 patch — MSI CustomAction JHYYSetUCForAllUsers (Execute="deferred" + Impersonate="no" + Return="ignore") 调 `jhyy-setuc.exe --system-context` 枚举 `HKEY_USERS` S-1-5-21-… SIDs, 写每用户 UserChoice。SYSTEM trust chain 绕过 UCPD kernel filter (verified Phase 0 2026-08-29)。Bundle.wxs 加 .NET 8 Desktop Runtime 链式安装确保 prereq。
 **触发面:** Windows 10/11 装了 JHYY + VSCode 双应用的机器, `.jhyy` 副档名被 VSCode 设为默认 opener 后, 文件总管文件夹视图显示白板文档图标
@@ -4803,10 +4911,12 @@ explorer.exe .
 - `docs/logs/v1/changelog-v1.8.0.md` v1.8.3 patch 段 (umbrella)
 
 
+<a id="w-063"></a>
 ## W-063: 短名 enum 模式匹配 `Some(v) => v` bind, codegen 传错 type → phi %t0 未定义
 
 **ID:** W-063
-**状态:** ✅ RESOLVED 2026-09-01 (v1.8.3.2 patch, probe-then-fix)
+**状态:** RESOLVED closed 2026-09-01 (v1.8.3) — 短名 enum 模式匹配 `Some(v) => v` bind, codegen 传错 type → phi %t0 未定义
+**提交/说明:** 2026-09-01 (v1.8.3.2 patch, probe-then-fix
 **日期:** v1.7.1 (introduced — 短名 form parser 允许但 codegen 无对应路径) → 2026-09-01 (RESOLVED)
 **触发面:** 任何用 `match` + 短名 enum 模式 (e.g. `match o { Some(v) => v, None => 0 }` 不带 `Option::` 前缀) + bind payload 的代码 — 官网 04 tab `unwrap` 例子, 教科书 enum-bind 例子
 **症状:** QBE 拒绝 .il, 报 `invalid type for operand %t0 in phi %t6` (or similar SSA reference). 用户只见 `QBE failed: "..."\n` 一行 (旧版, 无 stderr capture). 实际 .il 长这样 (regress from `test.jhyy` unwrap 例子):
@@ -4865,10 +4975,12 @@ let cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*matched_node).type_pt
 - Stage 2 selfhost closure N=4 byte-equal (`v2/v3/v4/v5` .il sha `fa1137e5b9621ab46bc95ad976b5f33e0a60e98e5ec59ef31d084203e146e242`)
 
 
+<a id="w-064"></a>
 ## W-064: run_qbe 失败只打 `QBE failed: ...` 缺 stderr 捕获, QBE 真实诊断丢失
 
 **ID:** W-064
-**状态:** ✅ RESOLVED 2026-09-01 (v1.8.3.2 patch)
+**状态:** RESOLVED closed 2026-09-01 (v1.8.3) — run_qbe 失败只打 `QBE failed: ...` 缺 stderr 捕获, QBE 真实诊断丢失
+**提交/说明:** 2026-09-01 (v1.8.3.2 patch
 **日期:** v1.5.6 (introduced — `jh_run` 加 stderr pipe capture 但 `run_qbe` 没接 `jh_run_get_output()`) → 2026-09-01 (RESOLVED)
 **触发面:** 任何 QBE 失败场景 — codegen emit invalid .il (W-063 + W-012 残留 + W-054 等); QBE binary 找不到 (W-021 升级后); .il syntax 错 (罕见)
 **症状:** 用户只见单行 `QBE failed: "<full qbe cmd_buf>"\n`, 不知道 QBE 实际诊断 (e.g. `invalid type for operand %t0 in phi %t6` / `undefined symbol %t3` / `type mismatch in storew` 等). 跟 `gcc link failed` 旧症状一样 — 错误晚出 + 信息丢失, 用户无从下手.
@@ -4913,10 +5025,12 @@ if r != (0 as i32) {
 **验证:** regress 103/103 + Stage 2 闭环 hold (v2/v3/v4/v5 .il sha `fa1137e5...`).
 
 
+<a id="w-065"></a>
 ## W-065: `jhyy run` 不预检 `fn main_jhyy` — 库 snippet 报 `undefined reference to main_jhyy` 对用户不友好
 
 **ID:** W-065
-**状态:** ✅ RESOLVED 2026-09-01 (v1.8.3.2 patch)
+**状态:** RESOLVED closed 2026-09-01 (v1.8.3) — `jhyy run` 不预检 `fn main_jhyy` — 库 snippet 报 `undefined reference to main_jhyy` 对用户不友好
+**提交/说明:** 2026-09-01 (v1.8.3.2 patch
 **日期:** v1.4.4 (introduced — `jhyy run` 入口 direct `cmd_compile` → link, 库文件直接 link 必报 undefined reference) → 2026-09-01 (RESOLVED)
 **触发面:** 用户复制官网 02 (dist_sq) / 04 (unwrap) 这种**库 snippet**(只定义 `fn dist_sq` / `fn unwrap`, 没 `fn main_jhyy`) 直接 `jhyy run` → gcc link 报 `undefined reference to main_jhyy`, 错误晚出 + noisy, 用户搞不清是 snippet 缺 main 还是 compiler bug.
 **症状:** gcc stderr 一长串 `undefined reference to 'main_jhyy'` + link exit 1. 实际 root cause 是 snippet 缺 entry point, 编译器只是按 spec 拒绝 link.
@@ -4957,10 +5071,12 @@ if av != bv { match_ok = 0 as i32; }
 - **scope discipline 赢 scope creep**: 计划阶段想加 helper `jh_file_read_all` + matching stub, 实际 inline fopen/fread/fclose + byte loop 就够 (50 行, 0 new helper, 0 C-side sync work)。**scope discipline > code reuse**。
 
 
+<a id="w-066"></a>
 ## W-066: post-425970d refactor 漏改 jhyy-compiler.wxs:622 — license.rtf 仍 ref `!(bindpath.common)\license.rtf`, 实际文件在 installer/assets/ → WIX0103
 
 **ID:** W-066
-**状态:** ✅ RESOLVED 2026-09-02 (v1.8.3.3 patch follow-up #2)
+**状态:** RESOLVED closed 2026-09-02 (v1.8.3) — post-425970d refactor 漏改 jhyy-compiler.wxs:622 — license.rtf 仍 ref `!(bindpath.common)\license.rtf`, 实际文件在 installer/as…
+**提交/说明:** 2026-09-02 (v1.8.3.3 patch follow-up #2
 **日期:** 2026-08-29 (introduced — 425970d installer deep restructure 把 `license.rtf` 移到 `installer/assets/`, 但 `jhyy-compiler.wxs:622` 仍指 `installer/common/license.rtf`) → 2026-09-02 (RESOLVED)
 **触发面:** release run #46 (tag v1.8.3.3 @ 65e897a) step "Build installer" — `wix build ... installer/wix/compiler/jhyy-compiler.wxs` 报 `WIX0103: Cannot find the File file '!(bindpath.common)\license.rtf'. The following paths were checked: !(bindpath.common)\license.rtf, installer/common\license.rtf`. 出包链路 build.ps1 → exit 1 → release.yml 整条红。
 
@@ -5001,10 +5117,12 @@ if av != bv { match_ok = 0 as i32; }
 - **`pwsh` 缺环境 fallback**: CI runner 有 PowerShell 7 (`/c/Program Files/PowerShell/7/pwsh.exe`), 本地用户机器可能只有 PS 5.1。`build.ps1` 是 syntax-compatible (switch 都对), 但 `wix` 工具链本身跑得动 — 不代表 5.1 跑的 verify 跟 7 完全等价; 真要稳还是 pwsh 7。**(per `feedback_ci_yaml_debugging` msys2 + set +e 教训同源 — verify 工具链必须跟 CI 一致)**
 
 
+<a id="w-067"></a>
 ## W-067: release.yml vs build.ps1 重复 strip-to-3 逻辑 → drift risk; 4-segment VERSION (v1.8.3.3) 暴露 Validate MSI 找错文件
 
 **ID:** W-067
-**状态:** ✅ RESOLVED 2026-09-02 (v1.8.3.3 follow-up #3, single source of truth)
+**状态:** RESOLVED closed 2026-09-02 (v1.8.3) — release.yml vs build.ps1 重复 strip-to-3 逻辑 → drift risk; 4-segment VERSION (v1.8.3.3) 暴露 Validate MSI 找错文件
+**提交/说明:** 2026-09-02 (v1.8.3.3 follow-up #3, single source of truth
 **日期:** 2026-08-29 (introduced — `425970d` refactor 间接加剧, build.ps1:75-83 跟 release.yml 各自有 strip 逻辑但未对齐) → 2026-09-02 (RESOLVED via build.ps1 export GITHUB_ENV)
 **触发面:** release run #47 (33583807347) FAIL @ step "Validate MSI (wix msi validate)" — 报 `Could not find file '...\installer\build-artifacts\jhyy-compiler-1.8.3.3.msi'`, 但 build.ps1 出包名是 `jhyy-compiler-1.8.3.msi` (strip 4-segment → 3-segment by MSI ProductVersion 约束)。
 
@@ -5056,10 +5174,12 @@ if av != bv { match_ok = 0 as i32; }
 5. **latent bug ship 教训**: W-067 这 bug 实际一直存在 (release.yml 跟 build.ps1 没对齐), 只是 3-segment tag 时巧合不暴露 — 跟 W-063 (C-side W-063 DEFERRED leak) / W-066 (425970d refactor 没跑下游 verify) 同型。**refactor 改 versioning 规则的 commit 必须显式 grep "MSI ProductVersion / filename / VERSION / JHY_VERSION" 全链路 + 跑端到端 verify**, 否则 latent ship
 
 
+<a id="w-068"></a>
 ## W-068: v1.8.3 Burn bundle 双击闪退 — `Theme.xml` ImageControl 用相对路径引用本地 png → wix stdba Theme parser embed 错位, exit 0x57
 
 **ID:** W-068
-**状态:** ✅ RESOLVED 2026-09-06 (v1.8.3 installer 真修, sha `a7b5be35...`)
+**状态:** RESOLVED closed 2026-09-06 (v1.8.3) — v1.8.3 Burn bundle 双击闪退 — `Theme.xml` ImageControl 用相对路径引用本地 png → wix stdba Theme parser embed 错位, exit 0x57
+**提交/说明:** 2026-09-06 (v1.8.3 installer 真修, sha `a7b5be35...`
 **日期:** 2026-08-29 (introduced — `425970d` refactor 时 Theme.xml line 45 改成 `../assets/icons/jhyy-icon-128.png`) → 2026-09-06 (RESOLVED — Theme.xml line 45 改回 plain `logo.png`, 走 wix stdba 内置 image 引用)
 **触发面:** `jhyy-installer-1.8.3.exe` (sha `6c24dd41...`, ship 在 `installer/build-artifacts/`) — **本地 + 同学双击均一闪而过**, exit 0x57。
 
@@ -5128,10 +5248,12 @@ if av != bv { match_ok = 0 as i32; }
 5. **W-068 是 W-066 的下游暴露**: W-066 (license.rtf bindpath) 解了 Bundle.wxs `File` element 路径, 让 bundle build 跑通; 但 Theme.xml ImageControl 路径错位**独立** 是另一条 embed 链, 不被 W-066 cover。两个 bug 都是 `425970d` refactor 引入, 但诊断路径不同 — 不能 assume 一个 fix cover 全部。
 
 
+<a id="w-071"></a>
 ## W-071: 自写后端 codegen_amd64 模块未 e2e 验证 — v2.6.x 阶段 ship 但 `make` 不编 import 链触发 24 sema 错
 
 **ID:** W-071
-**状态:** ✅ RESOLVED (v2.6.5 commit `07c6a89`)
+**状态:** RESOLVED closed 2026-09-06 (v2.6.5) — 自写后端 codegen_amd64 模块未 e2e 验证 — v2.6.x 阶段 ship 但 `make` 不编 import 链触发 24 sema 错
+**提交/说明:** v2.6.5 commit `07c6a89`
 **日期:** 2026-09-06 (introduced — v2.6.4 commit `c251658` 打开 import 测试 surface 24 错; resolved — v2.6.5 commit `07c6a89` 4 真改全 ship)
 **superseder:** v2.6.5 commit `07c6a89` (4 真改 = struct-literal annotation + precedence parens + parse_and_emit forward ref reorder + `let _ = emit_X()` 模式)
 **触发面:** v2.6.4 wire `run_backend` dispatch 实际 uncomment `import codegen_amd64;` 测试 inline_imports 链 → stage0 compile `main.jhyy` 报 24 个 sema 错 (codegen_amd64.jhyy + codegen_amd64_peephole.jhyy)。regress 104/104 + D43 closure `51376ce5...` hold 是 commit `c251658` 把 import 重新注释掉之后的状态 (inert)。
@@ -5213,10 +5335,12 @@ workaround (`c251658` inert) 的失效条件 = 任何 commit 真打开 self path
 
 ---
 
+<a id="w-069"></a>
 ## W-069: jhyy.exe 编译产物 corrupt / ld exit 5 — stage0 build pollution (v2.6.5 enable 真 import 后 surface)
 
 **ID:** W-069
-**状态:** ✅ RESOLVED v2.6.6 (commit TBD — see v2.6.6 changelog)
+**状态:** RESOLVED closed 2026-09-06 (v2.6.6) — jhyy.exe 编译产物 corrupt / ld exit 5 — stage0 build pollution (v2.6.5 enable 真 import 后 surface)
+**提交/说明:** v2.6.6 (commit TBD — see v2.6.6 changelog
 **日期:** 2026-09-06 (introduced — v2.6.5 commit `07c6a89` enable 真 `import codegen_amd64;` 后 surface)
 **superseder:** N/A — root cause fully diagnosed + fixed in v2.6.6
 
@@ -5291,6 +5415,7 @@ W-069 不是 stage0 build pollution, 而是 **codegen NODE_CALL is_extern branch
 TBD — v2.6.6 单独 sprint 排障, scope 跟 fix 见上。
 
 
+<a id="w-070"></a>
 ## W-070: jhyy.exe --target=amd64_sysv_freestanding 在 cg_module 阶段 fatal (v2.8.1 surface)
 
 **现象 (CLI smoke test, post-v2.8.1 ship):**
@@ -5363,10 +5488,12 @@ cmd_compile (main.jhyy)
 
 ---
 
+<a id="w-072"></a>
 ## W-072: 0f9c923 merge artifact + codegen_amd64.jhyy 重复 fn def → jhyy_stage0 segfault at [3] sema start (v3.1.4 真修)
 
 **ID:** W-072
-**状态:** ✅ RESOLVED 2026-09-09 (v3.1.4 axis-v3)
+**状态:** RESOLVED closed 2026-09-09 (v3.1.4) — 0f9c923 merge artifact + codegen_amd64.jhyy 重复 fn def → jhyy_stage0 segfault at [3] sema start (v3.1.4 真修)
+**提交/说明:** 2026-09-09 (v3.1.4 axis-v3
 **日期:** ACTIVE 2026-09-08 (0f9c923 merge) → RESOLVED 2026-09-09
 **触发面:** `make` build src0/ → `jhyy_stage0.exe compile compiler/src0/main.jhyy` (v2.4.0 stage-0 启动 src0 bootstrap)
 **症状:** `[3] sema start` 后立即 SIGSEGV (exit 139), 0 .il/.s/.exe 产物, 整个 src0 build chain 断
@@ -5493,7 +5620,8 @@ cmd_compile (main.jhyy)
 <a id="w-075"></a>
 ### W-075: std::mem mem_set 用 i32 store 而非 byte store (M0 简化)
 
-**状态:** ✅ RESOLVED 2026-10-09 (v4.0.2.3 wip) — i64-store 真修 ship + b32|shift|OR 避开 W-098 (i64 literal emit bug)
+**状态:** RESOLVED closed 2026-10-09 (v4.0.2) — i64-store 真修 ship + b32|shift|OR 避开 W-098 (i64 literal emit bug)
+**提交/说明:** 2026-10-09 (v4.0.2.3 wip
 **日期:** 2026-09-09 (v3.2.1 ship ACTIVE) → 2026-10-02 (DEFERRED) → 2026-10-09 (RESOLVED)
 
 **触发面:** `compiler/src0/std/mem.jhyy:mem_set` 实现走 `*(p+i) as *i32 = b` (每次 loop 写 4 字节 i32), 不是 byte-by-byte / 8-byte / SSE store。
@@ -5554,6 +5682,7 @@ cmd_compile (main.jhyy)
 - regress verified: 3/3 测试全 PASS (EXIT=42 / 0 / 0)
 - W-074 (同一真修 commit)
 
+<a id="w-074.6"></a>
 ### W-074.6: jhyy.exe 编 src0/main.jhyy 自举 .s 截断 / multifn silent fail (3 sub-bug RCA)
 
 **状态:** RESOLVED closed 2026-10-15 (v4.0.8) — 3 sub-bug 全真修;DEFERRED 所等的 W-096 / W-097 均已 RESOLVED,Stage 2 无残留症状
@@ -5683,6 +5812,7 @@ sema 写 hash 跟 codegen 查 hash **哈希对象不一致** → emit_call (code
 - regress verified: jhyy.exe sub-bug #3 真修后 158/159 PASS HOLD (本 session,待 commit 后 sha 基线化)
 - fixed_point.sh status (本 session): jhyy.exe (Stage 1) 走通 → emit v3 binary 走 chkstk_ms path,但 frame blow-up (484KB) 让 chkstk_ms probe 后仍 SEGV on argv0 deref — 待新 W-NNN 真修
 
+<a id="w-077"></a>
 ### W-077: src0/std/mem.jhyy mem_find_byte codegen 路径触发 access violation
 
 | 字段 | 值 |
@@ -5700,6 +5830,7 @@ sema 写 hash 跟 codegen 查 hash **哈希对象不一致** → emit_call (code
 
 **2026-10-01 audit-flip (v4.0.1 docs-only ship):** per `feedback_verify_active_reproduces` + v3.4.0 W-085 docs-only flip pattern — `compiler/tests/examples/std_mem_find_byte.jhyy` 不存在 (可能被 v3.2.2 改名/cleanup 时清掉),但 `std_mem_basic.jhyy` (含 inline `mem_find_byte` impl + 验证 `idx == 12` 路径) 2026-10-01 run EXIT=0 on main HEAD。Access violation / stack overflow 触发面已 moot,入口从 ACTIVE → RESOLVED。mem_find_byte fn API (`src0/std/mem.jhyy:85-99`) 保留作 std::mem 公开 API。 |
 
+<a id="w-078"></a>
 ### W-078: array[i32] index codegen 触发 QBE invalid type for first operand
 
 | 字段 | 值 |
@@ -5717,10 +5848,12 @@ sema 写 hash 跟 codegen 查 hash **哈希对象不一致** → emit_call (code
 
 **2026-10-01 audit-flip (v4.0.1 docs-only ship):** per `feedback_verify_active_reproduces` + v3.4.0 W-085 docs-only flip pattern — QBE git rm `6ae2d7c` (v3.1.0/Ph.3) 后 self-backend 是 sole production path;QBE-specific `invalid type for first operand %t91 in mul` workaround moot;`compiler/src0/codegen.jhyy` L939 (sub-word → long chain via `extsw`/`extuw`) + L988 (`i32→i64 sign-extend via extsw`) + L1963 (`=l extsw %t`) 已 emit 通用 w→l 转换覆盖 array indexing 路径。Index entry flipped ACTIVE → RESOLVED。 |
 
+<a id="w-087"></a>
 ## W-087: V3 self-backend emit_func_header frame size 不含 alloc pool 区域 — store 到 -8200(%rbp) 越界 → STACK_OVERFLOW (推 v3.0.9)
 
 **ID:** W-087
-**状态:** ✅ RESOLVED 2026-09-23 (v3.0.9 真修 per-fn alloc pool pre-scan)
+**状态:** RESOLVED closed 2026-09-23 (v3.0.9) — V3 self-backend emit_func_header frame size 不含 alloc pool 区域 — store 到 -8200(%rbp) 越界 → STACK_OVERFLOW (推 v3.0.9)
+**提交/说明:** 2026-09-23 (v3.0.9 真修 per-fn alloc pool pre-scan
 **日期:** 2026-09-23 (v3.0.9 ship)
 
 **触发面:** `JHY_SELF_BACKEND=1 jhyy.exe run <any .jhyy with non-trivial allocs>` — V3 self-backend (codegen_amd64_run) emit 任何用 `alloc8 N` / `alloc16 N` / `alloc4 N` 的函数 → STACK_OVERFLOW (exit 127 / NTSTATUS 0xC00000FD)。
@@ -5790,10 +5923,12 @@ if alloc_pool_base > frame_size { frame_size = alloc_pool_base; }
 
 **延伸 (post-v3.0.9 QBE removal):** 删 QBE 后 self-backend 成为 sole production path, frame_size 必须 = `max(formula_pool, 8192 + per_fn_alloc)` 才能保证不越界 — W-087 真修是 Ph.5 QBE removal 的 mandatory 前置(per v3.0.6 plan § "mandatory 前置 Ph.5a `qbe/` git rm")。
 
+<a id="w-088"></a>
 ## W-088: V3 self-backend caller-side store-pointer temp pre-scan 缺 — derived-address 越界 (推 v3.1.0 后 / v3.x)
 
 **ID:** W-088
-**状态:** ✅ RESOLVED 2026-09-29 (v3.4.1 ship 真修,heuristic + `=l add` count `max` 替换纯 heuristic)
+**状态:** RESOLVED closed 2026-09-29 (v3.4.1) — V3 self-backend caller-side store-pointer temp pre-scan 缺 — derived-address 越界 (推 v3.1.0 后 / v3.x)
+**提交/说明:** 2026-09-29 (v3.4.1 ship 真修,heuristic + `=l add` count `max` 替换纯 heuristic
 **日期:** 2026-09-24 (V3.1.0 ship 时 heuristic 兜底,full fix deferred); 2026-09-29 v3.4.1 真修
 
 **触发面:** `JHY_SELF_BACKEND=1 jhyy.exe run <.jhyy with alloc + pointer-arg functions>` — V3 self-backend emit 任何 `alloc8 N` / `alloc16 N` 函数 + 函数间传 pointer (e.g. `arena_alloc -> ptr_add -> store`) → load/store 越界或 invalid assembly。
@@ -5841,10 +5976,12 @@ if alloc_pool_base > frame_size { frame_size = alloc_pool_base; }
 
 **引用:** [[feedback_v3_self_backend_diverges_v2]] (V3 self-backend 真债 vs V2 v4.0.0); `feedback_codegen_amd64_multifn` (单 function .il PASS 但 2+ function 静默 fail — 同一 pattern); `feedback_fix_evaluation_rule` (5/5 PASS on target tests = std_arena_calloc 等 5 个 std_* test); `feedback_audit_single_commit_diff` (heuristic partial fix 单 commit ship, 跟 W-089 fix 同一 commit); `feedback_rca_first_root_cause` (5/19 fail = 26% 是 1 个根因 + 下游症状, 5 fail 全部 derived-address pre-scan 缺); [[feedback_verify_active_reproduces]] (v3.4.1 verification-first 模式,W-088 heuristic live RCA 链:Step 1 patch out + regress 5 FAIL → Step 4 Path B 真修 → Step 4 V3'' max(heuristic, count_l_add) achieve 5/5)。
 
+<a id="w-089"></a>
 ## W-089: V3 self-backend emit_call 不 flag l-typed call results as address-holder → `*(call_ret as *T)` 模式 load 错字节 (推 v3.1.0 后 / v3.x)
 
 **ID:** W-089
-**状态:** ✅ RESOLVED 2026-09-29 (v3.4.2 ship 真修: SymbolReturnTypeMap + emit_call semantic lookup 替换 v3.1.0 byte-prefix whitelist)
+**状态:** RESOLVED closed 2026-09-29 (v3.4.2) — V3 self-backend emit_call 不 flag l-typed call results as address-holder → `*(call_ret as *T)` 模式 load 错字节 (推 v3.1.0 后 /…
+**提交/说明:** 2026-09-29 (v3.4.2 ship 真修: SymbolReturnTypeMap + emit_call semantic lookup 替换 v3.1.0 byte-prefix whitelist
 **日期:** 2026-09-29 (v3.4.2 ship 真修, 真修 ~3 个月后 v3.1.0 whitelist ship)
 
 **触发面 (历史 / pre-v3.4.2):** `JHY_SELF_BACKEND=1 jhyy.exe run <.jhyy with l-typed call result + deref>` — V3 self-backend emit 任何 `let x = call fn(); *(x as *T)` 模式 → load 错字节。**v3.4.2 真修后 (see L5614-5651)**: 全自动 semantic lookup 替换 whitelist,trigger 清单转 historical reference。
@@ -5931,10 +6068,12 @@ RCA-first 模式 (per [[feedback_verify_active_reproduces]] + v3.4.0 W-085 docs-
 - cg_is_builtin_ptr_fn hardcode 5 link-only externs (ptr_add / ptr_add_u8 / ptr_sub / malloc / __closure_* prefix) — 这些 fn 不在 sema (link-only), 但 stdlib 90% 是 user-callable fn 通过 sema populate 进 map,无 manual whitelist 维护负担。
 - 双 release 修 (a) hash alignment + (b) map-not-cleared fix 都展示了 v3.4.2 initial ship 真 root cause 不止 surface (whitelist 替换); semantic 真修 surface-OK 但 wiring/semantic still有 latent bugs,fix cycle iterate 2 iter 达到 5/5 ship gate。
 
+<a id="w-090"></a>
 ## W-090: V3 self-backend temp_holds_address bitmap 256 上限太低 → std_vec_basic test_with_cap temp_id 跨过 256 → bounds check no-op → emit_load 走 slot direct read 而非 indirect dispatch → 错字节 (推 v3.2.4)
 
 **ID:** W-090
-**状态:** ✅ RESOLVED 2026-09-26 (v3.2.4 ship 真修,bitmap 256 → 1024)
+**状态:** RESOLVED closed 2026-09-26 (v3.2.4) — V3 self-backend temp_holds_address bitmap 256 上限太低 → std_vec_basic test_with_cap temp_id 跨过 256 → bounds check no-op →…
+**提交/说明:** 2026-09-26 (v3.2.4 ship 真修,bitmap 256 → 1024
 **日期:** 2026-09-26 (v3.2.4 phase 1 std::vec ship 期间发现)
 
 **触发面:** 任何 V3 self-backend 编译的 .jhyy 含 alloc-result + 多 ptr_add / ptr_sub 派生地址(>256 个 temp_id)— bitmap 上限 256 → cg_record_temp_holds_address 的 bounds check `temp_id >= 256` no-op → flag 没设上 → emit_load 走 direct slot read(`mov<size> -<off>(%rbp)`)而非 indirect dispatch(`mov<size> (%r8)`)→ 读 symbol 值(pointer)当数据读 → 错字节。
@@ -5968,10 +6107,12 @@ RCA-first 模式 (per [[feedback_verify_active_reproduces]] + v3.4.0 W-085 docs-
 
 **引用:** [[feedback_regress_clean_count]] (rm stale _regress_*.exe 前置); [[feedback_rca_first_root_cause]] (1 fail = 1 根因,deep dive 进 bitmap bound 不是猜); [[feedback_audit_single_commit_diff]] (单 commit ship); [[feedback_fix_evaluation_rule]] (std_vec_basic EXIT=0 gate); [[feedback_v3_self_backend_diverges_v2]] (V3 stdlib 触发 V2 unseen gaps); [[feedback_no_date_estimates]] (无 v3.2.4 ship date 估时,sprint 序列相对顺序)。
 
+<a id="w-091"></a>
 ## W-091: V3 self-backend emit_call `std_` 前缀 whitelist 缺 → std::vec 派生 fn std_vec_get 等返回 pointer 不 flag → `*(call_ret as *T)` 错字节 (推 v3.2.4)
 
 **ID:** W-091
-**状态:** ✅ RESOLVED 2026-09-26 (v3.2.4 ship catch-all `std_` prefix,跟 W-089 5th site 同一 fix)
+**状态:** RESOLVED closed 2026-09-26 (v3.2.4) — V3 self-backend emit_call `std_` 前缀 whitelist 缺 → std::vec 派生 fn std_vec_get 等返回 pointer 不 flag → `*(call_ret as *T)` 错…
+**提交/说明:** 2026-09-26 (v3.2.4 ship catch-all `std_` prefix,跟 W-089 5th site 同一 fix
 **日期:** 2026-09-26 (W-090 真修后 v3.2.4 ship gate 第 2 fail 暴露)
 
 **触发面:** 任何 V3 self-backend 编译的 .jhyy 含 `std_vec_get / std_vec_with_cap / std_map_get / std_string_data / std_*_...` 这种 stdlib fn 返回 *T,**且** caller 后续做 `*(call_ret as *T)` deref (e.g. `let p1 = std_vec_get(&v, 0); let v1 = *(p1 as *i64);`)。W-089 v3.1.0 whitelist 列了 `std_fmt_/std_mem_/std_str_/std_arena_/std_str_` 但 **缺 catch-all `std_` prefix**, std_vec_get (前 7 字节 `std_vec`, 不匹配任一 sub-prefix) silent miss。
@@ -6002,10 +6143,12 @@ RCA-first 模式 (per [[feedback_verify_active_reproduces]] + v3.4.0 W-085 docs-
 
 **引用:** [[feedback_rca_first_root_cause]] (W-090 修后 EXIT 109 = 下一根因,深 RCA 进 whitelist miss 不是猜); [[feedback_fix_evaluation_rule]] (5/5 PASS on std_vec_basic + regress 145/145); [[feedback_v3_self_backend_diverges_v2]] (V3 stdlib 触发 V2 unseen gaps); [[feedback_audit_single_commit_diff]] (单 commit ship 跟 W-090 同); W-089 (parent heuristic,本次扩 catch-all 是 W-089 follow-up); [[feedback_v2_self_backend_w089_unfixed]] (V2 v4.0.0 同 W-089/W-091 gap,V3 单独修,V4 converge 时同步)。
 
+<a id="w-092"></a>
 ## W-092: V3 self-backend bitmap 1024 暴露 big_test v0.5.0-era 隐性 W-085 fn arg corruption → segfault (推 v3.2.4)
 
 **ID:** W-092
-**状态:** ✅ RESOLVED 2026-09-26 (v3.2.4.1 ship 真修 W-093,bitmap 1024 → 4096;**根因假设错** — W-093 RCA:真根因 = bitmap bound 不够,不是 W-085 ACTIVE trigger pattern `fn(*T,i32,i32)`)
+**状态:** RESOLVED closed 2026-09-26 (v3.2.4) — V3 self-backend bitmap 1024 暴露 big_test v0.5.0-era 隐性 W-085 fn arg corruption → segfault (推 v3.2.4)
+**提交/说明:** 2026-09-26 (v3.2.4.1 ship 真修 W-093,bitmap 1024 → 4096;**根因假设错** — W-093 RCA:真根因 = bitmap bound 不够,不是 W-085 ACTIVE trigger pattern `fn(*T,i32,i32)`
 **日期:** 2026-09-26 (W-090 修后 v3.2.4 ship gate 全 regress 暴露) → 2026-09-26 (W-093 RCA + 真修翻 RESOLVED)
 
 **触发面 (W-092 假设,后被 W-093 推翻):** 任何 V3 self-backend 编译的 .jhyy 含 `fn f(p: Point, k: i32)` struct + i32 signature (e.g. big_test `point_scale` `point_translate` 等) + bitmap 1024 enabled (per W-090)。W-085 ACTIVE: *T 在前 + i32 后 fn signature + frame < 136B 时 emit_call 第 3 i32 参数 save 寄存器错位。bitmap 256 隐藏 (bounds check no-op,后续 `=l copy` / `mov<size> -<off>(%rbp)` 走 slot direct read 而非 indirect dispatch,i32 值 4 byte 够用,高位 garbage 不参与计算),bitmap 1024 暴露 (flag 生效 → indirect dispatch 把高位 garbage 解释为 pointer → mov via %r8 → segfault)。
@@ -6029,10 +6172,12 @@ RCA-first 模式 (per [[feedback_verify_active_reproduces]] + v3.4.0 W-085 docs-
 
 ---
 
+<a id="w-093"></a>
 ## W-093: V3 self-backend bitmap 1024 → 4096 真修 big_test 1 FAIL (推 v3.2.4.1)
 
 **ID:** W-093
-**状态:** ✅ RESOLVED 2026-09-26 (v3.2.4.1 ship 真修, bitmap 1024 → 4096; 5 line 修改覆盖 state.jhyy 3 处 + jhyy_helpers.c 2 处)
+**状态:** RESOLVED closed 2026-09-26 (v3.2.4) — V3 self-backend bitmap 1024 → 4096 真修 big_test 1 FAIL (推 v3.2.4.1)
+**提交/说明:** 2026-09-26 (v3.2.4.1 ship 真修, bitmap 1024 → 4096; 5 line 修改覆盖 state.jhyy 3 处 + jhyy_helpers.c 2 处
 **日期:** 2026-09-26 (W-092 假设错 → RCA → bitmap bound 真根因 → 4096 真修)
 
 **触发面:** 任何 V3 self-backend 编译的 .jhyy 含 `temp_id > 1024` 的派生 temp (e.g. add `addq $X, %rax` / store `movq %rax, -<slot>(%rbp)` 的 derived-address temp, copy `movl %eax, -<slot>(%rbp)` 的 ptr-flag temp)。big_test (v0.5.0-era corpus, 950 LOC, 120 fns) max temp_id = **1932** (per .s grep, 跨 5 个 dbg .s 文件), 跨过 1024 → `cg_record_temp_holds_address` bounds check no-op → flag 没设上 → emit_copy / emit_load / emit_store 走 slot direct path (`movl %eax, -<slot>(%rbp)`) 而非 indirect dispatch (`movl (%r8), %eax`) → 错字节 / segfault (EXIT=139)。
@@ -6073,10 +6218,12 @@ RCA-first 模式 (per [[feedback_verify_active_reproduces]] + v3.4.0 W-085 docs-
 
 **引用:** [[feedback_rca_first_root_cause]] (W-092 假设 W-085 错, W-093 RCA 部分真相 = bitmap bound, W-094+W-095 RCA 完整真相); [[feedback_fix_evaluation_rule]] (target test big_test EXIT=57 post-W-095 chain, regress 145/145 collateral); [[feedback_audit_single_commit_diff]] (W-093/W-094/W-095 分开 commit per RCA iter); [[feedback_v3_self_backend_diverges_v2]] (V3 stdlib 测试触发 V2 unseen gaps, big_test v0.5.0 corpus 是 V2 同 latent 但被 bitmap 256 隐藏); [[feedback_plans_per_version]] (W-093 = v3.2.4.1 patch, W-094 + W-095 = v3.2.4.2 follow-up patch); [[feedback_rerum_basic]] W-092 误诊 → W-093 partial → W-094 partial → W-095 真修 → 1 fail → 0 fail 闭环 (per user 2026-09-26 反馈 "这个不算 workaround 吧, 你这也没 work 呀, 还是 fail 呢, 你先修呗" — W-095 是真修, 不是 workaround)。
 
+<a id="w-094"></a>
 ## W-094: V3 self-backend alloc-tracking slot table bound 256 不够 → cg_record_temp_slot no-op → formula fallback 跟 alloc pool 物理 collision → struct data 跟 formula slot 覆盖 (推 v3.2.4.2)
 
 **ID:** W-094
-**状态:** ✅ RESOLVED 2026-09-26 (v3.2.4.2 ship slot table 256 → 4096;跟 W-093 bitmap 同步 bump;**partial fix** — 修了 `cg_record_temp_slot` 在 temp_id > 256 时能正常 record, 但 emit_load's dst 仍不 record → 仍 fail。完整真修在 W-095)
+**状态:** RESOLVED closed 2026-09-26 (v3.2.4) — V3 self-backend alloc-tracking slot table bound 256 不够 → cg_record_temp_slot no-op → formula fallback 跟 alloc pool 物理 c…
+**提交/说明:** 2026-09-26 (v3.2.4.2 ship slot table 256 → 4096;跟 W-093 bitmap 同步 bump;**partial fix** — 修了 `cg_record_temp_slot` 在 temp_id > 256 时能正常 record, 但 emit_load's dst 仍不 record → 仍 fail。完整真修在 W-095
 **日期:** 2026-09-26 (W-093 bitmap bump 后 t_rect_area 仍 fail → 进一步 RCA → slot table bound 也不够)
 
 **触发面:** 任何 V3 self-backend 编译的 .jhyy 含 `temp_id > 256` 的派生 temp 需要 record 进 alloc-tracking slot table。big_test (v0.5.0-era corpus, 950 LOC, 120 fns) max temp_id = **1932**, 跨过 256 → `cg_record_temp_slot` bounds check no-op → slot 留 0 → `cg_offset_for_temp_with_target` 后续查询 fall through formula `-(32 + t*8)` (Win) / `-(t*8)` (SysV) → **formula 跟 alloc pool 物理重叠** (formula range [-32, -32792], alloc pool starts at -8192) → 跨 temp_id 大时 formula 跟 alloc pool offset collision → struct data 写到别的 temp 的 slot → 后续 add `add %t5, 4` 读 t5 拿 garbage → bogus address → SEGV。
@@ -6106,10 +6253,12 @@ RCA-first 模式 (per [[feedback_verify_active_reproduces]] + v3.4.0 W-085 docs-
 
 **引用:** [[feedback_rca_first_root_cause]] (W-093 修了部分根因, W-094 RCA 进一步挖 slot table bound; 5 line 修改 RCA 1 fail = 1 根因 per step); [[feedback_fix_evaluation_rule]] (W-094 partial, 不达 5/5 PASS — 跟 W-095 联合 ship 才闭环); [[feedback_audit_single_commit_diff]] (W-094 单独立 entry 跟 W-093 分开 commit per RCA iter); [[feedback_codegen_amd64_multifn]] (V3 self-backend 静默 fail pattern: 单 fn PASS / 2+ fn FAIL 提示 codegen state corruption — slot table 状态是 codegen state 的一部分); [[feedback_plans_per_version]] (W-094 = v3.2.4.2 patch, 跟 W-093 v3.2.4.1 分开 commit)。
 
+<a id="w-095"></a>
 ## W-095: V3 self-backend emit_load's dst result temp 不 record 进 slot table → formula fallback 跟 alloc pool 物理 collision → struct pass-by-value field copy SEGV (推 v3.2.4.2 真修)
 
 **ID:** W-095
-**状态:** ✅ RESOLVED 2026-09-26 (v3.2.4.2 ship emit_load record dst via cg_alloc_slot + cg_record_temp_slot; 推 v3.2.4.2 patch 跟 W-094 联合 ship; **真修 — regress 145/145 PASS, user 反馈闭环**)
+**状态:** RESOLVED closed 2026-09-26 (v3.2.4) — V3 self-backend emit_load's dst result temp 不 record 进 slot table → formula fallback 跟 alloc pool 物理 collision → struct…
+**提交/说明:** 2026-09-26 (v3.2.4.2 ship emit_load record dst via cg_alloc_slot + cg_record_temp_slot; 推 v3.2.4.2 patch 跟 W-094 联合 ship; **真修 — regress 145/145 PASS, user 反馈闭环**
 **日期:** 2026-09-26 (W-094 slot table bump 后 t_rect_area 仍 fail → 进一步 RCA → emit_load 不 record dst → formula collision 完整根因)
 
 **触发面:** 任何 V3 self-backend 编译的 .jhyy 含 `emit_load` 的 dst result temp (e.g. `t1023 =w loadw %t1021` 中 t1023)。emit_load 之前 `dst_off = mem_temp_offset(dst, target_tag)` 调 `cg_offset_for_temp_with_target(dst, target_tag)` → 检查 slot table → 如果未 record 走 formula fallback。**emit_load 自身不调 `cg_record_temp_slot(dst, ...)`**, 所以所有 emit_load 的 dst 都走 formula。Formula `-(32 + t*8)` 跟 alloc pool (cg_alloc_slot advance, starts at -8192) 物理重叠 (formula range [-32, -32792]) → 大 temp_id 的 load result formula 跟 alloc-result pointer-slot 撞 → storew → overwrite struct ptr → 后续 add struct, N 拿 garbage → SEGV。
@@ -6150,7 +6299,8 @@ emit_load 现在对每个 dst result temp 都分配 dedicated alloc pool slot (c
 ## W-096: per-fn-local temp_id counter → emit slot offset 用 global t → main.jhyy 997 fns frame over-reserve 484KB → Stage 2 closure SEGFAULT (推 v3.x mid 真修)
 
 **ID:** W-096
-**状态:** ✅ RESOLVED closed 2026-10-08 (v4.0.2.2 wip — emit-side per-fn-local counter 真修 ship, 484KB→9KB frame hold, regress 159/160 PASS HOLD)
+**状态:** RESOLVED closed 2026-10-08 (v4.0.2) — per-fn-local temp_id counter → emit slot offset 用 global t → main.jhyy 997 fns frame over-reserve 484KB → Stage 2 closu…
+**提交/说明:** 2026-10-08 (v4.0.2.2 wip — emit-side per-fn-local counter 真修 ship, 484KB→9KB frame hold, regress 159/160 PASS HOLD
 **日期:** 2026-10-08 (v4.0.2.1 sub-bug #3 真修后 W-074.6 entry "严重性 (jhyy_v3.exe 阶段)" 段首次明示 W-NNN;1024 cap ship 在 commit `573b189`; emit-side 真修 ship 2026-10-08 v4.0.2.2 wip)
 
 **触发面:** jhyy_v3.exe (Stage 2 self-compiled binary from `jhyy.exe compile main.jhyy`) 跑 `jhyy_v3.exe compile compiler/src0/main.jhyy -o /tmp/v4.exe` → cmd_compile 段 SEGFAULT。pre-W-074.6 sub-bug #3 真修:emit .s 缺 `main_jhyy:` label + 0-byte body。post-sub-bug #3 真修:emit .s 完整 10MB, main_jhyy label 出现, 但 `main_jhyy` frame_size = `(max_global+1) * 8 = (60656+1) * 8 ≈ 485KB` (0x764a0) → `___chkstk_ms` probe 后 Windows 1MB default thread stack 仍 hold 但 alloc pool formula collision 在 stack guard page 边界 → SEGV。
@@ -6295,7 +6445,8 @@ RCA 突破:`cg_local_t_from_global` 的 OLD check `cur_fn_idx >= fn_count` 跟 `
 ## W-097: jhyy-side codegen emit_func_header per_fn_max lookup operand swap → frame > 4096B → ___chkstk_ms clobber rcx → 所有 C 函数 call SEGV (推 v4.0.2.3+)
 
 **ID:** W-097
-**状态:** ✅ RESOLVED 2026-10-15 (v4.0.8 wip — 闭环达成 `closure_check.sh` PASS, v2.s == v3.s byte-identical)
+**状态:** RESOLVED closed 2026-10-15 (v4.0.8) — jhyy-side codegen emit_func_header per_fn_max lookup operand swap → frame > 4096B → ___chkstk_ms clobber rcx → 所有 C 函数…
+**提交/说明:** 2026-10-15 (v4.0.8 wip — 闭环达成 `closure_check.sh` PASS, v2.s == v3.s byte-identical
 **日期:** 2026-10-08 发现 → 2026-10-09 深挖后 DEFERRED → **2026-10-15 真修闭环**
 
 ### 2026-10-15 RESOLVED — 六个 emit 根因,自举闭环达成
@@ -6396,10 +6547,12 @@ W-097 audit checklist (`docs/audit/w-097-emit-audit-checklist.md`) 原始列 3 s
 - plan: `docs/plans/v4/v4.0.2.5-plan.md` (待写)
 - related: [[W-074.6]] (Stage 2 closure 阻塞同根因), [[W-096]] (frame blow-up upstream 真修)
 
+<a id="w-098"></a>
 ## W-098: jhyy-side codegen emit i64 literal (>32-bit range) 截成 i32 + cltq sign-extend → 高 32 位丢 (W-075 mem_set 真修 surface;per `feedback_rca_first_root_cause` 1-iter RCA)
 
 **ID:** W-098
-**状态:** ✅ RESOLVED 2026-10-09 (v4.0.2.4 wip) — i64 literal emit 真修 ship 3-tier fix:emit + IR + cast side
+**状态:** RESOLVED closed 2026-10-09 (v4.0.2) — i64 literal emit 真修 ship 3-tier fix:emit + IR + cast side
+**提交/说明:** 2026-10-09 (v4.0.2.4 wip
 **日期:** 2026-10-09 (W-075 mem_set 真修 2nd attempt 时 1-iter RCA 找真根因) → 2026-10-09 (W-097 deep audit + 3-tier fix ship)
 **Filed-by:** MiniMax-M3
 
@@ -6499,10 +6652,12 @@ W-097 audit checklist (`docs/audit/w-097-emit-audit-checklist.md`) 原始列 3 s
 - 误判历史: v4.0.2.1 → v4.0.2.2 W-096 真修 ship 后, 第 1 session 误判 "i64 store 触发大 frame + chkstk_ms rcx clobber" (W-075 错 RCA)。v4.0.2.3 1-iter RCA 找真根因 = W-098 (i64 literal emit),不是 multifn frame (per `feedback_rca_first_root_cause`)。v4.0.2.4 3-tier 真修 ship
 - related: [[W-075]] (真修 ship, workaround 仍 ship;W-098 修后 revert 可选), [[W-097]] (deep audit 完成,emit_func_header operand swap 真修推 v4.0.2.5)
 
+<a id="w-100"></a>
 ## W-100: emit_call sret 路径无条件 `movl %eax, -<slot>(%rbp)` clobber 第一个 local (Stage 2 closure chain 第一关 SEGV 真修)
 
 **ID:** W-100
-**状态:** ✅ RESOLVED 2026-10-09 (v4.0.2.5 wip — sret early-return 早返 ship)
+**状态:** RESOLVED closed 2026-10-09 (v4.0.2) — emit_call sret 路径无条件 `movl %eax, -<slot>(%rbp)` clobber 第一个 local (Stage 2 closure chain 第一关 SEGV 真修)
+**提交/说明:** 2026-10-09 (v4.0.2.5 wip — sret early-return 早返 ship
 **日期:** 2026-10-09 (W-097 hoist 7-site 真修后, Stage 1→2 PASS, Stage 2→3 SEGV in `parser__parse_expr` with `rcx=0` 1-iter RCA 找 sret clobber)
 **Filed-by:** MiniMax-M3
 
@@ -6557,10 +6712,12 @@ if ret_temp_id == (0 as i64) {
 - 词法器证据: `compiler/src0/codegen_amd64_lexer.jhyy:lex_init_token` ret_temp_id 初始 0, `%` branch 不触发
 - related: [[W-097]] (前置, hoist 7-site 真修让 Stage 1→2 通过), [[W-101]] (residual, parse_expr ceqw slot bug 阻塞 Stage 2→3)
 
+<a id="w-101"></a>
 ## W-101: emit_binop ceqw dst_id 走 existing local address-holder slot 而非 new temp slot → Stage 2→3 SEGV at parse_expr
 
 **ID:** W-101
-**状态:** ✅ RESOLVED 2026-10-12 (v4.0.6 wip — attempt #7 SUCCESS, 3-arg `cg_alloc_slot(state, size, is_addr)` + audit § 5 separate address-holder pool 物理 disjoint; 5/5 PASS on main.jhyy)
+**状态:** RESOLVED closed 2026-10-12 (v4.0.6) — emit_binop ceqw dst_id 走 existing local address-holder slot 而非 new temp slot → Stage 2→3 SEGV at parse_expr
+**提交/说明:** 2026-10-12 (v4.0.6 wip — attempt #7 SUCCESS, 3-arg `cg_alloc_slot(state, size, is_addr)` + audit § 5 separate address-holder pool 物理 disjoint; 5/5 PASS on main.jhyy
 **日期:** 2026-10-09 (W-100 sret 真修 ship 后, Stage 2→3 closure 仍 SEGV; `parser__parse_expr+54146` 在 `mov %eax,(%r8)` with r8=0 1-iter RCA 找 ceqw slot 错位) → 2026-10-12 (attempt #7 SUCCESS 真修, 1-iter RCA 严格按 attempt #6 gdb evidence, 1.5h 闭环)
 **Filed-by:** MiniMax-M3
 
@@ -6839,10 +6996,12 @@ if ret_temp_id == (0 as i64) {
 - Fix attempt #1 (reverted) 改动: `compiler/src0/codegen_amd64_emit_call.jhyy:1415-1452` + `emit_mem.jhyy:755-759` + `emit_ctrl.jhyy:553-587` + `state.jhyy:854-907` (4 文件 115 LOC, REVERTED 2026-10-09)
 - related: [[W-100]] (前置, sret 真修 ship), [[W-096]] (holder mechanism 引入), [[W-074.6]] (Stage 2 closure 阻塞同根因)
 
+<a id="w-085"></a>
 ## W-085: codegen small-frame fn(*T, i32, i32) 第 3 i32 参数 save 寄存器错位 (推 v3.x)
 
 **ID:** W-085
-**状态:** ✅ RESOLVED 2026-09-29 (v3.4.0 ship docs-only flip — RCA v3.4.0 发现 W-085 已在 V3 v3.3.0 self-backend 不 reproduce;bench.sh reorder 是 dead code;workaround revert + entry 翻 ✅)
+**状态:** RESOLVED closed 2026-09-29 (v3.4.0) — codegen small-frame fn(*T, i32, i32) 第 3 i32 参数 save 寄存器错位 (推 v3.x)
+**提交/说明:** 2026-09-29 (v3.4.0 ship docs-only flip — RCA v3.4.0 发现 W-085 已在 V3 v3.3.0 self-backend 不 reproduce;bench.sh reorder 是 dead code;workaround revert + entry 翻 ✅
 **日期:** 2026-09-22 (v4.0.0 bench.sh nqueens 期间发现) → 2026-09-29 (v3.4.0 RCA flip)
 
 **触发面:** 任何 `fn f(p: *T, a: i32, b: i32)` 这种 *T 在前 + 2+ i32 的 small-frame 函数 — frame < 136B 时 emit_call 第 3 个 i32 参数 save 寄存器错位 (`%ecx` 覆盖 `%r8d`) → caller 端 arg corruption。
@@ -6880,6 +7039,7 @@ V2 v4.0.0 bench.sh nqueens 期间 4 个 reproducer 拆解 + assembly dump RCA �
 
 
 
+<a id="w-079"></a>
 ### W-079: QBE amd64_win mixed (l, w, w) extern fn args bug + i32 return zero-extension missing (v3.2.3 DEFER)
 
 | 字段 | 值 |
@@ -6904,6 +7064,7 @@ W-079 的 workaround 实际有两半 —— (a) std_io 改走 single-type-pointe
 本 entry 的 ✅ 状态把 (b) 一起盖住了。已另立 **W-103** 承接 (b),请到 W-103 看
 当前真实状态 —— 不要因为本条是 ✅ 就认为 std::os 是真实现。
 
+<a id="w-080"></a>
 ### W-080: self-backend i32 return zero-extend missing + std_io_print M0 stub (v3.2.3.1 真修)
 
 | 字段 | 值 |
@@ -6919,10 +7080,12 @@ W-079 的 workaround 实际有两半 —— (a) std_io 改走 single-type-pointe
 | **验证** | regress 151/151 PASS / 0 FAIL / 20 SKIP (+6 new tests);std_io_basic 6/6 sub-test PASS (5→6);exit_zero_extend_{0,1,127,128,255,256} 6/6 PASS (bash `$?` == (N & 0xFF)) |
 | **引用** | `docs/logs/v3/changelog-v3.2.md` v3.2.3.1 section;W-059 QBE-era history;`feedback_fix_evaluation_rule` 5/5 PASS |
 
+<a id="w-102"></a>
 ## W-102: address-holder 池与 alloc 池槽位重叠 → self-hosted 编译器编泛型结构体字面量 SEGV
 
 **ID:** W-102
-**状态:** ✅ RESOLVED 2026-10-15 (v4.0.8 wip — 合并为单一池)
+**状态:** RESOLVED closed 2026-10-15 (v4.0.8) — address-holder 池与 alloc 池槽位重叠 → self-hosted 编译器编泛型结构体字面量 SEGV
+**提交/说明:** 2026-10-15 (v4.0.8 wip — 合并为单一池
 **日期:** 2026-10-15(W-097 闭环达成后跑 `regress --binary=jhyy_v2.exe` 才暴露)
 
 **触发面:** `compiler/src0/codegen_amd64_state.jhyy` `cg_alloc_slot` —— 只在
@@ -7544,6 +7707,7 @@ borrow_mut_write.jhyy(单个 &mut 写内存):仍 EXIT=5 ✓
 - plan `docs/plans/v4/active-workaround-clearance.md` § 决策点 A
 
 <a id="w-105-1"></a>
+<a id="w-105.1"></a>
 ## W-105.1: check_cap_pass 同款空 stub,当前无调用点(死代码但签名在 API 面上)
 
 **状态:** RESOLVED closed 2026-10-20 (v4.0.18) — 恒 return 1 的 stub 连同注释一并删除
@@ -8676,6 +8840,7 @@ match 形态,而 match 形态不碰这三个字段)。
   W-102(泛型**结构体**字面量 SEGV,已 RESOLVED,与本条的 SEGV 症状相邻但不同源)
 
 
+<a id="w-112"></a>
 ## W-112: `#[link_section]` 完全失效 — 属性被解析但 codegen 是 no-op
 
 **状态:** RESOLVED closed 2026-10-20 (v4.0.16) — `.section <name>` 现在真的进 .s / .exe;V3-B 3e 的 ship gate 不再空转
@@ -9846,7 +10011,8 @@ compile succeeded but EXPECT-ERROR expected: kw='...' — 编译器没报这个�
 <a id="w-127"></a>
 ## W-127: Windows 目标整数 / 浮点实参寄存器编号不自洽 —— 浮点参在前时读错寄存器
 
-**状态:** RESOLVED closed 2026-10-24 (v4.0.20) —— 修法 + 回归门见下方
+**状态:** RESOLVED closed 2026-10-24 (v4.0.20) — — 修法 + 回归门见下方
+**提交/说明:** 2026-10-24 (v4.0.20
 **Filed-by:** audit-v4-spec-2026-10-24
 **日期:** 2026-10-24
 
@@ -9906,7 +10072,8 @@ g(42, 1.0)          // → EXIT=42 ✓(整数在前时正常)
 <a id="w-128"></a>
 ## W-128: `0o` / `0b` 字面量静默算成 0 —— lexer 认前缀,求值走 `strtoll(base=0)`
 
-**状态:** RESOLVED closed 2026-10-24 (v4.0.20) —— 修法 + 回归门见下方
+**状态:** RESOLVED closed 2026-10-24 (v4.0.20) — — 修法 + 回归门见下方
+**提交/说明:** 2026-10-24 (v4.0.20
 **Filed-by:** audit-v4-spec-2026-10-24
 **日期:** 2026-10-24
 
@@ -9957,7 +10124,8 @@ let z: i32 = 077;      // → EXIT=63 ✓(前导零按八进制,C 语义)
 <a id="w-129"></a>
 ## W-129: `alignof(T)` 表达式无类型 —— 语义分析里没有 `alignof` 分支
 
-**状态:** RESOLVED closed 2026-10-24 (v4.0.20) —— 修法 + 回归门见下方
+**状态:** RESOLVED closed 2026-10-24 (v4.0.20) — — 修法 + 回归门见下方
+**提交/说明:** 2026-10-24 (v4.0.20
 **Filed-by:** audit-v4-spec-2026-10-24
 **日期:** 2026-10-24
 
@@ -10156,7 +10324,8 @@ v4.0.8(commit `1dc6a23`)把 jhyy.exe 的产出改到自举编译器,自举侧的
 <a id="w-130"></a>
 ## W-130: address-holder bitmap 的**容量**在 C 桥接层与 jhyy 侧脱节 —— `--target=` 前缀判定失效
 
-**状态:** RESOLVED closed 2026-10-24 (v4.0.21) —— 根因定位 + 真修 + 四层常驻门
+**状态:** RESOLVED closed 2026-10-24 (v4.0.21) — — 根因定位 + 真修 + 四层常驻门
+**提交/说明:** 2026-10-24 (v4.0.21
 **Filed-by:** audit-v4-spec-2026-10-24
 **日期:** 2026-10-24
 
@@ -10905,6 +11074,58 @@ shadowing 修好了它仍会 FAIL ⇒ 改写成「返回 fails 计数」的形�
   `spec_shadowing_immutable.jhyy`(shadow 成不可变后再赋值 ⇒ 报错)
 - spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §3(已恢复 shadowing 承诺)+ 附录 B
 - 关联:**W-150**(同一个 null sym 的兄弟崩溃:重名 fn / type / const / 参数)
+
+---
+
+<a id="w-153"></a>
+## W-153: 索引重建脚本把索引表与下一个 H2 之间的内容**整段丢掉** ⇒ 锚点被吃 ⇒ 死链
+
+**状态:** RESOLVED closed 2026-10-27 (v4.0.22) — 保留 gap + 加「不许丢内容」自检;锚点脚本改成幂等
+**Filed-by:** 2026-10-27 清台账文档债时挖出
+**日期:** 2026-10-27
+
+**触发面:** `scripts/dev/v2_13_5_rebuild_index.py` 的 `rebuild_file`。
+
+**症状:** 每跑一次索引重建,`## 索引` 表与下一个 `## W-xxx:` 之间的内容**被整段删掉**
+—— 而那正好是**第一个条目的 `w-001` 锚点**(`<a id="…"></a>` 形式)的位置 ⇒ 索引里的
+`(#w-001)` 变成**死链**(点进去不跳)。⇒ 症状是「刚补上的锚点又没了」。
+
+**根因:**
+```python
+new_lines = lines[:idx_start] + new_index_lines + lines[idx_end:]
+#                                                ↑ idx_end = 下一个 '## ' 标题
+#                                                  ⇒ 索引表到下一个 H2 之间的整段被丢掉
+```
+
+**修法(2026-10-27 真修):**
+- 找出旧索引表的最后一行(最后一条 `| [W-` 行)⇒ **保留它之后的 gap**(空行 + 锚点)
+  拼到新表后面 ⇒ 锚点不再被吃;
+- gap 开头的空行由新表末尾的空行提供 ⇒ 去掉,否则每跑一次多一个空行(幂等性破掉);
+- **加自检**:重建前后比对全部锚点 id 的集合,丢一个就**响亮失败**(SystemExit)
+  ⇒ 这类「静默删内容」以后会被当场抓住(与 W-108 同款思路:索引读不到条目 = 假 0)。
+
+**顺带修的 `v2_13_5_insert_anchors.py`:**
+- 原来对每个 H2 **无条件**插锚点 ⇒ 在已有锚点的文件上再跑一遍 ⇒ **给已有的插重复的**
+  ⇒ HTML 里两个同名 id ⇒ 浏览器跳第一个(旧的)⇒ 看起来「插了没用」;
+- 现在:已经紧邻着同 id 锚点的 H2 **跳过** ⇒ **幂等**(跑 N 遍结果一样);
+- 口径改成 `#{2,3}`(与 rebuild_index.py 一致)⇒ H3 的子条目(W-073..W-079 / W-074.6)
+  也进索引 ⇒ 没锚点就是死链;
+- 加 `--check` 模式:只检查不写,报缺失/重复,退出码 1 = 有问题。
+
+**门:**
+- `python scripts/dev/v2_13_5_insert_anchors.py --check docs/internal/workarounds.md`
+  ⇒ **0 缺失 / 0 重复**;
+- `rebuild_index.py` 连跑两遍 ⇒ 逐字节相同(幂等);
+- 索引里 141 条链接**全部能解析**(改之前有 1 条死链 + 83 条老条目没锚点)。
+
+**影响范围(修前):** 台账里 83 条老条目没有锚点(索引点了不跳)⇒ 而且**每次重建索引
+就把 W-001 的锚点吃掉** ⇒ 死链反复出现、怎么补都留不住。
+
+**失效条件:** 已消除(2026-10-27 真修,见上)。
+
+**引用:**
+- 工具:`scripts/dev/v2_13_5_rebuild_index.py`、`scripts/dev/v2_13_5_insert_anchors.py`
+- 关联:**W-108**(索引脚本读不到条目 ⇒ 报出假的「0 ACTIVE」—— 同一类「工具静默失灵」)
 
 ---
 

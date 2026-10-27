@@ -409,6 +409,7 @@ let desc = match x {
 | 枚举绑定 | `Enum::Variant(x)` 或短名 `Variant(x)` | |
 
 - 所有 arm 返回类型必须一致。
+- ⚠️ **arm 的 body 只能是单个表达式** —— 不能写 `return`，也不能写成语句块（`{ ... }`）。与闭包体同款限制（§5.7）。
 - **每个 match arm 是独立作用域**：arm 的模式绑定（`Some(x)` 的 `x`）是**新绑定** —— 它**遮住**外层同名变量（arm 里读到的是 payload，不是外层的旧值），arm 结束后**不外泄**。与 Rust 一致。
 - **穷尽性检查已实装**：match 作用在 enum 上时，每个变体必须被显式覆盖或由 `_` 兜底，否则编译错误 `non-exhaustive match: missing variant`。
 - ⚠️ **范围的端点语义与 `for` 循环不同**：`0..10` 在 match 里**同时匹配 0 和 10**（闭区间），在 `for` 里不含 10（半开）。写范围 pattern 时按闭区间理解。
@@ -423,7 +424,7 @@ let r: i32 = f(41);        // 42
 ```
 
 - 语法：`|param: T, ...| { expr }`。参数类型**必须**显式标注。
-- 函数体是**单个表达式**，不是语句块：里面不能写 `let` / `return` / `match`。
+- 函数体是**一个块，块里只放单个表达式**（`|x: i32| { x + 1 }`）：里面不能写 `let` / `return` / `match` / 任何语句 —— 块只起括号作用。
 - **不能捕获外层变量**。闭包体内引用外层局部变量会编译期报错：
   `closure cannot capture outer variables (not supported yet): the closure body may only use its own parameters and literals`
 - ⚠️ 闭包值**可直接调用**；但「当函数值**传递**」做不到 —— 没有 `fn(...)` 类型语法（见 [§ 2.2](#22-复合类型) 与[附录 B](#附录-b未实装--已实装但受限)）。
@@ -975,6 +976,7 @@ type ErrChain = struct {
 - **`fn(...)` 函数指针类型语法** —— 类型位置不认 `fn(i32)` / `fn(i32) -> i32` ⇒ 闭包值**无法作为函数值传递**
 - 完整 NLL / Polonius 借用检查、生命周期标注 `'a`、reborrow、跨函数借用
 - 闭包捕获外层变量 —— **编译期明确报错**，不静默生成错误代码
+- **match arm 的 body 不能是语句块** —— 只能是单个表达式（不能写 `return` / `{ ... }`；与闭包体同款限制）
 - 块表达式（`let v = { ... };`）—— 表达式位置不认 `{`
 - 泛型约束 `<T: Ord>`、生命周期泛型、const generic、trait objects、HKT
 - 变参函数、回调函数、struct/enum 按值跨 FFI 边界
