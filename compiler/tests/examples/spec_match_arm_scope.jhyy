@@ -1,0 +1,61 @@
+// spec_match_arm_scope.jhyy — spec §5.6:match arm 的模式绑定是**新绑定**
+//
+// 2026-10-27(W-151 真修):本用例是「match arm 绑定同名变量 ⇒ payload 被静默丢弃」
+// 的回归门。
+//
+// 症状(修前):
+// ```jhyy
+// let v = 1;
+// let r = match Option::Some(5) { Some(v) => v, None => 0 };
+// // r == 1(外层的 v)而不是 5(payload)⇒ **静默错值**
+// ```
+//
+// 根因(两处,缺一不可):
+//   ① `parse_match`(statement 形式)与 `parse_expr` 里的 **inline match**
+//      (expression 形式)—— 这是**两份**match 解析代码 —— **都不给 arm 开作用域**
+//      ⇒ arm 的模式绑定落进**外层**作用域;
+//   ② `parse_pattern` 的 ident 绑定走「先查后插」,而查是 `symtab_lookup`
+//      (**沿作用域链往外找**)⇒ 外层已有同名变量时,模式**复用**它
+//      ⇒ 模式的「绑定」变成了「引用」⇒ payload 抽不出来。
+//
+// 修法:
+//   ① 每个 arm 一个**独立作用域**(push/pop)⇒ 绑定总是新的、且不外泄;
+//   ② 模式里的 ident 是**绑定**不是**引用** ⇒ 只查**当前**作用域
+//      (`symtab_lookup_local`);OR pattern 的两侧在同一个 arm 作用域里
+//      ⇒ 仍共用同一个绑定(与 spec §5.6「两侧必须绑定同名同类型的变量」一致)。
+//
+// EXPECT: 0
+type Option = enum { Some(i32), None }
+type Two = enum { A(i32), B(i32) }
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+
+    // ① arm 的绑定**遮住**外层同名变量 ⇒ 抽到的是 payload(5),不是外层的 1
+    let v = 1;
+    let r = match Option::Some(5) { Some(v) => v, None => 0 };
+    if r != 5 { fails = fails + 1; }
+
+    // ② 外层绑定**不受影响**(arm 的作用域是独立的)
+    if v != 1 { fails = fails + 2; }
+
+    // ③ 算术里也要用 payload(修前是 1+1000=1001)
+    let r2 = match Option::Some(5) { Some(v) => v + 1000, None => 0 };
+    if r2 != 1005 { fails = fails + 4; }
+
+    // ④ 名字不冲突时行为不变(回归护栏)
+    let r3 = match Option::Some(5) { Some(w) => w, None => 0 };
+    if r3 != 5 { fails = fails + 8; }
+
+    // ⑤ 两个 arm 绑**同名** ⇒ 互不干扰(修前第二个 arm 复用第一个的绑定)
+    let r4 = match Two::B(5) { Two::A(x) => x, Two::B(x) => x + 100 };
+    if r4 != 105 { fails = fails + 16; }
+
+    // ⑥ 同一个 match 里,外层同名变量 + arm 绑定 + 后续使用,三者互不干扰
+    let u = 100;
+    let r5 = match Option::Some(7) { Some(u) => u, None => 0 };
+    if r5 != 7 { fails = fails + 32; }
+    if u != 100 { fails = fails + 64; }
+
+    return fails;
+}

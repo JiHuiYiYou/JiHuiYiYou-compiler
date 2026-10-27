@@ -1149,7 +1149,21 @@ fn parse_pattern(p: *Parser) -> *Node {
         }
 
         // 普通 ident pattern（binding）
-        let mut sym = symtab_lookup((*p).current_scope, ident_name);
+        //
+        // W-151 真修(2026-10-27):这里**只能查当前作用域**(`symtab_lookup_local`),
+        // 不能用 `symtab_lookup`(它会沿作用域链往外找)。
+        //
+        // 原因:模式里的 ident 是**绑定**(binding),不是**引用**(reference)——
+        //   它声明一个**新**变量,而不是指向外层已有的同名变量。
+        //   用链式查找时:外层有同名变量 ⇒ 模式复用它 ⇒ **payload 被静默丢弃**
+        //   (实测 `let v = 1; match Some(5) { Some(v) => v }` 返回 **1** 而不是 5)。
+        //
+        // 配合「每个 arm 一个独立作用域」(parse_match 里 push/pop):
+        //   · arm 的绑定总是**新的** ⇒ 遮住外层同名变量 ⇒ payload 一定抽得出来;
+        //   · OR pattern 的两侧在**同一个** arm 作用域里 ⇒ 第二侧用
+        //     lookup_local 找到第一侧的绑定 ⇒ **共用同一个**(与 spec §5.6
+        //     「两侧必须绑定同名同类型的变量」一致)。
+        let mut sym = symtab_lookup_local((*p).current_scope, ident_name);
         if sym == (0 as *Sym) {
             sym = symtab_insert((*p).current_scope, ident_name, SYM_VAR(),
                                 0 as *u8, 0 as i32, (*p).scope_depth);
@@ -2153,6 +2167,17 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
         while parser_check(p, TOKEN_RBRACE()) == (0 as i32) {
             if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
 
+            // ── W-151 真修(2026-10-27):每个 match arm 一个**独立作用域**──
+            //   (与 statement 形式的 parse_match 同一套修法 —— 表达式形式与
+            //    语句形式是**两份**match 解析代码,改一处不够!)
+            //
+            // 修前:arm 不开作用域 ⇒ arm 的模式绑定落进**外层**作用域 ⇒
+            //   ① 外层已有同名变量时,arm 的绑定**复用**它 ⇒ **payload 被静默丢弃**
+            //      (实测 `let v = 1; match Some(5) { Some(v) => v }` 返回 **1**);
+            //   ② arm 的绑定**漏到 match 之后**。
+            // 修后:arm 的模式 + 体在自己的作用域里解析 ⇒ 绑定总是新的、
+            //   且不外泄;OR pattern 两侧仍在同一 arm 作用域 ⇒ 共用一个绑定。
+            parser_push_scope(p);
             let mut mx_pat: *Node = parse_pattern(p);
             // OR pattern — left-associative loop on `|` (跟 parse_match 一致)
             while parser_check(p, TOKEN_PIPE()) != (0 as i32) {
@@ -2165,6 +2190,8 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
             }
             parser_expect(p, TOKEN_FATARROW(), "=>" as *u8, &t);
             let mx_body = parse_expr(p, PREC_NONE());
+            // arm 作用域到此结束 ⇒ 绑定不外泄
+            parser_pop_scope(p);
 
             let _mx_c = parser_match(p, TOKEN_COMMA(), &t);
 
@@ -2571,6 +2598,25 @@ fn parse_match(p: *Parser) -> *Node {
         if parser_check(p, TOKEN_EOF()) != (0 as i32) {
             break;
         }
+        // ── W-151 真修(2026-10-27):每个 match arm 一个**独立作用域**──
+        //
+        // 修前:arm 不开作用域 ⇒ arm 的模式绑定(`Some(v) => ...`)落进**外层**作用域
+        //   ⇒ ① 若外层已有同名变量,arm 的绑定会**复用**它(pattern 走「先查后插」)
+        //      ⇒ **payload 被静默丢弃**:`let v = 1; match Some(5) { Some(v) => v }`
+        //      实测返回 **1**(外层的值)而不是 5 ⇒ 静默错值;
+        //   ② arm 的绑定会**漏到 match 之后**(外层作用域里凭空多一个 v)
+        //      ⇒ 之后同名 `let` 会与它撞车(W-142 修前 ⇒ 编译器崩)。
+        //
+        // 修法:arm 的模式 + 体都在**自己的作用域**里解析 ⇒
+        //   · arm 的绑定总是**新的**(遮住外层同名变量)⇒ payload 一定抽得出来;
+        //   · arm 结束就 pop ⇒ 绑定**不外泄**;
+        //   · 两个 arm 绑同名 ⇒ 互不干扰。
+        //   (OR pattern 的两侧在**同一个** arm 作用域里 ⇒ 仍共用同一个绑定 ——
+        //    与 spec §5.6「两侧必须绑定同名同类型的变量」一致。)
+        //
+        // ⚠ 主体表达式在 arm 作用域**之外**解析(在上面)⇒ arm 的绑定看不见主体,
+        //   主体也看不见 arm 的绑定 ⇒ 符合直觉。
+        parser_push_scope(p);
         let mut pat: *Node = parse_pattern(p);
         // v1.3.7: OR pattern — left-associative loop on `|`.
         // v1.4.6: parser_advance(p) → parser_advance(p, &t) — 修 &t 缺参 UB。
@@ -2584,6 +2630,8 @@ fn parse_match(p: *Parser) -> *Node {
         }
         parser_expect(p, TOKEN_FATARROW(), "=>" as *u8, &t);
         let body = parse_expr(p, PREC_NONE());
+        // arm 作用域到此结束 ⇒ 绑定不外泄
+        parser_pop_scope(p);
 
         // optional trailing comma
         let _x = parser_match(p, TOKEN_COMMA(), &t);
