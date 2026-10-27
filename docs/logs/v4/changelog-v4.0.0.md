@@ -1573,11 +1573,32 @@ statement 形式,expression 形式照样错)。
 ⇒ spec §5.6 补写「每个 match arm 是独立作用域」;门
 `spec_match_arm_scope.jhyy`(修前红 `expected=0 got=37` ⇒ 修后 EXIT=0)。
 
+### W-152:重名 **import** ⇒ 编译器崩溃;重名**类型参数** ⇒ 误导性错误链
+
+W-150 之后做「null sym 站点全扫」时挖出的最后两条同源路径。
+
+**症状:** `import os; import os;` ⇒ 编译器 **ACCESS_VIOLATION(0xC0000005)** 崩
+(不是报错)—— 崩在 `main.jhyy` 的 `inline_imports`:`(*id_sym_p).name` 解引用 null。
+
+重名类型参数(`fn f<T, T>`)不崩,但报的是
+「E0062: cannot infer type parameter from arguments」这种**指不到病根**的错
+(根因:fn 声明里有 2 个类型参数、符号表里只有 1 个)。
+
+**修法:** 两处插入点都加 `parser_duplicate_name` 守卫 ⇒
+`the name \`os\` is defined multiple times` /
+`the type parameter name \`T\` is defined multiple times`。
+
+⇒ **「null sym 空指针写」这一整类收口**:W-142(let)+ W-150(fn/type/const/参数)+
+W-152(import/类型参数)之后,`compiler/src0` 里**所有**「直接插入」点都处理完了
+(要么走 shadowing、要么有守卫并返回可用 sym)⇒ **13 类重名形态全扫:0 崩溃**
+(let / 全局 let / fn 参数 / 闭包参数 / 顶层 fn / 顶层 type / 顶层 const /
+import / fn 类型参数 / type 类型参数 / fn 与 type 同名 / 全局 let 与 fn 同名)。
+
 ### 门结果(2026-10-26 实测,本轮真修后)
 
 | 门 | 结果 |
 |---|---|
-| `regress.py`(全量) | ✅ **255 PASS + 0 XFAIL + 0 failed + 20 SKIP**(275 total)—— 上一版 249 PASS + 1 XFAIL / 270;本轮再 +5 条门 + 1 个 XFAIL 转真门(⇒ **套件 XFAIL 归零**) |
+| `regress.py`(全量) | ✅ **257 PASS + 0 XFAIL + 0 failed + 20 SKIP**(277 total)—— 上一版 249 PASS + 1 XFAIL / 270;本轮再 +7 条门 + 1 个 XFAIL 转真门(⇒ **套件 XFAIL 归零**) |
 | `regress.py --cross=auto`(Docker 起) | ✅ 7 个 sysv 交叉用例全过(exit=28/217/42/35/18/42/170) |
 | `audit_test_assertions.py --strict` | ✅ **0 违规** |
 | `artifact_checks.sh` | ✅ **14 PASS / 0 FAIL** |
@@ -1603,8 +1624,9 @@ statement 形式,expression 形式照样错)。
 | W-142 | RESOLVED | 同作用域同名 let ⇒ **shadowing**(spec §3 的承诺已恢复) |
 | W-150 | RESOLVED | 重名 fn / type / const / 参数 ⇒ 空指针写崩溃 ⇒ 改编译期报错 |
 | W-151 | RESOLVED | match arm 不开作用域 ⇒ arm 的模式绑定复用外层同名变量 ⇒ **payload 被静默丢弃** |
+| W-152 | RESOLVED | 重名 import ⇒ 编译器崩溃;重名类型参数 ⇒ 误导性错误链 |
 
-⇒ 台账 **3 ACTIVE → 0 ACTIVE / 0 DEFERRED**、140 索引行(**ACTIVE 桶第二次清空**)。
+⇒ 台账 **3 ACTIVE → 0 ACTIVE / 0 DEFERRED**、141 索引行(**ACTIVE 桶第二次清空**)。
 
 ---
 

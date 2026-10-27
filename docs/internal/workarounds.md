@@ -153,6 +153,7 @@
 | [W-134](#w-134) | RESOLVED | MCP pytest 套件里有一个**恒红**的陈旧测试 —— 断言的行为早已被换掉 |
 | [W-134.1](#w-134.1) | RESOLVED | `mcp-jhyy/tests/` 在 CI 里**零覆盖** —— 套件红绿都不影响 CI 结论 |
 | [W-142](#w-142) | RESOLVED | 同作用域 shadowing 让编译器在 sema 阶段**空指针写崩溃**(0xC0000005) |
+| [W-152](#w-152) | RESOLVED | 重名 **import** ⇒ 编译器崩溃;重名**类型参数** ⇒ 报一串指不到病根的错 |
 | [W-151](#w-151) | RESOLVED | match arm 不开作用域 ⇒ arm 的模式绑定**复用外层同名变量** ⇒ payload... |
 | [W-150](#w-150) | RESOLVED | 同作用域重名(fn / type / const / 参数)⇒ 编译器**空指针写崩溃** |
 | [W-141](#w-141) | RESOLVED | std/string.jhyy 的 arena block 布局错误 ⇒ 分配互相踩 ⇒... |
@@ -10904,6 +10905,62 @@ shadowing 修好了它仍会 FAIL ⇒ 改写成「返回 fails 计数」的形�
   `spec_shadowing_immutable.jhyy`(shadow 成不可变后再赋值 ⇒ 报错)
 - spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §3(已恢复 shadowing 承诺)+ 附录 B
 - 关联:**W-150**(同一个 null sym 的兄弟崩溃:重名 fn / type / const / 参数)
+
+---
+
+<a id="w-152"></a>
+## W-152: 重名 **import** ⇒ 编译器崩溃;重名**类型参数** ⇒ 报一串指不到病根的错
+
+**状态:** RESOLVED closed 2026-10-27 (v4.0.22) — import 与类型参数的插入点加守卫;两条门已挂
+**Filed-by:** W-150 真修后做「null sym 站点全扫」时挖出
+**日期:** 2026-10-27
+
+**触发面:** `compiler/src0/parser.jhyy` 的 import 声明解析与**两处**类型参数插入点
++ `compiler/src0/main.jhyy` 的 `inline_imports`。
+
+**症状(2026-10-27 实测):**
+```
+$ jhyy.exe compile dup_import.jhyy     # import os; import os;
+[1] imports start
+<ACCESS_VIOLATION 退出>                 ← 0xC0000005
+```
+⇒ 重名 import 让编译器**崩**(不是报错)。
+
+重名类型参数(`fn f<T, T>`)**不崩**,但报的是:
+```
+error: E0062: cannot infer type parameter from arguments (no argument for some type parameter)
+error: undefined variable
+error: return type does not match function return type
+```
+⇒ 一串**完全指不到病根**的连带错误(根因是「fn 声明里有 2 个类型参数、符号表里
+只有 1 个」)。
+
+**根因:** 与 W-142 / W-150 同源 —— `symtab_insert` 对「同 scope 重名」返回 null,
+而这两处**没人检查返回值**:
+- import:`main.jhyy` 的 `inline_imports` 直接 `(*id_sym_p).name` 解引用 null ⇒ 崩;
+- 类型参数:null 进了 type_params 数组 ⇒ 声明与符号表**对不上** ⇒ 后面全乱。
+
+**修法(2026-10-27 真修):** 两处都加 `parser_duplicate_name` 守卫 ⇒
+- 重名 import ⇒ `the name `os` is defined multiple times`;
+- 重名类型参数 ⇒ `the type parameter name `T` is defined multiple times`。
+
+**门:** `spec_dup_import.jhyy` / `spec_dup_type_param.jhyy`(两条 EXPECT-ERROR)。
+
+**影响范围(修前):** 重名 import ⇒ 编译器崩;重名类型参数 ⇒ 误导性错误链。
+
+**「null sym 空指针写」这一整类的收口:** W-142(let)+ W-150(fn/type/const/参数)+
+W-152(import/类型参数)之后,`compiler/src0` 里**所有**「直接插入」点都已处理:
+要么走 shadowing(let),要么有守卫并返回可用 sym。⇒ **13 类重名形态全扫:0 崩溃**
+(let / 全局 let / fn 参数 / 闭包参数 / 顶层 fn / 顶层 type / 顶层 const / import /
+fn 类型参数 / type 类型参数 / fn 与 type 同名 / 全局 let 与 fn 同名 / …)。
+
+**失效条件:** 已消除(2026-10-27 真修,见上)。
+
+**引用:**
+- 源码:`compiler/src0/parser.jhyy`(`parse_import_decl` + 两处类型参数插入点)、
+  `compiler/src0/main.jhyy`(`inline_imports` 的 null 解引用点)
+- 门:`compiler/tests/examples/spec_dup_import.jhyy`、`spec_dup_type_param.jhyy`
+- 关联:**W-142** / **W-150**(同一个 null sym 的其余路径)
 
 ---
 
