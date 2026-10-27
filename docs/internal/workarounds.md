@@ -11144,9 +11144,18 @@ gcc** ⇒ 那个 gcc 的 `windres` 预处理失败 ⇒ **要链 .exe 的测试�
 - 抽出**唯一实现** `mcp-jhyy/jhyy_env.py`(`build_subprocess_env()`);
 - 两个模块都 `from jhyy_env import build_subprocess_env as _build_subprocess_env`
   (真别名,不是包装函数 ⇒ 「是不是同一份」可以用 `is` 断言);
-- 补门 `mcp-jhyy/tests/test_env.py`(3 条):① 两模块用的是**同一个**对象
-  ② 受限 env 下 PATH 仍含 ucrt64 且是 Windows 形式 ③ TMP/TEMP/SystemRoot 缺了要补
-  ⇒ 以后再分叉,当场变红。
+- 补门 `mcp-jhyy/tests/test_env.py`(4 条):① 两模块用的是**同一个**对象
+  ② 受限 env 下 PATH 仍含 ucrt64 ③ **继承来的 PATH 一个字符都不能丢**
+  ④ TMP/TEMP/SystemRoot 缺了要补 ⇒ 以后再分叉,当场变红。
+
+⚠ **第一版把 CI 弄红了(2026-10-27,当场抓到并修掉):** 共享实现最初照抄 runner 那份
+的「MSYS 形式 ⇒ **整个替换**成 Windows fallback」⇒ ⇒ CI(setup-msys2 把 MSYS2 装在
+`$RUNNER_TEMP\msys64`,真正的 ucrt64 在**那里**)的 PATH 被整个换掉 ⇒
+**windres 找不到** ⇒ 每个要链 .exe 的测试都报 `W-132: windres failed` ⇒ **207 个
+测试全挂**(同一 commit 的本地 CLI 是绿的)。
+⇒ ⇒ **PATH 只许「追加」,不许「替换」**:继承来的 PATH 一个字都不能丢(CI 靠它找真正的
+MSYS2)⇒ 末尾**追加**一份 Windows 形式的 MSYS2 目录当兜底(给 MCP server 那种
+`/c/...` 形式 PATH 的场景)。
 
 ⇒ MCP 套件 **45 passed / 1 skipped**。
 

@@ -1698,8 +1698,15 @@ MCP 红」这种最难查的组合。
 报错)vs 共享那份 **3/3** ✓。
 
 **修法:** 抽出唯一实现 `mcp-jhyy/jhyy_env.py`;两模块直接 import 成**真别名**
-⇒ 「是不是同一份」可用 `is` 断言;补门 `mcp-jhyy/tests/test_env.py`(3 条:同一对象 /
-受限 env 下 PATH 仍含 ucrt64 / 关键变量缺了要补)⇒ 以后再分叉当场变红。
+⇒ 「是不是同一份」可用 `is` 断言;补门 `mcp-jhyy/tests/test_env.py`(4 条)⇒ 以后再分叉
+当场变红。
+
+⚠ **第一版把 CI 弄红了(当场抓到并修掉):** 共享实现最初照抄 runner 那份的
+「MSYS 形式 ⇒ **整个替换**成 Windows fallback」⇒ ⇒ CI(setup-msys2 把 MSYS2 装在
+`$RUNNER_TEMP\msys64`)的 PATH 被整个换掉 ⇒ **windres 找不到** ⇒ **207 个测试全挂**
+(同一 commit 的本地 CLI 是绿的)。⇒ **PATH 只许「追加」,不许「替换」**:继承来的 PATH
+一个字都不能丢(CI 靠它找真正的 MSYS2)⇒ 末尾追加一份 Windows 形式的 MSYS2 目录
+当兜底。
 
 ⇒ MCP 套件 **45 passed / 1 skipped**。
 

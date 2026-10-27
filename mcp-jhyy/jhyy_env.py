@@ -26,10 +26,16 @@ def build_subprocess_env() -> dict:
     要点:
     · TMP / TEMP / TMPDIR / SystemRoot / SystemDrive 缺了要补(gcc 的 collect2
       需要 tmp dir;缺了会**静默 exit 1**);
-    · **PATH 强制 Windows-style**:MSYS bash 起的 MCP server 继承到的 PATH 可能是
-      `/c/...` 形式,那种路径 jhyy.exe 内部的 cmd.exe 不认 ⇒ gcc 子进程找不到
-      ⇒ "gcc link failed"。所以不只是「补缺」,是要**强制**成 Windows 形式,
-      并把 ucrt64\\bin 放到头(gcc/cc1/as/ld/windres 都在那儿)。
+    · **PATH 只「追加」,绝不「替换」**:
+        - 继承来的 PATH **必须保留** —— CI(setup-msys2)把 MSYS2 装在
+          `$RUNNER_TEMP\\msys64`,真正的 ucrt64 在**那里**;一旦整个替换掉,
+          windres 就找不到 ⇒ 每个要链 .exe 的测试都挂(W-132 icon embedding
+          failed)。2026-10-27 实测踩过:第一版「MSYS 形式 ⇒ 整个替换成
+          Windows fallback」把 CI 弄红了 207 个测试。
+        - 末尾**追加**一份 Windows 形式的 MSYS2 目录作为**兜底**:MSYS bash 起的
+          MCP server 继承到的 PATH 可能是 `/c/...` 形式,那种路径 jhyy.exe 内部的
+          cmd.exe 不认 ⇒ gcc/cc1/as/ld/windres 找不到 ⇒ "gcc link failed"。
+          追加(而不是替换)⇒ 两种环境都能用。
     """
     default_tmp = tempfile.gettempdir()
     env = os.environ.copy()
@@ -39,15 +45,12 @@ def build_subprocess_env() -> dict:
         env["TEMP"] = default_tmp
     if not env.get("TMPDIR"):
         env["TMPDIR"] = default_tmp
-    # ALWAYS force Windows-style PATH
-    win_path = r"C:\Windows\System32;C:\Windows;C:\msys64\ucrt64\bin;C:\msys64\usr\bin"
-    if env.get("PATH") and not env["PATH"].startswith("/"):
-        # 已 Windows-style, 补 ucrt64 进 head (gcc/cc1 在这里)
-        if r"C:\msys64\ucrt64\bin" not in env["PATH"]:
-            env["PATH"] = r"C:\msys64\ucrt64\bin;" + env["PATH"]
+    # Windows 形式的 MSYS2 目录(gcc/cc1/as/ld/windres 都在那儿)—— 追加在**末尾**
+    win_fallback = r"C:\Windows\System32;C:\Windows;C:\msys64\ucrt64\bin;C:\msys64\usr\bin"
+    if env.get("PATH"):
+        env["PATH"] = env["PATH"] + ";" + win_fallback
     else:
-        # 空 / MSYS-style (`/c/...`), 用 Windows fallback
-        env["PATH"] = win_path
+        env["PATH"] = win_fallback
     if not env.get("SystemRoot"):
         env["SystemRoot"] = r"C:\Windows"
     if not env.get("SystemDrive"):
