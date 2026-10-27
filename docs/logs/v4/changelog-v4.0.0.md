@@ -1454,6 +1454,18 @@ SELFFAIL: 新 jhyy.exe 编 src0 的结果与它自己编的不一致 —— 自�
 实测:本次过渡被自动消化(第 1 代 vs 第 2 代不同 ⇒ 推进 ⇒ 第 2 代 vs 第 3 代
 相同 ⇒ 装第 2 代),`make` 一次通过;**再跑一次产物逐字节不变**(幂等)。
 
+⚠️ **这条门自己踩了一次 phantom state。** 改成迭代循环时,原有的
+`cp -f $@ $(BIN_DIR)/_boot_anchor.exe`(**锚点 = 已提交的那份 jhyy.exe**)被
+一起删掉了 —— 而当时 `compiler/build/bin/` 里躺着**上一 session 留下的陈旧
+`_boot_anchor.exe`** ⇒ 循环用的其实是那个旧锚点 ⇒ **看起来一切正常**。
+是 `make clean && make` 把它抓出来的(clean 之后锚点没了 ⇒ 立刻
+`SELFFAIL: 第 1 代编译失败: ... _boot_anchor.exe: No such file or directory`)。
+fresh clone 的 CI 没有陈旧文件 ⇒ **CI 会当场失败**,不会带着这个 bug 跑绿。
+
+⇒ 修法:补回 `cp`,并加一行 `@rm -f $(BIN_DIR)/_boot_anchor.exe` —— 锚点**每轮
+开始前先删干净** ⇒ 「锚点拷贝被误删」这类改动会**响亮失败**,而不是静默拿旧
+的顶上(仓库老教训:W-122 / W-123 / W-136 都是同款)。
+
 ### W-149:整数→浮点 conv 表丢**符号性** + f32 目标拿到 **f64**
 
 本轮核对「W-146 说 u64 as f64 已修,真的好了吗」时挖出来的 —— **只对了一半**:
@@ -1479,6 +1491,7 @@ f32 目标统一「先转 f64,再 `truncd`」。新门 `spec_int_to_float.jhyy` 
 | `artifact_checks.sh` | ✅ **14 PASS / 0 FAIL** |
 | `closure_check.sh` | ✅ **PASS** —— v2.s == v3.s 逐字节相同 |
 | `make`(自举闭环门) | ✅ **PASS** —— 过渡期自动消化;再跑一次产物逐字节不变 |
+| `make clean && make` | ✅ **PASS** —— 从零重建;产物与提交进仓的那份**逐字节相同**(TOOLCHAIN-DRIFT 静默) |
 | `make selfhost` | ✅ v2..v5 逐字节相同 |
 
 ### 台账

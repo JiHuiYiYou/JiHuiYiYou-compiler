@@ -11315,7 +11315,18 @@ SELFFAIL: 新 jhyy.exe 编 src0 的结果与它自己编的不一致 —— 自�
 
 **门:** `make` 本身(= 自举闭环门)。实测:本次过渡被自动消化(第 1 代 vs 第 2 代
 不同 ⇒ 推进 ⇒ 第 2 代 vs 第 3 代相同 ⇒ 装第 2 代),`make` 一次通过;
-**再跑一次产物逐字节不变**(幂等)。
+**再跑一次产物逐字节不变**(幂等);`make clean && make` 从零重建 ⇒ 产物与
+提交进仓的那份**逐字节相同**(TOOLCHAIN-DRIFT 静默)。
+
+⚠️ **这条门自己踩了一次 phantom state(值得单独记):** 改成迭代循环时,原有的
+`cp -f $@ $(BIN_DIR)/_boot_anchor.exe`(**锚点 = 已提交的那份 jhyy.exe**)被
+一起删掉了 —— 而当时 `compiler/build/bin/` 里躺着**上一 session 留下的陈旧
+`_boot_anchor.exe`** ⇒ 循环用的其实是那个旧锚点 ⇒ **看起来一切正常**。
+是 `make clean && make` 把它抓出来的(clean 之后锚点没了 ⇒ 立刻
+`SELFFAIL: 第 1 代编译失败: ... _boot_anchor.exe: No such file or directory`)。
+⇒ 修法补回 `cp`,并加一行 `@rm -f $(BIN_DIR)/_boot_anchor.exe` —— 锚点**每轮
+开始前先删干净** ⇒ 「锚点拷贝被误删」这类改动会**响亮失败**,而不是静默拿旧
+的顶上(同款教训:W-122 / W-123 / W-136)。
 
 **影响范围:** 每个改后端 / 改 src0 编码的人(过去只能手工绕过门)。
 
