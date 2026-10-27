@@ -104,15 +104,44 @@ $(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(JHY_RUNTIME_O) $
 	    echo "       git checkout HEAD -- compiler/build/bin/jhyy.exe"; \
 	    exit 1; \
 	fi
-	@# 锚点 = 当前这个(已提交的)jhyy.exe
-	@cp -f $@ $(BIN_DIR)/_boot_anchor.exe
-	@$(BIN_DIR)/_boot_anchor.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/_boot_new
-	@$(BIN_DIR)/_boot_new.exe     compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/_boot_new2
-	@# 自举闭环:新 exe 编 src0 的产物必须与它自己编的完全一致
-	@cmp -s $(BIN_DIR)/_boot_new.s $(BIN_DIR)/_boot_new2.s || { \
-	    echo "SELFFAIL: 新 jhyy.exe 编 src0 的结果与它自己编的不一致 —— 自举不闭环"; \
-	    echo "          $(BIN_DIR)/_boot_new.s  vs  $(BIN_DIR)/_boot_new2.s"; \
-	    exit 1; }
+	@# ── 自举闭环门:迭代到**不动点**(W-147,2026-10-26 真修)──
+	@#
+	@# 为什么从「编两代比一次」改成「迭代到不动点」:
+	@#
+	@# 旧逻辑:锚点编出第 1 代,第 1 代再编出第 2 代,比第 1 代与第 2 代的 .s。
+	@#   ⇒ 它验的是**锚点**的不动点,装出去的却是**没被验过**的第 1 代。
+	@#   ⇒ 改后端时(src0 自己的 .s 编码变了)会有**一代**过渡:
+	@#      第 1 代与第 2 代必然不同 ⇒ 门硬失败 ⇒ make 卡死;
+	@#      而那一代恰恰是**常量错**的一代(实测:src0 里 2^63 / 2^64 被写成
+	@#      9.2233720368547758 / 1.8446744073709551 —— 指数被后端丢掉)
+	@#      ⇒ 就算手工绕过门装上去,装出去的是**坏产物**。
+	@#
+	@# 新逻辑:反复「锚点编第 N 代 → 第 N 代编第 N+1 代 → 比第 N 与第 N+1 代」,
+	@#   不等就把锚点推进一代,最多 3 轮。
+	@#   收敛的那一轮,第 N 代**就是不动点**(第 N+1 代与它同产物)⇒ 装它是对的。
+	@#   ⇒ 门从「验锚点」升级成「验**装出去的那个产物**」—— 只会更强,不会更松。
+	@#   ⇒ 过渡期自动消化,不需要任何 escape hatch(仓库规矩:门不许有后门)。
+	@#
+	@# 3 轮仍不收敛 ⇒ 硬失败(真正的非确定性照样被抓,见 W-121 那类)。
+	@i=0; converged=0; \
+	while [ $$i -lt 3 ]; do \
+	  if ! $(BIN_DIR)/_boot_anchor.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/_boot_new >$(BIN_DIR)/_boot_new.log 2>&1; then \
+	    echo "SELFFAIL: 第 $$((i+1)) 代编译失败:"; cat $(BIN_DIR)/_boot_new.log; exit 1; \
+	  fi; \
+	  if ! $(BIN_DIR)/_boot_new.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/_boot_new2 >$(BIN_DIR)/_boot_new2.log 2>&1; then \
+	    echo "SELFFAIL: 第 $$((i+2)) 代编译失败:"; cat $(BIN_DIR)/_boot_new2.log; exit 1; \
+	  fi; \
+	  if cmp -s $(BIN_DIR)/_boot_new.s $(BIN_DIR)/_boot_new2.s; then converged=1; break; fi; \
+	  echo "  (自举过渡:第 $$((i+1)) 代与第 $$((i+2)) 代产物不同 ⇒ 推进锚点一代)"; \
+	  cp -f $(BIN_DIR)/_boot_new.exe $(BIN_DIR)/_boot_anchor.exe; \
+	  i=$$((i+1)); \
+	done; \
+	if [ $$converged -ne 1 ]; then \
+	  echo "SELFFAIL: 自举在 3 代内未收敛 —— 编译器不是不动点"; \
+	  echo "          $(BIN_DIR)/_boot_new.s  vs  $(BIN_DIR)/_boot_new2.s"; \
+	  exit 1; \
+	fi; \
+	echo "  自举闭环:第 $$((i+1)) 代收敛 ✓(不动点)"
 	@# v4.0.9 (W-117):产物还必须与**提交进仓的那个**逐字节相同,否则停下。
 	@#
 	@# 为什么必须硬失败而不是打个 warning:上面那条自举闭环检查只证明
@@ -154,7 +183,8 @@ $(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(JHY_RUNTIME_O) $
 	@mv -f $(BIN_DIR)/_boot_new.exe $@
 	@rm -f $(BIN_DIR)/_boot_anchor.exe $(BIN_DIR)/_boot_new2.exe \
 	       $(BIN_DIR)/_boot_anchor.il $(BIN_DIR)/_boot_new2.il \
-	       $(BIN_DIR)/_boot_anchor.s  $(BIN_DIR)/_boot_new.s
+	       $(BIN_DIR)/_boot_anchor.s  $(BIN_DIR)/_boot_new.s \
+	       $(BIN_DIR)/_boot_new.log $(BIN_DIR)/_boot_new2.log
 
 # v4.0.8:预编 runtime.c / jhyy_helpers.c 成 .o。
 #
