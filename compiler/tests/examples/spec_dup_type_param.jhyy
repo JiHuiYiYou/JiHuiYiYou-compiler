@@ -1,0 +1,18 @@
+// spec_dup_type_param.jhyy — 同名**类型参数** ⇒ 编译期报错(不是一串看不懂的连带错误)
+//
+// 2026-10-27(W-152 真修):重名类型参数(`fn f<T, T>`)本来**不崩**,但 null 进了
+// type_params 数组 ⇒ fn 声明里有 2 个类型参数、符号表里只有 1 个 ⇒ 后面报的是
+// 「E0062: cannot infer type parameter from arguments (no argument for some
+// type parameter)」这种**完全指不到病根**的错误。
+//
+// 修法:类型参数的插入点也加守卫 ⇒ 直接报「the type parameter name `T` is
+// defined multiple times」。
+//
+// EXPECT-ERROR: "the type parameter name"
+fn f<T, T>(x: T) -> T {
+    return x;
+}
+
+fn main_jhyy() -> i32 {
+    return f(42);
+}

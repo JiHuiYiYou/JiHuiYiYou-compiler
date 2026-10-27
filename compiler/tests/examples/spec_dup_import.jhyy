@@ -1,0 +1,18 @@
+// spec_dup_import.jhyy — 同名 **import** ⇒ 编译期报错(不是编译器崩溃)
+//
+// 2026-10-27(W-152 真修):`symtab_insert` 对「同 scope 重名」返回 null ⇒
+// import 节点的 sym 是 null ⇒ `main.jhyy` 的 inline_imports 直接
+// `(*id_sym_p).name` 解引用它 ⇒ **ACCESS_VIOLATION(0xC0000005)**。
+//
+// 实测:`import os; import os;` ⇒ 编译器崩(而不是报错)。
+//
+// 语义(user 2026-10-27 拍板):同名 import 是**错误**(与 Rust 的
+// 「the name `os` is defined multiple times」一致)⇒ 编译期报错,干净退出。
+//
+// EXPECT-ERROR: "is defined multiple times"
+import os;
+import os;
+
+fn main_jhyy() -> i32 {
+    return 0;
+}

@@ -3487,8 +3487,17 @@ fn parse_func(p: *Parser, is_extern: i32) -> *Node {
             if parser_check(p, TOKEN_EOF()) != (0 as i32) { break; }
             parser_expect(p, TOKEN_IDENT(), "type parameter name" as *u8, &t);
             let tpname = parser_tok_name(p, &t);
-            let _tpsym = symtab_insert((*p).current_scope, tpname, SYM_TYPE(),
-                                       0 as *u8, 0 as i32, (*p).scope_depth);
+            // W-152 真修(2026-10-27):重名类型参数 ⇒ 编译期报错(不是一串看不懂的
+            // 连带错误)。原来这里**不检查**返回值 ⇒ null 进了 type_params 数组
+            // ⇒ fn 声明里有 2 个类型参数、符号表里只有 1 个 ⇒ 后面报
+            // 「E0062: cannot infer type parameter from arguments」这种
+            // 完全指不到病根的错误。
+            let mut _tpsym = symtab_insert((*p).current_scope, tpname, SYM_TYPE(),
+                                          0 as *u8, 0 as i32, (*p).scope_depth);
+            if _tpsym == (0 as *Sym) {
+                _tpsym = parser_duplicate_name(p, loc_lf, loc_ll, loc_lc, tpname,
+                                               "the type parameter name" as *u8);
+            }
             if ntype_params >= tcap2 {
                 tcap2 = if tcap2 != (0 as i64) { tcap2 * (2 as i64) } else { (4 as i64) };
                 let nt = arena_alloc((*p).arena, tcap2 * (8 as i64));
@@ -3676,8 +3685,13 @@ fn parse_type_decl(p: *Parser) -> *Node {
             // 插 SYM_TYPE + type_ptr=0(type_ptr=0 是 monomorphize sentinel,
             //   resolve_type_node @285-289 已 gate type_ptr != 0 — bare T 在
             //   non-generic scope 会报 E0060)
-            let _psym = symtab_insert((*p).current_scope, pname, SYM_TYPE(),
-                                      0 as *u8, 0 as i32, (*p).scope_depth);
+            let mut _psym = symtab_insert((*p).current_scope, pname, SYM_TYPE(),
+                                         0 as *u8, 0 as i32, (*p).scope_depth);
+            // W-152 真修(2026-10-27):重名类型参数 ⇒ 编译期报错(同上面的 _tpsym)
+            if _psym == (0 as *Sym) {
+                _psym = parser_duplicate_name(p, loc_lf, loc_ll, loc_lc, pname,
+                                              "the type parameter name" as *u8);
+            }
             // 收集 type-param sym 进 type_params 数组
             if ntype_params >= tcap {
                 tcap = if tcap != (0 as i64) { tcap * (2 as i64) } else { (4 as i64) };
@@ -3936,8 +3950,17 @@ fn parse_import_decl(p: *Parser) -> *Node {
     let mname = parser_tok_name(p, &t);
     parser_expect(p, TOKEN_SEMICOLON(), ";" as *u8, &t);
 
-    let sym = symtab_insert((*p).global_scope, mname, SYM_MODULE(),
-                            0 as *u8, 0 as i32, 0 as i32);
+    // W-152 真修(2026-10-27):重名 import ⇒ 编译期报错(不是崩)
+    //
+    // `symtab_insert` 对「同 scope 重名」返回 null ⇒ 本节点的 sym 是 null ⇒
+    // `main.jhyy` 的 inline_imports 直接 `(*id_sym_p).name` 解引用它 ⇒
+    // **ACCESS_VIOLATION(0xC0000005)** —— 实测 `import os; import os;` 崩。
+    let mut sym = symtab_insert((*p).global_scope, mname, SYM_MODULE(),
+                                 0 as *u8, 0 as i32, 0 as i32);
+    if sym == (0 as *Sym) {
+        sym = parser_duplicate_name(p, loc_lf, loc_ll, loc_lc, mname,
+                                     "the name" as *u8);
+    }
     return ast_new_import_decl((*p).arena, loc_lf, loc_ll, loc_lc, sym);
 }
 
