@@ -123,6 +123,9 @@ $(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(JHY_RUNTIME_O) $
 	@#   ⇒ 过渡期自动消化,不需要任何 escape hatch(仓库规矩:门不许有后门)。
 	@#
 	@# 3 轮仍不收敛 ⇒ 硬失败(真正的非确定性照样被抓,见 W-121 那类)。
+	@# 锚点 = 当前这个(已提交的)jhyy.exe —— 每轮开始前都重铺一遍
+	@rm -f $(BIN_DIR)/_boot_anchor.exe   # 删陈旧锚点:缺 cp 时要响亮失败,不能拿旧的顶
+	@cp -f $@ $(BIN_DIR)/_boot_anchor.exe
 	@i=0; converged=0; \
 	while [ $$i -lt 3 ]; do \
 	  if ! $(BIN_DIR)/_boot_anchor.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/_boot_new >$(BIN_DIR)/_boot_new.log 2>&1; then \
