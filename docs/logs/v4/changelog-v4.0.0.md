@@ -1542,11 +1542,42 @@ parse errors
 
 ⇒ **台账 ACTIVE 桶清零(第二次)**:1 → 0。
 
+### W-151:match arm 不开作用域 ⇒ arm 的模式绑定**复用外层同名变量** ⇒ payload 被静默丢弃
+
+**2026-10-27 晚 —— 继 W-142 之后查 match 语义时挖出的第三个缺陷(同类:静默错值)。**
+
+**症状:**
+```jhyy
+let v = 1;
+let r = match Option::Some(5) { Some(v) => v, None => 0 };
+// r == 1(外层的 v)而不是 5(payload)⇒ **静默错值**,零诊断
+```
+⇒ arm body 里带算术也一样(`Some(v) => v + 1000` 得到 **1001** 而不是 1005)。
+
+**根因两处(缺一不可):**
+1. **arm 不开作用域** —— statement 形式(`parse_match`)与 expression 形式
+   (inline match 在 `parse_expr` 里)是**两份**match 解析代码,**都不 push 作用域**
+   ⇒ arm 的模式绑定落进**外层**作用域;
+2. **模式里的 ident 走「先查后插」,而查是 `symtab_lookup`** —— 它**沿作用域链
+   往外找** ⇒ 外层已有同名变量时,模式**复用**它 ⇒ 模式的「绑定」变成了「引用」
+   ⇒ payload 抽不出来。
+
+**修法:** 每个 arm 一个**独立作用域**(push/pop)+ 模式里的 ident 只查**当前**
+作用域(`symtab_lookup_local` 而不是 `symtab_lookup`)。
+OR pattern 的两侧在同一个 arm 作用域里 ⇒ 仍共用一个绑定(与 spec §5.6
+「两侧必须绑定同名同类型的变量」一致)。
+
+⚠ **两份** match 解析代码都要改 —— 只改一处不够(实测踩过:第一版只改了
+statement 形式,expression 形式照样错)。
+
+⇒ spec §5.6 补写「每个 match arm 是独立作用域」;门
+`spec_match_arm_scope.jhyy`(修前红 `expected=0 got=37` ⇒ 修后 EXIT=0)。
+
 ### 门结果(2026-10-26 实测,本轮真修后)
 
 | 门 | 结果 |
 |---|---|
-| `regress.py`(全量) | ✅ **254 PASS + 0 XFAIL + 0 failed + 20 SKIP**(274 total)—— 上一版 249 PASS + 1 XFAIL / 270;本轮再 +4 条门 + 1 个 XFAIL 转真门(⇒ **套件 XFAIL 归零**) |
+| `regress.py`(全量) | ✅ **255 PASS + 0 XFAIL + 0 failed + 20 SKIP**(275 total)—— 上一版 249 PASS + 1 XFAIL / 270;本轮再 +5 条门 + 1 个 XFAIL 转真门(⇒ **套件 XFAIL 归零**) |
 | `regress.py --cross=auto`(Docker 起) | ✅ 7 个 sysv 交叉用例全过(exit=28/217/42/35/18/42/170) |
 | `audit_test_assertions.py --strict` | ✅ **0 违规** |
 | `artifact_checks.sh` | ✅ **14 PASS / 0 FAIL** |
@@ -1571,8 +1602,9 @@ parse errors
 | W-149 | RESOLVED | 整数→浮点 conv 表丢符号性 + f32 目标拿到 f64 |
 | W-142 | RESOLVED | 同作用域同名 let ⇒ **shadowing**(spec §3 的承诺已恢复) |
 | W-150 | RESOLVED | 重名 fn / type / const / 参数 ⇒ 空指针写崩溃 ⇒ 改编译期报错 |
+| W-151 | RESOLVED | match arm 不开作用域 ⇒ arm 的模式绑定复用外层同名变量 ⇒ **payload 被静默丢弃** |
 
-⇒ 台账 **3 ACTIVE → 0 ACTIVE / 0 DEFERRED**、139 索引行(**ACTIVE 桶第二次清空**)。
+⇒ 台账 **3 ACTIVE → 0 ACTIVE / 0 DEFERRED**、140 索引行(**ACTIVE 桶第二次清空**)。
 
 ---
 

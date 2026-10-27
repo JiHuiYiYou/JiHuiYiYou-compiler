@@ -169,8 +169,10 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 **0 ACTIVE / 0 DEFERRED**(2026-10-27 —— **ACTIVE 桶第二次清空**(第一次是 2026-10-20)。
 v4.0.22 三轮下来把审计挖出的 6 条 ACTIVE 全闭了:W-143 / W-144(第二轮)、
 W-145..W-149(第二轮)、**W-142(第三轮:同作用域 shadowing → 改成 shadowing)+ 兄弟
-缺陷 W-150(重名 fn/type/const/参数 ⇒ 空指针写崩溃 → 改编译期报错)**。
-⇒ 套件的 **XFAIL 也归零**(254 PASS + 0 XFAIL)。
+缺陷 W-150(重名 fn/type/const/参数 ⇒ 空指针写崩溃 → 改编译期报错)**;
+第三轮晚又查出并修掉 **W-151**(match arm 不开作用域 ⇒ arm 的模式绑定复用外层同名
+变量 ⇒ **payload 被静默丢弃**)。
+⇒ 套件的 **XFAIL 也归零**(255 PASS + 0 XFAIL + 0 failed + 20 SKIP)。
 (此前:2026-10-26 早些时候 —— ACTIVE 涨到 **3** —— **W-143** = 浮点↔指针**不是按位
 重解释**(浮点→指针走数值截断;指针→浮点**静默给 0**);**W-144** = 数组类型的 struct
 字段**没被拷贝**(字面量读到垃圾 + 按值赋值 ACCESS_VIOLATION))。
@@ -188,6 +190,7 @@ W-145..W-149(第二轮)、**W-142(第三轮:同作用域 shadowing → 改成 sh
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
+| W-151 | — | ~~match arm 不开作用域 ⇒ arm 的模式绑定**复用外层同名变量** ⇒ **payload 被静默丢弃**(静默错值)~~ ✅ **2026-10-27 已修**:arm 的模式绑定落进**外层**作用域 + `parse_pattern` 的 ident 绑定走「先查后插」且查是 `symtab_lookup`(沿链往外找)⇒ 模式的「绑定」变成「引用」。修法:每个 arm 一个**独立作用域**(push/pop)—— ⚠ statement 形式(`parse_match`)与 expression 形式(inline match 在 `parse_expr` 里)是**两份**代码,**都要改**(实测踩过);模式里的 ident 只查**当前**作用域(`symtab_lookup_local`)。门:`spec_match_arm_scope.jhyy` |
 | W-150 | — | ~~重名 **fn / type / const / 参数** ⇒ 编译器**空指针写崩溃**(0xC0000005)~~ ✅ **2026-10-27 已修**:与 W-142 同源(`symtab_insert` 对「同 scope 重名」返回 null ⇒ 调用方不检查 ⇒ null 进 AST ⇒ sema 无条件解引用)。user 拍板:这几类是**错误**(不像 `let` 那样 shadowing)⇒ 编译期报 `the name \`f\` is defined multiple times`。新增 `parser_duplicate_name`(报错 + 返回一个**可用**的 sym ⇒ 永不 null)+ 5 个直接插入点加守卫;parser 的 `error_count > 0` ⇒ 驱动直接 `parse errors` + exit 1 ⇒ sema 根本不跑。门:`spec_dup_fn_name.jhyy` / `spec_dup_type_name.jhyy` / `spec_dup_param.jhyy` |
 | W-142 | — | ~~同作用域 shadowing 让编译器崩溃**(0xC0000005)~~ ✅ **2026-10-27 已修**:根因链 `parser.jhyy` 的 `parse_let` 调 `symtab_insert` → `symtab.jhyy` 的「重复检查(同 scope)」命中时 **`return 0`** ⇒ AST 的 sym 是 null → sema 无条件 `(*sym).type_ptr = ...` ⇒ **空指针写**。修法:同作用域同名 `let` ⇒ **shadowing**(spec §3 的原承诺已恢复)⇒ 新增 `symtab_insert_or_shadow`(**新建** Sym **原地替换**旧槽 —— 两个要点:复用旧指针 = 先绑定赢;新旧两条都留表里 = 按名查找拿到旧的)。语义与嵌套作用域的 shadowing 完全一致(可改可变性)。门:`spec_shadowing.jhyy`(**XFAIL 已摘**,转真门)+ `spec_shadowing_immutable.jhyy` |
 | W-149 | — | ~~整数→浮点 conv 表丢**符号性** + f32 目标拿到 **f64** ⇒ 8 个组合里 5 个错~~ ✅ **2026-10-26 已修**:前端 conv 表(`cg_convert_arg`)对 `u64 → f64` 一律发**有符号**的 `sltof` ⇒ 值 ≥ 2^63 变负数(后端的 `ultof` 算法早就对、**W-146 还修过**,但前端从来没发过它 ⇒ 死代码);且给 f32 目标发 `ultof`/`uwtof` ⇒ 那几个 op 在本后端**恒产 f64** ⇒ f64 位模式塞进 f32 槽。修法:按源类型 prim 判符号性 + f32 目标统一「先转 f64,再 `truncd`」。门:`spec_int_to_float.jhyy`(8 组合矩阵;修前红 `got=234`) |
@@ -239,7 +242,7 @@ W-145..W-149(第二轮)、**W-142(第三轮:同作用域 shadowing → 改成 sh
 | W-134 | ~~MCP pytest 套件里有一个**恒红**的陈旧测试~~ ✅ **2026-10-25 已修** —— `test_regress_baseline_drift_detection` 断言「sha 漂移 ⇒ 报 binary drifted」,但那个行为已被上一轮 commit `f72cef4` 刻意换成「binary 比源旧」的新鲜度检查 ⇒ **从那次起套件就是红的**,而 CI 从不跑 pytest ⇒ 没人发现。修法:拆成两条 —— `test_regress_sha_drift_is_not_fatal`(漂移**不**误报)+ `test_regress_stale_binary_detected`(binary 比源旧 ⇒ early_abort `older than source`)。**套件 40 passed / 1 skipped / 0 failed** |
 | W-134.1 | **DEFERRED** —— `mcp-jhyy/tests/`(41 个测试)在 CI 里**零覆盖**(`ci.yml` 没有 pytest step,也没有任何 `pip install`)⇒ 套件红绿都不影响 CI 结论。补 CI step 需要**第一个网络依赖**(fastmcp / pytest / pytest-asyncio),而本机 MSYS2 python 连 pip 都没有 ⇒ 命令**无法本地验证** ⇒ 建议单独一个 commit + 先在 PR 分支观察一轮 |
 
-**回归现状(2026-10-27 实测,W-142/W-150 真修后):254 PASS + 0 XFAIL + 0 failed + 20 SKIP(274 total)**
+**回归现状(2026-10-27 实测,W-142/W-150/W-151 真修后):255 PASS + 0 XFAIL + 0 failed + 20 SKIP(275 total)**
 (新增 49 条门:6 个 std lib 真身覆盖 + 11 个 spec 正向行为 + 31 个错误诊断门 +
 1 个聚合比较字段类型矩阵;第二轮再 +1 条 `spec_int_to_float.jhyy`(W-149 的 8 组合矩阵);
 `spec_ptr_float_cast.jhyy`(W-143)/ `spec_struct_array_field.jhyy`(W-144)两个 XFAIL

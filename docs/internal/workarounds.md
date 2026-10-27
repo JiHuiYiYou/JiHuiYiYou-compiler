@@ -153,6 +153,7 @@
 | [W-134](#w-134) | RESOLVED | MCP pytest 套件里有一个**恒红**的陈旧测试 —— 断言的行为早已被换掉 |
 | [W-134.1](#w-134.1) | RESOLVED | `mcp-jhyy/tests/` 在 CI 里**零覆盖** —— 套件红绿都不影响 CI 结论 |
 | [W-142](#w-142) | RESOLVED | 同作用域 shadowing 让编译器在 sema 阶段**空指针写崩溃**(0xC0000005) |
+| [W-151](#w-151) | RESOLVED | match arm 不开作用域 ⇒ arm 的模式绑定**复用外层同名变量** ⇒ payload... |
 | [W-150](#w-150) | RESOLVED | 同作用域重名(fn / type / const / 参数)⇒ 编译器**空指针写崩溃** |
 | [W-141](#w-141) | RESOLVED | std/string.jhyy 的 arena block 布局错误 ⇒ 分配互相踩 ⇒... |
 | [W-140](#w-140) | RESOLVED | std/string.jhyy 的 `str_find` 返回裸字面量 ⇒ `import... |
@@ -10903,6 +10904,66 @@ shadowing 修好了它仍会 FAIL ⇒ 改写成「返回 fails 计数」的形�
   `spec_shadowing_immutable.jhyy`(shadow 成不可变后再赋值 ⇒ 报错)
 - spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §3(已恢复 shadowing 承诺)+ 附录 B
 - 关联:**W-150**(同一个 null sym 的兄弟崩溃:重名 fn / type / const / 参数)
+
+---
+
+<a id="w-151"></a>
+## W-151: match arm 不开作用域 ⇒ arm 的模式绑定**复用外层同名变量** ⇒ payload 被静默丢弃
+
+**状态:** RESOLVED closed 2026-10-27 (v4.0.22) — 每个 arm 一个独立作用域 + 模式绑定只查当前作用域;门已挂
+**Filed-by:** W-142 真修后顺带查 match 语义时挖出
+**日期:** 2026-10-27
+
+**触发面:** `compiler/src0/parser.jhyy` 的**两处** match 解析(statement 形式的
+`parse_match` + expression 形式内联在 `parse_expr` 里的 inline match)+
+`parse_pattern` 的 ident 绑定。
+
+**症状(2026-10-27 实测,静默错值):**
+```jhyy
+let v = 1;
+let r = match Option::Some(5) { Some(v) => v, None => 0 };
+// r == 1(外层的 v)而不是 5(payload)⇒ **静默错值**,零诊断
+```
+⇒ arm body 里带算术也一样(`Some(v) => v + 1000` 得到 **1001** 而不是 1005)。
+
+**根因(两处,缺一不可):**
+1. **arm 不开作用域** —— statement 形式(`parse_match`)与 expression 形式
+   (inline match,在 `parse_expr` 里)是**两份**match 解析代码,**都不给 arm
+   push 作用域** ⇒ arm 的模式绑定落进**外层**作用域;
+2. **模式里的 ident 走「先查后插」,而查是 `symtab_lookup`** —— 它**沿作用域链
+   往外找** ⇒ 外层已有同名变量时,模式**复用**它 ⇒ 模式的「绑定」变成了「引用」
+   ⇒ payload 抽不出来。
+
+⇒ 两个后果:
+- **payload 被静默丢弃**(上面那条)—— 最坏的一类:值错、但不报错、不崩;
+- arm 的绑定**漏到 match 之后**(外层作用域里凭空多一个 v)⇒ 之后同名 `let`
+  会与它撞车(**W-142 修前 ⇒ 编译器崩**)。
+
+**修法(2026-10-27 真修):**
+- 每个 arm 一个**独立作用域**(`parser_push_scope` / `parser_pop_scope`)——
+  ⚠ **两份**match 解析代码都要改(只改一处不够!实测踩过:第一版只改了
+  statement 形式,expression 形式(实测探针用的正是它)照样错);
+- 模式里的 ident 是**绑定**不是**引用** ⇒ 只查**当前**作用域
+  (`symtab_lookup_local` 而不是 `symtab_lookup`);
+  OR pattern 的两侧在**同一个** arm 作用域里 ⇒ 第二侧仍复用第一侧的绑定
+  ⇒ 共用一个(与 spec §5.6「两侧必须绑定同名同类型的变量」一致)。
+
+**门:** `compiler/tests/examples/spec_match_arm_scope.jhyy`(真门,6 条断言:
+payload 抽得到 / 外层不受影响 / 算术用 payload / 名字不冲突时行为不变 /
+两个 arm 绑同名互不干扰 / 三者共存)。
+修前红:`expected=0 got=37` ⇒ 修后 EXIT=0 ✓(造过红灯)。
+
+**影响范围(修前):** 任何「match arm 的绑定名与外层变量同名」的程序 ⇒ arm 里的
+payload 抽不出来 ⇒ **静默算错值**(而且是「用外层的旧值」这种最难查的错法)。
+
+**失效条件:** 已消除(2026-10-27 真修,见上)。
+
+**引用:**
+- 源码:`compiler/src0/parser.jhyy`(`parse_match` + inline match 的 arm 作用域;
+  `parse_pattern` 的 ident 绑定)
+- 门:`compiler/tests/examples/spec_match_arm_scope.jhyy`
+- spec:`docs/abis/jhyy-lang-spec-v4.0.0.md` §5.6(arm 作用域语义已写明)
+- 关联:**W-142**(arm 的绑定漏出去之后,同名 `let` 会撞车 ⇒ 修前是崩溃)
 
 ---
 

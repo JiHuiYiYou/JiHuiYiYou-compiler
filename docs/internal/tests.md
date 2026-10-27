@@ -2,8 +2,8 @@
 
 > 集成测试清单 + 运行方法。详细每条 .jhyy 的预期值见 `compiler/tests/examples/`。
 >
-> **Last updated**: 2026-10-27 — `regress.py` = **254 PASS + 0 XFAIL + 0 failed + 20 SKIP**
-> (274 total)。`closure_check.sh` v2.s == v3.s byte-identical。
+> **Last updated**: 2026-10-27 — `regress.py` = **255 PASS + 0 XFAIL + 0 failed + 20 SKIP**
+> (275 total)。`closure_check.sh` v2.s == v3.s byte-identical。
 > 本机 Docker 已起 → `--cross=auto` 解析成 **docker**,6 个 sysv 用例**本地也真跑**
 > (exit=28/217/42/35/18/42 全对)。
 >
@@ -291,7 +291,7 @@ baseline 历史:
 - v4.0.8 — 173/173 PASS + 5 XFAIL + 19 SKIP(197 total)
 - v4.0.16 — 181/181 PASS + 2 XFAIL + 20 SKIP(203 total)
 - v4.0.20 — 186/186 PASS + 0 XFAIL + 19 SKIP(205 total)
-- **v4.0.22 — 254 PASS + 0 XFAIL + 0 failed + 20 SKIP(274 total)** ← 当前(2026-10-27 实测;lang-spec 覆盖审计补 49 条门 + W-143/144 真修再 +1 条 `spec_int_to_float.jhyy` + W-142/150 真修再 +4 条;3 个 XFAIL 全转真门 ⇒ **套件 XFAIL 归零**)
+- **v4.0.22 — 255 PASS + 0 XFAIL + 0 failed + 20 SKIP(275 total)** ← 当前(2026-10-27 实测;lang-spec 覆盖审计补 49 条门 + W-143/144 真修再 +1 条 `spec_int_to_float.jhyy` + W-142/150/151 真修再 +5 条;3 个 XFAIL 全转真门 ⇒ **套件 XFAIL 归零**)
 
 ⚠️ 数量涨了不代表覆盖变强。**断言强度**和**失败模式覆盖**是两个轴:
 前者今天清零了(零信号 54 → 0),后者仍然低 —— 一个没有测试的 bug,

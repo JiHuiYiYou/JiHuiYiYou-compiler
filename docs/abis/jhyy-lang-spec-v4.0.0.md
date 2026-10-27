@@ -409,6 +409,7 @@ let desc = match x {
 | 枚举绑定 | `Enum::Variant(x)` 或短名 `Variant(x)` | |
 
 - 所有 arm 返回类型必须一致。
+- **每个 match arm 是独立作用域**：arm 的模式绑定（`Some(x)` 的 `x`）是**新绑定** —— 它**遮住**外层同名变量（arm 里读到的是 payload，不是外层的旧值），arm 结束后**不外泄**。与 Rust 一致。
 - **穷尽性检查已实装**：match 作用在 enum 上时，每个变体必须被显式覆盖或由 `_` 兜底，否则编译错误 `non-exhaustive match: missing variant`。
 - ⚠️ **范围的端点语义与 `for` 循环不同**：`0..10` 在 match 里**同时匹配 0 和 10**（闭区间），在 `for` 里不含 10（半开）。写范围 pattern 时按闭区间理解。
 - ⚠️ 不支持 **guard pattern**（`Some(x) if x > 0` → 解析错误）。
