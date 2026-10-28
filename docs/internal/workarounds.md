@@ -177,6 +177,11 @@
 | [W-147](#w-147) | RESOLVED | 自举闭环门**验错了代** —— 验锚点、装第 1 代 ⇒ 过渡期卡死 + 装出坏产物 |
 | [W-148](#w-148) | RESOLVED | 后端 f64/f32 字面量解析**丢掉指数** ⇒ 任何 ≥1e16 的浮点常量都错 |
 | [W-149](#w-149) | RESOLVED | 整数→浮点 conv 表丢**符号性** + f32 目标拿到 **f64** ⇒ 8 个组合里... |
+| [W-158](#w-158) | RESOLVED | MSI 的 MSYS2 硬门槛 —— 没装 MSYS2 的机器**根本装不上编译器** |
+| [W-159](#w-159) | RESOLVED | gcc / collect2 按**裸名**找 `as` / `ld` ⇒ 捡到 PATH... |
+| [W-160](#w-160) | RESOLVED | 运行时 DLL 闭包只算**直接**导入 ⇒ 漏传递依赖 ⇒ 工具链在没 MSYS2... |
+| [W-161](#w-161) | RESOLVED | 头文件闭包只收 `*.h` ⇒ 漏 `.inl` ⇒ 内置工具链**编自己的 runtime.c... |
+| [W-162](#w-162) | RESOLVED | gcc 中间文件落 **cwd**(TMP 未设)⇒ 只读目录下链接失败且零输出 |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -12085,3 +12090,182 @@ IL 里的 `d_9.2233720368547758e+18` 被解析成 `9.2233720368547758` ——
   `compiler/src0/codegen_amd64_emit_sse.jhyy`(`emit_conv_*tof`)
 - 门:`compiler/tests/examples/spec_int_to_float.jhyy`
 - 相关:**W-146**(后端算法已对,但前端没接上)
+
+<a id="w-158"></a>
+## W-158: MSI 的 MSYS2 硬门槛 —— 没装 MSYS2 的机器**根本装不上编译器**
+
+**状态:** RESOLVED closed 2026-10-29 (v4.1.0) — installer 自带工具链,门槛拆除
+**Filed-by:** 2026-10-28 user 决定「全套 burn 进 installer」
+**日期:** 2026-10-28 → 2026-10-29
+
+**触发面:** `installer/wix/compiler/jhyy-compiler.wxs` 的
+`<Launch Condition="Installed OR MSYS2_GCC_FOUND" Message="!(loc.MSYS2NotFound)" />`
++ 4 路 MSYS2 探测(同文件 `:74-130`)。
+
+**症状:**
+- 目标机没装 MSYS2 ⇒ **MSI 直接 1603 失败**,编译器装不上;
+- 目标机装了 MSYS2 ⇒ 装上了,但编译器仍然用**用户自己那份** gcc
+  ⇒ 版本不受控,且 `docs/internal/build.md` §PATH 顺序 记的那个坑
+  (ucrt64 的 ld 捡到别的 DLL ⇒ **链接失败且 stderr 零输出**)照样发作。
+
+**根因:** 这是 v1.5.2 时刻的「力度 1 检测+引导」决策(见 `installer/wix/Bundle.wxs`
+文件头注释「不打包 GCC toolchain (~85MB 太重, 不在 v1.5 scope)」)——
+当时的取舍,到 v4.1.0 已经被用户明确推翻(「全套 burn 进 installer」)。
+
+**修法(2026-10-29 真修):**
+- installer 自带一份**最小原生 ucrt64 工具链**(gcc + binutils + CRT + 头文件闭包,
+  ≈90MB 原始 / MSI 压缩后 ≈40MB),装到 `<INSTALLDIR>\toolchain\`;
+- 删掉 LaunchCondition 与 4 路探测(工具链现在恒在,MSI 不该再拦人);
+- 编译器的解析顺序改成 `JHY_GCC` → `%JHYY_HOME%\env.txt` → **内置** →
+  `C:\msys64` 硬编码 → PATH → 裸 `gcc` ⇒ 默认用内置那份(确定性 + 版本受控);
+- 逃生门保留在最上面:用户要用自己的 gcc,设 `JHY_GCC` 或写 `env.txt`
+  (installer **不**代写 —— 写死绝对路径会在换盘/重装时失效)。
+
+**影响范围:** 所有装机用户。修前:没 MSYS2 装不上;修了:裸 Windows 10 机器
+装完即可 `jhyy build hello.jhyy`。
+
+**失效条件:** 已消除(2026-10-29 真修,见上)。
+
+**引用:**
+- 源码:`installer/wix/compiler/jhyy-compiler.wxs`(LaunchCondition 已删)
+- 编译器侧:`compiler/src0/jhyy_helpers.c`(`jh_gcc_path()` 新增「内置」一级)
+- 设计文档:`installer/toolchain/README.md`
+- 相关:**W-159 / W-160 / W-161 / W-162**(把这套工具链真正做自包含时挖出的四条)
+
+<a id="w-159"></a>
+## W-159: gcc / collect2 按**裸名**找 `as` / `ld` ⇒ 捡到 PATH 里的**别的** ld ⇒ 零输出链接失败
+
+**状态:** RESOLVED closed 2026-10-29 (v4.1.0) — 内置工具链把 as/ld 也放进 gcc 版本目录
+**Filed-by:** 2026-10-29 内置工具链可重定位门(G2)抓出
+**日期:** 2026-10-29
+
+**触发面:** 内置工具链的 `<toolchain>/bin/`(MSYS2 布局:工具只放 bin/)——
+gcc 找 `as`、collect2 找 `ld` 时**按裸名**解析,落到 PATH。
+
+**症状:**
+```
+collect2.exe: error: ld returned 9 exit status
+```
+**stderr 只有这一句,没有别的**;产物是个 **0 字节** 的 .exe。
+本机 PATH 里 `/usr/bin`(MSYS2 **POSIX 层**)排在 ucrt64 前面 ⇒
+collect2 捡到的是 POSIX 的 `ld.exe` ⇒ 它链不了 ucrt64 的对象/库 ⇒ 退出码 9。
+
+**根因:** MSYS2 的布局把 `as.exe` / `ld.exe` 只放在 `ucrt64/bin/`,
+而 gcc 自己的搜索路径(`standard_startfile_prefix` = `lib/gcc/<target>/<ver>/`)
+里**没有**它们 ⇒ gcc/collect2 只能退回 PATH。
+MSYS2 自己能用,是因为 `ucrt64/bin` 本来就在 PATH 上;
+**一旦把工具链搬走单独分发,这个隐含前提就没了**。
+
+**修法(2026-10-29 真修):**
+把 `as.exe` / `ld.exe` **额外**复制一份到
+`<toolchain>/lib/gcc/<target>/<ver>/`(gcc 的 `standard_startfile_prefix`
+与 collect2 的 `COMPILER_PATH` 都指向那里)⇒ 全程不碰 PATH。
+代价:+4MB(两份 exe)。
+
+**影响范围:** 内置工具链的所有用户。修前:链接在**任何** PATH 形态下都可能
+静默失败;修了:与 PATH 完全无关。
+
+**失效条件:** 已消除(2026-10-29 真修,见上)。
+
+**引用:**
+- 清单:`installer/toolchain/manifest.json`(`files.gcc_lib_from_bin`)
+- 采集:`installer/scripts/collect-toolchain.ps1`
+- 门:`installer/scripts/verify-toolchain.ps1` 的 **T3(poisoned PATH)**
+  —— 这条门就是为它写的:手工测试时用的是原机器的 PATH,恰好没踩到
+- 相关:**W-158**
+
+<a id="w-160"></a>
+## W-160: 运行时 DLL 闭包只算**直接**导入 ⇒ 漏传递依赖 ⇒ 工具链在没 MSYS2 的机器上加载失败
+
+**状态:** RESOLVED closed 2026-10-29 (v4.1.0) — 闭包改成工作表式传递求闭包
+**Filed-by:** 2026-10-29 内置工具链采集脚本自检抓出
+**日期:** 2026-10-29
+
+**触发面:** `installer/scripts/collect-toolchain.ps1` 的 DLL 闭包计算。
+
+**症状:** 首版闭包只扫**每个 exe 的直接导入表**(`objdump -p`),
+得出 9 个 DLL;但 `ldd` 独立交叉验证是 **10** 个 —— 差的是 `libiconv-2.dll`。
+
+**根因:** `libintl-8.dll` **自己**导入 `libiconv-2.dll`
+(`objdump -p libintl-8.dll` 实测)。直接导入闭包漏掉它 ⇒ 装出来的机器上
+`as.exe` / `ld.exe` / `windres.exe` 加载失败(除非用户恰好有 MSYS2)
+⇒ 正是「为了不用 MSYS2 而打包,结果还是得有 MSYS2」。
+
+**修法(2026-10-29 真修):** 闭包改成**工作表式传递闭包** ——
+新收进来的 DLL 也要扫它自己的导入表,直到不再增加。
+实测结果 **10 个**,与 `ldd` 独立交叉验证**完全一致**
+(`libgcc_s_seh-1` `libgmp-10` `libiconv-2` `libintl-8` `libisl-23`
+`libmpc-3` `libmpfr-6` `libwinpthread-1` `libzstd` `zlib1`)。
+
+**影响范围:** 内置工具链的所有用户。修前:换台没 MSYS2 的机器就炸;
+修了:DLL 闭包完整。
+
+**失效条件:** 已消除(2026-10-29 真修,见上)。
+
+**引用:**
+- 采集:`installer/scripts/collect-toolchain.ps1`(DLL 闭包段)
+- 交叉验证:MSYS2 的 `ldd` 对每个 exe 的依赖
+- 相关:**W-158 / W-159**
+
+<a id="w-161"></a>
+## W-161: 头文件闭包只收 `*.h` ⇒ 漏 `.inl` ⇒ 内置工具链**编自己的 runtime.c 都编不过**
+
+**状态:** RESOLVED closed 2026-10-29 (v4.1.0) — 闭包不再按扩展名过滤
+**Filed-by:** 2026-10-29 内置工具链采集脚本自检抓出
+**日期:** 2026-10-29
+
+**触发面:** `installer/scripts/collect-toolchain.ps1` 的头文件闭包计算
+(首版有一句 `if ($tok -notlike '*.h') { continue }`)。
+
+**症状:**
+```
+installer/build-artifacts/toolchain/include/stdio.h:1148:10: fatal error: swprintf.inl: No such file or directory
+```
+⇒ 内置 gcc 连自己的 `runtime.c` 都编不过(而 `runtime.c` 只是 `#include <stdlib.h>`)。
+
+**根因:** ucrt 的 `stdio.h` 会 `#include <swprintf.inl>`。
+只收 `*.h` 的过滤器把 `.inl` 静默丢掉 —— 而**依赖闭包**本身是对的
+(`gcc -M -E` 已经把 `.inl` 列出来了),是**我们自己加的过滤器**把它扔了。
+
+**修法(2026-10-29 真修):** 去掉扩展名过滤,改成「按根目录归属判定」——
+落在工具链目录树下的文件一律收。实测闭包 **304 个文件**(含 `.inl`),
+头文件总体积 7.6 MB。
+
+**影响范围:** 内置工具链的所有用户。修前:内置工具链**完全不能用**;
+修了:闭包完整。
+
+**失效条件:** 已消除(2026-10-29 真修,见上)。
+
+**引用:**
+- 采集:`installer/scripts/collect-toolchain.ps1`(头文件闭包段)
+- 门:`installer/scripts/verify-toolchain.ps1` 的 **T2(头闭包)**
+- 相关:**W-158 / W-160**
+
+<a id="w-162"></a>
+## W-162: gcc 中间文件落 **cwd**(TMP 未设)⇒ 只读目录下链接失败且零输出
+
+**状态:** RESOLVED closed 2026-10-29 (v4.1.0) — spawn gcc 前显式补 TMP/TEMP/TMPDIR
+**Filed-by:** 2026-10-29 内置工具链设计评审
+**日期:** 2026-10-29
+
+**触发面:** `compiler/src0/jhyy_helpers.c` 的 `jh_gcc_invoke()`(spawn gcc 之前)。
+
+**症状:** 编译器在 `C:\Program Files\JHYY\bin\`(只读)里跑 ⇒
+gcc 链接失败,报错形态与 W-159 同款(常常只有一句 `ld returned N`)。
+
+**根因:** gcc / collect2 在 `TMPDIR` / `TMP` / `TEMP` **全 unset** 时,
+把 `.s → .o` 的中间产物写到**当前工作目录**。装在 Program Files 下的
+编译器,若用户恰好在只读目录里跑,中间文件写不进去。
+
+**修法(2026-10-29 真修):** `jh_ensure_temp_env()` —— 三个变量**都没设**时
+补上 `GetTempPathA()` 给的那份(用户自己设了就尊重用户的值)。
+改的是本进程环境块(`SetEnvironmentVariableA`),`CreateProcessW` 传
+`lpEnvironment=NULL` ⇒ 子进程继承 ⇒ gcc 与 windres(它内部还要跑 `gcc -E`)都拿到。
+
+**影响范围:** 内置工具链的所有用户(尤其是 Program Files 安装 + 只读工作目录)。
+
+**失效条件:** 已消除(2026-10-29 真修,见上)。
+
+**引用:**
+- 源码:`compiler/src0/jhyy_helpers.c`(`jh_ensure_temp_env()`)
+- 相关:**W-159**(同族的「静默失败」)

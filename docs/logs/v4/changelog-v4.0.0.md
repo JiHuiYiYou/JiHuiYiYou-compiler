@@ -1779,6 +1779,77 @@ cast 约定(`argv as **u8` 才能下标),附录 B 同步登记。
 
 ---
 
+## v4.1.0 — installer 自带工具链:装完即用,**不再需要 MSYS2**
+
+> **破坏性变更**:装机用户的默认 gcc 从「他自己机器上的 MSYS2」变成「内置那份」。
+> 想用回自己的:`JHY_GCC=<gcc.exe 全路径>` 或 `%JHYY_HOME%\env.txt` 里写一行。
+
+### 起因
+
+v4.1.0 之前,`jhyy-installer-<ver>.exe` 装出来的是**半残编译器**:
+
+1. `installer/wix/compiler/jhyy-compiler.wxs` 有
+   `<Launch Condition="Installed OR MSYS2_GCC_FOUND">` + 4 路 MSYS2 探测
+   ⇒ **没装 MSYS2 的机器根本装不上**(MSI 直接 1603 失败);
+2. 装上了的人,编译器仍然用**他自己那份** gcc ⇒ 版本不受控;且
+   `docs/internal/build.md` §PATH 顺序 记的那个坑(ucrt64 的 ld 捡到别的 DLL
+   ⇒ **链接失败且 stderr 零输出**)照样发作。
+
+2026-10-28 user 拍板:**「全套 burn 进 installer」**。
+
+### 做了什么
+
+| 部件 | 内容 |
+|---|---|
+| **内置工具链** | 最小原生 ucrt64 子集(gcc + binutils + CRT + 头文件闭包),≈**90 MB** 原始 / MSI CAB 压缩后 ≈40 MB,装到 `<INSTALLDIR>\toolchain\` |
+| **解析顺序** | `JHY_GCC` → `%JHYY_HOME%\env.txt` → **内置** → `C:\msys64` 硬编码 → PATH → 裸 `gcc` ⇒ **默认用内置**(确定性 + 版本受控 + 不依赖用户 PATH 形态) |
+| **护栏 A(可见性)** | 链接失败时必打一行 `JHYY: using gcc: <path> (source: bundled\|JHY_GCC\|env.txt\|msys2\|PATH\|fallback)`;`JHY_VERBOSE=1` 时每次链接都打 |
+| **护栏 B(不代写)** | installer **不**往 `env.txt` 写 gcc 路径 —— 写死绝对路径会在换盘/重装时失效,还会盖住用户自己的配置 |
+| **预编 `.o`** | 随包发 `runtime.o` / `jhyy_helpers.o`(用**收集进来的那份 gcc** 编)⇒ 安装版每次链接省 4.5 秒(5045ms → 531ms) |
+| **TMP 护栏** | spawn gcc 前把 `TMP`/`TEMP`/`TMPDIR` 补成可写目录(gcc 在这三个全 unset 时把中间产物写 cwd) |
+| **拆门槛** | 删掉 LaunchCondition + 4 路 MSYS2 探测 —— 工具链现在恒在,MSI 不该再拦人 |
+| **合规** | 随包发 `toolchain/LICENSES/`(各包许可证原文)+ `SOURCES.txt`(包名/版本/上游/源码获取方式)—— GCC 是 GPLv3+Runtime Library Exception |
+
+### 三条「不能省」的坑(全部是门抓出来的,不是设计出来的)
+
+1. **目录结构不能拍平** —— gcc 用自身位置推导 `cc1`/`collect2`/`as`/`ld`。
+2. **`as.exe`/`ld.exe` 必须额外放一份到 `lib/gcc/<target>/<ver>/`** ——
+   gcc 与 collect2 按**裸名**找这两个;PATH 上有个别的 ld(典型:MSYS2 **POSIX 层**的
+   `/usr/bin/ld.exe`)就会被捡走 ⇒ 与 ucrt64 的库不匹配 ⇒
+   **链接失败且 stderr 零输出**(只有一句 `collect2.exe: error: ld returned 9 exit status`)。
+   ⚠️ 这条**手工测试时没踩到**(原机器的 PATH 恰好有可用的 ld),
+   是 **T3(poisoned PATH)门**抓出来的。
+3. **头闭包不能只收 `*.h`** —— ucrt 的 `stdio.h` 会 `#include <swprintf.inl>`;
+   漏了 `.inl` ⇒ 内置工具链**连自己的 `runtime.c` 都编不过**。
+
+另两条同族:运行时 DLL 闭包只算**直接**导入会漏传递依赖
+(`libintl-8.dll` → `libiconv-2.dll`)⇒ 换台没 MSYS2 的机器就炸。
+
+### 新增常驻门
+
+| 脚本 | 门 |
+|---|---|
+| `installer/scripts/collect-toolchain.ps1` | 采集(版本不符**响亮失败**;CI 用 `-AllowVersionDrift` 放宽) |
+| `installer/scripts/gen-toolchain-wxs.ps1` | manifest → WiX `<Fragment>`(按目录一个 Component,GUID 用 UUIDv5 确定性生成) |
+| `installer/scripts/verify-toolchain.ps1` | **7 条门**:可重定位(带空格路径)/ 头闭包 / **poisoned PATH** / 无 PATH / windres / 预编 `.o` 字节一致 |
+
+### 台账
+
+新增 **W-158 ~ W-162** 五条(全部 RESOLVED):
+W-158(MSYS2 硬门槛)/ W-159(裸名找 as/ld ⇒ 零输出失败)/ W-160(DLL 闭包漏传递依赖)/
+W-161(头闭包漏 `.inl`)/ W-162(gcc 中间文件落 cwd)。
+
+### 验收
+
+- 回归 **257 PASS + 0 XFAIL + 0 failed + 20 SKIP**(277 total,与 v4.0.22 同)
+- 自举闭环:`make` **第 1 代即收敛**(不动点)✓;新锚点 `f6025864f80991c5...` 同 commit 提交
+- 工具链门 **7/7 PASS**
+- 装机布局端到端:模拟 `C:\Program Files\JHYY` 布局 ⇒
+  `JHYY: using gcc: ...\toolchain\bin\gcc.exe (source: bundled)` ⇒
+  编译 + 链接 + 运行 ⇒ **EXIT=42** ✓
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一
@@ -1790,7 +1861,7 @@ Per [`docs/plans/v4/backlog.md`](../../plans/v4/backlog.md) (原 12 files: v4.1.
 | Sprint | Intent |
 |---|---|
 | v4.0.0 | (this ship — axis-v2 + axis-v3 merge) |
-| v4.1.0 | M5: delete `compiler/src/*.c` + untrack QBE + delete `runtime/runtime.c` — "jhyy 编 jhyy" 0-C 闭环 (deferred from v1.x) |
+| v4.1.0 | **installer 自带最小原生 ucrt64 工具链**（2026-10-29 起做）—— 原表里这一格挂的是 M5，但 M5 Part 1（删 `compiler/src/*.c` + untrack QBE）**已在 v4.0.21 落地**，Part 3/4 未启动 ⇒ 版本号回收给工具链 bundling。⚠️ backlog 表是历史快照，与实际分配可能不一致，以「版本号在启动时才分配」为准 |
 | v4.2.0 | async/await + Future runtime |
 | v4.3.0 | full lifetime + Polonius borrow check (replaces v3.1.0 NLL stub) |
 | v4.4.0 | closure enhance: move/borrow capture/generic/trait object |

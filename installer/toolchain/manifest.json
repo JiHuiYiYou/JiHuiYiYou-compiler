@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "description": "v4.1.0 内置工具链清单 —— collect-toolchain.ps1 与 CI 的唯一真相源。改动这里 = 改内置工具链的组成。",
+
+  "toolchain": {
+    "flavor": "ucrt64",
+    "target": "x86_64-w64-mingw32",
+    "gcc_version": "15.2.0",
+    "comment": "gcc_version 必须与 collect 时本机 ucrt64 的 gcc -dumpversion 完全一致，否则收集脚本响亮失败（产物可复现性的前提）。MSYS2 根目录取 $env:MSYS2_ROOT，缺省 C:\\msys64。",
+    "default_msys2_root": "C:\\msys64"
+  },
+
+  "packages": [
+    { "name": "mingw-w64-ucrt-x86_64-gcc", "version": "15.2.0-8", "license": "GPL-3.0-or-later WITH GCC-exception-3.1" },
+    { "name": "mingw-w64-ucrt-x86_64-gcc-libs", "version": "15.2.0-8", "license": "GPL-3.0-or-later WITH GCC-exception-3.1" },
+    { "name": "mingw-w64-ucrt-x86_64-binutils", "version": "2.45-2", "license": "GPL-3.0-or-later" },
+    { "name": "mingw-w64-ucrt-x86_64-crt-git", "version": "13.0.0.r179.g8181947cc-1", "license": "MIT" },
+    { "name": "mingw-w64-ucrt-x86_64-headers-git", "version": "13.0.0.r179.g8181947cc-1", "license": "MIT / GPL-2.0-or-later WITH Mingw-exception" },
+    { "name": "mingw-w64-ucrt-x86_64-libiconv", "version": "1.18-1", "license": "LGPL-2.1-or-later" },
+    { "name": "mingw-w64-ucrt-x86_64-zlib", "version": "1.3.1-1", "license": "Zlib" }
+  ],
+
+  "files": {
+    "comment_bin": "装到 <toolchain>/bin/。gcc 用自身位置推导 cc1/collect2/as/ld ⇒ 目录结构不能拍平。",
+    "bin": [
+      "gcc.exe",
+      "as.exe",
+      "ld.exe",
+      "ar.exe",
+      "dlltool.exe",
+      "windres.exe",
+      "strip.exe",
+      "nm.exe",
+      "objdump.exe",
+      "ranlib.exe"
+    ],
+
+    "comment_gcc_lib": "装到 <toolchain>/lib/gcc/<target>/<version>/（版本号目录由本机 gcc 推导，不写死）。",
+    "gcc_lib": [
+      "cc1.exe",
+      "collect2.exe",
+      "libgcc.a",
+      "libgcc_eh.a",
+      "crtbegin.o",
+      "crtend.o",
+      "crtfastmath.o",
+      "liblto_plugin.dll"
+    ],
+
+    "comment_gcc_lib_from_bin": "源文件在 <ucrt64>/bin/，但**额外**复制一份到 lib/gcc/<target>/<version>/。⚠️ as.exe / ld.exe 必须在 —— gcc 与 collect2 是按**裸名**去找这两个的（MSYS2 把它们只放在 bin/，gcc 自己的搜索路径里没有 ⇒ 只能落到 PATH）。PATH 上只要有一个别的 ld（典型：MSYS2 POSIX 层的 /usr/bin/ld.exe，或 mingw64 的 ld.exe）就会被捡走 ⇒ 与 ucrt64 的库不匹配 ⇒ 链接失败且 **stderr 零输出**（只有一句 'collect2.exe: error: ld returned 9 exit status'）。放进这个目录后，gcc 的 standard_startfile_prefix / collect2 的 COMPILER_PATH 直接命中，全程不碰 PATH。",
+    "gcc_lib_from_bin": [
+      "as.exe",
+      "ld.exe"
+    ],
+
+    "comment_crt_lib": "装到 <toolchain>/lib/。gcc 默认链接行要 -lmsvcrt -lmingwex -lmingw32 -lpthread -lm + -lkernel32 -luser32 -lshell32 -ladvapi32（-### 实测）+ crt2.o / crtbegin.o / crtend.o 启动文件 + default-manifest.o（由 mingw-w64-ucrt-x86_64-windows-default-manifest 提供，链接行里以裸名出现，漏了它 ⇒ ld 失败、只留一个 0 字节 exe、且报错只有一句 'collect2.exe: error: ld returned 9 exit status'）。",
+    "crt_lib": [
+      "crt2.o",
+      "binmode.o",
+      "default-manifest.o",
+      "libmingw32.a",
+      "libmingwex.a",
+      "libmsvcrt.a",
+      "libm.a",
+      "libpthread.a",
+      "libssp.a",
+      "libkernel32.a",
+      "libuser32.a",
+      "libshell32.a",
+      "libadvapi32.a"
+    ],
+
+    "comment_dlls": "运行时 DLL。**不由本清单决定** —— 收集脚本用 objdump 扫每个 exe 的 import 表自动求出闭包（排除 Windows 系统 DLL），避免 MSYS2 升级后漏 DLL。这些 DLL 要同时放进 bin/ 与 lib/gcc/<target>/<ver>/（cc1.exe 在后者，DLL 必须贴着 exe 走，不能指望 PATH）。",
+    "dlls": "AUTO"
+  },
+
+  "headers": {
+    "comment": "头文件闭包 = deps(closure_inputs) 的并集，再补 extra_gcc_internal。closure_inputs 用 gcc -M -E 求依赖（不用 -MMD 写文件）。实测：297 个头文件 / 7.6 MB（174 个系统头 + 123 个 gcc 自带）。",
+    "closure_inputs": [
+      "compiler/runtime/runtime.c",
+      "compiler/src0/jhyy_helpers.c"
+    ],
+    "extra_gcc_internal": [
+      "stddef.h",
+      "stdarg.h",
+      "stdbool.h",
+      "stdint.h",
+      "float.h",
+      "limits.h",
+      "stdalign.h",
+      "stdnoreturn.h",
+      "iso646.h",
+      "stdatomic.h",
+      "varargs.h"
+    ]
+  },
+
+  "licenses": {
+    "comment": "随包必须发许可证原文（GPL-3.0 的分发义务）+ SOURCES.txt（包名/版本/上游/源码获取方式）。目录名对应 <msys2>/ucrt64/share/licenses/<dir>/。gcc-libs 与 binutils 缺失 ⇒ 响亮失败（GPL 分发义务）。",
+    "required": ["gcc-libs", "binutils"],
+    "optional": ["crt", "headers", "libiconv", "zlib"]
+  },
+
+  "install": {
+    "comment": "装到 <INSTALLDIR>/toolchain/（与 bin/ 平级 —— bin/ 在系统 PATH 上，不该塞 90MB 的工具链进去）。",
+    "dir": "toolchain"
+  }
+}

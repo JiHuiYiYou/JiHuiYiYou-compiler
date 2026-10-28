@@ -4,7 +4,11 @@
 当前: **🟢 v4.0.19 发布**（2026-10-20，**台账 ACTIVE 桶首次清空(14 → 0)**）——
 <https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v4.0.19>
 （installer .exe + compiler .msi + vscode .vsix + SHA256.txt）。
-**🟡 v4.0.22 进行中**（2026-10-26，**lang-spec 覆盖审计：补 49 条回归门 + std lib 三处
+**🟡 v4.1.0 进行中**（2026-10-29，**installer 自带最小原生 ucrt64 工具链 ⇒ 装机用户
+不再需要 MSYS2**；解析顺序 `JHY_GCC → env.txt → 内置 → C:\msys64 → PATH`；
+新增 7 条工具链常驻门 + W-158..W-162 五条台账；**破坏性变更** ⇒ 提 minor 版本号；
+详见 [`installer/toolchain/README.md`](installer/toolchain/README.md)）。
+**🟡 v4.0.22 待发**（2026-10-26，**lang-spec 覆盖审计：补 49 条回归门 + std lib 三处
 真缺陷真修 + 3 条 ACTIVE 入账**；**同日第二轮：W-143 / W-144 真修 + 浮点转换链路上
 另外挖出 5 条(W-145..W-149)⇒ ACTIVE 桶 3 → 1**；**第三轮(2026-10-27)：W-142 真修
 (同作用域 shadowing)+ 兄弟缺陷 W-150(重名 fn/type/const/参数)⇒ **ACTIVE 桶 1 → 0

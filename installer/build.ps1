@@ -36,8 +36,18 @@ $ErrorActionPreference = "Stop"
 #           "1.5.5"     -> $clean="1.5.5", suffix=""
 #           "1.5.5-rc10" -> $clean="1.5.5", suffix="-rc10"
 #           "v1.5.5-rc1" -> $clean="1.5.5", suffix="-rc1" (caller strips 'v' first)
+#
+# v4.1.0 fix: the RC-suffix regex is tightened from ([a-z]+\d+) to (rc\d+).
+#   Why: `git describe --tags` output looks like "v4.0.19-9-gee35744", and
+#   the old pattern matched the trailing GIT HASH ("gee" + "35744") as an
+#   RC suffix => clean="4.0.19-9", suffix="-gee35744"
+#   => JHY_VERSION_DISPLAY became "4.0.19-gee35744"
+#   => the .vsix / .msi / installer.exe FILE NAMES all carried that fake
+#   suffix. Nobody noticed because release.yml passes JHY_VERSION explicitly
+#   from the tag; only LOCAL builds (the git-describe branch) hit it.
+#   Now only a real "-rcN" counts as an RC suffix.
 function _split_rc_suffix($verIn, [ref]$suffixOut) {
-    if ($verIn -match '^(.+?)-([a-z]+\d+)$') {
+    if ($verIn -match '^(.+?)-(rc\d+)$') {
         $suffixOut.Value = "-" + $matches[2]
         return $matches[1]
     }
@@ -246,6 +256,51 @@ switch ($Target) {
             }
         }
 
+        # 2b. v4.1.0: collect the bundled toolchain (gcc + binutils + CRT +
+        #   header closure) and generate its WiX fragment.
+        #
+        #   This is what removes the "you must install MSYS2 first" gate:
+        #   the MSI now ships a minimal native ucrt64 toolchain under
+        #   <INSTALLDIR>\toolchain\, so a bare Windows machine can compile
+        #   .jhyy programs.
+        #
+        #   Two scripts:
+        #     collect-toolchain.ps1 - copies the pinned file set out of the
+        #       local MSYS2, computes the runtime-DLL closure and the C
+        #       header closure, and pre-compiles runtime.o / jhyy_helpers.o
+        #       WITH THE COLLECTED gcc (so the .o matches the bundled ABI).
+        #     gen-toolchain-wxs.ps1 - turns the collected manifest into a
+        #       WiX <Fragment> (378 files, one Component per directory).
+        #
+        #   The fragment is passed to `wix build` as a SECOND source file
+        #   (Package in the main .wxs, Fragment in the generated one).
+        #   If a WiX version refuses multi-source builds, the fallback is to
+        #   append the fragment to a copy of the main .wxs - <Fragment> is a
+        #   top-level element, so appending is valid.
+        #
+        #   NOTE: keep these comments ASCII. This file has no BOM and the
+        #   repo runs it under pwsh (UTF-8); Windows PowerShell 5.1 would
+        #   read it as ANSI and mangle non-ASCII into parse errors.
+        Write-Host "[build.ps1] collecting bundled toolchain (v4.1.0)..."
+        & $script:PsExe -NoProfile -ExecutionPolicy Bypass -File "installer/scripts/collect-toolchain.ps1"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[ERROR] toolchain collection failed, aborting MSI build"
+            exit 1
+        }
+        Write-Host "[build.ps1] generating toolchain WiX fragment..."
+        & $script:PsExe -NoProfile -ExecutionPolicy Bypass -File "installer/scripts/gen-toolchain-wxs.ps1"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[ERROR] toolchain wxs generation failed, aborting MSI build"
+            exit 1
+        }
+        $toolchainWxs = "installer/build-artifacts/wix/jhyy-toolchain.generated.wxs"
+        $toolchainDir = "installer/build-artifacts/toolchain"
+        if (-not (Test-Path $toolchainWxs))  { Write-Host "[ERROR] missing $toolchainWxs"; exit 1 }
+        if (-not (Test-Path $toolchainDir))  { Write-Host "[ERROR] missing $toolchainDir"; exit 1 }
+        foreach ($o in @("runtime.o", "jhyy_helpers.o")) {
+            if (-not (Test-Path "$binDir/$o")) { Write-Host "[ERROR] missing prebuilt $o in $binDir"; exit 1 }
+        }
+
         # 3. build MSI via WiX 4/7
         #   bindpath bin/        -> jhyy.exe (sole production binary, v4.0.0 QBE removed) + runtime.{c,h} + jhyy_helpers.c + UI assets
         #   bindpath common/     -> license.rtf + install-configure-all.bat + 2 .ps1 helpers
@@ -256,12 +311,14 @@ switch ($Target) {
         #   install-configure-all.bat inline `code --install-extension` step.)
         & wix build `
             installer/wix/compiler/jhyy-compiler.wxs `
+            $toolchainWxs `
             -arch x64 `
             -b "bin=$binDir" `
             -b "common=installer/common" `
             -b "assets=installer/assets" `
             -b "scripts=installer/scripts" `
             -b "vscode-ext=$vscodeExtDir" `
+            -b "toolchain=$toolchainDir" `
             -loc "installer/wix/compiler/Locale.zh-CN.wxl" `
             -ext WixToolset.Util.wixext -ext WixToolset.UI.wixext `
             -d "JHY_VERSION=$($env:JHY_VERSION)" `

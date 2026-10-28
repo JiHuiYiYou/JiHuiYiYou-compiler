@@ -26,6 +26,68 @@ C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/
 
 ---
 
+## ⚠️ v4.1.0: installer 自带工具链(装机用户不需要 MSYS2)
+
+**装机版** `jhyy.exe` 从 v4.1.0 起自带一份最小原生 ucrt64 工具链,装在
+`<INSTALLDIR>\toolchain\`:
+
+```
+<INSTALLDIR>\toolchain\
+├── bin\        gcc as ld ar dlltool windres strip nm objdump ranlib + 10 个运行时 DLL
+├── lib\        crt2.o / default-manifest.o / binmode.o + CRT 与 win32 import libs
+│   └── gcc\x86_64-w64-mingw32\<ver>\
+│       ├── cc1.exe collect2.exe **as.exe ld.exe** libgcc.a crt*.o + 同样那 10 个 DLL
+│       └── include\   gcc 自带头（闭包里用到的那 123 个）
+├── include\    头文件闭包（297 个，7.6 MB）
+└── LICENSES\ + SOURCES.txt
+```
+
+原始 ≈ **90 MB**（MSI CAB 压缩后 ≈ 40 MB）。完整设计见
+[`installer/toolchain/README.md`](../../installer/toolchain/README.md)。
+
+### 编译器的解析顺序
+
+`jh_gcc_path()`（`compiler/src0/jhyy_helpers.c`）:
+
+```
+JHY_GCC 环境变量 → %JHYY_HOME%\env.txt → **内置 toolchain** → C:\msys64 硬编码 → PATH → 裸 "gcc"
+```
+
+⇒ **默认用内置那份**（确定性 + 版本受控 + 不依赖用户 PATH 形态）。
+用户要用回自己的 gcc：设 `JHY_GCC` 或写 `env.txt`（installer **不**代写）。
+
+### 三个必须记住的坑
+
+1. **目录结构不能拍平** —— gcc 用自身位置推导 `cc1` / `collect2` / `as` / `ld`。
+2. **`as.exe` / `ld.exe` 必须在 `lib/gcc/<target>/<ver>/` 里再放一份** ——
+   gcc 与 collect2 按**裸名**找这两个；PATH 上有个别的 ld（典型：MSYS2 POSIX 层的
+   `/usr/bin/ld.exe`）就会被捡走 ⇒ **链接失败且 stderr 零输出**（只有
+   `collect2.exe: error: ld returned 9 exit status`）。
+3. **头闭包不能只收 `*.h`** —— ucrt 的 `stdio.h` 会 `#include <swprintf.inl>`。
+
+### 门
+
+```bash
+# 采集（CI 用 -AllowVersionDrift；release 严格 —— 版本不符响亮失败）
+powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/collect-toolchain.ps1
+# 验（可重定位 / 头闭包 / poisoned PATH / 无 PATH / windres / 预编 .o 字节一致）
+powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/verify-toolchain.ps1
+```
+
+⚠️ 门必须能抓到真失败。新增或改动工具链组成后，**先跑门，再改代码**。
+
+### 预编 .o
+
+安装版每次链接都**现场重编** `runtime.c` + `jhyy_helpers.c` 是 5045ms；用预编 `.o`
+是 531ms。installer 从 v4.1.0 起随包发 `runtime.o` / `jhyy_helpers.o`
+（由**收集进来的那份 gcc** 编，保证 ABI 一致），编译器经
+`jh_path_runtime()` / `jh_path_helpers()` 优先取 `.o`（**仅安装布局**；
+源码树仍走相对路径 `compiler/build/obj/`，行为不变）。
+`.c` 仍然随包发，作为 `.o` 缺失时的回落 —— 回落路径要编 C，所以头闭包仍然必需。
+
+
+---
+
 ## 宿主平台
 
 **编译器宿主 = Windows x64。这是设计决策,不是缺陷,也不在 backlog 里。**

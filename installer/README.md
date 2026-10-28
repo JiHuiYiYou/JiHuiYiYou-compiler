@@ -142,6 +142,10 @@ jhyy-setuc.exe set-shadow <ext> <progid> # 仅清 MSYS2 HKCU OpenWithProgids sha
 
 **v1.5.3 design decisions**:
 - **力度 1 检测+引导** (per user 决策 2026-08-14): Burn 不打包 GCC toolchain (~85MB 太重, 不在 v1.5 scope); 检测 MSYS2 + ucrt64 GCC, 装了 → 正常装 compiler MSI; 没装 → Welcome page 提示用户先装 MSYS2 (https://www.msys2.org/); 装完 compiler MSI 后, Success page 提示: "装 MSYS2 后用 jhyy 编 .jhyy"
+  - ⚠️ **v4.1.0 已推翻**（user 2026-10-28 决定「全套 burn 进 installer」）：MSI 现在自带
+    一份最小原生 ucrt64 工具链（≈90 MB 原始 / 压缩后 ≈40 MB），装到
+    `<INSTALLDIR>\toolchain\`；**MSYS2 硬门槛（MSI 的 LaunchCondition）与 4 路探测已删**，
+    装机用户**不需要 MSYS2**。详见 [`installer/toolchain/README.md`](toolchain/README.md)。
 - **Bundle 走 standard WixStdBA UI** (不再写 custom BAFunctions): simple, 文档化, 跨版本稳; 留给 v1.5.4 装修 + v2.x BAFunctions 升级
 - **Bal extension DLL 通过绝对路径引** (workaround): `wix extension add -g WixToolset.Bal.wixext` 装的 DLL 文件名是 `WixToolset.BootstrapperApplications.wixext.dll` (不是 `WixToolset.Bal.wixext.dll`), wix CLI 7.0.0+b8977d6 的 `-ext WixToolset.Bal.wixext` 名字查找会 WIX0144 fail, workaround 是 -ext 传 DLL 绝对路径。详细见 `docs/internal/workarounds.md`
 

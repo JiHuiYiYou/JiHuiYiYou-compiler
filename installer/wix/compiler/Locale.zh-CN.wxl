@@ -18,15 +18,16 @@
   <String Id="DowngradeErrorMessage"
           Value="[ProductName] 已经安装更新的版本。请先卸载现有版本, 再安装本版本。" />
 
-  <String Id="MSYS2NotFound"
-          Value="未检测到 MSYS2 ucrt64 + GCC 环境。JHYY 编译器需要 GCC 链接 .jhyy 程序。
-请先安装 MSYS2 (https://www.msys2.org/) 并通过 pacman -S mingw-w64-ucrt-x86_64-gcc 装 GCC,
-然后重新运行本安装程序。
-JHYY 编译器本体会被安装, 但 jhyy run / jhyy compile 命令在没有 GCC 时会失败。" />
+  <!--
+    v4.1.0: MSYS2NotFound 文案退役 —— 之前它挂在
+    <Launch Condition="Installed OR MSYS2_GCC_FOUND"> 上 (没装 MSYS2 就装不上)。
+    v4.1.0 起 installer 自带一份最小原生 ucrt64 工具链, 门槛已拆除,
+    这条文案不再被引用。
+  -->
 
   <String Id="FeatureJHYYTitle" Value="JHYY 编译器核心" />
   <String Id="FeatureJHYYDescription"
-          Value="JHYY 编译器 (jhyy.exe), 自带自研 codegen 后端 (v4.0.0 起 QBE 完全移除)。需要 MSYS2 + GCC 环境用于链接。" />
+          Value="JHYY 编译器 (jhyy.exe), 自带自研 codegen 后端 (v4.0.0 起 QBE 完全移除)。v4.1.0 起自带链接用的 GCC 工具链, 无需另外安装 MSYS2。" />
 
   <String Id="WelcomeDlgTitle" Value="欢迎使用 [ProductName] 安装向导" />
   <String Id="WelcomeDlgDescription"

@@ -425,6 +425,27 @@ jobs:
           # ⚠️ 不要为了让 CI 变绿去放宽 KNOWN_FAIL 里的签名。那正是本项目栽过的坑。
           bash compiler/tests/bootstrap/artifact_checks.sh
 
+      # ── 内置工具链门(v4.1.0)──────────────────────────────────────────
+      # installer 从 v4.1.0 起自带一份最小原生 ucrt64 工具链
+      # (gcc + binutils + CRT + 头文件闭包),装机用户**不需要 MSYS2**。
+      #
+      # 这些门验的是「这份工具链真的能独立干活」——此前**零覆盖**:
+      #   · 可重定位: 换到带空格的随机路径还能编+链+跑
+      #   · 头闭包:   只用收集到的那份就能编 runtime.c / jhyy_helpers.c
+      #   · poisoned PATH: PATH 里塞一个别的 ld(MSYS2 POSIX 层那个)也不受影响
+      #     ← 这条门抓出了「collect2 按裸名找 ld ⇒ 捡到 PATH 里的 POSIX ld
+      #        ⇒ 链接失败且 stderr 零输出」那个真缺陷
+      #   · windres:  每次链接都要用它,缺了 ⇒ **每一次**编译都失败
+      #
+      # `-AllowVersionDrift`:CI 的 runner 镜像是滚动的,MSYS2 版本会漂。
+      # 这些门本身与版本无关,所以照样跑;版本 pin 只在**真正出货**的
+      # release.yml 里强制(collect 脚本默认响亮失败)。
+      - name: Bundled toolchain gates (relocatable / header closure / poisoned PATH)
+        shell: msys2 {0}
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/collect-toolchain.ps1 -AllowVersionDrift
+          powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/verify-toolchain.ps1
+
       # ── MCP 工具的 pytest 套件 ──────────────────────────────────────
       # v4.0.20 (W-134.1):`mcp-jhyy/tests/`(41 个测试)此前在 CI 里**零覆盖**
       # —— ci.yml 既没有 pytest step,也没有任何 pip install ⇒ **套件里的红绿

@@ -50,84 +50,27 @@
     <MediaTemplate EmbedCab="yes" />
 
     <!--
-      Prereq check: MSYS2 ucrt64 + gcc must be installed for jhyy.exe to
-      actually link .jhyy → .exe. We only WARN here (v1.5.2 单 MSI 不能
-      自动装 MSYS2, 自动装推到 v1.5.3 Burn bundle).
+      v4.1.0: **MSYS2 硬门槛已拆除**。
+      之前这里有 <Launch Condition="Installed OR MSYS2_GCC_FOUND"> + 4 路
+      MSYS2 探测 (HKLM Uninstall / PATH / C:\msys64\ucrt64\bin\gcc.exe /
+      C:\msys64 目录) ⇒ **没装 MSYS2 的机器根本装不上这个编译器**
+      (MSI 直接 1603 fail)。那 4 路探测与本文件下面 SetUCProp 那一段的
+      注释一起删除 —— 探测的前提("工具链要用户自己装")已经不成立了。
 
-      WiX 4 launch condition syntax: <Launch Condition="..." Message="..." />
-      (跟 v3 <Condition Message="..."> 不同, per GitHub discussion #6304)
+      v4.1.0 起 installer 自带一份最小原生 ucrt64 工具链
+      (gcc + binutils + CRT + 编译器自用的头文件子集, ~90MB 原始),
+      装到 <INSTALLDIR>\toolchain\ ⇒ 目标机**不需要 MSYS2、不需要
+      PATH 里任何东西**就能编译 .jhyy。
+      工具链的 WiX 定义是**生成的** (installer/scripts/gen-toolchain-wxs.ps1
+      → installer/build-artifacts/wix/jhyy-toolchain.generated.wxs),
+      以第二个 source file 的形式喂给 wix build。
 
-      Multi-source detection (W-031 fix, v1.5.6 hotfix):
-      原 v1.5.2 只查 HKLM\Uninstall\ucrt64 GCC (Windows MSI installer 注册),
-      但 MSYS2 ucrt64 GCC 是通过 pacman 装的, pacman 不写 Uninstall 注册表 →
-      LaunchCondition 误报 → MSI 1603 fail.
-      现在 4 源探测 (任一 true 即认为 GCC 装了):
-        1. MSYS2_GCC_UNINSTALL : 原 HKLM Uninstall\ucrt64 GCC (保留 backward compat)
-        2. MSYS2_GCC_PATH      : PATH 环境变量含 ucrt64\bin 或 mingw64\bin
-        3. MSYS2_GCC_FILE      : C:\msys64\ucrt64\bin\gcc.exe 存在 (Windows 默认 MSYS2 install path)
-        4. MSYS2_GCC_DIR       : C:\msys64 目录存在 (MSYS2 install 标志, 不强制 ucrt64 subdir)
-      W-031 决策 (user 2026-08-15): 改探测, 不删 LaunchCondition — 没 GCC 装上
-      也 OK (compiler 自身可用), 仅 jhyy run / jhyy compile 失败 (符合 v1.5.2 设计意图).
+      编译器侧的解析顺序 (jh_gcc_path, compiler/src0/jhyy_helpers.c):
+        JHY_GCC env → %JHYY_HOME%\env.txt → **内置 toolchain** →
+        C:\msys64 硬编码 → PATH → 裸 "gcc"
+      ⇒ 用户想用回自己的 MSYS2 gcc, 设 JHY_GCC 或写 env.txt 即可
+      (installer **不**代写 —— 写死绝对路径会在换盘/重装时失效)。
     -->
-    <Launch Condition="Installed OR MSYS2_GCC_FOUND" Message="!(loc.MSYS2NotFound)" />
-
-    <!-- Source 1: HKLM Uninstall\ucrt64 GCC (Windows installer registered) -->
-    <Property Id="MSYS2_GCC_UNINSTALL">
-      <RegistrySearch Id="MSYS2GccUninstallSearch"
-                      Type="raw"
-                      Root="HKLM"
-                      Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\ucrt64 GCC"
-                      Name="DisplayVersion" />
-    </Property>
-
-    <!--
-      Source 2: PATH environment variable contains ucrt64/bin or mingw64/bin.
-      Type="raw" + Root=HKLM uses the system PATH (per-machine).
-      Use Name="Path" (case sensitive — Windows registry uses "Path" key).
-    -->
-    <Property Id="MSYS2_GCC_PATH">
-      <RegistrySearch Id="MSYS2GccPathSearch"
-                      Type="raw"
-                      Root="HKLM"
-                      Key="SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
-                      Name="Path" />
-    </Property>
-
-    <!--
-      Source 3: gcc.exe exists at default MSYS2 install location.
-      WiX 4 DirectorySearch has no Type attribute — Path is the literal Windows
-      path; child FileSearch checks file existence by Name (no Type attribute).
-    -->
-    <Property Id="MSYS2_GCC_FILE">
-      <DirectorySearch Id="MSYS2UCRT64BinDir"
-                       Path="C:\msys64\ucrt64\bin">
-        <FileSearch Id="MSYS2GccExeSearch"
-                    Name="gcc.exe" />
-      </DirectorySearch>
-    </Property>
-
-    <!--
-      Source 4: C:\msys64 directory exists (MSYS2 install marker — covers
-      users who installed ucrt64 via pacman but PATH not propagated to
-      Windows env yet, e.g. user opens fresh cmd without MSYS2 env init).
-    -->
-    <Property Id="MSYS2_GCC_DIR">
-      <DirectorySearch Id="MSYS2RootDir"
-                       Path="C:\msys64" />
-    </Property>
-
-    <!--
-      Combined property: MSYS2_GCC_FOUND = any of the 4 sources found.
-      WiX 4 SetProperty requires Before/After sequence attribute when Id is
-      present. We schedule it After="AppSearch" so all 4 source properties are
-      populated by then. AppSearch is the standard MSI sequence action that
-      runs all <Property><RegistrySearch> + <Property><DirectorySearch>
-      sources.
-    -->
-    <SetProperty Id="MSYS2_GCC_FOUND"
-                 Value="1"
-                 Before="LaunchConditions"
-                 Condition="MSYS2_GCC_UNINSTALL OR MSYS2_GCC_PATH OR MSYS2_GCC_FILE OR MSYS2_GCC_DIR" />
 
     <!--
       W-031 fix: removed <Property><RegistrySearch> on INSTALLDIR + <SetDirectory>
@@ -186,6 +129,7 @@
 
       <ComponentGroupRef Id="JHYYBinFiles" />
       <ComponentGroupRef Id="JHYStdLibFiles" />
+      <ComponentGroupRef Id="JHYYToolchain" />
       <ComponentGroupRef Id="JHYYURLShortcuts" />
       <ComponentGroupRef Id="JHYYPathRegistry" />
       <ComponentGroupRef Id="JHYYShortcuts" />
@@ -483,6 +427,33 @@
         <File Id="ManualFixIconCachePS1File"
               Source="!(bindpath.scripts)\common\manual-fix-icon-cache.ps1"
               KeyPath="yes" />
+      </Component>
+
+      <!--
+        PrebuiltObjects (v4.1.0): runtime.o + jhyy_helpers.o, pre-compiled
+        with the BUNDLED gcc by installer/scripts/collect-toolchain.ps1.
+
+        Why: without these, every single link of a user program re-compiles
+        runtime.c + jhyy_helpers.c (measured 5045 ms vs 531 ms). The
+        compiler picks them up through jh_path_runtime()/jh_path_helpers(),
+        which prefer a sibling ".o" over the ".c" (installer layout only;
+        the source tree keeps using the relative compiler/build/obj/ path).
+        The .c files still ship (RuntimeC / HelpersC below) as the fallback
+        when the .o is missing - and that fallback is why the bundled
+        toolchain also carries the C header closure.
+
+        GUID is deterministic (UUIDv5 of "component:prebuilt-objects|<files>")
+        so it stays stable across rebuilds and only changes when the file
+        set changes.
+      -->
+      <Component Id="PrebuiltObjects" Bitness="always64" Guid="5275e1c9-9bc5-5920-8a53-90206f3eb471">
+        <File Id="PrebuiltRuntimeOFile"
+              Source="!(bindpath.bin)\runtime.o"
+              KeyPath="yes"
+              Checksum="yes" />
+        <File Id="PrebuiltHelpersOFile"
+              Source="!(bindpath.bin)\jhyy_helpers.o"
+              Checksum="yes" />
       </Component>
 
       <!--

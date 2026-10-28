@@ -55,6 +55,24 @@ upgrades silently keep old version (silent corruption).
 | JhyyIconFile (v1.5.7-rc1 rev 2 — brand .ico in INSTALLDIR\bin\) | `1C8B7A4D-3E2F-4B6D-9A5C-7E8F2D1B4A03` |
 | JhyyDocsURL | `4065743A-3D07-48DE-A0E3-7FF8D5FEFA79` |
 | JhyyQuickStartURL | `98BA5444-5A01-4FD4-9995-623AC6869020` |
+| PrebuiltObjects (v4.1.0 — 预编 runtime.o / jhyy_helpers.o) | `5275E1C9-9BC5-5920-8A53-90206F3EB471` |
+
+## v4.1.0 新增: 工具链组件 GUID 是**确定性生成**的
+
+内置工具链有 ~380 个文件,不可能手写 GUID。规则:
+
+```
+Component GUID = UUIDv5(6f1c2a3e-9b47-4d58-8a61-0c2e5f7d3b90,
+                        "component:<目录相对路径>|<该目录下排序后的文件名逗号连接>")
+```
+
+- **一个目录一个 Component** —— MSI 要求同一 Component 的所有 File 必须在同一目录。
+- 目录相对路径相对 `<toolchain>/` 根(例如 `lib/gcc/x86_64-w64-mingw32/15.2.0`)。
+- GUID 随**文件集合**变 ⇒ 该目录的文件集合变了 ⇒ GUID 也变(正好符合上面
+  "Component content 变了就要换 GUID" 的规则);文件集合不变 ⇒ GUID 不变 ⇒
+  升级时 Windows Installer 认得出是同一批文件。
+- 生成器:`installer/scripts/gen-toolchain-wxs.ps1`(内含 RFC 4122 v5 实现,
+  不依赖外部工具)。改工具链组成后**不需要**手工维护 GUID 表。
 
 ## Notes
 

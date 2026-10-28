@@ -312,8 +312,43 @@ __attribute__((used)) int jh_paths_init(const char *argv0) {
         if (stat(test_path, &st) == 0) {
             #pragma GCC diagnostic push
             #pragma GCC diagnostic ignored "-Wformat-truncation"
-            snprintf(jh_path_runtime_buf, sizeof(jh_path_runtime_buf), "%s\\runtime.c", dir_path);
-            snprintf(jh_path_helpers_buf, sizeof(jh_path_helpers_buf), "%s\\jhyy_helpers.c", dir_path);
+            /* v4.1.0: 预编 .o 快路径 ——
+             * 安装版每次链接都**现场重编** runtime.c + jhyy_helpers.c
+             * (实测 5045ms vs 用预编 .o 的 531ms)。installer 从 v4.1.0 起
+             * 随包发预编 .o ⇒ 有 .o 就用 .o,没有才回退 .c(行为不变)。
+             *
+             * 为什么能只改 C 侧:main.jhyy 的 use_obj 判定挂在**相对路径**
+             * "compiler/build/obj/_jhyy_runtime.o" 上(main.jhyy:1358-1362),
+             * 安装布局下那个相对路径不存在 ⇒ use_obj=0 ⇒ 走 RUNTIME_C()/
+             * HELPERS_C() ⇒ 而那俩问的就是本函数 ⇒ 拿到 .o 路径 ⇒ 链接 .o。
+             * main.jhyy 一行都不用动(动了会移位 temp 编号 ⇒ 自举产物漂移)。
+             *
+             * ⚠️ 语义变化:jh_path_runtime()/jh_path_helpers() 现在**可能**返回
+             *    一个 .o 路径(名字还叫 _path)。全仓只有 main.jhyy 的
+             *    RUNTIME_C()/HELPERS_C() 用它们,而那俩只出现在链接行
+             *    (main.jhyy:1368/1376)⇒ 无其它消费者。
+             *    自举后端 cg_is_ptr_ret_extern() 把这两个 extern 列为
+             *    "返回指针"(codegen_amd64_state.jhyy:1310)⇒ 返回 .o 路径
+             *    仍是指针 ⇒ 后端不用改。
+             * ⚠️ 源码树布局 (b) 完全不受影响:下面 (b) 分支原样返回 .c 路径,
+             *    而源码树里 use_obj 命中的本来就是 make 产出的相对路径 .o。
+             */
+            {
+                char obj_path[1024];
+                struct stat ost;
+                snprintf(obj_path, sizeof(obj_path), "%s\\runtime.o", dir_path);
+                if (stat(obj_path, &ost) == 0 && ost.st_size > 0) {
+                    snprintf(jh_path_runtime_buf, sizeof(jh_path_runtime_buf), "%s", obj_path);
+                } else {
+                    snprintf(jh_path_runtime_buf, sizeof(jh_path_runtime_buf), "%s\\runtime.c", dir_path);
+                }
+                snprintf(obj_path, sizeof(obj_path), "%s\\jhyy_helpers.o", dir_path);
+                if (stat(obj_path, &ost) == 0 && ost.st_size > 0) {
+                    snprintf(jh_path_helpers_buf, sizeof(jh_path_helpers_buf), "%s", obj_path);
+                } else {
+                    snprintf(jh_path_helpers_buf, sizeof(jh_path_helpers_buf), "%s\\jhyy_helpers.c", dir_path);
+                }
+            }
             /* W-103: installer 把 src0/std 下的 .jhyy 模块装到 <bin>/std/ */
             snprintf(jh_path_stdlib_buf, sizeof(jh_path_stdlib_buf), "%s\\std", dir_path);
             /* W-127: installer 把 jhyy-icon.ico 装到 <bin>\ (wxs 的 JhyyIconFile
@@ -398,7 +433,70 @@ __attribute__((used)) int jh_fullpath(char *out_buf, const char *rel_path, int m
    v1.5.6 Windows-only; v2.x 加 #ifdef __linux__ / __APPLE__ 分支.
    详见 docs/plans/v1/v1.5.6任务清单 + 概要设计.md § 设计 1. */
 static char jh_gcc_path_buf[1024];
+static const char *jh_gcc_source_buf = "fallback";
 static int  jh_gcc_path_initialized = 0;
+
+/* v4.1.0: 内置工具链解析层（本函数是唯一权威）。
+ *
+ * 背景:installer 之前**不带**工具链,编译器去用户机器上找 gcc
+ * (jh_gcc_path 的 MSYS2 magic / PATH 两级)。后果:
+ *   - 装机没 MSYS2 的用户,jhyy.exe 装上了但**一个 .jhyy 都编不了**;
+ *   - 装了 MSYS2 的用户,用**他自己那份** gcc ⇒ 版本不受控;
+ *     且 docs/internal/build.md §PATH 顺序 记的那个坑(ucrt64 的 ld 捡到
+ *     mingw64 的 DLL ⇒ 链接失败且 **stderr 零输出**)照样发作。
+ * v4.1.0 起 installer 自带一份最小原生 ucrt64 工具链,装在
+ * <INSTALLDIR>\toolchain\ ⇒ 本函数多一级「内置」优先级。
+ *
+ * 优先级(从高到低):
+ *   1. JHY_GCC 环境变量            —— 用户显式指定,永远最高
+ *   2. %JHYY_HOME%\env.txt 的 JHY_GCC= —— 用户显式配置
+ *   3. **内置工具链**               —— 本次新增;排在 MSYS2 magic 之前,
+ *      理由:内置那份版本受控、与发布产物匹配、且不依赖用户 PATH 形态。
+ *      用户自己的 MSYS2 只有在**显式**指定时才用得到(JHY_GCC / env.txt)。
+ *   4. C:\msys64\{ucrt64,mingw64,usr}\bin\gcc.exe —— 历史兜底
+ *   5. PATH 探测(SearchPathA)
+ *   6. 裸 "gcc"(交给 OS 在 exec 时解析)
+ *
+ * ⚠️ 源码树布局下第 3 级永远不命中(<repo>\compiler\build\bin\toolchain\ 与
+ *    <repo>\compiler\build\toolchain\ 都不存在)⇒ 开发者机器行为零变化。
+ */
+#ifdef _WIN32
+/* 探测内置工具链的 gcc.exe。写死了两种相对位置:
+ *   <jhyy.exe 所在目录>\toolchain\bin\gcc.exe        (bin\toolchain 布局)
+ *   <jhyy.exe 所在目录>\..\toolchain\bin\gcc.exe     (INSTALLDIR\toolchain 布局)
+ * 用 GetModuleFileNameA(NULL,...) 而不是 argv0 —— 不依赖调用方传了什么,
+ * 也不依赖 jh_paths_init 是否已经跑过。
+ * 返回 1 = 命中(路径写进 out_buf);0 = 没找到。
+ */
+static int jh_probe_bundled_gcc(char *out_buf, int out_cap) {
+    char exe_path[1024];
+    DWORD n = GetModuleFileNameA(NULL, exe_path, (DWORD)sizeof(exe_path));
+    if (n == 0 || n >= sizeof(exe_path)) return 0;
+    /* 砍掉文件名,只留目录 */
+    {
+        char *last = strrchr(exe_path, '\\');
+        if (!last) return 0;
+        *last = '\0';
+    }
+    {
+        const char *suffixes[2];
+        suffixes[0] = "\\toolchain\\bin\\gcc.exe";
+        suffixes[1] = "\\..\\toolchain\\bin\\gcc.exe";
+        for (int i = 0; i < 2; i++) {
+            char cand[1024];
+            #pragma GCC diagnostic push
+            #pragma GCC diagnostic ignored "-Wformat-truncation"
+            snprintf(cand, sizeof(cand), "%s%s", exe_path, suffixes[i]);
+            #pragma GCC diagnostic pop
+            if (GetFileAttributesA(cand) != INVALID_FILE_ATTRIBUTES) {
+                snprintf(out_buf, (size_t)out_cap, "%s", cand);
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+#endif /* _WIN32 */
 
 #ifdef _WIN32
 /* windows.h already included at top — GetFileAttributesA + INVALID_FILE_ATTRIBUTES
@@ -412,6 +510,7 @@ __attribute__((used)) const char *jh_gcc_path(void) {
         const char *env_gcc = getenv("JHY_GCC");
         if (env_gcc && env_gcc[0] != '\0') {
             snprintf(jh_gcc_path_buf, sizeof(jh_gcc_path_buf), "%s", env_gcc);
+            jh_gcc_source_buf = "JHY_GCC";
             jh_gcc_path_initialized = 1;
             return jh_gcc_path_buf;
         }
@@ -440,6 +539,7 @@ __attribute__((used)) const char *jh_gcc_path(void) {
                         val_buf[--len] = '\0';
                     if (len > 0) {
                         snprintf(jh_gcc_path_buf, sizeof(jh_gcc_path_buf), "%s", val_buf);
+                        jh_gcc_source_buf = "env.txt";
                         jh_gcc_path_initialized = 1;
                         fclose(f);
                         return jh_gcc_path_buf;
@@ -447,6 +547,19 @@ __attribute__((used)) const char *jh_gcc_path(void) {
                 }
                 fclose(f);
             }
+        }
+    }
+
+    /* Priority 2.5 (v4.1.0): **内置**工具链 —— installer 自带的那份。
+       排在 MSYS2 magic 之前(内置优先):内置那份版本受控、与发布产物匹配、
+       且不依赖用户 PATH 的形态(见文件头那段说明)。 */
+    {
+        char bundled[1024];
+        if (jh_probe_bundled_gcc(bundled, (int)sizeof(bundled))) {
+            snprintf(jh_gcc_path_buf, sizeof(jh_gcc_path_buf), "%s", bundled);
+            jh_gcc_source_buf = "bundled";
+            jh_gcc_path_initialized = 1;
+            return jh_gcc_path_buf;
         }
     }
 
@@ -461,6 +574,7 @@ __attribute__((used)) const char *jh_gcc_path(void) {
         for (int i = 0; msys2_magic[i]; i++) {
             if (GetFileAttributesA(msys2_magic[i]) != INVALID_FILE_ATTRIBUTES) {
                 snprintf(jh_gcc_path_buf, sizeof(jh_gcc_path_buf), "%s", msys2_magic[i]);
+                jh_gcc_source_buf = "msys2";
                 jh_gcc_path_initialized = 1;
                 return jh_gcc_path_buf;
             }
@@ -474,6 +588,7 @@ __attribute__((used)) const char *jh_gcc_path(void) {
         unsigned long n = SearchPathA(NULL, "gcc", ".exe", sizeof(path_buf), path_buf, NULL);
         if (n > 0 && n < sizeof(path_buf)) {
             snprintf(jh_gcc_path_buf, sizeof(jh_gcc_path_buf), "%s", path_buf);
+            jh_gcc_source_buf = "PATH";
             jh_gcc_path_initialized = 1;
             return jh_gcc_path_buf;
         }
@@ -482,6 +597,7 @@ __attribute__((used)) const char *jh_gcc_path(void) {
     /* Fallback: return "gcc" 走 PATH 解析 (跟 W-027 v8 之前一致; 错误信息保留
        gcc not found → cmd error) */
     snprintf(jh_gcc_path_buf, sizeof(jh_gcc_path_buf), "gcc");
+    jh_gcc_source_buf = "fallback";
     jh_gcc_path_initialized = 1;
     return jh_gcc_path_buf;
 }
@@ -491,10 +607,23 @@ __attribute__((used)) const char *jh_gcc_path(void) {
 __attribute__((used)) const char *jh_gcc_path(void) {
     if (jh_gcc_path_initialized) return jh_gcc_path_buf;
     snprintf(jh_gcc_path_buf, sizeof(jh_gcc_path_buf), "gcc");
+    jh_gcc_source_buf = "posix";
     jh_gcc_path_initialized = 1;
     return jh_gcc_path_buf;
 }
 #endif
+
+/* v4.1.0 护栏 A: 解析结果必须**可见**。
+   静默的"链接失败且零输出"是最难排查的一类 —— 用户不会怀疑 gcc,只会怀疑 jhyy。
+   jh_gcc_path() 只给路径;这里给"这份路径是从哪一级解析出来的",两者一起打
+   出来,用户一眼能判断"我的 gcc 没被用上"是不是预期行为。
+   调用方全在 C 侧(不新增 extern fn ⇒ 不动 main.jhyy ⇒ 不移位 temp 编号)。
+   ⚠️ 定义在 #ifdef _WIN32 之外 —— jh_gcc_invoke/jh_run 是跨平台编译的。 */
+__attribute__((used)) const char *jh_gcc_source(void) {
+    /* 触发一次解析,保证 source 与 path 同步 */
+    (void)jh_gcc_path();
+    return jh_gcc_source_buf;
+}
 
 /* W-127 (v4.0.20): windres 的路径 —— 用来把 "J" 图标编成 RT_ICON 资源。
  *
@@ -567,6 +696,34 @@ __attribute__((used)) void jh_icon_obj_store(const char *p) {
    jh_path_to_fwd),这里前置声明。 */
 __attribute__((used)) int jh_build_icon_obj(char *out_obj, int out_cap);
 
+/* v4.1.0: gcc 命令行前缀(带引号形式)。jh_run 靠它认出"这条命令是 gcc 链接行"
+   ⇒ 失败时才能打出"用的是哪份 gcc"。 */
+static char g_gcc_cmd_prefix[1100];
+
+/* v4.1.0: 保证子进程有一份**可写**的临时目录。
+ *
+ * 为什么需要:gcc / collect2 在 TMPDIR / TMP / TEMP **全 unset** 时,
+ * 会把编译中间产物(.s → .o)写到**当前工作目录**。装在
+ * C:\Program Files\JHYY\ 下的编译器,一旦用户恰好在只读目录里跑,
+ * 链接就会失败 —— 而且失败信息常常是**零输出**
+ * ("collect2.exe: error: ld returned 1 exit status",没有别的)。
+ * 这跟 docs/internal/build.md 记的「PATH 顺序」是同一族"静默失败"。
+ *
+ * 做法:只在三个变量**都没设**时补上(GetTempPathA 给的那份);
+ * 用户自己设了就尊重用户的值。改的是**本进程**的环境块
+ * (SetEnvironmentVariableA),CreateProcessW 传 lpEnvironment=NULL
+ * ⇒ 子进程继承 ⇒ gcc 与 windres(它内部还要跑 gcc -E)都拿到。
+ */
+static void jh_ensure_temp_env(void) {
+#ifdef _WIN32
+    char tmp[MAX_PATH];
+    if (GetTempPathA((DWORD)sizeof(tmp), tmp) == 0) return;
+    if (getenv("TMPDIR") == NULL) SetEnvironmentVariableA("TMPDIR", tmp);
+    if (getenv("TMP") == NULL)   SetEnvironmentVariableA("TMP", tmp);
+    if (getenv("TEMP") == NULL)  SetEnvironmentVariableA("TEMP", tmp);
+#endif
+}
+
 /* v1.5.6: jh_gcc_invoke — system() 包装, 内部调 jh_gcc_path() 拿 resolved gcc.
    main.jhyy link_with_gcc 改用此函数 (替代裸 system("gcc ...") 拼 cmd_buf).
    ABI: caller 提供 cmd_args (e.g. "ASM_PATH RUNTIME_C HELPERS_C -o EXE -lm"),
@@ -584,14 +741,33 @@ __attribute__((used)) int jh_build_icon_obj(char *out_obj, int out_cap);
    正好是 C 侧能插手而不动 .jhyy 的位置。 */
 __attribute__((used)) int jh_gcc_invoke(char *out_buf, int out_size, const char *args) {
     char ico_obj[1024];
-    int ico_rc = jh_build_icon_obj(ico_obj, (int)sizeof(ico_obj));
+    const char *gcc;
+    int ico_rc;
+
+    /* v4.1.0: 先把临时目录钉好 —— gcc 与 windres 都要用。
+       (放在 jh_build_icon_obj 之前,因为 windres 内部会跑 gcc -E。) */
+    jh_ensure_temp_env();
+
+    gcc = jh_gcc_path();
+
+    /* v4.1.0 护栏 A(之一): 解析结果**必须可见**。
+       JHY_VERBOSE=1 时每次链接都打一行 —— 让"我的 gcc 没被用上"这种
+       预期行为不必靠猜。默认安静(失败时那条由 jh_run 打)。 */
+    if (getenv("JHY_VERBOSE")) {
+        fprintf(stderr, "JHYY: using gcc: %s (source: %s)\n", gcc, jh_gcc_source());
+    }
+
+    /* 记住 gcc 命令行前缀 ⇒ jh_run 能认出"这条是 gcc 链接行"。 */
+    snprintf(g_gcc_cmd_prefix, sizeof(g_gcc_cmd_prefix), "\"%s\"", gcc);
+
+    ico_rc = jh_build_icon_obj(ico_obj, (int)sizeof(ico_obj));
     if (ico_rc == 0) {
         /* 图标对象插在 .s 前面 —— gcc/mingw 的 .o 顺序无关,放前面便于
            在链接命令里一眼看见它。jh_run 会在子进程结束后把它删掉。 */
         jh_icon_obj_store(ico_obj);
         {
             int n = snprintf(out_buf, (size_t)out_size, "\"%s\" \"%s\" %s",
-                             jh_gcc_path(), ico_obj, args);
+                             gcc, ico_obj, args);
             if (getenv("JHY_ICON_TRACE")) {
                 /* 每进程打印一次完整链接行(排查用,默认安静)。
                    「图标 .o 到底在不在链接行里」必须能一眼看见。 */
@@ -610,10 +786,10 @@ __attribute__((used)) int jh_gcc_invoke(char *out_buf, int out_size, const char 
         fprintf(stderr, "W-132: icon embedding failed — 链接将失败\n");
         return snprintf(out_buf, (size_t)out_size,
                         "\"%s\" \"__jhyy_icon_obj_missing__\" %s",
-                        jh_gcc_path(), args);
+                        gcc, args);
     }
     /* ico_rc == 1:本布局没有图标资源(例如裁剪过的安装)⇒ 跳过,不算错。 */
-    return snprintf(out_buf, (size_t)out_size, "\"%s\" %s", jh_gcc_path(), args);
+    return snprintf(out_buf, (size_t)out_size, "\"%s\" %s", gcc, args);
 }
 
 /* v1.5.6 W-048: temp ASCII path helpers — bypass mingw CRT argv decode on
@@ -840,6 +1016,21 @@ __attribute__((used)) int jh_run(const char *cmd_line) {
     }
     DWORD exit_code = 0;
     GetExitCodeProcess(pi.hProcess, &exit_code);
+    /* v4.1.0 护栏 A(之二): gcc 链接失败 ⇒ 把"用的是哪份 gcc、从哪一级解析来的"
+       一起打出来。
+       理由:"链接失败且 stderr 零输出"是最难排查的一类 —— 用户不会怀疑 gcc,
+       只会怀疑 jhyy。内置优先之后,装了 MSYS2 的用户会**发现自己的 gcc 没被
+       用上**(这是预期行为),但如果不说出来,他只会看到一句没头没尾的
+       "ld returned 1 exit status" ⇒ 猜错方向。
+       识别方式:jh_gcc_invoke 记下了 gcc 命令行前缀,命令以它开头 = gcc 调用。
+       (windres 与用户程序的命令行不以它开头 ⇒ 不会误报。) */
+    if (exit_code != 0 && g_gcc_cmd_prefix[0] != '\0' &&
+        strncmp(cmd_line, g_gcc_cmd_prefix, strlen(g_gcc_cmd_prefix)) == 0) {
+        fprintf(stderr, "JHYY: using gcc: %s (source: %s)\n",
+                jh_gcc_path(), jh_gcc_source());
+        fprintf(stderr, "JHYY: to use a different toolchain, set JHY_GCC=<full path to gcc.exe> "
+                       "or put 'JHY_GCC=<full path>' in %%JHYY_HOME%%\\env.txt\n");
+    }
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     CloseHandle(hReadPipe);
