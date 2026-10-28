@@ -79,7 +79,51 @@ if (-not $MsysRoot) {
 $ucrt       = Join-Path $MsysRoot "ucrt64"
 $gccExe     = Join-Path $ucrt "bin\gcc.exe"
 $objdumpExe = Join-Path $ucrt "bin\objdump.exe"
-if (-not (Test-Path $gccExe))     { throw "gcc not found: $gccExe (install MSYS2 ucrt64, or pass -MsysRoot)" }
+
+# The default MSYS2 root is NOT always C:\msys64. On GitHub Actions,
+# setup-msys2 installs into D:\a\_temp\setup-msys2\msys64 - so a hardcoded
+# root made the collector fail on CI ("gcc not found: C:\msys64\ucrt64\...").
+# Discovery order:
+#   1. -MsysRoot (explicit)
+#   2. $env:MSYS2_ROOT
+#   3. C:\msys64 (the classic default, if it really is there)
+#   4. ask the gcc that is on PATH: `gcc -print-file-name=libgcc.a` returns
+#      <ucrt>/lib/gcc/<target>/<ver>/libgcc.a => the ucrt dir is 3 levels up.
+#      This is the reliable one: it works wherever MSYS2 happens to live.
+#   5. cygpath -w / (the MSYS2 root, when cygpath is on PATH)
+if (-not (Test-Path $gccExe)) {
+    $found = $null
+    # (4) discover via the gcc on PATH. In MSYS2 the ucrt64 gcc lives in
+    # <ucrt>/bin/gcc.exe, so the ucrt dir is simply its grandparent.
+    $gccCmd = Get-Command gcc.exe -ErrorAction SilentlyContinue
+    if ($gccCmd) {
+        $binDir = Split-Path $gccCmd.Source -Parent
+        $ucrtCandidate = Split-Path $binDir -Parent
+        if ((Test-Path (Join-Path $ucrtCandidate "bin\gcc.exe")) -and
+            (Test-Path (Join-Path $ucrtCandidate "bin\objdump.exe"))) {
+            $found = $ucrtCandidate
+        }
+    }
+    # (5) last resort: cygpath
+    if (-not $found) {
+        $cyg = Get-Command cygpath.exe -ErrorAction SilentlyContinue
+        if ($cyg) {
+            $rootWin = (& $cyg.Source "-w" "/" 2>$null | Select-Object -First 1)
+            if ($rootWin) {
+                $ucrtCandidate = Join-Path $rootWin "ucrt64"
+                if (Test-Path (Join-Path $ucrtCandidate "bin\gcc.exe")) { $found = $ucrtCandidate }
+            }
+        }
+    }
+    if (-not $found) {
+        throw ("ucrt64 gcc not found. Tried: '$gccExe', the gcc on PATH, and cygpath.`n" +
+               "  Install MSYS2 (ucrt64) or pass -MsysRoot <path to the msys64 root>.")
+    }
+    $ucrt = $found
+    $gccExe = Join-Path $ucrt "bin\gcc.exe"
+    $objdumpExe = Join-Path $ucrt "bin\objdump.exe"
+    Say "discovered MSYS2 ucrt64 at: $ucrt"
+}
 if (-not (Test-Path $objdumpExe)) { throw "objdump not found: $objdumpExe" }
 
 # --- 1. version gate (hard failure) ----------------------------------------

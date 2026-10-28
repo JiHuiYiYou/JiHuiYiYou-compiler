@@ -443,7 +443,13 @@ jobs:
       - name: Bundled toolchain gates (relocatable / header closure / poisoned PATH)
         shell: msys2 {0}
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/collect-toolchain.ps1 -AllowVersionDrift
+          # The MSYS2 root is NOT C:\msys64 on GitHub Actions (setup-msys2
+          # installs into D:\a\_temp\setup-msys2\msys64). Ask the shell where
+          # it is and pass it explicitly; the collector also auto-discovers
+          # it via the gcc on PATH, so this is belt-and-braces.
+          MSYS2_ROOT_WIN=$(cygpath -w /)
+          echo "MSYS2 root: $MSYS2_ROOT_WIN"
+          powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/collect-toolchain.ps1 -AllowVersionDrift -MsysRoot "$MSYS2_ROOT_WIN"
           powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/verify-toolchain.ps1
 
       # ── MCP 工具的 pytest 套件 ──────────────────────────────────────

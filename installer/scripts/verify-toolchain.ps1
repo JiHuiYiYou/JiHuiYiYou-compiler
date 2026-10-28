@@ -65,6 +65,29 @@ function Invoke-Native($exe, $argList) {
     } finally { $ErrorActionPreference = $old }
 }
 
+# Locate the MSYS2 root. It is NOT always C:\msys64 - on GitHub Actions
+# setup-msys2 installs into D:\a\_temp\setup-msys2\msys64. The T3 gate
+# needs the real root to poison PATH with a FOREIGN ld; if it cannot find
+# it, the gate would silently SKIP - a gate that skips itself is worse
+# than no gate.
+function Find-MsysRoot {
+    if ($env:MSYS2_ROOT -and (Test-Path $env:MSYS2_ROOT)) { return $env:MSYS2_ROOT }
+    $gccCmd = Get-Command gcc.exe -ErrorAction SilentlyContinue
+    if ($gccCmd) {
+        # MSYS2 layout: <root>/ucrt64/bin/gcc.exe and <root>/usr/bin/...
+        $binDir = Split-Path $gccCmd.Source -Parent      # <ucrt>/bin
+        $ucrt   = Split-Path $binDir -Parent            # <ucrt>
+        $root   = Split-Path $ucrt -Parent              # <msys2 root>
+        if (Test-Path (Join-Path $root "usr\bin")) { return $root }
+        if (Test-Path (Join-Path $ucrt "usr\bin")) { return $ucrt }
+    }
+    foreach ($p in ($env:PATH -split ';')) {
+        if (-not $p) { continue }
+        if (Test-Path (Join-Path $p "msys-2.0.dll")) { return (Split-Path $p -Parent) }
+    }
+    return $null
+}
+
 $tc = (Resolve-Path $ToolchainDir).Path
 $gcc = Join-Path $tc "bin\gcc.exe"
 if (-not (Test-Path $gcc)) { throw "no staged toolchain at $tc (run collect-toolchain.ps1 first)" }
@@ -115,12 +138,20 @@ int main(void) { printf("jhyy-toolchain-ok\n"); return 42; }
     # output. This gate reproduces exactly that.
     $savedPath = $env:PATH
     try {
+        $msysRoot = Find-MsysRoot
         $poison = @()
-        foreach ($p in @("C:\msys64\usr\bin", "C:\msys64\mingw64\bin")) {
-            if (Test-Path $p) { $poison += $p }
+        if ($msysRoot) {
+            foreach ($p in @((Join-Path $msysRoot "usr\bin"), (Join-Path $msysRoot "mingw64\bin"))) {
+                if (Test-Path $p) { $poison += $p }
+            }
         }
-        if ($poison.Count -eq 0) { Say "  (no MSYS2 dirs found to poison PATH with - skipping T3)" }
-        else {
+        if ($poison.Count -eq 0) {
+            # A gate that skips itself is worse than no gate: fail loudly.
+            Gate "T3 builds+runs with a poisoned PATH" $false `
+                 ("no MSYS2 dir found to poison PATH with (MSYS2_ROOT=$($env:MSYS2_ROOT));" +
+                  " the gate cannot verify PATH independence - FIX THE GATE, do not skip it")
+        } else {
+            Say "  (poisoning PATH with: $($poison -join ';'))"
             $env:PATH = ($poison -join ";") + ";" + $savedPath
             $outExe = Join-Path $work "poisoned.exe"
             $r = Invoke-Native $rgcc @($hello, "-o", $outExe)
