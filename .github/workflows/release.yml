@@ -151,10 +151,24 @@ jobs:
         with:
           msystem: UCRT64
           update: true
+          # v4.1.0: this MSYS2 install is now ALSO the source of the
+          # toolchain that ships inside the installer. The collect step
+          # (installer/scripts/collect-toolchain.ps1) pins the gcc version
+          # and HARD-FAILS if it does not match
+          # installer/toolchain/manifest.json - so when MSYS2 ships a new
+          # gcc, the release build stops with a clear message instead of
+          # silently shipping an unpinned toolchain. Bump the manifest
+          # (and re-run the toolchain gates) to cut a new release.
+          #
+          # binutils is listed explicitly (it is also a gcc dependency):
+          # windres is invoked on EVERY link by the compiler - a missing
+          # windres makes every compile fail, not just the ones that want
+          # an icon.
           install: >-
             git
             base-devel
             mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-binutils
             mingw-w64-ucrt-x86_64-make
             python
             python-pip

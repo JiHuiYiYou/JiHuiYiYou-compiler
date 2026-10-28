@@ -1,7 +1,7 @@
 # JHYY ${VERSION} Release
 
 > **Release date**: ${ISO_DATE}
-> **Download**: [jhyy-installer-${VERSION}.exe](${INSTALLER_URL}) (~30MB Burn bundle — v1.8.x 起含 .NET 8 Desktop Runtime embed;v1.5.x = ~1.6MB 无 .NET 8)
+> **Download**: [jhyy-installer-${VERSION}.exe](${INSTALLER_URL}) (~30MB Burn bundle — v1.8.x 起含 .NET 8 Desktop Runtime embed;v4.1.0 起另含内置工具链)
 > **SHA256**: 见 [SHA256.txt](${SHA256_URL})
 > **Compatibility**: Windows 10 1809+ / Windows 11 / Windows Server 2019+ (x64)
 
@@ -11,7 +11,13 @@
 
 装完 `where jhyy` 应返回 `C:\Program Files\JHYY\bin\jhyy.exe`。
 
-**前置**: 装完会提示用户装 [MSYS2](https://www.msys2.org/) + ucrt64 GCC (jhyy 编 .jhyy → .exe 需要 qbe + gcc link)。Welcome page 已说明。
+**前置**: **v4.1.0 起不需要** —— installer 自带一份最小原生 ucrt64 工具链
+(gcc + binutils + CRT,装在 `C:\Program Files\JHYY\toolchain\`),装完即可
+`jhyy build hello.jhyy`。v4.1.0 之前需要自己装 [MSYS2](https://www.msys2.org/)
++ ucrt64 GCC。
+
+**想用自己的 gcc?** 设 `JHY_GCC=<gcc.exe 全路径>`,或在 `%JHYY_HOME%\env.txt`
+里写一行 `JHY_GCC=<gcc.exe 全路径>`。默认用内置那份(版本受控、产物可复现)。
 
 ## 主要改动 (v${VERSION})
 
