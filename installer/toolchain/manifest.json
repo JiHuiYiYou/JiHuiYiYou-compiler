@@ -61,6 +61,7 @@
       "libmingw32.a",
       "libmingwex.a",
       "libmsvcrt.a",
+      "libucrt.a",
       "libm.a",
       "libpthread.a",
       "libssp.a",
