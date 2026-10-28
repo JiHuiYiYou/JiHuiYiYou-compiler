@@ -26,6 +26,41 @@ C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/
 
 ---
 
+## 宿主平台
+
+**编译器宿主 = Windows x64。这是设计决策,不是缺陷,也不在 backlog 里。**
+
+证据链(免得下次 audit 又把它当 bug 挖出来):
+
+- `compiler/build/bin/jhyy.exe` 是 **PE32+ Windows 可执行文件**(git 跟踪的产物)。
+  `make` 的自举闭环必须**执行**它 ⇒ 宿主必须是 Windows(或 Wine)。
+- C 端编译器已于 v4.0.21 (`b6efe61`)删除 ⇒ **不存在**「用 Linux gcc 编出一个
+  原生 ELF 版 jhyy」这条路;`compiler/src0/*.jhyy` 是用 jhyy 自己写的(鸡生蛋),
+  唯一的种子就是上面那个 PE。
+- `compiler/src0/jhyy_helpers.c` 的 C 桥有 4 个 **只在 `#ifdef _WIN32` 内定义、
+  没有 `#else`** 的必需 FFI 符号 —— `jh_mktemp_ascii` / `jh_file_copy` /
+  `jh_rename_file` / `jh_unlink_file`(helpers.c:626-715)⇒ Linux 上编这个桥会
+  undefined reference。这 4 个在**每次编译的关键路径上**(建临时 .asm/.exe →
+  拷 .s → rename 到输出路径 → 清理)。
+- `jh_paths_init`(helpers.c:240-360)整段是 Windows 路径逻辑(无条件把 `/` 换成
+  `\`、`strrchr(path,'\\')`、拼 `%s\\runtime.c`、walk-up 也按 `\` 切)⇒ 布局探测
+  在 Linux 上必然失败 ⇒ 连 `runtime.c` / `jhyy_helpers.c` / std 目录都找不到。
+- `main.jhyy` 侧:`path_to_win()`(main.jhyy:177)把 `/` 换成 `\`;输出后缀写死
+  `.exe`(main.jhyy:1211 / 1609 / 1820)。
+- 工具链与分发全 Windows:CI `runs-on: windows-latest` + `shell: msys2 {0}`;
+  `release.yml` 同;installer 是 WiX(MSI/EXE)+ VSCode 扩展。
+
+⇒ **别把「宿主能不能是 Linux」当 bug 挖** —— `docs/plans/v4/backlog.md` 里
+**没有**这一项,那是范围外,不是待办。
+
+**目标(target)侧不受此限:** `--target=amd64_sysv` 产 Linux ELF —— .s 在 Windows
+上 emit,在 Linux 上 link + run。CI 里那道 `SysV ABI (6 tests windows-latest can
+never run)` job(`ci.yml`, `runs-on: ubuntu-latest`)干的就是这个。四个 target:
+`amd64_win`(默认)/ `amd64_win_freestanding` / `amd64_sysv` /
+`amd64_sysv_freestanding`。
+
+---
+
 ## 编译编译器 (自举链)
 
 **本仓没有 C 端了。** `compiler/build/bin/jhyy.exe` 是 **git 跟踪的**产物

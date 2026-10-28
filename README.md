@@ -11,7 +11,7 @@
 [![Version](https://img.shields.io/badge/version-v4.0.0-00d4aa)](docs/logs/v4/changelog-v4.0.0.md)
 [![Status](https://img.shields.io/badge/self--host-N%E2%89%A53%20byte--equal-success)](#status-v400)
 [![Backend](https://img.shields.io/badge/backend-self--hosted%20amd64-blue)](#architecture)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)](#install)
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#install)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![中文](https://img.shields.io/badge/lang-中文-red)](README.zh-CN.md)
 
@@ -32,24 +32,24 @@ JHYY (机会翼游) is a self-designed, statically typed, expression-oriented, c
 
 ## Install
 
-**Prerequisites**:
+**Prerequisites** (Windows x64 host — the compiler itself is Windows-only by design; see [docs/internal/build.md](docs/internal/build.md) § 宿主平台):
 - **Windows**: MSYS2 + `mingw-w64-ucrt-x86_64-gcc` + `mingw-w64-ucrt-x86_64-binutils`
-- **Linux**: GCC + binutils (`apt install gcc binutils` or equivalent)
 
 **Build** (one line, from repo root):
 
 ```bash
-make all        # → compiler/build/bin/jhyy.exe (~5MB Windows / ELF Linux)
+make all        # → compiler/build/bin/jhyy.exe (~2MB Windows PE)
 ```
 
 **One-shot installer** (Windows end users): `installer/jhyy-installer-4.0.0.exe` wires up `jhyy.exe` + `.jhyy` file association + VSCode extension + PATH registration. `installer/jhyy-compiler-4.0.0.msi` is the enterprise / SCCM distribution (no GUI). See [`installer/README.md`](installer/README.md).
 
-**Docker** (cross-platform):
+**Docker**:
 
 ```bash
-# Windows
+# compiler host — full toolchain (Windows)
 docker run -it msys2/mingw-w64-ucrt-x86_64 bash
-# Linux
+# amd64_sysv target toolchain — link + run the emitted .s on Linux
+# (jhyy.exe is a PE binary: it does NOT run inside this container)
 docker run -it gcc:12 bash
 ```
 
