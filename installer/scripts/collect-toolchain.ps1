@@ -236,20 +236,67 @@ foreach ($dll in $dllSet) {
 # is exactly their dependency closure - NOT the whole ucrt64/include tree
 # (135 MB). Measured: ~300 headers / 7.6 MB.
 #
-# Classification is by the ACTUAL path gcc resolved (gcc -M -E prints real
-# paths), matched against an ORDERED list of roots. Order matters: the gcc
-# include dirs live UNDER $ucrt, so the ucrt root would swallow them.
-$gccLibAbs  = "$ucrt\lib\gcc\$target\$gccVerDir"
-$gccIncAbs  = "$gccLibAbs\include"
-$gccFixAbs  = "$gccLibAbs\include-fixed"
-$sysIncAbs  = "$ucrt\include"
-$roots = @(
-    @{ root = "$gccIncAbs\"; cat = "gcc"      },
-    @{ root = "$gccFixAbs\"; cat = "gccfixed" },
-    @{ root = "$sysIncAbs\"; cat = "sys"      },
-    @{ root = "$gccLibAbs\"; cat = "gccother" }
-)
+# WHERE each header goes is derived FROM GCC ITSELF, not from a hardcoded
+# list of directories: `gcc -E -v` prints the include search path, and every
+# search dir is mapped to its position relative to the ucrt64 root, so the
+# collected tree reproduces the layout gcc expects.
+#
+# Why: the layout MOVES between gcc versions. gcc 15.2.0 has the system
+# headers in <ucrt>/include; gcc 16.2.0 (what CI runs) does not - and a
+# hardcoded classification put them in the wrong place, so the collected
+# toolchain could not even compile its own runtime.c ("stdlib.h: No such
+# file or directory").
+function Invoke-NativeCapture($exe, $argList) {
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $out = & $exe @argList 2>&1 | ForEach-Object { $_.ToString() }
+        return @{ code = $LASTEXITCODE; out = ($out -join "`n") }
+    } finally { $ErrorActionPreference = $old }
+}
 
+$ucrtAbs = [System.IO.Path]::GetFullPath($ucrt)
+function Normalize-Path([string]$p) {
+    try { return [System.IO.Path]::GetFullPath($p) } catch { return $p }
+}
+function Rel-Under([string]$p, [string]$root) {
+    $d = Normalize-Path ($p -replace '/', '\')
+    $r = (Normalize-Path ($root -replace '/', '\')).TrimEnd('\')
+    if ($d.StartsWith($r + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        return $d.Substring($r.Length + 1)
+    }
+    return $null
+}
+
+# 1. ask gcc where it looks for headers
+$probeSrc = Join-Path $env:TEMP "jhyy-empty-probe.c"
+Set-Content -Path $probeSrc -Value "" -Encoding ascii
+$probe = Invoke-NativeCapture $gccExe @("-E", "-v", "-x", "c", $probeSrc)
+Remove-Item -Force $probeSrc -ErrorAction SilentlyContinue
+$searchDirs = New-Object System.Collections.ArrayList
+$inList = $false
+foreach ($l in ($probe.out -split "`r?`n")) {
+    if ($l -match '#include <\.\.\.> search starts here:') { $inList = $true; continue }
+    if ($l -match 'End of search list') { $inList = $false; continue }
+    if ($inList) {
+        $t = $l.Trim()
+        if ($t -and ($t -notmatch '^#')) { [void]$searchDirs.Add((Normalize-Path $t)) }
+    }
+}
+if ($searchDirs.Count -eq 0) { throw "could not read gcc's include search path - is this a real gcc?" }
+# Every search dir must live under the ucrt64 root, otherwise the collected
+# tree cannot reproduce the layout gcc expects and the toolchain would not
+# be relocatable. Fail loudly instead of shipping a half-broken toolchain.
+foreach ($sd in $searchDirs) {
+    if (-not (Rel-Under $sd $ucrtAbs)) {
+        throw ("gcc's include search path contains a directory OUTSIDE the ucrt64 root:" +
+               " $sd`n  (ucrt64 root: $ucrtAbs)`n" +
+               "  The collected toolchain would not be relocatable - refusing to ship it.")
+    }
+}
+Say ("gcc include search dirs: " + (($searchDirs | ForEach-Object { Rel-Under $_ $ucrtAbs }) -join ' | '))
+
+# 2. the closure
 $closure = New-Object 'System.Collections.Generic.List[object]'
 $seen    = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
 foreach ($rel in $mf.headers.closure_inputs) {
@@ -263,42 +310,46 @@ foreach ($rel in $mf.headers.closure_inputs) {
         # files (stdio.h does `#include <swprintf.inl>`), and a "*.h only"
         # filter silently drops them - the toolchain then fails to compile
         # its own runtime.c with "swprintf.inl: No such file or directory".
-        # Membership is decided by the root matching below, which keeps only
-        # files that really live in the toolchain.
-        $p = ($tok -replace '/', '\')
-        foreach ($r in $roots) {
-            if ($p.StartsWith($r.root, [StringComparison]::OrdinalIgnoreCase)) {
-                $name = $p.Substring($r.root.Length)
-                $key  = $r.cat + "|" + $name
+        $p = Normalize-Path ($tok -replace '/', '\')
+        foreach ($sd in $searchDirs) {
+            if ($p.StartsWith($sd + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                $sdRel = Rel-Under $sd $ucrtAbs
+                if (-not $sdRel) { break }
+                $rel2 = $p.Substring($sd.Length + 1)
+                $key = "$sdRel|$rel2"
                 if ($seen.Add($key)) {
-                    $closure.Add([pscustomobject]@{ cat = $r.cat; name = $name; src = $p })
+                    $closure.Add([pscustomobject]@{ dstRel = (Join-Path $sdRel $rel2); src = $p })
                 }
                 break
             }
         }
     }
 }
-# gcc's own headers: explicit backstop against version drift
-foreach ($h in $mf.headers.extra_gcc_internal) {
-    $p = Join-Path $gccIncAbs $h
-    if (Test-Path $p) {
-        $key = "gcc|$h"
-        if ($seen.Add($key)) { $closure.Add([pscustomobject]@{ cat = "gcc"; name = $h; src = $p }) }
-    } else {
-        Say "  (skip missing gcc-internal header $h)"
+# gcc's own headers: explicit backstop against version drift. They live in
+# the search dir that provides stddef.h / stdarg.h.
+$gccIncDir = $null
+foreach ($sd in $searchDirs) {
+    if ((Test-Path (Join-Path $sd "stddef.h")) -and (Test-Path (Join-Path $sd "stdarg.h"))) { $gccIncDir = $sd; break }
+}
+if ($gccIncDir) {
+    $gccIncRel = Rel-Under $gccIncDir $ucrtAbs
+    foreach ($h in $mf.headers.extra_gcc_internal) {
+        $p = Join-Path $gccIncDir $h
+        if (Test-Path $p) {
+            $key = "$gccIncRel|$h"
+            if ($seen.Add($key)) { $closure.Add([pscustomobject]@{ dstRel = (Join-Path $gccIncRel $h); src = $p }) }
+        } else {
+            Say "  (skip missing gcc-internal header $h)"
+        }
     }
+} else {
+    Say "  (WARNING: could not locate the gcc-internal include dir - stddef.h/stdarg.h not found in the search path)"
 }
 Say "header closure: $($closure.Count) file(s)"
 
-$destFor = @{
-    "sys"      = "include"
-    "gcc"      = "$gccLibRel\include"
-    "gccfixed" = "$gccLibRel\include-fixed"
-    "gccother" = $gccLibRel
-}
 foreach ($h in $closure) {
     if (-not (Test-Path $h.src)) { throw "closure header vanished: $($h.src)" }
-    $dst = Join-Path $tcOut (Join-Path $destFor[$h.cat] $h.name)
+    $dst = Join-Path $tcOut $h.dstRel
     $dstDir = Split-Path $dst -Parent
     if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Force -Path $dstDir | Out-Null }
     Copy-Item -Path $h.src -Destination $dst -Force
