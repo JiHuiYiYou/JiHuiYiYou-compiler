@@ -466,18 +466,42 @@ $srcLines.Add("")
 # binaries that are actually shipped). pacman is queried when available;
 # otherwise fall back to the pinned versions in the manifest.
 $pacmanExe = Join-Path (Split-Path $ucrt -Parent) "usr\bin\pacman.exe"
+# The pacman query is BEST EFFORT: MSYS2 renames packages between releases
+# (gcc-libs -> libgcc, crt-git -> crt, headers-git -> headers), and a package
+# that is simply not installed must NOT abort the collection. When the
+# package is not found we fall back to the version pinned in the manifest.
+function Query-PkgVersion($pkg) {
+    $names = @($pkg.name)
+    if ($pkg.PSObject.Properties.Name -contains "aliases" -and $pkg.aliases) {
+        $names += @($pkg.aliases)
+    }
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        foreach ($n in $names) {
+            # Only accept a line that starts with the EXACT package name:
+            # pacman's "error: package ... was not found" must never be
+            # mistaken for a version line.
+            foreach ($line in (& $pacmanExe -Q $n 2>$null)) {
+                $s = "$line"
+                if ($s -match '^\s*(\S+)\s+(\S+)\s*$' -and $Matches[1] -eq $n) {
+                    return @{ ver = $Matches[2]; name = $Matches[1] }
+                }
+            }
+        }
+    } catch { } finally { $ErrorActionPreference = $old }
+    return $null
+}
 foreach ($p in $mf.packages) {
     $ver = $p.version
+    $pkgName = $p.name
     if (Test-Path $pacmanExe) {
-        $q = (& $pacmanExe -Q $p.name 2>$null | Select-Object -First 1)
-        if ($q) {
-            $parts = $q -split '\s+'
-            if ($parts.Length -ge 2) { $ver = $parts[1] }
-        }
+        $got = Query-PkgVersion $p
+        if ($got) { $ver = $got.ver; $pkgName = $got.name }
     }
-    $srcLines.Add(("  {0} {1}" -f $p.name, $ver))
+    $srcLines.Add(("  {0} {1}" -f $pkgName, $ver))
     $srcLines.Add(("    license: {0}" -f $p.license))
-    $srcLines.Add(("    source : https://repo.msys2.org/sources/{0}/" -f $p.name))
+    $srcLines.Add(("    source : https://repo.msys2.org/sources/{0}/" -f $pkgName))
 }
 $srcLines.Add("")
 $srcLines.Add("GCC itself: https://gcc.gnu.org/  (GPL-3.0-or-later WITH GCC Runtime")

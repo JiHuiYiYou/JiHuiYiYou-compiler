@@ -11,14 +11,15 @@
   },
 
   "packages": [
-    { "name": "mingw-w64-ucrt-x86_64-gcc", "version": "15.2.0-8", "license": "GPL-3.0-or-later WITH GCC-exception-3.1" },
-    { "name": "mingw-w64-ucrt-x86_64-gcc-libs", "version": "15.2.0-8", "license": "GPL-3.0-or-later WITH GCC-exception-3.1" },
-    { "name": "mingw-w64-ucrt-x86_64-binutils", "version": "2.45-2", "license": "GPL-3.0-or-later" },
-    { "name": "mingw-w64-ucrt-x86_64-crt-git", "version": "13.0.0.r179.g8181947cc-1", "license": "MIT" },
-    { "name": "mingw-w64-ucrt-x86_64-headers-git", "version": "13.0.0.r179.g8181947cc-1", "license": "MIT / GPL-2.0-or-later WITH Mingw-exception" },
-    { "name": "mingw-w64-ucrt-x86_64-libiconv", "version": "1.18-1", "license": "LGPL-2.1-or-later" },
-    { "name": "mingw-w64-ucrt-x86_64-zlib", "version": "1.3.1-1", "license": "Zlib" }
+    { "name": "mingw-w64-ucrt-x86_64-gcc", "aliases": [], "version": "15.2.0-8", "license": "GPL-3.0-or-later WITH GCC-exception-3.1" },
+    { "name": "mingw-w64-ucrt-x86_64-gcc-libs", "aliases": ["mingw-w64-ucrt-x86_64-libgcc"], "version": "15.2.0-8", "license": "GPL-3.0-or-later WITH GCC-exception-3.1" },
+    { "name": "mingw-w64-ucrt-x86_64-binutils", "aliases": [], "version": "2.45-2", "license": "GPL-3.0-or-later" },
+    { "name": "mingw-w64-ucrt-x86_64-crt-git", "aliases": ["mingw-w64-ucrt-x86_64-crt"], "version": "13.0.0.r179.g8181947cc-1", "license": "MIT" },
+    { "name": "mingw-w64-ucrt-x86_64-headers-git", "aliases": ["mingw-w64-ucrt-x86_64-headers"], "version": "13.0.0.r179.g8181947cc-1", "license": "MIT / GPL-2.0-or-later WITH Mingw-exception" },
+    { "name": "mingw-w64-ucrt-x86_64-libiconv", "aliases": [], "version": "1.18-1", "license": "LGPL-2.1-or-later" },
+    { "name": "mingw-w64-ucrt-x86_64-zlib", "aliases": [], "version": "1.3.1-1", "license": "Zlib" }
   ],
+  "packages_comment": "aliases = MSYS2 改名过的新包名(gcc 16 时代把 gcc-libs 改叫 libgcc、crt-git 改叫 crt、headers-git 改叫 headers)。查版本时先查 name,查不到再查 aliases ⇒ 溯源信息报的是**实际装着的**那个包。",
 
   "files": {
     "comment_bin": "装到 <toolchain>/bin/。gcc 用自身位置推导 cc1/collect2/as/ld ⇒ 目录结构不能拍平。",
