@@ -156,15 +156,24 @@ Say "gcc lib dir: $gccLibRel"
 
 # --- 2. clean output -------------------------------------------------------
 $tcOut  = Join-Path $OutDir "toolchain"
+# $tcDir is gcc's own PREFIX directory and ITS NAME IS NOT FREE:
+# gcc 16 builds the system include path as "<prefix>/bin/../../ucrt64/include"
+# (verified with `gcc -E -v` on gcc 16.2.0) - it hardcodes the "ucrt64"
+# component. A relocated toolchain therefore MUST keep that directory level,
+# otherwise the compiler looks for its headers OUTSIDE the toolchain and
+# every compile dies with "stdlib.h: No such file or directory".
+# gcc 15 does not hardcode it (<prefix>/include) - keeping the level works
+# for both.
+$tcDir  = Join-Path $tcOut "ucrt64"
 $binOut = Join-Path $OutDir "bin"
 if (Test-Path $tcOut) { Remove-Item -Recurse -Force $tcOut }
-New-Item -ItemType Directory -Force -Path $tcOut  | Out-Null
+New-Item -ItemType Directory -Force -Path $tcDir  | Out-Null
 New-Item -ItemType Directory -Force -Path $binOut | Out-Null
 
 function Copy-TC($relPath, $srcRoot) {
     $src = Join-Path $srcRoot $relPath
     if (-not (Test-Path $src)) { throw "missing toolchain file: $src" }
-    $dst = Join-Path $tcOut ($relPath -replace '/', '\')
+    $dst = Join-Path $tcDir ($relPath -replace '/', '\')
     $dstDir = Split-Path $dst -Parent
     if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Force -Path $dstDir | Out-Null }
     Copy-Item -Path $src -Destination $dst -Force
@@ -181,7 +190,7 @@ foreach ($f in $mf.files.crt_lib) { Copy-TC "lib/$f" $ucrt }
 foreach ($f in $mf.files.gcc_lib_from_bin) {
     $src = Join-Path $ucrt "bin\$f"
     if (-not (Test-Path $src)) { throw "missing toolchain file: $src" }
-    $dst = Join-Path $tcOut "$gccLibRel\$f"
+    $dst = Join-Path $tcDir "$gccLibRel\$f"
     Copy-Item -Path $src -Destination $dst -Force
 }
 Say "copied $($mf.files.bin.Count) bin + $($mf.files.gcc_lib.Count) gcc-lib + $($mf.files.crt_lib.Count) crt-lib + $($mf.files.gcc_lib_from_bin.Count) extra bin->gcc-lib"
@@ -226,8 +235,8 @@ foreach ($dll in $dllSet) {
     if (-not (Test-Path $src)) {
         throw "DLL '$dll' is required by the toolchain but missing from $ucrt\bin - refusing to ship a broken toolchain"
     }
-    Copy-Item -Path $src -Destination (Join-Path $tcOut "bin\$dll") -Force
-    Copy-Item -Path $src -Destination (Join-Path $tcOut "$gccLibRel\$dll") -Force
+    Copy-Item -Path $src -Destination (Join-Path $tcDir "bin\$dll") -Force
+    Copy-Item -Path $src -Destination (Join-Path $tcDir "$gccLibRel\$dll") -Force
 }
 
 # --- 5. header closure -----------------------------------------------------
@@ -259,6 +268,32 @@ $ucrtAbs = [System.IO.Path]::GetFullPath($ucrt)
 function Normalize-Path([string]$p) {
     try { return [System.IO.Path]::GetFullPath($p) } catch { return $p }
 }
+$gccLibDirAbs = Normalize-Path (Join-Path $ucrtAbs "lib\gcc\$target\$gccVerDir")
+# gcc may report include directories (and dependency paths) RELATIVE to one
+# of its own prefixes - and WHICH prefix differs between gcc versions:
+# gcc 15 prints them absolute, gcc 16 prints them relative ("include",
+# "../../../../include", ...). Resolving a relative path against the wrong
+# base silently drops every system header from the closure - the collected
+# toolchain then cannot compile its own runtime.c ("stdlib.h: No such file
+# or directory").
+#
+# So: try the plausible bases and take the one that EXISTS ON DISK. That is
+# empirical and does not care which prefix gcc anchored its relative paths
+# to.
+$pathBases = @(
+    $gccLibDirAbs,                       # <ucrt>/lib/gcc/<target>/<ver>
+    $ucrtAbs,                             # <ucrt>
+    (Split-Path $ucrtAbs -Parent)         # <msys2 root>
+)
+function Resolve-GccPath([string]$p) {
+    $t = ($p -replace '/', '\')
+    if ([System.IO.Path]::IsPathRooted($t)) { return Normalize-Path $t }
+    foreach ($b in $pathBases) {
+        $cand = Normalize-Path (Join-Path $b $t)
+        if (Test-Path $cand) { return $cand }
+    }
+    return Normalize-Path (Join-Path $ucrtAbs $t)
+}
 function Rel-Under([string]$p, [string]$root) {
     $d = Normalize-Path ($p -replace '/', '\')
     $r = (Normalize-Path ($root -replace '/', '\')).TrimEnd('\')
@@ -280,7 +315,7 @@ foreach ($l in ($probe.out -split "`r?`n")) {
     if ($l -match 'End of search list') { $inList = $false; continue }
     if ($inList) {
         $t = $l.Trim()
-        if ($t -and ($t -notmatch '^#')) { [void]$searchDirs.Add((Normalize-Path $t)) }
+        if ($t -and ($t -notmatch '^#')) { [void]$searchDirs.Add((Resolve-GccPath $t)) }
     }
 }
 if ($searchDirs.Count -eq 0) { throw "could not read gcc's include search path - is this a real gcc?" }
@@ -294,7 +329,8 @@ foreach ($sd in $searchDirs) {
                "  The collected toolchain would not be relocatable - refusing to ship it.")
     }
 }
-Say ("gcc include search dirs: " + (($searchDirs | ForEach-Object { Rel-Under $_ $ucrtAbs }) -join ' | '))
+Say ("gcc include search dirs (abs): " + ($searchDirs -join ' | '))
+Say ("gcc include search dirs (rel): " + (($searchDirs | ForEach-Object { Rel-Under $_ $ucrtAbs }) -join ' | '))
 
 # 2. the closure
 $closure = New-Object 'System.Collections.Generic.List[object]'
@@ -310,7 +346,7 @@ foreach ($rel in $mf.headers.closure_inputs) {
         # files (stdio.h does `#include <swprintf.inl>`), and a "*.h only"
         # filter silently drops them - the toolchain then fails to compile
         # its own runtime.c with "swprintf.inl: No such file or directory".
-        $p = Normalize-Path ($tok -replace '/', '\')
+        $p = Resolve-GccPath $tok
         foreach ($sd in $searchDirs) {
             if ($p.StartsWith($sd + '\', [StringComparison]::OrdinalIgnoreCase)) {
                 $sdRel = Rel-Under $sd $ucrtAbs
@@ -349,7 +385,7 @@ Say "header closure: $($closure.Count) file(s)"
 
 foreach ($h in $closure) {
     if (-not (Test-Path $h.src)) { throw "closure header vanished: $($h.src)" }
-    $dst = Join-Path $tcOut $h.dstRel
+    $dst = Join-Path $tcDir $h.dstRel
     $dstDir = Split-Path $dst -Parent
     if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Force -Path $dstDir | Out-Null }
     Copy-Item -Path $h.src -Destination $dst -Force
@@ -364,7 +400,7 @@ foreach ($h in $closure) {
 #
 # Baseline = the repo copies (always shipped).
 # Overlay  = whatever this MSYS2 provides (newer/extra texts win).
-$licOut = Join-Path $tcOut "LICENSES"
+$licOut = Join-Path $tcDir "LICENSES"
 New-Item -ItemType Directory -Force -Path $licOut | Out-Null
 $msysRoot = Split-Path $ucrt -Parent
 $licRoots = @(
@@ -420,11 +456,26 @@ $srcLines.Add("MSYS2 UCRT64 GCC toolchain. The files under toolchain/ are redist
 $srcLines.Add("verbatim from the packages listed below. Each package's license text is")
 $srcLines.Add("shipped under toolchain/LICENSES/ next to this file.")
 $srcLines.Add("")
+$srcLines.Add("Collected from:")
+$srcLines.Add(("  gcc        {0} (target {1})" -f $gccVer, $target))
+$srcLines.Add("")
 $srcLines.Add("MSYS2 packages (source of all binaries below):")
 $srcLines.Add("  https://repo.msys2.org/   (source tarballs under /sources/)")
 $srcLines.Add("")
+# Report the ACTUAL installed package versions (provenance must match the
+# binaries that are actually shipped). pacman is queried when available;
+# otherwise fall back to the pinned versions in the manifest.
+$pacmanExe = Join-Path (Split-Path $ucrt -Parent) "usr\bin\pacman.exe"
 foreach ($p in $mf.packages) {
-    $srcLines.Add(("  {0} {1}" -f $p.name, $p.version))
+    $ver = $p.version
+    if (Test-Path $pacmanExe) {
+        $q = (& $pacmanExe -Q $p.name 2>$null | Select-Object -First 1)
+        if ($q) {
+            $parts = $q -split '\s+'
+            if ($parts.Length -ge 2) { $ver = $parts[1] }
+        }
+    }
+    $srcLines.Add(("  {0} {1}" -f $p.name, $ver))
     $srcLines.Add(("    license: {0}" -f $p.license))
     $srcLines.Add(("    source : https://repo.msys2.org/sources/{0}/" -f $p.name))
 }
@@ -436,13 +487,13 @@ $srcLines.Add("To obtain the corresponding source code for any of the above, dow
 $srcLines.Add("package source tarball from the MSYS2 source repository URL given for it")
 $srcLines.Add("(a .tar.zst under https://repo.msys2.org/sources/<package>/), or the")
 $srcLines.Add("matching upstream release tarball for GCC.")
-$srcLines | Set-Content -Path (Join-Path $tcOut "SOURCES.txt") -Encoding utf8
+$srcLines | Set-Content -Path (Join-Path $tcDir "SOURCES.txt") -Encoding utf8
 
 # --- 7. prebuilt objects (kills the 4.5s per-link C recompilation) ---------
 # Must be built with the COLLECTED gcc: the .o and the gcc that links it
 # have to be the same version / same ABI.
 if (-not $SkipObjectFiles) {
-    $tcGcc = Join-Path $tcOut "bin\gcc.exe"
+    $tcGcc = Join-Path $tcDir "bin\gcc.exe"
     Say "building prebuilt objects with the collected gcc..."
     $objs = @(
         @{ src = "compiler/runtime/runtime.c";    out = "runtime.o" },

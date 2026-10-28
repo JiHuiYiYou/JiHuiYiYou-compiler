@@ -12,6 +12,11 @@
                        it, like "C:\Program Files\...") and compile + link +
                        RUN a hello world there. Proves there is no absolute
                        path dependency on the build machine.
+
+                       NOTE the "ucrt64" level: gcc 16 hardcodes it in the
+                       system include path ("<prefix>/bin/../../ucrt64/include")
+                       - so the staged tree MUST keep that directory name or
+                       the relocated compiler cannot find its own headers.
     T2 HEADERS      - compile runtime.c + jhyy_helpers.c using ONLY the
                        staged toolchain. Proves the header closure is
                        complete (including .inl files!).
@@ -89,7 +94,7 @@ function Find-MsysRoot {
 }
 
 $tc = (Resolve-Path $ToolchainDir).Path
-$gcc = Join-Path $tc "bin\gcc.exe"
+$gcc = Join-Path $tc "ucrt64\bin\gcc.exe"
 if (-not (Test-Path $gcc)) { throw "no staged toolchain at $tc (run collect-toolchain.ps1 first)" }
 Say "toolchain: $tc"
 
@@ -107,7 +112,7 @@ int main(void) { printf("jhyy-toolchain-ok\n"); return 42; }
     # Relocate to a path WITH A SPACE (the install dir is "C:\Program Files\JHYY").
     $relocated = Join-Path $work "Program Files JHYY toolchain"
     Copy-Item -Path $tc -Destination $relocated -Recurse -Force
-    $rgcc = Join-Path $relocated "bin\gcc.exe"
+    $rgcc = Join-Path $relocated "ucrt64\bin\gcc.exe"
     $helloExe = Join-Path $work "hello.exe"
     $r = Invoke-Native $rgcc @($hello, "-o", $helloExe)
     if ($r.code -ne 0) {
@@ -188,7 +193,7 @@ int main(void) { printf("jhyy-toolchain-ok\n"); return 42; }
     # ---------------------------------------------------------------- T5
     # windres runs on EVERY link; a missing windres makes every compile
     # fail (jh_gcc_invoke poisons the link line on purpose).
-    $windres = Join-Path $relocated "bin\windres.exe"
+    $windres = Join-Path $relocated "ucrt64\bin\windres.exe"
     $icoSrc  = "installer/assets/icons/jhyy-icon.ico"
     if (-not (Test-Path $windres)) {
         Gate "T5 windres present" $false $windres

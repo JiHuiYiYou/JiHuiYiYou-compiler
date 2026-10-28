@@ -182,6 +182,7 @@
 | [W-160](#w-160) | RESOLVED | 运行时 DLL 闭包只算**直接**导入 ⇒ 漏传递依赖 ⇒ 工具链在没 MSYS2... |
 | [W-161](#w-161) | RESOLVED | 头文件闭包只收 `*.h` ⇒ 漏 `.inl` ⇒ 内置工具链**编自己的 runtime.c... |
 | [W-162](#w-162) | RESOLVED | gcc 中间文件落 **cwd**(TMP 未设)⇒ 只读目录下链接失败且零输出 |
+| [W-163](#w-163) | RESOLVED | gcc 16 把系统头路径写死成 `<prefix>/bin/../../ucrt64/includ... |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -12269,3 +12270,47 @@ gcc 链接失败,报错形态与 W-159 同款(常常只有一句 `ld returned N`
 **引用:**
 - 源码:`compiler/src0/jhyy_helpers.c`(`jh_ensure_temp_env()`)
 - 相关:**W-159**(同族的「静默失败」)
+
+<a id="w-163"></a>
+## W-163: gcc 16 把系统头路径写死成 `<prefix>/bin/../../ucrt64/include` ⇒ prefix 目录**必须叫 `ucrt64`**
+
+**状态:** RESOLVED closed 2026-10-29 (v4.1.0) — 内置工具链根下保留 `ucrt64/` 这一层
+**Filed-by:** 2026-10-29 CI(v4.1.0 第一个 CI run 的后续)
+**日期:** 2026-10-29
+
+**触发面:** 内置工具链的目录布局 —— `<toolchain>/` 下 gcc 的 prefix 目录。
+
+**症状:**
+```
+toolchain/lib/gcc/x86_64-w64-mingw32/16.2.0/include/stdint.h:11:26: error:
+    no include path in which to search for stdint.h
+toolchain/lib/gcc/x86_64-w64-mingw32/16.2.0/include/stddef.h:1:25: error: ...
+compiler/runtime/runtime.c:2:10: fatal error: stdlib.h: No such file or directory
+```
+⇒ 收集出来的工具链**连自己的 `runtime.c` 都编不过**。
+
+**根因:** gcc 16.2.0 的 `gcc -E -v` 打出的是:
+```
+C:/.../ucrt64/bin/../lib/gcc/x86_64-w64-mingw32/16.2.0/include
+C:/.../ucrt64/bin/../lib/gcc/x86_64-w64-mingw32/16.2.0/include-fixed
+C:/.../ucrt64/bin/../../ucrt64/include        ← ⚠️ 写死了 "ucrt64" 这一段
+```
+⇒ 系统头路径 = `<prefix>/../ucrt64/include`,**prefix 目录必须叫 `ucrt64`**。
+工具链搬到 `<toolchain>/` 下后 prefix = `<toolchain>/ucrt64` ⇒
+`<toolchain>/ucrt64/../ucrt64/include` = `<toolchain>/ucrt64/include` ✓
+—— 但如果把 `ucrt64/` 这层**去掉**(prefix = `<toolchain>`),
+路径就变成 `<toolchain>/../ucrt64/include` ⇒ **跑到工具链外面** ⇒ 找不到头。
+
+**修法(2026-10-29 真修):** 工具链根下**保留 `ucrt64/` 这一层**。
+gcc 15 不写死这层(`<prefix>/include`)⇒ 保留它对两个版本都成立。
+
+**影响范围:** 内置工具链的所有用户。修前:工具链**完全不能用**;
+修了:布局与 MSYS2 原生一致 ⇒ 搬迁后仍可自洽。
+
+**失效条件:** 已消除(2026-10-29 真修,见上)。
+
+**引用:**
+- 证据:gcc 16.2.0 的 `gcc -E -v`(本地用解包的 MSYS2 包复现)
+- 采集:`installer/scripts/collect-toolchain.ps1`(`$tcDir` = `<toolchain>/ucrt64`)
+- 编译器侧:`compiler/src0/jhyy_helpers.c`(`jh_probe_bundled_gcc()` 的候选路径)
+- 相关:**W-159 / W-160 / W-161**(把这套工具链真正做自包含时挖出的四条)

@@ -103,7 +103,8 @@
   },
 
   "install": {
-    "comment": "装到 <INSTALLDIR>/toolchain/（与 bin/ 平级 —— bin/ 在系统 PATH 上，不该塞 90MB 的工具链进去）。",
-    "dir": "toolchain"
+    "comment": "装到 <INSTALLDIR>/toolchain/（与 bin/ 平级 —— bin/ 在系统 PATH 上，不该塞 90MB 的工具链进去）。⚠️ 工具链根下**必须**保留 `ucrt64/` 这一层：gcc 16 把系统头路径写死成 `<prefix>/bin/../../ucrt64/include`（实测 gcc 16.2.0 的 `gcc -E -v`）⇒ prefix 目录必须叫 `ucrt64`，否则搬到别处后编译器会去工具链外面找头文件（stdlib.h: No such file or directory）。gcc 15 不写死这层 ⇒ 保留它两边都成立。",
+    "dir": "toolchain",
+    "prefix_dir": "ucrt64"
   }
 }

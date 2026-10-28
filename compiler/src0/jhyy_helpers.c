@@ -461,9 +461,18 @@ static int  jh_gcc_path_initialized = 0;
  *    <repo>\compiler\build\toolchain\ 都不存在)⇒ 开发者机器行为零变化。
  */
 #ifdef _WIN32
-/* 探测内置工具链的 gcc.exe。写死了两种相对位置:
- *   <jhyy.exe 所在目录>\toolchain\bin\gcc.exe        (bin\toolchain 布局)
- *   <jhyy.exe 所在目录>\..\toolchain\bin\gcc.exe     (INSTALLDIR\toolchain 布局)
+/* 探测内置工具链的 gcc.exe。候选相对位置(按顺序):
+ *   <jhyy.exe 所在目录>\toolchain\ucrt64\bin\gcc.exe
+ *   <jhyy.exe 所在目录>\..\toolchain\ucrt64\bin\gcc.exe   ← 安装布局
+ *   <jhyy.exe 所在目录>\toolchain\bin\gcc.exe            (旧布局)
+ *   <jhyy.exe 所在目录>\..\toolchain\bin\gcc.exe         (旧布局)
+ *
+ * ⚠️ **"ucrt64" 这一层不是装饰** —— gcc 16 把系统头路径写死成
+ * "<prefix>/bin/../../ucrt64/include"(实测 gcc 16.2.0 的 `gcc -E -v`),
+ * 即 prefix 目录**必须叫 ucrt64**,否则搬走后编译器会去工具链外面找头文件,
+ * 表现为 "stdlib.h: No such file or directory"。gcc 15 不写死这层
+ * (<prefix>/include)⇒ 保留这一层对两个版本都成立。
+ *
  * 用 GetModuleFileNameA(NULL,...) 而不是 argv0 —— 不依赖调用方传了什么,
  * 也不依赖 jh_paths_init 是否已经跑过。
  * 返回 1 = 命中(路径写进 out_buf);0 = 没找到。
@@ -479,10 +488,12 @@ static int jh_probe_bundled_gcc(char *out_buf, int out_cap) {
         *last = '\0';
     }
     {
-        const char *suffixes[2];
-        suffixes[0] = "\\toolchain\\bin\\gcc.exe";
-        suffixes[1] = "\\..\\toolchain\\bin\\gcc.exe";
-        for (int i = 0; i < 2; i++) {
+        const char *suffixes[4];
+        suffixes[0] = "\\toolchain\\ucrt64\\bin\\gcc.exe";
+        suffixes[1] = "\\..\\toolchain\\ucrt64\\bin\\gcc.exe";
+        suffixes[2] = "\\toolchain\\bin\\gcc.exe";
+        suffixes[3] = "\\..\\toolchain\\bin\\gcc.exe";
+        for (int i = 0; i < 4; i++) {
             char cand[1024];
             #pragma GCC diagnostic push
             #pragma GCC diagnostic ignored "-Wformat-truncation"

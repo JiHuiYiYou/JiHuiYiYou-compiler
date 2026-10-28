@@ -1825,6 +1825,19 @@ v4.1.0 之前,`jhyy-installer-<ver>.exe` 装出来的是**半残编译器**:
 另两条同族:运行时 DLL 闭包只算**直接**导入会漏传递依赖
 (`libintl-8.dll` → `libiconv-2.dll`)⇒ 换台没 MSYS2 的机器就炸。
 
+### ⚠️ 第四条(**只有 CI 抓得到**,本地永远测不出)
+
+**gcc 16 把系统头路径写死成 `<prefix>/bin/../../ucrt64/include`** ⇒
+**prefix 目录必须叫 `ucrt64`**。工具链搬到 `<toolchain>/` 下后若把 `ucrt64/`
+这层去掉,编译器就会去**工具链外面**找头文件 ⇒
+`stdlib.h: No such file or directory` ⇒ 内置工具链完全不能用。
+
+⚠️ **本地测不出来**:本地 MSYS2 是 gcc 15.2.0(`<prefix>/include`,不写死),
+CI 的是 gcc 16.2.0 ⇒ 四个 CI run 才把它逼出来(前三个分别撞上
+「MSYS2 根目录不是 `C:\msys64`」「许可证目录改名」「头闭包分类错」)。
+
+⇒ 工具链根下**保留 `ucrt64/` 这一层** ⇒ 两个版本都成立(W-163)。
+
 ### 新增常驻门
 
 | 脚本 | 门 |

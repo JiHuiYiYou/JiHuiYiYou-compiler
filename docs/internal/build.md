@@ -33,16 +33,17 @@ C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/
 
 ```
 <INSTALLDIR>\toolchain\
-├── bin\        gcc as ld ar dlltool windres strip nm objdump ranlib + 10 个运行时 DLL
-├── lib\        crt2.o / default-manifest.o / binmode.o + CRT 与 win32 import libs
-│   └── gcc\x86_64-w64-mingw32\<ver>\
-│       ├── cc1.exe collect2.exe **as.exe ld.exe** libgcc.a crt*.o + 同样那 10 个 DLL
-│       └── include\   gcc 自带头（闭包里用到的那 123 个）
-├── include\    头文件闭包（297 个，7.6 MB）
-└── LICENSES\ + SOURCES.txt
+└── ucrt64\                    ← ⚠️ 这一层的**名字不能改**
+    ├── bin\        gcc as ld ar dlltool windres strip nm objdump ranlib + 10 个运行时 DLL
+    ├── lib\        crt2.o / default-manifest.o / binmode.o + CRT 与 win32 import libs
+    │   └── gcc\x86_64-w64-mingw32\<ver>\
+    │       ├── cc1.exe collect2.exe **as.exe ld.exe** libgcc.a crt*.o + 同样那 10 个 DLL
+    │       └── include\   gcc 自带头（闭包里用到的那 123 个）
+    ├── include\    头文件闭包（297 个，7.6 MB）
+    └── LICENSES\ + SOURCES.txt
 ```
 
-原始 ≈ **90 MB**（MSI CAB 压缩后 ≈ 40 MB）。完整设计见
+原始 ≈ **92 MB**（MSI CAB 压缩后 ≈ 40 MB）。完整设计见
 [`installer/toolchain/README.md`](../../installer/toolchain/README.md)。
 
 ### 编译器的解析顺序
@@ -56,14 +57,20 @@ JHY_GCC 环境变量 → %JHYY_HOME%\env.txt → **内置 toolchain** → C:\msy
 ⇒ **默认用内置那份**（确定性 + 版本受控 + 不依赖用户 PATH 形态）。
 用户要用回自己的 gcc：设 `JHY_GCC` 或写 `env.txt`（installer **不**代写）。
 
-### 三个必须记住的坑
+### 四个必须记住的坑
 
-1. **目录结构不能拍平** —— gcc 用自身位置推导 `cc1` / `collect2` / `as` / `ld`。
-2. **`as.exe` / `ld.exe` 必须在 `lib/gcc/<target>/<ver>/` 里再放一份** ——
+1. **`ucrt64/` 这一层的名字不能改** —— gcc 16 把系统头路径写死成
+   `<prefix>/bin/../../ucrt64/include`（实测 gcc 16.2.0 的 `gcc -E -v`）
+   ⇒ prefix 目录**必须叫 `ucrt64`**。工具链搬走后 `<prefix>/../ucrt64/include`
+   会跑到工具链外面 ⇒ 编译器连自己的 `runtime.c` 都编不过
+   （`stdlib.h: No such file or directory`）。gcc 15 不写死这层 ⇒ 保留它两边都成立。
+   ⚠️ **本地测不出来** —— 本地 MSYS2 是 gcc 15.2.0，CI 的是 16.2.0。
+2. **目录结构不能拍平** —— gcc 用自身位置推导 `cc1` / `collect2` / `as` / `ld`。
+3. **`as.exe` / `ld.exe` 必须在 `lib/gcc/<target>/<ver>/` 里再放一份** ——
    gcc 与 collect2 按**裸名**找这两个；PATH 上有个别的 ld（典型：MSYS2 POSIX 层的
    `/usr/bin/ld.exe`）就会被捡走 ⇒ **链接失败且 stderr 零输出**（只有
    `collect2.exe: error: ld returned 9 exit status`）。
-3. **头闭包不能只收 `*.h`** —— ucrt 的 `stdio.h` 会 `#include <swprintf.inl>`。
+4. **头闭包不能只收 `*.h`** —— ucrt 的 `stdio.h` 会 `#include <swprintf.inl>`。
 
 ### 门
 
