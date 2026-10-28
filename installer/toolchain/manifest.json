@@ -96,7 +96,7 @@
   },
 
   "licenses": {
-    "comment": "随包必须发许可证原文（GPL-3.0 的分发义务）+ SOURCES.txt（包名/版本/上游/源码获取方式）。目录名对应 <msys2>/ucrt64/share/licenses/<dir>/。gcc-libs 与 binutils 缺失 ⇒ 响亮失败（GPL 分发义务）。",
+    "comment": "随包必须发许可证原文（GPL-3.0 的分发义务）+ SOURCES.txt（包名/版本/上游/源码获取方式）。**基线 = 仓里的 installer/toolchain/licenses/<dir>/（已签入，确定性）**；MSYS2 自己提供的（<ucrt>/share/licenses/<dir>/ 等多处候选，带前缀匹配）作为**叠加**。gcc-libs 与 binutils 两边都没有 ⇒ 响亮失败（GPL 分发义务，不能省）。",
     "required": ["gcc-libs", "binutils"],
     "optional": ["crt", "headers", "libiconv", "zlib"]
   },

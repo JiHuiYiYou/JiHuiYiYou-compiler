@@ -305,19 +305,59 @@ foreach ($h in $closure) {
 }
 
 # --- 6. licenses + SOURCES.txt (GPL redistribution duty) -------------------
+# The license texts are CHECKED INTO THE REPO (installer/toolchain/licenses/)
+# so the payload is deterministic and independent of where MSYS2 happens to
+# keep its license files. Observed: gcc 15.2.0 has
+# <ucrt>/share/licenses/gcc-libs, gcc 16.2.0 does not - i.e. the layout
+# moves between MSYS2 releases.
+#
+# Baseline = the repo copies (always shipped).
+# Overlay  = whatever this MSYS2 provides (newer/extra texts win).
 $licOut = Join-Path $tcOut "LICENSES"
 New-Item -ItemType Directory -Force -Path $licOut | Out-Null
+$msysRoot = Split-Path $ucrt -Parent
+$licRoots = @(
+    (Join-Path $ucrt "share\licenses"),
+    (Join-Path $msysRoot "usr\share\licenses"),
+    (Join-Path $msysRoot "share\licenses")
+)
+function Find-LicenseDir([string]$name) {
+    foreach ($root in $licRoots) {
+        if (-not (Test-Path $root)) { continue }
+        $exact = Join-Path $root $name
+        if (Test-Path $exact) { return $exact }
+        # prefix match: "gcc-libs" may live in "gcc-libs-15.2" etc.
+        $hit = Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue |
+               Where-Object { $_.Name -like "$name*" } | Select-Object -First 1
+        if ($hit) { return $hit.FullName }
+    }
+    return $null
+}
+$repoLic = Join-Path $repoRoot "installer\toolchain\licenses"
 $licDirs = @(@($mf.licenses.required) + @($mf.licenses.optional))
 foreach ($dir in $licDirs) {
-    $src = Join-Path $ucrt "share\licenses\$dir"
-    if (Test-Path $src) {
-        $dst = Join-Path $licOut $dir
-        New-Item -ItemType Directory -Force -Path $dst | Out-Null
+    $dst = Join-Path $licOut $dir
+    New-Item -ItemType Directory -Force -Path $dst | Out-Null
+    # (1) baseline: the copies checked into the repo
+    $repoSrc = Join-Path $repoLic $dir
+    if (Test-Path $repoSrc) {
+        Copy-Item -Path (Join-Path $repoSrc "*") -Destination $dst -Force -Recurse
+    } else {
+        Say "  (no repo copy of the license texts for $dir)"
+    }
+    # (2) overlay: whatever this MSYS2 provides
+    $src = Find-LicenseDir $dir
+    if ($src) {
         Copy-Item -Path (Join-Path $src "*") -Destination $dst -Force -Recurse
     } elseif (@($mf.licenses.required) -contains $dir) {
-        throw "required license directory missing: $src (GPL redistribution duty - cannot skip)"
-    } else {
-        Say "  (no license dir for $dir - optional)"
+        # Required license with neither a repo copy nor an MSYS2 copy:
+        # we would be shipping GPL binaries without their license text.
+        if (-not (Test-Path $repoSrc)) {
+            throw ("required license '$dir' has neither a repo copy (installer/toolchain/licenses/$dir)" +
+                   " nor an MSYS2 copy under: " + ($licRoots -join '; ') +
+                   " - GPL redistribution duty, cannot skip.")
+        }
+        Say "  (no MSYS2 license dir for $dir - the repo copy was shipped)"
     }
 }
 $srcLines = New-Object 'System.Collections.Generic.List[string]'
