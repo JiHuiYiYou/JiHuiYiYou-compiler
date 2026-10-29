@@ -7,7 +7,7 @@
 （installer .exe 54.9 MB + compiler .msi 27.5 MB + vscode .vsix + SHA256.txt）。
 **🟢 v4.0.22 发布**（2026-10-29）——lang-spec 覆盖审计：补 49 条回归门 + 14 个
 真缺陷真修 + 台账 ACTIVE 桶第二次清空。
-**🟡 v4.1.1 进行中**（2026-10-29，**VSCode 终端 profile 改为探测真实 bash**（VSCode 自带的
+**🟢 v4.1.1 发布**（2026-10-29，**VSCode 终端 profile 改为探测真实 bash**（VSCode 自带的
 `bash (MSYS2)` 路径写死且不回落）+ 新增 `jhyy-bash.cmd` 启动器；
 **⚠️ 同时作废「打包 POSIX 层」这条计划** —— 实测 MSYS2 运行时**不做按树搬迁**
 ⇒ 详见 [`installer/toolchain/README.md`](installer/toolchain/README.md) § 二期结论）。
