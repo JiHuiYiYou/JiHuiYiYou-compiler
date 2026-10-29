@@ -45,9 +45,9 @@
   <String Id="InstallCancelButton" Overridable="yes" Value="取消 (&amp;C)" />
 
   <!-- W-033 JHYY customization: MSYS2 prereq warning shown above EulaRichedit -->
-  <String Id="MSYS2PrereqWarning" Overridable="yes" Value="前置要求: JHYY 编译器需要 MSYS2 + GCC" />
-  <String Id="MSYS2PrereqDetail" Overridable="yes" Value="JHYY 编译器自带,但运行需要 MSYS2 (含 ucrt64 GCC 工具链) 才能编译 .jhyy 程序。如果还没有安装,请先点击下方链接安装。" />
-  <String Id="MSYS2PrereqLink" Overridable="yes" Value="下载 MSYS2 (https://www.msys2.org/)" />
+  <String Id="MSYS2PrereqWarning" Overridable="yes" Value="无需额外安装: JHYY 已自带编译 .jhyy 所需的 GCC 工具链" />
+  <String Id="MSYS2PrereqDetail" Overridable="yes" Value="v4.1.0 起 installer 内置一份最小原生 MSYS2 UCRT64 工具链(gcc + binutils + CRT),装完即可编译 .jhyy 程序 —— **不需要**另外安装 MSYS2。想改用自己那份 gcc:设 JHY_GCC 环境变量,或写 %JHYY_HOME%\env.txt。" />
+  <String Id="MSYS2PrereqLink" Overridable="yes" Value="了解更多:自带工具链 / 如何改用你自己的 gcc" />
 
   <!-- Options page -->
   <String Id="OptionsHeader" Overridable="yes" Value="安装选项" />
@@ -86,7 +86,7 @@
   <String Id="SuccessCloseButton" Overridable="yes" Value="关闭 (&amp;C)" />
 
   <!-- W-033 JHYY customization: post-install hint shown on Success page -->
-  <String Id="PostInstallHint" Overridable="yes" Value="下一步:&#xA;&#xA;1. 打开新的 cmd 窗口运行 &quot;jhyy&quot; 验证安装。&#xA;2. 如果之前没装 MSYS2 + GCC, 请访问 https://www.msys2.org/ 下载并安装。&#xA;3. 打开 MSYS2 ucrt64 终端, 运行: pacman -S mingw-w64-ucrt-x86_64-gcc&#xA;4. 重启 cmd, 运行 &quot;jhyy run helloworld.jhyy&quot; 编译您的第一个 JHYY 程序。" />
+  <String Id="PostInstallHint" Overridable="yes" Value="下一步:&#xA;&#xA;1. 打开新的 cmd 窗口运行 &quot;jhyy&quot; 验证安装。&#xA;2. 写一个 hello.jhyy, 运行 &quot;jhyy compile hello.jhyy&quot; —— 链接用的是**随包自带的 GCC 工具链**,不需要另外装 MSYS2。&#xA;3. 想在 VSCode 里用? 打开项目文件夹, 右侧的 jhyy 扩展已自动装好。&#xA;4. 想用自己那份 gcc? 设 JHY_GCC 环境变量(见 wiki)。" />
 
   <!-- Failure page -->
   <String Id="FailureHeader" Overridable="yes" Value="安装失败" />

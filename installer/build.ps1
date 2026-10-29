@@ -356,9 +356,55 @@ switch ($Target) {
     "bundle" {
         Write-Host "[build.ps1] === Burn bundle build (v1.5.3, v1.8.3 patch) ==="
         # 1. ensure compiler MSI is built first (bundle chains it)
+        #
+        # v4.1.2 (W-166): this used to be "build the MSI only if it is MISSING"
+        # => a STALE MSI was silently reused. So after editing the compiler and
+        # rebuilding jhyy.exe, `build.ps1 bundle` still chained the OLD
+        # compiler into the bundle. Measured: after changing the help text in
+        # main.jhyy and rebuilding jhyy.exe, the MSI sha256 was byte-identical
+        # to the previous run (d32bb524...) => it still held the old binary.
+        # (CI is unaffected: a fresh checkout has no MSI => always rebuilt.
+        #  But EVERY local build hit this trap.)
+        #
+        # Fix: not just "does it exist" but "is any input newer than it" --
+        # compiler binary / bridge C sources / WiX sources / UI assets / VSIX /
+        # bundled toolchain. Any newer input => stale => rebuild.
         $msiPath = "installer/build-artifacts/jhyy-compiler-$JHY_VERSION_DISPLAY.msi"
+        $msiNeedsBuild = $false
+        $msiWhy = ""
         if (-not (Test-Path $msiPath)) {
-            Write-Host "[build.ps1] compiler MSI missing, building first..."
+            $msiNeedsBuild = $true
+            $msiWhy = "MSI missing"
+        } else {
+            $msiTime = (Get-Item $msiPath).LastWriteTimeUtc
+            # NOTE: do NOT use installer/build-artifacts/bin as an input -- it
+            # holds the COPIES the MSI build puts there, so their timestamps are
+            # always newer than the MSI => the MSI would look stale forever.
+            $msiInputs = @(
+                "compiler/build/bin/jhyy.exe",
+                "compiler/src0/jhyy_helpers.c",
+                "compiler/runtime/runtime.c"
+            )
+            foreach ($dir in @("installer/wix", "installer/assets",
+                               "installer/build-artifacts/vscode-ext",
+                               "installer/build-artifacts/toolchain")) {
+                if (Test-Path $dir) {
+                    $msiInputs += (Get-ChildItem $dir -Recurse -File -ErrorAction SilentlyContinue |
+                                    ForEach-Object { $_.FullName })
+                }
+            }
+            foreach ($f in $msiInputs) {
+                if (Test-Path $f) {
+                    if ((Get-Item $f).LastWriteTimeUtc -gt $msiTime) {
+                        $msiNeedsBuild = $true
+                        $msiWhy = "an input is newer than the MSI: $f"
+                        break
+                    }
+                }
+            }
+        }
+        if ($msiNeedsBuild) {
+            Write-Host "[build.ps1] compiler MSI needs a rebuild ($msiWhy) -- building first..."
             # Pass the ORIGINAL JHY_VERSION (with RC suffix if any) to the sub-script
             # so it can recompute RC_SUFFIX + DISPLAY internally. Without this,
             # sub-script sees JHY_VERSION=1.5.5 (already stripped by parent) and
@@ -372,6 +418,8 @@ switch ($Target) {
                 Write-Host "[ERROR] compiler MSI build failed, aborting bundle build"
                 exit 1
             }
+        } else {
+            Write-Host "[build.ps1] compiler MSI is up to date, reusing it."
         }
         # 1a. v1.8.3: ensure .NET 8 Desktop Runtime exe is downloaded for
         #     Bundle chain. Source: official MS dotnetcli mirror.

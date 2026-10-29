@@ -1914,6 +1914,123 @@ MSYS2 装在别处的用户、或只有 Git for Windows 的用户，会看到
 
 ---
 
+## v4.1.2 — `jhyy --version` 从来就不存在 + 版本号自动化(单一真相源)
+
+**2026-10-29。** **不是破坏性变更** —— 但有一处**用户可见的行为修正**
+（以前文档/release note 让人跑一个根本不存在的命令）。
+
+### 为什么
+
+**① `jhyy --version` 是个不存在的命令。**
+
+`main.jhyy` 的 CLI 全集只有：`compile` / `build` / `run` / `dump` 四个子命令
++ `--target=` / `--no-link` / `--help` 三个 flag。**没有 `--version`**。
+`git log -S'--version' -- compiler/` 只命中 `gcc --version` / `wix --version` /
+`qemu --version` —— 编译器源码里**一次都没有** `--version`。
+
+⇒ 跑 `jhyy --version` 会落到 `unknown command` 分支 ⇒ stderr 打一行
+`unknown command` + **exit 1**（`main.jhyy:1999-2000`）。
+
+而它此前被写在**用户能看见的地方**：`installer/changelog-template.md` 的
+验证步骤、release note、`installer/README.md` 的装机验证清单。
+⇒ 用户按文档跑 ⇒ 拿到 exit 1 ⇒ 以为装坏了。
+
+**② 顺带查出：编译器的版本横幅一直是陈旧的。**
+
+`main.jhyy` 里两条横幅路径各写死了一个版本号，且**都停在历史版本**：
+
+| 路径 | 改之前 | 改之后 |
+|---|---|---|
+| `jhyy`（无参数，argc<2） | `jhyy compiler v1.8.3.2 (self-hosted)` | `jhyy compiler v4.1.2 (self-hosted)` |
+| `jhyy --help` | `jhyy compiler v2.5.0 (self-hosted, v2.0 series)` | `jhyy compiler v4.1.2 (self-hosted)` |
+
+⇒ 用户 `jhyy --help` 看到的是「v2.5.0」，距当时实际版本差了两个大版本。
+
+**②' 再顺带查出：`jhyy --help` 里 `compile` / `build` 的说明是**反的**。**
+
+实际语义（`main.jhyy:cmd_compile` / `cmd_build`）：
+
+| 子命令 | 实际行为 | help 里写的（错） |
+|---|---|---|
+| `jhyy compile x.jhyy` | 编译 + **链接** → `.exe`（无 main 的库文件只编译） | 「compile to .obj」 |
+| `jhyy build x.jhyy` | **只编译** → `.s`（源文件旁边），**不链接** | 「compile + link to .exe」 |
+
+⇒ 用户照着 help 跑 `jhyy build hello.jhyy` **拿不到 exe**（只出 `hello.s`，
+退出码 2 = in-mem 路径已 emit，**不是**错误）。实测（v4.1.2 E2E，MSI 解包后
+PATH 里没有 MSYS2）：`jhyy compile` → `hello.exe` + `EXIT=42` ✓。
+
+⇒ 顺带把 README / release note / installer 的 post-install 提示里所有
+「`jhyy build` → 出 exe」的说法一并订正成 `jhyy compile`。
+（`README.md` 此前还有第三种说法：「`build` → emit IL only (.il file)」——
+实际 in-mem 路径根本不落 `.il`，落的是 `.s`。）
+
+**③ 根因：版本号散在 6 个地方，手改必漏。**
+
+| 位置 | 格式 | 这次漏掉的后果 |
+|---|---|---|
+| `VERSION` | 纯文本 | **真相源**（本次新增） |
+| `compiler/src0/main.jhyy` | 字符串字面量 | 编译器自报旧版本号 |
+| `installer/assets/license.rtf` | RTF | MSI 的 EULA 写着「Version 1.8.3」（一直停在 v1.8.3） |
+| `installer/distribution/scoop/jhyy.json` | JSON | scoop 装的是旧版 |
+| `installer/distribution/winget/.../JHYY/<ver>/*.yaml` | YAML（**目录名也带版本**） | winget 装的是旧版 |
+| `docs/logs/v4/changelog-v4.0.0.md` | Markdown | changelog 缺这一版 |
+
+漏改任何一处的后果都一样：**tag 上写着 v4.1.2，装出来的编译器自报 v4.1.1**。
+
+### 做了什么
+
+- **全仓 `jhyy --version` 表述改掉**（用户能看见的 + 历史计划/台账里的）。
+  用户侧的替代写法统一为 **`jhyy --help` 的首行**（`jhyy compiler v<版本> (self-hosted)`）。
+  历史台账里那几处「`--version` → EXIT=0」的记录**本身就是错的**
+  （v4.0.2.1 代的编译器对未知命令返回 exit 1），一并订正成 `--help`；
+  而「Stage 2 binary 跑任意非 `--help` 调用都 SEGV」那几处**不能改成 `--help`**
+  —— `--help` 恰好是当时唯一躲得开的路径（它在读 `argv[1]` 之前就 return 了），
+  改成 `--help` 会把一条真实的 RCA 记录改成假的 ⇒ 那些改成 `compile`。
+- **版本号自动化**：`VERSION` 文件做**单一真相源** +
+  [`scripts/dev/bump_version.py`](../../../scripts/dev/bump_version.py)：
+  - `set X.Y.Z` —— 一条命令刷全仓（含 winget manifest 目录名 + 3 个 yaml；
+    历史 `ReleaseNotes` 段落**保留**，只在最前面插一行新版本的 stub）；
+  - `finalize` —— 产物出来后回填 `scoop` 的 `hash` + winget 的 `InstallerSha256`；
+  - `check` —— **零漂移门**（`VERSION` == 每一处的版本串），CI 里跑。
+- **两道门把「tag 说谎」堵死**：
+  - `ci.yml` § Version consistency gate —— 查**仓内自洽**；
+  - `release.yml` § Assert VERSION file matches the tag —— **构建之前**就断言
+    `VERSION` == tag（不符 ⇒ 直接拒发，不浪费 40 分钟构建）。
+- **VSCode 扩展的 PATH 探测**：`spawnSync(jhyy, ['--version'])` → `['--help']`。
+  （原来只判 `ENOENT`「找不到可执行文件」，所以 exit 1 无害；但探的本来就是个
+  不存在的命令。）
+- **`build.ps1 bundle` 的陈旧 MSI 复用（W-166）**：原来「MSI 不存在才重建」
+  ⇒ 本地改完编译器再跑 bundle，**bundle 里嵌的还是旧编译器**（实测两轮 MSI
+  的 sha256 逐字节相同）。改成「MSI 不存在 **或** 有输入比它新 ⇒ 重建」，
+  并打印**是哪一项**比它新。CI 不受影响（fresh checkout 一定重建），
+  但本地发版前验证产物的那一环每次都在这个坑上。
+- **`jhyy --help` 里 `compile` / `build` 的说明写反了（W-164）**：实际是
+  **`compile` = 编译 + 链接（产出 .exe）**、`build` = **只编译**（产出 .s，不链接）；
+  旧文案写的是「compile → .obj」+「build → compile + link to .exe」
+  ⇒ 用户照着 help 跑 `jhyy build hello.jhyy` **拿不到 exe**（只出 hello.s，
+  退出码 2 = in-mem 路径已 emit，不是错误）。help / README / release note /
+  installer 的 post-install 提示全部对齐成实现真义：**要 exe 用 `jhyy compile`**。
+
+### ⚠️ 一条**不能自动化**的地方
+
+编译器的版本横幅**只能是字符串字面量**，不能改成运行时读文件 / 调 extern ——
+那需要给 `main.jhyy` **新增局部变量**，而**新增局部变量会移位模块级 temp 编号 ⇒
+自举产物行为漂移**（v4.0.20 实测：一条 1 字节读被整条丢掉 ⇒ `--target=` 不再被
+识别 ⇒ 6 个 sysv 用例全红）。⇒ 自动化只能落在「改字面量」这一层 ⇒
+**顺序不能反**：`bump_version.py set` → `make`（重编自举产物）→ 构建 → 回填 hash。
+
+### 验证门
+
+| 门 | 内容 | 结果 |
+|---|---|---|
+| `make` | 自举闭环（第 1 代收敛） | ✅ |
+| `closure_check.sh` | v2.s == v3.s 逐字节 | ✅ sha `aa5d52b3fe26f035` |
+| `regress.py --all` | 全量回归 | ✅ 257 PASS / 0 XFAIL / 0 failed / 20 SKIP |
+| `bump_version.py check` | 版本零漂移 | ✅ |
+| `release.yml` 新门 | `VERSION` == tag | ✅（构建前拦截） |
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

@@ -86,7 +86,7 @@ Component GUID = UUIDv5(6f1c2a3e-9b47-4d58-8a61-0c2e5f7d3b90,
 - **Bundle manifest caching**: After this change, `Burn` may report "Different version already
   installed" on existing per-machine installs because ProductCode changes per build. For dev
   testing: uninstall existing via Settings → Apps → JHYY Compiler → Uninstall before re-install.
-- **Scoop manifest**: `installer/scoop/jhyy.json` references the v1.5.4 dev ProductCode
-  (`BBCCEEFC-6163-46BF-B72C-7B20E6812960`) in the uninstaller block — that comment needs update
-  to reflect the new real ProductCode from this release's build output. The comment is
-  informational only (scoop's `uninstaller.script` is for guidance, not enforced).
+- **Scoop manifest**: `installer/distribution/scoop/jhyy.json` 的 uninstaller 块原先引用
+  v1.5.4 的 dev 占位 ProductCode(`BBCCEEFC-...`)。**v4.1.0 已改成真的 MSI UpgradeCode**
+  (`FC3FC7FC-3479-43EB-A64D-490BAEB32066`)—— 用 UpgradeCode 而不是 per-build 的
+  ProductCode,因为后者每次构建都变;`msiexec /x {UpgradeCode}` 会解析到当前装着的那个产品。

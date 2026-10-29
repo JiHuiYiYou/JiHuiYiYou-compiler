@@ -183,6 +183,9 @@
 | [W-161](#w-161) | RESOLVED | 头文件闭包只收 `*.h` ⇒ 漏 `.inl` ⇒ 内置工具链**编自己的 runtime.c... |
 | [W-162](#w-162) | RESOLVED | gcc 中间文件落 **cwd**(TMP 未设)⇒ 只读目录下链接失败且零输出 |
 | [W-163](#w-163) | RESOLVED | gcc 16 把系统头路径写死成 `<prefix>/bin/../../ucrt64/includ... |
+| [W-164](#w-164) | RESOLVED | `jhyy --help` 把 `compile` / `build` 的语义写**反**了 ⇒... |
+| [W-165](#w-165) | RESOLVED | `jhyy --version` **从来就不存在** ⇒ 文档 / release note... |
+| [W-166](#w-166) | RESOLVED | `build.ps1 bundle` 只在 MSI **不存在**时才重建 ⇒ **陈旧 MSI... |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -2682,7 +2685,7 @@ Win32 error 0x8007006e = decimal 110 = `ERROR_BAD_FORMAT` — Burn 拒绝接受 
 
 | # | 触发 | 出处 |
 |---|------|------|
-| 1 | **XML 1.0 spec violation** — Theme.xml line 10 注释里有 `jhyy --version` 文字。XML 1.0 规定 comment 里不允许 `--`(连续两个连字符)。`xml.etree` 验证: `not well-formed (invalid token): line 10, column 47`。**这是 exit 0x6e 的直接原因。** | XML 1.0 spec § 2.5 Comments |
+| 1 | **XML 1.0 spec violation** — Theme.xml line 10 注释里当时写着 `jhyy --version` 这行文字(**是注释里的字面内容,不是合法命令** —— jhyy 从来没有 `--version` 子命令)。XML 1.0 规定 comment 里不允许 `--`(连续两个连字符)。`xml.etree` 验证: `not well-formed (invalid token): line 10, column 47`。**这是 exit 0x6e 的直接原因。** | XML 1.0 spec § 2.5 Comments |
 | 2 | `xmlns="http://wixtoolset.org/schemas/v4/thm"` — 应为 `thmutil`。W-030 也没修对 — `thm` 这个 schema 在 WiX 4 runtime 不存在 | WiX 4 thmutil XSD |
 | 3 | `<Text>...</Text>` 元素 — 应为 `<Label>...</Label>`。`<Text>` 在 thmutil schema 里是 `<Button>` 内部的子元素(用来放按钮文字),不是 page-level 文本 | WiX 4 thmutil XSD |
 | 4 | `<LicenseTextBox>` — 应为 `<Richedit Name="EulaRichedit">`。`LicenseTextBox` 不是 thmutil 元素 | 同上 |
@@ -6336,7 +6339,7 @@ emit_load 现在对每个 dst result temp 都分配 dedicated alloc pool slot (c
 - `jhyy.exe compile main.jhyy` → emit `.s` 11MB, `.exe` 1.6MB OK
 - `jhyy_v3.exe.exe compile main.jhyy` → `objdump -d jhyy_v3_test.exe | grep "<main_jhyy>:"` show frame 0x764a0 = 484KB
 - `jhyy_v3.exe.exe` 跑任何 compile 命令 → exit 127 (SEGV at 1st chkstk_ms probe)
-- 单独 `jhyy_v3.exe.exe --version` (无 alloc 路径) → EXIT=0 OK, 确认 SEGV 在 alloc-heavy path
+- 单独 `jhyy_v3.exe.exe --help` (无 alloc 路径) → EXIT=0 OK, 确认 SEGV 在 alloc-heavy path
 - regress 160/160 PASS HOLD on `jhyy.exe` (Stage 1, sub-bug #3 真修后)
 
 **根因 (per RCA 2026-10-08):**
@@ -12123,7 +12126,7 @@ IL 里的 `d_9.2233720368547758e+18` 被解析成 `9.2233720368547758` ——
   (installer **不**代写 —— 写死绝对路径会在换盘/重装时失效)。
 
 **影响范围:** 所有装机用户。修前:没 MSYS2 装不上;修了:裸 Windows 10 机器
-装完即可 `jhyy build hello.jhyy`。
+装完即可 `jhyy compile hello.jhyy`。
 
 **失效条件:** 已消除(2026-10-29 真修,见上)。
 
@@ -12314,3 +12317,163 @@ gcc 15 不写死这层(`<prefix>/include`)⇒ 保留它对两个版本都成立�
 - 采集:`installer/scripts/collect-toolchain.ps1`(`$tcDir` = `<toolchain>/ucrt64`)
 - 编译器侧:`compiler/src0/jhyy_helpers.c`(`jh_probe_bundled_gcc()` 的候选路径)
 - 相关:**W-159 / W-160 / W-161**(把这套工具链真正做自包含时挖出的四条)
+
+<a id="w-164"></a>
+## W-164: `jhyy --help` 把 `compile` / `build` 的语义写**反**了 ⇒ 用户照 help 跑拿不到 exe
+
+**状态:** RESOLVED closed 2026-10-29 (v4.1.2) — help / README / release note 的命令说明全部跟实现对齐
+**Filed-by:** 2026-10-29 (v4.1.2 发版前的 release 文案审校)
+**日期:** 2026-10-29
+
+**触发面:** `jhyy --help` 的 `commands:` 段(`main.jhyy` 的 help 分支)。
+
+**症状:**
+用户照着 `jhyy --help` 跑 `jhyy build hello.jhyy` ⇒ **拿不到 exe**,只出 `hello.s`,
+而且**没有任何报错**(退出码 2)。⇒ 用户以为装坏了。
+
+**根因:** help 文案是 v0.x **C 端编译器**时代的语义,jhyy 自举后两个子命令的
+实际行为与之**正好相反**,但文案一直没跟着改:
+
+| 子命令 | 实际行为(`main.jhyy`) | help 里写的(错) |
+|---|---|---|
+| `compile` | `cmd_compile` = `build_il` + `link_with_gcc` ⇒ **链接** ⇒ 产出 `.exe` | 「compile to .obj (link with .exe on Windows)」 |
+| `build` | `cmd_build` = `build_il` **只编译** ⇒ 产出 `.s`(源文件旁边),**不链接** | 「compile + link to .exe」 |
+
+`regress.py:388` 用的是 `[binary, "compile", ...]` ⇒ **链接那条路是 `compile`**。
+
+⚠️ 附带一个坑:`build` 的退出码是 **2**,而 2 在 `build_il` 里的含义是
+「in-mem 路径已经 emit 完,跳过 file-path backend」—— **不是错误**。
+⇒ 单看退出码会误判成失败。
+
+**修法(2026-10-29 真修):**
+- `main.jhyy` 的 help 文案改成实现真义(纯字符串字面量改动 ⇒ 不动 temp 编号);
+- `README.md` 的 CLI 表(此前还有第三种说法「build → emit IL only (.il file)」——
+  in-mem 路径根本不落 `.il`,落的是 `.s`)一并对齐;
+- `installer/changelog-template.md` / `installer/release-notes/<ver>.md` /
+  `installer/wix/Bundle.zh-CN.wxl` 的 post-install 提示 / scoop `post_install` /
+  winget locale 注释里所有「`jhyy build` → 出 exe」的说法改成 `jhyy compile`。
+
+**E2E 实测(v4.1.2,MSI 解包后 PATH 里**没有** MSYS2):**
+```
+jhyy compile hello.jhyy -o hello
+  → JHYY: using gcc: ...\toolchain\ucrt64\bin\gcc.exe (source: bundled)
+  → hello.exe;运行 → "hello from jhyy" / EXIT=42 ✓
+jhyy build hello.jhyy -o hello
+  → 只出 hello.s,无 exe(修 help 之前用户会以为坏了)
+```
+
+**影响范围:** 所有读 `jhyy --help` 的用户 + 所有写「怎么用 jhyy」的文档。
+**失效条件:** 已消除(2026-10-29 真修,见上)。
+
+**引用:**
+- 实现:`compiler/src0/main.jhyy`(`cmd_compile` / `cmd_build` / `build_il` 的 `return 2`)
+- 门:无(纯文案);但 `installer/release-notes/4.1.2.md` 里记了这次的 E2E 证据
+- 相关:**W-165**(同一轮查出的 `--version` 表述问题)
+
+<a id="w-165"></a>
+## W-165: `jhyy --version` **从来就不存在** ⇒ 文档 / release note 让人跑一个不存在的命令
+
+**状态:** RESOLVED closed 2026-10-29 (v4.1.2) — 全仓表述订正 + `docs/internal/build.md` 补 CLI 参考
+**Filed-by:** 2026-10-29 (user 指出 release 文案里的这个命令根本不存在)
+**日期:** 2026-10-29
+
+**触发面:** `main.jhyy` 的 CLI(只有 `compile`/`build`/`run`/`dump` 四个子命令 +
+`--target=`/`--no-link`/`--help` 三个 flag)与**所有提到 `jhyy --version` 的文档**。
+
+**症状:**
+按文档跑 `jhyy --version` ⇒ stderr 一行 `unknown command` + **exit 1**
+(`main.jhyy:1999-2000`)。⇒ 用户按 release note 的验证步骤走,拿到的是失败。
+
+**根因:** `--version` **从来没有被实现过** ——
+`git log -S'--version' -- compiler/` 只命中 `gcc --version` / `wix --version` /
+`qemu --version`,编译器源码里一次都没有。文档是**照着「别的工具都有 --version」
+的直觉写的**,没人真跑过。
+
+⇒ 而且它**一路传染**:release note 模板 → 实际发出去的 release note →
+`installer/README.md` 的装机验证清单 → 历史 plan / changelog / 台账里的 repro 步骤。
+
+**修法(2026-10-29 真修):**
+- 替代写法统一为 **`jhyy --help` 的首行**(`jhyy compiler v<版本> (self-hosted)`);
+  不带参数跑 `jhyy` 也打同一行。
+- `installer/changelog-template.md` / `installer/README.md` / `docs/internal/build.md`
+  / `docs/plans/v4/*.md` / `docs/logs/v4/changelog-v4.0.2.md` /
+  `docs/internal/workarounds.md` 里全部相关表述订正。
+- ⚠️ **两类历史记录要区别对待**(改错就把 audit trail 改成假的了):
+  | 记录类型 | 例子 | 改法 |
+  |---|---|---|
+  | 「跑 `--version` → EXIT=0」 | v4.0.2.1-plan / changelog-v4.0.2 / workarounds W-096 段 | **本身就是错的**(未知命令返回 1)⇒ 改成 `--help` |
+  | 「跑 `--version` → SEGV」 | v4.0.6-plan / v4.0.7-plan | 当时 `--help` 在读 `argv[1]` 之前就 return 了 ⇒ 是**唯一躲得开的路径** ⇒ 改成 `--help` 会把真实 RCA 改成假的 ⇒ 改成 `compile` |
+  | XML 注释违规的证据 | W-033 段(`Theme.xml` 注释里的字面内容) | 保留原文 + 标注「是注释里的字面内容,不是合法命令」 |
+- `docs/internal/build.md` 补一节 **CLI 参考**(全集 + 「`--version` 不存在」的显式警告),
+  避免下一版又照直觉写。
+
+**影响范围:** 所有按文档验证安装的用户 + 所有写「怎么用 jhyy」的文档。
+
+**失效条件:** 已消除(2026-10-29 真修,见上)。
+
+**引用:**
+- 实现:`compiler/src0/main.jhyy`(`unknown command` 分支 = `main.jhyy:1999-2000`)
+- 文档:`docs/internal/build.md` § CLI 参考
+- 相关:**W-164**(同一轮查出的 `compile`/`build` 说明写反)
+
+<a id="w-166"></a>
+## W-166: `build.ps1 bundle` 只在 MSI **不存在**时才重建 ⇒ **陈旧 MSI 被静默复用** ⇒ bundle 里嵌旧编译器
+
+**状态:** RESOLVED closed 2026-10-29 (v4.1.2) — 改成「MSI 不存在 **或** 有输入比它新 ⇒ 重建」
+**Filed-by:** 2026-10-29 (v4.1.2 发版前重建安装包时撞上)
+**日期:** 2026-10-29
+
+**触发面:** `installer/build.ps1` 的 `bundle` 目标(第 1 步:「ensure compiler MSI is built first」)。
+
+**症状:**
+改完 `compiler/src0/main.jhyy`(help 文案)→ `make` 重编出新的 `jhyy.exe`
+→ 跑 `installer/build.ps1 bundle` ⇒ **bundle 里嵌的仍是旧编译器**:
+
+```
+run1:  d32bb524…  jhyy-compiler-4.1.2.msi     ← 旧
+run2:  d32bb524…  jhyy-compiler-4.1.2.msi     ← 改完编译器后再跑,**逐字节相同**
+```
+而 `installer/build-artifacts/bin/jhyy.exe` 的时间戳停在**两轮之前**
+(`Copy-Item` 那一步压根没执行,因为 `compiler` 目标整个被跳过了)。
+
+**根因:**
+```powershell
+if (-not (Test-Path $msiPath)) { ...build the compiler MSI... }
+```
+⇒ **只判存在性,不判新鲜度**。本地 `build-artifacts/` 是持久目录 ⇒ 第二轮
+`bundle` 直接跳过 `compiler` 目标(连带跳过 `Copy-Item` / 工具链采集 /
+VSIX 打包 / MSI 构建)⇒ 只重建了外层 bundle。
+
+⚠️ **CI 不受影响**(fresh checkout 没有 MSI ⇒ 一定会重建)⇒ 所以这条**只在本地发作**
+—— 而本地恰恰是发版前验证产物的那一环。
+
+**修法(2026-10-29 真修):**
+`bundle` 改成先做一次**新鲜度判定**:
+- 输入清单 = `compiler/build/bin/jhyy.exe` + `compiler/src0/jhyy_helpers.c` +
+  `compiler/runtime/runtime.c` + `installer/wix/**` + `installer/assets/**` +
+  `installer/build-artifacts/vscode-ext/**` + `installer/build-artifacts/toolchain/**`;
+- 任何一个比 MSI 新 ⇒ 判 MSI 陈旧 ⇒ 重建(并打印**是哪一项**比它新);
+- ⚠️ **输入清单里不能有 `installer/build-artifacts/bin`** —— 那是 MSI 构建时
+  **拷进去的副本**,时间戳必然比 MSI 新 ⇒ MSI 会被永远判成陈旧。
+
+**顺带记一条硬规则(同一次踩到):**
+`installer/build.ps1` **没有 BOM**,而 Windows PowerShell 5.1 把无 BOM 文件
+按**系统 ANSI 码页**读 ⇒ 文件里的**中文注释会被解成乱码**,且乱码里可能出现
+引号 ⇒ **整个脚本解析失败**。该文件自己的注释里就写着
+「NOTE: keep these comments ASCII」,但文件里**已经有中文**。
+本次新增的注释一律改成 ASCII;解析验证用:
+```powershell
+$e=$null; [System.Management.Automation.Language.Parser]::ParseFile(
+  "installer/build.ps1", [ref]$null, [ref]$e)   # $e.Count -gt 0 ⇒ 炸了
+```
+(实测:一条中文注释里的 `(` 让 ANSI 解码后的字符串**吞掉了收尾引号**
+⇒ 「Unexpected token」+「string is missing the terminator」。)
+
+**影响范围:** 所有**本地**发版构建(产物里嵌旧编译器 ⇒ 用户拿到的是上一版的编译器)。
+
+**失效条件:** 已消除(2026-10-29 真修,见上)。
+
+**引用:**
+- 代码:`installer/build.ps1`(`bundle` 目标的 MSI 新鲜度判定)
+- 证据:两轮构建的 MSI sha256 逐字节相同(`d32bb524…`)
+- 相关:**W-122**(side-file 固定路径 ⇒ 上一次编译泄漏到下一次)、**W-164 / W-165**(同一轮查出的两处文案 bug)

@@ -178,6 +178,21 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 
 工具链与构建见 [`build.md`](docs/internal/build.md);编码约定、项目结构、改动后必跑基线见 [`conventions.md`](docs/internal/conventions.md)。
 
+**发版时的版本号不要手改** —— `VERSION` 文件是唯一真相源,一条命令刷全仓
+(编译器横幅字面量 / license.rtf / scoop json / winget manifest 目录名 + 3 个 yaml /
+changelog 段):
+```bash
+python scripts/dev/bump_version.py set 4.1.2   # 刷版本号
+make                                            # 横幅字面量变了 -> 自举产物必须重编
+pwsh -File installer/build.ps1 bundle           # 构建
+python scripts/dev/bump_version.py finalize     # 回填 sha256
+python scripts/dev/bump_version.py check        # 零漂移门(CI 也跑)
+```
+⚠️ **顺序不能反**:编译器的版本横幅只能是 `main.jhyy` 里的**字符串字面量** ——
+改成运行时读文件/调 extern 需要新增局部变量,而**新增局部变量会移位模块级 temp
+编号 ⇒ 自举产物行为漂移**(v4.0.20 实测 ⇒ 6 个 sysv 用例全红)。
+详见 [`build.md`](docs/internal/build.md) § 版本号自动化。
+
 ## 当前活跃 workarounds
 
 **0 ACTIVE / 0 DEFERRED**(2026-10-27 —— **ACTIVE 桶第二次清空**(第一次是 2026-10-20)。

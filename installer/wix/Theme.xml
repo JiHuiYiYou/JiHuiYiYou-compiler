@@ -60,9 +60,11 @@
         </Page>
 
         <Page Name="Install">
-            <!-- W-035: MSYS2 prereq warning (above EulaRichedit, below title); MSYS2PrereqDetail dropped to fit 485x300 layout -->
+            <!-- v4.1.0: 这块不再是「MSYS2 前置要求」—— 工具链已随包自带。
+                 保留标签位, 改说「无需额外安装」, 链接指向 wiki(怎么用自带工具链 /
+                 怎么改用自己那份 gcc)。MSYS2PrereqDetail 仍不进布局(485x300 放不下)。 -->
             <Label X="11" Y="80" Width="-11" Height="20" FontId="2" DisablePrefix="yes">#(loc.MSYS2PrereqWarning)</Label>
-            <Hyperlink X="11" Y="100" Width="-11" Height="17" FontId="3" TabStop="yes" NavigateUri="https://www.msys2.org/">#(loc.MSYS2PrereqLink)</Hyperlink>
+            <Hyperlink X="11" Y="100" Width="-11" Height="17" FontId="3" TabStop="yes" NavigateUri="https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/wiki">#(loc.MSYS2PrereqLink)</Hyperlink>
 
             <!-- EulaRichedit sized to leave room for EulaAcceptCheckbox (~4px gap) -->
             <Richedit Name="EulaRichedit" X="11" Y="120" Width="-11" Height="-90" TabStop="yes" FontId="0" HexStyle="800000" />

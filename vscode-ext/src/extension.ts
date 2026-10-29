@@ -8,10 +8,12 @@
 //   jhyy.runFile      ▶  run `jhyy run <file>` (editor/title/run — Run area)
 //   jhyy.compileOnly  🛠 run `jhyy build <file>` (editor/title — regular title bar)
 //
-// PATH probe (spawnSync --version) detects missing toolchain and surfaces
+// PATH probe (spawnSync --help) detects missing toolchain and surfaces
 // a VS Code info notification with "Open Settings" affordance — falls back
 // gracefully when jhyy.exe is not on PATH (per project memory
 // project_jhyy_install_path: C:\Program Files\JHYY\bin needs manual add).
+// NOTE: jhyy has no `--version` subcommand — `--help` is the real flag that
+// prints the version banner (first line) and exits 0.
 
 import * as vscode from 'vscode';
 import { spawnSync } from 'child_process';
@@ -51,7 +53,7 @@ async function runOrCompile(mode: 'run' | 'compile'): Promise<void> {
     }
 
     const probeTarget = executorPath.trim() || executor.split(/\s+/, 1)[0] || 'jhyy';
-    const probe = spawnSync(probeTarget, ['--version'], {
+    const probe = spawnSync(probeTarget, ['--help'], {
         windowsHide: true,
         shell: false,
         timeout: 2000,

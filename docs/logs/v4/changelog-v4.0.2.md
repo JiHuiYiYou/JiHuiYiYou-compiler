@@ -256,7 +256,7 @@ per `feedback_rca_first_root_cause` 1-iter RCA: per-fn pre-scan table 256 entrie
 | fixed_point.sh v1/v2 byte-equal PASS | ✅ (post `JHY_WRITE_IL=1`) |
 | jhyy.exe compile main.jhyy → .s 10MB + gcc link OK + .exe 1.6MB | ✅ |
 | jhyy.exe --help 不 SEGFAULT | ✅ (post sub-bug #3) |
-| jhyy_v3.exe.exe --version EXIT=0 | ✅ (alloc-free path) |
+| jhyy_v3.exe.exe --help EXIT=0 | ✅ (alloc-free path) |
 | jhyy_v3.exe.exe compile main.jhyy → SEGFAULT | ❌ DEFERRED W-096 v3.x mid |
 | ACTIVE bucket = 0 | ⚠️ 2 DEFERRED (W-074.6 + W-075 + W-096 → 3 entries;W-074.6 sub-bug 真修 partial → Stage 1 走通但 entry 仍 DEFERRED 因 Stage 2 阻塞) |
 

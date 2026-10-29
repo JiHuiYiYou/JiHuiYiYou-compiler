@@ -492,6 +492,23 @@ jobs:
           python -m pip install --disable-pip-version-check -q fastmcp pytest pytest-asyncio
           python -m pytest mcp-jhyy/tests -q
 
+      # ── 版本号零漂移门(v4.1.2)────────────────────────────────────────
+      # 放在 job **最后** + `if: always()`:这样它翻红时**不会**把前面任何一道
+      # 门跳过(中途失败会 skip 后续不带 always() 的 step ⇒ 一道版本漂移会把
+      # 真正的失败原因藏起来)。这跟本 job 里其它 `if: always()` 的门同一个理由。
+      #
+      # 为什么要有这道门:版本号散在 6 个地方(编译器横幅字面量 / EULA / scoop json /
+      # winget manifest 目录名+3 个 yaml / changelog / release notes 片段),
+      # 手改必漏一处 —— 而漏了的后果是「tag v4.1.2 但装出来的编译器自报 v4.1.1」。
+      # `scripts/dev/bump_version.py set X.Y.Z` 现在把这件事变成一条命令;
+      # 本门验的是**仓内自洽**(VERSION == 每一处的版本串)。
+      # 「VERSION == tag」由 release.yml 在发版第一步断言。
+      - name: Version consistency gate (VERSION == every embedded version)
+        if: always()
+        shell: msys2 {0}
+        run: |
+          python scripts/dev/bump_version.py check
+
   # ══════════════════════════════════════════════════════════════════════
   # 5 个 SysV ABI 测试 —— 此前在 CI 上**根本不存在门**
   # ══════════════════════════════════════════════════════════════════════

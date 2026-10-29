@@ -1862,7 +1862,7 @@ fn main_jhyy(argc: i32, argv: *u8) -> i32 {
     }
 
     if argc < (2 as i32) {
-        printf("jhyy compiler v1.8.3.2 (self-hosted)\n" as *u8, 0);
+        printf("jhyy compiler v4.1.2 (self-hosted)\n" as *u8, 0);
         printf("usage: jhyy <command> [args]\n" as *u8, 0);
         printf("  --target=<triple> (default amd64_win)\n" as *u8, 0);
         printf("  compile <file.jhyy> [-o output]\n" as *u8, 0);
@@ -1887,13 +1887,21 @@ fn main_jhyy(argc: i32, argv: *u8) -> i32 {
         hi = hi + (1 as i32);
     }
     if help_requested == (1 as i32) {
-        printf("jhyy compiler v2.5.0 (self-hosted, v2.0 series)\n" as *u8, 0);
+        printf("jhyy compiler v4.1.2 (self-hosted)\n" as *u8, 0);
         printf("\n" as *u8, 0);
         printf("usage: jhyy [--target=<triple>] [--help] <command> [args]\n" as *u8, 0);
         printf("\n" as *u8, 0);
         printf("commands:\n" as *u8, 0);
-        printf("  compile <file.jhyy> [-o output]   compile to .obj (link with .exe on Windows)\n" as *u8, 0);
-        printf("  build   <file.jhyy> [-o output]   compile + link to .exe\n" as *u8, 0);
+        // v4.1.2 (W-164):这两行的说明以前是**反的**。
+        //   实际语义(main.jhyy:cmd_compile / cmd_build):
+        //     compile = build_il + link_with_gcc ⇒ 有 main 时产出 .exe
+        //               (无 main 的库文件只编译,不链)
+        //     build   = build_il 只编译            ⇒ 产出 .s,不链
+        //   旧文案写的是「compile → .obj」+「build → compile + link to .exe」
+        //   ⇒ 用户照着 help 跑 `jhyy build hello.jhyy` **拿不到 exe**
+        //   (只出 hello.s,退出码 2 = in-mem 路径已 emit,不是错误)。
+        printf("  compile <file.jhyy> [-o output]   compile + link -> .exe (lib w/o main: compile only)\n" as *u8, 0);
+        printf("  build   <file.jhyy> [-o output]   compile only -> .s (no link)\n" as *u8, 0);
         printf("  run     <file.jhyy>              compile + link + execute\n" as *u8, 0);
         printf("  dump    <file.jhyy>              print parsed AST / typed IR for debugging\n" as *u8, 0);
         printf("\n" as *u8, 0);

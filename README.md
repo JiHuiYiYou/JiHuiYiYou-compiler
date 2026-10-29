@@ -152,7 +152,7 @@ Full specification: [`docs/abis/jhyy-lang-spec-v1.3.0.md`](docs/abis/jhyy-lang-s
 ```text
 jhyy compile <file.jhyy> [-o name]   compile to .exe (default amd64 self-backend)
 jhyy run     <file.jhyy>             compile and run
-jhyy build   <file.jhyy> [-o name]   emit IL only (.il file)
+jhyy build   <file.jhyy> [-o name]   compile only, no link (.s next to the source)
 jhyy dump    <file.jhyy>             dump parsed AST to stdout (debug)
 jhyy                                 print help
 ```

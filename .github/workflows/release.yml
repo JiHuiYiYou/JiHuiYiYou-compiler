@@ -130,6 +130,29 @@ jobs:
           "JHY_IS_RC=$($env:JHY_IS_RC)"      | Add-Content -Path $env:GITHUB_ENV
           "JHY_TAG_NAME=$($env:JHY_TAG_NAME)"| Add-Content -Path $env:GITHUB_ENV
 
+      - name: Assert VERSION file matches the tag (blow up before building)
+        shell: pwsh
+        run: |
+          # v4.1.2:`VERSION` 文件是仓内版本号的**真相源**(见
+          # scripts/dev/bump_version.py)。tag 是"发布"这个动作。
+          # 两者必须一致 —— 否则会出现「tag v4.1.3,装出来的编译器自报 v4.1.2」。
+          #
+          # 这道门放在**构建之前**:不合就直接拒发,而不是等 40 分钟构建完
+          # 才发现装出去的产物版本号是错的。
+          #
+          # RC 后缀(`-rc1`)只存在于 tag 上,VERSION 里不带 —— 所以比较时
+          # 剥掉 RC 后缀再比。
+          $declared = (Get-Content "VERSION" -Raw).Trim()
+          $tagNoRc  = ($env:VERSION -replace '-rc\d+$', '')
+          Write-Host "VERSION file : $declared"
+          Write-Host "tag          : $tagNoRc"
+          if ($declared -ne $tagNoRc) {
+            Write-Host "::error::VERSION 文件($declared)与 tag($tagNoRc)不符,拒绝发布。"
+            Write-Host "::error::跑 'python scripts/dev/bump_version.py set $tagNoRc' 再重编 + 提交 + 打 tag。"
+            exit 1
+          }
+          Write-Host "[OK] VERSION file matches the tag"
+
       # v1.8.3.3 follow-up #3 (W-067): JHY_VERSION_DISPLAY is computed inside
       # installer/build.ps1 (line ~87, single source of truth) and exported to
       # $env:GITHUB_ENV when the script runs in CI. release.yml no longer
@@ -305,7 +328,7 @@ jobs:
       - name: Generate release notes from template
         shell: pwsh
         run: |
-          $template = Get-Content installer/changelog-template.md -Raw
+          $template = Get-Content installer/changelog-template.md -Raw -Encoding utf8
           $isoDate = (Get-Date -Format "yyyy-MM-dd")
           # Tag path uses VERSION (e.g. v1.8.3.3); filename uses JHY_VERSION_DISPLAY
           # (e.g. jhyy-installer-1.8.3.exe) because installer/build.ps1 strips 4-segment
@@ -313,15 +336,60 @@ jobs:
           $installerUrl = "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v$($env:VERSION)/jhyy-installer-$($env:JHY_VERSION_DISPLAY).exe"
           $sha256Url = "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v$($env:VERSION)/SHA256.txt"
           $minor = ($env:VERSION -split '\.')[0..1] -join '.'
+
+          # v4.1.2: **每版的「主要改动」在自己的文件里**(installer/release-notes/<ver>.md)
+          # —— 模板只留跟版本无关的部分(安装 / 验证 / 卸载 / 已知问题 / changelog 链接)。
+          # 以前模板里写死的是上一版的正文 ⇒ 每发一版都要手改模板 ⇒ 迟早发出去一份
+          # 描述的是**上一版**的 release note。
+          #
+          # RC 复用正式版的说明:先找 `<VERSION>.md`,找不到就去掉 `-rcN` 再找。
+          $notesFile = "installer/release-notes/$($env:VERSION).md"
+          if (-not (Test-Path $notesFile)) {
+            $noRc = $env:VERSION -replace '-rc\d+$', ''
+            $alt = "installer/release-notes/$noRc.md"
+            if (Test-Path $alt) {
+              Write-Host "[OK] RC 复用正式版的说明: $alt"
+              $notesFile = $alt
+            }
+          }
+          if (-not (Test-Path $notesFile)) {
+            Write-Host "::error::找不到这一版的 release notes: installer/release-notes/$($env:VERSION).md"
+            Write-Host "::error::跑 'python scripts/dev/bump_version.py set $($env:VERSION)' 会自动建一个 stub,补正文后再发。"
+            exit 1
+          }
+          $mainChanges = (Get-Content $notesFile -Raw -Encoding utf8)
+          Write-Host "[OK] release notes body: $notesFile ($($mainChanges.Length) chars)"
+
           $notes = $template `
             -replace '\$\{VERSION\}', $env:VERSION `
             -replace '\$\{ISO_DATE\}', $isoDate `
             -replace '\$\{INSTALLER_URL\}', $installerUrl `
             -replace '\$\{SHA256_URL\}', $sha256Url `
             -replace '\$\{MINOR\}', $minor
-          Set-Content -Path release-notes.md -Value $notes -NoNewline
+
+          # ⚠️ 用 MatchEvaluator 而不是 `-replace`,因为正文里有 `$`(例如
+          # `$env:MSYS2_ROOT`)—— `-replace` 的替换串里 `$` 是**组引用语法**,
+          # 会被吃掉。MatchEvaluator 的返回值按字面处理。
+          $notes = [regex]::Replace(
+            $notes,
+            '\$\{MAIN_CHANGES\}',
+            { param($m) $mainChanges })
+
+          if ($notes -match '\$\{') {
+            Write-Host "::error::release notes 里还有没替换的占位符:"
+            [regex]::Matches($notes, '\$\{[A-Z_]+\}') | ForEach-Object { Write-Host "  $($_.Value)" }
+            exit 1
+          }
+          # ⚠️ 不用 `Set-Content` —— Windows PowerShell 5.1 的 Set-Content 默认写
+          # **系统 ANSI 码页** ⇒ 中文全变问号(pwsh 7 默认 UTF-8,但显式写死更稳)。
+          # 也不要 `-Encoding utf8`(5.1 下 = 带 BOM ⇒ release body 开头多个 BOM)。
+          # 这里用 .NET API 显式写 **UTF-8 无 BOM**。
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "release-notes.md"),
+            $notes,
+            (New-Object System.Text.UTF8Encoding($false)))
           Write-Host "[OK] release-notes.md written"
-          Get-Content release-notes.md | Select-Object -First 30
+          Get-Content release-notes.md -Encoding utf8 | Select-Object -First 30
 
       - name: Validate MSI (wix msi validate)
         shell: pwsh

@@ -255,6 +255,94 @@ C 侧用 `path_to_fwd()` 把 `\` 全部转 `/` 才传给 windres(教训 2026-08-
 
 ---
 
+## CLI 参考(jhyy 到底支持哪些子命令 / flag)
+
+唯一 CLI 入口 = `compiler/src0/main.jhyy:1864-2000`。**全集如下**(没有别的):
+
+| 形式 | 行为 |
+|------|------|
+| `jhyy`(无参数) | 打印 `jhyy compiler v<版本> (self-hosted)` + 简版 usage,exit 0 (`main.jhyy:1864-1873`) |
+| `jhyy --help` | 打印同一行版本横幅 + **完整** help(子命令 + flag + target 列表),exit 0 (`main.jhyy:1875-1907`) |
+| `jhyy compile <file.jhyy> [-o out]` | 编译 + **链接** → `.exe`（库文件(无 main)只编译不链）；`--no-link` 时只出 `.s` |
+| `jhyy build   <file.jhyy> [-o out]` | **只编译** → `.s`（源文件旁边），**不链接**；⚠️ 成功时退出码是 **2**（不是 0）—— 那是 `build_il` 的「in-mem 路径已 emit」信号，**不是错误** |
+| `jhyy run     <file.jhyy>` | 编译 + 链接 + 执行 |
+| `jhyy dump    <file.jhyy>` | 打印 AST / typed IR(调试用) |
+| `--target=<triple>` | 选目标(默认 `amd64_win`),可出现在任意位置 (`main.jhyy:1924`) |
+| `--no-link` | 只出 `.s`,跳过 gcc 链接(**跟在子命令后面**,`main.jhyy:1560`) |
+
+> ⚠️ **`jhyy --version` 不存在 —— 从来就没有过**(`git log -S'--version' -- compiler/`
+> 只命中 `gcc --version` / `wix --version` / `qemu --version`)。
+> 想看版本号 ⇒ `jhyy --help` 的**首行**,或不带参数跑 `jhyy`。
+> 写文档 / release note / 脚本时**不要**用 `--version`:它会落到 `unknown command`
+> 分支 ⇒ stderr 打一行 `unknown command` + **exit 1** (`main.jhyy:1999-2000`)。
+
+---
+
+## 版本号自动化(v4.1.2 起)
+
+### 为什么
+
+版本号散在 **6 个地方、3 种格式**(另加每版的 release note 片段),而其中两处是
+**编译期烘进产物**的:
+
+| 位置 | 格式 | 漏改的后果 |
+|---|---|---|
+| `VERSION` | 纯文本 | **真相源**(v4.1.2 新增) |
+| `compiler/src0/main.jhyy` | jhyy 源码里的字符串字面量 | 编译器自报旧版本号;**改了必须重编自举产物** |
+| `installer/assets/license.rtf` | RTF | MSI 的 EULA 显示旧版本 |
+| `installer/distribution/scoop/jhyy.json` | JSON | scoop 装的是旧版 |
+| `installer/distribution/winget/.../JHYY/<ver>/*.yaml` | YAML(**目录名也带版本**) | winget 装的是旧版 |
+| `docs/logs/v4/changelog-v4.0.0.md` | Markdown | changelog 缺这一版 |
+
+漏改任何一处的后果都一样:**tag 上写着 v4.1.2,装出来的编译器自报 v4.1.1**。
+
+> 顺带把**每版的 release note 正文**也拆出去了 ——
+> `installer/release-notes/<ver>.md`(release.yml 从这里取 `${MAIN_CHANGES}`)。
+> 以前 `installer/changelog-template.md` 里写死的是**上一版**的正文 ⇒
+> 每发一版都要手改模板 ⇒ 迟早发出去一份描述的是上一版的 release note。
+> 详见 [`installer/release-notes/README.md`](../../installer/release-notes/README.md)。
+
+### 一条命令
+
+```bash
+# 1. 刷版本号(VERSION + 上面每一处;hash 置为待填占位)
+python scripts/dev/bump_version.py set 4.1.2
+
+# 2. 重编自举产物 —— main.jhyy 的字面量变了,产物必须跟上
+make
+
+# 3. 构建安装包
+pwsh -File installer/build.ps1 bundle
+
+# 4. 回填 sha256(scoop hash + winget InstallerSha256)
+python scripts/dev/bump_version.py finalize
+
+# 5. 门:查零漂移(CI 里也跑这一条)
+python scripts/dev/bump_version.py check
+```
+
+### tag 与 VERSION 的关系
+
+- **`VERSION` 文件** = 声明的版本(仓内真相源)
+- **tag** = 发布这个动作
+
+两者必须一致,否则就是「tag v4.1.3 但产物自报 v4.1.2」。所以:
+
+| 门 | 位置 | 查什么 |
+|---|---|---|
+| 仓内自洽 | `ci.yml` § Version consistency gate | `VERSION` == 每一处的版本串 |
+| **VERSION == tag** | `release.yml` § Assert VERSION file matches the tag | tag 与 `VERSION` 不符 ⇒ **构建前**就拒发 |
+
+### 为什么编译器版本号只能是字面量
+
+`main.jhyy` 的横幅是**字符串字面量**。它不能改成运行时读文件 / 调 extern ——
+那需要新增局部变量,而**给 `main.jhyy` 加局部变量会移位模块级 temp 编号 ⇒
+自举产物行为漂移**(v4.0.20 实测:一条 1 字节读被整条丢掉 ⇒ `--target=` 不再
+被识别 ⇒ 6 个 sysv 用例全红)。字符串字面量改动是安全的 ⇒ 自动化只能落在
+「改字面量」这一层 ⇒ 脚本改源码 + `make` 重编,顺序不能反。
+
+---
+
 ## 手动验证流水线
 
 当需要排查 codegen / 链接问题时，手动走一遍：

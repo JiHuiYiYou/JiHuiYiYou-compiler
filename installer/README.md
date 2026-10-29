@@ -162,7 +162,7 @@ jhyy-setuc.exe set-shadow <ext> <progid> # 仅清 MSYS2 HKCU OpenWithProgids sha
   # 期望: Welcome → Install → UAC → Progress(可能含 .NET 8 runtime 装) → Success → Close
   # 期望 (post-install):
   #   1. where jhyy  → C:\Program Files\JHYY\bin\jhyy.exe
-  #   2. jhyy --version  → 1.8.3
+  #   2. jhyy --help  → 首行 "jhyy compiler v<版本> (self-hosted)"(jhyy 没有 --version 子命令)
   #   3. 双击 hello.jhyy  → jhyy.exe run (file association + brand icon)
   #   4. code --list-extensions  → 含 jhyy.jhyy-lang (VSCode ext 自动装, 若有 code)
   #   5. Start Menu → JHYY → Documentation / Quick Start / Compiler

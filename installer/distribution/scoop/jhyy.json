@@ -1,5 +1,5 @@
 {
-    "version": "4.1.1",
+    "version": "4.1.2",
     "description": "JHYY (机会翼游) — statically-typed language + bootstrapping compiler for Windows",
     "homepage": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler",
     "license": {
@@ -7,8 +7,8 @@
         "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/LICENSE"
     },
     "depends": "",
-    "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.1/jhyy-installer-4.1.1.exe",
-    "hash": "9fbc670032f32ab4c6c347a8fcc931fc19f5f7306a378410d7f1245579b08a2f",
+    "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.2/jhyy-installer-4.1.2.exe",
+    "hash": "0000000000000000000000000000000000000000000000000000000000000000",
     "shortcuts": [
         ["JHYY Compiler", "C:\\Program Files\\JHYY\\bin\\jhyy.exe", ""],
         ["JHYY Documentation", "C:\\Program Files\\JHYY\\common\\JHYY Documentation.url", ""],
@@ -29,19 +29,20 @@
         "// verify it is reachable: 'where jhyy' should list it under Program Files.",
         "// v4.1.0+: MSYS2 is NO LONGER required — the installer ships a minimal",
         "// native MSYS2 UCRT64 toolchain (gcc + binutils + CRT + headers) under",
-        "// C:\\Program Files\\JHYY\\toolchain\\, so 'jhyy build hello.jhyy' works",
+        "// C:\\Program Files\\JHYY\\toolchain\\, so 'jhyy compile hello.jhyy' works",
         "// on a bare Windows machine. To use your own gcc instead, set",
         "// JHY_GCC=<full path to gcc.exe> or put 'JHY_GCC=<full path>' into",
         "// %JHYY_HOME%\\env.txt."
     ],
     "uninstaller": {
         "script": [
-            "// Burn bundle uninstall — same ProductCode as MSI.",
+            "// Burn bundle uninstall — the MSI underneath it.",
             "// For per-machine install, run elevated:",
-            "//   msiexec /x {BBCCEEFC-6163-46BF-B72C-7B20E6812960} /quiet",
+            "//   msiexec /x {FC3FC7FC-3479-43EB-A64D-490BAEB32066} /quiet",
             "// Or: Settings -> Apps -> JHYY Compiler -> Uninstall.",
-            "// Note: the GUID above is a v1.5.4 dev placeholder; the real release",
-            "// GUID will be filled before v1.5.0 ship (uuidgen). See .wxs comments."
+            "// Note: that GUID is the MSI's UpgradeCode (stable across releases),",
+            "// not the per-build ProductCode - msiexec /x resolves it to whichever",
+            "// product is currently installed. See installer/GUIDS.md."
         ]
     },
     "checkver": {

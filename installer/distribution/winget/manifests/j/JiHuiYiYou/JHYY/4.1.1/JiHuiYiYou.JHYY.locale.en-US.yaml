@@ -2,7 +2,7 @@
 #
 # v4.1.0 起:**不再需要 MSYS2** —— installer 自带一份最小原生 MSYS2 ucrt64
 # 工具链(gcc + binutils + CRT + 编译器自用的头文件闭包),装在
-# <INSTALLDIR>\toolchain\。装完即可 `jhyy build hello.jhyy`。
+# <INSTALLDIR>\toolchain\。装完即可 `jhyy compile hello.jhyy`。
 # 之前需要自己装 MSYS2 + ucrt64 GCC(而且 MSI 有硬门槛,没装根本装不上)。
 
 PackageVersion: 4.1.1
