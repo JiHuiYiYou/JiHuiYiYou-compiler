@@ -336,12 +336,38 @@ switch ($Target) {
         #   WixToolset.Bal.wixext.dll). The wix CLI extension-name lookup
         #   fails on Windows 7.0.0+b8977d6 (WIX0144). Workaround: reference
         #   the DLL by absolute path.
-        $balDll = "$env:USERPROFILE\.wix\extensions\WixToolset.Bal.wixext\7.0.0\wixext7\WixToolset.BootstrapperApplications.wixext.dll"
-        if (-not (Test-Path $balDll)) {
-            Write-Host "[ERROR] Bal extension DLL not found at: $balDll"
+        #
+        #   v4.1.0: 版本号**不再写死**。原来写的是 ...\Bal.wixext\7.0.0\wixext7\...
+        #   ⇒ runner 上的 WiX 一升级(7.0.1 / 7.1.x / 8.x)路径就找不到
+        #   ⇒ **release 构建在 Burn bundle 这步失败**(实测 2026-10-29:
+        #   v4.0.22 的发布就死在这儿 —— MSI 都已经编好了,挂在最后一步)。
+        #   改成**扫目录**:任何版本目录下的那个 DLL 都认(取最新的一个)。
+        #
+        #   ⚠️ 用户目录**不**只从 $env:USERPROFILE 取 —— 那个变量在某些 shell
+        #   (MSYS2 / CI 的某些步骤)里是空的 ⇒ Join-Path 会直接报「参数 Path
+        #   是空值」。用 .NET 的 GetFolderPath 兜底(Windows 上永远正确)。
+        $userProfile = $env:USERPROFILE
+        if (-not $userProfile) { $userProfile = [Environment]::GetFolderPath("UserProfile") }
+        if (-not $userProfile -and $env:HOMEDRIVE -and $env:USERNAME) {
+            $userProfile = Join-Path $env:HOMEDRIVE "Users\$env:USERNAME"
+        }
+        if (-not $userProfile) {
+            Write-Host "[ERROR] cannot resolve the user profile directory (USERPROFILE / GetFolderPath both empty)"
+            exit 1
+        }
+        $balRoot = Join-Path $userProfile ".wix\extensions\WixToolset.Bal.wixext"
+        $balDll = $null
+        if (Test-Path $balRoot) {
+            $hit = Get-ChildItem -Path $balRoot -Recurse -Filter "WixToolset.BootstrapperApplications.wixext.dll" -ErrorAction SilentlyContinue |
+                   Sort-Object FullName -Descending | Select-Object -First 1
+            if ($hit) { $balDll = $hit.FullName }
+        }
+        if (-not $balDll) {
+            Write-Host "[ERROR] Bal extension DLL not found under: $balRoot"
             Write-Host "Run:  wix extension add -g WixToolset.Bal.wixext"
             exit 1
         }
+        Write-Host "[build.ps1] using Bal extension: $balDll"
         & wix build `
             installer/wix/Bundle.wxs `
             -arch x64 `
