@@ -1,0 +1,49 @@
+# winget locale manifest (en-US) - JHYY 4.1.0
+#
+# v4.1.0 起:**不再需要 MSYS2** —— installer 自带一份最小原生 MSYS2 ucrt64
+# 工具链(gcc + binutils + CRT + 编译器自用的头文件闭包),装在
+# <INSTALLDIR>\toolchain\。装完即可 `jhyy build hello.jhyy`。
+# 之前需要自己装 MSYS2 + ucrt64 GCC(而且 MSI 有硬门槛,没装根本装不上)。
+
+PackageVersion: 4.1.0
+PackageLocale: en-US
+Publisher: JiHuiYiYou
+PackageName: JHYY Compiler
+License: MIT
+ShortDescription: JHYY (机会翼游) — statically-typed language + bootstrapping compiler for Windows
+Description: |-
+  JHYY (机会翼游) is a statically-typed programming language with a self-bootstrapping compiler.
+  The compiler is written in JHYY itself (self-hosting closure achieved since v1.0.0),
+  targeting amd64 Windows with its own in-memory x86-64 backend (no QBE since v4.0.0).
+
+  This installer bundles the jhyy.exe production binary, a **self-contained minimal
+  MSYS2 UCRT64 GCC toolchain** (gcc + binutils + CRT + the C headers the compiler
+  itself needs), a VSCode extension (.vsix, auto-installed if `code` is on PATH),
+  .jhyy file association, and Start Menu shortcuts.
+
+  **No MSYS2 installation required** - the toolchain ships with the compiler
+  (v4.1.0+). Set JHY_GCC=<path to gcc.exe> or put "JHY_GCC=<path>" into
+  %JHYY_HOME%\env.txt if you want to use your own GCC instead.
+
+  Build instructions and source code: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler
+  Language spec: docs/abis/jhyy-lang-spec-v4.0.0.md
+Moniker: jhyy
+Tags:
+  - compiler
+  - programming-language
+  - bootstrapping
+  - statically-typed
+ReleaseNotes: |-
+  v4.1.0: the installer now ships a minimal native MSYS2 UCRT64 toolchain, so
+  MSYS2 is no longer required - installing this package is enough to compile
+  and run .jhyy programs. BREAKING CHANGE: the default gcc is now the bundled
+  one instead of the one on your machine; set JHY_GCC (or %JHYY_HOME%\env.txt)
+  to keep using your own.
+  Also: prebuilt runtime objects (link time 5045ms -> 531ms), a gcc-resolution
+  trace line on link failures, and the MSYS2 prerequisite removed from the MSI
+  (previously a machine without MSYS2 could not install the compiler at all).
+  See docs/logs/v4/changelog-v4.0.0.md for the full changelog.
+ReleaseNotesUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/logs/v4/changelog-v4.0.0.md
+PurchaseUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler
+ManifestType: locale
+ManifestVersion: 1.5.0

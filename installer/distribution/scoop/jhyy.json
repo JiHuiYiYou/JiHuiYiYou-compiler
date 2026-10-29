@@ -1,5 +1,5 @@
 {
-    "version": "1.5.5",
+    "version": "4.1.0",
     "description": "JHYY (机会翼游) — statically-typed language + bootstrapping compiler for Windows",
     "homepage": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler",
     "license": {
@@ -7,8 +7,8 @@
         "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/LICENSE"
     },
     "depends": "",
-    "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v1.5.5/jhyy-installer-1.5.5.exe",
-    "hash": "<FILL_AT_RELEASE_TIME_FROM_SHA256.txt>",
+    "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.0/jhyy-installer-4.1.0.exe",
+    "hash": "2a1bc3db6185a7d9de1c6612b6aac390f852c4f529f96abd4e5ddf097909e2eb",
     "shortcuts": [
         ["JHYY Compiler", "C:\\Program Files\\JHYY\\bin\\jhyy.exe", ""],
         ["JHYY Documentation", "C:\\Program Files\\JHYY\\common\\JHYY Documentation.url", ""],
@@ -27,8 +27,12 @@
     "post_install": [
         "// After Burn bundle installs jhyy.exe to C:\\Program Files\\JHYY\\bin\\,",
         "// verify it is reachable: 'where jhyy' should list it under Program Files.",
-        "// Note: jhyy.exe requires MSYS2 + ucrt64 GCC for compile/link (qbe+as+ld).",
-        "// See https://www.msys2.org/ — the installer Welcome page also prompts."
+        "// v4.1.0+: MSYS2 is NO LONGER required — the installer ships a minimal",
+        "// native MSYS2 UCRT64 toolchain (gcc + binutils + CRT + headers) under",
+        "// C:\\Program Files\\JHYY\\toolchain\\, so 'jhyy build hello.jhyy' works",
+        "// on a bare Windows machine. To use your own gcc instead, set",
+        "// JHY_GCC=<full path to gcc.exe> or put 'JHY_GCC=<full path>' into",
+        "// %JHYY_HOME%\\env.txt."
     ],
     "uninstaller": {
         "script": [

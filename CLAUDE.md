@@ -1,24 +1,27 @@
 # CLAUDE.md — JHYY (机会翼游) 编译器项目
 
 自研静态类型编程语言 + 自举编译器。
-当前: **🟢 v4.0.19 发布**（2026-10-20，**台账 ACTIVE 桶首次清空(14 → 0)**）——
+当前: **🟢 v4.1.0 发布**（2026-10-29，**installer 自带最小原生 ucrt64 工具链 ⇒
+装机用户不再需要 MSYS2**）——
+<https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v4.1.0>
+（installer .exe 54.9 MB + compiler .msi 27.5 MB + vscode .vsix + SHA256.txt）。
+**🟢 v4.0.22 发布**（2026-10-29）——lang-spec 覆盖审计：补 49 条回归门 + 14 个
+真缺陷真修 + 台账 ACTIVE 桶第二次清空。
+<https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v4.0.22>
+**🟢 v4.0.19 发布**（2026-10-20，**台账 ACTIVE 桶首次清空(14 → 0)**）——
 <https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v4.0.19>
 （installer .exe + compiler .msi + vscode .vsix + SHA256.txt）。
-**🟡 v4.1.0 进行中**（2026-10-29，**installer 自带最小原生 ucrt64 工具链 ⇒ 装机用户
-不再需要 MSYS2**；解析顺序 `JHY_GCC → env.txt → 内置 → C:\msys64 → PATH`；
-新增 7 条工具链常驻门 + W-158..W-163 六条台账；**破坏性变更** ⇒ 提 minor 版本号；
-**CI 已绿**(gcc 16.2.0 上 7/7 门 PASS)；详见
-[`installer/toolchain/README.md`](installer/toolchain/README.md)）。
-**🟡 v4.0.22 待发**（2026-10-26，**lang-spec 覆盖审计：补 49 条回归门 + std lib 三处
-真缺陷真修 + 3 条 ACTIVE 入账**；**同日第二轮：W-143 / W-144 真修 + 浮点转换链路上
-另外挖出 5 条(W-145..W-149)⇒ ACTIVE 桶 3 → 1**；**第三轮(2026-10-27)：W-142 真修
-(同作用域 shadowing)+ 兄弟缺陷 W-150(重名 fn/type/const/参数)⇒ **ACTIVE 桶 1 → 0
-(第二次清空)**；**第四轮(同日)：MCP 工具逐个 smoke-test ⇒ W-154 / W-155 / W-156
-三条工具真缺陷 + 门自身的 W-157(`*argv` 只 load 1 字节 ⇒ 跟堆布局绑定的假信号)**）
-⇒ **257 PASS + 0 XFAIL + 0 failed + 20 SKIP**(277 total)；
-artifact_checks **14 PASS**；closure_check PASS(v2.s == v3.s)；
-台账 **0 ACTIVE / 0 DEFERRED**、152 索引行）
-—— **未发布**，下一个动作 = 走发布链 + promote v4.0.0 final。
+**v4.1.0 的关键事实**（详见 [`installer/toolchain/README.md`](installer/toolchain/README.md)）：
+解析顺序 `JHY_GCC → %JHYY_HOME%\env.txt → **内置** → C:\msys64 → PATH`；
+新增 7 条工具链常驻门 + W-158..W-163 六条台账；**破坏性变更**（默认 gcc 换成内置那份）。
+⚠️ **v4.1.0 最值得记住的一条**：gcc 16 把系统头路径**写死**成
+`<prefix>/bin/../../ucrt64/include` ⇒ 工具链根下**必须保留 `ucrt64/` 这一层**
+—— 本地(gcc 15.2.0)永远测不出来，是 CI(gcc 16.2.0)逼出来的。
+⚠️ **发版链路上修掉的两个既有 bug**：
+① MSI 的 Bal 扩展 DLL 路径**写死 WiX 版本** ⇒ WiX 一升级，发版就挂在最后一步；
+② GitHub runner 镜像自带**旧 MSYS2 在 `C:\mingw64`**（gcc 15.2.0）且**排在 PATH 前面**
+⇒ pwsh 步按 PATH 找 gcc 会挑中旧的 ⇒ 工具链版本 pin 失败 ⇒ 现在把
+MSYS2 根目录**显式传下去**（`JHY_MSYS2_ROOT=$(cygpath -w /)`）。
 ⚠️ v4.0.22 第二轮最值得记住的一条：**自举闭环门验错了代**（W-147）—— 旧逻辑验的是
 **锚点**的不动点、`mv` 装出去的却是**没被验过**的第 1 代 ⇒ 改后端时 src0 自己的 `.s`
 编码一变就**硬卡死**，而且那一代恰恰是**常量错**的一代 ⇒ 门已改成**迭代到不动点**
@@ -29,7 +32,7 @@ artifact_checks **14 PASS**；closure_check PASS(v2.s == v3.s)；
 当场挖出三处真缺陷：**字节循环写穿 4n 字节**(12 处)、**`import string;` 编译失败**、
 **arena 把分配互相踩 ⇒ AV**。详见
 [`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md) § v4.0.22。
-⚠️ 本轮最值得记住的两条：
+⚠️ v4.0.21 最值得记住的两条：
 ① **「链接失败」的三层掩护**（悬空注释吞掉 C 桥符号 → `$(CFLAGS_STAGE0)` 未定义
 把 `-Wall -Wextra` 一起丢掉 → PATH 里 `/mingw64/bin` 抢在 ucrt64 前面导致 ld
 加载错版本 DLL、**失败时零输出**）；

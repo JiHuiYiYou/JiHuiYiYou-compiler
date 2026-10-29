@@ -1,0 +1,33 @@
+# winget installer manifest - JHYY 4.1.0
+#
+# winget multi-file manifest v1.5.0 schema (https://github.com/microsoft/winget-cli)
+# Package: JiHuiYiYou.JHYY
+# Version: 4.1.0
+#
+# InstallerSha256 来自该次发布 GitHub Release 的 SHA256.txt 资产
+# (jhyy-installer-4.1.0.exe => 2a1bc3db6185a7d9de1c6612b6aac390f852c4f529f96abd4e5ddf097909e2eb)。
+#
+# 为什么走 Burn bundle: WiX 4 Burn bundles 是 winget 的一等 installer
+# (`InstallerType: burn`);winget CLI 直接跑它们(BurnArgs)。
+#
+# ⚠️ 本版是**破坏性变更**:默认的 gcc 从「用户自己机器上的 MSYS2」变成
+# 「installer 自带的那份」(v4.1.0 起不再需要 MSYS2)。
+
+PackageLocale: en-US
+PackageVersion: 4.1.0
+Platform:
+  - Windows.Desktop
+MinimumOSVersion: 10.0.17763.0
+InstallerType: burn
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.0/jhyy-installer-4.1.0.exe
+    InstallerSha256: 2a1bc3db6185a7d9de1c6612b6aac390f852c4f529f96abd4e5ddf097909e2eb
+    InstallerSwitches:
+      Silent: /quiet
+      SilentWithProgress: /passive
+    UpgradeBehavior: install
+    Commands:
+      - jhyy
+ManifestType: installer
+ManifestVersion: 1.5.0
