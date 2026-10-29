@@ -33,6 +33,7 @@ import codegen_amd64_emit_ctrl;   // V2-B v2.6.0 Unit B: emit_jmp / emit_jnz / e
 import codegen_amd64_emit_call;   // V2-B v2.6.0 Unit B: emit_call / emit_phi / emit_copy / emit_binop / emit_volatile
 import codegen_amd64_emit_sse;    // v2.11.19: 8 emit_conv_* (dtosi/stosi/truncd/exts/f32-f64/sltof/swtof/ultof/uwtof) + SSE helpers
 import codegen_amd64_peephole;    // V2-B v2.6.3: peephole_fold (local folding on emitted .s)
+import codegen_amd64_rcache;     // v4.4.0 寄存器缓存(rc_prepare / rc_enabled_from_env)
 import util;                      // V2-B v2.6.3: StringBuilder + sb_init / sb_buf / sb_len / ptr_add_u8
 import arena;                     // V2-B v2.6.3: Arena type + arena_alloc / arena_init
 
@@ -368,6 +369,17 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32,
     let g_max = cg_compute_global_max_temp(tokens, 40 as i64, n);
     let _fms = cg_state_set_frame_max_temp(state_buf, g_max);
 
+    // 4b. v4.4.0 寄存器缓存预扫(默认**关** ⇒ 产物逐字节不变)
+    let _rc_en = cg_state_set_rc_enabled(state_buf, rc_enabled_from_env());
+    if rc_enabled_from_env() == (1 as i32) {
+        let _rc_prep = rc_prepare(state_buf, tokens, 40 as i64, n);
+        if _rc_prep != (0 as i32) {
+            free(il_buf);
+            arena_free(&arena);
+            return 1 as i32;
+        }
+    }
+
     // 4. Regalloc analysis (linear-scan; sets g_regalloc_arr via jh_regalloc_set)
     // v2.11.2 (W-074.6 T3-b):regalloc_run SKIP — 走 cg_offset_for_temp_with_target
     // 公式 fallback (v2.5.0 1-to-1 简化)。原因:regalloc_run 在 self path
@@ -400,6 +412,19 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32,
     // emit_loadsub 走 slot direct path ⇒ **静默产出错代码**。同样响亮失败。
     if cg_state_get_holds_overflow(state_buf) != (0 as i32) {
         jh_fputs_stderr("jhyy error: address-holder bitmap overflow — refusing to emit silently-wrong code (W-130)" as *u8);
+        jh_fputs_stderr("
+" as *u8);
+        free(il_buf);
+        arena_free(&arena);
+        return 1 as i32;
+    }
+    // v4.4.0 寄存器缓存安全网:分配了寄存器的 temp 被按**栈槽**访问
+    // ⇒ 有 emit 调用点漏改 ⇒ 那个槽从没被写过 ⇒ 产物会**静默算错**。
+    // ⚠️ 这条检查必须在 **jh_write_file 之前** —— 放到后面就等于「先写出一个
+    //    错的 .s 再报错」⇒ 调用方仍可能拿到错产物(实测踩过:守卫响了,但
+    //    .s 和 .exe 照样落地,exit code 还是 0 ⇒ 静默错代码漏网)。
+    if cg_state_get_rc_violation(state_buf) != (0 as i32) {
+        jh_fputs_stderr("jhyy error: register-cache consistency violation — refusing to emit silently-wrong code (v4.4.0)" as *u8);
         jh_fputs_stderr("
 " as *u8);
         free(il_buf);

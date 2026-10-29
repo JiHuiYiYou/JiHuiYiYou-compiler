@@ -1,0 +1,670 @@
+// codegen_amd64_rcache.jhyy — v4.4.0 寄存器缓存
+//
+// ════════════════════════════════════════════════════════════════════════
+// 目标
+// ════════════════════════════════════════════════════════════════════════
+//
+// 后端当前把**每个** SSA temp 物化成一个栈槽 ⇒ 每个值都是
+// 「load 栈槽 → 算 → store 栈槽」。
+// 实测(编译器自己的 src0/main.jhyy,142763 行 IL):
+//   · 机器码里 **49% 的指令是访存**
+//   · **52% 的 temp 只用一次**;30.5% 紧接着下一条就被用;47.8% 在 4 条之内
+//
+// ⇒ 让「适合的」temp 住在**寄存器**里,省掉那次 store + 那次 load。
+//
+// ════════════════════════════════════════════════════════════════════════
+// 寄存器池
+// ════════════════════════════════════════════════════════════════════════
+//
+// 全选 **callee-saved** 且**后端一个都没用过**
+// (扫遍 codegen_amd64_emit_*.jhyy + abi_*.jhyy:%rbx / %r12-%r15 一次都没出现;
+// 真实产物里各出现 1 次,在注释里):
+//
+//   idx 0 → %rbx   idx 1 → %r12   idx 2 → %r13   idx 3 → %r14   idx 4 → %r15
+//
+// ⚠️ **不用** %rsi / %rdi:它们在 **SysV** 是第 1/2 个参数寄存器(后端要用)。
+// ⚠️ **不用** %rax / %rcx / %rdx / %r8-%r11:它们是后端 emit 路径的临时寄存器。
+//
+// callee-saved 的额外好处:**跨 call 安全** —— 被调用者会保住它们。
+//
+// ════════════════════════════════════════════════════════════════════════
+// 分配策略(保守子集)
+// ════════════════════════════════════════════════════════════════════════
+//
+// 一个 temp 被分配寄存器,当且仅当:
+//
+//   ① 它的 def 与**所有** use 在**同一基本块**(中间不能有 label)
+//   ② def 与**最后一次** use 之间**没有 call**
+//   ③ 类型是整数(qbe_type 'w' / 'l';浮点不进寄存器池)
+//   ④ 该基本块内同时活跃的这类 temp 不超过寄存器池大小
+//
+// ①②③ 的实测覆盖:**38.3%** 的 IL 指令(28109 / 73473)
+// ④ 的实测:保守子集下**同时活跃数最多 6**,池是 5 ⇒ 极值处 1 个 temp
+//    退化成「用栈槽」(= 今天的行为),不是错误。
+//
+// 线性扫描:按 def 顺序分配;一个 temp 的**最后一次 use** 之后释放它的寄存器。
+//
+// ════════════════════════════════════════════════════════════════════════
+// 安全网
+// ════════════════════════════════════════════════════════════════════════
+//
+// 分配了寄存器的 temp 若仍被**按栈槽**访问(漏改的调用点)⇒ 静默读到垃圾。
+// ⇒ `cg_offset_for_temp_with_target`(槽位访问的**唯一**收口)在发现
+//   该 temp 已分配寄存器时,置**粘滞错误标志** `rc_violation`;
+//   编译末尾(codegen_amd64_inmem / codegen_amd64)检查它 ⇒ **编译失败**。
+// ⇒ 「漏改的调用点」会被全量回归当场抓住,而不是产出错代码。
+//   (沿用 W-120 / W-130 的「响亮失败远好过静默错代码」规矩)
+
+import codegen_amd64_state;   // CGState / ILToken / ILTOK_* / cg_parse_temp
+import util;                 // ptr_add_u8
+import arena;                // arena_alloc
+
+extern fn memset(p: *u8, v: i32, n: i64) -> *u8;
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+extern fn jh_fmt_lld_stderr(fmt: *u8, val: i64) -> i32;
+extern fn jh_getenv(name: *u8) -> *u8;
+extern fn strcmp(a: *u8, b: *u8) -> i32;
+
+// ── 环境变量开关 ──────────────────────────────────────────────────────
+//
+// JHY_RCACHE=1        打开寄存器缓存(**v4.4.0 第一阶段默认关** ——
+//                     emit 层还没改造,打开会被安全网当场拦下)
+// JHY_RCACHE_STATS=1  打印分配统计(与 Python 参考实现对拍用)
+
+fn rc_env_is(name: *u8) -> i32 {
+    let v = jh_getenv(name);
+    if v == (0 as *u8) { return 0 as i32; }
+    if strcmp(v, "1" as *u8) == (0 as i32) { return 1 as i32; }
+    if strcmp(v, "true" as *u8) == (0 as i32) { return 1 as i32; }
+    return 0 as i32;
+}
+
+fn rc_stats_enabled() -> i32 {
+    return rc_env_is("JHY_RCACHE_STATS" as *u8);
+}
+
+// rc_enabled_from_env → 编译器要不要开寄存器缓存
+fn rc_enabled_from_env() -> i32 {
+    return rc_env_is("JHY_RCACHE" as *u8);
+}
+
+// ── 寄存器池 ──────────────────────────────────────────────────────────
+
+fn rc_reg_count() -> i64 { return 5 as i64; }
+
+// rc_reg_name <idx> → "%rbx" / "%r12" ... (idx 越界返回 0)
+fn rc_reg_name(idx: i64) -> *u8 {
+    if idx == (0 as i64) { return "%rbx" as *u8; }
+    if idx == (1 as i64) { return "%r12" as *u8; }
+    if idx == (2 as i64) { return "%r13" as *u8; }
+    if idx == (3 as i64) { return "%r14" as *u8; }
+    if idx == (4 as i64) { return "%r15" as *u8; }
+    return 0 as *u8;
+}
+
+// rc_reg_bit <idx> → 该寄存器在 callee mask 里的位(1 << idx)
+fn rc_reg_bit(idx: i64) -> i64 {
+    if idx < (0 as i64) { return 0 as i64; }
+    return 1 as i64 << idx;
+}
+
+// ── 访问器 ────────────────────────────────────────────────────────────
+
+// rc_reg_of <global_temp_id> → 寄存器 idx(0..4),或 -1(没分配)
+fn rc_reg_of(state: *u8, global_t: i64) -> i64 {
+    let cg = state as *CGState;
+    if (*cg).rc_reg_flat == (0 as *u8) { return -(1 as i64); }
+    if global_t < (0 as i64) { return -(1 as i64); }
+    if global_t > (*cg).rc_global_max { return -(1 as i64); }
+    let p = ptr_add_u8((*cg).rc_reg_flat, global_t) as *u8;
+    let v = *p as i64;
+    if v >= (255 as i64) { return -(1 as i64); }
+    return v;
+}
+
+// rc_callee_mask <fn_idx> → 该函数用到的 callee-saved 寄存器位掩码
+fn rc_callee_mask(state: *u8, fn_idx: i64) -> i64 {
+    let cg = state as *CGState;
+    if (*cg).rc_fn_callee == (0 as *u8) { return 0 as i64; }
+    if fn_idx < (0 as i64) { return 0 as i64; }
+    if fn_idx > (*cg).fn_count { return 0 as i64; }
+    let p = ptr_add_u8((*cg).rc_fn_callee, fn_idx * (8 as i64)) as *i64;
+    return *p;
+}
+
+// ── 内部 helper ───────────────────────────────────────────────────────
+
+// rc_is_def_kind <kind> → 该 token kind 是否定义一个 temp
+fn rc_is_def_kind(kind: i32) -> i32 {
+    if kind == ILTOK_ALLOC()   { return 1 as i32; }
+    if kind == ILTOK_LOADSUB() { return 1 as i32; }
+    if kind == ILTOK_LOAD()    { return 1 as i32; }
+    if kind == ILTOK_CALL()    { return 1 as i32; }
+    if kind == ILTOK_PHI()     { return 1 as i32; }
+    if kind == ILTOK_COPY()    { return 1 as i32; }
+    if kind == ILTOK_BINOP()   { return 1 as i32; }
+    return 0 as i32;
+}
+
+// rc_is_int_type <qbe_type> → 'w'(119) / 'l'(108)
+fn rc_is_int_type(qt: i32) -> i32 {
+    if qt == (119 as i32) { return 1 as i32; }   // 'w'
+    if qt == (108 as i32) { return 1 as i32; }   // 'l'
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// rc_prepare — 全模块预扫:算出每个 temp 住哪个寄存器
+// ════════════════════════════════════════════════════════════════════════
+//
+// 输入:token 数组(整个编译单元);输出写进 CGState 的表。
+// 必须在 cg_compute_per_fn_max_temps **之后**调(要它的 fn_starts /
+// per_fn_max / per_fn_base_t)。
+
+fn rc_prepare(state: *u8, tok_p: *u8, tok_size: i64, n: i64) -> i32 {
+    let cg = state as *CGState;
+    if (*cg).rc_enabled == (0 as i32) { return 0 as i32; }
+    if (*cg).fn_count <= (0 as i64) { return 0 as i32; }
+
+    let arena = (*cg).arena;
+    let fn_count = (*cg).fn_count;
+
+    // ── 1. 工作区大小 = 最大的「单函数 local temp 数」 ──
+    let mut max_local: i64 = 0 as i64;
+    let mut fi: i64 = 0 as i64;
+    while fi < fn_count {
+        let base_p = ptr_add_u8((*cg).per_fn_base_t, fi * (8 as i64)) as *i64;
+        let mx_p = ptr_add_u8((*cg).per_fn_max, fi * (8 as i64)) as *i64;
+        let lc: i64 = *mx_p - *base_p + (1 as i64);
+        if lc > max_local { max_local = lc; }
+        fi = fi + (1 as i64);
+    }
+    let work: i64 = max_local + (1 as i64);
+
+    // ── 2. 分配工作数组(i32 × 6 + u8 × 1)+ 结果表 ──
+    // ⚠️⚠️ 工作数组全是 **i64** ⇒ 分配、memset、**索引**三处都必须是 8 字节/项。
+    //    (本模块曾经把索引写成 `lt * 4` ⇒ 相邻项重叠 ⇒ def/lu 全是垃圾 ⇒
+    //     释放循环永远不前进 ⇒ 寄存器池只分配不释放 ⇒ 覆盖率 4% 而不是 38%。)
+    let w_bytes = work * (8 as i64);
+    let w_def_instr = arena_alloc(arena, w_bytes);
+    let w_def_block = arena_alloc(arena, w_bytes);
+    let w_def_call = arena_alloc(arena, w_bytes);
+    let w_use_block = arena_alloc(arena, w_bytes);
+    let w_last_use = arena_alloc(arena, w_bytes);
+    let w_use_call = arena_alloc(arena, w_bytes);
+    let w_flags = arena_alloc(arena, work);
+    if w_def_instr == (0 as *u8) || w_def_block == (0 as *u8) || w_def_call == (0 as *u8)
+       || w_use_block == (0 as *u8) || w_last_use == (0 as *u8) || w_use_call == (0 as *u8)
+       || w_flags == (0 as *u8) {
+        jh_fputs_stderr("jhyy error: out of arena memory allocating register-cache tables" as *u8);
+        jh_fputs_stderr("\n" as *u8);
+        return 1 as i32;
+    }
+
+    // 结果表:按 **global temp id** 索引(u8:255 = 未分配)
+    // 全模块最大 temp id = per_fn_max[fn_count-1](per_fn_max 单调 ⇒ 最后一个最大)
+    let gm_p = ptr_add_u8((*cg).per_fn_max, (fn_count - (1 as i64)) * (8 as i64)) as *i64;
+    let global_max: i64 = *gm_p;
+    (*cg).rc_global_max = global_max;
+    let reg_bytes = global_max + (1 as i64);
+    let reg_flat = arena_alloc(arena, reg_bytes);
+    if reg_flat == (0 as *u8) {
+        jh_fputs_stderr("jhyy error: out of arena memory allocating register-cache result table" as *u8);
+        jh_fputs_stderr("\n" as *u8);
+        return 1 as i32;
+    }
+    let _z = memset(reg_flat, 255 as i32, reg_bytes);
+
+    // 每个 temp 的类型表(寄存器里存的宽度必须跟它当初被存的宽度一致)
+    let qt_flat = arena_alloc(arena, reg_bytes);
+    if qt_flat == (0 as *u8) {
+        jh_fputs_stderr("jhyy error: out of arena memory allocating register-cache type table" as *u8);
+        jh_fputs_stderr("\n" as *u8);
+        return 1 as i32;
+    }
+    let _zq = memset(qt_flat, 108 as i32, reg_bytes);   // 默认 'l'
+    (*cg).rc_temp_qt = qt_flat;
+
+    // per-fn callee mask
+    let callee_bytes = (fn_count + (1 as i64)) * (8 as i64);
+    let fn_callee = arena_alloc(arena, callee_bytes);
+    if fn_callee == (0 as *u8) {
+        jh_fputs_stderr("jhyy error: out of arena memory allocating register-cache callee mask" as *u8);
+        jh_fputs_stderr("\n" as *u8);
+        return 1 as i32;
+    }
+    let _z2 = memset(fn_callee, 0 as i32, callee_bytes);
+
+    (*cg).rc_reg_flat = reg_flat;
+    (*cg).rc_fn_callee = fn_callee;
+
+    // 候选表(按 last_use 排序 ⇒ 释放时按指针顺序走,整体 O(n))
+    let cand_bytes = work * (8 as i64);
+    let cand_last = arena_alloc(arena, cand_bytes);
+    let cand_temp = arena_alloc(arena, cand_bytes);
+    if cand_last == (0 as *u8) || cand_temp == (0 as *u8) {
+        jh_fputs_stderr("jhyy error: out of arena memory allocating register-cache candidate table" as *u8);
+        jh_fputs_stderr("\n" as *u8);
+        return 1 as i32;
+    }
+
+    // ── 3. 逐函数:两遍扫 ──
+    let mut allocated: i64 = 0 as i64;
+    let mut rej_block: i64 = 0 as i64;
+    let mut rej_call: i64 = 0 as i64;
+    let mut cand_total: i64 = 0 as i64;
+    let mut pool_full: i64 = 0 as i64;
+    let mut no_def: i64 = 0 as i64;
+    let mut rej_nouse: i64 = 0 as i64;
+    let mut rej_multi: i64 = 0 as i64;
+    let mut rej_blk: i64 = 0 as i64;
+    let mut rej_cal: i64 = 0 as i64;
+    let mut rej_flt: i64 = 0 as i64;
+    let mut defs_seen: i64 = 0 as i64;
+    let mut flag_pass: i64 = 0 as i64;
+    let mut skip_nopool: i64 = 0 as i64;
+    let mut rel_freed: i64 = 0 as i64;
+    let mut rel_noreg: i64 = 0 as i64;
+    let mut ok_pass: i64 = 0 as i64;
+    fi = 0 as i64;
+    while fi < fn_count {
+        let start_p = ptr_add_u8((*cg).fn_starts, fi * (8 as i64)) as *i64;
+        let end_p = ptr_add_u8((*cg).fn_starts, (fi + (1 as i64)) * (8 as i64)) as *i64;
+        let fstart: i64 = *start_p;
+        let fend: i64 = *end_p;
+        let base_p = ptr_add_u8((*cg).per_fn_base_t, fi * (8 as i64)) as *i64;
+        let base_t: i64 = *base_p;
+        let mx_p = ptr_add_u8((*cg).per_fn_max, fi * (8 as i64)) as *i64;
+        let local_n: i64 = *mx_p - base_t + (1 as i64);
+
+        // 重置本函数的工作区
+        let _r1 = memset(w_def_instr, 0 as i32, local_n * (8 as i64));
+        let _r2 = memset(w_def_block, 0 as i32, local_n * (8 as i64));
+        let _r3 = memset(w_def_call, 0 as i32, local_n * (8 as i64));
+        let _r4 = memset(w_use_block, 255 as i32, local_n * (8 as i64));   // 0xFFFFFFFF = -1
+        let _r5 = memset(w_last_use, 255 as i32, local_n * (8 as i64));
+        let _r6 = memset(w_use_call, 0 as i32, local_n * (8 as i64));
+        let _r7 = memset(w_flags, 0 as i32, local_n);
+
+        // ── Pass 1:收集每个 temp 的 def / use 信息 ──
+        let mut block: i64 = 0 as i64;
+        let mut calls: i64 = 0 as i64;
+        let mut j: i64 = fstart + (1 as i64);   // 跳过 FUNC_HEADER
+        while j < fend {
+            let tok = (tok_p as i64 + j * tok_size) as *ILToken;
+            let kind = (*tok).kind;
+            if kind == ILTOK_LABEL() {
+                block = block + (1 as i64);
+                j = j + (1 as i64);
+                continue;
+            }
+            if kind == ILTOK_DIRECTIVE() || kind == ILTOK_DATA_STRING() || kind == ILTOK_EOF() {
+                j = j + (1 as i64);
+                continue;
+            }
+            let dst = (*tok).int_val;
+            let is_def = rc_is_def_kind(kind);
+            let text = (*tok).text;
+            let text_len = (*tok).text_len;
+
+            // def
+            if is_def == (1 as i32) && dst >= (0 as i64) {
+                let lt = dst - base_t;
+                if lt >= (0 as i64) && lt < local_n {
+                    let dp = ptr_add_u8(w_def_instr, lt * (8 as i64)) as *i64;
+                    *dp = j;
+                    // 记下这个 temp 的类型(寄存器里存的宽度靠它)
+                    let qp = ptr_add_u8(qt_flat, dst) as *u8;
+                    let qv = (*tok).qbe_type;
+                    if qv == (119 as i32) { *qp = 119 as u8; } else { *qp = 108 as u8; }
+                    let dbp = ptr_add_u8(w_def_block, lt * (8 as i64)) as *i64;
+                    *dbp = block;
+                    let dcp = ptr_add_u8(w_def_call, lt * (8 as i64)) as *i64;
+                    *dcp = calls;
+                }
+            }
+
+            // uses:文本里所有 %tN,除了 dst 本身
+            let mut seen: i64 = 0 as i64;
+            let mut u: i64 = cg_parse_temp(text, text_len, seen);
+            while u >= (0 as i64) {
+                if !(is_def == (1 as i32) && u == dst) {
+                    let lt = u - base_t;
+                    if lt >= (0 as i64) && lt < local_n {
+                        let fp = ptr_add_u8(w_flags, lt) as *u8;
+                        let fv = *fp as i64;
+                        let ubp = ptr_add_u8(w_use_block, lt * (8 as i64)) as *i64;
+                        if (fv & (1 as i64)) == (0 as i64) {
+                            // 第一次 use:记下它的块
+                            *ubp = block;
+                            let nfv = fv | (1 as i64);
+                            *fp = nfv as u8;
+                        } else if *ubp != block {
+                            // 后续 use 落在别的块 ⇒ multi_block
+                            let nfv = fv | (2 as i64);
+                            *fp = nfv as u8;
+                        }
+                        let lup = ptr_add_u8(w_last_use, lt * (8 as i64)) as *i64;
+                        *lup = j;
+                        let ucp = ptr_add_u8(w_use_call, lt * (8 as i64)) as *i64;
+                        *ucp = calls;
+                    }
+                }
+                seen = seen + (1 as i64);
+                u = cg_parse_temp(text, text_len, seen);
+            }
+
+            if kind == ILTOK_CALL() {
+                calls = calls + (1 as i64);
+            }
+            j = j + (1 as i64);
+        }
+
+        // ── Pass 1b:资格判定 + 候选表(按 last_use 排序)──
+        let mut cand_n: i64 = 0 as i64;
+        let mut lt: i64 = 0 as i64;
+        while lt < local_n {
+            let fp = ptr_add_u8(w_flags, lt) as *u8;
+            let fv = *fp as i64;
+            if (fv & (1 as i64)) != (0 as i64) && (fv & (2 as i64)) == (0 as i64) {
+                flag_pass = flag_pass + (1 as i64);
+                let dip = ptr_add_u8(w_def_instr, lt * (8 as i64)) as *i64;
+                if *dip < (0 as i64) {
+                    // 有 use 但**本函数里没有 def 记录** ⇒ 这个 temp 不是本函数定义的
+                    // (或 def 的 token kind 没被 rc_is_def_kind 认出来)⇒ 不能分配。
+                    no_def = no_def + (1 as i64);
+                    lt = lt + (1 as i64);
+                    continue;
+                }
+                let dbp = ptr_add_u8(w_def_block, lt * (8 as i64)) as *i64;
+                let def_block = *dbp;
+                let ubp = ptr_add_u8(w_use_block, lt * (8 as i64)) as *i64;
+                let use_block = *ubp;
+                let dcp = ptr_add_u8(w_def_call, lt * (8 as i64)) as *i64;
+                let def_call = *dcp;
+                let ucp = ptr_add_u8(w_use_call, lt * (8 as i64)) as *i64;
+                let use_call = *ucp;
+                let lup = ptr_add_u8(w_last_use, lt * (8 as i64)) as *i64;
+                let lu = *lup;
+                if def_block != use_block { rej_block = rej_block + (1 as i64); }
+                if def_call != use_call { rej_call = rej_call + (1 as i64); }
+                if def_block == use_block && def_call == use_call && lu >= (0 as i64) {
+                    // 插入排序(按 last_use 升序;同 last_use 时按 local index 升序
+                    // ⇒ **完全确定性**)
+                    let mut pos: i64 = cand_n;
+                    while pos > (0 as i64) {
+                        let prev_p = ptr_add_u8(cand_last, (pos - (1 as i64)) * (8 as i64)) as *i64;
+                        let prev = *prev_p;
+                        if prev <= lu { break; }
+                        let cp = ptr_add_u8(cand_last, pos * (8 as i64)) as *i64;
+                        *cp = prev;
+                        let tp = ptr_add_u8(cand_temp, pos * (8 as i64)) as *i64;
+                        let tp_prev = ptr_add_u8(cand_temp, (pos - (1 as i64)) * (8 as i64)) as *i64;
+                        *tp = *tp_prev;
+                        pos = pos - (1 as i64);
+                    }
+                    let clp = ptr_add_u8(cand_last, pos * (8 as i64)) as *i64;
+                    *clp = lu;
+                    let ctp = ptr_add_u8(cand_temp, pos * (8 as i64)) as *i64;
+                    *ctp = lt;
+                    cand_n = cand_n + (1 as i64);
+                    cand_total = cand_total + (1 as i64);
+                }
+            }
+            lt = lt + (1 as i64);
+        }
+
+        // ── Pass 2:线性扫描分配 ──
+        let mut free_mask: i64 = 31 as i64;
+        let mut fn_alloc: i64 = 0 as i64;
+        let mut callee_mask: i64 = 0 as i64;
+        let mut rel_ptr: i64 = 0 as i64;
+        let mut j2: i64 = fstart + (1 as i64);
+        while j2 < fend {
+            let tok = (tok_p as i64 + j2 * tok_size) as *ILToken;
+            let kind = (*tok).kind;
+            if kind == ILTOK_LABEL() {
+                j2 = j2 + (1 as i64);
+                continue;
+            }
+            if kind == ILTOK_DIRECTIVE() || kind == ILTOK_DATA_STRING() || kind == ILTOK_EOF() {
+                j2 = j2 + (1 as i64);
+                continue;
+            }
+            let dst = (*tok).int_val;
+            let is_def = rc_is_def_kind(kind);
+            if is_def == (1 as i32) { defs_seen = defs_seen + (1 as i64); }
+
+            // 释放「最后一次 use 已经过去」的候选 temp
+            while rel_ptr < cand_n {
+                let clp = ptr_add_u8(cand_last, rel_ptr * (8 as i64)) as *i64;
+                let lu = *clp;
+                if lu >= j2 { break; }
+                let ctp = ptr_add_u8(cand_temp, rel_ptr * (8 as i64)) as *i64;
+                let lt2 = *ctp;
+                let gt = lt2 + base_t;
+                let rp = ptr_add_u8(reg_flat, gt) as *u8;
+                let rv = *rp as i64;
+                if rv < (255 as i64) {
+                    free_mask = free_mask | rc_reg_bit(rv);
+                    *rp = 255 as u8;
+                    rel_freed = rel_freed + (1 as i64);
+                } else {
+                    rel_noreg = rel_noreg + (1 as i64);
+                }
+                rel_ptr = rel_ptr + (1 as i64);
+            }
+
+            // def:尝试分配
+            if is_def == (1 as i32) && dst >= (0 as i64) {
+                let lt3 = dst - base_t;
+                if lt3 >= (0 as i64) && lt3 < local_n {
+                    let fp = ptr_add_u8(w_flags, lt3) as *u8;
+                    let fv = *fp as i64;
+                    let dbp = ptr_add_u8(w_def_block, lt3 * (8 as i64)) as *i64;
+                    let def_block = *dbp;
+                    let ubp = ptr_add_u8(w_use_block, lt3 * (8 as i64)) as *i64;
+                    let use_block = *ubp;
+                    let dcp = ptr_add_u8(w_def_call, lt3 * (8 as i64)) as *i64;
+                    let def_call = *dcp;
+                    let ucp = ptr_add_u8(w_use_call, lt3 * (8 as i64)) as *i64;
+                    let use_call = *ucp;
+                    let mut ok: i32 = 1 as i32;
+                    if (fv & (1 as i64)) == (0 as i64) { ok = 0 as i32; rej_nouse = rej_nouse + (1 as i64); }
+                    if (fv & (2 as i64)) != (0 as i64) { ok = 0 as i32; rej_multi = rej_multi + (1 as i64); }
+                    if use_block != def_block { ok = 0 as i32; rej_blk = rej_blk + (1 as i64); }
+                    if use_call != def_call { ok = 0 as i32; rej_cal = rej_cal + (1 as i64); }
+                    if rc_is_int_type((*tok).qbe_type) == (0 as i32) { ok = 0 as i32; rej_flt = rej_flt + (1 as i64); }
+                    if ok == (1 as i32) { ok_pass = ok_pass + (1 as i64); }
+                    if ok == (1 as i32) && free_mask == (0 as i64) { skip_nopool = skip_nopool + (1 as i64); }
+                    if ok == (1 as i32) && free_mask != (0 as i64) {
+                        // 取最低空闲位(确定性:lowest reg wins)
+                        let mut r: i64 = 0 as i64;
+                        while r < rc_reg_count() {
+                            if (free_mask & rc_reg_bit(r)) != (0 as i64) { break; }
+                            r = r + (1 as i64);
+                        }
+                        if r >= rc_reg_count() {
+                            pool_full = pool_full + (1 as i64);
+                        }
+                        if r < rc_reg_count() {
+                            free_mask = free_mask - rc_reg_bit(r);
+                            let rp = ptr_add_u8(reg_flat, dst) as *u8;
+                            *rp = r as u8;
+                            callee_mask = callee_mask | rc_reg_bit(r);
+                            allocated = allocated + (1 as i64);
+                            fn_alloc = fn_alloc + (1 as i64);
+                        }
+                    }
+                }
+            }
+            j2 = j2 + (1 as i64);
+        }
+
+        let cp = ptr_add_u8(fn_callee, fi * (8 as i64)) as *i64;
+        *cp = callee_mask;
+        fi = fi + (1 as i64);
+    }
+
+    (*cg).rc_allocated = allocated;
+    // 统计(与 Python 参考实现对拍用 —— 见 docs/plans/v4/self-backend-perf-plan.md
+    // § 三之二 的测量)。**只在 JHY_RCACHE_STATS=1 时打**,默认静默。
+    if rc_stats_enabled() == (1 as i32) {
+        let mut fi2: i64 = 0 as i64;
+        let mut fns_with: i64 = 0 as i64;
+        while fi2 < fn_count {
+            let cp2 = ptr_add_u8(fn_callee, fi2 * (8 as i64)) as *i64;
+            if *cp2 != (0 as i64) { fns_with = fns_with + (1 as i64); }
+            fi2 = fi2 + (1 as i64);
+        }
+        jh_fputs_stderr("jhyy rcache: candidates = " as *u8);
+        let _q1 = jh_fmt_lld_stderr("%lld" as *u8, cand_total);
+        jh_fputs_stderr(", rejected(block) = " as *u8);
+        let _q2 = jh_fmt_lld_stderr("%lld" as *u8, rej_block);
+        jh_fputs_stderr(", rejected(call) = " as *u8);
+        let _q3 = jh_fmt_lld_stderr("%lld" as *u8, rej_call);
+        jh_fputs_stderr(", skip_nopool = " as *u8);
+        let _qe = jh_fmt_lld_stderr("%lld" as *u8, skip_nopool);
+        jh_fputs_stderr(", rel_freed = " as *u8);
+        let _qf = jh_fmt_lld_stderr("%lld" as *u8, rel_freed);
+        jh_fputs_stderr(", rel_noreg = " as *u8);
+        let _qg = jh_fmt_lld_stderr("%lld" as *u8, rel_noreg);
+        jh_fputs_stderr(", flag_pass = " as *u8);
+        let _qc = jh_fmt_lld_stderr("%lld" as *u8, flag_pass);
+        jh_fputs_stderr(", ok_pass = " as *u8);
+        let _qd = jh_fmt_lld_stderr("%lld" as *u8, ok_pass);
+        jh_fputs_stderr(", defs_seen = " as *u8);
+        let _q6 = jh_fmt_lld_stderr("%lld" as *u8, defs_seen);
+        jh_fputs_stderr(", rej_nouse = " as *u8);
+        let _q7 = jh_fmt_lld_stderr("%lld" as *u8, rej_nouse);
+        jh_fputs_stderr(", rej_multi = " as *u8);
+        let _q8 = jh_fmt_lld_stderr("%lld" as *u8, rej_multi);
+        jh_fputs_stderr(", rej_blk = " as *u8);
+        let _q9 = jh_fmt_lld_stderr("%lld" as *u8, rej_blk);
+        jh_fputs_stderr(", rej_cal = " as *u8);
+        let _qa = jh_fmt_lld_stderr("%lld" as *u8, rej_cal);
+        jh_fputs_stderr(", rej_flt = " as *u8);
+        let _qb = jh_fmt_lld_stderr("%lld" as *u8, rej_flt);
+        jh_fputs_stderr(", no_def = " as *u8);
+        let _q5 = jh_fmt_lld_stderr("%lld" as *u8, no_def);
+        jh_fputs_stderr(", pool_full = " as *u8);
+        let _q4 = jh_fmt_lld_stderr("%lld" as *u8, pool_full);
+        jh_fputs_stderr("\n" as *u8);
+        jh_fputs_stderr("jhyy rcache: allocated temps = " as *u8);
+        let _p1 = jh_fmt_lld_stderr("%lld" as *u8, allocated);
+        jh_fputs_stderr(", functions using callee-saved = " as *u8);
+        let _p2 = jh_fmt_lld_stderr("%lld" as *u8, fns_with);
+        jh_fputs_stderr("\n" as *u8);
+    }
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// emit 层收口:temp 的「位置」有两个 —— 寄存器 或 栈槽
+// ════════════════════════════════════════════════════════════════════════
+//
+// emit_load_temp  : 把 temp 读进 dest_reg
+// emit_store_temp : 把 src_reg 写进 temp
+//
+// 两条都**先查寄存器**;不在寄存器里才走栈槽
+// (⇒ 分配了寄存器的 temp 永远不会碰它的槽 ⇒ 不需要「既写寄存器又写槽」)
+//
+// ⚠️ 宽度:temp 是 'w'(32 位)时用 %ebx / %r12d 形式;'l'(64 位)用 %rbx / %r12。
+//    'w' 的 temp 只被按 32 位读写(跟今天栈槽路径一致)⇒ 高 32 位的含义无所谓。
+
+// rc_reg_name_for_qt <idx> <qt> → 宽度正确的寄存器名
+fn rc_reg_name_for_qt(idx: i64, qt: i32) -> *u8 {
+    let is_w = (qt == (119 as i32));
+    if idx == (0 as i64) { if is_w { return "%ebx" as *u8; } return "%rbx" as *u8; }
+    if idx == (1 as i64) { if is_w { return "%r12d" as *u8; } return "%r12" as *u8; }
+    if idx == (2 as i64) { if is_w { return "%r13d" as *u8; } return "%r13" as *u8; }
+    if idx == (3 as i64) { if is_w { return "%r14d" as *u8; } return "%r14" as *u8; }
+    if idx == (4 as i64) { if is_w { return "%r15d" as *u8; } return "%r15" as *u8; }
+    return 0 as *u8;
+}
+
+// rc_temp_qt <state> <temp> → temp 的 qbe 类型('w'/'l')
+// (寄存器里存的宽度必须跟它当初被存的宽度一致)
+fn rc_temp_qt(state: *u8, temp: i64) -> i32 {
+    let cg = state as *CGState;
+    if (*cg).rc_temp_qt == (0 as *u8) { return (108 as i32); }
+    if temp < (0 as i64) { return (108 as i32); }
+    if temp > (*cg).rc_global_max { return (108 as i32); }
+    let p = ptr_add_u8((*cg).rc_temp_qt, temp) as *u8;
+    let v = *p as i32;
+    if v == (119 as i32) { return (119 as i32); }
+    return (108 as i32);
+}
+
+// emit_load_temp <state> <temp> <dest_reg_name> <target_tag>
+//   dest_reg_name 必须是**宽度正确**的名字(如 "%eax" / "%rax")
+fn emit_load_temp(state: *u8, temp: i64, dest: *u8, target_tag: i32) -> i32 {
+    let cg = state as *CGState;
+    let sb = (*cg).out as *StringBuilder;
+    let arena = (*cg).arena;
+    let r = rc_reg_of(state, temp);
+    if r >= (0 as i64) {
+        let src = rc_reg_name_for_qt(r, rc_temp_qt(state, temp));
+        let _ = sb_append_cstr(arena, sb, "\tmov " as *u8);
+        let _ = sb_append_cstr(arena, sb, src);
+        let _ = sb_append_cstr(arena, sb, ", " as *u8);
+        let _ = sb_append_cstr(arena, sb, dest);
+        let _ = sb_append_cstr(arena, sb, "\n" as *u8);
+        return 0 as i32;
+    }
+    let off = cg_offset_for_temp_with_target(temp, target_tag);
+    let _ = sb_append_cstr(arena, sb, "\tmov " as *u8);
+    let _ = sb_appendf_lld(arena, sb, "%lld" as *u8, off);
+    let _ = sb_append_cstr(arena, sb, "(%rbp), " as *u8);
+    let _ = sb_append_cstr(arena, sb, dest);
+    let _ = sb_append_cstr(arena, sb, "\n" as *u8);
+    return 0 as i32;
+}
+
+// emit_store_temp <state> <temp> <src_reg_name> <target_tag>
+//   src_reg_name 必须是**宽度正确**的名字(如 "%eax" / "%rax")
+fn emit_store_temp(state: *u8, temp: i64, src: *u8, target_tag: i32) -> i32 {
+    let cg = state as *CGState;
+    let sb = (*cg).out as *StringBuilder;
+    let arena = (*cg).arena;
+    let r = rc_reg_of(state, temp);
+    if r >= (0 as i64) {
+        let dst = rc_reg_name_for_qt(r, rc_temp_qt(state, temp));
+        let _ = sb_append_cstr(arena, sb, "\tmov " as *u8);
+        let _ = sb_append_cstr(arena, sb, src);
+        let _ = sb_append_cstr(arena, sb, ", " as *u8);
+        let _ = sb_append_cstr(arena, sb, dst);
+        let _ = sb_append_cstr(arena, sb, "\n" as *u8);
+        return 0 as i32;
+    }
+    let off = cg_offset_for_temp_with_target(temp, target_tag);
+    let _ = sb_append_cstr(arena, sb, "\tmov " as *u8);
+    let _ = sb_append_cstr(arena, sb, src);
+    let _ = sb_append_cstr(arena, sb, ", " as *u8);
+    let _ = sb_appendf_lld(arena, sb, "%lld" as *u8, off);
+    let _ = sb_append_cstr(arena, sb, "(%rbp)\n" as *u8);
+    return 0 as i32;
+}
+
+// emit_operand_temp <state> <temp_id> <target_tag>
+//   发出一个 temp 作为**指令操作数**的文本:
+//     temp 在寄存器里 ⇒ "%rbx"(或 "%ebx" —— 'w' 宽度)
+//     temp 在栈槽里   ⇒ "<off>(%rbp)"
+//   用途:binop 的第二个操作数等「内联读操作数」的位置 —— 它们的形状是
+//   「<操作数>, %<目标寄存器>」⇒ 操作数要么是内存要么是寄存器。
+fn emit_operand_temp(state: *u8, temp_id: i64, target_tag: i32) -> i32 {
+    let cg = state as *CGState;
+    let sb = (*cg).out as *StringBuilder;
+    let arena = (*cg).arena;
+    let r = rc_reg_of(state, temp_id);
+    if r >= (0 as i64) {
+        let src = rc_reg_name_for_qt(r, rc_temp_qt(state, temp_id));
+        let _ = sb_append_cstr(arena, sb, "%" as *u8);
+        let _ = sb_append_cstr(arena, sb, src);
+        return 0 as i32;
+    }
+    let off = cg_offset_for_temp_with_target(temp_id, target_tag);
+    let _ = sb_appendf_lld(arena, sb, "%lld" as *u8, off);
+    let _ = sb_append_cstr(arena, sb, "(%rbp)" as *u8);
+    return 0 as i32;
+}

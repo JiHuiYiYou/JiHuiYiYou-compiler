@@ -29,6 +29,7 @@ import codegen_amd64_lexer;        // lex_il / lex_il_count
 import codegen_amd64;              // parse_and_emit (24-way dispatch)
 import codegen_amd64_regalloc;     // regalloc_clear_global
 import codegen_amd64_peephole;     // peephole_fold_with_len
+import codegen_amd64_rcache;       // v4.4.0 寄存器缓存(rc_prepare / rc_enabled_from_env)
 import util;                       // StringBuilder + sb_init
 import arena;                      // Arena + arena_init / arena_free
 
@@ -106,6 +107,19 @@ fn codegen_amd64_run_text(text: *u8, len: i64, asm_path: *u8, target_tag: i32,
     let g_max = cg_compute_global_max_temp(tokens, 40 as i64, n);
     let _fms = cg_state_set_frame_max_temp(state_buf, g_max);
 
+    // 4b. v4.4.0 寄存器缓存预扫(默认**关** ⇒ 产物逐字节不变)
+    //
+    // 第一阶段只铺基础设施:分配表算出来 + 安全网接上,但 emit 层**还没**
+    // 消费寄存器 ⇒ 打开 JHY_RCACHE 会被安全网当场拦下(这正是它的用途:
+    // 「漏改的调用点」当场暴露,而不是产出错代码)。
+    let _rc_en = cg_state_set_rc_enabled(state_buf, rc_enabled_from_env());
+    if rc_enabled_from_env() == (1 as i32) {
+        let _rc_prep = rc_prepare(state_buf, tokens, 40 as i64, n);
+        if _rc_prep != (0 as i32) {
+            return 1 as i32;
+        }
+    }
+
     // 5. Regalloc clear global (per codegen_amd64.jhyy:331; skip regalloc_run,
     //    走公式 fallback per W-074.6 T3-b 解释)
     let _clear_rc = regalloc_clear_global();
@@ -124,6 +138,14 @@ fn codegen_amd64_run_text(text: *u8, len: i64, asm_path: *u8, target_tag: i32,
     // emit_loadsub 走 slot direct path ⇒ **静默产出错代码**。同样响亮失败。
     if cg_state_get_holds_overflow(state_buf) != (0 as i32) {
         jh_fputs_stderr("jhyy error: address-holder bitmap overflow — refusing to emit silently-wrong code (W-130)" as *u8);
+        jh_fputs_stderr("
+" as *u8);
+        return 1 as i32;
+    }
+    // v4.4.0 寄存器缓存安全网:分配了寄存器的 temp 被按**栈槽**访问
+    // ⇒ 有 emit 调用点漏改 ⇒ 产物会**静默算错** ⇒ 编译失败。
+    if cg_state_get_rc_violation(state_buf) != (0 as i32) {
+        jh_fputs_stderr("jhyy error: register-cache consistency violation — refusing to emit silently-wrong code (v4.4.0)" as *u8);
         jh_fputs_stderr("
 " as *u8);
         return 1 as i32;
