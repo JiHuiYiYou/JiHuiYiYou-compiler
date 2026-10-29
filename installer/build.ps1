@@ -282,7 +282,18 @@ switch ($Target) {
         #   repo runs it under pwsh (UTF-8); Windows PowerShell 5.1 would
         #   read it as ANSI and mangle non-ASCII into parse errors.
         Write-Host "[build.ps1] collecting bundled toolchain (v4.1.0)..."
-        & $script:PsExe -NoProfile -ExecutionPolicy Bypass -File "installer/scripts/collect-toolchain.ps1"
+        $collectArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "installer/scripts/collect-toolchain.ps1")
+        if ($env:JHY_ALLOW_TOOLCHAIN_DRIFT) {
+            # Local dev escape hatch: the pinned gcc version in
+            # installer/toolchain/manifest.json is the RELEASE gate (it must
+            # match the CI/release machine). A developer whose local MSYS2
+            # differs can build with a warning instead of a hard failure.
+            # The shipped SOURCES.txt still reports the ACTUAL package
+            # versions, so the provenance stays truthful.
+            $collectArgs += "-AllowVersionDrift"
+            Write-Host "[build.ps1] JHY_ALLOW_TOOLCHAIN_DRIFT is set -> local toolchain version mismatch is a WARNING, not an error"
+        }
+        & $script:PsExe @collectArgs
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[ERROR] toolchain collection failed, aborting MSI build"
             exit 1

@@ -160,6 +160,10 @@ jobs:
           # silently shipping an unpinned toolchain. Bump the manifest
           # (and re-run the toolchain gates) to cut a new release.
           #
+          # NOTE: this job must NOT set JHY_ALLOW_TOOLCHAIN_DRIFT - that
+          # escape hatch is for LOCAL builds whose MSYS2 differs from the
+          # pinned one. The release ships what the manifest pins.
+          #
           # binutils is listed explicitly (it is also a gcc dependency):
           # windres is invoked on EVERY link by the compiler - a missing
           # windres makes every compile fail, not just the ones that want

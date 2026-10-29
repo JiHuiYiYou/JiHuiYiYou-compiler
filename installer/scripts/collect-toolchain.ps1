@@ -131,10 +131,14 @@ $gccVer = (& $gccExe -dumpversion 2>$null | Select-Object -First 1).Trim()
 if ($gccVer -ne $mf.toolchain.gcc_version) {
     $msg = ("gcc version mismatch: manifest pins {0}, this machine has {1} ({2})." -f $mf.toolchain.gcc_version, $gccVer, $gccExe)
     if ($AllowVersionDrift) {
-        Say ("WARNING: " + $msg + " -- allowed by -AllowVersionDrift (CI only; release builds are strict).")
+        Say ("WARNING: " + $msg + " -- allowed by -AllowVersionDrift (CI runs with it; the RELEASE build stays strict).")
     } else {
-        throw ($msg + "`n  Reproducible artifacts require both to agree - update" +
-               " installer/toolchain/manifest.json and re-run.")
+        throw ($msg + "`n  Reproducible artifacts require both to agree.`n" +
+               "  - release build: bump installer/toolchain/manifest.json to the" +
+               " gcc version the CI/release machine has, then re-run.`n" +
+               "  - local build only: set JHY_ALLOW_TOOLCHAIN_DRIFT=1 to downgrade" +
+               " this to a warning (the shipped SOURCES.txt still reports the" +
+               " ACTUAL package versions).")
     }
 }
 Say "gcc $gccVer @ $ucrt"

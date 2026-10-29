@@ -56,16 +56,22 @@ jhyy **发汇编，不发 C** —— 链接期被 gcc 编译的 C 只有 `runtim
 
 ## 版本钉死
 
-`manifest.json` 钉住 `gcc_version` 与各 MSYS2 包版本。收集脚本在本机 gcc 版本不符时**响亮失败**（不是 warning）—— 产物可复现性的前提。
+`manifest.json` 钉住 `gcc_version` 与各 MSYS2 包版本。**`gcc_version` 是发版闸门**：
+它必须等于 CI（= 发版机）上 MSYS2 的 gcc 版本 —— MSYS2 镜像会滚动，gcc 升级后
+必须跟着 bump，否则 release 构建**响亮失败**（不会悄悄发出一份没钉住的工具链）。
 
-- **release 构建**：严格（默认）。MSYS2 升级了 gcc ⇒ 发版构建直接失败 ⇒
-  维护者 bump manifest + 重跑工具链门 ⇒ 不会悄悄发出一份没钉住的工具链。
-- **CI**：`collect-toolchain.ps1 -AllowVersionDrift` ⇒ 版本漂移只告警。
-  CI 的 runner 镜像是滚动的（实测 2026-10-28 已经是 gcc 16.2.0，而本地是 15.2.0），
-  但那些门（可重定位 / 头闭包 / poisoned PATH）与版本无关 ⇒ 照样每次都跑。
+- **release 构建**：严格（默认）。不符 ⇒ 直接失败。
+- **CI**：`-AllowVersionDrift` ⇒ 版本漂移只告警。CI 的 runner 镜像是滚动的
+  （实测 2026-10-28 已经是 gcc 16.2.0），但那些门（可重定位 / 头闭包 /
+  poisoned PATH）与版本无关 ⇒ 照样每次都跑。
+- **本地构建**：默认也是严格。想用本机那份不同的 MSYS2 ⇒ 设
+  `JHY_ALLOW_TOOLCHAIN_DRIFT=1` ⇒ 只告警；此时随包 `SOURCES.txt` 报的是
+  **实际装着的**包版本（溯源不撒谎）。
 
 ⚠️ **gcc 16 会换掉一些东西**（CI 上实测）：
 许可证目录从 `gcc-libs` 变成 `gcc`（⇒ 许可证原文**签进仓里**做基线，MSYS2 的做叠加）；
+包名也改了（`gcc-libs` → `libgcc`、`crt-git` → `crt`、`headers-git` → `headers`
+⇒ manifest 里有 `aliases` 字段）；
 系统头路径写死了 `ucrt64` 这一层（⇒ 工具链根下必须保留 `ucrt64/`）。
 
 ## 用户怎么覆盖

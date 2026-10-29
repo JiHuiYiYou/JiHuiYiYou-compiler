@@ -1846,6 +1846,21 @@ CI 的是 gcc 16.2.0 ⇒ 四个 CI run 才把它逼出来(前三个分别撞上
 | `installer/scripts/gen-toolchain-wxs.ps1` | manifest → WiX `<Fragment>`(按目录一个 Component,GUID 用 UUIDv5 确定性生成) |
 | `installer/scripts/verify-toolchain.ps1` | **7 条门**:可重定位(带空格路径)/ 头闭包 / **poisoned PATH** / 无 PATH / windres / 预编 `.o` 字节一致 |
 
+### 版本闸门:manifest 的 `gcc_version` = **发版要出货的那份**
+
+`installer/toolchain/manifest.json` 钉住 `gcc_version`(= 发版机 CI 上的 gcc,当前 **16.2.0**)
+与各 MSYS2 包版本。**发版构建严格校验**:不符 ⇒ 响亮失败 ⇒ 不会悄悄发出一份没钉住的工具链。
+MSYS2 镜像会滚动,gcc 升级后**必须 bump manifest**（否则 release 构建直接失败 —— 这是设计,不是 bug）。
+
+- CI 用 `-AllowVersionDrift`(版本漂移只告警)⇒ 那些与版本无关的门每次都跑;
+- 本地机器 MSYS2 版本不同时,设 `JHY_ALLOW_TOOLCHAIN_DRIFT=1` 放行(只告警);
+  随包 `SOURCES.txt` 报的是**实际装着的**包版本(用 pacman 查,含 MSYS2 改名过的别名)
+  ⇒ **溯源不撒谎**。
+
+⚠️ gcc 16 会换掉一些东西(实测):许可证目录 `gcc-libs` → `gcc`(⇒ 许可证原文签进仓里做基线)、
+包名 `gcc-libs` → `libgcc` / `crt-git` → `crt` / `headers-git` → `headers`(⇒ manifest 有 aliases)、
+系统头路径写死 `ucrt64` 这一层(⇒ 工具链根下必须保留 `ucrt64/`)。
+
 ### 台账
 
 新增 **W-158 ~ W-162** 五条(全部 RESOLVED):
