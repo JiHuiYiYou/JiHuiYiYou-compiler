@@ -130,29 +130,6 @@ jobs:
           "JHY_IS_RC=$($env:JHY_IS_RC)"      | Add-Content -Path $env:GITHUB_ENV
           "JHY_TAG_NAME=$($env:JHY_TAG_NAME)"| Add-Content -Path $env:GITHUB_ENV
 
-      - name: Assert VERSION file matches the tag (blow up before building)
-        shell: pwsh
-        run: |
-          # v4.1.2:`VERSION` 文件是仓内版本号的**真相源**(见
-          # scripts/dev/bump_version.py)。tag 是"发布"这个动作。
-          # 两者必须一致 —— 否则会出现「tag v4.1.3,装出来的编译器自报 v4.1.2」。
-          #
-          # 这道门放在**构建之前**:不合就直接拒发,而不是等 40 分钟构建完
-          # 才发现装出去的产物版本号是错的。
-          #
-          # RC 后缀(`-rc1`)只存在于 tag 上,VERSION 里不带 —— 所以比较时
-          # 剥掉 RC 后缀再比。
-          $declared = (Get-Content "VERSION" -Raw).Trim()
-          $tagNoRc  = ($env:VERSION -replace '-rc\d+$', '')
-          Write-Host "VERSION file : $declared"
-          Write-Host "tag          : $tagNoRc"
-          if ($declared -ne $tagNoRc) {
-            Write-Host "::error::VERSION 文件($declared)与 tag($tagNoRc)不符,拒绝发布。"
-            Write-Host "::error::跑 'python scripts/dev/bump_version.py set $tagNoRc' 再重编 + 提交 + 打 tag。"
-            exit 1
-          }
-          Write-Host "[OK] VERSION file matches the tag"
-
       # v1.8.3.3 follow-up #3 (W-067): JHY_VERSION_DISPLAY is computed inside
       # installer/build.ps1 (line ~87, single source of truth) and exported to
       # $env:GITHUB_ENV when the script runs in CI. release.yml no longer
@@ -168,6 +145,33 @@ jobs:
           # qbe/ is a vendored copy of the QBE compiler source (v1.5.5 vendoring
           # fix for the historical dangling gitlink). See W-025.
           fetch-depth: 0  # for git describe / tag detection
+
+      # ⚠️ 这一步**必须在 Checkout 之后** —— VERSION 是仓里的文件,
+      #    checkout 之前读它必然读不到(第一版就踩了这个:门被放在
+      #    "Compute VERSION" 后面、Checkout 前面 ⇒ Get-Content 找不到文件
+      #    ⇒ step 直接失败 ⇒ 每次发版都炸)。
+      - name: Assert VERSION file matches the tag (blow up before building)
+        shell: pwsh
+        run: |
+          # v4.1.2:`VERSION` 文件是仓内版本号的**真相源**(见
+          # scripts/dev/bump_version.py)。tag 是"发布"这个动作。
+          # 两者必须一致 —— 否则会出现「tag v4.1.3,装出来的编译器自报 v4.1.2」。
+          #
+          # 这道门放在**构建之前**:不合就直接拒发,而不是等 40 分钟构建完
+          # 才发现装出去的产物版本号是错的。
+          #
+          # RC 后缀(`-rc1`)只存在于 tag 上,VERSION 里不带 —— 所以比较时
+          # 剥掉 RC 后缀再比。
+          $declared = (Get-Content "VERSION" -Raw -Encoding utf8).Trim()
+          $tagNoRc  = ($env:VERSION -replace '-rc\d+$', '')
+          Write-Host "VERSION file : $declared"
+          Write-Host "tag          : $tagNoRc"
+          if ($declared -ne $tagNoRc) {
+            Write-Host "::error::VERSION 文件($declared)与 tag($tagNoRc)不符,拒绝发布。"
+            Write-Host "::error::跑 'python scripts/dev/bump_version.py set $tagNoRc' 再重编 + 提交 + 打 tag。"
+            exit 1
+          }
+          Write-Host "[OK] VERSION file matches the tag"
 
       - name: Setup MSYS2 + toolchain
         uses: msys2/setup-msys2@v2
