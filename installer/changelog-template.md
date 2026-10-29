@@ -21,7 +21,30 @@
 
 ## 主要改动 (v${VERSION})
 
-**installer 自带工具链** —— 从这一版起,装机用户**不需要 MSYS2**也能编译 `.jhyy`。
+**VSCode 终端 profile 改为探测真实 bash + 新增 `jhyy-bash` 启动器。**
+(非破坏性变更;上一版的「自带工具链」见下。)
+
+- **VSCode 自带的 `bash (MSYS2)` profile 路径是写死的**
+  (`C:\msys64\usr\bin\bash.exe`)**且不会回落到别的 bash** ⇒ MSYS2 装在别处的
+  用户、或只有 Git for Windows 的用户,会看到 "the terminal profile is not
+  available"。现在改为写自己的 `bash (JHYY)` profile,指向**探测到的** bash:
+  `$env:MSYS2_ROOT` → `C:\msys64` → MSYS2 注册表的 `InstallLocation`
+  → Git for Windows → PATH。**探测不到就什么都不改**(终端用 PowerShell 完全正常,
+  `jhyy.exe` 本来就在系统 PATH 上)。
+- **新增 `jhyy-bash.cmd`**(装到 `C:\Program Files\JHYY\bin\`):自己找 bash 并启动,
+  顺带把 `JHYY\bin` 塞进 PATH 并设 `MSYS2_PATH_TYPE=inherit`
+  (MSYS2 的 minimal PATH 模式无视 Windows PATH ⇒ 不设它 bash 里就找不到 `jhyy`)。
+
+### ⚠️ 一条**作废**的计划:把 MSYS2 的 POSIX 层(bash + coreutils)打包成可选组件
+
+原计划二期还包含这一条。**实测后作废**:**MSYS2 的运行时(`msys-2.0.dll`)不做
+「按树搬迁」** —— 拷出来的 bash **仍然用系统的 `/usr/bin`**(596 个文件,而不是我们
+拷的 45 个)⇒ 装完是**半残态**(bash 有,但 `ls` / `etc` 全是系统那份)⇒ 比没有更麻烦。
+完整证据见 `installer/toolchain/README.md` § 二期结论。
+
+### 上一版(v4.1.0)的要点:installer 自带工具链
+
+**installer 自带工具链** —— 从 v4.1.0 起,装机用户**不需要 MSYS2** 也能编译 `.jhyy`。
 
 之前 MSI 里有 `<Launch Condition="Installed OR MSYS2_GCC_FOUND">` + 4 路 MSYS2 探测
 ⇒ **没装 MSYS2 的机器根本装不上这个编译器**;装上了的人用的也是**他自己那份** gcc
@@ -41,12 +64,13 @@
 - **7 条常驻门**(可重定位 / 头闭包 / poisoned PATH / 无 PATH / windres / 预编 `.o`
   字节一致 / DLL 闭包)⇒ 在 gcc 15.2.0 与 gcc 16.2.0 上都 7/7 PASS。
 
-> ⚠️ **破坏性变更**:默认 gcc 从「你自己机器上的 MSYS2」变成「内置那份」。
+> ⚠️ **v4.1.0 的破坏性变更**:默认 gcc 从「你自己机器上的 MSYS2」变成「内置那份」。
 > 想用回自己的:`JHY_GCC=<gcc.exe 全路径>` 或在 `%JHYY_HOME%\env.txt` 里写一行
 > `JHY_GCC=<gcc.exe 全路径>`。
 
-顺带修的既有 bug:MSI 的 Bal 扩展 DLL 路径写死了 WiX 版本 ⇒ **WiX 一升级,发版就挂在
-最后一步**(实测 v4.0.22 的发布就死在这儿,MSI 都编好了)⇒ 改成扫目录。
+顺带修的既有 bug:MSI 的 Bal 扩展 DLL 路径**写死 WiX 版本** ⇒ WiX 一升级,发版就挂在
+最后一步;GitHub runner 镜像自带**旧 MSYS2 在 `C:\mingw64`** 且排在 PATH 前面 ⇒
+工具链版本 pin 失败 ⇒ 现在把 MSYS2 根目录**显式传下去**。
 
 ## 验证 (5 项)
 
