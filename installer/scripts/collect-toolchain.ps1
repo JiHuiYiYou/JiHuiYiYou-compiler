@@ -72,9 +72,17 @@ $manifestPath = "installer/toolchain/manifest.json"
 if (-not (Test-Path $manifestPath)) { throw "manifest not found: $manifestPath" }
 $mf = [System.IO.File]::ReadAllText((Resolve-Path $manifestPath).Path, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
 
-if (-not $MsysRoot) {
-    if ($env:MSYS2_ROOT) { $MsysRoot = $env:MSYS2_ROOT }
-    else { $MsysRoot = $mf.toolchain.default_msys2_root }
+$explicitRoot = $false
+if ($MsysRoot) {
+    $explicitRoot = $true
+} elseif ($env:JHY_MSYS2_ROOT) {
+    $MsysRoot = $env:JHY_MSYS2_ROOT
+    $explicitRoot = $true
+} elseif ($env:MSYS2_ROOT) {
+    $MsysRoot = $env:MSYS2_ROOT
+    $explicitRoot = $true
+} else {
+    $MsysRoot = $mf.toolchain.default_msys2_root
 }
 $ucrt       = Join-Path $MsysRoot "ucrt64"
 $gccExe     = Join-Path $ucrt "bin\gcc.exe"
@@ -92,6 +100,19 @@ $objdumpExe = Join-Path $ucrt "bin\objdump.exe"
 #      This is the reliable one: it works wherever MSYS2 happens to live.
 #   5. cygpath -w / (the MSYS2 root, when cygpath is on PATH)
 if (-not (Test-Path $gccExe)) {
+    # An EXPLICIT root (JHY_MSYS2_ROOT / -MsysRoot / MSYS2_ROOT) is
+    # authoritative: if it has no ucrt64 gcc, that is a REAL problem and we
+    # must NOT silently fall back to whatever `gcc` the PATH happens to
+    # offer. The fallback below exists for the "no root given at all" case.
+    # (This is exactly how the v4.1.0 release picked up the runner image's
+    # STALE MSYS2 at C:\mingw64 - gcc 15.2.0 - instead of the freshly
+    # installed one, and then the version pin rejected it.)
+    if ($explicitRoot) {
+        throw ("ucrt64 gcc not found under the EXPLICIT MSYS2 root: $MsysRoot" +
+               " (expected: $gccExe)" +
+               "`n  The root was given explicitly (JHY_MSYS2_ROOT / -MsysRoot / MSYS2_ROOT)" +
+               " and is authoritative - fix it instead of falling back to PATH.")
+    }
     $found = $null
     # (4) discover via the gcc on PATH. In MSYS2 the ucrt64 gcc lives in
     # <ucrt>/bin/gcc.exe, so the ucrt dir is simply its grandparent.

@@ -283,6 +283,17 @@ switch ($Target) {
         #   read it as ANSI and mangle non-ASCII into parse errors.
         Write-Host "[build.ps1] collecting bundled toolchain (v4.1.0)..."
         $collectArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "installer/scripts/collect-toolchain.ps1")
+        if ($env:JHY_MSYS2_ROOT) {
+            # The GitHub runner image ships an OLD MSYS2 at C:\mingw64 (gcc
+            # 15.2.0) that sits FIRST on the Windows PATH, while
+            # setup-msys2 installs a FRESH one (gcc 16.2.0) elsewhere. So the
+            # PATH-based discovery inside a plain pwsh step picks the stale
+            # toolchain - and the version pin then rejects it. The MSYS2-shell
+            # steps know the right root (`cygpath -w /`); they export it as
+            # JHY_MSYS2_ROOT, and we pass it down explicitly.
+            $collectArgs += @("-MsysRoot", $env:JHY_MSYS2_ROOT)
+            Write-Host "[build.ps1] using MSYS2 root: $env:JHY_MSYS2_ROOT"
+        }
         if ($env:JHY_ALLOW_TOOLCHAIN_DRIFT) {
             # Local dev escape hatch: the pinned gcc version in
             # installer/toolchain/manifest.json is the RELEASE gate (it must

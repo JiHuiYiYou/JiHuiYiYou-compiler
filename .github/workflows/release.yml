@@ -221,6 +221,14 @@ jobs:
       - name: Build jhyy.exe (self-bootstrap, jhyy compiles src0)
         shell: msys2 {0}
         run: |
+          # v4.1.0: 把「本 job 用的 MSYS2 根目录」显式传给后面的 pwsh 步。
+          # 起因:GitHub runner 镜像自带一套**旧** MSYS2 在 C:\mingw64(gcc 15.2.0),
+          # 而 setup-msys2 装的是**新**的(gcc 16.2.0,在临时目录)。两者都在
+          # Windows PATH 上 ⇒ 后面那个 pwsh 步里按 PATH 找 gcc 会挑中**旧的** ⇒
+          # 工具链版本 pin 直接失败(实测 v4.1.0 的发布就死在这儿)。
+          # MSYS2 shell 里 `/` 就是本 job 正在用的那套 ⇒ cygpath -w / 给出正解。
+          echo "JHY_MSYS2_ROOT=$(cygpath -w /)" >> $GITHUB_ENV
+          echo "MSYS2 root: $(cygpath -w /)"
           make STRICT_TOOLCHAIN=0
           echo "jhyy.exe sha: $(sha256sum compiler/build/bin/jhyy.exe | cut -d' ' -f1)"
           ls -la compiler/build/bin/jhyy.exe

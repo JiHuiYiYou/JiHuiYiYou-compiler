@@ -117,6 +117,12 @@ jobs:
         run: |
           echo "GH_RUNNER=true" >> $GITHUB_ENV
           echo "MSYS2_PATH=/c/msys64/usr/bin:$PATH" >> $GITHUB_ENV
+          # v4.1.0: 把本 job 用的 MSYS2 根目录显式导出。GitHub runner 镜像
+          # 自带一套旧 MSYS2 在 C:\mingw64(gcc 15.2.0),与 setup-msys2 装的
+          # 新的一套(gcc 16.2.0)同时在 Windows PATH 上 ⇒ pwsh 步里按 PATH
+          # 找 gcc 会挑中旧的 ⇒ 工具链版本 pin 失败。`/` 在 MSYS2 shell 里
+          # 就是本 job 正在用的那套 ⇒ cygpath -w / 给出正解。
+          echo "JHY_MSYS2_ROOT=$(cygpath -w /)" >> $GITHUB_ENV
           which gcc python make
 
       - name: Build jhyy.exe (self-bootstrap) — 回归门就测这个产物
