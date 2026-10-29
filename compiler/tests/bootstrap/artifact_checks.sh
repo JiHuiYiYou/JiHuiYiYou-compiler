@@ -415,6 +415,151 @@ PY
 }
 
 # ════════════════════════════════════════════════════════════════════════════
+# v4.2.1 — 帧尺寸:alloc 池预留从「写死 8192」改成「按函数实际需要」
+# ════════════════════════════════════════════════════════════════════════════
+#
+# 背景(2026-10-29 实测,不是判断):
+#   `codegen_amd64_emit_ctrl.jhyy` 的 alloc_pool_size = 8192 + per_fn_alloc
+#   ⇒ **每个函数的帧 ≥8352 字节**,与该函数实际用几个 temp 无关
+#     (一个只用一个 temp 的函数也照样拿 8KB 栈)
+#   ⇒ 帧 > 4096 ⇒ Windows x64 ABI 要求探页 ⇒ **每个函数每次调用都走一次
+#      ___chkstk_ms**(实测自举产物 1045 个函数 **100%** 如此)
+#   ⇒ 实测 **~41% 的运行时**在这上面(消融:8384 帧 + chkstk = 335ms →
+#     128 帧无 chkstk = 197ms;gcc -O0 = 98ms)
+#
+# 两条门:
+#   G1 check_frame_bloat —— 帧不许大 + chkstk 次数必须为 0(**收益锁**)
+#   G2 check_frame_slots —— 每个 rbp 相对槽位必须落在该函数的帧内
+#                           (**安全网**:帧算小了,槽位越界就踩坏调用者的栈)
+#
+# ⚠️ G2 在修之前就该是**绿的**(帧本来就大)—— 它的作用不是「证明这次修好了」,
+#    是「将来谁再把预留算小,当场响」。G1 才是这次修好的证据。
+
+# _frame_stats <file.s> — 输出 "maxframe chkstk nviol [viol 细节]"
+#
+# 帧的识别:**函数序言里 pushq %rbp 之后的第一个** `subq $N, %rsp`。
+# 函数体里 call 之前的 `subq $32, %rsp` 是**出参区**,不是帧 —— 两者形态完全
+# 一样(`subq $N, %rsp`),只能靠「前面有没有 pushq %rbp」区分。
+_frame_stats() {
+    python - "$1" <<'PY'
+import re, sys
+lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().split("\n")
+fn_re = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*):\s*$')
+slot_re = re.compile(r'-(\d+)\(%rbp\)')
+frame = 0            # 当前函数的预留帧;0 = 还没量到
+in_prologue = False
+maxframe = 0
+chk = 0
+viol = 0
+detail = []
+for l in lines:
+    s = l.strip()
+    if fn_re.match(l.rstrip()):
+        frame = 0
+        in_prologue = False
+        continue
+    if s == "pushq %rbp":
+        in_prologue = True
+        continue
+    m = re.match(r'subq \$(\d+), %rsp$', s)
+    if m:
+        if in_prologue:
+            frame = int(m.group(1))
+            in_prologue = False
+            if frame > maxframe:
+                maxframe = frame
+        # 否则是 call 的出参区 —— 忽略
+        continue
+    if s == "call ___chkstk_ms":
+        chk += 1
+    if frame:
+        for sm in slot_re.finditer(l):
+            off = int(sm.group(1))
+            if off > frame:
+                viol += 1
+                if len(detail) < 3:
+                    detail.append(f"槽位 -{off}(%rbp) 越出帧 {frame}")
+print(maxframe, chk, viol, "; ".join(detail))
+PY
+}
+
+check_frame_bloat() {
+    hdr "v4.2.1  帧尺寸膨胀 + 每次调用的 chkstk 探页"
+    [ -x "$JHYY_EXE" ] || { skip "frame_bloat" "jhyy.exe 不存在"; return; }
+
+    local f="$WORK/fb.jhyy"
+    cat > "$f" <<'JEOF'
+fn add(a: i32, b: i32) -> i32 { return a + b; }
+fn mul(a: i32, b: i32) -> i32 { return a * b; }
+fn chain(a: i32) -> i32 { return add(mul(a, 3), add(a, 1)); }
+fn main_jhyy() -> i32 {
+    let mut r: i32 = 0;
+    r = chain(1);
+    return r;
+}
+JEOF
+    if ! "$JHYY_EXE" compile --target=amd64_win --no-link "$f" -o "$WORK/fb" \
+            > "$WORK/fb.log" 2>&1; then
+        badenv "frame_bloat" "编译失败:$(tail -3 "$WORK/fb.log" | tr '\n' ' ')"
+        return
+    fi
+    [ -f "$WORK/fb.s" ] || { badenv "frame_bloat" "没有产出 .s"; return; }
+
+    local stats maxframe chk viol
+    stats=$(_frame_stats "$WORK/fb.s")
+    maxframe=$(echo "$stats" | cut -d' ' -f1)
+    chk=$(echo "$stats" | cut -d' ' -f2)
+    viol=$(echo "$stats" | cut -d' ' -f3)
+    [ -n "$maxframe" ] || { badenv "frame_bloat" "量不到帧大小"; return; }
+
+    # 阈值:一个小函数(几个 temp)的帧不该超过 1KB。
+    # 修之前恒 ≥8352(写死的 8192 预留)⇒ 这条门修之前**必然红**。
+    if [ "$maxframe" -gt 1024 ]; then
+        bad "frame_bloat" "小函数的帧 ${maxframe}B > 1024B —— alloc 池预留还是写死的 8192"
+        return
+    fi
+    # 帧 < 4096 ⇒ Windows ABI 不要求探页 ⇒ 不该再有 ___chkstk_ms
+    if [ "$chk" -ne 0 ]; then
+        bad "frame_bloat" "还有 ${chk} 处 ___chkstk_ms —— 帧仍 >4096,每次调用都在探页"
+        return
+    fi
+    ok "frame_bloat(最大帧 ${maxframe}B, chkstk ${chk} 处)"
+}
+
+check_frame_slots() {
+    hdr "v4.2.1  栈槽必须落在该函数的预留帧内(帧算小的安全网)"
+    [ -x "$JHYY_EXE" ] || { skip "frame_slots" "jhyy.exe 不存在"; return; }
+
+    local f="$WORK/fs.jhyy"
+    cat > "$f" <<'JEOF'
+fn add(a: i32, b: i32) -> i32 { return a + b; }
+fn mul(a: i32, b: i32) -> i32 { return a * b; }
+fn chain(a: i32) -> i32 { return add(mul(a, 3), add(a, 1)); }
+fn main_jhyy() -> i32 {
+    let mut r: i32 = 0;
+    r = chain(1);
+    return r;
+}
+JEOF
+    if ! "$JHYY_EXE" compile --target=amd64_win --no-link "$f" -o "$WORK/fs" \
+            > "$WORK/fs.log" 2>&1; then
+        badenv "frame_slots" "编译失败:$(tail -3 "$WORK/fs.log" | tr '\n' ' ')"
+        return
+    fi
+    [ -f "$WORK/fs.s" ] || { badenv "frame_slots" "没有产出 .s"; return; }
+
+    local stats viol detail
+    stats=$(_frame_stats "$WORK/fs.s")
+    viol=$(echo "$stats" | cut -d' ' -f3)
+    detail=$(echo "$stats" | cut -d' ' -f4-)
+    if [ "$viol" -ne 0 ]; then
+        bad "frame_slots" "${viol} 个栈槽越出该函数的预留帧 —— ${detail}"
+        return
+    fi
+    ok "frame_slots(所有 rbp 相对槽位都在帧内)"
+}
+
+# ════════════════════════════════════════════════════════════════════════════
 # 4. W-116 — SysV callee 参数溢出必须覆盖 6 个整数寄存器
 # ════════════════════════════════════════════════════════════════════════════
 #
@@ -1034,6 +1179,8 @@ want holds_bitmap    && check_holds_bitmap
 want holds_cap_source && check_holds_cap_source
 want selfhost_target_flag && check_selfhost_target_flag
 want per_fn_frame    && check_per_fn_frame
+want frame_bloat     && check_frame_bloat
+want frame_slots     && check_frame_slots
 want sysv_mixed_struct && check_sysv_mixed_struct
 want sysv_memory_class && check_sysv_memory_class
 want sysv_arg_spill  && check_sysv_arg_spill

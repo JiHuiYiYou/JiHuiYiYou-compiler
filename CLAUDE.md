@@ -164,16 +164,24 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 (版本号权威在 [`version-schedule.md`](docs/plans/v4/version-schedule.md))。
 backlog 那 12 项里只有第 8 项(优化 pass)被吸收进 v4.3,其余 11 项排到 v4.6+。
 
-**v4.2 主线为什么是后端性能**(2026-10-29 实测,不是判断):
+**v4.2 主线为什么是自研后端性能**(2026-10-29 实测,不是判断):
 `compiler/src/*.c` 已于 v4.0.21 删光 ⇒ **自研后端就是编译器本身**
-(`jhyy.exe` 自己编 `src0/main.jhyy`,自举 12.5s)⇒ 后端性能直接乘在
+(`jhyy.exe` 自己编 `src0/main.jhyy`)⇒ 后端性能直接乘在
 项目迭代速度 + 用户写的每个 jhyy 程序上。可信基线(旧 `bench.sh` 的计时器是坏的):
-**jhyy 比 gcc -O0 慢 3.43x(fib)/ 4.73x(ack)/ 1.57x(nq)**;
-其中 **~41% 来自一个写死的常量**(`emit_ctrl.jhyy:565` 的 `8192` ⇒ 每函数帧
-≥8352 字节 ⇒ 100% 的函数每次调用都走 `___chkstk_ms` 探页)⇒ **v4.2.1 修它**。
+修帧尺寸前 jhyy 比 gcc -O0 慢 **3.46x(fib)/ 4.65x(ack)**;
+其中 **~41% 来自一个写死的常量**(`emit_ctrl.jhyy` 的 `8192` ⇒ 每函数帧
+≥8352 字节 ⇒ 100% 的函数每次调用都走 `___chkstk_ms` 探页)。
+
+**v4.2.1 已修(台账 W-167)**:帧中位 **8368 → 288 字节** · `___chkstk_ms` 调用
+**1045 → 46 处** · 总预留栈 **9.1MB → 1.5MB** · fib/ack jhyy/gcc-O0
+**3.46x/4.65x → 2.14x/2.13x** · 自举编译 **-16%** · 顺带修掉一个潜在下溢
+(旧公式在公式池主导时把 `per_fn_alloc` 丢掉了 ⇒ 值池向下生长不受帧保护)。
+新门 `artifact_checks.sh frame_bloat` + `frame_slots` 锁住这个收益。
 数据见 [`docs/perf/self-backend-baseline-2026-10-29.md`](docs/perf/self-backend-baseline-2026-10-29.md),
 测量脚本 `scripts/dev/bench/runtime_perf.py`(CPython `perf_counter`;MSYS2 的
-`date +%s.%N` 不可信,别用它计时)。
+`date +%s.%N` 不可信,别用它计时)。**CI 里的性能门是静态指标硬门**(指令数/
+访存数/帧大小/chkstk 次数,确定性 ⇒ 跨机器逐字节相同),**墙钟只报告** ——
+共享 runner 的宿主负载不可控。
 
 **plan 命名约定(2026-10-15 修订)**:已 ship / 进行中的 sprint 保留 `v4.X.Y-plan.md`(审计轨迹,改名会破坏跟 changelog / commit 的对应);未启动的 backlog 与进行中的工作用描述性文件名,**不用版本号** —— 版本号在启动时才分配。
 历史: changelog 见 `docs/logs/v0/changelog-v0.X.Y.md` (C 编译器) + `docs/logs/v1/changelog-v1.X.Y.md` (jhyy 自举) + `docs/logs/v2/changelog-v2.*.0.md` (QBE rewrite + freestanding) + `docs/logs/v3/changelog-v3.*.md` (language expansion + self-backend) + `docs/logs/v4/changelog-v4.0.0.md` (post-merge umbrella);早期 sprint（命名 `sprint-1*.md`）同目录。

@@ -135,6 +135,52 @@ v4.6+ ─ 语言特性链(lifetime → closure → dyn Trait → HKT)
 **gate**: 全量 regress 绿 + 自举闭环绿 + `artifact_checks` 绿 + **perf 数字改善 ≥ 30%**
 + `make` 后 `git add compiler/build/bin/jhyy.exe`(CI 的 artifact-fresh 步会比对它)。
 
+#### ✅ 完成记录(2026-10-29,台账 W-167)
+
+**改法**(`codegen_amd64_emit_ctrl.jhyy`):
+```
+alloc_pool_size = 8192 + per_fn_alloc
+⇒ alloc_pool_size = 32 + (local_max+1)*8 + per_fn_alloc
+```
+`local_max` 是**该函数精确已知**的 local temp 上限(`per_fn_max[cur] - per_fn_max[cur-1]`)
+⇒ 帧终于按函数实际需要算。
+
+**实测(自举产物 1045 个真实函数)**:
+
+| | 修前 | 修后 |
+|---|---|---|
+| 帧 min / 中位 | 8352 / 8368 | **208 / 288** |
+| 总预留栈 | 9.1 MB | **1.5 MB** (-84%) |
+| 帧 >4096 / chkstk 调用 | 1045 / 1045(100%) | **46 / 46(4.4%)** |
+| 最紧函数的余量 | 2664 B | **14584 B** |
+| fib / ack jhyy/gcc-O0 | 3.46x / 4.65x | **2.14x / 2.13x** |
+| 自举编译耗时 | 6676ms | **5605ms** (-16%) |
+
+⚠️ **帧 max 变大(237680 → 349232)但不是变紧** —— 旧公式用 `max(...)`,
+在公式池主导时**把 `per_fn_alloc` 丢掉了** ⇒ 值池向下生长不受帧保护
+(`parser__parse_expr` 只剩 2664 字节余量)。新公式把两项**相加**
+⇒ **顺手修掉一个潜在下溢**,大函数现在余量更足。
+
+**门(新增两条,都验过红灯)**:
+- `artifact_checks.sh frame_bloat` —— 修之前**必然红**(报「小函数的帧 8384B > 1024B」)
+- `artifact_checks.sh frame_slots` —— 每个 rbp 相对槽位必须落在该函数的帧内
+  (修之前就该是绿的 —— 已验;它是「帧算小的安全网」)
+
+**验收(全绿)**:
+
+| 门 | 结果 |
+|---|---|
+| `regress jhyy.exe` | ✅ **257 PASS + 0 XFAIL + 0 failed + 20 SKIP**(277 total,与修前基线一致) |
+| `artifact_checks.sh` | ✅ **16 PASS / 0 KNOWN-FAIL / 0 FAIL / 0 SKIP**(14 → 16,多的两条是本版新增) |
+| `closure_check.sh` | ✅ PASS(v2.s == v3.s,sha `8f706fe76d5fc0b7`) |
+| `fixed_point.sh` | ✅ **17 PASS / 0 FAIL / 0 INFO**(N=10) |
+| `make`(自举闭环门) | ✅ 第 2 代收敛(**过渡期自动消化** —— W-147 的「迭代到不动点」) |
+| perf 静态基线 | ✅ 已更新并锁住收益(insn 74→70 / frame_med 8384→320 / chkstk 2→0) |
+
+> ⚠️ **自举闭环的过渡期**:第 1 代(旧公式编新源码)与第 2 代(新公式编新源码)
+> 产物必然不同 ⇒ 门**推进锚点一代**后收敛 —— 这正是 W-147 把门从「验锚点」
+> 改成「迭代到不动点」的意义,不需要任何 escape hatch。
+
 ### v4.2.2 —— peephole 4096 限制真修
 
 **为什么**:`.s` 超过 4096 字节就整段跳过 peephole(`peephole.jhyy:545`)。

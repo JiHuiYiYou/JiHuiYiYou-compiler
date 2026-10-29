@@ -186,6 +186,7 @@
 | [W-164](#w-164) | RESOLVED | `jhyy --help` 把 `compile` / `build` 的语义写**反**了 ⇒... |
 | [W-165](#w-165) | RESOLVED | `jhyy --version` **从来就不存在** ⇒ 文档 / release note... |
 | [W-166](#w-166) | RESOLVED | `build.ps1 bundle` 只在 MSI **不存在**时才重建 ⇒ **陈旧 MSI... |
+| [W-167](#w-167) | RESOLVED | alloc 池的栈预留**写死 8192 字节** ⇒ 每个函数的帧 ≥8352 ⇒... |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -12477,3 +12478,89 @@ $e=$null; [System.Management.Automation.Language.Parser]::ParseFile(
 - 代码:`installer/build.ps1`(`bundle` 目标的 MSI 新鲜度判定)
 - 证据:两轮构建的 MSI sha256 逐字节相同(`d32bb524…`)
 - 相关:**W-122**(side-file 固定路径 ⇒ 上一次编译泄漏到下一次)、**W-164 / W-165**(同一轮查出的两处文案 bug)
+
+<a id="w-167"></a>
+## W-167: alloc 池的栈预留**写死 8192 字节** ⇒ 每个函数的帧 ≥8352 ⇒ **每次调用都走 `___chkstk_ms` 探页**
+
+**状态:** RESOLVED closed 2026-10-29 (v4.2.1) — 预留改成按函数实际需要算;新增两条常驻门
+**Filed-by:** 2026-10-29 (v4.2.0 性能基线审计 —— 做「帧尺寸消融」实验时撞上)
+**日期:** 2026-10-29
+
+**触发面:** `compiler/src0/codegen_amd64_emit_ctrl.jhyy` 的 `emit_func_header`
+(算每个函数的 `subq $N, %rsp`)⇒ **每一个被编译的函数**。
+
+**症状:**
+```asm
+fib:
+    pushq %rbp
+    movq %rsp, %rbp
+    movq $8384, %rax
+    call ___chkstk_ms      ← 每次调用都探页
+    subq $8384, %rsp       ← 一个只用了 72 字节的函数,白拿 8KB 栈
+```
+实测自举产物(`compiler/src0/main.s`,v4.1.2):**1045 个函数,100% 帧 ≥8352,
+100% 每次调用都走 `___chkstk_ms`**。
+
+**根因:**
+`alloc_pool_size = 8192 + per_fn_alloc`。那个 8192 的来历(`cg_alloc_slot` 的注释自陈):
+「alloc pool 起始 offset = -8192(公式 `-(32+t*8)` 在 t=255 = -2072),留 8192-2072 =
+6120 字节 gap 给 formula pool」—— 那是**公式 temp 池最深到 -32792 的 4096-temp 时代**
+的固定预留。后来 alloc 池的基址改成了每函数算的 `alloc_init_off`,
+**但预留尺寸没跟着改** ⇒ 于是每个函数都白拿 8KB。
+
+**影响(2026-10-29 实测,消融):**
+
+| 变体 | fib 耗时 |
+|---|---|
+| 现状(8384 帧 + chkstk) | 335ms |
+| 128 帧 + chkstk 保留 | 277ms |
+| 128 帧 + 无 chkstk | **197ms** |
+| (参照)gcc -O0 | 98ms |
+
+⇒ **~41% 的运行时**在这一个常量上;自举编译本身也快 16%(6676ms → 5605ms)。
+
+**修法(2026-10-29 真修):**
+```
+alloc_pool_size = 8192 + per_fn_alloc
+⇒ alloc_pool_size = 32 + (local_max+1)*8 + per_fn_alloc
+```
+`local_max` 是**该函数精确已知**的 local temp 上限(`per_fn_max[cur] - per_fn_max[cur-1]`,
+`emit_ctrl` 里算),不是全局上限 ⇒ 帧终于「按函数实际需要」算。
+两个常数的来历:公式池基址 `alloc_init_off = -(32 + (local_max+1)*8)`
+(与 `cg_alloc_slot` 的池基址**同一个公式**,保证值池正好接在公式池底下),
+`+8` 是槽宽。
+
+⚠️ **顺带修掉一个潜在的下溢**:旧公式在 `(local_max+1)*8` 主导时用 `max()`,
+**把 `per_fn_alloc` 那一项丢掉了** ⇒ 值池向下生长**不受帧保护**。
+实测旧产物里最紧的函数(`parser__parse_expr`)只剩 **2664 字节**余量。
+新公式把两项**相加** ⇒ 大函数现在余量更足(`parser__parse_expr` 2664 → 14584)。
+
+**验收(2026-10-29 实测):**
+
+| | 修前 | 修后 |
+|---|---|---|
+| 帧 min / 中位 | 8352 / 8368 | **208 / 288** |
+| 帧 max | 237680 | 349232(大函数现在**余量更足**,不是更紧) |
+| 总预留栈 | 9.1 MB | **1.5 MB** |
+| 帧 >4096 的函数 | 1045(100%) | **46(4.4%)** |
+| `___chkstk_ms` 调用 | 1045 | **46** |
+| fib jhyy/gcc-O0 | 3.46x | **2.14x** |
+| ack jhyy/gcc-O0 | 4.65x | **2.13x** |
+
+**门:**
+- `artifact_checks.sh frame_bloat` —— 小函数帧 ≤1024B 且 `___chkstk_ms` 次数 == 0
+  (**修之前必然红** —— 已验:报「小函数的帧 8384B > 1024B」)
+- `artifact_checks.sh frame_slots` —— 每个 rbp 相对槽位必须落在该函数的预留帧内
+  (**帧算小的安全网**;修之前就该是绿的 —— 已验)
+- `scripts/dev/bench/runtime_perf.py --ci` 的静态指标基线
+  (insn 74→70 / frame_med 8384→320 / chkstk 2→0)
+- 全量回归 **257 PASS / 0 XFAIL / 0 failed / 20 SKIP**(277 total)
+- `artifact_checks.sh` **16 PASS / 0 KNOWN-FAIL / 0 FAIL / 0 SKIP**
+- `closure_check.sh` PASS(v2.s == v3.s,sha `8f706fe76d5fc0b7`)
+- `fixed_point.sh` **17 PASS / 0 FAIL / 0 INFO**(N=10)
+
+**引用:**
+- 代码:`compiler/src0/codegen_amd64_emit_ctrl.jhyy`(alloc_pool_size 公式)
+- 测量:`scripts/dev/bench/runtime_perf.py`;数据:`docs/perf/self-backend-baseline-2026-10-29.md`
+- 相关:**W-147**(自举闭环门验错的那一代 —— 本条的过渡期就是靠它的「迭代到不动点」
+  自动消化的:第 1 代与第 2 代产物不同 ⇒ 推进锚点一代 ⇒ 第 2 代收敛 ✓)
