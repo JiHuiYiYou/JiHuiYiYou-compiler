@@ -1,7 +1,15 @@
 # CLAUDE.md — JHYY (机会翼游) 编译器项目
 
 自研静态类型编程语言 + 自举编译器。
-当前: **🟢 v4.1.0 发布**（2026-10-29，**installer 自带最小原生 ucrt64 工具链 ⇒
+当前: **🟢 v4.1.2 发布**（2026-10-29，**`jhyy --version` 从来就不存在**（跑它 =
+`unknown command` + exit 1）⇒ 全仓表述订正；**`jhyy --help` 里 compile/build 的
+说明写反了**（要 exe 用 `jhyy compile`）；**版本号自动化** —— `VERSION` 文件做
+唯一真相源 + `scripts/dev/bump_version.py`（set/check/finalize）+ 两道门
+（CI 零漂移门 + release 的 `VERSION == tag` 断言）；顺带真修 `build.ps1 bundle`
+静默复用陈旧 MSI ⇒ bundle 里嵌旧编译器）——
+<https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v4.1.2>
+（installer .exe 54.9 MB + compiler .msi 27.5 MB + vscode .vsix + SHA256.txt）。
+**🟢 v4.1.0 发布**（2026-10-29，**installer 自带最小原生 ucrt64 工具链 ⇒
 装机用户不再需要 MSYS2**）——
 <https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/tag/v4.1.0>
 （installer .exe 54.9 MB + compiler .msi 27.5 MB + vscode .vsix + SHA256.txt）。

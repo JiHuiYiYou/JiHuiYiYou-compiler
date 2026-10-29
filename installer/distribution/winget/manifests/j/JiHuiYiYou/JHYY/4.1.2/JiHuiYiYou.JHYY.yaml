@@ -5,7 +5,7 @@
 # Version: 4.1.2
 #
 # InstallerSha256 来自该次发布 GitHub Release 的 SHA256.txt 资产
-# (jhyy-installer-4.1.2.exe => 0000000000000000000000000000000000000000000000000000000000000000)。
+# (jhyy-installer-4.1.2.exe => 471dc6db3050d29d07f50d5f4da6bd547a3c367223e9b45871801da6b6e453a2)。
 #
 # 为什么走 Burn bundle: WiX 4 Burn bundles 是 winget 的一等 installer
 # (`InstallerType: burn`);winget CLI 直接跑它们(BurnArgs)。
@@ -22,7 +22,7 @@ InstallerType: burn
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.2/jhyy-installer-4.1.2.exe
-    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    InstallerSha256: 471dc6db3050d29d07f50d5f4da6bd547a3c367223e9b45871801da6b6e453a2
     InstallerSwitches:
       Silent: /quiet
       SilentWithProgress: /passive
