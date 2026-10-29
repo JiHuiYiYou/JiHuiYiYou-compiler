@@ -431,6 +431,55 @@ jobs:
           # ⚠️ 不要为了让 CI 变绿去放宽 KNOWN_FAIL 里的签名。那正是本项目栽过的坑。
           bash compiler/tests/bootstrap/artifact_checks.sh
 
+      # ── 运行时性能门(v4.2.0)────────────────────────────────────────────
+      #
+      # 这道门守的是「**生成代码的质量**」—— 编译器跑得对不等于跑得快。
+      # 自研后端自 v3.1.0 起是唯一生产路径 ⇒ 它的 codegen 质量直接决定
+      # 用户程序的运行时,也决定编译器自己的自举速度(12.5s)。
+      #
+      # ⚠️ **墙钟不在这道门里**:GitHub 的共享 runner 宿主负载不可控
+      # (同一个 gcc -O2 的 fib 在不同 step 里能差 3 倍)⇒ 拿它当硬门只会
+      # 制造假红,而「恒红且被忽略的步骤比没有门更糟」(本项目栽过)。
+      # ⇒ **墙钟只报告**,进 job summary 给人看趋势。
+      #
+      # ✅ **硬门是静态指标**:指令数 / 访存数 / 帧大小 / chkstk 次数
+      # —— 它们是「源码 × 编译器」的**确定性函数** ⇒ 同一份源码 + 同一个
+      # 编译器 ⇒ 逐字节相同 ⇒ 跨机器跨 runner 都不漂 ⇒ 可以当硬门。
+      #
+      # 基线在 scripts/dev/bench/runtime_perf.baseline.json。
+      # ⚠️ 更新基线必须写明理由 —— 它锁的是「已经拿到的收益」,不是「现状」。
+      - name: 运行时性能门(静态指标硬门 + 墙钟报告)
+        if: always()
+        shell: msys2 {0}
+        run: |
+          set +e
+          # python 在 PATH 上可能是 runner 镜像自带的旧 mingw64 那份,也可能是
+          # setup-msys2 装的 ucrt64 那份 —— 两者都是 CPython 且本脚本只用标准库,
+          # 所以用哪个都行;但**不能假设名字** ⇒ 逐个试。
+          PY=""
+          for c in python python3; do
+            if command -v "$c" >/dev/null 2>&1; then PY="$c"; break; fi
+          done
+          if [ -z "$PY" ]; then
+            echo "ERROR: python not found on PATH" >&2
+            exit 2
+          fi
+          echo "using python: $PY ($($PY --version 2>&1))"
+          OUT=$("$PY" scripts/dev/bench/runtime_perf.py --ci 2>&1)
+          RC=$?
+          echo "$OUT"
+          {
+            echo "### 运行时性能(v4.2.0)"
+            echo ""
+            echo '```'
+            echo "$OUT"
+            echo '```'
+            echo ""
+            echo "**墙钟只报告不拦** —— 共享 runner 的宿主负载不可控。"
+            echo "**硬门是静态指标**(指令数/访存数/帧大小/chkstk)—— 确定性 ⇒ 跨机器不漂。"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $RC
+
       # ── 内置工具链门(v4.1.0)──────────────────────────────────────────
       # installer 从 v4.1.0 起自带一份最小原生 ucrt64 工具链
       # (gcc + binutils + CRT + 头文件闭包),装机用户**不需要 MSYS2**。

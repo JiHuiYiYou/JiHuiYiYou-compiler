@@ -133,11 +133,17 @@ prologue frames=1045   chkstk calls=1045
 # 报告模式(永远 exit 0)
 python scripts/dev/bench/runtime_perf.py
 
-# 门模式(超阈值 exit 1)
+# dev 门模式(墙钟 + 静态指标,超阈值 exit 1)
 python scripts/dev/bench/runtime_perf.py --strict
+
+# CI 门模式(**只**静态指标硬门;墙钟只报告)
+python scripts/dev/bench/runtime_perf.py --ci
 
 # 只跑 fib(冒烟)
 python scripts/dev/bench/runtime_perf.py --quick
+
+# 重写静态指标基线
+python scripts/dev/bench/runtime_perf.py --update-baseline
 ```
 
 **环境**:MSYS2 python 无 pip;`scripts/dev/bench/runtime_perf.py` 只用标准库,
@@ -147,8 +153,45 @@ python scripts/dev/bench/runtime_perf.py --quick
 
 ---
 
+## 六、CI 门(v4.2.0 已接)
+
+**硬门 = 静态指标**,不是墙钟。
+
+| 指标 | 为什么能当硬门 |
+|---|---|
+| 指令数 / 访存数 | 「源码 × 编译器」的**确定性函数** ⇒ 跨机器跨 runner 逐字节相同 |
+| 帧大小(min/med/max) | 同上;且**变大就是变差**(帧越大 ⇒ 摸的栈越多 ⇒ 越慢) |
+| `___chkstk_ms` 次数 | 同上;**归零后不允许再出现** |
+
+**墙钟为什么不能当硬门**:同一个 gcc -O2 的 fib 在本地连续几轮量出
+2.27x / 3.46x / 4.42x / 4.65x —— 噪声比信号大一个数量级
+(宿主负载 + MSYS2 里 spawn Windows exe 的开销)。
+⇒ `--ci` 模式墙钟**只报告**,进 job summary 给人看趋势。
+
+**基线文件**:`scripts/dev/bench/runtime_perf.baseline.json`
+(容差 2% = `TOL`;基线为 0 的指标上限也是 0 ⇒ chkstk 归零后任何 >0 都红)。
+
+⚠️ **更新基线必须写明理由** —— 它锁的是「**已经拿到的收益**」,不是「现状」。
+v4.2.1 修完帧尺寸后基线会**大幅下降**(帧 8384 → 几百字节、chkstk 2 → 0),
+那时更新基线 = 把收益锁进去。
+
+**红光测试已做**(per `feedback_ci_gate_must_exercise_path`):
+把基线的 `fib.insn` 从 74 改成 70 ⇒ `--ci` 当场 exit 1 并报
+`fib.insn: 74 > 基线 70 的 102% 上限 71.4` ⇒ 还原 ⇒ exit 0。
+
+**CI 接线**:`.github/workflows/ci.yml` 的 `build-and-test` job,
+「运行时性能门(静态指标硬门 + 墙钟报告)」步,排在 `artifact_checks.sh` 之后。
+
+**`compiler/tests/bootstrap/bench.sh` 现在的角色**:**入口别名** ——
+不再自己实现计时(它的计时器是坏的,见 § 一),全部委托给 `runtime_perf.py`。
+旧的 `bash bench.sh --report|--strict` 调用方式与退出码不变。
+
+---
+
 ## Cross-ref
 
 - 计划:[`../plans/v4/self-backend-perf-plan.md`](../plans/v4/self-backend-perf-plan.md)
 - 旧报告(部分结论已过时):[`../plans/v4/JHYY自研后端pass查缺报告.md`](../plans/v4/JHYY自研后端pass查缺报告.md)
-- 旧的、计时器有问题的 bench:[`compiler/tests/bootstrap/bench.sh`](../../compiler/tests/bootstrap/bench.sh)
+- 计时器已修的 bench(现在是入口别名):[`compiler/tests/bootstrap/bench.sh`](../../compiler/tests/bootstrap/bench.sh)
+- 测量脚本:`scripts/dev/bench/runtime_perf.py`
+- 静态指标基线:`scripts/dev/bench/runtime_perf.baseline.json`

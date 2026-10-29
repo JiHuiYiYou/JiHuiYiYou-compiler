@@ -89,15 +89,21 @@ v4.6+ ─ 语言特性链(lifetime → closure → dyn Trait → HKT)
 
 | 交付 | 状态 |
 |---|---|
-| `scripts/dev/bench/runtime_perf.py` | ✅ **本轮已落地并验证**(输出逐字比对 gcc 产物;min-of-7;附静态指标:指令数/访存数/帧尺寸/chkstk 次数) |
-| `compiler/tests/bootstrap/bench.sh` 的计时器 | ⬜ 修或**标记废弃**并指向 `runtime_perf.py`(它现在测的是垃圾) |
-| CI 接线 | ⬜ 先以 `--report` 跑一轮记录基线,再升 `--strict` |
-| 静态指标进门 | ⬜ 指令数 / 访存数比墙钟稳定,适合做硬门;墙钟留作报告项 |
+| `scripts/dev/bench/runtime_perf.py` | ✅ **已落地并验证**(输出逐字比对 gcc 产物;min-of-7;附静态指标:指令数/访存数/帧尺寸/chkstk 次数) |
+| `compiler/tests/bootstrap/bench.sh` 的计时器 | ✅ **已改成入口别名** —— 不再自己实现计时(它的计时器是坏的:MSYS2 的 `date +%s.%N` 把 `sleep 1.0` 量成 1.45~1.76 秒),全部委托 `runtime_perf.py`;旧的 `--report`/`--strict` 调用方式与退出码不变 |
+| CI 接线 | ✅ **已接**(`ci.yml` 的 `build-and-test` job,排在 `artifact_checks.sh` 之后) |
+| 静态指标进门 | ✅ **已是硬门** —— 基线 `scripts/dev/bench/runtime_perf.baseline.json`,容差 2%;墙钟**只报告**(共享 runner 噪声大:同一个 fib 连续几轮量出 2.27x/3.46x/4.42x/4.65x) |
 
-**gate**: 门**造过红灯**才算门(per `feedback_ci_gate_must_exercise_path`);
-`--strict` 在故意改慢的探针上必须红。
+**gate**: 门**造过红灯**才算门(per `feedback_ci_gate_must_exercise_path`)
+—— ✅ 已做:基线的 `fib.insn` 74 → 70 ⇒ `--ci` 当场 exit 1 并报
+`fib.insn: 74 > 基线 70 的 102% 上限 71.4`;还原 ⇒ exit 0。
 
 **不改编译器** ⇒ 零回归风险。
+
+**⚠️ 为什么墙钟不进硬门**:GitHub 共享 runner 的宿主负载不可控,墙钟噪声比信号大
+一个数量级 ⇒ 拿它当硬门只会制造假红,而「恒红且被忽略的步骤比没有门更糟」
+(本项目栽过这个坑,见 `artifact_checks.sh` 步的注释)。
+**静态指标是「源码 × 编译器」的确定性函数** ⇒ 跨机器不漂 ⇒ 才是能当硬门的东西。
 
 ### v4.2.1 —— 帧尺寸公式修复 ⭐
 

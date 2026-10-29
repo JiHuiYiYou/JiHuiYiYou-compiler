@@ -1,0 +1,40 @@
+{
+  "_note": "静态指标基线 —— 由 runtime_perf.py --update-baseline 生成。更新基线必须写明理由(见 docs/perf/self-backend-baseline-*.md)。",
+  "_metrics": [
+    "insn",
+    "mem",
+    "frames",
+    "frame_min",
+    "frame_med",
+    "frame_max",
+    "chkstk"
+  ],
+  "_rule": "任一指标超过基线的 (1+TOL) 倍即判回归;chkstk 归零后不得再出现。",
+  "fib": {
+    "insn": 74,
+    "mem": 36,
+    "frames": 2,
+    "frame_min": 8368,
+    "frame_med": 8384,
+    "frame_max": 8384,
+    "chkstk": 2
+  },
+  "ack": {
+    "insn": 99,
+    "mem": 52,
+    "frames": 2,
+    "frame_min": 8352,
+    "frame_med": 8400,
+    "frame_max": 8400,
+    "chkstk": 2
+  },
+  "nq": {
+    "insn": 322,
+    "mem": 223,
+    "frames": 3,
+    "frame_min": 8496,
+    "frame_med": 8528,
+    "frame_max": 8656,
+    "chkstk": 3
+  }
+}

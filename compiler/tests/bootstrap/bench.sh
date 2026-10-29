@@ -1,269 +1,69 @@
 #!/usr/bin/env bash
-# bench.sh — v4.0.0 perf gate (per v2.0.0-os-prep.md § 5.2 item #8)
+# bench.sh — 运行时性能测量的**入口别名**
 #
-# Measure self-backend generated code runtime perf vs gcc -O2 same-source baseline.
-# PASS gate (--strict): jhyy_time / gcc_time ≤ 1.1 for all 3 programs.
-# Default (--report): logs + accept first-time baseline, exit 0.
+# ⚠️ 2026-10-29:本脚本**不再自己实现计时**。
 #
-# Programs: fib(35) → fib(35) % 1000000 / ackermann(3,8) → exit code /
-# nqueens(11) → solution count. Each: C source (heredoc) + jhyy source
-# (heredoc) → 5-run min trimmed-mean → ratio.
+# 旧实现(2026-08-24 写)的计时器是坏的:
+#   · `t=$(/usr/bin/time -f "%e" "$prog" > /dev/null 2>&1; ...)` —— `2>&1` 把
+#     /usr/bin/time 写往 stderr 的输出一起吞了 ⇒ `t` 恒为空
+#   · 于是每次都回落到 fallback:`date +%s.%N` —— 而 **MSYS2 的这个时钟不可靠**
+#     (实测 `sleep 1.0` 被量成 1.445~1.756 秒,误差 45%~76%)
+#   · 再叠上 MSYS2 bash 里 spawn 一个 Windows exe 的巨大开销
+#     (同一个 gcc -O2 的 fib:旧脚本量 197ms,真实值 55ms)
+#   · 而且它**只计时不验输出** —— 程序输出全错也算「跑成功」
 #
-# Usage: bash bench.sh [--strict|--report]
-# Exit codes:
-#   0 = PASS (default --report accepts; --strict ≤ 1.1)
-#   1 = FAIL (--strict mode, ratio > 1.1)
-#   2 = setup error (gcc missing, etc.)
+# ⇒ 旧脚本记下的基线(fib 1.399x / ack 0.596x / nq 1.020x)**不可信**。
 #
-# v4.0.0: first-time baseline. Perf optimization is v3.x territory per
-# feedback_no_artifacts_in_project convention.
+# 现在:全部委托给 `scripts/dev/bench/runtime_perf.py`
+#   · CPython `time.perf_counter()` → Win32 QueryPerformanceCounter
+#   · **先逐字比对 gcc 产物的 stdout**,不一致直接 FAIL
+#   · 额外统计静态指标(指令数 / 访存数 / 帧大小 / chkstk 次数)—— 确定性 ⇒ 可做 CI 硬门
+#
+# 用法(与旧版兼容):
+#   bash bench.sh            # 报告模式(永远 exit 0)
+#   bash bench.sh --report   # 同上
+#   bash bench.sh --strict   # 门模式(超阈值 exit 1)
+#
+# 退出码: 0 = PASS / 1 = FAIL / 2 = 环境或 setup 错误
+#
+# 新用法(推荐,能力更多):
+#   python scripts/dev/bench/runtime_perf.py [--report|--strict|--ci|--quick]
+#   python scripts/dev/bench/runtime_perf.py --update-baseline
+#
+# 可信基线与消融实验见:
+#   docs/perf/self-backend-baseline-2026-10-29.md
+# 计划见:
+#   docs/plans/v4/self-backend-perf-plan.md
 
 set -u
 
 MODE="${1:---report}"
-JHY="${JHYY:-$(git rev-parse --show-toplevel 2>/dev/null)/compiler/build/bin/jhyy.exe}"
-GCC="${GCC:-gcc}"
-THRESHOLD="${THRESHOLD:-1.1}"
-RUNS="${RUNS:-5}"
-TMPDIR="${TMPDIR:-/tmp/bench_v2160}"
-mkdir -p "$TMPDIR"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+PERF_PY="$REPO_ROOT/scripts/dev/bench/runtime_perf.py"
 
 if [[ "$MODE" != "--report" && "$MODE" != "--strict" ]]; then
-    echo "Usage: bash bench.sh [--strict|--report]" >&2
+    echo "Usage: bash bench.sh [--report|--strict]" >&2
+    echo "  (更完整的能力见: python scripts/dev/bench/runtime_perf.py --help 见脚本头注释)" >&2
     exit 2
 fi
 
-if ! command -v "$GCC" > /dev/null 2>&1; then
-    echo "ERROR: gcc not found in PATH" >&2
-    exit 2
-fi
-if [[ ! -x "$JHY" ]]; then
-    echo "ERROR: jhyy.exe not found at $JHY" >&2
-    exit 2
-fi
-
-# ───────────────────────────────────────────────────────────────────
-# Heredoc sources (C and jhyy equivalent for each program)
-# ───────────────────────────────────────────────────────────────────
-
-cat > "$TMPDIR/fib.c" <<'CEOF'
-#include <stdio.h>
-#include <stdlib.h>
-int fib(int n) { if (n < 2) return n; return fib(n-1) + fib(n-2); }
-int main(void) { printf("%d\n", fib(35) % 1000000); return 0; }
-CEOF
-
-cat > "$TMPDIR/fib.jhyy" <<'JEOF'
-extern fn printf(fmt: *u8, val: i32) -> i32;
-
-fn fib(n: i32) -> i32 {
-    if n < 2 { return n; }
-    return fib(n - 1) + fib(n - 2);
-}
-
-fn main_jhyy() -> i32 {
-    let r = fib(35) % 1000000;
-    printf("fib(35) %% 1000000 = %d\n" as *u8, r);
-    return r;
-}
-JEOF
-
-cat > "$TMPDIR/ack.c" <<'CEOF'
-#include <stdio.h>
-int A(int m, int n) {
-    if (m == 0) return n + 1;
-    if (n == 0) return A(m - 1, 1);
-    return A(m - 1, A(m, n - 1));
-}
-int main(void) { printf("%d\n", A(3, 8)); return 0; }
-CEOF
-
-cat > "$TMPDIR/ack.jhyy" <<'JEOF'
-extern fn printf(fmt: *u8, val: i32) -> i32;
-
-fn A(m: i32, n: i32) -> i32 {
-    if m == 0 { return n + 1; }
-    if n == 0 { return A(m - 1, 1); }
-    return A(m - 1, A(m, n - 1));
-}
-
-fn main_jhyy() -> i32 {
-    let r = A(3, 8);
-    printf("A(3, 8) = %d\n" as *u8, r);
-    return r;
-}
-JEOF
-
-cat > "$TMPDIR/nq.c" <<'CEOF'
-#include <stdio.h>
-static int sols = 0;
-static int cols[8];
-static int N = 7;
-void solve(int row) {
-    if (row == N) { sols++; return; }
-    for (int c = 0; c < N; c++) {
-        int ok = 1;
-        for (int r2 = 0; r2 < row; r2++) {
-            if (cols[r2] == c) { ok = 0; break; }
-            if (cols[r2] - c == r2 - row) { ok = 0; break; }
-            if (c - cols[r2] == r2 - row) { ok = 0; break; }
-        }
-        if (ok) { cols[row] = c; solve(row + 1); }
-    }
-}
-int main(void) { solve(0); printf("%d\n", sols); return 0; }
-CEOF
-
-cat > "$TMPDIR/nq.jhyy" <<'JEOF'
-extern fn printf(fmt: *u8, val: i32) -> i32;
-
-fn ok(row: i32, c: i32, cols: *i32) -> i32 {
-    let mut r2: i32 = 0;
-    while r2 < row {
-        let prev = cols[r2];
-        if prev == c { return 0; }
-        if prev - c == r2 - row { return 0; }
-        if c - prev == r2 - row { return 0; }
-        r2 = r2 + 1;
-    }
-    return 1;
-}
-
-fn solve(cols: *i32, N: i32, row: i32, sols: *i32) {
-    if row == N {
-        *sols = *sols + 1;
-        return;
-    }
-    let mut c: i32 = 0;
-    while c < N {
-        if ok(row, c, cols) == 1 {
-            cols[row] = c;
-            solve(cols, N, row + 1, sols);
-        }
-        c = c + 1;
-    }
-}
-
-fn main_jhyy() -> i32 {
-    let cols: [i32; 7] = [0, 0, 0, 0, 0, 0, 0];
-    let mut sols: i32 = 0;
-    solve(&cols as *i32, 7, 0, &sols as *i32);
-    printf("nqueens(7) = %d (expect 40)\n" as *u8, sols);
-    return sols;
-}
-JEOF
-
-# ───────────────────────────────────────────────────────────────────
-# Helpers
-# ───────────────────────────────────────────────────────────────────
-
-run_n() {
-    # $1 = program path, $2 = number of runs
-    # Returns min trimmed-mean (drop highest + lowest of remaining 3)
-    local prog="$1"
-    local n="$2"
-    local times=()
-    for ((i = 1; i <= n; i++)); do
-        # warmup if first run
-        if [[ $i -eq 1 ]]; then "$prog" > /dev/null 2>&1; fi
-        local t
-        # /usr/bin/time -f "%e" prints elapsed wall-clock seconds (decimal)
-        t=$(/usr/bin/time -f "%e" "$prog" > /dev/null 2>&1; cat /tmp/_bench_last_time 2>/dev/null) || true
-        # Fallback: use $SECONDS-based timing if /usr/bin/time is unavailable
-        if [[ -z "$t" ]]; then
-            local start end
-            start=$(date +%s.%N)
-            "$prog" > /dev/null 2>&1
-            end=$(date +%s.%N)
-            t=$(awk -v s="$start" -v e="$end" 'BEGIN { printf "%.2f", e - s }')
-        fi
-        times+=("$t")
+# ── 找 python ──
+# 优先 python3 / python;都没有再试本机的 miniconda3(MSYS2 的 python 没 pip,
+# 但本脚本只用标准库,MSYS2 的 python 也够用)。
+PY=""
+for c in python3 python; do
+    if command -v "$c" >/dev/null 2>&1; then PY="$c"; break; fi
+done
+if [ -z "$PY" ]; then
+    for c in "/c/Users/liuzhen/miniconda3/python.exe" \
+             "/c/Users/liuzhen/AppData/Local/Programs/Python/Python313/python.exe"; do
+        if [ -x "$c" ]; then PY="$c"; break; fi
     done
-    # trimmed-mean: drop highest + lowest of 5, mean of remaining 3
-    printf '%s\n' "${times[@]}" | sort -g | sed -n '2,4p' | awk '{ s += $1 } END { if (NR > 0) printf "%.3f", s / NR; else print "0.000" }'
-}
+fi
+if [ -z "$PY" ]; then
+    echo "ERROR: python not found (need python3 or python on PATH)" >&2
+    exit 2
+fi
 
-compile_and_time() {
-    # $1 = name (fib|ack|nq), $2 = lang (c|jhyy)
-    local name="$1"
-    local lang="$2"
-    local src="$TMPDIR/${name}.${lang}"
-    # Use bare name (no .exe suffix). jhyy.exe appends .exe automatically on
-    # MSYS2/Windows when -o doesn't already end in .exe. gcc accepts bare
-    # path; we'll pass the same path to gcc and let jhyy append.
-    local out_base="$TMPDIR/${name}_${lang}"
-    if [[ "$lang" == "c" ]]; then
-        $GCC -O2 -o "${out_base}.exe" "$src" 2>/dev/null
-    else
-        "$JHY" compile "$src" -o "${out_base}" > /dev/null 2>&1
-    fi
-    if [[ ! -x "${out_base}.exe" ]]; then
-        echo "ERROR: compile $name.$lang failed (output: ${out_base}.exe)" >&2
-        return 1
-    fi
-    run_n "${out_base}.exe" "$RUNS"
-}
-
-# ───────────────────────────────────────────────────────────────────
-# Main
-# ───────────────────────────────────────────────────────────────────
-
-echo "bench.sh — v4.0.0 perf gate (mode=$MODE)"
-echo "  jhyy: $JHY"
-echo "  gcc:  $GCC"
-echo "  threshold: ${THRESHOLD}x"
-echo "  runs per program: $RUNS (trimmed-mean of 3)"
-echo ""
-
-declare -a PROGRAMS=("fib" "ack" "nq")
-declare -a GCC_TIMES=()
-declare -a JHY_TIMES=()
-declare -a RATIOS=()
-declare -a STATUS=()
-
-FAIL=0
-
-for prog in "${PROGRAMS[@]}"; do
-    echo -n "  $prog: gcc -O2 ... "
-    gcc_t=$(compile_and_time "$prog" "c") || { FAIL=1; echo "COMPILE FAIL"; continue; }
-    echo -n "jhyy ... "
-    jhy_t=$(compile_and_time "$prog" "jhyy") || { FAIL=1; echo "COMPILE FAIL"; continue; }
-    ratio=$(awk -v j="$jhy_t" -v g="$gcc_t" 'BEGIN { if (g+0 > 0) printf "%.3f", j / g; else print "nan" }')
-    pass=$(awk -v r="$ratio" -v t="$THRESHOLD" 'BEGIN { print (r+0 <= t+0) ? "PASS" : "FAIL" }')
-    echo "${gcc_t}s / ${jhy_t}s = ${ratio}x [$pass]"
-    GCC_TIMES+=("$gcc_t")
-    JHY_TIMES+=("$jhy_t")
-    RATIOS+=("$ratio")
-    STATUS+=("$pass")
-    if [[ "$pass" == "FAIL" ]]; then FAIL=1; fi
-done
-
-echo ""
-echo "Summary:"
-printf "  %-8s %10s %10s %8s %s\n" "program" "gcc" "jhyy" "ratio" "status"
-for i in "${!PROGRAMS[@]}"; do
-    printf "  %-8s %10ss %10ss %7sx %s\n" "${PROGRAMS[$i]}" "${GCC_TIMES[$i]}" "${JHY_TIMES[$i]}" "${RATIOS[$i]}" "${STATUS[$i]}"
-done
-
-echo ""
-case "$MODE" in
-    --strict)
-        if [[ $FAIL -eq 0 ]]; then
-            echo "RESULT: PASS (all ratios ≤ ${THRESHOLD}x)"
-            exit 0
-        else
-            echo "RESULT: FAIL (one or more ratios > ${THRESHOLD}x)"
-            exit 1
-        fi
-        ;;
-    --report)
-        echo "RESULT: REPORT (--report mode accepts first-time baseline)"
-        if [[ $FAIL -eq 0 ]]; then
-            echo "  All ratios ≤ ${THRESHOLD}x — within target."
-        else
-            echo "  WARNING: one or more ratios > ${THRESHOLD}x."
-            echo "  This is the first-time baseline; --strict gate deferred to next sprint."
-        fi
-        exit 0
-        ;;
-esac
+exec "$PY" "$PERF_PY" "$MODE"
