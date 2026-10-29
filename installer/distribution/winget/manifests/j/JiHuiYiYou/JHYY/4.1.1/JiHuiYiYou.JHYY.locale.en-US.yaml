@@ -1,11 +1,11 @@
-# winget locale manifest (en-US) - JHYY 4.1.0
+# winget locale manifest (en-US) - JHYY 4.1.1
 #
 # v4.1.0 起:**不再需要 MSYS2** —— installer 自带一份最小原生 MSYS2 ucrt64
 # 工具链(gcc + binutils + CRT + 编译器自用的头文件闭包),装在
 # <INSTALLDIR>\toolchain\。装完即可 `jhyy build hello.jhyy`。
 # 之前需要自己装 MSYS2 + ucrt64 GCC(而且 MSI 有硬门槛,没装根本装不上)。
 
-PackageVersion: 4.1.0
+PackageVersion: 4.1.1
 PackageLocale: en-US
 Publisher: JiHuiYiYou
 PackageName: JHYY Compiler
@@ -34,6 +34,11 @@ Tags:
   - bootstrapping
   - statically-typed
 ReleaseNotes: |-
+  v4.1.1: the VSCode terminal profile now points at a bash this installer
+  DETECTS (MSYS2 -> Git for Windows -> PATH) instead of VSCode's built-in
+  "bash (MSYS2)" profile, whose path is hardcoded and never falls back - users
+  whose MSYS2 lives elsewhere used to get "the terminal profile is not
+  available". New jhyy-bash.cmd launcher starts that bash with jhyy on PATH.
   v4.1.0: the installer now ships a minimal native MSYS2 UCRT64 toolchain, so
   MSYS2 is no longer required - installing this package is enough to compile
   and run .jhyy programs. BREAKING CHANGE: the default gcc is now the bundled
