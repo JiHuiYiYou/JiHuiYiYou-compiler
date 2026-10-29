@@ -2,14 +2,15 @@
 
 > ## ⚠️ 优先级:低
 >
-> **本文档不是当前工作项。** 当前唯一进行中的计划是
-> [`active-workaround-clearance.md`](active-workaround-clearance.md)
-> (6 处活 workaround 真修,per 2026-10-10 user 决定「必须在 v4 正式版清零,
-> 大不了 v4 不发」)。
+> **2026-10-29 更新**:当前主线是
+> [`self-backend-perf-plan.md`](self-backend-perf-plan.md)(自研后端性能线,
+> v4.2 起)。本文档的 12 项里,**只有第 8 项(基本优化 pass)被吸收进
+> v4.3**,其余 11 项排到 **v4.6+**。
 >
-> 下面这 12 项**全部未启动**。
-> ⚠️ **2026-10-15 更正**:per 2026-10-10 user 政策,v4.0.0 final 的前置是
-> **14 条 ACTIVE 全部清零**,所以本文档的任何一项在 v4.0.0 final **之前都动不了**。
+> **M5 的状态变了**(见下表):Part 1 与 Part 2 **已经完成**,
+> 原依赖图「M5 是很多项的前置」不再成立。
+>
+> 本文档的 12 项**全部未启动**。
 > 版本归属见 [`version-schedule.md`](version-schedule.md)。
 > 它们的原版本号(`v4.1.0` … `v4.12.0`)已作废 —— 见文末「关于版本号」。
 
@@ -29,32 +30,36 @@
 
 | # | 项 | Scope | 改动量估算 | 强前置 | D43 目标 | 能否并行 |
 |---|-----|-------|-----------|--------|-----------|---------|
-| 1 | **M5 工具链闭环** | 删 `src/*.c` + untrack QBE + 删 `runtime.c` | ~5000+ 行删除 | v4.0 | — | 串行起点 |
+| 1 | **M5 工具链闭环** | ~~删 `src/*.c`~~ ✅ **v4.0.21 已做** + ~~untrack QBE~~ ✅ **v3.1.0 已做** + 删 `runtime.c` | ~5000+ 行删除 | v4.0 | — | **Part 3 = v4.5** |
 | 2 | **async/await + Future runtime** | 语法 + state machine codegen + executor | ~1130 行 | 1, 3i, 3j | N17 | 独立 |
 | 3 | **lifetime + Polonius borrow check** | lifetime 语法 + 子类型 + Polonius | ~1050 行 | 1, 3g stub | N18 | 串行链起点 |
 | 4 | **closure 增强** | move / borrow capture / generic / trait object | ~700 行 | 3, 3i, 3j | N19 | 串行 |
 | 5 | **const generic** | `const N` 泛型 + 单态化求值 | ~320 行 | 3i | N20 | 独立 |
 | 6 | **trait objects (dyn Trait)** | trait/impl + vtable + 动态分发 | ~730 行 | 4, 3i | N21 | 串行 |
 | 7 | **错误恢复** | parser/sema 多错误 + diag 聚合 + caret | ~580 行 | v4.0 | N22 | 独立 |
-| 8 | **基本优化 pass** | 常量折叠 / 代数化简 / DCE | ~500 行 | 1 | N23 | 独立 |
+| 8 | **基本优化 pass** | 常量折叠 / 代数化简 / DCE | ~500 行 | 1 | N23 | **→ 吸收进 v4.3(按新设计重做)** |
 | 9 | **包管理器** | `jhyy new/build/test` + manifest + 依赖 | ~780 行 | 3l.1, 3l.2 | N24 | 独立 |
 | 10 | **HKT + specialization** | 一阶 `F<*>` + 单层 impl 覆盖 | ~530 行 | 5, 6 | N25 | 串行 |
 | 11 | **并发 cap + 完整 memory model** | C11/Rust memory model + 多架构 Cap ABI | ~1950 行 | 3g, 3c, 3f | N26 | 独立 |
 | 12 | **`.jhyynb` binary format** | DWARF emitter + section builder + `jhyy-inspect` | ~1800 行 | 1 | N27 | 独立 |
 
-**依赖图:**
+**依赖图(2026-10-29 更新 —— M5 只剩 Part 3,它 = v4.5):**
 
 ```
-M5 ──┬─→ async ────────────────────────────────┐
-     ├─→ lifetime/Polonius ─→ closure ─→ dyn Trait ─→ HKT ─┐
-     ├─→ 优化 pass ──────────────────────────────┤         │
-     ├─→ .jhyynb ───────────────────────────────┤         │
-     └──────────────────────────────────────────┴─────────┘
+              ┌──→ async ────────────────────────────┐
+M5 Part 3 ───┼──→ lifetime/Polonius ─→ closure ─→ dyn Trait ─→ HKT ─┐
+(= v4.5)      ├──→ .jhyynb ──────────────────────────┤                │
+              └──→ 并发 cap ─────────────────────────┴────────────────┘
+优化 pass ──→ **v4.3**(已从本表移出,见 self-backend-perf-plan.md)
 const generic ──────────────────────────────→ HKT
-错误恢复   (独立,无 v4.x 内前置)
-包管理器   (独立,无 v4.x 内前置)
-并发 cap   (独立,无 v4.x 内前置,M11 launch 之后)
+错误恢复   (独立)
+包管理器   (独立)
 ```
+
+⚠️ **M5 的 Part 1 / Part 2 已经做完了**,原图「M5 是很多项的前置」不再准确:
+- Part 1 删 `compiler/src/*.c` —— ✅ **v4.0.21**(C 端 binary 随 `compiler/src/` 一起删)
+- Part 2 untrack QBE —— ✅ **v3.1.0**(`6ae2d7c` git rm)
+- Part 3 删 `compiler/runtime/runtime.c` + 用户侧 C runtime —— ⬜ **= v4.5**
 
 **强串行链:** `lifetime → closure → dyn Trait → HKT`(每一步都是下一步的输入)
 **可并行:** async / 错误恢复 / 优化 / 包管理 / 并发 cap / .jhyynb
@@ -66,12 +71,12 @@ const generic ──────────────────────
 **M5 deferral 历史:** 2026-08-14 user 决定 v1.5 installer ship 不触发 M5;
 原计划「v2/v3 后 sprint」于 2026-09-06 升级为 v4.x sprint。
 
-| Part | 内容 | 文件 |
-|------|------|------|
-| 1 | 删 `compiler/src/*.c`(C 端编译器,~5000+ 行) | `git rm -r compiler/src/` |
-| 2 | Untrack QBE 源码 + binary | `compiler/qbe/` + `compiler/build/bin/qbe.exe` |
-| 3 | 删 `compiler/runtime/runtime.c` + C runtime helpers | 替换为 `std/*.jhyy` + `unsafe` + FFI |
-| 4 | 工具链自含闭环验证 | `build-jhyy.sh` / `build.md` / `architecture.md` |
+| Part | 内容 | 文件 | 状态 |
+|------|------|------|------|
+| 1 | 删 `compiler/src/*.c`(C 端编译器,~5000+ 行) | `git rm -r compiler/src/` | ✅ **v4.0.21 已做**(`find compiler/src -name "*.c"` = 0) |
+| 2 | Untrack QBE 源码 + binary | `compiler/qbe/` + `compiler/build/bin/qbe.exe` | ✅ **v3.1.0 已做**(`6ae2d7c` git rm) |
+| 3 | 删 `compiler/runtime/runtime.c` + C runtime helpers | 替换为 `std/*.jhyy` + `unsafe` + FFI | ⬜ **= v4.5**(见 `self-backend-perf-plan.md`) |
+| 4 | 工具链自含闭环验证 | `build-jhyy.sh` / `build.md` / `architecture.md` | ⬜ 并入 v4.5 |
 
 **关键决策:** M5 是「删除」而非「重写」—— 实现代码已迁到 jhyy(std lib)或自写后端,
 M5 只删遗留 C。工具链仍依赖 MinGW `as` + `gcc`,**不**重打包 MSYS2。
@@ -88,6 +93,20 @@ byte-equal fail → revert 删 C action,逐文件删逐步验算
 > ⚠️ Part 3 与 [`active-workaround-clearance.md` W-103](active-workaround-clearance.md)
 > 存在方向张力:W-103 要往 `jhyy_helpers.c` 加 5 个 C bridge,而 M5 Part 3 要删 C runtime。
 > 两者的取舍需要 user 拍板。
+
+### ✅ Part 3 的取舍已定(2026-10-29):**排在性能线之后**
+
+**取舍本身**:真的 0-C 时换掉的是 **bridge 的实现**(改 syscall),
+`std/os.jhyy` 的 `std_os_*` 一行不动 —— 这跟台账 W-103 已记的一致,不是新决策。
+
+**排在 v4.5(性能线之后)而不是之前的理由**:
+M5 Part 3 把**成熟的 C runtime** 换成**新写的 jhyy 代码**
+(malloc/memcpy/printf/exit 走 `std/arena.jhyy` / `std/mem.jhyy` /
+`std/fmt.jhyy` / `std/os.jhyy`)⇒ **在一个已经比 gcc -O0 慢 3.4~4.7x 的后端上,
+再叠一层同样慢的代码**。先修后端 + 先有性能门,Part 3 才可控
+(才能写出「0-C 闭环后不得比 0-C 前慢 > X%」这条真正有意义的门)。
+
+详见 [`self-backend-perf-plan.md`](self-backend-perf-plan.md) § 三 v4.5。
 
 ---
 
@@ -240,6 +259,17 @@ span 与行/列不一致 → lexer 统一记录 byte offset → span mapping
 ---
 
 ## 8. 基本优化 pass(原 `v4.8.0-plan.md`)
+
+> ### ⚠️ 2026-10-29:本项已吸收进 v4.3,按新设计重做
+>
+> 原设计的前提「**pass 仅在 IR 层,v2 自写后端已有 peephole 兜底**」**已过时**:
+> - CLI **根本没有 `-O` 开关**(只有 `-o` / `--target=`)⇒ 开关基础设施要从零建
+> - 「后端已有 peephole 兜底」不成立 —— peephole 在 `.s` > 4096 字节时**整段跳过**
+>   (`codegen_amd64_peephole.jhyy:545`),真实程序永远不跑它
+> - 后端是**栈槽模型**(每个 SSA temp 一个栈槽,load→算→store)⇒ 在 IR 层做 pass
+>   会**直接减少 temp 数 ⇒ 帧变小 ⇒ 与 v4.2.1 的帧修复叠加**
+>
+> 新的范围与 gate 见 [`self-backend-perf-plan.md`](self-backend-perf-plan.md) § 三 v4.3.0。
 
 | 改动 | 文件 | 估算 |
 |------|------|------|

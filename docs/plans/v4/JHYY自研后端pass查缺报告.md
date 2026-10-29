@@ -4,6 +4,33 @@
 审计范围：`compiler/src0/codegen_amd64*.jhyy`、`codegen_amd64_regalloc.jhyy`、`codegen_amd64_peephole.jhyy`、`docs/plans/roadmap/v2.x-qbe-rewrite.md`
 生成日期：2026-10-25
 
+---
+
+> ## 🔴 2026-10-29 二次复核 —— 本报告的**结论**已被部分推翻,别照着做
+>
+> 本报告的技术观察(哪些 pass 缺、regalloc 没接、peephole 只剩 3 条规则)
+> **仍然成立**。但**结论层**有 4 条被 v4.1.2 源码 + 实测推翻:
+>
+> | 本报告的说法 | 二次复核结论 |
+> |---|---|
+> | §5 P1「**wire regalloc** 是最高杠杆的一改,其余所有 pass 加起来都补不上」 | **推翻**。`regalloc.jhyy` 是 prototype 不是「差一根线」:无 CFG、无函数边界、无 call-clobber 处理、无寄存器类、无 spill/reload 插入;`MAX_TEMPS=64` 对真实 60656 个 temp;**寄存器侧 API 零调用点**;`regalloc_init`/`regalloc_run` 的唯一调用点是注释掉的。成本被低估约**一个数量级** |
+> | §4.2「这个项目到目前为止没有做过一次运行时性能测量」 | **不准确**。`compiler/tests/bootstrap/bench.sh` 存在(v4.0.0)—— 但**它的计时器是坏的**(MSYS2 的 `date +%s.%N` 实测把 `sleep 1.0` 量成 1.45~1.76 秒)且不在 CI ⇒ 等于没测。可信基线见 [`../../docs/perf/self-backend-baseline-2026-10-29.md`](../../perf/self-backend-baseline-2026-10-29.md) |
+> | §4.3「IL buffer 4MB cap」 | 对**生产路径不成立** —— 4MB 是已废弃的文件读路径;生产走 in-mem + 8MB arena |
+> | §3「byte-equal 与优化直接冲突,**必须先决策**」 | **假两难,不需要先决策**。没有任何门拿硬编码 sha 比对 —— 全是运行时算 sha 比「同一编译器的两次运行」。真正会红的只有 `artifact_checks.sh` 的 4 条**汇编文本断言** |
+>
+> **本报告漏掉的最大一条**(2026-10-29 新发现):
+> `codegen_amd64_emit_ctrl.jhyy:565` 写死 `alloc_pool_size = 8192 + per_fn_alloc`
+> ⇒ **每个函数的帧 ≥8352 字节** ⇒ **100% 的函数每次调用都走 `___chkstk_ms` 探页**
+> ⇒ **实测 ~41% 的运行时**。这一个常量比整个寄存器分配器便宜两个数量级。
+>
+> **本报告低估了自己的发现**:§4.1 估「当前落在 QBE 的 30–50%」,实测是
+> **gcc -O0 的 3.43x(fib)/ 4.73x(ack)**,而且**参照系该用 gcc -O0 不是 gcc -O2**
+> (这几个程序 gcc -O0 ≈ gcc -O2,差距全在 codegen 质量而非优化 pass)。
+>
+> **现行计划**:[`self-backend-perf-plan.md`](self-backend-perf-plan.md)(v4.2 起的主线)。
+
+---
+
 > ⚠️ **本报告的审计对象是 v2.x 时代的快照**（2026-10-25 按 v4.0.21 源码复核过）。
 > **技术内容基本仍然成立**（pass 缺口清单、regalloc 未接、peephole 规则数、
 > 行数等已逐条复核），但**下面 §〇 的流水线描述与 §4.1 的 benchmark 配方

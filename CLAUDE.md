@@ -72,19 +72,19 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 |------|------|
 | 了解项目现在到哪、有什么限制 | 顶部 § 当前/目标 → [`workarounds.md`](docs/internal/workarounds.md)（当前限制）+ [`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md)（最新 ship） |
 | 想看 v0.x（C 编译器）整体还有什么没完成 | [`v0.x-c-compiler-roadmap.md`](docs/plans/roadmap/v0.x-c-compiler-roadmap.md)（已 frozen） |
-| 知道下一步做什么 | [`version-schedule.md`](docs/plans/v4/version-schedule.md)(**版本轴排期,入口在这**)
-| 起 v4.x 新 sprint | [`active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md)(怎么修 + 未完成清单)→ 未启动的未来工作看 [`backlog.md`](docs/plans/v4/backlog.md) |
+| 知道下一步做什么 | [`version-schedule.md`](docs/plans/v4/version-schedule.md)(**版本轴排期,入口在这**)→ 当前主线 [`self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)
+| 起 v4.x 新 sprint | [`self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)(v4.2 起的主线)→ 其余未启动工作看 [`backlog.md`](docs/plans/v4/backlog.md) |
 | 改编译器 / 排 bug | [`architecture.md`](docs/internal/architecture.md) 看模块边界 → [`build.md`](docs/internal/build.md) 看构建 + 调试坑 |
-| 改语言规范 / ABI | [`jhyy-lang-spec-v1.3.0.md`](docs/abis/jhyy-lang-spec-v1.3.0.md) / [`jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) |
+| 改语言规范 / ABI | [`jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) / [`jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) |
 | 查 v2/v3 历史决策 | [`docs/archive/v2-v3/`](docs/archive/v2-v3/) (v2-v3-parallel-sprint-plan.md + v2.0.0-os-prep.md 已归档,2026-09-29 user FINAL 决定作废) |
 
 ## 权威文档（100% 权威）
 
 | 文档 | 状态 | 用途 |
 |------|------|------|
-| [`jhyy-lang-spec-v1.3.0.md`](docs/abis/jhyy-lang-spec-v1.3.0.md) | 锁定（v1.3.0 = v1.1.0 + v1.3.x 增量）| 语言规范 + 附录 B 已知限制 + 附录 C/D/E v1.x 完整启动条件 + 历史 v1.0-v1.7 增量 |
-| [`jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) | 锁定（v0.4/v0.5/v0.6/v0.7 实现已追更） | 类型布局 + 调用约定 + § 11.1 阻塞自举问题清单。**⚠️ 2026-10-15 修正:本文件此前称「已全部解锁」不成立** —— A3(struct 跨 FFI)从未实现,A5(浮点比较)是确证 bug(W-109),两者都没挡住自举(自举 v1.8.3 已达成),但也不能算「解锁」 |
-| [`jhyy-lang-spec-floatsupplement-v3.3.0.md`](docs/abis/jhyy-lang-spec-floatsupplement-v3.3.0.md) | 锁定（v3.3.0 收编）| 浮点补充规范 — float `as` cast / fmod trunc / signed-zero semantics |
+| [`jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) | 锁定（2026-10-24，**取代 v1.3.0 + 17 份 v3.x supplement**，后二者已归档至 git 历史）| 语言规范 + 附录 B 已知限制。**正文只写当前代码确实已实装的行为**;未实装/受限的收进附录 B,不再混在正文冒充特性 |
+| [`jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) | 锁定（2026-10-24）| 类型布局 + 调用约定。**⚠️ 2026-10-15 修正(v1.0.0 时代遗留):此前称「已全部解锁」不成立** —— A3(struct 跨 FFI)从未实现,A5(浮点比较)是确证 bug(W-109),两者都没挡住自举(自举 v1.8.3 已达成),但也不能算「解锁」 |
+| ~~`jhyy-lang-spec-floatsupplement-v3.3.0.md`~~ | **已作废**（v3.3.0 收编进 v1.3.0,v1.3.0 又被 v4.0.0 取代 ⇒ 浮点补充规范现由 `jhyy-lang-spec-v4.0.0.md` 正文承载）| 浮点补充规范 — float `as` cast / fmod trunc / signed-zero semantics |
 
 **所有 plan 文件以这两个为 100% 权威对齐**。其他 v*.* 计划文件措辞可能滞后或不准，遇到冲突以 lang-spec / abi 为准。
 
@@ -154,11 +154,26 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 | L1 | [`v4.x-post-merge.md`](docs/plans/roadmap/v4.x-post-merge.md) | **v4.0.0-rc1 完成**（2026-09-30 — axis-v2 + axis-v3 合并入 main;Gate 3 selfhost deferred → v4.0.1）|
 | L1.5 | [`v2-v3-parallel-sprint-plan.md`](docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md) | ⚠️ **SUPERSEDED** — 已归档到 [`docs/archive/v2-v3/`](docs/archive/v2-v3/) (per 2026-09-30 v4.0.0 archive step) |
 | L3 | [`docs/plans/v4/active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md) | ✅ **已完成(2026-10-20)** —— ACTIVE 桶清零(14 → 0);文档保留作审计轨迹 |
-| L3 | [`docs/plans/v4/backlog.md`](docs/plans/v4/backlog.md) | 12 项未启动的未来工作(原 v4.1.0 - v4.12.0 合并,2026-10-15) |
+| L3 | [`docs/plans/v4/self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md) | 🔄 **v4.2 起的主线**(2026-10-29 立线)—— 自研后端性能线 |
+| L3 | [`docs/plans/v4/backlog.md`](docs/plans/v4/backlog.md) | 12 项未启动的未来工作(原 v4.1.0 - v4.12.0 合并,2026-10-15);M5 Part 1/2 已完成,Part 3 = v4.5 |
 
-最近完成的 sprint: **v4.0.0-rc1 shipped 2026-09-30** — axis-v2 + axis-v3 merged into main。
+最近完成的 sprint: **v4.1.2 shipped 2026-10-29** — 版本号自动化 + 三处「表述与实现不符」真修。
 
-下一阶段: **v4.0.0 final 的 promote + 发布**(见 [`active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md))→ 然后才谈 promote v4.0.0 final。backlog 那 12 项无优先级,不抢这条线。
+下一阶段: **v4.2 = 自研后端性能线**(2026-10-29 user 拍板)——
+见 [`docs/plans/v4/self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)
+(版本号权威在 [`version-schedule.md`](docs/plans/v4/version-schedule.md))。
+backlog 那 12 项里只有第 8 项(优化 pass)被吸收进 v4.3,其余 11 项排到 v4.6+。
+
+**v4.2 主线为什么是后端性能**(2026-10-29 实测,不是判断):
+`compiler/src/*.c` 已于 v4.0.21 删光 ⇒ **自研后端就是编译器本身**
+(`jhyy.exe` 自己编 `src0/main.jhyy`,自举 12.5s)⇒ 后端性能直接乘在
+项目迭代速度 + 用户写的每个 jhyy 程序上。可信基线(旧 `bench.sh` 的计时器是坏的):
+**jhyy 比 gcc -O0 慢 3.43x(fib)/ 4.73x(ack)/ 1.57x(nq)**;
+其中 **~41% 来自一个写死的常量**(`emit_ctrl.jhyy:565` 的 `8192` ⇒ 每函数帧
+≥8352 字节 ⇒ 100% 的函数每次调用都走 `___chkstk_ms` 探页)⇒ **v4.2.1 修它**。
+数据见 [`docs/perf/self-backend-baseline-2026-10-29.md`](docs/perf/self-backend-baseline-2026-10-29.md),
+测量脚本 `scripts/dev/bench/runtime_perf.py`(CPython `perf_counter`;MSYS2 的
+`date +%s.%N` 不可信,别用它计时)。
 
 **plan 命名约定(2026-10-15 修订)**:已 ship / 进行中的 sprint 保留 `v4.X.Y-plan.md`(审计轨迹,改名会破坏跟 changelog / commit 的对应);未启动的 backlog 与进行中的工作用描述性文件名,**不用版本号** —— 版本号在启动时才分配。
 历史: changelog 见 `docs/logs/v0/changelog-v0.X.Y.md` (C 编译器) + `docs/logs/v1/changelog-v1.X.Y.md` (jhyy 自举) + `docs/logs/v2/changelog-v2.*.0.md` (QBE rewrite + freestanding) + `docs/logs/v3/changelog-v3.*.md` (language expansion + self-backend) + `docs/logs/v4/changelog-v4.0.0.md` (post-merge umbrella);早期 sprint（命名 `sprint-1*.md`）同目录。
@@ -173,9 +188,8 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 
 ### 语言规范 & ABI（`docs/abis/`，locked）
 
-- [`jhyy-lang-spec-v1.3.0.md`](docs/abis/jhyy-lang-spec-v1.3.0.md) — 语言规范（v1.3.0 锁定 = v1.1.0 + v1.3.x 增量 + v3.3.0 float 补充合并）
-- [`jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) — ABI 白皮书（struct pass-by-value / 多文件 / FFI / break-continue / 切片 / 命名空间）
-- [`jhyy-lang-spec-floatsupplement-v3.3.0.md`](docs/abis/jhyy-lang-spec-floatsupplement-v3.3.0.md) — 浮点补充（已合并入 v1.3.0 spec 附录）
+- [`jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) — 语言规范（v4.0.0 锁定，2026-10-24;**取代 v1.3.0 + 17 份 v3.x supplement**;浮点内容已收进正文）
+- [`jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) — ABI 白皮书（struct pass-by-value / 多文件 / FFI / break-continue / 切片 / 命名空间）
 
 ### 历史归档（`docs/archive/`，不再使用）
 

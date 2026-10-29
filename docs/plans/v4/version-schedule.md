@@ -788,19 +788,45 @@ FLAKY 分类机制」是同一条理由。
 
 ## 四、v4.1 及以后
 
-**在 v4.0.0 final 之前一个都动不了**(政策约束)。final 之后按
-[`backlog.md`](backlog.md) 的依赖图推进:
+> ### ⚠️ 2026-10-29 重排:主线换成「自研后端性能线」
+>
+> **依据**:2026-10-29 user 拍板「自研后端性能线为主线」。三个理由:
+>
+> 1. **自研后端就是编译器本身** —— `compiler/src/*.c` 已于 v4.0.21 删光,
+>    `jhyy.exe` 由它自己编 `src0/main.jhyy`。后端性能直接乘在**项目自己的
+>    迭代速度**(自举编译 12.5s)和**用户写的每个 jhyy 程序**上。
+> 2. **有实测数据**:jhyy 生成代码比 gcc -O0 慢 **3.43x(fib)/ 4.73x(ack)**
+>    —— 见 [`../perf/self-backend-baseline-2026-10-29.md`](../../perf/self-backend-baseline-2026-10-29.md)。
+> 3. **有便宜的入口**:帧尺寸一个公式常量就占 **~41%** 的运行时
+>    (每函数帧 ≥8352 字节 ⇒ 100% 的函数每次调用都走 `___chkstk_ms` 探页)。
+>
+> **详细计划**:[`self-backend-perf-plan.md`](self-backend-perf-plan.md)(版本号在那份里是权威)。
 
-```
-M5 ──┬─→ async ────────────────────────────────┐
-     ├─→ 优化 pass ───────────────────────────┤
-     ├─→ .jhyynb ─────────────────────────────┤
-     └────────────────────────────────────────┴──→ (M5 是很多项的前置)
-const generic ──────────────────────────────→ HKT
-错误恢复   (独立)
-包管理器   (独立)
-并发 cap   (独立,M11 launch 之后)
-```
+| 版本 | 内容 | 性质 |
+|---|---|---|
+| **v4.2.0** | 可信性能门(`scripts/dev/bench/runtime_perf.py` 已落地并验证) | 门,不改编译器 |
+| **v4.2.1** | 帧尺寸公式修复(`emit_ctrl.jhyy:565` 的写死 8192) | ⭐ **~41% 运行时**,单点改动 |
+| **v4.2.2** | peephole 4096 限制真修(W-074.6.1) | 不修则 .s 级 pass 无从验证 |
+| **v4.3.0** | `-O0/-O1` 开关 + IR 层优化框架(常量折叠/代数化简/DCE) | backlog 第 8 项重做 |
+| **v4.3.1** | `artifact_checks.sh` 去文本耦合(4 条汇编文本断言) | 为 v4.4 铺路 |
+| **v4.4.0** | regalloc:per-fn 作用域 + 真 CFG + 真活跃区间 | 多 sprint 工程 |
+| **v4.4.1** | regalloc:call-clobber + 寄存器类 + `MAX_TEMPS` 动态化 | |
+| **v4.4.2** | regalloc:spill/reload 插入 + 帧布局重算 | |
+| **v4.4.3** | emit 改造 + phi 改并行移动(含环打破) | |
+| **v4.5** | **M5 Part 3(0-C 闭环)** —— 唯一剩余的 M5 项 | 前置 = v4.2 + v4.4 |
+| **v4.6+** | 语言特性链(`lifetime → closure → dyn Trait → HKT`)+ async / const generic / 错误恢复 / 包管理器 / 并发 cap / `.jhyynb` | 与性能线正交,可并行 |
+
+**M5 Part 3 为什么排在性能线之后**(2026-10-29 论证):
+M5 Part 3 把**成熟的 C runtime** 换成**新写的 jhyy 代码**(malloc/memcpy/printf/exit
+走 `std/arena.jhyy` / `std/mem.jhyy` / `std/fmt.jhyy` / `std/os.jhyy`)
+⇒ **在一个已经慢 3.4~4.7x 的后端上再叠一层同样慢的代码**。
+先修后端 + 先有性能门,M5 Part 3 才可控(才能写出
+「0-C 闭环后不得比 0-C 前慢 > X%」这条真正有意义的门)。
+
+**旧的 backlog 依赖图已过期**:M5 的 Part 1(`compiler/src/*.c`,v4.0.21)与
+Part 2(untrack QBE,v3.1.0)**都已完成**,只剩 Part 3 = v4.5。
+详见 [`backlog.md`](backlog.md)。
+
 
 **强串行链:** `lifetime → closure → dyn Trait → HKT`
 
