@@ -1878,6 +1878,42 @@ W-161(头闭包漏 `.inl`)/ W-162(gcc 中间文件落 cwd)。
 
 ---
 
+## v4.1.1 — VSCode 终端 profile 改为探测真实 bash + `jhyy-bash` 启动器
+
+**2026-10-29。** v4.1.0 的二期。**不是破坏性变更。**
+
+### 为什么
+
+VSCode 自带的 `bash (MSYS2)` 终端 profile 路径是**写死**的
+（`C:\msys64\usr\bin\bash.exe`）**且不会回落到别的 bash** ⇒
+MSYS2 装在别处的用户、或只有 Git for Windows 的用户，会看到
+"the terminal profile is not available"。
+
+### 做了什么
+
+- **VSCode profile 改为探测真实 bash**：探测顺序 `$env:MSYS2_ROOT` →
+  `C:\msys64` → MSYS2 注册表的 `InstallLocation` → Git for Windows → PATH；
+  探测不到就**不改用户的 VSCode 设置**（终端用 PowerShell 完全正常，
+  jhyy.exe 本来就在系统 PATH 上）。写的 profile 名是 `bash (JHYY)`。
+  门：`installer/scripts/verify-vscode-bash-detect.ps1`。
+- **`jhyy-bash.cmd`** 启动器（装到 `<INSTALLDIR>\bin\`）：自己找 bash 并启动，
+  顺带把 `JHYY\bin` 塞进 PATH 并设 `MSYS2_PATH_TYPE=inherit`
+  （MSYS2 的 minimal PATH 模式无视 Windows PATH ⇒ 不设它 bash 里找不到 jhyy）。
+
+### ⚠️ 一条**作废**的计划：打包 POSIX 层（bash + coreutils）做可选 Feature
+
+原计划二期还包含「把 MSYS2 的 POSIX 层做成 WiX 可选 Feature」。**实测后作废**：
+**MSYS2 的运行时（`msys-2.0.dll`）不做「按树搬迁」** ——
+实测（隔离副本 + 进程模块列表 + 藏掉 `usr/bin` + 四个环境变量 + 注册表）：
+拷出来的 bash **仍然用系统的 `/usr/bin`**（596 个文件，而不是我们拷的 45 个）⇒
+「装完自带 bash」实际是**半残态**（ls / etc 全是系统那份）⇒ 比没有更麻烦。
+完整证据见 [`installer/toolchain/README.md`](../../../installer/toolchain/README.md) § 二期结论。
+
+⇒ ⇒ **结论**：工具链自带（ucrt64）**可行且已做**；POSIX 层自带**不可行**（运行时不支持搬迁）⇒
+改为「探测用户已有的 bash + 给一个启动器」。
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

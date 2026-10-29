@@ -86,6 +86,50 @@ jhyy **发汇编，不发 C** —— 链接期被 gcc 编译的 C 只有 `runtim
 
 installer **不代写** env.txt —— 写死绝对路径会在换盘 / 重装时失效，还会盖住用户自己的配置。
 
+## 二期结论：**不打包 POSIX 层**（2026-10-29 实测后作废）
+
+原计划二期把 MSYS2 的 POSIX 层（bash + coreutils）做成 WiX **可选 Feature**。
+**实测后作废** —— 理由记在这里，免得以后有人再试一遍：
+
+**MSYS2 的运行时（`msys-2.0.dll`）不做「按树搬迁」。** 实测（本地 + 隔离副本）：
+
+| 测的东西 | 结果 |
+|---|---|
+| 拷一份 `msys-2.0.dll` + `bash.exe` + coreutils 到别处 | ✔ 我们的 DLL 确实被加载（进程模块列表里 `FileName` 指向拷贝那份） |
+| 那个 bash 里的 `/usr/bin` | ❌ 仍是**系统那份**（596 个文件），不是我们拷的 45 个 |
+| 把拷贝的 `usr/bin` **改名藏起来** | ❌ bash 照样能用 `/usr/bin` |
+| `MSYS2_ROOT` / `MSYS_ROOT` / `CYGWIN_ROOT` 等环境变量 | ❌ 全都不影响 |
+| 注册表里找 MSYS2 安装路径 | ❌ 查不到任何键 |
+
+⇒ 运行时解析出的 MSYS 根是**全局**的（跟着机器上那套 MSYS2 走），
+**不是**跟着 DLL/可执行文件的位置走。
+
+⇒ ⇒ ⇒ 所以「拷一份 MSYS2 出来自带」这条路走不通：拷出来的 bash 仍然用
+**系统的** `/usr/bin`、`/etc` ⇒ **半残态**（用户装完发现「bash 有，但
+`ls` 是系统那份、配置文件也是系统那份」）⇒ 比没有更麻烦。
+⇒ ⇒ ⇒ 也印证了当初 user 的判断：「不带 pacman 的 POSIX 层是半残态」。
+
+**⇒ 二期实际交付的是另一半**（真正解决 user 的原始诉求）：
+
+1. **VSCode 终端 profile 改为探测真实 bash**
+   （`installer/scripts/common/install-configure-vscode.ps1` 的 `Find-Bash`）。
+   VSCode 自带的 `bash (MSYS2)` profile 路径是**写死**的
+   （`C:\msys64\usr\bin\bash.exe`）**且不会回落**到别的 bash ⇒
+   装在别处的用户 / 只有 Git for Windows 的用户会看到
+   "the terminal profile is not available"。我们改为写自己的
+   `bash (JHYY)` profile，指向**探测到的** bash
+   （`$env:MSYS2_ROOT` → `C:\msys64` → MSYS2 注册表的 InstallLocation
+   → Git for Windows → PATH）。探测不到就**什么都不改**
+   （终端用 PowerShell 也完全正常，jhyy.exe 本来就在系统 PATH 上）。
+   ⇒ 门：`installer/scripts/verify-vscode-bash-detect.ps1`（探测结果必须
+   真的存在，且 install 脚本必须真的用它）。
+2. **`jhyy-bash.cmd` 启动器**（装到 `<INSTALLDIR>\bin\`）——
+   自己找 bash 并启动，顺带把 `JHYY\bin` 塞进 PATH、`MSYS2_PATH_TYPE=inherit`
+   （MSYS2 的 minimal PATH 模式会无视 Windows PATH，而 MSI 刚把 jhyy.exe
+   放进系统 PATH ⇒ 不设这个变量，bash 里就找不到 jhyy）。
+
+⇒ **不做**的：打包一份自己的 POSIX 层。
+
 ## 相关脚本
 
 | 脚本 | 作用 |

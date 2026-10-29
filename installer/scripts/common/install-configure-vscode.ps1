@@ -1,8 +1,16 @@
-# install-configure-vscode.ps1 (v1.5.7-rc1)
+# install-configure-vscode.ps1 (v1.5.7-rc1; v4.1.0 phase 2: detect the real bash)
 # MSI CustomAction post-install: configure VSCode user settings.json so the
-# integrated terminal defaults to "bash (MSYS2)" — required for jhyy to be
-# resolvable from VSCode's terminal because MSYS2 bash in minimal PATH mode
-# does not inherit the C:\Program Files\JHYY\bin entry the MSI just added
+# integrated terminal defaults to a bash we actually FOUND on this machine.
+#
+# v4.1.0 change: VSCode's built-in "bash (MSYS2)" profile has a HARD-CODED
+# path (C:\msys64\usr\bin\bash.exe) and does NOT fall back to another bash.
+# So we write our own profile ("bash (JHYY)") pointing at whichever bash we
+# detect (MSYS2 root env / C:\msys64 / MSYS2 registry InstallLocation /
+# Git for Windows / anything on PATH). If none is found we leave VSCode
+# alone - jhyy.exe is on the system PATH either way.
+#
+# The terminal still needs jhyy to be resolvable: MSYS2 bash in minimal PATH
+# mode does not inherit the C:\Program Files\JHYY\bin entry the MSI just added
 # to HKLM system PATH (see install-configure-env.ps1 for the env-var side).
 #
 # Conservative merge rules (don't clobber user's existing settings):
@@ -13,9 +21,9 @@
 #      ANY value → leave it alone (respect user choice; if they prefer
 #      PowerShell that's fine — the env var + system PATH cover cmd/PS).
 #   4. If `terminal.integrated.defaultProfile.windows` is NOT set → add
-#      `"bash (MSYS2)"` as the default.
-#   5. If `terminal.integrated.profiles.windows."bash (MSYS2)"` is NOT set →
-#      add the profile (same args as existing user profile).
+#      `"bash (JHYY)"` as the default.
+#   5. If `terminal.integrated.profiles.windows."bash (JHYY)"` is NOT set →
+#      add the profile (path = the bash we detected).
 #   6. If profile IS set but `path` points to a different bash.exe → leave
 #      alone (user may have multiple MSYS2 installs).
 #
@@ -27,8 +35,69 @@
 $ErrorActionPreference = "Stop"
 
 $settingsPath = Join-Path $env:APPDATA "Code\User\settings.json"
-$profileName = "bash (MSYS2)"
+$profileName = "bash (JHYY)"
 $defaultProfileKey = "terminal.integrated.defaultProfile.windows"
+
+# ---------------------------------------------------------------------------
+# Find a usable bash.
+#
+# WHY WE DO NOT USE VSCode's BUILT-IN "bash (MSYS2)" PROFILE:
+# that profile has a HARD-CODED path (C:\msys64\usr\bin\bash.exe), so it
+# only works for people who installed MSYS2 at the default location AND
+# still have it there. VSCode does not fall back to another bash.
+#
+# So we write our OWN profile pointing at whatever bash we actually find,
+# in this order:
+#   1. $env:MSYS2_ROOT\usr\bin\bash.exe     (explicit)
+#   2. C:\msys64\usr\bin\bash.exe          (MSYS2's classic default)
+#   3. the MSYS2 root recorded in the registry (uninstall key's InstallLocation)
+#   4. Git for Windows: %ProgramFiles%\Git\bin\bash.exe
+#   5. any bash.exe on PATH
+#
+# If none is found we leave VSCode alone - a terminal without bash is
+# still perfectly usable (PowerShell / cmd), and jhyy.exe is on the
+# system PATH either way.
+# ---------------------------------------------------------------------------
+function Find-Bash {
+    $candidates = New-Object System.Collections.ArrayList
+
+    if ($env:MSYS2_ROOT) { [void]$candidates.Add((Join-Path $env:MSYS2_ROOT "usr\bin\bash.exe")) }
+    [void]$candidates.Add("C:\msys64\usr\bin\bash.exe")
+
+    # MSYS2's own uninstall registry entry carries its InstallLocation
+    foreach ($hive in @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+                        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+                        "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall")) {
+        try {
+            Get-ChildItem -Path $hive -ErrorAction SilentlyContinue | ForEach-Object {
+                $p = Get-ItemProperty -Path $_.PSPath -ErrorAction SilentlyContinue
+                if ($p.InstallLocation -and (Split-Path $p.InstallLocation -Leaf) -like "msys*") {
+                    [void]$candidates.Add((Join-Path $p.InstallLocation "usr\bin\bash.exe"))
+                }
+            }
+        } catch { }
+    }
+
+    foreach ($pf in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if ($pf) { [void]$candidates.Add((Join-Path $pf "Git\bin\bash.exe")) }
+    }
+
+    $onPath = Get-Command bash.exe -ErrorAction SilentlyContinue
+    if ($onPath) { [void]$candidates.Add($onPath.Source) }
+
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path $c)) { return $c }
+    }
+    return $null
+}
+
+$bashExe = Find-Bash
+if (-not $bashExe) {
+    Write-Host "[install-configure-vscode] no bash.exe found (MSYS2 / Git for Windows / PATH) — skipping terminal profile" -ForegroundColor Yellow
+    Write-Host "[install-configure-vscode] (jhyy.exe is on the system PATH regardless; PowerShell works fine)"
+    exit 0
+}
+Write-Host "[install-configure-vscode] using bash: $bashExe" -ForegroundColor Green
 
 Write-Host "[install-configure-vscode] === configure VSCode user settings ==="
 Write-Host "[install-configure-vscode] path = $settingsPath"
@@ -90,7 +159,7 @@ if ($existingProfile -and $existingProfile.PSObject.Properties.Match($profileNam
 if (-not $profileEntry) {
     Write-Host "[install-configure-vscode] adding profile [$profileName]"
     $newProfileEntry = [PSCustomObject]@{
-        path = "C:\msys64\usr\bin\bash.exe"
+        path = $bashExe
         args = @("--login", "-i")
         env  = [PSCustomObject]@{ CHERE_INVOKING = "1" }
     }

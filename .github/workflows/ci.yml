@@ -457,6 +457,10 @@ jobs:
           echo "MSYS2 root: $MSYS2_ROOT_WIN"
           powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/collect-toolchain.ps1 -AllowVersionDrift -MsysRoot "$MSYS2_ROOT_WIN"
           powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/verify-toolchain.ps1
+          # The VSCode terminal profile points at a bash we DETECT. If the
+          # detection breaks, the user silently gets "the terminal profile is
+          # not available" in VSCode - so it gets its own gate.
+          powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/verify-vscode-bash-detect.ps1
 
       # ── MCP 工具的 pytest 套件 ──────────────────────────────────────
       # v4.0.20 (W-134.1):`mcp-jhyy/tests/`(41 个测试)此前在 CI 里**零覆盖**

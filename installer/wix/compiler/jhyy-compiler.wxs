@@ -430,6 +430,26 @@
       </Component>
 
       <!--
+        JhyyBashCmd (v4.1.0 phase 2): a launcher that opens a bash shell
+        with jhyy on the PATH.
+
+        Why: VSCode's built-in "bash (MSYS2)" terminal profile has a
+        HARD-CODED path (C:\msys64\usr\bin\bash.exe) and does NOT fall back
+        to another bash - so a user whose MSYS2 lives elsewhere (or who only
+        has Git for Windows) gets "the terminal profile is not available".
+        This launcher finds a bash itself (MSYS2 -> Git for Windows -> PATH)
+        and starts it with JHYY\bin on the PATH + MSYS2_PATH_TYPE=inherit
+        (an MSYS2 bash in minimal PATH mode ignores the Windows PATH, which
+        is where the MSI just put jhyy.exe).
+      -->
+      <Component Id="JhyyBashCmd" Bitness="always64" Guid="7787DD61-48A5-5622-89A6-9B8CEE602F24">
+        <File Id="JhyyBashCmdFile"
+              Source="!(bindpath.common)\jhyy-bash.cmd"
+              KeyPath="yes"
+              Checksum="yes" />
+      </Component>
+
+      <!--
         PrebuiltObjects (v4.1.0): runtime.o + jhyy_helpers.o, pre-compiled
         with the BUNDLED gcc by installer/scripts/collect-toolchain.ps1.
 

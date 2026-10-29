@@ -56,6 +56,7 @@ upgrades silently keep old version (silent corruption).
 | JhyyDocsURL | `4065743A-3D07-48DE-A0E3-7FF8D5FEFA79` |
 | JhyyQuickStartURL | `98BA5444-5A01-4FD4-9995-623AC6869020` |
 | PrebuiltObjects (v4.1.0 — 预编 runtime.o / jhyy_helpers.o) | `5275E1C9-9BC5-5920-8A53-90206F3EB471` |
+| JhyyBashCmd (v4.1.0 phase 2 — 启动一个带 jhyy 的 bash) | `7787DD61-48A5-5622-89A6-9B8CEE602F24` |
 
 ## v4.1.0 新增: 工具链组件 GUID 是**确定性生成**的
 

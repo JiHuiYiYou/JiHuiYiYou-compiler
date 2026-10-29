@@ -92,6 +92,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/verify-too
 源码树仍走相对路径 `compiler/build/obj/`，行为不变）。
 `.c` 仍然随包发，作为 `.o` 缺失时的回落 —— 回落路径要编 C，所以头闭包仍然必需。
 
+### 终端 / bash（v4.1.0 二期）
+
+- **VSCode 终端 profile 指向探测到的 bash**（不是 VSCode 自带那个写死路径的
+  `bash (MSYS2)` profile —— 它**不会**回落到别的 bash）。探测顺序：
+  `$env:MSYS2_ROOT` → `C:\msys64` → MSYS2 注册表的 `InstallLocation`
+  → Git for Windows → PATH。探测不到就**不改用户的 VSCode 设置**。
+  门：`installer/scripts/verify-vscode-bash-detect.ps1`。
+- **`jhyy-bash.cmd`**（装到 `<INSTALLDIR>\bin\`）：自己找 bash 并启动，
+  顺带把 `JHYY\bin` 塞进 PATH 并设 `MSYS2_PATH_TYPE=inherit`
+  （MSYS2 的 minimal PATH 模式无视 Windows PATH ⇒ 不设它 bash 里找不到 jhyy）。
+- ⚠️ **不打包 POSIX 层**（bash + coreutils）—— 实测 MSYS2 的运行时
+  **不做「按树搬迁」**（拷出来的 bash 仍然用系统的 `/usr/bin`）⇒ 半残态。
+  完整证据见 [`installer/toolchain/README.md`](../../installer/toolchain/README.md) § 二期结论。
+
 
 ---
 

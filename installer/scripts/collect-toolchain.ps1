@@ -58,6 +58,13 @@ param(
     [switch]$AllowVersionDrift
 )
 
+# Honor the env var too, so `JHY_ALLOW_TOOLCHAIN_DRIFT=1 collect-toolchain.ps1`
+# works without passing the switch (build.ps1 passes it explicitly, but the
+# env var is what a developer would reach for).
+if ($env:JHY_ALLOW_TOOLCHAIN_DRIFT -and -not $AllowVersionDrift) {
+    $AllowVersionDrift = $true
+}
+
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $repoRoot
