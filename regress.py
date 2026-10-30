@@ -702,10 +702,6 @@ def main():
                     help="Run byte-equal 三件套 check (per D26, requires JHYY_V1 "
                          "+ JHYY_V2 env vars; default jhyy_v1.exe.exe + jhyy.exe). "
                          "Opt-in: does NOT affect default regress baseline (104/104).")
-    ap.add_argument("--byte-equal-amd64", action="store_true",
-                    help="Run V2-B v2.6.0 (Unit F) byte-equal-amd64 driver "
-                         "(QBE vs self backend path parity check, 5 tests). "
-                         "Opt-in: does NOT affect default regress baseline.")
     ap.add_argument("--fixed-point", action="store_true",
                     help="Run V2-C v2.9.0 N≥3 selfhost fixed-point closure 验算 "
                          "(jhyy_v1 ↔ jhyy_v2 ↔ jhyy_v3 byte-equal .il per D43). "
@@ -754,24 +750,12 @@ def main():
         print(f"[--self-backend] JHY_SELF_BACKEND=1 set, QBE_FALLBACK unset", file=sys.stderr)
         # Falls through to default regress run — env vars drive jhyy-side dispatch.
 
-    if args.byte_equal_amd64:
-        # V2-B v2.6.0 (Unit F) byte-equal-amd64 (opt-in; QBE-vs-self backend
-        # path parity check, 5 tests). Self backend call site is currently
-        # deferred to v2.6.x (Unit E wire), so the script runs QBE-vs-QBE
-        # (trivially PASS). Real self-vs-QBE gate auto-fires when v2.6.x
-        # wires codegen_amd64_run into main.jhyy.
-        bootstrap_dir = ROOT / "compiler" / "tests" / "bootstrap"
-        byte_equal_amd64_sh = bootstrap_dir / "byte_equal_amd64.sh"
-        if not byte_equal_amd64_sh.exists():
-            print(f"byte-equal-amd64: script not found at {byte_equal_amd64_sh}",
-                  file=sys.stderr)
-            sys.exit(1)
-        bash_path = shutil.which("bash") or "bash"
-        result = subprocess.run(
-            [bash_path, str(byte_equal_amd64_sh)],
-            env=os.environ.copy(),
-        )
-        sys.exit(result.returncode)
+    # 2026-10-30:`--byte-equal-amd64` 连同 compiler/tests/bootstrap/byte_equal_amd64.sh
+    # 一起删了 —— 那脚本比的是「QBE_FALLBACK=1 的产物」vs「默认产物的」,而
+    # QBE_FALLBACK 从 v3.1.0 起**只打印一句告警、不影响任何产物**(QBE 已从编译器
+    # 移除)⇒ 两侧恒等 ⇒ 那个「QBE≡self byte-equal」门永远不可能红,等于没有门。
+    # regress.py 自己的旧注释也写着「the script runs QBE-vs-QBE (trivially PASS)」。
+    # ⇒ 真跨版本 byte-equal 用 `--byte-equal` + 显式给一个真的旧版 binary。
 
     if args.run_all_gated:
         # Matrix mode: gated binaries + optional informational

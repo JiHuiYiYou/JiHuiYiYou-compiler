@@ -48,6 +48,15 @@
 #   JHYY_V2  = jhyy v2 binary path (default: compiler/build/bin/jhyy.exe)
 #   JHY_WRITE_IL = 强制写 .il (debug 用; 默认 0 → 跳过 .il 写盘, in-mem path)
 #
+# ⚠️ **默认配置下这个门是「自己跟自己比」**(v4.0.8 起 `jhyy_v1.exe.exe` 就是
+# `jhyy.exe` 的 `cp -f` 副本)⇒ 两侧产物恒等 ⇒ 它只能验「编译器没崩」,
+# **验不了跨版本差异**。要真跨版本比较,必须用 `JHYY_V1=` 显式给一个
+# **真的旧版** binary(例如某个 v2.5.0 的 release 二进制)。
+#
+#   (同批删除的 `byte_equal_amd64.sh` 更极端:它比的是「QBE_FALLBACK=1」vs
+#    「默认」,而 QBE_FALLBACK 从 v3.1.0 起只打印一句告警、不影响任何产物
+#    ⇒ 那个「QBE≡self」门永远不可能红 ⇒ 已删。)
+#
 # 退出码:
 #   0  = .il + .s byte-equal (.exe 状态不影响退出码)
 #   1  = .il 或 .s FAIL 或 setup 错 (binary 找不到等)
