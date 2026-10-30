@@ -872,7 +872,8 @@ fence_release();   // sfence
 
 ## 19. Debug ABI（🔒 per D41）
 
-> **状态**：🔒 v2.2.0 锁定 Debug ABI 跨项目契约，随本规范 v4.0.0 一并继承。**OS 端镜像**见 [`../../../jhyy_OS/docs/v0.0.4-debug-abi.md`](../../../jhyy_OS/docs/v0.0.4-debug-abi.md)（🔒 Locked 2026-08-12，Q-Compiler-007 闭环 / D41）。
+> **状态**：🔒 v2.2.0 锁定 Debug ABI 跨项目契约，随本规范 v4.0.0 一并继承。
+> **权威位置**：**本节即权威**（编译器侧）。原 OS 端镜像 `jhyy_OS/docs/v0.0.4-debug-abi.md`（🔒 Locked 2026-08-12，Q-Compiler-007 闭环 / D41）已随 OS 侧文档整体清理于 2026-10-30（commit `f98d83d`）⇒ **OS 侧重写时从本节镜像，不得反向**。
 > **doc version pinning**：本节锁定时引用 OS doc 的 commit/tag；OS 端后续更新走 Q-Compiler-007 流程同步。
 
 ### 19.1 尺寸定案（per D41）

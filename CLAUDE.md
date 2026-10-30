@@ -406,20 +406,34 @@ W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_
 
 ## 与 jhyy_OS 项目的对齐（mirror stub）
 
-> **本节给编译器侧 sprint 设计者** — 启动 session 打算做 v4.x / OS 相关 sprint 之前,**必读**本节指向的三份 OS 侧 doc (但 v4.x OS 启动路径需重新评估 — `v2.0.0-os-prep.md` 已作废)。
+> **本节给编译器侧 sprint 设计者** — 启动 session 打算做 v4.x / OS 相关 sprint 之前,**必读**本节指向的协调文档。
+
+### ⚠️ 2026-10-30:OS 侧原设计文档已清空
+
+`../JiHuiYiYou-OS/`(原 `../jhyy_OS/`)下 17 份 v0.0.x 设计文档 + `deep_research/`
++ `README.md` + `CLAUDE.md` **已全部删除**(commit `f98d83d`)。
+原因:那批文档写于编译器 **v1.8.3** 时代(C 宿主 + QBE + ABI v1.0.0),
+大量结论已被推翻或过时。**内容不丢** —— 保留在 git 历史(`git show 24589bd:docs/<file>`)。
+
+⇒ **跨项目设计基线现在单点落在本仓 `docs/coordination/`**。
 
 | 文档 | 用途 | 何时读 |
 |------|------|--------|
-| [`../jhyy_OS/docs/coordination.md` § 0 Critical Path](../jhyy_OS/docs/coordination.md) | OS × compiler 跨项目时间线权威视图 | **每个 v4.x sprint 启动前必读** (重新评估 M11 launch 路径) |
-| [`../jhyy_OS/docs/v0.0.4-debug-abi.md`](../jhyy_OS/docs/v0.0.4-debug-abi.md) | **🔒 Locked**(2026-08-12,Q-Compiler-007 闭环 / D41)| Debug ABI + 尺寸定案 (D41 不动) |
+| [`docs/coordination/JHYY_决策总纲.md`](docs/coordination/JHYY_决策总纲.md) | **入口** —— 已确立结论 + 分歧裁决 + P0–P4.5 分期与硬门 + 待拍板清单 | **每个 v4.x / OS 相关 sprint 启动前必读** |
+| [`docs/coordination/JHYY_OS_内核模型与语言需求.md`](docs/coordination/JHYY_OS_内核模型与语言需求.md) | 内核模型(能力微内核 / CNode / type_tag / region_table)+ 对语言的 **22 条需求**(按失效严重性排序) | 设计 OS 相关特性时 |
+| [`docs/coordination/JHYY_编译器全阶段方向与路线图.md`](docs/coordination/JHYY_编译器全阶段方向与路线图.md) | 编译器全阶段方向 + 21 个后端 pass 清单 + `.jhyynb` contract section 设计 | 规划编译器工作时 |
+| [`docs/coordination/JHYY_Cap类型语义草案.md`](docs/coordination/JHYY_Cap类型语义草案.md) | `Cap<T, Rights>` / `ptr<phys>` 派生 / 8 种内置 rights 的具体提案 | 做 capability 类型化时 |
+| [`docs/coordination/JHYY_设计自审_对照K框架.md`](docs/coordination/JHYY_设计自审_对照K框架.md) | 对上面四份的**批评与补漏清单**(真遗漏 vs 框架错配) | 排期前必读 —— 别把已知缺口重排一遍 |
+| [`docs/abis/jhyy-lang-spec-v4.0.0.md` § 19](docs/abis/jhyy-lang-spec-v4.0.0.md) | Debug ABI(**🔒 per D41**;OS 侧旧镜像已删,此处是权威) | 做调试 / 可观测性时 |
 
-**冲突解决规则**(从 OS 侧 coordination.md § 7 镜像):
+**冲突解决规则**(沿用):
 - 任何 OS 镜像跟本 CLAUDE.md 冲突 → **以 compiler 为准** → OS 侧撤回 + 提交 Q-OS-XXX
 - 任何 compiler doc 跟 OS 镜像冲突 → OS doc 为准(本地权威)→ compiler 提交 Q-Compiler-XXX
 - 跨边界僵持 → 走 user 介入
 
-**当前跨边界问题状态**(2026-08-12 校准,2026-09-30 v4.0.0 时 v2/v3 已 ship 但 OS M11 launch 路径需重新评估):
-- ✅ **13 个 Q + 6 个 UD 决定 全部闭环/锁**
-- ✅ Q-Compiler-007 (Debug ABI 所有权 + spec 锁) — 2026-08-12 闭环 (D41)
-- ✅ D24-D29 6 个 UD 决定 — 全 ✅ 锁
-- ⚠️ v2.0.0-os-prep.md 已归档 (2026-09-30);OS M11 launch 需重新评估路径,新 OS 计划待 v4.x sprint 设计时填
+**当前跨边界问题状态**(2026-10-30 更新):
+- ✅ D41(Debug ABI 所有权 + spec 锁)、D44(`.jhyynb` 格式)—— 权威在本仓 `docs/abis/`
+- ⚠️ **OS 侧原 M1–M11 依赖图已作废**(`v2.0.0-os-prep.md` 2026-09-30 归档;OS 侧原
+  `coordination.md` 的 Critical Path 2026-10-30 一并删除)⇒ **新 OS 路线图待设计**
+- 🔄 **当前唯一在排期的跨项目路线 = `docs/coordination/` 的 P0–P4.5**(与本仓
+  `self-backend-perf-plan.md` 的 v4.x 版本轴**并行且正交**)

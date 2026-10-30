@@ -95,8 +95,9 @@ git diff <sha>~1 <sha>
 ## Sprint 设计规则
 
 - **计划中不写日期估时**(per `feedback_no_date_estimates`) — 用 sprint 序列 + 相对顺序,不写"几月几月完成"
-- **跨项目边界**(跟 `../jhyy_OS/`)走 [`coordination.md`](../jhyy_OS/docs/coordination.md) § 7 冲突解决规则
-- **sprint 设计前必读**:`docs/plans/v2/v2.0.0-os-prep.md` § 1 + § 6(OS 启动里程碑 + 关键决策点)
+- **跨项目边界**(跟 `../JiHuiYiYou-OS/`)走 [`docs/coordination/JHYY_决策总纲.md`](docs/coordination/JHYY_决策总纲.md) § 3 的冲突裁决 + § 5 的语言—内核边界契约
+  (⚠️ 原 `../jhyy_OS/docs/coordination.md` 与 `docs/plans/v2/v2.0.0-os-prep.md` 已分别于 2026-10-30 / 2026-09-30 删除/归档,内容在 git 历史里)
+- **sprint 设计前必读**:`docs/coordination/JHYY_决策总纲.md` § 4(分期路线图与硬验收门)
 - **changelog 遵循 umbrella 约定**:vX.Y 轴只 1 个 umbrella changelog,不创建 `changelog-vX.Y.Z.md` 之类 standalone(per `feedback_changelog_umbrella`)
 
 ## AI 协作

@@ -4,7 +4,7 @@
 **状态**: 设计文档(完成最终态视图;实装时机另行决定)
 **目标**: 为 jhyy_OS user-space + jhyy 编译器自身(M11)+ GDB attach 三重角色,定义一个 **jhyy 原生** 的二进制格式
 **不在范围**: 实施 sprint 划分 / 工作量估算 / 时间表(per memory `feedback_no_date_estimates`)
-**关联**: [`coordination.md § 3 D44`](../../../jhyy_OS/docs/coordination.md) | OS 镜像 [`v0.0.5-binary-format.md`](../../../jhyy_OS/docs/v0.0.5-binary-format.md) | plan 文件 `c-jihuiyiyou-twinkling-frog.md`(个人 plan,不随仓分发)
+**关联**: D44(决策登记,2026-09-04 user 锁) | OS 侧镜像已于 2026-10-30 随 OS 文档整体清理(commit `f98d83d`)⇒ **OS 侧重写时从本文档镜像,不得反向** | 跨项目背景见 [`../coordination/JHYY_OS_内核模型与语言需求.md`](../coordination/JHYY_OS_内核模型与语言需求.md) | plan 文件 `c-jihuiyiyou-twinkling-frog.md`(个人 plan,不随仓分发)
 
 ---
 
@@ -28,7 +28,7 @@ jhyy_OS kernel 走 `kernel.efi`(PE/COFF,被 UEFI 协议锁,per **D1** 2026-08-04
 
 ## 2. 约束(从已锁 D-locks 推导)
 
-- **5 原则**(per [`../../jhyy_OS/docs/v0.0.2-foundation-revision.md § 3.1`](../../../jhyy_OS/docs/v0.0.2-foundation-revision.md)):可行且简单 / 双线作战 / 寄生 Windows / Debug 在语言里 / Kernel 不解决语言问题
+- **5 原则**(原载于已清理的 OS 侧 `v0.0.2-foundation-revision.md § 3.1`):可行且简单 / 双线作战 / 寄生 Windows / Debug 在语言里 / Kernel 不解决语言问题 ⇒ **原则 5 的四条边界条件**见 [`../coordination/JHYY_决策总纲.md` § 5.3](../coordination/JHYY_决策总纲.md)
 - **D6 + D23**:`Cap<T>` 8 字节 wire = `{cnode_idx:u32@0, depth:u8@4, _pad:u8@5, rights:u16@6}`,phantom 字段 0 字节(codegen skip `_phantom`)
 - **D16**:`#[ipc_handler]` cap-offset 表 = `{msg_tag:u32, n_caps:u16, cap_offsets:[u16;n]}`(16B header 之后,payload 之前)
 - **D40**:wire-format 表达规则 — 链表 = `*T`(8B),数组 = `[*]T`(16B ptr+len)
@@ -501,7 +501,7 @@ struct RelocEntry {                         // 8-aligned
 - 实施 sprint 划分 / 工作量估算 / 时间表 — 见 memory `feedback_no_date_estimates`
 - jhyy 编译器现有 QBE + gcc emit 链路如何迁就 .jhyynb — 是 QBE .s → post-process 包装,还是完全自写后端,设计层面**不锁**,实装期讨论
 - DWARF 字节级 emitter 实现细节 — 本文档只 spec 容器结构,不写 emit 代码
-- jhyy-OS kernel 如何 mmap .jhyynb sections — OS loader 实现细节,见 [`v0.0.5-binary-format.md`](../../../jhyy_OS/docs/v0.0.5-binary-format.md)
+- jhyy-OS kernel 如何 mmap .jhyynb sections — OS loader 实现细节(原 OS 镜像 `v0.0.5-binary-format.md` 已于 2026-10-30 清理;loader 重写时以本文档 § 4–§ 14 为准)
 - aarch64 / riscv64 .jhyynb 字节序 / calling convention 差异 — 留 future
 
 ---
