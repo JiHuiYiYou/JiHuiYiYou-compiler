@@ -216,7 +216,7 @@ v4.2.0 / v4.2.1 ✅ 已完成;**v4.2.2 / v4.3.0 已降级**(实测性能价值 �
 - [`docs/internal/architecture.md`](docs/internal/architecture.md) — 流水线 / 模块 / 设计细节 / **self-backend codegen 速查** / Stage 0 自举
 - [`docs/internal/conventions.md`](docs/internal/conventions.md) — 编码约定 / 文件命名 / 提交规则
 - [`docs/internal/tests.md`](docs/internal/tests.md) — 集成测试清单 + 运行方法
-- [`docs/internal/workarounds.md`](docs/internal/workarounds.md) — W-NNN workaround 台账（**ACTIVE = 0** ✅ 见下方 §当前活跃 workarounds）
+- [`docs/internal/workarounds.md`](docs/internal/workarounds.md) — W-NNN workaround 台账（**ACTIVE = 1** 见下方 §当前活跃 workarounds）
 
 ### 语言规范 & ABI（`docs/abis/`，locked）
 
@@ -249,11 +249,14 @@ python scripts/dev/bump_version.py check        # 零漂移门(CI 也跑)
 
 ## 当前活跃 workarounds
 
-**0 ACTIVE / 0 DEFERRED**(2026-10-30 —— 仓库清理时挖出 **W-168**:`jhyy build`
-**不解析 `-o`**(usage 串谎称支持,产物静默落回 input 同目录)**且成功时退出码是 2**
-⇒ **同日真修**:`cmd_build` 实装 `-o` 解析 + 退出码归一,新增常驻门
-`artifact_checks.sh build_o_flag` ⇒ ACTIVE 桶**第三次**清空(仍是 0)。
-同日的 **W-169** 记的是「禁嵌套短路」约定**退役**(SUPERSEDED)——
+**1 ACTIVE / 0 DEFERRED**(2026-10-30 实测;台账索引 **165 行** —— 仓库清理时挖出 **W-170**:`jhyy build`
+**不处理 `#[link_section]`** ⇒ 该 attribute 在 build 路径上**静默 no-op**
+(实测:`compile --no-link` 的 .s 有 1 条 `.section`,`build` 的 0 条)。
+绕法:用 `compile --no-link -o` 代替 `build -o`。
+⚠️ 真修要改 src0 ⇒ 走「刷新自举锚点 + D43 re-pin + 全量回归」一整套发版级流程 ⇒ 待排期。
+同日 **W-168**(`jhyy build` 不解析 `-o` + 退出码是 2)已**真修**(`cmd_build` 实装
+`-o` 解析 + 退出码归一,新增常驻门 `artifact_checks.sh build_o_flag`);
+**W-169** 记的是「禁嵌套短路」约定**退役**(SUPERSEDED)——
 那条约定是 QBE 时代遗留,现由行为门 `logical_nested.jhyy` 取代)。
 (此前:2026-10-27 —— **0 ACTIVE / 0 DEFERRED** —— **ACTIVE 桶第二次清空**
 (第一次是 2026-10-20)。
@@ -285,10 +288,11 @@ MCP 套件 **46 passed / 1 skipped**。
 真凶是 **W-123**(`jh_mktemp_ascii` 的 seed = `pid ^ tid ^ ctr`,而 Windows 的 pid
 与主线程 tid 来自**同一个全局计数器** ⇒ `N ^ (N+1) = 1` ⇒ **每两个并发进程就撞一次
 同一个临时文件名** ⇒ 一个的 rename 失败 ⇒ **编译失败**。W-123 修好后:并发编译 32 个
-→ **0 失败**(修复前 4 个)),**0 ACTIVE / 0 DEFERRED / 164 索引行**(W-134.1 的 CI step 已由 `2ab0f24` 落地,2026-10-25 补翻状态),per `docs/internal/workarounds.md` 索引表):
+→ **0 失败**(修复前 4 个)),**0 ACTIVE / 0 DEFERRED**(2026-10-20/25 当时的快照;索引行数随 entry 增删变,当前值见 `workarounds.md` 索引表)(W-134.1 的 CI step 已由 `2ab0f24` 落地,2026-10-25 补翻状态),per `docs/internal/workarounds.md` 索引表):
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
+| W-170 | `compiler/src0/main.jhyy` `cmd_build` | 🔴 **`jhyy build` 不处理 `#[link_section]`** ⇒ 该 attribute 在 build 路径上**静默 no-op**。实测:同一份源文件,`compile --no-link` 的 .s 有 **1 条** `.section .text.boot`(536 B),`build` 的 **0 条**(522 B)⇒ 差的就是这一条。根因:`apply_link_section_directives`(W-112 引入)只在 `cmd_compile` 与 `link_with_gcc` 两处被调,`cmd_build` **两处都不调** ⇒ 不是 v4.0.16 引入的不对称,是 `build` 子命令**自存在起就没做过**这一步。绕法:用 `compile --no-link -o` 代替 `build -o`(两者产物只差 `.section` 这一处)。⚠️ 现有门 `artifact_checks.sh link_section` 用的是 `compile --no-link` ⇒ **抓不到本条**。真修待排期(改 src0 ⇒ 要刷锚点 + 全量回归) |
 | W-168 | `compiler/src0/main.jhyy` `cmd_build` | ~~`jhyy build` 不解析 `-o` + 成功时退出码是 2~~ ✅ **2026-10-30 已修**:`cmd_build` 实装 `-o` 解析(照 `cmd_compile` 的形状:`-o <path>` + 第一个非 flag 参数当输入)并把 `build_il` 的返回值 2(=「in-mem 后端已 emit .s」=**成功**)归一成 0 ⇒ `jhyy build` 的退出码不再是 2。⚠️ 但 **`jhyy build` ≠ `jhyy compile --no-link`**:后者产出 .s 后还会跑 `apply_link_section_directives`(W-112 的 `#[link_section]` 处理),`cmd_build` 不跑 ⇒ 含该属性的程序两条路径产物不同 ⇒ bench / stage1 继续用 `compile --no-link -o`。门:`artifact_checks.sh build_o_flag`(两个方向都验:`-o` 生效 **且** 默认行为不变) |
 | W-157 | — | ~~`spec_argc_argv` 门断言的不是它声称的东西 —— `*argv` 只 load **1 字节**~~ ✅ **2026-10-27 已修**:入口签名的 `argv` 实际是 C 的 `char **`(类型却写作 `*u8`)⇒ `*argv` 生成的 IL 是 `loadub` ⇒ 读到的是 **`argv[0]` 指针的最低字节** ⇒ 那条断言实际在验「**堆地址最低字节 ≠ 0**」⇒ **跟堆布局绑定的假信号**(PATH 形态一变 ⇒ 堆基址偏移 ⇒ 最低字节恰好为 0 ⇒ 假红;2026-10-27 CI 上就是这样炸的,本地用「MSYS 形式 PATH + `;` + Windows 形式」当场复现)。修法:门改 `*(argv as **u8)`(IL 变 `loadl`);spec §1.1 + 附录 B 写明 `argv` 的 cast 约定。门:`spec_argc_argv.jhyy` |
 | W-152 | — | ~~重名 **import** ⇒ 编译器**崩溃**(0xC0000005);重名**类型参数** ⇒ 报一串指不到病根的错~~ ✅ **2026-10-27 已修**:同一个 null sym 的最后两条路径 —— import 的 sym 是 null ⇒ `main.jhyy` 的 `inline_imports` 直接 `(*id_sym_p).name` 解引用它 ⇒ 崩;类型参数的 null 进了 type_params 数组 ⇒ 声明与符号表对不上 ⇒ 后面报「E0062: cannot infer type parameter」这种误导性错误。两处都加 `parser_duplicate_name` 守卫。门:`spec_dup_import.jhyy` / `spec_dup_type_param.jhyy` |

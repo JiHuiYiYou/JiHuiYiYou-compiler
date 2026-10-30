@@ -189,6 +189,7 @@
 | [W-167](#w-167) | RESOLVED | alloc 池的栈预留**写死 8192 字节** ⇒ 每个函数的帧 ≥8352 ⇒... |
 | [W-168](#w-168) | RESOLVED | `jhyy build` **不解析 `-o`** + **成功时退出码是 2** —— CLI... |
 | [W-169](#w-169) | SUPERSEDED | 「codegen 里禁嵌套 `&&`/`||` 短路」约定 —— QBE 时代遗留,in-mem... |
+| [W-170](#w-170) | ACTIVE | `jhyy build` **不处理 `#[link_section]`** ⇒ 该... |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -12709,3 +12710,69 @@ v4.x 换成 **in-mem 自研后端**后,约束对象(QBE 的 nested phi)**已不�
 - 门:`compiler/tests/examples/logical_nested.jhyy`(新)/ `logical.jhyy`(平铺,旧)
 - 约定落点:`docs/internal/conventions.md` § 短路语义(新)
 - 相关:**W-168**(`jhyy build` 不解析 `-o`)—— 同日仓库清理时挖出
+
+<a id="w-170"></a>
+## W-170: `jhyy build` **不处理 `#[link_section]`** ⇒ 该 attribute 在 build 路径上静默 no-op
+
+**状态:** ACTIVE since 2026-10-30 (v4.1.2) — build 路径缺 apply_link_section_directures;真修待排期
+**Filed-by:** 2026-10-30 (仓库清理 —— 补 W-168 时发现 `jhyy build` ≠ `jhyy compile --no-link`)
+**日期:** 2026-10-30
+
+**触发面:** `compiler/src0/main.jhyy` 的 `cmd_build` —— `jhyy build` 子命令。
+
+**症状(2026-10-30 实测):**
+```
+$ cat ls.jhyy
+#[link_section(".text.boot")]
+fn _start() -> i32 { return 42; }
+fn main_jhyy() -> i32 { return _start(); }
+
+$ jhyy compile --target=amd64_win --no-link ls.jhyy -o ls_c
+$ grep -c '^\s*\.section' ls_c.s
+1                       ← ✅ .section .text.boot 在
+$ jhyy build ls.jhyy -o ls_b
+$ grep -c '^\s*\.section' ls_b.s
+0                       ← ❌ 完全没有(产物 522 B vs compile 的 536 B)
+```
+⇒ **`#[link_section]` 在 `jhyy build` 路径上完全失效**,且**零告警** ——
+用户拿到一份缺 `.section` 指令的 .s,属性形同没写。
+
+**根因:**
+`apply_link_section_directives(asm_path)`(W-112 引入,把 `#[link_section("X")]`
+的 `.section X` 插进 **.s 文件本身**)只在**两处**被调用:
+- `cmd_compile`(`main.jhyy` 里 .s 产出之后)
+- `link_with_gcc`(链之前的副本)
+
+`cmd_build` **两处都不调** ⇒ 它产出的 .s 从来没有过 `.section` 指令。
+⇒ **不是 v4.0.16 引入的不对称** —— `build` 子命令自存在起就没做过这一步。
+
+**workaround:**
+用 `jhyy compile --no-link -o <path>` 代替 `jhyy build -o <path>`
+—— 两者产出的 .s **只有 `.section` 这一处差异**(实测 522 B vs 536 B),
+`compile --no-link` 那条会正确插上 `.section`。
+(`compile` 还会额外跑 `apply_link_section_directives`,这正是差别所在。)
+
+**影响范围:**
+- 只影响 `jhyy build` 的使用者(`.s` 产物的消费者:链接脚本 / 手工检视 / 嵌入式装配)。
+- `jhyy compile`(含 `--no-link`)**不受影响** —— W-112 修的就是它。
+- 仓内无依赖 `jhyy build` + `#[link_section]` 的组合
+  (`artifact_checks.sh link_section` 用的是 `compile --no-link`)⇒ 现有门抓不到它。
+
+**失效条件:** `cmd_build` 也调用 `apply_link_section_directives`(或把该处理下沉到
+`build_il` 里,让两条路径共用)。
+
+**修法草案:**
+`apply_link_section_directives` 的调用下沉到 `build_il` 的 in-mem 分支之后
+(`codegen_amd64_run_text` 写完 .s 的地方),这样 `build` 与 `compile` 天然一致 ——
+比在 `cmd_build` 里单独补一次调用更不容易再漏。
+
+⚠️ 注意:这会改 `compiler/src0/main.jhyy` ⇒ 新增/删除调用点会移位模块级 temp 编号
+⇒ 自举产物行为漂移 ⇒ 需要走「刷新自举锚点 + D43 baseline re-pin + 全量回归」
+一整套发版级流程(per W-168 同款)。
+
+**引用:**
+- 源码:`compiler/src0/main.jhyy`(`cmd_build` / `cmd_compile` 里
+  `apply_link_section_directives` 的调用点)
+- 相关:**W-112**(`#[link_section]` 落到真的 .s —— 修了 `compile` 路径,漏了 `build`)
+- 相关:**W-168**(`jhyy build` 的 `-o` 与退出码 —— 同一批发现,顺带暴露了本条)
+- 现有门:`artifact_checks.sh link_section` —— 只验 `compile --no-link`,⇒ 抓不到本条
