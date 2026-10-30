@@ -216,7 +216,7 @@ v4.2.0 / v4.2.1 ✅ 已完成;**v4.2.2 / v4.3.0 已降级**(实测性能价值 �
 - [`docs/internal/architecture.md`](docs/internal/architecture.md) — 流水线 / 模块 / 设计细节 / **self-backend codegen 速查** / Stage 0 自举
 - [`docs/internal/conventions.md`](docs/internal/conventions.md) — 编码约定 / 文件命名 / 提交规则
 - [`docs/internal/tests.md`](docs/internal/tests.md) — 集成测试清单 + 运行方法
-- [`docs/internal/workarounds.md`](docs/internal/workarounds.md) — W-NNN workaround 台账（**ACTIVE = 0** ✅ 见下方 §当前活跃 workarounds）
+- [`docs/internal/workarounds.md`](docs/internal/workarounds.md) — W-NNN workaround 台账（**ACTIVE = 1** 见下方 §当前活跃 workarounds）
 
 ### 语言规范 & ABI（`docs/abis/`，locked）
 
@@ -249,7 +249,11 @@ python scripts/dev/bump_version.py check        # 零漂移门(CI 也跑)
 
 ## 当前活跃 workarounds
 
-**0 ACTIVE / 0 DEFERRED**(2026-10-27 —— **ACTIVE 桶第二次清空**(第一次是 2026-10-20)。
+**1 ACTIVE / 0 DEFERRED**(2026-10-30 —— 仓库清理时挖出 **W-168**:`jhyy build`
+**不解析 `-o`** ⇒ usage 串谎称支持,产物静默落回 input 同目录;真修并入 v4.4.0
+(该版本本来就要重写 temp 分配 ⇒ 锚点刷新 / D43 baseline re-pin 那一步届时必做))。
+(此前:2026-10-27 —— **0 ACTIVE / 0 DEFERRED** —— **ACTIVE 桶第二次清空**
+(第一次是 2026-10-20)。
 v4.0.22 三轮下来把审计挖出的 6 条 ACTIVE 全闭了:W-143 / W-144(第二轮)、
 W-145..W-149(第二轮)、**W-142(第三轮:同作用域 shadowing → 改成 shadowing)+ 兄弟
 缺陷 W-150(重名 fn/type/const/参数 ⇒ 空指针写崩溃 → 改编译期报错)**;
@@ -282,6 +286,7 @@ MCP 套件 **46 passed / 1 skipped**。
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
+| W-168 | `compiler/src0/main.jhyy:1510` | 🔴 **`jhyy build` 不解析 `-o`** —— usage 串(`:1512`)写着 `[-o output]`,但 `cmd_build` 只取 `argv[0]` 当输入、其余参数全丢 ⇒ `jhyy build x.jhyy -o y` **静默忽略 `-o`**,产物仍落回 `x` 旁边,**零告警**。根因:`cmd_compile`(:1543-1584)从 v0.8 起就有完整 `-o`/`--no-link` 解析 ⇒ 两个子命令 CLI 不对称;`build` 的 `-o` 从来没实现过。绕法:用 `compile --no-link -o`(两者产出的 `.s` **逐字节相同**)。**真修并入 v4.4.0**(该版本本来就要重写 temp 分配 ⇒ 锚点刷新 / D43 baseline re-pin 那一步届时必做)。台账:`docs/internal/workarounds.md` W-168 |
 | W-157 | — | ~~`spec_argc_argv` 门断言的不是它声称的东西 —— `*argv` 只 load **1 字节**~~ ✅ **2026-10-27 已修**:入口签名的 `argv` 实际是 C 的 `char **`(类型却写作 `*u8`)⇒ `*argv` 生成的 IL 是 `loadub` ⇒ 读到的是 **`argv[0]` 指针的最低字节** ⇒ 那条断言实际在验「**堆地址最低字节 ≠ 0**」⇒ **跟堆布局绑定的假信号**(PATH 形态一变 ⇒ 堆基址偏移 ⇒ 最低字节恰好为 0 ⇒ 假红;2026-10-27 CI 上就是这样炸的,本地用「MSYS 形式 PATH + `;` + Windows 形式」当场复现)。修法:门改 `*(argv as **u8)`(IL 变 `loadl`);spec §1.1 + 附录 B 写明 `argv` 的 cast 约定。门:`spec_argc_argv.jhyy` |
 | W-152 | — | ~~重名 **import** ⇒ 编译器**崩溃**(0xC0000005);重名**类型参数** ⇒ 报一串指不到病根的错~~ ✅ **2026-10-27 已修**:同一个 null sym 的最后两条路径 —— import 的 sym 是 null ⇒ `main.jhyy` 的 `inline_imports` 直接 `(*id_sym_p).name` 解引用它 ⇒ 崩;类型参数的 null 进了 type_params 数组 ⇒ 声明与符号表对不上 ⇒ 后面报「E0062: cannot infer type parameter」这种误导性错误。两处都加 `parser_duplicate_name` 守卫。门:`spec_dup_import.jhyy` / `spec_dup_type_param.jhyy` |
 | W-151 | — | ~~match arm 不开作用域 ⇒ arm 的模式绑定**复用外层同名变量** ⇒ **payload 被静默丢弃**(静默错值)~~ ✅ **2026-10-27 已修**:arm 的模式绑定落进**外层**作用域 + `parse_pattern` 的 ident 绑定走「先查后插」且查是 `symtab_lookup`(沿链往外找)⇒ 模式的「绑定」变成「引用」。修法:每个 arm 一个**独立作用域**(push/pop)—— ⚠ statement 形式(`parse_match`)与 expression 形式(inline match 在 `parse_expr` 里)是**两份**代码,**都要改**(实测踩过);模式里的 ident 只查**当前**作用域(`symtab_lookup_local`)。门:`spec_match_arm_scope.jhyy` |

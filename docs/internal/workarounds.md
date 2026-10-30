@@ -187,6 +187,7 @@
 | [W-165](#w-165) | RESOLVED | `jhyy --version` **从来就不存在** ⇒ 文档 / release note... |
 | [W-166](#w-166) | RESOLVED | `build.ps1 bundle` 只在 MSI **不存在**时才重建 ⇒ **陈旧 MSI... |
 | [W-167](#w-167) | RESOLVED | alloc 池的栈预留**写死 8192 字节** ⇒ 每个函数的帧 ≥8352 ⇒... |
+| [W-168](#w-168) | ACTIVE | `jhyy build` **不解析 `-o`** —— usage 串谎称支持,产物静默落回... |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -12564,3 +12565,67 @@ alloc_pool_size = 8192 + per_fn_alloc
 - 测量:`scripts/dev/bench/runtime_perf.py`;数据:`docs/perf/self-backend-baseline-2026-10-29.md`
 - 相关:**W-147**(自举闭环门验错的那一代 —— 本条的过渡期就是靠它的「迭代到不动点」
   自动消化的:第 1 代与第 2 代产物不同 ⇒ 推进锚点一代 ⇒ 第 2 代收敛 ✓)
+
+<a id="w-168"></a>
+## W-168: `jhyy build` **不解析 `-o`** —— usage 串谎称支持,产物静默落回 input 同目录
+
+**状态:** ACTIVE since 2026-10-30 (v4.4.0) — build 子命令忽略 -o flag;真修并入 v4.4.0(它本来就要重写 temp 分配)
+**Filed-by:** 2026-10-30 (仓库清理 —— 查「bench 为何往 compiler/src0/ 写产物」时撞上)
+**日期:** 2026-10-30
+
+**触发面:** `compiler/src0/main.jhyy` 的 `cmd_build`(:1510)—— `jhyy build` 子命令。
+
+**症状:**
+```
+$ jhyy build t.jhyy -o /tmp/out/main
+[4] codegen done
+$ ls /tmp/out/          # 空 —— -o 被静默忽略
+$ ls t.s                # 产物落回 input 同目录
+```
+而 usage 串(`:1512`)写着 `usage: jhyy build <file.jhyy> [-o output]`
+⇒ **CLI 在说谎**;用户以为指定了输出路径,拿到的却是**别处的产物**,且**零告警**。
+
+**根因:**
+`cmd_build` 只取 `argv_arr[0]` 当输入、其余参数全丢:
+```
+let argv_arr = argv as **u8;
+let input = (*argv_arr);
+let out_buf = malloc(1024 as i64);
+derive_output_name(input, out_buf);
+```
+而 `cmd_compile`(:1543-1584)从 v0.8 commit 4 起就有完整的 `-o` / `--no-link` 解析
+⇒ **两个子命令的 CLI 不对称**。`build` 的 `-o` **从来没实现过**,
+usage 串抄的是 `compile` 的写法。
+
+**workaround:**
+暂无(未修)。可用的绕法:① 用 `compile --no-link -o <path>` 代替
+`build -o` —— 两者产出的 `.s` **逐字节相同**(实测 13,427,368 B 完全一致),
+且 `compile --no-link` 认 `-o`;这是仓内 `closure_check.sh` / `self_host_bench.sh`
+现在用的写法。② 直接接受产物落在 input 同目录。
+
+**影响范围:**
+- 只影响 `build` 子命令;`compile` 的 `-o` 从 v0.8 起一直正常。
+- 仓内唯一**依赖**「产物落在源码旁边」这行为的是
+  `scripts/dev/regalloc_reference.py` 的对拍流程(`JHY_WRITE_IL=1 jhyy build ...`
+  ⇒ `compiler/src0/main.il`)—— 该脚本已加注释说明「刻意如此,别去清理」。
+- 外部用户:任何照 usage 串传 `-o` 的人。
+
+**失效条件:** `cmd_build` 实现 `-o` 解析(或 usage 串不再宣称支持)。
+
+**修法草案:**
+照 `cmd_compile`(:1547-1569)已有的解析写一份给 `cmd_build`:
+`-o <path>` + 第一个非 flag 参数当输入。**或者**至少把 usage 串改成不说谎。
+
+⚠️ **为什么 2026-10-30 没直接修**:改 `compiler/src0/main.jhyy` ⇒ 新增局部变量 ⇒
+**移位模块级 temp 编号** ⇒ 自举产物行为漂移(v4.0.20 实测 6 个 sysv 用例全红)
+⇒ 需要「src0 改动 → 刷新自举锚点 → D43 baseline 重新 pin → 全量回归(含 Docker
+sysv)」一整套发版级流程。**并入 v4.4.0** 最省事 —— v4.4.0 本来就要重写
+temp 分配(位置映射 + 前瞻窗口),锚点刷新 / baseline re-pin 那一步届时必然要做。
+
+**引用:**
+- 源码:`compiler/src0/main.jhyy:1510`(cmd_build)/ `:1512`(usage 串)/
+  `:1543-1584`(`cmd_compile` 的正确写法,照抄对象)
+- `compiler/tests/stage1-expanded.sh` 曾把这个行为当「已知事实」写进注释
+  (2026-10-30 已随该脚本一起修掉 —— 它原本 7 个测试必然全红)
+- `scripts/dev/regalloc_reference.py` —— 唯一依赖「落在源码旁边」的仓内流程
+- plan:`docs/plans/v4/v4.4.0-plan.md`(下一个版本)
