@@ -7019,7 +7019,7 @@ if ret_temp_id == (0 as i64) {
     5. **commit cadence split (`feedback_audit_single_commit_diff`)** — attempt #6 一次性 4-file 108 LOC 引入 post-emit hidden trap, attempt #7 拆 4 commits 独立 verify, 每 commit 单独 ship, audit diff 容易 review
   - **结论 (7 attempts, attempt #7 SUCCESS, audit ledger closed)**: W-101 真根因 = `cg_offset_for_temp_with_target` 对 high temp_id (>= 1024) address-holder init/lookup 路径 + alloc/formula pool 物理 overlap (per audit `docs/audit/v4.0.3-codegen-deep-audit.md` 维度 2 错方向 + § 5 separate address-holder pool 正确方向). attempt #7 走 audit § 5 direction + 3-arg `cg_alloc_slot` 防 caller 写错, 1-iter RCA 严格按 attempt #6 gdb evidence, 5/5 PASS target = main.jhyy (覆盖 emit_load + cg_is_address_holder path), 1.5h 完成 7th attempt SUCCESS.
   - **W-101 status ✅ RESOLVED 2026-10-12 (v4.0.6 wip attempt #7 SUCCESS)** — fix ship, 5/5 PASS on main.jhyy, .s diff 0 字节 regression, jhyy.exe + jhyy_v1.exe.exe binary slot 同步更新, jhyy.exe.sha256 sidecar refresh to `2d14b2b8...`. v4.0.0 final tag ship gate 准备就绪 (per user 政策 "v4 不发" 缓解, ACTIVE = 0)
-  - **changelog**: `docs/logs/v4/changelog-v4.0.6.md` (W-101 attempt #7 SUCCESS audit ledger, 7 attempts 全记录, .s diff 0 字节 regression evidence)
+  - **changelog**: [`changelog-v4.0.6.md`](../logs/v4/changelog-v4.0.0.md#v406) (W-101 attempt #7 SUCCESS audit ledger, 7 attempts 全记录, .s diff 0 字节 regression evidence)
 
 **引用:**
 - SEGV 现场: `compiler/build/bin/_w099_v2.exe.s` 中 `parser__parse_expr` 函数体 + 0xD350 (54146) offset
@@ -12399,7 +12399,7 @@ jhyy build hello.jhyy -o hello
 - 替代写法统一为 **`jhyy --help` 的首行**(`jhyy compiler v<版本> (self-hosted)`);
   不带参数跑 `jhyy` 也打同一行。
 - `installer/changelog-template.md` / `installer/README.md` / `docs/internal/build.md`
-  / `docs/plans/v4/*.md` / `docs/logs/v4/changelog-v4.0.2.md` /
+  / `docs/plans/v4/*.md` / [`changelog-v4.0.2.md`](../logs/v4/changelog-v4.0.0.md#v402) /
   `docs/internal/workarounds.md` 里全部相关表述订正。
 - ⚠️ **两类历史记录要区别对待**(改错就把 audit trail 改成假的了):
   | 记录类型 | 例子 | 改法 |
