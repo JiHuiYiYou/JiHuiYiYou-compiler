@@ -9,6 +9,9 @@
         "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler.git"
     },
     "license": "MIT",
+    "scripts": {
+        "check:grammar": "node scripts/check-grammar.mjs"
+    },
     "engines": { "vscode": "^1.80.0" },
     "icon": "./icon.png",
     "main": "./out/extension.js",

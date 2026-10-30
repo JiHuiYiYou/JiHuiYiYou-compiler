@@ -26,21 +26,23 @@
         },
         "chars": {
             "name": "string.quoted.single.jhyy",
-            "match": "'.'"
+            "match": "'(?:\\\\.|[^'\\\\])'"
         },
         "numbers": {
             "patterns": [
-                { "name": "constant.numeric.hex.jhyy", "match": "\\b0[xX][0-9a-fA-F_]+\\b" },
-                { "name": "constant.numeric.oct.jhyy", "match": "\\b0[oO][0-7_]+\\b" },
-                { "name": "constant.numeric.bin.jhyy", "match": "\\b0[bB][01_]+\\b" },
-                { "name": "constant.numeric.float.jhyy", "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*\\b" },
-                { "name": "constant.numeric.integer.jhyy", "match": "\\b[0-9][0-9_]*\\b" }
+                { "name": "constant.numeric.hex.jhyy", "match": "\\b0[xX][0-9a-fA-F]+\\b" },
+                { "name": "constant.numeric.oct.jhyy", "match": "\\b0[oO][0-7]+\\b" },
+                { "name": "constant.numeric.bin.jhyy", "match": "\\b0[bB][01]+\\b" },
+                { "name": "constant.numeric.oct.jhyy", "match": "\\b0[0-7]+\\b" },
+                { "name": "constant.numeric.float.jhyy", "match": "\\b[0-9]+\\.[0-9]+(f32|f64|f)?\\b" },
+                { "name": "constant.numeric.integer.jhyy", "match": "\\b[0-9]+(i8|i16|i32|i64|u8|u16|u32|u64)?\\b" }
             ]
         },
         "keywords": {
             "patterns": [
-                { "name": "keyword.control.jhyy", "match": "\\b(if|else|while|for|in|match|return)\\b" },
-                { "name": "keyword.declaration.jhyy", "match": "\\b(let|mut|fn|type|struct|enum|extern|import|as)\\b" },
+                { "name": "keyword.control.jhyy", "match": "\\b(if|else|while|for|in|match|return|break|continue|defer)\\b" },
+                { "name": "keyword.declaration.jhyy", "match": "\\b(let|mut|fn|type|struct|enum|extern|import|as|const)\\b" },
+                { "name": "storage.modifier.jhyy", "match": "\\bvolatile\\b" },
                 { "name": "keyword.other.jhyy", "match": "\\b(sizeof|alignof)\\b" }
             ]
         },
@@ -52,12 +54,13 @@
         },
         "operators": {
             "patterns": [
-                { "name": "keyword.operator.jhyy", "match": "\\+=|-=|\\*=|/=|%=|==|!=|<=|>=|&&|\\|\\||<<|>>|->|=>|\\.\\.|<|>|&|\\||\\^|~|!|\\+|-|\\*|/|%|=" }
+                { "name": "keyword.operator.jhyy", "match": "\\+=|-=|\\*=|/=|%=|==|!=|<=|>=|&&|\\|\\||<<|>>|->|=>|::|\\.\\.|<|>|&|\\||\\^|~|!|\\+|-|\\*|/|%|=|\\." }
             ]
         },
         "constants": {
             "patterns": [
-                { "name": "constant.language.boolean.jhyy", "match": "\\b(true|false)\\b" }
+                { "name": "constant.language.boolean.jhyy", "match": "\\b(true|false)\\b" },
+                { "name": "constant.language.null.jhyy", "match": "\\bnull\\b" }
             ]
         }
     }

@@ -7,6 +7,7 @@
 # | step                                   | 阻断?  | 验的是                                    |
 # |----------------------------------------|--------|-------------------------------------------|
 # | regress.py --all                       | ✅ 是  | 201 个测试的退出码/stdout 断言            |
+# | vscode-ext:check-grammar(独立 job)     | ✅ 是  | VSCode 语法高亮 grammar 与真实语言规则一致 |
 # | 提交产物与当前源码同步(artifact-fresh)| ✅ 是  | 提交版与现编版编 src0 的 `.s` 逐字节相同  |
 # | make selfhost                          | ✅ 是  | v2..v5 的 `.s` 逐字节相同(确定性+自洽)   |
 # | closure_check.sh                       | ✅ 是  | Stage2 `.s` == Stage3 `.s`(自举闭环)      |
@@ -614,6 +615,43 @@ jobs:
           bash compiler/tests/bootstrap/sysv_abi_cross.sh tmp/sysv_abi
 
   # ══════════════════════════════════════════════════════════════════════
+  # VSCode 扩展 —— grammar 自检(独立 job,不依赖编译器)
+  # ══════════════════════════════════════════════════════════════════════
+  #
+  # 2026-10-30:此前 grammar **完全没有门**。`syntaxes/jhyy.tmLanguage.json`
+  # 是**手写**的,很容易跟真实语言规则对不上(用户报过一批:漏关键字 /
+  # 数字字面量规则不准 / 字符字面量不高亮),只能靠用户报 ⇒ 修完没有
+  # 任何东西盯着它别再退回去。
+  # `vscode-ext/scripts/check-grammar.mjs` 就是为此写的(把「语言真实规则 →
+  # grammar 必须命中」钉成 30 条断言 + 4 条反例),但它**没接进 CI**
+  # ⇒ 只在本地手动跑 = 装饰(per `feedback_ci_gate_must_exercise_path`:
+  # opt-in 的门必须真接上,否则比没有门更糟)。
+  #
+  # **独立 job 而不是 build-and-test 里的一步**:纯 Node、零依赖、约 1 秒;
+  # 放进那个 job 会让它排在最长 45 分钟的编译之后才报红。
+  #
+  # ⚠️ 这道门**造过红灯**(2026-10-30 变异测试):
+  #   ① 往 numbers 规则数组**前面插一条**  → 仍绿(重排免疫)
+  #   ② 重排 + 整数规则放回 `_` 分隔      → 红(旧版在此**空转变绿**)
+  #   ③ 浮点规则放行指数写法               → 红
+  #   ④ 前导零规则认 0-9                  → 红
+  #   ⑤ 整数 scope 改成 oct               → 红
+  vscode-ext:
+    name: VSCode extension grammar self-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Grammar self-check (语言真实规则 → grammar 必须命中)
+        working-directory: vscode-ext
+        run: node scripts/check-grammar.mjs
+
+  # ══════════════════════════════════════════════════════════════════════
   # 发布 —— 门不绿就发不出去
   # ══════════════════════════════════════════════════════════════════════
   #
@@ -628,7 +666,7 @@ jobs:
   # 且零代码重复。
   release:
     name: Release installer
-    needs: build-and-test
+    needs: [build-and-test, vscode-ext]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write   # 创建 GitHub Release
