@@ -187,6 +187,7 @@ $(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(JHY_RUNTIME_O) $
 	@rm -f $(BIN_DIR)/_boot_anchor.exe $(BIN_DIR)/_boot_new2.exe \
 	       $(BIN_DIR)/_boot_anchor.il $(BIN_DIR)/_boot_new2.il \
 	       $(BIN_DIR)/_boot_anchor.s  $(BIN_DIR)/_boot_new.s \
+	       $(BIN_DIR)/_boot_new2.s \
 	       $(BIN_DIR)/_boot_new.log $(BIN_DIR)/_boot_new2.log
 
 # v4.0.8:预编 runtime.c / jhyy_helpers.c 成 .o。
