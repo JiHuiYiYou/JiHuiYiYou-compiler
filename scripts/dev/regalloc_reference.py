@@ -10,6 +10,12 @@
     JHY_WRITE_IL=1 ./compiler/build/bin/jhyy.exe build compiler/src0/main.jhyy
     python scripts/dev/regalloc_reference.py compiler/src0/main.il
 
+⚠️ `compiler/src0/main.il` 落在**源码目录**里是刻意的,不是污染:
+   `jhyy build` **不解析 `-o`**(usage 串写着支持,实现漏了)⇒ 产物必定落在
+   input 同目录,没法重定向。而 in-mem 后端默认不落 .il,只有
+   `JHY_WRITE_IL=1` 才落 —— 所以这个 .il 只有在显式 opt-in 时才出现,
+   且是本对拍流程的输入,不是残留。**别去"顺手清理"它。**
+
 对拍点(实测两者**逐项相同**):
     · 合格候选(def+所有 use 同基本块 + 期间无 call + 整数类型)
     · 实际分配到寄存器的 temp 数(5 个寄存器池)

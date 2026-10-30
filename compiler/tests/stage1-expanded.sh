@@ -1,7 +1,12 @@
 #!/bin/bash
 # stage1-expanded.sh — v0.9 wip commit 2.5
 # Stage 1 byte-equal baseline verification across v0 (jhyy_0) and jhyy_v1.
-# 每个测试: jhyy_0 build vs jhyy_1 build → diff 必须空。
+# 每个测试: jhyy_0 compile --no-link vs jhyy_1 compile --no-link → diff 必须空。
+#
+# ⚠️ 2026-10-30 修:原脚本用 `build ... -o`,但 `cmd_build` **不解析 `-o`**
+# (usage 串写着支持,实现漏了)⇒ 产物落在 input 同目录,而脚本去 OUT_DIR 找
+# ⇒ v0_actual 永远不存在 ⇒ cmp 必然 FAIL(7 个测试全红)。
+# 同时原脚本比的是 `.il`,而 in-mem 后端默认不落 .il ⇒ 也要改成比 `.s`。
 
 set -u
 
@@ -45,21 +50,26 @@ echo
 
 for t in "${TESTS[@]}"; do
     src="${EXAMPLES_DIR}/${t}.jhyy"
-    v0_actual="${OUT_DIR}/${t}_v0_tmp.il"
-    # jhyy_v1 的 cmd_build 不解析 -o, 固定写到 input 同目录 <basename>.il
-    v1_actual="${EXAMPLES_DIR}/${t}.il"
+    v0_actual="${OUT_DIR}/${t}_v0_tmp.s"
+    v1_actual="${OUT_DIR}/${t}_v1_tmp.s"
 
     # 先删干净: 构建失败时要么没文件(loud FAIL), 要么就是本次产物 —
-    # 绝不能拿上一次遗留的陈旧 .il 去比对。
+    # 绝不能拿上一次遗留的陈旧产物去比对。
     rm -f "$v0_actual" "$v1_actual"
 
-    if ! "${JHY_0}" build "${src}" -o "${t}_v0_tmp" >/dev/null 2>"$OUT_DIR/${t}_v0.err"; then
-        echo "[FAIL] $t — v0 build failed:"
+    # ⚠️ 用 `compile --no-link` 而不是 `build`:
+    #   `jhyy build` **不解析 `-o`**(usage 串写着支持,实现漏了)⇒ 产物必定
+    #   落在 input 同目录,没法重定向 —— 而本脚本需要把两侧产物放在已知路径
+    #   才能 cmp。`compile --no-link` 支持 `-o`,且产出的 .s 与 `build`
+    #   **逐字节相同**(实测一致)⇒ 验的是同一件事。
+    #   这也是项目既有的惯用法(compiler/tests/bootstrap/closure_check.sh)。
+    if ! "${JHY_0}" compile --no-link "${src}" -o "${t}_v0_tmp" >/dev/null 2>"$OUT_DIR/${t}_v0.err"; then
+        echo "[FAIL] $t — v0 compile failed:"
         head -3 "$OUT_DIR/${t}_v0.err" | sed 's/^/       /'
         fail=$((fail+1)); failed_tests+=("$t"); continue
     fi
-    if ! "${JHY_1}" build "${src}" -o "${t}_v1_tmp" >/dev/null 2>"$OUT_DIR/${t}_v1.err"; then
-        echo "[FAIL] $t — v1 build failed:"
+    if ! "${JHY_1}" compile --no-link "${src}" -o "${t}_v1_tmp" >/dev/null 2>"$OUT_DIR/${t}_v1.err"; then
+        echo "[FAIL] $t — v1 compile failed:"
         head -3 "$OUT_DIR/${t}_v1.err" | sed 's/^/       /'
         fail=$((fail+1)); failed_tests+=("$t"); continue
     fi

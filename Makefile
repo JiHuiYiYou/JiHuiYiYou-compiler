@@ -270,6 +270,9 @@ test:
 
 clean:
 	rm -rf $(OBJ_DIR)
+	@# bench 输出目录(self_host_bench.sh 的产物,12.8 MB × 2)——
+	@# 它在 bin/ 之外,上面的 find 覆盖不到 ⇒ 显式删。
+	rm -rf $(BUILD_DIR)/bench
 	@# bin/ 下**只删未跟踪**的产物。git 跟踪的两个必须留在树上:
 	@#   .gitkeep  — 目录占位
 	@#   jhyy.exe  — 自举锚点(fresh clone 里就有;删了就没法自举)
