@@ -2,7 +2,7 @@
 
 VS Code 语言扩展 — `.jhyy` 文件的语法高亮 + 原生 run / compile 命令。
 
-> **Last updated**: v1.8.3 (2026-08-29) — `jhyy-lang-1.8.3.vsix` shipped,跟 compiler v1.8.3 / installer v1.8.3 / `.jhyy` 文件图标闭环(per installer v1.8.1 windres embed 修复)。最新 vsix 见 [`installer/build-artifacts/jhyy-lang-1.8.3.vsix`](../installer/build-artifacts/)。
+> **Last updated**: v1.8.3 (2026-08-29) — `jhyy-lang-1.8.3.vsix` shipped,跟 compiler v1.8.3 / installer v1.8.3 / `.jhyy` 文件图标闭环(per installer v1.8.1 windres embed 修复)。最新 vsix 见 `installer/build-artifacts/jhyy-lang-1.8.3.vsix`。
 
 ## 定位
 
@@ -20,9 +20,9 @@ VS Code 语言扩展 — `.jhyy` 文件的语法高亮 + 原生 run / compile �
 
 | 文件 | 版本 | 备注 |
 |------|------|------|
-| [`vscode-ext/package.json`](package.json) | `0.1.0`(manifest 模板, **不动**)| 这是 vsce manifest 的内部 version 字段,**由 [`installer/vscode-ext/package.ps1`](../installer/vscode-ext/) 在 build 期间按 `JHY_VERSION` 注入到 `.vsix` 的 `package.json`**。`package.json` 本身不修改 — 它是单 canonical source,vsix 内部 version 跟 compiler/installer 对齐(v1.8.x vsix → `1.8.3`)。 |
-| [`installer/build-artifacts/jhyy-lang-1.8.3.vsix`](../installer/build-artifacts/) | `1.8.3` | shipped via GH Actions release workflow |
-| [`vscode-ext/jhyy-lang-*.vsix`](.) | 0.1.0 → 1.8.3 | 历史 build 残留(`vsce package` 各次 ship 的本地副本,gitignored 但因 `vscode-ext/` 误 commit 留下 9 个版本) |
+| [`vscode-ext/package.json`](package.json) | `0.1.0`(manifest 模板, **不动**)| 这是 vsce manifest 的内部 version 字段,**由 [`installer/vscode-ext`](../installer/vscode-ext/) 在 build 期间按 `JHY_VERSION` 注入到 `.vsix` 的 `package.json`**。`package.json` 本身不修改 — 它是单 canonical source,vsix 内部 version 跟 compiler/installer 对齐(v1.8.x vsix → `1.8.3`)。 |
+| `installer/build-artifacts/jhyy-lang-1.8.3.vsix` | `1.8.3` | shipped via GH Actions release workflow |
+| [`vscode-ext`](.) | 0.1.0 → 1.8.3 | 历史 build 残留(`vsce package` 各次 ship 的本地副本,gitignored 但因 `vscode-ext/` 误 commit 留下 9 个版本) |
 
 > **历史 vsix**: `vscode-ext/jhyy-lang-*.vsix` 9 个版本(`0.1.0` / `1.5.6` / `1.5.7-rc1` / `1.5.7` / `1.5.8` / `1.5.9` / `1.5.10` / `1.8.0` / `1.8.3`)是开发期 `vsce package` 误 commit,应 gitignore 但实际跟踪,v2.0 sprint 启动前清理。
 
@@ -68,7 +68,7 @@ code --list-extensions | Select-String jhyy
 
 ### 方法 2: installer 自动装(用户级)
 
-走 [`installer/`](../installer/) — MSI post-install RunOnce (`install-configure-all.bat`) inline `code --install-extension` 自动跑。**Win10 22H2+ 上 v1.5.10 之前有 bug**(W-062),v1.8.2 起改走自定 ProgId `JHYY.SourceFile`(不依赖 `code` CLI),v1.8.3 起 SYSTEM-context CustomAction + 3-attempt fallback 闭环。
+走 [`installer`](../installer/) — MSI post-install RunOnce (`install-configure-all.bat`) inline `code --install-extension` 自动跑。**Win10 22H2+ 上 v1.5.10 之前有 bug**(W-062),v1.8.2 起改走自定 ProgId `JHYY.SourceFile`(不依赖 `code` CLI),v1.8.3 起 SYSTEM-context CustomAction + 3-attempt fallback 闭环。
 
 ### 方法 3: VSCode Marketplace(未来)
 

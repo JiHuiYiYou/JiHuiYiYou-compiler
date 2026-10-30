@@ -1,7 +1,7 @@
 # JHYY v2.11.0 — codegen_amd64_run 真修 (V2-C Part 2a, W-073 + W-074)
 
 **Shipped**: TBD (1 source commit + 1 docs commit)
-**Plan**: [`../../plans/v2/v2.11.0-plan.md`](../../plans/v2/v2.11.0-plan.md)
+**Plan**: [`docs/plans/v2/v2.11.0-plan.md`](../../plans/v2/v2.11.0-plan.md)
 **Scope**: codegen_amd64.jhyy trace + emit 函数体 silent-no-op 真修 + regress.py `--self-backend` flag + docs
 **前置**: v2.9.0 ship (V2-C Part 1: N≥3 fixed point verification harness)
 
@@ -9,12 +9,12 @@
 
 ## 🎯 Milestone indexes (standalone celebration docs)
 
-Per [`feedback_changelog_umbrella`](../../../JiHuiYiYou/memory/feedback_changelog_umbrella.md) 例外条款 ("sprint 涉及重大 pivot"), 以下 vX.Y.Z ship 单独开了 milestone celebration doc (umbrella 顶部索引, **不**重复内容):
+Per `feedback_changelog_umbrella` 例外条款 ("sprint 涉及重大 pivot"), 以下 vX.Y.Z ship 单独开了 milestone celebration doc (umbrella 顶部索引, **不**重复内容):
 
 | Sprint | Standalone milestone doc | Milestone |
 |--------|--------------------------|-----------|
-| **v2.11.23** | [`changelog-v2.11.23.md`](changelog-v2.11.23.md) | 🏆 **首次 self-backend 0 FAIL parity with QBE path** (架构修 + 4 DEFERRED sub-bug 全真修;regress 119/119 PASS / 0 FAIL / 20 SKIP;ACTIVE workaround 5 → 3) |
-| (v1.0.0 时代, v1 pattern 不在本 umbrella 范围) | [`../v1/changelog-v1.0.0.md`](../v1/changelog-v1.0.0.md) | 🏆 Stage 2 N=3 byte-equal 闭环 (自举闭合) |
+| **v2.11.23** | [`docs/logs/v2/changelog-v2.11.23.md`](changelog-v2.11.23.md) | 🏆 **首次 self-backend 0 FAIL parity with QBE path** (架构修 + 4 DEFERRED sub-bug 全真修;regress 119/119 PASS / 0 FAIL / 20 SKIP;ACTIVE workaround 5 → 3) |
+| (v1.0.0 时代, v1 pattern 不在本 umbrella 范围) | [`docs/logs/v1/changelog-v1.0.0.md`](../v1/changelog-v1.0.0.md) | 🏆 Stage 2 N=3 byte-equal 闭环 (自举闭合) |
 
 后续 vX.Y.Z sprint 满足 "重大 pivot" 例外时同样在 umbrella 顶部索引。
 
@@ -109,7 +109,7 @@ V2-C Part 2a:
 ## v2.11.1 — V2-C Part 2a-补: codegen_amd64_run lexer gap 真修 (W-074.5 closure + 延伸-3/4/6/7)
 
 **Shipped**: 2026-09-10
-**Plan**: [`../../plans/v2/v2.11.1-plan.md`](../../plans/v2/v2.11.1-plan.md) (in `twinkly-hatching-canyon.md` per plan mode)
+**Plan**: [`docs/plans/v2/v2.11.1-plan.md`](../../plans/v2/v2.11.1-plan.md) (in `twinkly-hatching-canyon.md` per plan mode)
 **Scope**: lexer gap 闭 (dbgfile/dbgloc/{/} + csltw + next_token_call args consume + struct offset 真修 + emit 误 cast 真修) + parse_and_emit DIRECTIVE noop 分支
 **前置**: v2.11.0 commit `25dfb00` (W-074 il_len=0 真修)
 
@@ -1566,7 +1566,7 @@ $ python regress.py --self-backend --no-baseline-check --timeout=120
 > "进度又太慢, 又怕推块了老 revert, 进度就一直很缓慢, 二十多个小版本了, 自研后端还没搞定"
 > "我有一个想法就是根因确定而不是症状确认"
 
-User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 sprint。完整 RCA 见 [`docs/internal/rca-v2.11.17.md`](../../internal/rca-v2.11.17.md)。
+User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 sprint。完整 RCA 见 `docs/internal/rca-v2.11.17.md`。
 
 ### RCA 关键发现
 
@@ -1614,7 +1614,7 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 - ✅ **5/5 PASS on C.3 phi 5 测试** (从 11 个挑最简 5): bug2_if_phi / bug3_void_if / bug3_void_exact / nested_if / control_flow
 - ✅ **IL phi count = 0** (grep `-c "phi "` = 0 全 5) — 漏前驱 = 必有 phi 残留, 安全网一步不能省
 - ✅ **regress.py 114/114 PASS** (full suite, 0 fail, 20 skipped = WSL/V3-B features)
-- ✅ **self-host closure sha = `3f96814870a3afb0d9b59e6d212165ffddeaada5ff4d8b29eda83126c0253cf8`** (v1/v2/v3/v4/v5 byte-equal, re-baseline per D43, 见 [`d43-baseline-archive.md`](d43-baseline-archive.md) v2.11.18 row)
+- ✅ **self-host closure sha = `3f96814870a3afb0d9b59e6d212165ffddeaada5ff4d8b29eda83126c0253cf8`** (v1/v2/v3/v4/v5 byte-equal, re-baseline per D43, 见 [`docs/logs/v2/d43-baseline-archive.md`](d43-baseline-archive.md) v2.11.18 row)
 - ✅ **byte_equal_amd64.sh 10/10 PASS** (self vs QBE parity, no-strict mode)
 - ✅ **nested_if EXIT=244** (= 500 mod 256, 期望 500 per `// EXPECT: 500` 注释)
 - ✅ **5/5 phi 测试 stdout 含正确值** (bug2_if_phi: `result = 300`; bug3_void_if: `result = 100`; bug3_void_exact: `x = 100`; control_flow: `sum = 23`; nested_if EXIT 244 = 500)
@@ -1657,7 +1657,7 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 
 ## v2.11.19 — Full SSE/float emit (Win + SysV) + ship ✅ shipped 2026-09-17
 
-**Plan**: [`../../plans/v2/v2.11.19-plan.md`](../../plans/v2/v2.11.19-plan.md)
+**Plan**: [`docs/plans/v2/v2.11.19-plan.md`](../../plans/v2/v2.11.19-plan.md)
 **RCA**: `rca-v2.11.17.md` § 3.3 — 自研 backend 零 SSE emit 代码 (grep `movss|movsd|addss|mulss|divss|cvtss2si|cvttsi2si|ucomiss|XMM` = 0 hits in `compiler/src0/codegen_amd64_*.jhyy`)。原 plan B "auto-QBE_FALLBACK" 被 user 否决 (2026-09-17), 改做**真 SSE emit**, 全 Win64 + SysV ABI 都自研 backend 通。
 
 **改动概览** (5 sub-commits, axis-v2 worktree):
@@ -1688,7 +1688,7 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 
 ## v2.11.20 — B-runtime 診斷 + 修復 (B-runtime cluster 3/28) 📋 planned
 
-**Plan**: [`../../plans/v2/v2.11.20-plan.md`](../../plans/v2/v2.11.20-plan.md)
+**Plan**: [`docs/plans/v2/v2.11.20-plan.md`](../../plans/v2/v2.11.20-plan.md)
 **RCA** (per `rca-v2.11.17.md` § 3.4):
 - Grep `jhyy_str|jhyy_alloc|jhyy_panic|jhyy_slice|jhyy_string|jhyy_arena` 在 `compiler/src0/codegen_amd64_*.jhyy`: **0 matches**
 - 只找到 compiler 自己用的 `arena_alloc` / `sb_append*` / `strlen` / `sprintf_lld` (编译时 codegen 自己用, 不是 compiled program runtime)
@@ -1739,8 +1739,8 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 
 **Pure code Phase 1+2+3+4: ~80 LOC** (vs 原始估 ±50, Phase 3 W-017 多 25 LOC 用于 emit_load/store $label 双 path)。
 
-**Plan**: [`../plans/v2/v2.11.20-plan.md`](../plans/v2/v2.11.20-plan.md)
-**RCA**: [`../../internal/rca/rca-v2.11.20.md`](../../internal/rca/rca-v2.11.20.md)
+**Plan**: [`docs/plans/v2/v2.11.20-plan.md`](../../plans/v2/v2.11.20-plan.md)
+**RCA**: [`docs/internal/rca/rca-v2.11.20.md`](../../internal/rca/rca-v2.11.20.md)
 
 ---
 
@@ -1781,8 +1781,8 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 
 **Pure docs sprint — 0 source LOC changes.** v2.11.21-fix sprint follows with concrete patches。
 
-**Plan**: [`../plans/v2/v2.11.21-plan.md`](../plans/v2/v2.11.21-plan.md)
-**RCA**: [`../../internal/rca/rca-v2.11.21.md`](../../internal/rca/rca-v2.11.21.md)
+**Plan**: [`docs/plans/v2/v2.11.21-plan.md`](../../plans/v2/v2.11.21-plan.md)
+**RCA**: [`docs/internal/rca/rca-v2.11.21.md`](../../internal/rca/rca-v2.11.21.md)
 
 ---
 
@@ -1832,8 +1832,8 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 4. `fix(backend): v2.11.21-fix Phase 4 — dungeon_game next_token_ret 跨行吞 @else50/@else53 真修` (commit `1985bd5`)
 5. `docs+ship(v2.11.21-fix): workarounds W-074.13 closure + architecture + d43-baseline-archive + tag v2.11.21` (commit `7422850`)
 
-**Plan**: [`../plans/v2/v2.11.21-plan.md`](../plans/v2/v2.11.21-plan.md) (RCA-only sprint v1 + FIX commit)
-**RCA**: [`../../internal/rca/rca-v2.11.21.md`](../../internal/rca/rca-v2.11.21.md)
+**Plan**: [`docs/plans/v2/v2.11.21-plan.md`](../../plans/v2/v2.11.21-plan.md) (RCA-only sprint v1 + FIX commit)
+**RCA**: [`docs/internal/rca/rca-v2.11.21.md`](../../internal/rca/rca-v2.11.21.md)
 
 ---
 
@@ -1877,7 +1877,7 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 - W-074.13 sub-bug 4 (for_in_slice_nested): 🔴 DEFERRED to v2.12.x (v2.11.22 attempt REVERTED; same architectural blocker as sub-bug 1)
 - 0 net source ACTIVE workaround count change (2 DEFERRED stays ACTIVE)
 
-**Plan**: [`../../plans/v2/v2.11.22-plan.md`](../../plans/v2/v2.11.22-plan.md) (NEW — DEFER outcome documented)
+**Plan**: [`docs/plans/v2/v2.11.22-plan.md`](../../plans/v2/v2.11.22-plan.md) (NEW — DEFER outcome documented)
 
 ---
 
@@ -1939,8 +1939,8 @@ v2.11.23 正确 RCA: **emit_alloc 应该调 existing `cg_record_temp_slot` API (
 - 0 net source ACTIVE workaround count change vs v2.11.22 (Phase 1+2 src0 changes are 真修 not workaround)
 - **net ACTIVE workaround count** (post-v2.11.23): 5 → **3** (W-074.13 全 CLOSED + parent W-074.13 RESOLVED)
 
-**Plan**: [`../../plans/v2/v2.11.23-plan.md`](../../plans/v2/v2.11.23-plan.md) (NEW — 架构修 ship outcome)
-**Workarounds update**: [`../../internal/workarounds.md`](../../internal/workarounds.md) W-074.13 v2.11.23 sprint closure section
+**Plan**: [`docs/plans/v2/v2.11.23-plan.md`](../../plans/v2/v2.11.23-plan.md) (NEW — 架构修 ship outcome)
+**Workarounds update**: [`docs/internal/workarounds.md`](../../internal/workarounds.md) W-074.13 v2.11.23 sprint closure section
 
 ---
 
@@ -2030,8 +2030,8 @@ v2.11.23 正确 RCA: **emit_alloc 应该调 existing `cg_record_temp_slot` API (
 - W-068 真修 v2 (prerequisite cherry-pick): commit `31e9d95` from axis-v2 → cherry-picked as `1c31b80` on main
 - v2.11.18 fix: commit `780da2e`
 - v2.11.20 fix commits (axis-v2): `56be6cf` (Phase 1+2 RC-1), `970f2ca` (Phase 3 W-017), `0831459` (Phase 4 RC-4)
-- D43 baseline archive: [`d43-baseline-archive.md`](d43-baseline-archive.md) v2.11.18 row + v2.11.20 HOLD row
-- v2.11.20 plan: [`../plans/v2/v2.11.20-plan.md`](../plans/v2/v2.11.20-plan.md)
-- v2.11.20 RCA: [`../../internal/rca/rca-v2.11.20.md`](../../internal/rca/rca-v2.11.20.md)
+- D43 baseline archive: [`docs/logs/v2/d43-baseline-archive.md`](d43-baseline-archive.md) v2.11.18 row + v2.11.20 HOLD row
+- v2.11.20 plan: [`docs/plans/v2/v2.11.20-plan.md`](../../plans/v2/v2.11.20-plan.md)
+- v2.11.20 RCA: [`docs/internal/rca/rca-v2.11.20.md`](../../internal/rca/rca-v2.11.20.md)
 
 ---

@@ -59,10 +59,10 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 指源码 commit，不指可安装产物；v4.0.9-rc1(2026-10-18)与 v4.0.19(2026-10-20)
 先后把发布链接通。
 - **v4.0.0-rc1 shipped** (2026-09-30, post-merge of `axis-v2` + `axis-v3` → main):
-- **v4.0.0-rc1 shipped** (commits `a4ba8fa`..`675e7da`;tag `v4.0.0-rc1` 已打) — **v4.x 首发 RC** = v2.x FINAL (v2.16.0) + v3.x FINAL (v3.4.2) 合并入 main;QBE toolchain 完全移除 + bench.sh + .exe byte-equal D26 stage0 coverage + self-backend closure + stdlib (mem/fmt/io/math/string/vec) 落地。**🔴 2026-10-15 audit 后 blocker 未清零**(per 2026-10-10 user 决定 "所有defer/active的workaround必须在v4正式版中清零,大不了v4不发"):W-101 RESOLVED (v4.0.6 attempt #7) + W-097 RESOLVED (2026-10-15,六个 emit 根因,`closure_check.sh` PASS `v2.s == v3.s` byte-identical) + W-072 早已 RESOLVED (2026-09-09)。**索引表 ACTIVE = 14 / DEFERRED = 0**(2026-10-15 复核后修正 —— 此前写的「0」是索引重建脚本读不到 59/89 条目造成的假象,见 W-108;**2026-10-20 已降到 0 条**:W-104 / W-112 / W-114 / W-103 / W-107 / W-120 / W-105 / W-105.1 / W-118 / W-121 / W-122 / W-113 / W-115 / W-106 / W-123 先后闭合 ⇒ **ACTIVE = 0 / DEFERRED = 0** ✅),**下一个动作 = 走 v4.0.0 final 的 promote 流程**(排期见 [`version-schedule.md`](docs/plans/v4/version-schedule.md))([`active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md)),不是 tag final
+- **v4.0.0-rc1 shipped** (commits `a4ba8fa`..`675e7da`;tag `v4.0.0-rc1` 已打) — **v4.x 首发 RC** = v2.x FINAL (v2.16.0) + v3.x FINAL (v3.4.2) 合并入 main;QBE toolchain 完全移除 + bench.sh + .exe byte-equal D26 stage0 coverage + self-backend closure + stdlib (mem/fmt/io/math/string/vec) 落地。**🔴 2026-10-15 audit 后 blocker 未清零**(per 2026-10-10 user 决定 "所有defer/active的workaround必须在v4正式版中清零,大不了v4不发"):W-101 RESOLVED (v4.0.6 attempt #7) + W-097 RESOLVED (2026-10-15,六个 emit 根因,`closure_check.sh` PASS `v2.s == v3.s` byte-identical) + W-072 早已 RESOLVED (2026-09-09)。**索引表 ACTIVE = 14 / DEFERRED = 0**(2026-10-15 复核后修正 —— 此前写的「0」是索引重建脚本读不到 59/89 条目造成的假象,见 W-108;**2026-10-20 已降到 0 条**:W-104 / W-112 / W-114 / W-103 / W-107 / W-120 / W-105 / W-105.1 / W-118 / W-121 / W-122 / W-113 / W-115 / W-106 / W-123 先后闭合 ⇒ **ACTIVE = 0 / DEFERRED = 0** ✅),**下一个动作 = 走 v4.0.0 final 的 promote 流程**(排期见 [`docs/plans/v4/version-schedule.md`](docs/plans/v4/version-schedule.md))([`docs/plans/v4/active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md)),不是 tag final
 - **v1.x 已 ship** (v1.8.3 tag `98c8272`, 2026-08-29) — Stage 2 N=4 byte-equal 闭环 + installer v1.8.3 WiX + UCPD.sys bypass。v1.x 终结。
 
-**v4.0 阶段**:v2.x 中/末 items (QBE 自写 — 现已 in-mem self-backend 直接 x86-64 emit 完成 / amd64_sysv 实 impl — V2-B 5/5 + V2-C v2.8.0 已 ship / N 代 fixed point — v2.14.0 N≥10 已 ship) 跟 v3.x items (3a-3f OS-required: inline asm / `#[naked]` / volatile / `#[link_section]` / memory barrier / `#[no_std]` / `&mut` + lifetime) 全部走完 / dropped off-axis (per 2026-09-29 user FINAL 决定);v4.0.0-rc1 = convergence release candidate (RC 保持,不 promote final per 2026-10-10 user 决定),后续 v4.x 工作走 [`docs/plans/v4/`](docs/plans/v4/) 的当前计划 + backlog。**已 ship 实际状态**(2026-10-11 v4.0.4 plan 已 commit):v4.0.2 ACTIVE bucket → 0 (W-073 emit escape + W-074/076 arena rename + W-075 mem_set i64-store + GHA 修通);v4.0.2.1 W-074.6 sub-bug #3 partial 真修 (sema hash + 65536 + chkstk_ms);v4.0.2.2 W-096 frame blow-up;v4.0.2.3 W-098 i64 literal emit;v4.0.2.5 W-097 hoist 7-site + W-100 sret clobber 真修。**emit 类 blocker 已清零(2026-10-15)**:W-101 RESOLVED (v4.0.6 attempt #7)+ W-097 RESOLVED (2026-10-15 六个 emit 根因,`closure_check.sh` PASS,`fixed_point.sh N=5` 7 PASS / 0 FAIL / 0 INFO,N=2 起全代 byte-equal)+ W-072 早已 RESOLVED (2026-09-09)。**但 2026-10-15 audit 挖出 14 条此前从未登记的活 workaround**(W-103..W-107 / W-105.1 首批;补断言测试又挖出 W-109 浮点比较、W-110 比较串号、W-111 泛型 enum 构造器(当时记为崩溃,2026-10-18 复核不复现)、W-112 link_section no-op、W-113 asm 位置错、W-114 enum match 失效;启 Docker 跑 sysv 门再挖出 W-115 W-089 reproducer 仍崩、W-116 SysV callee 只 spill 4 个寄存器) —— 见下 §当前活跃 workarounds。**下一动作 = 走 v4.0.0 final 的 promote 流程**(2026-10-20:W-104 / W-112 / W-114 / W-103 / W-107 / W-120 / W-105 / W-105.1 / W-118 / W-121 / W-122 / W-113 / W-115 / W-106 / W-123 先后闭合 ⇒ **ACTIVE = 0**),不是 tag v4.0.0 final。OS M11 launch 路径需重新评估 (`v2.0.0-os-prep.md` + `v2-v3-parallel-sprint-plan.md` 中硬前置假设已作废并归档到 `docs/archive/v2-v3/`)。
+**v4.0 阶段**:v2.x 中/末 items (QBE 自写 — 现已 in-mem self-backend 直接 x86-64 emit 完成 / amd64_sysv 实 impl — V2-B 5/5 + V2-C v2.8.0 已 ship / N 代 fixed point — v2.14.0 N≥10 已 ship) 跟 v3.x items (3a-3f OS-required: inline asm / `#[naked]` / volatile / `#[link_section]` / memory barrier / `#[no_std]` / `&mut` + lifetime) 全部走完 / dropped off-axis (per 2026-09-29 user FINAL 决定);v4.0.0-rc1 = convergence release candidate (RC 保持,不 promote final per 2026-10-10 user 决定),后续 v4.x 工作走 [`docs/plans/v4`](docs/plans/v4/) 的当前计划 + backlog。**已 ship 实际状态**(2026-10-11 v4.0.4 plan 已 commit):v4.0.2 ACTIVE bucket → 0 (W-073 emit escape + W-074/076 arena rename + W-075 mem_set i64-store + GHA 修通);v4.0.2.1 W-074.6 sub-bug #3 partial 真修 (sema hash + 65536 + chkstk_ms);v4.0.2.2 W-096 frame blow-up;v4.0.2.3 W-098 i64 literal emit;v4.0.2.5 W-097 hoist 7-site + W-100 sret clobber 真修。**emit 类 blocker 已清零(2026-10-15)**:W-101 RESOLVED (v4.0.6 attempt #7)+ W-097 RESOLVED (2026-10-15 六个 emit 根因,`closure_check.sh` PASS,`fixed_point.sh N=5` 7 PASS / 0 FAIL / 0 INFO,N=2 起全代 byte-equal)+ W-072 早已 RESOLVED (2026-09-09)。**但 2026-10-15 audit 挖出 14 条此前从未登记的活 workaround**(W-103..W-107 / W-105.1 首批;补断言测试又挖出 W-109 浮点比较、W-110 比较串号、W-111 泛型 enum 构造器(当时记为崩溃,2026-10-18 复核不复现)、W-112 link_section no-op、W-113 asm 位置错、W-114 enum match 失效;启 Docker 跑 sysv 门再挖出 W-115 W-089 reproducer 仍崩、W-116 SysV callee 只 spill 4 个寄存器) —— 见下 §当前活跃 workarounds。**下一动作 = 走 v4.0.0 final 的 promote 流程**(2026-10-20:W-104 / W-112 / W-114 / W-103 / W-107 / W-120 / W-105 / W-105.1 / W-118 / W-121 / W-122 / W-113 / W-115 / W-106 / W-123 先后闭合 ⇒ **ACTIVE = 0**),不是 tag v4.0.0 final。OS M11 launch 路径需重新评估 (`v2.0.0-os-prep.md` + `v2-v3-parallel-sprint-plan.md` 中硬前置假设已作废并归档到 `docs/archive/v2-v3/`)。
 
 ## Reading order
 
@@ -70,20 +70,20 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 
 | 意图 | 先看 |
 |------|------|
-| 了解项目现在到哪、有什么限制 | 顶部 § 当前/目标 → [`workarounds.md`](docs/internal/workarounds.md)（当前限制）+ [`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md)（最新 ship） |
-| 想看 v0.x（C 编译器）整体还有什么没完成 | [`v0.x-c-compiler-roadmap.md`](docs/plans/roadmap/v0.x-c-compiler-roadmap.md)（已 frozen） |
-| 知道下一步做什么 | **每格一份 `docs/plans/v4/v4.X.Y-plan.md`**(索引在 [`docs/plans/v4/README.md`](docs/plans/v4/README.md))—— 下一个版本 = 表里第一格未完成的;当前主线 [`self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)
-| 起 v4.x 新 sprint | **对应版本的 `v4.X.Y-plan.md`**(已预建,含验收门 / 启动时复核清单)→ 当前主线 [`self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)(v4.2 起) |
-| 改编译器 / 排 bug | [`architecture.md`](docs/internal/architecture.md) 看模块边界 → [`build.md`](docs/internal/build.md) 看构建 + 调试坑 |
-| 改语言规范 / ABI | [`jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) / [`jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) |
-| 查 v2/v3 历史决策 | [`docs/archive/v2-v3/`](docs/archive/v2-v3/) (v2-v3-parallel-sprint-plan.md + v2.0.0-os-prep.md 已归档,2026-09-29 user FINAL 决定作废) |
+| 了解项目现在到哪、有什么限制 | 顶部 § 当前/目标 → [`docs/internal/workarounds.md`](docs/internal/workarounds.md)（当前限制）+ [`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md)（最新 ship） |
+| 想看 v0.x（C 编译器）整体还有什么没完成 | [`docs/plans/roadmap/v0.x-c-compiler-roadmap.md`](docs/plans/roadmap/v0.x-c-compiler-roadmap.md)（已 frozen） |
+| 知道下一步做什么 | **每格一份 `docs/plans/v4/v4.X.Y-plan.md`**(索引在 [`docs/plans/v4/README.md`](docs/plans/v4/README.md))—— 下一个版本 = 表里第一格未完成的;当前主线 [`docs/plans/v4/self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)
+| 起 v4.x 新 sprint | **对应版本的 `v4.X.Y-plan.md`**(已预建,含验收门 / 启动时复核清单)→ 当前主线 [`docs/plans/v4/self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)(v4.2 起) |
+| 改编译器 / 排 bug | [`docs/internal/architecture.md`](docs/internal/architecture.md) 看模块边界 → [`docs/internal/build.md`](docs/internal/build.md) 看构建 + 调试坑 |
+| 改语言规范 / ABI | [`docs/abis/jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) / [`docs/abis/jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) |
+| 查 v2/v3 历史决策 | [`docs/archive/v2-v3`](docs/archive/v2-v3/) (v2-v3-parallel-sprint-plan.md + v2.0.0-os-prep.md 已归档,2026-09-29 user FINAL 决定作废) |
 
 ## 权威文档（100% 权威）
 
 | 文档 | 状态 | 用途 |
 |------|------|------|
-| [`jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) | 锁定（2026-10-24，**取代 v1.3.0 + 17 份 v3.x supplement**，后二者已归档至 git 历史）| 语言规范 + 附录 B 已知限制。**正文只写当前代码确实已实装的行为**;未实装/受限的收进附录 B,不再混在正文冒充特性 |
-| [`jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) | 锁定（2026-10-24）| 类型布局 + 调用约定。**⚠️ 2026-10-15 修正(v1.0.0 时代遗留):此前称「已全部解锁」不成立** —— A3(struct 跨 FFI)从未实现,A5(浮点比较)是确证 bug(W-109),两者都没挡住自举(自举 v1.8.3 已达成),但也不能算「解锁」 |
+| [`docs/abis/jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) | 锁定（2026-10-24，**取代 v1.3.0 + 17 份 v3.x supplement**，后二者已归档至 git 历史）| 语言规范 + 附录 B 已知限制。**正文只写当前代码确实已实装的行为**;未实装/受限的收进附录 B,不再混在正文冒充特性 |
+| [`docs/abis/jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) | 锁定（2026-10-24）| 类型布局 + 调用约定。**⚠️ 2026-10-15 修正(v1.0.0 时代遗留):此前称「已全部解锁」不成立** —— A3(struct 跨 FFI)从未实现,A5(浮点比较)是确证 bug(W-109),两者都没挡住自举(自举 v1.8.3 已达成),但也不能算「解锁」 |
 | ~~`jhyy-lang-spec-floatsupplement-v3.3.0.md`~~ | **已作废**（v3.3.0 收编进 v1.3.0,v1.3.0 又被 v4.0.0 取代 ⇒ 浮点补充规范现由 `jhyy-lang-spec-v4.0.0.md` 正文承载）| 浮点补充规范 — float `as` cast / fmod trunc / signed-zero semantics |
 
 **所有 plan 文件以这两个为 100% 权威对齐**。其他 v*.* 计划文件措辞可能滞后或不准，遇到冲突以 lang-spec / abi 为准。
@@ -98,13 +98,13 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 | **v1.x** | jhyy 自举（`compiler/src0/*.jhyy`） | 真自举闭环（v1.0 = byte-equal `.il`）— **🟢 v1.8.3 shipped = v1.x 终结** |
 | **v2.x** | QBE 完整重写 + 多目标 / 自研 OS 准备 | amd64_sysv / 多目标 / freestanding — **🟢 v2.16.0 shipped 2026-09-22 = v2.x 终结** (per 2026-09-29 user FINAL 决定;v2.x 中/末 items 全部 dropped off-axis,QBE 自写在 in-mem self-backend 里走完) |
 | **v3.x** | 语言特性扩展（OS-required：inline asm / volatile / naked / no_std / `&mut` + lifetime）| 服务于 jhyy_OS — **🟢 v3.4.2 shipped 2026-09-29 = v3.x 终结** (per 2026-09-29 user FINAL 决定;v3.0 3a-3f 全部 dropped off-axis;3 个 minor v3.4.0/1/2 ship 走完 W-085/W-088/W-089 真修,ACTIVE workaround bucket 清空) |
-| **v4.x** | 后合并 axis — stdlib / 0-C 闭环 / async / lifetime / trait / package manager / multi-arch / `.jhyynb` | 服务于编译器自身现代化 + jhyy_OS 重启评估 — **🟡 v4.0.0-rc1 shipped 2026-09-30 = v4.x 首发 RC** (axis-v2 + axis-v3 merge 入 main;**ACTIVE 已清零 → v4.0.0 final 可 promote**(余下 promote 条件见 `active-workaround-clearance.md` § 全局 ship gate);其余未启动项见 [`version-schedule.md`](docs/plans/v4/version-schedule.md) § 四) |
+| **v4.x** | 后合并 axis — stdlib / 0-C 闭环 / async / lifetime / trait / package manager / multi-arch / `.jhyynb` | 服务于编译器自身现代化 + jhyy_OS 重启评估 — **🟡 v4.0.0-rc1 shipped 2026-09-30 = v4.x 首发 RC** (axis-v2 + axis-v3 merge 入 main;**ACTIVE 已清零 → v4.0.0 final 可 promote**(余下 promote 条件见 `active-workaround-clearance.md` § 全局 ship gate);其余未启动项见 [`docs/plans/v4/version-schedule.md`](docs/plans/v4/version-schedule.md) § 四) |
 
 **轴之间的关系**（关键，避免误读 semver）：
 - **v0.x → v1.x**：严格顺序（v1.0 强前置 v0.x 全部完成）✅
 - **v1.x → v2.x / v3.x**：严格顺序（v2.0 / v3.0 sprint 3a 强前置 v1.0 真自举闭环）✅ v1.0.0 已 ship
-- **v2.x + v3.x → v4.x**：v4.0 = v2.x + v3.x 合并入 main;v4.x 内部按依赖图决定串并行(强串行链 `lifetime → closure → dyn Trait → HKT`;M5 / async / 错误恢复 / 优化 / 包管理 / 并发 cap / `.jhyynb` 可并行)—— 详见 [`version-schedule.md`](docs/plans/v4/version-schedule.md) § 四
-- **v4.x 中/末 items** (M5 0-C 闭环 / async / lifetime / trait / package manager / multi-arch / `.jhyynb`) 全部见 [`version-schedule.md`](docs/plans/v4/version-schedule.md) § 四(v4.6+),**一项都未启动**
+- **v2.x + v3.x → v4.x**：v4.0 = v2.x + v3.x 合并入 main;v4.x 内部按依赖图决定串并行(强串行链 `lifetime → closure → dyn Trait → HKT`;M5 / async / 错误恢复 / 优化 / 包管理 / 并发 cap / `.jhyynb` 可并行)—— 详见 [`docs/plans/v4/version-schedule.md`](docs/plans/v4/version-schedule.md) § 四
+- **v4.x 中/末 items** (M5 0-C 闭环 / async / lifetime / trait / package manager / multi-arch / `.jhyynb`) 全部见 [`docs/plans/v4/version-schedule.md`](docs/plans/v4/version-schedule.md) § 四(v4.6+),**一项都未启动**
 
 > v1.x = jhyy-side production（v1.4.4 物理 flip `jhyy.exe` 为 jhyy-side binary）；v1.4.6 真修 3 个 ACTIVE workaround（W-017 codegen module-level `let mut` + W-019 codegen nested struct field chain + W-020 parser inline match-as-expression reorder）后，src0 production 无外部 C runtime helper 依赖（除 `jhyy_helpers.c` DEPRECATED 状态保留 1-2 sprint 观察期）+ parser / codegen 跨侧行为对齐。ACTIVE workaround 数 → 0。
 
@@ -147,16 +147,16 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 
 | 层级 | 文档 | 状态 |
 |------|------|------|
-| L1 | [`v0.x-c-compiler-roadmap.md`](docs/plans/roadmap/v0.x-c-compiler-roadmap.md) | **已完成**（C 编译器演进到自举门槛，v0.9 wip commit 2.83 收尾）|
-| L1 | [`v1.0-self-hosting.md`](docs/plans/roadmap/v1.0-self-hosting.md) | **v1.0.0 完成**（2026-08-10 tag `eabee0d` — Stage 2 N=3 byte-equal 闭环）|
-| L1.5 | [`v2.x-qbe-rewrite.md`](docs/plans/roadmap/v2.x-qbe-rewrite.md) | **v2.16.0 完成**（2026-09-22 — QBE 移除 + bench.sh + .exe byte-equal）|
-| L1 | [`v3.x-language-expansion.md`](docs/plans/roadmap/v3.x-language-expansion.md) | **v3.4.2 完成**（2026-09-29 — 3 个 minor v3.4.0/1/2 ship 走完 W-085/W-088/W-089 真修）|
-| L1 | [`v4.x-post-merge.md`](docs/plans/roadmap/v4.x-post-merge.md) | **v4.0.0-rc1 完成**（2026-09-30 — axis-v2 + axis-v3 合并入 main;Gate 3 selfhost deferred → v4.0.1）|
-| L1.5 | [`v2-v3-parallel-sprint-plan.md`](docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md) | ⚠️ **SUPERSEDED** — 已归档到 [`docs/archive/v2-v3/`](docs/archive/v2-v3/) (per 2026-09-30 v4.0.0 archive step) |
+| L1 | [`docs/plans/roadmap/v0.x-c-compiler-roadmap.md`](docs/plans/roadmap/v0.x-c-compiler-roadmap.md) | **已完成**（C 编译器演进到自举门槛，v0.9 wip commit 2.83 收尾）|
+| L1 | [`docs/plans/roadmap/v1.0-self-hosting.md`](docs/plans/roadmap/v1.0-self-hosting.md) | **v1.0.0 完成**（2026-08-10 tag `eabee0d` — Stage 2 N=3 byte-equal 闭环）|
+| L1.5 | [`docs/plans/roadmap/v2.x-qbe-rewrite.md`](docs/plans/roadmap/v2.x-qbe-rewrite.md) | **v2.16.0 完成**（2026-09-22 — QBE 移除 + bench.sh + .exe byte-equal）|
+| L1 | [`docs/plans/roadmap/v3.x-language-expansion.md`](docs/plans/roadmap/v3.x-language-expansion.md) | **v3.4.2 完成**（2026-09-29 — 3 个 minor v3.4.0/1/2 ship 走完 W-085/W-088/W-089 真修）|
+| L1 | [`docs/plans/roadmap/v4.x-post-merge.md`](docs/plans/roadmap/v4.x-post-merge.md) | **v4.0.0-rc1 完成**（2026-09-30 — axis-v2 + axis-v3 合并入 main;Gate 3 selfhost deferred → v4.0.1）|
+| L1.5 | [`docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md`](docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md) | ⚠️ **SUPERSEDED** — 已归档到 [`docs/archive/v2-v3`](docs/archive/v2-v3/) (per 2026-09-30 v4.0.0 archive step) |
 | L3 | [`docs/plans/v4/active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md) | ✅ **已完成(2026-10-20)** —— ACTIVE 桶清零(14 → 0);文档保留作审计轨迹 |
 | L3 | [`docs/plans/v4/self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md) | 🔄 **v4.2 起的主线**(2026-10-29 立线)—— 自研后端性能线 |
-| L3 | [`docs/plans/v4/v4.4.0-plan.md`](docs/plans/v4/v4.4.0-plan.md) … [`v4.15-plan.md`](docs/plans/v4/v4.15-plan.md) | 🔄 **v4.x 版本系列文档(22 份,2026-10-30 新建)** —— 每格一份,含验收门 + 启动时复核清单;**版本号是预留号**,索引见 [`docs/plans/v4/README.md`](docs/plans/v4/README.md) |
-| L3 | ~~`docs/plans/v4/backlog.md`~~ | ⚠️ **已删除(2026-10-30)** —— 12 项未启动工作的僵尸排期表(依赖图已被它自己标注过期);清单现由 [`version-schedule.md`](docs/plans/v4/version-schedule.md) § 四 + **v4.x 版本系列文档**承担 |
+| L3 | [`docs/plans/v4/v4.4.0-plan.md`](docs/plans/v4/v4.4.0-plan.md) … [`docs/plans/v4/v4.15-plan.md`](docs/plans/v4/v4.15-plan.md) | 🔄 **v4.x 版本系列文档(22 份,2026-10-30 新建)** —— 每格一份,含验收门 + 启动时复核清单;**版本号是预留号**,索引见 [`docs/plans/v4/README.md`](docs/plans/v4/README.md) |
+| L3 | ~~`docs/plans/v4/backlog.md`~~ | ⚠️ **已删除(2026-10-30)** —— 12 项未启动工作的僵尸排期表(依赖图已被它自己标注过期);清单现由 [`docs/plans/v4/version-schedule.md`](docs/plans/v4/version-schedule.md) § 四 + **v4.x 版本系列文档**承担 |
 
 最近完成的 sprint: **v4.1.2 shipped 2026-10-29** — 版本号自动化 + 三处「表述与实现不符」真修。
 
@@ -212,25 +212,25 @@ v4.2.0 / v4.2.1 ✅ 已完成;**v4.2.2 / v4.3.0 已降级**(实测性能价值 �
 
 ### 项目内部（`docs/internal/`）
 
-- [`build.md`](docs/internal/build.md) — 编译 / 运行 / **self-backend 坑（Windows 独有）**
-- [`architecture.md`](docs/internal/architecture.md) — 流水线 / 模块 / 设计细节 / **self-backend codegen 速查** / Stage 0 自举
-- [`conventions.md`](docs/internal/conventions.md) — 编码约定 / 文件命名 / 提交规则
-- [`tests.md`](docs/internal/tests.md) — 集成测试清单 + 运行方法
-- [`workarounds.md`](docs/internal/workarounds.md) — W-NNN workaround 台账（**ACTIVE = 0** ✅ 见下方 §当前活跃 workarounds）
+- [`docs/internal/build.md`](docs/internal/build.md) — 编译 / 运行 / **self-backend 坑（Windows 独有）**
+- [`docs/internal/architecture.md`](docs/internal/architecture.md) — 流水线 / 模块 / 设计细节 / **self-backend codegen 速查** / Stage 0 自举
+- [`docs/internal/conventions.md`](docs/internal/conventions.md) — 编码约定 / 文件命名 / 提交规则
+- [`docs/internal/tests.md`](docs/internal/tests.md) — 集成测试清单 + 运行方法
+- [`docs/internal/workarounds.md`](docs/internal/workarounds.md) — W-NNN workaround 台账（**ACTIVE = 0** ✅ 见下方 §当前活跃 workarounds）
 
 ### 语言规范 & ABI（`docs/abis/`，locked）
 
-- [`jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) — 语言规范（v4.0.0 锁定，2026-10-24;**取代 v1.3.0 + 17 份 v3.x supplement**;浮点内容已收进正文）
-- [`jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) — ABI 白皮书（struct pass-by-value / 多文件 / FFI / break-continue / 切片 / 命名空间）
+- [`docs/abis/jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) — 语言规范（v4.0.0 锁定，2026-10-24;**取代 v1.3.0 + 17 份 v3.x supplement**;浮点内容已收进正文）
+- [`docs/abis/jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) — ABI 白皮书（struct pass-by-value / 多文件 / FFI / break-continue / 切片 / 命名空间）
 
 ### 历史归档（`docs/archive/`，不再使用）
 
-- [`v2-v3/v2-v3-parallel-sprint-plan.md`](docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md) — **SUPERSEDED 2026-09-29** v2/v3 并行 sprint 调度（v4.0.0 archive 后保留）
-- [`v2-v3/v2.0.0-os-prep.md`](docs/archive/v2-v3/v2.0.0-os-prep.md) — **SUPERSEDED 2026-09-29** OS × compiler 跨边界 M1-M11 硬前置（v4.0.0 archive 后保留）
+- [`docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md`](docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md) — **SUPERSEDED 2026-09-29** v2/v3 并行 sprint 调度（v4.0.0 archive 后保留）
+- [`docs/archive/v2-v3/v2.0.0-os-prep.md`](docs/archive/v2-v3/v2.0.0-os-prep.md) — **SUPERSEDED 2026-09-29** OS × compiler 跨边界 M1-M11 硬前置（v4.0.0 archive 后保留）
 
 ## 工作风格
 
-工具链与构建见 [`build.md`](docs/internal/build.md);编码约定、项目结构、改动后必跑基线见 [`conventions.md`](docs/internal/conventions.md)。
+工具链与构建见 [`docs/internal/build.md`](docs/internal/build.md);编码约定、项目结构、改动后必跑基线见 [`docs/internal/conventions.md`](docs/internal/conventions.md)。
 
 **发版时的版本号不要手改** —— `VERSION` 文件是唯一真相源,一条命令刷全仓
 (编译器横幅字面量 / license.rtf / scoop json / winget manifest 目录名 + 3 个 yaml /
@@ -245,7 +245,7 @@ python scripts/dev/bump_version.py check        # 零漂移门(CI 也跑)
 ⚠️ **顺序不能反**:编译器的版本横幅只能是 `main.jhyy` 里的**字符串字面量** ——
 改成运行时读文件/调 extern 需要新增局部变量,而**新增局部变量会移位模块级 temp
 编号 ⇒ 自举产物行为漂移**(v4.0.20 实测 ⇒ 6 个 sysv 用例全红)。
-详见 [`build.md`](docs/internal/build.md) § 版本号自动化。
+详见 [`docs/internal/build.md`](docs/internal/build.md) § 版本号自动化。
 
 ## 当前活跃 workarounds
 
@@ -362,7 +362,7 @@ W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_
 索引本身也漏 2 条(W-025 / W-070,二者都是 RESOLVED 故不影响 ACTIVE 计数:
 前者有 "follow-up" H3 打乱解析,后者的状态行还带 `✅` 前缀且日期格式不合 schema)。
 
-排序、修法、验收 gate 见 [`active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md)。
+排序、修法、验收 gate 见 [`docs/plans/v4/active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md)。
 
 **⚠️ 这几条为什么以前「看不见」:** 两个独立原因,都已修。
 
@@ -427,7 +427,7 @@ W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_
 |------|------|--------|
 | [`docs/coordination/JHYY_编译器侧设计终版.md`](docs/coordination/JHYY_编译器侧设计终版.md) | **编译器侧入口** —— 事实基线(逐条 `file:line`)+ P0–P4.5 分期与硬门 + 后端 pass 全表 + 规范一致性门 + 编译器侧 4 条待拍板(D5/D6/D9/D12) | **每个 v4.x / OS 相关 sprint 启动前必读** |
 | [`docs/coordination/JHYY_OS侧设计终版.md`](docs/coordination/JHYY_OS侧设计终版.md) | **OS 侧入口** —— 能力微内核形态 + CNode/type_tag/region_table + `.jhyynb` contract + 语言—内核边界 + 对语言的 **22 条需求** + OS 侧 8 条待拍板(D1–D4/D7/D8/D10/D11) | 设计 OS 相关特性时 / 拍板时读 |
-| [`docs/abis/jhyy-lang-spec-v4.0.0.md` § 19](docs/abis/jhyy-lang-spec-v4.0.0.md) | Debug ABI(**🔒 per D41**;OS 侧旧镜像已删,此处是权威) | 做调试 / 可观测性时 |
+| [docs/abis/jhyy-lang-spec-v4.0.0.md](docs/abis/jhyy-lang-spec-v4.0.0.md) | Debug ABI(**🔒 per D41**;OS 侧旧镜像已删,此处是权威) | 做调试 / 可观测性时 |
 
 **冲突解决规则**(沿用):
 - 任何 OS 镜像跟本 CLAUDE.md 冲突 → **以 compiler 为准** → OS 侧撤回 + 提交 Q-OS-XXX

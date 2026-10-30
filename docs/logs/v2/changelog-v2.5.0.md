@@ -2,7 +2,7 @@
 
 > **承接**: v2.4.0 ship (tag `v2.4.0`, `7fb735b`, 2026-09-04) — 多目标 dispatcher 完整化 + byte-equal 三件套(D26 recipe 落地)+ selfhost closure 4-stage IL byte-equal sha=`51376ce5...`。
 > **触发**: per `docs/plans/roadmap/v2-v3-parallel-sprint-plan.md § 6.2` + 2026-09-01 user 决定的 v2.x ‖ v3.x 异步并行策略。**v2.5.0 = v2.x M1-A = windows 自写后端起步**(IL → amd64 GAS `.s`,windows targets only;parse loop + 文件 I/O 留 V2-B v2.6.0 填)。
-> **scope**(per [`batch-V2-A-plan.md`](../../plans/v2/batch-V2-A-plan.md) + [`v2.5.0详细实现方案.md`](../../plans/v2/v2.5.0详细实现方案.md)):
+> **scope**(per [`docs/plans/v2/batch-V2-A-plan.md`](../../plans/v2/batch-V2-A-plan.md) + [`docs/plans/v2/v2.5.0详细实现方案.md`](../../plans/v2/v2.5.0详细实现方案.md)):
 > 1. **codegen_amd64.jhyy 模块化拆分** — 5 文件(state + lexer + 3 emit modules, ~2200 行),15 个 QBE IL 子集 + volatile token + D42 escape hatch stub
 > 2. **L4 详细实现方案** — `v2.5.0详细实现方案.md`(per `feedback_small_plans_no_docs` 推翻了"single-stage 不写 docs"的预设,V2-A 是新模块必须 L4)
 > 3. **§ 3.1 file-layer doc fix** — `v2-v3-parallel-sprint-plan.md § 3.1` 修 v2.x file-layer 描述(实际 = `src0/codegen_amd64.jhyy` 平铺,不是 `src0/qbe/` 子目录)
@@ -136,12 +136,12 @@
 
 ## 关联文档
 
-- v2.5.0 L3 任务清单 → [`../../plans/v2/batch-V2-A-plan.md`](../../plans/v2/batch-V2-A-plan.md)(commit `059cebf`,2026-09-05)
-- v2.5.0 L4 详细方案 → [`../../plans/v2/v2.5.0详细实现方案.md`](../../plans/v2/v2.5.0详细实现方案.md)
-- v2.x 长线 → [`../../plans/roadmap/v2.x-qbe-rewrite.md`](../../plans/roadmap/v2.x-qbe-rewrite.md)
-- v3.x 长线 → [`../../plans/roadmap/v3.x-language-expansion.md`](../../plans/roadmap/v3.x-language-expansion.md)
-- v2.x ‖ v3.x 并行 sprint 调度 → [`../../plans/roadmap/v2-v3-parallel-sprint-plan.md`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md)
+- v2.5.0 L3 任务清单 → [`docs/plans/v2/batch-V2-A-plan.md`](../../plans/v2/batch-V2-A-plan.md)(commit `059cebf`,2026-09-05)
+- v2.5.0 L4 详细方案 → [`docs/plans/v2/v2.5.0详细实现方案.md`](../../plans/v2/v2.5.0详细实现方案.md)
+- v2.x 长线 → [`docs/plans/roadmap/v2.x-qbe-rewrite.md`](../../plans/roadmap/v2.x-qbe-rewrite.md)
+- v3.x 长线 → [`docs/plans/roadmap/v3.x-language-expansion.md`](../../plans/roadmap/v3.x-language-expansion.md)
+- v2.x ‖ v3.x 并行 sprint 调度 → [`docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md`](../../archive/v2-v3/v2-v3-parallel-sprint-plan.md)
 - D42 / D43 spec 来源 → `coordination.md § 3`
 - 3c volatile 优先来源 → `v2-v3-parallel-sprint-plan.md § 4.2 + § 6.4`
-- 跨项目 OS 时间线 → [`../../../../jhyy_OS/docs/coordination.md`](../../../../jhyy_OS/docs/coordination.md)
+- 跨项目 OS 时间线 → [`docs/coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md)
 - 阶段其他 umbrella → [v2.0.0](changelog-v2.0.0.md) / [v2.1.0](changelog-v2.1.0.md) / [v2.2.0](changelog-v2.2.0.md) / [v2.3.0](changelog-v2.3.0.md) / [v2.4.0](changelog-v2.4.0.md)

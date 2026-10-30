@@ -212,7 +212,7 @@
 - v1.4.1 父 sprint: [`docs/plans/v1/v1.4.0任务清单 + 概要设计.md`](../../plans/v1/v1.4.0任务清单%20+%20概要设计.md) § Sprint v1.4.1
 - C-side argv[0] 实现 (前置 commit): commit `caa093b` v1.4.1 step 1
 - W-017 详细: [`docs/internal/workarounds.md`](../../internal/workarounds.md) § W-017
-- ABI 路径无关性: [`docs/abis/jhyy-abi-v1.0.0.md`](../../abis/jhyy-abi-v1.0.0.md) (无路径相关条目, 编译器纯 runtime concern)
+- ABI 路径无关性: [`docs/abis/jhyy-abi-v4.0.0.md`](../../abis/jhyy-abi-v4.0.0.md) (无路径相关条目, 编译器纯 runtime concern)
 - 上游 umbrella: `docs/logs/v1/changelog-v1.3.0.md` (v1.3.x ship 历史)
 
 ## v1.4.4 ship (本次 commit)
@@ -324,7 +324,7 @@
 
 **引用:**
 - v1.4.6 父 sprint: [`docs/plans/v1/v1.4.0任务清单 + 概要设计.md`](../../plans/v1/v1.4.0任务清单%20+%20概要设计.md) § Sprint v1.4.6
-- 真修详细方案: [`docs/plans/v1/v1.4.0详细实现方案.md`](../../plans/v1/v1.4.0详细实现方案.md) (umbrella per changelog umbrella convention)
+- 真修详细方案: `docs/plans/v1/v1.4.0详细实现方案.md` (umbrella per changelog umbrella convention)
 - workarounds RESOLVED 标注: [`docs/internal/workarounds.md`](../../internal/workarounds.md) § W-017 / W-019 / W-020
 
 ---

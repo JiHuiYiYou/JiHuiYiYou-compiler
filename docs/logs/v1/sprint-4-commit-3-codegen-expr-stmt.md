@@ -1,7 +1,7 @@
 # Sprint 4 commit 3 — codegen.jhyy: cg_expr BLOCK/LET/ASSIGN/RETURN/BREAK/CONTINUE/EXPR_STMT/BINARY + cg_stmt 薄包装
 
 **日期**: 2026-06-30
-**对应 plan**: [`../../plans/v1/v1.0.0详细实现方案.md`](../../plans/v1/v1.0.0详细实现方案.md) § 4.5（codegen 翻译策略）
+**对应 plan**: [`docs/plans/v1/v1.0.0详细实现方案.md`](../../plans/v1/v1.0.0详细实现方案.md) § 4.5（codegen 翻译策略）
 **状态**: ✅ **代码合并 + 47/50 regress PASS（0 failed），剩余 3 SKIP（lib）**
 **新增**: `compiler/src0/codegen.jhyy` +407 行（commit 2 是 462 行，commit 3 是 1062 行）
 

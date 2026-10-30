@@ -1,7 +1,7 @@
 # Sprint 3 commit 5 — sema.jhyy 翻译
 
 **日期**: 2026-06-28
-**对应 plan**: [`../../plans/v1/v1.0.0详细实现方案.md`](../../plans/v1/v1.0.0详细实现方案.md) § 3.4
+**对应 plan**: [`docs/plans/v1/v1.0.0详细实现方案.md`](../../plans/v1/v1.0.0详细实现方案.md) § 3.4
 **状态**: ✅ **完成 + T0-T7 全部 PASS（exit=42）**
 
 ## 目标

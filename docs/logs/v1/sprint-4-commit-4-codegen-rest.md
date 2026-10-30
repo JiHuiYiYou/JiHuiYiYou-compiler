@@ -1,7 +1,7 @@
 # Sprint 4 commit 4 — codegen.jhyy: cg_func + cg_module + 3 v0 codegen bug workarounds
 
 **日期**: 2026-07-02
-**对应 plan**: [`../../plans/v1/v1.0.0详细实现方案.md`](../../plans/v1/v1.0.0详细实现方案.md) § 4.5（codegen 翻译策略）+ Stage 1 byte-equal
+**对应 plan**: [`docs/plans/v1/v1.0.0详细实现方案.md`](../../plans/v1/v1.0.0详细实现方案.md) § 4.5（codegen 翻译策略）+ Stage 1 byte-equal
 **状态**: ⚠️ **代码翻译完成 + 47/50 regress PASS（0 failed）；Stage 1 byte-equal BLOCKED，defer 到 v0.8**
 **新增**: `compiler/src0/codegen.jhyy` +990 行（commit 3 是 ~1062 行，commit 4 是 ~2000 行）
 

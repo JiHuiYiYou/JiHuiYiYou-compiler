@@ -330,7 +330,7 @@
 ### 引用
 
 - v1.2.1/v1.2.2/v1.2.3/v1.2.4 changelog — 4 sprint 完整 ship 记录
-- [`docs/internal/status.md` § src0/ 自然化](../status.md) — status.md 新 section
-- [`docs/internal/workarounds.md` § W-005 / § W-003 cross-ref](../workarounds.md) — workarounds.md v1.2.0 cross-ref
+- `docs/internal/status.md` § src0/ 自然化 — status.md 新 section
+- [docs/internal/workarounds.md](../../internal/workarounds.md) — workarounds.md v1.2.0 cross-ref
 - [[project-v1-0-post-50-53-plan]] § Phase 3.1 — W-005 / W-003 / `_vN` 清理原始 plan
 - [[project-sprint-v1-1-2-c-side-divergence]] — C-side vs jhyy_v1 IL divergence

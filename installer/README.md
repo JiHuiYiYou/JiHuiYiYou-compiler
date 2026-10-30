@@ -2,7 +2,7 @@
 
 Windows 引导式安装器 — 把 JHYY 编译器装到 `C:\Program Files\JHYY\`, 自动配 PATH, 用户零配置。
 
-> **Last updated**: v1.8.3 (2026-08-29) — v1.x 终结 installer 真修闭环(UCPD.sys bypass + `.jhyy` 图标真修 + WiX CustomAction 静默失败 fallback)。详见下方 § v1.8.x 节。最新 shipped 产物: `jhyy-compiler-1.8.3.msi` (~995KB) + `jhyy-installer-1.8.3.exe` (~30MB, 含 .NET 8 Desktop Runtime embed) + `jhyy-lang-1.8.3.vsix`。SHA256 见 [`installer/SHA256.txt`](SHA256.txt)。
+> **Last updated**: v1.8.3 (2026-08-29) — v1.x 终结 installer 真修闭环(UCPD.sys bypass + `.jhyy` 图标真修 + WiX CustomAction 静默失败 fallback)。详见下方 § v1.8.x 节。最新 shipped 产物: `jhyy-compiler-1.8.3.msi` (~995KB) + `jhyy-installer-1.8.3.exe` (~30MB, 含 .NET 8 Desktop Runtime embed) + `jhyy-lang-1.8.3.vsix`。SHA256 见 `installer/SHA256.txt`。
 
 ## 当前状态 (v1.8.3 shipped)
 

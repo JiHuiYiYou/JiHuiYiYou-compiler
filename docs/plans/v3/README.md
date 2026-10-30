@@ -4,7 +4,7 @@
 
 ## 范围
 
-v3.x 是语言特性扩展轴,服务于 [jhyy_OS](../../../jhyy_OS/) 的 OS-required 语言特性:
+v3.x 是语言特性扩展轴,服务于 [jhyy_OS](../../coordination/JHYY_OS侧设计终版.md) 的 OS-required 语言特性:
 
 | Sprint | 特性 | 用途 | 状态 |
 |--------|------|------|------|
@@ -32,13 +32,13 @@ v3.x 是语言特性扩展轴,服务于 [jhyy_OS](../../../jhyy_OS/) 的 OS-requ
 
 完整 v3 未完成工作 → 9 个 per-version plan 文件(见下方"当前内容")。
 
-完整 OS 启动链路 (`M1 → M11`) 见 [`../v2/v2.0.0-os-prep.md`](../v2/v2.0.0-os-prep.md)。
+完整 OS 启动链路 (`M1 → M11`) 见 [`docs/archive/v2-v3/v2.0.0-os-prep.md`](../../archive/v2-v3/v2.0.0-os-prep.md)。
 
 ## 决策锁 (per `project_v2_v3_parallel_axes`)
 
 - v2.x ‖ v3.x 并行推进 (semver 推论 v2.99 < v3.0 但实际 OS M1 启动前两轴各自达成即可)
-- 每 sprint 设计前必读 [`../v2/v2.0.0-os-prep.md`](../v2/v2.0.0-os-prep.md) § 1 OS 启动里程碑表 + § 3 关键决策点 (D1-D11 / D18 / D27 / D42 / D43 / D-GUI-11 / D-GUI-12)
-- 跨边界冲突走 [`../../../jhyy_OS/docs/coordination.md`](../../../jhyy_OS/docs/coordination.md) § 7 规则
+- 每 sprint 设计前必读 [`docs/archive/v2-v3/v2.0.0-os-prep.md`](../../archive/v2-v3/v2.0.0-os-prep.md) § 1 OS 启动里程碑表 + § 3 关键决策点 (D1-D11 / D18 / D27 / D42 / D43 / D-GUI-11 / D-GUI-12)
+- 跨边界冲突走 [`docs/coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md) § 7 规则
 
 ## 跨轴 + branch 约定 (per `v2-v3-parallel-sprint-plan.md § 6`)
 
@@ -52,21 +52,21 @@ v3.x 是语言特性扩展轴,服务于 [jhyy_OS](../../../jhyy_OS/) 的 OS-requ
 ## 当前内容
 
 ### 已 ship (batch plan)
-- [`batch-V3-A-plan.md`](batch-V3-A-plan.md) — V3-A v3.0.0 3d `#[no_std]` 试水 ✅ ship
-- [`batch-V3-B-plan.md`](batch-V3-B-plan.md) — V3-B v3.0.1..v3.0.5 = 3a/3b/3c/3e/3f M1-required 5 件套 ✅ ship
-- [`batch-V3-C-plan.md`](batch-V3-C-plan.md) — V3-C v3.1.0 ✅ ship(v3.1.1 / v3.1.2 per-version plan 见下)
+- [`docs/plans/v3/batch-V3-A-plan.md`](batch-V3-A-plan.md) — V3-A v3.0.0 3d `#[no_std]` 试水 ✅ ship
+- [`docs/plans/v3/batch-V3-B-plan.md`](batch-V3-B-plan.md) — V3-B v3.0.1..v3.0.5 = 3a/3b/3c/3e/3f M1-required 5 件套 ✅ ship
+- [`docs/plans/v3/batch-V3-C-plan.md`](batch-V3-C-plan.md) — V3-C v3.1.0 ✅ ship(v3.1.1 / v3.1.2 per-version plan 见下)
 
 ### 待 ship / 未启动 (per-version plan)
-- [`v3.1.1-plan.md`](v3.1.1-plan.md) — 3g.5 PhantomData<T> ZST codegen(D27 锁:v3.1.0 ship 后启动)
-- [`v3.1.2-plan.md`](v3.1.2-plan.md) — 3g.7 CapTable<T> + 跨函数 cap pass(D27 锁:v3.1.1 ship 后启动,M4 launch 触发前置)
-- [`v3.1.3-plan.md`](v3.1.3-plan.md) — SysV abi_amd64_sysv.jhyy Cap<T> class backport patch(V2-B v2.7.0 ship 后启动)
-- [`v3.2.0-plan.md`](v3.2.0-plan.md) — 3i generics(单态化,M8d + M11 硬前置,per D-GUI-11)
-- [`v3.2.1-plan.md`](v3.2.1-plan.md) — 3j closures(M8d + M11 硬前置,3i ship 后启动)
-- [`v3.2.2-plan.md`](v3.2.2-plan.md) — 3l.1 std lib 基础(mem / fmt / string / arena,M11 硬前置)
-- [`v3.2.3-plan.md`](v3.2.3-plan.md) — 3l.2 std lib IO(io / os,M11 硬前置)
-- [`v3.2.4-plan.md`](v3.2.4-plan.md) — 3l.3 std lib 泛型容器(vec / map,M11 硬前置)
-- [`v3.2.5-plan.md`](v3.2.5-plan.md) — 3l.4 std lib 数学(math,FFI libm,M11 硬前置,3h ship 后启动)
-- [`v3.3.0-plan.md`](v3.3.0-plan.md) — 3h 浮点类型(f32/f64,D28 硬前置 v3.2.5;v3.x 关键路径最后 1 个)
+- [`docs/plans/v3/v3.1.1-plan.md`](v3.1.1-plan.md) — 3g.5 PhantomData<T> ZST codegen(D27 锁:v3.1.0 ship 后启动)
+- [`docs/plans/v3/v3.1.2-plan.md`](v3.1.2-plan.md) — 3g.7 CapTable<T> + 跨函数 cap pass(D27 锁:v3.1.1 ship 后启动,M4 launch 触发前置)
+- [`docs/plans/v3/v3.1.3-plan.md`](v3.1.3-plan.md) — SysV abi_amd64_sysv.jhyy Cap<T> class backport patch(V2-B v2.7.0 ship 后启动)
+- [`docs/plans/v3/v3.2.0-plan.md`](v3.2.0-plan.md) — 3i generics(单态化,M8d + M11 硬前置,per D-GUI-11)
+- [`docs/plans/v3/v3.2.1-plan.md`](v3.2.1-plan.md) — 3j closures(M8d + M11 硬前置,3i ship 后启动)
+- [`docs/plans/v3/v3.2.2-plan.md`](v3.2.2-plan.md) — 3l.1 std lib 基础(mem / fmt / string / arena,M11 硬前置)
+- [`docs/plans/v3/v3.2.3-plan.md`](v3.2.3-plan.md) — 3l.2 std lib IO(io / os,M11 硬前置)
+- [`docs/plans/v3/v3.2.4-plan.md`](v3.2.4-plan.md) — 3l.3 std lib 泛型容器(vec / map,M11 硬前置)
+- [`docs/plans/v3/v3.2.5-plan.md`](v3.2.5-plan.md) — 3l.4 std lib 数学(math,FFI libm,M11 硬前置,3h ship 后启动)
+- [`docs/plans/v3/v3.3.0-plan.md`](v3.3.0-plan.md) — 3h 浮点类型(f32/f64,D28 硬前置 v3.2.5;v3.x 关键路径最后 1 个)
 
 ### 抽象 feature / v3.x 中/末 / M5 → v4.x(per 2026-09-06 user 决定)
 非 OS-required 抽象 feature + M5 全推到 **v4.x 串行轴**。
@@ -75,7 +75,7 @@ v3.x 是语言特性扩展轴,服务于 [jhyy_OS](../../../jhyy_OS/) 的 OS-requ
 > 为根的依赖图,而**这张图被它自己标注为过期**(M5 只剩 Part 3 且 = v4.5;优化 pass
 > 降级到 v4.4 之后),验收基线还停在 163/163(现 257)⇒ **它是一份会误导未来规划的
 > 僵尸排期表**。⇒ **这 11 项的清单现由
-> [`../v4/version-schedule.md`](../v4/version-schedule.md) § 四承担**;详细 scope
+> [`docs/plans/v4/version-schedule.md`](../v4/version-schedule.md) § 四承担**;详细 scope
 > 在 git 历史,启动某项时再翻。**未启动的工作不再预先占版本号。**
 
 - 3k 错误恢复 → v4.6+
@@ -91,8 +91,8 @@ v3.x 是语言特性扩展轴,服务于 [jhyy_OS](../../../jhyy_OS/) 的 OS-requ
 - **M5**(删 `src/*.c` + untrack QBE + 删 `runtime.c`)→ Part 1/2 **已完成**;**Part 3 = v4.5**
 
 ### v4.x 合并触发
-- 触发前置:V2-C v2.8.0 ship + v3.x 全关键路径 ship + user 决定 merge 时机 → [`../v4/README.md`](../v4/README.md)
-- v2+v3 merge 后**主版本轴串行**,v4.x 全 plan 见 [`../v4/README.md`](../v4/README.md)
+- 触发前置:V2-C v2.8.0 ship + v3.x 全关键路径 ship + user 决定 merge 时机 → [`docs/plans/v4/README.md`](../v4/README.md)
+- v2+v3 merge 后**主版本轴串行**,v4.x 全 plan 见 [`docs/plans/v4/README.md`](../v4/README.md)
 
 ## 命名约定
 

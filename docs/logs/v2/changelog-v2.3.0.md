@@ -2,7 +2,7 @@
 
 > **承接**: v2.2.0 ship (`896a329`, 2026-09-03) — spec 锁定(abi § 13/14 + lang-spec § 17-20 + build.md multi-target);jhyy.exe binary 仍 sha=`376084ba...`(frozen,纯文档不改 IL 输出)。
 > **触发**: v2.2.0 ship 后立刻启动(per 2026-09-01 user 决定的 5 版本串行 sprint 计划)。**v2.0 阶段 Sprint B** = v2.0 阶段首个 **E2E 启动验证**:把 v2.1.0 编出的 freestanding .obj 经 lld-link 链成 .efi,跑 OVMF,验证 printk 到 framebuffer(ConOut)。**jhyy 编译 OS 类程序的第一例** = M1 launch 链路第一块就位(per `v2.0.0-os-prep.md § 1 M1 真 launch = jhyy_OS 编 `kernel.efi` 跑 OVMF,等 v3.0 3a-3c/3e-3f 全 ship 后)。
-> **scope**(per [`v2.3.0任务清单 + 概要设计.md`](../../plans/v2/v2.3.0任务清单 + 概要设计.md)):
+> **scope**(per [`docs/plans/v2/v2.3.0任务清单 + 概要设计.md`](../../plans/v2/v2.3.0任务清单 + 概要设计.md)):
 > 1. **EFI struct + protocol 定义** — `compiler/tests/examples/hello-freestanding/efi.jhyy` 新建(EfiSystemTable + EfiSimpleTextOutputProtocol per UEFI spec 2.10)
 > 2. **hello-freestanding.jhyy + link.ld + build-efi.sh** — UEFI entry + printk stub
 > 3. **run-ovmf.sh + OVMF.fd + E2E 验证** — QEMU + OVMF 启动 + printk 到 framebuffer + serial console
@@ -118,12 +118,12 @@
 
 ## 关联文档
 
-- v2.3.0 任务清单 → [`../../plans/v2/v2.3.0任务清单 + 概要设计.md`](../../plans/v2/v2.3.0任务清单 + 概要设计.md)
-- EFI E2E 测试 → [`../../tests/examples/hello-freestanding/`](../../tests/examples/hello-freestanding/)(efi.jhyy / hello-freestanding.jhyy / no-op.jhyy / link.ld / efi_main_asm.s / efi_helpers.s)
-- build-efi.sh → [`../../../scripts/dev/build/build-efi.sh`](../../../scripts/dev/build/build-efi.sh)
-- run-ovmf.sh → [`../../../scripts/dev/test/run-ovmf.sh`](../../../scripts/dev/test/run-ovmf.sh)
-- freestanding toolchain install → [`../../../scripts/dev/build/install-freestanding-toolchain.sh`](../../../scripts/dev/build/install-freestanding-toolchain.sh)(`28c178f`)
-- abi-v1.0.0 spec(§ 13/14 freestanding)| [`../../abis/jhyy-abi-v1.0.0.md`](../../abis/jhyy-abi-v1.0.0.md)
-- lang-spec-v1.3.0(§ 17-20 OS 启动前置 + freestanding + Debug + Wire)| [`../../abis/jhyy-lang-spec-v1.3.0.md`](../../abis/jhyy-lang-spec-v1.3.0.md)
-- 跨项目 OS 时间线 → [`../../../../jhyy_OS/docs/coordination.md`](../../../../jhyy_OS/docs/coordination.md)
+- v2.3.0 任务清单 → [`docs/plans/v2/v2.3.0任务清单 + 概要设计.md`](../../plans/v2/v2.3.0任务清单 + 概要设计.md)
+- EFI E2E 测试 → [`compiler/tests/examples/hello-freestanding/hello-freestanding.jhyy`](../../../compiler/tests/examples/hello-freestanding/hello-freestanding.jhyy)(efi.jhyy / hello-freestanding.jhyy / no-op.jhyy / link.ld / efi_main_asm.s / efi_helpers.s)
+- build-efi.sh → [`scripts/dev/build/build-efi.sh`](../../../scripts/dev/build/build-efi.sh)
+- run-ovmf.sh → [`scripts/dev/test/run-ovmf.sh`](../../../scripts/dev/test/run-ovmf.sh)
+- freestanding toolchain install → [`scripts/dev/install/install-freestanding-toolchain.sh`](../../../scripts/dev/install/install-freestanding-toolchain.sh)(`28c178f`)
+- abi-v1.0.0 spec(§ 13/14 freestanding)| [`docs/abis/jhyy-abi-v4.0.0.md`](../../abis/jhyy-abi-v4.0.0.md)
+- lang-spec-v1.3.0(§ 17-20 OS 启动前置 + freestanding + Debug + Wire)| [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md)
+- 跨项目 OS 时间线 → [`docs/coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md)
 - 阶段其他 umbrella → [v2.0.0](changelog-v2.0.0.md) / [v2.1.0](changelog-v2.1.0.md) / [v2.2.0](changelog-v2.2.0.md) / [v2.4.0](changelog-v2.4.0.md)

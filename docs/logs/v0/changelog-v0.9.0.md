@@ -63,9 +63,9 @@
 
 | 标准 | 状态 | 证据 |
 |------|------|------|
-| 7 测试集 byte-equal baseline 锁定(测试集 + EXPECT + 路径) | ✅ | [`stage1-expanded.sh`](../../../compiler/tests/stage1-expanded.sh) + `fib_renamed.jhyy`/`arith.jhyy`/`control_flow.jhyy` 等 7 文件 |
+| 7 测试集 byte-equal baseline 锁定(测试集 + EXPECT + 路径) | ✅ | [`compiler/tests/stage1-expanded.sh`](../../../compiler/tests/stage1-expanded.sh) + `fib_renamed.jhyy`/`arith.jhyy`/`control_flow.jhyy` 等 7 文件 |
 | B-let2 (l→w narrow) 修完,byte-equal ≥ 2/7 | ✅ | **2/7** (hello + arith PASS) |
-| 6 codegen gap 文档化 | ✅ | [`codegen-pitfalls.md` § 2](../../internal/codegen-pitfalls.md) |
+| 6 codegen gap 文档化 | ✅ | `codegen-pitfalls.md` § 2 |
 | regress 持平 baseline | ✅ | 3 OK (持平 commit 12 测量口径) |
 | Stage 1 验收脚本存在 | ✅ | `compiler/tests/stage1-expanded.sh` |
 

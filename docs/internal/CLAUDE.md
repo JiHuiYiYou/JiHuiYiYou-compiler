@@ -145,13 +145,14 @@ W-NNN 永远递增，**绝不重用**。任何新 workaround 必须拿下一个�
 
 ## 附录：自动化工具
 
-v2.13.5 ship 时同 ship 了 4 个 scripts/dev/v2_13_5_*.py 工具脚本，登记新 entry 时跑：
+v2.13.5 ship 时同 ship 了 4 个 `scripts/dev/v2_13_5_*.py` 工具脚本。其中 3 个是**一次性**
+的（已 ship 后不再用），2026-10-30 仓库清理时删掉了其中 2 个：
 
-| 脚本 | 用途 |
-|------|------|
-| `v2_13_5_rewrite_workarounds.py` | emoji-laden status line → 5-state enum 批量重写（仅 1 次性，已 ship 后不再用） |
-| `v2_13_5_insert_anchors.py` | 给每个 H2 前面插入 `<a id="w-NNN"></a>` 短锚（仅 1 次性） |
-| `v2_13_5_rebuild_index.py` | 重建 `## 索引` 表（写完新 entry 必跑） |
-| `mcp__jhyy__jhyy_workarounds` | MCP 实时查 W-XXX 状态（不走 grep / Read） |
+| 脚本 | 用途 | 状态 |
+|------|------|------|
+| `v2_13_5_rewrite_workarounds.py` | emoji-laden status line → 5-state enum 批量重写 | 🗑️ 2026-10-30 删除（仅 1 次性，已 ship 后不再用） |
+| `v2_13_5_insert_anchors.py` | 给每个 H2 前面插入 `<a id="w-NNN"></a>` 短锚 | 🗑️ 2026-10-30 删除（仅 1 次性） |
+| `v2_13_5_rebuild_index.py` | 重建 `## 索引` 表（写完新 entry 必跑） | ✅ 保留 |
+| `mcp__jhyy__jhyy_workarounds` | MCP 实时查 W-XXX 状态（不走 grep / Read） | ✅ 保留 |
 
 后续登记新 entry 唯一需要跑的脚本是 `v2_13_5_rebuild_index.py`。

@@ -1,7 +1,7 @@
 # Sprint 3 commit 2 — parser.jhyy parse_decl 翻译
 
 **日期**: 2026-06-25
-**对应 plan**: [`../../plans/v1/v1.0.0详细实现方案.md`](../../plans/v1/v1.0.0详细实现方案.md) § 3.3
+**对应 plan**: [`docs/plans/v1/v1.0.0详细实现方案.md`](../../plans/v1/v1.0.0详细实现方案.md) § 3.3
 **状态**: 完成 ✅
 
 ## 目标

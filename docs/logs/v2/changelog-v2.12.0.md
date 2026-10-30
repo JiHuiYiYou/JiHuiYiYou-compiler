@@ -1,7 +1,7 @@
 # JHYY v2.12.0 — 全量 self-backend audit (no sampling) — 119/119 phantom-free
 
 **Shipped**: 2026-09-19 on axis-v2 (commit `cc0ca33`)
-**Plan**: [`../../plans/v2/v2.12.0-plan.md`](../../plans/v2/v2.12.0-plan.md)
+**Plan**: [`docs/plans/v2/v2.12.0-plan.md`](../../plans/v2/v2.12.0-plan.md)
 **Scope**: 首个 audit sprint (无抽样) — 全 119 active PASS tests 跨 8 类别手动 audit。NOT modify 任何 src/* 或 src0/* 代码 (per C-side freeze `0cadfba` + v2.12.0-plan.md Out of scope)。**Audit 是 trace 不修**, 发现的 ❌ FAIL 出 v2.12.0.x.y patch fix。
 **前置**: v2.11.23 ship (首次 self-backend 0 FAIL parity with QBE path)
 **下一阶段**: v2.13.0 (真 XMM regalloc + 真 amd64_sysv codegen)
@@ -42,7 +42,7 @@ v2.12.0 = **首个 audit sprint (无抽样)** — 全 119 active PASS tests 跨 
 | **8** | Misc (arith / cast / ffi / etc.) | 32 | `50a1bf1` | **32/32 PASS** (29 numeric + 3 EXPECT-ERROR parity) |
 | | **Total** | **119** | | **119/119 PASS** phantom-free |
 
-**Audit log**: [`../../tests/audit/v2.12.0-audit-log.md`](../../tests/audit/v2.12.0-audit-log.md) — NEW file + NEW dir (compiler/tests/audit/),每 test 一行 `[PASS|⚠️|❌] <test>: codegen path diff QBE vs self-backend = [identical|<diff>]; EXIT parity = [PASS|<qbe_vs_sb>]; multi-input boundary = [PASS|<fail>]; module-level side-effect = [OK|<bug>]`
+**Audit log**: [`compiler/tests/audit/v2.12.0-audit-log.md`](../../../compiler/tests/audit/v2.12.0-audit-log.md) — NEW file + NEW dir (compiler/tests/audit/),每 test 一行 `[PASS|⚠️|❌] <test>: codegen path diff QBE vs self-backend = [identical|<diff>]; EXIT parity = [PASS|<qbe_vs_sb>]; multi-input boundary = [PASS|<fail>]; module-level side-effect = [OK|<bug>]`
 
 ### Audit 验证方法 (per test)
 
@@ -107,8 +107,8 @@ v2.12.0 audit 闭环 → v2.13.0 启动前置全部解锁:
 ### References
 
 - v2.12.0 plan: [`docs/plans/v2/v2.12.0-plan.md`](../../plans/v2/v2.12.0-plan.md)
-- Audit log: [`compiler/tests/audit/v2.12.0-audit-log.md`](../../tests/audit/v2.12.0-audit-log.md)
-- v2.11.23 ship (predecessor): [`changelog-v2.11.23.md`](changelog-v2.11.23.md) (🏆 首次 self-backend 0 FAIL parity)
-- v2.11.23 retro: [`retrospective-v2.11.23.md`](retrospective-v2.11.23.md)
-- W-074 series RCAs: [`../../internal/rca/rca-v2.11.20.md`](../../internal/rca/rca-v2.11.20.md), [`../../internal/rca/rca-v2.11.21.md`](../../internal/rca/rca-v2.11.21.md)
+- Audit log: [`compiler/tests/audit/v2.12.0-audit-log.md`](../../../compiler/tests/audit/v2.12.0-audit-log.md)
+- v2.11.23 ship (predecessor): [`docs/logs/v2/changelog-v2.11.23.md`](changelog-v2.11.23.md) (🏆 首次 self-backend 0 FAIL parity)
+- v2.11.23 retro: [`docs/logs/v2/retrospective-v2.11.23.md`](retrospective-v2.11.23.md)
+- W-074 series RCAs: [`docs/internal/rca/rca-v2.11.20.md`](../../internal/rca/rca-v2.11.20.md), [`docs/internal/rca/rca-v2.11.21.md`](../../internal/rca/rca-v2.11.21.md)
 - Memory: `feedback_codegen_amd64_multifn` (multi-fn silent-fail) + `feedback_codegen_amd64_run_zerobyte` (body 0-byte) + `feedback_rca_first_root_cause` (RCA-first) + `feedback_fix_evaluation_rule` (5/5 gate) + `feedback_changelog_umbrella` (v2.x 单 umbrella) + `feedback_axis_vn_worktree_isolation` + `feedback_regress_py_abspath` + `feedback_mcp_jhyy_run_workspace`

@@ -15,7 +15,7 @@
 
 ## 〇、复核:旧报告哪些结论还站得住
 
-[`JHYY自研后端pass查缺报告.md`](JHYY自研后端pass查缺报告.md)(2026-10-25 审计 v2.x 快照)
+[`docs/plans/v4/JHYY自研后端pass查缺报告.md`](JHYY自研后端pass查缺报告.md)(2026-10-25 审计 v2.x 快照)
 **仍然成立**:
 
 - regalloc 实现**未接线**(`codegen_amd64.jhyy:380-383` 仍是注释掉的)
@@ -462,7 +462,7 @@ eligible **58070 = 58070**、池满 **1345 = 1345**、分配 56725 vs 56719(差 
 > 验收基线还停在 163/163(现 257)⇒ **它是一份会误导未来规划的僵尸排期表**。
 >
 > **那 12 项没丢** —— 清单与排序现由
-> [`version-schedule.md`](version-schedule.md) § 四承担;详细 scope 在 git 历史,
+> [`docs/plans/v4/version-schedule.md`](version-schedule.md) § 四承担;详细 scope 在 git 历史,
 > 启动某项时再翻。
 
 | 原 backlog 项 | 处置 | 现在在哪 |
@@ -494,8 +494,8 @@ eligible **58070 = 58070**、池满 **1345 = 1345**、分配 56725 vs 56719(差 
 
 1. 改 → 全量 regress → 自举闭环 → `artifact_checks` → perf 数字
 2. `make` 后 `git add compiler/build/bin/jhyy.exe`(CI 的 artifact-fresh 步会比对它)
-3. 往 [`version-schedule.md`](version-schedule.md) 记实际做完的内容
-4. 往 [`../internal/workarounds.md`](../../internal/workarounds.md) 登记新发现的 workaround
+3. 往 [`docs/plans/v4/version-schedule.md`](version-schedule.md) 记实际做完的内容
+4. 往 [`docs/internal/workarounds.md`](../../internal/workarounds.md) 登记新发现的 workaround
 
 > ⚠️ **改 codegen 不会让任何 sha 基线变红** —— 所有门都是运行时算 sha 比两次运行。
 > 真正会红的是 `artifact_checks.sh` 的 4 条汇编文本断言(v4.3.1 处理)和
@@ -503,8 +503,8 @@ eligible **58070 = 58070**、池满 **1345 = 1345**、分配 56725 vs 56719(差 
 
 ## Cross-ref
 
-- 基线数据:[`../perf/self-backend-baseline-2026-10-29.md`](../../perf/self-backend-baseline-2026-10-29.md)
+- 基线数据:[`docs/perf/self-backend-baseline-2026-10-29.md`](../../perf/self-backend-baseline-2026-10-29.md)
 - 测量脚本:`scripts/dev/bench/runtime_perf.py`
-- 旧报告(部分结论已订正):[`JHYY自研后端pass查缺报告.md`](JHYY自研后端pass查缺报告.md)
-- 排期表(版本号权威):[`version-schedule.md`](version-schedule.md)
-- 未启动工作的清单:[`version-schedule.md`](version-schedule.md) § 四
+- 旧报告(部分结论已订正):[`docs/plans/v4/JHYY自研后端pass查缺报告.md`](JHYY自研后端pass查缺报告.md)
+- 排期表(版本号权威):[`docs/plans/v4/version-schedule.md`](version-schedule.md)
+- 未启动工作的清单:[`docs/plans/v4/version-schedule.md`](version-schedule.md) § 四

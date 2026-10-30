@@ -161,4 +161,4 @@
 - v1.0-post-50-53 plan: [`docs/plans/v1/v1.0-post-50-53-plan.md`](../../plans/v1/v1.0-post-50-53-plan.md)
 - v1.0 自举路线图: [`docs/plans/roadmap/v1.0-self-hosting.md`](../../plans/roadmap/v1.0-self-hosting.md)
 - C 端 changelog (Sprint 4.25 entry): [`docs/logs/v0/changelog-v0.9.0.md`](../v0/changelog-v0.9.0.md)
-- v1.0.0-rc predecessor: [`changelog-v1.0.0-rc.md`](changelog-v1.0.0-rc.md)
+- v1.0.0-rc predecessor: [`docs/logs/v1/changelog-v1.0.0-rc.md`](changelog-v1.0.0-rc.md)

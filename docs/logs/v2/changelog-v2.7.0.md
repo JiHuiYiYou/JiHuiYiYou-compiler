@@ -1,7 +1,7 @@
 # JHYY v2.7.0 — amd64_sysv + amd64_sysv_freestanding ABI 模块 + emit_call 拆 target
 
 **Shipped**: TBD (Phase 1 + 2a + 2b, 3 commits chain)
-**Plan**: [`../../plans/v2/v2.7.0-plan.md`](../../plans/v2/v2.7.0-plan.md)
+**Plan**: [`docs/plans/v2/v2.7.0-plan.md`](../../plans/v2/v2.7.0-plan.md)
 **Scope**: 7 source files (NEW 2 ABI modules + 5 sysv test fixtures + 修改 target_dispatch / codegen_amd64_state / codegen_amd64_emit_call / codegen / regress.py)
 
 ---
@@ -79,8 +79,8 @@
 
 ## References
 
-- v2.7.0 plan: [`../../plans/v2/v2.7.0-plan.md`](../../plans/v2/v2.7.0-plan.md)
-- v2.7.1 follow-up: [`../../plans/v2/v2.7.1-plan.md`](../../plans/v2/v2.7.1-plan.md) (Phase 3 wire 留此 doc)
+- v2.7.0 plan: [`docs/plans/v2/v2.7.0-plan.md`](../../plans/v2/v2.7.0-plan.md)
+- v2.7.1 follow-up: [`docs/plans/v2/v2.7.1-plan.md`](../../plans/v2/v2.7.1-plan.md) (Phase 3 wire 留此 doc)
 - v2.6.8 ship: commit `b457e6a` (docs hygiene)
 - v2.6.7 ship: commit `c965773` (byte_equal_amd64.sh Commit 5)
 - v2.6.6 ship: commit `224a944` (W-069 真修;旧 baseline `92e82554...` 本 ship 退役存档)
@@ -96,7 +96,7 @@
 ## v2.7.1 — Linux ELF runtime + regress.py --cross 实 wire + docs
 
 **Shipped**: 2026-09-08 (3-commit chain: `8500999` Phase 1 + `911b8da` Phase 2 + Commit 3 docs)
-**Plan**: [`../../plans/v2/v2.7.1-plan.md`](../../plans/v2/v2.7.1-plan.md)
+**Plan**: [`docs/plans/v2/v2.7.1-plan.md`](../../plans/v2/v2.7.1-plan.md)
 **Scope**: 1 NEW runtime dir (3 files: crt0.S / link.ld / README.md) + 1 driver file (regress.py --cross 实 wire) + 1 doc (d43-baseline-archive.md)
 
 ### Commit 1 (Phase 1): Linux ELF runtime — `runtime/linux_elf/` NEW
@@ -169,7 +169,7 @@
 
 ## References (v2.7.1)
 
-- v2.7.1 plan: [`../../plans/v2/v2.7.1-plan.md`](../../plans/v2/v2.7.1-plan.md)
+- v2.7.1 plan: [`docs/plans/v2/v2.7.1-plan.md`](../../plans/v2/v2.7.1-plan.md)
 - v2.7.0 ship: commits `a9c874d` + `abe9111` + `c920695` (前置)
 - v2.7.1 ship: commits `8500999` (Phase 1 runtime) + `911b8da` (Phase 2 --cross wire) + Commit 3 (this)
 - D43 baseline timeline (per `d43-baseline-archive.md`):
@@ -257,7 +257,7 @@ docker run --rm -v /c/...:/work gcc:12 bash -c "
 
 ## v2.7.2 — regress.py `--cross=docker` false-positive 修 (计划中,待 ship)
 
-**Plan**: [`../../plans/v2/v2.7.2-plan.md`](../../plans/v2/v2.7.2-plan.md)
+**Plan**: [`docs/plans/v2/v2.7.2-plan.md`](../../plans/v2/v2.7.2-plan.md)
 **Status**: 📋 Plan-only (设计完成,未启动 ship;1 commit 估计 ~5 LOC)
 **Prerequisite**: v2.7.1 post-ship Docker E2E verify 发现 `regress.py` `_run_cross_env_sysv_test` 2 个 bug — (a) exit=127 误报 "passed";(b) docker image 用 `ubuntu:22.04` 无 gcc
 
@@ -282,7 +282,7 @@ docker run --rm -v /c/...:/work gcc:12 bash -c "
 
 ## v2.8.0 — M2 sysv + sysv_freestanding codegen 真实现 + docker wire 路径修 + 5 sysv tests PASS
 
-**Plan**: [`../../plans/v2/v2.8.0-plan.md`](../../plans/v2/v2.8.0-plan.md) (修正版 per EnterPlanMode audit)
+**Plan**: [`docs/plans/v2/v2.8.0-plan.md`](../../plans/v2/v2.8.0-plan.md) (修正版 per EnterPlanMode audit)
 **Status (current)**:
 - ✅ **Commit 1 — codegen_amd64 SysV emit 实现 (D43 re-baselined)** → commit `<pending>`
 - ⏳ Phase 2 — docker wire 路径修 (container 内 build jhyy_linux) — 待 ship
@@ -329,7 +329,7 @@ docker run --rm -v /c/...:/work gcc:12 bash -c "
 - ✅ D43 closure v1→v2 hold: 两者 sha 相同 = `6a2f2277656ca991bd1c436c4e8bfe14f5d7b33b3587d778e4d8a0e00118af38` (新 baseline,见 D43 archive)
 
 **D43 re-baseline** (Commit 1 末):
-- 旧 baseline `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b` (v2.7.0 末 / v2.7.1 hold / v2.7.2 hold) → **退役** 进 [`d43-baseline-archive.md`](d43-baseline-archive.md)
+- 旧 baseline `cc89432920cba92f6c465dd73f5faa575bd9ce8d17d678c7e1f34879e419cf2b` (v2.7.0 末 / v2.7.1 hold / v2.7.2 hold) → **退役** 进 [`docs/logs/v2/d43-baseline-archive.md`](d43-baseline-archive.md)
 - 新 baseline **`6a2f2277656ca991bd1c436c4e8bfe14f5d7b33b3587d778e4d8a0e00118af38`** (v2.8.0 Commit 1) — canonical self-host 锁
 - Why re-baseline: 加 3 个 state 函数 (`target_is_win` / `cg_offset_for_temp_with_target` / `compute_offset_for_temp_id_with_target`) → ndeccls 1031 → 1034 → IL 591082 → 592311 bytes → sha 必须变
 - v1 编 = v2 编 (D43 closure invariant 仍 hold;只是具体 sha 值变了)
@@ -426,9 +426,9 @@ amd64_sysv_freestanding target: 实现留 v2.7.1
 **Tag**: `v2.8.1` (2026-09-08, 1 commit chain)
 
 **References**:
-- v2.8.1 plan: [`../../docs/plans/v2/v2.8.1-plan.md`](../../docs/plans/v2/v2.8.1-plan.md)
-- v2.8.0 ship (前置): [`v2.8.0-plan.md`](v2.8.0-plan.md) Phase 2 audit line 217-222
-- v2.7.0 plan (Phase 2a 漏做 C-side mirror): [`v2.7.0-plan.md`](v2.7.0-plan.md)
+- v2.8.1 plan: [`docs/plans/v2/v2.8.1-plan.md`](../../plans/v2/v2.8.1-plan.md)
+- v2.8.0 ship (前置): [`docs/plans/v2/v2.8.0-plan.md`](../../plans/v2/v2.8.0-plan.md) Phase 2 audit line 217-222
+- v2.7.0 plan (Phase 2a 漏做 C-side mirror): [`docs/plans/v2/v2.7.0-plan.md`](../../plans/v2/v2.7.0-plan.md)
 - W-069 NODE_CALL is_extern mangling (related): `docs/internal/workarounds.md`
 - jhyy-side codegen.jhyy cg_module stub-fatal: line 3880 (SYSV) / 3885 (SYSV_FREESTANDING)
 - jhyy-side abi_amd64_sysv.jhyy (QBE-call-time helper, 7 ABI fn, v2.7.0 Phase 1 ship): `compiler/src0/abi_amd64_sysv.jhyy`
@@ -442,7 +442,7 @@ amd64_sysv_freestanding target: 实现留 v2.7.1
 ## v2.8.2 — W-070 真修: jhyy-side codegen.jhyy cg_module 真 emit SysV QBE IL (M4 launch 硬前置彻底解锁)
 
 **Shipped**: TBD (Phase 1 commit `8b4d43d`, 2026-09-08)
-**Plan**: [`../../plans/v2/v2.8.2-plan.md`](../../plans/v2/v2.8.2-plan.md)
+**Plan**: [`docs/plans/v2/v2.8.2-plan.md`](../../plans/v2/v2.8.2-plan.md)
 
 ### Context (修正 v2.8.1 plan 假设)
 
@@ -514,7 +514,7 @@ W-070 entry (`docs/internal/workarounds.md`) status: 真修 in v2.8.2. Replaces 
 ### References
 
 - Commit 1: `8b4d43d` (W-070 真修 + Phase 1 ship gate verified)
-- v2.8.2 plan: [`../../plans/v2/v2.8.2-plan.md`](../../plans/v2/v2.8.2-plan.md)
+- v2.8.2 plan: [`docs/plans/v2/v2.8.2-plan.md`](../../plans/v2/v2.8.2-plan.md)
 - v2.8.0 ship (前置): codegen_amd64_emit_*.jhyy target_tag dispatch (mem/ctrl/peephole)
 - v2.7.0 ship (前置): abi_amd64_sysv.jhyy 7 ABI fn (no call sites until v2.8.2)
 - v2.7.1 ship (前置): Linux ELF runtime `crt0.S` + `link.ld`
@@ -528,7 +528,7 @@ W-070 entry (`docs/internal/workarounds.md`) status: 真修 in v2.8.2. Replaces 
 ## v2.8.3 — Docker gcc chain infra 补完: 5 sysv regress tests PASS end-to-end (M4 launch 验证完整化)
 
 **Shipped**: TBD (Commit 1, 2026-09-08)
-**Plan**: [`../../plans/v2/v2.8.3-plan.md`](../../plans/v2/v2.8.3-plan.md)
+**Plan**: [`docs/plans/v2/v2.8.3-plan.md`](../../plans/v2/v2.8.3-plan.md)
 **前置**: v2.8.2 ship (`8b4d43d` + `6e54df9`, tag `v2.8.2`) — W-070 真修, jhyy.exe 真 emit SysV .s
 **Out-of-scope patch honest discovery (per `feedback_no_artifacts_in_project`)**:
 本机 dev env Docker Desktop 4.84.0 + gcc:12 image verified (per v2.7.1 ship)。
@@ -574,7 +574,7 @@ v2.8.2 ship 时 honest 标 ⚠️ 的 gap = 5 sysv tests end-to-end 真跑 PASS�
 - 注释更新: 标 "v2.8.3 改 extern → local fn; v2.8.3 docker gcc chain 真跑揭露"
 - 其他 3 fixture (sysv_struct_mixed / sysv_struct_pass / sysv_struct_ret) inline 实现 本来就对, no fix
 
-**D. Docs (~50 LOC, Commit 2)**: 见 v2.8.3 plan file [`v2.8.3-plan.md`](../../plans/v2/v2.8.3-plan.md)
+**D. Docs (~50 LOC, Commit 2)**: 见 v2.8.3 plan file [`docs/plans/v2/v2.8.3-plan.md`](../../plans/v2/v2.8.3-plan.md)
 
 ### Phase 1 ship gate verified (5/5 + 10/10 + 20/20 + D43 closure)
 

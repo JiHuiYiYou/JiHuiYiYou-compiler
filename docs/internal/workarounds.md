@@ -499,7 +499,7 @@ store_byte_i32(nul1, 0 as i32);
 - W-003 workaround 代码 `let _ = fncall()` style 在 src0/ 24 处 通过 v1.2.2 (`f49e64d`) 全部 revert 回 `let _X = fncall()` 描述性名 风格 (cg_expr / cg_emit_store / cg_copy_struct / ir_emit_ret / ir_emit_str / ir_emit_jmp 6 类 call)
 - 跟 v1.2.0 plan out-of-scope "v3 workaround 29 处" (line 342) 实际工作已经 ship — v1.2.2 24 处 + v1.2.3/1.4 关联 = 完整 29 处 revert
 - W-003 状态:**code 撤回完, v0 fix ship 已闭环**
-- 详情见 [`docs/logs/v1/changelog-v1.2.0.md` § v1.2 wip commit 1.2](../logs/v1/changelog-v1.2.0.md)
+- 详情见 [docs/logs/v1/changelog-v1.2.0.md](../logs/v1/changelog-v1.2.0.md)
 
 ---
 
@@ -764,7 +764,7 @@ fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
 - W-005 workaround 代码 `let mut xxx_vN` style 在 src0/ 16 处 通过 v1.2.1 (`2c92cf4`) 全部 revert 回 `let mut xxx` 自然风格
 - W-005 workaround 残留 `_vN` 后缀 99 处 通过 v1.2.3 (`1c24841`) + v1.2.4 (`0026098`) 全部 cleanup
 - W-005 状态:**code 撤回完, v0 fix ship 已闭环** — 跟 v0.9 wip commit 2.13 + v0.9 wip commit 2.11 真修 chain 形成完整闭环
-- 详情见 [`docs/logs/v1/changelog-v1.2.0.md` § v1.2 wip commit 1.1](../logs/v1/changelog-v1.2.0.md) + [§ v1.2 wip commit 1.3](../logs/v1/changelog-v1.2.0.md) + [§ v1.2 wip commit 1.4](../logs/v1/changelog-v1.2.0.md)
+- 详情见 [docs/logs/v1/changelog-v1.2.0.md](../logs/v1/changelog-v1.2.0.md) + [§ v1.2 wip commit 1.3](../logs/v1/changelog-v1.2.0.md) + [§ v1.2 wip commit 1.4](../logs/v1/changelog-v1.2.0.md)
 
 ---
 
@@ -893,7 +893,7 @@ v1.1 wip commit 1.1 最初版本把 W-006 标 "RESOLVED (escaped — codegen fix
 **superseder**: closed (root cause = W-005 #2 family)
 
 **引用**:
-- [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md` § Sprint v1.1.1](../../plans/v1/v1.1.0任务清单%20+%20概要设计.md) — W-006 编排 (从 1st sprint 移到 "已真修" 状态)
+- [docs/plans/v1/v1.1.0任务清单 + 概要设计.md](../plans/v1/v1.1.0任务清单 + 概要设计.md) — W-006 编排 (从 1st sprint 移到 "已真修" 状态)
 - `memory/project_sprint4_21_phase_b_c_d_g_done.md` — Sprint 4.21 Phase C (cg_copy_struct const IRVal*)
 - `memory/project_sprint4_25_a_prime_sentinel_guard.md` — Sprint 4.25 A' sentinel 真修
 - Stage 1 byte-equal 7/7 PASS (持平 baseline)
@@ -1773,7 +1773,7 @@ export function w $unwrap_or(w %opt, ...)  ← ❌ callee 声明 w!
 **引用:**
 - v1.3.7 fix ship (umbrella): [`docs/logs/v1/changelog-v1.3.0.md`](../logs/v1/changelog-v1.3.0.md) § v1.3.7 fix ship
 - v1.3.7 父 sprint: `docs/plans/v1/v1.3.0任务清单 + 概要设计.md` § v1.3.7
-- ABI spec: [`docs/abis/jhyy-abi-v1.0.0.md`](../abis/jhyy-abi-v1.0.0.md) § enum pass semantics (大 enum = slot 传)
+- ABI spec: [`docs/abis/jhyy-abi-v4.0.0.md`](../abis/jhyy-abi-v4.0.0.md) § enum pass semantics (大 enum = slot 传)
 
 <a id="w-017"></a>
 ## W-017: jhyy 顶层 `let mut *u8 = 0` codegen 常量折叠 → 全局状态失效
@@ -8578,9 +8578,9 @@ f32 的全部四个序比较。
 **引用:**
 - 源码 `compiler/src0/codegen_amd64_lexer.jhyy:1628-1653`
 - 测试 `compiler/tests/examples/float_cmp.jhyy:4, 36-49`
-- 规范 [`../abis/jhyy-lang-spec-v1.3.0.md`](../abis/jhyy-lang-spec-v1.3.0.md)
+- 规范 [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../abis/jhyy-lang-spec-v4.0.0.md)
   §P2(该行的归因「用 QBE 默认指令」也已过时 —— QBE 早在 v3.1.0 移出生产路径)
-- ABI [`../abis/jhyy-abi-v1.0.0.md`](../abis/jhyy-abi-v1.0.0.md) § 11.1 A5 / § 11.2 B2
+- ABI [`docs/abis/jhyy-abi-v4.0.0.md`](../abis/jhyy-abi-v4.0.0.md) § 11.1 A5 / § 11.2 B2
 
 
 
@@ -11779,7 +11779,7 @@ let b: *i64 = x as *i64;
   `cg_sat_f64_to_i64` / `cg_sat_f64_to_u64` / `cg_sat_f64_to_int`
   (branch-free:整数 mask select,不碰 phi / 分支区)
 - 窄宽度(i8/u8/i16/u16/i32/u32/bool):先按 64 位饱和,再在**整数域**夹到
-  目标类型的 [MIN, MAX](iN 的区间是 i64 区间的子集 ⇒ 等价)
+  目标类型的 MIN, MAX
 - ⚠ 窄宽度用**有符号**比较会出错(u64 ≥ 2^63 看是负数)⇒ `cg_clamp_u64_narrow`
   单独处理:有符号看是负 ⇒ 一定 > 任何窄无符号类型的 MAX ⇒ 直接给 MAX
 
@@ -12498,7 +12498,7 @@ fib:
     call ___chkstk_ms      ← 每次调用都探页
     subq $8384, %rsp       ← 一个只用了 72 字节的函数,白拿 8KB 栈
 ```
-实测自举产物(`compiler/src0/main.s`,v4.1.2):**1045 个函数,100% 帧 ≥8352,
+实测自举产物(`compiler/build/bench/compile/main.s`,v4.1.2):**1045 个函数,100% 帧 ≥8352,
 100% 每次调用都走 `___chkstk_ms`**。
 
 **根因:**

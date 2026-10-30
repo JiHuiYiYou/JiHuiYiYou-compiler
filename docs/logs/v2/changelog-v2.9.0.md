@@ -1,7 +1,7 @@
 # JHYY v2.9.0 — N≥3 selfhost fixed point 验算 + verification harness (V2-C Part 1)
 
 **Shipped**: TBD (1 source commit + 1 docs commit)
-**Plan**: [`../../plans/v2/v2.9.0-plan.md`](../../plans/v2/v2.9.0-plan.md)
+**Plan**: [`docs/plans/v2/v2.9.0-plan.md`](../../plans/v2/v2.9.0-plan.md)
 **Scope**: 1 NEW shell script + 1 NEW python tool + regress.py opt-in flag + docs
 **前置**: v2.8.3 ship (`--no-link` flag + docker gcc chain 5/5 sysv PASS + W-070 真修)
 
@@ -105,10 +105,10 @@
 
 ## References
 
-- v2.9.0 plan: [`../../plans/v2/v2.9.0-plan.md`](../../plans/v2/v2.9.0-plan.md)
-- v2.10.0 plan (后续): [`../../plans/v2/v2.10.0-plan.md`](../../plans/v2/v2.10.0-plan.md)
+- v2.9.0 plan: [`docs/plans/v2/v2.9.0-plan.md`](../../plans/v2/v2.9.0-plan.md)
+- v2.10.0 plan (后续): `../../plans/v2/v2.10.0-plan.md`
 - v2.8.3 ship: tag `v2.8.3`, 2026-09-08 — `--no-link` flag + docker gcc chain
 - v1.0.0 真自举 byte-equal: tag `9b05c0f` / commit `eabee0d`, sha `2445e97d...`
 - D43 closure baseline archive: [`docs/logs/v2/d43-baseline-archive.md`](d43-baseline-archive.md)
-- M5 deferral: [`../../plans/v1/v1.x-phase-4-m5-boot-from-scratch.md`](../../plans/v1/v1.x-phase-4-m5-boot-from-scratch.md)
+- M5 deferral: [`docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md`](../../plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md)
 - Memory: [[feedback_plans_per_version]], [[feedback_changelog_umbrella]], [[feedback_fix_evaluation_rule]], [[feedback_regress_baseline_binary_hash]], [[feedback_no_artifacts_in_project]], [[feedback_auto_push_after_commit]]

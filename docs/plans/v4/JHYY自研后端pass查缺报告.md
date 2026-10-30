@@ -14,7 +14,7 @@
 > | 本报告的说法 | 二次复核结论 |
 > |---|---|
 > | §5 P1「**wire regalloc** 是最高杠杆的一改,其余所有 pass 加起来都补不上」 | **推翻**。`regalloc.jhyy` 是 prototype 不是「差一根线」:无 CFG、无函数边界、无 call-clobber 处理、无寄存器类、无 spill/reload 插入;`MAX_TEMPS=64` 对真实 60656 个 temp;**寄存器侧 API 零调用点**;`regalloc_init`/`regalloc_run` 的唯一调用点是注释掉的。成本被低估约**一个数量级** |
-> | §4.2「这个项目到目前为止没有做过一次运行时性能测量」 | **不准确**。`compiler/tests/bootstrap/bench.sh` 存在(v4.0.0)—— 但**它的计时器是坏的**(MSYS2 的 `date +%s.%N` 实测把 `sleep 1.0` 量成 1.45~1.76 秒)且不在 CI ⇒ 等于没测。可信基线见 [`../../docs/perf/self-backend-baseline-2026-10-29.md`](../../perf/self-backend-baseline-2026-10-29.md) |
+> | §4.2「这个项目到目前为止没有做过一次运行时性能测量」 | **不准确**。`compiler/tests/bootstrap/bench.sh` 存在(v4.0.0)—— 但**它的计时器是坏的**(MSYS2 的 `date +%s.%N` 实测把 `sleep 1.0` 量成 1.45~1.76 秒)且不在 CI ⇒ 等于没测。可信基线见 [`docs/perf/self-backend-baseline-2026-10-29.md`](../../perf/self-backend-baseline-2026-10-29.md) |
 > | §4.3「IL buffer 4MB cap」 | 对**生产路径不成立** —— 4MB 是已废弃的文件读路径;生产走 in-mem + 8MB arena |
 > | §3「byte-equal 与优化直接冲突,**必须先决策**」 | **假两难,不需要先决策**。没有任何门拿硬编码 sha 比对 —— 全是运行时算 sha 比「同一编译器的两次运行」。真正会红的只有 `artifact_checks.sh` 的 4 条**汇编文本断言** |
 >
@@ -27,7 +27,7 @@
 > **gcc -O0 的 3.43x(fib)/ 4.73x(ack)**,而且**参照系该用 gcc -O0 不是 gcc -O2**
 > (这几个程序 gcc -O0 ≈ gcc -O2,差距全在 codegen 质量而非优化 pass)。
 >
-> **现行计划**:[`self-backend-perf-plan.md`](self-backend-perf-plan.md)(v4.2 起的主线)。
+> **现行计划**:[`docs/plans/v4/self-backend-perf-plan.md`](self-backend-perf-plan.md)(v4.2 起的主线)。
 
 ---
 

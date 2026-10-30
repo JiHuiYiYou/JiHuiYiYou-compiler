@@ -1,14 +1,14 @@
 # v4.x — post-merge integration axis
 
-**状态**: 🟢 **当前主线 = [`self-backend-perf-plan.md`](self-backend-perf-plan.md)**
-(自研后端性能线,v4.2 起);**版本号权威 = [`version-schedule.md`](version-schedule.md)**。
+**状态**: 🟢 **当前主线 = [`docs/plans/v4/self-backend-perf-plan.md`](self-backend-perf-plan.md)**
+(自研后端性能线,v4.2 起);**版本号权威 = [`docs/plans/v4/version-schedule.md`](version-schedule.md)**。
 
 ## 目录结构(2026-10-30 调整)
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [`self-backend-perf-plan.md`](self-backend-perf-plan.md) | **当前主线** —— 自研后端性能线(v4.2 / v4.4 / v4.5) | 🔴 进行中 |
-| [`version-schedule.md`](version-schedule.md) | 历史排期轴 —— v4.0.x 已 ship 的逐版记录(§ 三)+ 版本表(§ 四 / § 五.3);⚠️ **§ 一 / § 二是 2026-10-18 的旧快照**,读前先核对现状 | ⚪ 半归档 |
+| [`docs/plans/v4/self-backend-perf-plan.md`](self-backend-perf-plan.md) | **当前主线** —— 自研后端性能线(v4.2 / v4.4 / v4.5) | 🔴 进行中 |
+| [`docs/plans/v4/version-schedule.md`](version-schedule.md) | 历史排期轴 —— v4.0.x 已 ship 的逐版记录(§ 三)+ 版本表(§ 四 / § 五.3);⚠️ **§ 一 / § 二是 2026-10-18 的旧快照**,读前先核对现状 | ⚪ 半归档 |
 | `active-workaround-clearance.md` | ACTIVE 桶清零的审计轨迹(2026-10-20 已完成,ACTIVE=0) | ⚪ 留档 |
 | `JHYY自研后端pass查缺报告.md` | 2026-10-25 的 pass 查缺报告(部分结论已被 2026-10-29 实测推翻) | ⚪ 留档 |
 | `v4.0.0-plan.md` … `v4.0.7-plan.md` | 已 ship 的 sprint 记录,**保留为审计轨迹,不合并** | ⚪ 留档 |
@@ -28,33 +28,33 @@ Scope(范围)· 验收门(硬指标)· **启动时复核清单** · Critical fil
 
 | 版本 | 主题 | 文档 |
 |---|---|---|
-| v4.4.0 | 寄存器分配 ①:位置映射 + 前瞻窗口缓存(**下一个版本**) | [`v4.4.0-plan.md`](v4.4.0-plan.md) |
-| v4.4.1 | 寄存器分配 ②:call-clobber + 寄存器类 | [`v4.4.1-plan.md`](v4.4.1-plan.md) |
-| v4.4.2 | 寄存器分配 ③:跨基本块 + phi 并行移动 | [`v4.4.2-plan.md`](v4.4.2-plan.md) |
-| v4.4.3 | 寄存器分配 ④:门 + perf 验证 + 去文本耦合 | [`v4.4.3-plan.md`](v4.4.3-plan.md) |
-| v4.4.5 | peephole 4096 真修 + IR 优化框架(降级下来的两版) | [`v4.4.5-plan.md`](v4.4.5-plan.md) |
-| v4.5 | M5 Part 3(0-C 闭环) | [`v4.5-plan.md`](v4.5-plan.md) |
+| v4.4.0 | 寄存器分配 ①:位置映射 + 前瞻窗口缓存(**下一个版本**) | [`docs/plans/v4/v4.4.0-plan.md`](v4.4.0-plan.md) |
+| v4.4.1 | 寄存器分配 ②:call-clobber + 寄存器类 | [`docs/plans/v4/v4.4.1-plan.md`](v4.4.1-plan.md) |
+| v4.4.2 | 寄存器分配 ③:跨基本块 + phi 并行移动 | [`docs/plans/v4/v4.4.2-plan.md`](v4.4.2-plan.md) |
+| v4.4.3 | 寄存器分配 ④:门 + perf 验证 + 去文本耦合 | [`docs/plans/v4/v4.4.3-plan.md`](v4.4.3-plan.md) |
+| v4.4.5 | peephole 4096 真修 + IR 优化框架(降级下来的两版) | [`docs/plans/v4/v4.4.5-plan.md`](v4.4.5-plan.md) |
+| v4.5 | M5 Part 3(0-C 闭环) | [`docs/plans/v4/v4.5-plan.md`](v4.5-plan.md) |
 
 **OS 线**(16 格,`OS-1`..`OS-16`):
 
 | 版本 | 序号 | 主题 | 文档 |
 |---|---|---|---|
-| v4.6 | OS-1 | 止血包 | [`v4.6-plan.md`](v4.6-plan.md) |
-| v4.7 | OS-2 | 观测(栈上界) | [`v4.7-plan.md`](v4.7-plan.md) |
-| v4.8 | OS-3 | 反馈环(最小 kernel.efi) | [`v4.8-plan.md`](v4.8-plan.md) |
-| v4.8.5 | OS-4 | 栈与分配 | [`v4.8.5-plan.md`](v4.8.5-plan.md) |
-| v4.9 | OS-5 | ABI 收敛 | [`v4.9-plan.md`](v4.9-plan.md) |
-| v4.10 | OS-6 | 语言自洽 | [`v4.10-plan.md`](v4.10-plan.md) |
-| v4.10.5 | OS-7 | 效果最小集 | [`v4.10.5-plan.md`](v4.10.5-plan.md) |
-| v4.11 | OS-8 | lifetime | [`v4.11-plan.md`](v4.11-plan.md) |
-| v4.12 | OS-9 | trait + dyn Trait | [`v4.12-plan.md`](v4.12-plan.md) |
-| v4.12.3 | OS-10 | const generic | [`v4.12.3-plan.md`](v4.12.3-plan.md) |
-| v4.12.5 | OS-11 | HKT(一阶) | [`v4.12.5-plan.md`](v4.12.5-plan.md) |
-| v4.13 | OS-12 | 效果骨架 + 锁序 | [`v4.13-plan.md`](v4.13-plan.md) |
-| v4.13.5 | OS-13 | 对象模型冻结(manifest) | [`v4.13.5-plan.md`](v4.13.5-plan.md) |
-| v4.14 | OS-14 | 能力类型化(`Cap<T>` 真 T) | [`v4.14-plan.md`](v4.14-plan.md) |
-| v4.14.5 | OS-15 | 内核数据结构(RCU / PerCpu) | [`v4.14.5-plan.md`](v4.14.5-plan.md) |
-| v4.15 | OS-16 | 可信工具链(KASAN / KCFI) | [`v4.15-plan.md`](v4.15-plan.md) |
+| v4.6 | OS-1 | 止血包 | [`docs/plans/v4/v4.6-plan.md`](v4.6-plan.md) |
+| v4.7 | OS-2 | 观测(栈上界) | [`docs/plans/v4/v4.7-plan.md`](v4.7-plan.md) |
+| v4.8 | OS-3 | 反馈环(最小 kernel.efi) | [`docs/plans/v4/v4.8-plan.md`](v4.8-plan.md) |
+| v4.8.5 | OS-4 | 栈与分配 | [`docs/plans/v4/v4.8.5-plan.md`](v4.8.5-plan.md) |
+| v4.9 | OS-5 | ABI 收敛 | [`docs/plans/v4/v4.9-plan.md`](v4.9-plan.md) |
+| v4.10 | OS-6 | 语言自洽 | [`docs/plans/v4/v4.10-plan.md`](v4.10-plan.md) |
+| v4.10.5 | OS-7 | 效果最小集 | [`docs/plans/v4/v4.10.5-plan.md`](v4.10.5-plan.md) |
+| v4.11 | OS-8 | lifetime | [`docs/plans/v4/v4.11-plan.md`](v4.11-plan.md) |
+| v4.12 | OS-9 | trait + dyn Trait | [`docs/plans/v4/v4.12-plan.md`](v4.12-plan.md) |
+| v4.12.3 | OS-10 | const generic | [`docs/plans/v4/v4.12.3-plan.md`](v4.12.3-plan.md) |
+| v4.12.5 | OS-11 | HKT(一阶) | [`docs/plans/v4/v4.12.5-plan.md`](v4.12.5-plan.md) |
+| v4.13 | OS-12 | 效果骨架 + 锁序 | [`docs/plans/v4/v4.13-plan.md`](v4.13-plan.md) |
+| v4.13.5 | OS-13 | 对象模型冻结(manifest) | [`docs/plans/v4/v4.13.5-plan.md`](v4.13.5-plan.md) |
+| v4.14 | OS-14 | 能力类型化(`Cap<T>` 真 T) | [`docs/plans/v4/v4.14-plan.md`](v4.14-plan.md) |
+| v4.14.5 | OS-15 | 内核数据结构(RCU / PerCpu) | [`docs/plans/v4/v4.14.5-plan.md`](v4.14.5-plan.md) |
+| v4.15 | OS-16 | 可信工具链(KASAN / KCFI) | [`docs/plans/v4/v4.15-plan.md`](v4.15-plan.md) |
 
 **v4.16 起**(不排进 OS 线,与之正交):async/await · 包管理器 ·
 并发 cap + 完整 memory model · 多架构 ABI —— **不预先落文档**,启动时再领版本号。
@@ -74,7 +74,7 @@ HKT / 并发 cap / `.jhyynb` / M5 Part 3)。
 
 | 内容 | 现在在哪 |
 |---|---|
-| 版本归属 + 「下一个做什么」 | [`version-schedule.md`](version-schedule.md) § 四(v4.5 / v4.6+ 两行) |
+| 版本归属 + 「下一个做什么」 | [`docs/plans/v4/version-schedule.md`](version-schedule.md) § 四(v4.5 / v4.6+ 两行) |
 | **每格的详细 scope** | **v4.x 版本系列文档**(见上)—— `v4.4.0-plan.md` … `v4.15-plan.md` |
 | 技术取舍的原始论证 | git 历史(commit `98f4e4c` 之前)—— 启动某项时再翻 |
 
@@ -88,7 +88,7 @@ v4.x 是 v2.x + v3.x axes merge 后的主版本轴 — **integration axis**,不�
 
 **并行/串行**(per `feedback_no_blind_serial_rule`):v4.x 内部 sub-sprint **按依赖图决定
 并行/串行**,**不**预设「single-line serial」元规则。当前依赖图见
-[`version-schedule.md`](version-schedule.md) § 四:
+[`docs/plans/v4/version-schedule.md`](version-schedule.md) § 四:
 
 - 强串行链:`lifetime → closure → dyn Trait → HKT`(v4.6+,与性能线正交,可并行)
 - 当前串行主线:性能线 `v4.2(✅) → v4.4 → v4.5`,`v4.4.5+` 收降级下来的两版;
@@ -105,8 +105,8 @@ v4.x 是 v2.x + v3.x axes merge 后的主版本轴 — **integration axis**,不�
 ## 决策锁
 
 - **v2.x ‖ v3.x 并行结束**:v4.0.0 merge 后,无独立跨轴 parallel
-- **跨边界冲突**走 [`../../coordination/JHYY_编译器侧设计终版.md`](../../coordination/JHYY_编译器侧设计终版.md)
-  § 1 的分工公式 + [`../../coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md) § 6 的语言—内核边界
+- **跨边界冲突**走 [`docs/coordination/JHYY_编译器侧设计终版.md`](../../coordination/JHYY_编译器侧设计终版.md)
+  § 1 的分工公式 + [`docs/coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md) § 6 的语言—内核边界
 - **D43 阶段性 self-equal** hold:v4.x 每 sub-sprint ship 重新 baseline
 
 ## 命名约定(2026-10-30 修订 + 2026-10-30 第二次修订)
@@ -130,9 +130,9 @@ v4.x 是 v2.x + v3.x axes merge 后的主版本轴 — **integration axis**,不�
 
 ## L1 长篇
 
-- [`../roadmap/v4.x-post-merge.md`](../roadmap/v4.x-post-merge.md) — v4.x 长线设计 + 决策锁 + 跨边界问题 + 强/弱依赖图
-- [`../../coordination/JHYY_编译器侧设计终版.md`](../../coordination/JHYY_编译器侧设计终版.md) — OS 线的 P0–P4.5 分期与硬门(与本轴正交)
-- [`../../coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md) — 内核形态 + capability 对象模型 + `.jhyynb` 契约 + 语言—内核边界
+- [`docs/plans/roadmap/v4.x-post-merge.md`](../roadmap/v4.x-post-merge.md) — v4.x 长线设计 + 决策锁 + 跨边界问题 + 强/弱依赖图
+- [`docs/coordination/JHYY_编译器侧设计终版.md`](../../coordination/JHYY_编译器侧设计终版.md) — OS 线的 P0–P4.5 分期与硬门(与本轴正交)
+- [`docs/coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md) — 内核形态 + capability 对象模型 + `.jhyynb` 契约 + 语言—内核边界
 
 ## Changelog
 

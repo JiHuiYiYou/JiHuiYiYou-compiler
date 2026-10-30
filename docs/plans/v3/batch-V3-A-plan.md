@@ -132,9 +132,9 @@
 - inner attr 跟 outer attr 互斥 / 优先级(留 v3.x 中)
 - 自定义 entry point(目前 hardcoded `main`;user 改 entry 留 v3.x 中)
 - 3a inline asm(留 V3-B v3.0.1)
-- 3b #[naked](留 V3-B v3.0.2)
+- 3b #naked
 - 3c volatile(留 V3-B v3.0.3)
-- 3e #[link_section](留 V3-B v3.0.4)
+- 3e #link_section
 - 3f memory barrier(留 V3-B v3.0.5)
 - 3g &mut + lifetime(留 V3-C)
 

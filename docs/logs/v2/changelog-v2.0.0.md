@@ -6,7 +6,7 @@
 > - **v2.0.0** = Sprint A Stage 1: target dispatcher 起步(`compiler/src0/target_dispatch.jhyy` 新建 + `codegen.jhyy` target switch + `main.jhyy` 加 `--target=<triple>` CLI + 默认 `Amd64Win`)
 > - 后续 patch(v2.0.1 / v2.0.2 等)— 内容回填到本 umbrella
 >
-> **plan 性质**: per [`v2.0.0任务清单 + 概要设计.md`](../../plans/v2/v2.0.0任务清单 + 概要设计.md)。**umbrella changelog**(per `feedback_changelog_umbrella.md` vX.Y axis 单 umbrella;v2.0 minor axis 单一 umbrella)。
+> **plan 性质**: per [`docs/plans/v2/v2.0.0任务清单 + 概要设计.md`](../../plans/v2/v2.0.0任务清单 + 概要设计.md)。**umbrella changelog**(per `feedback_changelog_umbrella.md` vX.Y axis 单 umbrella;v2.0 minor axis 单一 umbrella)。
 >
 > **关键纪律**:
 > - **Author 必须 `JHYY <15901598712@163.com>`** per `feedback_git_identity_canonical` + Co-author `MiniMax-M3 <noreply@MiniMax>` per `feedback_commit_coauthor`
@@ -110,11 +110,11 @@
 
 ## 关联文档
 
-- v2.0 阶段 sprint 计划 → [`../../plans/v2/`](../../plans/v2/)(v2.0.0 / v2.1.0 / v2.2.0 / v2.3.0 / v2.4.0 任务清单 + 概要设计)
-- v2.x ‖ v3.x 并行 sprint 调度 → [`../../plans/roadmap/v2-v3-parallel-sprint-plan.md`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md)
-- v2.0 OS 准备里程碑视图 → [`../../plans/v2/v2.0.0-os-prep.md`](../../plans/v2/v2.0.0-os-prep.md)
-- v2.x QBE 自写长线 → [`../../plans/roadmap/v2.x-qbe-rewrite.md`](../../plans/roadmap/v2.x-qbe-rewrite.md)
-- v3.x 语言扩展长线 → [`../../plans/roadmap/v3.x-language-expansion.md`](../../plans/roadmap/v3.x-language-expansion.md)
-- 跨项目 OS 时间线 → [`../../../../jhyy_OS/docs/coordination.md`](../../../../jhyy_OS/docs/coordination.md)
-- 上代 v1.x 实施日志 → [`../v1/`](../v1/)
-- v2.0 阶段后续 umbrella → [`changelog-v2.1.0.md`](changelog-v2.1.0.md) / [v2.2.0](changelog-v2.2.0.md) / [v2.3.0](changelog-v2.3.0.md) / [v2.4.0](changelog-v2.4.0.md)
+- v2.0 阶段 sprint 计划 → [`docs/plans/v2`](../../plans/v2/)(v2.0.0 / v2.1.0 / v2.2.0 / v2.3.0 / v2.4.0 任务清单 + 概要设计)
+- v2.x ‖ v3.x 并行 sprint 调度 → [`docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md`](../../archive/v2-v3/v2-v3-parallel-sprint-plan.md)
+- v2.0 OS 准备里程碑视图 → [`docs/archive/v2-v3/v2.0.0-os-prep.md`](../../archive/v2-v3/v2.0.0-os-prep.md)
+- v2.x QBE 自写长线 → [`docs/plans/roadmap/v2.x-qbe-rewrite.md`](../../plans/roadmap/v2.x-qbe-rewrite.md)
+- v3.x 语言扩展长线 → [`docs/plans/roadmap/v3.x-language-expansion.md`](../../plans/roadmap/v3.x-language-expansion.md)
+- 跨项目 OS 时间线 → [`docs/coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md)
+- 上代 v1.x 实施日志 → [`docs/logs/v1`](../v1/)
+- v2.0 阶段后续 umbrella → [`docs/logs/v2/changelog-v2.1.0.md`](changelog-v2.1.0.md) / [v2.2.0](changelog-v2.2.0.md) / [v2.3.0](changelog-v2.3.0.md) / [v2.4.0](changelog-v2.4.0.md)

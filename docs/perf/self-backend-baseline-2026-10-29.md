@@ -1,6 +1,6 @@
 # 自研后端运行时性能基线 —— 2026-10-29 实测
 
-> 这份文档补上 [`JHYY自研后端pass查缺报告.md`](../plans/v4/JHYY自研后端pass查缺报告.md)
+> 这份文档补上 [`docs/plans/v4/JHYY自研后端pass查缺报告.md`](../plans/v4/JHYY自研后端pass查缺报告.md)
 > §4.2 说的「**这个项目到目前为止没有做过一次运行时性能测量**」——
 > 那句话**不准确**:`compiler/tests/bootstrap/bench.sh` 存在(v4.0.0),
 > 但**它的计时器是坏的**,而且不在 CI ⇒ 等于没有测量。
@@ -67,7 +67,7 @@ fib / ack / nq 这三个程序 **gcc -O0 ≈ gcc -O2**(89.7 vs 55.5 / 28.5 vs 22
 `alloc_pool_size = (8192 as i64) + pfa_v` ⇒ **每个函数的帧至少 8352 字节**,
 与该函数实际用几个 temp 无关。
 
-**自举产物实测**(`compiler/src0/main.s`,v4.1.2,10.4 MB):
+**自举产物实测**(`compiler/build/bench/compile/main.s`,v4.1.2,10.4 MB):
 
 ```
 prologue frames=1045   chkstk calls=1045
@@ -238,8 +238,8 @@ alloc_pool_size = 8192 + per_fn_alloc
 
 ## Cross-ref
 
-- 计划:[`../plans/v4/self-backend-perf-plan.md`](../plans/v4/self-backend-perf-plan.md)
-- 旧报告(部分结论已过时):[`../plans/v4/JHYY自研后端pass查缺报告.md`](../plans/v4/JHYY自研后端pass查缺报告.md)
+- 计划:[`docs/plans/v4/self-backend-perf-plan.md`](../plans/v4/self-backend-perf-plan.md)
+- 旧报告(部分结论已过时):[`docs/plans/v4/JHYY自研后端pass查缺报告.md`](../plans/v4/JHYY自研后端pass查缺报告.md)
 - 计时器已修的 bench(现在是入口别名):[`compiler/tests/bootstrap/bench.sh`](../../compiler/tests/bootstrap/bench.sh)
 - 测量脚本:`scripts/dev/bench/runtime_perf.py`
 - 静态指标基线:`scripts/dev/bench/runtime_perf.baseline.json`

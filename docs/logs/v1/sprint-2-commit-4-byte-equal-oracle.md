@@ -1,7 +1,7 @@
 # Sprint 2 commit 4 — byte-equal oracle 框架
 
 **日期**: 2026-06-24
-**对应 plan**: [`../../plans/v1/v1.0.0详细实现方案.md`](../../plans/v1/v1.0.0详细实现方案.md) line 263 + 369
+**对应 plan**: [`docs/plans/v1/v1.0.0详细实现方案.md`](../../plans/v1/v1.0.0详细实现方案.md) line 263 + 369
 **状态**: 完成 ✅
 
 ## 目标

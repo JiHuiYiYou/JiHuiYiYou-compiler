@@ -1,6 +1,6 @@
 # jhyy_OS installer placeholder
 
-> **Last updated**: v1.8.3 (2026-08-29) — v1.x 已终结。OS installer scope **仍 deferred**,由 jhyy_OS 团队在后续 OS sprint 启动时填具体 WXS / Bundle / ProgId / CustomAction。详见 [`docs/plans/v2/v2.0.0-os-prep.md`](../../docs/plans/v2/v2.0.0-os-prep.md) § OS 启动链路 + [`../../../jhyy_OS/docs/coordination.md`](../../../jhyy_OS/docs/coordination.md) § 0 Critical Path。
+> **Last updated**: v1.8.3 (2026-08-29) — v1.x 已终结。OS installer scope **仍 deferred**,由 jhyy_OS 团队在后续 OS sprint 启动时填具体 WXS / Bundle / ProgId / CustomAction。详见 [`docs/archive/v2-v3/v2.0.0-os-prep.md`](../../docs/archive/v2-v3/v2.0.0-os-prep.md) § OS 启动链路 + [`docs/coordination/JHYY_OS侧设计终版.md`](../../docs/coordination/JHYY_OS侧设计终版.md) § 0 Critical Path。
 
 本目录是 jhyy_OS MSI 的 placeholder,当前**仅** `.gitkeep` + 本 README,无任何 WXS / Bundle / MSI 产物。
 
@@ -18,7 +18,7 @@ v1.5.3 Burn bundle (per `docs/plans/v1/v1.5.0任务清单 + 概要设计.md` § 
 
 ## 跨项目协调
 
-参见 [`../../../jhyy_OS/docs/coordination.md`](../../../jhyy_OS/docs/coordination.md) § 0 Critical Path — OS 启动 M1-M11 里程碑里, installer 是 OS 启动前的依赖项(OS 用户需要先装 JHYY 才能 build OS kernel)。**当前 13 个 Q + 6 个 UD 决定 全部闭环/锁**(per coordination.md § 6 + § 8),无 open 跨边界问题阻塞 OS sprint 设计。
+参见 [`docs/coordination/JHYY_OS侧设计终版.md`](../../docs/coordination/JHYY_OS侧设计终版.md) § 0 Critical Path — OS 启动 M1-M11 里程碑里, installer 是 OS 启动前的依赖项(OS 用户需要先装 JHYY 才能 build OS kernel)。**当前 13 个 Q + 6 个 UD 决定 全部闭环/锁**(per coordination.md § 6 + § 8),无 open 跨边界问题阻塞 OS sprint 设计。
 
 跨边界决策涉及 OS installer 的部分(per v2.0.0-os-prep § 3):
 - **D6**: `Cap<T>` 8 字节 — OS 侧 cap node 内存布局,直接影响 OS kernel ABI(不影响 OS MSI installer 范围)

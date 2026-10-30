@@ -8,8 +8,8 @@
 > 4. sprint 排程表(具体顺序)
 > 5. OS M1 / M4 / M11 launch 路径映射 + 节点顺序
 > **前置**: v1.0 真自举闭环(M4 hard)
-> **不在 scope**: v0.x(已完成) / v1.x sprint 设计(→ [v1.0-self-hosting.md](v1.0-self-hosting.md)) / OS 端设计(→ `jhyy_OS/` repo)
-> **权威源**: 本文件不替代 L1 长篇;v2.x 范围以 [v2.x-qbe-rewrite.md](v2.x-qbe-rewrite.md) 为准,v3.x 特性以 [v3.x-language-expansion.md](v3.x-language-expansion.md) 为准,OS 启动链路以 [v2.0.0-os-prep.md](../v2/v2.0.0-os-prep.md) 为准
+> **不在 scope**: v0.x(已完成) / v1.x sprint 设计(→ [docs/plans/roadmap/v1.0-self-hosting.md](../../plans/roadmap/v1.0-self-hosting.md)) / OS 端设计(→ `jhyy_OS/` repo)
+> **权威源**: 本文件不替代 L1 长篇;v2.x 范围以 [docs/plans/roadmap/v2.x-qbe-rewrite.md](../../plans/roadmap/v2.x-qbe-rewrite.md) 为准,v3.x 特性以 [docs/plans/roadmap/v3.x-language-expansion.md](../../plans/roadmap/v3.x-language-expansion.md) 为准,OS 启动链路以 [docs/archive/v2-v3/v2.0.0-os-prep.md](v2.0.0-os-prep.md) 为准
 
 ---
 
@@ -155,8 +155,8 @@
 | **v2.1.0** ✅ shipped (2026-09-03 commit `8ac3608`) | ABI 抽离(abi_amd64_win + abi_amd64_win_freestanding + codegen 抽离调用 + ABI 单元测试) | v2.0.0 |
 | **v2.2.0** ✅ shipped (2026-09-03 commit `896a329`) | spec 锁定(abi § 13 + lang-spec § 18-21 + build.md + jhyy_OS cross-check) | v2.1.0 |
 | **v2.3.0** ✅ shipped (2026-09-04 tag `v2.3.0` commit `54d93df`) | hello-freestanding.efi 跑 OVMF(UEFI + PE/COFF 链路验证)| v2.2.0 |
-| **v2.4.0** ✅ shipped (2026-09-04 tag `v2.4.0` commit `7fb735b`) | 多目标 dispatcher + **byte-equal 三件套**(per `coordination.md § 3 D26`:`jhyy_v1.il == jhyy_v2.il` + `.s == .s` + `.exe byte-equal` 兜底 recipe per [`v2.4.0 § 2.1.1 byte_equal.sh`](../v2/v2.4.0任务清单 + 概要设计.md))| v2.3.0 |
-| **v3.0 3a-3f**(⟂ 异步)⏳ 待启动 | v2.0 阶段 ship 后启动:3a inline asm / 3b #[naked] fn / 3c volatile load/store / 3e #[link_section] / 3f memory barrier / 3d #[no_std](软,任何时点做 per D10)| v2.4.0(6 特性独立,内部不强依赖;**3c 硬约束**:v2.x 自写后端在 3c ship 后才移植 volatile 语义,per § 4.2)|
+| **v2.4.0** ✅ shipped (2026-09-04 tag `v2.4.0` commit `7fb735b`) | 多目标 dispatcher + **byte-equal 三件套**(per `coordination.md § 3 D26`:`jhyy_v1.il == jhyy_v2.il` + `.s == .s` + `.exe byte-equal` 兜底 recipe per [`v2.4.0 § 2.1.1 byte_equal.sh`](../../plans/v2/v2.4.0任务清单 + 概要设计.md))| v2.3.0 |
+| **v3.0 3a-3f**(⟂ 异步)⏳ 待启动 | v2.0 阶段 ship 后启动:3a inline asm / 3b #[naked] fn / 3c volatile load/store / 3e #[link_section] / 3f memory barrier / 3d #no_std| v2.4.0(6 特性独立,内部不强依赖;**3c 硬约束**:v2.x 自写后端在 3c ship 后才移植 volatile 语义,per § 4.2)|
 | **M1 launch** | OS 编 kernel.efi + QEMU + OVMF + printk(端到端联调)| v2.0 阶段 + v3.0 3a-3c/3e-3f 全 ship(3d 软,M1 不依赖)|
 
 **关键**:
@@ -327,10 +327,10 @@ git push --force-with-lease
 
 | 约束 | 内容 | 来源 |
 |------|------|------|
-| **D42** | v3.0 3a inline asm 在 v2.x 自写后端完成**前**走 QBE .s 输出路径直接插入汇编(不依赖 `codegen_amd64.jhyy`);v2.x 末完成后才走自写后端 escape hatch | [coordination.md § 3 D42](../../../jhyy_OS/docs/coordination.md) |
+| **D42** | v3.0 3a inline asm 在 v2.x 自写后端完成**前**走 QBE .s 输出路径直接插入汇编(不依赖 `codegen_amd64.jhyy`);v2.x 末完成后才走自写后端 escape hatch | [coordination.md § 3 D42](../../coordination/JHYY_OS侧设计终版.md) |
 | **3c volatile 优先** | v3.0 3c `volatile` load/store 必须**先 ship**,再 v2.x 自写后端移植 volatile 语义(避免双倍 baseline 漂移) | [v2-v3-parallel-sprint-plan.md § 4.2](#) |
-| **D27** | v3.1 `3g → 3g.5 → 3g.7` 串行不可调换(phantom 0-byte 依赖 3g codegen;cap table 联调依赖 3g.5 锁定的 8 字节布局) | [coordination.md § 3 D27](../../../jhyy_OS/docs/coordination.md) |
-| **D43** | 阶段性 self-equal hold:每轴内 Stage 2 N=4 byte-equal closure 是 `jhyy_N == jhyy_N+1` self-equal,**不**跨版本;v3 axis ship 改 codegen 特性 → v2 axis 后续 sub-sprint 重新 baseline | [coordination.md § 3 D43](../../../jhyy_OS/docs/coordination.md) |
+| **D27** | v3.1 `3g → 3g.5 → 3g.7` 串行不可调换(phantom 0-byte 依赖 3g codegen;cap table 联调依赖 3g.5 锁定的 8 字节布局) | [coordination.md § 3 D27](../../coordination/JHYY_OS侧设计终版.md) |
+| **D43** | 阶段性 self-equal hold:每轴内 Stage 2 N=4 byte-equal closure 是 `jhyy_N == jhyy_N+1` self-equal,**不**跨版本;v3 axis ship 改 codegen 特性 → v2 axis 后续 sub-sprint 重新 baseline | [coordination.md § 3 D43](../../coordination/JHYY_OS侧设计终版.md) |
 
 ### § 6.5 Self-equal Baseline(D43 阶段性 hold)
 
@@ -444,14 +444,14 @@ Co-Authored-By: MiniMax-M3 <noreply@MiniMax>
 
 | 文档 | 关系 |
 |------|------|
-| [v2.x-qbe-rewrite.md](v2.x-qbe-rewrite.md) | v2.x 轴权威 L1 文档(本文件是其 sprint 级细化 + 并行视角) |
-| [v3.x-language-expansion.md](v3.x-language-expansion.md) | v3.x 轴权威 L1 文档(本文件是其 sprint 级细化 + 并行视角) |
-| [v2.0.0-os-prep.md](../v2/v2.0.0-os-prep.md) | OS 启动链路 + 跨项目接口权威(本文件引用其 M1-M11) |
-| [v1.0-self-hosting.md](v1.0-self-hosting.md) | v1.0 真闭环 L1 文档(本文件共同前置) |
-| [v1.x-phase-4-m5-boot-from-scratch.md](v1.x-phase-4-m5-boot-from-scratch.md) | **M5 推迟决策**(2026-08-14) — v2.x 末 (QBE 移除) + v3.x 末 (runtime 重写) 都 ship 后, 一次性删 `src/*.c` + untrack QBE + 删 runtime.c; M5 是 v1.x 末 Phase 4 单独 sprint |
-| [v1.0.0任务清单 + 概要设计.md](../v1/v1.0.0任务清单 + 概要设计.md) | v1.0 5 sprint 框架(M4 hard = sprint 3-4 末达成,本文件 § 2 + § 5.1 引用) |
-| [architecture-refactor.md](architecture-refactor.md) | 整体重构 L1 文档(本文件是其 § R-6 细化) |
-| [../../../jhyy_OS/docs/coordination.md](../../../jhyy_OS/docs/coordination.md) | 跨项目对齐(本文件 M1-M11 引用其决策) |
+| [docs/plans/roadmap/v2.x-qbe-rewrite.md](../../plans/roadmap/v2.x-qbe-rewrite.md) | v2.x 轴权威 L1 文档(本文件是其 sprint 级细化 + 并行视角) |
+| [docs/plans/roadmap/v3.x-language-expansion.md](../../plans/roadmap/v3.x-language-expansion.md) | v3.x 轴权威 L1 文档(本文件是其 sprint 级细化 + 并行视角) |
+| [docs/archive/v2-v3/v2.0.0-os-prep.md](v2.0.0-os-prep.md) | OS 启动链路 + 跨项目接口权威(本文件引用其 M1-M11) |
+| [docs/plans/roadmap/v1.0-self-hosting.md](../../plans/roadmap/v1.0-self-hosting.md) | v1.0 真闭环 L1 文档(本文件共同前置) |
+| [docs/plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md](../../plans/roadmap/v1.x-phase-4-m5-boot-from-scratch.md) | **M5 推迟决策**(2026-08-14) — v2.x 末 (QBE 移除) + v3.x 末 (runtime 重写) 都 ship 后, 一次性删 `src/*.c` + untrack QBE + 删 runtime.c; M5 是 v1.x 末 Phase 4 单独 sprint |
+| [docs/plans/v1/v1.0.0任务清单 + 概要设计.md](../../plans/v1/v1.0.0任务清单 + 概要设计.md) | v1.0 5 sprint 框架(M4 hard = sprint 3-4 末达成,本文件 § 2 + § 5.1 引用) |
+| [docs/plans/roadmap/architecture-refactor.md](../../plans/roadmap/architecture-refactor.md) | 整体重构 L1 文档(本文件是其 § R-6 细化) |
+| [docs/coordination/JHYY_OS侧设计终版.md](../../coordination/JHYY_OS侧设计终版.md) | 跨项目对齐(本文件 M1-M11 引用其决策) |
 
 ---
 

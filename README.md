@@ -143,7 +143,7 @@ python compiler/build/bin/regress.py --all --include-informational
 | **Memory** | runtime Arena allocator (`arena_alloc` via FFI) |
 | **Stdlib** (v3.x) | `std::mem`, `std::fmt`, `std::io`, `std::math`, `std::string`, `std::vec` (Vec<T> dynamic array) |
 
-Full specification: [`docs/abis/jhyy-lang-spec-v1.3.0.md`](docs/abis/jhyy-lang-spec-v1.3.0.md) (locked; v1.3.0 = v1.1.0 + 7 v1.3.x features); known limitations in Appendix B + Appendix E.
+Full specification: [`docs/abis/jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) (locked; v1.3.0 = v1.1.0 + 7 v1.3.x features); known limitations in Appendix B + Appendix E.
 
 ---
 
@@ -290,15 +290,15 @@ Sprint ordering may be re-parallelized (not strictly serial) per dep graph: v4.3
 
 ## Docs
 
-- **Language spec**: [`docs/abis/jhyy-lang-spec-v1.3.0.md`](docs/abis/jhyy-lang-spec-v1.3.0.md) (locked)
-- **ABI whitepaper**: [`docs/abis/jhyy-abi-v1.0.0.md`](docs/abis/jhyy-abi-v1.0.0.md) (locked)
+- **Language spec**: [`docs/abis/jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) (locked)
+- **ABI whitepaper**: [`docs/abis/jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) (locked)
 - **Architecture**: [`docs/internal/architecture.md`](docs/internal/architecture.md)
 - **Build**: [`docs/internal/build.md`](docs/internal/build.md) (QBE-removed + Windows-specific notes)
 - **Workarounds**: [`docs/internal/workarounds.md`](docs/internal/workarounds.md)
 - **Conventions**: [`docs/internal/conventions.md`](docs/internal/conventions.md)
 - **Tests**: [`docs/internal/tests.md`](docs/internal/tests.md)
 - **Changelog**: [`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md) (v4 umbrella)
-- **Archived plans**: [`docs/archive/v2-v3/`](docs/archive/v2-v3/) (v2/v3 historical — do not use)
+- **Archived plans**: [`docs/archive/v2-v3`](docs/archive/v2-v3/) (v2/v3 historical — do not use)
 
 ---
 

@@ -4,7 +4,7 @@
 
 > 🎉 **本文档的目标已达成。** 台账 108 行:102 RESOLVED + 4 SUPERSEDED + 2 INVALID
 > + **0 ACTIVE** + 0 DEFERRED。promote 条件的实测见
-> [`version-schedule.md`](version-schedule.md) § v4.0.19。
+> [`docs/plans/v4/version-schedule.md`](version-schedule.md) § v4.0.19。
 >
 > **下面保留整份文档作为审计轨迹** —— 每条 workaround 当时是怎么定位的、用了什么
 > 修法、造了什么红灯,都在原处 ✓。**「怎么修」已经不重要了;重要的是「修了什么、
@@ -19,7 +19,7 @@
 **历史状态:** 🔄 2026-10-18 修订(2026-10-15 建,per user 2026-10-10 决定「所有 defer/active 的
 workaround 必须在 v4 正式版中清零,大不了 v4 不发」)
 
-> 📅 **版本归属见 [`version-schedule.md`](version-schedule.md)** —— 本文档给「怎么修」,
+> 📅 **版本归属见 [`docs/plans/v4/version-schedule.md`](version-schedule.md)** —— 本文档给「怎么修」,
 > 那份给「第几个版本修」。**下一次的入口已改为 v4.0.10(补三个缺口)**。
 
 **修订摘要(2026-10-18,CI 重构期间顺带完成的部分):**
@@ -58,7 +58,7 @@ W-109 → **RESOLVED**(真修 `958c2b8`);W-118 新登记(B 组之外,
 **门的分布(2026-10-18 实测):** 9 条有门(W-103 / W-105 / W-107 / W-111 /
 W-112 / W-113 / W-114 / W-115 / W-116),**5 条没有**(W-104 / W-106 / W-110 /
 W-105.1 / W-118)。补掉前三条的排期见
-[`version-schedule.md` § v4.0.10](version-schedule.md)。
+[`docs/plans/v4/version-schedule.md` § v4.0.10](version-schedule.md)。
 
 排序依据:**① 现在就会让用户拿到错误结果** > ② 目标路径一旦启用就错 >
 ③ 距触发有明确余量的降级 > ④ 冗余/死代码。
@@ -520,7 +520,7 @@ W-079 当年挡的是 **QBE**;QBE 随 v4.0.0 完全移除,实测 mixed-width ext
 调用在 self-backend 下**完全正常** —— W-079 当年的技术理由早已失效,
 它的 RESOLVED 只是没覆盖 std_os 这一半。
 
-修法与验收见 [`version-schedule.md`](version-schedule.md) § v4.0.16
+修法与验收见 [`docs/plans/v4/version-schedule.md`](version-schedule.md) § v4.0.16
 与台账 `docs/internal/workarounds.md` 的 W-103 条目。下面保留本节原文作为
 **审计轨迹**(桥的名字从 `jh_open/jh_close/...` 改成 `jh_os_open/jh_os_close/...`
 —— 前缀跟已有 `jh_os_*` 家族对齐,避免跟 runtime.c 的 C 侧符号撞名)。
@@ -568,7 +568,7 @@ W-080 实际只动了 `std/io.jhyy` 和 `emit_call`。**(b) 从来没人动过�
 **✅ 2026-10-20 已修完(v4.0.11 的 ≤16B + v4.0.12 的 >16B)—— 台账转 RESOLVED。**
 
 实际根因比本节原先写的更大:不是「分类器接错」,是**整个 struct 参数退化成按指针传**。
-修法与验收见 [`version-schedule.md`](version-schedule.md) § v4.0.11 / § v4.0.12
+修法与验收见 [`docs/plans/v4/version-schedule.md`](version-schedule.md) § v4.0.11 / § v4.0.12
 与台账 `docs/internal/workarounds.md` 的 W-104 条目。摘要:
 
 - ≤16B → 按 eightbyte 分类(INTEGER→GPR,SSE→XMM);>16B → MEMORY class 整体落栈
@@ -733,7 +733,7 @@ workarounds.md 索引           → ACTIVE 0 / DEFERRED 0
 - 完整 Polonius / NLL / lifetime 子类型 / reborrow(留 v4.6+ 语言特性链的 lifetime 项)
 - 多架构 Cap<T> ABI(留 v4.6+ 的并发 cap 项)
 - `.jhyynb` binary format(留 v4.6+)
-- 其余未启动项 —— 见 [`version-schedule.md`](version-schedule.md) § 四
+- 其余未启动项 —— 见 [`docs/plans/v4/version-schedule.md`](version-schedule.md) § 四
 
 ## Cross-ref
 

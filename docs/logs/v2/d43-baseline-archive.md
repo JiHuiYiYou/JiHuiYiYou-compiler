@@ -1,6 +1,6 @@
 # D43 closure baseline — historical archive
 
-D43 closure invariant (per [`../plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-os-prep.md) § 3 row 10 + [`../../internal/architecture.md`](../../internal/architecture.md) D43 lock):
+D43 closure invariant (per [`docs/archive/v2-v3/v2.0.0-os-prep.md`](../../archive/v2-v3/v2.0.0-os-prep.md) § 3 row 10 + [`docs/internal/architecture.md`](../../internal/architecture.md) D43 lock):
 **v1 编 main.jhyy .il sha == v2 编 main.jhyy .il sha**(阶段性 self-equal;v2.x sub-sprint 改 codegen → 阶段性 break → re-baseline + archive 旧 baseline)。
 
 此文件存 v2.x 期间所有 D43 baseline 阶段值 + 退役旧值 + 验证步骤。
@@ -76,8 +76,8 @@ rm -f /tmp/_v1.il /tmp/_v2.il
 
 ## References
 
-- D43 lock + 历史 baseline 时间线: [`../../internal/architecture.md`](../../internal/architecture.md) line 163 + [`../../internal/workarounds.md`](../../internal/workarounds.md) line 4945 (W-069 entry)
-- v2.0.0-os-prep D43 描述: [`../plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-os-prep.md) § 3 row 10
+- D43 lock + 历史 baseline 时间线: [`docs/internal/architecture.md`](../../internal/architecture.md) line 163 + [`docs/internal/workarounds.md`](../../internal/workarounds.md) line 4945 (W-069 entry)
+- v2.0.0-os-prep D43 描述: [`docs/archive/v2-v3/v2.0.0-os-prep.md`](../../archive/v2-v3/v2.0.0-os-prep.md) § 3 row 10
 - v2.7.0 ship chain 3 commits: `a9c874d` + `abe9111` + `c920695`
 - v2.7.1 ship chain 3 commits: `8500999` + `911b8da` + Commit 3 (docs)
 - v2.6.6 baseline: commit `224a944` (W-069 真修)
@@ -93,7 +93,7 @@ rm -f /tmp/_v1.il /tmp/_v2.il
 
 D43 closure **保持 v2.7.1 baseline `cc894329...` HOLD 不变**(本次 verify 只跑手写汇编测试,不动 jhyy codegen)。
 
-详细 verify 步骤 + Docker MSYS2 PWD bug 记: 见 [`changelog-v2.7.0.md` v2.7.1 post-ship Docker E2E verify section](changelog-v2.7.0.md)
+详细 verify 步骤 + Docker MSYS2 PWD bug 记: 见 [`docs/logs/v2/changelog-v2.7.0.md` v2.7.1 post-ship Docker E2E verify section](changelog-v2.7.0.md)
 
 ---
 

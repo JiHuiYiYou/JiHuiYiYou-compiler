@@ -1,6 +1,6 @@
 # Changelog
 
-> **入口**:GitHub Release / 包管理器 / cache 层从这个文件读版本号。具体变更看 [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (完整索引) → [`docs/logs/v*/changelog-vX.Y.{0,md}`](docs/logs/) (per-version umbrella)。
+> **入口**:GitHub Release / 包管理器 / cache 层从这个文件读版本号。具体变更看 [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (完整索引) → [`docs/logs`](docs/logs/) (per-version umbrella)。
 
 ## 最新 release
 
@@ -291,9 +291,9 @@
 
 **v3.0 3a-3f** (语言扩展 OS-required) 等 user 启动 — v2.0 阶段 ✅ ship 走完(2026-09-04);**v2.x 中/末 跟 v3.x 异步并行**(QBE 自写 / amd64_sysv 实 impl / N 代 fixed point 仍待 v2.x 中/末) — OS 准备:
 
-- 路线图: [`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md`](docs/plans/roadmap/v2-v3-parallel-sprint-plan.md)
-- OS 启动链路: [`docs/plans/v2/v2.0.0-os-prep.md`](docs/plans/v2/v2.0.0-os-prep.md)
-- 跨项目协调: [`../jhyy_OS/docs/coordination.md`](../jhyy_OS/docs/coordination.md)
+- 路线图: [`docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md`](docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md)
+- OS 启动链路: [`docs/archive/v2-v3/v2.0.0-os-prep.md`](docs/archive/v2-v3/v2.0.0-os-prep.md)
+- 跨项目协调: [`docs/coordination/JHYY_OS侧设计终版.md`](docs/coordination/JHYY_OS侧设计终版.md)
 
 ## 编写约定
 

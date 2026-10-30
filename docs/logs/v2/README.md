@@ -27,7 +27,7 @@
 |---|---|
 | 版本 changelog | `changelog-vX.Y.Z.md`(每个 vX.Y minor axis 一个 umbrella,patch 回填) |
 | Sprint 实施日志 | `sprint-N-commit-M-*.md` |
-| Sprint 末 codegen 坑 | `sprint-N-codegen-bugs.md`(参考 [`../v1/changelog-v1.8.0.md`](../v1/changelog-v1.8.0.md) 格式) |
+| Sprint 末 codegen 坑 | `sprint-N-codegen-bugs.md`(参考 [`docs/logs/v1/changelog-v1.8.0.md`](../v1/changelog-v1.8.0.md) 格式) |
 
 **changelog umbrella 约定**(per `feedback_changelog_umbrella.md`):
 - vX.Y axis 只 1 个 umbrella changelog(不创建 standalone `changelog-vX.Y.Z-wNNN.md`)
@@ -36,10 +36,10 @@
 
 ## 关联
 
-- v2.x sprint 计划 → [`../../plans/v2/`](../../plans/v2/)
-- v2.x ‖ v3.x 并行 sprint 调度 → [`../../plans/roadmap/v2-v3-parallel-sprint-plan.md`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md)
-- v2.x QBE 自写长线路线图 → [`../../plans/roadmap/v2.x-qbe-rewrite.md`](../../plans/roadmap/v2.x-qbe-rewrite.md)
-- v3.x 语言扩展长线路线图 → [`../../plans/roadmap/v3.x-language-expansion.md`](../../plans/roadmap/v3.x-language-expansion.md)
-- 上代(v1.x jhyy 自举)→ [`../v1/`](../v1/)
-- 跨项目 OS 时间线 → [`../../../../jhyy_OS/docs/coordination.md`](../../../../jhyy_OS/docs/coordination.md)
-- v2.0 阶段 5 个 umbrella → [`changelog-v2.0.0.md`](changelog-v2.0.0.md) / [v2.1.0](changelog-v2.1.0.md) / [v2.2.0](changelog-v2.2.0.md) / [v2.3.0](changelog-v2.3.0.md) / [v2.4.0](changelog-v2.4.0.md)
+- v2.x sprint 计划 → [`docs/plans/v2`](../../plans/v2/)
+- v2.x ‖ v3.x 并行 sprint 调度 → [`docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md`](../../archive/v2-v3/v2-v3-parallel-sprint-plan.md)
+- v2.x QBE 自写长线路线图 → [`docs/plans/roadmap/v2.x-qbe-rewrite.md`](../../plans/roadmap/v2.x-qbe-rewrite.md)
+- v3.x 语言扩展长线路线图 → [`docs/plans/roadmap/v3.x-language-expansion.md`](../../plans/roadmap/v3.x-language-expansion.md)
+- 上代(v1.x jhyy 自举)→ [`docs/logs/v1`](../v1/)
+- 跨项目 OS 时间线 → [`docs/coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md)
+- v2.0 阶段 5 个 umbrella → [`docs/logs/v2/changelog-v2.0.0.md`](changelog-v2.0.0.md) / [v2.1.0](changelog-v2.1.0.md) / [v2.2.0](changelog-v2.2.0.md) / [v2.3.0](changelog-v2.3.0.md) / [v2.4.0](changelog-v2.4.0.md)

@@ -1,7 +1,7 @@
 # Sprint 3 commit 6 — sema.jhyy 清调试 + VARIANT 修复合入
 
 **日期**: 2026-06-28
-**对应 plan**: [`../../plans/v1/v1.0.0详细实现方案.md`](../../plans/v1/v1.0.0详细实现方案.md) § 3.4
+**对应 plan**: [`docs/plans/v1/v1.0.0详细实现方案.md`](../../plans/v1/v1.0.0详细实现方案.md) § 3.4
 **状态**: ✅ **代码已清 + T0-T7 全部 PASS（exit=42）**
 
 ## 目标

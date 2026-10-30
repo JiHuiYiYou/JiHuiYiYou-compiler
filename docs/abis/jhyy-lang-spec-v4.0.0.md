@@ -3,7 +3,7 @@
 **状态**：v4.0.0 —— v4 世代的规范基线，随 `v4.0.0 final` promote 一同锁版
 **取代**：`jhyy-lang-spec-v1.3.0.md` 及其 17 份 v3.x supplement（2026-10-24 归档至 git 历史）
 **事实基线**：正文只写**当前代码确实已实装**的行为；未实装 / 已实装但受限的，统一收进[附录 B](#附录-b未实装--已实装但受限)
-**配套**：[`jhyy-abi-v4.0.0.md`](./jhyy-abi-v4.0.0.md)
+**配套**：[`docs/abis/jhyy-abi-v4.0.0.md`](./jhyy-abi-v4.0.0.md)
 
 > **本版相对 v1.3.0 的写法变化**：v1.3.0 把 v3.x 的特性散在 17 份 supplement 里，本体与 supplement 之间大量交叉引用、且互相矛盾（例：v1.3.0 § 6.1 文档化了从未实装的块表达式；§ 4.1 文档化了会静默算错的 `1_000_000`）。本版把**已实装部分一次性收进正文**，supplement 全部作废；**未实装的部分明确写进附录 B**，不再混在正文里冒充特性。
 
@@ -496,7 +496,7 @@ fn f() -> i32 {
 | `amd64_sysv` | 整数与浮点是**两个独立 bank**：整数按出现顺序占 `rdi`/`rsi`/…，浮点按出现顺序占 `xmm0`/`xmm1`/…，互不影响 | `fn f(a: f64, b: i32)` ⇒ `a` 在 XMM0、`b` 在 **RDI** |
 
 两种规则下函数的**返回值**都相同，所以纯 jhyy 代码跨目标行为一致。
-完整规则见 [ABI § 3.1 / § 3.2](./jhyy-abi-v4.0.0.md#31-ms-x64amd64_win--amd64_win_freestanding)。
+完整规则见 [docs/abis/jhyy-abi-v4.0.0.md](./jhyy-abi-v4.0.0.md#31-ms-x64amd64_win--amd64_win_freestanding)。
 
 ---
 
@@ -551,7 +551,7 @@ let px = p.x;
 - ⚠️ **构造时允许省略字段**，编译器**不报「缺字段」错误**。
   但缺失字段的值是**未初始化读（栈上的垃圾）**，**不是 0** —— 见[附录 B](#附录-b未实装--已实装但受限)。
 - 支持嵌套 struct；按值传递时递归复制。
-- 按值传参与返回走 [ABI § 3.3 / § 3.5](./jhyy-abi-v4.0.0.md#33-聚合类型传参win)。
+- 按值传参与返回走 [docs/abis/jhyy-abi-v4.0.0.md](./jhyy-abi-v4.0.0.md#33-聚合类型传参win)。
 
 ---
 
@@ -1091,7 +1091,7 @@ fn main_jhyy() -> i32 {
 
 ## Cross-ref
 
-- ABI：[`jhyy-abi-v4.0.0.md`](./jhyy-abi-v4.0.0.md)
-- 二进制格式（设计稿，未实装）：[`jhyy-binary-format-v1.0.0.md`](./jhyy-binary-format-v1.0.0.md)
+- ABI：[`docs/abis/jhyy-abi-v4.0.0.md`](./jhyy-abi-v4.0.0.md)
+- 二进制格式（设计稿，未实装）：[`docs/abis/jhyy-binary-format-v1.0.0.md`](./jhyy-binary-format-v1.0.0.md)
 - 历史档案：v1.3.0 及其 17 份 v3.x supplement、v1.1.0、v1.0.0、v0.2.1、v0.0.1 —— 均已归档至 git 历史（`git show <sha>:docs/abis/<name>`）
 - 已知限制台账：[`docs/internal/workarounds.md`](../internal/workarounds.md)

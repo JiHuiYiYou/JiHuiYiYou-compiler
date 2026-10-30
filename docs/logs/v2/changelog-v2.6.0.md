@@ -1,7 +1,7 @@
 # Changelog — v2.6.0 (umbrella: V2-B v2.6.0 — regalloc + peephole + self backend wire-up)
 
 > **承接**: v2.5.0 ship (tag `v2.5.0`, `6d012ca`, 2026-09-05) — codegen_amd64 模块化拆分 (5 文件, ~2200 行) + run_backend dispatch hook (pass-through to run_qbe) + D43 baseline hold sha=`51376ce5...`。
-> **触发**: per `docs/plans/v2/batch-V2-B-plan.md` V2-B v2.6.0 plan + [`twinkly-hatching-canyon.md`](../../plans/twinkly-hatching-canyon.md)。**v2.6.0 = v2.x M1-B = regalloc + peephole + wire self backend (self path body deferred)**。
+> **触发**: per `docs/plans/v2/batch-V2-B-plan.md` V2-B v2.6.0 plan + `twinkly-hatching-canyon.md`。**v2.6.0 = v2.x M1-B = regalloc + peephole + wire self backend (self path body deferred)**。
 > **scope**(per V2-B plan):
 > 1. **Unit A**: jh_read_file / jh_write_file I/O helpers(C runtime, jhyy-side extern decls)
 > 2. **Unit B**: codegen_amd64 stub-fill — parse_and_emit 真实 emit dispatch + read_file / write_file real impl + cg_state_init / cg_state_reset_for_function / cg_alloc_slot real impl
@@ -147,13 +147,13 @@
 
 ## References
 
-- V2-B plan doc:[`batch-V2-B-plan.md`](../../plans/v2/batch-V2-B-plan.md)
-- Detailed V2-B plan:[`twinkly-hatching-canyon.md`](../../plans/twinkly-hatching-canyon.md)
+- V2-B plan doc:[`docs/plans/v2/batch-V2-B-plan.md`](../../plans/v2/batch-V2-B-plan.md)
+- Detailed V2-B plan:`twinkly-hatching-canyon.md`
 - V2-A ship gate + V2-B handoff:[[project_v2_5_0_ship]]
-- ABI lock:[`docs/abis/jhyy-abi-v1.0.0.md`](../../abis/jhyy-abi-v1.0.0.md) § 13 (MS x64 calling convention)
+- ABI lock:[`docs/abis/jhyy-abi-v4.0.0.md`](../../abis/jhyy-abi-v4.0.0.md) § 13 (MS x64 calling convention)
 - D43 spec:`coordination.md § 3 D43`(2026-09-01 锁)
-- 3c volatile dependency:[`batch-V2-B-plan.md` line 18](../../plans/v2/batch-V2-B-plan.md) + [`v3.x-language-expansion.md § Sprint 3c`](../../plans/roadmap/v3.x-language-expansion.md)
-- v2.x ‖ v3.x parallel axes:[`v2-v3-parallel-sprint-plan.md § 6.2`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md)
+- 3c volatile dependency:[`docs/plans/v2/batch-V2-B-plan.md` line 18](../../plans/v2/batch-V2-B-plan.md) + [`v3.x-language-expansion.md § Sprint 3c`](../../plans/roadmap/v3.x-language-expansion.md)
+- v2.x ‖ v3.x parallel axes:[`v2-v3-parallel-sprint-plan.md § 6.2`](../../archive/v2-v3/v2-v3-parallel-sprint-plan.md)
 - Batch worktree cleanup pattern:[[feedback_batch_worktree_cleanup]]
 
 ---
@@ -339,7 +339,7 @@ docs/logs/v2/changelog-v2.6.0.md         | (本 sub-section)
 - v2.6.5 commit: `07c6a89` (W-068 real wire-up)
 - v2.6.6 commit: `224a944` (W-069 真修)
 - v2.6.7 commit: TBD (byte_equal_amd64.sh Commit 5 + baseline)
-- W-068 entry: [`../../internal/workarounds.md`](../../internal/workarounds.md) (✅ RESOLVED)
-- W-069 entry: [`../../internal/workarounds.md`](../../internal/workarounds.md) (✅ RESOLVED v2.6.6)
-- Plan doc: [`twinkly-hatching-canyon.md`](../../plans/twinkly-hatching-canyon.md) (Phase 1-4)
+- W-068 entry: [`docs/internal/workarounds.md`](../../internal/workarounds.md) (✅ RESOLVED)
+- W-069 entry: [`docs/internal/workarounds.md`](../../internal/workarounds.md) (✅ RESOLVED v2.6.6)
+- Plan doc: `twinkly-hatching-canyon.md` (Phase 1-4)
 - D43 baseline: `51376ce5...` (v2.4.0 末) → `92e82554...` (v2.6.6 新 baseline, per D43 v2.x sub-sprint 阶段性 self-equal rule)

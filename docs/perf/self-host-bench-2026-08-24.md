@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-24
 **Snapshot:** 当前 `jhyy.exe` (v1.5.6 era jhyy-side binary, SHA `d524b8d0…`) + `jhyy_v1.exe.exe` (v1.0.0 historical baseline, SHA `37ffc49c…`)
-**Cross-reference:** [`v1.0.0-build-bench.md`](v1.0.0-build-bench.md)（单模块对比）;[`../plans/v2/v2.0.0-os-prep.md`](../plans/v2/v2.0.0-os-prep.md)（OS 准备清单里编译器自身构建基线）
+**Cross-reference:** [`docs/perf/v1.0.0-build-bench.md`](v1.0.0-build-bench.md)（单模块对比）;[`docs/archive/v2-v3/v2.0.0-os-prep.md`](../archive/v2-v3/v2.0.0-os-prep.md)（OS 准备清单里编译器自身构建基线）
 
 ## 动机
 
@@ -122,7 +122,7 @@
 
 ## OS 准备 sprint 预算意义
 
-OS 端 ([`../../jhyy_OS/docs/coordination.md`](../../jhyy_OS/docs/coordination.md) § 0 Critical Path) 在 M1 启动时会需要反复 build JHYY compiler。如果 sprint 设计里"build 编译器"出现频率高：
+OS 端 ([`docs/coordination/JHYY_OS侧设计终版.md`](../coordination/JHYY_OS侧设计终版.md) § 0 Critical Path) 在 M1 启动时会需要反复 build JHYY compiler。如果 sprint 设计里"build 编译器"出现频率高：
 
 - **每轮冷构建 ~8 s**：可以接受 inline 在开发循环里（保存后即时 rebuild）
 - **CI 跑全套（5 platform × 3 stage）~2 分钟**：在 Windows CI 上预算 1 分钟 + 编译 = 3-4 分钟，可行

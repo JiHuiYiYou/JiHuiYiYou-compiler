@@ -2,7 +2,7 @@
 
 **🎯 首次 self-backend 0 FAIL parity with QBE path — jhyy 编 jhyy 走自研 amd64 后端, 跑通所有 119 个 active regression test (QBE 119/139 PASS, self-backend 119/139 PASS / 0 FAIL / 20 SKIP, 4 DEFERRED sub-bug 全真修)**
 
-> **Per [`feedback_changelog_umbrella`](../../../JiHuiYiYou/memory/feedback_changelog_umbrella.md)**: v2.x 轴用 umbrella `docs/logs/v2/changelog-v2.11.0.md`, 不创建 standalone changelog。但本 sprint 满足 **"sprint 实在长 (>10 commit) / 涉及重大 pivot" 例外条款** — 架构修 (slot-vs-region overlap) + 4 个 DEFERRED sub-bug 全真修 + ACTIVE workaround 5 → 3 + 首次 self-backend 0 FAIL parity with QBE path — 跟 v1.0.0 standalone 同级别 milestone celebration, 单拆一份独立 milestone doc (umbrella 顶部加 link 索引, **不**重复 umbrella section 内容)。
+> **Per `feedback_changelog_umbrella`**: v2.x 轴用 umbrella `docs/logs/v2/changelog-v2.11.0.md`, 不创建 standalone changelog。但本 sprint 满足 **"sprint 实在长 (>10 commit) / 涉及重大 pivot" 例外条款** — 架构修 (slot-vs-region overlap) + 4 个 DEFERRED sub-bug 全真修 + ACTIVE workaround 5 → 3 + 首次 self-backend 0 FAIL parity with QBE path — 跟 v1.0.0 standalone 同级别 milestone celebration, 单拆一份独立 milestone doc (umbrella 顶部加 link 索引, **不**重复 umbrella section 内容)。
 
 ## 成就
 
@@ -122,7 +122,7 @@ v2.11.5 design 写好 `cg_record_temp_slot` API (state.jhyy:251) — 写 dst's p
 
 ## v2.x 后续路线 (post-v2.11.23)
 
-按 [`docs/plans/roadmap/v2-v3-parallel-sprint-plan.md`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md) § 5.1 路径 A + [`docs/plans/v2/v2.0.0-os-prep.md`](../../plans/v2/v2.0.0-os-prep.md):
+按 [`docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md`](../../archive/v2-v3/v2-v3-parallel-sprint-plan.md) § 5.1 路径 A + [`docs/archive/v2-v3/v2.0.0-os-prep.md`](../../archive/v2-v3/v2.0.0-os-prep.md):
 
 - **v2.x 中期 (v2.12+ 真 XMM regalloc)**: codegen_amd64 真 XMM register allocation (目前 f32/f64 走 stack spill + load)
 - **v2.x 末 (QBE 自写 + amd64_sysv 实 impl + N 代 fixed point)**: 跳过 QBE IL, 直接 emit x86-64
@@ -166,10 +166,10 @@ v2.11.5 design 写好 `cg_record_temp_slot` API (state.jhyy:251) — 写 dst's p
 - W-074.13 4 sub-bug 全 CLOSED: [`docs/internal/workarounds.md`](../../internal/workarounds.md) W-074.13 entry + v2.11.23 sprint closure section
 - v2.11.23 plan: [`docs/plans/v2/v2.11.23-plan.md`](../../plans/v2/v2.11.23-plan.md)
 - v2.11.23 predecessor RCA: [`docs/internal/rca/rca-v2.11.21.md`](../../internal/rca/rca-v2.11.21.md) (v2.11.23 closure section 写 v2.11.21 末尾 — audit 指出 v2.11.22 RCA claim 偏, v2.11.23 修正; **不**创建 rca-v2.11.22.md)
-- v2.11.23 umbrella section: [`docs/logs/v2/changelog-v2.11.0.md` v2.11.23 section](changelog-v2.11.0.md) (本 standalone doc 是 milestone celebration view, umbrella 顶部加 link 索引 — **不**重复内容)
+- v2.11.23 umbrella section: [docs/logs/v2/changelog-v2.11.0.md](changelog-v2.11.0.md) (本 standalone doc 是 milestone celebration view, umbrella 顶部加 link 索引 — **不**重复内容)
 - v2.11.23 D43 baseline: [`docs/logs/v2/d43-baseline-archive.md`](d43-baseline-archive.md) v2.11.23 row (HOLD on `e6b6f1fa...`)
 - v2.11.22 attempt DEFER outcome: [`docs/plans/v2/v2.11.22-plan.md`](../../plans/v2/v2.11.22-plan.md) (commit `b76d385` docs-only ship)
-- v2.12.0 plan (post-fix audit): [`docs/plans/v2/v2.12-plan.md`](../../plans/v2/v2.12-plan.md) (启动前置 = v2.11.23 ship, 已 ✅)
+- v2.12.0 plan (post-fix audit): `docs/plans/v2/v2.12-plan.md` (启动前置 = v2.11.23 ship, 已 ✅)
 - codegen_amd64 Phase 1 fix point: `compiler/src0/codegen_amd64_emit_mem.jhyy:280-350` (emit_alloc)
 - codegen_amd64 Phase 2 fix point: `compiler/src0/codegen_amd64_emit_call.jhyy:1653-1700` (emit_binop derived)
 - codegen_amd64 frame_size 兜底: `compiler/src0/codegen_amd64_emit_ctrl.jhyy:522-526`
@@ -178,4 +178,4 @@ v2.11.5 design 写好 `cg_record_temp_slot` API (state.jhyy:251) — 写 dst's p
 - cg_offset_for_temp_with_target: `compiler/src0/codegen_amd64_state.jhyy:639-660` (tier-1 lookup)
 - 已知 v1.0.0 standalone pattern: [`docs/logs/v1/changelog-v1.0.0.md`](../v1/changelog-v1.0.0.md) (本 doc 的 template)
 - 已知 v1.x 收尾路线: [`docs/logs/v1/changelog-v1.8.0.md`](../v1/changelog-v1.8.0.md) umbrella
-- 跨边界 OS 协调: [`../jhyy_OS/docs/coordination.md`](../../../jhyy_OS/docs/coordination.md) § 0 Critical Path (M1-M11 launch 联调)
+- 跨边界 OS 协调: [`docs/coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md) § 0 Critical Path (M1-M11 launch 联调)

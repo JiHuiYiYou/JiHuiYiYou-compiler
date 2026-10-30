@@ -12,7 +12,7 @@
 
 V3-C sub-sprint 1/3 — `&T` / `&mut T` 借用类型 + 简化版 NLL (stub) + `Cap<T>` 8 字节 layout。
 
-**D27 锁** v3.1.0 → v3.1.1 → v3.1.2 串行 (per [`../../plans/v3/batch-V3-C-plan.md`](../../plans/v3/batch-V3-C-plan.md) § 4.4 + [`../../plans/roadmap/v2-v3-parallel-sprint-plan.md`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md))。
+**D27 锁** v3.1.0 → v3.1.1 → v3.1.2 串行 (per [`docs/plans/v3/batch-V3-C-plan.md`](../../plans/v3/batch-V3-C-plan.md) § 4.4 + [`docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md`](../../archive/v2-v3/v2-v3-parallel-sprint-plan.md))。
 
 ---
 
@@ -133,8 +133,8 @@ V3-C sub-sprint 1/3 — `&T` / `&mut T` 借用类型 + 简化版 NLL (stub) + `C
 
 ## 6. 文档 / Documentation
 
-- [`../../abis/jhyy-lang-spec-borrow-check-supplement-v3.1.0.md`](../../abis/jhyy-lang-spec-borrow-check-supplement-v3.1.0.md) — borrow 语法 + 类型 + NLL stub
-- [`../../abis/jhyy-lang-spec-cap-t-supplement-v3.1.0.md`](../../abis/jhyy-lang-spec-cap-t-supplement-v3.1.0.md) — Cap<T> 8 字节 layout + ABI
+- [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md) — borrow 语法 + 类型 + NLL stub
+- [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md) — Cap<T> 8 字节 layout + ABI
 
 ---
 
@@ -160,7 +160,7 @@ feat(v3.1.0): add &mut + lifetime NLL (stub) + Cap<T> 8-byte layout (3g)
 
 V3-C sub-sprint 2/3 — `PhantomData<T>` 0 字节 ZST type marker,只占 type 表项不占 struct layout slot,不允许实例化 (M0 简化)。
 
-**D27 锁** v3.1.0 → v3.1.1 → v3.1.2 串行 (per [`../../plans/v3/batch-V3-C-plan.md`](../../plans/v3/batch-V3-C-plan.md) § 4.4 + [`../../plans/roadmap/v2-v3-parallel-sprint-plan.md`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md))。
+**D27 锁** v3.1.0 → v3.1.1 → v3.1.2 串行 (per [`docs/plans/v3/batch-V3-C-plan.md`](../../plans/v3/batch-V3-C-plan.md) § 4.4 + [`docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md`](../../archive/v2-v3/v2-v3-parallel-sprint-plan.md))。
 
 ---
 
@@ -265,9 +265,9 @@ V3-C sub-sprint 2/3 — `PhantomData<T>` 0 字节 ZST type marker,只占 type �
 
 ## 6. 文档 / Documentation
 
-- [`../abis/jhyy-lang-spec-phantomdata-supplement-v3.1.1.md`](../abis/jhyy-lang-spec-phantomdata-supplement-v3.1.1.md) — PhantomData 语法 + 0 字节 layout + ABI + codegen + 测试
-- (复用) [`../abis/jhyy-lang-spec-cap-t-supplement-v3.1.0.md`](../abis/jhyy-lang-spec-cap-t-supplement-v3.1.0.md) — Cap<T> 8 字节 layout + ABI
-- (复用) [`../abis/jhyy-lang-spec-borrow-check-supplement-v3.1.0.md`](../abis/jhyy-lang-spec-borrow-check-supplement-v3.1.0.md) — `&T` / `&mut T` + NLL stub
+- [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md) — PhantomData 语法 + 0 字节 layout + ABI + codegen + 测试
+- (复用) [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md) — Cap<T> 8 字节 layout + ABI
+- (复用) [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md) — `&T` / `&mut T` + NLL stub
 
 ---
 
@@ -386,8 +386,8 @@ V3-C sub-sprint 3/3 — `Cap<T>` parser 泛型 arm (v3.1.0 只 hardcode bare `Ca
 
 ## 6. 文档 / Documentation
 
-- (复用) [`../abis/jhyy-lang-spec-cap-t-supplement-v3.1.0.md`](../abis/jhyy-lang-spec-cap-t-supplement-v3.1.0.md) — Cap<T> 8 字节 layout + ABI (本 sprint 加 `<T>` syntax 补充)
-- (复用) [`../abis/jhyy-lang-spec-phantomdata-supplement-v3.1.1.md`](../abis/jhyy-lang-spec-phantomdata-supplement-v3.1.1.md) — PhantomData<T> ZST
+- (复用) [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md) — Cap<T> 8 字节 layout + ABI (本 sprint 加 `<T>` syntax 补充)
+- (复用) [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md) — PhantomData<T> ZST
 - (新增段, 暂未独立成 spec 文件) 本 sprint 内 inline 在 parser.jhyy / sema.jhyy comment — 等 v3.2.0 generic-on-pointer 一起补 spec
 
 ---

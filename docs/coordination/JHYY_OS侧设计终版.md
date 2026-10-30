@@ -3,7 +3,7 @@
 > **本文定位**：jhyy_OS 的**最终设计文档** —— 从三份规范逐条核过的事实基线，
 > 加上内核形态锁定、capability 对象模型、`.jhyynb` 契约、语言—内核边界与实现顺序。
 >
-> **配套文档**：[`JHYY_编译器侧设计终版.md`](JHYY_编译器侧设计终版.md) —— 编译器分期路线、pass 清单、
+> **配套文档**：[`docs/coordination/JHYY_编译器侧设计终版.md`](JHYY_编译器侧设计终版.md) —— 编译器分期路线、pass 清单、
 > 规范一致性门、编译器侧 4 条待拍板。
 >
 > **事实基线纪律**：唯一实现事实来源是三份规范（lang-spec v4.0.0 / abi v4.0.0 /
@@ -674,27 +674,27 @@ CpuLocalOff → CpuLocalReady · InterruptsOff → ThreadingReady
 
 ## §11 OS 侧分期与版本轴
 
-每格落在哪个版本，见 [`../plans/v4/README.md`](../plans/v4/README.md) 的版本系列索引；
+每格落在哪个版本，见 [`docs/plans/v4/README.md`](../plans/v4/README.md) 的版本系列索引；
 该格的详细 scope 在对应的 `v4.X.Y-plan.md` 里。
 
 | 版本 | 序号 | OS 侧拿到的东西 | OS 侧要交付的东西 | 验收门 | 系列文档 |
 |---|---|---|---|---|---|
-| **v4.6** | OS-1 | 实参类型/个数检查 + 整数上下文转换 | —— | src0 自身零实参不符（**先统计后改码**） | [`../plans/v4/v4.6-plan.md`](../plans/v4/v4.6-plan.md) |
-| **v4.7** | OS-2 | per-function `frame_local_max` + `call_path_max` + 链接期栈断言 | **线程栈大小策略**（loader 侧选，编译器只提供事实） | 链接期拒绝超栈对象 | [`../plans/v4/v4.7-plan.md`](../plans/v4/v4.7-plan.md) |
-| **v4.8** | OS-3 | UEFI entry 钩子 + 按 `--target` 分支链接 + 最小 `kernel.efi` | **UEFI 契约**：entry 符号、console protocol、停机语义 | 最小镜像在 QEMU/OVMF 输出 UTF-8 后停机 | [`../plans/v4/v4.8-plan.md`](../plans/v4/v4.8-plan.md) |
-| **v4.8.5** | OS-4 | 栈槽 16B 对齐 + 全程序栈分析 + 禁 XMM/red zone | **中断栈 4 KiB** + `#[naked]` handler 自报预算 | max_frame ≤ 16 KiB（**按 341 KiB 基线重算**）；XMM 溢出点 = 0 | [`../plans/v4/v4.8.5-plan.md`](../plans/v4/v4.8.5-plan.md) |
-| **v4.9** | OS-5 | ABI §12 的 14 条偏离收敛 + 容器格式由 target 决定 | —— | 偏离 ≤ 3 且均为显式兼容性例外 | [`../plans/v4/v4.9-plan.md`](../plans/v4/v4.9-plan.md) |
-| **v4.10** | OS-6 | 块表达式 + `fn` 类型位置 + 闭包捕获 + 结构化内联汇编 | —— | boot state 迁移可在块内完成；函数指针可跨模块传递 | [`../plans/v4/v4.10-plan.md`](../plans/v4/v4.10-plan.md) |
-| **v4.10.5** | OS-7 | 效果最小集（`irq_ctx` + `may_sleep`） | —— | `irq_ctx` 内调 `sleep()` / `alloc()` 编译失败 | [`../plans/v4/v4.10.5-plan.md`](../plans/v4/v4.10.5-plan.md) |
-| **v4.11** | OS-8 | 完整 lifetime + Polonius | —— | 3+ lifetime 用例 PASS | [`../plans/v4/v4.11-plan.md`](../plans/v4/v4.11-plan.md) |
-| **v4.12** | OS-9 | trait + vtable + `dyn Trait` | —— | 3+ trait/dyn 用例 PASS | [`../plans/v4/v4.12-plan.md`](../plans/v4/v4.12-plan.md) |
-| **v4.12.3** | OS-10 | const generic | —— | 3+ const generic 用例 PASS | [`../plans/v4/v4.12.3-plan.md`](../plans/v4/v4.12.3-plan.md) |
-| **v4.12.5** | OS-11 | 一阶 HKT | —— | 3+ HKT 用例 PASS | [`../plans/v4/v4.12.5-plan.md`](../plans/v4/v4.12.5-plan.md) |
-| **v4.13** | OS-12 | 完整效果格 + `holds(L)` 锁序图 + `ptr<user>`/`ptr<kernel>` | **per-CPU 备份栈**（从栈策略划出，归效果系统） | 无反向锁边；误用给出确定错误码 | [`../plans/v4/v4.13-plan.md`](../plans/v4/v4.13-plan.md) |
-| **v4.13.5** | OS-13 | **capability objects manifest**（本仓交付） | **哪些对象类型存在** + 每类的 rights 初集 / owner / init phase / **revoke 同步性** | 每个 type_tag 逐个有 owner 与 rights 初集；revoke 语义写明；slot version 方案定 | [`../plans/v4/v4.13.5-plan.md`](../plans/v4/v4.13.5-plan.md) |
-| **v4.14** | OS-14 | `Cap<T>` 真 T + rights 参数化 + `ptr<phys>` 派生 + `#[ipc_handler]` + contract section + `.jhyynb` 实装 | **`.jhyynb` loader 实现**（验证 contract，验证失败拒绝加载） | `Cap<i32>` ≠ `Cap<i64>`；整数不能 `as ptr<phys>`；IPC tag/layout/slot 全检查；contract 被 loader 校验 | [`../plans/v4/v4.14-plan.md`](../plans/v4/v4.14-plan.md) |
-| **v4.14.5** | OS-15 | `Rcu<T>` / `PerCpu<T>` / 侵入式容器 | **grace period 语义 + `gs:` 段布局** | 一个内核链表 + RCU 读侧能用 JHYY 自然表达，无需 unsafe | [`../plans/v4/v4.14.5-plan.md`](../plans/v4/v4.14.5-plan.md) |
-| **v4.15** | OS-16 | KASAN / KMSAN / KCFI / shadow stack / WCET class / panic 分类 | **shadow region 布局 + fault 分类表** | 插桩前后语义一致；≥20 个注入 bug 被捕获 | [`../plans/v4/v4.15-plan.md`](../plans/v4/v4.15-plan.md) |
+| **v4.6** | OS-1 | 实参类型/个数检查 + 整数上下文转换 | —— | src0 自身零实参不符（**先统计后改码**） | [`docs/plans/v4/v4.6-plan.md`](../plans/v4/v4.6-plan.md) |
+| **v4.7** | OS-2 | per-function `frame_local_max` + `call_path_max` + 链接期栈断言 | **线程栈大小策略**（loader 侧选，编译器只提供事实） | 链接期拒绝超栈对象 | [`docs/plans/v4/v4.7-plan.md`](../plans/v4/v4.7-plan.md) |
+| **v4.8** | OS-3 | UEFI entry 钩子 + 按 `--target` 分支链接 + 最小 `kernel.efi` | **UEFI 契约**：entry 符号、console protocol、停机语义 | 最小镜像在 QEMU/OVMF 输出 UTF-8 后停机 | [`docs/plans/v4/v4.8-plan.md`](../plans/v4/v4.8-plan.md) |
+| **v4.8.5** | OS-4 | 栈槽 16B 对齐 + 全程序栈分析 + 禁 XMM/red zone | **中断栈 4 KiB** + `#[naked]` handler 自报预算 | max_frame ≤ 16 KiB（**按 341 KiB 基线重算**）；XMM 溢出点 = 0 | [`docs/plans/v4/v4.8.5-plan.md`](../plans/v4/v4.8.5-plan.md) |
+| **v4.9** | OS-5 | ABI §12 的 14 条偏离收敛 + 容器格式由 target 决定 | —— | 偏离 ≤ 3 且均为显式兼容性例外 | [`docs/plans/v4/v4.9-plan.md`](../plans/v4/v4.9-plan.md) |
+| **v4.10** | OS-6 | 块表达式 + `fn` 类型位置 + 闭包捕获 + 结构化内联汇编 | —— | boot state 迁移可在块内完成；函数指针可跨模块传递 | [`docs/plans/v4/v4.10-plan.md`](../plans/v4/v4.10-plan.md) |
+| **v4.10.5** | OS-7 | 效果最小集（`irq_ctx` + `may_sleep`） | —— | `irq_ctx` 内调 `sleep()` / `alloc()` 编译失败 | [`docs/plans/v4/v4.10.5-plan.md`](../plans/v4/v4.10.5-plan.md) |
+| **v4.11** | OS-8 | 完整 lifetime + Polonius | —— | 3+ lifetime 用例 PASS | [`docs/plans/v4/v4.11-plan.md`](../plans/v4/v4.11-plan.md) |
+| **v4.12** | OS-9 | trait + vtable + `dyn Trait` | —— | 3+ trait/dyn 用例 PASS | [`docs/plans/v4/v4.12-plan.md`](../plans/v4/v4.12-plan.md) |
+| **v4.12.3** | OS-10 | const generic | —— | 3+ const generic 用例 PASS | [`docs/plans/v4/v4.12.3-plan.md`](../plans/v4/v4.12.3-plan.md) |
+| **v4.12.5** | OS-11 | 一阶 HKT | —— | 3+ HKT 用例 PASS | [`docs/plans/v4/v4.12.5-plan.md`](../plans/v4/v4.12.5-plan.md) |
+| **v4.13** | OS-12 | 完整效果格 + `holds(L)` 锁序图 + `ptr<user>`/`ptr<kernel>` | **per-CPU 备份栈**（从栈策略划出，归效果系统） | 无反向锁边；误用给出确定错误码 | [`docs/plans/v4/v4.13-plan.md`](../plans/v4/v4.13-plan.md) |
+| **v4.13.5** | OS-13 | **capability objects manifest**（本仓交付） | **哪些对象类型存在** + 每类的 rights 初集 / owner / init phase / **revoke 同步性** | 每个 type_tag 逐个有 owner 与 rights 初集；revoke 语义写明；slot version 方案定 | [`docs/plans/v4/v4.13.5-plan.md`](../plans/v4/v4.13.5-plan.md) |
+| **v4.14** | OS-14 | `Cap<T>` 真 T + rights 参数化 + `ptr<phys>` 派生 + `#[ipc_handler]` + contract section + `.jhyynb` 实装 | **`.jhyynb` loader 实现**（验证 contract，验证失败拒绝加载） | `Cap<i32>` ≠ `Cap<i64>`；整数不能 `as ptr<phys>`；IPC tag/layout/slot 全检查；contract 被 loader 校验 | [`docs/plans/v4/v4.14-plan.md`](../plans/v4/v4.14-plan.md) |
+| **v4.14.5** | OS-15 | `Rcu<T>` / `PerCpu<T>` / 侵入式容器 | **grace period 语义 + `gs:` 段布局** | 一个内核链表 + RCU 读侧能用 JHYY 自然表达，无需 unsafe | [`docs/plans/v4/v4.14.5-plan.md`](../plans/v4/v4.14.5-plan.md) |
+| **v4.15** | OS-16 | KASAN / KMSAN / KCFI / shadow stack / WCET class / panic 分类 | **shadow region 布局 + fault 分类表** | 插桩前后语义一致；≥20 个注入 bug 被捕获 | [`docs/plans/v4/v4.15-plan.md`](../plans/v4/v4.15-plan.md) |
 
 **不排进 OS 线的**（与 OS 线正交，v4.16 起独立）：
 async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI。
@@ -706,7 +706,7 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 ## §12 待拍板 —— OS 侧 8 条
 
 > 完整的 12 条（D1–D12）见 git 历史；编译器侧的 4 条（D5/D6/D9/D12）见
-> [`JHYY_编译器侧设计终版.md`](JHYY_编译器侧设计终版.md) § 8。
+> [`docs/coordination/JHYY_编译器侧设计终版.md`](JHYY_编译器侧设计终版.md) § 8。
 > **核实口径**：2026-10-30，所有「事实基线」逐条回源码 / 规范 / 门脚本核过，
 > 引用位置写明 `file:line` 或规范章节。**不引用任何文档里的转述当事实。**
 
@@ -997,9 +997,9 @@ file/shm/framebuffer/compositor/surface/seat/buffer 才能真正形成 capabilit
 
 | 文档 | 用途 |
 |---|---|
-| [`JHYY_编译器侧设计终版.md`](JHYY_编译器侧设计终版.md) | 编译器分期路线 · pass 全表 · 规范一致性门 · 编译器侧 4 条待拍板 · 静默错误清单 |
-| [`../abis/jhyy-lang-spec-v4.0.0.md`](../abis/jhyy-lang-spec-v4.0.0.md) | 语言规范（锁定 2026-10-24）· §2.6 `Cap<T>` |
-| [`../abis/jhyy-abi-v4.0.0.md`](../abis/jhyy-abi-v4.0.0.md) | ABI 白皮书（锁定 2026-10-24）· §2.5 `Cap<T>` · §12 已知偏离 |
-| [`../abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) | `.jhyynb` 二进制格式（**设计稿，未实装**）· §7 cap_init |
-| [`../plans/v4/README.md`](../plans/v4/README.md) | **版本系列索引** —— 每个版本槽一份 `v4.X.Y-plan.md`（性能线 6 + OS 线 16） |
-| [`../internal/workarounds.md`](../internal/workarounds.md) | W-NNN 台账（ACTIVE = 0）· W-105 借用检查最小版 · W-113 `asm!` 内联 · W-136 side-file |
+| [`docs/coordination/JHYY_编译器侧设计终版.md`](JHYY_编译器侧设计终版.md) | 编译器分期路线 · pass 全表 · 规范一致性门 · 编译器侧 4 条待拍板 · 静默错误清单 |
+| [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../abis/jhyy-lang-spec-v4.0.0.md) | 语言规范（锁定 2026-10-24）· §2.6 `Cap<T>` |
+| [`docs/abis/jhyy-abi-v4.0.0.md`](../abis/jhyy-abi-v4.0.0.md) | ABI 白皮书（锁定 2026-10-24）· §2.5 `Cap<T>` · §12 已知偏离 |
+| [`docs/abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) | `.jhyynb` 二进制格式（**设计稿，未实装**）· §7 cap_init |
+| [`docs/plans/v4/README.md`](../plans/v4/README.md) | **版本系列索引** —— 每个版本槽一份 `v4.X.Y-plan.md`（性能线 6 + OS 线 16） |
+| [`docs/internal/workarounds.md`](../internal/workarounds.md) | W-NNN 台账（ACTIVE = 0）· W-105 借用检查最小版 · W-113 `asm!` 内联 · W-136 side-file |

@@ -2,7 +2,7 @@
 
 > **承接**: v2.3.0 ship (tag `v2.3.0`, `54d93df`, 2026-09-04) — hello-freestanding.efi 跑 OVMF(首个 E2E 启动验证);regress 持平 104/104 PASS;selfhost closure 4-stage .il byte-equal sha=`312ee9ff`。
 > **触发**: v2.3.0 ship 后立刻启动(per 2026-09-01 user 决定的 5 版本串行 sprint 计划)。**v2.0 阶段 Sprint C = 阶段收尾**:闭环 D26 byte-equal 三件套完成定义 + multi-target CLI 表面完整化。**ship v2.4.0 = v2.0 阶段 ship + v3.0 3a-3f 启动前置全部解除**。
-> **scope**(per [`v2.4.0任务清单 + 概要设计.md`](../../plans/v2/v2.4.0任务清单 + 概要设计.md)):
+> **scope**(per [`docs/plans/v2/v2.4.0任务清单 + 概要设计.md`](../../plans/v2/v2.4.0任务清单 + 概要设计.md)):
 > 1. **dispatcher CLI 完整化** — `target_dispatch.jhyy` 加 `target_help` / `target_status` / `jh_target_count`;C-side mirror 同步;`main.jhyy` 加 `--help` flag;**amd64_sysv stub 保留 fatal**(per user 2026-09-04 确认);**不加 -c flag**(per user 2026-09-04 确认:已被 `compile` 子命令覆盖)
 > 2. **byte-equal 三件套脚本** — `byte_equal.sh` 新建(.il + .s + .exe byte-equal 跨 jhyy_v1 ↔ jhyy_v2)+ **D26 reproducibility recipe**(jhyy link line `-g0 -Wl,--build-id=none` + `SOURCE_DATE_EPOCH=1234567890` via `jh_setenv`)
 > 3. **regress.py 集成** — `--byte-equal` opt-in flag + `test_byte_equal()` subprocess wrapper
@@ -140,13 +140,13 @@
 
 ## 关联文档
 
-- v2.4.0 任务清单 → [`../../plans/v2/v2.4.0任务清单 + 概要设计.md`](../../plans/v2/v2.4.0任务清单 + 概要设计.md)(含 12 处 stale fix)
+- v2.4.0 任务清单 → [`docs/plans/v2/v2.4.0任务清单 + 概要设计.md`](../../plans/v2/v2.4.0任务清单 + 概要设计.md)(含 12 处 stale fix)
 - v2.4.0 详细 scope 决策记录(per Plan agent audit 2026-09-04 vs 原 plan doc)| 见 `docs/plans/v2/v2.4.0任务清单 + 概要设计.md` § Summary of Changes 末段 + 4 commits commit message
-- byte_equal.sh → [`../../../compiler/tests/bootstrap/byte_equal.sh`](../../../compiler/tests/bootstrap/byte_equal.sh)
+- byte_equal.sh → [`compiler/tests/bootstrap/byte_equal.sh`](../../../compiler/tests/bootstrap/byte_equal.sh)
 - D26 spec 来源 → `coordination.md § 3 D26`(2026-08-05 锁)
 - D43 spec 来源 → `coordination.md § 3 D43`(2026-09-01 锁)
-- 跨项目 OS 时间线 → [`../../../../jhyy_OS/docs/coordination.md`](../../../../jhyy_OS/docs/coordination.md)
-- v2.x ‖ v3.x 并行 sprint 调度 → [`../../plans/roadmap/v2-v3-parallel-sprint-plan.md`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md)
-- v2.x QBE 自写长线 → [`../../plans/roadmap/v2.x-qbe-rewrite.md`](../../plans/roadmap/v2.x-qbe-rewrite.md)
-- v3.x 语言扩展长线 → [`../../plans/roadmap/v3.x-language-expansion.md`](../../plans/roadmap/v3.x-language-expansion.md)
+- 跨项目 OS 时间线 → [`docs/coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md)
+- v2.x ‖ v3.x 并行 sprint 调度 → [`docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md`](../../archive/v2-v3/v2-v3-parallel-sprint-plan.md)
+- v2.x QBE 自写长线 → [`docs/plans/roadmap/v2.x-qbe-rewrite.md`](../../plans/roadmap/v2.x-qbe-rewrite.md)
+- v3.x 语言扩展长线 → [`docs/plans/roadmap/v3.x-language-expansion.md`](../../plans/roadmap/v3.x-language-expansion.md)
 - 阶段其他 umbrella → [v2.0.0](changelog-v2.0.0.md) / [v2.1.0](changelog-v2.1.0.md) / [v2.2.0](changelog-v2.2.0.md) / [v2.3.0](changelog-v2.3.0.md)

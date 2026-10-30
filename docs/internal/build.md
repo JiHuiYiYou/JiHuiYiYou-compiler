@@ -134,7 +134,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/verify-too
   `release.yml` 同;installer 是 WiX(MSI/EXE)+ VSCode 扩展。
 
 ⇒ **别把「宿主能不能是 Linux」当 bug 挖** —— 未启动工作的清单
-([`../plans/v4/version-schedule.md`](../plans/v4/version-schedule.md) § 四)里
+([`docs/plans/v4/version-schedule.md`](../plans/v4/version-schedule.md) § 四)里
 **没有**这一项,那是范围外,不是待办。
 
 **目标(target)侧不受此限:** `--target=amd64_sysv` 产 Linux ELF —— .s 在 Windows
@@ -369,7 +369,7 @@ cat compiler/build/bin/test.s
 
 ## 多 target 编译示例 (v2.0.0+)
 
-> v2.0.0 起 `jhyy.exe compile <src.jhyy> --target=<triple> -o <out>` CLI flag 决定目标 target;默认 `amd64_win`(v1.x 兼容)。完整 target 三元组 + ABI 差异表见 [`jhyy-abi-v1.0.0.md` § 13.1-13.2](../abis/jhyy-abi-v1.0.0.md)。
+> v2.0.0 起 `jhyy.exe compile <src.jhyy> --target=<triple> -o <out>` CLI flag 决定目标 target;默认 `amd64_win`(v1.x 兼容)。完整 target 三元组 + ABI 差异表见 [`docs/abis/jhyy-abi-v4.0.0.md` § 13.1-13.2](../abis/jhyy-abi-v4.0.0.md)。
 
 ### amd64_win (hosted, default)
 
@@ -386,7 +386,7 @@ jhyy.exe compile hello.jhyy --target=amd64_win -o hello.exe
 jhyy.exe compile hello_efi.jhyy --target=amd64_win_freestanding -o hello.obj
 ```
 
-生成 PE/COFF x86-64 `.obj`,**不**链 ucrt / vcruntime / libc。entry 由用户 `extern fn efi_main` / `_start` 提供(per [`jhyy-lang-spec-v1.3.0.md` § 18](../abis/jhyy-lang-spec-v1.3.0.md))。**v2.3.0 已 ship** (tag `v2.3.0` commit `54d93df`, 2026-09-04) — 完整 E2E 链路:`scripts/dev/build/build-efi.sh` (jhyy → .obj → lld-link `/SUBSYSTEM:EFI_APPLICATION /ENTRY:efi_main hello.obj /OUT:hello.efi`) + `scripts/dev/test/run-ovmf.sh` (QEMU + OVMF q35 + FAT12 image + serial capture);**E2E 5/5 PASS** 同 .efi 5 次启动输出 "Hello from jhyy freestanding!\n"(详见 [`jhyy-abi-v1.0.0.md` § 13.3 freestanding 约定](../abis/jhyy-abi-v1.0.0.md))。
+生成 PE/COFF x86-64 `.obj`,**不**链 ucrt / vcruntime / libc。entry 由用户 `extern fn efi_main` / `_start` 提供(per [`docs/abis/jhyy-lang-spec-v4.0.0.md` § 18](../abis/jhyy-lang-spec-v4.0.0.md))。**v2.3.0 已 ship** (tag `v2.3.0` commit `54d93df`, 2026-09-04) — 完整 E2E 链路:`scripts/dev/build/build-efi.sh` (jhyy → .obj → lld-link `/SUBSYSTEM:EFI_APPLICATION /ENTRY:efi_main hello.obj /OUT:hello.efi`) + `scripts/dev/test/run-ovmf.sh` (QEMU + OVMF q35 + FAT12 image + serial capture);**E2E 5/5 PASS** 同 .efi 5 次启动输出 "Hello from jhyy freestanding!\n"(详见 [`docs/abis/jhyy-abi-v4.0.0.md` § 13.3 freestanding 约定](../abis/jhyy-abi-v4.0.0.md))。
 
 ### amd64_sysv_stub (Linux 兼容 stub)
 
@@ -394,7 +394,7 @@ jhyy.exe compile hello_efi.jhyy --target=amd64_win_freestanding -o hello.obj
 jhyy.exe compile hello.jhyy --target=amd64_sysv_stub -o hello.s
 ```
 
-**当前 `cg_module` 在此 target 仍 fatal**(`amd64_sysv target: 实现留 v2.x M2`,per 2026-09-04 user 决定保留 fatal 不动 `codegen.jhyy:3783-3786`),只产出占位 `.s`;实实现 SysV ABI 推 v2.x M2 (跟 v2.x 中期自写 QBE 后端同期)。target_dispatch + CLI flag + `target_help` / `target_status` 已就位(per [`compiler/src0/target_dispatch.jhyy`](../../src0/target_dispatch.jhyy) v2.4.0 Stage 1),仅 codegen 路径未实现。
+**当前 `cg_module` 在此 target 仍 fatal**(`amd64_sysv target: 实现留 v2.x M2`,per 2026-09-04 user 决定保留 fatal 不动 `codegen.jhyy:3783-3786`),只产出占位 `.s`;实实现 SysV ABI 推 v2.x M2 (跟 v2.x 中期自写 QBE 后端同期)。target_dispatch + CLI flag + `target_help` / `target_status` 已就位(per [`compiler/src0/target_dispatch.jhyy`](../../compiler/src0/target_dispatch.jhyy) v2.4.0 Stage 1),仅 codegen 路径未实现。
 
 ---
 
@@ -451,7 +451,7 @@ lexer / parser / sema(它们 `#include "../../src/*.h"`)。`compiler/src/` 整�
 1. ~~**临时变量必须带字母前缀**：`%t0`, `%t1`... 不能用 `%0`, `%1`（QBE Windows 构建拒绝纯数字）~~
 2. ~~**缩进必须是空格**：4 空格，不能用 tab（QBE Windows 构建 tab 解析有 bug）~~
 3. ~~**QBE 参数顺序**：`qbe -o output.s input.il`（输出在前，和常见 CLI 相反）~~
-4. ~~**目标平台**：`-t <target>` 由 `--target=` CLI flag 决定(v2.0.0+,per [`jhyy-abi-v1.0.0.md` § 13.1](../abis/jhyy-abi-v1.0.0.md));v2.0 接受 `amd64_win` / `amd64_win_freestanding` / `amd64_sysv_stub` 三值,v1.x 仅 `amd64_win`(Windows x64 PE)。QBE 实际 backend 只认 `amd64_win` / `amd64_sysv` 两值,freestanding 复用 `amd64_win`(per D-GUI-12);SYSV 实 impl 推 v2.x M2~~
+4. ~~**目标平台**：`-t <target>` 由 `--target=` CLI flag 决定(v2.0.0+,per [`docs/abis/jhyy-abi-v4.0.0.md` § 13.1](../abis/jhyy-abi-v4.0.0.md));v2.0 接受 `amd64_win` / `amd64_win_freestanding` / `amd64_sysv_stub` 三值,v1.x 仅 `amd64_win`(Windows x64 PE)。QBE 实际 backend 只认 `amd64_win` / `amd64_sysv` 两值,freestanding 复用 `amd64_win`(per D-GUI-12);SYSV 实 impl 推 v2.x M2~~
 
 见 `docs/internal/architecture.md` 中 codegen 相关章节(以 self-backend 路径为准)。
 

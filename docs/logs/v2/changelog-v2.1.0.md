@@ -8,7 +8,7 @@
 > - **C-side mirror**:`compiler/src/target/abi_amd64_win.{c,h}` + `abi_amd64_win_freestanding.{c,h}`(per v2.0.0 同步 pattern)
 > - **codegen.jhyy 抽离调用**:所有 ABI 函数体 → 调 `abi_win_*`;`cg_module` 只剩 `switch t` dispatch;codegen.jhyy 行数净减 ≥ 300 LOC
 >
-> **plan 性质**: per [`v2.1.0任务清单 + 概要设计.md`](../../plans/v2/v2.1.0任务清单 + 概要设计.md) + [`v2.1.0详细实现方案.md`](../../plans/v2/v2.1.0详细实现方案.md)(2026-09-02 reframe 后)。
+> **plan 性质**: per [`docs/plans/v2/v2.1.0任务清单 + 概要设计.md`](../../plans/v2/v2.1.0任务清单 + 概要设计.md) + [`docs/plans/v2/v2.1.0详细实现方案.md`](../../plans/v2/v2.1.0详细实现方案.md)(2026-09-02 reframe 后)。
 >
 > **关键 discipline**(同 v2.0.0 umbrella):
 > - Author `JHYY <15901598712@163.com>` + Co-author `MiniMax-M3 <noreply@MiniMax>`
@@ -128,11 +128,11 @@
 
 ## 关联文档
 
-- v2.1.0 任务清单 → [`../../plans/v2/v2.1.0任务清单 + 概要设计.md`](../../plans/v2/v2.1.0任务清单 + 概要设计.md)
-- v2.1.0 详细实现方案 → [`../../plans/v2/v2.1.0详细实现方案.md`](../../plans/v2/v2.1.0详细实现方案.md)(2026-09-02 reframe 后)
-- v2.0 阶段 sprint 计划 → [`../../plans/v2/`](../../plans/v2/)
-- v2.0 OS 准备里程碑视图 → [`../../plans/v2/v2.0.0-os-prep.md`](../../plans/v2/v2.0.0-os-prep.md)
-- v2.x ‖ v3.x 并行 sprint 调度 → [`../../plans/roadmap/v2-v3-parallel-sprint-plan.md`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md)
-- 跨项目 OS 时间线 → [`../../../../jhyy_OS/docs/coordination.md`](../../../../jhyy_OS/docs/coordination.md)
-- 上代 v1.x 实施日志 → [`../v1/`](../v1/)
+- v2.1.0 任务清单 → [`docs/plans/v2/v2.1.0任务清单 + 概要设计.md`](../../plans/v2/v2.1.0任务清单 + 概要设计.md)
+- v2.1.0 详细实现方案 → [`docs/plans/v2/v2.1.0详细实现方案.md`](../../plans/v2/v2.1.0详细实现方案.md)(2026-09-02 reframe 后)
+- v2.0 阶段 sprint 计划 → [`docs/plans/v2`](../../plans/v2/)
+- v2.0 OS 准备里程碑视图 → [`docs/archive/v2-v3/v2.0.0-os-prep.md`](../../archive/v2-v3/v2.0.0-os-prep.md)
+- v2.x ‖ v3.x 并行 sprint 调度 → [`docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md`](../../archive/v2-v3/v2-v3-parallel-sprint-plan.md)
+- 跨项目 OS 时间线 → [`docs/coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md)
+- 上代 v1.x 实施日志 → [`docs/logs/v1`](../v1/)
 - 阶段其他 umbrella → [v2.0.0](changelog-v2.0.0.md) / [v2.2.0](changelog-v2.2.0.md) / [v2.3.0](changelog-v2.3.0.md) / [v2.4.0](changelog-v2.4.0.md)

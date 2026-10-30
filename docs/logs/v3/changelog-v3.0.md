@@ -7,7 +7,7 @@
 > 2. **V3-B** (v3.0.1 → v3.0.5) = M1-required 5 件套:3a inline asm / 3b `#[naked]` / 3c volatile / 3e `#[link_section]` / 3f memory barrier — **pending**(待 V3-A ship 后由 V3-B sprint 设计 fill in)
 > 3. **V3-C** (v3.1.0 → v3.1.2) = D27 串行:3g `&mut` + lifetime / 3g.5 / 3g.7 — **pending**(待 V3-B ship 后由 V3-C sprint 设计 fill in)
 >
-> **plan 性质**: per [`docs/plans/v3/batch-V3-A-plan.md`](../../plans/v3/batch-V3-A-plan.md) + [`batch-V3-B-plan.md`](../../plans/v3/batch-V3-B-plan.md) + [`batch-V3-C-plan.md`](../../plans/v3/batch-V3-C-plan.md)。**umbrella changelog**(per `feedback_changelog_umbrella.md` v3.0 minor axis 单一 umbrella,V3-A + V3-B + V3-C 不再开独立 changelog)。
+> **plan 性质**: per [`docs/plans/v3/batch-V3-A-plan.md`](../../plans/v3/batch-V3-A-plan.md) + [`docs/plans/v3/batch-V3-B-plan.md`](../../plans/v3/batch-V3-B-plan.md) + [`docs/plans/v3/batch-V3-C-plan.md`](../../plans/v3/batch-V3-C-plan.md)。**umbrella changelog**(per `feedback_changelog_umbrella.md` v3.0 minor axis 单一 umbrella,V3-A + V3-B + V3-C 不再开独立 changelog)。
 >
 > **关键纪律**(per `feedback_*`):
 > - Author `JHYY <15901598712@163.com>` + Co-author `MiniMax-M3 <noreply@MiniMax>`
@@ -59,7 +59,7 @@
 - **Link**: `-nostartfiles -nodefaultlibs` flag 加入 gcc link line
 - **Runtime**: `no_std_core/*.jhyy` stubs — `panic_handler`(M0)+ `memcpy` / `memset`(per-byte)+ `__start_kernel`(entry wrapper)
 - **Test**: `compiler/tests/examples/no_std_hello.jhyy`(ship gate EXIT:42)
-- **Doc**: [`docs/abis/jhyy-lang-spec-no_std-supplement-v3.0.0.md`](../../abis/jhyy-lang-spec-no_std-supplement-v3.0.0.md)(supplement,不动 spec body)
+- **Doc**: [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md)(supplement,不动 spec body)
 
 ### 验收
 
@@ -141,7 +141,7 @@ Unit 1 + Unit 2 merge 后,coordinator 跑 ship gate 暴露 2 个 integration gap
 ### V3-B v3.0.1 — inline asm (D42 passthrough) — 2026-09-05 ✅ shipped
 
 **Per**: [`docs/plans/v3/batch-V3-B-plan.md`](../../plans/v3/batch-V3-B-plan.md) Unit A1 (sub-sprint 3a)
-**Decision authority**: D42 ([`docs/plans/v2/v2.0.0-os-prep.md`](../../plans/v2/v2.0.0-os-prep.md))
+**Decision authority**: D42 ([`docs/archive/v2-v3/v2.0.0-os-prep.md`](../../archive/v2-v3/v2.0.0-os-prep.md))
 **Tag**: `v3.0.1` (V3-B Unit A1 ship, integration verify 后 coordinator 打 tag)
 **Branch**: `v3-B/v3.0.1-inline-asm` (cut from axis-v3) → merged `8643db4`
 
@@ -154,7 +154,7 @@ Unit 1 + Unit 2 merge 后,coordinator 跑 ship gate 暴露 2 个 integration gap
 - **V2-A escape hatch** (`codegen_amd64_emit_raw_asm`): V2-A 已 ship 签名,空 body;V3-B v3.0.1 填 body = 跟 cg_expr 同样 side-file append 实现
 - **main.jhyy** (`link_with_gcc`): 在 `jh_file_copy(asm_path, temp_asm)` 之后,gcc 链接之前,fopen("rb") 读 `_inline_asm.buf` 内容 → fopen("ab") 写到 temp_asm → unlink side-file
 - **Test**: `compiler/tests/examples/inline_asm_cpuid.jhyy` — 验证 asm 文本出现在 .s 末(grep cpuid ≥ 1)+ cpuid 字节 (0f a2) 出现在最终 .exe (objdump -d 验证)
-- **Doc**: [`docs/abis/jhyy-lang-spec-inline-asm-supplement-v3.0.1.md`](../../abis/jhyy-lang-spec-inline-asm-supplement-v3.0.1.md) — 7 节 supplement(scope / syntax / semantics / ABI / implementation / limitations / examples)
+- **Doc**: [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md) — 7 节 supplement(scope / syntax / semantics / ABI / implementation / limitations / examples)
 
 #### 验收
 
@@ -206,8 +206,8 @@ v3.0.1 用例:**定义 global 符号** / **在 entry 之前 hook** / **asm 出�
 
 ## V3-B — v3.0.2 (3b `#[naked]` raw-asm escape hatch) — 2026-09-06 ✅ shipped
 
-**Per**: [`docs/plans/v3/iterative-imagining-thunder.md`](../../plans/v3/iterative-imagining-thunder.md) Unit B1 (sub-sprint 3b)
-**Decision authority**: D42 ([`docs/plans/v2/v2.0.0-os-prep.md`](../../plans/v2/v2.0.0-os-prep.md)) + D40 wire-format fallback
+**Per**: `docs/plans/v3/iterative-imagining-thunder.md` Unit B1 (sub-sprint 3b)
+**Decision authority**: D42 ([`docs/archive/v2-v3/v2.0.0-os-prep.md`](../../archive/v2-v3/v2.0.0-os-prep.md)) + D40 wire-format fallback
 **Tag**: `v3.0.2` (V3-B Unit B1 ship)
 **重要性**: M1-required (per coordination.md § 3 D8 — OS interrupt entry / syscall handler / boot code 硬前置)
 
@@ -222,8 +222,8 @@ v3.0.1 用例:**定义 global 符号** / **在 entry 之前 hook** / **asm 出�
   - 调 `emit_naked_func_header(ir, fd_sym)` 写 side-file
 - **Codegen** (`cg_dbg_emit_loc`): naked fn 内 skip `dbgloc` emit (top-level `dbgloc` 不是合法 QBE 语法)
 - **ABI helper** (`abi_amd64_win.jhyy`): 新 `emit_naked_func_header(ir, fn_sym)` — `fopen("compiler/build/obj/_inline_asm.buf", "ab")` 写 `.globl <mangled>\n<mangled>:\n` (D42 side-file 复用 v3.0.1 inline asm)
-- **Test**: [`compiler/tests/examples/naked_interrupt_entry.jhyy`](../../../../compiler/tests/examples/naked_interrupt_entry.jhyy) — `#[naked] fn irq_entry() { asm!("iret"); }` + `fn main_jhyy() -> i32 { return 0 as i32; }` ship gate (EXIT:0)
-- **Doc**: [`docs/abis/jhyy-lang-spec-naked-supplement-v3.0.2.md`](../../abis/jhyy-lang-spec-naked-supplement-v3.0.2.md)
+- **Test**: [`compiler/tests/examples/naked_interrupt_entry.jhyy`](../../../compiler/tests/examples/naked_interrupt_entry.jhyy) — `#[naked] fn irq_entry() { asm!("iret"); }` + `fn main_jhyy() -> i32 { return 0 as i32; }` ship gate (EXIT:0)
+- **Doc**: [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md)
 
 ### 验收
 
@@ -317,7 +317,7 @@ v3.0.1 用例:**定义 global 符号** / **在 entry 之前 hook** / **asm 出�
     - no regalloc:`emit_load` / `emit_store` 已走 `movl mem, %reg` + `movl %reg, mem` direct mem op
     - no barrier:**不**emit `mfence` / `lock; addq $0, (%rsp)` — 那是 3f 职责
 - **Test**: `compiler/tests/examples/volatile_mmio.jhyy` ship gate smoke test(EXIT: 0)— opaque `read_sensor()` / `write_log()` defeat QBE constant propagation
-- **Doc**: [`jhyy-lang-spec-volatile-supplement-v3.0.3.md`](../../abis/jhyy-lang-spec-volatile-supplement-v3.0.3.md)
+- **Doc**: [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md)
 
 ### 验收
 
@@ -369,7 +369,7 @@ kernel + 物理地址**;V2-A 路径(`codegen_amd64.jhyy`)对此有完整保证(p
 
 ## V3-B — v3.0.4 (3e `#[link_section]` + QBE .s post-walk side-file) — 2026-09-06
 
-**Per**: [`docs/plans/v3/iterative-imagining-thunder.md`](../../plans/v3/iterative-imagining-thunder.md) § Phase B Step 2
+**Per**: `docs/plans/v3/iterative-imagining-thunder.md` § Phase B Step 2
 **Tag**: `v3.0.4` (V3-B Unit B2 ship, coordinator integration 后由 coordinator 打 umbrella tag)
 **重要性**: M1-required(per coordination.md § 3 D8 — M1 launch 强前置 v3.0 3a/3b/3c/3e/3f)
 
@@ -397,7 +397,7 @@ kernel + 物理地址**;V2-A 路径(`codegen_amd64.jhyy`)对此有完整保证(p
   - line-walk with 2-line sliding window 检测 `.text\n.balign 16\n.globl <name>\n` triple,若 `<name>` match side-file entry,replace `.text\n` with `.section <name>\n`,emit `balign` + `globl` lines
   - CRLF-aware line_len(per `feedback_qbe_crlf_root_cause`)
 - **Test**: `compiler/tests/examples/link_section_boot.jhyy` ship gate smoke test(EXIT: 0)
-- **Doc**: [`jhyy-lang-spec-link-section-supplement-v3.0.4.md`](../../abis/jhyy-lang-spec-link-section-supplement-v3.0.4.md)
+- **Doc**: [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md)
 
 ### 验收
 
@@ -455,7 +455,7 @@ kernel + 物理地址**;V2-A 路径(`codegen_amd64.jhyy`)对此有完整保证(p
 
 ## V3-B — v3.0.5 (3f memory barrier `fence_*()` + .s mnem side-file) — 2026-09-06
 
-**Per**: [`docs/plans/v3/iterative-imagining-thunder.md`](../../plans/v3/iterative-imagining-thunder.md) § Phase B Step 3
+**Per**: `docs/plans/v3/iterative-imagining-thunder.md` § Phase B Step 3
 **Tag**: `v3.0.5` (V3-B Unit B3 ship, coordinator integration 后由 coordinator 打 umbrella tag)
 **重要性**: M1-required(per coordination.md § 3 D8 — M1 launch 强前置 v3.0 3a/3b/3c/3e/3f)
 
@@ -482,7 +482,7 @@ kernel + 物理地址**;V2-A 路径(`codegen_amd64.jhyy`)对此有完整保证(p
     - `jh_file_stat_ok(_fence.buf) != 0` → fopen "rb" → fread → fopen temp_asm "ab" → fwrite → fclose × 2
     - `unlink(_fence.buf)` after read (keep next compile clean)
 - **Test**: `compiler/tests/examples/memory_barrier_smp.jhyy` ship gate smoke (4 fence calls + main_jhyy EXIT:0)
-- **Doc**: [`jhyy-lang-spec-memory-barrier-supplement-v3.0.5.md`](../../abis/jhyy-lang-spec-memory-barrier-supplement-v3.0.5.md)
+- **Doc**: [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md)
 
 ### 验收
 
@@ -863,13 +863,13 @@ V3-B ✅ ship 后由 V3-C sprint 设计 fill in — 3 sub-sprint 累计到本 um
 
 ## 关联文档
 
-- V3-A 任务清单 + 概要 → [`batch-V3-A-plan.md`](../../plans/v3/batch-V3-A-plan.md)
-- V3-A spec supplement → [`../../abis/jhyy-lang-spec-no_std-supplement-v3.0.0.md`](../../abis/jhyy-lang-spec-no_std-supplement-v3.0.0.md)
-- V3-A ship gate test → [`../../../compiler/tests/examples/no_std_hello.jhyy`](../../../compiler/tests/examples/no_std_hello.jhyy)
+- V3-A 任务清单 + 概要 → [`docs/plans/v3/batch-V3-A-plan.md`](../../plans/v3/batch-V3-A-plan.md)
+- V3-A spec supplement → [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md)
+- V3-A ship gate test → [`compiler/tests/examples/no_std_hello.jhyy`](../../../compiler/tests/examples/no_std_hello.jhyy)
 - V3-A no_std stubs → `compiler/runtime/no_std_core/*.jhyy`(per batch-V3-A-plan.md § 文件变更清单)
 - D10 spec 来源 → `coordination.md § 3 D10`(2026-08-05 锁)
 - D43 spec 来源 → `coordination.md § 3 D43`(2026-09-01 锁)
-- 跨项目 OS 时间线 → [`../../../../jhyy_OS/docs/coordination.md`](../../../../jhyy_OS/docs/coordination.md)
-- v2.x ‖ v3.x 并行 sprint 调度 → [`../../plans/roadmap/v2-v3-parallel-sprint-plan.md`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md)
-- v3.x 语言扩展长线 → [`../../plans/roadmap/v3.x-language-expansion.md`](../../plans/roadmap/v3.x-language-expansion.md)
+- 跨项目 OS 时间线 → [`docs/coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md)
+- v2.x ‖ v3.x 并行 sprint 调度 → [`docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md`](../../archive/v2-v3/v2-v3-parallel-sprint-plan.md)
+- v3.x 语言扩展长线 → [`docs/plans/roadmap/v3.x-language-expansion.md`](../../plans/roadmap/v3.x-language-expansion.md)
 - 阶段前 umbrella → [v2.0.0](../v2/changelog-v2.0.0.md) / [v2.1.0](../v2/changelog-v2.1.0.md) / [v2.2.0](../v2/changelog-v2.2.0.md) / [v2.3.0](../v2/changelog-v2.3.0.md) / [v2.4.0](../v2/changelog-v2.4.0.md)

@@ -185,7 +185,7 @@
 
 **根因**: 8 字节 enum (e.g. `MyEnum { A, B, C, D, E }` 5+ variant) 作为函数参数传递时,caller emit `l` (slot pointer) 但 callee 期待 `w` (value),导致读 slot 头 4 字节而非 enum payload,行为错。
 
-**修法**: codegen.c `cg_convert_arg` 区分 src 和 dst 的 enum size — 大 enum (`size > 4`) 始终走 `l` slot pointer path,小 enum 走 `w` value path。W-016 完整记录见 [`../../internal/workarounds.md`](../../internal/workarounds.md) § W-016。
+**修法**: codegen.c `cg_convert_arg` 区分 src 和 dst 的 enum size — 大 enum (`size > 4`) 始终走 `l` slot pointer path,小 enum 走 `w` value path。W-016 完整记录见 [`docs/internal/workarounds.md`](../../internal/workarounds.md) § W-016。
 
 **验证**: 5/5 触发面 PASS (per `feedback_fix_evaluation_rule`),jhyy_v1 vs C-side regress 持平,Stage 2 closure IL sha 仍 `7c035615...`(修改纯 ABI 边界语义,不影响 src0/ 现有 codegen 路径)。
 
@@ -210,17 +210,17 @@
 
 ## 下一阶段
 
-v1.4 (src0 production flip) → v1.5 (WiX installer) → v2.x ‖ v3.x 并行 (per [`v2-v3-parallel-sprint-plan.md`](../../plans/roadmap/v2-v3-parallel-sprint-plan.md))。v1.3.x 语法糖 Phase 4 全部 ship。
+v1.4 (src0 production flip) → v1.5 (WiX installer) → v2.x ‖ v3.x 并行 (per [`docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md`](../../archive/v2-v3/v2-v3-parallel-sprint-plan.md))。v1.3.x 语法糖 Phase 4 全部 ship。
 
 ## 关联文档
 
-- [`../plans/v1/v1.3.0任务清单 + 概要设计.md`](../../plans/v1/v1.3.0任务清单 + 概要设计.md) — plan 同步反映 design pivot (端改动表 + sprint 详细 § v1.3.1)
-- [`../../plans/roadmap/v1.0-post-50-53-plan.md`](../plans/v1/v1.0-post-50-53-plan.md) § Phase 4 — v1.3 语法糖原始 plan 源
-- [`../changelog-v1.2.0.md`](changelog-v1.2.0.md) — 前置 v1.2.0 ship 状态
-- [`../changelog-v1.0.0.md`](changelog-v1.0.0.md) — Stage 2 closure canonical sha `2445e97d...` (v1.3.1 → v1.3.7 逐 sprint 刷新,最终 `7c035615...`,不破坏历史记录)
-- [`../../../internal/status.md`](../internal/status.md) — § 当前版本 已同步到 v1.3.x 全 ship + § 已知限制 已同步
-- [`../../abis/jhyy-lang-spec-v1.2.0.md`](../../abis/jhyy-lang-spec-v1.2.0.md) — v1.2.0 锁定 (本次 ship 同步)
-- [`../../internal/workarounds.md`](../internal/workarounds.md) § W-016 — enum param ABI mismatch 完整记录
+- [`docs/plans/v1/v1.3.0任务清单 + 概要设计.md`](../../plans/v1/v1.3.0任务清单 + 概要设计.md) — plan 同步反映 design pivot (端改动表 + sprint 详细 § v1.3.1)
+- [`docs/plans/v1/v1.0-post-50-53-plan.md`](../../plans/v1/v1.0-post-50-53-plan.md) § Phase 4 — v1.3 语法糖原始 plan 源
+- [`docs/logs/v1/changelog-v1.2.0.md`](changelog-v1.2.0.md) — 前置 v1.2.0 ship 状态
+- [`docs/logs/v1/changelog-v1.0.0.md`](changelog-v1.0.0.md) — Stage 2 closure canonical sha `2445e97d...` (v1.3.1 → v1.3.7 逐 sprint 刷新,最终 `7c035615...`,不破坏历史记录)
+- `../../../internal/status.md` — § 当前版本 已同步到 v1.3.x 全 ship + § 已知限制 已同步
+- [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md) — v1.2.0 锁定 (本次 ship 同步)
+- [`docs/internal/workarounds.md`](../../internal/workarounds.md) § W-016 — enum param ABI mismatch 完整记录
 
 ---
 

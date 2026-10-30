@@ -438,7 +438,7 @@ docs/internal/
   ├─ tests.md (集成测试)
   └─ workarounds.md (W-001~W-009 现状,R-4 引用)
 
-[../../../jhyy_OS/docs/](../../../jhyy_OS/docs/) (OS 端,跟本 repo 同级)
+[../../../jhyy_OS/docs/](../../coordination/JHYY_OS侧设计终版.md) (OS 端,跟本 repo 同级)
   └─ coordination.md (跨项目对齐,本 repo 通过绝对路径引用)
 ```
 
@@ -683,15 +683,15 @@ v3.2+(3l std lib) ───────────────→ M11 硬前置
 
 ## § 17 关联文档
 
-- [v0.x-c-compiler-roadmap.md](v0.x-c-compiler-roadmap.md) — R-2 改
-- [v1.0-self-hosting.md](v1.0-self-hosting.md) — R-5 改
-- [v2.x-qbe-rewrite.md](v2.x-qbe-rewrite.md) — R-6 改
-- [v2.0.0-os-prep.md](../v2/v2.0.0-os-prep.md) — R-7 改
-- [v3.x-language-expansion.md](v3.x-language-expansion.md) — R-8 不变
-- [v3.x-capability-spec.md](v3.x-capability-spec.md) — R-9 改
-- [architecture.md](../../internal/architecture.md) — 内部架构(本重构不改,但 cross-ref)
-- [status.md](../../internal/status.md) — 当前状态(本重构不改,但 cross-ref)
-- [workarounds.md](../../internal/workarounds.md) — W-001~W-009 现状(R-4 引用)
-- [../../../jhyy_OS/docs/coordination.md](../../../jhyy_OS/docs/coordination.md) — 跨项目对齐
-- [../../../jhyy_OS/docs/v0.0.2-foundation-revision.md](../../../jhyy_OS/docs/v0.0.2-foundation-revision.md) — OS 端 5 决策
-- [../../../jhyy_OS/docs/v0.0.1.5-M5b-prereqs.md](../../../jhyy_OS/docs/v0.0.1.5-M5b-prereqs.md) — M5b 启动硬条件
+- [docs/plans/roadmap/v0.x-c-compiler-roadmap.md](v0.x-c-compiler-roadmap.md) — R-2 改
+- [docs/plans/roadmap/v1.0-self-hosting.md](v1.0-self-hosting.md) — R-5 改
+- [docs/plans/roadmap/v2.x-qbe-rewrite.md](v2.x-qbe-rewrite.md) — R-6 改
+- [docs/archive/v2-v3/v2.0.0-os-prep.md](../../archive/v2-v3/v2.0.0-os-prep.md) — R-7 改
+- [docs/plans/roadmap/v3.x-language-expansion.md](v3.x-language-expansion.md) — R-8 不变
+- [docs/plans/roadmap/v3.x-capability-spec.md](v3.x-capability-spec.md) — R-9 改
+- [docs/internal/architecture.md](../../internal/architecture.md) — 内部架构(本重构不改,但 cross-ref)
+- `status.md` — 当前状态(本重构不改,但 cross-ref)
+- [docs/internal/workarounds.md](../../internal/workarounds.md) — W-001~W-009 现状(R-4 引用)
+- [docs/coordination/JHYY_OS侧设计终版.md](../../coordination/JHYY_OS侧设计终版.md) — 跨项目对齐
+- [docs/coordination/JHYY_OS侧设计终版.md](../../coordination/JHYY_OS侧设计终版.md) — OS 端 5 决策
+- [docs/coordination/JHYY_OS侧设计终版.md](../../coordination/JHYY_OS侧设计终版.md) — M5b 启动硬条件

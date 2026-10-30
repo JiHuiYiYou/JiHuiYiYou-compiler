@@ -2,7 +2,7 @@
 
 > **承接**: v2.1.0 ship (`8ac3608`, 2026-09-03) — QBE-level ABI 抽离完成;`abi_amd64_win.jhyy` / `abi_amd64_win_freestanding.jhyy` / C-side mirror 同步就位,byte-equal 5/5 PASS + selfhost closure 4-stage .il byte-equal sha=`312ee9ff`。
 > **触发**: v2.1.0 ship 后立刻启动(per 2026-09-01 user 决定的 5 版本串行 sprint 计划)。**v2.0 阶段 Sprint A Stage 3** = 把已 ship 的 ABI + freestanding 约定**写进 spec**(之前只在 plan doc + 散在 C 端),让 v2.3.0 hello-freestanding.efi + v2.4.0 byte-equal + v3.x M1 联调有 100% 权威 spec 可对。
-> **scope**(per [`v2.2.0任务清单 + 概要设计.md`](../../plans/v2/v2.2.0任务清单 + 概要设计.md)):
+> **scope**(per [`docs/plans/v2/v2.2.0任务清单 + 概要设计.md`](../../plans/v2/v2.2.0任务清单 + 概要设计.md)):
 > - `docs/abis/jhyy-abi-v1.0.0.md` 增 § 13(多 target ABI + freestanding 约定 + UEFI 跟 MS x64 对齐)
 > - `docs/abis/jhyy-lang-spec-v1.3.0.md` 增 § 17-20(OS 启动前置 + freestanding 模式 + Debug ABI + Wire Format)
 > - `docs/internal/build.md` 更新(multi-target dispatch 说明)
@@ -116,10 +116,10 @@
 
 ## 关联文档
 
-- v2.2.0 任务清单 → [`../../plans/v2/v2.2.0任务清单 + 概要设计.md`](../../plans/v2/v2.2.0任务清单 + 概要设计.md)
-- abi-v1.0.0 spec → [`../../abis/jhyy-abi-v1.0.0.md`](../../abis/jhyy-abi-v1.0.0.md)(v2.2.0 加 § 13/14)
-- lang-spec-v1.3.0 → [`../../abis/jhyy-lang-spec-v1.3.0.md`](../../abis/jhyy-lang-spec-v1.3.0.md)(v2.2.0 加 § 17-20)
-- build.md → [`../../internal/build.md`](../../internal/build.md)(v2.2.0 multi-target dispatch)
-- Debug ABI 锁来源 → [`../../../../jhyy_OS/docs/v0.0.4-debug-abi.md`](../../../../jhyy_OS/docs/v0.0.4-debug-abi.md)
-- 跨项目 OS 端 spec mirror → [`../../../../jhyy_OS/docs/coordination.md`](../../../../jhyy_OS/docs/coordination.md)
+- v2.2.0 任务清单 → [`docs/plans/v2/v2.2.0任务清单 + 概要设计.md`](../../plans/v2/v2.2.0任务清单 + 概要设计.md)
+- abi-v1.0.0 spec → [`docs/abis/jhyy-abi-v4.0.0.md`](../../abis/jhyy-abi-v4.0.0.md)(v2.2.0 加 § 13/14)
+- lang-spec-v1.3.0 → [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../../abis/jhyy-lang-spec-v4.0.0.md)(v2.2.0 加 § 17-20)
+- build.md → [`docs/internal/build.md`](../../internal/build.md)(v2.2.0 multi-target dispatch)
+- Debug ABI 锁来源 → [`docs/coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md)
+- 跨项目 OS 端 spec mirror → [`docs/coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md)
 - 阶段其他 umbrella → [v2.0.0](changelog-v2.0.0.md) / [v2.1.0](changelog-v2.1.0.md) / [v2.3.0](changelog-v2.3.0.md) / [v2.4.0](changelog-v2.4.0.md)

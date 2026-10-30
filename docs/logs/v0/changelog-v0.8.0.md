@@ -268,7 +268,7 @@ let fname_str = *(ptr_add_u8(sym_p_v1 as *u8, 0 as i64) as **u8);  // Sym.name @
 
 **superseder**：本 commit 转 W-008 为 RESOLVED；剩余 v1 OK 数量回落的原因是 commit 11 把一些之前走错 IL 但碰巧能跑的测试暴露到 QBE 严格 typecheck 下，**新 cslel 错**。修 W-009（cslel 比较结果类型错）后 v1 OK 数量应回到 16+。
 
-**详细文档**：[`docs/internal/workarounds.md` § W-008](../../internal/workarounds.md#w-008)
+**详细文档**：[docs/internal/workarounds.md](../../internal/workarounds.md#w-008)
 
 ---
 
@@ -319,12 +319,12 @@ if (*src).kind != KIND_PRIMITIVE() { return arg; }
 - v1 regress：12 OK（持平，arena.jhyy 不在 regress 测试集——是 library；但**Stage 0 closure 解锁**）
 - W-008 (commit 11) + W-009 (commit 12) = jhyy_v1 编 arena.jhyy 通过 QBE typecheck 的**必要组合**
 
-**详细文档**：[`docs/internal/workarounds.md` § W-009](../../internal/workarounds.md#w-009)
+**详细文档**：[docs/internal/workarounds.md](../../internal/workarounds.md#w-009)
 ```
 
 ## Phase A/B 计划（commit 4 后剩余工作 — v0.9 真修前）
 
-> **2026-08-04 校准**：原"Phase A + B 全过 → 47 OK"假设未达成。Phase A-1 if-expr (commit 5, 9e77e09) 推进到 16 OK 后，后续 commit 6-12 的 W-001~W-009 workaround 暴露下一层 codegen 严格性问题（loadw→loadl / cslel operand type 等），jhyy_v1 regress 实际落定在 **12 OK / 47 总（持平 baseline）**。详见 [`v0.8.0任务清单 + 概要设计.md`](../../plans/v0/v0.8.0任务清单 + 概要设计.md) § 完成定义校准。
+> **2026-08-04 校准**：原"Phase A + B 全过 → 47 OK"假设未达成。Phase A-1 if-expr (commit 5, 9e77e09) 推进到 16 OK 后，后续 commit 6-12 的 W-001~W-009 workaround 暴露下一层 codegen 严格性问题（loadw→loadl / cslel operand type 等），jhyy_v1 regress 实际落定在 **12 OK / 47 总（持平 baseline）**。详见 [`docs/plans/v0/v0.8.0任务清单 + 概要设计.md`](../../plans/v0/v0.8.0任务清单 + 概要设计.md) § 完成定义校准。
 
 修完后理论 OK 总数从 7 推到 16（Phase A-1 commit 5 已达成；剩余待 v0.9 W-真修）：
 

@@ -26,6 +26,6 @@ v0.1 时代 sprint 用 `sprint-1[abc...]-*.md` 命名（v0.2.1 之后改用 `v0.
 
 ## 关联
 
-- C 端编译器 sprint 计划 → [`../../plans/v0/`](../../plans/v0/)
-- vX.Y 轴路线图 → [`../../plans/roadmap/`](../../plans/roadmap/)
-- jhyy 自举 changelog → [`../v1/`](../v1/)（v1.0.0 出后才有内容）
+- C 端编译器 sprint 计划 → [`docs/plans/v0`](../../plans/v0/)
+- vX.Y 轴路线图 → [`docs/plans/roadmap`](../../plans/roadmap/)
+- jhyy 自举 changelog → [`docs/logs/v1`](../v1/)（v1.0.0 出后才有内容）

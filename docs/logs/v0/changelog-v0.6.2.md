@@ -3,7 +3,7 @@
 > ⚠️ **本文档为历史草稿，描述 v0.6.2 计划修的 3 个 bug (#2/#5/#6)**。
 > 实际未单独发 v0.6.2。三个 bug 各自走小 patch 流修：
 >
-> - **#2 let mut dead-code** → **v0.6.5 patch** 已修（sema 层）。见 [`changelog-v0.6.5.md`](changelog-v0.6.5.md)。
+> - **#2 let mut dead-code** → **v0.6.5 patch** 已修（sema 层）。见 [`docs/logs/v0/changelog-v0.6.5.md`](changelog-v0.6.5.md)。
 > - **#5 nested struct QBE 'w' load 对齐** → 仍是 open bug，jhyy 端继续用平铺 6 字段 workaround。
 > - **#6 qbe_type_of(i8) → 'b'** → 仍是 open bug，jhyy 端继续用 `*i32 + shift+mask` workaround。
 >

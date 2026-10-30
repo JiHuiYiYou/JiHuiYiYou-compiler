@@ -6,7 +6,7 @@
 **版本轴当前 HEAD = `v4.1.2`**(2026-10-29 发布,含 installer + compiler .msi +
 vscode .vsix)。此前最后一次真实 release 停在 2026-09-08 的 v3.2.0 ——
 中间 v4.0.0-rc1 / v4.0.9-rc1 / v4.0.19 等几次 tag 全部发布失败。
-**当前进行中的主线 = [`self-backend-perf-plan.md`](self-backend-perf-plan.md)**;
+**当前进行中的主线 = [`docs/plans/v4/self-backend-perf-plan.md`](self-backend-perf-plan.md)**;
 本文档从 **v4.4 阶段二** 起继续往后排。
 
 ⚠️ **2026-10-30:本文档表头曾长期停在 `v4.0.9-rc1`(2026-10-18)未更新** ——
@@ -18,7 +18,7 @@ vscode .vsix)。此前最后一次真实 release 停在 2026-09-08 的 v3.2.0 �
 可能就不止一个 patch),**届时应该开 v4.1.0 而不是继续挤 v4.0.x**。
 本文档目前按 patch 排是因为 v4.0.x 已有的先例如此,不是因为它适合。
 
-plan 文件仍不以版本号命名(per [`README.md`](README.md) 的约定);
+plan 文件仍不以版本号命名(per [`docs/plans/v4/README.md`](README.md) 的约定);
 本文档是**排期表**,版本号在这份里是权威。
 
 ## 为什么需要这份
@@ -27,7 +27,7 @@ plan 文件仍不以版本号命名(per [`README.md`](README.md) 的约定);
 
 | 文档 | 有什么 | 缺什么 |
 |---|---|---|
-| [`active-workaround-clearance.md`](active-workaround-clearance.md) | 14 条 ACTIVE 的优先级 + 修法 + **未完成事项清单** | 没有版本归属 |
+| [`docs/plans/v4/active-workaround-clearance.md`](active-workaround-clearance.md) | 14 条 ACTIVE 的优先级 + 修法 + **未完成事项清单** | 没有版本归属 |
 | ~~`backlog.md`~~ | ~~12 项未启动工作的依赖图~~ | — ⚠️ **2026-10-30 已删除**(见下) |
 
 两份都是「**按什么顺序**」,不是「**第几个版本做什么**」。中间缺的就是这份。
@@ -116,7 +116,7 @@ v4.0.x 系列都占满了 —— v4.1 及以后的排期在这条前提下**一�
 
 | # | 决策 | 影响 |
 |---|------|------|
-| **D1** | **W-105 走 A/B/C 哪条?** 见 [`active-workaround-clearance.md` § 决策点](active-workaround-clearance.md) | 选 A 就要先**实现 `&mut`**(功能缺失,不是检查缺失)→ 至少 2 个版本;选 C(判 DEFERRED)则政策实质放宽,v4.0.0 final 立刻解锁一大半 |
+| **D1** | **W-105 走 A/B/C 哪条?** 见 [`docs/plans/v4/active-workaround-clearance.md` § 决策点](active-workaround-clearance.md) | 选 A 就要先**实现 `&mut`**(功能缺失,不是检查缺失)→ 至少 2 个版本;选 C(判 DEFERRED)则政策实质放宽,v4.0.0 final 立刻解锁一大半 |
 | **D2** | **v4.0.0 final 真的必须等 14 条全清?** | 若接受「先 promote RC 之外的部分」,整个排期前移 |
 | **D3** | ~~并发 flake 治根(改编译器源码给旁路文件加 pid 隔离)算不算 v4.0.x 范围?~~ | ✅ **2026-10-18 关闭**:真根因是 harness 命名冲突,已修。旁路文件那条机制**未观测到发作**,降级为「先加并发压力探针,再决定改不改」—— 见 v4.0.17 |
 
@@ -587,7 +587,7 @@ emit 落地位置)不在一个层面上,混在一起会让 diff 难审。
 | 回归基线连续 3 次全绿(排除 flake) | 🔶 本轮 181/181 × 3(其中一次 1 FLAKY,查明是**并发跑 `make`** 干扰 —— 单独重跑 5/5 PASS,干净重跑全量 0 FLAKY) |
 
 **gate:** v4.0.0 final 的四条 promote 条件全满足
-(见 [`active-workaround-clearance.md` § 全局 ship gate](active-workaround-clearance.md))。
+(见 [`docs/plans/v4/active-workaround-clearance.md` § 全局 ship gate](active-workaround-clearance.md))。
 
 **W-107 / W-120 的新常驻门:** `artifact_checks.sh` 的 `many_functions` ——
 4100 个函数的合成文件求和必须 == 36900(同时踩中两个悬崖:函数数 > 旧表上限、
@@ -809,15 +809,15 @@ FLAKY 分类机制」是同一条理由。
 >    `jhyy.exe` 由它自己编 `src0/main.jhyy`。后端性能直接乘在**项目自己的
 >    迭代速度**(自举编译 12.5s)和**用户写的每个 jhyy 程序**上。
 > 2. **有实测数据**:jhyy 生成代码比 gcc -O0 慢 **3.43x(fib)/ 4.73x(ack)**
->    —— 见 [`../perf/self-backend-baseline-2026-10-29.md`](../../perf/self-backend-baseline-2026-10-29.md)。
+>    —— 见 [`docs/perf/self-backend-baseline-2026-10-29.md`](../../perf/self-backend-baseline-2026-10-29.md)。
 > 3. **有便宜的入口**:帧尺寸一个公式常量就占 **~41%** 的运行时
 >    (每函数帧 ≥8352 字节 ⇒ 100% 的函数每次调用都走 `___chkstk_ms` 探页)。
 >
-> **详细计划**:[`self-backend-perf-plan.md`](self-backend-perf-plan.md)(版本号在那份里是权威)。
+> **详细计划**:[`docs/plans/v4/self-backend-perf-plan.md`](self-backend-perf-plan.md)(版本号在那份里是权威)。
 
 | 版本 | 内容 | 性质 | 系列文档 |
 |---|---|---|---|
-| **v4.2.0** | 可信性能门 | ✅ **已完成** —— `runtime_perf.py` + 静态指标基线 + `bench.sh` 改入口别名 + CI 接线(墙钟只报告、静态指标硬门;**红光测试已做**) | [`self-backend-perf-plan.md`](self-backend-perf-plan.md) § 三 |
+| **v4.2.0** | 可信性能门 | ✅ **已完成** —— `runtime_perf.py` + 静态指标基线 + `bench.sh` 改入口别名 + CI 接线(墙钟只报告、静态指标硬门;**红光测试已做**) | [`docs/plans/v4/self-backend-perf-plan.md`](self-backend-perf-plan.md) § 三 |
 | **v4.2.1** | 帧尺寸公式修复(`emit_ctrl.jhyy` 的写死 8192) | ✅ **已完成** —— 帧中位 8368→288 字节 · chkstk 1045→46 处 · 总预留栈 9.1MB→1.5MB · fib/ack jhyy/gcc-O0 3.46x/4.65x→**2.14x/2.13x** · 自举编译 -16% · 台账 W-167 | 同上 |
 | ~~**v4.2.2**~~ | peephole 4096 限制真修(W-074.6.1) | ⬇️ **降级到 v4.4 之后** —— 实测 3 条规则在 407386 行真实产物上只命中 **54** 条(0.002%);真实价值是清掉一个**休眠的静默崩溃** | ⇒ [**v4.4.5**](v4.4.5-plan.md) |
 | ~~**v4.3.0**~~ | `-O0/-O1` 开关 + IR 层优化框架(常量折叠/代数化简/DCE) | ⬇️ **降级到 v4.4 之后** —— 实测三项加起来只有语料 B 的 **1.8%** 的 IL 指令(前端本来就把常量表达式在源码层算掉了) | ⇒ [**v4.4.5**](v4.4.5-plan.md) |
@@ -846,7 +846,7 @@ v4.2.1 落地后逐项测量(语料 A = 编译器自己的 `src0/main.jhyy` 1427
 「load 槽 → 算 → store 槽」⇒ 机器码里 **49% 的指令是访存**。
 **这才是 2x 差距的所在**,IR 层优化动不了它。
 
-详见 [`self-backend-perf-plan.md`](self-backend-perf-plan.md) § 三之二。
+详见 [`docs/plans/v4/self-backend-perf-plan.md`](self-backend-perf-plan.md) § 三之二。
 
 **M5 Part 3 为什么排在性能线之后**(2026-10-29 论证):
 M5 Part 3 把**成熟的 C runtime** 换成**新写的 jhyy 代码**(malloc/memcpy/printf/exit
@@ -932,7 +932,7 @@ P2 的任务表里混着两件事:
 
 > ⚠️ **v4.14 那一行的「`unsafe` + `from_raw`」以 D5 的结论为准** ——
 > **不引入 `unsafe` 关键字**,改用 `#[trusted]` / `#[unsafe_cap_ctor]` 属性
-> (见 [`../../coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md) § 12 D5)。
+> (见 [`docs/coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md) § 12 D5)。
 
 **不排进 OS 线的**(与 OS 线正交,v4.16 起独立):async/await · 包管理器 ·
 并发 cap + 完整 memory model + 多架构 ABI。`.jhyynb` 已并入 OS-14。
@@ -983,7 +983,7 @@ ABI §12.6(栈槽只保证 8 字节对齐)+ §12.12(SysV 溢出的 f64 栈参缺
 |---|---|
 | 版本号全是**预留号** | 启动那一格时按实际状态复核;`OS-N` 序号是稳定身份 |
 | v4.8(UEFI / kernel.efi)**本地不可完全验证** | 需 QEMU/OVMF;OS 仓的设计文档已删 ⇒ 需要重新确认 loader 侧的预期 |
-| **12 条未拍板的设计** | 已给设计稿:[`docs/coordination/JHYY_OS侧设计终版.md § 12`](../../coordination/JHYY_OS侧设计终版.md)(OS 侧 8 条:D1–D4/D7/D8/D10/D11)+ [`JHYY_编译器侧设计终版.md § 8`](../../coordination/JHYY_编译器侧设计终版.md)(编译器侧 4 条:D5/D6/D9/D12),各含事实基线 / 选项 / 建议 / 产物 ⇒ **拍板前 OS-13(P4a manifest)与 OS-14(Cap 真 T)不能启动** |
+| **12 条未拍板的设计** | 已给设计稿:[`docs/coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md)(OS 侧 8 条:D1–D4/D7/D8/D10/D11)+ [`JHYY_编译器侧设计终版.md § 8`](../../coordination/JHYY_编译器侧设计终版.md)(编译器侧 4 条:D5/D6/D9/D12),各含事实基线 / 选项 / 建议 / 产物 ⇒ **拍板前 OS-13(P4a manifest)与 OS-14(Cap 真 T)不能启动** |
 | v4.14(Cap 类型化)被 **§2.4 的规范冲突阻塞** | `Cap` 草案 §2.4:lang-spec/abi 的 `rights@5` vs binary-format 的 `rights@6` —— **必须先裁决**,否则第一步「按类型拆 8 字节」就建在错的布局上 |
 | v4.15(KASAN/KCFI)依赖 def/use 强度 | KCFI 依赖函数类型(v4.12)与调用图(v4.7);KASAN/KMSAN 依赖更强的 def/use ⇒ 排在最后是对的 |
 | **「16 KiB 目标」是否可达** | 按 341 KiB 基线,v4.4 的寄存器分配(槽数 → ~24%)理论给到 ~85 KiB ⇒ **单靠寄存器分配到不了 16 KiB**,OS-4 之后还需别的杠杆(帧布局 / 池分离 / 更多寄存器 / 降 temp 数) |

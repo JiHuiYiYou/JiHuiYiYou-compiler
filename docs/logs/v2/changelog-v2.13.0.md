@@ -1,7 +1,7 @@
 # JHYY v2.13.0 — 真 XMM regalloc + 真 amd64_sysv codegen 全覆盖 + amd64_win_freestanding 真 E2E
 
 **Shipped**: 2026-09-19 on axis-v2 (commit `5ddbb2c`)
-**Plan**: [`../../plans/v2/v2.13.0-plan.md`](../../plans/v2/v2.13.0-plan.md)
+**Plan**: [`docs/plans/v2/v2.13.0-plan.md`](../../plans/v2/v2.13.0-plan.md)
 **Scope**: v2.x 中期 M2 真后端真 E2E 闭环 — W-074.6 PARTIAL → FULL CLOSED; 5 sysv tests SKIP → PASS; OVMF E2E 从 QBE baseline 推到自写后端真 emit。后续 v2.13.1/2/3/4/5/6/6.1/6.2/6.3/7 都 append 到本 umbrella。
 **前置**: v2.12.0 ship (全量 audit phantom-free 119/119 PASS)
 
@@ -87,7 +87,7 @@ per user 2026-09-19 "不要有outofscope,不要Defer,这些都安排在v2.13.x�
 - Phase 1 predecessor: v2.12.0 audit (上一 section)
 - Phase 2 predecessor: v2.7.0 Phase 2b (Stage 1c SysV ABI module wire) — Phase 2 真 emit 是它的 completion
 - Phase 3 predecessor: v2.3.0 Stage 2 OVMF boot recipe — Phase 3 是它的 self-backend completion
-- W-074 series: [`../../internal/rca/rca-v2.11.20.md`](../../internal/rca/rca-v2.11.20.md) + [`../../internal/rca/rca-v2.11.21.md`](../../internal/rca/rca-v2.11.21.md)
+- W-074 series: [`docs/internal/rca/rca-v2.11.20.md`](../../internal/rca/rca-v2.11.20.md) + [`docs/internal/rca/rca-v2.11.21.md`](../../internal/rca/rca-v2.11.21.md)
 - Memory: `feedback_fix_evaluation_rule` (5/5 gate) + `feedback_changelog_umbrella` (v2.x 单 umbrella) + `feedback_axis_vn_worktree_isolation` + `feedback_regress_py_abspath` + `feedback_mcp_jhyy_run_workspace` + `feedback_jhyy_no_forward_ref` (NEW Phase 2 lesson) + `feedback_codegen_amd64_run_zerobyte` (CGState slack 防 0-byte body)
 
 ---
@@ -224,7 +224,7 @@ v2.13.2 = Group A docs-only audit-flip sprint（per user 2026-09-20 决定，RCA
 
 ### References
 
-- v2.13.2 plan: [`docs/plans/v2/v2.13.2-plan.md`](../../plans/v2/v2.13.2-plan.md) (RCA findings + 4 步 Phase 2+3 序列, plan file 已 ship 前存在)
+- v2.13.2 plan: `docs/plans/v2/v2.13.2-plan.md` (RCA findings + 4 步 Phase 2+3 序列, plan file 已 ship 前存在)
 - v2.13.2 umbrella changelog (本 section, **不** 创建 standalone `changelog-v2.13.2.md` per [[feedback_changelog_umbrella]])
 - v2.13.1 ship reference: 上一 section v2.13.1 entries
 - v2.11.x 真修 chain (W-074.8 sub-bug 2 + 4): commit `d6364ba` (v2.11.19 Phase 3) + commit `4beab82` (v2.11.21-fix Phase 1)
@@ -610,7 +610,7 @@ Fix A (5-state enum) 是 module-level change,Python import 时 cache,需 `/resta
 ## v2.13.7 — W-057 UTF-8 3/4-byte codepoint 真修 (lexer 放宽 + parser decode 扩)
 
 **Shipped**: 2026-09-21 on axis-v2 (commit `<pending>`) + main mirror commit
-**Plan**: [`../../plans/v2/v2.13.7-plan.md`](../../plans/v2/v2.13.7-plan.md)
+**Plan**: [`docs/plans/v2/v2.13.7-plan.md`](../../plans/v2/v2.13.7-plan.md)
 **Scope**: W-057 (DEFERRED since 2026-08-28 v1.7.3) 真修 — char literal 全 codepoint 范围 (U+0000-U+10FFFF per RFC 3629) ship。2 src0 files (lexer.jhyy + parser.jhyy decode) + 2 新 tests, codegen 路径不变 (parser 把 char codepoint → `ast_new_int(PRIM_I32)`, 走 `NODE_INT` emit 已 work)。
 **前置**: v2.13.6.3 ship (MCP git.exe abs path + cache)
 
@@ -698,7 +698,7 @@ v1.7.0 Stage 3 ship 时 (commit `b0e9c3c`) 显式 lex reject 3/4-byte codepoint 
 ## v2.13.8 — W-058 fmod emit 路径真修 (codegen fold `a % b` 浮点 到 user-space formula)
 
 **Shipped**: 2026-09-21 on axis-v2 (commit `<pending>`) + main mirror commit
-**Plan**: [`../../plans/v2/v2.13.8-plan.md`](../../plans/v2/v2.13.8-plan.md)
+**Plan**: [`docs/plans/v2/v2.13.8-plan.md`](../../plans/v2/v2.13.8-plan.md)
 **Scope**: W-058 (DEFERRED since 2026-08-28 v1.7.3) 真修 — 浮点 fmod (`%`) codegen 不再 emit `remd`/`rems` (vendor QBE 2026-08-15 build 不支持), 改 emit 5-instruction user-space formula `a - trunc(a/b) * b` (trunc toward 0, 跟 QBE upstream `remd`/`rems` spec + C `fmod()` 严格一致)。1 src0 file (codegen.jhyy) + 3 new tests, vendor QBE + self-backend 都 work (fold IL 不见 `rem` token)。
 **前置**: v2.13.7 ship (W-057 UTF-8 codepoint 真修 + standalone umbrella split)
 
@@ -792,7 +792,7 @@ v1.7.2 patch A1 ship 时 (per `docs/logs/v1/changelog-v1.7.2.md` A1) fact-check 
 ## v2.13.9 — W-081 phi merge gap audit-flip closure (docs-only, 0 src change)
 
 **Shipped**: 2026-09-22 on axis-v2 (commit `<pending>`) + main mirror commit
-**Plan**: [`../../plans/v2/v2.13.9-plan.md`](../../plans/v2/v2.13.9-plan.md)
+**Plan**: [`docs/plans/v2/v2.13.9-plan.md`](../../plans/v2/v2.13.9-plan.md)
 **Scope**: W-081 (DEFERRED since v2.11.3) audit-flip closure — 4 sub-bugs A/B/C/D 真修 ALL ship via v2.13.x chain (per Phase A re-RCA 2026-09-22), 本 sprint = docs-only closure, 0 src change (per user 2026-09-20 决定 precedent = W-074.8 v2.13.2 ship pattern)。W-082 (NEW in v2.13.8 audit, QBE-side codegen.jhyy short-circuit phi merge gap) 推 v2.13.10 mini。
 **前置**: v2.13.7 ship (W-057 真修, ACTIVE=0) + v2.13.8 ship (W-058 真修, ACTIVE=0)
 
@@ -903,7 +903,7 @@ v1.7.2 patch A1 ship 时 (per `docs/logs/v1/changelog-v1.7.2.md` A1) fact-check 
 ## v2.13.10 — W-082 audit-flip docs-only + convention enforcement (跟 v2.13.9 W-081 pattern)
 
 **Shipped**: 2026-09-22 on axis-v2 (commit `<pending>`) + main mirror commit
-**Plan**: [`../../plans/v2/v2.13.10-plan.md`](../../plans/v2/v2.13.10-plan.md)
+**Plan**: [`docs/plans/v2/v2.13.10-plan.md`](../../plans/v2/v2.13.10-plan.md)
 **Scope**: W-082 (DEFERRED since 2026-09-21 v2.13.8 audit, QBE-side codegen.jhyy short-circuit `&&`/`||` nested if-condition phi merge gap) audit-flip docs-only + convention enforcement, 0 src0 真改 (跟 v2.13.9 W-081 audit-flip docs-only 同 pattern per user 2026-09-20 决定 precedent)。self-backend fmod_f32 + fmod_negative 真修 → v2.13.11 mini (per user 2026-09-22 决定)。
 **前置**: v2.13.9 ship (W-081 audit-flip, ACTIVE=0 + DEFERRED count 1)
 

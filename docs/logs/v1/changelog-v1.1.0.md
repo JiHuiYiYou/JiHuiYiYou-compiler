@@ -72,8 +72,8 @@
 
 ### 引用
 
-- [`docs/internal/workarounds.md` § W-006](../../internal/workarounds.md) — 完整 W-006 entry + RESOLVED section
-- [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md` § Sprint v1.1.1](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
+- [docs/internal/workarounds.md](../../internal/workarounds.md) — 完整 W-006 entry + RESOLVED section
+- [docs/plans/v1/v1.1.0任务清单 + 概要设计.md](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
 - `memory/project_w006_dormant_scan_2026_08_05.md` — 2026-08-05 首次 dormant scan
 - `memory/project_sprint4_21_phase_b_c_d_g_done.md` — Sprint 4.21 Phases C+D+G (cg_copy_struct const IRVal* + cg_expr out-param)
 - `memory/project_sprint4_25_a_prime_sentinel_guard.md` — Sprint 4.25 A' sentinel 真修 (W-005 #2 关键 commit)
@@ -150,10 +150,10 @@
 
 ### 引用
 
-- [`docs/internal/workarounds.md` § W-004](../../internal/workarounds.md) — 完整 W-004 entry + 2026-08-12 verification status + RESOLVED section
-- [`docs/internal/workarounds.md` § W-001](../../internal/workarounds.md) — 真因 byte-by-byte FNV-1a 真修 (root cause)
-- [`docs/internal/workarounds.md` § W-006](../../internal/workarounds.md) — 关系澄清 (不同 family, 不连带)
-- [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md` § Sprint v1.1.1](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
+- [docs/internal/workarounds.md](../../internal/workarounds.md) — 完整 W-004 entry + 2026-08-12 verification status + RESOLVED section
+- [docs/internal/workarounds.md](../../internal/workarounds.md) — 真因 byte-by-byte FNV-1a 真修 (root cause)
+- [docs/internal/workarounds.md](../../internal/workarounds.md) — 关系澄清 (不同 family, 不连带)
+- [docs/plans/v1/v1.1.0任务清单 + 概要设计.md](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
 - `memory/project_w006_transitively_resolved.md` — W-006 transitive close 模板 (本文 mirror)
 - v0 codegen Bug 1 (hash_string overread) + Bug 6 (let-mut assignment) W-004 真因 (per git log)
 - `memory/feedback_qbe_crlf_root_cause.md` — QBE 行号偏移错 (无关 W-004 但同 family 教训)
@@ -201,8 +201,8 @@
 
 ### 引用
 
-- [`docs/internal/workarounds.md` § W-007](../../internal/workarounds.md) — 完整 W-007 entry + RESOLVED section
-- [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md` § Sprint v1.1.2](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
+- [docs/internal/workarounds.md](../../internal/workarounds.md) — 完整 W-007 entry + RESOLVED section
+- [docs/plans/v1/v1.1.0任务清单 + 概要设计.md](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
 - `memory/feedback_fix_evaluation_rule.md` — 5/5 PASS 评估守门
 - commit `0453cef` (v0.8 commit 7) — C-side cg_convert_arg extsw 分支真修
 
@@ -256,8 +256,8 @@
 
 ### 引用
 
-- [`docs/internal/workarounds.md` § W-003](../../internal/workarounds.md) — 完整 W-003 entry + RESOLVED section
-- [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md` § Sprint v1.1.3](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
+- [docs/internal/workarounds.md](../../internal/workarounds.md) — 完整 W-003 entry + RESOLVED section
+- [docs/plans/v1/v1.1.0任务清单 + 概要设计.md](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
 - `memory/project_sprint4_23_max_locals.md` — Sprint 4.23 MAX_LOCALS 真修 (W-010 真因, 跟 W-003 是 W-005 #2 family)
 - `memory/project_sprint4_25_a_prime_sentinel_guard.md` — Sprint 4.25 A' sentinel 真修 (W-005 #2 关键 commit)
 
@@ -296,7 +296,7 @@
 
 ### 引用
 
-- [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md` § Sprint v1.1.4](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
+- [docs/plans/v1/v1.1.0任务清单 + 概要设计.md](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
 - 4 个 v0 codegen bug 列表 + 触发面 (per git log sprint 4)
 
 ---
@@ -334,7 +334,7 @@
 
 ### 引用
 
-- [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md` § Sprint v1.1.5](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
+- [docs/plans/v1/v1.1.0任务清单 + 概要设计.md](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
 - v0 codegen Bug 2 描述 (per git log)
 
 ---
@@ -372,7 +372,7 @@
 
 ### 引用
 
-- [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md` § Sprint v1.1.6](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
+- [docs/plans/v1/v1.1.0任务清单 + 概要设计.md](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
 - v0 codegen Bug 3 描述 (per git log)
 
 ---
@@ -429,7 +429,7 @@ if (!conv && (src_qt == 'w' || src_qt == 'l') && (dst_qt == 'b' || dst_qt == 'h'
 
 ### 引用
 
-- [`docs/plans/v1/v1.1.0任务清单 + 概要设计.md` § Sprint v1.1.7](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
+- [docs/plans/v1/v1.1.0任务清单 + 概要设计.md](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
 - `memory/project_sprint_v1_1_7_bug4_narrow_cast.md` — 本 sprint 详细记录
 - `memory/project_sprint4_7_irval_pass_by_value_bug.md` — Sprint 4.7 首次发现 Bug 4 (W-005 #2 family EMIT-layer 形态)
 - v0 codegen Bug 4 描述 (per git log)

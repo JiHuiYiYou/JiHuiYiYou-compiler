@@ -13,10 +13,10 @@
 - `v0.7.0详细实现方案.md`
 - `v0.8.0任务清单 + 概要设计.md` — v0.8 sprint 计划（自举路径清理）
 
-**vX.Y 轴后续**（已在 [`../roadmap/`](../roadmap/) 下）：
-- v2.x = QBE 完整重写 + 多目标 / 自研 OS 准备 → [`../roadmap/v2.x-qbe-rewrite.md`](../roadmap/v2.x-qbe-rewrite.md)
-- v3.x = 语言特性扩展（OS-required：inline asm / volatile / naked / no_std / `&mut` + lifetime）→ [`../roadmap/v3.x-language-expansion.md`](../roadmap/v3.x-language-expansion.md)
+**vX.Y 轴后续**（已在 [`docs/plans/roadmap`](../roadmap/) 下）：
+- v2.x = QBE 完整重写 + 多目标 / 自研 OS 准备 → [`docs/plans/roadmap/v2.x-qbe-rewrite.md`](../roadmap/v2.x-qbe-rewrite.md)
+- v3.x = 语言特性扩展（OS-required：inline asm / volatile / naked / no_std / `&mut` + lifetime）→ [`docs/plans/roadmap/v3.x-language-expansion.md`](../roadmap/v3.x-language-expansion.md)
 
-v1.0.0 自举 sprint 计划 → [`../v1/`](../v1/)
+v1.0.0 自举 sprint 计划 → [`docs/plans/v1`](../v1/)
 
-**C 端编译器的 changelog** 在 [`../../logs/v0/`](../../logs/v0/)（v0.0.1 → v0.8 wip 全套 changelog）。
+**C 端编译器的 changelog** 在 [`docs/logs/v0`](../../logs/v0/)（v0.0.1 → v0.8 wip 全套 changelog）。
