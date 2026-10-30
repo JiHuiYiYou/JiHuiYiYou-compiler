@@ -24,6 +24,11 @@
 # .gitmodules) — see W-025 for the v1.5.5 vendoring fix.
 #
 # Reference: docs/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.5
+#
+# 2026-10-30:原文件头有一段「qbe.exe source: vendored copy of QBE compiler
+# source under qbe/. Built by the "Build qbe.exe" step below.」—— **那个 step
+# 早就不存在了**,qbe/ 目录也已整体删除(v4.0.0 就该删完,2026-10-30 补完)。
+# 留着这段会让人以为发版还依赖 QBE。
 name: JHYY Installer Release
 
 # 2026-10-18:本文件从「tag push 直接触发」改成 **reusable workflow**。
@@ -142,8 +147,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # qbe/ is a vendored copy of the QBE compiler source (v1.5.5 vendoring
-          # fix for the historical dangling gitlink). See W-025.
+          # (原注释提到 qbe/ 是 vendored QBE source —— 已于 2026-10-30 整体删除)
           fetch-depth: 0  # for git describe / tag detection
 
       # ⚠️ 这一步**必须在 Checkout 之后** —— VERSION 是仓里的文件,
@@ -240,11 +244,12 @@ jobs:
           vsce --version
 
       # 2026-10-18:删掉 `make stage0`。v4.0.8 起 QBE 与 stage0 都已移出 `all`
-      # 的依赖链(jhyy.exe 自己编 src0),而 C 侧 stage0 的运行期仍需要
-      # `qbe/qbe.exe` —— 那个 vendored 二进制被 `.gitattributes` 的
-      # `qbe/** text eol=lf` glob 做 CRLF 转换损坏过(实测差 31 字节,
-      # 症状 "not compatible with the version of Windows you're running")。
-      # v4.0.6 的 release 就是死在这一步。
+      # 的依赖链(jhyy.exe 自己编 src0)。
+      # 2026-10-30:原注释还写着「C 侧 stage0 的运行期仍需要 qbe/qbe.exe」——
+      # 那句在 v4.0.21(compiler/src/ 整体删除)之后就不成立了,而 qbe/ 目录
+      # 也已于同日整体删除。v4.0.6 的 release 死在 stage0 那一步(QBE 二进制
+      # 被 `.gitattributes` 的 `qbe/** text eol=lf` glob 做 CRLF 转换损坏,
+      # 实测差 31 字节)—— 那个坑的教训已记进 .gitattributes。
       - name: Build jhyy.exe (self-bootstrap, jhyy compiles src0)
         shell: msys2 {0}
         run: |

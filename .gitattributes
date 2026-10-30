@@ -10,17 +10,11 @@
 *.sh     text eol=lf
 *.ini    text eol=lf
 Makefile text eol=lf
-# qbe/ vendored source 上游是 CRLF; 声明 eol=lf 让 git 知道仓库意图是 LF.
-# 实际 normalization 需 `git add --renormalize qbe/` 单独触发 (避免本 commit 100+ 文件 mass diff)
-qbe/** text eol=lf
-# ⚠️ 上面那条 glob 把 qbe/qbe.exe 也圈进了「文本」,二进制被做换行转换 → 损坏。
-# 实测后果(2026-10-15):提交版 842,749 B 跑不了(Exec format error /
-#   「not compatible with the version of Windows you're running」),
-#   本地正常版 842,780 B 能跑,差 31 字节(= 被转换掉的 CR 数)。
-#   CI 卡在第 2 步 `make`(stage0 compile → system("qbe/qbe.exe ...") 失败),
-#   **后面所有门都跑不到** —— CI 是红的,而本地一切正常。
-# gitattributes 后面的规则覆盖前面的同属性规则,所以这条必须排在 `qbe/**` 之后。
-qbe/*.exe  binary
+# ⚠️ 2026-10-30:原 qbe/ 那两条规则(`qbe/** text eol=lf` + `qbe/*.exe binary`)
+# 已随 qbe/ 目录整体删除而移除。留个记录:那条 `qbe/** text eol=lf` glob 把
+# qbe/qbe.exe 也圈进了「文本」,二进制被做换行转换 → 损坏(实测差 31 字节,
+# 症状 "not compatible with the version of Windows you're running"),
+# 曾把 v4.0.6 的 release 卡死。**教训:glob 规则要精确到扩展名,别整目录套。**
 *.exe      binary
 *.dll      binary
 *.so       binary
