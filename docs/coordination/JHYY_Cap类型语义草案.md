@@ -451,6 +451,11 @@ B §10 主张 `ptr<phys>` 从 `Cap<frame>` 派生，**方向完全同意**，但
 | 5 | **`derive_dyn` 是否允许存在？** | 允许 = 有逃生舱但也有效力缺口；禁止 = 某些动态策略写不出来 |
 | **6** | **`Cap<T>` 8 字节 wire 里 `rights` 在第 5 还是第 6 字节？**（lang-spec/abi `rights@5` vs binary-format `rights@6`，见 §2.4） | **阻塞 `Cap<T>` 真 T 的第一步**（按类型拆字节）。建议以 lang-spec/abi 为准并修订 binary-format |
 
+> 📎 **2026-10-30:本表六条已给出设计稿** ⇒ [`JHYY_待拍板设计.md`](JHYY_待拍板设计.md)
+> （本表 1–6 对应该文 **D2 / D3 / D5 / D4 / D6 / D1**）。
+> 该文还补了三条本表没列的：**D7** revoke 同步性（**不阻塞** Cap 真 T）、
+> **D8** `ptr<phys>` 是否消耗 `Cap<Frame>`、**D11** 内核栈策略。
+
 ---
 
 ## §9 最小落地顺序（建议）

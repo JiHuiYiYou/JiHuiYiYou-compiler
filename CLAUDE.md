@@ -424,6 +424,7 @@ W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_
 | [`docs/coordination/JHYY_编译器全阶段方向与路线图.md`](docs/coordination/JHYY_编译器全阶段方向与路线图.md) | 编译器全阶段方向 + 21 个后端 pass 清单 + `.jhyynb` contract section 设计 | 规划编译器工作时 |
 | [`docs/coordination/JHYY_Cap类型语义草案.md`](docs/coordination/JHYY_Cap类型语义草案.md) | `Cap<T, Rights>` / `ptr<phys>` 派生 / 8 种内置 rights 的具体提案 | 做 capability 类型化时 |
 | [`docs/coordination/JHYY_设计自审_对照K框架.md`](docs/coordination/JHYY_设计自审_对照K框架.md) | 对上面四份的**批评与补漏清单**(真遗漏 vs 框架错配) | 排期前必读 —— 别把已知缺口重排一遍 |
+| [`docs/coordination/JHYY_待拍板设计.md`](docs/coordination/JHYY_待拍板设计.md) | **12 条未拍板设计的可选方案 + 建议**(D1..D12,含可核实事实基线 / 选项 / 产物) | 拍板时读 —— 别从零推 |
 | [`docs/abis/jhyy-lang-spec-v4.0.0.md` § 19](docs/abis/jhyy-lang-spec-v4.0.0.md) | Debug ABI(**🔒 per D41**;OS 侧旧镜像已删,此处是权威) | 做调试 / 可观测性时 |
 
 **冲突解决规则**(沿用):
