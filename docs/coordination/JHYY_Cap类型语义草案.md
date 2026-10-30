@@ -306,8 +306,24 @@ let root: Cap<Frame, RWG> = unsafe {
 | **Sema** | ① 8 项 rights 常量表 ② 类型等价加入 rights 掩码比较 ③ `derive` 的子集检查（位运算）④ `as` 转换表加禁止规则（整数→`ptr<phys>`）⑤ unsafe 块标注 | **中（核心工作量）** |
 | **Mangling** | `<Base>$<T1>$<T2>` 直接扩展——rights 作为第二个参数拼进去，天然确定性、可复现 | 低 |
 | **IL** | `Cap<T,R>` 是 8 字节标量（与 `l` 同承载），**建议不新增 IR 概念**，只在类型侧保留标记供后续 pass 消费 | 低 |
-| **后端** | 无特殊处理（8 字节标量走 `l`）；`ptr<io>` 需要**禁止重排/合并/投机**的 codegen 标记 | 中 |
+| **后端** | 无特殊处理（8 字节标量走 `l`）；`ptr<io>` 需要**禁止重排/合并/投机**的 codegen 标记 ⚠️ **与 v4.4 寄存器分配有硬接口** —— 见下 | 中 |
 | **链接 / `.jhyynb`** | cap_init 由 `#[cap_constructor]` 或顶层声明生成；`provenance_seed_off` 填充；contract section 输出 capability facts | 中 |
+
+### 5.0 ⚠️ `ptr<io>` 的 volatile 语义与 v4.4 寄存器分配有**硬接口**
+
+`ptr<io>` 要求「默认 volatile、不合并访问、禁止推测读」。而当前后端的 volatile 实现:
+
+| 事实 | 位置 |
+|---|---|
+| 后端**能**识别 volatile(`tok.qbe_type == QBE_VOLATILE_MARKER()` == -1) | `codegen_amd64_emit_call.jhyy:2742` |
+| 但 `emit_volatile` **只发注释、什么都不做** —— 没有任何拒绝机制 | 同上 |
+| volatile 标记在 IL 层**以文本形式存在**(`volatile` 关键字)⇒ **寄存器分配器(扫 IL 文本)能看见它** | `codegen_amd64_lexer.jhyy:2081` |
+| 而 v4.4.0 阶段一的资格判据(同基本块 + 无 call + 整数类型)**没有 volatile 这一维** | `codegen_amd64_rcache.jhyy` |
+
+⇒ **v4.4 阶段二一旦把 temp 放进寄存器,volatile load 会被缓存 ⇒ MMIO 读静默失效。**
+⇒ 修法形状与阶段一的安全网相同:**显式排除 volatile temp + 响亮失败**。
+⇒ **本条必须在 `ptr<io>` 落地之前完成** —— 否则 `ptr<io>` 的「不合并/不投机」承诺
+在语言层写下来了,后端却给不了。
 
 ### 5.1 capability facts schema（写进 `.jhyynb` contract section）
 

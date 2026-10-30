@@ -26,7 +26,7 @@ IPC dispatch 表每表项 16 B，包含 `msg_tag:u32`、`handler_fn_off:u32`、`
 
 region_table 每表项 24 B，region kind 为 0=anon_arena、1=mmap、2=raw_mmio、3=unsafe_share、4=cap_namespace、5=kernel_shared，rights 包括 R/W/X/share，并带 growable、cow、pinned、lazy_commit 等 flags[3]。这是一份“区域声明”，不是完整 VM 对象模型：它不规定页粒度、颜色、cache policy、NUMA 节点、映射计数、evict 顺序，也不携带 lifetime/borrow checker 数据。规范还明确声明 Region Table 不携带 borrow checker 数据，理由之一“Kernel 不解决语言问题”[3]。这一条不是拒绝语言了解内核，而是拒绝让运行时承担语言语义。
 
-**ABI 的当前状态说明语言已经跨过“能表达能力”，但尚未跨过“能在内核中安全执行能力代码”。** 四个目标 amd64_win、amd64_win_freestanding、amd64_sysv、amd64_sysv_freestanding 均已在自托管后端覆盖[2]；`.jhyynb` 的 section 要求 4 KiB 对齐[3]，与 x86-64 页尺寸天然一致。但全 spill 策略只保存 RBP，自举编译器最大单函数帧达到 234080 B（约 229 KiB），目前依靠 `-Wl,--stack,67108864` 补偿[2]。这直接意味着内核栈模型不能按 C 风格的 8–16 KiB 默认值设计：229 KiB 已超经典 8 KiB 栈，未来最坏栈深度必须由编译器证明，而不能在 ABI 手册里继续作为 warning 存在。
+**ABI 的当前状态说明语言已经跨过“能表达能力”，但尚未跨过“能在内核中安全执行能力代码”。** 四个目标 amd64_win、amd64_win_freestanding、amd64_sysv、amd64_sysv_freestanding 均已在自托管后端覆盖[2]；`.jhyynb` 的 section 要求 4 KiB 对齐[3]，与 x86-64 页尺寸天然一致。但全 spill 策略只保存 RBP，自举编译器最大单函数帧达到 **349232 B（约 341 KiB）**（⚠️ v4.2.1 之后实测；此前的 234080 B ≈ 229 KiB 已作废，见脚注[2]），目前依靠 `-Wl,--stack,67108864` 补偿[2]。这直接意味着内核栈模型不能按 C 风格的 8–16 KiB 默认值设计：341 KiB 已远超经典 8 KiB 栈，未来最坏栈深度必须由编译器证明，而不能在 ABI 手册里继续作为 warning 存在。
 
 规范摘录数据（可下载：[规范摘录数据 CSV](/data/workspace/dr:JHYY_OS_内核模型与语言需求/规范摘录数据.csv)）将上述事实拆成可回溯单元格。表中所有数字均来自三份规范，不能外推为运行时性能或内存预算。
 
@@ -115,7 +115,7 @@ region_table 每表项 24 B，region kind 为 0=anon_arena、1=mmap、2=raw_mmio
 | 页表安装、TLB、ASID、中断屏蔽 | 运行期 | 硬件与全局状态 |
 | 栈用量上限、irq_ctx、锁序 | 编译期分析 + 链接期断言 | 属于单个 binary 的控制流事实 |
 
-**栈深度必须由“可关闭警告”升级为可验证属性。** 229 KiB 最坏帧已现实存在[2]，而规范规定栈槽只保证 8 字节对齐、没有 16 字节保证[2]。这会同时影响 SIMD 参数、IPC stub、汇编接口和内核 trap frame。建议每个函数输出 `max_frame`、`max_call_depth` 与 `requires_alignment`；每个线程创建点校验 `stack_reservation >= frame_of_callers + redzone`。对于 `#[naked]`、`asm!` 和 interrupt entry，汇编作者必须手工给出栈预算，编译器不得把它们视为零。否则 ABI 可以编译通过，却在内核递归 IPC、页错误路径或中断嵌套时破坏相邻栈。
+**栈深度必须由“可关闭警告”升级为可验证属性。** 341 KiB 最坏帧已现实存在[2]，而规范规定栈槽只保证 8 字节对齐、没有 16 字节保证[2]。这会同时影响 SIMD 参数、IPC stub、汇编接口和内核 trap frame。建议每个函数输出 `max_frame`、`max_call_depth` 与 `requires_alignment`；每个线程创建点校验 `stack_reservation >= frame_of_callers + redzone`。对于 `#[naked]`、`asm!` 和 interrupt entry，汇编作者必须手工给出栈预算，编译器不得把它们视为零。否则 ABI 可以编译通过，却在内核递归 IPC、页错误路径或中断嵌套时破坏相邻栈。
 
 **`.jhyynb` 缺少第四个契约 section。** cap_init、ipc_dispatch、region_table 回答“拥有什么、接收什么、访问哪里”；它们没有回答“执行时允许做什么”。建议增加 `contract` section，至少包含 `max_kernel_stack`、`may_sleep`、`irq_ctx`、`preempt_disabled`、`holds(L)`、`may_alloc`、IPC handler version、panic category 与 WCET class。若不想扩大正式加载格式，可把它放在 `debug_group` 的子节，但必须区分两类子节：一类是工具和内核必须验证的 contract metadata，另一类是可选调试信息。不能给调试信息内核加载语义，也不能给安全契约“debug”名称。
 
@@ -159,7 +159,7 @@ region_table 每表项 24 B，region kind 为 0=anon_arena、1=mmap、2=raw_mmio
 | 5 | `ptr<phys>` 从 `Cap<frame>` 派生 | frame cap 才是物理页的授权真源 | 物理地址可绕过 cap；DMA/显存缺少审计 | 有 frame/page/framebuffer tag，无派生规则 | 编译期 |
 | 6 | `#[ipc_handler]` 全契约检查 | 内核原地改写 cap_offsets[3] | handler 与 message struct 错配会破坏 CNode | 仅有属性名 | 编译期 |
 | 7 | capability 生命周期/销毁安全 | 撤销对象、CNode 与映射需要无悬挂 cap | slot reuse 导致 UAF；revoke 无法定位后代 | 未记载撤销结构 | 编译期+运行期 |
-| 8 | 栈深度编译期断言 | 229 KiB 最大帧已是现实风险[2] | 内核递归、中断或 IPC 破坏栈 | 仅通过链接器补偿 | 编译期 |
+| 8 | 栈深度编译期断言 | 341 KiB 最大帧已是现实风险[2] | 内核递归、中断或 IPC 破坏栈 | 仅通过链接器补偿 | 编译期 |
 | 9 | `may_sleep`/`irq_ctx`/`preempt_disabled` 效果 | sleep、调度与中断返回由内核控制 | 持锁 sleep、中断中非法 sleep | 效果系统不存在[1] | 编译期 |
 | 10 | `holds(L)`/`may_alloc` | 锁序与内存分配会影响 deadlock/reclaim | 分配器递归持锁；PF 路径 OOM | 无锁序/分配效果 | 编译期分析 |
 | 11 | RCU/PerCpu 语言原语 | 读侧必须关联 grace period 与 CPU 上下文 | 延后释放被提前回收；PerCpu 指针跨 context 失效 | 原语不存在[1] | 运行期+编译期 token |
@@ -177,7 +177,7 @@ region_table 每表项 24 B，region kind 为 0=anon_arena、1=mmap、2=raw_mmio
 
 **前四项优先级高到足以阻塞任何 GUI 或用户服务原型。** 若 `T` 与 rights 不进类型，cap_init 的 11 类对象无法映射到类型系统；若 `ptr<phys>` 不从 `Cap<frame>` 派生，region_table 的 raw_mmio 与 framebuffer 也不能形成授权链；若 handler 契约不检查，IPC dispatch 的原地 cap 改写会直接破坏 CSpace。这四项缺失时，即使 kernel.efi 能启动，也无法证明 user-space 不是靠巧合工作。
 
-**第 8 项栈深度与第 14 项 interrupt 契约是 ABI 正确性的前提。** 229 KiB 单函数帧意味着若内核仍按“每个函数很少分配大对象”的直觉实现，最坏路径将未知。编译器不应只警告，而应输出 per-function 帧上界、per-call-edge 深度和 `#[naked]` 手工预算；链接器拒绝不能满足保留栈的 binary。若暂时无法全程序分析，至少要先禁止递归、动态调用与巨型栈帧进入 `#[naked]`/interrupt path。
+**第 8 项栈深度与第 14 项 interrupt 契约是 ABI 正确性的前提。** 341 KiB 单函数帧意味着若内核仍按“每个函数很少分配大对象”的直觉实现，最坏路径将未知。编译器不应只警告，而应输出 per-function 帧上界、per-call-edge 深度和 `#[naked]` 手工预算；链接器拒绝不能满足保留栈的 binary。若暂时无法全程序分析，至少要先禁止递归、动态调用与巨型栈帧进入 `#[naked]`/interrupt path。
 
 ## 十、`ptr<phys>` 从 `Cap<frame>` 派生的具体形态
 
@@ -273,7 +273,7 @@ fn map_into<'cap>(space: &mut Cap<AddressSpace, W>,
 | v0.0.1 capability 对象表 | 仅知道 11 个 type_tag 值 | page/frame/framebuffer/page 的语义区分、是否增加 kernel-internal 对象 |
 | capability 版本与 provenance | cap_init 有 provenance_seed_off[3]，无规则 | slot reuse、派生 proof、跨进程与持久化是否安全 |
 | region_table 的 owner/生命周期 | 只有 kind、rights、flags | kernel_shared/unsafe_share/cap_namespace 的引用与 revoke 语义 |
-| 内核栈策略 | 只有用户态编译器 229 KiB 最大帧[2] | 内核栈大小、per-CPU 备份栈、中断栈、递归深度与栈溢出处理 |
+| 内核栈策略 | 只有用户态编译器 341 KiB 最大帧[2] | 内核栈大小、per-CPU 备份栈、中断栈、递归深度与栈溢出处理 |
 | M3 message struct 与 cap policy | 只有 IPC dispatch 表与 D16 wire[3] | handler 版本、timeout、cap grant/return、in-flight 消息所有权 |
 | panic/fault 模型 | 规范无 panic/unwind[1] | oops 分类、thread terminate、namespace revoke、是否支持 kernel continuation |
 | GUI 完整对象模型 | 只有 compositor/surface/seat/buffer/focus 等 tag | 显示 lease、format/modifier、transaction、presentation feedback、input focus |

@@ -201,7 +201,7 @@ alloc_pool_size = 8192 + per_fn_alloc
 - `-O0`(默认) / `-O1` 开关 —— **CLI 现在完全没有 `-O`**。
   默认保持 `-O0` ⇒ 现有 byte-equal 门全部保持绿,零风险。
 - IR pass 框架 + 常量折叠 / 代数化简 / DCE / 不可达代码消除
-  = backlog 第 8 项按新设计重做(原设计假设「后端已有 peephole 兜底」,已过时)
+  = 原 backlog 第 8 项按新设计重做(原 backlog 文档已删,见 § 四)(原设计假设「后端已有 peephole 兜底」,已过时)
 
 **gate**: `-O1` 与 `-O0` 语义等价(同一组用例输出逐字相同);
 优化后 `.s` 长度 ≤ 不优化 +5%;**`-O0` 必须仍 byte-equal**。
@@ -309,6 +309,26 @@ v4.4 的寄存器分配器会**同时**改寄存器名、栈槽编号、帧布�
 - 新门:「开了寄存器分配后,产物里的访存指令数显著下降」
   (用 `runtime_perf.py` 已有的静态指标 `mem` 计数)
 - 分配了寄存器但走槽位路径 ⇒ 编译失败(上面那条)
+
+#### v4.4.0 阶段二 —— emit 层消费寄存器(**下一个动作**)
+
+阶段一(2026-10-30 完成)只做**基础设施 + 安全网**,产物逐字节不变;
+**阶段二才让 emit 层真的按 temp id 取位置**(`emit_mov_temp_to_reg` /
+`emit_mov_reg_to_temp` 改成按 temp 取位置,操作数读取改走 `emit_operand_temp`)。
+**默认仍关**,靠 flag 开。
+
+**三条硬约束必须与阶段二同期落地** —— 前两条来自 OS 线的审核(见
+[`docs/plans/v4/version-schedule.md`](version-schedule.md) § 五.5),第三条是阶段一的延续:
+
+| # | 约束 | 为什么必须同期 | 形状 |
+|---|---|---|---|
+| 1 | **排除 volatile temp** | `emit_volatile`(`codegen_amd64_emit_call.jhyy:2742`)**只发注释、什么都不做**;后端**能**识别 volatile(`qbe_type == -1`)却**没有拒绝机制**;阶段一的资格判据**没有 volatile 这一维** ⇒ 寄存器化会让 volatile load 被缓存 ⇒ **MMIO 读静默失效** | 显式排除 + 响亮失败 |
+| 2 | **禁 XMM 溢出 / 禁 red zone** | `docs/coordination/JHYY_设计自审_对照K框架.md §3.1` 判定这两个约束「必须与寄存器分配**同一期**落地」;⚠️ 而 `决策总纲 §4` 的 P2 任务表漏了这条 ⇒ **总纲比自审宽松**,已按自审判定补入 | 持久断言(编译期上下文属性) |
+| 3 | **槽位访问响亮失败** | 阶段一已有:分配了寄存器却走槽位路径 ⇒ 编译失败。阶段二要保证**所有**槽位访问点都走收口 helper ⇒ 漏改的调用点当场被抓 | 沿用阶段一 |
+
+> ⚠️ **约束 1 与 `Cap` 草案的 `ptr<io>` 是同一件事**:`ptr<io>` 要求
+> 「默认 volatile、不合并访问、禁止推测读」⇒ 语言的承诺要靠后端这条约束兑现
+> ⇒ **必须在 `ptr<io>` 落地之前做完**,否则语言层写了承诺、后端给不了。
 
 ### v4.5 —— M5 Part 3(0-C 闭环)
 
@@ -433,16 +453,30 @@ eligible **58070 = 58070**、池满 **1345 = 1345**、分配 56725 vs 56719(差 
 
 ---
 
-## 四、与 12 项 backlog 的关系
+## 四、与那 12 项未启动工作的关系
 
-| backlog 项 | 处置 |
-|---|---|
-| 1 M5 工具链闭环 | Part 1/2 已完成;**Part 3 = v4.5**;Part 4 并入 v4.5 |
-| 8 基本优化 pass | **重做** = v4.3(设计前提已过时:原方案假设「后端有 peephole 兜底」) |
-| 2/3/4/5/6/7/9/10/11/12 | 保持 backlog 原范围,**排到 v4.6+** |
+> ⚠️ **2026-10-30:原 `docs/plans/v4/backlog.md` 已删除。** 那份文档把这 12 项
+> (M5 / async / lifetime / closure / const generic / trait / 错误恢复 / 优化 /
+> 包管理 / HKT / 并发 cap / `.jhyynb`)连成一张以 M5 为根的依赖图,而**这张图
+> 被它自己标注为过期**(M5 只剩 Part 3 且 = v4.5;第 8 项降级到 v4.4 之后),
+> 验收基线还停在 163/163(现 257)⇒ **它是一份会误导未来规划的僵尸排期表**。
+>
+> **那 12 项没丢** —— 清单与排序现由
+> [`version-schedule.md`](version-schedule.md) § 四承担;详细 scope 在 git 历史,
+> 启动某项时再翻。
 
-⇒ backlog 的依赖图(以 M5 为根)**已经过期**:M5 只剩 Part 3,且它是 v4.5。
-`docs/plans/v4/backlog.md` 需同步。
+| 原 backlog 项 | 处置 | 现在在哪 |
+|---|---|---|
+| 1 M5 工具链闭环 | Part 1/2 已完成;**Part 3 = v4.5**;Part 4 并入 v4.5 | 本文 § 三 v4.5 |
+| 8 基本优化 pass | **重做** = v4.4.5+(设计前提已过时:原方案假设「后端有 peephole 兜底」) | 本文 § 三之二 |
+| 2/3/4/5/6/7/9/10/11/12 | 范围不变,**排到 v4.6+** | `version-schedule.md` § 四 |
+
+⇒ **规划面收敛为三份**:`self-backend-perf-plan.md`(当前做什么)·
+`version-schedule.md`(第几个版本做什么)· `docs/coordination/`(OS 线,与本线正交)。
+
+⚠️ **2026-10-30:OS 线已并入版本轴**(`version-schedule.md` § 五「OS 线接入版本轴」)
+—— 两套轴(P0–P4.5 与 v4.x)此前**没有映射**,而 P2 的「linear scan 寄存器分配」
+**就是本线的 v4.4**。⇒ § 三的三个硬接口见 `version-schedule.md` § 五.5。
 
 ---
 
@@ -473,4 +507,4 @@ eligible **58070 = 58070**、池满 **1345 = 1345**、分配 56725 vs 56719(差 
 - 测量脚本:`scripts/dev/bench/runtime_perf.py`
 - 旧报告(部分结论已订正):[`JHYY自研后端pass查缺报告.md`](JHYY自研后端pass查缺报告.md)
 - 排期表(版本号权威):[`version-schedule.md`](version-schedule.md)
-- backlog:[`backlog.md`](backlog.md)
+- 未启动工作的清单:[`version-schedule.md`](version-schedule.md) § 四

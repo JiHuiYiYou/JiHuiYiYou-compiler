@@ -247,16 +247,16 @@ W-105.1 / W-118)。补掉前三条的排期见
 
 ## ⚠️ 决策点:用户政策与既有计划冲突
 
-W-105 的修复,[`backlog.md` § 3](backlog.md)(原 `v4.3.0-plan.md`)已经规划过了 ——
+W-105 的修复,v4.6+ 语言特性链的 lifetime 项(Polonius)已经规划过了 ——
 **Polonius borrow check,新模块 `compiler/src0/borrow_check.jhyy` 约 600 行**。
 那不是一个 sprint 收尾,是一个完整算法实现。
 
-于是 2026-10-10 的政策(「ACTIVE 必须清零,大不了 v4 不发」)跟 backlog 里的
+于是 2026-10-10 的政策(「ACTIVE 必须清零,大不了 v4 不发」)跟排期里的
 既有排期直接撞车。三个选项:
 
 | 选项 | 做法 | 后果 |
 |------|------|------|
-| **A. 先做最小独占检查**(推荐) | 现在只做「同一作用域内 `&mut` 互斥 + `&mut`/`&` 互斥」的局部检查(~150 行),完整 Polonius 留 backlog | 双写这个**最危险的** case 当场堵住,政策可满足;Polonius 仍是 feature 项而非 blocker |
+| **A. 先做最小独占检查**(推荐) | 现在只做「同一作用域内 `&mut` 互斥 + `&mut`/`&` 互斥」的局部检查(~150 行),完整 Polonius 留 v4.6+ 语言特性链 | 双写这个**最危险的** case 当场堵住,政策可满足;Polonius 仍是 feature 项而非 blocker |
 | B. 直接上 Polonius | 把 v4.3.0 提到 v4 final 之前 | v4 final 被一个 600 行算法实现无限期挂起 |
 | C. W-105 降级为 DEFERRED | 台账改判,承认这是有意的 ship-gate 决策 | 政策实质上被自己放宽;但如实反映了 2026-08 当时的设计意图 |
 
@@ -730,15 +730,15 @@ workarounds.md 索引           → ACTIVE 0 / DEFERRED 0
 
 ## Out of scope
 
-- 完整 Polonius / NLL / lifetime 子类型 / reborrow(留 backlog 的 lifetime 项)
-- 多架构 Cap<T> ABI(backlog 并发 cap 项)
-- `.jhyynb` binary format(backlog)
-- 其余 backlog 项 —— 见 [`backlog.md`](backlog.md)
+- 完整 Polonius / NLL / lifetime 子类型 / reborrow(留 v4.6+ 语言特性链的 lifetime 项)
+- 多架构 Cap<T> ABI(留 v4.6+ 的并发 cap 项)
+- `.jhyynb` binary format(留 v4.6+)
+- 其余未启动项 —— 见 [`version-schedule.md`](version-schedule.md) § 四
 
 ## Cross-ref
 
 - 台账:`docs/internal/workarounds.md` W-103..W-107
-- 既有排期冲突:[`backlog.md` § 3](backlog.md)(Polonius)—— 本文档决策点 B/C 选项所指
+- 既有排期冲突:v4.6+ 语言特性链的 lifetime 项(Polonius)—— 本文档决策点 B/C 选项所指
 - 门修复:commit `4a117a1`
 - 台账登记 + 索引修复:commit `d2f5361`
 - memory:`feedback_fix_evaluation_rule` / `feedback_ci_gate_must_exercise_path` /

@@ -133,7 +133,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/verify-too
 - 工具链与分发全 Windows:CI `runs-on: windows-latest` + `shell: msys2 {0}`;
   `release.yml` 同;installer 是 WiX(MSI/EXE)+ VSCode 扩展。
 
-⇒ **别把「宿主能不能是 Linux」当 bug 挖** —— `docs/plans/v4/backlog.md` 里
+⇒ **别把「宿主能不能是 Linux」当 bug 挖** —— 未启动工作的清单
+([`../plans/v4/version-schedule.md`](../plans/v4/version-schedule.md) § 四)里
 **没有**这一项,那是范围外,不是待办。
 
 **目标(target)侧不受此限:** `--target=amd64_sysv` 产 Linux ELF —— .s 在 Windows

@@ -69,21 +69,29 @@ v3.x 是语言特性扩展轴,服务于 [jhyy_OS](../../../jhyy_OS/) 的 OS-requ
 - [`v3.3.0-plan.md`](v3.3.0-plan.md) — 3h 浮点类型(f32/f64,D28 硬前置 v3.2.5;v3.x 关键路径最后 1 个)
 
 ### 抽象 feature / v3.x 中/末 / M5 → v4.x(per 2026-09-06 user 决定)
-非 OS-required 抽象 feature + M5 全推到 **v4.x 串行轴**:
-- 3k 错误恢复 → [`../v4/backlog.md § 7`](../v4/backlog.md)
-- 3m 基本优化 → [`../v4/backlog.md § 8`](../v4/backlog.md)
-- 3n 包管理器 → [`../v4/backlog.md § 9`](../v4/backlog.md)
-- async/await → [`../v4/backlog.md § 2`](../v4/backlog.md)
-- lifetime 完整版 + Polonius → [`../v4/backlog.md § 3`](../v4/backlog.md)
-- closure 增强 (move/borrow capture/generic/trait object)→ [`../v4/backlog.md § 4`](../v4/backlog.md)
-- const generic → [`../v4/backlog.md § 5`](../v4/backlog.md)
-- trait objects (dyn Trait)→ [`../v4/backlog.md § 6`](../v4/backlog.md)
-- HKT + specialization → [`../v4/backlog.md § 10`](../v4/backlog.md)
-- 并发 cap + 完整 memory model + 多架构 ABI → [`../v4/backlog.md § 11`](../v4/backlog.md)
-- **M5**(删 `src/*.c` + untrack QBE + 删 `runtime.c`)→ [`../v4/backlog.md § 1`](../v4/backlog.md)
+非 OS-required 抽象 feature + M5 全推到 **v4.x 串行轴**。
+
+> ⚠️ **2026-10-30:原 `../v4/backlog.md` 已删除** —— 那份文档把这 11 项连成一张以 M5
+> 为根的依赖图,而**这张图被它自己标注为过期**(M5 只剩 Part 3 且 = v4.5;优化 pass
+> 降级到 v4.4 之后),验收基线还停在 163/163(现 257)⇒ **它是一份会误导未来规划的
+> 僵尸排期表**。⇒ **这 11 项的清单现由
+> [`../v4/version-schedule.md`](../v4/version-schedule.md) § 四承担**;详细 scope
+> 在 git 历史,启动某项时再翻。**未启动的工作不再预先占版本号。**
+
+- 3k 错误恢复 → v4.6+
+- 3m 基本优化 → **v4.4.5+**(已降级到 v4.4 之后;实测性能价值 ≈ 0)
+- 3n 包管理器 → v4.6+
+- async/await → v4.6+
+- lifetime 完整版 + Polonius → v4.6+(语言特性链起点)
+- closure 增强 (move/borrow capture/generic/trait object)→ v4.6+
+- const generic → v4.6+
+- trait objects (dyn Trait)→ v4.6+
+- HKT + specialization → v4.6+
+- 并发 cap + 完整 memory model + 多架构 ABI → v4.6+
+- **M5**(删 `src/*.c` + untrack QBE + 删 `runtime.c`)→ Part 1/2 **已完成**;**Part 3 = v4.5**
 
 ### v4.x 合并触发
-- 触发前置:V2-C v2.8.0 ship + v3.x 全关键路径 ship + user 决定 merge 时机 → [`../v4/backlog.md § 0`](../v4/backlog.md)
+- 触发前置:V2-C v2.8.0 ship + v3.x 全关键路径 ship + user 决定 merge 时机 → [`../v4/README.md`](../v4/README.md)
 - v2+v3 merge 后**主版本轴串行**,v4.x 全 plan 见 [`../v4/README.md`](../v4/README.md)
 
 ## 命名约定

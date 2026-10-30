@@ -2034,10 +2034,15 @@ PATH 里没有 MSYS2）：`jhyy compile` → `hello.exe` + `EXIT=42` ✓。
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一
-> [`docs/plans/v4/backlog.md`](../../plans/v4/backlog.md),**不再以版本号命名**
+> `docs/plans/v4/backlog.md`,**不再以版本号命名**
 > —— 版本号在启动时才分配。已 ship 的 `v4.0.x` 计划保留原名作审计轨迹。
+>
+> ⚠️ **2026-10-30:`docs/plans/v4/backlog.md` 已删除** —— 它依赖图被它自己标注为
+> 过期(僵尸排期表)。这 12 项的清单现由
+> [`docs/plans/v4/version-schedule.md`](../../plans/v4/version-schedule.md) § 四承担;
+> 本节保留作审计轨迹。
 
-Per [`docs/plans/v4/backlog.md`](../../plans/v4/backlog.md) (原 12 files: v4.1.0 → v4.12.0):
+Per `docs/plans/v4/backlog.md` (已删除,2026-10-30)(原 12 files: v4.1.0 → v4.12.0):
 
 | Sprint | Intent |
 |---|---|

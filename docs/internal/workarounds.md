@@ -7589,7 +7589,7 @@ regress 用例。
 ## W-105: `&mut` 独占性不检查 — (a)「`&mut` 能用」+ (b)最小独占检查,均已修
 
 **状态:** RESOLVED closed 2026-10-20 (v4.0.18) — (a)「`&mut` 真的能用」+ (b)最小独占检查
-(同作用域内双 `&mut` 互斥)均已真修;完整 NLL/Polonius 留 backlog v4.3.0
+(同作用域内双 `&mut` 互斥)均已真修;完整 NLL/Polonius 留 v4.6+ 语言特性链
 **Backfilled:** 2026-10-15 (v3.1.0 V3-C 3g ship-gate stub)
 **Filed-by:** audit-fanout-2026-10-15
 **日期:** 2026-08 前后 (v3.1.0 ship) → 至今
@@ -7705,7 +7705,7 @@ local_t = global_t - base_t     ← 查表失败时退化成「全局 temp id」
 
 - 词法作用域,不是 NLL —— borrow 提前结束的情况会**误报**:
   `let y = &mut x; *y = 1; let z = &mut x;` 会被拒(NLL 下这是合法的)。
-  真正的 NLL/Polonius 在 backlog 的 **v4.3.0**。
+  真正的 NLL/Polonius 在 **v4.6+ 语言特性链**的 lifetime 项。
 - 跨函数 borrow / lifetime 子类型 / variance 不检测(spec §4.1 逐条列明)。
 
 **验收:**
@@ -7727,7 +7727,7 @@ borrow_mut_write.jhyy(单个 &mut 写内存):仍 EXIT=5 ✓
 存在,但它测的是 borrow 的**表面可解析性**,不是冲突检测。
 
 **失效条件:** ~~实现 NLL / Polonius 借用分析~~ → **2026-10-20 已做「最小独占检查」**
-(同作用域内双 `&mut` 互斥)。**完整** NLL/Polonius 仍在 backlog 的 v4.3.0
+(同作用域内双 `&mut` 互斥)。**完整** NLL/Polonius 仍在 v4.6+ 语言特性链的 lifetime 项
 (那里才有词法→NLL 的精度、跨函数 borrow、lifetime 子类型)。
 
 **引用:**
@@ -9331,7 +9331,7 @@ __closure_00000:
 检查** ⇒ 编译器给捕获了外层变量的闭包**生成坏代码** ✗。
 
 **修法(不实现捕获,改成明确报错):** 闭包捕获在 v3.2.1 的 MVP 范围里
-**明确排除** ⇒ 实现它是 feature 工作(backlog),不属于「清零 ACTIVE」。
+**明确排除** ⇒ 实现它是 feature 工作(v4.6+ 语言特性链),不属于「清零 ACTIVE」。
 本轮做的是**把「静默生成坏代码」换成「编译期明确报错」**:
 
 - `SemaContext` 加 `in_closure` 标志(闭包体检查期间为 1)

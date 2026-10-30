@@ -341,9 +341,20 @@ E0801: 函数指针类型不兼容
 | `stack` | 本地帧上界/调用边 | stack analysis |
 | `naked` | 手写栈预算、clobber、preserve | asm verifier |
 
-**目标 IL 不应直接升级为完整 SSA，而应先成为“带类型的控制流图 + 显式 effect/region metadata”。** SSA 利于全局 value numbering、GVN、LICM、PRE，但要求精确的 dominance、phi、内存模型和寄存器压力模型；当前全 spill、池化栈槽与多目标 ABI 尚未稳定。Koka 的 IR 包含类型、效果、堆与谓词注释，显示高层信息不必被完全擦除[11]；JHYY 可借鉴“保留类型与效果”，而不是一步实现通用 SSA。
+**目标 IL 应先成为“带类型的控制流图 + 显式 effect/region metadata”。** SSA 利于全局 value numbering、GVN、LICM、PRE，但要求精确的 dominance、phi、内存模型和寄存器压力模型；当前全 spill、池化栈槽与多目标 ABI 尚未稳定。Koka 的 IR 包含类型、效果、堆与谓词注释，显示高层信息不必被完全擦除[11]；JHYY 可借鉴“保留类型与效果”。
 
-**两阶段升级更合适。** 第一阶段给现有基本块 IR 增加 typed value、def/use、dominance、effect row 和栈事实，寄存器仍使用物理位置或临时号；第二阶段在机器无关优化前做 SSA construction，且允许 `Cap<T>`、效果与栈槽不进入 SSA 值集，仅作为 instruction/block annotation。这样避免用 SSA phi 表达授权，也不会让效果集合成为每个 use 的显式数据。
+> ⚠️ **2026-10-30 订正（前半句基于过时前提）**：本段原文写「**目标 IL 不应直接升级为完整 SSA**」
+> —— 但事实是 **IL 已经是 SSA**：前端产出的就是 `%tN = add %t2, %t3` 形式，
+> 且 `v4.4.0` 的寄存器分配器（`codegen_amd64_rcache.jhyy`）正是在 SSA temp 上做的。
+> 另一条独立证据：前端**已在源码层算掉常量表达式、已清掉死代码** ⇒ IR 层优化三项
+> （常量折叠 / 代数化简 / DCE）加起来只有语料 B 的 **1.8%**。
+> ⇒ **「缺 SSA」这个前提是错的**。真正缺的是 **寄存器分配 + dominance/phi**
+> （后者是 `v4.4.2` 的内容）。
+
+**两阶段升级更合适** —— ⚠️ **2026-10-30 订正:第一阶段的 SSA construction 已经完成**（前端一直产 SSA）。
+当前真正要补的是第一阶段的其余部分:typed value、def/use、dominance、effect row 和栈事实，
+以及第二阶段的机器无关优化框架。SSA 已有的前提下，允许 `Cap<T>`、效果与栈槽不进入 SSA 值集，
+仅作为 instruction/block annotation —— 这样避免用 SSA phi 表达授权，也不会让效果集合成为每个 use 的显式数据。
 
 ### 5.3 IL/中端：先分析正确性，再谈优化
 
@@ -361,19 +372,19 @@ E0801: 函数指针类型不兼容
 
 | Pass | 输入 IR | 输出/动作 | 依赖前端信息 | 拦住 OS 需求 | 复杂度 | 可增量 |
 |---|---|---|---|---|---:|---|
-| `ParamTypeChecker` | AST/HIR | 实参/extern 形状错误 | 完整签名 | 2 | 中 | 是 |
+| `ParamTypeChecker` | AST/HIR | 实参/extern 形状错误 | 完整签名 | 2 | 中 | 是 | **📋 已排 v4.6(OS-1)** —— 2026-10-30 实测:实参**类型与个数**均不检查 |
 | `BoolNormalization` | HIR/IL | 规范化 0/1 并报警来源 | 类型、控制流 | 已知 u8/&& 风险 | 低 | 是 |
 | `TlsStageAllocator` | 驱动层 | 每编译唯一 temp path | 无 | P0 并发 | 低 | 是 |
 | `CapTypeResolver` | HIR | `Cap<T,R>` 节点与子集约束 | `T`、`rights` 参数 | 1,2,3 | 中 | 是 |
 | `AddressSpaceChecker` | typed IR | `ptr<space>` 构造/解引用图 | cap origin、space kind | 4,5 | 中 | 是 |
-| `StackBoundsAnalysis` | CFG/IL | `local_max`、`callee_max`、递归标记 | 调用图、asm budget | 8 | 中 | 函数级 |
+| `StackBoundsAnalysis` | CFG/IL | `local_max`、`callee_max`、递归标记 | 调用图、asm budget | 8 | 中 | 函数级 | **📋 已排 v4.7(OS-2)** —— 依赖 v4.4 把帧压下来才量得准 |
 | `EffectPropagation` | CFG | `may_sleep/irq/preempt/alloc` | 函数效果、上下文 | 9,10 | 中 | 是 |
 | `LockOrderBuilder` | CFG | 有序类、边、强依赖图 | `LockClass`、acquire/release | 19 | 高 | 调用图级 |
 | `IpcContractChecker` | HIR/IL | tag/handler/layout/cap_offsets | handler、message struct | 6,16 | 高 | 函数级 |
 | `NakedInterruptChecker` | IL/asm | 栈预算、clobber、preserve | `#[naked]` 契约 | 14,22 | 高 | 是 |
 | `LayoutFingerprinter` | typed IL | size/align/hash/diff report | 字段与属性 | 15 | 低 | 是 |
 | `CapOffsetsBitmap` | IL/asm emission | slot bitmap、type/rights allowlist | cap 字段、handler | 6,16 | 中 | 函数级 |
-| `LinearScanRegAlloc` | SSA/CFG | 分配、spill、callee-save | 栈上界、ABI class | 8 | 高 | 函数级 |
+| `LinearScanRegAlloc` | SSA/CFG | 分配、spill、callee-save | 栈上界、ABI class | 8 | 高 | 函数级 | **🔄 v4.4.0 阶段一已落地**(受限线性扫描:同基本块 + 无 call + 整数类型;5 个 callee-saved GPR;池满退化成栈槽);**阶段二 = emit 层消费寄存器** |
 | `AsmClosureInliner` | IL | inline 决策、带上下文 clone | `fn` 类型、块/捕获 | 热路径 | 中 | 是 |
 | `KasanShadow` | IL | load/store 插桩与红区 | address space、unsafe 边界 | 安全测试 | 高 | 函数级 |
 | `KmsanUninit` | SSA IL | 未初始化来源传播 | def/use | 安全测试 | 高 | 函数级 |

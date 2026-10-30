@@ -73,7 +73,7 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 | 了解项目现在到哪、有什么限制 | 顶部 § 当前/目标 → [`workarounds.md`](docs/internal/workarounds.md)（当前限制）+ [`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md)（最新 ship） |
 | 想看 v0.x（C 编译器）整体还有什么没完成 | [`v0.x-c-compiler-roadmap.md`](docs/plans/roadmap/v0.x-c-compiler-roadmap.md)（已 frozen） |
 | 知道下一步做什么 | [`version-schedule.md`](docs/plans/v4/version-schedule.md)(**版本轴排期,入口在这**)→ 当前主线 [`self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)
-| 起 v4.x 新 sprint | [`self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)(v4.2 起的主线)→ 其余未启动工作看 [`backlog.md`](docs/plans/v4/backlog.md) |
+| 起 v4.x 新 sprint | [`self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)(v4.2 起的主线)→ 未启动工作的清单见 [`version-schedule.md`](docs/plans/v4/version-schedule.md) § 四 + **§ 五(OS 线接入版本轴)** |
 | 改编译器 / 排 bug | [`architecture.md`](docs/internal/architecture.md) 看模块边界 → [`build.md`](docs/internal/build.md) 看构建 + 调试坑 |
 | 改语言规范 / ABI | [`jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) / [`jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) |
 | 查 v2/v3 历史决策 | [`docs/archive/v2-v3/`](docs/archive/v2-v3/) (v2-v3-parallel-sprint-plan.md + v2.0.0-os-prep.md 已归档,2026-09-29 user FINAL 决定作废) |
@@ -98,13 +98,13 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 | **v1.x** | jhyy 自举（`compiler/src0/*.jhyy`） | 真自举闭环（v1.0 = byte-equal `.il`）— **🟢 v1.8.3 shipped = v1.x 终结** |
 | **v2.x** | QBE 完整重写 + 多目标 / 自研 OS 准备 | amd64_sysv / 多目标 / freestanding — **🟢 v2.16.0 shipped 2026-09-22 = v2.x 终结** (per 2026-09-29 user FINAL 决定;v2.x 中/末 items 全部 dropped off-axis,QBE 自写在 in-mem self-backend 里走完) |
 | **v3.x** | 语言特性扩展（OS-required：inline asm / volatile / naked / no_std / `&mut` + lifetime）| 服务于 jhyy_OS — **🟢 v3.4.2 shipped 2026-09-29 = v3.x 终结** (per 2026-09-29 user FINAL 决定;v3.0 3a-3f 全部 dropped off-axis;3 个 minor v3.4.0/1/2 ship 走完 W-085/W-088/W-089 真修,ACTIVE workaround bucket 清空) |
-| **v4.x** | 后合并 axis — stdlib / 0-C 闭环 / async / lifetime / trait / package manager / multi-arch / `.jhyynb` | 服务于编译器自身现代化 + jhyy_OS 重启评估 — **🟡 v4.0.0-rc1 shipped 2026-09-30 = v4.x 首发 RC** (axis-v2 + axis-v3 merge 入 main;**ACTIVE 已清零 → v4.0.0 final 可 promote**(余下 promote 条件见 `active-workaround-clearance.md` § 全局 ship gate);其余 12 项未启动,合并在 [`docs/plans/v4/backlog.md`](docs/plans/v4/backlog.md)) |
+| **v4.x** | 后合并 axis — stdlib / 0-C 闭环 / async / lifetime / trait / package manager / multi-arch / `.jhyynb` | 服务于编译器自身现代化 + jhyy_OS 重启评估 — **🟡 v4.0.0-rc1 shipped 2026-09-30 = v4.x 首发 RC** (axis-v2 + axis-v3 merge 入 main;**ACTIVE 已清零 → v4.0.0 final 可 promote**(余下 promote 条件见 `active-workaround-clearance.md` § 全局 ship gate);其余未启动项见 [`version-schedule.md`](docs/plans/v4/version-schedule.md) § 四) |
 
 **轴之间的关系**（关键，避免误读 semver）：
 - **v0.x → v1.x**：严格顺序（v1.0 强前置 v0.x 全部完成）✅
 - **v1.x → v2.x / v3.x**：严格顺序（v2.0 / v3.0 sprint 3a 强前置 v1.0 真自举闭环）✅ v1.0.0 已 ship
-- **v2.x + v3.x → v4.x**：v4.0 = v2.x + v3.x 合并入 main;v4.x 内部按依赖图决定串并行(强串行链 `lifetime → closure → dyn Trait → HKT`;M5 / async / 错误恢复 / 优化 / 包管理 / 并发 cap / `.jhyynb` 可并行)—— 详见 [`backlog.md`](docs/plans/v4/backlog.md) 依赖图
-- **v4.x 中/末 items** (M5 0-C 闭环 / async / lifetime / trait / package manager / multi-arch / `.jhyynb`) 全部规划在 [`backlog.md`](docs/plans/v4/backlog.md),**一项都未启动**
+- **v2.x + v3.x → v4.x**：v4.0 = v2.x + v3.x 合并入 main;v4.x 内部按依赖图决定串并行(强串行链 `lifetime → closure → dyn Trait → HKT`;M5 / async / 错误恢复 / 优化 / 包管理 / 并发 cap / `.jhyynb` 可并行)—— 详见 [`version-schedule.md`](docs/plans/v4/version-schedule.md) § 四
+- **v4.x 中/末 items** (M5 0-C 闭环 / async / lifetime / trait / package manager / multi-arch / `.jhyynb`) 全部见 [`version-schedule.md`](docs/plans/v4/version-schedule.md) § 四(v4.6+),**一项都未启动**
 
 > v1.x = jhyy-side production（v1.4.4 物理 flip `jhyy.exe` 为 jhyy-side binary）；v1.4.6 真修 3 个 ACTIVE workaround（W-017 codegen module-level `let mut` + W-019 codegen nested struct field chain + W-020 parser inline match-as-expression reorder）后，src0 production 无外部 C runtime helper 依赖（除 `jhyy_helpers.c` DEPRECATED 状态保留 1-2 sprint 观察期）+ parser / codegen 跨侧行为对齐。ACTIVE workaround 数 → 0。
 
@@ -155,7 +155,7 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 | L1.5 | [`v2-v3-parallel-sprint-plan.md`](docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md) | ⚠️ **SUPERSEDED** — 已归档到 [`docs/archive/v2-v3/`](docs/archive/v2-v3/) (per 2026-09-30 v4.0.0 archive step) |
 | L3 | [`docs/plans/v4/active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md) | ✅ **已完成(2026-10-20)** —— ACTIVE 桶清零(14 → 0);文档保留作审计轨迹 |
 | L3 | [`docs/plans/v4/self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md) | 🔄 **v4.2 起的主线**(2026-10-29 立线)—— 自研后端性能线 |
-| L3 | [`docs/plans/v4/backlog.md`](docs/plans/v4/backlog.md) | 12 项未启动的未来工作(原 v4.1.0 - v4.12.0 合并,2026-10-15);M5 Part 1/2 已完成,Part 3 = v4.5 |
+| L3 | ~~`docs/plans/v4/backlog.md`~~ | ⚠️ **已删除(2026-10-30)** —— 12 项未启动工作的僵尸排期表(依赖图已被它自己标注过期);清单现由 [`version-schedule.md`](docs/plans/v4/version-schedule.md) § 四承担 |
 
 最近完成的 sprint: **v4.1.2 shipped 2026-10-29** — 版本号自动化 + 三处「表述与实现不符」真修。
 
@@ -206,7 +206,7 @@ v4.2.0 / v4.2.1 ✅ 已完成;**v4.2.2 / v4.3.0 已降级**(实测性能价值 �
 访存数/帧大小/chkstk 次数,确定性 ⇒ 跨机器逐字节相同),**墙钟只报告** ——
 共享 runner 的宿主负载不可控。
 
-**plan 命名约定(2026-10-15 修订)**:已 ship / 进行中的 sprint 保留 `v4.X.Y-plan.md`(审计轨迹,改名会破坏跟 changelog / commit 的对应);未启动的 backlog 与进行中的工作用描述性文件名,**不用版本号** —— 版本号在启动时才分配。
+**plan 命名约定(2026-10-15 修订)**:已 ship / 进行中的 sprint 保留 `v4.X.Y-plan.md`(审计轨迹,改名会破坏跟 changelog / commit 的对应);未启动的工作与进行中的工作用描述性文件名,**不用版本号** —— 版本号在启动时才分配。
 历史: changelog 见 `docs/logs/v0/changelog-v0.X.Y.md` (C 编译器) + `docs/logs/v1/changelog-v1.X.Y.md` (jhyy 自举) + `docs/logs/v2/changelog-v2.*.0.md` (QBE rewrite + freestanding) + `docs/logs/v3/changelog-v3.*.md` (language expansion + self-backend) + `docs/logs/v4/changelog-v4.0.0.md` (post-merge umbrella);早期 sprint（命名 `sprint-1*.md`）同目录。
 
 ### 项目内部（`docs/internal/`）
@@ -296,7 +296,7 @@ MCP 套件 **46 passed / 1 skipped**。
 | W-139 | — | ~~std lib 的字节循环写 `*(p as *i32) = v` ⇒ store 宽度 4 字节 ⇒ 请求 n 字节实际写 4n 字节~~ ✅ **2026-10-26 已修**:jhyy 的 store 宽度跟 **cast 后的 pointee 类型**走(实测 `*(p as *i32) = 0x41424344` 写 4 字节、`*(p as *u8)` 写 1 字节)⇒ 12 处字节循环的读写统一改成 `*u8` 宽度(mem/fmt/string/vec)。`mem_set(b, 0x41424344, 4)` 修前写 7 字节(踩掉哨兵)修后写 4 字节 ✓ |
 | W-140 | — | ~~`std/string.jhyy` 的 `str_find` 返回裸字面量 ⇒ `import string;` 编译失败~~ ✅ **2026-10-26 已修**:`-> i64` 的函数里 `return 0;` 推断成 i32 ⇒ 类型不匹配 ⇒ 改 `return 0 as i64;` |
 | W-141 | — | ~~`std/string.jhyy` 的 arena 新建 block 时 payload 起点压在 next 指针上、且 bump 指针不推进 ⇒ 分配互相踩 ⇒ ACCESS_VIOLATION~~ ✅ **2026-10-26 已修**:block 布局改成 `[next(8B)][payload_size(8B)][payload...]`,payload 起点 = `raw+16`,`cur` 推进到 `data_start+size` |
-| W-105 | — | ~~`&mut` 独占性完全不检查~~ ✅ **2026-10-20 已修**:(a)「`&mut` 真的能用」+ (b)**最小独占检查**(同作用域内双 `&mut` 互斥,新测试 `borrow_mut_conflict.jhyy` EXPECT-ERROR ✓)。词法作用域(borrow 提前结束会误报)—— 完整 NLL/Polonius 留 backlog v4.3.0 |
+| W-105 | — | ~~`&mut` 独占性完全不检查~~ ✅ **2026-10-20 已修**:(a)「`&mut` 真的能用」+ (b)**最小独占检查**(同作用域内双 `&mut` 互斥,新测试 `borrow_mut_conflict.jhyy` EXPECT-ERROR ✓)。词法作用域(borrow 提前结束会误报)—— 完整 NLL/Polonius 留 v4.6+ 语言特性链 |
 | W-103 | — | ~~`std_os_open/close/read/write` 全是 M0 mock,`std_os_exit` 不退出进程~~ ✅ **2026-10-20 已修**:5 个 libc bridge 进 `jhyy_helpers.c`;`import` 加 std lib 目录回落 → 测试改 import 真身(新增 `std_os_exit.jhyy` 验进程真退出) |
 | W-107 | — | ~~五个 per-fn 表按固定上限分配~~ ✅ **2026-10-20 已修**:改成**按实际函数数**分配(`fn_count + 1`),`MAX_FN_ENTRIES` 常量删除、「太多函数」守门删除 —— **没有上限了**。之前那次动态分配被撤回,是因为「查表上界」那另一半真修还没落地(两者从未同时存在);这次两半齐了 |
 | W-120 | — | ~~temp 表(65536)越界 → 静默算错值~~ ✅ **2026-10-20 已修**:两张按 temp id 索引的表改成按**实际最大 temp id** 分配 + 越界**响亮失败**。**HEAD 上本来就可复现**(一个 25000 语句的函数就够:算出 s=0,正确值 74994)。`main.jhyy` 自己的 max temp id 已到 64953 —— 离越界只剩 583 |
@@ -388,7 +388,7 @@ W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_
 - W-103 → RESOLVED (2026-10-20, v4.0.16 —— `std_os_*` 接真 libc bridge;POSIX/Win 的 `O_*` flag 差异在桥这层翻译;`import` 加 std lib 目录回落 → std lib 第一次真的可被用户代码 import)
 - W-107 → RESOLVED (2026-10-20, v4.0.17 —— 五张 per-fn 表按实际函数数分配;新增常驻门 `artifact_checks.sh many_functions`:4100 个函数的合成文件求和必须 == 36900)
 - W-120 → RESOLVED (2026-10-20, v4.0.17 —— temp 表按实际最大 temp id 分配 + 越界响亮失败;**同一道门**也抓它:关掉修复 → 求和 = 0(静默错值)被当场抓住)
-- W-105 → RESOLVED (2026-10-20, v4.0.18 —— (a)「`&mut` 能用」+ (b) 最小独占检查(同作用域双 `&mut` 互斥);完整 NLL 留 backlog v4.3.0)
+- W-105 → RESOLVED (2026-10-20, v4.0.18 —— (a)「`&mut` 能用」+ (b) 最小独占检查(同作用域双 `&mut` 互斥);完整 NLL 留 v4.6+ 语言特性链)
 - W-105.1 → RESOLVED (2026-10-20, v4.0.18 —— `check_cap_pass` 死 stub 删除)
 - W-118 → RESOLVED (2026-10-20, v4.0.18 —— 语言 lexer 的 EOF 守卫;A/B 193/193 逐字节不变)
 - W-121 → RESOLVED (2026-10-20, v4.0.18 —— closure 符号名改用计数器 ⇒ 产物可复现)
@@ -435,5 +435,10 @@ W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_
 - ✅ D41(Debug ABI 所有权 + spec 锁)、D44(`.jhyynb` 格式)—— 权威在本仓 `docs/abis/`
 - ⚠️ **OS 侧原 M1–M11 依赖图已作废**(`v2.0.0-os-prep.md` 2026-09-30 归档;OS 侧原
   `coordination.md` 的 Critical Path 2026-10-30 一并删除)⇒ **新 OS 路线图待设计**
-- 🔄 **当前唯一在排期的跨项目路线 = `docs/coordination/` 的 P0–P4.5**(与本仓
-  `self-backend-perf-plan.md` 的 v4.x 版本轴**并行且正交**)
+- 🔄 **OS 线(P0–P4.5)已接入本仓版本轴** —— 2026-10-30 起不再是一套独立的轴:
+  映射表在 [`docs/plans/v4/version-schedule.md`](docs/plans/v4/version-schedule.md)
+  **§ 五「OS 线接入版本轴」**(OS-1..OS-16,对应 v4.6 起)。
+  ⚠️ **它与性能线不是「并行正交」,而是被切成两段**:P2 的「linear scan 寄存器
+  分配」**就是 v4.4**(性能线主线本身),P2 的另一半(全程序栈分析 + 链接断言)
+  落在 v4.7。**三个硬接口见 `version-schedule.md` § 五.5** —— 其中两条必须在
+  **v4.4.0 阶段二**同期落地(排除 volatile temp;禁 XMM 溢出 / 禁 red zone)
