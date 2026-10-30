@@ -352,7 +352,6 @@ def jhyy_il_diff(file_a: str, file_b: str, context: int = 3) -> dict:
 @mcp.tool
 def jhyy_selfhost_check(
     src: str = "compiler/src0/main.jhyy",
-    auto_rebuild: bool = False,
     timeout: int = 600,
 ) -> dict:
     """Run the v1→v2→v3→v4 byte-equal self-hosting closure chain.
@@ -362,13 +361,13 @@ def jhyy_selfhost_check(
               "v1 v2 v3 byte-equal", "run the closure check", "byte-equal 还稳吗",
               "自举闭环还在吗".
 
-    Default auto_rebuild=False — missing binary fails fast with clear error
-    (per Plan agent risk analysis: auto-rebuild masks phantom binary traps).
-    Pass auto_rebuild=True to auto-rebuild jhyy_v1 from src0/main.jhyy via jhyy.exe.
+    Missing binary fails fast with a clear error (per Plan agent risk analysis:
+    auto-rebuild masks phantom binary traps).
+    改了 src0 想重新验证 ⇒ 先跑 `make`(它自己就做闭环 + 刷新 jhyy_v1.exe.exe),
+    再调本工具。
 
     Args:
         src: 编译源文件 (default compiler/src0/main.jhyy)
-        auto_rebuild: True 时自动 rebuild jhyy_v1 (gcc + jhyy.exe 编 src0/main.jhyy)
         timeout: 每阶段 timeout (秒, default 600 = 10 分钟)
 
     Returns:
@@ -380,7 +379,7 @@ def jhyy_selfhost_check(
 
     比手写 ~30 行 bash chain 好: 一键, 失败 fail-fast + 列出失败阶段, 不用手动循环.
     """
-    return runner.selfhost_check(src, auto_rebuild, timeout)
+    return runner.selfhost_check(src, timeout)
 
 
 @mcp.tool

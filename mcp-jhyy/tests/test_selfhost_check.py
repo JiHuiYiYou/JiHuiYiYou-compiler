@@ -27,7 +27,7 @@ async def test_selfhost_check_fail_fast_missing_binary(mcp_client):
     try:
         result = await mcp_client.call_tool(
             "jhyy_selfhost_check",
-            {"src": "compiler/src0/main.jhyy", "auto_rebuild": False},
+            {"src": "compiler/src0/main.jhyy"},
         )
         data = result.data
         assert data["ok"] is False
@@ -55,7 +55,7 @@ async def test_selfhost_check_result_schema(mcp_client):
 
     result = await mcp_client.call_tool(
         "jhyy_selfhost_check",
-        {"src": repro_src, "auto_rebuild": False, "timeout": 300},
+        {"src": repro_src, "timeout": 300},
     )
     data = result.data
     # Schema fields should always be present

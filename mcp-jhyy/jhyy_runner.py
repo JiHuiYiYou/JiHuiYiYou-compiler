@@ -394,52 +394,12 @@ def _resolve_binary(binary: str) -> str:
     return _resolve_path(binary)
 
 
-def _maybe_rebuild_v144() -> dict:
-    """v1.4.4 改: auto_rebuild=True 时调 stage-0 链:
-       gcc → jhyy_stage0.exe (C 端 bootstrap)
-       jhyy_stage0.exe compile src0/main.jhyy → jhyy.exe (jhyy-side production)
-       cp jhyy.exe → jhyy.exe.exe (新 baseline)
-    """
-    # Stage 0: gcc 编译 C 端 → jhyy_stage0.exe
-    gcc_cmd = ["gcc", "-std=c11", "-Wall", "-Wextra",
-               "compiler/src/*.c",
-               "-o", "compiler/build/bin/jhyy_stage0.exe",
-               "-I", "compiler/src"]
-    gcc_result = _run_cmd(gcc_cmd, timeout=120)
-    if not gcc_result["ok"]:
-        return {"ok": False, "stage": "gcc_compile_stage0",
-                "stderr_tail": gcc_result["stderr"][-200:]}
-    # Stage 1: jhyy_stage0.exe 编 src0/main.jhyy → jhyy.exe (production)
-    stage0_exe = JHYY_ROOT / "compiler/build/bin/jhyy_stage0.exe"
-    compile_cmd = [str(stage0_exe), "compile", "compiler/src0/main.jhyy",
-                   "-o", "compiler/build/bin/jhyy"]
-    compile_result = _run_cmd(compile_cmd, timeout=120)
-    if not compile_result["ok"]:
-        return {"ok": False, "stage": "stage0_compile_main",
-                "stderr_tail": compile_result["stderr"][-200:]}
-    # cp jhyy.exe → jhyy.exe.exe (per memory feedback_regress_baseline_binary_hash)
-    import shutil
-    shutil.copy("compiler/build/bin/jhyy.exe", "compiler/build/bin/jhyy.exe.exe")
-    # 同时刷新 jhyy_v1.exe.exe (历史 baseline, regress_v1.py 用)
-    # jhyy_v1.exe.exe 在 v1.4.4 后 = jhyy.exe 自身 (因为 jhyy.exe 现在是 jhyy-side 产物)
-    # 但保留独立 binary 维持 v1.0.0 historical baseline 可追溯
-    shutil.copy("compiler/build/bin/jhyy.exe", "compiler/build/bin/jhyy_v1.exe.exe")
-    return {"ok": True}
-
-
-# v1.4.4: 保留旧函数名作 fallback (向后兼容 — 旧 caller 可能仍调)
-def _maybe_rebuild_jhyy_v1() -> dict:
-    """v1.4.4 deprecation: 旧函数名转发到 _maybe_rebuild_v144. 保留签名兼容."""
-    return _maybe_rebuild_v144()
-
-
-def selfhost_check(src: str = "compiler/src0/main.jhyy", auto_rebuild: bool = False,
+def selfhost_check(src: str = "compiler/src0/main.jhyy",
                    timeout: int = 600) -> dict:
     """一键 v1→v2→v3 byte-equal 验证.
 
     Args:
         src: 编译源文件 (default compiler/src0/main.jhyy)
-        auto_rebuild: True 时自动 rebuild jhyy_v1 (per Plan agent risk analysis: 默认 False 防 phantom)
         timeout: 每阶段 timeout (秒, default 600)
 
     Returns:
@@ -463,19 +423,6 @@ def selfhost_check(src: str = "compiler/src0/main.jhyy", auto_rebuild: bool = Fa
         }
     """
     start = time.time()
-
-    # Optional rebuild
-    if auto_rebuild:
-        rebuild = _maybe_rebuild_jhyy_v1()
-        if not rebuild["ok"]:
-            return {
-                "ok": False, "all_byte_equal": False,
-                "il_sha256": None,
-                "binary_chain": [],
-                "il_files": {},
-                "early_abort": f"auto_rebuild failed at {rebuild['stage']}: {rebuild['stderr_tail']}",
-                "duration_sec": round(time.time() - start, 2),
-            }
 
     # Check binaries exist
     # W-014 fix (2026-08-12): outputs use _sh_ scratch prefix so pre-stage cleanup
