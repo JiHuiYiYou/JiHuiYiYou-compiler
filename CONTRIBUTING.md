@@ -111,6 +111,24 @@ python scripts/dev/audit_test_assertions.py --strict   # 断言强度审计(挂 
 | **SSH** | push 到 `git@github.com:` 前**必须在同一次 Bash 调用里** `eval "$(ssh-agent -s)" && ssh-add /c/Users/liuzhen/.ssh/id_ed25519 && git push …`（Bash 工具每次新 subshell，agent 不持久 ⇒ 失败症状固定是 `Permission denied (publickey)`） |
 | **作者** | 项目作者 = GitHub `JiHuiYiYou`（机会翼游）；提到本人时不要猜真名 |
 
+### 刷版本号（发版 / 改版本）
+
+**版本号的唯一真相源 = 仓库根的 `VERSION` 文件**，其它地方一律由脚本刷出来 ——
+**不要手改**任何一处版本串（改了会漂，`bump_version.py check` 会红）。
+
+```bash
+python scripts/dev/bump_version.py set 4.1.3   # ① 刷 VERSION + 全仓 7 处 + 插 changelog/release-note stub
+make                                            # ② ★ 字面量变了 ⇒ 自举产物必须重编（漏了就自报旧版本）
+pwsh -File installer/build.ps1 bundle           # ③ 构建
+python scripts/dev/bump_version.py finalize      # ④ 回填 sha256
+python scripts/dev/bump_version.py check        # ⑤ 零漂移门
+```
+
+**顺序不能反** —— 编译器版本号只能是 `main.jhyy` 里的**字符串字面量**（改成运行时读文件
+需要新增局部变量，而新增局部变量会移位模块级 temp 编号 ⇒ 自举产物行为漂移）。
+
+完整说明 ⇒ [`docs/internal/build.md` § 版本号自动化](docs/internal/build.md#版本号自动化)。
+
 ### 验证纪律
 
 - **改任何东西之前先确认基线绿**：把工作树恢复到 HEAD，**跑一遍完整构建 + 门**。基线不绿 ⇒ 先修基线。「基线也失败」这句话在**当场重建过基线**之前不许说 —— 只换源码不重建 = 比的是两个不同状态（2026-10-25 W-136 那轮因此绕了整整一轮）。〔`feedback_baseline_before_change`〕

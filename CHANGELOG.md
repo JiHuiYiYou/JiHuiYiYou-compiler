@@ -5,7 +5,8 @@
 > v4 轴的 umbrella 在 [`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md)。
 >
 > 版本号的**唯一真相源**是仓库根的 `VERSION` 文件。
-> 改版本号用 `python scripts/dev/bump_version.py set <X.Y.Z>`（**不要手改**）。
+> 改版本号用 `python scripts/dev/bump_version.py set <X.Y.Z>`（**不要手改**）——
+> 完整流程（含**不可省的 `make`**）见 [`docs/internal/build.md` § 版本号自动化](docs/internal/build.md#版本号自动化)。
 
 ---
 

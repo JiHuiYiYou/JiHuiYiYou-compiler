@@ -23,9 +23,17 @@ release note 描述的是**上一版**的东西。
 ## 新建一版时
 
 ```bash
-python scripts/dev/bump_version.py set 4.1.3   # 自动建 installer/release-notes/4.1.3.md 的 stub
+python scripts/dev/bump_version.py set 4.1.3   # ① 自动建 installer/release-notes/4.1.3.md 的 stub
+                                           #    同时刷 VERSION + 全仓 7 处版本串 + 插 changelog 段
 # ... 把 stub 里的 TODO 换成这一版真正改了什么的正文 ...
+make                                            # ② ★ main.jhyy 的版本字面量变了 ⇒ 自举产物必须重编
+pwsh -File installer/build.ps1 bundle           # ③ 构建
+python scripts/dev/bump_version.py finalize      # ④ 回填 sha256(scoop hash + winget InstallerSha256)
+python scripts/dev/bump_version.py check        # ⑤ 零漂移门
 ```
+
+⚠️ **② 不能省** —— 漏了 `make`，装出去的编译器会**自报上一个版本号**。
+完整流程见 [`docs/internal/build.md` § 版本号自动化](../../docs/internal/build.md#版本号自动化)。
 
 ## 交叉引用
 

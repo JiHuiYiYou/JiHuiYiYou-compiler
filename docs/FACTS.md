@@ -16,6 +16,7 @@
 | 项 | 值 |
 |---|---|
 | 当前版本 | **4.1.2**（真相源 = 仓库根 `VERSION` 文件） |
+| **怎么刷版本** | [`docs/internal/build.md` § 版本号自动化](internal/build.md#版本号自动化) —— `bump_version.py set` → `make` → bundle → `finalize` → `check`，**顺序不能反** |
 | 最新 release | `v4.1.2`（2026-10-29） |
 | 版本轴 | v0.x(C 编译器，冻结于 v1.0.0) · v1.x(自举，终结于 v1.8.3) · v2.x(QBE 重写，终结于 v2.16.0) · v3.x(语言扩展，终结于 v3.4.2) · **v4.x(当前)** |
 | 编译器二进制 | `compiler/build/bin/jhyy.exe`（~1.9 MB） |
