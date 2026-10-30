@@ -1,305 +1,106 @@
 # Changelog
 
-> **入口**:GitHub Release / 包管理器 / cache 层从这个文件读版本号。具体变更看 [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (完整索引) → [`docs/logs`](docs/logs/) (per-version umbrella)。
-
-## 最新 release
-
-### v2.11.9 — 2026-09-13 — **axis-v2 W-074.7.9 QBE side 真修 — QBE fallback 5/5 EXIT exact closure** (axis-v2 only; main 待 merge; self-backend 侧仍 ACTIVE W-074.6 family)
-
-**Tag**: `v2.11.9` (axis-v2 branch)
-**Status**: W-074.7.9 big_test runtime **QBE side ✅ CLOSURE**; self-backend side 仍 🟡 ACTIVE due to W-074.6 family (extsw silent-skip + multi-func body 0-byte + emit_ret 不 mov %t1 → %eax 等 pre-existing bugs, 已知范围 ~500+ LOC 多 sprint, 显式 deferred v2.x 中期 per W-074.6 ACTIVE state)
-
-**Highlights**:
-
-- **2 个独立 root cause 真修** (per v2.11.9 plan mode Explore agent 调研):
-  - **`idiv` emit 无 sign-extend prefix** (emit_call.jhyy `is_div` branch): x86 `idivl` semantics dividend = `(%edx << 32) | %eax`; `%edx` 残留 → x86 #DE fault → Windows STATUS_INTEGER_DIVIDE_BY_ZERO 0xC000008C (wrapped 0xC0000095 per process config). **真修**: add `\tcltd\n` / `\tcqto\n` prefix (mirror `is_mod`).
-  - **Lexer 不识 QBE `rem` keyword** (lexer.jhyy `next_token_binop` dispatcher + main `next_token` `'r'` → ret/rem disambiguate): QBE `%` operator emits `rem` (signed remainder, per QBE spec §6.3). Lexer 之前无 `rem` branch → `next_token` returns -1 → `lex_il` 静默 skip 1 byte/iteration → `rem` keyword + 2 operand temps ALL skipped → those `t24`/`t69`/`t109`/etc. SSA values never appear in `.s`. **真修**: add `rem` branch in `next_token_binop` (consume "em", op_name="rem"); add `'r'` → ret/rem dispatch in main `next_token` (跟 `'d'` → div pattern 一致).
-- **`is_rem` flag + dispatch 真修** (emit_call.jhyy): new `is_rem` flag init + `cg_find_sub` check for "rem" 3-char substring + `is_rem` dispatch branch (cltd/cqto + idiv + movq %rdx, %rax — same path as is_mod).
-- **QBE fallback 5/5 EXIT exact closure 真修达成** (per [[feedback_fix_evaluation_rule]]):
-  - hello=42 ✅
-  - big_test=**12345** ✅ (从 v2.11.8 STATUS_INTEGER_OVERFLOW 0xC0000095 → v2.11.9 EXIT=12345, 真修 closure) — 9 个 `rem` ops 正确 emit (cltd+idivl + movq %rdx, %rax)
-  - struct_val_pass=35 ✅
-  - fib_renamed=832040 ✅ (= 832040 mod 256 = 40, 跟 baseline 一致)
-  - nested_struct_deep=22 ✅
-  - struct_val_assign=30 ✅
-- **QBE fallback 115/115 regress PASS preserved** + **self-backend 1/5 hello PASS preserved** (per W-074.6 baseline; multi-func closure deferred v2.x 中期)
-- **D43 closure v1↔v2 .il sha HOLD** (v2/v3/v4/v5 sha `42580b87...` post-fix, re-baseline per D43 closure rule 因 rem emit 微变)
-- **byte-equal-amd64 10/10 PASS preserved** + **fixed_point N≥3 PASS preserved**
-- **NEW ship gate audit grep** (per [[feedback_codegen_amd64_run_zerobyte]]): self-backend big_test.s `cltd` = 14 (5 div + 9 rem) + `idivl` = 14 + `movq %rdx, %rax` = 9 (was 0 pre-fix) + `.s` 行数 8727 ≥ 100 bytes + `main_jhyy.s` non-empty
-- **jhyy.exe.sha256 refresh**: `9ef7f49734ef99d7...`
-
-**完整 changelog**: [`docs/logs/v2/changelog-v2.11.0.md`](docs/logs/v2/changelog-v2.11.0.md) § v2.11.9
-**Plan**: [`docs/plans/v2/v2.11.9-plan.md`](docs/plans/v2/v2.11.9-plan.md)
+> **本文件 = 官方推荐的用法 + 每个版本的一句话要点。**
+> **详细的逐版本记录**在 [`docs/archive/logs/`](docs/archive/logs/) ——
+> v4 轴的 umbrella 在 [`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md)。
+>
+> 版本号的**唯一真相源**是仓库根的 `VERSION` 文件。
+> 改版本号用 `python scripts/dev/bump_version.py set <X.Y.Z>`（**不要手改**）。
 
 ---
 
-### v2.11.10 — 2026-09-13 — **axis-v2 W-074.6 T3-a per-fn frame size + T4-c multi-arg FN_ARG 真修 — 5/6 self-backend EXIT exact closure** (axis-v2 only; main 待 merge; **5/5 self-backend NOT achieved — T4-g emit_binop cnew + emit_jnz silent-skip exposed**)
+## 推荐用法
 
-**Tag**: `v2.11.10` (axis-v2 branch)
-**Status**: W-074.6 T3-a per-fn frame size **✅ CLOSURE** + W-074.6 T4-c multi-arg FN_ARG 真修 (scope UP 配套);self-backend 5/6 EXIT exact closure (跟 v2.11.9 baseline 一致但 different bug 真修);5/5 self-backend closure deferred v2.11.10a+ (T4-g emit_binop cnew + emit_jnz loop body entry silent-skip, pre-existing W-074.6 family bug)
+### 安装（Windows x64 最终用户）
 
-**Highlights**:
+下载 `jhyy-installer-4.1.2.exe`（~55 MB，GUI）或 `jhyy-compiler-4.1.2.msi`（~28 MB，
+企业 / SCCM 分发）。
 
-- **T3-a per-fn frame size 真修** — 两阶段 pre-scan (`cg_compute_per_fn_max_temps` Phase 1 扫 fn_starts, Phase 2 per-fn max temp id) + CGState 加 fn_starts/per_fn_max/fn_count 3 字段 + emit_func_header 改读 `per_fn_max[cur_fn_idx]` 替换 v2.11.2 global-max variant (1 个 fn = 15488 bytes frame → 递归函数 SIGSEGV 真修)
-  - big_test_run.s per-fn `subq $N, %rsp` 出现 多个 distinct frame sizes (gcd $600 / t_gcd $5920 / etc)
-  - `subq $15488` 出现 0 次 (vs 30+ pre-fix)
-  - gcd `subq $600, %rsp` vs 旧 `subq $15488, %rsp` (75 temps × 8 = 600 vs 1936 temps × 8 = 15488)
-- **T4-c multi-arg FN_ARG 真修** (scope UP 配套 T3-a):
-  - lexer `next_token_func_header` 改 dup 完整 header text (`function w $name(args)`) 替代 v2.11.0-2.11.9 只 dup name;hdr_start 跳过 ws 让 dup 起始就是 "function" 字符 (避免 `.globl  function...` 链接失败)
-  - emit_func_header 加 `cg_state_set_fn_header` populate cur_fn_header_text + extract name from full header for `.globl` + label
-  - emit_copy FNARG 路径替换 hardcode `reg_rcx_for_qt(dst_qt)` → `cg_find_arg_idx` + `reg_rax_for_qt_idx(dst_qt, idx, target_tag)`,Win x64 arg 0..3 = %rcx/%rdx/%r8/%r9 (SysV → rdi/rsi/rdx/rcx via target_tag)
-  - big_test gcd body emit `movl %ecx, -504(%rbp)` (arg 0 = %a) + `movl %edx, -512(%rbp)` (arg 1 = %b) vs 旧硬编码 `movl %ecx` 都用第 1 arg
-- **诚实记录 per [[feedback_fix_evaluation_rule]]**:**5/6 self-backend EXIT exact closure** ✅ (hello=42 / struct_val_pass=35 / fib_renamed=40 / nested_struct_deep=22 / struct_val_assign=30), 跟 v2.11.9 baseline 一致但 different bug 真修
-- **5/5 self-backend closure NOT achieved** — gdb 取证 big_test 在 T3-a+T4-c 真修后 SIGFPE at `gcd+158 idivl -576(%rbp)` (T4-g:emit_binop cnew silent-skip + emit_jnz loop body entry silent-skip — pre-existing W-074.6 family bug, NOT in v2.11.10 plan scope)。v2.11.10 plan 文档 "5/5 100% 可达" 预测 wrong — per [[feedback_codegen_amd64_multifn]] scope UP trigger:T4-g 暴露后 scope DOWN 5/6 闭环 接受 (跟 v2.11.9 baseline 一致不触发 +5 FLIP trigger)。**T4-g 真修 deferred v2.11.10a+ (~30-50 LOC 估)**
-- **Stage 2 N=4 jhyy 编 jhyy 闭环 (v2/v3/v4/v5 byte-equal) PASS** + **QBE fallback 115/115 PASS preserved** + **byte-equal-amd64 10/10 preserved** + **fixed-point N≥3 PASS preserved**
-- **D43 closure v1↔v2 .il sha HOLD** (re-baseline 因 emit 微变;new sha record in build artifacts)
-- **jhyy.exe.sha256 refresh**
+> **自 v4.1.0 起不需要 MSYS2** —— installer 自带一份最小原生 ucrt64 工具链。
+> 装完直接用。
 
-**完整 changelog**: [`docs/logs/v2/changelog-v2.11.0.md`](docs/logs/v2/changelog-v2.11.0.md) § v2.11.10
-**Plan**: [`docs/plans/v2/v2.11.10-plan.md`](docs/plans/v2/v2.11.10-plan.md)
+### 三条最常用的命令
 
----
+```bash
+jhyy compile hello.jhyy -o hello.exe   # 编译 + 链接
+jhyy run     hello.jhyy                # 编译 + 链接 + 执行
+jhyy build   hello.jhyy -o hello.s     # 只编译出汇编（不链接）
+```
 
-### v2.11.11 — 2026-09-13 — **axis-v2 W-074.6 T4-g lexer cnew/ceqw silent-skip 真修 — 5/6 self-backend EXIT exact closure maintained** (axis-v2 only; main 待 merge; **6/6 self-backend NOT achieved — 新 stack-slot-reuse sub-bug 暴露, deferred v2.11.11a+**)
+### 看版本
 
-**Tag**: `v2.11.11` (axis-v2 branch)
-**Status**: W-074.6 T4-g lexer 真修 **⚠️ PARTIAL closure** (lexer 部分 CLOSED,big_test gcd SIGFPE 真修); 5/6 self-backend EXIT exact closure maintained (跟 v2.11.10 baseline 持平但 different bug 真修); big_test 通过 gcd 后 **hang at t_bit_pack** (5min+ timeout),**新 stack-slot-reuse sub-bug 暴露** (W-074.6 family 范围内, deferred v2.11.11a+ 真修).
+**没有 `jhyy --version`** —— 它从来就不存在（跑它是 `unknown command` + exit 1）。
+版本横幅在 **`jhyy --help` 的首行**。
 
-**Highlights**:
+### 交叉编译到 Linux
 
-- **T4-g lexer 4-char compare-op recognition 真修** (`codegen_amd64_lexer.jhyy` 3 处 ~5 LOC):
-  - **stage 1 guard** 加 `n1 == (110 as i32)` 接受 `cnew` prefix
-  - **stage 2 guard refactor flag pattern** (2 独立 if 设 `has_type_suffix` flag + 最终 if check) 接受 type suffix at idx 3 (4-char `ceqw`/`cnew`) OR idx 4 (5-char `csltw`/`cultw`/...),**绕开 codegen short-circuit OR workaround 的 nested-OR bug** (首次尝试 nested OR 触发 QBE "predecessors not matched in phi" → refactor flag pattern 替代)
-  - **op_str table** 加 `n1 == 110 ('n') → "cnew"` branch consistency (dead store 但保持代码对称)
-- **T4-g 真修 verified**:
-  - `big_test.il` 65 个 4-char compare op 正确 emit (11 ceqw → 11 sete + 54 cnew → 54 setne in big_test_run.s)
-  - gcd Euclid loop cond check 正确 emit (cmpl + setne + cmpl $0 + jne/jmp) → **不再 SIGFPE in gcd+158** (跟 v2.11.10 不同)
-  - `.s` audit: `set(ne|e)\b` count ≥ 65 + `jne .Lloop_body` count > 100 + `jmp .Lloop_end` count > 100 + `grep subq \$15488` = 0 (T3-a closure preserved)
-- **Codegen nested-OR workaround bug 取证 (NEW finding)**: `compiler/src0/codegen.jhyy:2060-2101` short-circuit OR workaround 不 track cur_block 当 right_node 含 nested OR → QBE "predecessors not matched in phi" → selfhost build break。**refactor 绕开**: flag pattern (2 独立 if + flag + 最终 if check) 替代 nested OR。真修 deferred v2.x 中期 V2-D。
-- **诚实记录 per [[feedback_fix_evaluation_rule]]**:**5/6 self-backend EXIT exact closure maintained** ✅ (hello=42 / struct_val_pass=35 / fib_renamed=40 / nested_struct_deep=22 / struct_val_assign=30), 跟 v2.11.10 baseline 持平但 different bug 真修
-- **6/6 self-backend closure NOT achieved** — big_test 通过 gcd 后 hang at t_bit_pack (5min+ timeout), **新 stack-slot-reuse sub-bug 暴露** (W-074.6 family 范围内, in `compiler/src0/codegen_amd64_emit_call.jhyy` emit_binop shift op 路径): bit_pack 函数 emit `(a & 0xFF) | ((b & 0xFF) << 8) | ((c & 0xFF) << 16) | ((d & 0xFF) << 24)` 时所有 shift amounts (8/16/24) 跟 0xFF masks 写**同一个** -32(%rbp) slot → 计算错值 → check_eq 不等 → hang。QBE 后端不受影响 (QBE 走自己 allocator, EXIT=57 PASS 维持)。v2.11.11 plan 文档 "6/6 100% 可达" 预测 wrong (跟 v2.11.10 plan "5/5 100% 可达" 一样 wrong, Risk 5 警告成真) — per user 2026-09-13 pre-confirmed scope DOWN ("仅 T4-g 真修 (推荐)"): scope 限定在 T4-g lexer 真修, 6/6 closure 留 v2.11.11a+ 真修 stack-slot-reuse (~30-50 LOC 估)
-- **Self-backend regress**: **71/115 PASS** (vs v2.11.10 baseline 58/115, **+13 PASS** 改善, T4-g fix 暴露之前 crash 在 gcd 的 tests 现在通过, FLIP count = 13 PASS improvements 非 scope DOWN trigger per [[feedback_codegen_amd64_multifn]])
-- **Stage 2 N=4 jhyy 编 jhyy closure PASS** + **QBE fallback 115/115 PASS preserved** + **byte-equal-amd64 10/10 preserved** + **fixed-point N≥3 PASS preserved**
-- **D43 closure v1↔v2 .il sha HOLD** (re-baseline 因 lexer 微变; new sha `a4f32837...` recorded)
-- **jhyy.exe.sha256 refresh**
+```bash
+jhyy compile hello.jhyy --target=amd64_sysv_freestanding --no-link -o hello
+# → hello.s（ELF/SysV ABI 汇编），在 Linux 侧用 gcc 链
+```
 
-**完整 changelog**: [`docs/logs/v2/changelog-v2.11.0.md`](docs/logs/v2/changelog-v2.11.0.md) § v2.11.11
-**Plan**: [`docs/plans/v2/v2.11.11-plan.md`](docs/plans/v2/v2.11.11-plan.md)
+四个目标三元组见 [`docs/FACTS.md`](docs/FACTS.md) § 5。
+
+### 其它入口
+
+| 想做的事 | 去哪 |
+|---|---|
+| 了解项目 | [`README.md`](README.md)（英文） / [`README.zh-CN.md`](README.zh-CN.md)（中文） |
+| 写 `.jhyy` | [语言规范](docs/abis/jhyy-lang-spec-v4.0.0.md) |
+| 碰 FFI / struct 传参 | [ABI 白皮书](docs/abis/jhyy-abi-v4.0.0.md) |
+| 贡献代码 | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| 想知道「现在什么状态」 | [`docs/FACTS.md`](docs/FACTS.md) |
+| 查已知的坑 | [`docs/workarounds.md`](docs/workarounds.md) |
 
 ---
 
-### v2.11.12 — 2026-09-15 — **axis-v2 W-074.6 shl/shr (5 ops) missing + emit-copy dst_id=0 真修 — 6/6 self-backend EXIT exact closure ✅ 达成** (axis-v2 only; main 待 merge; **新里程碑: 6/6 self-backend closure 达成**)
+## 当前版本
 
-**Tag**: `v2.11.12` (axis-v2 branch)
-**Status**: W-074.6 shl/shr (5 ops and/or/xor/shl/shr) + emit-copy dst_id=0 **✅ CLOSED** (2 个独立 bugs 联动真修);**6/6 self-backend EXIT exact closure ✅ 达成** (hello=42 / big_test=57 / struct_val_pass=35 / fib_renamed=40 / nested_struct_deep=22 / struct_val_assign=30);big_test 不再 hang at t_bit_pack (was 5min+ timeout in v2.11.11, now PASS in seconds).
+### v4.1.2 — 2026-10-29
 
-**Highlights**:
-
-- **Bug A — shl/shr (5 ops) missing 真修** (~75 LOC across 2 files):
-  - `compiler/src0/codegen_amd64_lexer.jhyy` `next_token_binop` (line 631-720) 加 4 个 NEW branch:`and` / `or` / `xor` / `shl`/`shr`
-  - `compiler/src0/codegen_amd64_lexer.jhyy` main dispatcher `'s'` branch (line 1307-1329) shl/shr check BEFORE sub check + 新 `'o'` (or) + `'x'` (xor) branch + `'a'` branch 加 and check
-  - `compiler/src0/codegen_amd64_emit_call.jhyy` (line 1013-1040) 加 5 个 `is_*` flag + cg_find_sub detection chain
-  - `compiler/src0/codegen_amd64_emit_call.jhyy` (line 1166-1208) 加 5 个 dispatch branch:`andl/andq` + `orl/orq` + `xorl/xorq` + `shll/shlq` (32/64-bit imm + reg paths) + `shrl/shrq`
-  - **2 个 Phase C sub-bug 修正** (本次 ship 期间 surface): `%%` → `%` (sb_append_cstr plain append 不是 printf-style) + reg path 漏 `movl` prefix → 分开 imm / reg path 各自 emit 完整 prologue
-- **Bug B — emit-copy dst_id=0 root cause 真修** (~3 LOC):
-  - `compiler/src0/codegen_amd64_lexer.jhyy:1074-1123` LHS `%` branch entry save cursor + `=` miss fallthrough rollback cursor + return -1
-  - 关键 insight: LHS `%` branch 把 cursor 推到 ident END 后, 如果 `=` 不存在, `%` 字节已经被 consume → 上层 dispatcher 拿不到 `%` → 后续 fallback 路径 (例如 'c' for copy) 拿不到正确 wrap context → lex_parse_temp_id_from_ident 返回 0 → emit_copy collapse to slot -32
-- **诚实记录 per [[feedback_fix_evaluation_rule]]**:**6/6 self-backend EXIT exact closure ✅ 达成** (跟 v2.11.10 + v2.11.11 plan "100% 可达" 两次 wrong 教训形成对比, v2.11.12 ship record 6/6 真达成):
-  - hello=42 ✅
-  - **big_test=57** (= 12345 mod 256 per Windows 8-bit exit, **was hang at t_bit_pack 5min+ timeout in v2.11.11, now PASS**)
-  - struct_val_pass=35 ✅
-  - fib_renamed=40 ✅
-  - nested_struct_deep=22 ✅
-  - struct_val_assign=30 ✅
-- **NEW ship gate audit** (per [[feedback_codegen_amd64_run_zerobyte]]):
-  - 20 shll/shrl/andl/orl/xorl emits in `_regress_big_test.s` (vs 0 pre-fix)
-  - t_bit_pack + t_bit_unpack + t_shifts 全 PASS (was hang/crash)
-  - bit_pack distinct slots -1424, -1432, -1440, -1448, -1456, -1464, -1472, -1480, -1488, -1496, -1504, -1512, -1520, -1528, -1536, -1544, -1552 (vs all -32 collapse pre-fix)
-- **Self-backend regress**: **69/115** (vs v2.11.11 baseline 71/115, **-2**, 全部 pre-existing FAILs dominate: payload_bind/sizeof/slice/top_level_let_mut/u32_let_inferred 等不在 6/6 closure scope 内; plan target ≥75/115 NOT met — 因为 t_bit_pack / t_bit_unpack / t_shifts 不在 regress 测试 list); FLIP count -2 全部 pre-existing, scope DOWN trigger per [[feedback_codegen_amd64_multifn]] 未触发
-- **Stage 2 N=5 jhyy 编 jhyy closure PASS** + **QBE fallback 115/115 PASS preserved** + **byte-equal-amd64 10/10 preserved** + **fixed-point N=3,4,5 .il byte-equal + cap_test 跨 N 代 EXIT=42 一致 preserved**
-- **D43 closure v1↔v2 .il sha HOLD** (re-baseline 因 lexer+emit_call 微变; new sha `9e61c42c33c661afdd0c9eba4f361aa9cb021a80e7e4173e56bff6ed2097cf76`)
-- **jhyy.exe.sha256 refresh** (`58a6f3a27b03e8a2d39773581f6a6c648d377ace214b080c97e084e1a1a77101`)
-- **累计 W-074.6 family closed ~325 LOC** (T3-a + T4-c + T4-g + shl/shr + dst_id=0); 剩余 ~175+ LOC (stack-slot-reuse in other emit paths + extsw silent-skip + emit_ret 不 mov %t1 → %eax 等) 留 v2.x 中期 V2-D
-
-**完整 changelog**: [`docs/logs/v2/changelog-v2.11.0.md`](docs/logs/v2/changelog-v2.11.0.md) § v2.11.12
-**Plan**: [`docs/plans/v2/v2.11.12-plan.md`](docs/plans/v2/v2.11.12-plan.md)
+- **`jhyy --version` 从来就不存在** —— 文档 / release note / 脚本里此前让你跑一个
+  不存在的命令（跑它是 `unknown command` + exit 1）。版本横幅在 `jhyy --help` 首行。
+- **版本号自动化** —— `VERSION` 文件成为唯一真相源；`scripts/dev/bump_version.py`
+  提供 `set` / `check` / `finalize` 三条命令 + 两道门（CI 零漂移门 + release 的
+  `VERSION == tag` 断言）。
+- **真修 `build.ps1 bundle` 静默复用陈旧 MSI** —— bundle 里嵌的是旧编译器。
+- 完整记录：[`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md) § v4.1.2
 
 ---
 
-### v2.11.13 — 2026-09-15 — **axis-v2 W-074.6 cne substring missing 真修 — partial closure 14/44 (32%); FLIP-gate scope DOWN 触发 (Iter 5-7 deferred v2.11.14)** (axis-v2 only; main 待 merge)
+## 版本要点
 
-**Tag**: `v2.11.13` (axis-v2 branch)
-**Status**: W-074.6 cne substring missing **✅ CLOSED** (1 LOC 真修, cross-cluster +7 PASS self-backend); **scope DOWN 触发** (FLIP +7 超 stop threshold 5, per user 2026-09-15 "FLIP count 逼近 5 立即停手" + plan hard gate).
+| 版本 | 一句话 |
+|---|---|
+| **v4.1.2** | `--version` 不存在这件事说清楚 + 版本号自动化（`VERSION` 单一真相源） |
+| **v4.1.1** | VSCode 终端 profile 改为探测真实 bash + 新增 `jhyy-bash.cmd` 启动器；**作废「打包 POSIX 层」这条计划** |
+| **v4.1.0** | installer 自带最小原生 ucrt64 工具链 ⇒ **装机用户不再需要 MSYS2** |
+| **v4.0.22** | lang-spec 覆盖审计：补回归门 + 挖出 std lib 三处真缺陷 + 一处编译器崩溃 |
+| **v4.0.21** | side-file per-pid 唯一化（并发编译互踩）+ Makefile 变量漏改 + 跨盘改名失败 + C 端编译器删除 |
+| **v4.0.20** | 审计「skip test / 新增 test」挖出的三处**门**自身的问题 |
+| **v4.0.19** | workaround 台账 ACTIVE 桶首次清零（14 → 0） |
+| **v4.0.18** | `&mut` 最小独占检查 + 死 stub 删除；lexer EOF 守卫；产物可复现；`asm!` / memory barrier 真正内联进函数体 |
+| **v4.0.17** | 两张「按固定上限分配」的表改成按实际需要分配（顺带修掉 temp 表越界静默算错值） |
+| **v4.0.16** | `std_os_*` 接真 libc + `#[link_section]` 落到真的 `.s` |
+| **v4.0.15** | `&mut` 真的能用了 |
+| **v4.0.14** | enum 的 ABI 两侧统一（参数按地址 / 返回值走 sret） |
+| **v4.0.12** | SysV MEMORY class（>16B struct 走栈） |
+| **v4.0.6** | W-101 attempt #7 成功 —— 自举闭环达成 |
+| **v4.0.2** | 多条 emit / sema 真修（i64 字面量、mem_set i64-store、per-fn-local counter…） |
+| **v4.0.1** | v4.x 轴的第一次真修 |
+| **v4.0.0-rc1** | v2.x + v3.x 两轴合并入 main；QBE 工具链移除；自举闭环 |
+| **v4.2.0** | 运行时性能门进 CI（静态指标硬门 + 墙钟只报告）+ `bench.sh` 计时器真修 |
+| **v4.2.1** | 帧尺寸按函数实际需要算（去掉写死的 8192 预留）⇒ ~41% 运行时 |
+| **v4.4.0 阶段一** | 寄存器分配器 + 安全网（**产物逐字节不变**）；阶段二 = emit 层消费寄存器 |
 
-**Highlights**:
-
-- **W-074.6 cne substring missing in emit_binop 真修** (1 LOC + 8 LOC comment, axis-v2 commit `89b4b87`):
-  - `compiler/src0/codegen_amd64_emit_call.jhyy:1077` (v2.11.12 状态) `cg_find_sub(op_text, op_text_len, "cnew" as *u8, 4 as i64)` 改为 `"cne" 3-char` → catch 全部 4 个 cne_* QBE op (cnew/cnel/cnes/cned — compare-not-equal per size suffix letter w/l/s/d)
-  - **Plan v2.11.13 Iter 4 估 "Cap<T> sizeof default 30-50 LOC" 严重错归因** — 实测 sizeof 在 sema `type_size` (types.jhyy:366) hardcode 8, IL emit `%t2 =l copy 8` 跟 QBE byte-equal; 真根因是 `if s_cap != 8` emit `cnel %t8, %t11`, cnel 在 emit_binop dispatch substring miss → fall through `add` path → `addl src1, src2` + `cmpl $0, sum` 而非 `cmpl src2, src1` + `setne %al` → cap_table_basic got=10 (8+8=16 ≠ 0 → then-branch → return 10)
-  - Verify 无 false positive: 全 codegen.jhyy 搜 cx* ops (`ceqd/ceql/ceqs/ceqw/cned/cnel/cnes/cnew/csltl/csltw/cslel/cslew/csgtl/csgtw/csgel/csgew/cultl/cultw/culel/culew/cugtl/cugtw/cugel/cugew`) 都没有 `cne` substring → "cne" 3-char prefix 只 match 4 个真 cne_* op, 安全
-  - 跟 v2.11.12 真修的 shl/shr missing + dst_id=0 同 family pattern (W-074.6 silent-skip 在 emit_binop dispatch), 但 cne substring 是 emit_binop dispatch layer, 不是 lexer silent-skip
-- **Cross-cluster impact** (1 LOC fix 连锁 closure, plan 没预期):
-  | Test | v2.11.12 baseline | v2.11.13 Iter 4 | Cluster |
-  |------|-------------------|-----------------|---------|
-  | `arith.jhyy` | FAIL got=106 | **PASS EXIT=1000042** | C.1 follow-on (Iter 3 联动) |
-  | `int_width_arith.jhyy` | FAIL got=0 | **PASS EXIT=0** | C.1 follow-on |
-  | `int_suffix.jhyy` | FAIL | **PASS** | C.1 follow-on |
-  | `cap_table_advanced.jhyy` | FAIL got=10 | **PASS EXIT=42** | **C.2** (target cluster) |
-  | `cap_test_sysv.jhyy` | FAIL got=?? | **PASS EXIT=42** | **C.2** (target cluster) — Cap pass-by-value cross-fn |
-  | (cap_table_basic partial) | FAIL got=10 | FAIL got=30 | C.2 sizeof + 比较 fix 后, test 4 cross-fn struct field access 还 fail (`tbl.data as i64 + tbl.len` 走 struct pass-by-value, emit_copy 1-to-1 gap 仍 ACTIVE — 单独 bug, deferred v2.11.14) |
-- **诚实记录 per [[feedback_fix_evaluation_rule]]**: **partial closure 14/44 (32%)** (跟 v2.11.10 + v2.11.11 + v2.11.12 plan "100% / 6/6 / full closure" 三次 wrong 教训形成对比 — v2.11.13 plan honest scope (Scenario A iterative + "FLIP-gate") 仍 predict wrong cluster scope 但 FLIP-gate mechanism catch over-shoot → scope DOWN 正确执行):
-  - **Plan 估 3-way wrong**: LOC 30-50 → 实测 **1 LOC 真修** (97% 缩); Cluster C.2 (3 tests) → 实测 **cross-cluster 7+ tests closure**; 根因 sizeof default → 实测 **cne substring silent-skip**
-  - self-backend **78/115 → 85/115 PASS** (+7 FLIP, total +14 from v2.11.11 baseline 71/115); 30 FAIL (-14 from 44 baseline = 32% closure)
-  - **FLIP +7 触发 stop threshold 5 → scope DOWN v2.11.13** (per user 2026-09-15 "FLIP count 逼近 5 立即停手" + plan hard gate "FLIP count ≥ 4 → 停手 ship 当前 progress")
-  - Iter 5 (C.4 float f32/d) + Iter 6 (C.7 defer LIFO) + Iter 7 (B observe) 全 deferred v2.11.14
-- **NEW ship gate audit** (per [[feedback_codegen_amd64_run_zerobyte]]):
-  - cnel in `_regress_cap_table_basic.s` pre-fix `addl src1, src2` + `cmpl $0, sum`, post-fix `cmpl src2_off(%rbp), %rax` + `setne %al` + `movzbl %al, %eax`
-  - **big_test self-backend EXIT=57 preserved** (6/6 closure hold, no regression on v2.11.12 ship)
-- **Stage 2 N=5 jhyy 编 jhyy closure PASS** + **QBE fallback 115/135 PASS preserved** + **byte-equal-amd64 10/10 preserved** + **fixed-point N=3,4,5 .il byte-equal preserved**
-- **jhyy.exe.sha256 refresh** (`c9c274db4318ac84fb046bef0f75c2ef7d0bda379984b5581f46b318c0648c97`)
-- **累计 W-074.6 family closed ~328 LOC** (v2.11.12 325 + v2.11.13 1 LOC 真修); 剩余 ~172 LOC (struct pass-by-value emit_copy 1-to-1 gap + stack-slot-reuse in other emit paths + emit_ret 不 mov %t1 → %eax + extsw 之外其他 sub-family) 留 v2.x 中期 V2-D
-
-**完整 changelog**: [`docs/logs/v2/changelog-v2.11.0.md`](docs/logs/v2/changelog-v2.11.0.md) § v2.11.13
-**Plan**: [`docs/plans/v2/v2.11.13-plan.md`](docs/plans/v2/v2.11.13-plan.md)
+> ⚠️ v4.2.x / v4.4.0 是**性能线**，与 v4.0.x 的编号不按序 —— 排期见
+> [`docs/FACTS.md`](docs/FACTS.md) § 4。
 
 ---
 
-### v2.11.14 — 2026-09-15 — **axis-v2 W-074.7 phi merge gap 真修 attempt → hard STOP #3 (match.jhyy regress) → 0/31 closure (0%); Iter 1 source revert; Iter 2/3/4 全 deferred v2.11.15** (axis-v2 only; main 待 merge)
+## 往前的版本
 
-**Tag**: `v2.11.14` (axis-v2 branch)
-**Status**: W-074.7 phi merge gap **⏸ DEFERRED** (4 sub-bugs 真修 attempt → revert per hard STOP #3); **0/31 cluster closure (0%)**, baseline 84/115 PASS 持平.
-
-**Highlights**:
-
-- **W-074.7 phi merge gap 真修 attempt + revert** (axis-v2 source revert per hard STOP #3):
-  - 设计: CGState struct 加 4 fields (`phi_resolutions: *u8` + `phi_count: i64` + `cur_block_name: *u8` + `cur_block_name_len: i64`),64 entries × 80 bytes = 5KB arena alloc;`cg_record_phi_resolution` + `cg_lookup_phi_resolution` 双向 API;`cg_state_set_cur_block_name` + `cg_state_cur_block_name` getter;emit_phi 改写从 documented noop → real parse loop;emit_jmp 加 lookup block 在 `jmp .L<name>` 前 emit `mov src_slot → dest_slot` if hit;malloc state_buf 160 → 256 (CGState struct 加 4 fields 后总 24 × 8 ≈ 192 bytes)
-  - **Plan v2.11.14 Iter 1 估 "C.3 12 tests target ~100-150 LOC FLIP +11-12 clean / +6-8 likely / +0-3 worst" 4-way wrong 预测**:
-    - LOC partial correct (实测 ~120 LOC source attempt)
-    - Cluster wrong (实测 0/12 PASS)
-    - 根因 partially correct (实测 4 sub-bugs 复合 — A: emit_jmp lookup `(arm_name, merge_label)` key 但 dest_id alignment 错 → match.jhyy runtime crash `NTSTATUS_0xCEFD0000`; B: OR pattern `_|_` 不 emit 各成员独立 arm block 走 default `enum_default`; C: payload pattern `Some(v) => v` 的 `v` slot uninit; D: enum_match_arm_tag_check 缺 emit `cmpl $tag_value, discriminator`)
-    - FLIP est wrong (+11-12 → -1, hard STOP #3 trigger)
-  - **二次 sub-bug (compile-time crash)**: malloc state_buf 160 → 必须 256 (CGState struct 加 4 fields 后总 24 × 8 ≈ 192 bytes, 160 不够 → emit_call/emit_ctrl 写未映射内存 → process crash on first emit, 首 build 报 "5/115 passed, 110 failed")
-  - **hard STOP #3 (currently-PASSing test regression)** triggered per plan hard gate "match.jhyy 在 C.3 fix 后 FAIL → revert + redesign" → source revert 干净 `git checkout HEAD -- 4 files`
-- **诚实记录 per [[feedback_fix_evaluation_rule]]** (跟 v2.11.10 + v2.11.11 + v2.11.12 + v2.11.13 plan 4 次 wrong 预测形成对比 — v2.11.14 plan honest scope 第 5 次 partial wrong):
-  - 0/31 closure (0%); self-backend **84/115 PASS = baseline 持平** (no new cluster closure)
-  - match.jhyy pre-fix + post-revert **PASS** 维持 (silent win from v2.11.13 Iter 4 cne substring preserved)
-  - baseline gate 全 preserved (byte-equal D26 5/5, byte-equal-amd64 10/10, big_test self-backend EXIT=57, QBE fallback 115/135)
-  - **hard STOP #3** triggered per user 2026-09-15 "FLIP count 逼近 5 立即停手" directive → scope DOWN v2.11.14 (1 docs commit only, source revert 干净)
-  - Iter 2 (C.5 slice copy 16B vs 8B) + Iter 3 (C.4 float XMM emit gap) + Iter 4 (A1-XMM return register) 全 deferred v2.11.15
-- **NEW ship gate audit** (per [[feedback_codegen_amd64_run_zerobyte]]):
-  - source revert 干净 baseline maintained
-  - match.jhyy PASS 恢复 (regress baseline gate)
-  - self-backend regress 84/115 (= baseline 持平, no new cluster closure)
-  - **big_test self-backend EXIT=57 preserved** (6/6 closure hold, no regression on v2.11.13 ship)
-- **Stage 2 N=5 jhyy 编 jhyy closure PASS** + **QBE fallback 115/135 PASS preserved** + **byte-equal-amd64 10/10 preserved** + **fixed-point N=3,4,5 .il byte-equal preserved**
-- **jhyy.exe.sha256 refresh** (`774ec8347b4ce629c3f8447755ffdc1789dd7e593df358a72eb32c23f012ac09`)
-- **累计 W-074.6 family closed ~328 LOC + W-074.7 family NEW ⏸ DEFERRED** (4 sub-bugs ~55-100 LOC); 剩余 ~227-272 LOC 留 v2.11.15 + v2.x 中期 V2-D
-
-**完整 changelog**: [`docs/logs/v2/changelog-v2.11.0.md`](docs/logs/v2/changelog-v2.11.0.md) § v2.11.14
-**Plan**: [`docs/plans/v2/v2.11.14-plan.md`](docs/plans/v2/v2.11.14-plan.md)
-
----
-
-### v2.11.8 — 2026-09-13 — **axis-v2 W-074.7.8 真修 — 4/5 EXIT exact closure** (axis-v2 only; main 待 merge)
-
-**Tag**: `v2.11.8` (axis-v2 branch)
-**Status**: W-074.7.8 derived-address tracking **PARTIAL closure** (4/5 EXIT exact); big_test runtime STATUS_INTEGER_OVERFLOW 0xC0000095 deferred v2.11.9+ (W-074.7.9 NEW)
-
-**Highlights**:
-
-- **Derived-address tracking 真修** — bitmap flag 任何 temp holding derived address (alloc-result + binop add/sub on pointer + copy of address-holder); emit_load/store/loadsub 改 full dispatch (slot vs indirect `mov<size> (%r8), %reg` via %r8 scratch); emit_binop 产生 derived-address 时 flag result; emit_copy propagate flag (TEMP + FNARG paths)
-- **Self-referential slot bug 真修** — v2.11.5 design 让 pointer-slot == region offset, lea+mov 自我覆盖;真修 SKIP `cg_record_temp_slot`, pointer-slot 走 formula `-(32+t*8)` Win (formula 跟 region 物理分离)
-- **FNARG flag propagate** — l-typed fnarg (struct param pointer) 走 FNARG path 不 flag propagate → struct_val_pass EXIT 6→35 flip 真修
-- **byte-equal 五件套 4/5 EXIT exact closure**:
-  - hello=42 ✅ (跟 baseline 一致)
-  - fib_renamed=40 (= 832040 mod 256, 跟 baseline 一致) ✅
-  - struct_val_pass=35 (从 v2.11.6 EXIT=6 → v2.11.8 EXIT=35, 真修 closure) ✅
-  - nested_struct_deep=22 (从 v2.11.6 EXIT=35 → v2.11.8 EXIT=22, 真修 closure) ✅
-  - struct_val_assign=30 ✅ (跟 baseline 一致)
-  - big_test = STATUS_INTEGER_OVERFLOW 0xC0000095 ⚠️ (separate deeper bug, **deferred v2.11.9+ W-074.7.9 NEW**)
-- **QBE fallback 115/115 PASS preserved** + **self-backend 5/5 link preserved** (v2.11.6 closure 不 regress)
-- **self-backend regress +2 flips** (56/115 → 58/115, 远低于 +5 scope DOWN trigger per [[feedback_codegen_amd64_multifn]])
-- **D43 closure v1↔v2 .il sha HOLD** (v2/v3/v4/v5 sha = `3f0bfb...` 一致) + **byte_equal_amd64 10/10 PASS preserved** + **fixed_point N≥3 PASS preserved**
-- **NEW ship gate per [[feedback_codegen_amd64_run_zerobyte]]**: `main_jhyy.s` = 12 行 / 207 bytes (≥ 100 bytes 阈值, ≥ baseline, no truncation)
-- **jhyy.exe.sha256 refresh**: `883680d966cc79a9bf4e7df851e2441fb8bd9fbfe1a0924cc9adaa38c1dca13a`
-
-**完整 changelog**: [`docs/logs/v2/changelog-v2.11.0.md`](docs/logs/v2/changelog-v2.11.0.md) § v2.11.8
-**Plan**: [`docs/plans/v2/v2.11.8-plan.md`](docs/plans/v2/v2.11.8-plan.md)
-
----
-
-### v2.0 阶段 — 2026-09-04 — **v2.0 阶段全 ship ✅**
-
-**Tags**: `v2.3.0` (commit `54d93df`) + `v2.4.0` (commit `7fb735b`); 阶段内 v2.0.0 / v2.1.0 / v2.2.0 未打 tag (per 2026-09-01 user 决定:阶段首批 ship 即可打 tag)
-**Status**: v2.0 阶段 (v2.0.0 → v2.4.0) 全 ship;下一步 = **v3.0 3a-3f** (inline asm / `#[naked]` / volatile / `#[link_section]` / memory barrier / `#[no_std]` 软 ship) 等 user 启动;v2.x 中/末 ‖ v3.x 异步并行。
-
-**Highlights**:
-
-- **Multi-target dispatcher** — `jhyy compile --target=amd64_win` / `--target=amd64_win_freestanding` / `--target=amd64_sysv_stub`(stub fatal,推 v2.x 中/末)
-- **hello-freestanding.efi 跑 OVMF 5/5 PASS** — QEMU + OVMF (q35 machine) 启动 + FAT12 image + serial capture;ConOut->OutputString 间接调用通过 efi_call_via_ptr
-- **spec 锁定**: lang-spec § 17-20 (OS 启动前置 + freestanding + Debug + Wire); abi § 13/14 (Multi-target ABI + wire types)
-- **byte-equal 三件套** — `.il + .s + .exe` 三层 byte-equal 跨 jhyy_v1 ↔ jhyy_v2;D26 reproducibility recipe (`gcc -g0 -Wl,--build-id=none` + `SOURCE_DATE_EPOCH=1234567890` via `jh_setenv`)
-- **Stage 2 N=4 closure re-baselined** — sha `51376ce5...` (per D43 阶段性 self-equal hold,v2.4.0 Stage 1+2 触发 src0 emit 微变 → 重 baseline)
-- regress baseline 104/104 PASS + 4 SKIP (108 total)
-- ACTIVE workaround 数 → 0;W-057 / W-058 仍 DEFERRED-to-v2.x 中/末(QBE 自写时修)
-
-**完整 changelog**: 5 个 umbrella = [`docs/logs/v2/changelog-v2.0.0.md`](docs/logs/v2/changelog-v2.0.0.md) / [v2.1.0](docs/logs/v2/changelog-v2.1.0.md) / [v2.2.0](docs/logs/v2/changelog-v2.2.0.md) / [v2.3.0](docs/logs/v2/changelog-v2.3.0.md) / [v2.4.0](docs/logs/v2/changelog-v2.4.0.md)
-
----
-
-### v1.8.3 — 2026-08-29 — **v1.x FINAL** 🎯
-
-**Tag**: `v1.8.3` `98c8272`
-**Status**: v1.x 终结,v0.9 wip 冻结;v2.0 阶段 ship ✅ 走完 (2026-09-04),下一步 = v3.0 3a-3f 等 user 启动。
-
-**Highlights**:
-
-- **Stage 2 N=4 byte-equal 自举闭环稳定** — `jhyy_v1 → v2 → v3 → v4 → v5` 产出 byte-equal `.il` (sha `03a1cdd4...` v1.8.0 → `51376ce5...` v2.4.0 re-baseline)
-- **Installer v1.8.3 WiX** — UCPD.sys Deny ACE bypass + Windows 文件关联 4 层清理 (HKCR + UserChoice + OpenWithProgids + jhyy_auto_file ProgId)
-- **`jhyy-setuc.exe`** reverse-engineered Mozilla UCPD Hash 算法 (C# port),try/finally UCPD restart
-- **v1.7.x 32 candidates 完整 ship**(Stage 1-5 + v1.7.1/2/3 patches)
-- **spec v1.3.0 锁定** = v1.x FINAL marker; ACTIVE workaround 数 = 0
-
-**完整 changelog**:[`docs/logs/v1/changelog-v1.8.0.md`](docs/logs/v1/changelog-v1.8.0.md) (umbrella)
-
-## 版本轴速览
-
-| 轴 | 范围 | 当前状态 |
-|---|---|---|
-| **v0.x** | C 编译器自身 (`compiler/src/*.c`) | 🟢 frozen at v1.0.0 baseline |
-| **v1.x** | jhyy 自举 (`compiler/src0/*.jhyy`) | 🟢 **v1.8.3 shipped = v1.x FINAL** |
-| **v2.x** | QBE 完整重写 + amd64_sysv / freestanding | ✅ **v2.0 阶段 ship** (2026-09-04, tags `v2.3.0` / `v2.4.0`); v2.x 中/末 ⏳ 未启动 (QBE 自写 / amd64_sysv 实 impl / N 代 fixed point) |
-| **v3.x** | 语言特性扩展 (inline asm / `#[no_std]` / `&mut` + lifetime) | ⚪ next (v2.0 阶段 ✅ ship, 3a-3f 等 user 启动) |
-
-## v1.x ship 时间线
-
-| Version | Date | Tag / Commit | Highlights |
-|---------|------|--------------|-----------|
-| **v1.8.3** | 2026-08-29 | `98c8272` | installer v1.8.3 WiX + UCPD.sys bypass |
-| v1.8.2 | 2026-08-28 | — | Win10 Feb 2024+ UCPD.sys Deny ACE bypass + 4-layer file assoc cleanup |
-| v1.8.1 | 2026-08-28 | — | `jhyy-setuc.exe` reverse-engineered Mozilla 算法 |
-| v1.8.0 | 2026-08-28 | — | W-059 defer codegen 真修 + W-060/W-061 INVALID 闭环 |
-| v1.7.3 | 2026-08-28 | `57f89dc` | 32 candidates 完整 ship; spec v1.3.0 locked |
-| v1.7.0 | 2026-08-15 | — | EXPECT-ERROR annotation + Stage 1-4 |
-| v1.6.0 | 2026-08-13 | — | regress.py 收口 + baseline binary tracking |
-| v1.5.10 | 2026-08-27 | `c057aa3` | RunOnce auto-install VSCode ext |
-| v1.0.0 | 2026-08-10 | `eabee0d` | 真自举 byte-equal 闭环 (Stage 2 N=3) — jhyy 编 jhyy 里程碑 |
-
-**完整时间线 + 每版本 patch 详情**:`docs/CHANGELOG.md` (索引) → `docs/logs/v1/` (per-version umbrella changelog)
-
-## 下一阶段
-
-**v3.0 3a-3f** (语言扩展 OS-required) 等 user 启动 — v2.0 阶段 ✅ ship 走完(2026-09-04);**v2.x 中/末 跟 v3.x 异步并行**(QBE 自写 / amd64_sysv 实 impl / N 代 fixed point 仍待 v2.x 中/末) — OS 准备:
-
-- 路线图: [`docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md`](docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md)
-- OS 启动链路: [`docs/archive/v2-v3/v2.0.0-os-prep.md`](docs/archive/v2-v3/v2.0.0-os-prep.md)
-- 跨项目协调: [`docs/coordination/JHYY_OS侧设计终版.md`](docs/coordination/JHYY_OS侧设计终版.md)
-
-## 编写约定
-
-per `feedback_changelog_umbrella.md`:
-
-1. **vX.Y 轴只 1 个 umbrella changelog** — 不创建 `changelog-vX.Y.Z.md` / `changelog-vX.Y.Z-wNNN.md` 之类 standalone
-2. **Umbrella 包含**:承接上版本 + 触发原因 + scope 决策 + sprint 状态总览 + 关键数字 + 决策点 + 跨 sprint 影响
-3. **Patch 版本**(vX.Y.Z where Z>0) 内容回填到 vX.Y 的 umbrella changelog
-4. **本文件**(根 `CHANGELOG.md`) 是 GitHub Release / 包管理器入口,**不重复** `docs/CHANGELOG.md` 内容
+- **v3.x**（语言特性扩展，终结于 v3.4.2）· **v2.x**（QBE 重写 + 多目标，终结于 v2.16.0）·
+  **v1.x**（自举，终结于 v1.8.3）· **v0.x**（C 编译器，冻结于 v1.0.0 baseline）
+  ⇒ 全部在 [`docs/archive/logs/`](docs/archive/logs/)。
+- **逐版本的 sprint 计划** ⇒ [`docs/archive/plans/`](docs/archive/plans/)。

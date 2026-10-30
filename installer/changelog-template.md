@@ -45,11 +45,11 @@ ${MAIN_CHANGES}
 
 ## 完整 changelog
 
-见 [`docs/logs/v4/changelog-v4.0.0.md`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/logs/v4/changelog-v4.0.0.md)(v4.x 的 umbrella;各版本的段都在里面)
+见 [`docs/archive/logs/v4/changelog-v4.0.0.md`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/logs/v4/changelog-v4.0.0.md)(v4.x 的 umbrella;各版本的段都在里面)
 
 ## 第三方包管理 (manifest reference, 尚未提交到上游)
 
 - **winget**: `installer/distribution/winget/manifests/j/JiHuiYiYou/JHYY/${VERSION}/` — 3 manifest 文件 (version + installer + locale en-US)
 - **scoop**: `installer/distribution/scoop/jhyy.json` — single-file manifest
 
-实际 PR 到 [winget-pkgs](https://github.com/microsoft/winget-pkgs) / [ScoopInstaller/Main](https://github.com/ScoopInstaller/Main) 待排期 (per `docs/plans/v1/v1.5.0任务清单 + 概要设计.md` 决策-11)。
+实际 PR 到 [winget-pkgs](https://github.com/microsoft/winget-pkgs) / [ScoopInstaller/Main](https://github.com/ScoopInstaller/Main) 待排期 (per `docs/archive/plans/v1/v1.5.0任务清单 + 概要设计.md` 决策-11)。

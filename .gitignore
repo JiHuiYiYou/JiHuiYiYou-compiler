@@ -76,10 +76,14 @@ __pycache__/
 .agents
 skills-lock.json
 # 项目级 Claude Code 协作入口
-# 2026-10-15 user 决定放出版本控制。此前 CLAUDE.md 不随仓库公开,后果是
-# 「索引表 0 ACTIVE / 下一动作 = tag v4.0.0 final」这类状态断言没有 review 轨迹,
-# 也无法追溯是哪次改动让它过时。现在公开跟踪。
-# mcp-jhyy/CLAUDE.md + docs/internal/CLAUDE.md 本来就是公开跟踪的。
+# 2026-10-30 user 决定改回**不入仓**。CLAUDE.md 的本职是「给 agent 的本地提示词」,
+# 不是项目文档:它只该放恒为真的内容(本机环境 + 不会过时的规矩 + 知识索引),
+# 而「现在什么状态」必须去 docs/FACTS.md —— 放在 CLAUDE.md 里下一个 sprint 就过期。
+# 仓内需要留痕的部分 ⇒ docs/FACTS.md(事实) + CONTRIBUTING.md § 工作规约(通用规约)。
+# 注:2026-10-15 曾短暂决定公开跟踪,理由是「状态断言要有 review 轨迹」——
+# 那条诉求已由 docs/FACTS.md + scripts/dev/docs_facts_check.py 满足。
+CLAUDE.md
+
 # codegraph 索引（daemon.pid mtime 抖动会污染 git status）
 .codegraph/
 

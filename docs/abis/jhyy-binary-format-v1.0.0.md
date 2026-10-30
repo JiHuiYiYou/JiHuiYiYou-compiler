@@ -475,7 +475,7 @@ struct RelocEntry {                         // 8-aligned
 以下条目是**设计文档需要讨论的开放点**,不是 roadmap 时间:
 
 1. **PIE / ASLR 支持时机**:§ 4 bit 6 PIE 标志预留,但 .reloc table 何时启用
-2. **静态 vs 动态链接**:`reloc_table_off = 0` MVP 静态,M11+ 是否引入 shared lib(per `v3.x-language-expansion.md` 3l std lib 影响)
+2. **静态 vs 动态链接**:`reloc_table_off = 0` MVP 静态,M11+ 是否引入 shared lib(per `../archive/plans/roadmap/v3.x-language-expansion.md` 3l std lib 影响)
 3. **DWARF 版本**:v5(2017 最新)还是 v4?跟 QEMU / GDB 默认版本对齐
 4. **`.jhyy_coroutine` 格式**:M11+ coroutine state machine 描述格式(M11 没 sprint,只是预留)
 5. **Section kind 9-255 分配策略**:kernel-specific / language-specific 怎么命名空间

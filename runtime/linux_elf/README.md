@@ -1,108 +1,54 @@
-# Linux ELF runtime for jhyy
+# runtime/linux_elf — Linux ELF 运行时
 
-Statically-linked, freestanding Linux ELF64 runtime for the **jhyy**
-self-hosting compiler (`amd64_sysv_freestanding` target).
+> `amd64_sysv_freestanding` 目标用的**静态链接、无 libc** 的 Linux ELF64 运行时。
 
-Mirrors the UEFI freestanding runtime template from v2.4.0
-(`compiler/tests/examples/hello-freestanding/`), but for **Linux userspace**
-(SysV AMD64 ABI) instead of UEFI (MS x64 + EFIAPI calling convention).
-
-## Files
-
-| File | Purpose |
+| 文件 | 作用 |
 |---|---|
-| `crt0.S` | `_start` entry point: pop argc/argv, align stack to 16-byte (SysV § 3.2.2), zero frame pointer, `call main_jhyy` (jhyy convention per W-65), `SYS_exit` syscall with return code in `%edi` |
-| `link.ld` | Linker script: `OUTPUT_FORMAT(elf64-x86-64)`, `ENTRY(_start)`, 2 `PT_LOAD` PHDRs (text RX + data RW), standard `.text/.rodata/.data/.bss` layout |
-| `README.md` | This file — build invocations + verify commands |
+| [`crt0.S`](crt0.S) | `_start` 入口 —— SysV psABI § 3.2.2 的 16 字节栈对齐 + Linux x86_64 系统调用表 |
+| [`link.ld`](link.ld) | 链接脚本 —— 位置无关的静态可执行文件，2 个 PT_LOAD（text RX + data RW） |
 
-## Build (jhyy → ELF executable)
+产出的 ELF：**无 glibc / 无 libc 依赖**（freestanding 运行时自己管一切），
+entry = `_start`，`ET_EXEC` + `EM_X86_64`。
+
+---
+
+## 怎么用
+
+### 两段式（正常路径）
 
 ```bash
-# From repo root (JiHuiYiYou-axis-v2):
-# 1. Compile jhyy source to amd64_sysv_freestanding target assembly:
-./compiler/build/bin/jhyy.exe compile \
-    --target=amd64_sysv_freestanding \
-    compiler/tests/examples/hello.jhyy \
-    -o compiler/build/bin/hello
+# 1. Windows 侧：只出 .s,不链接(Windows 上链不出 ELF)
+jhyy compile hello.jhyy --target=amd64_sysv_freestanding --no-link -o hello
 
-# jhyy produces:
-#   - compiler/build/bin/hello.il      (QBE IL, unused for elf link)
-#   - compiler/build/bin/hello.s       (x86_64 assembly)
-#   - compiler/build/bin/hello.exe     (Windows PE, unused on Linux)
-
-# 2. Link with crt0 + linker script (NOT jhyy's Windows .exe):
+# 2. Linux 侧：链 + 跑
 gcc -nostdlib -static -T runtime/linux_elf/link.ld \
-    -o /tmp/hello.elf \
-    runtime/linux_elf/crt0.S \
-    compiler/build/bin/hello.s
-
-# 3. Verify the ELF binary:
-readelf -h /tmp/hello.elf      # ET_EXEC, EM_X86_64, Entry=0x400000+...
-file /tmp/hello.elf            # ELF 64-bit LSB executable, x86-64
+    -o hello.elf runtime/linux_elf/crt0.S hello.s
+./hello.elf
 ```
 
-## Run
-
-### On Linux host
+完整 6 用例的门（自带 docker gcc:12 chain）：
 
 ```bash
-chmod +x /tmp/hello.elf
-/tmp/hello.elf                 # runs main_jhyy, returns main_jhyy's %eax as exit code
-echo $?                        # exit code
+bash compiler/tests/bootstrap/sysv_full_regress.sh --runs=1
 ```
 
-### On Windows via WSL (Windows Subsystem for Linux)
+### 手工验证产物
 
 ```bash
-# Cross-build on Windows:
-gcc -nostdlib -static -T runtime/linux_elf/link.ld \
-    -o /tmp/hello.elf \
-    runtime/linux_elf/crt0.S \
-    compiler/build/bin/hello.s
-
-# Run via WSL (binary works because it's Linux x86_64, Windows Linux
-# Subsystem can load it directly):
-wsl /tmp/hello.elf
+readelf -h hello.elf    # 验 ET_EXEC + EM_X86_64 + entry _start
 ```
 
-### On Windows via QEMU (if installed)
+---
 
-```bash
-qemu-x86_64 /tmp/hello.elf     # QEMU user-mode emulation, no Linux needed
-```
+## 约定
 
-## ABI compliance
+`jhyy` 的 `cmd_run` 前置检查（per W-65）会检查这个运行时的调用约定：
+`_start` 由 crt0 提供，用户程序从 `main_jhyy` 进入。
 
-Per **System V AMD64 ABI** ([psABI](https://refspecs.linuxfoundation.org/elf/x86-64-abi-0.99.pdf)):
+---
 
-- **§ 3.2.2** Stack alignment: 16-byte boundary at function entry → `andq $-16, %rsp` after `popq %rdi`.
-- **§ 3.2.2** Frame pointer: not used (`xorq %rbp, %rbp`) → enables better backtraces.
-- **§ 3.2.3** Argument passing: not applicable here (no cross-fn args in crt0; main_jhyy called with no args — argc/argv passed via global / stack).
-- **§ A.4** Eightbyte classifier: N/A (no struct args in crt0).
+## 相关
 
-Per **Linux x86_64 syscall table** (kernel `<asm/unistd.h>`):
-- `SYS_exit` = `60` (in `%rax`), exit code in `%rdi` (low 32 bits used by kernel).
-
-## Cross-compile workflow integration
-
-The `compiler/build/bin/regress.py` `--cross {wsl,docker,auto,none}` flag
-(v2.7.0 argparse stub; v2.7.1 Commit 2 wires it) drives this build flow:
-
-- `--cross=wsl`: invoke `wsl.exe -d <distro> bash -c "<build invocations>"` to compile + run on Linux host
-- `--cross=docker`: invoke `docker run --rm -v $PWD:/work -w /work ubuntu:22.04 bash -c "<build invocations>"` to compile + run in Linux container
-- `--cross=auto`: probe `wsl.exe` then `docker` on PATH; fall back to `--cross=none` (SKIP)
-- `--cross=none`: explicitly SKIP (Windows host without WSL/Docker)
-
-## Status (2026-09-08)
-
-- **Phase 1 of v2.7.1**: runtime files created, build verify pass-through.
-- **Phase 2 of v2.7.1**: `regress.py --cross` wire (subprocess + auto-probe).
-- **Phase 3 of v2.7.1**: D43 closure re-baseline + docs + ship.
-
-## References
-
-- v2.4.0 hello-freestanding.efi OVMF 5/5 PASS — UEFI runtime template (mirrors crt0/link.ld structure but for EFI, not Linux)
-- W-65 cmd_run main_jhyy pre-check: `compiler/src0/driver.jhyy`
-- SysV psABI: § 3.2.2 (stack alignment), § 3.2.3 (arg passing), § A.4 (eightbyte classifier)
-- Linux x86_64 syscall table: `SYS_exit = 60`
-- ELF spec: `ET_EXEC`, `EM_X86_64`, `PT_LOAD` program headers
+- 多 target 与交叉编译 ⇒ [`docs/internal/build.md`](../../docs/internal/build.md) § 多 target
+- ABI（SysV 分类）⇒ [`docs/abis/jhyy-abi-v4.0.0.md`](../../docs/abis/jhyy-abi-v4.0.0.md)
+- 目标三元组清单 ⇒ [`docs/FACTS.md`](../../docs/FACTS.md) § 5

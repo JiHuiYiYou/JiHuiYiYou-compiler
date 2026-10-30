@@ -8,7 +8,7 @@
 
 **Statically typed. Expression-oriented. Compiled to native by a self-written amd64 backend.**
 
-[![Version](https://img.shields.io/badge/version-v4.1.2-00d4aa)](docs/logs/v4/changelog-v4.0.0.md)
+[![Version](https://img.shields.io/badge/version-v4.1.2-00d4aa)](docs/archive/logs/v4/changelog-v4.0.0.md)
 [![Status](https://img.shields.io/badge/self--host-byte--equal-success)](#status-v412)
 [![Backend](https://img.shields.io/badge/backend-self--hosted%20amd64-blue)](#architecture)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#install)
@@ -260,12 +260,12 @@ JiHuiYiYou-compiler/
 | `fixed_point.sh` | **17 PASS / 0 FAIL** (N=10, `.il` and `.s` byte-equal across generations) |
 | `artifact_checks.sh` | **17 PASS / 0 FAIL** |
 | `closure_check.sh` | PASS (v2.s == v3.s, byte-identical) |
-| ACTIVE workarounds | **1** — [`W-170`](docs/internal/workarounds.md): `jhyy build` doesn't apply `#[link_section]` |
+| ACTIVE workarounds | **1** — [`W-170`](docs/workarounds.md): `jhyy build` doesn't apply `#[link_section]` |
 | `jhyy-installer-4.1.2.exe` | shipped (~55 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
 | `jhyy-compiler-4.1.2.msi` | shipped (~28 MB, includes `jhyy-setuc.exe` + bundled toolchain) |
 | `jhyy-lang-4.1.2.vsix` | shipped (VS Code extension) |
 
-**v4.x umbrella changelog** — [`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md)
+**v4.x umbrella changelog** — [`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md)
 is the single per-axis changelog (per the project's umbrella convention).
 
 ---
@@ -274,7 +274,7 @@ is the single per-axis changelog (per the project's umbrella convention).
 
 v4.x is the post-merge axis. Plans live one per version slot under
 [`docs/plans/v4/`](docs/plans/v4/README.md) — the authoritative index, plus
-[`docs/plans/v4/version-schedule.md`](docs/plans/v4/version-schedule.md) for the schedule.
+[`docs/archive/plans/v4/version-schedule.md`](docs/archive/plans/v4/version-schedule.md) for the schedule.
 
 **Performance line** (self-written backend — the current main line):
 
@@ -302,11 +302,11 @@ Version numbers on reserved slots are **placeholders** — each plan carries a
 - **Binary format** (design doc, not implemented): [`docs/abis/jhyy-binary-format-v1.0.0.md`](docs/abis/jhyy-binary-format-v1.0.0.md)
 - **Architecture**: [`docs/internal/architecture.md`](docs/internal/architecture.md)
 - **Build & run**: [`docs/internal/build.md`](docs/internal/build.md)
-- **Tests**: [`docs/internal/tests.md`](docs/internal/tests.md)
-- **Workarounds ledger**: [`docs/internal/workarounds.md`](docs/internal/workarounds.md)
-- **Conventions**: [`docs/internal/conventions.md`](docs/internal/conventions.md)
-- **Changelog**: [`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md) (v4 umbrella)
-- **Archived plans**: [`docs/archive/v2-v3/`](docs/archive/v2-v3/) (v2/v3 historical — superseded)
+- **Tests**: [`docs/FACTS.md`](docs/FACTS.md)
+- **Workarounds ledger**: [`docs/workarounds.md`](docs/workarounds.md)
+- **Conventions**: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- **Changelog**: [`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md) (v4 umbrella)
+- **Archived plans**: [`docs/archive/plans/v2-v3/`](docs/archive/plans/v2-v3/) (v2/v3 historical — superseded)
 
 ---
 

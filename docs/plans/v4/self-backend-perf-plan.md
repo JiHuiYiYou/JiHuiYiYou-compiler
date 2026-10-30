@@ -15,7 +15,7 @@
 
 ## 〇、复核:旧报告哪些结论还站得住
 
-[`docs/plans/v4/JHYY自研后端pass查缺报告.md`](JHYY自研后端pass查缺报告.md)(2026-10-25 审计 v2.x 快照)
+[`docs/archive/plans/v4/JHYY自研后端pass查缺报告.md`](../../archive/plans/v4/JHYY自研后端pass查缺报告.md)(2026-10-25 审计 v2.x 快照)
 **仍然成立**:
 
 - regalloc 实现**未接线**(`codegen_amd64.jhyy:380-383` 仍是注释掉的)
@@ -170,7 +170,7 @@ alloc_pool_size = 8192 + per_fn_alloc
 
 | 门 | 结果 |
 |---|---|
-| `regress jhyy.exe` | ✅ **257 PASS + 0 XFAIL + 0 failed + 20 SKIP**(277 total,与修前基线一致) |
+| `regress jhyy.exe` | ✅ 全绿(基线见 [FACTS § 2](../../FACTS.md#2-回归与门)) |
 | `artifact_checks.sh` | ✅ **16 PASS / 0 KNOWN-FAIL / 0 FAIL / 0 SKIP**(14 → 16,多的两条是本版新增) |
 | `closure_check.sh` | ✅ PASS(v2.s == v3.s,sha `8f706fe76d5fc0b7`) |
 | `fixed_point.sh` | ✅ **17 PASS / 0 FAIL / 0 INFO**(N=10) |
@@ -318,7 +318,7 @@ v4.4 的寄存器分配器会**同时**改寄存器名、栈槽编号、帧布�
 **默认仍关**,靠 flag 开。
 
 **三条硬约束必须与阶段二同期落地** —— 前两条来自 OS 线的审核(见
-[`docs/plans/v4/version-schedule.md`](version-schedule.md) § 五.5),第三条是阶段一的延续:
+[`docs/archive/plans/v4/version-schedule.md`](../../archive/plans/v4/version-schedule.md) § 五.5),第三条是阶段一的延续:
 
 | # | 约束 | 为什么必须同期 | 形状 |
 |---|---|---|---|
@@ -462,21 +462,21 @@ eligible **58070 = 58070**、池满 **1345 = 1345**、分配 56725 vs 56719(差 
 > 验收基线还停在 163/163(现 257)⇒ **它是一份会误导未来规划的僵尸排期表**。
 >
 > **那 12 项没丢** —— 清单与排序现由
-> [`docs/plans/v4/version-schedule.md`](version-schedule.md) § 四承担;详细 scope 在 git 历史,
+> [`docs/archive/plans/v4/version-schedule.md`](../../archive/plans/v4/version-schedule.md) § 四承担;详细 scope 在 git 历史,
 > 启动某项时再翻。
 
 | 原 backlog 项 | 处置 | 现在在哪 |
 |---|---|---|
 | 1 M5 工具链闭环 | Part 1/2 已完成;**Part 3 = v4.5**;Part 4 并入 v4.5 | 本文 § 三 v4.5 |
 | 8 基本优化 pass | **重做** = v4.4.5+(设计前提已过时:原方案假设「后端有 peephole 兜底」) | 本文 § 三之二 |
-| 2/3/4/5/6/7/9/10/11/12 | 范围不变,**排到 v4.6+** | `version-schedule.md` § 四 |
+| 2/3/4/5/6/7/9/10/11/12 | 范围不变,**排到 v4.6+** | `../../archive/plans/v4/version-schedule.md` § 四 |
 
 ⇒ **规划面收敛为三份**:`self-backend-perf-plan.md`(当前做什么)·
-`version-schedule.md`(第几个版本做什么)· `docs/coordination/`(OS 线,与本线正交)。
+`../../archive/plans/v4/version-schedule.md`(第几个版本做什么)· `docs/coordination/`(OS 线,与本线正交)。
 
-⚠️ **2026-10-30:OS 线已并入版本轴**(`version-schedule.md` § 五「OS 线接入版本轴」)
+⚠️ **2026-10-30:OS 线已并入版本轴**(`../../archive/plans/v4/version-schedule.md` § 五「OS 线接入版本轴」)
 —— 两套轴(P0–P4.5 与 v4.x)此前**没有映射**,而 P2 的「linear scan 寄存器分配」
-**就是本线的 v4.4**。⇒ § 三的三个硬接口见 `version-schedule.md` § 五.5。
+**就是本线的 v4.4**。⇒ § 三的三个硬接口见 `../../archive/plans/v4/version-schedule.md` § 五.5。
 
 ---
 
@@ -494,8 +494,8 @@ eligible **58070 = 58070**、池满 **1345 = 1345**、分配 56725 vs 56719(差 
 
 1. 改 → 全量 regress → 自举闭环 → `artifact_checks` → perf 数字
 2. `make` 后 `git add compiler/build/bin/jhyy.exe`(CI 的 artifact-fresh 步会比对它)
-3. 往 [`docs/plans/v4/version-schedule.md`](version-schedule.md) 记实际做完的内容
-4. 往 [`docs/internal/workarounds.md`](../../internal/workarounds.md) 登记新发现的 workaround
+3. 往 [`docs/archive/plans/v4/version-schedule.md`](../../archive/plans/v4/version-schedule.md) 记实际做完的内容
+4. 往 [`docs/workarounds.md`](../../workarounds.md) 登记新发现的 workaround
 
 > ⚠️ **改 codegen 不会让任何 sha 基线变红** —— 所有门都是运行时算 sha 比两次运行。
 > 真正会红的是 `artifact_checks.sh` 的 4 条汇编文本断言(v4.3.1 处理)和
@@ -505,6 +505,6 @@ eligible **58070 = 58070**、池满 **1345 = 1345**、分配 56725 vs 56719(差 
 
 - 基线数据:[`docs/perf/self-backend-baseline-2026-10-29.md`](../../perf/self-backend-baseline-2026-10-29.md)
 - 测量脚本:`scripts/dev/bench/runtime_perf.py`
-- 旧报告(部分结论已订正):[`docs/plans/v4/JHYY自研后端pass查缺报告.md`](JHYY自研后端pass查缺报告.md)
-- 排期表(版本号权威):[`docs/plans/v4/version-schedule.md`](version-schedule.md)
-- 未启动工作的清单:[`docs/plans/v4/version-schedule.md`](version-schedule.md) § 四
+- 旧报告(部分结论已订正):[`docs/archive/plans/v4/JHYY自研后端pass查缺报告.md`](../../archive/plans/v4/JHYY自研后端pass查缺报告.md)
+- 排期表(版本号权威):[`docs/archive/plans/v4/version-schedule.md`](../../archive/plans/v4/version-schedule.md)
+- 未启动工作的清单:[`docs/archive/plans/v4/version-schedule.md`](../../archive/plans/v4/version-schedule.md) § 四

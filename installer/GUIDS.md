@@ -35,7 +35,6 @@ upgrades silently keep old version (silent corruption).
 | Component | GUID |
 |-----------|------|
 | JhyyExe | `A76D4595-11CE-4F86-B70A-170A6FDA06B0` |
-| QbeExe | `096E27A7-65E2-465C-BA58-399A02C0F000` |
 | ~~InstallVSIXBat (v1.5.4 — superseded in v1.5.10, dead code parser bug)~~ | ~~`5D1C3BC5-EBC3-472A-9744-1F96692A2E6F`~~ |
 | ~~ConfigureCodeRunnerPS1 (v1.5.6-patch2 — superseded in v1.5.10, Code Runner 集成已移除)~~ | ~~`F7A2D6E0-9B3C-4D1A-9E5F-3C7B8A2D6E01`~~ |
 | InstallConfigEnvPS1 (v1.5.7-rc1, now invoked by RunOnce) | `0ADA340F-4463-466E-AFEE-302147CC0DD4` |
@@ -55,8 +54,11 @@ upgrades silently keep old version (silent corruption).
 | JhyyIconFile (v1.5.7-rc1 rev 2 — brand .ico in INSTALLDIR\bin\) | `1C8B7A4D-3E2F-4B6D-9A5C-7E8F2D1B4A03` |
 | JhyyDocsURL | `4065743A-3D07-48DE-A0E3-7FF8D5FEFA79` |
 | JhyyQuickStartURL | `98BA5444-5A01-4FD4-9995-623AC6869020` |
-| PrebuiltObjects (v4.1.0 — 预编 runtime.o / jhyy_helpers.o) | `5275E1C9-9BC5-5920-8A53-90206F3EB471` |
-| JhyyBashCmd (v4.1.0 phase 2 — 启动一个带 jhyy 的 bash) | `7787DD61-48A5-5622-89A6-9B8CEE602F24` |
+| PrebuiltObjects (v4.1.0 — 预编 runtime.o / jhyy_helpers.o) | `5275e1c9-9bc5-5920-8a53-90206f3eb471` |
+| JhyyBashCmd (v4.1.1 — 启动一个带 jhyy 的 bash) | `7787DD61-48A5-5622-89A6-9B8CEE602F24` |
+| ManualFixIconCachePS1 (v1.8.2 — 清 Explorer 图标缓存) | `A2F4B7E9-5D3C-4E8B-A6F1-7C9D2E3B5A88` |
+| JHYYSetUCExe (v1.8.3 — UCPD.sys bypass 的 SYSTEM-context 写器) | `B3D5C8F2-6E4D-4F9C-B7E2-8D1A3F4C6B99` |
+| JhyyStdLib (v4.1.0 — 随包发 compiler/src0/std/) | `3C9E71A4-58D2-4B67-9E05-71A8D3C6F204` |
 
 ## v4.1.0 新增: 工具链组件 GUID 是**确定性生成**的
 

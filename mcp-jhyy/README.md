@@ -1,44 +1,33 @@
-# JHYY MCP Server
+# mcp-jhyy — Claude Code MCP 服务
 
-让 Claude Code 能**编译、运行、检查 JHYY 程序**的 MCP (Model Context Protocol) 服务器。
+> 让 Claude Code 直接操作 JHYY：编译、运行、看中间表示、查台账、跑回归。
+>
+> 本文件是**服务使用者**的说明书；agent 侧的路由规则在
+> [`server.py`](server.py) 顶部的 `JHYY_INSTRUCTIONS`（MCP 一启动 Claude 就读到）。
 
-> **Last updated**: v1.8.3 (2026-08-29) — 11 tools + 4 resources(v1.0.0 7 + Sprint 1 加 4);7 个 pytest test 文件,每文件含多个 `def test_*` 函数;`jhyy_ntstatus.py` 是内部 helper 未注册 MCP 工具。
+---
 
-装上之后，Claude Code 在帮你写 `.jhyy` 代码时，能自动调用编译器查语法错、跑回归、看生成的 QBE IL、查语言规范 / ABI 信息，省去手动跑 `jhyy compile && ./a.out` 的来回。
+## 安装
 
-## 工作原理
-
-```
-你："写一段 fib(30) 的递归代码并跑一下"
-Claude Code → 自动调用 MCP 工具
-  ├── jhyy_check("fib.jhyy")          → 语法/语义检查
-  ├── jhyy_compile("fib.jhyy")        → 调 jhyy.exe compile
-  ├── jhyy_run("fib.jhyy")            → 编译并执行，返回 exit_code / stdout
-  ├── jhyy_get_il("fib.jhyy")         → 返回 QBE IL（调试 codegen 用）
-  └── 输出: "fib(30) = 832040, exit_code 0"
-```
-
-## 快速开始
-
-### 前提条件
-
-- 已安装 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-- 已安装 Python 3.8+
-- 已构建 JHYY 编译器（`compiler/build/bin/jhyy.exe` 存在）
-
-### 1. 安装 Python 依赖
+### 1. Python 依赖
 
 ```bash
 pip install fastmcp
 ```
 
-⚠️ **装的是 `fastmcp`,不是 `mcp[cli]`** —— `server.py` 写的是 `from fastmcp import FastMCP`
-(顶层 `fastmcp` 模块),而**顶层 `fastmcp` 是独立于 Anthropic 官方 `mcp` 包的另一个发行包**
-(`fastmcp` 的依赖是 `fastmcp-slim[...]`,不是 `mcp`)。官方 `mcp` 包提供的是带前缀的
-`mcp.server.fastmcp` ⇒ **`pip install mcp[cli]` 装完仍然 `ModuleNotFoundError: No module named 'fastmcp'`**。
-CI 装的就是对的(`ci.yml`:`pip install fastmcp pytest pytest-asyncio`)。
+⚠️ **装的是 `fastmcp`，不是 `mcp[cli]`** —— `server.py` 写的是
+`from fastmcp import FastMCP`（**顶层** `fastmcp` 模块），而顶层 `fastmcp` 是
+**独立于**官方 `mcp` 包的另一个发行包（`fastmcp` 的依赖是 `fastmcp-slim`）。
+官方 `mcp` 只提供带前缀的 `mcp.server.fastmcp` ⇒ `pip install mcp[cli]`
+装完仍然 `ModuleNotFoundError: No module named 'fastmcp'`。
 
-`jhyy_runner.py` 仅用 Python 标准库。
+自检：
+
+```bash
+python -c "import fastmcp; print(fastmcp.__version__)"
+```
+
+⚠️ 别用 `python -c "import mcp"` 自检 —— 查的是另一个包，会给假绿灯。
 
 ### 2. 注册到 Claude Code
 
@@ -49,168 +38,99 @@ CI 装的就是对的(`ci.yml`:`pip install fastmcp pytest pytest-asyncio`)。
   "mcpServers": {
     "jhyy": {
       "command": "python",
-      "args": ["C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/mcp-jhyy/server.py"]
+      "args": ["C:/path/to/JiHuiYiYou/mcp-jhyy/server.py"]
     }
   }
 }
 ```
 
-> 把路径改成你本地的 `mcp-jhyy/server.py` 绝对路径。
+重启 Claude Code 后，问一句「用 `jhyy_check` 检查 hello.jhyy 的语法」——
+能调用并返回结果就说明加载成功。
 
-### 3. 验证安装
-
-重启 Claude Code 后，在任何目录下问：
-
-```
-"列出 JHYY 编译器版本"
-```
-
-如果 Claude 能调用 `jhyy_check` 之类工具并返回结果，说明 MCP 已正常加载。
-
-也可以直接跑端到端测试（无需 Claude Code）：
+也可以直接跑端到端测试（不需要 Claude Code）：
 
 ```bash
-python -c "from mcp_jhyy.jhyy_runner import compile_and_run; print(compile_and_run('compiler/tests/examples/hello.jhyy'))"
+python -c "import sys; sys.path.insert(0,'mcp-jhyy'); \
+from jhyy_runner import compile_and_run; \
+print(compile_and_run('compiler/tests/examples/hello.jhyy'))"
 # => {'ok': True, 'exit_code': 42, 'stdout': '', ...}
 ```
 
-## 在多个项目中使用
+> ⚠️ `mcp-jhyy` 带连字符 ⇒ **不是合法的 Python 包名** ⇒ 不能
+> `from mcp_jhyy.jhyy_runner import …`。用 `sys.path.insert` 或直接跑脚本。
 
-JHYY MCP 是**全局注册**的（写在 `~/.claude.json` 里），装一次即可在所有目录使用，不需要每个项目都装。
+---
 
-如果你的 `jhyy.exe` 路径在 `jhyy_runner.py` 里硬编码的位置（默认 `C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/build/bin/jhyy.exe`），搬家后需改 `mcp-jhyy/jhyy_runner.py` 顶部的 `JHYY_ROOT` 常量，然后重启 Claude Code。
-
-## 可用工具
+## 工具（11 个）
 
 ### 编译 & 运行
 
-| 工具 | 何时使用 | 备注 |
-|------|---------|------|
-| `jhyy_compile` | 把 `.jhyy` 编译成 `.exe` | 输出二进制路径可指定 |
-| `jhyy_run` | 编译并运行，返回 exit code / stdout | 完整 E2E |
-| `jhyy_check` | 只做语法/语义检查，不生成二进制 | 返回结构化错误列表 |
-| `jhyy_get_il` | 编译并返回 QBE IL 文本 | 调试 codegen 用 |
+| 工具 | 用途 |
+|---|---|
+| `jhyy_run` | 编译 + 链接 + 执行，返回 exit code / stdout |
+| `jhyy_compile` | 只编译 |
+| `jhyy_check` | 只做语法 / 语义检查，返回结构化错误列表 |
+| `jhyy_get_il` | 取中间表示（调试 codegen 用；需要 `JHY_WRITE_IL=1`） |
 
-### 语言 & ABI 查询
+### 验证
 
-| 工具 | 何时使用 | 示例 |
-|------|---------|------|
-| `jhyy_lang_ref` | 查语言规范（关键词搜索） | `"match"`, `"for"`, `"as"` |
-| `jhyy_abi_info` | 查 ABI 信息 | `"sret"`, `"struct pass"`, `"FFI"` |
+| 工具 | 用途 |
+|---|---|
+| `jhyy_regress` | 跑回归，返回 PASS/FAIL 列表 |
+| `jhyy_il_diff` | 两个 `.il` 的 byte-equal 检查 + 上下文 diff |
+| `jhyy_selfhost_check` | 一键自举闭环验证（v1→v2→v3→v4） |
 
-### 工具类
+### 查询
 
-| 工具 | 何时使用 | 备注 |
-|------|---------|------|
-| `jhyy_format` | 简单格式化 | v0.5.0 最小占位实现 |
-| `jhyy_regress` | 跑回归 / 验证 baseline 没破 | mcp-jhyy Sprint 1 ship (2026-08-11) |
-| `jhyy_il_diff` | 比两个 .il / Stage 1 byte-equal | mcp-jhyy Sprint 1 ship |
-| `jhyy_selfhost_check` | 验证自举闭环 (v1→v2→v3 byte-equal) | mcp-jhyy Sprint 1 ship |
-| `jhyy_workarounds` | 搜 workarounds / "W-XXX 状态?" | mcp-jhyy Sprint 1 ship |
+| 工具 | 用途 |
+|---|---|
+| `jhyy_workarounds` | 查 W-NNN workaround 的状态 / 详情（实时读台账） |
+| `jhyy_lang_ref` | 查语言规范（关键词搜索） |
+| `jhyy_abi_info` | 查 ABI 信息（`sret` / `struct pass` / `FFI` …） |
+| `jhyy_format` | 简单格式化（最小占位实现） |
 
-Claude Code 会根据工具描述中的触发条件**自动判断何时调用**，无需你手动指定。
+### 资源（4 个）
 
-## 资源
+`jhyy://spec` · `jhyy://abi` · `jhyy://examples` · `jhyy://changelog`
 
-| URI | 内容 |
-|-----|------|
-| `jhyy://spec` | 语言规范 **v4.0.0**(权威 markdown 全文,直读 `docs/abis/`) |
-| `jhyy://abi` | ABI **v4.0.0**(权威 markdown 全文,直读 `docs/abis/`) |
-| `jhyy://examples` | 示例代码列表 |
-| `jhyy://changelog` | 最新 changelog |
+---
 
-## 数据
+## 路径解析
 
-| 类别 | 来源 | 文件 |
-|------|------|------|
-| 语言规范 | `docs/abis/jhyy-lang-spec-v4.0.0.md` | **直读**(`jhyy_spec_doc.load_spec_doc`)—— 无快照 |
-| ABI 信息 | `docs/abis/jhyy-abi-v4.0.0.md` | **直读**(`jhyy_spec_doc.load_spec_doc`)—— 无快照 |
-| 集成测试 | `compiler/tests/examples/*.jhyy` | 由 `jhyy_run` 动态读 |
+`jhyy_runner.py` 的 `JHYY_ROOT` **由脚本位置自动推导**
+（`Path(__file__).resolve().parents[1]`）⇒ **换机器不用改任何东西**。
 
-## 项目结构
+---
 
-```
-mcp-jhyy/
-├── server.py              # MCP 服务器主程序（FastMCP 入口，11 tools + 4 resources）
-├── jhyy_runner.py         # subprocess 封装（compile / run / check / get_il）
-├── jhyy_regress.py        # jhyy_regress / jhyy_il_diff / jhyy_selfhost_check 实现（Sprint 1, 2026-08-11）
-├── jhyy_lang_ref.py       # jhyy_lang_ref tool 实现（关键词搜索 spec）
-├── jhyy_spec_doc.py       # spec / ABI markdown 解析（h2/h3 切节 + token-AND 搜索）
-├── jhyy_workarounds.py    # jhyy_workarounds tool 实现（W-NNN 索引搜索）
-├── jhyy_ntstatus.py       # 内部 NTSTATUS helper —— 未注册 MCP 工具，留给 OS sprint
-├── (jhyy_format tool  实现内联在 server.py line 240 区域，无独立 .py 文件)
-├── CLAUDE.md              # 局部 Claude Code 项目指令（给"打开 mcp-jhyy/"场景用）
-├── tests/                 # pytest 测试
-│   ├── __init__.py
-│   ├── conftest.py        # pytest fixture
-│   ├── pytest.ini         # pytest 配置
-│   ├── test_abi_info.py
-│   ├── test_il_diff.py
-│   ├── test_lang_ref.py
-│   ├── test_ntstatus.py
-│   ├── test_regress.py
-│   ├── test_selfhost_check.py
-│   └── test_workarounds.py
-└── README.md              # 本文件
+## 排障
+
+| 症状 | 原因 / 解法 |
+|---|---|
+| `ModuleNotFoundError: No module named 'fastmcp'` | 环境没装 `fastmcp` ⇒ `pip install fastmcp` |
+| MCP 没加载 | `~/.claude.json` 的路径对不对；手工 `python <path>/server.py` 看 stderr |
+| `jhyy_run` 报 `Executable not found` | `compiler/build/bin/jhyy.exe` 不存在 ⇒ 先 `make` |
+| 输出有 GBK 编码错误 | `jhyy_runner.py` 用 `encoding="utf-8", errors="replace"` ⇒ 工具返回的 JSON 是 UTF-8，Windows 终端显示可能乱码 |
+| `jhyy_regress` 超时 | 全量回归要 5–10 分钟，MCP 侧有 600s 硬超时 ⇒ 走 `Bash(python regress.py …)` + `run_in_background` |
+
+---
+
+## 开发
+
+```bash
+# pytest(需要 pip —— 本机默认 python 没有,用 miniconda 的)
+C:/Users/liuzhen/miniconda3/python.exe -m pytest mcp-jhyy/tests -q
 ```
 
-**测试数 note**: 7 个 `test_*.py` 文件,每个含多个 `def test_*` 函数;pytest collection 自动累加(具体函数个数随 Sprint 演进,以 `pytest mcp-jhyy/tests/` 实际输出为准)。
+测试文件（9 个）：`test_abi_info` · `test_env` · `test_get_il` · `test_il_diff` ·
+`test_lang_ref` · `test_ntstatus` · `test_regress` · `test_selfhost_check` ·
+`test_workarounds`。
 
-## 维护
+`jhyy_ntstatus.py` 是**内部 helper**（NTSTATUS 解析），**未注册**成 MCP 工具。
 
-### 更新语言规范 / ABI 数据
+---
 
-**没有快照要更新** —— 工具(`jhyy_lang_ref` / `jhyy_abi_info`)与资源
-(`jhyy://spec` / `jhyy://abi`)都**直读** `docs/abis/*-v4.0.0.md` 的权威 markdown。
+## 相关
 
-1. 编辑 `docs/abis/jhyy-lang-spec-v4.0.0.md` 或 `docs/abis/jhyy-abi-v4.0.0.md`
-2. 完事（重启 Claude Code 让 MCP 重新加载即可，但内容本身不缓存）
-
-> 历史:此前存在 `spec_data.json` / `abi_data.json` 两个**手编**快照
-> (v0.5.0 / v1.0.0,ABI 只有 40% 覆盖),与工具直读的 v4.0.0 文档**互相矛盾**。
-> 2026-10-24 删除,资源改为直发活文档 ⇒ 不可能再陈旧。
-
-### 添加新工具
-
-1. 在 `server.py` 里加 `@mcp.tool()` 装饰的函数
-2. 工具描述要写清"何时使用"和参数语义（Claude 靠这个判断自动调用）
-3. 重启 Claude Code
-
-## 端到端示例
-
-```
-User: 写一段 .jhyy 代码计算 fib(30) 并运行
-
-Claude:
-1. 写入 fib_test.jhyy
-2. 调用 jhyy_run("fib_test.jhyy")
-3. 返回: { ok: true, exit_code: 0, stdout: "fib(30) = 832040\n", ... }
-```
-
-## 常见问题
-
-**Q: 启动 Claude Code 后 MCP 没有加载？**
-A: 确认 `~/.claude.json` 里的 `jhyy` 配置路径正确。运行 `python C:/path/to/mcp-jhyy/server.py` 看是否有 Python 错误。
-
-**Q: 显示 `ModuleNotFoundError: No module named 'fastmcp'`（或 `'mcp'`）？**
-A: MCP 主机用的 Python 环境没装 **`fastmcp`**。用对应环境的 `pip install fastmcp` 重装。
-`server.py` 是 `python` 启动的，确保 **`python -c "import fastmcp"`** 能成功
-（⚠️ 别用 `python -c "import mcp"` 自检 —— 官方 `mcp` 包**不提供**顶层 `fastmcp`，
-那样自检会给假绿灯）。
-
-**Q: `jhyy_run` 报 `Executable not found`？**
-A: 检查 `mcp-jhyy/jhyy_runner.py` 顶部的 `JHYY_ROOT` 是否对应当前项目根。`compiler/build/bin/jhyy.exe` 必须存在（先 `gcc compiler/src/*.c -o ...` 编译）。
-
-**Q: 如何确认 MCP 正在工作？**
-A: 在 Claude Code 中问："用 jhyy_check 检查 hello.jhyy 的语法"。如果 Claude 调用了工具并返回结果，说明 MCP 正常工作。
-
-**Q: 输出有 GBK 编码错误？**
-A: `jhyy_runner.py` 用了 `encoding="utf-8", errors="replace"`，Windows GBK 终端显示中文可能乱码但工具返回的 JSON 是 UTF-8 没问题。
-
-## 限制
-
-- 仅支持 Windows x64（与 JHYY 编译器当前目标一致）
-- `jhyy_format` 仅为最小占位实现
-- 编译/运行结果通过 `subprocess.run` 同步获取，大程序可能 timeout
-- `jhyy_ntstatus.py` 是内部 helper（NTSTATUS 解析）—— **未注册 MCP 工具**，保留给后续 OS sprint（per `docs/plans/v2/v2.0.0-os-prep.md` OS Debug ABI）
-- C-side 默认路径硬编码 `C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/build/bin/jhyy.exe`（改路径需编辑 `jhyy_runner.py` 顶部 `JHYY_ROOT`）
+- 台账（`jhyy_workarounds` 读的就是它）⇒ [`docs/workarounds.md`](../docs/workarounds.md)
+- 语言规范 / ABI ⇒ [`docs/abis/`](../docs/abis/)
+- 编译器架构 ⇒ [`docs/internal/architecture.md`](../docs/internal/architecture.md)

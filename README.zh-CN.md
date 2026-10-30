@@ -8,7 +8,7 @@
 
 **静态类型 · 表达式导向 · 由自研 amd64 后端编译为原生机器码。**
 
-[![版本](https://img.shields.io/badge/版本-v4.1.2-00d4aa)](docs/logs/v4/changelog-v4.0.0.md)
+[![版本](https://img.shields.io/badge/版本-v4.1.2-00d4aa)](docs/archive/logs/v4/changelog-v4.0.0.md)
 [![状态](https://img.shields.io/badge/自举-byte--equal-success)](#状态-v412)
 [![后端](https://img.shields.io/badge/后端-自研%20amd64-blue)](#架构)
 [![平台](https://img.shields.io/badge/平台-Windows%20x64-lightgrey)](#安装)
@@ -261,12 +261,12 @@ JiHuiYiYou-compiler/
 | `fixed_point.sh` | **17 PASS / 0 FAIL**(N=10,`.il` 与 `.s` 跨代 byte-equal) |
 | `artifact_checks.sh` | **17 PASS / 0 FAIL** |
 | `closure_check.sh` | PASS(v2.s == v3.s,逐字节相同) |
-| ACTIVE workaround | **1** —— [`W-170`](docs/internal/workarounds.md):`jhyy build` 不处理 `#[link_section]` |
+| ACTIVE workaround | **1** —— [`W-170`](docs/workarounds.md):`jhyy build` 不处理 `#[link_section]` |
 | `jhyy-installer-4.1.2.exe` | 已发布(~55 MB,含 .NET 8 Desktop Runtime + 内置 ucrt64 工具链) |
 | `jhyy-compiler-4.1.2.msi` | 已发布(~28 MB,含 `jhyy-setuc.exe` + 内置工具链) |
 | `jhyy-lang-4.1.2.vsix` | 已发布(VS Code 扩展) |
 
-**v4.x umbrella changelog** —— [`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md)
+**v4.x umbrella changelog** —— [`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md)
 是本仓**每个版本轴唯一**的 changelog(按项目的 umbrella 约定)。
 
 ---
@@ -274,7 +274,7 @@ JiHuiYiYou-compiler/
 ## 路线图
 
 v4.x 是合并后的版本轴。计划按版本槽一份,放在 [`docs/plans/v4/`](docs/plans/v4/README.md) ——
-那份是权威索引;排期见 [`docs/plans/v4/version-schedule.md`](docs/plans/v4/version-schedule.md)。
+那份是权威索引;排期见 [`docs/archive/plans/v4/version-schedule.md`](docs/archive/plans/v4/version-schedule.md)。
 
 **性能线**(自研后端 —— 当前主线):
 
@@ -327,11 +327,11 @@ HKT → 能力类型化 → 可信工具链。
 - **二进制格式**(设计稿,未实装):[`docs/abis/jhyy-binary-format-v1.0.0.md`](docs/abis/jhyy-binary-format-v1.0.0.md)
 - **架构**:[`docs/internal/architecture.md`](docs/internal/architecture.md)
 - **构建与运行**:[`docs/internal/build.md`](docs/internal/build.md)
-- **测试**:[`docs/internal/tests.md`](docs/internal/tests.md)
-- **workaround 台账**:[`docs/internal/workarounds.md`](docs/internal/workarounds.md)
-- **编码约定**:[`docs/internal/conventions.md`](docs/internal/conventions.md)
-- **变更日志**:[`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md)(v4 umbrella)
-- **归档计划**:[`docs/archive/v2-v3/`](docs/archive/v2-v3/)(v2/v3 历史 —— 已作废)
+- **测试**:[`docs/FACTS.md`](docs/FACTS.md)
+- **workaround 台账**:[`docs/workarounds.md`](docs/workarounds.md)
+- **编码约定**:[`CONTRIBUTING.md`](CONTRIBUTING.md)
+- **变更日志**:[`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md)(v4 umbrella)
+- **归档计划**:[`docs/archive/plans/v2-v3/`](docs/archive/plans/v2-v3/)(v2/v3 历史 —— 已作废)
 
 ---
 

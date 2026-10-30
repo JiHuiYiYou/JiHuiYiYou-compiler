@@ -3,7 +3,7 @@
 **状态**：v4.0.0 —— v4 世代的规范基线，随 `v4.0.0 final` promote 一同锁版
 **取代**：`jhyy-lang-spec-v1.3.0.md` 及其 17 份 v3.x supplement（2026-10-24 归档至 git 历史）
 **事实基线**：正文只写**当前代码确实已实装**的行为；未实装 / 已实装但受限的，统一收进[附录 B](#附录-b未实装--已实装但受限)
-**配套**：[`docs/abis/jhyy-abi-v4.0.0.md`](./jhyy-abi-v4.0.0.md)
+**配套**：[`docs/abis/jhyy-abi-v4.0.0.md`](jhyy-abi-v4.0.0.md)
 
 > **本版相对 v1.3.0 的写法变化**：v1.3.0 把 v3.x 的特性散在 17 份 supplement 里，本体与 supplement 之间大量交叉引用、且互相矛盾（例：v1.3.0 § 6.1 文档化了从未实装的块表达式；§ 4.1 文档化了会静默算错的 `1_000_000`）。本版把**已实装部分一次性收进正文**，supplement 全部作废；**未实装的部分明确写进附录 B**，不再混在正文里冒充特性。
 
@@ -76,7 +76,7 @@ fn main_jhyy() -> i32 {
 
 `i8` `i16` `i32` `i64` `u8` `u16` `u32` `u64` `f32` `f64` `bool` `()`
 
-大小与对齐见 [ABI § 2.1](./jhyy-abi-v4.0.0.md#21-基础类型)。
+大小与对齐见 [ABI § 2.1](jhyy-abi-v4.0.0.md#21-基础类型)。
 
 - **没有独立的 `char` 类型**。字符字面量的类型是 `i32`，值是 Unicode codepoint。
 - 字符字面量支持**全码点范围 U+0000–U+10FFFF**（含 4 字节 emoji / 辅助平面），按 UTF-8 解码。
@@ -232,7 +232,7 @@ let b: i64 = alignof(i32);     // 4
 
 - 两者都接受**类型**（不是表达式）。`sizeof(some_var)` 会得到 `unknown type`。
 - 返回类型都是 `i64`。
-- ⚠️ **`alignof(enum)` 恒为 4** —— 与 enum 布局算出的自然对齐（`max(4, max_payload_align)`）不一致，见 [ABI § 12.2](./jhyy-abi-v4.0.0.md#abi-12-2)。
+- ⚠️ **`alignof(enum)` 恒为 4** —— 与 enum 布局算出的自然对齐（`max(4, max_payload_align)`）不一致，见 [ABI § 12.2](jhyy-abi-v4.0.0.md#abi-12-2)。
 
 ---
 
@@ -496,7 +496,7 @@ fn f() -> i32 {
 | `amd64_sysv` | 整数与浮点是**两个独立 bank**：整数按出现顺序占 `rdi`/`rsi`/…，浮点按出现顺序占 `xmm0`/`xmm1`/…，互不影响 | `fn f(a: f64, b: i32)` ⇒ `a` 在 XMM0、`b` 在 **RDI** |
 
 两种规则下函数的**返回值**都相同，所以纯 jhyy 代码跨目标行为一致。
-完整规则见 [docs/abis/jhyy-abi-v4.0.0.md](./jhyy-abi-v4.0.0.md#31-ms-x64amd64_win--amd64_win_freestanding)。
+完整规则见 [docs/abis/jhyy-abi-v4.0.0.md](jhyy-abi-v4.0.0.md#31-ms-x64amd64_win--amd64_win_freestanding)。
 
 ---
 
@@ -547,11 +547,11 @@ let p = Point { x: 10, y: 20 };
 let px = p.x;
 ```
 
-- 字段按声明顺序排列、按自然边界对齐（算法见 [ABI § 2.3](./jhyy-abi-v4.0.0.md#23-struct-布局)）。
+- 字段按声明顺序排列、按自然边界对齐（算法见 [ABI § 2.3](jhyy-abi-v4.0.0.md#23-struct-布局)）。
 - ⚠️ **构造时允许省略字段**，编译器**不报「缺字段」错误**。
   但缺失字段的值是**未初始化读（栈上的垃圾）**，**不是 0** —— 见[附录 B](#附录-b未实装--已实装但受限)。
 - 支持嵌套 struct；按值传递时递归复制。
-- 按值传参与返回走 [docs/abis/jhyy-abi-v4.0.0.md](./jhyy-abi-v4.0.0.md#33-聚合类型传参win)。
+- 按值传参与返回走 [docs/abis/jhyy-abi-v4.0.0.md](jhyy-abi-v4.0.0.md#33-聚合类型传参win)。
 
 ---
 
@@ -570,7 +570,7 @@ let none_val = Option::None;
 - tag 为 `i32`，从 0 起按声明顺序分配。
 - 变体可带 payload，也可为 nullary。
 - ⚠️ **一个变体最多带一个 payload** —— `Rect(i32, i32)` 是解析错误（`expected ), got ,`）。要装多个字段，把 payload 换成 struct —— 见[附录 B](#附录-b未实装--已实装但受限)。
-- 布局算法见 [ABI § 2.4](./jhyy-abi-v4.0.0.md#24-enum-布局)。
+- 布局算法见 [ABI § 2.4](jhyy-abi-v4.0.0.md#24-enum-布局)。
 - 配合 `match` 做穷尽性检查（[§ 5.6](#56-match)）。
 
 ---
@@ -701,7 +701,7 @@ extern fn fopen(path: *u8, mode: *u8) -> *u8;
 ```
 
 - `extern fn` 只声明、不生成函数体，链接期由 `ld` 解析符号。
-- 汇编符号**不加修饰**（[ABI § 3.6](./jhyy-abi-v4.0.0.md#36-名称修饰)）。
+- 汇编符号**不加修饰**（[ABI § 3.6](jhyy-abi-v4.0.0.md#36-名称修饰)）。
 - **不支持变参**：`printf` 的每个参数必须在 JHYY 侧逐个列出。
 - ⚠️ **参数 / 返回类型不做限制**：声明 `extern fn takes(s: MyStruct) -> i32;` 能编译通过（且**不会**按值跨 FFI 传 struct —— 实际按地址传，与 C ABI 不符）。
 
@@ -754,7 +754,7 @@ jhyy [--target=<triple>] [--help] <command> [args]
 
 | 标志 | 作用 |
 |---|---|
-| `--target=<triple>` | 选择目标（默认 `amd64_win`）。可选值见 [ABI § 1](./jhyy-abi-v4.0.0.md#1-目标平台) |
+| `--target=<triple>` | 选择目标（默认 `amd64_win`）。可选值见 [ABI § 1](jhyy-abi-v4.0.0.md#1-目标平台) |
 | `--no-link` | 只产出 `.s`，跳过 gcc 链接 |
 | `--help` | 打印完整帮助 |
 
@@ -831,7 +831,7 @@ fence_release();   // sfence
 
 ### 17.6 freestanding 目标与 entry 符号
 
-`--target=amd64_win_freestanding` / `amd64_sysv_freestanding` 选择的是**调用约定归属**（见 [ABI § 1](./jhyy-abi-v4.0.0.md#1-目标平台)），**不改变链接方式**。
+`--target=amd64_win_freestanding` / `amd64_sysv_freestanding` 选择的是**调用约定归属**（见 [ABI § 1](jhyy-abi-v4.0.0.md#1-目标平台)），**不改变链接方式**。
 
 - **entry 符号由用户自行提供**，编译器不提供默认 entry：
 
@@ -1023,7 +1023,7 @@ type ErrChain = struct {
 | `match` 范围是闭区间 | 与 `for` 的半开区间语义相反，容易踩 | — |
 | `defer` 不覆盖隐式返回 | 函数体末表达式返回时 defer 不执行 | — |
 | `std_io_print` / `std_io_print_err` | 依赖 libc 的 `stdout` / `stderr` 句柄获取 | — |
-| SysV 下 MEMORY class 参数与寄存器溢出参数混排 | 编译报错（[ABI § 12.4](./jhyy-abi-v4.0.0.md#abi-12-4)） | — |
+| SysV 下 MEMORY class 参数与寄存器溢出参数混排 | 编译报错（[ABI § 12.4](jhyy-abi-v4.0.0.md#abi-12-4)） | — |
 | 无交叉编译容器后端 | `--target` 不切换 PE / ELF 产出 | — |
 
 ---
@@ -1035,7 +1035,7 @@ type ErrChain = struct {
 - v1.0.0 已达成真自举闭环（commit `eabee0d`，2026-08-10）。
 - v4.0.x 世代的闭环形态是「`jhyy.exe` 自己编 src0，产出与自身 byte-equal」—— 见 `docs/internal/build.md` 与 `compiler/tests/bootstrap/fixed_point.sh`。
 - **自举编译器本身是本规范的最大消费者**：规范里每条关于「已实装」的断言，在 `compiler/src0/*.jhyy` 里都能找到对应实现。
-- 规范改动对自举的影响面：`docs/internal/conventions.md` 要求 `docs/abis/*` 变更后跑一遍 `regress.py`（spec 改动可能影响 jhyy 端解析）。
+- 规范改动对自举的影响面：`CONTRIBUTING.md` 要求 `docs/abis/*` 变更后跑一遍 `regress.py`（spec 改动可能影响 jhyy 端解析）。
 
 ---
 
@@ -1099,7 +1099,7 @@ fn main_jhyy() -> i32 {
 
 ## Cross-ref
 
-- ABI：[`docs/abis/jhyy-abi-v4.0.0.md`](./jhyy-abi-v4.0.0.md)
-- 二进制格式（设计稿，未实装）：[`docs/abis/jhyy-binary-format-v1.0.0.md`](./jhyy-binary-format-v1.0.0.md)
+- ABI：[`docs/abis/jhyy-abi-v4.0.0.md`](jhyy-abi-v4.0.0.md)
+- 二进制格式（设计稿，未实装）：[`docs/abis/jhyy-binary-format-v1.0.0.md`](jhyy-binary-format-v1.0.0.md)
 - 历史档案：v1.3.0 及其 17 份 v3.x supplement、v1.1.0、v1.0.0、v0.2.1、v0.0.1 —— 均已归档至 git 历史（`git show <sha>:docs/abis/<name>`）
-- 已知限制台账：[`docs/internal/workarounds.md`](../internal/workarounds.md)
+- 已知限制台账：[`docs/workarounds.md`](../workarounds.md)

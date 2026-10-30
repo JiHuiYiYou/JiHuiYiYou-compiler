@@ -3,7 +3,7 @@
 **状态**：v4.0.0 —— v4 世代的 ABI 基线，随 `v4.0.0 final` promote 一同锁版
 **取代**：`jhyy-abi-v1.0.0.md`（已归档至 git 历史）
 **事实基线**：本文件只陈述**当前代码确实实现**的行为。凡未实装或与标准平台 ABI 不一致者，写入 [§ 12「已知偏离与未实装项」](#12-已知偏离与未实装项)，不写进正文。
-**配套**：[`docs/abis/jhyy-lang-spec-v4.0.0.md`](./jhyy-lang-spec-v4.0.0.md)
+**配套**：[`docs/abis/jhyy-lang-spec-v4.0.0.md`](jhyy-lang-spec-v4.0.0.md)
 
 > **本版相对 v1.0.0 的最大变化**：QBE 已从构建链移除（v3.1.0）。v1.0.0 里那套「QBE IL 映射表」全部作废 —— 规范改以**机器级术语**（寄存器、栈、section、指令）表述。
 
@@ -420,8 +420,8 @@ epilogue:
 
 ## 13. Cross-ref
 
-- 语言规范：[`docs/abis/jhyy-lang-spec-v4.0.0.md`](./jhyy-lang-spec-v4.0.0.md)
-- 二进制格式（设计稿，未实装）：[`docs/abis/jhyy-binary-format-v1.0.0.md`](./jhyy-binary-format-v1.0.0.md)
+- 语言规范：[`docs/abis/jhyy-lang-spec-v4.0.0.md`](jhyy-lang-spec-v4.0.0.md)
+- 二进制格式（设计稿，未实装）：[`docs/abis/jhyy-binary-format-v1.0.0.md`](jhyy-binary-format-v1.0.0.md)
 - 历史档案（已归档至 git 历史）：`jhyy-abi-v1.0.0.md`、`jhyy-abi-v0.0.1.md`
-- 已知限制台账：[`docs/internal/workarounds.md`](../internal/workarounds.md)
+- 已知限制台账：[`docs/workarounds.md`](../workarounds.md)
 - 验证门：`compiler/tests/bootstrap/`（`closure_check.sh`、`fixed_point.sh`、`artifact_checks.sh`、`sysv_abi_cross.sh`、`sysv_full_regress.sh`）
