@@ -1,8 +1,10 @@
-# tmp/prep-clean-install.ps1 — kill stragglers + check env before v1.5.9 install
+# scripts/dev/install/prep-clean-install.ps1 — kill stragglers + check env before v1.5.9 install
 $ErrorActionPreference = "Continue"
 
-Write-Host "=== Kill any running jhyy/qbe processes ==="
-$procs = Get-Process -Name jhyy,qbe -ErrorAction SilentlyContinue
+Write-Host "=== Kill any running jhyy processes ==="
+# 2026-10-30:原来还带 qbe —— QBE 已于 v2.16.0 从编译器移除(本轮还把 qbe/
+# 目录删干净了)⇒ 那个进程名永远匹配不到,留着只会误导。
+$procs = Get-Process -Name jhyy -ErrorAction SilentlyContinue
 if ($procs) {
     $procs | Stop-Process -Force
     Write-Host "  Killed: $($procs.Name -join ', ')"

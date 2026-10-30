@@ -706,13 +706,6 @@ def main():
                     help="Run V2-C v2.9.0 N≥3 selfhost fixed-point closure 验算 "
                          "(jhyy_v1 ↔ jhyy_v2 ↔ jhyy_v3 byte-equal .il per D43). "
                          "Opt-in: does NOT affect default regress baseline.")
-    ap.add_argument("--self-backend", action="store_true",
-                    help="V2-C v2.11.0: force JHY_SELF_BACKEND=1 + unset QBE_FALLBACK "
-                         "to test self-written codegen_amd64_run path (bypasses QBE "
-                         "fallback). Per W-073 verification gap closure: codegen_amd64_run "
-                         "has been inert since v2.6.3 ship; this flag exercises the "
-                         "real backend path as ship gate. Opt-in: does NOT affect "
-                         "default regress baseline.")
     ap.add_argument("--cross", choices=["wsl", "docker", "auto", "none"],
                     default="auto",
                     help="Cross-env mode for sysv tests (v2.7.0 Phase 2b). "
@@ -742,13 +735,16 @@ def main():
         rc = test_fixed_point(tests)
         sys.exit(rc)
 
-    if args.self_backend:
-        # V2-C v2.11.0 W-073 closure: force self-written codegen_amd64_run path.
-        # Mutate os.environ so subprocess.run inherits via _build_subprocess_env().
-        os.environ["JHY_SELF_BACKEND"] = "1"
-        os.environ.pop("QBE_FALLBACK", None)
-        print(f"[--self-backend] JHY_SELF_BACKEND=1 set, QBE_FALLBACK unset", file=sys.stderr)
-        # Falls through to default regress run — env vars drive jhyy-side dispatch.
+    # 2026-10-30:`--self-backend` 删了 —— 它原来只做两件事:设
+    # `JHY_SELF_BACKEND=1` + unset `QBE_FALLBACK`。
+    #   · QBE_FALLBACK 从 v3.1.0 起**只打印一句告警**(QBE 已移除)
+    #   · JHY_SELF_BACKEND 唯一的功能读点是 jhyy_regress.py 的 SKIP-QBE
+    #     指令支持,而那个指令自 2026-10-15 起**没有任何 test 再用**
+    #     (本轮一并删掉了那段支持)
+    # ⇒ 这个 flag 已是纯空转。
+    # ⚠️ 编译器侧 `JHY_SELF_BACKEND=1` 的 **legacy opt-in 仍保留**
+    # (per docs/internal/architecture.md §"legacy opt-in"):它强制走
+    # file-path 老入口,调试时有用。
 
     # 2026-10-30:`--byte-equal-amd64` 连同 compiler/tests/bootstrap/byte_equal_amd64.sh
     # 一起删了 —— 那脚本比的是「QBE_FALLBACK=1 的产物」vs「默认产物的」,而

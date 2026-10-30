@@ -18,11 +18,19 @@
 #   - 3/3 FAIL red (per W-086 阻塞, V3 self-backend 对 fmod 类测试 produce 0-byte .s)
 #   - 灯转绿条件: W-086 (b)+(c) one-commit 真修 + run 此 script = 3/3 PASS green
 #
-# 与 byte_equal_amd64.sh 的区别:
+# 与 byte_equal_amd64.sh 的区别(后者已于 2026-10-30 删除):
 #   byte_equal_amd64.sh  — 同一 binary 不同 codegen 路径, 但两 path 都 fallback QBE
 #                          (default 不设 JHY_SELF_BACKEND → run_qbe, false positive)
 #   byte_equal_selfbackend.sh — 显式 set JHY_SELF_BACKEND=1 强制真 self-backend 路径
 #                               + 跟 V2 self-backend golden 比对 (真 exercise)
+#
+# 2026-10-30 订正:
+#   ① `byte_equal_amd64.sh` 已删 —— 它比的是「QBE_FALLBACK=1」vs「默认」,而
+#      QBE_FALLBACK 从 v3.1.0 起只打印告警、不影响产物 ⇒ 两侧恒等 ⇒ 那个门
+#      永远不可能红。**本脚本的 V2-golden 对照仍是真门,保留。**
+#   ② `JHY_SELF_BACKEND=1` 现在是**默认行为**(v2.15.0 起 in-mem 后端是
+#      sole production path)⇒ 显式 set 它已是空操作,留着只是历史可读性。
+#      编译器侧该 env 仍是 documented legacy opt-in(强制 file-path 老入口)。
 #
 # 用法: byte_equal_selfbackend.sh [--no-strict]
 #

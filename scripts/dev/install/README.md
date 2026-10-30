@@ -1,6 +1,10 @@
 # scripts/dev/install/
 
-JHYY installer / uninstall / 升级相关的开发脚本 (需要 admin / MSYS2 env)。
+JHYY installer / uninstall / 升级相关的开发脚本 (**需要 admin**)。
+
+⚠️ 2026-10-30 订正:原写「需要 admin / MSYS2 env」—— **MSYS2 已不再是前置**
+(v4.1.0 起 installer 自带最小原生 ucrt64 工具链,装完即用)。
+只有 `install-freestanding-toolchain.sh` 仍要 MSYS2 环境(lld + OVMF 固件)。
 
 | 脚本 | 用途 | 触发时机 |
 |------|------|----------|

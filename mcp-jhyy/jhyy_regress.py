@@ -370,10 +370,11 @@ def run_test(
     # v1.7.3: SKIP directive — 期望 test 暂 skip (有已知 bug 推后续 ship,
     # e.g. defer silent codegen crash 推 v1.8). 形式: `// SKIP: <reason>`.
     skip_reason = None
-    # v2.13.0: SKIP-QBE directive — 仅在 default QBE 模式 skip (--self-backend 模式
-    # 仍跑)。用法: 自写后端真修的 test,QBE 模式有已知 bug (e.g. xmm_pressure_9args
-    # QBE Win ABI f64 stack-arg emit `addsd %rdi, %xmm0` operand type mismatch)。
-    skip_qbe_reason = None
+    # 2026-10-30:原这里有 SKIP-QBE directive 的支持(「仅在 default QBE 模式 skip,
+    # --self-backend 模式仍跑」)—— **自 2026-10-15 最后一个使用者
+    # (xmm_pressure_9args.jhyy)摘掉该指令之后就没有任何 test 再用它**,
+    # 而 QBE 本身已于 v2.16.0 从编译器移除 ⇒ 这段逻辑与 `--self-backend`
+    # 一起成了死代码,删掉。
     # 2026-10-15 (CI 修复):SKIP-STAGE0 —— 只在 `jhyy_stage0.exe`(C 端 bootstrap)
     # 上跳过。存在的理由:`regress.py --all` 拿 jhyy.exe 与 jhyy_stage0.exe 两个
     # binary 做 gated,而 stage0 是 **C 端编译器**,它的 parser 早于 V3-B / V3-C,
@@ -381,8 +382,10 @@ def run_test(
     # 这些测试在 jhyy.exe(生产 binary)上必须跑 —— 它们验的是自举后端的行为,
     # 而自举后端**只有 jhyy.exe 这条腿在验**。
     #
-    # 与 SKIP-QBE 是镜像关系:SKIP-QBE 是「默认跳,opt进才跑」,本条是
-    # 「默认跑,只有 stage0 跳」。两边都不该被笼统的 SKIP 代替 —— 笼统 SKIP
+    # ⚠️ 原先还有一条与它镜像的 SKIP-QBE(「默认跳,opt进才跑」),但那个指令
+    # 自 2026-10-15 起已无使用者、QBE 也已移除 ⇒ 2026-10-30 连同它的
+    # 支持一起删了。**本条(默认跑,只有 stage0 跳)仍有效** ——
+    # 笼统的 SKIP 不该代替它。
     # 会让这些测试在**两条腿上都不跑**,那才是真的没人验。
     skip_stage0_reason = None
     # v1.5.6: SETENV directive — 解析 // SETENV: KEY=VALUE 行, 注入到
@@ -423,9 +426,6 @@ def run_test(
         m_s0 = re.search(r"//\s*SKIP-STAGE0\s*:\s*(.+)", src)
         if m_s0:
             skip_stage0_reason = m_s0.group(1).strip()
-        m_skip_qbe = re.search(r"//\s*SKIP-QBE\s*:\s*(.+)", src)
-        if m_skip_qbe:
-            skip_qbe_reason = m_skip_qbe.group(1).strip()
         # Skip library files (no main entry) — 用剥掉注释的源码判定,
         # 否则注释里提到 `fn main_jhyy` 会让一个没有 main 的文件被当成可跑测试。
         #
@@ -460,10 +460,6 @@ def run_test(
         # v1.7.3: SKIP directive — test 暂 skip (有已知 bug 推后续 ship).
         # 期望后续 sprint 真修 bug 后移除 SKIP 行启用 default regress.
         return (True, None, None, f"skipped ({skip_reason})")
-
-    # v2.13.0: SKIP-QBE directive — QBE 默认模式 skip, --self-backend 模式仍跑
-    if skip_qbe_reason is not None and not os.environ.get("JHY_SELF_BACKEND"):
-        return (True, None, None, f"skipped (qbe-only: {skip_qbe_reason})")
 
     # v1.5.6: 用 SETENV 覆盖的 env 跑 compile + run.
     # _build_subprocess_env() 已经在 PATH 段做 MSYS2 探测, SETENV 覆盖在它之上.

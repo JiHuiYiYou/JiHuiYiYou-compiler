@@ -1,6 +1,7 @@
-# tmp/uninstall-all-jhyy.ps1 — uninstall all JHYY MSI products for clean-slate test
+# scripts/dev/install/uninstall-all-jhyy.ps1 — uninstall all JHYY MSI products for clean-slate test
 # DESTRUCTIVE: removes all MSI-registered JHYY installations. Run only for testing.
-# NOT committed (tmp/ is gitignored).
+# 2026-10-30:原头注释写着「NOT committed (tmp/ is gitignored)」—— 但它**是在仓里**的
+# (scripts/dev/install/,dev-only 工具集,按惯例不随 installer ship)⇒ 改成如实描述。
 
 $ErrorActionPreference = "Continue"
 

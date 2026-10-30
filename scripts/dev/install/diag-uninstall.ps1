@@ -1,4 +1,4 @@
-# tmp/diag-uninstall.ps1 — diagnose 1603 failure + check INSTALLDIR state
+# scripts/dev/install/diag-uninstall.ps1 — diagnose 1603 failure + check INSTALLDIR state
 $ErrorActionPreference = "Continue"
 
 Write-Host "=== INSTALLDIR state ==="
