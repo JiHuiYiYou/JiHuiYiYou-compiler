@@ -14,11 +14,20 @@
  *   - memcpy.jhyy          (per-byte loop)
  *   - memset.jhyy          (per-byte loop)
  *   - __start_kernel.jhyy  (entry, dispatches to user fn main)
- * Per `jhyy-lang-spec-no_std-supplement-v3.0.0.md`, the no_std path uses
+ * Per `jhyy-lang-spec-v4.0.0.md` (the v3.x no_std supplement was folded into
+ * it on 2026-10-24), the no_std path uses
  * `-nostartfiles -nodefaultlibs -Wl,--entry=__start_kernel` and links
- * only the user's no_std_core/*.jhyy compiled objects. The host's
+ * only the user's no_std_core compiled objects (the .jhyy files in that
+ * directory). The host's
  * `main → main_jhyy` bridge here is intentionally bypassed in no_std mode
- * (no libc startup, no `int main(int argc, char **argv)` transition). */
+ * (no libc startup, no `int main(int argc, char **argv)` transition).
+ *
+ * ⚠️ 注释里**不要写注释起始符**(斜杠 + 星号)—— 块注释内再出现它会触发
+ * gcc 的 `-Wcomment` 告警("within comment"),而 `-Wall -Wextra` 是本仓的
+ * 硬要求(见 Makefile 的 CFLAGS_REPRO)。同类形态历史上真咬过人:
+ * W-136「悬空注释吞掉两个 C 桥符号」,而 W-137 修的正是
+ * 「`$(CFLAGS_STAGE0)` 未定义 ⇒ `-Wall -Wextra` 一起被丢掉」——
+ * 也就是说**当时这条告警是被静音的**,现在开关回来了它就重新露出来。 */
 
 /* v4.0.2 W-074/076: removed unused C-side Arena 24B (`arena_new` /
  * `arena_alloc` / `arena_reset` / `arena_destroy` + `Arena` struct).

@@ -1874,9 +1874,11 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
             }
         }
     }
-    // [Status: 真修 B-φ1 (if-else phi predecessor) in C-side (commit 2.6); src0/ workaround kept for历史读者了解历史.]
-    // v0 codegen bug 2 workaround: 避免 &&/|| 嵌套 short-circuit (nested phi predecessor mismatch)
-    // 改成 nested if-else，无短路
+    // [历史] v0 codegen bug 2 的 workaround:「避免 &&/|| 嵌套 short-circuit」
+    //   —— 当时 nested phi predecessor 会 mismatch,故一律改成 nested if-else。
+    //   **该约束已退役**(W-169):v4.x 的 in-mem 后端对嵌套短路是正确的,
+    //   门是 compiler/tests/examples/logical_nested.jhyy(带调用计数器)。
+    //   本行以下的代码是 float→int 转换,跟短路无关 —— 旧注释挂错了位置。
     // Sprint 4.5 C step 2 fix (float_cmp): D→S case was unreachable
     //   (above if src_qt==D matched first; inner QBE_W/L only — no QBE_S case).
     //   Add explicit QBE_S branch so f64→f32 truncd emits correctly.
@@ -3194,9 +3196,12 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
 
         // short-circuit && 和 ||
         //
-        // [Status: 真修 B-φ1 (if-else phi predecessor) in C-side (commit 2.6); src0/ workaround kept for历史读者了解历史.]
-        // v0 codegen bug 2 workaround：phi predecessor mismatch when recursive
-        // cg_expr call inside one branch of if-else。改走 store/load 模式：
+        // [历史] v0 codegen bug 2 的 workaround:「避免 &&/|| 嵌套 short-circuit」
+        //   —— 当时 nested phi predecessor 会 mismatch,故一律改成 nested if-else。
+        //   **该约束已退役**(W-169):v4.x 的 in-mem 后端对嵌套短路是正确的 ——
+        //   右侧只在 `sc_eval` 块求值(见下面)。门是
+        //   compiler/tests/examples/logical_nested.jhyy(带调用计数器,验 7 种嵌套形状
+        //   + 左到右求值顺序)。
         //   - alloc result slot at outer scope
         //   - each branch stores its value to slot, jmps merge
         //   - merge loads from slot (no phi needed)
@@ -3360,8 +3365,10 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         //   fold a % b = a - trunc(a/b) * b  (trunc toward 0; match QBE remd spec + C fmod)
         //   5 IL insns: div + dtosi/stosi + swtof + mul + sub
         //   跳过 op = "rem" dispatch (下方 line 2267) 直接 early-return
-        //   避免 `&&`/`||` 嵌套 short-circuit (W-081 sub-bug 触发 phi merge gap);
-        //     用 nested plain `if` (无 short-circuit), 每个 if-else 在 QBE IL 走常规 branch
+        // [历史] 当时为避免 `&&`/`||` 嵌套 short-circuit(W-081 sub-bug 触发 phi merge gap)
+        //   而写成 nested plain `if`(无 short-circuit)。**该约束已退役**(W-169) ——
+        //   in-mem 后端嵌套短路正确,门是 compiler/tests/examples/logical_nested.jhyy。
+        //   这里保留 nested 写法只是不想动已验证的代码。
         if d_op == TOKEN_PERCENT() {
             let mut is_fmod_qt: i32 = 0;
             if op_qt == QBE_D() { is_fmod_qt = 1; }

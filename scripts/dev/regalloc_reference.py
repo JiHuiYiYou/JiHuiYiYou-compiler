@@ -7,14 +7,17 @@
 一套实现自己验自己,只能说明它没崩。
 
 跑法:
-    JHY_WRITE_IL=1 ./compiler/build/bin/jhyy.exe build compiler/src0/main.jhyy
-    python scripts/dev/regalloc_reference.py compiler/src0/main.il
+    mkdir -p compiler/build/regalloc
+    JHY_WRITE_IL=1 ./compiler/build/bin/jhyy.exe build compiler/src0/main.jhyy -o compiler/build/regalloc/main
+    python scripts/dev/regalloc_reference.py compiler/build/regalloc/main.il
 
-⚠️ `compiler/src0/main.il` 落在**源码目录**里是刻意的,不是污染:
-   `jhyy build` **不解析 `-o`**(usage 串写着支持,实现漏了)⇒ 产物必定落在
-   input 同目录,没法重定向。而 in-mem 后端默认不落 .il,只有
-   `JHY_WRITE_IL=1` 才落 —— 所以这个 .il 只有在显式 opt-in 时才出现,
-   且是本对拍流程的输入,不是残留。**别去"顺手清理"它。**
+⚠️ 为什么产物落在 `compiler/build/regalloc/` 而不是源码目录:
+   in-mem 后端默认不落 .il,只有 `JHY_WRITE_IL=1` 才落 ⇒ 这个 .il 只在
+   显式 opt-in 时出现。2026-10-30(W-168)之前 `jhyy build` **不认 `-o`**
+   (usage 串写着支持,实现漏了)⇒ 产物只能落在 input 同目录
+   (`compiler/src0/main.il` + `compiler/src0/main.s`,源码目录被污染);
+   `build` 修好后用 `-o` 引到 build 树里 ⇒ `compiler/src0/` 保持干净。
+   `compiler/build/` 被 .gitignore 命中 ⇒ 这个 .il 不会被误提交。
 
 对拍点(实测两者**逐项相同**):
     · 合格候选(def+所有 use 同基本块 + 期间无 call + 整数类型)
@@ -193,7 +196,7 @@ def analyse(path):
 
 
 def main():
-    path = sys.argv[1] if len(sys.argv) > 1 else 'compiler/src0/main.il'
+    path = sys.argv[1] if len(sys.argv) > 1 else 'compiler/build/regalloc/main.il'
     r = analyse(path)
     print(f"参考实现(POOL={POOL})  {path}")
     print(f"  def 总数            : {r['defs']}")

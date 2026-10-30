@@ -1,0 +1,107 @@
+// logical_nested.jhyy — **嵌套** `&&` / `||` 的短路语义
+//
+// 补 `logical.jhyy` 的缺口:那个文件只测了**平铺**形状
+// (`false && X` / `true || X`),**嵌套**形状一个都没测。
+//
+// 为什么这个文件存在(而不是继续禁写嵌套):
+//   W-082 那条「codegen 里禁嵌套短路」的约定来自 **QBE IL 时代**
+//   (脚本 docstring 举的例子还是 `TOKEN_PERCENT()` / `QBE_D()`)。
+//   v4.x 的 in-mem 自研后端**嵌套短路是正确的**
+//   (codegen.jhyy:3204-3245 —— 右侧只在 `sc_eval` 块求值)。
+//   ⇒ 那条约定已经**过时**,而**真正该有的门**(嵌套形状的短路)却**从来没存在过**。
+//   ⇒ 本文件就是那个门。
+//
+// ⚠️ 短路语义(写期望时别搞反 —— 我第一版就反了,测出 EXIT=19 的假阳性):
+//   `A && B` ⇒ **B 只在 A 为真时**求值(A 假 ⇒ 结果假 ⇒ 跳过 B)
+//   `A || B` ⇒ **B 只在 A 为假时**求值(A 真 ⇒ 结果真 ⇒ 跳过 B)
+//
+// 关键设计(沿用 logical.jhyy):光看返回值**抓不到**短路失效 ——
+// `true || X` 短路坏掉时它照样求值 X,`true || 99` 还是 true。
+// **只有调用计数能区分。** ⇒ 每个 `tick()` 记一次被调用。
+//
+// 期望的调用次数(左到右求值,短路生效):
+//   N1  false && (X || X)        ⇒ 0 次(&& 的左侧假 ⇒ 整个右侧跳过)
+//   N2  true  && (X || X)        ⇒ 1 次(|| 的第 1 个 X 返回真 ⇒ 第 2 个跳过)
+//   N3  (X || X) && X            ⇒ 2 次(|| 的两个 X 都返回假 ⇒ && 的右侧跳过)
+//   N4  true  || (X && X)        ⇒ 0 次(|| 的左侧真 ⇒ 整个右侧跳过)
+//   N5  false || (X && X)        ⇒ 2 次(&& 的第 1 个 X 返回**真** ⇒ 第 2 个**要**求值)
+//   N6  false || (X && X)        ⇒ 1 次(&& 的第 1 个 X 返回**假** ⇒ 第 2 个跳过)
+//                                    ↑ N5/N6 这一对才是「嵌套 && 的短路生效」的判据
+//   N7  X || X                   ⇒ 1 次(左到右:第 1 个 X 返回真 ⇒ 第 2 个跳过)
+//                                    ↑ 顺带钉住「左到右求值」
+//   合计 = 0+1+2+0+2+1+1 = 7
+//
+// EXIT = score + calls * 100
+//   score = 1+2+4+8+16+32+64 = 127
+//   EXIT = 127 + 7*100 = 827
+//   任一短路坏掉 ⇒ calls 变多 ⇒ EXIT 变 827+ ⇒ 断言立刻翻红。
+//
+// EXPECT: 827
+// EXPECT-OUT: "N1 (false && (X || X)): 0"
+// EXPECT-OUT: "N2 (true && (X || X)): 1"
+// EXPECT-OUT: "N3 ((X || X) && X): 0"
+// EXPECT-OUT: "N4 (true || (X && X)): 1"
+// EXPECT-OUT: "N5 (false || (X && X) true-first): 1"
+// EXPECT-OUT: "N6 (false || (X && X) false-first): 0"
+// EXPECT-OUT: "N7 (X || X left-to-right): 1"
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+/* tick: 记一次「被求值」,并返回给定的值 —— 用返回值控制后续分支 */
+fn tick(calls: *i32, v: i32) -> i32 {
+    let c = *calls;
+    *calls = c + 1;
+    v
+}
+
+fn main_jhyy() -> i32 {
+    let mut calls: i32 = 0;
+
+    /* N1: false && (X || X) —— 左侧假 ⇒ 右侧两个 X 都不该被求值 */
+    let n1 = (0 != 0) && (tick(&calls, 1) != 0 || tick(&calls, 1) != 0);
+    printf("N1 (false && (X || X)): %d (expect 0)\n", if n1 { 1 } else { 0 });
+
+    /* N2: true && (X || X) —— || 的第 1 个 X 返回真 ⇒ 第 2 个不该被求值 */
+    let n2 = (1 != 0) && (tick(&calls, 2) != 0 || tick(&calls, 3) != 0);
+    printf("N2 (true && (X || X)): %d (expect 1)\n", if n2 { 1 } else { 0 });
+
+    /* N3: (X || X) && X —— || 的两个 X 都返回假 ⇒ && 的右侧不该被求值 */
+    let n3 = (tick(&calls, 0) != 0 || tick(&calls, 0) != 0) && (tick(&calls, 9) != 0);
+    printf("N3 ((X || X) && X): %d (expect 0)\n", if n3 { 1 } else { 0 });
+
+    /* N4: true || (X && X) —— 左侧真 ⇒ 右侧两个 X 都不该被求值 */
+    let n4 = (1 != 0) || (tick(&calls, 4) != 0 && tick(&calls, 4) != 0);
+    printf("N4 (true || (X && X)): %d (expect 1)\n", if n4 { 1 } else { 0 });
+
+    /* N5: false || (X && X),X 返回真 ⇒ && 的两个都要求值 */
+    let n5 = (0 != 0) || (tick(&calls, 5) != 0 && tick(&calls, 5) != 0);
+    printf("N5 (false || (X && X) true-first): %d (expect 1)\n", if n5 { 1 } else { 0 });
+
+    /* N6: false || (X && X),X 返回假 ⇒ && 的第 2 个不该被求值 ← 嵌套短路的判据 */
+    let n6 = (0 != 0) || (tick(&calls, 0) != 0 && tick(&calls, 5) != 0);
+    printf("N6 (false || (X && X) false-first): %d (expect 0)\n", if n6 { 1 } else { 0 });
+
+    /* N7: X || X —— 左到右:第 1 个返回真 ⇒ 第 2 个不该被求值 */
+    let n7 = (tick(&calls, 1) != 0 || tick(&calls, 0) != 0);
+    printf("N7 (X || X left-to-right): %d (expect 1)\n", if n7 { 1 } else { 0 });
+
+    // bool → i32(jhyy 的比较/逻辑结果是 bool,不能直接参与算术)
+    let n1i: i32 = if n1 { 1 } else { 0 };
+    let n2i: i32 = if n2 { 1 } else { 0 };
+    let n3i: i32 = if n3 { 1 } else { 0 };
+    let n4i: i32 = if n4 { 1 } else { 0 };
+    let n5i: i32 = if n5 { 1 } else { 0 };
+    let n6i: i32 = if n6 { 1 } else { 0 };
+    let n7i: i32 = if n7 { 1 } else { 0 };
+
+    let mut score: i32 = 0;
+    if n1i == 0 { score = score + 1; }
+    if n2i == 1 { score = score + 2; }
+    if n3i == 0 { score = score + 4; }
+    if n4i == 1 { score = score + 8; }
+    if n5i == 1 { score = score + 16; }
+    if n6i == 0 { score = score + 32; }
+    if n7i == 1 { score = score + 64; }
+
+    score + calls * 100
+}

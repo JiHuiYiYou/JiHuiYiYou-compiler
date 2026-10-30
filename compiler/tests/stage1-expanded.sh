@@ -58,10 +58,10 @@ for t in "${TESTS[@]}"; do
     rm -f "$v0_actual" "$v1_actual"
 
     # ⚠️ 用 `compile --no-link` 而不是 `build`:
-    #   `jhyy build` **不解析 `-o`**(usage 串写着支持,实现漏了)⇒ 产物必定
-    #   落在 input 同目录,没法重定向 —— 而本脚本需要把两侧产物放在已知路径
-    #   才能 cmp。`compile --no-link` 支持 `-o`,且产出的 .s 与 `build`
-    #   **逐字节相同**(实测一致)⇒ 验的是同一件事。
+    #   (2026-10-30 W-168 修后 `jhyy build` 已支持 `-o`,但**仍不能**替代本段 ——
+    #    `cmd_compile` 产出 .s 后还会跑 `apply_link_section_directives`
+    #    (W-112 的 `#[link_section]` 处理),`cmd_build` 不跑 ⇒ 含该属性的程序
+    #    两条路径的 .s 不同。)
     #   这也是项目既有的惯用法(compiler/tests/bootstrap/closure_check.sh)。
     if ! "${JHY_0}" compile --no-link "${src}" -o "${t}_v0_tmp" >/dev/null 2>"$OUT_DIR/${t}_v0.err"; then
         echo "[FAIL] $t — v0 compile failed:"

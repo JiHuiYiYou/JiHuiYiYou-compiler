@@ -1171,8 +1171,62 @@ check_crossvolume_rename() {
     ok "crossvolume_rename(改名带 MOVEFILE_COPY_ALLOWED,跨盘可落地)"
 }
 
+# ════════════════════════════════════════════════════════════════════════════
+# W-168 — `jhyy build` 必须真的认 `-o`
+# ════════════════════════════════════════════════════════════════════════════
+#
+# 症状(2026-10-30 修前):`jhyy build x.jhyy -o y` **静默忽略** `-o`
+# —— 产物仍落回 x 旁边,零告警。而 usage 串写着 `[-o output]`
+# ⇒ CLI 在说谎。连带后果:bench 之类想把产物引开的脚本只能让产物污染源码目录。
+#
+# 验法:**两个方向都要验** ——
+#   ① 带 `-o`   ⇒ 产物落在 `-o` 指的地方,且默认位置**没有**残留;
+#   ② 不带 `-o` ⇒ 产物仍落回默认位置(默认行为不许被改坏)。
+# 只验①会漏掉「`-o` 生效了但默认行为被改坏」这种反向回归。
+
+check_build_o_flag() {
+    hdr "W-168  jhyy build 是否真的认 -o"
+    [ -x "$JHYY_EXE" ] || { skip "build_o_flag" "jhyy.exe 不存在"; return; }
+
+    local src="$WORK/bo.jhyy"
+    local def="$WORK/bo.s"          # 不带 -o 时的默认产物(input 路径派生)
+    local want="$WORK/bo_out.s"      # 带 -o 时的产物
+    cat > "$src" <<'EOF'
+fn main_jhyy() -> i32 { return 42; }
+EOF
+
+    # ① 带 -o
+    rm -f "$def" "$want"
+    if ! "$JHYY_EXE" build "$src" -o "$WORK/bo_out" > "$WORK/bo.log" 2>&1; then
+        badenv "build_o_flag" "build 失败:$(tail -3 "$WORK/bo.log" | tr '\n' ' ')"
+        return
+    fi
+    if [ ! -s "$want" ]; then
+        bad "build_o_flag" "-o 指的地方没有产物(bo_out.s 不存在或为空)—— -o 又被忽略了"
+        return
+    fi
+    if [ -e "$def" ]; then
+        bad "build_o_flag" "默认位置仍有残留 .s —— -o 没把输出引走"
+        return
+    fi
+
+    # ② 不带 -o:默认行为不许变
+    rm -f "$def" "$want"
+    if ! "$JHYY_EXE" build "$src" > "$WORK/bo2.log" 2>&1; then
+        badenv "build_o_flag" "build(无 -o) 失败:$(tail -3 "$WORK/bo2.log" | tr '\n' ' ')"
+        return
+    fi
+    if [ ! -s "$def" ]; then
+        bad "build_o_flag" "不带 -o 时产物没落在默认位置 —— 默认行为被改坏了"
+        return
+    fi
+    rm -f "$def" "$want"
+    ok "build_o_flag(-o 生效 + 默认行为不变)"
+}
+
 want helpers_symbols && check_helpers_symbols
 want crossvolume_rename && check_crossvolume_rename
+want build_o_flag && check_build_o_flag
 want link_section    && check_link_section
 want asm_before_ret  && check_asm_before_ret
 want holds_bitmap    && check_holds_bitmap

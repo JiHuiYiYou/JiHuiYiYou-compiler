@@ -1505,20 +1505,66 @@ fn derive_output_name(input: *u8, out_buf: *u8) -> i32 {
     return 0 as i32;
 }
 
-// cmd_build: lex → parse → sema → codegen → 写 .il
+// cmd_build: lex → parse → sema → codegen → 写 .s(in-mem 后端)/ .il(JHY_WRITE_IL=1)
 // v2.0.0: 加 `t: i32` Target 参数 → build_il → cg_module dispatch
+// v4.1.3 (W-168): 支持 `-o <output>` —— 见函数体内注释
 fn cmd_build(argc: i32, argv: *u8, t: i32) -> i32 {
     if argc < (1 as i32) {
         jh_fputs_stderr("usage: jhyy build <file.jhyy> [-o output]\n" as *u8);
         return 1 as i32;
     }
-    // argv is *u8 → first arg is at *(argv as **u8)
-    let argv_arr = argv as **u8;
-    let input = (*argv_arr);
-    let out_buf = malloc(1024 as i64);
-    derive_output_name(input, out_buf);
+    /* W-168 (2026-10-30 真修):解析 `-o <output>`。
+     *
+     * 此前 usage 串写着 `[-o output]`,实现却只取 `argv[0]` 当输入、其余全丢
+     * ⇒ `jhyy build x.jhyy -o y` **静默忽略** `-o`,产物仍落回 x 旁边,零告警。
+     * `cmd_compile` 从 v0.8 commit 4 起就支持 `-o`(见下面)⇒ 两个子命令 CLI 不对称。
+     *
+     * 解析规则与 cmd_compile 一致:`-o <path>` + 第一个非 flag 参数当输入。
+     * out_buf 只被**读**(strlen / str_copy),不会写进用户的 argv 字符串。
+     */
+    let mut input: *u8 = 0 as *u8;
+    let mut user_out: *u8 = 0 as *u8;
+    let mut i: i32 = 0 as i32;
+    while i < argc {
+        let i64_i = i as i64;
+        let arg_p = ptr_add_u8(argv, i64_i * (8 as i64)) as **u8;
+        let arg = (*arg_p);
+        if strcmp(arg, "-o" as *u8) == (0 as i32) {
+            let next_i = i + (1 as i32);
+            if next_i < argc {
+                let next_i64 = next_i as i64;
+                let out_p = ptr_add_u8(argv, next_i64 * (8 as i64)) as **u8;
+                user_out = (*out_p);
+                i = next_i;
+            }
+        } else {
+            if input == (0 as *u8) {
+                input = arg;
+            }
+        }
+        i = i + (1 as i32);
+    }
+    if input == (0 as *u8) {
+        jh_fputs_stderr("build: no input file\n" as *u8);
+        return 1 as i32;
+    }
+    /* 默认从 input 派生 output 名（去 .jhyy 后缀） */
+    let derived = malloc(1024 as i64);
+    derive_output_name(input, derived);
+    let mut out_buf: *u8 = derived;
+    if user_out != (0 as *u8) {
+        free(derived);
+        out_buf = user_out;
+    }
     let r = build_il(input, out_buf, t);
-    free(out_buf);
+    if user_out == (0 as *u8) { free(derived); }
+    // W-168 (2026-10-30 真修):build_il 的返回值语义是
+    //   2 = in-mem 自研后端已直接 emit .s(**成功**)
+    //   0 = 老 .il-on-disk 路径(还要跑 run_backend)
+    //   1 = 失败
+    // cmd_compile 早就把这个 2 归一成 0,cmd_build 之前**直接透传**
+    // ⇒ `jhyy build` 成功时退出码是 2 ⇒ shell / CI 把它当失败。
+    if r == (2 as i32) { return 0 as i32; }
     return r;
 }
 

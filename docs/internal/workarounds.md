@@ -187,7 +187,8 @@
 | [W-165](#w-165) | RESOLVED | `jhyy --version` **从来就不存在** ⇒ 文档 / release note... |
 | [W-166](#w-166) | RESOLVED | `build.ps1 bundle` 只在 MSI **不存在**时才重建 ⇒ **陈旧 MSI... |
 | [W-167](#w-167) | RESOLVED | alloc 池的栈预留**写死 8192 字节** ⇒ 每个函数的帧 ≥8352 ⇒... |
-| [W-168](#w-168) | ACTIVE | `jhyy build` **不解析 `-o`** —— usage 串谎称支持,产物静默落回... |
+| [W-168](#w-168) | RESOLVED | `jhyy build` **不解析 `-o`** + **成功时退出码是 2** —— CLI... |
+| [W-169](#w-169) | SUPERSEDED | 「codegen 里禁嵌套 `&&`/`||` 短路」约定 —— QBE 时代遗留,in-mem... |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -12567,65 +12568,144 @@ alloc_pool_size = 8192 + per_fn_alloc
   自动消化的:第 1 代与第 2 代产物不同 ⇒ 推进锚点一代 ⇒ 第 2 代收敛 ✓)
 
 <a id="w-168"></a>
-## W-168: `jhyy build` **不解析 `-o`** —— usage 串谎称支持,产物静默落回 input 同目录
+## W-168: `jhyy build` **不解析 `-o`** + **成功时退出码是 2** —— CLI 在说谎
 
-**状态:** ACTIVE since 2026-10-30 (v4.4.0) — build 子命令忽略 -o flag;真修并入 v4.4.0(它本来就要重写 temp 分配)
+**状态:** RESOLVED closed 2026-10-30 (v4.1.2) — build 子命令实装 -o 解析并把退出码归一;新增常驻门 build_o_flag
 **Filed-by:** 2026-10-30 (仓库清理 —— 查「bench 为何往 compiler/src0/ 写产物」时撞上)
 **日期:** 2026-10-30
 
-**触发面:** `compiler/src0/main.jhyy` 的 `cmd_build`(:1510)—— `jhyy build` 子命令。
+**触发面:** `compiler/src0/main.jhyy` 的 `cmd_build` —— `jhyy build` 子命令。
 
-**症状:**
+**症状(两个 bug,同一个函数):**
+
+① **`-o` 被静默忽略**
 ```
-$ jhyy build t.jhyy -o /tmp/out/main
+$ jhyy build x.jhyy -o /tmp/out/main
 [4] codegen done
-$ ls /tmp/out/          # 空 —— -o 被静默忽略
-$ ls t.s                # 产物落回 input 同目录
+$ ls /tmp/out/     # 空 —— -o 被忽略
+$ ls x.s           # 产物落回 input 同目录,零告警
 ```
-而 usage 串(`:1512`)写着 `usage: jhyy build <file.jhyy> [-o output]`
-⇒ **CLI 在说谎**;用户以为指定了输出路径,拿到的却是**别处的产物**,且**零告警**。
+而 usage 串(`:1512`)写着 `usage: jhyy build <file.jhyy> [-o output]` ⇒ **CLI 在说谎**。
+
+② **成功时退出码是 2**
+```
+$ jhyy build x.jhyy; echo $?
+2        # 期望 0 —— shell / CI 把它当失败
+$ jhyy compile x.jhyy; echo $?
+0        # compile 是对的
+```
 
 **根因:**
-`cmd_build` 只取 `argv_arr[0]` 当输入、其余参数全丢:
+① `cmd_build` 只取 `argv[0]` 当输入、其余参数全丢:
 ```
 let argv_arr = argv as **u8;
 let input = (*argv_arr);
-let out_buf = malloc(1024 as i64);
-derive_output_name(input, out_buf);
 ```
-而 `cmd_compile`(:1543-1584)从 v0.8 commit 4 起就有完整的 `-o` / `--no-link` 解析
-⇒ **两个子命令的 CLI 不对称**。`build` 的 `-o` **从来没实现过**,
+而 `cmd_compile`(:1543 附近)从 v0.8 commit 4 起就有完整的 `-o` 解析
+⇒ **两个子命令的 CLI 不对称**;`build` 的 `-o` **从来没实现过**,
 usage 串抄的是 `compile` 的写法。
 
-**workaround:**
-暂无(未修)。可用的绕法:① 用 `compile --no-link -o <path>` 代替
-`build -o` —— 两者产出的 `.s` **逐字节相同**(实测 13,427,368 B 完全一致),
-且 `compile --no-link` 认 `-o`;这是仓内 `closure_check.sh` / `self_host_bench.sh`
-现在用的写法。② 直接接受产物落在 input 同目录。
+② `build_il` 的返回值语义是「2 = in-mem 自研后端已直接 emit .s(**成功**)
+/ 0 = 老 .il-on-disk 路径 / 1 = 失败」;`cmd_compile` 早就把 2 归一成 0,
+`cmd_build` 却**直接透传** ⇒ 成功时退出码 = 2。
 
 **影响范围:**
-- 只影响 `build` 子命令;`compile` 的 `-o` 从 v0.8 起一直正常。
-- 仓内唯一**依赖**「产物落在源码旁边」这行为的是
-  `scripts/dev/regalloc_reference.py` 的对拍流程(`JHY_WRITE_IL=1 jhyy build ...`
-  ⇒ `compiler/src0/main.il`)—— 该脚本已加注释说明「刻意如此,别去清理」。
-- 外部用户:任何照 usage 串传 `-o` 的人。
+- ① 只影响 `build` 子命令(`compile` 的 `-o` 一直正常)。
+- ② 同上。仓内无人依赖那个 2(查过:regress.py / mcp-jhyy / scripts 都只当它
+  是「跑过了」,不看退出码)⇒ 修正无兼容风险。
+- 连带好处:bench / regalloc 对拍流程**终于可以把产物引开**
+  (`jhyy build … -o <dir>/x`),不再往**源码目录** `compiler/src0/` 写产物。
 
-**失效条件:** `cmd_build` 实现 `-o` 解析(或 usage 串不再宣称支持)。
+**修法(2026-10-30 真修,`compiler/src0/main.jhyy`):**
+- `cmd_build` 照 `cmd_compile` 的形状解析 argv:`-o <path>` + 第一个非 flag
+  参数当输入(⇒ `jhyy build -o out x.jhyy` 这种 flag 在前的写法也认)。
+- `out_buf` 语义与 `cmd_compile` 一致:默认由 input 派生(可 free),
+  给了 `-o` 就直接用用户的字符串(**只被读**,strlen / str_copy,不会写进 argv)。
+- 退出码:`if r == 2 { return 0; }`(与 cmd_compile 的归一一致)。
 
-**修法草案:**
-照 `cmd_compile`(:1547-1569)已有的解析写一份给 `cmd_build`:
-`-o <path>` + 第一个非 flag 参数当输入。**或者**至少把 usage 串改成不说谎。
+**门:** `compiler/tests/bootstrap/artifact_checks.sh build_o_flag`
+—— **两个方向都验**:① 带 `-o` ⇒ 产物落在 `-o` 指的地方且**默认位置无残留**;
+② 不带 `-o` ⇒ 产物仍落回默认位置(默认行为不许被改坏)。
+只验①会漏掉「`-o` 生效了但默认行为被改坏」这种反向回归。
 
-⚠️ **为什么 2026-10-30 没直接修**:改 `compiler/src0/main.jhyy` ⇒ 新增局部变量 ⇒
-**移位模块级 temp 编号** ⇒ 自举产物行为漂移(v4.0.20 实测 6 个 sysv 用例全红)
-⇒ 需要「src0 改动 → 刷新自举锚点 → D43 baseline 重新 pin → 全量回归(含 Docker
-sysv)」一整套发版级流程。**并入 v4.4.0** 最省事 —— v4.4.0 本来就要重写
-temp 分配(位置映射 + 前瞻窗口),锚点刷新 / baseline re-pin 那一步届时必然要做。
+**验证(2026-10-30):**
+- `jhyy build tmp/bo.jhyy -o tmp/bo_out` ⇒ 产 `tmp/bo_out.s`,`tmp/bo.s` **不存在** ✅
+- `jhyy build tmp/bo.jhyy` ⇒ 产 `tmp/bo.s`(默认位置)✅,退出码 0 ✅
+- `jhyy build -o tmp/bo3 tmp/bo.jhyy` ⇒ 产 `tmp/bo3.s` ✅(flag 在前也认)
+- `artifact_checks.sh --only=build_o_flag` ⇒ **PASS**
+- 自举闭环第 1 代收敛;`make` 产出新锚点(见下)
+- 全量回归 **258/278 PASS + 0 XFAIL + 0 failed + 20 SKIP**(含新增的
+  `logical_nested.jhyy`,见 W-169)
+- `artifact_checks.sh` 全量 **17 PASS / 0 FAIL**
+
+**⚠️ 修后的两个已知边界(别踩):**
+- **`jhyy build` ≠ `jhyy compile --no-link`**:后者在产出 .s 之后还会跑
+  `apply_link_section_directives`(W-112 的 `#[link_section]` 处理),
+  `cmd_build` **不跑** ⇒ 含该属性的程序两条路径的 .s 不同。
+  ⇒ bench / stage1-expanded.sh 继续用 `compile --no-link -o`,**不要**换成 `build -o`。
+- `jhyy build` 仍是**只编不链**的子命令(不产 .exe)。
 
 **引用:**
-- 源码:`compiler/src0/main.jhyy:1510`(cmd_build)/ `:1512`(usage 串)/
-  `:1543-1584`(`cmd_compile` 的正确写法,照抄对象)
-- `compiler/tests/stage1-expanded.sh` 曾把这个行为当「已知事实」写进注释
-  (2026-10-30 已随该脚本一起修掉 —— 它原本 7 个测试必然全红)
-- `scripts/dev/regalloc_reference.py` —— 唯一依赖「落在源码旁边」的仓内流程
-- plan:`docs/plans/v4/v4.4.0-plan.md`(下一个版本)
+- 源码:`compiler/src0/main.jhyy`(cmd_build)/ `build_il` 的返回值语义
+- 门:`compiler/tests/bootstrap/artifact_checks.sh build_o_flag`
+- 配套:`scripts/dev/regalloc_reference.py`(对拍流程改用 `-o` 引到
+  `compiler/build/regalloc/` ⇒ `compiler/src0/` 不再被写产物)
+
+
+<a id="w-169"></a>
+## W-169: 「codegen 里禁嵌套 `&&`/`||` 短路」约定 —— QBE 时代遗留,in-mem 后端已退役
+
+**状态:** SUPERSEDED closed 2026-10-30 (v4.1.2) — 约束对象(QBE IL 的 nested phi)已不存在;门改为行为回归
+**Filed-by:** 2026-10-30 (仓库清理 —— 查「W-082 约定门形同虚设」时撞上)
+**日期:** 2026-10-30
+
+**触发面:**
+- `scripts/dev/v2_13_10_codegen_cond_no_nested_sc.py`(约定检查器)
+- `compiler/src0/codegen.jhyy` + `compiler/src0/codegen_amd64_*.jhyy` 共 8 处被它点名的「违规」
+
+**症状:**
+- 检查器 docstring 自称「if a future author reintroduces nested short-circuit, this
+  fails CI immediately」—— **它根本没接进 CI**(全仓零引用)。⇒ 那句话是假的。
+- 2026-10-30 实测它**当前就在 FAIL**:`codegen.jhyy:803` / `:1891` 两处,
+  另有 6 处在文件搬家后它根本看不到(`codegen_amd64_emit_call.jhyy:263/266/393/396`、
+  `codegen_amd64_lexer.jhyy:1981`、`codegen_amd64_state.jhyy:2522`)⇒
+  **约定实际全仓无人守**。
+- 而那 8 处「违规」**全是正确代码** —— in-mem 后端对嵌套短路是**正确**的。
+
+**根因:**
+约束来自 **QBE IL 时代**:当时 nested phi predecessor 会 mismatch(W-081 sub-bug),
+故一律要求写成 nested plain `if`(无 short-circuit)。
+v4.x 换成 **in-mem 自研后端**后,约束对象(QBE 的 nested phi)**已不存在**;
+短路实现让**右侧只在 `sc_eval` 块求值**(`&&` 走 `jnz left → sc_eval`,
+`||` 走 `jnz left → sc_true`),嵌套由递归自然覆盖。
+⇒ **约束过时,而真正该有的门(嵌套形状的行为回归)从来没存在过。**
+
+**workaround(已退役的约定):**
+「codegen 里禁 `if A && (B || C)` / `if A || (B && C)` 形状,改写 nested plain `if` flag dispatch」
+
+**影响范围:** 只影响 codegen 内部的**写法**;不影响语义(嵌套短路本来就是对的)。
+留着这条约定 = 强制大家写更啰嗦且完全等价的代码。
+
+**失效条件:** 已失效 —— v4.x 的 in-mem 后端短路正确。
+
+**superseder:** 「**行为回归门** `compiler/tests/examples/logical_nested.jhyy`
+(2026-10-30 新增)+ `docs/internal/conventions.md` § 短路语义(新增)」
+
+**2026-10-30 处置:**
+1. **删掉** `scripts/dev/v2_13_10_codegen_cond_no_nested_sc.py`(静态风格检查,
+   约束已退役 ⇒ 检查器无对象可查;留着只会让人以为它在守什么)。
+2. **8 处「违规」保持原样** —— 它们是对的,改成 nested 写法纯属倒退。
+3. `codegen.jhyy` 里两处「嵌套无短路」注释订正为 `[历史]` 标注
+   (其中一处原本挂在无关的 float→int 转换代码上 —— 见 `version-schedule.md` § 4 的
+   「嵌套短路的源码注释」行)。
+4. **新增行为门** `compiler/tests/examples/logical_nested.jhyy`:7 种嵌套形状 +
+   左到右求值顺序,用**调用计数器**区分「值对但副作用多执行」
+   —— 光看返回值抓不到短路失效(`true || X` 短路坏掉时照样求值 X,值一模一样)。
+   实测 7 个形状的调用次数 = 0/1/2/0/2/1/1,合计 7 ⇒ EXIT = 127 + 7×100 = 827。
+   ⚠️ `logical.jhyy` 只测**平铺**形状 ⇒ 这层缺口一直没人管。
+
+**引用:**
+- 源码:`compiler/src0/codegen.jhyy`(短路实现:右侧只在 `sc_eval` 块求值)
+- 门:`compiler/tests/examples/logical_nested.jhyy`(新)/ `logical.jhyy`(平铺,旧)
+- 约定落点:`docs/internal/conventions.md` § 短路语义(新)
+- 相关:**W-168**(`jhyy build` 不解析 `-o`)—— 同日仓库清理时挖出
