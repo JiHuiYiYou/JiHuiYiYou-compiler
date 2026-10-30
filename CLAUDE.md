@@ -417,14 +417,15 @@ W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_
 
 ⇒ **跨项目设计基线现在单点落在本仓 `docs/coordination/`**。
 
+⚠️ **2026-10-30 第二次整理** —— `docs/coordination/` 的 6 份中间稿
+(`JHYY_决策总纲` / `JHYY_编译器全阶段方向与路线图` / `JHYY_OS_内核模型与语言需求` /
+`JHYY_Cap类型语义草案` / `JHYY_设计自审_对照K框架` / `JHYY_待拍板设计`)
+已**合并成两份终版**,原 6 份删除(内容保留在 git 历史):
+
 | 文档 | 用途 | 何时读 |
 |------|------|--------|
-| [`docs/coordination/JHYY_决策总纲.md`](docs/coordination/JHYY_决策总纲.md) | **入口** —— 已确立结论 + 分歧裁决 + P0–P4.5 分期与硬门 + 待拍板清单 | **每个 v4.x / OS 相关 sprint 启动前必读** |
-| [`docs/coordination/JHYY_OS_内核模型与语言需求.md`](docs/coordination/JHYY_OS_内核模型与语言需求.md) | 内核模型(能力微内核 / CNode / type_tag / region_table)+ 对语言的 **22 条需求**(按失效严重性排序) | 设计 OS 相关特性时 |
-| [`docs/coordination/JHYY_编译器全阶段方向与路线图.md`](docs/coordination/JHYY_编译器全阶段方向与路线图.md) | 编译器全阶段方向 + 21 个后端 pass 清单 + `.jhyynb` contract section 设计 | 规划编译器工作时 |
-| [`docs/coordination/JHYY_Cap类型语义草案.md`](docs/coordination/JHYY_Cap类型语义草案.md) | `Cap<T, Rights>` / `ptr<phys>` 派生 / 8 种内置 rights 的具体提案 | 做 capability 类型化时 |
-| [`docs/coordination/JHYY_设计自审_对照K框架.md`](docs/coordination/JHYY_设计自审_对照K框架.md) | 对上面四份的**批评与补漏清单**(真遗漏 vs 框架错配) | 排期前必读 —— 别把已知缺口重排一遍 |
-| [`docs/coordination/JHYY_待拍板设计.md`](docs/coordination/JHYY_待拍板设计.md) | **12 条未拍板设计的可选方案 + 建议**(D1..D12,含可核实事实基线 / 选项 / 产物) | 拍板时读 —— 别从零推 |
+| [`docs/coordination/JHYY_编译器侧设计终版.md`](docs/coordination/JHYY_编译器侧设计终版.md) | **编译器侧入口** —— 事实基线(逐条 `file:line`)+ P0–P4.5 分期与硬门 + 后端 pass 全表 + 规范一致性门 + 编译器侧 4 条待拍板(D5/D6/D9/D12) | **每个 v4.x / OS 相关 sprint 启动前必读** |
+| [`docs/coordination/JHYY_OS侧设计终版.md`](docs/coordination/JHYY_OS侧设计终版.md) | **OS 侧入口** —— 能力微内核形态 + CNode/type_tag/region_table + `.jhyynb` contract + 语言—内核边界 + 对语言的 **22 条需求** + OS 侧 8 条待拍板(D1–D4/D7/D8/D10/D11) | 设计 OS 相关特性时 / 拍板时读 |
 | [`docs/abis/jhyy-lang-spec-v4.0.0.md` § 19](docs/abis/jhyy-lang-spec-v4.0.0.md) | Debug ABI(**🔒 per D41**;OS 侧旧镜像已删,此处是权威) | 做调试 / 可观测性时 |
 
 **冲突解决规则**(沿用):

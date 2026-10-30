@@ -4,7 +4,7 @@
 **状态**: 设计文档(完成最终态视图;实装时机另行决定)
 **目标**: 为 jhyy_OS user-space + jhyy 编译器自身(M11)+ GDB attach 三重角色,定义一个 **jhyy 原生** 的二进制格式
 **不在范围**: 实施 sprint 划分 / 工作量估算 / 时间表(per memory `feedback_no_date_estimates`)
-**关联**: D44(决策登记,2026-09-04 user 锁) | OS 侧镜像已于 2026-10-30 随 OS 文档整体清理(commit `f98d83d`)⇒ **OS 侧重写时从本文档镜像,不得反向** | 跨项目背景见 [`../coordination/JHYY_OS_内核模型与语言需求.md`](../coordination/JHYY_OS_内核模型与语言需求.md) | plan 文件 `c-jihuiyiyou-twinkling-frog.md`(个人 plan,不随仓分发)
+**关联**: D44(决策登记,2026-09-04 user 锁) | OS 侧镜像已于 2026-10-30 随 OS 文档整体清理(commit `f98d83d`)⇒ **OS 侧重写时从本文档镜像,不得反向** | 跨项目背景见 [`../coordination/JHYY_OS侧设计终版.md`](../coordination/JHYY_OS侧设计终版.md) | plan 文件 `c-jihuiyiyou-twinkling-frog.md`(个人 plan,不随仓分发)
 
 ---
 
@@ -28,8 +28,14 @@ jhyy_OS kernel 走 `kernel.efi`(PE/COFF,被 UEFI 协议锁,per **D1** 2026-08-04
 
 ## 2. 约束(从已锁 D-locks 推导)
 
-- **5 原则**(原载于已清理的 OS 侧 `v0.0.2-foundation-revision.md § 3.1`):可行且简单 / 双线作战 / 寄生 Windows / Debug 在语言里 / Kernel 不解决语言问题 ⇒ **原则 5 的四条边界条件**见 [`../coordination/JHYY_决策总纲.md` § 5.3](../coordination/JHYY_决策总纲.md)
+- **5 原则**(原载于已清理的 OS 侧 `v0.0.2-foundation-revision.md § 3.1`):可行且简单 / 双线作战 / 寄生 Windows / Debug 在语言里 / Kernel 不解决语言问题 ⇒ **原则 5 的四条边界条件**见 [`../coordination/JHYY_OS侧设计终版.md` § 6.2](../coordination/JHYY_OS侧设计终版.md)
 - **D6 + D23**:`Cap<T>` 8 字节 wire = `{cnode_idx:u32@0, depth:u8@4, _pad:u8@5, rights:u16@6}`,phantom 字段 0 字节(codegen skip `_phantom`)
+  > ⚠️ **2026-10-30 冲突登记(待拍板 D1)** —— 本行的 `rights@6` 与**两份锁定规范**
+  > (lang-spec §2.6 / abi §2.5,均为 2026-10-24 锁)的 `rights@5` **不一致**,相差 1 字节。
+  > lang-spec §2.6 自带示例 `0x0000030200000007 as Cap // cnode=7, depth=2, rights=R|W`
+  > 只有在 `rights@5` 下才解出自洽 ⇒ **建议以 lang-spec/abi 为准并修订本行**。
+  > 详见 [`../coordination/JHYY_OS侧设计终版.md` § 12 D1](../coordination/JHYY_OS侧设计终版.md)。
+  > **当前不发作**(无代码按字节拆 cap),但**必须在 `Cap<T>` 真 T 落地前裁决**。
 - **D16**:`#[ipc_handler]` cap-offset 表 = `{msg_tag:u32, n_caps:u16, cap_offsets:[u16;n]}`(16B header 之后,payload 之前)
 - **D40**:wire-format 表达规则 — 链表 = `*T`(8B),数组 = `[*]T`(16B ptr+len)
 - **D41**:jhyy 无 `packed` / `repr(...)`,所有 wire-format struct 必须自然对齐 + 显式 `_pad` 字段

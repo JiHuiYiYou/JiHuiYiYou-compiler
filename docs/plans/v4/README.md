@@ -58,8 +58,8 @@ v4.x 是 v2.x + v3.x axes merge 后的主版本轴 — **integration axis**,不�
 ## 决策锁
 
 - **v2.x ‖ v3.x 并行结束**:v4.0.0 merge 后,无独立跨轴 parallel
-- **跨边界冲突**走 [`../../coordination/JHYY_决策总纲.md`](../../coordination/JHYY_决策总纲.md)
-  § 3 的裁决规则(编译器侧文档为本仓 `docs/coordination/` 5 份)
+- **跨边界冲突**走 [`../../coordination/JHYY_编译器侧设计终版.md`](../../coordination/JHYY_编译器侧设计终版.md)
+  § 1 的分工公式 + [`../../coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md) § 6 的语言—内核边界
 - **D43 阶段性 self-equal** hold:v4.x 每 sub-sprint ship 重新 baseline
 
 ## 命名约定(2026-10-30 修订)
@@ -77,7 +77,8 @@ v4.x 是 v2.x + v3.x axes merge 后的主版本轴 — **integration axis**,不�
 ## L1 长篇
 
 - [`../roadmap/v4.x-post-merge.md`](../roadmap/v4.x-post-merge.md) — v4.x 长线设计 + 决策锁 + 跨边界问题 + 强/弱依赖图
-- [`../../coordination/JHYY_决策总纲.md`](../../coordination/JHYY_决策总纲.md) — OS 线的 P0–P4.5 分期与硬门(与本轴正交)
+- [`../../coordination/JHYY_编译器侧设计终版.md`](../../coordination/JHYY_编译器侧设计终版.md) — OS 线的 P0–P4.5 分期与硬门(与本轴正交)
+- [`../../coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md) — 内核形态 + capability 对象模型 + `.jhyynb` 契约 + 语言—内核边界
 
 ## Changelog
 

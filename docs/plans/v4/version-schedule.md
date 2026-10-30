@@ -979,7 +979,7 @@ ABI §12.6(栈槽只保证 8 字节对齐)+ §12.12(SysV 溢出的 f64 栈参缺
 |---|---|
 | 版本号全是**预留号** | 启动那一格时按实际状态复核;`OS-N` 序号是稳定身份 |
 | v4.8(UEFI / kernel.efi)**本地不可完全验证** | 需 QEMU/OVMF;OS 仓的设计文档已删 ⇒ 需要重新确认 loader 侧的预期 |
-| **12 条未拍板的设计** | 已给设计稿:[`docs/coordination/JHYY_待拍板设计.md`](../../coordination/JHYY_待拍板设计.md)(D1..D12,含事实基线 / 选项 / 建议 / 产物)⇒ **拍板前 OS-13(P4a manifest)与 OS-14(Cap 真 T)不能启动** |
+| **12 条未拍板的设计** | 已给设计稿:[`docs/coordination/JHYY_OS侧设计终版.md § 12`](../../coordination/JHYY_OS侧设计终版.md)(OS 侧 8 条:D1–D4/D7/D8/D10/D11)+ [`JHYY_编译器侧设计终版.md § 8`](../../coordination/JHYY_编译器侧设计终版.md)(编译器侧 4 条:D5/D6/D9/D12),各含事实基线 / 选项 / 建议 / 产物 ⇒ **拍板前 OS-13(P4a manifest)与 OS-14(Cap 真 T)不能启动** |
 | v4.14(Cap 类型化)被 **§2.4 的规范冲突阻塞** | `Cap` 草案 §2.4:lang-spec/abi 的 `rights@5` vs binary-format 的 `rights@6` —— **必须先裁决**,否则第一步「按类型拆 8 字节」就建在错的布局上 |
 | v4.15(KASAN/KCFI)依赖 def/use 强度 | KCFI 依赖函数类型(v4.12)与调用图(v4.7);KASAN/KMSAN 依赖更强的 def/use ⇒ 排在最后是对的 |
 | **「16 KiB 目标」是否可达** | 按 341 KiB 基线,v4.4 的寄存器分配(槽数 → ~24%)理论给到 ~85 KiB ⇒ **单靠寄存器分配到不了 16 KiB**,OS-4 之后还需别的杠杆(帧布局 / 池分离 / 更多寄存器 / 降 temp 数) |
