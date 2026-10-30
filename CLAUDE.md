@@ -258,7 +258,7 @@ python scripts/dev/bump_version.py check        # 零漂移门(CI 也跑)
 | 项 | 规约 |
 |---|---|
 | commit 身份 | 必须 `JHYY <15901598712@163.com>` —— `JHYY@local` / host 派生值**不算**主页绿格子，永不接受。新仓首次 commit 前 `git config --local user.name "JHYY" && git config --local user.email "15901598712@163.com"`；commit 后 `git show <sha> --no-patch` 复核 `Author:` |
-| Co-Authored-By | `Co-Authored-By: MiniMax-M3 <noreply@MiniMax>` —— **不要**保留系统默认的 Claude/Opus trailer |
+| Co-Authored-By | `Co-Authored-By: MiniMax-M3.1-Flash <noreply@MiniMax>` —— **不要**保留系统默认的 Claude/Opus trailer |
 | push | commit 成功**直接 push**，不二次确认。例外：`--force` / 新分支 / tag / 多 agent 并发抢同一 branch ⇒ 先确认 |
 | SSH | push 到 `git@github.com:` 前**必须在同一次 Bash 调用里** `eval "$(ssh-agent -s)" && ssh-add /c/Users/liuzhen/.ssh/id_ed25519 && git push …`（Bash 工具每次新 subshell，agent 不持久 ⇒ 失败症状固定是 `Permission denied (publickey)`） |
 | 作者 | 项目作者 = GitHub `JiHuiYiYou`（机会翼游）；提到本人时不要猜真名 |
