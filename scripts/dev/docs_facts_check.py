@@ -51,8 +51,9 @@ def all_md() -> list[Path]:
         # 调同一个二进制只列 4 个(只顶层)⇒ 门会「扫了 4 个文件却报 OK」。
         # ⇒ 不带 pathspec,自己在 Python 里按后缀过滤。
         names = subprocess.run(
-            ["git", "-C", str(ROOT), "ls-files"],
-            capture_output=True, text=True, check=True).stdout.splitlines()
+            ["git", "-C", str(ROOT), "ls-files", "-z"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            check=True).stdout.split("\0")
         names = [n for n in names if n.endswith(".md")]
     except Exception:
         names = []
@@ -221,11 +222,17 @@ def tracked_files() -> set[str]:
     """
     import subprocess
     try:
-        out = subprocess.run(["git", "-C", str(ROOT), "ls-files"],
-                             capture_output=True, text=True, check=True).stdout
+        # ⚠️ **必须显式 encoding="utf-8"** —— `text=True` 用的是**系统 locale**
+        # (中文 Windows = cp936 / CI = cp1252),而 git 的路径是 UTF-8
+        # ⇒ 中文文件名被解码成乱码 ⇒ tracked 集合里匹配不上
+        # ⇒ 表现为「一堆明明在仓里的文件被判成未入仓」(2026-10-30 CI 实测 183 处假阳性)。
+        # `-z` = NUL 分隔 ⇒ 不受行分隔与 core.quotePath 的引号影响。
+        out = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"],
+                             capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", check=True).stdout
     except Exception:
         return set()
-    return {ln.strip().replace("\\", "/") for ln in out.splitlines() if ln.strip()}
+    return {ln.replace("\\", "/") for ln in out.split("\0") if ln.strip()}
 
 
 def check_links() -> None:
