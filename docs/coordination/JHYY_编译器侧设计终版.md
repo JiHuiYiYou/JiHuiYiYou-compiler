@@ -47,7 +47,7 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 | rights 单调收缩 | 编译期生成证明 + **运行期内核强制** |
 | IPC `msg_tag` 唯一、handler 签名一致 | 编译期 |
 | `cap_offsets` 合法性与位图 | 编译期布局验证 + **内核必须重查**（消息可能来自不可信进程） |
-| message struct 字段 size/align 一致 | 编译期（D41 无 packed、显式 `_pad` 下可完整检查） |
+| message struct 字段 size/align 一致 | 编译期（D41 无 packed、显式 `_pad` 下可完整检查；**Debug ABI 权威 = [lang-spec § 19](../abis/jhyy-lang-spec-v4.0.0.md#19-debug-abi)**） |
 | region 内访问不越界 | 运行期为主 |
 | 跨进程 cap 派生 / 拷贝 / revoke | 运行期 |
 | 页表 / TLB / ASID / 中断屏蔽 | 运行期 |
@@ -108,7 +108,7 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 | 四个 amd64 目标全自托管，无 QBE 回退 | `amd64_win` / `amd64_win_freestanding` / `amd64_sysv` / `amd64_sysv_freestanding` |
 | **IL 已经是 SSA** —— 前端产 `%tN = add %t2, %t3` | v4.4 寄存器分配器 `codegen_amd64_rcache.jhyy` 正是在 SSA temp 上做的 |
 | 前端**已在源码层**算掉常量表达式、清掉死代码 | ⇒ IR 层优化三项合计只有语料 B 的 **1.8%** |
-| `&&` / `\|\|` 短路（含嵌套） | `codegen.jhyy:3204-3245`；实测三种嵌套形状均短路 |
+| `&&` / `\|\|` 短路（含嵌套） | `codegen.jhyy:3209-3248`；实测三种嵌套形状均短路 |
 | 数字字面量 `0o` / `0b` 前缀 | W-128（v4.0.20） |
 | side-file 路径加 pid 后缀 ⇒ 并发编译不互踩 | W-136（v4.0.21）；A/B 实测 12/12 逐字节相同 |
 | `0o`/`0b`/`alignof` 等已在回归门内 | regress 279 total（2026-10-30 实测 259 PASS + 0 XFAIL + 20 SKIP） |
@@ -118,23 +118,23 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 | 项 | 结论 | 证据 |
 |---|---|---|
 | 实参**类型**检查 | ❌ **未做** | `sema.jhyy:1773-1811`：期望形参类型只用于泛型 enum 变体解析（W-111 遗留），**从不与实参比对**。实测 `takes_i64(1 as i32)` / `takes_ptr(7 as i64)` 编译通过**并运行** |
-| 实参**个数**检查 | ❌ **未做（规范里也没记）** | 实测 `takes_one(1, 2)` 编译通过并运行。lang-spec §118 与附录 B 只写了「类型不检查」 |
+| 实参**个数**检查 | ❌ **未做（规范里也没记）** | 实测 `takes_one(1, 2)` 编译通过并运行。lang-spec §2.4 与附录 B 只写了「类型不检查」 |
 | `extern fn` 形状限制 | ❌ **未做** | `sema.jhyy:2984` 只跳过 body 检查，无任何形状约束 |
-| CLI 多余输入文件报错 | ❌ **静默忽略** | `main.jhyy:1561-1563`：`if input == (0 as *u8) { input = arg; }` ⇒ 第二个输入文件被丢弃 |
-| bool 归一化 | ⚠️ **宽度已一致，值未归一化** | 表达式层统一 `'w'`（`ir.jhyy:188`）、data 段用 `'b'`（`ir.jhyy:70`）；但 `codegen.jhyy:3212` 的 `jnz` 判「非 0」⇒ **值为 2 的 bool 仍算真** |
+| CLI 多余输入文件报错 | ❌ **静默忽略** | `main.jhyy:1541-1543`（cmd_build）与 `:1609-1611`（cmd_compile）：`if input == (0 as *u8) { input = arg; }` ⇒ 第二个输入文件被丢弃 |
+| bool 归一化 | ⚠️ **宽度已一致，值未归一化** | 表达式层统一 `'w'`（`ir.jhyy:188`）、data 段用 `'b'`（`ir.jhyy:70`）；但 `codegen.jhyy:3218`（`&&`）与 `:3234`（`||`）的 `jnz` 判「非 0」⇒ **值为 2 的 bool 仍算真** |
 | 顶层非整数初始化 | ❌ **未做** | 实测 `const BAD: [i32; 2] = [1.5, 2.5];` 编译通过并运行。lang-spec §12 自陈「编译器不做 const 检查」⇒ **能力边界，不是 bug** |
-| **整数隐式提升** | ❌ **缺失，且规范未记** ⚠️ | `i64 + 1` 报 "type mismatch in binary"；`i64 + (1 as i64)` 通过；`i64 < i64` 正常 ⇒ **不是比较运算符的问题**。而 `let x: i64 = 10` **通过**（字面量在 let/赋值处有 coerce，`sema.jhyy:2169-2175`）⇒ **同一套字面量在两个位置规则不同**。lang-spec §117 只写了「整数与浮点之间不允许隐式转换」，**整数之间没写** |
+| **整数隐式提升** | ❌ **未实装**（规则**已定**，见 §4.2）⚠️ | `i64 + 1` 报 "type mismatch in binary"；`i64 + (1 as i64)` 通过；`i64 < i64` 正常 ⇒ **不是比较运算符的问题**。而 `let x: i64 = 10` **通过**（字面量在 let/赋值处有 coerce，`sema.jhyy:2172-2183`）⇒ **同一套字面量在两个位置规则不同**。lang-spec §2.4 只写了「整数与浮点之间不允许隐式转换」，**整数之间没写** ⇒ 规范缺口。**已定规则**：字面量按期望类型解释、变量之间不转换（§4.2） |
 | UEFI EFIAPI wrapper | ❌ **未实装** | abi §12.8 —— `emit_entry_point` / `no_crt_init` 两个钩子都是空实现 |
 | 交叉容器后端（PE/ELF 由 target 决定） | ❌ **未实装** | abi §12.9 —— 容器格式由宿主机 `ld` 决定 |
 | Windows 控制台 UTF-8 | ❌ **运行时未设** | abi §12.14 —— `runtime.c` 的 `main` 不调 `SetConsoleOutputCP(65001)` |
-| `emit_volatile` | ⚠️ **只发注释、什么都不做** | `codegen_amd64_emit_call.jhyy:2741`；后端**能**识别 volatile（`tok.qbe_type == QBE_VOLATILE_MARKER()`）却**无拒绝机制** |
+| `emit_volatile` | ⚠️ **只发注释、什么都不做** | `codegen_amd64_emit_call.jhyy:2742`；后端**能**识别 volatile（`tok.qbe_type == QBE_VOLATILE_MARKER()`）却**无拒绝机制** |
 
 ### 2.3 三处已订正的旧结论
 
 | 旧结论 | 订正 | 影响 |
 |---|---|---|
-| 「最大单函数帧 229 KiB」 | ❌ **作废**。v4.2.1 后 **max 帧 237680 → 349232 B（341 KiB，反而变大）**，中位帧 **8368 → 288 B**，chkstk 调用 **1045 → 46** | 旧公式用 `max(...)`，在公式池主导时把 `per_fn_alloc` 丢掉了 ⇒ **降帧的真正杠杆是寄存器分配（v4.4 阶段二），不是再调公式** ⇒ P2 的「≤ 16 KiB」要按 341 KiB 重算 |
-| 「目标 IL 不应直接升级为完整 SSA」 | ❌ **前提是错的** —— IL 已经是 SSA | 真正缺的是**寄存器分配 + dominance/phi**（后者是 v4.4.2） |
+| 「最大单函数帧 229 KiB」 | ❌ **作废**。v4.2.1 后 **max 帧 237680 → 349232 B（341.0 KiB，反而变大）**，中位帧 **8368 → 288 B**，chkstk 调用 **1045 → 46**。⚠️ 三个数出自两个来源：**abi §12.7 记 234080 B（= 228.6 KiB，即「229 KiB」那个数）**，perf 基线记旧值 237680 B，新值 349232 B ⇒ 两处应统一到 perf 基线 | 旧公式用 `max(...)`，在公式池主导时把 `per_fn_alloc` 丢掉了 ⇒ **降帧的真正杠杆是寄存器分配（v4.4 阶段二），不是再调公式** ⇒ P2 的「≤ 16 KiB」要按 341 KiB 重算 |
+| 「目标 IL 不应直接升级为完整 SSA」 | ❌ **前提是错的** —— IL 已经是 SSA | 真正缺的是**寄存器分配的 emit 层消费（阶段二）+ dominance/phi**（后者是 v4.4.2）。⚠️ 寄存器分配器**阶段一已落地**（`codegen_amd64_rcache.jhyy`，默认关 ⇒ 产物逐字节不变） |
 | 「u8 组合比较是 codegen 缺陷」 | ❌ **不成立**。2026-10-30 实测 `eq_u8(200,200)` / `ne_u8(200,201)` / `u8 == 255` / `bool && (…)` 全部正确（exit 0） | 真问题是 **bool 的值未归一化**（`jnz` 判「非 0」）⇒ 与 codegen 宽度无关 ⇒ 修法不同 |
 
 > 📎 **动手前先写十行复现，确定是哪一类。别信任何人的转述，包括 AI 报告。**
@@ -156,7 +156,7 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 
 | 阶段 | 目标 | 关键任务 | 前置 | 验收门（硬指标） | 不做会怎样 |
 |---|---|---|---|---|---|
-| **P0 止血** | 消除静默错误与不可重复编译 | 实参类型+个数检查；`extern fn` 参数形状限制；CLI 多余输入文件改报错；bool 值归一化；顶层非整数初始化；**整数上下文转换**（D12）；错误可定位（span） | 无 | ① 多余 `.jhyy` 输入报错（不静默忽略）② 并发 8 进程编译无旁路文件竞争 ③ `false && side()` 中 `side` 不执行 ④ 传 `i32` 给 struct 形参编译失败 ⑤ `takes_one(1,2)` 编译失败 | 后续自举无法区分真错误与旧 bug；Windows 上无法并行构建 |
+| **P0 止血** | 消除静默错误与不可重复编译 | 实参类型+个数检查；`extern fn` 参数形状限制；CLI 多余输入文件改报错；bool 值归一化；顶层非整数初始化；**整数上下文转换**；错误可定位（span） | 无 | ① 多余 `.jhyy` 输入报错（不静默忽略）② 并发 8 进程编译无旁路文件竞争 ③ `false && side()` 中 `side` 不执行 ④ 传 `i32` 给 struct 形参编译失败 ⑤ `takes_one(1,2)` 编译失败 | 后续自举无法区分真错误与旧 bug；Windows 上无法并行构建 |
 | **P0.5 观测** | 编译器知道自己的最坏行为 | 输出 per-function `frame_local_max`；构建调用图算 `call_path_max`；递归/动态调用显式标记；链接器支持栈断言 | P0 | ① 所有函数两个上界可打印 ② CI 保存基线 CSV ③ 链接期可断言线程栈保留量 ≥ 最坏链 + redzone | 栈问题只能靠运行时溢出发现，内核栈大小无从配置 |
 | **P1 反馈环** | 最小镜像真跑在裸金属 | UEFI entry 钩子实装；**按 `--target` 分支链接**（而非按源文件的 `#[no_std]`）；移除无条件 Windows 系统库；`SetConsoleOutputCP(65001)` | P0 | ① 最小 `kernel.efi` 在 QEMU/OVMF 输出 UTF-8 后停机 ② 编译期可选 8 KiB / 16 KiB 栈并触发断言 ③ `#[no_std]` 不再自动加 `-lkernel32 -luser32 -lshell32 -ladvapi32 -lm` | 编译器长期寄生 Windows；能力/IPC 是否可执行永远未知 |
 | **P2 栈与分配** | 先证明栈，再压栈 | 栈深度全程序分析 + 链接断言；栈槽 16B 对齐；linear scan 寄存器分配；**禁 XMM 溢出 + 禁 red zone（上下文属性，同期）** | P0.5 | ① **最大单帧 ≤ 16 KiB**（基线 **341 KiB**）② `call_path_max` 受链接期断言 ③ SysV SIMD 参数不产生 8B 对齐 fault ④ 内核上下文 XMM 溢出点 = 0 ⑤ red zone 使用点 = 0 | 中断/IPC 破坏相邻栈；线程栈被迫无谓增大 |
@@ -185,16 +185,21 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 - P3 与 P2.5 部分并行（前端语法改造不依赖 ABI 收敛，但合流点需回归）
 - **P4a 是纯纸面工作**，可与 P2.5–P3.5 完全并行 ⇒ 建议最早启动
 
-### 3.3 三个硬接口（v4.4.0 阶段二）
+### 3.3 阶段二必须同期的硬约束（v4.4.0）
 
-> 这三条**必须在 v4.4.0 阶段二（emit 层消费寄存器）同期落地** ——
+> **三条**必须在 v4.4.0 阶段二（emit 层消费寄存器）**同期落地** ——
 > 否则约束会晚一版落地，而那正是它开始发作的时刻。
+> 前两条来自本节；第 3 条（槽位访问响亮失败）是 v4.4.0 计划自带的**阶段一安全网**，
+> 阶段二要保证所有槽位访问点都走收口 helper。
 
 | # | 接口 | 现状证据 | 处置 |
 |---|---|---|---|
-| **A** | **排除 volatile temp** | `emit_volatile`（`codegen_amd64_emit_call.jhyy:2741`）只发注释；后端能识别 volatile 标记却无拒绝机制；v4.4.0 阶段一资格判据（同基本块 + 无 call + 整数类型）**没有 volatile 这一维**（`codegen_amd64_rcache.jhyy` grep 零命中） | 显式排除 + 响亮失败（形状与阶段一安全网相同） |
+| **A** | **排除 volatile temp** | `emit_volatile`（`codegen_amd64_emit_call.jhyy:2742`）只发注释；后端能识别 volatile 标记却无拒绝机制；v4.4.0 阶段一资格判据（同基本块 + 无 call + 整数类型）**没有 volatile 这一维**（`codegen_amd64_rcache.jhyy` grep 零命中） | 显式排除 + 响亮失败（形状与阶段一安全网相同） |
 | **B** | **禁 XMM 溢出 + 禁 red zone** | 后端全 spill、寄存器池只有 5 个 GPR、**没有省略帧优化**（grep 零命中）⇒ **当前恰好安全** | 持久断言，作为编译期上下文属性 |
-| **C** | **16B 对齐** | abi §12.6（栈槽只保证 8B）+ §12.12（SysV 溢出 f64 栈参缺 16B） | **与寄存器分配正交 ⇒ 可提前单独做** |
+| **3** | **槽位访问响亮失败** | 阶段一已有：分配了寄存器却走槽位路径 ⇒ 编译失败 | 阶段二保证**所有**槽位访问点走收口 helper |
+
+> **另有一条不属于本节**：**16B 对齐**（abi §12.6 栈槽只保证 8B + §12.12 SysV 溢出 f64 栈参缺 16B）
+> —— 它**与寄存器分配正交 ⇒ 可提前单独做**，不必等阶段二。
 
 > ⚠️ **A 的后果**：v4.4 阶段二一旦把 temp 放进寄存器，volatile load 会被缓存 ⇒ **MMIO 读静默失效**。
 > ⇒ 「`ptr<io>` 默认 volatile、不合并、不推测读」的承诺在语言层写下来之前，后端必须先给得起。
@@ -245,11 +250,33 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 
 ### 4.2 Sema / 类型系统
 
-**现状**：实参不检查；bool 不归一化；顶层非整数初始化错误；borrow check 极弱（W-105 最小版，词法作用域）；
+**现状**：实参不检查；bool 不归一化；顶层非整数初始化**静默通过**（不报错）；borrow check 极弱（W-105 最小版，词法作用域）；
 没有 effect row。
 
 **目标**：两遍 + 约束求解（而非完全 Hindley–Milner）——
 第一遍收集模块 / 类型 / 函数 / 泛型形参；第二遍检查签名 / 实参 / 泛型实例化 / 能力约束。
+
+**整数上下文转换 —— 已定规则**（不是「待定」，是按事实定的）：
+
+> 整数字面量在**期望类型已知**的位置（let / 赋值 / 函数实参 / 二元运算中另一侧为整型）
+> 按期望类型解释；**两侧都是变量时不做隐式转换** ⇒ 类型不同即报错。
+
+| 写法 | 结果 | 依据 |
+|---|---|---|
+| `i64 + 1` | ✅（1 按 i64 解释） | 字面量位置有期望类型 |
+| `let x: i64 = 10;` | ✅ | 同上（`sema.jhyy` 的字面量 coerce 路径已有） |
+| `takes_i64(1)` | ✅ | 同上 |
+| `i64 + i32_var` | ❌ 类型不符 | 变量之间**不**隐式转换 |
+| `i32_var + i64_var` | ❌ 类型不符 | 同上 |
+
+**为什么不做全面整数提升（C 风格）**：痛点是**字面量**不是变量 ——
+`i64 + some_i32_var` **是类型错误，应该报错** ⇒ 全面提升会把它也放过 ⇒
+**反而丢掉类型检查**。字面量 coerce 的逻辑 sema 里**已经有**（let 位置），
+复用到二元运算与实参位置即可 ⇒ 一处改动。
+
+⚠️ **与实参检查同批落地**：实参检查上线时，报错口径必须区分
+「字面量可隐式转换」与「真的类型不符」⇒ 两者要一起上，否则实参检查会把合法的
+字面量调用判死。
 
 **建议的 IL 交接 schema**：
 
@@ -270,7 +297,7 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 
 **现状**：进程内 IL 只有 `w/l/s/d/m`，足以描述宽度和 MEMORY class，却没有类型、效果、cap、layout 与调用图。
 
-**⚠️ 订正**：IL **已经是 SSA**（前端一直产 SSA）。真正缺的是 **寄存器分配 + dominance/phi**
+**⚠️ 订正**：IL **已经是 SSA**（前端一直产 SSA）。真正缺的是 **寄存器分配的 emit 层消费（阶段二）+ dominance/phi**
 （后者是 v4.4.2）。⇒ 「缺 SSA」这个前提是错的。
 
 **两阶段升级**（第一阶段的 SSA construction 已完成）：
@@ -377,6 +404,12 @@ target tuple `amd64_win` / `amd64_win_freestanding` / `amd64_sysv` / `amd64_sysv
 
 `debug_group` 适合放可选 source map，**不能承担 loader 语义**。
 若坚持扩展 `debug_group`，至少分 `debug` / `contract` 两级 flag，加载器只验证后者。
+
+> **与 binary-format § 12 的 `jhyy_ipc` / `jhyy_region` / `jhyy_cap` 的分工（已定）**：
+> 那三项描述的是 **IPC 注册元数据 / region 图 / provenance seed** —— 属**可丢弃的调试信息**
+> ⇒ 留在 `debug_group`；**loader 必须验证的**那些事实（栈表 / 效果表 / 锁序 / cap_map /
+> layout / naked / termination / wcet）⇒ 走 **contract section (kind=9)**。
+> 两级 flag 区分：**`debug` 可丢，`contract` 必验**。
 contract section 必须有 **version、producer ID、source hash、compatibility policy**，
 否则旧 loader 可能忽略新增安全字段。
 
@@ -426,6 +459,11 @@ fn derive_dynamic<T, SrcR>(src: &Cap<T, SrcR>, want: u16) -> Option<Cap<T, RWG>>
 fn narrow<DstR>(c: &Cap<T, RWG>) -> Option<Cap<T, DstR>>
 ```
 
+> **命名**：不存在 `derive_dyn` 这个名字 —— 统一叫 **`derive_dynamic`**。
+> 「名字丑」是对的：它明显区别于编译期确定子集的 `derive`。
+> `narrow` 是**运行时唯一一次权限检查**（`TargetR ⊆ SrcR`，失败返回 `None`），
+> 且**内核侧还要再查一次** —— 用户态的检查只是加速带。
+
 **四条 rights 规则**：
 
 | # | 规则 | 编码 | 检查阶段 |
@@ -438,17 +476,56 @@ fn narrow<DstR>(c: &Cap<T, RWG>) -> Option<Cap<T, DstR>>
 R4 单独说：`grant` 意味着「可以把这个能力再转给别人」，是**权限的放大器**。
 若允许 `RW → RWG`，rights 单调收缩就形同虚设。
 
+**capability 的构造入口 —— 只有一条路，但必须可审计**：
+
+> 内核 bootstrap 阶段**确实需要**手工构造 root cap ⇒ **后门在语义上不可消除**，
+> 目标不是「没有后门」，而是「**后门数量可度量、位置可审计、越权不可能**」。
+
+| 入口 | 状态 | 规则 |
+|---|---|---|
+| `from_raw` | **唯一**的构造入口 | 无限制 |
+| `as Cap` | **deprecated 别名** | **只在 `#[trusted]` 范围内可用**；普通模块里写 ⇒ 编译期报错 |
+| `#[unsafe_cap_ctor]` | 函数/语句级标注 | 标在 `from_raw` 调用点 ⇒ 计入 `unsafe_ctor_count` |
+
+**不引入 `unsafe` 关键字** —— 用属性（`#[trusted]` / `#[unsafe_cap_ctor]`）：
+
+| 理由 | 说明 |
+|---|---|
+| 成本 | `unsafe` 是一整套语言级语义（块 / fn / trait / impl / lint 生态 / 与 borrow 的交互），而 JHYY 连 `&mut` 的完整语义都还停在 W-105 的**最小版** |
+| 需求 | JHYY 要的只有一件事：让「绕过 capability 构造」**可标注、可统计、可审计** ⇒ 属性就够 |
+| 零新语法 | 属性语法**已经存在**（`#[naked]` / `#[no_std]` / `#[link_section]` / `#[ipc_handler]`）⇒ 这是决定性理由 |
+| 贴合场景 | cap 构造只发生在 **kernel bootstrap**（整个模块都是特权）⇒ **模块级** `#[trusted]` 更合适 |
+
+⇒ **明确不做**：`unsafe` 关键字 / `unsafe fn` / `unsafe trait` / `unsafe` 块。
+留到「真的需要 unsafe fn 时」再设计。
+
+**capability facts schema（写进 `.jhyynb` contract section）**：
+
+```c
+struct CapContract {
+    cap_type_count:      u16,     // 该 binary 使用的 Cap<T,R> 组合数
+    // 每种组合一条：{ type_tag:u32, rights_mask:u16, monomorphic_count:u32}
+    unsafe_ctor_count:   u32,     // 【关键】unsafe 构造点数量
+    unsafe_ctor_offs:    []u32,   // 各构造点的 .text 偏移，供审计
+    derive_edges:        []u32,   // 静态派生边
+    ptr_phys_sites:      []u32,   // ptr<phys> 派生点
+}
+```
+
+> **`unsafe_ctor_count` 是最有价值的一个字段** —— 它把一个「后门」变成
+> **可度量、可设阈值的指标** ⇒ CI 可断言 `kernel.efi` 的 count ≤ N 且只在 bootstrap 模块。
+
 **编译器侧影响清单**：
 
 | 阶段 | 改动 | 复杂度 |
 |---|---|---|
-| **Lexer** | 新增 8 个保留字（`R`/`W`/`G`/`RW`/…）；若引入 `unsafe` 概念需新关键字 | 低 |
+| **Lexer** | 新增 8 个保留字（`R`/`W`/`G`/`RW`/…）；**不新增 `unsafe` 关键字**（用属性） | 低 |
 | **Parser** | 解析 `Cap<T, R>` 双参数；`ptr<phys, R>`；`derive::<T>()` turbofish | 中 |
-| **Sema** | ① 8 项 rights 常量表 ② 类型等价加 rights 掩码比较 ③ derive 子集检查（位运算）④ `as` 转换表加禁止规则（整数→`ptr<phys>`）⑤ unsafe 标注 | **中（核心工作量）** |
+| **Sema** | ① 8 项 rights 常量表 ② 类型等价加 rights 掩码比较 ③ derive 子集检查（位运算）④ `as` 转换表加禁止规则（整数→`ptr<phys>`）⑤ `#[trusted]` / `#[unsafe_cap_ctor]` 标注检查 | **中（核心工作量）** |
 | **Mangling** | `<Base>$<T1>$<T2>` 直接扩展 | 低 |
 | **IL** | `Cap<T,R>` 是 8 字节标量（与 `l` 同承载）⇒ **不新增 IR 概念**，只在类型侧保留标记供后续 pass 消费 | 低 |
 | **后端** | 无特殊处理（8 字节标量走 `l`）；**`ptr<io>` 需要禁止重排/合并/投机的 codegen 标记** ⚠️ **与 v4.4 阶段二有硬接口** | 中 |
-| **链接 / `.jhyynb`** | cap_init 由 `#[cap_constructor]` 或顶层声明生成；`provenance_seed_off` 填充；contract section 输出 capability facts | 中 |
+| **链接 / `.jhyynb`** | cap_init 由 `#[cap_constructor]` 或顶层声明生成；`provenance_seed_off` 填充；contract section 输出 capability facts（含 `unsafe_ctor_count`） | 中 |
 
 ### 5.2 `ptr<phys>` / `ptr<io>`
 
@@ -673,9 +750,14 @@ E0601: capability rights escalation
    从三处解析 Cap 布局的 `(offset, size, type)` 三元组 + rights 位宽 ⇒ **不一致即红**，接进 CI。
    （这次冲突能活三个月，就是因为**没有一道门**。）
 
-> 完整的 12 条待拍板设计见 OS 侧文档 § 12 与 [`JHYY_待拍板设计.md` 的 git 历史](https://github.com/JiHuiYiYou)。
 
 ### 7.2 ABI §12 的 14 条已知偏离
+
+> **编号约定**：本文的 `§N` 指**本文自己的章节**；`abi §12.x` 指 ABI 文档的偏离表；
+> **`D1` / `D2` / `D6` / `D11` / `D16` / `D23` / `D40`–`D44` / `D-GUI-*` 是 2026-09-04
+> 之前的**历史决策编号**（D-lock），清单在
+> [`docs/abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) § 16。
+> **本文不再引入新的 D 编号** —— 设计按事实定稿，没有「待拍板」这一层。
 
 | # | 项 | 性质 | 收敛于 |
 |---|---|---|---|
@@ -699,115 +781,22 @@ hosted + freestanding 两套 smoke 全绿。
 
 ---
 
-## §8 待拍板 —— 编译器侧 4 条
+## §8 验收计数器与度量
 
-> 完整的 12 条（D1–D12）见 OS 侧文档 § 12 与 git 历史。
-> 下列 4 条是**编译器侧直接落地**的；**它们都不阻塞任何后续版本 ⇒ 可先拍**。
-
-### D12 —— 整数之间要不要隐式提升？【建议：只在字面量位置提升 + 写进规范】
-
-**事实基线**（2026-10-30 实测）：
-
-| 写法 | 结果 |
-|---|---|
-| `i64 + (1 as i64)` | ✅ 通过 |
-| `let x: i64 = 10;` | ✅ 通过（字面量在 let/赋值处有 coerce，`sema.jhyy:2169`） |
-| **`i64 + 1`** | ❌ **报 "type mismatch in binary"** |
-| `i64 < i64`（变量比变量） | ✅ 通过 ⇒ **不是比较运算符的问题** |
-
-⇒ 同一套整数字面量，在 `let`/赋值处被 coerce，在二元运算处不。
-lang-spec §117 只写了「整数与浮点之间不允许隐式转换」，**整数之间既没写允许也没写禁止**
-⇒ 这是一条**规范缺口**，不是实现 bug。
-
-**选项**：F1 全面整数提升（C 风格）❌ / F2 保持现状只写规范 ⚠️ / **F3 只在字面量位置提升** ✅ /
-F4 连 `let x: i64 = 10` 也要写 cast ❌（破坏现有代码，收益不成比例）
-
-**建议：F3 + 把规则写进规范。**
-- **痛点是字面量，不是变量**：`i64 + 1` 极常见；`i64 + some_i32_var` **是类型错误，应该报错**
-  ⇒ F1 会把后者也放过 ⇒ **反而丢掉类型检查**
-- **F3 是一处改动**：sema 里字面量 coerce 的逻辑**已经有**（let 位置），复用到二元运算与实参位置即可
-- ⚠️ **与 OS-1 的实参检查有交互**：`takes_i64(1)` 会变合法 ⇒
-  **OS-1 的报错口径必须区分「字面量可隐式转换」与「真的类型不符」** ⇒ 两者要**同批落地**，
-  否则实参检查会把合法的字面量调用判死
-
-**建议的规范条文**：
-
-> 整数字面量在**期望类型已知**的位置（let / 赋值 / 函数实参 / 二元运算中另一侧为整型）按期望类型解释；
-> **两侧都是变量时不做隐式转换** ⇒ 类型不同即报错。
->
-> `i64 + 1` ✅（1 按 i64 解释）· `let x: i64 = 10` ✅ · `takes_i64(1)` ✅
-> `i64 + i32_var` ❌ · `i32_var + i64_var` ❌
-
-**产物**：lang-spec 补一节「整数上下文转换」；sema 复用 coerce；
-**门**：新测试 `spec_int_ctx_coerce.jhyy`（正向三项 + 反向 `i64 + i32_var` 必须报错）。
-
-### D5 —— 是否引入 `unsafe` 关键字？【建议：不引入，用属性】
-
-**事实基线**：`grep -rn unsafe compiler/src0/*.jhyy` ⇒ **零命中** ⇒ `unsafe` 完全不存在。
-
-**建议**：`#[trusted]`（模块/文件级）+ `#[unsafe_cap_ctor]`（函数/语句级）。
-理由：
-1. **`unsafe` 是一整套语言级语义**（块 / fn / trait / impl / lint 生态 / 与 borrow 的交互），
-   而 JHYY 连 `&mut` 的完整语义都还停在 W-105 的**最小版**（词法作用域）⇒ 成本远超需求
-2. JHYY 要的只有一件事：让「绕过 capability 构造」**可标注、可统计、可审计** ⇒ 属性就够了
-3. **属性语法已经存在**（`#[naked]` / `#[no_std]` / `#[link_section]` / `#[ipc_handler]`）⇒ **零新语法** ——
-   这是决定性理由
-4. **模块级更贴合实际场景**：cap 构造只发生在 **kernel bootstrap**（整个模块都是特权）
-
-**明确不做**：unsafe 关键字 / unsafe fn / unsafe trait / unsafe 块 ⇒ 留到「需要 unsafe fn 时」再设计。
-
-### D9 —— `as Cap` 逃生舱保留吗？【建议：保留但收敛】（与 D5 同批）
-
-- **完全禁掉是做不到的**：内核 bootstrap 阶段**确实需要**手工构造 root cap
-  ⇒ **后门在语义上不可消除，只能让它可审计**
-- ⇒ 目标不是「没有后门」，而是「**后门数量可度量、位置可审计、越权不可能**」
-- 收敛手段：`from_raw` 是**唯一**构造入口；`as Cap` 保留为 **deprecated 别名**，
-  且**只在 `#[trusted]` 范围内可用** ⇒ 在普通模块里写 `as Cap` ⇒ **编译期报错**
-- 编译器输出 `unsafe_ctor_count` + `unsafe_ctor_offs` 进 contract section
-  ⇒ CI 可断言 `kernel.efi` 的 count ≤ N 且只在 bootstrap 模块
-
-**capability facts schema（写进 `.jhyynb` contract section）**：
-
-```c
-struct CapContract {
-    cap_type_count:      u16,     // 该 binary 使用的 Cap<T,R> 组合数
-    // 每种组合一条：{ type_tag:u32, rights_mask:u16, monomorphic_count:u32}
-    unsafe_ctor_count:   u32,     // 【关键】unsafe 构造点数量
-    unsafe_ctor_offs:    []u32,   // 各构造点的 .text 偏移，供审计
-    derive_edges:        []u32,   // 静态派生边
-    ptr_phys_sites:      []u32,   // ptr<phys> 派生点
-}
-```
-
-> **`unsafe_ctor_count` 是最有价值的一个字段** —— 它把一个「后门」变成**可度量、可设阈值的指标**。
-
-### D6 —— `derive_dyn` 是否允许存在？【建议：允许，重命名为 `derive_dynamic`】
-
-1. **完全禁止会逼出更糟的写法**：用户会直接 `as Cap` 手搓
-   ⇒ **把一个受控的降级变成一个完全不受控的后门** ⇒ 禁 `derive_dyn` 反而**更不安全**
-2. **「名字丑」是对的** ⇒ `derive_dynamic` 比 `derive_dyn` 更明显
-3. **返回最宽类型是诚实的**：编译器确实不知道运行时 rights
-4. **但 `narrow` 本身要过子集检查**：运行时检查 `TargetR ⊆ SrcR`，失败返回 `None`
-   ⇒ 这是**运行时唯一一次权限检查** —— 且**内核侧还要再查一次**（用户态的检查只是加速带）
-
----
-
-## §9 验收计数器与度量
-
-### 9.1 一句话判断标准
+### 8.1 一句话判断标准
 
 > **每完成一期，问：又有多少条规则从「文档里写着」变成了「编译不过」？**
 > 这个数字不增长，就是在做工程优化而不是在做语言。
 
-### 9.2 三类可测指标
+### 8.2 三类可测指标
 
 | 类别 | 指标 | 当前值 |
 |---|---|---|
-| **规则转化率** | 「文档里写着」→「编译不过」的规则条数 | 逐期递增（见 §9.1） |
-| **静默错误清零** | P0 六项中已闭合的项数 | **0 / 6**（P0 未启动） |
+| **规则转化率** | 「文档里写着」→「编译不过」的规则条数 | 逐期递增（见 §8.1） |
+| **静默错误清零** | P0 七项中已闭合的项数 | **0 / 7**（P0 未启动） |
 | **静默错误残余** | `spec_argc_argv` 式「验的不是它声称的东西」的门数 | 回归套件 **0 XFAIL**（2026-10-30：259 PASS + 0 XFAIL + 20 SKIP / 279 total） |
 
-### 9.3 每个新特性的准入检查表
+### 8.3 每个新特性的准入检查表
 
 1. 它是**语言层 / 签名层 / 事实层**中的哪一层？（不属于任何一层 ⇒ 不得进规范）
 2. 它把哪条规则从「文档」变成「编译不过」？
@@ -818,7 +807,7 @@ struct CapContract {
 
 ---
 
-## §10 明确不做清单
+## §9 明确不做清单
 
 | 不做 | 理由 |
 |---|---|
@@ -837,20 +826,19 @@ struct CapContract {
 
 ---
 
-## §11 不确定性与需补材料
+## §10 不确定性与需补材料
 
 | 项 | 说明 |
 |---|---|
 | **「16 KiB 目标」是否可达** | 按 341 KiB 基线，v4.4 寄存器分配（槽数 → ~24%）理论给到 ~85 KiB ⇒ **单靠寄存器分配到不了 16 KiB** ⇒ OS-4 之后还需别的杠杆（帧布局 / 池分离 / 更多寄存器 / 降 temp 数）⇒ **16 KiB 应标注「可达性未证」** |
 | **建议的可判定硬门** | **自举编译器自身（1045 个函数）的 `call_path_max × frame ≤ 64 KiB`** —— 自举编译器是本仓最坏情况（**1045 个真实函数**，per `docs/perf/self-backend-baseline-2026-10-29.md`；`main.jhyy` 的 max temp id 已达 **6 万量级**，见台账 W-120），它的最坏调用路径若能在 64 KiB 内跑完 ⇒ 内核栈若跑得动自举编译器，就跑得动绝大多数内核代码。⚠️ 这是**类比，不是证明** ⇒ **OS-4 的验收门数字应据此复核** |
-| **编译器源码结构 / 现有 pass 清单 / 错误码总表** | 曾是「补材料」清单的 #1；本文已按源码补齐 P0 六项的 `file:line` 证据。**剩余缺口**：增量编译缓存、测试框架细节 |
-| **jhyy_OS 的 coordination.md 与 D-lock 全集** | 目前只知道 D6/D16/D23/D40/D41/D42/D43/D44/D-GUI-2/D-GUI-12 ⇒ **OS 侧设计文档已于 2026-10-30 全部删除**（git 历史保留）⇒ **跨项目设计基线现单点落在本仓 `docs/coordination/`** |
+| **编译器源码结构 / 现有 pass 清单 / 错误码总表** | 曾是「补材料」清单的 #1；本文已按源码补齐 P0 七项的 `file:line` 证据。**剩余缺口**：增量编译缓存、测试框架细节 |
+| **D-lock 全集** | **已在仓内**：[`docs/abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) § 16「与 D-locks 对位」= 14 条（D1/D2/D6/D11/D13·D20/D16/D17/D22/D23/D40/D41/D42/D43/D-GUI-12）；OS 侧原设计文档已于 2026-10-30 全部删除（git 历史保留）⇒ **跨项目设计基线现单点落在本仓 `docs/coordination/`** |
 | **v4.8(UEFI / kernel.efi) 本地不可完全验证** | 需 QEMU/OVMF；OS 仓设计文档已删 ⇒ 需重新确认 loader 侧的预期 |
-| **12 条待拍板** | 已给设计稿（见 OS 侧文档 § 12）⇒ **拍板前 OS-13(P4a manifest) 与 OS-14(Cap 真 T) 不能启动** |
 
 ---
 
-## §12 交叉引用
+## §11 交叉引用
 
 | 文档 | 用途 |
 |---|---|
@@ -860,7 +848,7 @@ struct CapContract {
 | [`docs/abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) | `.jhyynb` 二进制格式（**设计稿，未实装**） |
 | [`docs/plans/v4/README.md`](../plans/v4/README.md) | **版本系列索引** —— 每个版本槽一份 `v4.X.Y-plan.md`（性能线 6 + OS 线 16） |
 | [`docs/plans/v4/self-backend-perf-plan.md`](../plans/v4/self-backend-perf-plan.md) | v4.2+ 自研后端性能线（v4.4 寄存器分配） |
-| [`docs/workarounds.md`](../workarounds.md) | W-NNN 台账（ACTIVE = 0） |
+| [`docs/workarounds.md`](../workarounds.md) | W-NNN 台账（**ACTIVE = 1** —— W-170：`jhyy build` 不处理 `#[link_section]`） |
 | [`docs/internal/build.md`](../internal/build.md) | 构建 / 调试 / self-backend 坑 |
 | [`docs/FACTS.md`](../FACTS.md) | 回归套件清单与运行方法 |
 | [`docs/perf/self-backend-baseline-2026-10-29.md`](../perf/self-backend-baseline-2026-10-29.md) | 帧/访存基线数据（341 KiB / 288 B 的来源） |

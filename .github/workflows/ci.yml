@@ -572,6 +572,20 @@ jobs:
         run: |
           python scripts/dev/docs_facts_check.py
 
+      # 规范一致性门(2026-10-30 加)。
+      #
+      # 为什么要有这道门:`Cap<T>` 的 8 字节 wire 布局在**两份锁定规范**
+      # (lang-spec §2.6 / abi §2.5,`rights@5`)与**一份设计稿**
+      # (binary-format §2,原 `rights@6`)里不一致,相差 1 字节 ——
+      # **这个冲突活了三个月,就是因为没有一道门**。
+      # 本门比对三处的 Cap 布局 + rights 位宽,并用 lang-spec 自带的构造示例
+      # 做独立佐证(示例只能在一侧自洽 ⇒ 它是判对错的证据,不是装饰)。
+      - name: Spec consistency gate (three specs must agree)
+        if: always()
+        shell: msys2 {0}
+        run: |
+          python scripts/dev/check_spec_consistency.py
+
   # ══════════════════════════════════════════════════════════════════════
   # 5 个 SysV ABI 测试 —— 此前在 CI 上**根本不存在门**
   # ══════════════════════════════════════════════════════════════════════

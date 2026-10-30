@@ -4,10 +4,10 @@
 > 加上内核形态锁定、capability 对象模型、`.jhyynb` 契约、语言—内核边界与实现顺序。
 >
 > **配套文档**：[`docs/coordination/JHYY_编译器侧设计终版.md`](JHYY_编译器侧设计终版.md) —— 编译器分期路线、pass 清单、
-> 规范一致性门、编译器侧 4 条待拍板。
+> 规范一致性门。
 >
 > **事实基线纪律**：唯一实现事实来源是三份规范（lang-spec v4.0.0 / abi v4.0.0 /
-> binary-format v1.0.0）+ 编译器源码。**规范没有记载的，不能宣称已锁定**，标「**待确认**」。
+> binary-format v1.0.0）+ 编译器源码。**规范没有记载的，不能宣称已锁定** ⇒ 进 § 14 的「事实缺口归属」（每项都有归属槽与产出物）。
 > ⚠️ **binary-format v1.0.0 是设计稿，未实装**（abi §12.10）⇒ 凡只由它记载的结论都注明来源。
 >
 > **本文取代**（原 6 份，内容保留在 git 历史）：
@@ -143,7 +143,7 @@ provenance_seed_off:u32 · _pad2:u32
 `init_call_off` 允许 per-Cap 初始化逻辑（jhyy 侧 `#[cap_constructor]` emit）。
 
 ⚠️ **cap_init 的 `rights:u16` 字段与 `Cap<T>` wire 的 `rights:u16` 字段是两个不同的字段，
-但被设计成同源**（binary-format §239：「rights 直接对应 `Cap<T>` 8B 布局的 rights:u16 字段，
+但被设计成同源**（binary-format § 7「Cap Init Table」：「rights 直接对应 `Cap<T>` 8B 布局的 rights:u16 字段，
 kernel 分配 cap 时直接 copy」）⇒ 见 §12 D2。
 
 **IPC dispatch 表项（16 B）**：
@@ -218,8 +218,20 @@ JHYY 至少应引入四种对象关系：
 **单靠 `depth:u8` 只能证明「child 比 parent 更深」**，
 **不能证明 child 仍指向同一对象，不能证明没有兄弟 cap，也不能证明映射仍然存在**。
 
-⇒ **建议以对象反向边作为语义真源，CNode depth 只作为派生证明与遍历界。**
+⇒ **以对象反向边作为语义真源，CNode depth 只作为派生证明与遍历界。**
 ⇒ `derive` 必须在内核侧登记派生边，否则 revoke 不精确。
+
+**撤销的同步性 —— 已定**：
+
+| 决定 | 内容 |
+|---|---|
+| **默认同步** | 同步是 object capability 模型的核心承诺；异步则要求**每一个使用点**都处理「可能已撤销」⇒ 把并发问题推给所有用户 ⇒ 不可推理 |
+| **分级例外** | 某些对象**物理上不可能同步**：`Mapping`（unmap 必须等所有 CPU 刷 TLB ⇒ 需 quiesce）、`Frame`（正在被 DMA ⇒ 等 DMA 完成）⇒ **哪些对象需要异步，是 P4a manifest 的逐类决定**，不是语言级规则 |
+| **传播** | revoke 沿 CDT 传播（父撤销 ⇒ 全部后代失效）—— 这是 CDT 的定义，不是选择 |
+| **两个不同的操作** | 撤销一个**派生引用**不影响它的兄弟；撤销**对象**时兄弟全失效 ⇒ 必须拆成两个系统调用：`retract_cap(cap)` / `revoke_object(cap)` |
+
+⚠️ **撤销不阻塞 `Cap<T>` 的 T 落地** —— revoke 是**运行期**语义，`T` 的解析是**编译期**
+语义 ⇒ 两者无依赖。**语言层：`Cap<T>` 的类型不因 revoke 改变** ⇒ revoke 不进类型系统。
 
 ### 3.3 rights 单调收缩由 derive 系统保证
 
@@ -235,6 +247,18 @@ JHYY 至少应引入四种对象关系：
 
 **G 不应被允许由 R/W 派生得到**，除非内核显式执行「升级需要授权对象」的协议 ——
 grant 是权限的放大器，允许 `RW → RWG` 则单调收缩形同虚设。
+
+**revoke 位不进 `Cap<T>` wire —— 已定**（与 §3.6 的布局一并落地）：
+
+| 理由 | 说明 |
+|---|---|
+| 两个正交维度被塞进了一个字段 | cap 的 rights 描述「**持有者能对这个对象做什么**」；revoke 描述「**持有者能对这个引用做什么**」⇒ 若同占 16 位，rights 类型从 8 种变 16 种，其中**一半是不可达组合** |
+| 撤销的正确语义是 CDT 上的操作 | 一个 cap 被 revoke 后，它在**别的进程**的副本也失效吗？若 revoke 在 wire 上，每个副本各带一位 ⇒ **语义分裂** ⇒ CDT（对象反向边）是全局真源 ⇒ revoke 必须是 **CDT 上的操作** |
+| 真正需要的额外位是 slot 版本 | 「这个引用还活着吗」的载体是 **slot generation**（§3.5），不是 cap 上的 revoke 位 |
+| 先例 | seL4 的 revoke 是 CDT 上的操作（`CdtRevoke`）；cap 上没有 revoke 位 |
+
+⇒ **rights 类型集合定为 8 种**（R/W/G 三位）。cap_init 表项的 `_pad0:u8` 若要表达
+「该 cap 初始是否可撤销」，用**独立表项字段**，不进 cap wire。
 
 ### 3.4 软件能力的模型边界
 
@@ -265,9 +289,23 @@ JHYY 保证「**授权单调收缩 + 对象类型不匹配不可编译**」，
 
 ### 3.5 CHERI 缺失对语言提出的四项要求
 
-1. **CNode slot 必须版本化** —— 在 8 字节 wire 中永久保留 `padding:u8`，
-   后续以 1 字节 generation/version + 软件证明承载对象版本；
-   在兼容前不应复用 slot 索引，或复用前必须清零并维护全局 epoch
+1. **CNode slot 必须版本化 —— 已定：`padding:u8` 改作 slot generation**
+   （字段改名 `gen:u8`，**wire 长度不变、字段数不变 ⇒ ABI 不破坏**）
+
+   | 方案 | 判定 |
+   |---|---|
+   | **`padding:u8` 改作 slot generation** | ✅ **已定** |
+   | 内核维护 `(slot, generation) → alive` 表，cap 不带 generation | ❌ **不可能** —— cap 只有 slot 索引，内核无从知道这个 cap 是哪个 generation 派发的 |
+   | 用 `provenance_seed` 哈希 | ❌ 同样需要 cap 带标识 |
+   | 不做，slot 永不复用 | ⚠️ 简单，但 2^32 槽会耗尽；且等于**放弃**对一个已知 UAF 的防护 |
+
+   语义：`gen` 是 **slot 复用代数**；slot 被复用时 +1；cap 派发时携带当时的代数。
+
+   **必须写明的约束（容易踩坑）**：
+   - generation **只在同一个 CNode 槽内有意义** ⇒ 跨 CNode 派生时，目标槽的 generation
+     由**目标 CNode 的所有者**决定（内核分配），**不是继承**
+     ⇒ 写错会让「跨 CNode 混淆」的防护**看起来存在实则无效**
+   - 因此 `AddressSpace` / `Mapping` 若引入，**也要各自的 slot 空间与 generation 语义**
 2. **`Cap<T>` 的 `T` 必须被解析** —— 硬件边界缺失时，**类型就是唯一廉价防线**
 3. **rights 必须进入类型参数** —— 避免所有 cap 退化成 `Cap<i32>`
 4. **provenance 必须成为语言与 ABI 的不变量** —— cap_init 的 `provenance_seed_off`
@@ -275,6 +313,30 @@ JHYY 保证「**授权单调收缩 + 对象类型不匹配不可编译**」，
 
 **短期建议**：「软件 capability + 可选 CHERI 后端」，而不是等待 CHERI。
 **不要承诺 CHERI 兼容 ABI，也不要用 CHERI 论文为当前软件能力模型背书。**
+
+### 3.6 `Cap<T>` 的 wire 布局 —— 已定：`rights@5`
+
+```
+cnode_idx:u32@0 · depth:u8@4 · rights:u16@5 · gen:u8@7
+```
+
+| 来源 | 原布局 | 性质 |
+|---|---|---|
+| lang-spec § 2.6 | `rights:u16@5` | **锁定规范**（2026-10-24） |
+| abi § 2.5 | `rights:u16@5`（逐字一致） | **锁定规范**（2026-10-24） |
+| binary-format § 2 | ~~`rights:u16@6`~~ | 设计稿（2026-09-04，未实装）⇒ **已按本布局修订** |
+
+**判定证据、逐条推理与编译器侧动作 ⇒
+[`JHYY_编译器侧设计终版.md` § 7.1](JHYY_编译器侧设计终版.md#71-三处规范冲突cap-wire-布局编译器侧动作)。**
+一句话：lang-spec § 2.6 自带的构造示例
+`0x0000030200000007 as Cap // cnode=7, depth=2, rights=R|W`
+小端展开 = `07 00 00 00 | 02 | 03 00 | 00` ⇒ **只有 `rights@5` 下才自洽**。
+
+**为什么现在定不亏**：`Cap<T>` 的 `T` 不解析、无字段访问 ⇒ 没有任何代码按字节拆 cap
+⇒ **现在改零成本**；等 `Cap<T>` 真 T 落地后再改就是 ABI break。
+
+⚠️ **这次冲突能活三个月，就是因为没有一道门** ⇒ 已加
+`scripts/dev/check_spec_consistency.py`（比对三处的 Cap 布局 + rights 位宽），接进 CI。
 
 ---
 
@@ -301,8 +363,9 @@ console 是传统输出对象；endpoint_focus 是焦点授权。
 `map_into` 的签名需要 `Cap<AddressSpace, W>` 与返回 `Cap<Mapping, R>` ——
 **但 type_tag 表里既没有 address_space 也没有 mapping。**
 
-⇒ **设计产出**：
-- 缺失的 type_tag **登记为 P4a(OS-13) manifest 的输入**，**不在此刻临时加**
+⇒ **已定**：
+- 缺失的两个 type_tag（`AddressSpace` / `Mapping`）**登记为 P4a(OS-13) manifest 的输入**，
+  **不在此刻临时加**
 - **P4a 的 manifest 必须先答「哪些对象类型存在」**，否则 P4b 写签名时会再次缺类型
 - ⚠️ 这部分依赖内核的地址空间模型，而**那部分 OS 文档已被删**（2026-10-30）⇒ **需重新确认**
 
@@ -310,7 +373,7 @@ console 是传统输出对象；endpoint_focus 是焦点授权。
 
 **规范词汇表里只有 `page`** —— 「Frame」这个词是 OS 报告自造的。
 
-**建议：type_tag=1 的名字从 `page` 改为 `Frame`（语义：物理页框），`Page` 不存在。**
+**已定：type_tag=1 的名字从 `page` 改为 `Frame`（语义：物理页框），`Page` 不存在。**
 
 理由：
 1. **`page` 在 OS/硬件语境里几乎总是「虚拟页」**，而这里要表达的是**物理页框**
@@ -380,7 +443,7 @@ kind = 9  contract    loader 必须验证，验证失败拒绝加载
 kind = 6  debug_group 可选，可剥离
 ```
 
-**承载内容**（与编译器侧 §4.5 的表一一对应）：
+**承载内容**（编译器侧 § 4.5 的 8 个子节，这里是 OS 视角的合并视图）：
 栈上界（`frame_local_max` / `call_path_max`）、`may_sleep`/`irq_ctx`/`preempt_disabled`/`may_alloc`、
 `holds(L)` 锁序图、IPC handler version、panic category、WCET class、
 cap_offsets 位图与 type_tag allowlist。
@@ -432,6 +495,10 @@ cap_offsets 位图与 type_tag allowlist。
 
 > **「内核不实现语言，但为语言提供可证明使用的运行时契约」。**
 
+（原「5 原则」全文见
+[`docs/abis/jhyy-binary-format-v1.0.0.md` § 2](../abis/jhyy-binary-format-v1.0.0.md#2-capability-abi)
+的「5 原则」一条 —— 那批 OS 侧原设计文档已于 2026-10-30 删除，原则原文留在 binary-format 里。）
+
 这条边界既避免内核承担类型推导，也避免语言把全局硬件状态假装成纯函数。
 
 ---
@@ -455,25 +522,19 @@ const generic 与名义类型系统冲突（常量不是声明名）且单态化
 
 **唯一失去的能力**：无法表达「运行时决定的 rights」⇒ 由 `derive_dynamic` 显式兜底。
 
-### 7.2 派生 API 与四条规则
+### 7.2 派生 API 与四条规则 —— OS 侧的约束与后果
 
-```jhyy
-// 静态派生（首选）：编译期完成子集检查
-fn derive<T, SrcR, DstR>(src: &Cap<T, SrcR>) -> Cap<T, DstR>
+**API 与 R1–R4 规则的权威定义在
+[`JHYY_编译器侧设计终版.md` § 5.1](JHYY_编译器侧设计终版.md#51-capt-rights--编译器侧实现要点)
+（`derive` / `derive_dynamic` / `narrow` 三个入口 + 四条规则）。**
+OS 侧只补充**内核必须强制什么**：
 
-// 运行时派生（次选）：返回最宽类型 + Option
-fn derive_dynamic<T, SrcR>(src: &Cap<T, SrcR>, want: u16) -> Option<Cap<T, RWG>>
-```
-
-| # | 规则 | 检查阶段 |
-|---|---|---|
-| R1 | 派生只能清位，不能置位 | 编译期 |
-| R2 | root 的 rights 是对象类型允许集的子集 | 编译期（manifest 驱动） |
-| R3 | 映射类操作可附加 VM rights，但不产生新 capability rights | 编译期 |
-| R4 | G 不能由 R/W 派生得到 | 编译期 + 运行期 |
-
-**内核侧仍须强制**：`cap_derive` 系统调用是**唯一权威**；
-编译期检查是加速带。攻击者可以伪造用户态 syscall 参数。
+| OS 侧后果 | 说明 |
+|---|---|
+| **`cap_derive` 系统调用是唯一权威** | 编译期检查是**加速带**，不是替代品 —— 攻击者可以伪造用户态 syscall 参数 |
+| **R2 的「对象类型允许集」由 manifest 提供** | 内核侧维护 `allowed_mask(type_tag)`；编译期靠它做常量判定 |
+| **R4 的「升级需要授权对象」是内核协议** | 编译期只能判「G 不能由 R/W 派生」，**「谁有权授权」是内核的事** |
+| **`narrow` 的子集检查要在内核再查一次** | 用户态那一次是加速带 |
 
 ### 7.3 `ptr<phys>` 从 `Cap<Frame>` 派生 ⭐
 
@@ -496,6 +557,19 @@ fn map_into<'f, R>(
 **`ptr<phys>` 的构造必须只有三类可信来源**：
 ① `Cap<Frame>` 的借用映射；② `Cap<Framebuffer>` 显式适配；
 ③ loader 验证过的 `region_table` raw_mmio 条目。
+
+**映射是否消耗源 cap —— 已定：不消耗，派生新 cap，原 cap 保留。**
+
+| 理由 | 说明 |
+|---|---|
+| capability 模型的核心是「可并存的授权」 | 映射一个 frame 不应该让 frame 消失 ⇒ 用户可能想 map 两次（不同 vaddr），或 map 后仍持有 frame 用于 `unmap` |
+| 消耗（by value）会让心智模型冲突 | 「map → unmap → 再 map」很别扭，且与「cap 是引用」冲突 |
+| 借用检查器会咬人 | `&Cap<Frame, R>` 会让长生命周期的 mapping 借用短生命周期的 cap ⇒ 而 JHYY 的借用检查还在 W-105 最小版 |
+| **「转移所有权」不需要语言级特例** | 用户想转移就自己 `derive` 后 `drop` 原件 |
+
+⇒ **映射的 rights ⊆ frame 的 rights**（编译期常量判定）。
+**unmap 是否等待** ⇒ 归 §3.2 的分级：`Mapping` 标 `async_revoke: true`
+（unmap 必须等所有映射消失，否则还有 CPU 在用那个物理页）。
 
 **能力边界（必须写进规范）**：
 
@@ -551,7 +625,7 @@ fn map_into<'f, R>(
 
 编译器应为每条 handler 生成 `cap_offset_bitmap + type_tag_allowlist + rights_lower_bound`。
 
-### 8.4 cap 的移动语义
+### 8.4 cap 的移动语义 —— 已定
 
 **IPC 里的 cap 是移动（transfer），不是复制**：
 复制 ⇒ 一个 cap 两个持有者 ⇒ **revoke 语义立刻崩**（撤销谁？）
@@ -566,6 +640,10 @@ fn map_into<'f, R>(
 **第一版不做借用/共享 cap**（`borrow_cap`）—— 需要「可共享引用」概念，第一版没有。
 **第一版不做 timeout** —— seL4 用 notification + timeout，而 timeout 后 cap 归谁是经典的「泄漏」难题
 ⇒ 第一版同步阻塞 IPC **不带 timeout** ⇒ **不会产生泄漏** ⇒ 登记进 ABI §12 已知偏离。
+
+> **三个子问题分别定**（不再有「待定」）：
+> **grant / return ⇒ 移动（transfer）**；**in-flight 消息所有权 ⇒ 发送即撤销 sender slot**，
+> flight 期间由 kernel 托管；**timeout ⇒ 第一版不做**。
 
 ---
 
@@ -614,6 +692,21 @@ CpuLocalOff → CpuLocalReady · InterruptsOff → ThreadingReady
 ⚠️ **对于 `#[naked]`、`asm!` 和 interrupt entry，汇编作者必须手工给出栈预算，
 编译器不得把它们视为零。** 否则 ABI 可以编译通过，
 却在内核递归 IPC、页错误路径或中断嵌套时破坏相邻栈。
+
+**内核栈策略 —— 已定**：
+
+| # | 决定 | 内容 |
+|---|---|---|
+| 1 | **栈大小不是编译器定的，是 loader / 内核定的** | 编译器的作用是**把最坏情况算出来并让链接期断言** ⇒ 「内核栈策略」主要是内核侧的，编译器侧只提供事实 |
+| 2 | **P2 的硬门改成可判定形式** | **硬门**：自举编译器自身（**1045 个真实函数**）的 `call_path_max × frame ≤ 64 KiB`。**长期目标**：`max_frame ≤ 16 KiB` —— **保留但标注「可达性未证」** |
+| 3 | **中断栈** | 独立于线程栈，**固定 4 KiB**；`#[naked]` interrupt handler 自报预算 |
+| 4 | **per-CPU 备份栈** | **不在栈策略里解决** ⇒ 归效果系统（`preempt_disabled` 语义 + per-CPU 双缓冲） |
+| 5 | **递归深度** | 递归函数**默认不允许进入内核栈路径**（链接期拒绝），必须显式 `#[trusted(recursive, max_depth=N)]` 声明上界 |
+
+> **硬门为什么用 64 KiB**：自举编译器是本仓最坏情况（1045 个真实函数；
+> `main.jhyy` 的 max temp id 已达 **6 万量级**，见台账 W-120）。
+> 它的最坏调用路径若能在 64 KiB 内跑完 ⇒ 内核栈若跑得动自举编译器，就跑得动绝大多数内核代码。
+> ⚠️ 这是**类比，不是证明** ⇒ **OS-4 的验收门数字应据此复核**。
 
 ### 9.4 无栈展开不是「没有错误处理」，而是必须定义错误终止面
 
@@ -699,221 +792,10 @@ CpuLocalOff → CpuLocalReady · InterruptsOff → ThreadingReady
 **不排进 OS 线的**（与 OS 线正交，v4.16 起独立）：
 async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI。
 
-**拍板前 OS-13(manifest) 与 OS-14(Cap 真 T) 不能启动** —— 见 § 12。
 
 ---
 
-## §12 待拍板 —— OS 侧 8 条
-
-> 完整的 12 条（D1–D12）见 git 历史；编译器侧的 4 条（D5/D6/D9/D12）见
-> [`docs/coordination/JHYY_编译器侧设计终版.md`](JHYY_编译器侧设计终版.md) § 8。
-> **核实口径**：2026-10-30，所有「事实基线」逐条回源码 / 规范 / 门脚本核过，
-> 引用位置写明 `file:line` 或规范章节。**不引用任何文档里的转述当事实。**
-
-| # | 决策 | 建议 | 阻塞什么 | 紧迫度 |
-|---|---|---|---|---|
-| **D1** | `Cap` wire 里 `rights` 在第 5 还是第 6 字节？ | **以 lang-spec + abi 为准（rights@5）**，修订 binary-format；**并加规范一致性门** | `Cap<T>` 真 T 的第一步 | 🔴 **最硬** |
-| **D2** | revoke 位是否进 `Cap` wire？ | **不进**；cap_init 的第 4 位另作元数据 | rights 集合是 8 种还是 16 种 | 🔴 |
-| **D3** | `Page` 与 `Frame` 是不是两个对象？ | **统一为 `Frame`**，`Page` 不存在；**另发现缺 2 个 type_tag** | `frame_phys` 签名 | 🔴 |
-| **D4** | slot version 方案？ | **用 `padding:u8` 做 slot generation** | slot 复用 = UAF + 静默越权 | 🔴 |
-| **D7** | revoke 同步还是异步？传播吗？ | **默认同步 + 分级**；区分 `retract_cap` / `revoke_object` | ⚠️ **其实不阻塞 Cap 真 T**（见下） | 🟡 |
-| **D8** | `ptr<phys>` 消耗 `Cap<Frame>` 吗？ | **不消耗**；派生新 cap，原 cap 保留 | derive API 形态 + TLB 协议 | 🟡 |
-| **D10** | M3 message 的 cap 策略？ | **移动语义**；发送即撤销 sender slot；**第一版不做 timeout** | `#[ipc_handler]` 契约 | 🟢 |
-| **D11** | 内核栈策略？ | **栈大小由 loader 选**；硬门改成「自举编译器 64 KiB 内跑完」；中断栈 4 KiB | P2 的 16 KiB 目标可不可达 | 🟡 |
-
-**依赖关系**：
-
-```
-D1 ──┬─→ D2（定下 rights 集合大小）
-     ├─→ D4（定下 padding 字节的用途）
-     └─→ D3（定下 type_tag 词汇）
-D7 ──→ D8 ──→ D10（unmap 语义 → IPC 语义）
-```
-
-### D1 —— `Cap` wire 里 `rights` 在第 5 还是第 6 字节？【🔴 最硬】
-
-**事实基线**：
-
-| 来源 | 布局 |
-|---|---|
-| lang-spec §2.6 | `cnode_idx:u32@0` · `depth:u8@4` · **`rights:u16@5`** · `padding:u8@7` |
-| abi §2.5 | 同上（**逐字一致**） |
-| binary-format §2（D6+D23） | `cnode_idx:u32@0` · `depth:u8@4` · `_pad:u8@5` · **`rights:u16@6`** |
-
-**判定证据**：lang-spec §2.6 自带构造示例
-`0x0000030200000007 as Cap  // cnode=7, depth=2, rights=R|W`
-小端展开 = `07 00 00 00 | 02 | 03 00 | 00`
-⇒ **只有在 `rights@5` 下才解出注释说的 cnode=7 / depth=2 / rights=R|W**；
-按 `rights@6` 解出来是 `rights=0x0000`、`_pad=0x03` ⇒ **示例自相矛盾**。
-
-**另一条独立事实**：`type_tag` / `cap_init` 词汇表**只存在于 binary-format**
-⇒ lang-spec 与 abi 互相印证，binary-format 是孤本异类。
-且 binary-format 引用的 D6/D23 原件**不在本仓**。
-
-**当前不发作的原因**：`Cap<T>` 的 `T` 不解析、无字段访问 ⇒ **没有任何代码按字节拆 cap**。
-
-**选项**：
-A. 以 lang-spec + abi 为准（rights@5），修订 binary-format ⇒ **改一份未实装的设计稿 ⇒ 零代码成本**
-B. 以 binary-format 为准 ⇒ 改两份**已锁定**的规范 + 换一个自洽性已被使用的示例 ⇒ 高成本高风险
-C. 两者都不改，只写「按 target 决定」⇒ **最坏** —— 同一份程序用不同规范实现会静默错位 1 字节
-
-**建议：A + 一道规范一致性门。**
-1. 两份**锁定**规范（2026-10-24）互证一致，且带**可验证示例**；
-   binary-format 是 2026-09-04 的**设计稿**（未实装）⇒ **事实基线一侧两票，另一侧一票**
-2. 两种布局都满足 D41 的「自然对齐 + 显式 `_pad`」⇒ **对齐推不出对错**
-3. **当前零代码成本** ⇒ 现在改零成本，等 `Cap<T>` 真 T 落地后再改就是 ABI break
-
-**为什么要加门（方案 C 的教训）**：这次冲突能活三个月（两份锁定规范互相矛盾），
-**是因为没有一道门** ⇒ 加 `scripts/dev/check_spec_consistency.py`
-（比对三处的 Cap 布局 + rights 位宽），接进 CI。
-
-**产物**：binary-format §2 改为 `rights:u16@5` + 「本字段与 lang-spec §2.6 同源；改动须三处同步」；
-**单一真源 = lang-spec §2.6**；新门 `check_spec_consistency.py`。
-
-### D2 —— revoke 位是否进 `Cap<T>` wire？【🔴】
-
-**事实基线**：lang-spec §2.6 / abi §2.5 = **3 位**（R/W/G）；
-binary-format §7 cap_init = **4 位**（R/W/G/**revoke**）。
-
-**建议：revoke 不进 `Cap<T>` wire。**
-
-1. **两个正交维度被塞进了一个字段** —— cap 的 rights 描述「**持有者能对这个对象做什么**」；
-   revoke 描述「**持有者能对这个引用做什么**」⇒ 前者是对象的权限集，后者是引用的处置权
-   ⇒ 若同占 16 位，rights 类型从 8 种变 16 种，其中**一半是不可达组合**
-2. **撤销的正确语义是 CDT 上的操作，不是 cap 上的属性** ——
-   一个 cap 被 revoke 后，它在**别的进程**的副本也失效吗？
-   若 revoke 在 wire 上，每个副本各带一位 ⇒ **语义分裂**
-   ⇒ CDT（对象反向边）是全局真源 ⇒ revoke 必须是 **CDT 上的操作**
-3. **真正需要「这个引用还活着吗」的载体是 slot 版本**（见 D4）⇒ 那才是 cap wire 上真正需要的额外位
-4. **seL4 的先例**：revoke 是 CDT 上的操作（`CdtRevoke`）；cap 上没有 revoke 位
-
-**代价与处置**：cap_init 表项的 `_pad0:u8` 有 1 字节可用 ⇒
-若需要表达「该 cap 初始是否可撤销」，用**独立表项字段**。
-**rights 类型集合定为 8 种**（与 D1 合并生效）。
-
-### D3 —— `Page` 与 `Frame` 是不是两个对象？【🔴】
-
-见 §4.3。**建议：统一为 `Frame`；`Page` 不存在；并补两个缺失的 type_tag**
-（`AddressSpace` / `Mapping`）**登记进 P4a(OS-13) 清单，不在此刻临时加**。
-
-### D4 —— slot version 方案？【🔴】
-
-**事实基线**：`Cap<T>` wire 的 `padding:u8@7` —— lang-spec 明写「**零**」⇒ **1 字节空闲**；
-规范**完全没有** slot version / generation 的记载。
-
-| | 方案 | 判定 |
-|---|---|---|
-| A | **`padding:u8` 改作 slot generation** | ✅ |
-| B | 内核维护 `(slot, generation) → alive` 表，cap 不带 generation | ❌ **不可能** —— cap 只有 slot 索引，内核无从知道这个 cap 是哪个 generation 派发的 |
-| C | 用 `provenance_seed` 哈希 | ❌ 同样需要 cap 带标识 |
-| D | 不做，slot 永不复用 | ⚠️ 简单，但 2^32 槽会耗尽；且等于**放弃**对一个已知 UAF 的防护 |
-
-**建议：A。**
-1. `padding:u8` 已存在且明文写「零」⇒ 重新定义它 **wire 长度不变、字段数不变、ABI 不破坏** ⇒ 零成本
-2. 这是**唯一能让内核判定「这个 cap 还活着吗」的机制** ⇒ 没有它，slot 复用 = UAF；
-   更糟的是它**静默越权**（旧 cap 拿到了新对象的权限）
-3. **seL4 用的是 CNode generation** ⇒ 成熟做法
-
-**必须写明的约束（容易踩坑）**：
-- generation **只在同一个 CNode 槽内有意义** ⇒ 跨 CNode 派生时，目标槽的 generation
-  由**目标 CNode 的所有者**决定（内核分配），**不是继承**
-  ⇒ 写错会让「跨 CNode 混淆」的防护**看起来存在实则无效**
-- 因此 `AddressSpace` / `Mapping` 若引入，**也要各自的 slot 空间与 generation 语义**
-
-**产物**：lang-spec §2.6 + abi §2.5 的 `padding:u8` 改名 `gen:u8`，
-语义改为「slot 复用代数；slot 被复用时 +1；cap 派发时携带当时的代数」；binary-format §2 同步。
-
-### D7 —— revoke 同步还是异步？传播吗？【🟡，⚠️ 不阻塞 Cap 真 T】
-
-**⚠️ 先纠正一条阻塞判断**：`决策总纲` 曾写「revoke 同步性阻塞 `Cap<T>` 的 T 落地时机」——
-**这条阻塞判断是错的**：revoke 是**运行期**语义，`T` 的解析是**编译期**语义 ⇒ 两者无依赖
-⇒ **D7 不阻塞 Cap 真 T**，可以从阻塞列表里降级。
-
-**建议：默认同步 + 按对象类型分级；区分 retract 与 revoke。**
-1. **同步是 object capability 模型的核心承诺** —— 异步则要求**每一个使用点**都处理
-   「可能已撤销」⇒ 把并发问题推给所有用户 ⇒ 不可推理
-2. 但**同步对某些对象物理上不可能**：
-   `Mapping`（unmap 必须等所有 CPU 刷 TLB ⇒ 需 quiesce）、`Frame`（正在被 DMA ⇒ 等 DMA 完成）
-   ⇒ **哪些对象需要异步，是 P4a manifest 的逐类决定**，不是语言级规则
-3. **传播**：revoke 沿 CDT 传播（父撤销 ⇒ 全部后代失效）—— 这是 CDT 的定义，不是选择
-4. **兄弟 cap 不受影响**：撤销一个**派生引用**不影响它的兄弟；
-   但撤销**对象**时兄弟全失效 ⇒ ⇒ **必须是两个不同的操作**
-
-**产物**：两个系统调用 `retract_cap(cap)` / `revoke_object(cap)`；
-默认同步；需 quiesce 的对象类型在 P4a manifest 里标 `async_revoke: true` + 声明 quiesce 机制；
-**语言层：`Cap<T>` 的类型不因 revoke 改变** ⇒ revoke 不进类型系统。
-
-### D8 —— `ptr<phys>` 消耗 `Cap<Frame>` 吗？unmap 等所有映射消失吗？【🟡】
-
-**建议：不消耗 —— 派生新 cap，原 cap 保留。**
-1. **capability 模型的核心是「可并存的授权」**：映射一个 frame 不应该让 frame 消失
-   ⇒ 用户可能想 map 两次（不同 vaddr），或 map 后仍持有 frame 用于 `unmap`
-2. 消耗（by value）会让「map → unmap → 再 map」很别扭，且与「cap 是引用」的心智模型冲突
-3. 借用（`&Cap<Frame, R>`）在借用检查下会让长生命周期的 mapping 借用短生命周期的 cap
-   ⇒ 借用检查器会咬人（而 JHYY 的借用检查还在 W-105 最小版）
-4. **派生新 cap** = `derive` + `map` 两步，与 8 种 rights 模型一致：
-   **mapping 的 rights ⊆ frame 的 rights**（编译期常量判定）
-
-**「转移所有权」怎么表达**：用现有能力即可 —— 用户想转移就自己 `derive` 后 `drop` 原件
-⇒ **不需要语言级特例**。
-
-**unmap 是否等待**：归 D7 的分级 ⇒ **`Mapping` 标 `async_revoke: true`**
-（unmap 必须等所有映射消失，否则还有 CPU 在用那个物理页）。
-
-### D10 —— M3 message struct 的 cap 策略？【🟢】
-
-见 § 8.4。**建议：三个子问题分别定**
-- **grant / return** ⇒ **移动（transfer）**
-- **in-flight 消息所有权** ⇒ **发送即撤销 sender slot**；flight 期间由 kernel 托管
-- **timeout** ⇒ **第一版不做**，登记进 ABI §12 已知偏离
-
-### D11 —— 内核栈策略？【🟡】
-
-**事实基线**：
-
-| 项 | 值 |
-|---|---|
-| 自举编译器最大单函数帧 | **349232 B（341 KiB）**（v4.2.1 后实测；229 KiB 已作废） |
-| 自举编译器中位帧 | **288 B** |
-| 栈预留 | 64 MB（`-Wl,--stack,67108864`，abi §12.7） |
-| 栈槽对齐 | 只保证 8 字节（abi §12.6） |
-| red zone / 省略帧 | 当前**不用**（grep 零命中） |
-| P2 目标 | max_frame ≤ 16 KiB |
-| 寄存器分配理论上限 | 槽数 → ~24% ⇒ **~85 KiB** |
-
-**建议**：
-
-**① 栈大小不是编译器定的，是 loader / 内核定的。**
-编译器的作用是**把最坏情况算出来并让链接期断言** ⇒
-「内核栈策略」这个决策**主要是内核侧的**，编译器侧只提供事实。
-
-**② 把 P2 的门从「≤ 16 KiB」改成可判定的形式**：
-
-| | 建议 |
-|---|---|
-| **硬门（可判定）** | **自举编译器自身（1045 个函数）的 `call_path_max × frame ≤ 64 KiB`** |
-| **长期目标** | `max_frame ≤ 16 KiB` —— **保留但标注「可达性未证」** |
-
-理由：自举编译器是本仓最坏情况（**1045 个真实函数**，per `docs/perf/self-backend-baseline-2026-10-29.md`；
-`main.jhyy` 的 max temp id 已达 **6 万量级**，见台账 W-120）；
-它的最坏调用路径若能在 64 KiB 内跑完 ⇒ 内核栈若跑得动自举编译器，就跑得动绝大多数内核代码。
-⚠️ 这是**类比，不是证明** ⇒ **OS-4 的验收门数字应据此复核**。
-
-**③ 中断栈**：独立于线程栈，**固定 4 KiB**，
-`#[naked]` interrupt handler 自报预算。
-
-**④ per-CPU 备份栈**：不在栈策略里解决 ⇒ 归效果系统（`preempt_disabled` 语义 + per-CPU 双缓冲）
-⇒ **从栈策略里划出去**。
-
-**⑤ 递归深度**：递归函数**默认不允许进入内核栈路径**（链接期拒绝），
-必须显式 `#[unsafe(recursive, max_depth=N)]` 声明上界。
-
-**产物落点**：栈大小 → OS-2；硬门 → OS-4；16 KiB → OS-4 备注；
-中断栈 → OS-3；per-CPU 备份栈 → OS-12；递归 → OS-2。
-
----
-
-## §13 最小实现顺序
+## §12 最小实现顺序
 
 **第一阶段 —— 只做「可信加载器能看懂、内核能强制执行」的最小格式。**
 先冻结 `.jhyynb` 的 cap_init / region_table / IPC dispatch 静态表，
@@ -943,11 +825,14 @@ file/shm/framebuffer/compositor/surface/seat/buffer 才能真正形成 capabilit
 
 ---
 
-## §14 外部对标：值得抄的是能力/TCB 边界，不是具体 C 结构
+## §13 外部对标：值得抄的是能力/TCB 边界，不是具体 C 结构
+
+> ⚠️ **口径**：本节引用的**外部项目的数字与结论未在本仓复核** —— 只作为设计取向的
+> 参照，**不作为事实基线**。仓内可复核的事实一律在 § 2。
 
 | 外部项目 | 已核实结论 | 对 JHYY 的建议 | 不应抄的部分 |
 |---|---|---|---|
-| **seL4** | CSpace/能力模型；实现级正确性、安全属性证明与二进制验证（工业强度先例）；证明工作量记录为 **11+ 人年**；形式化验证曾发现 **460+ 个 bug，而测试只发现 16 个** | 先冻结对象、CSpace、revoke 语义；把可验证的接口边界、对象不变式与测试 oracle 设计成可审查形式 | 复制 C 风格的全局状态与宏 |
+| **seL4** | CSpace/能力模型；实现级正确性、安全属性证明与二进制验证（工业强度先例）；证明工作量记录为 **11+ 人年**；形式化验证曾发现 **460+ 个 bug，而测试只发现 16 个**（⚠️ 外部数据，**未在本仓复核**） | 先冻结对象、CSpace、revoke 语义；把可验证的接口边界、对象不变式与测试 oracle 设计成可审查形式 | 复制 C 风格的全局状态与宏 |
 | **Rust for Linux** | 2025 年维护者峰会后 Rust 结束实验期、进入长期支持阶段，已有生产驱动；但 DMA API 抽象与 C/Rust 所有权边界仍冲突；Linux 内核首个 Rust 代码 CVE 源于链表并发移除导致 prev/next 损坏 | 从一开始统一 unsafe 内核边界 ⇒ 避免 Rust-for-Linux 最大的一部分组织成本 | 把已有 Linux 惯用法当天然正确；先复制 `Box/Arc` 再补 `ListLinks` |
 | **Asterinas** | 内核分为特权 OS 框架与去特权 OS 服务，以缩小内存安全 TCB | capability 成为进入 OS 框架的入口（而非模块可见性） | 只以 safe/unsafe 替代授权 |
 | **Redox** | 完整的 Rust 微内核 OS | 借鉴服务化与 IPC 测试 | 未经验证的具体服务结构 |
@@ -961,29 +846,28 @@ file/shm/framebuffer/compositor/surface/seat/buffer 才能真正形成 capabilit
 
 ---
 
-## §15 规范未记载 —— 待确认清单
+## §14 事实缺口 —— 每项落到具体的 OS-N 槽
 
-> 下列资料必须来自真实仓库、coordination.md、D-lock 全文或 v0.0.1-capability.md；
-> **本仓无法用三份规范补出**。
+> 下列是**规范没记载、且 OS 侧原设计文档已删**的事实缺口。
+> **不是「待拍板的设计」** —— 设计的部分已在前面的章节定稿（§3.6 / §4 / §7 / §8 / §9）；
+> 这里列的是**「还不知道的事实」**，每一项都有**归属槽、产出物、阻塞谁** ⇒
+> 不是一个无主的清单。
 
-| 待确认项 | 已知线索 | 会阻塞的结论 |
-|---|---|---|
-| 真实 jhyy_OS 调度模型 | 规范没有线程、runqueue、时间片、优先级或 SMP 事实 | 能否确定内核是单核先跑、Tier 0 对象及 `#[ipc_handler]` 的抢占语义 |
-| 中断与 trap 模型 | 只提到 `#[naked] interrupt` | interrupt entry 的栈、Callee-saved、redzone、IRQ 线程化与嵌套规则 |
-| 内存管理模型 | 只有 region_table 与 frame/page/framebuffer tag | frame metadata、allocator、slab、page table、ASID/PCID、page fault handler 的位置 |
-| CSpace 与 CNode 实际结构 | 只有 wire 的 cnode_idx/depth | slot version、CNode 增长、跨 CNode 解析与内核对象 header |
-| CDT/撤销树 | 只有 depth 字段 | revoke 同步性、是否支持 in-progress、反向边、RCU grace 与映射 unmap |
-| D-lock 全集 | 仅知 D23、D40、D41、D-GUI-12、5 原则 | 哪些能力已锁定、哪些仍可变、与新增类型/效果系统是否冲突 |
-| v0.0.1 capability 对象表 | 仅知道 11 个 type_tag 值 | **frame/framebuffer/page 的语义区分**、是否增加 kernel-internal 对象、`AddressSpace`/`Mapping` 是否需要 cap 化 |
-| capability 版本与 provenance | cap_init 有 provenance_seed_off，无规则 | slot reuse、派生 proof、跨进程与持久化是否安全 |
-| region_table 的 owner/生命周期 | 只有 kind、rights、flags | kernel_shared/unsafe_share/cap_namespace 的引用与 revoke 语义 |
-| 内核栈策略 | 只有用户态编译器 341 KiB 最大帧 | 内核栈大小、per-CPU 备份栈、中断栈、递归深度与栈溢出处理 |
-| M3 message struct 与 cap policy | 只有 IPC dispatch 表与 D16 wire | handler 版本、timeout、cap grant/return、in-flight 消息所有权 |
-| panic/fault 模型 | 规范无 panic/unwind | oops 分类、thread terminate、namespace revoke、是否支持 kernel continuation |
-| GUI 完整对象模型 | 只有 compositor/surface/seat/buffer/focus 等 tag | 显示 lease、format/modifier、transaction、presentation feedback、input focus |
-| boot/hardware 适配范围 | 只知 PE/COFF kernel.efi 与 UEFI 钩子空实现 | 第一版支持哪些主板、APIC、定时器、串口/显卡与 SMP 步骤 |
-| `.jhyynb` 加载与签名语义 | 只有 section 格式 | 是否需要签名/测量、加载顺序、未知 section 处理、contract 是否强制 |
-| 编译器兼容性 | 只知四 ABI 目标与 14 条已知偏离 | `T` 重新解析是否破坏 ABI、版本迁移与旧 binary 共存 |
+| 事实缺口 | 归属槽 | 产出物 | 阻塞谁 |
+|---|---|---|---|
+| 真实内核调度模型（线程 / runqueue / 时间片 / 优先级 / SMP） | **OS-1 / OS-2** | BootState 扩展 + 调度骨架 | OS-2 栈观测、OS-12 效果骨架 |
+| 中断与 trap 模型（entry 栈 / callee-saved / redzone / IRQ 线程化 / 嵌套） | **OS-3** | `#[naked]` interrupt 契约 + 4 KiB 中断栈 | OS-3 最小 kernel.efi |
+| 内存管理模型（frame metadata / allocator / slab / 页表 / ASID / page fault handler 位置） | **OS-4** | 帧 + 分配器设计 | OS-4 栈与分配、OS-14 Cap 真 T |
+| CSpace 与 CNode 的实际结构（slot 空间 / CNode 增长 / 跨 CNode 解析 / 对象 header） | **OS-13** | manifest 里的对象与 slot 空间 | OS-13 manifest、OS-14 Cap 真 T |
+| CDT / 撤销树的实现细节（反向边存储 / in-progress / RCU grace / 映射 unmap） | **OS-13 / OS-15** | CDT 数据结构 + `retract_cap` / `revoke_object` | OS-14 Cap 真 T |
+| capability 对象表（11 个 type_tag 之外的语义区分、kernel-internal 对象、`AddressSpace`/`Mapping` 是否要 cap） | **OS-13** | 完整 type_tag 表（`Frame` 已定，见 §4.3） | OS-13 manifest |
+| capability 版本与 provenance（派生 proof / 跨进程 / 持久化是否安全） | **OS-13 / OS-14** | provenance 规则 + `gen` 语义（已定，见 §3.5） | OS-14 Cap 真 T |
+| region_table 的 owner / 生命周期（`kernel_shared` / `unsafe_share` / `cap_namespace` 的引用与 revoke） | **OS-13** | region_table 字段定稿 | OS-13 manifest |
+| panic / fault 模型（oops 分类 / thread terminate / namespace revoke / 是否支持 kernel continuation） | **OS-12** | 终止面分类（已定框架，见 §9.4） | OS-12 效果骨架 |
+| GUI 完整对象模型（像素格式 / modifier / 原子提交 / presentation feedback / input focus） | **OS-13**（或明确推迟） | 显示对象定义 | GUI 冻结（不在当前主线） |
+| boot / hardware 适配范围（第一版支持哪些主板 / APIC / 定时器 / 串口 / 显卡 / SMP） | **OS-3** | 硬件适配清单 | OS-3 最小 kernel.efi |
+| `.jhyynb` 加载与签名语义（是否需要签名 / 测量 / 加载顺序 / 未知 section / contract 是否强制） | **OS-3** + **OS-16** | loader 规格 + contract 校验规则 | OS-3 loader、OS-16 可信工具链 |
+| 编译器兼容性（`T` 重新解析是否破坏 ABI / 版本迁移 / 旧 binary 共存） | **OS-5** | ABI 收敛方案 | OS-5 ABI 收敛 |
 
 > ⚠️ **2026-10-30：OS 侧原设计文档（`../JiHuiYiYou-OS/` 下 17 份 v0.0.x 设计文档 +
 > `deep_research/` + README + CLAUDE.md）已全部删除**（commit `f98d83d`）——
@@ -993,7 +877,7 @@ file/shm/framebuffer/compositor/surface/seat/buffer 才能真正形成 capabilit
 
 ---
 
-## §16 交叉引用
+## §15 交叉引用
 
 | 文档 | 用途 |
 |---|---|

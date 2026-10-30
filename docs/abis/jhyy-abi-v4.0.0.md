@@ -119,12 +119,23 @@ offset  size  field        type
 0       4     cnode_idx    u32     CSpace slot index
 4       1     depth        u8      CDL 深度
 5       2     rights       u16     bit0=R, bit1=W, bit2=G
-7       1     padding      u8      零
+7       1     gen          u8      slot 复用代数(slot 被复用时 +1;cap 派发时携带当时的代数)
 ```
 
 - 小端序。
-- ⚠️ **`T` 当前不被解析** —— `Cap` 的 inner 被硬编码成 `i32`，所以 `Cap<i32>` 与 `Cap<i64>` 是同一个类型。语言规范里「名义相等按 `elem` 区分」的说法在当前实现下不成立。
-- 不提供 `.cnode_idx` / `.depth` / `.rights` 字段访问语法；构造走 8 字节整型字面量 + `as Cap` 转换。
+
+- ⚠️ **`gen` 的语义（2026-10-30 定）**：slot 被复用时 +1；cap 派发时携带当时的代数。
+  这是**内核判定「这个 cap 还活着吗」的唯一机制** ⇒ 没有它，slot 复用 = UAF，
+  且**静默越权**（旧 cap 拿到新对象的权限）。
+  ⚠️ generation **只在同一个 CNode 槽内有意义** ⇒ 跨 CNode 派生时目标槽的代数由
+  **目标 CNode 的所有者**决定（内核分配），**不是继承**。
+- ⚠️ **`T` 当前不被解析** —— `Cap<T>` 的 inner **被解析但被忽略**：`Cap` 在符号表里
+  **只登记一次**，**第一个 `Cap<X>` 赢**（此后所有 `Cap<Y>` 都解析到同一个符号）
+  ⇒ `Cap<i32>` 与 `Cap<i64>` **是同一个类型**。
+  实测：`let b: Cap<i64> = a;`（`a: Cap<i32>`）**编译通过**（两个方向都通过）；
+  对照组 `P<i32>` → `P<i64>` 会报 `type mismatch in let` ⇒ 泛型机制本身没问题，`Cap` 是特殊的。
+  且 inner **从不 resolve 也不校验** ⇒ `Cap<NotAType>` **零诊断**（实测编译通过）。
+  不带 `<T>` 的裸 `Cap` 走 sema 的 `type_cap(PRIM_I32())`。- 不提供 `.cnode_idx` / `.depth` / `.rights` 字段访问语法；构造走 8 字节整型字面量 + `as Cap` 转换。
 
 ### 2.6 `volatile T`
 
