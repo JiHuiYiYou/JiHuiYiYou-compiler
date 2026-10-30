@@ -6,48 +6,60 @@
 
 ### 机会翼游 — A self-hosted, statically typed, compiled systems programming language
 
-**Statically typed. Expression-oriented. Compiled to native via self-hosted amd64 backend.**
+**Statically typed. Expression-oriented. Compiled to native by a self-written amd64 backend.**
 
 [![Version](https://img.shields.io/badge/version-v4.1.2-00d4aa)](docs/logs/v4/changelog-v4.0.0.md)
-[![Status](https://img.shields.io/badge/self--host-N%E2%89%A53%20byte--equal-success)](#status-v400)
+[![Status](https://img.shields.io/badge/self--host-byte--equal-success)](#status-v412)
 [![Backend](https://img.shields.io/badge/backend-self--hosted%20amd64-blue)](#architecture)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#install)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![中文](https://img.shields.io/badge/lang-中文-red)](README.zh-CN.md)
 
-[Quick Start](#quick-start) · [Install](#install) · [Language](#language) · [CLI](#cli) · [Architecture](#architecture) · [Status](#status-v400) · [Roadmap](#roadmap) · [Docs](#docs)
+[Quick Start](#quick-start) · [Install](#install) · [Language](#language) · [CLI](#cli) · [Architecture](#architecture) · [Status](#status-v412) · [Roadmap](#roadmap) · [Docs](#docs)
 
 </div>
 
 ---
 
-> [!WARNING]
-> **这份 README 的内容段落停留在 v4.0.0** —— 架构一节仍说 `compiler/src/*.c` 是现行实现
-> (该目录已于 v4.0.21 删光)、回归数仍写 104/104(现为 259/279)、Roadmap 表整张作废。
-> **徽章已跟到 v4.1.2,但正文尚未重写** —— 当前真实状态以 [`CLAUDE.md`](CLAUDE.md)
-> 和 [`docs/plans/v4/README.md`](docs/plans/v4/README.md) 为准。
-
 ## What is JHYY
 
-JHYY (机会翼游) is a self-designed, statically typed, expression-oriented, compiled systems programming language. The compiler is **self-hosted** — `compiler/src0/*.jhyy` is the authoritative source; `compiler/src/*.c` is a legacy C-side reference kept for parity testing. v4.0.0 unifies the v2.x (QBE-free, in-mem pipeline) and v3.x (self-backend amd64 codegen) axes into a single tree, achieving N≥3 self-host byte-equal closure on the self-hosted amd64 backend.
+JHYY (机会翼游) is a self-designed, statically typed, expression-oriented, compiled systems
+programming language. **The compiler is written in itself** — `compiler/src0/*.jhyy` is the
+*only* implementation. `jhyy.exe` compiles `compiler/src0/main.jhyy`; the compiler that
+produces compiles it again, and the closure gate **iterates until the emitted `.s` is
+byte-identical** (the fixed point is reached, not assumed).
+
+The backend is a **self-written in-memory amd64 code emitter**
+(`compiler/src0/codegen_amd64_*.jhyy`) — no vendored QBE, no LLVM, no GC, no runtime.
 
 **Design goals**:
-- **Self-hosting** — `compiler/src0/*.jhyy` is compiled by `jhyy.exe` (itself built from `compiler/src/*.c`); the resulting `jhyy_v1.exe.exe` then compiles `compiler/src0/` again to produce `jhyy_v2.exe` whose `.il` is byte-equal to v1. (✓ v1.0.0; re-validated at v4.0.0)
-- **No runtime / no GC / no QBE** — direct amd64 code emission, native PE/COFF (Windows) and ELF (Linux) binaries
-- **OS-ready** — `[T; N]`, `*T`, slices, `extern fn`, `match`, enum, FFI calling C ABI
+
+- **Self-hosting** — the compiler compiles itself; the closure is verified by iteration to a
+  fixed point (`.s` byte-identical across generations).
+- **Native output** — direct amd64 code emission; PE/COFF (Windows) and ELF (Linux) binaries.
+- **OS-ready** — `extern fn` FFI on the C ABI, `enum` + `match`, `#[no_std]`, `#[naked]`,
+  inline `asm!`, `#[link_section]`, `volatile`, memory barriers, `defer`.
 
 ## Install
 
-**Prerequisites** (Windows x64 host — the compiler itself is Windows-only by design; see [docs/internal/build.md](docs/internal/build.md) § 宿主平台):
-- **Windows**: MSYS2 + `mingw-w64-ucrt-x86_64-gcc` + `mingw-w64-ucrt-x86_64-binutils`
+**End users (Windows x64)** — grab the installer. **MSYS2 is not required**: since v4.1.0
+the MSI bundles a minimal native ucrt64 toolchain (`<INSTALLDIR>\toolchain\`).
 
-**Build** (one line, from repo root):
+| Artifact | Size | What it is |
+|---|---|---|
+| `jhyy-installer-4.1.2.exe` | ~55 MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |
+| `jhyy-compiler-4.1.2.msi` | ~28 MB | Same payload, no GUI — for enterprise / SCCM distribution |
+
+**Building from source** — needs MSYS2 + `mingw-w64-ucrt-x86_64-gcc` (the compiler
+*build* host requirement; end users don't need it):
 
 ```bash
-make all        # → compiler/build/bin/jhyy.exe (~2MB Windows PE)
+make all        # → compiler/build/bin/jhyy.exe (~1.9 MB)
 ```
 
-**One-shot installer** (Windows end users): `installer/jhyy-installer-4.0.0.exe` wires up `jhyy.exe` + `.jhyy` file association + VSCode extension + PATH registration. `installer/jhyy-compiler-4.0.0.msi` is the enterprise / SCCM distribution (no GUI). See [`installer/README.md`](installer/README.md).
+> [!IMPORTANT]
+> Do NOT use the MinGW `gcc` shipped with Git Bash (`/c/Program\ Files/Git/mingw64/bin/gcc.exe`)
+> — it does not support PE+ linking and fails at link time.
 
 **Docker**:
 
@@ -59,10 +71,9 @@ docker run -it msys2/mingw-w64-ucrt-x86_64 bash
 docker run -it gcc:12 bash
 ```
 
-**VSCode users**: opening this repo triggers `.vscode/settings.json` to add `compiler/build/bin` and MSYS2 PATH to the integrated terminal automatically — no manual setup needed. Press `Ctrl+Shift+B` to compile + run any `.jhyy` file.
-
-> [!IMPORTANT]
-> Do NOT use the MinGW `gcc` shipped with Git Bash (`/c/Program\ Files/Git/mingw64/bin/gcc.exe`) — it does not support PE+ linking and will fail at link time.
+**VSCode users**: opening this repo triggers `.vscode/settings.json` to add
+`compiler/build/bin` and the MSYS2 ucrt64 path to the integrated terminal. Press
+`Ctrl+Shift+B` to compile + run any `.jhyy` file.
 
 ---
 
@@ -74,7 +85,7 @@ type Point = struct { x: i32, y: i32 }
 
 fn dist_sq(a: Point, b: Point) -> i32 {
     let dx = a.x - b.x;
-    let dy = b.y - a.y;
+    let dy = a.y - b.y;
     dx * dx + dy * dy
 }
 
@@ -119,17 +130,15 @@ echo $?    # => 42
 ### Run the regression suite
 
 ```bash
-python compiler/build/bin/regress.py
-# => 104/104 passed, 0 failed, 4 skipped (of 108 total) — v4.0.0 baseline
+python regress.py
+# => 259/259 passed (全部有断言), 0 failed, 20 skipped (of 279 total)
 ```
 
-### Verify self-hosting closure
+### Verify the self-host closure
 
 ```bash
-# Method 1: regress through self-hosted compiler (v1.4.7+ single regress entry)
-python compiler/build/bin/regress.py --all --include-informational
-# Method 2: one-shot closure check via MCP (recommended)
-# ask Claude Code: "verify self-host closure" → jhyy_selfhost_check
+make            # builds jhyy.exe, then iterates the closure to a fixed point
+#   ⇒ _boot_new.s vs _boot_new2.s byte-identical
 ```
 
 ---
@@ -138,65 +147,81 @@ python compiler/build/bin/regress.py --all --include-informational
 
 | Category | Supported |
 |----------|-----------|
-| **Types** | `i8/i16/i32/i64`, `u8/u16/u32/u64`, `f32/f64`, `bool`, `*T`, `[T; N]`, `[*]T` (slice), `struct`, `enum` |
+| **Types** | `i8/i16/i32/i64`, `u8/u16/u32/u64`, `f32/f64`, `bool`, `*T`, `[T; N]`, `[*]T` (slice), `struct`, `enum`, `Cap<T>`, `PhantomData<T>` |
+| **Sizes** | `sizeof(T)` / `alignof(T)` — compile-time constants |
 | **Casts** | `as` — integer/float conversion, widening/narrowing, `*T ↔ i64/u64` |
 | **Control flow** | `if`/`else` (expression-valued), `while`, `for i in start..end`, `break`, `continue`, `match` (literal/range/enum/wildcard, with exhaustiveness check) |
-| **Top-level const** | `const NAME: [T; N] = [...]` — compile-time emit to `.data` section |
+| **Cleanup** | `defer` — runs at scope exit (LIFO); not run on an implicit tail return |
+| **Top-level const** | `const NAME: [T; N] = [...]` — compile-time emit to the `.data` section |
 | **Logic** | `&&` / `\|\|` short-circuit, `!` / `~` unary |
-| **Functions** | first-class, recursion, compound assignment (`+=` `-=` `*=` `/=` `%=`), block-expression closures |
+| **Functions** | first-class, recursion, compound assignment (`+=` `-=` `*=` `/=` `%=`), block-expression closures (no capture — capturing is a compile error) |
 | **Modules** | `import` + transitive imports, multi-file CLI, `mod::fn()` namespaces |
 | **FFI** | `extern fn` calling C (printf, file I/O, multi-arg) |
-| **Memory** | runtime Arena allocator (`arena_alloc` via FFI) |
-| **Stdlib** (v3.x) | `std::mem`, `std::fmt`, `std::io`, `std::math`, `std::string`, `std::vec` (Vec<T> dynamic array) |
+| **OS / embedded** | `#[no_std]`, `#[naked]`, `#[link_section]`, `volatile`, inline `asm!`, memory barriers |
+| **Stdlib** | `import mem;` / `fmt` / `io` / `math` / `string` / `vec` / `os` / `arena` — **note: no `std::` prefix** (`import std::vec;` is a compile error) |
 
-Full specification: [`docs/abis/jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) (locked; v1.3.0 = v1.1.0 + 7 v1.3.x features); known limitations in Appendix B + Appendix E.
+Full specification: [`docs/abis/jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md)
+(locked 2026-10-24; it replaces v1.3.0 + 17 v3.x supplements, both archived to git history).
+Known limitations are collected in its **Appendix B**, not scattered through the prose.
 
 ---
 
 ## CLI
 
 ```text
-jhyy compile <file.jhyy> [-o name]   compile to .exe (default amd64 self-backend)
-jhyy run     <file.jhyy>             compile and run
-jhyy build   <file.jhyy> [-o name]   compile only, no link (.s next to the source)
-jhyy dump    <file.jhyy>             dump parsed AST to stdout (debug)
-jhyy                                 print help
+jhyy compile <file.jhyy> [-o output]   compile + link -> .exe
+jhyy build   <file.jhyy> [-o output]   compile only -> .s (no link)
+jhyy run     <file.jhyy>              compile + link + execute
+jhyy dump    <file.jhyy>              ⚠️ not implemented yet (exits 1)
+
+flags:
+  --target=<triple>  select target (default amd64_win)
+  --no-link          compile to .s only, skip the gcc link (for cross toolchains)
+  --help             show help and exit
 ```
 
-> [!TIP]
-> For multi-file compilation, list every `.jhyy` source on the command line: `jhyy compile main.jhyy lib.jhyy -o app`
+Targets: `amd64_win` (default, hosted Windows) · `amd64_win_freestanding` (UEFI) ·
+`amd64_sysv` · `amd64_sysv_freestanding`.
 
 > [!TIP]
-> `JHY_SELF_BACKEND=1` forces the self-hosted amd64 backend even on Windows (default backend is `amd64_win` PE+COFF). `JHY_SELF_BACKEND=0` forces the C-side path. Omit for default target selection.
+> For multi-file compilation, list every `.jhyy` source on the command line:
+> `jhyy compile main.jhyy lib.jhyy -o app`
+>
+> ⚠️ **There is no `jhyy --version`** — it never existed. Running it prints
+> `unknown command` and exits 1. The version banner is the **first line of
+> `jhyy --help`** (and of `jhyy` with no arguments).
+>
+> ⚠️ `jhyy build` and `jhyy compile --no-link` are *not* equivalent: `build` does not run
+> `apply_link_section_directives`, so programs using `#[link_section]` produce different
+> `.s` on the two paths (see `W-170`). Prefer `compile --no-link` for tooling.
 
 ---
 
 ## Architecture
 
-The JHYY compiler exists in two **functionally equivalent** implementations:
-
 ```mermaid
 flowchart TB
-    cs["<b>compiler/src/</b><br/>C-side · legacy parity<br/>main.c · lexer · parser · sema · codegen · symtab"]
-    s0["<b>compiler/src0/</b><br/>jhyy-side · authoritative<br/>main.jhyy · parser · lexer · sema<br/>ir · codegen · target_dispatch"]
-    cs -->|gcc builds| bin1["jhyy.exe"]
-    bin1 -->|compiles src0| s0
-    s0 --> bin2["jhyy_v1.exe.exe"]
-    src_src[".jhyy source"] --> sb["<b>Self-backend amd64 codegen</b><br/>codegen_amd64_state / lexer / emit_*<br/>(no QBE)"]
-    bin1 --> sb
-    bin2 --> sb
-    sb --> asm[".s"] --> ln["as + ld"] --> exe[".exe / ELF"]
+    src[".jhyy source"] --> lex["Lexer → Token 流"]
+    lex --> parse["Parser → AST"]
+    parse --> sema["Sema → 标注 AST"]
+    sema --> il["codegen.jhyy<br/>发 QBE 风格 IL 文本到**内存**"]
+    il --> sb["codegen_amd64_inmem<br/>lex → 解析 → emit → peephole"]
+    sb --> asm[".s (amd64)"]
+    asm --> ln["as + ld (gcc)"]
+    ln --> exe[".exe (PE/COFF) / ELF"]
 ```
 
-| Implementation | Role | Status |
-|----------------|------|--------|
-| `compiler/src/*.c` | C-side compiler (legacy parity reference) | maintained for parity tests |
-| `compiler/src0/*.jhyy` | jhyy-side authoritative source | self-host path, byte-equal to C-side |
-| `compiler/src0/std/*.jhyy` | Standard library (v3.x) | `mem`, `fmt`, `io`, `math`, `string`, `vec` |
+| Piece | Where | Role |
+|-------|-------|------|
+| `compiler/src0/*.jhyy` | 30 modules | **The** compiler — lexer, parser, sema, IR, codegen, target dispatch |
+| `compiler/src0/codegen_amd64_*.jhyy` | self-written backend | IL lexer · emitter (`emit_call` / `emit_ctrl` / `emit_mem` / `emit_sse`) · peephole · register cache |
+| `compiler/src0/std/*.jhyy` | 8 modules | `mem` `fmt` `io` `math` `string` `vec` `os` `arena` |
+| `compiler/runtime/runtime.c` | C runtime | Arena allocator + `main` → `main_jhyy` bridge |
+| `runtime/linux_elf/` | crt0.S + link.ld | Linux ELF runtime for the `amd64_sysv*` targets |
 
-Both paths emit **byte-equal native amd64 assembly** through the self-hosted backend — Stage 1 (`jhyy_0.exe` vs `jhyy_v1.exe.exe`) 7/7 byte-equal, Stage 2 (`jhyy_v1 → v2 → v3`) N≥3 byte-equal closure.
-
-**Why no QBE?** QBE was removed in v4.0.0 (post-v2.16.0); the self-hosted backend in `compiler/src0/codegen_amd64_*.jhyy` is now the sole codegen path. This eliminates a 17K-LOC vendored dependency and tightens the iteration loop on the codegen itself.
+**Why no QBE?** QBE was removed in v4.0.0 (post-v2.16.0). The self-written backend is now
+the sole codegen path — that removes a 17K-LOC vendored dependency and tightens the
+iteration loop on codegen itself.
 
 ---
 
@@ -205,92 +230,68 @@ Both paths emit **byte-equal native amd64 assembly** through the self-hosted bac
 ```
 JiHuiYiYou-compiler/
 ├── compiler/
-│   ├── src/                    C-side compiler (legacy parity reference; ~10 .c / 9 .h files)
-│   ├── src0/                   jhyy-side authoritative source (14 main modules + std/)
-│   │   ├── std/                Standard library: mem / fmt / io / math / string / vec (v3.x)
-│   │   └── codegen_amd64_*.jhyy  Self-backend amd64 codegen (state / lexer / emit_* / regalloc)
+│   ├── src0/                   编译器源码(唯一实现,30 个模块 + std/)
+│   │   ├── std/                标准库:mem / fmt / io / math / string / vec / os / arena
+│   │   └── codegen_amd64_*.jhyy 自研后端:IL lexer / emit_* / peephole / 寄存器缓存
+│   ├── runtime/                C 运行时(Arena + main 入口)
 │   ├── tests/
-│   │   ├── examples/           integration tests (~50 .jhyy) — regress.py auto-runs
-│   │   └── bootstrap/          fixed_point.sh, byte_equal.sh, byte_equal_selfbackend, bench.sh
-│   └── build/
-│       └── bin/
-│           ├── jhyy.exe        C-side compiler binary
-│           ├── jhyy_v1.exe.exe self-hosted compiler (jhyy compiled src0/)
-│           └── regress.py      regression script
-├── installer/                  WiX installer + .NET 8 CustomAction (Windows)
-├── mcp-jhyy/                   Claude Code MCP server (jhyy_* tools)
-├── vscode-ext/                  VS Code language extension
-├── scripts/dev/                dev/ install-uninstall helpers, bench, test orchestrators
-├── docs/
-│   ├── abis/                   language spec + ABI whitepaper (locked)
-│   ├── plans/                  v4.x plans per version (umbrella per `feedback_changelog_umbrella`)
-│   ├── internal/               architecture / build / workarounds / conventions / tests
-│   ├── logs/v4/                v4.x changelogs (umbrella per vX.Y)
-│   └── archive/v2-v3/          archived v2/v3 plans (historical, do not use)
-├── tools/                      cross-repo utilities
-├── .editorconfig
-├── README.md                   English (this file)
-└── README.zh-CN.md              简体中文
+│   │   ├── examples/           集成测试(274 个 .jhyy + 5 个子目录)— regress.py 自动跑
+│   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
+│   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe(自举产物)
+├── runtime/linux_elf/          Linux ELF 运行时(crt0.S + link.ld)
+├── regress.py                  回归测试套件(仓库根)
+├── docs/                       规范 / 内部文档 / 计划 / changelog
+├── installer/                  WiX installer + 内置 ucrt64 工具链
+├── mcp-jhyy/                   Claude Code MCP server(jhyy_* 工具)
+├── vscode-ext/                 VS Code 扩展
+├── scripts/dev/                开发脚本(bench / test / build / install)
+└── tools/                      跨仓工具
 ```
 
 ---
 
-## Status (v4.0.0)
-
-`jhyy_v1 → jhyy_v2 → jhyy_v3` compile themselves and emit **byte-equal amd64 assembly** through the self-hosted backend:
-
-```
-jhyy_v1.exe.exe → src0/main.jhyy → jhyy_v2.il   ← byte-equal to v1.il
-jhyy_v2.exe     → src0/main.jhyy → jhyy_v3.il   ← byte-equal to v1.il
-                                                  sha (re-baselined at v4.0.0; see changelog)
-```
-
-The fixed point is an attractor, not a transient. **Stage 2 N≥3 byte-equal closure** reached at v1.0.0 (tag `9b05c0f`, 2026-08-10), re-validated through v1.8.3 (tag `98c8272`, 2026-08-29), then in v4.0.0 with self-hosted amd64 backend (post-v2.16.0 QBE-removal + post-v3.4.2 self-backend closure).
+## Status (v4.1.2)
 
 | Metric | Value |
 |--------|-------|
-| `regress.py` (C-side `jhyy.exe`) | **104/104 PASS, 0 failed, 4 skipped** (108 total) |
-| `regress.py --binary=jhyy_v1.exe.exe` (self-hosted) | **104/104 PASS, 0 failed, 4 skipped** (parity hold) |
-| Stage 1 byte-equal (`jhyy_0` vs `jhyy_v1`) | **7/7 PASS** |
-| Stage 2 N≥3 byte-equal (`v1→v2→v3`) | **stable** (post-v4.0.0 re-baseline) |
-| `byte_equal_selfbackend.sh` (self-backend path) | **3/3 PASS** (fmod_basic / fmod_negative / fmod_f32) |
-| ACTIVE workarounds | **0** (all W-IDs in `docs/internal/workarounds.md` are RESOLVED / SUPERSEDED / INVALID) |
-| `installer/jhyy-installer-4.0.0.exe` | shipped (~30MB, includes .NET 8 Desktop Runtime) |
-| `installer/jhyy-compiler-4.0.0.msi` | shipped (~995KB, includes `jhyy-setuc.exe`) |
-| `vscode-ext/jhyy-lang-4.0.0.vsix` | shipped (~13KB) |
+| `regress.py` | **259 PASS + 0 XFAIL + 0 failed + 20 SKIP** (279 total) |
+| Assertion audit | 279 scanned / 259 runnable / 200 real assertions / 0 zero-signal |
+| Self-host closure | `make` iterates to a fixed point — emitted `.s` byte-identical |
+| `fixed_point.sh` | **17 PASS / 0 FAIL** (N=10, `.il` and `.s` byte-equal across generations) |
+| `artifact_checks.sh` | **17 PASS / 0 FAIL** |
+| `closure_check.sh` | PASS (v2.s == v3.s, byte-identical) |
+| ACTIVE workarounds | **1** — [`W-170`](docs/internal/workarounds.md): `jhyy build` doesn't apply `#[link_section]` |
+| `jhyy-installer-4.1.2.exe` | shipped (~55 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
+| `jhyy-compiler-4.1.2.msi` | shipped (~28 MB, includes `jhyy-setuc.exe` + bundled toolchain) |
+| `jhyy-lang-4.1.2.vsix` | shipped (VS Code extension) |
 
-**v4.0.0 umbrella changelog** — [`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md) covers the v2/v3 axis merge + QBE removal + stdlib + self-backend closure.
-
-**W-NNN workaround status (v4.0.0 ship)**:
-- All ACTIVE workarounds in v1.x/v2.x/v3.x era resolved (W-017 codegen module-level `let mut`, W-019 nested struct field chain, W-020 parser inline match-as-expression reorder, W-057 UTF-8 3/4-byte codepoint, W-058 fmod user-space formula trunc, W-083 self-backend fmod 真修, W-085/W-086/W-088/W-089 self-backend regressions) — bucket cleared at v3.4.2 / v4.0.0
-- Invalid workarounds retained for audit (W-060 enum variant payload ABI bash `$?` 8-bit truncation, W-061 nested struct field offset — both regress.py W-028 mod-256 fix handles)
-- Permanently deferred (WiX Bal.wixext DLL naming — upstream won't fix; documents permanent workaround)
-
-Full index: [`docs/internal/workarounds.md`](docs/internal/workarounds.md).
+**v4.x umbrella changelog** — [`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md)
+is the single per-axis changelog (per the project's umbrella convention).
 
 ---
 
 ## Roadmap
 
-v4.x is the post-merge axis, built on top of the unified v2+v3 state. Per-sprint plans live under `docs/plans/v4/v4.X.Y-plan.md` (one plan per minor version, per `feedback_plans_per_version`):
+v4.x is the post-merge axis. Plans live one per version slot under
+[`docs/plans/v4/`](docs/plans/v4/README.md) — the authoritative index, plus
+[`docs/plans/v4/version-schedule.md`](docs/plans/v4/version-schedule.md) for the schedule.
+
+**Performance line** (self-written backend — the current main line):
 
 | Sprint | Intent |
 |--------|--------|
-| **v4.0.0** ✅ | axis-v2 (v2.16.0) + axis-v3 (v3.4.2) merged into main; QBE removed; self-backend closure (this ship) |
-| v4.1.0 | M5: delete `compiler/src/*.c` + untrack QBE + delete `runtime/runtime.c` — "jhyy 编 jhyy" 0-C 闭环 (deferred from v1.x) |
-| v4.2.0 | async/await + Future runtime |
-| v4.3.0 | full lifetime + Polonius borrow check (replaces v3.1.0 NLL stub) |
-| v4.4.0 | closure enhance: move/borrow capture/generic/trait object |
-| v4.5.0 | const generic `[T; N]` |
-| v4.6.0 | trait objects (dyn Trait) + vtable dispatch |
-| v4.7.0 | multi-error recovery (parser/sema diagnostic chain) |
-| v4.8.0 | basic optimization pass (const fold / dead code / algebra) |
-| v4.9.0 | package manager (`jhyy new/build/test` + `jhyy.toml`) |
-| v4.10.0 | HKT 1阶 + specialization |
-| v4.11.0 | C11/Rust memory model + multi-arch (aarch64/riscv64) Cap<T> ABI |
-| v4.12.0 | `.jhyynb` native binary format实装 (DWARF emitter + `--target=jhyy-os` + `jhyy-inspect`) |
+| **v4.4.0** ⭐ | **Register allocation** — stage 1 (allocator + safety net, byte-identical output) is done; stage 2 is the emit layer consuming registers |
+| v4.4.1 / v4.4.2 / v4.4.3 | call-clobber + register classes / cross-block + phi parallel moves / gates + perf validation |
+| v4.4.5 | peephole 4096 limit + IR optimisation framework (two downgraded versions) |
+| v4.5 | M5 Part 3 — the last 0-C-closure item |
 
-Sprint ordering may be re-parallelized (not strictly serial) per dep graph: v4.3 → v4.4 strict; v4.5/v4.6/v4.7/v4.8/v4.9 can open feature worktrees in parallel.
+**OS line** (v4.6 → v4.15, stable identity `OS-1` … `OS-16`): stop-the-bleeding → stack
+observation → feedback loop → ABI convergence → language self-consistency → effect system →
+lifetime → trait + `dyn Trait` → const generics → HKT → capability typing → trusted
+toolchain.
+
+Version numbers on reserved slots are **placeholders** — each plan carries a
+"check on start" checklist to be re-verified against reality when that slot is picked up.
 
 ---
 
@@ -298,13 +299,14 @@ Sprint ordering may be re-parallelized (not strictly serial) per dep graph: v4.3
 
 - **Language spec**: [`docs/abis/jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) (locked)
 - **ABI whitepaper**: [`docs/abis/jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) (locked)
+- **Binary format** (design doc, not implemented): [`docs/abis/jhyy-binary-format-v1.0.0.md`](docs/abis/jhyy-binary-format-v1.0.0.md)
 - **Architecture**: [`docs/internal/architecture.md`](docs/internal/architecture.md)
-- **Build**: [`docs/internal/build.md`](docs/internal/build.md) (QBE-removed + Windows-specific notes)
-- **Workarounds**: [`docs/internal/workarounds.md`](docs/internal/workarounds.md)
-- **Conventions**: [`docs/internal/conventions.md`](docs/internal/conventions.md)
+- **Build & run**: [`docs/internal/build.md`](docs/internal/build.md)
 - **Tests**: [`docs/internal/tests.md`](docs/internal/tests.md)
+- **Workarounds ledger**: [`docs/internal/workarounds.md`](docs/internal/workarounds.md)
+- **Conventions**: [`docs/internal/conventions.md`](docs/internal/conventions.md)
 - **Changelog**: [`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md) (v4 umbrella)
-- **Archived plans**: [`docs/archive/v2-v3`](docs/archive/v2-v3/) (v2/v3 historical — do not use)
+- **Archived plans**: [`docs/archive/v2-v3/`](docs/archive/v2-v3/) (v2/v3 historical — superseded)
 
 ---
 
@@ -314,4 +316,4 @@ MIT — see [`LICENSE`](LICENSE).
 
 ---
 
-<sub>v4.0.0 — axis-v2 + axis-v3 merged into main · 2026-09-30 · built with the self-hosted amd64 backend</sub>
+<sub>v4.1.2 — 2026-10-29 · 版本号自动化(`VERSION` 单一真相源) · 自研 amd64 后端</sub>
