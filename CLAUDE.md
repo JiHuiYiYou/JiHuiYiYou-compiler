@@ -155,7 +155,7 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 | L1.5 | [`docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md`](docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md) | ⚠️ **SUPERSEDED** — 已归档到 [`docs/archive/v2-v3`](docs/archive/v2-v3/) (per 2026-09-30 v4.0.0 archive step) |
 | L3 | [`docs/plans/v4/active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md) | ✅ **已完成(2026-10-20)** —— ACTIVE 桶清零(14 → 0);文档保留作审计轨迹 |
 | L3 | [`docs/plans/v4/self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md) | 🔄 **v4.2 起的主线**(2026-10-29 立线)—— 自研后端性能线 |
-| L3 | [`docs/plans/v4/v4.4.0-plan.md`](docs/plans/v4/v4.4.0-plan.md) … [`docs/plans/v4/v4.15-plan.md`](docs/plans/v4/v4.15-plan.md) | 🔄 **v4.x 版本系列文档(22 份,2026-10-30 新建)** —— 每格一份,含验收门 + 启动时复核清单;**版本号是预留号**,索引见 [`docs/plans/v4/README.md`](docs/plans/v4/README.md) |
+| L3 | [`docs/plans/v4/v4.4.0-plan.md`](docs/plans/v4/v4.4.0-plan.md) … [`docs/plans/v4/v4.15-plan.md`](docs/plans/v4/v4.15-plan.md) | 🔄 **v4.x 版本系列文档(31 份,2026-10-30 新建)** —— 每格一份,含验收门 + 启动时复核清单;**版本号是预留号**,索引见 [`docs/plans/v4/README.md`](docs/plans/v4/README.md) |
 | L3 | ~~`docs/plans/v4/backlog.md`~~ | ⚠️ **已删除(2026-10-30)** —— 12 项未启动工作的僵尸排期表(依赖图已被它自己标注过期);清单现由 [`docs/plans/v4/version-schedule.md`](docs/plans/v4/version-schedule.md) § 四 + **v4.x 版本系列文档**承担 |
 
 最近完成的 sprint: **v4.1.2 shipped 2026-10-29** — 版本号自动化 + 三处「表述与实现不符」真修。
@@ -207,7 +207,7 @@ v4.2.0 / v4.2.1 ✅ 已完成;**v4.2.2 / v4.3.0 已降级**(实测性能价值 �
 访存数/帧大小/chkstk 次数,确定性 ⇒ 跨机器逐字节相同),**墙钟只报告** ——
 共享 runner 的宿主负载不可控。
 
-**plan 命名约定(2026-10-15 修订;2026-10-30 第二次修订)**:已 ship / 进行中的 sprint 保留 `v4.X.Y-plan.md`(审计轨迹,改名会破坏跟 changelog / commit 的对应);**已排期的版本槽**(性能线 v4.4.0–v4.5 + OS 线 v4.6–v4.15)**预先落一份 `v4.X.Y-plan.md`**(2026-10-30 新建 22 份,索引见 [`docs/plans/v4/README.md`](docs/plans/v4/README.md))—— ⚠️ **版本号仍是「预留号」**,启动那一格时按实际状态复核(每份自带「启动时复核清单」);**稳定身份是 `OS-N` 序号**,跨版本重排时序号不变。未排期的工作(v4.16+ 那批)与进行中的工作用描述性文件名,**不用版本号**。
+**plan 命名约定(2026-10-15 修订;2026-10-30 第二次修订)**:已 ship / 进行中的 sprint 保留 `v4.X.Y-plan.md`(审计轨迹,改名会破坏跟 changelog / commit 的对应);**已排期的版本槽**(性能线 v4.4.0–v4.5 + OS 线 v4.6–v4.15)**预先落一份 `v4.X.Y-plan.md`**(2026-10-30 新建 31 份,索引见 [`docs/plans/v4/README.md`](docs/plans/v4/README.md))—— ⚠️ **版本号仍是「预留号」**,启动那一格时按实际状态复核(每份自带「启动时复核清单」);**稳定身份是 `OS-N` 序号**,跨版本重排时序号不变。未排期的工作(v4.16+ 那批)与进行中的工作用描述性文件名,**不用版本号**。
 历史: changelog 见 `docs/logs/v0/changelog-v0.X.Y.md` (C 编译器) + `docs/logs/v1/changelog-v1.X.Y.md` (jhyy 自举) + `docs/logs/v2/changelog-v2.*.0.md` (QBE rewrite + freestanding) + `docs/logs/v3/changelog-v3.*.md` (language expansion + self-backend) + `docs/logs/v4/changelog-v4.0.0.md` (post-merge umbrella);早期 sprint（命名 `sprint-1*.md`）同目录。
 
 ### 项目内部（`docs/internal/`）
@@ -285,7 +285,7 @@ MCP 套件 **46 passed / 1 skipped**。
 真凶是 **W-123**(`jh_mktemp_ascii` 的 seed = `pid ^ tid ^ ctr`,而 Windows 的 pid
 与主线程 tid 来自**同一个全局计数器** ⇒ `N ^ (N+1) = 1` ⇒ **每两个并发进程就撞一次
 同一个临时文件名** ⇒ 一个的 rename 失败 ⇒ **编译失败**。W-123 修好后:并发编译 32 个
-→ **0 失败**(修复前 4 个)),**0 ACTIVE / 0 DEFERRED / 127 索引行**(W-134.1 的 CI step 已由 `2ab0f24` 落地,2026-10-25 补翻状态),per `docs/internal/workarounds.md` 索引表):
+→ **0 失败**(修复前 4 个)),**0 ACTIVE / 0 DEFERRED / 164 索引行**(W-134.1 的 CI step 已由 `2ab0f24` 落地,2026-10-25 补翻状态),per `docs/internal/workarounds.md` 索引表):
 
 | W-NNN | 位置 | 性质 |
 |-------|------|------|
@@ -344,18 +344,21 @@ MCP 套件 **46 passed / 1 skipped**。
 | W-134 | ~~MCP pytest 套件里有一个**恒红**的陈旧测试~~ ✅ **2026-10-25 已修** —— `test_regress_baseline_drift_detection` 断言「sha 漂移 ⇒ 报 binary drifted」,但那个行为已被上一轮 commit `f72cef4` 刻意换成「binary 比源旧」的新鲜度检查 ⇒ **从那次起套件就是红的**,而 CI 从不跑 pytest ⇒ 没人发现。修法:拆成两条 —— `test_regress_sha_drift_is_not_fatal`(漂移**不**误报)+ `test_regress_stale_binary_detected`(binary 比源旧 ⇒ early_abort `older than source`)。**套件 40 passed / 1 skipped / 0 failed** |
 | W-134.1 | **DEFERRED** —— `mcp-jhyy/tests/`(41 个测试)在 CI 里**零覆盖**(`ci.yml` 没有 pytest step,也没有任何 `pip install`)⇒ 套件红绿都不影响 CI 结论。补 CI step 需要**第一个网络依赖**(fastmcp / pytest / pytest-asyncio),而本机 MSYS2 python 连 pip 都没有 ⇒ 命令**无法本地验证** ⇒ 建议单独一个 commit + 先在 PR 分支观察一轮 |
 
-**回归现状(2026-10-27 实测,W-142/W-150/W-151/W-152 真修后):257 PASS + 0 XFAIL + 0 failed + 20 SKIP(277 total)**
-(新增 49 条门:6 个 std lib 真身覆盖 + 11 个 spec 正向行为 + 31 个错误诊断门 +
+**回归现状(2026-10-30 实测,W-168 真修 + W-169 退役后):258 PASS + 0 XFAIL + 0 failed + 20 SKIP(278 total)**
+(相对 2026-10-27 的 257 PASS / 277 total,新增的是 `logical_nested.jhyy` ——
+W-169 退役「禁嵌套短路」约定时补的**嵌套短路行为门**;
+同批还新增 `artifact_checks.sh build_o_flag`(W-168 的 CLI 门))
+(2026-10-27 那次新增 49 条门:6 个 std lib 真身覆盖 + 11 个 spec 正向行为 + 31 个错误诊断门 +
 1 个聚合比较字段类型矩阵;第二轮再 +1 条 `spec_int_to_float.jhyy`(W-149 的 8 组合矩阵);
 `spec_ptr_float_cast.jhyy`(W-143)/ `spec_struct_array_field.jhyy`(W-144)两个 XFAIL
 **转真门** ⇒ 剩 1 个 XFAIL = `spec_shadowing.jhyy`(W-142))
-(本日早些时候 —— W-126 / W-124 / W-125 修完时 —— 是 186/186 + 0 XFAIL + 19 SKIP / 205 total;
+(再往前 —— W-126 / W-124 / W-125 修完时 —— 是 186/186 + 0 XFAIL + 19 SKIP / 205 total;
 再往前 184/184 + 2 XFAIL + 20 SKIP / 203 total)。本机 Docker Desktop 起 daemon 后
 `regress.py --cross=auto` 解析成 **docker** ⇒ **7 个** sysv 用例本地也真跑
 (exit=28/217/42/35/18/42/170 全对 —— 新增 `sysv_mixed_int_float`)。
 `closure_check.sh` PASS(v2.s == v3.s 逐字节)、`fixed_point.sh` 17 PASS / 0 FAIL
-(N=10 .il 与 .s 跨代 byte-equal)、`artifact_checks.sh` **14 PASS** / 0 FAIL
-(含 W-130 新增 3 道门)、`audit_test_assertions.py --strict` 0 违规、
+(N=10 .il 与 .s 跨代 byte-equal)、`artifact_checks.sh` **17 PASS** / 0 FAIL
+(含 W-130 的 3 道门 + W-168 的 `build_o_flag`)、`audit_test_assertions.py --strict` 0 违规、
 `make`(自举闭环门)PASS —— 过渡期自动消化,**再跑一次产物逐字节不变**(幂等)。
 
 **回归现状见下方「v4.0.20 真修批次」—— 数字已更新到 200/200 + 0 XFAIL / 219 total。**
