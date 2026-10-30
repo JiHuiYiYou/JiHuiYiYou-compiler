@@ -144,7 +144,7 @@ fi
 echo
 echo "=== sysv 结果: $PASS PASS / $KNOWN KNOWN-FAIL / $FAIL FAIL ==="
 if [ "$KNOWN" -gt 0 ]; then
-    echo "  在位的已知问题(见 docs/internal/workarounds.md):"
+    echo "  在位的已知问题(见 docs/workarounds.md):"
     for k in "${KNOWN_IDS[@]}"; do echo "    - $k"; done
 fi
 if [ "$FAIL" -gt 0 ]; then

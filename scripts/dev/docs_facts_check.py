@@ -46,9 +46,14 @@ def all_md() -> list[Path]:
     不是工作树里的临时文件(gitignored 的 .claude/ 等不算)。"""
     import subprocess
     try:
+        # ⚠️ **不要用 pathspec `*.md`** —— 实测:同样的 git、同样参数,
+        # bash 下 `git ls-files '*.md'` 列 234 个(跨目录),而从 Python subprocess
+        # 调同一个二进制只列 4 个(只顶层)⇒ 门会「扫了 4 个文件却报 OK」。
+        # ⇒ 不带 pathspec,自己在 Python 里按后缀过滤。
         names = subprocess.run(
-            ["git", "-C", str(ROOT), "ls-files", "*.md"],
+            ["git", "-C", str(ROOT), "ls-files"],
             capture_output=True, text=True, check=True).stdout.splitlines()
+        names = [n for n in names if n.endswith(".md")]
     except Exception:
         names = []
     if names:
@@ -206,9 +211,27 @@ def anchors_of(path: Path) -> set[str]:
     return hs
 
 
+def tracked_files() -> set[str]:
+    """仓内**被 git 跟踪**的文件(相对路径,正斜杠)。
+
+    为什么必须用这个集合而不是「磁盘上存在」:
+    根 `CLAUDE.md` 已移出版本控制(它现在是本地 agent 提示词)⇒ 磁盘上存在、
+    但**clone 的人拿不到** ⇒ 指向它的链接对读者就是断的。
+    2026-10-30 的 CI 就是这样红了一次而本地是绿的。
+    """
+    import subprocess
+    try:
+        out = subprocess.run(["git", "-C", str(ROOT), "ls-files"],
+                             capture_output=True, text=True, check=True).stdout
+    except Exception:
+        return set()
+    return {ln.strip().replace("\\", "/") for ln in out.splitlines() if ln.strip()}
+
+
 def check_links() -> None:
     link_re = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
     cache: dict[str, set[str]] = {}
+    tracked = tracked_files()
     broken = 0
     for p in all_md():
         rel = p.relative_to(ROOT).as_posix()
@@ -233,6 +256,30 @@ def check_links() -> None:
                 if broken <= 20:
                     fail(f"{rel}: 断链 → {t}")
                 continue
+            # 磁盘上有、但**不在 git 里** ⇒ clone 的人拿不到 ⇒ 同样是断链
+            try:
+                rel_target = cand.resolve().relative_to(ROOT.resolve()).as_posix()
+            except (ValueError, OSError):
+                # 解析到了**仓外**(本地恰好有同名文件、CI 上没有 ⇒ 同一个链接两种结果)
+                broken += 1
+                if broken <= 20:
+                    fail(f"{rel}: 指向**仓外**的路径 → {t}"
+                         f"（本地可能恰好存在同名文件，clone 后必然断）")
+                continue
+            # 目录目标:git 不跟踪目录本身,只跟踪里面的文件 ⇒ 用前缀判「非空且被跟踪」
+            if rel_target and rel_target.endswith("/"):
+                rel_target = rel_target.rstrip("/")
+            if rel_target and tracked and cand.is_dir():
+                has_tracked = any(k.startswith(rel_target + "/") for k in tracked)
+            elif rel_target and tracked:
+                has_tracked = rel_target in tracked
+            else:
+                has_tracked = True
+            if rel_target and tracked and not has_tracked:
+                broken += 1
+                if broken <= 20:
+                    fail(f"{rel}: 指向**未入仓**的文件 → {t}"
+                         f"（clone 后拿不到；该文件已被移出版本控制）")
             if anc and cand.suffix.lower() == ".md":
                 key = str(cand)
                 if key not in cache:

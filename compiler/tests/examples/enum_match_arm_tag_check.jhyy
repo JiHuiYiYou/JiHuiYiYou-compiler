@@ -4,7 +4,7 @@
 // 之前 codegen 对 non-binding enum pattern (literal / wildcard) 统一
 // `goto enum_default` → 多 arm 顺序 match 退化成"永远第一 arm"。
 // fix: codegen 按 expected_tag 真做 tag compare, payload slot alias 只在
-// binding pattern 时 emit (per docs/internal/workarounds.md § Stage 3 +
+// binding pattern 时 emit (per docs/workarounds.md § Stage 3 +
 // W-057 ACTIVE 段, 2026-08-28 ship 后标 RESOLVED).
 //
 // 本 test 验证两条路径都正确:

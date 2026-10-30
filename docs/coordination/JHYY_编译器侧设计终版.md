@@ -47,7 +47,7 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 | rights 单调收缩 | 编译期生成证明 + **运行期内核强制** |
 | IPC `msg_tag` 唯一、handler 签名一致 | 编译期 |
 | `cap_offsets` 合法性与位图 | 编译期布局验证 + **内核必须重查**（消息可能来自不可信进程） |
-| message struct 字段 size/align 一致 | 编译期（D41 无 packed、显式 `_pad` 下可完整检查；**Debug ABI 权威 = [lang-spec § 19](../abis/jhyy-lang-spec-v4.0.0.md#19-debug-abi)**） |
+| message struct 字段 size/align 一致 | 编译期（D41 无 packed、显式 `_pad` 下可完整检查；**Debug ABI 权威 = [lang-spec § 19](../abis/jhyy-lang-spec-v4.0.0.md#19-debug-abi-per-d41)**） |
 | region 内访问不越界 | 运行期为主 |
 | 跨进程 cap 派生 / 拷贝 / revoke | 运行期 |
 | 页表 / TLB / ASID / 中断屏蔽 | 运行期 |

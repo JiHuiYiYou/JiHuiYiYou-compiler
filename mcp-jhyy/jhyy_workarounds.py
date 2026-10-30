@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""jhyy_workarounds.py — 解析 + 搜索 docs/internal/workarounds.md
+"""jhyy_workarounds.py — 解析 + 搜索 docs/workarounds.md
 
 Sprint mcp-1 (2026-08-11). 处理中英字段混用 (workarounds.md 实际有 ID/状态/日期/触发面/...).
 
@@ -66,6 +66,21 @@ def _git_path() -> Optional[str]:
     return None
 
 
+# 2026-10-30:台账从 docs/internal/ 搬到 docs/(文档大重构)。新位置优先,
+# 旧位置作回落 —— 机器上可能还有 v4.1.2 之前的旧 worktree。
+LEDGER_REL = "docs/workarounds.md"
+LEGACY_LEDGER_REL = "docs/internal/workarounds.md"
+
+
+def _ledger_in(root: Path) -> Path | None:
+    """返回该 root 下存在的台账路径(新位置优先,旧位置回落)。"""
+    for rel in (LEDGER_REL, LEGACY_LEDGER_REL):
+        p = root / rel
+        if p.exists():
+            return p
+    return None
+
+
 def _detect_root() -> Path:
     """Detect JHYY root, prefer active worktree over script location.
 
@@ -93,7 +108,7 @@ def _detect_root() -> Path:
     env_override = os.environ.get("JHYY_MCP_WORKTREE", "").strip()
     if env_override:
         override_path = _msys_to_windows(env_override).resolve()
-        if (override_path / "docs/internal/workarounds.md").exists():
+        if _ledger_in(override_path) is not None:
             return override_path
 
     # Cache for Tier 2/3/4 results.
@@ -142,7 +157,7 @@ def _detect_root_impl() -> Path:
             ).strip()
         except (subprocess.CalledProcessError, FileNotFoundError, OSError):
             cwd_branch = ""
-        if cwd_branch != "main" and cwd_toplevel != script_root and (cwd_toplevel / "docs/internal/workarounds.md").exists():
+        if cwd_branch != "main" and cwd_toplevel != script_root and _ledger_in(cwd_toplevel) is not None:
             return cwd_toplevel
     except (subprocess.CalledProcessError, FileNotFoundError, OSError, subprocess.TimeoutExpired):
         cwd_toplevel = None
@@ -180,8 +195,8 @@ def _detect_root_impl() -> Path:
             # CWD prepended → C:\c\... (BAD, 文件不存在). 用 _msys_to_windows 转
             # `/c/...` → `C:/...` 再 resolve → C:\Works (CORRECT).
             wt_path = _msys_to_windows(wt_path_str).resolve()
-            wd = wt_path / "docs/internal/workarounds.md"
-            if not wd.exists():
+            wd = _ledger_in(wt_path)
+            if wd is None:
                 continue
             try:
                 commit_time_str = subprocess.check_output(
@@ -213,7 +228,9 @@ def _detect_root_impl() -> Path:
 # cd 到其他 worktree 后 MCP 立即跟随, 不需 restart.
 def _default_path() -> Path:
     """返回当前 cwd git worktree 的 workarounds.md (fallback to script-derived)."""
-    return _detect_root() / "docs/internal/workarounds.md"
+    root = _detect_root()
+    wd = _ledger_in(root)
+    return wd if wd is not None else root / LEDGER_REL
 
 
 # Backward-compat: 外部代码可能 import JHYY_ROOT / DEFAULT_PATH
@@ -225,7 +242,7 @@ _detect_root_cache: dict = {"value": None, "time": 0.0}
 _DETECT_CACHE_TTL = 60.0
 
 JHYY_ROOT = _detect_root()
-DEFAULT_PATH = JHYY_ROOT / "docs/internal/workarounds.md"
+DEFAULT_PATH = JHYY_ROOT / LEDGER_REL
 
 # 字段 alias 表: canonical_field → [alias1, alias2, ...]
 # workarounds.md 实际混用中英, 解析时按列表顺序匹配
@@ -396,7 +413,7 @@ def search(query: str, status: Optional[str] = None, path: Optional[Path] = None
         status: 可选过滤 5-state enum: "ACTIVE" / "RESOLVED" / "SUPERSEDED" / "DEFERRED" / "INVALID"
                 v2.13.6 mini 起严格 token match (不再是 substring), 避免 W-051 RESOLVED
                 但 body 写 "强标 ACTIVE 不解决任何 active 问题" 的误分类.
-        path: 可选 workarounds.md 路径 (默认 = cwd git worktree 的 docs/internal/workarounds.md,
+        path: 可选 workarounds.md 路径 (默认 = cwd git worktree 的 docs/workarounds.md,
               v2.13.6 mini worktree 探测; fallback to script parents[1])
 
     Returns:

@@ -496,7 +496,7 @@ cap_offsets 位图与 type_tag allowlist。
 > **「内核不实现语言，但为语言提供可证明使用的运行时契约」。**
 
 （原「5 原则」全文见
-[`docs/abis/jhyy-binary-format-v1.0.0.md` § 2](../abis/jhyy-binary-format-v1.0.0.md#2-capability-abi)
+[`docs/abis/jhyy-binary-format-v1.0.0.md` § 2](../abis/jhyy-binary-format-v1.0.0.md#2-约束从已锁-d-locks-推导)
 的「5 原则」一条 —— 那批 OS 侧原设计文档已于 2026-10-30 删除，原则原文留在 binary-format 里。）
 
 这条边界既避免内核承担类型推导，也避免语言把全局硬件状态假装成纯函数。

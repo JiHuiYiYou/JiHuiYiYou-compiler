@@ -169,7 +169,7 @@ jobs:
           # 并打 warning 说「CI 编出的编译器行为与发布的不同(W-117)」。那句话是
           # **错的**:W-117 已于 2026-10-18 闭合(根因 = IL lexer 在 EOF 处无守卫,
           # `lex_peek_byte` 无 `cur < end` 边界检查 + `lex_next_byte` 在 EOF 不推进
-          # cur),该症状在受控 A/B 下不复现 —— 见 docs/internal/workarounds.md。
+          # cur),该症状在受控 A/B 下不复现 —— 见 docs/workarounds.md。
           #
           # 现在:**不换回产物**。回归门测的就是本 job 刚编出来的这份,也就是
           # **当前源码**编出来的编译器。改 src0 引入的语义回归,201 个测试

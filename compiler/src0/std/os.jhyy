@@ -31,7 +31,7 @@
 //   jh_os_open / jh_os_close / jh_os_read / jh_os_write / jh_os_exit
 // 签名跟下面的 std_os_* **1:1 对齐**,jhyy 侧零宽度转换。
 //
-// ⚠️ 方向张力(必记,见 docs/internal/workarounds.md W-103):
+// ⚠️ 方向张力(必记,见 docs/workarounds.md W-103):
 // 这 5 个 bridge 让 jhyy 程序**又依赖 C runtime**,与 M5「删 C runtime /
 // 0-C 闭环」方向相反。取舍:std_os_* 是 POSIX 语义层,OS kernel M11 launch
 // 之前由 host libc 兑现最省事。真要 0-C 时,换掉的是 bridge 的**实现**

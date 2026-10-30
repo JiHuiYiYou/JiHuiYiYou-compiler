@@ -146,6 +146,11 @@ python scripts/dev/audit_test_assertions.py --strict   # 断言强度审计(挂 
 - **≤ 200 行 / sprint 是软指标**：超了先看是不是真有重复代码，没有就 ship，别为凑数牺牲可读性。〔`feedback_file_size_relaxed`〕
 - **重构 docs 要逐条 fact-check**：这条限制还存在吗？对应 sprint 已经 ship 了吗？措辞过时吗？换实现路径（换 backend / 换算法）后，**旧文档里关于该路径的「已修复 / 已支持」全部要重新核一遍**（2026-10-15 复核 v1.3 的「浮点比较已支持」就是漏网）。docs-only commit 不用跑 regress，但**必须核对内容** —— 内容错的 doc 比 stale doc 更糟。〔`feedback_doc_refactor_factcheck`〕
 - **会变的数字只写在 `docs/FACTS.md`**，其它文档引用、不复述 —— 复述就是下一个漂移源。〔`feedback_facts_single_source`〕
+- **设计文档不留「待拍板台账」** —— 遇到设计分歧**按事实定稿**：源码 / 规范 / 门脚本能查的就去查，
+  把结论**写进对应的设计章节**，不留「待拍板 / 待确认」的清单条目。
+  只有**事实本身缺失**（不是设计未定）才列出来，且每项要有**归属槽 / 产出物 / 阻塞谁**
+  ⇒ **不留无主的待确认清单**。（2026-10-30：coordination 两份终版的 D1–D12 台账按此整体消除；
+  「事实缺口」清单里的 7 项当时就被这些决定一并回答了。）
 - **两份 README 必须同步改**（`README.md` / `README.zh-CN.md`）—— 门面分叉比内容旧更糟。
 
 ### 台账（docs/workarounds.md）纪律

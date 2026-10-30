@@ -33,7 +33,7 @@
 // NOTE: nested struct (Outer { inner: Inner }) is covered by
 // compiler/tests/examples/nested_struct_dwarf.jhyy (per v1.7.3 patch A7, deferred
 // to v1.8 due to W-061 nested struct field offset bug discovered during patch ship;
-// see docs/internal/workarounds.md W-061 🟡 DEFERRED v1.8 + W-019 ✅ RESOLVED 2026-08-14).
+// see docs/workarounds.md W-061 🟡 DEFERRED v1.8 + W-019 ✅ RESOLVED 2026-08-14).
 //
 // Run:
 //   jhyy.exe compile gdb_pretty_test.jhyy -o gdb_pretty_test

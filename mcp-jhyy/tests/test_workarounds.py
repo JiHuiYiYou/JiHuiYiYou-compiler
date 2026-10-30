@@ -121,7 +121,7 @@ async def test_workarounds_total_matches_index_table(mcp_client):
     import re
     from pathlib import Path
 
-    ledger = Path(__file__).resolve().parents[2] / "docs/internal/workarounds.md"
+    ledger = Path(__file__).resolve().parents[2] / "docs" / "workarounds.md"
     text = ledger.read_text(encoding="utf-8")
     index_rows = len(re.findall(r"^\| \[W-", text, re.M))
 

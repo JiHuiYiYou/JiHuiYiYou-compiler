@@ -4,7 +4,7 @@
 // where codegen passed match-result type instead of subject type to
 // cg_match_pattern, breaking short-name form (long-name `Option::Some(v)`
 // has pe->type_sym set so was unaffected). See codegen.jhyy:3468 fix +
-// docs/internal/workarounds.md W-063 + docs/logs/v1/changelog-v1.8.0.md §
+// docs/workarounds.md W-063 + docs/logs/v1/changelog-v1.8.0.md §
 // v1.8.3.2 patch.
 
 type Option = enum { Some(i32), None }

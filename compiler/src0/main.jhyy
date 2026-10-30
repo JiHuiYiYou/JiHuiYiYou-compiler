@@ -1335,7 +1335,7 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     // jhyy_helpers.c (no C runtime bridge) and adds `-nostartfiles
     // -nodefaultlibs -Wl,--entry=main -lgcc`.
     //
-    // 2026-10-24 真修(W-124;台账见 docs/internal/workarounds.md):
+    // 2026-10-24 真修(W-124;台账见 docs/workarounds.md):
     // 原来这里写的是 `-Wl,--entry=main_jhyy`,注释还宣称「codegen 把用户的
     // `fn main` 发成 `main_jhyy`」—— **代码从来没这么做过**:codegen 按函数名
     // 原样发符号,用户的 `fn main` 就是 `main`。于是 no_std 程序 100% 链不过:
@@ -1437,7 +1437,7 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
         // v1.5.6 W-042: mirror run_qbe pattern (:684-686) — print actual gcc
         // cmd_buf so user can distinguish CreateProcessA fail (gcc not
         // found, return -1) from gcc exit != 0 (link error). See
-        // docs/internal/workarounds.md § W-042.
+        // docs/workarounds.md § W-042.
         jh_fputs_stderr("gcc link failed: " as *u8);
         jh_fputs_stderr(invoke_buf as *u8);
         jh_fputs_stderr("\n" as *u8);
@@ -1445,7 +1445,7 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
         // error message is visible. Without this, gcc errors bypass the
         // parent's stderr (cmd.exe /c '2>&1' only redirects cmd.exe's own
         // stderr, not the child's) and the user sees "gcc link failed" with
-        // no explanation. See docs/internal/workarounds.md § W-045.
+        // no explanation. See docs/workarounds.md § W-045.
         if captured != (0 as *u8) {
             let c0 = (*captured);
             if c0 != (0 as i32) {
