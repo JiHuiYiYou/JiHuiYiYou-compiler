@@ -8,7 +8,7 @@
 | 文档 | 内容 | 状态 |
 |------|------|------|
 | [`self-backend-perf-plan.md`](self-backend-perf-plan.md) | **当前主线** —— 自研后端性能线(v4.2 / v4.4 / v4.5) | 🔴 进行中 |
-| [`version-schedule.md`](version-schedule.md) | **版本号唯一权威** —— 「下一个版本做什么」在这里;**§ 五 = OS 线(P0–P4.5)接入版本轴** | 🔴 进行中 |
+| [`version-schedule.md`](version-schedule.md) | 历史排期轴 —— v4.0.x 已 ship 的逐版记录(§ 三)+ 版本表(§ 四 / § 五.3);⚠️ **§ 一 / § 二是 2026-10-18 的旧快照**,读前先核对现状 | ⚪ 半归档 |
 | `active-workaround-clearance.md` | ACTIVE 桶清零的审计轨迹(2026-10-20 已完成,ACTIVE=0) | ⚪ 留档 |
 | `JHYY自研后端pass查缺报告.md` | 2026-10-25 的 pass 查缺报告(部分结论已被 2026-10-29 实测推翻) | ⚪ 留档 |
 | `v4.0.0-plan.md` … `v4.0.7-plan.md` | 已 ship 的 sprint 记录,**保留为审计轨迹,不合并** | ⚪ 留档 |

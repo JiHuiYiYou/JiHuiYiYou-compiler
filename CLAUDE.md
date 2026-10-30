@@ -72,8 +72,8 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 |------|------|
 | 了解项目现在到哪、有什么限制 | 顶部 § 当前/目标 → [`workarounds.md`](docs/internal/workarounds.md)（当前限制）+ [`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md)（最新 ship） |
 | 想看 v0.x（C 编译器）整体还有什么没完成 | [`v0.x-c-compiler-roadmap.md`](docs/plans/roadmap/v0.x-c-compiler-roadmap.md)（已 frozen） |
-| 知道下一步做什么 | [`version-schedule.md`](docs/plans/v4/version-schedule.md)(**版本轴排期,入口在这**)→ 当前主线 [`self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md) → **每格的详细 scope 见 `docs/plans/v4/v4.X.Y-plan.md` 系列**(索引在 [`docs/plans/v4/README.md`](docs/plans/v4/README.md))
-| 起 v4.x 新 sprint | [`self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)(v4.2 起的主线)→ **对应版本的 `v4.X.Y-plan.md`**(已预建,含验收门 / 启动时复核清单)→ 未排期工作的清单见 [`version-schedule.md`](docs/plans/v4/version-schedule.md) § 四 + **§ 五(OS 线接入版本轴)** |
+| 知道下一步做什么 | **每格一份 `docs/plans/v4/v4.X.Y-plan.md`**(索引在 [`docs/plans/v4/README.md`](docs/plans/v4/README.md))—— 下一个版本 = 表里第一格未完成的;当前主线 [`self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)
+| 起 v4.x 新 sprint | **对应版本的 `v4.X.Y-plan.md`**(已预建,含验收门 / 启动时复核清单)→ 当前主线 [`self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)(v4.2 起) |
 | 改编译器 / 排 bug | [`architecture.md`](docs/internal/architecture.md) 看模块边界 → [`build.md`](docs/internal/build.md) 看构建 + 调试坑 |
 | 改语言规范 / ABI | [`jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) / [`jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) |
 | 查 v2/v3 历史决策 | [`docs/archive/v2-v3/`](docs/archive/v2-v3/) (v2-v3-parallel-sprint-plan.md + v2.0.0-os-prep.md 已归档,2026-09-29 user FINAL 决定作废) |
@@ -162,7 +162,7 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 
 下一阶段: **v4.4 = 寄存器分配**(自研后端性能线,2026-10-29 user 拍板)——
 见 [`docs/plans/v4/self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)
-(版本号权威在 [`version-schedule.md`](docs/plans/v4/version-schedule.md))。
+(该版的详细 scope 在 [`docs/plans/v4/v4.4.0-plan.md`](docs/plans/v4/v4.4.0-plan.md))。
 v4.2.0 / v4.2.1 ✅ 已完成;**v4.2.2 / v4.3.0 已降级**(实测性能价值 ≈0,见下);
 **v4.4.0 阶段一(寄存器分配器 + 安全网,产物逐字节不变)✅ 已完成** ——
 下一步是阶段二(emit 层消费寄存器)。
@@ -439,9 +439,11 @@ W-118 是同一天做 W-117 RCA 时发现的**另一处**同款缺陷(`lex_peek_
 - ⚠️ **OS 侧原 M1–M11 依赖图已作废**(`v2.0.0-os-prep.md` 2026-09-30 归档;OS 侧原
   `coordination.md` 的 Critical Path 2026-10-30 一并删除)⇒ **新 OS 路线图待设计**
 - 🔄 **OS 线(P0–P4.5)已接入本仓版本轴** —— 2026-10-30 起不再是一套独立的轴:
-  映射表在 [`docs/plans/v4/version-schedule.md`](docs/plans/v4/version-schedule.md)
-  **§ 五「OS 线接入版本轴」**(OS-1..OS-16,对应 v4.6 起)。
+  映射表(OS-1..OS-16,对应 v4.6 起)在
+  [`docs/coordination/JHYY_编译器侧设计终版.md`](docs/coordination/JHYY_编译器侧设计终版.md) § 3.4
+  与 [`docs/coordination/JHYY_OS侧设计终版.md`](docs/coordination/JHYY_OS侧设计终版.md) § 11,
+  每格另有 `docs/plans/v4/v4.X.Y-plan.md`。
   ⚠️ **它与性能线不是「并行正交」,而是被切成两段**:P2 的「linear scan 寄存器
   分配」**就是 v4.4**(性能线主线本身),P2 的另一半(全程序栈分析 + 链接断言)
-  落在 v4.7。**三个硬接口见 `version-schedule.md` § 五.5** —— 其中两条必须在
+  落在 v4.7。**三个硬接口见 `JHYY_编译器侧设计终版.md` § 3.3** —— 其中两条必须在
   **v4.4.0 阶段二**同期落地(排除 volatile temp;禁 XMM 溢出 / 禁 red zone)

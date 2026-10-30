@@ -15,7 +15,7 @@
 > `JHYY_待拍板设计.md` · `JHYY_设计自审_对照K框架.md` · `JHYY_OS_内核模型与语言需求.md`（OS 部分）。
 >
 > **版本号是预留号** —— 每格启动时按实际状态复核；稳定身份是 `OS-N` 序号
-> （见 [`../plans/v4/version-schedule.md`](../plans/v4/version-schedule.md) § 五）。
+> （见 [`../plans/v4/README.md`](../plans/v4/README.md) 的版本系列索引）。
 
 ---
 
@@ -202,24 +202,25 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 
 ### 3.4 与版本轴的对应
 
-版本轴权威在 [`../plans/v4/version-schedule.md`](../plans/v4/version-schedule.md) § 五.3。
+每格落在哪个版本，见 [`../plans/v4/README.md`](../plans/v4/README.md) 的版本系列索引；
+该格的详细 scope 在对应的 `v4.X.Y-plan.md` 里。
 `OS-N` 是跨版本重排时**不变**的稳定身份。
 
-| 阶段 | 版本（预留号） | 序号 | 主题 |
-|---|---|---|---|
-| P0 | **v4.6** | OS-1 | 止血包 |
-| P0.5 | **v4.7** | OS-2 | 观测（栈上界） |
-| P1 | **v4.8** | OS-3 | 反馈环（最小 kernel.efi） |
-| P2 | **v4.8.5** | OS-4 | 栈与分配 |
-| P2.5 | **v4.9** | OS-5 | ABI 收敛 |
-| P3 | **v4.10** | OS-6 | 语言自洽 |
-| P2.75 | **v4.10.5** | OS-7 | 效果最小集 |
-| — | v4.11 / v4.12 / v4.12.3 / v4.12.5 | OS-8..OS-11 | lifetime / trait / const generic / HKT |
-| P3.5 | **v4.13** | OS-12 | 效果骨架 |
-| P4a | **v4.13.5** | OS-13 | 对象模型冻结 |
-| P4b | **v4.14** | OS-14 | 能力类型化 |
-| P4c | **v4.14.5** | OS-15 | 内核数据结构 |
-| P4.5 | **v4.15** | OS-16 | 可信工具链 |
+| 阶段 | 版本（预留号） | 序号 | 主题 | 系列文档 |
+|---|---|---|---|---|
+| P0 | **v4.6** | OS-1 | 止血包 | [`v4.6-plan.md`](../plans/v4/v4.6-plan.md) |
+| P0.5 | **v4.7** | OS-2 | 观测（栈上界） | [`v4.7-plan.md`](../plans/v4/v4.7-plan.md) |
+| P1 | **v4.8** | OS-3 | 反馈环（最小 kernel.efi） | [`v4.8-plan.md`](../plans/v4/v4.8-plan.md) |
+| P2 | **v4.8.5** | OS-4 | 栈与分配 | [`v4.8.5-plan.md`](../plans/v4/v4.8.5-plan.md) |
+| P2.5 | **v4.9** | OS-5 | ABI 收敛 | [`v4.9-plan.md`](../plans/v4/v4.9-plan.md) |
+| P3 | **v4.10** | OS-6 | 语言自洽 | [`v4.10-plan.md`](../plans/v4/v4.10-plan.md) |
+| P2.75 | **v4.10.5** | OS-7 | 效果最小集 | [`v4.10.5-plan.md`](../plans/v4/v4.10.5-plan.md) |
+| — | v4.11 / v4.12 / v4.12.3 / v4.12.5 | OS-8..OS-11 | lifetime / trait / const generic / HKT | [`v4.11`](../plans/v4/v4.11-plan.md) / [`v4.12`](../plans/v4/v4.12-plan.md) / [`v4.12.3`](../plans/v4/v4.12.3-plan.md) / [`v4.12.5`](../plans/v4/v4.12.5-plan.md) |
+| P3.5 | **v4.13** | OS-12 | 效果骨架 | [`v4.13-plan.md`](../plans/v4/v4.13-plan.md) |
+| P4a | **v4.13.5** | OS-13 | 对象模型冻结 | [`v4.13.5-plan.md`](../plans/v4/v4.13.5-plan.md) |
+| P4b | **v4.14** | OS-14 | 能力类型化 | [`v4.14-plan.md`](../plans/v4/v4.14-plan.md) |
+| P4c | **v4.14.5** | OS-15 | 内核数据结构 | [`v4.14.5-plan.md`](../plans/v4/v4.14.5-plan.md) |
+| P4.5 | **v4.15** | OS-16 | 可信工具链 | [`v4.15-plan.md`](../plans/v4/v4.15-plan.md) |
 
 **v4.6(OS-1) 有一条硬前置**：实参类型检查会让「整数实参传给指针形参」这类代码**编译失败**
 ⇒ 必须**先统计** `src0` 自身有多少处实参类型不符（自举是硬门），再决定报错口径
@@ -857,7 +858,7 @@ struct CapContract {
 | [`../abis/jhyy-lang-spec-v4.0.0.md`](../abis/jhyy-lang-spec-v4.0.0.md) | 语言规范（锁定 2026-10-24） |
 | [`../abis/jhyy-abi-v4.0.0.md`](../abis/jhyy-abi-v4.0.0.md) | ABI 白皮书（锁定 2026-10-24）· §12 已知偏离 |
 | [`../abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) | `.jhyynb` 二进制格式（**设计稿，未实装**） |
-| [`../plans/v4/version-schedule.md`](../plans/v4/version-schedule.md) | **版本轴权威** · § 五 OS 线（OS-1..OS-16） |
+| [`../plans/v4/README.md`](../plans/v4/README.md) | **版本系列索引** —— 每个版本槽一份 `v4.X.Y-plan.md`（性能线 6 + OS 线 16） |
 | [`../plans/v4/self-backend-perf-plan.md`](../plans/v4/self-backend-perf-plan.md) | v4.2+ 自研后端性能线（v4.4 寄存器分配） |
 | [`../internal/workarounds.md`](../internal/workarounds.md) | W-NNN 台账（ACTIVE = 0） |
 | [`../internal/build.md`](../internal/build.md) | 构建 / 调试 / self-backend 坑 |
