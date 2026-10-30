@@ -97,8 +97,8 @@ v4.x 是 v2.x + v3.x axes merge 后的主版本轴 — **integration axis**,不�
 ## v4.0 阶段当前状态
 
 - **v4.1.2 已发布**(2026-10-29)—— 当前最新 release
-- **台账 ACTIVE = 0 / DEFERRED = 0**(2026-10-27 复核)
-- **回归** 257 PASS + 0 XFAIL + 0 failed + 20 SKIP(277 total)
+- **台账 ACTIVE = 1 / DEFERRED = 0**(2026-10-30 复核 —— 唯一 ACTIVE = **W-170**:`jhyy build` 不处理 `#[link_section]`)
+- **回归** 259 PASS + 0 XFAIL + 0 failed + 20 SKIP(279 total)
 - **v4.2 已完成**:v4.2.0 可信性能门 · v4.2.1 帧尺寸按需(W-167)
 - **v4.4.0 阶段一已完成**:寄存器分配器基础设施 + 安全网(默认关,产物逐字节不变)
 

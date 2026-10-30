@@ -2,8 +2,8 @@
 
 > 集成测试清单 + 运行方法。详细每条 .jhyy 的预期值见 `compiler/tests/examples/`。
 >
-> **Last updated**: 2026-10-27 — `regress.py` = **257 PASS + 0 XFAIL + 0 failed + 20 SKIP**
-> (277 total)。`closure_check.sh` v2.s == v3.s byte-identical。
+> **Last updated**: 2026-10-30 — `regress.py` = **259 PASS + 0 XFAIL + 0 failed + 20 SKIP**
+> (279 total)。`closure_check.sh` v2.s == v3.s byte-identical。
 > 本机 Docker 已起 → `--cross=auto` 解析成 **docker**,6 个 sysv 用例**本地也真跑**
 > (exit=28/217/42/35/18/42 全对)。
 >
@@ -45,16 +45,20 @@ python scripts/dev/audit_test_assertions.py --strict   # 有违规 exit 1(挂 CI
 `generics_enum.jhyy` 骗过(它有 `//EXPECT:42` 而 main 是字面 `return 42`)。
 判据是「`main_jhyy` 的返回值是否从被测表达式推导」。
 
-2026-10-15 终值(197 个 `.jhyy`,可跑 173):
+2026-10-30 终值(279 个 `.jhyy`,可跑 259):
 
 | 分类 | 数量 | 实际验了什么 |
 |---|---|---|
-| **真断言**(`real` + `out-asserted`) | **193** | 结果正确 |
+| **真断言**(`real` + `out-asserted`) | **200** | 结果正确 |
 | `literal-return-ok` | 8 | 合理例外:`exit_zero_extend_*` + `hello`,被测对象就是退出码 |
-| `expect-error` | 44 | 编译必须失败且 stderr 含关键字 |
-| `xfail` | 3 | 预期内失败(真跑;修好 ⇒ XPASS ⇒ suite 红)—— `spec_shadowing.jhyy`(W-142)/`spec_ptr_float_cast.jhyy`(W-143)/`spec_struct_array_field.jhyy`(W-144) |
+| `expect-error` | 51 | 编译必须失败且 stderr 含关键字 |
+| `xfail` | **0** | 曾有 3 个(`spec_shadowing.jhyy` W-142 / `spec_ptr_float_cast.jhyy` W-143 / `spec_struct_array_field.jhyy` W-144)⇒ 三条全真修后**转真门**,XFAIL 桶归零 |
 | `skipped` | 6 | `// SKIP:` |
 | `library` | 14 | 无 `fn main_jhyy` |
+
+> ⚠️ 本表 2026-10-30 之前一直是 2026-10-15 的快照(197 / 173 / 193 / 44 / 3)——
+> 其中 `真断言 193 > 可跑 173` **自相矛盾**(真断言不可能多于可跑的),且 `xfail 3`
+> 在三条真修后早就该归零。数字已按 `audit_test_assertions.py` 实测刷新。
 
 **零信号合计 0。** 曾是 54(43 个只验没崩 + 11 个有 EXPECT 但不可能失败),
 2026-10-15 全部改成真断言。
@@ -62,7 +66,7 @@ python scripts/dev/audit_test_assertions.py --strict   # 有违规 exit 1(挂 CI
 regress 汇总行现在**只计有断言的**:
 
 ```
-===== 186/186 passed (全部有断言), 0 failed, 19 skipped (of 205 total) =====
+===== 259/259 passed (全部有断言), 0 failed, 20 skipped (of 279 total) =====
   ├─ NOASSERT 0  无断言,只验了「进程没崩」
   ├─ VACUOUS  0  有 EXPECT 但断言在数学上不可能失败
   ├─ XFAIL    0  预期内失败(已知 bug,真跑了)
@@ -291,7 +295,8 @@ baseline 历史:
 - v4.0.8 — 173/173 PASS + 5 XFAIL + 19 SKIP(197 total)
 - v4.0.16 — 181/181 PASS + 2 XFAIL + 20 SKIP(203 total)
 - v4.0.20 — 186/186 PASS + 0 XFAIL + 19 SKIP(205 total)
-- **v4.0.22 — 257 PASS + 0 XFAIL + 0 failed + 20 SKIP(277 total)** ← 当前(2026-10-27 实测;lang-spec 覆盖审计补 49 条门 + W-143/144 真修再 +1 条 `spec_int_to_float.jhyy` + W-142/150/151/152 真修再 +7 条;3 个 XFAIL 全转真门 ⇒ **套件 XFAIL 归零**)
+- **v4.0.22 — 257 PASS + 0 XFAIL + 0 failed + 20 SKIP(277 total)** ← 2026-10-27 实测;lang-spec 覆盖审计补 49 条门 + W-143/144 真修再 +1 条 `spec_int_to_float.jhyy` + W-142/150/151/152 真修再 +7 条;3 个 XFAIL 全转真门 ⇒ **套件 XFAIL 归零**
+- **当前(2026-10-30 实测)—— 259 PASS + 0 XFAIL + 0 failed + 20 SKIP(279 total)** ← 相对上一行 +2:`logical_nested.jhyy`(W-169 退役补门)+ `spec_err_enum_multi_payload.jhyy`(lang-spec 附录 D 修正 ⇒ enum 变体只支持单 payload 这条限制进附录 B 并配门)
 
 ⚠️ 数量涨了不代表覆盖变强。**断言强度**和**失败模式覆盖**是两个轴:
 前者今天清零了(零信号 54 → 0),后者仍然低 —— 一个没有测试的 bug,

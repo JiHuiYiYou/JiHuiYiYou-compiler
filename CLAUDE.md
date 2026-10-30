@@ -348,10 +348,12 @@ MCP 套件 **46 passed / 1 skipped**。
 | W-134 | ~~MCP pytest 套件里有一个**恒红**的陈旧测试~~ ✅ **2026-10-25 已修** —— `test_regress_baseline_drift_detection` 断言「sha 漂移 ⇒ 报 binary drifted」,但那个行为已被上一轮 commit `f72cef4` 刻意换成「binary 比源旧」的新鲜度检查 ⇒ **从那次起套件就是红的**,而 CI 从不跑 pytest ⇒ 没人发现。修法:拆成两条 —— `test_regress_sha_drift_is_not_fatal`(漂移**不**误报)+ `test_regress_stale_binary_detected`(binary 比源旧 ⇒ early_abort `older than source`)。**套件 40 passed / 1 skipped / 0 failed** |
 | W-134.1 | **DEFERRED** —— `mcp-jhyy/tests/`(41 个测试)在 CI 里**零覆盖**(`ci.yml` 没有 pytest step,也没有任何 `pip install`)⇒ 套件红绿都不影响 CI 结论。补 CI step 需要**第一个网络依赖**(fastmcp / pytest / pytest-asyncio),而本机 MSYS2 python 连 pip 都没有 ⇒ 命令**无法本地验证** ⇒ 建议单独一个 commit + 先在 PR 分支观察一轮 |
 
-**回归现状(2026-10-30 实测,W-168 真修 + W-169 退役后):258 PASS + 0 XFAIL + 0 failed + 20 SKIP(278 total)**
+**回归现状(2026-10-30 实测,W-168 真修 + W-169 退役后 + lang-spec 附录 D 修正):259 PASS + 0 XFAIL + 0 failed + 20 SKIP(279 total)**
 (相对 2026-10-27 的 257 PASS / 277 total,新增的是 `logical_nested.jhyy` ——
 W-169 退役「禁嵌套短路」约定时补的**嵌套短路行为门**;
-同批还新增 `artifact_checks.sh build_o_flag`(W-168 的 CLI 门))
+同批还新增 `artifact_checks.sh build_o_flag`(W-168 的 CLI 门);
+再 +1 条 `spec_err_enum_multi_payload.jhyy` —— lang-spec 附录 D 的「完全可编译的一个程序」
+**原先编译不过**(enum 变体只支持单 payload)⇒ 该限制已进规范附录 B 并配门锁住)
 (2026-10-27 那次新增 49 条门:6 个 std lib 真身覆盖 + 11 个 spec 正向行为 + 31 个错误诊断门 +
 1 个聚合比较字段类型矩阵;第二轮再 +1 条 `spec_int_to_float.jhyy`(W-149 的 8 组合矩阵);
 `spec_ptr_float_cast.jhyy`(W-143)/ `spec_struct_array_field.jhyy`(W-144)两个 XFAIL

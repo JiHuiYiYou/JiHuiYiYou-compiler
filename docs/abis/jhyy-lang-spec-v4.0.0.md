@@ -569,6 +569,7 @@ let none_val = Option::None;
 
 - tag 为 `i32`，从 0 起按声明顺序分配。
 - 变体可带 payload，也可为 nullary。
+- ⚠️ **一个变体最多带一个 payload** —— `Rect(i32, i32)` 是解析错误（`expected ), got ,`）。要装多个字段，把 payload 换成 struct —— 见[附录 B](#附录-b未实装--已实装但受限)。
 - 布局算法见 [ABI § 2.4](./jhyy-abi-v4.0.0.md#24-enum-布局)。
 - 配合 `match` 做穷尽性检查（[§ 5.6](#56-match)）。
 
@@ -1012,6 +1013,7 @@ type ErrChain = struct {
 | **聚合的大小比较未实装** | `a < b` / `a >= b`(struct / enum / 数组 / 切片)编译期报错(`ordering comparison is not supported for struct/enum/array/slice types`)—— 聚合的大小比较无定义 | **W-133.2** |
 | **struct 字面量的字段值类型必须精确匹配字段类型** | `type P = struct { c: u8 }` 写 `P { c: 7 }` 报 `field type mismatch` —— 整数字面量默认推断为 `i32`,与 `u8` 不相等。须写成 `let c: u8 = 7;` 再 `P { c: c }` | **W-133.3** |
 | **struct 字面量省略的字段未初始化** | 编译器不报「缺字段」错误，但缺失字段的值是**栈上的未初始化垃圾**，**不是 0**（毒化栈后实测 y=0 / z=garbage，每次可能不同） | — |
+| **enum 变体最多只能带一个 payload** | `type S = enum { R(i32, i32) }` 编译期报错（`expected ), got ,`）—— 变体声明的括号里只能跟**一个**类型。要装多个字段，把 payload 换成 struct（`R(PRect)`；已由 `agg_eq_enum.jhyy` 覆盖）。**门**：`spec_err_enum_multi_payload.jhyy` | — |
 | **不可变性的写保护未实装** | 编译器不检查取地址对象是否可变；`&x` 对不可变绑定合法，`*p = v` 不报错也**不生效** | — |
 | **函数实参类型不检查** | `f(5)` 传给 struct 形参能编译，运行时按 struct 布局读寄存器 → **访问违例崩溃** | — |
 | 借用检查只覆盖「同作用域内双 `&mut`」 | 词法作用域会误报「借用提前结束」的情况尚未处理 | — |
@@ -1044,8 +1046,8 @@ type ErrChain = struct {
 import vec;
 
 type Shape = enum {
-    Circle(i32),
-    Rect(i32, i32),
+    Circle(i32),     // 半径
+    Rect(i32),       // 面积（变体只带一个 payload —— 见附录 B）
     Empty,
 }
 
@@ -1057,7 +1059,7 @@ type Point = struct {
 fn area(s: Shape) -> i32 {
     match s {
         Shape::Circle(r) => 3 * r * r,
-        Shape::Rect(w, h) => w * h,
+        Shape::Rect(a) => a,
         Shape::Empty => 0,
     }
 }
@@ -1075,7 +1077,7 @@ fn main_jhyy() -> i32 {
     defer cleanup();
 
     let p = Point { x: 3, y: 4 };
-    let s = Shape::Rect(p.x, p.y);
+    let s = Shape::Rect(p.x * p.y);
     let a = area(s);
 
     let f = |n: i32| { n * 2 };
@@ -1086,6 +1088,12 @@ fn main_jhyy() -> i32 {
     return m;   // 100
 }
 ```
+
+> **可编译性已核**（2026-10-30）：本例**逐字**编译 + 运行 ⇒ `EXIT=100`，与末行注释一致。
+> ⚠️ 此前本例的 `Rect(i32, i32)` 编译不过（首个错误在**变体声明处**：`expected ), got ,`；
+> 顺带在 match 模式处报 `expected ) after enum pattern, got ,`、在构造处报 `expected ), got ,`）——
+> enum 变体只支持**一个** payload（§ 9 + 附录 B），已按此改正。
+> 该限制另有一道门锁住：`compiler/tests/examples/spec_err_enum_multi_payload.jhyy`。
 
 ---
 

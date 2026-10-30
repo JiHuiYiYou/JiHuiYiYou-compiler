@@ -1,0 +1,24 @@
+// spec_err_enum_multi_payload.jhyy — spec §9 / 附录 B:enum 变体最多只能带一个 payload
+//
+// 覆盖缺口(2026-10-30 lang-spec 附录 D 修正时挖出):规范附录 D 的「完全可编译的一个程序」
+// 原本写 `Rect(i32, i32)`,**实测编译不过** ——
+//
+//   type Shape = enum { Circle(i32), Rect(i32, i32), Empty }
+//                                        ^^^^^^^^^^^^ error: expected ;, got )
+//
+// ⇒ 变体声明的括号里只能跟**一个**类型。这条限制原先**既没进规范附录 B、也没有门**,
+// 读者只会以为编译器坏了(而不是「这是当前的能力边界」)。
+//
+// 现在:规范 §9 加了规范性约束、附录 B 加了受限条目,本门把它锁住 ——
+// 将来编译器支持多 payload 时,本门会翻红(XPASS),**逼着规范同步更新**。
+//
+// 多字段的绕法 = 把 payload 换成 struct(`R(PRect)`),已由 `agg_eq_enum.jhyy` 覆盖。
+//
+// EXPECT-ERROR: "expected ), got ,"
+type Shape = enum {
+    Rect(i32, i32),
+}
+
+fn main_jhyy() -> i32 {
+    return 0;
+}
