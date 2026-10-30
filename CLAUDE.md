@@ -72,8 +72,8 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 |------|------|
 | 了解项目现在到哪、有什么限制 | 顶部 § 当前/目标 → [`workarounds.md`](docs/internal/workarounds.md)（当前限制）+ [`docs/logs/v4/changelog-v4.0.0.md`](docs/logs/v4/changelog-v4.0.0.md)（最新 ship） |
 | 想看 v0.x（C 编译器）整体还有什么没完成 | [`v0.x-c-compiler-roadmap.md`](docs/plans/roadmap/v0.x-c-compiler-roadmap.md)（已 frozen） |
-| 知道下一步做什么 | [`version-schedule.md`](docs/plans/v4/version-schedule.md)(**版本轴排期,入口在这**)→ 当前主线 [`self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)
-| 起 v4.x 新 sprint | [`self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)(v4.2 起的主线)→ 未启动工作的清单见 [`version-schedule.md`](docs/plans/v4/version-schedule.md) § 四 + **§ 五(OS 线接入版本轴)** |
+| 知道下一步做什么 | [`version-schedule.md`](docs/plans/v4/version-schedule.md)(**版本轴排期,入口在这**)→ 当前主线 [`self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md) → **每格的详细 scope 见 `docs/plans/v4/v4.X.Y-plan.md` 系列**(索引在 [`docs/plans/v4/README.md`](docs/plans/v4/README.md))
+| 起 v4.x 新 sprint | [`self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md)(v4.2 起的主线)→ **对应版本的 `v4.X.Y-plan.md`**(已预建,含验收门 / 启动时复核清单)→ 未排期工作的清单见 [`version-schedule.md`](docs/plans/v4/version-schedule.md) § 四 + **§ 五(OS 线接入版本轴)** |
 | 改编译器 / 排 bug | [`architecture.md`](docs/internal/architecture.md) 看模块边界 → [`build.md`](docs/internal/build.md) 看构建 + 调试坑 |
 | 改语言规范 / ABI | [`jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) / [`jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) |
 | 查 v2/v3 历史决策 | [`docs/archive/v2-v3/`](docs/archive/v2-v3/) (v2-v3-parallel-sprint-plan.md + v2.0.0-os-prep.md 已归档,2026-09-29 user FINAL 决定作废) |
@@ -155,7 +155,8 @@ fixed_point 17 PASS、artifact 7 PASS、SysV 6+3、CI 全绿）。
 | L1.5 | [`v2-v3-parallel-sprint-plan.md`](docs/archive/v2-v3/v2-v3-parallel-sprint-plan.md) | ⚠️ **SUPERSEDED** — 已归档到 [`docs/archive/v2-v3/`](docs/archive/v2-v3/) (per 2026-09-30 v4.0.0 archive step) |
 | L3 | [`docs/plans/v4/active-workaround-clearance.md`](docs/plans/v4/active-workaround-clearance.md) | ✅ **已完成(2026-10-20)** —— ACTIVE 桶清零(14 → 0);文档保留作审计轨迹 |
 | L3 | [`docs/plans/v4/self-backend-perf-plan.md`](docs/plans/v4/self-backend-perf-plan.md) | 🔄 **v4.2 起的主线**(2026-10-29 立线)—— 自研后端性能线 |
-| L3 | ~~`docs/plans/v4/backlog.md`~~ | ⚠️ **已删除(2026-10-30)** —— 12 项未启动工作的僵尸排期表(依赖图已被它自己标注过期);清单现由 [`version-schedule.md`](docs/plans/v4/version-schedule.md) § 四承担 |
+| L3 | [`docs/plans/v4/v4.4.0-plan.md`](docs/plans/v4/v4.4.0-plan.md) … [`v4.15-plan.md`](docs/plans/v4/v4.15-plan.md) | 🔄 **v4.x 版本系列文档(22 份,2026-10-30 新建)** —— 每格一份,含验收门 + 启动时复核清单;**版本号是预留号**,索引见 [`docs/plans/v4/README.md`](docs/plans/v4/README.md) |
+| L3 | ~~`docs/plans/v4/backlog.md`~~ | ⚠️ **已删除(2026-10-30)** —— 12 项未启动工作的僵尸排期表(依赖图已被它自己标注过期);清单现由 [`version-schedule.md`](docs/plans/v4/version-schedule.md) § 四 + **v4.x 版本系列文档**承担 |
 
 最近完成的 sprint: **v4.1.2 shipped 2026-10-29** — 版本号自动化 + 三处「表述与实现不符」真修。
 
@@ -206,7 +207,7 @@ v4.2.0 / v4.2.1 ✅ 已完成;**v4.2.2 / v4.3.0 已降级**(实测性能价值 �
 访存数/帧大小/chkstk 次数,确定性 ⇒ 跨机器逐字节相同),**墙钟只报告** ——
 共享 runner 的宿主负载不可控。
 
-**plan 命名约定(2026-10-15 修订)**:已 ship / 进行中的 sprint 保留 `v4.X.Y-plan.md`(审计轨迹,改名会破坏跟 changelog / commit 的对应);未启动的工作与进行中的工作用描述性文件名,**不用版本号** —— 版本号在启动时才分配。
+**plan 命名约定(2026-10-15 修订;2026-10-30 第二次修订)**:已 ship / 进行中的 sprint 保留 `v4.X.Y-plan.md`(审计轨迹,改名会破坏跟 changelog / commit 的对应);**已排期的版本槽**(性能线 v4.4.0–v4.5 + OS 线 v4.6–v4.15)**预先落一份 `v4.X.Y-plan.md`**(2026-10-30 新建 22 份,索引见 [`docs/plans/v4/README.md`](docs/plans/v4/README.md))—— ⚠️ **版本号仍是「预留号」**,启动那一格时按实际状态复核(每份自带「启动时复核清单」);**稳定身份是 `OS-N` 序号**,跨版本重排时序号不变。未排期的工作(v4.16+ 那批)与进行中的工作用描述性文件名,**不用版本号**。
 历史: changelog 见 `docs/logs/v0/changelog-v0.X.Y.md` (C 编译器) + `docs/logs/v1/changelog-v1.X.Y.md` (jhyy 自举) + `docs/logs/v2/changelog-v2.*.0.md` (QBE rewrite + freestanding) + `docs/logs/v3/changelog-v3.*.md` (language expansion + self-backend) + `docs/logs/v4/changelog-v4.0.0.md` (post-merge umbrella);早期 sprint（命名 `sprint-1*.md`）同目录。
 
 ### 项目内部（`docs/internal/`）

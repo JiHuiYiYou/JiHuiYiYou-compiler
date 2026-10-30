@@ -815,19 +815,19 @@ FLAKY 分类机制」是同一条理由。
 >
 > **详细计划**:[`self-backend-perf-plan.md`](self-backend-perf-plan.md)(版本号在那份里是权威)。
 
-| 版本 | 内容 | 性质 |
-|---|---|---|
-| **v4.2.0** | 可信性能门 | ✅ **已完成** —— `runtime_perf.py` + 静态指标基线 + `bench.sh` 改入口别名 + CI 接线(墙钟只报告、静态指标硬门;**红光测试已做**) |
-| **v4.2.1** | 帧尺寸公式修复(`emit_ctrl.jhyy` 的写死 8192) | ✅ **已完成** —— 帧中位 8368→288 字节 · chkstk 1045→46 处 · 总预留栈 9.1MB→1.5MB · fib/ack jhyy/gcc-O0 3.46x/4.65x→**2.14x/2.13x** · 自举编译 -16% · 台账 W-167 |
-| ~~**v4.2.2**~~ | peephole 4096 限制真修(W-074.6.1) | ⬇️ **降级到 v4.4 之后** —— 实测 3 条规则在 407386 行真实产物上只命中 **54** 条(0.002%);真实价值是清掉一个**休眠的静默崩溃** |
-| ~~**v4.3.0**~~ | `-O0/-O1` 开关 + IR 层优化框架(常量折叠/代数化简/DCE) | ⬇️ **降级到 v4.4 之后** —— 实测三项加起来只有语料 B 的 **1.8%** 的 IL 指令(前端本来就把常量表达式在源码层算掉了) |
-| **v4.4.0** | **寄存器分配 ①**:后端加「temp → 寄存器/槽位」位置映射 + **前瞻窗口**的寄存器缓存 | ⭐ **下一个版本** —— 唯一剩下的数量级杠杆 |
-| **v4.4.1** | 寄存器分配 ②:call-clobber 处理(跨调用的值 ⇒ callee-saved 或落槽) | 这步才需要真正的活跃区间分析 |
-| **v4.4.2** | 寄存器分配 ③:跨基本块 / phi(并行移动 + 环打破) | |
-| **v4.4.3** | 寄存器分配 ④:门 + perf 验证 + `artifact_checks.sh` 4 条汇编文本断言去耦合 | |
-| **v4.4.5+** | peephole 4096 限制真修 + IR 优化框架(降级下来的两版) | |
-| **v4.5** | **M5 Part 3(0-C 闭环)** —— 唯一剩余的 M5 项 | 前置 = v4.2 + v4.4 |
-| **v4.6+** | 语言特性链(`lifetime → closure → dyn Trait → HKT`)+ async / const generic / 错误恢复 / 包管理器 / 并发 cap / `.jhyynb` | 与性能线正交,可并行 |
+| 版本 | 内容 | 性质 | 系列文档 |
+|---|---|---|---|
+| **v4.2.0** | 可信性能门 | ✅ **已完成** —— `runtime_perf.py` + 静态指标基线 + `bench.sh` 改入口别名 + CI 接线(墙钟只报告、静态指标硬门;**红光测试已做**) | [`self-backend-perf-plan.md`](self-backend-perf-plan.md) § 三 |
+| **v4.2.1** | 帧尺寸公式修复(`emit_ctrl.jhyy` 的写死 8192) | ✅ **已完成** —— 帧中位 8368→288 字节 · chkstk 1045→46 处 · 总预留栈 9.1MB→1.5MB · fib/ack jhyy/gcc-O0 3.46x/4.65x→**2.14x/2.13x** · 自举编译 -16% · 台账 W-167 | 同上 |
+| ~~**v4.2.2**~~ | peephole 4096 限制真修(W-074.6.1) | ⬇️ **降级到 v4.4 之后** —— 实测 3 条规则在 407386 行真实产物上只命中 **54** 条(0.002%);真实价值是清掉一个**休眠的静默崩溃** | ⇒ [**v4.4.5**](v4.4.5-plan.md) |
+| ~~**v4.3.0**~~ | `-O0/-O1` 开关 + IR 层优化框架(常量折叠/代数化简/DCE) | ⬇️ **降级到 v4.4 之后** —— 实测三项加起来只有语料 B 的 **1.8%** 的 IL 指令(前端本来就把常量表达式在源码层算掉了) | ⇒ [**v4.4.5**](v4.4.5-plan.md) |
+| **v4.4.0** | **寄存器分配 ①**:后端加「temp → 寄存器/槽位」位置映射 + **前瞻窗口**的寄存器缓存 | ⭐ **下一个版本** —— 唯一剩下的数量级杠杆 | [**v4.4.0-plan.md**](v4.4.0-plan.md) |
+| **v4.4.1** | 寄存器分配 ②:call-clobber 处理(跨调用的值 ⇒ callee-saved 或落槽) | 这步才需要真正的活跃区间分析 | [**v4.4.1-plan.md**](v4.4.1-plan.md) |
+| **v4.4.2** | 寄存器分配 ③:跨基本块 / phi(并行移动 + 环打破) | | [**v4.4.2-plan.md**](v4.4.2-plan.md) |
+| **v4.4.3** | 寄存器分配 ④:门 + perf 验证 + `artifact_checks.sh` 4 条汇编文本断言去耦合 | | [**v4.4.3-plan.md**](v4.4.3-plan.md) |
+| **v4.4.5+** | peephole 4096 限制真修 + IR 优化框架(降级下来的两版) | | [**v4.4.5-plan.md**](v4.4.5-plan.md) |
+| **v4.5** | **M5 Part 3(0-C 闭环)** —— 唯一剩余的 M5 项 | 前置 = v4.2 + v4.4 | [**v4.5-plan.md**](v4.5-plan.md) |
+| **v4.6+** | 语言特性链(`lifetime → closure → dyn Trait → HKT`)+ async / const generic / 错误恢复 / 包管理器 / 并发 cap / `.jhyynb` | 与性能线正交,可并行 | ⇒ § 五.3 的 OS 线(OS-1..OS-16) |
 
 ### ⚠️ 2026-10-29 的重排理由(**测量驱动,不是判断**)
 
@@ -911,24 +911,28 @@ P2 的任务表里混着两件事:
 > 版本号在**启动那一格**时要按当时的实际状态复核;每格另有一个稳定序号 `OS-N`,
 > 跨版本重排时**序号不变**。
 
-| 版本 | 序号 | 主题 | P 来源 | 内容 | 前置 | 验收门 |
-|---|---|---|---|---|---|---|
-| **v4.6** | OS-1 | 止血包 | P0 | 实参类型/个数检查 · extern fn 形状限制 · CLI 多余输入文件报错 · bool 值归一化 · 整数隐式提升 | — | 5 个新门 + 自举闭环 + 全量回归;**且 src0 自身零实参不符**(先统计再改,见 § 5.4) |
-| **v4.7** | OS-2 | 观测 | P0.5 | per-function `frame_local_max` · 全程序 `call_path_max` · 递归/动态调用显式标记 · 链接期栈断言 | v4.4(帧已压小)· v4.6(调用图更准) | 所有函数两个上界可打印 · CI 存基线 CSV · 链接期拒绝超栈对象 |
-| **v4.8** | OS-3 | 反馈环 | P1 | UEFI entry 钩子 · 按 `--target` 分支链接 · 移除无条件 Windows 库 · `SetConsoleOutputCP(65001)` · 最小 `kernel.efi` | v4.6 | 最小镜像在 QEMU/OVMF 输出 UTF-8 后停机 · 8/16 KiB 栈链接期可选 · `#[no_std]` 不再自动加 Windows 库 |
-| **v4.8.5** | OS-4 | 栈与分配 | P2 | 栈槽 16B 对齐(ABI §12.6 / §12.12)· 全程序栈分析接进链接器 · **禁 XMM 溢出 + 禁 red zone 上下文属性** | v4.7 | max_frame ≤ 16 KiB(**按 341 KiB 基线重算**)· SysV SIMD 参数不产生 8B 对齐 fault · 内核上下文 XMM 溢出点 = 0 |
-| **v4.9** | OS-5 | ABI 收敛 | P2.5 | ABI §12 的 14 条偏离逐条收敛(§12.1 sret 阈值 / §12.2 alignof(enum) / §12.4 MEMORY 混排 / §12.11 eightbyte / §12.9 PE-ELF) | v4.8.5 | 偏离 ≤ 3 且均为显式兼容性例外 · abi-hash CI 不回归 · hosted + freestanding 两套 smoke 全绿 |
-| **v4.10** | OS-6 | 语言自洽 | P3 | 块表达式 · `fn` 类型位置 · 闭包捕获 · `()` 类型位置 · defer 覆盖末表达式 · **结构化内联汇编**(自审新增) | v4.9 | 100 个内核 helper 可写成 1–5 行闭包 · boot state 迁移可在块内完成 · 函数指针可跨模块传递 · asm 块未声明 clobber 即报错 |
-| **v4.10.5** | OS-7 | 效果最小集 | P2.75 | `with { irq_ctx }` / `with { may_sleep }` + 调用点直接禁止 | v4.10 | `irq_ctx` 内调 `sleep()` / `alloc()` 编译失败 |
-| **v4.11** | OS-8 | lifetime | — | 完整 lifetime 标注 + 子类型 + **Polonius**(W-105 完整版)· reborrow | v4.10 | 3+ lifetime 用例 PASS · v3.1.0 stub 借用检查全部 case 仍过 |
-| **v4.12** | OS-9 | trait | — | trait 语法 + `impl Trait for Type` + vtable + `dyn Trait` + `Box<dyn Trait>` | v4.11 | 3+ trait/dyn 用例 PASS |
-| **v4.12.3** | OS-10 | const generic | — | `const N` 泛型 + 单态化求值 + `[T; N]` | v4.9 | 3+ const generic 用例 PASS |
-| **v4.12.5** | OS-11 | HKT | — | 一阶 `F<*>` + 一层 impl 覆盖 | v4.12 · v4.12.3 | 3+ HKT 用例 PASS |
-| **v4.13** | OS-12 | 效果骨架 | P3.5 | 完整效果格 + 传播 + 禁止规则 + `holds(L)` 锁序图 | v4.10.5 · v4.11 | 无反向锁边 · 误用给出确定错误码 |
-| **v4.13.5** | OS-13 | 对象模型冻结 | P4a | capability objects manifest(type_tag 白名单 / 初始 rights / owner / init phase) | v4.9 | 11 个 type_tag 逐个有 owner 与 rights 初集 · revoke 语义写明 · slot version 方案定 |
-| **v4.14** | OS-14 | 能力类型化 | P4b | `Cap<T>` 真 T · 8 个内置 rights 类型 · `derive::<DstR>()` 子集检查 · `ptr<phys>` 派生 · `unsafe` + `from_raw` · `#[ipc_handler]` · contract section · **`.jhyynb` 实装** | v4.13.5 | `Cap<i32>` ≠ `Cap<i64>` · 整数不能 `as ptr<phys>` · IPC tag/layout/slot 全检查 · contract 被 loader 校验 |
-| **v4.14.5** | OS-15 | 内核数据结构 | P4c | `Rcu<T>` · `PerCpu<T>`(`gs:` 寻址)· 侵入式容器 | v4.11 | 一个内核链表 + RCU 读侧能用 JHYY 自然表达,无需 unsafe |
-| **v4.15** | OS-16 | 可信工具链 | P4.5 | KASAN · KMSAN · KCFI · shadow stack · WCET class · panic 分类 · layout 差分 | v4.14 | 插桩前后语义一致 · ≥20 个注入 bug 被捕获 · KCFI 对类型不匹配报错 |
+| 版本 | 序号 | 主题 | P 来源 | 内容 | 前置 | 验收门 | 系列文档 |
+|---|---|---|---|---|---|---|---|
+| **v4.6** | OS-1 | 止血包 | P0 | 实参类型/个数检查 · extern fn 形状限制 · CLI 多余输入文件报错 · bool 值归一化 · 整数隐式提升 | — | 5 个新门 + 自举闭环 + 全量回归;**且 src0 自身零实参不符**(先统计再改,见 § 5.4) | [**v4.6-plan.md**](v4.6-plan.md) |
+| **v4.7** | OS-2 | 观测 | P0.5 | per-function `frame_local_max` · 全程序 `call_path_max` · 递归/动态调用显式标记 · 链接期栈断言 | v4.4(帧已压小)· v4.6(调用图更准) | 所有函数两个上界可打印 · CI 存基线 CSV · 链接期拒绝超栈对象 | [**v4.7-plan.md**](v4.7-plan.md) |
+| **v4.8** | OS-3 | 反馈环 | P1 | UEFI entry 钩子 · 按 `--target` 分支链接 · 移除无条件 Windows 库 · `SetConsoleOutputCP(65001)` · 最小 `kernel.efi` | v4.6 | 最小镜像在 QEMU/OVMF 输出 UTF-8 后停机 · 8/16 KiB 栈链接期可选 · `#[no_std]` 不再自动加 Windows 库 | [**v4.8-plan.md**](v4.8-plan.md) |
+| **v4.8.5** | OS-4 | 栈与分配 | P2 | 栈槽 16B 对齐(ABI §12.6 / §12.12)· 全程序栈分析接进链接器 · **禁 XMM 溢出 + 禁 red zone 上下文属性** | v4.7 | max_frame ≤ 16 KiB(**按 341 KiB 基线重算**)· SysV SIMD 参数不产生 8B 对齐 fault · 内核上下文 XMM 溢出点 = 0 | [**v4.8.5-plan.md**](v4.8.5-plan.md) |
+| **v4.9** | OS-5 | ABI 收敛 | P2.5 | ABI §12 的 14 条偏离逐条收敛(§12.1 sret 阈值 / §12.2 alignof(enum) / §12.4 MEMORY 混排 / §12.11 eightbyte / §12.9 PE-ELF) | v4.8.5 | 偏离 ≤ 3 且均为显式兼容性例外 · abi-hash CI 不回归 · hosted + freestanding 两套 smoke 全绿 | [**v4.9-plan.md**](v4.9-plan.md) |
+| **v4.10** | OS-6 | 语言自洽 | P3 | 块表达式 · `fn` 类型位置 · 闭包捕获 · `()` 类型位置 · defer 覆盖末表达式 · **结构化内联汇编**(自审新增) | v4.9 | 100 个内核 helper 可写成 1–5 行闭包 · boot state 迁移可在块内完成 · 函数指针可跨模块传递 · asm 块未声明 clobber 即报错 | [**v4.10-plan.md**](v4.10-plan.md) |
+| **v4.10.5** | OS-7 | 效果最小集 | P2.75 | `with { irq_ctx }` / `with { may_sleep }` + 调用点直接禁止 | v4.10 | `irq_ctx` 内调 `sleep()` / `alloc()` 编译失败 | [**v4.10.5-plan.md**](v4.10.5-plan.md) |
+| **v4.11** | OS-8 | lifetime | — | 完整 lifetime 标注 + 子类型 + **Polonius**(W-105 完整版)· reborrow | v4.10 | 3+ lifetime 用例 PASS · v3.1.0 stub 借用检查全部 case 仍过 | [**v4.11-plan.md**](v4.11-plan.md) |
+| **v4.12** | OS-9 | trait | — | trait 语法 + `impl Trait for Type` + vtable + `dyn Trait` + `Box<dyn Trait>` | v4.11 | 3+ trait/dyn 用例 PASS | [**v4.12-plan.md**](v4.12-plan.md) |
+| **v4.12.3** | OS-10 | const generic | — | `const N` 泛型 + 单态化求值 + `[T; N]` | v4.9 | 3+ const generic 用例 PASS | [**v4.12.3-plan.md**](v4.12.3-plan.md) |
+| **v4.12.5** | OS-11 | HKT | — | 一阶 `F<*>` + 一层 impl 覆盖 | v4.12 · v4.12.3 | 3+ HKT 用例 PASS | [**v4.12.5-plan.md**](v4.12.5-plan.md) |
+| **v4.13** | OS-12 | 效果骨架 | P3.5 | 完整效果格 + 传播 + 禁止规则 + `holds(L)` 锁序图 | v4.10.5 · v4.11 | 无反向锁边 · 误用给出确定错误码 | [**v4.13-plan.md**](v4.13-plan.md) |
+| **v4.13.5** | OS-13 | 对象模型冻结 | P4a | capability objects manifest(type_tag 白名单 / 初始 rights / owner / init phase) | v4.9 | 11 个 type_tag 逐个有 owner 与 rights 初集 · revoke 语义写明 · slot version 方案定 | [**v4.13.5-plan.md**](v4.13.5-plan.md) |
+| **v4.14** | OS-14 | 能力类型化 | P4b | `Cap<T>` 真 T · 8 个内置 rights 类型 · `derive::<DstR>()` 子集检查 · `ptr<phys>` 派生 · `unsafe` + `from_raw` · `#[ipc_handler]` · contract section · **`.jhyynb` 实装** | v4.13.5 | `Cap<i32>` ≠ `Cap<i64>` · 整数不能 `as ptr<phys>` · IPC tag/layout/slot 全检查 · contract 被 loader 校验 | [**v4.14-plan.md**](v4.14-plan.md) |
+| **v4.14.5** | OS-15 | 内核数据结构 | P4c | `Rcu<T>` · `PerCpu<T>`(`gs:` 寻址)· 侵入式容器 | v4.11 | 一个内核链表 + RCU 读侧能用 JHYY 自然表达,无需 unsafe | [**v4.14.5-plan.md**](v4.14.5-plan.md) |
+| **v4.15** | OS-16 | 可信工具链 | P4.5 | KASAN · KMSAN · KCFI · shadow stack · WCET class · panic 分类 · layout 差分 | v4.14 | 插桩前后语义一致 · ≥20 个注入 bug 被捕获 · KCFI 对类型不匹配报错 | [**v4.15-plan.md**](v4.15-plan.md) |
+
+> ⚠️ **v4.14 那一行的「`unsafe` + `from_raw`」以 D5 的结论为准** ——
+> **不引入 `unsafe` 关键字**,改用 `#[trusted]` / `#[unsafe_cap_ctor]` 属性
+> (见 [`../../coordination/JHYY_OS侧设计终版.md`](../../coordination/JHYY_OS侧设计终版.md) § 12 D5)。
 
 **不排进 OS 线的**(与 OS 线正交,v4.16 起独立):async/await · 包管理器 ·
 并发 cap + 完整 memory model + 多架构 ABI。`.jhyynb` 已并入 OS-14。
