@@ -3,7 +3,7 @@
 
 ## 为什么需要这个
 
-版本号散在**仓库的不同角落、3 种格式**里,而其中两处是**编译期烘进产物**的:
+版本号散在**仓库的不同角落、多种格式**里,而其中两处是**编译期烘进产物**的:
 
 | 位置 | 格式 | 谁改 | 为什么不能手改 |
 |---|---|---|---|
@@ -12,6 +12,7 @@
 | `installer/assets/license.rtf` | RTF | 脚本 | MSI 的 EULA 里显示的版本 |
 | `installer/distribution/scoop/jhyy.json` | JSON | 脚本(+hash 要 post-build 填) | 手改 JSON 容易破格式 |
 | `installer/distribution/winget/.../JHYY/<ver>/*.yaml` | YAML(**目录名也带版本**) | 脚本(+hash 要 post-build 填) | 目录名 / 3 个字段 / URL 里的版本要同时改 |
+| `README.md` / `README.zh-CN.md` | Markdown(shields.io 徽章 URL) | 脚本 | 徽章是**读者第一眼看到的版本号** —— 它漂了 = 门面在骗人 |
 | `docs/logs/v4/changelog-v4.0.0.md` | Markdown | 脚本插 stub,人写正文 |
 | `installer/release-notes/<ver>.md` | Markdown | 脚本建 stub,人写正文(release.yml 的 `${MAIN_CHANGES}` 从这儿取) | — |
 
@@ -86,6 +87,16 @@ LICENSE_RTF = Path("installer/assets/license.rtf")
 MAIN_JHYY = Path("compiler/src0/main.jhyy")
 CHANGELOG = Path("docs/logs/v4/changelog-v4.0.0.md")
 RELEASE_NOTES_DIR = Path("installer/release-notes")
+
+# 两份 README 的版本徽章 —— shields.io URL 里的 label 不同(英文 `version` / 中文 `版本`),
+# 但版本串的位置一样(`badge/<label>-vX.Y.Z-<color>`)⇒ 同一个正则模板 + 各自的 label。
+# **为什么要进这道门**:徽章是读者第一眼看到的版本号。2026-10-30 实测:两道门
+# (脚本 + CI)都跑绿,而 README.md 的徽章停在 v4.0.0、README.zh-CN.md 停在 v1.8.3
+# —— 落地文档可以整份落后 8 个 release 而门全绿。门不看它,就等于没有门。
+README_BADGES = [
+    (Path("README.md"), "version"),
+    (Path("README.zh-CN.md"), "版本"),
+]
 
 # changelog 里新版本段要插在它前面(该文件是**升序**的:最老在前)
 CHANGELOG_ANCHOR = "## v4.x follow-on plans"
@@ -180,6 +191,10 @@ def fingerprints(version: str) -> dict[str, list[str]]:
     scan(MAIN_JHYY, r"jhyy compiler v(\d+\.\d+\.\d+) \(self-hosted\)", rel(MAIN_JHYY))
     scan(LICENSE_RTF, r"Version (\d+\.\d+\.\d+)", rel(LICENSE_RTF))
     scan(SCOOP_JSON, r'"version"\s*:\s*"(\d+\.\d+\.\d+)"', rel(SCOOP_JSON))
+
+    # 两份 README 的版本徽章(见 README_BADGES 的注释:徽章漂了 = 门面在骗人)
+    for path, blabel in README_BADGES:
+        scan(path, r"badge/" + blabel + r"-v(\d+\.\d+\.\d+)-", rel(path) + " 徽章")
 
     wdir = ROOT / WINGET_BASE / version
     if not wdir.is_dir():
@@ -309,6 +324,19 @@ def cmd_set(new: str, *, dry_run: bool = False) -> int:
         [(r"Version \d+\.\d+\.\d+", "Version " + new)],
     )
     print(f"[bump_version] {rel(LICENSE_RTF)}: {n} 处")
+
+    # 两份 README 的版本徽章(shields.io URL;label 因语言而异 —— 英文 `version` / 中文 `版本`)
+    for path, blabel in README_BADGES:
+        n = replace_in_file(
+            ROOT / path,
+            [
+                (
+                    r"(badge/" + blabel + r"-v)\d+\.\d+\.\d+(-)",
+                    r"\g<1>" + new + r"\g<2>",
+                )
+            ],
+        )
+        print(f"[bump_version] {rel(path)}: {n} 处")
 
     # scoop manifest
     n = replace_in_file(

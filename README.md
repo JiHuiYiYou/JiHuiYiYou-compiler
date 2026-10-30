@@ -8,7 +8,7 @@
 
 **Statically typed. Expression-oriented. Compiled to native via self-hosted amd64 backend.**
 
-[![Version](https://img.shields.io/badge/version-v4.0.0-00d4aa)](docs/logs/v4/changelog-v4.0.0.md)
+[![Version](https://img.shields.io/badge/version-v4.1.2-00d4aa)](docs/logs/v4/changelog-v4.0.0.md)
 [![Status](https://img.shields.io/badge/self--host-N%E2%89%A53%20byte--equal-success)](#status-v400)
 [![Backend](https://img.shields.io/badge/backend-self--hosted%20amd64-blue)](#architecture)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#install)
@@ -20,6 +20,12 @@
 </div>
 
 ---
+
+> [!WARNING]
+> **这份 README 的内容段落停留在 v4.0.0** —— 架构一节仍说 `compiler/src/*.c` 是现行实现
+> (该目录已于 v4.0.21 删光)、回归数仍写 104/104(现为 258/278)、Roadmap 表整张作废。
+> **徽章已跟到 v4.1.2,但正文尚未重写** —— 当前真实状态以 [`CLAUDE.md`](CLAUDE.md)
+> 和 [`docs/plans/v4/README.md`](docs/plans/v4/README.md) 为准。
 
 ## What is JHYY
 

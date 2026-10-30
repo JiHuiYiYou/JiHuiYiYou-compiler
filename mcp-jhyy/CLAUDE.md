@@ -55,4 +55,4 @@
 1. **编译/运行类**（`jhyy_run` / `jhyy_compile` / `jhyy_check`）：用 Bash 直接调 `compiler/build/bin/jhyy.exe`
 2. **查 IL**（`jhyy_get_il`）：用 `Read("compiler/build/bin/<name>.il")` 或 `Bash("cat ...")`
 3. **查语言规范 / ABI**（`jhyy_lang_ref` / `jhyy_abi_info`）：用 `Read("docs/abis/jhyy-lang-spec-v4.0.0.md")` 等对应文档
-4. **报错给用户**："MCP 不可用，已用回退方式完成。如果持续失败检查 `~/.claude.json` 的 `jhyy` 配置和 Python `mcp[cli]` 是否安装"
+4. **报错给用户**："MCP 不可用，已用回退方式完成。如果持续失败检查 `~/.claude.json` 的 `jhyy` 配置和 Python **`fastmcp`** 是否安装（`server.py` 写的是 `from fastmcp import FastMCP` —— 顶层 `fastmcp` 是独立于官方 `mcp` 包的发行包，装 `mcp[cli]` 不管用）"

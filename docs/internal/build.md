@@ -21,7 +21,7 @@ C:/Users/liuzhen/Desktop/coding/JiHuiYiYou/
 
 工具：
 - GCC：`/c/msys64/ucrt64/bin/gcc.exe` (15.2.0 MSYS2 ucrt64)
-- Self-backend (jhyy-side 自研 x86-64 codegen):**v4.0.0 起 sole production path** (QBE 完全移除,per `docs/plans/v2/v4.0.0-plan.md`)
+- Self-backend (jhyy-side 自研 x86-64 codegen):**v4.0.0 起 sole production path** (QBE 完全移除,per `docs/plans/v4/v4.0.0-plan.md`)
 - Git：`/d/Program Files/Git/bin/git.exe`
 
 ---
@@ -233,7 +233,7 @@ export PATH="/c/msys64/ucrt64/bin:/c/msys64/usr/bin:$PATH"
 make
 ```
 
-(.ico 修改走 `installer/build-jhyy-icons.ps1`,deterministic 重出 6-frame ICO;
+(.ico 修改走 `installer/scripts/build-jhyy-icons.ps1`,deterministic 重出 6-frame ICO;
 改完不重 build,`jhyy.exe` 内嵌的还是旧 icon。)
 
 **path 坑**:`windres` 内部走 `gcc -E` 预处理,路径里的 `\` 会被当 escape 字符吃掉。
@@ -258,24 +258,24 @@ C 侧用 `path_to_fwd()` 把 `\` 全部转 `/` 才传给 windres(教训 2026-08-
 
 ## CLI 参考(jhyy 到底支持哪些子命令 / flag)
 
-唯一 CLI 入口 = `compiler/src0/main.jhyy:1864-2000`。**全集如下**(没有别的):
+唯一 CLI 入口 = `compiler/src0/main.jhyy:1898-2054`。**全集如下**(没有别的):
 
 | 形式 | 行为 |
 |------|------|
-| `jhyy`(无参数) | 打印 `jhyy compiler v<版本> (self-hosted)` + 简版 usage,exit 0 (`main.jhyy:1864-1873`) |
-| `jhyy --help` | 打印同一行版本横幅 + **完整** help(子命令 + flag + target 列表),exit 0 (`main.jhyy:1875-1907`) |
+| `jhyy`(无参数) | 打印 `jhyy compiler v<版本> (self-hosted)` + 简版 usage,exit 0 (`main.jhyy:1911`) |
+| `jhyy --help` | 打印同一行版本横幅 + **完整** help(子命令 + flag + target 列表),exit 0 (`main.jhyy:1930-1960`) |
 | `jhyy compile <file.jhyy> [-o out]` | 编译 + **链接** → `.exe`（库文件(无 main)只编译不链）；`--no-link` 时只出 `.s` |
-| `jhyy build   <file.jhyy> [-o out]` | **只编译** → `.s`（源文件旁边），**不链接**；⚠️ 成功时退出码是 **2**（不是 0）—— 那是 `build_il` 的「in-mem 路径已 emit」信号，**不是错误** |
+| `jhyy build   <file.jhyy> [-o out]` | **只编译** → `.s`（落在 `-o` 指定的输出**旁边**），**不链接**；成功时退出码 **0** —— 此前是 2（`build_il` 的「in-mem 已 emit」返回值直接透传），W-168 已归一 (`main.jhyy:1568-1570`)；⚠️ **不跑** `apply_link_section_directives` ⇒ 含 `#[link_section]` 的程序，`build` 与 `compile --no-link` 产物不同（W-170）⇒ bench / stage1 继续用 `compile --no-link -o` |
 | `jhyy run     <file.jhyy>` | 编译 + 链接 + 执行 |
-| `jhyy dump    <file.jhyy>` | 打印 AST / typed IR(调试用) |
-| `--target=<triple>` | 选目标(默认 `amd64_win`),可出现在任意位置 (`main.jhyy:1924`) |
-| `--no-link` | 只出 `.s`,跳过 gcc 链接(**跟在子命令后面**,`main.jhyy:1560`) |
+| `jhyy dump    <file.jhyy>` | ⚠️ **未实现** —— 打印 `cmd_dump not yet implemented` 到 stderr 并 **exit 1** (`main.jhyy:1891-1892`) |
+| `--target=<triple>` | 选目标(默认 `amd64_win`),可出现在任意位置 (`main.jhyy:1968-1970`) |
+| `--no-link` | 只出 `.s`,跳过 gcc 链接(**跟在子命令后面**,`main.jhyy:1606`) |
 
 > ⚠️ **`jhyy --version` 不存在 —— 从来就没有过**(`git log -S'--version' -- compiler/`
 > 只命中 `gcc --version` / `wix --version` / `qemu --version`)。
 > 想看版本号 ⇒ `jhyy --help` 的**首行**,或不带参数跑 `jhyy`。
 > 写文档 / release note / 脚本时**不要**用 `--version`:它会落到 `unknown command`
-> 分支 ⇒ stderr 打一行 `unknown command` + **exit 1** (`main.jhyy:1999-2000`)。
+> 分支 ⇒ stderr 打一行 `unknown command` + **exit 1** (`main.jhyy:2053`)。
 
 ---
 
@@ -283,7 +283,7 @@ C 侧用 `path_to_fwd()` 把 `\` 全部转 `/` 才传给 windres(教训 2026-08-
 
 ### 为什么
 
-版本号散在 **6 个地方、3 种格式**(另加每版的 release note 片段),而其中两处是
+版本号散在 **8 个地方、多种格式**(另加每版的 release note 片段),而其中两处是
 **编译期烘进产物**的:
 
 | 位置 | 格式 | 漏改的后果 |
@@ -293,9 +293,15 @@ C 侧用 `path_to_fwd()` 把 `\` 全部转 `/` 才传给 windres(教训 2026-08-
 | `installer/assets/license.rtf` | RTF | MSI 的 EULA 显示旧版本 |
 | `installer/distribution/scoop/jhyy.json` | JSON | scoop 装的是旧版 |
 | `installer/distribution/winget/.../JHYY/<ver>/*.yaml` | YAML(**目录名也带版本**) | winget 装的是旧版 |
+| `README.md` / `README.zh-CN.md` | Markdown(shields.io 徽章 URL) | **门面骗人** —— 徽章是读者第一眼看到的版本号 |
 | `docs/logs/v4/changelog-v4.0.0.md` | Markdown | changelog 缺这一版 |
 
 漏改任何一处的后果都一样:**tag 上写着 v4.1.2,装出来的编译器自报 v4.1.1**。
+
+> ⚠️ **两份 README 的徽章是 2026-10-30 才补进这道门的** —— 补之前的实测:
+> 门跑绿、CI 全绿,而 `README.md` 的徽章停在 **v4.0.0**、`README.zh-CN.md` 停在
+> **v1.8.3**(落后 8 个 release)。门不看它,就等于没有门。
+> **两份 README 的正文本身仍是旧版本内容**(待重写),徽章上方已加 `> [!WARNING]` 横幅说明。
 
 > 顺带把**每版的 release note 正文**也拆出去了 ——
 > `installer/release-notes/<ver>.md`(release.yml 从这里取 `${MAIN_CHANGES}`)。
@@ -349,12 +355,14 @@ python scripts/dev/bump_version.py check
 当需要排查 codegen / 链接问题时，手动走一遍：
 
 ```bash
-# 1. 编译 .jhyy → 生成 .s (v2.15.0 起默认 in-mem path 不写盘;force 写盘设 JHY_WRITE_IL=1)
-./compiler/build/bin/jhyy.exe compile test.jhyy -o test
+# 1. 只编译不链接 → .s(落在 `-o` 指定的输出**旁边**,即当前工作目录)
+./compiler/build/bin/jhyy.exe compile test.jhyy --no-link -o test
+#   ⇒ 产出 test.s(只有汇编;**不加 --no-link 会顺带链出 test.exe**,那就不是"手动链接"了)。
+#     **默认不落 .il** —— 只有要看中间表示才加 JHY_WRITE_IL=1(会多出一个 test.il)。
+#     ⚠️ .s 落在 -o 输出旁边,不是 compiler/build/bin/ ⇒ 下一步的 cat 路径要跟着改。
 
-# 2. v2.15.0+: 默认 in-mem self-backend 不写 .il/.s 文件。如需查看 .s 输出:
-JHY_WRITE_IL=1 JHY_SELF_BACKEND=1 ./compiler/build/bin/jhyy.exe compile test.jhyy -o test
-cat compiler/build/bin/test.s
+# 2. 看 .s 汇编(路径 = 步骤 1 的输出旁边)
+cat test.s
 
 # 3. 手动链接(需 runtime.c + jhyy_helpers.c,jhyy 编 jhyy 必需)
 /c/msys64/ucrt64/bin/gcc.exe test.s compiler/runtime/runtime.c compiler/src0/jhyy_helpers.c -o test.exe -lm
@@ -363,7 +371,11 @@ cat compiler/build/bin/test.s
 ./test.exe; echo $?
 ```
 
-> **v4.0.0 注**:QBE 工具链已完全移除,不再有 `./qbe/qbe.exe` step。self-backend 是 sole production path (per `docs/plans/v2/v4.0.0-plan.md`)。
+> ⚠️ **2026-10-30 订正**:本节原文写「默认 in-mem self-backend **不写 .il/.s 文件**」——
+> **对 `.s` 不成立**(实测 `compile` 会写 .s;只有 `.il` 才需要 `JHY_WRITE_IL=1`),
+> 且原文的 `cat compiler/build/bin/test.s` 路径也是错的(.s 落在 `-o` 输出旁边)。
+>
+> **v4.0.0 注**:QBE 工具链已完全移除,不再有 `./qbe/qbe.exe` step。self-backend 是 sole production path (per `docs/plans/v4/v4.0.0-plan.md`)。
 
 ---
 
@@ -388,13 +400,29 @@ jhyy.exe compile hello_efi.jhyy --target=amd64_win_freestanding -o hello.obj
 
 生成 PE/COFF x86-64 `.obj`,**不**链 ucrt / vcruntime / libc。entry 由用户 `extern fn efi_main` / `_start` 提供(per [`docs/abis/jhyy-lang-spec-v4.0.0.md` § 18](../abis/jhyy-lang-spec-v4.0.0.md))。**v2.3.0 已 ship** (tag `v2.3.0` commit `54d93df`, 2026-09-04) — 完整 E2E 链路:`scripts/dev/build/build-efi.sh` (jhyy → .obj → lld-link `/SUBSYSTEM:EFI_APPLICATION /ENTRY:efi_main hello.obj /OUT:hello.efi`) + `scripts/dev/test/run-ovmf.sh` (QEMU + OVMF q35 + FAT12 image + serial capture);**E2E 5/5 PASS** 同 .efi 5 次启动输出 "Hello from jhyy freestanding!\n"(详见 [`docs/abis/jhyy-abi-v4.0.0.md` § 13.3 freestanding 约定](../abis/jhyy-abi-v4.0.0.md))。
 
-### amd64_sysv_stub (Linux 兼容 stub)
+### amd64_sysv (Linux ELF — v2.13.0 起真实现)
 
 ```bash
-jhyy.exe compile hello.jhyy --target=amd64_sysv_stub -o hello.s
+# 交叉链路分两段:Windows 侧只出 .s,Linux 侧在 docker 里链 + 跑
+jhyy.exe compile hello.jhyy --target=amd64_sysv_freestanding --no-link -o hello
+#   ⇒ 产出 hello.s(ELF/SysV ABI 汇编),**不链接**(Windows 上链不出 ELF)
+
+# 完整 6 用例的门(自带 docker gcc:12 chain:链 crt0.S + link.ld → 跑 ELF)
+bash compiler/tests/bootstrap/sysv_full_regress.sh --runs=1
 ```
 
-**当前 `cg_module` 在此 target 仍 fatal**(`amd64_sysv target: 实现留 v2.x M2`,per 2026-09-04 user 决定保留 fatal 不动 `codegen.jhyy:3783-3786`),只产出占位 `.s`;实实现 SysV ABI 推 v2.x M2 (跟 v2.x 中期自写 QBE 后端同期)。target_dispatch + CLI flag + `target_help` / `target_status` 已就位(per [`compiler/src0/target_dispatch.jhyy`](../../compiler/src0/target_dispatch.jhyy) v2.4.0 Stage 1),仅 codegen 路径未实现。
+**⚠️ 2026-10-30 订正**:本节原文写的是 `--target=amd64_sysv_stub` + 「在此 target
+仍 fatal… 实现留 v2.x M2」。**两处都过期了**:
+- `amd64_sysv_stub` 这个三元组**v2.7.0 Phase 2a 就改名了**,现在实跑是
+  `unknown target 'amd64_sysv_stub', available: amd64_win, amd64_win_freestanding,
+  amd64_sysv, amd64_sysv_freestanding` + **exit 1**;
+- `amd64_sysv` **v2.13.0 起是真实现**(真 XMM regalloc + 8-class §A.4 分类 + sret
+  helper),不再是 stub。`codegen.jhyy:3783-3786` 现在是 W-114 的 enum sret 代码,
+  跟 fatal 无关。
+
+现有四个三元组:`amd64_win`(默认)· `amd64_win_freestanding`(UEFI)·
+`amd64_sysv` · `amd64_sysv_freestanding`。target_dispatch + CLI flag +
+`target_help` / `target_status` 见 [`compiler/src0/target_dispatch.jhyy`](../../compiler/src0/target_dispatch.jhyy)。
 
 ---
 
@@ -444,7 +472,7 @@ lexer / parser / sema(它们 `#include "../../src/*.h"`)。`compiler/src/` 整�
 
 ## Backend 历史注（v4.0.0 之前）
 
-> **v4.0.0 起**:QBE 工具链**完全移除**。`run_qbe` 改 fatal-stub (签名保留);`qbe/` git rm 41 files;qbe.exe mirror 删;installer/license.rtf/wxs QBE 引用删;`build.md` "QBE 后端坑" section 历史归档 (per `docs/plans/v2/v4.0.0-plan.md`)。self-backend 是 sole production path。
+> **v4.0.0 起**:QBE 工具链**完全移除**。`run_qbe` 改 fatal-stub (签名保留);`qbe/` git rm 41 files;qbe.exe mirror 删;installer/license.rtf/wxs QBE 引用删;`build.md` "QBE 后端坑" section 历史归档 (per `docs/plans/v4/v4.0.0-plan.md`)。self-backend 是 sole production path。
 
 ~~**QBE 后端坑（Windows 独有, v4.0.0 起历史归档）**~~:
 

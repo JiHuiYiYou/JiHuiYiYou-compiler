@@ -6,11 +6,11 @@
 
 ### 机会翼游 — 自研静态类型编译型系统编程语言
 
-**静态类型 · 表达式导向 · 通过 QBE 编译为原生机器码**
+**静态类型 · 表达式导向 · 通过自研 amd64 后端编译为原生机器码**
 
-[![版本](https://img.shields.io/badge/版本-v1.8.3-00d4aa)](docs/logs/v1/changelog-v1.8.0.md)
+[![版本](https://img.shields.io/badge/版本-v4.1.2-00d4aa)](docs/logs/v4/changelog-v4.0.0.md)
 [![状态](https://img.shields.io/badge/自举-byte--equal%20v1%E2%86%92v5-success)](docs/logs/v1/changelog-v1.8.0.md)
-[![后端](https://img.shields.io/badge/后端-QBE-orange)](https://c9x.me/compile/)
+[![后端](https://img.shields.io/badge/后端-自研%20amd64-blue)](#架构)
 [![平台](https://img.shields.io/badge/平台-Windows%20x64-lightgrey)](#构建)
 [![协议](https://img.shields.io/badge/协议-MIT-blue)](LICENSE)
 [![English](https://img.shields.io/badge/lang-English-red)](README.md)
@@ -20,6 +20,14 @@
 </div>
 
 ---
+
+> [!WARNING]
+> **这份 README 的正文停留在 v1.8.3 时代**(落后 8 个 release / 1.5 个月)——
+> 它仍把 QBE 说成后端、把 `compiler/src/*.c` 说成生产路径、把回归数写成 102/102,
+> 尾部整段是 v2.11.x 的 ship 记录。
+> **徽章已跟到 v4.1.2,但正文尚未重写** —— 当前真实状态以 [`CLAUDE.md`](CLAUDE.md)
+> 和 [`docs/plans/v4/README.md`](docs/plans/v4/README.md) 为准。
+> 英文版 [`README.md`](README.md) 的落后程度较轻(停在 v4.0.0)。
 
 ## v1.8.3 — v1.x 终结,installer 自举闭环 + UCPD.sys bypass
 

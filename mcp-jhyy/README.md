@@ -29,10 +29,16 @@ Claude Code → 自动调用 MCP 工具
 ### 1. 安装 Python 依赖
 
 ```bash
-pip install mcp[cli]
+pip install fastmcp
 ```
 
-`mcp[cli]` 提供 FastMCP。`jhyy_runner.py` 仅用 Python 标准库。
+⚠️ **装的是 `fastmcp`,不是 `mcp[cli]`** —— `server.py` 写的是 `from fastmcp import FastMCP`
+(顶层 `fastmcp` 模块),而**顶层 `fastmcp` 是独立于 Anthropic 官方 `mcp` 包的另一个发行包**
+(`fastmcp` 的依赖是 `fastmcp-slim[...]`,不是 `mcp`)。官方 `mcp` 包提供的是带前缀的
+`mcp.server.fastmcp` ⇒ **`pip install mcp[cli]` 装完仍然 `ModuleNotFoundError: No module named 'fastmcp'`**。
+CI 装的就是对的(`ci.yml`:`pip install fastmcp pytest pytest-asyncio`)。
+
+`jhyy_runner.py` 仅用 Python 标准库。
 
 ### 2. 注册到 Claude Code
 
@@ -186,8 +192,11 @@ Claude:
 **Q: 启动 Claude Code 后 MCP 没有加载？**
 A: 确认 `~/.claude.json` 里的 `jhyy` 配置路径正确。运行 `python C:/path/to/mcp-jhyy/server.py` 看是否有 Python 错误。
 
-**Q: 显示 `ModuleNotFoundError: No module named 'mcp'`？**
-A: MCP 主机用的 Python 环境没装 `mcp[cli]`。用对应环境的 `pip install mcp[cli]` 重装。`server.py` 是 `python` 启动的，确保 `python -c "import mcp"` 能成功。
+**Q: 显示 `ModuleNotFoundError: No module named 'fastmcp'`（或 `'mcp'`）？**
+A: MCP 主机用的 Python 环境没装 **`fastmcp`**。用对应环境的 `pip install fastmcp` 重装。
+`server.py` 是 `python` 启动的，确保 **`python -c "import fastmcp"`** 能成功
+（⚠️ 别用 `python -c "import mcp"` 自检 —— 官方 `mcp` 包**不提供**顶层 `fastmcp`，
+那样自检会给假绿灯）。
 
 **Q: `jhyy_run` 报 `Executable not found`？**
 A: 检查 `mcp-jhyy/jhyy_runner.py` 顶部的 `JHYY_ROOT` 是否对应当前项目根。`compiler/build/bin/jhyy.exe` 必须存在（先 `gcc compiler/src/*.c -o ...` 编译）。
