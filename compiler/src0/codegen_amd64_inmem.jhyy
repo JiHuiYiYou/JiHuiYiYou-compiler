@@ -6,7 +6,7 @@
 // step 1;内部仍然走 lex_il → regalloc → parse_and_emit → peephole_fold_with_len
 // → jh_write_file 7 步编排 (vs codegen_amd64_run 8 步)。
 //
-// 设计依据 (per docs/plans/v2/v2.15.0-plan.md Strategy B+):
+// 设计依据 (per docs/archive/plans/v2/v2.15.0-plan.md Strategy B+):
 // - 复用现有 9 个 codegen_amd64_*.jhyy 文件, 0 修改 lex_il / parse_and_emit /
 //   emit_* / peephole_fold_with_len; 只换 input source 从 file → caller buffer
 // - JHY_WRITE_IL=1 env var 给 regress.py (走 QBE path) 或 debug 用, 强制走

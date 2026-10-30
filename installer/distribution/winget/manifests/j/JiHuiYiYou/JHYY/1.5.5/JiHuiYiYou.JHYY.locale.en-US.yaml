@@ -30,10 +30,10 @@ Tags:
   - bootstrapping
   - statically-typed
 ReleaseNotes: |-
-  See docs/logs/v1/changelog-v1.5.0.md for the full changelog across the v1.5.0
+  See docs/archive/logs/v1/changelog-v1.5.0.md for the full changelog across the v1.5.0
   umbrella (v1.5.1 / v1.5.2 / v1.5.3 / v1.5.4 / v1.5.5). This release (v1.5.5)
   adds GitHub Actions release workflow + winget/scoop reference manifests.
-ReleaseNotesUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/logs/v1/changelog-v1.5.0.md
+ReleaseNotesUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/archive/logs/v1/changelog-v1.5.0.md
 PurchaseUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler
 ManifestType: locale
 ManifestVersion: 1.5.0

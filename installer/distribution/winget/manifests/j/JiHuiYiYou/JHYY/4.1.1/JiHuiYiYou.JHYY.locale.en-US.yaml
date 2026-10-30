@@ -47,8 +47,8 @@ ReleaseNotes: |-
   Also: prebuilt runtime objects (link time 5045ms -> 531ms), a gcc-resolution
   trace line on link failures, and the MSYS2 prerequisite removed from the MSI
   (previously a machine without MSYS2 could not install the compiler at all).
-  See docs/logs/v4/changelog-v4.0.0.md for the full changelog.
-ReleaseNotesUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/logs/v4/changelog-v4.0.0.md
+  See docs/archive/logs/v4/changelog-v4.0.0.md for the full changelog.
+ReleaseNotesUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/archive/logs/v4/changelog-v4.0.0.md
 PurchaseUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler
 ManifestType: locale
 ManifestVersion: 1.5.0

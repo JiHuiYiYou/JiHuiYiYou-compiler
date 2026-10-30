@@ -33,8 +33,8 @@ v4.0.0-rc1 = the moment when JHYY stops being two parallel compilers and becomes
 |---|---|---|---|
 | 1 | `a4ba8fa` | `chore(merge): merge axis-v2 into main (v2.16.0 axis final)` | `--no-ff`; 1 conflict on `compiler/tests/bootstrap/fixed_point.sh` (resolved by `--theirs`; v3 doesn't have this file) |
 | 2 | `c13397d` | `chore(merge): merge axis-v3 into main (v3.4.2 axis final)` | `--no-ff`; 20 conflicts (src0/*.jhyy + ../../../workarounds.md + bench.sh + 6 new test files + 4 jhyy_v2..v5.exe + jhyy_stage0.exe); all resolved `--theirs` per user decision 2 (v3 slim workarounds + v3 stdlib + v3 new codegen arch wins) |
-| 3 | `c473246` | `chore(version): bump v2.16.0 → v4.0.0-rc1 across active source/docs/installer (~22 files)` | 22 files / 81 hits; excluded: `docs/logs/v2/`, `docs/plans/v2/`, `docs/logs/v3/changelog-v3.*`, `docs/plans/v3/v3.0.6-port-...` + `../../plans/v3/v3.4.0-plan.md`, `scripts/dev/v2_13_8_*.py` + `v2_15_0_*.py`, `README.md`, `installer/assets/license.rtf` |
-| 4 | `b1cf522` | `docs(archive): move invalidated v2/v3 plans to docs/archive/v2-v3/` | per user decision 1: archive (not delete); `../../plans/v2-v3/v2-v3-parallel-sprint-plan.md` + `../../plans/v2-v3/v2.0.0-os-prep.md` → `docs/archive/v2-v3/` with README explaining rationale |
+| 3 | `c473246` | `chore(version): bump v2.16.0 → v4.0.0-rc1 across active source/docs/installer (~22 files)` | 22 files / 81 hits; excluded: `docs/archive/logs/v2/`, `docs/archive/plans/v2/`, `docs/logs/v3/changelog-v3.*`, `docs/plans/v3/v3.0.6-port-...` + `../../plans/v3/v3.4.0-plan.md`, `scripts/dev/v2_13_8_*.py` + `v2_15_0_*.py`, `README.md`, `installer/assets/license.rtf` |
+| 4 | `b1cf522` | `docs(archive): move invalidated v2/v3 plans to docs/archive/plans/v2-v3/` | per user decision 1: archive (not delete); `../../plans/v2-v3/v2-v3-parallel-sprint-plan.md` + `../../plans/v2-v3/v2.0.0-os-prep.md` → `docs/archive/plans/v2-v3/` with README explaining rationale |
 | 5 | `3a48fdd` | `docs(readme): full rewrite for v4.0.0 (post-QBE self-backend + stdlib)` | per user decision 4: 432 → 363 lines; badges → v4.0.0 + self-hosted amd64 backend + Windows+Linux; status table reflects v4.0.0 state; roadmap points to v4.1.0..v4.12.0 |
 | 6 | (this commit) | `docs: v4.0.0-rc1 umbrella changelog + CLAUDE.md version-axis update` | per `feedback_changelog_umbrella`: single umbrella per vX.Y, no standalone changelog-v4.X.Y.md; **v4.0 → v4.0.0-rc1 downgrade** per 2026-09-30 user 决定 (Gate 3 selfhost deferred) |
 | 7 | (later) | `chore(cleanup): remove axis-v2 + axis-v3 worktree/branch (post-v4.0.0-rc1 merge)` | per `feedback_batch_worktree_cleanup` triplet |
@@ -90,8 +90,8 @@ If any gate fails → STOP before tag push. Diagnose root cause per `feedback_rc
 
 ## Breaking / notable changes (post-merge cleanup)
 
-1. **Version references unified to v4.0.0** — 22 files had `v2.16.0` strings bumped to `v4.0.0`. Historical `docs/logs/v2/`, `docs/plans/v2/`, `docs/logs/v3/changelog-v3.*`, `docs/plans/v3/v3.0.6-port-...` retained as audit ledger.
-2. **Stale plans archived** — `../../plans/v2-v3/v2-v3-parallel-sprint-plan.md` + `../../plans/v2-v3/v2.0.0-os-prep.md` moved to `docs/archive/v2-v3/` with README explaining per 2026-09-29 user FINAL decision. The OS M11 launch path predicted by these docs is invalidated and needs v4.x-era redesign.
+1. **Version references unified to v4.0.0** — 22 files had `v2.16.0` strings bumped to `v4.0.0`. Historical `docs/archive/logs/v2/`, `docs/archive/plans/v2/`, `docs/logs/v3/changelog-v3.*`, `docs/plans/v3/v3.0.6-port-...` retained as audit ledger.
+2. **Stale plans archived** — `../../plans/v2-v3/v2-v3-parallel-sprint-plan.md` + `../../plans/v2-v3/v2.0.0-os-prep.md` moved to `docs/archive/plans/v2-v3/` with README explaining per 2026-09-29 user FINAL decision. The OS M11 launch path predicted by these docs is invalidated and needs v4.x-era redesign.
 3. **QBE references purged from user-facing docs** — README.md drops all QBE mentions (except as historical); ../../../internal/build.md updates for in-mem self-backend; installer wxs/wxl no longer mention QBE.
 4. **WORKAROUND bucket cleared** — v3.4.2 ACTIVE → 0 carries forward to v4.0.0 (per user FINAL 决定). New ACTIVE bucket work in v4.x goes through standard process.
 5. **`axis-v2` + `axis-v3` branches + worktrees removed** — `feedback_batch_worktree_cleanup` triplet post-tag-push.
@@ -157,7 +157,7 @@ W-106(arena-touch)/ W-107(per-fn 表 1024 上限)/ W-109(浮点比较算错)。
 
 ---
 
-<!-- 2026-10-30 仓库清理:原 docs/logs/v4/ 下有 7 份 standalone changelog
+<!-- 2026-10-30 仓库清理:原 docs/archive/logs/v4/ 下有 7 份 standalone changelog
      (v4.0.1 / v4.0.2 / v4.0.2.3 / v4.0.2.4 / v4.0.4 / v4.0.5 / v4.0.6),
      违反「vX.Y axis 只用 1 个 umbrella changelog」的约定。
      已按时间序全部并入本文件,standalone 文件已删。 -->

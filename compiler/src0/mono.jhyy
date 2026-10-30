@@ -6,7 +6,7 @@
 // 输出:克隆 + substitute 后的 NON-generic decls (ntype_params == 0),
 //      append 回 (*md).decls。Pass 2 走现有 layout 路径把它们当普通 struct 处理。
 //
-// 关键设计(per docs/plans/v3/v3.2.0-plan.md § 3.1 + § Implementation order):
+// 关键设计(per docs/archive/plans/v3/v3.2.0-plan.md § 3.1 + § Implementation order):
 //   1. **Type struct 不动**:monomorphize 用 name-based source cloning,
 //      不走 Type.args(type_args → TYPE_SIZE 变 → ABI 全 touch)。
 //   2. **AST 扩展已经做完**:NodeTypeDecl / NodeModule 已经加 type_params /

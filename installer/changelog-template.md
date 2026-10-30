@@ -45,7 +45,7 @@ ${MAIN_CHANGES}
 
 ## 完整 changelog
 
-见 [`docs/archive/logs/v4/changelog-v4.0.0.md`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/logs/v4/changelog-v4.0.0.md)(v4.x 的 umbrella;各版本的段都在里面)
+见 [`docs/archive/logs/v4/changelog-v4.0.0.md`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/archive/logs/v4/changelog-v4.0.0.md)(v4.x 的 umbrella;各版本的段都在里面)
 
 ## 第三方包管理 (manifest reference, 尚未提交到上游)
 

@@ -1,6 +1,6 @@
 // codegen_amd64_lexer.jhyy — v2.5.0 A1 agent: QBE IL lexer
 //
-// Module-split 设计 (per docs/plans/v2/v2.5.0详细实现方案.md § 4.1):
+// Module-split 设计 (per docs/archive/plans/v2/v2.5.0详细实现方案.md § 4.1):
 // 本模块只产 ILToken 数组,不 emit .s,不接触 CGState。emit 模块(A2/A3/A4)
 // 拿到 tokens 后用 tok.text / tok.int_val / tok.qbe_type 字段组装 amd64 GAS。
 //

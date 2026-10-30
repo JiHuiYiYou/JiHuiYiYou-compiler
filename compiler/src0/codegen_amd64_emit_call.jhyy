@@ -1,6 +1,6 @@
 // codegen_amd64_emit_call.jhyy — v2.5.0 A4 agent: call / compute / volatile emit
 //
-// Module-split 设计(per `docs/plans/v2/v2.5.0详细实现方案.md` § 4.1):
+// Module-split 设计(per `docs/archive/plans/v2/v2.5.0详细实现方案.md` § 4.1):
 // v2.5.0 codegen_amd64 自举路径中,call / phi / copy / binop / volatile 这 5
 // 个 IL instruction → amd64 GAS `.s` 的 emit 全部归本模块(A4 unit)。
 //
@@ -577,7 +577,7 @@ fn target_is_win(target_tag: i32) -> i32 {
 }
 
 // ════════════════════════════════════════════
-// v2.11.15 Iter 1 A1-XMM 真修 (per `docs/plans/v2/v2.11.15-plan.md` Iter 1):
+// v2.11.15 Iter 1 A1-XMM 真修 (per `docs/archive/plans/v2/v2.11.15-plan.md` Iter 1):
 //   - f32/f64 (QBE_S/QBE_D) return 用 %xmm0 + movss/movsd (SysV/Win ABI 一致)
 //   - f32/f64 (QBE_S/QBE_D) arg 走 %xmm0..%xmm7 + movss/movsd
 //   - integer ret/arg (QBE_W/QBE_L) 仍走 %rax/%eax + movl/movq (existing)

@@ -1,5 +1,5 @@
 {
-  "$comment": "v2.14.0 mutation testing protocol — 30 mutation 模板, 期望 catch ≥ 80% (24/30) per docs/plans/v2/v2.14.0-plan.md Phase 2. 所有 find 字符串都是从 src0 单行 unique 出现的 substring (用于 verify_harness 触发 compile fail).",
+  "$comment": "v2.14.0 mutation testing protocol — 30 mutation 模板, 期望 catch ≥ 80% (24/30) per docs/archive/plans/v2/v2.14.0-plan.md Phase 2. 所有 find 字符串都是从 src0 单行 unique 出现的 substring (用于 verify_harness 触发 compile fail).",
   "$format_doc": {
     "id": "M-XXX unique id",
     "file": "compiler/src0/<file>.jhyy 相对路径 (相对 JHYY_ROOT)",

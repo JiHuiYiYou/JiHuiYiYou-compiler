@@ -4,7 +4,7 @@
 // 给每个 %tN 分配 register 或 spill slot;emit 函数目前还是 v2.5.0 1-to-1 栈路径
 // (per plan:regalloc 输出"可用但未消费",等 Unit E wire + 后续 emit 函数支持时用上)。
 //
-// 算法(per docs/plans/v2/batch-V2-B-plan.md § v2.6.0):
+// 算法(per docs/archive/plans/v2/batch-V2-B-plan.md § v2.6.0):
 //   1. Walk tokens,build live interval per temp (start, end)
 //   2. Sort intervals by start(deterministic:稳定排序,tiebreak 按 temp_id)
 //   3. Linear scan:assign regs from pool,spill to stack on conflict

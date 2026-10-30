@@ -316,4 +316,4 @@ Phantom binary 那次误判让我浪费了一周 — 测的 baseline 是 stale `
 
 ---
 
-**附录**: 完整 commit 链 + sprint 实施日志见 `docs/archive/logs/v0/changelog-v0.6.0.md` ~ `../v0/changelog-v0.9.0.md` (v0.x C 编译器演进) + `docs/logs/v1/` (v1.x 自举时代). 关键 milestone 的 project memory 在 `~/.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_*.md`.
+**附录**: 完整 commit 链 + sprint 实施日志见 `docs/archive/logs/v0/changelog-v0.6.0.md` ~ `../v0/changelog-v0.9.0.md` (v0.x C 编译器演进) + `docs/archive/logs/v1/` (v1.x 自举时代). 关键 milestone 的 project memory 在 `~/.claude/projects/C--Users-liuzhen-Desktop-coding-JiHuiYiYou/memory/project_*.md`.

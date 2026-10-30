@@ -19,7 +19,7 @@
 //
 // 3-class minimum viable: INTEGER / SSE / MEMORY. Full 8-class SysV § A.4
 // (INTEGER / SSE / SSEUP / MEMORY / NO_CLASS) is v2.7.2+ territory per
-// `docs/plans/v2/v2.7.0-plan.md` out-of-scope list.
+// `docs/archive/plans/v2/v2.7.0-plan.md` out-of-scope list.
 //
 // Note: lives flat in compiler/src0/ (not in a subdir) — jhyy import
 // syntax doesn't support paths with `/` (per `parse_import_decl`

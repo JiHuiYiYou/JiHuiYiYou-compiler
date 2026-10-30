@@ -4,7 +4,7 @@
 # 用法: mutation_test.sh [--baseline-only]
 #
 # 调用 mutation_test.py 跑 mutation testing protocol, 期望 catch ≥ 80% (24/30)
-# per docs/plans/v2/v2.14.0-plan.md Phase 2.
+# per docs/archive/plans/v2/v2.14.0-plan.md Phase 2.
 #
 # 环境变量:
 #   JHY_MUT_LIMIT    = 限制 mutation 数量 (0 = all, default 0)

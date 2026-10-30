@@ -4,7 +4,7 @@
 // 回退路径:run_backend() → run_qbe() (self=0 或 QBE_FALLBACK=1)。本模块是
 // codegen_amd64.jhyy parse loop 的 4 个 leaf emit callback,不自带 entry。
 //
-// 关键约束(per docs/plans/v2/v2.5.0详细实现方案.md):
+// 关键约束(per docs/archive/plans/v2/v2.5.0详细实现方案.md):
 //   - § 3.5 E1-E4 emit 模板 = 本模块 4 个函数的权威规范
 //   - § 3.3 + § 4.3:v2.5.0 **不做 regalloc**,每个 %tN 直接 spill 到栈槽;
 //     regalloc 留 V2-B v2.6.0,届时只换 cg_offset_for_temp 实现,本模块接口不动

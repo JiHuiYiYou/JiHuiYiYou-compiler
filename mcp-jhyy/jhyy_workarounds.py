@@ -69,7 +69,7 @@ def _git_path() -> Optional[str]:
 # 2026-10-30:台账从 docs/internal/ 搬到 docs/(文档大重构)。新位置优先,
 # 旧位置作回落 —— 机器上可能还有 v4.1.2 之前的旧 worktree。
 LEDGER_REL = "docs/workarounds.md"
-LEGACY_LEDGER_REL = "docs/internal/workarounds.md"
+LEGACY_LEDGER_REL = "docs/workarounds.md"
 
 
 def _ledger_in(root: Path) -> Path | None:

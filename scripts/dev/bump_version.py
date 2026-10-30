@@ -13,7 +13,7 @@
 | `installer/distribution/scoop/jhyy.json` | JSON | 脚本(+hash 要 post-build 填) | 手改 JSON 容易破格式 |
 | `installer/distribution/winget/.../JHYY/<ver>/*.yaml` | YAML(**目录名也带版本**) | 脚本(+hash 要 post-build 填) | 目录名 / 3 个字段 / URL 里的版本要同时改 |
 | `README.md` / `README.zh-CN.md` | Markdown(shields.io 徽章 URL) | 脚本 | 徽章是**读者第一眼看到的版本号** —— 它漂了 = 门面在骗人 |
-| `docs/logs/v4/changelog-v4.0.0.md` | Markdown | 脚本插 stub,人写正文 |
+| `docs/archive/logs/v4/changelog-v4.0.0.md` | Markdown | 脚本插 stub,人写正文 |
 | `installer/release-notes/<ver>.md` | Markdown | 脚本建 stub,人写正文(release.yml 的 `${MAIN_CHANGES}` 从这儿取) | — |
 
 漏改任何一处的后果都一样:**tag 上写着 v4.1.2,装出来的编译器自报 v4.1.1**。
@@ -85,7 +85,7 @@ WINGET_BASE = Path("installer/distribution/winget/manifests/j/JiHuiYiYou/JHYY")
 SCOOP_JSON = Path("installer/distribution/scoop/jhyy.json")
 LICENSE_RTF = Path("installer/assets/license.rtf")
 MAIN_JHYY = Path("compiler/src0/main.jhyy")
-CHANGELOG = Path("docs/logs/v4/changelog-v4.0.0.md")
+CHANGELOG = Path("docs/archive/logs/v4/changelog-v4.0.0.md")
 RELEASE_NOTES_DIR = Path("installer/release-notes")
 
 # 两份 README 的版本徽章 —— shields.io URL 里的 label 不同(英文 `version` / 中文 `版本`),
@@ -415,6 +415,15 @@ def cmd_check() -> int:
         for v in found:
             if v != version:
                 problems.append(f"{label}: 版本串是 {v!r},期望 {version!r}")
+
+    # changelog 路径 + 锚点必须有效 —— `set` 要往那里插新版本段。
+    # 2026-10-30:文档大重构把 changelog 搬到 docs/archive/logs/ 后,这个路径没跟着改
+    # ⇒ `set` 会在「找不到锚点」处 die,而 `check` 当时**不读 changelog** ⇒ 门全绿、发版流程却已坏。
+    cl = ROOT / CHANGELOG
+    if not cl.is_file():
+        problems.append(f"{rel(CHANGELOG)}: changelog 文件不存在(`set` 会失败)")
+    elif CHANGELOG_ANCHOR not in read_text(cl):
+        problems.append(f"{rel(CHANGELOG)}: 找不到锚点 {CHANGELOG_ANCHOR!r}(`set` 会失败)")
 
     # sha256 占位检查(未回填只报 INFO,不算漂移 —— 那是发布流程的正常中间态)
     scoop = ROOT / SCOOP_JSON

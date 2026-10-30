@@ -32,7 +32,7 @@
   Reference:
     - https://wixtoolset.org/docs/v4/bundle/wixstdba/
     - WiX 4 source: src/wix/WixToolset.BootstrapperApplications.wixext/
-    - docs/internal/workarounds.md W-033
+    - docs/workarounds.md W-033
 -->
 <Theme xmlns="http://wixtoolset.org/schemas/v4/thmutil">
 

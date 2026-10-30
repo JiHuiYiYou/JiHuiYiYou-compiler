@@ -116,5 +116,5 @@
 - v2.x QBE 自写长线 → [`docs/archive/plans/roadmap/v2.x-qbe-rewrite.md`](../../plans/roadmap/v2.x-qbe-rewrite.md)
 - v3.x 语言扩展长线 → [`docs/archive/plans/roadmap/v3.x-language-expansion.md`](../../plans/roadmap/v3.x-language-expansion.md)
 - 跨项目 OS 时间线 → [`docs/coordination/JHYY_OS侧设计终版.md`](../../../coordination/JHYY_OS侧设计终版.md)
-- 上代 v1.x 实施日志 → [`docs/logs/v1`](../v1/)
+- 上代 v1.x 实施日志 → [`docs/archive/logs/v1`](../v1/)
 - v2.0 阶段后续 umbrella → [`docs/archive/logs/v2/changelog-v2.1.0.md`](changelog-v2.1.0.md) / [v2.2.0](changelog-v2.2.0.md) / [v2.3.0](changelog-v2.3.0.md) / [v2.4.0](changelog-v2.4.0.md)

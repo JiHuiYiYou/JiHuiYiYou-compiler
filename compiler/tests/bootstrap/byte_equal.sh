@@ -21,7 +21,7 @@
 #   - 默认 backend 走 in-mem self path (JHY_WRITE_IL 默认 0 → 跳过 .il 写盘).
 #   - .s byte-equal 从 INFO-only 升级成 primary closure gate (跟 .il 同位置)
 #   - V1 frozen binary (v2.5.0 baseline) 走老 QBE path;V2 (in-mem) 走 self path;
-#     .s closure 跨 backend 必须 byte-equal (per docs/plans/v2/v2.15.0-plan.md
+#     .s closure 跨 backend 必须 byte-equal (per docs/archive/plans/v2/v2.15.0-plan.md
 #     Strategy B+;验证点: in-mem .s 跟 JHY_WRITE_IL=1 self path .s byte-equal)。
 #
 # v4.0.0 升级:

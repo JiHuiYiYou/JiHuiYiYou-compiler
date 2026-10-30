@@ -6,7 +6,7 @@
 // v1.8.3 patch: adds --system-context mode for MSI CustomAction use.
 //   SYSTEM trust chain bypasses UCPD.sys (Win10 2024-02+) — no need to
 //   stop UCPD. Enumerates HKEY_USERS S-1-5-21-… SIDs and writes each
-//   user's UserChoice directly. See docs/internal/workarounds.md W-062.
+//   user's UserChoice directly. See docs/workarounds.md W-062.
 //
 // Algorithm reference:
 //   Mozilla Firefox browser/components/shell/WindowsUserChoice.cpp

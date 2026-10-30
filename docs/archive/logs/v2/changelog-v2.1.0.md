@@ -134,5 +134,5 @@
 - v2.0 OS 准备里程碑视图 → [`docs/archive/plans/v2-v3/v2.0.0-os-prep.md`](../../plans/v2-v3/v2.0.0-os-prep.md)
 - v2.x ‖ v3.x 并行 sprint 调度 → [`docs/archive/plans/v2-v3/v2-v3-parallel-sprint-plan.md`](../../plans/v2-v3/v2-v3-parallel-sprint-plan.md)
 - 跨项目 OS 时间线 → [`docs/coordination/JHYY_OS侧设计终版.md`](../../../coordination/JHYY_OS侧设计终版.md)
-- 上代 v1.x 实施日志 → [`docs/logs/v1`](../v1/)
+- 上代 v1.x 实施日志 → [`docs/archive/logs/v1`](../v1/)
 - 阶段其他 umbrella → [v2.0.0](changelog-v2.0.0.md) / [v2.2.0](changelog-v2.2.0.md) / [v2.3.0](changelog-v2.3.0.md) / [v2.4.0](changelog-v2.4.0.md)

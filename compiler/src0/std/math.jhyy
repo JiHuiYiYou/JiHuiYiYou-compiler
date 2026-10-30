@@ -1,6 +1,6 @@
 // math.jhyy — v3.2.5 (3l.4) std lib 数学 (FFI libm, f64-only M0)。
 //
-// 设计 (per `docs/plans/v3/v3.2.5-plan.md` + user 2026-09-28 "v3.2.5 go"):
+// 设计 (per `docs/archive/plans/v3/v3.2.5-plan.md` + user 2026-09-28 "v3.2.5 go"):
 //   - FFI libm 直接接 (Option A):`extern fn sin/cos/sqrt/pow` 直接 declare
 //     走 MSVCRT (Windows) / libc + libm (POSIX);`-lm` 已在 link line
 //     (per main.jhyy:1201 + jhyy_helpers.c:424 comment)。

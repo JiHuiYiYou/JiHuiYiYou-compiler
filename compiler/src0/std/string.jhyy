@@ -1,6 +1,6 @@
 // string.jhyy — v3.2.2 (3l.1) std lib 起步:string ops (裸 *u8 + 长度, 无借用)。
 //
-// M0 简化(per `docs/plans/v3/v3.2.2-plan.md`):
+// M0 简化(per `docs/archive/plans/v3/v3.2.2-plan.md`):
 //   - 不依赖 closure / generic / 借用
 //   - String 用裸 *u8 + 长度表示 (跟 CapTable 路径一致)
 //   - 借用 string view (&str) 留 v3.x 中末 (需 &mut + lifetime)

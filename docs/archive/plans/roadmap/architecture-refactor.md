@@ -418,16 +418,16 @@ CLAUDE.md (项目入口)
   ├─ v3.x-capability-spec.md (R-9 改:8 字节措辞)
   └─ architecture-refactor.md (本文件)
 
-docs/plans/v0/ (L3 sprint 任务清单)
+docs/archive/plans/v0/ (L3 sprint 任务清单)
   ├─ v0.0~v0.7 各 sprint 任务清单(已发版本)
   ├─ v0.8.0 任务清单(R-1 改:commit 12 收尾)
   └─ v0.9.0 任务清单(R-1 新建:codegen bug 真修 + main.c 翻译)
 
-docs/plans/v1/
+docs/archive/plans/v1/
   ├─ v1.0.0 任务清单(R-3 改:不在 v1.0 范围段重写)
   └─ v1.0.0 详细实现方案(R-4 改:codegen 坑清单加 W-001~W-009)
 
-docs/plans/v2/
+docs/archive/plans/v2/
   └─ ../v2-v3/v2.0.0-os-prep.md (R-7 改:完成定义视图)
 
 docs/internal/
@@ -545,7 +545,7 @@ v0.8 wip → v0.9.0 → v1.0.0 → v1.1.0 → v2.0.0 → v2.x → v3.0.0 → v3.
 | 项 | 内容 |
 |---|------|
 | **目标** | spec 增补 + jhyy_helpers.c 清理 + 文档同步 |
-| **做法** | 1. **lang-spec 增补**:§ 18 Cap<T> + § 19 unsafe_cap + § 20 Type-driven IPC + § 21 provenance(spec drafting,不动实现) <br> 2. **abi 增补**:§ 13 Cap wire format + cnode 引用布局 <br> 3. **jhyy_helpers.c 清理**:v0.9 末 + v1.0 期间累积的 bridge fn 评估;能砍的砍,能内联的内联 <br> 4. **v0.x 历史 sprint 文档归档**:v0.0~v0.7 任务清单 → `docs/logs/v0/`,L3 表格里只留 v0.6+ 已发版 <br> 5. v1.1.0 changelog + spec patch |
+| **做法** | 1. **lang-spec 增补**:§ 18 Cap<T> + § 19 unsafe_cap + § 20 Type-driven IPC + § 21 provenance(spec drafting,不动实现) <br> 2. **abi 增补**:§ 13 Cap wire format + cnode 引用布局 <br> 3. **jhyy_helpers.c 清理**:v0.9 末 + v1.0 期间累积的 bridge fn 评估;能砍的砍,能内联的内联 <br> 4. **v0.x 历史 sprint 文档归档**:v0.0~v0.7 任务清单 → `docs/archive/logs/v0/`,L3 表格里只留 v0.6+ 已发版 <br> 5. v1.1.0 changelog + spec patch |
 | **事实依据** | OS 端 coordination § 5 已列 spec 增补 backlog;jhyy_helpers.c 范围扩了 3 次(v0.8 commit 10 + commit 11 + commit 12)需要清理 |
 | **OS 对接** | 0.5 — spec 增补锁 = v3.1 sprint 3g 启动的硬前置(spec 锁定才能实现)|
 | **R 链接** | R-3 + R-4(v1.0 任务清单 / 详细方案 spec drafting 项) |

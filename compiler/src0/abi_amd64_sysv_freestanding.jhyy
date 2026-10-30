@@ -2,7 +2,7 @@
 //
 // V2-B v2.7.0 M2 deliverable: SysV freestanding (no libc, no CRT) ABI module.
 // Linux ELF executable via `runtime/linux_elf/crt0.S` + `runtime/linux_elf/link.ld`
-// (per `docs/plans/v2/v2.7.1-plan.md` Phase 1).
+// (per `docs/archive/plans/v2/v2.7.1-plan.md` Phase 1).
 //
 // Like `abi_amd64_win_freestanding.jhyy`, this is a thin delegate wrapper
 // over `abi_amd64_sysv.jhyy`. The 3 signature-shaping functions
@@ -13,7 +13,7 @@
 //
 // The 2 freestanding-specific hooks (emit_entry_point / no_crt_init)
 // are stubs in v2.7.0; real Linux ELF crt0 wiring ships in v2.7.1 Phase 1
-// (per `docs/plans/v2/v2.7.1-plan.md` § runtime/linux_elf/).
+// (per `docs/archive/plans/v2/v2.7.1-plan.md` § runtime/linux_elf/).
 //
 // Note: lives flat in compiler/src0/ (not in a subdir) — jhyy import
 // syntax doesn't support paths with `/` (per `parse_import_decl`

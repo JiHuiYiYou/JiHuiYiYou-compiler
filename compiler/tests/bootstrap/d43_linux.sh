@@ -6,7 +6,7 @@
 #
 # 注: v2.14.0 Phase 3 简化 — Linux 真 self-host chain 等 v2.4.0 multi-target
 #     dispatcher ship 后启动。当前 d43_linux.sh 走 sanity check path: Win jhyy
-#     编 → 验证 .il sha 跟 Win closure baseline 一致 (per docs/logs/v2/d43-baseline-archive.md
+#     编 → 验证 .il sha 跟 Win closure baseline 一致 (per docs/archive/logs/v2/d43-baseline-archive.md
 #     当前 active baseline = 43fee332...)。
 #
 # 用法: d43_linux.sh
@@ -28,7 +28,7 @@ DOCKER_IMAGE="${DOCKER_IMAGE:-gcc:12}"
 JHYY_BIN="$JHYY_ROOT/compiler/build/bin/jhyy.exe"
 JHYY_INPUT="$JHYY_ROOT/compiler/src0/main.jhyy"
 
-# v2.13.11 closure baseline (per docs/logs/v2/d43-baseline-archive.md v2.13.0 Ph.2 row re-measured
+# v2.13.11 closure baseline (per docs/archive/logs/v2/d43-baseline-archive.md v2.13.0 Ph.2 row re-measured
 # at v2.13.11 closure — jhyy_v2/v3/v4/v5 → 1 unique sha via fixed_point.sh N=10 verification)
 EXPECTED_BASELINE_SHA="43fee332c0fdb110283a7192a26f63c6c44bb1a4c9706e1d0ba4f55400c9eb40"
 

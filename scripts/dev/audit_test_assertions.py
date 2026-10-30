@@ -20,7 +20,7 @@
 
     python scripts/dev/audit_test_assertions.py             # 报告
     python scripts/dev/audit_test_assertions.py --strict     # 有违规就 exit 1
-    python scripts/dev/audit_test_assertions.py --baseline docs/internal/tests.md
+    python scripts/dev/audit_test_assertions.py --baseline docs/FACTS.md
     python scripts/dev/audit_test_assertions.py --json
 
 `--strict` 适合挂 CI / pre-commit:新增一个 crash-only 或 literal-return

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # fixed_point_linux.sh — N≥3 selfhost closure verify on Linux x86_64
-# (v2.14.0 cross-platform per docs/plans/v2/v2.14.0-plan.md Phase 3)
+# (v2.14.0 cross-platform per docs/archive/plans/v2/v2.14.0-plan.md Phase 3)
 #
 # 目的: 验证 fixed_point N≥3 closure 在 Linux x86_64 (docker gcc:12) 下 byte-equal
 #       + main.jhyy 跑通 — 不只 Windows mingw 才有 closure property。

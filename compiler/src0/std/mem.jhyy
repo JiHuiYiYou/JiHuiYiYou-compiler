@@ -1,6 +1,6 @@
 // mem.jhyy — v3.2.2 (3l.1) std lib 起步:memcpy/memcmp/memset 纯 jhyy byte 循环。
 //
-// M0 简化(per `docs/plans/v3/v3.2.2-plan.md` + 2026-09-09 user 决定):
+// M0 简化(per `docs/archive/plans/v3/v3.2.2-plan.md` + 2026-09-09 user 决定):
 //   - 不依赖 closure / generic / 借用
 //   - 自实现 byte 循环(不调 libc memcpy/memcmp/memset),保证 std lib 不依赖 libc 运行时
 //   - 不跨 import 模块(避免 mangle 复杂度;ptr_add 本地实现)

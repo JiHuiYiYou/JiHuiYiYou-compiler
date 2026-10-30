@@ -1,6 +1,6 @@
 // vec.jhyy — v3.2.4 (3l.3) std lib 泛型动态数组 Vec<T>。
 //
-// M0 简化(per `docs/plans/v3/v3.2.4-plan.md`):
+// M0 简化(per `docs/archive/plans/v3/v3.2.4-plan.md`):
 //   - 泛型通过 monomorphization 走(per v3.2.0/3i 已 ship 机制)
 //   - Vec<T> = struct { data: *u8, len: i64, cap: i64 } = 24 字节
 //   - 所有 push/get/len/free 等 API 接受 `*Vec<T>` (caller 自己 alloc Vec)

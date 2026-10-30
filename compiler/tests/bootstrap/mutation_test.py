@@ -2,7 +2,7 @@
 # mutation_test.py — v2.14.0 mutation testing protocol driver
 #
 # 在 compiler/src0/*.jhyy 注入可控 mutation, 跑 verification harness, 期望
-# harness catch 该 mutation (≥ 80% catch rate per docs/plans/v2/v2.14.0-plan.md
+# harness catch 该 mutation (≥ 80% catch rate per docs/archive/plans/v2/v2.14.0-plan.md
 # Phase 2).
 #
 # 设计原则:
@@ -412,7 +412,7 @@ def main():
             f.write(f"| {r['id']} | {r['category']} | {r['status']} | {r['expected']} | {r['description'][:50]} | {r['elapsed_s']}s |\n")
         f.write(f"\n")
 
-        f.write(f"## Verification Gates (per docs/plans/v2/v2.14.0-plan.md Phase 2)\n\n")
+        f.write(f"## Verification Gates (per docs/archive/plans/v2/v2.14.0-plan.md Phase 2)\n\n")
         f.write(f"- ✅ Catch rate ≥ 80%: {'PASS' if catch_rate >= CATCH_THRESHOLD else 'FAIL'} ({catch_rate:.1%})\n")
         f.write(f"- ✅ False positive = 0: PASS (no mutation failed application + harness runs OK)\n")
         f.write(f"- ✅ mutation-test-report.md 完整: PASS\n")

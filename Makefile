@@ -21,7 +21,7 @@
 
 CC       = gcc
 # v4.0.0 D26: -g0 + strip build-id for byte-equal rebuilds.
-# Per docs/plans/v2/v2.4.0任务清单 + 概要设计.md:26,104-124 + docs/logs/v2/changelog-v2.4.0.md
+# Per docs/plans/v2/v2.4.0任务清单 + 概要设计.md:26,104-124 + docs/archive/logs/v2/changelog-v2.4.0.md
 # (原名 CFLAGS_STAGE0 —— C 端删掉后 "stage0" 已无指代对象,改名 CFLAGS_REPRO)
 CFLAGS_REPRO = -std=c11 -Wall -Wextra -g0 -Wl,--build-id=none
 SOURCE_DATE_EPOCH = 1234567890

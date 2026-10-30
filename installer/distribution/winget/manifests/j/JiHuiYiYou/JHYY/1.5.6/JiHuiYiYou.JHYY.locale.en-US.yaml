@@ -41,9 +41,9 @@ ReleaseNotes: |-
   v1.5.6 patch2: VSCode Code Runner integration — auto-installs formulahendry.code-runner
   + writes code-runner.executorMap → jhyy run mapping to VSCode user settings.json.
   Also fixes 3 path-quoting bugs (W-038, W-039, W-040) that broke jhyy run / compile
-  when installed under "C:\Program Files\...". See docs/logs/v1/changelog-v1.5.0.md
+  when installed under "C:\Program Files\...". See docs/archive/logs/v1/changelog-v1.5.0.md
   for the full v1.5.x umbrella changelog.
-ReleaseNotesUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/logs/v1/changelog-v1.5.0.md
+ReleaseNotesUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/archive/logs/v1/changelog-v1.5.0.md
 PurchaseUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler
 ManifestType: locale
 ManifestVersion: 1.5.0

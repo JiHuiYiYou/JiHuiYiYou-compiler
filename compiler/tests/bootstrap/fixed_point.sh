@@ -8,7 +8,7 @@
 #   cap_test.jhyy 跨代 exit code = 42 (per V3-C v3.1.0 ship, 8-byte Cap<T>)
 #
 # N=3 是 primary ship gate (per D43); N=4/5 informational; N=6-N=10 informational
-# for v2.14.0 ship (per docs/plans/v2/v2.14.0-plan.md Phase 1).
+# for v2.14.0 ship (per docs/archive/plans/v2/v2.14.0-plan.md Phase 1).
 #
 # v1↔v2 closure 复用 byte_equal.sh (per D26); v2↔v3, v3↔v4, ... 由本 script
 # 直接 diff. .s / .exe byte-equal 不强制 (v2.6.0 起 peephole + regalloc 改 .s,
@@ -17,12 +17,12 @@
 # v2.14.0 升级:
 #   - JHY_FP_MAX_N default 5 → 10
 #   - JHY_FP_BASELINE_SHA: 可选环境变量, 期望所有 v_N sha 跟它 byte-equal (per
-#     docs/logs/v2/d43-baseline-archive.md 当前 active baseline)
+#     docs/archive/logs/v2/d43-baseline-archive.md 当前 active baseline)
 #   - JHY_FP_FAILFAST=0 默认; 设 1 → 任一代 break 立即 exit 1 (而非 INFO)
 #   - per-代 timing 验证 closure 不退化 (10 代 < 1.5x 单代时间)
 #
 # v2.15.0 升级:
-#   - 加 .s byte-equal 第二层 (per docs/plans/v2/v2.15.0-plan.md Strategy B+):
+#   - 加 .s byte-equal 第二层 (per docs/archive/plans/v2/v2.15.0-plan.md Strategy B+):
 #     in-mem self path 默认 .s 跟 JHY_WRITE_IL=1 self path .s byte-equal → 跨代
 #     closure 也是 byte-equal (per D43 dual-layer extension)
 #   - JHY_FP_BASELINE_S_SHA: 可选环境变量, 期望所有 v_N .s sha 跟它 byte-equal
@@ -151,7 +151,7 @@ echo
 IL_V1="$JHY_FP_BUILD_DIR/main_v1.il"
 IL_V2="$JHY_FP_BUILD_DIR/main_v2.il"
 IL_V3="$JHY_FP_BUILD_DIR/main_v3.il"
-# v2.15.0: .s byte-equal 第二层 (per docs/plans/v2/v2.15.0-plan.md Strategy B+)
+# v2.15.0: .s byte-equal 第二层 (per docs/archive/plans/v2/v2.15.0-plan.md Strategy B+)
 S_V1="$JHY_FP_BUILD_DIR/main_v1.s"
 S_V2="$JHY_FP_BUILD_DIR/main_v2.s"
 S_V3="$JHY_FP_BUILD_DIR/main_v3.s"
@@ -199,7 +199,7 @@ echo "  v1=$SHA_V1"
 echo "  v2=$SHA_V2"
 echo "  v3=$SHA_V3"
 
-# v2.13.0 Phase 1 re-baseline event (per docs/logs/v2/d43-baseline-archive.md SOP):
+# v2.13.0 Phase 1 re-baseline event (per docs/archive/logs/v2/d43-baseline-archive.md SOP):
 #   v2 (current) ≠ v1 (frozen historical) is EXPECTED when codegen changes;re-baseline
 #   archives the OLD v1 sha and sets new active baseline = v2 sha.Closure is verified by
 #   v2=v3 byte-equal (N=3 primary ship gate).v1=v2 match = "HOLD" (no re-baseline).

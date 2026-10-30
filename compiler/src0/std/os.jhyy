@@ -1,6 +1,6 @@
 // os.jhyy — v3.2.3 (3l.2) std lib OS:syscall wrappers (open/read/write/exit/getenv)。
 //
-// M0 简化(per `docs/plans/v3/v3.2.3-plan.md` + 2026-09-10 user 决定):
+// M0 简化(per `docs/archive/plans/v3/v3.2.3-plan.md` + 2026-09-10 user 决定):
 //   - 不依赖 closure / generic / 借用
 //   - 不依赖 std::mem / std::string(避免 cross-module import — 见 W-077 根因)
 //   - 不 export cap / fd table(M11 OS launch 后再做 v3.x 中)
