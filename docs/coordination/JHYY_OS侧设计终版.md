@@ -108,11 +108,14 @@ offset  size  field        type
 | `cnode_idx:u32` | 至多 2^32 个逻辑 slot 编号 | slot 空间不必连续；内核可划分 CNode、保留特殊索引 |
 | `depth:u8` | 从当前 CNode 根起至多 256 层 | 撤销链长度有静态界，**但不能单靠它识别对象身份或兄弟关系** |
 | `rights:u16`，低 3 位 R/W/G | 每 cap 携带授权标志 | 权限检查在**内核对象访问点统一执行**，而不是由服务策略散落决定 |
-| `padding:u8` | 当前未解释 | 不可用作自由用途；建议保留给未来 flags/version（见 §12 D4） |
+| **`gen:u8`** | **slot 复用代数**（D4 已定） | 承载「这个 cap 还活着吗」⇒ slot 复用 = UAF 且**静默越权** |
 | **`Cap<T>` 的 `T` 不解析** | 当前所有 `Cap<T>` 实例等价 | 内核无法在类型系统层信任「这是 frame cap」 |
 
-⚠️ **真正的异常是 `T` 不被解析** —— `Cap` 的 inner 被硬编码成 `i32`，
-所以 `Cap<i32>` 与 `Cap<i64>` **是同一个类型**（lang-spec §2.6 / abi §2.5 实测记录）。
+⚠️ **真正的异常是 `T` 不被解析** —— `Cap<T>` 的 inner **被解析但被忽略**：
+`Cap` 在符号表里**只登记一次**，**第一个 `Cap<X>` 赢**（此后所有 `Cap<Y>` 解析到同一个符号）
+⇒ `Cap<i32>` 与 `Cap<i64>` **是同一个类型**（2026-10-30 实测：可互相赋值；
+对照组普通泛型 `P<i32>` → `P<i64>` 会报 `type mismatch in let`）。
+且 inner **从不 resolve 也不校验** ⇒ `Cap<NotAType>` **零诊断**。
 名义相等按 `elem` 区分的说法在当前实现下**不成立**。
 ⇒ wire 已具备对象身份，**语言层却还不能把对象身份对应到对象类型**。
 
@@ -886,4 +889,4 @@ file/shm/framebuffer/compositor/surface/seat/buffer 才能真正形成 capabilit
 | [`docs/abis/jhyy-abi-v4.0.0.md`](../abis/jhyy-abi-v4.0.0.md) | ABI 白皮书（锁定 2026-10-24）· §2.5 `Cap<T>` · §12 已知偏离 |
 | [`docs/abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) | `.jhyynb` 二进制格式（**设计稿，未实装**）· §7 cap_init |
 | [`docs/plans/v4/README.md`](../plans/v4/README.md) | **版本系列索引** —— 每个版本槽一份 `v4.X.Y-plan.md`（性能线 6 + OS 线 16） |
-| [`docs/workarounds.md`](../workarounds.md) | W-NNN 台账（ACTIVE = 0）· W-105 借用检查最小版 · W-113 `asm!` 内联 · W-136 side-file |
+| [`docs/workarounds.md`](../workarounds.md) | W-NNN 台账（**ACTIVE = 1** —— W-170：`jhyy build` 不处理 `#[link_section]`）· W-105 借用检查最小版 · W-113 `asm!` 内联 · W-136 side-file |

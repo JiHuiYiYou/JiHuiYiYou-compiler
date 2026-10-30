@@ -439,7 +439,10 @@ let desc = match x {
 - **穷尽性检查已实装**：match 作用在 enum 上时，每个变体必须被显式覆盖或由 `_` 兜底，否则编译错误 `non-exhaustive match: missing variant`。
 - ⚠️ **范围的端点语义与 `for` 循环不同**：`0..10` 在 match 里**同时匹配 0 和 10**（闭区间），在 `for` 里不含 10（半开）。写范围 pattern 时按闭区间理解。
 - ⚠️ 不支持 **guard pattern**（`Some(x) if x > 0` → 解析错误）。
-- ⚠️ 不支持嵌套 OR（`A | B | C`）与二层以上的嵌套 pattern。
+- ⚠️ **二层以上的嵌套 pattern 不支持**（`Some(Some(x))` 解析失败）。
+- **OR pattern 支持多路** —— `A | B | C`、enum 变体 OR（`O::A | O::B`）、
+  嵌套 pattern 里的 OR（`O::A(x) | O::B(x)`）均正常工作
+  （2026-10-30 实测：命中语义与穷尽性判定都正确）。
 
 ### 5.7 闭包
 
@@ -794,7 +797,8 @@ asm!("nop");
 asm!("cpuid");
 ```
 
-- 语句位置专用，不能作表达式值使用。
+- 语法上**表达式位置也可用**（`let x = asm!("nop");` 能编译），但**返回值语义未定义**
+  ⇒ **惯例写在语句位置，不要依赖它的值**。
 - 单字符串参数；**不支持操作数约束**、模板占位符、clobber 声明（`asm!(...) operands are not supported ... single-string-literal only`）。
 - AT&T 语法，x86-64 only。
 - **内联在函数体当前位置**（文本 hex 编码进 IL，后端在该位置解回原文写入 `.s`）。这一点是正确性问题：早期实现把它 append 到 `.s` 末尾，落在所有函数之外成为**死字节**。
@@ -885,6 +889,9 @@ fence_release();   // sfence
 ## 19. Debug ABI（🔒 per D41）
 
 > **状态**：🔒 v2.2.0 锁定 Debug ABI 跨项目契约，随本规范 v4.0.0 一并继承。
+> ⚠️ **本节是「跨项目 wire 契约」，不是编译器侧已实装的类型** ——
+> `DebugEvent` / `ErrChain` / `ProvenanceInfo` 在 `compiler/src0/` 里**零命中**
+> （编译器侧不定义、不生成这些类型）⇒ 读本节时按「OS 侧与外部工具链的契约」理解。
 > **权威位置**：**本节即权威**（编译器侧）。原 OS 端镜像 `jhyy_OS/docs/v0.0.4-debug-abi.md`（🔒 Locked 2026-08-12，Q-Compiler-007 闭环 / D41）已随 OS 侧文档整体清理于 2026-10-30（commit `f98d83d`）⇒ **OS 侧重写时从本节镜像，不得反向**。
 > **doc version pinning**：本节锁定时引用 OS doc 的 commit/tag；OS 端后续更新走 Q-Compiler-007 流程同步。
 
