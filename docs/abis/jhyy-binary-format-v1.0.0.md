@@ -58,7 +58,7 @@ jhyy_OS kernel 走 `kernel.efi`(PE/COFF,被 UEFI 协议锁,per **D1** 2026-08-04
 ```
 .jhyynb 文件结构(自顶向下):
 ┌─────────────────────────────────────────┐
-│ § 4 Header (固定 112B,8-aligned)        │ ← magic + version + flags + offsets
+│ § 4 Header (固定 120B,8-aligned)        │ ← magic + version + flags + offsets
 ├─────────────────────────────────────────┤
 │ § 5 Section Table (N × 32B)             │ ← N 个 section 描述符
 ├─────────────────────────────────────────┤
@@ -92,10 +92,10 @@ jhyy_OS kernel 走 `kernel.efi`(PE/COFF,被 UEFI 协议锁,per **D1** 2026-08-04
 
 ---
 
-## 4. Header(112B, 8-aligned)
+## 4. Header(120B, 8-aligned)
 
 ```c
-struct JhynbHeader {                        // 8-aligned, 全自然对齐, 显式 _pad
+struct JhynbHeader {                        // 放置 8-aligned;自然 alignof = 8;padding 全部显式写成 _pad*
     magic:         [4]u8 = 'J','B','E','\x01',  // "JBE\x01" — JBE = Jhyy Binary Executable, \x01 = format version 1;4B magic
     version:       u16 = 1,                  // 格式版本(初始 1)
     flags:         u16,                      // bit 0 = debug_info present
@@ -108,14 +108,15 @@ struct JhynbHeader {                        // 8-aligned, 全自然对齐, 显�
                                                 // bit 7-15 = reserved
     target:        u8 = 0,                   // 0 = amd64_jhyy_os(预留 1=aarch64, 2=riscv64)
     abi_version:   u8,                       // 对齐 jhyy-abi-v1.x.x 主版本
-    _pad0:         u16,                      // 显式 padding(8-aligned 下一字段)
+    _pad0:         u16,                      // 显式 padding(offset 10 → 12)
+    _pad1:         u32,                      // 显式 padding(offset 12 → 16;下一个 u64 字段要 8 对齐)
 
     entry_point:   u64,                      // .text 段内 _start 偏移(vaddr = section[.text].vaddr + entry_point)
     stack_size:    u64,                      // 初始栈大小(per-thread; kernel 创建时 mmap)
     heap_hint:     u64,                      // 初始 heap 起始 hint(user std malloc first-fit 起跳点)
 
     section_count: u16,                      // section table 条目数
-    _pad1:         u16,                      // padding
+    _pad2:         u16,                      // padding
 
     section_table_off:   u32,                // section table 文件偏移(相对 .jhyynb 起点)
     section_table_size:  u32,                // N × 32B
@@ -124,15 +125,15 @@ struct JhynbHeader {                        // 8-aligned, 全自然对齐, 显�
 
     cap_init_off:        u32,                // § 7 cap init table 偏移;0 = 无
     cap_init_count:      u16,                // 条目数
-    _pad2:               u16,
+    _pad3:               u16,
 
     ipc_dispatch_off:    u32,                // § 8 IPC dispatch table 偏移;0 = 无
     ipc_dispatch_count:  u16,
-    _pad3:               u16,
+    _pad4:               u16,
 
     region_table_off:    u32,                // § 9 region table 偏移;0 = 无
     region_table_count:  u16,
-    _pad4:               u16,
+    _pad5:               u16,
 
     debug_off:           u32,                // § 12 debug section 偏移;0 = 无
     debug_size:          u32,
@@ -143,12 +144,18 @@ struct JhynbHeader {                        // 8-aligned, 全自然对齐, 显�
     reloc_table_off:     u32,                // § 14 relocation 表偏移;0 = 无
     reloc_table_size:    u32,
 
-    header_crc:          u32,                // CRC32(header[0..104]) — transit corruption detect
+    header_crc:          u32,                // CRC32(header[0..108]) — transit corruption detect
 
-    _pad5:               u32,                // 尾 padding(8 对齐收尾)
+    _pad6:               u32,                // 尾 padding(8 对齐收尾)
 }
-// 总 112B, sizeof = 112, alignof = 8
+// 总 120B, sizeof = 120, alignof = 8
 ```
+
+> **2026-10-31 订正**：原文写 **112B**。按自然对齐重算是 **120B** —— `_pad0: u16` 结束于
+> offset 12，而下一个 `entry_point: u64` 要 8 对齐 ⇒ offset 12 处有 **4B 隐式 padding**
+> （而本文档自己的规矩是「padding 显式写成 `_pad*` 字段」）⇒ 补了 `_pad1: u32`，
+> 顺延 `_pad2…_pad6`。`header_crc` 实际在 offset **108** ⇒ CRC 覆盖 `header[0..108]`。
+> 尺寸由门 `scripts/dev/check_binary_format_layout.py` 守着。
 
 **字段语义注释**:
 - `entry_point` 是 `.text` 段内偏移,**不是绝对 vaddr**;loader 用 `section[.text].vaddr + entry_point` 算真实入口(per ABI § 9 程序入口)
@@ -213,6 +220,7 @@ struct StringTable {
     strings:        []u8,                    // N 个 null-terminated string 拼接
                                                 // 末尾 8B 对齐
 }
+// 变长:固定部分 4B(_pad)+ N 字节字符串区,总大小随 N 变化 ⇒ 不能声明固定 sizeof
 ```
 
 **引用方式**:`name_idx` 是相对 StringTable 起点的字节偏移。Section / Symbol / Region name 全部走这个表。
@@ -222,7 +230,7 @@ struct StringTable {
 ## 7. Cap Init Table(per-entry 32B, 8-aligned)
 
 ```c
-struct CapInitEntry {                       // 8-aligned, 全自然对齐
+struct CapInitEntry {                       // 放置 8-aligned;自然 alignof = 4
     type_tag:       u32,                     // 0=endpoint, 1=page, 2=framebuffer,
                                                 // 3=console, 4=file, 5=shm,
                                                 // 6=compositor, 7=surface,
@@ -244,7 +252,7 @@ struct CapInitEntry {                       // 8-aligned, 全自然对齐
     _pad2:          u32,                     // 显式 padding
 
 }
-// 总 32B, sizeof = 32, alignof = 8
+// 总 32B, sizeof = 32, alignof = 4
 ```
 
 **为什么这样设计**:
@@ -260,7 +268,7 @@ struct CapInitEntry {                       // 8-aligned, 全自然对齐
 ## 8. IPC Dispatch Table(per-entry 16B, 8-aligned)
 
 ```c
-struct IpcDispatchEntry {                   // 8-aligned, 全自然对齐
+struct IpcDispatchEntry {                   // 放置 8-aligned;自然 alignof = 4
     msg_tag:        u32,                     // IPC 消息 tag(用户层 enum)
     handler_fn_off: u32,                     // .text 内偏移 — handler 函数入口
                                                 // (= section[.text].vaddr + off)
@@ -269,7 +277,7 @@ struct IpcDispatchEntry {                   // 8-aligned, 全自然对齐
 
     cap_off_table_off: u32,                  // .rodata.cap_offsets 段内偏移(D16 wire format)
 }
-// 总 16B, sizeof = 16, alignof = 8
+// 总 16B, sizeof = 16, alignof = 4
 ```
 
 **`cap_off_table_off` 指向的子结构**(在 `.rodata.cap_offsets` 段内):
@@ -279,7 +287,8 @@ struct CapOffsetTable {                     // D16 wire format
     _pad0:          u16,                     // padding(8 对齐)
     cap_offsets:    []u16,                   // Cap<T> 字段在 IPC message struct 内的偏移数组
 }
-// 大小 = 8 + n_caps * 2B; 末尾 8B 对齐
+// 变长:固定部分 4B(n_caps u16 + _pad0 u16)+ n_caps * 2B(cap_offsets),末尾 8B 对齐
+//      ⇒ 总大小 = align_up(4 + n_caps*2, 8),随 n_caps 变化 ⇒ 不能声明固定 sizeof
 ```
 
 **为什么这样设计**:
@@ -334,7 +343,7 @@ Debug section 是一个**复合容器**,内部组织成"debug sub-section group"
 ```
 Debug Group 结构:
 ┌─────────────────────────────────────────┐
-│ Debug Group Header (16B)                 │
+│ Debug Group Header (12B)                 │
 │  - sub_section_count: u16                │
 │  - _pad: u16                              │
 │  - total_size: u32 (整个 debug group 大小) │
@@ -360,7 +369,7 @@ struct DebugSubSection {
     flags:          u16,                     // bit 0 = compressed(zlib), bit 1 = required
     _pad0:          u16,                     // padding
 }
-// 总 16B
+// 总 16B, sizeof = 16, alignof = 4
 ```
 
 **标准 DWARF sub-section 名(per DWARF v5 spec)**:
@@ -410,7 +419,7 @@ struct SymbolEntry {                        // 8-aligned
     vaddr_off:      u32,                     // section 内偏移(vaddr = section.vaddr + vaddr_off)
     size:           u32,                     // 符号占用大小(代码 = 函数体字节数;变量 = sizeof)
 }
-// 总 16B(可选 24B 带 type metadata)
+// 总 16B, sizeof = 16, alignof = 4(可选 24B 带 type metadata)
 ```
 
 **MVP 简化**:v0 仅 function + global_var 两种 kind;type metadata 留未来扩展(预留 24B form)。
@@ -428,7 +437,7 @@ struct RelocEntry {                         // 8-aligned
     offset:         u32,                     // section 内偏移(要 patch 的位置)
     addend:         u64,                     // 加数(PIE 时 = 0)
 }
-// 总 16B
+// 总 16B, sizeof = 16, alignof = 8
 ```
 
 **MVP 静态链接**:`reloc_table_off = 0` — 编译器 emit 时所有地址已知,不需要 patch
@@ -497,7 +506,8 @@ struct RelocEntry {                         // 8-aligned
 
 **设计层面**(实装前):
 1. **ABI 一致性**:§ 16 对位表逐项检查,每个 D-lock 都有对应字段
-2. **size 算术**:每个 struct 末尾对齐算一遍;全表 8-aligned;Header 总 112B
+2. **size 算术**:每个 struct 按**自然对齐逐字段**算(中间的隐式 padding 必须写成显式 `_pad*` 字段);Header 总 **120B**
+   ⇒ 由门 `scripts/dev/check_binary_format_layout.py` 守着(它按自然对齐重算并校验声明尺寸 / alignof / 无隐式 padding)
 3. **cap_init wire format 跟 OS cnode byte-equal**:模拟 .jhyynb § 7 + OS cnode 内存,逐字节 diff
 4. **DWARF sub-section 名跟 GDB 期望对齐**:DWARF v5 spec 附录查 .debug_* 完整名清单
 

@@ -6,13 +6,14 @@
 #
 # | step                                   | 阻断?  | 验的是                                    |
 # |----------------------------------------|--------|-------------------------------------------|
-# | regress.py --all                       | ✅ 是  | 201 个测试的退出码/stdout 断言            |
+# | regress.py --all                       | ✅ 是  | 261 个测试的退出码/stdout 断言            |
 # | vscode-ext:check-grammar(独立 job)     | ✅ 是  | VSCode 语法高亮 grammar 与真实语言规则一致 |
 # | 提交产物与当前源码同步(artifact-fresh)| ✅ 是  | 提交版与现编版编 src0 的 `.s` 逐字节相同  |
 # | make selfhost                          | ✅ 是  | v2..v5 的 `.s` 逐字节相同(确定性+自洽)   |
 # | closure_check.sh                       | ✅ 是  | Stage2 `.s` == Stage3 `.s`(自举闭环)      |
 # | audit_test_assertions.py --strict      | ✅ 是  | 每个测试都有能失败的断言                   |
 # | artifact_checks.sh                     | ✅ 是  | 产物字节布局(expected-FAIL 模型,见 step)  |
+# | check_binary_format_layout.py          | ✅ 是  | `.jhyynb` 每个 struct 的尺寸算术可算、无隐式 padding |
 # | ~~jhyy_v1.exe.exe cmp 副本约定~~       | —     | 2026-10-18 删除,理由见下方 [已删 step]    |
 #
 # **每道门验的是什么边界,别互相误读:**
@@ -585,6 +586,16 @@ jobs:
         shell: msys2 {0}
         run: |
           python scripts/dev/check_spec_consistency.py
+
+      - name: Binary format layout gate (.jhyynb struct sizes must be computable)
+        # 2026-10-31 新增:binary-format 的每个 struct 尺寸是**手写**的,不是算出来的
+        # ⇒ 人算错时没人知道。实测抓到三处真错:header 写 112B(实为 120B,且有 4B
+        # 隐式 padding)、Debug Group Header 写 16B(实为 12B)、header_crc 的 CRC
+        # 覆盖范围写错 ⇒ 规范照着实现的人会**二进制错位**而 CI 全绿。
+        if: always()
+        shell: msys2 {0}
+        run: |
+          python scripts/dev/check_binary_format_layout.py
 
   # ══════════════════════════════════════════════════════════════════════
   # 5 个 SysV ABI 测试 —— 此前在 CI 上**根本不存在门**

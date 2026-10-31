@@ -122,7 +122,7 @@ offset  size  field        type
 
 ### 2.2 `.jhyynb` —— 为 capability 启动而设计的格式
 
-magic `JBE\x01`，header 112 B。
+magic `JBE\x01`，header **120 B**（2026-10-31 按自然对齐重算订正，原写 112 B）。
 ⚠️ **binary-format v1.0.0 是设计稿，未实装**（abi §12.10）—— 下列结构是**目标格式**，不是当前产物。
 
 | Section | kind | 表项大小 | 承载语义 |
