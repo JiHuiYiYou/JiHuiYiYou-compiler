@@ -63,6 +63,31 @@ static char **g_argv_a = NULL;
 static int   g_argc_a = 0;
 
 int main(int argc, char **argv) {
+    /*
+     * stdout **不缓冲**。
+     *
+     * 为什么:C 运行时给 stdout 的缓冲方式取决于它是不是**交互设备**:
+     * - 终端(FILE_TYPE_CHAR):行缓冲/无缓冲 ⇒ printf("请输入一个数字: ")
+     *   立刻就显示出来了;
+     * - 管道(FILE_TYPE_PIPE):**全缓冲** ⇒ 那句提示一直躺在 4KB 缓冲区里,
+     *   直到程序退出才一次性冲出来。
+     *
+     * 而 stdout 到底是不是终端,取决于**谁在跑这个程序**:
+     * - 在 cmd / Windows Terminal 里直接跑 jhyy run ⇒ stdout 是控制台 ⇒ 没事;
+     * - 被 IDE、被 CI harness、被 `jhyy run | less` 这种管道包起来 ⇒ stdout
+     *   是管道 ⇒ **提示看不见**:程序先问「请输入一个数字:」,可屏幕上一个字
+     *   都没有,用户只能瞎猜(用户报过:「有一个输出在输入之前,但他只会在输入
+     *   之后打印」—— 那句提示一直卡在缓冲区里,直到程序读完输入才吐出来)。
+     *
+     * `_IONBF` 让 stdout 跟连控制台时一个样:每次 printf 立即落盘。
+     * 代价是每次 printf 一次 write 系统调用 —— 对这种体量的程序无所谓,
+     * 而「提示立刻可见」值钱得多。
+     *
+     * ⚠️ 编译器自己也链 runtime.c,所以 jhyy.exe 的 stdout 同样变成无缓冲 ——
+     *    无害:编译时 stdout 是 **0 字节**(进度和诊断全走 stderr,实测过),
+     *    只有 `--help` 之类才写 stdout。
+     */
+    setvbuf(stdout, NULL, _IONBF, 0);
 #ifdef _WIN32
     /* W-047: re-decode argv from Unicode command line */
     LPWSTR wcmd = GetCommandLineW();
