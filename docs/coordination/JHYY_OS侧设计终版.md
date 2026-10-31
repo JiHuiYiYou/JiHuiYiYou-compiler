@@ -93,11 +93,12 @@ offset  size  field        type
 0       4     cnode_idx    u32     CSpace slot index
 4       1     depth        u8      CDL 深度
 5       2     rights       u16     bit0=R, bit1=W, bit2=G
-7       1     padding      u8      零
+7       1     gen          u8      slot 复用代数(slot 被复用时 +1)
 ```
 
 小端序。来源：lang-spec §2.6 与 abi §2.5（**逐字一致**）。
-⚠️ binary-format §2 记载的是 `_pad:u8@5` + `rights:u16@6` ⇒ **冲突，见 §12 D1**。
+⚠️ binary-format §2 曾记载 `_pad:u8@5` + `rights:u16@6` ⇒ **冲突，已裁决为 `rights@5`**
+（binary-format 已于 2026-10-30 订正；详见 §3.6）。
 
 **三个独立维度**：slot 索引、从 CNode 根出发的层级、权限。
 它不只是「一个整数」—— **slot 语义只有在 CNode 与 depth 共同解释时才有意义**；
@@ -108,7 +109,7 @@ offset  size  field        type
 | `cnode_idx:u32` | 至多 2^32 个逻辑 slot 编号 | slot 空间不必连续；内核可划分 CNode、保留特殊索引 |
 | `depth:u8` | 从当前 CNode 根起至多 256 层 | 撤销链长度有静态界，**但不能单靠它识别对象身份或兄弟关系** |
 | `rights:u16`，低 3 位 R/W/G | 每 cap 携带授权标志 | 权限检查在**内核对象访问点统一执行**，而不是由服务策略散落决定 |
-| **`gen:u8`** | **slot 复用代数**（D4 已定） | 承载「这个 cap 还活着吗」⇒ slot 复用 = UAF 且**静默越权** |
+| **`gen:u8`** | **slot 复用代数**（slot generation 方案已定） | 承载「这个 cap 还活着吗」⇒ slot 复用 = UAF 且**静默越权** |
 | **`Cap<T>` 的 `T` 不解析** | 当前所有 `Cap<T>` 实例等价 | 内核无法在类型系统层信任「这是 frame cap」 |
 
 ⚠️ **真正的异常是 `T` 不被解析** —— `Cap<T>` 的 inner **被解析但被忽略**：
@@ -147,7 +148,7 @@ provenance_seed_off:u32 · _pad2:u32
 
 ⚠️ **cap_init 的 `rights:u16` 字段与 `Cap<T>` wire 的 `rights:u16` 字段是两个不同的字段，
 但被设计成同源**（binary-format § 7「Cap Init Table」：「rights 直接对应 `Cap<T>` 8B 布局的 rights:u16 字段，
-kernel 分配 cap 时直接 copy」）⇒ 见 §12 D2。
+kernel 分配 cap 时直接 copy」）⇒ 详见 binary-format § 7「Cap Init Table」。
 
 **IPC dispatch 表项（16 B）**：
 
@@ -155,7 +156,7 @@ kernel 分配 cap 时直接 copy」）⇒ 见 §12 D2。
 msg_tag:u32 · handler_fn_off:u32 · cap_off_count:u16 · cap_off_table_off:u32
 ```
 
-它引用 D16 wire `{n_caps:u16, _pad:u16, cap_offsets:[]u16}`；
+它引用 cap-offset 表的 wire 格式 `{n_caps:u16, _pad:u16, cap_offsets:[]u16}`；
 **内核收到 IPC 后按 `cap_offsets` 原地改写 `cnode_idx` 以避免 deep-copy**。
 
 > 原地改写是有价值的性能决定，但它也意味着 **message struct 与 cap_offsets 的布局错配
@@ -330,7 +331,7 @@ cnode_idx:u32@0 · depth:u8@4 · rights:u16@5 · gen:u8@7
 | binary-format § 2 | ~~`rights:u16@6`~~ | 设计稿（2026-09-04，未实装）⇒ **已按本布局修订** |
 
 **判定证据、逐条推理与编译器侧动作 ⇒
-[`JHYY_编译器侧设计终版.md` § 7.1](JHYY_编译器侧设计终版.md#71-三处规范冲突cap-wire-布局编译器侧动作)。**
+[`JHYY_编译器侧设计终版.md` § 7.1](JHYY_编译器侧设计终版.md#71-cap-wire-布局的字节偏移--已收敛历史记录)。**
 一句话：lang-spec § 2.6 自带的构造示例
 `0x0000030200000007 as Cap // cnode=7, depth=2, rights=R|W`
 小端展开 = `07 00 00 00 | 02 | 03 00 | 00` ⇒ **只有 `rights@5` 下才自洽**。
@@ -579,7 +580,7 @@ fn map_into<'f, R>(
 | 能防住 | 防不住 |
 |---|---|
 | 凭空造物理地址（`0x1000 as ptr<phys>` 编译失败） | 用户态把 8 字节 slot **复制**给另一个进程（object capability 的固有边界） |
-| 用 endpoint cap 去访问物理内存 | slot 释放后被复用，旧 cap 指向新对象（**需要 slot version**，见 D4） |
+| 用 endpoint cap 去访问物理内存 | slot 释放后被复用，旧 cap 指向新对象（**需要 slot version**） |
 | 只读 frame 派生出可写 phys（rights 跟随） | 内核本身的 bug（capability 模型不保护内核） |
 
 ### 7.4 `ptr<io>` 必须与 `ptr<phys>` 分开
@@ -748,7 +749,7 @@ CpuLocalOff → CpuLocalReady · InterruptsOff → ThreadingReady
 | 12 | 侵入式容器与 pin 保证 | 内核对象常驻链表/队列，不能移动 | 容器指针悬空；list_head 需重复 unsafe 包装 | 无 list_head/trait/移动模型 | 编译期 | **OS-15（P4c）** |
 | 13 | BootState 线性 typestate | paging/heap/alloc/interrupt 有严格顺序 | 未映射页表时使用 global alloc，或未初始化 CPU 时开中断 | 无启动状态系统 | 编译期 | OS-6 / OS-14 |
 | 14 | `#[naked]` 与 interrupt 栈契约 | GUI 接口使用 `#[naked]` interrupt | 入口使用错误栈、Callee-saved 或 redzone | 有 `#[naked]`，规则不足 | 编译期契约 | OS-14 |
-| 15 | wire 结构稳定 repr 与布局测试 | D41 禁止 packed，要求自然对齐 + 显式 `_pad` | section 解析发生 padding 相关 UB | D41 已锁定 | 编译期布局测试 | OS-5 / OS-16 |
+| 15 | wire 结构稳定 repr 与布局测试 | Debug ABI 布局契约禁止 packed，要求自然对齐 + 显式 `_pad` | section 解析发生 padding 相关 UB | 已锁定 | 编译期布局测试 | OS-5 / OS-16 |
 | 16 | `cap_offsets` bitmap/handler 签名元数据 | 防止 IPC stub 把普通字节当 cap | 内核按错误 offset 改写 CNode | 仅有 offsets 数组 | 编译期输出 + 运行期检查 | OS-14 |
 | 17 | region 边界与生命周期 metadata | region_table 只有 base/size/flags | 越界映射或共享对象过早释放 | 部分存在 | 编译期/运行期 | OS-13 |
 | 18 | panic/oops/继续可达性分析 | 内核无 panic、无 unwind | 无法区分可恢复错误与内核 fault | 未定义 | 编译期 + 运行期 | OS-16 |
@@ -884,7 +885,7 @@ file/shm/framebuffer/compositor/surface/seat/buffer 才能真正形成 capabilit
 
 | 文档 | 用途 |
 |---|---|
-| [`docs/coordination/JHYY_编译器侧设计终版.md`](JHYY_编译器侧设计终版.md) | 编译器分期路线 · pass 全表 · 规范一致性门 · 编译器侧 4 条待拍板 · 静默错误清单 |
+| [`docs/coordination/JHYY_编译器侧设计终版.md`](JHYY_编译器侧设计终版.md) | 编译器分期路线 · pass 全表 · 规范一致性门 · 编译器侧 5 条「不确定性与需补材料」· 静默错误清单 |
 | [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../abis/jhyy-lang-spec-v4.0.0.md) | 语言规范（锁定 2026-10-24）· §2.6 `Cap<T>` |
 | [`docs/abis/jhyy-abi-v4.0.0.md`](../abis/jhyy-abi-v4.0.0.md) | ABI 白皮书（锁定 2026-10-24）· §2.5 `Cap<T>` · §12 已知偏离 |
 | [`docs/abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) | `.jhyynb` 二进制格式（**设计稿，未实装**）· §7 cap_init |

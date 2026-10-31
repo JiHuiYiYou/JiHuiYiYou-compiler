@@ -47,7 +47,7 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 | rights 单调收缩 | 编译期生成证明 + **运行期内核强制** |
 | IPC `msg_tag` 唯一、handler 签名一致 | 编译期 |
 | `cap_offsets` 合法性与位图 | 编译期布局验证 + **内核必须重查**（消息可能来自不可信进程） |
-| message struct 字段 size/align 一致 | 编译期（D41 无 packed、显式 `_pad` 下可完整检查；**Debug ABI 权威 = [lang-spec § 19](../abis/jhyy-lang-spec-v4.0.0.md#19-debug-abi-per-d41)**） |
+| message struct 字段 size/align 一致 | 编译期（Debug ABI 布局契约无 packed、显式 `_pad` 下可完整检查；**Debug ABI 权威 = [lang-spec § 19](../abis/jhyy-lang-spec-v4.0.0.md#19-debug-abi-跨项目契约)**） |
 | region 内访问不越界 | 运行期为主 |
 | 跨进程 cap 派生 / 拷贝 / revoke | 运行期 |
 | 页表 / TLB / ASID / 中断屏蔽 | 运行期 |
@@ -335,7 +335,7 @@ rights 是节点上的常量属性。代码生成把 8 字节 wire 写入位置�
 |---|---|---|---|---:|---:|---|---|
 | `ParamTypeChecker` | AST/HIR | 实参类型/个数 + extern 形状错误 | 完整签名 | 静默错误 | 中 | 是 | **OS-1 (v4.6)** |
 | `BoolNormalization` | HIR/IL | 规范化 0/1 并报警来源 | 类型、控制流 | 静默错误 | 低 | 是 | **OS-1** |
-| `IntContextCoerce` | HIR | 字面量按期望类型解释 | 期望类型 | 规范缺口 | 低 | 是 | **OS-1（D12）** |
+| `IntContextCoerce` | HIR | 字面量按期望类型解释 | 期望类型 | 规范缺口 | 低 | 是 | **OS-1（整数上下文转换）** |
 | `TlsStageAllocator` | 驱动层 | 每编译唯一 temp path | 无 | 并发 | 低 | 是 | ✅ 已做（W-136） |
 | `CapTypeResolver` | HIR | `Cap<T,R>` 节点与子集约束 | `T`、`rights` | 授权 | 中 | 是 | **OS-14** |
 | `AddressSpaceChecker` | typed IR | `ptr<space>` 构造/解引用图 | cap origin、space kind | 授权 | 中 | 是 | **OS-12/OS-14** |
@@ -620,7 +620,7 @@ struct MapFrameMsg {
 }
 ```
 
-**D16 wire 仍由内核解析** ⇒ 内核必须检查 offset、slot 存在性和 rights，
+**cap-offset 表的 wire 格式仍由内核解析** ⇒ 内核必须检查 offset、slot 存在性和 rights，
 但 **trusted sender 的布局不一致被前移到编译期**。
 
 **错误信息必须指出迁移路径**，不能只说「不匹配」：
@@ -716,48 +716,49 @@ E0601: capability rights escalation
 
 ## §7 规范一致性与 ABI 收敛
 
-### 7.1 三处规范冲突：`Cap` wire 布局（**编译器侧动作**）
+### 7.1 `Cap` wire 布局的字节偏移 —— **已收敛**（历史记录）
 
-⚠️ **两份锁定规范对 `Cap<T>` 的 8 字节 wire 布局不一致 —— `rights` 的字节偏移差 1。**
-
-| 来源 | 布局 |
-|---|---|
-| lang-spec v4.0.0 §2.6 | `cnode_idx:u32@0` · `depth:u8@4` · **`rights:u16@5`** · `padding:u8@7` |
-| abi v4.0.0 §2.5 | 同上（**逐字一致**） |
-| binary-format v1.0.0 §2（引 D6 + D23） | `cnode_idx:u32@0` · `depth:u8@4` · **`_pad:u8@5`** · **`rights:u16@6`** |
-
-**判定证据**：lang-spec §2.6 自带构造示例
-`let c: Cap = 0x0000030200000007 as Cap;   // cnode=7, depth=2, rights=R|W`
-小端展开 = `07 00 00 00 | 02 | 03 00 | 00`
-⇒ **只有在 `rights@5` 下才解出注释说的 cnode=7 / depth=2 / rights=R|W**；
-按 `rights@6` 解出来是 `rights=0x0000`、`_pad=0x03` ⇒ **示例自相矛盾**。
-
-**另一条独立事实**：`type_tag` / `cap_init` 词汇表**只存在于 binary-format**
-（`grep -l type_tag docs/abis/*.md` 只有它）⇒ lang-spec 与 abi 互相印证，binary-format 是孤本异类。
+⚠️ **2026-09 ~ 10 曾有一处真冲突**：两份锁定规范对 `Cap<T>` 的 8 字节 wire 布局不一致 ——
+`rights` 的字节偏移差 1（`rights:u16@5` vs `rights:u16@6`）。
 
 **为什么这条比「rights 有几位」更硬**：
 「有几位」只影响语义集合大小；
 **「在第几字节」** —— 凡是按字节读写 cap 的地方（IPC 原地改写 `cnode_idx`、cap_init 复制 rights 字段、
 `.jhyynb` 序列化）**两种布局算出的字节位置不同** ⇒ **同一份程序用不同规范实现会静默读写错位 1 字节**。
 
-**当前不发作的原因**：`Cap<T>` 的 `T` 不被解析、无 `.cnode_idx`/`.depth`/`.rights` 字段访问
-⇒ **没有任何代码按字节拆 cap**。⇒ **现在改是零成本，等 `Cap<T>` 真 T 落地后再改就是 ABI break。**
+**判定证据**（当时）：lang-spec §2.6 自带构造示例
+`let c: Cap = 0x0000030200000007 as Cap;   // cnode=7, depth=2, rights=R|W`
+小端展开 = `07 00 00 00 | 02 | 03 00 | 00`
+⇒ **只有在 `rights@5` 下才解出注释说的 cnode=7 / depth=2 / rights=R|W**；
+按 `rights@6` 解出来是 `rights=0x0000`、`_pad=0x03` ⇒ **示例自相矛盾**。
 
-**编译器侧动作**：
-1. **单一真源 = lang-spec §2.6**；abi §2.5 与 binary-format §2 改为引用它
-2. binary-format §2 那行改为 `rights:u16@5` + 一句「本字段与 lang-spec §2.6 同源；改动须三处同步」
-3. **加规范一致性门** `scripts/dev/check_spec_consistency.py`：
-   从三处解析 Cap 布局的 `(offset, size, type)` 三元组 + rights 位宽 ⇒ **不一致即红**，接进 CI。
+**已收敛（2026-10-30）**：
+1. **单一真源 = lang-spec §2.6** —— `cnode_idx:u32@0` · `depth:u8@4` · `rights:u16@5` · `gen:u8@7`；
+   abi §2.5 与 binary-format §2 都已改成同一布局，binary-format 那行还带一句
+   「本字段与 lang-spec §2.6 同源；改动须三处同步」。
+2. **规范一致性门已建成并接进 CI**：`scripts/dev/check_spec_consistency.py` 从三处解析 Cap 布局的
+   `(offset, size, type)` 三元组 + rights 位宽 + 构造示例自洽 ⇒ **不一致即红**。
    （这次冲突能活三个月，就是因为**没有一道门**。）
+3. **`type_tag` / `cap_init` 词汇表仍只存在于 binary-format**（lang-spec 与 abi 互证，它仍是孤本异类）⇒
+   依赖它的结论必须标「per binary-format §X（设计稿，未实装）」。
+
+**改动纪律**：lang-spec §2.6 / abi §2.5 / binary-format §2 **三处必须同步**，门会替你验。
+⚠️ 注意 `Cap<T>` 真 T 落在 v4.14(OS-14) —— 那时起「没有代码按字节拆 cap」这个豁免就没了，
+偏移一旦再错就是**真 ABI break**。
 
 
 ### 7.2 ABI §12 的 14 条已知偏离
 
-> **编号约定**：本文的 `§N` 指**本文自己的章节**；`abi §12.x` 指 ABI 文档的偏离表；
-> **`D1` / `D2` / `D6` / `D11` / `D16` / `D23` / `D40`–`D44` / `D-GUI-*` 是 2026-09-04
-> 之前的**历史决策编号**（D-lock），清单在
-> [`docs/abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) § 16。
-> **本文不再引入新的 D 编号** —— 设计按事实定稿，没有「待拍板」这一层。
+> **编号约定**：本文的 `§N` 指**本文自己的章节**；`abi §12.x` 指 ABI 文档的偏离表。
+> **本文不引用任何 D 编号** —— 决策一律直接写内容（例：「slot generation 方案」「整数上下文转换」），
+> 不用编号当引用锚点。
+> 理由：仓内曾并存**两套** D 编号（`binary-format` § 16 的历史 D-lock，与 2026-10-30
+> coordination 拍板的那套），**同一个 `D1`/`D6` 在两套里指两件完全不同的事**，而其中
+> 一套的定义文档已被删除 ⇒ 编号当引用 = 悬空指针。
+> `.jhyynb` 格式自己的历史决策编号仍留在
+> [`docs/abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) § 16
+> —— 那是**该格式自己的决策日志，不跨文档引用**。
+> 设计按事实定稿，没有「待拍板」这一层。
 
 | # | 项 | 性质 | 收敛于 |
 |---|---|---|---|
@@ -816,7 +817,7 @@ hosted + freestanding 两套 smoke 全绿。
 | 默认 async | v4.16 起独立线，不进 OS 线 |
 | **通用代数效应**（handler / CPS / 效应代数） | 只做闭合效果格的单调传播与禁止规则 |
 | **const 泛型 + 依赖类型** | rights 走 8 个内置有限集合类型 |
-| **unsafe 关键字 / unsafe fn / unsafe trait / unsafe 块** | 用 `#[trusted]` / `#[unsafe_cap_ctor]` 属性替代（D5） |
+| **unsafe 关键字 / unsafe fn / unsafe trait / unsafe 块** | 用 `#[trusted]` / `#[unsafe_cap_ctor]` 属性替代（「不引入 unsafe 关键字」这条决策） |
 | **重度单态化** | 88 种 rights 组合上界可控；无全局编译时间预算 |
 | **Kconfig 式配置空间** | 降级为「target × 属性 × flag 组合矩阵」 |
 | **static keys / 代码自修改** | Linux 的历史包袱；推迟到 P5+ |
@@ -833,7 +834,7 @@ hosted + freestanding 两套 smoke 全绿。
 | **「16 KiB 目标」是否可达** | 按 341 KiB 基线，v4.4 寄存器分配（槽数 → ~24%）理论给到 ~85 KiB ⇒ **单靠寄存器分配到不了 16 KiB** ⇒ OS-4 之后还需别的杠杆（帧布局 / 池分离 / 更多寄存器 / 降 temp 数）⇒ **16 KiB 应标注「可达性未证」** |
 | **建议的可判定硬门** | **自举编译器自身（1045 个函数）的 `call_path_max × frame ≤ 64 KiB`** —— 自举编译器是本仓最坏情况（**1045 个真实函数**，per `docs/perf/self-backend-baseline-2026-10-29.md`；`main.jhyy` 的 max temp id 已达 **6 万量级**，见台账 W-120），它的最坏调用路径若能在 64 KiB 内跑完 ⇒ 内核栈若跑得动自举编译器，就跑得动绝大多数内核代码。⚠️ 这是**类比，不是证明** ⇒ **OS-4 的验收门数字应据此复核** |
 | **编译器源码结构 / 现有 pass 清单 / 错误码总表** | 曾是「补材料」清单的 #1；本文已按源码补齐 P0 七项的 `file:line` 证据。**剩余缺口**：增量编译缓存、测试框架细节 |
-| **D-lock 全集** | **已在仓内**：[`docs/abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) § 16「与 D-locks 对位」= 14 条（D1/D2/D6/D11/D13·D20/D16/D17/D22/D23/D40/D41/D42/D43/D-GUI-12）；OS 侧原设计文档已于 2026-10-30 全部删除（git 历史保留）⇒ **跨项目设计基线现单点落在本仓 `docs/coordination/`** |
+| **历史决策编号（D-lock）** | **`.jhyynb` 格式自己的决策日志**：[`docs/abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) § 16「与 D-locks 对位」（15 个编号）。⚠️ 那 15 个编号**只覆盖该格式自己的决策**，且**不跨文档引用** —— 本文与 `docs/plans/v4/` 一律直接写决策内容（见上方「编号约定」）。OS 侧原设计文档已于 2026-10-30 全部删除（git 历史保留）⇒ **跨项目设计基线现单点落在本仓 `docs/coordination/`** |
 | **v4.8(UEFI / kernel.efi) 本地不可完全验证** | 需 QEMU/OVMF；OS 仓设计文档已删 ⇒ 需重新确认 loader 侧的预期 |
 
 ---
@@ -842,7 +843,7 @@ hosted + freestanding 两套 smoke 全绿。
 
 | 文档 | 用途 |
 |---|---|
-| [`docs/coordination/JHYY_OS侧设计终版.md`](JHYY_OS侧设计终版.md) | 内核形态 · capability 对象模型 · `.jhyynb` 契约 · 语言—内核边界 · OS 侧 22 条需求 · OS 侧 8 条待拍板 |
+| [`docs/coordination/JHYY_OS侧设计终版.md`](JHYY_OS侧设计终版.md) | 内核形态 · capability 对象模型 · `.jhyynb` 契约 · 语言—内核边界 · OS 侧 22 条需求 · OS 侧 13 条「事实缺口」 |
 | [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../abis/jhyy-lang-spec-v4.0.0.md) | 语言规范（锁定 2026-10-24） |
 | [`docs/abis/jhyy-abi-v4.0.0.md`](../abis/jhyy-abi-v4.0.0.md) | ABI 白皮书（锁定 2026-10-24）· §12 已知偏离 |
 | [`docs/abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) | `.jhyynb` 二进制格式（**设计稿，未实装**） |

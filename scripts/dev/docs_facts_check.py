@@ -121,6 +121,20 @@ def declared() -> dict:
     else:
         out["active"] = int(m.group(1))
 
+    m = re.search(r"\| DEFERRED \| (\d+)", ft)
+    if not m:
+        fail("FACTS.md: 找不到 DEFERRED 数")
+    else:
+        out["deferred"] = int(m.group(1))
+
+    m = re.search(r"\| RESOLVED / SUPERSEDED / INVALID \| (\d+) / (\d+) / (\d+)", ft)
+    if not m:
+        fail("FACTS.md: 找不到 RESOLVED / SUPERSEDED / INVALID 那一行")
+    else:
+        out["resolved"] = int(m.group(1))
+        out["superseded"] = int(m.group(2))
+        out["invalid"] = int(m.group(3))
+
     m = re.search(r"artifact_checks\.sh` \| \*\*(\d+)", ft)
     if not m:
         fail("FACTS.md: 找不到 artifact_checks 门数")
@@ -136,6 +150,43 @@ def declared() -> dict:
 # --------------------------------------------------------------------------
 # B/C. 与现实对拍
 # --------------------------------------------------------------------------
+LEDGER_STATES = ("ACTIVE", "DEFERRED", "RESOLVED", "SUPERSEDED", "INVALID")
+
+
+def parse_ledger(text: str) -> tuple[dict[str, str], dict[str, str]]:
+    """把台账拆成「正文状态」与「索引状态」两张表。
+
+    **正文**：按 `<a id="w-NNN"></a>` 切块，取每块**第一条** `**状态:**` 行的 5 态枚举。
+    **索引**：`| [W-NNN](#anchor) | STATUS | ...` 行。
+
+    两处容错（都是台账里的既有结构，不是 bug）：
+    - §1 登记规范的**模板锚点** `w-NNN` —— 它的状态行写的是 `<STATUS>`，不是合法枚举 ⇒ 跳过。
+    - 遗留**重复锚点** `w-105-1`（与 `w-105.1` 相邻的空锚点）—— 它没有状态行 ⇒ 跳过。
+
+    为什么要正文解析：`check_ledger()` 原来只数**索引行**，所以正文里的状态漂移
+    （条目被改成 ACTIVE、正文整段删掉只留索引行）门都看不见 —— FACTS.md 声明的
+    「RESOLVED / SUPERSEDED / INVALID = 153 / 9 / 2」当时**没有任何门在读**。
+    """
+    idx: dict[str, str] = {}
+    for m in re.finditer(r"^\| \[(W-[\w.\-]+)\]\(#[^)]+\) \| ([A-Z]+) \|", text, re.M):
+        idx[m.group(1)] = m.group(2)
+
+    body: dict[str, str] = {}
+    # 用 finditer 切段而不是 re.split —— 相邻锚点（`w-105-1` 与 `w-105.1`）在
+    # split 下会互相吃掉换行，导致后者的正文被算到前者名下。
+    anchors = list(re.finditer(r'<a id="(w-[\w.\-]+)"></a>', text))
+    for i, a in enumerate(anchors):
+        start = a.end()
+        end = anchors[i + 1].start() if i + 1 < len(anchors) else len(text)
+        m = re.search(r"^\*\*状态:\*\*\s*([A-Z]+)", text[start:end], re.M)
+        if not m:
+            continue                       # 无状态行（空锚点 / 非条目块）
+        if m.group(1) not in LEDGER_STATES:
+            continue                       # 规范模板里的 `<STATUS>` 占位
+        body[a.group(1).upper()] = m.group(1)
+    return body, idx
+
+
 def check_ledger(d: dict) -> None:
     wm = ROOT / "docs" / "internal" / "workarounds.md"
     if not wm.is_file():
@@ -148,6 +199,26 @@ def check_ledger(d: dict) -> None:
         fail(f"台账索引 {idx_rows} 行 != FACTS.md 声明的 {d['ledger_total']} 行")
     if "active" in d and active != d["active"]:
         fail(f"台账 ACTIVE {active} 条 != FACTS.md 声明的 {d['active']} 条")
+
+    # ── 正文解析 + per-status 对拍（原来只查索引行，正文漂移门看不见）──
+    body, idx = parse_ledger(text)
+    if "ledger_total" in d and len(body) != d["ledger_total"]:
+        fail(f"台账正文条目 {len(body)} 条 != FACTS.md 声明的 {d['ledger_total']} 条")
+
+    counts = {s: sum(1 for v in body.values() if v == s) for s in LEDGER_STATES}
+    for key, state in (("active", "ACTIVE"), ("deferred", "DEFERRED"),
+                        ("resolved", "RESOLVED"), ("superseded", "SUPERSEDED"),
+                        ("invalid", "INVALID")):
+        if key in d and counts[state] != d[key]:
+            fail(f"台账正文 {state} {counts[state]} 条 != FACTS.md 声明的 {d[key]} 条")
+
+    # 索引状态 ↔ 正文状态必须一致（索引是索引表的副本，不是真相）
+    for wid, st in idx.items():
+        b = body.get(wid.upper())
+        if b is None:
+            fail(f"台账索引有 {wid}，但正文没有对应条目")
+        elif b != st:
+            fail(f"台账 {wid}: 索引状态 {st} != 正文状态 {b}")
 
 
 def check_gates(d: dict) -> None:

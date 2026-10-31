@@ -10,7 +10,7 @@
 > 仓内现行事实见 [`docs/internal/FACTS.md`](../internal/FACTS.md)。
 **目标**: 为 jhyy_OS user-space + jhyy 编译器自身(M11)+ GDB attach 三重角色,定义一个 **jhyy 原生** 的二进制格式
 **不在范围**: 实施 sprint 划分 / 工作量估算 / 时间表(per memory `feedback_no_date_estimates`)
-**关联**: D44(决策登记,2026-09-04 user 锁) | OS 侧镜像已于 2026-10-30 随 OS 文档整体清理(commit `f98d83d`)⇒ **OS 侧重写时从本文档镜像,不得反向** | 跨项目背景见 [`docs/coordination/JHYY_OS侧设计终版.md`](../coordination/JHYY_OS侧设计终版.md) | plan 文件 `c-jihuiyiyou-twinkling-frog.md`(个人 plan,不随仓分发)
+**关联**: 决策登记(2026-09-04 user 锁) | OS 侧镜像已于 2026-10-30 随 OS 文档整体清理(commit `f98d83d`)⇒ **OS 侧重写时从本文档镜像,不得反向** | 跨项目背景见 [`docs/coordination/JHYY_OS侧设计终版.md`](../coordination/JHYY_OS侧设计终版.md) | plan 文件 `c-jihuiyiyou-twinkling-frog.md`(个人 plan,不随仓分发)
 
 ---
 
@@ -252,7 +252,7 @@ struct CapInitEntry {                       // 8-aligned, 全自然对齐
 - `cnode_idx_hint` = 0xFFFFFFFF 时 kernel 自由分配;否则 kernel 尽量按 hint 分配(用于 init 进程持有 root endpoint 之类)
 - `rights` 直接对应 `Cap<T>` 8B 布局的 `rights: u16` 字段(per D6),kernel 分配 cap 时直接 copy
 - `init_call_off` 允许 per-Cap 初始化逻辑(jhyy-side `#[cap_constructor]` emit);loader 创建 cap 后跳此函数(若非零)
-- `provenance_seed_off` 是 jhyy 专属 — debug build 可塞 ProvenanceInfo 初始 snapshot,runtime 不用重建(per Q-OS-003 / D14)
+- `provenance_seed_off` 是 jhyy 专属 — debug build 可塞 ProvenanceInfo 初始 snapshot,runtime 不用重建(per Q-OS-003)
 - `_phantom: *T` 字段**不进 binary**(per D23, codegen skip;Cap<T> jhyy-side phantom 不出现于任何 wire format)
 
 ---
@@ -310,7 +310,7 @@ struct RegionEntry {                        // 8-aligned
 
 **为什么这样设计**:
 - `region_id` 是 OS 内核 + jhyy 编译器联合管理 — compiler codegen 时每个 `arena_alloc` 携带 region_id(per region types primary, D2)
-- `kind` 让 kernel 知道 region 怎么管理(anon_arena 进程退出释放;raw_mmio 不能 swap;unsafe_share 跨进程 ledger 追踪 per D-GUI-2)
+- `kind` 让 kernel 知道 region 怎么管理(anon_arena 进程退出释放;raw_mmio 不能 swap;unsafe_share 跨进程 ledger 追踪)
 - **不携带 borrow checker 数据**(违反 5 原则 #1 + #5)
 - `flags` 预留给 M11+ 高级特性(growable / cow)
 

@@ -899,16 +899,16 @@ fence_release();   // sfence
 
 ---
 
-## 19. Debug ABI（🔒 per D41）
+## 19. Debug ABI（🔒 跨项目契约）
 
 > **状态**：🔒 v2.2.0 锁定 Debug ABI 跨项目契约，随本规范 v4.0.0 一并继承。
 > ⚠️ **本节是「跨项目 wire 契约」，不是编译器侧已实装的类型** ——
 > `DebugEvent` / `ErrChain` / `ProvenanceInfo` 在 `compiler/src0/` 里**零命中**
 > （编译器侧不定义、不生成这些类型）⇒ 读本节时按「OS 侧与外部工具链的契约」理解。
-> **权威位置**：**本节即权威**（编译器侧）。原 OS 端镜像 `jhyy_OS/docs/v0.0.4-debug-abi.md`（🔒 Locked 2026-08-12，Q-Compiler-007 闭环 / D41）已随 OS 侧文档整体清理于 2026-10-30（commit `f98d83d`）⇒ **OS 侧重写时从本节镜像，不得反向**。
+> **权威位置**：**本节即权威**（编译器侧）。原 OS 端镜像 `jhyy_OS/docs/v0.0.4-debug-abi.md`（🔒 Locked 2026-08-12，Q-Compiler-007 闭环）已随 OS 侧文档整体清理于 2026-10-30（commit `f98d83d`）⇒ **OS 侧重写时从本节镜像，不得反向**。
 > **doc version pinning**：本节锁定时引用 OS doc 的 commit/tag；OS 端后续更新走 Q-Compiler-007 流程同步。
 
-### 19.1 尺寸定案（per D41）
+### 19.1 尺寸定案
 
 | 类型 | 尺寸 | 说明 |
 |------|------|------|
@@ -916,11 +916,11 @@ fence_release();   // sfence
 | `ErrChain`（含 `SourceLoc` 24B 内嵌） | **64B** | 错误链，NULL-ended |
 | `ProvenanceInfo`（DAG parents/children K=8） | **136B** | `Cap<T>` runtime trace metadata |
 
-**布局总原则**（per D41 R1/R2）：jhyy **无 `packed` / `repr(...)`**；所有跨边界 struct 一律自然对齐；padding 显式写成 `_pad*` 字段。
+**布局总原则**：jhyy **无 `packed` / `repr(...)`**；所有跨边界 struct 一律自然对齐；padding 显式写成 `_pad*` 字段。
 
 ### 19.2 jhyy 侧类型表达
 
-jhyy 侧类型表达**严格遵循 [§ 20](#20-wire-format--jhyy-侧表达规则-per-d40) 的 wire-format 规则**（per D40）：
+jhyy 侧类型表达**严格遵循 [§ 20](#20-wire-format--jhyy-侧表达规则-跨项目契约) 的 wire-format 规则**：
 
 | wire 字段 | jhyy 表达 | 说明 |
 |----------|----------|------|
@@ -929,21 +929,21 @@ jhyy 侧类型表达**严格遵循 [§ 20](#20-wire-format--jhyy-侧表达规则
 | `ErrChain.trace` / `ErrChain.context` | `[*]TraceEntry` / `[*]u8` 切片 | 显式 `*_len` 字段 |
 | `DebugEvent.payload` | `*u8` + `payload_len` | 跨 FFI 用指针，长度由显式字段提供 |
 
-### 19.3 jhyy 编译器不生成 DWARF debug info（per D41 R3）
+### 19.3 jhyy 编译器不生成 DWARF debug info
 
 - jhyy 编译器 emit `dbgfile` + `dbgloc` 指令，**仅 line table**。
 - **不**生成 DWARF `.debug_info` / `.debug_abbrev` / `.debug_line` 完整 section。
 - debug 数据由 OS 端 runtime side table 承载；release build 可 strip runtime debug info。
 
-### 19.4 FFI 边界提醒（per D41 R4）
+### 19.4 FFI 边界提醒
 
 本节全部 struct 都是**内存布局契约**（指针传递），**不得按值跨 FFI 边界**。集成 `SysError.chain` 时必须以指针传 `ErrChain`。
 
 ---
 
-## 20. Wire Format ↔ jhyy 侧表达规则（🔒 per D40）
+## 20. Wire Format ↔ jhyy 侧表达规则（🔒 跨项目契约）
 
-> **状态**：🔒 v2.2.0 锁定跨 FFI 边界时 wire-format C struct 字段到 jhyy 类型表达的系统规则（per D40，2026-08-12 锁，修订 D14 字段类型部分，D14 主体不变）。
+> **状态**：🔒 v2.2.0 锁定跨 FFI 边界时 wire-format C struct 字段到 jhyy 类型表达的系统规则（2026-08-12 锁；修订「跨 FFI 边界的字段类型规则」部分，该规则主体不变）。
 
 ### 20.1 两条核心映射
 
@@ -982,11 +982,11 @@ type ErrChain = struct {
 
 `*ErrChain` 裸指针 = wire `ErrChain*`（NULL = chain root）。
 
-### 20.4 跟 D14（FFI 边界）的关系
+### 20.4 跟「跨 FFI 边界规则」的关系
 
-- D14 主体规则不变；本节是 D14 在 wire-format 字段类型层的具体扩展。
-- 任何与 D40 锁的偏差走 Q-Compiler-XXX 流程。
-- 本节跟 freestanding 的 MS x64 约定、[§ 19](#19-debug-abi-per-d41) 的 Debug ABI、`Cap<T>` runtime 链用例一致 —— `Cap<T>` runtime `*T` 链 + `ProvenanceInfo.grant_chain` `*T` 链全部用 `*T` 裸指针。
+- 「跨 FFI 边界规则」主体不变；本节是它在 wire-format 字段类型层的具体扩展。
+- 任何与本节锁定的偏差走 Q-Compiler-XXX 流程。
+- 本节跟 freestanding 的 MS x64 约定、[§ 19](#19-debug-abi-跨项目契约) 的 Debug ABI、`Cap<T>` runtime 链用例一致 —— `Cap<T>` runtime `*T` 链 + `ProvenanceInfo.grant_chain` `*T` 链全部用 `*T` 裸指针。
 
 ---
 
@@ -1053,6 +1053,8 @@ type ErrChain = struct {
 | **顶层全局变量只有整数类型初始化正确** | `let mut f: f64 = 3.5;` 读到 **0**（初始化器被丢弃）；`let mut p: Point = ...` 读到**垃圾**（未定义读）。整数类型（含跨函数读写链）正确 | — |
 | `match` 范围是闭区间 | 与 `for` 的半开区间语义相反，容易踩 | — |
 | `defer` 不覆盖隐式返回 | 函数体末表达式返回时 defer 不执行 | — |
+| **二层以上的嵌套 pattern 不支持** | pattern 树里不得有 enum pattern 是另一个 enum pattern 的后代（OR 包着的也算）⇒ 编译期报错 `nested pattern is not supported`。**外层 tag 比较与内层 payload 提取都未实装** | — |
+| **命令行只接受一个输入文件** | 多余的 `.jhyy` 参数被**静默忽略**（不报错、不警告）⇒ `jhyy compile a.jhyy b.jhyy` 实际只编 `a.jhyy`。多文件须用 `import` 组合（见 [§ 1.2](#12-源文件与多文件)） | — |
 | `std_io_print` / `std_io_print_err` | 依赖 libc 的 `stdout` / `stderr` 句柄获取 | — |
 | SysV 下 MEMORY class 参数与寄存器溢出参数混排 | 编译报错（[ABI § 12.4](jhyy-abi-v4.0.0.md#abi-12-4)） | — |
 | 无交叉编译容器后端 | `--target` 不切换 PE / ELF 产出 | — |
