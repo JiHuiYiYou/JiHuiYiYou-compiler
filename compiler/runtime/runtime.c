@@ -89,6 +89,28 @@ int main(int argc, char **argv) {
      */
     setvbuf(stdout, NULL, _IONBF, 0);
 #ifdef _WIN32
+    /*
+     * 连着**控制台**时,把代码页设成 UTF-8(CP_UTF8)。
+     *
+     * 为什么:代码页决定「控制台怎么解释程序写出去的字节」。
+     * 默认是**系统 OEM 代码页**(中文 Windows = CP936/GBK)⇒ 程序 printf 出去的
+     * **UTF-8 字节**会被当成 GBK 解释 ⇒ 屏幕上的中文全是乱码。
+     * (实测:伪控制台 ConPTY 里,`printf("请输入一个数字: ")` 显示成
+     *  「璇疯緭鍏ヤ竴涓鏁瓧」—— 正是把 UTF-8 字节按 GBK 解的结果。)
+     *
+     * 设成 CP_UTF8 之后,控制台按 UTF-8 解释 ⇒ 中文正常 ✓。
+     *
+     * ⚠️ **只在 stdout 是控制台时才设** —— 管道/重定向时字节原样透传,
+     *    不该动代码页(IDE 那边按 UTF-8 解管道里的字节;一致性门也是)。
+     *
+     * ⚠️ 这会改掉**用户那个控制台**的代码页 —— 但那正是我们要的:
+     *    之后这个控制台里的所有输出(程序的、cmd 的)都按 UTF-8 走,一致。
+     */
+    if (GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) == FILE_TYPE_CHAR) {
+        SetConsoleOutputCP(CP_UTF8);
+        SetConsoleCP(CP_UTF8);
+    }
+
     /* W-047: re-decode argv from Unicode command line */
     LPWSTR wcmd = GetCommandLineW();
     if (wcmd) {
