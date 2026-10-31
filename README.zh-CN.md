@@ -4,7 +4,7 @@
 
 <div><img src="vscode-ext/jhyy-calligraphy.png" width="220" alt="机会翼游 书法 logo"></div>
 
-### 机会翼游 — 自研静态类型编译型系统编程语言
+### JHYY(机会翼游)—— 自研静态类型编译型系统编程语言
 
 **静态类型 · 表达式导向 · 由自研 amd64 后端编译为原生机器码。**
 
@@ -76,18 +76,24 @@ fn main_jhyy() -> i32 {
 
 ## 安装
 
-**最终用户(Windows x64)** —— 下安装包即可。**不需要 MSYS2**:自 v4.1.0 起
-MSI 自带一份最小原生 ucrt64 工具链(`<INSTALLDIR>\toolchain\`)。
+**最终用户(Windows x64)** —— 从
+[**GitHub Releases**](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/latest) 下安装包。
+**不需要 MSYS2**:自 v4.1.0 起
+安装包自带一份最小原生 ucrt64 工具链(`<INSTALLDIR>\toolchain\`)。
 
 | 产物 | 体积 | 说明 |
 |---|---|---|
-| `jhyy-installer-4.1.2.exe` | ~55 MB | GUI 安装器 —— 编译器 + `.jhyy` 文件关联 + VS Code 扩展 + PATH |
-| `jhyy-compiler-4.1.2.msi` | ~28 MB | 同样内容、无 GUI —— 企业 / SCCM 分发用 |
+| [`jhyy-installer-4.1.2.exe`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.2/jhyy-installer-4.1.2.exe) | ~55 MB | GUI 安装器 —— 编译器 + `.jhyy` 文件关联 + VS Code 扩展 + PATH |
+| [`jhyy-compiler-4.1.2.msi`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.2/jhyy-compiler-4.1.2.msi) | ~28 MB | 同样内容、无 GUI —— 企业 / SCCM 分发用 |
+
+校验和随产物一起发布在 `SHA256.txt`。
 
 **从源码构建** —— 需要 MSYS2 + `mingw-w64-ucrt-x86_64-gcc`
 (这只是**构建编译器**的宿主要求,最终用户不需要):
 
 ```bash
+git clone https://github.com/JiHuiYiYou/JiHuiYiYou-compiler.git
+cd JiHuiYiYou-compiler
 make all        # → compiler/build/bin/jhyy.exe(~1.9 MB)
 ```
 
@@ -130,7 +136,7 @@ echo $?    # => 42
 
 ```bash
 python regress.py
-# => 259/259 passed (全部有断言), 0 failed, 20 skipped (of 279 total)
+# => 261/261 passed (全部有断言), 0 failed, 20 skipped (of 281 total)
 ```
 
 ### 验证自举闭环
@@ -186,9 +192,11 @@ flag:
 目标三元组:`amd64_win`(默认,hosted Windows)· `amd64_win_freestanding`(UEFI)·
 `amd64_sysv` · `amd64_sysv_freestanding`。
 
-> [!TIP]
-> 多文件编译:把每个 `.jhyy` 源文件都列在命令行上 ——
-> `jhyy compile main.jhyy lib.jhyy -o app`
+> [!IMPORTANT]
+> **命令行只接受一个输入文件。** 多余的 `.jhyy` 参数会被**静默忽略** ——
+> 不报错、不警告 ⇒ `jhyy compile main.jhyy lib.jhyy` 实际**只编 `main.jhyy`**。
+> 多文件请用 `import` 组合:在 `main.jhyy` 里写 `import lib;`,
+> 编译器会沿 import 图把 `lib.jhyy` 一起编进来。
 >
 > ⚠️ **没有 `jhyy --version`** —— 它从来就不存在。跑它会打一行 `unknown command`
 > 并 **exit 1**。版本横幅在 **`jhyy --help` 的首行**(不带参数跑 `jhyy` 也一样)。
@@ -255,39 +263,31 @@ JiHuiYiYou-compiler/
 
 | 指标 | 值 |
 |------|-----|
-| `regress.py` | **259 PASS + 0 XFAIL + 0 failed + 20 SKIP**(279 total) |
-| 断言强度审计 | 扫 279 / 可跑 259 / 真断言 200 / 零信号 0 |
+| `regress.py` | **261 PASS + 0 XFAIL + 0 failed + 20 SKIP**(281 total) |
+| 断言强度审计 | 扫 281 / 可跑 261 / 真断言 201 / 零信号 0 |
 | 自举闭环 | `make` 迭代到不动点 —— 生成的 `.s` 跨代逐字节相同 |
-| `fixed_point.sh` | **17 PASS / 0 FAIL**(N=10,`.il` 与 `.s` 跨代 byte-equal) |
+| `fixed_point.sh` | PASS(N=10 —— `.il` 与 `.s` 跨代 byte-equal) |
 | `artifact_checks.sh` | **17 PASS / 0 FAIL** |
 | `closure_check.sh` | PASS(v2.s == v3.s,逐字节相同) |
-| ACTIVE workaround | **1** —— [`W-170`](docs/workarounds.md):`jhyy build` 不处理 `#[link_section]` |
+| ACTIVE workaround | **1** —— [`W-170`](docs/internal/workarounds.md):`jhyy build` 不处理 `#[link_section]` |
 | `jhyy-installer-4.1.2.exe` | 已发布(~55 MB,含 .NET 8 Desktop Runtime + 内置 ucrt64 工具链) |
 | `jhyy-compiler-4.1.2.msi` | 已发布(~28 MB,含 `jhyy-setuc.exe` + 内置工具链) |
 | `jhyy-lang-4.1.2.vsix` | 已发布(VS Code 扩展) |
 
-**v4.x umbrella changelog** —— [`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md)
-是本仓**每个版本轴唯一**的 changelog(按项目的 umbrella 约定)。
+**变更日志** —— [`CHANGELOG.md`](CHANGELOG.md) 每版一行;逐轴的详细记录是 v4 的
+umbrella:[`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md)
+(按项目的 umbrella 约定,每个版本轴只有一份)。
 
 ---
 
 ## 路线图
 
-v4.x 是合并后的版本轴。计划按版本槽一份,放在 [`docs/plans/v4/`](docs/plans/v4/README.md) ——
-那份是权威索引;排期见 [`docs/archive/plans/v4/version-schedule.md`](docs/archive/plans/v4/version-schedule.md)。
+v4.x 是合并后的版本轴。**排期的权威来源** —— 每格一个版本槽、每格做什么、
+以及稳定的 `OS-N` 序号 —— 在 [`docs/internal/FACTS.md`](docs/internal/FACTS.md) § 4。
+计划按版本槽一份,放在 [`docs/plans/v4/`](docs/plans/v4/README.md)。
 
-**性能线**(自研后端 —— 当前主线):
-
-| 版本 | 意图 |
-|------|------|
-| **v4.4.0** ⭐ | **寄存器分配** —— 阶段一(分配器 + 安全网,产物逐字节不变)已完成;阶段二是 emit 层消费寄存器 |
-| v4.4.1 / v4.4.2 / v4.4.3 | call-clobber + 寄存器类 / 跨基本块 + phi 并行移动 / 门 + perf 验证 |
-| v4.4.5 | peephole 4096 限制 + IR 优化框架(两版降级下来的) |
-| v4.5 | M5 Part 3 —— 最后一项 0-C 闭环 |
-
-**OS 线**(v4.6 → v4.15,稳定身份 `OS-1` … `OS-16`):止血包 → 栈观测 → 反馈环 →
-ABI 收敛 → 语言自洽 → 效果系统 → lifetime → trait + `dyn Trait` → const generic →
-HKT → 能力类型化 → 可信工具链。
+**当前主线**:自研后端的性能线(自研 amd64 后端的寄存器分配),其后是 OS 线
+(v4.6 → v4.15,稳定身份 `OS-1` … `OS-16`)。
 
 预留槽上的版本号是**占位号** —— 每份计划都带「启动时复核清单」,那一格被启动时
 按当时的实际状态重新核对。
@@ -322,16 +322,20 @@ HKT → 能力类型化 → 可信工具链。
 
 ## 文档
 
+- **全仓文档地图** —— 各文档各管什么:[`docs/internal/README.md`](docs/internal/README.md)
 - **语言规范**:[`docs/abis/jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md)(锁定)
 - **ABI 白皮书**:[`docs/abis/jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md)(锁定)
 - **二进制格式**(设计稿,未实装):[`docs/abis/jhyy-binary-format-v1.0.0.md`](docs/abis/jhyy-binary-format-v1.0.0.md)
+- **当前事实**(版本、回归数、排期):[`docs/internal/FACTS.md`](docs/internal/FACTS.md)
 - **架构**:[`docs/internal/architecture.md`](docs/internal/architecture.md)
 - **构建与运行**:[`docs/internal/build.md`](docs/internal/build.md)
-- **测试**:[`docs/FACTS.md`](docs/FACTS.md)
-- **workaround 台账**:[`docs/workarounds.md`](docs/workarounds.md)
-- **编码约定**:[`CONTRIBUTING.md`](CONTRIBUTING.md)
-- **变更日志**:[`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md)(v4 umbrella)
-- **归档计划**:[`docs/archive/plans/v2-v3/`](docs/archive/plans/v2-v3/)(v2/v3 历史 —— 已作废)
+- **workaround 台账**:[`docs/internal/workarounds.md`](docs/internal/workarounds.md)
+- **当前计划**:[`docs/plans/v4/`](docs/plans/v4/README.md)
+- **跨项目设计**(编译器侧 / OS 侧):[`docs/coordination/`](docs/coordination/)
+- **性能基线**:[`docs/perf/self-backend-baseline-2026-10-29.md`](docs/perf/self-backend-baseline-2026-10-29.md)
+- **贡献指南**:[`CONTRIBUTING.md`](CONTRIBUTING.md)(英文)
+- **变更日志**:[`CHANGELOG.md`](CHANGELOG.md)(英文;每版一行)
+- **归档**:[`docs/archive/`](docs/archive/README.md)(历史 —— 已作废的计划、旧 changelog)
 
 ---
 

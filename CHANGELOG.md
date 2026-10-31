@@ -1,107 +1,80 @@
 # Changelog
 
-> **本文件 = 官方推荐的用法 + 每个版本的一句话要点。**
-> **详细的逐版本记录**在 [`docs/archive/logs/`](docs/archive/logs/) ——
-> v4 轴的 umbrella 在 [`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md)。
+> **One line per release.** The detailed record — what changed, why, and how it was
+> verified — lives in [`docs/archive/logs/`](docs/archive/logs/); the v4 axis umbrella is
+> [`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md).
 >
-> 版本号的**唯一真相源**是仓库根的 `VERSION` 文件。
-> 改版本号用 `python scripts/dev/bump_version.py set <X.Y.Z>`（**不要手改**）——
-> 完整流程（含**不可省的 `make`**）见 [`docs/internal/build.md` § 版本号自动化](docs/internal/build.md#版本号自动化)。
+> The **single source of truth for the version number** is the `VERSION` file at the
+> repository root. Never edit it by hand — run
+> `python scripts/dev/bump_version.py set <X.Y.Z>`; the full flow, including the
+> mandatory `make`, is in
+> [`docs/internal/build.md`](docs/internal/build.md#版本号自动化).
+>
+> `set` also inserts the new row into the table below, and `check` asserts that this
+> table's first row matches `VERSION` — so this file can no longer drift silently.
 
 ---
 
-## 推荐用法
+## Releases
 
-### 安装（Windows x64 最终用户）
+> One row per **published release** — every version here has a GitHub release and a
+> git tag. Changes that are in the tree but carry no release of their own are listed
+> under [Change slots](#change-slots-no-release-tag) instead.
 
-下载 `jhyy-installer-4.1.2.exe`（~55 MB，GUI）或 `jhyy-compiler-4.1.2.msi`（~28 MB，
-企业 / SCCM 分发）。
-
-> **自 v4.1.0 起不需要 MSYS2** —— installer 自带一份最小原生 ucrt64 工具链。
-> 装完直接用。
-
-### 三条最常用的命令
-
-```bash
-jhyy compile hello.jhyy -o hello.exe   # 编译 + 链接
-jhyy run     hello.jhyy                # 编译 + 链接 + 执行
-jhyy build   hello.jhyy -o hello.s     # 只编译出汇编（不链接）
-```
-
-### 看版本
-
-**没有 `jhyy --version`** —— 它从来就不存在（跑它是 `unknown command` + exit 1）。
-版本横幅在 **`jhyy --help` 的首行**。
-
-### 交叉编译到 Linux
-
-```bash
-jhyy compile hello.jhyy --target=amd64_sysv_freestanding --no-link -o hello
-# → hello.s（ELF/SysV ABI 汇编），在 Linux 侧用 gcc 链
-```
-
-四个目标三元组见 [`docs/FACTS.md`](docs/FACTS.md) § 5。
-
-### 其它入口
-
-| 想做的事 | 去哪 |
+| Version | One-line summary |
 |---|---|
-| 了解项目 | [`README.md`](README.md)（英文） / [`README.zh-CN.md`](README.zh-CN.md)（中文） |
-| 写 `.jhyy` | [语言规范](docs/abis/jhyy-lang-spec-v4.0.0.md) |
-| 碰 FFI / struct 传参 | [ABI 白皮书](docs/abis/jhyy-abi-v4.0.0.md) |
-| 贡献代码 | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| 想知道「现在什么状态」 | [`docs/FACTS.md`](docs/FACTS.md) |
-| 查已知的坑 | [`docs/workarounds.md`](docs/workarounds.md) |
+| **v4.1.2** | `jhyy --version` never existed — said out loud, plus version-number automation (`VERSION` as the single source of truth) |
+| **v4.1.1** | VS Code terminal profile probes for a real bash + a new `jhyy-bash.cmd` launcher; the "bundle a POSIX layer" plan is dropped |
+| **v4.1.0** | The installer bundles a minimal native ucrt64 toolchain ⇒ end users no longer need MSYS2 |
+| **v4.0.22** | Language-spec coverage audit: 34 regression gates added + three real std-lib defects and one compiler crash found |
+| **v4.0.19** | The workaround ledger's ACTIVE bucket hits zero for the first time (14 → 0) |
+| **v4.0.9-rc1** | The release chain itself is fixed: the regression gate now tests the compiler the job just built, tag pushes actually trigger a run, and the new SysV ABI gate caught W-116 on its first run |
+| **v4.0.6** | W-101 attempt #7 succeeds — the root cause is really fixed and the v4.0.0 final tag is unblocked |
+| **v4.0.2** | The first batch of real fixes on the v4.x axis (i64 literals, `mem_set` i64-store, the per-function local counter) |
+| **v4.0.1** | The first real fix on the v4.x axis |
+| **v4.0.0-rc1** | The v2.x and v3.x axes merge into main — one compiler instead of two; the QBE toolchain is gone, the in-memory self-backend is the only codegen path |
 
----
+> `v4.0.0 final` was never promoted: the release was held back until the workaround
+> ledger was clean, so the axis restarts at `v4.0.0-rc1`.
 
-## 当前版本
+## Change slots (no release tag)
 
-### v4.1.2 — 2026-10-29
+> These are **change slots, not releases** — there is no tag and no published artifact
+> for them. Their content does ship, inside whichever tagged release was cut after the
+> change landed. They are listed separately so that the table above stays a truthful
+> record of *releases*.
 
-- **`jhyy --version` 从来就不存在** —— 文档 / release note / 脚本里此前让你跑一个
-  不存在的命令（跑它是 `unknown command` + exit 1）。版本横幅在 `jhyy --help` 首行。
-- **版本号自动化** —— `VERSION` 文件成为唯一真相源；`scripts/dev/bump_version.py`
-  提供 `set` / `check` / `finalize` 三条命令 + 两道门（CI 零漂移门 + release 的
-  `VERSION == tag` 断言）。
-- **真修 `build.ps1 bundle` 静默复用陈旧 MSI** —— bundle 里嵌的是旧编译器。
-- 完整记录：[`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md) § v4.1.2
-
----
-
-## 版本要点
-
-| 版本 | 一句话 |
+| Slot | Change |
 |---|---|
-| **v4.1.2** | `--version` 不存在这件事说清楚 + 版本号自动化（`VERSION` 单一真相源） |
-| **v4.1.1** | VSCode 终端 profile 改为探测真实 bash + 新增 `jhyy-bash.cmd` 启动器；**作废「打包 POSIX 层」这条计划** |
-| **v4.1.0** | installer 自带最小原生 ucrt64 工具链 ⇒ **装机用户不再需要 MSYS2** |
-| **v4.0.22** | lang-spec 覆盖审计：补回归门 + 挖出 std lib 三处真缺陷 + 一处编译器崩溃 |
-| **v4.0.21** | side-file per-pid 唯一化（并发编译互踩）+ Makefile 变量漏改 + 跨盘改名失败 + C 端编译器删除 |
-| **v4.0.20** | 审计「skip test / 新增 test」挖出的三处**门**自身的问题 |
-| **v4.0.19** | workaround 台账 ACTIVE 桶首次清零（14 → 0） |
-| **v4.0.18** | `&mut` 最小独占检查 + 死 stub 删除；lexer EOF 守卫；产物可复现；`asm!` / memory barrier 真正内联进函数体 |
-| **v4.0.17** | 两张「按固定上限分配」的表改成按实际需要分配（顺带修掉 temp 表越界静默算错值） |
-| **v4.0.16** | `std_os_*` 接真 libc + `#[link_section]` 落到真的 `.s` |
-| **v4.0.15** | `&mut` 真的能用了 |
-| **v4.0.14** | enum 的 ABI 两侧统一（参数按地址 / 返回值走 sret） |
-| **v4.0.12** | SysV MEMORY class（>16B struct 走栈） |
-| **v4.0.6** | W-101 attempt #7 成功 —— 自举闭环达成 |
-| **v4.0.2** | 多条 emit / sema 真修（i64 字面量、mem_set i64-store、per-fn-local counter…） |
-| **v4.0.1** | v4.x 轴的第一次真修 |
-| **v4.0.0-rc1** | v2.x + v3.x 两轴合并入 main；QBE 工具链移除；自举闭环 |
-| **v4.2.0** | 运行时性能门进 CI（静态指标硬门 + 墙钟只报告）+ `bench.sh` 计时器真修 |
-| **v4.2.1** | 帧尺寸按函数实际需要算（去掉写死的 8192 预留）⇒ ~41% 运行时 |
-| **v4.4.0 阶段一** | 寄存器分配器 + 安全网（**产物逐字节不变**）；阶段二 = emit 层消费寄存器 |
+| v4.4.0 (stage 1) | Register allocator + safety net (byte-identical output); stage 2 is the emit layer consuming registers |
+| v4.2.1 | Frame size computed from what the function actually needs (the hard-coded 8192-byte reserve is gone) ⇒ ~41% runtime |
+| v4.2.0 | Runtime performance gate lands in CI (hard gate on static metrics, wall-clock only reported) + `bench.sh` timer really fixed |
+| v4.0.21 | Side files are unique per PID (concurrent compiles stop colliding) + a Makefile variable that was never updated + a cross-drive rename failure + the C-side compiler deleted |
+| v4.0.20 | An audit of "skipped test / new test" surfaced three problems in the gates themselves |
+| v4.0.18 | Minimal exclusivity check for `&mut` + dead stub removal; lexer EOF guard; reproducible artifacts; `asm!` and memory barriers actually inlined into the function body |
+| v4.0.17 | Two "allocate a fixed maximum" tables now allocate what is actually needed (which also fixed the temp table silently computing wrong values on overflow) |
+| v4.0.16 | `std_os_*` wired to the real libc + `#[link_section]` lands in a real `.s` |
+| v4.0.15 | `&mut` actually works |
+| v4.0.14 | The enum ABI is unified on both sides (arguments by address, return value through sret) |
+| v4.0.12 | SysV MEMORY class (structs larger than 16 B are passed on the stack) |
+| v4.0.5 | W-101 attempt #6 (a separate address-holder pool) reverted |
+| v4.0.4 | W-101 attempt #5 (the bitmap change) reverted — the logging-first RCA step shipped |
+| v4.0.2.4 | W-098 i64 literal emission really fixed (three tiers: emit + IR + cast) |
+| v4.0.2.3 | W-075 `mem_set` i64-store really fixed |
+| v4.0.2.2 | W-096 per-function local counter really fixed on the emit side |
+| v4.0.2.1 | W-074.6 multi-function emission really fixed (3 sub-bugs) + part of the W-096 1024 cap |
 
-> ⚠️ v4.2.x / v4.4.0 是**性能线**，与 v4.0.x 的编号不按序 —— 排期见
-> [`docs/FACTS.md`](docs/FACTS.md) § 4。
+> **The performance line (v4.2.x, v4.4.x) shares the v4 axis, but its numbering does not
+> follow the v4.0.x series** — the schedule is in [`docs/internal/FACTS.md`](docs/internal/FACTS.md) § 4.
 
 ---
 
-## 往前的版本
+## Earlier axes
 
-- **v3.x**（语言特性扩展，终结于 v3.4.2）· **v2.x**（QBE 重写 + 多目标，终结于 v2.16.0）·
-  **v1.x**（自举，终结于 v1.8.3）· **v0.x**（C 编译器，冻结于 v1.0.0 baseline）
-  ⇒ 全部在 [`docs/archive/logs/`](docs/archive/logs/)。
-- **逐版本的 sprint 计划** ⇒ [`docs/archive/plans/`](docs/archive/plans/)。
+- **v3.x** — language features (ended at v3.4.2)
+- **v2.x** — the QBE rewrite and multi-target support (ended at v2.16.0)
+- **v1.x** — self-hosting (ended at v1.8.3)
+- **v0.x** — the C compiler (frozen at the v1.0.0 baseline)
+
+Their per-version records are in [`docs/archive/logs/`](docs/archive/logs/), their
+sprint plans in [`docs/archive/plans/`](docs/archive/plans/).

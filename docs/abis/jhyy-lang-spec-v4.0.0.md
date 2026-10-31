@@ -439,10 +439,23 @@ let desc = match x {
 - **穷尽性检查已实装**：match 作用在 enum 上时，每个变体必须被显式覆盖或由 `_` 兜底，否则编译错误 `non-exhaustive match: missing variant`。
 - ⚠️ **范围的端点语义与 `for` 循环不同**：`0..10` 在 match 里**同时匹配 0 和 10**（闭区间），在 `for` 里不含 10（半开）。写范围 pattern 时按闭区间理解。
 - ⚠️ 不支持 **guard pattern**（`Some(x) if x > 0` → 解析错误）。
-- ⚠️ **二层以上的嵌套 pattern 不支持**（`Some(Some(x))` 解析失败）。
+- ⚠️ **二层以上的嵌套 pattern 不支持** —— 编译期报错 `nested pattern is not supported`。
+  判据：**pattern 树里不得有 enum pattern 是另一个 enum pattern 的后代**（OR 包着的也算）。
+  > **2026-10-31 订正**：原文写「（`Some(Some(x))` 解析失败）」。实测（修复前）嵌套 pattern
+  > **能编译能运行**，但内层 variant **从不比较**、内层 payload **根本不提取** ⇒
+  > `o = O::A(I::X(42))` 配 `O::A(I::X(x)) => x` 实测得到 **0xE8000000**（**不是 42**），
+  > 且 `o = O::A(I::Y)` 会**静默走错 arm** ⇒ 零告警零诊断的**错值**。
+  > 现在改为**编译期拒绝**（代码向规范靠拢）。真要支持嵌套 pattern 是另一个 sprint 的
+  > 功能（内层 tag 比较 + 内层 payload 提取 + 绑定语义），不是修 bug。
 - **OR pattern 支持多路** —— `A | B | C`、enum 变体 OR（`O::A | O::B`）、
-  嵌套 pattern 里的 OR（`O::A(x) | O::B(x)`）均正常工作
-  （2026-10-30 实测：命中语义与穷尽性判定都正确）。
+  带绑定的 OR（`O::A(x) | O::B(x)`）均正常工作（命中语义与穷尽性判定都正确）。
+  > **2026-10-31 订正**：原文写「2026-10-30 实测：命中语义与穷尽性判定都正确」——
+  > **那句实测结论是错的**。实测 `match e { E::A | E::B | E::C => 1 }`（E 恰好 3 个变体）
+  > 被**误报** `non-exhaustive match: missing variant`；4 变体 + `A|B|C` 一臂 + `D` 一臂
+  > 同样误报。根因：穷尽性判定只收集 OR 的 left / right 两个**直接**子节点，而 OR 是
+  > **左结合**的 ⇒ `A | (B | C)` 的 right 是 OR 节点 ⇒ 中间变体从没被标记为已覆盖。
+  > 命中语义一直是对的（codegen 的 OR 分支是递归的）—— 这是「一条路径修了、平行路径
+  > 没修」的典型。
 
 ### 5.7 闭包
 
@@ -1053,7 +1066,7 @@ type ErrChain = struct {
 - v1.0.0 已达成真自举闭环（commit `eabee0d`，2026-08-10）。
 - v4.0.x 世代的闭环形态是「`jhyy.exe` 自己编 src0，产出与自身 byte-equal」—— 见 `docs/internal/build.md` 与 `compiler/tests/bootstrap/fixed_point.sh`。
 - **自举编译器本身是本规范的最大消费者**：规范里每条关于「已实装」的断言，在 `compiler/src0/*.jhyy` 里都能找到对应实现。
-- 规范改动对自举的影响面：`CONTRIBUTING.md` 要求 `docs/abis/*` 变更后跑一遍 `regress.py`（spec 改动可能影响 jhyy 端解析）。
+- 规范改动对自举的影响面：`docs/abis/*` 变更后要跑一遍 `regress.py`（spec 改动可能影响 jhyy 端解析）。
 
 ---
 
@@ -1120,4 +1133,4 @@ fn main_jhyy() -> i32 {
 - ABI：[`docs/abis/jhyy-abi-v4.0.0.md`](jhyy-abi-v4.0.0.md)
 - 二进制格式（设计稿，未实装）：[`docs/abis/jhyy-binary-format-v1.0.0.md`](jhyy-binary-format-v1.0.0.md)
 - 历史档案：v1.3.0 及其 17 份 v3.x supplement、v1.1.0、v1.0.0、v0.2.1、v0.0.1 —— 均已归档至 git 历史（`git show <sha>:docs/abis/<name>`）
-- 已知限制台账：[`docs/workarounds.md`](../workarounds.md)
+- 已知限制台账：[`docs/internal/workarounds.md`](../internal/workarounds.md)

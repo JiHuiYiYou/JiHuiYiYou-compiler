@@ -920,6 +920,58 @@ fn sema_operand_is_call(n: *Node) -> i32 {
     return 0 as i32;
 }
 
+// ════════════════════════════════════════════════════
+// 2026-10-31 真修:OR pattern 的变体覆盖收集必须**递归**
+// ════════════════════════════════════════════════════
+//
+// 实测 bug:`match e { E::A | E::B | E::C => 1 }`(E 恰好 3 个变体)
+//   → **误报** `non-exhaustive match: missing variant`。
+//   连「其他 arm 补齐变体」也救不了:4 变体 + `A|B|C` 一臂 + `D` 一臂仍误报。
+//
+// 根因:旧的 OR 收集只取 left / right 两个**直接**子节点。OR 是**左结合**的,
+//   `A | (B | C)` 解析成 OR(left=A, right=OR(B,C))⇒ right 是 OR 节点而不是
+//   ENUM ⇒ 旧代码的 `if right.kind == ENUM` 判否 ⇒ **B 和 C 从没被标记为
+//   已覆盖** ⇒ 穷尽性判定把它们算成「未覆盖」。
+//
+// 对照:**codegen 的 OR 分支一直是递归的**(`cg_match_pattern` 递归 left/right
+//   再 `or` 起来)⇒ 命中语义一直是对的,只有穷尽性判定漏 ⇒ 这就是
+//   「一条路径修了、平行路径没修」的典型。
+//
+// 本函数与 codegen 的做法对齐:**递归走整棵 OR 树**,把每个 ENUM 叶子的变体
+//   标记为已覆盖;遇到 WILD 返回 1(上层据此置 has_wildcard)。
+fn sema_mark_pattern_variants(pat: *Node, variants_buf: *u8, nv: i64) -> i32 {
+    if pat == (0 as *Node) { return 0 as i32; }
+    if (*pat).kind == NODE_PATTERN_OR() {
+        let po = node_pattern_or_data(pat);
+        let l = sema_mark_pattern_variants((*po).left as *Node, variants_buf, nv);
+        let r = sema_mark_pattern_variants((*po).right as *Node, variants_buf, nv);
+        if l == (1 as i32) { return 1 as i32; }
+        return r;
+    }
+    if (*pat).kind == NODE_PATTERN_WILD() { return 1 as i32; }
+    if (*pat).kind == NODE_PATTERN_ENUM() {
+        let pe = node_pattern_enum_data(pat);
+        let vsym = (*pe).variant_sym as *Sym;
+        if vsym != (0 as *Sym) {
+            let vname = (*vsym).name;
+            let mut jj: i64 = 0 as i64;
+            while jj < nv {
+                let slot = ptr_add_u8(variants_buf, jj * (8 as i64)) as **Sym;
+                let v_sym = *slot;
+                if v_sym != (0 as *Sym) {
+                    if strcmp((*v_sym).name, vname) == (0 as i32) {
+                        *slot = 0 as *Sym;
+                        break;
+                    }
+                }
+                jj = jj + (1 as i64);
+            }
+        }
+        return 0 as i32;
+    }
+    return 0 as i32;
+}
+
 fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     if n == (0 as *Node) { return type_void(ta); }
     if (*n).type_ptr != (0 as *u8) { return (*n).type_ptr as *Type; }
@@ -2680,58 +2732,14 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                             }
                         } else {
                             // v1.3.7: OR pattern — mark both branches' variants.
+                            // 2026-10-31 真修:改**递归** —— 旧的只看 left / right 两个
+                            // **直接**子节点;OR 是左结合的,`A | (B | C)` 的 right 是
+                            // OR 节点而不是 ENUM ⇒ 旧代码判否 ⇒ **B / C 从没被标记
+                            // 为已覆盖** ⇒ 误报 non-exhaustive(实测 `A|B|C` 3 路就炸)。
+                            // codegen 的 OR 分支一直是递归的 ⇒ 这里跟它对齐。
                             if (*pat).kind == NODE_PATTERN_OR() {
-                                let po = node_pattern_or_data(pat);
-                                let left = (*po).left as *Node;
-                                if left != (0 as *Node) {
-                                    if (*left).kind == NODE_PATTERN_ENUM() {
-                                        let lpe = node_pattern_enum_data(left);
-                                        let lvsym = (*lpe).variant_sym as *Sym;
-                                        if lvsym != (0 as *Sym) {
-                                            let lvname = (*lvsym).name;
-                                            let mut jj: i64 = 0 as i64;
-                                            while jj < nv {
-                                                let slot = ptr_add_u8(variants_buf, jj * (8 as i64)) as **Sym;
-                                                let v_sym = *slot;
-                                                if v_sym != (0 as *Sym) {
-                                                    if strcmp((*v_sym).name, lvname) == (0 as i32) {
-                                                        *slot = 0 as *Sym;
-                                                    }
-                                                }
-                                                jj = jj + (1 as i64);
-                                            }
-                                        }
-                                    } else {
-                                        if (*left).kind == NODE_PATTERN_WILD() {
-                                            has_wildcard = 1 as i32;
-                                        }
-                                    }
-                                }
-                                let right = (*po).right as *Node;
-                                if right != (0 as *Node) {
-                                    if (*right).kind == NODE_PATTERN_ENUM() {
-                                        let rpe = node_pattern_enum_data(right);
-                                        let rvsym = (*rpe).variant_sym as *Sym;
-                                        if rvsym != (0 as *Sym) {
-                                            let rvname = (*rvsym).name;
-                                            let mut jj: i64 = 0 as i64;
-                                            while jj < nv {
-                                                let slot = ptr_add_u8(variants_buf, jj * (8 as i64)) as **Sym;
-                                                let v_sym = *slot;
-                                                if v_sym != (0 as *Sym) {
-                                                    if strcmp((*v_sym).name, rvname) == (0 as i32) {
-                                                        *slot = 0 as *Sym;
-                                                    }
-                                                }
-                                                jj = jj + (1 as i64);
-                                            }
-                                        }
-                                    } else {
-                                        if (*right).kind == NODE_PATTERN_WILD() {
-                                            has_wildcard = 1 as i32;
-                                        }
-                                    }
-                                }
+                                let _w = sema_mark_pattern_variants(pat, variants_buf, nv);
+                                if _w == (1 as i32) { has_wildcard = 1 as i32; }
                             }
                         }
                     }

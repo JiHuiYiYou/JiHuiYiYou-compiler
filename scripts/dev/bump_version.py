@@ -101,7 +101,49 @@ README_BADGES = [
 # changelog 里新版本段要插在它前面(该文件是**升序**的:最老在前)
 CHANGELOG_ANCHOR = "## v4.x follow-on plans"
 
+# ── 门面 changelog(仓库根 CHANGELOG.md)────────────────────────────────────
+# 2026-10-31:这份文件**原来没有主人** —— `set` 只写内层 umbrella(上面那个
+# CHANGELOG 常量),根 CHANGELOG.md **没有任何脚本碰** ⇒ 它可以落后任意多个
+# release 而门全绿(实测:它把 v4.4.0 / v4.2.1 / v4.2.0 三条**没有 tag 的
+# 变更槽**当已发布写在最上面,而 VERSION=4.1.2、git tag 也没有这三个)。
+# ⇒ 这里给它定主人:`set` 往 `## Releases` 表首行插一行,`check` 断言首行
+#    版本 == VERSION。门不看它,就等于没有门。
+ROOT_CHANGELOG = Path("CHANGELOG.md")
+ROOT_CHANGELOG_SECTION = "## Releases"
+
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
+
+
+def root_changelog_top_version(text: str) -> str | None:
+    """根 CHANGELOG 的 `## Releases` 段首行版本号(取不到 ⇒ None)。
+
+    首行 = 表里第一行 `| **vX.Y.Z** | ... |`。读**整段**而不是整份文件 ——
+    下面的 `## Change slots` 段里也有 `| **vX.Y.Z** |` 行,不能串味。
+    """
+    sec = text.find(ROOT_CHANGELOG_SECTION)
+    if sec < 0:
+        return None
+    m = re.search(r"\|\s*\*\*v(\d+\.\d+\.\d+)\*\*", text[sec:])
+    return m.group(1) if m else None
+
+
+def root_changelog_insert_row(text: str, new: str) -> str | None:
+    """在根 CHANGELOG 的 `## Releases` 表首行插入一行(取不到落点 ⇒ None)。
+
+    落点 = `## Releases` 之后的第一条表格分隔行 `|---|` 的**下一行**
+    (新版本在最上面)。摘要先留 TODO —— 人写。
+    """
+    sec = text.find(ROOT_CHANGELOG_SECTION)
+    if sec < 0:
+        return None
+    sep = text.find("\n|---", sec)
+    if sep < 0:
+        return None
+    eol = text.find("\n", sep + 1)
+    if eol < 0:
+        return None
+    row = f"| **v{new}** | (TODO - what changed in this release; fill in before publishing) |\n"
+    return text[: eol + 1] + row + text[eol + 1 :]
 
 
 # --------------------------------------------------------------------------
@@ -376,6 +418,20 @@ def cmd_set(new: str, *, dry_run: bool = False) -> int:
         else:
             print(f"[bump_version] {rel(cl)}: v{new} 段已存在,跳过")
 
+    # 门面 changelog(仓库根 CHANGELOG.md)—— 读者第一眼看到的「每版一行」。
+    # 2026-10-31 新增:这份文件原来**没有任何脚本碰** ⇒ 它落后几个 release 门也不管。
+    rcl = ROOT / ROOT_CHANGELOG
+    if rcl.is_file():
+        rtext = read_text(rcl)
+        if root_changelog_top_version(rtext) != new:
+            new_text = root_changelog_insert_row(rtext, new)
+            if new_text is None:
+                die(f"门面 changelog 里找不到 `{ROOT_CHANGELOG_SECTION}` 段或表格分隔行")
+            write_text(rcl, new_text)
+            print(f"[bump_version] {rel(rcl)}: 插入 v{new} 行")
+        else:
+            print(f"[bump_version] {rel(rcl)}: v{new} 行已存在,跳过")
+
     # release notes 片段(每版一个文件;release.yml 的 ${MAIN_CHANGES} 从这儿取)
     notes_dir = ROOT / RELEASE_NOTES_DIR
     notes_file = notes_dir / f"{new}.md"
@@ -424,6 +480,24 @@ def cmd_check() -> int:
         problems.append(f"{rel(CHANGELOG)}: changelog 文件不存在(`set` 会失败)")
     elif CHANGELOG_ANCHOR not in read_text(cl):
         problems.append(f"{rel(CHANGELOG)}: 找不到锚点 {CHANGELOG_ANCHOR!r}(`set` 会失败)")
+
+    # 门面 changelog(根 CHANGELOG.md)—— 它的 `## Releases` 首行版本必须 == VERSION。
+    # 2026-10-31 新增:这份文件原来没有主人(`set` 只写内层 umbrella)⇒ 实测它把
+    # 三条**没有 tag** 的变更槽当已发布写在最上面,而 VERSION 是 4.1.2。
+    rcl = ROOT / ROOT_CHANGELOG
+    if not rcl.is_file():
+        problems.append(f"{rel(ROOT_CHANGELOG)}: 门面 changelog 不存在")
+    else:
+        top = root_changelog_top_version(read_text(rcl))
+        if top is None:
+            problems.append(
+                f"{rel(ROOT_CHANGELOG)}: 找不到 `{ROOT_CHANGELOG_SECTION}` 段或它的首行版本"
+            )
+        elif top != version:
+            problems.append(
+                f"{rel(ROOT_CHANGELOG)}: `{ROOT_CHANGELOG_SECTION}` 首行版本是 {top!r},"
+                f"期望 {version!r}"
+            )
 
     # sha256 占位检查(未回填只报 INFO,不算漂移 —— 那是发布流程的正常中间态)
     scoop = ROOT / SCOOP_JSON

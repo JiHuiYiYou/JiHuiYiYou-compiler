@@ -1054,6 +1054,38 @@ fn parse_pattern_primary(p: *Parser) -> *Node {
 }
 
 // ════════════════════════════════════════════════════
+// 2026-10-31 真修:二层以上的嵌套 pattern **不支持** ⇒ 编译期拒绝
+// ════════════════════════════════════════════════════
+//
+// 为什么必须拒(而不是让它继续跑):
+//   实测(2026-10-31)嵌套 pattern **能编译能运行**,但行为是**静默产出错值**:
+//
+//   1. **内层 variant 从不比较** —— `match o { O::A(I::X(x)) => 7, _ => 0 }`
+//      对 `o = O::A(I::Y)` 实测 exit=7(静默走错 arm;零告警零诊断)。
+//      根因:codegen 的 NODE_PATTERN_ENUM 分支只在 inner 是 NODE_PATTERN_IDENT
+//      (绑定)时才做 payload alias,inner 是 enum pattern 时**整个被忽略**。
+//   2. **内层 payload 根本不提取** —— `o = O::A(I::X(42))` 配 `O::A(I::X(x)) => x`
+//      实测 exit=0xE8000000(**不是 42**)⇒ `x` 是**栈上垃圾**。
+//
+//   ⇒ 规范(lang-spec §5.6)写的就是「二层以上的嵌套 pattern 不支持」⇒
+//   **代码向规范靠拢**,不是规范向代码靠拢。要真支持嵌套 pattern 是**另一个
+//   sprint 的功能**(内层 tag 比较 + 内层 payload 提取 + 绑定语义),不是修 bug。
+//
+// 判据:**pattern 树里不得有 enum pattern 是另一个 enum pattern 的后代**
+//   (OR 包着的也算 —— `O::A(I::X(x) | I::Y)` 一样会走到内层)。
+fn parser_pattern_has_enum(pat: *Node) -> i32 {
+    if pat == (0 as *Node) { return 0; }
+    if (*pat).kind == NODE_PATTERN_ENUM() { return 1; }
+    if (*pat).kind == NODE_PATTERN_OR() {
+        let po = node_pattern_or_data(pat);
+        let l = parser_pattern_has_enum((*po).left as *Node);
+        if l == (1 as i32) { return 1; }
+        return parser_pattern_has_enum((*po).right as *Node);
+    }
+    return 0;
+}
+
+// ════════════════════════════════════════════════════
 // parse_pattern: 完整实现（commit 3）
 // 对应 C 端 parser.c:113-204
 // 自递归 OK（mutual recursion 走 internal calls 也 OK，因为所有 callee 都已定义）
@@ -1111,6 +1143,14 @@ fn parse_pattern(p: *Parser) -> *Node {
             if parser_match(p, TOKEN_LPAREN(), &t) != (0 as i32) {
                 inner = parse_pattern(p);
                 parser_expect(p, TOKEN_RPAREN(), ") after enum pattern" as *u8, &t);
+                // 2026-10-31 真修:嵌套 pattern 编译期拒绝(见 parser_pattern_has_enum
+                // 的注释 —— 现状是「静默走错 arm + 绑定取到栈上垃圾」)。
+                if parser_pattern_has_enum(inner) == (1 as i32) {
+                    jh_print_loc_stderr((*inner).loc_filename, (*inner).loc_line, (*inner).loc_col);
+                    jh_fputs_stderr("error: nested pattern is not supported" as *u8);
+                    jh_fputs_stderr("\n" as *u8);
+                    (*p).error_count = (*p).error_count + (1 as i32);
+                }
             }
             return ast_new_pattern_enum((*p).arena, loc_lf, loc_ll, loc_lc, tsym, vsym, inner);
         }
@@ -1139,6 +1179,13 @@ fn parse_pattern(p: *Parser) -> *Node {
                     parser_advance(p, &t);  // consume (
                     let inner = parse_pattern(p);
                     parser_expect(p, TOKEN_RPAREN(), ") after enum pattern" as *u8, &t);
+                    // 2026-10-31 真修:嵌套 pattern 编译期拒绝(同上)。
+                    if parser_pattern_has_enum(inner) == (1 as i32) {
+                        jh_print_loc_stderr((*inner).loc_filename, (*inner).loc_line, (*inner).loc_col);
+                        jh_fputs_stderr("error: nested pattern is not supported" as *u8);
+                        jh_fputs_stderr("\n" as *u8);
+                        (*p).error_count = (*p).error_count + (1 as i32);
+                    }
                     return ast_new_pattern_enum((*p).arena, loc_lf, loc_ll, loc_lc,
                                                 0 as *Sym, gsym, inner);
                 }

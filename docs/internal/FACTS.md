@@ -16,7 +16,7 @@
 | 项 | 值 |
 |---|---|
 | 当前版本 | **4.1.2**（真相源 = 仓库根 `VERSION` 文件） |
-| **怎么刷版本** | [`docs/internal/build.md` § 版本号自动化](internal/build.md#版本号自动化) —— `bump_version.py set` → `make` → bundle → `finalize` → `check`，**顺序不能反** |
+| **怎么刷版本** | [`docs/internal/build.md` § 版本号自动化](build.md#版本号自动化) —— `bump_version.py set` → `make` → bundle → `finalize` → `check`，**顺序不能反** |
 | 最新 release | `v4.1.2`（2026-10-29） |
 | 版本轴 | v0.x(C 编译器，冻结于 v1.0.0) · v1.x(自举，终结于 v1.8.3) · v2.x(QBE 重写，终结于 v2.16.0) · v3.x(语言扩展，终结于 v3.4.2) · **v4.x(当前)** |
 | 编译器二进制 | `compiler/build/bin/jhyy.exe`（~1.9 MB） |
@@ -35,8 +35,8 @@
 
 | 门 | 值 |
 |---|---|
-| `python regress.py` | **259 PASS + 0 XFAIL + 0 failed + 20 SKIP**（279 total） |
-| 断言强度审计 | 扫描 279 · 可跑 259 · 真断言 200 · literal-return-ok 8 · expect-error 51 · skipped 6 · library 14 · **零信号 0** |
+| `python regress.py` | **261 PASS + 0 XFAIL + 0 failed + 20 SKIP**（281 total） |
+| 断言强度审计 | 扫描 281 · 可跑 261 · 真断言 201 · literal-return-ok 8 · expect-error 52 · skipped 6 · library 14 · **零信号 0** |
 | `compiler/tests/bootstrap/artifact_checks.sh` | **17 道**（`check_*` 函数数）· 0 FAIL |
 | `compiler/tests/bootstrap/fixed_point.sh` | N=10 跨代 byte-equal 全绿（`.il` 与 `.s`；门数由脚本内部计数，不在此声明） |
 | `compiler/tests/bootstrap/closure_check.sh` | PASS（v2.s == v3.s，逐字节相同） |
@@ -50,7 +50,7 @@
 
 | 项 | 值 |
 |---|---|
-| 台账 | [`docs/workarounds.md`](workarounds.md) —— **永不归档** |
+| 台账 | [`docs/internal/workarounds.md`](workarounds.md) —— **永不归档** |
 | 条目总数 | **165** |
 | ACTIVE | **1** —— [`W-170`](workarounds.md#w-170)：`jhyy build` 不处理 `#[link_section]` |
 | DEFERRED | 0 |
@@ -118,10 +118,10 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 
 ## 6. 引用本文件的方式
 
-**正确**：
+**正确**（从 `docs/` 下的子目录引用）：
 
 ```markdown
-回归基线见 [`../docs/FACTS.md`](../docs/FACTS.md) § 2。
+回归基线见 [`../internal/FACTS.md`](../internal/FACTS.md) § 2。
 ```
 
 **错误**（复述 = 下一个漂移源）：

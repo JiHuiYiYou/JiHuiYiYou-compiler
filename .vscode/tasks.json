@@ -4,22 +4,14 @@
         {
             "label": "JHYY: Build Compiler",
             "type": "shell",
-            "command": "C:/msys64/ucrt64/bin/gcc.exe",
+            "command": "C:/msys64/usr/bin/bash.exe",
             "args": [
-                "-std=c11",
-                "-Wall",
-                "-Wextra",
-                "compiler/src/*.c",
-                "-o",
-                "compiler/build/bin/jhyy.exe",
-                "-I",
-                "compiler/src"
+                "-lc",
+                "make -C \"${workspaceFolder}\" all"
             ],
             "group": "build",
-            "problemMatcher": [
-                "$gcc"
-            ],
-            "detail": "Compile the JHYY compiler from C source"
+            "problemMatcher": [],
+            "detail": "Self-host build: make → compiler/build/bin/jhyy.exe. The C compiler is gone (compiler/src/*.c was deleted in v4.0.21) — the compiler builds itself now."
         },
         {
             "label": "JHYY: Run",
@@ -72,7 +64,7 @@
                 "panel": "new"
             },
             "problemMatcher": [],
-            "detail": "Compile .jhyy to .il only (no linking)"
+            "detail": "Compile .jhyy to .s only (no linking). NOTE: `jhyy build` does not apply #[link_section] — use `jhyy compile --no-link` for tooling (W-170)"
         }
     ]
 }

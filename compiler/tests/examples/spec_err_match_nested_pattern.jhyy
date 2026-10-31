@@ -1,0 +1,28 @@
+// spec_err_match_nested_pattern.jhyy — spec §5.6:二层以上的嵌套 pattern 不支持
+//
+// 覆盖缺口(2026-10-31 文档审计发现):嵌套 pattern 的内层 variant **从不比较**,
+// 且内层 payload **根本不提取** ⇒ 现状是**静默产出错值**,不是解析失败:
+//
+//   1. `match o { O::A(I::X(x)) => 7, _ => 0 }` 对 `o = O::A(I::Y)`
+//      实测 exit=7(静默走错 arm;零告警零诊断)
+//   2. `o = O::A(I::X(42))` 配 `O::A(I::X(x)) => x` 实测 exit=0xE8000000
+//      (**不是 42**)⇒ `x` 是栈上垃圾
+//
+// 规范(lang-spec §5.6)写的就是「二层以上的嵌套 pattern 不支持」⇒ 代码向规范
+// 靠拢:嵌套 pattern 现在**编译期被拒绝**,不再产出错值。
+// 真要支持嵌套 pattern 是另一个 sprint 的功能(内层 tag 比较 + payload 提取
+// + 绑定语义),不是修 bug。
+//
+// EXPECT-ERROR: "nested pattern is not supported"
+
+type I = enum { X(i32), Y }
+type O = enum { A(I), None }
+
+fn main_jhyy() -> i32 {
+    let o: O = O::A(I::Y);
+    let r: i32 = match o {
+        O::A(I::X(x)) => x,
+        _ => 0,
+    };
+    return r;
+}

@@ -2,13 +2,13 @@
 
 <div><img src="vscode-ext/icon-animated.svg" width="96" alt="JHYY logo"></div>
 
-<div><img src="vscode-ext/jhyy-calligraphy.png" width="220" alt="机会翼游 calligraphy logo"></div>
+<div><img src="vscode-ext/jhyy-calligraphy.png" width="220" alt="JHYY calligraphy logo"></div>
 
-### 机会翼游 — A self-hosted, statically typed, compiled systems programming language
+### JHYY (机会翼游) — A self-hosted, statically typed, compiled systems programming language
 
 **Statically typed. Expression-oriented. Compiled to native by a self-written amd64 backend.**
 
-[![Version](https://img.shields.io/badge/version-v4.1.2-00d4aa)](docs/archive/logs/v4/changelog-v4.0.0.md)
+[![Version](https://img.shields.io/badge/version-v4.1.2-00d4aa)](CHANGELOG.md)
 [![Status](https://img.shields.io/badge/self--host-byte--equal-success)](#status-v412)
 [![Backend](https://img.shields.io/badge/backend-self--hosted%20amd64-blue)](#architecture)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#install)
@@ -39,41 +39,6 @@ The backend is a **self-written in-memory amd64 code emitter**
 - **Native output** — direct amd64 code emission; PE/COFF (Windows) and ELF (Linux) binaries.
 - **OS-ready** — `extern fn` FFI on the C ABI, `enum` + `match`, `#[no_std]`, `#[naked]`,
   inline `asm!`, `#[link_section]`, `volatile`, memory barriers, `defer`.
-
-## Install
-
-**End users (Windows x64)** — grab the installer. **MSYS2 is not required**: since v4.1.0
-the MSI bundles a minimal native ucrt64 toolchain (`<INSTALLDIR>\toolchain\`).
-
-| Artifact | Size | What it is |
-|---|---|---|
-| `jhyy-installer-4.1.2.exe` | ~55 MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |
-| `jhyy-compiler-4.1.2.msi` | ~28 MB | Same payload, no GUI — for enterprise / SCCM distribution |
-
-**Building from source** — needs MSYS2 + `mingw-w64-ucrt-x86_64-gcc` (the compiler
-*build* host requirement; end users don't need it):
-
-```bash
-make all        # → compiler/build/bin/jhyy.exe (~1.9 MB)
-```
-
-> [!IMPORTANT]
-> Do NOT use the MinGW `gcc` shipped with Git Bash (`/c/Program\ Files/Git/mingw64/bin/gcc.exe`)
-> — it does not support PE+ linking and fails at link time.
-
-**Docker**:
-
-```bash
-# compiler host — full toolchain (Windows)
-docker run -it msys2/mingw-w64-ucrt-x86_64 bash
-# amd64_sysv target toolchain — link + run the emitted .s on Linux
-# (jhyy.exe is a PE binary: it does NOT run inside this container)
-docker run -it gcc:12 bash
-```
-
-**VSCode users**: opening this repo triggers `.vscode/settings.json` to add
-`compiler/build/bin` and the MSYS2 ucrt64 path to the integrated terminal. Press
-`Ctrl+Shift+B` to compile + run any `.jhyy` file.
 
 ---
 
@@ -111,6 +76,49 @@ fn main_jhyy() -> i32 {
 
 ---
 
+## Install
+
+**End users (Windows x64)** — grab the installer from
+[**GitHub Releases**](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/latest).
+**MSYS2 is not required**: since v4.1.0 the installer bundles a minimal native ucrt64
+toolchain (`<INSTALLDIR>\toolchain\`).
+
+| Artifact | Size | What it is |
+|---|---|---|
+| [`jhyy-installer-4.1.2.exe`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.2/jhyy-installer-4.1.2.exe) | ~55 MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |
+| [`jhyy-compiler-4.1.2.msi`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.2/jhyy-compiler-4.1.2.msi) | ~28 MB | Same payload, no GUI — for enterprise / SCCM distribution |
+
+Checksums are published alongside the assets as `SHA256.txt`.
+
+**Building from source** — needs MSYS2 + `mingw-w64-ucrt-x86_64-gcc` (the compiler
+*build* host requirement; end users don't need it):
+
+```bash
+git clone https://github.com/JiHuiYiYou/JiHuiYiYou-compiler.git
+cd JiHuiYiYou-compiler
+make all        # → compiler/build/bin/jhyy.exe (~1.9 MB)
+```
+
+> [!IMPORTANT]
+> Do NOT use the MinGW `gcc` shipped with Git Bash (`/c/Program\ Files/Git/mingw64/bin/gcc.exe`)
+> — it does not support PE+ linking and fails at link time.
+
+**Docker**:
+
+```bash
+# compiler host — full toolchain (Windows)
+docker run -it msys2/mingw-w64-ucrt-x86_64 bash
+# amd64_sysv target toolchain — link + run the emitted .s on Linux
+# (jhyy.exe is a PE binary: it does NOT run inside this container)
+docker run -it gcc:12 bash
+```
+
+**VSCode users**: opening this repo triggers `.vscode/settings.json` to add
+`compiler/build/bin` and the MSYS2 ucrt64 path to the integrated terminal. Press
+`Ctrl+Shift+B` to compile + run any `.jhyy` file.
+
+---
+
 ## Quick Start
 
 ### Hello world
@@ -131,7 +139,7 @@ echo $?    # => 42
 
 ```bash
 python regress.py
-# => 259/259 passed (全部有断言), 0 failed, 20 skipped (of 279 total)
+# => 261/261 passed (all with assertions), 0 failed, 20 skipped (of 281 total)
 ```
 
 ### Verify the self-host closure
@@ -140,6 +148,11 @@ python regress.py
 make            # builds jhyy.exe, then iterates the closure to a fixed point
 #   ⇒ _boot_new.s vs _boot_new2.s byte-identical
 ```
+
+### Run with VSCode
+
+With the extension installed, `.jhyy` files get a ▶ run button in the title bar
+(`Ctrl+F5`).
 
 ---
 
@@ -183,9 +196,12 @@ flags:
 Targets: `amd64_win` (default, hosted Windows) · `amd64_win_freestanding` (UEFI) ·
 `amd64_sysv` · `amd64_sysv_freestanding`.
 
-> [!TIP]
-> For multi-file compilation, list every `.jhyy` source on the command line:
-> `jhyy compile main.jhyy lib.jhyy -o app`
+> [!IMPORTANT]
+> **The command line takes exactly one input file.** Extra `.jhyy` arguments are
+> **silently ignored** — no error, no warning — so `jhyy compile main.jhyy lib.jhyy`
+> compiles **only** `main.jhyy`.
+> Combine files with `import` instead: put `import lib;` in `main.jhyy` and the
+> compiler pulls `lib.jhyy` in along the import graph.
 >
 > ⚠️ **There is no `jhyy --version`** — it never existed. Running it prints
 > `unknown command` and exits 1. The version banner is the **first line of
@@ -201,11 +217,11 @@ Targets: `amd64_win` (default, hosted Windows) · `amd64_win_freestanding` (UEFI
 
 ```mermaid
 flowchart TB
-    src[".jhyy source"] --> lex["Lexer → Token 流"]
+    src[".jhyy source"] --> lex["Lexer → Token stream"]
     lex --> parse["Parser → AST"]
-    parse --> sema["Sema → 标注 AST"]
-    sema --> il["codegen.jhyy<br/>发 QBE 风格 IL 文本到**内存**"]
-    il --> sb["codegen_amd64_inmem<br/>lex → 解析 → emit → peephole"]
+    parse --> sema["Sema → annotated AST"]
+    sema --> il["codegen.jhyy<br/>emits QBE-style IL text to **memory**"]
+    il --> sb["codegen_amd64_inmem<br/>lex → parse → emit → peephole"]
     sb --> asm[".s (amd64)"]
     asm --> ln["as + ld (gcc)"]
     ln --> exe[".exe (PE/COFF) / ELF"]
@@ -230,22 +246,22 @@ iteration loop on codegen itself.
 ```
 JiHuiYiYou-compiler/
 ├── compiler/
-│   ├── src0/                   编译器源码(唯一实现,30 个模块 + std/)
-│   │   ├── std/                标准库:mem / fmt / io / math / string / vec / os / arena
-│   │   └── codegen_amd64_*.jhyy 自研后端:IL lexer / emit_* / peephole / 寄存器缓存
-│   ├── runtime/                C 运行时(Arena + main 入口)
+│   ├── src0/                   compiler sources (the only implementation, 30 modules + std/)
+│   │   ├── std/                standard library: mem / fmt / io / math / string / vec / os / arena
+│   │   └── codegen_amd64_*.jhyy self-written backend: IL lexer / emit_* / peephole / register cache
+│   ├── runtime/                C runtime (arena + main entry)
 │   ├── tests/
-│   │   ├── examples/           集成测试(274 个 .jhyy + 5 个子目录)— regress.py 自动跑
+│   │   ├── examples/           integration tests (274 .jhyy files + 5 subdirectories) — run by regress.py
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
-│   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe(自举产物)
-├── runtime/linux_elf/          Linux ELF 运行时(crt0.S + link.ld)
-├── regress.py                  回归测试套件(仓库根)
-├── docs/                       规范 / 内部文档 / 计划 / changelog
-├── installer/                  WiX installer + 内置 ucrt64 工具链
-├── mcp-jhyy/                   Claude Code MCP server(jhyy_* 工具)
-├── vscode-ext/                 VS Code 扩展
-├── scripts/dev/                开发脚本(bench / test / build / install)
-└── tools/                      跨仓工具
+│   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe (self-hosted artifacts)
+├── runtime/linux_elf/          Linux ELF runtime (crt0.S + link.ld)
+├── regress.py                  regression test suite (repository root)
+├── docs/                       specs / internal docs / plans / changelog
+├── installer/                  WiX installer + bundled ucrt64 toolchain
+├── mcp-jhyy/                   Claude Code MCP server (jhyy_* tools)
+├── vscode-ext/                 VS Code extension
+├── scripts/dev/                development scripts (bench / test / build / install)
+└── tools/                      cross-repository tools
 ```
 
 ---
@@ -254,59 +270,82 @@ JiHuiYiYou-compiler/
 
 | Metric | Value |
 |--------|-------|
-| `regress.py` | **259 PASS + 0 XFAIL + 0 failed + 20 SKIP** (279 total) |
-| Assertion audit | 279 scanned / 259 runnable / 200 real assertions / 0 zero-signal |
+| `regress.py` | **261 PASS + 0 XFAIL + 0 failed + 20 SKIP** (281 total) |
+| Assertion audit | 281 scanned / 261 runnable / 201 real assertions / 0 zero-signal |
 | Self-host closure | `make` iterates to a fixed point — emitted `.s` byte-identical |
-| `fixed_point.sh` | **17 PASS / 0 FAIL** (N=10, `.il` and `.s` byte-equal across generations) |
+| `fixed_point.sh` | PASS (N=10 — `.il` and `.s` byte-equal across generations) |
 | `artifact_checks.sh` | **17 PASS / 0 FAIL** |
 | `closure_check.sh` | PASS (v2.s == v3.s, byte-identical) |
-| ACTIVE workarounds | **1** — [`W-170`](docs/workarounds.md): `jhyy build` doesn't apply `#[link_section]` |
+| ACTIVE workarounds | **1** — [`W-170`](docs/internal/workarounds.md): `jhyy build` doesn't apply `#[link_section]` |
 | `jhyy-installer-4.1.2.exe` | shipped (~55 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
 | `jhyy-compiler-4.1.2.msi` | shipped (~28 MB, includes `jhyy-setuc.exe` + bundled toolchain) |
 | `jhyy-lang-4.1.2.vsix` | shipped (VS Code extension) |
 
-**v4.x umbrella changelog** — [`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md)
-is the single per-axis changelog (per the project's umbrella convention).
+**Changelog** — [`CHANGELOG.md`](CHANGELOG.md) has one line per release; the detailed
+per-axis record is the v4 umbrella,
+[`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md).
 
 ---
 
 ## Roadmap
 
-v4.x is the post-merge axis. Plans live one per version slot under
-[`docs/plans/v4/`](docs/plans/v4/README.md) — the authoritative index, plus
-[`docs/archive/plans/v4/version-schedule.md`](docs/archive/plans/v4/version-schedule.md) for the schedule.
+v4.x is the post-merge axis. **The authoritative schedule** — one slot per version, what each
+slot contains, and the stable `OS-N` identities — is
+[`docs/internal/FACTS.md`](docs/internal/FACTS.md) § 4. Plans live one per version slot under
+[`docs/plans/v4/`](docs/plans/v4/README.md).
 
-**Performance line** (self-written backend — the current main line):
-
-| Sprint | Intent |
-|--------|--------|
-| **v4.4.0** ⭐ | **Register allocation** — stage 1 (allocator + safety net, byte-identical output) is done; stage 2 is the emit layer consuming registers |
-| v4.4.1 / v4.4.2 / v4.4.3 | call-clobber + register classes / cross-block + phi parallel moves / gates + perf validation |
-| v4.4.5 | peephole 4096 limit + IR optimisation framework (two downgraded versions) |
-| v4.5 | M5 Part 3 — the last 0-C-closure item |
-
-**OS line** (v4.6 → v4.15, stable identity `OS-1` … `OS-16`): stop-the-bleeding → stack
-observation → feedback loop → ABI convergence → language self-consistency → effect system →
-lifetime → trait + `dyn Trait` → const generics → HKT → capability typing → trusted
-toolchain.
+**Current line**: the self-written backend's performance line (register allocation for the
+self-written amd64 backend), followed by the OS line (v4.6 → v4.15, stable identity
+`OS-1` … `OS-16`).
 
 Version numbers on reserved slots are **placeholders** — each plan carries a
 "check on start" checklist to be re-verified against reality when that slot is picked up.
 
 ---
 
+## Tools & integrations
+
+### Claude Code MCP server
+
+`mcp-jhyy/` provides **11 MCP tools**:
+
+| Tool | Purpose |
+|------|---------|
+| `jhyy_run` / `jhyy_check` / `jhyy_compile` | compile / run / check `.jhyy` |
+| `jhyy_get_il` | fetch the intermediate representation (codegen debugging) |
+| `jhyy_regress` | run the regression suite, returns the PASS/FAIL list |
+| `jhyy_il_diff` | byte-equal check + contextual diff of two `.il` files |
+| `jhyy_selfhost_check` | one-shot self-host closure verification (v1→v2→v3→v4) |
+| `jhyy_workarounds` | look up the status of a W-NNN workaround |
+| `jhyy_lang_ref` / `jhyy_abi_info` / `jhyy_format` | language / ABI / formatting queries |
+
+Install with `pip install fastmcp` (⚠️ **not** `mcp[cli]` — `fastmcp` is a separate
+top-level distribution). See [`mcp-jhyy/README.md`](mcp-jhyy/README.md).
+
+### VS Code extension
+
+`vscode-ext/` provides syntax highlighting (TextMate grammar + file icons), a native ▶
+`Run JHYY File` command (`Ctrl+F5`) and a `Compile JHYY File (no run)` command. The
+latest shipped build is `jhyy-lang-4.1.2.vsix`.
+
+---
+
 ## Docs
 
+- **All repo docs** — the map of what lives where: [`docs/internal/README.md`](docs/internal/README.md)
 - **Language spec**: [`docs/abis/jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) (locked)
 - **ABI whitepaper**: [`docs/abis/jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) (locked)
 - **Binary format** (design doc, not implemented): [`docs/abis/jhyy-binary-format-v1.0.0.md`](docs/abis/jhyy-binary-format-v1.0.0.md)
+- **Current facts** (version, regression count, schedule): [`docs/internal/FACTS.md`](docs/internal/FACTS.md)
 - **Architecture**: [`docs/internal/architecture.md`](docs/internal/architecture.md)
 - **Build & run**: [`docs/internal/build.md`](docs/internal/build.md)
-- **Tests**: [`docs/FACTS.md`](docs/FACTS.md)
-- **Workarounds ledger**: [`docs/workarounds.md`](docs/workarounds.md)
-- **Conventions**: [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- **Changelog**: [`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md) (v4 umbrella)
-- **Archived plans**: [`docs/archive/plans/v2-v3/`](docs/archive/plans/v2-v3/) (v2/v3 historical — superseded)
+- **Workarounds ledger**: [`docs/internal/workarounds.md`](docs/internal/workarounds.md)
+- **Current plans**: [`docs/plans/v4/`](docs/plans/v4/README.md)
+- **Cross-project design** (compiler side / OS side): [`docs/coordination/`](docs/coordination/)
+- **Performance baseline**: [`docs/perf/self-backend-baseline-2026-10-29.md`](docs/perf/self-backend-baseline-2026-10-29.md)
+- **Contributing**: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- **Changelog**: [`CHANGELOG.md`](CHANGELOG.md)
+- **Archive**: [`docs/archive/`](docs/archive/README.md) (history — superseded plans, old changelogs)
 
 ---
 
@@ -316,4 +355,15 @@ MIT — see [`LICENSE`](LICENSE).
 
 ---
 
-<sub>v4.1.2 — 2026-10-29 · 版本号自动化(`VERSION` 单一真相源) · 自研 amd64 后端</sub>
+## Contributors
+
+- **Human author:** JHYY
+- **AI collaborator:** MiniMax-M3 — contributes to design, implementation, debugging and
+  documentation through the [Claude Code](https://claude.ai/code) CLI workflow
+
+Since v0.6, every sprint's implementation and documentation have been produced by JHYY
+and MiniMax-M3 together.
+
+---
+
+<sub>v4.1.2 — 2026-10-29 · version automation (`VERSION` is the single source of truth) · self-written amd64 backend</sub>

@@ -1,0 +1,24 @@
+// match_or_pattern_multi.jhyy — spec §5.6:OR pattern 支持多路(A | B | C ...)
+//
+// 覆盖缺口(2026-10-31 文档审计发现):N 路 OR 的**穷尽性判定漏掉中间变体**
+// ⇒ `match e { E::A | E::B | E::C => 1 }`(E 恰好 3 个变体)被**误报**
+// `non-exhaustive match: missing variant` —— 明明是穷尽的。
+// 连「其他 arm 补齐变体」也救不了:4 变体 + `A|B|C` 一臂 + `D` 一臂仍误报。
+//
+// 根因:sema 的 OR 变体收集只取 left / right 两个**直接**子节点;OR 是左结合的,
+// `A | (B | C)` 的 right 是 OR 节点而不是 ENUM ⇒ 中间变体从没被标记为已覆盖。
+// codegen 的 OR 分支一直是递归的 ⇒ 命中语义一直是对的,只有穷尽性判定漏。
+//
+// 本用例锁两件事:3 路 OR ①**穷尽**(能编译)②**命中正确**(e=C 走该臂)。
+//
+// EXPECT: 1
+
+type E = enum { A, B, C }
+
+fn main_jhyy() -> i32 {
+    let e: E = E::C;
+    let r: i32 = match e {
+        E::A | E::B | E::C => 1,
+    };
+    return r;
+}
