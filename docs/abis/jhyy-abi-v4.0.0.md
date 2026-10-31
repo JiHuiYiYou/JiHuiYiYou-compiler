@@ -119,15 +119,26 @@ total_size     = align_up(payload_offset + max_payload_size, total_align)
 
 ### 2.5 `Cap<T>`
 
+8 字节内建类型：
+
 ```
 offset  size  field        type
 0       4     cnode_idx    u32     CSpace slot index
 4       1     depth        u8      CDL 深度
-5       2     rights       u16     bit0=R, bit1=W, bit2=G
-7       1     gen          u8      slot 复用代数(slot 被复用时 +1;cap 派发时携带当时的代数)
+5       1     gen          u8      slot 复用代数(slot 被复用时 +1;cap 派发时携带当时的代数)
+6       2     rights       u16     bit0=R, bit1=W, bit2=G
 ```
 
 - 小端序。
+- ⚠️ **字段顺序 = 自然对齐的结果（2026-10-31 订正）**：本布局**必须**是
+  `cnode_idx@0 · depth@4 · gen@5 · rights@6` —— `rights:u16` 落在**偶数**偏移上，
+  整个类型**字段全部自然对齐、无隐式 padding**（类型自身的 `alignof` 仍为 8，见 [§ 2.2](#22-复合类型)）。
+  之前的 `rights@5`（`gen@7`）把 u16 放在**奇数**偏移 ⇒ 那个布局**只能由 packed 产生**，
+  与本规范的「无 `packed` / 显式 `_pad`」布局契约冲突（见 [§ 2 类型布局](#2-类型布局)），
+  也让编译器侧「message struct 字段 size/align 一致」的编译期检查无从表达。
+  **代价为零**：`.jhyynb` 是**设计稿未实装**（**ABI** § 12.10），
+  没有任何产物实现过这份布局 ⇒ 改偏移不破坏任何兼容性；
+  **窗口在 `Cap<T>` 真 T 落地（OS-14）之前**，之后改就是第二次 ABI break。
 
 - ⚠️ **`gen` 的语义（2026-10-30 定）**：slot 被复用时 +1；cap 派发时携带当时的代数。
   这是**内核判定「这个 cap 还活着吗」的唯一机制** ⇒ 没有它，slot 复用 = UAF，
@@ -140,7 +151,11 @@ offset  size  field        type
   实测：`let b: Cap<i64> = a;`（`a: Cap<i32>`）**编译通过**（两个方向都通过）；
   对照组 `P<i32>` → `P<i64>` 会报 `type mismatch in let` ⇒ 泛型机制本身没问题，`Cap` 是特殊的。
   且 inner **从不 resolve 也不校验** ⇒ `Cap<NotAType>` **零诊断**（实测编译通过）。
-  不带 `<T>` 的裸 `Cap` 走 sema 的 `type_cap(PRIM_I32())`。- 不提供 `.cnode_idx` / `.depth` / `.rights` 字段访问语法；构造走 8 字节整型字面量 + `as Cap` 转换。
+  不带 `<T>` 的裸 `Cap` 走 sema 的 `type_cap(PRIM_I32())`。- 不提供 `.cnode_idx` / `.depth` / `.rights` 字段访问语法。构造走 8 字节整型字面量 + `as Cap`：
+
+```jhyy
+let c: Cap = 0x0003000200000007 as Cap;   // cnode=7, depth=2, gen=0, rights=R|W
+```
 
 ### 2.6 `volatile T`
 
@@ -308,7 +323,7 @@ epilogue:
 - **不支持**：struct / enum 按值跨 FFI 边界、变参函数（JHYY 侧需逐参数列出）、回调函数。
   - ⚠️ `extern fn` 的参数 / 返回类型**不做编译期限制**：声明 struct 参数能编译通过，但实际按地址传，与 C ABI 不符（静默不符，无报错）。
 - 字符串字面量是 UTF-8 字节序列，存放在 **`.data`** 段（GAS 默认数据段；编译器从不发 `.section .rodata`），以 NUL 结尾（`.byte 0`），作为 `*u8` 传给 C，兼容 C `char*`。
-- ⚠️ **Windows 控制台 UTF-8 输出不由运行时设置** —— `runtime.c` 的 `main` 只做 argv 重解码 + 调 `main_jhyy`，**没有** `SetConsoleOutputCP(65001)` 调用。需要 UTF-8 终端得自行 `chcp 65001`（见 [§ 12.14](#abi-12-14)）。
+- ✅ **Windows 控制台 UTF-8 输出由运行时设置**（2026-10-31 起）—— `runtime.c` 的 `main` 检测 `GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) == FILE_TYPE_CHAR` ⇒ **只在 stdout 是控制台时**调 `SetConsoleOutputCP(CP_UTF8)` + `SetConsoleCP(CP_UTF8)`（`CP_UTF8` == 65001）；管道 / 重定向时**不动代码页**（字节原样透传，IDE 侧按 UTF-8 解）。理由：默认 OEM 代码页在中文 Windows 是 CP936/GBK，程序 printf 出去的 UTF-8 字节会被按 GBK 解释 ⇒ 屏幕全是乱码。行 `chcp 65001`（见 [§ 12.14](#abi-12-14)）。
 
 ---
 
@@ -436,7 +451,7 @@ epilogue:
 | <a id="abi-12-11"></a>12.11 | **SysV eightbyte 宽度规则只对第 0 个 eightbyte 成立**：第 1 个及以后恒为 8 字节（实现比较的是字段**绝对**结束偏移与字面量 4）。12 字节 struct 的第二个 eightbyte 因此被当作 8 字节，与 gcc 的 INTEGER(4) 不符 | 偏离 SysV |
 | <a id="abi-12-12"></a>12.12 | **SysV 溢出的 f64 栈参缺 16 字节对齐**：caller 只按 8 递增 | 偏离 SysV |
 | <a id="abi-12-13"></a>12.13 | **旁路文件走固定路径**，两个并发编译会互相干扰。`#[no_std]` 用例因此在测试 harness 中串行执行 | ⚠️ **已过时** —— W-136（v4.0.21）已给 side-file 加 pid 后缀（A/B 实测 12 路并发逐字节相同）⇒ **v4.9(OS-5) 从本表移除**，届时编号前移 |
-| <a id="abi-12-14"></a>12.14 | **Windows 控制台 UTF-8 不由运行时设置**：`runtime.c` 的 `main` 不调用 `SetConsoleOutputCP(65001)`，需自行 `chcp 65001` | 实现特征 |
+| <a id="abi-12-14"></a>12.14 | **Windows 控制台 UTF-8 由运行时设置**（2026-10-31 起）：`runtime.c` 的 `main` 在 **stdout 是控制台时**调 `SetConsoleOutputCP(CP_UTF8)` + `SetConsoleCP(CP_UTF8)`；管道 / 重定向时不动代码页 | 实现特征 |
 
 ---
 

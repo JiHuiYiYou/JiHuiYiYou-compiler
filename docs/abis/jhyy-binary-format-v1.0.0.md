@@ -35,12 +35,17 @@ jhyy_OS kernel 走 `kernel.efi`(PE/COFF,被 UEFI 协议锁,per **D1** 2026-08-04
 ## 2. 约束(从已锁 D-locks 推导)
 
 - **5 原则**(原载于已清理的 OS 侧 `v0.0.2-foundation-revision.md § 3.1`):可行且简单 / 双线作战 / 寄生 Windows / Debug 在语言里 / Kernel 不解决语言问题 ⇒ **原则 5 的四条边界条件**见 [docs/coordination/JHYY_OS侧设计终版.md](../coordination/JHYY_OS侧设计终版.md)
-- **D6 + D23**:`Cap<T>` 8 字节 wire = `{cnode_idx:u32@0, depth:u8@4, rights:u16@5, gen:u8@7}`,phantom 字段 0 字节(codegen skip `_phantom`)
-  > ✅ **2026-10-30 已定：按 lang-spec §2.6 / abi §2.5 的 `rights@5`**(两份锁定规范,
-  > 均为 2026-10-24 锁)。**本行原写的 `rights@6` 是错的** —— lang-spec §2.6 自带示例
-  > `0x0000030200000007 as Cap // cnode=7, depth=2, rights=R|W` 小端展开 =
-  > `07 00 00 00 | 02 | 03 00 | 00`,**只有 `rights@5` 下才解出自洽**。
-  > `gen:u8@7`(原 `padding:u8`)= **slot 复用代数**,见
+- **D6 + D23**:`Cap<T>` 8 字节 wire = `{cnode_idx:u32@0, depth:u8@4, gen:u8@5, rights:u16@6}`,phantom 字段 0 字节(codegen skip `_phantom`)
+  > ✅ **2026-10-31 定：按 lang-spec §2.6 / abi §2.5 的 `cnode_idx@0 · depth@4 · gen@5 · rights@6`**
+  > (两份锁定规范，2026-10-24 锁)。**本行原写的 `rights@6` 是错的** —— lang-spec §2.6 自带示例
+  > `0x0003000200000007 as Cap // cnode=7, depth=2, gen=0, rights=R|W` 小端展开 =
+  > `07 00 00 00 | 02 | 00 | 03 00`,**只有 `rights@6` 下才解出自洽**。
+  > ⚠️ **为什么是 6 不是 5**：`rights:u16` 必须落在**偶数**偏移（自然对齐），否则整个类型
+  > **只能由 packed 产生** —— 与本规范的「无 `packed` / 显式 `_pad`」布局契约冲突，也让
+  > 编译器侧「message struct 字段 size/align 一致」的编译期检查无从表达。
+  > 2026-10-30 锁的 `rights@5`（`gen@7`）把 u16 放在**奇数**偏移 —— **那版只能 packed**。
+  > **代价为零**：本格式未实装 ⇒ 没有任何产物实现过旧布局。
+  > `gen:u8@5`(原 `padding:u8`)= **slot 复用代数**,见
   > [docs/coordination/JHYY_OS侧设计终版.md](../coordination/JHYY_OS侧设计终版.md) § 3.5。
   > **本字段与 lang-spec § 2.6 同源;改动须三处同步** —— 门:
   > `scripts/dev/check_spec_consistency.py`。

@@ -392,7 +392,7 @@ fn resolve_type_node(ctx: *SemaContext, ta: *TypeArena, tn: *Node) -> *Type {
         if strcmp(name, "f32" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_F32()); }
         if strcmp(name, "f64" as *u8)  == (0 as i32) { return type_primitive(ta, PRIM_F64()); }
         if strcmp(name, "bool" as *u8) == (0 as i32) { return type_primitive(ta, PRIM_BOOL()); }
-        // v3.1.0 (V3-C 3g): Cap builtin — 8-byte capability (cnode/depth/rights/pad).
+        // v3.1.0 (V3-C 3g): Cap builtin — 8-byte capability (cnode_idx/depth/gen/rights).
         // 简化:default inner=i32, 完整 Cap<T> generic 留 v3.1.2。
         if strcmp(name, "Cap" as *u8) == (0 as i32) {
             return type_cap((*ctx).arena, type_primitive(ta, PRIM_I32()));

@@ -189,11 +189,20 @@ let s: *u8 = "hello";
 offset  size  field        type
 0       4     cnode_idx    u32     CSpace slot index
 4       1     depth        u8      CDL 深度
-5       2     rights       u16     bit0=R, bit1=W, bit2=G
-7       1     gen          u8      slot 复用代数(slot 被复用时 +1;cap 派发时携带当时的代数)
+5       1     gen          u8      slot 复用代数(slot 被复用时 +1;cap 派发时携带当时的代数)
+6       2     rights       u16     bit0=R, bit1=W, bit2=G
 ```
 
 - 小端序。
+- ⚠️ **字段顺序 = 自然对齐的结果（2026-10-31 订正）**：本布局**必须**是
+  `cnode_idx@0 · depth@4 · gen@5 · rights@6` —— `rights:u16` 落在**偶数**偏移上，
+  整个类型**字段全部自然对齐、无隐式 padding**（类型自身的 `alignof` 仍为 8，见 [§ 2.2](#22-复合类型)）。
+  之前的 `rights@5`（`gen@7`）把 u16 放在**奇数**偏移 ⇒ 那个布局**只能由 packed 产生**，
+  与本规范的「无 `packed` / 显式 `_pad`」布局契约冲突（见 [§ 19](#19-debug-abi-跨项目契约)），
+  也让编译器侧「message struct 字段 size/align 一致」的编译期检查无从表达。
+  **代价为零**：`.jhyynb` 是**设计稿未实装**（[ABI § 12.10](jhyy-abi-v4.0.0.md#abi-12-10)），
+  没有任何产物实现过这份布局 ⇒ 改偏移不破坏任何兼容性；
+  **窗口在 `Cap<T>` 真 T 落地（OS-14）之前**，之后改就是第二次 ABI break。
 
 - ⚠️ **`gen` 的语义（2026-10-30 定）**：slot 被复用时 +1；cap 派发时携带当时的代数。
   这是**内核判定「这个 cap 还活着吗」的唯一机制** ⇒ 没有它，slot 复用 = UAF，
@@ -209,7 +218,7 @@ offset  size  field        type
   不带 `<T>` 的裸 `Cap` 走 sema 的 `type_cap(PRIM_I32())`。- 不提供 `.cnode_idx` / `.depth` / `.rights` 字段访问语法。构造走 8 字节整型字面量 + `as Cap`：
 
 ```jhyy
-let c: Cap = 0x0000030200000007 as Cap;   // cnode=7, depth=2, rights=R|W
+let c: Cap = 0x0003000200000007 as Cap;   // cnode=7, depth=2, gen=0, rights=R|W
 ```
 
 ### 2.7 `PhantomData<T>`

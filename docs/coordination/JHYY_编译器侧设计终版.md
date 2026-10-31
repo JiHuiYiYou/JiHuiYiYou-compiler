@@ -719,7 +719,7 @@ E0601: capability rights escalation
 ### 7.1 `Cap` wire 布局的字节偏移 —— **已收敛**（历史记录）
 
 ⚠️ **2026-09 ~ 10 曾有一处真冲突**：两份锁定规范对 `Cap<T>` 的 8 字节 wire 布局不一致 ——
-`rights` 的字节偏移差 1（`rights:u16@5` vs `rights:u16@6`）。
+`rights` 的字节偏移差 1（`rights:u16@5` vs `rights:u16@6`）—— 而**这两版都不满足自然对齐**。
 
 **为什么这条比「rights 有几位」更硬**：
 「有几位」只影响语义集合大小；
@@ -727,13 +727,18 @@ E0601: capability rights escalation
 `.jhyynb` 序列化）**两种布局算出的字节位置不同** ⇒ **同一份程序用不同规范实现会静默读写错位 1 字节**。
 
 **判定证据**（当时）：lang-spec §2.6 自带构造示例
-`let c: Cap = 0x0000030200000007 as Cap;   // cnode=7, depth=2, rights=R|W`
-小端展开 = `07 00 00 00 | 02 | 03 00 | 00`
-⇒ **只有在 `rights@5` 下才解出注释说的 cnode=7 / depth=2 / rights=R|W**；
-按 `rights@6` 解出来是 `rights=0x0000`、`_pad=0x03` ⇒ **示例自相矛盾**。
+`let c: Cap = 0x0003000200000007 as Cap;   // cnode=7, depth=2, gen=0, rights=R|W`
+小端展开 = `07 00 00 00 | 02 | 00 | 03 00`
+⇒ **只有在 `rights@6` 下才解出注释说的 cnode=7 / depth=2 / rights=R|W**。
 
-**已收敛（2026-10-30）**：
-1. **单一真源 = lang-spec §2.6** —— `cnode_idx:u32@0` · `depth:u8@4` · `rights:u16@5` · `gen:u8@7`；
+**已收敛（2026-10-30；2026-10-31 再订正一次 —— 改成自然对齐）**：
+1. **单一真源 = lang-spec §2.6** —— `cnode_idx:u32@0` · `depth:u8@4` · `gen:u8@5` · `rights:u16@6`；
+   ⚠️ **`rights:u16` 必须落在偶数偏移**：先前锁的 `rights@5`（`gen@7`）把 u16 放在奇数偏移
+   ⇒ **那版只能由 packed 产生**，与本仓「无 `packed` / 显式 `_pad`」的布局契约冲突，
+   也让 §1.1 的「message struct 字段 size/align 一致」编译期检查**无从表达**。
+   新布局**字段全部自然对齐、无隐式 padding**（类型自身 `alignof` 仍为 8，见 abi § 2.2）。
+   **兼容成本为零**：`.jhyynb` 是设计稿未实装（ABI § 12.10）⇒ 没有产物实现过旧布局；
+   **窗口在 `Cap<T>` 真 T 落地（OS-14）之前**，之后改就是第二次 ABI break。
    abi §2.5 与 binary-format §2 都已改成同一布局，binary-format 那行还带一句
    「本字段与 lang-spec §2.6 同源；改动须三处同步」。
 2. **规范一致性门已建成并接进 CI**：`scripts/dev/check_spec_consistency.py` 从三处解析 Cap 布局的

@@ -296,12 +296,14 @@ fn type_ref(a: *Arena, inner: *Type, is_mut: i32) -> *Type {
 }
 
 // v3.1.0 (V3-C 3g): type_cap — 构造 `Cap<T>` builtin capability type.
-// 8 字节 layout (per OS ABI D6 + spec supplement § 3):
+// 8 字节 layout（per lang-spec § 2.6 / abi § 2.5，**2026-10-31 改成自然对齐**）:
 //   cnode_idx : u32 @ 0   (CSpace slot)
 //   depth     : u8  @ 4   (CDL depth)
-//   rights    : u16 @ 5   (read/write/grant)
-//   padding   : u8  @ 7   (alignment to 8)
-// 内部表示:Kind=KIND_CAP(elem=*Type),size=8,align=8。
+//   gen       : u8  @ 5   (slot 复用代数)
+//   rights    : u16 @ 6   (read/write/grant)
+// 字段全部自然对齐、无隐式 padding ⇒ **不需要 packed**（原先 rights@5 把 u16 放在
+// 奇数偏移，那版只能由 packed 产生，与本仓「无 packed / 显式 _pad」的布局契约冲突）。
+// 内部表示:Kind=KIND_CAP(elem=*Type),size=8,align=8（align=8 见 abi § 2.2）。
 // pass-by-value 走 8-byte register(跟 i64/u64/f64 一致)。
 fn KIND_CAP()         -> i32 { return 11 as i32; }
 fn type_cap(a: *Arena, inner: *Type) -> *Type {

@@ -92,13 +92,13 @@ cap_init 只剩「启动时开权限」，cap_offsets 退化成普通 fd 传输�
 offset  size  field        type
 0       4     cnode_idx    u32     CSpace slot index
 4       1     depth        u8      CDL 深度
-5       2     rights       u16     bit0=R, bit1=W, bit2=G
-7       1     gen          u8      slot 复用代数(slot 被复用时 +1)
+5       1     gen          u8      slot 复用代数(slot 被复用时 +1)
+6       2     rights       u16     bit0=R, bit1=W, bit2=G
 ```
 
-小端序。来源：lang-spec §2.6 与 abi §2.5（**逐字一致**）。
-⚠️ binary-format §2 曾记载 `_pad:u8@5` + `rights:u16@6` ⇒ **冲突，已裁决为 `rights@5`**
-（binary-format 已于 2026-10-30 订正；详见 §3.6）。
+小端序。来源：lang-spec §2.6 与 abi §2.5（**字段表逐字一致**；正文里两处「布局契约」的章节链接指向各自文档，故非全字节相同）。
+⚠️ binary-format §2 曾记载 `_pad:u8@5` + `rights:u16@6` ⇒ **冲突，已裁决为自然对齐布局**
+`cnode_idx@0 · depth@4 · gen@5 · rights@6`（binary-format 已于 2026-10-31 订正；详见 §3.6）。
 
 **三个独立维度**：slot 索引、从 CNode 根出发的层级、权限。
 它不只是「一个整数」—— **slot 语义只有在 CNode 与 depth 共同解释时才有意义**；
@@ -318,26 +318,32 @@ JHYY 保证「**授权单调收缩 + 对象类型不匹配不可编译**」，
 **短期建议**：「软件 capability + 可选 CHERI 后端」，而不是等待 CHERI。
 **不要承诺 CHERI 兼容 ABI，也不要用 CHERI 论文为当前软件能力模型背书。**
 
-### 3.6 `Cap<T>` 的 wire 布局 —— 已定：`rights@5`
+### 3.6 `Cap<T>` 的 wire 布局 —— 已定：**自然对齐**（`gen@5 / rights@6`）
 
 ```
-cnode_idx:u32@0 · depth:u8@4 · rights:u16@5 · gen:u8@7
+cnode_idx:u32@0 · depth:u8@4 · gen:u8@5 · rights:u16@6
 ```
 
 | 来源 | 原布局 | 性质 |
 |---|---|---|
-| lang-spec § 2.6 | `rights:u16@5` | **锁定规范**（2026-10-24） |
-| abi § 2.5 | `rights:u16@5`（逐字一致） | **锁定规范**（2026-10-24） |
-| binary-format § 2 | ~~`rights:u16@6`~~ | 设计稿（2026-09-04，未实装）⇒ **已按本布局修订** |
+| lang-spec § 2.6 | `gen:u8@5 · rights:u16@6` | **锁定规范**（2026-10-24 锁，2026-10-31 改对齐） |
+| abi § 2.5 | 同上（字段表逐字一致） | **锁定规范**（2026-10-24 锁，2026-10-31 改对齐） |
+| binary-format § 2 | ~~`rights:u16@6`~~ | 设计稿（2026-09-04，未实装）⇒ **已按本布局修订**（2026-10-31） |
 
 **判定证据、逐条推理与编译器侧动作 ⇒
 [`JHYY_编译器侧设计终版.md` § 7.1](JHYY_编译器侧设计终版.md#71-cap-wire-布局的字节偏移--已收敛历史记录)。**
 一句话：lang-spec § 2.6 自带的构造示例
-`0x0000030200000007 as Cap // cnode=7, depth=2, rights=R|W`
-小端展开 = `07 00 00 00 | 02 | 03 00 | 00` ⇒ **只有 `rights@5` 下才自洽**。
+`0x0003000200000007 as Cap // cnode=7, depth=2, gen=0, rights=R|W`
+小端展开 = `07 00 00 00 | 02 | 00 | 03 00` ⇒ **只有 `rights@6` 下才自洽**。
+
+**为什么是自然对齐**：`rights:u16` 落在**偶数**偏移 ⇒ 整个类型**无隐式 padding**、
+**字段全部自然对齐、无隐式 padding** ⇒ 与「无 `packed` / 显式 `_pad`」的布局契约一致，编译器侧
+「message struct 字段 size/align 一致」的编译期检查才**有东西可查**。
+反之 `rights@5`（u16 在奇数偏移）**只能由 packed 产生**。
 
 **为什么现在定不亏**：`Cap<T>` 的 `T` 不解析、无字段访问 ⇒ 没有任何代码按字节拆 cap
 ⇒ **现在改零成本**；等 `Cap<T>` 真 T 落地后再改就是 ABI break。
+（另外 `.jhyynb` 本身是**设计稿未实装** ⇒ 旧布局没有任何产物实现过，兼容成本为零。）
 
 ⚠️ **这次冲突能活三个月，就是因为没有一道门** ⇒ 已加
 `scripts/dev/check_spec_consistency.py`（比对三处的 Cap 布局 + rights 位宽），接进 CI。
